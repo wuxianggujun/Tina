@@ -16,9 +16,11 @@ file(COPY "${SDL3_SOURCES_DIR}/bin/" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
 
 # 显示SDL3_INCLUDE_DIR
 message(STATUS "SDL3_INCLUDE_DIR: ${SDL3_INCLUDE_DIR}")
+message(STATUS "CORE_SRC: ${CORE_SRC}")
 
 add_executable(${PROJECT_NAME})
-target_sources(${PROJECT_NAME} PRIVATE ${CORE_SRC})
+target_sources(${PROJECT_NAME} PUBLIC ${CORE_SRC})
+target_include_directories(${PROJECT_NAME} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(${PROJECT_NAME} PRIVATE ${SDL3_INCLUDE_DIR})
 target_link_directories(${PROJECT_NAME} PRIVATE ${SDL3_LIB_DIR})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${SDL3MAIN_LIB} ${SDL3_LIBS})
