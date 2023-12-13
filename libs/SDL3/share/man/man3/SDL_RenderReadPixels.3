@@ -1,0 +1,80 @@
+.\" This manpage content is licensed under Creative Commons
+.\"  Attribution 4.0 International (CC BY 4.0)
+.\"   https://creativecommons.org/licenses/by/4.0/
+.\" This manpage was generated from SDL's wiki page for SDL_RenderReadPixels:
+.\"   https://wiki.libsdl.org/SDL_RenderReadPixels
+.\" Generated with SDL/build-scripts/wikiheaders.pl
+.\"  revision SDL-f3d8a2d
+.\" Please report issues in this manpage's content at:
+.\"   https://github.com/libsdl-org/sdlwiki/issues/new
+.\" Please report issues in the generation of this manpage from the wiki at:
+.\"   https://github.com/libsdl-org/SDL/issues/new?title=Misgenerated%20manpage%20for%20SDL_RenderReadPixels
+.\" SDL can be found at https://libsdl.org/
+.de URL
+\$2 \(laURL: \$1 \(ra\$3
+..
+.if \n[.g] .mso www.tmac
+.TH SDL_RenderReadPixels 3 "SDL 3.0.0" "SDL" "SDL3 FUNCTIONS"
+.SH NAME
+SDL_RenderReadPixels \- Read pixels from the current rendering target to an array of pixels\[char46]
+.SH SYNOPSIS
+.nf
+.B #include \(dqSDL3/SDL.h\(dq
+.PP
+.BI "int SDL_RenderReadPixels(SDL_Renderer *renderer,
+.BI "                         const SDL_Rect *rect,
+.BI "                         Uint32 format,
+.BI "                         void *pixels, int pitch);
+.fi
+.SH DESCRIPTION
+
+.B WARNING
+: This is a very slow operation, and should not be used
+frequently\[char46] If you're using this on the main rendering target, it should be
+called after rendering and before 
+.BR SDL_RenderPresent
+()\[char46]
+.BR pitch
+specifies the number of bytes between rows in the destination
+.BR pixels
+data\[char46] This allows you to write to a subrectangle or have padded
+rows in the destination\[char46] Generally,
+.BR pitch
+should equal the number of
+pixels per row in the
+.BR pixels
+data times the number of bytes per pixel,
+but it might contain additional padding (for example, 24bit RGB Windows
+Bitmap data pads all rows to multiples of 4 bytes)\[char46]
+
+.SH FUNCTION PARAMETERS
+.TP
+.I renderer
+the rendering context
+.TP
+.I rect
+an 
+.BR SDL_Rect
+ structure representing the area in pixels relative to the to current viewport, or NULL for the entire viewport
+.TP
+.I format
+an 
+.BR SDL_PixelFormatEnum
+ value of the desired format of the pixel data, or 0 to use the format of the rendering target
+.TP
+.I pixels
+a pointer to the pixel data to copy into
+.TP
+.I pitch
+the pitch of the
+.BR pixels
+parameter
+.SH RETURN VALUE
+Returns 0 on success or a negative error code on failure; call
+
+.BR SDL_GetError
+() for more information\[char46]
+
+.SH AVAILABILITY
+This function is available since SDL 3\[char46]0\[char46]0\[char46]
+

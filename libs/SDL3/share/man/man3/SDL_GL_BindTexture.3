@@ -1,0 +1,76 @@
+.\" This manpage content is licensed under Creative Commons
+.\"  Attribution 4.0 International (CC BY 4.0)
+.\"   https://creativecommons.org/licenses/by/4.0/
+.\" This manpage was generated from SDL's wiki page for SDL_GL_BindTexture:
+.\"   https://wiki.libsdl.org/SDL_GL_BindTexture
+.\" Generated with SDL/build-scripts/wikiheaders.pl
+.\"  revision SDL-f3d8a2d
+.\" Please report issues in this manpage's content at:
+.\"   https://github.com/libsdl-org/sdlwiki/issues/new
+.\" Please report issues in the generation of this manpage from the wiki at:
+.\"   https://github.com/libsdl-org/SDL/issues/new?title=Misgenerated%20manpage%20for%20SDL_GL_BindTexture
+.\" SDL can be found at https://libsdl.org/
+.de URL
+\$2 \(laURL: \$1 \(ra\$3
+..
+.if \n[.g] .mso www.tmac
+.TH SDL_GL_BindTexture 3 "SDL 3.0.0" "SDL" "SDL3 FUNCTIONS"
+.SH NAME
+SDL_GL_BindTexture \- Bind an OpenGL/ES/ES2 texture to the current context\[char46]
+.SH SYNOPSIS
+.nf
+.B #include \(dqSDL3/SDL.h\(dq
+.PP
+.BI "int SDL_GL_BindTexture(SDL_Texture *texture, float *texw, float *texh);
+.fi
+.SH DESCRIPTION
+This is for use with OpenGL instructions when rendering OpenGL primitives
+directly\[char46]
+
+If not NULL,
+.BR texw
+and
+.BR texh
+will be filled with the width and height
+values suitable for the provided texture\[char46] In most cases, both will be 1\[char46]0,
+however, on systems that support the GL_ARB_texture_rectangle extension,
+these values will actually be the pixel width and height used to create the
+texture, so this factor needs to be taken into account when providing
+texture coordinates to OpenGL\[char46]
+
+You need a renderer to create an 
+.BR SDL_Texture
+, therefore you
+can only use this function with an implicit OpenGL context from
+
+.BR SDL_CreateRenderer
+(), not with your own OpenGL
+context\[char46] If you need control over your OpenGL context, you need to write
+your own texture-loading methods\[char46]
+
+Also note that SDL may upload RGB textures as BGR (or vice-versa), and
+re-order the color channels in the shaders phase, so the uploaded texture
+may have swapped color channels\[char46]
+
+.SH FUNCTION PARAMETERS
+.TP
+.I texture
+the texture to bind to the current OpenGL/ES/ES2 context
+.TP
+.I texw
+a pointer to a float value which will be filled with the texture width or NULL if you don't need that value
+.TP
+.I texh
+a pointer to a float value which will be filled with the texture height or NULL if you don't need that value
+.SH RETURN VALUE
+Returns 0 on success or a negative error code on failure; call
+
+.BR SDL_GetError
+() for more information\[char46]
+
+.SH AVAILABILITY
+This function is available since SDL 3\[char46]0\[char46]0\[char46]
+
+.SH SEE ALSO
+.BR SDL_GL_MakeCurrent (3),
+.BR SDL_GL_UnbindTexture (3)

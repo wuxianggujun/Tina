@@ -1,0 +1,48 @@
+.\" This manpage content is licensed under Creative Commons
+.\"  Attribution 4.0 International (CC BY 4.0)
+.\"   https://creativecommons.org/licenses/by/4.0/
+.\" This manpage was generated from SDL's wiki page for SDL_ReleaseVideoCaptureFrame:
+.\"   https://wiki.libsdl.org/SDL_ReleaseVideoCaptureFrame
+.\" Generated with SDL/build-scripts/wikiheaders.pl
+.\"  revision SDL-f3d8a2d
+.\" Please report issues in this manpage's content at:
+.\"   https://github.com/libsdl-org/sdlwiki/issues/new
+.\" Please report issues in the generation of this manpage from the wiki at:
+.\"   https://github.com/libsdl-org/SDL/issues/new?title=Misgenerated%20manpage%20for%20SDL_ReleaseVideoCaptureFrame
+.\" SDL can be found at https://libsdl.org/
+.de URL
+\$2 \(laURL: \$1 \(ra\$3
+..
+.if \n[.g] .mso www.tmac
+.TH SDL_ReleaseVideoCaptureFrame 3 "SDL 3.0.0" "SDL" "SDL3 FUNCTIONS"
+.SH NAME
+SDL_ReleaseVideoCaptureFrame \- Release a frame\[char46]
+.SH SYNOPSIS
+.nf
+.B #include \(dqSDL3/SDL.h\(dq
+.PP
+.BI "int SDL_ReleaseVideoCaptureFrame(SDL_VideoCaptureDevice *device, SDL_VideoCaptureFrame *frame);
+.fi
+.SH DESCRIPTION
+Let the back-end re-use the internal buffer for video capture\[char46]
+
+All acquired frames should be released before closing the device\[char46]
+
+.SH FUNCTION PARAMETERS
+.TP
+.I device
+opened video capture device
+.TP
+.I frame
+frame pointer\[char46]
+.SH RETURN VALUE
+Returns 0 on success or a negative error code on failure; call
+
+.BR SDL_GetError
+() for more information\[char46]
+
+.SH AVAILABILITY
+This function is available since SDL 3\[char46]0\[char46]0\[char46]
+
+.SH SEE ALSO
+.BR SDL_AcquireVideoCaptureFrame (3)

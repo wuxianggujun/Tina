@@ -1,0 +1,5 @@
+C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/cmake-build-debug/CMakeFiles/edit_cache.dir
+C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/cmake-build-debug/CMakeFiles/rebuild_cache.dir
+C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/cmake-build-debug/core/CMakeFiles/Tina.dir
+C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/cmake-build-debug/core/CMakeFiles/edit_cache.dir
+C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/cmake-build-debug/core/CMakeFiles/rebuild_cache.dir

@@ -1,0 +1,104 @@
+.\" This manpage content is licensed under Creative Commons
+.\"  Attribution 4.0 International (CC BY 4.0)
+.\"   https://creativecommons.org/licenses/by/4.0/
+.\" This manpage was generated from SDL's wiki page for SDL_GetTextureProperties:
+.\"   https://wiki.libsdl.org/SDL_GetTextureProperties
+.\" Generated with SDL/build-scripts/wikiheaders.pl
+.\"  revision SDL-f3d8a2d
+.\" Please report issues in this manpage's content at:
+.\"   https://github.com/libsdl-org/sdlwiki/issues/new
+.\" Please report issues in the generation of this manpage from the wiki at:
+.\"   https://github.com/libsdl-org/SDL/issues/new?title=Misgenerated%20manpage%20for%20SDL_GetTextureProperties
+.\" SDL can be found at https://libsdl.org/
+.de URL
+\$2 \(laURL: \$1 \(ra\$3
+..
+.if \n[.g] .mso www.tmac
+.TH SDL_GetTextureProperties 3 "SDL 3.0.0" "SDL" "SDL3 FUNCTIONS"
+.SH NAME
+SDL_GetTextureProperties \- Get the properties associated with a texture\[char46]
+.SH SYNOPSIS
+.nf
+.B #include \(dqSDL3/SDL.h\(dq
+.PP
+.BI "SDL_PropertiesID SDL_GetTextureProperties(SDL_Texture *texture);
+.fi
+.SH DESCRIPTION
+The following read-only properties are provided by SDL:
+
+With the direct3d11 renderer:
+
+
+\(bu "SDL\[char46]texture\[char46]d3d11\[char46]texture" (pointer) - the ID3D11Texture2D associated
+  with the texture
+
+\(bu "SDL\[char46]texture\[char46]d3d11\[char46]texture_u" (pointer) - the ID3D11Texture2D associated
+  with the U plane of a YUV texture
+
+\(bu "SDL\[char46]texture\[char46]d3d11\[char46]texture_v" (pointer) - the ID3D11Texture2D associated
+  with the V plane of a YUV texture
+
+With the direct3d12 renderer:
+
+
+\(bu "SDL\[char46]texture\[char46]d3d12\[char46]texture" (pointer) - the ID3D12Resource associated
+  with the texture
+
+\(bu "SDL\[char46]texture\[char46]d3d12\[char46]texture_u" (pointer) - the ID3D12Resource associated
+  with the U plane of a YUV texture
+
+\(bu "SDL\[char46]texture\[char46]d3d12\[char46]texture_v" (pointer) - the ID3D12Resource associated
+  with the V plane of a YUV texture
+
+With the opengl renderer:
+
+
+\(bu "SDL\[char46]texture\[char46]opengl\[char46]texture" (number) - the GLuint texture associated
+  with the texture
+
+\(bu "SDL\[char46]texture\[char46]opengl\[char46]texture_uv" (number) - the GLuint texture associated
+  with the UV plane of an NV12 texture
+
+\(bu "SDL\[char46]texture\[char46]opengl\[char46]texture_u" (number) - the GLuint texture associated
+  with the U plane of a YUV texture
+
+\(bu "SDL\[char46]texture\[char46]opengl\[char46]texture_v" (number) - the GLuint texture associated
+  with the V plane of a YUV texture
+
+\(bu "SDL\[char46]texture\[char46]opengl\[char46]tex_w" (float) - the texture coordinate width of the
+  texture (0\[char46]0 - 1\[char46]0)
+
+\(bu "SDL\[char46]texture\[char46]opengl\[char46]tex_h" (float) - the texture coordinate height of the
+  texture (0\[char46]0 - 1\[char46]0)
+
+With the opengles2 renderer:
+
+
+\(bu "SDL\[char46]texture\[char46]opengles2\[char46]texture" (number) - the GLuint texture associated
+  with the texture
+
+\(bu "SDL\[char46]texture\[char46]opengles2\[char46]texture_uv" (number) - the GLuint texture
+  associated with the UV plane of an NV12 texture
+
+\(bu "SDL\[char46]texture\[char46]opengles2\[char46]texture_u" (number) - the GLuint texture
+  associated with the U plane of a YUV texture
+
+\(bu "SDL\[char46]texture\[char46]opengles2\[char46]texture_v" (number) - the GLuint texture
+  associated with the V plane of a YUV texture
+
+.SH FUNCTION PARAMETERS
+.TP
+.I texture
+the texture to query
+.SH RETURN VALUE
+Returns a valid property ID on success or 0 on failure; call
+
+.BR SDL_GetError
+() for more information\[char46]
+
+.SH AVAILABILITY
+This function is available since SDL 3\[char46]0\[char46]0\[char46]
+
+.SH SEE ALSO
+.BR SDL_GetProperty (3),
+.BR SDL_SetProperty (3)

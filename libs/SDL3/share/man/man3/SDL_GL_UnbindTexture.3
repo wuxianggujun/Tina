@@ -1,0 +1,47 @@
+.\" This manpage content is licensed under Creative Commons
+.\"  Attribution 4.0 International (CC BY 4.0)
+.\"   https://creativecommons.org/licenses/by/4.0/
+.\" This manpage was generated from SDL's wiki page for SDL_GL_UnbindTexture:
+.\"   https://wiki.libsdl.org/SDL_GL_UnbindTexture
+.\" Generated with SDL/build-scripts/wikiheaders.pl
+.\"  revision SDL-f3d8a2d
+.\" Please report issues in this manpage's content at:
+.\"   https://github.com/libsdl-org/sdlwiki/issues/new
+.\" Please report issues in the generation of this manpage from the wiki at:
+.\"   https://github.com/libsdl-org/SDL/issues/new?title=Misgenerated%20manpage%20for%20SDL_GL_UnbindTexture
+.\" SDL can be found at https://libsdl.org/
+.de URL
+\$2 \(laURL: \$1 \(ra\$3
+..
+.if \n[.g] .mso www.tmac
+.TH SDL_GL_UnbindTexture 3 "SDL 3.0.0" "SDL" "SDL3 FUNCTIONS"
+.SH NAME
+SDL_GL_UnbindTexture \- Unbind an OpenGL/ES/ES2 texture from the current context\[char46]
+.SH SYNOPSIS
+.nf
+.B #include \(dqSDL3/SDL.h\(dq
+.PP
+.BI "int SDL_GL_UnbindTexture(SDL_Texture *texture);
+.fi
+.SH DESCRIPTION
+See 
+.BR SDL_GL_BindTexture
+() for examples on how to use
+these functions
+
+.SH FUNCTION PARAMETERS
+.TP
+.I texture
+the texture to unbind from the current OpenGL/ES/ES2 context
+.SH RETURN VALUE
+Returns 0 on success or a negative error code on failure; call
+
+.BR SDL_GetError
+() for more information\[char46]
+
+.SH AVAILABILITY
+This function is available since SDL 3\[char46]0\[char46]0\[char46]
+
+.SH SEE ALSO
+.BR SDL_GL_BindTexture (3),
+.BR SDL_GL_MakeCurrent (3)

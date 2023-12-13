@@ -1,0 +1,61 @@
+.\" This manpage content is licensed under Creative Commons
+.\"  Attribution 4.0 International (CC BY 4.0)
+.\"   https://creativecommons.org/licenses/by/4.0/
+.\" This manpage was generated from SDL's wiki page for SDL_RWprintf:
+.\"   https://wiki.libsdl.org/SDL_RWprintf
+.\" Generated with SDL/build-scripts/wikiheaders.pl
+.\"  revision SDL-f3d8a2d
+.\" Please report issues in this manpage's content at:
+.\"   https://github.com/libsdl-org/sdlwiki/issues/new
+.\" Please report issues in the generation of this manpage from the wiki at:
+.\"   https://github.com/libsdl-org/SDL/issues/new?title=Misgenerated%20manpage%20for%20SDL_RWprintf
+.\" SDL can be found at https://libsdl.org/
+.de URL
+\$2 \(laURL: \$1 \(ra\$3
+..
+.if \n[.g] .mso www.tmac
+.TH SDL_RWprintf 3 "SDL 3.0.0" "SDL" "SDL3 FUNCTIONS"
+.SH NAME
+SDL_RWprintf \- Print to an 
+.BR SDL_RWops
+ data stream\[char46]
+.SH SYNOPSIS
+.nf
+.B #include \(dqSDL3/SDL.h\(dq
+.PP
+.BI "size_t SDL_RWprintf(SDL_RWops *context, SDL_PRINTF_FORMAT_STRING const char *fmt, ...)  SDL_PRINTF_VARARG_FUNC(2);
+.fi
+.SH DESCRIPTION
+This function does formatted printing to the stream\[char46]
+
+.SH FUNCTION PARAMETERS
+.TP
+.I context
+a pointer to an 
+.BR SDL_RWops
+ structure
+.TP
+.I fmt
+a printf() style format string
+.TP
+.I ...
+additional parameters matching % tokens in the
+.BR fmt
+string, if any
+.SH RETURN VALUE
+Returns the number of bytes written, or 0 on error; call
+
+.BR SDL_GetError
+() for more information\[char46]
+
+.SH AVAILABILITY
+This function is available since SDL 3\[char46]0\[char46]0\[char46]
+
+.SH SEE ALSO
+.BR SDL_RWclose (3),
+.BR SDL_RWFromConstMem (3),
+.BR SDL_RWFromFile (3),
+.BR SDL_RWFromMem (3),
+.BR SDL_RWread (3),
+.BR SDL_RWseek (3),
+.BR SDL_RWwrite (3)

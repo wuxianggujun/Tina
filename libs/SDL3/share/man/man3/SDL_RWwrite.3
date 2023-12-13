@@ -1,0 +1,92 @@
+.\" This manpage content is licensed under Creative Commons
+.\"  Attribution 4.0 International (CC BY 4.0)
+.\"   https://creativecommons.org/licenses/by/4.0/
+.\" This manpage was generated from SDL's wiki page for SDL_RWwrite:
+.\"   https://wiki.libsdl.org/SDL_RWwrite
+.\" Generated with SDL/build-scripts/wikiheaders.pl
+.\"  revision SDL-f3d8a2d
+.\" Please report issues in this manpage's content at:
+.\"   https://github.com/libsdl-org/sdlwiki/issues/new
+.\" Please report issues in the generation of this manpage from the wiki at:
+.\"   https://github.com/libsdl-org/SDL/issues/new?title=Misgenerated%20manpage%20for%20SDL_RWwrite
+.\" SDL can be found at https://libsdl.org/
+.de URL
+\$2 \(laURL: \$1 \(ra\$3
+..
+.if \n[.g] .mso www.tmac
+.TH SDL_RWwrite 3 "SDL 3.0.0" "SDL" "SDL3 FUNCTIONS"
+.SH NAME
+SDL_RWwrite \- Write to an 
+.BR SDL_RWops
+ data stream\[char46]
+.SH SYNOPSIS
+.nf
+.B #include \(dqSDL3/SDL.h\(dq
+.PP
+.BI "size_t SDL_RWwrite(SDL_RWops *context, const void *ptr, size_t size);
+.fi
+.SH DESCRIPTION
+This function writes exactly
+.BR size
+bytes from the area pointed at by
+.BR ptr
+to the stream\[char46] If this fails for any reason, it'll return less than
+.BR size
+to demonstrate how far the write progressed\[char46] On success, it returns
+.BR num
+\[char46]
+
+On error, this function still attempts to write as much as possible, so it
+might return a positive value less than the requested write size\[char46] If the
+function failed to write anything and there was an actual error, it will
+return -1\[char46] For streams that support non-blocking operation, if nothing was
+written because it would require blocking, this function returns -2 to
+distinguish that this is not an error and the caller can try again later\[char46]
+
+
+.BR SDL_RWwrite
+ is actually a function wrapper that calls the
+
+.BR SDL_RWops
+'s
+.BR write
+method appropriately, to simplify
+application development\[char46]
+
+It is an error to specify a negative
+.BR size
+, but this parameter is signed
+so you definitely cannot overflow the return value on a successful run with
+enormous amounts of data\[char46]
+
+.SH FUNCTION PARAMETERS
+.TP
+.I context
+a pointer to an 
+.BR SDL_RWops
+ structure
+.TP
+.I ptr
+a pointer to a buffer containing data to write
+.TP
+.I size
+the number of bytes to write
+.SH RETURN VALUE
+Returns the number of bytes written, which will be less than
+.BR num
+on
+error; call 
+.BR SDL_GetError
+() for more information\[char46]
+
+.SH AVAILABILITY
+This function is available since SDL 3\[char46]0\[char46]0\[char46]
+
+.SH SEE ALSO
+.BR SDL_RWclose (3),
+.BR SDL_RWFromConstMem (3),
+.BR SDL_RWFromFile (3),
+.BR SDL_RWFromMem (3),
+.BR SDL_RWprint (3),
+.BR SDL_RWread (3),
+.BR SDL_RWseek (3)

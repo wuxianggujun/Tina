@@ -1,0 +1,5 @@
+"D:\Program Files\JetBrains\ToolBox\CLion Nova\bin\cmake\win\x64\bin\cmake.exe" -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_MAKE_PROGRAM=D:/Program Files/JetBrains/ToolBox/CLion Nova/bin/ninja/win/x64/ninja.exe" -G Ninja -S C:\Users\WuXiangGuJun\CodeSpace\ClionCodeProjects\Tina -B C:\Users\WuXiangGuJun\CodeSpace\ClionCodeProjects\Tina\cmake-build-debug
+-- SDL3_INCLUDE_DIR: C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/libs/SDL3/include
+-- Configuring done (0.3s)
+-- Generating done (0.0s)
+-- Build files have been written to: C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/cmake-build-debug

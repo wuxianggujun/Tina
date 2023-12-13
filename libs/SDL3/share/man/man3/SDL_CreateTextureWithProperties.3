@@ -1,0 +1,124 @@
+.\" This manpage content is licensed under Creative Commons
+.\"  Attribution 4.0 International (CC BY 4.0)
+.\"   https://creativecommons.org/licenses/by/4.0/
+.\" This manpage was generated from SDL's wiki page for SDL_CreateTextureWithProperties:
+.\"   https://wiki.libsdl.org/SDL_CreateTextureWithProperties
+.\" Generated with SDL/build-scripts/wikiheaders.pl
+.\"  revision SDL-f3d8a2d
+.\" Please report issues in this manpage's content at:
+.\"   https://github.com/libsdl-org/sdlwiki/issues/new
+.\" Please report issues in the generation of this manpage from the wiki at:
+.\"   https://github.com/libsdl-org/SDL/issues/new?title=Misgenerated%20manpage%20for%20SDL_CreateTextureWithProperties
+.\" SDL can be found at https://libsdl.org/
+.de URL
+\$2 \(laURL: \$1 \(ra\$3
+..
+.if \n[.g] .mso www.tmac
+.TH SDL_CreateTextureWithProperties 3 "SDL 3.0.0" "SDL" "SDL3 FUNCTIONS"
+.SH NAME
+SDL_CreateTextureWithProperties \- Create a texture for a rendering context with the specified properties\[char46]
+.SH SYNOPSIS
+.nf
+.B #include \(dqSDL3/SDL.h\(dq
+.PP
+.BI "SDL_Texture* SDL_CreateTextureWithProperties(SDL_Renderer *renderer, SDL_PropertiesID props);
+.fi
+.SH DESCRIPTION
+These are the supported properties:
+
+
+\(bu "format" (number) - one of the enumerated values in
+  
+.BR SDL_PixelFormatEnum
+, defaults to the best RGBA
+  format for the renderer
+
+\(bu "access" (number) - one of the enumerated values in
+  
+.BR SDL_TextureAccess
+, defaults to
+  
+.BR SDL_TEXTUREACCESS_STATIC
+
+
+\(bu "width" (number) - the width of the texture in pixels, required
+
+\(bu "height" (number) - the height of the texture in pixels, required
+
+With the direct3d11 renderer:
+
+
+\(bu "d3d11\[char46]texture" (pointer) - the ID3D11Texture2D associated with the
+  texture, if you want to wrap an existing texture\[char46]
+
+\(bu "d3d11\[char46]texture_u" (pointer) - the ID3D11Texture2D associated with the U
+  plane of a YUV texture, if you want to wrap an existing texture\[char46]
+
+\(bu "d3d11\[char46]texture_v" (pointer) - the ID3D11Texture2D associated with the V
+  plane of a YUV texture, if you want to wrap an existing texture\[char46]
+
+With the direct3d12 renderer:
+
+
+\(bu "d3d12\[char46]texture" (pointer) - the ID3D12Resource associated with the
+  texture, if you want to wrap an existing texture\[char46]
+
+\(bu "d3d12\[char46]texture_u" (pointer) - the ID3D12Resource associated with the U
+  plane of a YUV texture, if you want to wrap an existing texture\[char46]
+
+\(bu "d3d12\[char46]texture_v" (pointer) - the ID3D12Resource associated with the V
+  plane of a YUV texture, if you want to wrap an existing texture\[char46]
+
+With the opengl renderer:
+
+
+\(bu "opengl\[char46]texture" (number) - the GLuint texture associated with the
+  texture, if you want to wrap an existing texture\[char46]
+
+\(bu "opengl\[char46]texture_uv" (number) - the GLuint texture associated with the UV
+  plane of an NV12 texture, if you want to wrap an existing texture\[char46]
+
+\(bu "opengl\[char46]texture_u" (number) - the GLuint texture associated with the U
+  plane of a YUV texture, if you want to wrap an existing texture\[char46]
+
+\(bu "opengl\[char46]texture_v" (number) - the GLuint texture associated with the V
+  plane of a YUV texture, if you want to wrap an existing texture\[char46]
+
+With the opengles2 renderer:
+
+
+\(bu "opengles2\[char46]texture" (number) - the GLuint texture associated with the
+  texture, if you want to wrap an existing texture\[char46]
+
+\(bu "opengles2\[char46]texture_uv" (number) - the GLuint texture associated with the
+  UV plane of an NV12 texture, if you want to wrap an existing texture\[char46]
+
+\(bu "opengles2\[char46]texture_u" (number) - the GLuint texture associated with the U
+  plane of a YUV texture, if you want to wrap an existing texture\[char46]
+
+\(bu "opengles2\[char46]texture_v" (number) - the GLuint texture associated with the V
+  plane of a YUV texture, if you want to wrap an existing texture\[char46]
+
+.SH FUNCTION PARAMETERS
+.TP
+.I renderer
+the rendering context
+.TP
+.I props
+the properties to use
+.SH RETURN VALUE
+Returns a pointer to the created texture or NULL if no rendering context
+was active, the format was unsupported, or the width or height were out of
+range; call 
+.BR SDL_GetError
+() for more information\[char46]
+
+.SH AVAILABILITY
+This function is available since SDL 3\[char46]0\[char46]0\[char46]
+
+.SH SEE ALSO
+.BR SDL_CreateTextureFromSurface (3),
+.BR SDL_CreateTexture (3),
+.BR SDL_DestroyTexture (3),
+.BR SDL_QueryTexture (3),
+.BR SDL_UpdateTexture (3)
