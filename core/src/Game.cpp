@@ -36,6 +36,7 @@ const Vector2i Game::getWindowSize()
 {
     Vector2i size{};
     SDL_GetWindowSize(m_window,&size.x, &size.y);
+    return size;
 }
 
 const std::string& Game::getBasePath()
