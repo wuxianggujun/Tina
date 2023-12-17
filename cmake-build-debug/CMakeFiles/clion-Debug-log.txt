@@ -1,6 +1,0 @@
-"D:\Program Files\JetBrains\ToolBox\CLion Nova\bin\cmake\win\x64\bin\cmake.exe" -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_MAKE_PROGRAM=D:/Program Files/JetBrains/ToolBox/CLion Nova/bin/ninja/win/x64/ninja.exe" -G Ninja -S C:\Users\WuXiangGuJun\CodeSpace\ClionCodeProjects\Tina -B C:\Users\WuXiangGuJun\CodeSpace\ClionCodeProjects\Tina\cmake-build-debug
--- SDL3_INCLUDE_DIR: C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/libs/SDL3/include
--- CORE_SRC: C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/core/include/Game.hpp;C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/core/include/config.hpp;C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/core/include/mario.hpp;C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/core/include/rects.hpp;C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/core/include/world.hpp;C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/core/src/Game.cpp;C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/core/src/main.cpp
--- Configuring done (0.0s)
--- Generating done (0.0s)
--- Build files have been written to: C:/Users/WuXiangGuJun/CodeSpace/ClionCodeProjects/Tina/cmake-build-debug

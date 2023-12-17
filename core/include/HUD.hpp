@@ -15,7 +15,7 @@ public:
     static HUD& getInstance();
 
     void init();
-    void drawText(SDL_Renderer* renderer, const std::string* text, const Vector2f& pos, float charSize);
+    void drawText(SDL_Renderer* renderer, const std::string& text, const Vector2f& pos, float charSize);
 
 private:
     static HUD* s_instance;
