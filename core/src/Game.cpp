@@ -62,16 +62,16 @@ Game::Game()
 
     m_basePath = SDL_GetBasePath();
 
-    HUD::getInstance().init();
+    //HUD::getInstance().init();
 }
 
 void Game::init()
 {
     SDL_CHECK(SDL_CreateWindowAndRenderer(1920,1080,SDL_EVENT_WINDOW_SHOWN, &m_window, &m_renderer));
     SDL_SetWindowTitle(m_window, "GameTest");
-    SDL_SetWindowBordered(m_window,SDL_FALSE);
+    SDL_SetWindowBordered(m_window,SDL_TRUE);
 
-    std::string path = m_basePath + "assets\\img\\icon.png";
+    std::string path = m_basePath + "assets\\img\\icon.jpg";
 
     SDL_Surface* surface = IMG_Load(path.c_str());
     SDL_SetWindowIcon(m_window, surface);
@@ -118,10 +118,9 @@ void Game::render()
     SDL_CHECK(SDL_SetRenderDrawColor(m_renderer,57,102,0,255));
     SDL_CHECK(SDL_RenderClear(m_renderer));
 
-    std::string text = std::to_string(int(1.f/m_deltaTime));
-    HUD::getInstance().drawText(m_renderer, text + " FPS",{0.f,0.f},48);
+    std::string text = std::to_string(int(1.f / m_deltaTime));
+    //HUD::getInstance().drawText(m_renderer, text + " FPS",{0.f,0.f},48);
     //m_world->render(m_renderer);
 
     SDL_RenderPresent(m_renderer);
 }
-
