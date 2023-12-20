@@ -1,0 +1,8 @@
+//
+// Created by WuXiangGuJun on 2023/12/19.
+//
+
+#ifndef FILEMANIPULATION_HPP
+#define FILEMANIPULATION_HPP
+
+#endif //FILEMANIPULATION_HPP
