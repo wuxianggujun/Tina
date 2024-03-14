@@ -19,6 +19,8 @@ set(BGFX_CUSTOM_TARGETS FALSE CACHE INTERNAL "")
 
 
 add_subdirectory(bgfx.cmake)
+add_subdirectory(microsoft-gsl)
 add_subdirectory(glfw)
 add_subdirectory(glm)
 add_subdirectory(spdlog)
+add_subdirectory(stb-cmake)

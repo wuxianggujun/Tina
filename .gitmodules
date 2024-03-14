@@ -1,0 +1,6 @@
+[submodule "3rdparty/microsoft-gsl"]
+	path = 3rdparty/microsoft-gsl
+	url = https://github.com/microsoft/GSL.git
+[submodule "3rdparty/stb-cmake"]
+	path = 3rdparty/stb-cmake
+	url = https://github.com/gracicot/stb-cmake.git
