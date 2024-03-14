@@ -515,3 +515,4 @@ MigrationBackup/
 3rdparty/glfw
 3rdparty/glm
 3rdparty/spdlog
+*.bin

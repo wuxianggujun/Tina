@@ -4,6 +4,11 @@ project(Tina)
 option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
 
+if (NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "DEBUG")
+endif ()
+
+
 find_package(Git)
 if (NOT GIT_FOUND)
     message(FATAL_ERROR "Git needs to be installed to pull the dependencies")
@@ -23,11 +28,15 @@ add_subdirectory(3rdparty)
 
 add_shaders_directory(shaders SHADERS_TARGET_NAME)
 
-add_executable(${PROJECT_NAME} src/main.cpp)
+add_executable(${PROJECT_NAME} src/main.cpp engine/base/Log.cpp engine/base/Log.hpp
+        engine/base/Util.cpp
+        engine/base/Util.hpp)
+
 
 target_include_directories(${PROJECT_NAME} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(${PROJECT_NAME} PUBLIC glfw bx bimg bgfx)
+target_link_libraries(${PROJECT_NAME} PUBLIC Boost::utility)
 target_link_libraries(${PROJECT_NAME} PUBLIC Microsoft.GSL::GSL)
 target_link_libraries(${PROJECT_NAME} PUBLIC glm)
 target_link_libraries(${PROJECT_NAME} PRIVATE spdlog)
