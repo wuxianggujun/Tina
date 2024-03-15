@@ -1,7 +1,8 @@
-#include <iostream>
+﻿#include <iostream>
+#include "../engine/base/Log.hpp"
 
 int main()
 {
-    std::cout << "Hello, World!" << std::endl;
+    DEBUG("Hello");
     return 0;
 }

@@ -30,13 +30,14 @@ add_shaders_directory(shaders SHADERS_TARGET_NAME)
 
 add_executable(${PROJECT_NAME} src/main.cpp engine/base/Log.cpp engine/base/Log.hpp
         engine/base/Util.cpp
-        engine/base/Util.hpp)
+        engine/base/Util.hpp
+        engine/base/PlatformDetection.hpp)
 
 
 target_include_directories(${PROJECT_NAME} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(${PROJECT_NAME} PUBLIC glfw bx bimg bgfx)
-target_link_libraries(${PROJECT_NAME} PUBLIC Boost::utility)
+target_link_libraries(${PROJECT_NAME} PUBLIC Boost::utility Boost::core Boost::detail Boost::lexical_cast)
 target_link_libraries(${PROJECT_NAME} PUBLIC Microsoft.GSL::GSL)
 target_link_libraries(${PROJECT_NAME} PUBLIC glm)
 target_link_libraries(${PROJECT_NAME} PRIVATE spdlog)

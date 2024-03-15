@@ -1,4 +1,4 @@
-//
+﻿//
 // Created by 33442 on 2024/3/14.
 //
 
@@ -78,9 +78,9 @@ namespace Tina
 // todo need to improve
 // #define LOGGER Logger::Instance().init("Logger","logs/log.txt",spdlog::level::trace);
 
-#define LOGGER(...) Logger::Instance().init(__VA_ARGS__);
-#define LOGGER_WITH_NAME(name) Logger::Instance().init("logs/log.txt",name);
-#define ONLY_TO_CONSOLE Logger::onlyToConsole();
-#define ONLY_TO_FILE Logger::onlyToFile();
+#define LOGGER(...) Tina::Logger::Instance().init(__VA_ARGS__);
+#define LOGGER_WITH_NAME(name) Tina::Logger::Instance().init("logs/log.txt",name);
+#define ONLY_TO_CONSOLE Tina::Logger::onlyToConsole();
+#define ONLY_TO_FILE Tina::Logger::onlyToFile();
 
 #endif //LOG_HPP
