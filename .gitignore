@@ -516,3 +516,4 @@ MigrationBackup/
 3rdparty/glm
 3rdparty/spdlog
 *.bin
+/.idea

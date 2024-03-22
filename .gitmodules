@@ -4,3 +4,6 @@
 [submodule "3rdparty/stb-cmake"]
 	path = 3rdparty/stb-cmake
 	url = https://github.com/gracicot/stb-cmake.git
+[submodule "3rdparty/blink"]
+	path = 3rdparty/blink
+	url = https://github.com/jart/blink.git
