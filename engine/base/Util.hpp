@@ -1,4 +1,4 @@
-ï»¿//
+//
 // Created by 33442 on 2024/3/14.
 //
 
@@ -8,7 +8,7 @@
 #include <memory>
 #include <sstream>
 #include <thread>
-#ifdef PLATFORM_WINDOWS
+#ifdef TINA_PLATFORM_WINDOWS
 #include <windows.h>
 #else
 #include <unistd.h>
@@ -28,14 +28,14 @@ namespace Tina
 
     namespace Util
     {
-        // è¿™æ®µä»£ç å®šä¹‰äº†ä¸€ä¸ª C++11 ç‰ˆæœ¬çš„ make_unique<T>() å‡½æ•°æ¨¡æ¿ï¼Œç”¨äºåˆ›å»ºå¹¶è¿”å›ä¸€ä¸ªæŒ‡å‘ç±»å‹ T çš„ std::unique_ptr æ™ºèƒ½æŒ‡é’ˆã€‚
+        // Õâ¶Î´úÂë¶¨ÒåÁËÒ»¸ö C++11 °æ±¾µÄ make_unique<T>() º¯ÊıÄ£°å£¬ÓÃÓÚ´´½¨²¢·µ»ØÒ»¸öÖ¸ÏòÀàĞÍ T µÄ std::unique_ptr ÖÇÄÜÖ¸Õë¡£
         template <typename T, typename... Args>
         std::unique_ptr<T> make_unique(Args&&... args)
         {
             return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
         }
 
-#ifdef PLATFORM_WINDOWS
+#ifdef TINA_PLATFORM_WINDOWS
         inline DWORD gettid()
         {
             return GetCurrentThreadId();
@@ -60,7 +60,7 @@ namespace Tina
                 t_cachedTid = gettid();
             }
         }
-#ifdef PLATFORM_WINDOWS
+#ifdef TINA_PLATFORM_WINDOWS
         inline DWORD tid() {
             if (t_cachedTid == 0)
             {
@@ -85,7 +85,7 @@ namespace Tina
         struct  CaseInsensitivelLess
         {
 			bool operator()(const std::string& lhs, const std::string& rhs) const {
-#ifdef PLATFORM_WINDOWS
+#ifdef TINA_PLATFORM_WINDOWS
                 return _stricmp(lhs.c_str(), rhs.c_str()) < 0;
 #else
                 return strcasecmp(lhs.c_str(), rhs.c_str()) < 0;

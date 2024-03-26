@@ -21,23 +21,50 @@ endif ()
 
 # Options
 include(CMakeDependentOption)
-
 include(cmake/utils.cmake)
+
+# 递归查找文件夹下的 .h .hpp. ini 文件保存到 HEADER_FILES
+file(GLOB_RECURSE HEADER_FILES engine/*.h engine/*.hpp)
+
+# 递归查找文件夹下的 *.cpp *.c 文件保存到 SOURCE_FILES
+file(GLOB_RECURSE SOURCE_FILES engine/*.cpp engine/*.c)
+
+# 递归查找文件夹下的 *.hlsl 文件保存到 SHADER_FILES(如果没有 shader 可以删除)
+file(GLOB_RECURSE SHADER_FILES *.hlsl)
+
+# 将 HEDADER_FILES 和 SOURCE_FILES 和 SHADER_FILES 保存到 AllFile 变量
+set(TINA_All_FIlE ${HEADER_FILES} ${SOURCE_FILES} ${SHADER_FILES})
+
 
 add_subdirectory(3rdparty)
 
 add_shaders_directory(shaders SHADERS_TARGET_NAME)
 
-add_executable(${PROJECT_NAME} src/main.cpp engine/base/Log.cpp engine/base/Log.hpp
+#add_executable(${PROJECT_NAME} src/main.cpp ${TINA_FILE_ITEM})
+
+
+add_executable(${PROJECT_NAME}
+        src/main.cpp
+        engine/base/Log.cpp
+        engine/base/Log.hpp
+        engine/base/Exception.hpp
+        engine/base/Exception.cpp
         engine/base/Util.cpp
         engine/base/Util.hpp
-        engine/base/PlatformDetection.hpp)
+        engine/base/PlatformDetection.hpp
+        engine/base/AbstractWindow.cpp
+        engine/base/AbstractWindow.hpp
+        engine/base/Application.cpp
+        engine/base/Application.hpp
+        engine/base/GlfwWindow.cpp
+        engine/base/GlfwWindow.hpp)
 
 
 target_include_directories(${PROJECT_NAME} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(${PROJECT_NAME} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/engine/base")
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(${PROJECT_NAME} PUBLIC glfw bx bimg bgfx)
-target_link_libraries(${PROJECT_NAME} PUBLIC Boost::utility Boost::core Boost::detail Boost::lexical_cast)
+target_link_libraries(${PROJECT_NAME} PUBLIC Boost::utility Boost::core Boost::detail Boost::lexical_cast Boost::exception Boost::timer)
 target_link_libraries(${PROJECT_NAME} PUBLIC Microsoft.GSL::GSL)
 target_link_libraries(${PROJECT_NAME} PUBLIC glm)
 target_link_libraries(${PROJECT_NAME} PRIVATE spdlog)

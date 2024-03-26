@@ -5,12 +5,12 @@
 #ifndef ABSTRACTWINDOW_HPP
 #define ABSTRACTWINDOW_HPP
 
-namespace Tina {
+namespace Tina
+{
+    class AbstractWindow
+    {
 
-class AbstractWindow {
-
-};
-
+    };
 } // Tina
 
 #endif //ABSTRACTWINDOW_HPP

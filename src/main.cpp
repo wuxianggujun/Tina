@@ -1,8 +1,8 @@
-﻿#include <iostream>
-#include "../engine/base/Log.hpp"
+#include <iostream>
+#include "Application.hpp"
 
-int main()
+int main(int argc, char** argv)
 {
-    DEBUG("Hello");
-    return 0;
+    Tina::Application application;
+    return application.run(argc, argv);
 }
