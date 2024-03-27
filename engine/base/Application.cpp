@@ -50,14 +50,15 @@ namespace Tina
         window.initialize();
 
 		std::cout <<"GlfwWindow Initialize Time: "<< startTime.format() << std::endl;
-
-        window.run();
-		//try {
-  //          THROW_SIMPLE_EXCEPTION(Tina::GlfwInitError, "An error occurred.");
-		//}
-		//catch (const Tina::Exception& e) {
-  //          std::cerr << "Caught an exception: " << boost::diagnostic_information(e) << std::endl;
-		//}
+		try {
+			window.run();
+		}
+		catch (const Tina::Exception& e) {
+			std::cerr << "Exception caught: " << e.what() << std::endl;
+			if (e.comment() != nullptr) {
+				std::cerr << "Comment: " << *e.comment() << std::endl;
+			}
+		}
         window.shutdown();
         return 0;
     }

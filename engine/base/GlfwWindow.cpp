@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <GL/gl.h>
 #include <iostream>
-
+#include "Exception.hpp"
 
 
 namespace Tina
@@ -43,7 +43,24 @@ namespace Tina
 			glfwInitialized = false;
 			throw std::runtime_error("Cannot create a window.");
 		}
-	
+
+		glfwSetKeyCallback(m_window, KeyCallback);
+
+		bgfx::renderFrame();
+
+		bgfx::Init init;
+		init.platformData.nwh = glfwGetWin32Window(m_window);
+
+		int width, height;
+		glfwGetWindowSize(m_window, &width, &height);
+		init.resolution.width = static_cast<uint32_t>(width);
+		init.resolution.height = static_cast<uint32_t>(height);
+		init.resolution.reset = BGFX_RESET_VSYNC;
+		//if (!bgfx::init(init))
+		//{
+			THROW_SIMPLE_EXCEPTION(GlfwError, "≥ı ºªØ“Ï≥£¥ÌŒÛ");
+		//}
+
 		glfwMakeContextCurrent(m_window);
     }
 
@@ -63,13 +80,19 @@ namespace Tina
 			glfwPollEvents();
 
 		}
-		return 0;
+		return EXIT_SUCCESS;
     }
 
     void GlfwWindow::shutdown()
     {
+		glfwDestroyWindow(m_window);
 		glfwTerminate();
     }
+
+	void GlfwWindow::KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+	{
+
+	}
 
 	void GlfwWindow::ErrorCallback(int error, const char* description)
 	{

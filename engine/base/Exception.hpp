@@ -31,19 +31,20 @@ namespace Tina {
 	class SimpleException : public Exception {
 	public:
 		const char* what() const noexcept override {
-			return T::message();
+			return T::TAG();
 		}
 	};
 
 	// 错误信息提供者
 	struct RuntimeError {
+		
 		static constexpr const char* message() {
-			return "Default runtime error message.";
+			return "";
 		}
 	};
 
-	struct GlfwInitError {
-		static constexpr const char* message() {
+	struct GlfwError {
+		static constexpr const char* TAG() {
 			return "Cannot initialize GLFW.";
 		}
 	};

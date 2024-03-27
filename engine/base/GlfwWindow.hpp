@@ -38,6 +38,8 @@ namespace Tina
         }
 
     private:
+        static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+
         static void ErrorCallback(int error, const char* description);
 
         [[nodiscard]] int getWidth() const

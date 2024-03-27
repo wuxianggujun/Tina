@@ -17,6 +17,8 @@ set(BGFX_BUILD_TOOLS TRUE CACHE INTERNAL "")
 set(BGFX_BUILD_EXAMPLES TRUE CACHE INTERNAL "")
 set(BGFX_CUSTOM_TARGETS FALSE CACHE INTERNAL "")
 
+#googletest
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 
 add_subdirectory(bgfx.cmake)
 add_subdirectory(boost)
