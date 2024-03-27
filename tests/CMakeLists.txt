@@ -1,4 +1,10 @@
-add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/3rdparty/googletest)
+if(TINA_BUILD_TESTING)
 
-add_executable(${CMAKE_PROJECT_NAME} example.cpp)
-target_link_libraries(${CMAKE_PROJECT_NAME} gtest_main)
+aux_source_directory(opengl TEST_OPENGL_SRCS)
+
+add_executable(tests ${TEST_OPENGL_SRCS})
+target_link_libraries(tests  PUBLIC  GTest::gtest_main)
+
+add_test(NAME tests COMMAND tests)
+
+endif()

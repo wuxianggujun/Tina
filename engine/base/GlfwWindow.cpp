@@ -50,8 +50,12 @@ namespace Tina
 
 		bgfx::renderFrame();
 
+		bgfx::PlatformData platformData;
+		platformData.nwh = glfwGetWin32Window(m_window);
+		bgfx::setPlatformData(platformData);
+
 		bgfx::Init init;
-		init.platformData.nwh = glfwGetWin32Window(m_window);
+		init.platformData = platformData;
 
 		int width, height;
 		glfwGetWindowSize(m_window, &width, &height);
@@ -100,6 +104,7 @@ namespace Tina
 			bgfx::setDebug(s_showStats ? BGFX_DEBUG_STATS : BGFX_DEBUG_TEXT);
 			// Advance to next frame. Process submitted rendering primitives.
 			bgfx::frame();
+			glfwSwapBuffers(m_window);
 		
 		}
 		return EXIT_SUCCESS;
