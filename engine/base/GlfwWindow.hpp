@@ -62,6 +62,7 @@ namespace Tina
         GLFWwindow* m_window;
         int width;
         int height;
+        static bool s_showStats;
         const char* title;
     };
 } // Tina

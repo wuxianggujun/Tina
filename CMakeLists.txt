@@ -57,7 +57,7 @@ add_executable(${PROJECT_NAME}
         engine/base/Application.cpp
         engine/base/Application.hpp
         engine/base/GlfwWindow.cpp
-        engine/base/GlfwWindow.hpp "test/opengl/example.cpp")
+        engine/base/GlfwWindow.hpp)
 
 
 target_include_directories(${PROJECT_NAME} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

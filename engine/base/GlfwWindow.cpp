@@ -13,6 +13,8 @@
 
 namespace Tina
 {
+	bool GlfwWindow::s_showStats = false;
+
     GlfwWindow::GlfwWindow(const char* title, int width, int height)
     {
         this->title = title;
@@ -56,10 +58,10 @@ namespace Tina
 		init.resolution.width = static_cast<uint32_t>(width);
 		init.resolution.height = static_cast<uint32_t>(height);
 		init.resolution.reset = BGFX_RESET_VSYNC;
-		//if (!bgfx::init(init))
-		//{
+		if (!bgfx::init(init))
+		{
 			THROW_SIMPLE_EXCEPTION(GlfwError, "≥ı ºªØ“Ï≥£¥ÌŒÛ");
-		//}
+		}
 
 		glfwMakeContextCurrent(m_window);
     }
@@ -73,25 +75,48 @@ namespace Tina
 
     	std::cout << "Hello, world!" << std::endl;
 
+		const bgfx::ViewId KClearView = 0;
+		bgfx::setViewClear(KClearView, BGFX_CLEAR_COLOR);
+		bgfx::setViewRect(KClearView, 0, 0, bgfx::BackbufferRatio::Equal);
+
 		while (!glfwWindowShouldClose(m_window))
 		{
-			glfwSwapBuffers(m_window);
-
 			glfwPollEvents();
-
+		
+			int oldWidth = width, oldHeight = height;
+			if (width != oldWidth || height != oldHeight) {
+				bgfx::reset(static_cast<uint32_t>(width), static_cast<uint32_t>(height), BGFX_RESET_VSYNC);
+				bgfx::setViewRect(KClearView, 0, 0, bgfx::BackbufferRatio::Equal);
+			}
+			bgfx::touch(KClearView);
+			bgfx::dbgTextClear();
+			bgfx::dbgTextPrintf(0, 0, 0x0f, "Press F1 to toggle stats.");
+			bgfx::dbgTextPrintf(0, 1, 0x0f, "Color can be changed with ANSI \x1b[9;me\x1b[10;ms\x1b[11;mc\x1b[12;ma\x1b[13;mp\x1b[14;me\x1b[0m code too.");
+			bgfx::dbgTextPrintf(80, 1, 0x0f, "\x1b[;0m    \x1b[;1m    \x1b[; 2m    \x1b[; 3m    \x1b[; 4m    \x1b[; 5m    \x1b[; 6m    \x1b[; 7m    \x1b[0m");
+			bgfx::dbgTextPrintf(80, 2, 0x0f, "\x1b[;8m    \x1b[;9m    \x1b[;10m    \x1b[;11m    \x1b[;12m    \x1b[;13m    \x1b[;14m    \x1b[;15m    \x1b[0m");
+			const bgfx::Stats* stats = bgfx::getStats();
+			bgfx::dbgTextPrintf(0, 2, 0x0f, "Backbuffer %dW x %dH in pixels, debug text %dW x %dH in characters.", stats->width, stats->height, stats->textWidth, stats->textHeight);
+			// Enable stats or debug text.
+			bgfx::setDebug(s_showStats ? BGFX_DEBUG_STATS : BGFX_DEBUG_TEXT);
+			// Advance to next frame. Process submitted rendering primitives.
+			bgfx::frame();
+		
 		}
 		return EXIT_SUCCESS;
     }
 
     void GlfwWindow::shutdown()
     {
+		bgfx::shutdown();
 		glfwDestroyWindow(m_window);
 		glfwTerminate();
     }
 
+
 	void GlfwWindow::KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
 	{
-
+		if (key == GLFW_KEY_F1 && action == GLFW_RELEASE)
+			s_showStats = !s_showStats;
 	}
 
 	void GlfwWindow::ErrorCallback(int error, const char* description)
