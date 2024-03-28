@@ -23,6 +23,8 @@ set(BGFX_CUSTOM_TARGETS FALSE CACHE INTERNAL "")
 #googletest
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 
+#boost
+
 add_subdirectory(bgfx.cmake)
 add_subdirectory(boost)
 add_subdirectory(microsoft-gsl)

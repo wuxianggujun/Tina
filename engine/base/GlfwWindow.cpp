@@ -73,9 +73,8 @@ namespace Tina
 
     	std::cout << "Hello, world!" << std::endl;
 
-		const bgfx::ViewId KClearView = 0;
-		bgfx::setViewClear(KClearView, BGFX_CLEAR_COLOR);
-		bgfx::setViewRect(KClearView, 0, 0, bgfx::BackbufferRatio::Equal);
+		bgfx::setViewClear(clearViewId, BGFX_CLEAR_COLOR);
+		bgfx::setViewRect(clearViewId, 0, 0, bgfx::BackbufferRatio::Equal);
 
 		while (!glfwWindowShouldClose(m_window))
 		{
@@ -84,9 +83,9 @@ namespace Tina
 			int oldWidth = width, oldHeight = height;
 			if (width != oldWidth || height != oldHeight) {
 				bgfx::reset(static_cast<uint32_t>(width), static_cast<uint32_t>(height), BGFX_RESET_VSYNC);
-				bgfx::setViewRect(KClearView, 0, 0, bgfx::BackbufferRatio::Equal);
+				bgfx::setViewRect(clearViewId, 0, 0, bgfx::BackbufferRatio::Equal);
 			}
-			bgfx::touch(KClearView);
+			bgfx::touch(clearViewId);
 			bgfx::dbgTextClear();
 			bgfx::dbgTextPrintf(0, 0, 0x0f, "Press F1 to toggle stats.");
 			bgfx::dbgTextPrintf(0, 1, 0x0f, "Color can be changed with ANSI \x1b[9;me\x1b[10;ms\x1b[11;mc\x1b[12;ma\x1b[13;mp\x1b[14;me\x1b[0m code too.");
@@ -106,6 +105,7 @@ namespace Tina
 
     void GlfwWindow::shutdown()
     {
+		glfwMakeContextCurrent(nullptr);
 		bgfx::shutdown();
 		glfwDestroyWindow(m_window);
 		glfwTerminate();

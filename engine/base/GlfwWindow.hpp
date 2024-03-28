@@ -65,7 +65,7 @@ namespace Tina
         bool glfwInitialized = true;
         GLFWwindow* m_window;
         static bool s_showStats;
-
+        const bgfx::ViewId clearViewId = 0;
     };
 } // Tina
 
