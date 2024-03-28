@@ -5,24 +5,39 @@
 #ifndef APPLICATION_HPP
 #define APPLICATION_HPP
 #include <cstdint>
+#include "BaseApplication.hpp"
+#include <boost/timer/timer.hpp>
 
 namespace Tina
 {
-    class Application
+    template<class WindowType>
+    class Application : public BaseApplication
     {
-    private:
-        virtual void initialize(int _argc, char** _argv);
-        virtual void shutDown();
-
     public:
-        explicit Application(const char* title = "Tina", uint32_t width = 1280, uint32_t height = 768);
-        ~Application() { Application::shutDown(); }
-        virtual int run(int argc, char** argv);
+        explicit Application(const char* title = "Tina", uint32_t width = 1280, uint32_t height = 768) :BaseApplication(title, width, height) {
 
+        }
+        void initialize(int argc, char** argv) override {
+
+        }
+       int run(int argc, char** argv) override {
+		   //计算程序运行时间
+		   boost::timer::auto_cpu_timer startTime;
+           initialize(argc, argv);
+           window.create(mTitle, mWidth, mHeight);
+           std::cout << "Application Initialize Time: " << startTime.format() << std::endl;
+           int result = window.run();
+           if (!result)
+           {
+               shutdown();
+           }
+           return result;
+       }
+       void shutdown() override {
+           window.shutdown();
+       }
     private:
-        uint32_t mWidth;
-        uint32_t mHeight;
-        const char* mTitle;
+        WindowType window;
     };
 } // Tina
 

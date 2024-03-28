@@ -20,16 +20,21 @@
     #define GLFW_EXPOSE_NATIVE_COCOA
 #endif
 #include <GLFW/glfw3native.h>
+#include "AbstractWindow.hpp"
 
 
 namespace Tina
 {
-    class GlfwWindow
+    class GlfwWindow : AbstractWindow
     {
     public:
-        GlfwWindow(const char* title, int width, int height);
+        GlfwWindow() = default;
 
-        void initialize();
+        void create(const char* title, int width, int height) override {
+            AbstractWindow::create(title, width, height);
+        }
+
+        void initialize() override;
         int run();
         void shutdown();
 
@@ -37,10 +42,10 @@ namespace Tina
             return glfwInitialized;
         }
 
-    private:
-        static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
-
-        static void ErrorCallback(int error, const char* description);
+	protected:
+		static void onKeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+		static void onWindowSizeCallback(GLFWwindow* window, int width, int height);
+        static void onErrorCallback(int error, const char* description);
 
         [[nodiscard]] int getWidth() const
         {
@@ -60,10 +65,7 @@ namespace Tina
         const char* description = nullptr;
         bool glfwInitialized = true;
         GLFWwindow* m_window;
-        int width;
-        int height;
         static bool s_showStats;
-        const char* title;
     };
 } // Tina
 

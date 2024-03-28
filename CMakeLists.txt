@@ -1,9 +1,12 @@
 cmake_minimum_required(VERSION 3.28)
 project(Tina)
 
+set(CMAKE_CXX_STANDARD 20)
+
 option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_TESTING "Google Tests" ON)
+option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" ON)
 
 if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "DEBUG")
@@ -23,7 +26,9 @@ endif ()
 # Options
 include(CMakeDependentOption)
 #自动更新子模块
+if(TINA_AUTOUPDATE_SUBMODULE)
 include(cmake/UpdateSubmodules.cmake)
+endif()
 include(cmake/utils.cmake)
 
 # 递归查找文件夹下的 .h .hpp. ini 文件保存到 HEADER_FILES
@@ -51,6 +56,7 @@ add_shaders_directory(shaders SHADERS_TARGET_NAME)
 
 add_executable(${PROJECT_NAME}
         src/main.cpp
+
         engine/base/Log.cpp
         engine/base/Log.hpp
         engine/base/Exception.hpp
@@ -60,7 +66,7 @@ add_executable(${PROJECT_NAME}
         engine/base/PlatformDetection.hpp
         engine/base/AbstractWindow.cpp
         engine/base/AbstractWindow.hpp
-        engine/base/Application.cpp
+        engine/base/BaseApplication.hpp
         engine/base/Application.hpp
         engine/base/GlfwWindow.cpp
         engine/base/GlfwWindow.hpp)

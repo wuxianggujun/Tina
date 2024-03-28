@@ -15,16 +15,10 @@ namespace Tina
 {
 	bool GlfwWindow::s_showStats = false;
 
-    GlfwWindow::GlfwWindow(const char* title, int width, int height)
-    {
-        this->title = title;
-        this->width = width;
-        this->height = height;
-    }
 
-    void GlfwWindow::initialize()
+	void GlfwWindow::initialize()
     {
-        glfwSetErrorCallback(ErrorCallback);
+        glfwSetErrorCallback(onErrorCallback);
 
 		if (!glfwInit())
 		{
@@ -46,7 +40,7 @@ namespace Tina
 			throw std::runtime_error("Cannot create a window.");
 		}
 
-		glfwSetKeyCallback(m_window, KeyCallback);
+		glfwSetKeyCallback(m_window, onKeyCallback);
 
 		bgfx::renderFrame();
 
@@ -118,13 +112,13 @@ namespace Tina
     }
 
 
-	void GlfwWindow::KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+	void GlfwWindow::onKeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
 	{
 		if (key == GLFW_KEY_F1 && action == GLFW_RELEASE)
 			s_showStats = !s_showStats;
 	}
 
-	void GlfwWindow::ErrorCallback(int error, const char* description)
+	void GlfwWindow::onErrorCallback(int error, const char* description)
 	{
         fprintf(stderr, "Error: %s\n", description);
 	}
