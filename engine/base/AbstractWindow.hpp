@@ -21,6 +21,9 @@ namespace Tina
         };
 
         virtual void initialize() = 0;
+        virtual int run() = 0;
+        virtual void shutdown() = 0;
+
         protected:
         int32_t width;
         int32_t height;

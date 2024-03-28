@@ -56,7 +56,7 @@ add_shaders_directory(shaders SHADERS_TARGET_NAME)
 
 add_executable(${PROJECT_NAME}
         src/main.cpp
-
+        src/TestGlfwWindow.hpp
         engine/base/Log.cpp
         engine/base/Log.hpp
         engine/base/Exception.hpp
@@ -69,7 +69,7 @@ add_executable(${PROJECT_NAME}
         engine/base/BaseApplication.hpp
         engine/base/Application.hpp
         engine/base/GlfwWindow.cpp
-        engine/base/GlfwWindow.hpp)
+        engine/base/GlfwWindow.hpp "src/TestGlfwWindow.hpp")
 
 
 target_include_directories(${PROJECT_NAME} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

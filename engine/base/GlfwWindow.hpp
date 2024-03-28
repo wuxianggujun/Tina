@@ -35,8 +35,8 @@ namespace Tina
         }
 
         void initialize() override;
-        int run();
-        void shutdown();
+        int run() override;
+        void shutdown() override;
 
         bool isGlfwInitialized()const {
             return glfwInitialized;
@@ -61,8 +61,7 @@ namespace Tina
             return height;
         }
 
-    private:
-        const char* description = nullptr;
+        protected:
         bool glfwInitialized = true;
         GLFWwindow* m_window;
         static bool s_showStats;
