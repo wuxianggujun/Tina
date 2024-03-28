@@ -23,7 +23,9 @@ set(BGFX_CUSTOM_TARGETS FALSE CACHE INTERNAL "")
 #googletest
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 
-#boost
+#entt
+
+option(ENTT_INCLUDE_NATVIS "Add EnTT natvis files to the EnTT target." ON)
 
 add_subdirectory(bgfx.cmake)
 add_subdirectory(boost)

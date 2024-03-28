@@ -1,6 +1,7 @@
 #include "GlfwWindow.hpp"
 #include <filesystem>
 #include <fstream>
+#include <entt/entt.hpp>
 
 class TestGlfwWindow : public Tina::GlfwWindow{
 
