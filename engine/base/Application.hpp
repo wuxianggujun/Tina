@@ -27,10 +27,7 @@ namespace Tina
            window.create(mTitle, mWidth, mHeight);
            std::cout << "Application Initialize Time: " << startTime.format() << std::endl;
            int result = window.run();
-           if (!result)
-           {
-               shutdown();
-           }
+           shutdown();
            return result;
        }
        void shutdown() override {

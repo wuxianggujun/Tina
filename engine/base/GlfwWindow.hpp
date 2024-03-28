@@ -65,6 +65,7 @@ namespace Tina
         bool glfwInitialized = true;
         GLFWwindow* m_window;
         static bool s_showStats;
+
     };
 } // Tina
 

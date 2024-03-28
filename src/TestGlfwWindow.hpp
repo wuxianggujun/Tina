@@ -4,6 +4,11 @@ class TestGlfwWindow : public Tina::GlfwWindow{
 
 public:
 
+
+	void render() {
+
+	}
+
 	int run() override{
 
 		if (!glfwInitialized)
@@ -14,11 +19,20 @@ public:
 		while (!glfwWindowShouldClose(m_window))
 		{
 			glfwPollEvents();
+			bgfx::touch(0);
 
-			glfwSwapBuffers(m_window);
+			render();
 
+			bgfx::frame();
 		}
 
 		return 0;
 	}
+
+
+
+private:
+	bgfx::ShaderHandle vertex_shader;
+	bgfx::ShaderHandle fragment_shader;
+	bgfx::ProgramHandle programHandle;
 };

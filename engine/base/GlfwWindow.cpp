@@ -39,7 +39,7 @@ namespace Tina
 			glfwInitialized = false;
 			throw std::runtime_error("Cannot create a window.");
 		}
-
+		glfwSetWindowUserPointer(m_window,this);
 		glfwSetKeyCallback(m_window, onKeyCallback);
 
 		bgfx::renderFrame();
