@@ -1,6 +1,6 @@
 #include <iostream>
-#include "engine/core/Application.hpp"
-#include "engine/core/GlfwWindow.hpp"
+#include "core/Application.hpp"
+#include "core/GlfwWindow.hpp"
 #include "TestGlfwWindow.hpp"
 
 

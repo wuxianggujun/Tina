@@ -2,15 +2,12 @@
 // Created by 33442 on 2024/3/16.
 //
 
-#include "engine/base/GlfwWindow.hpp"
-
+#include "GlfwWindow.hpp"
 #include <cstdlib>
 #include <stdexcept>
 #include <GL/gl.h>
 #include <iostream>
 #include "Exception.hpp"
-#include "engine/log/Log.hpp"
-#include "engine/log/LogManager.hpp"
 
 namespace Tina
 {
@@ -69,7 +66,7 @@ namespace Tina
 
     int GlfwWindow::run()
     {
-		TINA_TRACE("TinaEngine v{}.{}", 0, 1);
+		//TINA_TRACE("TinaEngine v{}.{}", 0, 1);
 		if (!glfwInitialized)
 		{
 			return EXIT_FAILURE;

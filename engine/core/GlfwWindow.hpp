@@ -20,8 +20,7 @@
     #define GLFW_EXPOSE_NATIVE_COCOA
 #endif
 #include <GLFW/glfw3native.h>
-#include "engine/core/AbstractWindow.hpp"
-#include "engine/log/LogManager.hpp"
+#include "AbstractWindow.hpp"
 
 namespace Tina
 {

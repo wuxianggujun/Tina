@@ -7,6 +7,7 @@ option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "$
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_TESTING "Google Tests" ON)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" ON)
+option(TINA_FILE_EXCLUSION "Enable excluding log file" OFF)
 
 # Include cmake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -34,20 +35,19 @@ include(cmake/UpdateSubmodules.cmake)
 endif()
 include(cmake/utils.cmake)
 
-# 递归查找文件夹下的 .h .hpp. ini 文件保存到 HEADER_FILES
-file(GLOB_RECURSE HEADER_FILES engine/*.h engine/*.hpp)
+file(GLOB_RECURSE TINA_HEADER_FILES CONFIGURE_DEPENDS engine/*.h engine/*.hpp)
+file(GLOB_RECURSE TINA_SOURCE_FILES CONFIGURE_DEPENDS engine/*.cpp engine/*.c)
+set(TINA_All_FIlE ${TINA_HEADER_FILES} ${TINA_SOURCE_FILES})
 
-# 递归查找文件夹下的 *.cpp *.c 文件保存到 SOURCE_FILES
-file(GLOB_RECURSE SOURCE_FILES engine/*.cpp engine/*.c)
+if(${TINA_FILE_EXCLUSION})
+# 过滤掉log文件夹
+list(FILTER TINA_All_FIlE EXCLUDE REGEX "^${CMAKE_CURRENT_SOURCE_DIR}/engine/log/")
+message(STATUS "TINA_All_FIlE: ${TINA_All_FIlE}")
+endif()
 
-# 递归查找文件夹下的 *.hlsl 文件保存到 SHADER_FILES(如果没有 shader 可以删除)
-file(GLOB_RECURSE SHADER_FILES *.hlsl)
+set(ENGINE_SOURCES "" PARENT_SCOPE)
 
-# 将 HEDADER_FILES 和 SOURCE_FILES 和 SHADER_FILES 保存到 AllFile 变量
-set(TINA_All_FIlE ${HEADER_FILES} ${SOURCE_FILES} ${SHADER_FILES})
-
-
-add_subdirectory(engine)
+#add_subdirectory(engine)
 
 enable_testing()
 #启用外部库
@@ -58,12 +58,16 @@ add_shaders_directory(shaders SHADERS_TARGET_NAME)
 
 #add_executable(${PROJECT_NAME} src/main.cpp ${TINA_FILE_ITEM})
 
+message(STATUS "ENGINE_SRC" ${ENGINE_SOURCES})
 
-add_executable(${PROJECT_NAME} ${ENGINE_SOURCES}
+add_executable(${PROJECT_NAME})
+target_sources(${PROJECT_NAME} PRIVATE 
+        ${TINA_All_FIlE}
         src/main.cpp
         src/TestGlfwWindow.hpp)
 
-target_include_directories(${PROJECT_NAME} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
+target_include_directories(${PROJECT_NAME} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/engine")
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(${PROJECT_NAME} PUBLIC glfw bx bimg bgfx)
 target_link_libraries(${PROJECT_NAME} PUBLIC EnTT::EnTT)

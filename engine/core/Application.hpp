@@ -7,7 +7,6 @@
 #include <cstdint>
 #include "BaseApplication.hpp"
 #include <boost/timer/timer.hpp>
-#include "AbstractWindow.hpp"
 
 namespace Tina
 {
