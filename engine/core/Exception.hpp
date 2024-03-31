@@ -16,7 +16,7 @@ namespace Tina {
 	struct errinfo_comment_tag;
 	using errinfo_comment = boost::error_info<errinfo_comment_tag, std::string>;
 
-	// »ù´¡Òì³£Àà
+	// åŸºç¡€å¼‚å¸¸ç±»
 	class Exception : public std::exception, public boost::exception {
 	public:
 		char const* what() const noexcept override;
@@ -26,7 +26,7 @@ namespace Tina {
 		std::string const* comment() const noexcept;
 	};
 
-	// Í¨ÓÃÒì³£Ä£°åÀà
+	// é€šç”¨å¼‚å¸¸æ¨¡æ¿ç±»
 	template<typename T>
 	class SimpleException : public Exception {
 	public:
@@ -35,7 +35,7 @@ namespace Tina {
 		}
 	};
 
-	// ´íÎóĞÅÏ¢Ìá¹©Õß
+	// é”™è¯¯ä¿¡æ¯æä¾›è€…
 	struct RuntimeError {
 		
 		static constexpr const char* message() {
@@ -49,7 +49,7 @@ namespace Tina {
 		}
 	};
 
-	// ºê¶¨ÒåÒÔ±ã¸½¼ÓĞÅÏ¢²¢Å×³öÒì³£
+	// å®å®šä¹‰ä»¥ä¾¿é™„åŠ ä¿¡æ¯å¹¶æŠ›å‡ºå¼‚å¸¸
 #define THROW_SIMPLE_EXCEPTION(ErrorType, Description) \
     throw Tina::SimpleException<ErrorType>() \
         << Tina::errinfo_file_name(__FILE__) \

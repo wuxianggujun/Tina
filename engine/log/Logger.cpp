@@ -21,7 +21,7 @@ namespace Tina {
 			fs::create_directory(logDir);
 		}
 
-		// 异步打印日志
+		// 寮傛鎵撳嵃鏃ュ織
 		constexpr std::size_t logBufferSize = 32 * 1024; // 32kb
 		spdlog::init_thread_pool(logBufferSize, std::thread::hardware_concurrency());
 		std::vector<spdlog::sink_ptr> sinks;

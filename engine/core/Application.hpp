@@ -21,7 +21,7 @@ namespace Tina
 
         }
        int run(int argc, char** argv) override {
-		   //计算程序运行时间
+		   //璁＄畻绋嬪簭杩愯鏃堕棿
 		   boost::timer::auto_cpu_timer startTime;
            initialize(argc, argv);
            window.create(mTitle, mWidth, mHeight);

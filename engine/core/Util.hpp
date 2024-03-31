@@ -28,7 +28,7 @@ namespace Tina
 
     namespace Util
     {
-        // Õâ¶Î´úÂë¶¨ÒåÁËÒ»¸ö C++11 °æ±¾µÄ make_unique<T>() º¯ÊıÄ£°å£¬ÓÃÓÚ´´½¨²¢·µ»ØÒ»¸öÖ¸ÏòÀàĞÍ T µÄ std::unique_ptr ÖÇÄÜÖ¸Õë¡£
+        // è¿™æ®µä»£ç å®šä¹‰äº†ä¸€ä¸ª C++11 ç‰ˆæœ¬çš„ make_unique<T>() å‡½æ•°æ¨¡æ¿ï¼Œç”¨äºåˆ›å»ºå¹¶è¿”å›ä¸€ä¸ªæŒ‡å‘ç±»å‹ T çš„ std::unique_ptr æ™ºèƒ½æŒ‡é’ˆã€‚
         template <typename T, typename... Args>
         std::unique_ptr<T> make_unique(Args&&... args)
         {

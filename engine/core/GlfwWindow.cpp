@@ -26,7 +26,7 @@ namespace Tina
 			throw std::runtime_error("Cannot initialize GLFW.");
 		}
 
-		// ³õÊ¼»¯glfw
+		// åˆå§‹åŒ–glfw
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
 		glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
 		glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -58,7 +58,7 @@ namespace Tina
 		init.resolution.reset = BGFX_RESET_VSYNC;
 		if (!bgfx::init(init))
 		{
-			THROW_SIMPLE_EXCEPTION(GlfwError, "³õÊ¼»¯Òì³£´íÎó");
+			THROW_SIMPLE_EXCEPTION(GlfwError, "åˆå§‹åŒ–å¼‚å¸¸é”™è¯¯");
 		}
 
 		glfwMakeContextCurrent(m_window);

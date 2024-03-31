@@ -29,7 +29,7 @@ endif ()
 
 # Options
 include(CMakeDependentOption)
-#自动更新子模块
+#脳脭露炉赂眉脨脗脳脫脛拢驴茅
 if(TINA_AUTOUPDATE_SUBMODULE)
 include(cmake/UpdateSubmodules.cmake)
 endif()
@@ -40,7 +40,7 @@ file(GLOB_RECURSE TINA_SOURCE_FILES CONFIGURE_DEPENDS engine/*.cpp engine/*.c)
 set(TINA_All_FIlE ${TINA_HEADER_FILES} ${TINA_SOURCE_FILES})
 
 if(${TINA_FILE_EXCLUSION})
-# 过滤掉log文件夹
+# 鹿媒脗脣碌么log脦脛录镁录脨
 list(FILTER TINA_All_FIlE EXCLUDE REGEX "^${CMAKE_CURRENT_SOURCE_DIR}/engine/log/")
 message(STATUS "TINA_All_FIlE: ${TINA_All_FIlE}")
 endif()
@@ -50,7 +50,7 @@ set(ENGINE_SOURCES "" PARENT_SCOPE)
 #add_subdirectory(engine)
 
 enable_testing()
-#启用外部库
+#脝么脫脙脥芒虏驴驴芒
 add_subdirectory(3rdparty)
 add_subdirectory(tests)
 
@@ -59,6 +59,18 @@ add_shaders_directory(shaders SHADERS_TARGET_NAME)
 #add_executable(${PROJECT_NAME} src/main.cpp ${TINA_FILE_ITEM})
 
 message(STATUS "ENGINE_SRC" ${ENGINE_SOURCES})
+
+
+message(STATUS "鍗фЫ鍘熸潵濡傛锛屾槸蹇呴』瑕佹寚瀹歎TF-8")
+
+
+if(MSVC)
+    add_compile_options("/source-charset:utf-8")
+    #add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
+    #add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
+endif()
+
+
 
 add_executable(${PROJECT_NAME})
 target_sources(${PROJECT_NAME} PRIVATE 
@@ -81,6 +93,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC "${SHADERS_TARGET_NAME}")
 
 target_compile_definitions(${PROJECT_NAME} PUBLIC GLFW_INCLUDE_NONE)
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
+
 
 if (${TINA_BUILD_DOCS})
 include(cmake/CompileOptions.cmake)
