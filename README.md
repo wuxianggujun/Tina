@@ -1,38 +1,16 @@
 依赖库
 
 ```text
-git clone https://github.com/bkaradzic/bgfx.cmake.git
-git clone https://github.com/gabime/spdlog.git
-git clone https://github.com/bkaradzic/bx.git
-git clone https://github.com/bkaradzic/bimg.git
-git clone https://github.com/bkaradzic/bgfx.git
-git clone https://github.com/google/googletest.git
-https://github.com/boostorg/boost.git
-
-
-[submodule "3rdparty/microsoft-gsl"]
-	path = 3rdparty/microsoft-gsl
-	url = https://github.com/microsoft/GSL.git
-[submodule "3rdparty/stb-cmake"]
-	path = 3rdparty/stb-cmake
-	url = https://github.com/gracicot/stb-cmake.git
-[submodule "3rdparty/blink"]
-	path = 3rdparty/blink
-	url = https://github.com/jart/blink.git
-[submodule "3rdparty/boost"]
-	path = 3rdparty/boost
-	url = https://github.com/boostorg/boost.git
-[submodule "3rdparty/cosmopolitan"]
-	path = 3rdparty/cosmopolitan
-	url = https://github.com/jart/cosmopolitan.git
-[submodule "3rdparty/entt"]
-	path = 3rdparty/entt
-	url = https://github.com/skypjack/entt.git
-[submodule "3rdparty/googletest"]
-	path = 3rdparty/googletest
-	url = https://github.com/google/googletest.git
-[submodule "3rdparty/libxlsxwriter"]
-	path = 3rdparty/libxlsxwriter
-	url = https://github.com/jmcnamara/libxlsxwriter.git
+	 https://github.com/bkaradzic/bgfx.cmake.git
+	 https://github.com/gabime/spdlog.git
+	 https://github.com/boostorg/boost.git
+	 https://github.com/microsoft/GSL.git
+	 https://github.com/gracicot/stb-cmake.git
+	 https://github.com/jart/blink.git
+	 https://github.com/boostorg/boost.git
+     https://github.com/jart/cosmopolitan.git
+	 https://github.com/skypjack/entt.git
+	 https://github.com/google/googletest.git
+	 https://github.com/jmcnamara/libxlsxwriter.git
 
 ```
