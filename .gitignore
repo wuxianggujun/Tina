@@ -81,3 +81,4 @@ fabric.properties
 
 
 /.idea
+*.bin
