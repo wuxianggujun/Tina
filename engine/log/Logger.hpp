@@ -27,7 +27,11 @@ namespace Tina {
 
 		bool init(const std::string_view& logFilePath);
 
+        void shutdown();
 
+    private:
+        std::atomic_bool _is_inited = false;
+        spdlog::level::level_enum _log_level = spdlog::level::trace;
 
 	};
 

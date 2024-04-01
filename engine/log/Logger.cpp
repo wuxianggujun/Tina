@@ -29,15 +29,25 @@ namespace Tina {
 		auto dailySink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(logPath.string(), 0, 2);
 		sinks.push_back(dailySink);
 
-#ifdef TINA_PLATFORM_WINDOWS
-
-
+#if defined(TINA_PLATFORM_WINDOWS) && defined(_DEBUG) && !defined(NO_CONSOLE_LOG)
+        auto ms_sink = std::make_shared<spdlog::sinks::msvc_sink_mt>();
+        sinks.push_back(ms_sink);
 #endif // DEBUG
 
-
-		return false;
+#if !defined(TINA_PLATFORM_WINDOWS) && !defined(NO_CONSOLE_LOG)
+        auto consolt_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        sinks.push_back(consolt_sink);
+#endif
+        spdlog::set_default_logger(std::make_shared<spdlog::logger>("", sinks.begin(), sinks.end()));
+        spdlog::set_pattern("%s(%#):[%L %D %T .%e %P %t %!] %v");
+        spdlog::flush_on(spdlog::level::warn);
+        spdlog::set_level(_log_level);
+		return true;
 	}
 
+    void shutdown() {
+        spdlog::shutdown();
+    }
 
 }
 
