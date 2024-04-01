@@ -4,7 +4,6 @@
 #include <sstream>
 #include <filesystem>
 #include <boost/utility.hpp>
-#include <boost/predef.h>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/async.h>
@@ -17,6 +16,7 @@
 #include <spdlog/sinks/stdout_sinks.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include "PlatformDetection.hpp"
 
 namespace Tina {
 

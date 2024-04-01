@@ -40,7 +40,7 @@ namespace Tina
         bool isGlfwInitialized()const {
             return glfwInitialized;
         }
-
+        
 	protected:
 		static void onKeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 		static void onWindowSizeCallback(GLFWwindow* window, int width, int height);

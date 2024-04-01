@@ -29,7 +29,8 @@ namespace Tina {
 		auto dailySink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(logPath.string(), 0, 2);
 		sinks.push_back(dailySink);
 
-#ifdef BOOST_OS_WINDOWS
+#ifdef TINA_PLATFORM_WINDOWS
+
 
 #endif // DEBUG
 
