@@ -7,6 +7,8 @@
 int main(int argc, char** argv)
 {
     Tina::Logger::getInstance().init();
+    Tina::Logger::getInstance().onlyToFile();
+
     Tina::Application<TestGlfwWindow> application;
     return application.run(argc, argv);
 }

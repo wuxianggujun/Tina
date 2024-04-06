@@ -74,6 +74,15 @@ namespace Tina {
         spdlog::shutdown();
     }
 
+    void Logger::onlyToConsole()
+    {
+        writeToConsole_.store(false);
+    }
+
+     void Logger::onlyToFile()
+    {
+         writeToFile_.store(false);
+    }
 }
 
 
