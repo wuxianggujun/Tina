@@ -7,7 +7,7 @@ option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "$
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_TESTING "Google Tests" ON)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" ON)
-option(TINA_FILE_EXCLUSION "Enable excluding log file" ON)
+option(TINA_FILE_EXCLUSION "Enable excluding log file" OFF)
 
 # Include cmake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -40,29 +40,17 @@ file(GLOB_RECURSE TINA_SOURCE_FILES CONFIGURE_DEPENDS engine/*.cpp engine/*.c)
 set(TINA_All_FIlE ${TINA_HEADER_FILES} ${TINA_SOURCE_FILES})
 
 if(${TINA_FILE_EXCLUSION})
-# ¹ýÂËµôlogÎÄ¼þ¼Ð
 list(FILTER TINA_All_FIlE EXCLUDE REGEX "^${CMAKE_CURRENT_SOURCE_DIR}/engine/log/")
 message(STATUS "TINA_All_FIlE: ${TINA_All_FIlE}")
 endif()
 
 set(ENGINE_SOURCES "" PARENT_SCOPE)
 
-#add_subdirectory(engine)
-
 enable_testing()
-#ÆôÓÃÍâ²¿¿â
 add_subdirectory(3rdparty)
 add_subdirectory(tests)
 
 add_shaders_directory(shaders SHADERS_TARGET_NAME)
-
-#add_executable(${PROJECT_NAME} src/main.cpp ${TINA_FILE_ITEM})
-
-message(STATUS "ENGINE_SRC" ${ENGINE_SOURCES})
-
-
-message(STATUS "卧槽原来如此，是必须要指定UTF-8")
-
 
 if(MSVC)
     add_compile_options("/source-charset:utf-8")
@@ -70,7 +58,7 @@ if(MSVC)
     #add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
 endif()
 
-
+message(STATUS "TINA_All_FIlE: ${TINA_All_FIlE}")
 
 add_executable(${PROJECT_NAME})
 target_sources(${PROJECT_NAME} PRIVATE 

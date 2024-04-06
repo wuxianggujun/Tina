@@ -14,3 +14,5 @@ https://github.com/google/googletest.git
 https://github.com/jmcnamara/libxlsxwriter.git
 
 ```
+
+log模块基于开源项目https://github.com/gqw/spdlog_wrapper

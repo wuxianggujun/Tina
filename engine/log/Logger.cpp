@@ -3,45 +3,70 @@
 
 namespace Tina {
 
-	Logger* Logger::getInstance()
+    std::atomic_bool Logger::writeToFile_{ true };
+    std::atomic_bool Logger::writeToConsole_{ true };
+
+	Logger& Logger::getInstance()
 	{
 		static Logger logger;
 		return logger;
 	}
 
-	bool Logger::init(const std::string_view& logFilePath)
+	bool Logger::init(const std::string_view& logFilePath,const std::string& loggerName)
 	{
+        if (isInited_)
+        {
+            return true;
+        }
+
+        if (!writeToFile_ && !writeToConsole_)
+        {
+            std::cout << "Initialized AN EMPTY Logger!" << std::endl;
+            return true;
+        }
 		namespace fs = std::filesystem;
 
-		fs::path logPath(logFilePath);
-		fs::path logDir = logPath.parent_path();
+        try
+        {
+            fs::path logPath(logFilePath);
+            fs::path logDir = logPath.parent_path();
 
-		if (!fs::exists(logPath))
-		{
-			fs::create_directory(logDir);
-		}
+            if (!fs::exists(logPath))
+            {
+                fs::create_directory(logDir);
+            }
 
-		// 异步打印日志
-		constexpr std::size_t logBufferSize = 32 * 1024; // 32kb
-		spdlog::init_thread_pool(logBufferSize, std::thread::hardware_concurrency());
-		std::vector<spdlog::sink_ptr> sinks;
+            spdlog::flush_every(std::chrono::seconds(3));
 
-		auto dailySink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(logPath.string(), 0, 2);
-		sinks.push_back(dailySink);
+            // 异步打印日志
+            constexpr std::size_t logBufferSize = 32 * 1024; // 32kb
+            spdlog::init_thread_pool(logBufferSize, std::thread::hardware_concurrency());
+            std::vector<spdlog::sink_ptr> sinks;
 
-#if defined(TINA_PLATFORM_WINDOWS) && defined(_DEBUG) && !defined(NO_CONSOLE_LOG)
-        auto ms_sink = std::make_shared<spdlog::sinks::msvc_sink_mt>();
-        sinks.push_back(ms_sink);
-#endif // DEBUG
+            if (writeToConsole_)
+            {
+                auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+                sinks.push_back(std::move(console_sink));
+            }
+          
+            if (writeToFile_)
+            {
+                auto dailySink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(logPath.string(), 0, 2);
+                sinks.push_back(std::move(dailySink));
+            }
 
-#if !defined(TINA_PLATFORM_WINDOWS) && !defined(NO_CONSOLE_LOG)
-        auto consolt_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        sinks.push_back(consolt_sink);
-#endif
-        spdlog::set_default_logger(std::make_shared<spdlog::logger>("", sinks.begin(), sinks.end()));
-        spdlog::set_pattern("%s(%#):[%L %D %T .%e %P %t %!] %v");
-        spdlog::flush_on(spdlog::level::warn);
-        spdlog::set_level(_log_level);
+            std::shared_ptr<spdlog::logger> logger = std::make_shared<spdlog::logger>(loggerName,sinks.begin(),sinks.end());
+            spdlog::set_default_logger(logger);
+            spdlog::set_pattern("%s(%#):[%L %D %T .%e %P %t %!] %v");
+            spdlog::flush_on(spdlog::level::warn);
+            spdlog::set_level(_log_level);
+
+        }
+        catch (const std::exception_ptr& ex)
+        {
+            return false;
+        }
+        isInited_ = true;
 		return true;
 	}
 
