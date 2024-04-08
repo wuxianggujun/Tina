@@ -3,8 +3,6 @@
 
 namespace Tina {
 
-    std::atomic_bool Logger::writeToFile_{ true };
-    std::atomic_bool Logger::writeToConsole_{ true };
 
 	Logger& Logger::getInstance()
 	{
@@ -12,18 +10,13 @@ namespace Tina {
 		return logger;
 	}
 
-	bool Logger::init(const std::string_view& logFilePath,const std::string& loggerName)
+	bool Logger::init(const std::string_view& logFilePath,const std::string& loggerName,const size_t mode)
 	{
         if (isInited_)
         {
             return true;
         }
 
-        if (!writeToFile_ && !writeToConsole_)
-        {
-            std::cout << "Initialized AN EMPTY Logger!" << std::endl;
-            return true;
-        }
 		namespace fs = std::filesystem;
 
         try
@@ -36,28 +29,38 @@ namespace Tina {
                 fs::create_directory(logDir);
             }
 
-            spdlog::flush_every(std::chrono::seconds(3));
-
             // 异步打印日志
             constexpr std::size_t logBufferSize = 32 * 1024; // 32kb
             spdlog::init_thread_pool(logBufferSize, std::thread::hardware_concurrency());
             std::vector<spdlog::sink_ptr> sinks;
 
-            if (writeToConsole_)
+            if (mode & STDOUT)
             {
                 auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
                 sinks.push_back(std::move(console_sink));
             }
           
-            if (writeToFile_)
+            if (mode & FILEOUT)
             {
                 auto dailySink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(logPath.string(), 0, 2);
                 sinks.push_back(std::move(dailySink));
             }
 
-            std::shared_ptr<spdlog::logger> logger = std::make_shared<spdlog::logger>(loggerName,sinks.begin(),sinks.end());
-            spdlog::set_default_logger(logger);
-            spdlog::set_pattern("%s(%#):[%L %D %T .%e %P %t %!] %v");
+            if (mode & ASYNC)
+            {
+                spdlog::set_default_logger(std::make_shared<spdlog::async_logger>(loggerName,sinks.begin(),sinks.end(),spdlog::thread_pool(),spdlog::async_overflow_policy::block));
+            }
+            else
+            {
+                spdlog::set_default_logger(std::make_shared<spdlog::logger>(loggerName, sinks.begin(), sinks.end()));
+            }
+
+            auto formatter = std::make_unique<spdlog::pattern_formatter>();
+
+            formatter->add_flag<LogFormatterFlag>('*').set_pattern("[%Y-%m-%d %H:%M:%S.%e] %^[%*]%$ |%t| [<%!> %s:%#]: %v");
+
+            spdlog::set_formatter(std::move(formatter));
+            spdlog::flush_every(std::chrono::seconds(5)); 
             spdlog::flush_on(spdlog::level::warn);
             spdlog::set_level(_log_level);
 
@@ -74,15 +77,8 @@ namespace Tina {
         spdlog::shutdown();
     }
 
-    void Logger::onlyToConsole()
-    {
-        writeToConsole_.store(false);
-    }
 
-     void Logger::onlyToFile()
-    {
-         writeToFile_.store(false);
-    }
+
 }
 
 

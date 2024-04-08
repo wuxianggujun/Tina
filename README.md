@@ -15,4 +15,6 @@ https://github.com/jmcnamara/libxlsxwriter.git
 
 ```
 
-log模块基于开源项目https://github.com/gqw/spdlog_wrapper
+log模块基于开源项目
+https://github.com/gqw/spdlog_wrapper
+https://github.com/KkemChen/klog
