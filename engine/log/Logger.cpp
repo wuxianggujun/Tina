@@ -1,84 +1,68 @@
 #include "Logger.hpp"
 
-
 namespace Tina {
 
+    void Logger::setLevel(LogLevel level) {
+        _logLevel = static_cast<spdlog::level::level_enum>(level);
+        spdlog::set_level(_logLevel);
+    }
 
-	Logger& Logger::getInstance()
-	{
-		static Logger logger;
-		return logger;
-	}
-
-	bool Logger::init(const std::string_view& logFilePath,const std::string& loggerName,const size_t mode)
-	{
-        if (isInited_)
-        {
-            return true;
-        }
-
-		namespace fs = std::filesystem;
-
+    bool Logger::init(const std::string& logPath /* = LOG_PATH */, const size_t mode /* = STDOUT */) {
+        if (_isInited) return true;
+        namespace fs = std::filesystem;
         try
         {
-            fs::path logPath(logFilePath);
-            fs::path logDir = logPath.parent_path();
+            fs::path logFilePath(logPath);
+            fs::path logFileName = logFilePath.filename();
+            spdlog::filename_t basename, ext;
+            std::tie(basename, ext) = spdlog::details::file_helper::split_by_extension(logFileName.string());
 
-            if (!fs::exists(logPath))
-            {
-                fs::create_directory(logDir);
-            }
+            spdlog::init_thread_pool(LOG_BUFFER_SIZE, std::thread::hardware_concurrency());
 
-            // 异步打印日志
-            constexpr std::size_t logBufferSize = 32 * 1024; // 32kb
-            spdlog::init_thread_pool(logBufferSize, std::thread::hardware_concurrency());
             std::vector<spdlog::sink_ptr> sinks;
 
             if (mode & STDOUT)
             {
-                auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-                sinks.push_back(std::move(console_sink));
+                auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+                sinks.push_back(consoleSink);
             }
-          
+
             if (mode & FILEOUT)
             {
-                auto dailySink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(logPath.string(), 0, 2);
-                sinks.push_back(std::move(dailySink));
+                auto rotatingSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(logFilePath.string(), LOG_FILE_MAX_SIZE, 10);
+                sinks.push_back(rotatingSink);
             }
 
             if (mode & ASYNC)
             {
-                spdlog::set_default_logger(std::make_shared<spdlog::async_logger>(loggerName,sinks.begin(),sinks.end(),spdlog::thread_pool(),spdlog::async_overflow_policy::block));
+                spdlog::set_default_logger(std::make_shared<spdlog::async_logger>(basename,sinks.begin(),sinks.end(),spdlog::thread_pool(),spdlog::async_overflow_policy::block));
             }
             else
             {
-                spdlog::set_default_logger(std::make_shared<spdlog::logger>(loggerName, sinks.begin(), sinks.end()));
+                spdlog::set_default_logger(std::make_shared<spdlog::logger>(basename, sinks.begin(), sinks.end()));
             }
 
             auto formatter = std::make_unique<spdlog::pattern_formatter>();
+            formatter->add_flag<LogLevelFormatterFlag>('*');
+            formatter->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %^[%*]%$ |%t| [<%!> %s:%#]: %v");
 
-            formatter->add_flag<LogFormatterFlag>('*').set_pattern("[%Y-%m-%d %H:%M:%S.%e] %^[%*]%$ |%t| [<%!> %s:%#]: %v");
-
+            //formatter->set_pattern("\e[90m[%H:%M:%S.%e] [\e[0m%^%l%$\e[90m] [%*] [%s:%#]\e[0m %v");
             spdlog::set_formatter(std::move(formatter));
-            spdlog::flush_every(std::chrono::seconds(5)); 
-            spdlog::flush_on(spdlog::level::warn);
-            spdlog::set_level(_log_level);
-
+            
+         
+            //spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] %^[%*]%$ |%t| [<%!> %s:%#]: %v");
+            spdlog::flush_every(std::chrono::seconds(5));
+            spdlog::flush_on(spdlog::level::info);
+            spdlog::set_level(_logLevel);
         }
-        catch (const std::exception_ptr& ex)
+        catch (const std::exception_ptr ex)
         {
+            assert(false);
             return false;
         }
-        isInited_ = true;
-		return true;
-	}
-
-    void shutdown() {
-        spdlog::shutdown();
+        _isInited = true;
+        return true;
     }
-
-
-
 }
 
 

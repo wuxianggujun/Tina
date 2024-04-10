@@ -2,6 +2,9 @@
 #define TINA_LOGGER_HPP
 
 #include <iostream>
+#include <string>
+#include <string_view>
+
 #include <sstream>
 #include <filesystem>
 #include <boost/utility.hpp>
@@ -11,6 +14,8 @@
 #include <spdlog/async.h>
 #include <spdlog/logger.h>
 #include <spdlog/fmt/fmt.h>
+#include <spdlog/details/fmt_helper.h>
+#include <spdlog/pattern_formatter.h>
 #include <spdlog/fmt/bundled/printf.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/daily_file_sink.h>
@@ -18,30 +23,40 @@
 #include <spdlog/sinks/stdout_sinks.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/rotating_file_sink.h>
-#include <spdlog/pattern_formatter.h>
 
 #include "core/PlatformDetection.hpp"
 
 namespace Tina {
+    constexpr const char* LOG_PATH = "logs/default.log";
+    constexpr size_t LOG_FILE_MAX_SIZE = 10 * 1024 * 1024;
+    constexpr size_t LOG_MAX_STORAGE_DAYS = 5;
+    constexpr size_t LOG_BUFFER_SIZE = 32 * 1024;
 
     enum LogMode
     {
-        STDOUT = 1 << 0, //主日志控制台输出
-        FILEOUT = 1<<1,  //主日志文件输出
-        ASYNC = 1<<2     //异步日志模式
+        STDOUT = 1 << 0,
+        FILEOUT = 1 << 1,
+        ASYNC  = 1 << 2
     };
 
-    class LogFormatterFlag;
+    enum LogLevel : size_t
+    {
+        Trace = 0,
+        Debug = 1,
+        Info = 2,
+        Warn = 3,
+        Error = 4,
+        Fatal = 5,
+        Off = 6,
+        N_Levels
+    };
 
-
-
-	class Logger final : boost::noncopyable{
-
+    class Logger final : public boost::noncopyable {
     public:
         struct LogStream : public std::ostringstream
         {
         public:
-            LogStream(const spdlog::source_loc&loc,spdlog::level::level_enum level,std::string_view prefix):_loc(loc),_level(level),_prefix(prefix) {
+            LogStream(const std::string logger, const spdlog::source_loc& loc, LogLevel level):_logger(logger),_loc(loc),_level(level) {
 
             }
 
@@ -50,95 +65,83 @@ namespace Tina {
             }
 
             void flush() {
-                Logger::getInstance().log(_loc,_level,(_prefix + str()).c_str());
+                Logger::getInstance().log(_loc, _level, (_logger + str()).c_str());
             }
+
 
         private:
+            std::string _logger;
             spdlog::source_loc _loc;
-            spdlog::level::level_enum _level = spdlog::level::info;
-            std::string _prefix;
+            LogLevel _level;
         };
 
+    public:
+        class LogLevelFormatterFlag : public spdlog::custom_flag_formatter {
+        public:
 
-
-	public:
-		static Logger& getInstance();
-
-		bool init(const std::string_view& logFilePath = "logs/log.txt",const std::string& loggerName="TinaLogger",const size_t mode = STDOUT);
-
-        void shutdown();
-
-        template<class... Args>
-        void log(const spdlog::source_loc& loc, spdlog::level::level_enum lev, const char* fmt, const Args&... args);
-
-
-        template<class... Args>
-        void printf(const spdlog::source_loc& loc, spdlog::level::level_enum lev, const char* fmt, const Args&... args) {
-            spdlog::log(loc, lev, fmt::sprintf(fmt, args...).c_str());
-        }
-
-        spdlog::level::level_enum level() const {
-            return _log_level;
-        }
-
-        void setLevel(spdlog::level::level_enum lev) {
-            _log_level = lev;
-            spdlog::set_level(lev);
-        }
-
-        void setFlushOn(spdlog::level::level_enum lev) {
-            spdlog::flush_on(lev);
-        }
-
-        static const char* getShortName(std::string_view path) {
-            if (path.empty())
+            std::unique_ptr<custom_flag_formatter> clone() const override
             {
-                return path.data();
+                return spdlog::details::make_unique<LogLevelFormatterFlag>();
             }
-            size_t pos = path.find_last_of("/\\");
-            return path.data() + ((pos == path.npos) ? 0 : pos + 1);
+
+            void format(const spdlog::details::log_msg& logMsg, const std::tm& tm_time, spdlog::memory_buf_t& dest) override
+            {
+                static spdlog::string_view_t levels[] = { "TRACE","DEBUG","INFO","WARN","ERROR","FATAL","OFF","N_LEVELS" };
+                spdlog::details::fmt_helper::append_string_view(levels[logMsg.level], dest);
+            }
+
+        };
+
+    public:
+        static Logger& getInstance() {
+            static Logger logger;
+            return logger;
         }
 
+        void shutdown() {
+            spdlog::shutdown();
+        }
+
+        template<typename... Args>
+        void log(const spdlog::source_loc& loc, LogLevel level, const char* fmt, const Args&... args);
+
+        template<typename... Args>
+        void printf(const spdlog::source_loc& loc, LogLevel level, const char* fmt, const Args&... args);
+
+        void setLevel(LogLevel logLevel);
+
+        void setFlushOn(LogLevel logLevel) {
+            spdlog::flush_on(static_cast<spdlog::level::level_enum>(logLevel));
+        }
+
+        bool init(const std::string& logPath = LOG_PATH, const size_t mode = STDOUT);
     private:
         Logger() = default;
         ~Logger() = default;
-
         Logger(const Logger&) = delete;
-        Logger& operator=(const Logger&) = delete;
+        void operator=(const Logger&) = delete;
+
+        void setColor();
 
     private:
-        std::atomic_bool isInited_{ false };
-        const size_t FILE_SIZE = 1024 * 1024 * 5;
-        spdlog::level::level_enum _log_level = spdlog::level::trace;
-
-	};
-
-    class LogFormatterFlag : public spdlog::custom_flag_formatter
-    {
-    public:
-        void format(const spdlog::details::log_msg& _log_msg, const std::tm&,
-            spdlog::memory_buf_t& dest) override {
-        }
-
-        std::unique_ptr<custom_flag_formatter> clone() const override
-        {
-            return spdlog::details::make_unique<LogFormatterFlag>();
-        }
+        std::atomic_bool _isInited = { false };
+        spdlog::level::level_enum _logLevel = spdlog::level::trace;
     };
 
-    template<class ...Args>
-    inline void Logger::log(const spdlog::source_loc& loc, spdlog::level::level_enum lev, const char* fmt, const Args & ...args)
+    template<typename...Args>
+    inline void Logger::log(const spdlog::source_loc& loc, LogLevel level, const char* fmt, const Args&... args)
     {
-       spdlog::log(loc, lev, fmt, args...);
+        spdlog::log(loc, static_cast<spdlog::level::level_enum>(level), fmt, args...);
     }
 
+
+    template<typename...Args>
+    void Logger::printf(const spdlog::source_loc& loc, LogLevel level, const char* fmt, const Args&... args)
+    {
+        spdlog::log(loc,static_cast<spdlog::level::level_enum>(level),fmt::sprintf(fmt,args...).c_str());
+    }
+#define LOG_TRACE(fmt,...) Tina::Logger::getInstance().printf({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Trace,fmt,##__VA_ARGS__);
 }
-
-#define __FILENAME__ (Tina::Logger::getShortName(__FILE__))
-
-#define LOG_LOGGER(...) Tina::Logger::getInstance();
-#define LOG_TRACE(fmt,...) Tina::Logger::getInstance().log({__FILE__, __LINE__, __FUNCTION__}, spdlog::level::trace, fmt, ##__VA_ARGS__);
-
 
 
 
