@@ -28,6 +28,7 @@
 
 namespace Tina {
     constexpr const char* LOG_PATH = "logs/default.log";
+    constexpr const std::string_view TINA_LOGGER = "TINALOGGER";
     constexpr size_t LOG_FILE_MAX_SIZE = 10 * 1024 * 1024;
     constexpr size_t LOG_MAX_STORAGE_DAYS = 5;
     constexpr size_t LOG_BUFFER_SIZE = 32 * 1024;
@@ -64,11 +65,10 @@ namespace Tina {
                 flush();
             }
 
-            void flush() {
-                Logger::getInstance().log(_loc, _level, (_logger + str()).c_str());
+            void flush() const{
+                //Logger::getInstance().log(_loc, _level, (_logger + str()).c_str());
+                //Logger::getInstance().log(_loc, _level, std::string(_logger + str()));
             }
-
-
         private:
             std::string _logger;
             spdlog::source_loc _loc;
@@ -103,7 +103,7 @@ namespace Tina {
         }
 
         template<typename... Args>
-        void log(const spdlog::source_loc& loc, LogLevel level, const char* fmt, const Args&... args);
+        void log(const spdlog::source_loc& loc, LogLevel level, fmt::format_string<Args...> fmt, Args &&...args);
 
         template<typename... Args>
         void printf(const spdlog::source_loc& loc, LogLevel level, const char* fmt, const Args&... args);
@@ -126,21 +126,46 @@ namespace Tina {
     private:
         std::atomic_bool _isInited = { false };
         spdlog::level::level_enum _logLevel = spdlog::level::trace;
+        static std::shared_ptr<spdlog::logger> logger;
     };
 
     template<typename...Args>
-    inline void Logger::log(const spdlog::source_loc& loc, LogLevel level, const char* fmt, const Args&... args)
+    inline void Logger::log(const spdlog::source_loc& loc, LogLevel level, fmt::format_string<Args...> fmt, Args &&...args)
     {
-        spdlog::log(loc, static_cast<spdlog::level::level_enum>(level), fmt, args...);
+        spdlog::log(loc, static_cast<spdlog::level::level_enum>(level), fmt, std::forward<Args>(args)...);
     }
 
 
     template<typename...Args>
     void Logger::printf(const spdlog::source_loc& loc, LogLevel level, const char* fmt, const Args&... args)
     {
-        spdlog::log(loc,static_cast<spdlog::level::level_enum>(level),fmt::sprintf(fmt,args...).c_str());
+       log(loc,level,fmt::sprintf(fmt,args...).c_str());
     }
-#define LOG_TRACE(fmt,...) Tina::Logger::getInstance().printf({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Trace,fmt,##__VA_ARGS__);
+
+    /*
+#define LOG_TRACE(fmt,...) spdlog::log({__FILE__, __LINE__, __FUNCTION__}, spdlog::level::trace, fmt, ##__VA_ARGS__);
+#define LOG_DEBUG(fmt,...) spdlog::log({__FILE__, __LINE__, __FUNCTION__}, spdlog::level::debug, fmt, ##__VA_ARGS__);
+#define LOG_INFO(fmt,...) spdlog::log({__FILE__, __LINE__, __FUNCTION__}, spdlog::level::info, fmt, ##__VA_ARGS__);
+#define LOG_WARN(fmt,...) spdlog::log({__FILE__, __LINE__, __FUNCTION__}, spdlog::level::warn, fmt, ##__VA_ARGS__);
+#define LOG_ERROR(fmt,...) spdlog::log({__FILE__, __LINE__, __FUNCTION__}, spdlog::level::err, fmt, ##__VA_ARGS__);
+#define LOG_FATAL(fmt,...) spdlog::log({__FILE__, __LINE__, __FUNCTION__}, spdlog::level::critical, fmt, ##__VA_ARGS__);
+   */
+
+#define LOG_TRACE(fmt,...) Tina::Logger::getInstance().log({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Trace,fmt,##__VA_ARGS__);
+#define LOG_DEBUG(fmt,...) Tina::Logger::getInstance().log({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Debug,fmt,##__VA_ARGS__);
+#define LOG_INFO(fmt,...)  Tina::Logger::getInstance().log({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Info,fmt,##__VA_ARGS__);
+#define LOG_WARN(fmt,...)  Tina::Logger::getInstance().log({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Warn,fmt,##__VA_ARGS__);
+#define LOG_ERROR(fmt,...) Tina::Logger::getInstance().log({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Error,fmt,##__VA_ARGS__);
+#define LOG_FATAL(fmt,...) Tina::Logger::getInstance().log({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Fatal,fmt,##__VA_ARGS__);
+
+// Format
+#define LOG_FORMAT_TRACE(fmt,...) Tina::Logger::getInstance().printf({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Trace,fmt,##__VA_ARGS__);
+#define LOG_FORMAT_DEBUG(fmt,...) Tina::Logger::getInstance().printf({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Debug,fmt,##__VA_ARGS__);
+#define LOG_FORMAT_INFO(fmt,...) Tina::Logger::getInstance().printf({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Info,fmt,##__VA_ARGS__);
+#define LOG_FORMAT_WARN(fmt,...) Tina::Logger::getInstance().printf({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Warn,fmt,##__VA_ARGS__);
+#define LOG_FORMAT_ERROR(fmt,...) Tina::Logger::getInstance().printf({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Error,fmt,##__VA_ARGS__);
+#define LOG_FORMAT_FATAL(fmt,...) Tina::Logger::getInstance().printf({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Fatal,fmt,##__VA_ARGS__);
+
 }
 
 

@@ -54,6 +54,8 @@ namespace Tina {
             spdlog::flush_every(std::chrono::seconds(5));
             spdlog::flush_on(spdlog::level::info);
             spdlog::set_level(_logLevel);
+
+
         }
         catch (const std::exception_ptr ex)
         {
