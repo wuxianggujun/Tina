@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.26)
 project(Tina)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 
 option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
@@ -16,6 +16,9 @@ if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "DEBUG")
 endif ()
 
+if(MSVC)
+    string(APPEND CMAKE_CXX_FLAGS " /Zc:__cplusplus /MP")
+endif()
 
 find_package(Git)
 if (NOT GIT_FOUND)
@@ -80,7 +83,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC stb::image)
 target_link_libraries(${PROJECT_NAME} PUBLIC "${SHADERS_TARGET_NAME}")
 
 target_compile_definitions(${PROJECT_NAME} PUBLIC GLFW_INCLUDE_NONE)
-target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
+#target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
 
 
 if (${TINA_BUILD_DOCS})
