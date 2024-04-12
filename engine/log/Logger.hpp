@@ -20,6 +20,7 @@ namespace std {
 #include <memory>
 #include <regex>
 #include <iostream>
+#include <string_view>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/async.h>
@@ -112,9 +113,11 @@ namespace Tina
         ///停止所有日志记录操作并清理内部资源
         void shutdown() { spdlog::shutdown(); }
 
+       
         ///spdlog输出
         template <typename... Args>
         void log(const spdlog::source_loc& loc, LogLevel lvl, const char* fmt, const Args&... args);
+
 
         ///传统printf输出
         void printf(const spdlog::source_loc& loc, LogLevel lvl, const char* fmt, ...);
@@ -259,7 +262,6 @@ namespace Tina
     };
 
 
-    ///////////////////////////////////////////
     template <typename... Args>
     inline void Logger::log(const spdlog::source_loc& loc, LogLevel lvl, const char* fmt,
         const Args&... args)
@@ -300,73 +302,70 @@ namespace Tina
             log(loc, lvl, fmt::sprintf(fmt, args...).c_str());
         }
     }
-}// namespace kkem
+}
 
 
-#	define 	 log_trace(fmt,...) 		Tina::Logger::Get().fmt_printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace, fmt, ##__VA_ARGS__)
+#	define 	 LOG_FORMAT_TRACE(fmt,...) 		Tina::Logger::Get().fmt_printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace, fmt, ##__VA_ARGS__)
 #	define	 LOG_TRACE(fmt, ...) 		Tina::Logger::Get().log({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace, fmt, ##__VA_ARGS__)
-#	define 	 logtrace(fmt,...) 		Tina::Logger::Get().printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace, fmt, ##__VA_ARGS__)
-#	define	 LOGTRACE() 			Tina::Logger::LogStream({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace)
+#	define 	 LOG_PRINTF_TRACE(fmt,...) 		Tina::Logger::Get().printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace, fmt, ##__VA_ARGS__)
+#	define	 LOG_STREAM_TRACE() 			Tina::Logger::LogStream({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace)
 
-#	define 	 log_trace_(logger,fmt,...) 		Tina::Logger::Get().fmt_printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace, fmt, ##__VA_ARGS__)
-#	define	 LOG_TRACE_(logger,fmt, ...) 		Tina::Logger::Get().log_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace, fmt, ##__VA_ARGS__)
-#	define 	 logtrace_(logger,fmt,...) 		Tina::Logger::Get().printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace, fmt, ##__VA_ARGS__)
-#	define	 LOGTRACE_(logger) 			Tina::Logger::LogStream_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace)
+#	define 	 LOG_LOGGER_FORMAT_TRACE(logger,fmt,...) 		Tina::Logger::Get().fmt_printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace, fmt, ##__VA_ARGS__)
+#	define	 LOG_LOGGER_TRACE(logger,fmt, ...) 		Tina::Logger::Get().log_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace, fmt, ##__VA_ARGS__)
+#	define 	 LOG_LOGGER_PRINTF_TRACE(logger,fmt,...) 		Tina::Logger::Get().printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace, fmt, ##__VA_ARGS__)
+#	define	 LOG_LOGGER_STREAM_TRACE(logger) 			Tina::Logger::LogStream_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace)
 
 
-#	define 	 log_debug(fmt,...) 		Tina::Logger::Get().fmt_printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug, fmt, ##__VA_ARGS__)
+#	define 	 LOG_FORMAT_DEBUG(fmt,...) 		Tina::Logger::Get().fmt_printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug, fmt, ##__VA_ARGS__)
 #	define	 LOG_DEBUG(fmt, ...) 		Tina::Logger::Get().log({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug, fmt, ##__VA_ARGS__)
-#	define 	 logdebug(fmt,...) 		Tina::Logger::Get().printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug, fmt, ##__VA_ARGS__)
-#	define	 LOGDEBUG() 			Tina::Logger::LogStream({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug)
+#	define 	 LOG_PRINTF_DEBUG(fmt,...) 		Tina::Logger::Get().printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug, fmt, ##__VA_ARGS__)
+#	define	 LOG_STREAM_DEBUG() 			Tina::Logger::LogStream({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug)
 
-#	define 	 log_debug_(logger,fmt,...) 		Tina::Logger::Get().fmt_printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug, fmt, ##__VA_ARGS__)
-#	define	 LOG_DEBUG_(logger,fmt, ...) 		Tina::Logger::Get().log_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug, fmt, ##__VA_ARGS__)
-#	define 	 logdebug_(logger,fmt,...) 		Tina::Logger::Get().printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug, fmt, ##__VA_ARGS__)
-#	define	 LOGDEBUG_(logger) 			Tina::Logger::LogStream_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug)
+#	define 	 LOG_LOGGER_FORMAT_DEBUG(logger,fmt,...) 		Tina::Logger::Get().fmt_printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug, fmt, ##__VA_ARGS__)
+#	define	 LOG_LOGGER_DEBUG(logger,fmt, ...) 		Tina::Logger::Get().log_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug, fmt, ##__VA_ARGS__)
+#	define 	 LOG_LOGGER_PRINTF_DEBUG(logger,fmt,...) 		Tina::Logger::Get().printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug, fmt, ##__VA_ARGS__)
+#	define	 LOG_LOGGER_STREAM_TRACE(logger) 			Tina::Logger::LogStream_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Debug)
 
 
-#	define 	 log_info(fmt,...) 		Tina::Logger::Get().fmt_printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info, fmt, ##__VA_ARGS__)
+#	define 	 LOG_FORMAT_INFO(fmt,...) 		Tina::Logger::Get().fmt_printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info, fmt, ##__VA_ARGS__)
 #	define	 LOG_INFO(fmt, ...) 		Tina::Logger::Get().log({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info, fmt, ##__VA_ARGS__)
-#	define 	 loginfo(fmt,...) 		Tina::Logger::Get().printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info, fmt, ##__VA_ARGS__)
-#	define	 LOGINFO() 			Tina::Logger::LogStream({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info)
-
-#	define 	 log_info_(logger,fmt,...) 		Tina::Logger::Get().fmt_printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info, fmt, ##__VA_ARGS__)
-#	define	 LOG_INFO_(logger,fmt, ...) 		Tina::Logger::Get().log_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info, fmt, ##__VA_ARGS__)
-#	define 	 loginfo_(logger,fmt,...) 		Tina::Logger::Get().printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info, fmt, ##__VA_ARGS__)
-#	define	 LOGINFO_(logger) 			Tina::Logger::LogStream_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info)
-
-
-#	define 	 log_warn(fmt,...) 		Tina::Logger::Get().fmt_printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn, fmt, ##__VA_ARGS__)
+#	define 	 LOG_PRINTF_INFO(fmt,...) 		Tina::Logger::Get().printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info, fmt, ##__VA_ARGS__)
+#	define	 LOG_STREAM_INFO() 			Tina::Logger::LogStream({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info)
+          
+#	define 	 LOG_LOGGER_FORMAT_INFO(logger,fmt,...) 		Tina::Logger::Get().fmt_printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info, fmt, ##__VA_ARGS__)
+#	define	 LOG_LOGGER_INFO(logger,fmt, ...) 		Tina::Logger::Get().log_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info, fmt, ##__VA_ARGS__)
+#	define 	 LOG_LOGGER_PRINTF_INFO(logger,fmt,...) 		Tina::Logger::Get().printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info, fmt, ##__VA_ARGS__)
+#	define	 LOG_LOGGER_STREAM_INFO(logger) 			Tina::Logger::LogStream_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Info)
+            
+#	define 	 LOG_FORMAT_WARN(fmt,...) 		Tina::Logger::Get().fmt_printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn, fmt, ##__VA_ARGS__)
 #	define	 LOG_WARN(fmt, ...) 		Tina::Logger::Get().log({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn, fmt, ##__VA_ARGS__)
-#	define 	 logwarn(fmt,...) 		Tina::Logger::Get().printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn, fmt, ##__VA_ARGS__)
-#	define	 LOGWARN() 			Tina::Logger::LogStream({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn)
-
-#	define 	 log_warn_(logger,fmt,...) 		Tina::Logger::Get().fmt_printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn, fmt, ##__VA_ARGS__)
-#	define	 LOG_WARN_(logger,fmt, ...) 		Tina::Logger::Get().log_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn, fmt, ##__VA_ARGS__)
-#	define 	 logwarn_(logger,fmt,...) 		Tina::Logger::Get().printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn, fmt, ##__VA_ARGS__)
-#	define	 LOGWARN_(logger) 			Tina::Logger::LogStream_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn)
-
-
-#	define 	 log_err(fmt,...) 		Tina::Logger::Get().fmt_printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error, fmt, ##__VA_ARGS__)
-#	define	 LOG_ERR(fmt, ...) 		Tina::Logger::Get().log({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error, fmt, ##__VA_ARGS__)
-#	define 	 logerr(fmt,...) 		Tina::Logger::Get().printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error, fmt, ##__VA_ARGS__)
-#	define	 LOGERR() 			Tina::Logger::LogStream({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error)
-
-#	define 	 log_err_(logger,fmt,...) 		Tina::Logger::Get().fmt_printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error, fmt, ##__VA_ARGS__)
-#	define	 LOG_ERR_(logger,fmt, ...) 		Tina::Logger::Get().log_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error, fmt, ##__VA_ARGS__)
-#	define 	 logerr_(logger,fmt,...) 		Tina::Logger::Get().printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error, fmt, ##__VA_ARGS__)
-#	define	 LOGERR_(logger) 			Tina::Logger::LogStream_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error)
-
-
-#	define 	 log_fatal(fmt,...) 		Tina::Logger::Get().fmt_printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal, fmt, ##__VA_ARGS__)
+#	define 	 LOG_PRINTF_WARN(fmt,...) 		Tina::Logger::Get().printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn, fmt, ##__VA_ARGS__)
+#	define	 LOG_STREAM_WARN() 			Tina::Logger::LogStream({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn)
+             
+#	define 	 LOG_LOGGER_FORMAT_WARN(logger,fmt,...) 		Tina::Logger::Get().fmt_printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn, fmt, ##__VA_ARGS__)
+#	define	 LOG_LOGGER_WARN(logger,fmt, ...) 		Tina::Logger::Get().log_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn, fmt, ##__VA_ARGS__)
+#	define 	 LOG_LOGGER_PRINTF_WARN(logger,fmt,...) 		Tina::Logger::Get().printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn, fmt, ##__VA_ARGS__)
+#	define	 LOG_LOGGER_STREAM_WARN(logger) 			Tina::Logger::LogStream_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Warn)
+           
+#	define 	 LOG_FORMAT_ERROR(fmt,...) 		Tina::Logger::Get().fmt_printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error, fmt, ##__VA_ARGS__)
+#	define	 LOG_ERROR(fmt, ...) 		Tina::Logger::Get().log({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error, fmt, ##__VA_ARGS__)
+#	define 	 LOG_PRINTF_ERROR(fmt,...) 		Tina::Logger::Get().printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error, fmt, ##__VA_ARGS__)
+#	define	 LOG_STREAM_ERROR() 			Tina::Logger::LogStream({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error)
+           
+#	define 	 LOG_LOGGER_FORMAT_ERROR(logger,fmt,...) 		Tina::Logger::Get().fmt_printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error, fmt, ##__VA_ARGS__)
+#	define	 LOG_LOGGER_ERROR(logger,fmt, ...) 		Tina::Logger::Get().log_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error, fmt, ##__VA_ARGS__)
+#	define 	 LOG_LOGGER_PRINTF_ERROR(logger,fmt,...) 		Tina::Logger::Get().printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error, fmt, ##__VA_ARGS__)
+#	define	 LOG_LOGGER_STREAM_ERROR(logger) 			Tina::Logger::LogStream_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Error)
+           
+#	define 	 LOG_FORMAT_FATAL(fmt,...) 		Tina::Logger::Get().fmt_printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal, fmt, ##__VA_ARGS__)
 #	define	 LOG_FATAL(fmt, ...) 		Tina::Logger::Get().log({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal, fmt, ##__VA_ARGS__)
-#	define 	 logfatal(fmt,...) 		Tina::Logger::Get().printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal, fmt, ##__VA_ARGS__)
-#	define	 LOGFATAL() 			Tina::Logger::LogStream({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal)
-
-#	define 	 log_fatal_(logger,fmt,...) 		Tina::Logger::Get().fmt_printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal, fmt, ##__VA_ARGS__)
-#	define	 LOG_FATAL_(logger,fmt, ...) 		Tina::Logger::Get().log_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal, fmt, ##__VA_ARGS__)
-#	define 	 logfatal_(logger,fmt,...) 		Tina::Logger::Get().printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal, fmt, ##__VA_ARGS__)
-#	define	 LOGFATAL_(logger) 			Tina::Logger::LogStream_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal)
+#	define 	 LOG_PRINTF_FATAL(fmt,...) 		Tina::Logger::Get().printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal, fmt, ##__VA_ARGS__)
+#	define	 LOG_STREAM_FATAL() 			Tina::Logger::LogStream({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal)
+          
+#	define 	 LOG_LOGGER_FORMAT_FATAL(logger,fmt,...) 		Tina::Logger::Get().fmt_printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal, fmt, ##__VA_ARGS__)
+#	define	 LOG_LOGGER_FATAL(logger,fmt, ...) 		Tina::Logger::Get().log_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal, fmt, ##__VA_ARGS__)
+#	define 	 LOG_LOGGER_PRINTF_FATAL(logger,fmt,...) 		Tina::Logger::Get().printf_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal, fmt, ##__VA_ARGS__)
+#	define	 LOG_LOGGER_STREAM_FATAL(logger) 			Tina::Logger::LogStream_(logger,{__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Fatal)
 
 
 #endif // !TINA_LOGGER_HPP
