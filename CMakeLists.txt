@@ -83,7 +83,6 @@ target_link_libraries(${PROJECT_NAME} PUBLIC stb::image)
 target_link_libraries(${PROJECT_NAME} PUBLIC "${SHADERS_TARGET_NAME}")
 
 target_compile_definitions(${PROJECT_NAME} PUBLIC GLFW_INCLUDE_NONE)
-#target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
 
 
 if (${TINA_BUILD_DOCS})

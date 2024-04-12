@@ -304,6 +304,7 @@ namespace Tina
     }
 }
 
+#   define   LOG_LOGGER_INIT(path,mode) Tina::Logger::Get().init(path,mode);
 
 #	define 	 LOG_FORMAT_TRACE(fmt,...) 		Tina::Logger::Get().fmt_printf({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace, fmt, ##__VA_ARGS__)
 #	define	 LOG_TRACE(fmt, ...) 		Tina::Logger::Get().log({__FILE__, __LINE__, __FUNCTION__}, Tina::LogLevel::Trace, fmt, ##__VA_ARGS__)
