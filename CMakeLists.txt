@@ -53,7 +53,7 @@ enable_testing()
 add_subdirectory(3rdparty)
 add_subdirectory(tests)
 
-add_shaders_directory(shaders SHADERS_TARGET_NAME)
+add_shaders_directory(${CMAKE_CURRENT_SOURCE_DIR}/shaders SHADERS_TARGET_NAME)
 
 if(MSVC)
     add_compile_options("/source-charset:utf-8")

@@ -2,8 +2,8 @@
 // Created by 33442 on 2024/3/16.
 //
 
-#ifndef GLFWWINDOW_HPP
-#define GLFWWINDOW_HPP
+#ifndef TINA_GLFWWINDOW_HPP
+#define TINA_GLFWWINDOW_HPP
 
 #include <cstdio>
 #include <bx/bx.h>
@@ -68,4 +68,4 @@ namespace Tina
     };
 } // Tina
 
-#endif //GLFWWINDOW_HPP
+#endif //TINA_GLFWWINDOW_HPP

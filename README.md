@@ -18,3 +18,6 @@ https://github.com/jmcnamara/libxlsxwriter.git
 log模块基于开源项目
 https://github.com/gqw/spdlog_wrapper
 https://github.com/KkemChen/klog
+
+项目借鉴
+https://github.com/Somgonk/Platformer

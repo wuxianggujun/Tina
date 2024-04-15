@@ -7,10 +7,7 @@
 
 int main(int argc, char** argv)
 {
-
-    LOG_LOGGER_INIT("logs/stream.log", Tina::STDOUT | Tina::FILEOUT | Tina::ASYNC);
-  
-
+    LOG_LOGGER_INIT("logs/TinaEngine.log", Tina::STDOUT | Tina::FILEOUT | Tina::ASYNC);
     Tina::Application<TestGlfwWindow> application;
     return application.run(argc, argv);
 }

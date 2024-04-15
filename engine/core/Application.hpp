@@ -7,6 +7,7 @@
 #include <cstdint>
 #include "BaseApplication.hpp"
 #include <boost/timer/timer.hpp>
+#include "log/Logger.hpp"
 
 namespace Tina
 {
@@ -25,7 +26,7 @@ namespace Tina
 		   boost::timer::auto_cpu_timer startTime;
            initialize(argc, argv);
            window.create(mTitle, mWidth, mHeight);
-           std::cout << "Application Initialize Time: " << startTime.format() << std::endl;
+           LOG_STREAM_INFO() << "Application Initialize Time: " << startTime.format();
            int result = window.run();
            shutdown();
            return result;

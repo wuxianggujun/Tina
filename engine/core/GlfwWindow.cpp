@@ -16,8 +16,6 @@ namespace Tina
 
 	void GlfwWindow::initialize()
     {
-		//mLogMnagaer.initialize();
-
         glfwSetErrorCallback(onErrorCallback);
 
 		if (!glfwInit())
@@ -66,13 +64,10 @@ namespace Tina
 
     int GlfwWindow::run()
     {
-		//TINA_TRACE("TinaEngine v{}.{}", 0, 1);
 		if (!glfwInitialized)
 		{
 			return EXIT_FAILURE;
 		}
-
-    	std::cout << "Hello, world!" << std::endl;
 
 		bgfx::setViewClear(clearViewId, BGFX_CLEAR_COLOR);
 		bgfx::setViewRect(clearViewId, 0, 0, bgfx::BackbufferRatio::Equal);
@@ -110,7 +105,6 @@ namespace Tina
 		bgfx::shutdown();
 		glfwDestroyWindow(m_window);
 		glfwTerminate();
-		//mLogMnagaer.shutdown();
     }
 
 
