@@ -1,5 +1,4 @@
 #include "View.hpp"
-#include "Layer.hpp"
 
 namespace Tina {
 
@@ -20,13 +19,16 @@ namespace Tina {
 
         bgfx::touch(view);
 
-        for (int i = 0;i<layers.size();i++)
-        {
-            bgfx::setState(BGFX_STATE_WRITE_R | BGFX_STATE_WRITE_G | BGFX_STATE_WRITE_B | BGFX_STATE_WRITE_A);;
+        for (int i = 0; i < layers.size(); i++) {
+            bgfx::setState(
+                BGFX_STATE_WRITE_R
+                | BGFX_STATE_WRITE_G
+                | BGFX_STATE_WRITE_B
+                | BGFX_STATE_WRITE_A
+            );
+
+            layers.at(i).draw(view);
         }
-
-        layers.at(1).draw(view);
     }
-
 
 }

@@ -4,11 +4,10 @@
 #include <iostream>
 #include <bgfx/bgfx.h>
 #include <vector>
+#include "Layer.hpp"
+
 
 namespace Tina {
-
-    class Layer;
-
     class View {
     public:
         View();

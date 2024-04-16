@@ -18,8 +18,7 @@ namespace Tina {
 
     class Layer {
     public:
-        Layer(GlfwWindow window, std::vector<ColorVertex>& vertices, std::vector<uint16_t>& indices);
-        void setScaleFactor(double xScale, double yScale);
+        Layer(std::vector<ColorVertex>& vertices, std::vector<uint16_t>& indices);
         void updateGeometry(std::vector<ColorVertex>& vertices);
         void updateGeometry(std::vector<uint16_t>& indices);
         void updateGeometry(std::vector<ColorVertex>& vertices,std::vector<uint16_t> &indices);
@@ -28,12 +27,7 @@ namespace Tina {
         std::vector<ColorVertex> vertices;
         std::vector<uint16_t> indices;
 
-        double xScale = 1;
-        double yScale = 1;
-
     private:
-
-        void scaleVertices(double xScale, double yScale);
 
         bgfx::DynamicVertexBufferHandle vertexBuffer;
         bgfx::DynamicIndexBufferHandle indexBuffer;

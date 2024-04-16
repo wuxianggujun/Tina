@@ -60,6 +60,10 @@ namespace Tina
             return height;
         }
 
+        GLFWwindow* getNativeWindow() const {
+            return m_window;
+        }
+
         protected:
         bool glfwInitialized = true;
         GLFWwindow* m_window;

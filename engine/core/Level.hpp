@@ -27,7 +27,7 @@ namespace Tina {
 
         std::string name;
         int width;
-        int hegiht;
+        int height;
 
         int attempts;
 
