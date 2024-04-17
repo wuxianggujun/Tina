@@ -1,8 +1,8 @@
-set(TINA_TESE_TARGET_NAME Tina_Tests)
 if(TINA_BUILD_TESTING)
 
+set(TINA_TESE_TARGET_NAME Tina_Tests)
 set(TEST_SRC_DIRS)
-aux_source_directory(opengl TEST_SRC_DIRS)
+#aux_source_directory(opengl TEST_SRC_DIRS)
 aux_source_directory(src TEST_SRC_DIRS)
 
 add_executable(${TINA_TESE_TARGET_NAME} ${TEST_SRC_DIRS})

@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.26)
-project(Tina)
+cmake_minimum_required(VERSION 3.18..3.28)
+project(Tina VERSION 0.0.1 DESCRIPTION "This is easy engine" LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 
