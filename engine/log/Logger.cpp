@@ -1,40 +1,31 @@
 #include "Logger.hpp"
 #include <csignal>
 #ifndef _WIN32
+#include <cstdlib>
 #include <execinfo.h>
 #include <unistd.h>
-#include <cstdlib>
+
 #endif
 thread_local std::stringstream Tina::Logger::_ss;
 static uint32_t s_backtraceDepth = 0;
 #ifdef _WIN32
-#define xxx(sink_)	sink_->set_color(\
-						static_cast<spdlog::level::level_enum>(LogLevel::Trace), 3);\
-						sink_->set_color(\
-						static_cast<spdlog::level::level_enum>(LogLevel::Debug), 1);\
-						sink_->set_color(\
-						static_cast<spdlog::level::level_enum>(LogLevel::Info), 2);\
-						sink_->set_color(\
-						static_cast<spdlog::level::level_enum>(LogLevel::Warn), 6);\
-						sink_->set_color(\
-						static_cast<spdlog::level::level_enum>(LogLevel::Error), 4);\
-						sink_->set_color(\
-						static_cast<spdlog::level::level_enum>(LogLevel::Fatal), 5);
+#define xxx(sink_)                                                                                                     \
+    sink_->set_color(static_cast<spdlog::level::level_enum>(LogLevel::Trace), 3);                                      \
+    sink_->set_color(static_cast<spdlog::level::level_enum>(LogLevel::Debug), 1);                                      \
+    sink_->set_color(static_cast<spdlog::level::level_enum>(LogLevel::Info), 2);                                       \
+    sink_->set_color(static_cast<spdlog::level::level_enum>(LogLevel::Warn), 6);                                       \
+    sink_->set_color(static_cast<spdlog::level::level_enum>(LogLevel::Error), 4);                                      \
+    sink_->set_color(static_cast<spdlog::level::level_enum>(LogLevel::Fatal), 5);
 
 
 #else
-#define xxx(sink_)	sink_->set_color(\
-					static_cast<spdlog::level::level_enum>(Trace), "\033[36m");\
-					sink_->set_color(\
-					static_cast<spdlog::level::level_enum>(Debug), "\033[1;34m");\
-					sink_->set_color(\
-					static_cast<spdlog::level::level_enum>(Info), "\033[1;32m");\
-					sink_->set_color(\
-					static_cast<spdlog::level::level_enum>(Warn), "\033[1;33m");\
-					sink_->set_color(\
-					static_cast<spdlog::level::level_enum>(Error), "\033[1;31m");\
-					sink_->set_color(\
-					static_cast<spdlog::level::level_enum>(Fatal), "\033[1;35m");
+#define xxx(sink_)                                                                                                     \
+    sink_->set_color(static_cast<spdlog::level::level_enum>(Trace), "\033[36m");                                       \
+    sink_->set_color(static_cast<spdlog::level::level_enum>(Debug), "\033[1;34m");                                     \
+    sink_->set_color(static_cast<spdlog::level::level_enum>(Info), "\033[1;32m");                                      \
+    sink_->set_color(static_cast<spdlog::level::level_enum>(Warn), "\033[1;33m");                                      \
+    sink_->set_color(static_cast<spdlog::level::level_enum>(Error), "\033[1;31m");                                     \
+    sink_->set_color(static_cast<spdlog::level::level_enum>(Fatal), "\033[1;35m");
 #endif
 
 
@@ -79,8 +70,7 @@ void Tina::Logger::printf(const spdlog::source_loc& loc, LogLevel lvl, const cha
     _ss.str("");
 }
 
-void Tina::Logger::printf_(const std::string& logger, const spdlog::source_loc& loc,
-    LogLevel lvl, const char* fmt, ...)
+void Tina::Logger::printf_(const std::string& logger, const spdlog::source_loc& loc, LogLevel lvl, const char* fmt, ...)
 {
     auto fun = [](void* self, const char* fmt, va_list al) {
         auto thiz = static_cast<Logger*>(self);
@@ -127,7 +117,8 @@ void Tina::Logger::add_on_output(const std::function<void(const std::string& msg
     }
 }
 
-void Tina::Logger::add_on_output(const std::string& logger, const std::function<void(const std::string&, const int& level)>& cb)
+void Tina::Logger::add_on_output(const std::string& logger,
+    const std::function<void(const std::string&, const int& level)>& cb)
 {
     auto it = _map_exLog.find(logger);
     if (it != _map_exLog.end()) {
@@ -142,27 +133,27 @@ void Tina::Logger::add_on_output(const std::string& logger, const std::function<
 }
 
 /***************/
-bool Tina::Logger::init(const std::string& logPath, const uint32_t mode,
-    const uint32_t threadCount, const uint32_t backtrackDepth, const uint32_t logBufferSize)
+bool Tina::Logger::init(const std::string& logPath, const uint32_t mode, const uint32_t threadCount,
+    const uint32_t backtrackDepth, const uint32_t logBufferSize)
 {
-    if (_isInited) return true;
+    if (_isInited)
+        return true;
     try {
         std::filesystem::path log_file_path(logPath);
         std::filesystem::path log_filename = log_file_path.filename();
 
         spdlog::filename_t basename, ext;
-        std::tie(basename, ext) =
-            spdlog::details::file_helper::split_by_extension(log_filename.string());
+        std::tie(basename, ext) = spdlog::details::file_helper::split_by_extension(log_filename.string());
 
-        //spdlog::init_thread_pool(log_buffer_size, std::thread::hardware_concurrency());
+        // spdlog::init_thread_pool(log_buffer_size, std::thread::hardware_concurrency());
         spdlog::init_thread_pool(logBufferSize, threadCount);
         std::vector<spdlog::sink_ptr> sinks;
 
         // constexpr std::size_t max_file_size = 50 * 1024 * 1024; // 50mb
-        //auto rotatingSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_file_path, 20 * 1024, 10);
+        // auto rotatingSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(log_file_path, 20 * 1024, 10);
 
-        //auto daily_sink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(log_path.string(), 23, 59); //日志滚动更新时间：每天23:59更新
-        //sinks.push_back(daily_sink);
+        // auto daily_sink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(log_path.string(), 23, 59);
+        // //日志滚动更新时间：每天23:59更新 sinks.push_back(daily_sink);
 
         // auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_path.string(), true);
         // sinks.push_back(file_sink);
@@ -170,33 +161,29 @@ bool Tina::Logger::init(const std::string& logPath, const uint32_t mode,
         //控制台输出
         if (mode & STDOUT) {
             auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-            xxx(console_sink)
-                sinks.push_back(console_sink);
+            xxx(console_sink) sinks.push_back(console_sink);
         }
 
         //文件输出
         if (mode & FILEOUT) {
-            auto rotatingSink = std::make_shared<
-                CustomRotatingFileSink>(logPath, SINGLE_FILE_MAX_SIZE, MAX_STORAGE_DAYS);
+            auto rotatingSink =
+                std::make_shared<CustomRotatingFileSink>(logPath, SINGLE_FILE_MAX_SIZE, MAX_STORAGE_DAYS);
             sinks.push_back(rotatingSink);
         }
 
         //异步
         if (mode & ASYNC) {
-            spdlog::set_default_logger(std::make_shared<spdlog::async_logger>(basename,
-                sinks.begin(), sinks.end(),
-                spdlog::thread_pool(),
-                spdlog::async_overflow_policy::block));
+            spdlog::set_default_logger(std::make_shared<spdlog::async_logger>(
+                basename, sinks.begin(), sinks.end(), spdlog::thread_pool(), spdlog::async_overflow_policy::block));
         }
         else {
-            spdlog::set_default_logger(std::make_shared<spdlog::logger>(basename, sinks.begin(),
-                sinks.end()));
+            spdlog::set_default_logger(std::make_shared<spdlog::logger>(basename, sinks.begin(), sinks.end()));
         }
 
         auto formatter = std::make_unique<spdlog::pattern_formatter>();
 
-        formatter->add_flag<CustomLevelFormatterFlag>('*').
-            set_pattern("[%Y-%m-%d %H:%M:%S.%e] %^[%*]%$ |%t| [<%!> %s:%#]: %v");
+        formatter->add_flag<CustomLevelFormatterFlag>('*').set_pattern(
+            "%^[%Y-%m-%d %H:%M:%S.%e] [%*] |%t| [<%!> %s:%#]: %v%$");
 
         spdlog::set_formatter(std::move(formatter));
 
@@ -222,12 +209,41 @@ bool Tina::Logger::init(const std::string& logPath, const uint32_t mode,
             }
             else {
                 spdlog::critical("Error: signal {}", signal);
-                spdlog::critical(" ****************** Backtrace Start ******************");
+                spdlog::critical("****************** Backtrace Start ******************");
                 for (size_t i = 0; i < size; ++i) {
-                    spdlog::critical("Backtrace {}: {}", i, symbols[i]);
+                    std::stringstream ss;
+                    ss << "[" << i << "]: " << symbols[i] << "\n";
+                    // 解析可执行文件路径和偏移地址
+                    char* begin_path = symbols[i];
+                    char* end_path = strchr(symbols[i], '(');
+                    char* begin_offset = strchr(symbols[i], '+');
+                    char* end_offset = strchr(symbols[i], ')');
+
+                    if (begin_path && end_path && begin_offset && end_offset && begin_offset < end_offset) {
+                        *end_path = '\0';      // 终止可执行文件路径字符串
+                        *end_offset = '\0';    // 终止偏移地址字符串
+
+                        char syscom[256];
+                        sprintf(syscom, "addr2line -e %s -f -C -i %s", begin_path, begin_offset + 1);
+                        std::array<char, 1024> buffer;
+                        std::string result;
+                        std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(syscom, "r"), pclose);
+                        if (!pipe) {
+                            spdlog::critical("Failed to run addr2line command");
+                            continue;
+                        }
+                        while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+                            result += buffer.data();
+                        }
+                        ss << result;
+                        spdlog::critical("{}", ss.str());
+                    }
+                    else {
+                        spdlog::critical("Failed to parse executable path or offset for backtrace {}", i);
+                    }
                 }
                 free(symbols);
-                spdlog::critical(" ****************** Backtrace End ********************");
+                spdlog::critical("****************** Backtrace End ********************");
             }
 #else
             spdlog::critical("Fatal error: Signal {}", signal);
@@ -254,28 +270,25 @@ bool Tina::Logger::add_ExLog(const std::string& logPath, const int mode)
         std::filesystem::path log_filename = log_file_path.filename();
 
         spdlog::filename_t basename, ext;
-        std::tie(basename, ext) =
-            spdlog::details::file_helper::split_by_extension(log_filename.string());
+        std::tie(basename, ext) = spdlog::details::file_helper::split_by_extension(log_filename.string());
 
         std::vector<spdlog::sink_ptr> sinks;
 
         //控制台输出
         if (mode & STDOUT) {
             auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-            xxx(console_sink)
-                sinks.push_back(console_sink);
+            xxx(console_sink) sinks.push_back(console_sink);
         }
         //文件输出
         if (mode & FILEOUT) {
-            auto rotatingSink = std::make_shared<
-                CustomRotatingFileSink>(logPath, SINGLE_FILE_MAX_SIZE, MAX_STORAGE_DAYS);
+            auto rotatingSink =
+                std::make_shared<CustomRotatingFileSink>(logPath, SINGLE_FILE_MAX_SIZE, MAX_STORAGE_DAYS);
             sinks.push_back(rotatingSink);
         }
 
         std::shared_ptr<spdlog::logger> exLog;
         if (mode & ASYNC) {
-            exLog = std::make_shared<spdlog::async_logger>(basename, sinks.begin(), sinks.end(),
-                spdlog::thread_pool(),
+            exLog = std::make_shared<spdlog::async_logger>(basename, sinks.begin(), sinks.end(), spdlog::thread_pool(),
                 spdlog::async_overflow_policy::block);
         }
         else {
@@ -284,8 +297,8 @@ bool Tina::Logger::add_ExLog(const std::string& logPath, const int mode)
 
         auto formatter = std::make_unique<spdlog::pattern_formatter>();
 
-        formatter->add_flag<CustomLevelFormatterFlag>('*').
-            set_pattern("[%Y-%m-%d %H:%M:%S.%e] %^[%*]%$ |%t| [<%!> %s:%#] [%n]: %v");
+        formatter->add_flag<CustomLevelFormatterFlag>('*').set_pattern(
+            "%^[%n][%Y-%m-%d %H:%M:%S.%e] [%*] |%t| [<%!> %s:%#]: %v%$");
 
         exLog->set_formatter(std::move(formatter));
         exLog->flush_on(spdlog::level::trace);
@@ -299,12 +312,10 @@ bool Tina::Logger::add_ExLog(const std::string& logPath, const int mode)
     return true;
 }
 
-Tina::CustomRotatingFileSink::CustomRotatingFileSink(spdlog::filename_t log_path,
-    std::size_t max_size,
-    std::size_t max_storage_days,
-    bool rotate_on_open,
-    const spdlog::file_event_handlers&
-    event_handlers) : _log_path(log_path),
+Tina::CustomRotatingFileSink::CustomRotatingFileSink(spdlog::filename_t log_path, std::size_t max_size,
+    std::size_t max_storage_days, bool rotate_on_open,
+    const spdlog::file_event_handlers& event_handlers) :
+    _log_path(log_path),
     _max_size(max_size), _max_storage_days(max_storage_days), _file_helper{ event_handlers }
 {
     if (max_size == 0) {
@@ -319,13 +330,12 @@ Tina::CustomRotatingFileSink::CustomRotatingFileSink(spdlog::filename_t log_path
     _log_filename = _log_path.filename();
 
     spdlog::filename_t basename, ext;
-    std::tie(basename, ext) =
-        spdlog::details::file_helper::split_by_extension(_log_filename.string());
+    std::tie(basename, ext) = spdlog::details::file_helper::split_by_extension(_log_filename.string());
 
     _log_basename = basename;
 
     _file_helper.open(calc_filename());
-    _current_size = _file_helper.size(); // expensive. called only once
+    _current_size = _file_helper.size();    // expensive. called only once
 
     auto now = std::chrono::system_clock::now();
     std::time_t time = std::chrono::system_clock::to_time_t(now);
@@ -340,7 +350,9 @@ Tina::CustomRotatingFileSink::CustomRotatingFileSink(spdlog::filename_t log_path
     }
 }
 
-void Tina::CustomRotatingFileSink::add_on_output(const std::function<void(const std::string& msg, const int& level)>& cb) {
+void Tina::CustomRotatingFileSink::add_on_output(
+    const std::function<void(const std::string& msg, const int& level)>& cb)
+{
 #ifdef LOG_ADD_OUTPUT_MUTEX
     std::lock_guard<std::recursive_mutex> lock(_on_output_mx);
 #endif
@@ -354,11 +366,9 @@ spdlog::filename_t Tina::CustomRotatingFileSink::calc_filename()
     std::tm tm = *std::localtime(&time);
 
     return _log_parent_path.empty()
-        ? spdlog::fmt_lib::format("{:%Y-%m-%d}/{}_{:%Y-%m-%d_%H-%M-%S}.log", tm,
-            _log_basename.string(), tm)
-        : spdlog::fmt_lib::format("{}/{:%Y-%m-%d}/{}_{:%Y-%m-%d_%H-%M-%S}.log",
-            _log_parent_path.string(), tm, _log_basename.string(),
-            tm);
+        ? spdlog::fmt_lib::format("{:%Y-%m-%d}/{}_{:%Y-%m-%d_%H-%M-%S}.log", tm, _log_basename.string(), tm)
+        : spdlog::fmt_lib::format("{}/{:%Y-%m-%d}/{}_{:%Y-%m-%d_%H-%M-%S}.log", _log_parent_path.string(),
+            tm, _log_basename.string(), tm);
     /// logs/yyyy-mm-dd/basename_yyyy-mm-dd_h-m-s.log
 }
 
@@ -415,7 +425,7 @@ void Tina::CustomRotatingFileSink::rotate_()
 void Tina::CustomRotatingFileSink::cleanup_file_()
 {
     const std::regex folder_regex(R"(\d{4}-\d{2}-\d{2})");
-    //const std::chrono::hours max_age();
+    // const std::chrono::hours max_age();
 
     for (auto& p : std::filesystem::directory_iterator(_log_parent_path)) {
         if (std::filesystem::is_directory(p)) {
@@ -428,11 +438,9 @@ void Tina::CustomRotatingFileSink::cleanup_file_()
                 std::tm date1_tm{ 0, 0, 0, day, mon - 1, year - 1900 };
                 const std::time_t date_tt = std::mktime(&date1_tm);
 
-                const std::chrono::system_clock::time_point time =
-                    std::chrono::system_clock::from_time_t(date_tt);
+                const std::chrono::system_clock::time_point time = std::chrono::system_clock::from_time_t(date_tt);
 
-                const std::chrono::system_clock::time_point now =
-                    std::chrono::system_clock::now();
+                const std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
 
                 const std::chrono::duration<double> duration = now - time;
 
@@ -441,8 +449,7 @@ void Tina::CustomRotatingFileSink::cleanup_file_()
 
                 if (days > _max_storage_days) {
                     std::filesystem::remove_all(p);
-                    std::cout << "Clean up log files older than" << _max_storage_days << " days"
-                        << std::endl;
+                    std::cout << "Clean up log files older than" << _max_storage_days << " days" << std::endl;
                 }
             }
         }
@@ -455,31 +462,39 @@ bool Tina::CustomRotatingFileSink::is_daily_rotate_tp_()
     std::time_t time = std::chrono::system_clock::to_time_t(now);
     std::tm tm = *std::localtime(&time);
 
-    if (tm.tm_mday != _last_rotate_day) return true;
+    if (tm.tm_mday != _last_rotate_day)
+        return true;
 
     return false;
-
 }
 
-void Tina::CustomLevelFormatterFlag::format(const spdlog::details::log_msg& _log_msg,
-    const std::tm&, spdlog::memory_buf_t& dest) {
+void Tina::CustomLevelFormatterFlag::format(const spdlog::details::log_msg& _log_msg, const std::tm&,
+    spdlog::memory_buf_t& dest)
+{
     switch (_log_msg.level) {
 #undef DEBUG
 #undef ERROR
-#define xx(level,msg) case level: {\
-				static std::string msg = #msg; \
-					dest.append(msg.data(), msg.data() + msg.size()); \
-					break; }
+#define xx(level, msg)                                                                                                 \
+    case level:                                                                                                        \
+        {                                                                                                              \
+            static std::string msg = #msg;                                                                             \
+            dest.append(msg.data(), msg.data() + msg.size());                                                          \
+            break;                                                                                                     \
+        }
 
+        // clang-format off
         xx(spdlog::level::trace, TRACE)
             xx(spdlog::level::debug, DEBUG)
             xx(spdlog::level::info, INFO)
             xx(spdlog::level::warn, WARN)
             xx(spdlog::level::err, ERROR)
             xx(spdlog::level::critical, FATAL)
+
 #undef xx
+
     default: break;
     }
+    // clang-format on
 }
 
 #undef xxx
