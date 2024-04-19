@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18..3.28)
+cmake_minimum_required(VERSION 3.20..3.28)
 project(Tina VERSION 0.0.1 DESCRIPTION "This is easy engine" LANGUAGES CXX)
 
 # Set /std:c++20 for all configurations
@@ -51,8 +51,20 @@ include(cmake/UpdateSubmodules.cmake)
 endif()
 include(cmake/utils.cmake)
 
-file(GLOB_RECURSE TINA_HEADER_FILES CONFIGURE_DEPENDS engine/*.h engine/*.hpp)
-file(GLOB_RECURSE TINA_SOURCE_FILES CONFIGURE_DEPENDS engine/*.cpp engine/*.c)
+file(GLOB_RECURSE TINA_HEADER_FILES CONFIGURE_DEPENDS
+            ${ROOT_DIR}/engine/core/*.h**
+            ${ROOT_DIR}/engine/log/*.h**
+            ${ROOT_DIR}/engine/framework/*.h**)
+
+source_group(TINA_All_FIlE FILES ${TINA_HEADER_FILES})
+
+file(GLOB_RECURSE TINA_SOURCE_FILES CONFIGURE_DEPENDS
+            ${ROOT_DIR}/engine/core/*.c**
+            ${ROOT_DIR}/engine/log/*.c**
+            ${ROOT_DIR}/engine/framework/*.c**)
+
+source_group(TINA_All_FIlE FILES ${TINA_SOURCE_FILES})
+
 set(TINA_All_FIlE ${TINA_HEADER_FILES} ${TINA_SOURCE_FILES})
 
 if(${TINA_FILE_EXCLUSION})
@@ -63,7 +75,9 @@ endif()
 set(ENGINE_SOURCES "" PARENT_SCOPE)
 
 enable_testing()
+
 add_subdirectory(3rdparty)
+#add_subdirectory(engine/framework)
 add_subdirectory(tests)
 
 add_shaders_directory(${ROOT_DIR}/shaders SHADERS_TARGET_NAME)

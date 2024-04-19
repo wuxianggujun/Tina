@@ -19,11 +19,12 @@
 
 | 序号 | 项目名称 | GitHub 链接 |
 | ---- | -------- | ---------- |
-| 1    | spdlog\_wrapper | [GitHub](https://github.com/gqw/spdlog_wrapper) |
-| 2    | klog | [GitHub](https://github.com/KkemChen/klog) |
+| 1    | spdlog_wrapper | [GitHub](https://github.com/gqw/spdlog_wrapper) |
+| 2    | klog            | [GitHub](https://github.com/KkemChen/klog) |
 
-## 项目借鉴
+## Learning Resources
 
 | 序号 | 项目名称 | GitHub 链接 |
 | ---- | -------- | ---------- |
-| 1    | Platformer | [GitHub](https://github.com/Somgonk/Platformer) |
+| 1    | Platformer           | [GitHub](https://github.com/Somgonk/Platformer) |
+| 2    | CatDogEngine         | [GitHub](https://github.com/CatDogEngine/CatDogEngine) |
