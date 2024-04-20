@@ -2,11 +2,11 @@
 #define TINA_FRAMEWORK_ENGINE_HPP
 
 #include "EngineDefines.hpp"
-#include "framework/Application.hpp"
+#include "Application.hpp"
 
 #include <vector>
 #include <memory>
-#include "boost/noncopyable.hpp"
+#include <boost/noncopyable.hpp>
 
 namespace Tina {
 
@@ -14,9 +14,12 @@ namespace Tina {
     class Renderer;
     class World;
 
-    class Engine : boost::noncopyable{
+    class Engine {
+    public:
         Engine() = delete;
-        explicit Engine(std::unique_ptr<Application> application);
+        explicit Engine(std::unique_ptr<Application> pApplication);
+        Engine(const Engine&) = delete;
+        Engine& operator=(const Engine&) = delete;
         Engine(Engine&&) = delete;
         Engine& operator=(Engine&&) = delete;
         virtual ~Engine();

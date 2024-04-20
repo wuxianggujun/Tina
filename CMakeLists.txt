@@ -93,7 +93,7 @@ target_sources(${PROJECT_NAME} PRIVATE
 target_include_directories(${PROJECT_NAME} PUBLIC "${ROOT_DIR}/engine")
 target_include_directories(${PROJECT_NAME} PRIVATE "${ROOT_DIR}/src")
 target_link_libraries(${PROJECT_NAME} PUBLIC glfw glm bx bimg bgfx)
-target_link_libraries(${PROJECT_NAME} PUBLIC Boost::predef Boost::utility Boost::core Boost::detail Boost::lexical_cast Boost::exception Boost::timer)
+target_link_libraries(${PROJECT_NAME} PUBLIC Boost::predef Boost::utility Boost::core Boost::detail Boost::lexical_cast Boost::exception Boost::timer Boost::chrono)
 target_link_libraries(${PROJECT_NAME} PUBLIC spdlog stb::image Microsoft.GSL::GSL EnTT::EnTT)
 
 target_link_libraries(${PROJECT_NAME} PUBLIC "${SHADERS_TARGET_NAME}")
