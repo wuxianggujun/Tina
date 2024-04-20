@@ -24,9 +24,4 @@ namespace Tina {
    void GameApplication::shutdown() {
 
     }
-
-   Application::Excution GameApplication::run() {
-
-       return Excution::Continue;
-    }
 }

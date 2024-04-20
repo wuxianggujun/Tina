@@ -2,13 +2,11 @@
 
 int main(int argc, char** argv)
 {
-    using namespace Tina;
-
-    Engine* engine = Engine::create(std::make_unique<Tina::GameApplication>());
+    Tina::Engine* engine = Tina::Engine::create(std::make_unique<Tina::GameApplication>());
 
     engine->init({"Tina",nullptr,1280,720,false});
     engine->run();
 
-    Engine::destroy(engine);
+    Tina::Engine::destroy(engine);
     return 0;
 }

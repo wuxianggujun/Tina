@@ -76,12 +76,9 @@ list(FILTER TINA_All_FIlE EXCLUDE REGEX "^${ROOT_DIR}/engine/log/")
 message(STATUS "TINA_All_FIlE: ${TINA_All_FIlE}")
 endif()
 
-set(ENGINE_SOURCES "" PARENT_SCOPE)
-
 enable_testing()
 
 add_subdirectory(3rdparty)
-#add_subdirectory(engine/framework)
 add_subdirectory(tests)
 
 add_shaders_directory(${ROOT_DIR}/shaders SHADERS_TARGET_NAME)

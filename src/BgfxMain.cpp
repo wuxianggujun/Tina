@@ -72,7 +72,4 @@ int test()
     glfwTerminate();
 
     return 0;
-   /* LOG_LOGGER_INIT("logs/TinaEngine.log", Tina::STDOUT | Tina::FILEOUT | Tina::ASYNC);
-    Tina::Application<TestGlfwWindow> application;
-    return application.run(argc, argv);*/
 }

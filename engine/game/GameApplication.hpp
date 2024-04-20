@@ -7,6 +7,12 @@
 
 namespace Tina {
 
+    class GlfwWindow;
+    class Renderer;
+    class RenderTarget;
+    class Screen;
+
+
     class GameApplication : public Application{
 
     public:
