@@ -22,12 +22,6 @@ namespace Tina{
 
     public:
 
-        enum class Excution
-        {
-            Continue,
-            Quit
-        };
-
         Application() = default;
         Application(Application&&) = default;
         Application& operator=(Application&&) = default;
@@ -37,7 +31,6 @@ namespace Tina{
         virtual bool update(float deltaTime) = 0;
         virtual void shutdown() = 0;
 
-        virtual Excution run() = 0;
 
         void setEngine(Engine* engine) {
             this->engine = engine;
