@@ -24,7 +24,6 @@ namespace Tina {
     }
 
     void Engine::init(InitArgs args) {
-        LOG_LOGGER_INIT("logs/Engine.log",Tina::STDOUT |Tina::FILEOUT|Tina::ASYNC);
         LOG_INFO("Init engine");
         GlfwWindow::init();
 
@@ -56,6 +55,7 @@ namespace Tina {
 
 
     Engine* Engine::create(std::unique_ptr<Application> application) {
+        LOG_LOGGER_INIT("logs/Engine.log", Tina::STDOUT | Tina::FILEOUT | Tina::ASYNC);
         LOG_INFO("Init log");
 
         Application* app = application.get();
