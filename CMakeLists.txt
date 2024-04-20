@@ -87,8 +87,8 @@ message(STATUS "TINA_All_FIlE: ${TINA_All_FIlE}")
 add_executable(${PROJECT_NAME})
 target_sources(${PROJECT_NAME} PRIVATE 
         ${TINA_All_FIlE}
-        src/main.cpp
-        src/TestGlfwWindow.hpp)
+        "src/main.cpp"
+        "src/TestGlfwWindow.hpp")
 
 target_include_directories(${PROJECT_NAME} PUBLIC "${ROOT_DIR}/engine")
 target_include_directories(${PROJECT_NAME} PRIVATE "${ROOT_DIR}/src")
