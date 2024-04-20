@@ -1,4 +1,3 @@
-#include "framework/Engine.hpp"
 #include "game/GameApplication.hpp"
 
 int main(int argc, char** argv)
@@ -7,6 +6,9 @@ int main(int argc, char** argv)
 
     Engine* engine = Engine::create(std::make_unique<Tina::GameApplication>());
 
+    engine->init({"Tina",nullptr,1280,720,false});
+    engine->run();
 
+    Engine::destroy(engine);
     return 0;
 }

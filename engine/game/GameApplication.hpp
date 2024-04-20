@@ -2,6 +2,7 @@
 #define TINA_GAME_APPLICATION_HPP
 
 #include <memory>
+#include "framework/Engine.hpp"
 #include "framework/Application.hpp"
 
 namespace Tina {
