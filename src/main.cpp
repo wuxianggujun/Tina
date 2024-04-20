@@ -2,7 +2,7 @@
 #include "core/Application.hpp"
 #include "core/GlfwWindow.hpp"
 #include "TestGlfwWindow.hpp"
-#include "log/Logger.hpp"
+#include "log/Log.hpp"
 #include <format>
 #include "core/View.hpp"
 #include "core/Layer.hpp"

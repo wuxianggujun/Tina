@@ -7,7 +7,7 @@
 #include <cstdint>
 #include "BaseApplication.hpp"
 #include <boost/timer/timer.hpp>
-#include "log/Logger.hpp"
+#include "log/Log.hpp"
 
 namespace Tina
 {

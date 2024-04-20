@@ -1,5 +1,5 @@
-#ifndef TINA_LOGGER_HPP
-#define TINA_LOGGER_HPP
+#ifndef TINA_LOG_HPP
+#define TINA_LOG_HPP
 
 #if defined(_WIN32) && _MSC_VER >= 1910 && __cplusplus < 201703L
 #define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING

@@ -1,4 +1,4 @@
-#include "Logger.hpp"
+#include "Log.hpp"
 #include <csignal>
 #ifndef _WIN32
 #include <cstdlib>

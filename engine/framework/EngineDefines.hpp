@@ -1,0 +1,10 @@
+#ifndef TINA_FRAMEWORK_ENGINEDEFINES_HPP
+#define TINA_FRAMEWORK_ENGINEDEFINES_HPP
+
+#ifdef ENGINE_BUILD_SHARED
+#define ENGINE_API __declspec(dllexport)
+#else
+#define ENGINE_API
+#endif // TINA_ENGINE_BUILD_SHARED
+
+#endif
