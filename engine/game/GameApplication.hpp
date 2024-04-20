@@ -18,8 +18,6 @@ namespace Tina {
         virtual void init(InitArgs initArgs) override;
         virtual bool update(float deltaTime) override;
         virtual void shutdown() override;
-
-        virtual Excution run() override;
     };
 
 
