@@ -10,14 +10,10 @@
 
 namespace Tina {
 
-    class RenderContext;
-    class Renderer;
-    class World;
-
     class Engine : boost::noncopyable{
     public:
         Engine() = delete;
-        explicit Engine(std::unique_ptr<Application> pApplication);
+        explicit Engine(std::unique_ptr<Application> application);
         Engine(Engine&&) = delete;
         Engine& operator=(Engine&&) = delete;
         virtual ~Engine();

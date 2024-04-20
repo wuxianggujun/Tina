@@ -2,12 +2,11 @@
 #define TINA_GAME_APPLICATION_HPP
 
 #include <memory>
-#include <boost/noncopyable.hpp>
 #include "framework/Application.hpp"
 
 namespace Tina {
 
-    class GameApplication : public Application, boost::noncopyable{
+    class GameApplication : public Application{
 
     public:
         GameApplication();

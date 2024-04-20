@@ -14,7 +14,6 @@
 namespace Tina {
 
 
-
     Engine::Engine(std::unique_ptr<Application> application):engineApplication(std::move(application)){
 
     }

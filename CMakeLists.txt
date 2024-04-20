@@ -54,6 +54,8 @@ include(cmake/utils.cmake)
 file(GLOB_RECURSE TINA_HEADER_FILES CONFIGURE_DEPENDS
             ${ROOT_DIR}/engine/core/*.h**
             ${ROOT_DIR}/engine/log/*.h**
+            ${ROOT_DIR}/engine/game/*.h**
+            ${ROOT_DIR}/engine/timer/*.h**
             ${ROOT_DIR}/engine/framework/*.h**)
 
 source_group(TINA_All_FIlE FILES ${TINA_HEADER_FILES})
@@ -61,6 +63,8 @@ source_group(TINA_All_FIlE FILES ${TINA_HEADER_FILES})
 file(GLOB_RECURSE TINA_SOURCE_FILES CONFIGURE_DEPENDS
             ${ROOT_DIR}/engine/core/*.c**
             ${ROOT_DIR}/engine/log/*.c**
+            ${ROOT_DIR}/engine/game/*.c**
+            ${ROOT_DIR}/engine/timer/*.c**
             ${ROOT_DIR}/engine/framework/*.c**)
 
 source_group(TINA_All_FIlE FILES ${TINA_SOURCE_FILES})

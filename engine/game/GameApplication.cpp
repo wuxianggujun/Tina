@@ -11,20 +11,22 @@ namespace Tina {
     }
 
 
-    GameApplication::init(InitArgs initArgs) {
+   void GameApplication::init(InitArgs initArgs) {
 
     }
 
-    GameApplication::update(float deltaTime) {
+    bool GameApplication::update(float deltaTime) {
 
+        return true;
     }
 
 
-    GameApplication::shutdown() {
+   void GameApplication::shutdown() {
 
     }
 
-    GameApplication::run() {
+   Application::Excution GameApplication::run() {
 
+       return Excution::Continue;
     }
 }
