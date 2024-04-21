@@ -5,10 +5,26 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
-
 namespace Tina {
 
-    void glfwLogError(int error, const char* description) {
+    void* _windowHandle = nullptr;
+
+    GLFWwindow* _glfwMainWindow = nullptr;
+    GLFWwindow* _glfwDefaultCursor = nullptr;
+
+    bool GlfwWindow::glfwGetWindowMonitorSize(int windowX, int windowY, int* monitorWidth, int* monitorHegiht) {
+        if (monitorWidth == nullptr || monitorHegiht == nullptr)
+        {
+            LOG_ERROR("GlfwWIndow Error: monitorWidth or monitorHeight equal null");
+            exit(false);
+        }
+
+
+
+    }
+
+
+    void GlfwWindow::glfwLogError(int error, const char* description) {
         LOG_ERROR("Glfw Error: {}",description);
     }
 #if GLFW_EXPOSE_NATIVE_COCOA
