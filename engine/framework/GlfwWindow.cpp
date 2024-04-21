@@ -5,7 +5,6 @@
 #include <GLFW/glfw3native.h>
 
 
-
 namespace Tina {
 
     void GlfwWindow::init() {
