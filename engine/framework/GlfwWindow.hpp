@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+
 namespace Tina {
 
     class GlfwWindow {

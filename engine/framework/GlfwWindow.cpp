@@ -1,5 +1,11 @@
 #include "GlfwWindow.hpp"
 
+#include <bgfx/bgfx.h>
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+
+
+
 namespace Tina {
 
     void GlfwWindow::init() {

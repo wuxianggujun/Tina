@@ -32,13 +32,15 @@ namespace Tina {
     }
 
     void Engine::run() {
-        //Clock clock;
+        Clock clock;
 
         while (true)
         {
             ZoneScoped;
 
-            if (!engineApplication->update(1.0f))
+            clock.update();
+
+            if (!engineApplication->update(clock.getDeltaTime()))
             {
                 break;
             }
