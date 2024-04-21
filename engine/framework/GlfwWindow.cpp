@@ -498,7 +498,39 @@ namespace Tina {
 
 
     void GlfwWindow::init() {
-    
+
+        //设置错误回调显示报错信息
+        glfwSetErrorCallback(glfwLogError);
+
+        if (!glfwInit())
+        {
+            throw std::runtime_error("Cannot initialize GLFW.");
+        }
+
+        // 在主线程进行渲染，不另开子线程
+        bgfx::renderFrame();
+
+        bgfx::Init bgfxInit;
+        // 自动选择适合平台的默认呈现后端
+        bgfxInit.type = bgfx::RendererType::Count;
+
+        // TODO
+
+        int width, height;
+
+        glfwGetFramebufferSize(window,&width, &height);
+        bgfxInit.resolution.width = static_cast<uint32_t>(width);
+        bgfxInit.resolution.height = static_cast<uint32_t>(height);
+        bgfxInit.resolution.reset = BGFX_RESET_VSYNC;
+        bgfxInit.debug = false;
+        bgfxInit.profile = false;
+
+        if (!bgfx::init(bgfxInit))
+        {
+            LOG_ERROR("Bgfx Init error!");
+        }
+
+        glfwMakeContextCurrent(window);
     }
 
 

@@ -115,7 +115,7 @@ namespace Tina {
         void close();
 
     private:
-
+        static GLFWwindow* window;
         bool isClosed = false;
     };
 
