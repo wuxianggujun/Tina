@@ -8,6 +8,7 @@
 #include <GL/gl.h>
 #include <iostream>
 #include "Exception.hpp"
+#include "GlfwWindow.hpp"
 
 namespace Tina
 {

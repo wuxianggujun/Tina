@@ -1,3 +1,4 @@
+#include "log/Log.hpp"
 #include "GlfwWindow.hpp"
 
 #include <bgfx/bgfx.h>
@@ -6,6 +7,11 @@
 
 
 namespace Tina {
+
+    void glfwLogError(int error, const char* description) {
+        LOG_ERROR("Glfw Error: {}",description);
+    }
+
 
     void GlfwWindow::init() {
 
