@@ -11,7 +11,12 @@ namespace Tina {
     void glfwLogError(int error, const char* description) {
         LOG_ERROR("Glfw Error: {}",description);
     }
-
+#if GLFW_EXPOSE_NATIVE_COCOA
+#define  GLFW_EXPOSE_NATIVE_COCOA
+    void* glfwPlatformWindowHandle(GLFWwindow* window) {
+        return (void*)glfwGetCocoaWindow(window);
+    }
+#endif
 
     void GlfwWindow::init() {
 
