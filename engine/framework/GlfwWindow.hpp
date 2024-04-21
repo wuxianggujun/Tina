@@ -12,6 +12,7 @@
 #define GLFW_EXPOSE_NATIVE_X11
 #elif BX_PLATFORM_WINDOWS
 #define GLFW_EXPOSE_NATIVE_WIN32
+#include <windows.h>
 #elif BX_PLATFORM_OSX
 #define GLFW_EXPOSE_NATIVE_COCOA
 #endif
@@ -27,11 +28,12 @@
 #define GLFW_HAS_GAMEPAD_API            (GLFW_VERSION_COMBINED >= 3300) // 3.3+ glfwGetGamepadState() new api
 #define GLFW_HAS_GETKEYNAME             (GLFW_VERSION_COMBINED >= 3200) // 3.2+ glfwGetKeyName()
 
+class GLFWwindow;
+class GLFWmonitor;
+
 namespace Tina {
 
-    class GLFWwindow;
-    class GLFWmonitor;
-
+  
     class GlfwWindow {
 
     private:
@@ -51,8 +53,8 @@ namespace Tina {
         static void glfwSetWindowMainIcon(GLFWwindow* window);
     
         static void* glfwPlatformWindowHandle(GLFWwindow* window);
-        static bool glfwGetWindowMonitorSize(GLFWwindow* window,int* monitorWidth,int* monitorHegiht);
-        static bool glfwGetWindowMonitorSize(int windowX,int windowY,int* monitorWidth,int* monitorHegiht);
+        static bool glfwGetWindowMonitorSize(GLFWwindow* window,int* monitorWidth,int* monitorHeight);
+        static bool glfwGetWindowMonitorSize(int windowX,int windowY,int* monitorWidth,int* monitorHeight);
         static void glfwShowWaitCursor(GLFWwindow* window);
    
         static void glfwShowNormalCursor(GLFWwindow* window);

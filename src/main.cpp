@@ -1,6 +1,7 @@
 #include "game/GameApplication.hpp"
 #include <boost/timer/timer.hpp>
 #include "log/Log.hpp"
+
 int main(int argc, char** argv)
 {
     Tina::Engine* engine = Tina::Engine::create(std::make_unique<Tina::GameApplication>());
