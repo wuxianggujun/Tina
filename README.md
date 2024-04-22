@@ -1,5 +1,5 @@
 
-## 
+## Lib
 
 | 序号 | 库名称 | GitHub 链接 |
 | ---- | ------- | ---------- |
@@ -24,9 +24,8 @@
 
 ## Learning Resources
 
-- **Platformer**   : [GitHub](https://github.com/Somgonk/Platformer) |
-- **CatDogEngine** : [GitHub](https://github.com/CatDogEngine/CatDogEngine) |
-- **wallet**       : [GitHub](https://github.com/wiimag/wallet) |
-
+- **Platformer**   : [GitHub](https://github.com/Somgonk/Platformer)
+- **CatDogEngine** : [GitHub](https://github.com/CatDogEngine/CatDogEngine)
+- **wallet**       : [GitHub](https://github.com/wiimag/wallet)
 
 
