@@ -31,3 +31,6 @@
 [submodule "3rdparty/glm"]
 	path = 3rdparty/glm
 	url = https://github.com/g-truc/glm.git
+[submodule "3rdparty/tracy"]
+	path = 3rdparty/tracy
+	url = https://github.com/wolfpld/tracy.git

@@ -1,5 +1,5 @@
 
-## 依赖库
+## 
 
 | 序号 | 库名称 | GitHub 链接 |
 | ---- | ------- | ---------- |
@@ -13,8 +13,9 @@
 | 8    | entt          | [GitHub](https://github.com/skypjack/entt.git) |
 | 9    | Google Test   | [GitHub](https://github.com/google/googletest.git) |
 | 10   | libxlsxwriter | [GitHub](https://github.com/jmcnamara/libxlsxwriter.git) |
+| 11   | tracy         | [GitHub](https://github.com/wolfpld/tracy.git) |
 
-## Log 模块基于开源项目
+## Log Learning Resources
 
 | 序号 | 项目名称 | GitHub 链接 |
 | ---- | -------- | ---------- |
@@ -23,8 +24,9 @@
 
 ## Learning Resources
 
-| 序号 | 项目名称 | GitHub 链接 |
-| ---- | -------- | ---------- |
-| 1    | Platformer   | [GitHub](https://github.com/Somgonk/Platformer) |
-| 2    | CatDogEngine | [GitHub](https://github.com/CatDogEngine/CatDogEngine) |
-| 3    | wallet       | [GitHub](https://github.com/wiimag/wallet) |
+- **Platformer**   : [GitHub](https://github.com/Somgonk/Platformer) |
+- **CatDogEngine** : [GitHub](https://github.com/CatDogEngine/CatDogEngine) |
+- **wallet**       : [GitHub](https://github.com/wiimag/wallet) |
+
+
+
