@@ -12,6 +12,7 @@
 namespace Tina {
 
     class InitArgs;
+    class GlfwWindow;
 
     class Engine : boost::noncopyable{
     public:
@@ -33,7 +34,7 @@ namespace Tina {
     private:
 
         std::unique_ptr<Application> engineApplication;
-
+        std::unique_ptr<GlfwWindow> glfwWindow;
     };
 
 }

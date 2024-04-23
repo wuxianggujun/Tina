@@ -25,14 +25,15 @@ namespace Tina {
 
     void Engine::init(InitArgs args) {
         LOG_INFO("Init engine");
+        glfwWindow = std::make_unique<GlfwWindow>();
+        glfwWindow->initialize(args.title, args.width, args.height, args.iconFilePath, args.useFullScreen);
         engineApplication->init(args);
-
     }
 
     void Engine::run() {
         Clock clock;
 
-        while (true)
+        while (glfwWindow->shouldClose())
         {
             ZoneScoped;
 
@@ -42,13 +43,13 @@ namespace Tina {
             {
                 break;
             }
-
+            glfwWindow->update();
             FrameMark;
         }
     }
 
     void Engine::shutdown() {
-     
+        glfwWindow->close();
     }
 
     static std::unique_ptr<Engine> s_engine;

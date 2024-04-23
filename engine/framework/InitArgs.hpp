@@ -9,8 +9,8 @@ namespace Tina {
     {
         const char* title = "TinaApplication";
         const char* iconFilePath = nullptr;
-        uint16_t width = 800;
-        uint16_t height = 600;
+        uint32_t width = 800;
+        uint32_t height = 600;
         bool useFullScreen = false;
     };
 

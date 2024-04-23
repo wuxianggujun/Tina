@@ -376,7 +376,7 @@ namespace Tina {
 
     GLFWwindow* GlfwWindow::window = nullptr;
 
-    GlfwWindow::GlfwWindow(uint32_t width, uint32_t height, const char* title, const char* iconFilePath, bool useFullScreen)
+    bool GlfwWindow::initialize(const char* title, uint16_t width, uint16_t height, const char* iconFilePath, bool useFullScreen)
     {
         //设置错误回调显示报错信息
         glfwSetErrorCallback(glfwLogError);
@@ -390,7 +390,7 @@ namespace Tina {
         glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
 
         // Create window,make opengl context current request v-sync
-        window = glfwCreateWindow(width,height,title,nullptr,nullptr);
+        window = glfwCreateWindow(width, height, title, nullptr, nullptr);
         if (!window)
         {
             glfwTerminate();
@@ -425,8 +425,15 @@ namespace Tina {
             LOG_ERROR("Bgfx Init error!");
             throw std::runtime_error("Bgfx Init error!");
         }
-
+        return true;
     }
+
+    GlfwWindow::~GlfwWindow()
+    {
+        close();
+    }
+
+ 
 
     void GlfwWindow::setTitle(const char* title) {
         glfwSetWindowTitle(this->window, title);
@@ -454,20 +461,19 @@ namespace Tina {
 
 
     void GlfwWindow::update() {
-        while (!glfwWindowShouldClose(window))
-        {
-
             /* Swap front and back buffers */
             glfwSwapBuffers(window);
 
             /* Poll for and process events */
             glfwPollEvents();
-        }
     }
 
 
     void GlfwWindow::close() {
-        glfwDestroyWindow(window);
+        if (window)
+        {
+            glfwDestroyWindow(window);
+        }
         glfwTerminate();
     }
 

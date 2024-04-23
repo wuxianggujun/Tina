@@ -94,11 +94,11 @@ namespace Tina {
         static float glfwCurrentWindowScale();
 
     public:
-        explicit GlfwWindow(uint32_t width,uint32_t height,const char* title,const char* iconFilePath = nullptr,bool useFullScreen = false);
+        explicit GlfwWindow() = default;
 
         virtual ~GlfwWindow();
 
-        bool Initialize(const char* title, uint16_t width, uint16_t height, const char* iconFilePath = nullptr, bool useFullScreen = false);
+        bool initialize(const char* title, uint16_t width, uint16_t height, const char* iconFilePath = nullptr, bool useFullScreen = false);
 
     public:
 
@@ -111,7 +111,8 @@ namespace Tina {
 
         void update();
 
-        bool shouldClose() const{
+        bool shouldClose(){
+            isClosed = !glfwWindowShouldClose(window);
             return isClosed;
         }
 
