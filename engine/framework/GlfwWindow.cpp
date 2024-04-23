@@ -386,19 +386,19 @@ namespace Tina {
         }
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, useFullScreen ? GLFW_TRUE : GLFW_FALSE);
+        //glfwWindowHint(GLFW_RESIZABLE, useFullScreen ? GLFW_TRUE : GLFW_FALSE);
         glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
 
         // Create window,make opengl context current request v-sync
-        window = glfwCreateWindow(width, height, title, nullptr, nullptr);
-        if (!window)
+        this->window = glfwCreateWindow(width, height, title, nullptr, nullptr);
+        if (!this->window)
         {
             glfwTerminate();
             throw std::runtime_error("Can not create this window");
         }
 
-        glfwMakeContextCurrent(window);
-        glfwSetWindowUserPointer(window, this);
+        glfwMakeContextCurrent(this->window);
+        glfwSetWindowUserPointer(this->window, this);
         glfwSwapInterval(1);
 
 
@@ -406,7 +406,14 @@ namespace Tina {
         bgfx::renderFrame();
 
         bgfx::PlatformData platFormData;
+#if GLFW_EXPOSE_NATIVE_X11
+        platFormData.nwh = (void*)(uintptr_t)glfwGetX11Window(this->window);
+        platFormData.ndt = glfwGetX11Display();
+#elif GLFW_EXPOSE_NATIVE_COCOA
+        platFormData.nwh - glfwGetCocoaWindow(this->window);
+#elif GLFW_EXPOSE_NATIVE_WIN32
         platFormData.nwh = glfwGetWin32Window(window);
+#endif // GLFW_EXPOSE_NATIVE_X11
 
         bgfx::Init bgfxInit;
         bgfxInit.platformData = platFormData;
@@ -462,7 +469,7 @@ namespace Tina {
 
     void GlfwWindow::update() {
             /* Swap front and back buffers */
-            glfwSwapBuffers(window);
+ //           glfwSwapBuffers(this->window);
 
             /* Poll for and process events */
             glfwPollEvents();
@@ -470,6 +477,7 @@ namespace Tina {
 
 
     void GlfwWindow::close() {
+        bgfx::shutdown();
         if (window)
         {
             glfwDestroyWindow(window);

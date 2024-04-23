@@ -1,22 +1,13 @@
 #ifndef TINA_FRAMEWORK_GLFWWINDOW_HPP
 #define TINA_FRAMEWORK_GLFWWINDOW_HPP
 
+#include "NativeWindow.hpp"
 #include <cstdint>
-#include <bx/bx.h>
 #include <bx/spscqueue.h>
 #include <bx/thread.h>
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
 #include <GLFW/glfw3.h>
-#if BX_PLATFORM_LINUX
-#define GLFW_EXPOSE_NATIVE_X11
-#elif BX_PLATFORM_WINDOWS
-#define GLFW_EXPOSE_NATIVE_WIN32
-#include <windows.h>
-#elif BX_PLATFORM_OSX
-#define GLFW_EXPOSE_NATIVE_COCOA
-#endif
-#include <GLFW/glfw3native.h>
 
 // We gather version tests as define in order to easily see which features are version-dependent.
 #define GLFW_VERSION_COMBINED           (GLFW_VERSION_MAJOR * 1000 + GLFW_VERSION_MINOR * 100 + GLFW_VERSION_REVISION)
