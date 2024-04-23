@@ -25,7 +25,7 @@ namespace Tina {
 
     void Engine::init(InitArgs args) {
         LOG_INFO("Init engine");
-        GlfwWindow::init();
+        GlfwWindow::init(args);
 
         engineApplication->init(args);
 

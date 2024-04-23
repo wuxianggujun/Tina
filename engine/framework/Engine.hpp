@@ -3,12 +3,15 @@
 
 #include "EngineDefines.hpp"
 #include "Application.hpp"
+#include "InitArgs.hpp"
 
 #include <vector>
 #include <memory>
 #include <boost/noncopyable.hpp>
 
 namespace Tina {
+
+    class InitArgs;
 
     class Engine : boost::noncopyable{
     public:

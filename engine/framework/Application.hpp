@@ -1,22 +1,13 @@
 #ifndef TINA_FRAMEWORK_APPLICATION_HPP
 #define TINA_FRAMEWORK_APPLICATION_HPP
 
-#include <cstdint>
+#include "InitArgs.hpp"
 #include <boost/utility.hpp>
 
 namespace Tina{
 
+    class InitArgs;
     class Engine;
-
-    struct InitArgs
-    {
-        const char* title = "TinaApplication";
-        const char* iconFilePath = nullptr;
-        uint16_t width = 800;
-        uint16_t height = 600;
-        bool useFullScreen = false;
-
-    };
 
     class Application : public boost::noncopyable{
 

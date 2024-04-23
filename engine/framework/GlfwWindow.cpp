@@ -374,17 +374,17 @@ namespace Tina {
     }
 #endif
 
-    void GlfwWindow::shutdown() {
-        if (_glfwDefaultCursor)
-        {
-            glfwDestroyCursor(_glfwDefaultCursor);
-        }
+    /*   void GlfwWindow::shutdown() {
+           if (_glfwDefaultCursor)
+           {
+               glfwDestroyCursor(_glfwDefaultCursor);
+           }
 
-        glfwDestroyWindow(_glfwMainWindow);
-        glfwTerminate();
+           glfwDestroyWindow(_glfwMainWindow);
+           glfwTerminate();
 
-        _glfwMainWindow = nullptr;
-    }
+           _glfwMainWindow = nullptr;
+       }*/
 
 
 //    GLFWwindow* glfw_main_window(const char* window_title /*= nullptr*/)
@@ -495,9 +495,33 @@ namespace Tina {
 //        return glfw_get_window_scale(_glfw_main_window);
 //    }
 
+    GLFWwindow* GlfwWindow::window = nullptr;
+
+    GlfwWindow::GlfwWindow(uint16_t width, uint16_t height, const char* title, const char* iconFilePath, bool useFullScreen)
+    {
+        if (!glfwInit())
+        {
+            throw std::runtime_error("Cannot initialize GLFW.");
+        }
+
+        //设置错误回调显示报错信息
+        glfwSetErrorCallback(glfwLogError);
+
+        // Create window,make opengl context current request v-sync
+        window = glfwCreateWindow(width,height,title,nullptr,nullptr);
+        if (!window)
+        {
+            glfwTerminate();
+            throw std::runtime_error("Can not create this window");
+        }
+
+        glfwMakeContextCurrent(window);
+        glfwSetWindowUserPointer(window, this);
+        glfwSwapInterval(1);
+    }
 
 
-    void GlfwWindow::init() {
+    void GlfwWindow::init(InitArgs args) {
 
         //设置错误回调显示报错信息
         glfwSetErrorCallback(glfwLogError);
@@ -507,10 +531,24 @@ namespace Tina {
             throw std::runtime_error("Cannot initialize GLFW.");
         }
 
+        window = glfwCreateWindow(args.width,args.height,args.title,nullptr,nullptr);
+
+        if (!window)
+        {
+            glfwTerminate();
+            throw std::runtime_error("Can not create this window");
+        }
+
+        //glfwSwapInterval(1);
+
         // 在主线程进行渲染，不另开子线程
         bgfx::renderFrame();
 
+        bgfx::PlatformData platFormData;
+        platFormData.nwh = glfwGetWin32Window(window);
+
         bgfx::Init bgfxInit;
+        bgfxInit.platformData = platFormData;
         // 自动选择适合平台的默认呈现后端
         bgfxInit.type = bgfx::RendererType::Count;
 
@@ -535,6 +573,7 @@ namespace Tina {
 
 
     void GlfwWindow::shutdown() {
+        glfwTerminate();
 
     }
 
@@ -565,12 +604,16 @@ namespace Tina {
 
 
     void GlfwWindow::update() {
-
+        while (!glfwWindowShouldClose(window))
+        {
+            //glfwSwapBuffers(window);
+            glfwWaitEvents();
+        }
     }
 
 
     void GlfwWindow::close() {
-
+       
     }
 
 }
