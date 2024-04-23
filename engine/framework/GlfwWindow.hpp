@@ -1,8 +1,6 @@
 #ifndef TINA_FRAMEWORK_GLFWWINDOW_HPP
 #define TINA_FRAMEWORK_GLFWWINDOW_HPP
 
-#include "InitArgs.hpp"
-
 #include <cstdint>
 #include <bx/bx.h>
 #include <bx/spscqueue.h>
@@ -96,13 +94,11 @@ namespace Tina {
         static float glfwCurrentWindowScale();
 
     public:
-        explicit GlfwWindow(uint16_t width,uint16_t height,const char* title,const char* iconFilePath = nullptr,bool useFullScreen = false);
+        explicit GlfwWindow(uint32_t width,uint32_t height,const char* title,const char* iconFilePath = nullptr,bool useFullScreen = false);
 
         virtual ~GlfwWindow();
 
-    public:
-        static void init(InitArgs args);
-        static void shutdown();
+        bool Initialize(const char* title, uint16_t width, uint16_t height, const char* iconFilePath = nullptr, bool useFullScreen = false);
 
     public:
 

@@ -374,138 +374,20 @@ namespace Tina {
     }
 #endif
 
-    /*   void GlfwWindow::shutdown() {
-           if (_glfwDefaultCursor)
-           {
-               glfwDestroyCursor(_glfwDefaultCursor);
-           }
-
-           glfwDestroyWindow(_glfwMainWindow);
-           glfwTerminate();
-
-           _glfwMainWindow = nullptr;
-       }*/
-
-
-//    GLFWwindow* glfw_main_window(const char* window_title /*= nullptr*/)
-//    {
-//        if (window_title == nullptr)
-//            return _glfw_main_window;
-//
-//        FOUNDATION_ASSERT(_glfw_main_window == nullptr);
-//
-//        // Setup window
-//        glfwSetErrorCallback(glfw_log_error);
-//        if (!glfwInit())
-//            return nullptr;
-//
-//        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-//
-//#if FOUNDATION_PLATFORM_MACOS
-//        glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_FALSE);
-//        glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_FALSE);
-//#else
-//        glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
-//#endif
-//
-//        GLFWwindow* window = glfw_create_window_geometry(window_title);
-//        if (window == nullptr)
-//            return nullptr;
-//
-//        const application_t* app = environment_application();
-//        string_const_t version_string = string_from_version_static(app->version);
-//        glfwSetWindowTitle(window, string_format_static_const("%s v.%.*s", window_title, STRING_FORMAT(version_string)));
-//        glfw_set_window_main_icon(window);
-//
-//        // Set global window handles if not set already.
-//        if (_glfw_main_window == nullptr)
-//            _glfw_main_window = window;
-//
-//        if (_window_handle == 0)
-//            _window_handle = glfw_platform_window_handle(window);
-//
-//#if 1 //!BUILD_DEBUG
-//        // As soon as the request to close the window is initiate we hide it in order to 
-//        // give the impression that the application is already close, but in fact, the shutdown sequence
-//        // is still running.
-//        // FIXME: This is a hack, we should speed up the shutdown sequence in most cases
-//        glfwSetWindowCloseCallback(window, [](GLFWwindow* window)
-//            {
-//                if (glfwWindowShouldClose(window))
-//                {
-//                    log_infof(0, STRING_CONST("Closing application..."));
-//                    glfwHideWindow(window);
-//                }
-//            });
-//#endif
-//
-//        return window;
-//    }
-//
-//
-//    void glfw_show_wait_cursor(GLFWwindow* window)
-//    {
-//#if FOUNDATION_PLATFORM_WINDOWS
-//        HCURSOR cursor = LoadCursor(NULL, IDC_WAIT);
-//        SetClassLongPtr(window ? (HWND)glfw_platform_window_handle(window) : NULL, GCLP_HCURSOR, (LONG_PTR)cursor);
-//#else
-//        FOUNDATION_UNUSED(window);
-//#endif
-//    }
-//
-//    void glfw_show_normal_cursor(GLFWwindow* window)
-//    {
-//        if (_glfw_default_cursor == nullptr)
-//            _glfw_default_cursor = glfwCreateStandardCursor(GLFW_ARROW_CURSOR);
-//
-//#if FOUNDATION_PLATFORM_WINDOWS
-//        HCURSOR cursor = LoadCursor(NULL, IDC_ARROW);
-//        SetClassLongPtr(window ? (HWND)glfw_platform_window_handle(window) : NULL, GCLP_HCURSOR, (LONG_PTR)cursor);
-//#else
-//        if (window)
-//            glfwSetCursor(window, _glfw_default_cursor);
-//#endif
-//    }
-//
-//    void glfw_request_close_window(GLFWwindow* window)
-//    {
-//        FOUNDATION_ASSERT(window);
-//
-//        glfwSetWindowShouldClose(window, GLFW_TRUE);
-//#if 1 //!BUILD_DEBUG
-//        if (glfwGetError(nullptr) == GLFW_NO_ERROR)
-//            glfwHideWindow(window);
-//#endif
-//    }
-//
-//    float glfw_get_window_scale(GLFWwindow* window)
-//    {
-//        float scale = 1.0f;
-//        if (window)
-//        {
-//            GLFWmonitor* monitor = glfw_find_window_monitor(window);
-//            float scale_y = 1.0f;
-//            glfwGetMonitorContentScale(monitor, &scale, &scale_y);
-//        }
-//        return scale;
-//    }
-//
-//    float glfw_current_window_scale()
-//    {
-//        return glfw_get_window_scale(_glfw_main_window);
-//    }
-
     GLFWwindow* GlfwWindow::window = nullptr;
 
-    GlfwWindow::GlfwWindow(uint16_t width, uint16_t height, const char* title, const char* iconFilePath, bool useFullScreen)
+    GlfwWindow::GlfwWindow(uint32_t width, uint32_t height, const char* title, const char* iconFilePath, bool useFullScreen)
     {
+        //设置错误回调显示报错信息
+        glfwSetErrorCallback(glfwLogError);
         if (!glfwInit())
         {
             throw std::runtime_error("Cannot initialize GLFW.");
         }
 
-        //设置错误回调显示报错信息
-        glfwSetErrorCallback(glfwLogError);
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_RESIZABLE, useFullScreen ? GLFW_TRUE : GLFW_FALSE);
+        glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
 
         // Create window,make opengl context current request v-sync
         window = glfwCreateWindow(width,height,title,nullptr,nullptr);
@@ -518,28 +400,7 @@ namespace Tina {
         glfwMakeContextCurrent(window);
         glfwSetWindowUserPointer(window, this);
         glfwSwapInterval(1);
-    }
 
-
-    void GlfwWindow::init(InitArgs args) {
-
-        //设置错误回调显示报错信息
-        glfwSetErrorCallback(glfwLogError);
-
-        if (!glfwInit())
-        {
-            throw std::runtime_error("Cannot initialize GLFW.");
-        }
-
-        window = glfwCreateWindow(args.width,args.height,args.title,nullptr,nullptr);
-
-        if (!window)
-        {
-            glfwTerminate();
-            throw std::runtime_error("Can not create this window");
-        }
-
-        //glfwSwapInterval(1);
 
         // 在主线程进行渲染，不另开子线程
         bgfx::renderFrame();
@@ -553,12 +414,8 @@ namespace Tina {
         bgfxInit.type = bgfx::RendererType::Count;
 
         // TODO
-
-        int width, height;
-
-        glfwGetFramebufferSize(window,&width, &height);
-        bgfxInit.resolution.width = static_cast<uint32_t>(width);
-        bgfxInit.resolution.height = static_cast<uint32_t>(height);
+        bgfxInit.resolution.width = width;
+        bgfxInit.resolution.height = height;
         bgfxInit.resolution.reset = BGFX_RESET_VSYNC;
         bgfxInit.debug = false;
         bgfxInit.profile = false;
@@ -566,20 +423,13 @@ namespace Tina {
         if (!bgfx::init(bgfxInit))
         {
             LOG_ERROR("Bgfx Init error!");
+            throw std::runtime_error("Bgfx Init error!");
         }
 
-        glfwMakeContextCurrent(window);
     }
-
-
-    void GlfwWindow::shutdown() {
-        glfwTerminate();
-
-    }
-
 
     void GlfwWindow::setTitle(const char* title) {
-
+        glfwSetWindowTitle(this->window, title);
     }
 
     void GlfwWindow::setFullScreen(bool flag) {
@@ -591,7 +441,7 @@ namespace Tina {
     }
 
     void GlfwWindow::setSize(uint16_t width, uint16_t height) {
-
+        glfwSetWindowSize(this->window,static_cast<int>(width),static_cast<int>(height));
     }
 
     void GlfwWindow::setWindowIcon(const char* iconFilePath) const {
@@ -606,14 +456,19 @@ namespace Tina {
     void GlfwWindow::update() {
         while (!glfwWindowShouldClose(window))
         {
-            //glfwSwapBuffers(window);
-            glfwWaitEvents();
+
+            /* Swap front and back buffers */
+            glfwSwapBuffers(window);
+
+            /* Poll for and process events */
+            glfwPollEvents();
         }
     }
 
 
     void GlfwWindow::close() {
-       
+        glfwDestroyWindow(window);
+        glfwTerminate();
     }
 
 }

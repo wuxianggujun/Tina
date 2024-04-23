@@ -25,8 +25,6 @@ namespace Tina {
 
     void Engine::init(InitArgs args) {
         LOG_INFO("Init engine");
-        GlfwWindow::init(args);
-
         engineApplication->init(args);
 
     }
@@ -50,7 +48,7 @@ namespace Tina {
     }
 
     void Engine::shutdown() {
-        GlfwWindow::shutdown();
+     
     }
 
     static std::unique_ptr<Engine> s_engine;
