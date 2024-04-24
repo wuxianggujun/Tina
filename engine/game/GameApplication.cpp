@@ -17,7 +17,7 @@ namespace Tina {
     }
 
     bool GameApplication::update(float deltaTime) {
-        LOG_INFO("Gmae Application update");
+        //LOG_INFO("Gmae Application update");
         return true;
     }
 

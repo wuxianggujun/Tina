@@ -13,6 +13,12 @@ namespace Tina {
             throw std::runtime_error("Cannot initialize GLFW.");
         }
 
+        glfwWindowHint(GLFW_SAMPLES, 4);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         //glfwWindowHint(GLFW_RESIZABLE, useFullScreen ? GLFW_TRUE : GLFW_FALSE);
         glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
@@ -21,7 +27,6 @@ namespace Tina {
         this->window = glfwCreateWindow(width, height, title, nullptr, nullptr);
         if (!this->window)
         {
-            glfwTerminate();
             throw std::runtime_error("Can not create this window");
         }
 
@@ -38,6 +43,7 @@ namespace Tina {
 #if BX_PLATFORM_LINUX
         platFormData.ndt = glfwGetX11Display();
 #endif
+        platFormData.context = nullptr;
 
         bgfx::Init bgfxInit;
         bgfxInit.platformData = platFormData;
@@ -92,20 +98,18 @@ namespace Tina {
 
 
     void GlfwWindow::update() {
-            /* Swap front and back buffers */
- //           glfwSwapBuffers(this->window);
 
-            /* Poll for and process events */
+        bgfx::frame();
+
             glfwPollEvents();
     }
 
 
     void GlfwWindow::close() {
+        glfwMakeContextCurrent(this->window);
         bgfx::shutdown();
-        if (window)
-        {
-            glfwDestroyWindow(window);
-        }
+        glfwMakeContextCurrent(nullptr);
+        glfwDestroyWindow(this->window);
         glfwTerminate();
     }
 

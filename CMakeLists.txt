@@ -53,6 +53,7 @@ include(cmake/utils.cmake)
 
 file(GLOB_RECURSE TINA_HEADER_FILES CONFIGURE_DEPENDS
             ${ROOT_DIR}/engine/core/*.h**
+            ${ROOT_DIR}/engine/ecs/*.h** *.inl
             ${ROOT_DIR}/engine/log/*.h**
             ${ROOT_DIR}/engine/game/*.h**
             ${ROOT_DIR}/engine/timer/*.h**
