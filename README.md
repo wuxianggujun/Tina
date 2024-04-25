@@ -11,14 +11,14 @@
 | ---- | ------------------------------------ | ---------------------------------------- |
 | 1    | [bgfx.cmake](https://github.com/bkaradzic/bgfx.cmake.git) |Cross-platform, graphics API agnostic, "Bring Your Own Engine/Framework" style rendering library.         |
 | 2    | [spdlog](https://github.com/gabime/spdlog.git)            |Fast C++ logging library.      |
-| 3    | [Boost](https://github.com/boostorg/boost.git)            |         |
-| 4    | [Microsoft GSL](https://github.com/microsoft/GSL.git)     |         |
+| 3    | [Boost](https://github.com/boostorg/boost.git)            |Super-project for modularized Boost         |
+| 4    | [Microsoft GSL](https://github.com/microsoft/GSL.git)     |Guidelines Support Library         |
 | 5    | [stb-cmake](https://github.com/gracicot/stb-cmake.git)    |Single-file public domain (or MIT licensed) libraries for C/C++.       |
 | 6    | [entt](https://github.com/skypjack/entt.git)              |Fast and reliable entity-component system (ECS)       |
 | 7    | [glfw](https://github.com/glfw/glfw.git)                  |A multi-platform library for OpenGL, OpenGL ES, Vulkan, window and input.       |
-| 8    | [glm](https://github.com/g-truc/glm.git)                  |        |
-| 9    | [Google Test](https://github.com/google/googletest.git)   |         |
-| 10   | [tracy](https://github.com/wolfpld/tracy.git)             |         |
+| 8    | [glm](https://github.com/g-truc/glm.git)                  |OpenGL Mathematics (GLM) is a header only C++ mathematics library for graphics software based on the OpenGL Shading Language (GLSL) specifications.        |
+| 9    | [Google Test](https://github.com/google/googletest.git)   |Googletest is based on the xUnit testing framework, a popular architecture for unit testing         |
+| 10   | [tracy](https://github.com/wolfpld/tracy.git)             |A real time, nanosecond resolution, remote telemetry, hybrid frame and sampling profiler for games and other applications.         |
 
 ## Log Learning Resources
 
