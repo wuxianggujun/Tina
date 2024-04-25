@@ -1,3 +1,9 @@
+if(MSVC)
+  add_compile_options(/W0)
+else()
+  add_compile_options(-w)
+endif()
+
 # glfw
 set(GLFW_BUILD_EXAMPLES FALSE CACHE INTERNAL "")
 set(GLFW_BUILD_TESTS FALSE CACHE INTERNAL "")
@@ -5,6 +11,7 @@ set(GLFW_BUILD_DOCS FALSE CACHE INTERNAL "")
 set(GLFW_INSTALL FALSE CACHE INTERNAL "")
 
 #glm
+set(GLM_TEST_ENABLE  OFF CACHE INTERNAL "")
 set(GLM_ENABLE_CXX_20 TRUE CACHE INTERNAL "")
 set(GLM_DISABLE_AUTO_DETECTION TRUE CACHE INTERNAL "")
 set(GLM_QUIET TRUE CACHE INTERNAL "")
@@ -19,7 +26,7 @@ set(BGFX_BUILD_EXAMPLE_COMMON FALSE CACHE INTERNAL "")
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 
 #entt
-
+set(BUILD_TESTING OFF CACHE INTERNAL "")
 option(ENTT_INCLUDE_NATVIS "Add EnTT natvis files to the EnTT target." ON)
 
 add_subdirectory(bgfx.cmake)
