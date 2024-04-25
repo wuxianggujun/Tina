@@ -13,12 +13,11 @@
 | 3    | Boost         | [GitHub](https://github.com/boostorg/boost.git) |
 | 4    | Microsoft GSL | [GitHub](https://github.com/microsoft/GSL.git) |
 | 5    | stb-cmake     | [GitHub](https://github.com/gracicot/stb-cmake.git) |
-| 6    | blink         | [GitHub](https://github.com/jart/blink.git) |
-| 7    | Cosmopolitan  | [GitHub](https://github.com/jart/cosmopolitan.git) |
-| 8    | entt          | [GitHub](https://github.com/skypjack/entt.git) |
+| 6    | entt          | [GitHub](https://github.com/skypjack/entt.git) |
+| 7    | glfw          | [GitHub](https://github.com/glfw/glfw.git) |
+| 8    | glm           | [GitHub](https://github.com/g-truc/glm.git) |
 | 9    | Google Test   | [GitHub](https://github.com/google/googletest.git) |
-| 10   | libxlsxwriter | [GitHub](https://github.com/jmcnamara/libxlsxwriter.git) |
-| 11   | tracy         | [GitHub](https://github.com/wolfpld/tracy.git) |
+| 10   | tracy         | [GitHub](https://github.com/wolfpld/tracy.git) |
 
 ## Log Learning Resources
 

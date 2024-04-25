@@ -14,7 +14,7 @@ set(BUILD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/build CACHE PATH "Build directory path
 
 option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
-option(TINA_BUILD_TESTING "Google Tests" ON)
+option(TINA_BUILD_TESTING "Turn on Tina's Google Tests" ON)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
 
 list(APPEND CMAKE_MODULE_PATH ${ROOT_DIR}/cmake)
@@ -30,8 +30,11 @@ else ()
         message(FATAL_ERROR "Git version of 2.35 is needed for patch application")
     endif ()
 endif ()
+
+# Import the tool cmake script
 include(TinaTool)
 
+# Automatically update submodule versions
 if(TINA_AUTOUPDATE_SUBMODULE)
 include(UpdateSubmodules)
 endif()
@@ -39,6 +42,13 @@ endif()
 add_subdirectory(dependencies)
 add_subdirectory(engine)
 add_subdirectory(runtime)
-add_subdirectory(samples)
 
+# Examples
+if(TINA_BUILD_EXAMPLES)
+add_subdirectory(samples)
+endif()
+
+# Tests
+if(TINA_BUILD_TESTING)
 add_subdirectory(tests)
+endif()
