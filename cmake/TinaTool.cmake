@@ -1,4 +1,4 @@
-function(Group_Files_ByDirectory FILE_LIST)
+function(GROUP_FILES_BYDIRECTORY FILE_LIST)
     foreach(file IN LISTS ${FILE_LIST})
     get_filename_component(file_Path "${file}" DIRECTORY)
     string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/src" "" group_path "${file_path}")

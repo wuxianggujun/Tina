@@ -15,7 +15,7 @@ set(BUILD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/build CACHE PATH "Build directory path
 option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_TESTING "Google Tests" ON)
-option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" ON)
+option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
 
 list(APPEND CMAKE_MODULE_PATH ${ROOT_DIR}/cmake)
 
@@ -34,11 +34,6 @@ include(TinaTool)
 
 if(TINA_AUTOUPDATE_SUBMODULE)
 include(UpdateSubmodules)
-endif()
-
-
-if(MSVC)
-   add_compile_options(/MP /ZI /JMC)
 endif()
 
 add_subdirectory(dependencies)
