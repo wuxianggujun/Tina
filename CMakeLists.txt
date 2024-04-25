@@ -36,7 +36,12 @@ include(TinaTool)
 
 # Automatically update submodule versions
 if(TINA_AUTOUPDATE_SUBMODULE)
-include(UpdateSubmodules)
+    include(UpdateSubmodules)
+endif()
+
+if(MSVC)
+    #add_compile_options("/source-charset:utf-8")
+    string(APPEND CMAKE_CXX_FLAGS " /Zc:__cplusplus /MP")
 endif()
 
 add_subdirectory(dependencies)
@@ -45,10 +50,11 @@ add_subdirectory(runtime)
 
 # Examples
 if(TINA_BUILD_EXAMPLES)
-add_subdirectory(samples)
+    add_subdirectory(samples)
 endif()
 
 # Tests
 if(TINA_BUILD_TESTING)
-add_subdirectory(tests)
+    enable_testing()
+    add_subdirectory(tests)
 endif()

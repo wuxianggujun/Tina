@@ -1,5 +1,6 @@
 set(SUBMODULE_PROJECT_NAME "Engine")
-file(GLOB_RECURSE ENGINE_FILES
+
+file(GLOB_RECURSE ENGINE_FILES CONFIGURE_DEPENDS
         src/framework/*.c**
         src/log/*.c**)
 
@@ -13,6 +14,7 @@ add_definitions(
     -DGLFW_INCLUDE_NONE
     -D_CRT_SECURE_NO_WARNINGS
     -DUNICODE)
+#target_compile_definitions(${PROJECT_NAME} PUBLIC GLFW_INCLUDE_NONE)
 
 if(msvc)
   target_compile_options(${SUBMODULE_PROJECT_NAME} PRIVATE "/bigobj")
