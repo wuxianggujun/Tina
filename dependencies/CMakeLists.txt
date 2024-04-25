@@ -31,7 +31,7 @@ option(ENTT_INCLUDE_NATVIS "Add EnTT natvis files to the EnTT target." ON)
 
 add_subdirectory(bgfx.cmake)
 add_subdirectory(boost)
-add_subdirectory(microsoft-gsl)
+add_subdirectory(GSL)
 add_subdirectory(glfw)
 add_subdirectory(glm)
 add_subdirectory(spdlog)
@@ -39,3 +39,21 @@ add_subdirectory(stb-cmake)
 add_subdirectory(entt)
 add_subdirectory(googletest)
 
+set(TINA_LIBRARIES
+    bx
+    bimg
+    bgfx
+    Boost::predef
+    Boost::utility
+    Boost::core Boost::detail
+    Boost::lexical_cast
+    Boost::exception
+    Boost::timer
+    Boost::chrono
+    glfw
+    glm
+    spdlog
+    stb::image
+    Microsoft.GSL::GSL
+    EnTT::EnTT
+    CACHE INTERNAL "")
