@@ -1,9 +1,3 @@
-cmake_minimum_required(VERSION 3.20)
-project(3rdparty)
-
-
-set(CMAKE_CXX_STANDARD 17)
-
 # glfw
 set(GLFW_BUILD_EXAMPLES FALSE CACHE INTERNAL "")
 set(GLFW_BUILD_TESTS FALSE CACHE INTERNAL "")

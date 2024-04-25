@@ -1,5 +1,0 @@
-#ifndef TINA_ENGINE_PCH_HPP
-#define TINA_ENGINE_PCH_HPP
-
-
-#endif // TINA_ENGINE_PCH_HPP
