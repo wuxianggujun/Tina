@@ -4,6 +4,8 @@ file(GLOB_RECURSE ENGINE_FILES CONFIGURE_DEPENDS
         src/framework/*.c**
         src/log/*.c**)
 
+add_compile_options("$<$<CONFIG:DEBUG>:-DDEBUG>" "$<$<CONFIG:DEBUG>:-DENABLE_ASSERTS>")
+
 add_library(${SUBMODULE_PROJECT_NAME} ${ENGINE_FILES})
 
 GROUP_FILES_BYDIRECTORY("ENGINE_FILES")
