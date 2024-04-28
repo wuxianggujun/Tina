@@ -3,6 +3,25 @@
 //
 
 #include "Engine.hpp"
+#include "Configuration.hpp"
+#include "Application.hpp"
 
 namespace Tina {
+
+    Engine *Engine::singleton = nullptr;
+
+    Engine::Engine() {
+        singleton = this;
+    }
+
+    Engine *Engine::getSingleton() {
+        return singleton;
+    }
+
+    int Engine::run(std::unique_ptr<Application> application) {
+        return 0;
+    }
+
+
+
 } // Tina

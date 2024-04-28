@@ -1,9 +1,7 @@
-#include <iostream>
-#include "framework/Test.hpp"
+#include "TinaEngine.hpp"
 
 int main(int argc, char* argv[]) {
-
-    std::cout << "Init" << std::endl;
-    Tina::test();
-    return EXIT_SUCCESS;
+     Tina::Configuration config("Tina",1280,720);
+     auto engine =  Tina::Engine::getSingleton();
+     return engine->run(std::make_unique<Tina::Application>(config));
 }

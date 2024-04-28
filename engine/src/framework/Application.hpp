@@ -5,11 +5,14 @@
 #ifndef TINA_APPLICATION_HPP
 #define TINA_APPLICATION_HPP
 
+#include "Configuration.hpp"
+
 namespace Tina {
 
-class Application {
-
-};
+    class Application {
+    public:
+        explicit Application(Configuration config);
+    };
 
 } // Tina
 

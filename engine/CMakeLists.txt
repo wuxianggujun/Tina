@@ -2,7 +2,8 @@ set(SUBMODULE_PROJECT_NAME "Engine")
 
 file(GLOB_RECURSE ENGINE_FILES CONFIGURE_DEPENDS
         src/framework/*.c**
-        src/log/*.c**)
+        src/log/*.c**
+        src/*.h**)
 
 add_compile_options("$<$<CONFIG:DEBUG>:-DDEBUG>" "$<$<CONFIG:DEBUG>:-DENABLE_ASSERTS>")
 

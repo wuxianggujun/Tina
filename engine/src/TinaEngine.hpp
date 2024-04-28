@@ -5,4 +5,8 @@
 #ifndef TINA_TINAENGINE_HPP
 #define TINA_TINAENGINE_HPP
 
+#include "framework/Engine.hpp"
+#include "framework/Configuration.hpp"
+#include "framework/Application.hpp"
+
 #endif //TINA_TINAENGINE_HPP
