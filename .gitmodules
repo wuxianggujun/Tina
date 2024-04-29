@@ -31,6 +31,3 @@
 [submodule "dependencies/simpleini"]
 	path = dependencies/simpleini
 	url = https://github.com/brofield/simpleini.git
-[submodule "dependencies/glad"]
-	path = dependencies/glad
-	url = https://github.com/Dav1dde/glad.git

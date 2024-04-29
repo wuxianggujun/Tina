@@ -3,12 +3,8 @@
 //
 
 #include "Application.hpp"
+#include "Configuration.hpp"
 
 namespace Tina {
-
-    Application::Application(Configuration config) {
-
-    }
-
 
 } // Tina

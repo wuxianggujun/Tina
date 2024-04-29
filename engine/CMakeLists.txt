@@ -1,15 +1,17 @@
 set(SUBMODULE_PROJECT_NAME "Engine")
 
 file(GLOB_RECURSE ENGINE_FILES CONFIGURE_DEPENDS
+        src/application/*.c**
         src/framework/*.c**
         src/log/*.c**
+        src/tool/*.c**
         src/*.h**)
 
 add_compile_options("$<$<CONFIG:DEBUG>:-DDEBUG>" "$<$<CONFIG:DEBUG>:-DENABLE_ASSERTS>")
 
 add_library(${SUBMODULE_PROJECT_NAME} ${ENGINE_FILES})
 
-GROUP_FILES_BYDIRECTORY("ENGINE_FILES")
+GROUP_FILES_BY_DIRECTORY("ENGINE_FILES")
 
 target_link_libraries(${SUBMODULE_PROJECT_NAME} PRIVATE ${TINA_LIBRARIES})
 

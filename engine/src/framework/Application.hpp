@@ -5,13 +5,13 @@
 #ifndef TINA_APPLICATION_HPP
 #define TINA_APPLICATION_HPP
 
-#include "Configuration.hpp"
-
 namespace Tina {
-
     class Application {
     public:
-        explicit Application(Configuration config);
+        virtual void run() = 0;
+    protected:
+        virtual bool initialize() = 0;
+        virtual void close() {};
     };
 
 } // Tina

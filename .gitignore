@@ -83,3 +83,4 @@ fabric.properties
 /.idea
 *.bin
 build
+dependencies/
