@@ -83,4 +83,14 @@ fabric.properties
 /.idea
 *.bin
 build
-dependencies/
+dependencies/bgfx.cmake/*
+dependencies/boost/*
+dependencies/entt/*
+dependencies/glfw/*
+dependencies/glm/*
+dependencies/googletest
+dependencies/GSL/*
+dependencies/simpleini/*
+dependencies/spdlog/*
+dependencies/stb-cmake/*
+dependencies/tracy/*

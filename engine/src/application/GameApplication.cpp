@@ -3,6 +3,19 @@
 //
 
 #include "GameApplication.hpp"
+#include "framework/Configuration.hpp"
 
 namespace Tina {
+    bool GameApplication::initialize() {
+        return false;
+    }
+
+    void GameApplication::close() {
+        Application::close();
+    }
+
+    GameApplication::GameApplication(Configuration config) {
+
+    }
+
 } // Tina

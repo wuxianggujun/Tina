@@ -2,15 +2,10 @@
 // Created by wuxianggujun on 2024/4/28.
 //
 
-#ifndef TINA_TRACY_HPP
-#define TINA_TRACY_HPP
+#ifndef TINA_TOOL_TRACY_HPP
+#define TINA_TOOL_TRACY_HPP
 
+#include <tracy/Tracy.hpp>
+//#include <tracy/TracyOpenGL.hpp>
 
-
-class Tracy {
-
-};
-
-
-
-#endif //TINA_TRACY_HPP
+#endif //TINA_TOOL_TRACY_HPP
