@@ -8,17 +8,27 @@
 
 namespace Tina {
 
-    Window::Window(size_t width, size_t height, const char *title):windowWidth(width),windowHeight(height),windowTitle(title){
+    Window::Window(const char *title, size_t width, size_t height):windowWidth(width),windowHeight(height),windowTitle(title) {
     }
 
-    void Window::initialize() {
-        if (!glfwInit())return;
+    bool Window::initialize() {
+        if (!glfwInit())return false;
+
+        window = glfwCreateWindow(static_cast<int>(windowWidth),static_cast<int>(windowHeight),windowTitle, nullptr, nullptr);
+        if (!window) return false;
 
 
+        return true;
     }
 
     void Window::close() {
-
+        if (window){
+            glfwDestroyWindow(window);
+        }
+        glfwTerminate();
+        window = nullptr;
     }
+
+
 
 } // Tina

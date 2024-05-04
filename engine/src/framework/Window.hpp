@@ -14,12 +14,11 @@ namespace Tina {
     class Window {
 
     public:
-        Window(size_t width,size_t height,const char* title);
+        Window(const char* title,size_t width,size_t height);
         ~Window() =delete;
 
-        void initialize();
+        bool initialize();
         void close();
-
 
     private:
         GLFWwindow* window{};

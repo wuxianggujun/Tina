@@ -10,15 +10,18 @@
 namespace Tina {
 
     class Configuration;
+    class Window;
 
     class GameApplication : public Application{
     public:
-        explicit GameApplication(Configuration config);
-        explicit GameApplication(const char *name, int width, int height);
+        explicit GameApplication(const char *title, int width, int height);
+        explicit GameApplication(const Configuration &configuration);
+
         bool initialize() override;
-
+        void run() override;
         void close() override;
-
+    private:
+        Window * window = nullptr;
     };
 
 } // Tina

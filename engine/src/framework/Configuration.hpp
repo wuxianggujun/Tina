@@ -14,7 +14,7 @@ namespace Tina{
             windowHeight(height),useFullScreen(fullScreen){
         }
         ~Configuration() = default;
-    private:
+    public:
         const char* windowTitle = "Tina";
         size_t windowWidth = 800;
         size_t windowHeight = 600;
