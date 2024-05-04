@@ -19,9 +19,13 @@ namespace Tina {
     }
 
     int Engine::run(std::unique_ptr<Application> application) {
+        isRunning = application->initialize();
+        while (isRunning){
+            application->run();
+        }
+        application->close();
         return 0;
     }
-
 
 
 } // Tina

@@ -20,7 +20,8 @@ namespace Tina {
         virtual ~Engine() =default;
 
         int run(std::unique_ptr<Application> application);
-
+    private:
+        bool isRunning = false;
     };
 
 } // Tina

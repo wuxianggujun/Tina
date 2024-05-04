@@ -19,6 +19,8 @@ namespace Tina {
 
         bool initialize();
         void close();
+        void update();
+        [[nodiscard]] bool shouldClose() const;
 
     private:
         GLFWwindow* window{};

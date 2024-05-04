@@ -30,7 +30,10 @@ namespace Tina {
     }
 
     void GameApplication::run() {
-
+        if (window->shouldClose()){
+            return;
+        }
+        window->update();
     }
 
 

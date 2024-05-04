@@ -9,7 +9,8 @@ namespace Tina {
     class Application {
     public:
         virtual void run() = 0;
-    protected:
+
+    public:
         virtual bool initialize() = 0;
         virtual void close() {};
     };
