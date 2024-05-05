@@ -78,19 +78,6 @@ fabric.properties
 .idea/caches/build_file_checksums.ser
 
 .vs/
-
-
 /.idea
 *.bin
-build
-dependencies/bgfx.cmake/*
-dependencies/boost/*
-dependencies/entt/*
-dependencies/glfw/*
-dependencies/glm/*
-dependencies/googletest
-dependencies/GSL/*
-dependencies/simpleini/*
-dependencies/spdlog/*
-dependencies/stb-cmake/*
-dependencies/tracy/*
+/build
