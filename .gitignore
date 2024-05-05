@@ -94,3 +94,4 @@ dependencies/simpleini/*
 dependencies/spdlog/*
 dependencies/stb-cmake/*
 dependencies/tracy/*
+dependencies/glad/*
