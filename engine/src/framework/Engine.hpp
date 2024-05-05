@@ -12,11 +12,16 @@ namespace Tina {
     class Configuration;
 
     class Engine {
+    private:
+        static Engine* instance_;
+        Engine(){};
     public:
-        static Engine* singleton;
+        Engine(const Engine&) =delete;
+        Engine& operator=(const Engine&) = delete;
+
     public:
         static  Engine* getSingleton();
-        Engine();
+
         virtual ~Engine() =default;
 
         int run(std::unique_ptr<Application> application);

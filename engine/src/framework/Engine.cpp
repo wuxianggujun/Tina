@@ -8,14 +8,13 @@
 
 namespace Tina {
 
-    Engine *Engine::singleton = nullptr;
-
-    Engine::Engine() {
-        singleton = this;
-    }
+    Engine *Engine::instance_ = nullptr;
 
     Engine *Engine::getSingleton() {
-        return singleton;
+        if (instance_ == nullptr){
+            instance_ = new Engine();
+        }
+        return instance_;
     }
 
     int Engine::run(std::unique_ptr<Application> application) {

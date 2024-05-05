@@ -26,6 +26,7 @@ namespace Tina {
     }
 
     void GameApplication::close() {
+        window->destroy();
         Application::close();
     }
 

@@ -18,7 +18,7 @@ namespace Tina {
         ~Window() =delete;
 
         bool initialize();
-        void close();
+        void destroy();
         void update();
         [[nodiscard]] bool shouldClose() const;
 
