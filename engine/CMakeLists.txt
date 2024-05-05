@@ -1,12 +1,9 @@
 set(SUBMODULE_PROJECT_NAME "Engine")
+set(SUBMODULE_PROJECT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
 file(GLOB_RECURSE ENGINE_FILES CONFIGURE_DEPENDS
-        src/application/*.c**
-        src/framework/*.c**
-        src/framework/json/*.c**
-        src/framework/log/*.c**
-        src/tool/*.c**
-        src/*.h**)
+        ${SUBMODULE_PROJECT_DIR}/src/*.c**
+        ${SUBMODULE_PROJECT_DIR}/src/*.h**)
 
 add_compile_options("$<$<CONFIG:DEBUG>:-DDEBUG>" "$<$<CONFIG:DEBUG>:-DENABLE_ASSERTS>")
 
@@ -20,7 +17,6 @@ add_definitions(
     -DGLFW_INCLUDE_NONE
     -D_CRT_SECURE_NO_WARNINGS
     -DUNICODE)
-#target_compile_definitions(${PROJECT_NAME} PUBLIC GLFW_INCLUDE_NONE)
 
 if(msvc)
   target_compile_options(${SUBMODULE_PROJECT_NAME} PRIVATE "/bigobj")
@@ -28,4 +24,4 @@ else()
   add_compile_options(-Wa,-mbig-obj)
 endif()
 
-target_include_directories(${SUBMODULE_PROJECT_NAME} PUBLIC src)
+target_include_directories(${SUBMODULE_PROJECT_NAME} PUBLIC ${SUBMODULE_PROJECT_DIR}/src)
