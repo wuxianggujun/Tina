@@ -27,10 +27,10 @@
 
 ## Log Learning Resources
 
-| 序号 | 项目名称                   | GitHub 链接                               |
-| ---- | -------------------------- | ---------------------------------------- |
-| 1    | [spdlog_wrapper](https://github.com/gqw/spdlog_wrapper) | [GitHub](https://github.com/gqw/spdlog_wrapper)  |
-| 2    | [klog](https://github.com/KkemChen/klog)                 | [GitHub](https://github.com/KkemChen/klog)  |
+| 序号 | 项目                   |
+| ---- | ------------------------ |
+| 1    | [spdlog_wrapper](https://github.com/gqw/spdlog_wrapper) |
+| 2    | [klog](https://github.com/KkemChen/klog)               |
 
 ## Learning Resources
 

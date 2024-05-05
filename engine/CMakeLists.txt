@@ -3,7 +3,8 @@ set(SUBMODULE_PROJECT_NAME "Engine")
 file(GLOB_RECURSE ENGINE_FILES CONFIGURE_DEPENDS
         src/application/*.c**
         src/framework/*.c**
-        src/log/*.c**
+        src/framework/json/*.c**
+        src/framework/log/*.c**
         src/tool/*.c**
         src/*.h**)
 
@@ -11,9 +12,9 @@ add_compile_options("$<$<CONFIG:DEBUG>:-DDEBUG>" "$<$<CONFIG:DEBUG>:-DENABLE_ASS
 
 add_library(${SUBMODULE_PROJECT_NAME} ${ENGINE_FILES})
 
-GROUP_FILES_BY_DIRECTORY("ENGINE_FILES")
+#GROUP_FILES_BY_DIRECTORY("ENGINE_FILES")
 
-target_link_libraries(${SUBMODULE_PROJECT_NAME} PRIVATE ${TINA_LIBRARIES})
+target_link_libraries(${SUBMODULE_PROJECT_NAME} PRIVATE INTERFACE ${TINA_LIBRARIES})
 
 add_definitions(
     -DGLFW_INCLUDE_NONE
