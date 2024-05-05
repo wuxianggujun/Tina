@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18..3.28)
+cmake_minimum_required(VERSION 3.28)
 project(Tina VERSION 0.0.1 LANGUAGES CXX)
 
 if(NOT CMAKE_BUILD_TYPE)
