@@ -73,6 +73,7 @@ endif()
 
 # Import the tool cmake script
 include(TinaTool)
+include(SourceGroups)
 
 # Automatically update submodule versions
 if(TINA_AUTOUPDATE_SUBMODULE)

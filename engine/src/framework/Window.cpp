@@ -5,6 +5,7 @@
 #include "Window.hpp"
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
+#include "tool/GlfwTool.hpp"
 
 namespace Tina {
 
@@ -12,6 +13,7 @@ namespace Tina {
     }
 
     bool Window::initialize() {
+        glfwSetErrorCallback(GlfwTool::ErrorCallback);
         if (!glfwInit())return false;
 
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,4);

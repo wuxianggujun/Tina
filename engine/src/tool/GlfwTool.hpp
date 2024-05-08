@@ -5,10 +5,14 @@
 #ifndef TINA_TOOL_GLFWTOOL_HPP
 #define TINA_TOOL_GLFWTOOL_HPP
 
+class GLFWwindow;
+
 namespace Tina {
 
     class GlfwTool final{
-      public:
+     public:
+        static void ErrorCallback(int error,const char* description);
+        static void MouseButtonCallback(GLFWwindow* window,int button,int action,int mods);
 
      public:
         GlfwTool() = delete;
