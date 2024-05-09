@@ -3,7 +3,6 @@
 //
 
 #include "Engine.hpp"
-#include "Configuration.hpp"
 #include "Application.hpp"
 
 namespace Tina {

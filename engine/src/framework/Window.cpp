@@ -3,11 +3,12 @@
 //
 
 #include "Window.hpp"
-#include <glad/gl.h>
 #include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
 #include <cassert>
 #include <cstdio>
 #include "tool/GlfwTool.hpp"
+#include "glad/gl.h"
 
 namespace Tina {
 
@@ -17,21 +18,21 @@ namespace Tina {
     bool Window::initialize() {
         glfwSetErrorCallback(GlfwTool::ErrorCallback);
         if (!glfwInit())return false;
-        //assert(!glfwInit());
 
+        glfwWindowHint(GLFW_DECORATED,GLFW_TRUE);
+        glfwWindowHint(GLFW_CLIENT_API,GLFW_OPENGL_API);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,4);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR,6);
+        glfwWindowHint(GLFW_OPENGL_PROFILE,GLFW_OPENGL_CORE_PROFILE);
 
         window = glfwCreateWindow(static_cast<int>(windowWidth),static_cast<int>(windowHeight),windowTitle, nullptr, nullptr);
         if (!window) return false;
 
-        assert(window!=nullptr);
-
-        //gladLoadGL(glfwGetProcAddress);
 
         /* Make the window's context current */
         glfwMakeContextCurrent(window);
-        //glClearColor( 0.4f, 0.3f, 0.4f, 0.0f );
+        gladLoadGL(glfwGetProcAddress);
+        glfwSwapInterval(1);
         return true;
     }
 
@@ -48,12 +49,12 @@ namespace Tina {
     }
 
     void Window::update() {
-        printf("Window::update");
+        //printf("Window::update\n");
         /* Render here */
-        //glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT);
 
         /* Swap front and back buffers */
-        //glfwSwapBuffers(window);
+        glfwSwapBuffers(window);
 
         /* Poll for and process events */
         glfwPollEvents();
