@@ -12,6 +12,7 @@ namespace Tina {
 
     public:
         virtual bool initialize() = 0;
+        virtual bool isRunning() = 0;
         virtual void close() {};
     };
 

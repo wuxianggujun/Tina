@@ -7,10 +7,12 @@ set(GLAD_FILES "")
 
 list(APPEND GLAD_FILES
         "${GLAD_DIR}/include/glad/gl.h"
+        "${GLAD_DIR}/include/glad/wgl.h"
         "${GLAD_DIR}/include/KHR/khrplatform.h"
         "${GLAD_DIR}/src/gl.c"
+        "${GLAD_DIR}/src/wgl.c"
 )
 
 add_library(${PROJECT_NAME} STATIC ${GLAD_FILES})
 
-target_include_directories(${PROJECT_NAME} PRIVATE include SYSTEM INTERFACE include)
+target_include_directories(${PROJECT_NAME} PUBLIC include SYSTEM INTERFACE include)

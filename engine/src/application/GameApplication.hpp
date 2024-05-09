@@ -14,10 +14,10 @@ namespace Tina {
 
     class GameApplication : public Application{
     public:
-        explicit GameApplication(const char *title, int width, int height);
         explicit GameApplication(const Configuration &configuration);
 
         bool initialize() override;
+        bool isRunning() override;
         void run() override;
         void close() override;
     private:

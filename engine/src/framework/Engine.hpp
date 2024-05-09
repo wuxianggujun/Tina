@@ -14,7 +14,7 @@ namespace Tina {
     class Engine {
     private:
         static Engine* instance_;
-        Engine(){};
+        Engine() = default;
     public:
         Engine(const Engine&) =delete;
         Engine& operator=(const Engine&) = delete;

@@ -2,27 +2,18 @@
 // Created by wuxianggujun on 2024/4/28.
 //
 
+#include <cstdio>
 #include "GameApplication.hpp"
 #include "framework/Configuration.hpp"
 #include "framework/Window.hpp"
 
 namespace Tina {
-    GameApplication::GameApplication(const char *title, int width, int height) {
-        window = new Window(title, width, height);
-    }
-
     GameApplication::GameApplication(const Configuration &configuration) {
         window = new Window(configuration.windowTitle,configuration.windowWidth,configuration.windowHeight);
     }
 
-
     bool GameApplication::initialize() {
-        if (!window->initialize()){
-            return false;
-        }
-
-
-        return true;
+        return window->initialize();
     }
 
     void GameApplication::close() {
@@ -31,10 +22,12 @@ namespace Tina {
     }
 
     void GameApplication::run() {
-        if (window->shouldClose()){
-            return;
-        }
+        //printf("GameApplication::run\n");
         window->update();
+    }
+
+    bool GameApplication::isRunning() {
+        return window->shouldClose();
     }
 
 
