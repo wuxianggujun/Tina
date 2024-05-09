@@ -39,7 +39,6 @@ OPTION(TRACY_ON_DEMAND "" ON)
 option(TRACY_ONLY_IPV4 "IPv4 only" ON)
 
 add_subdirectory(bgfx.cmake)
-add_subdirectory(boost)
 add_subdirectory(GSL)
 add_subdirectory(glfw)
 add_subdirectory(glad)
@@ -54,13 +53,6 @@ set(TINA_LIBRARIES
     bx
     bimg
     bgfx
-    Boost::predef
-    Boost::utility
-    Boost::core Boost::detail
-    Boost::lexical_cast
-    Boost::exception
-    Boost::timer
-    Boost::chrono
     glfw
     glm
     glad
