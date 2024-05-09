@@ -28,15 +28,16 @@ namespace Tina {
         window = glfwCreateWindow(static_cast<int>(windowWidth),static_cast<int>(windowHeight),windowTitle, nullptr, nullptr);
         if (!window) return false;
 
-
         /* Make the window's context current */
         glfwMakeContextCurrent(window);
+
         gladLoadGL(glfwGetProcAddress);
         glfwSwapInterval(1);
         return true;
     }
 
     void Window::destroy() {
+        
         if (window){
             glfwDestroyWindow(window);
         }
@@ -51,8 +52,8 @@ namespace Tina {
     void Window::update() {
         //printf("Window::update\n");
         /* Render here */
-        glClear(GL_COLOR_BUFFER_BIT);
-
+        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+        glClearColor(49.f/255,77.f/255,121.f/255,1.f);
         /* Swap front and back buffers */
         glfwSwapBuffers(window);
 
