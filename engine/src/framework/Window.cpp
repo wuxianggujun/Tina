@@ -37,7 +37,7 @@ namespace Tina {
     }
 
     void Window::destroy() {
-        
+        glfwMakeContextCurrent(nullptr);
         if (window){
             glfwDestroyWindow(window);
         }
