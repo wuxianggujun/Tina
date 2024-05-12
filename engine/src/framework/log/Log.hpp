@@ -1,6 +1,10 @@
 #ifndef TINA_FRAMEWORK_LOG_HPP
 #define TINA_FRAMEWORK_LOG_HPP
 
+
+#include <cstdint>
+#include <filesystem>
+
 #include <spdlog/spdlog.h>
 #include <spdlog/async.h>
 #include <spdlog/logger.h>
@@ -19,6 +23,7 @@ namespace Tina {
     constexpr const char *LOG_PATH = "logs/default.log";
     constexpr uint32_t SINGLE_FILE_MAX_SIZE = 20 * 1024 * 1024;
     constexpr uint32_t MAX_STORAGE_DAYS = 5;
+    constexpr uint32_t LOG_BUFFER_SIZE = 32 * 1024;
 
     enum LogMode {
         STDOUT = 1 << 0,
@@ -49,7 +54,7 @@ namespace Tina {
             LogStream(const spdlog::source_loc &_loc, LogLevel _lvl, std::string_view _prefix)
                     : loc(_loc), lvl(_lvl), prefix(_prefix) {}
 
-            ~LogStream() {
+            ~LogStream() override {
                 flush();
             }
 
@@ -63,21 +68,60 @@ namespace Tina {
             std::string prefix;
         };
 
+    public:
+        class LogRotatingFileSink : public spdlog::sinks::base_sink<std::mutex> {
+        public:
+            LogRotatingFileSink(spdlog::filename_t logPath, std::size_t max_size, std::size_t max_storage_days,
+                                bool roate_on_open = false, const spdlog::file_event_handlers &event_handles = {});
+
+            static spdlog::filename_t calc_filename(const spdlog::filename_t &filename, std::size_t index);
+
+            spdlog::filename_t filename();
+
+        protected:
+            void sink_it_(const spdlog::details::log_msg &msg) override;
+
+            void flush_() override;
+
+        private:
+            void rotate_();
+
+            bool rename_file_(const spdlog::filename_t &src_filename, const spdlog::filename_t &target_filename);
+
+            void cleanup_old_files_();
+
+            spdlog::filename_t base_filename_;
+            std::atomic<std::size_t> max_size_;
+            std::atomic<std::size_t> max_storage_days;
+            std::size_t current_size_;
+
+            std::filesystem::path _log_base_filename;
+            std::filesystem::path _log_file_path;
+
+            spdlog::details::file_helper file_helper_;
+
+        };
+
+
+    public:
+        class LogLevelFormatterFlag : public spdlog::custom_flag_formatter {
+        public:
+            void format(const spdlog::details::log_msg &msg, const std::tm &, spdlog::memory_buf_t &dest) override {}
+
+            [[nodiscard]] std::unique_ptr<custom_flag_formatter> clone() const override {
+                return spdlog::details::make_unique<LogLevelFormatterFlag>();
+            }
+        };
+
         static Logger &getInstance() {
             static Logger logger;
             return logger;
         }
 
-        bool init(const std::string_view logFilePath) {
-            namespace fs = std::filesystem;
+        bool init(const std::string &logPath = LOG_PATH, uint32_t mode = STDOUT,
+                  uint32_t threadCount = std::thread::hardware_concurrency(), uint32_t logBufferSize = LOG_BUFFER_SIZE);
 
-
-            return true;
-        }
-
-        void shutdown() {
-            spdlog::shutdown();
-        }
+        void shutdown();
 
 
         template<class... Args>
@@ -87,16 +131,11 @@ namespace Tina {
 
         template<class... Args>
         inline void
-        printf(const spdlog::source_loc &loc, spdlog::level::level_enum lvl, const char *fmt, const Args &... args) {
+        printf(const spdlog::source_loc &loc, LogLevel lvl, const char *fmt, const Args &... args) {
             log(loc, lvl, fmt::sprintf(fmt, args...).c_str());
         }
 
         void setLevel(LogLevel lvl);
-
-        void addOnOutput(const std::function<void(const std::string &message, const int &level)> &cb);
-
-        void addOnOutput(const std::string &logger,
-                         const std::function<void(const std::string &message, const int &level)> &cb);
 
         void flushOn(LogLevel level);
 
@@ -117,6 +156,9 @@ namespace Tina {
 
 
 }
+
+#define LOG_INIT(path, mode, ...) Tina::Logger::getInstance().init(path,mode,##__VA_ARGS__);
+#define LOG_TRACE(fmt, ...) Tina::Logger::getInstance().log({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Trace, fmt, ##__VA_ARGS__);
 
 
 #endif // TINA_FRAMEWORK_LOG_HPP

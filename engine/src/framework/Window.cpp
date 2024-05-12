@@ -9,6 +9,7 @@
 #include <cstdio>
 #include "tool/GlfwTool.hpp"
 #include "glad/gl.h"
+#include "framework/log/Log.hpp"
 
 namespace Tina {
 
@@ -16,6 +17,9 @@ namespace Tina {
     }
 
     bool Window::initialize() {
+        LOG_INIT("logs/log.log",Tina::LogMode::DEFAULT);
+        LOG_TRACE("Hello");
+
         glfwSetErrorCallback(GlfwTool::ErrorCallback);
         if (!glfwInit())return false;
 
@@ -49,7 +53,13 @@ namespace Tina {
         return !glfwWindowShouldClose(window);
     }
 
+    void processInput(GLFWwindow* glfWwindow){
+        if (glfwGetKey(glfWwindow, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(glfWwindow, true);
+    }
+
     void Window::update() {
+        processInput(this->window);
         //printf("Window::update\n");
         /* Render here */
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
