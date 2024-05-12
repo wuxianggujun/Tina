@@ -8,7 +8,7 @@
 #include <cassert>
 #include <cstdio>
 #include "tool/GlfwTool.hpp"
-#include "glad/gl.h"
+//#include "glad/gl.h"
 #include "framework/log/Log.hpp"
 
 namespace Tina {
@@ -36,18 +36,19 @@ namespace Tina {
 
         /* Make the window's context current */
         glfwMakeContextCurrent(window);
-
-        gladLoadGL(glfwGetProcAddress);
+        glfwSetWindowUserPointer(window, this);
+//        gladLoadGL(glfwGetProcAddress);
         glfwSwapInterval(1);
         return true;
     }
 
     void Window::destroy() {
         printf("Window::destroy\n");
-        //glfwMakeContextCurrent(nullptr);
-        glfwDestroyWindow(this->window);
+        glfwMakeContextCurrent(nullptr);
+        if (this->window) {
+            glfwDestroyWindow(this->window);
+        }
         glfwTerminate();
-        this->window = nullptr;
     }
 
     bool Window::shouldClose() const {
@@ -62,16 +63,26 @@ namespace Tina {
     }
 
     void Window::update() {
-        processInput(this->window);
+        //processInput(this->window);
+        glfwMakeContextCurrent(this->window);
+
+        if (glfwGetKey(this->window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+            glfwSetWindowShouldClose(this->window, true);
+            //glfwDestroyWindow(this->window);
+        }
         //printf("Window::update\n");
         /* Render here */
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glClearColor(49.f / 255, 77.f / 255, 121.f / 255, 1.f);
+//        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+//        glClearColor(49.f / 255, 77.f / 255, 121.f / 255, 1.f);
         /* Swap front and back buffers */
         glfwSwapBuffers(window);
 
         /* Poll for and process events */
         glfwPollEvents();
+    }
+
+    Window::~Window() {
+        this->window = nullptr;
     }
 
 

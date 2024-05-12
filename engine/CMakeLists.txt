@@ -14,12 +14,15 @@ target_link_libraries(${SUBMODULE_PROJECT_NAME} PUBLIC ${TINA_LIBRARIES})
 add_definitions(
     -DGLFW_INCLUDE_NONE
     -D_CRT_SECURE_NO_WARNINGS
-    -DUNICODE)
+    -DUNICODE
+)
 
 if(msvc)
+  add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
+  add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
   target_compile_options(${SUBMODULE_PROJECT_NAME} PRIVATE "/bigobj")
 else()
-  add_compile_options(-Wa,-mbig-obj)
+  #add_compile_options(-Wa,-mbig-obj)
 endif()
 
 target_include_directories(${SUBMODULE_PROJECT_NAME} PUBLIC ${SUBMODULE_PROJECT_DIR}/src)

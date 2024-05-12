@@ -14,19 +14,23 @@ namespace Tina {
     class Window {
 
     public:
-        Window(const char* title,size_t width,size_t height);
-        ~Window() =delete;
+        explicit Window(const char *title, size_t width, size_t height);
+
+        ~Window();
 
         bool initialize();
+
         void destroy();
+
         void update();
+
         [[nodiscard]] bool shouldClose() const;
 
     private:
-        GLFWwindow* window{};
+        GLFWwindow *window = nullptr;
         size_t windowWidth = 0;
         size_t windowHeight = 0;
-        const char* windowTitle = nullptr;
+        const char *windowTitle = nullptr;
     };
 
 } // Tina

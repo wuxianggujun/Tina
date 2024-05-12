@@ -7,6 +7,6 @@
 
 namespace Tina {
     void GlfwTool::ErrorCallback(int error, const char *description) {
-        printf("Glfw Error %d: %s\n", error, description);
+        LOG_TRACE(description);
     }
 } // Tina

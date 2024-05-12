@@ -106,7 +106,10 @@ namespace Tina {
     public:
         class LogLevelFormatterFlag : public spdlog::custom_flag_formatter {
         public:
-            void format(const spdlog::details::log_msg &msg, const std::tm &, spdlog::memory_buf_t &dest) override {}
+            void format(const spdlog::details::log_msg &msg, const std::tm &, spdlog::memory_buf_t &dest) override {
+                std::string tina_text = "Tina";
+                dest.append(tina_text.data(), tina_text.data() + tina_text.size());
+            }
 
             [[nodiscard]] std::unique_ptr<custom_flag_formatter> clone() const override {
                 return spdlog::details::make_unique<LogLevelFormatterFlag>();

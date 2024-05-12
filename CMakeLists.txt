@@ -58,6 +58,8 @@ endif()
 include(CheckCXXCompilerFlag)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_FLAGS "/utf-8")
+set(CMAKE_C_FLAGS "/utf-8")
 if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     set(CMAKE_CXX_STANDARD 20)
 endif()
@@ -81,7 +83,8 @@ if(TINA_AUTOUPDATE_SUBMODULE)
 endif()
 
 if(MSVC)
-    #add_compile_options("/source-charset:utf-8")
+    add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
+    add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
     string(APPEND CMAKE_CXX_FLAGS " /Zc:__cplusplus /MP")
 endif()
 

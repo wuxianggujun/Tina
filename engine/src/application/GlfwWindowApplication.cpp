@@ -3,7 +3,7 @@
 //
 
 #include "GlfwWindowApplication.hpp"
-#include <glad/gl.h>
+//#include <glad/gl.h>
 #include <GLFW/glfw3.h>
 
 namespace Tina {
@@ -22,8 +22,8 @@ namespace Tina {
             auto deltaTime = static_cast<float>(currentTime - previousTime);
             previousTime = currentTime;
 
-            glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
-            glClearColor(49.f/255,77.f/255,121.f/255,1.f);
+            //glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+            //glClearColor(49.f/255,77.f/255,121.f/255,1.f);
 
             glfwPollEvents();
             update(deltaTime);
@@ -62,7 +62,7 @@ namespace Tina {
         glfwSetWindowPos(_windowHandle, (screenWidth - windowWidth) / 2, (screenHeight - windowHeight) / 2);
 
         glfwMakeContextCurrent(_windowHandle);
-        gladLoadGL(glfwGetProcAddress);
+        //gladLoadGL(glfwGetProcAddress);
 
 
 
@@ -73,8 +73,8 @@ namespace Tina {
 
     bool GlfwWindowApplication::load() {
         /* Render here */
-        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
-        glClearColor(49.f/255,77.f/255,121.f/255,1.f);
+        //glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+        //glClearColor(49.f/255,77.f/255,121.f/255,1.f);
         glfwSwapInterval(1);
         return true;
     }

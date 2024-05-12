@@ -3,13 +3,15 @@
 //
 
 #include <cstdio>
+
 #include "GameApplication.hpp"
 #include "framework/Configuration.hpp"
 #include "framework/Window.hpp"
 
 namespace Tina {
     GameApplication::GameApplication(const Configuration &configuration) {
-        window = new Window(configuration.windowTitle,configuration.windowWidth,configuration.windowHeight);
+        window = std::make_shared<Window>(configuration.windowTitle, configuration.windowWidth,
+                                          configuration.windowHeight);
     }
 
     bool GameApplication::initialize() {
