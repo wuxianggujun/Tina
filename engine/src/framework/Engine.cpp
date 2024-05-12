@@ -18,7 +18,7 @@ namespace Tina {
 
     int Engine::run(std::unique_ptr<Application> application) {
         isRunning = application->initialize();
-        while ((isRunning =application->isRunning())){
+        while (!(isRunning =application->isRunning())){
             application->run();
         }
         application->close();
