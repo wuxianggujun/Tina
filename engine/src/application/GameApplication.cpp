@@ -21,7 +21,6 @@ namespace Tina {
     }
 
     void GameApplication::run() {
-        //printf("GameApplication::run\n");
         window->update();
     }
 

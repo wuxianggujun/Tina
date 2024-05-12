@@ -43,21 +43,22 @@ namespace Tina {
     }
 
     void Window::destroy() {
-        glfwMakeContextCurrent(nullptr);
-        if (window) {
-            glfwDestroyWindow(window);
-        }
+        printf("Window::destroy\n");
+        //glfwMakeContextCurrent(nullptr);
+        glfwDestroyWindow(this->window);
         glfwTerminate();
-        window = nullptr;
+        this->window = nullptr;
     }
 
     bool Window::shouldClose() const {
-        return glfwWindowShouldClose(window);
+        return !glfwWindowShouldClose(window);
     }
 
     void processInput(GLFWwindow *glfWwindow) {
-        if (glfwGetKey(glfWwindow, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        if (glfwGetKey(glfWwindow, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             glfwSetWindowShouldClose(glfWwindow, true);
+            glfwDestroyWindow(glfWwindow);
+        }
     }
 
     void Window::update() {

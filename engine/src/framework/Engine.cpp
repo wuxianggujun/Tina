@@ -10,7 +10,7 @@ namespace Tina {
     Engine *Engine::instance_ = nullptr;
 
     Engine *Engine::getSingleton() {
-        if (instance_ == nullptr){
+        if (instance_ == nullptr) {
             instance_ = new Engine();
         }
         return instance_;
@@ -18,8 +18,9 @@ namespace Tina {
 
     int Engine::run(std::unique_ptr<Application> application) {
         isRunning = application->initialize();
-        while (!(isRunning =application->isRunning())){
+        while (isRunning) {
             application->run();
+            isRunning = application->isRunning();
         }
         application->close();
         return 0;

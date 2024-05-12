@@ -21,7 +21,7 @@ namespace Tina {
         void run() override;
         void close() override;
     private:
-        Window * window = nullptr;
+        Window* window = nullptr;
     };
 
 } // Tina
