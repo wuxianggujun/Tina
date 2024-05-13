@@ -7,7 +7,12 @@
 
 #include <cstdint>
 
-class GLFWwindow;
+#include <bx/bx.h>
+#include <bgfx/bgfx.h>
+#include <bgfx/platform.h>
+#include <GLFW/glfw3.h>
+
+#include <GLFW/glfw3native.h>
 
 namespace Tina {
 

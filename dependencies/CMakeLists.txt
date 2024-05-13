@@ -41,7 +41,7 @@ option(TRACY_ONLY_IPV4 "IPv4 only" ON)
 add_subdirectory(bgfx.cmake)
 add_subdirectory(GSL)
 add_subdirectory(glfw)
-#add_subdirectory(glad)
+add_subdirectory(glad)
 add_subdirectory(glm)
 add_subdirectory(spdlog)
 add_subdirectory(stb-cmake)
@@ -55,7 +55,7 @@ set(TINA_LIBRARIES
     bgfx
     glfw
     glm
-    #glad
+    glad
     spdlog
     stb::image
     Microsoft.GSL::GSL

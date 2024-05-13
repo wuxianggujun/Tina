@@ -6,11 +6,10 @@
 
 #include "GameApplication.hpp"
 #include "framework/Configuration.hpp"
-#include "framework/Window.hpp"
 
 namespace Tina {
     GameApplication::GameApplication(const Configuration &configuration) {
-        window = std::make_shared<Window>(configuration.windowTitle, configuration.windowWidth,
+        window = std::make_unique<Window>(configuration.windowTitle, configuration.windowWidth,
                                           configuration.windowHeight);
     }
 

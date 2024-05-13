@@ -6,6 +6,7 @@
 #define TINA_APPLICATION_GAMEAPPLICATION_HPP
 
 #include <memory>
+#include "framework/Window.hpp"
 #include "framework/Application.hpp"
 
 namespace Tina {
@@ -27,7 +28,7 @@ namespace Tina {
         void close() override;
 
     private:
-        std::shared_ptr<Window> window;
+        std::unique_ptr<Window> window;
     };
 
 } // Tina

@@ -3,12 +3,10 @@
 //
 
 #include "Window.hpp"
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
 #include <cassert>
 #include <cstdio>
 #include "tool/GlfwTool.hpp"
-//#include "glad/gl.h"
+#include "glad/gl.h"
 #include "framework/log/Log.hpp"
 
 namespace Tina {
@@ -24,7 +22,6 @@ namespace Tina {
         glfwSetErrorCallback(GlfwTool::ErrorCallback);
         if (!glfwInit())return false;
 
-        glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
         glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
@@ -37,7 +34,7 @@ namespace Tina {
         /* Make the window's context current */
         glfwMakeContextCurrent(window);
         glfwSetWindowUserPointer(window, this);
-//        gladLoadGL(glfwGetProcAddress);
+        gladLoadGL(glfwGetProcAddress);
         glfwSwapInterval(1);
         return true;
     }
@@ -45,9 +42,12 @@ namespace Tina {
     void Window::destroy() {
         printf("Window::destroy\n");
         glfwMakeContextCurrent(nullptr);
-        if (this->window) {
+        glfwSetWindowUserPointer(window, nullptr);
+        //exit(EXIT_SUCCESS);
+      /*  if (this->window) {
             glfwDestroyWindow(this->window);
-        }
+        }*/
+
         glfwTerminate();
     }
 
@@ -63,22 +63,18 @@ namespace Tina {
     }
 
     void Window::update() {
-        //processInput(this->window);
-        glfwMakeContextCurrent(this->window);
+        processInput(this->window);
+        //glfwMakeContextCurrent(this->window);
 
-        if (glfwGetKey(this->window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-            glfwSetWindowShouldClose(this->window, true);
-            //glfwDestroyWindow(this->window);
-        }
-        //printf("Window::update\n");
         /* Render here */
-//        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-//        glClearColor(49.f / 255, 77.f / 255, 121.f / 255, 1.f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glClearColor(49.f / 255, 77.f / 255, 121.f / 255, 1.f);
         /* Swap front and back buffers */
         glfwSwapBuffers(window);
 
         /* Poll for and process events */
         glfwPollEvents();
+
     }
 
     Window::~Window() {
