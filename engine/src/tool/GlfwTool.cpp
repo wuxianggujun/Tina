@@ -4,11 +4,13 @@
 
 #include "GlfwTool.hpp"
 #include "framework/log/Log.hpp"
+#include "GLFW/glfw3.h"
 #include <iostream>
 
 namespace Tina {
     void GlfwTool::ErrorCallback(int error, const char *description) {
         //LOG_TRACE(description);
-        std::cout << "Glfw error: " <<"(" << error << ") " << description << std::endl;
+        if(error == 65545) return;
+        LOG_FMT_TRACE("GLFW Error {0} {1}",error,description);
     }
 } // Tina

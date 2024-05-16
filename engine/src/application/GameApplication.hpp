@@ -6,6 +6,7 @@
 #define TINA_APPLICATION_GAMEAPPLICATION_HPP
 
 #include <memory>
+#include "framework/Core.hpp"
 #include "framework/Window.hpp"
 #include "framework/Application.hpp"
 

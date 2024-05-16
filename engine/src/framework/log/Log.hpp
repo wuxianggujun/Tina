@@ -162,6 +162,7 @@ namespace Tina {
 
 #define LOG_INIT(path, mode, ...) Tina::Logger::getInstance().init(path,mode,##__VA_ARGS__);
 #define LOG_TRACE(fmt, ...) Tina::Logger::getInstance().log({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Trace, fmt, ##__VA_ARGS__);
+#define LOG_FMT_TRACE(fmt, ...) Tina::Logger::getInstance().printf({__FILE__, __LINE__, __FUNCTION__},Tina::LogLevel::Trace, fmt, ##__VA_ARGS__);
 
 
 #endif // TINA_FRAMEWORK_LOG_HPP

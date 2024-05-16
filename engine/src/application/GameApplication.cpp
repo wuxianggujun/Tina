@@ -9,24 +9,25 @@
 
 namespace Tina {
     GameApplication::GameApplication(const Configuration &configuration) {
-        window = std::make_unique<Window>(configuration.windowTitle, configuration.windowWidth,
-                                          configuration.windowHeight);
-    }
-
-    bool GameApplication::initialize() {
-        return window->initialize();
-    }
-
-    void GameApplication::close() {
-        window->destroy();
+       /* window = std::make_unique<Window>(configuration.windowTitle, configuration.windowWidth,
+                                          configuration.windowHeight);*/
     }
 
     void GameApplication::run() {
-        window->update();
+       /* window->update();*/
     }
 
     bool GameApplication::isRunning() {
-        return window->shouldClose();
+       /* return window->shouldClose();*/
+        return true;
+    }
+
+    bool GameApplication::initialize() {
+        return false;
+    }
+
+    void GameApplication::close() {
+        /*Application::close();*/
     }
 
 

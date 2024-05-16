@@ -6,27 +6,44 @@
 #define TINA_ENGINE_HPP
 
 #include <memory>
+#include "Core.hpp"
 
 namespace Tina {
     class Application;
+
     class Configuration;
 
     class Engine {
-    private:
-        static Engine* instance_;
+    public:
         Engine() = default;
-    public:
-        Engine(const Engine&) =delete;
-        Engine& operator=(const Engine&) = delete;
+
+        explicit Engine(Scope<Application> application);
+
+        Engine(const Engine &) = delete;
+
+        Engine &operator=(const Engine &) = delete;
+
+        Engine(Engine &&other) = delete;
+
+        Engine &operator=(Engine &&) = delete;
+
+        virtual ~Engine();
 
     public:
-        static  Engine* getSingleton();
+        static ENGINE_API Engine *create(Scope<Application> application);
 
-        virtual ~Engine() =default;
+        static ENGINE_API void destroy(Engine *engine);
 
-        int run(std::unique_ptr<Application> application);
+    protected:
+        ENGINE_API void init(Configuration config);
+
+    public:
+        ENGINE_API int run(Configuration config);
+
+        ENGINE_API void shutdown();
+
     private:
-        bool isRunning = false;
+        Scope<Application> engineApplication;
     };
 
 } // Tina
