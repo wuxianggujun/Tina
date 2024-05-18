@@ -43,7 +43,14 @@ namespace Tina {
         bgfx::renderFrame();
         bgfx::Init bgfxInit;
 
-        GlfwTool::getNativeWindow(bgfxInit);
+#if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
+        bgfxInit.platformData.ndt = glfwGetX11Display();
+    bgfxInit.platformData.nwh = (void*)(uintptr_t)glfwGetX11Window(window);
+#elif BX_PLATFORM_OSX
+        bgfxInit.platformData.nwh = glfwGetCocoaWindow(window);
+#elif BX_PLATFORM_WINDOWS
+        bgfxInit.platformData.nwh = glfwGetWin32Window(window);
+#endif
 
         glfwGetWindowSize(window, &width, &height);
 

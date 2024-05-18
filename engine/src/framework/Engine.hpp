@@ -27,7 +27,7 @@ namespace Tina {
 
         Engine &operator=(Engine &&) = delete;
 
-        virtual ~Engine();
+        virtual ~Engine() = default;
 
     public:
         static ENGINE_API Engine *create(Scope<Application> application);
@@ -36,6 +36,7 @@ namespace Tina {
 
     protected:
         ENGINE_API void init(Configuration config);
+        ENGINE_API void stop();
 
     public:
         ENGINE_API int run(Configuration config);

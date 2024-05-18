@@ -12,12 +12,13 @@ namespace Tina {
     Engine::Engine(Scope<Application> application) : engineApplication(std::move(application)) {
     }
 
+/*
     Engine::~Engine() {
-        if (isRunning)
-        {
+        if (isRunning) {
             shutdown();
         }
     }
+*/
 
     void Engine::init(Configuration config) {
         isRunning = engineApplication->initialize();
@@ -28,17 +29,17 @@ namespace Tina {
 
         while (isRunning) {
             if (!engineApplication->isRunning()) {
-                isRunning = false;
+                stop();
                 break;
             }
             engineApplication->run();
         }
-
+        //shutdown();
         return EXIT_SUCCESS;
     }
 
     void Engine::shutdown() {
-        isRunning = false;
+        stop();
         engineApplication->close();
     }
 
@@ -53,12 +54,15 @@ namespace Tina {
 
     void Engine::destroy(Engine *engine) {
         assert(scopeEngine.get() == engine);
-        if (scopeEngine)
-        {
+        if (scopeEngine) {
             scopeEngine->shutdown();
             scopeEngine.reset();
             scopeEngine = nullptr;
-        }     
+        }
+    }
+
+    void Engine::stop() {
+        isRunning = false;
     }
 
 

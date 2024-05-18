@@ -1,5 +1,5 @@
 if(MSVC)
-  add_compile_options(/W0)
+  add_compile_options(/W3)
 else()
   add_compile_options(-w)
 endif()
@@ -39,7 +39,7 @@ OPTION(TRACY_ON_DEMAND "" ON)
 option(TRACY_ONLY_IPV4 "IPv4 only" ON)
 
 add_subdirectory(bgfx.cmake)
-add_subdirectory(GSL)
+#add_subdirectory(GSL)
 add_subdirectory(glfw)
 #add_subdirectory(glad)
 add_subdirectory(glm)
@@ -58,7 +58,7 @@ set(TINA_LIBRARIES
     #glad
     spdlog
     stb::image
-    Microsoft.GSL::GSL
+    #Microsoft.GSL::GSL
     EnTT::EnTT
     Tracy::TracyClient
     CACHE INTERNAL "")
