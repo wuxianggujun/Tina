@@ -10,11 +10,11 @@
 #include <bx/bx.h>
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
 #include <string>
 #include <utility>
 #include <filesystem>
+
+#include "tool/GlfwTool.hpp"
 
 namespace Tina {
 
@@ -64,10 +64,12 @@ namespace Tina {
 
         void setVSync(bool enabled);
 
-        void setCursorPosition(double xPos,double yPos);
+        void setCursorPosition(double xPos, double yPos);
+
         void setWindowMode(WindowMode mode, size_t width = 0, size_t height = 0);
 
         void maximizeWindow();
+
         void restoreWindow();
 
         [[nodiscard]] bool shouldClose() const;

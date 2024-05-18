@@ -17,15 +17,16 @@ namespace Tina {
     }
 
     void Engine::init(Configuration config) {
-        engineApplication->initialize();
+        isRunning = engineApplication->initialize();
     }
 
     int Engine::run(Configuration config) {
         init(config);
 
-        while (true) {
+        while (isRunning) {
             engineApplication->run();
             if (!engineApplication->isRunning()) {
+                isRunning = false;
                 break;
             }
         }
@@ -34,6 +35,7 @@ namespace Tina {
     }
 
     void Engine::shutdown() {
+        isRunning = false;
         engineApplication->close();
     }
 

@@ -18,14 +18,7 @@ namespace Tina {
         glfwSetErrorCallback(GlfwTool::ErrorCallback);
         if (!glfwInit())
             return false;
-        videoMode = *(glfwGetVideoMode(glfwGetPrimaryMonitor()));
-#ifdef DEBUG
-        glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
-#endif
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 6);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+
         window = glfwCreateWindow(1080, 720,
                                   "Tina", nullptr, nullptr);
 
@@ -33,7 +26,14 @@ namespace Tina {
             return false;
         }
 
-        glfwMakeContextCurrent(window);
+        bgfx::Init bgfxInit;
+        //bgfxInit.platformData.nwh = glfwGetWin32Window(window);
+        bgfxInit.type = bgfx::RendererType::Count; // Automatically choose a renderer.
+        bgfxInit.resolution.width = 1280;
+        bgfxInit.resolution.height = 720;
+        bgfxInit.resolution.reset = BGFX_RESET_VSYNC;
+        bgfx::init(bgfxInit);
+
 
         return true;
     }
@@ -51,7 +51,6 @@ namespace Tina {
     void processInput(GLFWwindow *glfWwindow) {
         if (glfwGetKey(glfWwindow, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
             glfwSetWindowShouldClose(glfWwindow, true);
-            glfwDestroyWindow(glfWwindow);
         }
     }
 
@@ -59,7 +58,7 @@ namespace Tina {
         processInput(this->window);
 
         /* Swap front and back buffers */
-        //glfwSwapBuffers(window);
+//        glfwSwapBuffers(window);
 
         /* Poll for and process events */
         glfwPollEvents();

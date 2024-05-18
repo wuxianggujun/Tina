@@ -44,6 +44,7 @@ namespace Tina {
 
     private:
         Scope<Application> engineApplication;
+        bool isRunning = false;
     };
 
 } // Tina

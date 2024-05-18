@@ -4,7 +4,6 @@
 
 #include "GlfwTool.hpp"
 #include "framework/log/Log.hpp"
-#include "GLFW/glfw3.h"
 #include <iostream>
 
 namespace Tina {
@@ -13,5 +12,9 @@ namespace Tina {
         if (error == 65545) return;
         std::cout << "Glfw Error: " << error << " : " << description << std::endl;
         //LOG_FMT_TRACE("GLFW Error {0} {1}",error,description);
+    }
+
+    void *GlfwTool::getGlfwNativeWindow() {
+        return nullptr;
     }
 } // Tina
