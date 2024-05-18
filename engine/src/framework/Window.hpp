@@ -61,8 +61,11 @@ namespace Tina {
 
     public:
         Window();
+        ~Window() = default;
 
-        bool handleResize();
+        void update();
+        void destroy();
+        bool  isRunning();
 
         int fail;
 

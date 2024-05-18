@@ -49,4 +49,21 @@ namespace Tina {
         }
 
     }
+
+    void Window::update() {
+
+        glfwPollEvents();
+
+        //bgfx::frame();
+    }
+
+    void Window::destroy() {
+        glfwDestroyWindow(window);
+        bgfx::shutdown();
+        glfwTerminate();
+    }
+
+    bool Window::isRunning() {
+        return !glfwWindowShouldClose(window);
+    }
 } // Tina
