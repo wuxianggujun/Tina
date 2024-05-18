@@ -13,14 +13,30 @@
 
 namespace Tina {
 
-    enum class JsonType{
-
+    enum class JsonType {
+        kNULL,
+        kBOOL,
+        kNUMBER,
+        kSTRING,
+        kARRAY,
+        kOBJECT
     };
 
-    class Json final{
+    class JsonVlaue;
+
+    class Json final {
+
+    public:
+        using _array = std::vector<Json>;
+        using _object = std::unordered_map<std::string, Json>;
+    public:
+
+
+    public:
+
 
     };
 
 } // Tina
 
-#endif //TINA_FRAMEWORK_JSON_JSON_HPP
+#endif //TINA_FRAMEWORK_JSON_HPP

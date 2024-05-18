@@ -11,7 +11,6 @@
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
 #include <GLFW/glfw3.h>
-
 #include <GLFW/glfw3native.h>
 #include <string>
 #include <utility>

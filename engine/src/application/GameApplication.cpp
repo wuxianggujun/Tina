@@ -9,25 +9,37 @@
 
 namespace Tina {
     GameApplication::GameApplication(const Configuration &configuration) {
-       /* window = std::make_unique<Window>(configuration.windowTitle, configuration.windowWidth,
-                                          configuration.windowHeight);*/
+        WindowProps props;
+        props.width = 1080;
+        props.height = 720;
+        props.windowMode = WindowMode::WINDOWED;
+        props.title = "Tina";
+        props.posX = 20;
+        props.posY = 35;
+        window = createScope<Window>(std::move(props));
     }
 
     void GameApplication::run() {
-       /* window->update();*/
+        window->update();
     }
 
     bool GameApplication::isRunning() {
-       /* return window->shouldClose();*/
-        return true;
+        return window->shouldClose();
     }
 
     bool GameApplication::initialize() {
-        return false;
+        WindowProps props;
+        props.width = 1080;
+        props.height = 720;
+        props.windowMode = WindowMode::WINDOWED;
+        props.title = "Tina";
+        props.posX = 20;
+        props.posY = 35;
+        return window->initialize(props);
     }
 
     void GameApplication::close() {
-        /*Application::close();*/
+        window->destroy();
     }
 
 

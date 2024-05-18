@@ -6,7 +6,6 @@
 #include <cassert>
 #include <cstdio>
 #include "tool/GlfwTool.hpp"
-#include "glad/gl.h"
 #include "framework/log/Log.hpp"
 #include <stb/stb_image.h>
 #include "Core.hpp"
@@ -15,13 +14,6 @@ namespace Tina {
 
     bool Window::initialize(const WindowProps &props) {
         LOG_INIT("logs/log.log", Tina::LogMode::DEFAULT);
-
-        windowData.title = props.title;
-        windowData.width = props.width;
-        windowData.height = props.height;
-        windowData.posX = props.posX;
-        windowData.posY = props.posY;
-        windowData.windowMode = props.windowMode;
 
         glfwSetErrorCallback(GlfwTool::ErrorCallback);
         if (!glfwInit())
@@ -33,12 +25,15 @@ namespace Tina {
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 6);
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-//        glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
-        window = glfwCreateWindow(static_cast<int>(windowData.width), static_cast<int>(windowData.height),
-                                  windowData.title.c_str(), nullptr, nullptr);
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        window = glfwCreateWindow(1080, 720,
+                                  "Tina", nullptr, nullptr);
 
-        oldWindowModeParams.width = windowData.width;
-        oldWindowModeParams.height = windowData.height;
+        if (!window) {
+            return false;
+        }
+
+        glfwMakeContextCurrent(window);
 
         return true;
     }
@@ -63,11 +58,8 @@ namespace Tina {
     void Window::update() {
         processInput(this->window);
 
-        /* Render here */
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glClearColor(49.f / 255, 77.f / 255, 121.f / 255, 1.f);
         /* Swap front and back buffers */
-        glfwSwapBuffers(window);
+        //glfwSwapBuffers(window);
 
         /* Poll for and process events */
         glfwPollEvents();
@@ -79,6 +71,7 @@ namespace Tina {
     }
 
 
+/*
     void Window::setIcon(const std::filesystem::path &iconPath) {
         int width, height, channels;
         stbi_set_flip_vertically_on_load(0);
@@ -92,53 +85,54 @@ namespace Tina {
         glfwSetWindowIcon(window, 1, images);
         stbi_image_free(data);
     }
+*/
 
-    void Window::setWindowMode(WindowMode mode, size_t width, size_t height) {
-        if (!window)
-            return;
-        if (mode == windowData.windowMode)
-            return;
+    /* void Window::setWindowMode(WindowMode mode, size_t width, size_t height) {
+         if (!window)
+             return;
+         if (mode == windowData.windowMode)
+             return;
 
-        GLFWmonitor *monitor = nullptr;
+         GLFWmonitor *monitor = nullptr;
 
-        if (windowData.windowMode == WindowMode::WINDOWED) {
-            oldWindowModeParams.width = windowData.width;
-            oldWindowModeParams.height = windowData.height;
-            glfwGetWindowPos(window, reinterpret_cast<int *>(&(oldWindowModeParams.xPos)),
-                             reinterpret_cast<int *>(&(oldWindowModeParams.yPos)));
-        }
+         if (windowData.windowMode == WindowMode::WINDOWED) {
+             oldWindowModeParams.width = windowData.width;
+             oldWindowModeParams.height = windowData.height;
+             glfwGetWindowPos(window, reinterpret_cast<int *>(&(oldWindowModeParams.xPos)),
+                              reinterpret_cast<int *>(&(oldWindowModeParams.yPos)));
+         }
 
-        if (mode == WindowMode::BORDERLESS) {
-            width = videoMode.width;
-            height = videoMode.height;
-            monitor = glfwGetPrimaryMonitor();
-        } else if (mode == WindowMode::WINDOWED && (width == 0 || height == 0)) {
-            width = oldWindowModeParams.width;
-            height = oldWindowModeParams.height;
-        } else if (mode == WindowMode::FULLSCREEN) {
-            if (width == 0 || height == 0) {
-                width = videoMode.width;
-                height = videoMode.height;
-            }
-            monitor = glfwGetPrimaryMonitor();
-        } else if (mode != WindowMode::WINDOWED) {
-            if (width == 0 || height == 0) {
-                width = oldWindowModeParams.width;
-                height = oldWindowModeParams.height;
-            }
-            mode = WindowMode::WINDOWED;
-        }
+         if (mode == WindowMode::BORDERLESS) {
+             width = videoMode.width;
+             height = videoMode.height;
+             monitor = glfwGetPrimaryMonitor();
+         } else if (mode == WindowMode::WINDOWED && (width == 0 || height == 0)) {
+             width = oldWindowModeParams.width;
+             height = oldWindowModeParams.height;
+         } else if (mode == WindowMode::FULLSCREEN) {
+             if (width == 0 || height == 0) {
+                 width = videoMode.width;
+                 height = videoMode.height;
+             }
+             monitor = glfwGetPrimaryMonitor();
+         } else if (mode != WindowMode::WINDOWED) {
+             if (width == 0 || height == 0) {
+                 width = oldWindowModeParams.width;
+                 height = oldWindowModeParams.height;
+             }
+             mode = WindowMode::WINDOWED;
+         }
 
-        windowData.width = width;
-        windowData.height = height;
+         windowData.width = width;
+         windowData.height = height;
 
-        // TODO 后面写窗口重置事件
+         // TODO 后面写窗口重置事件
 
 
-        glfwSetWindowMonitor(window, monitor, static_cast<int>(oldWindowModeParams.xPos),
-                             static_cast<int>(oldWindowModeParams.yPos), static_cast<int>(width),
-                             static_cast<int>(height), videoMode.refreshRate);
-    }
+         glfwSetWindowMonitor(window, monitor, static_cast<int>(oldWindowModeParams.xPos),
+                              static_cast<int>(oldWindowModeParams.yPos), static_cast<int>(width),
+                              static_cast<int>(height), videoMode.refreshRate);
+     }*/
 
     void Window::maximizeWindow() {
         glfwMaximizeWindow(window);
@@ -150,6 +144,10 @@ namespace Tina {
 
     void Window::setCursorPosition(double xPos, double yPos) {
         glfwSetCursorPos(window, xPos, yPos);
+    }
+
+    Window::Window(const WindowProps &props) {
+
     }
 
 
