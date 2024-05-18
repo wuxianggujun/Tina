@@ -12,142 +12,41 @@
 
 namespace Tina {
 
-    bool Window::initialize(const WindowProps &props) {
-        LOG_INIT("logs/log.log", Tina::LogMode::DEFAULT);
-
+    Window::Window() {
+        // inits glfw
+        if (!glfwInit()) {
+            fail = 1;
+            return;
+        }
         glfwSetErrorCallback(GlfwTool::ErrorCallback);
-        if (!glfwInit())
-            return false;
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        window = glfwCreateWindow(750, 750, "Platformer", nullptr, nullptr);
 
-        window = glfwCreateWindow(1080, 720,
-                                  "Tina", nullptr, nullptr);
-
-        if (!window) {
-            return false;
-        }
-
+        // Call bgfx::renderFrame before bgfx::init to signal to bgfx not to create a render thread.
+        bgfx::renderFrame();
         bgfx::Init bgfxInit;
-        //bgfxInit.platformData.nwh = glfwGetWin32Window(window);
-        bgfxInit.type = bgfx::RendererType::Count; // Automatically choose a renderer.
-        bgfxInit.resolution.width = 1280;
-        bgfxInit.resolution.height = 720;
+
+        //Platform specific config
+#if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
+        bgfxInit.platformData.ndt = glfwGetX11Display();
+    bgfxInit.platformData.nwh = (void*)(uintptr_t)glfwGetX11Window(window);
+#elif BX_PLATFORM_OSX
+        bgfxInit.platformData.nwh = glfwGetCocoaWindow(window);
+#elif BX_PLATFORM_WINDOWS
+        bgfxInit.platformData.nwh = glfwGetWin32Window(window);
+#endif
+
+        glfwGetWindowSize(window, &width, &height);
+
+
+        bgfxInit.resolution.width = (uint32_t) width * 3;
+        bgfxInit.resolution.height = (uint32_t) height * 3;
         bgfxInit.resolution.reset = BGFX_RESET_VSYNC;
-        bgfx::init(bgfxInit);
 
-
-        return true;
-    }
-
-    void Window::destroy() {
-        printf("Window::destroy\n");
-        glfwDestroyWindow(window);
-        glfwTerminate();
-    }
-
-    bool Window::shouldClose() const {
-        return !glfwWindowShouldClose(window);
-    }
-
-    void processInput(GLFWwindow *glfWwindow) {
-        if (glfwGetKey(glfWwindow, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-            glfwSetWindowShouldClose(glfWwindow, true);
+        if (!bgfx::init(bgfxInit)) {
+            fail = 1;
+            return;
         }
-    }
-
-    void Window::update() {
-        processInput(this->window);
-
-        /* Swap front and back buffers */
-//        glfwSwapBuffers(window);
-
-        /* Poll for and process events */
-        glfwPollEvents();
 
     }
-
-    Window::~Window() {
-        destroy();
-    }
-
-
-/*
-    void Window::setIcon(const std::filesystem::path &iconPath) {
-        int width, height, channels;
-        stbi_set_flip_vertically_on_load(0);
-        stbi_uc *data = stbi_load(iconPath.string().c_str(), &width, &height, &channels, 4);
-        //ASSERT(data, "Failed to load image!");
-        //ASSERT(channels == 4, "Icon must be RGBA");
-        GLFWimage images[1];
-        images[0].width = width;
-        images[0].height = height;
-        images[0].pixels = data;
-        glfwSetWindowIcon(window, 1, images);
-        stbi_image_free(data);
-    }
-*/
-
-    /* void Window::setWindowMode(WindowMode mode, size_t width, size_t height) {
-         if (!window)
-             return;
-         if (mode == windowData.windowMode)
-             return;
-
-         GLFWmonitor *monitor = nullptr;
-
-         if (windowData.windowMode == WindowMode::WINDOWED) {
-             oldWindowModeParams.width = windowData.width;
-             oldWindowModeParams.height = windowData.height;
-             glfwGetWindowPos(window, reinterpret_cast<int *>(&(oldWindowModeParams.xPos)),
-                              reinterpret_cast<int *>(&(oldWindowModeParams.yPos)));
-         }
-
-         if (mode == WindowMode::BORDERLESS) {
-             width = videoMode.width;
-             height = videoMode.height;
-             monitor = glfwGetPrimaryMonitor();
-         } else if (mode == WindowMode::WINDOWED && (width == 0 || height == 0)) {
-             width = oldWindowModeParams.width;
-             height = oldWindowModeParams.height;
-         } else if (mode == WindowMode::FULLSCREEN) {
-             if (width == 0 || height == 0) {
-                 width = videoMode.width;
-                 height = videoMode.height;
-             }
-             monitor = glfwGetPrimaryMonitor();
-         } else if (mode != WindowMode::WINDOWED) {
-             if (width == 0 || height == 0) {
-                 width = oldWindowModeParams.width;
-                 height = oldWindowModeParams.height;
-             }
-             mode = WindowMode::WINDOWED;
-         }
-
-         windowData.width = width;
-         windowData.height = height;
-
-         // TODO 后面写窗口重置事件
-
-
-         glfwSetWindowMonitor(window, monitor, static_cast<int>(oldWindowModeParams.xPos),
-                              static_cast<int>(oldWindowModeParams.yPos), static_cast<int>(width),
-                              static_cast<int>(height), videoMode.refreshRate);
-     }*/
-
-    void Window::maximizeWindow() {
-        glfwMaximizeWindow(window);
-    }
-
-    void Window::restoreWindow() {
-        glfwRestoreWindow(window);
-    }
-
-    void Window::setCursorPosition(double xPos, double yPos) {
-        glfwSetCursorPos(window, xPos, yPos);
-    }
-
-    Window::Window(const WindowProps &props) {
-
-    }
-
-
 } // Tina

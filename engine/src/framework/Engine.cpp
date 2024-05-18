@@ -13,7 +13,10 @@ namespace Tina {
     }
 
     Engine::~Engine() {
-        shutdown();
+        if (isRunning)
+        {
+            shutdown();
+        }
     }
 
     void Engine::init(Configuration config) {
@@ -24,11 +27,11 @@ namespace Tina {
         init(config);
 
         while (isRunning) {
-            engineApplication->run();
             if (!engineApplication->isRunning()) {
                 isRunning = false;
                 break;
             }
+            engineApplication->run();
         }
 
         return EXIT_SUCCESS;
@@ -50,11 +53,12 @@ namespace Tina {
 
     void Engine::destroy(Engine *engine) {
         assert(scopeEngine.get() == engine);
-        if (scopeEngine) {
+        if (scopeEngine)
+        {
             scopeEngine->shutdown();
             scopeEngine.reset();
             scopeEngine = nullptr;
-        }
+        }     
     }
 
 

@@ -5,14 +5,24 @@
 #ifndef TINA_FRAMEWORK_WINDOW_HPP
 #define TINA_FRAMEWORK_WINDOW_HPP
 
-#include <cstdint>
+
+#include <iostream>
 
 #include <bx/bx.h>
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
-#include <string>
-#include <utility>
-#include <filesystem>
+#include <GLFW/glfw3.h>
+#include <bitset>
+
+#if BX_PLATFORM_LINUX
+#define GLFW_EXPOSE_NATIVE_X11
+#elif BX_PLATFORM_WINDOWS
+#define GLFW_EXPOSE_NATIVE_WIN32
+#elif BX_PLATFORM_OSX
+#define GLFW_EXPOSE_NATIVE_COCOA
+#endif
+
+#include <GLFW/glfw3native.h>
 
 #include "tool/GlfwTool.hpp"
 
@@ -50,57 +60,20 @@ namespace Tina {
     class Window {
 
     public:
-        explicit Window(const WindowProps &props);
+        Window();
 
-        ~Window();
+        bool handleResize();
 
-        bool initialize(const WindowProps &props);
-
-        void destroy();
-
-        void update();
-
-        void setIcon(const std::filesystem::path &iconPath);
-
-        void setVSync(bool enabled);
-
-        void setCursorPosition(double xPos, double yPos);
-
-        void setWindowMode(WindowMode mode, size_t width = 0, size_t height = 0);
-
-        void maximizeWindow();
-
-        void restoreWindow();
-
-        [[nodiscard]] bool shouldClose() const;
-
-        [[nodiscard]] size_t getWidth() const { return windowData.width; }
-
-        [[nodiscard]] size_t getHeight() const { return windowData.height; }
-
-        [[nodiscard]] size_t getPosX() const { return windowData.posX; }
-
-        [[nodiscard]] size_t getPosY() const { return windowData.posY; }
-
-    private:
-        struct WindowData {
-            std::string title;
-            size_t width, height, posX, posY;
-            bool vSync;
-            WindowMode windowMode;
-            bool maximized;
-        };
+        int fail;
 
         GLFWwindow *window;
-        GLFWvidmode videoMode;
-        WindowData windowData;
+        int width;
+        int height;
+        double xScale;
+        double yScale;
 
-        struct WindowModeParams {
-            size_t width, height;
-            size_t xPos, yPos;
-        };
+        static bool keyStates[GLFW_KEY_LAST + 1];
 
-        WindowModeParams oldWindowModeParams;
     };
 
 } // Tina
