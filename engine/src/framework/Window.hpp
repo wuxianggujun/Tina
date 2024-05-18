@@ -60,12 +60,16 @@ namespace Tina {
     class Window {
 
     public:
-        Window();
+        Window() = default;
         ~Window() = default;
 
+        bool initialize();
+
         void update();
+
         void destroy();
-        bool  isRunning();
+
+        bool isRunning() const;
 
         int fail;
 

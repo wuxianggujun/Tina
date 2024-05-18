@@ -30,7 +30,17 @@ namespace Tina {
         //LOG_FMT_TRACE("GLFW Error {0} {1}",error,description);
     }
 
-    void *GlfwTool::getGlfwNativeWindow() {
+    void *GlfwTool::getNativeWindow(bgfx::Init bgfxInit) {
+        //Platform specific config
+#if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
+        bgfxInit.platformData.ndt = glfwGetX11Display();
+    bgfxInit.platformData.nwh = (void*)(uintptr_t)glfwGetX11Window(window);
+#elif BX_PLATFORM_OSX
+        bgfxInit.platformData.nwh = glfwGetCocoaWindow(window);
+#elif BX_PLATFORM_WINDOWS
+        bgfxInit.platformData.nwh = glfwGetWin32Window(window);
+#endif
         return nullptr;
     }
+
 } // Tina

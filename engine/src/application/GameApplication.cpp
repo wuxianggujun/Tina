@@ -21,7 +21,7 @@ namespace Tina {
     }
 
     bool GameApplication::initialize() {
-        return true;
+        return window->initialize();
     }
 
     void GameApplication::close() {
