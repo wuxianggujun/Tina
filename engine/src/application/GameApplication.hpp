@@ -10,6 +10,8 @@
 #include "framework/Core.hpp"
 #include "framework/Window.hpp"
 #include "framework/Application.hpp"
+#include "framework/render/Renderer.hpp"
+#include "framework/render/WorldRenderer.hpp"
 
 namespace Tina {
 
@@ -31,6 +33,7 @@ namespace Tina {
 
     private:
         Scope<Window> window;
+        WorldRenderer* renderer;
     };
 
 } // Tina
