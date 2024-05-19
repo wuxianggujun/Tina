@@ -6,6 +6,7 @@
 #include "Engine.hpp"
 #include "Application.hpp"
 #include "Configuration.hpp"
+#include "time/Clock.hpp"
 
 namespace Tina {
 
@@ -27,12 +28,15 @@ namespace Tina {
     int Engine::run(Configuration config) {
         init(config);
 
+        Clock clock;
+
         while (isRunning) {
+            clock.update();
             if (!engineApplication->isRunning()) {
                 stop();
                 break;
             }
-            engineApplication->run();
+            engineApplication->run(clock.getDeltaTime());
         }
         //shutdown();
         return EXIT_SUCCESS;

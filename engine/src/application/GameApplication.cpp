@@ -17,9 +17,9 @@ namespace Tina {
 
     }
 
-    void GameApplication::run() {
+    void GameApplication::run(float deltaTime) {
         window->update();
-        renderer->render(0.1f);
+        renderer->render(deltaTime);
     }
 
     bool GameApplication::isRunning() {

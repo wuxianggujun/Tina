@@ -27,7 +27,7 @@ namespace Tina {
 
         bool isRunning() override;
 
-        void run() override;
+        void run(float deltaTime) override;
 
         void close() override;
 

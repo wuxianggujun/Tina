@@ -14,7 +14,7 @@ namespace Tina {
     protected:
         Engine *engine{};
     public:
-        virtual void run() = 0;
+        virtual void run(float deltaTime) = 0;
 
     public:
         virtual bool initialize() = 0;
