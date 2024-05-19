@@ -14,7 +14,6 @@ namespace Tina {
     GameApplication::GameApplication(const Configuration &configuration) {
         window = createScope<Window>();
         renderer = new WorldRenderer();
-
     }
 
     void GameApplication::run(float deltaTime) {
@@ -27,7 +26,9 @@ namespace Tina {
     }
 
     bool GameApplication::initialize() {
-        return window->initialize();
+        bool result = window->initialize();
+        renderer->initialize();
+        return result;
     }
 
     void GameApplication::close() {

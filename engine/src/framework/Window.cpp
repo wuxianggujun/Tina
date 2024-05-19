@@ -13,10 +13,7 @@
 namespace Tina {
 
     void Window::update() {
-
         glfwPollEvents();
-
-        //bgfx::frame();
     }
 
     void Window::destroy() {
