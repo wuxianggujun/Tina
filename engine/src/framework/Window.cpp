@@ -14,6 +14,17 @@ namespace Tina {
 
     void Window::update() {
         glfwPollEvents();
+
+        int oldWidth = width, oldHeight = height;
+        glfwGetWindowSize(window, &width, &height);
+        printf("width:%d,height:%d\n", width, height);
+
+        if (width != oldWidth || height != oldHeight){
+            bgfx::reset(width, height, BGFX_RESET_VSYNC);
+            bgfx::setViewRect(kClearView, 0, 0, bgfx::BackbufferRatio::Equal);
+        }
+
+        bgfx::frame();
     }
 
     void Window::destroy() {
@@ -60,6 +71,13 @@ namespace Tina {
             fail = 1;
             return false;
         }
+
+        // Set view 0 to the same dimensions as the window and to clear the color buffer.
+        bgfx::setViewClear(kClearView, BGFX_CLEAR_COLOR);
+        bgfx::setViewRect(kClearView, 0, 0, bgfx::BackbufferRatio::Equal);
+
+        bgfx::setDebug(BGFX_DEBUG_NONE);
+
         return true;
     }
 } // Tina

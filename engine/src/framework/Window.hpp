@@ -81,6 +81,9 @@ namespace Tina {
 
         static bool keyStates[GLFW_KEY_LAST + 1];
 
+    private:
+        const bgfx::ViewId kClearView = 0;
+
     };
 
 } // Tina
