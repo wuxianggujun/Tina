@@ -30,8 +30,10 @@ git submodule update --init --recursive
 ## Learning Resources
 
 - **[Platformer](https://github.com/Somgonk/Platformer)**
+- **[MitchEngine](https://github.com/wobbier/MitchEngine)**
 - **[CatDogEngine](https://github.com/CatDogEngine/CatDogEngine)**
 - **[wallet](https://github.com/wiimag/wallet)**
+- **[ant](https://github.com/ejoy/ant)**
 - **[Cross-Platform-Game-Engine](https://github.com/ThomasJowett/Cross-Platform-Game-Engine)**
 - **[ReflexEngine](https://github.com/dante1130/ReflexEngine)**
 - **[PhysicalEngine](https://github.com/Im-Rises/PhysicalEngine)**

@@ -1,5 +1,7 @@
 // main_test.cpp
 #include <gtest/gtest.h>
+#include "ecs/Entity.hpp"
+#include "ecs/Scene.hpp"
 
 // 测试套件示例
 class BasicTests : public ::testing::Test {
@@ -21,7 +23,9 @@ int globalFunc(int i){
 
 // 测试用例示例
 TEST_F(BasicTests, Test1) {
-    globalFunc(100);
+    Tina::Scene scene;
+    Tina::Entity groundEntity = scene.createEntity("ground");
+    Tina::Entity playerEntity = scene.createEntity("player");
 }
 
 TEST(BasicTests2, Test2) {
