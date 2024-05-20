@@ -19,10 +19,12 @@ namespace Tina {
         glfwGetWindowSize(window, &width, &height);
         printf("width:%d,height:%d\n", width, height);
 
-        if (width != oldWidth || height != oldHeight){
+        if (width != oldWidth || height != oldHeight) {
             bgfx::reset(width, height, BGFX_RESET_VSYNC);
             bgfx::setViewRect(kClearView, 0, 0, bgfx::BackbufferRatio::Equal);
         }
+        bgfx::touch(kClearView);
+        bgfx::setViewClear(kClearView, BGFX_CLEAR_COLOR, 0x333399FF);
 
         bgfx::frame();
     }
