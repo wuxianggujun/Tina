@@ -39,3 +39,5 @@ git submodule update --init --recursive
 - **[PhysicalEngine](https://github.com/Im-Rises/PhysicalEngine)**
 - **[spdlog_wrapper](https://github.com/gqw/spdlog_wrapper)**
 - **[klog](https://github.com/KkemChen/klog)**
+- **[Spatial.Engine](https://github.com/luizgabriel/Spatial.Engine)**
+- **[EraEngine](https://github.com/EldarMuradov/EraEngine)**

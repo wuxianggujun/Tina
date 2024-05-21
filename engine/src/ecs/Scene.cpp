@@ -21,7 +21,4 @@ namespace Tina {
         return entity;
     }
 
-    void Scene::destroyEntity(Entity entity) {
-
-    }
 } // Tina

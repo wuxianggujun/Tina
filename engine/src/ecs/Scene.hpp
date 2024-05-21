@@ -21,8 +21,6 @@ namespace Tina {
 
         Entity createEntity(std::string tag);
 
-        void destroyEntity(Entity entity);
-
         friend class Entity;
 
     };
