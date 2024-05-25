@@ -40,6 +40,10 @@ option(TRACY_ONLY_IPV4 "IPv4 only" ON)
 
 add_subdirectory(bgfx.cmake)
 #add_subdirectory(GSL)
+
+#find_package(GLFW3 REQUIRED)
+find_package(X11 REQUIRED)
+
 add_subdirectory(glfw)
 #add_subdirectory(glad)
 add_subdirectory(glm)
@@ -54,6 +58,7 @@ set(TINA_LIBRARIES
     bimg
     bgfx
     glfw
+    ${GLFW_LIBRARIES}
     glm
     #glad
     spdlog

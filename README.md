@@ -20,23 +20,23 @@ For Ubuntu compilation, you need to install the minimum version of git >=2.35,Yo
     sudo add-apt-repository ppa:git-core/ppa
     sudo apt update
     sudo apt install git
-```
-```shell
-sudo snap install cmake --classic
+    sudo apt install ninja-build
 ```
 
 ```shell
-sudo apt install libx11-dev libxext-dev libxtst-dev libxrender-dev libxmu-dev libxmuu-dev
+sudo snap install cmake --classic
+sudo ln -s /snap/cmake/current/bin/cmake /usr/bin/cmake
+sudo ln -s /snap/cmake/current/bin/ccmake /usr/bin/ccmake
+sudo ln -s /snap/cmake/current/bin/cpack /usr/bin/cpack
+```
+
+```shell
 sudo apt install libgl1-mesa-dev
-sudo apt-get -y install wayland-scanner++
-sudo apt install weston
-sudo apt install libwayland-bin
+sudo apt-get install libglfw3-dev
 sudo apt-get install pkg-config
-sudo apt-get -y install libxkbcommon-x11-0
-sudo apt-get install libxkbcommon-x11-dev
-sudo apt-get install libxcursor-dev
-sudo apt-get install libxinerama-dev
-sudo apt-get install cmake xorg-dev libglu1-mesa-dev
+sudo apt install libwayland-dev libxkbcommon-dev xorg-dev
+sudo apt-get install libx11-dev libxext-dev libxtst-dev libxrender-dev libxmu-dev libxmuu-dev
+
 ```
 
 ## Dependencies

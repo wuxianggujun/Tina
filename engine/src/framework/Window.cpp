@@ -55,7 +55,7 @@ namespace Tina {
 
 #if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
         bgfxInit.platformData.ndt = glfwGetX11Display();
-    bgfxInit.platformData.nwh = (void*)(uintptr_t)glfwGetX11Window(window);
+         bgfxInit.platformData.nwh = (void*)(uintptr_t)glfwGetX11Window(window);
 #elif BX_PLATFORM_OSX
         bgfxInit.platformData.nwh = glfwGetCocoaWindow(window);
 #elif BX_PLATFORM_WINDOWS
@@ -63,7 +63,6 @@ namespace Tina {
 #endif
 
         glfwGetWindowSize(window, &width, &height);
-
 
         bgfxInit.resolution.width = (uint32_t) width * 3;
         bgfxInit.resolution.height = (uint32_t) height * 3;
