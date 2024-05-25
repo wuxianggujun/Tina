@@ -58,8 +58,10 @@ endif()
 include(CheckCXXCompilerFlag)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS "/utf-8")
-set(CMAKE_C_FLAGS "/utf-8")
+#set(CMAKE_CXX_FLAGS "/utf-8")
+#set(CMAKE_C_FLAGS "/utf-8")
+#set(CMAKE_C_COMPILER "gcc")
+
 if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     set(CMAKE_CXX_STANDARD 20)
 endif()

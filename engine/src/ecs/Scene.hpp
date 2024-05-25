@@ -14,6 +14,7 @@ namespace Tina {
     class Scene {
     private:
         entt::registry registry;
+        entt::entity rootEntity;
     public:
         Scene();
 

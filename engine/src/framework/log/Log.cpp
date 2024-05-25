@@ -12,12 +12,12 @@ namespace Tina {
             fs::path logFileDir = logFilePath.parent_path();
             fs::path logFileName = logFilePath.filename();
 
-            if (!fs::exists(logFilePath)){
+            if (!fs::exists(logFilePath)) {
                 fs::create_directories(logFileDir);
             }
 
             spdlog::filename_t basename, ext;
-            std::tie(basename,ext) = spdlog::details::file_helper::split_by_extension(logFileName.string());
+            std::tie(basename, ext) = spdlog::details::file_helper::split_by_extension(logFileName.string());
 
             spdlog::init_thread_pool(logBufferSize, threadCount);
             std::vector<spdlog::sink_ptr> sinks;
@@ -26,13 +26,16 @@ namespace Tina {
                 sinks.push_back(console_sink);
             }
 
+#ifdef defined(_WIN32)
             if (mode & MSVC){
                 auto msvc_sink = std::make_shared<spdlog::sinks::msvc_sink_mt>();
                 sinks.push_back(msvc_sink);
             }
+#endif
 
             if (mode & FILE) {
-                auto rotating_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(logPath.c_str(), 1024 * 1024, 5, true);
+                auto rotating_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(logPath.c_str(),
+                                                                                            1024 * 1024, 5, true);
                 sinks.push_back(rotating_sink);
             }
 

@@ -13,6 +13,32 @@ git clone https://github.com/wuxianggujun/Tina.git
 git submodule update --init --recursive
 ```
 
+### Ubuntu Build
+Ubuntu requires cmake and ninja to be installed, as well as a C++ development environment
+For Ubuntu compilation, you need to install the minimum version of git >=2.35,You can use the command below to install the latest version
+```shell
+    sudo add-apt-repository ppa:git-core/ppa
+    sudo apt update
+    sudo apt install git
+```
+```shell
+sudo snap install cmake --classic
+```
+
+```shell
+sudo apt install libx11-dev libxext-dev libxtst-dev libxrender-dev libxmu-dev libxmuu-dev
+sudo apt install libgl1-mesa-dev
+sudo apt-get -y install wayland-scanner++
+sudo apt install weston
+sudo apt install libwayland-bin
+sudo apt-get install pkg-config
+sudo apt-get -y install libxkbcommon-x11-0
+sudo apt-get install libxkbcommon-x11-dev
+sudo apt-get install libxcursor-dev
+sudo apt-get install libxinerama-dev
+sudo apt-get install cmake xorg-dev libglu1-mesa-dev
+```
+
 ## Dependencies
  * [bgfx.cmake](https://github.com/bkaradzic/bgfx.cmake.git) :  Cross-platform, graphics API agnostic, "Bring Your Own Engine/Framework" style rendering library.        
  * [spdlog](https://github.com/gabime/spdlog.git)   :           Fast C++ logging library.      
