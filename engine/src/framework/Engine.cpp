@@ -26,6 +26,7 @@ namespace Tina {
     }
 
     int Engine::run(Configuration config) {
+        FrameMarkStart("Engine Run");
         init(config);
 
         Clock clock;
@@ -38,6 +39,7 @@ namespace Tina {
             }
             engineApplication->run(clock.getDeltaTime());
         }
+        FrameMarkEnd("Engine Run");
         //shutdown();
         return EXIT_SUCCESS;
     }

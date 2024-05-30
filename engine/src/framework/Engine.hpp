@@ -7,6 +7,8 @@
 
 #include <memory>
 #include "Core.hpp"
+#include "tool/Tracy.hpp"
+
 
 namespace Tina {
     class Application;

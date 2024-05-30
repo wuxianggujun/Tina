@@ -23,10 +23,7 @@ namespace Tina {
             bgfx::reset(width, height, BGFX_RESET_VSYNC);
             bgfx::setViewRect(kClearView, 0, 0, bgfx::BackbufferRatio::Equal);
         }
-  /*      bgfx::touch(kClearView);
-        bgfx::setViewClear(kClearView, BGFX_CLEAR_COLOR, 0x333399FF);
 
-        bgfx::frame();*/
     }
 
     void Window::destroy() {
