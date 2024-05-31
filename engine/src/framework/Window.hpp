@@ -24,6 +24,7 @@
 
 #include <GLFW/glfw3native.h>
 
+#include "math/Vector2i.hpp"
 #include "tool/GlfwTool.hpp"
 
 namespace Tina {
@@ -74,8 +75,7 @@ namespace Tina {
         int fail;
 
         GLFWwindow *window;
-        int width;
-        int height;
+        Vector2i windowSize;
         double xScale;
         double yScale;
 

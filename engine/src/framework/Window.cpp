@@ -10,17 +10,18 @@
 #include <stb/stb_image.h>
 #include "Core.hpp"
 
+
 namespace Tina {
 
     void Window::update() {
         glfwPollEvents();
 
-        int oldWidth = width, oldHeight = height;
-        glfwGetWindowSize(window, &width, &height);
-        printf("width:%d,height:%d\n", width, height);
+        Vector2i oldWindowSize{windowSize.width, windowSize.height};
+        glfwGetWindowSize(window, &windowSize.width, &windowSize.height);
+        printf("width:%d,height:%d\n", windowSize.width, windowSize.height);
 
-        if (width != oldWidth || height != oldHeight) {
-            bgfx::reset(width, height, BGFX_RESET_VSYNC);
+        if (windowSize.width != oldWindowSize.width || windowSize.height != oldWindowSize.height) {
+            bgfx::reset(windowSize.width, windowSize.height, BGFX_RESET_VSYNC);
             bgfx::setViewRect(kClearView, 0, 0, bgfx::BackbufferRatio::Equal);
         }
 
@@ -59,10 +60,10 @@ namespace Tina {
         bgfxInit.platformData.nwh = glfwGetWin32Window(window);
 #endif
 
-        glfwGetWindowSize(window, &width, &height);
+        glfwGetWindowSize(window, &windowSize.width, &windowSize.height);
 
-        bgfxInit.resolution.width = (uint32_t) width * 3;
-        bgfxInit.resolution.height = (uint32_t) height * 3;
+        bgfxInit.resolution.width = (uint32_t) windowSize.width * 3;
+        bgfxInit.resolution.height = (uint32_t) windowSize.height * 3;
         bgfxInit.resolution.reset = BGFX_RESET_VSYNC;
 
         if (!bgfx::init(bgfxInit)) {
