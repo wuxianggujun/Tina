@@ -38,6 +38,12 @@ sudo apt install libwayland-dev libxkbcommon-dev xorg-dev
 sudo apt-get install libx11-dev libxext-dev libxtst-dev libxrender-dev libxmu-dev libxmuu-dev
 
 ```
+## Build And Run
+```mkdir build & cd build
+cmake ..
+make
+./Tina
+```
 
 ## Dependencies
  * [bgfx.cmake](https://github.com/bkaradzic/bgfx.cmake.git) :  Cross-platform, graphics API agnostic, "Bring Your Own Engine/Framework" style rendering library.        
