@@ -11,6 +11,20 @@ GROUP_FILES_BY_DIRECTORY("ENGINE_FILES")
 
 target_link_libraries(${SUBMODULE_PROJECT_NAME} PUBLIC ${TINA_LIBRARIES})
 
+
+target_link_libraries(${SUBMODULE_PROJECT_NAME} PRIVATE
+        -lglfw
+        -lGL
+        -lm
+        -lXrandr
+        -lXi
+        -lX11
+        -lXxf86vm
+        -lpthread
+        -ldl
+        -lXinerama
+        -lXcursor)
+
 add_definitions(
     -DGLFW_INCLUDE_NONE
     -D_CRT_SECURE_NO_WARNINGS

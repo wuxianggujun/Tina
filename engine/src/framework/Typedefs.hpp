@@ -16,6 +16,7 @@
 #define ALLOW_DISCARD (void)
 #endif
 
+/*
 
 // Generic ABS function,for math uses please use Math::abs.
 template<typename T>
@@ -42,6 +43,7 @@ template<typename T, typename T2, typename T3>
 constexpr auto CLAMP(const T a, const T2 b, const T3 c) {
     return a < b ? b : (a > c ? c : a);
 }
+*/
 
 
 #endif //TINA_TYPEDEFS_HPP
