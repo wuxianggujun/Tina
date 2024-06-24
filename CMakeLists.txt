@@ -77,6 +77,7 @@ endif()
 
 # Import the tool cmake script
 include(TinaTool)
+include(BgfxUtil)
 include(SourceGroups)
 
 # Automatically update submodule versions

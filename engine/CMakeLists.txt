@@ -5,14 +5,15 @@ file(GLOB_RECURSE ENGINE_FILES CONFIGURE_DEPENDS
         ${SUBMODULE_PROJECT_DIR}/src/*.c**
         ${SUBMODULE_PROJECT_DIR}/src/*.h**)
 
+add_shaders_directory(${SUBMODULE_PROJECT_DIR}/shaders SHADERS_TARGET_NAME)
 add_compile_options("$<$<CONFIG:DEBUG>:-DDEBUG>" "$<$<CONFIG:DEBUG>:-DENABLE_ASSERTS>")
 add_library(${SUBMODULE_PROJECT_NAME} ${ENGINE_FILES})
 GROUP_FILES_BY_DIRECTORY("ENGINE_FILES")
 
 target_link_libraries(${SUBMODULE_PROJECT_NAME} PUBLIC ${TINA_LIBRARIES})
+target_link_libraries(${SUBMODULE_PROJECT_NAME} PUBLIC ${SHADERS_TARGET_NAME})
 
-
-target_link_libraries(${SUBMODULE_PROJECT_NAME} PRIVATE
+#[[target_link_libraries(${SUBMODULE_PROJECT_NAME} PRIVATE
         -lglfw
         -lGL
         -lm
@@ -23,7 +24,7 @@ target_link_libraries(${SUBMODULE_PROJECT_NAME} PRIVATE
         -lpthread
         -ldl
         -lXinerama
-        -lXcursor)
+        -lXcursor)]]
 
 add_definitions(
     -DGLFW_INCLUDE_NONE
