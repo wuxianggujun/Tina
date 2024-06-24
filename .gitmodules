@@ -22,9 +22,6 @@
 [submodule "dependencies/tracy"]
 	path = dependencies/tracy
 	url = https://github.com/wolfpld/tracy.git
-[submodule "dependencies/GSL"]
-	path = dependencies/GSL
-	url = https://github.com/microsoft/GSL.git
-[submodule "dependencies/simpleini"]
-	path = dependencies/simpleini
-	url = https://github.com/brofield/simpleini.git
+[submodule "dependencies/yaml-cpp"]
+	path = dependencies/yaml-cpp
+	url = https://github.com/jbeder/yaml-cpp.git

@@ -47,6 +47,7 @@ find_package(X11 REQUIRED)
 add_subdirectory(glfw)
 #add_subdirectory(glad)
 add_subdirectory(glm)
+add_subdirectory(yaml-cpp)
 add_subdirectory(spdlog)
 add_subdirectory(stb-cmake)
 add_subdirectory(entt)
@@ -65,5 +66,6 @@ set(TINA_LIBRARIES
     stb::image
     #Microsoft.GSL::GSL
     EnTT::EnTT
+    yaml-cpp::yaml-cpp
     Tracy::TracyClient
     CACHE INTERNAL "")
