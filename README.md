@@ -17,10 +17,10 @@ git submodule update --init --recursive
 Ubuntu requires cmake and ninja to be installed, as well as a C++ development environment
 For Ubuntu compilation, you need to install the minimum version of git >=2.35,You can use the command below to install the latest version
 ```shell
-    sudo add-apt-repository ppa:git-core/ppa
-    sudo apt update
-    sudo apt install git
-    sudo apt install ninja-build
+sudo add-apt-repository ppa:git-core/ppa
+sudo apt update
+sudo apt install git
+sudo apt install ninja-build
 ```
 
 ```shell
