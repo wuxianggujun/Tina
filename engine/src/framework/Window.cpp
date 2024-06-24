@@ -38,7 +38,9 @@ namespace Tina {
     }
 
     bool Window::initialize() {
+#ifndef _WIN32
         glfwInitHint(GLFW_PLATFORM,GLFW_PLATFORM_X11);
+#endif
         // inits glfw
         if (!glfwInit()) {
             fail = 1;
