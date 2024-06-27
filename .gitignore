@@ -82,3 +82,9 @@ fabric.properties
 *.bin
 /build
 /dependencies/bgfx.cmake/*
+
+.arts
+cmake-build-debug
+cmake-build-release
+cmake-build-minSizeRel
+cmake-build-relWithDebInfo
