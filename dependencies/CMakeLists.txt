@@ -58,8 +58,7 @@ set(TINA_LIBRARIES
     bx
     bimg
     bgfx
-    glfw
-    ${GLFW_LIBRARIES}
+    glfw ${GLFW_LIBRARIES}
     glm
     #glad
     spdlog

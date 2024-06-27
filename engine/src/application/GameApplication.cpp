@@ -10,8 +10,8 @@
 
 namespace Tina {
 
-    GameApplication::GameApplication(const Configuration &configuration) {
-        window = createScope<Window>();
+    GameApplication::GameApplication(Configuration &configuration) {
+        window = createScope<Window>(configuration);
         renderer = new WorldRenderer();
     }
 

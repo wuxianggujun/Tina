@@ -12,7 +12,6 @@
 
 
 namespace Tina {
-
     void Window::update() {
         glfwPollEvents();
 
@@ -24,7 +23,6 @@ namespace Tina {
             bgfx::reset(windowSize.width, windowSize.height, BGFX_RESET_VSYNC);
             bgfx::setViewRect(kClearView, 0, 0, bgfx::BackbufferRatio::Equal);
         }
-
     }
 
     void Window::destroy() {
@@ -35,6 +33,10 @@ namespace Tina {
 
     bool Window::isRunning() const {
         return !glfwWindowShouldClose(window);
+    }
+
+
+    Window::Window(Configuration &config) : configuration(config) {
     }
 
     bool Window::initialize() {
@@ -48,7 +50,9 @@ namespace Tina {
         }
         glfwSetErrorCallback(GlfwTool::ErrorCallback);
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        window = glfwCreateWindow(750, 750, "Platformer", nullptr, nullptr);
+        window = glfwCreateWindow(static_cast<int>(configuration.windowWidth),
+                                  static_cast<int>(configuration.windowHeight),
+                                  configuration.windowTitle, nullptr, nullptr);
 
         // Call bgfx::renderFrame before bgfx::init to signal to bgfx not to create a render thread.
         bgfx::renderFrame();

@@ -8,20 +8,19 @@
 #include "Engine.hpp"
 
 namespace Tina {
-
     class Application {
-
     protected:
         Engine *engine{};
+
     public:
         virtual void run(float deltaTime) = 0;
 
-    public:
         virtual bool initialize() = 0;
 
         virtual bool isRunning() = 0;
 
-        virtual void close() {};
+        virtual void close() {
+        };
 
         void setEngine([[maybe_unused]] Engine *currentEngine) {
             if (currentEngine) {
@@ -31,7 +30,6 @@ namespace Tina {
 
         [[maybe_unused]] [[nodiscard]] Engine *getEngine() const { return engine; }
     };
-
 } // Tina
 
 #endif //TINA_APPLICATION_HPP

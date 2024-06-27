@@ -14,14 +14,14 @@
 #include "framework/render/WorldRenderer.hpp"
 
 namespace Tina {
-
     class Configuration;
 
     class Window;
 
-    class GameApplication : public Application {
+
+    class GameApplication final : public Application {
     public:
-        explicit GameApplication(const Configuration &configuration);
+        explicit GameApplication(Configuration &configuration);
 
         bool initialize() override;
 
@@ -33,9 +33,8 @@ namespace Tina {
 
     private:
         Scope<Window> window;
-        WorldRenderer* renderer;
+        WorldRenderer *renderer;
     };
-
 } // Tina
 
 #endif //TINA_APPLICATION_GAMEAPPLICATION_HPP

@@ -7,6 +7,7 @@
 
 #include <memory>
 #include "Core.hpp"
+#include "Configuration.hpp"
 #include "tool/Tracy.hpp"
 
 
@@ -37,11 +38,11 @@ namespace Tina {
         static ENGINE_API void destroy(Engine *engine);
 
     protected:
-        ENGINE_API void init(Configuration config);
+        ENGINE_API void init();
         ENGINE_API void stop();
 
     public:
-        ENGINE_API int run(Configuration config);
+        ENGINE_API int run(Configuration& config);
 
         ENGINE_API void shutdown();
 

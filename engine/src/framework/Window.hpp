@@ -24,11 +24,11 @@
 
 #include <GLFW/glfw3native.h>
 
+#include "Configuration.hpp"
 #include "math/Vector2i.hpp"
 #include "tool/GlfwTool.hpp"
 
 namespace Tina {
-
     enum class WindowMode {
         WINDOWED = 0, // Windowed mode
         FULLSCREEN = 1, // Fullscreen mode
@@ -54,14 +54,13 @@ namespace Tina {
                                                        posX(posX), posY(posY),
                                                        windowMode(windowMode) {
         }
-
     };
 
 
     class Window {
-
     public:
-        Window() = default;
+        explicit Window(Configuration &config);
+
         ~Window() = default;
 
         bool initialize();
@@ -72,20 +71,19 @@ namespace Tina {
 
         bool isRunning() const;
 
-        int fail;
+        int fail{};
 
-        GLFWwindow *window;
+        GLFWwindow *window{};
         Vector2i windowSize;
-        double xScale;
-        double yScale;
+        double xScale{};
+        double yScale{};
 
         static bool keyStates[GLFW_KEY_LAST + 1];
 
     private:
+        const Configuration configuration;
         const bgfx::ViewId kClearView = 0;
-
     };
-
 } // Tina
 
 #endif //TINA_FRAMEWORK_WINDOW_HPP
