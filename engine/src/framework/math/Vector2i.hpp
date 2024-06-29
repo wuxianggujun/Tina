@@ -9,7 +9,6 @@
 #include "../Typedefs.hpp"
 
 namespace Tina {
-
     class NO_DISCARD Vector2i {
     public:
         union {
@@ -18,11 +17,13 @@ namespace Tina {
                     int32_t x;
                     int32_t width;
                 };
+
                 union {
                     int32_t y;
                     int32_t height;
                 };
             };
+
             int32_t coord[2] = {0};
         };
 
@@ -33,9 +34,7 @@ namespace Tina {
         inline const int32_t &operator[](int p_axis) const {
             return coord[p_axis];
         }
-
     };
-
 } // Tina
 
 #endif //TINA_FRAMEWORK_MATH_VECTORI_HPP

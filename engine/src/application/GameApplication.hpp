@@ -13,6 +13,7 @@
 #include "framework/render/Renderer.hpp"
 #include "framework/render/WorldRenderer.hpp"
 #include "framework/time/StopWatch.hpp"
+#include "flatphysics/FlatVector.hpp"
 
 namespace Tina {
     class Configuration;
