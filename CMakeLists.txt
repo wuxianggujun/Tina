@@ -4,7 +4,7 @@
 #
 # ##############################################################################
 
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.27)
 project(Tina VERSION 0.0.1 LANGUAGES CXX)
 
 # In-source builds are disabled.
@@ -26,7 +26,7 @@ set(BUILD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/build CACHE PATH "Build directory path
 # Functional options
 option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
-option(TINA_BUILD_TESTING "Turn on Tina's Google Tests" ON)
+option(TINA_BUILD_TESTING "Turn on Tina's Google Tests" OFF)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
 
 list(APPEND CMAKE_MODULE_PATH ${ROOT_DIR}/cmake)
