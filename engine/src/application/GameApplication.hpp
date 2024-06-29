@@ -19,7 +19,6 @@ namespace Tina {
 
     class Window;
 
-
     class GameApplication final : public Application {
     public:
         explicit GameApplication(Configuration &configuration);

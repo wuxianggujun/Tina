@@ -13,6 +13,8 @@ namespace Tina {
         Engine *engine{};
 
     public:
+        virtual ~Application() = default;
+
         virtual void run(float deltaTime) = 0;
 
         virtual bool initialize() = 0;
