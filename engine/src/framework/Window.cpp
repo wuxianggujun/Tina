@@ -17,7 +17,7 @@ namespace Tina {
 
         Vector2i oldWindowSize{windowSize.width, windowSize.height};
         glfwGetWindowSize(window, &windowSize.width, &windowSize.height);
-        printf("width:%d,height:%d\n", windowSize.width, windowSize.height);
+        // printf("width:%d,height:%d\n", windowSize.width, windowSize.height);
 
         if (windowSize.width != oldWindowSize.width || windowSize.height != oldWindowSize.height) {
             bgfx::reset(windowSize.width, windowSize.height, BGFX_RESET_VSYNC);

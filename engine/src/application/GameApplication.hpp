@@ -12,6 +12,7 @@
 #include "framework/Application.hpp"
 #include "framework/render/Renderer.hpp"
 #include "framework/render/WorldRenderer.hpp"
+#include "framework/time/StopWatch.hpp"
 
 namespace Tina {
     class Configuration;

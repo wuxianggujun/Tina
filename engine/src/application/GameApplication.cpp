@@ -8,8 +8,8 @@
 
 #include "framework/Configuration.hpp"
 
-namespace Tina {
 
+namespace Tina {
     GameApplication::GameApplication(Configuration &configuration) {
         window = createScope<Window>(configuration);
         renderer = new WorldRenderer();
@@ -27,6 +27,22 @@ namespace Tina {
     bool GameApplication::initialize() {
         bool result = window->initialize();
         renderer->initialize();
+
+        const auto duration = StopWatch::milliseconds([] {
+            float x1 = 0.05f;
+            float y1 = 0.002f;
+            float x2 = 0.001f;
+            float y2 = 0.003f;
+
+            for (int i = 0; i < INT_MAX; i++) {
+                x1 += x2;
+                y1 += y2;
+            }
+        });
+
+
+        std::cout << "it time " << duration << " milliseconds." << std::endl;
+
         return result;
     }
 
@@ -34,6 +50,4 @@ namespace Tina {
         delete renderer;
         window->destroy();
     }
-
-
 } // Tina
