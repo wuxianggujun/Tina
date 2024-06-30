@@ -67,9 +67,11 @@ namespace Tina {
 
         void update();
 
+        bool handleResize();
+
         void destroy();
 
-        bool isRunning() const;
+        [[nodiscard]] bool isRunning() const;
 
         int fail{};
 

@@ -8,9 +8,7 @@
 #include <iostream>
 #include <vector>
 #include <bgfx/bgfx.h>
-// #include "Layer.hpp"
-
-class Layer;
+#include "Layer.hpp"
 
 namespace Tina {
 
@@ -18,7 +16,7 @@ namespace Tina {
     public:
         View();
 
-        void addLayer(Layer *layer);
+        void addLayer(Layer &layer);
 
         void submit();
 

@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "generated/shaders/engine/all.h"
-#include "bgfx/embedded_shader.h"
-#include "bgfx/bgfx.h"
+#include <bgfx/embedded_shader.h>
+#include <bgfx/bgfx.h>
 
 namespace Tina {
     struct ColorVertex {
