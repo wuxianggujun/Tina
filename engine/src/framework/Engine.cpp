@@ -21,11 +21,11 @@ namespace Tina {
     }
 */
 
-    void Engine::init(Configuration& config) {
+    void Engine::init(const Configuration& config) {
         isRunning = engineApplication->initialize(config);
     }
 
-    int Engine::run(Configuration& config) {
+    int Engine::run(const Configuration& config) {
         FrameMarkStart("Engine Run");
         init(config);
 

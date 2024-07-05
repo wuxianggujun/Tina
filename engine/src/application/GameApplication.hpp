@@ -23,7 +23,7 @@ namespace Tina {
 
     class GameApplication final : public Application {
     public:
-        bool initialize(Configuration& config) override;
+        bool initialize(const Configuration& config) override;
 
         bool isRunning() override;
 

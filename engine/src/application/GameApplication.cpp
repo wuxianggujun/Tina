@@ -24,7 +24,7 @@ namespace Tina {
         return window->isRunning();
     }
 
-    bool GameApplication::initialize(Configuration &configuration) {
+    bool GameApplication::initialize(const Configuration &configuration) {
         renderContext = createScope<RenderContext>();
         window = createScope<Window>(configuration);
 

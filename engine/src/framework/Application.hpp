@@ -25,7 +25,7 @@ namespace Tina {
 
         virtual void run(float deltaTime) = 0;
 
-        virtual bool initialize(Configuration &config) = 0;
+        virtual bool initialize(const Configuration &config) = 0;
 
         virtual bool isRunning() = 0;
 

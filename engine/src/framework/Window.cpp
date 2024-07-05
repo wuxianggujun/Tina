@@ -41,7 +41,7 @@ namespace Tina {
     }
 
 
-    Window::Window(Configuration &config) : configuration(config) {
+    Window::Window(const Configuration &config) : configuration(config) {
     }
 
     bool Window::initialize() {

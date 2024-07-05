@@ -59,7 +59,7 @@ namespace Tina {
 
     class Window {
     public:
-        explicit Window(Configuration &config);
+        explicit Window(const Configuration &config);
 
         ~Window() = default;
 

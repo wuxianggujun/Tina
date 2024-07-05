@@ -38,11 +38,11 @@ namespace Tina {
         static ENGINE_API void destroy(Engine *engine);
 
     protected:
-        ENGINE_API void init(Configuration& config);
+        ENGINE_API auto init(const Configuration &config) -> void;
         ENGINE_API void stop();
 
     public:
-        ENGINE_API int run(Configuration& config);
+        ENGINE_API int run(const Configuration& config);
 
         ENGINE_API void shutdown();
 
