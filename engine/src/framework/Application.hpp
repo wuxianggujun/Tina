@@ -6,6 +6,7 @@
 #define TINA_APPLICATION_HPP
 
 #include "Engine.hpp"
+#include "framework/Configuration.hpp"
 
 namespace Tina {
     class Application {
@@ -13,16 +14,22 @@ namespace Tina {
         Engine *engine{};
 
     public:
+        Application() = default;
+        Application(const Application&) = delete;
+        Application& operator=(const Application&) = delete;
+
+        Application(Application&&) = delete;
+        Application& operator=(Application&&) = delete;
+
         virtual ~Application() = default;
 
         virtual void run(float deltaTime) = 0;
 
-        virtual bool initialize() = 0;
+        virtual bool initialize(Configuration &config) = 0;
 
         virtual bool isRunning() = 0;
 
-        virtual void close() {
-        };
+        virtual void shutdown() = 0;
 
         void setEngine([[maybe_unused]] Engine *currentEngine) {
             if (currentEngine) {

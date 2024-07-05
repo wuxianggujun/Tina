@@ -21,13 +21,13 @@ namespace Tina {
     }
 */
 
-    void Engine::init() {
-        isRunning = engineApplication->initialize();
+    void Engine::init(Configuration& config) {
+        isRunning = engineApplication->initialize(config);
     }
 
     int Engine::run(Configuration& config) {
         FrameMarkStart("Engine Run");
-        init();
+        init(config);
 
         Clock clock;
 
@@ -46,7 +46,7 @@ namespace Tina {
 
     void Engine::shutdown() {
         stop();
-        engineApplication->close();
+        engineApplication->shutdown();
     }
 
     static Scope<Engine> scopeEngine;

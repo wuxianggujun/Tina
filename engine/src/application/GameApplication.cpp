@@ -10,22 +10,24 @@
 #include "framework/math/Vector2.hpp"
 
 namespace Tina {
-    GameApplication::GameApplication(Configuration &configuration) {
-        renderContext = createScope<RenderContext>();
-        window = createScope<Window>(configuration);
-        //renderer = new WorldRenderer();
-    }
 
     void GameApplication::run(float deltaTime) {
         window->update();
         //renderer->render(deltaTime);
     }
 
+    void GameApplication::shutdown() {
+        window->destroy();
+    }
+
     bool GameApplication::isRunning() {
         return window->isRunning();
     }
 
-    bool GameApplication::initialize() {
+    bool GameApplication::initialize(Configuration &configuration) {
+        renderContext = createScope<RenderContext>();
+        window = createScope<Window>(configuration);
+
         bool result = window->initialize();
         //renderer->initialize();
 
@@ -59,8 +61,5 @@ namespace Tina {
         return result;
     }
 
-    void GameApplication::close() {
-        //delete renderer;
-        window->destroy();
-    }
+
 } // Tina

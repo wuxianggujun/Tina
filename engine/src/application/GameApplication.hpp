@@ -23,15 +23,13 @@ namespace Tina {
 
     class GameApplication final : public Application {
     public:
-        explicit GameApplication(Configuration &configuration);
-
-        bool initialize() override;
+        bool initialize(Configuration& config) override;
 
         bool isRunning() override;
 
         void run(float deltaTime) override;
 
-        void close() override;
+        void shutdown() override;
 
     private:
         Scope<Window> window;
