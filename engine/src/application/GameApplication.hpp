@@ -33,7 +33,7 @@ namespace Tina {
 
     private:
         Scope<Window> window;
-        Scope<RenderContext> renderContext;
+        Ref<RenderContext> renderContext;
     };
 } // Tina
 

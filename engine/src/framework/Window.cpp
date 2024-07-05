@@ -14,8 +14,18 @@
 namespace Tina {
     void Window::update() {
         glfwPollEvents();
-
         handleResize();
+    }
+
+    void *Window::getNativeWindowHandle() {
+#if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
+        nativeWindowHandle = (void*)(uintptr_t)glfwGetX11Window(window);
+#elif BX_PLATFORM_OSX
+        nativeWindowHandle = glfwGetCocoaWindow(window);
+#elif BX_PLATFORM_WINDOWS
+        nativeWindowHandle = glfwGetWin32Window(window);
+#endif
+        return nativeWindowHandle;
     }
 
     bool Window::handleResize() {
@@ -23,7 +33,7 @@ namespace Tina {
         glfwGetWindowSize(window, &windowSize.width, &windowSize.height);
 
         if (windowSize.width != oldWindowSize.width || windowSize.height != oldWindowSize.height) {
-            renderContext.onResize(windowSize.width, windowSize.height);
+            renderContext->onResize(windowSize.width, windowSize.height);
             bgfx::setViewRect(kClearView, 0, 0, bgfx::BackbufferRatio::Equal);
             return true;
         }
@@ -55,22 +65,13 @@ namespace Tina {
         }
         glfwSetErrorCallback(GlfwTool::ErrorCallback);
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        window = glfwCreateWindow(static_cast<int>(configuration.windowWidth),
-                                  static_cast<int>(configuration.windowHeight),
+        window = glfwCreateWindow(configuration.windowWidth,
+                                  configuration.windowHeight,
                                   configuration.windowTitle, nullptr, nullptr);
 
         // Call bgfx::renderFrame before bgfx::init to signal to bgfx not to create a render thread.
         bgfx::renderFrame();
         bgfx::Init bgfxInit;
-
-#if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
-        bgfxInit.platformData.ndt = glfwGetX11Display();
-         bgfxInit.platformData.nwh = (void*)(uintptr_t)glfwGetX11Window(window);
-#elif BX_PLATFORM_OSX
-        bgfxInit.platformData.nwh = glfwGetCocoaWindow(window);
-#elif BX_PLATFORM_WINDOWS
-        bgfxInit.platformData.nwh = glfwGetWin32Window(window);
-#endif
 
         glfwGetWindowSize(window, &windowSize.width, &windowSize.height);
 
@@ -82,12 +83,16 @@ namespace Tina {
             fail = 1;
             return false;
         }
-        /*// Set view 0 to the same dimensions as the window and to clear the color buffer.
-        bgfx::setViewClear(kClearView, BGFX_CLEAR_COLOR);
-        bgfx::setViewRect(kClearView, 0, 0, bgfx::BackbufferRatio::Equal);
 
-        bgfx::setDebug(BGFX_DEBUG_NONE);*/
+        if (renderContext) {
+            renderContext->initialize(configuration.graphicsBackend, getNativeWindowHandle());
+        }
+
 
         return true;
+    }
+
+    void Window::setRenderContext(Ref<RenderContext> renderContext) {
+        this->renderContext = std::move(renderContext);
     }
 } // Tina

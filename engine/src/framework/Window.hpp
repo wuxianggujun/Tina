@@ -65,7 +65,11 @@ namespace Tina {
 
         bool initialize();
 
+        void setRenderContext(Ref<RenderContext> renderContext);
+
         void update();
+
+        [[nodiscard]] void *getNativeWindowHandle();
 
         bool handleResize();
 
@@ -83,9 +87,10 @@ namespace Tina {
         static bool keyStates[GLFW_KEY_LAST + 1];
 
     private:
+        void *nativeWindowHandle{};
         const Configuration configuration;
         const bgfx::ViewId kClearView = 0;
-        RenderContext renderContext;
+        Ref<RenderContext> renderContext;
     };
 } // Tina
 

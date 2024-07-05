@@ -10,10 +10,13 @@
 #include "framework/math/Vector2.hpp"
 
 namespace Tina {
-
     void GameApplication::run(float deltaTime) {
         window->update();
-        //renderer->render(deltaTime);
+        if (renderContext) {
+            renderContext->beginFrame();
+
+            renderContext->endFrame();
+        }
     }
 
     void GameApplication::shutdown() {
@@ -25,11 +28,12 @@ namespace Tina {
     }
 
     bool GameApplication::initialize(const Configuration &configuration) {
-        renderContext = createScope<RenderContext>();
+        renderContext = createRef<RenderContext>();
         window = createScope<Window>(configuration);
+        window->setRenderContext(renderContext);
 
         bool result = window->initialize();
-        //renderer->initialize();
+
 
         FlatVector vectorA{3.0f, 4.0f};
 
@@ -60,6 +64,4 @@ namespace Tina {
 
         return result;
     }
-
-
 } // Tina

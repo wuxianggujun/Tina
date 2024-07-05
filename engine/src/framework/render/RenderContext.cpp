@@ -3,6 +3,8 @@
 //
 
 #include "RenderContext.hpp"
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
 
 namespace Tina {
     RenderContext::~RenderContext() {
@@ -35,6 +37,11 @@ namespace Tina {
                 break;
             }
         }
+
+#if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
+        bgfxInit.platformData.ndt = glfwGetX11Display();
+#endif
+
         initDesc.platformData.nwh = hwd;
         bgfx::init(initDesc);
     }
