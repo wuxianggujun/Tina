@@ -23,7 +23,7 @@
 #endif
 
 #include <GLFW/glfw3native.h>
-
+#include "framework/render/RenderContext.hpp"
 #include "Configuration.hpp"
 #include "math/Vector2i.hpp"
 #include "tool/GlfwTool.hpp"
@@ -85,6 +85,7 @@ namespace Tina {
     private:
         const Configuration configuration;
         const bgfx::ViewId kClearView = 0;
+        RenderContext renderContext;
     };
 } // Tina
 

@@ -23,7 +23,7 @@ namespace Tina {
         glfwGetWindowSize(window, &windowSize.width, &windowSize.height);
 
         if (windowSize.width != oldWindowSize.width || windowSize.height != oldWindowSize.height) {
-            bgfx::reset(windowSize.width, windowSize.height, BGFX_RESET_VSYNC);
+            renderContext.onResize(windowSize.width, windowSize.height);
             bgfx::setViewRect(kClearView, 0, 0, bgfx::BackbufferRatio::Equal);
             return true;
         }

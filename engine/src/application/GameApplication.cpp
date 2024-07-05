@@ -11,13 +11,14 @@
 
 namespace Tina {
     GameApplication::GameApplication(Configuration &configuration) {
+        renderContext = createScope<RenderContext>();
         window = createScope<Window>(configuration);
-        renderer = new WorldRenderer();
+        //renderer = new WorldRenderer();
     }
 
     void GameApplication::run(float deltaTime) {
         window->update();
-        renderer->render(deltaTime);
+        //renderer->render(deltaTime);
     }
 
     bool GameApplication::isRunning() {
@@ -26,7 +27,7 @@ namespace Tina {
 
     bool GameApplication::initialize() {
         bool result = window->initialize();
-        renderer->initialize();
+        //renderer->initialize();
 
         FlatVector vectorA{3.0f, 4.0f};
 
@@ -59,7 +60,7 @@ namespace Tina {
     }
 
     void GameApplication::close() {
-        delete renderer;
+        //delete renderer;
         window->destroy();
     }
 } // Tina
