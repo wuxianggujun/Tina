@@ -10,8 +10,7 @@ namespace Tina {
     RenderContext::~RenderContext() {
     }
 
-    void RenderContext::initialize(GraphicsBackend backend, void *hwd) {
-        bgfx::Init initDesc;
+    void RenderContext::initialize(bgfx::Init &initDesc, GraphicsBackend backend, void *hwd) {
         switch (backend) {
             case GraphicsBackend::OpenGL:
                 initDesc.type = bgfx::RendererType::OpenGL;
@@ -41,9 +40,10 @@ namespace Tina {
 #if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
         bgfxInit.platformData.ndt = glfwGetX11Display();
 #endif
-
         initDesc.platformData.nwh = hwd;
-        bgfx::init(initDesc);
+        if (!bgfx::init(initDesc)) {
+            return;
+        }
     }
 
     void RenderContext::onResize(uint16_t width, uint16_t height) {

@@ -75,19 +75,13 @@ namespace Tina {
 
         glfwGetWindowSize(window, &windowSize.width, &windowSize.height);
 
-        bgfxInit.resolution.width = (uint32_t) windowSize.width * 3;
-        bgfxInit.resolution.height = (uint32_t) windowSize.height * 3;
+        bgfxInit.resolution.width = windowSize.width * 3;
+        bgfxInit.resolution.height = windowSize.height * 3;
         bgfxInit.resolution.reset = BGFX_RESET_VSYNC;
 
-        if (!bgfx::init(bgfxInit)) {
-            fail = 1;
-            return false;
-        }
-
         if (renderContext) {
-            renderContext->initialize(configuration.graphicsBackend, getNativeWindowHandle());
+            renderContext->initialize(bgfxInit, configuration.graphicsBackend, getNativeWindowHandle());
         }
-
 
         return true;
     }

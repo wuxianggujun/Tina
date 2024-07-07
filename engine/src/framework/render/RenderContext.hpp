@@ -27,7 +27,7 @@ namespace Tina {
 
         ~RenderContext();
 
-        void initialize(GraphicsBackend backend, void *hwd = nullptr);
+        void initialize(bgfx::Init& init, GraphicsBackend backend, void *hwd = nullptr);
 
         void onResize(uint16_t width, uint16_t height);
 
