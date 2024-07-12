@@ -89,7 +89,6 @@ namespace Tina {
     private:
         void *nativeWindowHandle{};
         const Configuration configuration;
-        const bgfx::ViewId kClearView = 0;
         Ref<RenderContext> renderContext;
     };
 } // Tina

@@ -34,7 +34,6 @@ namespace Tina {
 
         if (windowSize.width != oldWindowSize.width || windowSize.height != oldWindowSize.height) {
             renderContext->onResize(windowSize.width, windowSize.height);
-            bgfx::setViewRect(kClearView, 0, 0, bgfx::BackbufferRatio::Equal);
             return true;
         }
         return false;
