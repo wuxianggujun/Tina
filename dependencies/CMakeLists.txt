@@ -45,6 +45,7 @@ add_subdirectory(bgfx.cmake)
 find_package(X11 REQUIRED)
 
 add_subdirectory(glfw)
+add_subdirectory(SDL)
 #add_subdirectory(glad)
 add_subdirectory(glm)
 add_subdirectory(yaml-cpp)
@@ -58,13 +59,12 @@ set(TINA_LIBRARIES
     bx
     bimg
     bgfx
-    glfw ${GLFW_LIBRARIES}
+    glfw
     glm
-    #glad
     spdlog
     stb::image
-    #Microsoft.GSL::GSL
-    EnTT::EnTT
+    EnTT::EnTT 
+    SDL3::SDL3
     yaml-cpp::yaml-cpp
     Tracy::TracyClient
     CACHE INTERNAL "")

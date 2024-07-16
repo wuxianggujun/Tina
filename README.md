@@ -46,12 +46,12 @@ make
 ```
 
 ## Dependencies
+
  * [bgfx.cmake](https://github.com/bkaradzic/bgfx.cmake.git) :  Cross-platform, graphics API agnostic, "Bring Your Own Engine/Framework" style rendering library.        
- * [spdlog](https://github.com/gabime/spdlog.git)   :           Fast C++ logging library.      
- * [Microsoft GSL](https://github.com/microsoft/GSL.git)  :     Guidelines Support Library.         
- * [simpleini](https://github.com/brofield/simpleini) :         A cross-platform library that provides a simple API to read and write INI-style configuration files. It supports data files in ASCII, MBCS and Unicode.
+ * [spdlog](https://github.com/gabime/spdlog.git)   :           Fast C++ logging library.
  * [stb-cmake](https://github.com/gracicot/stb-cmake.git) :     Single-file public domain (or MIT licensed) libraries for C/C++.       
- * [entt](https://github.com/skypjack/entt.git)  :              Fast and reliable entity-component system (ECS)       
+ * [entt](https://github.com/skypjack/entt.git)  :              Fast and reliable entity-component system (ECS).   
+ * [SDL](https://github.com/libsdl-org/SDL.git) : Simple Directmedia Layer.
  * [glfw](https://github.com/glfw/glfw.git)   :                 A multi-platform library for OpenGL, OpenGL ES, Vulkan, window and input.       
  * [glad](https://github.com/Dav1dde/glad.git) :  |Multi-language GL/GLES/EGL/GLX/WGL Loader-Generator based on the official specs.         
  * [glm](https://github.com/g-truc/glm.git)  :                  OpenGL Mathematics (GLM) is a header only C++ mathematics library for graphics software based on the OpenGL Shading Language (GLSL) specifications.        
