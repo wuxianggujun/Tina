@@ -49,7 +49,7 @@ make
 
  * [bgfx.cmake](https://github.com/bkaradzic/bgfx.cmake.git) :  Cross-platform, graphics API agnostic, "Bring Your Own Engine/Framework" style rendering library.        
  * [spdlog](https://github.com/gabime/spdlog.git)   :           Fast C++ logging library.
- * [stb-cmake](https://github.com/gracicot/stb-cmake.git) :     Single-file public domain (or MIT licensed) libraries for C/C++.       
+ * [stb-cmake](https://github.com/wuxianggujun/stb-cmake.git) :     Single-file public domain (or MIT licensed) libraries for C/C++.       
  * [entt](https://github.com/skypjack/entt.git)  :              Fast and reliable entity-component system (ECS).   
  * [SDL](https://github.com/libsdl-org/SDL.git) : Simple Directmedia Layer.
  * [glfw](https://github.com/glfw/glfw.git)   :                 A multi-platform library for OpenGL, OpenGL ES, Vulkan, window and input.       
