@@ -18,8 +18,8 @@ namespace Tina
         {
             struct
             {
-                float x{};
-                float y{};
+                float x;
+                float y;
             };
 
             glm::vec2 internalVec2;
