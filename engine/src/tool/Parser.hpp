@@ -66,7 +66,7 @@ namespace Tina
         class cmd_base
         {
         public:
-            explicit cmd_base(const std::string& name, const std::string& alternative, const std::string& description,
+            explicit cmd_base(const std::string& name, const std::string& alternative, std::string  description,
                               bool required, bool dominant, bool isVariadic);
             virtual ~cmd_base();
 

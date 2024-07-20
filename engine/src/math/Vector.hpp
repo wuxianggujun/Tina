@@ -9,7 +9,6 @@
 #include <format>
 #include <iostream>
 #include <sstream>
-#include <vector>
 #include <string>
 #include <glm/glm.hpp>
 #include <glm/vec2.hpp>
@@ -27,13 +26,11 @@ namespace Tina
                 union
                 {
                     T x;
-                    T width;
                 };
 
                 union
                 {
                     T y;
-                    T height;
                 };
             };
 

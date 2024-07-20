@@ -3,13 +3,13 @@
 //
 
 #include "GameApplication.hpp"
-#include "math/Vector2.hpp"
+#include "math/Vector.hpp"
 
 namespace Tina
 {
     void GameApplication::run()
     {
-        Vector2 resolution = Vector2(1280, 720);
+        Vector2i resolution = Vector2i(1280, 720);
 
         window = new SDLWindow();
         window->create({

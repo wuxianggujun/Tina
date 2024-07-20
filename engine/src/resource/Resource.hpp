@@ -5,12 +5,12 @@
 #ifndef TINA_RESOURCE_HPP
 #define TINA_RESOURCE_HPP
 
-namespace Tina {
-
-class Resource {
-
-};
-
+namespace Tina
+{
+    class Resource
+    {
+        
+    };
 } // Tina
 
 #endif //TINA_RESOURCE_HPP
