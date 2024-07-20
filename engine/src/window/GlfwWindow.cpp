@@ -16,8 +16,12 @@ namespace Tina
 
     void GlfwWindow::create(WindowConfig config)
     {
+        
 
+    }
 
+    void GlfwWindow::render()
+    {
     }
 
     void GlfwWindow::destroy()

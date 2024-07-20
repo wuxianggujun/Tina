@@ -11,11 +11,7 @@ namespace Tina
     {
         Vector2i resolution = Vector2i(1280, 720);
 
-        window = new SDLWindow();
-        window->create({
-            "Tina Game Engine", static_cast<int>(resolution.x), static_cast<int>(resolution.y), false, true, true
-        });
-
+        window = new GlfwWindow();
         mainLoop();
     }
 

@@ -7,6 +7,7 @@
 
 #include "Core.hpp"
 #include "window/Window.hpp"
+#include "window/GlfwWindow.hpp"
 #include "window/SDLWindow.hpp"
 
 namespace Tina

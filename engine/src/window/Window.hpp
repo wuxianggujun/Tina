@@ -5,6 +5,8 @@
 #ifndef TINA_WINDOW_HPP
 #define TINA_WINDOW_HPP
 
+#include "math/Vector.hpp"
+
 namespace Tina
 {
     class Window
@@ -13,12 +15,11 @@ namespace Tina
         class WindowConfig
         {
         public:
-            const char* title;
-            int width;
-            int height;
-            bool resizable;
-            bool fullscreen;
-            bool vsync;
+            const char* title{};
+            Vector2i size;
+            bool resizable{};
+            bool fullscreen{};
+            bool vsync{};
         };
 
     public:

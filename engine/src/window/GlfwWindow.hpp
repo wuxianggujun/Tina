@@ -26,12 +26,13 @@ namespace Tina
     public:
         GlfwWindow();
         ~GlfwWindow() override = default;
-
-    public:
+        
         void create(WindowConfig config) override;
+        void render() override;
         void destroy() override;
         void pollEvents() override;
         bool shouldClose() override;
+        
 
     private:
         std::unique_ptr<GLFWwindow, GlfwWindowDeleter> m_window;

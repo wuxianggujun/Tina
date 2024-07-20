@@ -26,11 +26,13 @@ namespace Tina
                 union
                 {
                     T x;
+                    T width;
                 };
 
                 union
                 {
                     T y;
+                    T height;
                 };
             };
 

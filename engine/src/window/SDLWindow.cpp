@@ -6,9 +6,8 @@
 
 namespace Tina
 {
-    SDLWindow::SDLWindow(): m_window(nullptr,&SDL_DestroyWindow)
+    SDLWindow::SDLWindow(): m_window(nullptr, &SDL_DestroyWindow)
     {
-
     }
 
     SDLWindow::~SDLWindow()
@@ -27,7 +26,7 @@ namespace Tina
             printf("SDL could not initialize! SDL Error: %s\n", SDL_GetError());
             exit(1);
         }
-        m_window = make_window(config.title, config.width, config.height,SDL_WINDOW_BORDERLESS);;
+        m_window = make_window(config.title, config.size.width, config.size.height,SDL_WINDOW_BORDERLESS);;
         if (!m_window)
         {
             printf("Window could not be created! SDL Error: %s\n", SDL_GetError());
@@ -42,14 +41,13 @@ namespace Tina
     void SDLWindow::pollEvents()
     {
         SDL_Event event;
-        if (SDL_PollEvent(&event)!= 0)
+        if (SDL_PollEvent(&event) != 0)
         {
             if (event.type == SDL_EVENT_QUIT)
             {
                 exit(0);
             }
         }
-
     }
 
     bool SDLWindow::shouldClose()
