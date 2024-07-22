@@ -12,6 +12,7 @@ namespace Tina
         Vector2i resolution = Vector2i(1280, 720);
 
         window = new GlfwWindow();
+        window->create(Window::WindowConfig{"Tina", resolution, false, false, false});
         mainLoop();
     }
 
@@ -19,6 +20,7 @@ namespace Tina
     {
         while (window->shouldClose())
         {
+            window->render();
             window->pollEvents();
         }
     }

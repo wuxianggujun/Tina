@@ -11,7 +11,7 @@ namespace Tina
 {
     class Window
     {
-    protected:
+    public:
         class WindowConfig
         {
         public:
