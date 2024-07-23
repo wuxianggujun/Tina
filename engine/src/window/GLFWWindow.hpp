@@ -35,7 +35,7 @@
 
 namespace Tina
 {
-    class GlfwWindow : public Window
+    class GLFWWindow : public Window
     {
     protected:
         struct GlfwWindowDeleter
@@ -50,8 +50,8 @@ namespace Tina
         };
 
     public:
-        GlfwWindow();
-        ~GlfwWindow() override = default;
+        GLFWWindow();
+        ~GLFWWindow() override = default;
 
         void create(WindowConfig config) override;
         void render() override;
@@ -59,6 +59,8 @@ namespace Tina
         void pollEvents() override;
         bool shouldClose() override;
 
+        [[nodiscard]] GLFWwindow* getNativeWindow() const { return m_window.get(); }
+        
     private:
         static void errorCallback(int error, const char* description);
 

@@ -6,7 +6,7 @@
 
 namespace Tina
 {
-    GlfwWindow::GlfwWindow() : m_window(nullptr, GlfwWindowDeleter())
+    GLFWWindow::GLFWWindow() : m_window(nullptr, GlfwWindowDeleter())
     {
         glfwSetErrorCallback(errorCallback);
         if (!glfwInit())
@@ -17,7 +17,7 @@ namespace Tina
     }
 
 
-    void GlfwWindow::create(WindowConfig config)
+    void GLFWWindow::create(WindowConfig config)
     {
 #if BX_PLATFORM_LINUX
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
@@ -54,7 +54,7 @@ namespace Tina
         bgfx::reset(config.size.width, config.size.height,BGFX_RESET_VSYNC);
     }
 
-    void GlfwWindow::render()
+    void GLFWWindow::render()
     {
         bgfx::setViewClear(0,BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
         bgfx::setViewRect(0, 0, 0, bgfx::BackbufferRatio::Equal);
@@ -64,24 +64,24 @@ namespace Tina
         bgfx::frame();
     }
 
-    void GlfwWindow::destroy()
+    void GLFWWindow::destroy()
     {
         bgfx::shutdown();
         m_window.reset();
         //glfwDestroyWindow(m_window.get());
     }
 
-    void GlfwWindow::pollEvents()
+    void GLFWWindow::pollEvents()
     {
         glfwPollEvents();
     }
 
-    bool GlfwWindow::shouldClose()
+    bool GLFWWindow::shouldClose()
     {
         return !glfwWindowShouldClose(m_window.get());
     }
 
-    void GlfwWindow::errorCallback(int error, const char* description)
+    void GLFWWindow::errorCallback(int error, const char* description)
     {
         printf("GLFW Error (%d): %s\n", error, description);
     }

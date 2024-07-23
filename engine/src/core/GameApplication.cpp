@@ -11,8 +11,10 @@ namespace Tina
     {
         Vector2i resolution = Vector2i(1280, 720);
 
-        window = createScope<GlfwWindow>();
+        window = createScope<GLFWWindow>();
         window->create(Window::WindowConfig{"Tina", resolution, false, false, false});
+        inputHandler = createInputHandler(InputHandlerGLFW, window.get());
+        inputHandler->initialize();
         mainLoop();
     }
 
@@ -20,8 +22,10 @@ namespace Tina
     {
         while (window->shouldClose())
         {
+            inputHandler->pollEvents();
             window->render();
-            window->pollEvents();
+            //window->pollEvents()
+            inputHandler->processEvent();
         }
         window->destroy();
     }

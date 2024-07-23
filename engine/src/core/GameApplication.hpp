@@ -7,8 +7,12 @@
 
 #include "Core.hpp"
 #include "window/Window.hpp"
-#include "window/GlfwWindow.hpp"
+#include "window/GLFWWindow.hpp"
 #include "window/SDLWindow.hpp"
+#include "window/InputHandler.hpp"
+#include "window/GLFWInput.hpp"
+#include "window/SDLInput.hpp"
+
 
 namespace Tina
 {
@@ -20,6 +24,7 @@ namespace Tina
 
     protected:
         Scope<Window> window;
+        Scope<InputHandler> inputHandler;
     };
 } // Tina
 
