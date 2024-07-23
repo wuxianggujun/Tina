@@ -11,17 +11,18 @@ namespace Tina
     {
         Vector2i resolution = Vector2i(1280, 720);
 
-        window = new GlfwWindow();
+        window = createScope<GlfwWindow>();
         window->create(Window::WindowConfig{"Tina", resolution, false, false, false});
         mainLoop();
     }
 
-    void GameApplication::mainLoop()
+    void GameApplication::mainLoop() const
     {
         while (window->shouldClose())
         {
             window->render();
             window->pollEvents();
         }
+        window->destroy();
     }
 } // Tina

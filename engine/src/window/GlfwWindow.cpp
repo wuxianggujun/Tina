@@ -67,7 +67,8 @@ namespace Tina
     void GlfwWindow::destroy()
     {
         bgfx::shutdown();
-        glfwDestroyWindow(m_window.get());
+        m_window.reset();
+        //glfwDestroyWindow(m_window.get());
     }
 
     void GlfwWindow::pollEvents()

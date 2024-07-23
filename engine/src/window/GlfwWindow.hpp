@@ -12,7 +12,6 @@
 
 #include <bgfx/platform.h>
 
-#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
 #if BX_PLATFORM_LINUX
@@ -43,7 +42,10 @@ namespace Tina
         {
             void operator()(GLFWwindow* window) const
             {
-                glfwDestroyWindow(window);
+                if (window)
+                {
+                    glfwDestroyWindow(window);
+                }     
             }
         };
 

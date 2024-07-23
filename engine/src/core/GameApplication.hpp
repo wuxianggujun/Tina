@@ -16,10 +16,10 @@ namespace Tina
     {
     public:
         void run();
-        void mainLoop();
+        void mainLoop() const;
 
     protected:
-        Window* window = nullptr;
+        Scope<Window> window;
     };
 } // Tina
 
