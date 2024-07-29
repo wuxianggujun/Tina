@@ -25,9 +25,7 @@ namespace Tina
         virtual void write(Byte* bytes, size_t size) = 0;
 
         virtual void write(const uint8_t* bytes, size_t size) = 0;
-
-    private:
-        static constexpr size_t MAX_SKIP_BUFFER_SIZE = 2048;
+        
     };
 } // Tina
 
