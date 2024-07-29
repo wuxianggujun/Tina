@@ -7,11 +7,9 @@
 #ifndef TINA_FILESYSTEM_BYTEBUFFER_HPP
 #define TINA_FILESYSTEM_BYTEBUFFER_HPP
 
-#include <cstdio>
 #include <cstdint>
 #include <string>
 #include <vector>
-#include <memory.h>
 #include "tool/Endianness.hpp"
 
 namespace Tina
@@ -57,11 +55,8 @@ namespace Tina
 
         void clear()
         {
-            if (!buffer_.empty())
-            {
-                buffer_.clear();
-                rPos_ = wPos_ = 0;
-            }
+            buffer_.clear();
+            rPos_ = wPos_ = 0;
         }
 
         size_t capacity() const
@@ -109,19 +104,32 @@ namespace Tina
         {
             return wPos_;
         }
+        
 
         std::string readString() const
         {
-            std::string str;
-            char byte = 0;
-            while (true)
+            std::string str{};
+            char byte = '\0';
+
+            // 确保当前读位置有效
+            while (rPos_ < buffer_.size())
             {
-                if (!read<char>(byte)) break;
-                if (byte == '\0') break;
-                str += byte;
+                // 从当前读位置读取char
+                byte = read<char>(rPos_);
+                str += byte; // 将读取的字符添加到字符串
+
+                rPos_++; // 更新读位置
+
+                // 如果读取到字符串结束符，退出循环
+                if (byte == '\0')
+                {
+                    break;
+                }
             }
+
             return str;
         }
+
 
         // 比较两个ByteBuffer对象是否相等
         bool equal(const ByteBuffer& other) const
@@ -153,7 +161,7 @@ namespace Tina
             static_assert(std::is_fundamental_v<T>, "put(compound)");
             if (pos + sizeof(T) <= size())
             {
-                std::memcpy((&buffer_[pos], reinterpret_cast<uint8_t*>(&value), sizeof(T)));
+                std::memcpy((&buffer_[pos], reinterpret_cast<const uint8_t*>(&value), sizeof(T)));
             }
         }
 
@@ -170,23 +178,22 @@ namespace Tina
         template <typename T>
         T read(size_t pos) const
         {
-            T value;
-            if (readAtPosition(pos, value))
+            T value{};
+            if (pos + sizeof(T) <= buffer_.size())
             {
+                value = *reinterpret_cast<const T*>(&buffer_[pos]);
+                value = Tool::EndianConvert(value); // 执行大小端转
                 return value;
             }
-            else
-            {
-                // 处理读取失败的情况，例如返回默认值或抛出异常
-                return T{};
-            }
+            return value;
         }
 
-        template <typename T>
-        bool read(T& value) const
+
+        /*template <typename T>
+        T read(T& value) const
         {
             return readAtPosition(rPos_, value);
-        }
+        }*/
 
 
         void read(uint8_t* dest, size_t len) const
@@ -224,20 +231,6 @@ namespace Tina
             static_assert(std::is_fundamental_v<T>, "append(compound)");
             value = EndianConvert(value);
             append(reinterpret_cast<uint8_t*>(&value), sizeof(value));
-        }
-
-    private:
-        // 私有辅助函数，执行实际的读取和大小端转换
-        template <typename T>
-        bool readAtPosition(size_t pos, T& value) const
-        {
-            if (pos + sizeof(T) > buffer_.size())
-            {
-                return false;
-            }
-            value = *reinterpret_cast<const T*>(&buffer_[pos]);
-            value = Tool::EndianConvert(value); // 执行大小端转换
-            return true;
         }
 
     protected:
