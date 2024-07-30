@@ -1,5 +1,6 @@
 //
 // Created by wuxianggujun on 2024/7/28.
+// https://github.com/chenshuo/muduo/blob/master/muduo/net/Buffer.h
 // https://github.com/RamseyK/ByteBufferCpp/blob/main/src/ByteBuffer.hpp
 // https://github.com/jameyboor/Robots-on-Wheels/blob/1cde0a4b512f0d5d88f46f70689035ce580d02ce/ByteBuffer.h
 //
@@ -8,6 +9,7 @@
 #define TINA_FILESYSTEM_BYTEBUFFER_HPP
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include "tool/Endianness.hpp"
@@ -50,13 +52,16 @@ namespace Tina
 
         virtual ~ByteBuffer()
         {
-            clear();
+            rPos_ = wPos_ = 0;
         }
 
         void clear()
         {
-            buffer_.clear();
-            rPos_ = wPos_ = 0;
+            if (!buffer_.empty())
+            {
+                buffer_.clear();
+                rPos_ = wPos_ = 0;
+            }
         }
 
         size_t capacity() const
@@ -104,32 +109,70 @@ namespace Tina
         {
             return wPos_;
         }
-        
+
+        bool isEmpty() const
+        {
+            return buffer_.empty();
+        }
+
+        template <typename T>
+        void readSkip() const
+        {
+            skipBytes(sizeof(T));
+        }
+
+        void skipBytes(size_t count) const
+        {
+            if (rPos_ + count <= buffer_.size())
+            {
+                rPos_ += count;
+            }
+            else
+            {
+                rPos_ = buffer_.size();
+            }
+        }
+
 
         std::string readString() const
         {
             std::string str{};
-            char byte = '\0';
-
+            
+            size_t pos = rPos_;
+            
             // 确保当前读位置有效
-            while (rPos_ < buffer_.size())
+            while (pos < buffer_.size())
             {
                 // 从当前读位置读取char
-                byte = read<char>(rPos_);
-                str += byte; // 将读取的字符添加到字符串
-
-                rPos_++; // 更新读位置
-
                 // 如果读取到字符串结束符，退出循环
-                if (byte == '\0')
+                if (const char byte = read<char>(pos); byte == '\0')
                 {
                     break;
                 }
+                pos++;
             }
 
+            // 创建从开始位置到结束符之前的字符串
+            str.assign(reinterpret_cast<const char*>(&buffer_[rPos_]), pos - rPos_);
+            rPos_ = (pos < buffer_.size()) ? pos : buffer_.size();
             return str;
         }
 
+
+        void writeString(const std::string& str)
+        {
+            if (!str.empty())
+            {
+                append(str.c_str(), str.size());
+            }
+        }
+
+        void swap(ByteBuffer& other) noexcept
+        {
+            buffer_.swap(other.buffer_);
+            std::swap(rPos_, other.rPos_);
+            std::swap(wPos_, other.wPos_);
+        }
 
         // 比较两个ByteBuffer对象是否相等
         bool equal(const ByteBuffer& other) const
@@ -156,12 +199,20 @@ namespace Tina
         }
 
         template <typename T>
-        void put(size_t pos, T value)
+        void
+        put(size_t pos, T value)
         {
-            static_assert(std::is_fundamental_v<T>, "put(compound)");
-            if (pos + sizeof(T) <= size())
+            static_assert(std::is_fundamental_v<T>, "append(compound)");
+            value = Tool::EndianConvert(value);
+            put(pos, reinterpret_cast<const uint8_t*>(&value), sizeof(value));
+        }
+
+
+        void put(size_t pos, const uint8_t* src, size_t cnt)
+        {
+            if (pos + cnt <= size() && src && cnt)
             {
-                std::memcpy((&buffer_[pos], reinterpret_cast<const uint8_t*>(&value), sizeof(T)));
+                std::memcpy(&buffer_[pos], src, cnt);
             }
         }
 
@@ -189,13 +240,6 @@ namespace Tina
         }
 
 
-        /*template <typename T>
-        T read(T& value) const
-        {
-            return readAtPosition(rPos_, value);
-        }*/
-
-
         void read(uint8_t* dest, size_t len) const
         {
             if ((rPos_ + len) < buffer_.size())
@@ -209,7 +253,7 @@ namespace Tina
         {
             if (src && cnt)
             {
-                if ((buffer_.size() < wPos_ + cnt))
+                if (buffer_.size() < (wPos_ + cnt))
                 {
                     buffer_.resize(wPos_ + cnt);
                 }
@@ -229,8 +273,31 @@ namespace Tina
         void append(T& value)
         {
             static_assert(std::is_fundamental_v<T>, "append(compound)");
-            value = EndianConvert(value);
+            value = Tool::EndianConvert(value);
             append(reinterpret_cast<uint8_t*>(&value), sizeof(value));
+        }
+
+        const uint8_t* peek() const
+        {
+            return &buffer_[rPos_];
+        }
+
+        uint8_t& operator[](size_t const pos)
+        {
+            if (pos >= size())
+            {
+                throw std::out_of_range("ByteBuffer::operator[]");
+            }
+            return buffer_[pos];
+        }
+
+        uint8_t const& operator[](size_t const pos) const
+        {
+            if (pos >= size())
+            {
+                throw std::out_of_range("ByteBuffer::operator[]");
+            }
+            return buffer_[pos];
         }
 
     protected:
