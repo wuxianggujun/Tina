@@ -271,7 +271,7 @@ namespace Tina
         }
 
         template <typename T>
-        void append(T& value)
+        void append(T value)
         {
             static_assert(std::is_fundamental_v<T>, "append(compound)");
             value = Tool::EndianConvert(value);

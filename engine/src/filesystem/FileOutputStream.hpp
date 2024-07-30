@@ -8,6 +8,7 @@
 #include <string>
 #include <fstream>
 #include "OutputStream.hpp"
+#include "ByteBuffer.hpp"
 
 namespace Tina
 {
@@ -23,6 +24,7 @@ namespace Tina
         void write(Byte* bytes,size_t size) override;
         void write(ByteBuffer& buffer) override;
 
+        
         //void write(Byte[] bytes, size_t size);
         
         void writeAndFlush(Byte byte);

@@ -4,6 +4,7 @@
 #include "FileOutputStream.hpp"
 #include <cstdio>
 
+
 namespace Tina
 {
     FileOutputStream::FileOutputStream(const std::string& path) : filePath(path)
@@ -58,8 +59,27 @@ namespace Tina
 
     void FileOutputStream::write(ByteBuffer& buffer)
     {
+        if (fileStream.is_open())
+        {
+            // 假设buffer.size()返回的是unsigned long long类型
+            unsigned long long bufferSize = buffer.size();
+            std::streamsize maxStreamSize = std::numeric_limits<std::streamsize>::max();
+
+            std::streamsize safeSize;
+            // 确保转换安全，避免溢出
+            if (bufferSize <= static_cast<unsigned long long>(maxStreamSize))
+            {
+                safeSize = static_cast<std::streamsize>(bufferSize);
+            }
+            else
+            {
+                // 处理超出范围的情况，例如设置为最大值
+                safeSize = maxStreamSize;
+            }
+            fileStream.write(reinterpret_cast<const char*>(buffer.peek()), safeSize);
+        }
     }
-    
+
 
     void FileOutputStream::writeAndFlush(Byte byte)
     {
