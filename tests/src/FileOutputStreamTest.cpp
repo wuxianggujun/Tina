@@ -24,7 +24,7 @@ protected:
 TEST_F(FileOutputStreamTest, WriteSingleByte)
 {
     FileOutputStream ostrm(testFileName);
-    Byte bytes[] = { Byte(65), Byte(66), Byte(67), Byte(68) };
+    Byte bytes[] = { 65, 66, 67,68 };
     ostrm.write(bytes,4);
     ostrm.flush();
     ostrm.close();

@@ -16,16 +16,26 @@ namespace Tina
         {
         }
 
-        [[nodiscard]] uint8_t getData() const
+        Byte(int data = 0) : data_(static_cast<uint8_t>(data)), is_null_(false)
         {
-            return data_;
         }
+
+        [[nodiscard]] const uint8_t* getData() const
+        {
+            return &data_;
+        }
+
+        [[nodiscard]] char getChar() const
+        {
+            return static_cast<char>(data_);
+        }
+
 
         [[nodiscard]] bool isNull() const
         {
             return is_null_;
         }
-    
+
     private:
         uint8_t data_;
         bool is_null_;

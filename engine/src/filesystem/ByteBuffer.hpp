@@ -16,6 +16,7 @@
 
 namespace Tina
 {
+    
     class ByteBuffer
     {
     public:

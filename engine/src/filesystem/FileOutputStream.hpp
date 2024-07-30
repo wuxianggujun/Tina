@@ -21,7 +21,7 @@ namespace Tina
         void flush() override;
         void write(Byte byte) override;
         void write(Byte* bytes,size_t size) override;
-        void write(const uint8_t* bytes, size_t size) override;
+        void write(ByteBuffer& buffer) override;
 
         //void write(Byte[] bytes, size_t size);
         

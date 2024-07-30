@@ -59,7 +59,6 @@ TEST_F(ByteBufferTest, ReadSkipString)
 
     // 读取字符串
     std::string str = buffer_.readString();
-    printf("Read String: %s\n", str.c_str());
 
     // 验证字符串内容
     EXPECT_EQ(str, "String");
@@ -68,11 +67,4 @@ TEST_F(ByteBufferTest, ReadSkipString)
     EXPECT_EQ(buffer_.getReadPos(), 11); // 11 = length of "Test\0String"
 
     buffer_.skipBytes(5); // Skip "Test\0"
-}
-
-
-int main(int argc, char** argv)
-{
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
 }

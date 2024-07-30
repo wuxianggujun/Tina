@@ -41,7 +41,7 @@ namespace Tina
     {
         if (fileStream.is_open() && !byte.isNull())
         {
-            fileStream.put(static_cast<char>(byte.getData()));
+            fileStream.put(byte.getChar());
         }
     }
 
@@ -51,19 +51,15 @@ namespace Tina
         {
             for (size_t i = 0; i < size; ++i)
             {
-                fileStream.put(static_cast<char>(bytes[i].getData()));
+                fileStream.put(bytes[i].getChar());
             }
         }
     }
-    
 
-    void FileOutputStream::write(const uint8_t* bytes, size_t size)
+    void FileOutputStream::write(ByteBuffer& buffer)
     {
-        if (fileStream.is_open() && bytes && size > 0)
-        {
-            fileStream.write(reinterpret_cast<const char*>(bytes), static_cast<long long>(size));
-        }
     }
+    
 
     void FileOutputStream::writeAndFlush(Byte byte)
     {
