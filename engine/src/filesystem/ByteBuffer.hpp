@@ -282,24 +282,6 @@ namespace Tina
             return &buffer_[rPos_];
         }
 
-        uint8_t& operator[](size_t const pos)
-        {
-            if (pos >= size())
-            {
-                throw std::out_of_range("ByteBuffer::operator[]");
-            }
-            return buffer_[pos];
-        }
-
-        uint8_t const& operator[](size_t const pos) const
-        {
-            if (pos >= size())
-            {
-                throw std::out_of_range("ByteBuffer::operator[]");
-            }
-            return buffer_[pos];
-        }
-
     protected:
         mutable size_t rPos_;
         size_t wPos_;
