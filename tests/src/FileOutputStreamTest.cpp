@@ -18,7 +18,7 @@ protected:
     void TearDown() override
     {
         // 删除测试文件
-        //std::remove(testFileName.c_str());
+        std::remove(testFileName.c_str());
     }
 
     std::string testFileName;
@@ -62,7 +62,7 @@ TEST_F(FileOutputStreamTest, WriteLargeData)
     size_t largeSize = 100 * 1024 * 1024; // 10 MB
     // 准备大量测试数据
     ByteBuffer buffer(largeSize);
-    
+
     for (size_t size = 0; size < largeSize; ++size)
     {
         buffer.append('A');
