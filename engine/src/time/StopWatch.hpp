@@ -1,76 +1,89 @@
 //
 // Created by wuxianggujun on 2024/8/1.
+// https://github.com/CrikeeIP/Stopwatch
 //
 
 #ifndef TINA_TIME_STOPWATCH_HPP
 #define TINA_TIME_STOPWATCH_HPP
 
 #include <chrono>
-#include <mutex>
 
 namespace Tina
 {
-    class StopWatch
+    class Stopwatch
     {
-        StopWatch(): m_running(false), m_elapsed_time(9)
+    public:
+        enum TimeFormat { NANOSECONDS, MICROSECONDS, MILLISECONDS, SECONDS };
+
+        Stopwatch() : stopped(false)
         {
+            start();
+        }
+
+        ~Stopwatch()
+        {
+            if (!stopped)
+            {
+                stop();
+            }
         }
 
         void start()
         {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_running)
+            if (!stopped)
             {
-                stop();
+                start_time = std::chrono::high_resolution_clock::now();
             }
-
-            m_start_time = std::chrono::high_resolution_clock::now();
-            m_running = true;
+            else
+            {
+                // 如果计时器已经停止，再次开始时重置 stopped 状态
+                stopped = false;
+            }
         }
 
         void stop()
         {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_running)
+            if (!stopped)
             {
-                auto stop_time = std::chrono::high_resolution_clock::now();
-                m_elapsed_time += stop_time - m_start_time;
-                m_running = false;
+                const auto end_time = std::chrono::high_resolution_clock::now();
+                elapsed_time = end_time - start_time;
+                stopped = true;
             }
         }
 
-        std::chrono::high_resolution_clock::duration getElapsedTime()
+        template <TimeFormat fmt = TimeFormat::MILLISECONDS>
+        [[nodiscard]] decltype(auto) elapsed() const
         {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            if (m_running)
+            if (!stopped)
             {
-                auto current_time = std::chrono::high_resolution_clock::now();
-                return m_elapsed_time + (current_time - m_start_time);
+                /*const auto end_time = std::chrono::high_resolution_clock::now();
+                auto duration = end_time - start_time;*/
+                return ticks<fmt>(elapsed_time);
             }
-            return m_elapsed_time;
-        }
-
-
-        decltype(auto) get_elapsed_seconds() -> long long
-        {
-            return std::chrono::duration_cast<std::chrono::seconds>(getElapsedTime()).count();
-        }
-
-        decltype(auto) get_elapsed_milliseconds() -> long long
-        {
-            return std::chrono::duration_cast<std::chrono::milliseconds>(getElapsedTime()).count();
-        }
-
-        decltype(auto) get_elapsed_microseconds() -> long long
-        {
-            return std::chrono::duration_cast<std::chrono::microseconds>(getElapsedTime()).count();
+            return ticks<fmt>(elapsed_time);
         }
 
     private:
-        std::chrono::high_resolution_clock::time_point m_start_time;
-        std::chrono::high_resolution_clock::duration m_elapsed_time;
-        bool m_running;
-        std::mutex m_mutex;
+        typedef std::chrono::time_point<std::chrono::high_resolution_clock> time_pt;
+        time_pt start_time;
+        std::chrono::high_resolution_clock::duration elapsed_time{};
+        bool stopped;
+
+        template <TimeFormat fmt>
+        static decltype(auto) ticks(const std::chrono::high_resolution_clock::duration& duration)
+        {
+            switch (fmt)
+            {
+            case NANOSECONDS:
+                return std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
+            case MICROSECONDS:
+                return std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+            case MILLISECONDS:
+                return std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+            case SECONDS:
+                return std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+            }
+        }
     };
 }
 
