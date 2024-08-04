@@ -7,83 +7,85 @@
 #define TINA_TIME_STOPWATCH_HPP
 
 #include <chrono>
+#include <string>
+#include <format>
 
 namespace Tina
 {
     class Stopwatch
     {
     public:
-        enum TimeFormat { NANOSECONDS, MICROSECONDS, MILLISECONDS, SECONDS };
-
-        Stopwatch() : stopped(false)
+        enum TimeFormat
         {
-            start();
-        }
+            NANOSECONDS, MICROSECONDS, MILLISECONDS, SECONDS, MINUTES, HOURS, DAYS
+        };
 
-        ~Stopwatch()
+        Stopwatch() : start_time({}), stop_time({}), stopped(false)
         {
-            if (!stopped)
-            {
-                stop();
-            }
         }
 
         void start()
         {
-            if (!stopped)
-            {
-                start_time = std::chrono::high_resolution_clock::now();
-            }
-            else
-            {
-                // 如果计时器已经停止，再次开始时重置 stopped 状态
-                stopped = false;
-            }
+            start_time = clock::now();
         }
 
         void stop()
         {
-            if (!stopped)
-            {
-                const auto end_time = std::chrono::high_resolution_clock::now();
-                elapsed_time = end_time - start_time;
-                stopped = true;
-            }
+            stop_time = clock::now();
+            m_duration = std::chrono::duration_cast<std::chrono::microseconds>(stop_time - start_time).count();
         }
 
-        template <TimeFormat fmt = TimeFormat::MILLISECONDS>
-        [[nodiscard]] decltype(auto) elapsed() const
+        decltype(auto) duration() const
         {
-            if (!stopped)
+            return m_duration;
+        }
+
+        template <TimeFormat fmt = MILLISECONDS, class Func>
+        decltype(auto) time(Func&& func)
+        {
+            start();
+            func();
+            stop();
+            return duration();
+        }
+
+        static std::string format(std::chrono::microseconds::rep duration)
+        {
+            using namespace std::chrono;
+
+            auto ms = duration_cast<milliseconds>(microseconds(duration)).count();
+            auto s = duration_cast<seconds>(microseconds(duration)).count();
+            auto m = duration_cast<minutes>(microseconds(duration)).count();
+            auto h = duration_cast<hours>(microseconds(duration)).count();
+            auto d = duration_cast<days>(microseconds(duration)).count();
+            // 使用std::format来格式化字符串
+            if (d > 0)
             {
-                /*const auto end_time = std::chrono::high_resolution_clock::now();
-                auto duration = end_time - start_time;*/
-                return ticks<fmt>(elapsed_time);
+                return std::format("{}d {}h {}m {}s {}ms", d, h % 24, m % 60, s % 60, ms % 1000);
             }
-            return ticks<fmt>(elapsed_time);
+            if (h > 0)
+            {
+                return std::format("{}h {}m {}s {}ms", h, m % 60, s % 60, ms);
+            }
+            if (m > 0)
+            {
+                return std::format("{}m {}s {}ms", m, s % 60, ms);
+            }
+            if (s > 0)
+            {
+                return std::format("{}s {}ms", s, ms);
+            }
+            return std::format("{}ms", ms);
         }
 
     private:
-        typedef std::chrono::time_point<std::chrono::high_resolution_clock> time_pt;
+        using clock = std::chrono::high_resolution_clock;
+        using time_pt = std::chrono::time_point<std::chrono::high_resolution_clock>;
         time_pt start_time;
-        std::chrono::high_resolution_clock::duration elapsed_time{};
-        bool stopped;
+        time_pt stop_time;
+        std::chrono::microseconds::rep m_duration{};
 
-        template <TimeFormat fmt>
-        static decltype(auto) ticks(const std::chrono::high_resolution_clock::duration& duration)
-        {
-            switch (fmt)
-            {
-            case NANOSECONDS:
-                return std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
-            case MICROSECONDS:
-                return std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
-            case MILLISECONDS:
-                return std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
-            case SECONDS:
-                return std::chrono::duration_cast<std::chrono::seconds>(duration).count();
-            }
-        }
+        mutable bool stopped;
     };
 }
 
