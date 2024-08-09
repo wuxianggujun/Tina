@@ -5,18 +5,30 @@
 
 namespace Tina
 {
-    File::File(std::string filename, FileMode mode) : fileName_(std::move(filename)), mode_(mode), isOpen_(false)
+    File::File(std::string filename, FileMode mode): fileName_(std::move(filename)), mode_(mode), fileStream_(nullptr),
+                                                     isOpen_(false)
     {
-        std::ios::openmode openMode = convertMode(mode);
-        fileStream_.open(fileName_, openMode);
-        if (!fileStream_.is_open())
+        const char* cMode = nullptr;
+        switch (mode)
         {
-            std::cerr << "Failed to open file " << fileName_ << std::endl;
+        case FileMode::Read:
+            cMode = "r";
+            break;
+        case FileMode::ReadWrite:
+            cMode = "r+";
+            break;
+        case FileMode::Write:
+            cMode = "w";
+            break;
+        default:
+            throw std::invalid_argument("Invalid File Mode");
         }
-        else
+        fileStream_ = new FileStream(fileName_.c_str(), cMode);
+        if (!fileStream_->getFile())
         {
-            isOpen_ = true;
+            throw std::runtime_error("Failed to open file");
         }
+        isOpen_ = true;
     }
 
     File::~File()
@@ -24,54 +36,39 @@ namespace Tina
         close();
     }
 
-    bool File::read(std::string &data, bool allowWrite)
+    bool File::read(std::string& data, bool allowWrite) const
     {
-        if (!isOpen_ || (mode_ == FileMode::Write && !allowWrite))
-        {
+        if (!isOpen_ || mode_ == FileMode::Write)
             return false;
-        }
-
-        data.assign((std::istreambuf_iterator<char>(fileStream_)),
-                     std::istreambuf_iterator<char>());
-
+        char buffer[1024];
+        size_t bytesRead = fileStream_->read(buffer, sizeof(char), sizeof(buffer) - 1);
+        if (bytesRead == 0)
+            return false;
+        buffer[bytesRead] = '\0';
+        data = buffer;
         return true;
     }
 
-    bool File::write(const std::string &data, bool append, bool allowRead)
+    bool File::write(const std::string& data, bool append, bool allowRead) const
     {
-        if (!isOpen_ || (mode_ == FileMode::Read && !allowRead))
-        {
+        if (!isOpen_ || mode_ == FileMode::Read)
             return false;
-        }
-
         if (append)
-        {
-            fileStream_.seekp(0, std::ios::end);
-        }
+            fileStream_->seek(0, SEEK_END);
 
-        fileStream_ << data;
-        return fileStream_.good();
+        auto bytesWritten = fileStream_->write(data.c_str(), sizeof(char), data.size());
+        return bytesWritten == data.size();
     }
 
-    bool File::flush()
+    void File::close()
     {
-        if (fileStream_.is_open())
+        if (isOpen_)
         {
-            fileStream_.flush();
-            return true;
-        }
-        return false;
-    }
-
-    bool File::close()
-    {
-        if (fileStream_.is_open())
-        {
-            fileStream_.close();
+            if (fileStream_->close()) throw std::runtime_error("Failed to close file");
             isOpen_ = false;
-            return true;
+            delete fileStream_;
+            fileStream_ = nullptr;
         }
-        return false;
     }
 
     bool File::isOpen() const
@@ -81,16 +78,19 @@ namespace Tina
 
     bool File::exists() const
     {
-        return std::filesystem::exists(fileName_);
+        struct _stat buffer{};
+        return _stat(fileName_.c_str(), &buffer) == 0;
     }
 
-    std::string File::getDirectoryPath() const
+    [[nodiscard]] std::string File::getDirectoryPath() const
     {
-        return std::filesystem::path(fileName_).parent_path().string();
+        size_t pos = fileName_.find_last_of(PATH_SEPARATOR);
+        return (pos != std::string::npos) ? fileName_.substr(0, pos) : "";
     }
 
-    std::string File::getFileName() const
+    [[nodiscard]] std::string File::getFileName() const
     {
-        return std::filesystem::path(fileName_).filename().string();
+        size_t pos = fileName_.find_last_of(PATH_SEPARATOR);
+        return (pos != std::string::npos) ? fileName_.substr(pos + 1) : fileName_;
     }
 } // namespace Tina

@@ -15,8 +15,6 @@ TEST(FileTest, CreateAndWriteToFile)
 
     ASSERT_TRUE(file.isOpen());
     ASSERT_TRUE(file.write("Hello, World!"));
-    ASSERT_TRUE(file.flush());
-    ASSERT_TRUE(file.close());
 }
 
 TEST(FileTest, ReadFromFile)
@@ -33,7 +31,6 @@ TEST(FileTest, ReadFromFile)
     std::getline(infile, content);
 
     ASSERT_EQ(content, "Hello, World!");
-    ASSERT_TRUE(file.close());
 }
 
 TEST(FileTest, FileExistence)
@@ -41,7 +38,6 @@ TEST(FileTest, FileExistence)
     std::string filename = "test.txt";
     File file(filename, FileMode::Read);
 
-    ASSERT_TRUE(file.exists());
-    ASSERT_TRUE(file.close());
+    ASSERT_TRUE(file.exists()); 
 }
 
