@@ -8,7 +8,7 @@ namespace Tina
     File::File(std::string filename, FileMode mode): fileName_(std::move(filename)), mode_(mode), fileStream_(nullptr),
                                                      isOpen_(false)
     {
-        const char* cMode = nullptr;
+        const char* cMode;
         switch (mode)
         {
         case FileMode::Read:
@@ -33,23 +33,27 @@ namespace Tina
 
     File::~File()
     {
-        close();
+        File::close();
     }
 
-    bool File::read(std::string& data, bool allowWrite) const
+    auto File::read(std::string& data) const -> bool
     {
-        if (!isOpen_ || mode_ == FileMode::Write)
+        if (!isOpen_ || mode_ != FileMode::Read)
+        {
             return false;
-        char buffer[1024];
-        size_t bytesRead = fileStream_->read(buffer, sizeof(char), sizeof(buffer) - 1);
-        if (bytesRead == 0)
-            return false;
-        buffer[bytesRead] = '\0';
-        data = buffer;
+        }
+        constexpr size_t bufferSize = 1024; // 定义缓冲区大小
+        std::vector<char> buffer(bufferSize);
+        size_t bytesRead;
+
+        while ((bytesRead = fileStream_->read(buffer.data(), 1, bufferSize)) > 0)
+        {
+            data.append(buffer.data(), bytesRead); // 将读取的数据追加到数据字符串
+        }
         return true;
     }
 
-    bool File::write(const std::string& data, bool append, bool allowRead) const
+    bool File::write(const std::string& data, bool append) const
     {
         if (!isOpen_ || mode_ == FileMode::Read)
             return false;
@@ -71,6 +75,16 @@ namespace Tina
         }
     }
 
+    bool File::isFile() const
+    {
+        return std::filesystem::is_regular_file(fileName_);
+    }
+
+    bool File::isDirectory() const
+    {
+        return std::filesystem::is_directory(fileName_);
+    }
+
     bool File::isOpen() const
     {
         return isOpen_;
@@ -80,6 +94,26 @@ namespace Tina
     {
         struct _stat buffer{};
         return _stat(fileName_.c_str(), &buffer) == 0;
+    }
+
+    FileMode File::getMode() const
+    {
+        return mode_;
+    }
+
+    FileStream* File::getFileStream() const
+    {
+        return fileStream_;
+    }
+
+    std::vector<File> File::listFiles() const
+    {
+        std::vector<File> files;
+        for (const auto& entry : std::filesystem::directory_iterator(fileName_))
+        {
+            files.emplace_back(entry.path().string().c_str(), FileMode::ReadWrite);
+        }
+        return files;
     }
 
     [[nodiscard]] std::string File::getDirectoryPath() const

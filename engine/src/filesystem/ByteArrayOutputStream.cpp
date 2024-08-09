@@ -62,10 +62,10 @@ namespace Tina
         buffer_->append(bytes, size);
     }
 
-    void ByteArrayOutputStream::write(ByteBuffer& buffer)
+    void ByteArrayOutputStream::write(Bytes& bytes)
     {
-        buffer_->swap(buffer);
     }
+    
 
     ByteArrayOutputStream::~ByteArrayOutputStream()
     {

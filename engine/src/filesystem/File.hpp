@@ -1,8 +1,11 @@
 #ifndef TINA_FILESYSTEM_FILE_HPP
 #define TINA_FILESYSTEM_FILE_HPP
 
+#include <vector>
+
 #include "FileStream.hpp"
 #include "Closeable.hpp"
+#include <sys/stat.h>
 
 namespace Tina
 {
@@ -25,11 +28,19 @@ namespace Tina
         File(std::string filename, FileMode mode);
         ~File() override;
 
-        bool read(std::string& data, bool allowWrite = false) const;
-        [[nodiscard]] bool write(const std::string& data, bool append = false, bool allowRead = false) const;
+        [[nodiscard]] auto read(std::string& data) const -> bool;
+        [[nodiscard]] bool write(const std::string& data, bool append = false) const;
         void close() override;
+        [[nodiscard]] bool isFile() const;
+        [[nodiscard]] bool isDirectory() const;
         [[nodiscard]] bool isOpen() const;
         [[nodiscard]] bool exists() const;
+
+        [[nodiscard]] FileMode getMode() const;
+
+        [[nodiscard]] FileStream* getFileStream() const;
+        
+        [[nodiscard]] std::vector<File> listFiles() const;
 
         [[nodiscard]] std::string getDirectoryPath() const;
         [[nodiscard]] std::string getFileName() const;

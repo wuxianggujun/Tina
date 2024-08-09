@@ -21,8 +21,9 @@
 #include <linux/limits.h>
 #endif
 
-namespace Tina{
-class FileStream
+namespace Tina
+{
+    class FileStream
     {
     private:
         FILE* file = nullptr;
@@ -104,6 +105,11 @@ class FileStream
         [[nodiscard]] bool eof() const
         {
             return feof(file);
+        }
+
+        [[nodiscard]] size_t flush() const
+        {
+            return fflush(file);
         }
 
         [[nodiscard]] size_t error() const

@@ -21,6 +21,7 @@ namespace Tina
         {
             return data_;
         }
+        
 
         [[nodiscard]] constexpr char getChar() const noexcept
         {

@@ -28,7 +28,7 @@ namespace Tina
         void flush() override;
         void write(Byte byte) override;
         void write(Byte* bytes, size_t size) override;
-        void write(ByteBuffer& bytes) override;
+        void write(Bytes& bytes) override;
         ~ByteArrayOutputStream() override;
 
     protected:

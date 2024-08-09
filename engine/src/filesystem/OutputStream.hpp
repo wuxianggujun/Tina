@@ -8,14 +8,16 @@
 #include "Closeable.hpp"
 #include "Flushable.hpp"
 #include "Byte.hpp"
+#include "Buffer.hpp"
 
 namespace Tina
 {
-
     class ByteBuffer;
-    
+
     class OutputStream : public Closeable, Flushable
     {
+    protected:
+        using Bytes = Buffer<Byte>;
     public:
         void close() override = 0;
         void flush() override = 0;
@@ -24,8 +26,7 @@ namespace Tina
 
         virtual void write(Byte* bytes, size_t size) = 0;
 
-        virtual void write(ByteBuffer& buffer) = 0;
-        
+        virtual void write(Bytes& buffer) = 0;
     };
 } // Tina
 

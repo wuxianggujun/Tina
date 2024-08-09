@@ -3,17 +3,26 @@
 
 #include "FileOutputStream.hpp"
 #include <cstdio>
+#include <utility>
 
 
 namespace Tina
 {
-    FileOutputStream::FileOutputStream(const std::string& path) : filePath(path)
+    FileOutputStream::FileOutputStream(std::string path) : file(new File(path, FileMode::Write)),
+                                                           filePath(std::move(path))
     {
-        fileStream.open(path.c_str(), std::ios::binary | std::ios::out);
+    }
 
-        if (!fileStream.is_open())
+    FileOutputStream::FileOutputStream(File* file_ptr)
+    {
+        if (file_ptr)
         {
-            printf("Failed to open file %s\n", filePath.c_str());
+            if (file_ptr->getMode() != FileMode::Read || file_ptr->getMode() == FileMode::ReadWrite)
+            {
+                throw std::runtime_error("FileOutputStream: FileMode must be Write");
+            }
+            file = file_ptr;
+            filePath = file->getDirectoryPath();
         }
     }
 
@@ -24,60 +33,39 @@ namespace Tina
 
     void FileOutputStream::close()
     {
-        if (fileStream.is_open())
+        if (file && file->isOpen())
         {
-            fileStream.close();
+            file->close();
+            delete file;
+            file = nullptr;
         }
     }
 
     void FileOutputStream::flush()
     {
-        if (fileStream.is_open())
-        {
-            fileStream.flush();
-        }
+    }
+
+    void FileOutputStream::write(const std::string& data) const
+    {
+        (void)file->write(data, false);
+    }
+
+    void FileOutputStream::write(const std::string& data, bool append) const
+    {
+        (void)file->write(data, append);
     }
 
     void FileOutputStream::write(Byte byte)
     {
-        if (fileStream.is_open())
-        {
-            fileStream.put(byte.getChar());
-        }
     }
 
     void FileOutputStream::write(Byte* bytes, size_t size)
     {
-        if (fileStream.is_open() && bytes && size > 0)
-        {
-            for (size_t i = 0; i < size; ++i)
-            {
-                fileStream.put(bytes[i].getChar());
-            }
-        }
     }
 
-    void FileOutputStream::write(ByteBuffer& buffer)
+    void FileOutputStream::write(Bytes& buffer)
     {
-        if (fileStream.is_open())
-        {
-            // 假设buffer.size()返回的是unsigned long long类型
-            unsigned long long bufferSize = buffer.size();
-            std::streamsize maxStreamSize = std::numeric_limits<std::streamsize>::max();
-
-            std::streamsize safeSize;
-            // 确保转换安全，避免溢出
-            if (bufferSize <= static_cast<unsigned long long>(maxStreamSize))
-            {
-                safeSize = static_cast<std::streamsize>(bufferSize);
-            }
-            else
-            {
-                // 处理超出范围的情况，例如设置为最大值
-                safeSize = maxStreamSize;
-            }
-            fileStream.write(reinterpret_cast<const char*>(buffer.peek()), safeSize);
-        }
+        writeBytes(buffer);
     }
 
 
@@ -85,5 +73,22 @@ namespace Tina
     {
         write(byte);
         flush();
+    }
+
+    void FileOutputStream::writeBytes(const Bytes& bytes) const
+    {
+        if (file->isOpen())
+        {
+            if (const auto fileStream = file->getFileStream())
+            {
+                const auto* data = reinterpret_cast<const uint8_t*>(bytes.begin());
+                const size_t size = bytes.size();
+                if (const size_t written = fileStream->write(data, sizeof(uint8_t), size); written != size)
+                {
+                    throw std::runtime_error("FileOutputStream: write bytes failed");
+                }
+                (void)fileStream->flush();
+            }
+        }
     }
 } // Tina

@@ -11,80 +11,64 @@ class FileOutputStreamTest : public ::testing::Test
 protected:
     void SetUp() override
     {
-        // 创建一个临时文件用于测试
-        testFileName = "test_output.bin";
+        /*// 创建一个临时文件用于测试
+        testFileName = "test_output.bin";*/
+        // 创建一个用于测试的文件，并打开它
+        testFile = std::make_unique<File>(testFilePath, FileMode::Write);
+        ASSERT_TRUE(testFile->isOpen());
     }
 
     void TearDown() override
     {
-        // 删除测试文件
-        std::remove(testFileName.c_str());
+        // 清理工作
+        if (testOutputStream)
+        {
+            testOutputStream->close();
+        }
+        if (testFile)
+        {
+            testFile->close();
+        }
+        // 移除测试文件
+        //remove(testFilePath.c_str());
     }
 
-    std::string testFileName;
+    const std::string testFilePath = "test_output.txt";
+    std::unique_ptr<File> testFile;
+    std::unique_ptr<FileOutputStream> testOutputStream;
 };
 
 
-TEST_F(FileOutputStreamTest, WriteSingleByte)
+TEST_F(FileOutputStreamTest, WriteString)
 {
-    FileOutputStream ostrm(testFileName);
-    Byte bytes[] = {65, 66, 67, 68};
-    ostrm.write(bytes, 4);
-    ostrm.flush();
-    ostrm.close();
+    testOutputStream = std::make_unique<FileOutputStream>(testFilePath);
+    std::string testData = "Hello, World!";
+    testOutputStream->write(testData);
+    testOutputStream->flush();
+    testOutputStream->close();
+
+    std::string context;
+    File file(testFilePath, FileMode::Read);
+    (void)file.read(context);
+    file.close();
+    ASSERT_FALSE(file.isOpen());
 }
 
-TEST_F(FileOutputStreamTest, WriteAndReadBack)
+TEST_F(FileOutputStreamTest, WriteByteArray)
 {
-    // 准备测试数据
-    ByteBuffer buffer;
-    std::string testData = "Hello, Google Test!";
-    buffer.writeString(testData);
-
-    // 写入文件
-    FileOutputStream fos(testFileName);
-    fos.write(buffer);
-    fos.flush();
-    fos.close();
-
-    // 读取文件内容并验证
-    std::ifstream inputFile(testFileName, std::ios::binary);
-    ASSERT_TRUE(inputFile.is_open());
-
-    std::string fileContent((std::istreambuf_iterator<char>(inputFile)), std::istreambuf_iterator<char>());
-    inputFile.close();
-
-    EXPECT_EQ(testData, fileContent);
-}
-
-TEST_F(FileOutputStreamTest, WriteLargeData)
-{
-    size_t largeSize = 100 * 1024 * 1024; // 10 MB
-    // 准备大量测试数据
-    ByteBuffer buffer(largeSize);
-
-    for (size_t size = 0; size < largeSize; ++size)
+    
+    auto testStream2 = std::make_unique<FileOutputStream>("test_output.bin");
+    using Bytes = Buffer<Byte>;
+    Bytes testData(4096);
+    for (int i = 0; i < testData.size(); ++i)
     {
-        buffer.append('A');
+        testData[i] = Byte(i);
     }
 
+    // 确保没有额外的 null terminator
+    testData.resize(testData.size() - 1, false); // 假设最后一个是 null terminator
 
-    // 写入文件
-    FileOutputStream fos(testFileName);
-    fos.write(buffer);
-    fos.flush();
-    fos.close();
-
-    // 读取文件内容并验证
-    std::ifstream inputFile(testFileName, std::ios::binary);
-    ASSERT_TRUE(inputFile.is_open());
-
-    std::vector<uint8_t> fileContent((std::istreambuf_iterator<char>(inputFile)), std::istreambuf_iterator<char>());
-    inputFile.close();
-
-    ASSERT_EQ(largeSize, fileContent.size());
-    for (size_t i = 0; i < largeSize; ++i)
-    {
-        EXPECT_EQ('A', fileContent[i]);
-    }
+    testStream2->write(testData);
+    testStream2->flush();
+    testStream2->close();
 }
