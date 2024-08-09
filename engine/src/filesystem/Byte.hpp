@@ -6,33 +6,93 @@
 #define TINA_FILESYSTEM_BYTE_HPP
 
 #include <cstdint>
+#include <ostream>
 
 namespace Tina
 {
     class Byte
     {
     public:
-        explicit Byte(uint8_t data = 0): data_(data)
+        explicit constexpr Byte(uint8_t data = 0) noexcept : data_(data)
         {
         }
 
-        explicit Byte(int data = 0) : data_(static_cast<uint8_t>(data))
+        [[nodiscard]] constexpr uint8_t getData() const noexcept
         {
+            return data_;
         }
 
-        [[nodiscard]] const uint8_t* getData() const
-        {
-            return &data_;
-        }
-
-        [[nodiscard]] char getChar() const
+        [[nodiscard]] constexpr char getChar() const noexcept
         {
             return static_cast<char>(data_);
+        }
+
+        bool operator!=(const Byte& other) const noexcept
+        {
+            return data_ != other.data_;
+        }
+
+        bool operator==(const Byte& other) const noexcept
+        {
+            return data_ == other.data_;
+        }
+
+        bool operator<(const Byte& other) const noexcept
+        {
+            return data_ < other.data_;
+        }
+
+        bool operator>(const Byte& other) const noexcept
+        {
+            return data_ > other.data_;
+        }
+
+        Byte& operator=(uint8_t data) noexcept
+        {
+            data_ = data;
+            return *this;
+        }
+
+        Byte& operator+=(uint8_t value) noexcept
+        {
+            data_ += value;
+            return *this;
+        }
+
+        Byte operator+(uint8_t value) const noexcept
+        {
+            return Byte(data_ + value);
+        }
+
+        explicit operator uint8_t() const noexcept
+        {
+            return data_;
+        }
+
+        explicit operator int() const noexcept
+        {
+            return static_cast<int>(data_);
+        }
+
+        static constexpr Byte zero() noexcept
+        {
+            return Byte(0);
+        }
+
+        static constexpr Byte max() noexcept
+        {
+            return Byte(255);
         }
 
     private:
         uint8_t data_;
     };
+
+    inline std::ostream& operator<<(std::ostream& os, const Byte& byte)
+    {
+        os << static_cast<int>(byte.getData());
+        return os;
+    }
 }
 
 #endif //TINA_FILESYSTEM_BYTE_HPP

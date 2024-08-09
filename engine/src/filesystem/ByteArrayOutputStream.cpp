@@ -54,7 +54,7 @@ namespace Tina
 
     void ByteArrayOutputStream::write(Byte byte)
     {
-        buffer_->append(byte.getData(), sizeof(byte.getData()));
+        buffer_->append(byte.getData());
     }
 
     void ByteArrayOutputStream::write(Byte* bytes, size_t size)
