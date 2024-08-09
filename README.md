@@ -75,9 +75,7 @@ make
 - **[EraEngine](https://github.com/EldarMuradov/EraEngine)**
 - **[simple_engine](https://github.com/bikemurt/simple_engine)**
 - **[2019-ecs](https://code.austinmorlan.com/austin/2019-ecs)**
-
-## Thanks
-https://github.com/search?q=ByteBuffer+language%3AC%2B%2B+&type=repositories
+- **[PainterEngine](https://github.com/matrixcascade/PainterEngine)**
 
 ## License
 [MIT](https://github.com/wuxianggujun/Tina/blob/master/LICENSE)

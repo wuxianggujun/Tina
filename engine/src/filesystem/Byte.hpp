@@ -12,11 +12,11 @@ namespace Tina
     class Byte
     {
     public:
-        explicit Byte(uint8_t data = 0): data_(data), is_null_(false)
+        explicit Byte(uint8_t data = 0): data_(data)
         {
         }
 
-        Byte(int data = 0) : data_(static_cast<uint8_t>(data)), is_null_(false)
+        explicit Byte(int data = 0) : data_(static_cast<uint8_t>(data))
         {
         }
 
@@ -30,15 +30,8 @@ namespace Tina
             return static_cast<char>(data_);
         }
 
-
-        [[nodiscard]] bool isNull() const
-        {
-            return is_null_;
-        }
-
     private:
         uint8_t data_;
-        bool is_null_;
     };
 }
 

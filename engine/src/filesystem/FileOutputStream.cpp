@@ -40,7 +40,7 @@ namespace Tina
 
     void FileOutputStream::write(Byte byte)
     {
-        if (fileStream.is_open() && !byte.isNull())
+        if (fileStream.is_open())
         {
             fileStream.put(byte.getChar());
         }
