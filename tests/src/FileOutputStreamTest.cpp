@@ -14,7 +14,7 @@ protected:
         /*// 创建一个临时文件用于测试
         testFileName = "test_output.bin";*/
         // 创建一个用于测试的文件，并打开它
-        testFile = std::make_unique<File>(testFilePath, FileMode::Write);
+        testFile = std::make_unique<File>(testFilePath, Write| Binary);
         ASSERT_TRUE(testFile->isOpen());
     }
 
@@ -48,7 +48,7 @@ TEST_F(FileOutputStreamTest, WriteString)
     testOutputStream->close();
 
     std::string context;
-    File file(testFilePath, FileMode::Read);
+    File file(testFilePath, Read|Write);
     (void)file.read(context);
     file.close();
     ASSERT_FALSE(file.isOpen());

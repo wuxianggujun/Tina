@@ -7,6 +7,8 @@
 #include "Closeable.hpp"
 #include <sys/stat.h>
 
+#include "Flushable.hpp"
+
 namespace Tina
 {
 #if defined(WIN32) || defined(_WIN32)
@@ -15,22 +17,25 @@ namespace Tina
 #define PATH_SEPARATOR '/'
 #endif
 
-    enum class FileMode
+    enum FileMode
     {
-        Read,
-        Write,
-        ReadWrite
+        Read = 1 << 0,
+        Write = 1 << 1,
+        Text = 1 << 2,
+        Binary = 1 << 3,
+        Append = 1 << 4
     };
-    
+
     class File : Closeable
     {
     public:
-        File(std::string filename, FileMode mode);
+        explicit File(std::string filename, size_t mode = Binary);
         ~File() override;
 
         [[nodiscard]] auto read(std::string& data) const -> bool;
         [[nodiscard]] bool write(const std::string& data, bool append = false) const;
         void close() override;
+        
         [[nodiscard]] bool isFile() const;
         [[nodiscard]] bool isDirectory() const;
         [[nodiscard]] bool isOpen() const;
@@ -39,11 +44,12 @@ namespace Tina
         [[nodiscard]] FileMode getMode() const;
 
         [[nodiscard]] FileStream* getFileStream() const;
-        
+
         [[nodiscard]] std::vector<File> listFiles() const;
 
         [[nodiscard]] std::string getDirectoryPath() const;
         [[nodiscard]] std::string getFileName() const;
+
 
     private:
         std::string fileName_;

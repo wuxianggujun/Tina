@@ -6,7 +6,6 @@
 #define TINA_FILESYSTEM_FILEOUTPUTSTREAM_HPP
 
 #include <string>
-#include <fstream>
 #include "OutputStream.hpp"
 #include "File.hpp"
 

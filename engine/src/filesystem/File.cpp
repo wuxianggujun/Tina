@@ -5,31 +5,53 @@
 
 namespace Tina
 {
-    File::File(std::string filename, FileMode mode): fileName_(std::move(filename)), mode_(mode), fileStream_(nullptr),
-                                                     isOpen_(false)
+    File::File(std::string filename, size_t mode) : fileName_(std::move(filename)),
+                                                    fileStream_(nullptr),
+                                                    isOpen_(false)
     {
-        const char* cMode;
-        switch (mode)
+        mode_ = static_cast<FileMode>(mode);
+
+        std::string cMode;
+        // 判断读写追加模式
+        if ((mode_ & Write) && (mode_ & Read))
         {
-        case FileMode::Read:
-            cMode = "r";
-            break;
-        case FileMode::ReadWrite:
             cMode = "r+";
-            break;
-        case FileMode::Write:
-            cMode = "w";
-            break;
-        default:
-            throw std::invalid_argument("Invalid File Mode");
         }
-        fileStream_ = new FileStream(fileName_.c_str(), cMode);
+        else if (mode_ & Write)
+        {
+            cMode = "w";
+        }
+        else if (mode_ & Read)
+        {
+            cMode = "r";
+        }
+        else if (mode_ & Append)
+        {
+            cMode = "a";
+        }
+        else
+        {
+            throw std::invalid_argument("Invalid file mode");
+        }
+
+        // 添加文本或二进制模式
+        if (mode_ & Binary)
+        {
+            cMode += "b";
+        }
+        else if (mode_ & Text)
+        {
+            cMode += "t";
+        }
+        
+        fileStream_ = new FileStream(fileName_.c_str(), cMode.c_str());
         if (!fileStream_->getFile())
         {
             throw std::runtime_error("Failed to open file");
         }
         isOpen_ = true;
     }
+
 
     File::~File()
     {
@@ -38,7 +60,7 @@ namespace Tina
 
     auto File::read(std::string& data) const -> bool
     {
-        if (!isOpen_ || mode_ != FileMode::Read)
+        if (!isOpen_ || mode_ & Binary)
         {
             return false;
         }
@@ -111,7 +133,7 @@ namespace Tina
         std::vector<File> files;
         for (const auto& entry : std::filesystem::directory_iterator(fileName_))
         {
-            files.emplace_back(entry.path().string().c_str(), FileMode::ReadWrite);
+            files.emplace_back(entry.path().string().c_str(), FileMode::Read);
         }
         return files;
     }

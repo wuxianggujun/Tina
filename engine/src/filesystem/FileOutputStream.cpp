@@ -17,7 +17,7 @@ namespace Tina
     {
         if (file_ptr)
         {
-            if (file_ptr->getMode() != FileMode::Read || file_ptr->getMode() == FileMode::ReadWrite)
+            if (!(file_ptr->getMode() & Read))
             {
                 throw std::runtime_error("FileOutputStream: FileMode must be Write");
             }
@@ -43,6 +43,7 @@ namespace Tina
 
     void FileOutputStream::flush()
     {
+       (void)file->getFileStream()->flush();
     }
 
     void FileOutputStream::write(const std::string& data) const
