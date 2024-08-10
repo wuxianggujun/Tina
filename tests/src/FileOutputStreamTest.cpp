@@ -56,18 +56,17 @@ TEST_F(FileOutputStreamTest, WriteString)
 
 TEST_F(FileOutputStreamTest, WriteByteArray)
 {
-    auto testStream2 = std::make_unique<FileOutputStream>("test_output.bin");
+    File* file = new File("test_output.bin", Write | Binary);
+    auto testStream2 = std::make_unique<FileOutputStream>(file);
 
-    ByteBuffer testData(1024);
-
+    ByteBuffer testData(64);
+    
+    testData.resize();
     // 使用索引操作直接写入数据到 ByteBuffer
     for (size_t i = 0; i < testData.capacity(); ++i)
     {
         testData.put(i, static_cast<uint8_t>(i));
     }
-
-    testData.resize(1024);  // 确保缓冲区大小正确
-
     testStream2->write(testData);
     testStream2->flush();
     testStream2->close();

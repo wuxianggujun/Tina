@@ -17,7 +17,7 @@ namespace Tina
     {
         if (file_ptr)
         {
-            if (!(file_ptr->getMode() & Read))
+            if (!(file_ptr->getMode() & Write))
             {
                 throw std::runtime_error("FileOutputStream: FileMode must be Write");
             }
@@ -108,7 +108,7 @@ namespace Tina
                 }
 
                 // 将数据写入文件
-                const size_t written = fileStream->write(data, 1, dataSize);
+                const size_t written = fileStream->write(data, sizeof(uint8_t), dataSize);
                 if (written != dataSize)
                 {
                     throw std::runtime_error("FileOutputStream: write bytes failed");

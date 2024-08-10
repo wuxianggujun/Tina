@@ -16,7 +16,6 @@
 
 namespace Tina
 {
-    
     class ByteBuffer
     {
     public:
@@ -83,6 +82,11 @@ namespace Tina
             }
         }
 
+        void resize()
+        {
+            resize(buffer_.capacity());
+        }
+        
         void resize(size_t size)
         {
             buffer_.resize(size);
@@ -138,9 +142,9 @@ namespace Tina
         std::string readString() const
         {
             std::string str{};
-            
+
             size_t pos = rPos_;
-            
+
             // 确保当前读位置有效
             while (pos < buffer_.size())
             {
