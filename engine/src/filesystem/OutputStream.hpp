@@ -9,6 +9,7 @@
 #include "Flushable.hpp"
 #include "Byte.hpp"
 #include "Buffer.hpp"
+#include "ByteBuffer.hpp"
 
 namespace Tina
 {
@@ -17,7 +18,7 @@ namespace Tina
     class OutputStream : public Closeable, Flushable
     {
     protected:
-        using Bytes = Buffer<Byte>;
+        using Bytes = ByteBuffer;
     public:
         void close() override = 0;
         void flush() override = 0;

@@ -14,7 +14,7 @@ protected:
         /*// 创建一个临时文件用于测试
         testFileName = "test_output.bin";*/
         // 创建一个用于测试的文件，并打开它
-        testFile = std::make_unique<File>(testFilePath, Write| Binary);
+        testFile = std::make_unique<File>(testFilePath, Write | Binary);
         ASSERT_TRUE(testFile->isOpen());
     }
 
@@ -48,7 +48,7 @@ TEST_F(FileOutputStreamTest, WriteString)
     testOutputStream->close();
 
     std::string context;
-    File file(testFilePath, Read|Write);
+    File file(testFilePath, Read | Write);
     (void)file.read(context);
     file.close();
     ASSERT_FALSE(file.isOpen());
@@ -56,17 +56,17 @@ TEST_F(FileOutputStreamTest, WriteString)
 
 TEST_F(FileOutputStreamTest, WriteByteArray)
 {
-    
     auto testStream2 = std::make_unique<FileOutputStream>("test_output.bin");
-    using Bytes = Buffer<Byte>;
-    Bytes testData(4096);
-    for (int i = 0; i < testData.size(); ++i)
+
+    ByteBuffer testData(1024);
+
+    // 使用索引操作直接写入数据到 ByteBuffer
+    for (size_t i = 0; i < testData.capacity(); ++i)
     {
-        testData[i] = Byte(i);
+        testData.put(i, static_cast<uint8_t>(i));
     }
 
-    // 确保没有额外的 null terminator
-    testData.resize(testData.size() - 1, false); // 假设最后一个是 null terminator
+    testData.resize(1024);  // 确保缓冲区大小正确
 
     testStream2->write(testData);
     testStream2->flush();
