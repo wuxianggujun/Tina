@@ -54,7 +54,7 @@ TEST_F(FileOutputStreamTest, WriteString)
     ASSERT_FALSE(file.isOpen());
 }
 
-TEST_F(FileOutputStreamTest, WriteByteArray)
+/*TEST_F(FileOutputStreamTest, WriteByteArray)
 {
     File* file = new File("test_output.bin", Write | Binary);
     auto testStream2 = std::make_unique<FileOutputStream>(file);
@@ -66,6 +66,23 @@ TEST_F(FileOutputStreamTest, WriteByteArray)
     for (size_t i = 0; i < testData.capacity(); ++i)
     {
         testData.put(i, static_cast<uint8_t>(i));
+    }
+    testStream2->write(testData);
+    testStream2->flush();
+    testStream2->close();
+}*/
+
+TEST_F(FileOutputStreamTest, WriteByteArray)
+{
+    File* file = new File("test_output.bin", Write | Binary);
+    auto testStream2 = std::make_unique<FileOutputStream>(file);
+    using Bytes = Buffer<Byte>;
+    Bytes testData(1024);
+
+    // 使用索引操作直接写入数据到 ByteBuffer
+    for (size_t i = 0; i < testData.size(); ++i)
+    {
+        testData[i] = Byte(i);
     }
     testStream2->write(testData);
     testStream2->flush();

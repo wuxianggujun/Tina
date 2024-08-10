@@ -18,7 +18,8 @@ namespace Tina
     class OutputStream : public Closeable, Flushable
     {
     protected:
-        using Bytes = ByteBuffer;
+        using Bytes = Buffer<Byte>;
+        //using Bytes = ByteBuffer;
     public:
         void close() override = 0;
         void flush() override = 0;
