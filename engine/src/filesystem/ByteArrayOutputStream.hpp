@@ -23,7 +23,7 @@ namespace Tina
         [[nodiscard]] size_t size() const;
         [[nodiscard]] std::vector<uint8_t> toByteArray() const;
 
-        [[nodiscard]] Bytes* getByteBuffer() const;
+        [[nodiscard]] Buffer<Byte>*  getByteBuffer() const;
 
         void close() override;
         void flush() override;

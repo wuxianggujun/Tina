@@ -85,12 +85,7 @@ namespace Tina
         auto bytesWritten = fileStream_->write(data.c_str(), sizeof(char), data.size());
         return bytesWritten == data.size();
     }
-
-    /*void File::write(const Buffer<Byte>& data)
-    {
-        
-    }*/
-
+    
     void File::close()
     {
         if (isOpen_)

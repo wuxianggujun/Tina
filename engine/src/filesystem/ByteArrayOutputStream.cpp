@@ -33,7 +33,7 @@ namespace Tina
         return byteArray;
     }
 
-    OutputStream::Bytes* ByteArrayOutputStream::getByteBuffer() const
+    Buffer<Byte>* ByteArrayOutputStream::getByteBuffer() const
     {
         return buffer_;
     }

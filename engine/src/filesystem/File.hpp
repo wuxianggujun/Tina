@@ -33,7 +33,6 @@ namespace Tina
 
         [[nodiscard]] auto read(std::string& data) const -> bool;
         [[nodiscard]] bool write(const std::string& data, bool append = false) const;
-        // void write(const Buffer<Byte>& data);
         void close() override;
 
         [[nodiscard]] bool isFile() const;

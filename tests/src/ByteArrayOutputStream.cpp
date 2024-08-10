@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include "filesystem/ByteArrayOutputStream.hpp"
 #include "filesystem/File.hpp"
+#include "filesystem/FileOutputStream.hpp"
 
 using namespace Tina;
 
@@ -25,9 +26,10 @@ protected:
 
 TEST_F(ByteArrayOutputStreamTest, test_write_byte)
 {
+    FileOutputStream fileOutputStream("ByteArrayOutputStreamTest.bin");
     
     auto* bytes = new Buffer<Byte>(512);
-    
+
     for (int i = 0; i < 1024; ++i)
     {
         m_byteArrayOutputStream->write(Byte(0x01));
@@ -35,6 +37,7 @@ TEST_F(ByteArrayOutputStreamTest, test_write_byte)
 
     m_byteArrayOutputStream->writeBytes(bytes);
 
-    
-    
+    fileOutputStream.write(*m_byteArrayOutputStream->getByteBuffer());
+    fileOutputStream.flush();
+    fileOutputStream.close();
 }

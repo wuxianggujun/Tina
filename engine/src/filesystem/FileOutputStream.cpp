@@ -8,7 +8,7 @@
 
 namespace Tina
 {
-    FileOutputStream::FileOutputStream(std::string path) : file(new File(path, FileMode::Write)),
+    FileOutputStream::FileOutputStream(std::string path) : file(new File(path, Binary | Write)),
                                                            filePath(std::move(path))
     {
     }
@@ -43,7 +43,7 @@ namespace Tina
 
     void FileOutputStream::flush()
     {
-       (void)file->getFileStream()->flush();
+        (void)file->getFileStream()->flush();
     }
 
     void FileOutputStream::write(const std::string& data) const
@@ -91,10 +91,9 @@ namespace Tina
                 (void)fileStream->flush();
             }
         }
-    } 
-    
+    }
 
-    
+
     /*
     void FileOutputStream::writeBytes(const  ByteBuffer& bytes) const
     {
@@ -131,6 +130,4 @@ namespace Tina
         }
     }
     */
-    
-
 } // Tina
