@@ -8,6 +8,7 @@
 #include "OutputStream.hpp"
 #include "ByteBuffer.hpp"
 #include "Byte.hpp"
+#include "File.hpp"
 #include <vector>
 
 namespace Tina
@@ -19,20 +20,20 @@ namespace Tina
         explicit ByteArrayOutputStream(size_t size);
 
         void reset() const;
-        size_t size() const;
-        std::vector<uint8_t> toByteArray() const;
+        [[nodiscard]] size_t size() const;
+        [[nodiscard]] std::vector<uint8_t> toByteArray() const;
 
-        ByteBuffer* getByteBuffer() const;
+        [[nodiscard]] Bytes* getByteBuffer() const;
 
         void close() override;
         void flush() override;
         void write(Byte byte) override;
         void write(Byte* bytes, size_t size) override;
         void write(Bytes& bytes) override;
+        void writeBytes(Bytes* outputBuffer) const;
         ~ByteArrayOutputStream() override;
-
     protected:
-        ByteBuffer* buffer_;
+        Bytes* buffer_;
     };
 } // Tina
 

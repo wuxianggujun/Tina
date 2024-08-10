@@ -93,7 +93,10 @@ namespace Tina
         }
     } 
     
-    /*void FileOutputStream::writeBytes(const Tina::ByteBuffer& bytes) const
+
+    
+    /*
+    void FileOutputStream::writeBytes(const  ByteBuffer& bytes) const
     {
         if (file->isOpen())
         {
@@ -126,7 +129,8 @@ namespace Tina
         {
             throw std::runtime_error("FileOutputStream: file is not open");
         }
-    }*/
-
+    }
+    */
+    
 
 } // Tina

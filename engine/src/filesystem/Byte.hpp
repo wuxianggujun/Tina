@@ -79,11 +79,7 @@ namespace Tina
         {
             return Byte(0);
         }
-
-        static constexpr Byte max() noexcept
-        {
-            return Byte(255);
-        }
+    
 
     private:
         uint8_t data_;

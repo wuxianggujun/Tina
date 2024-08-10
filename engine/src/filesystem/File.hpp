@@ -5,9 +5,8 @@
 
 #include "FileStream.hpp"
 #include "Closeable.hpp"
-#include <sys/stat.h>
-
-#include "Flushable.hpp"
+#include "Buffer.hpp"
+#include "Byte.hpp"
 
 namespace Tina
 {
@@ -34,8 +33,9 @@ namespace Tina
 
         [[nodiscard]] auto read(std::string& data) const -> bool;
         [[nodiscard]] bool write(const std::string& data, bool append = false) const;
+        // void write(const Buffer<Byte>& data);
         void close() override;
-        
+
         [[nodiscard]] bool isFile() const;
         [[nodiscard]] bool isDirectory() const;
         [[nodiscard]] bool isOpen() const;
@@ -49,7 +49,6 @@ namespace Tina
 
         [[nodiscard]] std::string getDirectoryPath() const;
         [[nodiscard]] std::string getFileName() const;
-
 
     private:
         std::string fileName_;

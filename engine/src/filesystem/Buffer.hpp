@@ -164,7 +164,8 @@ namespace Tina
 
         void append(T val)
         {
-            resize(_used + 1, true);
+            
+                resize(_used + 1, true);
             _ptr[_used - 1] = val;
         }
 
@@ -183,7 +184,7 @@ namespace Tina
             return _capacity * sizeof(T);
         }
 
-        void swap(Buffer& other) noexcept
+        void swap(Buffer<T>& other) noexcept
         {
             using std::swap;
             swap(_ptr, other._ptr);
