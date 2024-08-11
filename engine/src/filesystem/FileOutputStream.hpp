@@ -23,11 +23,11 @@ namespace Tina
         void flush() override;
         void write(const std::string& data) const;
         void write(const std::string& data, bool append) const;
-        void write(Byte byte) override;
+        void write(const Byte& byte) override;
         void write(Byte* bytes, size_t size) override;
         void write(Bytes& buffer) override;
 
-        void writeAndFlush(Byte byte);
+        void writeAndFlush(const Byte& byte);
 
     private:
         void writeBytes(const Bytes& bytes) const;

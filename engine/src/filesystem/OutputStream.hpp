@@ -24,7 +24,7 @@ namespace Tina
         void close() override = 0;
         void flush() override = 0;
 
-        virtual void write(Byte byte) = 0;
+        virtual void write(const Byte& byte) = 0;
 
         virtual void write(Byte* bytes, size_t size) = 0;
 

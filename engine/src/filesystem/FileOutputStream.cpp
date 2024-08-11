@@ -56,7 +56,7 @@ namespace Tina
         (void)file->write(data, append);
     }
 
-    void FileOutputStream::write(Byte byte)
+    void FileOutputStream::write(const Byte& byte)
     {
     }
 
@@ -70,7 +70,7 @@ namespace Tina
     }
 
 
-    void FileOutputStream::writeAndFlush(Byte byte)
+    void FileOutputStream::writeAndFlush(const Byte& byte)
     {
         write(byte);
         flush();
@@ -84,7 +84,7 @@ namespace Tina
             {
                 const auto* data = reinterpret_cast<const uint8_t*>(bytes.begin());
                 const size_t size = bytes.size();
-                if (const size_t written = fileStream->write(data, 1, size); written != size)
+                if (const size_t written = fileStream->write(data, sizeof(uint8_t), size); written != size)
                 {
                     throw std::runtime_error("FileOutputStream: write bytes failed");
                 }

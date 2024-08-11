@@ -5,10 +5,12 @@
 #include "GameApplication.hpp"
 #include "math/Vector.hpp"
 
+
 namespace Tina
 {
     void GameApplication::run()
     {
+        CTRACK;
         Vector2i resolution = Vector2i(1280, 720);
 
         window = createScope<GLFWWindow>();

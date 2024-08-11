@@ -27,12 +27,15 @@ namespace Tina
 
         void close() override;
         void flush() override;
-        void write(Byte byte) override;
+        void write(const Byte& byte) override;
         void write(Byte* bytes, size_t size) override;
         void write(Bytes& bytes) override;
         void writeBytes(Bytes* outputBuffer) const;
         ~ByteArrayOutputStream() override;
+    private:
+        constexpr static size_t BUFFER_DEFAULT_SIZE = 0x1000;
     protected:
+        
         Bytes* buffer_;
     };
 } // Tina

@@ -54,6 +54,7 @@ add_subdirectory(stb-cmake)
 add_subdirectory(entt)
 add_subdirectory(googletest)
 add_subdirectory(tracy)
+add_subdirectory(ctrack)
 
 set(TINA_LIBRARIES
     bx
@@ -66,5 +67,6 @@ set(TINA_LIBRARIES
     EnTT::EnTT 
     SDL3::SDL3
     yaml-cpp::yaml-cpp
-    Tracy::TracyClient
+    Tracy::TracyClient 
+    ctrack
     CACHE INTERNAL "")

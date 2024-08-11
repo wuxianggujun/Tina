@@ -16,6 +16,7 @@ namespace Tina
         explicit constexpr Byte(uint8_t data = 0) noexcept : data_(data)
         {
         }
+        Byte(const Byte& other) = default;
 
         [[nodiscard]] constexpr uint8_t getData() const noexcept
         {
@@ -53,6 +54,17 @@ namespace Tina
             data_ = data;
             return *this;
         }
+
+        // 赋值操作符重载
+        Byte& operator=(const Byte& other)
+        {
+            if (this != &other)
+            {
+                data_ = other.data_;
+            }
+            return *this;
+        }
+
 
         Byte& operator+=(uint8_t value) noexcept
         {
