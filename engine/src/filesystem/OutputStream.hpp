@@ -13,8 +13,6 @@
 
 namespace Tina
 {
-    class ByteBuffer;
-
     class OutputStream : public Closeable, Flushable
     {
     protected:
