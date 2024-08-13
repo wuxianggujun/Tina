@@ -5,7 +5,7 @@
 
 namespace Tina
 {
-    File::File(std::string filename, size_t mode) : fileName_(std::move(filename)),
+    File::File(const Path& filename, size_t mode) : fileName_(filename),
                                                     fileStream_(nullptr),
                                                     isOpen_(false)
     {
@@ -43,15 +43,14 @@ namespace Tina
         {
             cMode += "t";
         }
-        
-        fileStream_ = new FileStream(fileName_.c_str(), cMode.c_str());
+
+        fileStream_ = new FileStream(fileName_.getFullPath().c_str(), cMode.c_str());
         if (!fileStream_->getFile())
         {
             throw std::runtime_error("Failed to open file");
         }
         isOpen_ = true;
     }
-
 
     File::~File()
     {
@@ -85,10 +84,10 @@ namespace Tina
         auto bytesWritten = fileStream_->write(data.c_str(), sizeof(char), data.size());
         return bytesWritten == data.size();
     }
-    
+
     void File::close()
     {
-        if (isOpen_)
+        if (isOpen_ && fileStream_)
         {
             if (fileStream_->close()) throw std::runtime_error("Failed to close file");
             isOpen_ = false;
@@ -99,12 +98,12 @@ namespace Tina
 
     bool File::isFile() const
     {
-        return std::filesystem::is_regular_file(fileName_);
+        return std::filesystem::is_regular_file(fileName_.getFullPath());
     }
 
     bool File::isDirectory() const
     {
-        return std::filesystem::is_directory(fileName_);
+        return std::filesystem::is_directory(fileName_.getFullPath());
     }
 
     bool File::isOpen() const
@@ -115,7 +114,12 @@ namespace Tina
     bool File::exists() const
     {
         struct _stat buffer{};
-        return _stat(fileName_.c_str(), &buffer) == 0;
+        return _stat(fileName_.getFullPath().c_str(), &buffer) == 0;
+    }
+
+    Path File::getPath() const
+    {
+        return fileName_;
     }
 
     FileMode File::getMode() const
@@ -131,22 +135,22 @@ namespace Tina
     std::vector<File> File::listFiles() const
     {
         std::vector<File> files;
-        for (const auto& entry : std::filesystem::directory_iterator(fileName_))
+        for (const auto& entry : std::filesystem::directory_iterator(fileName_.getFullPath()))
         {
-            files.emplace_back(entry.path().string().c_str(), FileMode::Read);
+            files.emplace_back(Path(entry.path().string()), FileMode::Read);
         }
         return files;
     }
 
     [[nodiscard]] std::string File::getDirectoryPath() const
     {
-        size_t pos = fileName_.find_last_of(PATH_SEPARATOR);
-        return (pos != std::string::npos) ? fileName_.substr(0, pos) : "";
+        size_t pos = fileName_.getFullPath().find_last_of(PATH_SEPARATOR);
+        return (pos != std::string::npos) ? fileName_.getFullPath().substr(0, pos) : "";
     }
 
     [[nodiscard]] std::string File::getFileName() const
     {
-        size_t pos = fileName_.find_last_of(PATH_SEPARATOR);
-        return (pos != std::string::npos) ? fileName_.substr(pos + 1) : fileName_;
+        size_t pos = fileName_.getFullPath().find_last_of(PATH_SEPARATOR);
+        return (pos != std::string::npos) ? fileName_.getFullPath().substr(pos + 1) : fileName_.getFullPath();
     }
 } // namespace Tina

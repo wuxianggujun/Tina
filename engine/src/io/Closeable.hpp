@@ -13,6 +13,7 @@ namespace Tina
     {
     public:
         void close() override = 0;
+        ~Closeable() override = default;
     };
 }
 

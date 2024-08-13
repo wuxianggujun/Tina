@@ -1,6 +1,6 @@
 // Created by wuxianggujun on 2024/7/28.
 //
-
+/*
 #include "FileOutputStream.hpp"
 #include <cstdio>
 #include <utility>
@@ -94,8 +94,7 @@ namespace Tina
     }
 
 
-    /*
-    void FileOutputStream::writeBytes(const  ByteBuffer& bytes) const
+//    void FileOutputStream::writeBytes(const  ByteBuffer& bytes) const
     {
         if (file->isOpen())
         {
@@ -129,5 +128,6 @@ namespace Tina
             throw std::runtime_error("FileOutputStream: file is not open");
         }
     }
-    */
+ 
 } // Tina
+*/

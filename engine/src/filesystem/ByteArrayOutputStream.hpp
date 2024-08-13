@@ -5,6 +5,8 @@
 #ifndef TINA_FILESYSTEM_BYTEARRAYOUTPUTSTREAM_HPP
 #define TINA_FILESYSTEM_BYTEARRAYOUTPUTSTREAM_HPP
 
+
+/*
 #include "OutputStream.hpp"
 #include "ByteBuffer.hpp"
 #include "Byte.hpp"
@@ -39,5 +41,5 @@ namespace Tina
         Bytes* buffer_;
     };
 } // Tina
-
+*/
 #endif //TINA_FILESYSTEM_BYTEARRAYOUTPUTSTREAM_HPP

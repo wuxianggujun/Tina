@@ -21,7 +21,7 @@ namespace Tina
     class Path
     {
     public:
-        explicit Path(std::string path = "");
+        explicit Path(const std::string& path = "");
         Path(const Path& path);
 
         [[nodiscard]] Path getParentDirectory() const;
@@ -34,15 +34,15 @@ namespace Tina
         [[nodiscard]] std::string getFileNameWithoutExtension() const;
         [[nodiscard]] std::string getExtension() const;
         [[nodiscard]] Path getChildFile(std::string relativePath) const;
-        Path getSibingFile(std::string& fileName) const;
-        [[nodiscard]] std::string addTrailingSparator(const std::string& path) const;
+        Path getSiblingFile(const std::string& fileName) const;
+        [[nodiscard]] std::string addTrailingSeparator(const std::string& path) const;
 
         static const char pathSeparator;
         static const std::string pathSeparatorString;
 
         InputStream* createInputStream() const;
-        bool exists();
-        bool isEmpty();
+        bool exists() const;
+        bool isEmpty() const;
 
     private:
         std::string fullPath;

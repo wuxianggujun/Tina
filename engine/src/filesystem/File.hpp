@@ -3,15 +3,12 @@
 
 #include <vector>
 
+#include "Path.hpp"
 #include "FileStream.hpp"
-#include "Closeable.hpp"
-#include "Buffer.hpp"
-#include "Byte.hpp"
+#include "io/Closeable.hpp"
 
 namespace Tina
 {
-
-
     enum FileMode
     {
         Read = 1 << 0,
@@ -24,7 +21,7 @@ namespace Tina
     class File : Closeable
     {
     public:
-        explicit File(std::string filename, size_t mode = Binary);
+        explicit File(const Path& filename, size_t mode = Binary);
         ~File() override;
 
         [[nodiscard]] auto read(std::string& data) const -> bool;
@@ -36,6 +33,8 @@ namespace Tina
         [[nodiscard]] bool isOpen() const;
         [[nodiscard]] bool exists() const;
 
+        [[nodiscard]] Path getPath() const;
+        
         [[nodiscard]] FileMode getMode() const;
 
         [[nodiscard]] FileStream* getFileStream() const;
@@ -46,7 +45,7 @@ namespace Tina
         [[nodiscard]] std::string getFileName() const;
 
     private:
-        std::string fileName_;
+        Path fileName_;
         FileMode mode_;
         FileStream* fileStream_;
         bool isOpen_;

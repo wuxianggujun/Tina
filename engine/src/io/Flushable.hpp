@@ -2,8 +2,8 @@
 // Created by wuxianggujun on 2024/7/28.
 //
 
-#ifndef TINA_FILESYSTEM_FLUSHABLE_HPP
-#define TINA_FILESYSTEM_FLUSHABLE_HPP
+#ifndef TINA_IO_FLUSHABLE_HPP
+#define TINA_IO_FLUSHABLE_HPP
 
 namespace Tina
 {
@@ -15,4 +15,4 @@ namespace Tina
     };
 };
 
-#endif //TINA_FILESYSTEM_FLUSHABLE_HPP
+#endif //TINA_IO_FLUSHABLE_HPP
