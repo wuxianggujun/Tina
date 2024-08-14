@@ -4,6 +4,8 @@
 
 #include "FileInputStream.hpp"
 
+#include "OutputStream.hpp"
+
 namespace Tina
 {
     FileInputStream::FileInputStream(const Path& path)
@@ -52,6 +54,21 @@ namespace Tina
         return static_cast<Byte>(result);
     }
 
+    size_t FileInputStream::transferTo(OutputStream& out)
+    {
+        size_t transferred = 0;
+        auto buffer = new Buffer<Byte>(DEFAULT_BUFFER_SIZE);
+        buffer->resize(0);
+        size_t read;
+        while ((read = file->getFileStream()->read(buffer->begin(), sizeof(uint8_t), DEFAULT_BUFFER_SIZE)) > 0)
+        {
+            out.write(buffer->begin(), sizeof(uint8_t), read);
+            transferred += read;
+        }
+        delete buffer;
+        return transferred;
+    }
+
     Buffer<Byte> FileInputStream::read(size_t size)
     {
         if (!file->isOpen())
@@ -76,4 +93,5 @@ namespace Tina
     {
         return file->getFileStream()->tell();
     }
+    
 } // Tina

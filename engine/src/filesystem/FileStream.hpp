@@ -67,7 +67,7 @@ namespace Tina
         {
             return fwrite(ptr, itemSize, itemCount, file);
         }
-        
+
         [[nodiscard]] long tell() const
         {
             return ftell(file);

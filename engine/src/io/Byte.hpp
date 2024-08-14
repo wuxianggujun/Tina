@@ -82,12 +82,6 @@ namespace Tina
         {
             return data_;
         }
-
-        [[nodiscard]] bool isEOF() const noexcept
-        {
-            return data_ == 0xFF;
-        }
-
         explicit operator int() const noexcept
         {
             return data_;

@@ -20,10 +20,10 @@ namespace Tina
 
         void close() override;
         Byte read() override;
+        size_t transferTo(OutputStream& out) override;
         Buffer<Byte> read(size_t size) override;
         [[nodiscard]] bool eof() const;
         [[nodiscard]] long tell() const;
-
     private:
         Path filePath;
         File* file;

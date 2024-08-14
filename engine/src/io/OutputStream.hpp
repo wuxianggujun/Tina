@@ -22,6 +22,7 @@ namespace Tina
         virtual void write(const Byte& byte) = 0;
         virtual void write(const Bytes& buffer) = 0;
         virtual void write(const Bytes& buffer, size_t size) = 0;
+        virtual void write(const Byte* byte , size_t offset, size_t size) = 0;
     };
 } // Tina
 
