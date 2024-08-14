@@ -16,13 +16,14 @@ namespace Tina
         explicit constexpr Byte(uint8_t data = 0) noexcept : data_(data)
         {
         }
+
         Byte(const Byte& other) = default;
 
         [[nodiscard]] constexpr uint8_t getData() const noexcept
         {
             return data_;
         }
-        
+
 
         [[nodiscard]] constexpr char getChar() const noexcept
         {
@@ -82,16 +83,20 @@ namespace Tina
             return data_;
         }
 
+        [[nodiscard]] bool isEOF() const noexcept
+        {
+            return data_ == 0xFF;
+        }
+
         explicit operator int() const noexcept
         {
-            return static_cast<int>(data_);
+            return data_;
         }
 
         static constexpr Byte zero() noexcept
         {
             return Byte(0);
         }
-    
 
     private:
         uint8_t data_;

@@ -47,7 +47,7 @@ namespace Tina
         fileStream_ = new FileStream(fileName_.getFullPath().c_str(), cMode.c_str());
         if (!fileStream_->getFile())
         {
-            throw std::runtime_error("Failed to open file");
+            throw std::runtime_error("Failed file not exists or cannot open file");
         }
         isOpen_ = true;
     }

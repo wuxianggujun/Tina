@@ -16,9 +16,9 @@ namespace Tina
     {
     public:
         using Bytes = Buffer<Byte>;
-    public:
-        void close() override;
-        void flush() override;
+
+        void close() override = 0;
+        void flush() override = 0;
         virtual void write(const Byte& byte) = 0;
         virtual void write(const Bytes& buffer) = 0;
         virtual void write(const Bytes& buffer, size_t size) = 0;

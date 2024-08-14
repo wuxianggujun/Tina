@@ -15,9 +15,7 @@ namespace Tina
     {
     public:
         using Bytes = Buffer<Byte>;
-
-    public:
-        void close() override;
+        void close() override = 0; 
         virtual Byte read() = 0;
         virtual Bytes read(size_t size) = 0;
     };

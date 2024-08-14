@@ -7,7 +7,7 @@ file(GLOB TEST_SRC_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
 
 foreach (_test_file ${TEST_SRC_FILES})
     get_filename_component(_test_name ${_test_file} NAME_WE)
-    set(_full_test_name "TinaTest${_test_name}")
+    set(_full_test_name "Tina${_test_name}")
 
     add_executable(${_full_test_name} ${_test_file})
     target_link_libraries(${_full_test_name} Engine GTest::gtest_main)

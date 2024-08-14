@@ -8,11 +8,16 @@ namespace Tina
 {
     FileInputStream::FileInputStream(const Path& path)
     {
-        file = new File(path, Binary);
+        file = new File(path, Read | Binary);
 
         if (!file->isOpen())
         {
             throw std::runtime_error("Failed to open file" + path.getFileName());
+        }
+
+        if (!file->exists())
+        {
+            throw std::runtime_error("File does not exist" + path.getFileName());
         }
     }
 
@@ -49,6 +54,10 @@ namespace Tina
 
     Buffer<Byte> FileInputStream::read(size_t size)
     {
+        if (!file->isOpen())
+        {
+            throw std::runtime_error("Failed to read from file stream." + filePath.getFileName());
+        }
         auto bytes = Buffer<Byte>(size);
         bytes.resize(0);
         if (file->getFileStream()->read(bytes.begin(), sizeof(uint8_t), size) == 0)
@@ -56,5 +65,15 @@ namespace Tina
             throw std::runtime_error("Failed to read from file stream." + filePath.getFileName());
         }
         return bytes;
+    }
+
+    bool FileInputStream::eof() const
+    {
+        return file->getFileStream()->eof();
+    }
+
+    long FileInputStream::tell() const
+    {
+        return file->getFileStream()->tell();
     }
 } // Tina
