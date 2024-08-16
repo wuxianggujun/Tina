@@ -25,7 +25,7 @@ namespace Tina::Tool
     {
         static_assert(std::is_fundamental_v<T>, "EndianConvert supports only fundamental types.");
         T result;
-        std::memcpy(&result, reinterpret_cast<const uint8_t*>(&value), sizeof(value));
+        memcpy(&result, reinterpret_cast<const uint8_t*>(&value), sizeof(value));
         for (size_t i = 0; i < sizeof(T); ++i)
         {
             reinterpret_cast<uint8_t*>(&result)[i] = reinterpret_cast<const uint8_t*>(&value)[sizeof(T) - 1 - i];

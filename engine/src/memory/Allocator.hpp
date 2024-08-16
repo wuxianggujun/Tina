@@ -5,6 +5,9 @@
 #ifndef TINA_MEMORY_ALLOCATOR_HPP
 #define TINA_MEMORY_ALLOCATOR_HPP
 
+#include <new>
+#include <cstddef>
+
 namespace Tina
 {
     class Allocator

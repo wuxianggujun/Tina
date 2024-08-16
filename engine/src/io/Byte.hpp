@@ -82,9 +82,15 @@ namespace Tina
         {
             return data_;
         }
+
         explicit operator int() const noexcept
         {
             return data_;
+        }
+
+        Byte operator&(int i) const
+        {
+            return Byte(data_ & i);
         }
 
         static constexpr Byte zero() noexcept

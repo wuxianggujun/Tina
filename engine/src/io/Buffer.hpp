@@ -8,41 +8,38 @@
 
 #include <cstring>
 #include <cstddef>
-#include <memory> 
+#include <memory>
 
 
-namespace Tina
-{
-    template <class T>
+namespace Tina {
+    template<class T>
     class Buffer
-      /**
-       * 一个缓冲区类，用于在构造函数中分配给定类型和大小的缓冲区，
-       * 并在析构函数中释放缓冲区。此类在需要临时缓冲区的任何地方都很有用。
-       * 注意：缓冲区既有大小又有容量，类似于 std：：vector 和 std：：string。但是，在创建 Buffer 时，大小始终等于容量（通过构造函数的 length 参数提供），
-       * 因为 Buffer 旨在通过直接写入其内容来填充，即将指针传递给通过 begin（） 获取的缓冲区的第一个元素的指针到期望指向缓冲区的指针的函数。
-       * 因此，在新创建的 Buffer 上调用 append（） 将始终扩展缓冲区的大小和容量。
-       * 如果需要创建一个 缓冲区 并希望通过调用 append（） 向其写入数据，正确的步骤是先创建 Buffer，然后调用 resize（0），然后调用 append（）。
-       */
+            /**
+             * 一个缓冲区类，用于在构造函数中分配给定类型和大小的缓冲区，
+             * 并在析构函数中释放缓冲区。此类在需要临时缓冲区的任何地方都很有用。
+             * 注意：缓冲区既有大小又有容量，类似于 std：：vector 和 std：：string。但是，在创建 Buffer 时，大小始终等于容量（通过构造函数的 length 参数提供），
+             * 因为 Buffer 旨在通过直接写入其内容来填充，即将指针传递给通过 begin（） 获取的缓冲区的第一个元素的指针到期望指向缓冲区的指针的函数。
+             * 因此，在新创建的 Buffer 上调用 append（） 将始终扩展缓冲区的大小和容量。
+             */
     {
     public:
-        explicit Buffer(std::size_t length):
-            _capacity(length),
-            _used(length),
-            _ptr(nullptr),
-            _ownMem(true)
+        explicit Buffer(std::size_t length): _capacity(length),
+                                             _used(0),
+                                             _readPos(0),
+                                             _ptr(nullptr),
+                                             _ownMem(true)
         /// Creates and allocates the Buffer.
         {
-            if (length > 0)
-            {
+            if (length > 0) {
                 _ptr = new T[length];
             }
         }
 
-        Buffer(T* pMem, std::size_t length):
-            _capacity(length),
-            _used(length),
-            _ptr(pMem),
-            _ownMem(false)
+        Buffer(T *pMem, std::size_t length): _capacity(length),
+                                             _used(0),
+                                             _readPos(0),
+                                             _ptr(pMem),
+                                             _ownMem(false)
         /// Creates the Buffer. Length argument specifies the length
         /// of the supplied memory pointed to by pMem in the number
         /// of elements of type T. Supplied pointer is considered
@@ -52,78 +49,79 @@ namespace Tina
         {
         }
 
-        Buffer(const T* pMem, std::size_t length):
-            _capacity(length),
-            _used(length),
-            _ptr(nullptr),
-            _ownMem(true)
+        Buffer(const T *pMem, std::size_t length): _capacity(length),
+                                                   _used(0),
+                                                   _readPos(0),
+                                                   _ptr(nullptr),
+                                                   _ownMem(true)
         /// Creates and allocates the Buffer; copies the contents of
         /// the supplied memory into the buffer. Length argument specifies
         /// the length of the supplied memory pointed to by pMem in the
         /// number of elements of type T.
         {
-            if (_capacity > 0)
-            {
+            if (_capacity > 0) {
                 _ptr = new T[_capacity];
-                std::memcpy(_ptr, pMem, _used * sizeof(T));
+                std::memcpy(_ptr, pMem, _capacity * sizeof(T));
             }
         }
 
-        Buffer(const Buffer& other):
+        Buffer(const Buffer &other):
             /// Copy constructor.
-            _capacity(other._used),
+            _capacity(other._capacity),
             _used(other._used),
+            _readPos(other._readPos),
             _ptr(nullptr),
-            _ownMem(true)
-        {
-            if (_used)
-            {
+            _ownMem(true) {
+            if (_used) {
                 _ptr = new T[_used];
                 std::memcpy(_ptr, other._ptr, _used * sizeof(T));
             }
         }
 
-        Buffer(Buffer&& other) noexcept:
+        // 移动构造函数
+        Buffer(Buffer &&other) noexcept:
             /// Move constructor.
             _capacity(other._capacity),
             _used(other._used),
+            _readPos(other._readPos),
             _ptr(other._ptr),
-            _ownMem(other._ownMem)
-        {
+            _ownMem(other._ownMem) {
             other._capacity = 0;
             other._used = 0;
             other._ownMem = false;
             other._ptr = nullptr;
         }
 
-        Buffer& operator =(const Buffer& other)
+        Buffer &operator =(const Buffer &other)
         /// Assignment operator.
         {
-            if (this != &other)
-            {
+            if (this != &other) {
                 Buffer tmp(other);
                 swap(tmp);
             }
 
             return *this;
         }
-        
 
-        Buffer& operator =(Buffer&& other) noexcept
+
+        Buffer &operator =(Buffer &&other) noexcept
         /// Move assignment operator.
         {
-            if (_ownMem) delete [] _ptr;
+            if (this != &other) {
+                if (_ownMem) delete [] _ptr;
 
-            _capacity = other._capacity;
-            _used = other._used;
-            _ptr = other._ptr;
-            _ownMem = other._ownMem;
+                _capacity = other._capacity;
+                _used = other._used;
+                _readPos = other._readPos;
+                _ptr = other._ptr;
+                _ownMem = other._ownMem;
 
-            other._capacity = 0;
-            other._used = 0;
-            other._ownMem = false;
-            other._ptr = nullptr;
-
+                other._capacity = 0;
+                other._used = 0;
+                other._readPos = 0;
+                other._ownMem = false;
+                other._ptr = nullptr;
+            }
             return *this;
         }
 
@@ -143,19 +141,17 @@ namespace Tina
         {
             if (!_ownMem) throw std::runtime_error("Cannot resize buffer which does not own its storage.");
 
-            if (newCapacity > _capacity)
-            {
-                T* ptr = new T[newCapacity];
-                if (preserveContent && _ptr)
-                {
+            if (newCapacity > _capacity) {
+                T *ptr = new T[newCapacity];
+                if (preserveContent && _ptr) {
                     std::memcpy(ptr, _ptr, _used * sizeof(T));
                 }
                 delete [] _ptr;
                 _ptr = ptr;
                 _capacity = newCapacity;
+            } else {
+                _used = newCapacity;
             }
-
-            _used = newCapacity;
         }
 
         void setCapacity(std::size_t newCapacity, bool preserveContent = true)
@@ -172,14 +168,11 @@ namespace Tina
         {
             if (!_ownMem) throw std::runtime_error("Cannot resize buffer which does not own its storage.");
 
-            if (newCapacity != _capacity)
-            {
-                T* ptr = nullptr;
-                if (newCapacity > 0)
-                {
+            if (newCapacity != _capacity) {
+                T *ptr = nullptr;
+                if (newCapacity > 0) {
                     ptr = new T[newCapacity];
-                    if (preserveContent && _ptr)
-                    {
+                    if (preserveContent && _ptr) {
                         std::size_t newSz = _used < newCapacity ? _used : newCapacity;
                         std::memcpy(ptr, _ptr, newSz * sizeof(T));
                     }
@@ -192,9 +185,8 @@ namespace Tina
             }
         }
 
-    
 
-        void assign(const T* buf, std::size_t sz)
+        void assign(const T *buf, std::size_t sz)
         /// Assigns the argument buffer to this buffer.
         /// If necessary, resizes the buffer.
         {
@@ -202,14 +194,16 @@ namespace Tina
             if (sz > _capacity) resize(sz, false);
             std::memcpy(_ptr, buf, sz * sizeof(T));
             _used = sz;
+            _readPos = 0;
         }
 
-        void append(const T* buf, std::size_t sz)
-        /// Resizes this buffer and appends the argument buffer.
-        {
+        void append(const T *buf, std::size_t sz) {
             if (0 == sz) return;
-            resize(_used + sz, true);
-            std::memcpy(_ptr + _used - sz, buf, sz * sizeof(T));
+            if (_used + sz > _capacity) {
+                resize(_used + sz, true);
+            }
+            std::memcpy(_ptr + _used, buf, sz * sizeof(T));
+            _used += sz;
         }
 
         void append(T val)
@@ -219,10 +213,33 @@ namespace Tina
             _ptr[_used - 1] = val;
         }
 
-        void append(const Buffer& buf)
+        void append(const Buffer &buf)
         /// Resizes this buffer and appends the argument buffer.
         {
             append(buf.begin(), buf.size());
+        }
+
+        T read() const {
+            if (_readPos > _used) {
+                throw std::out_of_range("Read position out of bounds");
+            }
+            return _ptr[_readPos++];
+        }
+
+        void read(T *buf, std::size_t sz) {
+            if (_readPos + sz > _used) {
+                throw std::out_of_range("Read position out of bounds");
+            }
+            std::memcpy(buf, _ptr + _readPos, sz * sizeof(T));
+            _readPos += sz;
+        }
+
+        void setReadPos(std::size_t pos = 0) const {
+            if (pos > _used) {
+                _readPos = _used;
+            } else {
+                _readPos = pos;
+            }
         }
 
         [[nodiscard]] std::size_t capacity() const
@@ -237,7 +254,7 @@ namespace Tina
             return _capacity * sizeof(T);
         }
 
-        void swap(Buffer& other) noexcept
+        void swap(Buffer &other) noexcept
         /// Swaps the buffer with another one.
         {
             using std::swap;
@@ -247,18 +264,15 @@ namespace Tina
             std::swap(_ownMem, other._ownMem);
         }
 
-        bool operator ==(const Buffer& other) const
+        bool operator ==(const Buffer &other) const
         /// Compare operator.
         {
-            if (this != &other)
-            {
-                if (_used == other._used)
-                {
-                    if (_ptr && other._ptr && std::memcmp(_ptr, other._ptr, _used * sizeof(T)) == 0)
-                    {
+            if (this != &other) {
+                if (_used == other._used) {
+                    if (_ptr && other._ptr && std::memcmp(_ptr, other._ptr, _used * sizeof(T)) == 0) {
                         return true;
                     }
-                    else return _used == 0;
+                    return _used == 0;
                 }
                 return false;
             }
@@ -266,7 +280,7 @@ namespace Tina
             return true;
         }
 
-        bool operator !=(const Buffer& other) const
+        bool operator !=(const Buffer &other) const
         /// Compare operator.
         {
             return !(*this == other);
@@ -275,6 +289,9 @@ namespace Tina
         void clear() const
         /// Sets the contents of the buffer to zero.
         {
+            _used = 0;
+            _capacity = 0;
+            _readPos = 0;
             std::memset(_ptr, 0, _used * sizeof(T));
         }
 
@@ -290,25 +307,25 @@ namespace Tina
             return _used * sizeof(T);
         }
 
-        T* begin()
+        T *begin()
         /// Returns a pointer to the beginning of the buffer.
         {
             return _ptr;
         }
 
-        const T* begin() const
+        const T *begin() const
         /// Returns a pointer to the beginning of the buffer.
         {
             return _ptr;
         }
 
-        T* end()
+        T *end()
         /// Returns a pointer to end of the buffer.
         {
             return _ptr + _used;
         }
 
-        const T* end() const
+        const T *end() const
         /// Returns a pointer to the end of the buffer.
         {
             return _ptr + _used;
@@ -320,17 +337,14 @@ namespace Tina
             return 0 == _used;
         }
 
-        T& operator [](std::size_t index)
-        {
-            if(index < _used)
-            {
+        T &operator [](std::size_t index) {
+            if (index > _used) {
                 throw std::runtime_error("Index out of range");
             }
             return _ptr[index];
         }
 
-        const T& operator [](std::size_t index) const
-        {
+        const T &operator [](std::size_t index) const {
             if (index >= _used) {
                 throw std::out_of_range("Index out of bounds");
             }
@@ -340,9 +354,10 @@ namespace Tina
     private:
         Buffer();
 
-        std::size_t _capacity;
-        std::size_t _used;
-        T* _ptr;
+        mutable std::size_t _capacity;
+        mutable std::size_t _used;
+        mutable std::size_t _readPos;
+        T *_ptr;
         bool _ownMem;
     };
 }
