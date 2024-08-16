@@ -103,7 +103,7 @@ TEST_F(BufferTest, Read) {
     Buffer<int> buf(10);
     int data[5] = {1, 2, 3, 4, 5};
     buf.append(data, 5);
-    
+
 
     for (int i = 0; i < 5; ++i) {
         auto var = buf[i];
@@ -113,14 +113,8 @@ TEST_F(BufferTest, Read) {
     buf.setReadPos();
 
     int temp[5];
-    buf.read(temp, 5);
-    for (int i = 0; i < 5; ++i) {
+    buf.read(temp, 2, 3);
+    for (int i = 0; i < 3; ++i) {
         auto bufVar = temp[i];
     }
-    
-
-    
-    
 }
-
-

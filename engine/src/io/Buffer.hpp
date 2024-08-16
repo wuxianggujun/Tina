@@ -233,6 +233,30 @@ namespace Tina {
             std::memcpy(buf, _ptr + _readPos, sz * sizeof(T));
             _readPos += sz;
         }
+        
+        void read(Buffer<T> *buf, std::size_t sz) {
+            if (_readPos + sz > _used) {
+                throw std::out_of_range("Read position out of bounds");
+            }
+            std::memcpy(buf->begin(), _ptr + _readPos, sz * sizeof(T));
+            _readPos += sz;
+        }
+
+        void read(T *buf, std::size_t index, std::size_t length) const {
+            if (index + length > _used || _readPos + length > _used) {
+                throw std::out_of_range("Read Index out of bounds");
+            }
+            std::memcpy(buf, _ptr + index, length * sizeof(T));
+        }
+
+        void read(Buffer<T> *buf, std::size_t index, std::size_t length) const {
+            if (index + length > _used || _readPos + length > _used) {
+                throw std::out_of_range("Read Index out of bounds");
+            }
+            std::memcpy(buf->begin(), _ptr + index, length * sizeof(T));
+        }
+        
+        
 
         void setReadPos(std::size_t pos = 0) const {
             if (pos > _used) {
@@ -240,6 +264,10 @@ namespace Tina {
             } else {
                 _readPos = pos;
             }
+        }
+
+        size_t getReadPos() const {
+            return _readPos;
         }
 
         [[nodiscard]] std::size_t capacity() const

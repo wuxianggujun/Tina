@@ -9,24 +9,30 @@
 #include "filesystem/File.hpp"
 #include "InputStream.hpp"
 
-namespace Tina
-{
-    class FileInputStream : public InputStream
-    {
+namespace Tina {
+    class FileInputStream : public InputStream {
     public:
-        explicit FileInputStream(const Path& path);
-        explicit FileInputStream(File* file);
+        explicit FileInputStream(const Path &path);
+
+        explicit FileInputStream(File *file);
+
         ~FileInputStream() override;
 
         void close() override;
+
         Byte read() override;
-        size_t transferTo(OutputStream& out) override;
-        Buffer<Byte> read(size_t size) override;
+
+        size_t transferTo(OutputStream &out) override;
+
+        Scope<Buffer<Byte>> read(size_t size) override;
+
         [[nodiscard]] bool eof() const;
+
         [[nodiscard]] long tell() const;
+
     private:
         Path filePath;
-        File* file;
+        File *file;
     };
 } // Tina
 

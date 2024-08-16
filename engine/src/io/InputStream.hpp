@@ -8,6 +8,7 @@
 #include "Byte.hpp"
 #include "Buffer.hpp"
 #include "Closeable.hpp"
+#include "core/Core.hpp"
 
 namespace Tina
 {
@@ -19,7 +20,7 @@ namespace Tina
         using Bytes = Buffer<Byte>;
         void close() override = 0;
         virtual Byte read() = 0;
-        virtual Bytes read(size_t size) = 0;
+        virtual Scope<Bytes> read(size_t size) = 0;
         virtual size_t transferTo(OutputStream& out) = 0;
     protected:
         const size_t MAX_SKIP_BUFFER_SIZE = 2048;
