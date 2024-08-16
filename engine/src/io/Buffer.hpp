@@ -209,8 +209,13 @@ namespace Tina {
         void append(T val)
         /// Resizes this buffer by one element and appends the argument value.
         {
-            resize(_used + 1, true);
-            _ptr[_used - 1] = val;
+            if (_used + sizeof(T) > _capacity)
+            {
+                resize(_used + 1, true);
+                //_ptr[_used - 1] = val;
+            }
+            _ptr[_used++] = val;
+         
         }
 
         void append(const Buffer &buf)

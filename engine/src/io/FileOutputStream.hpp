@@ -1,39 +1,42 @@
 //
 // Created by wuxianggujun on 2024/7/28.
 //
-/*
 #ifndef TINA_FILESYSTEM_FILEOUTPUTSTREAM_HPP
 #define TINA_FILESYSTEM_FILEOUTPUTSTREAM_HPP
 
-#include "File.hpp"
-#include "Path.hpp"
-#include "io/OutputStream.hpp"
 
-namespace Tina
-{
-    class FileOutputStream : public OutputStream
-    {
+#include "filesystem/Path.hpp"
+#include "filesystem/File.hpp"
+#include "OutputStream.hpp"
+#include "Byte.hpp"
 
+namespace Tina {
+    class FileOutputStream : public OutputStream {
     public:
-        explicit FileOutputStream(std::string path);
-        explicit FileOutputStream(File file);
+        explicit FileOutputStream(const Path& path);
+
+        explicit FileOutputStream(File* file);
+
         ~FileOutputStream() override;
+        
+        void write(const Byte &byte) override; 
 
+        void write(const Bytes &buffer) override;
+
+        void write(const Bytes &buffer, size_t size) override;
+
+        void write(const Byte& byte, size_t offset, size_t size) override;
+        
         void close() override;
+
         void flush() override;
-        void write(const std::string& data) const;
-        void write(const std::string& data, bool append) const;
-
-        void writeAndFlush(const Byte& byte);
-
-        void writeTo(OutputStream& outputStream);
+        
+        void writeAndFlush(const Byte &byte);
+    
     private:
-        void writeBytes(const Bytes& bytes) const;
-    private:
-        File* file;
-        std::string filePath;
+        Path path_;
+        File *file_;
     };
 } // Tina
 
 #endif //TINA_FILESYSTEM_FILEOUTPUTSTREAM_HPP
-*/

@@ -5,8 +5,8 @@
 #ifndef TINA_IO_OUTPUTSTREAM_HPP
 #define TINA_IO_OUTPUTSTREAM_HPP
 
-#include "Byte.hpp"
-#include "Buffer.hpp"
+#include "io/Byte.hpp"
+#include "io/Buffer.hpp"
 #include "Closeable.hpp"
 #include "Flushable.hpp"
 
@@ -22,7 +22,7 @@ namespace Tina
         virtual void write(const Byte& byte) = 0;
         virtual void write(const Bytes& buffer) = 0;
         virtual void write(const Bytes& buffer, size_t size) = 0;
-        virtual void write(const Byte* byte , size_t offset, size_t size) = 0;
+        virtual void write(const Byte& byte,size_t offset, size_t size) = 0;
     };
 } // Tina
 
