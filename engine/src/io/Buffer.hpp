@@ -217,7 +217,7 @@ namespace Tina {
             _ptr[_used++] = val;
          
         }
-
+        
         void append(const Buffer &buf)
         /// Resizes this buffer and appends the argument buffer.
         {

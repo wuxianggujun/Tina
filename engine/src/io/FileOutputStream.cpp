@@ -5,7 +5,13 @@
 
 
 namespace Tina {
-    FileOutputStream::FileOutputStream(const Path &path) : path_(path), file_(new File(path, Write || Binary)) {
+    FileOutputStream::FileOutputStream(const Path &path) {
+        file_ = new File(path, Write | Binary);
+        path_ = path;
+
+        if (!file_->isOpen()) {
+            throw std::runtime_error("Failed to open file for writing");
+        }
     }
 
     FileOutputStream::FileOutputStream(File *file) {
@@ -22,7 +28,11 @@ namespace Tina {
 
     void FileOutputStream::write(const Byte &byte) {
         if (file_->isOpen()) {
-            file_->getFileStream()->write(reinterpret_cast<const uint8_t *>(byte.getData()), 1, sizeof(uint8_t));
+            const uint8_t data = byte.getData();
+            const size_t written = file_->getFileStream()->write(&data, sizeof(uint8_t), 1);
+            if (written != sizeof(uint8_t)) {
+                throw std::runtime_error("Failed to write byte to file");
+            }
         }
     }
 
@@ -34,7 +44,6 @@ namespace Tina {
                     written != buffer.size()) {
                     throw std::runtime_error("Failed to write to file");
                 }
-                (void) fileStream->flush();
             }
         }
     }
@@ -47,15 +56,17 @@ namespace Tina {
                     written != size) {
                     throw std::runtime_error("Failed to write to file");
                 }
-                (void) fileStream->flush();
             }
         }
     }
 
-    void FileOutputStream::write(const Byte &byte, size_t offset, size_t size) {
+    void FileOutputStream::write(const Buffer<Byte> &buffer, size_t offset, size_t size) {
         if (file_->isOpen()) {
             if (const auto fileStream = file_->getFileStream()) {
-                fileStream->write(reinterpret_cast<const uint8_t *>(byte.getData()) + offset, sizeof(uint8_t), size);
+                size_t written = fileStream->write(buffer.begin() + offset, sizeof(uint8_t), size);
+                if (written != size) {
+                    throw std::runtime_error("Failed to write to file");
+                }
             }
         }
     }
@@ -72,9 +83,8 @@ namespace Tina {
         (void) file_->getFileStream()->flush();
     }
 
-    void FileOutputStream::writeAndFlush(const Byte &byte) {
-        write(byte);
-        flush(); 
+    void FileOutputStream::writeAndFlush(const Buffer<Byte> &buffer) {
+        write(buffer);
+        flush();
     }
-    
 } // Tina

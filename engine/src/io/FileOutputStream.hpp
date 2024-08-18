@@ -25,13 +25,13 @@ namespace Tina {
 
         void write(const Bytes &buffer, size_t size) override;
 
-        void write(const Byte& byte, size_t offset, size_t size) override;
+        void write(const Bytes& buffer, size_t offset, size_t size) override;
         
         void close() override;
 
         void flush() override;
         
-        void writeAndFlush(const Byte &byte);
+        void writeAndFlush(const Buffer<Byte> &buffer);
     
     private:
         Path path_;

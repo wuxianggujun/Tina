@@ -57,7 +57,7 @@ namespace Tina
     size_t FileInputStream::transferTo(OutputStream& out)
     {
         size_t transferred = 0;
-        auto buffer = new Buffer<Byte>(DEFAULT_BUFFER_SIZE);
+        /*auto buffer = new Buffer<Byte>(DEFAULT_BUFFER_SIZE);
         buffer->resize(0);
         size_t read;
         while ((read = file->getFileStream()->read(buffer->begin(), sizeof(uint8_t), DEFAULT_BUFFER_SIZE)) > 0)
@@ -65,7 +65,7 @@ namespace Tina
             out.write(buffer->begin(), sizeof(uint8_t), read);
             transferred += read;
         }
-        delete buffer;
+        delete buffer;*/
         return transferred;
     }
 
