@@ -55,13 +55,15 @@ add_subdirectory(entt)
 add_subdirectory(googletest)
 add_subdirectory(tracy)
 add_subdirectory(ctrack)
+add_subdirectory(icu-cmake)
 
 set(TINA_LIBRARIES
     bx
     bimg
     bgfx
     glfw
-    glm
+    glm 
+    icu
     spdlog
     stb::image
     EnTT::EnTT 

@@ -6,12 +6,10 @@ Tina
 
 This is a simple game engine implemented using a large number of third-party libraries. I just want to finish a real project.
 
-## Building
+## Usage
+1.Clone the repository using the following command:`git clone https://github.com/wuxianggujun/Tina.git`
 
-```
-git clone https://github.com/wuxianggujun/Tina.git
-git submodule update --init --recursive
-```
+2.Initialize the submodule using `git submodule update --init --recursive`
 
 ### Ubuntu Build
 Ubuntu requires cmake and ninja to be installed, as well as a C++ development environment

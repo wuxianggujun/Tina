@@ -31,3 +31,6 @@
 [submodule "dependencies/ctrack"]
 	path = dependencies/ctrack
 	url = https://github.com/Compaile/ctrack.git
+[submodule "dependencies/icu-cmake"]
+	path = dependencies/icu-cmake
+	url = https://github.com/viaduck/icu-cmake.git
