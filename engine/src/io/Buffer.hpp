@@ -9,7 +9,7 @@
 #include <cstring>
 #include <cstddef>
 #include <memory>
-
+#include <stdexcept>
 
 namespace Tina {
     template<class T>
