@@ -117,6 +117,13 @@ namespace Tina
         return _stat(fileName_.getFullPath().c_str(), &buffer) == 0;
     }
 
+    bool File::mkdirs() const {
+        if (std::filesystem::exists(fileName_.getFullPath())) {
+            return true;
+        }
+        return std::filesystem::create_directory(fileName_.getFullPath());
+    }
+
     Path File::getPath() const
     {
         return fileName_;

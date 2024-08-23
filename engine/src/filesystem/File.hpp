@@ -31,7 +31,10 @@ namespace Tina
         [[nodiscard]] bool isFile() const;
         [[nodiscard]] bool isDirectory() const;
         [[nodiscard]] bool isOpen() const;
+        
         [[nodiscard]] bool exists() const;
+
+        bool mkdirs() const;
 
         [[nodiscard]] Path getPath() const;
         

@@ -46,6 +46,7 @@ namespace Tina
 #elif BX_PLATFORM_WINDOWS
         bgfxInit.platformData.nwh = glfwGetWin32Window(m_window.get());
 #endif
+        
         if (!bgfx::init(bgfxInit))
         {
             printf("Bgfx initialization failed\n");
@@ -56,19 +57,12 @@ namespace Tina
 
     void GLFWWindow::render()
     {
-        bgfx::setViewClear(0,BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
-        bgfx::setViewRect(0, 0, 0, bgfx::BackbufferRatio::Equal);
-
-        bgfx::touch(0);
-
-        bgfx::frame();
+        // TODO: 以后尝试看一下以后是否可以用来绘制ui
     }
 
     void GLFWWindow::destroy()
     {
-        bgfx::shutdown();
         m_window.reset();
-        //glfwDestroyWindow(m_window.get());
     }
 
     void GLFWWindow::pollEvents()

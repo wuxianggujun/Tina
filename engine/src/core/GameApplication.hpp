@@ -10,6 +10,7 @@
 #include "window/GLFWWindow.hpp"
 #include "window/SDLWindow.hpp"
 #include "window/InputHandler.hpp"
+#include "core/Renderer.hpp"
 #include "window/GLFWInput.hpp"
 #include "window/SDLInput.hpp"
 #include <ctrack.hpp>
@@ -25,6 +26,7 @@ namespace Tina
     protected:
         Scope<Window> window;
         Scope<InputHandler> inputHandler;
+        Scope<Renderer> renderer;
     };
 } // Tina
 

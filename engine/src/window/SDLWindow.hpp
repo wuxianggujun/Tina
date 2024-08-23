@@ -1,5 +1,6 @@
 //
 // Created by wuxianggujun on 2024/7/12.
+// https://gist.github.com/wuxianggujun/549c8cbcc8c6b6a751daac493624617d
 //
 
 #ifndef TINA_WINDOW_SDLWINDOW_HPP
