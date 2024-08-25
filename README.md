@@ -60,6 +60,7 @@ make
 ## Learning Resources
 
 - **[Platformer](https://github.com/Somgonk/Platformer)**
+- **[NGE2](https://github.com/NorbertGerberg/NGE2)**
 - **[MitchEngine](https://github.com/wobbier/MitchEngine)**
 - **[CatDogEngine](https://github.com/CatDogEngine/CatDogEngine)**
 - **[wallet](https://github.com/wiimag/wallet)**

@@ -16,9 +16,10 @@ namespace Tina
     {
         if (mWindow)
         {
-            glfwSetKeyCallback(mWindow, keyCallback);
-            glfwSetMouseButtonCallback(mWindow, mouseButtonCallback);
-            glfwSetCursorPosCallback(mWindow, cursorPosCallback);
+            // Set GLFW callbacks here
+            // glfwSetKeyCallback(mWindow, keyCallback);
+            // glfwSetMouseButtonCallback(mWindow, mouseButtonCallback);
+            // glfwSetCursorPosCallback(mWindow, cursorPosCallback);
         }
     }
 

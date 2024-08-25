@@ -5,8 +5,13 @@
 #include "bx/math.h"
 
 namespace Tina {
-
     bgfx::VertexLayout PosColorVertex::ms_decl;
+
+    const bgfx::EmbeddedShader shaders[3] = {
+        BGFX_EMBEDDED_SHADER(vs_simple),
+        BGFX_EMBEDDED_SHADER(fs_simple),
+        BGFX_EMBEDDED_SHADER_END()
+    };
 
     static PosColorVertex s_cubeVertices[] =
     {
@@ -25,9 +30,10 @@ namespace Tina {
     // 保存实际的顶点缓冲区和索引缓冲区
     bgfx::VertexBufferHandle m_cubeVBH;
     bgfx::IndexBufferHandle m_cubeIBH;
-    
 
-    Renderer::Renderer(Vector2i size, int viewId): _resolution(size), _viewId(viewId), _programHandle(BGFX_INVALID_HANDLE) {
+
+    Renderer::Renderer(Vector2i size, int viewId): _resolution(size), _viewId(viewId),
+                                                   _programHandle(BGFX_INVALID_HANDLE) {
         bgfx::setDebug(BGFX_DEBUG_TEXT);
 
         PosColorVertex::init();
@@ -35,23 +41,12 @@ namespace Tina {
         m_cubeVBH = bgfx::createVertexBuffer(bgfx::makeRef(s_cubeVertices, sizeof(s_cubeVertices)),
                                              PosColorVertex::ms_decl);
         m_cubeIBH = bgfx::createIndexBuffer(bgfx::makeRef(s_cubeTriList, sizeof(s_cubeTriList)));
-        
-        // 创建 FileReader 对象
-        FileReader reader;
-        bx::Error error;
-        // 尝试打开文件
-        if (!reader.open(bx::FilePath("./engine/assets/shaders"), &error)) {
-            // 处理打开文件失败的情况
-            printf("Failed to open shader directory\n");
-            // 可能需要设置一个无效的程序句柄或采取其他错误恢复措施
-        } else {
-            // 打开成功，使用 reader 调用 loadProgram
-            _programHandle = loadProgram(&reader, "vs_cubes", "fs_cubes");
-            // 关闭 FileReader，如果不需要保持打开状态的话
-            bx::close(&reader);
-        }
 
-        
+        bgfx::RendererType::Enum type = bgfx::getRendererType();
+
+        _programHandle = bgfx::createProgram(bgfx::createEmbeddedShader(shaders, type, "vs_simple"),
+                                             bgfx::createEmbeddedShader(shaders, type, "fs_simple"), true);
+
         bgfx::setViewClear(0,BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
         bgfx::setViewRect(0, 0, 0, bgfx::BackbufferRatio::Equal);
     }

@@ -5,7 +5,7 @@
 #include <bgfx/bgfx.h>
 #include "math/Vector.hpp"
 #include <bgfx/embedded_shader.h>
-// #include "generated/shaders/engine/all.h"
+#include "generated/shaders/engine/all.h"
 #include "tool/bgfx_utils.h" 
 
 namespace Tina {
