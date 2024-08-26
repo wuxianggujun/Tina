@@ -29,11 +29,11 @@ namespace Tina {
     public:
         Renderer(Vector2i resolution, int viewId);
 
-        ~Renderer();
+        ~Renderer() = default;
 
         void render();
 
-        void shutdown();
+        void shutdown(); 
 
     private:
         Vector2i _resolution;

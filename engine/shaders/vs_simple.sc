@@ -1,8 +1,7 @@
  $input a_position, a_color0
  $output v_color0
  
- #include <bgfx_shader.sh>
- #include "shaderlib.sh"
+ #include "./include/bgfx.sh"
  
  void main()
  {

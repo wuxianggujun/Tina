@@ -51,9 +51,6 @@ namespace Tina {
         bgfx::setViewRect(0, 0, 0, bgfx::BackbufferRatio::Equal);
     }
 
-    Renderer::~Renderer() {
-    }
-
     void Renderer::render() {
         const bx::Vec3 at = {0.0f, 0.0f, 0.0f};
         const bx::Vec3 eye = {0.0f, 0.0f, 10.0f};
@@ -103,6 +100,9 @@ namespace Tina {
     }
 
     void Renderer::shutdown() {
+        /*bgfx::destroy(_programHandle);
+        bgfx::destroy(m_cubeVBH);
+        bgfx::destroy(m_cubeIBH);*/
         bgfx::shutdown();
     }
 }
