@@ -5,15 +5,14 @@
 #include "bx/math.h"
 
 namespace Tina {
-    bgfx::VertexLayout PosColorVertex::ms_decl;
-
+    
     const bgfx::EmbeddedShader shaders[3] = {
         BGFX_EMBEDDED_SHADER(vs_simple),
         BGFX_EMBEDDED_SHADER(fs_simple),
         BGFX_EMBEDDED_SHADER_END()
     };
 
-    static PosColorVertex s_cubeVertices[] =
+    static  Renderer::PosColorVertex s_cubeVertices[] =
     {
         {0.5f, 0.5f, 0.0f, 0xff0000ff},
         {0.5f, -0.5f, 0.0f, 0xff0000ff},
@@ -27,9 +26,7 @@ namespace Tina {
         1, 2, 3
     };
 
-    // 保存实际的顶点缓冲区和索引缓冲区
-    bgfx::VertexBufferHandle m_cubeVBH;
-    bgfx::IndexBufferHandle m_cubeIBH;
+    bgfx::VertexLayout Renderer::PosColorVertex::ms_decl;
 
 
     Renderer::Renderer(Vector2i size, int viewId): _resolution(size), _viewId(viewId),
@@ -37,6 +34,11 @@ namespace Tina {
         bgfx::setDebug(BGFX_DEBUG_TEXT);
 
         PosColorVertex::init();
+
+        m_cubeTexture = bgfx::createTexture2D(size.width,size.height,false,1,bgfx::TextureFormat::RGBA8,BGFX_TEXTURE_RT);
+
+        m_frameBuffer = bgfx::createFrameBuffer(1, &m_cubeTexture,false);
+        
 
         m_cubeVBH = bgfx::createVertexBuffer(bgfx::makeRef(s_cubeVertices, sizeof(s_cubeVertices)),
                                              PosColorVertex::ms_decl);
@@ -47,6 +49,7 @@ namespace Tina {
         _programHandle = bgfx::createProgram(bgfx::createEmbeddedShader(shaders, type, "vs_simple"),
                                              bgfx::createEmbeddedShader(shaders, type, "fs_simple"), true);
 
+        //bgfx::setViewFrameBuffer(_viewId, m_frameBuffer);
         bgfx::setViewClear(0,BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
         bgfx::setViewRect(0, 0, 0, bgfx::BackbufferRatio::Equal);
     }
@@ -100,9 +103,6 @@ namespace Tina {
     }
 
     void Renderer::shutdown() {
-        /*bgfx::destroy(_programHandle);
-        bgfx::destroy(m_cubeVBH);
-        bgfx::destroy(m_cubeIBH);*/
         bgfx::shutdown();
     }
 }
