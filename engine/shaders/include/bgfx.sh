@@ -1,2 +1,2 @@
 #include <bgfx_shader.sh>
-#include <shaderlib.sh>
+#include "shaderlib.sh"

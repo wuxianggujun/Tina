@@ -5,14 +5,13 @@
 #include "bx/math.h"
 
 namespace Tina {
-    
     const bgfx::EmbeddedShader shaders[3] = {
         BGFX_EMBEDDED_SHADER(vs_simple),
         BGFX_EMBEDDED_SHADER(fs_simple),
         BGFX_EMBEDDED_SHADER_END()
     };
 
-    static  Renderer::PosColorVertex s_cubeVertices[] =
+    static Renderer::PosColorVertex s_cubeVertices[] =
     {
         {0.5f, 0.5f, 0.0f, 0xff0000ff},
         {0.5f, -0.5f, 0.0f, 0xff0000ff},
@@ -35,10 +34,11 @@ namespace Tina {
 
         PosColorVertex::init();
 
-        m_cubeTexture = bgfx::createTexture2D(size.width,size.height,false,1,bgfx::TextureFormat::RGBA8,BGFX_TEXTURE_RT);
+        m_cubeTexture = bgfx::createTexture2D(size.width, size.height, false, 1, bgfx::TextureFormat::RGBA8,
+                                              BGFX_TEXTURE_RT);
 
-        m_frameBuffer = bgfx::createFrameBuffer(1, &m_cubeTexture,false);
-        
+        m_frameBuffer = bgfx::createFrameBuffer(1, &m_cubeTexture, false);
+
 
         m_cubeVBH = bgfx::createVertexBuffer(bgfx::makeRef(s_cubeVertices, sizeof(s_cubeVertices)),
                                              PosColorVertex::ms_decl);
@@ -104,5 +104,23 @@ namespace Tina {
 
     void Renderer::shutdown() {
         bgfx::shutdown();
+    }
+
+    void * Renderer::allocate(size_t size) {
+        return bx::alloc(getAllocator(),size);
+    }
+
+    void Renderer::freeAllocator(void *ptr) {
+        if (nullptr != _allocator) {
+            bx::free(_allocator, ptr);
+        }
+    }
+
+    bx::AllocatorI *Renderer::getAllocator() {
+        if (nullptr == _allocator) {
+            static bx::DefaultAllocator currentAllocator;
+            _allocator = &currentAllocator;
+        }
+        return _allocator;
     }
 }

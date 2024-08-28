@@ -6,14 +6,11 @@
 #include "math/Vector.hpp"
 #include <bgfx/embedded_shader.h>
 #include "generated/shaders/engine/all.h"
-#include "tool/bgfx_utils.h" 
+#include "tool/bgfx_utils.h"
 
 namespace Tina {
-
-
     class Renderer {
     public:
-
         struct PosColorVertex {
             float m_x;
             float m_y;
@@ -22,24 +19,31 @@ namespace Tina {
 
             static void init() {
                 ms_decl.begin()
-                   .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
-                   .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
-                   .end();
+                        .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+                        .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
+                        .end();
             }
+
             static bgfx::VertexLayout ms_decl;
         };
-        
+
         Renderer(Vector2i resolution, int viewId);
 
         ~Renderer() = default;
 
         void render();
 
-        void shutdown(); 
+        void shutdown();
+
+        void* allocate(size_t size);
+        void freeAllocator(void* ptr);
+    protected:
+        bx::AllocatorI *getAllocator();
 
     private:
         Vector2i _resolution;
         bgfx::ViewId _viewId;
+        bx::AllocatorI *_allocator = getAllocator();
         bgfx::ProgramHandle _programHandle;
         // 保存实际的顶点缓冲区和索引缓冲区
         bgfx::VertexBufferHandle m_cubeVBH;

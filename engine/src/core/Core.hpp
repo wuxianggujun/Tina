@@ -7,8 +7,12 @@
 
 #include <memory>
 
+#define TINA_STATIC_ASSERT(_condition, ...) static_assert(_condition, "" __VA_ARGS__)
+
 namespace Tina
 {
+    
+    
     // Scope is an alias for std::unique_ptr with a default deleter
     template <class T, typename Deleter = std::default_delete<T>>
     using Scope = std::unique_ptr<T,Deleter>;
@@ -34,7 +38,6 @@ namespace Tina
     // WeakRef is an alias for std::weak_ptr
     template <class T>
     using WeakRef = std::weak_ptr<T>;
-    
 } // Tina
 
 #endif //TINA_CORE_HPP
