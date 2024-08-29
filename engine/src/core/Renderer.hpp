@@ -6,7 +6,7 @@
 #include "math/Vector.hpp"
 #include <bgfx/embedded_shader.h>
 #include "generated/shaders/engine/all.h"
-#include "tool/bgfx_utils.h"
+#include "tool/BgfxUtils.hpp"
 
 namespace Tina {
     class Renderer {
@@ -35,20 +35,16 @@ namespace Tina {
 
         void shutdown();
 
-        void* allocate(size_t size);
-        void freeAllocator(void* ptr);
-    protected:
-        bx::AllocatorI *getAllocator();
 
     private:
         Vector2i _resolution;
         bgfx::ViewId _viewId;
-        bx::AllocatorI *_allocator = getAllocator();
         bgfx::ProgramHandle _programHandle;
         // 保存实际的顶点缓冲区和索引缓冲区
         bgfx::VertexBufferHandle m_cubeVBH;
         bgfx::IndexBufferHandle m_cubeIBH;
         bgfx::TextureHandle m_cubeTexture = BGFX_INVALID_HANDLE;
+        bgfx::TextureHandle m_imageTexture = BGFX_INVALID_HANDLE;
         bgfx::FrameBufferHandle m_frameBuffer = BGFX_INVALID_HANDLE;
     };
 }

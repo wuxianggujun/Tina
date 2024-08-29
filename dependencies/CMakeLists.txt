@@ -66,6 +66,7 @@ add_subdirectory(icu/icu4c)
 set(TINA_LIBRARIES
         bx
         bimg
+        bimg_decode
         bgfx
         glfw
         glm

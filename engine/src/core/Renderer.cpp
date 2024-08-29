@@ -34,6 +34,11 @@ namespace Tina {
 
         PosColorVertex::init();
 
+        bx::FilePath imageFilePath("./resource/Tina.jpg");
+        bx::FileReader fileReader;
+        
+        m_imageTexture = BgfxUtils::loadTexture(&fileReader,imageFilePath);
+        
         m_cubeTexture = bgfx::createTexture2D(size.width, size.height, false, 1, bgfx::TextureFormat::RGBA8,
                                               BGFX_TEXTURE_RT);
 
@@ -106,21 +111,5 @@ namespace Tina {
         bgfx::shutdown();
     }
 
-    void * Renderer::allocate(size_t size) {
-        return bx::alloc(getAllocator(),size);
-    }
 
-    void Renderer::freeAllocator(void *ptr) {
-        if (nullptr != _allocator) {
-            bx::free(_allocator, ptr);
-        }
-    }
-
-    bx::AllocatorI *Renderer::getAllocator() {
-        if (nullptr == _allocator) {
-            static bx::DefaultAllocator currentAllocator;
-            _allocator = &currentAllocator;
-        }
-        return _allocator;
-    }
 }
