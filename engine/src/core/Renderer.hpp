@@ -11,6 +11,7 @@
 namespace Tina {
     class Renderer {
     public:
+        
         struct PosColorVertex {
             float m_x;
             float m_y;
@@ -42,7 +43,7 @@ namespace Tina {
         bgfx::ProgramHandle _programHandle;
         // 保存实际的顶点缓冲区和索引缓冲区
         bgfx::VertexBufferHandle m_cubeVBH;
-        bgfx::IndexBufferHandle m_cubeIBH;
+        bgfx::IndexBufferHandle m_cubeIBH[5];
         bgfx::TextureHandle m_cubeTexture = BGFX_INVALID_HANDLE;
         bgfx::TextureHandle m_imageTexture = BGFX_INVALID_HANDLE;
         bgfx::FrameBufferHandle m_frameBuffer = BGFX_INVALID_HANDLE;

@@ -13,17 +13,78 @@ namespace Tina {
 
     static Renderer::PosColorVertex s_cubeVertices[] =
     {
-        {0.5f, 0.5f, 0.0f, 0xff0000ff},
-        {0.5f, -0.5f, 0.0f, 0xff0000ff},
-        {-0.5f, -0.5f, 0.0f, 0xff00ff00},
-        {-0.5f, 0.5f, 0.0f, 0xff00ff00}
+        {-1.0f, 1.0f, 1.0f, 0xff000000},
+        {1.0f, 1.0f, 1.0f, 0xff0000ff},
+        {-1.0f, -1.0f, 1.0f, 0xff00ff00},
+        {1.0f, -1.0f, 1.0f, 0xff00ffff},
+        {-1.0f, 1.0f, -1.0f, 0xffff0000},
+        {1.0f, 1.0f, -1.0f, 0xffff00ff},
+        {-1.0f, -1.0f, -1.0f, 0xffffff00},
+        {1.0f, -1.0f, -1.0f, 0xffffffff}
     };
 
     static const uint16_t s_cubeTriList[] =
     {
-        0, 1, 3,
-        1, 2, 3
+        0, 1, 2, // 0
+        1, 3, 2,
+        4, 6, 5, // 2
+        5, 6, 7,
+        0, 2, 4, // 4
+        4, 2, 6,
+        1, 5, 3, // 6
+        5, 7, 3,
+        0, 4, 1, // 8
+        4, 5, 1,
+        2, 3, 6, // 10
+        6, 3, 7,
     };
+
+
+    
+    static const uint16_t s_cubeTriStrip[] =
+    {
+        0, 1, 2,
+        3,
+        7,
+        1,
+        5,
+        0,
+        4,
+        2,
+        6,
+        7,
+        4,
+        5,
+    };
+
+    static const uint16_t s_cubeLineList[] =
+    {
+        0, 1,
+        0, 2,
+        0, 4,
+        1, 3,
+        1, 5,
+        2, 3,
+        2, 6,
+        3, 7,
+        4, 5,
+        4, 6,
+        5, 7,
+        6, 7,
+    };
+
+    static const uint16_t s_cubeLineStrip[] =
+    {
+        0, 2, 3, 1, 5, 7, 6, 4,
+        0, 2, 6, 4, 5, 7, 3, 1,
+        0,
+    };
+
+    static const uint16_t s_cubePoints[] =
+    {
+        0, 1, 2, 3, 4, 5, 6, 7
+    };
+
 
     bgfx::VertexLayout Renderer::PosColorVertex::ms_decl;
 
@@ -36,9 +97,9 @@ namespace Tina {
 
         bx::FilePath imageFilePath("./resource/Tina.jpg");
         bx::FileReader fileReader;
-        
-        m_imageTexture = BgfxUtils::loadTexture(&fileReader,imageFilePath);
-        
+
+        m_imageTexture = BgfxUtils::loadTexture(&fileReader, imageFilePath);
+
         m_cubeTexture = bgfx::createTexture2D(size.width, size.height, false, 1, bgfx::TextureFormat::RGBA8,
                                               BGFX_TEXTURE_RT);
 
@@ -47,7 +108,11 @@ namespace Tina {
 
         m_cubeVBH = bgfx::createVertexBuffer(bgfx::makeRef(s_cubeVertices, sizeof(s_cubeVertices)),
                                              PosColorVertex::ms_decl);
-        m_cubeIBH = bgfx::createIndexBuffer(bgfx::makeRef(s_cubeTriList, sizeof(s_cubeTriList)));
+        m_cubeIBH[0] = bgfx::createIndexBuffer(bgfx::makeRef(s_cubeTriList, sizeof(s_cubeTriList)));
+        m_cubeIBH[1] = bgfx::createIndexBuffer(bgfx::makeRef(s_cubeTriList, sizeof(s_cubeTriList)));
+        m_cubeIBH[2] = bgfx::createIndexBuffer(bgfx::makeRef(s_cubeTriList, sizeof(s_cubeTriList)));
+        m_cubeIBH[3] = bgfx::createIndexBuffer(bgfx::makeRef(s_cubeTriList, sizeof(s_cubeTriList)));
+        m_cubeIBH[4] = bgfx::createIndexBuffer(bgfx::makeRef(s_cubeTriList, sizeof(s_cubeTriList)));
 
         bgfx::RendererType::Enum type = bgfx::getRendererType();
 
@@ -96,7 +161,7 @@ namespace Tina {
 
         // Set vertex and index buffer.
         bgfx::setVertexBuffer(-_viewId, m_cubeVBH);
-        bgfx::setIndexBuffer(m_cubeIBH);
+        bgfx::setIndexBuffer(m_cubeIBH[0]);
 
         // Set render states.
         bgfx::setState(BGFX_STATE_DEFAULT);
@@ -108,8 +173,7 @@ namespace Tina {
     }
 
     void Renderer::shutdown() {
+        bgfx::destroy(m_cubeVBH);
         bgfx::shutdown();
     }
-
-
 }
