@@ -21,7 +21,7 @@ TEST_F(ByteArrayInputStreamTest, BasicReadTest) {
         bytes.append(Byte(i));
     }
 
-   auto test = createScope<Buffer<Byte>>(bytes.size());
+   auto test = createScopePtr<Buffer<Byte>>(bytes.size());
 
 
    bytes.read(test.get(), bytes.size());

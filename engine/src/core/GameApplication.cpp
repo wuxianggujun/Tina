@@ -11,12 +11,12 @@ namespace Tina
     {
         Vector2i resolution = Vector2i(1280, 720);
 
-        window = createScope<GLFWWindow>();
+        window = createScopePtr<GLFWWindow>();
         window->create(Window::WindowConfig{"Tina", resolution, false, false, false});
         inputHandler = createInputHandler(InputHandlerGLFW, window.get());
         inputHandler->initialize();
 
-        renderer = createScope<Renderer>(resolution,0);
+        renderer = createScopePtr<Renderer>(resolution,0);
         
         mainLoop();
     }

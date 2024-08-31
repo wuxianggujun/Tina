@@ -69,13 +69,13 @@ namespace Tina
         return transferred;
     }
 
-    Scope<Buffer<Byte>> FileInputStream::read(size_t size)
+    ScopePtr<Buffer<Byte>> FileInputStream::read(size_t size)
     {
         if (!file->isOpen())
         {
             throw std::runtime_error("Failed to read from file stream." + filePath.getFileName());
         }
-        auto bytes = createScope<Buffer<Byte>>(size);
+        auto bytes = createScopePtr<Buffer<Byte>>(size);
         if (file->getFileStream()->read(bytes.get()->begin(), sizeof(uint8_t), size) == 0)
         {
             throw std::runtime_error("Failed to read from file stream." + filePath.getFileName());

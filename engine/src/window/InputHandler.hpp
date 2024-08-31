@@ -28,7 +28,7 @@ namespace Tina
         virtual void processEvent() = 0;
     };
 
-    Scope<InputHandler> createInputHandler(InputHandlerType type,Window* window);
+    ScopePtr<InputHandler> createInputHandler(InputHandlerType type,Window* window);
 } // Tina
 
 #endif //TINA_WINDOW_INPUT_HPP

@@ -24,7 +24,7 @@ namespace Tina {
 
         size_t transferTo(OutputStream &out) override;
 
-        Scope<Buffer<Byte>> read(size_t size) override;
+        ScopePtr<Buffer<Byte>> read(size_t size) override;
 
         [[nodiscard]] bool eof() const;
 

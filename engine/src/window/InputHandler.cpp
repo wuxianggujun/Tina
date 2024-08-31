@@ -10,17 +10,17 @@ namespace Tina
 {
     class Window;
     
-    Scope<InputHandler> createInputHandler(InputHandlerType type,Window* window)
+    ScopePtr<InputHandler> createInputHandler(InputHandlerType type,Window* window)
     {
         switch (type)
         {
         case InputHandlerGLFW:
-            return createScope<GLFWInput>(dynamic_cast<GLFWWindow*>(window));
+            return createScopePtr<GLFWInput>(dynamic_cast<GLFWWindow*>(window));
         case InputHandlerSDL:
-            return createScope<SDLInput>();
+            return createScopePtr<SDLInput>();
         case InputHandlerNONE:
         default:
-            return createScope<GLFWInput>(dynamic_cast<GLFWWindow*>(window));
+            return createScopePtr<GLFWInput>(dynamic_cast<GLFWWindow*>(window));
         }
     }
 }

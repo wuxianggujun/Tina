@@ -49,7 +49,7 @@ namespace Tina {
             dest.append(identifier.data(), identifier.data() + identifier.size());
         }
 
-        std::unique_ptr<custom_flag_formatter> clone() const override {
+        ScopePtr<custom_flag_formatter> clone() const override {
             return spdlog::details::make_unique<LevelFormatterFlag>();
         }
     };

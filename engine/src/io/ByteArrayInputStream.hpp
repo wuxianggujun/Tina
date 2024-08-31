@@ -22,7 +22,7 @@ namespace Tina
         
         void close() override;
         Byte read() override;
-        Scope<Buffer<Byte>> read(size_t size) override;
+        ScopePtr<Buffer<Byte>> read(size_t size) override;
         size_t read(Buffer<Byte>* bytes, std::size_t off, std::size_t len) const;
         size_t transferTo(OutputStream& out) override;
         ~ByteArrayInputStream() override;

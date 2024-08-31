@@ -24,7 +24,7 @@ namespace Tina {
         return buf_.read();
     }
 
-   Scope<Buffer<Byte>> ByteArrayInputStream::read(size_t size) {
+   ScopePtr<Buffer<Byte>> ByteArrayInputStream::read(size_t size) {
         auto result = std::make_unique<Buffer<Byte> >(size);
         buf_.read(result.get(), size);
         return result;

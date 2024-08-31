@@ -48,7 +48,7 @@ namespace Tina {
         static void errorCallback(int error, const char *description);
 
     private:
-        Scope<GLFWwindow, GlfwWindowDeleter> m_window;
+        ScopePtr<GLFWwindow, GlfwWindowDeleter> m_window;
     };
 } // Tina
 

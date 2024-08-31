@@ -24,9 +24,9 @@ namespace Tina
         void mainLoop() const;
 
     protected:
-        Scope<Window> window;
-        Scope<InputHandler> inputHandler;
-        Scope<Renderer> renderer;
+        ScopePtr<Window> window;
+        ScopePtr<InputHandler> inputHandler;
+        ScopePtr<Renderer> renderer;
     };
 } // Tina
 
