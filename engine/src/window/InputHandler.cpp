@@ -3,7 +3,6 @@
 //
 #include "InputHandler.hpp"
 #include "GLFWInput.hpp"
-#include "SDLInput.hpp"
 #include "GLFWWindow.hpp"
 
 namespace Tina
@@ -16,8 +15,6 @@ namespace Tina
         {
         case InputHandlerGLFW:
             return createScopePtr<GLFWInput>(dynamic_cast<GLFWWindow*>(window));
-        case InputHandlerSDL:
-            return createScopePtr<SDLInput>();
         case InputHandlerNONE:
         default:
             return createScopePtr<GLFWInput>(dynamic_cast<GLFWWindow*>(window));

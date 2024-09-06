@@ -8,11 +8,9 @@
 #include "Core.hpp"
 #include "window/Window.hpp"
 #include "window/GLFWWindow.hpp"
-#include "window/SDLWindow.hpp"
 #include "window/InputHandler.hpp"
 #include "core/Renderer.hpp"
 #include "window/GLFWInput.hpp"
-#include "window/SDLInput.hpp"
 #include <ctrack.hpp>
 
 namespace Tina

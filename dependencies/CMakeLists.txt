@@ -38,7 +38,6 @@ OPTION(TRACY_ON_DEMAND "" ON)
 #option(TRACY_NO_SYSTEM_TRACING "Disable System Tracing" ON)
 option(TRACY_ONLY_IPV4 "IPv4 only" ON)
 
-
 # icu
 set(BUILD_ICU ON CACHE BOOL "Enable compilation of ICU")
 set(ICU_BUILD_VERSION "72.1" CACHE STRING "" FORCE)
@@ -51,7 +50,7 @@ add_subdirectory(bgfx.cmake)
 find_package(X11 REQUIRED)
 
 add_subdirectory(glfw)
-add_subdirectory(SDL)
+#add_subdirectory(SDL)
 #add_subdirectory(glad)
 add_subdirectory(glm)
 add_subdirectory(yaml-cpp)
@@ -74,7 +73,7 @@ set(TINA_LIBRARIES
         spdlog
         stb::image
         EnTT::EnTT
-        SDL3::SDL3
+        #SDL3::SDL3
         yaml-cpp::yaml-cpp
         Tracy::TracyClient
         ctrack
