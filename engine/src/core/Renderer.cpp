@@ -5,11 +5,11 @@
 #include "bx/math.h"
 
 namespace Tina {
-    const bgfx::EmbeddedShader shaders[3] = {
+    /*const bgfx::EmbeddedShader shaders[3] = {
         BGFX_EMBEDDED_SHADER(vs_simple),
         BGFX_EMBEDDED_SHADER(fs_simple),
         BGFX_EMBEDDED_SHADER_END()
-    };
+    };*/
 
     static Renderer::PosColorVertex s_cubeVertices[] =
     {
@@ -116,8 +116,10 @@ namespace Tina {
 
         bgfx::RendererType::Enum type = bgfx::getRendererType();
 
+        /*
         _programHandle = bgfx::createProgram(bgfx::createEmbeddedShader(shaders, type, "vs_simple"),
                                              bgfx::createEmbeddedShader(shaders, type, "fs_simple"), true);
+                                             */
 
         //bgfx::setViewFrameBuffer(_viewId, m_frameBuffer);
         bgfx::setViewClear(0,BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);

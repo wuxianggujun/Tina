@@ -5,13 +5,14 @@ file(GLOB_RECURSE ENGINE_FILES CONFIGURE_DEPENDS
         ${SUBMODULE_PROJECT_DIR}/src/*.c**
         ${SUBMODULE_PROJECT_DIR}/src/*.h**)
 
-add_shaders_directory(${SUBMODULE_PROJECT_DIR}/shaders SHADERS_TARGET_NAME)
+add_shader_compile_dir(${CMAKE_SOURCE_DIR}/resources/shaders "simple")
 add_compile_options("$<$<CONFIG:DEBUG>:-DDEBUG>" "$<$<CONFIG:DEBUG>:-DENABLE_ASSERTS>")
 add_library(${SUBMODULE_PROJECT_NAME} ${ENGINE_FILES})
 GROUP_FILES_BY_DIRECTORY("ENGINE_FILES")
 
+add_dependencies(${SUBMODULE_PROJECT_NAME} shaders)
+
 target_link_libraries(${SUBMODULE_PROJECT_NAME} PUBLIC ${TINA_LIBRARIES})
-target_link_libraries(${SUBMODULE_PROJECT_NAME} PUBLIC ${SHADERS_TARGET_NAME})
 
 #[[target_link_libraries(${SUBMODULE_PROJECT_NAME} PRIVATE
         -lglfw

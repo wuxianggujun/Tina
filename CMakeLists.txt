@@ -80,6 +80,7 @@ endif ()
 include(TinaTool)
 include(BgfxUtil)
 include(SourceGroups)
+include(CompileShaders)
 
 # Automatically update submodule versions
 if (TINA_AUTOUPDATE_SUBMODULE)
@@ -93,6 +94,7 @@ if (MSVC)
 endif ()
 
 add_subdirectory(dependencies)
+#add_subdirectory(resources/shaders)
 add_subdirectory(engine)
 add_subdirectory(runtime)
 
