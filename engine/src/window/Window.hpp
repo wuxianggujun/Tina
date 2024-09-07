@@ -6,16 +6,20 @@
 #define TINA_WINDOW_HPP
 
 #include "math/Vector.hpp"
+#include "graphics/BgfxCallback.hpp"
 
-namespace Tina
-{
-    class Window
-    {
+namespace Tina {
+    class Window {
     public:
-        class WindowConfig
-        {
+        enum class WindowMode {
+            WINDOWED,
+            FULLSCREEN,
+            BORDERLESS
+        };
+
+        class WindowConfig {
         public:
-            const char* title{};
+            const char *title{};
             Vector2i size;
             bool resizable{};
             bool fullscreen{};
@@ -26,12 +30,19 @@ namespace Tina
         virtual ~Window() = default;
 
         virtual void create(WindowConfig config) = 0;
+
         virtual void destroy() = 0;
 
         virtual void render() = 0;
 
         virtual void pollEvents() = 0;
+
         virtual bool shouldClose() = 0;
+
+        static void saveScreenShot(const std::string &fileName);
+
+    protected:
+        BgfxCallback m_bgfxCallback;
     };
 } // Tina
 

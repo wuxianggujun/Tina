@@ -42,6 +42,8 @@ namespace Tina {
 
         bool shouldClose() override;
 
+        static void saveScreenShot(const std::string& fileName);
+
         [[nodiscard]] GLFWwindow *getNativeWindow() const { return m_window.get(); }
 
     private:

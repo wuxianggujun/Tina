@@ -37,6 +37,7 @@ namespace Tina
         bgfxInit.resolution.width = config.size.width;
         bgfxInit.resolution.height = config.size.height;
         bgfxInit.resolution.reset = BGFX_RESET_VSYNC;
+        bgfxInit.callback = &m_bgfxCallback;
 
 #if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
         bgfxInit.platformData.nwh = (void*)(uintptr_t) glfwGetX11Window(m_window.get());
@@ -73,6 +74,10 @@ namespace Tina
     bool GLFWWindow::shouldClose()
     {
         return !glfwWindowShouldClose(m_window.get());
+    }
+
+    void GLFWWindow::saveScreenShot(const std::string &fileName) {
+        bgfx::requestScreenShot(BGFX_INVALID_HANDLE, fileName.c_str());
     }
 
     void GLFWWindow::errorCallback(int error, const char* description)

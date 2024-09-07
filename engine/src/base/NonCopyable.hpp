@@ -1,7 +1,7 @@
 #ifndef TINA_BASE_NONCOPYABLE_HPP
 #define TINA_BASE_NONCOPYABLE_HPP
 
-namespace TIna {
+namespace Tina {
     class NonCopyable {
     public:
         NonCopyable(const NonCopyable &) = delete;
