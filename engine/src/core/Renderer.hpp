@@ -7,8 +7,6 @@
 #include "core/Shader.hpp"
 #include "graphics/IndexBuffer.hpp"
 #include "graphics/VertexBuffer.hpp"
-#include <bgfx/embedded_shader.h>
-// #include "generated/shaders/engine/all.h"
 #include "tool/BgfxUtils.hpp"
 
 namespace Tina {

@@ -18,26 +18,29 @@ namespace Tina {
         0, 1, 3,
         1, 2, 3
     };
-    
+
 
     Renderer::Renderer(Vector2i size, int viewId): _resolution(size), _viewId(viewId) {
         bgfx::setDebug(BGFX_DEBUG_TEXT);
-        
-        m_vertexBuffer.setUpDefaultLayout();
-        
-        m_vertexBuffer.init(s_cubeVertices, 4);
 
-        m_indexBuffer.init(s_cubeTriList, 2);
+        m_vertexBuffer.getLayout().begin()
+                .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
+                .end();
+
+        m_vertexBuffer.init(s_cubeVertices, sizeof(s_cubeVertices));
+
+        m_indexBuffer.init(s_cubeTriList, sizeof(s_cubeTriList));
 
         m_shader.loadFromFile("simple");
 
-        bgfx::setViewClear(0,BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
-        bgfx::setViewRect(0, 0, 0, bgfx::BackbufferRatio::Equal);
+        bgfx::setViewClear(0,BGFX_CLEAR_COLOR|BGFX_CLEAR_DEPTH,0x303030ff,1.0f,0);
+        bgfx::setViewRect(0,0,0,bgfx::BackbufferRatio::Equal);
     }
 
     void Renderer::render() {
-        const bx::Vec3 at = {0.0f, 0.0f, 0.0f};
-        const bx::Vec3 eye = {0.0f, 0.0f, 10.0f};
+        constexpr bx::Vec3 at = {0.0f, 0.0f, 0.0f};
+        constexpr bx::Vec3 eye = {0.0f, 0.0f, 10.0f};
 
         // Set view and projection matrix for view 0.
         float view[16];
@@ -69,7 +72,7 @@ namespace Tina {
 
         // Set model matrix for rendering.
         bgfx::setTransform(mtx);
-        
+
         m_vertexBuffer.enable();
         m_indexBuffer.enable();
 
