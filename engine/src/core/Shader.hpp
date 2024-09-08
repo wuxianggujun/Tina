@@ -30,7 +30,7 @@ namespace Tina {
         }
 
     private:
-        const std::string SHADER_PATH = "resources/shaders/";
+        const std::string SHADER_PATH = "../resources/shaders/";
         bgfx::ShaderHandle m_vertexShader = BGFX_INVALID_HANDLE;
         bgfx::ShaderHandle m_fragmentShader = BGFX_INVALID_HANDLE;
         bgfx::ProgramHandle m_program = BGFX_INVALID_HANDLE;
