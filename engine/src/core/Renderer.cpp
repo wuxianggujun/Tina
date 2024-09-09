@@ -19,23 +19,41 @@ namespace Tina {
         1, 2, 3
     };
 
+    float vertices[] = {
+        -0.5f, -0.5f, 0.0f,
+        0.5f, -0.5f, 0.0f,
+        0.0f, 0.5f, 0.0f
+    };
+
+    uint16_t indices[] = {
+        0, 1, 2
+    };
+
 
     Renderer::Renderer(Vector2i size, int viewId): _resolution(size), _viewId(viewId) {
-        bgfx::setDebug(BGFX_DEBUG_TEXT);
+        // bgfx::setDebug(BGFX_DEBUG_TEXT);
+        // bgfx::setDebug(BGFX_DEBUG_WIREFRAME);
+
+        /*m_vertexBuffer.getLayout().begin()
+                .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+                .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
+                .end();*/
 
         m_vertexBuffer.getLayout().begin()
                 .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
-                .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
                 .end();
 
-        m_vertexBuffer.init(s_cubeVertices, sizeof(s_cubeVertices));
 
-        m_indexBuffer.init(s_cubeTriList, sizeof(s_cubeTriList));
+        m_vertexBuffer.init(vertices, sizeof(vertices));
+        // m_vertexBuffer.init(s_cubeVertices, sizeof(s_cubeVertices));
+
+        //m_indexBuffer.init(s_cubeTriList, sizeof(s_cubeTriList));
+        m_indexBuffer.init(indices, sizeof(indices));
 
         m_shader.loadFromFile("simple");
 
-        bgfx::setViewClear(0,BGFX_CLEAR_COLOR|BGFX_CLEAR_DEPTH,0x303030ff,1.0f,0);
-        bgfx::setViewRect(0,0,0,bgfx::BackbufferRatio::Equal);
+        bgfx::setViewClear(0,BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
+        bgfx::setViewRect(0, 0, 0, bgfx::BackbufferRatio::Equal);
     }
 
     void Renderer::render() {
