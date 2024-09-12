@@ -33,7 +33,7 @@ namespace Tina {
         Vector2i _resolution;
         bgfx::ViewId _viewId;
         Shader m_shader;
-        IndexBuffer m_indexBuffer[5];
+        IndexBuffer m_indexBuffer;
         VertexBuffer m_vertexBuffer;
     };
 }
