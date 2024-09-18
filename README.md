@@ -78,6 +78,9 @@ make
 - **[2019-ecs](https://code.austinmorlan.com/austin/2019-ecs)**
 - **[PainterEngine](https://github.com/matrixcascade/PainterEngine)**
 
-## License
-[MIT](https://github.com/wuxianggujun/Tina/blob/master/LICENSE)
+## Acknowledgments
+
+- Thanks to JetBrains for providing open-source project free License
+
+<a href="https://jb.gg/OpenSourceSupport"><img src="./img/jb_beam.svg" /></a>
 

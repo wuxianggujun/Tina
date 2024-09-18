@@ -28,13 +28,17 @@ namespace Tina {
 
         void shutdown();
 
+    private:
+        bgfx::TextureHandle loadTexture(const char* fileName);
 
     private:
         Vector2i _resolution;
         bgfx::ViewId _viewId;
         Shader m_shader;
-        IndexBuffer m_indexBuffer[5];
+        bgfx::UniformHandle s_texColor;
+        IndexBuffer m_indexBuffer;
         VertexBuffer m_vertexBuffer;
+        bgfx::TextureHandle m_texture;
     };
 }
 
