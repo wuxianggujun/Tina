@@ -17,8 +17,6 @@ namespace Tina {
             float m_x;
             float m_y;
             float m_z;
-            uint32_t m_normal;
-            uint32_t m_tangent;
             // 纹理坐标
             int16_t m_u;
             int16_t m_v;
@@ -37,11 +35,7 @@ namespace Tina {
         IndexBuffer m_ibh;
         Shader m_shader;
         bgfx::UniformHandle s_texColor;
-        bgfx::UniformHandle s_texNormal;
         bgfx::TextureHandle m_textureColor;
-        bgfx::TextureHandle m_textureNormal;
-        uint16_t m_numLights;
-        bool m_instancingSupported;
 
         Vector2i m_resolution;
         int64_t m_timeOffset;
