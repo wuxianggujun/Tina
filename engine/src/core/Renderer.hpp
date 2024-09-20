@@ -12,12 +12,16 @@
 namespace Tina {
     class Renderer {
     public:
-        
-        struct PosColorVertex {
+        struct PosNormalTangentTexcoordVertex {
+            // 顶点坐标
             float m_x;
             float m_y;
             float m_z;
-            uint32_t m_abgr;
+            uint32_t m_normal;
+            uint32_t m_tangent;
+            // 纹理坐标
+            int16_t m_u;
+            int16_t m_v;
         };
 
         Renderer(Vector2i resolution, int viewId);
@@ -29,16 +33,18 @@ namespace Tina {
         void shutdown();
 
     private:
-        bgfx::TextureHandle loadTexture(const char* fileName);
-
-    private:
-        Vector2i _resolution;
-        bgfx::ViewId _viewId;
+        VertexBuffer m_vbh;
+        IndexBuffer m_ibh;
         Shader m_shader;
         bgfx::UniformHandle s_texColor;
-        IndexBuffer m_indexBuffer;
-        VertexBuffer m_vertexBuffer;
-        bgfx::TextureHandle m_texture;
+        bgfx::UniformHandle s_texNormal;
+        bgfx::TextureHandle m_textureColor;
+        bgfx::TextureHandle m_textureNormal;
+        uint16_t m_numLights;
+        bool m_instancingSupported;
+
+        Vector2i m_resolution;
+        int64_t m_timeOffset;
     };
 }
 

@@ -34,6 +34,8 @@ namespace Tina::BgfxUtils {
 
     bgfx::TextureHandle loadTexture(bx::FileReaderI *_reader, const bx::FilePath &_filePath, uint64_t _flags = BGFX_TEXTURE_NONE|BGFX_SAMPLER_NONE,
                                     uint8_t _skip = 0, bgfx::TextureInfo *_info= nullptr, bimg::Orientation::Enum *_orientation = nullptr);
+
+    bgfx::TextureHandle loadTexture(const char* fileName);
     
 }
 

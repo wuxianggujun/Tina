@@ -3,6 +3,8 @@
 #include <format>
 #include <iostream>
 #include <stdexcept>
+#include <fstream>
+
 
 namespace Tina::BgfxUtils {
     void *allocate(size_t size) {
@@ -94,6 +96,50 @@ namespace Tina::BgfxUtils {
         }
         return nullptr;
     }
+
+    bgfx::TextureHandle loadTexture(const char *filepath) {
+        // Opening the file in binary mode
+        std::ifstream file(filepath, std::ios::binary);
+
+        if (!file.is_open()) {
+            std::cerr << "Failed to open file at filepath: " << filepath << std::endl;
+        }
+
+        // Getting the filesize
+        file.seekg(0, std::ios::end);
+        std::streampos size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        // Storing the data into data
+        char *data = new char[size];
+        file.read(data, size);
+
+        // Closing the file
+        file.close();
+
+        bx::DefaultAllocator allocator;
+        bimg::ImageContainer *img_container = bimg::imageParse(&allocator, data, size);
+
+        if (img_container == nullptr)
+            return BGFX_INVALID_HANDLE;
+
+        const bgfx::Memory *mem = bgfx::makeRef(img_container->m_data, img_container->m_size, 0, img_container);
+        delete[] data;
+
+        bgfx::TextureHandle handle = bgfx::createTexture2D(static_cast<uint16_t>(img_container->m_width),
+                                                           static_cast<uint16_t>(img_container->m_height),
+                                                           1 < img_container->m_numMips, img_container->m_numLayers,
+                                                           static_cast<bgfx::TextureFormat::Enum>(img_container->
+                                                               m_format),
+                                                           BGFX_SAMPLER_U_MIRROR | BGFX_SAMPLER_V_MIRROR, mem
+        );
+
+        std::cout << "Image width: " << static_cast<uint16_t>(img_container->m_width) <<
+                ", Image height: " << static_cast<uint16_t>(img_container->m_height) << std::endl;
+
+        return handle;
+    }
+    
 
     void imageReleaseCb(void *_ptr, void *_userData) {
         if (nullptr != _ptr) {
