@@ -77,6 +77,23 @@ namespace Tina {
     }
 
     void Renderer::render() {
+
+        const bx::Vec3 at  = { 0.0f, 0.0f,   0.0f };
+        const bx::Vec3 eye = { 0.0f, 0.0f, -35.0f };
+
+        // Set view and projection matrix for view 0.
+        {
+            float view[16];
+            bx::mtxLookAt(view, eye, at);
+
+            float proj[16];
+            bx::mtxProj(proj, 60.0f, static_cast<float>(m_resolution.width)/static_cast<float>(m_resolution.height), 0.1f, 100.0f, bgfx::getCaps()->homogeneousDepth);
+            bgfx::setViewTransform(0, view, proj);
+
+            // Set view 0 default viewport.
+            bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(m_resolution.width), static_cast<uint16_t>(m_resolution.height) );
+        }
+        
         bgfx::touch(0);
 
         // Set vertex and index buffer.
@@ -103,7 +120,7 @@ namespace Tina {
     void Renderer::shutdown() {
         m_vbh.free();
         m_ibh.free();
-        bgfx::destroy(m_textureColor);
+        bgfx::destroy(m_textureColor); 
         bgfx::destroy(s_texColor);
         bgfx::shutdown();
     }

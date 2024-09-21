@@ -28,7 +28,7 @@ namespace Tina {
 
         [[nodiscard]] bool isValid() const;
 
-        [[nodiscard]] decltype(auto) handler() const {
+        [[nodiscard]] decltype(auto) handle() const {
             return (!m_isDynamic) ? m_staticHandle.idx : m_dynamicHandle.idx;
         }
 
