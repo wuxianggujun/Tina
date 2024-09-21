@@ -22,11 +22,13 @@ endif ()
 # Cache the root directory
 set(ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR} CACHE PATH "Root directory path")
 set(BUILD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/build CACHE PATH "Build directory path")
+set(RESOURCE_DIR ${ROOT_DIR}/resources CACHE PATH "Resource directory path")
+set(RESOURCE_DEST_DIR ${CMAKE_BINARY_DIR}/resources CACHE PATH "Resource directory path")
 
 # Functional options
 option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
-option(TINA_BUILD_TESTING "Turn on Tina's Google Tests" OFF)
+option(TINA_BUILD_TESTING "Turn on Tina's Google Tests" ON)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
 
 list(APPEND CMAKE_MODULE_PATH ${ROOT_DIR}/cmake)
@@ -80,6 +82,7 @@ endif ()
 include(TinaTool)
 include(BgfxUtil)
 include(SourceGroups)
+include(CompileShaders)
 
 # Automatically update submodule versions
 if (TINA_AUTOUPDATE_SUBMODULE)
@@ -92,7 +95,20 @@ if (MSVC)
     string(APPEND CMAKE_CXX_FLAGS " /Zc:__cplusplus /MP")
 endif ()
 
+# 必须重新加载cmake才会生效
+file(GLOB_RECURSE RESOURCE_FILES "${RESOURCE_DIR}/*")
+
+foreach (FILE ${RESOURCE_FILES})
+    if (NOT FILE MATCHES "/shaders/")
+        file(RELATIVE_PATH REL_PATH "${RESOURCE_DIR}" "${FILE}")
+        get_filename_component(REAL_PATH "${REL_PATH}" DIRECTORY)
+        file(MAKE_DIRECTORY "${RESOURCE_DEST_DIR}/${REAL_PATH}")
+        file(COPY "${FILE}" DESTINATION "${RESOURCE_DEST_DIR}/${REAL_PATH}")
+    endif ()
+endforeach ()
+
 add_subdirectory(dependencies)
+#add_subdirectory(resources/shaders)
 add_subdirectory(engine)
 add_subdirectory(runtime)
 
@@ -106,3 +122,4 @@ if (TINA_BUILD_TESTING)
     enable_testing()
     add_subdirectory(tests)
 endif ()
+

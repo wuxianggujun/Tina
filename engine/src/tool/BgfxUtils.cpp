@@ -1,124 +1,218 @@
-//
-// Created by wuxianggujun on 2024/5/20.
-//
-
 #include "BgfxUtils.hpp"
-#include <filesystem>
-#include <fstream>
+
+#include <format>
 #include <iostream>
-#include <memory>
-#include <vector>
+#include <stdexcept>
+#include <fstream>
 
-#include <bgfx/bgfx.h>
-#include <bx/commandline.h>
-#include <bx/endian.h>
-#include <bx/math.h>
-#include <bx/readerwriter.h>
-#include <bx/string.h>
 
-namespace Tina {
-
-    static std::vector<std::shared_ptr<char[]>> loadedFiles;
-
-    static const bgfx::Memory *loadFile(const std::string &_filePath) {
-        auto filePath = std::filesystem::path(_filePath);
-
-        if (filePath.is_relative()) {
-            filePath = std::filesystem::current_path() / filePath;
-        }
-
-        if (std::filesystem::is_symlink(filePath)) {
-            filePath = std::filesystem::read_symlink(filePath);
-        }
-
-        std::ifstream is(filePath, std::ios::binary);
-        if (!is) {
-            std::cout << "Invalid filepath: " << _filePath << std::endl;
-            return NULL;
-        }
-
-        is.seekg(0, std::ios::end);
-        uint32_t size = is.tellg();
-        is.seekg(0, std::ios::beg);
-
-        std::shared_ptr<char[]> buffer{new char[size]};
-        is.read(buffer.get(), size);
-
-        loadedFiles.push_back(buffer);
-
-        return bgfx::makeRef(buffer.get(), size);
+namespace Tina::BgfxUtils {
+    void *allocate(size_t size) {
+        return bx::alloc(getAllocator(), size);
     }
 
-   std::string BgfxUtils::getFilepath(const std::string &_from_resources) {
-        std::string filepath = "./resources/" + _from_resources;
-
-        return filepath;
+    void unLoad(void *ptr) {
+        if (nullptr != _allocator) {
+            bx::free(_allocator, ptr);
+        }
     }
 
-    bgfx::ShaderHandle BgfxUtils::loadShader(const std::string &_name) {
-        std::string shaderPath = "???";
+    bx::AllocatorI *getAllocator() {
+        if (nullptr == _allocator) {
+            static bx::DefaultAllocator currentAllocator;
+            _allocator = &currentAllocator;
+        }
+        return _allocator;
+    }
+
+
+    static const bgfx::Memory *loadMem(bx::FileReaderI *_reader, const bx::FilePath &_filePath) {
+        if (bx::open(_reader, _filePath)) {
+            auto size = static_cast<uint32_t>(bx::getSize(_reader));
+            const bgfx::Memory *mem = bgfx::alloc(size + 1);
+            bx::read(_reader, mem->data, size, bx::ErrorAssert{});
+            bx::close(_reader);
+            mem->data[mem->size - 1] = '\0';
+            return mem;
+        }
+        return NULL;
+    }
+
+    static bgfx::ShaderHandle loadShader(bx::FileReaderI *_reader, const bx::StringView &_name) {
+        bx::FilePath filePath("shaders/");
 
         switch (bgfx::getRendererType()) {
             case bgfx::RendererType::Noop:
             case bgfx::RendererType::Direct3D11:
-            case bgfx::RendererType::Direct3D12:
-                shaderPath = "shaders/dx11/";
-                break;
-            case bgfx::RendererType::Gnm:
-                shaderPath = "shaders/pssl/";
-                break;
-            case bgfx::RendererType::Metal:
-                shaderPath = "shaders/metal/";
-                break;
-            case bgfx::RendererType::Nvn:
-                shaderPath = "shaders/nvn/";
-                break;
-            case bgfx::RendererType::OpenGL:
-                shaderPath = "shaders/glsl/";
-                break;
-            case bgfx::RendererType::OpenGLES:
-                shaderPath = "shaders/essl/";
-                break;
-            case bgfx::RendererType::Vulkan:
-                shaderPath = "shaders/spirv/";
-                break;
+            case bgfx::RendererType::Direct3D12: filePath.join("dx11");
                 break;
             case bgfx::RendererType::Agc:
+            case bgfx::RendererType::Gnm: filePath.join("pssl");
+                break;
+            case bgfx::RendererType::Metal: filePath.join("metal");
+                break;
+            case bgfx::RendererType::Nvn: filePath.join("nvn");
+                break;
+            case bgfx::RendererType::OpenGL: filePath.join("glsl");
+                break;
+            case bgfx::RendererType::OpenGLES: filePath.join("essl");
+                break;
+            case bgfx::RendererType::Vulkan: filePath.join("spirv");
+                break;
+
             case bgfx::RendererType::Count:
                 BX_ASSERT(false, "You should not be here!");
                 break;
         }
 
-        std::string filepath = getFilepath(shaderPath + _name + ".bin");
+        char fileName[512];
+        bx::strCopy(fileName, BX_COUNTOF(fileName), _name);
+        bx::strCat(fileName, BX_COUNTOF(fileName), ".bin");
 
-        bgfx::ShaderHandle handle = bgfx::createShader(loadFile(filepath));
-        bgfx::setName(handle, _name.c_str());
+        filePath.join(fileName);
+
+        bgfx::ShaderHandle handle = bgfx::createShader(loadMem(_reader, filePath.getCPtr()));
+        bgfx::setName(handle, _name.getPtr(), _name.getLength());
 
         return handle;
     }
 
-    bgfx::ProgramHandle BgfxUtils::loadProgram(const std::string &_vsName, const std::string &_fsName) {
-        bgfx::ShaderHandle vsh = loadShader(_vsName);
+
+    void *load(bx::FileReaderI *_reader, bx::AllocatorI *_allocator, const bx::FilePath &_filePath, uint32_t *_size) {
+        if (bx::open(_reader, _filePath)) {
+            auto size = static_cast<uint32_t>(bx::getSize(_reader));
+            void *data = bx::alloc(_allocator, size);
+            bx::read(_reader, data, size, bx::ErrorAssert{});
+            bx::close(_reader);
+            if (_size != nullptr) {
+                *_size = size;
+            }
+            return data;
+        } else {
+            std::cerr << "Failed to open file: " << _filePath.getCPtr() << std::endl;
+        }
+        if (_size != nullptr) {
+            *_size = 0;
+        }
+        return nullptr;
+    }
+
+    bgfx::TextureHandle loadTexture(const char *filepath) {
+        // Opening the file in binary mode
+        std::ifstream file(filepath, std::ios::binary);
+
+        if (!file.is_open()) {
+            std::cerr << "Failed to open file at filepath: " << filepath << std::endl;
+        }
+
+        // Getting the filesize
+        file.seekg(0, std::ios::end);
+        std::streampos size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        // Storing the data into data
+        char *data = new char[size];
+        file.read(data, size);
+
+        // Closing the file
+        file.close();
+
+        bx::DefaultAllocator allocator;
+        bimg::ImageContainer *img_container = bimg::imageParse(&allocator, data, size);
+
+        if (img_container == nullptr)
+            return BGFX_INVALID_HANDLE;
+
+        const bgfx::Memory *mem = bgfx::makeRef(img_container->m_data, img_container->m_size, 0, img_container);
+        delete[] data;
+
+        bgfx::TextureHandle handle = bgfx::createTexture2D(static_cast<uint16_t>(img_container->m_width),
+                                                           static_cast<uint16_t>(img_container->m_height),
+                                                           1 < img_container->m_numMips, img_container->m_numLayers,
+                                                           static_cast<bgfx::TextureFormat::Enum>(img_container->
+                                                               m_format),
+                                                           BGFX_SAMPLER_U_MIRROR | BGFX_SAMPLER_V_MIRROR, mem
+        );
+
+        std::cout << "Image width: " << static_cast<uint16_t>(img_container->m_width) <<
+                ", Image height: " << static_cast<uint16_t>(img_container->m_height) << std::endl;
+
+        return handle;
+    }
+    
+
+    void imageReleaseCb(void *_ptr, void *_userData) {
+        if (nullptr != _ptr) {
+            auto *imageContainer = static_cast<bimg::ImageContainer *>(_userData);
+            bimg::imageFree(imageContainer);
+        }
+    }
+
+    bgfx::ProgramHandle loadProgram(bx::FileReaderI *_reader, const bx::StringView &_vsName,
+                                    const bx::StringView &_fsName) {
+        bgfx::ShaderHandle vsh = loadShader(_reader, _vsName);
         bgfx::ShaderHandle fsh = BGFX_INVALID_HANDLE;
-        if (!_fsName.empty()) {
-            fsh = loadShader(_fsName);
+        if (!_fsName.isEmpty()) {
+            fsh = loadShader(_reader, _fsName);
         }
 
         return bgfx::createProgram(vsh, fsh, true /* destroy shaders when program is destroyed */);
     }
 
-    bgfx::TextureHandle BgfxUtils::loadTexture(const std::string &_name, uint64_t _flags, uint8_t _skip,
-                                               bgfx::TextureInfo *_info, bimg::Orientation::Enum *_orientation) {
-        std::string filepath = BgfxUtils::getFilepath("textures/" + _name + ".dds");
+    bgfx::TextureHandle loadTexture(bx::FileReaderI *_reader, const bx::FilePath &_filePath, uint64_t _flags,
+                                    uint8_t _skip, bgfx::TextureInfo *_info,
+                                    bimg::Orientation::Enum *_orientation) {
+        bgfx::TextureHandle handle = BGFX_INVALID_HANDLE;
+        uint32_t size;
 
-        auto data_mem = loadFile(filepath);
-        return bgfx::createTexture(
-                data_mem,
-                _flags,
-                _skip,
-                _info
-        );
+        void *data = load(_reader, getAllocator(), _filePath, &size);
+        if (data != nullptr) {
+            bimg::ImageContainer *imageContainer = bimg::imageParse(getAllocator(), data, size);
+
+            if (imageContainer != nullptr) {
+                if (_orientation != nullptr) {
+                    *_orientation = imageContainer->m_orientation;
+                }
+                const bgfx::Memory *mem = bgfx::makeRef(imageContainer->m_data, imageContainer->m_size, imageReleaseCb,
+                                                        imageContainer);
+                unLoad(data);
+
+                if (imageContainer->m_cubeMap) {
+                    handle = bgfx::createTextureCube(static_cast<uint16_t>(imageContainer->m_width),
+                                                     1 < imageContainer->m_numMips,
+                                                     imageContainer->m_numLayers,
+                                                     static_cast<bgfx::TextureFormat::Enum>(imageContainer->m_format),
+                                                     _flags, mem);
+                } else if (1 < imageContainer->m_depth) {
+                    handle = bgfx::createTexture3D(static_cast<uint16_t>(imageContainer->m_width),
+                                                   static_cast<uint16_t>(imageContainer->m_height),
+                                                   static_cast<uint16_t>(imageContainer->m_depth),
+                                                   1 < imageContainer->m_numMips,
+                                                   static_cast<bgfx::TextureFormat::Enum>(imageContainer->m_format),
+                                                   _flags, mem);
+                } else if (bgfx::isTextureValid(0, false, imageContainer->m_numLayers,
+                                                static_cast<bgfx::TextureFormat::Enum>(imageContainer->m_format),
+                                                _flags)) {
+                    handle = bgfx::createTexture2D(static_cast<uint16_t>(imageContainer->m_width),
+                                                   static_cast<uint16_t>(imageContainer->m_height),
+                                                   1 < imageContainer->m_numMips, imageContainer->m_numLayers,
+                                                   static_cast<bgfx::TextureFormat::Enum>(imageContainer->m_format),
+                                                   _flags, mem);
+                }
+                if (bgfx::isValid(handle)) {
+                    const bx::StringView name_(_filePath);
+                    bgfx::setName(handle, name_.getPtr(), name_.getLength());
+                }
+
+                if (_info != nullptr) {
+                    bgfx::calcTextureSize(*_info, static_cast<uint16_t>(imageContainer->m_width),
+                                          static_cast<uint16_t>(imageContainer->m_height),
+                                          static_cast<uint16_t>(imageContainer->m_depth), imageContainer->m_cubeMap,
+                                          1 < imageContainer->m_numMips, imageContainer->m_numLayers,
+                                          static_cast<bgfx::TextureFormat::Enum>(imageContainer->m_format));
+                }
+            }
+        }
+        return handle;
     }
-
-
-} // Tina
+}

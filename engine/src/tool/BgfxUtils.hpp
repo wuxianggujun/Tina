@@ -1,30 +1,43 @@
-//
-// Created by wuxianggujun on 2024/5/20.
-//
+#ifndef TINA_UTILS_HEADER_GUARD
+#define TINA_UTILS_HEADER_GUARD
 
-#ifndef TINA_TOOL_BGFXUTILS_HPP
-#define TINA_TOOL_BGFXUTILS_HPP
-
-#include <string>
-
-#include <bx/bx.h>
-#include <bx/filepath.h>
-#include <bx/string.h>
 #include <bgfx/bgfx.h>
 #include <bimg/bimg.h>
+#include <bx/file.h>
+#include <bx/macros.h>
+#include <bx/string.h>
+#include <bx/readerwriter.h>
+#include <bx/bounds.h>
+#include <bx/pixelformat.h>
+#include <bx/filepath.h>
+#include <bimg/decode.h>
 
-namespace Tina {
+namespace Tina::BgfxUtils {
+    static bx::StringView s_currentDir = "./";
 
-    class BgfxUtils {
-    public:
-        std::string getFilepath(const std::string& _from_resources);
+    bx::AllocatorI *getAllocator();
 
-        bgfx::ShaderHandle loadShader(const std::string& _name);
-        bgfx::ProgramHandle loadProgram(const std::string& _vsName, const std::string& _fsName);
+    void *allocate(size_t size);
 
-        bgfx::TextureHandle loadTexture(const std::string& _name, uint64_t _flags = BGFX_TEXTURE_NONE|BGFX_SAMPLER_NONE, uint8_t _skip = 0, bgfx::TextureInfo* _info = NULL, bimg::Orientation::Enum* _orientation = NULL);
-    };
+    void unLoad(void *ptr);
 
-} // Tina
+    static bx::AllocatorI *_allocator = getAllocator();
 
-#endif //TINA_TOOL_BGFXUTILS_HPP
+    void *load(bx::FileReaderI *_reader, bx::AllocatorI *_allocator, const bx::FilePath &_filePath, uint32_t *size);
+
+    static void imageReleaseCb(void* _ptr, void* _userData);
+    
+    bgfx::ShaderHandle loadShader(const bx::StringView &_name);
+
+    bgfx::ProgramHandle loadProgram(bx::FileReaderI *_reader, const bx::StringView &_vsName,
+                                    const bx::StringView &_fsName);
+
+    bgfx::TextureHandle loadTexture(bx::FileReaderI *_reader, const bx::FilePath &_filePath, uint64_t _flags = BGFX_TEXTURE_NONE|BGFX_SAMPLER_NONE,
+                                    uint8_t _skip = 0, bgfx::TextureInfo *_info= nullptr, bimg::Orientation::Enum *_orientation = nullptr);
+
+    bgfx::TextureHandle loadTexture(const char* fileName);
+    
+}
+
+
+#endif // TINA_UTILS_HEADER_GUARD

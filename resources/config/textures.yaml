@@ -1,0 +1,21 @@
+application:
+  run-mode: debug
+  window:
+    title: "My Game"
+    width: 800
+    height: 600
+    icon: "icon.png"
+  graphics:
+    antialiasing: true
+    vsync: true
+    fullscreen: false
+    resolution: 1.0
+    shaders: true
+    postprocessing: true
+    shadows: true
+resources:
+  textures:
+    player: "player.png"
+    enemy: "enemy.png"
+    bullet: "bullet.png"
+    explosion: "explosion.png"
