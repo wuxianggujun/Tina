@@ -47,7 +47,7 @@ namespace Tina {
             printf("Bgfx initialization failed\n");
             return;
         }
-        bgfx::setDebug(BGFX_DEBUG_NONE);
+        //bgfx::setDebug(BGFX_DEBUG_NONE);
         bgfx::reset(config.size.width, config.size.height,BGFX_RESET_VSYNC);
     }
 

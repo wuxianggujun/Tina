@@ -6,20 +6,7 @@
 #include "stb/stb_image.h"
 
 namespace Tina {
-    inline uint32_t encodeNormalRgba8(float _x, float _y = 0.0f, float _z = 0.0f, float _w = 0.0f) {
-        const float src[] =
-        {
-            _x * 0.5f + 0.5f,
-            _y * 0.5f + 0.5f,
-            _z * 0.5f + 0.5f,
-            _w * 0.5f + 0.5f,
-        };
-        uint32_t dst;
-        bx::packRgba8(&dst, src);
-        return dst;
-    }
-
-
+    
     Renderer::PosNormalTangentTexcoordVertex s_cubeVertices[24] = {
         {-1.0f, 1.0f, 1.0f, 0, 0},
         {1.0f, 1.0f, 1.0f, 0x7fff, 0},
@@ -65,10 +52,8 @@ namespace Tina {
         21, 23, 22,
     };
 
-    Renderer::Renderer(Vector2i size, int viewId): m_resolution(size),
-                                                   m_timeOffset(0.0f) {
-        bgfx::setViewClear(0,BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
-
+    Renderer::Renderer(Vector2i size, int viewId): m_resolution(size){
+        
         m_vbh.getLayout().begin()
                 .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
                 .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Int16, true, true)
@@ -78,17 +63,20 @@ namespace Tina {
         m_vbh.init(s_cubeVertices, sizeof(s_cubeVertices));
         m_ibh.init(s_cubeIndices, sizeof(s_cubeIndices));
 
+        std::cout << "Renderer IBH: "<< m_ibh.handle() << std::endl;
+        std::cout << "Renderer VBH: "<< m_vbh.handle() << std::endl;
         s_texColor = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
 
-        m_shader.loadShader("bump");
+        m_shader.loadFromFile("bump");
 
         m_textureColor = BgfxUtils::loadTexture("../resources/textures/grassland.png");
 
-        m_timeOffset = bx::getHPCounter();
+   
+        bgfx::setViewClear(0,BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
+        bgfx::setViewRect(0, 0, 0, m_resolution.width, m_resolution.height);
     }
 
     void Renderer::render() {
-        bgfx::setViewRect(0, 0, 0, m_resolution.width, m_resolution.height);
         bgfx::touch(0);
 
         // Set vertex and index buffer.
@@ -108,9 +96,7 @@ namespace Tina {
         );
         // Submit primitive for rendering to view 0.
         bgfx::submit(0, m_shader.getProgram());
-
-        // Advance to next frame. Rendering thread will be kicked to
-        // process submitted rendering primitives.
+        
         bgfx::frame();
     }
 

@@ -34,11 +34,10 @@ namespace Tina {
         VertexBuffer m_vbh;
         IndexBuffer m_ibh;
         Shader m_shader;
-        bgfx::UniformHandle s_texColor;
-        bgfx::TextureHandle m_textureColor;
+        bgfx::UniformHandle s_texColor = BGFX_INVALID_HANDLE;
+        bgfx::TextureHandle m_textureColor = BGFX_INVALID_HANDLE;
 
         Vector2i m_resolution;
-        int64_t m_timeOffset;
     };
 }
 
