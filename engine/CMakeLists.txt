@@ -12,6 +12,11 @@ GROUP_FILES_BY_DIRECTORY("ENGINE_FILES")
 
 add_dependencies(${SUBMODULE_PROJECT_NAME} shaders)
 
+if (UNIX)
+    set(UNIX_LIBS -ldl -lpthread)
+    target_link_libraries(${SUBMODULE_PROJECT_NAME} PUBLIC ${UNIX_LIBS})
+endif ()
+
 target_link_libraries(${SUBMODULE_PROJECT_NAME} PUBLIC ${TINA_LIBRARIES})
 
 #[[target_link_libraries(${SUBMODULE_PROJECT_NAME} PRIVATE
@@ -28,17 +33,17 @@ target_link_libraries(${SUBMODULE_PROJECT_NAME} PUBLIC ${TINA_LIBRARIES})
         -lXcursor)]]
 
 add_definitions(
-    -DGLFW_INCLUDE_NONE
-    -D_CRT_SECURE_NO_WARNINGS
-    -DUNICODE
+        -DGLFW_INCLUDE_NONE
+        -D_CRT_SECURE_NO_WARNINGS
+        -DUNICODE
 )
 
-if(msvc)
-  add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
-  add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
-  target_compile_options(${SUBMODULE_PROJECT_NAME} PRIVATE "/bigobj")
-else()
-  # add_compile_options(-Wa,-mbig-obj)
-endif()
+if (msvc)
+    add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
+    add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
+    target_compile_options(${SUBMODULE_PROJECT_NAME} PRIVATE "/bigobj")
+else ()
+    # add_compile_options(-Wa,-mbig-obj)
+endif ()
 
 target_include_directories(${SUBMODULE_PROJECT_NAME} PUBLIC ${SUBMODULE_PROJECT_DIR}/src)

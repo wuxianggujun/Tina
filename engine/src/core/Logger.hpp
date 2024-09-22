@@ -49,7 +49,7 @@ namespace Tina {
             dest.append(identifier.data(), identifier.data() + identifier.size());
         }
 
-        ScopePtr<custom_flag_formatter> clone() const override {
+        [[nodiscard]] ScopePtr<custom_flag_formatter> clone() const override {
             return spdlog::details::make_unique<LevelFormatterFlag>();
         }
     };
@@ -61,7 +61,7 @@ namespace Tina {
             LogStream(const spdlog::source_loc &loc, LogLevel level): _loc(loc), _level(level) {
             }
 
-            ~LogStream() override {
+            ~LogStream() {
                 flush();
             }
 

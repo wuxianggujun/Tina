@@ -81,7 +81,6 @@ fabric.properties
 /.idea
 *.bin
 /build
-/dependencies/bgfx.cmake/*
 
 .arts
 cmake-build-debug

@@ -79,7 +79,7 @@ namespace Tina {
     void Renderer::render() {
 
         const bx::Vec3 at  = { 0.0f, 0.0f,   0.0f };
-        const bx::Vec3 eye = { 0.0f, 0.0f, -35.0f };
+        const bx::Vec3 eye = { 5.0f, 5.0f, -5.0f };
 
         // Set view and projection matrix for view 0.
         {

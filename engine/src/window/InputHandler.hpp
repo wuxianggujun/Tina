@@ -8,10 +8,10 @@
 #include <string>
 #include "core/Core.hpp"
 
-class Window;
-
 namespace Tina
 {
+    class Window;
+    
     enum InputHandlerType
     {
         InputHandlerGLFW,

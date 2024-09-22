@@ -31,3 +31,6 @@
 [submodule "dependencies/icu"]
 	path = dependencies/icu
 	url = https://github.com/unicode-org/icu.git
+[submodule "dependencies/fmt"]
+	path = dependencies/fmt
+	url = https://github.com/fmtlib/fmt.git

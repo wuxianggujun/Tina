@@ -1,6 +1,6 @@
 #include "BgfxUtils.hpp"
 
-#include <format>
+#include <fmt/format.h>
 #include <iostream>
 #include <stdexcept>
 #include <fstream>

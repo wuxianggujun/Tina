@@ -7,8 +7,6 @@
 
 namespace Tina
 {
-    class Window;
-    
     ScopePtr<InputHandler> createInputHandler(InputHandlerType type,Window* window)
     {
         switch (type)

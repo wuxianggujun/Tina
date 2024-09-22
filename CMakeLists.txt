@@ -60,10 +60,13 @@ endif ()
 
 include(CheckCXXCompilerFlag)
 
-set(CMAKE_CXX_STANDARD 17)
-#set(CMAKE_CXX_FLAGS "/utf-8")
-#set(CMAKE_C_FLAGS "/utf-8")
-#set(CMAKE_C_COMPILER "gcc")
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+#[[set(CMAKE_CXX_STANDARD 17)
 
 if ("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     set(CMAKE_CXX_STANDARD 20)
@@ -72,7 +75,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # cygwin gnu c++ needs to use -std=gnu++17 instead of -std=c++17
     set(CMAKE_CXX_EXTENSIONS OFF)
-endif ()
+endif ()]]
 
 if (BUILD_SHARED_LIBS)
     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
