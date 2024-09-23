@@ -5,16 +5,20 @@
 #ifndef TINA_WINDOW_GLFWWINDOW_HPP
 #define TINA_WINDOW_GLFWWINDOW_HPP
 
-
-#include <bx/bx.h>
-#include <bimg/bimg.h>
-#include <bgfx/bgfx.h>
-#include <bgfx/platform.h>
-#include "core/Platform.hpp"
 #include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
 #include "Window.hpp"
 #include "core/Core.hpp"
+// #include "core/Platform.hpp"
+
+#if BX_PLATFORM_LINUX
+#define GLFW_EXPOSE_NATIVE_X11
+#elif BX_PLATFORM_WINDOWS
+#define GLFW_EXPOSE_NATIVE_WIN32
+#elif BX_PLATFORM_OSX
+#define GLFW_EXPOSE_NATIVE_COCOA
+#endif
+#include <GLFW/glfw3native.h>
+
 
 namespace Tina {
     class GLFWWindow : public Window {

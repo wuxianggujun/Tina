@@ -1,5 +1,5 @@
 #include "File.hpp"
-#include <filesystem>
+#include "FileSystem.hpp"
 #include <iostream>
 #include <utility>
 
@@ -98,12 +98,12 @@ namespace Tina
 
     bool File::isFile() const
     {
-        return std::filesystem::is_regular_file(fileName_.getFullPath());
+        return ghc::filesystem::is_regular_file(fileName_.getFullPath());
     }
 
     bool File::isDirectory() const
     {
-        return std::filesystem::is_directory(fileName_.getFullPath());
+        return ghc::filesystem::is_directory(fileName_.getFullPath());
     }
 
     bool File::isOpen() const
@@ -113,15 +113,15 @@ namespace Tina
 
     bool File::exists() const
     {
-        struct _stat buffer{};
-        return _stat(fileName_.getFullPath().c_str(), &buffer) == 0;
+        ghc::filesystem::path path(fileName_.getFullPath());
+        return ghc::filesystem::exists(path) && ghc::filesystem::is_regular_file(path);
     }
 
     bool File::mkdirs() const {
-        if (std::filesystem::exists(fileName_.getFullPath())) {
+        if (ghc::filesystem::exists(fileName_.getFullPath())) {
             return true;
         }
-        return std::filesystem::create_directory(fileName_.getFullPath());
+        return ghc::filesystem::create_directory(fileName_.getFullPath());
     }
 
     Path File::getPath() const
@@ -142,7 +142,7 @@ namespace Tina
     std::vector<File> File::listFiles() const
     {
         std::vector<File> files;
-        for (const auto& entry : std::filesystem::directory_iterator(fileName_.getFullPath()))
+        for (const auto& entry : ghc::filesystem::directory_iterator(fileName_.getFullPath()))
         {
             files.emplace_back(Path(entry.path().string()), FileMode::Read);
         }

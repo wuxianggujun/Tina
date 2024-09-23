@@ -2,8 +2,8 @@
 #include "Platform.hpp"
 #include <csignal>
 #include <cstdarg>
-#include <filesystem>
 
+#include "filesystem/FileSystem.hpp"
 #include "spdlog/pattern_formatter.h"
 #include "spdlog/details/file_helper.h"
 #include "spdlog/sinks/rotating_file_sink.h"
@@ -68,8 +68,8 @@ namespace Tina {
         if (_initialized) return true;
 
         try {
-            std::filesystem::path logFilePath(logPath);
-            std::filesystem::path logFileName = logFilePath.filename();
+            ghc::filesystem::path logFilePath(logPath);
+            ghc::filesystem::path logFileName = logFilePath.filename();
 
             auto [baseName, ext] = spdlog::details::file_helper::split_by_extension(logFileName.string());
 

@@ -1,13 +1,14 @@
 #ifndef TINA_CORE_LOGGER_HPP
 #define TINA_CORE_LOGGER_HPP
 
+#include "core/Core.hpp"
 #include <spdlog/spdlog.h>
 #include <spdlog/async.h>
-#include "core/Core.hpp"
 
+#include <sstream>
 #include <spdlog/fmt/bundled/printf.h>
+#include <spdlog/pattern_formatter.h>
 
-#include "spdlog/pattern_formatter.h"
 
 namespace Tina {
     enum LogMode {

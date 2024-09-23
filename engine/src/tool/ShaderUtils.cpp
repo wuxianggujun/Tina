@@ -1,45 +1,73 @@
 #include "ShaderUtils.hpp"
-#include <filesystem>
-
+#include "filesystem/FileSystem.hpp"
 #include "bimg/bimg.h"
-
+#include <sstream>
+#include <cstdio>
+#include <stdexcept>
+#include "core/Platform.hpp"
 
 namespace Tina {
     bool ShaderUtils::compileShader(std::string &name) {
-        bool flag = true;
-        std::filesystem::path shaderCFilePath = "shaderc.exe";
-        if (!std::filesystem::exists(shaderCFilePath) || name.empty()) {
-            return false;
+        if (name.empty()) {
+            throw std::invalid_argument("Shader name cannot be empty");
         }
 
-        // std::string rp = flag ? "spirv" : "d3d";
-        // std::string rcmd = flag ? " -p spirv" : " -p s_5_0 -o 3";
-        std::string rcmd = " -p s_5_0 -O 3 --type vertex --verbose  -i ../../dependencies/bgfx.cmake/bgfx/src";
-        // std::string rcmd = " -p vs_5_0 --type vertex --verbose  -i ../../dependencies/bgfx.cmake/bgfx/src";
+        ghc::filesystem::path shaderCFilePath = "./shaderc"; // 假设 shaderc 在同一目录下
+        if (!ghc::filesystem::exists(shaderCFilePath)) {
+            throw std::runtime_error("shaderc executable does not exist");
+        }
 
+        // 构建 shader 源文件路径
+        ghc::filesystem::path shaderSourcePath = "shaders/" + name + ".sc";
+        if (!ghc::filesystem::exists(shaderSourcePath)) {
+            throw std::runtime_error("Shader source file does not exist: " + shaderSourcePath.string());
+        }
 
-        std::string endFile = "shaders/" + name + ".bin";
-        std::string arguments = "-f shaders/" + name + ".sc" + " -o " + endFile +
-                                " --stdout --varyingdef shaders/varying.def.sc  --platform windows" + rcmd;
+        // 构建输出文件路径
+        ghc::filesystem::path outputFilePath = "shaders/" + name + ".bin";
+
+        // 构建 shaderc 编译命令
+        std::string arguments = "-f " + shaderSourcePath.string() + " -o " + outputFilePath.string() +
+                                " --stdout --varyingdef shaders/varying.def.sc --platform linux -p s_5_0 -O 3 --type vertex --verbose -i ../../dependencies/bgfx.cmake/bgfx/src";
 
         std::ostringstream command;
-        command << "shaderc.exe " << arguments;
+        command << shaderCFilePath.string() << " " << arguments;
 
+        // 使用 popen 调用 shaderc
+#ifdef  TINA_PLATFORM_LINUX
+        FILE *pipe = popen(command.str().c_str(), "r");
+#elif  TINA_PLATFORM_WINDOWS
         FILE *pipe = _popen(command.str().c_str(), "r");
+#endif
+
         if (!pipe) {
-            printf("Failed to run command: %s\n", command.str().c_str());
-            return false;
+            throw std::runtime_error("Failed to run shaderc command: " + command.str());
         }
+
+        // 捕获编译输出
         std::ostringstream output;
         char buffer[128];
         while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
             output << buffer;
         }
-        if (_pclose(pipe) == -1) {
-            printf("Failed to close command: %s\n", command.str().c_str());
-            return false;
+
+
+#ifdef  TINA_PLATFORM_LINUX
+        // 检查 shaderc 编译器是否成功
+        if (pclose(pipe) != 0) {
+            throw std::runtime_error("Shader compilation failed: " + output.str());
         }
-        printf("%s", output.str().c_str());
+#elif  TINA_PLATFORM_WINDOWS
+        // 检查 shaderc 编译器是否成功
+        if (_pclose(pipe) != 0) {
+            throw std::runtime_error("Shader compilation failed: " + output.str());
+        }
+
+#endif
+
+        
+      
+        std::printf("Shader compiled successfully: %s\n", outputFilePath.string().c_str());
         return true;
     }
 

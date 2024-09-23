@@ -4,27 +4,28 @@
 
 #include "GLFWWindow.hpp"
 
+#include <fmt/printf.h>
+
 namespace Tina {
     GLFWWindow::GLFWWindow() : m_window(nullptr, GlfwWindowDeleter()) {
         glfwSetErrorCallback(errorCallback);
         if (!glfwInit()) {
-            printf("GLFW initialization failed\n");
+            fmt::printf("GLFW initialization failed\n");
             return;
         }
     }
-
-
+    
       void GLFWWindow::create(WindowConfig config) {
-#if BX_PLATFORM_LINUX
+/*#if BX_PLATFORM_LINUX
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
         /*if (glfwPlatformSupported(GLFW_PLATFORM_WAYLAND))
-            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);*/
-#endif
+            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);#1#
+#endif*/
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         m_window.reset(glfwCreateWindow(config.size.width, config.size.height, config.title, nullptr, nullptr));
         if (!m_window) {
-            printf("GLFW window creation failed\n");
+            fmt::printf("GLFW window creation failed\n");
         }
 
         bgfx::Init bgfxInit;
@@ -44,7 +45,7 @@ namespace Tina {
 #endif
 
         if (!bgfx::init(bgfxInit)) {
-            printf("Bgfx initialization failed\n");
+            fmt::printf("Bgfx initialization failed\n");
             return;
         }
         //bgfx::setDebug(BGFX_DEBUG_NONE);
@@ -72,6 +73,6 @@ namespace Tina {
     }
 
     void GLFWWindow::errorCallback(int error, const char *description) {
-        printf("GLFW Error (%d): %s\n", error, description);
+        fmt::printf("GLFW Error (%d): %s\n", error, description);
     }
 } // Tina
