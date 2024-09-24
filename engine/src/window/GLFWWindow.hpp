@@ -8,13 +8,15 @@
 #include <GLFW/glfw3.h>
 #include "Window.hpp"
 #include "core/Core.hpp"
-// #include "core/Platform.hpp"
 
-#if BX_PLATFORM_LINUX
+// build for Linux
+#include "core/Platform.hpp"
+
+#if TINA_PLATFORM_LINUX
 #define GLFW_EXPOSE_NATIVE_X11
-#elif BX_PLATFORM_WINDOWS
+#elif TINA_PLATFORM_WINDOWS
 #define GLFW_EXPOSE_NATIVE_WIN32
-#elif BX_PLATFORM_OSX
+#elif TINA_PLATFORM_OSX
 #define GLFW_EXPOSE_NATIVE_COCOA
 #endif
 #include <GLFW/glfw3native.h>

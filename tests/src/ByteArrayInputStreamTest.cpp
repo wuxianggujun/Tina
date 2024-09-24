@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include "io/ByteArrayInputStream.hpp"
+#include <fmt/format.h>
 
 using namespace Tina;
 using Bytes = Buffer<Byte>;
@@ -21,19 +22,18 @@ TEST_F(ByteArrayInputStreamTest, BasicReadTest) {
         bytes.append(Byte(i));
     }
 
-   auto test = createScopePtr<Buffer<Byte>>(bytes.size());
+    auto test = createScopePtr<Buffer<Byte> >(bytes.size());
 
 
-   bytes.read(test.get(), bytes.size());
+    bytes.read(test.get(), bytes.size());
 
-   Byte b;
-   int t;
-   for (int i = 0; i <test.get()->size(); i++)
-   {
-       b = bytes.read();
-       t = i;
-   }
-   printf("%ld\n", t);
+    Byte b;
+    int t;
+    for (int i = 0; i < test.get()->size(); i++) {
+        b = bytes.read();
+        t = i;
+    }
+    fmt::print("%ld\n", t);
 
     //ByteArrayInputStream inputStream(bytes);
 }

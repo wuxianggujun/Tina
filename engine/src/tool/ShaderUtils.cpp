@@ -4,9 +4,11 @@
 #include <sstream>
 #include <cstdio>
 #include <stdexcept>
+
 #include "core/Platform.hpp"
 
 namespace Tina {
+    /*
     bool ShaderUtils::compileShader(std::string &name) {
         if (name.empty()) {
             throw std::invalid_argument("Shader name cannot be empty");
@@ -47,7 +49,7 @@ namespace Tina {
         // 捕获编译输出
         std::ostringstream output;
         char buffer[128];
-        while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        while (fgets(buffer, sizeof(buffer), fmt::pipe) != nullptr) {
             output << buffer;
         }
 
@@ -71,6 +73,8 @@ namespace Tina {
         return true;
     }
 
+    */
+    
     /*bgfx::TextureHandle ShaderUtils::loadPng(const char *fileName, uint64_t state) {
         bx::FileReader fFileReader;
         bx::FilePath fFilePath(fileName);
