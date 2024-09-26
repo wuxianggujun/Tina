@@ -8,16 +8,16 @@
 #include <bx/platform.h>
 
 #if  BX_PLATFORM_ANDROID
-#define TINA_PLATFORM_ANDROID 0
+#define TINA_PLATFORM_ANDROID
 #define TINA_PLATFORM_NAME "Android"
 #elif BX_PLATFORM_WINDOWS
-#define TINA_PLATFORM_WINDOWS 0
+#define TINA_PLATFORM_WINDOWS
 #define TINA_PLATFORM_NAME "Windows"
 #elif BX_PLATFORM_LINUX
-#define TINA_PLATFORM_LINUX 0
+#define TINA_PLATFORM_LINUX
 #define TINA_PLATFORM_NAME "Linux"
 #elif BX_PLATFORM_OSX
-#define TINA_PLATFORM_OSX 0
+#define TINA_PLATFORM_OSX
 #define TINA_PLATFORM_NAME "OS"
 #else
 #error "Unknown platform!"

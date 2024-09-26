@@ -12,11 +12,11 @@
 // build for Linux
 #include "core/Platform.hpp"
 
-#if TINA_PLATFORM_LINUX
+#if defined(TINA_PLATFORM_LINUX)
 #define GLFW_EXPOSE_NATIVE_X11
-#elif TINA_PLATFORM_WINDOWS
+#elif defined(TINA_PLATFORM_WINDOWS)
 #define GLFW_EXPOSE_NATIVE_WIN32
-#elif TINA_PLATFORM_OSX
+#elif defined(TINA_PLATFORM_OSX)
 #define GLFW_EXPOSE_NATIVE_COCOA
 #endif
 #include <GLFW/glfw3native.h>
