@@ -4,6 +4,7 @@
 #include <cstdarg>
 #include <vector>
 
+#include "FileSystem.hpp"
 #include "Path.hpp"
 #include "io/Closeable.hpp"
 

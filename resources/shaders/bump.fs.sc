@@ -1,4 +1,4 @@
-$input  v_texcoord0// in...
+$input  v_texcoord0
 
 #include "./include/bgfx.sh"
 

@@ -6,7 +6,19 @@
 #define VECTOR_HPP
 
 #include <cmath>
+// If the gcc compiler is used on a Linux system, check whether <format>header files exist
+/*
+#if __has_include(<format>)
 #include <format>
+#endif
+
+#ifdef __cpp_lib_format
+
+#else
+
+#endif
+*/
+#include <fmt/format.h>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -168,7 +180,7 @@ namespace Tina
 
         [[nodiscard]] std::string toString() const
         {
-            return std::format("[ x: {}, y: {} ]", this->x, this->y);
+            return fmt::format("[ x: {}, y: {} ]", this->x, this->y);
         }
 
         void toStdout() const

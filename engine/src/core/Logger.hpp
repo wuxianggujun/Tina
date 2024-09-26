@@ -1,13 +1,14 @@
 #ifndef TINA_CORE_LOGGER_HPP
 #define TINA_CORE_LOGGER_HPP
 
+#include "core/Core.hpp"
 #include <spdlog/spdlog.h>
 #include <spdlog/async.h>
-#include "core/Core.hpp"
 
+#include <sstream>
 #include <spdlog/fmt/bundled/printf.h>
+#include <spdlog/pattern_formatter.h>
 
-#include "spdlog/pattern_formatter.h"
 
 namespace Tina {
     enum LogMode {
@@ -49,7 +50,7 @@ namespace Tina {
             dest.append(identifier.data(), identifier.data() + identifier.size());
         }
 
-        ScopePtr<custom_flag_formatter> clone() const override {
+        [[nodiscard]] ScopePtr<custom_flag_formatter> clone() const override {
             return spdlog::details::make_unique<LevelFormatterFlag>();
         }
     };
@@ -61,7 +62,7 @@ namespace Tina {
             LogStream(const spdlog::source_loc &loc, LogLevel level): _loc(loc), _level(level) {
             }
 
-            ~LogStream() override {
+            ~LogStream() {
                 flush();
             }
 

@@ -4,7 +4,7 @@
 #
 # ##############################################################################
 
-cmake_minimum_required(VERSION 3.27)
+cmake_minimum_required(VERSION 3.20)
 project(Tina VERSION 0.0.1 LANGUAGES CXX)
 
 # In-source builds are disabled.
@@ -60,10 +60,9 @@ endif ()
 
 include(CheckCXXCompilerFlag)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(CMAKE_CXX_STANDARD 17)
-#set(CMAKE_CXX_FLAGS "/utf-8")
-#set(CMAKE_C_FLAGS "/utf-8")
-#set(CMAKE_C_COMPILER "gcc")
 
 if ("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     set(CMAKE_CXX_STANDARD 20)

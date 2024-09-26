@@ -53,6 +53,7 @@ add_subdirectory(glfw)
 #add_subdirectory(SDL)
 #add_subdirectory(glad)
 add_subdirectory(glm)
+add_subdirectory(fmt)
 add_subdirectory(yaml-cpp)
 add_subdirectory(spdlog)
 add_subdirectory(stb-cmake)
@@ -70,6 +71,7 @@ set(TINA_LIBRARIES
         glfw
         glm
         icu
+        fmt::fmt
         spdlog
         stb::image
         EnTT::EnTT
