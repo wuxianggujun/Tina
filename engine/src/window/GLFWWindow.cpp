@@ -4,9 +4,8 @@
 
 #include "GLFWWindow.hpp"
 
-#include <fmt/printf.h>
 
-#include "bgfx/platform.h"
+#include <fmt/printf.h>
 
 namespace Tina {
     GLFWWindow::GLFWWindow() : m_window(nullptr, GlfwWindowDeleter()) {
@@ -18,17 +17,28 @@ namespace Tina {
     }
 
     void GLFWWindow::create(WindowConfig config) {
-#if BX_PLATFORM_LINUX
-        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-        /*if (glfwPlatformSupported(GLFW_PLATFORM_WAYLAND))
-            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);*/
+#ifdef GLFW_EXPOSE_NATIVE_WIN32
+        if (glfwPlatformSupported(GLFW_PLATFORM_WIN32))
+            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WIN32);
+#elifdef  GLFW_EXPOSE_NATIVE_COCOA
+         if (glfwPlatformSupported(GLFW_PLATFORM_COCOA))
+            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_COCOA);
+#elifdef  GLFW_EXPOSE_NATIVE_X11
+         if (glfwPlatformSupported(GLFW_PLATFORM_X11))
+            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#elifdef TINA_CONFIG_USE_WAYLAND
+        if (glfwPlatformSupported(GLFW_PLATFORM_WAYLAND))
+            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);
 #endif
+
+        fmt::printf("GLFW version: %d.%d.%d\n", GLFW_VERSION_MAJOR, GLFW_VERSION_MINOR, GLFW_VERSION_REVISION);
+        fmt::printf("GLFW window creation on platform: {}\n", glfwGetPlatform());
+
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         m_window.reset(glfwCreateWindow(config.size.width, config.size.height, config.title, nullptr, nullptr));
-        if (!m_window) {
-            fmt::printf("GLFW window creation failed\n");
-        }
 
         bgfx::Init bgfxInit;
         bgfxInit.type = bgfx::RendererType::Count;
@@ -39,20 +49,11 @@ namespace Tina {
 
         bgfx::PlatformData pd;
         pd.context = glfwGetCurrentContext();
-#if defined(GLFW_EXPOSE_NATIVE_WAYLAND)
-        pd.nwh = glfwGetWaylandWindow(m_window.get());
-        pd.ndt = glfwGetWaylandDisplay();
-#elif defined(GLFW_EXPOSE_NATIVE_X11)
-        pd.nwh = (void *) (uintptr_t) glfwGetX11Window(m_window.get());
-        pd.ndt = glfwGetX11Display();
-#elif defined(GLFW_EXPOSE_NATIVE_WIN32)
-        pd.nwh = glfwGetWin32Window(m_window.get());
-#elif defined(GLFW_EXPOSE_NATIVE_COCOA)
-        pd.nwh = glfwGetCocoaWindow(m_window.get());
-#endif
-
+        pd.nwh = glfwNativeWindowHandle(m_window.get());
+        pd.ndt = getNativeDisplayHandle();
+        pd.type = getNativeWindowHandleType();
         bgfxInit.platformData = pd;
-        
+
         if (!bgfx::init(bgfxInit)) {
             fmt::printf("Bgfx initialization failed\n");
             return;
@@ -79,6 +80,70 @@ namespace Tina {
 
     void GLFWWindow::saveScreenShot(const std::string &fileName) {
         bgfx::requestScreenShot(BGFX_INVALID_HANDLE, fileName.c_str());
+    }
+
+    void *GLFWWindow::glfwNativeWindowHandle(GLFWwindow *window) {
+#ifdef TINA_PLATFORM_LINUX
+#ifdef TINA_CONFIG_USE_WAYLAND
+        auto *win_impl = static_cast<wl_egl_window *>(glfwGetWindowUserPointer(window));
+        if (!win_impl) {
+            Vector2i size;
+            glfwGetWindowSize(window, &size.width, &size.height);
+            auto *surface = glfwGetWaylandWindow(window);
+            if (!surface) {
+                return nullptr;
+            }
+            win_impl = wl_egl_window_create(surface, size.width, size.height);
+            glfwSetWindowUserPointer(window, reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(win_impl)));
+        }
+        return reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(win_impl));
+#else
+        return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(getWindowX11Window(window)));
+#endif
+#elif defined(TINA_PLATFORM_OSX)
+        return glfwGetCocoaWindow(window);
+#elif defined(TINA_PLATFORM_WINDOWS)
+        return glfwGetWin32Window(window);
+#endif
+    }
+
+    void *GLFWWindow::getNativeDisplayHandle() {
+#ifdef TINA_PLATFORM_LINUX
+#ifdef  TINA_CONFIG_USE_WAYLAND
+        return glfwGetWaylandDisplay();
+#		else
+        return glfwGetX11Display();
+#		endif
+#	else
+        return NULL;
+#	endif
+    }
+
+    bgfx::NativeWindowHandleType::Enum GLFWWindow::getNativeWindowHandleType() {
+#ifdef TINA_PLATFORM_LINUX
+#ifdef  TINA_CONFIG_USE_WAYLAND
+        return bgfx::NativeWindowHandleType::Wayland;
+#		else
+            return bgfx::NativeWindowHandleType::Default;
+#		endif
+#	else
+        return bgfx::NativeWindowHandleType::Default;
+#	endif
+    }
+
+    void GLFWWindow::glfwDestroyWindowImpl(GLFWwindow *window) {
+        if (!window)
+            return;
+#ifdef TINA_PLATFORM_LINUX
+#ifdef TINA_CONFIG_USE_WAYLAND
+        auto *win_impl = static_cast<wl_egl_window *>(glfwGetWindowUserPointer(window));
+        if (win_impl) {
+            glfwSetWindowUserPointer(window, nullptr);
+            wl_egl_window_destroy(win_impl);
+        }
+#endif
+#endif
+        glfwDestroyWindow(window);
     }
 
     void GLFWWindow::errorCallback(int error, const char *description) {

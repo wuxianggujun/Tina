@@ -9,16 +9,9 @@
 #include "Window.hpp"
 #include "core/Core.hpp"
 
+#define TINA_CONFIG_USE_WAYLAND
 // build for Linux
 #include "core/Platform.hpp"
-
-#if defined(TINA_PLATFORM_LINUX)
-#define GLFW_EXPOSE_NATIVE_X11
-#elif defined(TINA_PLATFORM_WINDOWS)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#elif defined(TINA_PLATFORM_OSX)
-#define GLFW_EXPOSE_NATIVE_COCOA
-#endif
 #include <GLFW/glfw3native.h>
 
 
@@ -27,9 +20,7 @@ namespace Tina {
     protected:
         struct GlfwWindowDeleter {
             void operator()(GLFWwindow *window) const {
-                if (window) {
-                    glfwDestroyWindow(window);
-                }
+                glfwDestroyWindowImpl(window);
             }
         };
 
@@ -48,11 +39,18 @@ namespace Tina {
 
         bool shouldClose() override;
 
-        static void saveScreenShot(const std::string& fileName);
+        static void saveScreenShot(const std::string &fileName);
 
         [[nodiscard]] GLFWwindow *getNativeWindow() const { return m_window.get(); }
 
     private:
+        static void *glfwNativeWindowHandle(GLFWwindow *window);
+
+        static void* getNativeDisplayHandle();
+
+        static bgfx::NativeWindowHandleType::Enum getNativeWindowHandleType();
+        static void glfwDestroyWindowImpl(GLFWwindow *window);
+
         static void errorCallback(int error, const char *description);
 
     private:

@@ -4,7 +4,7 @@
 #
 # ##############################################################################
 
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.20...3.28)
 project(Tina VERSION 0.0.1 LANGUAGES CXX)
 
 # In-source builds are disabled.
@@ -60,18 +60,24 @@ endif ()
 
 include(CheckCXXCompilerFlag)
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if ("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     set(CMAKE_CXX_STANDARD 20)
 endif ()
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    # cygwin gnu c++ needs to use -std=gnu++17 instead of -std=c++17
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall -O3") # ALL WARNINGS
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     set(CMAKE_CXX_EXTENSIONS OFF)
-endif ()
+    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} /MP")    # MULTICORE BUILDS
+    # Hide the console in release mode
+    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /ENTRY:mainCRTStartup")
+    endif ()
+endif()
 
 if (BUILD_SHARED_LIBS)
     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
@@ -93,6 +99,7 @@ if (MSVC)
     add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
     string(APPEND CMAKE_CXX_FLAGS " /Zc:__cplusplus /MP")
 endif ()
+
 
 # 必须重新加载cmake才会生效
 file(GLOB_RECURSE RESOURCE_FILES "${RESOURCE_DIR}/*")

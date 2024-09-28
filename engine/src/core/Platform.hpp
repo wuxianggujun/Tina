@@ -24,12 +24,14 @@
 #define TINA_PLATFORM_NAME "Unknown"
 #endif
 
+
 #if defined(TINA_PLATFORM_LINUX)
 #if defined(TINA_CONFIG_USE_WAYLAND)
-    #define GLFW_EXPOSE_NATIVE_WAYLAND
+#include <wayland-egl.h>
+#define GLFW_EXPOSE_NATIVE_WAYLAND
 #else
-    #define GLFW_EXPOSE_NATIVE_X11
-    #define GLFW_EXPOSE_NATIVE_GLX
+#define GLFW_EXPOSE_NATIVE_X11
+#define GLFW_EXPOSE_NATIVE_GLX
 #endif
 
 #elif defined(TINA_PLATFORM_OSX)
@@ -39,6 +41,5 @@
     #define GLFW_EXPOSE_NATIVE_WIN32
     #define GLFW_EXPOSE_NATIVE_WGL
 #endif
-
 
 #endif //TINA_CORE_PLATFORM_HPP

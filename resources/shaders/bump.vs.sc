@@ -1,7 +1,7 @@
 $input a_position,a_texcoord0
 $output v_texcoord0
 
-#include "./include/bgfx.sh"
+#include <bgfx_shader.sh>
 
 void main()
 {
