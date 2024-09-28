@@ -20,13 +20,13 @@ namespace Tina {
 #ifdef GLFW_EXPOSE_NATIVE_WIN32
         if (glfwPlatformSupported(GLFW_PLATFORM_WIN32))
             glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WIN32);
-#elifdef  GLFW_EXPOSE_NATIVE_COCOA
+#elif defined (GLFW_EXPOSE_NATIVE_COCOA)
          if (glfwPlatformSupported(GLFW_PLATFORM_COCOA))
             glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_COCOA);
-#elifdef  GLFW_EXPOSE_NATIVE_X11
+#elif   defined(GLFW_EXPOSE_NATIVE_X11)
          if (glfwPlatformSupported(GLFW_PLATFORM_X11))
             glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-#elifdef TINA_CONFIG_USE_WAYLAND
+#elif defined(TINA_CONFIG_USE_WAYLAND)
         if (glfwPlatformSupported(GLFW_PLATFORM_WAYLAND))
             glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);
 #endif

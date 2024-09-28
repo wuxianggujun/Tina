@@ -13,7 +13,7 @@ if (UNIX)
     #find_package(EGL QUIET REQUIRED)
 endif ()
 
-find_package(OpenGL REQUIRED COMPONENTS EGL)
+#find_package(OpenGL REQUIRED COMPONENTS EGL)
 #find_package(Wayland REQUIRED COMPONENTS Client Egl)
 
 add_shader_compile_dir(${CMAKE_SOURCE_DIR}/resources/shaders "bump")
