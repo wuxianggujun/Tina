@@ -4,8 +4,9 @@
 
 #include "GLFWWindow.hpp"
 
-
 #include <fmt/printf.h>
+
+#include "bgfx/platform.h"
 
 namespace Tina {
     GLFWWindow::GLFWWindow() : m_window(nullptr, GlfwWindowDeleter()) {
@@ -35,25 +36,23 @@ namespace Tina {
         fmt::printf("GLFW window creation on platform: {}\n", glfwGetPlatform());
 
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         m_window.reset(glfwCreateWindow(config.size.width, config.size.height, config.title, nullptr, nullptr));
 
         bgfx::Init bgfxInit;
-        bgfxInit.type = bgfx::RendererType::Count;
+        bgfxInit.type = bgfx::RendererType::Vulkan;
         bgfxInit.resolution.width = config.size.width;
         bgfxInit.resolution.height = config.size.height;
         bgfxInit.resolution.reset = BGFX_RESET_VSYNC;
         bgfxInit.callback = &m_bgfxCallback;
 
-        bgfx::PlatformData pd;
-        pd.context = glfwGetCurrentContext();
-        pd.nwh = glfwNativeWindowHandle(m_window.get());
-        pd.ndt = getNativeDisplayHandle();
-        pd.type = getNativeWindowHandleType();
-        bgfxInit.platformData = pd;
-
+        bgfxInit.platformData.context = glfwGetCurrentContext();
+        bgfxInit.platformData.nwh = glfwNativeWindowHandle(m_window.get());
+        bgfxInit.platformData.ndt = getNativeDisplayHandle();
+        bgfxInit.platformData.type = getNativeWindowHandleType();
+    
         if (!bgfx::init(bgfxInit)) {
             fmt::printf("Bgfx initialization failed\n");
             return;
