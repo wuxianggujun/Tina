@@ -1,12 +1,3 @@
-function(GROUP_FILES_BY_DIRECTORY FILE_LIST)
-    foreach(file IN LISTS ${FILE_LIST})
-    get_filename_component(file_Path "${file}" DIRECTORY)
-    string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/src" "" group_path "${file_path}")
-    string(REPLACE "/" "\\" group_name "${group_path}")
-    source_group("${group_name}" FILES "${file}")
-    endforeach()
-endfunction()
-
 function(add_subdirectory_checked dir)
     if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${dir}/CMakeLists.txt")
         message(FATAL_ERROR "Directory ${dir} does not exist or does not contain a CMakeLists.txt file.")
