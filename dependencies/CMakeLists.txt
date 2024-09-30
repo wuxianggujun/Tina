@@ -10,6 +10,11 @@ set(GLFW_BUILD_TESTS FALSE CACHE INTERNAL "")
 set(GLFW_BUILD_DOCS FALSE CACHE INTERNAL "")
 set(GLFW_INSTALL FALSE CACHE INTERNAL "")
 
+set(GLFW_BUILD_WAYLAND ON )
+#set(GLFW_USE_WAYLAND ON)
+#set(GLFW_BUILD_X11 OFF)
+
+
 # glm
 set(GLM_TEST_ENABLE OFF CACHE INTERNAL "")
 set(GLM_ENABLE_CXX_20 TRUE CACHE INTERNAL "")
@@ -21,6 +26,8 @@ set(BGFX_BUILD_TOOLS TRUE CACHE INTERNAL "")
 set(BGFX_BUILD_EXAMPLES TRUE CACHE INTERNAL "")
 set(BGFX_CUSTOM_TARGETS FALSE CACHE INTERNAL "")
 set(BGFX_BUILD_EXAMPLE_COMMON FALSE CACHE INTERNAL "")
+
+
 
 # googletest
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -71,7 +78,6 @@ set(TINA_LIBRARIES
         spdlog
         stb::image
         EnTT::EnTT
-        #SDL3::SDL3
         yaml-cpp::yaml-cpp
         Tracy::TracyClient
         ctrack

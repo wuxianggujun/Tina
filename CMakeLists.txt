@@ -6,6 +6,10 @@
 
 cmake_minimum_required(VERSION 3.20...3.28)
 project(Tina VERSION 0.0.1 LANGUAGES CXX)
+  
+if (POLICY CMP0127)
+    cmake_policy(SET CMP0127 NEW)
+endif()
 
 # In-source builds are disabled.
 if ("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_BINARY_DIR}")
@@ -30,6 +34,8 @@ option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "$
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_TESTING "Turn on Tina's Google Tests" ON)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
+option(WITH_WAYLAND "Build with Wayland support" ON)
+option(TINA_BUILD_WAYLAND "Build Wayland" ON)
 
 list(APPEND CMAKE_MODULE_PATH ${ROOT_DIR}/cmake)
 
@@ -83,6 +89,7 @@ if (BUILD_SHARED_LIBS)
     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 endif ()
 
+include(Tina)
 # Import the tool cmake script
 include(TinaTool)
 include(BgfxUtil)
