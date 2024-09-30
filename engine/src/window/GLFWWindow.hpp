@@ -9,6 +9,7 @@
 #include "Window.hpp"
 #include "core/Core.hpp"
 
+#define WL_EGL_PLATFORM 1 
 #define TINA_CONFIG_USE_WAYLAND
 // build for Linux
 #include "core/Platform.hpp"
