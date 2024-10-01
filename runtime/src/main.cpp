@@ -138,7 +138,6 @@ int main(int argc, char *argv[]) {
     if (!bgfx::init(init)) {
         return bx::kExitFailure;
     }
-    bgfx::setDebug(BGFX_DEBUG_NONE);
 
     bgfx::FrameBufferHandle frameBufferHandle = bgfx::createFrameBuffer(glfwNativeWindowHandle(m_window), m_width,
                                                                         m_height);
