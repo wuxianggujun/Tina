@@ -18,13 +18,14 @@ set(CMAKE_CXX_STANDARD 17)
 
 
 if (TINA_BUILD_WAYLAND)
-    add_definitions(-DGLFW_BUILD_WAYLAND=ON)
+#    add_definitions(-DGLFW_BUILD_WAYLAND=ON)
     add_definitions(-DGLFW_BUILD_X11=OFF)
     add_definitions(-DGLFW_USE_WAYLAND=ON)
     add_definitions(-DTINA_CONFIG_USE_WAYLAND=1)
+#    add_definitions(-DBGFX_WITH_WAYLAND=ON)
 
     # 定义宏 TINA_CONFIG_USE_WAYLAND
-#    add_definitions(-DTINA_CONFIG_USE_WAYLAND=ON)
+    #    add_definitions(-DTINA_CONFIG_USE_WAYLAND=ON)
 endif (TINA_BUILD_WAYLAND)
 
 
