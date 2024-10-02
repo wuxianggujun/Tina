@@ -1,8 +1,12 @@
+//#define WL_EGL_PLATFORM 1 
+// #define TINA_CONFIG_USE_WAYLAND 0
+
+#include <bx/bx.h>
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
-#include <bx/uint32_t.h>
-#include <bx/constants.h>
 #include <GLFW/glfw3.h>
+#include <bx/constants.h>
+#include <iostream>
 
 #if BX_PLATFORM_LINUX
 #	if TINA_CONFIG_USE_WAYLAND
@@ -18,27 +22,23 @@
 #elif BX_PLATFORM_WINDOWS
 #	define GLFW_EXPOSE_NATIVE_WIN32
 #	define GLFW_EXPOSE_NATIVE_WGL
-#endif //
+#endif 
 #include <GLFW/glfw3native.h>
-
-#include <iostream>
-
 
 static void *glfwNativeWindowHandle(GLFWwindow *_window) {
 #	if BX_PLATFORM_LINUX
-# 		if TINA_CONFIG_USE_WAYLAND
-        wl_egl_window* win_impl = (wl_egl_window*)glfwGetWindowUserPointer(_window);
-        if (!win_impl)
-        {
-            int width, height;
-            glfwGetWindowSize(_window, &width, &height);
-            struct wl_surface* surface = (struct wl_surface*)glfwGetWaylandWindow(_window);
-            if (!surface)
-                return nullptr;
-            win_impl = wl_egl_window_create(surface, width, height);
-            glfwSetWindowUserPointer(_window, (void*)(uintptr_t)win_impl);
-        }
-        return (void*)(uintptr_t)win_impl;
+    #if TINA_CONFIG_USE_WAYLAND
+    wl_egl_window *win_impl = (wl_egl_window *) glfwGetWindowUserPointer(_window);
+    if (!win_impl) {
+        int width, height;
+        glfwGetWindowSize(_window, &width, &height);
+        struct wl_surface *surface = (struct wl_surface *) glfwGetWaylandWindow(_window);
+        if (!surface)
+            return nullptr;
+        win_impl = wl_egl_window_create(surface, width, height);
+        glfwSetWindowUserPointer(_window, (void *) (uintptr_t) win_impl);
+    }
+    return (void *) (uintptr_t) win_impl;
 #		else
     return (void *) (uintptr_t) glfwGetX11Window(_window);
 #		endif
@@ -54,12 +54,11 @@ static void glfwDestroyWindowImpl(GLFWwindow *_window) {
         return;
 #	if BX_PLATFORM_LINUX
 #		if TINA_CONFIG_USE_WAYLAND
-        wl_egl_window* win_impl = (wl_egl_window*)glfwGetWindowUserPointer(_window);
-        if (win_impl)
-        {
-            glfwSetWindowUserPointer(_window, nullptr);
-            wl_egl_window_destroy(win_impl);
-        }
+    wl_egl_window *win_impl = (wl_egl_window *) glfwGetWindowUserPointer(_window);
+    if (win_impl) {
+        glfwSetWindowUserPointer(_window, nullptr);
+        wl_egl_window_destroy(win_impl);
+    }
 #		endif
 #	endif
     glfwDestroyWindow(_window);
@@ -74,7 +73,7 @@ static void errorCb(int _error, const char *_description) {
 void *getNativeDisplayHandle() {
 #	if BX_PLATFORM_LINUX
 #		if TINA_CONFIG_USE_WAYLAND
-        return glfwGetWaylandDisplay();
+    return glfwGetWaylandDisplay();
 #		else
     return glfwGetX11Display();
 #		endif // ENTRY_CONFIG_USE_WAYLAND
@@ -86,7 +85,7 @@ void *getNativeDisplayHandle() {
 bgfx::NativeWindowHandleType::Enum getNativeWindowHandleType() {
 #	if BX_PLATFORM_LINUX
 #		if TINA_CONFIG_USE_WAYLAND
-        return bgfx::NativeWindowHandleType::Wayland;
+    return bgfx::NativeWindowHandleType::Wayland;
 #		else
     return bgfx::NativeWindowHandleType::Default;
 #		endif // ENTRY_CONFIG_USE_WAYLAND
@@ -139,9 +138,6 @@ int main(int argc, char *argv[]) {
         return bx::kExitFailure;
     }
 
-    bgfx::FrameBufferHandle frameBufferHandle = bgfx::createFrameBuffer(glfwNativeWindowHandle(m_window), m_width,
-                                                                        m_height);
-    bgfx::setViewFrameBuffer(0, frameBufferHandle);
     bgfx::setViewRect(0, 0, 0, uint16_t(m_width), uint16_t(m_height));
     bgfx::setViewClear(0
                        , BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH
@@ -149,9 +145,11 @@ int main(int argc, char *argv[]) {
                        , 1.0f
                        , 0
     );
-    bgfx::touch(0);
+
 
     while (!glfwWindowShouldClose(m_window)) {
+        bgfx::touch(0);
+
         bgfx::frame();
         glfwPollEvents();
     }

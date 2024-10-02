@@ -4,10 +4,9 @@ set(GLFW_BUILD_TESTS FALSE CACHE INTERNAL "")
 set(GLFW_BUILD_DOCS FALSE CACHE INTERNAL "")
 set(GLFW_INSTALL FALSE CACHE INTERNAL "")
 
-#set(GLFW_BUILD_WAYLAND ON )
-#set(GLFW_USE_WAYLAND ON)
-#set(GLFW_BUILD_X11 OFF)
-
+    #set(GLFW_BUILD_WAYLAND ON)
+    #set(GLFW_USE_WAYLAND ON)
+    #set(GLFW_BUILD_X11 OFF)
 
 # bgfx
 set(BGFX_BUILD_TOOLS TRUE CACHE INTERNAL "")
@@ -16,9 +15,8 @@ set(BGFX_CUSTOM_TARGETS FALSE CACHE INTERNAL "")
 set(BGFX_BUILD_EXAMPLE_COMMON FALSE CACHE INTERNAL "")
 
 
-add_subdirectory_checked(bgfx.cmake)
-
-add_subdirectory_checked(glfw)
+add_subdirectory(bgfx.cmake)
+add_subdirectory(glfw)
 
 set(TINA_LIBRARIES
         bx

@@ -1,6 +1,0 @@
-function(add_subdirectory_checked dir)
-    if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${dir}/CMakeLists.txt")
-        message(FATAL_ERROR "Directory ${dir} does not exist or does not contain a CMakeLists.txt file.")
-    endif ()
-    add_subdirectory(${dir})
-endfunction()
