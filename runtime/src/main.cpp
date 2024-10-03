@@ -22,30 +22,21 @@
 #elif BX_PLATFORM_WINDOWS
 #	define GLFW_EXPOSE_NATIVE_WIN32
 #	define GLFW_EXPOSE_NATIVE_WGL
-#endif 
+#endif
 #include <GLFW/glfw3native.h>
 
 static void *glfwNativeWindowHandle(GLFWwindow *_window) {
 #	if BX_PLATFORM_LINUX
-    #if TINA_CONFIG_USE_WAYLAND
-    wl_egl_window *win_impl = (wl_egl_window *) glfwGetWindowUserPointer(_window);
-    if (!win_impl) {
-        int width, height;
-        glfwGetWindowSize(_window, &width, &height);
-        struct wl_surface *surface = (struct wl_surface *) glfwGetWaylandWindow(_window);
-        if (!surface)
-            return nullptr;
-        win_impl = wl_egl_window_create(surface, width, height);
-        glfwSetWindowUserPointer(_window, (void *) (uintptr_t) win_impl);
-    }
-    return (void *) (uintptr_t) win_impl;
+# 		if TINA_CONFIG_USE_WAYLAND
+    struct wl_surface *surface = (struct wl_surface *) glfwGetWaylandWindow(_window);
+    return (void *) surface;
 #		else
-    return (void *) (uintptr_t) glfwGetX11Window(_window);
+    return (void*)(uintptr_t)glfwGetX11Window(_window);
 #		endif
 #	elif BX_PLATFORM_OSX
-        return glfwGetCocoaWindow(_window);
+    return glfwGetCocoaWindow(_window);
 #	elif BX_PLATFORM_WINDOWS
-        return glfwGetWin32Window(_window);
+    return glfwGetWin32Window(_window);
 #	endif // BX_PLATFORM_
 }
 
