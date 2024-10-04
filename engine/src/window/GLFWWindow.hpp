@@ -5,12 +5,11 @@
 #ifndef TINA_WINDOW_GLFWWINDOW_HPP
 #define TINA_WINDOW_GLFWWINDOW_HPP
 
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include "Window.hpp"
 #include "core/Core.hpp"
 
-#define WL_EGL_PLATFORM 1 
-#define TINA_CONFIG_USE_WAYLAND
 // build for Linux
 #include "core/Platform.hpp"
 #include <GLFW/glfw3native.h>
@@ -21,7 +20,10 @@ namespace Tina {
     protected:
         struct GlfwWindowDeleter {
             void operator()(GLFWwindow *window) const {
-                glfwDestroyWindowImpl(window);
+                if (window)
+                {
+                    glfwDestroyWindow(window);
+                }
             }
         };
 
@@ -50,7 +52,6 @@ namespace Tina {
         static void* getNativeDisplayHandle();
 
         static bgfx::NativeWindowHandleType::Enum getNativeWindowHandleType();
-        static void glfwDestroyWindowImpl(GLFWwindow *window);
 
         static void errorCallback(int error, const char *description);
 

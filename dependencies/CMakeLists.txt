@@ -43,12 +43,11 @@ set(TINA_LIBRARIES
         bimg
         bimg_decode
         bgfx
-        glfw
+        glfw 
         glm
         fmt::fmt
         spdlog
         stb::image
         EnTT::EnTT
         yaml-cpp::yaml-cpp
-        Tracy::TracyClient
         CACHE INTERNAL "")

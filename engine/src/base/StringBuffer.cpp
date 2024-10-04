@@ -60,7 +60,7 @@ namespace Tina {
         }
     }
 
-    std::string StringBuffer::convertEncoding(const std::string &input, const char *toEncoding) const {
+    /*std::string StringBuffer::convertEncoding(const std::string &input, const char *toEncoding) const {
         UErrorCode status{U_ZERO_ERROR};
         auto *conv = ucnv_open("shift_jis", &status);
 
@@ -96,5 +96,5 @@ namespace Tina {
             }
         }
         return count;
-    }
+    }*/
 }

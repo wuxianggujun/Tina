@@ -15,20 +15,16 @@ GROUP_FILES_BY_DIRECTORY("ENGINE_FILES")
 
 add_dependencies(${SUBMODULE_PROJECT_NAME} shaders)
 
-add_definitions(
-        -DGLFW_INCLUDE_NONE
-)
-
 if (UNIX)
     set(UNIX_LIBS -ldl -lpthread)
     target_link_libraries(${SUBMODULE_PROJECT_NAME} PUBLIC ${UNIX_LIBS})
 endif ()
 
-if (WITH_WAYLAND)
-    #add_definitions(-DGLFW_BUILD_WAYLAND=OFF )
-    #add_definitions(-DGLFW_BUILD_X11=ON)
-    add_definitions(-DGLFW_USE_WAYLAND=ON)
+if (TINA_BUILD_WAYLAND)
+    add_definitions(-DGLFW_BUILD_WAYLAND=ON)
+    add_definitions(-DGLFW_BUILD_X11=OFF)
     add_definitions(-DWL_EGL_PLATFORM=1)
+    add_definitions(-DTINA_CONFIG_USE_WAYLAND=0)
 endif () 
  
 if (TINA_BUILD_WAYLAND)
