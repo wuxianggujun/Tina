@@ -1,6 +1,3 @@
-//#define WL_EGL_PLATFORM 1 
-// #define TINA_CONFIG_USE_WAYLAND 0
-
 #include <bx/bx.h>
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
