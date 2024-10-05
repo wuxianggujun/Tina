@@ -14,7 +14,6 @@
 #include "core/Platform.hpp"
 #include <GLFW/glfw3native.h>
 
-
 namespace Tina {
     class GLFWWindow : public Window {
     protected:

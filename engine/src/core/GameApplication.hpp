@@ -8,9 +8,8 @@
 #include "Core.hpp"
 #include "window/Window.hpp"
 #include "window/GLFWWindow.hpp"
-#include "window/InputHandler.hpp"
 #include "core/Renderer.hpp"
-#include "window/GLFWInput.hpp"
+#include "window/EventHandle.hpp"
 
 namespace Tina
 {
@@ -22,8 +21,8 @@ namespace Tina
 
     protected:
         ScopePtr<Window> window;
-        ScopePtr<InputHandler> inputHandler;
         ScopePtr<Renderer> renderer;
+        ScopePtr<EventHandle> eventHandler;
     };
 } // Tina
 

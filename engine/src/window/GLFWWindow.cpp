@@ -3,7 +3,6 @@
 //
 
 #include "GLFWWindow.hpp"
-
 #include <fmt/printf.h>
 
 namespace Tina {
@@ -23,7 +22,7 @@ namespace Tina {
          if (glfwPlatformSupported(GLFW_PLATFORM_COCOA))
             glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_COCOA);
 #elif  defined(GLFW_EXPOSE_NATIVE_X11)
-         if (glfwPlatformSupported(GLFW_PLATFORM_X11))
+        if (glfwPlatformSupported(GLFW_PLATFORM_X11))
             glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
 #elif defined(TINA_CONFIG_USE_WAYLAND)
         if (glfwPlatformSupported(GLFW_PLATFORM_WAYLAND))
@@ -90,6 +89,7 @@ namespace Tina {
 #elif TINA_PLATFORM_WINDOWS
         return glfwGetWin32Window(window);
 #endif
+        return nullptr;
     }
 
     void *GLFWWindow::getNativeDisplayHandle() {

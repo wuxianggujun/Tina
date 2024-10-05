@@ -24,7 +24,7 @@ if (TINA_BUILD_WAYLAND)
     add_definitions(-DGLFW_BUILD_WAYLAND=ON)
     add_definitions(-DGLFW_BUILD_X11=OFF)
     add_definitions(-DWL_EGL_PLATFORM=1)
-    add_definitions(-DTINA_CONFIG_USE_WAYLAND=0)
+#    add_definitions(-DTINA_CONFIG_USE_WAYLAND=0)
 endif () 
  
 if (TINA_BUILD_WAYLAND)
