@@ -1,5 +1,5 @@
-#ifndef TINA_WINDOW_EVENT_HANDLE_HPP
-#define TINA_WINDOW_EVENT_HANDLE_HPP
+#ifndef TINA_WINDOW_EVENT_HANDLER_HPP
+#define TINA_WINDOW_EVENT_HANDLER_HPP
 
 #include <memory>
 #include <mutex>
@@ -9,7 +9,7 @@
 #include "EventListenerList.hpp"
 
 namespace Tina {
-    class EventHandle {
+    class EventHandler {
     public:
         template<class T, class F>
         void addEventListener(F &&func) {
@@ -67,4 +67,4 @@ namespace Tina {
 }
 
 
-#endif // TINA_WINDOW_EVENT_HANDLE_HPP
+#endif // TINA_WINDOW_EVENT_HANDLER_HPP

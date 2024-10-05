@@ -5,10 +5,14 @@
 #ifndef TINA_WINDOW_HPP
 #define TINA_WINDOW_HPP
 
+#include "core/Core.hpp"
 #include "math/Vector.hpp"
 #include "graphics/BgfxCallback.hpp"
 
 namespace Tina {
+    
+    class EventHandler;
+    
     class Window {
     public:
         enum class WindowMode {
@@ -30,6 +34,8 @@ namespace Tina {
         virtual ~Window() = default;
 
         virtual void create(WindowConfig config) = 0;
+
+        virtual void setEventHandler(ScopePtr<EventHandler> callback){}
 
         virtual void destroy() = 0;
 

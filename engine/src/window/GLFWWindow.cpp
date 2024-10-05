@@ -5,6 +5,8 @@
 #include "GLFWWindow.hpp"
 #include <fmt/printf.h>
 
+#include "EventHandler.hpp"
+
 namespace Tina {
     GLFWWindow::GLFWWindow() : m_window(nullptr, GlfwWindowDeleter()) {
         glfwSetErrorCallback(errorCallback);
@@ -33,10 +35,12 @@ namespace Tina {
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+
+
         m_window.reset(glfwCreateWindow(config.size.width, config.size.height, config.title, nullptr, nullptr));
 
         bgfx::Init bgfxInit;
-        bgfxInit.type = bgfx::RendererType::Vulkan;
+        bgfxInit.type = bgfx::RendererType::Count;
         bgfxInit.vendorId = BGFX_PCI_ID_NONE;
         bgfxInit.resolution.width = config.size.width;
         bgfxInit.resolution.height = config.size.height;
@@ -52,8 +56,18 @@ namespace Tina {
             fmt::printf("Bgfx initialization failed\n");
             return;
         }
+
+        glfwSetWindowUserPointer(m_window.get(), this);
+
+        glfwSetKeyCallback(m_window.get(), keyboardCallback);
+
+
         //bgfx::setDebug(BGFX_DEBUG_NONE);
         bgfx::reset(config.size.width, config.size.height,BGFX_RESET_VSYNC);
+    }
+
+    void GLFWWindow::setEventHandler(ScopePtr<EventHandler> callback) {
+        m_eventHandle = std::move(callback);
     }
 
     void GLFWWindow::render() {
@@ -76,6 +90,15 @@ namespace Tina {
         bgfx::requestScreenShot(BGFX_INVALID_HANDLE, fileName.c_str());
     }
 
+    void GLFWWindow::keyboardCallback(GLFWwindow *window, int32_t _key, int32_t _scancode, int32_t _action,
+                                      int32_t _mods) {
+        const auto *self = static_cast<GLFWWindow *>(glfwGetWindowUserPointer(window));
+        if (self && self->m_eventHandle) {
+            KeyboardEvent event(_key, _scancode, _action, _mods);
+            self->m_eventHandle->emplaceEvent<KeyboardEvent>(event);
+        }
+    }
+
     void *GLFWWindow::glfwNativeWindowHandle(GLFWwindow *window) {
 #if TINA_PLATFORM_LINUX
         if (glfwGetPlatform() == GLFW_PLATFORM_WAYLAND) {
@@ -89,7 +112,6 @@ namespace Tina {
 #elif TINA_PLATFORM_WINDOWS
         return glfwGetWin32Window(window);
 #endif
-        return nullptr;
     }
 
     void *GLFWWindow::getNativeDisplayHandle() {

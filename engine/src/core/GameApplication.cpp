@@ -10,8 +10,9 @@ namespace Tina {
         Vector2i resolution = Vector2i(1280, 720);
 
         window = createScopePtr<GLFWWindow>();
+        eventHandler = createScopePtr<EventHandler>();
         window->create(Window::WindowConfig{"Tina", resolution, false, false, false});
-
+        window->setEventHandler(std::move(eventHandler));
         renderer = createScopePtr<Renderer>(resolution, 0);
 
         mainLoop();
@@ -19,7 +20,9 @@ namespace Tina {
 
     void GameApplication::mainLoop() const {
         while (window->shouldClose()) {
+            window->pollEvents();
             renderer->render();
+            eventHandler->processEvents();
         }
         renderer->shutdown();
         window->destroy();

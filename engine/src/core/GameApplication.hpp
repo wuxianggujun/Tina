@@ -9,10 +9,11 @@
 #include "window/Window.hpp"
 #include "window/GLFWWindow.hpp"
 #include "core/Renderer.hpp"
-#include "window/EventHandle.hpp"
+#include "window/EventHandler.hpp"
 
 namespace Tina
 {
+    
     class GameApplication
     {
     public:
@@ -22,7 +23,7 @@ namespace Tina
     protected:
         ScopePtr<Window> window;
         ScopePtr<Renderer> renderer;
-        ScopePtr<EventHandle> eventHandler;
+        ScopePtr<EventHandler> eventHandler;
     };
 } // Tina
 
