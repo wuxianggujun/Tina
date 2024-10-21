@@ -76,6 +76,7 @@ make
 - **[simple_engine](https://github.com/bikemurt/simple_engine)**
 - **[2019-ecs](https://code.austinmorlan.com/austin/2019-ecs)**
 - **[PainterEngine](https://github.com/matrixcascade/PainterEngine)**
+- **[ElvenEngine](https://github.com/denyskryvytskyi/ElvenEngine)**
 
 ## Acknowledgments
 

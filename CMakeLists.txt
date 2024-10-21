@@ -34,7 +34,7 @@ option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "$
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_TESTING "Turn on Tina's Google Tests" OFF)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
-option(TINA_BUILD_WAYLAND "Build Wayland" OFF)
+option(TINA_BUILD_WAYLAND "Build Wayland" ON)
 
 list(APPEND CMAKE_MODULE_PATH ${ROOT_DIR}/cmake)
 
