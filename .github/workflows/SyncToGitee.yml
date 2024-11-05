@@ -19,5 +19,6 @@ jobs:
         dst_token:  ${{ secrets.GITEE_TOKEN }}  # Gitee账户的私人令牌
         account_type: user  # 账户类型
         clone_style: "https"  # 使用https方式进行clone，也可以使用ssh
+        force_update: true  # 启用后，强制同步，即强制覆盖目的端仓库
         static_list: "Tina"
         debug: true  # 启用后会显示所有执行命令
