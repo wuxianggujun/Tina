@@ -23,12 +23,12 @@ namespace Tina {
 #elif defined (GLFW_EXPOSE_NATIVE_COCOA)
          if (glfwPlatformSupported(GLFW_PLATFORM_COCOA))
             glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_COCOA);
+#elif defined(GLFW_EXPOSE_NATIVE_WAYLAND)
+        if (glfwPlatformSupported(GLFW_PLATFORM_WAYLAND))
+            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);
 #elif  defined(GLFW_EXPOSE_NATIVE_X11)
         if (glfwPlatformSupported(GLFW_PLATFORM_X11))
             glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
-#elif defined(TINA_CONFIG_USE_WAYLAND)
-        if (glfwPlatformSupported(GLFW_PLATFORM_WAYLAND))
-            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);
 #endif
 
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
@@ -99,31 +99,26 @@ namespace Tina {
         }
     }
 
-    void *GLFWWindow::glfwNativeWindowHandle(GLFWwindow *window) {
-#if TINA_PLATFORM_LINUX
-        if (glfwGetPlatform() == GLFW_PLATFORM_WAYLAND) {
-            return glfwGetWaylandWindow(window);
+    void *GLFWWindow::glfwNativeWindowHandle(GLFWwindow *_window) {
+#	if TINA_PLATFORM_LINUX
+        if (GLFW_PLATFORM_WAYLAND == glfwGetPlatform()) {
+            return glfwGetWaylandWindow(_window);
         }
-        else  {
-            return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(getWindowX11Window(window)));
-        }
-#elif TINA_PLATFORM_OSX
-        return glfwGetCocoaWindow(window);
-#elif TINA_PLATFORM_WINDOWS
-        return glfwGetWin32Window(window);
-#endif
+        return reinterpret_cast<void *>(glfwGetX11Window(_window));
+#	elif TINA_PLATFORM_OSX
+        return glfwGetCocoaWindow(_window);
+#	elif TINA_PLATFORM_WINDOWS
+        return glfwGetWin32Window(_window);
+#	endif
     }
+
 
     void *GLFWWindow::getNativeDisplayHandle() {
 #if TINA_PLATFORM_LINUX
-        if (glfwGetPlatform() == GLFW_PLATFORM_WAYLAND)
-        {
+        if (GLFW_PLATFORM_WAYLAND == glfwGetPlatform()) {
             return glfwGetWaylandDisplay();
         }
-        else
-        {
-            return glfwGetX11Display();
-        }
+        return glfwGetX11Display();
 #	else
         return nullptr;
 #	endif
@@ -131,17 +126,11 @@ namespace Tina {
 
     bgfx::NativeWindowHandleType::Enum GLFWWindow::getNativeWindowHandleType() {
 #if TINA_PLATFORM_LINUX
-		if (glfwGetPlatform() == GLFW_PLATFORM_WAYLAND)
-        {
+        if (GLFW_PLATFORM_WAYLAND == glfwGetPlatform()) {
             return bgfx::NativeWindowHandleType::Wayland;
         }
-    else
-        {
-     return bgfx::NativeWindowHandleType::Default;
-     }
-#	else
+#endif
         return bgfx::NativeWindowHandleType::Default;
-#	endif
     }
 
 

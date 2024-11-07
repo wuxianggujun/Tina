@@ -23,31 +23,11 @@ endif ()
 if (TINA_BUILD_WAYLAND)
     add_definitions(-DGLFW_BUILD_WAYLAND=ON)
     add_definitions(-DGLFW_BUILD_X11=OFF)
-    add_definitions(-DWL_EGL_PLATFORM=1)
-#    add_definitions(-DTINA_CONFIG_USE_WAYLAND=0)
+    #add_definitions(-DTINA_CONFIG_USE_WAYLAND=0)
 endif () 
- 
+
 if (TINA_BUILD_WAYLAND)
-    include(FindPkgConfig)
-
-    pkg_check_modules(Wayland REQUIRED
-            wayland-client>=0.2.7
-            wayland-cursor>=0.2.7
-            wayland-egl>=0.2.7
-            xkbcommon>=0.5.0)
-
     target_include_directories(${SUBMODULE_PROJECT_NAME} PUBLIC ${Wayland_INCLUDE_DIRS})
-
-    if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        find_package(EpollShim)
-        if (EPOLLSHIM_FOUND)
-            target_include_directories(${SUBMODULE_PROJECT_NAME} PUBLIC ${EPOLLSHIM_INCLUDE_DIRS})
-            target_link_libraries(${SUBMODULE_PROJECT_NAME} public ${EPOLLSHIM_LIBRARIES})
-        endif()
-    endif()
-endif()
-
-if (TINA_BUILD_WAYLAND)
     target_link_libraries(${SUBMODULE_PROJECT_NAME} PUBLIC ${Wayland_LIBRARIES})
 endif()
 
