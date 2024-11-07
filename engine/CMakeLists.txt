@@ -26,10 +26,12 @@ if (TINA_BUILD_WAYLAND)
     #add_definitions(-DTINA_CONFIG_USE_WAYLAND=0)
 endif () 
 
+#[[
 if (TINA_BUILD_WAYLAND)
     target_include_directories(${SUBMODULE_PROJECT_NAME} PUBLIC ${Wayland_INCLUDE_DIRS})
     target_link_libraries(${SUBMODULE_PROJECT_NAME} PUBLIC ${Wayland_LIBRARIES})
 endif()
+]]
 
 target_link_libraries(${SUBMODULE_PROJECT_NAME} PUBLIC ${TINA_LIBRARIES})
 

@@ -22,7 +22,7 @@ namespace Tina {
         while (window->shouldClose()) {
             window->pollEvents();
             renderer->render();
-            eventHandler->processEvents();
+            //eventHandler->processEvents();
         }
         renderer->shutdown();
         window->destroy();
