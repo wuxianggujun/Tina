@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-laster
     steps:
 
     - name: Sync Github Repos To Gitee  # 名字随便起
@@ -17,7 +17,7 @@ jobs:
         dst: gitee/wuxianggujun  # 目的端账户名(gitee)
         dst_key: ${{ secrets.GITEE_PRIVATE_KEY }}
         dst_token: ${{ secrets.GITEE_TOKEN }}
-        static_list: 'MY_REPO'
+        static_list: 'Tina'
         account_type: user
         force_update: true
         timeout: 300
