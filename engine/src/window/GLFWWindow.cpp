@@ -8,6 +8,7 @@
 #include "EventHandler.hpp"
 
 namespace Tina {
+    
     GLFWWindow::GLFWWindow() : m_window(nullptr, GlfwWindowDeleter()) {
         glfwSetErrorCallback(errorCallback);
         if (!glfwInit()) {
@@ -60,9 +61,7 @@ namespace Tina {
         glfwSetWindowUserPointer(m_window.get(), this);
 
         glfwSetKeyCallback(m_window.get(), keyboardCallback);
-
-
-        //bgfx::setDebug(BGFX_DEBUG_NONE);
+        
         bgfx::reset(config.size.width, config.size.height,BGFX_RESET_VSYNC);
     }
 
