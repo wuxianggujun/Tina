@@ -82,7 +82,7 @@ namespace Tina {
     }
 
     bool GLFWWindow::shouldClose() {
-        return !glfwWindowShouldClose(m_window.get());
+        return glfwWindowShouldClose(m_window.get());
     }
 
     void GLFWWindow::saveScreenShot(const std::string &fileName) {
