@@ -66,7 +66,7 @@ namespace Tina {
     void GameApplication::render() {
         renderer->render();
         guiSystem->Render(registry);
-        // renderer->frame();
+        renderer->frame();
     }
 
     void GameApplication::createTestGui() {

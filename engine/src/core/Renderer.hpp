@@ -28,6 +28,7 @@ namespace Tina {
 
         void render();
 
+        void frame();
         void shutdown();
         
         // 获取分辨率

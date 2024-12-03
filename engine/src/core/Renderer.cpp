@@ -1,4 +1,4 @@
-#include "Renderer.hpp"
+ #include "Renderer.hpp"
 
 #include "bgfx/platform.h"
 #include "bx/math.h"
@@ -104,8 +104,7 @@ namespace Tina {
         bgfx::setTexture(0, s_texColor, m_textureColor);
 
         // Set render states.
-        bgfx::setState(0
-                       | BGFX_STATE_WRITE_RGB
+        bgfx::setState(BGFX_STATE_WRITE_RGB
                        | BGFX_STATE_WRITE_A
                        | BGFX_STATE_WRITE_Z
                        | BGFX_STATE_DEPTH_TEST_LESS
@@ -113,7 +112,9 @@ namespace Tina {
         );
         // Submit primitive for rendering to view 0.
         bgfx::submit(0, m_shader.getProgram());
-        
+    }
+
+    void Renderer::frame() {
         bgfx::frame();
     }
 
