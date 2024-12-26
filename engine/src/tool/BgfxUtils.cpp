@@ -35,7 +35,7 @@ namespace Tina::BgfxUtils {
             mem->data[mem->size - 1] = '\0';
             return mem;
         }
-        return NULL;
+        return nullptr;
     }
 
     static bgfx::ShaderHandle loadShader(bx::FileReaderI *_reader, const bx::StringView &_name) {
@@ -214,5 +214,12 @@ namespace Tina::BgfxUtils {
             }
         }
         return handle;
+    }
+
+    bgfx::ProgramHandle loadProgram(const char* _vsName, const char* _fsName) {
+        bx::FileReader reader;
+        bx::StringView vsName(_vsName);
+        bx::StringView fsName(_fsName);
+        return loadProgram(&reader, vsName, fsName);
     }
 }

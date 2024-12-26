@@ -64,8 +64,30 @@ namespace Tina {
     }
 
     void GameApplication::render() {
+        // 设置视口
+        bgfx::setViewClear(0,
+            BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+            0x303030ff, // 背景色
+            1.0f,  // 深度清除值
+            0      // 模板清除值
+        );
+        
+        // 设置视口大小
+        bgfx::setViewRect(0, 0, 0, 
+            static_cast<uint16_t>(1280), 
+            static_cast<uint16_t>( 720)
+        );
+        
+        // 确保每帧都触发
+        bgfx::touch(0);
+        
+        // 渲染3D场景
         renderer->render();
+        
+        // 渲染GUI
         guiSystem->Render(registry);
+        
+        // 提交帧
         renderer->frame();
     }
 
