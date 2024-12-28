@@ -49,8 +49,20 @@ namespace Tina {
     }
 
     void ResourceManager::unloadResource(const ResourceHandle &handle) {
-        const auto it = m_resources.find(handle);
-        if (it != m_resources.end()) {
+        if (const auto it = m_resources.find(handle); it != m_resources.end()) {
+            // 在这里添加特定资源类型的释放逻辑
+            if (it->second->getType() == ResourceType::Texture) {
+                auto textureResource = std::dynamic_pointer_cast<TextureResource>(it->second);
+                if (textureResource && textureResource->isLoaded()) {
+                    bgfx::destroy(textureResource->getTexture().getTextureHandle());
+                }
+            } else if (it->second->getType() == ResourceType::Shader) {
+                auto shaderResource = std::dynamic_pointer_cast<ShaderResource>(it->second);
+                if (shaderResource && shaderResource->isLoaded()) {
+                    bgfx::destroy(shaderResource->getShader().getProgram());
+                }
+            }
+
             it->second->unload();
             m_resources.erase(it);
         }
@@ -58,6 +70,18 @@ namespace Tina {
 
     void ResourceManager::unloadAllResources() {
         for (const auto &pair: m_resources) {
+            // 在这里添加特定资源类型的释放逻辑
+            if (pair.second->getType() == ResourceType::Texture) {
+                auto textureResource = std::dynamic_pointer_cast<TextureResource>(pair.second);
+                if (textureResource && textureResource->isLoaded()) {
+                    bgfx::destroy(textureResource->getTexture().getTextureHandle());
+                }
+            } else if (pair.second->getType() == ResourceType::Shader) {
+                auto shaderResource = std::dynamic_pointer_cast<ShaderResource>(pair.second);
+                if (shaderResource && shaderResource->isLoaded()) {
+                    bgfx::destroy(shaderResource->getShader().getProgram());
+                }
+            }
             pair.second->unload();
         }
         m_resources.clear();

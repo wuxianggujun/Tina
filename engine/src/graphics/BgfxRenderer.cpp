@@ -29,14 +29,14 @@ namespace Tina {
     void BgfxRenderer::shutdown() {
         m_vbh.free();
         m_ibh.free();
-        
+        // if (s_texColorHandle && s_texColorHandle->isValid())
+        //     s_texColorHandle->free();
         // 强制 BGFX 等待当前帧渲染完成
         bgfx::frame(true);
         
         m_resourceManager->unloadAllResources();
-        bgfx::shutdown();
     }
-
+ 
 
     void BgfxRenderer::render() {
         const bx::Vec3 at  = { 0.0f, 0.0f,   0.0f };

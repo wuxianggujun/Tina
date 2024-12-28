@@ -26,10 +26,12 @@ namespace Tina {
         this->m_handle = bgfx::createUniform(uniformName, type, num);
     }
 
-    void ShaderUniform::free() const {
-        if (bgfx::isValid(m_handle)) {
-            bgfx::destroy(m_handle);
+    void ShaderUniform::free() {
+        if (!bgfx::isValid(m_handle)) {
+           return;
         }
+        bgfx::destroy(m_handle);
+        m_handle.idx = bgfx::kInvalidHandle;
     }
 
     void ShaderUniform::setValue(float x, float y, float z, float w) const {

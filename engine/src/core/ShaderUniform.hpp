@@ -19,7 +19,7 @@ namespace Tina {
 
         void init(const char *uniformName, bgfx::UniformType::Enum type, uint16_t num = 1);
 
-        void free() const;
+        void free();
 
         void setValue(float x, float y = 0.f, float z = 0.f, float w = 0.f) const;
 

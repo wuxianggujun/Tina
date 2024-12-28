@@ -36,7 +36,7 @@ namespace Tina {
 
     void GameApplication::mainLoop() {
         while (!m_window->shouldClose()) {
-            float currentTime = static_cast<float>(glfwGetTime());
+            auto currentTime = static_cast<float>(glfwGetTime());
             float deltaTime = currentTime - lastFrameTime;
             lastFrameTime = currentTime;
 
@@ -45,8 +45,6 @@ namespace Tina {
 
             m_window->pollEvents();
         }
-        m_renderer->shutdown();
-        m_window->destroy();
     }
 
     void GameApplication::shutdown() {
