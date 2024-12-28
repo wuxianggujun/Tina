@@ -5,6 +5,7 @@
 #ifndef TINA_WINDOW_HPP
 #define TINA_WINDOW_HPP
 
+#include <string>
 #include "core/Core.hpp"
 #include "math/Vector.hpp"
 #include "graphics/BgfxCallback.hpp"

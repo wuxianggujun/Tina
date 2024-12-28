@@ -11,7 +11,10 @@
 #include "core/Renderer.hpp"
 #include "window/EventHandler.hpp"
 #include "gui/GuiSystem.hpp"
-#include <entt/entt.hpp>
+#include "window/IWindow.hpp"
+#include "IRenderer.hpp"
+#include "gui/IGuiSystem.hpp"
+#include "resource/ResourceManager.hpp"
 
 namespace Tina
 {
@@ -20,7 +23,8 @@ namespace Tina
     {
 
     public:
-        GameApplication();
+        GameApplication(ScopePtr<IWindow>&& window,ScopePtr<IRenderer>&& renderer, ScopePtr<IGuiSystem>&& guiSystem, ScopePtr<EventHandler>&& eventHandler);
+        
         ~GameApplication();
 
         void initialize();
@@ -31,11 +35,12 @@ namespace Tina
         void shutdown();
 
     protected:
-        ScopePtr<Window> window;
-        ScopePtr<GuiSystem> guiSystem;
-        ScopePtr<Renderer> renderer;
-        ScopePtr<EventHandler> eventHandler;
-        entt::registry registry;
+        ScopePtr<IWindow> m_window;
+        ScopePtr<IGuiSystem> m_guiSystem;
+        ScopePtr<IRenderer> m_renderer;
+        ScopePtr<EventHandler> m_eventHandler;
+        ScopePtr<ResourceManager> m_resourceManager;
+        entt::registry m_registry;
 
         float lastFrameTime{0.0f};
 

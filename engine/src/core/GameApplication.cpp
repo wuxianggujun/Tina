@@ -6,16 +6,18 @@
 #include "math/Vector.hpp"
 
 namespace Tina {
-    GameApplication::GameApplication() {
+    
+    GameApplication::GameApplication(ScopePtr<IWindow> &&window, ScopePtr<IRenderer> &&renderer,
+        ScopePtr<IGuiSystem> &&guiSystem, ScopePtr<EventHandler> &&eventHandler):
+        m_window(std::move(window)), m_renderer(std::move(renderer)), m_guiSystem(std::move(guiSystem)),
+        m_eventHandler(std::move(eventHandler)),m_resourceManager(createScopePtr<ResourceManager>()) {
         Vector2i resolution = Vector2i(1280, 720);
-        window = createScopePtr<GLFWWindow>();
-        guiSystem = createScopePtr<GuiSystem>();
-        eventHandler = createScopePtr<EventHandler>();
-        window->create(Window::WindowConfig{"Tina", resolution, false, false, false});
-        window->setEventHandler(std::move(eventHandler));
-        renderer = createScopePtr<Renderer>(resolution, 0);
+        IWindow::WindowConfig config("Tina", resolution, false, false, false);
+        m_window->create(config);
+        m_window->setEventHandler(std::move(m_eventHandler));
+        m_renderer->init(resolution);
 
-        guiSystem->Initialize(resolution.width, resolution.height);
+        m_guiSystem->initialize(resolution.width, resolution.height);
         lastFrameTime = static_cast<float>(glfwGetTime());
     }
 
@@ -33,7 +35,7 @@ namespace Tina {
     }
 
     void GameApplication::mainLoop() {
-        while (!window->shouldClose()) {
+        while (!m_window->shouldClose()) {
             float currentTime = static_cast<float>(glfwGetTime());
             float deltaTime = currentTime - lastFrameTime;
             lastFrameTime = currentTime;
@@ -41,26 +43,26 @@ namespace Tina {
             update(deltaTime);
             render();
 
-            window->pollEvents();
+            m_window->pollEvents();
         }
-        renderer->shutdown();
-        window->destroy();
+        m_renderer->shutdown();
+        m_window->destroy();
     }
 
     void GameApplication::shutdown() {
-        if (guiSystem) {
-            guiSystem->Shutdown();
+        if (m_guiSystem) {
+            m_guiSystem->shutdown();
         }
-        if (renderer) {
-            renderer->shutdown();
+        if (m_renderer) {
+            m_renderer->shutdown();
         }
-        if (window) {
-            window->destroy();
+        if (m_window) {
+            m_window->destroy();
         }
     }
 
     void GameApplication::update(float deltaTime) {
-        guiSystem->Update(registry,deltaTime);
+        m_guiSystem->update(m_registry,deltaTime);
     }
 
     void GameApplication::render() {
@@ -74,34 +76,34 @@ namespace Tina {
         
         // 设置视口大小
         bgfx::setViewRect(0, 0, 0, 
-            static_cast<uint16_t>(1280), 
-            static_cast<uint16_t>( 720)
+            1280, 
+            720
         );
         
         // 确保每帧都触发
         bgfx::touch(0);
         
         // 渲染3D场景
-        renderer->render();
-        
+        m_renderer->render();
+
         // 渲染GUI
-        guiSystem->Render(registry);
-        
+        m_guiSystem->render(m_registry);
+
         // 提交帧
-        renderer->frame();
+        m_renderer->frame();
     }
 
     void GameApplication::createTestGui() {
         // 创建测试GUI元素
-        auto buttonEntity = registry.create();
-        auto& button = registry.emplace<GuiComponent>(buttonEntity);
+        auto buttonEntity = m_registry.create();
+        auto& button = m_registry.emplace<GuiComponent>(buttonEntity);
         button.position = glm::vec2(100.0f, 100.0f);
         button.size = glm::vec2(200.0f, 50.0f);
         button.color = glm::vec4(0.2f, 0.6f, 1.0f, 1.0f);
         button.text = "Click Me!";
-        
-        auto panelEntity = registry.create();
-        auto& panel = registry.emplace<GuiComponent>(panelEntity);
+
+        auto panelEntity = m_registry.create();
+        auto& panel = m_registry.emplace<GuiComponent>(panelEntity);
         panel.position = glm::vec2(400.0f, 100.0f);
         panel.size = glm::vec2(300.0f, 200.0f);
         panel.color = glm::vec4(0.3f, 0.3f, 0.3f, 0.8f);
