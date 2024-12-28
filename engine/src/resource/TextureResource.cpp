@@ -6,21 +6,19 @@ namespace Tina {
     }
 
     TextureResource::~TextureResource() {
-        unload();
+        TextureResource::unload();
     }
 
     bool TextureResource::load() {
-        if (isLoaded()) {
-            return true;
+        if (!isLoaded()) {
+            m_texture = BgfxUtils::loadTexture(m_path.c_str()); 
         }
-
-        m_texture = BgfxUtils::loadTexture(m_path.c_str());
-        
+        return true;
     }
 
     void TextureResource::unload() {
         if (isLoaded()) {
-            bgfx::destroy(m_texture.getHandle());
+            bgfx::destroy(m_texture.getTextureHandle());
             m_texture = Texture();
         }
     }

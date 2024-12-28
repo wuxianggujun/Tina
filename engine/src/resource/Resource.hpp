@@ -16,13 +16,14 @@ namespace Tina {
         Resource(const ResourceHandle &handle, const std::string &path, ResourceType type);
 
         virtual ~Resource() = default;
-        
+
+        virtual bool load() = 0;
+        virtual void unload() = 0;
 
         [[nodiscard]] const ResourceHandle &getHandle() const;
         [[nodiscard]] const std::string &getPath() const;
         [[nodiscard]] ResourceType getType() const;
         [[nodiscard]] virtual bool isLoaded() const = 0;
-        
         
     protected:
         ResourceHandle m_handle;

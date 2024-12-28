@@ -17,7 +17,7 @@ namespace Tina {
         }
     }
 
-    void GLFWWindow::create(WindowConfig config) {
+    void GLFWWindow::create(const WindowConfig& config) {
 #if defined(GLFW_EXPOSE_NATIVE_WIN32)
         if (glfwPlatformSupported(GLFW_PLATFORM_WIN32))
             glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WIN32);
@@ -38,13 +38,13 @@ namespace Tina {
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
 
-        m_window.reset(glfwCreateWindow(config.size.width, config.size.height, config.title, nullptr, nullptr));
+        m_window.reset(glfwCreateWindow(config.resolution.width, config.resolution.height, config.title.c_str(), nullptr, nullptr));
 
         bgfx::Init bgfxInit;
         bgfxInit.type = bgfx::RendererType::Count;
         bgfxInit.vendorId = BGFX_PCI_ID_NONE;
-        bgfxInit.resolution.width = config.size.width;
-        bgfxInit.resolution.height = config.size.height;
+        bgfxInit.resolution.width = config.resolution.width;
+        bgfxInit.resolution.height = config.resolution.height;
         bgfxInit.resolution.reset = BGFX_RESET_VSYNC;
         bgfxInit.callback = &m_bgfxCallback;
 
@@ -62,17 +62,13 @@ namespace Tina {
 
         glfwSetKeyCallback(m_window.get(), keyboardCallback);
         
-        bgfx::reset(config.size.width, config.size.height,BGFX_RESET_VSYNC);
+        bgfx::reset(config.resolution.width, config.resolution.height,BGFX_RESET_VSYNC);
     }
 
-    void GLFWWindow::setEventHandler(ScopePtr<EventHandler> callback) {
-        m_eventHandle = std::move(callback);
+    void GLFWWindow::setEventHandler(ScopePtr<EventHandler> &&eventHandler) {
+        m_eventHandle = std::move(eventHandler);
     }
-
-    void GLFWWindow::render() {
-        // TODO: 以后尝试看一下以后是否可以用来绘制ui
-    }
-
+    
     void GLFWWindow::destroy() {
         m_window.reset();
     }

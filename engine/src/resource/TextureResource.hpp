@@ -5,8 +5,6 @@
 #include "graphics/Texture.hpp"
 
 namespace Tina {
-
-    class Texture;
     
     class TextureResource : public Resource {
     public:
@@ -19,6 +17,8 @@ namespace Tina {
         [[nodiscard]] bool isLoaded() const override;
         [[nodiscard]] const Texture& getTexture() const;
 
+        static constexpr ResourceType staticResourceType = ResourceType::Texture;
+        
     protected:
         Texture m_texture;
     };

@@ -87,3 +87,5 @@ cmake-build-debug
 cmake-build-release
 cmake-build-minSizeRel
 cmake-build-relWithDebInfo
+
+CMakeSettings.json

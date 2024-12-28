@@ -16,6 +16,7 @@ namespace Tina{
         bool isLoaded() const override;
         const Shader &getShader() const;
 
+        static constexpr ResourceType staticResourceType = ResourceType::Shader;
     private:
         Shader m_shader;
     };

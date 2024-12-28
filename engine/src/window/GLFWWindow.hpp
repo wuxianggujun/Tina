@@ -7,6 +7,7 @@
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+#include "IWindow.hpp"
 #include "Window.hpp"
 
 
@@ -25,7 +26,7 @@ namespace Tina {
         int mods;
     };
     
-    class GLFWWindow : public Window {
+    class GLFWWindow : public IWindow {
     protected:
         struct GlfwWindowDeleter {
             void operator()(GLFWwindow *window) const {
@@ -41,12 +42,10 @@ namespace Tina {
 
         ~GLFWWindow() override = default;
 
-        void create(WindowConfig config) override;
-
-        void setEventHandler(ScopePtr<EventHandler> callback) override;
+        void create(const WindowConfig& config) override;
         
-        void render() override;
-
+        void setEventHandler(ScopePtr<EventHandler> &&eventHandler) override;
+   
         void destroy() override;
 
         void pollEvents() override;
@@ -55,7 +54,7 @@ namespace Tina {
 
         static void saveScreenShot(const std::string &fileName);
 
-        [[nodiscard]] GLFWwindow *getNativeWindow() const { return m_window.get(); }
+        [[nodiscard]] void*getNativeWindow() const override { return m_window.get(); }
 
     private:
 
@@ -68,7 +67,7 @@ namespace Tina {
 
         static void errorCallback(int error, const char *description);
 
-    private:
+        BgfxCallback m_bgfxCallback;
         ScopePtr<EventHandler> m_eventHandle;
         ScopePtr<GLFWwindow, GlfwWindowDeleter> m_window;
     };

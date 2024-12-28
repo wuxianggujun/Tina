@@ -7,25 +7,30 @@
 namespace Tina {
     class ResourceHandle {
     public:
-        ResourceHandle(): m_id(0) {
-        }
+        ResourceHandle();
 
-        explicit ResourceHandle(uint64_t id): m_id(id) {
-        }
+        explicit ResourceHandle(uint64_t id);
 
-        explicit ResourceHandle(const std::string &path): m_id(std::hash<std::string>{}(path)) {
-        }
-
+        explicit ResourceHandle(const std::string &path);
+        
         [[nodiscard]] uint64_t getId() const;
         [[nodiscard]] bool isValid() const;
 
-        bool operator==(const ResourceHandle & other) const;
-        bool operator!=(const ResourceHandle & other) const;
-        // 用于std::map排序
-        bool operator<(const ResourceHandle & other) const;
-    
+        bool operator==(const ResourceHandle &other) const;
+        
     private:
         uint64_t m_id;
+    };
+}
+
+
+// 特化 std::hash
+namespace std {
+    template <>
+    struct hash<Tina::ResourceHandle> {
+        size_t operator()(const Tina::ResourceHandle& handle) const noexcept {
+            return handle.getId();
+        }
     };
 }
 #endif

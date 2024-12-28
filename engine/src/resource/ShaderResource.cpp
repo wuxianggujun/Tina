@@ -20,7 +20,15 @@ namespace Tina {
 
     void ShaderResource::unload() {
         if (isLoaded()) {
-            m_shader = Shader();
+            m_shader.destory();
         }
+    }
+
+    bool ShaderResource::isLoaded() const {
+        return m_shader.isValid();
+    }
+
+    const Shader & ShaderResource::getShader() const {
+        return m_shader;
     }
 }
