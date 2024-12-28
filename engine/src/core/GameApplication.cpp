@@ -26,7 +26,7 @@ namespace Tina {
     }
 
     void GameApplication::initialize() {
-        createTestGui();
+        // createTestGui();
     }
 
     void GameApplication::run() {
@@ -66,6 +66,7 @@ namespace Tina {
     }
 
     void GameApplication::render() {
+        bgfx::begin();
         // 设置视口
         bgfx::setViewClear(0,
             BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,

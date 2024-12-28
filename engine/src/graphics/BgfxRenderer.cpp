@@ -14,18 +14,6 @@ namespace Tina {
     void BgfxRenderer::init(Vector2i resolution) {
         m_resolution = resolution;
 
-        // 初始化Bgfx
-
-        bgfx::Init init;
-        init.platformData.nwh = m_window->getNativeWindow();
-        init.resolution.width = resolution.width;
-        init.resolution.height = resolution.height;
-        init.resolution.reset = BGFX_RESET_VSYNC;
-        if (!bgfx::init(init)) {
-            // 处理 BGFX 初始化失败的情况
-            return;
-        }
-
         m_vbh.getLayout().begin()
              .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
              .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Int16, true, true)
@@ -41,6 +29,10 @@ namespace Tina {
     void BgfxRenderer::shutdown() {
         m_vbh.free();
         m_ibh.free();
+        
+        // 强制 BGFX 等待当前帧渲染完成
+        bgfx::frame(true);
+        
         m_resourceManager->unloadAllResources();
         bgfx::shutdown();
     }

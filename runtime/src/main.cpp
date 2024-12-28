@@ -2,7 +2,7 @@
 
 using namespace Tina;
 
-int main(int argc, char* argv[]) {
+ int main(int argc, char* argv[]) {
     ParserYamlConfig config("../resources/config/textures.yaml");
     // 创建具体组件的实例
     ScopePtr<IWindow> window = Tina::createScopePtr<GLFWWindow>();

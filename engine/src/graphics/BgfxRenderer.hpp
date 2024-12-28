@@ -13,7 +13,7 @@ namespace Tina {
 
     class BgfxRenderer : public IRenderer{
     public:
-        BgfxRenderer(IWindow* window);
+        explicit BgfxRenderer(IWindow* window);
         ~BgfxRenderer() override;
 
         void init(Vector2i resolution) override;
