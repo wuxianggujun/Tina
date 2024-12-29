@@ -8,7 +8,6 @@
 #include "EventHandler.hpp"
 
 namespace Tina {
-    
     GLFWWindow::GLFWWindow() : m_window(nullptr, GlfwWindowDeleter()) {
         glfwSetErrorCallback(errorCallback);
         if (!glfwInit()) {
@@ -17,7 +16,7 @@ namespace Tina {
         }
     }
 
-    void GLFWWindow::create(const WindowConfig& config) {
+    void GLFWWindow::create(const WindowConfig &config) {
 #if defined(GLFW_EXPOSE_NATIVE_WIN32)
         if (glfwPlatformSupported(GLFW_PLATFORM_WIN32))
             glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WIN32);
@@ -36,15 +35,17 @@ namespace Tina {
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        
+        m_windowSize = config.resolution;
 
-
-        m_window.reset(glfwCreateWindow(config.resolution.width, config.resolution.height, config.title.c_str(), nullptr, nullptr));
+        m_window.reset(
+            glfwCreateWindow(m_windowSize.width, m_windowSize.height, config.title.c_str(), nullptr, nullptr));
 
         bgfx::Init bgfxInit;
         bgfxInit.type = bgfx::RendererType::Count;
         bgfxInit.vendorId = BGFX_PCI_ID_NONE;
-        bgfxInit.resolution.width = config.resolution.width;
-        bgfxInit.resolution.height = config.resolution.height;
+        bgfxInit.resolution.width = m_windowSize.width;
+        bgfxInit.resolution.height = m_windowSize.height;
         bgfxInit.resolution.reset = BGFX_RESET_VSYNC;
         bgfxInit.callback = &m_bgfxCallback;
 
@@ -59,17 +60,23 @@ namespace Tina {
         }
 
         glfwSetWindowUserPointer(m_window.get(), this);
-
+        glfwSetWindowSizeCallback(m_window.get(), windowSizeCallBack);
         glfwSetKeyCallback(m_window.get(), keyboardCallback);
-        
-        bgfx::reset(config.resolution.width, config.resolution.height,BGFX_RESET_VSYNC);
+
+        bgfx::reset(m_windowSize.width, m_windowSize.height,BGFX_RESET_VSYNC);
+
+        m_renderer = createScopePtr<BgfxRenderer>(this);
+        m_renderer->init(m_windowSize);
     }
 
     void GLFWWindow::setEventHandler(ScopePtr<EventHandler> &&eventHandler) {
         m_eventHandle = std::move(eventHandler);
     }
-    
+
     void GLFWWindow::destroy() {
+        if (m_renderer) {
+            m_renderer->shutdown();
+        }
         m_window.reset();
     }
 
@@ -83,6 +90,35 @@ namespace Tina {
 
     void GLFWWindow::saveScreenShot(const std::string &fileName) {
         bgfx::requestScreenShot(BGFX_INVALID_HANDLE, fileName.c_str());
+    }
+
+    void GLFWWindow::windowSizeCallBack(GLFWwindow *window, int width, int height) {
+        auto *self = static_cast<GLFWWindow *>(glfwGetWindowUserPointer(window));
+        if (self) {
+            self->m_windowSize.width = width;
+            self->m_windowSize.height = height;
+            bgfx::reset(width, height,BGFX_RESET_VSYNC);
+
+            if (self->m_renderer) {
+                self->m_renderer->resize(self->m_windowSize);
+            }
+        }
+    }
+
+    void GLFWWindow::render() {
+        if (m_renderer) {
+            m_renderer->render();
+        }
+    }
+
+    void GLFWWindow::frame() {
+        if (m_renderer) {
+            m_renderer->frame();
+        }
+    }
+
+    Vector2i GLFWWindow::getResolution() const {
+        return m_windowSize;
     }
 
     void GLFWWindow::keyboardCallback(GLFWwindow *window, int32_t _key, int32_t _scancode, int32_t _action,

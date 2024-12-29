@@ -15,14 +15,18 @@ namespace Tina {
             bool maximized{};
             bool vsync{};
         };
-
+        
         virtual ~IWindow() = default;
         virtual void create(const WindowConfig& config) = 0;
+        virtual void render() = 0;
+        virtual void frame() = 0;
         virtual void destroy() = 0;
         virtual void pollEvents() = 0;
         virtual bool shouldClose() = 0;
         virtual void setEventHandler(ScopePtr<EventHandler> &&eventHandler) = 0;
         [[nodiscard]] virtual void* getNativeWindow() const = 0;
+
+        [[nodiscard]] virtual Vector2i getResolution() const = 0;
     };
 }
 

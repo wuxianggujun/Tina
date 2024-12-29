@@ -7,16 +7,12 @@
 
 namespace Tina {
     
-    GameApplication::GameApplication(ScopePtr<IWindow> &&window, ScopePtr<IRenderer> &&renderer,
+    GameApplication::GameApplication(ScopePtr<IWindow> &&window,
         ScopePtr<IGuiSystem> &&guiSystem, ScopePtr<EventHandler> &&eventHandler):
-        m_window(std::move(window)), m_renderer(std::move(renderer)), m_guiSystem(std::move(guiSystem)),
+        m_window(std::move(window)), m_guiSystem(std::move(guiSystem)),
         m_eventHandler(std::move(eventHandler)),m_resourceManager(createScopePtr<ResourceManager>()) {
-        Vector2i resolution = Vector2i(1280, 720);
-        IWindow::WindowConfig config("Tina", resolution, false, false, false);
-        m_window->create(config);
+        Vector2i resolution = m_window->getResolution();
         m_window->setEventHandler(std::move(m_eventHandler));
-        m_renderer->init(resolution);
-
         m_guiSystem->initialize(resolution.width, resolution.height);
         lastFrameTime = static_cast<float>(glfwGetTime());
     }
@@ -27,6 +23,15 @@ namespace Tina {
 
     void GameApplication::initialize() {
         // createTestGui();
+        // 创建 WindowConfig
+        Tina::IWindow::WindowConfig config;
+        config.title = "Tina Engine";
+        config.resolution = {1280, 720};
+        config.resizable = true;
+        config.maximized = false;
+        config.vsync = true;
+
+        m_window->create(config);
     }
 
     void GameApplication::run() {
@@ -51,9 +56,6 @@ namespace Tina {
         if (m_guiSystem) {
             m_guiSystem->shutdown();
         }
-        if (m_renderer) {
-            m_renderer->shutdown();
-        }
         if (m_window) {
             m_window->destroy();
         }
@@ -64,6 +66,8 @@ namespace Tina {
     }
 
     void GameApplication::render() {
+        // 从 IWindow 获取分辨率
+        Vector2i resolution = m_window->getResolution();
         bgfx::begin();
         // 设置视口
         bgfx::setViewClear(0,
@@ -75,21 +79,22 @@ namespace Tina {
         
         // 设置视口大小
         bgfx::setViewRect(0, 0, 0, 
-            1280, 
-            720
+            resolution.width, 
+            resolution.height
         );
         
         // 确保每帧都触发
         bgfx::touch(0);
-        
-        // 渲染3D场景
-        m_renderer->render();
 
+        if (m_window) {
+            m_window->render();
+        }
         // 渲染GUI
         m_guiSystem->render(m_registry);
 
-        // 提交帧
-        m_renderer->frame();
+        if (m_window) {
+            m_window->frame(); // 添加一个 frame 接口在 IWindow 中
+        }
     }
 
     void GameApplication::createTestGui() {

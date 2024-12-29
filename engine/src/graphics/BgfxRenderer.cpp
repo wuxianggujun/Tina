@@ -85,6 +85,19 @@ namespace Tina {
         bgfx::frame();
     }
 
+    void BgfxRenderer::resize(Vector2i resolution) {
+        m_resolution = resolution;
+        bgfx::setViewRect(0, 0, 0, m_resolution.width, m_resolution.height);
+        // 更新投影矩阵，保持宽高比
+        constexpr bx::Vec3 at = {0.0f, 0.0f, 0.0f};
+        constexpr bx::Vec3 eye = {5.0f, 5.0f, -5.0f};
+        float view[16];
+        bx::mtxLookAt(view, eye, at);
+        float proj[16];
+        bx::mtxProj(proj, 60.0f, static_cast<float>(m_resolution.width) / static_cast<float>(m_resolution.height), 0.1f, 100.0f, bgfx::getCaps()->homogeneousDepth);
+        bgfx::setViewTransform(0, view, proj);
+    }
+
     Vector2i BgfxRenderer::getResolution() const {
         return m_resolution;
     }

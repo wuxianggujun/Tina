@@ -15,6 +15,8 @@
 #include "core/Platform.hpp"
 #include <GLFW/glfw3native.h>
 
+#include "graphics/BgfxRenderer.hpp"
+
 namespace Tina {
 
     class EventHandler;
@@ -56,6 +58,7 @@ namespace Tina {
 
         [[nodiscard]] void*getNativeWindow() const override { return m_window.get(); }
 
+ 
     private:
 
         static void keyboardCallback(GLFWwindow *window,int32_t _key, int32_t _scancode, int32_t _action, int32_t _mods);
@@ -66,9 +69,19 @@ namespace Tina {
         static bgfx::NativeWindowHandleType::Enum getNativeWindowHandleType();
 
         static void errorCallback(int error, const char *description);
+        static void windowSizeCallBack(GLFWwindow* window, int width, int height);
 
+    public:
+        void render() override;
+
+        void frame() override;
+        Vector2i getResolution() const override;
+
+    private:
+        Vector2i m_windowSize;
         BgfxCallback m_bgfxCallback;
         ScopePtr<EventHandler> m_eventHandle;
+        ScopePtr<BgfxRenderer> m_renderer;
         ScopePtr<GLFWwindow, GlfwWindowDeleter> m_window;
     };
 } // Tina

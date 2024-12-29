@@ -24,6 +24,8 @@ namespace Tina {
 
         void frame() override;
 
+        void resize(Vector2i resolution) override;
+
         [[nodiscard]] Vector2i getResolution() const override;
 
         void setTexture(uint8_t stage, const ShaderUniform &uniform, const ResourceHandle &textureHandle) override;

@@ -23,7 +23,7 @@ namespace Tina
     {
 
     public:
-        GameApplication(ScopePtr<IWindow>&& window,ScopePtr<IRenderer>&& renderer, ScopePtr<IGuiSystem>&& guiSystem, ScopePtr<EventHandler>&& eventHandler);
+        GameApplication(ScopePtr<IWindow>&& window, ScopePtr<IGuiSystem>&& guiSystem, ScopePtr<EventHandler>&& eventHandler);
         
         ~GameApplication();
 
@@ -37,7 +37,6 @@ namespace Tina
     protected:
         ScopePtr<IWindow> m_window;
         ScopePtr<IGuiSystem> m_guiSystem;
-        ScopePtr<IRenderer> m_renderer;
         ScopePtr<EventHandler> m_eventHandler;
         ScopePtr<ResourceManager> m_resourceManager;
         entt::registry m_registry;
