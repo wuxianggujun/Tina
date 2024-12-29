@@ -5,6 +5,7 @@
 #ifndef TINA_CORE_GAMEAPPLICATION_HPP
 #define TINA_CORE_GAMEAPPLICATION_HPP
 
+#include "CoreApplication.hpp"
 #include "Core.hpp"
 #include "window/Window.hpp"
 #include "window/GLFWWindow.hpp"
@@ -19,26 +20,20 @@
 namespace Tina
 {
     
-    class GameApplication
+    class GameApplication : public CoreApplication
     {
 
     public:
-        GameApplication(ScopePtr<IWindow>&& window, ScopePtr<IGuiSystem>&& guiSystem, ScopePtr<EventHandler>&& eventHandler);
+        explicit GameApplication(const Path &configFilePath);
         
-        ~GameApplication();
-
-        void initialize();
+        ~GameApplication() override;
         
-        void run();
+        void run() override;
         void mainLoop();
 
-        void shutdown();
-
     protected:
-        ScopePtr<IWindow> m_window;
-        ScopePtr<IGuiSystem> m_guiSystem;
-        ScopePtr<EventHandler> m_eventHandler;
-        ScopePtr<ResourceManager> m_resourceManager;
+        void initialize() override;
+        
         entt::registry m_registry;
 
         float lastFrameTime{0.0f};
@@ -46,7 +41,6 @@ namespace Tina
         void update(float deltaTime);
         void render();
         void createTestGui();
-        
     };
 } // Tina
 

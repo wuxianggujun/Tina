@@ -5,6 +5,7 @@
 #ifndef TINA_TINAENGINE_HPP
 #define TINA_TINAENGINE_HPP
 
+// #include "core/Logger.hpp"
 #include "window/GLFWWindow.hpp"
 #include "core/ParserYamlConfig.hpp"
 #include "core/GameApplication.hpp"
