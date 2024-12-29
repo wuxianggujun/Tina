@@ -6,46 +6,58 @@
 #ifndef TINA_FILESYSTEM_PATH_HPP
 #define TINA_FILESYSTEM_PATH_HPP
 
+#include "FileSystem.hpp"
 #include <string>
 
-namespace Tina
-{
-#if defined(WIN32) || defined(_WIN32)
-#define PATH_SEPARATOR '\\'
-#else
-#define PATH_SEPARATOR '/'
-#endif
-    
-    class InputStream;
-
-    class Path
-    {
+namespace Tina {
+    class Path {
     public:
-        explicit Path(const std::string& path = "");
-        Path(const Path& path);
+        explicit Path(const std::string &path = "");
+
+        explicit Path(const ghc::filesystem::path &path);
+
+        ~Path() = default;
+
+        //拷贝构造函数
+        Path(const Path &other);
+
+        Path(Path &&other) noexcept;
+
+        Path &operator=(const Path &other);
+
+        Path &operator=(Path &&other) noexcept;
+
 
         [[nodiscard]] Path getParentDirectory() const;
-        [[nodiscard]] std::string getPathUpToLastSlash() const;
 
 
-        [[nodiscard]] std::string getFullPath() const { return fullPath; }
+#ifdef GHC_OS_WINDOWS
+        [[nodiscard]] std::wstring toString() const;
+#else
+        [[nodiscard]] std::string toString() const;
+#endif
+
+        // 返回完整路径的字符串形式
+        [[nodiscard]] std::string getFullPath() const;
+        
+        [[nodiscard]] const ghc::filesystem::path &getPath() const;
 
         [[nodiscard]] std::string getFileName() const;
+
         [[nodiscard]] std::string getFileNameWithoutExtension() const;
+
         [[nodiscard]] std::string getExtension() const;
+
         [[nodiscard]] Path getChildFile(std::string relativePath) const;
-        Path getSiblingFile(const std::string& fileName) const;
-        [[nodiscard]] std::string addTrailingSeparator(const std::string& path) const;
 
-        static const char pathSeparator;
-        static const std::string pathSeparatorString;
+        Path getSiblingFile(const std::string &fileName) const;
 
-        InputStream* createInputStream() const;
         bool exists() const;
+
         bool isEmpty() const;
 
     private:
-        std::string fullPath;
+        ghc::filesystem::path m_path;
     };
 }
 
