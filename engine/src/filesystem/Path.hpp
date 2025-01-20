@@ -6,7 +6,7 @@
 #ifndef TINA_FILESYSTEM_PATH_HPP
 #define TINA_FILESYSTEM_PATH_HPP
 
-#include "FileSystem.hpp"
+
 #include <string>
 
 namespace Tina {
@@ -14,9 +14,7 @@ namespace Tina {
     public:
         explicit Path(const std::string &path);
 
-        explicit Path(const ghc::filesystem::path &path);
-
-        ~Path() = default;
+        ~Path();
 
         //拷贝构造函数
         Path(const Path &other);
@@ -30,17 +28,10 @@ namespace Tina {
 
         [[nodiscard]] Path getParentDirectory() const;
 
-
-#ifdef GHC_OS_WINDOWS
-        [[nodiscard]] std::wstring toString() const;
-#else
         [[nodiscard]] std::string toString() const;
-#endif
 
         // 返回完整路径的字符串形式
         [[nodiscard]] std::string getFullPath() const;
-        
-        [[nodiscard]] const ghc::filesystem::path &getPath() const;
 
         [[nodiscard]] std::string getFileName() const;
 
@@ -48,7 +39,7 @@ namespace Tina {
 
         [[nodiscard]] std::string getExtension() const;
 
-        [[nodiscard]] Path getChildFile(std::string relativePath) const;
+        [[nodiscard]] Path getChildFile(const std::string& relativePath) const;
 
         Path getSiblingFile(const std::string &fileName) const;
 
@@ -57,7 +48,8 @@ namespace Tina {
         bool isEmpty() const;
 
     private:
-        ghc::filesystem::path m_path;
+        class Impl; // 前向声明
+        Impl* m_impl{}; // 使用指针，避免包含 ghc/filesystem 头文件
     };
 }
 

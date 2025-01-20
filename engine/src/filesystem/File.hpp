@@ -21,8 +21,14 @@ namespace Tina
     class File : Closeable
     {
     public:
-        explicit File(const Path& filename, size_t mode = FileMode::Binary);
+        explicit File(Path  filename, size_t mode = FileMode::Binary);
         ~File() override;
+
+        File(const File&) = delete;
+        File& operator=(const File&) = delete;
+
+        File(File&& other) noexcept;
+        File& operator=(File&& other) noexcept;
 
         [[nodiscard]] bool read(std::string& data) const;
         [[nodiscard]] bool write(const std::string& data, bool append = false) const;

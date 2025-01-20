@@ -86,7 +86,7 @@ namespace Tina {
 
         // 显式类型转换
         explicit operator uint8_t() const noexcept { return data_; }
-        explicit operator int() const noexcept { return static_cast<int>(data_); }
+        explicit operator int() const noexcept { return data_; }
 
         // 类似于 std::byte 的 to_integer
         template<typename T>
@@ -94,12 +94,11 @@ namespace Tina {
             return static_cast<T>(data_);
         }
 
-        static constexpr Byte zero{0};
-
     private:
         uint8_t data_;
     };
 
+    // operator<< 重载被移到了类定义之外，但在命名空间内
     inline std::ostream &operator<<(std::ostream &os, const Byte &byte) {
         os << static_cast<int>(byte.data()); // 使用 data()
         return os;
