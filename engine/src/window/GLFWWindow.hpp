@@ -2,19 +2,18 @@
 // Created by wuxianggujun on 2024/7/12.
 //
 
-#ifndef TINA_WINDOW_GLFWWINDOW_HPP
-#define TINA_WINDOW_GLFWWINDOW_HPP
+#ifndef TINA_WINDOW_GLFW_HPP
+#define TINA_WINDOW_GLFW_HPP
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include "IWindow.hpp"
-#include "Window.hpp"
-
 
 // build for Linux
 #include "core/Platform.hpp"
 #include <GLFW/glfw3native.h>
 
+#include "graphics/BgfxCallback.hpp"
 #include "graphics/BgfxRenderer.hpp"
 
 namespace Tina {
@@ -86,4 +85,4 @@ namespace Tina {
     };
 } // Tina
 
-#endif //TINA_WINDOW_GLFWWINDOW_HPP
+#endif //TINA_WINDOW_GLFW_HPP

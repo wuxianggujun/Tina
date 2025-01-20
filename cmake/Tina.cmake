@@ -1,3 +1,4 @@
+#[[
 cmake_minimum_required(VERSION 3.20)
 
 function(add_shader_compile_dir SHADER_DIR)
@@ -124,4 +125,4 @@ function(add_shader_compile_dir SHADER_DIR)
     source_group(TREE "${SHADER_DIR}" PREFIX "Shader Files" FILES ${SHADER_SOURCE_LIST})
     target_sources(shaders PRIVATE ${SHADER_SOURCE_LIST})
 
-endfunction()
+endfunction()]]

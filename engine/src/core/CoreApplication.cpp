@@ -40,7 +40,7 @@ namespace Tina {
     }
 
     ScopePtr<IWindow> CoreApplication::createWindow(const IWindow::WindowConfig &config) {
-        ScopePtr<IWindow> window = createScopePtr<GLFWWindow>(config);
+        ScopePtr<IWindow> window = createScopePtr<GLFWWindow>();
         window->create(config);
         return window;
     }

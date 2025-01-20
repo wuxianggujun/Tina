@@ -4,6 +4,7 @@
 
 #ifndef TINA_FILESYSTEM_BYTE_HPP
 #define TINA_FILESYSTEM_BYTE_HPP
+
 #include <cstdint>
 #include <ostream>
 #include <type_traits>
@@ -89,7 +90,7 @@ namespace Tina {
 
         // 类似于 std::byte 的 to_integer
         template<typename T>
-        [[nodiscard]] constexpr std::enable_if_t<std::is_integral<T>::value, T> to_integer() const noexcept {
+        [[nodiscard]] constexpr std::enable_if_t<std::is_integral_v<T>, T> to_integer() const noexcept {
             return static_cast<T>(data_);
         }
 

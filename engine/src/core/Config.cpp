@@ -1,11 +1,13 @@
 #include "Config.hpp"
 
+#include <fstream>
+
 namespace Tina {
     void Config::loadFromFile(const std::string &filePath) {
           YAML::Node root = YAML::LoadFile(filePath);
 
         for (YAML::const_iterator it = root.begin(); it != root.end(); ++it) {
-            const std::string key = it->first.as<std::string>();
+            const auto key = it->first.as<std::string>();
             const YAML::Node& valueNode = it->second;
 
             if (valueNode.IsScalar()) {
@@ -37,7 +39,7 @@ namespace Tina {
                 std::vector<std::any> sequence;
                 for (YAML::const_iterator seqIt = valueNode.begin(); seqIt != valueNode.end(); ++seqIt) {
                     // 简单处理，都当作字符串
-                    sequence.push_back(seqIt->as<std::string>());
+                    sequence.emplace_back(seqIt->as<std::string>());
                 }
                 m_data[key] = sequence;
             } else if (valueNode.IsMap()) {
@@ -45,7 +47,7 @@ namespace Tina {
                 // 这里需要根据你的需求来决定如何存储字典
                 // 例如，你可以将字典存储为 std::unordered_map<std::string, std::any>
                 std::unordered_map<std::string, std::any> map;
-                for (YAML::const_iterator mapIt = valueNode.begin(); mapIt != valueNode.end(); ++mapIt) {
+                for (auto mapIt = valueNode.begin(); mapIt != valueNode.end(); ++mapIt) {
                     map[mapIt->first.as<std::string>()] = mapIt->second.as<std::string>();
                 }
                 m_data[key] = map;

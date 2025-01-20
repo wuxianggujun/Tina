@@ -4,7 +4,7 @@
 #
 # ##############################################################################
 
-cmake_minimum_required(VERSION 3.20...3.28)
+cmake_minimum_required(VERSION 3.20...3.30)
 project(Tina VERSION 0.0.1 LANGUAGES CXX)
 
 
@@ -87,7 +87,7 @@ if (BUILD_SHARED_LIBS)
     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 endif ()
 
-include(Tina)
+#include(Tina)
 # Import the tool cmake script
 include(TinaTool)
 include(BgfxUtil)
@@ -99,7 +99,7 @@ if (TINA_AUTOUPDATE_SUBMODULE)
     include(UpdateSubmodules)
 endif ()
 
-if (MSVC)
+if (MSVC) 
     add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
     add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
     string(APPEND CMAKE_CXX_FLAGS " /Zc:__cplusplus /MP")

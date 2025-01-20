@@ -12,7 +12,7 @@
 namespace Tina {
     class Path {
     public:
-        explicit Path(const std::string &path = "");
+        explicit Path(const std::string &path);
 
         explicit Path(const ghc::filesystem::path &path);
 
