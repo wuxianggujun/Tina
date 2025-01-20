@@ -1,4 +1,5 @@
 #include "File.hpp"
+// #define NOMINMAX
 #include "FileSystem.hpp"
 #include <iostream>
 #include <utility>

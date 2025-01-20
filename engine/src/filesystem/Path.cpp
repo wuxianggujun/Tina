@@ -3,6 +3,7 @@
 //
 
 #include "Path.hpp"
+// #define NOMINMAX
 #include "FileSystem.hpp"
 
 #include <algorithm>
