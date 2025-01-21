@@ -1,18 +1,21 @@
 application:
-  run-mode: debug
-  window:
-    title: "My Game"
-    width: 800
-    height: 600
-    icon: "icon.png"
-  graphics:
-    antialiasing: true
-    vsync: true
-    fullscreen: false
-    resolution: 1.0
-    shaders: true
-    postprocessing: true
-    shadows: true
+  name: "My Game"
+  run-mode: debug  # 可选: debug, release, profile
+window:
+  title: "My Game"
+  width: 800
+  height: 600
+  icon: "icon.png"
+graphics:
+  antialiasing-enabled: true
+  vsync-enabled: true
+  fullscreen-enabled: false
+  resolution-scale: 1.0
+  shaders-enabled: true
+  postprocessing-enabled: true
+  shadows-enabled: true
+network:
+  timeout: 5000  # 示例：在 loadConfig 中设置的值
 resources:
   textures:
     player: "player.png"

@@ -2,114 +2,95 @@
 
 #include <fstream>
 
-namespace Tina {
-    void Config::loadFromFile(const std::string &filePath) {
-          YAML::Node root = YAML::LoadFile(filePath);
+namespace Tina
+{
+    void Config::loadFromFile(const std::string& filePath)
+    {
+        try
+        {
+            m_data.clear();
 
-        for (YAML::const_iterator it = root.begin(); it != root.end(); ++it) {
-            const auto key = it->first.as<std::string>();
-            const YAML::Node& valueNode = it->second;
+            YamlValue parseData = YamlParser::parseFile(filePath);
 
-            if (valueNode.IsScalar()) {
-                // 简单标量类型 (int, float, bool, string)
-                if (valueNode.Tag() == "!") {
-                    // YAML 特殊类型处理，如 !!int, !!float, !!bool, !!str
-                    // 这里可以根据需要添加更详细的类型处理
-                    m_data[key] = valueNode.as<std::string>();
-                } else {
-                    // 尝试自动推断类型
-                    try {
-                        m_data[key] = valueNode.as<bool>();
-                    } catch (...) {
-                        try {
-                            m_data[key] = valueNode.as<int>();
-                        } catch (...) {
-                            try {
-                                m_data[key] = valueNode.as<double>();
-                            } catch (...) {
-                                m_data[key] = valueNode.as<std::string>();
-                            }
-                        }
-                    }
-                }
-            } else if (valueNode.IsSequence()) {
-                // 序列 (数组) 类型
-                // 这里需要根据你的需求来决定如何存储数组
-                // 例如，你可以将数组存储为 std::vector<std::any>
-                std::vector<std::any> sequence;
-                for (YAML::const_iterator seqIt = valueNode.begin(); seqIt != valueNode.end(); ++seqIt) {
-                    // 简单处理，都当作字符串
-                    sequence.emplace_back(seqIt->as<std::string>());
-                }
-                m_data[key] = sequence;
-            } else if (valueNode.IsMap()) {
-                // 映射 (字典) 类型
-                // 这里需要根据你的需求来决定如何存储字典
-                // 例如，你可以将字典存储为 std::unordered_map<std::string, std::any>
-                std::unordered_map<std::string, std::any> map;
-                for (auto mapIt = valueNode.begin(); mapIt != valueNode.end(); ++mapIt) {
-                    map[mapIt->first.as<std::string>()] = mapIt->second.as<std::string>();
-                }
-                m_data[key] = map;
+            if (std::holds_alternative<std::unordered_map<std::string, YamlValuePtr>>(parseData.data))
+            {
+                m_data = std::get<std::unordered_map<std::string, YamlValuePtr>>(parseData.data);
+            }
+            else
+            {
+                throw std::runtime_error("Load YAML data is not a map");
             }
         }
+        catch (const std::runtime_error& e)
+        {
+            throw std::runtime_error("Error loading config from " + filePath + ": " + e.what());
+        }
     }
 
-
-     void Config::saveToFile(const std::string& filePath) {
-        YAML::Emitter out; // 创建 YAML::Emitter 对象
-        out << YAML::BeginMap; // 开始写入 YAML 映射
-
-        for (const auto& pair : m_data) {
-            const std::string& key = pair.first;
-            const std::any& value = pair.second;
-
-            if (value.type() == typeid(int)) {
-                out << YAML::Key << key << YAML::Value << std::any_cast<int>(value);
-            } else if (value.type() == typeid(double)) {
-                out << YAML::Key << key << YAML::Value << std::any_cast<double>(value);
-            } else if (value.type() == typeid(bool)) {
-                out << YAML::Key << key << YAML::Value << std::any_cast<bool>(value);
-            } else if (value.type() == typeid(std::string)) {
-                out << YAML::Key << key << YAML::Value << std::any_cast<std::string>(value);
-            } else if (value.type() == typeid(std::vector<std::any>)) {
-                const auto& vec = std::any_cast<std::vector<std::any>>(value);
-                out << YAML::Key << key << YAML::Value << YAML::BeginSeq; // 开始写入 YAML 序列
-                for (const auto& item : vec) {
-                    if (item.type() == typeid(std::string)) {
-                        out << std::any_cast<std::string>(item);
-                    }
-                }
-                out << YAML::EndSeq; // 结束写入 YAML 序列
-            } else if (value.type() == typeid(std::unordered_map<std::string, std::any>)) {
-                const auto& map = std::any_cast<std::unordered_map<std::string, std::any>>(value);
-                out << YAML::Key << key << YAML::Value << YAML::BeginMap; // 开始写入 YAML 映射
-                for (const auto& mapPair : map) {
-                    if (mapPair.second.type() == typeid(std::string)) {
-                        out << YAML::Key << mapPair.first << YAML::Value << std::any_cast<std::string>(mapPair.second);
-                    }
-                }
-                out << YAML::EndMap; // 结束写入 YAML 映射
+    void Config::saveToFile(const std::string& filePath) const
+    {
+        try
+        {
+            YamlValue dataToSerialize(m_data);
+            std::string yamlString = YamlParser::stringify(dataToSerialize);
+            std::ofstream file(filePath);
+            if (file.is_open())
+            {
+                file << yamlString;
+                file.close();
+            }
+            else
+            {
+                throw std::runtime_error("Could not open file for writing: " + filePath);
             }
         }
-
-        out << YAML::EndMap; // 结束写入 YAML 映射
-
-        // 将 Emitter 的内容写入文件
-        std::ofstream fout(filePath);
-        if (fout.is_open()) {
-            fout << out.c_str(); // 使用 out.c_str() 获取生成的 YAML 字符串
-            fout.close();
-        } else {
-            // 文件打开失败处理
-            // 可以抛出异常或者记录日志
+        catch (const std::runtime_error& e)
+        {
+            throw std::runtime_error("Error saving config to " + filePath + ": " + e.what());
         }
     }
 
-    
-    bool Config::contains(const std::string& key) const {
-        return m_data.contains(key);
+    bool Config::contains(const std::string& key) const
+    {
+        std::vector<std::string> keys;
+        size_t start = 0;
+        size_t end = key.find('.');
+        while (end != std::string::npos) {
+            keys.push_back(key.substr(start, end - start));
+            start = end + 1;
+            end = key.find('.', start);
+        }
+        keys.push_back(key.substr(start));
+
+        const std::unordered_map<std::string, YamlValuePtr>* currentMap = &m_data;
+        for (size_t i = 0; i < keys.size() - 1; ++i) {
+            auto it = currentMap->find(keys[i]);
+            if (it == currentMap->end() || !std::holds_alternative<std::unordered_map<std::string, YamlValuePtr>>(it->second->data)) {
+                return false;
+            }
+            currentMap = &std::get<std::unordered_map<std::string, YamlValuePtr>>(it->second->data);
+        }
+
+        return currentMap->contains(keys.back());
     }
 
-    
+
+    void Config::setNested(const std::vector<std::string>& keys, const YamlValue& value)
+    {
+        std::unordered_map<std::string, YamlValuePtr>* currentMap = &m_data;
+        for (size_t i = 0; i < keys.size() - 1; ++i)
+        {
+            auto& key = keys[i];
+            if (!currentMap->contains(key) || !std::holds_alternative<std::unordered_map<std::string, YamlValuePtr>>(
+                (*currentMap)[key]->data))
+            {
+                (*currentMap)[key] = std::make_shared<YamlValue>(YamlValue{
+                    std::unordered_map<std::string, YamlValuePtr>()
+                });
+            }
+            currentMap = &std::get<std::unordered_map<std::string, YamlValuePtr>>((*currentMap)[key]->data);
+        }
+        (*currentMap)[keys.back()] = std::make_shared<YamlValue>(value);
+    }
+
 }
