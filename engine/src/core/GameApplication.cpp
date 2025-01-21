@@ -5,26 +5,49 @@
 #include "GameApplication.hpp"
 #include "math/Vector.hpp"
 
-namespace Tina {
-    GameApplication::GameApplication(const Path &configFilePath): CoreApplication(configFilePath) {
+namespace Tina
+{
+    GameApplication::GameApplication(const Path& configFilePath): CoreApplication(configFilePath)
+    {
         m_eventHandler = CoreApplication::createEventHandler();
         m_resourceManager = createScopePtr<ResourceManager>();
     }
 
     GameApplication::~GameApplication() = default;
 
-    void GameApplication::initialize() {
+    void GameApplication::initialize()
+    {
         // 创建 WindowConfig
         IWindow::WindowConfig windowConfig;
         // 从配置文件中读取窗口配置
-        // 假设你的 Config 类提供了获取窗口配置的方法
-        windowConfig.title = "Tina Engine";          // 可以换成类似于 m_config->getWindowConfig().title
-        windowConfig.resolution.width = 1280;   // m_config->getWindowConfig().resolution.width;
-        windowConfig.resolution.height = 720;   // m_config->getWindowConfig().resolution.height;
-        windowConfig.resizable = true;          // m_config->getWindowConfig().resizable;
-        windowConfig.maximized = false;         // m_config->getWindowConfig().maximized;
-        windowConfig.vsync = true;              // m_config->getWindowConfig().vsync;
-
+        if (m_config->contains("window"))
+        {
+            try
+            {
+                windowConfig.title = m_config->get<std::string>("window.title");
+                windowConfig.resolution.width = m_config->get<int>("window.width");
+                windowConfig.resolution.height = m_config->get<int>("window.height");
+                windowConfig.resizable = m_config->get<bool>("window.resizable");
+                windowConfig.maximized = m_config->get<bool>("window.maximized"); // 从graphics读取
+                windowConfig.vsync = m_config->get<bool>("window.vsync-enabled");
+            }
+            catch (const std::runtime_error& e)
+            {
+                std::cerr << "Error reading window configuration: " << e.what() << std::endl;
+                // 可以选择使用默认值或抛出异常
+                throw;
+            }
+        }else
+        {
+            std::cerr << "Warning: 'window' configuration not found. Using default values." << std::endl;
+            // 使用默认值
+            windowConfig.title = "Tina Engine";
+            windowConfig.resolution.width = 1280;
+            windowConfig.resolution.height = 720;
+            windowConfig.resizable = true;
+            windowConfig.maximized = false;
+            windowConfig.vsync = true;
+        }
         m_window = createWindow(windowConfig);
         m_window->setEventHandler(std::move(m_eventHandler));
 
@@ -32,13 +55,16 @@ namespace Tina {
         m_guiSystem->initialize(windowConfig.resolution.width, windowConfig.resolution.height);
     }
 
-    void GameApplication::run() {
+    void GameApplication::run()
+    {
         initialize();
         mainLoop();
     }
 
-    void GameApplication::mainLoop() {
-        while (!m_window->shouldClose()) {
+    void GameApplication::mainLoop()
+    {
+        while (!m_window->shouldClose())
+        {
             const auto currentTime = static_cast<float>(glfwGetTime());
             const float deltaTime = currentTime - lastFrameTime;
             lastFrameTime = currentTime;
@@ -49,16 +75,18 @@ namespace Tina {
             m_window->pollEvents();
         }
     }
-    
 
-    void GameApplication::update(float deltaTime) {
+
+    void GameApplication::update(float deltaTime)
+    {
         m_guiSystem->update(m_registry, deltaTime);
     }
 
-    void GameApplication::render() {
+    void GameApplication::render()
+    {
         // 从 IWindow 获取分辨率
         const Vector2i resolution = m_window->getResolution();
-        
+
         bgfx::begin();
         // 设置视口
         bgfx::setViewClear(0,
@@ -77,28 +105,31 @@ namespace Tina {
         // 确保每帧都触发
         bgfx::touch(0);
 
-        if (m_window) {
+        if (m_window)
+        {
             m_window->render();
         }
         // 渲染GUI
         m_guiSystem->render(m_registry);
 
-        if (m_window) {
+        if (m_window)
+        {
             m_window->frame(); // 添加一个 frame 接口在 IWindow 中
         }
     }
 
-    void GameApplication::createTestGui() {
+    void GameApplication::createTestGui()
+    {
         // 创建测试GUI元素
         auto buttonEntity = m_registry.create();
-        auto &button = m_registry.emplace<GuiComponent>(buttonEntity);
+        auto& button = m_registry.emplace<GuiComponent>(buttonEntity);
         button.position = glm::vec2(100.0f, 100.0f);
         button.size = glm::vec2(200.0f, 50.0f);
         button.color = glm::vec4(0.2f, 0.6f, 1.0f, 1.0f);
         button.text = "Click Me!";
 
         auto panelEntity = m_registry.create();
-        auto &panel = m_registry.emplace<GuiComponent>(panelEntity);
+        auto& panel = m_registry.emplace<GuiComponent>(panelEntity);
         panel.position = glm::vec2(400.0f, 100.0f);
         panel.size = glm::vec2(300.0f, 200.0f);
         panel.color = glm::vec4(0.3f, 0.3f, 0.3f, 0.8f);

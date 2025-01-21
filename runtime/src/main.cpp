@@ -4,7 +4,7 @@ using namespace Tina;
 
 int main(int argc, char *argv[]) {
     try {
-        Path configFilePath("../resources/config/textures.yaml");
+        Path configFilePath("../resources/config/settings.yaml");
         ScopePtr<GameApplication> app = createScopePtr<GameApplication>(configFilePath);
         app->run();
     } catch (const std::exception &e) {
