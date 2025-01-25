@@ -3,9 +3,7 @@
 // https://github.com/pocoproject/poco/blob/1eebd46c0487356fc3c89991ddc160ab97a6f001/Foundation/include/Poco/Path.h
 //
 
-#ifndef TINA_FILESYSTEM_PATH_HPP
-#define TINA_FILESYSTEM_PATH_HPP
-
+#pragma once
 
 #include <string>
 
@@ -52,6 +50,3 @@ namespace Tina {
         Impl* m_impl{}; // 使用指针，避免包含 ghc/filesystem 头文件
     };
 }
-
-
-#endif //TINA_FILESYSTEM_PATH_HPP

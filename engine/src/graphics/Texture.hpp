@@ -1,27 +1,33 @@
-#ifndef TINA_CORE_GRAPHICS_TEXTURE_HPP
-#define TINA_CORE_GRAPHICS_TEXTURE_HPP
+#pragma once
 
 #include <bgfx/bgfx.h>
+#include <string>
 
 namespace Tina {
+    using TextureHandle = bgfx::TextureHandle;
+
     class Texture {
     public:
         Texture();
-        explicit Texture(bgfx::TextureHandle handle);
-        ~Texture() = default;
+        explicit Texture(const TextureHandle& handle);
+        ~Texture();
 
-        void setTexture(bgfx::TextureHandle handle);
-        bgfx::TextureHandle getTextureHandle() const;
+        void setHandle(const TextureHandle& handle);
+        TextureHandle getHandle() const;
+        bool isValid() const;
 
-        [[nodiscard]] bool isValid() const;
+        static TextureHandle loadFromFile(const std::string& filename);
+        static TextureHandle loadFromMemory(const void* data, uint32_t size);
 
-        Texture&operator=(const Texture &other);
-        Texture&operator=(bgfx::TextureHandle handle) noexcept;
-        
+        Texture& operator=(const Texture& other);
+        Texture& operator=(const TextureHandle& handle);
+
     private:
-        bgfx::TextureHandle m_handle;
+        TextureHandle m_handle;
     };
+
+    // 全局函数用于加载纹理
+    inline TextureHandle loadTexture(const char* filename) {
+        return Texture::loadFromFile(std::string(filename));
+    }
 }
-
-
-#endif

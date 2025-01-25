@@ -2,45 +2,40 @@
 // Created by wuxianggujun on 2024/7/12.
 //
 
-#ifndef TINA_CORE_GAME_APPLICATION_HPP
-#define TINA_CORE_GAME_APPLICATION_HPP
+#pragma once
 
-#include "CoreApplication.hpp"
-#include "Core.hpp"
-#include "window/GLFWWindow.hpp"
-#include "core/Renderer.hpp"
-#include "window/EventHandler.hpp"
-#include "gui/GuiSystem.hpp"
+#include <memory>
 #include "window/IWindow.hpp"
-#include "IRenderer.hpp"
-#include "gui/IGuiSystem.hpp"
-#include "resource/ResourceManager.hpp"
+#include "gui/GuiSystem.hpp"
+#include "graphics/Renderer2D.hpp"
+#include "graphics/Texture.hpp"
+#include "math/Vector.hpp"
+#include "filesystem/Path.hpp"
 
 namespace Tina
 {
-    
-    class GameApplication : public CoreApplication
+    class GameApplication
     {
-
     public:
-        explicit GameApplication(const Path &configFilePath);
-        
-        ~GameApplication() override;
-        
-        void run() override;
+        GameApplication();
+        explicit GameApplication(const Path& configPath);
+        virtual ~GameApplication();
+
+        void initialize();
+        void run();
         void mainLoop();
-
-    protected:
-        void initialize() override;
-        
-        entt::registry m_registry;
-
-        float lastFrameTime{0.0f};
-
         void update(float deltaTime);
         void render();
-        void createTestGui();
+        void shutdown();
+
+    protected:
+        std::unique_ptr<IWindow> m_window;
+        std::unique_ptr<GuiSystem> m_guiSystem;
+        std::unique_ptr<Renderer2D> m_renderer2D;
+        TextureHandle m_logoTexture;
+        float m_lastFrameTime{0.0f};
+        Path m_configPath;
+
+        GuiSystem* createGuiSystem();
     };
 } // Tina
-
-#endif //TINA_CORE_GAME_APPLICATION_HPP

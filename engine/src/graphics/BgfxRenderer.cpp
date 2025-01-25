@@ -105,7 +105,7 @@ namespace Tina {
     void BgfxRenderer::setTexture(uint8_t stage, const ShaderUniform &uniform, const ResourceHandle &textureHandle) {
         auto textureResource = m_resourceManager->getResource<TextureResource>(textureHandle);
         if (textureResource && textureResource->isLoaded()) {
-            bgfx::setTexture(stage, uniform.getHandle(), textureResource->getTexture().getTextureHandle());
+            bgfx::setTexture(stage, uniform.getHandle(), textureResource->getTexture().getHandle());
         }
     }
 

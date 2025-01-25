@@ -2,13 +2,26 @@
 // Created by wuxianggujun on 2024/4/27.
 //
 
-#ifndef TINA_TINA_ENGINE_HPP
-#define TINA_TINA_ENGINE_HPP
+#pragma once
 
-// #include "core/Logger.hpp"
-#include "window/GLFWWindow.hpp"
+// Core
+#include "core/Core.hpp"
 #include "core/GameApplication.hpp"
-#include "gui/BgfxGuiSystem.hpp"
-#include "graphics/BgfxRenderer.hpp"
 
-#endif //TINA_TINA_ENGINE_HPP
+// Filesystem
+#include "filesystem/Path.hpp"
+
+// Graphics
+#include "graphics/Renderer2D.hpp"
+#include "graphics/Color.hpp"
+#include "graphics/Texture.hpp"
+
+// Window
+#include "window/IWindow.hpp"
+#include "window/GLFWWindow.hpp"
+
+// GUI
+#include "gui/GuiSystem.hpp"
+
+// Math
+#include "math/Vector.hpp"

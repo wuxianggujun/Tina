@@ -92,4 +92,12 @@ namespace Tina {
 
     template RefPtr<TextureResource> ResourceManager::getResource<TextureResource>(const ResourceHandle& handle);
     template RefPtr<ShaderResource> ResourceManager::getResource<ShaderResource>(const ResourceHandle& handle);
+
+    TextureHandle ResourceManager::getTextureHandle(const std::string& name) const {
+        auto it = m_textures.find(name);
+        if (it != m_textures.end()) {
+            return it->second->getHandle();
+        }
+        return BGFX_INVALID_HANDLE;
+    }
 }

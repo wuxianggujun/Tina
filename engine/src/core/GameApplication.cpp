@@ -4,55 +4,53 @@
 
 #include "GameApplication.hpp"
 #include "math/Vector.hpp"
+#include "graphics/Renderer2D.hpp"
+#include "graphics/Color.hpp"
+#include "window/GLFWWindow.hpp"
 
 namespace Tina
 {
-    GameApplication::GameApplication(const Path& configFilePath): CoreApplication(configFilePath)
+    GameApplication::GameApplication() : m_lastFrameTime(0.0f), m_configPath("")
     {
-        m_eventHandler = CoreApplication::createEventHandler();
-        m_resourceManager = createScopePtr<ResourceManager>();
     }
 
-    GameApplication::~GameApplication() = default;
+    GameApplication::GameApplication(const Path& configPath)
+        : m_lastFrameTime(0.0f)
+        , m_configPath(configPath)
+    {
+    }
+
+    GameApplication::~GameApplication()
+    {
+        shutdown();
+    }
 
     void GameApplication::initialize()
     {
-        // 创建 WindowConfig
+        // 创建窗口配置
         IWindow::WindowConfig windowConfig;
-        // 从配置文件中读取窗口配置
-        if (m_config->contains("window"))
-        {
-            try
-            {
-                windowConfig.title = m_config->get<std::string>("window.title");
-                windowConfig.resolution.width = m_config->get<int>("window.width");
-                windowConfig.resolution.height = m_config->get<int>("window.height");
-                windowConfig.resizable = m_config->get<bool>("window.resizable");
-                windowConfig.maximized = m_config->get<bool>("window.maximized"); // 从graphics读取
-                windowConfig.vsync = m_config->get<bool>("window.vsync-enabled");
-            }
-            catch (const std::runtime_error& e)
-            {
-                std::cerr << "Error reading window configuration: " << e.what() << std::endl;
-                // 可以选择使用默认值或抛出异常
-                throw;
-            }
-        }else
-        {
-            std::cerr << "Warning: 'window' configuration not found. Using default values." << std::endl;
-            // 使用默认值
-            windowConfig.title = "Tina Engine";
-            windowConfig.resolution.width = 1280;
-            windowConfig.resolution.height = 720;
-            windowConfig.resizable = true;
-            windowConfig.maximized = false;
-            windowConfig.vsync = true;
-        }
-        m_window = createWindow(windowConfig);
-        m_window->setEventHandler(std::move(m_eventHandler));
+        windowConfig.title = "Tina Engine";
+        windowConfig.resolution.width = 1280;
+        windowConfig.resolution.height = 720;
+        windowConfig.resizable = true;
+        windowConfig.maximized = false;
+        windowConfig.vsync = true;
 
-        m_guiSystem = createGuiSystem();
-        m_guiSystem->initialize(windowConfig.resolution.width, windowConfig.resolution.height);
+        // 如果有配置文件，从配置文件读取配置
+        if (m_configPath.exists())
+        {
+            // TODO: 从配置文件读取配置
+        }
+
+        // 创建窗口
+        m_window = std::make_unique<GLFWWindow>();
+        m_window->create(windowConfig);
+
+        // 创建GUI系统
+        m_guiSystem = std::make_unique<GuiSystem>();
+
+        // 创建2D渲染器
+        m_renderer2D = std::make_unique<Renderer2D>();
     }
 
     void GameApplication::run()
@@ -63,11 +61,11 @@ namespace Tina
 
     void GameApplication::mainLoop()
     {
-        while (!m_window->shouldClose())
+        while (m_window && !m_window->shouldClose())
         {
-            const auto currentTime = static_cast<float>(glfwGetTime());
-            const float deltaTime = currentTime - lastFrameTime;
-            lastFrameTime = currentTime;
+            float currentTime = static_cast<float>(glfwGetTime());
+            float deltaTime = currentTime - m_lastFrameTime;
+            m_lastFrameTime = currentTime;
 
             update(deltaTime);
             render();
@@ -76,62 +74,49 @@ namespace Tina
         }
     }
 
-
     void GameApplication::update(float deltaTime)
     {
-        m_guiSystem->update(m_registry, deltaTime);
+        if (m_guiSystem)
+        {
+            // m_guiSystem->update(deltaTime);
+        }
     }
 
     void GameApplication::render()
     {
-        // 从 IWindow 获取分辨率
-        const Vector2i resolution = m_window->getResolution();
-
-        bgfx::begin();
-        // 设置视口
-        bgfx::setViewClear(0,
-                           BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                           0x303030ff, // 背景色
-                           1.0f, // 深度清除值
-                           0 // 模板清除值
-        );
-
-        // 设置视口大小
-        bgfx::setViewRect(0, 0, 0,
-                          resolution.width,
-                          resolution.height
-        );
-
-        // 确保每帧都触发
-        bgfx::touch(0);
-
         if (m_window)
         {
             m_window->render();
         }
-        // 渲染GUI
-        m_guiSystem->render(m_registry);
 
-        if (m_window)
+        if (m_renderer2D)
         {
-            m_window->frame(); // 添加一个 frame 接口在 IWindow 中
+            m_renderer2D->begin();
+            // 在这里添加2D渲染代码
+            m_renderer2D->end();
+        }
+
+        if (m_guiSystem)
+        {
+            // m_guiSystem->render();
         }
     }
 
-    void GameApplication::createTestGui()
+    void GameApplication::shutdown()
     {
-        // 创建测试GUI元素
-        auto buttonEntity = m_registry.create();
-        auto& button = m_registry.emplace<GuiComponent>(buttonEntity);
-        button.position = glm::vec2(100.0f, 100.0f);
-        button.size = glm::vec2(200.0f, 50.0f);
-        button.color = glm::vec4(0.2f, 0.6f, 1.0f, 1.0f);
-        button.text = "Click Me!";
+        if (m_renderer2D)
+        {
+            m_renderer2D.reset();
+        }
 
-        auto panelEntity = m_registry.create();
-        auto& panel = m_registry.emplace<GuiComponent>(panelEntity);
-        panel.position = glm::vec2(400.0f, 100.0f);
-        panel.size = glm::vec2(300.0f, 200.0f);
-        panel.color = glm::vec4(0.3f, 0.3f, 0.3f, 0.8f);
+        if (m_guiSystem)
+        {
+            m_guiSystem.reset();
+        }
+
+        if (m_window)
+        {
+            m_window.reset();
+        }
     }
 } // Tina

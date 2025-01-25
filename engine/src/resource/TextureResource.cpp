@@ -30,4 +30,8 @@ namespace Tina {
     const Texture & TextureResource::getTexture() const {
         return m_texture;
     }
+
+    TextureHandle TextureResource::getHandle() const {
+        return m_texture.getHandle();
+    }
 }
