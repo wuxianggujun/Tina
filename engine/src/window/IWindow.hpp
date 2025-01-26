@@ -1,33 +1,33 @@
-#ifndef TINA_CORE_IWINDOW_HPP
-#define TINA_CORE_IWINDOW_HPP
+#pragma once
 
-#include <string>
 #include "EventHandler.hpp"
 #include "math/Vector.hpp"
+#include "core/Core.hpp"
 
 namespace Tina {
     class IWindow {
     public:
         struct WindowConfig {
-            std::string title{};
-            Vector2i resolution{};
-            bool resizable{};
-            bool maximized{};
-            bool vsync{};
+            std::string title;
+            Vector2i resolution;
+            bool resizable{false};
+            bool maximized{false};
+            bool vsync{true};
         };
-        
+
         virtual ~IWindow() = default;
+
+        // 窗口管理
         virtual void create(const WindowConfig& config) = 0;
-        virtual void render() = 0;
-        virtual void frame() = 0;
         virtual void destroy() = 0;
         virtual void pollEvents() = 0;
         virtual bool shouldClose() = 0;
-        virtual void setEventHandler(ScopePtr<EventHandler> &&eventHandler) = 0;
+        
+        // 窗口属性
         [[nodiscard]] virtual void* getNativeWindow() const = 0;
-
         [[nodiscard]] virtual Vector2i getResolution() const = 0;
-    };
-}
 
-#endif
+        // 事件处理
+        virtual void setEventHandler(ScopePtr<EventHandler>&& eventHandler) = 0;
+    };
+} // Tina

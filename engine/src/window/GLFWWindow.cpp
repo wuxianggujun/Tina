@@ -63,10 +63,7 @@ namespace Tina {
         glfwSetWindowSizeCallback(m_window.get(), windowSizeCallBack);
         glfwSetKeyCallback(m_window.get(), keyboardCallback);
 
-        bgfx::reset(m_windowSize.width, m_windowSize.height,BGFX_RESET_VSYNC);
-
-        m_renderer = createScopePtr<BgfxRenderer>(this);
-        m_renderer->init(m_windowSize);
+        bgfx::reset(m_windowSize.width, m_windowSize.height, BGFX_RESET_VSYNC);
     }
 
     void GLFWWindow::setEventHandler(ScopePtr<EventHandler> &&eventHandler) {
@@ -74,10 +71,9 @@ namespace Tina {
     }
 
     void GLFWWindow::destroy() {
-        if (m_renderer) {
-            m_renderer->shutdown();
-        }
+        bgfx::shutdown();
         m_window.reset();
+        glfwTerminate();
     }
 
     void GLFWWindow::pollEvents() {
@@ -97,35 +93,15 @@ namespace Tina {
         if (self) {
             self->m_windowSize.width = width;
             self->m_windowSize.height = height;
-            bgfx::reset(width, height,BGFX_RESET_VSYNC);
-
-            if (self->m_renderer) {
-                self->m_renderer->resize(self->m_windowSize);
-            }
+            bgfx::reset(width, height, BGFX_RESET_VSYNC);
         }
     }
 
-    void GLFWWindow::render() {
-        if (m_renderer) {
-            m_renderer->render();
-        }
-    }
-
-    void GLFWWindow::frame() {
-        if (m_renderer) {
-            m_renderer->frame();
-        }
-    }
-
-    Vector2i GLFWWindow::getResolution() const {
-        return m_windowSize;
-    }
-
-    void GLFWWindow::keyboardCallback(GLFWwindow *window, int32_t _key, int32_t _scancode, int32_t _action,
-                                      int32_t _mods) {
+    void GLFWWindow::keyboardCallback(GLFWwindow *window, int32_t key, int32_t scancode, int32_t action,
+                                      int32_t mods) {
         const auto *self = static_cast<GLFWWindow *>(glfwGetWindowUserPointer(window));
         if (self && self->m_eventHandle) {
-            KeyboardEvent event(_key, _scancode, _action, _mods);
+            KeyboardEvent event(key, scancode, action, mods);
             self->m_eventHandle->emplaceEvent<KeyboardEvent>(event);
         }
     }
@@ -142,7 +118,6 @@ namespace Tina {
         return glfwGetWin32Window(_window);
 #	endif
     }
-
 
     void *GLFWWindow::getNativeDisplayHandle() {
 #if TINA_PLATFORM_LINUX
@@ -163,7 +138,6 @@ namespace Tina {
 #endif
         return bgfx::NativeWindowHandleType::Default;
     }
-
 
     void GLFWWindow::errorCallback(int error, const char *description) {
         fmt::printf("GLFW Error (%d): %s\n", error, description);

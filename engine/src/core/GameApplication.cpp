@@ -7,6 +7,8 @@
 #include "graphics/Renderer2D.hpp"
 #include "graphics/Color.hpp"
 #include "window/GLFWWindow.hpp"
+#include "core/Config.hpp"
+#include <fmt/format.h>
 
 namespace Tina
 {
@@ -39,7 +41,28 @@ namespace Tina
         // 如果有配置文件，从配置文件读取配置
         if (m_configPath.exists())
         {
-            // TODO: 从配置文件读取配置
+            try 
+            {
+                Config config;
+                config.loadFromFile(m_configPath.toString());
+
+                if (config.contains("window.title"))
+                    windowConfig.title = config.get<std::string>("window.title");
+                if (config.contains("window.width"))
+                    windowConfig.resolution.width = config.get<int>("window.width");
+                if (config.contains("window.height"))
+                    windowConfig.resolution.height = config.get<int>("window.height");
+                if (config.contains("window.resizable"))
+                    windowConfig.resizable = config.get<bool>("window.resizable");
+                if (config.contains("window.maximized"))
+                    windowConfig.maximized = config.get<bool>("window.maximized");
+                if (config.contains("window.vsync-enabled"))
+                    windowConfig.vsync = config.get<bool>("window.vsync-enabled");
+            }
+            catch (const std::exception& e)
+            {
+                // 处理异常
+            }
         }
 
         // 创建窗口
@@ -86,19 +109,17 @@ namespace Tina
     {
         if (m_window)
         {
-            m_window->render();
-        }
+            if (m_renderer2D)
+            {
+                m_renderer2D->begin();
+                // 在这里添加2D渲染代码
+                m_renderer2D->end();
+            }
 
-        if (m_renderer2D)
-        {
-            m_renderer2D->begin();
-            // 在这里添加2D渲染代码
-            m_renderer2D->end();
-        }
-
-        if (m_guiSystem)
-        {
-            // m_guiSystem->render();
+            if (m_guiSystem)
+            {
+                // m_guiSystem->render();
+            }
         }
     }
 
