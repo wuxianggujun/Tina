@@ -20,20 +20,36 @@ namespace Tina
         {
         }
 
+        // 拷贝构造函数 - 不需要 explicit
+        String(const String& other)
+        {
+            m_size = other.m_size;
+            m_capacity = other.m_capacity;
+            if (other.m_data)
+            {
+                m_data = new char[m_capacity];
+                std::memcpy(m_data, other.m_data, m_size + 1);
+            }
+            else
+            {
+                m_data = nullptr;
+            }
+        }
+
         explicit String(const char* str)
         {
             assert(str != nullptr && R"(Input String cannot be null)");
-            m_size = strlen(str);
+            m_size = std::strlen(str);
             m_capacity = m_size + 1;
             m_data = new char[m_capacity];
             std::memcpy(m_data, str, m_size + 1);
         }
 
-        String(const std::string& str): String(str.c_str())
+        explicit String(const std::string& str): String(str.c_str())
         {
         }
 
-        String(const std::string_view str)
+        explicit String(const std::string_view str)
         {
             m_size = str.size();
             m_capacity = m_size + 1;
@@ -131,47 +147,56 @@ namespace Tina
             return std::strcmp(m_data ? m_data : "", str) == 0;
         }
 
+        // 添加与C字符串相关的操作
+        String& operator+=(const char* str)
+        {
+            if (str)
+            {
+                size_t strLen = std::strlen(str);
+                if (strLen > 0)
+                {
+                    size_t newSize = m_size + strLen;
+                    if (newSize + 1 > m_capacity)
+                    {
+                        reserve(std::max(newSize + 1, m_capacity * 2));
+                    }
+                    std::memcpy(m_data + m_size, str, strLen + 1);
+                    m_size = newSize;
+                }
+            }
+            return *this;
+        }
+
+        // 添加 String 类型的 += 操作符
         String& operator+=(const String& other)
         {
-            if (other.m_size > 0)
+            if (!other.empty())
             {
                 size_t newSize = m_size + other.m_size;
                 if (newSize + 1 > m_capacity)
                 {
                     reserve(std::max(newSize + 1, m_capacity * 2));
                 }
-                std::memcpy(m_data + m_size, other.m_data, other.m_size + 1);
+                if (other.m_data)
+                {
+                    std::memcpy(m_data + m_size, other.m_data, other.m_size + 1);
+                }
                 m_size = newSize;
             }
             return *this;
         }
 
-
         String operator+(const String& other) const
         {
-            if (m_size == 0) return String(other);
-            if (other.m_size == 0) return String(*this);
+            String result(*this);
+            result += other;
+            return result;
+        }
 
-            String result;
-            result.reserve(m_size + other.m_size + 1); // 使用 reserve 预分配空间
-
-            // 复制第一个字符串
-            if (m_data)
-            {
-                std::memcpy(result.m_data, m_data, m_size);
-            }
-
-            // 复制第二个字符串（包含终止符）
-            if (other.m_data)
-            {
-                std::memcpy(result.m_data + m_size, other.m_data, other.m_size + 1);
-            }
-            else
-            {
-                result.m_data[m_size] = '\0';
-            }
-
-            result.m_size = m_size + other.m_size; // 更新大小
+        String operator+(const char* str) const
+        {
+            String result(*this);
+            result += str;
             return result;
         }
 
@@ -192,15 +217,19 @@ namespace Tina
             m_size = m_capacity = 0;
         }
 
-        void reserve(size_t capacity) {
-            if (capacity <= m_capacity) return;  // 只在需要更大容量时重新分配
+        void reserve(size_t capacity)
+        {
+            if (capacity <= m_capacity) return; // 只在需要更大容量时重新分配
 
             char* newData = new char[capacity];
-            if (m_data) {
-                std::memcpy(newData, m_data, m_size + 1);  // 包含空终止符
+            if (m_data)
+            {
+                std::memcpy(newData, m_data, m_size + 1); // 包含空终止符
                 delete[] m_data;
-            } else {
-                newData[0] = '\0';  // 确保新分配的内存有终止符
+            }
+            else
+            {
+                newData[0] = '\0'; // 确保新分配的内存有终止符
             }
             m_data = newData;
             m_capacity = capacity;
