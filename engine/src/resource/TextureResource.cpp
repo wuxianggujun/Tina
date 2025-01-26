@@ -18,10 +18,11 @@ namespace Tina {
 
     void TextureResource::unload() {
         if (isLoaded()) {
-            bgfx::destroy(m_texture.getTextureHandle());
+            bgfx::destroy(m_texture.getHandle());
             m_texture = Texture();
         }
     }
+
 
     bool TextureResource::isLoaded() const {
         return m_texture.isValid();
@@ -31,7 +32,8 @@ namespace Tina {
         return m_texture;
     }
 
-    TextureHandle TextureResource::getHandle() const {
+    TextureHandle TextureResource::getTextureHandle() const {
         return m_texture.getHandle();
     }
+
 }

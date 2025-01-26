@@ -8,32 +8,46 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-namespace Tina {
+namespace Tina
+{
     Renderer2D::Renderer2D()
-        : m_vertexBuffer(BGFX_INVALID_HANDLE)
-        , m_indexBuffer(BGFX_INVALID_HANDLE)
-        , m_program(BGFX_INVALID_HANDLE)
-        , m_vertexCount(0)
-        , m_indexCount(0) {
+        : m_vbh(BGFX_INVALID_HANDLE), m_ibh(BGFX_INVALID_HANDLE), m_program(BGFX_INVALID_HANDLE)
+          , m_s_texture(BGFX_INVALID_HANDLE)
+          , m_currentTexture(BGFX_INVALID_HANDLE)
+          , m_indexCount(0), m_isDrawing(false), m_vertexBuffer(BGFX_INVALID_HANDLE)
+          , m_indexBuffer(BGFX_INVALID_HANDLE), m_vertexCount(0)
+    {
     }
 
-    Renderer2D::~Renderer2D() {
-        if (bgfx::isValid(m_vertexBuffer)) {
+    Renderer2D::~Renderer2D()
+    {
+        if (bgfx::isValid(m_vertexBuffer))
+        {
             bgfx::destroy(m_vertexBuffer);
         }
-        if (bgfx::isValid(m_indexBuffer)) {
+        if (bgfx::isValid(m_indexBuffer))
+        {
             bgfx::destroy(m_indexBuffer);
         }
-        if (bgfx::isValid(m_program)) {
+        if (bgfx::isValid(m_program))
+        {
             bgfx::destroy(m_program);
         }
     }
 
-    void Renderer2D::initialize() {
+    void Renderer2D::initialize()
+    {
+        bgfx::VertexLayout layout;
+        layout.begin()
+              .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
+              .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+              .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
+              .end();
+
         // 创建动态顶点缓冲区
         m_vertexBuffer = bgfx::createDynamicVertexBuffer(
             MAX_VERTICES,
-            Vertex::layout,
+            layout,
             BGFX_BUFFER_ALLOW_RESIZE
         );
 
@@ -44,25 +58,42 @@ namespace Tina {
         );
 
         // 加载着色器程序
-        m_program = BgfxUtils::loadProgram("shaders/sprite_vs", "shaders/sprite_fs");
+        m_program = BgfxUtils::loadProgram("sprite.vs", "sprite.fs");
+        m_s_texture = bgfx::createUniform("s_texture", bgfx::UniformType::Sampler);
     }
 
-    void Renderer2D::begin() {
+    void Renderer2D::begin()
+    {
         m_vertexCount = 0;
         m_indexCount = 0;
+        m_isDrawing = true;
+        m_vertices.clear();
+        m_indices.clear();
     }
 
-    void Renderer2D::end() {
+    void Renderer2D::end()
+    {
         flush();
     }
 
-    void Renderer2D::flush() {
-        if (m_vertexCount == 0) {
+    void Renderer2D::flush()
+    {
+        if (m_vertexCount == 0)
+        {
+            return;
+        }
+
+        if (m_vertices.empty() || m_indices.empty())
+        {
             return;
         }
 
         // 更新顶点缓冲区
         const bgfx::Memory* vertexMem = bgfx::alloc(m_vertexCount * sizeof(Vertex));
+        if (vertexMem == nullptr)
+        {
+            return;
+        }
         memcpy(vertexMem->data, m_vertices.data(), m_vertexCount * sizeof(Vertex));
         bgfx::update(m_vertexBuffer, 0, vertexMem);
 
@@ -73,20 +104,28 @@ namespace Tina {
 
         // 设置渲染状态
         bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
-                      BGFX_STATE_BLEND_ALPHA);
+            BGFX_STATE_BLEND_ALPHA);
 
         // 提交绘制命令
         bgfx::setVertexBuffer(0, m_vertexBuffer, 0, m_vertexCount);
         bgfx::setIndexBuffer(m_indexBuffer, 0, m_indexCount);
+        bgfx::setTexture(0, m_s_texture, m_currentTexture);
         bgfx::submit(0, m_program);
 
         // 重置计数器
         m_vertexCount = 0;
         m_indexCount = 0;
+        m_vertices.clear();
+        m_indices.clear();
+        m_currentTexture = BGFX_INVALID_HANDLE;
     }
 
-    void Renderer2D::drawRect(const Vector2f& position, const Vector2f& size, const Color& color) {
-        if (m_vertexCount + 4 > MAX_VERTICES || m_indexCount + 6 > MAX_INDICES) {
+    void Renderer2D::drawRect(const Vector2f& position, const Vector2f& size, const Color& color)
+    {
+        if (!m_isDrawing) return;
+
+        if (m_vertexCount + 4 > MAX_VERTICES || m_indexCount + 6 > MAX_INDICES)
+        {
             flush();
         }
 
@@ -95,50 +134,63 @@ namespace Tina {
         float w = size.x;
         float h = size.y;
 
+        uint32_t colorValue = color.toABGR();
+
         // 添加顶点
-        m_vertices[m_vertexCount++] = {{x, y}, color, {0.0f, 0.0f}};
-        m_vertices[m_vertexCount++] = {{x + w, y}, color, {1.0f, 0.0f}};
-        m_vertices[m_vertexCount++] = {{x + w, y + h}, color, {1.0f, 1.0f}};
-        m_vertices[m_vertexCount++] = {{x, y + h}, color, {0.0f, 1.0f}};
+        m_vertices.emplace_back(x, y, 0.0f, 0.0f, colorValue);
+        m_vertices.emplace_back(x + w, y, 1.0f, 0.0f, colorValue);
+        m_vertices.emplace_back(x + w, y + h, 1.0f, 1.0f, colorValue);
+        m_vertices.emplace_back(x, y + h, 0.0f, 1.0f, colorValue);
+        m_vertexCount += 4;
 
         // 添加索引
         uint16_t baseIndex = m_vertexCount - 4;
-        m_indices[m_indexCount++] = baseIndex + 0;
-        m_indices[m_indexCount++] = baseIndex + 1;
-        m_indices[m_indexCount++] = baseIndex + 2;
-        m_indices[m_indexCount++] = baseIndex + 0;
-        m_indices[m_indexCount++] = baseIndex + 2;
-        m_indices[m_indexCount++] = baseIndex + 3;
+        m_indices.push_back(baseIndex + 0);
+        m_indices.push_back(baseIndex + 1);
+        m_indices.push_back(baseIndex + 2);
+        m_indices.push_back(baseIndex + 0);
+        m_indices.push_back(baseIndex + 2);
+        m_indices.push_back(baseIndex + 3);
+        m_indexCount += 6;
     }
 
-    void Renderer2D::drawCircle(const Vector2f& center, float radius, const Color& color, int segments) {
-        if (m_vertexCount + segments + 1 > MAX_VERTICES || m_indexCount + segments * 3 > MAX_INDICES) {
+    void Renderer2D::drawCircle(const Vector2f& center, float radius, const Color& color, int segments)
+    {
+        if (!m_isDrawing) return;
+        if (m_vertexCount + segments + 1 > MAX_VERTICES || m_indexCount + segments * 3 > MAX_INDICES)
+        {
             flush();
         }
 
         // 添加中心顶点
-        m_vertices[m_vertexCount++] = {{center.x, center.y}, color, {0.5f, 0.5f}};
+        m_vertices.emplace_back(Vector2f(center.x, center.y), Vector2f(0.5f, 0.5f), color.toABGR());
 
         // 添加圆周顶点
-        for (int i = 0; i < segments; ++i) {
-            float angle = (float)(i * 2.0 * M_PI / segments);
+        for (int i = 0; i < segments; ++i)
+        {
+            const auto angle = static_cast<float>(i * 2.0 * M_PI / segments);
             float x = center.x + radius * std::cos(angle);
             float y = center.y + radius * std::sin(angle);
-            m_vertices[m_vertexCount++] = {{x, y}, color, {0.5f + 0.5f * std::cos(angle), 0.5f + 0.5f * std::sin(angle)}};
+            m_vertices.emplace_back(Vector2f(x, y), Vector2f(0.5f + 0.5f * std::cos(angle), 0.5f + 0.5f * std::sin(angle)), color.toABGR());
         }
 
         // 添加索引
         uint16_t baseIndex = m_vertexCount - segments - 1;
-        for (int i = 0; i < segments; ++i) {
-            m_indices[m_indexCount++] = baseIndex;
-            m_indices[m_indexCount++] = baseIndex + 1 + i;
-            m_indices[m_indexCount++] = baseIndex + 1 + ((i + 1) % segments);
+        for (int i = 0; i < segments; ++i)
+        {
+            m_indices.push_back(baseIndex);
+            m_indices.push_back(baseIndex + 1 + i);
+            m_indices.push_back(baseIndex + 1 + ((i + 1) % segments));
+            m_indexCount += 3;
         }
     }
 
     void Renderer2D::drawSprite(const Vector2f& position, const Vector2f& size, const TextureHandle& texture,
-                               const Vector2f& uv0, const Vector2f& uv1, const Color& tint) {
-        if (m_vertexCount + 4 > MAX_VERTICES || m_indexCount + 6 > MAX_INDICES) {
+                                const Vector2f& uv0, const Vector2f& uv1, const Color& tint)
+    {
+        if (!m_isDrawing) return;
+        if (m_vertexCount + 4 > MAX_VERTICES || m_indexCount + 6 > MAX_INDICES)
+        {
             flush();
         }
 
@@ -146,32 +198,38 @@ namespace Tina {
         uint16_t startVertex = m_vertexCount;
 
         // 添加顶点
-        m_vertices[m_vertexCount++] = {{position.x, position.y}, colorValue, uv0};
-        m_vertices[m_vertexCount++] = {{position.x + size.x, position.y}, colorValue, uv1};
-        m_vertices[m_vertexCount++] = {{position.x + size.x, position.y + size.y}, colorValue, uv1};
-        m_vertices[m_vertexCount++] = {{position.x, position.y + size.y}, colorValue, uv0};
+        m_vertices.emplace_back(Vector2f(position.x, position.y), uv0, colorValue);
+        m_vertices.emplace_back(Vector2f(position.x + size.x, position.y), uv1, colorValue);
+        m_vertices.emplace_back(Vector2f(position.x + size.x, position.y + size.y), uv1, colorValue);
+        m_vertices.emplace_back(Vector2f(position.x, position.y + size.y), uv0, colorValue);
+        m_vertexCount += 4;
 
         // 添加索引
         uint16_t baseIndex = startVertex;
-        m_indices[m_indexCount++] = baseIndex + 0;
-        m_indices[m_indexCount++] = baseIndex + 1;
-        m_indices[m_indexCount++] = baseIndex + 2;
-        m_indices[m_indexCount++] = baseIndex + 0;
-        m_indices[m_indexCount++] = baseIndex + 2;
-        m_indices[m_indexCount++] = baseIndex + 3;
+        m_indices.push_back(baseIndex + 0);
+        m_indices.push_back(baseIndex + 1);
+        m_indices.push_back(baseIndex + 2);
+        m_indices.push_back(baseIndex + 0);
+        m_indices.push_back(baseIndex + 2);
+        m_indices.push_back(baseIndex + 3);
+        m_indexCount += 6;
 
         // 设置纹理
-        bgfx::setTexture(0, m_s_texture, texture);
+        m_currentTexture = texture; // 设置当前纹理，用于批处理
     }
 
-    void Renderer2D::drawLine(const Vector2f& start, const Vector2f& end, float thickness, const Color& color) {
-        if (m_vertexCount + 4 > MAX_VERTICES || m_indexCount + 6 > MAX_INDICES) {
+    void Renderer2D::drawLine(const Vector2f& start, const Vector2f& end, float thickness, const Color& color)
+    {
+        if (!m_isDrawing) return;
+        if (m_vertexCount + 4 > MAX_VERTICES || m_indexCount + 6 > MAX_INDICES)
+        {
             flush();
         }
 
         Vector2f direction = Vector2f(end.x - start.x, end.y - start.y);
         float length = sqrt(direction.x * direction.x + direction.y * direction.y);
-        if (length > 0) {
+        if (length > 0)
+        {
             direction.x /= length;
             direction.y /= length;
         }
@@ -182,38 +240,44 @@ namespace Tina {
         uint16_t startVertex = m_vertexCount;
 
         // 添加顶点
-        m_vertices[m_vertexCount++] = {{start.x - normal.x, start.y - normal.y}, colorValue, {0.0f, 0.0f}};
-        m_vertices[m_vertexCount++] = {{start.x + normal.x, start.y + normal.y}, colorValue, {1.0f, 0.0f}};
-        m_vertices[m_vertexCount++] = {{end.x + normal.x, end.y + normal.y}, colorValue, {1.0f, 1.0f}};
-        m_vertices[m_vertexCount++] = {{end.x - normal.x, end.y - normal.y}, colorValue, {0.0f, 1.0f}};
+        m_vertices.emplace_back(Vector2f(start.x - normal.x, start.y - normal.y), Vector2f(0.0f, 0.0f), colorValue);
+        m_vertices.emplace_back(Vector2f(start.x + normal.x, start.y + normal.y), Vector2f(1.0f, 0.0f), colorValue);
+        m_vertices.emplace_back(Vector2f(end.x + normal.x, end.y + normal.y), Vector2f(1.0f, 1.0f), colorValue);
+        m_vertices.emplace_back(Vector2f(end.x - normal.x, end.y - normal.y), Vector2f(0.0f, 1.0f), colorValue);
+        m_vertexCount += 4;
 
         // 添加索引
         uint16_t baseIndex = startVertex;
-        m_indices[m_indexCount++] = baseIndex + 0;
-        m_indices[m_indexCount++] = baseIndex + 1;
-        m_indices[m_indexCount++] = baseIndex + 2;
-        m_indices[m_indexCount++] = baseIndex + 0;
-        m_indices[m_indexCount++] = baseIndex + 2;
-        m_indices[m_indexCount++] = baseIndex + 3;
+        m_indices.push_back(baseIndex + 0);
+        m_indices.push_back(baseIndex + 1);
+        m_indices.push_back(baseIndex + 2);
+        m_indices.push_back(baseIndex + 0);
+        m_indices.push_back(baseIndex + 2);
+        m_indices.push_back(baseIndex + 3);
+        m_indexCount += 6;
     }
 
-    void Renderer2D::drawTriangle(const Vector2f& p1, const Vector2f& p2, const Vector2f& p3, const Color& color) {
-        if (m_vertexCount + 3 > MAX_VERTICES || m_indexCount + 3 > MAX_INDICES) {
+    void Renderer2D::drawTriangle(const Vector2f& p1, const Vector2f& p2, const Vector2f& p3, const Color& color)
+    {
+        if (!m_isDrawing) return;
+        if (m_vertexCount + 3 > MAX_VERTICES || m_indexCount + 3 > MAX_INDICES)
+        {
             flush();
         }
 
         uint32_t colorValue = color.toABGR();
-        uint16_t startVertex = m_vertexCount;
 
         // 添加顶点
-        m_vertices[m_vertexCount++] = {{p1.x, p1.y}, colorValue, {0.0f, 0.0f}};
-        m_vertices[m_vertexCount++] = {{p2.x, p2.y}, colorValue, {1.0f, 0.0f}};
-        m_vertices[m_vertexCount++] = {{p3.x, p3.y}, colorValue, {0.5f, 1.0f}};
+        m_vertices.emplace_back(p1.x, p1.y, 0.0f, 0.0f, colorValue);
+        m_vertices.emplace_back(p2.x, p2.y, 1.0f, 0.0f, colorValue);
+        m_vertices.emplace_back(p3.x, p3.y, 1.0f, 1.0f, colorValue);
+        m_vertexCount += 3;
 
         // 添加索引
-        uint16_t baseIndex = startVertex;
-        m_indices[m_indexCount++] = baseIndex + 0;
-        m_indices[m_indexCount++] = baseIndex + 1;
-        m_indices[m_indexCount++] = baseIndex + 2;
+        uint16_t baseIndex = m_vertexCount - 3;
+        m_indices.push_back(baseIndex + 0);
+        m_indices.push_back(baseIndex + 1);
+        m_indices.push_back(baseIndex + 2);
+        m_indexCount += 3;
     }
-} 
+}

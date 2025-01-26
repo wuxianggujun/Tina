@@ -54,7 +54,7 @@ namespace Tina {
             if (it->second->getType() == ResourceType::Texture) {
                 auto textureResource = std::dynamic_pointer_cast<TextureResource>(it->second);
                 if (textureResource && textureResource->isLoaded()) {
-                    bgfx::destroy(textureResource->getTexture().getTextureHandle());
+                    bgfx::destroy(textureResource->getTexture().getHandle());
                 }
             } else if (it->second->getType() == ResourceType::Shader) {
                 auto shaderResource = std::dynamic_pointer_cast<ShaderResource>(it->second);
@@ -74,7 +74,7 @@ namespace Tina {
             if (pair.second->getType() == ResourceType::Texture) {
                 auto textureResource = std::dynamic_pointer_cast<TextureResource>(pair.second);
                 if (textureResource && textureResource->isLoaded()) {
-                    bgfx::destroy(textureResource->getTexture().getTextureHandle());
+                    bgfx::destroy(textureResource->getTexture().getHandle());
                 }
             } else if (pair.second->getType() == ResourceType::Shader) {
                 auto shaderResource = std::dynamic_pointer_cast<ShaderResource>(pair.second);
@@ -93,11 +93,4 @@ namespace Tina {
     template RefPtr<TextureResource> ResourceManager::getResource<TextureResource>(const ResourceHandle& handle);
     template RefPtr<ShaderResource> ResourceManager::getResource<ShaderResource>(const ResourceHandle& handle);
 
-    TextureHandle ResourceManager::getTextureHandle(const std::string& name) const {
-        auto it = m_textures.find(name);
-        if (it != m_textures.end()) {
-            return it->second->getHandle();
-        }
-        return BGFX_INVALID_HANDLE;
-    }
 }

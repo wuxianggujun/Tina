@@ -9,6 +9,8 @@
 #include "core/Core.hpp"
 
 namespace Tina {
+    class TextureResource;
+
     class ResourceManager {
 
     public:

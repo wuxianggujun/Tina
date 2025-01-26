@@ -14,6 +14,7 @@ namespace Tina {
         bool load() override;
         void unload() override;
 
+        [[nodiscard]] TextureHandle getTextureHandle() const;
         [[nodiscard]] bool isLoaded() const override;
         [[nodiscard]] const Texture& getTexture() const;
 

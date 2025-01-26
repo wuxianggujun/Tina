@@ -13,8 +13,8 @@ namespace Tina {
         ~Texture();
 
         void setHandle(const TextureHandle& handle);
-        TextureHandle getHandle() const;
-        bool isValid() const;
+        [[nodiscard]] TextureHandle getHandle() const;
+        [[nodiscard]] bool isValid() const;
 
         static TextureHandle loadFromFile(const std::string& filename);
         static TextureHandle loadFromMemory(const void* data, uint32_t size);
