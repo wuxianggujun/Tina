@@ -142,4 +142,62 @@ namespace Tina {
     void GLFWWindow::errorCallback(int error, const char *description) {
         fmt::printf("GLFW Error (%d): %s\n", error, description);
     }
+
+    void GLFWWindow::setTitle(const std::string& title) {
+        if (m_window) {
+            glfwSetWindowTitle(m_window.get(), title.c_str());
+            m_title = title;
+        }
+    }
+
+    void GLFWWindow::setSize(const Vector2i& size) {
+        if (m_window) {
+            glfwSetWindowSize(m_window.get(), size.width, size.height);
+            m_windowSize = size;
+            bgfx::reset(size.width, size.height, m_isVSync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE);
+        }
+    }
+
+    void GLFWWindow::setVSync(bool enabled) {
+        if (m_isVSync != enabled) {
+            m_isVSync = enabled;
+            bgfx::reset(m_windowSize.width, m_windowSize.height, 
+                enabled ? BGFX_RESET_VSYNC : BGFX_RESET_NONE);
+        }
+    }
+
+    void GLFWWindow::setFullscreen(bool fullscreen) {
+        if (m_window && m_isFullscreen != fullscreen) {
+            if (fullscreen) {
+                // 获取主显示器
+                GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+                if (monitor) {
+                    const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+                    glfwSetWindowMonitor(m_window.get(), monitor, 0, 0, 
+                        mode->width, mode->height, mode->refreshRate);
+                }
+            } else {
+                // 恢复窗口模式
+                glfwSetWindowMonitor(m_window.get(), nullptr, 100, 100, 
+                    m_windowSize.width, m_windowSize.height, 0);
+            }
+            m_isFullscreen = fullscreen;
+        }
+    }
+
+    std::string GLFWWindow::getTitle() const {
+        return m_title;
+    }
+
+    bool GLFWWindow::isFullscreen() const {
+        return m_isFullscreen;
+    }
+
+    bool GLFWWindow::isVSync() const {
+        return m_isVSync;
+    }
+
+    bool GLFWWindow::isVisible() const {
+        return m_window && glfwGetWindowAttrib(m_window.get(), GLFW_VISIBLE);
+    }
 } // Tina

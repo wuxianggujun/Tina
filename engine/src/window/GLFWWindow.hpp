@@ -54,6 +54,17 @@ namespace Tina {
         // 事件处理
         void setEventHandler(ScopePtr<EventHandler>&& eventHandler) override;
 
+        // 窗口属性设置和获取
+        void setTitle(const std::string& title) override;
+        void setSize(const Vector2i& size) override;
+        void setVSync(bool enabled) override;
+        void setFullscreen(bool fullscreen) override;
+
+        [[nodiscard]] std::string getTitle() const override;
+        [[nodiscard]] bool isFullscreen() const override;
+        [[nodiscard]] bool isVSync() const override;
+        [[nodiscard]] bool isVisible() const override;
+
         // GLFW特有功能
         static void saveScreenShot(const std::string &fileName);
 
@@ -73,5 +84,8 @@ namespace Tina {
         BgfxCallback m_bgfxCallback;
         ScopePtr<EventHandler> m_eventHandle;
         ScopePtr<GLFWwindow, GlfwWindowDeleter> m_window;
+        bool m_isFullscreen{false};
+        bool m_isVSync{true};
+        std::string m_title;
     };
 } // Tina
