@@ -10,7 +10,8 @@
 #include <algorithm>
 #include <cassert>
 #include <stdexcept>
-
+#include <vector>
+/*
 namespace Tina
 {
     class String
@@ -45,30 +46,6 @@ namespace Tina
             std::memcpy(m_data, str, m_size + 1);
         }
 
-        explicit String(const std::string& str): String(str.c_str())
-        {
-        }
-
-        explicit String(const std::string_view str)
-        {
-            m_size = str.size();
-            m_capacity = m_size + 1;
-            m_data = new char[m_capacity];
-            std::memcpy(m_data, str.data(), m_size);
-            m_data[m_size] = '\0';
-        }
-
-        String(String&& other) noexcept: m_data(other.m_data), m_size(other.m_size),
-                                         m_capacity(other.m_capacity)
-        {
-            other.m_data = nullptr;
-            other.m_size = other.m_capacity = 0;
-        }
-
-        ~String()
-        {
-            delete[] m_data;
-        }
 
         // Copy the assignment operator
         String& operator=(const String& other)
@@ -106,35 +83,8 @@ namespace Tina
             return *this;
         }
 
-        explicit operator std::string() const
-        {
-            return m_data ? std::string(m_data) : std::string();
-        }
 
-        explicit operator std::string_view() const
-        {
-            return m_data ? std::string_view(m_data, m_size) : std::string_view();
-        }
 
-        [[nodiscard]] const char* c_str() const
-        {
-            return m_data ? m_data : "";
-        }
-
-        [[nodiscard]] size_t length() const
-        {
-            return m_size;
-        }
-
-        [[nodiscard]] size_t size() const
-        {
-            return m_size;
-        }
-
-        [[nodiscard]] bool empty() const
-        {
-            return m_size == 0;
-        }
 
         bool operator==(const String& other) const
         {
@@ -266,3 +216,93 @@ namespace Tina
         return String(str) + other;
     }
 } // Tina
+*/
+
+namespace Tina
+{
+    class StringMemoryPool;
+
+    class String
+    {
+    public:
+        String();
+        String(const String& other);
+        explicit String(const char* str);
+        explicit String(const std::string& str);
+        explicit String(std::string_view str);
+        String(String&& other) noexcept;
+
+        ~String();
+
+        String& operator=(const String& other);
+        String& operator=(String&& other) noexcept;
+
+        explicit operator std::string() const;
+        explicit operator std::string_view() const;
+
+        [[nodiscard]] const char* c_str() const;
+        [[nodiscard]] size_t length() const;
+        [[nodiscard]] size_t size() const;
+        [[nodiscard]] bool empty() const;
+        [[nodiscard]] size_t capacity() const;
+
+        bool operator==(const String& other) const;
+        bool operator==(const char* str) const;
+        bool operator!=(const String& other) const;
+        String& operator+=(const String& other);
+        String& operator+=(const char* str);
+        String operator+(const String& other) const;
+        String operator+(const char* str) const;
+        char& operator[](size_t index);
+        const char& operator[](size_t index) const;
+
+        void clear();
+        void reserve(size_t capacity);
+
+    private:
+        void checkIndex(size_t index) const;
+        char* allocateMemory(size_t size);
+        void deallocateMemory(char* ptr, size_t size);
+
+        char* m_data;
+        size_t m_size;
+        size_t m_capacity;
+        static StringMemoryPool& getMemoryPool();
+    };
+
+    inline String operator+(const char* str, const String& other);
+
+
+    class StringMemoryPool
+    {
+    public:
+        static constexpr size_t SMALL_STRING_SIZE = 32;
+        static constexpr size_t MEDIUM_STRING_SIZE = 128;
+        static constexpr size_t LARGE_STRING_SIZE = 512;
+        static constexpr size_t BLOCK_COUNT = 1024;
+
+        struct MemoryBlock
+        {
+            char* data;
+            bool used;
+            size_t size;
+        };
+
+        StringMemoryPool();
+        ~StringMemoryPool();
+
+        char* allocate(size_t size);
+        void deallocate(char* ptr, size_t size);
+        static StringMemoryPool& getInstance();
+
+    private:
+        std::vector<MemoryBlock> m_blocks;
+        std::vector<MemoryBlock> m_mediumPool;
+        std::vector<MemoryBlock> m_largePool;
+
+        void initializePool(std::vector<MemoryBlock>& pool, size_t blockSize);
+        void releasePool(std::vector<MemoryBlock>& pool);
+        char* allocateFromPool(std::vector<MemoryBlock>& pool, size_t size);
+        void deallocateToPool(std::vector<MemoryBlock>& pool, const char* ptr);
+    };
+}

@@ -7,6 +7,9 @@
 cmake_minimum_required(VERSION 3.20...3.30)
 project(Tina VERSION 0.0.1 LANGUAGES CXX)
 
+if(POLICY CMP0175)
+    cmake_policy(SET CMP0175 OLD)
+endif()
 
 # In-source builds are disabled.
 if ("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_BINARY_DIR}")
