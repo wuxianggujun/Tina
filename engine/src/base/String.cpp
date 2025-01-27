@@ -4,6 +4,8 @@
 
 #include "String.hpp"
 
+#include <fmt/base.h>
+
 namespace Tina
 {
     char* String::allocateMemory(size_t size)
@@ -35,6 +37,72 @@ namespace Tina
         releasePool(m_largePool);
     }
 
+    void StringMemoryPool::updateAllocationStats(size_t size)
+    {
+        m_stats.totalAllocations++;
+        m_stats.currentAllocations++;
+        m_stats.peakAllocations = std::max(m_stats.peakAllocations, m_stats.currentAllocations);
+
+        m_stats.totalMemoryUsed += size;
+        m_stats.currentMemoryUsed += size;
+        m_stats.peakMemoryUsed = std::max(m_stats.peakMemoryUsed, m_stats.currentMemoryUsed);
+
+        if (size <= SMALL_STRING_SIZE)
+        {
+            updatePoolStats(m_stats.smallPool, true);
+        }
+        else if (size <= MEDIUM_STRING_SIZE)
+        {
+            updatePoolStats(m_stats.mediumPool, true);
+        }
+        else if (size <= LARGE_STRING_SIZE)
+        {
+            updatePoolStats(m_stats.largePool, true);
+        }
+        else
+        {
+            updatePoolStats(m_stats.customAllocations, true);
+        }
+    }
+
+    void StringMemoryPool::updateDeallocationStats(size_t size)
+    {
+        m_stats.currentAllocations--;
+        m_stats.currentMemoryUsed -= size;
+
+        if (size <= SMALL_STRING_SIZE)
+        {
+            updatePoolStats(m_stats.smallPool, false);
+        }
+        else if (size <= MEDIUM_STRING_SIZE)
+        {
+            updatePoolStats(m_stats.mediumPool, false);
+        }
+        else if (size <= LARGE_STRING_SIZE)
+        {
+            updatePoolStats(m_stats.largePool, false);
+        }
+        else
+        {
+            updatePoolStats(m_stats.customAllocations, false);
+        }
+    }
+
+    void StringMemoryPool::updatePoolStats(PoolStats::PoolTypeStats& stats, bool isAllocation)
+    {
+        if (isAllocation)
+        {
+            stats.allocations++;
+            stats.currentUsage++;
+            stats.peakUsage = std::max(stats.peakUsage, stats.currentUsage);
+        }
+        else
+        {
+            stats.deallocations++;
+            stats.currentUsage--;
+        }
+    }
+
     void StringMemoryPool::initializePool(std::vector<MemoryBlock>& pool, size_t blockSize)
     {
         pool.resize(BLOCK_COUNT);
@@ -57,26 +125,37 @@ namespace Tina
 
     char* StringMemoryPool::allocate(size_t size)
     {
+        char* ptr = nullptr;
+
         if (size <= SMALL_STRING_SIZE)
         {
-            return allocateFromPool(m_blocks, size);
+            ptr = allocateFromPool(m_blocks, size);
+        }
+        else if (size <= MEDIUM_STRING_SIZE)
+        {
+            ptr = allocateFromPool(m_mediumPool, size);
+        }
+        else if (size <= LARGE_STRING_SIZE)
+        {
+            ptr = allocateFromPool(m_largePool, size);
+        }
+        else
+        {
+            ptr = new char[size];
         }
 
-        if (size <= MEDIUM_STRING_SIZE)
+        if (ptr)
         {
-            return allocateFromPool(m_mediumPool, size);
+            updateAllocationStats(size);
         }
-
-        if (size <= LARGE_STRING_SIZE)
-        {
-            return allocateFromPool(m_largePool, size);
-        }
-        return new char[size];
+        return ptr;
     }
 
     void StringMemoryPool::deallocate(char* ptr, size_t size)
     {
         if (!ptr) return;
+
+        updateDeallocationStats(size);
 
         if (size <= SMALL_STRING_SIZE)
         {
@@ -131,6 +210,33 @@ namespace Tina
     {
         static StringMemoryPool instance;
         return instance;
+    }
+
+    const StringMemoryPool::PoolStats& StringMemoryPool::getStats() const
+    {
+        return m_stats;
+    }
+
+    void StringMemoryPool::resetStats()
+    {
+        m_stats = PoolStats{};
+    }
+
+    void StringMemoryPool::printStats() const {
+        fmt::print("String Memory Pool Statistics:\n");
+        fmt::print("Total allocations: {}\n", m_stats.totalAllocations);
+        fmt::print("Current allocations: {}\n", m_stats.currentAllocations);
+        fmt::print("Peak allocations: {}\n", m_stats.peakAllocations);
+        fmt::print("Total memory used: {} bytes\n", m_stats.totalMemoryUsed);
+        fmt::print("Current memory used: {} bytes\n", m_stats.currentMemoryUsed);
+        fmt::print("Peak memory used: {} bytes\n", m_stats.peakMemoryUsed);
+
+        fmt::print("\nPool-specific statistics:\n");
+
+        fmt::print("Small Pool:\n  {}\n", m_stats.smallPool);
+        fmt::print("Medium Pool:\n  {}\n", m_stats.mediumPool);
+        fmt::print("Large Pool:\n  {}\n", m_stats.largePool);
+        fmt::print("Custom Allocations:\n  {}\n", m_stats.customAllocations);  // 这里之前用错了变量
     }
 
 

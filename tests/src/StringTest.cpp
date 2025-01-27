@@ -6,11 +6,18 @@
 
 using namespace Tina;
 
-class StringTest:public testing::Test
-{
+// 在 SetUp 和 TearDown 中添加统计信息重置和打印
+class StringTest : public testing::Test {
 protected:
-    void SetUp() override{}
-    void TearDown() override{}
+    void SetUp() override {
+        StringMemoryPool::getInstance().resetStats();
+        fmt::print("\n=== Test Start ===\n");
+    }
+
+    void TearDown() override {
+        fmt::print("\n=== Test End ===\n");
+        StringMemoryPool::getInstance().printStats();
+    }
 };
 
 TEST_F(StringTest,ConstructorTest)
@@ -155,12 +162,48 @@ TEST_F(StringTest, ConversionTest) {
     EXPECT_EQ(sv, "Hello");
 }
 
-// 修改内存测试
+// 修改 MemoryTest，添加统计信息
 TEST_F(StringTest, MemoryTest) {
+    StringMemoryPool::getInstance().resetStats();
+    fmt::print("\n=== Before Memory Test ===\n");
+    StringMemoryPool::getInstance().printStats();
+
     String s("a");
     for (int i = 1; i < 1000; ++i) {
-        s += "a";  // 使用 += 操作符
+        s += "a";
     }
+
+    fmt::print("\n=== After 1000 Concatenations ===\n");
+    StringMemoryPool::getInstance().printStats();
+
     EXPECT_EQ(s.size(), 1000);
     EXPECT_GE(s.capacity(), 1000);
 }
+
+
+// 添加一个专门的内存统计测试
+TEST_F(StringTest, MemoryPoolStatsTest) {
+    // 重置统计信息开始测试
+    StringMemoryPool::getInstance().resetStats();
+
+    // 创建不同大小的字符串测试不同的内存池
+    String small("Small");  // 应该使用小字符串池
+    String medium(std::string(100, 'M'));  // 应该使用中等字符串池
+    String large(std::string(200, 'L'));   // 应该使用大字符串池
+    String huge(std::string(1000, 'H'));   // 应该使用自定义分配
+
+    // 打印当前状态
+    StringMemoryPool::getInstance().printStats();
+
+    // 测试拷贝和移动操作对内存的影响
+    {
+        String copied = small;
+        String moved = std::move(large);
+        StringMemoryPool::getInstance().printStats();
+    } // 作用域结束，字符串被销毁
+
+    // 打印销毁后的状态
+    StringMemoryPool::getInstance().printStats();
+}
+
+

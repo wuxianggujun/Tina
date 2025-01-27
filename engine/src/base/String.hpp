@@ -11,212 +11,7 @@
 #include <cassert>
 #include <stdexcept>
 #include <vector>
-/*
-namespace Tina
-{
-    class String
-    {
-    public:
-        String(): m_data(nullptr), m_size(0), m_capacity(0)
-        {
-        }
-
-        // 拷贝构造函数 - 不需要 explicit
-        String(const String& other)
-        {
-            m_size = other.m_size;
-            m_capacity = other.m_capacity;
-            if (other.m_data)
-            {
-                m_data = new char[m_capacity];
-                std::memcpy(m_data, other.m_data, m_size + 1);
-            }
-            else
-            {
-                m_data = nullptr;
-            }
-        }
-
-        explicit String(const char* str)
-        {
-            assert(str != nullptr && R"(Input String cannot be null)");
-            m_size = std::strlen(str);
-            m_capacity = m_size + 1;
-            m_data = new char[m_capacity];
-            std::memcpy(m_data, str, m_size + 1);
-        }
-
-
-        // Copy the assignment operator
-        String& operator=(const String& other)
-        {
-            if (this != &other)
-            {
-                delete[] m_data;
-                m_size = other.m_size;
-                m_capacity = other.m_capacity;
-                if (other.m_data)
-                {
-                    m_data = new char[m_capacity];
-                    std::memcpy(m_data, other.m_data, m_size + 1);
-                }
-                else
-                {
-                    m_data = nullptr;
-                }
-            }
-            return *this;
-        }
-
-        // Move the assignment operator
-        String& operator=(String&& other) noexcept
-        {
-            if (this != &other)
-            {
-                delete[] m_data;
-                m_data = other.m_data;
-                m_size = other.m_size;
-                m_capacity = other.m_capacity;
-                other.m_data = nullptr;
-                other.m_size = other.m_capacity = 0;
-            }
-            return *this;
-        }
-
-
-
-
-        bool operator==(const String& other) const
-        {
-            return m_size == other.m_size && std::memcmp(m_data, other.m_data, m_size) == 0;
-        }
-
-        bool operator==(const char* str) const
-        {
-            if (!str) return m_size == 0;
-            return std::strcmp(m_data ? m_data : "", str) == 0;
-        }
-
-        // 添加与C字符串相关的操作
-        String& operator+=(const char* str)
-        {
-            if (str)
-            {
-                size_t strLen = std::strlen(str);
-                if (strLen > 0)
-                {
-                    size_t newSize = m_size + strLen;
-                    if (newSize + 1 > m_capacity)
-                    {
-                        reserve(std::max(newSize + 1, m_capacity * 2));
-                    }
-                    std::memcpy(m_data + m_size, str, strLen + 1);
-                    m_size = newSize;
-                }
-            }
-            return *this;
-        }
-
-        // 添加 String 类型的 += 操作符
-        String& operator+=(const String& other)
-        {
-            if (!other.empty())
-            {
-                size_t newSize = m_size + other.m_size;
-                if (newSize + 1 > m_capacity)
-                {
-                    reserve(std::max(newSize + 1, m_capacity * 2));
-                }
-                if (other.m_data)
-                {
-                    std::memcpy(m_data + m_size, other.m_data, other.m_size + 1);
-                }
-                m_size = newSize;
-            }
-            return *this;
-        }
-
-        String operator+(const String& other) const
-        {
-            String result(*this);
-            result += other;
-            return result;
-        }
-
-        String operator+(const char* str) const
-        {
-            String result(*this);
-            result += str;
-            return result;
-        }
-
-        bool operator!=(const String& other) const
-        {
-            return !(*this == other);
-        }
-
-        [[nodiscard]] size_t capacity() const
-        {
-            return m_capacity;
-        }
-
-        void clear()
-        {
-            delete[] m_data;
-            m_data = nullptr;
-            m_size = m_capacity = 0;
-        }
-
-        void reserve(size_t capacity)
-        {
-            if (capacity <= m_capacity) return; // 只在需要更大容量时重新分配
-
-            char* newData = new char[capacity];
-            if (m_data)
-            {
-                std::memcpy(newData, m_data, m_size + 1); // 包含空终止符
-                delete[] m_data;
-            }
-            else
-            {
-                newData[0] = '\0'; // 确保新分配的内存有终止符
-            }
-            m_data = newData;
-            m_capacity = capacity;
-        }
-
-        char& operator[](const size_t index)
-        {
-            checkIndex(index);
-            return m_data[index];
-        }
-
-        const char& operator[](const size_t index) const
-        {
-            checkIndex(index);
-            return m_data[index];
-        }
-
-    private:
-        char* m_data;
-        size_t m_size;
-        size_t m_capacity;
-
-        void checkIndex(size_t index) const
-        {
-            if (index >= m_size)
-            {
-                throw std::out_of_range("String index out of range");
-            }
-        }
-    };
-
-    inline String operator+(const char* str, const String& other)
-    {
-        return String(str) + other;
-    }
-} // Tina
-*/
+#include <fmt/base.h>
 
 namespace Tina
 {
@@ -276,6 +71,30 @@ namespace Tina
     class StringMemoryPool
     {
     public:
+
+        struct PoolStats
+        {
+            size_t totalAllocations{0};
+            size_t currentAllocations{0};
+            size_t peakAllocations{0};
+            size_t totalMemoryUsed{0};
+            size_t currentMemoryUsed{0};
+            size_t peakMemoryUsed{0};
+
+            struct PoolTypeStats
+            {
+                size_t allocations{0};
+                size_t deallocations{0};
+                size_t currentUsage{0};
+                size_t peakUsage{0};
+            };
+
+            PoolTypeStats smallPool;
+            PoolTypeStats mediumPool;
+            PoolTypeStats largePool;
+            PoolTypeStats customAllocations;
+        };
+
         static constexpr size_t SMALL_STRING_SIZE = 32;
         static constexpr size_t MEDIUM_STRING_SIZE = 128;
         static constexpr size_t LARGE_STRING_SIZE = 512;
@@ -295,10 +114,21 @@ namespace Tina
         void deallocate(char* ptr, size_t size);
         static StringMemoryPool& getInstance();
 
+        const PoolStats& getStats() const;
+
+        void resetStats();
+        void printStats() const;
+
     private:
         std::vector<MemoryBlock> m_blocks;
         std::vector<MemoryBlock> m_mediumPool;
         std::vector<MemoryBlock> m_largePool;
+
+        PoolStats m_stats;
+
+        void updateAllocationStats(size_t size);
+        void updateDeallocationStats(size_t size);
+        void updatePoolStats(PoolStats::PoolTypeStats& stats,bool isAllocation);
 
         void initializePool(std::vector<MemoryBlock>& pool, size_t blockSize);
         void releasePool(std::vector<MemoryBlock>& pool);
@@ -306,3 +136,23 @@ namespace Tina
         void deallocateToPool(std::vector<MemoryBlock>& pool, const char* ptr);
     };
 }
+
+// 在 String.hpp 文件末尾修改格式化器实现
+template<>
+struct fmt::formatter<Tina::StringMemoryPool::PoolStats::PoolTypeStats> {
+    // 保持 parse 方法不变
+    constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+
+    // 修改 format 方法，添加 const 限定符
+    template<typename FormatContext>
+    auto format(const Tina::StringMemoryPool::PoolStats::PoolTypeStats& stats, FormatContext& ctx) const {
+        return fmt::format_to(
+            ctx.out(),
+            "allocations: {}, deallocations: {}, current_usage: {}, peak_usage: {}",
+            stats.allocations,
+            stats.deallocations,
+            stats.currentUsage,
+            stats.peakUsage
+        );
+    }
+};
