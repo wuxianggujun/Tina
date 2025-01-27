@@ -367,23 +367,25 @@ namespace Tina
         return *this;
     }
 
-    void String::reserve(size_t newCapacity)
-    {
-        // 如果新容量小于等于当前容量，直接返回
-        if (newCapacity <= getCapacity()) return;
+    void String::reserve(size_t newCapacity) {
+        fmt::print("reserve({}): current m_isSSO={}, current capacity={}\n",
+                   newCapacity, m_isSSO, getCapacity());
 
-        // 如果当前是SSO模式
-        if (m_isSSO)
-        {
-            // 只有当新容量大于SSO容量时才切换到堆
-            if (newCapacity > SSO_CAPACITY)
-            {
-                switchToHeap(newCapacity);
-            }
+        if (newCapacity <= getCapacity()) {
+            fmt::print("  -> No need to reserve more space\n");
+            return;
         }
-        else
-        {
-            // 已经在堆上，分配新的更大空间
+
+        if (m_isSSO) {
+            if (newCapacity > SSO_CAPACITY) {
+                fmt::print("  -> Switching to heap with capacity {}\n", newCapacity);
+                switchToHeap(newCapacity);
+            } else {
+                fmt::print("  -> Staying in SSO mode\n");
+            }
+        } else {
+            fmt::print("  -> Reallocating on heap from {} to {}\n",
+                      heap.m_capacity, newCapacity);
             char* newData = allocateMemory(newCapacity);
             std::memcpy(newData, heap.m_data, m_size + 1);
             deallocateMemory(heap.m_data, heap.m_capacity);
@@ -572,14 +574,13 @@ namespace Tina
         return m_size == 0;
     }
 
-    size_t String::capacity() const
-    {
-        if (m_isSSO)
-        {
-            return m_size == 0 ? 0 : SSO_CAPACITY; // 空字符串返回0，否则返回SSO容量
-        }
-        return heap.m_capacity;
+    size_t String::capacity() const {
+        size_t cap = m_isSSO ? SSO_CAPACITY : heap.m_capacity;
+        fmt::print("capacity(): m_isSSO={}, m_size={}, returning capacity={}\n",
+                   m_isSSO, m_size, cap);
+        return cap;
     }
+
 
     // 比较操作符
     bool String::operator==(const String& other) const

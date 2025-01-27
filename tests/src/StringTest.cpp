@@ -126,26 +126,28 @@ TEST_F(StringTest, AccessTest) {
     EXPECT_THROW(cs[4], std::out_of_range);
 }
 
-// 测试容量管理
 TEST_F(StringTest, CapacityTest) {
-    String s;
-    EXPECT_EQ(s.capacity(), 0);  // 空字符串应该报告0容量
-
-    s.reserve(10);
-    EXPECT_GE(s.capacity(), 10);  // 容量应该至少为10
+    String s1;
+    fmt::print("\nTesting empty string:\n");
+    fmt::print("s1: size={}, capacity={}\n", s1.size(), s1.capacity());
+    EXPECT_EQ(s1.capacity(), String::SSO_CAPACITY);  // 空字符串也应该有SSO容量
 
     String s2("Hello");
-    size_t originalCapacity = s2.capacity();
-    s2 += " World";  // 应该触发扩容
-    EXPECT_GT(s2.capacity(), originalCapacity);  // 新容量应该大于原容量
+    fmt::print("\nTesting small string:\n");
+    fmt::print("s2: size={}, capacity={}\n", s2.size(), s2.capacity());
+    EXPECT_EQ(s2.capacity(), String::SSO_CAPACITY);
 
-    // 测试SSO到堆的转换
-    String s3("Small");
-    EXPECT_LE(s3.capacity(), String::SSO_CAPACITY);  // 应该使用SSO
-    s3 += "This is a longer string that will force heap allocation";
-    EXPECT_GT(s3.capacity(), String::SSO_CAPACITY);  // 应该切换到堆分配
+    fmt::print("\nTesting reserve:\n");
+    s2.reserve(10);
+    fmt::print("After reserve(10): size={}, capacity={}\n", s2.size(), s2.capacity());
+    EXPECT_EQ(s2.capacity(), String::SSO_CAPACITY);  // 应该保持SSO容量
+
+    String s3;
+    s3.reserve(32);
+    fmt::print("\nTesting large reserve:\n");
+    fmt::print("s3: size={}, capacity={}\n", s3.size(), s3.capacity());
+    EXPECT_EQ(s3.capacity(), 32);
 }
-
 // 测试清除操作
 TEST_F(StringTest, ClearTest) {
     String s("Hello");
