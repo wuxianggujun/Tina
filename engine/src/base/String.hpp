@@ -20,6 +20,7 @@ namespace Tina
     class String
     {
     public:
+        // 构造函数
         String();
         String(const String& other);
         explicit String(const char* str);
@@ -29,18 +30,22 @@ namespace Tina
 
         ~String();
 
+        // 赋值运算符
         String& operator=(const String& other);
         String& operator=(String&& other) noexcept;
 
+        // 类型转换
         explicit operator std::string() const;
         explicit operator std::string_view() const;
 
+        // 访问方法
         [[nodiscard]] const char* c_str() const;
         [[nodiscard]] size_t length() const;
         [[nodiscard]] size_t size() const;
         [[nodiscard]] bool empty() const;
         [[nodiscard]] size_t capacity() const;
 
+        // 操作符重载
         bool operator==(const String& other) const;
         bool operator==(const char* str) const;
         bool operator!=(const String& other) const;
@@ -51,17 +56,62 @@ namespace Tina
         char& operator[](size_t index);
         const char& operator[](size_t index) const;
 
+        // 修改方法
         void clear();
         void reserve(size_t capacity);
+        void resize(size_t newSize, char ch = '\0');
+        void shrink_to_fit();
+
+        // 查找方法
+        size_t find(const String& str, size_t pos = 0) const;
+        size_t find(const char* str, size_t pos = 0) const;
+        size_t rfind(const String& str, size_t pos = npos) const;
+        size_t rfind(const char* str, size_t pos = npos) const;
+
+        // 子串操作
+        String substr(size_t pos = 0, size_t len = npos) const;
+        void append(const char* str, size_t n);
+        void append(const String& str);
+        void insert(size_t pos, const String& str);
+        void insert(size_t pos, const char* str);
+        void erase(size_t pos = 0, size_t len = npos);
+        void replace(size_t pos, size_t len, const String& str);
+        void replace(size_t pos, size_t len, const char* str);
+
+        static constexpr size_t SSO_CAPACITY = 15;
+        static constexpr size_t npos = static_cast<size_t>(-1);
 
     private:
+
+        union
+        {
+            struct
+            {
+                char* m_data;
+                size_t m_capacity;
+            } heap;
+
+            struct
+            {
+                char data[SSO_CAPACITY + 1];
+            } sso;
+        };
+        size_t m_size;
+        bool m_isSSO; // 标记是否使用SSO
+
+        // 私有辅助方法
         void checkIndex(size_t index) const;
         char* allocateMemory(size_t size);
         void deallocateMemory(char* ptr, size_t size);
+        bool canUseSSO(size_t size) const { return size <= SSO_CAPACITY; }
+        char* getDataPtr() { return m_isSSO ? sso.data : heap.m_data; }
+        const char* getDataPtr() const { return m_isSSO ? sso.data : heap.m_data; }
+        size_t getCapacity() const { return m_isSSO ? SSO_CAPACITY : heap.m_capacity; }
+        void moveFrom(String&& other) noexcept;
+        void copyFrom(const String& other);
+        void switchToHeap(size_t newCapacity);
+        void tryToSwitchToSSO();
 
-        char* m_data;
-        size_t m_size;
-        size_t m_capacity;
         static StringMemoryPool& getMemoryPool();
     };
 
@@ -71,7 +121,6 @@ namespace Tina
     class StringMemoryPool
     {
     public:
-
         struct PoolStats
         {
             size_t totalAllocations{0};
@@ -128,7 +177,7 @@ namespace Tina
 
         void updateAllocationStats(size_t size);
         void updateDeallocationStats(size_t size);
-        void updatePoolStats(PoolStats::PoolTypeStats& stats,bool isAllocation);
+        void updatePoolStats(PoolStats::PoolTypeStats& stats, bool isAllocation);
 
         void initializePool(std::vector<MemoryBlock>& pool, size_t blockSize);
         void releasePool(std::vector<MemoryBlock>& pool);
@@ -137,15 +186,26 @@ namespace Tina
     };
 }
 
-// 在 String.hpp 文件末尾修改格式化器实现
+// fmt 格式化支持
 template<>
-struct fmt::formatter<Tina::StringMemoryPool::PoolStats::PoolTypeStats> {
+struct fmt::formatter<Tina::String> : formatter<string_view> {
+    template<typename FormatContext>
+    auto format(const Tina::String& str, FormatContext& ctx) const {
+        return formatter<string_view>::format(string_view(str.c_str(), str.length()), ctx);
+    }
+};
+
+// 在 String.hpp 文件末尾修改格式化器实现
+template <>
+struct fmt::formatter<Tina::StringMemoryPool::PoolStats::PoolTypeStats>
+{
     // 保持 parse 方法不变
     constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
 
     // 修改 format 方法，添加 const 限定符
-    template<typename FormatContext>
-    auto format(const Tina::StringMemoryPool::PoolStats::PoolTypeStats& stats, FormatContext& ctx) const {
+    template <typename FormatContext>
+    auto format(const Tina::StringMemoryPool::PoolStats::PoolTypeStats& stats, FormatContext& ctx) const
+    {
         return fmt::format_to(
             ctx.out(),
             "allocations: {}, deallocations: {}, current_usage: {}, peak_usage: {}",
