@@ -47,4 +47,5 @@ endfunction()
 
 compile_shaders(
         basic
+        sprite
 )

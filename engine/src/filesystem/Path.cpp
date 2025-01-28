@@ -19,6 +19,14 @@ namespace Tina
         {
         }
 
+        explicit Impl(const String& path): m_path(path.c_str())
+        {
+        }
+
+        explicit Impl(const char* path): m_path(path)
+        {
+        }
+
         explicit Impl(ghc::filesystem::path path): m_path(std::move(path))
         {
         }
@@ -56,6 +64,16 @@ namespace Tina
 
 
     Path::Path(const std::string& path): m_impl(new Impl(path))
+    {
+
+    }
+
+    Path::Path(const String& path): m_impl(new Impl(path))
+    {
+
+    }
+
+    Path::Path(const char* path): m_impl(new Impl(path))
     {
 
     }
@@ -100,6 +118,9 @@ namespace Tina
         return m_impl->m_path.string();
     }
 
+    String Path::toTinaString() const {
+        return String(toString());
+    }
 
     std::string Path::getFullPath() const {
         return m_impl->m_path.string();
@@ -121,8 +142,20 @@ namespace Tina
         return Path((m_impl->m_path / relativePath).string());
     }
 
+    Path Path::getChildFile(const String& relativePath) const {
+        return Path((m_impl->m_path / relativePath.c_str()).string());
+    }
+
+    Path Path::getChildFile(const char* relativePath) const {
+        return Path((m_impl->m_path / relativePath).string());
+    }
+
     Path Path::getSiblingFile(const std::string &fileName) const {
         return Path((m_impl->m_path.parent_path() / fileName).string());
+    }
+
+    Path Path::getSiblingFile(const String& fileName) const {
+        return Path((m_impl->m_path.parent_path() / fileName.c_str()).string());
     }
 
     bool Path::exists() const {

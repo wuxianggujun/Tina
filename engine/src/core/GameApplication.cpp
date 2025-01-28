@@ -8,6 +8,7 @@
 #include "graphics/Color.hpp"
 #include "window/GLFWWindow.hpp"
 #include "core/Config.hpp"
+#include <bgfx/bgfx.h>
 #include <fmt/format.h>
 
 namespace Tina
@@ -74,6 +75,7 @@ namespace Tina
 
         // 创建2D渲染器
         m_renderer2D = std::make_unique<Renderer2D>();
+        m_renderer2D->initialize();
     }
 
     void GameApplication::run()
@@ -109,17 +111,26 @@ namespace Tina
     {
         if (m_window)
         {
+            // 设置视图
+            bgfx::setViewRect(0, 0, 0, uint16_t(m_window->getResolution().x), uint16_t(m_window->getResolution().y));
+            bgfx::touch(0);
+
             if (m_renderer2D)
             {
                 m_renderer2D->begin();
-                // 在这里添加2D渲染代码
+                // 使用 drawRect 替代 drawQuad
+                m_renderer2D->drawRect(Vector2f(100.0f, 100.0f), Vector2f(100.0f, 100.0f), Color(1.0f, 0.0f, 0.0f, 1.0f));
                 m_renderer2D->end();
+                m_renderer2D->flush();  // 确保刷新缓冲区
             }
 
             if (m_guiSystem)
             {
                 // m_guiSystem->render();
             }
+
+            // 提交帧
+            bgfx::frame();
         }
     }
 

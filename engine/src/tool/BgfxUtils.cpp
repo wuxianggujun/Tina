@@ -39,39 +39,56 @@ namespace Tina::BgfxUtils {
     }
 
     static bgfx::ShaderHandle loadShader(bx::FileReaderI *_reader, const bx::StringView &_name) {
-        bx::FilePath filePath("shaders/");
+        Path shaderPath = ResourcePath::getShaderPath();
 
+        // 根据渲染器类型选择着色器目录
+        String rendererDir;
         switch (bgfx::getRendererType()) {
             case bgfx::RendererType::Noop:
             case bgfx::RendererType::Direct3D11:
-            case bgfx::RendererType::Direct3D12: filePath.join("dx11");
+            case bgfx::RendererType::Direct3D12: 
+                rendererDir = String("dx11");
                 break;
             case bgfx::RendererType::Agc:
-            case bgfx::RendererType::Gnm: filePath.join("pssl");
+            case bgfx::RendererType::Gnm: 
+                rendererDir = String("pssl");
                 break;
-            case bgfx::RendererType::Metal: filePath.join("metal");
+            case bgfx::RendererType::Metal: 
+                rendererDir = String("metal");
                 break;
-            case bgfx::RendererType::Nvn: filePath.join("nvn");
+            case bgfx::RendererType::Nvn: 
+                rendererDir = String("nvn");
                 break;
-            case bgfx::RendererType::OpenGL: filePath.join("glsl");
+            case bgfx::RendererType::OpenGL: 
+                rendererDir = String("glsl");
                 break;
-            case bgfx::RendererType::OpenGLES: filePath.join("essl");
+            case bgfx::RendererType::OpenGLES: 
+                rendererDir = String("essl");
                 break;
-            case bgfx::RendererType::Vulkan: filePath.join("spirv");
+            case bgfx::RendererType::Vulkan: 
+                rendererDir = String("spirv");
                 break;
-
-            case bgfx::RendererType::Count:
-                BX_ASSERT(false, "You should not be here!");
+            default:
+                BX_ASSERT(false, "Unsupported renderer type!");
                 break;
         }
 
-        char fileName[512];
-        bx::strCopy(fileName, BX_COUNTOF(fileName), _name);
-        bx::strCat(fileName, BX_COUNTOF(fileName), ".bin");
+        shaderPath = shaderPath.getChildFile(rendererDir);
+        
+        String fileName(_name.getPtr(), _name.getLength());
+        fileName += String(".bin");
+        
+        Path fullPath = shaderPath.getChildFile(fileName);
 
-        filePath.join(fileName);
+        std::cout << "Loading shader from: " << fullPath.toString() << std::endl;
 
-        bgfx::ShaderHandle handle = bgfx::createShader(loadMem(_reader, filePath.getCPtr()));
+        const bgfx::Memory* mem = loadMem(_reader, bx::FilePath(fullPath.toString().c_str()));
+        if (!mem) {
+            std::cerr << "Failed to load shader: " << fullPath.toString() << std::endl;
+            return BGFX_INVALID_HANDLE;
+        }
+
+        bgfx::ShaderHandle handle = bgfx::createShader(mem);
         bgfx::setName(handle, _name.getPtr(), _name.getLength());
 
         return handle;

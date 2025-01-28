@@ -214,4 +214,42 @@ TEST_F(StringTest, MemoryPoolStatsTest) {
     StringMemoryPool::getInstance().printStats();
 }
 
+TEST_F(StringTest, SSOTest) {
+    fmt::print("\n=== SSO Test ===\n");
+
+    // 测试空字符串
+    String empty;
+    fmt::print("Empty string: size={}, capacity={}, isSSO={}\n",
+               empty.size(), empty.capacity(), empty.size() <= String::SSO_CAPACITY);
+
+    // 测试小字符串（应该使用 SSO）
+    String small("Hello");
+    fmt::print("Small string: size={}, capacity={}, isSSO={}\n",
+               small.size(), small.capacity(), small.size() <= String::SSO_CAPACITY);
+
+    // 测试刚好在 SSO 边界的字符串
+    String boundary(std::string(String::SSO_CAPACITY, 'x'));
+    fmt::print("Boundary string: size={}, capacity={}, isSSO={}\n",
+               boundary.size(), boundary.capacity(),
+               boundary.size() <= String::SSO_CAPACITY);
+
+    // 测试超过 SSO 容量的字符串
+    String large(std::string(String::SSO_CAPACITY + 1, 'x'));
+    fmt::print("Large string: size={}, capacity={}, isSSO={}\n",
+               large.size(), large.capacity(),
+               large.size() <= String::SSO_CAPACITY);
+
+    // 验证预期行为
+    EXPECT_EQ(empty.capacity(), String::SSO_CAPACITY);
+    EXPECT_EQ(small.capacity(), String::SSO_CAPACITY);
+    EXPECT_EQ(boundary.capacity(), String::SSO_CAPACITY);
+    EXPECT_GT(large.capacity(), String::SSO_CAPACITY);
+
+    // 测试 SSO 字符串的内存分配
+    StringMemoryPool::getInstance().resetStats();
+    String ssoStr("Small String");
+    fmt::print("\nMemory stats after creating SSO string:\n");
+    StringMemoryPool::getInstance().printStats();
+    EXPECT_EQ(StringMemoryPool::getInstance().getStats().totalAllocations, 0);
+}
 

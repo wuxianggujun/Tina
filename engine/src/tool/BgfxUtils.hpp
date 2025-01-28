@@ -11,6 +11,7 @@
 #include <bx/pixelformat.h>
 #include <bx/filepath.h>
 #include <bimg/decode.h>
+#include "filesystem/ResourcePath.hpp"
 
 namespace Tina::BgfxUtils {
     static bx::StringView s_currentDir = "./";

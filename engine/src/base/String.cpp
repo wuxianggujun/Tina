@@ -292,6 +292,27 @@ namespace Tina
         }
     }
 
+    String::String(const char* str, size_t length) {
+        if (str == nullptr) {
+            m_isSSO = true;
+            m_size = 0;
+            sso.data[0] = '\0';
+            return;
+        }
+
+        m_size = length;
+        if (canUseSSO(m_size)) {
+            m_isSSO = true;
+            std::memcpy(sso.data, str, m_size);
+            sso.data[m_size] = '\0';
+        } else {
+            m_isSSO = false;
+            heap.m_capacity = m_size + 1;
+            heap.m_data = allocateMemory(heap.m_capacity);
+            std::memcpy(heap.m_data, str, m_size);
+            heap.m_data[m_size] = '\0';
+        }
+    }
 
     String::String(String&& other) noexcept : m_size(other.m_size), m_isSSO(other.m_isSSO)
     {

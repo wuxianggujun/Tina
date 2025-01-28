@@ -5,44 +5,39 @@
 
 #pragma once
 
-#include <string>
+#include "base/String.hpp"
 
 namespace Tina {
     class Path {
     public:
         explicit Path(const std::string &path);
+        explicit Path(const String &path);  // 添加 String 构造函数
+        explicit Path(const char* path);    // 添加 const char* 构造函数
 
         ~Path();
 
         //拷贝构造函数
         Path(const Path &other);
-
         Path(Path &&other) noexcept;
-
         Path &operator=(const Path &other);
-
         Path &operator=(Path &&other) noexcept;
 
-
         [[nodiscard]] Path getParentDirectory() const;
-
         [[nodiscard]] std::string toString() const;
-
-        // 返回完整路径的字符串形式
+        [[nodiscard]] String toTinaString() const;  // 添加转换到 String 的方法
         [[nodiscard]] std::string getFullPath() const;
-
         [[nodiscard]] std::string getFileName() const;
-
         [[nodiscard]] std::string getFileNameWithoutExtension() const;
-
         [[nodiscard]] std::string getExtension() const;
 
         [[nodiscard]] Path getChildFile(const std::string& relativePath) const;
+        [[nodiscard]] Path getChildFile(const String& relativePath) const;  // 添加 String 版本
+        [[nodiscard]] Path getChildFile(const char* relativePath) const;    // 添加 const char* 版本
 
         Path getSiblingFile(const std::string &fileName) const;
+        Path getSiblingFile(const String &fileName) const;  // 添加 String 版本
 
         bool exists() const;
-
         bool isEmpty() const;
 
     private:

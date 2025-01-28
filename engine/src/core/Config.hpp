@@ -32,7 +32,7 @@ namespace Tina
         T getNested(const std::vector<std::string>& keys) const;
 
         template <typename T>
-        static T convertTo(const YamlValuePtr& value);
+        T convertTo(const YamlValuePtr& valuePtr) const;
 
         // Helper function to set nested values
         void setNested(const std::vector<std::string>& keys, const YamlValue& value);
@@ -115,15 +115,23 @@ namespace Tina
     }
 
     template <typename T>
-    T Config::convertTo(const YamlValuePtr& valuePtr)
+    T Config::convertTo(const YamlValuePtr& valuePtr) const
     {
-        const YamlValue value = *valuePtr;
+        if (!valuePtr) {
+            throw std::runtime_error("Null value pointer");
+        }
+
+        const YamlValue& value = *valuePtr;
 
         if constexpr (std::is_same_v<T, int>)
         {
             if (std::holds_alternative<int>(value.data))
             {
                 return std::get<int>(value.data);
+            }
+            else if (std::holds_alternative<double>(value.data))
+            {
+                return static_cast<int>(std::get<double>(value.data));
             }
         }
         else if constexpr (std::is_same_v<T, double>)
@@ -132,6 +140,10 @@ namespace Tina
             {
                 return std::get<double>(value.data);
             }
+            else if (std::holds_alternative<int>(value.data))
+            {
+                return static_cast<double>(std::get<int>(value.data));
+            }
         }
         else if constexpr (std::is_same_v<T, bool>)
         {
@@ -139,12 +151,33 @@ namespace Tina
             {
                 return std::get<bool>(value.data);
             }
+            else if (std::holds_alternative<int>(value.data))
+            {
+                return std::get<int>(value.data) != 0;
+            }
+            else if (std::holds_alternative<std::string>(value.data))
+            {
+                const auto& str = std::get<std::string>(value.data);
+                return str == "true" || str == "1" || str == "yes" || str == "on";
+            }
         }
         else if constexpr (std::is_same_v<T, std::string>)
         {
             if (std::holds_alternative<std::string>(value.data))
             {
                 return std::get<std::string>(value.data);
+            }
+            else if (std::holds_alternative<int>(value.data))
+            {
+                return std::to_string(std::get<int>(value.data));
+            }
+            else if (std::holds_alternative<double>(value.data))
+            {
+                return std::to_string(std::get<double>(value.data));
+            }
+            else if (std::holds_alternative<bool>(value.data))
+            {
+                return std::get<bool>(value.data) ? "true" : "false";
             }
         }
         throw std::runtime_error("Type conversion error");

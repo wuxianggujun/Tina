@@ -4,6 +4,7 @@
 
 #include "YamlParser.hpp"
 #include <fstream>
+#include <iostream>
 
 namespace Tina
 {
@@ -32,19 +33,26 @@ namespace Tina
     {
         if (node.IsScalar())
         {
+            std::string originalValue = node.Scalar();
+            
+            // 尝试按顺序转换，但不输出中间失败的消息
             try { return std::make_shared<YamlValue>(YamlValue{node.as<int>()}); }
-            catch (...)
-            {
-            }
+            catch (...) {}
+            
             try { return std::make_shared<YamlValue>(YamlValue{node.as<double>()}); }
-            catch (...)
-            {
-            }
+            catch (...) {}
+            
             try { return std::make_shared<YamlValue>(YamlValue{node.as<bool>()}); }
-            catch (...)
-            {
+            catch (...) {}
+
+            // 最后尝试作为字符串
+            try {
+                return std::make_shared<YamlValue>(YamlValue{node.as<std::string>()});
             }
-            return std::make_shared<YamlValue>(YamlValue{node.as<std::string>()});
+            catch (const YAML::Exception& e) {
+                std::cerr << "Failed to parse value: " << originalValue << " - " << e.what() << std::endl;
+                throw;
+            }
         }
         if (node.IsSequence())
         {

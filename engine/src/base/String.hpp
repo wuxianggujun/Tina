@@ -27,6 +27,7 @@ namespace Tina
         explicit String(const std::string& str);
         explicit String(std::string_view str);
         String(String&& other) noexcept;
+        String(const char* str, size_t length);
 
         ~String();
 
