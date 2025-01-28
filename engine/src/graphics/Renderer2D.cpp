@@ -41,6 +41,7 @@ namespace Tina
 
     void Renderer2D::initialize()
     {
+        // 首先创建顶点布局
         bgfx::VertexLayout layout;
         layout.begin()
               .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
@@ -55,25 +56,69 @@ namespace Tina
             BGFX_BUFFER_ALLOW_RESIZE
         );
 
+        if (!bgfx::isValid(m_vertexBuffer)) {
+            fmt::print("Failed to create vertex buffer\n");
+            throw std::runtime_error("Failed to create vertex buffer");
+        }
+
         // 创建动态索引缓冲区
         m_indexBuffer = bgfx::createDynamicIndexBuffer(
             MAX_INDICES,
             BGFX_BUFFER_ALLOW_RESIZE
         );
 
+        if (!bgfx::isValid(m_indexBuffer)) {
+            fmt::print("Failed to create index buffer\n");
+            throw std::runtime_error("Failed to create index buffer");
+        }
+
         // 加载着色器程序
+        fmt::print("Loading shader program...\n");
         m_program = BgfxUtils::loadProgram("sprite.vs", "sprite.fs");
         
-        // 创建 uniform 句柄
-        m_s_texture = bgfx::createUniform("s_texture", bgfx::UniformType::Sampler);
-        m_u_modelViewProj.init("u_modelViewProj", bgfx::UniformType::Mat4);
-
-        if (!bgfx::isValid(m_program) || !bgfx::isValid(m_s_texture))
-        {
-            fmt::print("Failed to initialize Renderer2D resources!\n");
-            if (!bgfx::isValid(m_program)) fmt::print("Failed to create shader program\n");
-            if (!bgfx::isValid(m_s_texture)) fmt::print("Failed to create s_texture uniform\n");
+        if (!bgfx::isValid(m_program)) {
+            fmt::print("Failed to load shader program\n");
+            throw std::runtime_error("Failed to load shader program");
         }
+        fmt::print("Successfully loaded shader program, handle: {}\n", m_program.idx);
+
+        // 等待一帧确保着色器程序完全加载
+        bgfx::frame();
+        bgfx::frame(); // 等待两帧以确保完全加载
+        
+        // 创建 MVP uniform
+        fmt::print("Creating MVP uniform...\n");
+        bgfx::UniformHandle mvp = bgfx::createUniform("u_modelViewProj", bgfx::UniformType::Mat4);
+        if (!bgfx::isValid(mvp)) {
+            fmt::print("Failed to create MVP uniform. This might happen if the uniform is not used in the shader.\n");
+            fmt::print("Shader program handle: {}, is valid: {}\n", m_program.idx, bgfx::isValid(m_program));
+            throw std::runtime_error("Failed to create MVP uniform");
+        }
+        fmt::print("Successfully created MVP uniform\n");
+        
+        // 初始化 ShaderUniform
+        m_u_modelViewProj = ShaderUniform();
+        m_u_modelViewProj.setHandle(mvp);
+
+        // 创建采样器 uniform
+        fmt::print("Creating sampler uniform...\n");
+        m_s_texture = bgfx::createUniform("s_texture", bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(m_s_texture)) {
+            fmt::print("Failed to create sampler uniform\n");
+            throw std::runtime_error("Failed to create sampler uniform");
+        }
+        fmt::print("Successfully created sampler uniform, handle: {}\n", m_s_texture.idx);
+
+        // 确保所有资源都已正确初始化
+        if (!bgfx::isValid(m_program) || !bgfx::isValid(m_s_texture) || !m_u_modelViewProj.isValid()) {
+            fmt::print("Resource validation failed:\n");
+            fmt::print("  Program valid: {}\n", bgfx::isValid(m_program));
+            fmt::print("  Sampler valid: {}\n", bgfx::isValid(m_s_texture));
+            fmt::print("  MVP valid: {}\n", m_u_modelViewProj.isValid());
+            throw std::runtime_error("Resource validation failed");
+        }
+        
+        fmt::print("Successfully initialized all Renderer2D resources\n");
     }
 
     void Renderer2D::begin()
@@ -92,12 +137,7 @@ namespace Tina
 
     void Renderer2D::flush()
     {
-        if (m_vertexCount == 0)
-        {
-            return;
-        }
-
-        if (m_vertices.empty() || m_indices.empty())
+        if (m_vertexCount == 0 || m_vertices.empty() || m_indices.empty())
         {
             return;
         }
@@ -106,6 +146,7 @@ namespace Tina
         const bgfx::Memory* vertexMem = bgfx::alloc(m_vertexCount * sizeof(Vertex));
         if (vertexMem == nullptr)
         {
+            fmt::print("Failed to allocate vertex memory\n");
             return;
         }
         memcpy(vertexMem->data, m_vertices.data(), m_vertexCount * sizeof(Vertex));
@@ -139,7 +180,13 @@ namespace Tina
 
         float mvp[16];
         bx::mtxMul(mvp, view, proj);
-        m_u_modelViewProj.setMatrix4(mvp);
+
+        // 检查 uniform 是否有效
+        if (m_u_modelViewProj.isValid()) {
+            m_u_modelViewProj.setMatrix4(mvp);
+        } else {
+            fmt::print("Warning: MVP uniform is invalid, skipping matrix update\n");
+        }
 
         // 提交绘制命令
         bgfx::setVertexBuffer(0, m_vertexBuffer, 0, m_vertexCount);
