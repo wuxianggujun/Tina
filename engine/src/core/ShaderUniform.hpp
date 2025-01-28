@@ -21,7 +21,7 @@ namespace Tina {
 
         void free();
 
-        void setHandle(bgfx::UniformHandle handle);
+        void setHandle(bgfx::UniformHandle handle, const char* uniformName);
 
         void setValue(float x, float y = 0.f, float z = 0.f, float w = 0.f) const;
 

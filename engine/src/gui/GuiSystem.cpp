@@ -1,4 +1,4 @@
-#include "GuiSystem.hpp"
+/*#include "GuiSystem.hpp"
 #include <bgfx/bgfx.h>
 #include "tool/BgfxUtils.hpp"
 
@@ -143,4 +143,4 @@ void GuiSystem::Resize(uint16_t width, uint16_t height) {
     m_height = height;
 }
 
-}  // namespace Engine 
+}  // namespace Engine */

@@ -28,11 +28,20 @@ namespace Tina {
         this->free();
     }
 
-    void ShaderUniform::setHandle(bgfx::UniformHandle handle) {
+    void ShaderUniform::setHandle(bgfx::UniformHandle handle, const char* uniformName) {
         if (bgfx::isValid(m_handle)) {
             this->free();
         }
         m_handle = handle;
+        m_uniformName = uniformName;
+        
+        if (!bgfx::isValid(m_handle)) {
+            fmt::print("Warning: Setting invalid uniform handle for '{}'\n", 
+                m_uniformName ? m_uniformName : "unknown");
+        } else {
+            fmt::print("Successfully set uniform handle for '{}'\n", 
+                m_uniformName ? m_uniformName : "unknown");
+        }
     }
 
     void ShaderUniform::init(const char *uniformName, bgfx::UniformType::Enum type, uint16_t num) {
@@ -86,8 +95,20 @@ namespace Tina {
     void ShaderUniform::setMatrix4(const float* matrix) const {
         if (!bgfx::isValid(m_handle)) {
             fmt::print("Attempting to set matrix for invalid uniform '{}'\n", m_uniformName ? m_uniformName : "unknown");
-            return;
+            throw std::runtime_error("Invalid uniform handle");
         }
-        bgfx::setUniform(m_handle, matrix);
+        
+        if (matrix == nullptr) {
+            fmt::print("Attempting to set null matrix for uniform '{}'\n", m_uniformName ? m_uniformName : "unknown");
+            throw std::runtime_error("Null matrix pointer");
+        }
+
+        try {
+            bgfx::setUniform(m_handle, matrix);
+            fmt::print("Successfully set matrix for uniform '{}'\n", m_uniformName ? m_uniformName : "unknown");
+        } catch (const std::exception& e) {
+            fmt::print("Failed to set matrix for uniform '{}': {}\n", m_uniformName ? m_uniformName : "unknown", e.what());
+            throw;
+        }
     }
 }

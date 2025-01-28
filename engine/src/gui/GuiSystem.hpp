@@ -6,6 +6,7 @@
 
 namespace Tina {
 
+/*
 struct PosColorVertex {
     float x;
     float y;
@@ -22,6 +23,7 @@ struct PosColorVertex {
 
     static bgfx::VertexLayout ms_layout;
 };
+*/
 
 class GuiSystem {
 public:
@@ -47,7 +49,7 @@ private:
     void InitializeShaders();
     void CreateBuffers();
     
-    std::vector<PosColorVertex> m_vertices;
+    // std::vector<PosColorVertex> m_vertices;
     std::vector<uint16_t> m_indices;
 };
 

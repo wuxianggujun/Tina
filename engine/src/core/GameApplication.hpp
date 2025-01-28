@@ -6,7 +6,6 @@
 
 #include <memory>
 #include "window/IWindow.hpp"
-#include "gui/GuiSystem.hpp"
 #include "graphics/Renderer2D.hpp"
 #include "graphics/Texture.hpp"
 #include "math/Vector.hpp"
@@ -30,12 +29,10 @@ namespace Tina
 
     protected:
         std::unique_ptr<IWindow> m_window;
-        std::unique_ptr<GuiSystem> m_guiSystem;
+        // std::unique_ptr<GuiSystem> m_guiSystem;
         std::unique_ptr<Renderer2D> m_renderer2D;
         TextureHandle m_logoTexture;
         float m_lastFrameTime{0.0f};
         Path m_configPath;
-
-        GuiSystem* createGuiSystem();
     };
 } // Tina

@@ -73,7 +73,7 @@ namespace Tina
         m_window->create(windowConfig);
 
         // 创建GUI系统
-        m_guiSystem = std::make_unique<GuiSystem>();
+        // m_guiSystem = std::make_unique<GuiSystem>();
 
         // 创建2D渲染器
         m_renderer2D = std::make_unique<Renderer2D>();
@@ -103,10 +103,10 @@ namespace Tina
 
     void GameApplication::update(float deltaTime)
     {
-        if (m_guiSystem)
-        {
-            // m_guiSystem->update(deltaTime);
-        }
+        // if (m_guiSystem)
+        // {
+        //     // m_guiSystem->update(deltaTime);
+        // }
     }
 
     void GameApplication::render()
@@ -146,17 +146,12 @@ namespace Tina
 
             if (m_renderer2D)
             {
-                m_renderer2D->begin();
-                // 使用 drawRect 替代 drawQuad
-                m_renderer2D->drawRect(Vector2f(100.0f, 100.0f), Vector2f(100.0f, 100.0f), Color(1.0f, 0.0f, 0.0f, 1.0f));
-                m_renderer2D->end();
-                m_renderer2D->flush();  // 确保刷新缓冲区
             }
 
-            if (m_guiSystem)
-            {
-                // m_guiSystem->render();
-            }
+            // if (m_guiSystem)
+            // {
+            //     // m_guiSystem->render();
+            // }
 
             // 提交帧
             bgfx::frame();
@@ -170,10 +165,10 @@ namespace Tina
             m_renderer2D.reset();
         }
 
-        if (m_guiSystem)
-        {
-            m_guiSystem.reset();
-        }
+        // if (m_guiSystem)
+        // {
+        //     m_guiSystem.reset();
+        // }
 
         if (m_window)
         {
