@@ -33,6 +33,10 @@ namespace Tina
         {
             bgfx::destroy(m_program);
         }
+        if (bgfx::isValid(m_s_texture))
+        {
+            bgfx::destroy(m_s_texture);
+        }
     }
 
     void Renderer2D::initialize()
@@ -59,7 +63,17 @@ namespace Tina
 
         // 加载着色器程序
         m_program = BgfxUtils::loadProgram("sprite.vs", "sprite.fs");
+        
+        // 创建 uniform 句柄
         m_s_texture = bgfx::createUniform("s_texture", bgfx::UniformType::Sampler);
+        m_u_modelViewProj.init("u_modelViewProj", bgfx::UniformType::Mat4);
+
+        if (!bgfx::isValid(m_program) || !bgfx::isValid(m_s_texture))
+        {
+            fmt::print("Failed to initialize Renderer2D resources!\n");
+            if (!bgfx::isValid(m_program)) fmt::print("Failed to create shader program\n");
+            if (!bgfx::isValid(m_s_texture)) fmt::print("Failed to create s_texture uniform\n");
+        }
     }
 
     void Renderer2D::begin()
@@ -105,6 +119,27 @@ namespace Tina
         // 设置渲染状态
         bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
             BGFX_STATE_BLEND_ALPHA);
+
+        // 设置变换矩阵
+        float view[16];
+        float proj[16];
+        bx::mtxIdentity(view);
+        bx::mtxOrtho(
+            proj,
+            0.0f,                                   // 左边界
+            800.0f,                                 // 右边界
+            600.0f,                                 // 底边界
+            0.0f,                                   // 顶边界
+            0.0f,                                   // 近平面
+            1000.0f,                                // 远平面
+            0.0f,                                   // 偏移
+            bgfx::getCaps()->homogeneousDepth,     // 是否使用同质深度
+            bx::Handedness::Right                   // 坐标系手性
+        );
+
+        float mvp[16];
+        bx::mtxMul(mvp, view, proj);
+        m_u_modelViewProj.setMatrix4(mvp);
 
         // 提交绘制命令
         bgfx::setVertexBuffer(0, m_vertexBuffer, 0, m_vertexCount);

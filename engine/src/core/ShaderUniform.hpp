@@ -25,6 +25,8 @@ namespace Tina {
 
         void setValue(const Color &color, bool needsRounding = false) const;
 
+        void setMatrix4(const float* matrix) const;
+
         [[nodiscard]] const bgfx::UniformHandle &getHandle() const { return m_handle; };
 
     private:

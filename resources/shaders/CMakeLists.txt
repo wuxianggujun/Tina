@@ -15,8 +15,8 @@ function(compile_shaders)
             set(IN_FRAGMENT  "${CMAKE_SOURCE_DIR}/resources/shaders/${shader_name}.fs.sc")
             set(IN_DEF       "${CMAKE_SOURCE_DIR}/resources/shaders/${shader_name}.def.sc")
 
-            set(OUT_VERTEX   "${CMAKE_SOURCE_DIR}/resources/shaders/${shader_name}.${profile}.vs.bin")
-            set(OUT_FRAGMENT "${CMAKE_SOURCE_DIR}/resources/shaders/${shader_name}.${profile}.fs.bin")
+            set(OUT_VERTEX   "${CMAKE_BINARY_DIR}/shaders/${shader_name}.${profile}.vs.bin")
+            set(OUT_FRAGMENT "${CMAKE_BINARY_DIR}/shaders/${shader_name}.${profile}.fs.bin")
 
             set(BGFX_SHADER_INCLUDE_PATH "${CMAKE_SOURCE_DIR}/dependencies/bgfx.cmake/bgfx/src")
 
@@ -33,6 +33,32 @@ function(compile_shaders)
                     DEPENDS ${IN_FRAGMENT} ${IN_DEF}
                     COMMAND ${BGFX_SHADERC} --type fragment --platform ${platform} --profile ${profile} -f ${IN_FRAGMENT} --varyingdef ${IN_DEF} -o ${OUT_FRAGMENT} -i "${BGFX_SHADER_INCLUDE_PATH}"
             )
+
+            # Create output directories for each renderer type
+            foreach(renderer_type IN ITEMS dx11 glsl spv metal)
+                file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/shaders/${renderer_type}")
+            endforeach()
+
+            # Copy compiled shaders to appropriate renderer directories
+            if(profile STREQUAL "s_5_0")
+                add_custom_command(
+                    TARGET shaders POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy ${OUT_VERTEX} "${CMAKE_BINARY_DIR}/shaders/dx11/${shader_name}.vs.bin"
+                    COMMAND ${CMAKE_COMMAND} -E copy ${OUT_FRAGMENT} "${CMAKE_BINARY_DIR}/shaders/dx11/${shader_name}.fs.bin"
+                )
+            elseif(profile STREQUAL "120")
+                add_custom_command(
+                    TARGET shaders POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy ${OUT_VERTEX} "${CMAKE_BINARY_DIR}/shaders/glsl/${shader_name}.vs.bin"
+                    COMMAND ${CMAKE_COMMAND} -E copy ${OUT_FRAGMENT} "${CMAKE_BINARY_DIR}/shaders/glsl/${shader_name}.fs.bin"
+                )
+            elseif(profile STREQUAL "spirv")
+                add_custom_command(
+                    TARGET shaders POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy ${OUT_VERTEX} "${CMAKE_BINARY_DIR}/shaders/spv/${shader_name}.vs.bin"
+                    COMMAND ${CMAKE_COMMAND} -E copy ${OUT_FRAGMENT} "${CMAKE_BINARY_DIR}/shaders/spv/${shader_name}.fs.bin"
+                )
+            endif()
 
             list(APPEND SHADER_SOURCE_LIST ${IN_VERTEX} ${IN_FRAGMENT} ${IN_DEF})
             list(APPEND SHADER_OUTPUT_LIST ${OUT_VERTEX} ${OUT_FRAGMENT})

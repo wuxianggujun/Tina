@@ -55,4 +55,8 @@ namespace Tina {
             bgfx::setUniform(m_handle, value);
         }*/
     }
+
+    void ShaderUniform::setMatrix4(const float* matrix) const {
+        bgfx::setUniform(m_handle, matrix);
+    }
 }

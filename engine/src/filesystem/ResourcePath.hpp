@@ -1,5 +1,4 @@
-#ifndef TINA_FILESYSTEM_RESOURCE_PATH_HPP
-#define TINA_FILESYSTEM_RESOURCE_PATH_HPP
+#pragma once
 
 #include "base/String.hpp"
 #include "filesystem/Path.hpp"
@@ -31,5 +30,3 @@ namespace Tina {
         static const String AUDIO_PATH;
     };
 }
-
-#endif // TINA_FILESYSTEM_RESOURCE_PATH_HPP

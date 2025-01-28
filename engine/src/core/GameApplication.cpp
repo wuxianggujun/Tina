@@ -11,6 +11,8 @@
 #include <bgfx/bgfx.h>
 #include <fmt/format.h>
 
+#include "bx/math.h"
+
 namespace Tina
 {
     GameApplication::GameApplication() : m_lastFrameTime(0.0f), m_configPath("")
@@ -111,8 +113,35 @@ namespace Tina
     {
         if (m_window)
         {
-            // 设置视图
+            // 设置视图清屏状态
+            bgfx::setViewClear(0
+                , BGFX_CLEAR_COLOR|BGFX_CLEAR_DEPTH
+                , 0x303030ff
+                , 1.0f
+                , 0
+            );
+
+            // 设置视图矩形
             bgfx::setViewRect(0, 0, 0, uint16_t(m_window->getResolution().x), uint16_t(m_window->getResolution().y));
+
+            // 设置视图变换矩阵
+            float view[16];
+            float proj[16];
+            bx::mtxIdentity(view);
+            bx::mtxOrtho(
+                proj,
+                0.0f,
+                float(m_window->getResolution().x),
+                float(m_window->getResolution().y),
+                0.0f,
+                -1.0f,
+                1.0f,
+                0.0f,
+                bgfx::getCaps()->homogeneousDepth,
+                bx::Handedness::Right
+            );
+            bgfx::setViewTransform(0, view, proj);
+
             bgfx::touch(0);
 
             if (m_renderer2D)
