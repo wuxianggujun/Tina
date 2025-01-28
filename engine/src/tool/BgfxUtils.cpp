@@ -7,7 +7,7 @@
 
 
 namespace Tina::BgfxUtils {
-    void *allocate(size_t size) {
+    void *allocate(const size_t size) {
         return bx::alloc(getAllocator(), size);
     }
 
@@ -28,7 +28,7 @@ namespace Tina::BgfxUtils {
 
     static const bgfx::Memory *loadMem(bx::FileReaderI *_reader, const bx::FilePath &_filePath) {
         if (bx::open(_reader, _filePath)) {
-            auto size = static_cast<uint32_t>(bx::getSize(_reader));
+            const auto size = static_cast<uint32_t>(bx::getSize(_reader));
             const bgfx::Memory *mem = bgfx::alloc(size + 1);
             bx::read(_reader, mem->data, size, bx::ErrorAssert{});
             bx::close(_reader);
@@ -66,7 +66,7 @@ namespace Tina::BgfxUtils {
                 rendererDir = String("essl");
                 break;
             case bgfx::RendererType::Vulkan: 
-                rendererDir = String("spirv");
+                rendererDir = String("spv");
                 break;
             default:
                 BX_ASSERT(false, "Unsupported renderer type!");

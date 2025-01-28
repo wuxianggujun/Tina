@@ -4,7 +4,7 @@
 namespace Tina {
     // 静态成员初始化
     Path ResourcePath::s_rootPath("");
-    const String ResourcePath::DEFAULT_ROOT_PATH("../../resources");
+    const String ResourcePath::DEFAULT_ROOT_PATH("../resources");
 
     // 资源子目录
     const String ResourcePath::SHADER_PATH("shaders");

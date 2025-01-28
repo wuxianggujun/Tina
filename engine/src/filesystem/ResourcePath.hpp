@@ -17,10 +17,7 @@ namespace Tina {
         static Path getModelPath();
         static Path getFontPath();
         static Path getAudioPath();
-        
-        // 组合路径
-        static Path combine(const Path& base, const Path& relative);
-        
+
     private:
         static Path s_rootPath;  // 资源根目录
         static const String DEFAULT_ROOT_PATH;  // 默认根目录

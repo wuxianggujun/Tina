@@ -34,11 +34,11 @@ namespace Tina {
         [[nodiscard]] Path getChildFile(const String& relativePath) const;  // 添加 String 版本
         [[nodiscard]] Path getChildFile(const char* relativePath) const;    // 添加 const char* 版本
 
-        Path getSiblingFile(const std::string &fileName) const;
-        Path getSiblingFile(const String &fileName) const;  // 添加 String 版本
+        [[nodiscard]] Path getSiblingFile(const std::string &fileName) const;
+        [[nodiscard]] Path getSiblingFile(const String &fileName) const;  // 添加 String 版本
 
-        bool exists() const;
-        bool isEmpty() const;
+        [[nodiscard]] bool exists() const;
+        [[nodiscard]] bool isEmpty() const;
 
     private:
         class Impl; // 前向声明
