@@ -7,16 +7,20 @@
 
 #include "EventHandler.hpp"
 
-namespace Tina {
-    GLFWWindow::GLFWWindow() : m_window(nullptr, GlfwWindowDeleter()) {
+namespace Tina
+{
+    GLFWWindow::GLFWWindow() : m_window(nullptr, GlfwWindowDeleter())
+    {
         glfwSetErrorCallback(errorCallback);
-        if (!glfwInit()) {
+        if (!glfwInit())
+        {
             fmt::printf("GLFW initialization failed\n");
             return;
         }
     }
 
-    void GLFWWindow::create(const WindowConfig &config) {
+    void GLFWWindow::create(const WindowConfig& config)
+    {
 #if defined(GLFW_EXPOSE_NATIVE_WIN32)
         if (glfwPlatformSupported(GLFW_PLATFORM_WIN32))
             glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WIN32);
@@ -35,13 +39,14 @@ namespace Tina {
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_RESIZABLE, config.resizable ? GLFW_TRUE : GLFW_FALSE);
-        
+
         m_windowSize = config.resolution;
 
         m_window.reset(
             glfwCreateWindow(m_windowSize.width, m_windowSize.height, config.title.c_str(), nullptr, nullptr));
 
-        if (!m_window) {
+        if (!m_window)
+        {
             fmt::print("Failed to create GLFW window\n");
             return;
         }
@@ -68,7 +73,8 @@ namespace Tina {
         fmt::print("Display handle: {}\n", (void*)bgfxInit.platformData.ndt);
         fmt::print("Window handle type: {}\n", static_cast<int>(bgfxInit.platformData.type));
 
-        if (!bgfx::init(bgfxInit)) {
+        if (!bgfx::init(bgfxInit))
+        {
             fmt::print("BGFX initialization failed\n");
             return;
         }
@@ -88,46 +94,61 @@ namespace Tina {
         fmt::print("Window creation completed\n");
     }
 
-    void GLFWWindow::setEventHandler(ScopePtr<EventHandler> &&eventHandler) {
+    void GLFWWindow::setEventHandler(ScopePtr<EventHandler>&& eventHandler)
+    {
         m_eventHandle = std::move(eventHandler);
     }
 
-    void GLFWWindow::destroy() {
+    void GLFWWindow::destroy()
+    {
         m_window.reset();
         glfwTerminate();
     }
 
-    void GLFWWindow::pollEvents() {
+    void GLFWWindow::pollEvents()
+    {
         glfwPollEvents();
     }
 
-    bool GLFWWindow::shouldClose() {
+    bool GLFWWindow::shouldClose()
+    {
         return glfwWindowShouldClose(m_window.get());
     }
 
-    void GLFWWindow::saveScreenShot(const std::string &fileName) {
+    void GLFWWindow::saveScreenShot(const std::string& fileName)
+    {
         bgfx::requestScreenShot(BGFX_INVALID_HANDLE, fileName.c_str());
     }
 
-    void GLFWWindow::windowSizeCallBack(GLFWwindow *window, int width, int height) {
-        auto *self = static_cast<GLFWWindow *>(glfwGetWindowUserPointer(window));
-        if (self) {
+    void GLFWWindow::windowSizeCallBack(GLFWwindow* window, int width, int height)
+    {
+        auto* self = static_cast<GLFWWindow*>(glfwGetWindowUserPointer(window));
+        if (self)
+        {
             self->m_windowSize.width = width;
             self->m_windowSize.height = height;
             bgfx::reset(width, height, BGFX_RESET_VSYNC);
+
+            for (auto* listener : self->m_resizeListeners)
+            {
+                listener->onWindowResize(width, height);
+            }
         }
     }
 
-    void GLFWWindow::keyboardCallback(GLFWwindow *window, int32_t key, int32_t scancode, int32_t action,
-                                      int32_t mods) {
-        const auto *self = static_cast<GLFWWindow *>(glfwGetWindowUserPointer(window));
-        if (self && self->m_eventHandle) {
+    void GLFWWindow::keyboardCallback(GLFWwindow* window, int32_t key, int32_t scancode, int32_t action,
+                                      int32_t mods)
+    {
+        const auto* self = static_cast<GLFWWindow*>(glfwGetWindowUserPointer(window));
+        if (self && self->m_eventHandle)
+        {
             KeyboardEvent event(key, scancode, action, mods);
             self->m_eventHandle->emplaceEvent<KeyboardEvent>(event);
         }
     }
 
-    void *GLFWWindow::glfwNativeWindowHandle(GLFWwindow *_window) {
+    void* GLFWWindow::glfwNativeWindowHandle(GLFWwindow* _window)
+    {
 #	if TINA_PLATFORM_LINUX
         if (GLFW_PLATFORM_WAYLAND == glfwGetPlatform()) {
             return glfwGetWaylandWindow(_window);
@@ -140,7 +161,8 @@ namespace Tina {
 #	endif
     }
 
-    void *GLFWWindow::getNativeDisplayHandle() {
+    void* GLFWWindow::getNativeDisplayHandle()
+    {
 #if TINA_PLATFORM_LINUX
         if (GLFW_PLATFORM_WAYLAND == glfwGetPlatform()) {
             return glfwGetWaylandDisplay();
@@ -151,7 +173,8 @@ namespace Tina {
 #	endif
     }
 
-    bgfx::NativeWindowHandleType::Enum GLFWWindow::getNativeWindowHandleType() {
+    bgfx::NativeWindowHandleType::Enum GLFWWindow::getNativeWindowHandleType()
+    {
 #if TINA_PLATFORM_LINUX
         if (GLFW_PLATFORM_WAYLAND == glfwGetPlatform()) {
             return bgfx::NativeWindowHandleType::Wayland;
@@ -160,65 +183,99 @@ namespace Tina {
         return bgfx::NativeWindowHandleType::Default;
     }
 
-    void GLFWWindow::errorCallback(int error, const char *description) {
+    void GLFWWindow::errorCallback(int error, const char* description)
+    {
         fmt::printf("GLFW Error (%d): %s\n", error, description);
     }
 
-    void GLFWWindow::setTitle(const std::string& title) {
-        if (m_window) {
+    void GLFWWindow::setTitle(const std::string& title)
+    {
+        if (m_window)
+        {
             glfwSetWindowTitle(m_window.get(), title.c_str());
             m_title = title;
         }
     }
 
-    void GLFWWindow::setSize(const Vector2i& size) {
-        if (m_window) {
+    void GLFWWindow::setSize(const Vector2i& size)
+    {
+        if (m_window)
+        {
             glfwSetWindowSize(m_window.get(), size.width, size.height);
             m_windowSize = size;
             bgfx::reset(size.width, size.height, m_isVSync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE);
         }
     }
 
-    void GLFWWindow::setVSync(bool enabled) {
-        if (m_isVSync != enabled) {
+    void GLFWWindow::setVSync(bool enabled)
+    {
+        if (m_isVSync != enabled)
+        {
             m_isVSync = enabled;
-            bgfx::reset(m_windowSize.width, m_windowSize.height, 
-                enabled ? BGFX_RESET_VSYNC : BGFX_RESET_NONE);
+            bgfx::reset(m_windowSize.width, m_windowSize.height,
+                        enabled ? BGFX_RESET_VSYNC : BGFX_RESET_NONE);
         }
     }
 
-    void GLFWWindow::setFullscreen(bool fullscreen) {
-        if (m_window && m_isFullscreen != fullscreen) {
-            if (fullscreen) {
+    void GLFWWindow::setFullscreen(bool fullscreen)
+    {
+        if (m_window && m_isFullscreen != fullscreen)
+        {
+            if (fullscreen)
+            {
                 // 获取主显示器
                 GLFWmonitor* monitor = glfwGetPrimaryMonitor();
-                if (monitor) {
+                if (monitor)
+                {
                     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
-                    glfwSetWindowMonitor(m_window.get(), monitor, 0, 0, 
-                        mode->width, mode->height, mode->refreshRate);
+                    glfwSetWindowMonitor(m_window.get(), monitor, 0, 0,
+                                         mode->width, mode->height, mode->refreshRate);
                 }
-            } else {
+            }
+            else
+            {
                 // 恢复窗口模式
-                glfwSetWindowMonitor(m_window.get(), nullptr, 100, 100, 
-                    m_windowSize.width, m_windowSize.height, 0);
+                glfwSetWindowMonitor(m_window.get(), nullptr, 100, 100,
+                                     m_windowSize.width, m_windowSize.height, 0);
             }
             m_isFullscreen = fullscreen;
         }
     }
 
-    std::string GLFWWindow::getTitle() const {
+    std::string GLFWWindow::getTitle() const
+    {
         return m_title;
     }
 
-    bool GLFWWindow::isFullscreen() const {
+    bool GLFWWindow::isFullscreen() const
+    {
         return m_isFullscreen;
     }
 
-    bool GLFWWindow::isVSync() const {
+    bool GLFWWindow::isVSync() const
+    {
         return m_isVSync;
     }
 
-    bool GLFWWindow::isVisible() const {
+    bool GLFWWindow::isVisible() const
+    {
         return m_window && glfwGetWindowAttrib(m_window.get(), GLFW_VISIBLE);
+    }
+
+    void GLFWWindow::addResizeListener(IWindowResizeListener* listener)
+    {
+        if (listener)
+        {
+            m_resizeListeners.push_back(listener);
+        }
+    }
+
+    void GLFWWindow::removeResizeListener(IWindowResizeListener* listener)
+    {
+        auto it = std::find(m_resizeListeners.begin(), m_resizeListeners.end(), listener);
+        if (it != m_resizeListeners.end())
+        {
+            m_resizeListeners.erase(it);
+        }
     }
 } // Tina

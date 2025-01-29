@@ -9,10 +9,11 @@
 #include "graphics/Renderer2D.hpp"
 #include "graphics/Camera.hpp"
 #include "filesystem/Path.hpp"
+#include"window/IWindowResizeListener.hpp"
 
 namespace Tina
 {
-    class GameApplication
+    class GameApplication : public IWindowResizeListener
     {
     public:
         GameApplication();
@@ -20,6 +21,8 @@ namespace Tina
         virtual ~GameApplication();
 
         void run();
+
+        void onWindowResize(int width, int height) override;
 
     protected:
         virtual void initialize();

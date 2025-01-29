@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <vector>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include "IWindow.hpp"
@@ -11,7 +12,7 @@
 // build for Linux
 #include "core/Platform.hpp"
 #include <GLFW/glfw3native.h>
-
+#include "IWindowResizeListener.hpp"
 #include "graphics/BgfxCallback.hpp"
 
 namespace Tina {
@@ -65,6 +66,9 @@ namespace Tina {
         [[nodiscard]] bool isVSync() const override;
         [[nodiscard]] bool isVisible() const override;
 
+        void addResizeListener(IWindowResizeListener* listener) override;
+        void removeResizeListener(IWindowResizeListener* listener);
+
         // GLFW特有功能
         static void saveScreenShot(const std::string &fileName);
 
@@ -79,7 +83,8 @@ namespace Tina {
         static void* getNativeDisplayHandle();
         static bgfx::NativeWindowHandleType::Enum getNativeWindowHandleType();
 
-    private:
+        std::vector<IWindowResizeListener*> m_resizeListeners;
+
         Vector2i m_windowSize;
         BgfxCallback m_bgfxCallback;
         ScopePtr<EventHandler> m_eventHandle;

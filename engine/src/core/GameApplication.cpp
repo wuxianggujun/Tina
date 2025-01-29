@@ -21,7 +21,7 @@ namespace Tina
 
     GameApplication::GameApplication(const Path& configPath)
         : m_lastFrameTime(0.0f)
-        , m_configPath(configPath)
+          , m_configPath(configPath)
     {
     }
 
@@ -44,7 +44,7 @@ namespace Tina
         // 如果有配置文件，从配置文件读取配置
         if (m_configPath.exists())
         {
-            try 
+            try
             {
                 Config config;
                 config.loadFromFile(m_configPath.toString());
@@ -71,30 +71,30 @@ namespace Tina
         // 创建窗口
         m_window = std::make_unique<GLFWWindow>();
         m_window->create(windowConfig);
-
+        m_window->addResizeListener(this);
         // 创建GUI系统
         // m_guiSystem = std::make_unique<GuiSystem>();
 
         // 创建2D渲染器
-        m_renderer2D = std::make_unique<Renderer2D>(0);  // 使用视图0
+        m_renderer2D = std::make_unique<Renderer2D>(0); // 使用视图0
         m_renderer2D->initialize();
 
         // 创建正交相机
         float width = static_cast<float>(windowConfig.resolution.width);
         float height = static_cast<float>(windowConfig.resolution.height);
         m_camera = std::make_unique<OrthographicCamera>(
-            0.0f,    // left
-            width,   // right
-            height,  // bottom
-            0.0f,    // top
-            -1.0f,   // near
-            1.0f     // far
+            0.0f, // left
+            width, // right
+            height, // bottom
+            0.0f, // top
+            -1.0f, // near
+            1.0f // far
         );
-        
+
         // 设置相机位置（使用简单的2D设置）
         m_camera->setPosition(Vector3f(0.0f, 0.0f, 0.0f));
         m_camera->setTarget(Vector3f(0.0f, 0.0f, -1.0f));
-        
+
         // 设置渲染器使用这个相机
         m_renderer2D->setCamera(m_camera.get());
     }
@@ -103,6 +103,22 @@ namespace Tina
     {
         initialize();
         mainLoop();
+    }
+
+    void GameApplication::onWindowResize(int width, int height)
+    {
+        // 更新相机投影
+        if (m_camera)
+        {
+            m_camera->setProjection(
+                0.0f, // left
+                static_cast<float>(width), // right
+                static_cast<float>(height), // bottom
+                0.0f, // top
+                -1.0f, // near
+                1.0f // far
+            );
+        }
     }
 
     void GameApplication::mainLoop()
@@ -125,26 +141,6 @@ namespace Tina
 
     void GameApplication::update(float deltaTime)
     {
-        // 检查窗口大小是否改变
-        const Vector2i& currentSize = m_window->getResolution();
-        static Vector2i lastSize = currentSize;
-        
-        if (currentSize != lastSize)
-        {
-            // 更新相机投影
-            if (m_camera)
-            {
-                m_camera->setProjection(
-                    0.0f,                          // left
-                    static_cast<float>(currentSize.x),  // right
-                    static_cast<float>(currentSize.y),  // bottom
-                    0.0f,                          // top
-                    -1.0f,                         // near
-                    1.0f                           // far
-                );
-            }
-            lastSize = currentSize;
-        }
     }
 
     void GameApplication::render()
@@ -152,19 +148,19 @@ namespace Tina
         if (m_window)
         {
             const Vector2i& resolution = m_window->getResolution();
-            
+
             // 设置视图清屏状态
             bgfx::setViewClear(0,
-                BGFX_CLEAR_COLOR|BGFX_CLEAR_DEPTH,
-                0x303030ff,  // 深灰色背景
-                1.0f,
-                0
+                               BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                               0x303030ff, // 深灰色背景
+                               1.0f,
+                               0
             );
 
             // 设置视图矩形
-            bgfx::setViewRect(0, 0, 0, 
-                static_cast<uint16_t>(resolution.x), 
-                static_cast<uint16_t>(resolution.y));
+            bgfx::setViewRect(0, 0, 0,
+                              static_cast<uint16_t>(resolution.x),
+                              static_cast<uint16_t>(resolution.y));
 
             // 确保视图0被清除
             bgfx::touch(0);
@@ -173,9 +169,9 @@ namespace Tina
             if (m_renderer2D)
             {
                 m_renderer2D->begin();
-                
+
                 // 绘制一些矩形，使用相对于窗口大小的位置和尺寸
-                float rectSize = 100.0f;  // 固定大小的矩形
+                float rectSize = 100.0f; // 固定大小的矩形
                 m_renderer2D->drawRect({100, 100}, {rectSize, rectSize}, Color::Red);
                 m_renderer2D->drawRect({250, 100}, {rectSize, rectSize}, Color::Green);
                 m_renderer2D->drawRect({400, 100}, {rectSize, rectSize}, Color::Blue);
@@ -200,6 +196,7 @@ namespace Tina
 
         if (m_window)
         {
+            m_window->removeResizeListener(this);
             m_window.reset();
         }
     }

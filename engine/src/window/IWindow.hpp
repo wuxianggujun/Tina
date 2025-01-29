@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EventHandler.hpp"
+#include "IWindowResizeListener.hpp"
 #include "math/Vector.hpp"
 #include "core/Core.hpp"
 
@@ -25,6 +26,8 @@ namespace Tina
         virtual void destroy() = 0;
         virtual void pollEvents() = 0;
         virtual bool shouldClose() = 0;
+        virtual void addResizeListener(IWindowResizeListener* listener) = 0;
+        virtual void removeResizeListener(IWindowResizeListener* listener) = 0;
 
         // 窗口属性
         [[nodiscard]] virtual void* getNativeWindow() const = 0;
