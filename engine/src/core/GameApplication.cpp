@@ -76,7 +76,7 @@ namespace Tina
         // m_guiSystem = std::make_unique<GuiSystem>();
 
         // 创建2D渲染器
-        m_renderer2D = std::make_unique<Renderer2D>();
+        m_renderer2D = std::make_unique<Renderer2D>(0);  // 使用视图0
         m_renderer2D->initialize();
     }
 
@@ -96,6 +96,9 @@ namespace Tina
 
             update(deltaTime);
             render();
+
+            // 提交帧
+            bgfx::frame();
 
             m_window->pollEvents();
         }
@@ -124,7 +127,11 @@ namespace Tina
             // 设置视图矩形
             uint16_t width = uint16_t(m_window->getResolution().x);
             uint16_t height = uint16_t(m_window->getResolution().y);
+            bgfx::setViewRect(0, 0, 0, width, height);
             fmt::print("Window size: {}x{}\n", width, height);
+
+            // 确保视图0被清除
+            bgfx::touch(0);
 
             // 渲染2D内容
             if (m_renderer2D)
@@ -145,9 +152,6 @@ namespace Tina
 
                 m_renderer2D->end();
             }
-
-            // 提交帧
-            bgfx::frame();
         }
     }
 

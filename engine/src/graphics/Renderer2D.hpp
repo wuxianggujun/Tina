@@ -65,8 +65,8 @@ namespace Tina
 
         uint16_t m_viewId;  // 视图ID
         bgfx::ProgramHandle m_program;
-        bgfx::VertexBufferHandle m_vbh;
-        bgfx::IndexBufferHandle m_ibh;
+        bgfx::DynamicVertexBufferHandle m_vbh;
+        bgfx::DynamicIndexBufferHandle m_ibh;
         bgfx::UniformHandle m_s_texColor; // 纹理采样器uniform
 
         // 批处理相关

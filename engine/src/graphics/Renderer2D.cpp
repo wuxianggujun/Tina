@@ -57,13 +57,10 @@ namespace Tina
         m_indices = new uint16_t[MAX_INDICES];
         
         // 创建动态顶点缓冲
-        const uint32_t numVertices = MAX_VERTICES;
-        const uint32_t numIndices = MAX_INDICES;
-
-        // 创建静态顶点缓冲（用于测试）
-        m_vbh = bgfx::createVertexBuffer(
-            bgfx::makeRef(m_vertices, sizeof(PosColorTexCoordVertex) * MAX_VERTICES),
-            PosColorTexCoordVertex::ms_layout
+        m_vbh = bgfx::createDynamicVertexBuffer(
+            MAX_VERTICES,
+            PosColorTexCoordVertex::ms_layout,
+            BGFX_BUFFER_ALLOW_RESIZE
         );
         fmt::print("Created vertex buffer with handle: {}\n", m_vbh.idx);
         if (!bgfx::isValid(m_vbh)) {
@@ -72,9 +69,10 @@ namespace Tina
         }
         fmt::print("Vertex buffer created successfully\n");
 
-        // 创建静态索引缓冲（用于测试）
-        m_ibh = bgfx::createIndexBuffer(
-            bgfx::makeRef(m_indices, sizeof(uint16_t) * MAX_INDICES)
+        // 创建动态索引缓冲
+        m_ibh = bgfx::createDynamicIndexBuffer(
+            MAX_INDICES,
+            BGFX_BUFFER_ALLOW_RESIZE
         );
         fmt::print("Created index buffer with handle: {}\n", m_ibh.idx);
         if (!bgfx::isValid(m_ibh)) {
@@ -99,17 +97,6 @@ namespace Tina
             throw std::runtime_error("Failed to create texture sampler uniform");
         }
 
-        // 设置视图矩形
-        bgfx::setViewRect(0, 0, 0, bgfx::getStats()->width, bgfx::getStats()->height);
-        
-        // 设置视图清除标志
-        bgfx::setViewClear(0,
-            BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-            0x303030ff, // 背景色
-            1.0f,       // 深度值
-            0           // 模板值
-        );
-        
         fmt::print("Renderer2D initialization completed\n");
     }
 
@@ -123,17 +110,16 @@ namespace Tina
         // 更新视图矩形
         uint16_t width = uint16_t(bgfx::getStats()->width);
         uint16_t height = uint16_t(bgfx::getStats()->height);
-        bgfx::setViewRect(m_viewId, 0, 0, width, height);
         
         // 设置正交投影矩阵
         float proj[16];
         bx::mtxOrtho(proj, 
             0.0f,                // left
             float(width),        // right
-            float(height),       // bottom
             0.0f,               // top
-            0.0f,               // near
-            1.0f,               // far
+            float(height),       // bottom
+            0.0f,              // near
+            100.0f,            // far
             0.0f,               // offset
             bgfx::getCaps()->homogeneousDepth);
 
@@ -144,18 +130,10 @@ namespace Tina
         // 设置视图和投影矩阵
         bgfx::setViewTransform(m_viewId, view, proj);
 
-        // 重置模型矩阵
+        // 设置模型矩阵为单位矩阵
         float mtx[16];
         bx::mtxIdentity(mtx);
         bgfx::setTransform(mtx);
-        
-        // 设置视图清除标志
-        bgfx::setViewClear(m_viewId,
-            BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-            0x303030ff, // 背景色
-            1.0f,       // 深度值
-            0           // 模板值
-        );
         
         m_isDrawing = true;
         m_currentVertex = 0;
@@ -191,25 +169,25 @@ namespace Tina
             return;
         }
 
-        // 创建新的缓冲区
-        bgfx::VertexBufferHandle newVbh = bgfx::createVertexBuffer(
-            bgfx::makeRef(m_vertices, m_currentVertex * sizeof(PosColorTexCoordVertex)),
-            PosColorTexCoordVertex::ms_layout
-        );
-
-        bgfx::IndexBufferHandle newIbh = bgfx::createIndexBuffer(
-            bgfx::makeRef(m_indices, m_currentIndex * sizeof(uint16_t))
-        );
+        // 更新动态缓冲区
+        bgfx::update(m_vbh, 0, bgfx::makeRef(m_vertices, m_currentVertex * sizeof(PosColorTexCoordVertex)));
+        bgfx::update(m_ibh, 0, bgfx::makeRef(m_indices, m_currentIndex * sizeof(uint16_t)));
 
         // 设置渲染状态
         uint64_t state = 0
             | BGFX_STATE_WRITE_RGB
             | BGFX_STATE_WRITE_A
+            | BGFX_STATE_WRITE_Z
             | BGFX_STATE_DEPTH_TEST_LESS
             | BGFX_STATE_MSAA
             | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
         
         bgfx::setState(state);
+
+        // 设置模型矩阵
+        float mtx[16];
+        bx::mtxIdentity(mtx);
+        bgfx::setTransform(mtx);
         
         // 如果有纹理，设置纹理
         if (bgfx::isValid(m_currentTexture)) {
@@ -217,8 +195,8 @@ namespace Tina
         }
 
         // 设置顶点和索引缓冲
-        bgfx::setVertexBuffer(0, newVbh);
-        bgfx::setIndexBuffer(newIbh);
+        bgfx::setVertexBuffer(0, m_vbh, 0, m_currentVertex);
+        bgfx::setIndexBuffer(m_ibh, 0, m_currentIndex);
 
         if (!bgfx::isValid(m_program)) {
             fmt::print("Invalid shader program handle: {}\n", m_program.idx);
@@ -226,14 +204,10 @@ namespace Tina
         }
 
         fmt::print("Submitting draw call with program: {}, vbh: {}, ibh: {}\n", 
-            m_program.idx, newVbh.idx, newIbh.idx);
+            m_program.idx, m_vbh.idx, m_ibh.idx);
 
         // 提交绘制命令
         bgfx::submit(m_viewId, m_program);
-
-        // 销毁临时缓冲区
-        bgfx::destroy(newVbh);
-        bgfx::destroy(newIbh);
 
         // 重置计数器
         m_currentVertex = 0;
@@ -257,12 +231,14 @@ namespace Tina
         // 计算矩形的四个顶点
         uint16_t baseVertex = m_currentVertex;
         
-        // 注意：Y坐标需要翻转，因为OpenGL的坐标系原点在左下角，而我们想要左上角为原点
-        float y = float(bgfx::getStats()->height) - position.y;
-        float h = -size.y;  // 翻转高度
+        // 不再翻转Y坐标，使用正常的坐标系统
+        float x = position.x;
+        float y = position.y;
+        float w = size.x;
+        float h = size.y;
         
         // 左上
-        m_vertices[m_currentVertex].m_x = position.x;
+        m_vertices[m_currentVertex].m_x = x;
         m_vertices[m_currentVertex].m_y = y;
         m_vertices[m_currentVertex].m_z = 0.0f;
         m_vertices[m_currentVertex].m_rgba = color;
@@ -271,7 +247,7 @@ namespace Tina
         m_currentVertex++;
 
         // 右上
-        m_vertices[m_currentVertex].m_x = position.x + size.x;
+        m_vertices[m_currentVertex].m_x = x + w;
         m_vertices[m_currentVertex].m_y = y;
         m_vertices[m_currentVertex].m_z = 0.0f;
         m_vertices[m_currentVertex].m_rgba = color;
@@ -280,7 +256,7 @@ namespace Tina
         m_currentVertex++;
 
         // 左下
-        m_vertices[m_currentVertex].m_x = position.x;
+        m_vertices[m_currentVertex].m_x = x;
         m_vertices[m_currentVertex].m_y = y + h;
         m_vertices[m_currentVertex].m_z = 0.0f;
         m_vertices[m_currentVertex].m_rgba = color;
@@ -289,7 +265,7 @@ namespace Tina
         m_currentVertex++;
 
         // 右下
-        m_vertices[m_currentVertex].m_x = position.x + size.x;
+        m_vertices[m_currentVertex].m_x = x + w;
         m_vertices[m_currentVertex].m_y = y + h;
         m_vertices[m_currentVertex].m_z = 0.0f;
         m_vertices[m_currentVertex].m_rgba = color;
@@ -297,13 +273,13 @@ namespace Tina
         m_vertices[m_currentVertex].m_v = 1.0f;
         m_currentVertex++;
 
-        // 添加索引 (注意：顺序改为顺时针)
+        // 添加索引 (顺时针顺序)
         m_indices[m_currentIndex++] = baseVertex + 0; // 左上
-        m_indices[m_currentIndex++] = baseVertex + 2; // 左下
-        m_indices[m_currentIndex++] = baseVertex + 1; // 右上
         m_indices[m_currentIndex++] = baseVertex + 1; // 右上
         m_indices[m_currentIndex++] = baseVertex + 2; // 左下
+        m_indices[m_currentIndex++] = baseVertex + 1; // 右上
         m_indices[m_currentIndex++] = baseVertex + 3; // 右下
+        m_indices[m_currentIndex++] = baseVertex + 2; // 左下
     }
 
     void Renderer2D::drawTexturedRect(const Vector2f& position, const Vector2f& size, 
