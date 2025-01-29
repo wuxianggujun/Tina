@@ -29,6 +29,8 @@ namespace Tina {
             return m_program;
         }
 
+        void destory();
+
     private:
         const std::string SHADER_PATH = "../resources/shaders/";
         bgfx::ShaderHandle m_vertexShader = BGFX_INVALID_HANDLE;

@@ -7,7 +7,7 @@
 
 
 namespace Tina::BgfxUtils {
-    void *allocate(size_t size) {
+    void *allocate(const size_t size) {
         return bx::alloc(getAllocator(), size);
     }
 
@@ -28,50 +28,67 @@ namespace Tina::BgfxUtils {
 
     static const bgfx::Memory *loadMem(bx::FileReaderI *_reader, const bx::FilePath &_filePath) {
         if (bx::open(_reader, _filePath)) {
-            auto size = static_cast<uint32_t>(bx::getSize(_reader));
+            const auto size = static_cast<uint32_t>(bx::getSize(_reader));
             const bgfx::Memory *mem = bgfx::alloc(size + 1);
             bx::read(_reader, mem->data, size, bx::ErrorAssert{});
             bx::close(_reader);
             mem->data[mem->size - 1] = '\0';
             return mem;
         }
-        return NULL;
+        return nullptr;
     }
 
     static bgfx::ShaderHandle loadShader(bx::FileReaderI *_reader, const bx::StringView &_name) {
-        bx::FilePath filePath("shaders/");
+        Path shaderPath = ResourcePath::getShaderPath();
 
+        // 根据渲染器类型选择着色器目录
+        String rendererDir;
         switch (bgfx::getRendererType()) {
             case bgfx::RendererType::Noop:
             case bgfx::RendererType::Direct3D11:
-            case bgfx::RendererType::Direct3D12: filePath.join("dx11");
+            case bgfx::RendererType::Direct3D12: 
+                rendererDir = String("dx11");
                 break;
             case bgfx::RendererType::Agc:
-            case bgfx::RendererType::Gnm: filePath.join("pssl");
+            case bgfx::RendererType::Gnm: 
+                rendererDir = String("pssl");
                 break;
-            case bgfx::RendererType::Metal: filePath.join("metal");
+            case bgfx::RendererType::Metal: 
+                rendererDir = String("metal");
                 break;
-            case bgfx::RendererType::Nvn: filePath.join("nvn");
+            case bgfx::RendererType::Nvn: 
+                rendererDir = String("nvn");
                 break;
-            case bgfx::RendererType::OpenGL: filePath.join("glsl");
+            case bgfx::RendererType::OpenGL: 
+                rendererDir = String("glsl");
                 break;
-            case bgfx::RendererType::OpenGLES: filePath.join("essl");
+            case bgfx::RendererType::OpenGLES: 
+                rendererDir = String("essl");
                 break;
-            case bgfx::RendererType::Vulkan: filePath.join("spirv");
+            case bgfx::RendererType::Vulkan: 
+                rendererDir = String("spv");
                 break;
-
-            case bgfx::RendererType::Count:
-                BX_ASSERT(false, "You should not be here!");
+            default:
+                BX_ASSERT(false, "Unsupported renderer type!");
                 break;
         }
 
-        char fileName[512];
-        bx::strCopy(fileName, BX_COUNTOF(fileName), _name);
-        bx::strCat(fileName, BX_COUNTOF(fileName), ".bin");
+        shaderPath = shaderPath.getChildFile(rendererDir);
+        
+        String fileName(_name.getPtr(), _name.getLength());
+        fileName += String(".bin");
+        
+        Path fullPath = shaderPath.getChildFile(fileName);
 
-        filePath.join(fileName);
+        fmt::print("Loading shader from: {}\n", fullPath.toString());
 
-        bgfx::ShaderHandle handle = bgfx::createShader(loadMem(_reader, filePath.getCPtr()));
+        const bgfx::Memory* mem = loadMem(_reader, bx::FilePath(fullPath.toString().c_str()));
+        if (!mem) {
+            fmt::print("Failed to load shader: {}\n", fullPath.toString());
+                return BGFX_INVALID_HANDLE;
+        }
+
+        bgfx::ShaderHandle handle = bgfx::createShader(mem);
         bgfx::setName(handle, _name.getPtr(), _name.getLength());
 
         return handle;
@@ -214,5 +231,12 @@ namespace Tina::BgfxUtils {
             }
         }
         return handle;
+    }
+
+    bgfx::ProgramHandle loadProgram(const char* _vsName, const char* _fsName) {
+        bx::FileReader reader;
+        bx::StringView vsName(_vsName);
+        bx::StringView fsName(_fsName);
+        return loadProgram(&reader, vsName, fsName);
     }
 }

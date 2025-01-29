@@ -32,7 +32,7 @@ sudo ln -s /snap/cmake/current/bin/cpack /usr/bin/cpack
 sudo apt install libgl1-mesa-dev
 sudo apt-get install libglfw3-dev
 sudo apt-get install pkg-config
-sudo apt install libwayland-dev libxkbcommon-dev xorg-dev
+sudo apt install libwayland-dev libwayland-egl-backend-dev libxkbcommon-dev xorg-dev 
 sudo apt-get install libx11-dev libxext-dev libxtst-dev libxrender-dev libxmu-dev libxmuu-dev
 
 ```
@@ -76,6 +76,7 @@ make
 - **[simple_engine](https://github.com/bikemurt/simple_engine)**
 - **[2019-ecs](https://code.austinmorlan.com/austin/2019-ecs)**
 - **[PainterEngine](https://github.com/matrixcascade/PainterEngine)**
+- **[ElvenEngine](https://github.com/denyskryvytskyi/ElvenEngine)**
 
 ## Acknowledgments
 

@@ -2,8 +2,7 @@
 // Created by wuxianggujun on 2024/7/17.
 //
 
-#ifndef VECTOR_HPP
-#define VECTOR_HPP
+#pragma once
 
 #include <cmath>
 // If the gcc compiler is used on a Linux system, check whether <format>header files exist
@@ -24,6 +23,7 @@
 #include <string>
 #include <glm/glm.hpp>
 #include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
 
 namespace Tina
 {
@@ -192,6 +192,120 @@ namespace Tina
     using Vector2f = Vector<float>;
     using Vector2i = Vector<int>;
     using Vector2d = Vector<double>;
-} // Tina
 
-#endif //VECTOR_HPP
+    struct Vector2 {
+        float x, y;
+
+        Vector2() : x(0.0f), y(0.0f) {}
+        Vector2(float x, float y) : x(x), y(y) {}
+
+        Vector2 operator+(const Vector2& other) const {
+            return Vector2(x + other.x, y + other.y);
+        }
+
+        Vector2 operator-(const Vector2& other) const {
+            return Vector2(x - other.x, y - other.y);
+        }
+
+        Vector2 operator*(float scalar) const {
+            return Vector2(x * scalar, y * scalar);
+        }
+
+        Vector2 normalized() const {
+            float length = sqrt(x * x + y * y);
+            if (length != 0.0f) {
+                return Vector2(x / length, y / length);
+            }
+            return *this;
+        }
+    };
+
+    template <class T>
+    class Vector3
+    {
+    public:
+        union
+        {
+            struct
+            {
+                T x;
+                T y;
+                T z;
+            };
+            glm::vec<3, T, glm::defaultp> internalVec;
+        };
+
+        Vector3() : internalVec(0, 0, 0) {}
+        Vector3(T x, T y, T z) : internalVec(x, y, z) {}
+        explicit Vector3(const glm::vec<3, T, glm::defaultp>& vec3) : internalVec(vec3) {}
+
+        T& operator[](const int index)
+        {
+            return (&x)[index];
+        }
+
+        const T& operator[](const int index) const
+        {
+            return (&x)[index];
+        }
+
+        Vector3<T> operator+(const Vector3<T>& other) const
+        {
+            return Vector3<T>(internalVec + other.internalVec);
+        }
+
+        Vector3<T> operator-(const Vector3<T>& other) const
+        {
+            return Vector3<T>(internalVec - other.internalVec);
+        }
+
+        Vector3<T> operator*(const T& scalar) const
+        {
+            return Vector3<T>(internalVec * scalar);
+        }
+
+        Vector3<T> operator/(const T& scalar) const
+        {
+            return Vector3<T>(internalVec / scalar);
+        }
+
+        bool operator==(const Vector3<T>& other) const
+        {
+            return internalVec == other.internalVec;
+        }
+
+        bool operator!=(const Vector3<T>& other) const
+        {
+            return internalVec != other.internalVec;
+        }
+
+        T length() const
+        {
+            return std::sqrt(x * x + y * y + z * z);
+        }
+
+        Vector3<T> normalized() const
+        {
+            T len = length();
+            if (len != 0)
+            {
+                return Vector3<T>(x / len, y / len, z / len);
+            }
+            return *this;
+        }
+
+        [[nodiscard]] std::string toString() const
+        {
+            return fmt::format("[ x: {}, y: {}, z: {} ]", x, y, z);
+        }
+
+        void toStdout() const
+        {
+            std::cout << toString() << std::endl;
+        }
+    };
+
+    using Vector3f = Vector3<float>;
+    using Vector3i = Vector3<int>;
+    using Vector3d = Vector3<double>;
+} // Tina

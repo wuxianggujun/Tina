@@ -28,8 +28,12 @@ namespace Tina {
 
         void render();
 
+        void frame();
         void shutdown();
-
+        
+        // 获取分辨率
+        Vector2i getResolution() const { return m_resolution; }
+    
     private:
         VertexBuffer m_vbh;
         IndexBuffer m_ibh;

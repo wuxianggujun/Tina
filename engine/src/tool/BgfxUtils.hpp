@@ -11,6 +11,7 @@
 #include <bx/pixelformat.h>
 #include <bx/filepath.h>
 #include <bimg/decode.h>
+#include "filesystem/ResourcePath.hpp"
 
 namespace Tina::BgfxUtils {
     static bx::StringView s_currentDir = "./";
@@ -29,8 +30,11 @@ namespace Tina::BgfxUtils {
     
     bgfx::ShaderHandle loadShader(const bx::StringView &_name);
 
-    bgfx::ProgramHandle loadProgram(bx::FileReaderI *_reader, const bx::StringView &_vsName,
-                                    const bx::StringView &_fsName);
+    bgfx::ProgramHandle loadProgram(bx::FileReaderI* _reader,
+                                  const bx::StringView& _vsName,
+                                  const bx::StringView& _fsName);
+
+    bgfx::ProgramHandle loadProgram(const char* _vsName, const char* _fsName);
 
     bgfx::TextureHandle loadTexture(bx::FileReaderI *_reader, const bx::FilePath &_filePath, uint64_t _flags = BGFX_TEXTURE_NONE|BGFX_SAMPLER_NONE,
                                     uint8_t _skip = 0, bgfx::TextureInfo *_info= nullptr, bimg::Orientation::Enum *_orientation = nullptr);

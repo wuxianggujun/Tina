@@ -30,8 +30,8 @@ namespace Tina {
             bx::vsnprintf(out + len, total - len, _format, _argList);
         }
         out[total] = '\0';
-        if (Config::isBgfxDebugLogEnabled)
-            bx::debugOutput(out);
+        // if (Config::isBgfxDebugLogEnabled)
+        //     bx::debugOutput(out);
     }
 
     void BgfxCallback::profilerBegin(const char *_name, uint32_t _abgr, const char *_filePath, uint16_t _line) {

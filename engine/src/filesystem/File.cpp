@@ -1,55 +1,52 @@
 #include "File.hpp"
+// #define NOMINMAX
 #include "FileSystem.hpp"
 #include <iostream>
 #include <utility>
 
 namespace Tina
 {
-    File::File(const Path& filename, size_t mode) : fileName_(filename),
-                                                    fileStream_(nullptr),
-                                                    isOpen_(false)
+    File::File(Path filename, size_t mode) : m_path(std::move(filename)), m_isOpen(false)
     {
-        mode_ = static_cast<FileMode>(mode);
+        m_mode = static_cast<FileMode>(mode);
 
-        std::string cMode;
-        // 判断读写追加模式
-        if ((mode_ & Write) && (mode_ & Read))
+        std::ios_base::openmode openMode = std::ios_base::in; // 默认以读取模式打开
+
+        if ((m_mode & Write) && (m_mode & Read))
         {
-            cMode = "r+";
+            openMode |= std::ios_base::out; // 读写模式
         }
-        else if (mode_ & Write)
+        else if (m_mode & Write)
         {
-            cMode = "w";
+            openMode = std::ios_base::out; // 只写模式
         }
-        else if (mode_ & Read)
+        else if (m_mode & Read)
         {
-            cMode = "r";
-        }
-        else if (mode_ & Append)
-        {
-            cMode = "a";
-        }
-        else
-        {
-            throw std::invalid_argument("Invalid file mode");
+            openMode = std::ios_base::in; // 只读模式
         }
 
-        // 添加文本或二进制模式
-        if (mode_ & Binary)
+        if (m_mode & Append)
         {
-            cMode += "b";
-        }
-        else if (mode_ & Text)
-        {
-            cMode += "t";
+            openMode |= std::ios_base::app; // 追加模式
         }
 
-        fileStream_ = new FileStream(fileName_.getFullPath().c_str(), cMode.c_str());
-        if (!fileStream_->getFile())
+        if (m_mode & Binary)
         {
-            throw std::runtime_error("Failed file not exists or cannot open file");
+            openMode |= std::ios_base::binary; // 二进制模式
         }
-        isOpen_ = true;
+        else if (m_mode & Text)
+        {
+            // 文本模式（默认）
+        }
+
+        m_fileStream.open(m_path.toString(), openMode);
+
+        if (!m_fileStream.is_open())
+        {
+            throw std::runtime_error("Failed to open file: " + m_path.toString());
+        }
+
+        m_isOpen = true;
     }
 
     File::~File()
@@ -57,107 +54,135 @@ namespace Tina
         File::close();
     }
 
-    auto File::read(std::string& data) const -> bool
+    File::File(File&& other) noexcept: m_path(std::move(other.m_path)),
+                                       m_mode(other.m_mode),
+                                       m_fileStream(std::move(other.m_fileStream)),
+                                       m_isOpen(other.m_isOpen)
     {
-        if (!isOpen_ || mode_ & Binary)
-        {
-            return false;
-        }
-        constexpr size_t bufferSize = 1024; // 定义缓冲区大小
-        std::vector<char> buffer(bufferSize);
-        size_t bytesRead;
-
-        while ((bytesRead = fileStream_->read(buffer.data(), 1, bufferSize)) > 0)
-        {
-            data.append(buffer.data(), bytesRead); // 将读取的数据追加到数据字符串
-        }
-        return true;
+        // 使移动后的对象处于有效但未指定的状态
+        other.m_isOpen = false;
     }
 
-    bool File::write(const std::string& data, bool append) const
+    File& File::operator=(File&& other) noexcept
     {
-        if (!isOpen_ || mode_ == FileMode::Read)
+        if (this != &other)
+        {
+            close();
+            m_path = std::move(other.m_path);
+            m_mode = other.m_mode;
+            m_fileStream = std::move(other.m_fileStream);
+            m_isOpen = other.m_isOpen;
+            // 使移动后的对象处于有效但未指定的状态
+            other.m_isOpen = false;
+        }
+        return *this;
+    }
+
+    bool File::read(std::string& data) const
+    {
+        if (!m_isOpen || !(m_mode & Read))
+        {
             return false;
+        }
+
+        // 将文件指针移动到文件开头
+        m_fileStream.seekg(0, std::ios::beg);
+
+        // 清空 data
+        data.clear();
+        // 使用 std::istreambuf_iterator 读取文件内容
+        data.assign((std::istreambuf_iterator<char>(m_fileStream)),
+                    std::istreambuf_iterator<char>());
+
+        return m_fileStream.eof();
+    }
+
+    bool File::write(const std::string& data, const bool append) const
+    {
+        if (!m_isOpen || !(m_mode & Write))
+        {
+            return false;
+        }
+
+        // 使用 const_cast 移除 const 限定，因为 seekp 和 operator<< 不是 const 成员函数
         if (append)
-            fileStream_->seek(0, SEEK_END);
+        {
+            m_fileStream.seekp(0, std::ios_base::end);
+        }
 
-        auto bytesWritten = fileStream_->write(data.c_str(), sizeof(char), data.size());
-        return bytesWritten == data.size();
+        const_cast<std::fstream&>(m_fileStream) << data;
+        return !m_fileStream.fail();
     }
+
 
     void File::close()
     {
-        if (isOpen_ && fileStream_)
+        if (m_isOpen)
         {
-            if (fileStream_->close()) throw std::runtime_error("Failed to close file");
-            isOpen_ = false;
-            delete fileStream_;
-            fileStream_ = nullptr;
+            m_fileStream.close();
+            m_isOpen = false;
         }
     }
 
     bool File::isFile() const
     {
-        return ghc::filesystem::is_regular_file(fileName_.getFullPath());
+        return ghc::filesystem::is_regular_file(m_path.toString());
     }
 
     bool File::isDirectory() const
     {
-        return ghc::filesystem::is_directory(fileName_.getFullPath());
+        return ghc::filesystem::is_directory(m_path.toString());
     }
 
     bool File::isOpen() const
     {
-        return isOpen_;
+        return m_isOpen;
     }
 
     bool File::exists() const
     {
-        ghc::filesystem::path path(fileName_.getFullPath());
-        return ghc::filesystem::exists(path) && ghc::filesystem::is_regular_file(path);
+        return ghc::filesystem::exists(m_path.toString());
     }
 
-    bool File::mkdirs() const {
-        if (ghc::filesystem::exists(fileName_.getFullPath())) {
+    bool File::mkdirs() const
+    {
+        if (ghc::filesystem::exists(m_path.toString()))
+        {
             return true;
         }
-        return ghc::filesystem::create_directory(fileName_.getFullPath());
+        return ghc::filesystem::create_directories(m_path.toString());
     }
 
     Path File::getPath() const
     {
-        return fileName_;
+        return m_path;
     }
 
     FileMode File::getMode() const
     {
-        return mode_;
-    }
-
-    FileStream* File::getFileStream() const
-    {
-        return fileStream_;
+        return m_mode;
     }
 
     std::vector<File> File::listFiles() const
     {
         std::vector<File> files;
-        for (const auto& entry : ghc::filesystem::directory_iterator(fileName_.getFullPath()))
+        if (isDirectory())
         {
-            files.emplace_back(Path(entry.path().string()), FileMode::Read);
+            for (const auto& entry : ghc::filesystem::directory_iterator(m_path.toString()))
+            {
+                files.emplace_back(Path(entry.path().string()), FileMode::Read);
+            }
         }
         return files;
     }
 
-    [[nodiscard]] std::string File::getDirectoryPath() const
+    std::string File::getDirectoryPath() const
     {
-        size_t pos = fileName_.getFullPath().find_last_of(PATH_SEPARATOR);
-        return (pos != std::string::npos) ? fileName_.getFullPath().substr(0, pos) : "";
+        return m_path.getParentDirectory().getFullPath();
     }
 
-    [[nodiscard]] std::string File::getFileName() const
+    std::string File::getFileName() const
     {
-        size_t pos = fileName_.getFullPath().find_last_of(PATH_SEPARATOR);
-        return (pos != std::string::npos) ? fileName_.getFullPath().substr(pos + 1) : fileName_.getFullPath();
+        return m_path.getFileName();
     }
 } // namespace Tina

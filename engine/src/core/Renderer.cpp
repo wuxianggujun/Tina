@@ -53,11 +53,11 @@ namespace Tina {
     };
 
     Renderer::Renderer(Vector2i size, int viewId): m_resolution(size){
-        
+
         m_vbh.getLayout().begin()
-                .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
                 .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Int16, true, true)
-                .end();
+            .end();
 
 
         m_vbh.init(s_cubeVertices, sizeof(s_cubeVertices));
@@ -83,12 +83,12 @@ namespace Tina {
 
         // Set view and projection matrix for view 0.
         {
-            float view[16];
-            bx::mtxLookAt(view, eye, at);
+        float view[16];
+        bx::mtxLookAt(view, eye, at);
 
-            float proj[16];
+        float proj[16];
             bx::mtxProj(proj, 60.0f, static_cast<float>(m_resolution.width)/static_cast<float>(m_resolution.height), 0.1f, 100.0f, bgfx::getCaps()->homogeneousDepth);
-            bgfx::setViewTransform(0, view, proj);
+        bgfx::setViewTransform(0, view, proj);
 
             // Set view 0 default viewport.
             bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(m_resolution.width), static_cast<uint16_t>(m_resolution.height) );
@@ -104,23 +104,24 @@ namespace Tina {
         bgfx::setTexture(0, s_texColor, m_textureColor);
 
         // Set render states.
-        bgfx::setState(0
-                       | BGFX_STATE_WRITE_RGB
-                       | BGFX_STATE_WRITE_A
+        bgfx::setState(BGFX_STATE_WRITE_RGB 
+            | BGFX_STATE_WRITE_A
                        | BGFX_STATE_WRITE_Z
-                       | BGFX_STATE_DEPTH_TEST_LESS
+            | BGFX_STATE_DEPTH_TEST_LESS
                        | BGFX_STATE_MSAA
         );
         // Submit primitive for rendering to view 0.
         bgfx::submit(0, m_shader.getProgram());
-        
+    }
+
+    void Renderer::frame() {
         bgfx::frame();
     }
 
     void Renderer::shutdown() {
         m_vbh.free();
         m_ibh.free();
-        bgfx::destroy(m_textureColor); 
+        bgfx::destroy(m_textureColor);
         bgfx::destroy(s_texColor);
         bgfx::shutdown();
     }

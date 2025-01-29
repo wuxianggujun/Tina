@@ -2,28 +2,32 @@
 // Created by wuxianggujun on 2024/7/12.
 //
 
-#ifndef TINA_WINDOW_GLFWWINDOW_HPP
-#define TINA_WINDOW_GLFWWINDOW_HPP
+#pragma once
 
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-#include "Window.hpp"
-#include "core/Core.hpp"
+#include "IWindow.hpp"
 
 // build for Linux
 #include "core/Platform.hpp"
-
-#if TINA_PLATFORM_LINUX
-#define GLFW_EXPOSE_NATIVE_X11
-#elif TINA_PLATFORM_WINDOWS
-#define GLFW_EXPOSE_NATIVE_WIN32
-#elif TINA_PLATFORM_OSX
-#define GLFW_EXPOSE_NATIVE_COCOA
-#endif
 #include <GLFW/glfw3native.h>
 
+#include "graphics/BgfxCallback.hpp"
 
 namespace Tina {
-    class GLFWWindow : public Window {
+    class EventHandler;
+    
+    struct KeyboardEvent {
+        int key;
+        int scancode;
+        int action;
+        int mods;
+
+        KeyboardEvent(int key, int scancode, int action, int mods)
+            : key(key), scancode(scancode), action(action), mods(mods) {}
+    };
+    
+    class GLFWWindow : public IWindow {
     protected:
         struct GlfwWindowDeleter {
             void operator()(GLFWwindow *window) const {
@@ -35,29 +39,53 @@ namespace Tina {
 
     public:
         GLFWWindow();
-
         ~GLFWWindow() override = default;
 
-        void create(WindowConfig config) override;
-
-        void render() override;
-
+        // 窗口管理
+        void create(const WindowConfig& config) override;
         void destroy() override;
-
         void pollEvents() override;
-
         bool shouldClose() override;
+        
+        // 窗口属性
+        [[nodiscard]] void* getNativeWindow() const override { return m_window.get(); }
+        [[nodiscard]] Vector2i getResolution() const override { return m_windowSize; }
 
-        static void saveScreenShot(const std::string& fileName);
+        // 事件处理
+        void setEventHandler(ScopePtr<EventHandler>&& eventHandler) override;
 
-        [[nodiscard]] GLFWwindow *getNativeWindow() const { return m_window.get(); }
+        // 窗口属性设置和获取
+        void setTitle(const std::string& title) override;
+        void setSize(const Vector2i& size) override;
+        void setVSync(bool enabled) override;
+        void setFullscreen(bool fullscreen) override;
+
+        [[nodiscard]] std::string getTitle() const override;
+        [[nodiscard]] bool isFullscreen() const override;
+        [[nodiscard]] bool isVSync() const override;
+        [[nodiscard]] bool isVisible() const override;
+
+        // GLFW特有功能
+        static void saveScreenShot(const std::string &fileName);
 
     private:
+        // GLFW回调
+        static void keyboardCallback(GLFWwindow *window, int32_t key, int32_t scancode, int32_t action, int32_t mods);
+        static void windowSizeCallBack(GLFWwindow* window, int width, int height);
         static void errorCallback(int error, const char *description);
+        
+        // 平台相关
+        static void* glfwNativeWindowHandle(GLFWwindow *window);
+        static void* getNativeDisplayHandle();
+        static bgfx::NativeWindowHandleType::Enum getNativeWindowHandleType();
 
     private:
+        Vector2i m_windowSize;
+        BgfxCallback m_bgfxCallback;
+        ScopePtr<EventHandler> m_eventHandle;
         ScopePtr<GLFWwindow, GlfwWindowDeleter> m_window;
+        bool m_isFullscreen{false};
+        bool m_isVSync{true};
+        std::string m_title;
     };
 } // Tina
-
-#endif //TINA_WINDOW_GLFWWINDOW_HPP

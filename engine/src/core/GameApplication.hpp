@@ -2,30 +2,38 @@
 // Created by wuxianggujun on 2024/7/12.
 //
 
-#ifndef TINA_CORE_GAMEAPPLICATION_HPP
-#define TINA_CORE_GAMEAPPLICATION_HPP
+#pragma once
 
-#include "Core.hpp"
-#include "window/Window.hpp"
-#include "window/GLFWWindow.hpp"
-#include "window/InputHandler.hpp"
-#include "core/Renderer.hpp"
-#include "window/GLFWInput.hpp"
-#include <ctrack.hpp>
+#include <memory>
+#include "window/IWindow.hpp"
+#include "graphics/Renderer2D.hpp"
+#include "graphics/Camera.hpp"
+#include "filesystem/Path.hpp"
 
 namespace Tina
 {
     class GameApplication
     {
     public:
+        GameApplication();
+        explicit GameApplication(const Path& configPath);
+        virtual ~GameApplication();
+
         void run();
-        void mainLoop() const;
 
     protected:
-        ScopePtr<Window> window;
-        ScopePtr<InputHandler> inputHandler;
-        ScopePtr<Renderer> renderer;
+        virtual void initialize();
+        virtual void update(float deltaTime);
+        virtual void render();
+        virtual void shutdown();
+
+        void mainLoop();
+
+        std::unique_ptr<IWindow> m_window;
+        // std::unique_ptr<GuiSystem> m_guiSystem;
+        std::unique_ptr<Renderer2D> m_renderer2D;
+        std::unique_ptr<OrthographicCamera> m_camera;  // 默认使用正交相机
+        float m_lastFrameTime;
+        Path m_configPath;
     };
 } // Tina
-
-#endif //TINA_CORE_GAMEAPPLICATION_HPP

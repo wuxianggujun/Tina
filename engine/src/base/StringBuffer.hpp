@@ -3,11 +3,6 @@
 
 #include "io/Buffer.hpp"
 #include <string>
-#include <unicode/ucnv.h>
-#include <unicode/utypes.h>
-#include <unicode/stringpiece.h>
-#include <unicode/utf8.h>
-#include <unicode/uchar.h>
 
 namespace Tina {
     class StringBuffer {
@@ -34,7 +29,7 @@ namespace Tina {
         
         std::string convertEncoding(const std::string &input, const char *toEncoding) const;
 
-        [[nodiscard]] size_t countWhiteSpace(const icu::StringPiece &input) const;
+        // [[nodiscard]] size_t countWhiteSpace(const icu::StringPiece &input) const;
 
     private:
         Buffer<char> *strBuffer;

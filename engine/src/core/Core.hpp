@@ -2,8 +2,7 @@
 // Created by wuxianggujun on 2024/7/12.
 //
 
-#ifndef TINA_CORE_HPP
-#define TINA_CORE_HPP
+#pragma once
 
 #include <memory>
 
@@ -13,7 +12,7 @@ namespace Tina
 {
     // Scope is an alias for std::unique_ptr with a default deleter
     template <class T, typename Deleter = std::default_delete<T>>
-    using ScopePtr = std::unique_ptr<T,Deleter>;
+    using ScopePtr = std::unique_ptr<T, Deleter>;
 
     // createScope is a helper function to create a Scope object
     template <class T, class... Args>
@@ -36,6 +35,17 @@ namespace Tina
     // WeakRef is an alias for std::weak_ptr
     template <class T>
     using WeakRefPtr = std::weak_ptr<T>;
-} // Tina
 
-#endif //TINA_CORE_HPP
+    // 其他智能指针类型别名
+    template <class T>
+    using SharedPtr = RefPtr<T>;
+
+    template <class T>
+    using WeakPtr = WeakRefPtr<T>;
+
+    // 为保持兼容性，添加createSharedPtr作为createRefPtr的别名
+    template <class T, class... Args>
+    constexpr SharedPtr<T> createSharedPtr(Args&&... args) {
+        return createRefPtr<T>(std::forward<Args>(args)...);
+    }
+} // Tina

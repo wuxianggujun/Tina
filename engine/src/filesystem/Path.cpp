@@ -3,147 +3,166 @@
 //
 
 #include "Path.hpp"
+// #define NOMINMAX
+#include "FileSystem.hpp"
 
 #include <algorithm>
 #include <fstream>
+#include <utility>
 
 namespace Tina
 {
-    const char Path::pathSeparator = PATH_SEPARATOR;
-    const std::string Path::pathSeparatorString(1,PATH_SEPARATOR);
-
-    Path::Path(const std::string& path)
+    class Path::Impl
     {
-        fullPath = path;
-
-        std::replace(fullPath.begin(), fullPath.end(), '\\', PATH_SEPARATOR);
-    }
-
-    Path::Path(const Path& path)
-    {
-        fullPath = path.fullPath;
-    }
-
-    std::string Path::getPathUpToLastSlash() const
-    {
-        // find last occurrence of characters
-        const size_t lastSlash = fullPath.find_last_of(pathSeparator);
-        if (lastSlash > 0)
+    public:
+        explicit Impl(const std::string& path): m_path(path)
         {
-            return fullPath.substr(0, lastSlash);
         }
-        if (lastSlash == 0)
+
+        explicit Impl(const String& path): m_path(path.c_str())
         {
-            return pathSeparatorString;
         }
-        return fullPath;
-    }
 
-    Path Path::getParentDirectory() const
-    {
-        Path parentDirectory;
-        parentDirectory.fullPath = getPathUpToLastSlash();
-        return parentDirectory;
-    }
-
-    std::string Path::getFileName() const
-    {
-        return fullPath.substr(fullPath.find_last_of(pathSeparator) + 1);
-    }
-
-    std::string Path::getFileNameWithoutExtension() const
-    {
-        const size_t lastSlash = fullPath.find_last_of(pathSeparator) + 1;
-        const size_t lastDot = fullPath.find_last_of('.');
-        if (lastDot > lastSlash)
+        explicit Impl(const char* path): m_path(path)
         {
-            return fullPath.substr(lastSlash, lastDot);
         }
-        return fullPath.substr(lastSlash);
-    }
 
-    std::string Path::getExtension() const
-    {
-        const size_t lastDot = fullPath.find_last_of('.');
-
-        if (lastDot == std::string::npos)
-            return "";
-        std::string ext = fullPath.substr(lastDot + 1);
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-        return ext;
-    }
-
-    Path Path::getChildFile(std::string relativePath) const
-    {
-        //if (isAbsolutePath (relativePath))
-        //return File (relativePath);
-
-        std::string path(fullPath);
-
-        // It's relative, so remove any ../ or ./ bits at the start..
-        if (relativePath[0] == '.')
+        explicit Impl(ghc::filesystem::path path): m_path(std::move(path))
         {
-            while (relativePath[0] == '.')
+        }
+
+        explicit Impl(const Path& other): m_path(other.m_impl->m_path)
+        {
+        }
+
+        explicit Impl(Path&& other) noexcept: m_path(std::move(other.m_impl->m_path))
+        {
+        }
+
+        Impl(const Impl& other) : m_path(other.m_path) {}
+
+        Impl& operator=(const Impl& other)
+        {
+            if (this != &other)
             {
-                const char secondChar = relativePath[1];
-
-                if (secondChar == '.')
-                {
-                    const char thirdChar = relativePath[2];
-
-                    if (thirdChar == 0 || thirdChar == pathSeparator)
-                    {
-                        const int lastSlash = path.find_last_of(pathSeparator);
-                        if (lastSlash >= 0)
-                            path = path.substr(0, lastSlash);
-
-                        relativePath = relativePath.substr(3);
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-                else if (secondChar == pathSeparator)
-                {
-                    relativePath = relativePath.substr(2);
-                }
-                else
-                {
-                    break;
-                }
+                m_path = other.m_path;
             }
+            return *this;
         }
 
-        return Path(addTrailingSeparator(path) + relativePath);
-    }
+        Impl& operator=(Impl&& other) noexcept
+        {
+            if (this != &other)
+            {
+                m_path = std::move(other.m_path);
+            }
+            return *this;
+        }
 
-    Path Path::getSiblingFile(const std::string& fileName) const
+        ghc::filesystem::path m_path;
+    };
+
+
+    Path::Path(const std::string& path): m_impl(new Impl(path))
     {
-        return getParentDirectory().getChildFile (fileName);
+
     }
 
-
-    std::string Path::addTrailingSeparator(const std::string& path) const
+    Path::Path(const String& path): m_impl(new Impl(path))
     {
-        if (path.empty())
-            return pathSeparatorString;
 
-        if (path[path.length() - 1] != pathSeparator)
-            return path + pathSeparator;
-
-        return path;
     }
 
-    bool Path::exists() const
+    Path::Path(const char* path): m_impl(new Impl(path))
     {
-        std::ifstream my_file(fullPath.c_str());
-        return my_file.good();
+
     }
 
-    bool Path::isEmpty() const
-    {
-        return fullPath.empty();
+    Path::Path(const Path &other): m_impl(new Impl(*other.m_impl)) {
     }
-    
+
+    Path::Path(Path&& other) noexcept : m_impl(other.m_impl)
+    {
+        other.m_impl = nullptr;
+    }
+
+    Path::~Path()
+    {
+        delete m_impl;
+    }
+
+    Path& Path::operator=(const Path& other)
+    {
+        if (this != &other)
+        {
+            *m_impl = *other.m_impl;
+        }
+        return *this;
+    }
+
+    Path &Path::operator=(Path &&other) noexcept {
+        if (this != &other) {
+            delete m_impl;
+            m_impl = other.m_impl;
+            other.m_impl = nullptr;
+        }
+        return *this;
+    }
+
+    Path Path::getParentDirectory() const {
+        return Path(m_impl->m_path.parent_path().string());
+    }
+
+
+    std::string Path::toString() const {
+        return m_impl->m_path.string();
+    }
+
+    String Path::toTinaString() const {
+        return String(toString());
+    }
+
+    std::string Path::getFullPath() const {
+        return m_impl->m_path.string();
+    }
+
+    std::string Path::getFileName() const {
+        return m_impl->m_path.filename().string();
+    }
+
+    std::string Path::getFileNameWithoutExtension() const {
+        return m_impl->m_path.stem().string();
+    }
+
+    std::string Path::getExtension() const {
+        return m_impl->m_path.extension().string();
+    }
+
+    Path Path::getChildFile(const std::string& relativePath) const {
+        return Path((m_impl->m_path / relativePath).string());
+    }
+
+    Path Path::getChildFile(const String& relativePath) const {
+        return Path((m_impl->m_path / relativePath.c_str()).string());
+    }
+
+    Path Path::getChildFile(const char* relativePath) const {
+        return Path((m_impl->m_path / relativePath).string());
+    }
+
+    Path Path::getSiblingFile(const std::string &fileName) const {
+        return Path((m_impl->m_path.parent_path() / fileName).string());
+    }
+
+    Path Path::getSiblingFile(const String& fileName) const {
+        return Path((m_impl->m_path.parent_path() / fileName.c_str()).string());
+    }
+
+    bool Path::exists() const {
+        return ghc::filesystem::exists(m_impl->m_path);
+    }
+
+    bool Path::isEmpty() const {
+        return m_impl->m_path.empty();
+    }
 }

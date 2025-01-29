@@ -4,8 +4,12 @@
 #
 # ##############################################################################
 
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.20...3.30)
 project(Tina VERSION 0.0.1 LANGUAGES CXX)
+
+if(POLICY CMP0175)
+    cmake_policy(SET CMP0175 OLD)
+endif()
 
 # In-source builds are disabled.
 if ("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_BINARY_DIR}")
@@ -30,6 +34,7 @@ option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "$
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_TESTING "Turn on Tina's Google Tests" ON)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
+option(TINA_BUILD_WAYLAND "Build Wayland" OFF)
 
 list(APPEND CMAKE_MODULE_PATH ${ROOT_DIR}/cmake)
 
@@ -60,23 +65,32 @@ endif ()
 
 include(CheckCXXCompilerFlag)
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# CMakeLists.txt
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNOMINMAX")
 
 if ("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     set(CMAKE_CXX_STANDARD 20)
 endif ()
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    # cygwin gnu c++ needs to use -std=gnu++17 instead of -std=c++17
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall -O3") # ALL WARNINGS
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     set(CMAKE_CXX_EXTENSIONS OFF)
-endif ()
+    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} /MP")    # MULTICORE BUILDS
+    # Hide the console in release mode
+    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /ENTRY:mainCRTStartup")
+    endif ()
+endif()
 
 if (BUILD_SHARED_LIBS)
     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 endif ()
 
+#include(Tina)
 # Import the tool cmake script
 include(TinaTool)
 include(BgfxUtil)
@@ -88,11 +102,12 @@ if (TINA_AUTOUPDATE_SUBMODULE)
     include(UpdateSubmodules)
 endif ()
 
-if (MSVC)
+if (MSVC) 
     add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
     add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
     string(APPEND CMAKE_CXX_FLAGS " /Zc:__cplusplus /MP")
 endif ()
+
 
 # 必须重新加载cmake才会生效
 file(GLOB_RECURSE RESOURCE_FILES "${RESOURCE_DIR}/*")
@@ -107,7 +122,6 @@ foreach (FILE ${RESOURCE_FILES})
 endforeach ()
 
 add_subdirectory(dependencies)
-#add_subdirectory(resources/shaders)
 add_subdirectory(engine)
 add_subdirectory(runtime)
 
