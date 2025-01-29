@@ -146,6 +146,7 @@ namespace Tina
 
             if (m_renderer2D)
             {
+                m_renderer2D->render();
             }
 
             // if (m_guiSystem)

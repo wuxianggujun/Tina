@@ -77,9 +77,6 @@ namespace Tina
         }
         fmt::print("Successfully loaded shader program, handle: {}\n", m_program.idx);
 
-        // 5. 设置初始视图变换
-        setViewProjection(800.0f, 600.0f);
-
         fmt::print("Renderer2D initialization completed\n");
     }
 
@@ -105,6 +102,8 @@ namespace Tina
 
     void Renderer2D::render()
     {
+        fmt::print("Starting render...\n");
+
         // 设置模型变换矩阵（这里使用单位矩阵）
         float mtx[16];
         bx::mtxIdentity(mtx);
@@ -116,14 +115,33 @@ namespace Tina
             | BGFX_STATE_WRITE_A
             | BGFX_STATE_WRITE_Z
             | BGFX_STATE_DEPTH_TEST_LESS
+            | BGFX_STATE_CULL_CW
             | BGFX_STATE_MSAA;
         bgfx::setState(state);
 
         // 设置顶点和索引缓冲
+        if (!bgfx::isValid(m_vbh)) {
+            fmt::print("Warning: Invalid vertex buffer handle\n");
+            return;
+        }
+        if (!bgfx::isValid(m_ibh)) {
+            fmt::print("Warning: Invalid index buffer handle\n");
+            return;
+        }
+        if (!bgfx::isValid(m_program)) {
+            fmt::print("Warning: Invalid program handle\n");
+            return;
+        }
+
         bgfx::setVertexBuffer(0, m_vbh);
         bgfx::setIndexBuffer(m_ibh);
 
+        // 确保视图被清除
+        bgfx::touch(0);
+
         // 提交绘制命令
         bgfx::submit(0, m_program);
+
+        fmt::print("Render completed\n");
     }
 }

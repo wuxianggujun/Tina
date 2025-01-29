@@ -77,4 +77,5 @@ compile_shaders(
         sprite
         gui
         bump
+        cubes
 )
