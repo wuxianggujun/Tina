@@ -116,13 +116,15 @@ namespace Tina
             // 设置视图清屏状态
             bgfx::setViewClear(0
                 , BGFX_CLEAR_COLOR|BGFX_CLEAR_DEPTH
-                , 0x303030ff
+                , 0x303030ff  // 深灰色背景
                 , 1.0f
                 , 0
             );
 
             // 设置视图矩形
-            bgfx::setViewRect(0, 0, 0, uint16_t(m_window->getResolution().x), uint16_t(m_window->getResolution().y));
+            uint16_t width = uint16_t(m_window->getResolution().x);
+            uint16_t height = uint16_t(m_window->getResolution().y);
+            bgfx::setViewRect(0, 0, 0, width, height);
 
             // 设置视图变换矩阵
             float view[16];
@@ -131,28 +133,21 @@ namespace Tina
             bx::mtxOrtho(
                 proj,
                 0.0f,
-                float(m_window->getResolution().x),
-                float(m_window->getResolution().y),
+                float(width),
+                float(height),
                 0.0f,
-                -1.0f,
-                1.0f,
                 0.0f,
-                bgfx::getCaps()->homogeneousDepth,
-                bx::Handedness::Right
+                1000.0f,
+                0.0f,
+                bgfx::getCaps()->homogeneousDepth
             );
             bgfx::setViewTransform(0, view, proj);
 
-            bgfx::touch(0);
-
+            // 渲染2D内容
             if (m_renderer2D)
             {
                 m_renderer2D->render();
             }
-
-            // if (m_guiSystem)
-            // {
-            //     // m_guiSystem->render();
-            // }
 
             // 提交帧
             bgfx::frame();

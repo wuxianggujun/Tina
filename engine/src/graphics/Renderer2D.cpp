@@ -11,10 +11,10 @@ namespace Tina
     // 定义一个简单的矩形顶点数据
     static PosColorVertex s_quadVertices[] =
     {
-        {-0.5f,  0.5f, 0.0f, 0xffffffff }, // 左上
-        { 0.5f,  0.5f, 0.0f, 0xffffffff }, // 右上
-        {-0.5f, -0.5f, 0.0f, 0xffffffff }, // 左下
-        { 0.5f, -0.5f, 0.0f, 0xffffffff }, // 右下
+        {100.0f, 100.0f, 0.0f, 0xff0000ff }, // 左上，红色
+        {300.0f, 100.0f, 0.0f, 0x00ff00ff }, // 右上，绿色
+        {100.0f, 300.0f, 0.0f, 0x0000ffff }, // 左下，蓝色
+        {300.0f, 300.0f, 0.0f, 0xffffffff }, // 右下，白色
     };
 
     // 定义索引数据
@@ -113,31 +113,28 @@ namespace Tina
         uint64_t state = 0
             | BGFX_STATE_WRITE_RGB
             | BGFX_STATE_WRITE_A
-            | BGFX_STATE_WRITE_Z
-            | BGFX_STATE_DEPTH_TEST_LESS
-            | BGFX_STATE_CULL_CW
-            | BGFX_STATE_MSAA;
+            | BGFX_STATE_BLEND_ALPHA;  // 使用alpha混合
         bgfx::setState(state);
 
         // 设置顶点和索引缓冲
         if (!bgfx::isValid(m_vbh)) {
-            fmt::print("Warning: Invalid vertex buffer handle\n");
+            fmt::print("Warning: Invalid vertex buffer handle: {}\n", m_vbh.idx);
             return;
         }
         if (!bgfx::isValid(m_ibh)) {
-            fmt::print("Warning: Invalid index buffer handle\n");
+            fmt::print("Warning: Invalid index buffer handle: {}\n", m_ibh.idx);
             return;
         }
         if (!bgfx::isValid(m_program)) {
-            fmt::print("Warning: Invalid program handle\n");
+            fmt::print("Warning: Invalid program handle: {}\n", m_program.idx);
             return;
         }
 
+        fmt::print("Submitting draw call with program: {}, vb: {}, ib: {}\n", 
+            m_program.idx, m_vbh.idx, m_ibh.idx);
+
         bgfx::setVertexBuffer(0, m_vbh);
         bgfx::setIndexBuffer(m_ibh);
-
-        // 确保视图被清除
-        bgfx::touch(0);
 
         // 提交绘制命令
         bgfx::submit(0, m_program);
