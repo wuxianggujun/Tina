@@ -146,7 +146,14 @@ namespace Tina
             // 渲染2D内容
             if (m_renderer2D)
             {
-                m_renderer2D->render();
+                m_renderer2D->begin();
+                
+                // 绘制一些测试矩形
+                m_renderer2D->drawRect(Vector2f(100, 100), Vector2f(200, 200), 0xff0000ff); // 红色
+                m_renderer2D->drawRect(Vector2f(400, 100), Vector2f(200, 200), 0x00ff00ff); // 绿色
+                m_renderer2D->drawRect(Vector2f(250, 350), Vector2f(200, 200), 0x0000ffff); // 蓝色
+                
+                m_renderer2D->end();
             }
 
             // 提交帧

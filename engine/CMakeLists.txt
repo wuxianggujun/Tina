@@ -8,7 +8,7 @@ file(GLOB_RECURSE ENGINE_FILES CONFIGURE_DEPENDS
 )
 
 
-add_shader_compile_dir(${CMAKE_SOURCE_DIR}/resources/shaders "cubes" "sprite")
+add_shader_compile_dir(${CMAKE_SOURCE_DIR}/resources/shaders "sprite")
 add_compile_options("$<$<CONFIG:DEBUG>:-DDEBUG>" "$<$<CONFIG:DEBUG>:-DENABLE_ASSERTS>")
 add_library(${SUBMODULE_PROJECT_NAME} ${ENGINE_FILES})
 GROUP_FILES_BY_DIRECTORY("ENGINE_FILES")

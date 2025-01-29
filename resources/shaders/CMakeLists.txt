@@ -16,6 +16,7 @@ function(compile_shaders)
         foreach(shader_name IN LISTS ARGN)
             set(IN_VERTEX    "${CMAKE_SOURCE_DIR}/resources/shaders/${shader_name}.vs.sc")
             set(IN_FRAGMENT  "${CMAKE_SOURCE_DIR}/resources/shaders/${shader_name}.fs.sc")
+            set(SHADER_DEF   "${CMAKE_SOURCE_DIR}/resources/shaders/${shader_name}.def.sc")
 
             set(OUT_VERTEX   "${CMAKE_BINARY_DIR}/shaders/${shader_name}.${profile}.vs.bin")
             set(OUT_FRAGMENT "${CMAKE_BINARY_DIR}/shaders/${shader_name}.${profile}.fs.bin")
@@ -26,14 +27,14 @@ function(compile_shaders)
 
             add_custom_command(
                     OUTPUT ${OUT_VERTEX}
-                    DEPENDS ${IN_VERTEX} ${COMMON_VARYING_DEF}
-                    COMMAND ${BGFX_SHADERC} --type vertex --platform ${platform} --profile ${profile} -f ${IN_VERTEX} --varyingdef ${COMMON_VARYING_DEF} -o ${OUT_VERTEX} -i "${BGFX_SHADER_INCLUDE_PATH}"
+                    DEPENDS ${IN_VERTEX} ${SHADER_DEF}
+                    COMMAND ${BGFX_SHADERC} --type vertex --platform ${platform} --profile ${profile} -f ${IN_VERTEX} --varyingdef ${SHADER_DEF} -o ${OUT_VERTEX} -i "${BGFX_SHADER_INCLUDE_PATH}"
             )
 
             add_custom_command(
                     OUTPUT ${OUT_FRAGMENT}
-                    DEPENDS ${IN_FRAGMENT} ${COMMON_VARYING_DEF}
-                    COMMAND ${BGFX_SHADERC} --type fragment --platform ${platform} --profile ${profile} -f ${IN_FRAGMENT} --varyingdef ${COMMON_VARYING_DEF} -o ${OUT_FRAGMENT} -i "${BGFX_SHADER_INCLUDE_PATH}"
+                    DEPENDS ${IN_FRAGMENT} ${SHADER_DEF}
+                    COMMAND ${BGFX_SHADERC} --type fragment --platform ${platform} --profile ${profile} -f ${IN_FRAGMENT} --varyingdef ${SHADER_DEF} -o ${OUT_FRAGMENT} -i "${BGFX_SHADER_INCLUDE_PATH}"
             )
 
             # Create output directories for each renderer type
@@ -62,7 +63,7 @@ function(compile_shaders)
                 )
             endif()
 
-            list(APPEND SHADER_SOURCE_LIST ${IN_VERTEX} ${IN_FRAGMENT} ${COMMON_VARYING_DEF})
+            list(APPEND SHADER_SOURCE_LIST ${IN_VERTEX} ${IN_FRAGMENT} ${SHADER_DEF})
             list(APPEND SHADER_OUTPUT_LIST ${OUT_VERTEX} ${OUT_FRAGMENT})
         endforeach()
     endforeach()
