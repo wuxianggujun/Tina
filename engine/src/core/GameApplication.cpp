@@ -124,6 +124,7 @@ namespace Tina
             // 设置视图矩形
             uint16_t width = uint16_t(m_window->getResolution().x);
             uint16_t height = uint16_t(m_window->getResolution().y);
+            fmt::print("Window size: {}x{}\n", width, height);
             bgfx::setViewRect(0, 0, 0, width, height);
 
             // 设置视图变换矩阵
@@ -148,10 +149,15 @@ namespace Tina
             {
                 m_renderer2D->begin();
                 
-                // 绘制一些测试矩形
-                m_renderer2D->drawRect(Vector2f(100, 100), Vector2f(200, 200), 0xff0000ff); // 红色
-                m_renderer2D->drawRect(Vector2f(400, 100), Vector2f(200, 200), 0x00ff00ff); // 绿色
-                m_renderer2D->drawRect(Vector2f(250, 350), Vector2f(200, 200), 0x0000ffff); // 蓝色
+                // 使用ABGR格式的颜色 (Alpha | Blue | Green | Red)
+                uint32_t red = 0xff0000ff;    // Alpha=ff, Blue=00, Green=00, Red=ff
+                uint32_t green = 0xff00ff00;  // Alpha=ff, Blue=00, Green=ff, Red=00
+                uint32_t blue = 0xffff0000;   // Alpha=ff, Blue=ff, Green=00, Red=00
+                
+                // 绘制测试矩形
+                m_renderer2D->drawRect(Vector2f(100, 100), Vector2f(400, 300), red);    // 红色矩形
+                m_renderer2D->drawRect(Vector2f(600, 100), Vector2f(200, 200), green);  // 绿色矩形
+                m_renderer2D->drawRect(Vector2f(300, 500), Vector2f(300, 100), blue);   // 蓝色矩形
                 
                 m_renderer2D->end();
             }

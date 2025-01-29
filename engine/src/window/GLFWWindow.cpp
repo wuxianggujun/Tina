@@ -33,37 +33,59 @@ namespace Tina {
 
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
-
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+        glfwWindowHint(GLFW_RESIZABLE, config.resizable ? GLFW_TRUE : GLFW_FALSE);
         
         m_windowSize = config.resolution;
 
         m_window.reset(
             glfwCreateWindow(m_windowSize.width, m_windowSize.height, config.title.c_str(), nullptr, nullptr));
 
+        if (!m_window) {
+            fmt::print("Failed to create GLFW window\n");
+            return;
+        }
+
         bgfx::Init bgfxInit;
-        bgfxInit.type = bgfx::RendererType::Count;
-        bgfxInit.vendorId = BGFX_PCI_ID_NONE;
+#if TINA_PLATFORM_WINDOWS
+        bgfxInit.type = bgfx::RendererType::Direct3D11;
+#else
+        bgfxInit.type = bgfx::RendererType::OpenGL;
+#endif
         bgfxInit.resolution.width = m_windowSize.width;
         bgfxInit.resolution.height = m_windowSize.height;
         bgfxInit.resolution.reset = BGFX_RESET_VSYNC;
         bgfxInit.callback = &m_bgfxCallback;
 
-        // bgfxInit.platformData.context = glfwGetCurrentContext();
         bgfxInit.platformData.nwh = glfwNativeWindowHandle(m_window.get());
         bgfxInit.platformData.ndt = getNativeDisplayHandle();
         bgfxInit.platformData.type = getNativeWindowHandleType();
+        bgfxInit.platformData.backBuffer = nullptr;
+        bgfxInit.platformData.backBufferDS = nullptr;
+
+        fmt::print("Initializing BGFX...\n");
+        fmt::print("Window handle: {}\n", (void*)bgfxInit.platformData.nwh);
+        fmt::print("Display handle: {}\n", (void*)bgfxInit.platformData.ndt);
+        fmt::print("Window handle type: {}\n", static_cast<int>(bgfxInit.platformData.type));
 
         if (!bgfx::init(bgfxInit)) {
-            fmt::printf("Bgfx initialization failed\n");
+            fmt::print("BGFX initialization failed\n");
             return;
         }
+        fmt::print("BGFX initialized successfully\n");
+
+        // Set debug flags and text size
+        bgfx::setDebug(BGFX_DEBUG_TEXT | BGFX_DEBUG_STATS);
+
+        // 设置视口
+        bgfx::setViewRect(0, 0, 0, uint16_t(m_windowSize.width), uint16_t(m_windowSize.height));
+        bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
 
         glfwSetWindowUserPointer(m_window.get(), this);
         glfwSetWindowSizeCallback(m_window.get(), windowSizeCallBack);
         glfwSetKeyCallback(m_window.get(), keyboardCallback);
 
-        bgfx::reset(m_windowSize.width, m_windowSize.height, BGFX_RESET_VSYNC);
+        fmt::print("Window creation completed\n");
     }
 
     void GLFWWindow::setEventHandler(ScopePtr<EventHandler> &&eventHandler) {

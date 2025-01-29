@@ -8,12 +8,12 @@ namespace Tina
     // 顶点结构体，包含位置、颜色和纹理坐标
     struct PosColorTexCoordVertex
     {
-        float x;
-        float y;
-        float z;
-        uint32_t color;
-        float u;
-        float v;
+        float m_x;
+        float m_y;
+        float m_z;
+        uint32_t m_rgba;
+        float m_u;
+        float m_v;
 
         static void init()
         {
