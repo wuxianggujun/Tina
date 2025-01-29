@@ -134,6 +134,13 @@ namespace Tina
             0           // 模板值
         );
 
+        // 设置渲染状态
+        uint64_t state = 0
+            | BGFX_STATE_WRITE_RGB
+            | BGFX_STATE_WRITE_A
+            | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+        bgfx::setState(state);
+
         m_isDrawing = true;
         m_currentVertex = 0;
         m_currentIndex = 0;

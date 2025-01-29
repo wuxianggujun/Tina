@@ -125,16 +125,34 @@ namespace Tina
 
     void GameApplication::update(float deltaTime)
     {
-        // if (m_guiSystem)
-        // {
-        //     // m_guiSystem->update(deltaTime);
-        // }
+        // 检查窗口大小是否改变
+        const Vector2i& currentSize = m_window->getResolution();
+        static Vector2i lastSize = currentSize;
+        
+        if (currentSize != lastSize)
+        {
+            // 更新相机投影
+            if (m_camera)
+            {
+                m_camera->setProjection(
+                    0.0f,                          // left
+                    static_cast<float>(currentSize.x),  // right
+                    static_cast<float>(currentSize.y),  // bottom
+                    0.0f,                          // top
+                    -1.0f,                         // near
+                    1.0f                           // far
+                );
+            }
+            lastSize = currentSize;
+        }
     }
 
     void GameApplication::render()
     {
         if (m_window)
         {
+            const Vector2i& resolution = m_window->getResolution();
+            
             // 设置视图清屏状态
             bgfx::setViewClear(0,
                 BGFX_CLEAR_COLOR|BGFX_CLEAR_DEPTH,
@@ -144,9 +162,9 @@ namespace Tina
             );
 
             // 设置视图矩形
-            uint16_t width = uint16_t(m_window->getResolution().x);
-            uint16_t height = uint16_t(m_window->getResolution().y);
-            bgfx::setViewRect(0, 0, 0, width, height);
+            bgfx::setViewRect(0, 0, 0, 
+                static_cast<uint16_t>(resolution.x), 
+                static_cast<uint16_t>(resolution.y));
 
             // 确保视图0被清除
             bgfx::touch(0);
@@ -156,11 +174,12 @@ namespace Tina
             {
                 m_renderer2D->begin();
                 
-                // 绘制一些矩形
-                m_renderer2D->drawRect({100, 100}, {100, 100}, Color::Red);
-                m_renderer2D->drawRect({250, 100}, {100, 100}, Color::Green);
-                m_renderer2D->drawRect({400, 100}, {100, 100}, Color::Blue);
-                m_renderer2D->drawRect({550, 100}, {100, 100}, Color::White);
+                // 绘制一些矩形，使用相对于窗口大小的位置和尺寸
+                float rectSize = 100.0f;  // 固定大小的矩形
+                m_renderer2D->drawRect({100, 100}, {rectSize, rectSize}, Color::Red);
+                m_renderer2D->drawRect({250, 100}, {rectSize, rectSize}, Color::Green);
+                m_renderer2D->drawRect({400, 100}, {rectSize, rectSize}, Color::Blue);
+                m_renderer2D->drawRect({550, 100}, {rectSize, rectSize}, Color::White);
 
                 m_renderer2D->end();
             }
