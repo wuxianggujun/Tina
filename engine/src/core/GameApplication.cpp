@@ -78,6 +78,25 @@ namespace Tina
         // 创建2D渲染器
         m_renderer2D = std::make_unique<Renderer2D>(0);  // 使用视图0
         m_renderer2D->initialize();
+
+        // 创建正交相机
+        float width = static_cast<float>(windowConfig.resolution.width);
+        float height = static_cast<float>(windowConfig.resolution.height);
+        m_camera = std::make_unique<OrthographicCamera>(
+            0.0f,    // left
+            width,   // right
+            height,  // bottom
+            0.0f,    // top
+            -1.0f,   // near
+            1.0f     // far
+        );
+        
+        // 设置相机位置（使用简单的2D设置）
+        m_camera->setPosition(Vector3f(0.0f, 0.0f, 0.0f));
+        m_camera->setTarget(Vector3f(0.0f, 0.0f, -1.0f));
+        
+        // 设置渲染器使用这个相机
+        m_renderer2D->setCamera(m_camera.get());
     }
 
     void GameApplication::run()
@@ -117,18 +136,17 @@ namespace Tina
         if (m_window)
         {
             // 设置视图清屏状态
-            bgfx::setViewClear(0
-                , BGFX_CLEAR_COLOR|BGFX_CLEAR_DEPTH
-                , 0x303030ff  // 深灰色背景
-                , 1.0f
-                , 0
+            bgfx::setViewClear(0,
+                BGFX_CLEAR_COLOR|BGFX_CLEAR_DEPTH,
+                0x303030ff,  // 深灰色背景
+                1.0f,
+                0
             );
 
             // 设置视图矩形
             uint16_t width = uint16_t(m_window->getResolution().x);
             uint16_t height = uint16_t(m_window->getResolution().y);
             bgfx::setViewRect(0, 0, 0, width, height);
-            fmt::print("Window size: {}x{}\n", width, height);
 
             // 确保视图0被清除
             bgfx::touch(0);
@@ -138,15 +156,8 @@ namespace Tina
             {
                 m_renderer2D->begin();
                 
-                // 使用RGBA格式的颜色
-                uint32_t red   = 0xffff0000;  // Alpha=ff, Red=ff, Green=00, Blue=00
-                uint32_t green = 0xff00ff00;  // Alpha=ff, Red=00, Green=ff, Blue=00
-                uint32_t blue  = 0xff0000ff;  // Alpha=ff, Red=00, Green=00, Blue=ff
-                uint32_t white = 0xffffffff;  // Alpha=ff, Red=ff, Green=ff, Blue=ff
-
                 // 绘制一些矩形
                 m_renderer2D->drawRect({100, 100}, {100, 100}, Color::Red);
-                m_renderer2D->drawRect({200, 100}, {100, 100}, Color(1.0f, 0.0f, 0.0f, 0.5f));  // 半透明红色
                 m_renderer2D->drawRect({250, 100}, {100, 100}, Color::Green);
                 m_renderer2D->drawRect({400, 100}, {100, 100}, Color::Blue);
                 m_renderer2D->drawRect({550, 100}, {100, 100}, Color::White);

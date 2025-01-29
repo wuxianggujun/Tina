@@ -4,6 +4,7 @@
 
 #include "Color.hpp"
 #include "math/Vector.hpp"
+#include "Camera.hpp"
 
 namespace Tina
 {
@@ -42,14 +43,15 @@ namespace Tina
         // 设置视图ID
         void setViewId(uint16_t viewId) { m_viewId = viewId; }
 
-        // 设置视图投影矩阵
-        void setViewProjection(float width, float height);
+        // 设置相机
+        void setCamera(const Camera* camera) { m_camera = camera; }
 
         // 绘制纯色矩形
         void drawRect(const Vector2f& position, const Vector2f& size, const Color& color);
 
         // 绘制纹理矩形
-        void drawTexturedRect(const Vector2f& position, const Vector2f& size, bgfx::TextureHandle texture, uint32_t color = 0xffffffff);
+        void drawTexturedRect(const Vector2f& position, const Vector2f& size, 
+                            bgfx::TextureHandle texture, const Color& color = Color::White);
 
         // 开始和结束批处理
         void begin();
@@ -66,6 +68,7 @@ namespace Tina
         bool checkFlush(uint16_t vertexCount, uint16_t indexCount);
 
         uint16_t m_viewId;  // 视图ID
+        const Camera* m_camera;  // 当前相机
         bgfx::ProgramHandle m_program;
         bgfx::DynamicVertexBufferHandle m_vbh;
         bgfx::DynamicIndexBufferHandle m_ibh;

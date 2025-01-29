@@ -3,6 +3,7 @@
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 #include <fmt/format.h>
+#include <glm/glm.hpp>
 
 namespace Tina
 {
@@ -20,6 +21,7 @@ namespace Tina
         , m_currentIndex(0)
         , m_currentTexture(BGFX_INVALID_HANDLE)
         , m_isDrawing(false)
+        , m_camera(nullptr)
     {
     }
 
@@ -107,34 +109,31 @@ namespace Tina
             return;
         }
 
-        // 更新视图矩形
+        if (!m_camera) {
+            fmt::print("Warning: No camera set for Renderer2D\n");
+            return;
+        }
+
+        // 获取视图和投影矩阵
+        const glm::mat4& view = m_camera->getViewMatrix();
+        const glm::mat4& proj = m_camera->getProjectionMatrix();
+
+        // 设置视图和投影矩阵
+        bgfx::setViewTransform(m_viewId, &view[0][0], &proj[0][0]);
+
+        // 设置视图矩形
         uint16_t width = uint16_t(bgfx::getStats()->width);
         uint16_t height = uint16_t(bgfx::getStats()->height);
-        
-        // 设置正交投影矩阵
-        float proj[16];
-        bx::mtxOrtho(proj, 
-            0.0f,                // left
-            float(width),        // right
-            0.0f,               // top
-            float(height),       // bottom
-            0.0f,              // near
-            100.0f,            // far
-            0.0f,               // offset
-            bgfx::getCaps()->homogeneousDepth);
+        bgfx::setViewRect(m_viewId, 0, 0, width, height);
 
-        // 设置视图矩阵（使用单位矩阵，因为是2D渲染）
-        float view[16];
-        bx::mtxIdentity(view);
-        
-        // 设置视图和投影矩阵
-        bgfx::setViewTransform(m_viewId, view, proj);
+        // 设置视图清除标志
+        bgfx::setViewClear(m_viewId,
+            BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+            0x303030ff, // 背景色
+            1.0f,       // 深度值
+            0           // 模板值
+        );
 
-        // 设置模型矩阵为单位矩阵
-        float mtx[16];
-        bx::mtxIdentity(mtx);
-        bgfx::setTransform(mtx);
-        
         m_isDrawing = true;
         m_currentVertex = 0;
         m_currentIndex = 0;
@@ -173,18 +172,15 @@ namespace Tina
         bgfx::update(m_vbh, 0, bgfx::makeRef(m_vertices, m_currentVertex * sizeof(PosColorTexCoordVertex)));
         bgfx::update(m_ibh, 0, bgfx::makeRef(m_indices, m_currentIndex * sizeof(uint16_t)));
 
-        // 设置渲染状态
+        // 设置渲染状态 - 简化2D渲染状态
         uint64_t state = 0
             | BGFX_STATE_WRITE_RGB
             | BGFX_STATE_WRITE_A
-            | BGFX_STATE_WRITE_Z
-            | BGFX_STATE_DEPTH_TEST_LESS
-            | BGFX_STATE_MSAA
             | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
-        
+
         bgfx::setState(state);
 
-        // 设置模型矩阵
+        // 设置模型矩阵为单位矩阵
         float mtx[16];
         bx::mtxIdentity(mtx);
         bgfx::setTransform(mtx);
@@ -197,14 +193,6 @@ namespace Tina
         // 设置顶点和索引缓冲
         bgfx::setVertexBuffer(0, m_vbh, 0, m_currentVertex);
         bgfx::setIndexBuffer(m_ibh, 0, m_currentIndex);
-
-        if (!bgfx::isValid(m_program)) {
-            fmt::print("Invalid shader program handle: {}\n", m_program.idx);
-            return;
-        }
-
-        fmt::print("Submitting draw call with program: {}, vbh: {}, ibh: {}\n", 
-            m_program.idx, m_vbh.idx, m_ibh.idx);
 
         // 提交绘制命令
         bgfx::submit(m_viewId, m_program);
@@ -233,7 +221,6 @@ namespace Tina
         // 计算矩形的四个顶点
         uint16_t baseVertex = m_currentVertex;
 
-        // 不再翻转Y坐标，使用正常的坐标系统
         float x = position.x;
         float y = position.y;
         float w = size.x;
@@ -285,13 +272,13 @@ namespace Tina
     }
 
     void Renderer2D::drawTexturedRect(const Vector2f& position, const Vector2f& size,
-                                      bgfx::TextureHandle texture, uint32_t color)
+                                      bgfx::TextureHandle texture, const Color& color)
     {
         if (m_currentTexture.idx != texture.idx) {
             flush();
             m_currentTexture = texture;
         }
-        // drawRect(position, size, abgr);
+        drawRect(position, size, color);
     }
 
     void Renderer2D::render()
