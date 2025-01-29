@@ -6,7 +6,7 @@ SAMPLER2D(s_texColor, 0);
 
 void main()
 {
-    vec4 color = texture2D(s_texColor, v_texcoord0);
-    // gl_FragColor = color * v_color0;
-    gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); // 输出纯红色
+    // 直接使用顶点颜色，确保正确解析RGBA格式
+    vec4 color = v_color0;
+    gl_FragColor = vec4(color.bgr, color.a); // 交换BGR为RGB
 } 

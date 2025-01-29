@@ -138,11 +138,11 @@ namespace Tina
             {
                 m_renderer2D->begin();
                 
-                // 使用ABGR格式的颜色 (Alpha | Blue | Green | Red)
-                uint32_t red = 0xff0000ff;    // Alpha=ff, Blue=00, Green=00, Red=ff
-                uint32_t green = 0xff00ff00;  // Alpha=ff, Blue=00, Green=ff, Red=00
-                uint32_t blue = 0xffff0000;   // Alpha=ff, Blue=ff, Green=00, Red=00
-                uint32_t white = 0xffffffff;  // Alpha=ff, Blue=ff, Green=ff, Red=ff
+                // 使用RGBA格式的颜色
+                uint32_t red   = 0xffff0000;  // Alpha=ff, Red=ff, Green=00, Blue=00
+                uint32_t green = 0xff00ff00;  // Alpha=ff, Red=00, Green=ff, Blue=00
+                uint32_t blue  = 0xff0000ff;  // Alpha=ff, Red=00, Green=00, Blue=ff
+                uint32_t white = 0xffffffff;  // Alpha=ff, Red=ff, Green=ff, Blue=ff
 
                 // 绘制一些矩形
                 m_renderer2D->drawRect({100, 100}, {100, 100}, red);

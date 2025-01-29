@@ -6,6 +6,6 @@ $output v_color0, v_texcoord0
 void main()
 {
     gl_Position = mul(u_modelViewProj, vec4(a_position, 1.0));
-    v_color0 = a_color0;
+    v_color0 = a_color0.rgba;
     v_texcoord0 = a_texcoord0;
 } 
