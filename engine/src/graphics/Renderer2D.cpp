@@ -8,8 +8,9 @@ namespace Tina
 {
     bgfx::VertexLayout PosColorTexCoordVertex::ms_layout;
 
-    Renderer2D::Renderer2D()
-        : m_program(BGFX_INVALID_HANDLE)
+    Renderer2D::Renderer2D(uint16_t viewId)
+        : m_viewId(viewId)
+        , m_program(BGFX_INVALID_HANDLE)
         , m_vbh(BGFX_INVALID_HANDLE)
         , m_ibh(BGFX_INVALID_HANDLE)
         , m_s_texColor(BGFX_INVALID_HANDLE)
@@ -43,34 +44,44 @@ namespace Tina
         
         // 初始化顶点布局
         PosColorTexCoordVertex::init();
-        fmt::print("Vertex layout initialized\n");
+        fmt::print("Vertex layout initialized with stride: {}\n", PosColorTexCoordVertex::ms_layout.getStride());
+
+        // 验证顶点布局
+        if (PosColorTexCoordVertex::ms_layout.getStride() == 0) {
+            fmt::print("Error: Invalid vertex layout stride\n");
+            throw std::runtime_error("Invalid vertex layout");
+        }
 
         // 分配批处理缓冲区
         m_vertices = new PosColorTexCoordVertex[MAX_VERTICES];
         m_indices = new uint16_t[MAX_INDICES];
         
         // 创建动态顶点缓冲
-        m_vbh = bgfx::createDynamicVertexBuffer(
-            uint32_t(MAX_VERTICES),
-            PosColorTexCoordVertex::ms_layout,
-            BGFX_BUFFER_ALLOW_RESIZE
+        const uint32_t numVertices = MAX_VERTICES;
+        const uint32_t numIndices = MAX_INDICES;
+
+        // 创建静态顶点缓冲（用于测试）
+        m_vbh = bgfx::createVertexBuffer(
+            bgfx::makeRef(m_vertices, sizeof(PosColorTexCoordVertex) * MAX_VERTICES),
+            PosColorTexCoordVertex::ms_layout
         );
+        fmt::print("Created vertex buffer with handle: {}\n", m_vbh.idx);
         if (!bgfx::isValid(m_vbh)) {
-            fmt::print("Failed to create vertex buffer\n");
+            fmt::print("Failed to create vertex buffer (invalid handle)\n");
             throw std::runtime_error("Failed to create vertex buffer");
         }
-        fmt::print("Dynamic vertex buffer created, handle: {}\n", m_vbh.idx);
+        fmt::print("Vertex buffer created successfully\n");
 
-        // 创建动态索引缓冲
-        m_ibh = bgfx::createDynamicIndexBuffer(
-            uint32_t(MAX_INDICES),
-            BGFX_BUFFER_ALLOW_RESIZE
+        // 创建静态索引缓冲（用于测试）
+        m_ibh = bgfx::createIndexBuffer(
+            bgfx::makeRef(m_indices, sizeof(uint16_t) * MAX_INDICES)
         );
+        fmt::print("Created index buffer with handle: {}\n", m_ibh.idx);
         if (!bgfx::isValid(m_ibh)) {
-            fmt::print("Failed to create index buffer\n");
+            fmt::print("Failed to create index buffer (invalid handle)\n");
             throw std::runtime_error("Failed to create index buffer");
         }
-        fmt::print("Dynamic index buffer created, handle: {}\n", m_ibh.idx);
+        fmt::print("Index buffer created successfully\n");
 
         // 加载着色器程序
         fmt::print("Loading shader program...\n");
@@ -112,24 +123,34 @@ namespace Tina
         // 更新视图矩形
         uint16_t width = uint16_t(bgfx::getStats()->width);
         uint16_t height = uint16_t(bgfx::getStats()->height);
-        bgfx::setViewRect(0, 0, 0, width, height);
+        bgfx::setViewRect(m_viewId, 0, 0, width, height);
         
         // 设置正交投影矩阵
-        float ortho[16];
-        bx::mtxOrtho(ortho, 
+        float proj[16];
+        bx::mtxOrtho(proj, 
             0.0f,                // left
             float(width),        // right
             float(height),       // bottom
             0.0f,               // top
             0.0f,               // near
-            1000.0f,            // far
+            1.0f,               // far
             0.0f,               // offset
             bgfx::getCaps()->homogeneousDepth);
+
+        // 设置视图矩阵（使用单位矩阵，因为是2D渲染）
+        float view[16];
+        bx::mtxIdentity(view);
         
-        bgfx::setViewTransform(0, NULL, ortho);
+        // 设置视图和投影矩阵
+        bgfx::setViewTransform(m_viewId, view, proj);
+
+        // 重置模型矩阵
+        float mtx[16];
+        bx::mtxIdentity(mtx);
+        bgfx::setTransform(mtx);
         
         // 设置视图清除标志
-        bgfx::setViewClear(0,
+        bgfx::setViewClear(m_viewId,
             BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
             0x303030ff, // 背景色
             1.0f,       // 深度值
@@ -170,27 +191,34 @@ namespace Tina
             return;
         }
 
-        // 更新顶点和索引缓冲
-        bgfx::update(m_vbh, 0, bgfx::makeRef(m_vertices, m_currentVertex * sizeof(PosColorTexCoordVertex)));
-        bgfx::update(m_ibh, 0, bgfx::makeRef(m_indices, m_currentIndex * sizeof(uint16_t)));
+        // 创建新的缓冲区
+        bgfx::VertexBufferHandle newVbh = bgfx::createVertexBuffer(
+            bgfx::makeRef(m_vertices, m_currentVertex * sizeof(PosColorTexCoordVertex)),
+            PosColorTexCoordVertex::ms_layout
+        );
+
+        bgfx::IndexBufferHandle newIbh = bgfx::createIndexBuffer(
+            bgfx::makeRef(m_indices, m_currentIndex * sizeof(uint16_t))
+        );
 
         // 设置渲染状态
         uint64_t state = 0
             | BGFX_STATE_WRITE_RGB
             | BGFX_STATE_WRITE_A
+            | BGFX_STATE_DEPTH_TEST_LESS
             | BGFX_STATE_MSAA
             | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
         
         bgfx::setState(state);
         
-        // 设置模型矩阵（使用单位矩阵）
-        float mtx[16];
-        bx::mtxIdentity(mtx);
-        bgfx::setTransform(mtx);
+        // 如果有纹理，设置纹理
+        if (bgfx::isValid(m_currentTexture)) {
+            bgfx::setTexture(0, m_s_texColor, m_currentTexture);
+        }
 
         // 设置顶点和索引缓冲
-        bgfx::setVertexBuffer(0, m_vbh, 0, m_currentVertex);
-        bgfx::setIndexBuffer(m_ibh, 0, m_currentIndex);
+        bgfx::setVertexBuffer(0, newVbh);
+        bgfx::setIndexBuffer(newIbh);
 
         if (!bgfx::isValid(m_program)) {
             fmt::print("Invalid shader program handle: {}\n", m_program.idx);
@@ -198,10 +226,14 @@ namespace Tina
         }
 
         fmt::print("Submitting draw call with program: {}, vbh: {}, ibh: {}\n", 
-            m_program.idx, m_vbh.idx, m_ibh.idx);
+            m_program.idx, newVbh.idx, newIbh.idx);
 
         // 提交绘制命令
-        bgfx::submit(0, m_program);
+        bgfx::submit(m_viewId, m_program);
+
+        // 销毁临时缓冲区
+        bgfx::destroy(newVbh);
+        bgfx::destroy(newIbh);
 
         // 重置计数器
         m_currentVertex = 0;
@@ -226,8 +258,8 @@ namespace Tina
         uint16_t baseVertex = m_currentVertex;
         
         // 注意：Y坐标需要翻转，因为OpenGL的坐标系原点在左下角，而我们想要左上角为原点
-        float y = position.y;
-        float h = size.y;
+        float y = float(bgfx::getStats()->height) - position.y;
+        float h = -size.y;  // 翻转高度
         
         // 左上
         m_vertices[m_currentVertex].m_x = position.x;

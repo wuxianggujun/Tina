@@ -31,11 +31,14 @@ namespace Tina
     class Renderer2D
     {
     public:
-        Renderer2D();
+        explicit Renderer2D(uint16_t viewId = 0);
         ~Renderer2D();
 
         // 初始化渲染器
         void initialize();
+
+        // 设置视图ID
+        void setViewId(uint16_t viewId) { m_viewId = viewId; }
 
         // 设置视图投影矩阵
         void setViewProjection(float width, float height);
@@ -60,9 +63,10 @@ namespace Tina
         // 检查是否需要刷新批处理
         bool checkFlush(uint16_t vertexCount, uint16_t indexCount);
 
+        uint16_t m_viewId;  // 视图ID
         bgfx::ProgramHandle m_program;
-        bgfx::DynamicVertexBufferHandle m_vbh;
-        bgfx::DynamicIndexBufferHandle m_ibh;
+        bgfx::VertexBufferHandle m_vbh;
+        bgfx::IndexBufferHandle m_ibh;
         bgfx::UniformHandle m_s_texColor; // 纹理采样器uniform
 
         // 批处理相关
