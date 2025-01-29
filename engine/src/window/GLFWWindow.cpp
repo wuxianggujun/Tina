@@ -71,7 +71,6 @@ namespace Tina {
     }
 
     void GLFWWindow::destroy() {
-        bgfx::shutdown();
         m_window.reset();
         glfwTerminate();
     }

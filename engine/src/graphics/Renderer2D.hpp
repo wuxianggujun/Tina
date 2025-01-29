@@ -33,9 +33,11 @@ namespace Tina
 
         void initialize();
         void setViewProjection(float width, float height);
+        void render();
 
     private:
         bgfx::ProgramHandle m_program;
-        bgfx::UniformHandle m_mvpUniform;
+        bgfx::VertexBufferHandle m_vbh;
+        bgfx::IndexBufferHandle m_ibh;
     };
 }

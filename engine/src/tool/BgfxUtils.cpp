@@ -80,12 +80,12 @@ namespace Tina::BgfxUtils {
         
         Path fullPath = shaderPath.getChildFile(fileName);
 
-        std::cout << "Loading shader from: " << fullPath.toString() << std::endl;
+        fmt::print("Loading shader from: {}\n", fullPath.toString());
 
         const bgfx::Memory* mem = loadMem(_reader, bx::FilePath(fullPath.toString().c_str()));
         if (!mem) {
-            std::cerr << "Failed to load shader: " << fullPath.toString() << std::endl;
-            return BGFX_INVALID_HANDLE;
+            fmt::print("Failed to load shader: {}\n", fullPath.toString());
+                return BGFX_INVALID_HANDLE;
         }
 
         bgfx::ShaderHandle handle = bgfx::createShader(mem);
