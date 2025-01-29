@@ -1,6 +1,8 @@
 #pragma once
 
 #include <bgfx/bgfx.h>
+
+#include "Color.hpp"
 #include "math/Vector.hpp"
 
 namespace Tina
@@ -44,7 +46,7 @@ namespace Tina
         void setViewProjection(float width, float height);
 
         // 绘制纯色矩形
-        void drawRect(const Vector2f& position, const Vector2f& size, uint32_t color);
+        void drawRect(const Vector2f& position, const Vector2f& size, const Color& color);
 
         // 绘制纹理矩形
         void drawTexturedRect(const Vector2f& position, const Vector2f& size, bgfx::TextureHandle texture, uint32_t color = 0xffffffff);

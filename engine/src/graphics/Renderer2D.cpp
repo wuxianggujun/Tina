@@ -214,8 +214,8 @@ namespace Tina
         m_currentIndex = 0;
     }
 
-    void Renderer2D::drawRect(const Vector2f& position, const Vector2f& size, uint32_t color)
-    {
+    void Renderer2D::drawRect(const Vector2f& position, const Vector2f& size, const Color& color)
+    {   
         if (!m_isDrawing) {
             fmt::print("Warning: drawRect() called without begin()\n");
             return;
@@ -225,23 +225,25 @@ namespace Tina
             flush();
         }
 
-        fmt::print("Drawing rect at ({}, {}) with size ({}, {}), color: {:#x}\n", 
-            position.x, position.y, size.x, size.y, color);
+        fmt::print("Drawing rect at position ({}, {}), size ({}, {})\n",
+            position.x, position.y, size.x, size.y);
+
+        uint32_t abgr = color.toABGR();
 
         // 计算矩形的四个顶点
         uint16_t baseVertex = m_currentVertex;
-        
+
         // 不再翻转Y坐标，使用正常的坐标系统
         float x = position.x;
         float y = position.y;
         float w = size.x;
         float h = size.y;
-        
+
         // 左上
         m_vertices[m_currentVertex].m_x = x;
         m_vertices[m_currentVertex].m_y = y;
         m_vertices[m_currentVertex].m_z = 0.0f;
-        m_vertices[m_currentVertex].m_rgba = color;
+        m_vertices[m_currentVertex].m_rgba = abgr;
         m_vertices[m_currentVertex].m_u = 0.0f;
         m_vertices[m_currentVertex].m_v = 0.0f;
         m_currentVertex++;
@@ -250,7 +252,7 @@ namespace Tina
         m_vertices[m_currentVertex].m_x = x + w;
         m_vertices[m_currentVertex].m_y = y;
         m_vertices[m_currentVertex].m_z = 0.0f;
-        m_vertices[m_currentVertex].m_rgba = color;
+        m_vertices[m_currentVertex].m_rgba = abgr;
         m_vertices[m_currentVertex].m_u = 1.0f;
         m_vertices[m_currentVertex].m_v = 0.0f;
         m_currentVertex++;
@@ -259,7 +261,7 @@ namespace Tina
         m_vertices[m_currentVertex].m_x = x;
         m_vertices[m_currentVertex].m_y = y + h;
         m_vertices[m_currentVertex].m_z = 0.0f;
-        m_vertices[m_currentVertex].m_rgba = color;
+        m_vertices[m_currentVertex].m_rgba = abgr;
         m_vertices[m_currentVertex].m_u = 0.0f;
         m_vertices[m_currentVertex].m_v = 1.0f;
         m_currentVertex++;
@@ -268,7 +270,7 @@ namespace Tina
         m_vertices[m_currentVertex].m_x = x + w;
         m_vertices[m_currentVertex].m_y = y + h;
         m_vertices[m_currentVertex].m_z = 0.0f;
-        m_vertices[m_currentVertex].m_rgba = color;
+        m_vertices[m_currentVertex].m_rgba = abgr;
         m_vertices[m_currentVertex].m_u = 1.0f;
         m_vertices[m_currentVertex].m_v = 1.0f;
         m_currentVertex++;
@@ -282,14 +284,14 @@ namespace Tina
         m_indices[m_currentIndex++] = baseVertex + 2; // 左下
     }
 
-    void Renderer2D::drawTexturedRect(const Vector2f& position, const Vector2f& size, 
-                                    bgfx::TextureHandle texture, uint32_t color)
+    void Renderer2D::drawTexturedRect(const Vector2f& position, const Vector2f& size,
+                                      bgfx::TextureHandle texture, uint32_t color)
     {
         if (m_currentTexture.idx != texture.idx) {
             flush();
             m_currentTexture = texture;
         }
-        drawRect(position, size, color);
+        // drawRect(position, size, abgr);
     }
 
     void Renderer2D::render()

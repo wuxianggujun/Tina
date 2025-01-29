@@ -145,10 +145,11 @@ namespace Tina
                 uint32_t white = 0xffffffff;  // Alpha=ff, Red=ff, Green=ff, Blue=ff
 
                 // 绘制一些矩形
-                m_renderer2D->drawRect({100, 100}, {100, 100}, red);
-                m_renderer2D->drawRect({250, 100}, {100, 100}, green);
-                m_renderer2D->drawRect({400, 100}, {100, 100}, blue);
-                m_renderer2D->drawRect({550, 100}, {100, 100}, white);
+                m_renderer2D->drawRect({100, 100}, {100, 100}, Color::Red);
+                m_renderer2D->drawRect({200, 100}, {100, 100}, Color(1.0f, 0.0f, 0.0f, 0.5f));  // 半透明红色
+                m_renderer2D->drawRect({250, 100}, {100, 100}, Color::Green);
+                m_renderer2D->drawRect({400, 100}, {100, 100}, Color::Blue);
+                m_renderer2D->drawRect({550, 100}, {100, 100}, Color::White);
 
                 m_renderer2D->end();
             }
