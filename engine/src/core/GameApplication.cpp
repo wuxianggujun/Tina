@@ -12,6 +12,7 @@
 #include <bgfx/bgfx.h>
 #include <fmt/format.h>
 #include "bx/math.h"
+#include "graphics/Sprite.hpp"
 
 namespace Tina
 {
@@ -101,6 +102,23 @@ namespace Tina
 
         // 创建示例实体
         createExampleEntities();
+
+        Texture iconTexture(Texture::loadFromFile("../resources/textures/player.png"));
+        // 创建玩家精灵
+        auto player = m_scene.createSprite(
+            iconTexture,
+            Vector2f(100.0f, 100.0f),  // 位置
+            Vector2f(64.0f, 64.0f)     // 大小
+        );
+
+        // 获取并修改组件
+        auto& transform = m_scene.getComponent<TransformComponent>(player);
+        transform.rotation = 45.0f;
+
+        auto& spriteComp = m_scene.getComponent<SpriteComponent>(player);
+        spriteComp.depth = 1.0f;
+        spriteComp.sprite.setOrigin(Vector2f(32.0f, 32.0f));
+
     }
 
     void GameApplication::createExampleEntities() {
@@ -170,6 +188,11 @@ namespace Tina
     void GameApplication::update(float deltaTime)
     {
         // 子类实现具体的更新逻辑
+        const auto view = m_scene.getRegistry().view<TransformComponent, SpriteComponent>();
+        for (const auto entity : view) {
+            auto& transform = view.get<TransformComponent>(entity);
+            transform.rotation += 45.0f * deltaTime; // 旋转精灵
+        }
     }
 
     void GameApplication::render()

@@ -4,6 +4,7 @@
 #include "graphics/Color.hpp"
 #include "math/Vector.hpp"
 #include "components/RenderComponents.hpp"
+#include "components/SpriteComponent.hpp"
 
 namespace Tina {
 
@@ -39,6 +40,46 @@ public:
         sprite.size = size;
         sprite.color = tint;
         
+        return entity;
+    }
+
+    // 创建精灵实体
+    entt::entity createSprite(const Texture& texture, const Vector2f& position,
+                             const Vector2f& size = Vector2f(1.0f, 1.0f),
+                             const Color& color = Color::White)
+    {
+        auto entity = m_registry.create();
+
+        // 添加变换组件
+        auto& transform = m_registry.emplace<TransformComponent>(entity);
+        transform.position = position;
+        transform.scale = size;
+
+        // 添加精灵组件
+        auto& spriteComp = m_registry.emplace<SpriteComponent>(entity);
+        spriteComp.sprite.setTexture(texture);
+        spriteComp.sprite.setColor(color);
+
+        return entity;
+    }
+
+    // 创建动画精灵
+    entt::entity createAnimatedSprite(const Texture& spriteSheet,
+                                    const Vector2f& position,
+                                    const Rectf& initialFrame)
+    {
+        auto entity = m_registry.create();
+
+        auto& transform = m_registry.emplace<TransformComponent>(entity);
+        transform.position = position;
+
+        auto& spriteComp = m_registry.emplace<SpriteComponent>(entity);
+        spriteComp.sprite.setTexture(spriteSheet);
+        spriteComp.sprite.setTextureRect(initialFrame);
+
+        // 可以添加动画组件
+        // auto& animComp = m_registry.emplace<AnimationComponent>(entity);
+
         return entity;
     }
 

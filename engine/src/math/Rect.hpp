@@ -67,7 +67,6 @@ namespace Tina
             return !(*this == other);
         }
 
-    private:
         T left, top;
         T width, height;
     };

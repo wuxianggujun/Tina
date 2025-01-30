@@ -4,6 +4,8 @@
 #include <bgfx/bgfx.h>
 #include <bx/uint32_t.h>
 
+#include "components/SpriteComponent.hpp"
+
 namespace Tina {
 
 void RenderSystem::initialize() {
@@ -68,6 +70,39 @@ void RenderSystem::render(entt::registry& registry) {
 
     // 开始2D渲染器的批处理
     m_renderer2D->begin();
+
+
+    // 渲染所有带有 SpriteComponent 的实体
+    auto spriteView = registry.view<const TransformComponent, const SpriteComponent>();
+
+    // 按深度排序
+    std::vector<entt::entity> sortedEntities;
+    for (auto entity : spriteView) {
+        sortedEntities.push_back(entity);
+    }
+
+    std::sort(sortedEntities.begin(), sortedEntities.end(),
+        [&registry](entt::entity a, entt::entity b) {
+            return registry.get<const SpriteComponent>(a).depth <
+                   registry.get<const SpriteComponent>(b).depth;
+        });
+
+    // 渲染精灵
+    for (auto entity : sortedEntities) {
+        const auto& transform = registry.get<const TransformComponent>(entity);
+        const auto& spriteComp = registry.get<const SpriteComponent>(entity);
+
+        if (!spriteComp.visible) continue;
+
+        // 更新精灵的变换
+        Sprite& sprite = const_cast<Sprite&>(spriteComp.sprite);
+        sprite.setPosition(transform.position);
+        sprite.setRotation(transform.rotation);
+        sprite.setScale(transform.scale);
+
+        // 绘制精灵
+        m_renderer2D->drawSprite(sprite);
+    }
 
     // 按组件类型分别渲染
     renderSprites(registry);

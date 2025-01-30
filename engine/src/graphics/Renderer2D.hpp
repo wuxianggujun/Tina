@@ -1,7 +1,5 @@
 #pragma once
 
-#include <bgfx/bgfx.h>
-
 #include "Color.hpp"
 #include "math/Vector.hpp"
 #include "Camera.hpp"
@@ -9,6 +7,8 @@
 
 namespace Tina
 {
+    class Sprite;
+
     // 顶点结构体，包含位置、颜色和纹理坐标
     struct PosColorTexCoordVertex
     {
@@ -53,6 +53,8 @@ namespace Tina
         // 绘制纹理矩形
         void drawTexturedRect(const Vector2f& position, const Vector2f& size,
                             const Texture& texture, const Color& color = Color::White);
+
+        void drawSprite(const Sprite& sprite);
 
         // 开始和结束批处理
         void begin();
