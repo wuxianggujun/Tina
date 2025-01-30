@@ -27,7 +27,7 @@ namespace Tina
 
     GameApplication::~GameApplication()
     {
-        shutdown();
+        GameApplication::shutdown();
     }
 
     void GameApplication::initialize()
@@ -74,18 +74,19 @@ namespace Tina
         m_window->addResizeListener(this);
 
         // 初始化渲染系统
-        RenderSystem::getInstance().initialize();
+        auto& renderSystem = RenderSystem::getInstance();
+        renderSystem.initialize();
 
         // 创建正交相机
         float width = static_cast<float>(windowConfig.resolution.width);
         float height = static_cast<float>(windowConfig.resolution.height);
         m_camera = std::make_unique<OrthographicCamera>(
-            0.0f, // left
-            width, // right
-            height, // bottom
-            0.0f, // top
-            -1.0f, // near
-            1.0f // far
+            0.0f,    // left
+            width,   // right
+            height,  // bottom
+            0.0f,    // top
+            -1.0f,   // near
+            1.0f     // far
         );
 
         // 设置相机位置
@@ -93,7 +94,10 @@ namespace Tina
         m_camera->setTarget(Vector3f(0.0f, 0.0f, -1.0f));
 
         // 设置渲染系统的相机
-        RenderSystem::getInstance().setCamera(m_camera.get());
+        renderSystem.setCamera(m_camera.get());
+        
+        // 设置视口
+        renderSystem.setViewport(0, 0, windowConfig.resolution.width, windowConfig.resolution.height);
 
         // 创建示例实体
         createExampleEntities();

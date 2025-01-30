@@ -53,12 +53,29 @@ void RenderSystem::beginFrame() {
         bgfx::setViewTransform(0, 
             &m_activeCamera->getViewMatrix()[0][0],
             &m_activeCamera->getProjectionMatrix()[0][0]);
+            
+        // 设置Renderer2D的相机
+        if (m_renderer2D) {
+            m_renderer2D->setCamera(m_activeCamera);
+        }
+    }
+}
+
+void RenderSystem::render(entt::registry& registry) {
+    if (!m_initialized || !m_renderer2D) {
+        return;
     }
 
     // 开始2D渲染器的批处理
-    if (m_renderer2D) {
-        m_renderer2D->begin();
-    }
+    m_renderer2D->begin();
+
+    // 按组件类型分别渲染
+    renderSprites(registry);
+    renderQuads(registry);
+    renderCustom(registry);
+
+    // 结束2D渲染器的批处理
+    m_renderer2D->end();
 }
 
 template<typename Component>
@@ -136,25 +153,9 @@ void RenderSystem::renderCustom(entt::registry& registry) {
     }
 }
 
-void RenderSystem::render(entt::registry& registry) {
-    if (!m_initialized) {
-        return;
-    }
-
-    // 按组件类型分别渲染
-    renderSprites(registry);
-    renderQuads(registry);
-    renderCustom(registry);
-}
-
 void RenderSystem::endFrame() {
     if (!m_initialized) {
         return;
-    }
-
-    // 结束2D渲染器的批处理
-    if (m_renderer2D) {
-        m_renderer2D->end();
     }
 
     // 提交帧
