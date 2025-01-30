@@ -2,6 +2,7 @@
 
 #include "graphics/Renderer2D.hpp"
 #include "graphics/Camera.hpp"
+#include "graphics/RenderLayerManager.hpp"
 #include "core/Shader.hpp"
 #include "components/RenderComponents.hpp"
 #include <entt/entt.hpp>
@@ -36,6 +37,9 @@ namespace Tina
         void setViewport(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
         void setClearColor(const Color& color);
 
+        // 层级管理
+        RenderLayerManager& getLayerManager() { return m_layerManager; }
+
     private:
         RenderSystem() = default;
         ~RenderSystem() = default;
@@ -44,19 +48,14 @@ namespace Tina
         RenderSystem(const RenderSystem&) = delete;
         RenderSystem& operator=(const RenderSystem&) = delete;
 
-        // 渲染不同类型的组件
-        void renderSprites(entt::registry& registry);
-        void renderQuads(entt::registry& registry);
-        void renderCustom(entt::registry& registry);
-        
-        // 按深度排序实体
-        template<typename Component>
-        std::vector<entt::entity> sortEntitiesByDepth(entt::registry& registry);
+        // 渲染指定层的实体
+        void renderLayer(entt::registry& registry, RenderLayer layer);
 
     private:
         std::unique_ptr<Renderer2D> m_renderer2D;
         Camera* m_activeCamera = nullptr;
         Color m_clearColor{0.2f, 0.2f, 0.2f, 1.0f};
         bool m_initialized = false;
+        RenderLayerManager m_layerManager;
     };
 }

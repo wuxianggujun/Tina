@@ -125,14 +125,15 @@ namespace Tina
 
     void GameApplication::createExampleEntities()
     {
+        auto& layerManager = RenderSystem::getInstance().getLayerManager();
+
         // 创建背景矩形
         auto background = m_scene.createQuad(
             Vector2f(100.0f, 100.0f),
             Vector2f(300.0f, 300.0f),
             Color(0.2f, 0.2f, 0.2f, 1.0f)
         );
-        auto& bgQuadComp = m_scene.getComponent<QuadRendererComponent>(background);
-        bgQuadComp.depth = getDepthFromLayer(RenderLayer::Background);
+        layerManager.addToLayer(background, RenderLayer::Background);
 
         // 创建红色矩形 - 实体低层
         auto redQuad = m_scene.createQuad(
@@ -140,8 +141,7 @@ namespace Tina
             Vector2f(100.0f, 100.0f),
             Color::Red
         );
-        auto& redQuadComp = m_scene.getComponent<QuadRendererComponent>(redQuad);
-        redQuadComp.depth = getDepthFromLayer(RenderLayer::EntityLow);
+        layerManager.addToLayer(redQuad, RenderLayer::EntityLow);
 
         // 创建绿色矩形 - 实体中层
         auto greenQuad = m_scene.createQuad(
@@ -149,8 +149,7 @@ namespace Tina
             Vector2f(100.0f, 100.0f),
             Color::Green
         );
-        auto& greenQuadComp = m_scene.getComponent<QuadRendererComponent>(greenQuad);
-        greenQuadComp.depth = getDepthFromLayer(RenderLayer::EntityMid);
+        layerManager.addToLayer(greenQuad, RenderLayer::EntityMid);
 
         // 创建蓝色矩形 - 实体高层
         auto blueQuad = m_scene.createQuad(
@@ -158,17 +157,35 @@ namespace Tina
             Vector2f(100.0f, 100.0f),
             Color::Blue
         );
-        auto& blueQuadComp = m_scene.getComponent<QuadRendererComponent>(blueQuad);
-        blueQuadComp.depth = getDepthFromLayer(RenderLayer::EntityHigh);
+        layerManager.addToLayer(blueQuad, RenderLayer::EntityHigh);
 
-        // 创建白色矩形 - 在实体中层和高层之间
+        // 创建白色矩形 - UI层
         auto whiteQuad = m_scene.createQuad(
             Vector2f(225.0f, 225.0f),
             Vector2f(100.0f, 100.0f),
             Color::White
         );
-        auto& whiteQuadComp = m_scene.getComponent<QuadRendererComponent>(whiteQuad);
-        whiteQuadComp.depth = getCustomDepthBetweenLayers(RenderLayer::EntityMid, RenderLayer::EntityHigh, 0.5f);
+        layerManager.addToLayer(whiteQuad, RenderLayer::UI);
+
+        // 创建玩家精灵
+        Texture iconTexture(Texture::loadFromFile("../resources/textures/player.png"));
+        auto player = m_scene.createSprite(
+            iconTexture,
+            Vector2f(100.0f, 100.0f),
+            Vector2f(64.0f, 64.0f)
+        );
+
+        // 设置玩家精灵属性
+        auto& transform = m_scene.getComponent<TransformComponent>(player);
+        transform.rotation = 0.0f;
+
+        auto& spriteComp = m_scene.getComponent<SpriteComponent>(player);
+        Vector2f spriteSize(64.0f, 64.0f);
+        spriteComp.sprite.setSize(spriteSize);
+        spriteComp.sprite.setOrigin(spriteSize * 0.5f);
+
+        // 将玩家添加到实体高层
+        layerManager.addToLayer(player, RenderLayer::EntityHigh);
     }
 
     void GameApplication::onWindowResize(int width, int height)

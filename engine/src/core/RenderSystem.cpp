@@ -71,121 +71,53 @@ void RenderSystem::render(entt::registry& registry) {
     // 开始2D渲染器的批处理
     m_renderer2D->begin();
 
-
-    // 渲染所有带有 SpriteComponent 的实体
-    auto spriteView = registry.view<const TransformComponent, const SpriteComponent>();
-
-    // 按深度排序
-    std::vector<entt::entity> sortedEntities;
-    for (auto entity : spriteView) {
-        sortedEntities.push_back(entity);
-    }
-
-    std::sort(sortedEntities.begin(), sortedEntities.end(),
-        [&registry](entt::entity a, entt::entity b) {
-            return registry.get<const SpriteComponent>(a).depth <
-                   registry.get<const SpriteComponent>(b).depth;
-        });
-
-    // 渲染精灵
-    for (auto entity : sortedEntities) {
-        const auto& transform = registry.get<const TransformComponent>(entity);
-        const auto& spriteComp = registry.get<const SpriteComponent>(entity);
-
-        if (!spriteComp.visible) continue;
-
-        // 更新精灵的变换
-        Sprite& sprite = const_cast<Sprite&>(spriteComp.sprite);
-        sprite.setPosition(transform.position);
-        // 在渲染精灵时
-        // float radians = bx::toRad(transform.rotation); // 将角度转换为弧度
-        sprite.setRotation(transform.rotation);
-        sprite.setScale(transform.scale);
-
-        // 绘制精灵
-        m_renderer2D->drawSprite(sprite);
-    }
-
-    // 按组件类型分别渲染
-    renderSprites(registry);
-    renderQuads(registry);
-    renderCustom(registry);
+    // 按层级顺序渲染
+    renderLayer(registry, RenderLayer::Background);
+    renderLayer(registry, RenderLayer::Default);
+    renderLayer(registry, RenderLayer::EntityLow);
+    renderLayer(registry, RenderLayer::EntityMid);
+    renderLayer(registry, RenderLayer::EntityHigh);
+    renderLayer(registry, RenderLayer::UI);
+    renderLayer(registry, RenderLayer::UIHigh);
+    renderLayer(registry, RenderLayer::Overlay);
+    renderLayer(registry, RenderLayer::Debug);
 
     // 结束2D渲染器的批处理
     m_renderer2D->end();
 }
 
-template<typename Component>
-std::vector<entt::entity> RenderSystem::sortEntitiesByDepth(entt::registry& registry) {
-    auto view = registry.view<TransformComponent, Component>();
-    std::vector<entt::entity> sortedEntities;
-    
-    // 使用迭代器获取实体数量
-    size_t entityCount = 0;
-    for (auto entity : view) {
-        entityCount++;
-    }
-    sortedEntities.reserve(entityCount);
+void RenderSystem::renderLayer(entt::registry& registry, RenderLayer layer) {
+    // 获取当前层的所有实体
+    const auto& entities = m_layerManager.getEntitiesInLayer(layer);
 
-    // 收集实体
-    for (auto entity : view) {
-        sortedEntities.push_back(entity);
-    }
+    // 渲染精灵
+    for (auto entity : entities) {
+        if (registry.all_of<TransformComponent, SpriteComponent>(entity)) {
+            const auto& transform = registry.get<TransformComponent>(entity);
+            const auto& spriteComp = registry.get<SpriteComponent>(entity);
 
-    // 按深度排序
-    std::sort(sortedEntities.begin(), sortedEntities.end(),
-        [&registry](const entt::entity& a, const entt::entity& b) {
-            const auto& compA = registry.get<Component>(a);
-            const auto& compB = registry.get<Component>(b);
-            return compA.depth < compB.depth;
-        });
+            if (!spriteComp.visible) continue;
 
-    return sortedEntities;
-}
+            // 更新精灵的变换
+            Sprite& sprite = const_cast<Sprite&>(spriteComp.sprite);
+            sprite.setPosition(transform.position);
+            sprite.setRotation(transform.rotation);
+            sprite.setScale(transform.scale);
 
-void RenderSystem::renderSprites(entt::registry& registry) {
-    auto sortedEntities = sortEntitiesByDepth<SpriteRendererComponent>(registry);
-    
-    for (auto entity : sortedEntities) {
-        const auto& transform = registry.get<TransformComponent>(entity);
-        const auto& sprite = registry.get<SpriteRendererComponent>(entity);
-        
-        if (sprite.visible && m_renderer2D) {
-            m_renderer2D->drawTexturedRect(
-                transform.position,
-                sprite.size * transform.scale,
-                sprite.texture,
-                sprite.color
-            );
+            // 绘制精灵
+            m_renderer2D->drawSprite(sprite);
         }
-    }
-}
+        else if (registry.all_of<TransformComponent, QuadRendererComponent>(entity)) {
+            const auto& transform = registry.get<TransformComponent>(entity);
+            const auto& quad = registry.get<QuadRendererComponent>(entity);
 
-void RenderSystem::renderQuads(entt::registry& registry) {
-    auto sortedEntities = sortEntitiesByDepth<QuadRendererComponent>(registry);
-    
-    for (auto entity : sortedEntities) {
-        const auto& transform = registry.get<TransformComponent>(entity);
-        const auto& quad = registry.get<QuadRendererComponent>(entity);
-        
-        if (quad.visible && m_renderer2D) {
+            if (!quad.visible) continue;
+
             m_renderer2D->drawRect(
                 transform.position,
                 quad.size * transform.scale,
                 quad.color
             );
-        }
-    }
-}
-
-void RenderSystem::renderCustom(entt::registry& registry) {
-    auto sortedEntities = sortEntitiesByDepth<CustomRendererComponent>(registry);
-    
-    for (auto entity : sortedEntities) {
-        const auto& custom = registry.get<CustomRendererComponent>(entity);
-        
-        if (custom.visible && custom.renderFunction) {
-            custom.renderFunction();
         }
     }
 }
