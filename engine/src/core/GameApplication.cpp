@@ -113,11 +113,13 @@ namespace Tina
 
         // 获取并修改组件
         auto& transform = m_scene.getComponent<TransformComponent>(player);
-        transform.rotation = 45.0f;
+        transform.rotation = 0.0f;
 
         auto& spriteComp = m_scene.getComponent<SpriteComponent>(player);
         spriteComp.depth = 1.0f;
-        spriteComp.sprite.setOrigin(Vector2f(32.0f, 32.0f));
+        // 设置旋转中心为精灵的中心点
+        Vector2f spriteSize(64.0f, 64.0f);
+        spriteComp.sprite.setOrigin(spriteSize * 0.5f);  // 使用精灵大小的一半作为旋转中心
     }
 
     void GameApplication::createExampleEntities()
@@ -187,14 +189,26 @@ namespace Tina
 
     void GameApplication::update(float deltaTime)
     {
-        // 子类实现具体的更新逻辑
         const auto view = m_scene.getRegistry().view<TransformComponent, SpriteComponent>();
         for (const auto entity : view)
         {
             auto& transform = view.get<TransformComponent>(entity);
-            transform.rotation += 45.0f * deltaTime; // 旋转精灵
-            // 打印位置信息
-            fmt::print("Sprite position: ({}, {})\n", transform.position.x, transform.position.y);
+            auto& sprite = view.get<SpriteComponent>(entity);
+
+            // 使用较小的旋转速度
+            const float rotationSpeed = 90.0f; // 每秒90度
+            transform.rotation = std::fmod(transform.rotation + rotationSpeed * deltaTime, 360.0f);
+            if (transform.rotation < 0)
+            {
+                transform.rotation += 360.0f;
+            }
+
+            fmt::print("Entity {} - Position: ({}, {}), Rotation: {}, Depth: {}\n",
+                static_cast<uint32_t>(entity),
+                transform.position.x,
+                transform.position.y,
+                transform.rotation,
+                sprite.depth);
         }
     }
 

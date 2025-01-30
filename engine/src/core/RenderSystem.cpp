@@ -97,6 +97,8 @@ void RenderSystem::render(entt::registry& registry) {
         // 更新精灵的变换
         Sprite& sprite = const_cast<Sprite&>(spriteComp.sprite);
         sprite.setPosition(transform.position);
+        // 在渲染精灵时
+        // float radians = bx::toRad(transform.rotation); // 将角度转换为弧度
         sprite.setRotation(transform.rotation);
         sprite.setScale(transform.scale);
 
