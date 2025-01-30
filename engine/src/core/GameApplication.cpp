@@ -8,7 +8,7 @@
 #include "window/GLFWWindow.hpp"
 #include "core/Config.hpp"
 #include "core/RenderSystem.hpp"
-#include "core/components/RenderComponents.hpp"
+#include "components/RenderComponents.hpp"
 #include <bgfx/bgfx.h>
 #include <fmt/format.h>
 #include "bx/math.h"

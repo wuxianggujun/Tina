@@ -3,7 +3,7 @@
 #include <entt/entt.hpp>
 #include "graphics/Color.hpp"
 #include "math/Vector.hpp"
-#include "core/components/RenderComponents.hpp"
+#include "components/RenderComponents.hpp"
 
 namespace Tina {
 

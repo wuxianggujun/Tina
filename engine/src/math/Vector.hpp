@@ -168,6 +168,14 @@ namespace Tina
             return internalVec.x > other.internalVec.x && internalVec.y > other.internalVec.y;
         }
 
+        bool operator>=(const Vector<T>& other) const {
+            return glm::all(glm::greaterThanEqual(internalVec, other.internalVec));
+        }
+
+        bool operator<=(const Vector<T>& other) const {
+            return glm::all(glm::lessThanEqual(internalVec, other.internalVec));
+        }
+
         bool isZero() const
         {
             return x == 0 && y == 0;
@@ -192,33 +200,6 @@ namespace Tina
     using Vector2f = Vector<float>;
     using Vector2i = Vector<int>;
     using Vector2d = Vector<double>;
-
-    struct Vector2 {
-        float x, y;
-
-        Vector2() : x(0.0f), y(0.0f) {}
-        Vector2(float x, float y) : x(x), y(y) {}
-
-        Vector2 operator+(const Vector2& other) const {
-            return Vector2(x + other.x, y + other.y);
-        }
-
-        Vector2 operator-(const Vector2& other) const {
-            return Vector2(x - other.x, y - other.y);
-        }
-
-        Vector2 operator*(float scalar) const {
-            return Vector2(x * scalar, y * scalar);
-        }
-
-        Vector2 normalized() const {
-            float length = sqrt(x * x + y * y);
-            if (length != 0.0f) {
-                return Vector2(x / length, y / length);
-            }
-            return *this;
-        }
-    };
 
     template <class T>
     class Vector3

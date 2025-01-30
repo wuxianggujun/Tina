@@ -3,6 +3,8 @@
 #include "math/Vector.hpp"
 #include "graphics/Color.hpp"
 #include <bgfx/bgfx.h>
+#include "graphics/Texture.hpp"
+#include "math/Rect.hpp"
 
 namespace Tina {
 
@@ -16,7 +18,8 @@ struct TransformComponent {
 // 精灵渲染组件
 struct SpriteRendererComponent {
     Color color = Color::White;
-    bgfx::TextureHandle texture = BGFX_INVALID_HANDLE;
+    Texture texture;  // 使用 Texture 类而不是 bgfx::TextureHandle
+    Rectf textureRect;  // 使用新的 Rect 类
     Vector2f size{100.0f, 100.0f};
     float depth{0.0f};
     bool visible{true};

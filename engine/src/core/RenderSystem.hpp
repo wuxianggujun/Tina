@@ -3,7 +3,7 @@
 #include "graphics/Renderer2D.hpp"
 #include "graphics/Camera.hpp"
 #include "core/Shader.hpp"
-#include "core/components/RenderComponents.hpp"
+#include "components/RenderComponents.hpp"
 #include <entt/entt.hpp>
 #include <memory>
 #include <vector>

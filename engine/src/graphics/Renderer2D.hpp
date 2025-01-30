@@ -5,6 +5,7 @@
 #include "Color.hpp"
 #include "math/Vector.hpp"
 #include "Camera.hpp"
+#include "Texture.hpp"
 
 namespace Tina
 {
@@ -50,8 +51,8 @@ namespace Tina
         void drawRect(const Vector2f& position, const Vector2f& size, const Color& color);
 
         // 绘制纹理矩形
-        void drawTexturedRect(const Vector2f& position, const Vector2f& size, 
-                            bgfx::TextureHandle texture, const Color& color = Color::White);
+        void drawTexturedRect(const Vector2f& position, const Vector2f& size,
+                            const Texture& texture, const Color& color = Color::White);
 
         // 开始和结束批处理
         void begin();
@@ -83,7 +84,7 @@ namespace Tina
         uint16_t m_currentVertex;
         uint16_t m_currentIndex;
 
-        bgfx::TextureHandle m_currentTexture;
+        Texture m_currentTexture;
         bool m_isDrawing;
     };
 }

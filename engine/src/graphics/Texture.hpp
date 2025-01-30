@@ -15,12 +15,15 @@ namespace Tina {
         void setHandle(const TextureHandle& handle);
         [[nodiscard]] TextureHandle getHandle() const;
         [[nodiscard]] bool isValid() const;
+        [[nodiscard]] uint16_t getIdx() const;
 
         static TextureHandle loadFromFile(const std::string& filename);
         static TextureHandle loadFromMemory(const void* data, uint32_t size);
 
         Texture& operator=(const Texture& other);
         Texture& operator=(const TextureHandle& handle);
+        bool operator==(const Texture& other) const;
+        bool operator!=(const Texture& other) const;
 
     private:
         TextureHandle m_handle;

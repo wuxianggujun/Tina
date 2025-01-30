@@ -37,6 +37,19 @@ namespace Tina {
         return bgfx::isValid(m_handle);
     }
 
+    uint16_t Texture::getIdx() const
+    {
+        return m_handle.idx;
+    }
+
+    bool Texture::operator==(const Texture& other) const {
+        return m_handle.idx == other.m_handle.idx;
+    }
+
+    bool Texture::operator!=(const Texture& other) const {
+        return m_handle.idx != other.m_handle.idx;
+    }
+
     Texture& Texture::operator=(const Texture& other) {
         if (this != &other) {
             setHandle(other.m_handle);
@@ -55,12 +68,12 @@ namespace Tina {
             return BGFX_INVALID_HANDLE;
         }
 
-        uint32_t size = (uint32_t)bx::getSize(&reader);
+        const uint32_t size = static_cast<uint32_t>(bx::getSize(&reader));
         void* data = bx::alloc(&s_allocator, size);
         bx::read(&reader, data, size, &s_error);
         bx::close(&reader);
 
-        TextureHandle handle = loadFromMemory(data, size);
+        const TextureHandle handle = loadFromMemory(data, size);
         bx::free(&s_allocator, data);
 
         return handle;

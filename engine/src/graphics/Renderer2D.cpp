@@ -193,8 +193,8 @@ namespace Tina
         bgfx::setTransform(mtx);
         
         // 如果有纹理，设置纹理
-        if (bgfx::isValid(m_currentTexture)) {
-            bgfx::setTexture(0, m_s_texColor, m_currentTexture);
+        if (m_currentTexture.isValid()) {
+            bgfx::setTexture(0, m_s_texColor, m_currentTexture.getHandle());
         }
 
         // 设置顶点和索引缓冲
@@ -279,9 +279,15 @@ namespace Tina
     }
 
     void Renderer2D::drawTexturedRect(const Vector2f& position, const Vector2f& size,
-                                      bgfx::TextureHandle texture, const Color& color)
+                                      const Texture& texture, const Color& color)
     {
-        if (m_currentTexture.idx != texture.idx) {
+        if (!texture.isValid())
+        {
+            fmt::print("Warning: Attempting to draw with invalid texture\n");
+            return;
+        }
+
+        if (m_currentTexture != texture) {
             flush();
             m_currentTexture = texture;
         }
