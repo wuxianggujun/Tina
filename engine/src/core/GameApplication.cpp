@@ -4,13 +4,13 @@
 
 #include "GameApplication.hpp"
 #include "math/Vector.hpp"
-#include "graphics/Renderer2D.hpp"
 #include "graphics/Color.hpp"
 #include "window/GLFWWindow.hpp"
 #include "core/Config.hpp"
+#include "core/RenderSystem.hpp"
+#include "core/components/RenderComponents.hpp"
 #include <bgfx/bgfx.h>
 #include <fmt/format.h>
-
 #include "bx/math.h"
 
 namespace Tina
@@ -64,7 +64,7 @@ namespace Tina
             }
             catch (const std::exception& e)
             {
-                // 处理异常
+                fmt::print("Failed to load config: {}\n", e.what());
             }
         }
 
@@ -72,12 +72,9 @@ namespace Tina
         m_window = std::make_unique<GLFWWindow>();
         m_window->create(windowConfig);
         m_window->addResizeListener(this);
-        // 创建GUI系统
-        // m_guiSystem = std::make_unique<GuiSystem>();
 
-        // 创建2D渲染器
-        m_renderer2D = std::make_unique<Renderer2D>(0); // 使用视图0
-        m_renderer2D->initialize();
+        // 初始化渲染系统
+        RenderSystem::getInstance().initialize();
 
         // 创建正交相机
         float width = static_cast<float>(windowConfig.resolution.width);
@@ -91,18 +88,65 @@ namespace Tina
             1.0f // far
         );
 
-        // 设置相机位置（使用简单的2D设置）
+        // 设置相机位置
         m_camera->setPosition(Vector3f(0.0f, 0.0f, 0.0f));
         m_camera->setTarget(Vector3f(0.0f, 0.0f, -1.0f));
 
-        // 设置渲染器使用这个相机
-        m_renderer2D->setCamera(m_camera.get());
+        // 设置渲染系统的相机
+        RenderSystem::getInstance().setCamera(m_camera.get());
+
+        // 创建示例实体
+        createExampleEntities();
     }
 
-    void GameApplication::run()
-    {
-        initialize();
-        mainLoop();
+    void GameApplication::createExampleEntities() {
+        // 创建红色矩形
+        {
+            auto entity = m_registry.create();
+            auto& transform = m_registry.emplace<TransformComponent>(entity);
+            transform.position = Vector2f(100.0f, 100.0f);
+            
+            auto& quad = m_registry.emplace<QuadRendererComponent>(entity);
+            quad.color = Color::Red;
+            quad.size = Vector2f(100.0f, 100.0f);
+            quad.depth = 0.0f;
+        }
+
+        // 创建绿色矩形
+        {
+            auto entity = m_registry.create();
+            auto& transform = m_registry.emplace<TransformComponent>(entity);
+            transform.position = Vector2f(250.0f, 100.0f);
+            
+            auto& quad = m_registry.emplace<QuadRendererComponent>(entity);
+            quad.color = Color::Green;
+            quad.size = Vector2f(100.0f, 100.0f);
+            quad.depth = 0.1f;
+        }
+
+        // 创建蓝色矩形
+        {
+            auto entity = m_registry.create();
+            auto& transform = m_registry.emplace<TransformComponent>(entity);
+            transform.position = Vector2f(400.0f, 100.0f);
+            
+            auto& quad = m_registry.emplace<QuadRendererComponent>(entity);
+            quad.color = Color::Blue;
+            quad.size = Vector2f(100.0f, 100.0f);
+            quad.depth = 0.2f;
+        }
+
+        // 创建白色矩形
+        {
+            auto entity = m_registry.create();
+            auto& transform = m_registry.emplace<TransformComponent>(entity);
+            transform.position = Vector2f(550.0f, 100.0f);
+            
+            auto& quad = m_registry.emplace<QuadRendererComponent>(entity);
+            quad.color = Color::White;
+            quad.size = Vector2f(100.0f, 100.0f);
+            quad.depth = 0.3f;
+        }
     }
 
     void GameApplication::onWindowResize(int width, int height)
@@ -119,6 +163,9 @@ namespace Tina
                 1.0f // far
             );
         }
+        
+        // 更新渲染系统的视口
+        RenderSystem::getInstance().setViewport(0, 0, width, height);
     }
 
     void GameApplication::mainLoop()
@@ -132,72 +179,50 @@ namespace Tina
             update(deltaTime);
             render();
 
-            // 提交帧
-            bgfx::frame();
-
             m_window->pollEvents();
         }
     }
 
     void GameApplication::update(float deltaTime)
     {
+        // 子类实现具体的更新逻辑
     }
 
     void GameApplication::render()
     {
-        if (m_window)
-        {
-            const Vector2i& resolution = m_window->getResolution();
+        auto& renderSystem = RenderSystem::getInstance();
+        
+        // 开始渲染帧
+        renderSystem.beginFrame();
 
-            // 设置视图清屏状态
-            bgfx::setViewClear(0,
-                               BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                               0x303030ff, // 深灰色背景
-                               1.0f,
-                               0
-            );
+        // 设置清屏颜色
+        renderSystem.setClearColor(Color(0.2f, 0.2f, 0.2f, 1.0f));
 
-            // 设置视图矩形
-            bgfx::setViewRect(0, 0, 0,
-                              static_cast<uint16_t>(resolution.x),
-                              static_cast<uint16_t>(resolution.y));
+        // 使用ECS渲染所有实体
+        renderSystem.render(m_registry);
 
-            // 确保视图0被清除
-            bgfx::touch(0);
-
-            // 渲染2D内容
-            if (m_renderer2D)
-            {
-                m_renderer2D->begin();
-
-                // 绘制一些矩形，使用相对于窗口大小的位置和尺寸
-                float rectSize = 100.0f; // 固定大小的矩形
-                m_renderer2D->drawRect({100, 100}, {rectSize, rectSize}, Color::Red);
-                m_renderer2D->drawRect({250, 100}, {rectSize, rectSize}, Color::Green);
-                m_renderer2D->drawRect({400, 100}, {rectSize, rectSize}, Color::Blue);
-                m_renderer2D->drawRect({550, 100}, {rectSize, rectSize}, Color::White);
-
-                m_renderer2D->end();
-            }
-        }
+        // 结束渲染帧
+        renderSystem.endFrame();
     }
 
     void GameApplication::shutdown()
     {
-        if (m_renderer2D)
-        {
-            m_renderer2D.reset();
-        }
-
-        // if (m_guiSystem)
-        // {
-        //     m_guiSystem.reset();
-        // }
+        // 清除所有实体
+        m_registry.clear();
+        
+        // 关闭渲染系统
+        RenderSystem::getInstance().shutdown();
 
         if (m_window)
         {
             m_window->removeResizeListener(this);
             m_window.reset();
         }
+    }
+
+    void GameApplication::run()
+    {
+        initialize();
+        mainLoop();
     }
 } // Tina
