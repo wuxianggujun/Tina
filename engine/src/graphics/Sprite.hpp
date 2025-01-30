@@ -28,12 +28,14 @@ namespace Tina
         void setScale(const Vector2f& scale);
         void setOrigin(const Vector2f& origin);
         void setColor(const Color& color);
+        void setSize(const Vector2f& size);
 
         const Vector2f& getPosition() const;
         float getRotation() const;
         const Vector2f& getScale() const;
         const Vector2f& getOrigin() const;
         const Color& getColor() const;
+        const Vector2f& getSize() const;
 
         // 变换操作
         void move(const Vector2f& offset);
@@ -50,6 +52,7 @@ namespace Tina
         Vector2f m_position;
         Vector2f m_scale;
         Vector2f m_origin;
+        Vector2f m_size;
         float m_rotation;
         Color m_color;
     };

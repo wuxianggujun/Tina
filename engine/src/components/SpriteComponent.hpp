@@ -4,6 +4,7 @@
 
 #pragma once
 #include "graphics/Sprite.hpp"
+#include "graphics/RenderLayer.hpp"
 
 namespace Tina
 {
@@ -11,7 +12,8 @@ namespace Tina
     {
         Sprite sprite;
         bool visible{true};
-        float depth{0.0f};
+        float depth{getDepthFromLayer(RenderLayer::Default)}; // 默认使用 Default 层
+        RenderLayer layer{RenderLayer::Default}; // 当前层级
 
         void setTexture(const Texture& texture)
         {
@@ -28,10 +30,29 @@ namespace Tina
             sprite.setColor(color);
         }
 
-        void setDepth(const float newDepth)
+        // 设置预定义层级
+        void setLayer(RenderLayer newLayer)
         {
-            depth = std::clamp(newDepth,0.0f,1.0f);
+            layer = newLayer;
+            depth = getDepthFromLayer(newLayer);
         }
 
+        // 设置自定义深度值（0.0f - 1.0f）
+        void setCustomDepth(float newDepth)
+        {
+            depth = std::clamp(newDepth, 0.0f, 1.0f);
+        }
+
+        // 在两个层级之间设置自定义深度
+        void setDepthBetweenLayers(RenderLayer lowerLayer, RenderLayer upperLayer, float t)
+        {
+            depth = getCustomDepthBetweenLayers(lowerLayer, upperLayer, t);
+        }
+
+        // 获取当前深度值
+        float getDepth() const { return depth; }
+
+        // 获取当前层级
+        RenderLayer getLayer() const { return layer; }
     };
 }

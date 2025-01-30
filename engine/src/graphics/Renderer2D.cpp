@@ -159,14 +159,15 @@ namespace Tina
                            0 // 模板值
         );
 
-        // 设置渲染状态
+        // 设置2D渲染状态
         uint64_t state = 0
             | BGFX_STATE_WRITE_RGB
             | BGFX_STATE_WRITE_A
-            | BGFX_STATE_WRITE_Z // 启用深度写入
-            | BGFX_STATE_DEPTH_TEST_LESS // 启用深度测试
+            | BGFX_STATE_DEPTH_TEST_LESS
+            | BGFX_STATE_WRITE_Z
             | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA)
-            | BGFX_STATE_MSAA; // 如果需要抗锯齿
+            | BGFX_STATE_MSAA;            // 启用多重采样
+
         bgfx::setState(state);
 
         m_isDrawing = true;
@@ -209,14 +210,14 @@ namespace Tina
         bgfx::update(m_vbh, 0, bgfx::makeRef(m_vertices, m_currentVertex * sizeof(PosColorTexCoordVertex)));
         bgfx::update(m_ibh, 0, bgfx::makeRef(m_indices, m_currentIndex * sizeof(uint16_t)));
 
-        // 设置渲染状态 - 简化2D渲染状态
+        // 设置2D渲染状态
         uint64_t state = 0
             | BGFX_STATE_WRITE_RGB
             | BGFX_STATE_WRITE_A
-            | BGFX_STATE_WRITE_Z
             | BGFX_STATE_DEPTH_TEST_LESS
+            | BGFX_STATE_WRITE_Z
             | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA)
-            | BGFX_STATE_MSAA;
+            | BGFX_STATE_MSAA;            // 启用多重采样
 
         bgfx::setState(state);
 
@@ -339,7 +340,7 @@ namespace Tina
         }
 
         const Vector2f& position = sprite.getPosition();
-        const Vector2f& scale = sprite.getScale();
+        const Vector2f& size = sprite.getSize();  // 使用精灵的实际大小
         const Vector2f& origin = sprite.getOrigin();
         const Rectf& textureRect = sprite.getTextureRect();
 
@@ -374,9 +375,6 @@ namespace Tina
         float cosRotation = std::cos(radians);
         float sinRotation = std::sin(radians);
 
-        // 使用纹理矩形的实际大小
-        Vector2f size = scale;  // 使用传入的scale作为实际大小
-        
         // 计算旋转中心点（相对于精灵左上角的偏移）
         Vector2f rotationCenter = origin;
 

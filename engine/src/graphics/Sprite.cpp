@@ -8,7 +8,7 @@ namespace Tina
 {
     Sprite::Sprite(): m_textureRect(0.0f, 0.0f, 0.0f, 0.0f),
                       m_position(0.0f, 0.0f),
-                      m_scale(1.0f, 1.0f), m_origin(0.0f, 0.0f), m_rotation(0.0f), m_color(Color::White)
+                      m_scale(1.0f, 1.0f), m_origin(0.0f, 0.0f), m_size(0.0f, 0.0f), m_rotation(0.0f), m_color(Color::White)
     {
     }
 
@@ -25,8 +25,13 @@ namespace Tina
             // 如果纹理有效且还没有设置纹理矩形，设置为整个纹理
             if (m_textureRect.width == 0 || m_textureRect.height == 0)
             {
-                // 这里需要从纹理获取实际尺寸，暂时使用1.0作为默认UV坐标
                 m_textureRect = Rectf(0.0f, 0.0f, 1.0f, 1.0f);
+            }
+            // 如果还没有设置大小，使用纹理的实际大小
+            if (m_size.x == 0 || m_size.y == 0)
+            {
+                // TODO: 从纹理获取实际大小
+                m_size = Vector2f(64.0f, 64.0f);  // 临时使用固定大小
             }
         }
     }
@@ -119,5 +124,15 @@ namespace Tina
         // TODO: 如果需要，这里还可以添加旋转变换的处理
 
         return bounds;
+    }
+
+    void Sprite::setSize(const Vector2f& size)
+    {
+        m_size = size;
+    }
+
+    const Vector2f& Sprite::getSize() const
+    {
+        return m_size;
     }
 } // Tina

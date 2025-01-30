@@ -116,41 +116,59 @@ namespace Tina
         transform.rotation = 0.0f;
 
         auto& spriteComp = m_scene.getComponent<SpriteComponent>(player);
-        spriteComp.depth = 1.0f;
+        spriteComp.setLayer(RenderLayer::EntityHigh);  // 使用预定义层级
         // 设置旋转中心为精灵的中心点
         Vector2f spriteSize(64.0f, 64.0f);
+        spriteComp.sprite.setSize(spriteSize);  // 设置精灵大小
         spriteComp.sprite.setOrigin(spriteSize * 0.5f);  // 使用精灵大小的一半作为旋转中心
     }
 
     void GameApplication::createExampleEntities()
     {
-        // 创建红色矩形
-        m_scene.createQuad(
+        // 创建背景矩形
+        auto background = m_scene.createQuad(
             Vector2f(100.0f, 100.0f),
+            Vector2f(300.0f, 300.0f),
+            Color(0.2f, 0.2f, 0.2f, 1.0f)
+        );
+        auto& bgQuadComp = m_scene.getComponent<QuadRendererComponent>(background);
+        bgQuadComp.depth = getDepthFromLayer(RenderLayer::Background);
+
+        // 创建红色矩形 - 实体低层
+        auto redQuad = m_scene.createQuad(
+            Vector2f(150.0f, 150.0f),
             Vector2f(100.0f, 100.0f),
             Color::Red
         );
+        auto& redQuadComp = m_scene.getComponent<QuadRendererComponent>(redQuad);
+        redQuadComp.depth = getDepthFromLayer(RenderLayer::EntityLow);
 
-        // 创建绿色矩形
-        m_scene.createQuad(
-            Vector2f(250.0f, 100.0f),
+        // 创建绿色矩形 - 实体中层
+        auto greenQuad = m_scene.createQuad(
+            Vector2f(200.0f, 200.0f),
             Vector2f(100.0f, 100.0f),
             Color::Green
         );
+        auto& greenQuadComp = m_scene.getComponent<QuadRendererComponent>(greenQuad);
+        greenQuadComp.depth = getDepthFromLayer(RenderLayer::EntityMid);
 
-        // 创建蓝色矩形
-        m_scene.createQuad(
-            Vector2f(400.0f, 100.0f),
+        // 创建蓝色矩形 - 实体高层
+        auto blueQuad = m_scene.createQuad(
+            Vector2f(250.0f, 250.0f),
             Vector2f(100.0f, 100.0f),
             Color::Blue
         );
+        auto& blueQuadComp = m_scene.getComponent<QuadRendererComponent>(blueQuad);
+        blueQuadComp.depth = getDepthFromLayer(RenderLayer::EntityHigh);
 
-        // 创建白色矩形
-        m_scene.createQuad(
-            Vector2f(550.0f, 100.0f),
+        // 创建白色矩形 - 在实体中层和高层之间
+        auto whiteQuad = m_scene.createQuad(
+            Vector2f(225.0f, 225.0f),
             Vector2f(100.0f, 100.0f),
             Color::White
         );
+        auto& whiteQuadComp = m_scene.getComponent<QuadRendererComponent>(whiteQuad);
+        whiteQuadComp.depth = getCustomDepthBetweenLayers(RenderLayer::EntityMid, RenderLayer::EntityHigh, 0.5f);
     }
 
     void GameApplication::onWindowResize(int width, int height)
