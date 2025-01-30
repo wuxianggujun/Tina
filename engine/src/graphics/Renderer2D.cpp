@@ -341,6 +341,7 @@ namespace Tina
         const Vector2f& position = sprite.getPosition();
         const Vector2f& scale = sprite.getScale();
         const Vector2f& origin = sprite.getOrigin();
+        const Rectf& textureRect = sprite.getTextureRect();
 
         // 将旋转限制在 0-360 度范围内
         float rotation = std::fmod(sprite.getRotation(), 360.0f);
@@ -350,7 +351,6 @@ namespace Tina
         }
 
         const Color& color = sprite.getColor();
-        const Rectf& textureRect = sprite.getTextureRect();
 
         if (m_currentTexture.idx != sprite.getTexture().getIdx())
         {
@@ -374,19 +374,18 @@ namespace Tina
         float cosRotation = std::cos(radians);
         float sinRotation = std::sin(radians);
 
-        // 计算精灵的实际大小
-        Vector2f size(64.0f, 64.0f);  // 使用固定大小或从纹理获取
-        Vector2f scaledSize = size * scale;
+        // 使用纹理矩形的实际大小
+        Vector2f size = scale;  // 使用传入的scale作为实际大小
         
         // 计算旋转中心点（相对于精灵左上角的偏移）
         Vector2f rotationCenter = origin;
 
         // 计算四个顶点（相对于旋转中心点）
         Vector2f vertices[4] = {
-            Vector2f(-rotationCenter.x, -rotationCenter.y),                    // 左上
-            Vector2f(scaledSize.x - rotationCenter.x, -rotationCenter.y),     // 右上
-            Vector2f(-rotationCenter.x, scaledSize.y - rotationCenter.y),     // 左下
-            Vector2f(scaledSize.x - rotationCenter.x, scaledSize.y - rotationCenter.y)  // 右下
+            Vector2f(-rotationCenter.x, -rotationCenter.y),                // 左上
+            Vector2f(size.x - rotationCenter.x, -rotationCenter.y),       // 右上
+            Vector2f(-rotationCenter.x, size.y - rotationCenter.y),       // 左下
+            Vector2f(size.x - rotationCenter.x, size.y - rotationCenter.y) // 右下
         };
 
         // 应用旋转和平移
@@ -402,6 +401,12 @@ namespace Tina
         uint32_t abgr = color.toABGR();
         uint16_t baseVertex = m_currentVertex;
 
+        // 使用纹理矩形的UV坐标
+        float u1 = textureRect.left;
+        float v1 = textureRect.top;
+        float u2 = textureRect.left + textureRect.width;
+        float v2 = textureRect.top + textureRect.height;
+
         // 添加顶点
         for (int i = 0; i < 4; ++i)
         {
@@ -409,8 +414,8 @@ namespace Tina
             m_vertices[m_currentVertex].m_y = vertices[i].y;
             m_vertices[m_currentVertex].m_z = 0.0f;
             m_vertices[m_currentVertex].m_rgba = abgr;
-            m_vertices[m_currentVertex].m_u = (i == 1 || i == 3) ? 1.0f : 0.0f;
-            m_vertices[m_currentVertex].m_v = (i == 2 || i == 3) ? 1.0f : 0.0f;
+            m_vertices[m_currentVertex].m_u = (i == 1 || i == 3) ? u2 : u1;
+            m_vertices[m_currentVertex].m_v = (i == 2 || i == 3) ? v2 : v1;
             m_currentVertex++;
         }
 
