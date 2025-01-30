@@ -105,52 +105,32 @@ namespace Tina
 
     void GameApplication::createExampleEntities() {
         // 创建红色矩形
-        {
-            auto entity = m_registry.create();
-            auto& transform = m_registry.emplace<TransformComponent>(entity);
-            transform.position = Vector2f(100.0f, 100.0f);
-            
-            auto& quad = m_registry.emplace<QuadRendererComponent>(entity);
-            quad.color = Color::Red;
-            quad.size = Vector2f(100.0f, 100.0f);
-            quad.depth = 0.0f;
-        }
+        m_scene.createQuad(
+            Vector2f(100.0f, 100.0f),
+            Vector2f(100.0f, 100.0f),
+            Color::Red
+        );
 
         // 创建绿色矩形
-        {
-            auto entity = m_registry.create();
-            auto& transform = m_registry.emplace<TransformComponent>(entity);
-            transform.position = Vector2f(250.0f, 100.0f);
-            
-            auto& quad = m_registry.emplace<QuadRendererComponent>(entity);
-            quad.color = Color::Green;
-            quad.size = Vector2f(100.0f, 100.0f);
-            quad.depth = 0.1f;
-        }
+        m_scene.createQuad(
+            Vector2f(250.0f, 100.0f),
+            Vector2f(100.0f, 100.0f),
+            Color::Green
+        );
 
         // 创建蓝色矩形
-        {
-            auto entity = m_registry.create();
-            auto& transform = m_registry.emplace<TransformComponent>(entity);
-            transform.position = Vector2f(400.0f, 100.0f);
-            
-            auto& quad = m_registry.emplace<QuadRendererComponent>(entity);
-            quad.color = Color::Blue;
-            quad.size = Vector2f(100.0f, 100.0f);
-            quad.depth = 0.2f;
-        }
+        m_scene.createQuad(
+            Vector2f(400.0f, 100.0f),
+            Vector2f(100.0f, 100.0f),
+            Color::Blue
+        );
 
         // 创建白色矩形
-        {
-            auto entity = m_registry.create();
-            auto& transform = m_registry.emplace<TransformComponent>(entity);
-            transform.position = Vector2f(550.0f, 100.0f);
-            
-            auto& quad = m_registry.emplace<QuadRendererComponent>(entity);
-            quad.color = Color::White;
-            quad.size = Vector2f(100.0f, 100.0f);
-            quad.depth = 0.3f;
-        }
+        m_scene.createQuad(
+            Vector2f(550.0f, 100.0f),
+            Vector2f(100.0f, 100.0f),
+            Color::White
+        );
     }
 
     void GameApplication::onWindowResize(int width, int height)
@@ -203,7 +183,7 @@ namespace Tina
         renderSystem.setClearColor(Color(0.2f, 0.2f, 0.2f, 1.0f));
 
         // 使用ECS渲染所有实体
-        renderSystem.render(m_registry);
+        renderSystem.render(m_scene.getRegistry());
 
         // 结束渲染帧
         renderSystem.endFrame();
@@ -211,8 +191,7 @@ namespace Tina
 
     void GameApplication::shutdown()
     {
-        // 清除所有实体
-        m_registry.clear();
+        // 场景会在析构时自动清理所有实体
         
         // 关闭渲染系统
         RenderSystem::getInstance().shutdown();

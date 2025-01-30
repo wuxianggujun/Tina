@@ -9,7 +9,7 @@
 #include "graphics/Camera.hpp"
 #include "filesystem/Path.hpp"
 #include "window/IWindowResizeListener.hpp"
-#include <entt/entt.hpp>
+#include "scene/Scene.hpp"
 
 namespace Tina
 {
@@ -35,12 +35,15 @@ namespace Tina
         // 创建示例实体
         void createExampleEntities();
 
+        // 获取当前场景
+        Scene& getCurrentScene() { return m_scene; }
+
         std::unique_ptr<IWindow> m_window;
         std::unique_ptr<OrthographicCamera> m_camera;
         float m_lastFrameTime;
         Path m_configPath;
         
-        // ECS注册表
-        entt::registry m_registry;
+        // 场景
+        Scene m_scene;
     };
 } // Tina
