@@ -27,5 +27,11 @@ namespace Tina
         {
             sprite.setColor(color);
         }
+
+        void setDepth(const float newDepth)
+        {
+            depth = std::clamp(newDepth,0.0f,1.0f);
+        }
+
     };
 }

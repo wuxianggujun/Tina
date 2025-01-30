@@ -82,12 +82,12 @@ namespace Tina
         float width = static_cast<float>(windowConfig.resolution.width);
         float height = static_cast<float>(windowConfig.resolution.height);
         m_camera = std::make_unique<OrthographicCamera>(
-            0.0f,    // left
-            width,   // right
-            height,  // bottom
-            0.0f,    // top
-            -1.0f,   // near
-            1.0f     // far
+            0.0f, // left
+            width, // right
+            0.0f, // bottom
+            height, // top
+            -1.0f, // near
+            1.0f // far
         );
 
         // 设置相机位置
@@ -96,7 +96,7 @@ namespace Tina
 
         // 设置渲染系统的相机
         renderSystem.setCamera(m_camera.get());
-        
+
         // 设置视口
         renderSystem.setViewport(0, 0, windowConfig.resolution.width, windowConfig.resolution.height);
 
@@ -107,8 +107,8 @@ namespace Tina
         // 创建玩家精灵
         auto player = m_scene.createSprite(
             iconTexture,
-            Vector2f(100.0f, 100.0f),  // 位置
-            Vector2f(64.0f, 64.0f)     // 大小
+            Vector2f(100.0f, 100.0f), // 位置
+            Vector2f(64.0f, 64.0f) // 大小
         );
 
         // 获取并修改组件
@@ -118,10 +118,10 @@ namespace Tina
         auto& spriteComp = m_scene.getComponent<SpriteComponent>(player);
         spriteComp.depth = 1.0f;
         spriteComp.sprite.setOrigin(Vector2f(32.0f, 32.0f));
-
     }
 
-    void GameApplication::createExampleEntities() {
+    void GameApplication::createExampleEntities()
+    {
         // 创建红色矩形
         m_scene.createQuad(
             Vector2f(100.0f, 100.0f),
@@ -159,13 +159,13 @@ namespace Tina
             m_camera->setProjection(
                 0.0f, // left
                 static_cast<float>(width), // right
-                static_cast<float>(height), // bottom
-                0.0f, // top
+                0.0f, // bottom
+                static_cast<float>(height), // top
                 -1.0f, // near
                 1.0f // far
             );
         }
-        
+
         // 更新渲染系统的视口
         RenderSystem::getInstance().setViewport(0, 0, width, height);
     }
@@ -189,16 +189,19 @@ namespace Tina
     {
         // 子类实现具体的更新逻辑
         const auto view = m_scene.getRegistry().view<TransformComponent, SpriteComponent>();
-        for (const auto entity : view) {
+        for (const auto entity : view)
+        {
             auto& transform = view.get<TransformComponent>(entity);
             transform.rotation += 45.0f * deltaTime; // 旋转精灵
+            // 打印位置信息
+            fmt::print("Sprite position: ({}, {})\n", transform.position.x, transform.position.y);
         }
     }
 
     void GameApplication::render()
     {
         auto& renderSystem = RenderSystem::getInstance();
-        
+
         // 开始渲染帧
         renderSystem.beginFrame();
 
@@ -215,15 +218,19 @@ namespace Tina
     void GameApplication::shutdown()
     {
         // 场景会在析构时自动清理所有实体
-        
+        m_scene.clear();
+
+        m_camera.reset();
+
         // 关闭渲染系统
         RenderSystem::getInstance().shutdown();
 
         if (m_window)
         {
             m_window->removeResizeListener(this);
-            m_window.reset();
+            m_window->destroy();
         }
+        bgfx::shutdown();
     }
 
     void GameApplication::run()

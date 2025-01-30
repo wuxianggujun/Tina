@@ -26,17 +26,36 @@ namespace Tina
 
     Renderer2D::~Renderer2D()
     {
+        // 确保按正确顺序释放资源
         if (bgfx::isValid(m_ibh))
+        {
             bgfx::destroy(m_ibh);
+            m_ibh = BGFX_INVALID_HANDLE;
+        }
+
         if (bgfx::isValid(m_vbh))
+        {
             bgfx::destroy(m_vbh);
-        if (bgfx::isValid(m_program))
-            bgfx::destroy(m_program);
+            m_vbh = BGFX_INVALID_HANDLE;
+        }
+
         if (bgfx::isValid(m_s_texColor))
+        {
             bgfx::destroy(m_s_texColor);
+            m_s_texColor = BGFX_INVALID_HANDLE;
+        }
+
+        if (bgfx::isValid(m_program))
+        {
+            bgfx::destroy(m_program);
+            m_program = BGFX_INVALID_HANDLE;
+        }
 
         delete[] m_vertices;
+        m_vertices = nullptr;
+
         delete[] m_indices;
+        m_indices = nullptr;
     }
 
     void Renderer2D::initialize()
@@ -144,7 +163,10 @@ namespace Tina
         uint64_t state = 0
             | BGFX_STATE_WRITE_RGB
             | BGFX_STATE_WRITE_A
-            | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+            | BGFX_STATE_WRITE_Z // 启用深度写入
+            | BGFX_STATE_DEPTH_TEST_LESS // 启用深度测试
+            | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA)
+            | BGFX_STATE_MSAA; // 如果需要抗锯齿
         bgfx::setState(state);
 
         m_isDrawing = true;
@@ -191,7 +213,10 @@ namespace Tina
         uint64_t state = 0
             | BGFX_STATE_WRITE_RGB
             | BGFX_STATE_WRITE_A
-            | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+            | BGFX_STATE_WRITE_Z
+            | BGFX_STATE_DEPTH_TEST_LESS
+            | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA)
+            | BGFX_STATE_MSAA;
 
         bgfx::setState(state);
 
@@ -201,9 +226,9 @@ namespace Tina
         bgfx::setTransform(mtx);
 
         // 如果有纹理，设置纹理
-        if (m_currentTexture.isValid())
+        if (bgfx::isValid(m_currentTexture))
         {
-            bgfx::setTexture(0, m_s_texColor, m_currentTexture.getHandle());
+            bgfx::setTexture(0, m_s_texColor, m_currentTexture);
         }
 
         // 设置顶点和索引缓冲
@@ -298,12 +323,17 @@ namespace Tina
             return;
         }
 
-        if (m_currentTexture != texture)
+        if (m_currentTexture.idx != texture.getIdx())
         {
             flush();
-            m_currentTexture = texture;
+            m_currentTexture = texture.getHandle();
         }
         drawRect(position, size, color);
+    }
+
+    void Renderer2D::drawSprite(const Sprite& sprite, float depth)
+    {
+
     }
 
     void Renderer2D::drawSprite(const Sprite& sprite)
@@ -321,10 +351,10 @@ namespace Tina
         const Color& color = sprite.getColor();
         const Rectf& textureRect = sprite.getTextureRect();
 
-        if (m_currentTexture != sprite.getTexture())
+        if (m_currentTexture.idx != sprite.getTexture().getIdx())
         {
             flush();
-            m_currentTexture = sprite.getTexture();
+            m_currentTexture = sprite.getTexture().getHandle();
         }
 
         if (!m_isDrawing)

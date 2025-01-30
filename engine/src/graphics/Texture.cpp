@@ -5,66 +5,139 @@
 #include <bx/error.h>
 #include <bx/bx.h>
 
-namespace Tina {
-    
+namespace Tina
+{
     static bx::DefaultAllocator s_allocator;
     static bx::Error s_error;
 
-    Texture::Texture() : m_handle(BGFX_INVALID_HANDLE) {
+    Texture::Texture() : m_textureData(nullptr)
+    {
     }
 
-    Texture::Texture(const TextureHandle& handle) : m_handle(handle) {
+
+    Texture::Texture(const TextureHandle& handle)
+        : m_textureData(bgfx::isValid(handle) ? new TextureData(handle) : nullptr)
+    {
     }
 
-    Texture::~Texture() {
-        if (bgfx::isValid(m_handle)) {
-            bgfx::destroy(m_handle);
+    Texture::~Texture()
+    {
+        release();
+    }
+
+    Texture::Texture(const Texture& other) : m_textureData(other.m_textureData)
+    {
+        addRef();
+    }
+
+    Texture& Texture::operator=(const Texture& other)
+    {
+        if (this != &other)
+        {
+            release();
+            m_textureData = other.m_textureData;
+            addRef();
+        }
+        return *this;
+    }
+
+    Texture::Texture(Texture&& other) noexcept : m_textureData(other.m_textureData)
+    {
+        other.m_textureData = nullptr;
+    }
+
+    Texture& Texture::operator=(Texture&& other) noexcept
+    {
+        if (this != &other)
+        {
+            release();
+            m_textureData = other.m_textureData;
+            other.m_textureData = nullptr;
+        }
+        return *this;
+    }
+
+
+    void Texture::setHandle(const TextureHandle& handle)
+    {
+        if (!m_textureData || m_textureData->handle.idx != handle.idx)
+        {
+            release();
+            if (bgfx::isValid(handle))
+            {
+                m_textureData = new TextureData(handle);
+            }
         }
     }
 
-    void Texture::setHandle(const TextureHandle& handle) {
-        if (bgfx::isValid(m_handle)) {
-            bgfx::destroy(m_handle);
+    TextureHandle Texture::getHandle() const
+    {
+        if (m_textureData)
+        {
+            return m_textureData->handle;
         }
-        m_handle = handle;
+        TextureHandle invalid = {BGFX_INVALID_HANDLE}; // 正确创建无效句柄
+        return invalid;
     }
 
-    TextureHandle Texture::getHandle() const {
-        return m_handle;
-    }
 
-    bool Texture::isValid() const {
-        return bgfx::isValid(m_handle);
+    bool Texture::isValid() const
+    {
+        return m_textureData && bgfx::isValid(m_textureData->handle);
     }
 
     uint16_t Texture::getIdx() const
     {
-        return m_handle.idx;
+        if (m_textureData && bgfx::isValid(m_textureData->handle))
+            return m_textureData->handle.idx;
+        return UINT16_MAX; // 使用 UINT16_MAX 作为无效索引
     }
 
-    bool Texture::operator==(const Texture& other) const {
-        return m_handle.idx == other.m_handle.idx;
-    }
 
-    bool Texture::operator!=(const Texture& other) const {
-        return m_handle.idx != other.m_handle.idx;
-    }
-
-    Texture& Texture::operator=(const Texture& other) {
-        if (this != &other) {
-            setHandle(other.m_handle);
+    void Texture::addRef()
+    {
+        if (m_textureData)
+        {
+            ++m_textureData->refCount;
         }
-        return *this;
     }
 
-    Texture& Texture::operator=(const TextureHandle& handle) {
+    void Texture::release()
+    {
+        if (m_textureData)
+        {
+            if (--m_textureData->refCount == 0)
+            {
+                delete m_textureData;
+            }
+            m_textureData = nullptr;
+        }
+    }
+
+    bool Texture::operator==(const Texture& other) const
+    {
+        if (m_textureData == nullptr && other.m_textureData == nullptr) return true;
+        if (m_textureData == nullptr || other.m_textureData == nullptr) return false;
+        return m_textureData->handle.idx == other.m_textureData->handle.idx;
+    }
+
+    bool Texture::operator!=(const Texture& other) const
+    {
+        return !(*this == other);
+    }
+
+
+    Texture& Texture::operator=(const TextureHandle& handle)
+    {
         setHandle(handle);
         return *this;
     }
 
-    TextureHandle Texture::loadFromFile(const std::string& filename) {
+    TextureHandle Texture::loadFromFile(const std::string& filename)
+    {
         bx::FileReader reader;
-        if (!bx::open(&reader, filename.c_str(), &s_error)) {
+        if (!bx::open(&reader, filename.c_str(), &s_error))
+        {
             return BGFX_INVALID_HANDLE;
         }
 
@@ -79,20 +152,22 @@ namespace Tina {
         return handle;
     }
 
-    TextureHandle Texture::loadFromMemory(const void* data, uint32_t size) {
+    TextureHandle Texture::loadFromMemory(const void* data, uint32_t size)
+    {
         bimg::ImageContainer* imageContainer = bimg::imageParse(&s_allocator, data, size);
-        if (!imageContainer) {
+        if (!imageContainer)
+        {
             return BGFX_INVALID_HANDLE;
         }
 
         const bgfx::Memory* mem = bgfx::copy(imageContainer->m_data, imageContainer->m_size);
 
-        TextureHandle handle = bgfx::createTexture2D(
-            uint16_t(imageContainer->m_width),
-            uint16_t(imageContainer->m_height),
+        const TextureHandle handle = bgfx::createTexture2D(
+            static_cast<uint16_t>(imageContainer->m_width),
+            static_cast<uint16_t>(imageContainer->m_height),
             1 < imageContainer->m_numMips,
             imageContainer->m_numLayers,
-            bgfx::TextureFormat::Enum(imageContainer->m_format),
+            static_cast<bgfx::TextureFormat::Enum>(imageContainer->m_format),
             BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE,
             mem
         );

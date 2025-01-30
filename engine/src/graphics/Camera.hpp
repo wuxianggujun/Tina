@@ -52,7 +52,7 @@ namespace Tina {
     public:
         OrthographicCamera(float left, float right, float bottom, float top, float near = 0.0f, float far = 100.0f)
             : m_left(left), m_right(right), m_bottom(bottom), m_top(top), m_near(near), m_far(far) {
-            updateProjectionMatrix();
+            OrthographicCamera::updateProjectionMatrix();
         }
 
         void setProjection(float left, float right, float bottom, float top, float near = 0.0f, float far = 100.0f) {
@@ -78,7 +78,7 @@ namespace Tina {
     public:
         PerspectiveCamera(float fov, float aspect, float near = 0.1f, float far = 1000.0f)
             : m_fov(fov), m_aspect(aspect), m_near(near), m_far(far) {
-            updateProjectionMatrix();
+            PerspectiveCamera::updateProjectionMatrix();
         }
 
         void setProjection(float fov, float aspect, float near = 0.1f, float far = 1000.0f) {

@@ -54,6 +54,7 @@ namespace Tina
         void drawTexturedRect(const Vector2f& position, const Vector2f& size,
                             const Texture& texture, const Color& color = Color::White);
 
+        void drawSprite(const Sprite& sprite,float depth);
         void drawSprite(const Sprite& sprite);
 
         // 开始和结束批处理
@@ -86,7 +87,7 @@ namespace Tina
         uint16_t m_currentVertex;
         uint16_t m_currentIndex;
 
-        Texture m_currentTexture;
+        TextureHandle m_currentTexture;
         bool m_isDrawing;
     };
 }
