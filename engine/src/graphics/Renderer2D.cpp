@@ -154,21 +154,10 @@ namespace Tina
         // 设置视图清除标志
         bgfx::setViewClear(m_viewId,
                            BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                           0x303030ff, // 背景色
-                           1.0f, // 深度值
-                           0 // 模板值
+                           0x303030ff,
+                           1.0f,
+                           0
         );
-
-        // 设置2D渲染状态
-        uint64_t state = 0
-            | BGFX_STATE_WRITE_RGB
-            | BGFX_STATE_WRITE_A
-            | BGFX_STATE_DEPTH_TEST_LESS
-            | BGFX_STATE_WRITE_Z
-            | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA)
-            | BGFX_STATE_MSAA;            // 启用多重采样
-
-        bgfx::setState(state);
 
         m_isDrawing = true;
         m_currentVertex = 0;
@@ -195,41 +184,45 @@ namespace Tina
 
     void Renderer2D::flush()
     {
-        if (m_currentVertex == 0)
-            return;
-
-        fmt::print("Flushing {} vertices and {} indices\n", m_currentVertex, m_currentIndex);
-
-        if (!bgfx::isValid(m_vbh) || !bgfx::isValid(m_ibh))
+        if (m_currentVertex == 0 || m_currentIndex == 0)
         {
-            fmt::print("Invalid buffer handles: vbh={}, ibh={}\n", m_vbh.idx, m_ibh.idx);
             return;
         }
 
-        // 更新动态缓冲区
-        bgfx::update(m_vbh, 0, bgfx::makeRef(m_vertices, m_currentVertex * sizeof(PosColorTexCoordVertex)));
-        bgfx::update(m_ibh, 0, bgfx::makeRef(m_indices, m_currentIndex * sizeof(uint16_t)));
+        fmt::print("Flushing {} vertices and {} indices\n", m_currentVertex, m_currentIndex);
 
-        // 设置2D渲染状态
-        uint64_t state = 0
-            | BGFX_STATE_WRITE_RGB
+        // 更新顶点缓冲区
+        bgfx::update(m_vbh,
+            0,
+            bgfx::copy(m_vertices, m_currentVertex * sizeof(PosColorTexCoordVertex))
+        );
+
+        // 更新索引缓冲区
+        bgfx::update(m_ibh,
+            0,
+            bgfx::copy(m_indices, m_currentIndex * sizeof(uint16_t))
+        );
+
+        // 设置渲染状态
+        uint64_t state = BGFX_STATE_WRITE_RGB 
             | BGFX_STATE_WRITE_A
-            | BGFX_STATE_DEPTH_TEST_LESS
-            | BGFX_STATE_WRITE_Z
-            | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA)
-            | BGFX_STATE_MSAA;            // 启用多重采样
+            | BGFX_STATE_MSAA
+            | BGFX_STATE_DEPTH_TEST_ALWAYS
+            | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
 
         bgfx::setState(state);
 
-        // 设置模型矩阵为单位矩阵
-        float mtx[16];
-        bx::mtxIdentity(mtx);
-        bgfx::setTransform(mtx);
-
-        // 如果有纹理，设置纹理
+        // 设置纹理和着色器
         if (bgfx::isValid(m_currentTexture))
         {
+            fmt::print("Setting texture with handle: {} for drawing\n", m_currentTexture.idx);
             bgfx::setTexture(0, m_s_texColor, m_currentTexture);
+        }
+        else
+        {
+            fmt::print("No valid texture during flush, using default shader state\n");
+            // 对于无纹理的绘制，我们仍然需要设置一个有效的采样器状态
+            bgfx::setTexture(0, m_s_texColor, BGFX_INVALID_HANDLE);
         }
 
         // 设置顶点和索引缓冲
@@ -237,6 +230,11 @@ namespace Tina
         bgfx::setIndexBuffer(m_ibh, 0, m_currentIndex);
 
         // 提交绘制命令
+        fmt::print("Submitting draw call with program handle: {}\n", m_program.idx);
+        if (!bgfx::isValid(m_program)) {
+            fmt::print("Warning: Invalid shader program!\n");
+            return;
+        }
         bgfx::submit(m_viewId, m_program);
 
         // 重置计数器
@@ -252,13 +250,17 @@ namespace Tina
             return;
         }
 
+        // 如果当前有纹理，需要先刷新
+        if (bgfx::isValid(m_currentTexture))
+        {
+            flush();
+            m_currentTexture = BGFX_INVALID_HANDLE;
+        }
+
         if (checkFlush(4, 6))
         {
             flush();
         }
-
-        fmt::print("Drawing rect at position ({}, {}), size ({}, {})\n",
-                   position.x, position.y, size.x, size.y);
 
         uint32_t abgr = color.toABGR();
 
@@ -306,13 +308,13 @@ namespace Tina
         m_vertices[m_currentVertex].m_v = 1.0f;
         m_currentVertex++;
 
-        // 添加索引 (顺时针顺序)
-        m_indices[m_currentIndex++] = baseVertex + 0; // 左上
-        m_indices[m_currentIndex++] = baseVertex + 1; // 右上
-        m_indices[m_currentIndex++] = baseVertex + 2; // 左下
-        m_indices[m_currentIndex++] = baseVertex + 1; // 右上
-        m_indices[m_currentIndex++] = baseVertex + 3; // 右下
-        m_indices[m_currentIndex++] = baseVertex + 2; // 左下
+        // 添加索引
+        m_indices[m_currentIndex++] = baseVertex + 0;
+        m_indices[m_currentIndex++] = baseVertex + 1;
+        m_indices[m_currentIndex++] = baseVertex + 2;
+        m_indices[m_currentIndex++] = baseVertex + 1;
+        m_indices[m_currentIndex++] = baseVertex + 3;
+        m_indices[m_currentIndex++] = baseVertex + 2;
     }
 
     void Renderer2D::drawTexturedRect(const Vector2f& position, const Vector2f& size,
@@ -336,27 +338,8 @@ namespace Tina
     {
         if (!sprite.getTexture().isValid())
         {
+            fmt::print("Warning: Invalid texture in sprite\n");
             return;
-        }
-
-        const Vector2f& position = sprite.getPosition();
-        const Vector2f& size = sprite.getSize();  // 使用精灵的实际大小
-        const Vector2f& origin = sprite.getOrigin();
-        const Rectf& textureRect = sprite.getTextureRect();
-
-        // 将旋转限制在 0-360 度范围内
-        float rotation = std::fmod(sprite.getRotation(), 360.0f);
-        if (rotation < 0)
-        {
-            rotation += 360.0f;
-        }
-
-        const Color& color = sprite.getColor();
-
-        if (m_currentTexture.idx != sprite.getTexture().getIdx())
-        {
-            flush();
-            m_currentTexture = sprite.getTexture().getHandle();
         }
 
         if (!m_isDrawing)
@@ -365,25 +348,46 @@ namespace Tina
             return;
         }
 
+        // 检查是否需要切换纹理
+        TextureHandle newTexture = sprite.getTexture().getHandle();
+        fmt::print("Drawing sprite with texture handle: {}, current texture handle: {}\n", 
+                  newTexture.idx, m_currentTexture.idx);
+                  
+        if (m_currentTexture.idx != newTexture.idx)
+        {
+            fmt::print("Switching texture from {} to {}\n", m_currentTexture.idx, newTexture.idx);
+            flush(); // 确保在切换纹理前刷新当前批次
+            m_currentTexture = newTexture;
+        }
+
+        // 检查缓冲区是否需要刷新
         if (checkFlush(4, 6))
         {
             flush();
         }
 
-        // 计算变换后的顶点位置
-        float radians = bx::toRad(rotation);
+        const Vector2f& position = sprite.getPosition();
+        const Vector2f& size = sprite.getSize();
+        const Vector2f& origin = sprite.getOrigin();
+        const Rectf& textureRect = sprite.getTextureRect();
+        const Color& color = sprite.getColor();
+
+        // 如果精灵不可见，直接返回
+        if (color.a == 0)
+        {
+            return;
+        }
+
+        float radians = bx::toRad(sprite.getRotation());
         float cosRotation = std::cos(radians);
         float sinRotation = std::sin(radians);
 
-        // 计算旋转中心点（相对于精灵左上角的偏移）
-        Vector2f rotationCenter = origin;
-
-        // 计算四个顶点（相对于旋转中心点）
+        // 计算顶点位置
         Vector2f vertices[4] = {
-            Vector2f(-rotationCenter.x, -rotationCenter.y),                // 左上
-            Vector2f(size.x - rotationCenter.x, -rotationCenter.y),       // 右上
-            Vector2f(-rotationCenter.x, size.y - rotationCenter.y),       // 左下
-            Vector2f(size.x - rotationCenter.x, size.y - rotationCenter.y) // 右下
+            Vector2f(-origin.x, -origin.y),                // 左上
+            Vector2f(size.x - origin.x, -origin.y),       // 右上
+            Vector2f(-origin.x, size.y - origin.y),       // 左下
+            Vector2f(size.x - origin.x, size.y - origin.y) // 右下
         };
 
         // 应用旋转和平移
@@ -399,21 +403,44 @@ namespace Tina
         uint32_t abgr = color.toABGR();
         uint16_t baseVertex = m_currentVertex;
 
-        // 使用纹理矩形的UV坐标
+        // 设置UV坐标 - 使用textureRect的尺寸
         float u1 = textureRect.left;
         float v1 = textureRect.top;
         float u2 = textureRect.left + textureRect.width;
         float v2 = textureRect.top + textureRect.height;
 
-        // 添加顶点
+        fmt::print("Drawing sprite with texture handle: {}, UV: ({}, {}) -> ({}, {})\n", 
+                  m_currentTexture.idx, u1, v1, u2, v2);
+
+        // 添加顶点 - 确保UV坐标正确对应纹理区域
         for (int i = 0; i < 4; ++i)
         {
             m_vertices[m_currentVertex].m_x = vertices[i].x;
             m_vertices[m_currentVertex].m_y = vertices[i].y;
             m_vertices[m_currentVertex].m_z = 0.0f;
             m_vertices[m_currentVertex].m_rgba = abgr;
-            m_vertices[m_currentVertex].m_u = (i == 1 || i == 3) ? u2 : u1;
-            m_vertices[m_currentVertex].m_v = (i == 2 || i == 3) ? v2 : v1;
+            
+            // 左上角顶点
+            if (i == 0) {
+                m_vertices[m_currentVertex].m_u = u1;
+                m_vertices[m_currentVertex].m_v = v1;
+            }
+            // 右上角顶点
+            else if (i == 1) {
+                m_vertices[m_currentVertex].m_u = u2;
+                m_vertices[m_currentVertex].m_v = v1;
+            }
+            // 左下角顶点
+            else if (i == 2) {
+                m_vertices[m_currentVertex].m_u = u1;
+                m_vertices[m_currentVertex].m_v = v2;
+            }
+            // 右下角顶点
+            else {
+                m_vertices[m_currentVertex].m_u = u2;
+                m_vertices[m_currentVertex].m_v = v2;
+            }
+            
             m_currentVertex++;
         }
 

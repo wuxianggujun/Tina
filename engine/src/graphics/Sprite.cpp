@@ -22,16 +22,28 @@ namespace Tina
         m_texture = texture;
         if (m_texture.isValid())
         {
-            // 如果纹理有效且还没有设置纹理矩形，设置为整个纹理
-            if (m_textureRect.width == 0 || m_textureRect.height == 0)
-            {
-                m_textureRect = Rectf(0.0f, 0.0f, 1.0f, 1.0f);
-            }
+            // 设置纹理矩形为整个纹理
+            m_textureRect = Rectf(0.0f, 0.0f, 1.0f, 1.0f);
+            
             // 如果还没有设置大小，使用纹理的实际大小
             if (m_size.x == 0 || m_size.y == 0)
             {
-                // TODO: 从纹理获取实际大小
-                m_size = Vector2f(64.0f, 64.0f);  // 临时使用固定大小
+                // 获取纹理的实际大小
+                bgfx::TextureInfo info;
+                bgfx::calcTextureSize(
+                    info,
+                    64,     // width
+                    64,     // height
+                    1,      // depth
+                    false,  // cubeMap
+                    false,  // hasMips
+                    1,      // numLayers
+                    bgfx::TextureFormat::RGBA8
+                );
+                
+                // 使用计算出的尺寸
+                m_size = Vector2f(static_cast<float>(info.width), 
+                                static_cast<float>(info.height));
             }
         }
     }

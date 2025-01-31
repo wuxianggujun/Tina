@@ -102,25 +102,6 @@ namespace Tina
 
         // 创建示例实体
         createExampleEntities();
-
-        Texture iconTexture(Texture::loadFromFile("../resources/textures/player.png"));
-        // 创建玩家精灵
-        auto player = m_scene.createSprite(
-            iconTexture,
-            Vector2f(100.0f, 100.0f), // 位置
-            Vector2f(64.0f, 64.0f) // 大小
-        );
-
-        // 获取并修改组件
-        auto& transform = m_scene.getComponent<TransformComponent>(player);
-        transform.rotation = 0.0f;
-
-        auto& spriteComp = m_scene.getComponent<SpriteComponent>(player);
-        spriteComp.setLayer(RenderLayer::EntityHigh);  // 使用预定义层级
-        // 设置旋转中心为精灵的中心点
-        Vector2f spriteSize(64.0f, 64.0f);
-        spriteComp.sprite.setSize(spriteSize);  // 设置精灵大小
-        spriteComp.sprite.setOrigin(spriteSize * 0.5f);  // 使用精灵大小的一半作为旋转中心
     }
 
     void GameApplication::createExampleEntities()
@@ -169,22 +150,31 @@ namespace Tina
 
         // 创建玩家精灵
         Texture iconTexture(Texture::loadFromFile("../resources/textures/player.png"));
+        fmt::print("Loading player texture... Handle: {}\n", iconTexture.getHandle().idx);
+        if (!iconTexture.isValid()) {
+            fmt::print("Failed to load player texture!\n");
+            return;
+        }
+        fmt::print("Successfully loaded player texture\n");
+        
         auto player = m_scene.createSprite(
             iconTexture,
-            Vector2f(100.0f, 100.0f),
-            Vector2f(64.0f, 64.0f)
+            Vector2f(300.0f, 300.0f), // 位置
+            Vector2f(64.0f, 64.0f) // 大小
         );
 
-        // 设置玩家精灵属性
+        // 获取并修改组件
         auto& transform = m_scene.getComponent<TransformComponent>(player);
         transform.rotation = 0.0f;
+        transform.scale = Vector2f(1.0f, 1.0f);
 
         auto& spriteComp = m_scene.getComponent<SpriteComponent>(player);
-        Vector2f spriteSize(64.0f, 64.0f);
-        spriteComp.sprite.setSize(spriteSize);
-        spriteComp.sprite.setOrigin(spriteSize * 0.5f);
+        spriteComp.visible = true;
+        spriteComp.sprite.setSize(Vector2f(64.0f, 64.0f));
+        spriteComp.sprite.setOrigin(Vector2f(32.0f, 32.0f));
+        spriteComp.sprite.setColor(Color::White);
 
-        // 将玩家添加到实体高层
+        // 将玩家添加到层级管理器
         layerManager.addToLayer(player, RenderLayer::EntityHigh);
     }
 
@@ -237,6 +227,11 @@ namespace Tina
             {
                 transform.rotation += 360.0f;
             }
+
+            // 更新精灵的变换
+            sprite.sprite.setPosition(transform.position);
+            sprite.sprite.setRotation(transform.rotation);
+            sprite.sprite.setScale(transform.scale);
 
             fmt::print("Entity {} - Position: ({}, {}), Rotation: {}, Depth: {}\n",
                 static_cast<uint32_t>(entity),

@@ -64,10 +64,11 @@ namespace Tina
         // 提交渲染
         void render();
 
-    private:
+
         // 刷新批处理缓冲区
         void flush();
 
+    private:
         // 检查是否需要刷新批处理
         bool checkFlush(uint16_t vertexCount, uint16_t indexCount);
 

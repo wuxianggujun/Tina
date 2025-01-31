@@ -50,6 +50,11 @@ void RenderSystem::beginFrame() {
         0
     );
 
+    // 重置视图矩形
+    const uint32_t width = bgfx::getStats()->width;
+    const uint32_t height = bgfx::getStats()->height;
+    bgfx::setViewRect(0, 0, 0, width, height);
+
     // 如果有活动相机，更新视图和投影矩阵
     if (m_activeCamera) {
         bgfx::setViewTransform(0, 
@@ -61,6 +66,11 @@ void RenderSystem::beginFrame() {
             m_renderer2D->setCamera(m_activeCamera);
         }
     }
+
+    // 设置默认渲染状态
+    uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
+    state |= BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+    bgfx::setState(state);
 }
 
 void RenderSystem::render(entt::registry& registry) {
@@ -72,54 +82,61 @@ void RenderSystem::render(entt::registry& registry) {
     m_renderer2D->begin();
 
     // 按层级顺序渲染
-    renderLayer(registry, RenderLayer::Background);
-    renderLayer(registry, RenderLayer::Default);
-    renderLayer(registry, RenderLayer::EntityLow);
-    renderLayer(registry, RenderLayer::EntityMid);
-    renderLayer(registry, RenderLayer::EntityHigh);
-    renderLayer(registry, RenderLayer::UI);
-    renderLayer(registry, RenderLayer::UIHigh);
-    renderLayer(registry, RenderLayer::Overlay);
-    renderLayer(registry, RenderLayer::Debug);
+    for (int layerIndex = 0; layerIndex <= static_cast<int>(RenderLayer::Debug); ++layerIndex) {
+        auto layer = static_cast<RenderLayer>(layerIndex);
+        const auto& entities = m_layerManager.getEntitiesInLayer(layer);
+        
+        if (!entities.empty()) {
+            fmt::print("Rendering layer {} with {} entities\n", layerIndex, entities.size());
+        }
+
+        // 设置该层的渲染状态
+        uint64_t state = BGFX_STATE_WRITE_RGB 
+            | BGFX_STATE_WRITE_A
+            | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+        bgfx::setState(state);
+
+        // 渲染所有实体
+        for (auto entity : entities) {
+            // 渲染无纹理的矩形
+            if (registry.all_of<TransformComponent, QuadRendererComponent>(entity)) {
+                const auto& transform = registry.get<TransformComponent>(entity);
+                const auto& quad = registry.get<QuadRendererComponent>(entity);
+
+                if (!quad.visible) continue;
+
+                m_renderer2D->drawRect(
+                    transform.position,
+                    quad.size * transform.scale,
+                    quad.color
+                );
+            }
+            // 渲染精灵
+            else if (registry.all_of<TransformComponent, SpriteComponent>(entity)) {
+                const auto& transform = registry.get<TransformComponent>(entity);
+                const auto& spriteComp = registry.get<SpriteComponent>(entity);
+
+                if (!spriteComp.visible) continue;
+
+                // 更新精灵的变换
+                Sprite& sprite = const_cast<Sprite&>(spriteComp.sprite);
+                sprite.setPosition(transform.position);
+                sprite.setRotation(transform.rotation);
+                sprite.setScale(transform.scale);
+
+                // 绘制精灵
+                m_renderer2D->drawSprite(sprite);
+            }
+        }
+
+        // 每个层级结束后刷新
+        if (!entities.empty()) {
+            m_renderer2D->flush();
+        }
+    }
 
     // 结束2D渲染器的批处理
     m_renderer2D->end();
-}
-
-void RenderSystem::renderLayer(entt::registry& registry, RenderLayer layer) {
-    // 获取当前层的所有实体
-    const auto& entities = m_layerManager.getEntitiesInLayer(layer);
-
-    // 渲染精灵
-    for (auto entity : entities) {
-        if (registry.all_of<TransformComponent, SpriteComponent>(entity)) {
-            const auto& transform = registry.get<TransformComponent>(entity);
-            const auto& spriteComp = registry.get<SpriteComponent>(entity);
-
-            if (!spriteComp.visible) continue;
-
-            // 更新精灵的变换
-            Sprite& sprite = const_cast<Sprite&>(spriteComp.sprite);
-            sprite.setPosition(transform.position);
-            sprite.setRotation(transform.rotation);
-            sprite.setScale(transform.scale);
-
-            // 绘制精灵
-            m_renderer2D->drawSprite(sprite);
-        }
-        else if (registry.all_of<TransformComponent, QuadRendererComponent>(entity)) {
-            const auto& transform = registry.get<TransformComponent>(entity);
-            const auto& quad = registry.get<QuadRendererComponent>(entity);
-
-            if (!quad.visible) continue;
-
-            m_renderer2D->drawRect(
-                transform.position,
-                quad.size * transform.scale,
-                quad.color
-            );
-        }
-    }
 }
 
 void RenderSystem::endFrame() {
