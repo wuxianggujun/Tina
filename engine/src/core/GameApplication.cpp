@@ -106,47 +106,45 @@ namespace Tina
 
     void GameApplication::createExampleEntities()
     {
-        auto& layerManager = RenderSystem::getInstance().getLayerManager();
-
         // 创建背景矩形
-        auto background = m_scene.createQuad(
+        m_scene.createQuad(
             Vector2f(100.0f, 100.0f),
             Vector2f(300.0f, 300.0f),
-            Color(0.2f, 0.2f, 0.2f, 1.0f)
+            Color(0.2f, 0.2f, 0.2f, 1.0f),
+            RenderLayer::Background
         );
-        layerManager.addToLayer(background, RenderLayer::Background);
 
         // 创建红色矩形 - 实体低层
-        auto redQuad = m_scene.createQuad(
+        m_scene.createQuad(
             Vector2f(150.0f, 150.0f),
             Vector2f(100.0f, 100.0f),
-            Color::Red
+            Color::Red,
+            RenderLayer::EntityLow
         );
-        layerManager.addToLayer(redQuad, RenderLayer::EntityLow);
 
         // 创建绿色矩形 - 实体中层
-        auto greenQuad = m_scene.createQuad(
+        m_scene.createQuad(
             Vector2f(200.0f, 200.0f),
             Vector2f(100.0f, 100.0f),
-            Color::Green
+            Color::Green,
+            RenderLayer::EntityMid
         );
-        layerManager.addToLayer(greenQuad, RenderLayer::EntityMid);
 
         // 创建蓝色矩形 - 实体高层
-        auto blueQuad = m_scene.createQuad(
+        m_scene.createQuad(
             Vector2f(250.0f, 250.0f),
             Vector2f(100.0f, 100.0f),
-            Color::Blue
+            Color::Blue,
+            RenderLayer::EntityHigh
         );
-        layerManager.addToLayer(blueQuad, RenderLayer::EntityHigh);
 
         // 创建白色矩形 - UI层
-        auto whiteQuad = m_scene.createQuad(
+        m_scene.createQuad(
             Vector2f(225.0f, 225.0f),
             Vector2f(100.0f, 100.0f),
-            Color::White
+            Color::White,
+            RenderLayer::UI
         );
-        layerManager.addToLayer(whiteQuad, RenderLayer::UI);
 
         // 创建玩家精灵
         Texture iconTexture(Texture::loadFromFile("../resources/textures/player.png"));
@@ -160,7 +158,9 @@ namespace Tina
         auto player = m_scene.createSprite(
             iconTexture,
             Vector2f(300.0f, 300.0f), // 位置
-            Vector2f(64.0f, 64.0f) // 大小
+            Vector2f(64.0f, 64.0f),   // 大小
+            Color::White,             // 颜色
+            RenderLayer::EntityHigh   // 层级
         );
 
         // 获取并修改组件
@@ -173,9 +173,6 @@ namespace Tina
         spriteComp.sprite.setSize(Vector2f(64.0f, 64.0f));
         spriteComp.sprite.setOrigin(Vector2f(32.0f, 32.0f));
         spriteComp.sprite.setColor(Color::White);
-
-        // 将玩家添加到层级管理器
-        layerManager.addToLayer(player, RenderLayer::EntityHigh);
     }
 
     void GameApplication::onWindowResize(int width, int height)

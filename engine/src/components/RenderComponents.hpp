@@ -5,6 +5,7 @@
 #include <bgfx/bgfx.h>
 #include "graphics/Texture.hpp"
 #include "math/Rect.hpp"
+#include "graphics/RenderLayer.hpp"
 
 namespace Tina {
 
@@ -23,6 +24,7 @@ struct SpriteRendererComponent {
     Vector2f size{100.0f, 100.0f};
     float depth{0.0f};
     bool visible{true};
+    RenderLayer layer{RenderLayer::Default};  // 默认层
 };
 
 // 矩形渲染组件
@@ -31,6 +33,7 @@ struct QuadRendererComponent {
     Vector2f size{100.0f, 100.0f};
     float depth{0.0f};
     bool visible{true};
+    RenderLayer layer{RenderLayer::Default};  // 默认层
 };
 
 // 自定义渲染组件
@@ -38,6 +41,7 @@ struct CustomRendererComponent {
     std::function<void()> renderFunction;
     float depth{0.0f};
     bool visible{true};
+    RenderLayer layer{RenderLayer::Default};  // 默认层
 };
 
 } 

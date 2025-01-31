@@ -14,7 +14,7 @@ public:
     ~Scene() = default;
 
     // 创建2D图形的便捷方法
-    entt::entity createQuad(const Vector2f& position, const Vector2f& size, const Color& color) {
+    entt::entity createQuad(const Vector2f& position, const Vector2f& size, const Color& color, RenderLayer layer = RenderLayer::Default) {
         auto entity = m_registry.create();
         
         // 自动创建必要的组件
@@ -24,12 +24,13 @@ public:
         auto& quad = m_registry.emplace<QuadRendererComponent>(entity);
         quad.color = color;
         quad.size = size;
+        quad.layer = layer;  // 设置渲染层级
         
         return entity;
     }
 
     // 创建精灵的便捷方法
-    entt::entity createSprite(const Vector2f& position, const Vector2f& size, bgfx::TextureHandle texture, const Color& tint = Color::White) {
+    entt::entity createSprite(const Vector2f& position, const Vector2f& size, bgfx::TextureHandle texture, const Color& tint = Color::White, RenderLayer layer = RenderLayer::Default) {
         auto entity = m_registry.create();
         
         auto& transform = m_registry.emplace<TransformComponent>(entity);
@@ -39,6 +40,7 @@ public:
         sprite.texture = texture;
         sprite.size = size;
         sprite.color = tint;
+        sprite.layer = layer;  // 设置渲染层级
         
         return entity;
     }
@@ -46,7 +48,8 @@ public:
     // 创建精灵实体
     entt::entity createSprite(const Texture& texture, const Vector2f& position,
                              const Vector2f& size = Vector2f(1.0f, 1.0f),
-                             const Color& color = Color::White)
+                             const Color& color = Color::White,
+                             RenderLayer layer = RenderLayer::Default)
     {
         auto entity = m_registry.create();
 
@@ -59,6 +62,8 @@ public:
         auto& spriteComp = m_registry.emplace<SpriteComponent>(entity);
         spriteComp.sprite.setTexture(texture);
         spriteComp.sprite.setColor(color);
+        spriteComp.layer = layer;  // 设置层级
+        spriteComp.visible = true;
 
         return entity;
     }

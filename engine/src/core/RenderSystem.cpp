@@ -73,70 +73,19 @@ void RenderSystem::beginFrame() {
     bgfx::setState(state);
 }
 
-void RenderSystem::render(entt::registry& registry) {
-    if (!m_initialized || !m_renderer2D) {
+void RenderSystem::render(entt::registry& registry)
+{
+    if (!m_initialized || !m_renderer2D)
+    {
         return;
     }
 
-    // 开始2D渲染器的批处理
-    m_renderer2D->begin();
-
     // 按层级顺序渲染
-    for (int layerIndex = 0; layerIndex <= static_cast<int>(RenderLayer::Debug); ++layerIndex) {
-        auto layer = static_cast<RenderLayer>(layerIndex);
-        const auto& entities = m_layerManager.getEntitiesInLayer(layer);
-        
-        if (!entities.empty()) {
-            fmt::print("Rendering layer {} with {} entities\n", layerIndex, entities.size());
-        }
-
-        // 设置该层的渲染状态
-        uint64_t state = BGFX_STATE_WRITE_RGB 
-            | BGFX_STATE_WRITE_A
-            | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
-        bgfx::setState(state);
-
-        // 渲染所有实体
-        for (auto entity : entities) {
-            // 渲染无纹理的矩形
-            if (registry.all_of<TransformComponent, QuadRendererComponent>(entity)) {
-                const auto& transform = registry.get<TransformComponent>(entity);
-                const auto& quad = registry.get<QuadRendererComponent>(entity);
-
-                if (!quad.visible) continue;
-
-                m_renderer2D->drawRect(
-                    transform.position,
-                    quad.size * transform.scale,
-                    quad.color
-                );
-            }
-            // 渲染精灵
-            else if (registry.all_of<TransformComponent, SpriteComponent>(entity)) {
-                const auto& transform = registry.get<TransformComponent>(entity);
-                const auto& spriteComp = registry.get<SpriteComponent>(entity);
-
-                if (!spriteComp.visible) continue;
-
-                // 更新精灵的变换
-                Sprite& sprite = const_cast<Sprite&>(spriteComp.sprite);
-                sprite.setPosition(transform.position);
-                sprite.setRotation(transform.rotation);
-                sprite.setScale(transform.scale);
-
-                // 绘制精灵
-                m_renderer2D->drawSprite(sprite);
-            }
-        }
-
-        // 每个层级结束后刷新
-        if (!entities.empty()) {
-            m_renderer2D->flush();
-        }
-    }
-
-    // 结束2D渲染器的批处理
-    m_renderer2D->end();
+    renderLayer(registry, RenderLayer::Background);
+    renderLayer(registry, RenderLayer::EntityLow);
+    renderLayer(registry, RenderLayer::EntityMid);
+    renderLayer(registry, RenderLayer::EntityHigh);
+    renderLayer(registry, RenderLayer::UI);
 }
 
 void RenderSystem::endFrame() {
@@ -157,6 +106,127 @@ void RenderSystem::setViewport(uint16_t x, uint16_t y, uint16_t width, uint16_t 
 
 void RenderSystem::setClearColor(const Color& color) {
     m_clearColor = color;
+}
+
+void RenderSystem::renderLayer(entt::registry& registry, RenderLayer layer)
+{
+    fmt::print("\n=== Rendering Layer: {} ===\n", static_cast<int>(layer));
+    
+    // 开始新的批次
+    m_renderer2D->begin();
+
+    // 获取该层级的所有实体
+    std::vector<entt::entity> entities;
+    
+    // 处理矩形实体
+    auto quadView = registry.view<TransformComponent, QuadRendererComponent>();
+    for (auto entity : quadView)
+    {
+        const auto& quadComp = quadView.get<QuadRendererComponent>(entity);
+        if (quadComp.layer == layer)
+        {
+            entities.push_back(entity);
+            fmt::print("Found quad entity {} in layer {}, visible: {}\n",
+                static_cast<uint32_t>(entity),
+                static_cast<int>(layer),
+                quadComp.visible);
+        }
+    }
+
+    // 处理精灵实体
+    auto spriteView = registry.view<TransformComponent, SpriteComponent>();
+    for (auto entity : spriteView)
+    {
+        const auto& spriteComp = spriteView.get<SpriteComponent>(entity);
+        if (spriteComp.layer == layer)
+        {
+            entities.push_back(entity);
+            fmt::print("Found sprite entity {} in layer {}, visible: {}, has texture: {}\n",
+                static_cast<uint32_t>(entity),
+                static_cast<int>(layer),
+                spriteComp.visible,
+                spriteComp.sprite.getTexture().isValid());
+        }
+    }
+
+    // 如果这个层级有实体需要渲染
+    if (!entities.empty())
+    {
+        fmt::print("Rendering {} entities in layer {}\n", entities.size(), static_cast<int>(layer));
+
+        // 按深度排序
+        std::sort(entities.begin(), entities.end(),
+            [&registry](entt::entity a, entt::entity b) {
+                float depthA = 0.0f;
+                float depthB = 0.0f;
+                
+                if (registry.all_of<SpriteComponent>(a))
+                    depthA = registry.get<SpriteComponent>(a).depth;
+                if (registry.all_of<QuadRendererComponent>(a))
+                    depthA = registry.get<QuadRendererComponent>(a).depth;
+                    
+                if (registry.all_of<SpriteComponent>(b))
+                    depthB = registry.get<SpriteComponent>(b).depth;
+                if (registry.all_of<QuadRendererComponent>(b))
+                    depthB = registry.get<QuadRendererComponent>(b).depth;
+                    
+                return depthA < depthB;
+            });
+
+        // 渲染该层级的所有实体
+        for (auto entity : entities)
+        {
+            const auto& transform = registry.get<TransformComponent>(entity);
+
+            // 渲染矩形
+            if (registry.all_of<QuadRendererComponent>(entity))
+            {
+                const auto& quadComp = registry.get<QuadRendererComponent>(entity);
+                if (!quadComp.visible) continue;
+
+                fmt::print("Drawing quad entity {} at position ({}, {})\n",
+                    static_cast<uint32_t>(entity),
+                    transform.position.x,
+                    transform.position.y);
+
+                m_renderer2D->drawRect(
+                    transform.position,
+                    quadComp.size * transform.scale,
+                    quadComp.color
+                );
+            }
+            // 渲染精灵
+            else if (registry.all_of<SpriteComponent>(entity))
+            {
+                const auto& spriteComp = registry.get<SpriteComponent>(entity);
+                if (!spriteComp.visible) continue;
+
+                fmt::print("Drawing sprite entity {} at position ({}, {}), rotation: {}, has texture: {}\n",
+                    static_cast<uint32_t>(entity),
+                    transform.position.x,
+                    transform.position.y,
+                    transform.rotation,
+                    spriteComp.sprite.getTexture().isValid());
+
+                // 更新精灵的变换
+                Sprite& sprite = const_cast<Sprite&>(spriteComp.sprite);
+                sprite.setPosition(transform.position);
+                sprite.setRotation(transform.rotation);
+                sprite.setScale(transform.scale);
+
+                m_renderer2D->drawSprite(sprite);
+            }
+        }
+    }
+    else
+    {
+        fmt::print("No entities to render in layer {}\n", static_cast<int>(layer));
+    }
+
+    // 结束这个层级的批次
+    m_renderer2D->end();
+    
+    fmt::print("=== Layer {} Rendering Complete ===\n\n", static_cast<int>(layer));
 }
 
 } 

@@ -250,13 +250,7 @@ namespace Tina
             return;
         }
 
-        // 如果当前有纹理，需要先刷新
-        if (bgfx::isValid(m_currentTexture))
-        {
-            flush();
-            m_currentTexture = BGFX_INVALID_HANDLE;
-        }
-
+        // 检查是否需要刷新批处理
         if (checkFlush(4, 6))
         {
             flush();
