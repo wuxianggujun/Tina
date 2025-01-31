@@ -140,17 +140,17 @@ namespace Tina
         }
 
         // 打印相机信息
-        const auto& view = m_camera->getViewMatrix();
-        const auto& proj = m_camera->getProjectionMatrix();
+        const auto& viewMatrix = m_camera->getViewMatrix();
+        const auto& projMatrix = m_camera->getProjectionMatrix();
         fmt::print("Camera View Matrix:\n");
         for (int i = 0; i < 4; ++i) {
             fmt::print("[{:.2f}, {:.2f}, {:.2f}, {:.2f}]\n", 
-                view[i][0], view[i][1], view[i][2], view[i][3]);
+                viewMatrix[i][0], viewMatrix[i][1], viewMatrix[i][2], viewMatrix[i][3]);
         }
         fmt::print("Camera Projection Matrix:\n");
         for (int i = 0; i < 4; ++i) {
             fmt::print("[{:.2f}, {:.2f}, {:.2f}, {:.2f}]\n", 
-                proj[i][0], proj[i][1], proj[i][2], proj[i][3]);
+                projMatrix[i][0], projMatrix[i][1], projMatrix[i][2], projMatrix[i][3]);
         }
 
         // 设置视图清除标志
@@ -170,14 +170,12 @@ namespace Tina
         // 设置视图变换
         float viewMat[16];
         float projMat[16];
-        bx::mtxIdentity(viewMat);  // 使用单位矩阵作为视图矩阵
-        bx::mtxOrtho(projMat,      // 使用正交投影
-            0.0f, float(width),     // left, right
-            float(height), 0.0f,    // bottom, top (翻转Y轴)
-            0.0f, 100.0f,          // near, far
-            0.0f,                  // offset
-            bgfx::getCaps()->homogeneousDepth);  // 使用正确的深度范围
+        
+        // 复制view matrix数据
+        memcpy(viewMat, &viewMatrix[0][0], sizeof(float) * 16);
+        memcpy(projMat, &projMatrix[0][0], sizeof(float) * 16);
 
+        // 设置视图和投影矩阵
         bgfx::setViewTransform(m_viewId, viewMat, projMat);
 
         m_isDrawing = true;
@@ -225,22 +223,26 @@ namespace Tina
         );
 
         // 设置渲染状态
-        uint64_t state = 0
-            | BGFX_STATE_WRITE_RGB
+        uint64_t state = BGFX_STATE_WRITE_RGB
             | BGFX_STATE_WRITE_A
             | BGFX_STATE_WRITE_Z
             | BGFX_STATE_DEPTH_TEST_LEQUAL
-            | BGFX_STATE_MSAA
-            | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+            | BGFX_STATE_MSAA;
 
-        bgfx::setState(state);
-
-        // 设置纹理
+        // 如果有纹理，添加混合模式
         if (bgfx::isValid(m_currentTexture))
         {
+            state |= BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
             fmt::print("Setting texture with handle: {} for drawing\n", m_currentTexture.idx);
             bgfx::setTexture(0, m_s_texColor, m_currentTexture);
+            state |= BGFX_STATE_BLEND_ALPHA;  // 添加基本alpha混合
         }
+        else
+        {
+            state |= BGFX_STATE_BLEND_ALPHA;
+        }
+
+        bgfx::setState(state);
 
         // 设置变换矩阵 - 使用单位矩阵作为模型矩阵
         float modelMat[16];
@@ -252,7 +254,9 @@ namespace Tina
         bgfx::setIndexBuffer(m_ibh, 0, m_currentIndex);
 
         // 提交绘制命令
-        fmt::print("Submitting draw call with program handle: {}\n", m_program.idx);
+        fmt::print("Submitting draw call with program handle: {}, texture: {}\n", 
+            m_program.idx, 
+            bgfx::isValid(m_currentTexture) ? "yes" : "no");
         bgfx::submit(m_viewId, m_program);
 
         // 重置计数器
@@ -296,7 +300,7 @@ namespace Tina
         m_vertices[m_currentVertex].m_y = y;
         m_vertices[m_currentVertex].m_z = depth;
         m_vertices[m_currentVertex].m_rgba = abgr;
-        m_vertices[m_currentVertex].m_u = 0.0f;
+        m_vertices[m_currentVertex].m_u = 0.0f;  // 这些UV坐标对于纯色矩形来说不需要
         m_vertices[m_currentVertex].m_v = 0.0f;
         m_currentVertex++;
 
@@ -305,7 +309,7 @@ namespace Tina
         m_vertices[m_currentVertex].m_y = y;
         m_vertices[m_currentVertex].m_z = depth;
         m_vertices[m_currentVertex].m_rgba = abgr;
-        m_vertices[m_currentVertex].m_u = 1.0f;
+        m_vertices[m_currentVertex].m_u = 1.0f;  // 这些UV坐标对于纯色矩形来说不需要
         m_vertices[m_currentVertex].m_v = 0.0f;
         m_currentVertex++;
 
@@ -314,7 +318,7 @@ namespace Tina
         m_vertices[m_currentVertex].m_y = y + h;
         m_vertices[m_currentVertex].m_z = depth;
         m_vertices[m_currentVertex].m_rgba = abgr;
-        m_vertices[m_currentVertex].m_u = 0.0f;
+        m_vertices[m_currentVertex].m_u = 0.0f;  // 这些UV坐标对于纯色矩形来说不需要
         m_vertices[m_currentVertex].m_v = 1.0f;
         m_currentVertex++;
 
@@ -323,7 +327,7 @@ namespace Tina
         m_vertices[m_currentVertex].m_y = y + h;
         m_vertices[m_currentVertex].m_z = depth;
         m_vertices[m_currentVertex].m_rgba = abgr;
-        m_vertices[m_currentVertex].m_u = 1.0f;
+        m_vertices[m_currentVertex].m_u = 1.0f;  // 这些UV坐标对于纯色矩形来说不需要
         m_vertices[m_currentVertex].m_v = 1.0f;
         m_currentVertex++;
 

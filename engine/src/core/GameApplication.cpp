@@ -78,7 +78,7 @@ namespace Tina
         auto& renderSystem = RenderSystem::getInstance();
         renderSystem.initialize();
 
-        // 创建正交相机
+        // 创建正交相机，使用屏幕坐标系（左上角为原点）
         float width = static_cast<float>(windowConfig.resolution.width);
         float height = static_cast<float>(windowConfig.resolution.height);
         m_camera = std::make_unique<OrthographicCamera>(
@@ -87,12 +87,12 @@ namespace Tina
             height,  // bottom
             0.0f,    // top
             0.0f,    // near
-            1.0f     // far
+            100.0f   // far
         );
 
         // 设置相机位置 - 使用屏幕坐标系
-        m_camera->setPosition(Vector3f(0.0f, 0.0f, 1.0f));  // 将相机放在Z=1处
-        m_camera->setTarget(Vector3f(0.0f, 0.0f, 0.0f));    // 看向Z=0平面
+        m_camera->setPosition(Vector3f(0.0f, 0.0f, 1.0f));  // 相机位于z=1处
+        m_camera->setTarget(Vector3f(0.0f, 0.0f, 0.0f));    // 看向z=0平面
 
         // 设置渲染系统的相机
         renderSystem.setCamera(m_camera.get());
@@ -185,16 +185,18 @@ namespace Tina
         {
             float fWidth = static_cast<float>(width);
             float fHeight = static_cast<float>(height);
+            
+            // 更新相机投影，保持屏幕坐标系
             m_camera->setProjection(
                 0.0f,     // left
                 fWidth,   // right
                 fHeight,  // bottom
                 0.0f,     // top
                 0.0f,     // near
-                1.0f      // far
+                100.0f    // far
             );
             
-            // 更新相机位置
+            // 保持相机位置不变
             m_camera->setPosition(Vector3f(0.0f, 0.0f, 1.0f));
             m_camera->setTarget(Vector3f(0.0f, 0.0f, 0.0f));
         }

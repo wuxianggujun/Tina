@@ -3,6 +3,9 @@
 #include "math/Vector.hpp"
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <bgfx/bgfx.h>
+#include <bx/math.h>
 
 namespace Tina {
     class Camera {
@@ -32,35 +35,16 @@ namespace Tina {
     protected:
         // 更新视图矩阵
         virtual void updateViewMatrix() {
-            // 计算相机的前、右、上向量
-            glm::vec3 pos(m_position.x, m_position.y, m_position.z);
-            glm::vec3 target(m_target.x, m_target.y, m_target.z);
-            glm::vec3 up(0.0f, -1.0f, 0.0f);  // Y轴向下
-
-            glm::vec3 forward = glm::normalize(target - pos);
-            glm::vec3 right = glm::normalize(glm::cross(forward, up));
-            glm::vec3 newUp = glm::cross(right, forward);
-
-            // 手动构建视图矩阵
-            m_viewMatrix[0][0] = right.x;
-            m_viewMatrix[0][1] = newUp.x;
-            m_viewMatrix[0][2] = -forward.x;
-            m_viewMatrix[0][3] = 0.0f;
-
-            m_viewMatrix[1][0] = right.y;
-            m_viewMatrix[1][1] = newUp.y;
-            m_viewMatrix[1][2] = -forward.y;
-            m_viewMatrix[1][3] = 0.0f;
-
-            m_viewMatrix[2][0] = right.z;
-            m_viewMatrix[2][1] = newUp.z;
-            m_viewMatrix[2][2] = -forward.z;
-            m_viewMatrix[2][3] = 0.0f;
-
-            m_viewMatrix[3][0] = -glm::dot(right, pos);
-            m_viewMatrix[3][1] = -glm::dot(newUp, pos);
-            m_viewMatrix[3][2] = glm::dot(forward, pos);
-            m_viewMatrix[3][3] = 1.0f;
+            // 在屏幕坐标系中，我们只需要一个简单的平移矩阵
+            m_viewMatrix = glm::mat4(1.0f);
+            
+            // 设置Z轴方向（正向屏幕外）
+            m_viewMatrix[2][2] = -1.0f;  // 翻转Z轴
+            
+            // 应用相机位置
+            m_viewMatrix[3][0] = -m_position.x;
+            m_viewMatrix[3][1] = -m_position.y;
+            m_viewMatrix[3][2] = -m_position.z;
         }
 
         // 更新投影矩阵（由派生类实现）
@@ -91,30 +75,22 @@ namespace Tina {
 
     protected:
         void updateProjectionMatrix() override {
-            // 使用bgfx的坐标系统：Y轴向下，Z轴向内
-            float width = m_right - m_left;
-            float height = m_bottom - m_top;
+            // 使用屏幕坐标系（左上角为原点）
+            m_projectionMatrix = glm::ortho(
+                0.0f,                   // left
+                m_right,                // right
+                m_bottom,               // bottom
+                0.0f,                   // top (Y轴向下，顶部为0)
+                0.0f,                   // near
+                100.0f                  // far
+            );
 
-            // 使用列主序矩阵（bgfx和OpenGL使用的格式）
-            m_projectionMatrix[0][0] = 2.0f / width;
-            m_projectionMatrix[0][1] = 0.0f;
-            m_projectionMatrix[0][2] = 0.0f;
-            m_projectionMatrix[0][3] = 0.0f;
+            // 调整深度范围从[-1,1]到[0,1]
+            glm::mat4 depthAdjust = glm::mat4(1.0f);
+            depthAdjust[2][2] = 0.5f;   // 缩放Z到[0,1]范围
+            depthAdjust[3][2] = 0.5f;   // 平移Z到[0,1]范围
 
-            m_projectionMatrix[1][0] = 0.0f;
-            m_projectionMatrix[1][1] = -2.0f / height;  // 翻转Y轴
-            m_projectionMatrix[1][2] = 0.0f;
-            m_projectionMatrix[1][3] = 0.0f;
-
-            m_projectionMatrix[2][0] = 0.0f;
-            m_projectionMatrix[2][1] = 0.0f;
-            m_projectionMatrix[2][2] = 2.0f / (m_far - m_near);
-            m_projectionMatrix[2][3] = 0.0f;
-
-            m_projectionMatrix[3][0] = -(m_right + m_left) / width;
-            m_projectionMatrix[3][1] = (m_bottom + m_top) / height;  // 注意这里的符号
-            m_projectionMatrix[3][2] = -(m_far + m_near) / (m_far - m_near);
-            m_projectionMatrix[3][3] = 1.0f;
+            m_projectionMatrix = depthAdjust * m_projectionMatrix;
         }
 
     private:
