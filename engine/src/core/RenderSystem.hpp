@@ -50,6 +50,7 @@ namespace Tina
 
         // 渲染指定层的实体
         void renderLayer(entt::registry& registry, RenderLayer layer);
+        float getDepthFromLayer(RenderLayer layer);
 
     private:
         std::unique_ptr<Renderer2D> m_renderer2D;

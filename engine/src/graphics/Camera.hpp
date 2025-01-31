@@ -32,11 +32,35 @@ namespace Tina {
     protected:
         // 更新视图矩阵
         virtual void updateViewMatrix() {
-            m_viewMatrix = glm::lookAt(
-                glm::vec3(m_position.x, m_position.y, m_position.z),
-                glm::vec3(m_target.x, m_target.y, m_target.z),
-                glm::vec3(0.0f, 1.0f, 0.0f)
-            );
+            // 计算相机的前、右、上向量
+            glm::vec3 pos(m_position.x, m_position.y, m_position.z);
+            glm::vec3 target(m_target.x, m_target.y, m_target.z);
+            glm::vec3 up(0.0f, -1.0f, 0.0f);  // Y轴向下
+
+            glm::vec3 forward = glm::normalize(target - pos);
+            glm::vec3 right = glm::normalize(glm::cross(forward, up));
+            glm::vec3 newUp = glm::cross(right, forward);
+
+            // 手动构建视图矩阵
+            m_viewMatrix[0][0] = right.x;
+            m_viewMatrix[0][1] = newUp.x;
+            m_viewMatrix[0][2] = -forward.x;
+            m_viewMatrix[0][3] = 0.0f;
+
+            m_viewMatrix[1][0] = right.y;
+            m_viewMatrix[1][1] = newUp.y;
+            m_viewMatrix[1][2] = -forward.y;
+            m_viewMatrix[1][3] = 0.0f;
+
+            m_viewMatrix[2][0] = right.z;
+            m_viewMatrix[2][1] = newUp.z;
+            m_viewMatrix[2][2] = -forward.z;
+            m_viewMatrix[2][3] = 0.0f;
+
+            m_viewMatrix[3][0] = -glm::dot(right, pos);
+            m_viewMatrix[3][1] = -glm::dot(newUp, pos);
+            m_viewMatrix[3][2] = glm::dot(forward, pos);
+            m_viewMatrix[3][3] = 1.0f;
         }
 
         // 更新投影矩阵（由派生类实现）
@@ -67,7 +91,30 @@ namespace Tina {
 
     protected:
         void updateProjectionMatrix() override {
-            m_projectionMatrix = glm::ortho(m_left, m_right, m_bottom, m_top, m_near, m_far);
+            // 使用bgfx的坐标系统：Y轴向下，Z轴向内
+            float width = m_right - m_left;
+            float height = m_bottom - m_top;
+
+            // 使用列主序矩阵（bgfx和OpenGL使用的格式）
+            m_projectionMatrix[0][0] = 2.0f / width;
+            m_projectionMatrix[0][1] = 0.0f;
+            m_projectionMatrix[0][2] = 0.0f;
+            m_projectionMatrix[0][3] = 0.0f;
+
+            m_projectionMatrix[1][0] = 0.0f;
+            m_projectionMatrix[1][1] = -2.0f / height;  // 翻转Y轴
+            m_projectionMatrix[1][2] = 0.0f;
+            m_projectionMatrix[1][3] = 0.0f;
+
+            m_projectionMatrix[2][0] = 0.0f;
+            m_projectionMatrix[2][1] = 0.0f;
+            m_projectionMatrix[2][2] = 2.0f / (m_far - m_near);
+            m_projectionMatrix[2][3] = 0.0f;
+
+            m_projectionMatrix[3][0] = -(m_right + m_left) / width;
+            m_projectionMatrix[3][1] = (m_bottom + m_top) / height;  // 注意这里的符号
+            m_projectionMatrix[3][2] = -(m_far + m_near) / (m_far - m_near);
+            m_projectionMatrix[3][3] = 1.0f;
         }
 
     private:

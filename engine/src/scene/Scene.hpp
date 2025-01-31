@@ -25,6 +25,8 @@ public:
         quad.color = color;
         quad.size = size;
         quad.layer = layer;  // 设置渲染层级
+        quad.depth = getDepthFromLayer(layer);  // 设置深度值
+        quad.visible = true;
         
         return entity;
     }
@@ -63,6 +65,7 @@ public:
         spriteComp.sprite.setTexture(texture);
         spriteComp.sprite.setColor(color);
         spriteComp.layer = layer;  // 设置层级
+        spriteComp.depth = getDepthFromLayer(layer);  // 设置深度值
         spriteComp.visible = true;
 
         return entity;

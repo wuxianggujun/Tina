@@ -82,17 +82,17 @@ namespace Tina
         float width = static_cast<float>(windowConfig.resolution.width);
         float height = static_cast<float>(windowConfig.resolution.height);
         m_camera = std::make_unique<OrthographicCamera>(
-            0.0f, // left
-            width, // right
-            0.0f, // bottom
-            height, // top
-            -1.0f, // near
-            1.0f // far
+            0.0f,    // left
+            width,   // right
+            height,  // bottom
+            0.0f,    // top
+            0.0f,    // near
+            1.0f     // far
         );
 
-        // 设置相机位置
-        m_camera->setPosition(Vector3f(0.0f, 0.0f, 0.0f));
-        m_camera->setTarget(Vector3f(0.0f, 0.0f, -1.0f));
+        // 设置相机位置 - 使用屏幕坐标系
+        m_camera->setPosition(Vector3f(0.0f, 0.0f, 1.0f));  // 将相机放在Z=1处
+        m_camera->setTarget(Vector3f(0.0f, 0.0f, 0.0f));    // 看向Z=0平面
 
         // 设置渲染系统的相机
         renderSystem.setCamera(m_camera.get());
@@ -106,6 +106,9 @@ namespace Tina
 
     void GameApplication::createExampleEntities()
     {
+        float width = static_cast<float>(m_window->getResolution().width);
+        float height = static_cast<float>(m_window->getResolution().height);
+
         // 创建背景矩形
         m_scene.createQuad(
             Vector2f(100.0f, 100.0f),
@@ -157,10 +160,10 @@ namespace Tina
         
         auto player = m_scene.createSprite(
             iconTexture,
-            Vector2f(300.0f, 300.0f), // 位置
-            Vector2f(64.0f, 64.0f),   // 大小
-            Color::White,             // 颜色
-            RenderLayer::EntityHigh   // 层级
+            Vector2f(300.0f, 300.0f),  // 位置
+            Vector2f(64.0f, 64.0f),    // 大小
+            Color::White,              // 颜色
+            RenderLayer::EntityHigh    // 层级
         );
 
         // 获取并修改组件
@@ -180,14 +183,20 @@ namespace Tina
         // 更新相机投影
         if (m_camera)
         {
+            float fWidth = static_cast<float>(width);
+            float fHeight = static_cast<float>(height);
             m_camera->setProjection(
-                0.0f, // left
-                static_cast<float>(width), // right
-                0.0f, // bottom
-                static_cast<float>(height), // top
-                -1.0f, // near
-                1.0f // far
+                0.0f,     // left
+                fWidth,   // right
+                fHeight,  // bottom
+                0.0f,     // top
+                0.0f,     // near
+                1.0f      // far
             );
+            
+            // 更新相机位置
+            m_camera->setPosition(Vector3f(0.0f, 0.0f, 1.0f));
+            m_camera->setTarget(Vector3f(0.0f, 0.0f, 0.0f));
         }
 
         // 更新渲染系统的视口
@@ -211,7 +220,7 @@ namespace Tina
 
     void GameApplication::update(float deltaTime)
     {
-        const auto view = m_scene.getRegistry().view<TransformComponent, SpriteComponent>();
+        const auto&& view = m_scene.getRegistry().view<TransformComponent, SpriteComponent>();
         for (const auto entity : view)
         {
             auto& transform = view.get<TransformComponent>(entity);

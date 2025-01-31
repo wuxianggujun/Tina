@@ -48,14 +48,16 @@ namespace Tina
         void setCamera(const Camera* camera) { m_camera = camera; }
 
         // 绘制纯色矩形
-        void drawRect(const Vector2f& position, const Vector2f& size, const Color& color);
+        void drawRect(const Vector2f& position, const Vector2f& size, const Color& color, float depth = 0.0f);
 
         // 绘制纹理矩形
         void drawTexturedRect(const Vector2f& position, const Vector2f& size,
                             const Texture& texture, const Color& color = Color::White);
 
-        void drawSprite(const Sprite& sprite,float depth);
+        // 绘制精灵
+        void drawSprite(const Vector2f& position, const Vector2f& size, const Color& color, const Texture& texture, float depth = 0.0f);
         void drawSprite(const Sprite& sprite);
+
 
         // 开始和结束批处理
         void begin();

@@ -139,25 +139,46 @@ namespace Tina
             return;
         }
 
-        // 获取视图和投影矩阵
-        const glm::mat4& view = m_camera->getViewMatrix();
-        const glm::mat4& proj = m_camera->getProjectionMatrix();
+        // 打印相机信息
+        const auto& view = m_camera->getViewMatrix();
+        const auto& proj = m_camera->getProjectionMatrix();
+        fmt::print("Camera View Matrix:\n");
+        for (int i = 0; i < 4; ++i) {
+            fmt::print("[{:.2f}, {:.2f}, {:.2f}, {:.2f}]\n", 
+                view[i][0], view[i][1], view[i][2], view[i][3]);
+        }
+        fmt::print("Camera Projection Matrix:\n");
+        for (int i = 0; i < 4; ++i) {
+            fmt::print("[{:.2f}, {:.2f}, {:.2f}, {:.2f}]\n", 
+                proj[i][0], proj[i][1], proj[i][2], proj[i][3]);
+        }
 
-        // 设置视图和投影矩阵
-        bgfx::setViewTransform(m_viewId, &view[0][0], &proj[0][0]);
+        // 设置视图清除标志
+        bgfx::setViewClear(m_viewId,
+            BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+            0x303030ff,  // 深灰色背景
+            1.0f,        // 深度清除值
+            0           // 模板清除值
+        );
 
         // 设置视图矩形
         uint16_t width = uint16_t(bgfx::getStats()->width);
         uint16_t height = uint16_t(bgfx::getStats()->height);
         bgfx::setViewRect(m_viewId, 0, 0, width, height);
+        fmt::print("Setting view rectangle: {}x{}\n", width, height);
 
-        // 设置视图清除标志
-        bgfx::setViewClear(m_viewId,
-                           BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                           0x303030ff,
-                           1.0f,
-                           0
-        );
+        // 设置视图变换
+        float viewMat[16];
+        float projMat[16];
+        bx::mtxIdentity(viewMat);  // 使用单位矩阵作为视图矩阵
+        bx::mtxOrtho(projMat,      // 使用正交投影
+            0.0f, float(width),     // left, right
+            float(height), 0.0f,    // bottom, top (翻转Y轴)
+            0.0f, 100.0f,          // near, far
+            0.0f,                  // offset
+            bgfx::getCaps()->homogeneousDepth);  // 使用正确的深度范围
+
+        bgfx::setViewTransform(m_viewId, viewMat, projMat);
 
         m_isDrawing = true;
         m_currentVertex = 0;
@@ -204,26 +225,27 @@ namespace Tina
         );
 
         // 设置渲染状态
-        uint64_t state = BGFX_STATE_WRITE_RGB 
+        uint64_t state = 0
+            | BGFX_STATE_WRITE_RGB
             | BGFX_STATE_WRITE_A
+            | BGFX_STATE_WRITE_Z
+            | BGFX_STATE_DEPTH_TEST_LEQUAL
             | BGFX_STATE_MSAA
-            | BGFX_STATE_DEPTH_TEST_ALWAYS
             | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
 
         bgfx::setState(state);
 
-        // 设置纹理和着色器
+        // 设置纹理
         if (bgfx::isValid(m_currentTexture))
         {
             fmt::print("Setting texture with handle: {} for drawing\n", m_currentTexture.idx);
             bgfx::setTexture(0, m_s_texColor, m_currentTexture);
         }
-        else
-        {
-            fmt::print("No valid texture during flush, using default shader state\n");
-            // 对于无纹理的绘制，我们仍然需要设置一个有效的采样器状态
-            bgfx::setTexture(0, m_s_texColor, BGFX_INVALID_HANDLE);
-        }
+
+        // 设置变换矩阵 - 使用单位矩阵作为模型矩阵
+        float modelMat[16];
+        bx::mtxIdentity(modelMat);
+        bgfx::setTransform(modelMat);
 
         // 设置顶点和索引缓冲
         bgfx::setVertexBuffer(0, m_vbh, 0, m_currentVertex);
@@ -231,10 +253,6 @@ namespace Tina
 
         // 提交绘制命令
         fmt::print("Submitting draw call with program handle: {}\n", m_program.idx);
-        if (!bgfx::isValid(m_program)) {
-            fmt::print("Warning: Invalid shader program!\n");
-            return;
-        }
         bgfx::submit(m_viewId, m_program);
 
         // 重置计数器
@@ -242,12 +260,19 @@ namespace Tina
         m_currentIndex = 0;
     }
 
-    void Renderer2D::drawRect(const Vector2f& position, const Vector2f& size, const Color& color)
+    void Renderer2D::drawRect(const Vector2f& position, const Vector2f& size, const Color& color, float depth)
     {
         if (!m_isDrawing)
         {
             fmt::print("Warning: drawRect() called without begin()\n");
             return;
+        }
+
+        // 如果当前有纹理，需要刷新批次
+        if (bgfx::isValid(m_currentTexture))
+        {
+            flush();
+            m_currentTexture = BGFX_INVALID_HANDLE;
         }
 
         // 检查是否需要刷新批处理
@@ -269,7 +294,7 @@ namespace Tina
         // 左上
         m_vertices[m_currentVertex].m_x = x;
         m_vertices[m_currentVertex].m_y = y;
-        m_vertices[m_currentVertex].m_z = 0.0f;
+        m_vertices[m_currentVertex].m_z = depth;
         m_vertices[m_currentVertex].m_rgba = abgr;
         m_vertices[m_currentVertex].m_u = 0.0f;
         m_vertices[m_currentVertex].m_v = 0.0f;
@@ -278,7 +303,7 @@ namespace Tina
         // 右上
         m_vertices[m_currentVertex].m_x = x + w;
         m_vertices[m_currentVertex].m_y = y;
-        m_vertices[m_currentVertex].m_z = 0.0f;
+        m_vertices[m_currentVertex].m_z = depth;
         m_vertices[m_currentVertex].m_rgba = abgr;
         m_vertices[m_currentVertex].m_u = 1.0f;
         m_vertices[m_currentVertex].m_v = 0.0f;
@@ -287,7 +312,7 @@ namespace Tina
         // 左下
         m_vertices[m_currentVertex].m_x = x;
         m_vertices[m_currentVertex].m_y = y + h;
-        m_vertices[m_currentVertex].m_z = 0.0f;
+        m_vertices[m_currentVertex].m_z = depth;
         m_vertices[m_currentVertex].m_rgba = abgr;
         m_vertices[m_currentVertex].m_u = 0.0f;
         m_vertices[m_currentVertex].m_v = 1.0f;
@@ -296,7 +321,7 @@ namespace Tina
         // 右下
         m_vertices[m_currentVertex].m_x = x + w;
         m_vertices[m_currentVertex].m_y = y + h;
-        m_vertices[m_currentVertex].m_z = 0.0f;
+        m_vertices[m_currentVertex].m_z = depth;
         m_vertices[m_currentVertex].m_rgba = abgr;
         m_vertices[m_currentVertex].m_u = 1.0f;
         m_vertices[m_currentVertex].m_v = 1.0f;
@@ -326,6 +351,91 @@ namespace Tina
             m_currentTexture = texture.getHandle();
         }
         drawRect(position, size, color);
+    }
+
+    void Renderer2D::drawSprite(const Vector2f& position, const Vector2f& size, const Color& color, const Texture& texture, float depth)
+    {
+        if (!m_isDrawing)
+        {
+            fmt::print("Warning: drawSprite() called without begin()\n");
+            return;
+        }
+
+        // 检查纹理是否有效
+        if (!texture.isValid())
+        {
+            fmt::print("Warning: Invalid texture in drawSprite\n");
+            return;
+        }
+
+        // 检查是否需要切换纹理
+        TextureHandle newTexture = texture.getHandle();
+        if (m_currentTexture.idx != newTexture.idx)
+        {
+            fmt::print("Switching texture from {} to {}\n", m_currentTexture.idx, newTexture.idx);
+            flush(); // 在切换纹理前刷新当前批次
+            m_currentTexture = newTexture;
+        }
+
+        // 检查是否需要刷新批处理
+        if (checkFlush(4, 6))
+        {
+            flush();
+        }
+
+        uint32_t abgr = color.toABGR();
+
+        // 计算矩形的四个顶点
+        uint16_t baseVertex = m_currentVertex;
+
+        float x = position.x;
+        float y = position.y;
+        float w = size.x;
+        float h = size.y;
+
+        // 左上
+        m_vertices[m_currentVertex].m_x = x;
+        m_vertices[m_currentVertex].m_y = y;
+        m_vertices[m_currentVertex].m_z = depth;
+        m_vertices[m_currentVertex].m_rgba = abgr;
+        m_vertices[m_currentVertex].m_u = 0.0f;
+        m_vertices[m_currentVertex].m_v = 0.0f;
+        m_currentVertex++;
+
+        // 右上
+        m_vertices[m_currentVertex].m_x = x + w;
+        m_vertices[m_currentVertex].m_y = y;
+        m_vertices[m_currentVertex].m_z = depth;
+        m_vertices[m_currentVertex].m_rgba = abgr;
+        m_vertices[m_currentVertex].m_u = 1.0f;
+        m_vertices[m_currentVertex].m_v = 0.0f;
+        m_currentVertex++;
+
+        // 左下
+        m_vertices[m_currentVertex].m_x = x;
+        m_vertices[m_currentVertex].m_y = y + h;
+        m_vertices[m_currentVertex].m_z = depth;
+        m_vertices[m_currentVertex].m_rgba = abgr;
+        m_vertices[m_currentVertex].m_u = 0.0f;
+        m_vertices[m_currentVertex].m_v = 1.0f;
+        m_currentVertex++;
+
+        // 右下
+        m_vertices[m_currentVertex].m_x = x + w;
+        m_vertices[m_currentVertex].m_y = y + h;
+        m_vertices[m_currentVertex].m_z = depth;
+        m_vertices[m_currentVertex].m_rgba = abgr;
+        m_vertices[m_currentVertex].m_u = 1.0f;
+        m_vertices[m_currentVertex].m_v = 1.0f;
+        m_currentVertex++;
+
+        // 添加索引
+        m_indices[m_currentIndex++] = baseVertex + 0;
+        m_indices[m_currentIndex++] = baseVertex + 1;
+        m_indices[m_currentIndex++] = baseVertex + 2;
+        m_indices[m_currentIndex++] = baseVertex + 1;
+        m_indices[m_currentIndex++] = baseVertex + 3;
+        m_indices[m_currentIndex++] = baseVertex + 2;
     }
 
     void Renderer2D::drawSprite(const Sprite& sprite)
@@ -411,7 +521,7 @@ namespace Tina
         {
             m_vertices[m_currentVertex].m_x = vertices[i].x;
             m_vertices[m_currentVertex].m_y = vertices[i].y;
-            m_vertices[m_currentVertex].m_z = 0.0f;
+            m_vertices[m_currentVertex].m_z = 0.0f;  // 使用默认深度值
             m_vertices[m_currentVertex].m_rgba = abgr;
             
             // 左上角顶点

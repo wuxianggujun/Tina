@@ -68,8 +68,15 @@ void RenderSystem::beginFrame() {
     }
 
     // 设置默认渲染状态
-    uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
-    state |= BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+    uint64_t state = 0
+        | BGFX_STATE_WRITE_RGB
+        | BGFX_STATE_WRITE_A
+        | BGFX_STATE_WRITE_Z
+        | BGFX_STATE_DEPTH_TEST_LESS
+        | BGFX_STATE_CULL_CW
+        | BGFX_STATE_MSAA
+        | BGFX_STATE_BLEND_SRC_ALPHA;
+
     bgfx::setState(state);
 }
 
@@ -106,6 +113,21 @@ void RenderSystem::setViewport(uint16_t x, uint16_t y, uint16_t width, uint16_t 
 
 void RenderSystem::setClearColor(const Color& color) {
     m_clearColor = color;
+}
+
+float RenderSystem::getDepthFromLayer(RenderLayer layer)
+{
+    // 将层级映射到深度值范围 [0.0, 1.0]
+    // Background 最远 (1.0)，UI 最近 (0.0)
+    switch (layer)
+    {
+        case RenderLayer::Background: return 0.99f;  // 接近远平面但不完全是1.0
+        case RenderLayer::EntityLow:  return 0.75f;
+        case RenderLayer::EntityMid:  return 0.5f;
+        case RenderLayer::EntityHigh: return 0.25f;
+        case RenderLayer::UI:         return 0.01f;  // 接近近平面但不完全是0.0
+        default:                      return 0.5f;
+    }
 }
 
 void RenderSystem::renderLayer(entt::registry& registry, RenderLayer layer)
@@ -173,6 +195,9 @@ void RenderSystem::renderLayer(entt::registry& registry, RenderLayer layer)
                 return depthA < depthB;
             });
 
+        // 获取当前层级的基础深度值
+        float baseDepth = getDepthFromLayer(layer);
+
         // 渲染该层级的所有实体
         for (auto entity : entities)
         {
@@ -189,10 +214,14 @@ void RenderSystem::renderLayer(entt::registry& registry, RenderLayer layer)
                     transform.position.x,
                     transform.position.y);
 
+                // 计算最终深度值
+                float finalDepth = baseDepth + quadComp.depth * 0.01f;  // 在层内微调深度
+
                 m_renderer2D->drawRect(
                     transform.position,
                     quadComp.size * transform.scale,
-                    quadComp.color
+                    quadComp.color,
+                    finalDepth
                 );
             }
             // 渲染精灵
@@ -214,7 +243,17 @@ void RenderSystem::renderLayer(entt::registry& registry, RenderLayer layer)
                 sprite.setRotation(transform.rotation);
                 sprite.setScale(transform.scale);
 
-                m_renderer2D->drawSprite(sprite);
+                // 计算最终深度值
+                float finalDepth = baseDepth + spriteComp.depth * 0.01f;  // 在层内微调深度
+
+                // 绘制精灵，使用计算出的深度值
+                m_renderer2D->drawSprite(
+                    sprite.getPosition(),
+                    sprite.getSize(),
+                    sprite.getColor(),
+                    sprite.getTexture(),
+                    finalDepth
+                );
             }
         }
     }
