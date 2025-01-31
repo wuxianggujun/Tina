@@ -35,16 +35,9 @@ namespace Tina {
     protected:
         // 更新视图矩阵
         virtual void updateViewMatrix() {
-            // 在屏幕坐标系中，我们只需要一个简单的平移矩阵
+            // 在2D渲染中，我们只需要一个简单的平移矩阵
             m_viewMatrix = glm::mat4(1.0f);
-            
-            // 设置Z轴方向（正向屏幕外）
-            m_viewMatrix[2][2] = -1.0f;  // 翻转Z轴
-            
-            // 应用相机位置
-            m_viewMatrix[3][0] = -m_position.x;
-            m_viewMatrix[3][1] = -m_position.y;
-            m_viewMatrix[3][2] = -m_position.z;
+            m_viewMatrix = glm::translate(m_viewMatrix, glm::vec3(-m_position.x, -m_position.y, -m_position.z));
         }
 
         // 更新投影矩阵（由派生类实现）
@@ -60,7 +53,7 @@ namespace Tina {
     public:
         OrthographicCamera(float left, float right, float bottom, float top, float near = 0.0f, float far = 100.0f)
             : m_left(left), m_right(right), m_bottom(bottom), m_top(top), m_near(near), m_far(far) {
-            OrthographicCamera::updateProjectionMatrix();
+            updateProjectionMatrix();
         }
 
         void setProjection(float left, float right, float bottom, float top, float near = 0.0f, float far = 100.0f) {
@@ -75,17 +68,17 @@ namespace Tina {
 
     protected:
         void updateProjectionMatrix() override {
-            // 使用屏幕坐标系（左上角为原点）
+            // 创建正交投影矩阵
             m_projectionMatrix = glm::ortho(
-                0.0f,                   // left
+                m_left,                 // left
                 m_right,                // right
                 m_bottom,               // bottom
-                0.0f,                   // top (Y轴向下，顶部为0)
-                0.0f,                   // near
-                100.0f                  // far
+                m_top,                  // top
+                m_near,                 // near
+                m_far                   // far
             );
 
-            // 调整深度范围从[-1,1]到[0,1]
+            // 调整深度范围从[-1,1]到[0,1]（bgfx要求）
             glm::mat4 depthAdjust = glm::mat4(1.0f);
             depthAdjust[2][2] = 0.5f;   // 缩放Z到[0,1]范围
             depthAdjust[3][2] = 0.5f;   // 平移Z到[0,1]范围
@@ -101,7 +94,7 @@ namespace Tina {
     public:
         PerspectiveCamera(float fov, float aspect, float near = 0.1f, float far = 1000.0f)
             : m_fov(fov), m_aspect(aspect), m_near(near), m_far(far) {
-            PerspectiveCamera::updateProjectionMatrix();
+            updateProjectionMatrix();
         }
 
         void setProjection(float fov, float aspect, float near = 0.1f, float far = 1000.0f) {
@@ -115,6 +108,13 @@ namespace Tina {
     protected:
         void updateProjectionMatrix() override {
             m_projectionMatrix = glm::perspective(glm::radians(m_fov), m_aspect, m_near, m_far);
+            
+            // 调整深度范围从[-1,1]到[0,1]（bgfx要求）
+            glm::mat4 depthAdjust = glm::mat4(1.0f);
+            depthAdjust[2][2] = 0.5f;
+            depthAdjust[3][2] = 0.5f;
+            
+            m_projectionMatrix = depthAdjust * m_projectionMatrix;
         }
 
     private:

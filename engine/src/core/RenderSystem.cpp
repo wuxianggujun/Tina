@@ -46,7 +46,7 @@ void RenderSystem::beginFrame() {
     bgfx::setViewClear(0,
         BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
         m_clearColor.toABGR(),
-        1.0f,
+        1.0f,  // 清除深度值为1.0（最远）
         0
     );
 
@@ -72,10 +72,9 @@ void RenderSystem::beginFrame() {
         | BGFX_STATE_WRITE_RGB
         | BGFX_STATE_WRITE_A
         | BGFX_STATE_WRITE_Z
-        | BGFX_STATE_DEPTH_TEST_LESS
-        | BGFX_STATE_CULL_CW
+        | BGFX_STATE_DEPTH_TEST_LESS  // 使用LESS深度测试
         | BGFX_STATE_MSAA
-        | BGFX_STATE_BLEND_SRC_ALPHA;
+        | BGFX_STATE_BLEND_ALPHA;     // 启用alpha混合
 
     bgfx::setState(state);
 }
@@ -121,11 +120,11 @@ float RenderSystem::getDepthFromLayer(RenderLayer layer)
     // Background 最远 (1.0)，UI 最近 (0.0)
     switch (layer)
     {
-        case RenderLayer::Background: return 0.99f;  // 接近远平面但不完全是1.0
+        case RenderLayer::Background: return 0.99f;  // 接近远平面
         case RenderLayer::EntityLow:  return 0.75f;
         case RenderLayer::EntityMid:  return 0.5f;
         case RenderLayer::EntityHigh: return 0.25f;
-        case RenderLayer::UI:         return 0.01f;  // 接近近平面但不完全是0.0
+        case RenderLayer::UI:         return 0.01f;  // 接近近平面
         default:                      return 0.5f;
     }
 }

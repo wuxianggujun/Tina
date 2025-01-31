@@ -139,19 +139,11 @@ namespace Tina
             return;
         }
 
-        // 打印相机信息
-        const auto& viewMatrix = m_camera->getViewMatrix();
-        const auto& projMatrix = m_camera->getProjectionMatrix();
-        fmt::print("Camera View Matrix:\n");
-        for (int i = 0; i < 4; ++i) {
-            fmt::print("[{:.2f}, {:.2f}, {:.2f}, {:.2f}]\n", 
-                viewMatrix[i][0], viewMatrix[i][1], viewMatrix[i][2], viewMatrix[i][3]);
-        }
-        fmt::print("Camera Projection Matrix:\n");
-        for (int i = 0; i < 4; ++i) {
-            fmt::print("[{:.2f}, {:.2f}, {:.2f}, {:.2f}]\n", 
-                projMatrix[i][0], projMatrix[i][1], projMatrix[i][2], projMatrix[i][3]);
-        }
+        // 设置视图矩形
+        uint16_t width = uint16_t(bgfx::getStats()->width);
+        uint16_t height = uint16_t(bgfx::getStats()->height);
+        bgfx::setViewRect(m_viewId, 0, 0, width, height);
+        fmt::print("Setting view rectangle: {}x{}\n", width, height);
 
         // 设置视图清除标志
         bgfx::setViewClear(m_viewId,
@@ -161,22 +153,29 @@ namespace Tina
             0           // 模板清除值
         );
 
-        // 设置视图矩形
-        uint16_t width = uint16_t(bgfx::getStats()->width);
-        uint16_t height = uint16_t(bgfx::getStats()->height);
-        bgfx::setViewRect(m_viewId, 0, 0, width, height);
-        fmt::print("Setting view rectangle: {}x{}\n", width, height);
+        // 设置正交投影矩阵
+        float orthoProj[16];
+        bx::mtxOrtho(
+            orthoProj,
+            0.0f,                               // left
+            static_cast<float>(width),          // right
+            static_cast<float>(height),         // bottom
+            0.0f,                               // top
+            0.0f,                               // near
+            100.0f,                            // far
+            0.0f,                              // offset
+            bgfx::getCaps()->homogeneousDepth  // 使用正确的深度范围
+        );
 
-        // 设置视图变换
-        float viewMat[16];
-        float projMat[16];
-        
-        // 复制view matrix数据
-        memcpy(viewMat, &viewMatrix[0][0], sizeof(float) * 16);
-        memcpy(projMat, &projMatrix[0][0], sizeof(float) * 16);
+        // 设置视图矩阵（使用单位矩阵，因为是2D渲染）
+        float view[16];
+        bx::mtxIdentity(view);
 
         // 设置视图和投影矩阵
-        bgfx::setViewTransform(m_viewId, viewMat, projMat);
+        bgfx::setViewTransform(m_viewId, view, orthoProj);
+
+        // 确保视图被处理
+        bgfx::touch(m_viewId);
 
         m_isDrawing = true;
         m_currentVertex = 0;
@@ -191,6 +190,8 @@ namespace Tina
             fmt::print("Warning: end() called while not drawing\n");
             return;
         }
+        
+        // 确保刷新最后的批次
         flush();
         m_isDrawing = false;
     }
@@ -211,38 +212,30 @@ namespace Tina
         fmt::print("Flushing {} vertices and {} indices\n", m_currentVertex, m_currentIndex);
 
         // 更新顶点缓冲区
-        bgfx::update(m_vbh,
-            0,
-            bgfx::copy(m_vertices, m_currentVertex * sizeof(PosColorTexCoordVertex))
-        );
+        const bgfx::Memory* vbMem = bgfx::copy(m_vertices, m_currentVertex * sizeof(PosColorTexCoordVertex));
+        bgfx::update(m_vbh, 0, vbMem);
 
         // 更新索引缓冲区
-        bgfx::update(m_ibh,
-            0,
-            bgfx::copy(m_indices, m_currentIndex * sizeof(uint16_t))
-        );
+        const bgfx::Memory* ibMem = bgfx::copy(m_indices, m_currentIndex * sizeof(uint16_t));
+        bgfx::update(m_ibh, 0, ibMem);
 
         // 设置渲染状态
-        uint64_t state = BGFX_STATE_WRITE_RGB
+        uint64_t state = 0
+            | BGFX_STATE_WRITE_RGB
             | BGFX_STATE_WRITE_A
             | BGFX_STATE_WRITE_Z
-            | BGFX_STATE_DEPTH_TEST_LEQUAL
+            | BGFX_STATE_DEPTH_TEST_LEQUAL  // 使用LEQUAL而不是LESS
+            | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA)
             | BGFX_STATE_MSAA;
 
-        // 如果有纹理，添加混合模式
+        bgfx::setState(state);
+
+        // 如果有纹理，设置纹理
         if (bgfx::isValid(m_currentTexture))
         {
-            state |= BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
             fmt::print("Setting texture with handle: {} for drawing\n", m_currentTexture.idx);
             bgfx::setTexture(0, m_s_texColor, m_currentTexture);
-            state |= BGFX_STATE_BLEND_ALPHA;  // 添加基本alpha混合
         }
-        else
-        {
-            state |= BGFX_STATE_BLEND_ALPHA;
-        }
-
-        bgfx::setState(state);
 
         // 设置变换矩阵 - 使用单位矩阵作为模型矩阵
         float modelMat[16];
@@ -272,9 +265,10 @@ namespace Tina
             return;
         }
 
-        // 如果当前有纹理，需要刷新批次
+        // 只有当当前批次使用了不同的纹理时才需要刷新
         if (bgfx::isValid(m_currentTexture))
         {
+            // 如果当前批次使用了纹理，而这次要绘制无纹理矩形
             flush();
             m_currentTexture = BGFX_INVALID_HANDLE;
         }
@@ -372,12 +366,14 @@ namespace Tina
             return;
         }
 
-        // 检查是否需要切换纹理
+        // 如果纹理发生变化，需要刷新批次
         TextureHandle newTexture = texture.getHandle();
         if (m_currentTexture.idx != newTexture.idx)
         {
-            fmt::print("Switching texture from {} to {}\n", m_currentTexture.idx, newTexture.idx);
-            flush(); // 在切换纹理前刷新当前批次
+            if (m_currentVertex > 0)
+            {
+                flush();
+            }
             m_currentTexture = newTexture;
         }
 
