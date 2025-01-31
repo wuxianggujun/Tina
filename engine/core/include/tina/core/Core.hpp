@@ -15,20 +15,3 @@
     #define TINA_CORE_API
 #endif
 
-namespace Tina {
-namespace Core {
-
-class TINA_CORE_API Engine {
-public:
-    Engine();
-    ~Engine();
-
-    bool initialize();
-    void shutdown();
-
-    // Get engine version
-    const char* getVersion() const;
-};
-
-} // namespace Core
-} // namespace Tina 
