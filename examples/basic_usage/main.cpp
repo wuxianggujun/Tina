@@ -1,12 +1,15 @@
 #include <iostream>
 #include "tina/core/Core.hpp"
+#include "tina/core/Engine.hpp"
 
-int main() {
+int main()
+{
     // Create engine instance
     Tina::Core::Engine engine;
 
     // Initialize engine
-    if (!engine.initialize()) {
+    if (!engine.initialize())
+    {
         std::cerr << "Failed to initialize Tina engine!" << std::endl;
         return -1;
     }
@@ -22,4 +25,4 @@ int main() {
     std::cout << "Engine shutdown complete." << std::endl;
 
     return 0;
-} 
+}

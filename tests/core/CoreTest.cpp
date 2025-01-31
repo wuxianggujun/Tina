@@ -1,5 +1,9 @@
 #include <gtest/gtest.h>
 #include "tina/core/Core.hpp"
+#include <EASTL/vector.h>
+#include <EASTL/string.h>
+
+#include "tina/core/Engine.hpp"
 
 class EngineTest : public ::testing::Test {
 protected:
@@ -32,6 +36,35 @@ TEST_F(EngineTest, Lifecycle) {
     engine.shutdown();
     // 如果shutdown没有崩溃，我们认为测试通过
     SUCCEED() << "Engine shutdown completed successfully";
+}
+
+// EASTL需要实现这个分配器回调
+void* operator new[](size_t size, const char* pName, int flags, unsigned debugFlags, const char* file, int line)
+{
+    return new uint8_t[size];
+}
+
+void* operator new[](size_t size, size_t alignment, size_t alignmentOffset, const char* pName, int flags, unsigned debugFlags, const char* file, int line)
+{
+    return new uint8_t[size];
+}
+
+TEST(EASTLTest, VectorTest) {
+    eastl::vector<int> vec;
+    vec.push_back(1);
+    vec.push_back(2);
+    vec.push_back(3);
+
+    EXPECT_EQ(vec.size(), 3);
+    EXPECT_EQ(vec[0], 1);
+    EXPECT_EQ(vec[1], 2);
+    EXPECT_EQ(vec[2], 3);
+}
+
+TEST(EASTLTest, StringTest) {
+    eastl::string str = "Hello EASTL";
+    EXPECT_EQ(str.length(), 11);
+    EXPECT_TRUE(str == "Hello EASTL");
 }
 
 int main(int argc, char **argv) {
