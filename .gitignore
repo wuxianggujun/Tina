@@ -1,3 +1,39 @@
+# Build directories
 /build/
 /cmake-build-debug/
+out/
+
+# IDE files
+.vs/
 .idea/
+*.user
+*.suo
+*.sln.docstates
+
+# Compiled files
+*.obj
+*.dll
+*.exe
+*.pdb
+*.lib
+*.a
+*.so
+*.dylib
+
+# Third-party specific
+third_party/bgfx.cmake/.github/
+third_party/*/.github/
+third_party/*/docs/
+third_party/*/.git/
+third_party/*/examples/
+third_party/*/tests/
+third_party/*/samples/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

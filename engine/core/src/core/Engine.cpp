@@ -4,33 +4,32 @@
 
 #include "tina/core/Engine.hpp"
 
-namespace Tina {
-    namespace Core {
+namespace Tina::Core
+{
 
-        Engine::Engine()
-        {
-        }
+    Engine::Engine()
+    {
+    }
 
-        Engine::~Engine()
-        {
-            shutdown();
-        }
+    Engine::~Engine()
+    {
+        shutdown();
+    }
 
-        bool Engine::initialize()
-        {
-            // Add initialization code here
-            return true;
-        }
+    bool Engine::initialize()
+    {
+        // Add initialization code here
+        return true;
+    }
 
-        void Engine::shutdown()
-        {
-            // Add cleanup code here
-        }
+    void Engine::shutdown()
+    {
+        // Add cleanup code here
+    }
 
-        const char* Engine::getVersion() const
-        {
-            return TINA_VERSION;
-        }
+    const char* Engine::getVersion() const
+    {
+        return TINA_VERSION;
+    }
 
-    } // namespace Core
-} // namespace Tina
+}
