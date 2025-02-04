@@ -1,6 +1,7 @@
 #include "tina/log/Logger.hpp"
 #include <fmt/color.h>
-#include <filesystem>
+#include "tina/container/String.hpp"
+#include "tina/core/filesystem.hpp"
 
 namespace Tina {
 
@@ -38,22 +39,22 @@ Logger::~Logger() {
     }
 }
 
-void Logger::setOutputFile(const std::string& filename) {
+void Logger::setOutputFile(const String& filename) {
     stop();  // 确保之前的文件被关闭
     
     try {
-        auto path = std::filesystem::path(filename);
-        std::filesystem::create_directories(path.parent_path());
+        logPath_ = ghc::filesystem::path(filename.c_str());
+        ghc::filesystem::create_directories(logPath_.parent_path());
         
 #ifdef _WIN32
         if (fopen_s(&logFile_, filename.c_str(), "a") != 0) {
             logFile_ = nullptr;
-            fmt::print(stderr, "Failed to open log file: {}\n", filename);
+            fmt::print(stderr, "Failed to open log file: {}\n", filename.c_str());
         }
 #else
         logFile_ = fopen(filename.c_str(), "a");
         if (!logFile_) {
-            fmt::print(stderr, "Failed to open log file: {}\n", filename);
+            fmt::print(stderr, "Failed to open log file: {}\n", filename.c_str());
         }
 #endif
     } catch (const std::exception& e) {
@@ -143,8 +144,8 @@ void Logger::flush() {
                       "[{}] [{}] [{}] {}\n",
                       timeStr,
                       levelToString(msg.level),
-                      msg.module,
-                      msg.message);
+                      msg.module.c_str(),
+                      msg.message.c_str());
 
             // 文件输出
             if (logFile_) {
@@ -152,8 +153,8 @@ void Logger::flush() {
                           "[{}] [{}] [{}] {}\n",
                           timeStr,
                           levelToString(msg.level),
-                          msg.module,
-                          msg.message);
+                          msg.module.c_str(),
+                          msg.message.c_str());
                 fflush(logFile_);
             }
         }

@@ -10,6 +10,8 @@
 #include <vector>
 #include <memory>
 #include <cstdio>
+#include "tina/container/String.hpp"
+#include "tina/core/filesystem.hpp"
 
 namespace Tina {
 
@@ -26,8 +28,8 @@ enum class LogLevel : uint8_t {
 struct LogMessage {
     std::chrono::system_clock::time_point timestamp;
     LogLevel level;
-    std::string_view module;
-    std::string message;
+    String module;
+    String message;
 };
 
 class RingBuffer {
@@ -75,8 +77,8 @@ public:
             LogMessage msg{
                 std::chrono::system_clock::now(),
                 level,
-                module,
-                fmt::format(fmt, std::forward<Args>(args)...)
+                String(module),
+                String(fmt::format(fmt, std::forward<Args>(args)...))
             };
 
             if (!messageBuffer_.push(std::move(msg))) {
@@ -86,13 +88,12 @@ public:
             }
             flushCV_.notify_one();
         } catch (const std::exception& e) {
-            // 确保日志失败不会影响程序运行
             fmt::print(stderr, "Logging failed: {}\n", e.what());
         }
     }
 
     void setMinLevel(LogLevel level) { minLevel_ = level; }
-    void setOutputFile(const std::string& filename);
+    void setOutputFile(const String& filename);
     void start();
     void stop();
     bool isRunning() const { return running_; }
@@ -119,6 +120,7 @@ private:
     std::mutex mutex_;
     std::condition_variable flushCV_;
     std::atomic<bool> running_{false};
+    ghc::filesystem::path logPath_;
 };
 
 #define TINA_LOG_TRACE(module, ...) \
