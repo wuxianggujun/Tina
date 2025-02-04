@@ -1,7 +1,5 @@
 #include "tina/log/Logger.hpp"
 #include <fmt/color.h>
-#include "tina/container/String.hpp"
-#include "tina/core/filesystem.hpp"
 
 namespace Tina {
 
@@ -30,8 +28,6 @@ namespace {
         }
     }
 }
-
-Logger::Logger() = default;
 
 Logger::~Logger() {
     if (running_) {
@@ -64,13 +60,21 @@ void Logger::setOutputFile(const String& filename) {
 
 void Logger::start() {
     if (running_) return;
-    
+
+    // 检查系统资源
+    if (!logFile_) {
+        fmt::print(stderr, "Cannot start logger: No output file set\n");
+        return;
+    }
+
     running_ = true;
-    try {
-        workerThread_ = std::thread(&Logger::processLogs, this);
-    } catch (const std::exception& e) {
+    workerThread_ = std::thread(&Logger::processLogs, this);
+
+    // 验证线程是否成功启动
+    if (!workerThread_.joinable()) {
         running_ = false;
-        fmt::print(stderr, "Failed to start logger thread: {}\n", e.what());
+        fmt::print(stderr, "Failed to start logger thread: Thread not joinable\n");
+        return;
     }
 }
 
@@ -120,8 +124,8 @@ void Logger::processLogs() {
         {
             std::lock_guard<std::mutex> lock(overflowMutex_);
             if (!overflowMessages_.empty()) {
-                for (auto& msg : overflowMessages_) {
-                    batchMessages.push_back(std::move(msg));
+                for (auto& log_message : overflowMessages_) {
+                    batchMessages.push_back(std::move(log_message));
                 }
                 overflowMessages_.clear();
                 if (!batchMessages.empty()) {

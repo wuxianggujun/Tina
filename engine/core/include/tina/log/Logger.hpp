@@ -1,5 +1,4 @@
 #pragma once
-#include <string_view>
 #include <fmt/format.h>
 #include <fmt/chrono.h>
 #include <array>
@@ -26,6 +25,14 @@ enum class LogLevel : uint8_t {
 };
 
 struct LogMessage {
+    LogMessage() : timestamp(std::chrono::system_clock::now()), level(LogLevel::Info) {}
+    
+    LogMessage(std::chrono::system_clock::time_point ts, LogLevel lvl, String mod, String msg)
+        : timestamp(ts)
+        , level(lvl)
+        , module(std::move(mod))
+        , message(std::move(msg)) {}
+        
     std::chrono::system_clock::time_point timestamp;
     LogLevel level;
     String module;
@@ -64,10 +71,17 @@ private:
 
 class Logger {
 public:
+    // 单例访问
     static Logger& instance() {
         static Logger instance;
         return instance;
     }
+
+    // 删除的函数放在public部分
+    Logger(const Logger&) = delete;
+    Logger& operator=(const Logger&) = delete;
+    Logger(Logger&&) = delete;
+    Logger& operator=(Logger&&) = delete;
 
     template<typename... Args>
     void log(LogLevel level, std::string_view module, fmt::format_string<Args...> fmt, Args&&... args) {
@@ -99,27 +113,23 @@ public:
     bool isRunning() const { return running_; }
 
 private:
-    Logger();
+    // 构造函数和析构函数
+    Logger() : minLevel_(LogLevel::Info), logFile_(nullptr), running_(false) {}
     ~Logger();
-
-    Logger(const Logger&) = delete;
-    Logger& operator=(const Logger&) = delete;
-    Logger(Logger&&) = delete;
-    Logger& operator=(Logger&&) = delete;
 
     void processLogs();
     void flush();
 
-    std::atomic<LogLevel> minLevel_{LogLevel::Info};
+    std::atomic<LogLevel> minLevel_;
     RingBuffer messageBuffer_;
     std::vector<LogMessage> overflowMessages_;
     std::mutex overflowMutex_;
     
-    FILE* logFile_{nullptr};
+    FILE* logFile_;
     std::thread workerThread_;
     std::mutex mutex_;
     std::condition_variable flushCV_;
-    std::atomic<bool> running_{false};
+    std::atomic<bool> running_;
     ghc::filesystem::path logPath_;
 };
 
