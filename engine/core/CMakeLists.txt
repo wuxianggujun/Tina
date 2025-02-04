@@ -13,8 +13,8 @@ file(GLOB_RECURSE CORE_HEADERS
 add_library(TinaCore ${TINA_LIB_TYPE}
         ${CORE_SOURCES}
         ${CORE_HEADERS}
-        src/log/Logger.cpp
 )
+
 add_library(Tina::Core ALIAS TinaCore)
 
 # 设置包含目录
@@ -33,6 +33,8 @@ target_link_libraries(TinaCore
         bx
         bimg
         fmt::fmt
+        glfw
+        entt
 )
 
 # 设置编译选项

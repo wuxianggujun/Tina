@@ -6,11 +6,28 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 
 # 包含资源复制模块和EASTL设置
 include(CopyResources)
-
+include(ThirdParty)
 
 # 添加第三方库
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/bgfx.cmake bgfx_build)
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/fmt fmt_build)
+# 添加第三方库（带配置选项）
+tina_add_third_party(NAME bgfx
+        PATH ${CMAKE_SOURCE_DIR}/third_party/bgfx.cmake)
+
+tina_add_third_party(NAME fmt
+        PATH ${CMAKE_SOURCE_DIR}/third_party/fmt)
+
+tina_add_third_party(NAME glfw
+        PATH ${CMAKE_SOURCE_DIR}/third_party/glfw
+        OPTIONS
+        GLFW_BUILD_TESTS=OFF
+        GLFW_BUILD_DOCS=OFF
+        GLFW_INSTALL=ON)
+
+tina_add_third_party(NAME entt
+        PATH ${CMAKE_SOURCE_DIR}/third_party/entt
+        OPTIONS
+        ENTT_BUILD_TESTING=OFF
+        ENTT_BUILD_DOCS=OFF)
 
 # 首先添加Core模块，因为其他模块可能依赖它
 add_subdirectory(core)    # 基础功能模块
