@@ -2,9 +2,6 @@
 # 添加本地的Google Test
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/googletest googletest_build)
 
-# 添加本地的Google Benchmark
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/benchmark benchmark_build)
-
 # 启用测试
 enable_testing()
 
@@ -42,14 +39,12 @@ target_link_libraries(StringTest
         Tina::Core
         GTest::gtest
         GTest::gtest_main
-        benchmark
-        benchmark_main
 )
 
 # 添加包含目录
 target_include_directories(StringTest
     PRIVATE
-        ${CMAKE_SOURCE_DIR}/engine
+        ${CMAKE_SOURCE_DIR}/engine/core/include
 )
 
 # 添加测试

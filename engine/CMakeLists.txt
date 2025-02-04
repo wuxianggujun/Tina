@@ -6,13 +6,11 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 
 # 包含资源复制模块和EASTL设置
 include(CopyResources)
-include(SetupEASTL)
 
-# 设置EASTL
-setup_eastl()
 
 # 添加第三方库
 add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/bgfx.cmake bgfx_build)
+add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/fmt fmt_build)
 
 # 首先添加Core模块，因为其他模块可能依赖它
 add_subdirectory(core)    # 基础功能模块

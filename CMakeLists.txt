@@ -1,3 +1,7 @@
+# 禁用vcpkg集成
+set(CMAKE_TOOLCHAIN_FILE "" CACHE FILEPATH "" FORCE)
+set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "" CACHE FILEPATH "" FORCE)
+
 cmake_minimum_required(VERSION 3.15)
 
 # 项目名称和版本
@@ -12,9 +16,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# 设置MSVC的UTF-8编码支持
+# 设置MSVC的编译选项
 if(MSVC)
     add_compile_options(/utf-8)
+    add_compile_options(/Zc:__cplusplus)
     # 为GTest设置正确的运行时库
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 endif()

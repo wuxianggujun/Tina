@@ -31,7 +31,7 @@ target_link_libraries(TinaCore
         bgfx
         bx
         bimg
-        EASTL
+        fmt::fmt
 )
 
 # 设置编译选项

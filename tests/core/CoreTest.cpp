@@ -1,8 +1,5 @@
 #include <gtest/gtest.h>
 #include "tina/core/Core.hpp"
-#include <EASTL/vector.h>
-#include <EASTL/string.h>
-
 #include "tina/core/Engine.hpp"
 
 class EngineTest : public ::testing::Test {
