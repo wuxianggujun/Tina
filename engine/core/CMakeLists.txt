@@ -34,7 +34,7 @@ target_link_libraries(TinaCore
         bimg
         fmt::fmt
         glfw
-        entt
+        EnTT::EnTT
 )
 
 # 设置编译选项
@@ -56,16 +56,3 @@ set_target_properties(TinaCore PROPERTIES
         EXPORT_NAME "Core"
         OUTPUT_NAME "tina-core"
 )
-# # 安装配置, 只需要安装库文件和头文件即可，导出已经在 engine/CMakeLists.txt 中处理
-# install(TARGETS TinaCore
-#         LIBRARY DESTINATION lib
-#         ARCHIVE DESTINATION lib
-#         RUNTIME DESTINATION bin
-#         INCLUDES DESTINATION include
-# )
-
-# # 安装头文件
-# install(DIRECTORY include/
-#         DESTINATION include
-#         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
-# )

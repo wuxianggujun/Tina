@@ -1,0 +1,21 @@
+function(tina_add_module)
+    set(options REQUIRED)
+    set(oneValueArgs NAME)
+    cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "" ${ARGN})
+
+    # 将 ARG_NAME 的首字母转换为大写
+    string(SUBSTRING ${ARG_NAME} 0 1 first_char)
+    string(TOUPPER ${first_char} first_char_upper)
+    string(SUBSTRING ${ARG_NAME} 1 -1 rest_of_string)
+    string(APPEND arg_name_capitalized ${first_char_upper} ${rest_of_string})
+
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${ARG_NAME}/CMakeLists.txt")
+        add_subdirectory(${ARG_NAME})
+        target_link_libraries(TinaEngine INTERFACE Tina::${arg_name_capitalized})
+        message(STATUS "Added module: ${arg_name_capitalized}")
+    elseif(ARG_REQUIRED)
+        message(FATAL_ERROR "Required module ${ARG_NAME} not found! Capitalized name: ${arg_name_capitalized}")
+    else()
+        message(STATUS "Skipping optional module: ${ARG_NAME}")
+    endif()
+endfunction()
