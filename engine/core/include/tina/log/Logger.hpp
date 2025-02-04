@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <vector>
 #include <memory>
+#include <cstdio>
 
 namespace Tina {
 
@@ -70,31 +71,40 @@ public:
     void log(LogLevel level, std::string_view module, fmt::format_string<Args...> fmt, Args&&... args) {
         if (level < minLevel_) return;
 
-        LogMessage msg{
-            std::chrono::system_clock::now(),
-            level,
-            module,
-            fmt::format(fmt, std::forward<Args>(args)...)
-        };
+        try {
+            LogMessage msg{
+                std::chrono::system_clock::now(),
+                level,
+                module,
+                fmt::format(fmt, std::forward<Args>(args)...)
+            };
 
-        if (!messageBuffer_.push(std::move(msg))) {
-            // Buffer full, handle overflow
-            std::lock_guard<std::mutex> lock(overflowMutex_);
-            overflowMessages_.push_back(std::move(msg));
+            if (!messageBuffer_.push(std::move(msg))) {
+                // Buffer full, handle overflow
+                std::lock_guard<std::mutex> lock(overflowMutex_);
+                overflowMessages_.push_back(std::move(msg));
+            }
+            flushCV_.notify_one();
+        } catch (const std::exception& e) {
+            // 确保日志失败不会影响程序运行
+            fmt::print(stderr, "Logging failed: {}\n", e.what());
         }
-        flushCV_.notify_one();
     }
 
     void setMinLevel(LogLevel level) { minLevel_ = level; }
     void setOutputFile(const std::string& filename);
     void start();
     void stop();
+    bool isRunning() const { return running_; }
 
 private:
     Logger();
     ~Logger();
+
     Logger(const Logger&) = delete;
     Logger& operator=(const Logger&) = delete;
+    Logger(Logger&&) = delete;
+    Logger& operator=(Logger&&) = delete;
 
     void processLogs();
     void flush();
@@ -104,7 +114,7 @@ private:
     std::vector<LogMessage> overflowMessages_;
     std::mutex overflowMutex_;
     
-    std::unique_ptr<FILE, decltype(&fclose)> file_;
+    FILE* logFile_{nullptr};
     std::thread workerThread_;
     std::mutex mutex_;
     std::condition_variable flushCV_;
@@ -112,16 +122,16 @@ private:
 };
 
 #define TINA_LOG_TRACE(module, ...) \
-    Tina::Logger::instance().log(Tina::LogLevel::Trace, module, __VA_ARGS__)
+    ::Tina::Logger::instance().log(::Tina::LogLevel::Trace, module, __VA_ARGS__)
 #define TINA_LOG_DEBUG(module, ...) \
-    Tina::Logger::instance().log(Tina::LogLevel::Debug, module, __VA_ARGS__)
+    ::Tina::Logger::instance().log(::Tina::LogLevel::Debug, module, __VA_ARGS__)
 #define TINA_LOG_INFO(module, ...) \
-    Tina::Logger::instance().log(Tina::LogLevel::Info, module, __VA_ARGS__)
+    ::Tina::Logger::instance().log(::Tina::LogLevel::Info, module, __VA_ARGS__)
 #define TINA_LOG_WARN(module, ...) \
-    Tina::Logger::instance().log(Tina::LogLevel::Warn, module, __VA_ARGS__)
+    ::Tina::Logger::instance().log(::Tina::LogLevel::Warn, module, __VA_ARGS__)
 #define TINA_LOG_ERROR(module, ...) \
-    Tina::Logger::instance().log(Tina::LogLevel::Error, module, __VA_ARGS__)
+    ::Tina::Logger::instance().log(::Tina::LogLevel::Error, module, __VA_ARGS__)
 #define TINA_LOG_FATAL(module, ...) \
-    Tina::Logger::instance().log(Tina::LogLevel::Fatal, module, __VA_ARGS__)
+    ::Tina::Logger::instance().log(::Tina::LogLevel::Fatal, module, __VA_ARGS__)
 
 } // namespace Tina

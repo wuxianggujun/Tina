@@ -30,7 +30,7 @@ namespace {
     }
 }
 
-Logger::Logger() : file_(nullptr, fclose) {}
+Logger::Logger() = default;
 
 Logger::~Logger() {
     if (running_) {
@@ -45,17 +45,19 @@ void Logger::setOutputFile(const std::string& filename) {
         auto path = std::filesystem::path(filename);
         std::filesystem::create_directories(path.parent_path());
         
-        FILE* fp = nullptr;
 #ifdef _WIN32
-        fopen_s(&fp, filename.c_str(), "a");
-#else
-        fp = fopen(filename.c_str(), "a");
-#endif
-        if (fp) {
-            file_.reset(fp);
+        if (fopen_s(&logFile_, filename.c_str(), "a") != 0) {
+            logFile_ = nullptr;
+            fmt::print(stderr, "Failed to open log file: {}\n", filename);
         }
+#else
+        logFile_ = fopen(filename.c_str(), "a");
+        if (!logFile_) {
+            fmt::print(stderr, "Failed to open log file: {}\n", filename);
+        }
+#endif
     } catch (const std::exception& e) {
-        fmt::print(stderr, "Failed to open log file: {}\n", e.what());
+        fmt::print(stderr, "Failed to create log directory: {}\n", e.what());
     }
 }
 
@@ -82,7 +84,10 @@ void Logger::stop() {
     }
     
     flush();
-    file_.reset();  // 确保文件被关闭
+    if (logFile_) {
+        fclose(logFile_);
+        logFile_ = nullptr;
+    }
 }
 
 void Logger::processLogs() {
@@ -128,8 +133,6 @@ void Logger::processLogs() {
 }
 
 void Logger::flush() {
-    if (!file_) return;  // 如果文件未打开，直接返回
-
     try {
         LogMessage msg;
         while (messageBuffer_.pop(msg)) {
@@ -144,18 +147,15 @@ void Logger::flush() {
                       msg.message);
 
             // 文件输出
-            if (file_) {
-                fmt::print(file_.get(),
+            if (logFile_) {
+                fmt::print(logFile_,
                           "[{}] [{}] [{}] {}\n",
                           timeStr,
                           levelToString(msg.level),
                           msg.module,
                           msg.message);
+                fflush(logFile_);
             }
-        }
-
-        if (file_) {
-            fflush(file_.get());
         }
     } catch (const std::exception& e) {
         fmt::print(stderr, "Error during log flush: {}\n", e.what());

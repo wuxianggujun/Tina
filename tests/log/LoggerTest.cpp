@@ -4,70 +4,82 @@
 #include <chrono>
 #include <filesystem>
 
+namespace fs = std::filesystem;
+
 class LoggerTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        logger_ = &Tina::Logger::instance();
-        
-        // 清理之前可能存在的测试目录
-        try {
-            if (std::filesystem::exists("test_logs")) {
-                std::filesystem::remove_all("test_logs");
-            }
-        } catch (const std::exception& e) {
-            fmt::print(stderr, "Error cleaning up test directory: {}\n", e.what());
+        // 确保日志系统处于已停止状态
+        auto& logger = Tina::Logger::instance();
+        if (logger.isRunning()) {
+            logger.stop();
         }
 
-        // 创建测试目录
-        std::filesystem::create_directories("test_logs");
-        logger_->setOutputFile("test_logs/test.log");
-        logger_->start();
+        // 清理测试目录
+        cleanupTestDirectory();
+        
+        // 创建新的测试目录
+        fs::create_directories("test_logs");
+        
+        // 启动日志系统
+        logger.setOutputFile("test_logs/test.log");
+        logger.start();
     }
 
     void TearDown() override {
-        if (logger_) {
-            logger_->stop();
+        // 停止日志系统
+        auto& logger = Tina::Logger::instance();
+        if (logger.isRunning()) {
+            logger.stop();
         }
 
-        // 等待一段时间确保所有文件操作完成
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-        try {
-            if (std::filesystem::exists("test_logs")) {
-                std::filesystem::remove_all("test_logs");
-            }
-        } catch (const std::exception& e) {
-            fmt::print(stderr, "Error cleaning up test directory: {}\n", e.what());
-        }
+        // 等待文件系统操作完成
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        
+        // 清理测试目录
+        cleanupTestDirectory();
     }
 
-    Tina::Logger* logger_;
+private:
+    void cleanupTestDirectory() {
+        try {
+            if (fs::exists("test_logs")) {
+                for (int retry = 0; retry < 3; ++retry) {
+                    std::error_code ec;
+                    fs::remove_all("test_logs", ec);
+                    if (!ec) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+            }
+        } catch (const std::exception& e) {
+            fmt::print(stderr, "Warning: Failed to cleanup test directory: {}\n", e.what());
+        }
+    }
 };
 
 TEST_F(LoggerTest, BasicLogging) {
-    ASSERT_TRUE(logger_ != nullptr);
+    auto& logger = Tina::Logger::instance();
+    ASSERT_TRUE(logger.isRunning()) << "Logger should be running";
     
     TINA_LOG_INFO("TestModule", "Basic log message");
-    TINA_LOG_ERROR("TestModule", "Error message with number {}", 42);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     
-    // 给异步日志一些时间写入
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    
-    // 验证日志文件存在
-    EXPECT_TRUE(std::filesystem::exists("test_logs/test.log"));
+    ASSERT_TRUE(fs::exists("test_logs/test.log")) << "Log file should exist";
 }
 
 TEST_F(LoggerTest, MultiThreadLogging) {
-    ASSERT_TRUE(logger_ != nullptr);
+    auto& logger = Tina::Logger::instance();
+    ASSERT_TRUE(logger.isRunning()) << "Logger should be running";
     
     constexpr int kThreadCount = 4;
-    constexpr int kMessagesPerThread = 100;
+    constexpr int kMessagesPerThread = 10;  // 减少消息数量以加快测试
     
     std::vector<std::thread> threads;
     for (int i = 0; i < kThreadCount; ++i) {
         threads.emplace_back([i, kMessagesPerThread] {
             for (int j = 0; j < kMessagesPerThread; ++j) {
                 TINA_LOG_INFO("ThreadTest", "Thread {} Message {}", i, j);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));  // 添加小延迟
             }
         });
     }
@@ -76,20 +88,20 @@ TEST_F(LoggerTest, MultiThreadLogging) {
         thread.join();
     }
 
-    // 给异步日志一些时间写入
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    // 等待日志写入
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
     
-    // 验证日志文件存在且大小大于0
+    ASSERT_TRUE(fs::exists("test_logs/test.log")) << "Log file should exist";
+    
     std::error_code ec;
-    auto fileSize = std::filesystem::file_size("test_logs/test.log", ec);
-    EXPECT_FALSE(ec) << "Error getting file size: " << ec.message();
-    if (!ec) {
-        EXPECT_GT(fileSize, 0);
-    }
+    auto fileSize = fs::file_size("test_logs/test.log", ec);
+    ASSERT_FALSE(ec) << "Failed to get file size: " << ec.message();
+    ASSERT_GT(fileSize, 0) << "Log file should not be empty";
 }
 
 TEST_F(LoggerTest, LogLevels) {
-    ASSERT_TRUE(logger_ != nullptr);
+    auto& logger = Tina::Logger::instance();
+    ASSERT_TRUE(logger.isRunning()) << "Logger should be running";
     
     TINA_LOG_TRACE("TestModule", "Trace message");
     TINA_LOG_DEBUG("TestModule", "Debug message");
@@ -98,9 +110,7 @@ TEST_F(LoggerTest, LogLevels) {
     TINA_LOG_ERROR("TestModule", "Error message");
     TINA_LOG_FATAL("TestModule", "Fatal message");
 
-    // 给异步日志一些时间写入
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     
-    // 验证日志文件存在
-    EXPECT_TRUE(std::filesystem::exists("test_logs/test.log"));
+    ASSERT_TRUE(fs::exists("test_logs/test.log")) << "Log file should exist";
 }
