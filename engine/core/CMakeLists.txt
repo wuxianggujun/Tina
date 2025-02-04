@@ -13,6 +13,7 @@ file(GLOB_RECURSE CORE_HEADERS
 add_library(TinaCore ${TINA_LIB_TYPE}
         ${CORE_SOURCES}
         ${CORE_HEADERS}
+        src/log/Logger.cpp
 )
 add_library(Tina::Core ALIAS TinaCore)
 

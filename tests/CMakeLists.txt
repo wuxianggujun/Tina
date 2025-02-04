@@ -29,12 +29,12 @@ include(GoogleTest)
 gtest_discover_tests(CoreTest)
 
 # 添加String测试可执行文件
-add_executable(StringTest
-    container/StringTest.cpp
+add_executable(LoggerTest
+    log/LoggerTest.cpp
 )
 
 # 链接必要的库
-target_link_libraries(StringTest
+target_link_libraries(LoggerTest
     PRIVATE
         Tina::Core
         GTest::gtest
@@ -42,10 +42,10 @@ target_link_libraries(StringTest
 )
 
 # 添加包含目录
-target_include_directories(StringTest
+target_include_directories(LoggerTest
     PRIVATE
         ${CMAKE_SOURCE_DIR}/engine/core/include
 )
 
 # 添加测试
-add_test(NAME StringTest COMMAND StringTest) 
+gtest_discover_tests(LoggerTest)
