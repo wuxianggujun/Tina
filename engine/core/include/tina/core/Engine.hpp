@@ -4,6 +4,7 @@
 #pragma once
 
 #include "tina/core/Core.hpp"
+#include "tina/core/Context.hpp"
 
 namespace Tina::Core
 {
@@ -16,8 +17,13 @@ namespace Tina::Core
         bool initialize();
         void shutdown();
 
+        bool run();
+
         // Get engine version
         const char* getVersion() const;
+
+    private:
+        Context m_context;
     };
 
 }
