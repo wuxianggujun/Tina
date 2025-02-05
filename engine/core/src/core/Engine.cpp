@@ -9,7 +9,6 @@
 
 namespace Tina::Core
 {
-
     Engine::Engine()
     {
         TINA_LOG_INFO("Engine", "Engine created.");
@@ -72,7 +71,10 @@ namespace Tina::Core
 
     bool Engine::run()
     {
-        bool running  = true;
+        // 设置初始背景色
+        const uint32_t clearColor = 0x443355FF;
+
+        bool running = true;
         while (running)
         {
             m_context.processEvents();
@@ -82,32 +84,39 @@ namespace Tina::Core
             {
                 switch (event.type)
                 {
-                    case Event::WindowDestroy:
-                        return true;
-                    case Event::Key:
-                        if (event.key.key == GLFW_KEY_ESCAPE && event.key.action == GLFW_PRESS)
-                        {
-                            return true;
-                        }
-                        break;
-                    case Event::WindowResize:
-                        bgfx::reset(event.windowResize.width, event.windowResize.height, BGFX_RESET_VSYNC);
-                        bgfx::setViewRect(0, 0, 0, event.windowResize.width, event.windowResize.height);
-                        break;
-                    default:
-                        break;
+                case Event::WindowDestroy:
+                    running = false;
+                    break;
+                case Event::Key:
+                    if (event.key.key == GLFW_KEY_ESCAPE && event.key.action == GLFW_PRESS)
+                    {
+                        running = false;
+                    }
+                    break;
+                case Event::WindowResize:
+                    bgfx::reset(event.windowResize.width, event.windowResize.height, BGFX_RESET_VSYNC);
+                    bgfx::setViewRect(0, 0, 0, event.windowResize.width, event.windowResize.height);
+                    break;
+                default:
+
+                    break;
                 }
             }
+
+            // 清除背景
+            bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, clearColor, 1.0f, 0);
+            // 设置视口
+            bgfx::setViewRect(0, 0, 0, uint16_t(1280), uint16_t(720));
 
             // 渲染
             bgfx::touch(0);
             bgfx::frame();
         }
+        return true;
     }
 
     const char* Engine::getVersion() const
     {
         return TINA_VERSION;
     }
-
 }
