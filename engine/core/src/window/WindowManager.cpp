@@ -10,15 +10,6 @@
 
 namespace Tina
 {
-    static void keyCallback(GLFWwindow* glfwWindow, int32_t key, int32_t scancode, int32_t action, int32_t mods);
-    static void charCallback(GLFWwindow* glfwWindow, uint32_t codepoint);
-    static void scrollCallback(GLFWwindow* glfwWindow, double dx, double dy);
-    static void cursorPosCallback(GLFWwindow* glfwWindow, double mx, double my);
-    static void mouseButtonCallback(GLFWwindow* glfwWindow, int32_t button, int32_t action, int32_t mods);
-    static void windowSizeCallback(GLFWwindow* glfwWindow, int32_t width, int32_t height);
-    static void dropFileCallback(GLFWwindow* glfwWindow, int32_t count, const char** filePaths);
-    static void joystickCallback(int jid, int action);
-
     WindowManager* WindowManager::s_instance = nullptr;
 
     WindowManager::WindowManager(Context* context): m_context(context), m_windowHandleAlloc()
@@ -280,7 +271,7 @@ namespace Tina
         m_context->getEventQueue().postEvent(event);
     }
 
-    static void keyCallback(GLFWwindow* glfwWindow, int32_t key, int32_t scancode, int32_t action, int32_t mods)
+    void WindowManager::keyCallback(GLFWwindow* glfwWindow, int32_t key, int32_t scancode, int32_t action, int32_t mods)
     {
         if (auto* manager = WindowManager::getInstance())
         {
@@ -292,7 +283,7 @@ namespace Tina
         }
     }
 
-    static void charCallback(GLFWwindow* glfwWindow, uint32_t codepoint)
+    void WindowManager::charCallback(GLFWwindow* glfwWindow, uint32_t codepoint)
     {
         if (auto* manager = WindowManager::getInstance())
         {
@@ -304,7 +295,7 @@ namespace Tina
         }
     }
 
-    static void scrollCallback(GLFWwindow* glfwWindow, double dx, double dy)
+    void WindowManager::scrollCallback(GLFWwindow* glfwWindow, double dx, double dy)
     {
         if (auto* manager = WindowManager::getInstance())
         {
@@ -316,7 +307,7 @@ namespace Tina
         }
     }
 
-    static void cursorPosCallback(GLFWwindow* glfwWindow, double mx, double my)
+    void WindowManager::cursorPosCallback(GLFWwindow* glfwWindow, double mx, double my)
     {
         if (auto* manager = WindowManager::getInstance())
         {
@@ -328,7 +319,7 @@ namespace Tina
         }
     }
 
-    static void mouseButtonCallback(GLFWwindow* glfwWindow, int32_t button, int32_t action, int32_t mods)
+    void WindowManager::mouseButtonCallback(GLFWwindow* glfwWindow, int32_t button, int32_t action, int32_t mods)
     {
         if (auto* manager = WindowManager::getInstance())
         {
@@ -340,7 +331,7 @@ namespace Tina
         }
     }
 
-    static void windowSizeCallback(GLFWwindow* glfwWindow, int32_t width, int32_t height)
+    void WindowManager::windowSizeCallback(GLFWwindow* glfwWindow, int32_t width, int32_t height)
     {
         if (auto* manager = WindowManager::getInstance())
         {
@@ -352,7 +343,7 @@ namespace Tina
         }
     }
 
-    static void dropFileCallback(GLFWwindow* glfwWindow, int32_t count, const char** filePaths)
+    void WindowManager::dropFileCallback(GLFWwindow* glfwWindow, int32_t count, const char** filePaths)
     {
         if (auto* manager = WindowManager::getInstance())
         {
@@ -364,7 +355,7 @@ namespace Tina
         }
     }
 
-    static void joystickCallback(int jid, int action)
+    void WindowManager::joystickCallback(int jid, int action)
     {
         if (auto* manager = WindowManager::getInstance())
         {

@@ -6,7 +6,7 @@
 #include <map>
 #include "Window.hpp"
 #if BX_PLATFORM_WINDOWS
-    #define GLFW_EXPOSE_NATIVE_WIN32
+#define GLFW_EXPOSE_NATIVE_WIN32
 #elif BX_PLATFORM_LINUX
     #define GLFW_EXPOSE_NATIVE_X11
     #define GLFW_EXPOSE_NATIVE_WAYLAND
@@ -24,7 +24,6 @@ namespace Tina
 
     class WindowManager
     {
-
     public:
         explicit WindowManager(Context* context);
         ~WindowManager();
@@ -47,25 +46,25 @@ namespace Tina
 
         static WindowManager* getInstance() { return s_instance; }
 
+        WindowHandle findHandle(GLFWwindow* glfwWindow) const;
+
     private:
         static WindowManager* s_instance;
         Context* m_context;
         std::map<WindowHandle, Window*> m_windowMap;
         bx::HandleAllocT<TINA_CONFIG_MAX_WINDOWS> m_windowHandleAlloc;
 
-        WindowHandle findHandle(GLFWwindow* glfwWindow) const;
-
         // --- GLFW Error Callback ---
         static void errorCb(int _error, const char* _description);
 
-        friend void keyCallback(GLFWwindow* glfwWindow, int32_t key, int32_t scancode, int32_t action, int32_t mods);
-        friend void charCallback(GLFWwindow* glfwWindow, uint32_t scancode);
-        friend void scrollCallback(GLFWwindow* glfwWindow, double dx, double dy);
-        friend void cursorPosCallback(GLFWwindow* glfwWindow, double mx, double my);
-        friend void mouseButtonCallback(GLFWwindow* glfwWindow, int32_t button, int32_t action, int32_t mods);
-        friend void windowSizeCallback(GLFWwindow* glfwWindow, int32_t width, int32_t height);
-        friend void dropFileCallback(GLFWwindow* glfwWindow, int32_t count, const char** filePaths);
-        friend void joystickCallback(int jid, int action);
+        static void keyCallback(GLFWwindow* glfwWindow, int32_t key, int32_t scancode, int32_t action, int32_t mods);
+        static void charCallback(GLFWwindow* glfwWindow, uint32_t codepoint);
+        static void scrollCallback(GLFWwindow* glfwWindow, double dx, double dy);
+        static void cursorPosCallback(GLFWwindow* glfwWindow, double mx, double my);
+        static void mouseButtonCallback(GLFWwindow* glfwWindow, int32_t button, int32_t action, int32_t mods);
+        static void windowSizeCallback(GLFWwindow* glfwWindow, int32_t width, int32_t height);
+        static void dropFileCallback(GLFWwindow* glfwWindow, int32_t count, const char** filePaths);
+        static void joystickCallback(int jid, int action);
 
     public:
         // WindowManager 实例方法 - 处理事件并发送到 EventQueue
