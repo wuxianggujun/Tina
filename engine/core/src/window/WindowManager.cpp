@@ -32,7 +32,7 @@ namespace Tina
             return false;
         }
 
-        // 设置手柄回掉
+        // 设置手柄回调
         glfwSetJoystickCallback(joystickCallback);
         glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
         TINA_LOG_INFO("WindowManager::initialize", "GLFW initialized successfully.");
@@ -153,7 +153,7 @@ namespace Tina
 #elif BX_PLATFORM_OSX
         return NULL;
 #elif BX_PLATFORM_WINDOWS
-        return NULL;
+        return nullptr;
 #endif
     }
 

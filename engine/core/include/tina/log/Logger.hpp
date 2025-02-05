@@ -1,16 +1,13 @@
 #pragma once
 #include <fmt/format.h>
 #include <fmt/chrono.h>
-#include <array>
-#include <atomic>
+#include "tina/core/Core.hpp"
+#include "tina/container/String.hpp"
+#include "tina/core/filesystem.hpp"
+
 #include <thread>
 #include <mutex>
 #include <condition_variable>
-#include <vector>
-#include <memory>
-#include <cstdio>
-#include "tina/container/String.hpp"
-#include "tina/core/filesystem.hpp"
 
 namespace Tina {
 
@@ -86,25 +83,10 @@ public:
     template<typename... Args>
     void log(LogLevel level, std::string_view module, fmt::format_string<Args...> fmt, Args&&... args) {
         if (level < minLevel_) return;
-
-        try {
-            LogMessage msg{
-                std::chrono::system_clock::now(),
-                level,
-                String(module),
-                String(fmt::format(fmt, std::forward<Args>(args)...))
-            };
-
-            if (!messageBuffer_.push(std::move(msg))) {
-                // Buffer full, handle overflow
-                std::lock_guard<std::mutex> lock(overflowMutex_);
-                overflowMessages_.push_back(std::move(msg));
-            }
-            flushCV_.notify_one();
-        } catch (const std::exception& e) {
-            fmt::print(stderr, "Logging failed: {}\n", e.what());
-        }
+        log(level, module, fmt::format(fmt, std::forward<Args>(args)...));
     }
+
+    void log(LogLevel level, std::string_view module, std::string_view message);
 
     void setMinLevel(LogLevel level) { minLevel_ = level; }
     void setOutputFile(const String& filename);
@@ -114,7 +96,9 @@ public:
 
 private:
     // 构造函数和析构函数
-    Logger() : minLevel_(LogLevel::Info), logFile_(nullptr), running_(false) {}
+    Logger() : minLevel_(LogLevel::Info), logFile_(nullptr), running_(false) {
+        fmt::print("Logger instance created\n");
+    }
     ~Logger();
 
     void processLogs();
@@ -133,17 +117,34 @@ private:
     ghc::filesystem::path logPath_;
 };
 
-#define TINA_LOG_TRACE(module, ...) \
-    ::Tina::Logger::instance().log(::Tina::LogLevel::Trace, module, __VA_ARGS__)
-#define TINA_LOG_DEBUG(module, ...) \
-    ::Tina::Logger::instance().log(::Tina::LogLevel::Debug, module, __VA_ARGS__)
-#define TINA_LOG_INFO(module, ...) \
-    ::Tina::Logger::instance().log(::Tina::LogLevel::Info, module, __VA_ARGS__)
-#define TINA_LOG_WARN(module, ...) \
-    ::Tina::Logger::instance().log(::Tina::LogLevel::Warn, module, __VA_ARGS__)
-#define TINA_LOG_ERROR(module, ...) \
-    ::Tina::Logger::instance().log(::Tina::LogLevel::Error, module, __VA_ARGS__)
-#define TINA_LOG_FATAL(module, ...) \
-    ::Tina::Logger::instance().log(::Tina::LogLevel::Fatal, module, __VA_ARGS__)
+#define TINA_LOG_TRACE(module, ...) do { \
+    if (::Tina::Logger::instance().isRunning()) \
+        ::Tina::Logger::instance().log(::Tina::LogLevel::Trace, module, __VA_ARGS__); \
+} while(0)
+
+#define TINA_LOG_DEBUG(module, ...) do { \
+    if (::Tina::Logger::instance().isRunning()) \
+        ::Tina::Logger::instance().log(::Tina::LogLevel::Debug, module, __VA_ARGS__); \
+} while(0)
+
+#define TINA_LOG_INFO(module, ...) do { \
+    if (::Tina::Logger::instance().isRunning()) \
+        ::Tina::Logger::instance().log(::Tina::LogLevel::Info, module, __VA_ARGS__); \
+} while(0)
+
+#define TINA_LOG_WARN(module, ...) do { \
+    if (::Tina::Logger::instance().isRunning()) \
+        ::Tina::Logger::instance().log(::Tina::LogLevel::Warn, module, __VA_ARGS__); \
+} while(0)
+
+#define TINA_LOG_ERROR(module, ...) do { \
+    if (::Tina::Logger::instance().isRunning()) \
+        ::Tina::Logger::instance().log(::Tina::LogLevel::Error, module, __VA_ARGS__); \
+} while(0)
+
+#define TINA_LOG_FATAL(module, ...) do { \
+    if (::Tina::Logger::instance().isRunning()) \
+        ::Tina::Logger::instance().log(::Tina::LogLevel::Fatal, module, __VA_ARGS__); \
+} while(0)
 
 } // namespace Tina

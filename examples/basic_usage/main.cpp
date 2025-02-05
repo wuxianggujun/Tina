@@ -6,10 +6,28 @@ using namespace Tina;
 
 int main()
 {
+    fmt::print("Starting application...\n");
+
     auto& logger = Tina::Logger::instance();
-    // 需要先启动日志系统
-    logger.setOutputFile(String("logs/app.log"));
+    
+    // 使用绝对路径
+    auto logPath = ghc::filesystem::current_path() / "logs" / "app.log";
+    fmt::print("Log file path: {}\n", logPath.string());
+    
+    // 确保日志目录存在
+    ghc::filesystem::create_directories(logPath.parent_path());
+    fmt::print("Log directory created: {}\n", logPath.parent_path().string());
+
+    // 设置日志文件
+    logger.setOutputFile(String(logPath.string()));
     logger.start();
+    fmt::print("Logger started\n");
+    
+    // 设置日志级别
+    logger.setMinLevel(LogLevel::Info);
+
+    TINA_LOG_INFO("main", "Application starting...");
+
     // Create engine instance
     Core::Engine engine;
 
@@ -22,14 +40,16 @@ int main()
 
     if (!engine.run())
     {
-        // Engine::run মেথড কল করুন, Context::run এর পরিবর্তে
         TINA_LOG_ERROR("main", "Application run failed.");
-        engine.shutdown(); // শাটডাউন ইঞ্জিন
+        engine.shutdown();
         return 1;
     }
 
     // Shutdown engine
     engine.shutdown();
     TINA_LOG_INFO("main", "Application finished successfully.");
+
+    if (logger.isRunning())
+        logger.stop();
     return 0;
 }

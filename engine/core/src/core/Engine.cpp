@@ -79,6 +79,7 @@ namespace Tina::Core
         {
             m_context.processEvents();
 
+            /*
             Event event;
             while (m_context.getEventQueue().peekEvent(event))
             {
@@ -102,6 +103,7 @@ namespace Tina::Core
                     break;
                 }
             }
+            */
 
             // 清除背景
             bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, clearColor, 1.0f, 0);
