@@ -16,7 +16,7 @@ namespace Tina
         ~Context();
 
         bool initialize();
-        bool run(int argc, char** argv);
+        // bool run(int argc, char** argv);
         void processEvents();
 
         WindowManager& getWindowManager() { return windowManager; }
@@ -29,6 +29,4 @@ namespace Tina
 
         friend class WindowManager;
     };
-
-    extern Context s_ctx;
 } // Tina

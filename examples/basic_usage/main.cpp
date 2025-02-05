@@ -6,6 +6,10 @@ using namespace Tina;
 
 int main()
 {
+    auto& logger = Tina::Logger::instance();
+    // 需要先启动日志系统
+    logger.setOutputFile(String("logs/app.log"));
+    logger.start();
     // Create engine instance
     Core::Engine engine;
 

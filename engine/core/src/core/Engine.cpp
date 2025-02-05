@@ -23,14 +23,14 @@ namespace Tina::Core
 
     bool Engine::initialize()
     {
-        if (!s_ctx.initialize())
+        if (!m_context.initialize())
         {
             TINA_LOG_ERROR("Engine::initialize", "Failed to initialize context");
             return false;
         }
 
         // 创建主窗口
-        WindowHandle mainWindow = s_ctx.getWindowManager().createWindow(100, 100, 1280, 720, 0, "Tina Engine");
+        WindowHandle mainWindow = m_context.getWindowManager().createWindow(100, 100, 1280, 720, 0, "Tina Engine");
         if (!isValid(mainWindow))
         {
             TINA_LOG_ERROR("Engine::initialize", "Failed to create main window");
@@ -43,9 +43,9 @@ namespace Tina::Core
         bgfxInit.resolution.width = 1280;
         bgfxInit.resolution.height = 720;
         bgfxInit.resolution.reset = BGFX_RESET_VSYNC;
-        bgfxInit.platformData.nwh = s_ctx.getWindowManager().getNativeWindowHandle(mainWindow);
-        bgfxInit.platformData.ndt = s_ctx.getWindowManager().getNativeDisplayHandle();
-        bgfxInit.platformData.type = s_ctx.getWindowManager().getNativeWindowHandleType();
+        bgfxInit.platformData.nwh = m_context.getWindowManager().getNativeWindowHandle(mainWindow);
+        bgfxInit.platformData.ndt = m_context.getWindowManager().getNativeDisplayHandle();
+        bgfxInit.platformData.type = m_context.getWindowManager().getNativeWindowHandleType();
 
         if (!bgfx::init(bgfxInit))
         {
@@ -67,18 +67,18 @@ namespace Tina::Core
     void Engine::shutdown()
     {
         bgfx::shutdown();
-        s_ctx.getWindowManager().terminate();
+        m_context.getWindowManager().terminate();
     }
 
     bool Engine::run()
     {
-        while (true)
+        bool running  = true;
+        while (running)
         {
-            // 处理事件
-            s_ctx.getWindowManager().processMessage();
+            m_context.processEvents();
 
             Event event;
-            while (s_ctx.getEventQueue().peekEvent(event))
+            while (m_context.getEventQueue().peekEvent(event))
             {
                 switch (event.type)
                 {

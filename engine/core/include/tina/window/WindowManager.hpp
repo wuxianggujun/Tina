@@ -24,6 +24,7 @@ namespace Tina
 
     class WindowManager
     {
+
     public:
         explicit WindowManager(Context* context);
         ~WindowManager();
@@ -44,7 +45,10 @@ namespace Tina
         void* getNativeDisplayHandle();
         bgfx::NativeWindowHandleType::Enum getNativeWindowHandleType();
 
+        static WindowManager* getInstance() { return s_instance; }
+
     private:
+        static WindowManager* s_instance;
         Context* m_context;
         std::map<WindowHandle, Window*> m_windowMap;
         bx::HandleAllocT<TINA_CONFIG_MAX_WINDOWS> m_windowHandleAlloc;

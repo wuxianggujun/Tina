@@ -19,12 +19,16 @@ namespace Tina
     static void dropFileCallback(GLFWwindow* glfwWindow, int32_t count, const char** filePaths);
     static void joystickCallback(int jid, int action);
 
+    WindowManager* WindowManager::s_instance = nullptr;
+
     WindowManager::WindowManager(Context* context): m_context(context), m_windowHandleAlloc()
     {
+        s_instance = this;
     }
 
     WindowManager::~WindowManager()
     {
+        s_instance = nullptr;
         terminate();
     }
 
@@ -113,7 +117,7 @@ namespace Tina
             event.windowHandle = handle;
             event.window.nativeWindowHandle = nullptr;
             m_context->getEventQueue().postEvent(event);
-            
+
             delete window;
             m_windowMap.erase(it);
             m_windowHandleAlloc.free(handle.idx);
@@ -278,70 +282,93 @@ namespace Tina
 
     static void keyCallback(GLFWwindow* glfwWindow, int32_t key, int32_t scancode, int32_t action, int32_t mods)
     {
-        WindowHandle handle = s_ctx.getWindowManager().findHandle(glfwWindow);
-        if (handle.idx != UINT16_MAX)
+        if (auto* manager = WindowManager::getInstance())
         {
-            s_ctx.getWindowManager().eventCallback_key(handle, glfwWindow, key, scancode, action, mods);
+            const WindowHandle handle = manager->findHandle(glfwWindow);
+            if (handle.idx != UINT16_MAX)
+            {
+                manager->eventCallback_key(handle, glfwWindow, key, scancode, action, mods);
+            }
         }
     }
 
     static void charCallback(GLFWwindow* glfwWindow, uint32_t codepoint)
     {
-        WindowHandle handle = s_ctx.getWindowManager().findHandle(glfwWindow);
-        if (handle.idx != UINT16_MAX)
+        if (auto* manager = WindowManager::getInstance())
         {
-            s_ctx.getWindowManager().eventCallback_char(handle, glfwWindow, codepoint);
+            WindowHandle handle = manager->findHandle(glfwWindow);
+            if (handle.idx != UINT16_MAX)
+            {
+                manager->eventCallback_char(handle, glfwWindow, codepoint);
+            }
         }
     }
 
     static void scrollCallback(GLFWwindow* glfwWindow, double dx, double dy)
     {
-        WindowHandle handle = s_ctx.getWindowManager().findHandle(glfwWindow);
-        if (handle.idx != UINT16_MAX)
+        if (auto* manager = WindowManager::getInstance())
         {
-            s_ctx.getWindowManager().eventCallback_scroll(handle, glfwWindow, dx, dy);
+            WindowHandle handle = manager->findHandle(glfwWindow);
+            if (handle.idx != UINT16_MAX)
+            {
+                manager->eventCallback_scroll(handle, glfwWindow, dx, dy);
+            }
         }
     }
 
     static void cursorPosCallback(GLFWwindow* glfwWindow, double mx, double my)
     {
-        WindowHandle handle = s_ctx.getWindowManager().findHandle(glfwWindow);
-        if (handle.idx != UINT16_MAX)
+        if (auto* manager = WindowManager::getInstance())
         {
-            s_ctx.getWindowManager().eventCallback_cursorPos(handle, glfwWindow, mx, my);
+            WindowHandle handle = manager->findHandle(glfwWindow);
+            if (handle.idx != UINT16_MAX)
+            {
+                manager->eventCallback_cursorPos(handle, glfwWindow, mx, my);
+            }
         }
     }
 
     static void mouseButtonCallback(GLFWwindow* glfwWindow, int32_t button, int32_t action, int32_t mods)
     {
-        WindowHandle handle = s_ctx.getWindowManager().findHandle(glfwWindow);
-        if (handle.idx != UINT16_MAX)
+        if (auto* manager = WindowManager::getInstance())
         {
-            s_ctx.getWindowManager().eventCallback_mouseButton(handle, glfwWindow, button, action, mods);
+            WindowHandle handle = manager->findHandle(glfwWindow);
+            if (handle.idx != UINT16_MAX)
+            {
+                manager->eventCallback_mouseButton(handle, glfwWindow, button, action, mods);
+            }
         }
     }
 
     static void windowSizeCallback(GLFWwindow* glfwWindow, int32_t width, int32_t height)
     {
-        WindowHandle handle = s_ctx.getWindowManager().findHandle(glfwWindow);
-        if (handle.idx != UINT16_MAX)
+        if (auto* manager = WindowManager::getInstance())
         {
-            s_ctx.getWindowManager().eventCallback_windowSize(handle, glfwWindow, width, height);
+            WindowHandle handle = manager->findHandle(glfwWindow);
+            if (handle.idx != UINT16_MAX)
+            {
+                manager->eventCallback_windowSize(handle, glfwWindow, width, height);
+            }
         }
     }
 
     static void dropFileCallback(GLFWwindow* glfwWindow, int32_t count, const char** filePaths)
     {
-        WindowHandle handle = s_ctx.getWindowManager().findHandle(glfwWindow);
-        if (handle.idx != UINT16_MAX)
+        if (auto* manager = WindowManager::getInstance())
         {
-            s_ctx.getWindowManager().eventCallback_dropFile(handle, glfwWindow, count, filePaths);
+            WindowHandle handle = manager->findHandle(glfwWindow);
+            if (handle.idx != UINT16_MAX)
+            {
+                manager->eventCallback_dropFile(handle, glfwWindow, count, filePaths);
+            }
         }
     }
 
     static void joystickCallback(int jid, int action)
     {
-        s_ctx.getWindowManager().eventCallback_joystick(jid, action);
+        if (auto* manager = WindowManager::getInstance())
+        {
+            manager->eventCallback_joystick(jid, action);
+        }
     }
-
 } // Tina
