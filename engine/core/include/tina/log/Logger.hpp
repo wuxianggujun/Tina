@@ -1,150 +1,140 @@
 #pragma once
+
+#include <string>
+#include <memory>
 #include <fmt/format.h>
 #include <fmt/chrono.h>
-#include "tina/core/Core.hpp"
-#include "tina/container/String.hpp"
-#include "tina/core/filesystem.hpp"
-
+#include <fmt/ranges.h>
+#include <fmt/color.h>
+#include <chrono>
+#include <atomic>
 #include <thread>
 #include <mutex>
-#include <condition_variable>
+#include <queue>
+#include <vector>
+
+// 调试日志宏
+#ifdef _DEBUG
+#define LOG_DEBUG(format, ...) fmt::print(fg(fmt::color::light_blue), "[DEBUG] {} - " format "\n", __FUNCTION__, ##__VA_ARGS__)
+#else
+#define LOG_DEBUG(format, ...)
+#endif
 
 namespace Tina {
 
-enum class LogLevel : uint8_t {
-    Trace,
-    Debug,
-    Info,
-    Warn,
-    Error,
-    Fatal,
-    Off
-};
-
-struct LogMessage {
-    LogMessage() : timestamp(std::chrono::system_clock::now()), level(LogLevel::Info) {}
-    
-    LogMessage(std::chrono::system_clock::time_point ts, LogLevel lvl, String mod, String msg)
-        : timestamp(ts)
-        , level(lvl)
-        , module(std::move(mod))
-        , message(std::move(msg)) {}
-        
-    std::chrono::system_clock::time_point timestamp;
-    LogLevel level;
-    String module;
-    String message;
-};
-
-class RingBuffer {
-public:
-    explicit RingBuffer(size_t capacity = 8192) 
-        : buffer_(capacity)
-        , capacity_(capacity)
-        , head_(0)
-        , tail_(0) {}
-
-    bool push(LogMessage&& msg) {
-        size_t next = (head_ + 1) % capacity_;
-        if (next == tail_) return false;  // Buffer is full
-        buffer_[head_] = std::move(msg);
-        head_ = next;
-        return true;
-    }
-
-    bool pop(LogMessage& msg) {
-        if (tail_ == head_) return false;  // Buffer is empty
-        msg = std::move(buffer_[tail_]);
-        tail_ = (tail_ + 1) % capacity_;
-        return true;
-    }
-
-private:
-    std::vector<LogMessage> buffer_;
-    const size_t capacity_;
-    std::atomic<size_t> head_;
-    std::atomic<size_t> tail_;
-};
+// 定义队列大小
+#ifndef TINA_LOG_QUEUE_SIZE
+#define TINA_LOG_QUEUE_SIZE (1 << 20)  // 1MB
+#endif
 
 class Logger {
 public:
-    // 单例访问
-    static Logger& instance() {
-        static Logger instance;
-        return instance;
-    }
+    enum class Level : uint8_t {
+        Debug = 0,
+        Info,
+        Warning,
+        Error,
+        Off
+    };
 
-    // 删除的函数放在public部分
-    Logger(const Logger&) = delete;
-    Logger& operator=(const Logger&) = delete;
-    Logger(Logger&&) = delete;
-    Logger& operator=(Logger&&) = delete;
+    static Logger& getInstance();
+    void init(const std::string& filename, bool truncate = false);
+    void init(FILE* fp, bool manageFp = false);
+    void setLogLevel(Level level);
+    Level getLogLevel() const;
+    bool isLevelEnabled(Level level) const;
+    void setFlushDelay(int64_t ns);
+    void setFlushLevel(Level level);
+    void setFlushBufferSize(uint32_t bytes);
+    void startPollingThread(int64_t pollInterval = 1000000000);
+    void stopPollingThread();
+    void flush(bool force = false);
+    void close();
 
     template<typename... Args>
-    void log(LogLevel level, std::string_view module, fmt::format_string<Args...> fmt, Args&&... args) {
-        if (level < minLevel_) return;
-        log(level, module, fmt::format(fmt, std::forward<Args>(args)...));
+    void debug(fmt::format_string<Args...> format, Args&&... args) {
+        if (isLevelEnabled(Level::Debug)) {
+            logImpl(Level::Debug, format, std::forward<Args>(args)...);
+        }
     }
 
-    void log(LogLevel level, std::string_view module, std::string_view message);
+    template<typename... Args>
+    void info(fmt::format_string<Args...> format, Args&&... args) {
+        if (isLevelEnabled(Level::Info)) {
+            logImpl(Level::Info, format, std::forward<Args>(args)...);
+        }
+    }
 
-    void setMinLevel(LogLevel level) { minLevel_ = level; }
-    void setOutputFile(const String& filename);
-    void start();
-    void stop();
-    bool isRunning() const { return running_; }
+    template<typename... Args>
+    void warning(fmt::format_string<Args...> format, Args&&... args) {
+        if (isLevelEnabled(Level::Warning)) {
+            logImpl(Level::Warning, format, std::forward<Args>(args)...);
+        }
+    }
+
+    template<typename... Args>
+    void error(fmt::format_string<Args...> format, Args&&... args) {
+        if (isLevelEnabled(Level::Error)) {
+            logImpl(Level::Error, format, std::forward<Args>(args)...);
+        }
+    }
 
 private:
-    // 构造函数和析构函数
-    Logger() : minLevel_(LogLevel::Info), logFile_(nullptr), running_(false) {
-        fmt::print("Logger instance created\n");
-    }
+    Logger();
     ~Logger();
+    Logger(const Logger&) = delete;
+    Logger& operator=(const Logger&) = delete;
 
-    void processLogs();
-    void flush();
+    struct LogMessage {
+        Level level;
+        std::chrono::system_clock::time_point timestamp;
+        std::string content;
+        
+        LogMessage(Level lvl, std::chrono::system_clock::time_point ts, std::string&& msg)
+            : level(lvl), timestamp(ts), content(std::move(msg)) {}
+    };
 
-    std::atomic<LogLevel> minLevel_;
-    RingBuffer messageBuffer_;
-    std::vector<LogMessage> overflowMessages_;
-    std::mutex overflowMutex_;
+    template<typename... Args>
+    void logImpl(Level level, fmt::format_string<Args...> format, Args&&... args) {
+        LOG_DEBUG("Formatting message");
+        std::string message = fmt::format(format, std::forward<Args>(args)...);
+        
+        LOG_DEBUG("Creating timestamp");
+        auto now = std::chrono::system_clock::now();
+            
+        LOG_DEBUG("Acquiring mutex");
+        std::unique_lock<std::mutex> lock(queueMutex_);
+        LOG_DEBUG("Adding message to queue");
+        messageQueue_.emplace(level, now, std::move(message));
+        
+        if (level >= flushLevel_ || messageQueue_.size() >= flushBufferSize_) {
+            LOG_DEBUG("Immediate flush required");
+            flush(true);
+        }
+        LOG_DEBUG("Message queued successfully");
+    }
+
+    void processQueuedMessages();
+
+    std::atomic<Level> currentLevel_;
+    int64_t flushDelay_;
+    uint32_t flushBufferSize_;
+    Level flushLevel_;
+    FILE* outputFp_;
+    bool manageFp_;
     
-    FILE* logFile_;
-    std::thread workerThread_;
-    std::mutex mutex_;
-    std::condition_variable flushCV_;
-    std::atomic<bool> running_;
-    ghc::filesystem::path logPath_;
+    std::mutex queueMutex_;
+    std::queue<LogMessage> messageQueue_;
+    
+    std::atomic<bool> threadRunning_;
+    std::thread pollingThread_;
+    std::condition_variable queueCV_;
+    bool shouldExit_ = false;
 };
 
-#define TINA_LOG_TRACE(module, ...) do { \
-    if (::Tina::Logger::instance().isRunning()) \
-        ::Tina::Logger::instance().log(::Tina::LogLevel::Trace, module, __VA_ARGS__); \
-} while(0)
-
-#define TINA_LOG_DEBUG(module, ...) do { \
-    if (::Tina::Logger::instance().isRunning()) \
-        ::Tina::Logger::instance().log(::Tina::LogLevel::Debug, module, __VA_ARGS__); \
-} while(0)
-
-#define TINA_LOG_INFO(module, ...) do { \
-    if (::Tina::Logger::instance().isRunning()) \
-        ::Tina::Logger::instance().log(::Tina::LogLevel::Info, module, __VA_ARGS__); \
-} while(0)
-
-#define TINA_LOG_WARN(module, ...) do { \
-    if (::Tina::Logger::instance().isRunning()) \
-        ::Tina::Logger::instance().log(::Tina::LogLevel::Warn, module, __VA_ARGS__); \
-} while(0)
-
-#define TINA_LOG_ERROR(module, ...) do { \
-    if (::Tina::Logger::instance().isRunning()) \
-        ::Tina::Logger::instance().log(::Tina::LogLevel::Error, module, __VA_ARGS__); \
-} while(0)
-
-#define TINA_LOG_FATAL(module, ...) do { \
-    if (::Tina::Logger::instance().isRunning()) \
-        ::Tina::Logger::instance().log(::Tina::LogLevel::Fatal, module, __VA_ARGS__); \
-} while(0)
+#define TINA_LOG_DEBUG(...) Tina::Logger::getInstance().debug(__VA_ARGS__)
+#define TINA_LOG_INFO(...) Tina::Logger::getInstance().info(__VA_ARGS__)
+#define TINA_LOG_WARNING(...) Tina::Logger::getInstance().warning(__VA_ARGS__)
+#define TINA_LOG_ERROR(...) Tina::Logger::getInstance().error(__VA_ARGS__)
 
 } // namespace Tina

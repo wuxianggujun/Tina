@@ -1,3 +1,4 @@
+/*
 #include "tina/core/Core.hpp"
 #include "tina/core/Engine.hpp"
 #include "tina/log/Logger.hpp"
@@ -51,5 +52,24 @@ int main()
 
     if (logger.isRunning())
         logger.stop();
+    return 0;
+}
+*/
+
+#include "tina/log/Logger.hpp"
+
+int main() {
+    // 初始化日志系统
+    Tina::Logger::getInstance().init("app.log");
+
+    // 设置日志级别
+    Tina::Logger::getInstance().setLogLevel(Tina::Logger::Level::Debug);
+
+    // 记录日志
+    TINA_LOG_DEBUG("调试信息: 值={}", 42);
+    TINA_LOG_INFO("普通信息");
+    TINA_LOG_WARNING("警告信息");
+    TINA_LOG_ERROR("错误信息: {}", "出现问题");
+
     return 0;
 }

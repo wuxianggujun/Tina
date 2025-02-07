@@ -1,373 +1,258 @@
 #include "tina/log/Logger.hpp"
-
-#include <array>
-#include <atomic>
-
-#include <vector>
-#include <memory>
-#include <cstdio>
-#include <corecrt_io.h>
-#include <fcntl.h>
-#include <fmt/color.h>
+#include <iomanip>
+#include <sstream>
 
 namespace Tina {
 
-namespace {
-    constexpr std::string_view levelToString(LogLevel level) {
-        switch (level) {
-            case LogLevel::Trace: return "TRACE";
-            case LogLevel::Debug: return "DEBUG";
-            case LogLevel::Info:  return "INFO ";
-            case LogLevel::Warn:  return "WARN ";
-            case LogLevel::Error: return "ERROR";
-            case LogLevel::Fatal: return "FATAL";
-            default:              return "UNKNOWN";
-        }
-    }
+Logger& Logger::getInstance() {
+    LOG_DEBUG("Getting logger instance");
+    static Logger instance;
+    return instance;
+}
 
-    fmt::color levelToColor(LogLevel level) {
-        switch (level) {
-            case LogLevel::Trace: return fmt::color::gray;
-            case LogLevel::Debug: return fmt::color::light_blue;
-            case LogLevel::Info:  return fmt::color::green;
-            case LogLevel::Warn:  return fmt::color::yellow;
-            case LogLevel::Error: return fmt::color::red;
-            case LogLevel::Fatal: return fmt::color::purple;
-            default:              return fmt::color::white;
-        }
-    }
+Logger::Logger()
+    : currentLevel_(Level::Info)
+    , flushDelay_(3000000000) // 3秒
+    , flushBufferSize_(8 * 1024) // 8KB
+    , flushLevel_(Level::Error)
+    , outputFp_(nullptr)
+    , manageFp_(false)
+    , threadRunning_(false)
+    , shouldExit_(false) {
+    LOG_DEBUG("Logger constructed");
 }
 
 Logger::~Logger() {
-    if (running_) {
-        stop();
-    }
+    LOG_DEBUG("Logger destructor called");
+    stopPollingThread();
+    flush(true);
+    close();
+    LOG_DEBUG("Logger destroyed");
 }
 
-void Logger::setOutputFile(const String& filename) {
-    stop();  // 确保之前的文件被关闭
-    
+void Logger::init(const std::string& filename, bool truncate) {
+    LOG_DEBUG("Initializing logger with file: {}", filename);
     try {
-        fmt::print("Setting up log file: {}\n", filename.c_str());
-        
-        // 确保日志目录存在
-        logPath_ = ghc::filesystem::path(filename.c_str());
-        if (!logPath_.parent_path().empty()) {
-            ghc::filesystem::create_directories(logPath_.parent_path());
-            fmt::print("Created log directory: {}\n", logPath_.parent_path().string());
+	    if (threadRunning_)
+	    {
+            close();
+	    }
+
+        std::lock_guard<std::mutex> lock(queueMutex_);
+
+        outputFp_ = fopen(filename.c_str(), truncate ? "w" : "a");
+        if (!outputFp_) {
+            LOG_DEBUG("Failed to open file: {}", filename);
+            throw std::runtime_error("Failed to open log file");
         }
-        
-        // 关闭现有文件
-        if (logFile_) {
-            fmt::print("Closing existing log file\n");
-            fclose(logFile_);
-            logFile_ = nullptr;
-        }
-        
-        fmt::print("Opening log file in binary mode: {}\n", filename.c_str());
-        
-        // 检查文件权限
-        if (ghc::filesystem::exists(logPath_)) {
-            ghc::filesystem::file_status status = ghc::filesystem::status(logPath_);
-            if ((status.permissions() & ghc::filesystem::perms::owner_write) == ghc::filesystem::perms::none) {
-                fmt::print(stderr, "File is read-only\n");
-                return;
-            }
-        }
-        
-#ifdef TINA_PLATFORM_WINDOWS
-        // Windows平台特定代码
-        HANDLE fileHandle = CreateFileA(
-            filename.c_str(),
-            GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ,
-            nullptr,
-            CREATE_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL,
-            nullptr
-        );
-        
-        if (fileHandle == INVALID_HANDLE_VALUE) {
-            DWORD error = GetLastError();
-            char errMsg[256];
-            FormatMessageA(
-                FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                nullptr,
-                error,
-                MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                errMsg,
-                sizeof(errMsg),
-                nullptr
-            );
-            fmt::print(stderr, "Failed to create file: {} (error: {})\n", errMsg, error);
-            return;
-        }
-        
-        // 将 HANDLE 转换为 FILE*
-        int fd = _open_osfhandle((intptr_t)fileHandle, _O_BINARY | _O_RDWR);
-        if (fd == -1) {
-            CloseHandle(fileHandle);
-            fmt::print(stderr, "Failed to convert handle to file descriptor\n");
-            return;
-        }
-        
-        logFile_ = _fdopen(fd, "wb");
-        if (!logFile_) {
-            _close(fd);
-            fmt::print(stderr, "Failed to create FILE* from file descriptor\n");
-            return;
-        }
-#else
-        // 非Windows平台代码
-        logFile_ = fopen(filename.c_str(), "wb");
-        if (!logFile_) {
-            fmt::print(stderr, "Failed to open log file '{}': {}\n", filename.c_str(), strerror(errno));
-            return;
-        }
-#endif
-        
-        fmt::print("Log file opened successfully, writing BOM\n");
-        
-        // 写入UTF-8 BOM
-        const unsigned char utf8_bom[3] = { 0xEF, 0xBB, 0xBF };
-        size_t bomWritten = fwrite(utf8_bom, 1, sizeof(utf8_bom), logFile_);
-        if (bomWritten != sizeof(utf8_bom)) {
-            fmt::print(stderr, "Failed to write UTF-8 BOM: wrote {} of {} bytes\n", 
-                      bomWritten, sizeof(utf8_bom));
-            fclose(logFile_);
-            logFile_ = nullptr;
-            return;
-        }
-        
-        // 设置文件缓冲区为无缓冲模式
-        if (setvbuf(logFile_, nullptr, _IONBF, 0) != 0) {
-            fmt::print(stderr, "Failed to set file buffer mode: {}\n", strerror(errno));
-        }
-        
-        // 验证文件是否可写
-        auto initMsg = fmt::format("=== Log Started at {} ===\n", 
-                                 fmt::format("{:%Y-%m-%d %H:%M:%S}", 
-                                           std::chrono::system_clock::now()));
-        
-        size_t initMsgLen = initMsg.length();
-        size_t written = fwrite(initMsg.c_str(), 1, initMsgLen, logFile_);
-        
-        if (written != initMsgLen) {
-            fmt::print(stderr, "Failed to write initial log message: wrote {} of {} bytes\n",
-                      written, initMsgLen);
-            fclose(logFile_);
-            logFile_ = nullptr;
-            return;
-        }
-        
-        // 确保数据写入磁盘
-        if (fflush(logFile_) != 0) {
-            fmt::print(stderr, "Failed to flush initial message: {}\n", strerror(errno));
-        }
-        
-#ifdef TINA_PLATFORM_WINDOWS
-        if (_commit(_fileno(logFile_)) != 0) {
-            fmt::print(stderr, "Failed to commit initial message: {}\n", strerror(errno));
-        }
-#else
-        if (fsync(fileno(logFile_)) != 0) {
-            fmt::print(stderr, "Failed to sync initial message: {}\n", strerror(errno));
-        }
-#endif
-        
-        fmt::print("Successfully initialized log file\n");
+        manageFp_ = true;
+        LOG_DEBUG("Logger initialized with file successfully");
     } catch (const std::exception& e) {
-        fmt::print(stderr, "Failed to setup log file '{}': {}\n", filename.c_str(), e.what());
-        if (logFile_) {
-            fclose(logFile_);
-            logFile_ = nullptr;
-        }
+        LOG_DEBUG("Exception in init: {}", e.what());
+        throw;
     }
 }
 
-void Logger::start() {
-    if (running_) {
-        fmt::print("Logger is already running\n");
-        return;
-    }
-
-    if (!logFile_) {
-        fmt::print(stderr, "Cannot start logger: No output file set\n");
-        return;
-    }
-
-    running_ = true;
-    workerThread_ = std::thread(&Logger::processLogs, this);
-
-    if (!workerThread_.joinable()) {
-        running_ = false;
-        fmt::print(stderr, "Failed to start logger thread\n");
-        return;
-    }
-    
-    fmt::print("Logger started successfully\n");
-}
-
-void Logger::stop() {
-    if (!running_) return;
-    
-    fmt::print("Stopping logger...\n");
-    running_ = false;
-    flushCV_.notify_all();
-    
-    if (workerThread_.joinable()) {
-        workerThread_.join();
-    }
-    
-    if (logFile_) {
-        auto endMsg = fmt::format("=== Log Ended at {} ===\n",
-                                fmt::format("{:%Y-%m-%d %H:%M:%S}",
-                                          std::chrono::system_clock::now()));
-        
-        size_t endMsgLen = endMsg.length();
-        size_t written = fwrite(endMsg.c_str(), 1, endMsgLen, logFile_);
-        
-        if (written != endMsgLen) {
-            fmt::print(stderr, "Failed to write end message: wrote {} of {} bytes\n",
-                      written, endMsgLen);
-        }
-        
-        if (fflush(logFile_) != 0) {
-            fmt::print(stderr, "Failed to flush final message: {}\n", strerror(errno));
-        }
-        
-        fclose(logFile_);
-        logFile_ = nullptr;
-    }
-    
-    fmt::print("Logger stopped\n");
-}
-
-void Logger::processLogs() {
-    fmt::print("Log processing thread started\n");
-    
-    while (running_) {
-        bool hasMessages = false;
+void Logger::init(FILE* fp, bool manageFp) {
+    LOG_DEBUG("Initializing logger with FILE pointer");
+    try {
+        if (threadRunning_)
         {
-            std::unique_lock<std::mutex> lock(mutex_);
-            flushCV_.wait_for(lock, std::chrono::milliseconds(100));
+            close();
         }
 
-        LogMessage msg;
-        while (messageBuffer_.pop(msg)) {
-            hasMessages = true;
-            // 将系统时间转换为本地时间
-            auto now = std::chrono::system_clock::to_time_t(msg.timestamp);
-            std::tm local_tm{};
-            localtime_s(&local_tm, &now);
-            auto timeStr = fmt::format("{:%Y-%m-%d %H:%M:%S}", local_tm);
-            auto logStr = fmt::format("[{}] [{}] [{}] {}\n",
-                                    timeStr,
-                                    levelToString(msg.level),
-                                    msg.module.c_str(),
-                                    msg.message.c_str());
-            
-            // 控制台输出
-            fmt::print(fg(levelToColor(msg.level)), "{}", logStr);
-            
-            // 文件输出
-            if (logFile_) {
-                size_t len = logStr.length();
-                size_t written = fwrite(logStr.c_str(), 1, len, logFile_);
-                
-                if (written != len) {
-                    fmt::print(stderr, "Failed to write log message: wrote {} of {} bytes (error: {})\n",
-                             written, len, strerror(errno));
-                    continue;
-                }
-                
-                if (fflush(logFile_) != 0) {
-                    fmt::print(stderr, "Failed to flush log message: {}\n", strerror(errno));
-                }
-                
-#ifdef TINA_PLATFORM_WINDOWS
-                if (_commit(_fileno(logFile_)) != 0) {
-                    fmt::print(stderr, "Failed to commit log message: {}\n", strerror(errno));
-                }
-#else
-                if (fsync(fileno(logFile_)) != 0) {
-                    fmt::print(stderr, "Failed to sync log message: {}\n", strerror(errno));
-                }
-#endif
-            }
-        }
+        std::lock_guard<std::mutex> lock(queueMutex_);
 
-        if (hasMessages) {
-            fmt::print("Processed batch of messages\n");
-        }
-    }
-    
-    fmt::print("Log processing thread stopped\n");
-}
-
-void Logger::log(LogLevel level, std::string_view module, std::string_view message) {
-    if (level < minLevel_) return;
-
-    try {
-        LogMessage msg{
-            std::chrono::system_clock::now(),
-            level,
-            String(module),
-            String(message)
-        };
-
-        if (!messageBuffer_.push(std::move(msg))) {
-            // Buffer full, handle overflow
-            std::lock_guard<std::mutex> lock(overflowMutex_);
-            overflowMessages_.push_back(std::move(msg));
-            fmt::print(stderr, "Log buffer full, message moved to overflow\n");
-        }
-        flushCV_.notify_one();
+        outputFp_ = fp;
+        manageFp_ = manageFp;
+        LOG_DEBUG("Logger initialized with FILE pointer successfully");
     } catch (const std::exception& e) {
-        fmt::print(stderr, "Logging failed: {}\n", e.what());
+        LOG_DEBUG("Exception in init: {}", e.what());
+        throw;
     }
 }
 
-void Logger::flush() {
-    if (!running_) return;
-    
+void Logger::setLogLevel(Level level) {
+    LOG_DEBUG("Setting log level to: {}", static_cast<int>(level));
+    currentLevel_.store(level, std::memory_order_relaxed);
+}
+
+Logger::Level Logger::getLogLevel() const {
+    auto level = currentLevel_.load(std::memory_order_relaxed);
+    LOG_DEBUG("Current log level: {}", static_cast<int>(level));
+    return level;
+}
+
+bool Logger::isLevelEnabled(Level level) const {
+    bool enabled = level >= currentLevel_.load(std::memory_order_relaxed);
+    LOG_DEBUG("Checking if level {} is enabled: {}", static_cast<int>(level), enabled);
+    return enabled;
+}
+
+void Logger::setFlushDelay(int64_t ns) {
+    LOG_DEBUG("Setting flush delay to: {} ns", ns);
+    flushDelay_ = ns;
+}
+
+void Logger::setFlushLevel(Level level) {
+    LOG_DEBUG("Setting flush level to: {}", static_cast<int>(level));
+    flushLevel_ = level;
+}
+
+void Logger::setFlushBufferSize(uint32_t bytes) {
+    LOG_DEBUG("Setting flush buffer size to: {} bytes", bytes);
+    flushBufferSize_ = bytes;
+}
+
+void Logger::startPollingThread(int64_t pollInterval) {
+    LOG_DEBUG("Starting polling thread with interval: {} ns", pollInterval);
     try {
-        LogMessage msg;
-        while (messageBuffer_.pop(msg)) {
-            auto timeStr = fmt::format("{:%Y-%m-%d %H:%M:%S}", msg.timestamp);
-            auto logStr = fmt::format("[{}] [{}] [{}] {}\n",
-                                    timeStr,
-                                    levelToString(msg.level),
-                                    msg.module.c_str(),
-                                    msg.message.c_str());
-            
-            // 控制台输出
-            fmt::print(fg(levelToColor(msg.level)), "{}", logStr);
-            
-            // 文件输出
-            if (logFile_) {
-                if (fputs(logStr.c_str(), logFile_) == EOF) {
-                    fmt::print(stderr, "Failed to write to log file\n");
-                    continue;
-                }
-                
-                // 立即刷新文件缓冲区
-                if (fflush(logFile_) != 0) {
-                    fmt::print(stderr, "Failed to flush log file\n");
+        if (threadRunning_) {
+            LOG_DEBUG("Thread already running");
+            return;
+        }
+
+        shouldExit_ = false;
+        threadRunning_ = true;
+
+        pollingThread_ = std::thread([this]() {
+            LOG_DEBUG("Polling thread started");
+            while (!shouldExit_) {
+                try {
+                    std::unique_lock<std::mutex> lock(queueMutex_);
+                    if (!messageQueue_.empty()) {
+                        LOG_DEBUG("Processing {} messages", messageQueue_.size());
+                        processQueuedMessages();
+                    }
+                    lock.unlock();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                } catch (const std::exception& e) {
+                    LOG_DEBUG("Exception in polling thread: {}", e.what());
                 }
             }
-        }
+            LOG_DEBUG("Polling thread stopping");
+        });
+        LOG_DEBUG("Polling thread created successfully");
     } catch (const std::exception& e) {
-        fmt::print(stderr, "Error during log flush: {}\n", e.what());
-        // 尝试重新打开文件
-        if (logFile_) {
-            fclose(logFile_);
-            logFile_ = nullptr;
-            if (!logPath_.empty()) {
-                setOutputFile(String(logPath_.string()));
-            }
-        }
+        LOG_DEBUG("Exception in startPollingThread: {}", e.what());
+        threadRunning_ = false;
+        throw;
     }
 }
 
-} // namespace Tina
+void Logger::stopPollingThread() {
+    LOG_DEBUG("Stopping polling thread");
+    try {
+        if (!threadRunning_) {
+            LOG_DEBUG("Thread not running");
+            return;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(queueMutex_);
+            shouldExit_ = true;
+            LOG_DEBUG("Set exit flag");
+        }
+
+        if (pollingThread_.joinable()) {
+            LOG_DEBUG("Joining thread");
+            pollingThread_.join();
+        }
+
+        threadRunning_ = false;
+        LOG_DEBUG("Polling thread stopped successfully");
+    } catch (const std::exception& e) {
+        LOG_DEBUG("Exception in stopPollingThread: {}", e.what());
+        throw;
+    }
+}
+
+void Logger::flush(bool force) {
+    LOG_DEBUG("Flushing messages (force: {})", force);
+    try {
+        if (!outputFp_) {
+            LOG_DEBUG("No output file");
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        processQueuedMessages();
+        if (force) {
+            LOG_DEBUG("Force flushing file");
+            fflush(outputFp_);
+        }
+        LOG_DEBUG("Flush completed");
+    } catch (const std::exception& e) {
+        LOG_DEBUG("Exception in flush: {}", e.what());
+        throw;
+    }
+}
+
+void Logger::close() {
+    LOG_DEBUG("Closing logger");
+    try {
+        stopPollingThread();
+
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        if (outputFp_ && manageFp_) {
+            LOG_DEBUG("Flushing and closing file");
+            fflush(outputFp_);
+            fclose(outputFp_);
+        }
+        outputFp_ = nullptr;
+        manageFp_ = false;
+
+        size_t remainingMessages = messageQueue_.size();
+        LOG_DEBUG("Clearing {} remaining messages", remainingMessages);
+        while (!messageQueue_.empty()) {
+            messageQueue_.pop();
+        }
+        LOG_DEBUG("Logger closed successfully");
+    } catch (const std::exception& e) {
+        LOG_DEBUG("Exception in close: {}", e.what());
+        throw;
+    }
+}
+
+void Logger::processQueuedMessages() {
+    if (!outputFp_) {
+        LOG_DEBUG("No output file in processQueuedMessages");
+        return;
+    }
+
+    static const char* levelStrings[] = {
+        "调试", "信息", "警告", "错误"
+    };
+
+    size_t processedCount = 0;
+    try {
+        while (!messageQueue_.empty()) {
+            const auto& msg = messageQueue_.front();
+
+            auto timeT = std::chrono::system_clock::to_time_t(msg.timestamp);
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                msg.timestamp.time_since_epoch()).count() % 1000;
+
+            std::stringstream ss;
+            ss << std::put_time(std::localtime(&timeT), "%Y-%m-%d %H:%M:%S");
+            ss << "." << std::setfill('0') << std::setw(3) << ms;
+
+            std::string logLine = fmt::format("{} [{}] {}\n",
+                ss.str(), levelStrings[static_cast<size_t>(msg.level)], msg.content);
+
+            if (fwrite(logLine.data(), 1, logLine.size(), outputFp_) != logLine.size()) {
+                LOG_DEBUG("Failed to write log line");
+                throw std::runtime_error("Failed to write to log file");
+            }
+            messageQueue_.pop();
+            processedCount++;
+        }
+        LOG_DEBUG("Processed {} messages", processedCount);
+    } catch (const std::exception& e) {
+        LOG_DEBUG("Exception in processQueuedMessages after processing {} messages: {}",
+            processedCount, e.what());
+        throw;
+    }
+}
+
+}

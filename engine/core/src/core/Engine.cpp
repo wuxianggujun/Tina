@@ -75,35 +75,34 @@ namespace Tina::Core
         const uint32_t clearColor = 0x443355FF;
 
         bool running = true;
+
         while (running)
         {
             m_context.processEvents();
 
-            /*
-            Event event;
-            while (m_context.getEventQueue().peekEvent(event))
-            {
-                switch (event.type)
-                {
-                case Event::WindowDestroy:
-                    running = false;
-                    break;
-                case Event::Key:
-                    if (event.key.key == GLFW_KEY_ESCAPE && event.key.action == GLFW_PRESS)
-                    {
-                        running = false;
-                    }
-                    break;
-                case Event::WindowResize:
-                    bgfx::reset(event.windowResize.width, event.windowResize.height, BGFX_RESET_VSYNC);
-                    bgfx::setViewRect(0, 0, 0, event.windowResize.width, event.windowResize.height);
-                    break;
-                default:
+             Event event;
+             while (m_context.getEventQueue().peekEvent(event))
+             {
+                 switch (event.type)
+                 {
+                 case Event::WindowDestroy:
+                     running = false;
+                     break;
+                 case Event::Key:
+                     if (event.key.key == GLFW_KEY_ESCAPE && event.key.action == GLFW_PRESS)
+                     {
+                         running = false;
+                     }
+                     break;
+                 case Event::WindowResize:
+                     bgfx::reset(event.windowResize.width, event.windowResize.height, BGFX_RESET_VSYNC);
+                     bgfx::setViewRect(0, 0, 0, event.windowResize.width, event.windowResize.height);
+                     break;
+                 default:
 
-                    break;
-                }
-            }
-            */
+                     break;
+                 }
+             }
 
             // 清除背景
             bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, clearColor, 1.0f, 0);
