@@ -60,38 +60,38 @@ namespace Tina
         void close();
 
         template <typename... Args>
-        void debug(fmt::format_string<Args...> format, Args&&... args)
+        void debug(const char* file, uint32_t line, fmt::format_string<Args...> format, Args&&... args)
         {
             if (isLevelEnabled(Level::Debug))
             {
-                logImpl(Level::Debug, format, std::forward<Args>(args)...);
+                logImpl(Level::Debug, file, line, format, std::forward<Args>(args)...);
             }
         }
 
         template <typename... Args>
-        void info(fmt::format_string<Args...> format, Args&&... args)
+        void info(const char* file, uint32_t line,fmt::format_string<Args...> format, Args&&... args)
         {
             if (isLevelEnabled(Level::Info))
             {
-                logImpl(Level::Info, format, std::forward<Args>(args)...);
+                logImpl(Level::Info,file, line, format, std::forward<Args>(args)...);
             }
         }
 
         template <typename... Args>
-        void warning(fmt::format_string<Args...> format, Args&&... args)
+        void warning(const char* file, uint32_t line,fmt::format_string<Args...> format, Args&&... args)
         {
             if (isLevelEnabled(Level::Warning))
             {
-                logImpl(Level::Warning, format, std::forward<Args>(args)...);
+                logImpl(Level::Warning, file, line,format, std::forward<Args>(args)...);
             }
         }
 
         template <typename... Args>
-        void error(fmt::format_string<Args...> format, Args&&... args)
+        void error(const char* file, uint32_t line,fmt::format_string<Args...> format, Args&&... args)
         {
             if (isLevelEnabled(Level::Error))
             {
-                logImpl(Level::Error, format, std::forward<Args>(args)...);
+                logImpl(Level::Error, file, line,format, std::forward<Args>(args)...);
             }
         }
 
@@ -106,26 +106,29 @@ namespace Tina
             Level level;
             std::chrono::system_clock::time_point timestamp;
             std::string content;
+            std::string file;
+            uint32_t line;
 
-            LogMessage(const Level lvl, const std::chrono::system_clock::time_point ts, std::string&& msg)
-                : level(lvl), timestamp(ts), content(std::move(msg))
+            LogMessage(const Level lvl, const std::chrono::system_clock::time_point ts, const std::string_view msg,
+                       const std::string_view filename, const uint32_t lineNumber)
+                : level(lvl), timestamp(ts), content(msg), file(filename), line(lineNumber)
             {
             }
         };
 
         template <typename... Args>
-        void logImpl(Level level, fmt::format_string<Args...> format, Args&&... args)
+        void logImpl(Level level, const char* file, uint32_t line, fmt::format_string<Args...> format, Args&&... args)
         {
             try
             {
                 std::string message = fmt::format(format, std::forward<Args>(args)...);
                 auto now = std::chrono::system_clock::now();
 
-                bool needsFlush = (level >= flushLevel_);
+                bool needsFlush = level >= flushLevel_;
 
                 {
                     std::lock_guard<std::mutex> lock(queueMutex_);
-                    messageQueue_.emplace(level, now, std::move(message));
+                    messageQueue_.emplace(level, now, std::move(message), file, line);
                     if (needsFlush)
                     {
                         // 对于高级别的日志，直接处理消息队列
@@ -163,9 +166,8 @@ namespace Tina
         std::atomic_bool shouldExit_{false};
     };
 
-    // 用户日志宏
-#define TINA_LOG_DEBUG(...) Tina::Logger::getInstance().debug(__VA_ARGS__)
-#define TINA_LOG_INFO(...) Tina::Logger::getInstance().info(__VA_ARGS__)
-#define TINA_LOG_WARNING(...) Tina::Logger::getInstance().warning(__VA_ARGS__)
-#define TINA_LOG_ERROR(...) Tina::Logger::getInstance().error(__VA_ARGS__)
+#define TINA_LOG_DEBUG(...) Tina::Logger::getInstance().debug(__FILE__, __LINE__, __VA_ARGS__)
+#define TINA_LOG_INFO(...) Tina::Logger::getInstance().info(__FILE__, __LINE__, __VA_ARGS__)
+#define TINA_LOG_WARNING(...) Tina::Logger::getInstance().warning(__FILE__, __LINE__, __VA_ARGS__)
+#define TINA_LOG_ERROR(...) Tina::Logger::getInstance().error(__FILE__, __LINE__, __VA_ARGS__)
 } // namespace Tina

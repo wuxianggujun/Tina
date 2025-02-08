@@ -1,7 +1,5 @@
 #include "tina/log/Logger.hpp"
 #include <iomanip>
-#include <iostream>
-#include <sstream>
 
 namespace Tina
 {
@@ -212,6 +210,21 @@ namespace Tina
         }
     }
 
+    std::string getBaseName(const std::string& path) {
+        size_t lastSlash = path.find_last_of("/\\");
+        if (lastSlash != std::string::npos) {
+            return path.substr(lastSlash + 1);
+        }
+        return path;
+    }
+
+    static const char* getBaseName(const char* path) {
+        const char* lastSlash = std::strrchr(path, '/');
+        const char* lastBackslash = std::strrchr(path, '\\');
+        const char* last = (lastSlash > lastBackslash) ? lastSlash : lastBackslash;
+        return last ? last + 1 : path;
+    }
+
     void Logger::processQueuedMessages()
     {
         std::vector<LogMessage> localQueue;
@@ -256,10 +269,13 @@ namespace Tina
                 char timestamp[32];
                 std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &tm);
 
-                std::string logLine = fmt::format("[{}] [{}] {}\n",
-                                                timestamp,
-                                                levelStrings[static_cast<size_t>(msg.level)],
-                                                msg.content);
+                std::string logLine = fmt::format("[{}] [{}] [{}:{}] {}\n",
+                                timestamp,
+                                levelStrings[static_cast<size_t>(msg.level)],
+                                getBaseName(msg.file.c_str()),
+                                msg.line,
+                                msg.content);  // 这里添加了消息内容
+
                 buffer += logLine;
 
                 // 控制台输出（带颜色）
