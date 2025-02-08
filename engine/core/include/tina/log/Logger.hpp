@@ -16,8 +16,13 @@
 #include <condition_variable>
 
 // 调试日志宏
-#ifdef _DEBUG
-#define LOG_DEBUG(format, ...) fmt::print(fg(fmt::color::light_blue), "[DEBUG] {} - " format "\n", __FUNCTION__, ##__VA_ARGS__)
+#ifdef TINA_DEBUG_LOGGER
+#define LOG_DEBUG(format, ...) \
+do { \
+if constexpr (true) { \
+fmt::print(fg(fmt::color::light_blue), "[DEBUG] {} - " format "\n", __FUNCTION__, ##__VA_ARGS__); \
+} \
+} while(false)
 #else
 #define LOG_DEBUG(format, ...)
 #endif
@@ -102,12 +107,11 @@ namespace Tina
             std::chrono::system_clock::time_point timestamp;
             std::string content;
 
-            LogMessage(Level lvl, std::chrono::system_clock::time_point ts, std::string&& msg)
+            LogMessage(const Level lvl, const std::chrono::system_clock::time_point ts, std::string&& msg)
                 : level(lvl), timestamp(ts), content(std::move(msg))
             {
             }
         };
-
 
         template <typename... Args>
         void logImpl(Level level, fmt::format_string<Args...> format, Args&&... args)
@@ -118,13 +122,17 @@ namespace Tina
                 auto now = std::chrono::system_clock::now();
 
                 bool needsFlush = (level >= flushLevel_);
+
                 {
                     std::lock_guard<std::mutex> lock(queueMutex_);
                     messageQueue_.emplace(level, now, std::move(message));
-                    if (needsFlush) {
+                    if (needsFlush)
+                    {
                         // 对于高级别的日志，直接处理消息队列
                         processQueuedMessages();
-                    } else {
+                    }
+                    else
+                    {
                         // 否则只通知轮询线程
                         queueCV_.notify_one();
                     }
@@ -132,7 +140,7 @@ namespace Tina
             }
             catch (const std::exception& e)
             {
-                fmt::print(stderr, "Error in logImpl: {}\n", e.what());
+                LOG_DEBUG("Error in logImpl: {}\n", e.what());
             }
         }
 
@@ -144,7 +152,7 @@ namespace Tina
         Level flushLevel_;
         std::ofstream outputFile_;
         bool manageFp_;
-        bool consoleOutput_; // 添加控制台输出标志
+        bool consoleOutput_; // 控制台输出标志
 
         std::mutex queueMutex_;
         std::queue<LogMessage> messageQueue_;
@@ -155,6 +163,7 @@ namespace Tina
         std::atomic_bool shouldExit_{false};
     };
 
+    // 用户日志宏
 #define TINA_LOG_DEBUG(...) Tina::Logger::getInstance().debug(__VA_ARGS__)
 #define TINA_LOG_INFO(...) Tina::Logger::getInstance().info(__VA_ARGS__)
 #define TINA_LOG_WARNING(...) Tina::Logger::getInstance().warning(__VA_ARGS__)
