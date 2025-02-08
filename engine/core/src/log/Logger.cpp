@@ -1,258 +1,333 @@
 #include "tina/log/Logger.hpp"
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 
-namespace Tina {
-
-Logger& Logger::getInstance() {
-    LOG_DEBUG("Getting logger instance");
-    static Logger instance;
-    return instance;
-}
-
-Logger::Logger()
-    : currentLevel_(Level::Info)
-    , flushDelay_(3000000000) // 3秒
-    , flushBufferSize_(8 * 1024) // 8KB
-    , flushLevel_(Level::Error)
-    , outputFp_(nullptr)
-    , manageFp_(false)
-    , threadRunning_(false)
-    , shouldExit_(false) {
-    LOG_DEBUG("Logger constructed");
-}
-
-Logger::~Logger() {
-    LOG_DEBUG("Logger destructor called");
-    stopPollingThread();
-    flush(true);
-    close();
-    LOG_DEBUG("Logger destroyed");
-}
-
-void Logger::init(const std::string& filename, bool truncate) {
-    LOG_DEBUG("Initializing logger with file: {}", filename);
-    try {
-	    if (threadRunning_)
-	    {
-            close();
-	    }
-
-        std::lock_guard<std::mutex> lock(queueMutex_);
-
-        outputFp_ = fopen(filename.c_str(), truncate ? "w" : "a");
-        if (!outputFp_) {
-            LOG_DEBUG("Failed to open file: {}", filename);
-            throw std::runtime_error("Failed to open log file");
-        }
-        manageFp_ = true;
-        LOG_DEBUG("Logger initialized with file successfully");
-    } catch (const std::exception& e) {
-        LOG_DEBUG("Exception in init: {}", e.what());
-        throw;
+namespace Tina
+{
+    Logger& Logger::getInstance()
+    {
+        fmt::print(stderr, "Getting logger instance\n");
+        static Logger instance;
+        return instance;
     }
-}
 
-void Logger::init(FILE* fp, bool manageFp) {
-    LOG_DEBUG("Initializing logger with FILE pointer");
-    try {
-        if (threadRunning_)
+    Logger::Logger()
+        : currentLevel_(Level::Info)
+          , flushDelay_(3000000000) // 3秒
+          , flushBufferSize_(8 * 1024) // 8KB
+          , flushLevel_(Level::Error)
+          , manageFp_(false)
+          , threadRunning_(false)
+          , consoleOutput_(true)
+    {
+        fmt::print(stderr, "Logger constructed\n");
+    }
+
+    Logger::~Logger()
+    {
+        try
         {
             close();
         }
-
-        std::lock_guard<std::mutex> lock(queueMutex_);
-
-        outputFp_ = fp;
-        manageFp_ = manageFp;
-        LOG_DEBUG("Logger initialized with FILE pointer successfully");
-    } catch (const std::exception& e) {
-        LOG_DEBUG("Exception in init: {}", e.what());
-        throw;
-    }
-}
-
-void Logger::setLogLevel(Level level) {
-    LOG_DEBUG("Setting log level to: {}", static_cast<int>(level));
-    currentLevel_.store(level, std::memory_order_relaxed);
-}
-
-Logger::Level Logger::getLogLevel() const {
-    auto level = currentLevel_.load(std::memory_order_relaxed);
-    LOG_DEBUG("Current log level: {}", static_cast<int>(level));
-    return level;
-}
-
-bool Logger::isLevelEnabled(Level level) const {
-    bool enabled = level >= currentLevel_.load(std::memory_order_relaxed);
-    LOG_DEBUG("Checking if level {} is enabled: {}", static_cast<int>(level), enabled);
-    return enabled;
-}
-
-void Logger::setFlushDelay(int64_t ns) {
-    LOG_DEBUG("Setting flush delay to: {} ns", ns);
-    flushDelay_ = ns;
-}
-
-void Logger::setFlushLevel(Level level) {
-    LOG_DEBUG("Setting flush level to: {}", static_cast<int>(level));
-    flushLevel_ = level;
-}
-
-void Logger::setFlushBufferSize(uint32_t bytes) {
-    LOG_DEBUG("Setting flush buffer size to: {} bytes", bytes);
-    flushBufferSize_ = bytes;
-}
-
-void Logger::startPollingThread(int64_t pollInterval) {
-    LOG_DEBUG("Starting polling thread with interval: {} ns", pollInterval);
-    try {
-        if (threadRunning_) {
-            LOG_DEBUG("Thread already running");
-            return;
+        catch (...)
+        {
+            // 析构函数不应该抛出异常
         }
+    }
 
-        shouldExit_ = false;
-        threadRunning_ = true;
-
-        pollingThread_ = std::thread([this]() {
-            LOG_DEBUG("Polling thread started");
-            while (!shouldExit_) {
-                try {
-                    std::unique_lock<std::mutex> lock(queueMutex_);
-                    if (!messageQueue_.empty()) {
-                        LOG_DEBUG("Processing {} messages", messageQueue_.size());
-                        processQueuedMessages();
-                    }
-                    lock.unlock();
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                } catch (const std::exception& e) {
-                    LOG_DEBUG("Exception in polling thread: {}", e.what());
-                }
+    void Logger::init(const std::string& filename, bool truncate, bool consoleOutput)
+    {
+        try
+        {
+            if (threadRunning_)
+            {
+                close();
             }
-            LOG_DEBUG("Polling thread stopping");
-        });
-        LOG_DEBUG("Polling thread created successfully");
-    } catch (const std::exception& e) {
-        LOG_DEBUG("Exception in startPollingThread: {}", e.what());
-        threadRunning_ = false;
-        throw;
-    }
-}
 
-void Logger::stopPollingThread() {
-    LOG_DEBUG("Stopping polling thread");
-    try {
-        if (!threadRunning_) {
-            LOG_DEBUG("Thread not running");
-            return;
+            {
+                std::lock_guard<std::mutex> lock(queueMutex_);
+                outputFile_.open(filename, truncate ? std::ios::trunc : std::ios::app);
+                if (!outputFile_.is_open())
+                {
+                    throw std::runtime_error("Failed to open log file: " + filename);
+                }
+                manageFp_ = true;
+                consoleOutput_ = consoleOutput;
+            }
+            // 自动启动轮询线程，使用100ms的默认轮询间隔
+            startPollingThread(100'000'000);
+            fmt::print(stderr, "Logger initialized with file: {}\n", filename);
         }
+        catch (const std::exception& e)
+        {
+            fmt::print(stderr, "Error in init: {}\n", e.what());
+            throw;
+        }
+    }
 
+    void Logger::setLogLevel(Level level)
+    {
+        fmt::print(stderr, "Setting log level to: {}\n", static_cast<int>(level));
+        currentLevel_.store(level, std::memory_order_relaxed);
+    }
+
+    Logger::Level Logger::getLogLevel() const
+    {
+        auto level = currentLevel_.load(std::memory_order_relaxed);
+        fmt::print(stderr, "Current log level: {}\n", static_cast<int>(level));
+        return level;
+    }
+
+    bool Logger::isLevelEnabled(Level level) const
+    {
+        bool enabled = level >= currentLevel_.load(std::memory_order_relaxed);
+        fmt::print(stderr, "Checking if level {} is enabled: {}\n", static_cast<int>(level), enabled);
+        return enabled;
+    }
+
+    void Logger::setFlushDelay(int64_t ns)
+    {
+        fmt::print(stderr, "Setting flush delay to: {} ns\n", ns);
+        flushDelay_ = ns;
+    }
+
+    void Logger::setFlushLevel(Level level)
+    {
+        fmt::print(stderr, "Setting flush level to: {}\n", static_cast<int>(level));
+        flushLevel_ = level;
+    }
+
+    void Logger::setFlushBufferSize(uint32_t bytes)
+    {
+        fmt::print(stderr, "Setting flush buffer size to: {} bytes\n", bytes);
+        flushBufferSize_ = bytes;
+    }
+
+    void Logger::startPollingThread(int64_t pollInterval)
+    {
+        try
         {
             std::lock_guard<std::mutex> lock(queueMutex_);
-            shouldExit_ = true;
-            LOG_DEBUG("Set exit flag");
-        }
+            if (threadRunning_)
+            {
+                return;
+            }
 
-        if (pollingThread_.joinable()) {
-            LOG_DEBUG("Joining thread");
-            pollingThread_.join();
-        }
+            shouldExit_ = false;
+            threadRunning_ = true;
 
-        threadRunning_ = false;
-        LOG_DEBUG("Polling thread stopped successfully");
-    } catch (const std::exception& e) {
-        LOG_DEBUG("Exception in stopPollingThread: {}", e.what());
-        throw;
+            pollingThread_ = std::thread([this, pollInterval]()
+            {
+                while (!shouldExit_)
+                {
+                    try
+                    {
+                        std::unique_lock<std::mutex> lock(queueMutex_);
+                        // 等待新消息或退出信号
+                        auto result = queueCV_.wait_for(lock,
+                                                        std::chrono::nanoseconds(pollInterval),
+                                                        [this] { return !messageQueue_.empty() || shouldExit_; });
+
+                        if (result && !messageQueue_.empty())
+                        {
+                            lock.unlock(); // 释放锁后再处理消息
+                            processQueuedMessages();
+                        }
+                    }
+                    catch (const std::exception& e)
+                    {
+                        fmt::print(stderr, "Error in polling thread: {}\n", e.what());
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    }
+                }
+                fmt::print(stderr, "Polling thread stopped\n");
+            });
+
+            fmt::print(stderr, "Polling thread started\n");
+        }
+        catch (const std::exception& e)
+        {
+            threadRunning_ = false;
+            fmt::print(stderr, "Error starting polling thread: {}\n", e.what());
+            throw;
+        }
     }
-}
 
-void Logger::flush(bool force) {
-    LOG_DEBUG("Flushing messages (force: {})", force);
-    try {
-        if (!outputFp_) {
-            LOG_DEBUG("No output file");
+    void Logger::stopPollingThread()
+    {
+        try
+        {
+            {
+                std::lock_guard<std::mutex> lock(queueMutex_);
+                if (!threadRunning_)
+                {
+                    return;
+                }
+                shouldExit_ = true;
+                queueCV_.notify_one();
+            }
+
+            if (pollingThread_.joinable())
+            {
+                pollingThread_.join();
+            }
+
+            threadRunning_ = false;
+            fmt::print(stderr, "Polling thread stopped successfully\n");
+        }
+        catch (const std::exception& e)
+        {
+            fmt::print(stderr, "Error stopping polling thread: {}\n", e.what());
+            throw;
+        }
+    }
+
+    void Logger::close()
+    {
+        fmt::print(stderr, "Closing logger\n");
+        try
+        {
+            if (threadRunning_)
+            {
+                // 确保所有消息都被处理
+                flush(true);
+                stopPollingThread();
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(queueMutex_);
+                if (outputFile_.is_open())
+                {
+                    outputFile_.close();
+                }
+            }
+            manageFp_ = false;
+
+            fmt::print(stderr, "Logger closed successfully\n");
+        }
+        catch (const std::exception& e)
+        {
+            fmt::print(stderr, "Error closing logger: {}\n", e.what());
+            throw;
+        }
+    }
+
+      void Logger::processQueuedMessages()
+    {
+        std::vector<LogMessage> localQueue;
+
+        // 首先获取消息队列的副本
+        {
+            std::lock_guard<std::mutex> lock(queueMutex_);
+            if (messageQueue_.empty())
+            {
+                return;
+            }
+
+            // 将队列中的消息移动到vector中
+            localQueue.reserve(messageQueue_.size());
+            while (!messageQueue_.empty()) {
+                localQueue.push_back(std::move(messageQueue_.front()));
+                messageQueue_.pop();
+            }
+        }
+
+        static const char* levelStrings[] = {
+            "DEBUG", "INFO", "WARN", "ERROR"
+        };
+
+        static const fmt::color levelColors[] = {
+            fmt::color::light_blue, // Debug
+            fmt::color::light_green, // Info
+            fmt::color::yellow, // Warning
+            fmt::color::red // Error
+        };
+
+        std::string buffer;
+        size_t processedCount = 0;
+
+        // 处理消息，不持有锁
+        for (const auto& msg : localQueue)
+        {
+            try
+            {
+                // 格式化时间戳
+                auto time_t = std::chrono::system_clock::to_time_t(msg.timestamp);
+                auto tm = *std::localtime(&time_t);
+                char timestamp[32];
+                std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &tm);
+
+                // 格式化日志行
+                std::string logLine = fmt::format("[{}] [{}] {}\n",
+                                                timestamp,
+                                                levelStrings[static_cast<size_t>(msg.level)],
+                                                msg.content);
+
+                // 添加到缓冲区
+                buffer += logLine;
+
+                // 控制台输出（带颜色）
+                if (consoleOutput_)
+                {
+                    fmt::color color = levelColors[static_cast<size_t>(msg.level)];
+                    fmt::print(fg(color), "{}", logLine);
+                    fflush(stdout);
+                }
+
+                processedCount++;
+            }
+            catch (const std::exception& e)
+            {
+                fmt::print(stderr, "Error processing log message: {}\n", e.what());
+            }
+        }
+
+        // 最后一次性写入文件
+        if (!buffer.empty())
+        {
+            try
+            {
+                std::lock_guard<std::mutex> lock(queueMutex_);
+                if (outputFile_.is_open())
+                {
+                    outputFile_.write(buffer.c_str(), buffer.size());
+                    outputFile_.flush();
+                }
+            }
+            catch (const std::exception& e)
+            {
+                fmt::print(stderr, "Error writing to log file: {}\n", e.what());
+            }
+        }
+
+        if (processedCount > 0)
+        {
+            fmt::print(stderr, "Processed {} messages\n", processedCount);
+        }
+    }
+
+    void Logger::flush(bool force)
+    {
+        if (!threadRunning_ && !force)
+        {
             return;
         }
 
-        std::lock_guard<std::mutex> lock(queueMutex_);
-        processQueuedMessages();
-        if (force) {
-            LOG_DEBUG("Force flushing file");
-            fflush(outputFp_);
-        }
-        LOG_DEBUG("Flush completed");
-    } catch (const std::exception& e) {
-        LOG_DEBUG("Exception in flush: {}", e.what());
-        throw;
-    }
-}
-
-void Logger::close() {
-    LOG_DEBUG("Closing logger");
-    try {
-        stopPollingThread();
-
-        std::lock_guard<std::mutex> lock(queueMutex_);
-        if (outputFp_ && manageFp_) {
-            LOG_DEBUG("Flushing and closing file");
-            fflush(outputFp_);
-            fclose(outputFp_);
-        }
-        outputFp_ = nullptr;
-        manageFp_ = false;
-
-        size_t remainingMessages = messageQueue_.size();
-        LOG_DEBUG("Clearing {} remaining messages", remainingMessages);
-        while (!messageQueue_.empty()) {
-            messageQueue_.pop();
-        }
-        LOG_DEBUG("Logger closed successfully");
-    } catch (const std::exception& e) {
-        LOG_DEBUG("Exception in close: {}", e.what());
-        throw;
-    }
-}
-
-void Logger::processQueuedMessages() {
-    if (!outputFp_) {
-        LOG_DEBUG("No output file in processQueuedMessages");
-        return;
-    }
-
-    static const char* levelStrings[] = {
-        "调试", "信息", "警告", "错误"
-    };
-
-    size_t processedCount = 0;
-    try {
-        while (!messageQueue_.empty()) {
-            const auto& msg = messageQueue_.front();
-
-            auto timeT = std::chrono::system_clock::to_time_t(msg.timestamp);
-            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                msg.timestamp.time_since_epoch()).count() % 1000;
-
-            std::stringstream ss;
-            ss << std::put_time(std::localtime(&timeT), "%Y-%m-%d %H:%M:%S");
-            ss << "." << std::setfill('0') << std::setw(3) << ms;
-
-            std::string logLine = fmt::format("{} [{}] {}\n",
-                ss.str(), levelStrings[static_cast<size_t>(msg.level)], msg.content);
-
-            if (fwrite(logLine.data(), 1, logLine.size(), outputFp_) != logLine.size()) {
-                LOG_DEBUG("Failed to write log line");
-                throw std::runtime_error("Failed to write to log file");
+        try
+        {
+            if (force)
+            {
+                processQueuedMessages();
             }
-            messageQueue_.pop();
-            processedCount++;
+            else
+            {
+                queueCV_.notify_one(); // 非强制刷新只通知轮询线程
+            }
         }
-        LOG_DEBUG("Processed {} messages", processedCount);
-    } catch (const std::exception& e) {
-        LOG_DEBUG("Exception in processQueuedMessages after processing {} messages: {}",
-            processedCount, e.what());
-        throw;
+        catch (const std::exception& e)
+        {
+            fmt::print(stderr, "Error in flush: {}\n", e.what());
+        }
     }
-}
-
 }
