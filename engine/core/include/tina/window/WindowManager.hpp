@@ -65,6 +65,7 @@ namespace Tina
         static void windowSizeCallback(GLFWwindow* glfwWindow, int32_t width, int32_t height);
         static void dropFileCallback(GLFWwindow* glfwWindow, int32_t count, const char** filePaths);
         static void joystickCallback(int jid, int action);
+        static void windowCloseCallback(GLFWwindow* glfwWindow);
 
     public:
         // WindowManager 实例方法 - 处理事件并发送到 EventQueue

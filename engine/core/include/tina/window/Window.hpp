@@ -45,9 +45,10 @@ namespace Tina
 
         Window(WindowManager* windowManager, WindowHandle handle, const WindowConfig& config);
         ~Window();
+        [[nodiscard]] bool shouldClose() const;
 
-        GLFWwindow* getHandle() const { return m_handle; }
-        WindowHandle getWindowHandle() const { return m_windowHandle; }
+        [[nodiscard]] GLFWwindow* getHandle() const { return m_handle; }
+        [[nodiscard]] WindowHandle getWindowHandle() const { return m_windowHandle; }
 
         void setTitle(const char* title);
         void setPosition(int32_t x, int32_t y);

@@ -12,7 +12,7 @@ int main()
     logger.init("app.log", true, true);  // 文件名，是否清空文件，是否输出到控制台
     logger.setLogLevel(Tina::Logger::Level::Debug);
 
-    TINA_LOG_INFO("main", "Application starting...");
+    TINA_LOG_INFO("Application starting");
 
     // Create engine instance
     Core::Engine engine;
@@ -20,20 +20,16 @@ int main()
     // Initialize engine
     if (!engine.initialize())
     {
-        TINA_LOG_ERROR("main", "Engine initialization failed.");
+        TINA_LOG_ERROR("Engine initialization failed");
         return -1;
     }
 
     if (!engine.run())
     {
-        TINA_LOG_ERROR("main", "Application run failed.");
-        engine.shutdown();
+        TINA_LOG_ERROR("Application run failed");
         return 1;
     }
 
-    // Shutdown engine
-    engine.shutdown();
-    TINA_LOG_INFO("main", "Application finished successfully.");
-
+    TINA_LOG_INFO("Application finished successfully");
     return 0;
 }

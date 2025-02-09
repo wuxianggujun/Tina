@@ -83,6 +83,7 @@ namespace Tina
         glfwSetMouseButtonCallback(window->getHandle(), mouseButtonCallback);
         glfwSetWindowSizeCallback(window->getHandle(), windowSizeCallback);
         glfwSetDropCallback(window->getHandle(), dropFileCallback);
+        glfwSetWindowCloseCallback(window->getHandle(), windowCloseCallback);  // 添加窗口关闭回调
 
         // 发送窗口创建事件
         Event event;
@@ -128,6 +129,18 @@ namespace Tina
     void WindowManager::processMessage()
     {
         glfwPollEvents();
+        
+        // 检查所有窗口的关闭状态
+        for (auto const& [handle, window] : m_windowMap)
+        {
+            if (window->shouldClose())
+            {
+                Event event;
+                event.type = Event::WindowClose;
+                event.windowHandle = handle;
+                m_context->getEventQueue().postEvent(event);
+            }
+        }
     }
 
     void* WindowManager::getNativeWindowHandle(WindowHandle handle)
@@ -360,6 +373,21 @@ namespace Tina
         if (auto* manager = WindowManager::getInstance())
         {
             manager->eventCallback_joystick(jid, action);
+        }
+    }
+
+    void WindowManager::windowCloseCallback(GLFWwindow* glfwWindow)
+    {
+        if (s_instance)
+        {
+            WindowHandle handle = s_instance->findHandle(glfwWindow);
+            if (isValid(handle))
+            {
+                Event event;
+                event.type = Event::WindowClose;
+                event.windowHandle = handle;
+                s_instance->m_context->getEventQueue().postEvent(event);
+            }
         }
     }
 } // Tina

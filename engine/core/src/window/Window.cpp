@@ -30,11 +30,10 @@ namespace Tina {
         }
     }
 
-
-    // bool Window::shouldClose() const
-    // {
-    //     return glfwWindowShouldClose(m_handle);
-    // }
+    bool Window::shouldClose() const
+    {
+        return glfwWindowShouldClose(m_handle);
+    }
 
     void Window::setTitle(const char* title)
     {

@@ -11,20 +11,24 @@ namespace Tina::Core
 {
     Engine::Engine()
     {
-        TINA_LOG_INFO("Engine", "Engine created.");
+        TINA_LOG_INFO("Engine created.");
     }
 
     Engine::~Engine()
     {
-        TINA_LOG_INFO("Engine", "Engine destroyed.");
-        shutdown();
+        TINA_LOG_INFO("Engine destroyed.");
+        // 确保在析构时调用 shutdown
+        if (bgfx::getInternalData()->context)
+        {
+            shutdown();
+        }
     }
 
     bool Engine::initialize()
     {
         if (!m_context.initialize())
         {
-            TINA_LOG_ERROR("Engine::initialize", "Failed to initialize context");
+            TINA_LOG_ERROR("Failed to initialize context");
             return false;
         }
 
@@ -32,7 +36,7 @@ namespace Tina::Core
         WindowHandle mainWindow = m_context.getWindowManager().createWindow(100, 100, 1280, 720, 0, "Tina Engine");
         if (!isValid(mainWindow))
         {
-            TINA_LOG_ERROR("Engine::initialize", "Failed to create main window");
+            TINA_LOG_ERROR("Failed to create main window");
             return false;
         }
 
@@ -48,7 +52,7 @@ namespace Tina::Core
 
         if (!bgfx::init(bgfxInit))
         {
-            TINA_LOG_ERROR("Engine::initialize", "Failed to initialize bgfx");
+            TINA_LOG_ERROR("Failed to initialize bgfx");
             return false;
         }
 
@@ -59,14 +63,21 @@ namespace Tina::Core
         bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
         bgfx::setViewRect(0, 0, 0, bgfxInit.resolution.width, bgfxInit.resolution.height);
 
-        TINA_LOG_INFO("Engine::initialize", "Engine initialized successfully");
+        TINA_LOG_INFO("Engine initialized successfully");
         return true;
     }
 
     void Engine::shutdown()
     {
-        bgfx::shutdown();
+        TINA_LOG_INFO("Engine shutting down");
+        // 先关闭 bgfx
+        if (bgfx::getInternalData()->context)
+        {
+            bgfx::shutdown();
+        }
+        // 再关闭窗口管理器
         m_context.getWindowManager().terminate();
+        TINA_LOG_INFO("Engine shutdown completed");
     }
 
     bool Engine::run()
@@ -86,15 +97,15 @@ namespace Tina::Core
                 switch (event.type)
                 {
                 case Event::WindowDestroy:
-                    running = false;
-                    break;
                 case Event::WindowClose:
                     running = false;
+                    TINA_LOG_INFO("Window close event received");
                     break;
                 case Event::Key:
                     if (event.key.key == GLFW_KEY_ESCAPE && event.key.action == GLFW_PRESS)
                     {
                         running = false;
+                        TINA_LOG_INFO("ESC key pressed, closing window");
                     }
                     break;
                 case Event::WindowResize:
@@ -102,7 +113,7 @@ namespace Tina::Core
                         // 更新视口和渲染目标
                         bgfx::reset(event.windowResize.width, event.windowResize.height, BGFX_RESET_VSYNC);
                         bgfx::setViewRect(0, 0, 0, uint16_t(event.windowResize.width), uint16_t(event.windowResize.height));
-                        TINA_LOG_INFO("Engine::run", "Window resized to {}x{}", event.windowResize.width, event.windowResize.height);
+                        TINA_LOG_INFO("Window resized");
                     }
                     break;
                 default:
@@ -110,6 +121,12 @@ namespace Tina::Core
                 }
                 // 从队列中移除已处理的事件
                 m_context.getEventQueue().pollEvent();
+            }
+
+            // 如果窗口要关闭，就不要再渲染了
+            if (!running)
+            {
+                break;
             }
 
             // 设置渲染状态
@@ -122,6 +139,8 @@ namespace Tina::Core
             bgfx::frame();
         }
 
+        // 在退出主循环后确保正确关闭
+        shutdown();
         return true;
     }
 

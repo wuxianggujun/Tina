@@ -13,8 +13,8 @@ namespace Tina
     Context s_ctx;
 
     Context::Context()
-        : windowManager(this)
-        , eventQueue()
+        : m_allocator(nullptr), windowManager(this)
+          , eventQueue()
     {
         TINA_LOG_INFO("Context::Context", "Context created.");
     }
