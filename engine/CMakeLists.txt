@@ -24,12 +24,9 @@ tina_add_third_party(NAME glfw
         GLFW_BUILD_DOCS=OFF
         GLFW_INSTALL=OFF)
 
-tina_add_third_party(NAME glm
-        PATH ${CMAKE_SOURCE_DIR}/third_party/glm
-        OPTIONS
-        GLM_BUILD_TESTS=OFF
-        GLM_BUILD_INSTALL=OFF
-        GLM_ENABLE_CXX_17=ON)
+# GLM 配置
+add_library(glm INTERFACE)
+target_include_directories(glm INTERFACE ${CMAKE_SOURCE_DIR}/third_party/glm)
 
 tina_add_third_party(NAME entt
         PATH ${CMAKE_SOURCE_DIR}/third_party/entt
