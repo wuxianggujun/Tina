@@ -55,9 +55,9 @@ namespace Tina::Core
         // 设置调试标志
         bgfx::setDebug(BGFX_DEBUG_TEXT);
 
-        // 设置视口
+        // 设置初始视口和清除颜色
         bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
-        bgfx::setViewRect(0, 0, 0, 1280, 720);
+        bgfx::setViewRect(0, 0, 0, bgfxInit.resolution.width, bgfxInit.resolution.height);
 
         TINA_LOG_INFO("Engine::initialize", "Engine initialized successfully");
         return true;
@@ -71,48 +71,57 @@ namespace Tina::Core
 
     bool Engine::run()
     {
-        // 设置初始背景色
         const uint32_t clearColor = 0x443355FF;
-
         bool running = true;
 
         while (running)
         {
+            // 处理窗口事件
             m_context.processEvents();
 
-             Event event;
-             while (m_context.getEventQueue().peekEvent(event))
-             {
-                 switch (event.type)
-                 {
-                 case Event::WindowDestroy:
-                     running = false;
-                     break;
-                 case Event::Key:
-                     if (event.key.key == GLFW_KEY_ESCAPE && event.key.action == GLFW_PRESS)
-                     {
-                         running = false;
-                     }
-                     break;
-                 case Event::WindowResize:
-                     bgfx::reset(event.windowResize.width, event.windowResize.height, BGFX_RESET_VSYNC);
-                     bgfx::setViewRect(0, 0, 0, event.windowResize.width, event.windowResize.height);
-                     break;
-                 default:
+            // 处理事件队列中的所有事件
+            Event event;
+            while (m_context.getEventQueue().peekEvent(event))
+            {
+                switch (event.type)
+                {
+                case Event::WindowDestroy:
+                    running = false;
+                    break;
+                case Event::WindowClose:
+                    running = false;
+                    break;
+                case Event::Key:
+                    if (event.key.key == GLFW_KEY_ESCAPE && event.key.action == GLFW_PRESS)
+                    {
+                        running = false;
+                    }
+                    break;
+                case Event::WindowResize:
+                    {
+                        // 更新视口和渲染目标
+                        bgfx::reset(event.windowResize.width, event.windowResize.height, BGFX_RESET_VSYNC);
+                        bgfx::setViewRect(0, 0, 0, uint16_t(event.windowResize.width), uint16_t(event.windowResize.height));
+                        TINA_LOG_INFO("Engine::run", "Window resized to {}x{}", event.windowResize.width, event.windowResize.height);
+                    }
+                    break;
+                default:
+                    break;
+                }
+                // 从队列中移除已处理的事件
+                m_context.getEventQueue().pollEvent();
+            }
 
-                     break;
-                 }
-             }
-
-            // 清除背景
+            // 设置渲染状态
             bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, clearColor, 1.0f, 0);
-            // 设置视口
-            bgfx::setViewRect(0, 0, 0, uint16_t(1280), uint16_t(720));
 
-            // 渲染
+            // 确保视图 0 被更新
             bgfx::touch(0);
+
+            // 提交帧缓冲并等待垂直同步
             bgfx::frame();
         }
+
         return true;
     }
 
