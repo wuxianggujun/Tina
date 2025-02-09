@@ -22,7 +22,14 @@ tina_add_third_party(NAME glfw
         OPTIONS
         GLFW_BUILD_TESTS=OFF
         GLFW_BUILD_DOCS=OFF
-        GLFW_INSTALL=ON)
+        GLFW_INSTALL=OFF)
+
+tina_add_third_party(NAME glm
+        PATH ${CMAKE_SOURCE_DIR}/third_party/glm
+        OPTIONS
+        GLM_BUILD_TESTS=OFF
+        GLM_BUILD_INSTALL=OFF
+        GLM_ENABLE_CXX_17=ON)
 
 tina_add_third_party(NAME entt
         PATH ${CMAKE_SOURCE_DIR}/third_party/entt
@@ -49,33 +56,4 @@ copy_resources(
         "textures/*"
         "icons/*"
         "fonts/*"
-)
-
-# 安装配置
-install(TARGETS TinaEngine TinaCore EnTT
-    EXPORT TinaTargets
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin
-    INCLUDES DESTINATION include
-)
-
-# 安装头文件 - 包含所有常见的头文件类型
-install(DIRECTORY core/include/
-    DESTINATION include
-    FILES_MATCHING 
-        PATTERN "*.h"      # C头文件
-        PATTERN "*.hpp"    # C++头文件
-        PATTERN "*.hxx"    # C++头文件（替代扩展名）
-        PATTERN "*.inl"    # 内联实现文件
-        PATTERN "*.tpp"    # 模板实现文件
-        PATTERN "*.inc"    # 包含文件
-    PATTERN "private" EXCLUDE  # 排除private目录
-    PATTERN "internal" EXCLUDE # 排除internal目录
-)
-
-install(EXPORT TinaTargets
-    FILE TinaTargets.cmake
-    NAMESPACE Tina::
-    DESTINATION lib/cmake/Tina
 )

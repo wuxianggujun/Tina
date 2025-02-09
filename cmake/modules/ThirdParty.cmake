@@ -10,11 +10,12 @@ function(tina_add_third_party)
 
     message(STATUS "Adding third party: ${ARG_NAME} from ${ARG_PATH} to ${ARG_BUILD_DIR}")
 
-    foreach (option ${ARG_OPTIONS})
-        string(REPLACE "=" ";" parts ${option})
-        list(GET parts 0 var)
-        list(GET parts 1 value)
-        set(${var} ${value} CACHE INTERNAL "Third party option")
+    # 设置选项
+    foreach(var IN LISTS ARG_OPTIONS)
+        string(REGEX MATCH "([^=]+)=(.+)" _ ${var})
+        set(name ${CMAKE_MATCH_1})
+        set(value ${CMAKE_MATCH_2})
+        set(${name} ${value} CACHE INTERNAL "Third party option")
     endforeach ()
 
     # 添加子目录

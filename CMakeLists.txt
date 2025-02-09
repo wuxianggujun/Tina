@@ -56,21 +56,6 @@ if(TINA_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-# # 导出配置
-# include(CMakePackageConfigHelpers)
-# write_basic_package_version_file(
-#     "${CMAKE_BINARY_DIR}/TinaConfigVersion.cmake"
-#     VERSION ${PROJECT_VERSION}
-#     COMPATIBILITY SameMajorVersion
-# )
-
-# # 安装配置
-# install(EXPORT TinaTargets
-#     FILE TinaTargets.cmake
-#     NAMESPACE Tina::
-#     DESTINATION lib/cmake/Tina
-# )
-
 # 创建配置文件
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/TinaConfig.cmake.in

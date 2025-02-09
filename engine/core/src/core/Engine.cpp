@@ -64,6 +64,9 @@ namespace Tina::Core
         bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
         bgfx::setViewRect(0, 0, 0, bgfxInit.resolution.width, bgfxInit.resolution.height);
 
+        // 创建默认场景
+        createScene("Default Scene");
+
         TINA_LOG_INFO("Engine initialized successfully");
         return true;
     }
@@ -120,6 +123,13 @@ namespace Tina::Core
             // 设置渲染状态
             bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, clearColor, 1.0f, 0);
 
+            // 更新和渲染场景
+            if (m_activeScene)
+            {
+                // TODO: 更新场景
+                // TODO: 渲染场景
+            }
+
             // 确保视图被更新
             bgfx::touch(0);
 
@@ -153,5 +163,20 @@ namespace Tina::Core
     Context& Engine::getContext()
     {
         return m_context;
+    }
+
+    Scene* Engine::createScene(const std::string& name)
+    {
+        m_activeScene = std::make_unique<Scene>(name);
+        return m_activeScene.get();
+    }
+
+    void Engine::setActiveScene(Scene* scene)
+    {
+        if (scene)
+        {
+            m_activeScene.reset(scene);
+            TINA_LOG_INFO("Set active scene: {}", scene->getName());
+        }
     }
 }

@@ -9,4 +9,4 @@ check_required_components(Tina)
 set_and_check(TINA_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
 
 # 导出库目标
-set(TINA_LIBRARIES Tina::Core Tina::Network Tina::Utils) 
+set(TINA_LIBRARIES Tina::Core) 
