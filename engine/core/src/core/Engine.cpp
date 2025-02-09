@@ -39,6 +39,7 @@ namespace Tina::Core
             TINA_LOG_ERROR("Failed to create main window");
             return false;
         }
+        m_mainWindow = mainWindow;
 
         // 初始化bgfx
         bgfx::Init bgfxInit;
@@ -59,25 +60,12 @@ namespace Tina::Core
         // 设置调试标志
         bgfx::setDebug(BGFX_DEBUG_TEXT);
 
-        // 设置初始视口和清除颜色
+        // 设置视图
         bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
         bgfx::setViewRect(0, 0, 0, bgfxInit.resolution.width, bgfxInit.resolution.height);
 
         TINA_LOG_INFO("Engine initialized successfully");
         return true;
-    }
-
-    void Engine::shutdown()
-    {
-        TINA_LOG_INFO("Engine shutting down");
-        // 先关闭 bgfx
-        if (bgfx::getInternalData()->context)
-        {
-            bgfx::shutdown();
-        }
-        // 再关闭窗口管理器
-        m_context.getWindowManager().terminate();
-        TINA_LOG_INFO("Engine shutdown completed");
     }
 
     bool Engine::run()
@@ -132,7 +120,7 @@ namespace Tina::Core
             // 设置渲染状态
             bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, clearColor, 1.0f, 0);
 
-            // 确保视图 0 被更新
+            // 确保视图被更新
             bgfx::touch(0);
 
             // 提交帧缓冲并等待垂直同步
@@ -144,8 +132,26 @@ namespace Tina::Core
         return true;
     }
 
-    const char* Engine::getVersion() const
+    void Engine::shutdown()
+    {
+        TINA_LOG_INFO("Engine shutting down");
+        // 先关闭 bgfx
+        if (bgfx::getInternalData()->context)
+        {
+            bgfx::shutdown();
+        }
+        // 再关闭窗口管理器
+        m_context.getWindowManager().terminate();
+        TINA_LOG_INFO("Engine shutdown completed");
+    }
+
+    const char* Engine::getVersion()
     {
         return TINA_VERSION;
+    }
+
+    Context& Engine::getContext()
+    {
+        return m_context;
     }
 }

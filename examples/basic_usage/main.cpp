@@ -1,6 +1,6 @@
-#include "tina/core/Core.hpp"
 #include "tina/core/Engine.hpp"
 #include "tina/log/Logger.hpp"
+#include <fmt/format.h>
 
 using namespace Tina;
 
@@ -14,16 +14,17 @@ int main()
 
     TINA_LOG_INFO("Application starting");
 
-    // Create engine instance
+    // 创建引擎实例
     Core::Engine engine;
 
-    // Initialize engine
+    // 初始化引擎
     if (!engine.initialize())
     {
         TINA_LOG_ERROR("Engine initialization failed");
         return -1;
     }
 
+    // 运行引擎主循环
     if (!engine.run())
     {
         TINA_LOG_ERROR("Application run failed");

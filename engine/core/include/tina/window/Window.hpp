@@ -60,3 +60,13 @@ namespace Tina
         GLFWwindow* m_handle;
     };
 } // Tina
+
+// 为 WindowHandle 添加哈希函数支持
+namespace std {
+    template<>
+    struct hash<Tina::WindowHandle> {
+        size_t operator()(const Tina::WindowHandle& handle) const noexcept {
+            return std::hash<uint16_t>{}(handle.idx);
+        }
+    };
+}
