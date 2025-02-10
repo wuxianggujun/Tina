@@ -8,11 +8,18 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 include(CopyResources)
 include(ThirdParty)
 include(Modules)
-include(ShaderUtils)
+include(CompileShaders)
 
 # 添加第三方库
 tina_add_third_party(NAME bgfx
-        PATH ${CMAKE_SOURCE_DIR}/third_party/bgfx.cmake)
+        PATH ${CMAKE_SOURCE_DIR}/third_party/bgfx.cmake
+        OPTIONS
+        BGFX_BUILD_TOOLS=ON
+        BGFX_BUILD_EXAMPLES=OFF)
+
+# 设置 BGFX 根目录 - 这对着色器编译很重要
+set(BGFX_DIR "${CMAKE_SOURCE_DIR}/third_party/bgfx.cmake/bgfx")
+message(STATUS "BGFX_DIR: ${BGFX_DIR}")
 
 tina_add_third_party(NAME fmt
         PATH ${CMAKE_SOURCE_DIR}/third_party/fmt)
@@ -34,36 +41,39 @@ tina_add_third_party(NAME entt
         ENTT_BUILD_TESTING=OFF
         ENTT_BUILD_DOCS=OFF)
 
-# 设置 BGFX 根目录
-set(BGFX_ROOT_DIR "${CMAKE_SOURCE_DIR}/third_party/bgfx.cmake/bgfx")
-
-# 创建引擎库（改为静态库而不是接口库）
-add_library(TinaEngine STATIC dummy.cpp)
+# 创建引擎库（改为INTERFACE库，因为它只是一个聚合库）
+add_library(TinaEngine INTERFACE)
 add_library(Tina::Engine ALIAS TinaEngine)
 
-# 编译着色器
-add_shader_compile_dir(${CMAKE_CURRENT_SOURCE_DIR}/resources/shaders
-        2d  # This will compile vs_2d.sc and fs_2d.sc
-        # Add more shader names here if needed
-)
 # 链接Core模块（这是必需的基础模块）
 tina_add_module(NAME core REQUIRED)
-#tina_add_module(NAME network)
-#tina_add_module(NAME utils)
 
-# 复制资源文件
-add_custom_target(copy_resources ALL
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/resources"
-        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resources"
-    COMMENT "Copying resources..."
+# 设置引擎库的包含目录和链接依赖
+target_include_directories(TinaEngine
+        INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# 确保 Core 模块可以找到生成的着色器头文件
-target_include_directories(TinaCore 
-    PRIVATE 
-        "${CMAKE_BINARY_DIR}/generated"
+target_link_libraries(TinaEngine
+        INTERFACE
+        Tina::Core
+        bgfx
+        bx
+        bimg
+        fmt::fmt
+        glfw
+        EnTT::EnTT
+        glm
 )
 
-# 添加依赖关系
-add_dependencies(TinaCore shaders copy_resources)
+## 复制资源文件
+#add_custom_target(copy_resources ALL
+#    COMMAND ${CMAKE_COMMAND} -E copy_directory
+#    "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+#    "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resources"
+#    COMMENT "Copying resources..."
+#)
+#
+#add_dependencies(TinaEngine copy_resources)
+
+

@@ -21,7 +21,7 @@ namespace Tina::Core
         bool initialize();
         bool run();
         void shutdown();
-        const char* getVersion();
+        const char* getVersion() const;
         Context& getContext();
 
         // 场景管理
@@ -36,6 +36,7 @@ namespace Tina::Core
         Context m_context;
         WindowHandle m_mainWindow;
         std::unique_ptr<Scene> m_activeScene;  // 当前活动场景
+        bool m_isShutdown{false};  // 添加标志位以防止重复调用 shutdown
     };
 
 }

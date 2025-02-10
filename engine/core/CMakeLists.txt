@@ -8,10 +8,13 @@ file(GLOB_RECURSE CORE_HEADER_FILES
     "include/*.hpp"
     "include/*.h"
 )
+add_shader_compile_dir(${CMAKE_SOURCE_DIR}/engine/resources/shaders "2d")
 
 # 创建核心库
 add_library(TinaCore ${CORE_SOURCE_FILES} ${CORE_HEADER_FILES})
 add_library(Tina::Core ALIAS TinaCore)
+
+add_dependencies(TinaCore shaders)
 
 # 设置包含目录
 target_include_directories(TinaCore

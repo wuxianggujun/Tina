@@ -19,11 +19,7 @@ namespace Tina::Core
     Engine::~Engine()
     {
         TINA_LOG_INFO("Engine destroyed.");
-        // 确保在析构时调用 shutdown
-        if (bgfx::getInternalData()->context)
-        {
-            shutdown();
-        }
+        shutdown();
     }
 
     bool Engine::initialize()
@@ -146,18 +142,26 @@ namespace Tina::Core
 
     void Engine::shutdown()
     {
+        if (m_isShutdown) {
+            return;  // 防止重复调用
+        }
+
         TINA_LOG_INFO("Engine shutting down");
+        
         // 先关闭 bgfx
         if (bgfx::getInternalData()->context)
         {
             bgfx::shutdown();
         }
+        
         // 再关闭窗口管理器
         m_context.getWindowManager().terminate();
+        
+        m_isShutdown = true;
         TINA_LOG_INFO("Engine shutdown completed");
     }
 
-    const char* Engine::getVersion()
+    const char* Engine::getVersion() const
     {
         return TINA_VERSION;
     }
