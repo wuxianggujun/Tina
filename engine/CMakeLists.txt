@@ -8,7 +8,8 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 include(CopyResources)
 include(ThirdParty)
 include(Modules)
-include(CompileShaders)
+include(ShaderUtils)
+#include(CompileShaders)
 
 # 添加第三方库
 tina_add_third_party(NAME bgfx

@@ -1,19 +1,47 @@
+cmake_minimum_required(VERSION 3.20)
+
+# 获取平台相关的着色器配置
+function(_get_shader_profiles PLATFORM_OUT PROFILES_OUT SHADER_MODELS_OUT)
+    if(WIN32 OR MINGW OR MSYS OR CYGWIN)
+        set(PLATFORM "windows")
+        set(PROFILES "dx11;dx9;spirv;essl;glsl")
+        set(SHADER_MODELS "s_5_0;s_4_0;spirv;300_es;120")
+    elseif(APPLE)
+        set(PLATFORM "osx")
+        set(PROFILES "metal;spirv;glsl")
+        set(SHADER_MODELS "metal;spirv;120")
+    elseif(UNIX AND NOT APPLE)
+        set(PLATFORM "linux")
+        set(PROFILES "glsl;spirv;essl")
+        set(SHADER_MODELS "120;spirv;300_es")
+    else()
+        message(FATAL_ERROR "Unsupported platform for shader compilation")
+    endif()
+    
+    set(${PLATFORM_OUT} ${PLATFORM} PARENT_SCOPE)
+    set(${PROFILES_OUT} ${PROFILES} PARENT_SCOPE)
+    set(${SHADER_MODELS_OUT} ${SHADER_MODELS} PARENT_SCOPE)
+endfunction()
+
+# 编译着色器目录
 function(add_shader_compile_dir SHADER_DIR)
-    if (NOT EXISTS "${SHADER_DIR}")
+    cmake_parse_arguments(ARGS "GENERATE_HEADERS" "" "" ${ARGN})
+    
+    if(NOT EXISTS "${SHADER_DIR}")
         message(FATAL_ERROR "Shader directory ${SHADER_DIR} does not exist")
         return()
-    endif ()
-
-    # 设置输出目录
-    set(SHADER_OUTPUT_DIR "${CMAKE_BINARY_DIR}/resources/shaders")
-    file(MAKE_DIRECTORY "${SHADER_OUTPUT_DIR}")
-    message(STATUS "Shader output directory: ${SHADER_OUTPUT_DIR}")
+    endif()
 
     # 检查shaderc是否可用
     if(NOT TARGET bgfx::shaderc)
         message(FATAL_ERROR "bgfx::shaderc target not found. Cannot compile shaders.")
         return()
     endif()
+
+    # 设置输出目录
+    set(SHADER_OUTPUT_DIR "${CMAKE_BINARY_DIR}/resources/shaders")
+    file(MAKE_DIRECTORY "${SHADER_OUTPUT_DIR}")
+    message(STATUS "Shader output directory: ${SHADER_OUTPUT_DIR}")
 
     # 设置 bgfx 相关路径
     set(BGFX_SHADER_INCLUDE_PATH "${BGFX_DIR}/src")
@@ -22,156 +50,176 @@ function(add_shader_compile_dir SHADER_DIR)
         return()
     endif()
 
-    # 获取shaderc路径
-    get_target_property(SHADERC_PATH bgfx::shaderc IMPORTED_LOCATION)
-    if(NOT SHADERC_PATH)
-        set(SHADERC_PATH "${CMAKE_BINARY_DIR}/bin/shaderc${CMAKE_EXECUTABLE_SUFFIX}")
-    endif()
-    
-    if(NOT EXISTS "${SHADERC_PATH}")
-        message(FATAL_ERROR "shaderc executable not found at: ${SHADERC_PATH}")
-        return()
-    endif()
-    message(STATUS "Using shaderc at: ${SHADERC_PATH}")
-
-    # 基于平台定义支持的着色器配置文件
-    set(PROFILES "")
-    if (WIN32)
-        list(APPEND PROFILES "dx11")
-        set(PLATFORM "windows")
-        set(SHADER_MODEL "s_5_0")
-    elseif (APPLE)
-        list(APPEND PROFILES "metal")
-        set(PLATFORM "osx")
-        set(SHADER_MODEL "metal")
-    elseif (UNIX AND NOT APPLE)
-        list(APPEND PROFILES "spirv")
-        set(PLATFORM "linux")
-        set(SHADER_MODEL "spirv")
-    endif ()
+    # 获取平台相关配置
+    _get_shader_profiles(PLATFORM PROFILES SHADER_MODELS)
+    message(STATUS "Compiling shaders for platform: ${PLATFORM}")
+    message(STATUS "Using shader profiles: ${PROFILES}")
+    message(STATUS "Using shader models: ${SHADER_MODELS}")
 
     set(ALL_SHADER_OUTPUTS "")
-    set(SHADER_SOURCES "")
+    set(ALL_SHADER_SOURCES "")
 
-    foreach (SHADER_NAME ${ARGN})
-        message(STATUS "Processing shader: ${SHADER_NAME}")
-        
+    # 获取着色器名称列表（移除GENERATE_HEADERS参数）
+    set(SHADER_NAMES ${ARGS_UNPARSED_ARGUMENTS})
+
+    # 处理每个着色器
+    foreach(SHADER_NAME ${SHADER_NAMES})
         set(VERTEX_SHADER "${SHADER_DIR}/vs_${SHADER_NAME}.sc")
         set(FRAGMENT_SHADER "${SHADER_DIR}/fs_${SHADER_NAME}.sc")
-        set(VARYING_DEF_FILE "${SHADER_DIR}/varying.def.sc")
-
-        message(STATUS "Vertex shader: ${VERTEX_SHADER}")
-        message(STATUS "Fragment shader: ${FRAGMENT_SHADER}")
-        message(STATUS "Varying def: ${VARYING_DEF_FILE}")
-
-        if (NOT EXISTS "${VERTEX_SHADER}")
-            message(FATAL_ERROR "Vertex shader not found: ${VERTEX_SHADER}")
-            continue()
-        endif ()
-
-        if (NOT EXISTS "${FRAGMENT_SHADER}")
-            message(FATAL_ERROR "Fragment shader not found: ${FRAGMENT_SHADER}")
-            continue()
-        endif ()
-
-        if (NOT EXISTS "${VARYING_DEF_FILE}")
-            message(FATAL_ERROR "Varying definition file not found: ${VARYING_DEF_FILE}")
+        
+        # 首先检查特定的def文件，如果不存在则使用默认的varying.def.sc
+        set(SPECIFIC_DEF_FILE "${SHADER_DIR}/${SHADER_NAME}.def.sc")
+        set(DEFAULT_DEF_FILE "${SHADER_DIR}/varying.def.sc")
+        
+        if(EXISTS "${SPECIFIC_DEF_FILE}")
+            set(VARYING_DEF_FILE "${SPECIFIC_DEF_FILE}")
+            message(STATUS "Using shader-specific def file: ${SPECIFIC_DEF_FILE}")
+        elseif(EXISTS "${DEFAULT_DEF_FILE}")
+            set(VARYING_DEF_FILE "${DEFAULT_DEF_FILE}")
+            message(STATUS "Using default def file: ${DEFAULT_DEF_FILE}")
+        else()
+            message(FATAL_ERROR "No varying definition file found for shader ${SHADER_NAME}")
             continue()
         endif()
 
-        foreach (PROFILE ${PROFILES})
+        if(NOT EXISTS "${VERTEX_SHADER}")
+            message(FATAL_ERROR "Vertex shader not found: ${VERTEX_SHADER}")
+            continue()
+        endif()
+
+        if(NOT EXISTS "${FRAGMENT_SHADER}")
+            message(FATAL_ERROR "Fragment shader not found: ${FRAGMENT_SHADER}")
+            continue()
+        endif()
+
+        list(APPEND ALL_SHADER_SOURCES 
+            "${VERTEX_SHADER}" 
+            "${FRAGMENT_SHADER}" 
+            "${VARYING_DEF_FILE}"
+        )
+
+        # 为每个profile编译着色器
+        list(LENGTH PROFILES PROFILE_COUNT)
+        math(EXPR LAST_INDEX "${PROFILE_COUNT} - 1")
+        
+        foreach(INDEX RANGE ${LAST_INDEX})
+            list(GET PROFILES ${INDEX} PROFILE)
+            list(GET SHADER_MODELS ${INDEX} SHADER_MODEL)
+            
             set(PROFILE_OUTPUT_DIR "${SHADER_OUTPUT_DIR}/${PROFILE}")
             file(MAKE_DIRECTORY "${PROFILE_OUTPUT_DIR}")
-            message(STATUS "Profile output directory: ${PROFILE_OUTPUT_DIR}")
 
-            # 编译Vertex Shader
+            # 顶点着色器
             set(VERTEX_OUTPUT "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}.vs.bin")
-            set(VERTEX_HEADER "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}.vs.bin.h")
-            
-            message(STATUS "Vertex shader output: ${VERTEX_OUTPUT}")
-            message(STATUS "Vertex shader header: ${VERTEX_HEADER}")
-            
+            set(VERTEX_HEADER "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}.vs.hpp")
+
+            # 基本的编译命令（始终生成二进制文件）
             add_custom_command(
-                OUTPUT ${VERTEX_OUTPUT} ${VERTEX_HEADER}
-                COMMAND ${SHADERC_PATH}
+                OUTPUT ${VERTEX_OUTPUT}
+                COMMAND bgfx::shaderc
+                    --type vertex
+                    --platform ${PLATFORM}
+                    --profile ${SHADER_MODEL}
                     -f "${VERTEX_SHADER}"
                     -o "${VERTEX_OUTPUT}"
                     -i "${BGFX_SHADER_INCLUDE_PATH}"
-                    --platform ${PLATFORM}
-                    --type vertex
-                    --profile ${SHADER_MODEL}
-                    -v "${VARYING_DEF_FILE}"
-                COMMAND ${SHADERC_PATH}
-                    -f "${VERTEX_SHADER}"
-                    -o "${VERTEX_HEADER}"
-                    -i "${BGFX_SHADER_INCLUDE_PATH}"
-                    --platform ${PLATFORM}
-                    --type vertex
-                    --profile ${SHADER_MODEL}
-                    -v "${VARYING_DEF_FILE}"
-                    --bin2c
-                DEPENDS ${VERTEX_SHADER} ${VARYING_DEF_FILE}
+                    -i "${SHADER_DIR}"
+                    --varyingdef "${VARYING_DEF_FILE}"
+                DEPENDS "${VERTEX_SHADER}" "${VARYING_DEF_FILE}"
                 COMMENT "Compiling vertex shader ${SHADER_NAME} for ${PROFILE}"
                 VERBATIM
             )
 
-            list(APPEND ALL_SHADER_OUTPUTS ${VERTEX_OUTPUT} ${VERTEX_HEADER})
+            list(APPEND ALL_SHADER_OUTPUTS "${VERTEX_OUTPUT}")
 
-            # Fragment shader compilation
+            # 如果需要生成头文件
+            if(ARGS_GENERATE_HEADERS)
+                add_custom_command(
+                    OUTPUT ${VERTEX_HEADER}
+                    COMMAND bgfx::shaderc
+                        --type vertex
+                        --platform ${PLATFORM}
+                        --profile ${SHADER_MODEL}
+                        -f "${VERTEX_SHADER}"
+                        -o "${VERTEX_HEADER}"
+                        -i "${BGFX_SHADER_INCLUDE_PATH}"
+                        -i "${SHADER_DIR}"
+                        --varyingdef "${VARYING_DEF_FILE}"
+                        --bin2c
+                    DEPENDS "${VERTEX_SHADER}" "${VARYING_DEF_FILE}"
+                    COMMENT "Generating vertex shader header ${SHADER_NAME} for ${PROFILE}"
+                    VERBATIM
+                )
+                list(APPEND ALL_SHADER_OUTPUTS "${VERTEX_HEADER}")
+            endif()
+
+            # 片段着色器
             set(FRAGMENT_OUTPUT "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}.fs.bin")
-            set(FRAGMENT_HEADER "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}.fs.bin.h")
-            
-            message(STATUS "Fragment shader output: ${FRAGMENT_OUTPUT}")
-            message(STATUS "Fragment shader header: ${FRAGMENT_HEADER}")
-            
+            set(FRAGMENT_HEADER "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}.fs.hpp")
+
+            # 基本的编译命令（始终生成二进制文件）
             add_custom_command(
-                OUTPUT ${FRAGMENT_OUTPUT} ${FRAGMENT_HEADER}
-                COMMAND ${SHADERC_PATH}
+                OUTPUT ${FRAGMENT_OUTPUT}
+                COMMAND bgfx::shaderc
+                    --type fragment
+                    --platform ${PLATFORM}
+                    --profile ${SHADER_MODEL}
                     -f "${FRAGMENT_SHADER}"
                     -o "${FRAGMENT_OUTPUT}"
                     -i "${BGFX_SHADER_INCLUDE_PATH}"
-                    --platform ${PLATFORM}
-                    --type fragment
-                    --profile ${SHADER_MODEL}
-                    -v "${VARYING_DEF_FILE}"
-                COMMAND ${SHADERC_PATH}
-                    -f "${FRAGMENT_SHADER}"
-                    -o "${FRAGMENT_HEADER}"
-                    -i "${BGFX_SHADER_INCLUDE_PATH}"
-                    --platform ${PLATFORM}
-                    --type fragment
-                    --profile ${SHADER_MODEL}
-                    -v "${VARYING_DEF_FILE}"
-                    --bin2c
-                DEPENDS ${FRAGMENT_SHADER} ${VARYING_DEF_FILE}
+                    -i "${SHADER_DIR}"
+                    --varyingdef "${VARYING_DEF_FILE}"
+                DEPENDS "${FRAGMENT_SHADER}" "${VARYING_DEF_FILE}"
                 COMMENT "Compiling fragment shader ${SHADER_NAME} for ${PROFILE}"
                 VERBATIM
             )
-            
-            list(APPEND ALL_SHADER_OUTPUTS ${FRAGMENT_OUTPUT} ${FRAGMENT_HEADER})
-        endforeach ()
 
-        list(APPEND SHADER_SOURCES "${VERTEX_SHADER}" "${FRAGMENT_SHADER}" "${VARYING_DEF_FILE}")
-    endforeach ()
+            list(APPEND ALL_SHADER_OUTPUTS "${FRAGMENT_OUTPUT}")
 
-    if (ALL_SHADER_OUTPUTS)
-        message(STATUS "Creating shader target with outputs:")
-        foreach(OUTPUT ${ALL_SHADER_OUTPUTS})
-            message(STATUS "  ${OUTPUT}")
+            # 如果需要生成头文件
+            if(ARGS_GENERATE_HEADERS)
+                add_custom_command(
+                    OUTPUT ${FRAGMENT_HEADER}
+                    COMMAND bgfx::shaderc
+                        --type fragment
+                        --platform ${PLATFORM}
+                        --profile ${SHADER_MODEL}
+                        -f "${FRAGMENT_SHADER}"
+                        -o "${FRAGMENT_HEADER}"
+                        -i "${BGFX_SHADER_INCLUDE_PATH}"
+                        -i "${SHADER_DIR}"
+                        --varyingdef "${VARYING_DEF_FILE}"
+                        --bin2c
+                    DEPENDS "${FRAGMENT_SHADER}" "${VARYING_DEF_FILE}"
+                    COMMENT "Generating fragment shader header ${SHADER_NAME} for ${PROFILE}"
+                    VERBATIM
+                )
+                list(APPEND ALL_SHADER_OUTPUTS "${FRAGMENT_HEADER}")
+            endif()
         endforeach()
+    endforeach()
 
-        # 创建一个自定义目标来编译所有着色器
+    if(ALL_SHADER_OUTPUTS)
+        # 创建着色器编译目标
         add_custom_target(shaders ALL
             DEPENDS ${ALL_SHADER_OUTPUTS}
-            SOURCES ${SHADER_SOURCES}
             COMMENT "Compiling all shaders"
         )
+        
+        # 添加源文件以在IDE中显示
+        target_sources(shaders PRIVATE ${ALL_SHADER_SOURCES})
+        source_group(TREE "${SHADER_DIR}" PREFIX "Shader Files" FILES ${ALL_SHADER_SOURCES})
 
         # 确保shaderc在编译着色器之前已经构建
         add_dependencies(shaders bgfx::shaderc)
+
+        message(STATUS "Created shader target with outputs:")
+        foreach(OUTPUT ${ALL_SHADER_OUTPUTS})
+            message(STATUS "  ${OUTPUT}")
+        endforeach()
     else()
         message(FATAL_ERROR "No shader outputs were configured")
-    endif ()
+    endif()
 endfunction()
 
 # 编译着色器到头文件的函数
