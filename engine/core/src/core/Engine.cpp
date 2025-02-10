@@ -3,9 +3,11 @@
 //
 
 #include "tina/core/Engine.hpp"
-
 #include "bgfx/platform.h"
 #include "tina/log/Logger.hpp"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace Tina::Core
 {
@@ -178,5 +180,12 @@ namespace Tina::Core
             m_activeScene.reset(scene);
             TINA_LOG_INFO("Set active scene: {}", scene->getName());
         }
+    }
+
+    std::filesystem::path Engine::getExecutablePath()
+    {
+        char path[MAX_PATH];
+        GetModuleFileNameA(nullptr, path, MAX_PATH);
+        return std::filesystem::path(path).parent_path();
     }
 }

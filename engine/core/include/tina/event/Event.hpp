@@ -34,6 +34,7 @@ namespace Tina
 
         Type type;
         WindowHandle windowHandle;
+        bool handled = false;
 
         union
         {
@@ -130,12 +131,14 @@ namespace Tina
         Event()
             : type(None)
               , windowHandle({UINT16_MAX})
+              , handled(false)
         {
         }
 
         Event(Type type)
             : type(type)
               , windowHandle({UINT16_MAX})
+              , handled(false)
         {
         }
     };

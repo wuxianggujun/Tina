@@ -2,7 +2,7 @@
 set(CMAKE_TOOLCHAIN_FILE "" CACHE FILEPATH "" FORCE)
 set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "" CACHE FILEPATH "" FORCE)
 
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.25)
 
 # 项目名称和版本
 project(Tina 

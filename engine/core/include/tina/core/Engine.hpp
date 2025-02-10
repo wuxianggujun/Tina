@@ -8,6 +8,8 @@
 #include "tina/window/Window.hpp"
 #include "tina/scene/Scene.hpp"
 #include <memory>
+#include <string>
+#include <filesystem>
 
 namespace Tina::Core
 {
@@ -26,6 +28,9 @@ namespace Tina::Core
         Scene* createScene(const std::string& name);
         void setActiveScene(Scene* scene);
         Scene* getActiveScene() { return m_activeScene.get(); }
+
+        // 获取可执行文件路径
+        static std::filesystem::path getExecutablePath();
 
     private:
         Context m_context;

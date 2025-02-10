@@ -1,5 +1,6 @@
 #include "tina/scene/Scene.hpp"
 #include "tina/log/Logger.hpp"
+#include "tina/event/Event.hpp"
 
 namespace Tina
 {
@@ -50,4 +51,57 @@ namespace Tina
             TINA_LOG_INFO("Renamed entity to: {} in scene: {}", name, m_name);
         }
     }
-}
+
+    void Scene::pushLayer(std::shared_ptr<Layer> layer)
+    {
+        m_LayerStack.pushLayer(layer);
+        layer->onAttach();
+    }
+
+    void Scene::pushOverlay(std::shared_ptr<Layer> overlay)
+    {
+        m_LayerStack.pushOverlay(overlay);
+        overlay->onAttach();
+    }
+
+    void Scene::popLayer(std::shared_ptr<Layer> layer)
+    {
+        layer->onDetach();
+        m_LayerStack.popLayer(layer);
+    }
+
+    void Scene::popOverlay(std::shared_ptr<Layer> overlay)
+    {
+        overlay->onDetach();
+        m_LayerStack.popOverlay(overlay);
+    }
+
+    void Scene::onUpdate(float deltaTime)
+    {
+        for (auto& layer : m_LayerStack)
+            layer->onUpdate(deltaTime);
+    }
+
+    void Scene::onRender()
+    {
+        for (auto& layer : m_LayerStack)
+            layer->onRender();
+    }
+
+    void Scene::onImGuiRender()
+    {
+        for (auto& layer : m_LayerStack)
+            layer->onImGuiRender();
+    }
+
+    void Scene::onEvent(Event& event)
+    {
+        for (auto it = m_LayerStack.end(); it != m_LayerStack.begin(); )
+        {
+            (*--it)->onEvent(event);
+            if (event.handled)
+                break;
+        }
+    }
+
+} // namespace Tina
