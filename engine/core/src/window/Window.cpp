@@ -25,6 +25,8 @@ namespace Tina {
     {
         if (m_handle)
         {
+            TINA_LOG_DEBUG("Destroying window");
+            glfwSetWindowUserPointer(m_handle, nullptr);  // 清除用户指针
             glfwDestroyWindow(m_handle);
             m_handle = nullptr;
         }
@@ -39,11 +41,6 @@ namespace Tina {
     {
         glfwSetWindowTitle(m_handle, title);
     }
-
-    // void Window::setSize(uint32_t width, uint32_t height)
-    // {
-    //     glfwSetWindowSize(m_handle,width,height);
-    // }
 
     void Window::setPosition(int32_t x, int32_t y)
     {
@@ -68,16 +65,4 @@ namespace Tina {
         }
     }
 
-    // void Window::setMouseLock(bool lock)
-    // {
-    //     if (lock) {
-    //         glfwSetInputMode(m_handle, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-    //     } else {
-    //         glfwSetInputMode(m_handle, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-    //     }
-    // }
-    //
-    // void Window::setupCallbacks()
-    // {
-    // }
 } // Tina

@@ -4,29 +4,33 @@
 
 #pragma once
 
-#include "tina/window/WindowManager.hpp"
-#include "tina/event/EventQueue.hpp"
+#include "tina/core/Core.hpp"
+#include <memory>
 
 namespace Tina
 {
-    class Context
+    class WindowManager;
+    class EventQueue;
+
+    class TINA_CORE_API Context
     {
     public:
-        Context();
+        static Context& getInstance();
+        
         ~Context();
-
         bool initialize();
-        // bool run(int argc, char** argv);
         void processEvents();
 
-        WindowManager& getWindowManager() { return windowManager; }
-        EventQueue& getEventQueue() { return eventQueue; }
+        WindowManager& getWindowManager() { return *m_windowManager; }
+        EventQueue& getEventQueue() { return *m_eventQueue; }
 
     private:
-        bx::AllocatorI* m_allocator;
-        WindowManager windowManager;
-        EventQueue eventQueue;
-
-        friend class WindowManager;
+        Context();  // 私有构造函数
+        Context(const Context&) = delete;  // 禁止拷贝
+        Context& operator=(const Context&) = delete;  // 禁止赋值
+        
+        static Context* s_instance;
+        std::unique_ptr<WindowManager> m_windowManager;
+        std::unique_ptr<EventQueue> m_eventQueue;
     };
 } // Tina

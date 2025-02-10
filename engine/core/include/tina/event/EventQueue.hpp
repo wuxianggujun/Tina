@@ -11,15 +11,16 @@
 namespace Tina {
     class EventQueue {
     public:
-        EventQueue();
-        ~EventQueue();
+        EventQueue() = default;
+        ~EventQueue() = default;
 
-        void postEvent(const Event& event);
-        Event pollEvent();
-        bool peekEvent(Event& event);
+        void pushEvent(const Event& event);
+        bool pollEvent(Event& event);
+        void clear();
+        bool isEmpty() const;
 
     private:
         std::queue<Event> m_eventQueue;
-        std::mutex m_mutex;
+        mutable std::mutex m_mutex;
     };
 } // Tina

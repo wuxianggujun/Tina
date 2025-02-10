@@ -1,29 +1,24 @@
-//
-// Created by wuxianggujun on 2025/2/5.
-//
-
 #pragma once
-#include <map>
-#include "Window.hpp"
+
+#include "tina/core/Core.hpp"
+#include "tina/window/Window.hpp"
+#include "tina/event/Event.hpp"
+#include <GLFW/glfw3.h>
 #if BX_PLATFORM_WINDOWS
-#define GLFW_EXPOSE_NATIVE_WIN32
+    #define GLFW_EXPOSE_NATIVE_WIN32
 #elif BX_PLATFORM_LINUX
     #define GLFW_EXPOSE_NATIVE_X11
-    #define GLFW_EXPOSE_NATIVE_WAYLAND
 #elif BX_PLATFORM_OSX
     #define GLFW_EXPOSE_NATIVE_COCOA
 #endif
 #include <GLFW/glfw3native.h>
-// 最大窗口数量
-#define TINA_CONFIG_MAX_WINDOWS 10
+#include <unordered_map>
+#include <memory>
 
-namespace Tina
-{
+namespace Tina {
     class Context;
-    class EventQueue;
 
-    class WindowManager
-    {
+    class TINA_CORE_API WindowManager {
     public:
         explicit WindowManager(Context* context);
         ~WindowManager();
@@ -31,53 +26,48 @@ namespace Tina
         bool initialize();
         void terminate();
 
-        WindowHandle createWindow(int32_t x, int32_t y, int32_t width, int32_t height, uint32_t flags,
-                                  const char* title);
+        WindowHandle createWindow(const Window::WindowConfig& config);
         void destroyWindow(WindowHandle handle);
-
         Window* getWindow(WindowHandle handle);
 
-        // 处理消息队列和GLFW事件
+        void pollEvents();
+        bool pollEvent(Event& event);
         void processMessage();
 
-        void* getNativeWindowHandle(WindowHandle _handle);
+        GLFWwindow* getGLFWwindow(WindowHandle handle) const;
+        WindowHandle findHandle(GLFWwindow* window) const;
+
+        void* getNativeWindowHandle(WindowHandle handle);
         void* getNativeDisplayHandle();
-        bgfx::NativeWindowHandleType::Enum getNativeWindowHandleType();
 
         static WindowManager* getInstance() { return s_instance; }
 
-        WindowHandle findHandle(GLFWwindow* glfwWindow) const;
+    private:
+        static void errorCallback(int error, const char* description);
+        static void joystickCallback(int jid, int event);
+        void setupCallbacks(WindowHandle handle, GLFWwindow* window);
+
+        void eventCallback_key(WindowHandle handle, GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods);
+        void eventCallback_char(WindowHandle handle, GLFWwindow* window, uint32_t codepoint);
+        void eventCallback_scroll(WindowHandle handle, GLFWwindow* window, double dx, double dy);
+        void eventCallback_cursorPos(WindowHandle handle, GLFWwindow* window, double mx, double my);
+        void eventCallback_mouseButton(WindowHandle handle, GLFWwindow* window, int32_t button, int32_t action, int32_t mods);
+        void eventCallback_windowSize(WindowHandle handle, GLFWwindow* window, int32_t width, int32_t height);
+        void eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths);
+        void eventCallback_joystick(int jid, int action);
+
+        static void keyCallback(GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods);
+        static void charCallback(GLFWwindow* window, uint32_t codepoint);
+        static void scrollCallback(GLFWwindow* window, double dx, double dy);
+        static void cursorPosCallback(GLFWwindow* window, double mx, double my);
+        static void mouseButtonCallback(GLFWwindow* window, int32_t button, int32_t action, int32_t mods);
+        static void windowSizeCallback(GLFWwindow* window, int32_t width, int32_t height);
+        static void windowCloseCallback(GLFWwindow* window);
+        static void dropFileCallback(GLFWwindow* window, int32_t count, const char** filePaths);
 
     private:
         static WindowManager* s_instance;
         Context* m_context;
-        std::map<WindowHandle, Window*> m_windowMap;
-        bx::HandleAllocT<TINA_CONFIG_MAX_WINDOWS> m_windowHandleAlloc;
-
-        // --- GLFW Error Callback ---
-        static void errorCb(int _error, const char* _description);
-
-        static void keyCallback(GLFWwindow* glfwWindow, int32_t key, int32_t scancode, int32_t action, int32_t mods);
-        static void charCallback(GLFWwindow* glfwWindow, uint32_t codepoint);
-        static void scrollCallback(GLFWwindow* glfwWindow, double dx, double dy);
-        static void cursorPosCallback(GLFWwindow* glfwWindow, double mx, double my);
-        static void mouseButtonCallback(GLFWwindow* glfwWindow, int32_t button, int32_t action, int32_t mods);
-        static void windowSizeCallback(GLFWwindow* glfwWindow, int32_t width, int32_t height);
-        static void dropFileCallback(GLFWwindow* glfwWindow, int32_t count, const char** filePaths);
-        static void joystickCallback(int jid, int action);
-        static void windowCloseCallback(GLFWwindow* glfwWindow);
-
-    public:
-        // WindowManager 实例方法 - 处理事件并发送到 EventQueue
-        void eventCallback_key(WindowHandle handle, GLFWwindow* glfwWindow, int32_t key, int32_t scancode,
-                               int32_t action, int32_t mods);
-        void eventCallback_char(WindowHandle handle, GLFWwindow* glfwWindow, uint32_t scancode);
-        void eventCallback_scroll(WindowHandle handle, GLFWwindow* glfwWindow, double dx, double dy);
-        void eventCallback_cursorPos(WindowHandle handle, GLFWwindow* glfwWindow, double mx, double my);
-        void eventCallback_mouseButton(WindowHandle handle, GLFWwindow* glfwWindow, int32_t button, int32_t action,
-                                       int32_t mods);
-        void eventCallback_windowSize(WindowHandle handle, GLFWwindow* glfwWindow, int32_t width, int32_t height);
-        void eventCallback_dropFile(WindowHandle handle, GLFWwindow* glfwWindow, int32_t count, const char** filePaths);
-        void eventCallback_joystick(int jid, int action);
+        std::unordered_map<uint16_t, std::unique_ptr<Window>> m_windowMap;
     };
 } // Tina

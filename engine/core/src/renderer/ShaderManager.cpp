@@ -1,5 +1,6 @@
 #include "tina/renderer/ShaderManager.hpp"
 #include "tina/core/Engine.hpp"
+#include "tina/log/Logger.hpp"
 #include <fstream>
 #include <filesystem>
 
@@ -29,14 +30,22 @@ bgfx::ShaderHandle ShaderManager::loadShader(const std::string& name, const std:
         return it->second;
     }
 
-    // 构建着色器文件路径
-    std::filesystem::path shaderPath = std::filesystem::path(Tina::Core::Engine::getExecutablePath()) / "bin" / "shaders";
+    // 获取着色器目录路径
+    #ifdef SHADER_OUTPUT_DIR
+    std::filesystem::path shaderPath = SHADER_OUTPUT_DIR;
+    #else
+    std::filesystem::path shaderPath = std::filesystem::path(Core::Engine::getExecutablePath()) / "resources" / "shaders";
+    #endif
+
+    TINA_LOG_INFO("Loading shader from base path: {}", shaderPath.string());
     
     // 根据平台选择正确的着色器版本
     std::string platformDir;
-    switch (bgfx::getRendererType()) {
+    const auto rendererType = bgfx::getRendererType();
+    TINA_LOG_INFO("Current renderer type: {}", bgfx::getRendererName(rendererType));
+
+    switch (rendererType) {
         case bgfx::RendererType::Direct3D11:
-        case bgfx::RendererType::Direct3D12:
             platformDir = "dx11";
             break;
         case bgfx::RendererType::OpenGL:
@@ -48,31 +57,48 @@ bgfx::ShaderHandle ShaderManager::loadShader(const std::string& name, const std:
         case bgfx::RendererType::Vulkan:
             platformDir = "spirv";
             break;
+        case bgfx::RendererType::Noop:
+            platformDir = "null";
+            break;
         default:
-            throw std::runtime_error("Unsupported renderer type");
+            // 对于其他类型，使用 dx11 作为默认值
+            platformDir = "dx11";
+            break;
     }
     
+    TINA_LOG_INFO("Using shader platform directory: {}", platformDir);
     shaderPath /= platformDir;
-    shaderPath /= name + "." + type + ".bin";
+    
+    // 修改文件名格式以匹配编译输出
+    std::string filename = name + "." + type + ".bin";
+    shaderPath /= filename;
 
-    // 加载着色器二进制数据
-    auto shaderData = loadShaderBinary(shaderPath.string());
-    
-    // 创建着色器
-    const bgfx::Memory* mem = bgfx::copy(shaderData.data(), shaderData.size());
-    bgfx::ShaderHandle handle = bgfx::createShader(mem);
-    
-    if (!bgfx::isValid(handle)) {
-        throw std::runtime_error("Failed to create shader: " + name);
+    TINA_LOG_INFO("Attempting to load shader from: {}", shaderPath.string());
+
+    try {
+        // 加载着色器二进制数据
+        auto shaderData = loadShaderBinary(shaderPath.string());
+        
+        // 创建着色器
+        const bgfx::Memory* mem = bgfx::copy(shaderData.data(), shaderData.size());
+        bgfx::ShaderHandle handle = bgfx::createShader(mem);
+        
+        if (!bgfx::isValid(handle)) {
+            throw std::runtime_error("Failed to create shader: " + name);
+        }
+
+        // 设置调试名称
+        bgfx::setName(handle, (name + "_" + type).c_str());
+        
+        // 缓存着色器句柄
+        m_shaderCache[cacheKey] = handle;
+        
+        TINA_LOG_INFO("Successfully loaded shader: {} ({})", name, type);
+        return handle;
+    } catch (const std::exception& e) {
+        TINA_LOG_ERROR("Failed to load shader {} ({}): {}", name, type, e.what());
+        throw;
     }
-
-    // 设置调试名称
-    bgfx::setName(handle, (name + "_" + type).c_str());
-    
-    // 缓存着色器句柄
-    m_shaderCache[cacheKey] = handle;
-    
-    return handle;
 }
 
 bgfx::ProgramHandle ShaderManager::createProgram(const std::string& name) {

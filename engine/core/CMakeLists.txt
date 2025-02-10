@@ -8,18 +8,22 @@ file(GLOB_RECURSE CORE_HEADER_FILES
     "include/*.hpp"
     "include/*.h"
 )
+
+# 编译着色器
 add_shader_compile_dir(${CMAKE_SOURCE_DIR}/engine/resources/shaders "2d")
 
 # 创建核心库
 add_library(TinaCore ${CORE_SOURCE_FILES} ${CORE_HEADER_FILES})
 add_library(Tina::Core ALIAS TinaCore)
 
+# 确保着色器在核心库之前编译
 add_dependencies(TinaCore shaders)
 
 # 设置包含目录
 target_include_directories(TinaCore
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_BINARY_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
@@ -41,6 +45,7 @@ target_compile_definitions(TinaCore
     PRIVATE
         TINA_CORE_EXPORTS
         TINA_VERSION="${PROJECT_VERSION}"
+        SHADER_OUTPUT_DIR="${CMAKE_BINARY_DIR}/resources/shaders"
 )
 
 # 启用 C++17

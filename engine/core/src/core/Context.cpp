@@ -2,44 +2,49 @@
 // Created by wuxianggujun on 2025/2/5.
 //
 
-#include "tina/event/EventQueue.hpp"
 #include "tina/core/Context.hpp"
+#include "tina/window/WindowManager.hpp"
+#include "tina/event/EventQueue.hpp"
 #include "tina/log/Logger.hpp"
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
+#include <memory>
 
 namespace Tina
 {
-    Context s_ctx;
+    Context* Context::s_instance = nullptr;
 
-    Context::Context()
-        : m_allocator(nullptr), windowManager(this)
-          , eventQueue()
+    Context& Context::getInstance()
     {
-        TINA_LOG_INFO("Context::Context", "Context created.");
-    }
-
-    Context::~Context()
-    {
-        windowManager.terminate();
-        TINA_LOG_INFO("Context::~Context", "Context destroyed.");
-    }
-
-    bool Context::initialize()
-    {
-        if (!windowManager.initialize())
+        if (!s_instance)
         {
-            TINA_LOG_ERROR("Context::initialize", "WindowManager initialization failed.");
-            return false;
+            s_instance = new Context();
         }
+        return *s_instance;
+    }
 
-        TINA_LOG_INFO("Context::initialize", "Context initialized successfully.");
+    Context::Context() 
+        : m_windowManager(std::make_unique<WindowManager>(this))
+        , m_eventQueue(std::make_unique<EventQueue>())
+    {
+        TINA_LOG_INFO("Context created");
+    }
+
+    Context::~Context() {
+        TINA_LOG_INFO("Context destroyed");
+        m_windowManager.reset();
+        m_eventQueue.reset();
+        s_instance = nullptr;
+    }
+
+    bool Context::initialize() {
+        TINA_LOG_INFO("Initializing context");
         return true;
     }
 
-    void Context::processEvents()
-    {
-        windowManager.processMessage();
+    void Context::processEvents() {
+        if (m_windowManager) {
+            m_windowManager->processMessage();
+        }
     }
-
 } // namespace Tina

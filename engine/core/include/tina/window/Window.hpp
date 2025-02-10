@@ -54,6 +54,18 @@ namespace Tina
         void setPosition(int32_t x, int32_t y);
         void setFullscreen(bool fullscreen);
 
+        [[nodiscard]] int32_t getWidth() const { 
+            int width, height;
+            glfwGetWindowSize(m_handle, &width, &height);
+            return width;
+        }
+        
+        [[nodiscard]] int32_t getHeight() const {
+            int width, height;
+            glfwGetWindowSize(m_handle, &width, &height);
+            return height;
+        }
+
     private:
         WindowManager* m_windowManager;
         WindowHandle m_windowHandle;

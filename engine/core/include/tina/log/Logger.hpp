@@ -41,7 +41,7 @@ namespace Tina
         {
             Debug = 0,
             Info,
-            Warning,
+            Warn,
             Error,
             Off
         };
@@ -80,9 +80,9 @@ namespace Tina
         template <typename... Args>
         void warning(const char* file, uint32_t line,fmt::format_string<Args...> format, Args&&... args)
         {
-            if (isLevelEnabled(Level::Warning))
+            if (isLevelEnabled(Level::Warn))
             {
-                logImpl(Level::Warning, file, line,format, std::forward<Args>(args)...);
+                logImpl(Level::Warn, file, line,format, std::forward<Args>(args)...);
             }
         }
 
@@ -123,9 +123,7 @@ namespace Tina
             {
                 std::string message = fmt::format(format, std::forward<Args>(args)...);
                 auto now = std::chrono::system_clock::now();
-
                 bool needsFlush = level >= flushLevel_;
-
                 {
                     std::lock_guard<std::mutex> lock(queueMutex_);
                     messageQueue_.emplace(level, now, std::move(message), file, line);
@@ -168,6 +166,6 @@ namespace Tina
 
 #define TINA_LOG_DEBUG(...) Tina::Logger::getInstance().debug(__FILE__, __LINE__, __VA_ARGS__)
 #define TINA_LOG_INFO(...) Tina::Logger::getInstance().info(__FILE__, __LINE__, __VA_ARGS__)
-#define TINA_LOG_WARNING(...) Tina::Logger::getInstance().warning(__FILE__, __LINE__, __VA_ARGS__)
+#define TINA_LOG_WARN(...) Tina::Logger::getInstance().warning(__FILE__, __LINE__, __VA_ARGS__)
 #define TINA_LOG_ERROR(...) Tina::Logger::getInstance().error(__FILE__, __LINE__, __VA_ARGS__)
 } // namespace Tina

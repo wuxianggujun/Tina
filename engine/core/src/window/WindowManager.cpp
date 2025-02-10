@@ -12,7 +12,8 @@ namespace Tina
 {
     WindowManager* WindowManager::s_instance = nullptr;
 
-    WindowManager::WindowManager(Context* context): m_context(context), m_windowHandleAlloc()
+    WindowManager::WindowManager(Context* context)
+        : m_context(context)
     {
         s_instance = this;
     }
@@ -25,122 +26,266 @@ namespace Tina
 
     bool WindowManager::initialize()
     {
-        glfwSetErrorCallback(errorCb);
+        glfwSetErrorCallback(errorCallback);
         if (!glfwInit())
         {
             TINA_LOG_ERROR("WindowManager::initialize", " Failed to initialize GLFW");
             return false;
         }
 
-        // 设置手柄回调
         glfwSetJoystickCallback(joystickCallback);
-        glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         TINA_LOG_INFO("WindowManager::initialize", "GLFW initialized successfully.");
         return true;
     }
 
     void WindowManager::terminate()
     {
-        for (auto const& [handle,window] : m_windowMap)
-        {
-            delete window;
+        TINA_LOG_INFO("Terminating WindowManager");
+        
+        if (!glfwGetCurrentContext()) {
+            TINA_LOG_DEBUG("No GLFW context exists, skipping window cleanup");
+            return;
         }
 
-        m_windowMap.clear();
-        m_windowHandleAlloc.reset();
+        try {
+            // 先移除所有回调
+            for (const auto& [idx, window] : m_windowMap) {
+                if (GLFWwindow* handle = window->getHandle()) {
+                    glfwSetWindowUserPointer(handle, nullptr);
+                    glfwSetKeyCallback(handle, nullptr);
+                    glfwSetCharCallback(handle, nullptr);
+                    glfwSetScrollCallback(handle, nullptr);
+                    glfwSetCursorPosCallback(handle, nullptr);
+                    glfwSetMouseButtonCallback(handle, nullptr);
+                    glfwSetWindowSizeCallback(handle, nullptr);
+                    glfwSetDropCallback(handle, nullptr);
+                }
+            }
 
-        glfwTerminate();
+            // 清理窗口
+            m_windowMap.clear();
+
+            // 重置回调
+            glfwSetErrorCallback(nullptr);
+            glfwSetJoystickCallback(nullptr);
+
+            // 终止 GLFW
+            glfwTerminate();
+            
+            TINA_LOG_INFO("WindowManager terminated successfully");
+        } catch (const std::exception& e) {
+            TINA_LOG_ERROR("WindowManager::terminate", "Error during termination: {}", e.what());
+        }
     }
 
-    WindowHandle WindowManager::createWindow(int32_t x, int32_t y, int32_t width, int32_t height, uint32_t flags,
-                                             const char* title)
+    WindowHandle WindowManager::createWindow(const Window::WindowConfig& config)
     {
-        Window::WindowConfig windowConfig;
-        windowConfig.title = String(title);
-        windowConfig.width = width;
-        windowConfig.height = height;
+        WindowHandle handle;
+        handle.idx = static_cast<uint16_t>(m_windowMap.size());
 
-        WindowHandle handle = {m_windowHandleAlloc.alloc()};
-        // 创建Window对象，传入WindowManager指针和WindowHandle
-        auto* window = new Window(this, handle, windowConfig);
-        // 检查GLFW窗口是否创建成功
-        if (!window->getHandle())
-        {
-            m_windowHandleAlloc.free(handle.idx);
-            delete window;
-            return {UINT16_MAX}; // 无效的WindowHandle
+        auto window = std::make_unique<Window>(this, handle, config);
+        if (!window->getHandle()) {
+            TINA_LOG_ERROR("WindowManager::createWindow", "Failed to create GLFW window");
+            return WindowHandle{UINT16_MAX};
         }
 
-        m_windowMap[handle] = window;
+        m_windowMap[handle.idx] = std::move(window);
+        setupCallbacks(handle, m_windowMap[handle.idx]->getHandle());
 
-        glfwSetWindowPos(window->getHandle(), x, y);
+        Event event = createWindowEvent(Event::WindowCreate, handle, m_windowMap[handle.idx]->getHandle());
+        m_context->getEventQueue().pushEvent(event);
 
-        // 设置GLFW回掉函数
-        glfwSetKeyCallback(window->getHandle(), keyCallback);
-        glfwSetCharCallback(window->getHandle(), charCallback);
-        glfwSetScrollCallback(window->getHandle(), scrollCallback);
-        glfwSetCursorPosCallback(window->getHandle(), cursorPosCallback);
-        glfwSetMouseButtonCallback(window->getHandle(), mouseButtonCallback);
-        glfwSetWindowSizeCallback(window->getHandle(), windowSizeCallback);
-        glfwSetDropCallback(window->getHandle(), dropFileCallback);
-        glfwSetWindowCloseCallback(window->getHandle(), windowCloseCallback);  // 添加窗口关闭回调
-
-        // 发送窗口创建事件
-        Event event;
-        event.type = Event::WindowCreate;
-        event.windowHandle = handle;
-        event.window.nativeWindowHandle = getNativeWindowHandle(handle);
-        m_context->getEventQueue().postEvent(event);
-
-        TINA_LOG_INFO("WindowManager::createWindow", "Window created successfully. Handle: {}", handle.idx);
         return handle;
     }
 
     void WindowManager::destroyWindow(WindowHandle handle)
     {
-        auto it = m_windowMap.find(handle);
-
-        if (it != m_windowMap.end())
-        {
-            Window* window = it->second;
-            // 发送窗口销毁事件
-            Event event;
-            event.type = Event::WindowDestroy;
-            event.windowHandle = handle;
-            event.window.nativeWindowHandle = nullptr;
-            m_context->getEventQueue().postEvent(event);
-
-            delete window;
+        auto it = m_windowMap.find(handle.idx);
+        if (it != m_windowMap.end()) {
+            Event event = createWindowEvent(Event::WindowDestroy, handle);
+            m_context->getEventQueue().pushEvent(event);
             m_windowMap.erase(it);
-            m_windowHandleAlloc.free(handle.idx);
         }
     }
 
     Window* WindowManager::getWindow(WindowHandle handle)
     {
-        auto it = m_windowMap.find(handle);
-        if (it != m_windowMap.end())
-        {
-            return it->second;
+        auto it = m_windowMap.find(handle.idx);
+        return it != m_windowMap.end() ? it->second.get() : nullptr;
+    }
+
+    GLFWwindow* WindowManager::getGLFWwindow(WindowHandle handle) const
+    {
+        auto it = m_windowMap.find(handle.idx);
+        return it != m_windowMap.end() ? it->second->getHandle() : nullptr;
+    }
+
+    WindowHandle WindowManager::findHandle(GLFWwindow* window) const
+    {
+        for (const auto& [idx, win] : m_windowMap) {
+            if (win->getHandle() == window) {
+                WindowHandle handle;
+                handle.idx = idx;
+                return handle;
+            }
         }
-        return nullptr;
+        return WindowHandle{UINT16_MAX};
+    }
+
+    void WindowManager::pollEvents()
+    {
+        glfwPollEvents();
+    }
+
+    bool WindowManager::pollEvent(Event& event)
+    {
+        return m_context->getEventQueue().pollEvent(event);
     }
 
     void WindowManager::processMessage()
     {
         glfwPollEvents();
         
-        // 检查所有窗口的关闭状态
-        for (auto const& [handle, window] : m_windowMap)
-        {
-            if (window->shouldClose())
-            {
-                Event event;
-                event.type = Event::WindowClose;
-                event.windowHandle = handle;
-                m_context->getEventQueue().postEvent(event);
+        for (const auto& [idx, window] : m_windowMap) {
+            if (window->shouldClose()) {
+                WindowHandle handle;
+                handle.idx = idx;
+                Event event = createWindowEvent(Event::WindowClose, handle);
+                m_context->getEventQueue().pushEvent(event);
             }
         }
+    }
+
+    void WindowManager::setupCallbacks(WindowHandle handle, GLFWwindow* window)
+    {
+        glfwSetWindowUserPointer(window, this);
+        
+        glfwSetKeyCallback(window, [](GLFWwindow* w, int key, int scancode, int action, int mods) {
+            auto* wm = static_cast<WindowManager*>(glfwGetWindowUserPointer(w));
+            if (wm) {
+                WindowHandle h = wm->findHandle(w);
+                wm->eventCallback_key(h, w, key, scancode, action, mods);
+            }
+        });
+
+        glfwSetCharCallback(window, [](GLFWwindow* w, uint32_t codepoint) {
+            auto* wm = static_cast<WindowManager*>(glfwGetWindowUserPointer(w));
+            if (wm) {
+                WindowHandle h = wm->findHandle(w);
+                wm->eventCallback_char(h, w, codepoint);
+            }
+        });
+
+        glfwSetScrollCallback(window, [](GLFWwindow* w, double dx, double dy) {
+            auto* wm = static_cast<WindowManager*>(glfwGetWindowUserPointer(w));
+            if (wm) {
+                WindowHandle h = wm->findHandle(w);
+                wm->eventCallback_scroll(h, w, dx, dy);
+            }
+        });
+
+        glfwSetCursorPosCallback(window, [](GLFWwindow* w, double mx, double my) {
+            auto* wm = static_cast<WindowManager*>(glfwGetWindowUserPointer(w));
+            if (wm) {
+                WindowHandle h = wm->findHandle(w);
+                wm->eventCallback_cursorPos(h, w, mx, my);
+            }
+        });
+
+        glfwSetMouseButtonCallback(window, [](GLFWwindow* w, int button, int action, int mods) {
+            auto* wm = static_cast<WindowManager*>(glfwGetWindowUserPointer(w));
+            if (wm) {
+                WindowHandle h = wm->findHandle(w);
+                wm->eventCallback_mouseButton(h, w, button, action, mods);
+            }
+        });
+
+        glfwSetWindowSizeCallback(window, [](GLFWwindow* w, int width, int height) {
+            auto* wm = static_cast<WindowManager*>(glfwGetWindowUserPointer(w));
+            if (wm) {
+                WindowHandle h = wm->findHandle(w);
+                wm->eventCallback_windowSize(h, w, width, height);
+            }
+        });
+
+        glfwSetDropCallback(window, [](GLFWwindow* w, int count, const char** paths) {
+            auto* wm = static_cast<WindowManager*>(glfwGetWindowUserPointer(w));
+            if (wm) {
+                WindowHandle h = wm->findHandle(w);
+                wm->eventCallback_dropFile(h, w, count, paths);
+            }
+        });
+    }
+
+    void WindowManager::errorCallback(int error, const char* description)
+    {
+        TINA_LOG_ERROR("GLFW Error", "({}) {}", error, description);
+    }
+
+    void WindowManager::joystickCallback(int jid, int event)
+    {
+        if (WindowManager* manager = WindowManager::getInstance()) {
+            manager->eventCallback_joystick(jid, event);
+        }
+    }
+
+    void WindowManager::eventCallback_key(WindowHandle handle, GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods)
+    {
+        Event event = createKeyEvent(handle, key, scancode, action, mods);
+        m_context->getEventQueue().pushEvent(event);
+    }
+
+    void WindowManager::eventCallback_char(WindowHandle handle, GLFWwindow* window, uint32_t codepoint)
+    {
+        Event event(Event::Char);
+        event.windowHandle = handle;
+        event.character.codepoint = codepoint;
+        m_context->getEventQueue().pushEvent(event);
+    }
+
+    void WindowManager::eventCallback_scroll(WindowHandle handle, GLFWwindow* window, double dx, double dy)
+    {
+        Event event = createMouseScrollEvent(handle, dx, dy);
+        m_context->getEventQueue().pushEvent(event);
+    }
+
+    void WindowManager::eventCallback_cursorPos(WindowHandle handle, GLFWwindow* window, double mx, double my)
+    {
+        Event event(Event::CursorPos);
+        event.windowHandle = handle;
+        event.cursorPos.x = mx;
+        event.cursorPos.y = my;
+        m_context->getEventQueue().pushEvent(event);
+    }
+
+    void WindowManager::eventCallback_mouseButton(WindowHandle handle, GLFWwindow* window, int32_t button, int32_t action, int32_t mods)
+    {
+        Event event = createMouseButtonEvent(handle, button, action, mods);
+        m_context->getEventQueue().pushEvent(event);
+    }
+
+    void WindowManager::eventCallback_windowSize(WindowHandle handle, GLFWwindow* window, int32_t width, int32_t height)
+    {
+        Event event = createWindowResizeEvent(handle, width, height);
+        m_context->getEventQueue().pushEvent(event);
+    }
+
+    void WindowManager::eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths)
+    {
+        Event event(Event::DropFile);
+        event.windowHandle = handle;
+        event.dropFile.count = count;
+        event.dropFile.paths = filePaths;
+        m_context->getEventQueue().pushEvent(event);
+    }
+
+    void WindowManager::eventCallback_joystick(int jid, int action)
+    {
+        Event event(Event::Gamepad);
+        event.gamepad.jid = jid;
+        event.gamepad.action = action;
+        m_context->getEventQueue().pushEvent(event);
     }
 
     void* WindowManager::getNativeWindowHandle(WindowHandle handle)
@@ -154,6 +299,8 @@ namespace Tina
             return glfwGetCocoaWindow(window->getHandle());
 #elif BX_PLATFORM_WINDOWS
             return glfwGetWin32Window(window->getHandle());
+#else
+            return nullptr;
 #endif
         }
         return nullptr;
@@ -167,227 +314,9 @@ namespace Tina
         return NULL;
 #elif BX_PLATFORM_WINDOWS
         return nullptr;
+#else
+        return nullptr;
 #endif
     }
 
-    bgfx::NativeWindowHandleType::Enum WindowManager::getNativeWindowHandleType()
-    {
-#if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
-        return bgfx::NativeWindowHandleType::X11;
-#elif BX_PLATFORM_OSX
-        return bgfx::NativeWindowHandleType::Cocoa;
-#elif BX_PLATFORM_WINDOWS
-        return bgfx::NativeWindowHandleType::Default;
-#endif
-    }
-
-    WindowHandle WindowManager::findHandle(GLFWwindow* glfwWindow) const
-    {
-        for (auto const& [handle, window] : m_windowMap)
-        {
-            if (window->getHandle() == glfwWindow)
-            {
-                return handle;
-            }
-        }
-        return {UINT16_MAX};
-    }
-
-    void WindowManager::errorCb(int _error, const char* _description)
-    {
-        TINA_LOG_ERROR("GLFW Error", "Code: {}, Description: {}", _error, _description);
-    }
-
-    void WindowManager::eventCallback_key(WindowHandle handle, GLFWwindow* glfwWindow, int32_t key, int32_t scancode,
-                                          int32_t action, int32_t mods)
-    {
-        Event event;
-        event.type = Event::Key;
-        event.windowHandle = handle;
-        event.key.key = key;
-        event.key.scancode = scancode;
-        event.key.action = action;
-        event.key.mods = mods;
-        m_context->getEventQueue().postEvent(event);
-    }
-
-    void WindowManager::eventCallback_char(WindowHandle handle, GLFWwindow* glfwWindow, uint32_t codepoint)
-    {
-        Event event;
-        event.type = Event::Char;
-        event.windowHandle = handle;
-        event.character.codepoint = codepoint;
-        m_context->getEventQueue().postEvent(event);
-    }
-
-    void WindowManager::eventCallback_scroll(WindowHandle handle, GLFWwindow* glfwWindow, double dx, double dy)
-    {
-        Event event;
-        event.type = Event::MouseScroll;
-        event.windowHandle = handle;
-        event.mouseScroll.xoffset = dx;
-        event.mouseScroll.yoffset = dy;
-        m_context->getEventQueue().postEvent(event);
-    }
-
-    void WindowManager::eventCallback_cursorPos(WindowHandle handle, GLFWwindow* glfwWindow, double mx, double my)
-    {
-        Event event;
-        event.type = Event::CursorPos;
-        event.windowHandle = handle;
-        event.cursorPos.x = mx;
-        event.cursorPos.y = my;
-        m_context->getEventQueue().postEvent(event);
-    }
-
-    void WindowManager::eventCallback_mouseButton(WindowHandle handle, GLFWwindow* glfwWindow, int32_t button,
-                                                  int32_t action, int32_t mods)
-    {
-        Event event;
-        event.type = Event::MouseButton;
-        event.windowHandle = handle;
-        event.mouseButton.button = button;
-        event.mouseButton.action = action;
-        event.mouseButton.mods = mods;
-        m_context->getEventQueue().postEvent(event);
-    }
-
-    void WindowManager::eventCallback_windowSize(WindowHandle handle, GLFWwindow* glfwWindow, int32_t width,
-                                                 int32_t height)
-    {
-        Event event;
-        event.type = Event::WindowResize;
-        event.windowHandle = handle;
-        event.windowResize.width = width;
-        event.windowResize.height = height;
-        m_context->getEventQueue().postEvent(event);
-    }
-
-    void WindowManager::eventCallback_dropFile(WindowHandle handle, GLFWwindow* glfwWindow, int32_t count,
-                                               const char** filePaths)
-    {
-        Event event;
-        event.type = Event::DropFile;
-        event.windowHandle = handle;
-        event.dropFile.count = count;
-        event.dropFile.paths = filePaths;
-        m_context->getEventQueue().postEvent(event);
-    }
-
-    void WindowManager::eventCallback_joystick(int jid, int action)
-    {
-        Event event;
-        event.type = Event::Gamepad;
-        event.windowHandle = {UINT16_MAX}; // 手柄事件不关联特定窗口
-        event.gamepad.jid = jid;
-        event.gamepad.action = action;
-        m_context->getEventQueue().postEvent(event);
-    }
-
-    void WindowManager::keyCallback(GLFWwindow* glfwWindow, int32_t key, int32_t scancode, int32_t action, int32_t mods)
-    {
-        if (auto* manager = WindowManager::getInstance())
-        {
-            const WindowHandle handle = manager->findHandle(glfwWindow);
-            if (handle.idx != UINT16_MAX)
-            {
-                manager->eventCallback_key(handle, glfwWindow, key, scancode, action, mods);
-            }
-        }
-    }
-
-    void WindowManager::charCallback(GLFWwindow* glfwWindow, uint32_t codepoint)
-    {
-        if (auto* manager = WindowManager::getInstance())
-        {
-            WindowHandle handle = manager->findHandle(glfwWindow);
-            if (handle.idx != UINT16_MAX)
-            {
-                manager->eventCallback_char(handle, glfwWindow, codepoint);
-            }
-        }
-    }
-
-    void WindowManager::scrollCallback(GLFWwindow* glfwWindow, double dx, double dy)
-    {
-        if (auto* manager = WindowManager::getInstance())
-        {
-            WindowHandle handle = manager->findHandle(glfwWindow);
-            if (handle.idx != UINT16_MAX)
-            {
-                manager->eventCallback_scroll(handle, glfwWindow, dx, dy);
-            }
-        }
-    }
-
-    void WindowManager::cursorPosCallback(GLFWwindow* glfwWindow, double mx, double my)
-    {
-        if (auto* manager = WindowManager::getInstance())
-        {
-            WindowHandle handle = manager->findHandle(glfwWindow);
-            if (handle.idx != UINT16_MAX)
-            {
-                manager->eventCallback_cursorPos(handle, glfwWindow, mx, my);
-            }
-        }
-    }
-
-    void WindowManager::mouseButtonCallback(GLFWwindow* glfwWindow, int32_t button, int32_t action, int32_t mods)
-    {
-        if (auto* manager = WindowManager::getInstance())
-        {
-            WindowHandle handle = manager->findHandle(glfwWindow);
-            if (handle.idx != UINT16_MAX)
-            {
-                manager->eventCallback_mouseButton(handle, glfwWindow, button, action, mods);
-            }
-        }
-    }
-
-    void WindowManager::windowSizeCallback(GLFWwindow* glfwWindow, int32_t width, int32_t height)
-    {
-        if (auto* manager = WindowManager::getInstance())
-        {
-            WindowHandle handle = manager->findHandle(glfwWindow);
-            if (handle.idx != UINT16_MAX)
-            {
-                manager->eventCallback_windowSize(handle, glfwWindow, width, height);
-            }
-        }
-    }
-
-    void WindowManager::dropFileCallback(GLFWwindow* glfwWindow, int32_t count, const char** filePaths)
-    {
-        if (auto* manager = WindowManager::getInstance())
-        {
-            WindowHandle handle = manager->findHandle(glfwWindow);
-            if (handle.idx != UINT16_MAX)
-            {
-                manager->eventCallback_dropFile(handle, glfwWindow, count, filePaths);
-            }
-        }
-    }
-
-    void WindowManager::joystickCallback(int jid, int action)
-    {
-        if (auto* manager = WindowManager::getInstance())
-        {
-            manager->eventCallback_joystick(jid, action);
-        }
-    }
-
-    void WindowManager::windowCloseCallback(GLFWwindow* glfwWindow)
-    {
-        if (s_instance)
-        {
-            WindowHandle handle = s_instance->findHandle(glfwWindow);
-            if (isValid(handle))
-            {
-                Event event;
-                event.type = Event::WindowClose;
-                event.windowHandle = handle;
-                s_instance->m_context->getEventQueue().postEvent(event);
-            }
-        }
-    }
-} // Tina
+} // namespace Tina
