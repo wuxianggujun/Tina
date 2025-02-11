@@ -1,8 +1,6 @@
-#include <memory>
 #include <tina/core/Engine.hpp>
 #include <tina/layer/Render2DLayer.hpp>
 #include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 #include "tina/scene/Scene.hpp"
 #include "tina/log/Logger.hpp"
 
@@ -18,7 +16,7 @@ using namespace Tina;
 
     try {
         // 创建引擎实例
-        std::unique_ptr<Core::Engine> engine = std::make_unique<Core::Engine>();
+        UniquePtr<Core::Engine> engine = MakeUnique<Core::Engine>();
         
         // 初始化引擎
         if (!engine->initialize()) {
@@ -34,7 +32,8 @@ using namespace Tina;
         }
         
         // 添加Render2DLayer
-        auto render2DLayer = std::make_shared<Render2DLayer>();
+        const auto render2DLayer = MakeShared<Render2DLayer>();
+        scene->pushLayer(render2DLayer.get());
 
         // 运行引擎
         if (!engine->run()) {

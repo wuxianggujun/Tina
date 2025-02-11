@@ -2,7 +2,7 @@
 
 #include <bgfx/bgfx.h>
 #include <bx/bx.h>
-#include "tina/core/Core.hpp"  // 包含核心头文件以获取导出宏
+#include "tina/core/Core.hpp"
 
 namespace Tina::Render
 {

@@ -5,41 +5,41 @@
 #include "bgfx/platform.h"
 #include "tina/log/Logger.hpp"
 #include "tina/event/Event.hpp"
+#include "tina/layer/Layer.hpp"
 
 namespace Tina
 {
-    Scene::Scene(std::string  name)
-        : m_name(std::move(name))  // 最先初始化
+    Scene::Scene(std::string name)
+        : m_name(std::move(name)) // 最先初始化
     {
         TINA_LOG_INFO("Created scene: {}", m_name);
     }
 
-    Scene::~Scene() {
-        try {
+    Scene::~Scene()
+    {
+        try
+        {
             // 在析构函数开始时记录场景名称
             std::string sceneName = m_name;
             TINA_LOG_INFO("Destroying scene: {}", sceneName);
-            
+
             // 只在真正需要时执行渲染同步
-            if (bgfx::getInternalData() && bgfx::getInternalData()->context) {
+            if (bgfx::getInternalData() && bgfx::getInternalData()->context)
+            {
                 bgfx::frame(false); // 使用 false 参数避免等待 VSync
             }
 
             // 清理实体注册表
-            try {
-                TINA_LOG_DEBUG("Clearing entity registry");
-                m_registry.clear();
-            }
-            catch (const std::exception& e) {
-                TINA_LOG_ERROR("Error clearing registry: {}", e.what());
-            }
-
+            TINA_LOG_DEBUG("Clearing entity registry");
+            m_registry.clear();
             TINA_LOG_INFO("Scene destroyed: {}", sceneName);
         }
-        catch (const std::exception& e) {
+        catch (const std::exception& e)
+        {
             TINA_LOG_ERROR("Error in scene destructor: {}", e.what());
         }
-        catch (...) {
+        catch (...)
+        {
             TINA_LOG_ERROR("Unknown error in scene destructor");
         }
     }
@@ -47,10 +47,10 @@ namespace Tina
     entt::entity Scene::createEntity(const std::string& name)
     {
         entt::entity entity = m_registry.create();
-        
+
         // 添加名称组件
         m_registry.emplace<std::string>(entity, name);
-        
+
         TINA_LOG_INFO("Created entity: {} in scene: {}", name, m_name);
         return entity;
     }
@@ -88,17 +88,33 @@ namespace Tina
 
     void Scene::onUpdate(float deltaTime)
     {
+        for (Layer* layer : m_layerStack)
+        {
+            layer->onUpdate(deltaTime);
+        }
     }
 
     void Scene::onRender()
     {
+        for (Layer* layer : m_layerStack)
+        {
+            layer->onRender();
+        }
     }
 
     void Scene::onImGuiRender()
     {
+        for (Layer* layer : m_layerStack)
+        {
+            layer->onImGuiRender();
+        }
     }
 
     void Scene::onEvent(struct Event& event)
     {
+        for (auto it = m_layerStack.end(); it != m_layerStack.begin();)
+        {
+            (*--it)->onEvent(event);
+        }
     }
 } // namespace Tina

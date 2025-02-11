@@ -6,7 +6,7 @@ namespace Tina {
 
 class Layer {
 public:
-    Layer(const std::string& name = "Layer");
+    explicit Layer(const std::string& name = "Layer");
     virtual ~Layer() = default;
 
     virtual void onAttach() {} // 当Layer被添加到Scene时调用
@@ -16,7 +16,7 @@ public:
     virtual void onImGuiRender() {} // ImGui渲染
     virtual void onEvent(class Event& event) {} // 事件处理
 
-    const std::string& getName() const { return m_Name; }
+    [[nodiscard]] const std::string& getName() const { return m_Name; }
 
 protected:
     std::string m_Name;

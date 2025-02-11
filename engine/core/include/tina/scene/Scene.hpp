@@ -3,14 +3,15 @@
 #include "tina/core/Core.hpp"
 #include <entt/entt.hpp>
 #include <string>
-#include "tina/log/Logger.hpp"
+
+#include "tina/layer/LayerStack.hpp"
 
 namespace Tina
 {
     class TINA_CORE_API Scene
     {
     public:
-        explicit Scene(std::string  name = "Scene");
+        explicit Scene(std::string name = "Scene");
         ~Scene();
 
         // 禁止拷贝和赋值
@@ -21,7 +22,7 @@ namespace Tina
         entt::entity createEntity(const std::string& name = std::string());
         void destroyEntity(entt::entity entity);
         // 获取实体名称
-        std::string getEntityName(entt::entity entity) const;
+        [[nodiscard]] std::string getEntityName(entt::entity entity) const;
         // 设置实体名称
         void setEntityName(entt::entity entity, const std::string& name);
 
@@ -33,12 +34,19 @@ namespace Tina
 
         // Getters
         entt::registry& getRegistry() { return m_registry; }
-        const entt::registry& getRegistry() const { return m_registry; }
-        const std::string& getName() const { return m_name; }
+        [[nodiscard]] const entt::registry& getRegistry() const { return m_registry; }
+        [[nodiscard]] const std::string& getName() const { return m_name; }
         void setName(const std::string& name) { m_name = name; }
+
+        void pushLayer(Layer* layer) { m_layerStack.pushLayer(layer); }
+        void pushOverlay(Layer* overlay) { m_layerStack.pushOverlay(overlay); }
+        void popLayer(Layer* layer) { m_layerStack.popLayer(layer); }
+        void popOverlay(Layer* overlay) { m_layerStack.popOverlay(overlay); }
+
     private:
         // 成员变量按照销毁顺序排列（从下到上销毁）
-        std::string m_name;           // 最先被初始化，最后被销毁
-        entt::registry m_registry;    // 第二个被初始化
+        std::string m_name; // 最先被初始化，最后被销毁
+        entt::registry m_registry; // 第二个被初始化
+        LayerStack m_layerStack;
     };
 }
