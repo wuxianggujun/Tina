@@ -38,7 +38,7 @@ namespace Tina
     public:
         struct WindowConfig
         {
-            String title;
+            const char* title;
             int32_t width;
             int32_t height;
         };

@@ -42,13 +42,14 @@ namespace Tina
     void WindowManager::terminate()
     {
         TINA_LOG_INFO("Terminating WindowManager");
-        
-        if (!glfwGetCurrentContext()) {
-            TINA_LOG_DEBUG("No GLFW context exists, skipping window cleanup");
-            return;
-        }
 
         try {
+            // 检查GLFW是否已初始化
+            if (!glfwInit()) {
+                TINA_LOG_DEBUG("GLFW not initialized, skipping cleanup");
+                return;
+            }
+
             // 先移除所有回调
             for (const auto& [idx, window] : m_windowMap) {
                 if (GLFWwindow* handle = window->getHandle()) {
@@ -75,7 +76,7 @@ namespace Tina
             
             TINA_LOG_INFO("WindowManager terminated successfully");
         } catch (const std::exception& e) {
-            TINA_LOG_ERROR("WindowManager::terminate", "Error during termination: {}", e.what());
+            TINA_LOG_ERROR("Error during WindowManager termination: {}", e.what());
         }
     }
 

@@ -12,7 +12,7 @@ namespace Tina {
         : m_windowManager(windowManager), m_windowHandle(handle), m_handle(nullptr)
     {
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        m_handle = glfwCreateWindow(config.width, config.height, config.title.c_str(), nullptr, nullptr);
+        m_handle = glfwCreateWindow(config.width, config.height, config.title, nullptr, nullptr);
         if (!m_handle)
         {
             TINA_LOG_ERROR("Window::Window", "Failed to create GLFW window");

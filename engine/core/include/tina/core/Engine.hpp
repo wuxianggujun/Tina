@@ -7,7 +7,6 @@
 #include "tina/core/Context.hpp"
 #include "tina/window/Window.hpp"
 #include "tina/scene/Scene.hpp"
-#include "tina/layer/LayerStack.hpp"
 #include "tina/event/Event.hpp"
 #include "tina/log/Logger.hpp"
 #include <memory>
@@ -36,7 +35,7 @@ namespace Tina::Core
         static std::filesystem::path getExecutablePath();
 
         // 获取主窗口句柄
-        WindowHandle getMainWindow() const { return m_mainWindow; }
+        [[nodiscard]] WindowHandle getMainWindow() const { return m_mainWindow; }
 
         // 获取窗口尺寸
         void getWindowSize(uint32_t& width, uint32_t& height) const {

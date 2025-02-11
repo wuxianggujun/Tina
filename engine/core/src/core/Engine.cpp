@@ -37,7 +37,11 @@ namespace Tina::Core
 
     Engine::~Engine()
     {
-        shutdown();
+        if (!m_isShutdown) {
+            shutdown();
+        }
+        s_Instance = nullptr;
+        TINA_LOG_INFO("Engine destroyed.");
     }
 
     bool Engine::initialize() {
@@ -57,7 +61,7 @@ namespace Tina::Core
             Window::WindowConfig config;
             config.width = m_windowWidth;
             config.height = m_windowHeight;
-            config.title = String("Tina Engine");
+            config.title = "Tina Engine";
 
             m_mainWindow = m_context.getWindowManager().createWindow(config);
 
@@ -176,31 +180,36 @@ namespace Tina::Core
     void Engine::shutdown()
     {
         if (m_isShutdown) {
+            TINA_LOG_WARN("Engine already shut down");
             return;
         }
 
         try {
-            // 1. 首先销毁活动场景
-            if (m_activeScene) {
-                TINA_LOG_DEBUG("Destroying active scene");
-                std::string sceneName = m_activeScene->getName();
-                m_activeScene = nullptr;  // 这会触发Scene的析构函数
-                TINA_LOG_DEBUG("Active scene '{}' destroyed", sceneName);
-            }
-
-            // 2. 然后开始引擎的关闭过程
             TINA_LOG_INFO("Engine shutting down");
             m_isShutdown = true;
 
-            // 3. 确保所有渲染命令都已完成
-            if (bgfx::getInternalData()->context) {
+            // 1. 首先禁用 VSync
+            if (bgfx::getInternalData() && bgfx::getInternalData()->context) {
+                bgfx::setViewMode(0, bgfx::ViewMode::Sequential);
+                uint32_t reset = BGFX_RESET_NONE;
+                bgfx::reset(m_windowWidth, m_windowHeight, reset);
+            }
+
+            // 2. 销毁活动场景
+            if (m_activeScene) {
+                TINA_LOG_DEBUG("Destroying active scene");
+                m_activeScene.reset();
+                TINA_LOG_DEBUG("Active scene destroyed");
+            }
+
+            // 3. 快速提交最后一帧
+            if (bgfx::getInternalData() && bgfx::getInternalData()->context) {
                 TINA_LOG_DEBUG("Finalizing render commands");
-                bgfx::frame();
-                bgfx::renderFrame();
+                bgfx::frame(false); // 不等待 VSync
             }
 
             // 4. 关闭BGFX
-            if (bgfx::getInternalData()->context) {
+            if (bgfx::getInternalData() && bgfx::getInternalData()->context) {
                 TINA_LOG_DEBUG("Shutting down BGFX");
                 bgfx::shutdown();
             }
@@ -213,17 +222,7 @@ namespace Tina::Core
         }
         catch (const std::exception& e) {
             TINA_LOG_ERROR("Error during shutdown: {}", e.what());
-            try {
-                // 确保基本清理
-                m_activeScene = nullptr;
-                if (bgfx::getInternalData()->context) {
-                    bgfx::shutdown();
-                }
-                m_context.getWindowManager().terminate();
-            }
-            catch (...) {
-                TINA_LOG_ERROR("Critical error during emergency cleanup");
-            }
+            m_isShutdown = true;
         }
     }
 

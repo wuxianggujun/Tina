@@ -21,8 +21,8 @@ namespace Tina
         bool initialize();
         void processEvents();
 
-        WindowManager& getWindowManager() { return *m_windowManager; }
-        EventQueue& getEventQueue() { return *m_eventQueue; }
+        [[nodiscard]] WindowManager& getWindowManager() const { return *m_windowManager; }
+        [[nodiscard]] EventQueue& getEventQueue() const { return *m_eventQueue; }
 
     private:
         Context();  // 私有构造函数
