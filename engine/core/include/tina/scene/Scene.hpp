@@ -4,14 +4,19 @@
 #include <entt/entt.hpp>
 #include <string>
 #include "tina/layer/LayerStack.hpp"
+#include "tina/log/Logger.hpp"
 
 namespace Tina
 {
     class TINA_CORE_API Scene
     {
     public:
-        Scene(const std::string& name = "Scene");
-        ~Scene() = default;
+        explicit Scene(const std::string& name = "Scene");
+        ~Scene();
+
+        // 禁止拷贝和赋值
+        Scene(const Scene&) = delete;
+        Scene& operator=(const Scene&) = delete;
 
         // Entity management
         entt::entity createEntity(const std::string& name = std::string());
@@ -41,8 +46,9 @@ namespace Tina
         LayerStack& getLayers() { return m_LayerStack; }
 
     private:
-        std::string m_name;
-        entt::registry m_registry;
-        LayerStack m_LayerStack;
+        // 成员变量按照销毁顺序排列（从下到上销毁）
+        std::string m_name;           // 最先被初始化，最后被销毁
+        entt::registry m_registry;    // 第二个被初始化
+        LayerStack m_LayerStack;      // 第三个被初始化
     };
 }

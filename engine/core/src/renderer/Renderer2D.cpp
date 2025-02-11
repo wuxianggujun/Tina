@@ -124,6 +124,7 @@ void Renderer2D::shutdown() {
             TINA_LOG_DEBUG("Freeing vertex buffer memory");
             delete[] s_Data.vertexBufferBase;
             s_Data.vertexBufferBase = nullptr;
+            s_Data.vertexBufferPtr = nullptr;
         }
 
         if (s_Data.indices) {
@@ -132,7 +133,6 @@ void Renderer2D::shutdown() {
             s_Data.indices = nullptr;
         }
 
-        s_Data.vertexBufferPtr = nullptr;
         s_Data.quadCount = 0;
         s_Data.isInitialized = false;
 
@@ -140,9 +140,12 @@ void Renderer2D::shutdown() {
     }
     catch (const std::exception& e) {
         TINA_LOG_ERROR("Error during Renderer2D shutdown: {}", e.what());
-        // 即使发生错误也标记为未初始化，防止重复调用
+        // 确保标记为未初始化，防止重复调用
         s_Data.isInitialized = false;
-        throw;
+    }
+    catch (...) {
+        TINA_LOG_ERROR("Unknown error during Renderer2D shutdown");
+        s_Data.isInitialized = false;
     }
 }
 

@@ -179,47 +179,50 @@ namespace Tina::Core
             return;
         }
 
-        TINA_LOG_INFO("Engine shutting down");
-        
         try {
-            // 停止主循环
-            m_isShutdown = true;
-
-            // 销毁场景（这会触发所有Layer的shutdown，包括Renderer2D）
+            // 1. 首先销毁活动场景
             if (m_activeScene) {
                 TINA_LOG_DEBUG("Destroying active scene");
-                m_activeScene.reset();
+                std::string sceneName = m_activeScene->getName();
+                m_activeScene = nullptr;  // 这会触发Scene的析构函数
+                TINA_LOG_DEBUG("Active scene '{}' destroyed", sceneName);
             }
 
-            // 等待渲染完成并清理渲染资源
+            // 2. 然后开始引擎的关闭过程
+            TINA_LOG_INFO("Engine shutting down");
+            m_isShutdown = true;
+
+            // 3. 确保所有渲染命令都已完成
             if (bgfx::getInternalData()->context) {
-                TINA_LOG_DEBUG("Waiting for render commands to complete");
-                // 确保所有渲染命令都被处理
+                TINA_LOG_DEBUG("Finalizing render commands");
                 bgfx::frame();
-                // 等待 GPU 完成所有工作
                 bgfx::renderFrame();
-                // 关闭 BGFX
+            }
+
+            // 4. 关闭BGFX
+            if (bgfx::getInternalData()->context) {
                 TINA_LOG_DEBUG("Shutting down BGFX");
                 bgfx::shutdown();
             }
 
-            // 最后关闭窗口管理器（这会处理GLFW的清理）
+            // 5. 最后关闭窗口管理器
             TINA_LOG_DEBUG("Terminating window manager");
             m_context.getWindowManager().terminate();
 
-            TINA_LOG_INFO("Engine shutdown completed successfully");
+            TINA_LOG_INFO("Engine shutdown completed");
         }
         catch (const std::exception& e) {
             TINA_LOG_ERROR("Error during shutdown: {}", e.what());
-            // 即使出错也要尝试清理资源
             try {
+                // 确保基本清理
+                m_activeScene = nullptr;
                 if (bgfx::getInternalData()->context) {
                     bgfx::shutdown();
                 }
                 m_context.getWindowManager().terminate();
             }
             catch (...) {
-                TINA_LOG_ERROR("Additional error during cleanup");
+                TINA_LOG_ERROR("Critical error during emergency cleanup");
             }
         }
     }

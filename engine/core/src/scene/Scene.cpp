@@ -1,13 +1,77 @@
 #include "tina/scene/Scene.hpp"
+
+#include "bgfx/platform.h"
 #include "tina/log/Logger.hpp"
 #include "tina/event/Event.hpp"
 
 namespace Tina
 {
     Scene::Scene(const std::string& name)
-        : m_name(name)
+        : m_name(name)  // 最先初始化
+        , m_registry()  // 第二个初始化
+        , m_LayerStack() // 第三个初始化
     {
-        TINA_LOG_INFO("Created scene: {}", name);
+        TINA_LOG_INFO("Created scene: {}", m_name);
+    }
+
+    Scene::~Scene() {
+        try {
+            // 保存场景名称的副本，并立即清空原始名称以防止后续访问
+            std::string sceneName = std::move(m_name);
+            TINA_LOG_INFO("Destroying scene: {}", sceneName);
+            
+            // 确保完成所有渲染操作
+            if (bgfx::getInternalData()->context) {
+                bgfx::frame();
+                bgfx::renderFrame();
+            }
+            
+            // 清理LayerStack
+            try {
+                TINA_LOG_DEBUG("Clearing LayerStack");
+                // 先调用所有层的onDetach
+                for (auto& layer : m_LayerStack) {
+                    if (layer) {
+                        try {
+                            TINA_LOG_DEBUG("Detaching layer: {}", layer->getName());
+                            layer->onDetach();
+                        }
+                        catch (const std::exception& e) {
+                            TINA_LOG_ERROR("Error detaching layer: {}", e.what());
+                        }
+                    }
+                }
+                
+                // 等待GPU完成所有操作
+                if (bgfx::getInternalData()->context) {
+                    bgfx::frame();
+                    bgfx::renderFrame();
+                }
+
+                // 然后清空LayerStack（不会触发onDetach）
+                m_LayerStack.clear();
+            }
+            catch (const std::exception& e) {
+                TINA_LOG_ERROR("Error clearing LayerStack: {}", e.what());
+            }
+
+            // 清理实体注册表
+            try {
+                TINA_LOG_DEBUG("Clearing entity registry");
+                m_registry.clear();
+            }
+            catch (const std::exception& e) {
+                TINA_LOG_ERROR("Error clearing registry: {}", e.what());
+            }
+
+            TINA_LOG_INFO("Scene destroyed: {}", sceneName);
+        }
+        catch (const std::exception& e) {
+            TINA_LOG_ERROR("Error in scene destructor: {}", e.what());
+        }
+        catch (...) {
+            TINA_LOG_ERROR("Unknown error in scene destructor");
+        }
     }
 
     entt::entity Scene::createEntity(const std::string& name)

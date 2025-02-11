@@ -72,18 +72,43 @@ public:
     void onDetach() override {
         TINA_LOG_INFO("Shutting down Render2DLayer");
         
-        // 关闭 Renderer2D
-        if (Renderer2D::isInitialized()) {
-            Renderer2D::shutdown();
-        }
+        try {
+            // 确保完成所有渲染操作
+            if (bgfx::getInternalData()->context) {
+                bgfx::frame();
+                bgfx::renderFrame();
+            }
 
-        // 销毁着色器程序
-        if (bgfx::isValid(m_shaderProgram)) {
-            bgfx::destroy(m_shaderProgram);
-            m_shaderProgram = BGFX_INVALID_HANDLE;
-        }
+            // 先关闭 Renderer2D
+            if (Renderer2D::isInitialized()) {
+                TINA_LOG_DEBUG("Shutting down Renderer2D");
+                Renderer2D::shutdown();
+                
+                // 等待GPU完成所有操作
+                if (bgfx::getInternalData()->context) {
+                    bgfx::frame();
+                    bgfx::renderFrame();
+                }
+            }
 
-        m_initialized = false;
+            // 然后销毁着色器程序
+            if (bgfx::isValid(m_shaderProgram)) {
+                TINA_LOG_DEBUG("Destroying shader program");
+                bgfx::destroy(m_shaderProgram);
+                m_shaderProgram = BGFX_INVALID_HANDLE;
+            }
+
+            m_initialized = false;
+            TINA_LOG_INFO("Render2DLayer shutdown completed");
+        }
+        catch (const std::exception& e) {
+            TINA_LOG_ERROR("Error during Render2DLayer shutdown: {}", e.what());
+            // 确保着色器程序被销毁
+            if (bgfx::isValid(m_shaderProgram)) {
+                bgfx::destroy(m_shaderProgram);
+                m_shaderProgram = BGFX_INVALID_HANDLE;
+            }
+        }
     }
 
     void onUpdate(float deltaTime) override {
@@ -91,13 +116,11 @@ public:
     }
 
     void onRender() override {
-        if (!Renderer2D::isInitialized()) {
-            TINA_LOG_ERROR("Renderer2D not initialized");
+        if (!m_initialized || !Renderer2D::isInitialized()) {
             return;
         }
 
         if (!bgfx::isValid(m_shaderProgram)) {
-            TINA_LOG_ERROR("Invalid shader program");
             return;
         }
 
@@ -114,15 +137,15 @@ public:
             // 开始场景渲染
             Renderer2D::beginScene(proj);
 
-            // 绘制测试图形 - 使用更大的尺寸和更亮的颜色
-            Renderer2D::drawQuad({100.0f, 100.0f}, {200.0f, 200.0f}, {1.0f, 0.0f, 0.0f, 1.0f});  // 大红色方块
-            Renderer2D::drawQuad({400.0f, 200.0f}, {200.0f, 200.0f}, {0.0f, 1.0f, 0.0f, 1.0f});  // 大绿色方块
-            Renderer2D::drawQuad({700.0f, 300.0f}, {200.0f, 200.0f}, {0.0f, 0.0f, 1.0f, 1.0f});  // 大蓝色方块
-            Renderer2D::drawQuad({300.0f, 400.0f}, {200.0f, 200.0f}, {1.0f, 1.0f, 0.0f, 1.0f});  // 大黄色方块
+            // 绘制测试图形
+            Renderer2D::drawQuad({100.0f, 100.0f}, {200.0f, 200.0f}, {1.0f, 0.0f, 0.0f, 1.0f});
+            Renderer2D::drawQuad({400.0f, 200.0f}, {200.0f, 200.0f}, {0.0f, 1.0f, 0.0f, 1.0f});
+            Renderer2D::drawQuad({700.0f, 300.0f}, {200.0f, 200.0f}, {0.0f, 0.0f, 1.0f, 1.0f});
+            Renderer2D::drawQuad({300.0f, 400.0f}, {200.0f, 200.0f}, {1.0f, 1.0f, 0.0f, 1.0f});
 
             Renderer2D::endScene();
-
-        } catch (const std::exception& e) {
+        }
+        catch (const std::exception& e) {
             TINA_LOG_ERROR("Error during 2D rendering: {}", e.what());
         }
     }
