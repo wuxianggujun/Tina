@@ -132,28 +132,8 @@ void Renderer2D::beginScene(const glm::mat4& viewProj) {
 
     TINA_LOG_DEBUG("Beginning scene with view matrix");
 
-    // 获取当前窗口尺寸
-    uint32_t width, height;
-    Core::Engine::get().getWindowSize(width, height);
-
-    // 设置视图矩阵和视口
-    bgfx::setViewRect(0, 0, 0, uint16_t(width), uint16_t(height));
-
-    // 设置正交投影矩阵
-    float orthoProjection[16];
-    bx::mtxOrtho(orthoProjection, 
-        0.0f, float(width),    // left, right
-        float(height), 0.0f,   // bottom, top (反转Y轴)
-        0.0f, 1000.0f,        // near, far
-        0.0f,                 // offset
-        bgfx::getCaps()->homogeneousDepth);
-
-    // 设置视图矩阵（默认为单位矩阵）
-    float view[16];
-    bx::mtxIdentity(view);
-
     // 设置变换矩阵
-    bgfx::setViewTransform(0, view, orthoProjection);
+    bgfx::setViewTransform(0, nullptr, glm::value_ptr(viewProj));
 
     // 设置视图清除状态
     bgfx::setViewClear(0,

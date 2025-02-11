@@ -51,6 +51,10 @@ namespace Tina
         [[nodiscard]] const float* getView() const { return m_viewMatrix; }
         [[nodiscard]] const float* getViewProjection() const { return m_viewProjectionMatrix; }
 
+        // 添加这个方法来获取GLM格式的投影矩阵
+        [[nodiscard]] glm::mat4 getProjectionMatrix() const {
+            return glm::make_mat4(m_projectionMatrix);
+        }
     private:
         void updateView()
         {

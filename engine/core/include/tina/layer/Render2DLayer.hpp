@@ -20,6 +20,41 @@ namespace Tina
             TINA_LOG_INFO("Render2DLayer created");
         }
 
+    private:
+        void initShaders()
+        {
+            auto& shaderManager = ShaderManager::getInstance();
+            m_shaderProgram = shaderManager.createProgram("2d");
+            if (!bgfx::isValid(m_shaderProgram))
+            {
+                throw std::runtime_error("Failed to create 2D shader program");
+            }
+            TINA_LOG_INFO("Successfully loaded 2D shaders");
+        }
+
+        void initRenderer2D()
+        {
+            if (!Renderer2D::isInitialized())
+            {
+                Renderer2D::init(m_shaderProgram);
+                if (!Renderer2D::isInitialized())
+                {
+                    throw std::runtime_error("Failed to initialize Renderer2D");
+                }
+            }
+        }
+
+        void initCamera()
+        {
+            uint32_t width, height;
+            Core::Engine::get().getWindowSize(width, height);
+            m_camera = std::make_unique<OrthographicCamera>(
+                0.0f, static_cast<float>(width),
+                static_cast<float>(height), 0.0f
+            );
+        }
+
+    public:
         void onAttach() override
         {
             if (m_initialized)
@@ -32,55 +67,9 @@ namespace Tina
 
             try
             {
-                // 加载2D渲染所需的着色器
-                auto& shaderManager = ShaderManager::getInstance();
-
-                TINA_LOG_DEBUG("Creating shader program");
-                m_shaderProgram = shaderManager.createProgram("2d");
-                if (!bgfx::isValid(m_shaderProgram))
-                {
-                    TINA_LOG_ERROR("Failed to create 2D shader program");
-                    return;
-                }
-                TINA_LOG_INFO("Successfully loaded 2D shaders");
-
-                // 初始化 Renderer2D
-                if (!Renderer2D::isInitialized())
-                {
-                    TINA_LOG_DEBUG("Initializing Renderer2D with shader program");
-                    try
-                    {
-                        Renderer2D::init(m_shaderProgram);
-
-                        if (!Renderer2D::isInitialized())
-                        {
-                            TINA_LOG_ERROR("Failed to initialize Renderer2D");
-                            if (bgfx::isValid(m_shaderProgram))
-                            {
-                                bgfx::destroy(m_shaderProgram);
-                                m_shaderProgram = BGFX_INVALID_HANDLE;
-                            }
-                            return;
-                        }
-                    }
-                    catch (const std::exception& e)
-                    {
-                        TINA_LOG_ERROR("Exception during Renderer2D initialization: {}", e.what());
-                        if (bgfx::isValid(m_shaderProgram))
-                        {
-                            bgfx::destroy(m_shaderProgram);
-                            m_shaderProgram = BGFX_INVALID_HANDLE;
-                        }
-                        return;
-                    }
-                }
-                // 初始化相机
-                uint32_t width, height;
-                Core::Engine::get().getWindowSize(width, height);
-                m_camera = std::make_unique<OrthographicCamera>(
-                    0.0f, static_cast<float>(width),
-                    static_cast<float>(height), 0.0f
-                );
+                initShaders();
+                initRenderer2D();
+                initCamera();
 
                 m_initialized = true;
                 TINA_LOG_INFO("Render2DLayer initialized successfully");
@@ -175,31 +164,15 @@ namespace Tina
 
         void onRender() override
         {
-            if (!m_initialized || !Renderer2D::isInitialized())
-            {
-                return;
-            }
-
-            if (!bgfx::isValid(m_shaderProgram))
+            if (!m_initialized || !Renderer2D::isInitialized() || !bgfx::isValid(m_shaderProgram))
             {
                 return;
             }
 
             try
             {
-                // 获取当前窗口尺寸
-                uint32_t width, height;
-                Core::Engine::get().getWindowSize(width, height);
-
-                bgfx::setViewTransform(0, m_camera->getView(), m_camera->getProjection());
-
-                // 创建投影矩阵
-                glm::mat4 proj = glm::ortho(0.0f, static_cast<float>(width),
-                                            static_cast<float>(height), 0.0f,
-                                            -1.0f, 1.0f);
-
                 // 开始场景渲染
-                Renderer2D::beginScene(proj);
+                Renderer2D::beginScene(m_camera->getProjectionMatrix());
 
                 // 绘制测试图形
                 Renderer2D::drawQuad({100.0f, 100.0f}, {200.0f, 200.0f}, {1.0f, 0.0f, 0.0f, 1.0f});
