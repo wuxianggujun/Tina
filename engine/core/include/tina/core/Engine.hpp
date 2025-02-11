@@ -7,11 +7,8 @@
 #include "tina/core/Context.hpp"
 #include "tina/window/Window.hpp"
 #include "tina/scene/Scene.hpp"
-#include "tina/event/Event.hpp"
-#include "tina/log/Logger.hpp"
 #include <memory>
 #include <string>
-#include <filesystem>
 
 namespace Tina::Core
 {
@@ -29,10 +26,7 @@ namespace Tina::Core
         // 场景管理
         Scene* createScene(const std::string& name);
         void setActiveScene(Scene* scene);
-        Scene* getActiveScene() { return m_activeScene.get(); }
-
-        // 获取可执行文件路径
-        static std::filesystem::path getExecutablePath();
+        Scene* getActiveScene() const { return m_activeScene.get(); }
 
         // 获取主窗口句柄
         [[nodiscard]] WindowHandle getMainWindow() const { return m_mainWindow; }
@@ -48,7 +42,7 @@ namespace Tina::Core
     private:
         Context& m_context;  // 改为引用
         WindowHandle m_mainWindow;
-        std::unique_ptr<Scene> m_activeScene;  // 当前活动场景
+        UniquePtr<Scene> m_activeScene;  // 当前活动场景
         uint32_t m_windowWidth;
         uint32_t m_windowHeight;
         bool m_isShutdown;  // 添加标志位以防止重复调用 shutdown

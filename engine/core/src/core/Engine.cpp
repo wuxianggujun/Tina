@@ -7,14 +7,9 @@
 #include "tina/window/WindowManager.hpp"
 #include "tina/event/EventQueue.hpp"
 #include "tina/log/Logger.hpp"
-
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
-#include <GLFW/glfw3.h>
-#include "bx/math.h"
 #include "tina/renderer/Renderer2D.hpp"
-#include "tina/renderer/ShaderManager.hpp"
-#include "tina/event/Event.hpp"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -226,7 +221,6 @@ namespace Tina::Core
                 bgfx::reset(m_windowWidth, m_windowHeight, reset);
             }
 
-            // 2. 销毁活动场景
             if (m_activeScene)
             {
                 TINA_LOG_DEBUG("Destroying active scene");
@@ -234,16 +228,10 @@ namespace Tina::Core
                 TINA_LOG_DEBUG("Active scene destroyed");
             }
 
-            // 3. 快速提交最后一帧
             if (bgfx::getInternalData() && bgfx::getInternalData()->context)
             {
                 TINA_LOG_DEBUG("Finalizing render commands");
                 bgfx::frame(false); // 不等待 VSync
-            }
-
-            // 4. 关闭BGFX
-            if (bgfx::getInternalData() && bgfx::getInternalData()->context)
-            {
                 TINA_LOG_DEBUG("Shutting down BGFX");
                 bgfx::shutdown();
             }
@@ -268,7 +256,7 @@ namespace Tina::Core
 
     Scene* Engine::createScene(const std::string& name)
     {
-        m_activeScene = std::make_unique<Scene>(name);
+        m_activeScene = MakeUnique<Scene>(name);
         return m_activeScene.get();
     }
 
@@ -279,12 +267,5 @@ namespace Tina::Core
             m_activeScene.reset(scene);
             TINA_LOG_INFO("Set active scene: {}", scene->getName());
         }
-    }
-
-    std::filesystem::path Engine::getExecutablePath()
-    {
-        char path[MAX_PATH];
-        GetModuleFileNameA(nullptr, path, MAX_PATH);
-        return std::filesystem::path(path).parent_path();
     }
 }

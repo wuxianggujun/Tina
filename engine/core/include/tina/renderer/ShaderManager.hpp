@@ -4,7 +4,6 @@
 #include <unordered_map>
 #include <memory>
 #include <bgfx/bgfx.h>
-#include "tina/log/Logger.hpp"
 
 namespace Tina {
 

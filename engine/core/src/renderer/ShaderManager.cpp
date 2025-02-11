@@ -108,8 +108,8 @@ bgfx::ProgramHandle ShaderManager::createProgram(const std::string& name) {
     }
 
     // 加载顶点和片段着色器
-    bgfx::ShaderHandle vsh = loadShader(name, "vs");
-    bgfx::ShaderHandle fsh = loadShader(name, "fs");
+    const bgfx::ShaderHandle vsh = loadShader(name, "vs");
+    const bgfx::ShaderHandle fsh = loadShader(name, "fs");
 
     // 创建着色器程序
     bgfx::ProgramHandle program = bgfx::createProgram(vsh, fsh, true);
