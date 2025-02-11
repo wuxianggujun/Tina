@@ -78,27 +78,37 @@ namespace Tina
 
     void Scene::onUpdate(float deltaTime)
     {
+        // 更新所有层
         for (auto& layer : m_LayerStack)
+        {
             layer->onUpdate(deltaTime);
+        }
     }
 
     void Scene::onRender()
     {
+        // 渲染所有层
         for (auto& layer : m_LayerStack)
+        {
             layer->onRender();
+        }
     }
 
     void Scene::onImGuiRender()
     {
+        // ImGui渲染所有层
         for (auto& layer : m_LayerStack)
+        {
             layer->onImGuiRender();
+        }
     }
 
     void Scene::onEvent(Event& event)
     {
-        for (auto it = m_LayerStack.end(); it != m_LayerStack.begin(); )
+        // 从上到下处理事件
+        for (auto it = m_LayerStack.rbegin(); it != m_LayerStack.rend(); ++it)
         {
-            (*--it)->onEvent(event);
+            (*it)->onEvent(event);
             if (event.handled)
                 break;
         }

@@ -64,8 +64,8 @@ function(add_shader_compile_dir SHADER_DIR)
 
     # 处理每个着色器
     foreach(SHADER_NAME ${SHADER_NAMES})
-        set(VERTEX_SHADER "${SHADER_DIR}/vs_${SHADER_NAME}.sc")
-        set(FRAGMENT_SHADER "${SHADER_DIR}/fs_${SHADER_NAME}.sc")
+        set(VERTEX_SHADER "${SHADER_DIR}/${SHADER_NAME}_vs.sc")
+        set(FRAGMENT_SHADER "${SHADER_DIR}/${SHADER_NAME}_fs.sc")
         
         # 首先检查特定的def文件，如果不存在则使用默认的varying.def.sc
         set(SPECIFIC_DEF_FILE "${SHADER_DIR}/${SHADER_NAME}.def.sc")

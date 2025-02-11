@@ -1,14 +1,10 @@
 #pragma once
 
-#include "Layer.hpp"
-#include "tina/core/Engine.hpp"
+#include "tina/layer/Layer.hpp"
 #include "tina/renderer/Renderer2D.hpp"
 #include "tina/renderer/ShaderManager.hpp"
 #include "tina/log/Logger.hpp"
-#include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <bx/math.h>
-#include <GLFW/glfw3.h>
 
 namespace Tina {
 
@@ -25,7 +21,7 @@ public:
         }
 
         TINA_LOG_INFO("Initializing Render2DLayer");
-        
+
         try {
             // 加载2D渲染所需的着色器
             auto& shaderManager = ShaderManager::getInstance();

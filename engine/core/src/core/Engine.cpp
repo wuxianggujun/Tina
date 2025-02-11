@@ -155,9 +155,10 @@ namespace Tina::Core
                 // 触摸视口
                 bgfx::touch(0);
 
-                // 更新场景
+                // 更新和渲染场景
                 if (m_activeScene) {
                     m_activeScene->onUpdate(deltaTime);
+                    m_activeScene->onRender();
                 }
 
                 // 提交帧
@@ -193,7 +194,11 @@ namespace Tina::Core
             // 等待渲染完成并清理渲染资源
             if (bgfx::getInternalData()->context) {
                 TINA_LOG_DEBUG("Waiting for render commands to complete");
+                // 确保所有渲染命令都被处理
                 bgfx::frame();
+                // 等待 GPU 完成所有工作
+                bgfx::renderFrame();
+                // 关闭 BGFX
                 TINA_LOG_DEBUG("Shutting down BGFX");
                 bgfx::shutdown();
             }

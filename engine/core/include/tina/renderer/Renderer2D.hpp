@@ -60,9 +60,10 @@ public:
     // 纹理绘制
     static void drawQuad(const glm::vec2& position, const glm::vec2& size, bgfx::TextureHandle texture, uint32_t color = 0xffffffff);
 
-private:
+    // 批处理相关
     static void flush();
 
+private:
     struct Renderer2DData {
         static const uint32_t MaxQuads = 10000;
         static const uint32_t MaxVertices = MaxQuads * 4;

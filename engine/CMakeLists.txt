@@ -9,7 +9,6 @@ include(CopyResources)
 include(ThirdParty)
 include(Modules)
 include(ShaderUtils)
-#include(CompileShaders)
 
 # 添加第三方库
 tina_add_third_party(NAME bgfx
@@ -66,15 +65,3 @@ target_link_libraries(TinaEngine
         EnTT::EnTT
         glm
 )
-
-## 复制资源文件
-#add_custom_target(copy_resources ALL
-#    COMMAND ${CMAKE_COMMAND} -E copy_directory
-#    "${CMAKE_CURRENT_SOURCE_DIR}/resources"
-#    "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resources"
-#    COMMENT "Copying resources..."
-#)
-#
-#add_dependencies(TinaEngine copy_resources)
-
-
