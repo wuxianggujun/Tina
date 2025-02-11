@@ -97,54 +97,29 @@ void Renderer2D::shutdown() {
     TINA_LOG_INFO("Shutting down Renderer2D");
 
     try {
-        // 确保所有渲染命令都已经提交
-        flush();
-
-        // 销毁BGFX资源
+        // 一次性销毁所有BGFX资源
         if (bgfx::isValid(s_Data.vertexBuffer)) {
-            TINA_LOG_DEBUG("Destroying vertex buffer");
             bgfx::destroy(s_Data.vertexBuffer);
-            s_Data.vertexBuffer = BGFX_INVALID_HANDLE;
         }
-
         if (bgfx::isValid(s_Data.indexBuffer)) {
-            TINA_LOG_DEBUG("Destroying index buffer");
             bgfx::destroy(s_Data.indexBuffer);
-            s_Data.indexBuffer = BGFX_INVALID_HANDLE;
         }
-
         if (bgfx::isValid(s_Data.s_texColor)) {
-            TINA_LOG_DEBUG("Destroying texture sampler uniform");
             bgfx::destroy(s_Data.s_texColor);
-            s_Data.s_texColor = BGFX_INVALID_HANDLE;
         }
 
         // 释放内存
-        if (s_Data.vertexBufferBase) {
-            TINA_LOG_DEBUG("Freeing vertex buffer memory");
-            delete[] s_Data.vertexBufferBase;
-            s_Data.vertexBufferBase = nullptr;
-            s_Data.vertexBufferPtr = nullptr;
-        }
+        delete[] s_Data.vertexBufferBase;
+        delete[] s_Data.indices;
 
-        if (s_Data.indices) {
-            TINA_LOG_DEBUG("Freeing index buffer memory");
-            delete[] s_Data.indices;
-            s_Data.indices = nullptr;
-        }
-
-        s_Data.quadCount = 0;
-        s_Data.isInitialized = false;
+        // 重置所有句柄和指针
+        s_Data = Renderer2DData();
 
         TINA_LOG_INFO("Renderer2D shutdown complete");
     }
     catch (const std::exception& e) {
         TINA_LOG_ERROR("Error during Renderer2D shutdown: {}", e.what());
         // 确保标记为未初始化，防止重复调用
-        s_Data.isInitialized = false;
-    }
-    catch (...) {
-        TINA_LOG_ERROR("Unknown error during Renderer2D shutdown");
         s_Data.isInitialized = false;
     }
 }

@@ -76,19 +76,12 @@ public:
             // 确保完成所有渲染操作
             if (bgfx::getInternalData()->context) {
                 bgfx::frame();
-                bgfx::renderFrame();
             }
 
             // 先关闭 Renderer2D
             if (Renderer2D::isInitialized()) {
                 TINA_LOG_DEBUG("Shutting down Renderer2D");
                 Renderer2D::shutdown();
-                
-                // 等待GPU完成所有操作
-                if (bgfx::getInternalData()->context) {
-                    bgfx::frame();
-                    bgfx::renderFrame();
-                }
             }
 
             // 然后销毁着色器程序
