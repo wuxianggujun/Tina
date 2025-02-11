@@ -25,11 +25,11 @@ namespace Tina::Core
 
     Engine::Engine()
         : m_context(Context::getInstance())
-        , m_mainWindow(BGFX_INVALID_HANDLE)
-        , m_windowWidth(1280)
-        , m_windowHeight(720)
-        , m_isShutdown(false)
-        , m_isInitialized(false)
+          , m_mainWindow(BGFX_INVALID_HANDLE)
+          , m_windowWidth(1280)
+          , m_windowHeight(720)
+          , m_isShutdown(false)
+          , m_isInitialized(false)
     {
         s_Instance = this;
         TINA_LOG_INFO("Engine created.");
@@ -37,22 +37,27 @@ namespace Tina::Core
 
     Engine::~Engine()
     {
-        if (!m_isShutdown) {
+        if (!m_isShutdown)
+        {
             shutdown();
         }
         s_Instance = nullptr;
         TINA_LOG_INFO("Engine destroyed.");
     }
 
-    bool Engine::initialize() {
-        if (m_isInitialized) {
+    bool Engine::initialize()
+    {
+        if (m_isInitialized)
+        {
             TINA_LOG_WARN("Engine already initialized");
             return true;
         }
 
-        try {
+        try
+        {
             // 初始化窗口管理器
-            if (!m_context.getWindowManager().initialize()) {
+            if (!m_context.getWindowManager().initialize())
+            {
                 TINA_LOG_ERROR("Failed to initialize window manager");
                 return false;
             }
@@ -65,7 +70,8 @@ namespace Tina::Core
 
             m_mainWindow = m_context.getWindowManager().createWindow(config);
 
-            if (!isValid(m_mainWindow)) {
+            if (!isValid(m_mainWindow))
+            {
                 TINA_LOG_ERROR("Failed to create main window");
                 return false;
             }
@@ -79,17 +85,18 @@ namespace Tina::Core
             init.platformData.nwh = m_context.getWindowManager().getNativeWindowHandle(m_mainWindow);
             init.platformData.ndt = m_context.getWindowManager().getNativeDisplayHandle();
 
-            if (!bgfx::init(init)) {
+            if (!bgfx::init(init))
+            {
                 TINA_LOG_ERROR("Failed to initialize bgfx");
                 return false;
             }
 
             // 设置视口
             bgfx::setViewClear(0
-                , BGFX_CLEAR_COLOR|BGFX_CLEAR_DEPTH
-                , 0x303030ff
-                , 1.0f
-                , 0
+                               , BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH
+                               , 0x303030ff
+                               , 1.0f
+                               , 0
             );
 
             bgfx::setViewRect(0, 0, 0, uint16_t(m_windowWidth), uint16_t(m_windowHeight));
@@ -98,23 +105,28 @@ namespace Tina::Core
             TINA_LOG_INFO("Engine initialized successfully");
             return true;
         }
-        catch (const std::exception& e) {
+        catch (const std::exception& e)
+        {
             TINA_LOG_ERROR("Error during initialization: {}", e.what());
             return false;
         }
     }
 
-    bool Engine::run() {
-        if (!m_isInitialized) {
+    bool Engine::run()
+    {
+        if (!m_isInitialized)
+        {
             TINA_LOG_ERROR("Engine not initialized");
             return false;
         }
 
-        try {
+        try
+        {
             bool running = true;
             double lastTime = glfwGetTime();
-            
-            while (running && !m_isShutdown) {
+
+            while (running && !m_isShutdown)
+            {
                 // 计算deltaTime
                 double currentTime = glfwGetTime();
                 float deltaTime = static_cast<float>(currentTime - lastTime);
@@ -125,42 +137,57 @@ namespace Tina::Core
 
                 // 处理事件队列
                 Event event;
-                while (m_context.getWindowManager().pollEvent(event)) {
-                    if (event.type == Event::WindowClose && 
-                        event.windowHandle.idx == m_mainWindow.idx) {
+                while (m_context.getWindowManager().pollEvent(event))
+                {
+                    if (event.type == Event::WindowClose &&
+                        event.windowHandle.idx == m_mainWindow.idx)
+                    {
                         running = false;
                         break;
                     }
 
-                    if (m_activeScene) {
+                    if (event.type == Event::WindowResize)
+                    {
+                        // 窗口已经调整大小
+                        // bgfx视口已经自动更新
+                        int32_t width = event.windowResize.width;
+                        int32_t height = event.windowResize.height;
+                        TINA_LOG_INFO("Window resized to {}x{}", width, height);
+                    }
+
+
+                    if (m_activeScene)
+                    {
                         m_activeScene->onEvent(event);
                     }
                 }
 
                 // 检查窗口是否应该关闭
                 Window* mainWindow = m_context.getWindowManager().getWindow(m_mainWindow);
-                if (!mainWindow || mainWindow->shouldClose()) {
+                if (!mainWindow || mainWindow->shouldClose())
+                {
                     running = false;
                     continue;
                 }
 
                 // 设置视口
-                bgfx::setViewRect(0, 0, 0, 
-                    uint16_t(mainWindow->getWidth()), 
-                    uint16_t(mainWindow->getHeight()));
+                bgfx::setViewRect(0, 0, 0,
+                                  uint16_t(mainWindow->getWidth()),
+                                  uint16_t(mainWindow->getHeight()));
 
                 // 清除背景
                 bgfx::setViewClear(0,
-                    BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                    0x303030ff, // 深灰色背景
-                    1.0f,
-                    0);
+                                   BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                                   0x303030ff, // 深灰色背景
+                                   1.0f,
+                                   0);
 
                 // 触摸视口
                 bgfx::touch(0);
 
                 // 更新和渲染场景
-                if (m_activeScene) {
+                if (m_activeScene)
+                {
                     m_activeScene->onUpdate(deltaTime);
                     m_activeScene->onRender();
                 }
@@ -171,7 +198,8 @@ namespace Tina::Core
 
             return true;
         }
-        catch (const std::exception& e) {
+        catch (const std::exception& e)
+        {
             TINA_LOG_ERROR("Error during main loop: {}", e.what());
             return false;
         }
@@ -179,48 +207,50 @@ namespace Tina::Core
 
     void Engine::shutdown()
     {
-        if (m_isShutdown) {
+        if (m_isShutdown)
+        {
             TINA_LOG_WARN("Engine already shut down");
             return;
         }
 
-        try {
+        try
+        {
             TINA_LOG_INFO("Engine shutting down");
             m_isShutdown = true;
 
             // 1. 首先禁用 VSync
-            if (bgfx::getInternalData() && bgfx::getInternalData()->context) {
+            if (bgfx::getInternalData() && bgfx::getInternalData()->context)
+            {
                 bgfx::setViewMode(0, bgfx::ViewMode::Sequential);
                 uint32_t reset = BGFX_RESET_NONE;
                 bgfx::reset(m_windowWidth, m_windowHeight, reset);
             }
 
             // 2. 销毁活动场景
-            if (m_activeScene) {
+            if (m_activeScene)
+            {
                 TINA_LOG_DEBUG("Destroying active scene");
                 m_activeScene.reset();
                 TINA_LOG_DEBUG("Active scene destroyed");
             }
 
             // 3. 快速提交最后一帧
-            if (bgfx::getInternalData() && bgfx::getInternalData()->context) {
+            if (bgfx::getInternalData() && bgfx::getInternalData()->context)
+            {
                 TINA_LOG_DEBUG("Finalizing render commands");
                 bgfx::frame(false); // 不等待 VSync
             }
 
             // 4. 关闭BGFX
-            if (bgfx::getInternalData() && bgfx::getInternalData()->context) {
+            if (bgfx::getInternalData() && bgfx::getInternalData()->context)
+            {
                 TINA_LOG_DEBUG("Shutting down BGFX");
                 bgfx::shutdown();
             }
-
-            // 5. 最后关闭窗口管理器
-            TINA_LOG_DEBUG("Terminating window manager");
-            m_context.getWindowManager().terminate();
-
             TINA_LOG_INFO("Engine shutdown completed");
         }
-        catch (const std::exception& e) {
+        catch (const std::exception& e)
+        {
             TINA_LOG_ERROR("Error during shutdown: {}", e.what());
             m_isShutdown = true;
         }

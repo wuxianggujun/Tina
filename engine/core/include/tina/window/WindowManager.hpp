@@ -56,14 +56,7 @@ namespace Tina {
         void eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths);
         void eventCallback_joystick(int jid, int action);
 
-        static void keyCallback(GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods);
-        static void charCallback(GLFWwindow* window, uint32_t codepoint);
-        static void scrollCallback(GLFWwindow* window, double dx, double dy);
-        static void cursorPosCallback(GLFWwindow* window, double mx, double my);
-        static void mouseButtonCallback(GLFWwindow* window, int32_t button, int32_t action, int32_t mods);
-        static void windowSizeCallback(GLFWwindow* window, int32_t width, int32_t height);
-        static void windowCloseCallback(GLFWwindow* window);
-        static void dropFileCallback(GLFWwindow* window, int32_t count, const char** filePaths);
+        void updateBgfxViewport(WindowHandle handle, int32_t width, int32_t height);
 
     private:
         static WindowManager* s_instance;

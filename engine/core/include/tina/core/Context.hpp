@@ -15,7 +15,10 @@ namespace Tina
     class TINA_CORE_API Context
     {
     public:
-        static Context& getInstance();
+        static Context& getInstance() {
+            static Context instance;  // 使用局部静态变量，保证线程安全和自动析构
+            return instance;
+        }
         
         ~Context();
         bool initialize();
@@ -29,7 +32,6 @@ namespace Tina
         Context(const Context&) = delete;  // 禁止拷贝
         Context& operator=(const Context&) = delete;  // 禁止赋值
         
-        static Context* s_instance;
         std::unique_ptr<WindowManager> m_windowManager;
         std::unique_ptr<EventQueue> m_eventQueue;
     };

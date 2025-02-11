@@ -12,17 +12,6 @@
 
 namespace Tina
 {
-    Context* Context::s_instance = nullptr;
-
-    Context& Context::getInstance()
-    {
-        if (!s_instance)
-        {
-            s_instance = new Context();
-        }
-        return *s_instance;
-    }
-
     Context::Context() 
         : m_windowManager(std::make_unique<WindowManager>(this))
         , m_eventQueue(std::make_unique<EventQueue>())
@@ -31,10 +20,10 @@ namespace Tina
     }
 
     Context::~Context() {
-        TINA_LOG_INFO("Context destroyed");
-        m_windowManager.reset();
+        TINA_LOG_INFO("Context destroying");
         m_eventQueue.reset();
-        s_instance = nullptr;
+        m_windowManager.reset();
+        TINA_LOG_INFO("Context destroyed");
     }
 
     bool Context::initialize() {

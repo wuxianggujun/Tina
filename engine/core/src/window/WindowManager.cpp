@@ -6,6 +6,8 @@
 #include "tina/log/Logger.hpp"
 #include "tina/event/EventQueue.hpp"
 #include <bgfx/bgfx.h>
+
+#include "bgfx/platform.h"
 #include "tina/core/Context.hpp"
 
 namespace Tina
@@ -268,8 +270,28 @@ namespace Tina
 
     void WindowManager::eventCallback_windowSize(WindowHandle handle, GLFWwindow* window, int32_t width, int32_t height)
     {
+        // 创建窗口大小改变事件
         Event event = createWindowResizeEvent(handle, width, height);
         m_context->getEventQueue().pushEvent(event);
+
+        // 更新渲染视口
+        updateBgfxViewport(handle, width, height);
+    }
+
+    void WindowManager::updateBgfxViewport(WindowHandle handle, int32_t width, int32_t height)
+    {
+        if (bgfx::getInternalData() && bgfx::getInternalData()->context) {
+            // 设置视口大小
+            bgfx::reset(width, height, BGFX_RESET_VSYNC);
+            
+            // 更新视口设置
+            bgfx::setViewRect(0, 0, 0, uint16_t(width), uint16_t(height));
+            
+            // 设置视图变换矩阵（如果需要）
+            bgfx::setViewTransform(0, nullptr, nullptr);
+            
+            TINA_LOG_DEBUG("Updated bgfx viewport: {}x{}", width, height);
+        }
     }
 
     void WindowManager::eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths)
