@@ -10,11 +10,7 @@ namespace Tina
 {
     LayerStack::~LayerStack()
     {
-        for (Layer* layer : m_Layers)
-        {
-            layer->onDetach();
-            delete layer;
-        }
+        clear();
     }
 
     void LayerStack::pushLayer(Layer* layer)
@@ -44,6 +40,18 @@ namespace Tina
             overlay->onDetach();
             m_Layers.erase(it);
         }
+    }
+
+    void LayerStack::clear()
+    {
+        for (Layer* layer : m_Layers)
+        {
+            layer->onDetach();
+            delete layer;
+        }
+
+        m_Layers.clear();
+        m_LayerInsertIndex = 0;
     }
 
 } // Tina

@@ -32,8 +32,8 @@ using namespace Tina;
         }
         
         // 添加Render2DLayer
-        const auto render2DLayer = MakeShared<Render2DLayer>();
-        scene->pushLayer(render2DLayer.get());
+        auto render2DLayer = new Render2DLayer();
+        scene->pushLayer(render2DLayer);
 
         // 运行引擎
         if (!engine->run()) {

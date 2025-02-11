@@ -23,6 +23,8 @@ namespace Tina
             std::string sceneName = m_name;
             TINA_LOG_INFO("Destroying scene: {}", sceneName);
 
+            m_layerStack.clear();
+
             // 只在真正需要时执行渲染同步
             if (bgfx::getInternalData() && bgfx::getInternalData()->context)
             {

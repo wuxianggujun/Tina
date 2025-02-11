@@ -19,6 +19,7 @@ namespace Tina
         void pushOverlay(Layer* overlay);
         void popLayer(Layer* layer);
         void popOverlay(Layer* overlay);
+        void clear();
 
         std::vector<Layer*>::iterator begin() { return m_Layers.begin(); }
         std::vector<Layer*>::iterator end() { return m_Layers.end(); }
@@ -27,4 +28,5 @@ namespace Tina
         std::vector<Layer*> m_Layers;
         unsigned int m_LayerInsertIndex = 0;
     };
+
 } // Tina

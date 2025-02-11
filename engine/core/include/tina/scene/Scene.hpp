@@ -3,7 +3,6 @@
 #include "tina/core/Core.hpp"
 #include <entt/entt.hpp>
 #include <string>
-
 #include "tina/layer/LayerStack.hpp"
 
 namespace Tina
