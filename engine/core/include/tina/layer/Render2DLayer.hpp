@@ -74,6 +74,13 @@ namespace Tina
                         return;
                     }
                 }
+                // 初始化相机
+                uint32_t width, height;
+                Core::Engine::get().getWindowSize(width, height);
+                m_camera = std::make_unique<OrthographicCamera>(
+                    0.0f, static_cast<float>(width),
+                    static_cast<float>(height), 0.0f
+                );
 
                 m_initialized = true;
                 TINA_LOG_INFO("Render2DLayer initialized successfully");
@@ -98,28 +105,20 @@ namespace Tina
 
                 if (bgfx::getInternalData() && bgfx::getInternalData()->context)
                 {
+                    // 更新相机投影
+                    m_camera->setProjection(
+                        0.0f, static_cast<float>(width),
+                        static_cast<float>(height), 0.0f
+                    );
+
                     // 更新视口
                     bgfx::reset(width, height, BGFX_RESET_VSYNC);
                     bgfx::setViewRect(0, 0, 0, uint16_t(width), uint16_t(height));
 
-                    // 更新投影矩阵
-                    float orthoProjection[16];
-                    bx::mtxOrtho(
-                        orthoProjection,
-                        0.0f, float(width),
-                        float(height), 0.0f,
-                        0.0f, 1000.0f,
-                        0.0f,
-                        bgfx::getCaps()->homogeneousDepth
-                    );
+                    // 设置新的视图变换
+                    bgfx::setViewTransform(0, m_camera->getView(), m_camera->getProjection());
 
-                    // 更新视图变换
-                    float view[16];
-                    bx::mtxIdentity(view);
-                    bgfx::setViewTransform(0, view, orthoProjection);
-
-                    // 强制刷新
-                    bgfx::frame();
+                    event.handled = true;
                 }
 
                 TINA_LOG_INFO("Render2DLayer: Window resized to {}x{}", width, height);
@@ -192,6 +191,7 @@ namespace Tina
                 uint32_t width, height;
                 Core::Engine::get().getWindowSize(width, height);
 
+                bgfx::setViewTransform(0, m_camera->getView(), m_camera->getProjection());
 
                 // 创建投影矩阵
                 glm::mat4 proj = glm::ortho(0.0f, static_cast<float>(width),

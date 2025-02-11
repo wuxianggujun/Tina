@@ -15,7 +15,10 @@ namespace Tina
     class OrthographicCamera
     {
     public:
-        explicit OrthographicCamera(float left, float right, float bottom, float top);
+        explicit OrthographicCamera(float left, float right, float bottom, float top)
+        {
+            setProjection(left, right, bottom, top);
+        }
 
         void setProjection(float left, float right, float bottom, float top)
         {
@@ -76,9 +79,9 @@ namespace Tina
             bx::mtxMul(m_viewProjectionMatrix, m_viewMatrix, m_projectionMatrix);
         }
 
-        float m_projectionMatrix[16];
-        float m_viewMatrix[16];
-        float m_viewProjectionMatrix[16];
+        float m_projectionMatrix[16]{};
+        float m_viewMatrix[16]{};
+        float m_viewProjectionMatrix[16]{};
 
         glm::vec3 m_position = {0.0f, 0.0f, 0.0f};
         float m_rotation = 0.0f;
