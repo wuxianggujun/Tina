@@ -7,6 +7,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "bx/math.h"
+#include "tina/core/OrthographicCamera.hpp"
 #include "tina/event/Event.hpp"
 
 namespace Tina
@@ -215,6 +216,7 @@ namespace Tina
         }
 
     private:
+        std::unique_ptr<OrthographicCamera> m_camera;
         bgfx::ProgramHandle m_shaderProgram = BGFX_INVALID_HANDLE;
         bool m_initialized = false;
     };

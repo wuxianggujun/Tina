@@ -19,7 +19,7 @@ namespace Tina::Render
         void endFrame();
 
         // 获取 bgfx 视图 ID
-        bgfx::ViewId getMainViewId() const { return m_mainView; }
+        [[nodiscard]] bgfx::ViewId getMainViewId() const { return m_mainView; }
 
     private:
         bgfx::ViewId m_mainView;
