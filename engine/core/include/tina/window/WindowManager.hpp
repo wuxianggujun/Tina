@@ -56,8 +56,6 @@ namespace Tina {
         void eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths);
         void eventCallback_joystick(int jid, int action);
 
-        void updateBgfxViewport(WindowHandle handle, int32_t width, int32_t height);
-
     private:
         static WindowManager* s_instance;
         Context* m_context;

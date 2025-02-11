@@ -112,11 +112,16 @@ namespace Tina
         }
     }
 
-    void Scene::onEvent(struct Event& event)
+    void Scene::onEvent(Event& event)
     {
+        // 从后向前遍历，使最上层的Layer先处理事件
         for (auto it = m_layerStack.end(); it != m_layerStack.begin();)
         {
             (*--it)->onEvent(event);
+            if (event.handled)
+            {
+                break;
+            }
         }
     }
 } // namespace Tina

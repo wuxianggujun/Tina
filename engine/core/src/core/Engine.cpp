@@ -143,11 +143,27 @@ namespace Tina::Core
 
                     if (event.type == Event::WindowResize)
                     {
-                        // 窗口已经调整大小
-                        // bgfx视口已经自动更新
-                        int32_t width = event.windowResize.width;
-                        int32_t height = event.windowResize.height;
-                        TINA_LOG_INFO("Window resized to {}x{}", width, height);
+                        // 确保引擎层面也处理窗口大小改变
+                        m_windowWidth = event.windowResize.width;
+                        m_windowHeight = event.windowResize.height;
+                        TINA_LOG_INFO("Render2DLayer: Window resized to {}x{}",
+                                      event.windowResize.width,
+                                      event.windowResize.height);
+
+                        // // 重置渲染视口
+                        // if (bgfx::getInternalData() && bgfx::getInternalData()->context)
+                        // {
+                        //     bgfx::reset(
+                        //         event.windowResize.width,
+                        //         event.windowResize.height,
+                        //         BGFX_RESET_VSYNC
+                        //     );
+                        //
+                        //     // 更新视口设置
+                        //     bgfx::setViewRect(0, 0, 0,
+                        //                       uint16_t(event.windowResize.width),
+                        //                       uint16_t(event.windowResize.height));
+                        // }
                     }
 
 
