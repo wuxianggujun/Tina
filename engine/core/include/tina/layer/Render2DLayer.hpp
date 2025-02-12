@@ -175,10 +175,10 @@ namespace Tina
                 Renderer2D::beginScene(m_camera->getProjectionMatrix());
 
                 // 绘制测试图形
-                Renderer2D::drawQuad({100.0f, 100.0f}, {200.0f, 200.0f}, {1.0f, 0.0f, 0.0f, 1.0f});
-                Renderer2D::drawQuad({400.0f, 200.0f}, {200.0f, 200.0f}, {0.0f, 1.0f, 0.0f, 1.0f});
-                Renderer2D::drawQuad({700.0f, 300.0f}, {200.0f, 200.0f}, {0.0f, 0.0f, 1.0f, 1.0f});
-                Renderer2D::drawQuad({300.0f, 400.0f}, {200.0f, 200.0f}, {1.0f, 1.0f, 0.0f, 1.0f});
+                Renderer2D::drawRect({100.0f, 100.0f}, {200.0f, 200.0f}, Color::Red);
+                Renderer2D::drawRect({400.0f, 200.0f}, {200.0f, 200.0f}, Color::Blue);
+                Renderer2D::drawRect({700.0f, 300.0f}, {200.0f, 200.0f}, Color::Green);
+                Renderer2D::drawRect({300.0f, 400.0f}, {200.0f, 200.0f}, Color::Orange);
 
                 Renderer2D::endScene();
             }

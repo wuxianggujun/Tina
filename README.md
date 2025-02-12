@@ -61,6 +61,16 @@ TINA_BUILD_TESTS       # 构建测试（默认：ON）
 ### 构建步骤
 
 ```bash
+# 克隆renderer/refactor分支
+git clone -b renderer/refactor https://github.com/wuxianggujun/Tina.git 
+
+# 进入项目目录
+cd Tina 
+
+# 验证克隆分支（可选）
+git branch 
+
+# 应显示* renderer/refactor
 # 配置项目
 cmake -B build
 
