@@ -34,6 +34,7 @@ target_link_libraries(TinaCore
         bx
         bgfx
         bimg
+        bimg_decode
         fmt::fmt
         glfw
         EnTT::EnTT
@@ -45,7 +46,7 @@ target_compile_definitions(TinaCore
     PRIVATE
         TINA_CORE_EXPORTS
         TINA_VERSION="${PROJECT_VERSION}"
-        SHADER_OUTPUT_DIR="${CMAKE_BINARY_DIR}/resources/shaders"
+        SHADER_OUTPUT_DIR="${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resources/shaders"
 )
 
 # 启用 C++17
@@ -55,3 +56,15 @@ target_compile_features(TinaCore PUBLIC cxx_std_17)
 if(MSVC)
     target_compile_options(TinaCore PRIVATE /wd4251)
 endif()
+
+# 复制资源文件（排除shaders目录）
+copy_resources(
+    TARGET_NAME TinaCore
+    SOURCE_DIR "${CMAKE_SOURCE_DIR}/engine/resources"
+    DESTINATION_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resources"
+    PATTERNS 
+        "textures/*"
+        "fonts/*"
+        "models/*"
+        "audio/*"
+)

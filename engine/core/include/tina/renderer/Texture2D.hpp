@@ -101,6 +101,27 @@ namespace Tina
                     Wrapping wrapping = Wrapping::ClampEdge, Filter filter = Filter::Linear,
                     const void* data = nullptr, uint32_t size = 0) noexcept;
 
+        void setNativeHandle(bgfx::TextureHandle handle, 
+            uint16_t width, uint16_t height, uint16_t depth = 1,
+            bool hasMips = false, uint16_t layers = 1,
+            bgfx::TextureFormat::Enum format = bgfx::TextureFormat::RGBA8) noexcept 
+        {
+            if (bgfx::isValid(this->handle)) {
+                bgfx::destroy(this->handle);
+            }
+            this->handle = handle;
+            if (bgfx::isValid(handle)) {
+                info.width = width;
+                info.height = height;
+                info.depth = depth;
+                info.numMips = hasMips ? 0 : 1;
+                info.numLayers = layers;
+                info.format = format;
+                info.cubeMap = false;
+                info.storageSize = 0;
+            }
+        }
+
         [[nodiscard]] const std::string& getName() const { return name; }
         [[nodiscard]] const bgfx::TextureHandle& getNativeHandle() const { return handle; }
         [[nodiscard]] uint16_t getWidth() const { return info.width; }

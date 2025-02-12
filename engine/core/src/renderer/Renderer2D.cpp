@@ -106,10 +106,11 @@ namespace Tina
 
             TINA_LOG_DEBUG("Creating texture sampler uniform");
             s_Data.s_texColor = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
+            s_Data.u_useTexture = bgfx::createUniform("u_useTexture", bgfx::UniformType::Vec4);
 
-            if (!bgfx::isValid(s_Data.s_texColor))
+            if (!bgfx::isValid(s_Data.s_texColor) || !bgfx::isValid(s_Data.u_useTexture))
             {
-                throw std::runtime_error("Failed to create texture sampler uniform");
+                throw std::runtime_error("Failed to create uniforms");
             }
 
             s_Data.isInitialized = true;
@@ -146,6 +147,10 @@ namespace Tina
             if (bgfx::isValid(s_Data.s_texColor))
             {
                 bgfx::destroy(s_Data.s_texColor);
+            }
+            if (bgfx::isValid(s_Data.u_useTexture))
+            {
+                bgfx::destroy(s_Data.u_useTexture);
             }
 
             // 释放内存
@@ -261,14 +266,85 @@ namespace Tina
         s_Data.vertexBufferPtr->color = packedColor;
         s_Data.vertexBufferPtr++;
 
+        // 设置不使用纹理的标志
+        float noTexture[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        bgfx::setUniform(s_Data.u_useTexture, noTexture);
+
         s_Data.quadCount++;
     }
 
     void Renderer2D::drawTexturedRect(const glm::vec2& position, const glm::vec2& size, bgfx::TextureHandle texture,
         const Color& color)
     {
-        drawRect(position, size, color);
+        if (!s_Data.isInitialized)
+        {
+            TINA_LOG_ERROR("Renderer2D not initialized");
+            return;
+        }
+
+        if (s_Data.quadCount >= s_Data.MaxQuads)
+        {
+            flush();
+        }
+
+        if (!bgfx::isValid(texture))
+        {
+            TINA_LOG_ERROR("Invalid texture handle");
+            return;
+        }
+
+        float x = position.x;
+        float y = position.y;
+        float width = size.x;
+        float height = size.y;
+        float z = 0.0f;
+
+        uint32_t packedColor = static_cast<uint32_t>(color);
+
+        // 添加四个顶点，按照逆时针顺序
+        s_Data.vertexBufferPtr->x = x;
+        s_Data.vertexBufferPtr->y = y;
+        s_Data.vertexBufferPtr->z = z;
+        s_Data.vertexBufferPtr->u = 0.0f;
+        s_Data.vertexBufferPtr->v = 0.0f;
+        s_Data.vertexBufferPtr->color = packedColor;
+        s_Data.vertexBufferPtr++;
+
+        s_Data.vertexBufferPtr->x = x + width;
+        s_Data.vertexBufferPtr->y = y;
+        s_Data.vertexBufferPtr->z = z;
+        s_Data.vertexBufferPtr->u = 1.0f;
+        s_Data.vertexBufferPtr->v = 0.0f;
+        s_Data.vertexBufferPtr->color = packedColor;
+        s_Data.vertexBufferPtr++;
+
+        s_Data.vertexBufferPtr->x = x + width;
+        s_Data.vertexBufferPtr->y = y + height;
+        s_Data.vertexBufferPtr->z = z;
+        s_Data.vertexBufferPtr->u = 1.0f;
+        s_Data.vertexBufferPtr->v = 1.0f;
+        s_Data.vertexBufferPtr->color = packedColor;
+        s_Data.vertexBufferPtr++;
+
+        s_Data.vertexBufferPtr->x = x;
+        s_Data.vertexBufferPtr->y = y + height;
+        s_Data.vertexBufferPtr->z = z;
+        s_Data.vertexBufferPtr->u = 0.0f;
+        s_Data.vertexBufferPtr->v = 1.0f;
+        s_Data.vertexBufferPtr->color = packedColor;
+        s_Data.vertexBufferPtr++;
+
+        // 设置使用纹理的标志
+        float useTexture[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+        bgfx::setUniform(s_Data.u_useTexture, useTexture);
+        
+        // 设置纹理
         bgfx::setTexture(0, s_Data.s_texColor, texture);
+
+        s_Data.quadCount++;
+
+        // 立即刷新以确保纹理正确渲染
+        flush();
     }
 
     void Renderer2D::flush()

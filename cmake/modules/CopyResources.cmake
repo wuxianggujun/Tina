@@ -46,12 +46,11 @@ function(copy_resources)
         # 获取目标文件的目录
         get_filename_component(DEST_DIR "${DEST_FILE}" DIRECTORY)
         
-        # 添加复制命令
+        # 添加复制命令（移除了 DEPENDS 关键字）
         add_custom_command(
             TARGET ${COPY_TARGET_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "${DEST_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${FILE}" "${DEST_FILE}"
-            DEPENDS "${FILE}"
             COMMENT "Copying resource ${REL_PATH}"
         )
     endforeach()

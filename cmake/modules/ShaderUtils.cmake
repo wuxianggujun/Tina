@@ -39,7 +39,7 @@ function(add_shader_compile_dir SHADER_DIR)
     endif()
 
     # 设置输出目录
-    set(SHADER_OUTPUT_DIR "${CMAKE_BINARY_DIR}/resources/shaders")
+    set(SHADER_OUTPUT_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resources/shaders")
     file(MAKE_DIRECTORY "${SHADER_OUTPUT_DIR}")
     message(STATUS "Shader output directory: ${SHADER_OUTPUT_DIR}")
 

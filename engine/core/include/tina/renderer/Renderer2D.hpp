@@ -66,6 +66,7 @@ namespace Tina
 
             bgfx::ProgramHandle shader = BGFX_INVALID_HANDLE;
             bgfx::UniformHandle s_texColor = BGFX_INVALID_HANDLE;
+            bgfx::UniformHandle u_useTexture = BGFX_INVALID_HANDLE;
             bgfx::DynamicVertexBufferHandle vertexBuffer = BGFX_INVALID_HANDLE;
             bgfx::IndexBufferHandle indexBuffer = BGFX_INVALID_HANDLE;
 

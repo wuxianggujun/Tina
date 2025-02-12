@@ -9,6 +9,9 @@
 #include "bx/math.h"
 #include "tina/core/OrthographicCamera.hpp"
 #include "tina/event/Event.hpp"
+#include "tina/renderer/Texture2D.hpp"
+#include <unordered_map>
+#include "tina/utils/BgfxUtils.hpp"
 
 namespace Tina
 {
@@ -18,6 +21,14 @@ namespace Tina
         Render2DLayer() : Layer("Render2DLayer")
         {
             TINA_LOG_INFO("Render2DLayer created");
+        }
+
+        ~Render2DLayer()
+        {
+            for (auto& [name, texture] : m_textures)
+            {
+                delete texture;
+            }
         }
 
     private:
@@ -54,6 +65,40 @@ namespace Tina
             );
         }
 
+        void loadTextures()
+        {
+            // 加载测试纹理
+            const std::string texturePath = "resources/textures/test.png";
+            TINA_LOG_INFO("Loading texture: {}", texturePath);
+            
+            auto result = Utils::BgfxUtils::loadTexture(texturePath);
+            if (!bgfx::isValid(result.handle))
+            {
+                TINA_LOG_ERROR("Failed to load texture: {}", texturePath);
+                return;
+            }
+
+            TINA_LOG_INFO("Texture loaded successfully. Size: {}x{}, Format: {}, Layers: {}, Depth: {}, HasMips: {}",
+                result.width, result.height, static_cast<int>(result.format),
+                result.layers, result.depth, result.hasMips);
+
+            auto texture = new Texture2D("test");
+            texture->setNativeHandle(result.handle, result.width, result.height, 
+                result.depth, result.hasMips, result.layers, result.format);
+
+            if (texture->isValid())
+            {
+                m_textures["test"] = texture;
+                TINA_LOG_INFO("Successfully created texture object: test ({}x{})", 
+                    texture->getWidth(), texture->getHeight());
+            }
+            else
+            {
+                TINA_LOG_ERROR("Failed to create texture object: test");
+                delete texture;
+            }
+        }
+
     public:
         void onAttach() override
         {
@@ -70,6 +115,7 @@ namespace Tina
                 initShaders();
                 initRenderer2D();
                 initCamera();
+                loadTextures();
 
                 m_initialized = true;
                 TINA_LOG_INFO("Render2DLayer initialized successfully");
@@ -180,6 +226,28 @@ namespace Tina
                 Renderer2D::drawRect({700.0f, 300.0f}, {200.0f, 200.0f}, Color::Green);
                 Renderer2D::drawRect({300.0f, 400.0f}, {200.0f, 200.0f}, Color::Orange);
 
+                // 绘制纹理
+                auto it = m_textures.find("test");
+                if (it != m_textures.end() && it->second->isValid())
+                {
+                    float scale = 0.25f;  // 缩小缩放因子
+                    float width = static_cast<float>(it->second->getWidth()) * scale;
+                    float height = static_cast<float>(it->second->getHeight()) * scale;
+                    
+                    TINA_LOG_DEBUG("Drawing texture: {}x{} at position (500, 300)", width, height);
+                    
+                    Renderer2D::drawTexturedRect(
+                        {500.0f, 300.0f},    // 位置
+                        {width, height},      // 使用实际纹理尺寸（经过缩放）
+                        it->second->getNativeHandle(),
+                        Color::White
+                    );
+                }
+                else
+                {
+                    TINA_LOG_WARN("Test texture not found or invalid");
+                }
+
                 Renderer2D::endScene();
             }
             catch (const std::exception& e)
@@ -191,6 +259,7 @@ namespace Tina
     private:
         std::unique_ptr<OrthographicCamera> m_camera;
         bgfx::ProgramHandle m_shaderProgram = BGFX_INVALID_HANDLE;
+        std::unordered_map<std::string, Texture2D*> m_textures;
         bool m_initialized = false;
     };
 } // namespace Tina
