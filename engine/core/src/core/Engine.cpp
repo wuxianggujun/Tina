@@ -13,6 +13,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#include "tina/core/Timer.hpp"
 
 namespace Tina::Core
 {
@@ -118,14 +119,13 @@ namespace Tina::Core
         try
         {
             bool running = true;
-            double lastTime = glfwGetTime();
+            Timer timer(true);  // 单个Timer实例
+            const float targetFrameTime = 1.0f / 60.0f; // 60 FPS
 
             while (running && !m_isShutdown)
             {
-                // 计算deltaTime
-                double currentTime = glfwGetTime();
-                float deltaTime = static_cast<float>(currentTime - lastTime);
-                lastTime = currentTime;
+                float deltaTime = timer.getSeconds(true);
+                timer.reset();
 
                 // 处理窗口事件
                 m_context.getWindowManager().pollEvents();
@@ -149,23 +149,7 @@ namespace Tina::Core
                         TINA_LOG_INFO("Render2DLayer: Window resized to {}x{}",
                                       event.windowResize.width,
                                       event.windowResize.height);
-
-                        // // 重置渲染视口
-                        // if (bgfx::getInternalData() && bgfx::getInternalData()->context)
-                        // {
-                        //     bgfx::reset(
-                        //         event.windowResize.width,
-                        //         event.windowResize.height,
-                        //         BGFX_RESET_VSYNC
-                        //     );
-                        //
-                        //     // 更新视口设置
-                        //     bgfx::setViewRect(0, 0, 0,
-                        //                       uint16_t(event.windowResize.width),
-                        //                       uint16_t(event.windowResize.height));
-                        // }
                     }
-
 
                     if (m_activeScene)
                     {
@@ -189,7 +173,7 @@ namespace Tina::Core
                 // 清除背景
                 bgfx::setViewClear(0,
                                    BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                                   0x303030ff, // 深灰色背景
+                                   0x303030ff,
                                    1.0f,
                                    0);
 
@@ -205,6 +189,17 @@ namespace Tina::Core
 
                 // 提交帧
                 bgfx::frame();
+
+                // 帧率限制
+                float frameTime = timer.getSeconds(true);
+                if (frameTime < targetFrameTime)
+                {
+                    float sleepTime = (targetFrameTime - frameTime) * 1000.0f;
+                    if (sleepTime > 0)
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int64_t>(sleepTime)));
+                    }
+                }
             }
 
             return true;

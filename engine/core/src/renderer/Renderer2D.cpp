@@ -21,7 +21,7 @@ namespace Tina
                 .begin()
                 .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
                 .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
-                .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
+                .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true, true)  // normalized = true, asInt = true
                 .end();
 
             if (!layout.getStride())
@@ -218,14 +218,15 @@ namespace Tina
             flush();
         }
 
-        // 直接使用屏幕坐标
         float x = position.x;
         float y = position.y;
         float width = size.x;
         float height = size.y;
-        float z = 0.0f; // 使用z坐标进行深度排序
+        float z = 0.0f;
 
-        auto packedColor = static_cast<uint32_t>(color);
+        uint32_t packedColor = static_cast<uint32_t>(color);
+        TINA_LOG_DEBUG("Color components: R={}, G={}, B={}, A={}, Packed=0x{:08x}",
+                      color.getR(), color.getG(), color.getB(), color.getA(), packedColor);
 
         // 添加四个顶点，按照逆时针顺序
         s_Data.vertexBufferPtr->x = x;
@@ -261,10 +262,6 @@ namespace Tina
         s_Data.vertexBufferPtr++;
 
         s_Data.quadCount++;
-
-        TINA_LOG_DEBUG("Drew quad at ({}, {}) with size ({}, {}) and color 0x{:08x}",
-                       x, y, width, height, packedColor);
-
     }
 
     void Renderer2D::drawTexturedRect(const glm::vec2& position, const glm::vec2& size, bgfx::TextureHandle texture,
