@@ -15,7 +15,7 @@ tina_add_third_party(NAME bgfx
         PATH ${CMAKE_SOURCE_DIR}/third_party/bgfx.cmake
         OPTIONS
         BGFX_BUILD_TOOLS=ON
-        BGFX_BUILD_EXAMPLES=OFF)
+        BGFX_BUILD_EXAMPLES=ON)
 
 # 设置 BGFX 根目录 - 这对着色器编译很重要
 set(BGFX_DIR "${CMAKE_SOURCE_DIR}/third_party/bgfx.cmake/bgfx")

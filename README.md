@@ -129,3 +129,4 @@ int main() {
 ## 贡献指南
 
 [待定]
+varying.def.sc 不能添加任何注释，不然Shader无法通过编译！

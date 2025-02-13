@@ -1,7 +1,7 @@
 #pragma once
 
 #include "tina/layer/Layer.hpp"
-#include "tina/systems/RenderSystem.hpp"
+#include "tina/renderer/BatchRenderer2D.hpp"
 #include "tina/renderer/ShaderManager.hpp"
 #include "tina/log/Logger.hpp"
 #include <glm/gtc/matrix_transform.hpp>
@@ -11,7 +11,7 @@
 #include "tina/renderer/Texture2D.hpp"
 #include <unordered_map>
 #include "tina/utils/BgfxUtils.hpp"
-#include <entt/entt.hpp>
+#include <vector>
 
 #include "bgfx/platform.h"
 
@@ -27,42 +27,86 @@ namespace Tina
 
         ~Render2DLayer()
         {
-            // 清理前确保所有实体都被销毁
-            m_registry.clear();
+            m_rectangles.clear();
             m_textures.clear();
+            m_texturedRectangles.clear();
+        }
+
+        // 加载纹理
+        std::shared_ptr<Texture2D> loadTexture(const std::string& name, const std::string& path)
+        {
+            auto it = m_textures.find(name);
+            if (it != m_textures.end())
+            {
+                return it->second;
+            }
+
+            // 使用BgfxUtils加载纹理
+            auto result = Utils::BgfxUtils::loadTexture(path);
+            if (!bgfx::isValid(result.handle))
+            {
+                TINA_LOG_ERROR("Failed to load texture: {}", path);
+                return nullptr;
+            }
+
+            auto texture = Texture2D::create(name);
+            texture->setNativeHandle(
+                result.handle,
+                result.width,
+                result.height,
+                result.depth,
+                result.hasMips,
+                result.layers,
+                result.format
+            );
+            
+            if (texture->isValid())
+            {
+                m_textures[name] = texture;
+                TINA_LOG_INFO("Texture '{}' loaded successfully", name);
+                return texture;
+            }
+            
+            TINA_LOG_ERROR("Failed to create texture '{}'", name);
+            return nullptr;
         }
 
         // 创建矩形
-        entt::entity createRectangle(const glm::vec2& position, const glm::vec2& size, const Color& color)
+        void createRectangle(const glm::vec2& position, const glm::vec2& size, const Color& color)
         {
-            auto entity = m_registry.create();
-            
-            auto& transform = m_registry.emplace<Transform2DComponent>(entity, position);
-            auto& rectangle = m_registry.emplace<RectangleComponent>(entity, size);
-            rectangle.setColor(color);
-            
-            return entity;
+            BatchRenderer2D::InstanceData instance;
+            instance.Transform = glm::vec4(position.x, position.y, size.x, size.y);
+            instance.Color = glm::vec4(color.getR(), color.getG(), color.getB(), color.getA());
+            m_rectangles.push_back(instance);
         }
 
-        // 创建精灵
-        entt::entity createSprite(const glm::vec2& position, const std::string& textureName)
+        // 创建带纹理的矩形
+        void createTexturedRectangle(const glm::vec2& position, const glm::vec2& size, 
+                                   const std::string& textureName,
+                                   const glm::vec4& textureCoords = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f),
+                                   const Color& tint = Color::White)
         {
-            auto entity = m_registry.create();
-            
-            auto& transform = m_registry.emplace<Transform2DComponent>(entity, position);
-            auto& sprite = m_registry.emplace<SpriteComponent>(entity);
-            
             auto it = m_textures.find(textureName);
-            if (it != m_textures.end())
+            if (it == m_textures.end())
             {
-                sprite.setTexture(it->second);
+                TINA_LOG_WARN("Texture '{}' not found", textureName);
+                return;
             }
-            
-            return entity;
+
+            BatchRenderer2D::InstanceData instance;
+            instance.Transform = glm::vec4(position.x, position.y, size.x, size.y);
+            instance.Color = glm::vec4(tint.getR(), tint.getG(), tint.getB(), tint.getA());
+            instance.TextureData = textureCoords;
+            instance.TextureIndex = static_cast<float>(m_texturedRectangles.size());
+
+            m_texturedRectangles.push_back({instance, it->second});
         }
 
         void createRandomRectangles(int count)
         {
+            m_rectangles.clear();
+            m_rectangles.reserve(count);
+
             for (int i = 0; i < count; i++)
             {
                 float x = static_cast<float>(rand() % 800);
@@ -71,12 +115,11 @@ namespace Tina
                 float width = 50.0f + static_cast<float>(rand() % 150);
                 float height = 50.0f + static_cast<float>(rand() % 150);
 
-                // 生成0-1范围的归一化颜色值
                 Color randomColor(
-                    static_cast<float>(rand()) / RAND_MAX,  // r
-                    static_cast<float>(rand()) / RAND_MAX,  // g
-                    static_cast<float>(rand()) / RAND_MAX,  // b
-                    1.0f                                    // a
+                    static_cast<float>(rand()) / RAND_MAX,
+                    static_cast<float>(rand()) / RAND_MAX,
+                    static_cast<float>(rand()) / RAND_MAX,
+                    1.0f
                 );
 
                 createRectangle({x, y}, {width, height}, randomColor);
@@ -97,8 +140,8 @@ namespace Tina
 
         void initRenderer()
         {
-            m_renderSystem = std::make_unique<RenderSystem>();
-            m_renderSystem->init(m_shaderProgram);
+            m_batchRenderer = std::make_unique<BatchRenderer2D>();
+            m_batchRenderer->init(m_shaderProgram);
         }
 
         void initCamera()
@@ -109,61 +152,6 @@ namespace Tina
                 0.0f, static_cast<float>(width),
                 static_cast<float>(height), 0.0f
             );
-        }
-
-        void loadTextures()
-        {
-            // 加载测试纹理
-            const std::string texturePath = "resources/textures/test.png";
-            TINA_LOG_INFO("Loading texture: {}", texturePath);
-            
-            auto result = Utils::BgfxUtils::loadTexture(texturePath);
-            if (!bgfx::isValid(result.handle))
-            {
-                TINA_LOG_ERROR("Failed to load texture: {}", texturePath);
-                return;
-            }
-
-            TINA_LOG_INFO("Texture loaded successfully. Size: {}x{}, Format: {}, Layers: {}, Depth: {}, HasMips: {}",
-                result.width, result.height, static_cast<int>(result.format),
-                result.layers, result.depth, result.hasMips);
-
-            auto texture = Texture2D::create("test");
-            texture->setNativeHandle(result.handle, result.width, result.height, 
-                result.depth, result.hasMips, result.layers, result.format);
-
-            if (texture->isValid())
-            {
-                m_textures["test"] = texture;
-                TINA_LOG_INFO("Successfully created texture object: test ({}x{})", 
-                    texture->getWidth(), texture->getHeight());
-            }
-        }
-
-        void createTestObjects()
-        {
-            // // 创建测试矩形
-            // createRectangle({100.0f, 100.0f}, {200.0f, 200.0f}, Color::Red);
-            // createRectangle({400.0f, 200.0f}, {200.0f, 200.0f}, Color::Blue);
-            // createRectangle({700.0f, 300.0f}, {200.0f, 200.0f}, Color::Green);
-            // createRectangle({300.0f, 400.0f}, {200.0f, 200.0f}, Color::Orange);
-
-            createRandomRectangles(100);
-
-            // 创建测试精灵
-            auto spriteEntity = createSprite({500.0f, 300.0f}, "test");
-            if (auto* sprite = m_registry.try_get<SpriteComponent>(spriteEntity))
-            {
-                if (sprite->getTexture())
-                {
-                    float scale = 0.25f;
-                    glm::vec2 size = {
-                        static_cast<float>(sprite->getTexture()->getWidth()) * scale,
-                        static_cast<float>(sprite->getTexture()->getHeight()) * scale
-                    };
-                    sprite->setSize(size);
-                }
-            }
         }
 
     public:
@@ -182,8 +170,51 @@ namespace Tina
                 initShaders();
                 initRenderer();
                 initCamera();
-                loadTextures();
-                createTestObjects();
+                
+                // 加载测试纹理
+                auto texture = loadTexture("test", "resources/textures/test.png");
+                if (texture && texture->isValid())
+                {
+                    TINA_LOG_INFO("Successfully loaded test texture");
+                    
+                    // 创建一个居中的纹理矩形
+                    uint32_t windowWidth, windowHeight;
+                    Core::Engine::get().getWindowSize(windowWidth, windowHeight);
+                    
+                    float textureWidth = static_cast<float>(texture->getWidth());
+                    float textureHeight = static_cast<float>(texture->getHeight());
+                    
+                    // 计算居中位置
+                    glm::vec2 position(
+                        (windowWidth - textureWidth) * 0.5f,
+                        (windowHeight - textureHeight) * 0.5f
+                    );
+                    
+                    // 创建纹理矩形
+                    createTexturedRectangle(
+                        position,                           // 居中位置
+                        {textureWidth, textureHeight},     // 使用纹理原始大小
+                        "test",                            // 纹理名称
+                        {0.0f, 0.0f, 1.0f, 1.0f},         // 使用完整纹理
+                        Color(1.0f, 1.0f, 1.0f, 1.0f)     // 白色，不调整颜色
+                    );
+                    
+                    // 创建第二个纹理矩形，展示UV坐标和颜色调整
+                    createTexturedRectangle(
+                        {50.0f, 50.0f},                   // 左上角位置
+                        {100.0f, 100.0f},                 // 自定义大小
+                        "test",                           // 使用同一个纹理
+                        {0.0f, 0.0f, 0.5f, 0.5f},        // 只使用纹理的左上角部分
+                        Color(1.0f, 0.8f, 0.8f, 0.8f)    // 带透明度的淡红色
+                    );
+                }
+                else
+                {
+                    TINA_LOG_ERROR("Failed to load test texture");
+                }
+                
+                // 创建一些随机矩形作为背景
+                createRandomRectangles(100);
 
                 m_initialized = true;
                 TINA_LOG_INFO("Render2DLayer initialized successfully");
@@ -208,13 +239,11 @@ namespace Tina
 
                 if (bgfx::getInternalData() && bgfx::getInternalData()->context)
                 {
-                    // 更新相机投影
                     m_camera->setProjection(
                         0.0f, static_cast<float>(width),
                         static_cast<float>(height), 0.0f
                     );
 
-                    // 更新视口
                     bgfx::reset(width, height, BGFX_RESET_VSYNC);
                     bgfx::setViewRect(0, 0, 0, uint16_t(width), uint16_t(height));
 
@@ -232,19 +261,16 @@ namespace Tina
 
             try
             {
-                // 确保完成所有渲染操作
                 if (bgfx::getInternalData()->context)
                 {
                     bgfx::frame();
                 }
 
-                // 关闭渲染系统
-                if (m_renderSystem)
+                if (m_batchRenderer)
                 {
-                    m_renderSystem->shutdown();
+                    m_batchRenderer->shutdown();
                 }
 
-                // 销毁着色器程序
                 if (bgfx::isValid(m_shaderProgram))
                 {
                     TINA_LOG_DEBUG("Destroying shader program");
@@ -273,21 +299,39 @@ namespace Tina
 
         void onRender() override
         {
-            if (!m_initialized || !m_renderSystem || !bgfx::isValid(m_shaderProgram))
+            if (!m_initialized || !m_batchRenderer || !bgfx::isValid(m_shaderProgram))
             {
                 return;
             }
 
             try
             {
-                // 开始场景渲染
-                m_renderSystem->beginScene(*m_camera);
+                bgfx::setViewTransform(0, nullptr, glm::value_ptr(m_camera->getProjectionMatrix()));
                 
-                // 渲染所有实体
-                m_renderSystem->render(m_registry);
+                m_batchRenderer->begin();
                 
-                // 结束场景渲染
-                m_renderSystem->endScene();
+                // 绘制普通矩形
+                if (!m_rectangles.empty())
+                {
+                    m_batchRenderer->drawQuads(m_rectangles);
+                }
+                
+                // 绘制带纹理的矩形
+                if (!m_texturedRectangles.empty())
+                {
+                    std::vector<BatchRenderer2D::InstanceData> instances;
+                    std::vector<std::shared_ptr<Texture2D>> textures;
+                    
+                    for (const auto& [instance, texture] : m_texturedRectangles)
+                    {
+                        instances.push_back(instance);
+                        textures.push_back(texture);
+                    }
+                    
+                    m_batchRenderer->drawTexturedQuads(instances, textures);
+                }
+                
+                m_batchRenderer->end();
             }
             catch (const std::exception& e)
             {
@@ -301,8 +345,14 @@ namespace Tina
         std::unordered_map<std::string, std::shared_ptr<Texture2D>> m_textures;
         bool m_initialized = false;
         
-        // 新增的ECS相关成员
-        entt::registry m_registry;
-        std::unique_ptr<RenderSystem> m_renderSystem;
+        std::unique_ptr<BatchRenderer2D> m_batchRenderer;
+        std::vector<BatchRenderer2D::InstanceData> m_rectangles;
+        
+        // 存储带纹理的矩形数据
+        struct TexturedRectangle {
+            BatchRenderer2D::InstanceData instance;
+            std::shared_ptr<Texture2D> texture;
+        };
+        std::vector<TexturedRectangle> m_texturedRectangles;
     };
 } // namespace Tina
