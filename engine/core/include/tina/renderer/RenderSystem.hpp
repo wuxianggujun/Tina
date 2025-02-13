@@ -8,13 +8,18 @@
 #include <vector>
 #include <memory>
 
+#include "tina/components/RectangleComponent.hpp"
+
 namespace Tina {
 
 class RenderSystem {
 public:
-    static constexpr uint32_t MAX_QUADS = 10000;
+    static constexpr uint32_t MAX_QUADS = 20000;
     static constexpr uint32_t MAX_VERTICES = MAX_QUADS * 4;
     static constexpr uint32_t MAX_INDICES = MAX_QUADS * 6;
+    static constexpr uint32_t MAX_TEXTURE_SLOTS = 16;
+    static constexpr uint32_t VERTEX_BUFFER_SIZE = MAX_VERTICES * sizeof(RectangleComponent::Vertex);
+    static constexpr uint32_t INDEX_BUFFER_SIZE = MAX_INDICES * sizeof(uint16_t);
 
     RenderSystem();
     ~RenderSystem();
@@ -40,6 +45,15 @@ private:
     void initBatch();
     void flushBatch(RenderBatch& batch);
     bool shouldStartNewBatch(const RenderBatch& batch, const SpriteComponent* sprite) const;
+    
+    bool isValidBatch(const RenderBatch& batch) const {
+        return bgfx::isValid(batch.vertexBuffer) && bgfx::isValid(batch.indexBuffer);
+    }
+
+    bool canAddToCurrentBatch(uint32_t additionalQuads) const {
+        if (!m_CurrentBatch) return false;
+        return (m_CurrentBatch->quadCount + additionalQuads) <= MAX_QUADS;
+    }
 
 private:
     bgfx::ProgramHandle m_Shader = BGFX_INVALID_HANDLE;

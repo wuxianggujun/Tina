@@ -1,4 +1,7 @@
-#include "tina/systems/RenderSystem.hpp"
+#include "tina/renderer/RenderSystem.hpp"
+
+#include <entt/entity/registry.hpp>
+
 #include "tina/log/Logger.hpp"
 #include <glm/gtc/type_ptr.hpp>
 
@@ -9,7 +12,7 @@ RenderSystem::RenderSystem() {
     
     try {
         // 预分配缓冲区
-        m_VertexBuffer.resize(MAX_VERTICES * sizeof(RectangleComponent::Vertex));
+        m_VertexBuffer.resize(VERTEX_BUFFER_SIZE);
         m_IndexBuffer.resize(MAX_INDICES);
         
         // 预先创建一个批次
@@ -31,6 +34,11 @@ RenderSystem::~RenderSystem() {
 void RenderSystem::init(bgfx::ProgramHandle shader) {
     if (m_Initialized) {
         TINA_LOG_WARN("RenderSystem already initialized");
+        return;
+    }
+
+    if (!bgfx::isValid(shader)) {
+        TINA_LOG_ERROR("Invalid shader handle");
         return;
     }
 
@@ -92,21 +100,28 @@ void RenderSystem::shutdown() {
         for (auto& batch : m_Batches) {
             if (bgfx::isValid(batch.vertexBuffer)) {
                 bgfx::destroy(batch.vertexBuffer);
+                batch.vertexBuffer = BGFX_INVALID_HANDLE;
             }
             if (bgfx::isValid(batch.indexBuffer)) {
                 bgfx::destroy(batch.indexBuffer);
+                batch.indexBuffer = BGFX_INVALID_HANDLE;
             }
         }
         m_Batches.clear();
+        m_CurrentBatch = nullptr;
 
         // 销毁Uniforms
         if (bgfx::isValid(m_TextureSampler)) {
             bgfx::destroy(m_TextureSampler);
+            m_TextureSampler = BGFX_INVALID_HANDLE;
         }
         if (bgfx::isValid(m_UseTexture)) {
             bgfx::destroy(m_UseTexture);
+            m_UseTexture = BGFX_INVALID_HANDLE;
         }
 
+        m_VertexBuffer.clear();
+        m_IndexBuffer.clear();
         m_Initialized = false;
         TINA_LOG_INFO("RenderSystem shutdown complete");
     }
@@ -117,6 +132,7 @@ void RenderSystem::shutdown() {
 
 void RenderSystem::beginScene(const OrthographicCamera& camera) {
     if (!m_Initialized) {
+        TINA_LOG_WARN("RenderSystem not initialized");
         return;
     }
 
@@ -131,8 +147,11 @@ void RenderSystem::beginScene(const OrthographicCamera& camera) {
         batch.vertexCount = 0;
         batch.indexCount = 0;
         batch.texture = BGFX_INVALID_HANDLE;
-    }
+        }
 
+    if (m_Batches.empty()) {
+    m_Batches.push_back(RenderBatch());
+    }
     m_CurrentBatch = &m_Batches[0];
 }
 
@@ -145,14 +164,14 @@ void RenderSystem::endScene() {
 
     // Flush所有非空批次
     for (auto& batch : m_Batches) {
-        if (batch.quadCount > 0) {
+        if (batch.quadCount > 0 && isValidBatch(batch)) {
             flushBatch(batch);
         }
     }
 }
 
 void RenderSystem::render(entt::registry& registry) {
-    if (!m_Initialized) {
+    if (!m_Initialized || !m_CurrentBatch) {
         return;
     }
 
@@ -167,19 +186,28 @@ void RenderSystem::render(entt::registry& registry) {
             continue;
         }
 
-        // 获取变换矩阵
-        glm::mat4 transformMatrix = transform.getTransform();
-
-        // 检查是否需要开始新的批次
-        if (m_CurrentBatch->quadCount >= MAX_QUADS) {
+        // 检查是否可以添加到当前批次
+        if (!canAddToCurrentBatch(1)) {
             flushBatch(*m_CurrentBatch);
+            if (m_Batches.size() >= MAX_QUADS) {
+                TINA_LOG_ERROR("Too many batches");
+                return;
+            }
             m_CurrentBatch = &m_Batches.emplace_back();
             initBatch();
         }
 
+        // 获取变换矩阵
+        glm::mat4 transformMatrix = transform.getTransform();
+
         // 更新顶点数据时应用变换
         size_t vertexOffset = m_CurrentBatch->vertexCount * sizeof(RectangleComponent::Vertex);
-        auto* vertices = reinterpret_cast<RectangleComponent::Vertex*>(m_VertexBuffer.data()+vertexOffset);
+        if (vertexOffset + sizeof(RectangleComponent::Vertex) * 4 > m_VertexBuffer.size()) {
+            TINA_LOG_ERROR("Vertex buffer overflow");
+            return;
+        }
+
+        auto* vertices = reinterpret_cast<RectangleComponent::Vertex*>(m_VertexBuffer.data() + vertexOffset);
 
         // 先获取原始顶点数据
         renderable.updateVertexBuffer(vertices,
@@ -196,6 +224,11 @@ void RenderSystem::render(entt::registry& registry) {
 
         // 更新索引数据
         size_t indexOffset = m_CurrentBatch->indexCount;
+        if (indexOffset + 6 > m_IndexBuffer.size()) {
+            TINA_LOG_ERROR("Index buffer overflow");
+            return;
+        }
+
         renderable.updateIndexBuffer(m_IndexBuffer.data() + indexOffset, 
             sizeof(uint16_t) * 6);
 
@@ -217,6 +250,10 @@ void RenderSystem::render(entt::registry& registry) {
         // 检查是否需要开始新的批次
         if (shouldStartNewBatch(*m_CurrentBatch, &sprite)) {
             flushBatch(*m_CurrentBatch);
+            if (m_Batches.size() >= MAX_QUADS) {
+                TINA_LOG_ERROR("Too many batches");
+                return;
+            }
             m_CurrentBatch = &m_Batches.emplace_back();
             initBatch();
         }
@@ -228,11 +265,21 @@ void RenderSystem::render(entt::registry& registry) {
 
         // 更新顶点数据
         size_t vertexOffset = m_CurrentBatch->vertexCount * sizeof(RectangleComponent::Vertex);
+        if (vertexOffset + sizeof(RectangleComponent::Vertex) * 4 > m_VertexBuffer.size()) {
+            TINA_LOG_ERROR("Vertex buffer overflow");
+            return;
+        }
+
         sprite.updateVertexBuffer(m_VertexBuffer.data() + vertexOffset, 
             sizeof(RectangleComponent::Vertex) * 4);
 
         // 更新索引数据
         size_t indexOffset = m_CurrentBatch->indexCount;
+        if (indexOffset + 6 > m_IndexBuffer.size()) {
+            TINA_LOG_ERROR("Index buffer overflow");
+            return;
+        }
+
         sprite.updateIndexBuffer(m_IndexBuffer.data() + indexOffset, 
             sizeof(uint16_t) * 6);
 
@@ -304,7 +351,7 @@ void RenderSystem::initBatch() {
 }
 
 void RenderSystem::flushBatch(RenderBatch& batch) {
-    if (batch.quadCount == 0) {
+    if (batch.quadCount == 0 || !isValidBatch(batch)) {
         return;
     }
 
@@ -352,7 +399,7 @@ void RenderSystem::flushBatch(RenderBatch& batch) {
         // 提交渲染
         bgfx::submit(0, m_Shader);
 
-        // 重置批次状态
+        // 重置状态
         batch.quadCount = 0;
         batch.vertexCount = 0;
         batch.indexCount = 0;

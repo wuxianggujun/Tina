@@ -52,4 +52,21 @@ void SpriteComponent::updateVertexBuffer(void* buffer, uint32_t size) {
     vertices[3].color = packedColor;
 }
 
+void SpriteComponent::updateIndexBuffer(void* buffer, uint32_t size) {
+    if (size < sizeof(uint16_t) * 6) {
+        TINA_LOG_ERROR("Buffer size too small for sprite indices");
+        return;
+    }
+
+    uint16_t* indices = static_cast<uint16_t*>(buffer);
+    
+    // 两个三角形组成一个矩形
+    indices[0] = 0;
+    indices[1] = 1;
+    indices[2] = 2;
+    indices[3] = 2;
+    indices[4] = 3;
+    indices[5] = 0;
+}
+
 } // namespace Tina 

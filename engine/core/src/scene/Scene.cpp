@@ -49,10 +49,7 @@ namespace Tina
     entt::entity Scene::createEntity(const std::string& name)
     {
         entt::entity entity = m_registry.create();
-
-        // 添加名称组件
         m_registry.emplace<std::string>(entity, name);
-
         TINA_LOG_INFO("Created entity: {} in scene: {}", name, m_name);
         return entity;
     }
