@@ -6,17 +6,23 @@ $input v_color0, v_texcoord0
 // 纹理采样器
 SAMPLER2D(s_texColor, 0);
 
-// 是否使用纹理的标志
+// 是否使用纹理的标志 (x: 是否使用纹理, y: 纹理索引)
 uniform vec4 u_useTexture;
 
 void main()
 {
     vec4 color = v_color0;
     
-    // 如果使用纹理,则采样纹理并与顶点颜色混合
+    // 如果启用了纹理
     if (u_useTexture.x > 0.5) {
+        // 直接使用原始UV坐标采样纹理
         vec4 texColor = texture2D(s_texColor, v_texcoord0);
         color *= texColor;
+    }
+    
+    // 只有完全透明的片段才丢弃
+    if (color.a <= 0.0) {
+        discard;
     }
     
     gl_FragColor = color;

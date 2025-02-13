@@ -99,6 +99,11 @@ namespace Tina
             instance.TextureData = textureCoords;
             instance.TextureIndex = static_cast<float>(m_texturedRectangles.size());
 
+            TINA_LOG_DEBUG("Creating textured rectangle: pos({}, {}), size({}, {}), texCoords({}, {}, {}, {}), index({})",
+                position.x, position.y, size.x, size.y,
+                textureCoords.x, textureCoords.y, textureCoords.z, textureCoords.w,
+                instance.TextureIndex);
+
             m_texturedRectangles.push_back({instance, it->second});
         }
 
@@ -142,6 +147,11 @@ namespace Tina
         {
             m_batchRenderer = std::make_unique<BatchRenderer2D>();
             m_batchRenderer->init(m_shaderProgram);
+            
+            // 清除之前的数据
+            m_rectangles.clear();
+            m_texturedRectangles.clear();
+            m_textures.clear();
         }
 
         void initCamera()
@@ -170,6 +180,11 @@ namespace Tina
                 initShaders();
                 initRenderer();
                 initCamera();
+                
+                // 清除之前的数据
+                m_rectangles.clear();
+                m_texturedRectangles.clear();
+                m_textures.clear();
                 
                 // 加载测试纹理
                 auto texture = loadTexture("test", "resources/textures/test.png");
@@ -294,7 +309,8 @@ namespace Tina
 
         void onUpdate(float deltaTime) override
         {
-            // 在这里更新2D对象
+            // 在这里更新2D对象的位置、大小等属性
+            // 而不是重新创建对象
         }
 
         void onRender() override
@@ -310,25 +326,40 @@ namespace Tina
                 
                 m_batchRenderer->begin();
                 
-                // 绘制普通矩形
+                // 一次性绘制所有存储的矩形
                 if (!m_rectangles.empty())
                 {
                     m_batchRenderer->drawQuads(m_rectangles);
                 }
                 
-                // 绘制带纹理的矩形
+                // 一次性绘制所有存储的纹理矩形
                 if (!m_texturedRectangles.empty())
                 {
                     std::vector<BatchRenderer2D::InstanceData> instances;
                     std::vector<std::shared_ptr<Texture2D>> textures;
                     
+                    TINA_LOG_DEBUG("Preparing to render {} textured rectangles", m_texturedRectangles.size());
+                    
                     for (const auto& [instance, texture] : m_texturedRectangles)
                     {
-                        instances.push_back(instance);
-                        textures.push_back(texture);
+                        if (texture && texture->isValid())
+                        {
+                            TINA_LOG_DEBUG("Adding textured rectangle: pos({}, {}), size({}, {}), texCoords({}, {}, {}, {}), index({})",
+                                instance.Transform.x, instance.Transform.y,
+                                instance.Transform.z, instance.Transform.w,
+                                instance.TextureData.x, instance.TextureData.y,
+                                instance.TextureData.z, instance.TextureData.w,
+                                instance.TextureIndex);
+                                
+                            instances.push_back(instance);
+                            textures.push_back(texture);
+                        }
                     }
                     
-                    m_batchRenderer->drawTexturedQuads(instances, textures);
+                    if (!instances.empty())
+                    {
+                        m_batchRenderer->drawTexturedQuads(instances, textures);
+                    }
                 }
                 
                 m_batchRenderer->end();

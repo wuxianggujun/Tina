@@ -8,7 +8,9 @@ bgfx::VertexLayout BatchRenderer2D::s_VertexLayout;
 bgfx::VertexLayout BatchRenderer2D::s_InstanceLayout;
 
 BatchRenderer2D::BatchRenderer2D() {
-    m_Instances.reserve(MAX_QUADS);
+    // 为两个实例数组预分配空间
+    m_ColorInstances.reserve(MAX_QUADS);
+    m_TexturedInstances.reserve(MAX_QUADS);
 }
 
 BatchRenderer2D::~BatchRenderer2D() {
@@ -63,22 +65,22 @@ void BatchRenderer2D::createBuffers() {
     // 创建单个四边形的顶点数据
     std::vector<QuadVertex> vertices(4);
     
-    // 左上
+    // 左上 (0.0, 0.0)
     vertices[0].Position = {0.0f, 0.0f, 0.0f};
     vertices[0].TexCoord = {0.0f, 0.0f};
     vertices[0].Color = 0xFFFFFFFF;
 
-    // 右上
+    // 右上 (1.0, 0.0)
     vertices[1].Position = {1.0f, 0.0f, 0.0f};
     vertices[1].TexCoord = {1.0f, 0.0f};
     vertices[1].Color = 0xFFFFFFFF;
 
-    // 右下
+    // 右下 (1.0, 1.0)
     vertices[2].Position = {1.0f, 1.0f, 0.0f};
     vertices[2].TexCoord = {1.0f, 1.0f};
     vertices[2].Color = 0xFFFFFFFF;
 
-    // 左下
+    // 左下 (0.0, 1.0)
     vertices[3].Position = {0.0f, 1.0f, 0.0f};
     vertices[3].TexCoord = {0.0f, 1.0f};
     vertices[3].Color = 0xFFFFFFFF;
@@ -94,11 +96,21 @@ void BatchRenderer2D::createBuffers() {
 
     // 创建实例缓冲
     uint32_t flags = BGFX_BUFFER_ALLOW_RESIZE;
-    m_InstanceBuffer = bgfx::createDynamicVertexBuffer(
+    m_ColorInstanceBuffer = bgfx::createDynamicVertexBuffer(
         MAX_QUADS,
         s_InstanceLayout,
         flags
     );
+    
+    m_TexturedInstanceBuffer = bgfx::createDynamicVertexBuffer(
+        MAX_QUADS,
+        s_InstanceLayout,
+        flags
+    );
+    
+    // 预分配实例数组
+    m_ColorInstances.reserve(MAX_QUADS);
+    m_TexturedInstances.reserve(MAX_QUADS);
 }
 
 void BatchRenderer2D::shutdown() {
@@ -116,44 +128,70 @@ void BatchRenderer2D::shutdown() {
         bgfx::destroy(m_IndexBuffer);
     }
     
-    if (bgfx::isValid(m_InstanceBuffer)) {
-        bgfx::destroy(m_InstanceBuffer);
+    if (bgfx::isValid(m_ColorInstanceBuffer)) {
+        bgfx::destroy(m_ColorInstanceBuffer);
+    }
+    
+    if (bgfx::isValid(m_TexturedInstanceBuffer)) {
+        bgfx::destroy(m_TexturedInstanceBuffer);
     }
 
-    m_Instances.clear();
-    m_QuadCount = 0;
+    m_ColorInstances.clear();
+    m_TexturedInstances.clear();
+    m_Textures.clear();
+    m_ColorQuadCount = 0;
+    m_TexturedQuadCount = 0;
     m_Initialized = false;
 }
 
 void BatchRenderer2D::begin() {
-    m_Instances.clear();
-    m_QuadCount = 0;
+    m_ColorInstances.clear();
+    m_TexturedInstances.clear();
+    m_Textures.clear();
+    m_ColorQuadCount = 0;
+    m_TexturedQuadCount = 0;
 }
 
 void BatchRenderer2D::end() {
-    flushBatch();
+    // 先渲染纯色批次
+    if (m_ColorQuadCount > 0) {
+        flushColorBatch();
+    }
+    
+    // 再渲染纹理批次
+    if (m_TexturedQuadCount > 0) {
+        flushTextureBatch();
+    }
 }
 
 void BatchRenderer2D::drawQuad(const glm::vec2& position, const glm::vec2& size, const Color& color) {
-    if (m_QuadCount >= MAX_QUADS) {
-        flushBatch();
+    if (m_ColorQuadCount >= MAX_QUADS) {
+        flushColorBatch();
     }
 
     InstanceData instance;
     instance.Transform = glm::vec4(position.x, position.y, size.x, size.y);
     instance.Color = glm::vec4(color.getR(), color.getG(), color.getB(), color.getA());
+    instance.TextureData = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
+    instance.TextureIndex = -1.0f;  // 标记为非纹理quad
     
-    m_Instances.push_back(instance);
-    m_QuadCount++;
+    m_ColorInstances.push_back(instance);
+    m_ColorQuadCount++;
 }
 
 void BatchRenderer2D::drawQuads(const std::vector<InstanceData>& instances) {
     for (const auto& instance : instances) {
-        if (m_QuadCount >= MAX_QUADS) {
-            flushBatch();
+        if (m_ColorQuadCount >= MAX_QUADS) {
+            flushColorBatch();
         }
-        m_Instances.push_back(instance);
-        m_QuadCount++;
+        
+        // 创建新的实例，确保是非纹理quad
+        InstanceData newInstance = instance;
+        newInstance.TextureData = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
+        newInstance.TextureIndex = -1.0f;  // 标记为非纹理quad
+        
+        m_ColorInstances.push_back(newInstance);
+        m_ColorQuadCount++;
     }
 }
 
@@ -166,8 +204,8 @@ void BatchRenderer2D::drawTexturedQuad(const glm::vec2& position, const glm::vec
         return;
     }
 
-    if (m_QuadCount >= MAX_QUADS) {
-        flushBatch();
+    if (m_TexturedQuadCount >= MAX_QUADS) {
+        flushTextureBatch();
     }
 
     // 查找或添加纹理
@@ -175,84 +213,167 @@ void BatchRenderer2D::drawTexturedQuad(const glm::vec2& position, const glm::vec
     float textureIndex = 0.0f;
     
     if (it == m_Textures.end()) {
+        if (m_Textures.size() >= MAX_TEXTURE_SLOTS) {
+            flushTextureBatch();
+            m_Textures.clear();
+        }
         textureIndex = static_cast<float>(m_Textures.size());
         m_Textures.push_back(texture);
     } else {
         textureIndex = static_cast<float>(std::distance(m_Textures.begin(), it));
     }
 
+    // 创建实例数据
     InstanceData instance;
     instance.Transform = glm::vec4(position.x, position.y, size.x, size.y);
     instance.Color = glm::vec4(tint.getR(), tint.getG(), tint.getB(), tint.getA());
     instance.TextureData = textureCoords;
     instance.TextureIndex = textureIndex;
+
+    TINA_LOG_DEBUG("Creating textured quad: pos({}, {}), size({}, {}), texCoords({}, {}, {}, {}), texIndex({})",
+        position.x, position.y, size.x, size.y,
+        textureCoords.x, textureCoords.y, textureCoords.z, textureCoords.w,
+        textureIndex);
     
-    m_Instances.push_back(instance);
-    m_QuadCount++;
+    m_TexturedInstances.push_back(instance);
+    m_TexturedQuadCount++;
 }
 
 void BatchRenderer2D::drawTexturedQuads(const std::vector<InstanceData>& instances,
                                       const std::vector<std::shared_ptr<Texture2D>>& textures) {
     // 添加新的纹理
     for (const auto& texture : textures) {
+        if (!texture || !texture->isValid()) {
+            TINA_LOG_WARN("Invalid texture in drawTexturedQuads");
+            continue;
+        }
         if (std::find(m_Textures.begin(), m_Textures.end(), texture) == m_Textures.end()) {
+            if (m_Textures.size() >= MAX_TEXTURE_SLOTS) {
+                flushTextureBatch();
+                m_Textures.clear();
+            }
             m_Textures.push_back(texture);
         }
     }
 
     // 添加实例数据
     for (const auto& instance : instances) {
-        if (m_QuadCount >= MAX_QUADS) {
-            flushBatch();
+        if (m_TexturedQuadCount >= MAX_QUADS) {
+            flushTextureBatch();
         }
-        m_Instances.push_back(instance);
-        m_QuadCount++;
+
+        // 只处理有效的纹理索引
+        if (instance.TextureIndex >= 0 && instance.TextureIndex < textures.size()) {
+            m_TexturedInstances.push_back(instance);
+            m_TexturedQuadCount++;
+        }
     }
 }
 
-void BatchRenderer2D::flushBatch() {
-    if (m_QuadCount == 0) {
+void BatchRenderer2D::flushColorBatch() {
+    if (m_ColorQuadCount == 0) {
         return;
     }
 
+    TINA_LOG_DEBUG("Flushing color batch with {} quads", m_ColorQuadCount);
+
     // 更新实例数据
-    const bgfx::Memory* mem = bgfx::copy(m_Instances.data(), 
-        m_QuadCount * sizeof(InstanceData));
-    bgfx::update(m_InstanceBuffer, 0, mem);
+    const bgfx::Memory* mem = bgfx::copy(m_ColorInstances.data(), 
+        m_ColorQuadCount * sizeof(InstanceData));
+    bgfx::update(m_ColorInstanceBuffer, 0, mem);
+
+    // 设置uniform
+    float noTexture[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    bgfx::setUniform(m_UseTexture, noTexture);
 
     // 设置渲染状态
     uint64_t state = 0
         | BGFX_STATE_WRITE_RGB
         | BGFX_STATE_WRITE_A
-        | BGFX_STATE_DEPTH_TEST_LESS
-        | BGFX_STATE_WRITE_Z
+        | BGFX_STATE_DEPTH_TEST_ALWAYS
         | BGFX_STATE_MSAA
-        | BGFX_STATE_BLEND_ALPHA;
+        | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
 
     bgfx::setState(state);
 
-    // 设置纹理
-    if (!m_Textures.empty()) {
-        bgfx::setTexture(0, m_TextureSampler, m_Textures[0]->getNativeHandle());
-        float useTexture[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
-        bgfx::setUniform(m_UseTexture, useTexture);
-    } else {
-        float noTexture[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-        bgfx::setUniform(m_UseTexture, noTexture);
-    }
-
     // 设置缓冲
     bgfx::setVertexBuffer(0, m_VertexBuffer);
-    bgfx::setInstanceDataBuffer(m_InstanceBuffer, 0, m_QuadCount);
+    bgfx::setInstanceDataBuffer(m_ColorInstanceBuffer, 0, m_ColorQuadCount);
     bgfx::setIndexBuffer(m_IndexBuffer);
 
     // 提交渲染
     bgfx::submit(0, m_Shader);
 
     // 重置状态
-    m_Instances.clear();
+    m_ColorInstances.clear();
+    m_ColorQuadCount = 0;
+}
+
+void BatchRenderer2D::flushTextureBatch() {
+    if (m_TexturedQuadCount == 0 || m_Textures.empty()) {
+        return;
+    }
+
+    TINA_LOG_DEBUG("Flushing texture batch with {} quads and {} textures", 
+        m_TexturedQuadCount, m_Textures.size());
+
+    // 更新实例数据
+    const bgfx::Memory* mem = bgfx::copy(m_TexturedInstances.data(), 
+        m_TexturedQuadCount * sizeof(InstanceData));
+    bgfx::update(m_TexturedInstanceBuffer, 0, mem);
+
+    // 设置纹理和uniform
+    for (size_t i = 0; i < m_Textures.size(); ++i) {
+        const auto& texture = m_Textures[i];
+        if (texture && texture->isValid()) {
+            // 设置纹理采样器状态
+            uint32_t samplerFlags = 0
+                | BGFX_SAMPLER_U_CLAMP
+                | BGFX_SAMPLER_V_CLAMP
+                | BGFX_SAMPLER_MIN_POINT
+                | BGFX_SAMPLER_MAG_POINT;
+            
+            // 设置纹理和采样器标志
+            bgfx::setTexture(0, m_TextureSampler, texture->getNativeHandle(), samplerFlags);
+            
+            // 启用纹理并传递纹理索引
+            float useTexture[4] = { 1.0f, static_cast<float>(i), 0.0f, 0.0f };
+            bgfx::setUniform(m_UseTexture, useTexture);
+            
+            TINA_LOG_DEBUG("Setting texture[{}] handle: {}, size: {}x{}, sampler flags: {:#x}, useTexture: [{}, {}, {}, {}]", 
+                i,
+                texture->getNativeHandle().idx,
+                texture->getWidth(),
+                texture->getHeight(),
+                samplerFlags,
+                useTexture[0], useTexture[1], useTexture[2], useTexture[3]);
+                
+            break; // 目前只使用第一个纹理
+        }
+    }
+
+    // 设置渲染状态
+    uint64_t state = 0
+        | BGFX_STATE_WRITE_RGB
+        | BGFX_STATE_WRITE_A
+        | BGFX_STATE_DEPTH_TEST_ALWAYS
+        | BGFX_STATE_MSAA
+        | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+
+    bgfx::setState(state);
+
+    // 设置缓冲
+    bgfx::setVertexBuffer(0, m_VertexBuffer);
+    bgfx::setInstanceDataBuffer(m_TexturedInstanceBuffer, 0, m_TexturedQuadCount);
+    bgfx::setIndexBuffer(m_IndexBuffer);
+
+    // 提交渲染
+    bgfx::submit(0, m_Shader);
+
+    // 重置状态
+    m_TexturedInstances.clear();
     m_Textures.clear();
-    m_QuadCount = 0;
+    m_TexturedQuadCount = 0;
 }
 
 } // namespace Tina 
