@@ -167,6 +167,9 @@ void RenderSystem::render(entt::registry& registry) {
             continue;
         }
 
+        // 获取变换矩阵
+        glm::mat4 transformMatrix = transform.getTransform();
+
         // 检查是否需要开始新的批次
         if (m_CurrentBatch->quadCount >= MAX_QUADS) {
             flushBatch(*m_CurrentBatch);
@@ -174,10 +177,22 @@ void RenderSystem::render(entt::registry& registry) {
             initBatch();
         }
 
-        // 更新顶点数据
+        // 更新顶点数据时应用变换
         size_t vertexOffset = m_CurrentBatch->vertexCount * sizeof(RectangleComponent::Vertex);
-        renderable.updateVertexBuffer(m_VertexBuffer.data() + vertexOffset, 
+        auto* vertices = reinterpret_cast<RectangleComponent::Vertex*>(m_VertexBuffer.data()+vertexOffset);
+
+        // 先获取原始顶点数据
+        renderable.updateVertexBuffer(vertices,
             sizeof(RectangleComponent::Vertex) * 4);
+
+        // 对每个顶点应用变换
+        for (int i = 0; i < 4; i++) {
+            glm::vec4 pos(vertices[i].x, vertices[i].y, vertices[i].z, 1.0f);
+            pos = transformMatrix * pos;
+            vertices[i].x = pos.x;
+            vertices[i].y = pos.y;
+            vertices[i].z = pos.z;
+        }
 
         // 更新索引数据
         size_t indexOffset = m_CurrentBatch->indexCount;
