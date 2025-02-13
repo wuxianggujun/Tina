@@ -1,17 +1,19 @@
 #pragma once
 
 #include "tina/layer/Layer.hpp"
-#include "tina/renderer/Renderer2D.hpp"
+#include "tina/systems/RenderSystem.hpp"
 #include "tina/renderer/ShaderManager.hpp"
 #include "tina/log/Logger.hpp"
 #include <glm/gtc/matrix_transform.hpp>
-
 #include "bx/math.h"
 #include "tina/core/OrthographicCamera.hpp"
 #include "tina/event/Event.hpp"
 #include "tina/renderer/Texture2D.hpp"
 #include <unordered_map>
 #include "tina/utils/BgfxUtils.hpp"
+#include <entt/entt.hpp>
+
+#include "bgfx/platform.h"
 
 namespace Tina
 {
@@ -25,10 +27,38 @@ namespace Tina
 
         ~Render2DLayer()
         {
-            for (auto& [name, texture] : m_textures)
+            // 清理前确保所有实体都被销毁
+            m_registry.clear();
+            m_textures.clear();
+        }
+
+        // 创建矩形
+        entt::entity createRectangle(const glm::vec2& position, const glm::vec2& size, const Color& color)
+        {
+            auto entity = m_registry.create();
+            
+            auto& transform = m_registry.emplace<Transform2DComponent>(entity, position);
+            auto& rectangle = m_registry.emplace<RectangleComponent>(entity, size);
+            rectangle.setColor(color);
+            
+            return entity;
+        }
+
+        // 创建精灵
+        entt::entity createSprite(const glm::vec2& position, const std::string& textureName)
+        {
+            auto entity = m_registry.create();
+            
+            auto& transform = m_registry.emplace<Transform2DComponent>(entity, position);
+            auto& sprite = m_registry.emplace<SpriteComponent>(entity);
+            
+            auto it = m_textures.find(textureName);
+            if (it != m_textures.end())
             {
-                delete texture;
+                sprite.setTexture(it->second);
             }
+            
+            return entity;
         }
 
     private:
@@ -43,16 +73,10 @@ namespace Tina
             TINA_LOG_INFO("Successfully loaded 2D shaders");
         }
 
-        void initRenderer2D()
+        void initRenderer()
         {
-            if (!Renderer2D::isInitialized())
-            {
-                Renderer2D::init(m_shaderProgram);
-                if (!Renderer2D::isInitialized())
-                {
-                    throw std::runtime_error("Failed to initialize Renderer2D");
-                }
-            }
+            m_renderSystem = std::make_unique<RenderSystem>();
+            m_renderSystem->init(m_shaderProgram);
         }
 
         void initCamera()
@@ -82,7 +106,7 @@ namespace Tina
                 result.width, result.height, static_cast<int>(result.format),
                 result.layers, result.depth, result.hasMips);
 
-            auto texture = new Texture2D("test");
+            auto texture = Texture2D::create("test");
             texture->setNativeHandle(result.handle, result.width, result.height, 
                 result.depth, result.hasMips, result.layers, result.format);
 
@@ -92,10 +116,29 @@ namespace Tina
                 TINA_LOG_INFO("Successfully created texture object: test ({}x{})", 
                     texture->getWidth(), texture->getHeight());
             }
-            else
+        }
+
+        void createTestObjects()
+        {
+            // 创建测试矩形
+            createRectangle({100.0f, 100.0f}, {200.0f, 200.0f}, Color::Red);
+            createRectangle({400.0f, 200.0f}, {200.0f, 200.0f}, Color::Blue);
+            createRectangle({700.0f, 300.0f}, {200.0f, 200.0f}, Color::Green);
+            createRectangle({300.0f, 400.0f}, {200.0f, 200.0f}, Color::Orange);
+
+            // 创建测试精灵
+            auto spriteEntity = createSprite({500.0f, 300.0f}, "test");
+            if (auto* sprite = m_registry.try_get<SpriteComponent>(spriteEntity))
             {
-                TINA_LOG_ERROR("Failed to create texture object: test");
-                delete texture;
+                if (sprite->getTexture())
+                {
+                    float scale = 0.25f;
+                    glm::vec2 size = {
+                        static_cast<float>(sprite->getTexture()->getWidth()) * scale,
+                        static_cast<float>(sprite->getTexture()->getHeight()) * scale
+                    };
+                    sprite->setSize(size);
+                }
             }
         }
 
@@ -113,9 +156,10 @@ namespace Tina
             try
             {
                 initShaders();
-                initRenderer2D();
+                initRenderer();
                 initCamera();
                 loadTextures();
+                createTestObjects();
 
                 m_initialized = true;
                 TINA_LOG_INFO("Render2DLayer initialized successfully");
@@ -150,9 +194,6 @@ namespace Tina
                     bgfx::reset(width, height, BGFX_RESET_VSYNC);
                     bgfx::setViewRect(0, 0, 0, uint16_t(width), uint16_t(height));
 
-                    // 设置新的视图变换
-                    bgfx::setViewTransform(0, m_camera->getView(), m_camera->getProjection());
-
                     event.handled = true;
                 }
 
@@ -173,14 +214,13 @@ namespace Tina
                     bgfx::frame();
                 }
 
-                // 先关闭 Renderer2D
-                if (Renderer2D::isInitialized())
+                // 关闭渲染系统
+                if (m_renderSystem)
                 {
-                    TINA_LOG_DEBUG("Shutting down Renderer2D");
-                    Renderer2D::shutdown();
+                    m_renderSystem->shutdown();
                 }
 
-                // 然后销毁着色器程序
+                // 销毁着色器程序
                 if (bgfx::isValid(m_shaderProgram))
                 {
                     TINA_LOG_DEBUG("Destroying shader program");
@@ -194,7 +234,6 @@ namespace Tina
             catch (const std::exception& e)
             {
                 TINA_LOG_ERROR("Error during Render2DLayer shutdown: {}", e.what());
-                // 确保着色器程序被销毁
                 if (bgfx::isValid(m_shaderProgram))
                 {
                     bgfx::destroy(m_shaderProgram);
@@ -210,7 +249,7 @@ namespace Tina
 
         void onRender() override
         {
-            if (!m_initialized || !Renderer2D::isInitialized() || !bgfx::isValid(m_shaderProgram))
+            if (!m_initialized || !m_renderSystem || !bgfx::isValid(m_shaderProgram))
             {
                 return;
             }
@@ -218,37 +257,13 @@ namespace Tina
             try
             {
                 // 开始场景渲染
-                Renderer2D::beginScene(m_camera->getProjectionMatrix());
-
-                // 绘制测试图形
-                Renderer2D::drawRect({100.0f, 100.0f}, {200.0f, 200.0f}, Color::Red);
-                Renderer2D::drawRect({400.0f, 200.0f}, {200.0f, 200.0f}, Color::Blue);
-                Renderer2D::drawRect({700.0f, 300.0f}, {200.0f, 200.0f}, Color::Green);
-                Renderer2D::drawRect({300.0f, 400.0f}, {200.0f, 200.0f}, Color::Orange);
-
-                // 绘制纹理
-                auto it = m_textures.find("test");
-                if (it != m_textures.end() && it->second->isValid())
-                {
-                    float scale = 0.25f;  // 缩小缩放因子
-                    float width = static_cast<float>(it->second->getWidth()) * scale;
-                    float height = static_cast<float>(it->second->getHeight()) * scale;
-                    
-                    TINA_LOG_DEBUG("Drawing texture: {}x{} at position (500, 300)", width, height);
-                    
-                    Renderer2D::drawTexturedRect(
-                        {500.0f, 300.0f},    // 位置
-                        {width, height},      // 使用实际纹理尺寸（经过缩放）
-                        it->second->getNativeHandle(),
-                        Color::White
-                    );
-                }
-                else
-                {
-                    TINA_LOG_WARN("Test texture not found or invalid");
-                }
-
-                Renderer2D::endScene();
+                m_renderSystem->beginScene(*m_camera);
+                
+                // 渲染所有实体
+                m_renderSystem->render(m_registry);
+                
+                // 结束场景渲染
+                m_renderSystem->endScene();
             }
             catch (const std::exception& e)
             {
@@ -259,7 +274,11 @@ namespace Tina
     private:
         std::unique_ptr<OrthographicCamera> m_camera;
         bgfx::ProgramHandle m_shaderProgram = BGFX_INVALID_HANDLE;
-        std::unordered_map<std::string, Texture2D*> m_textures;
+        std::unordered_map<std::string, std::shared_ptr<Texture2D>> m_textures;
         bool m_initialized = false;
+        
+        // 新增的ECS相关成员
+        entt::registry m_registry;
+        std::unique_ptr<RenderSystem> m_renderSystem;
     };
 } // namespace Tina

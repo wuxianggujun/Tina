@@ -2,17 +2,21 @@ $input v_color0, v_texcoord0
 
 #include <bgfx_shader.sh>
 
+// 纹理采样器
 SAMPLER2D(s_texColor, 0);
-uniform vec4 u_useTexture;  // 使用 x 分量作为标志，1.0表示使用纹理，0.0表示不使用
+
+// 是否使用纹理的标志
+uniform vec4 u_useTexture;
 
 void main()
 {
+    vec4 color = v_color0;
+    
+    // 如果使用纹理,则采样纹理并与顶点颜色混合
     if (u_useTexture.x > 0.5) {
-        // 有纹理时，混合纹理颜色和顶点颜色
         vec4 texColor = texture2D(s_texColor, v_texcoord0);
-        gl_FragColor = texColor * v_color0;
-    } else {
-        // 无纹理时，直接使用顶点颜色
-        gl_FragColor = v_color0;
+        color *= texColor;
     }
+    
+    gl_FragColor = color;
 }

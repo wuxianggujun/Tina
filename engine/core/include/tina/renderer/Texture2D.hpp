@@ -5,7 +5,7 @@
 #pragma once
 
 #include <string>
-
+#include <memory>
 #include "bgfx/bgfx.h"
 
 namespace Tina
@@ -84,15 +84,17 @@ namespace Tina
         MirroredRepeat,
     };
 
-    class Texture2D
+    class Texture2D : public std::enable_shared_from_this<Texture2D>
     {
     public:
-        explicit Texture2D(std::string name);
+        static std::shared_ptr<Texture2D> create(const std::string& name) {
+            return std::shared_ptr<Texture2D>(new Texture2D(name));
+        }
+
         ~Texture2D();
 
         Texture2D(const Texture2D& texture) = delete;
         Texture2D& operator=(const Texture2D& texture) = delete;
-
 
         void create(uint16_t width, uint16_t height, uint16_t layers, Format format,
                     Wrapping wrapping, Filter filter, const bgfx::Memory* memory) noexcept;
@@ -131,6 +133,9 @@ namespace Tina
         [[nodiscard]] bool isValid() const { return bgfx::isValid(handle); }
 
     protected:
+        explicit Texture2D(std::string name);
+
+    private:
         std::string name;
         bgfx::TextureHandle handle;
         bgfx::TextureInfo info;

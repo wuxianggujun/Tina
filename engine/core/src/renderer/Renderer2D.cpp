@@ -21,7 +21,7 @@ namespace Tina
                 .begin()
                 .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
                 .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
-                .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true, true)  // normalized = true, asInt = true
+                .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true, false)  // RGBA format, normalized
                 .end();
 
             if (!layout.getStride())
@@ -214,8 +214,13 @@ namespace Tina
     {
         if (!s_Data.isInitialized)
         {
-            TINA_LOG_ERROR("Renderer2D not initialized");
             return;
+        }
+
+        // 如果当前有纹理状态,需要先flush
+        if (bgfx::isValid(s_Data.currentTexture))
+        {
+            flush();
         }
 
         if (s_Data.quadCount >= s_Data.MaxQuads)
@@ -230,8 +235,7 @@ namespace Tina
         float z = 0.0f;
 
         uint32_t packedColor = static_cast<uint32_t>(color);
-        TINA_LOG_DEBUG("Color components: R={}, G={}, B={}, A={}, Packed=0x{:08x}",
-                      color.getR(), color.getG(), color.getB(), color.getA(), packedColor);
+        TINA_LOG_DEBUG("Packed color: 0x{:08x}", packedColor);
 
         // 添加四个顶点，按照逆时针顺序
         s_Data.vertexBufferPtr->x = x;
@@ -266,25 +270,15 @@ namespace Tina
         s_Data.vertexBufferPtr->color = packedColor;
         s_Data.vertexBufferPtr++;
 
-        // 设置不使用纹理的标志
-        float noTexture[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-        bgfx::setUniform(s_Data.u_useTexture, noTexture);
-
         s_Data.quadCount++;
     }
 
-    void Renderer2D::drawTexturedRect(const glm::vec2& position, const glm::vec2& size, bgfx::TextureHandle texture,
-        const Color& color)
+    void Renderer2D::drawTexturedRect(const glm::vec2& position, const glm::vec2& size, bgfx::TextureHandle texture, const Color& color)
     {
         if (!s_Data.isInitialized)
         {
             TINA_LOG_ERROR("Renderer2D not initialized");
             return;
-        }
-
-        if (s_Data.quadCount >= s_Data.MaxQuads)
-        {
-            flush();
         }
 
         if (!bgfx::isValid(texture))
@@ -293,6 +287,16 @@ namespace Tina
             return;
         }
 
+        // 如果当前batch不为空或纹理改变,需要先flush
+        if (s_Data.quadCount > 0)
+        {
+            flush();
+        }
+
+        // 设置当前纹理
+        s_Data.currentTexture = texture;
+        TINA_LOG_DEBUG("Setting texture handle: {} for drawing", texture.idx);
+
         float x = position.x;
         float y = position.y;
         float width = size.x;
@@ -300,6 +304,7 @@ namespace Tina
         float z = 0.0f;
 
         uint32_t packedColor = static_cast<uint32_t>(color);
+        TINA_LOG_DEBUG("Packed color for texture: 0x{:08x}", packedColor);
 
         // 添加四个顶点，按照逆时针顺序
         s_Data.vertexBufferPtr->x = x;
@@ -334,16 +339,9 @@ namespace Tina
         s_Data.vertexBufferPtr->color = packedColor;
         s_Data.vertexBufferPtr++;
 
-        // 设置使用纹理的标志
-        float useTexture[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
-        bgfx::setUniform(s_Data.u_useTexture, useTexture);
-        
-        // 设置纹理
-        bgfx::setTexture(0, s_Data.s_texColor, texture);
-
         s_Data.quadCount++;
-
-        // 立即刷新以确保纹理正确渲染
+        
+        // 立即提交纹理绘制
         flush();
     }
 
@@ -376,9 +374,24 @@ namespace Tina
                     | BGFX_STATE_DEPTH_TEST_LESS
                     | BGFX_STATE_WRITE_Z
                     | BGFX_STATE_MSAA
-                    | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+                    | BGFX_STATE_BLEND_ALPHA;  // 使用预定义的alpha混合模式
 
                 bgfx::setState(state);
+
+                // 设置纹理状态
+                if (bgfx::isValid(s_Data.currentTexture))
+                {
+                    TINA_LOG_DEBUG("Setting texture state: enabled with handle: {}", s_Data.currentTexture.idx);
+                    bgfx::setTexture(0, s_Data.s_texColor, s_Data.currentTexture);
+                    float useTexture[4] = { 1.0f, 0.0f, 0.0f, 0.0f };
+                    bgfx::setUniform(s_Data.u_useTexture, useTexture);
+                }
+                else
+                {
+                    TINA_LOG_DEBUG("Setting texture state: disabled (solid color rendering)");
+                    float noTexture[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                    bgfx::setUniform(s_Data.u_useTexture, noTexture);
+                }
 
                 // 设置缓冲
                 bgfx::setVertexBuffer(0, s_Data.vertexBuffer, 0, vertexCount);
@@ -387,7 +400,9 @@ namespace Tina
                 // 提交渲染
                 bgfx::submit(0, s_Data.shader);
 
-                TINA_LOG_DEBUG("Submitted render with {} quads", s_Data.quadCount);
+                TINA_LOG_DEBUG("Submitted render with {} quads (texture: {})", 
+                    s_Data.quadCount, 
+                    bgfx::isValid(s_Data.currentTexture) ? "yes" : "no");
             }
         }
         catch (const std::exception& e)
@@ -398,5 +413,6 @@ namespace Tina
         // 重置状态
         s_Data.quadCount = 0;
         s_Data.vertexBufferPtr = s_Data.vertexBufferBase;
+        s_Data.currentTexture = BGFX_INVALID_HANDLE;
     }
 }

@@ -8,6 +8,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <bx/math.h>
 #include <bgfx/bgfx.h>
+#include <glm/gtc/type_ptr.hpp>
 
 
 namespace Tina
