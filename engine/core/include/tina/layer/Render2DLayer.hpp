@@ -61,6 +61,28 @@ namespace Tina
             return entity;
         }
 
+        void createRandomRectangles(int count)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                float x = static_cast<float>(rand() % 800);
+                float y = static_cast<float>(rand() % 600);
+
+                float width = 50.0f + static_cast<float>(rand() % 150);
+                float height = 50.0f + static_cast<float>(rand() % 150);
+
+                // 生成0-1范围的归一化颜色值
+                Color randomColor(
+                    static_cast<float>(rand()) / RAND_MAX,  // r
+                    static_cast<float>(rand()) / RAND_MAX,  // g
+                    static_cast<float>(rand()) / RAND_MAX,  // b
+                    1.0f                                    // a
+                );
+
+                createRectangle({x, y}, {width, height}, randomColor);
+            }
+        }
+
     private:
         void initShaders()
         {
@@ -120,11 +142,13 @@ namespace Tina
 
         void createTestObjects()
         {
-            // 创建测试矩形
-            createRectangle({100.0f, 100.0f}, {200.0f, 200.0f}, Color::Red);
-            createRectangle({400.0f, 200.0f}, {200.0f, 200.0f}, Color::Blue);
-            createRectangle({700.0f, 300.0f}, {200.0f, 200.0f}, Color::Green);
-            createRectangle({300.0f, 400.0f}, {200.0f, 200.0f}, Color::Orange);
+            // // 创建测试矩形
+            // createRectangle({100.0f, 100.0f}, {200.0f, 200.0f}, Color::Red);
+            // createRectangle({400.0f, 200.0f}, {200.0f, 200.0f}, Color::Blue);
+            // createRectangle({700.0f, 300.0f}, {200.0f, 200.0f}, Color::Green);
+            // createRectangle({300.0f, 400.0f}, {200.0f, 200.0f}, Color::Orange);
+
+            createRandomRectangles(100);
 
             // 创建测试精灵
             auto spriteEntity = createSprite({500.0f, 300.0f}, "test");
