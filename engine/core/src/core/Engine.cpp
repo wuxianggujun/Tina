@@ -9,7 +9,6 @@
 #include "tina/log/Logger.hpp"
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
-#include "tina/renderer/Renderer2D.hpp"
 #ifdef _WIN32
 #include <windows.h>
 #endif
