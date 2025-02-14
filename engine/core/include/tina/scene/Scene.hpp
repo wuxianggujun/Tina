@@ -58,8 +58,8 @@ namespace Tina
         [[nodiscard]] const std::string& getName() const { return m_name; }
         void setName(const std::string& name) { m_name = name; }
 
-        void pushLayer(Layer* layer) { m_layerStack.pushLayer(layer); }
-        void pushOverlay(Layer* overlay) { m_layerStack.pushOverlay(overlay); }
+        void pushLayer(Layer* layer);
+        void pushOverlay(Layer* overlay);
         void popLayer(Layer* layer) { m_layerStack.popLayer(layer); }
         void popOverlay(Layer* overlay) { m_layerStack.popOverlay(overlay); }
 

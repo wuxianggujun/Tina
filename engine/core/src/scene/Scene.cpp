@@ -121,4 +121,18 @@ namespace Tina
             }
         }
     }
+
+    void Scene::pushLayer(Layer* layer)
+    {
+        layer->setScene(this);
+        m_layerStack.pushLayer(layer);
+        layer->onAttach();
+    }
+
+    void Scene::pushOverlay(Layer* overlay)
+    {
+        overlay->setScene(this);
+        m_layerStack.pushOverlay(overlay);
+        overlay->onAttach();
+    }
 } // namespace Tina

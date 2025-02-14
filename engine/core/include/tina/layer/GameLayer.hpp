@@ -46,6 +46,33 @@ namespace Tina
             return sprite;
         }
 
+        // 在GameLayer中管理精灵
+        void setSpritePriority(const std::string& name, int layer) {
+            auto view = m_scene.getRegistry().view<SpriteComponent>();
+            for (auto entity : view) {
+                if (m_scene.getEntityName(entity) == name) {
+                    auto& sprite = view.get<SpriteComponent>(entity);
+                    sprite.setLayer(layer);
+                    break;
+                }
+            }
+        }
+
+        // 动态改变渲染顺序
+        void bringToFront(const std::string& name) {
+            auto view = m_scene.getRegistry().view<SpriteComponent>();
+            int maxLayer = 0;
+
+            // 找到当前最高层
+            for (auto entity : view) {
+                auto& sprite = view.get<SpriteComponent>(entity);
+                maxLayer = std::max(maxLayer, sprite.getLayer());
+            }
+
+            // 将指定精灵移到最上层
+            setSpritePriority(name, maxLayer + 1);
+        }
+
     protected:
         Scene& m_scene;
         Render2DLayer* m_render2DLayer = nullptr;

@@ -1,15 +1,17 @@
 #pragma once
 
 #include <string>
+#include "tina/core/Core.hpp"
 
 namespace Tina
 {
+    class Scene;
     class Event;
 
-    class Layer
+    class TINA_CORE_API Layer
     {
     public:
-        explicit Layer(const std::string& name = "Layer");
+        explicit Layer(std::string  name = "Layer");
         virtual ~Layer() = default;
 
         virtual void onAttach()
@@ -31,10 +33,13 @@ namespace Tina
         {
         } // 事件处理
 
-        [[nodiscard]] const std::string& getName() const { return m_Name; }
+        [[nodiscard]] const std::string& getName() const { return m_debugName; }
+        
+        void setScene(Scene* scene) { m_scene = scene; }
+        Scene* getScene() const { return m_scene; }
 
     protected:
-        std::string m_Name;
-        bool m_Enabled = true;
+        std::string m_debugName;
+        Scene* m_scene = nullptr;
     };
 } // namespace Tina
