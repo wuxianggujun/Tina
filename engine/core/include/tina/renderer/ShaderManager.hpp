@@ -27,8 +27,11 @@ public:
     // 销毁着色器程序
     void destroyProgram(bgfx::ProgramHandle handle);
 
+    // 检查是否已经关闭
+    bool isShutdown() const { return m_isShutdown; }
+
 private:
-    ShaderManager() = default;
+    ShaderManager() : m_isShutdown(false) {}
     ~ShaderManager() = default;
     ShaderManager(const ShaderManager&) = delete;
     ShaderManager& operator=(const ShaderManager&) = delete;
@@ -36,8 +39,19 @@ private:
     // 从文件加载着色器二进制数据
     std::vector<uint8_t> loadShaderBinary(const std::string& filename);
 
+    // 检查资源是否有效
+    bool isResourceValid() const { return !m_isShutdown; }
+
+    // 存储program和其关联的shaders
+    struct ShaderPair {
+        bgfx::ShaderHandle vertex;
+        bgfx::ShaderHandle fragment;
+    };
+
     std::unordered_map<std::string, bgfx::ShaderHandle> m_shaderCache;
     std::unordered_map<std::string, bgfx::ProgramHandle> m_programCache;
+    std::unordered_map<std::string, ShaderPair> m_programShaders;
+    bool m_isShutdown;
 };
 
 } // namespace Tina

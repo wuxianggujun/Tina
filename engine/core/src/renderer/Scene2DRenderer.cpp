@@ -13,15 +13,21 @@ namespace Tina
         if (!scene)
             return;
 
-        auto& registry = scene->getRegistry();
         std::vector<std::pair<int, entt::entity>> sortedEntities;
+        sortedEntities.clear();
 
         // 收集并排序所有要渲染的实体
         sortRenderables(scene, sortedEntities);
 
-        // 渲染排序后的实体
+        // 渲染排序后的实体，只渲染一次
         for (const auto& [layer, entity] : sortedEntities)
         {
+            auto& registry = scene->getRegistry();
+            if (!registry.valid(entity)) continue;
+
+            auto& sprite = registry.get<SpriteComponent>(entity);
+            if (!sprite.isVisible()) continue;
+
             renderEntity(registry, entity, renderer);
         }
     }
@@ -50,18 +56,28 @@ namespace Tina
         auto& transform = registry.get<Transform2DComponent>(entity);
         auto& sprite = registry.get<SpriteComponent>(entity);
 
-        // 设置Transform组件
-        sprite.setTransform(&transform);
-        sprite.updateRenderData();
+        // 只在必要时更新
+        static glm::vec2 lastPos;
+        static glm::vec2 lastSize;
+
+        glm::vec2 currentPos = transform.getPosition();
+        glm::vec2 currentSize = sprite.getSize() * transform.getScale();
+
+        if (currentPos != lastPos || currentSize != lastSize)
+        {
+            sprite.setTransform(&transform);
+            sprite.updateRenderData();
+            lastPos = currentPos;
+            lastSize = currentSize;
+        }
 
         if (sprite.getTexture() && sprite.getTexture()->isValid())
         {
-            renderer.drawSprite(transform.getPosition(), sprite.getSize() * transform.getScale(),
-                                sprite.getTexture(), sprite.getTextureRect(), sprite.getColor());
-        }
-        else
-        {
-            renderer.drawQuad(transform.getPosition(), sprite.getSize() * transform.getScale(), sprite.getColor());
+            renderer.drawSprite(transform.getPosition(),
+                                sprite.getSize() * transform.getScale(),
+                                sprite.getTexture(),
+                                sprite.getTextureRect(),
+                                sprite.getColor());
         }
     }
 } // Tina

@@ -26,6 +26,7 @@ namespace Tina
             std::string sceneName = m_name;
             TINA_LOG_INFO("Destroying scene: {}", sceneName);
 
+            // 1. 先清理LayerStack
             m_layerStack.clear();
 
             // 只在真正需要时执行渲染同步
@@ -42,10 +43,6 @@ namespace Tina
         catch (const std::exception& e)
         {
             TINA_LOG_ERROR("Error in scene destructor: {}", e.what());
-        }
-        catch (...)
-        {
-            TINA_LOG_ERROR("Unknown error in scene destructor");
         }
     }
 

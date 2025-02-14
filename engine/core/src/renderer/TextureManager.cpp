@@ -78,13 +78,13 @@ namespace Tina
         m_textures.clear();
     }
 
-    TextureManager::~TextureManager()
+    void TextureManager::shutdown()
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        // 在销毁纹理之前检查BGFX Context
         if (bgfx::getInternalData() && bgfx::getInternalData()->context)
         {
-            m_textures.clear(); // 这会触发Texture2D的析构函数
+            m_textures.clear();
         }
+        TINA_LOG_INFO("TextureManager shutdown completed");
     }
 } // Tina

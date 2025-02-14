@@ -111,35 +111,98 @@ bgfx::ProgramHandle ShaderManager::createProgram(const std::string& name) {
     const bgfx::ShaderHandle vsh = loadShader(name, "vs");
     const bgfx::ShaderHandle fsh = loadShader(name, "fs");
 
-    // 创建着色器程序
-    bgfx::ProgramHandle program = bgfx::createProgram(vsh, fsh, true);
+    // 创建着色器程序 - 不自动销毁shaders
+    bgfx::ProgramHandle program = bgfx::createProgram(vsh, fsh, false);
     if (!bgfx::isValid(program)) {
+        // 如果创建失败,手动清理shaders
+        if (bgfx::isValid(vsh)) bgfx::destroy(vsh);
+        if (bgfx::isValid(fsh)) bgfx::destroy(fsh);
         throw std::runtime_error("Failed to create shader program: " + name);
     }
 
+    // 缓存程序
+    m_programCache[name] = program;
+    
+    // 缓存着色器和程序的关系
+    m_programShaders[name] = {vsh, fsh};
+    
     return program;
 }
 
 void ShaderManager::destroyProgram(bgfx::ProgramHandle handle) {
-    if (bgfx::isValid(handle)) {
-        bgfx::destroy(handle);
+    if (!bgfx::isValid(handle)) {
+        return;
+    }
+
+    // 从缓存中移除
+    for (auto it = m_programCache.begin(); it != m_programCache.end(); ++it) {
+        if (it->second.idx == handle.idx) {
+            std::string name = it->first;  // 复制name而不是引用,因为我们要erase迭代器
+            TINA_LOG_DEBUG("Destroying shader program: {}", name);
+            
+            // 销毁关联的shaders
+            auto shaderIt = m_programShaders.find(name);
+            if (shaderIt != m_programShaders.end()) {
+                const auto& shaders = shaderIt->second;
+                
+                // 从shader缓存中移除
+                std::string vsKey = name + "_vs";
+                std::string fsKey = name + "_fs";
+                
+                if (bgfx::isValid(shaders.vertex)) {
+                    TINA_LOG_DEBUG("Destroying vertex shader for program: {}", name);
+                    bgfx::destroy(shaders.vertex);
+                    m_shaderCache.erase(vsKey);
+                }
+                
+                if (bgfx::isValid(shaders.fragment)) {
+                    TINA_LOG_DEBUG("Destroying fragment shader for program: {}", name);
+                    bgfx::destroy(shaders.fragment);
+                    m_shaderCache.erase(fsKey);
+                }
+                
+                m_programShaders.erase(shaderIt);
+            }
+            
+            // 最后销毁program
+            bgfx::destroy(handle);
+            m_programCache.erase(it);
+            return;
+        }
     }
 }
 
 void ShaderManager::shutdown() {
     TINA_PROFILE_FUNCTION();
     
-    // 销毁所有着色器程序
+    if (m_isShutdown) {
+        TINA_LOG_WARN("ShaderManager already shut down");
+        return;
+    }
+    
+    // 销毁所有着色器程序和其关联的shaders
+    TINA_LOG_DEBUG("Destroying shader programs and associated shaders");
+    
+    // 使用一个临时vector存储所有需要销毁的programs
+    std::vector<bgfx::ProgramHandle> programsToDestroy;
     for (const auto& pair : m_programCache) {
-        bgfx::destroy(pair.second);
+        if (bgfx::isValid(pair.second)) {
+            programsToDestroy.push_back(pair.second);
+        }
     }
+    
+    // 使用destroyProgram销毁每个program及其关联的shaders
+    for (const auto& program : programsToDestroy) {
+        destroyProgram(program);
+    }
+    
+    // 确保所有缓存都被清理
     m_programCache.clear();
-
-    // 销毁所有着色器
-    for (const auto& pair : m_shaderCache) {
-        bgfx::destroy(pair.second);
-    }
+    m_programShaders.clear();
     m_shaderCache.clear();
+    
+    m_isShutdown = true;
+    TINA_LOG_DEBUG("ShaderManager shutdown completed");
 }
 
 } // namespace Tina

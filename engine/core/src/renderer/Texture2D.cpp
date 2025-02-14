@@ -82,7 +82,13 @@ namespace Tina
     Texture2D::~Texture2D()
     {
         TINA_PROFILE_FUNCTION();
-        destroy();
+        try {
+            destroy();
+            TINA_LOG_DEBUG("Texture2D destroyed: {}", name);
+        }
+        catch (const std::exception& e) {
+            TINA_LOG_ERROR("Error in Texture2D destructor: {}", e.what());
+        }
     }
 
     void Texture2D::create(uint16_t width, uint16_t height, uint16_t layers, Format format,
@@ -224,9 +230,20 @@ namespace Tina
 
     void Texture2D::destroy() {
         TINA_PROFILE_FUNCTION();
-        
-        if (bgfx::isValid(handle)) {
-            bgfx::destroy(handle);
+
+        if (bgfx::isValid(handle))
+        {
+            // 只在BGFX Context有效时销毁
+            if (bgfx::getInternalData() && bgfx::getInternalData()->context)
+            {
+                try {
+                    bgfx::destroy(handle);
+                    TINA_LOG_DEBUG("Destroyed texture handle for: {}", name);
+                }
+                catch (const std::exception& e) {
+                    TINA_LOG_ERROR("Error destroying texture handle: {}", e.what());
+                }
+            }
             handle = BGFX_INVALID_HANDLE;
         }
     }

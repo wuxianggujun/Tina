@@ -11,6 +11,8 @@
 #include <memory>
 #include <mutex>
 
+#include "tina/log/Logger.hpp"
+
 namespace Tina
 {
     class TINA_CORE_API TextureManager
@@ -34,9 +36,15 @@ namespace Tina
         // 清理所有纹理
         void clear();
 
+        void shutdown();
+
     private:
         TextureManager() = default;
-        ~TextureManager();
+        ~TextureManager()
+        {
+            // 析构函数中不再进行资源清理
+            TINA_LOG_DEBUG("TextureManager destroyed");
+        }
 
         std::unordered_map<std::string, SharedPtr<Texture2D>> m_textures;
         mutable std::mutex m_mutex;  // 用于线程同步

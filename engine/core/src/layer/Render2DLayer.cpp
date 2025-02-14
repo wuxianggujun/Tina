@@ -64,24 +64,24 @@ namespace Tina
                 m_renderer->shutdown();
             }
 
-            if (bgfx::getInternalData() && bgfx::getInternalData()->context)
+            // 使用ShaderManager销毁shader program
+            if (bgfx::isValid(m_shaderProgram))
             {
-                if (bgfx::isValid(m_shaderProgram))
-                {
-                    TINA_LOG_DEBUG("Destroying shader program");
-                    bgfx::destroy(m_shaderProgram);
-                    m_shaderProgram = BGFX_INVALID_HANDLE;
-                }
+                TINA_LOG_DEBUG("Destroying shader program");
+                ShaderManager::getInstance().destroyProgram(m_shaderProgram);
+                m_shaderProgram = BGFX_INVALID_HANDLE;
             }
+
             m_initialized = false;
             TINA_LOG_INFO("Render2DLayer shutdown completed");
         }
         catch (const std::exception& e)
         {
             TINA_LOG_ERROR("Error during Render2DLayer shutdown: {}", e.what());
+            // 即使发生错误也要尝试清理shader
             if (bgfx::isValid(m_shaderProgram))
             {
-                bgfx::destroy(m_shaderProgram);
+                ShaderManager::getInstance().destroyProgram(m_shaderProgram);
                 m_shaderProgram = BGFX_INVALID_HANDLE;
             }
         }
@@ -99,8 +99,12 @@ namespace Tina
     {
         if (!m_initialized || !m_renderer) return;
 
+        static bool rendering = false;
+        if (rendering) return; // 防止重入
+
         try
         {
+            rendering = true;
             m_renderer->beginScene(m_camera);
 
             // 渲染场景中的实体
@@ -114,6 +118,7 @@ namespace Tina
         {
             TINA_LOG_ERROR("Error during 2D rendering: {}", e.what());
         }
+        rendering = false;
     }
 
     void Render2DLayer::onEvent(Event& event)
@@ -182,12 +187,22 @@ namespace Tina
 
     void Render2DLayer::initShaders()
     {
-        m_shaderProgram = ShaderManager::getInstance().createProgram("2d");
-        if (!bgfx::isValid(m_shaderProgram))
-        {
-            throw std::runtime_error("Failed to create 2D shader program");
+        try {
+            m_shaderProgram = ShaderManager::getInstance().createProgram("2d");
+            if (!bgfx::isValid(m_shaderProgram))
+            {
+                throw std::runtime_error("Failed to create 2D shader program");
+            }
+            TINA_LOG_INFO("Successfully loaded 2D shaders");
+        } catch (const std::exception& e) {
+            TINA_LOG_ERROR("Failed to initialize shaders: {}", e.what());
+            if (bgfx::isValid(m_shaderProgram))
+            {
+                ShaderManager::getInstance().destroyProgram(m_shaderProgram);
+                m_shaderProgram = BGFX_INVALID_HANDLE;
+            }
+            throw;
         }
-        TINA_LOG_INFO("Successfully loaded 2D shaders");
     }
 
     void Render2DLayer::initRenderer()

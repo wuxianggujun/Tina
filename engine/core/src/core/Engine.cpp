@@ -13,6 +13,9 @@
 #include <windows.h>
 #endif
 #include "tina/core/Timer.hpp"
+#include "tina/renderer/RenderCommand.hpp"
+#include "tina/renderer/ShaderManager.hpp"
+#include "tina/renderer/TextureManager.hpp"
 
 namespace Tina::Core
 {
@@ -118,7 +121,7 @@ namespace Tina::Core
         try
         {
             bool running = true;
-            Timer timer(true);  // 单个Timer实例
+            Timer timer(true); // 单个Timer实例
             const float targetFrameTime = 1.0f / 60.0f; // 60 FPS
 
             while (running && !m_isShutdown)
@@ -212,45 +215,37 @@ namespace Tina::Core
 
     void Engine::shutdown()
     {
-        if (m_isShutdown)
-        {
-            TINA_LOG_WARN("Engine already shut down");
-            return;
-        }
-        try
-        {
-            TINA_LOG_INFO("Engine shutting down");
-            m_isShutdown = true;
+        TINA_LOG_INFO("Engine shutting down");
 
-            // 1. 首先禁用 VSync
-            if (bgfx::getInternalData() && bgfx::getInternalData()->context)
-            {
-                bgfx::setViewMode(0, bgfx::ViewMode::Sequential);
-                uint32_t reset = BGFX_RESET_NONE;
-                bgfx::reset(m_windowWidth, m_windowHeight, reset);
-            }
-
-            if (m_activeScene)
-            {
-                TINA_LOG_DEBUG("Destroying active scene");
-                m_activeScene.reset();
-                TINA_LOG_DEBUG("Active scene destroyed");
-            }
-
-            if (bgfx::getInternalData() && bgfx::getInternalData()->context)
-            {
-                TINA_LOG_DEBUG("Finalizing render commands");
-                bgfx::frame(false); // 不等待 VSync
-                TINA_LOG_DEBUG("Shutting down BGFX");
-                bgfx::shutdown();
-            }
-            TINA_LOG_INFO("Engine shutdown completed");
-        }
-        catch (const std::exception& e)
+        // 1. 先关闭场景
+        if (m_activeScene)
         {
-            TINA_LOG_ERROR("Error during shutdown: {}", e.what());
-            m_isShutdown = true;
+            TINA_LOG_DEBUG("Destroying active scene");
+            m_activeScene.reset();
+            TINA_LOG_DEBUG("Active scene destroyed");
         }
+
+        // 2. 完成所有渲染命令
+        TINA_LOG_DEBUG("Finalizing render commands");
+        RenderCommandQueue::getInstance().executeAll();
+
+        // 3. 提交一帧确保所有渲染完成
+        TINA_LOG_DEBUG("Submitting final frame");
+        bgfx::frame();
+
+        // 4. 关闭资源管理器
+        TINA_LOG_DEBUG("Shutting down resource managers");
+        TextureManager::getInstance().shutdown();
+        ShaderManager::getInstance().shutdown();
+
+        // 5. 关闭BGFX
+        TINA_LOG_DEBUG("Shutting down BGFX");
+        if (bgfx::getInternalData() && bgfx::getInternalData()->context)
+        {
+            bgfx::shutdown();
+        }
+
+        TINA_LOG_INFO("Engine shutdown completed");
     }
 
     const char* Engine::getVersion() const
