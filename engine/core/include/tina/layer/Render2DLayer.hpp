@@ -4,6 +4,7 @@
 #include "tina/renderer/BatchRenderer2D.hpp"
 #include "tina/renderer/ShaderManager.hpp"
 #include "tina/log/Logger.hpp"
+#include "tina/core/Engine.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include "bx/math.h"
 #include "tina/core/OrthographicCamera.hpp"

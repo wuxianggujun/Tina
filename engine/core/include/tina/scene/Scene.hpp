@@ -25,6 +25,27 @@ namespace Tina
         // 设置实体名称
         void setEntityName(entt::entity entity, const std::string& name);
 
+        // Component management
+        template<typename T, typename... Args>
+        T& addComponent(entt::entity entity, Args&&... args) {
+            return m_registry.emplace<T>(entity, std::forward<Args>(args)...);
+        }
+
+        template<typename T>
+        T& getComponent(entt::entity entity) {
+            return m_registry.get<T>(entity);
+        }
+
+        template<typename T>
+        bool hasComponent(entt::entity entity) {
+            return m_registry.all_of<T>(entity);
+        }
+
+        template<typename T>
+        void removeComponent(entt::entity entity) {
+            m_registry.remove<T>(entity);
+        }
+
         // Scene lifecycle
         void onUpdate(float deltaTime);
         void onRender();
@@ -41,6 +62,10 @@ namespace Tina
         void pushOverlay(Layer* overlay) { m_layerStack.pushOverlay(overlay); }
         void popLayer(Layer* layer) { m_layerStack.popLayer(layer); }
         void popOverlay(Layer* overlay) { m_layerStack.popOverlay(overlay); }
+
+        // Layer access
+        const LayerStack& getLayerStack() const { return m_layerStack; }
+        LayerStack& getLayerStack() { return m_layerStack; }
 
     private:
         // 成员变量按照销毁顺序排列（从下到上销毁）
