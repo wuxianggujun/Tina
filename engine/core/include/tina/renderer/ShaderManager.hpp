@@ -43,14 +43,13 @@ private:
     bool isResourceValid() const { return !m_isShutdown; }
 
     // 存储program和其关联的shaders
-    struct ShaderPair {
-        bgfx::ShaderHandle vertex;
-        bgfx::ShaderHandle fragment;
+    struct ProgramResources {
+        bgfx::ProgramHandle program;
+        bgfx::ShaderHandle vertexShader;
+        bgfx::ShaderHandle fragmentShader;
     };
 
-    std::unordered_map<std::string, bgfx::ShaderHandle> m_shaderCache;
-    std::unordered_map<std::string, bgfx::ProgramHandle> m_programCache;
-    std::unordered_map<std::string, ShaderPair> m_programShaders;
+    std::unordered_map<std::string, ProgramResources> m_programs;
     bool m_isShutdown;
 };
 
