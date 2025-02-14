@@ -190,51 +190,6 @@ namespace Tina
                 m_rectangles.clear();
                 m_texturedRectangles.clear();
                 m_textures.clear();
-                
-                // 加载测试纹理
-                auto texture = loadTexture("test", "resources/textures/test.png");
-                if (texture && texture->isValid())
-                {
-                    TINA_LOG_INFO("Successfully loaded test texture");
-                    
-                    // 创建一个居中的纹理矩形
-                    uint32_t windowWidth, windowHeight;
-                    Core::Engine::get().getWindowSize(windowWidth, windowHeight);
-                    
-                    float textureWidth = static_cast<float>(texture->getWidth());
-                    float textureHeight = static_cast<float>(texture->getHeight());
-                    
-                    // 计算居中位置
-                    glm::vec2 position(
-                        (windowWidth - textureWidth) * 0.5f,
-                        (windowHeight - textureHeight) * 0.5f
-                    );
-                    
-                    // 创建纹理矩形
-                    createTexturedRectangle(
-                        position,                           // 居中位置
-                        {textureWidth, textureHeight},     // 使用纹理原始大小
-                        "test",                            // 纹理名称
-                        {0.0f, 0.0f, 1.0f, 1.0f},         // 使用完整纹理
-                        Color(1.0f, 1.0f, 1.0f, 1.0f)     // 白色，不调整颜色
-                    );
-                    
-                    // 创建第二个纹理矩形，展示UV坐标和颜色调整
-                    createTexturedRectangle(
-                        {50.0f, 50.0f},                   // 左上角位置
-                        {100.0f, 100.0f},                 // 自定义大小
-                        "test",                           // 使用同一个纹理
-                        {0.0f, 0.0f, 0.5f, 0.5f},        // 只使用纹理的左上角部分
-                        Color(1.0f, 0.8f, 0.8f, 0.8f)    // 带透明度的淡红色
-                    );
-                }
-                else
-                {
-                    TINA_LOG_ERROR("Failed to load test texture");
-                }
-                
-                // 创建一些随机矩形作为背景
-                createRandomRectangles(100);
 
                 m_initialized = true;
                 TINA_LOG_INFO("Render2DLayer initialized successfully");
