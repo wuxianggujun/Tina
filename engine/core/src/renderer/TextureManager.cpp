@@ -3,6 +3,8 @@
 //
 
 #include "tina/renderer/TextureManager.hpp"
+
+#include "bgfx/platform.h"
 #include "tina/log/Logger.hpp"
 #include "tina/utils/BgfxUtils.hpp"
 
@@ -65,5 +67,14 @@ namespace Tina
     void TextureManager::clear()
     {
         m_textures.clear();
+    }
+
+    TextureManager::~TextureManager()
+    {
+        // 在销毁纹理之前检查BGFX Context
+        if (bgfx::getInternalData() && bgfx::getInternalData()->context)
+        {
+            clear(); // 这会触发Texture2D的析构函数
+        }
     }
 } // Tina

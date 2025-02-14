@@ -21,8 +21,7 @@ namespace Tina
 
     private:
         TextureManager() =default;
-        ~TextureManager() =default;
-
+        ~TextureManager();
         TextureManager(const TextureManager&) =delete;
         TextureManager& operator=(const TextureManager&) =delete;
 

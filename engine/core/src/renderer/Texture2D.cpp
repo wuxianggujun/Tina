@@ -7,6 +7,8 @@
 #include <array>
 #include <tina/core/Core.hpp>
 
+#include "bgfx/platform.h"
+
 namespace Tina
 {
     constexpr std::array<bgfx::TextureFormat::Enum, static_cast<size_t>(Format::RGBA4) + 1> k_TextureFormatsBgfx{
@@ -79,7 +81,12 @@ namespace Tina
     {
         if (bgfx::isValid(handle))
         {
-            bgfx::destroy(handle);
+            // 检查BGFX Context是否还有效
+            if (bgfx::getInternalData() && bgfx::getInternalData()->context)
+            {
+                bgfx::destroy(handle);
+            }
+            handle = BGFX_INVALID_HANDLE;
         }
     }
 

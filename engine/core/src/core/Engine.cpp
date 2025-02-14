@@ -217,7 +217,6 @@ namespace Tina::Core
             TINA_LOG_WARN("Engine already shut down");
             return;
         }
-
         try
         {
             TINA_LOG_INFO("Engine shutting down");
