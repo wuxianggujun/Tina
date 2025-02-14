@@ -11,17 +11,20 @@ namespace Tina
     Renderer2D::Renderer2D() = default;
     Renderer2D::~Renderer2D() = default;
 
-    void Renderer2D::init(const bgfx::ProgramHandle shader)
+    void Renderer2D::init(bgfx::ProgramHandle shader)
     {
         m_BatchRenderer = MakeUnique<BatchRenderer2D>();
         m_BatchRenderer->init(shader);
+        RenderCommandQueue::getInstance().setBatchRenderer(m_BatchRenderer.get());
     }
 
     void Renderer2D::shutdown()
     {
         if (m_BatchRenderer)
         {
+            RenderCommandQueue::getInstance().setBatchRenderer(nullptr);
             m_BatchRenderer->shutdown();
+            m_BatchRenderer.reset();
         }
     }
 
@@ -30,9 +33,23 @@ namespace Tina
         m_Camera = camera;
         if (m_Camera)
         {
-            bgfx::setViewTransform(0, nullptr, glm::value_ptr(m_Camera->getProjectionMatrix()));
+            const auto& view = m_Camera->getViewMatrix();
+            const auto& proj = m_Camera->getProjectionMatrix();
+
+            bgfx::setViewTransform(0,
+                                   glm::value_ptr(view),
+                                   glm::value_ptr(proj)
+            );
+            TINA_LOG_DEBUG("Setting view transform with camera matrices");
         }
-        m_BatchRenderer->begin();
+        else
+        {
+            TINA_LOG_WARN("No camera provided for scene rendering");
+        }
+        if (m_BatchRenderer)
+        {
+            m_BatchRenderer->begin();
+        }
         m_sceneInProgress = true;
     }
 
@@ -40,7 +57,10 @@ namespace Tina
     {
         if (m_sceneInProgress)
         {
-            m_BatchRenderer->end();
+            if (m_BatchRenderer)
+            {
+                m_BatchRenderer->end();
+            }
             m_sceneInProgress = false;
         }
     }
@@ -53,7 +73,10 @@ namespace Tina
             return;
         }
 
-        m_BatchRenderer->drawQuad(position, size, color);
+        if (m_BatchRenderer)
+        {
+            m_BatchRenderer->drawQuad(position, size, color);
+        }
     }
 
     void Renderer2D::drawSprite(const glm::vec2& position, const glm::vec2& size, const SharedPtr<Texture2D>& texture,
@@ -64,7 +87,8 @@ namespace Tina
             TINA_LOG_WARN("Attempting to draw outside of scene");
             return;
         }
-        if (texture && texture->isValid())
+
+        if (m_BatchRenderer && texture && texture->isValid())
         {
             m_BatchRenderer->drawTexturedQuad(position, size, texture, texCoords, color);
         }

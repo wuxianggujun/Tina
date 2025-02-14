@@ -15,9 +15,7 @@ namespace Tina
     {
     public:
         void render(Scene* scene, Renderer2D& renderer);
-
-    private:
-        void sortRenderables(Scene* scene, std::vector<std::pair<int, entt::entity>>& entitles);
-        void renderEntity(const entt::registry& registry, entt::entity entity, Renderer2D& renderer);
+        void sortRenderables(Scene* scene, std::vector<std::pair<int, entt::entity>>& entities);
+        void renderEntity(entt::registry& registry, entt::entity entity, Renderer2D& renderer);
     };
 } // Tina

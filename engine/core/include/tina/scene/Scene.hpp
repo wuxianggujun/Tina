@@ -1,12 +1,17 @@
 #pragma once
 
 #include "tina/core/Core.hpp"
+#include "tina/components/ComponentDependencyManager.hpp"
 #include <entt/entt.hpp>
 #include <string>
 #include "tina/layer/LayerStack.hpp"
+#include <memory>
 
 namespace Tina
 {
+    class Layer;
+    class Event;
+
     class TINA_CORE_API Scene
     {
     public:
@@ -46,31 +51,40 @@ namespace Tina
             m_registry.remove<T>(entity);
         }
 
+        // 获取注册表
+        entt::registry& getRegistry() { return m_registry; }
+        const entt::registry& getRegistry() const { return m_registry; }
+
         // Scene lifecycle
         void onUpdate(float deltaTime);
         void onRender();
         void onImGuiRender();
-        void onEvent(class Event& event);
+        void onEvent(Event& event);
 
         // Getters
-        entt::registry& getRegistry() { return m_registry; }
-        [[nodiscard]] const entt::registry& getRegistry() const { return m_registry; }
         [[nodiscard]] const std::string& getName() const { return m_name; }
         void setName(const std::string& name) { m_name = name; }
-
-        void pushLayer(Layer* layer);
-        void pushOverlay(Layer* overlay);
-        void popLayer(Layer* layer) { m_layerStack.popLayer(layer); }
-        void popOverlay(Layer* overlay) { m_layerStack.popOverlay(overlay); }
-
-        // Layer access
-        const LayerStack& getLayerStack() const { return m_layerStack; }
+        [[nodiscard]] const LayerStack& getLayerStack() const { return m_layerStack; }
         LayerStack& getLayerStack() { return m_layerStack; }
 
+        // Layer management
+        void pushLayer(Layer* layer);
+        void pushOverlay(Layer* overlay);
+
+        // Component dependency management
+        template<typename T, typename Dependency>
+        void registerComponentDependency() {
+            ComponentDependencyManager::getInstance().registerDependency<T, Dependency>();
+        }
+
+        template<typename T, typename... Dependencies>
+        void registerComponentDependencies() {
+            ComponentDependencyManager::getInstance().registerDependencies<T, Dependencies...>();
+        }
+
     private:
-        // 成员变量按照销毁顺序排列（从下到上销毁）
-        std::string m_name; // 最先被初始化，最后被销毁
-        entt::registry m_registry; // 第二个被初始化
+        std::string m_name;
         LayerStack m_layerStack;
+        entt::registry m_registry;
     };
-}
+} // namespace Tina

@@ -31,6 +31,9 @@ tina_add_third_party(NAME glfw
         GLFW_BUILD_DOCS=OFF
         GLFW_INSTALL=OFF)
 
+tina_add_third_party(NAME tracy
+        PATH ${CMAKE_SOURCE_DIR}/third_party/tracy)
+
 # GLM 配置
 add_library(glm INTERFACE)
 target_include_directories(glm INTERFACE ${CMAKE_SOURCE_DIR}/third_party/glm)
@@ -54,14 +57,14 @@ target_include_directories(TinaEngine
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(TinaEngine
-        INTERFACE
-        Tina::Core
-        bgfx
-        bx
-        bimg
-        fmt::fmt
-        glfw
-        EnTT::EnTT
-        glm
-)
+#target_link_libraries(TinaEngine
+#        INTERFACE
+#        Tina::Core
+#        bgfx
+#        bx
+#        bimg
+#        fmt::fmt
+#        glfw
+#        EnTT::EnTT
+#        glm
+#)

@@ -45,10 +45,14 @@ namespace Tina
         std::sort(entitles.begin(), entitles.end());
     }
 
-    void Scene2DRenderer::renderEntity(const entt::registry& registry, entt::entity entity, Renderer2D& renderer)
+    void Scene2DRenderer::renderEntity(entt::registry& registry, entt::entity entity, Renderer2D& renderer)
     {
-        const auto& transform = registry.get<Transform2DComponent>(entity);
-        const auto& sprite = registry.get<SpriteComponent>(entity);
+        auto& transform = registry.get<Transform2DComponent>(entity);
+        auto& sprite = registry.get<SpriteComponent>(entity);
+
+        // 设置Transform组件
+        sprite.setTransform(&transform);
+        sprite.updateRenderData();
 
         if (sprite.getTexture() && sprite.getTexture()->isValid())
         {

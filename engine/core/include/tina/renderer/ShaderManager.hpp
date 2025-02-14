@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <memory>
 #include <bgfx/bgfx.h>
+#include "tina/utils/Profiler.hpp"
 
 namespace Tina {
 
@@ -22,6 +23,9 @@ public:
 
     // 释放所有着色器资源
     void shutdown();
+
+    // 销毁着色器程序
+    void destroyProgram(bgfx::ProgramHandle handle);
 
 private:
     ShaderManager() = default;

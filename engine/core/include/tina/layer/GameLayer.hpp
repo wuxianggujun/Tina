@@ -30,19 +30,33 @@ namespace Tina
 
         SpriteComponent& createSprite(const std::string& name, const std::string& texturePath)
         {
-            auto entity = m_scene.createEntity(name);
-
-            auto& transform = m_scene.addComponent<Transform2DComponent>(entity);
-            auto& sprite = m_scene.addComponent<SpriteComponent>(entity);
-
-            if (m_render2DLayer)
+            // 检查Render2DLayer是否有效
+            if (!m_render2DLayer)
             {
-                auto texture = m_render2DLayer->loadTexture(name, texturePath);
-                if (texture)
-                {
-                    sprite.setTexture(texture);
-                }
+                TINA_LOG_ERROR("Render2DLayer is not initialized!");
+                throw std::runtime_error("Render2DLayer is not initialized");
             }
+
+            // 加载纹理
+            std::shared_ptr<Texture2D> texture = m_render2DLayer->loadTexture(name, texturePath);
+            if (!texture)
+            {
+                TINA_LOG_ERROR("Failed to load texture for sprite: {}", name);
+                throw std::runtime_error("Failed to load texture");
+            }
+
+            // 创建实体和组件
+            auto entity = m_scene.createEntity(name);
+            
+            // 添加Transform组件
+            auto& transform = m_scene.addComponent<Transform2DComponent>(entity);
+            
+            // 添加Sprite组件,将texture作为构造参数传入
+            auto& sprite = m_scene.addComponent<SpriteComponent>(entity, texture);
+            
+            // 设置Transform引用
+            sprite.setTransform(&transform);
+
             return sprite;
         }
 

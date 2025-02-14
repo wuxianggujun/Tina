@@ -36,7 +36,7 @@ namespace Tina
         [[nodiscard]] const std::string& getName() const { return m_debugName; }
         
         void setScene(Scene* scene) { m_scene = scene; }
-        Scene* getScene() const { return m_scene; }
+        [[nodiscard]] Scene* getScene() const { return m_scene; }
 
     protected:
         std::string m_debugName;

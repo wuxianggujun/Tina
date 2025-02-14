@@ -7,6 +7,9 @@
 #include <string>
 #include <memory>
 #include "bgfx/bgfx.h"
+#include <vector>
+#include "tina/resources/ResourceManager.hpp"
+#include "tina/utils/Profiler.hpp"
 
 namespace Tina
 {
@@ -84,60 +87,59 @@ namespace Tina
         MirroredRepeat,
     };
 
-    class Texture2D : public std::enable_shared_from_this<Texture2D>
+    class Texture2D : public Resource
     {
     public:
-        static std::shared_ptr<Texture2D> create(const std::string& name) {
-            return std::shared_ptr<Texture2D>(new Texture2D(name));
-        }
-
+        explicit Texture2D(std::string name = "");
         ~Texture2D();
 
-        Texture2D(const Texture2D& texture) = delete;
-        Texture2D& operator=(const Texture2D& texture) = delete;
+        // 禁止拷贝
+        Texture2D(const Texture2D&) = delete;
+        Texture2D& operator=(const Texture2D&) = delete;
 
+        // 创建纹理的多个重载
+        void create(const void* data, uint32_t width, uint32_t height);
+        
         void create(uint16_t width, uint16_t height, uint16_t layers, Format format,
                     Wrapping wrapping, Filter filter, const bgfx::Memory* memory) noexcept;
+        
+        void create(uint16_t width, uint16_t height, uint16_t layers, Format format,
+                    Wrapping wrapping, Filter filter, const void* data, uint32_t size) noexcept;
+        
+        // 更新纹理数据
+        void update(const void* data, uint32_t width, uint32_t height);
 
-        void create(uint16_t width, uint16_t height, uint16_t layers, Format format = Format::RGBA8,
-                    Wrapping wrapping = Wrapping::ClampEdge, Filter filter = Filter::Linear,
-                    const void* data = nullptr, uint32_t size = 0) noexcept;
+        // Resource接口实现
+        bool isValid() const override { return bgfx::isValid(handle); }
+        bool reload() override;
 
-        void setNativeHandle(bgfx::TextureHandle handle, 
-            uint16_t width, uint16_t height, uint16_t depth = 1,
-            bool hasMips = false, uint16_t layers = 1,
-            bgfx::TextureFormat::Enum format = bgfx::TextureFormat::RGBA8) noexcept 
-        {
-            if (bgfx::isValid(this->handle)) {
-                bgfx::destroy(this->handle);
-            }
-            this->handle = handle;
-            if (bgfx::isValid(handle)) {
-                info.width = width;
-                info.height = height;
-                info.depth = depth;
-                info.numMips = hasMips ? 0 : 1;
-                info.numLayers = layers;
-                info.format = format;
-                info.cubeMap = false;
-                info.storageSize = 0;
-            }
-        }
+        // Getters
+        bgfx::TextureHandle getHandle() const { return handle; }
+        bgfx::TextureHandle getNativeHandle() const { return handle; }
+        uint32_t getWidth() const { return m_Width; }
+        uint32_t getHeight() const { return m_Height; }
+        const std::vector<uint8_t>& getData() const { return m_Data; }
+        const std::string& getPath() const { return m_Path; }
+        const std::string& getName() const { return name; }
 
-        [[nodiscard]] const std::string& getName() const { return name; }
-        [[nodiscard]] const bgfx::TextureHandle& getNativeHandle() const { return handle; }
-        [[nodiscard]] uint16_t getWidth() const { return info.width; }
-        [[nodiscard]] uint16_t getHeight() const { return info.height; }
-        [[nodiscard]] uint16_t getLayerCount() const { return info.numLayers; }
-        [[nodiscard]] bgfx::TextureFormat::Enum getFormat() const { return info.format; }
-        [[nodiscard]] bool isValid() const { return bgfx::isValid(handle); }
-
-    protected:
-        explicit Texture2D(std::string name);
+        // Setters
+        void setPath(const std::string& path) { m_Path = path; }
+        void setName(const std::string& newName) { name = newName; }
+        void setHandle(bgfx::TextureHandle h) { handle = h; }
+        void setWidth(uint32_t width) { m_Width = width; }
+        void setHeight(uint32_t height) { m_Height = height; }
 
     private:
-        std::string name;
-        bgfx::TextureHandle handle;
+        void destroy();
+        void createTexture();
+
+        bgfx::TextureHandle handle = BGFX_INVALID_HANDLE;
         bgfx::TextureInfo info;
+        std::string name;
+        
+        uint32_t m_Width = 0;
+        uint32_t m_Height = 0;
+        std::vector<uint8_t> m_Data;
+        std::string m_Path;
     };
 } // Tina

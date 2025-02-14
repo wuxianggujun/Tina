@@ -6,6 +6,8 @@
 #include <cassert>
 #include <array>
 #include <tina/core/Core.hpp>
+#include "tina/log/Logger.hpp"
+#include <algorithm>
 
 #include "bgfx/platform.h"
 
@@ -66,7 +68,7 @@ namespace Tina
         bgfx::TextureFormat::RGBA4, // RGBA4
     };
 
-    bgfx::TextureFormat::Enum getBgfxTextureFormat(Format format)
+    static bgfx::TextureFormat::Enum getBgfxTextureFormat(Format format)
     {
         return k_TextureFormatsBgfx.at(static_cast<size_t>(format));
     }
@@ -79,15 +81,8 @@ namespace Tina
 
     Texture2D::~Texture2D()
     {
-        if (bgfx::isValid(handle))
-        {
-            // 检查BGFX Context是否还有效
-            if (bgfx::getInternalData() && bgfx::getInternalData()->context)
-            {
-                bgfx::destroy(handle);
-            }
-            handle = BGFX_INVALID_HANDLE;
-        }
+        TINA_PROFILE_FUNCTION();
+        destroy();
     }
 
     void Texture2D::create(uint16_t width, uint16_t height, uint16_t layers, Format format,
@@ -137,5 +132,133 @@ namespace Tina
                            Wrapping wrapping, Filter filter, const void* data, uint32_t size) noexcept
     {
         create(width, height, layers, format, wrapping, filter, bgfx::makeRef(data, size));
+    }
+
+    void Texture2D::create(const void* data, uint32_t width, uint32_t height) {
+        TINA_PROFILE_FUNCTION();
+        
+        m_Width = width;
+        m_Height = height;
+
+        // 如果已存在纹理,先销毁
+        if (bgfx::isValid(handle)) {
+            destroy();
+        }
+
+        // 创建纹理
+        handle = bgfx::createTexture2D(
+            uint16_t(width),
+            uint16_t(height),
+            false,
+            1,
+            bgfx::TextureFormat::RGBA8,
+            BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE,
+            data ? bgfx::copy(data, width * height * 4) : nullptr
+        );
+
+        if (!bgfx::isValid(handle)) {
+            TINA_LOG_ERROR("Failed to create texture");
+            throw std::runtime_error("Failed to create texture");
+        }
+
+        // 保存纹理数据用于重新加载
+        if (data) {
+            m_Data.resize(width * height * 4);
+            memcpy(m_Data.data(), data, m_Data.size());
+        }
+    }
+
+    void Texture2D::update(const void* data, uint32_t width, uint32_t height) {
+        TINA_PROFILE_FUNCTION();
+        
+        if (!bgfx::isValid(handle)) {
+            TINA_LOG_WARN("Texture handle invalid, creating new texture");
+            create(data, width, height);
+            return;
+        }
+
+        if (width != m_Width || height != m_Height) {
+            TINA_LOG_INFO("Texture size changed, recreating texture");
+            destroy();
+            create(data, width, height);
+            return;
+        }
+
+        // 更新纹理数据
+        bgfx::updateTexture2D(
+            handle,
+            0,
+            0,
+            0,
+            0,
+            uint16_t(width),
+            uint16_t(height),
+            bgfx::copy(data, width * height * 4)
+        );
+
+        // 更新缓存的数据
+        if (data) {
+            m_Data.resize(width * height * 4);
+            memcpy(m_Data.data(), data, m_Data.size());
+        }
+    }
+
+    bool Texture2D::reload() {
+        TINA_PROFILE_FUNCTION();
+        
+        if (m_Data.empty() || m_Path.empty()) {
+            TINA_LOG_ERROR("Cannot reload texture: no data or path available");
+            return false;
+        }
+
+        try {
+            create(m_Data.data(), m_Width, m_Height);
+            TINA_LOG_INFO("Successfully reloaded texture: {}", m_Path);
+            return true;
+        }
+        catch (const std::exception& e) {
+            TINA_LOG_ERROR("Failed to reload texture: {}", e.what());
+            return false;
+        }
+    }
+
+    void Texture2D::destroy() {
+        TINA_PROFILE_FUNCTION();
+        
+        if (bgfx::isValid(handle)) {
+            bgfx::destroy(handle);
+            handle = BGFX_INVALID_HANDLE;
+        }
+    }
+
+    void Texture2D::createTexture() {
+        TINA_PROFILE_FUNCTION();
+        
+        // 销毁旧纹理
+        destroy();
+
+        // 创建新纹理
+        const bgfx::Memory* mem = nullptr;
+        if (!m_Data.empty()) {
+            mem = bgfx::copy(m_Data.data(), m_Data.size());
+        }
+
+        uint64_t flags = BGFX_TEXTURE_NONE |
+                         BGFX_SAMPLER_U_CLAMP |
+                         BGFX_SAMPLER_V_CLAMP;
+
+        handle = bgfx::createTexture2D(
+            m_Width,
+            m_Height,
+            false,
+            1,
+            bgfx::TextureFormat::RGBA8,
+            flags,
+            mem
+        );
+
+        if (!bgfx::isValid(handle)) {
+            throw std::runtime_error("Failed to create texture");
+        }
     }
 } // Tina

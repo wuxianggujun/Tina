@@ -113,18 +113,22 @@ bgfx::ProgramHandle ShaderManager::createProgram(const std::string& name) {
 
     // 创建着色器程序
     bgfx::ProgramHandle program = bgfx::createProgram(vsh, fsh, true);
-    
     if (!bgfx::isValid(program)) {
         throw std::runtime_error("Failed to create shader program: " + name);
     }
 
-    // 缓存程序句柄
-    m_programCache[name] = program;
-    
     return program;
 }
 
+void ShaderManager::destroyProgram(bgfx::ProgramHandle handle) {
+    if (bgfx::isValid(handle)) {
+        bgfx::destroy(handle);
+    }
+}
+
 void ShaderManager::shutdown() {
+    TINA_PROFILE_FUNCTION();
+    
     // 销毁所有着色器程序
     for (const auto& pair : m_programCache) {
         bgfx::destroy(pair.second);

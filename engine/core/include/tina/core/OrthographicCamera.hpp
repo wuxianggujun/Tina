@@ -9,86 +9,118 @@
 #include <bx/math.h>
 #include <bgfx/bgfx.h>
 #include <glm/gtc/type_ptr.hpp>
-
+#include "tina/event/Event.hpp"
+#include "tina/log/Logger.hpp"
 
 namespace Tina
 {
     class OrthographicCamera
     {
     public:
-        explicit OrthographicCamera(float left, float right, float bottom, float top)
+        enum class ProjectionType
         {
-            setProjection(left, right, bottom, top);
+            Centered, // 中心点为原点的投影
+            ScreenSpace // 屏幕空间投影(左上角为原点)
+        };
+
+
+        OrthographicCamera(float left, float right, float bottom, float top)
+            : m_ProjectionMatrix(glm::ortho(left, right, bottom, top, -1.0f, 1.0f))
+              , m_ViewMatrix(1.0f)
+              , m_Position(0.0f)
+              , m_Rotation(0.0f),
+              m_ProjectionType(ProjectionType::ScreenSpace)
+
+        {
+            m_ViewProjectionMatrix = m_ProjectionMatrix * m_ViewMatrix;
         }
+
 
         void setProjection(float left, float right, float bottom, float top)
         {
-            // 计算投影矩阵
-            bx::mtxOrtho(m_projectionMatrix,
-                         left, right, // left, right
-                         bottom, top, // bottom, top (反转Y轴)
-                         -1.0f, 1.0f, // near, far
-                         0.0f, // offset
-                         bgfx::getCaps()->homogeneousDepth);
-            updateViewProjection();
-        }
-
-        void setPosition(const glm::vec3& position)
-        {
-            m_position = position;
-            updateView();
-        }
-
-        void setRotation(float rotation)
-        {
-            m_rotation = rotation;
-            updateView();
-        }
-
-        [[nodiscard]] const glm::vec3& getPosition() const { return m_position; }
-        [[nodiscard]] float getRotation() const { return m_rotation; }
-
-        [[nodiscard]] const float* getProjection() const { return m_projectionMatrix; }
-        [[nodiscard]] const float* getView() const { return m_viewMatrix; }
-        [[nodiscard]] const float* getViewProjection() const { return m_viewProjectionMatrix; }
-
-        // 添加这个方法来获取GLM格式的投影矩阵
-        [[nodiscard]] glm::mat4 getProjectionMatrix() const {
-            return glm::make_mat4(m_projectionMatrix);
-        }
-    private:
-        void updateView()
-        {
-            // 计算视图矩阵
-            bx::mtxIdentity(m_viewMatrix);
-
-            // 应用旋转
-            if (m_rotation != 0.0f)
+            if (m_ProjectionType == ProjectionType::ScreenSpace)
             {
-                float rotationMatrix[16];
-                bx::mtxRotateZ(rotationMatrix, m_rotation);
-                bx::mtxMul(m_viewMatrix, m_viewMatrix, rotationMatrix);
+                // 屏幕空间投影(左上角为原点)
+                m_ProjectionMatrix = glm::ortho(left, right, bottom, top, -1.0f, 1.0f);
             }
-
-            // 应用位移
-            float translation[16];
-            bx::mtxTranslate(translation, -m_position.x, -m_position.y, -m_position.z);
-            bx::mtxMul(m_viewMatrix, m_viewMatrix, translation);
-
-            updateViewProjection();
+            else
+            {
+                // 中心点为原点的投影
+                float halfWidth = (right - left) * 0.5f;
+                float halfHeight = (top - bottom) * 0.5f;
+                m_ProjectionMatrix = glm::ortho(-halfWidth, halfWidth, -halfHeight, halfHeight, -1.0f, 1.0f);
+            }
+            m_ViewProjectionMatrix = m_ProjectionMatrix * m_ViewMatrix;
+            TINA_LOG_DEBUG("Camera projection updated: L={}, R={}, B={}, T={}", left, right, bottom, top);
         }
 
-        void updateViewProjection()
+        void setProjectionType(ProjectionType type)
         {
-            // 计算视图投影矩阵
-            bx::mtxMul(m_viewProjectionMatrix, m_viewMatrix, m_projectionMatrix);
+            if (m_ProjectionType != type)
+            {
+                m_ProjectionType = type;
+                // 重新计算投影矩阵
+                float width = m_Right - m_Left;
+                float height = m_Bottom - m_Top;
+                setProjection(m_Left, m_Right, m_Bottom, m_Top);
+            }
         }
 
-        float m_projectionMatrix[16]{};
-        float m_viewMatrix[16]{};
-        float m_viewProjectionMatrix[16]{};
+        void onUpdate(float deltaTime)
+        {
+            // 在这里更新相机的位置、旋转等
+            if (m_Position != m_LastPosition || m_Rotation != m_LastRotation)
+            {
+                glm::mat4 transform = glm::translate(glm::mat4(1.0f), m_Position) *
+                    glm::rotate(glm::mat4(1.0f), glm::radians(m_Rotation), glm::vec3(0, 0, 1));
 
-        glm::vec3 m_position = {0.0f, 0.0f, 0.0f};
-        float m_rotation = 0.0f;
+                m_ViewMatrix = glm::inverse(transform);
+                m_ViewProjectionMatrix = m_ProjectionMatrix * m_ViewMatrix;
+
+                m_LastPosition = m_Position;
+                m_LastRotation = m_Rotation;
+            }
+        }
+
+        void onEvent(Event& event)
+        {
+            // 处理相机相关的事件
+            // 例如窗口大小改变、鼠标移动等
+            if (event.type == Event::WindowResize)
+            {
+                // 更新投影矩阵
+                float aspectRatio = (float)event.windowResize.width / (float)event.windowResize.height;
+                float width = m_ZoomLevel * aspectRatio;
+                float height = m_ZoomLevel;
+                setProjection(-width * 0.5f, width * 0.5f, -height * 0.5f, height * 0.5f);
+            }
+        }
+
+        const glm::vec3& getPosition() const { return m_Position; }
+        void setPosition(const glm::vec3& position) { m_Position = position; }
+
+        float getRotation() const { return m_Rotation; }
+        void setRotation(float rotation) { m_Rotation = rotation; }
+
+        const glm::mat4& getProjectionMatrix() const { return m_ProjectionMatrix; }
+        const glm::mat4& getViewMatrix() const { return m_ViewMatrix; }
+        const glm::mat4& getViewProjectionMatrix() const { return m_ViewProjectionMatrix; }
+
+    private:
+        ProjectionType m_ProjectionType;
+
+        float m_Left = 0.0f, m_Right = 0.0f;
+        float m_Top = 0.0f, m_Bottom = 0.0f;
+
+        glm::mat4 m_ProjectionMatrix;
+        glm::mat4 m_ViewMatrix;
+        glm::mat4 m_ViewProjectionMatrix{};
+
+        glm::vec3 m_Position;
+        float m_Rotation;
+
+        glm::vec3 m_LastPosition = glm::vec3(0.0f);
+        float m_LastRotation = 0.0f;
+        float m_ZoomLevel = 1.0f;
     };
-} // Tina
+} // namespace Tina
