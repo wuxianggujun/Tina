@@ -32,12 +32,6 @@ namespace Tina
         // 记录分配
         s_allocations[ptr] = {size, ptr};
 
-        // 使用bytes来显示更精确的数值
-        TINA_LOG_DEBUG("GLFW allocated {}bytes, total: {}bytes, current: {}bytes",
-            size,
-            s_totalAllocated.load(),
-            s_currentAllocated.load());
-
         return ptr;
     }
 
@@ -74,12 +68,6 @@ namespace Tina
         // 更新记录
         s_allocations.erase(block);
         s_allocations[newPtr] = {size, newPtr};
-
-        TINA_LOG_DEBUG("GLFW reallocated {} -> {}bytes, total: {}MB, current: {}MB",
-                       oldSize, size,
-                       s_totalAllocated.load() / (1024*1024),
-                       s_currentAllocated.load() / (1024*1024));
-
         return newPtr;
     }
 

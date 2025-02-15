@@ -30,6 +30,10 @@ namespace Tina
     {
         glfwSetErrorCallback(errorCallback);
 
+        // 禁用游戏手柄支持
+        glfwInitHint(GLFW_JOYSTICK_HAT_BUTTONS, GLFW_FALSE);
+        glfwInitHint(GLFW_COCOA_CHDIR_RESOURCES, GLFW_FALSE);
+
         // 设置GLFW内存分配器
         GLFWallocator allocator;
         allocator.allocate = GlfwMemoryManager::allocate;
@@ -49,7 +53,7 @@ namespace Tina
             return false;
         }
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwSetJoystickCallback(joystickCallback);
+        //glfwSetJoystickCallback(joystickCallback);
         TINA_LOG_INFO("WindowManager::initialize - GLFW initialized successfully");
         // 输出初始内存使用情况
         TINA_LOG_DEBUG("GLFW memory stats - Current: {}MB, Peak: {}MB",

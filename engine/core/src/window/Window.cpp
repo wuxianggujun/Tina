@@ -7,11 +7,14 @@
 #include <bx/allocator.h>
 #include "tina/window/Window.hpp"
 #include "tina/log/Logger.hpp"
+#include "tina/window/GlfwMemoryManager.hpp"
 
 namespace Tina {
     Window::Window(WindowManager* windowManager, WindowHandle handle, const WindowConfig& config)
         : m_windowManager(windowManager), m_windowHandle(handle), m_handle(nullptr)
     {
+        size_t beforeMem = GlfwMemoryManager::getCurrentAllocated();
+
         m_handle = glfwCreateWindow(config.width, config.height, config.title, nullptr, nullptr);
         if (!m_handle)
         {
@@ -19,6 +22,8 @@ namespace Tina {
             return;
         }
         glfwSetWindowUserPointer(m_handle, this);
+        size_t afterMem = GlfwMemoryManager::getCurrentAllocated();
+        TINA_LOG_DEBUG("Window creation memory usage: {} bytes", afterMem - beforeMem);
     }
 
     Window::~Window()
