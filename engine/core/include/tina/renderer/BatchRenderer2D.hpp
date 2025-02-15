@@ -1,10 +1,10 @@
 #pragma once
 
-#include <bgfx/bgfx.h>
 #include <glm/glm.hpp>
 #include "tina/renderer/Color.hpp"
 #include "tina/renderer/Texture2D.hpp"
 #include "tina/renderer/RenderCommand.hpp"
+#include "tina/renderer/UniformManager.hpp"
 #include <vector>
 #include <memory>
 #include <mutex>
@@ -99,8 +99,9 @@ private:
     bgfx::IndexBufferHandle m_IndexBuffer = BGFX_INVALID_HANDLE;
 
     bgfx::DynamicVertexBufferHandle m_InstanceBuffer = BGFX_INVALID_HANDLE;
-    bgfx::UniformHandle m_TextureSampler = BGFX_INVALID_HANDLE;
-    bgfx::UniformHandle m_UseTexture = BGFX_INVALID_HANDLE;
+
+    const std::string SAMPLER_UNIFORM_NAME = "s_texColor";
+    const std::string USE_TEXTURE_UNIFORM_NAME = "u_useTexture";
 
     static bgfx::VertexLayout s_VertexLayout;
     static bgfx::VertexLayout s_InstanceLayout;

@@ -51,7 +51,6 @@ namespace Tina
         TINA_PROFILE_FUNCTION();
         entt::entity entity = m_registry.create();
         m_registry.emplace<std::string>(entity, name);
-        TINA_LOG_INFO("Created entity: {} in scene: {}", name, m_name);
         return entity;
     }
 

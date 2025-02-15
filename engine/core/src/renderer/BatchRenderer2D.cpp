@@ -55,9 +55,11 @@ namespace Tina
 
             m_Shader = shader;
 
+            auto& uniformManager = UniformManager::getInstance();
+
             // 创建Uniforms
-            m_TextureSampler = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
-            m_UseTexture = bgfx::createUniform("u_useTexture", bgfx::UniformType::Vec4);
+            uniformManager.createUniform(SAMPLER_UNIFORM_NAME, bgfx::UniformType::Sampler);
+            uniformManager.createUniform(USE_TEXTURE_UNIFORM_NAME, bgfx::UniformType::Vec4);
 
             // 初始化顶点布局
             s_VertexLayout
@@ -143,6 +145,8 @@ namespace Tina
     {
         if (m_QuadCount == 0) return;
 
+        auto& uniformManager = UniformManager::getInstance();
+
         // 更新实例缓冲
         const bgfx::Memory* mem = bgfx::copy(m_Instances.data(), m_QuadCount * sizeof(InstanceData));
         bgfx::update(m_InstanceBuffer, 0, mem);
@@ -150,12 +154,12 @@ namespace Tina
         // 绑定纹理
         for (size_t i = 0; i < m_Textures.size(); i++)
         {
-            bgfx::setTexture(static_cast<uint8_t>(i), m_TextureSampler, m_Textures[i]->getHandle());
+            bgfx::setTexture(static_cast<uint8_t>(i),  uniformManager.getUniformHandle(SAMPLER_UNIFORM_NAME), m_Textures[i]->getHandle());
         }
 
         // 设置是否使用纹理的uniform
         float useTexture = !m_Textures.empty() ? 1.0f : 0.0f;
-        bgfx::setUniform(m_UseTexture, &useTexture);
+        uniformManager.setUniform(USE_TEXTURE_UNIFORM_NAME, glm::vec4(useTexture, 0.0f, 0.0f, 0.0f));
 
         // 设置渲染状态
         uint8_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
@@ -200,16 +204,6 @@ namespace Tina
         if (bgfx::isValid(m_InstanceBuffer))
         {
             bgfx::destroy(m_InstanceBuffer);
-        }
-
-        if (bgfx::isValid(m_TextureSampler))
-        {
-            bgfx::destroy(m_TextureSampler);
-        }
-
-        if (bgfx::isValid(m_UseTexture))
-        {
-            bgfx::destroy(m_UseTexture);
         }
 
         m_Instances.clear();
