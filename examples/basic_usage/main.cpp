@@ -25,7 +25,7 @@ public:
             sprite.setLayer(0);
             // 设置位置 - 横向排列
             sprite.setPosition({i * 150.0f, 50.0f});
-            sprite.setScale({0.5f, 0.5f}); // 缩小一点以便显示更多
+            sprite.setScale({0.2f, 0.2f}); // 缩小一点以便显示更多
         }
 
         // 创建95个纯色矩形
