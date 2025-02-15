@@ -20,7 +20,7 @@ public:
         // 创建背景精灵(层级0)
         auto& background = createSprite("test", "resources/textures/test.png");
         background.setLayer(0);
-        background.setScale({2.0f, 2.0f});
+        // background.setScale({2.0f, 2.0f});
     }
 
     void onUpdate(float deltaTime) override

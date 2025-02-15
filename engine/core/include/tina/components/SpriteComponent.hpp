@@ -11,7 +11,6 @@ namespace Tina {
 
 class SpriteComponent : public Renderable2DComponent {
 public:
-    static constexpr float MAX_DISPLAY_SIZE = 256.0f; // 最大显示尺寸
     // 顶点数据结构
     struct Vertex {
         float x, y, z;
@@ -20,7 +19,7 @@ public:
     };
 
     struct InstanceData {
-        glm::vec4 Transform;    // x, y, scale_x, scale_y
+        glm::vec4 Transform;    // x, y, width, height
         glm::vec4 Color;       // rgba color
         glm::vec4 TextureData; // UV coordinates
         float TextureIndex;    // texture slot
@@ -30,22 +29,15 @@ public:
     SpriteComponent() = default;
 
     explicit SpriteComponent(const std::shared_ptr<Texture2D>& texture)
-     : m_Texture(texture) {
+        : m_Texture(texture) {
         if (texture) {
-            float width = static_cast<float>(texture->getWidth());
-            float height = static_cast<float>(texture->getHeight());
-
-            // 计算缩放比例
-            if (width > MAX_DISPLAY_SIZE || height > MAX_DISPLAY_SIZE) {
-                float scale = MAX_DISPLAY_SIZE / std::max(width, height);
-                m_Scale = glm::vec2(scale);
-                width *= scale;
-                height *= scale;
-            }
-
-            setSize({width, height});
-            TINA_LOG_DEBUG("Created sprite with size: {}x{}, scale: {}",
-                width, height, m_Scale.x);
+            // 使用纹理的原始像素尺寸
+            setSize({
+                static_cast<float>(texture->getWidth()),
+                static_cast<float>(texture->getHeight())
+            });
+            TINA_LOG_DEBUG("Created sprite with original size: {}x{}", 
+                texture->getWidth(), texture->getHeight());
         }
     }
 
@@ -53,6 +45,7 @@ public:
     void setTexture(const std::shared_ptr<Texture2D>& texture) {
         m_Texture = texture;
         if (texture) {
+            // 使用纹理的原始像素尺寸
             setSize({
                 static_cast<float>(texture->getWidth()),
                 static_cast<float>(texture->getHeight())
@@ -65,17 +58,36 @@ public:
     void setTextureRect(const glm::vec4& rect) { m_TextureRect = rect; }
     const glm::vec4& getTextureRect() const { return m_TextureRect; }
 
-    // 缩放
-    void setScale(const glm::vec2& scale) { m_Scale = scale; }
-    const glm::vec2& getScale() const { return m_Scale; }
+    // Transform相关便捷方法
+    void setScale(const glm::vec2& scale) {
+        if (m_Transform) {
+            m_Transform->setScale(scale);
+        }
+    }
+    
+    glm::vec2 getScale() const {
+        return m_Transform ? m_Transform->getScale() : glm::vec2(1.0f);
+    }
+    
+    void setPosition(const glm::vec2& position) {
+        if (m_Transform) {
+            m_Transform->setPosition(position);
+        }
+    }
+    
+    glm::vec2 getPosition() const {
+        return m_Transform ? m_Transform->getPosition() : glm::vec2(0.0f);
+    }
 
     // 设置关联的Transform组件
     void setTransform(Transform2DComponent* transform) { m_Transform = transform; }
+    Transform2DComponent* getTransform() const { return m_Transform; }
 
     // 实现基类接口
     void updateRenderData() override {
         glm::vec2 position = m_Transform ? m_Transform->getPosition() : glm::vec2(0.0f);
-        glm::vec2 finalSize = m_Size * m_Scale;
+        glm::vec2 scale = m_Transform ? m_Transform->getScale() : glm::vec2(1.0f);
+        glm::vec2 finalSize = m_Size * scale;
 
         m_InstanceData.Transform = glm::vec4(position.x, position.y, finalSize.x, finalSize.y);
         m_InstanceData.Color = glm::vec4(m_Color.getR(), m_Color.getG(), m_Color.getB(), m_Color.getA());
@@ -100,10 +112,9 @@ public:
 
 private:
     std::shared_ptr<Texture2D> m_Texture;
-    glm::vec4 m_TextureRect = {0.0f, 0.0f, 1.0f, 1.0f};
-    glm::vec2 m_Scale = {1.0f, 1.0f};
+    glm::vec4 m_TextureRect = {0.0f, 0.0f, 1.0f, 1.0f};  // UV坐标
     InstanceData m_InstanceData{};
     Transform2DComponent* m_Transform = nullptr;  // 关联的Transform组件
 };
 
-} // namespace Tina 
+} // namespace Tina
