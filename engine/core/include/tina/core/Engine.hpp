@@ -39,6 +39,8 @@ namespace Tina::Core
 
         static Engine& get() { return *s_Instance; }
 
+        void logMemoryStats();
+
     private:
         Context& m_context;  // 改为引用
         WindowHandle m_mainWindow;

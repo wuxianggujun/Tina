@@ -39,7 +39,8 @@ namespace Tina
     public:
         enum class Level : uint8_t
         {
-            Debug = 0,
+            Trace = 0,  // 添加Trace级别作为最低级别
+            Debug,
             Info,
             Warn,
             Error,
@@ -58,6 +59,15 @@ namespace Tina
         void stopPollingThread();
         void flush(bool force = false);
         void close();
+
+        template <typename... Args>
+        void trace(const char* file, uint32_t line, fmt::format_string<Args...> format, Args&&... args)
+        {
+            if (isLevelEnabled(Level::Trace))
+            {
+                logImpl(Level::Trace, file, line, format, std::forward<Args>(args)...);
+            }
+        }
 
         template <typename... Args>
         void debug(const char* file, uint32_t line, fmt::format_string<Args...> format, Args&&... args)
@@ -164,6 +174,7 @@ namespace Tina
         std::atomic_bool shouldExit_{false};
     };
 
+#define TINA_LOG_TRACE(...) Tina::Logger::getInstance().trace(__FILE__, __LINE__, __VA_ARGS__)
 #define TINA_LOG_DEBUG(...) Tina::Logger::getInstance().debug(__FILE__, __LINE__, __VA_ARGS__)
 #define TINA_LOG_INFO(...) Tina::Logger::getInstance().info(__FILE__, __LINE__, __VA_ARGS__)
 #define TINA_LOG_WARN(...) Tina::Logger::getInstance().warning(__FILE__, __LINE__, __VA_ARGS__)

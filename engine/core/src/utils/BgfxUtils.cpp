@@ -178,7 +178,7 @@ namespace Tina::Utils
         if (bx::open(reader, filePath.c_str()))
         {
             uint32_t size = (uint32_t)bx::getSize(reader);
-            TINA_LOG_DEBUG("Loading texture file of size: {} bytes", size);
+            TINA_LOG_DEBUG("Loading texture file '{}' of size: {} bytes", filePath, size);
             
             void* data = bx::alloc(&s_allocator, size);
             if (data == nullptr)
@@ -188,7 +188,7 @@ namespace Tina::Utils
                 return result;
             }
 
-            TINA_LOG_DEBUG("Memory allocated successfully");
+            TINA_LOG_DEBUG("Memory allocated for texture data: {} bytes", size);
 
             try
             {
@@ -248,27 +248,29 @@ namespace Tina::Utils
                         result.height = uint16_t(imageContainer->m_height);
                         result.depth = uint16_t(imageContainer->m_depth);
                         result.hasMips = 1 < imageContainer->m_numMips;
-                        result.layers = uint16_t(imageContainer->m_numLayers);
+                        result.layers = imageContainer->m_numLayers;
                         result.format = bgfx::TextureFormat::Enum(imageContainer->m_format);
                         
                         TINA_LOG_DEBUG("Texture created successfully");
                     }
                     else
                     {
-                        TINA_LOG_ERROR("Failed to create texture handle");
+                        TINA_LOG_ERROR("Failed to create texture from loaded data");
+                        bimg::imageFree(imageContainer);
                     }
                 }
                 else
                 {
                     TINA_LOG_ERROR("Failed to parse image data");
                 }
+
+                bx::free(&s_allocator, data);
             }
             catch (const std::exception& e)
             {
                 TINA_LOG_ERROR("Exception during texture loading: {}", e.what());
+                bx::free(&s_allocator, data);
             }
-
-            bx::free(&s_allocator, data);
         }
         else
         {

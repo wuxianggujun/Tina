@@ -115,23 +115,30 @@ void BatchRenderer2D::createBuffers() {
     const bgfx::Memory* ibMem = bgfx::copy(indices.data(), indices.size() * sizeof(uint16_t));
     m_IndexBuffer = bgfx::createIndexBuffer(ibMem);
 
-    // 创建实例缓冲
+    // 创建实例缓冲 - 使用较小的初始容量
+    uint32_t initialCapacity = 100;  // 减小初始容量
     uint32_t flags = BGFX_BUFFER_ALLOW_RESIZE;
+    
     m_ColorInstanceBuffer = bgfx::createDynamicVertexBuffer(
-        MAX_QUADS,
+        initialCapacity,
         s_InstanceLayout,
         flags
     );
     
     m_TexturedInstanceBuffer = bgfx::createDynamicVertexBuffer(
-        MAX_QUADS,
+        initialCapacity,
         s_InstanceLayout,
         flags
     );
     
-    // 预分配实例数组(使用较小的初始容量)
-    m_ColorInstances.reserve(100);
-    m_TexturedInstances.reserve(100);
+    // 预分配实例数组
+    m_ColorInstances.reserve(initialCapacity);
+    m_TexturedInstances.reserve(initialCapacity);
+    
+    TINA_LOG_DEBUG("Buffers created - Initial capacity: {}, Instance size: {} bytes, Total memory: {} bytes",
+        initialCapacity,
+        sizeof(InstanceData),
+        initialCapacity * sizeof(InstanceData) * 2);
 }
 
 void BatchRenderer2D::shutdown() {
@@ -172,11 +179,46 @@ void BatchRenderer2D::begin() {
     TINA_PROFILE_FUNCTION();
     std::lock_guard<std::mutex> lock(m_Mutex);
     
+    // 输出上一帧的内存使用情况
+    size_t colorMemory = m_ColorInstances.capacity() * sizeof(InstanceData);
+    size_t texturedMemory = m_TexturedInstances.capacity() * sizeof(InstanceData);
+    size_t textureMemory = 0;
+    
+    for (const auto& texture : m_Textures) {
+        if (texture) {
+            textureMemory += texture->getWidth() * texture->getHeight() * 4;
+        }
+    }
+    
+    TINA_LOG_DEBUG("Begin frame - Memory Usage:\n\tColor Instances: {}/{} ({}KB)\n\tTextured Instances: {}/{} ({}KB)\n\tActive Textures: {} ({}KB)\n\tTotal: {}KB",
+        m_ColorQuadCount, m_ColorInstances.capacity(), colorMemory/1024,
+        m_TexturedQuadCount, m_TexturedInstances.capacity(), texturedMemory/1024,
+        m_Textures.size(), textureMemory/1024,
+        (colorMemory + texturedMemory + textureMemory)/1024);
+
+    // 清理数据
     m_ColorInstances.clear();
     m_TexturedInstances.clear();
     m_Textures.clear();
     m_ColorQuadCount = 0;
     m_TexturedQuadCount = 0;
+    
+    // 每100帧收缩一次vectors
+    static int frameCount = 0;
+    if (++frameCount >= 100) {
+        frameCount = 0;
+        
+        // 只在容量明显大于使用量时收缩
+        if (m_ColorInstances.capacity() > m_ColorInstances.size() * 2) {
+            m_ColorInstances.shrink_to_fit();
+        }
+        if (m_TexturedInstances.capacity() > m_TexturedInstances.size() * 2) {
+            m_TexturedInstances.shrink_to_fit();
+        }
+        
+        TINA_LOG_DEBUG("Shrunk instance vectors - New capacities:\n\tColor: {}\n\tTextured: {}",
+            m_ColorInstances.capacity(), m_TexturedInstances.capacity());
+    }
 }
 
 void BatchRenderer2D::flushColorBatchInternal() {
@@ -255,16 +297,38 @@ void BatchRenderer2D::end() {
     TINA_PROFILE_FUNCTION();
     std::lock_guard<std::mutex> lock(m_Mutex);
     
-    // 先渲染纯色批次
+    // 输出本帧的渲染统计
+    TINA_LOG_DEBUG("End frame - Rendering stats:\n\tColor quads: {}\n\tTextured quads: {}\n\tTexture bindings: {}",
+        m_ColorQuadCount, m_TexturedQuadCount, m_Textures.size());
+    
+    // 渲染所有批次
     if (m_ColorQuadCount > 0) {
         TINA_PROFILE_SCOPE("Flush Color Batch");
         flushColorBatchInternal();
     }
     
-    // 再渲染纹理批次
     if (m_TexturedQuadCount > 0) {
         TINA_PROFILE_SCOPE("Flush Texture Batch");
         flushTextureBatchInternal();
+    }
+    
+    // 主动释放不再需要的GPU资源
+    if (m_ColorInstances.capacity() > MAX_QUADS) {
+        bgfx::destroy(m_ColorInstanceBuffer);
+        m_ColorInstanceBuffer = bgfx::createDynamicVertexBuffer(
+            MAX_QUADS,
+            s_InstanceLayout,
+            BGFX_BUFFER_ALLOW_RESIZE
+        );
+    }
+    
+    if (m_TexturedInstances.capacity() > MAX_QUADS) {
+        bgfx::destroy(m_TexturedInstanceBuffer);
+        m_TexturedInstanceBuffer = bgfx::createDynamicVertexBuffer(
+            MAX_QUADS,
+            s_InstanceLayout,
+            BGFX_BUFFER_ALLOW_RESIZE
+        );
     }
 }
 

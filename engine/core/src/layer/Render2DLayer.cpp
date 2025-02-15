@@ -105,6 +105,22 @@ namespace Tina
         try
         {
             rendering = true;
+            
+            // 在渲染开始前清理上一帧的数据
+            m_rectangles.clear();
+            m_texturedRectangles.clear();
+            
+            // 每100帧收缩一次vectors
+            static int frameCount = 0;
+            if (++frameCount >= 100)
+            {
+                frameCount = 0;
+                m_rectangles.shrink_to_fit();
+                m_texturedRectangles.shrink_to_fit();
+                TINA_LOG_DEBUG("Shrunk instance vectors - Rectangles capacity: {}, Textured rectangles capacity: {}",
+                    m_rectangles.capacity(), m_texturedRectangles.capacity());
+            }
+            
             m_renderer->beginScene(m_camera);
 
             // 渲染场景中的实体
@@ -112,6 +128,14 @@ namespace Tina
             {
                 m_sceneRenderer->render(scene, *m_renderer);
             }
+            
+            // 输出当前内存使用情况
+            size_t totalMemoryUsage = 
+                m_rectangles.capacity() * sizeof(BatchRenderer2D::InstanceData) +
+                m_texturedRectangles.capacity() * (sizeof(BatchRenderer2D::InstanceData) + sizeof(std::shared_ptr<Texture2D>));
+                
+            TINA_LOG_DEBUG("Total rendering memory usage: {} bytes", totalMemoryUsage);
+            
             m_renderer->endScene();
         }
         catch (const std::exception& e)
@@ -164,6 +188,17 @@ namespace Tina
         instance.Color = glm::vec4(color.getR(), color.getG(), color.getB(), color.getA());
         instance.TextureData = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
         instance.TextureInfo = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);  // 非纹理quad
+        
+        // 预分配一定大小以减少重新分配
+        if (m_rectangles.empty())
+        {
+            m_rectangles.reserve(100);
+        }
+        
+        TINA_LOG_DEBUG("Rectangle instances count: {}, Memory usage: {} bytes", 
+            m_rectangles.size(), 
+            m_rectangles.size() * sizeof(BatchRenderer2D::InstanceData));
+        
         m_rectangles.push_back(instance);
     }
 
@@ -183,6 +218,16 @@ namespace Tina
         instance.Color = glm::vec4(tint.getR(), tint.getG(), tint.getB(), tint.getA());
         instance.TextureData = textureCoords;
         instance.TextureInfo = glm::vec4(static_cast<float>(m_texturedRectangles.size()), 0.0f, 0.0f, 0.0f);
+
+        // 预分配一定大小以减少重新分配
+        if (m_texturedRectangles.empty())
+        {
+            m_texturedRectangles.reserve(100);
+        }
+
+        TINA_LOG_DEBUG("Textured rectangle instances count: {}, Memory usage: {} bytes", 
+            m_texturedRectangles.size(),
+            m_texturedRectangles.size() * (sizeof(BatchRenderer2D::InstanceData) + sizeof(std::shared_ptr<Texture2D>)));
 
         m_texturedRectangles.push_back({instance, texture});
     }

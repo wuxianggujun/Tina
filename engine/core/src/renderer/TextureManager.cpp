@@ -24,6 +24,7 @@ namespace Tina
         const auto it = m_textures.find(name);
         if (it != m_textures.end())
         {
+            TINA_LOG_DEBUG("Texture '{}' already loaded, reusing existing texture", name);
             return it->second;
         }
 
@@ -47,7 +48,20 @@ namespace Tina
         if (texture->isValid())
         {
             m_textures[name] = texture;
-            TINA_LOG_INFO("Texture '{}' loaded successfully", name);
+            
+            // 计算总内存使用
+            size_t totalTextureMemory = 0;
+            for (const auto& pair : m_textures)
+            {
+                const auto& tex = pair.second;
+                totalTextureMemory += tex->getWidth() * tex->getHeight() * 4; // 假设RGBA8格式
+            }
+            
+            TINA_LOG_INFO("Texture '{}' loaded successfully - Size: {}x{}, Estimated Memory: {} bytes, Total Texture Memory: {} bytes",
+                name, result.width, result.height,
+                result.width * result.height * 4,
+                totalTextureMemory);
+                
             return texture;
         }
 
@@ -68,6 +82,11 @@ namespace Tina
         auto it = m_textures.find(name);
         if (it != m_textures.end())
         {
+            const auto& texture = it->second;
+            TINA_LOG_DEBUG("Releasing texture '{}' - Size: {}x{}, Estimated Memory: {} bytes",
+                name, texture->getWidth(), texture->getHeight(),
+                texture->getWidth() * texture->getHeight() * 4);
+                
             m_textures.erase(it);
         }
     }
@@ -75,6 +94,15 @@ namespace Tina
     void TextureManager::clear()
     {
         std::lock_guard<std::mutex> lock(m_mutex);
+        
+        size_t totalMemoryFreed = 0;
+        for (const auto& pair : m_textures)
+        {
+            const auto& texture = pair.second;
+            totalMemoryFreed += texture->getWidth() * texture->getHeight() * 4;
+        }
+        
+        TINA_LOG_INFO("Clearing all textures - Total Memory Freed: {} bytes", totalMemoryFreed);
         m_textures.clear();
     }
 
@@ -83,8 +111,15 @@ namespace Tina
         std::lock_guard<std::mutex> lock(m_mutex);
         if (bgfx::getInternalData() && bgfx::getInternalData()->context)
         {
+            size_t totalMemoryFreed = 0;
+            for (const auto& pair : m_textures)
+            {
+                const auto& texture = pair.second;
+                totalMemoryFreed += texture->getWidth() * texture->getHeight() * 4;
+            }
+            
+            TINA_LOG_INFO("TextureManager shutdown - Total Memory Freed: {} bytes", totalMemoryFreed);
             m_textures.clear();
         }
-        TINA_LOG_INFO("TextureManager shutdown completed");
     }
 } // Tina

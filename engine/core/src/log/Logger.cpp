@@ -246,14 +246,15 @@ namespace Tina
         }
 
         static const char* levelStrings[] = {
-            "DEBUG", "INFO", "WARN", "ERROR"
+            "TRACE", "DEBUG", "INFO", "WARN", "ERROR"
         };
 
         static constexpr fmt::color levelColors[] = {
-            fmt::color::light_blue,
-            fmt::color::light_green,
-            fmt::color::yellow,
-            fmt::color::red
+            fmt::color::gray,      // TRACE
+            fmt::color::light_blue,// DEBUG
+            fmt::color::light_green,// INFO
+            fmt::color::yellow,    // WARN
+            fmt::color::red       // ERROR
         };
 
         std::string buffer;
