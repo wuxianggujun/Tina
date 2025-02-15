@@ -92,33 +92,25 @@ public:
 
 private:
     void createBuffers();
-    void flushColorBatch();    // 刷新纯色批次
-    void flushTextureBatch();  // 刷新纹理批次
-    void flushColorBatchInternal();  // 内部刷新纯色批次(无锁)
-    void flushTextureBatchInternal();  // 内部刷新纹理批次(无锁)
+    void flushBatch();  // 只保留一个flush函数
 
     bgfx::ProgramHandle m_Shader = BGFX_INVALID_HANDLE;
     bgfx::VertexBufferHandle m_VertexBuffer = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle m_IndexBuffer = BGFX_INVALID_HANDLE;
 
-    bgfx::DynamicVertexBufferHandle m_ColorInstanceBuffer = BGFX_INVALID_HANDLE;
-    bgfx::DynamicVertexBufferHandle m_TexturedInstanceBuffer = BGFX_INVALID_HANDLE;
-
+    bgfx::DynamicVertexBufferHandle m_InstanceBuffer = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle m_TextureSampler = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle m_UseTexture = BGFX_INVALID_HANDLE;
 
     static bgfx::VertexLayout s_VertexLayout;
     static bgfx::VertexLayout s_InstanceLayout;
 
-    std::vector<InstanceData> m_ColorInstances;
-    std::vector<InstanceData> m_TexturedInstances;
+    std::vector<InstanceData> m_Instances;
     std::vector<std::shared_ptr<Texture2D>> m_Textures;
+    uint32_t m_QuadCount = 0;
 
-    uint32_t m_ColorQuadCount = 0;
-    uint32_t m_TexturedQuadCount = 0;
     bool m_Initialized = false;
-
-    std::mutex m_Mutex; // 用于线程同步
+    std::mutex m_Mutex;
 };
 
 // 便捷函数
