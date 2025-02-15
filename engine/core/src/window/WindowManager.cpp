@@ -6,9 +6,9 @@
 #include "tina/log/Logger.hpp"
 #include "tina/event/EventQueue.hpp"
 #include <bgfx/bgfx.h>
-
-#include "bgfx/platform.h"
+#include <bgfx/platform.h>
 #include "tina/core/Context.hpp"
+#include "tina/window/GlfwMemoryManager.hpp"
 
 namespace Tina
 {
@@ -29,15 +29,33 @@ namespace Tina
     bool WindowManager::initialize()
     {
         glfwSetErrorCallback(errorCallback);
+
+        // 设置GLFW内存分配器
+        GLFWallocator allocator;
+        allocator.allocate = GlfwMemoryManager::allocate;
+        allocator.reallocate = GlfwMemoryManager::reallocate;
+        allocator.deallocate = GlfwMemoryManager::deallocate;
+        allocator.user = nullptr;
+
+        // 设置内存分配器 - 这是void函数,直接调用
+        glfwInitAllocator(&allocator);
+
+        // 验证内存管理器是否正常工作
+        TINA_LOG_DEBUG("Setting up GLFW memory allocator");
+
         if (!glfwInit())
         {
             TINA_LOG_ERROR("WindowManager::initialize", " Failed to initialize GLFW");
             return false;
         }
-
-        glfwSetJoystickCallback(joystickCallback);
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        TINA_LOG_INFO("WindowManager::initialize", "GLFW initialized successfully.");
+        glfwSetJoystickCallback(joystickCallback);
+        TINA_LOG_INFO("WindowManager::initialize - GLFW initialized successfully");
+        // 输出初始内存使用情况
+        TINA_LOG_DEBUG("GLFW memory stats - Current: {}MB, Peak: {}MB",
+            GlfwMemoryManager::getCurrentAllocated() / (1024*1024),
+            GlfwMemoryManager::getPeakAllocated() / (1024*1024));
+
         return true;
     }
 

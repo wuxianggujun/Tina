@@ -3,7 +3,8 @@
 //
 
 #include <utility>
-
+#include <bx/handlealloc.h>
+#include <bx/allocator.h>
 #include "tina/window/Window.hpp"
 #include "tina/log/Logger.hpp"
 
@@ -11,7 +12,6 @@ namespace Tina {
     Window::Window(WindowManager* windowManager, WindowHandle handle, const WindowConfig& config)
         : m_windowManager(windowManager), m_windowHandle(handle), m_handle(nullptr)
     {
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         m_handle = glfwCreateWindow(config.width, config.height, config.title, nullptr, nullptr);
         if (!m_handle)
         {

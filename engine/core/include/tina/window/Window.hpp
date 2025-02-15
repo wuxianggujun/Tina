@@ -3,14 +3,8 @@
 //
 
 #pragma once
+#include "tina/core/Core.hpp"
 #include <GLFW/glfw3.h>
-#include <bx/bx.h>
-#include <bgfx/bgfx.h>
-#include <bx/handlealloc.h>
-#include <bx/thread.h>
-#include <bx/mutex.h>
-#include <bx/allocator.h>
-#include "tina/container/String.hpp"
 
 namespace Tina
 {

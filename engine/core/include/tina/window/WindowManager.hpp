@@ -34,7 +34,7 @@ namespace Tina {
         bool pollEvent(Event& event);
         void processMessage();
 
-        GLFWwindow* getGLFWwindow(WindowHandle handle) const;
+        [[nodiscard]] GLFWwindow* getGLFWwindow(WindowHandle handle) const;
         WindowHandle findHandle(GLFWwindow* window) const;
 
         void* getNativeWindowHandle(WindowHandle handle);
@@ -56,7 +56,6 @@ namespace Tina {
         void eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths);
         void eventCallback_joystick(int jid, int action);
 
-    private:
         static WindowManager* s_instance;
         Context* m_context;
         std::unordered_map<uint16_t, std::unique_ptr<Window>> m_windowMap;
