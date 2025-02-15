@@ -45,7 +45,8 @@ private:
 
 class BatchRenderer2D {
 public:
-    static constexpr uint32_t MAX_QUADS = 20000;
+    // 减少最大quad数量,因为大多数2D场景不需要这么多
+    static constexpr uint32_t MAX_QUADS = 1000;
     static constexpr uint32_t MAX_VERTICES = MAX_QUADS * 4;
     static constexpr uint32_t MAX_INDICES = MAX_QUADS * 6;
     static constexpr uint32_t MAX_TEXTURE_SLOTS = 16;
@@ -56,12 +57,12 @@ public:
         uint32_t Color;
     };
 
+    // 实例数据结构 - 保持与shader一致的布局
     struct InstanceData {
-        glm::vec4 Transform;    // x, y, scale_x, scale_y
-        glm::vec4 Color;       // rgba color
-        glm::vec4 TextureData; // UV coordinates
-        float TextureIndex;    // texture slot
-        float Padding[3];      // alignment padding
+        glm::vec4 Transform;    // x, y, width, height (i_data0)
+        glm::vec4 Color;       // rgba color (i_data1)
+        glm::vec4 TextureData; // UV coordinates (i_data2)
+        glm::vec4 TextureInfo; // x: texture index, yzw: padding (i_data3)
     };
 
     BatchRenderer2D();
@@ -96,27 +97,23 @@ private:
     void flushColorBatchInternal();  // 内部刷新纯色批次(无锁)
     void flushTextureBatchInternal();  // 内部刷新纹理批次(无锁)
 
-    friend class DrawQuadBatchCommand;
-    friend class DrawTexturedQuadBatchCommand;
-
-private:
     bgfx::ProgramHandle m_Shader = BGFX_INVALID_HANDLE;
     bgfx::VertexBufferHandle m_VertexBuffer = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle m_IndexBuffer = BGFX_INVALID_HANDLE;
-    
+
     bgfx::DynamicVertexBufferHandle m_ColorInstanceBuffer = BGFX_INVALID_HANDLE;
     bgfx::DynamicVertexBufferHandle m_TexturedInstanceBuffer = BGFX_INVALID_HANDLE;
-    
+
     bgfx::UniformHandle m_TextureSampler = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle m_UseTexture = BGFX_INVALID_HANDLE;
 
     static bgfx::VertexLayout s_VertexLayout;
     static bgfx::VertexLayout s_InstanceLayout;
-    
+
     std::vector<InstanceData> m_ColorInstances;
     std::vector<InstanceData> m_TexturedInstances;
     std::vector<std::shared_ptr<Texture2D>> m_Textures;
-    
+
     uint32_t m_ColorQuadCount = 0;
     uint32_t m_TexturedQuadCount = 0;
     bool m_Initialized = false;

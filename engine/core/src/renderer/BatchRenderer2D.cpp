@@ -59,13 +59,13 @@ void BatchRenderer2D::init(bgfx::ProgramHandle shader) {
             .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
             .end();
 
-        // 初始化实例数据布局
+        // 初始化实例数据布局 - 保持与shader一致
         s_InstanceLayout
             .begin()
             .add(bgfx::Attrib::TexCoord7, 4, bgfx::AttribType::Float)     // Transform (i_data0)
             .add(bgfx::Attrib::TexCoord6, 4, bgfx::AttribType::Float)     // Color (i_data1)
             .add(bgfx::Attrib::TexCoord5, 4, bgfx::AttribType::Float)     // TextureData (i_data2)
-            .add(bgfx::Attrib::TexCoord4, 4, bgfx::AttribType::Float)     // TextureIndex + Padding (i_data3)
+            .add(bgfx::Attrib::TexCoord4, 4, bgfx::AttribType::Float)     // TextureInfo (i_data3)
             .end();
 
         createBuffers();
@@ -129,9 +129,9 @@ void BatchRenderer2D::createBuffers() {
         flags
     );
     
-    // 预分配实例数组
-    m_ColorInstances.reserve(MAX_QUADS);
-    m_TexturedInstances.reserve(MAX_QUADS);
+    // 预分配实例数组(使用较小的初始容量)
+    m_ColorInstances.reserve(100);
+    m_TexturedInstances.reserve(100);
 }
 
 void BatchRenderer2D::shutdown() {
@@ -271,18 +271,19 @@ void BatchRenderer2D::end() {
 void BatchRenderer2D::drawQuad(const glm::vec2& position, const glm::vec2& size, const Color& color) {
     TINA_PROFILE_FUNCTION();
     std::lock_guard<std::mutex> lock(m_Mutex);
-    
+
     if (m_ColorQuadCount >= MAX_QUADS) {
         flushColorBatch();
     }
 
-    InstanceData instance;
-    instance.Transform = glm::vec4(position.x, position.y, size.x, size.y);
-    instance.Color = glm::vec4(color.getR(), color.getG(), color.getB(), color.getA());
-    instance.TextureData = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
-    instance.TextureIndex = -1.0f;  // 标记为非纹理quad
+    // 创建实例数据
+    InstanceData newInstance;
+    newInstance.Transform = glm::vec4(position.x, position.y, size.x, size.y);
+    newInstance.Color = glm::vec4(color.getR(), color.getG(), color.getB(), color.getA());
+    newInstance.TextureData = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
+    newInstance.TextureInfo = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);  // 非纹理quad
     
-    m_ColorInstances.push_back(instance);
+    m_ColorInstances.push_back(newInstance);
     m_ColorQuadCount++;
 }
 
@@ -298,7 +299,7 @@ void BatchRenderer2D::drawQuads(const std::vector<InstanceData>& instances) {
         // 创建新的实例，确保是非纹理quad
         InstanceData newInstance = instance;
         newInstance.TextureData = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
-        newInstance.TextureIndex = -1.0f;  // 标记为非纹理quad
+        newInstance.TextureInfo = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);  // 标记为非纹理quad
         
         m_ColorInstances.push_back(newInstance);
         m_ColorQuadCount++;
@@ -341,7 +342,7 @@ void BatchRenderer2D::drawTexturedQuad(const glm::vec2& position, const glm::vec
     instance.Transform = glm::vec4(position.x, position.y, size.x, size.y);
     instance.Color = glm::vec4(tint.getR(), tint.getG(), tint.getB(), tint.getA());
     instance.TextureData = textureCoords;
-    instance.TextureIndex = textureIndex;
+    instance.TextureInfo = glm::vec4(textureIndex, 0.0f, 0.0f, 0.0f);
 
     TINA_LOG_DEBUG("Creating textured quad: pos({}, {}), size({}, {}), texCoords({}, {}, {}, {}), texIndex({})",
         position.x, position.y, size.x, size.y,

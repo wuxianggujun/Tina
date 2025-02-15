@@ -162,6 +162,8 @@ namespace Tina
         BatchRenderer2D::InstanceData instance;
         instance.Transform = glm::vec4(position.x, position.y, size.x, size.y);
         instance.Color = glm::vec4(color.getR(), color.getG(), color.getB(), color.getA());
+        instance.TextureData = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
+        instance.TextureInfo = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);  // 非纹理quad
         m_rectangles.push_back(instance);
     }
 
@@ -180,7 +182,7 @@ namespace Tina
         instance.Transform = glm::vec4(position.x, position.y, size.x, size.y);
         instance.Color = glm::vec4(tint.getR(), tint.getG(), tint.getB(), tint.getA());
         instance.TextureData = textureCoords;
-        instance.TextureIndex = static_cast<float>(m_texturedRectangles.size());
+        instance.TextureInfo = glm::vec4(static_cast<float>(m_texturedRectangles.size()), 0.0f, 0.0f, 0.0f);
 
         m_texturedRectangles.push_back({instance, texture});
     }
