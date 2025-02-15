@@ -23,7 +23,7 @@ namespace Tina::Core
     Engine* Engine::s_Instance = nullptr;
 
     Engine::Engine()
-        : m_context(Context::getInstance())
+        : m_uniformManager(), m_textureManager(), m_shaderManager(), m_context(Context::getInstance())
           , m_mainWindow(BGFX_INVALID_HANDLE)
           , m_windowWidth(1280)
           , m_windowHeight(720)
@@ -111,6 +111,12 @@ namespace Tina::Core
         }
     }
 
+    void Engine::getWindowSize(uint32_t& width, uint32_t& height) const
+    {
+        width = m_windowWidth;
+        height = m_windowHeight;
+    }
+
     void Engine::logMemoryStats()
     {
 #ifdef _WIN32
@@ -122,21 +128,21 @@ namespace Tina::Core
             static float peakWorkingSet = 0;
             float currentWorkingSet = pmc.WorkingSetSize / (1024.0f * 1024.0f);
             float currentPrivateUsage = pmc.PrivateUsage / (1024.0f * 1024.0f);
-            
+
             peakWorkingSet = std::max(peakWorkingSet, currentWorkingSet);
-            
+
             // 基本内存统计
             TINA_LOG_DEBUG("Memory Statistics:");
-            TINA_LOG_DEBUG("\tWorking Set: {:.2f}MB (实际占用物理内存) [{:+.2f}MB] (峰值: {:.2f}MB)", 
-                currentWorkingSet,
-                currentWorkingSet - lastWorkingSet,
-                peakWorkingSet);
-            TINA_LOG_DEBUG("\tPrivate Usage: {:.2f}MB (进程独占内存) [{:+.2f}MB]", 
-                currentPrivateUsage,
-                currentPrivateUsage - lastPrivateUsage);
-            TINA_LOG_DEBUG("\tVirtual Memory: {:.2f}MB (虚拟内存)", 
-                pmc.PagefileUsage / (1024.0 * 1024.0));
-            
+            TINA_LOG_DEBUG("\tWorking Set: {:.2f}MB (实际占用物理内存) [{:+.2f}MB] (峰值: {:.2f}MB)",
+                           currentWorkingSet,
+                           currentWorkingSet - lastWorkingSet,
+                           peakWorkingSet);
+            TINA_LOG_DEBUG("\tPrivate Usage: {:.2f}MB (进程独占内存) [{:+.2f}MB]",
+                           currentPrivateUsage,
+                           currentPrivateUsage - lastPrivateUsage);
+            TINA_LOG_DEBUG("\tVirtual Memory: {:.2f}MB (虚拟内存)",
+                           pmc.PagefileUsage / (1024.0 * 1024.0));
+
             // 检查内存增长
             static int growthCount = 0;
             if (currentWorkingSet - lastWorkingSet > 1.0f) // 1MB增长阈值
@@ -151,19 +157,19 @@ namespace Tina::Core
             {
                 growthCount = 0;
             }
-            
+
             lastWorkingSet = currentWorkingSet;
             lastPrivateUsage = currentPrivateUsage;
-            
+
             // 获取更详细的内存信息
             MEMORY_BASIC_INFORMATION memInfo;
             size_t committedTotal = 0;
             size_t reservedTotal = 0;
             size_t privateTotal = 0;
-            size_t imageTotal = 0;    // DLL和EXE
-            size_t mappedTotal = 0;   // 内存映射文件
+            size_t imageTotal = 0; // DLL和EXE
+            size_t mappedTotal = 0; // 内存映射文件
             void* addr = nullptr;
-            
+
             while (VirtualQuery(addr, &memInfo, sizeof(memInfo)))
             {
                 if (memInfo.State == MEM_COMMIT)
@@ -178,19 +184,19 @@ namespace Tina::Core
                 }
                 else if (memInfo.State == MEM_RESERVE)
                     reservedTotal += memInfo.RegionSize;
-                    
+
                 addr = (void*)((char*)memInfo.BaseAddress + memInfo.RegionSize);
                 if ((size_t)addr >= 0x7FFF0000)
                     break;
             }
-            
+
             TINA_LOG_DEBUG("\tMemory Allocation:");
             TINA_LOG_DEBUG("\t\tCommitted: {:.2f}MB (已分配且可访问)", committedTotal / (1024.0 * 1024.0));
             TINA_LOG_DEBUG("\t\tPrivate: {:.2f}MB (进程私有已分配)", privateTotal / (1024.0 * 1024.0));
             TINA_LOG_DEBUG("\t\tImage: {:.2f}MB (DLL和可执行文件)", imageTotal / (1024.0 * 1024.0));
             TINA_LOG_DEBUG("\t\tMapped: {:.2f}MB (内存映射文件)", mappedTotal / (1024.0 * 1024.0));
             TINA_LOG_DEBUG("\t\tReserved: {:.2f}MB (预留未分配)", reservedTotal / (1024.0 * 1024.0));
-            
+
             // 获取堆信息
             HANDLE hHeap = GetProcessHeap();
             if (hHeap)
@@ -203,13 +209,13 @@ namespace Tina::Core
                 size_t largestFreeBlock = 0;
                 size_t totalBlocks = 0;
                 size_t usedBlocks = 0;
-                size_t smallBlocks = 0;  // 小于1KB的块
-                
+                size_t smallBlocks = 0; // 小于1KB的块
+
                 while (HeapWalk(hHeap, &entry))
                 {
                     totalHeapSize += entry.cbData;
                     totalBlocks++;
-                    
+
                     if (entry.wFlags & PROCESS_HEAP_ENTRY_BUSY)
                     {
                         usedHeapSize += entry.cbData;
@@ -223,28 +229,28 @@ namespace Tina::Core
                         largestFreeBlock = std::max(largestFreeBlock, (size_t)entry.cbData);
                     }
                 }
-                
+
                 float fragmentation = (totalHeapSize > 0) ? (freeHeapSize * 100.0f / totalHeapSize) : 0.0f;
                 float avgBlockSize = (usedBlocks > 0) ? (usedHeapSize / (float)usedBlocks) : 0.0f;
                 float smallBlockRatio = (usedBlocks > 0) ? (smallBlocks * 100.0f / usedBlocks) : 0.0f;
-                
+
                 TINA_LOG_DEBUG("\tHeap Analysis:");
                 TINA_LOG_DEBUG("\t\tTotal: {:.2f}MB ({} blocks)", totalHeapSize / (1024.0 * 1024.0), totalBlocks);
-                TINA_LOG_DEBUG("\t\tUsed: {:.2f}MB ({} blocks, avg {:.2f}KB)", 
-                    usedHeapSize / (1024.0 * 1024.0), 
-                    usedBlocks,
-                    avgBlockSize / 1024.0f);
-                TINA_LOG_DEBUG("\t\tFree: {:.2f}MB (largest block: {:.2f}MB)", 
-                    freeHeapSize / (1024.0 * 1024.0),
-                    largestFreeBlock / (1024.0 * 1024.0));
+                TINA_LOG_DEBUG("\t\tUsed: {:.2f}MB ({} blocks, avg {:.2f}KB)",
+                               usedHeapSize / (1024.0 * 1024.0),
+                               usedBlocks,
+                               avgBlockSize / 1024.0f);
+                TINA_LOG_DEBUG("\t\tFree: {:.2f}MB (largest block: {:.2f}MB)",
+                               freeHeapSize / (1024.0 * 1024.0),
+                               largestFreeBlock / (1024.0 * 1024.0));
                 TINA_LOG_DEBUG("\t\tFragmentation: {:.1f}%", fragmentation);
                 TINA_LOG_DEBUG("\t\tSmall Blocks (<1KB): {:.1f}% ({} blocks)",
-                    smallBlockRatio, smallBlocks);
-                
+                               smallBlockRatio, smallBlocks);
+
                 // 内存警告和建议
                 if (fragmentation > 15.0f)
                     TINA_LOG_WARN("\t\t高内存碎片化! 建议实现内存池");
-                    
+
                 if (usedHeapSize > 0.8f * totalHeapSize)
                 {
                     TINA_LOG_WARN("\t\t堆内存使用率过高! 建议:");
@@ -252,7 +258,7 @@ namespace Tina::Core
                     TINA_LOG_WARN("\t\t2. 检查大块内存分配");
                     TINA_LOG_WARN("\t\t3. 实现资源缓存池");
                 }
-                
+
                 if (smallBlockRatio > 50.0f)
                 {
                     TINA_LOG_WARN("\t\t小内存块过多! 建议:");
@@ -260,7 +266,7 @@ namespace Tina::Core
                     TINA_LOG_WARN("\t\t2. 合并小内存分配");
                     TINA_LOG_WARN("\t\t3. 检查临时对象创建");
                 }
-                
+
                 if (fragmentation > 10.0f && largestFreeBlock < 1024 * 1024) // 1MB
                 {
                     TINA_LOG_WARN("\t\t内存碎片化严重且无大块可用! 建议:");
@@ -406,8 +412,10 @@ namespace Tina::Core
 
         // 4. 关闭资源管理器
         TINA_LOG_DEBUG("Shutting down resource managers");
-        TextureManager::getInstance().shutdown();
-        ShaderManager::getInstance().shutdown();
+
+        m_uniformManager.shutdown();
+        m_textureManager.shutdown();
+        m_shaderManager.shutdown();
 
         // 5. 关闭BGFX
         TINA_LOG_DEBUG("Shutting down BGFX");

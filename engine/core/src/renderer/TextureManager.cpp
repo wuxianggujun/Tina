@@ -10,11 +10,7 @@
 
 namespace Tina
 {
-    TextureManager& TextureManager::getInstance()
-    {
-        static TextureManager instance;
-        return instance;
-    }
+    TextureManager::~TextureManager() = default;
 
     SharedPtr<Texture2D> TextureManager::loadTexture(const std::string& name, const std::string& path)
     {

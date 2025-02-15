@@ -6,7 +6,6 @@
 
 #include "BatchRenderer2D.hpp"
 #include "Color.hpp"
-#include "bgfx/bgfx.h"
 #include "tina/core/Core.hpp"
 #include "tina/core/OrthographicCamera.hpp"
 #include "tina/math/Vec.hpp"

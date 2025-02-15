@@ -4,7 +4,6 @@
 #include "tina/renderer/Color.hpp"
 #include "tina/renderer/Texture2D.hpp"
 #include "tina/renderer/RenderCommand.hpp"
-#include "tina/renderer/UniformManager.hpp"
 #include <vector>
 #include <memory>
 #include <mutex>

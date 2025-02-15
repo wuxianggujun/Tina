@@ -1,4 +1,5 @@
 #include "tina/renderer/BatchRenderer2D.hpp"
+#include "tina/core/Engine.hpp"
 #include "tina/log/Logger.hpp"
 #include "tina/utils/Profiler.hpp"
 #include <glm/gtc/type_ptr.hpp>
@@ -55,7 +56,7 @@ namespace Tina
 
             m_Shader = shader;
 
-            auto& uniformManager = UniformManager::getInstance();
+            auto& uniformManager = Core::Engine::get().getUniformManager();
 
             // 创建Uniforms
             uniformManager.createUniform(SAMPLER_UNIFORM_NAME, bgfx::UniformType::Sampler);
@@ -145,7 +146,7 @@ namespace Tina
     {
         if (m_QuadCount == 0) return;
 
-        auto& uniformManager = UniformManager::getInstance();
+        auto& uniformManager = Core::Engine::get().getUniformManager();
 
         // 更新实例缓冲
         const bgfx::Memory* mem = bgfx::copy(m_Instances.data(), m_QuadCount * sizeof(InstanceData));

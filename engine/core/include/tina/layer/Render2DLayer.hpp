@@ -2,19 +2,13 @@
 
 #include "tina/layer/Layer.hpp"
 #include "tina/renderer/BatchRenderer2D.hpp"
-#include "tina/renderer/ShaderManager.hpp"
-#include "tina/log/Logger.hpp"
-#include "tina/core/Engine.hpp"
 #include <glm/gtc/matrix_transform.hpp>
 #include "bx/math.h"
 #include "tina/core/OrthographicCamera.hpp"
-#include "tina/event/Event.hpp"
 #include "tina/renderer/Texture2D.hpp"
-#include "tina/scene/Scene.hpp"
 #include <vector>
 #include <algorithm>
-
-#include "bgfx/platform.h"
+#include <bgfx/platform.h>
 #include "tina/renderer/Renderer2D.hpp"
 #include "tina/renderer/Scene2DRenderer.hpp"
 

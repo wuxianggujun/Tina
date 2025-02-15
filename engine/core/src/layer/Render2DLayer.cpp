@@ -2,9 +2,9 @@
 // Created by wuxianggujun on 2025/2/14.
 //
 
+#include "tina/core/Engine.hpp"
 #include "tina/layer/Render2DLayer.hpp"
-#include "tina/renderer/TextureManager.hpp"
-#include "tina/renderer/ShaderManager.hpp"
+#include "tina/log/Logger.hpp"
 
 namespace Tina
 {
@@ -68,7 +68,7 @@ namespace Tina
             if (bgfx::isValid(m_shaderProgram))
             {
                 TINA_LOG_DEBUG("Destroying shader program");
-                ShaderManager::getInstance().destroyProgram(m_shaderProgram);
+                Core::Engine::get().getShaderManager().destroyProgram(m_shaderProgram);
                 m_shaderProgram = BGFX_INVALID_HANDLE;
             }
 
@@ -81,7 +81,7 @@ namespace Tina
             // 即使发生错误也要尝试清理shader
             if (bgfx::isValid(m_shaderProgram))
             {
-                ShaderManager::getInstance().destroyProgram(m_shaderProgram);
+                 Core::Engine::get().getShaderManager().destroyProgram(m_shaderProgram);
                 m_shaderProgram = BGFX_INVALID_HANDLE;
             }
         }
@@ -178,7 +178,7 @@ namespace Tina
 
     std::shared_ptr<Texture2D> Render2DLayer::loadTexture(const std::string& name, const std::string& path)
     {
-        return TextureManager::getInstance().loadTexture(name, path);
+        return Core::Engine::get().getTextureManager().loadTexture(name, path);
     }
 
     void Render2DLayer::createRectangle(const glm::vec2& position, const glm::vec2& size, const Color& color)
@@ -206,7 +206,7 @@ namespace Tina
                                                 const std::string& textureName, const glm::vec4& textureCoords,
                                                 const Color& tint)
     {
-        auto texture = TextureManager::getInstance().getTexture(textureName);
+        auto texture = Core::Engine::get().getTextureManager().getTexture(textureName);
         if (!texture)
         {
             TINA_LOG_WARN("Texture '{}' not found", textureName);
@@ -235,7 +235,7 @@ namespace Tina
     void Render2DLayer::initShaders()
     {
         try {
-            m_shaderProgram = ShaderManager::getInstance().createProgram("2d");
+            m_shaderProgram = Core::Engine::get().getShaderManager().createProgram("2d");
             if (!bgfx::isValid(m_shaderProgram))
             {
                 throw std::runtime_error("Failed to create 2D shader program");
@@ -245,7 +245,7 @@ namespace Tina
             TINA_LOG_ERROR("Failed to initialize shaders: {}", e.what());
             if (bgfx::isValid(m_shaderProgram))
             {
-                ShaderManager::getInstance().destroyProgram(m_shaderProgram);
+                Core::Engine::get().getShaderManager().destroyProgram(m_shaderProgram);
                 m_shaderProgram = BGFX_INVALID_HANDLE;
             }
             throw;

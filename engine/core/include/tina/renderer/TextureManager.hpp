@@ -18,7 +18,8 @@ namespace Tina
     class TINA_CORE_API TextureManager
     {
     public:
-        static TextureManager& getInstance();
+        TextureManager() = default;
+        ~TextureManager();
 
         // 禁止拷贝和赋值
         TextureManager(const TextureManager&) = delete;
@@ -39,13 +40,6 @@ namespace Tina
         void shutdown();
 
     private:
-        TextureManager() = default;
-        ~TextureManager()
-        {
-            // 析构函数中不再进行资源清理
-            TINA_LOG_DEBUG("TextureManager destroyed");
-        }
-
         std::unordered_map<std::string, SharedPtr<Texture2D>> m_textures;
         mutable std::mutex m_mutex;  // 用于线程同步
     };

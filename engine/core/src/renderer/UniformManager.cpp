@@ -3,9 +3,7 @@
 //
 
 #include "tina/renderer/UniformManager.hpp"
-
 #include <glm/gtc/type_ptr.hpp>
-
 #include "tina/log/Logger.hpp"
 
 namespace Tina
@@ -96,7 +94,7 @@ namespace Tina
         }
     }
 
-    void UniformManager::shundown()
+    void UniformManager::shutdown()
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
         if (!m_Initialized) return;
@@ -117,6 +115,6 @@ namespace Tina
 
     UniformManager::~UniformManager()
     {
-        shundown();
+        shutdown();
     }
 } // Tina

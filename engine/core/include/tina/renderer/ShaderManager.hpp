@@ -10,10 +10,11 @@ namespace Tina {
 
 class ShaderManager {
 public:
-    static ShaderManager& getInstance() {
-        static ShaderManager instance;
-        return instance;
-    }
+    ShaderManager() : m_isShutdown(false) {}
+    ~ShaderManager() = default;
+
+    ShaderManager(const ShaderManager&) = delete;
+    ShaderManager& operator=(const ShaderManager&) = delete;
 
     // 从编译好的二进制文件加载着色器
     bgfx::ShaderHandle loadShader(const std::string& name, const std::string& type);
@@ -31,10 +32,6 @@ public:
     bool isShutdown() const { return m_isShutdown; }
 
 private:
-    ShaderManager() : m_isShutdown(false) {}
-    ~ShaderManager() = default;
-    ShaderManager(const ShaderManager&) = delete;
-    ShaderManager& operator=(const ShaderManager&) = delete;
 
     // 从文件加载着色器二进制数据
     std::vector<uint8_t> loadShaderBinary(const std::string& filename);

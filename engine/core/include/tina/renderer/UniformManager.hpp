@@ -17,11 +17,13 @@ namespace Tina
     class TINA_CORE_API UniformManager
     {
     public:
-        static UniformManager& getInstance()
-        {
-            static UniformManager instance;
-            return instance;
-        }
+        UniformManager() = default;
+        ~UniformManager();
+
+
+        UniformManager(const UniformManager&) = delete;
+        UniformManager& operator=(const UniformManager&) = delete;
+
         // 创建或获取Uniform
         bgfx::UniformHandle createUniform(const std::string& name,bgfx::UniformType::Enum type);
 
@@ -40,14 +42,9 @@ namespace Tina
         // 删除Uniform
         void destroyUniform(const std::string& name);
 
-        void shundown();
+        void shutdown();
 
     private:
-        UniformManager() = default;
-        ~UniformManager();
-
-        UniformManager(const UniformManager&) = delete;
-        UniformManager& operator=(const UniformManager&) = delete;
 
         struct UniformInfo
         {
