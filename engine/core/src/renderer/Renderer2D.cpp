@@ -93,4 +93,18 @@ namespace Tina
             m_BatchRenderer->drawTexturedQuad(position, size, texture, texCoords, color);
         }
     }
+
+    void Renderer2D::drawQuads(const std::vector<BatchRenderer2D::InstanceData>& instances)
+    {
+        if (!m_sceneInProgress)
+        {
+            TINA_LOG_WARN("Attempting to draw outside of scene");
+            return;
+        }
+
+        if (m_BatchRenderer)
+        {
+            m_BatchRenderer->drawQuads(instances);
+        }
+    }
 } // Tina

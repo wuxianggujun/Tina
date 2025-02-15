@@ -5,6 +5,7 @@
 #include "tina/renderer/Scene2DRenderer.hpp"
 #include "tina/components/Transform2DComponent.hpp"
 #include "tina/components/SpriteComponent.hpp"
+#include "tina/components/RectangleComponent.hpp"
 
 namespace Tina
 {
@@ -50,9 +51,6 @@ namespace Tina
                 continue;
             }
 
-            auto& sprite = registry.get<SpriteComponent>(entity);
-            if (!sprite.isVisible()) continue;
-
             renderEntity(registry, entity, renderer);
         }
         
@@ -73,13 +71,24 @@ namespace Tina
     void Scene2DRenderer::sortRenderables(Scene* scene, std::vector<std::pair<int, entt::entity>>& entities)
     {
         auto& registry = scene->getRegistry();
-        auto view = registry.view<Transform2DComponent, SpriteComponent>();
-
-        view.each([&entities](entt::entity entity, const Transform2DComponent& transform, const SpriteComponent& sprite)
+        
+        // 处理精灵
+        auto spriteView = registry.view<Transform2DComponent, SpriteComponent>();
+        spriteView.each([&entities](entt::entity entity, const Transform2DComponent& transform, const SpriteComponent& sprite)
         {
             if (sprite.isVisible())
             {
                 entities.emplace_back(sprite.getLayer(), entity);
+            }
+        });
+
+        // 处理矩形
+        auto rectView = registry.view<Transform2DComponent, RectangleComponent>();
+        rectView.each([&entities](entt::entity entity, const Transform2DComponent& transform, const RectangleComponent& rect)
+        {
+            if (rect.isVisible())
+            {
+                entities.emplace_back(rect.getLayer(), entity);
             }
         });
 
@@ -89,36 +98,61 @@ namespace Tina
     void Scene2DRenderer::renderEntity(entt::registry& registry, entt::entity entity, Renderer2D& renderer)
     {
         auto& transform = registry.get<Transform2DComponent>(entity);
-        auto& sprite = registry.get<SpriteComponent>(entity);
-
-        // 获取或创建实体状态
         auto& state = m_EntityStates[entity];
         
-        // 检查是否需要更新
-        glm::vec2 currentPos = transform.getPosition();
-        glm::vec2 currentSize = sprite.getSize() * transform.getScale();
-
-        if (currentPos != state.lastPosition || currentSize != state.lastSize)
+        // 检查实体是否有SpriteComponent
+        if (auto* sprite = registry.try_get<SpriteComponent>(entity))
         {
-            sprite.setTransform(&transform);
-            sprite.updateRenderData();
-            
-            state.lastPosition = currentPos;
-            state.lastSize = currentSize;
-            
-            TINA_LOG_TRACE("Updated entity {} transform - Pos: ({}, {}), Size: ({}, {})",
-                static_cast<uint32_t>(entity),
-                currentPos.x, currentPos.y,
-                currentSize.x, currentSize.y);
+            // 检查是否需要更新
+            glm::vec2 currentPos = transform.getPosition();
+            glm::vec2 currentSize = sprite->getSize() * transform.getScale();
+
+            if (currentPos != state.lastPosition || currentSize != state.lastSize)
+            {
+                sprite->setTransform(&transform);
+                sprite->updateRenderData();
+                
+                state.lastPosition = currentPos;
+                state.lastSize = currentSize;
+                
+                TINA_LOG_TRACE("Updated sprite entity {} transform - Pos: ({}, {}), Size: ({}, {})",
+                    static_cast<uint32_t>(entity),
+                    currentPos.x, currentPos.y,
+                    currentSize.x, currentSize.y);
+            }
+
+            if (sprite->getTexture() && sprite->getTexture()->isValid())
+            {
+                renderer.drawSprite(transform.getPosition(),
+                                sprite->getSize() * transform.getScale(),
+                                sprite->getTexture(),
+                                sprite->getTextureRect(),
+                                sprite->getColor());
+            }
         }
-
-        if (sprite.getTexture() && sprite.getTexture()->isValid())
+        // 检查实体是否有RectangleComponent
+        else if (auto* rect = registry.try_get<RectangleComponent>(entity))
         {
-            renderer.drawSprite(transform.getPosition(),
-                              sprite.getSize() * transform.getScale(),
-                              sprite.getTexture(),
-                              sprite.getTextureRect(),
-                              sprite.getColor());
+            // 检查是否需要更新
+            glm::vec2 currentPos = transform.getPosition();
+            glm::vec2 currentSize = rect->getSize() * transform.getScale();
+
+            if (currentPos != state.lastPosition || currentSize != state.lastSize)
+            {
+                rect->updateRenderData();
+                
+                state.lastPosition = currentPos;
+                state.lastSize = currentSize;
+                
+                TINA_LOG_TRACE("Updated rectangle entity {} transform - Pos: ({}, {}), Size: ({}, {})",
+                    static_cast<uint32_t>(entity),
+                    currentPos.x, currentPos.y,
+                    currentSize.x, currentSize.y);
+            }
+
+            // 使用RectangleComponent中的实例数据
+            const auto* instanceData = static_cast<const BatchRenderer2D::InstanceData*>(rect->getInstanceData());
+            renderer.drawQuads({*instanceData});
         }
     }
 } // Tina

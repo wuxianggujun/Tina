@@ -233,7 +233,8 @@ void BatchRenderer2D::flushColorBatchInternal() {
     bgfx::setUniform(m_UseTexture, glm::value_ptr(glm::vec4(0.0f)));
 
     // 设置渲染状态
-    uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+    uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z |
+                     BGFX_STATE_DEPTH_TEST_LESS |
                      BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
     
     // 提交绘制命令
@@ -265,7 +266,8 @@ void BatchRenderer2D::flushTextureBatchInternal() {
     }
 
     // 设置渲染状态
-    uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+    uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z |
+                     BGFX_STATE_DEPTH_TEST_LESS |
                      BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
 
     // 提交绘制命令

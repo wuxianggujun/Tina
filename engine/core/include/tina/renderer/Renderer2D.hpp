@@ -31,6 +31,8 @@ namespace Tina
         void drawSprite(const glm::vec2& position, const glm::vec2& size, const SharedPtr<Texture2D>& texture,
                         const glm::vec4& texCoords = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f),
                         const Color& color = Color::White);
+        
+        void drawQuads(const std::vector<BatchRenderer2D::InstanceData>& instances);
 
         [[nodiscard]] BatchRenderer2D* getBatchRenderer() const { return m_BatchRenderer.get(); }
 

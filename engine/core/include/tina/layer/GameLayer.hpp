@@ -7,6 +7,7 @@
 #include "tina/layer/Layer.hpp"
 #include "tina/scene/Scene.hpp"
 #include "tina/components/SpriteComponent.hpp"
+#include "tina/components/RectangleComponent.hpp"
 #include "tina/components/Transform2DComponent.hpp"
 #include "tina/layer/Render2DLayer.hpp"
 #include "tina/core/Engine.hpp"
@@ -60,6 +61,24 @@ namespace Tina
             return sprite;
         }
 
+        // 创建矩形
+        RectangleComponent& createRectangle(const glm::vec2& position, const glm::vec2& size, const Color& color)
+        {
+            auto entity = m_scene.createEntity("Rectangle");
+            
+            // 添加Transform组件
+            auto& transform = m_scene.addComponent<Transform2DComponent>(entity);
+            transform.setPosition(position);
+            
+            // 添加Rectangle组件
+            auto& rectangle = m_scene.addComponent<RectangleComponent>(entity);
+            rectangle.setSize(size);
+            rectangle.setColor(color);
+            rectangle.setTransform(&transform);  // 设置Transform引用
+            
+            return rectangle;
+        }
+
         // 在GameLayer中管理精灵
         void setSpritePriority(const std::string& name, int layer) {
             auto view = m_scene.getRegistry().view<SpriteComponent>();
@@ -86,6 +105,9 @@ namespace Tina
             // 将指定精灵移到最上层
             setSpritePriority(name, maxLayer + 1);
         }
+
+        Scene& getScene() { return m_scene; }
+        const Scene& getScene() const { return m_scene; }
 
     protected:
         Scene& m_scene;

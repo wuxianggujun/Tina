@@ -1,4 +1,4 @@
-#include "tina/renderer/RenderSystem.hpp"
+/*#include "tina/renderer/RenderSystem.hpp"
 
 #include <entt/entity/registry.hpp>
 
@@ -442,4 +442,4 @@ bool RenderSystem::shouldStartNewBatch(const RenderBatch& batch, const SpriteCom
     return false;
 }
 
-} // namespace Tina 
+} // namespace Tina */

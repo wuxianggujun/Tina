@@ -4,6 +4,8 @@
 #include <glm/glm.hpp>
 #include "tina/scene/Scene.hpp"
 #include "tina/log/Logger.hpp"
+#include "tina/renderer/Color.hpp"
+#include <random>
 
 using namespace Tina;
 
@@ -17,10 +19,50 @@ public:
 
     void onAttach() override
     {
-        // 创建背景精灵(层级0)
-        auto& background = createSprite("test", "resources/textures/test.png");
-        background.setLayer(0);
-        // background.setScale({2.0f, 2.0f});
+        // 创建5个test纹理精灵
+        for(int i = 0; i < 5; i++) {
+            auto& sprite = createSprite("test" + std::to_string(i), "resources/textures/test.png");
+            sprite.setLayer(0);
+            // 设置位置 - 横向排列
+            sprite.setPosition({i * 150.0f, 50.0f});
+            sprite.setScale({0.5f, 0.5f}); // 缩小一点以便显示更多
+        }
+
+        // 创建95个纯色矩形
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<float> colorDist(0.0f, 1.0f);
+
+        int rows = 10;
+        int cols = 10;
+        float rectWidth = 50.0f;
+        float rectHeight = 50.0f;
+        float spacing = 10.0f;
+        float startX = 50.0f;
+        float startY = 200.0f;
+
+        for(int i = 0; i < 95; i++) {
+            int row = i / cols;
+            int col = i % cols;
+            
+            // 生成随机颜色
+            Color randomColor(
+                colorDist(gen),
+                colorDist(gen),
+                colorDist(gen),
+                1.0f
+            );
+
+            // 计算位置
+            float x = startX + col * (rectWidth + spacing);
+            float y = startY + row * (rectHeight + spacing);
+
+            // 创建矩形
+            auto& rect = createRectangle({x, y}, {rectWidth, rectHeight}, randomColor);
+            rect.setLayer(1); // 设置在精灵后面
+        }
+
+        TINA_LOG_INFO("Created 5 sprites and 95 rectangles");
     }
 
     void onUpdate(float deltaTime) override

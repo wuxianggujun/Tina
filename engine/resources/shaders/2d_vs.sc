@@ -33,10 +33,10 @@ void main()
         v_texcoord0 = texData.xy + (a_texcoord0 * texData.zw);
         
         // 将纹理索引存储在z坐标中用于调试
-        gl_Position.z = 0.0;  // 确保纹理在最前面
+        gl_Position.z = 0.1;  // 纹理在后面
     } else {
         // 对于无纹理的quad，保持原始UV坐标
         v_texcoord0 = a_texcoord0;
-        gl_Position.z = 0.1;  // 纯色矩形稍微靠后
+        gl_Position.z = 0.0;  // 纯色矩形在前面
     }
 }

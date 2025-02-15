@@ -13,9 +13,8 @@ void main()
 {
     vec4 color = v_color0;
     
-    // 如果启用了纹理
-    if (u_useTexture.x > 0.5) {
-        // 直接使用原始UV坐标采样纹理
+    // 使用u_useTexture.x来判断是否使用纹理
+    if (u_useTexture.x > 0.0) {
         vec4 texColor = texture2D(s_texColor, v_texcoord0);
         color *= texColor;
     }

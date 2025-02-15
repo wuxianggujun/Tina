@@ -5,32 +5,21 @@ Tina 是一个模块化的游戏引擎，采用现代 C++ 开发，使用 CMake 
 ## 项目结构
 
 ```
-Tina/
-├── engine/                    # 引擎核心代码
-│   ├── core/                  # 核心功能模块
-│   │   ├── include/          
-│   │   │   └── tina/         # 公共头文件
-│   │   │       ├── core/     # 核心功能
-│   │   │       └── render/   # 渲染功能
-│   │   ├── src/             
-│   │   │   └── render/      # 渲染实现
-│   │   └── CMakeLists.txt   
-│   └── CMakeLists.txt       
-│
-├── third_party/              # 第三方依赖
-│   ├── bgfx.cmake/          # BGFX 图形库
-│   └── googletest/          # Google Test 测试框架
-│
-├── examples/                 # 示例代码
-│   ├── basic_usage/         # 基础使用示例
-│   └── CMakeLists.txt
-│
-├── tests/                    # 单元测试
-│   ├── core/                # 核心模块测试
-│   └── CMakeLists.txt
-│
-└── CMakeLists.txt           # 主构建文件
-
+engine/
+├── core/                 # 引擎核心
+│   ├── include/         # 头文件
+│   │   └── tina/       
+│   │       ├── core/    # 核心类
+│   │       ├── window/  # 窗口管理
+│   │       ├── renderer/# 渲染系统
+│   │       ├── scene/   # 场景管理
+│   │       ├── event/   # 事件系统
+│   │       ├── components/# 组件系统
+│   │       └── utils/   # 工具类
+│   └── src/            # 源文件
+├── resources/          # 资源文件
+├── utils/             # 通用工具
+└── network/           # 网络模块
 ```
 
 ## 核心特性
