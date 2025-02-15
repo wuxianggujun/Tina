@@ -1,4 +1,4 @@
-$input v_color0, v_texcoord0
+$input v_color0, v_texcoord0,v_useTexture
 
 #include "common.sh"
 #include <bgfx_shader.sh>
@@ -12,12 +12,13 @@ uniform vec4 u_useTexture;
 void main()
 {
     vec4 color = v_color0;
-    
-    // 使用u_useTexture.x来判断是否使用纹理
-    if (u_useTexture.x > 0.0) {
-        vec4 texColor = texture2D(s_texColor, v_texcoord0);
-        color *= texColor;
+
+    // 同时检查全局纹理标志和实例纹理标志
+    if (u_useTexture.x > 0.0 && v_useTexture > 0.0) {
+       vec4 texColor = texture2D(s_texColor, v_texcoord0);
+       color *= texColor;
     }
+
     
     // 只有完全透明的片段才丢弃
     if (color.a <= 0.0) {
