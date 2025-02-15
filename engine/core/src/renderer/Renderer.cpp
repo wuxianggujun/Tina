@@ -1,5 +1,5 @@
-#include "../../include/tina/renderer/Renderer.hpp"
-#include <../../../../third_party/bgfx.cmake/bx/include/bx/math.h>
+#include "tina/renderer/Renderer.hpp"
+#include <bx/math.h>
 
 namespace Tina::Render
 {
