@@ -70,11 +70,22 @@ public:
     BatchRenderer2D(const BatchRenderer2D&) = delete;
     BatchRenderer2D& operator=(const BatchRenderer2D&) = delete;
 
+    uint16_t m_ViewId = 0;
+    void setViewId(uint16_t viewId) { m_ViewId = viewId; }
+    uint16_t getViewId() const { return m_ViewId; }
+
     void init(bgfx::ProgramHandle shader);
     void shutdown();
 
     void begin();
     void end();
+
+    void flushBatch(uint16_t viewId);
+
+    void setViewTransform(const glm::mat4& view,const glm::mat4& proj);
+    void setViewRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
+    void setViewClear(uint16_t flags, uint32_t rgba = 0x303030ff, float depth = 1.0f, uint8_t stencil = 0);
+
 
     // 快速绘制方法
     void drawQuad(const glm::vec2& position, const glm::vec2& size, const Color& color);
@@ -91,7 +102,6 @@ public:
 
 private:
     void createBuffers();
-    void flushBatch();  // 只保留一个flush函数
 
     bgfx::ProgramHandle m_Shader = BGFX_INVALID_HANDLE;
     bgfx::VertexBufferHandle m_VertexBuffer = BGFX_INVALID_HANDLE;

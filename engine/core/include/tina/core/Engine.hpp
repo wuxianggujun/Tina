@@ -16,7 +16,8 @@
 
 namespace Tina::Core
 {
-    class TINA_CORE_API Engine {
+    class TINA_CORE_API Engine
+    {
     public:
         Engine();
         virtual ~Engine();
@@ -26,6 +27,13 @@ namespace Tina::Core
         void shutdown();
         const char* getVersion() const;
         Context& getContext();
+
+        uint16_t allocateViewId() { return m_nextViewId++; }
+
+        void resetViewIds()
+        {
+            m_nextViewId = 0;
+        }
 
         UniformManager& getUniformManager() { return m_uniformManager; }
         TextureManager& getTextureManager() { return m_textureManager; }
@@ -51,13 +59,15 @@ namespace Tina::Core
         TextureManager m_textureManager;
         ShaderManager m_shaderManager;
 
-        Context& m_context;  // 改为引用
+        Context& m_context; // 改为引用
         WindowHandle m_mainWindow;
-        UniquePtr<Scene> m_activeScene;  // 当前活动场景
+        UniquePtr<Scene> m_activeScene; // 当前活动场景
         uint32_t m_windowWidth;
         uint32_t m_windowHeight;
-        bool m_isShutdown;  // 添加标志位以防止重复调用 shutdown
+        bool m_isShutdown; // 添加标志位以防止重复调用 shutdown
         bool m_isInitialized;
         static Engine* s_Instance;
+
+        std::atomic<uint16_t> m_nextViewId{0};
     };
 }

@@ -142,7 +142,7 @@ namespace Tina
                        sizeof(InstanceData));
     }
 
-    void BatchRenderer2D::flushBatch()
+    void BatchRenderer2D::flushBatch(uint16_t viewId)
     {
         if (m_QuadCount == 0) return;
 
@@ -172,12 +172,27 @@ namespace Tina
         bgfx::setInstanceDataBuffer(m_InstanceBuffer, 0, m_QuadCount);
         bgfx::setIndexBuffer(m_IndexBuffer);
         bgfx::setState(state);
-        bgfx::submit(0, m_Shader);
+        bgfx::submit(viewId, m_Shader);
 
         // 重置
         m_QuadCount = 0;
         m_Instances.clear();
         m_Textures.clear();
+    }
+
+    void BatchRenderer2D::setViewTransform(const glm::mat4& view, const glm::mat4& proj)
+    {
+        bgfx::setViewTransform(m_ViewId,glm::value_ptr(view), glm::value_ptr(proj));
+    }
+
+    void BatchRenderer2D::setViewRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height)
+    {
+        bgfx::setViewRect(m_ViewId, x, y, width, height);
+    }
+
+    void BatchRenderer2D::setViewClear(uint16_t flags, uint32_t rgba, float depth, uint8_t stencil)
+    {
+        bgfx::setViewClear(m_ViewId, flags, rgba, depth, stencil);
     }
 
     void BatchRenderer2D::shutdown()
@@ -251,7 +266,7 @@ namespace Tina
         if (m_QuadCount > 0)
         {
             TINA_PROFILE_SCOPE("Flush Batch");
-            flushBatch();
+            flushBatch(m_ViewId);
         }
 
         // 主动释放不再需要的GPU资源
@@ -273,7 +288,7 @@ namespace Tina
 
         if (m_QuadCount >= MAX_QUADS)
         {
-            flushBatch();
+            flushBatch(m_ViewId);
         }
 
         // 创建实例数据
@@ -296,7 +311,7 @@ namespace Tina
         {
             if (m_QuadCount >= MAX_QUADS)
             {
-                flushBatch();
+                flushBatch(m_ViewId);
             }
 
             // 创建新的实例，确保是非纹理quad
@@ -325,7 +340,7 @@ namespace Tina
 
         if (m_QuadCount >= MAX_QUADS)
         {
-            flushBatch();
+            flushBatch(m_ViewId);
         }
 
         // 查找或添加纹理
@@ -336,7 +351,7 @@ namespace Tina
         {
             if (m_Textures.size() >= MAX_TEXTURE_SLOTS)
             {
-                flushBatch();
+                flushBatch(m_ViewId);
                 m_Textures.clear();
             }
             textureIndex = static_cast<float>(m_Textures.size());
@@ -376,7 +391,7 @@ namespace Tina
             {
                 if (m_Textures.size() >= MAX_TEXTURE_SLOTS)
                 {
-                    flushBatch();
+                    flushBatch(m_ViewId);
                     m_Textures.clear();
                 }
                 m_Textures.push_back(texture);
@@ -388,7 +403,7 @@ namespace Tina
         {
             if (m_QuadCount >= MAX_QUADS)
             {
-                flushBatch();
+                flushBatch(m_ViewId);
             }
             m_Instances.push_back(instance);
             m_QuadCount++;

@@ -26,9 +26,27 @@ namespace Tina
             try
             {
                 TINA_LOG_INFO("Initializing Render2DLayer");
+
+                m_ViewId = Core::Engine::get().allocateViewId();
+                TINA_LOG_INFO("Allocated viewId: {}", m_ViewId);
+
                 initShaders();
                 initRenderer();
                 initCamera();
+
+                // 设置view参数
+                if (m_renderer && m_renderer->getBatchRenderer())
+                {
+                    m_renderer->getBatchRenderer()->setViewId(m_ViewId);
+
+                    uint32_t width, height;
+                    Core::Engine::get().getWindowSize(width, height);
+
+                    m_renderer->getBatchRenderer()->setViewRect(0, 0, width, height);
+                    m_renderer->getBatchRenderer()->setViewClear(
+                        BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH
+                    );
+                }
 
                 // 清除之前的数据
                 m_rectangles.clear();
@@ -81,7 +99,7 @@ namespace Tina
             // 即使发生错误也要尝试清理shader
             if (bgfx::isValid(m_shaderProgram))
             {
-                 Core::Engine::get().getShaderManager().destroyProgram(m_shaderProgram);
+                Core::Engine::get().getShaderManager().destroyProgram(m_shaderProgram);
                 m_shaderProgram = BGFX_INVALID_HANDLE;
             }
         }
@@ -105,11 +123,8 @@ namespace Tina
         try
         {
             rendering = true;
-            
-            // 在渲染开始前清理上一帧的数据
-            m_rectangles.clear();
-            m_texturedRectangles.clear();
-            
+
+
             // 每100帧收缩一次vectors
             static int frameCount = 0;
             if (++frameCount >= 100)
@@ -118,9 +133,9 @@ namespace Tina
                 m_rectangles.shrink_to_fit();
                 m_texturedRectangles.shrink_to_fit();
                 TINA_LOG_DEBUG("Shrunk instance vectors - Rectangles capacity: {}, Textured rectangles capacity: {}",
-                    m_rectangles.capacity(), m_texturedRectangles.capacity());
+                               m_rectangles.capacity(), m_texturedRectangles.capacity());
             }
-            
+
             m_renderer->beginScene(m_camera);
 
             // 渲染场景中的实体
@@ -128,14 +143,15 @@ namespace Tina
             {
                 m_sceneRenderer->render(scene, *m_renderer);
             }
-            
+
             // 输出当前内存使用情况
-            size_t totalMemoryUsage = 
+            size_t totalMemoryUsage =
                 m_rectangles.capacity() * sizeof(BatchRenderer2D::InstanceData) +
-                m_texturedRectangles.capacity() * (sizeof(BatchRenderer2D::InstanceData) + sizeof(std::shared_ptr<Texture2D>));
-                
+                m_texturedRectangles.capacity() * (sizeof(BatchRenderer2D::InstanceData) + sizeof(std::shared_ptr<
+                    Texture2D>));
+
             TINA_LOG_DEBUG("Total rendering memory usage: {} bytes", totalMemoryUsage);
-            
+
             m_renderer->endScene();
         }
         catch (const std::exception& e)
@@ -164,15 +180,43 @@ namespace Tina
             if (bgfx::getInternalData() && bgfx::getInternalData()->context)
             {
                 bgfx::reset(width, height, BGFX_RESET_VSYNC);
-                bgfx::setViewRect(0, 0, 0, uint16_t(width), uint16_t(height));
-                TINA_LOG_DEBUG("View rect updated: {}x{}", width, height);
+                bgfx::setViewRect(m_ViewId, 0, 0, uint16_t(width), uint16_t(height));
             }
+
+            if (m_renderer && m_renderer->getBatchRenderer())
+            {
+                m_renderer->getBatchRenderer()->setViewRect(0, 0, width, height);
+            }
+
             event.handled = true;
         }
         // 让相机处理其他事件
         if (m_camera && !event.handled)
         {
             m_camera->onEvent(event);
+        }
+    }
+
+    void Render2DLayer::setViewId(uint16_t viewId)
+    {
+        m_ViewId = viewId;
+
+        if (m_renderer)
+        {
+            m_renderer->setViewId(viewId);  // 设置到Renderer2D
+            if (m_renderer->getBatchRenderer())
+            {
+                m_renderer->getBatchRenderer()->setViewId(viewId);
+
+                uint32_t width, height;
+                Core::Engine::get().getWindowSize(width, height);
+
+                m_renderer->getBatchRenderer()->setViewRect(viewId, 0, width, height);
+                m_renderer->getBatchRenderer()->setViewClear(
+                    BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                    0x303030ff, 1.0f, 0
+                );
+            }
         }
     }
 
@@ -187,18 +231,18 @@ namespace Tina
         instance.Transform = glm::vec4(position.x, position.y, size.x, size.y);
         instance.Color = glm::vec4(color.getR(), color.getG(), color.getB(), color.getA());
         instance.TextureData = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
-        instance.TextureInfo = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f);  // 非纹理quad
-        
+        instance.TextureInfo = glm::vec4(-1.0f, 0.0f, 0.0f, 0.0f); // 非纹理quad
+
         // 预分配一定大小以减少重新分配
         if (m_rectangles.empty())
         {
             m_rectangles.reserve(100);
         }
-        
-        TINA_LOG_DEBUG("Rectangle instances count: {}, Memory usage: {} bytes", 
-            m_rectangles.size(), 
-            m_rectangles.size() * sizeof(BatchRenderer2D::InstanceData));
-        
+
+        TINA_LOG_DEBUG("Rectangle instances count: {}, Memory usage: {} bytes",
+                       m_rectangles.size(),
+                       m_rectangles.size() * sizeof(BatchRenderer2D::InstanceData));
+
         m_rectangles.push_back(instance);
     }
 
@@ -225,23 +269,27 @@ namespace Tina
             m_texturedRectangles.reserve(100);
         }
 
-        TINA_LOG_DEBUG("Textured rectangle instances count: {}, Memory usage: {} bytes", 
-            m_texturedRectangles.size(),
-            m_texturedRectangles.size() * (sizeof(BatchRenderer2D::InstanceData) + sizeof(std::shared_ptr<Texture2D>)));
+        TINA_LOG_DEBUG("Textured rectangle instances count: {}, Memory usage: {} bytes",
+                       m_texturedRectangles.size(),
+                       m_texturedRectangles.size() * (sizeof(BatchRenderer2D::InstanceData) + sizeof(std::shared_ptr<
+                           Texture2D>)));
 
         m_texturedRectangles.push_back({instance, texture});
     }
 
     void Render2DLayer::initShaders()
     {
-        try {
+        try
+        {
             m_shaderProgram = Core::Engine::get().getShaderManager().createProgram("2d");
             if (!bgfx::isValid(m_shaderProgram))
             {
                 throw std::runtime_error("Failed to create 2D shader program");
             }
             TINA_LOG_INFO("Successfully loaded 2D shaders");
-        } catch (const std::exception& e) {
+        }
+        catch (const std::exception& e)
+        {
             TINA_LOG_ERROR("Failed to initialize shaders: {}", e.what());
             if (bgfx::isValid(m_shaderProgram))
             {
@@ -256,6 +304,7 @@ namespace Tina
     {
         m_renderer = MakeUnique<Renderer2D>();
         m_renderer->init(m_shaderProgram);
+        m_renderer->setViewId(m_ViewId);
         m_sceneRenderer = MakeUnique<Scene2DRenderer>();
     }
 

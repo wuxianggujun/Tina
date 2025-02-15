@@ -36,7 +36,7 @@ namespace Tina
             const auto& view = m_Camera->getViewMatrix();
             const auto& proj = m_Camera->getProjectionMatrix();
 
-            bgfx::setViewTransform(0,
+            bgfx::setViewTransform(m_ViewId,
                                    glm::value_ptr(view),
                                    glm::value_ptr(proj)
             );

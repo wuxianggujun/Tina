@@ -28,6 +28,8 @@ namespace Tina
         void onRender() override;
         void onEvent(Event& event) override;
 
+        void setViewId(uint16_t viewId);
+        uint16_t getViewId() const { return m_ViewId; }
 
         // 加载纹理
         std::shared_ptr<Texture2D> loadTexture(const std::string& name, const std::string& path);
@@ -48,6 +50,8 @@ namespace Tina
         void initRenderer();
 
         void initCamera();
+
+        uint16_t m_ViewId = 0;
 
         UniquePtr<Renderer2D> m_renderer;
         UniquePtr<Scene2DRenderer> m_sceneRenderer;

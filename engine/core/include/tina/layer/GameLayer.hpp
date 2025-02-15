@@ -19,12 +19,14 @@ namespace Tina
     public:
         GameLayer(Scene& scene)
             : Layer("GameLayer")
-            , m_scene(scene)
+              , m_scene(scene)
         {
             m_render2DLayer = findRender2DLayer();
             if (!m_render2DLayer)
             {
                 m_render2DLayer = new Render2DLayer();
+                // 设置viewId
+                // m_render2DLayer->setViewId(Core::Engine::get().allocateViewId());
                 m_scene.pushLayer(m_render2DLayer);
             }
         }
@@ -48,13 +50,13 @@ namespace Tina
 
             // 创建实体和组件
             auto entity = m_scene.createEntity(name);
-            
+
             // 添加Transform组件
             auto& transform = m_scene.addComponent<Transform2DComponent>(entity);
-            
+
             // 添加Sprite组件,将texture作为构造参数传入
             auto& sprite = m_scene.addComponent<SpriteComponent>(entity, texture);
-            
+
             // 设置Transform引用
             sprite.setTransform(&transform);
 
@@ -65,25 +67,28 @@ namespace Tina
         RectangleComponent& createRectangle(const glm::vec2& position, const glm::vec2& size, const Color& color)
         {
             auto entity = m_scene.createEntity("Rectangle");
-            
+
             // 添加Transform组件
             auto& transform = m_scene.addComponent<Transform2DComponent>(entity);
             transform.setPosition(position);
-            
+
             // 添加Rectangle组件
             auto& rectangle = m_scene.addComponent<RectangleComponent>(entity);
             rectangle.setSize(size);
             rectangle.setColor(color);
-            rectangle.setTransform(&transform);  // 设置Transform引用
-            
+            rectangle.setTransform(&transform); // 设置Transform引用
+
             return rectangle;
         }
 
         // 在GameLayer中管理精灵
-        void setSpritePriority(const std::string& name, int layer) {
+        void setSpritePriority(const std::string& name, int layer)
+        {
             auto view = m_scene.getRegistry().view<SpriteComponent>();
-            for (auto entity : view) {
-                if (m_scene.getEntityName(entity) == name) {
+            for (auto entity : view)
+            {
+                if (m_scene.getEntityName(entity) == name)
+                {
                     auto& sprite = view.get<SpriteComponent>(entity);
                     sprite.setLayer(layer);
                     break;
@@ -92,12 +97,14 @@ namespace Tina
         }
 
         // 动态改变渲染顺序
-        void bringToFront(const std::string& name) {
+        void bringToFront(const std::string& name)
+        {
             auto view = m_scene.getRegistry().view<SpriteComponent>();
             int maxLayer = 0;
 
             // 找到当前最高层
-            for (auto entity : view) {
+            for (auto entity : view)
+            {
                 auto& sprite = view.get<SpriteComponent>(entity);
                 maxLayer = std::max(maxLayer, sprite.getLayer());
             }

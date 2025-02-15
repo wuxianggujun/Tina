@@ -23,6 +23,8 @@ namespace Tina
         void init(bgfx::ProgramHandle shader);
         void shutdown();
 
+        void setViewId(uint16_t viewId){m_ViewId = viewId;}
+
         void beginScene(const SharedPtr<OrthographicCamera>& camera);
         void endScene();
 
@@ -36,6 +38,7 @@ namespace Tina
         [[nodiscard]] BatchRenderer2D* getBatchRenderer() const { return m_BatchRenderer.get(); }
 
     private:
+        uint16_t m_ViewId = 0;
         UniquePtr<BatchRenderer2D> m_BatchRenderer;
         SharedPtr<OrthographicCamera> m_Camera;
         bool m_sceneInProgress = false;
