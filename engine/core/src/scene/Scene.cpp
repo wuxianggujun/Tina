@@ -5,16 +5,21 @@
 #include "bgfx/platform.h"
 #include "tina/log/Logger.hpp"
 #include "tina/event/Event.hpp"
-#include "tina/layer/Layer.hpp"
 #include "tina/utils/Profiler.hpp"
 
 namespace Tina
 {
     Scene::Scene(std::string name)
-        : m_name(std::move(name)) // 最先初始化
+        : m_name(std::move(name)),
+          m_rootView(new View("RootView"))
     {
         TINA_PROFILE_FUNCTION();
         TINA_LOG_INFO("Created scene: {}", m_name);
+        // 获取当前窗口大小
+        uint32_t width, height;
+        Core::Engine::get().getWindowSize(width, height);
+        m_rootView->setViewPort(Rect(0, 0, width, height));
+        m_rootView->onAttach();
     }
 
     Scene::~Scene()
@@ -26,19 +31,17 @@ namespace Tina
             std::string sceneName = m_name;
             TINA_LOG_INFO("Destroying scene: {}", sceneName);
 
-            // 1. 先清理LayerStack
-            m_layerStack.clear();
+            if (m_rootView)
+            {
+                m_rootView->onDetach();
+                delete m_rootView;
+            }
 
             // 只在真正需要时执行渲染同步
             if (bgfx::getInternalData() && bgfx::getInternalData()->context)
             {
                 bgfx::frame(false); // 使用 false 参数避免等待 VSync
             }
-
-            // 清理实体注册表
-            TINA_LOG_DEBUG("Clearing entity registry");
-            m_registry.clear();
-            TINA_LOG_INFO("Scene destroyed: {}", sceneName);
         }
         catch (const std::exception& e)
         {
@@ -46,111 +49,74 @@ namespace Tina
         }
     }
 
-    entt::entity Scene::createEntity(const std::string& name)
-    {
-        TINA_PROFILE_FUNCTION();
-        entt::entity entity = m_registry.create();
-        m_registry.emplace<std::string>(entity, name);
-        return entity;
-    }
-
-    void Scene::destroyEntity(entt::entity entity)
-    {
-        TINA_PROFILE_FUNCTION();
-        if (m_registry.valid(entity))
-        {
-            std::string name = getEntityName(entity);
-            m_registry.destroy(entity);
-            TINA_LOG_INFO("Destroyed entity: {} in scene: {}", name, m_name);
-        }
-    }
-
-    std::string Scene::getEntityName(entt::entity entity) const
-    {
-        TINA_PROFILE_FUNCTION();
-        if (m_registry.valid(entity))
-        {
-            if (auto* name = m_registry.try_get<std::string>(entity))
-            {
-                return *name;
-            }
-        }
-        return "Invalid Entity";
-    }
-
-    void Scene::setEntityName(entt::entity entity, const std::string& name)
-    {
-        TINA_PROFILE_FUNCTION();
-        if (m_registry.valid(entity))
-        {
-            m_registry.replace<std::string>(entity, name);
-            TINA_LOG_INFO("Renamed entity to: {} in scene: {}", name, m_name);
-        }
-    }
-
     void Scene::onUpdate(float deltaTime)
     {
         TINA_PROFILE_FUNCTION();
         TINA_PROFILE_PLOT("Scene Delta Time", deltaTime);
-        
-        for (Layer* layer : m_layerStack)
+
+        if (m_rootView)
         {
-            TINA_PROFILE_SCOPE("Layer Update");
-            layer->onUpdate(deltaTime);
+            m_rootView->onUpdate(deltaTime);
         }
     }
 
-    void Scene::onRender()
+    void Scene::addView(View* view)
     {
-        TINA_PROFILE_FUNCTION();
-        
-        for (Layer* layer : m_layerStack)
+        if (view)
         {
-            TINA_PROFILE_SCOPE("Layer Render");
-            layer->onRender();
+            m_rootView->addChild(view);
         }
-        
-        TINA_PROFILE_FRAME();
     }
 
-    void Scene::onImGuiRender()
+    void Scene::removeView(View* view)
     {
-        TINA_PROFILE_FUNCTION();
-        
-        for (Layer* layer : m_layerStack)
+        if (view)
         {
-            TINA_PROFILE_SCOPE("Layer ImGui Render");
-            layer->onImGuiRender();
+            m_rootView->removeChild(view);
         }
     }
 
     void Scene::onEvent(Event& event)
     {
-        TINA_PROFILE_FUNCTION();
-        
-        // 从后向前遍历，使最上层的Layer先处理事件
-        for (auto it = m_layerStack.end(); it != m_layerStack.begin();)
+        TINA_LOG_DEBUG("Scene: Received event type {}", static_cast<int>(event.type));
+
+        // 直接传递事件给根视图
+        if (m_rootView)
         {
-            TINA_PROFILE_SCOPE("Layer Event");
-            (*--it)->onEvent(event);
-            if (event.handled)
-            {
-                break;
-            }
+            m_rootView->onEvent(event);
         }
     }
 
-    void Scene::pushLayer(Layer* layer)
+    void Scene::onRender()
     {
-        TINA_PROFILE_FUNCTION();
-        layer->setScene(this);
-        m_layerStack.pushLayer(layer);
+        if (m_rootView)
+        {
+            // 渲染视图树
+            renderView(m_rootView);
+            // 在所有View渲染完成后,提交这一帧
+            bgfx::frame();
+        }
     }
 
-    void Scene::pushOverlay(Layer* overlay)
+    void Scene::renderView(View* view)
     {
-        TINA_PROFILE_FUNCTION();
-        overlay->setScene(this);
-        m_layerStack.pushOverlay(overlay);
+        if (!view || !view->isVisible()) return;
+        // 开始渲染
+        view->beginRender();
+
+        // 如果是GameView,渲染场景实体
+        if (auto* gameView = dynamic_cast<GameView*>(view))
+        {
+            gameView->render(this);
+        }
+
+        // 渲染子视图
+        for (auto* child : view->getChildren())
+        {
+            renderView(dynamic_cast<View*>(child));
+        }
+
+        // 结束渲染
+        view->endRender();
     }
 } // namespace Tina

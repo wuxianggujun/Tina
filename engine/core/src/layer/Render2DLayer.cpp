@@ -6,6 +6,7 @@
 #include "tina/layer/Render2DLayer.hpp"
 #include "tina/log/Logger.hpp"
 
+/*
 namespace Tina
 {
     Render2DLayer::Render2DLayer() : Layer("Render2DLayer")
@@ -321,3 +322,4 @@ namespace Tina
         TINA_LOG_INFO("Camera initialized with screen space projection {}x{}", width, height);
     }
 }
+*/

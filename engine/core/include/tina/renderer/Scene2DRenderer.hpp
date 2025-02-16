@@ -5,13 +5,16 @@
 #pragma once
 
 #include "tina/core/Core.hpp"
-#include "tina/scene/Scene.hpp"
 #include "tina/renderer/Renderer2D.hpp"
 #include <vector>
 #include <unordered_map>
+#include <entt/entity/registry.hpp>
 
+/*
 namespace Tina
 {
+    class Scene;
+
     class TINA_CORE_API Scene2DRenderer
     {
     public:
@@ -35,3 +38,4 @@ namespace Tina
         std::unordered_map<entt::entity, EntityState> m_EntityStates;
     };
 } // namespace Tina
+*/

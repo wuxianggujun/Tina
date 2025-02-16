@@ -7,6 +7,7 @@
 #include "tina/components/SpriteComponent.hpp"
 #include "tina/components/RectangleComponent.hpp"
 
+/*
 namespace Tina
 {
     Scene2DRenderer::Scene2DRenderer()
@@ -156,3 +157,4 @@ namespace Tina
         }
     }
 } // Tina
+*/

@@ -6,13 +6,14 @@
 #include "tina/core/Core.hpp"
 #include "tina/core/Context.hpp"
 #include "tina/window/Window.hpp"
-#include "tina/scene/Scene.hpp"
-#include <memory>
-#include <string>
-
 #include "tina/renderer/ShaderManager.hpp"
 #include "tina/renderer/TextureManager.hpp"
 #include "tina/renderer/UniformManager.hpp"
+
+namespace Tina
+{
+    class Scene;
+}
 
 namespace Tina::Core
 {
@@ -27,13 +28,6 @@ namespace Tina::Core
         void shutdown();
         const char* getVersion() const;
         Context& getContext();
-
-        uint16_t allocateViewId() { return m_nextViewId++; }
-
-        void resetViewIds()
-        {
-            m_nextViewId = 0;
-        }
 
         UniformManager& getUniformManager() { return m_uniformManager; }
         TextureManager& getTextureManager() { return m_textureManager; }
@@ -67,7 +61,5 @@ namespace Tina::Core
         bool m_isShutdown; // 添加标志位以防止重复调用 shutdown
         bool m_isInitialized;
         static Engine* s_Instance;
-
-        std::atomic<uint16_t> m_nextViewId{0};
     };
 }

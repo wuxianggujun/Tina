@@ -13,6 +13,7 @@
 #include <windows.h>
 #endif
 #include "tina/core/Timer.hpp"
+#include "tina/scene/Scene.hpp"
 #include "tina/renderer/RenderCommand.hpp"
 #include "tina/renderer/ShaderManager.hpp"
 #include "tina/renderer/TextureManager.hpp"
@@ -62,7 +63,7 @@ namespace Tina::Core
             }
 
             // 创建主窗口
-            Window::WindowConfig config;
+            Window::WindowConfig config{};
             config.width = m_windowWidth;
             config.height = m_windowHeight;
             config.title = "Tina Engine";
@@ -89,17 +90,6 @@ namespace Tina::Core
                 TINA_LOG_ERROR("Failed to initialize bgfx");
                 return false;
             }
-
-            // 设置视口
-            bgfx::setViewClear(0
-                               , BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH
-                               , 0x303030ff
-                               , 1.0f
-                               , 0
-            );
-
-            bgfx::setViewRect(0, 0, 0, uint16_t(m_windowWidth), uint16_t(m_windowHeight));
-
             m_isInitialized = true;
             TINA_LOG_INFO("Engine initialized successfully");
             return true;
@@ -291,20 +281,12 @@ namespace Tina::Core
         {
             bool running = true;
             Timer timer(true);
-            const float targetFrameTime = 1.0f / 60.0f;
+            constexpr float targetFrameTime = 1.0f / 60.0f;
 
             while (running && !m_isShutdown)
             {
                 float deltaTime = timer.getSeconds(true);
                 timer.reset();
-
-                // 每100帧输出一次内存统计
-                static int frameCount = 0;
-                if (++frameCount >= 100)
-                {
-                    frameCount = 0;
-                    logMemoryStats();
-                }
 
                 // 处理窗口事件
                 m_context.getWindowManager().pollEvents();
@@ -322,14 +304,11 @@ namespace Tina::Core
 
                     if (event.type == Event::WindowResize)
                     {
-                        // 确保引擎层面也处理窗口大小改变
+                        // 只更新内部状态
                         m_windowWidth = event.windowResize.width;
                         m_windowHeight = event.windowResize.height;
-                        TINA_LOG_INFO("Render2DLayer: Window resized to {}x{}",
-                                      event.windowResize.width,
-                                      event.windowResize.height);
                     }
-
+                    // 无论Engine是否处理了事件,都传递给Scene
                     if (m_activeScene)
                     {
                         m_activeScene->onEvent(event);
@@ -337,27 +316,12 @@ namespace Tina::Core
                 }
 
                 // 检查窗口是否应该关闭
-                Window* mainWindow = m_context.getWindowManager().getWindow(m_mainWindow);
+                const Window* mainWindow = m_context.getWindowManager().getWindow(m_mainWindow);
                 if (!mainWindow || mainWindow->shouldClose())
                 {
                     running = false;
                     continue;
                 }
-
-                // 设置视口
-                bgfx::setViewRect(0, 0, 0,
-                                  uint16_t(mainWindow->getWidth()),
-                                  uint16_t(mainWindow->getHeight()));
-
-                // 清除背景
-                bgfx::setViewClear(0,
-                                   BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                                   0x303030ff,
-                                   1.0f,
-                                   0);
-
-                // 触摸视口
-                bgfx::touch(0);
 
                 // 更新和渲染场景
                 if (m_activeScene)
@@ -366,15 +330,10 @@ namespace Tina::Core
                     m_activeScene->onRender();
                 }
 
-                // 提交帧
-                bgfx::frame();
-
                 // 帧率限制
-                float frameTime = timer.getSeconds(true);
-                if (frameTime < targetFrameTime)
+                if (const float frameTime = timer.getSeconds(true); frameTime < targetFrameTime)
                 {
-                    float sleepTime = (targetFrameTime - frameTime) * 1000.0f;
-                    if (sleepTime > 0)
+                    if (const float sleepTime = (targetFrameTime - frameTime) * 1000.0f; sleepTime > 0)
                     {
                         std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int64_t>(sleepTime)));
                     }

@@ -293,7 +293,9 @@ namespace Tina
     void WindowManager::eventCallback_windowSize(WindowHandle handle, GLFWwindow* window, int32_t width, int32_t height)
     {
         // 创建窗口大小改变事件
+        TINA_LOG_DEBUG("Creating WindowResize event: {}x{}", width, height);
         Event event = createWindowResizeEvent(handle, width, height);
+        TINA_LOG_DEBUG("Created event type: {}", static_cast<int>(event.type));
         m_context->getEventQueue().pushEvent(event);
 
     }

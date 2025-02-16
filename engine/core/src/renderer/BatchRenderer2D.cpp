@@ -180,21 +180,6 @@ namespace Tina
         m_Textures.clear();
     }
 
-    void BatchRenderer2D::setViewTransform(const glm::mat4& view, const glm::mat4& proj)
-    {
-        bgfx::setViewTransform(m_ViewId,glm::value_ptr(view), glm::value_ptr(proj));
-    }
-
-    void BatchRenderer2D::setViewRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height)
-    {
-        bgfx::setViewRect(m_ViewId, x, y, width, height);
-    }
-
-    void BatchRenderer2D::setViewClear(uint16_t flags, uint32_t rgba, float depth, uint8_t stencil)
-    {
-        bgfx::setViewClear(m_ViewId, flags, rgba, depth, stencil);
-    }
-
     void BatchRenderer2D::shutdown()
     {
         TINA_PROFILE_FUNCTION();

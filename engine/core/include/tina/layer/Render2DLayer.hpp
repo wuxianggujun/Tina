@@ -12,6 +12,7 @@
 #include "tina/renderer/Renderer2D.hpp"
 #include "tina/renderer/Scene2DRenderer.hpp"
 
+/*
 namespace Tina
 {
     class Render2DLayer : public Layer
@@ -70,3 +71,4 @@ namespace Tina
         std::vector<TexturedRectangle> m_texturedRectangles;
     };
 } // namespace Tina
+*/
