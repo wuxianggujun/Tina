@@ -8,6 +8,8 @@
 #include "tina/renderer/BatchRenderer2D.hpp"
 #include "tina/renderer/Scene2DRenderer.hpp"
 #include "tina/view/View.hpp"
+#include "tina/resources/ResourceManager.hpp"
+#include "tina/resources/TextureLoader.hpp"
 
 namespace Tina
 {
@@ -21,9 +23,9 @@ namespace Tina
         }
 
         // 加载纹理
-        std::shared_ptr<Texture2D> loadTexture(const std::string& name, const std::string& path)
+        std::shared_ptr<Texture2D> loadTexture(const std::string& path)
         {
-            return Core::Engine::get().getTextureManager().loadTexture(name, path);
+            return ResourceManager::getInstance().load<Texture2D>(path);
         }
 
         // 创建矩形
@@ -50,7 +52,7 @@ namespace Tina
                                      const glm::vec4& textureCoords = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f),
                                      const Color& tint = Color::White)
         {
-            auto texture = Core::Engine::get().getTextureManager().getTexture(textureName);
+            auto texture = ResourceManager::getInstance().get<Texture2D>(textureName);
             if (!texture)
             {
                 TINA_LOG_WARN("Texture '{}' not found", textureName);

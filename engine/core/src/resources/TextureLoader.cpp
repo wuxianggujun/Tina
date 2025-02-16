@@ -11,6 +11,7 @@ std::shared_ptr<Resource> TextureLoader::load(const std::string& path) {
     try {
         auto texture = std::make_shared<Texture2D>();
         if (loadTextureData(path, texture.get())) {
+            texture->setPath(path);
             TINA_LOG_INFO("Successfully loaded texture: {}", path);
             return texture;
         }
@@ -40,16 +41,11 @@ bool TextureLoader::reload(Resource* resource) {
             return false;
         }
 
-        // 创建临时纹理
-        auto tempTexture = std::make_shared<Texture2D>();
-        if (!loadTextureData(path, tempTexture.get())) {
+        // 重新加载纹理数据
+        if (!loadTextureData(path, texture)) {
             TINA_LOG_ERROR("Failed to reload texture data: {}", path);
             return false;
         }
-
-        // 更新原始纹理 - 使用data()获取vector的底层指针
-        const auto& textureData = tempTexture->getData();
-        texture->update(textureData.data(), tempTexture->getWidth(), tempTexture->getHeight());
         
         TINA_LOG_INFO("Successfully reloaded texture: {}", path);
         return true;
@@ -62,29 +58,29 @@ bool TextureLoader::reload(Resource* resource) {
 
 bool TextureLoader::loadTextureData(const std::string& path, Texture2D* texture) {
     TINA_PROFILE_FUNCTION();
-    
-    // 加载图像数据
+
     int width, height, channels;
     stbi_set_flip_vertically_on_load(true);
-    unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, 4);
     
+    // 加载图像数据
+    unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
     if (!data) {
-        TINA_LOG_ERROR("Failed to load image data: {}", stbi_failure_reason());
+        TINA_LOG_ERROR("Failed to load image: {}", path);
         return false;
     }
 
-    // 创建纹理
-    try {
-        texture->create(data, width, height);
-        texture->setPath(path);
-        stbi_image_free(data);
-        return true;
-    }
-    catch (const std::exception& e) {
-        TINA_LOG_ERROR("Failed to create texture: {}", e.what());
-        stbi_image_free(data);
-        return false;
-    }
+    // 将数据存储到纹理对象
+    size_t dataSize = width * height * 4; // RGBA = 4 channels
+    std::vector<uint8_t> textureData(data, data + dataSize);
+    texture->setData(std::move(textureData));
+    
+    // 创建BGFX纹理
+    texture->create(data, width, height);
+    
+    // 释放stb_image分配的内存
+    stbi_image_free(data);
+    
+    return true;
 }
 
-} // namespace Tina 
+} // namespace Tina

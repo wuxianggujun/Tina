@@ -18,6 +18,8 @@
 #include "tina/renderer/ShaderManager.hpp"
 #include "tina/renderer/TextureManager.hpp"
 #include <psapi.h> // Windows内存信息API
+#include "tina/resources/ResourceManager.hpp"
+#include "tina/resources/TextureLoader.hpp"
 
 namespace Tina::Core
 {
@@ -90,6 +92,11 @@ namespace Tina::Core
                 TINA_LOG_ERROR("Failed to initialize bgfx");
                 return false;
             }
+
+            // 注册资源加载器
+            auto& resourceManager = ResourceManager::getInstance();
+            resourceManager.registerLoader<Texture2D>(std::make_unique<TextureLoader>());
+
             m_isInitialized = true;
             TINA_LOG_INFO("Engine initialized successfully");
             return true;
