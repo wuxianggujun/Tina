@@ -101,22 +101,22 @@ namespace Tina
 
         // 左上
         vertices[0].Position = {0.0f, 0.0f, 0.0f};
-        vertices[0].TexCoord = {0.0f, 0.0f};
+        vertices[0].TexCoord = {0.0f, 1.0f};
         vertices[0].Color = 0xFFFFFFFF;
 
         // 右上
         vertices[1].Position = {1.0f, 0.0f, 0.0f};
-        vertices[1].TexCoord = {1.0f, 0.0f};
+        vertices[1].TexCoord = {1.0f, 1.0f};
         vertices[1].Color = 0xFFFFFFFF;
 
         // 右下
         vertices[2].Position = {1.0f, 1.0f, 0.0f};
-        vertices[2].TexCoord = {1.0f, 1.0f};
+        vertices[2].TexCoord = {1.0f, 0.0f};
         vertices[2].Color = 0xFFFFFFFF;
 
         // 左下
         vertices[3].Position = {0.0f, 1.0f, 0.0f};
-        vertices[3].TexCoord = {0.0f, 1.0f};
+        vertices[3].TexCoord = {0.0f, 0.0f};
         vertices[3].Color = 0xFFFFFFFF;
 
         // 创建顶点缓冲
