@@ -7,6 +7,7 @@
 #include <vector>
 #include <memory>
 #include <mutex>
+#include <glm/gtc/type_ptr.hpp>
 
 namespace Tina {
 
@@ -82,11 +83,6 @@ public:
 
     void flushBatch(uint16_t viewId);
 
-    void setViewTransform(const glm::mat4& view,const glm::mat4& proj);
-    void setViewRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
-    void setViewClear(uint16_t flags, uint32_t rgba = 0x303030ff, float depth = 1.0f, uint8_t stencil = 0);
-
-
     // 快速绘制方法
     void drawQuad(const glm::vec2& position, const glm::vec2& size, const Color& color);
     void drawQuads(const std::vector<InstanceData>& instances);
@@ -99,6 +95,18 @@ public:
 
     void drawTexturedQuads(const std::vector<InstanceData>& instances,
                           const std::vector<std::shared_ptr<Texture2D>>& textures);
+
+    void setViewRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height) {
+        bgfx::setViewRect(m_ViewId, x, y, width, height);
+    }
+
+    void setViewClear(uint16_t flags, uint32_t rgba = 0x000000ff, float depth = 1.0f, uint8_t stencil = 0) {
+        bgfx::setViewClear(m_ViewId, flags, rgba, depth, stencil);
+    }
+
+    void setViewTransform(const glm::mat4& view, const glm::mat4& proj) {
+        bgfx::setViewTransform(m_ViewId, glm::value_ptr(view), glm::value_ptr(proj));
+    }
 
 private:
     void createBuffers();

@@ -46,6 +46,10 @@ namespace Tina
             this->zOrder = zOrder;
         }
 
+        // 获取节点名称
+        [[nodiscard]] const std::string& getName() const { return name; }
+        void setName(const std::string& nodeName) { name = nodeName; }
+
         void addChild(Node* child)
         {
             if (child->parent)

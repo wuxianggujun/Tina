@@ -15,10 +15,13 @@ void main()
 
     // 同时检查全局纹理标志和实例纹理标志
     if (u_useTexture.x > 0.0 && v_useTexture > 0.0) {
-       vec4 texColor = texture2D(s_texColor, v_texcoord0);
-       color *= texColor;
+        // 采样纹理并应用颜色
+        vec4 texColor = texture2D(s_texColor, v_texcoord0);
+        
+        // 预乘alpha
+        texColor.rgb *= texColor.a;
+        color *= texColor;
     }
-
     
     // 只有完全透明的片段才丢弃
     if (color.a <= 0.0) {

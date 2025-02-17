@@ -18,7 +18,7 @@ namespace Tina
     class TINA_CORE_API TextureManager
     {
     public:
-        TextureManager() = default;
+        TextureManager();
         ~TextureManager();
 
         // 禁止拷贝和赋值

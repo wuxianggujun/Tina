@@ -1,154 +1,134 @@
 #include <tina/core/Engine.hpp>
-#include <tina/layer/Render2DLayer.hpp>
-#include <tina/layer/GameLayer.hpp>
-#include <glm/glm.hpp>
-#include "tina/scene/Scene.hpp"
-#include "tina/log/Logger.hpp"
-#include "tina/renderer/Color.hpp"
+#include <tina/scene/Scene.hpp>
+#include <tina/view/GameView.hpp>
+#include <tina/components/Transform2DComponent.hpp>
+#include <tina/components/SpriteComponent.hpp>
+#include <tina/components/RectangleComponent.hpp>
+#include <tina/log/Logger.hpp>
+#include <tina/renderer/Color.hpp>
 #include <random>
 
 using namespace Tina;
 
-// 自定义游戏层
-// class MyGameLayer : public GameLayer
-// {
-// public:
-//     MyGameLayer(Scene& scene) : GameLayer(scene)
-//     {
-//     }
-//
-//     void onAttach() override
-//     {
-//         // 创建5个test纹理精灵
-//         for(int i = 0; i < 5; i++) {
-//             auto& sprite = createSprite("test" + std::to_string(i), "resources/textures/test.png");
-//             sprite.setLayer(0);
-//             // 设置位置 - 横向排列
-//             sprite.setPosition({i * 150.0f, 50.0f});
-//             sprite.setScale({0.2f, 0.2f}); // 缩小一点以便显示更多
-//         }
-//
-//         // 创建95个纯色矩形
-//         std::random_device rd;
-//         std::mt19937 gen(rd());
-//         std::uniform_real_distribution<float> colorDist(0.0f, 1.0f);
-//
-//         int rows = 10;
-//         int cols = 10;
-//         float rectWidth = 50.0f;
-//         float rectHeight = 50.0f;
-//         float spacing = 10.0f;
-//         float startX = 50.0f;
-//         float startY = 200.0f;
-//
-//         for(int i = 0; i < 95; i++) {
-//             int row = i / cols;
-//             int col = i % cols;
-//
-//             // 生成随机颜色
-//             Color randomColor(
-//                 colorDist(gen),
-//                 colorDist(gen),
-//                 colorDist(gen),
-//                 1.0f
-//             );
-//
-//             // 计算位置
-//             float x = startX + col * (rectWidth + spacing);
-//             float y = startY + row * (rectHeight + spacing);
-//
-//             // 创建矩形
-//             auto& rect = createRectangle({x, y}, {rectWidth, rectHeight}, randomColor);
-//             rect.setLayer(1); // 设置在精灵后面
-//         }
-//
-//         TINA_LOG_INFO("Created 5 sprites and 95 rectangles");
-//     }
-//
-//     void onUpdate(float deltaTime) override
-//     {
-//         // 更新玩家位置
-//         if (auto* transform = m_scene.getRegistry().try_get<Transform2DComponent>(m_playerEntity))
-//         {
-//             auto pos = transform->getPosition();
-//             // 简单的移动逻辑
-//             pos.x += m_velocity.x * deltaTime;
-//             pos.y += m_velocity.y * deltaTime;
-//             transform->setPosition(pos);
-//         }
-//     }
-//
-//     void onEvent(Event& event) override
-//     {
-//         // 处理输入事件来更新速度
-//         // TODO: 添加输入处理
-//     }
-//
-// private:
-//     entt::entity m_playerEntity;
-//     glm::vec2 m_velocity{50.0f, 0.0f}; // 默认向右移动
-// };
+// 创建测试实体
+void createTestEntities(Scene* scene) {
+    auto& registry = scene->getRegistry();
+    
+    // 创建5个精灵实体
+    for (int i = 0; i < 5; i++) {
+        auto entity = registry.create();
+        
+        // 添加Transform组件
+        auto& transform = registry.emplace<Transform2DComponent>(entity);
+        transform.setPosition({i * 150.0f, 50.0f});
+        transform.setScale({0.2f, 0.2f});
+        
+        // 添加Sprite组件
+        auto& sprite = registry.emplace<SpriteComponent>(entity);
+        sprite.setTexture(Core::Engine::get().getTextureManager().getTexture("test" + std::to_string(i)));
+        sprite.setLayer(0);
+        sprite.setVisible(true);
+        
+        TINA_LOG_DEBUG("Created sprite entity {} at position ({}, {})", 
+            static_cast<uint32_t>(entity), 
+            transform.getPosition().x, 
+            transform.getPosition().y);
+    }
+    
+    // 创建95个彩色矩形实体
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> colorDist(0.0f, 1.0f);
+    
+    int rows = 10;
+    int cols = 10;
+    float rectWidth = 50.0f;
+    float rectHeight = 50.0f;
+    float spacing = 10.0f;
+    float startX = 50.0f;
+    float startY = 200.0f;
+    
+    for (int i = 0; i < 95; i++) {
+        int row = i / cols;
+        int col = i % cols;
+        
+        auto entity = registry.create();
+        
+        // 添加Transform组件
+        auto& transform = registry.emplace<Transform2DComponent>(entity);
+        transform.setPosition({
+            startX + col * (rectWidth + spacing),
+            startY + row * (rectHeight + spacing)
+        });
+        
+        // 添加Rectangle组件
+        auto& rect = registry.emplace<RectangleComponent>(entity);
+        rect.setSize({rectWidth, rectHeight});
+        rect.setColor(Color(
+            colorDist(gen),
+            colorDist(gen),
+            colorDist(gen),
+            1.0f
+        ));
+        rect.setLayer(1);
+        rect.setVisible(true);
+        
+        TINA_LOG_DEBUG("Created rectangle entity {} at position ({}, {})", 
+            static_cast<uint32_t>(entity), 
+            transform.getPosition().x, 
+            transform.getPosition().y);
+    }
+    
+    TINA_LOG_INFO("Created 5 sprites and 95 rectangles");
+}
 
-int main()
-{
+int main() {
     // 初始化日志系统
     auto& logger = Tina::Logger::getInstance();
-    logger.init("app.log", true, true); // 文件名，是否清空文件，是否输出到控制台
-
-    // 设置日志级别
+    logger.init("app.log", true, true);
     logger.setLogLevel(Tina::Logger::Level::Debug);
-
-    try
-    {
+    
+    try {
         // 创建引擎实例
         UniquePtr<Core::Engine> engine = MakeUnique<Core::Engine>();
-
+        
         // 初始化引擎
-        if (!engine->initialize())
-        {
+        if (!engine->initialize()) {
             TINA_LOG_ERROR("Failed to initialize engine");
             return -1;
         }
-
+        
         // 创建场景
         Scene* scene = engine->createScene("Main Scene");
-        if (!scene)
-        {
+        if (!scene) {
             TINA_LOG_ERROR("Failed to create scene");
             return -1;
         }
-
+        
         // 创建游戏视图
         auto gameView = new GameView();
         scene->addView(gameView);
-
-        // 创建精灵
-        gameView->createTexturedRectangle(
-            {100, 100}, // position
-            {50, 50}, // size
-            "sprite1", // texture name
-            {0, 0, 1, 1} // texture coords
-        );
-
-        // 创建矩形
-        gameView->createRectangle(
-            {200, 200}, // position
-            {100, 100}, // size
-            Color::Red // color
-        );
-
+        
+        // 预加载纹理
+        for (int i = 0; i < 5; i++) {
+            auto textureName = "test" + std::to_string(i);
+            if (!gameView->loadTexture(textureName, "textures/test.png")) {
+                TINA_LOG_WARN("Failed to load texture: {}", textureName);
+            }
+        }
+        
+        // 创建测试实体
+        createTestEntities(scene);
+        
         // 运行引擎
-        if (!engine->run())
-        {
+        if (!engine->run()) {
             TINA_LOG_ERROR("Engine run failed");
             return -1;
         }
-
-        // 引擎将在这里自动销毁
+        
         return 0;
     }
-    catch (const std::exception& e)
-    {
+    catch (const std::exception& e) {
         TINA_LOG_ERROR("Application error: {}", e.what());
         return 1;
     }

@@ -12,6 +12,8 @@
 
 namespace Tina
 {
+    class Scene;
+
     class TINA_CORE_API View : public Node
     {
     public:
@@ -72,12 +74,12 @@ namespace Tina
         void setViewPort(const Rect& viewport)
         {
             TINA_LOG_DEBUG("View '{}': Viewport set to {}x{} at ({},{})",
-                name,
-                viewport.getWidth(), viewport.getHeight(),
-                viewport.getX(), viewport.getY());
+                           name,
+                           viewport.getWidth(), viewport.getHeight(),
+                           viewport.getX(), viewport.getY());
 
             renderState.viewport = viewport;
-            renderState.scissor = viewport;  // 同时更新裁剪区域
+            renderState.scissor = viewport; // 同时更新裁剪区域
 
             // 立即更新渲染状态
             updateRenderState();
@@ -118,9 +120,9 @@ namespace Tina
             if (event.type == Event::WindowResize)
             {
                 TINA_LOG_INFO("View '{}': Handling WindowResize {}x{}",
-                    name,
-                    event.windowResize.width,
-                    event.windowResize.height);
+                              name,
+                              event.windowResize.width,
+                              event.windowResize.height);
 
                 // 更新 bgfx 的分辨率和视口
                 bgfx::reset(
@@ -153,9 +155,9 @@ namespace Tina
             if (!isVisible()) return;
 
             TINA_LOG_DEBUG("View '{}': Begin render with viewport {}x{}",
-                name,
-                renderState.viewport.getWidth(),
-                renderState.viewport.getHeight());
+                           name,
+                           renderState.viewport.getWidth(),
+                           renderState.viewport.getHeight());
 
             // 设置视图状态
             bgfx::setViewRect(
@@ -200,6 +202,10 @@ namespace Tina
             bgfx::touch(renderState.viewId);
         }
 
+        virtual void render(Scene* scene)
+        {
+        }
+
         virtual void endRender()
         {
         }
@@ -217,9 +223,9 @@ namespace Tina
         void updateRenderState()
         {
             TINA_LOG_DEBUG("View '{}': Updating render state, viewport: {}x{}, scissor: {}x{}",
-                name,
-                renderState.viewport.getWidth(), renderState.viewport.getHeight(),
-                renderState.scissor.getWidth(), renderState.scissor.getHeight());
+                           name,
+                           renderState.viewport.getWidth(), renderState.viewport.getHeight(),
+                           renderState.scissor.getWidth(), renderState.scissor.getHeight());
 
             // 设置视图矩形
             bgfx::setViewRect(

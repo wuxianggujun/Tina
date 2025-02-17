@@ -99,22 +99,22 @@ namespace Tina
         // 创建顶点数据
         std::vector<QuadVertex> vertices(4);
 
-        // 左上 (0.0, 0.0)
+        // 左上
         vertices[0].Position = {0.0f, 0.0f, 0.0f};
         vertices[0].TexCoord = {0.0f, 0.0f};
         vertices[0].Color = 0xFFFFFFFF;
 
-        // 右上 (1.0, 0.0)
+        // 右上
         vertices[1].Position = {1.0f, 0.0f, 0.0f};
         vertices[1].TexCoord = {1.0f, 0.0f};
         vertices[1].Color = 0xFFFFFFFF;
 
-        // 右下 (1.0, 1.0)
+        // 右下
         vertices[2].Position = {1.0f, 1.0f, 0.0f};
         vertices[2].TexCoord = {1.0f, 1.0f};
         vertices[2].Color = 0xFFFFFFFF;
 
-        // 左下 (0.0, 1.0)
+        // 左下
         vertices[3].Position = {0.0f, 1.0f, 0.0f};
         vertices[3].TexCoord = {0.0f, 1.0f};
         vertices[3].Color = 0xFFFFFFFF;
@@ -323,22 +323,19 @@ namespace Tina
             return;
         }
 
-        if (m_QuadCount >= MAX_QUADS)
+        // 检查是否需要刷新批次
+        if (m_QuadCount >= MAX_QUADS || m_Textures.size() >= MAX_TEXTURE_SLOTS)
         {
             flushBatch(m_ViewId);
+            m_Textures.clear();
         }
 
         // 查找或添加纹理
         auto it = std::find(m_Textures.begin(), m_Textures.end(), texture);
-        float textureIndex = 0.0f;
+        float textureIndex;
 
         if (it == m_Textures.end())
         {
-            if (m_Textures.size() >= MAX_TEXTURE_SLOTS)
-            {
-                flushBatch(m_ViewId);
-                m_Textures.clear();
-            }
             textureIndex = static_cast<float>(m_Textures.size());
             m_Textures.push_back(texture);
         }

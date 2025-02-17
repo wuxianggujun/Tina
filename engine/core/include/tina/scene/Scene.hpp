@@ -21,22 +21,33 @@ namespace Tina
 
         // Scene lifecycle
         void onUpdate(float deltaTime);
-        // Getters
+        
+        // Getters & Setters
         [[nodiscard]] const std::string& getName() const { return m_name; }
         void setName(const std::string& name) { m_name = name; }
 
+        // View management
         void addView(View* view);
-
         void removeView(View* view);
-
         void onEvent(Event& event);
-
         void onRender();
 
+        // ECS Registry access
+        [[nodiscard]] entt::registry& getRegistry() { return m_registry; }
+        [[nodiscard]] const entt::registry& getRegistry() const { return m_registry; }
+
     private:
-        void renderView(View* view);
+        // View lifecycle management
+        void initializeView(View* view);
+        void cleanupView(View* view);
+        void updateViewHierarchy(View* view, float deltaTime);
+        void renderViewHierarchy(View* view);
+        void propagateEventToView(View* view, Event& event);
 
         std::string m_name;
         View* m_rootView;
+        
+        // ECS registry
+        entt::registry m_registry;
     };
 } // namespace Tina

@@ -15,7 +15,10 @@ void main()
     
     // 转换到裁剪空间 - 所有quad使用相同的z值
     vec4 pos = vec4(worldPos, 0.0, 1.0);
-    gl_Position = mul(u_modelViewProj, pos);
+    
+    // 使用视图和投影矩阵变换
+    vec4 viewPos = mul(u_view, pos);
+    gl_Position = mul(u_proj, viewPos);
     
     // 传递颜色
     v_color0 = i_data1;

@@ -3,19 +3,22 @@
 //
 
 #include "tina/renderer/TextureManager.hpp"
-
+#include "tina/resources/ResourceManager.hpp"
+#include "tina/resources/TextureLoader.hpp"
 #include "bgfx/platform.h"
 #include "tina/log/Logger.hpp"
 #include "tina/utils/BgfxUtils.hpp"
+#include <filesystem>
 
 namespace Tina
 {
+    TextureManager::TextureManager() = default;
     TextureManager::~TextureManager() = default;
 
     SharedPtr<Texture2D> TextureManager::loadTexture(const std::string& name, const std::string& path)
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        
+
         // 检查纹理是否已加载
         const auto it = m_textures.find(name);
         if (it != m_textures.end())
@@ -24,52 +27,74 @@ namespace Tina
             return it->second;
         }
 
-        // 使用BgfxUtils加载纹理
-        const auto result = Utils::BgfxUtils::loadTexture(path);
-        if (!bgfx::isValid(result.handle))
+        // 构建完整的资源路径
+        std::filesystem::path resourcePath = std::filesystem::current_path() / "resources" / path;
+
+        // 检查目录和文件是否存在
+        if (!std::filesystem::exists(resourcePath.parent_path()))
         {
-            TINA_LOG_ERROR("Failed to load texture:{}", path);
+            TINA_LOG_ERROR("Resource directory does not exist: {}", resourcePath.parent_path().string());
             return nullptr;
         }
 
-        // 创建新的纹理对象
-        auto texture = std::make_shared<Texture2D>(name);
-        
-        // 设置纹理数据
-        texture->setHandle(result.handle);
-        texture->setWidth(result.width);
-        texture->setHeight(result.height);
-        texture->setPath(path);
-
-        if (texture->isValid())
+        if (!std::filesystem::exists(resourcePath))
         {
-            m_textures[name] = texture;
-            
-            // 计算总内存使用
-            size_t totalTextureMemory = 0;
-            for (const auto& pair : m_textures)
-            {
-                const auto& tex = pair.second;
-                totalTextureMemory += tex->getWidth() * tex->getHeight() * 4; // 假设RGBA8格式
-            }
-            
-            TINA_LOG_INFO("Texture '{}' loaded successfully - Size: {}x{}, Estimated Memory: {} bytes, Total Texture Memory: {} bytes",
-                name, result.width, result.height,
-                result.width * result.height * 4,
-                totalTextureMemory);
-                
-            return texture;
+            TINA_LOG_ERROR("Texture file does not exist: {}", resourcePath.string());
+            return nullptr;
         }
 
-        TINA_LOG_ERROR("Failed to create texture:{}", name);
-        return nullptr;
+        TINA_LOG_DEBUG("Loading texture from path: {}", resourcePath.string());
+
+        // 使用 ResourceManager 加载纹理
+        auto texture = ResourceManager::getInstance().load<Texture2D>(resourcePath.string());
+        if (!texture)
+        {
+            TINA_LOG_ERROR("Failed to load texture through ResourceManager: {}", resourcePath.string());
+            return nullptr;
+        }
+
+        // 验证纹理是否有效
+        if (!texture->isValid() || texture->getWidth() == 0 || texture->getHeight() == 0)
+        {
+            TINA_LOG_ERROR("Loaded texture is invalid: {}", resourcePath.string());
+            return nullptr;
+        }
+
+        // 缓存纹理
+        m_textures[name] = texture;
+
+        // 计算总内存使用
+        size_t totalTextureMemory = 0;
+        for (const auto& pair : m_textures)
+        {
+            const auto& tex = pair.second;
+            if (tex && tex->isValid())
+            {
+                totalTextureMemory += tex->getWidth() * tex->getHeight() * 4;
+            }
+        }
+
+        TINA_LOG_INFO("Texture '{}' loaded successfully - Path: {}, Size: {}x{}, Memory: {} KB, Total Memory: {} KB",
+                      name,
+                      resourcePath.string(),
+                      texture->getWidth(),
+                      texture->getHeight(),
+                      (texture->getWidth() * texture->getHeight() * 4) / 1024,
+                      totalTextureMemory / 1024);
+
+        return texture;
     }
 
     SharedPtr<Texture2D> TextureManager::getTexture(const std::string& name)
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         const auto it = m_textures.find(name);
-        return (it != m_textures.end()) ? it->second : nullptr;
+        if (it != m_textures.end() && it->second && it->second->isValid())
+        {
+            return it->second;
+        }
+        TINA_LOG_WARN("Texture '{}' not found or invalid", name);
+        return nullptr;
     }
 
     void TextureManager::releaseTexture(const std::string& name)
@@ -79,10 +104,17 @@ namespace Tina
         if (it != m_textures.end())
         {
             const auto& texture = it->second;
-            TINA_LOG_DEBUG("Releasing texture '{}' - Size: {}x{}, Estimated Memory: {} bytes",
-                name, texture->getWidth(), texture->getHeight(),
-                texture->getWidth() * texture->getHeight() * 4);
-                
+            if (texture && texture->isValid())
+            {
+                TINA_LOG_DEBUG("Releasing texture '{}' - Size: {}x{}, Memory: {} KB",
+                               name,
+                               texture->getWidth(),
+                               texture->getHeight(),
+                               (texture->getWidth() * texture->getHeight() * 4) / 1024);
+
+                // 从 ResourceManager 中释放
+                ResourceManager::getInstance().release<Texture2D>(texture->getPath());
+            }
             m_textures.erase(it);
         }
     }
@@ -90,15 +122,20 @@ namespace Tina
     void TextureManager::clear()
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        
+
         size_t totalMemoryFreed = 0;
         for (const auto& pair : m_textures)
         {
             const auto& texture = pair.second;
-            totalMemoryFreed += texture->getWidth() * texture->getHeight() * 4;
+            if (texture && texture->isValid())
+            {
+                totalMemoryFreed += texture->getWidth() * texture->getHeight() * 4;
+                // 从 ResourceManager 中释放
+                ResourceManager::getInstance().release<Texture2D>(texture->getPath());
+            }
         }
-        
-        TINA_LOG_INFO("Clearing all textures - Total Memory Freed: {} bytes", totalMemoryFreed);
+
+        TINA_LOG_INFO("Cleared all textures - Total Memory Freed: {} KB", totalMemoryFreed / 1024);
         m_textures.clear();
     }
 
@@ -111,10 +148,15 @@ namespace Tina
             for (const auto& pair : m_textures)
             {
                 const auto& texture = pair.second;
-                totalMemoryFreed += texture->getWidth() * texture->getHeight() * 4;
+                if (texture && texture->isValid())
+                {
+                    totalMemoryFreed += texture->getWidth() * texture->getHeight() * 4;
+                    // 从 ResourceManager 中释放
+                    ResourceManager::getInstance().release<Texture2D>(texture->getPath());
+                }
             }
-            
-            TINA_LOG_INFO("TextureManager shutdown - Total Memory Freed: {} bytes", totalMemoryFreed);
+
+            TINA_LOG_INFO("TextureManager shutdown - Total Memory Freed: {} KB", totalMemoryFreed / 1024);
             m_textures.clear();
         }
     }

@@ -120,30 +120,43 @@ namespace Tina::Utils
             filePath.join("metal"); 
             break;
         default:
-            TINA_LOG_ERROR("Unsupported renderer type");
+            TINA_LOG_ERROR("Unsupported renderer type: {}", bgfx::getRendererName(bgfx::getRendererType()));
             return BGFX_INVALID_HANDLE;
         }
 
         std::string fileName = name + ".bin";
         filePath.join(fileName.c_str());
 
+        TINA_LOG_DEBUG("Loading shader '{}' from path: {}", name, filePath.getCPtr());
+
         const bgfx::Memory* mem = loadMem(filePath.getCPtr());
         if (!mem)
         {
+            TINA_LOG_ERROR("Failed to load shader memory for '{}'", name);
             return BGFX_INVALID_HANDLE;
         }
 
         bgfx::ShaderHandle handle = bgfx::createShader(mem);
+        if (!bgfx::isValid(handle))
+        {
+            TINA_LOG_ERROR("Failed to create shader '{}' from memory", name);
+            return BGFX_INVALID_HANDLE;
+        }
+
         bgfx::setName(handle, name.c_str());
+        TINA_LOG_DEBUG("Successfully loaded shader '{}'", name);
 
         return handle;
     }
 
     bgfx::ProgramHandle BgfxUtils::loadProgram(const std::string& vsName, const std::string& fsName)
     {
+        TINA_LOG_DEBUG("Loading shader program - VS: '{}', FS: '{}'", vsName, fsName);
+
         bgfx::ShaderHandle vsh = loadShader(vsName);
         if (!bgfx::isValid(vsh))
         {
+            TINA_LOG_ERROR("Failed to load vertex shader '{}'", vsName);
             return BGFX_INVALID_HANDLE;
         }
 
@@ -153,12 +166,21 @@ namespace Tina::Utils
             fsh = loadShader(fsName);
             if (!bgfx::isValid(fsh))
             {
+                TINA_LOG_ERROR("Failed to load fragment shader '{}'", fsName);
                 bgfx::destroy(vsh);
                 return BGFX_INVALID_HANDLE;
             }
         }
 
-        return bgfx::createProgram(vsh, fsh, true);
+        bgfx::ProgramHandle program = bgfx::createProgram(vsh, fsh, true);
+        if (!bgfx::isValid(program))
+        {
+            TINA_LOG_ERROR("Failed to create program from shaders - VS: '{}', FS: '{}'", vsName, fsName);
+            return BGFX_INVALID_HANDLE;
+        }
+
+        TINA_LOG_DEBUG("Successfully created shader program - VS: '{}', FS: '{}'", vsName, fsName);
+        return program;
     }
 
     TextureLoadResult BgfxUtils::loadTexture(const std::string& filePath, uint64_t flags)

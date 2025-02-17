@@ -5,6 +5,7 @@
 #include "tina/renderer/Renderer2D.hpp"
 
 #include "tina/log/Logger.hpp"
+#include "tina/core/Engine.hpp"
 
 namespace Tina
 {
@@ -60,6 +61,7 @@ namespace Tina
             if (m_BatchRenderer)
             {
                 m_BatchRenderer->end();
+                TINA_LOG_DEBUG("Scene end - ViewId: {}", m_ViewId);
             }
             m_sceneInProgress = false;
         }
@@ -76,6 +78,8 @@ namespace Tina
         if (m_BatchRenderer)
         {
             m_BatchRenderer->drawQuad(position, size, color);
+            TINA_LOG_DEBUG("Drawing quad at ({}, {}) with size ({}, {})",
+                position.x, position.y, size.x, size.y);
         }
     }
 
@@ -91,6 +95,8 @@ namespace Tina
         if (m_BatchRenderer && texture && texture->isValid())
         {
             m_BatchRenderer->drawTexturedQuad(position, size, texture, texCoords, color);
+            TINA_LOG_DEBUG("Drawing sprite at ({}, {}) with size ({}, {}), texture: {}", 
+                position.x, position.y, size.x, size.y, texture->getName());
         }
     }
 

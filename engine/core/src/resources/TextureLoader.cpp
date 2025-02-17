@@ -69,18 +69,38 @@ bool TextureLoader::loadTextureData(const std::string& path, Texture2D* texture)
         return false;
     }
 
-    // 将数据存储到纹理对象
-    size_t dataSize = width * height * 4; // RGBA = 4 channels
-    std::vector<uint8_t> textureData(data, data + dataSize);
-    texture->setData(std::move(textureData));
-    
-    // 创建BGFX纹理
-    texture->create(data, width, height);
-    
-    // 释放stb_image分配的内存
-    stbi_image_free(data);
-    
-    return true;
+    try {
+        // 将数据存储到纹理对象
+        size_t dataSize = width * height * 4; // RGBA = 4 channels
+        std::vector<uint8_t> textureData(data, data + dataSize);
+        texture->setData(std::move(textureData));
+        
+        // 设置纹理尺寸
+        texture->setWidth(width);
+        texture->setHeight(height);
+        
+        // 创建 BGFX 纹理
+        texture->create(data, width, height);
+        
+        // 验证纹理是否创建成功
+        if (!texture->isValid()) {
+            TINA_LOG_ERROR("Failed to create BGFX texture: {}", path);
+            stbi_image_free(data);
+            return false;
+        }
+        
+        TINA_LOG_DEBUG("Created BGFX texture: {}x{}, Handle: {}", width, height, texture->getHandle().idx);
+        
+        // 释放stb_image分配的内存
+        stbi_image_free(data);
+        
+        return true;
+    }
+    catch (const std::exception& e) {
+        TINA_LOG_ERROR("Exception while creating texture: {}", e.what());
+        stbi_image_free(data);
+        return false;
+    }
 }
 
 } // namespace Tina
