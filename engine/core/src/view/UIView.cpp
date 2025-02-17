@@ -4,10 +4,6 @@
 
 namespace Tina {
 
-UIView::UIView() : View("UIView") {
-    TINA_LOG_INFO("UIView created");
-}
-
 void UIView::onAttach() {
     if (!m_initialized) {
         try {
@@ -106,9 +102,6 @@ void UIView::beginRender() {
     if (m_camera) {
         m_renderer->beginScene(m_camera);
     }
-    
-    // 清空绘制命令列表
-    m_drawCommands.clear();
 }
 
 void UIView::endRender() {
@@ -125,8 +118,32 @@ void UIView::endRender() {
 void UIView::render(Scene* scene) {
     if (!isVisible() || !m_initialized || !m_renderer) return;
 
+    TINA_LOG_DEBUG("UIView starting render with {} draw commands", m_drawCommands.size());
+
+    // 开始渲染
     beginRender();
+
+    // 设置渲染状态
+    if (m_renderer && m_renderer->getBatchRenderer()) {
+        auto* batchRenderer = m_renderer->getBatchRenderer();
+        
+        // 设置渲染状态,确保UI正确显示
+        uint32_t state = BGFX_STATE_WRITE_RGB 
+            | BGFX_STATE_WRITE_A
+            | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+            
+        bgfx::setState(state);
+    }
+
+    // 执行所有绘制命令
+    for (const auto& cmd : m_drawCommands) {
+        cmd();
+    }
+
+    // 结束渲染
     endRender();
+
+    TINA_LOG_DEBUG("UIView finished rendering {} draw commands", m_drawCommands.size());
 }
 
 bool UIView::onEvent(Event& event) {
@@ -179,6 +196,9 @@ void UIView::setBackgroundColor(const UIColor& color) {
 void UIView::drawLine(const glm::vec2& start, const glm::vec2& end, const LineStyle& style) {
     if (!m_renderer) return;
     
+    TINA_LOG_DEBUG("Adding line draw command from ({}, {}) to ({}, {}) with thickness {}",
+        start.x, start.y, end.x, end.y, style.thickness);
+    
     m_drawCommands.push_back([this, start, end, style]() {
         // 计算线段的方向和长度
         glm::vec2 direction = end - start;
@@ -189,25 +209,28 @@ void UIView::drawLine(const glm::vec2& start, const glm::vec2& end, const LineSt
         // 归一化方向
         direction /= length;
         
-        // 计算垂直于线段的向量，用于生成线段的宽度
-        glm::vec2 normal(-direction.y, direction.x);
-        normal *= style.thickness * 0.5f;
+        // 计算旋转角度
+        float angle = atan2(direction.y, direction.x);
         
-        // 生成线段的四个顶点位置
-        glm::vec2 v0 = start + normal;
-        glm::vec2 v1 = end + normal;
-        glm::vec2 v2 = end - normal;
-        glm::vec2 v3 = start - normal;
+        // 计算变换矩阵
+        glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(start, 0.0f));
+        transform = glm::rotate(transform, angle, glm::vec3(0.0f, 0.0f, 1.0f));
         
-        // 计算线段的大小
-        glm::vec2 size = end - start;
+        // 计算变换后的终点
+        glm::vec2 transformedEnd = glm::vec2(
+            transform[0][0] * length + transform[3][0],
+            transform[1][0] * length + transform[3][1]
+        );
         
-        // 使用单个drawQuad绘制线段
+        // 使用变换后的坐标绘制quad
         m_renderer->drawQuad(
             start,
-            {glm::length(size), style.thickness},
+            {length, style.thickness},
             Color(style.color.r, style.color.g, style.color.b, style.color.a)
         );
+        
+        TINA_LOG_DEBUG("Drawing line as quad at ({}, {}) with size ({}, {}) and angle {}",
+            start.x, start.y, length, style.thickness, angle);
     });
 }
 

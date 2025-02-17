@@ -88,24 +88,28 @@ void createUICross(UIView* uiView) {
     uint32_t width, height;
     Core::Engine::get().getWindowSize(width, height);
     
-    // 设置线条样式
+    // 设置线条样式 - 增加粗细并使用更鲜艳的颜色
     LineStyle style;
-    style.thickness = 2.0f;
-    style.color = {1.0f, 0.0f, 0.0f, 1.0f}; // 红色
+    style.thickness = 5.0f;  // 增加线条粗细
+    style.color = {1.0f, 0.0f, 0.0f, 1.0f}; // 保持鲜艳的红色
+    
+    TINA_LOG_INFO("Drawing UI cross at window size {}x{}", width, height);
+    
+    // 计算中心点
+    float centerX = width * 0.5f;
+    float centerY = height * 0.5f;
     
     // 绘制垂直线(连接屏幕顶部和底部)
-    float centerX = width / 2.0f;
     uiView->drawLine(
-        {centerX, 0.0f},
-        {centerX, static_cast<float>(height)},
+        {centerX, 0.0f},             // 顶部中点
+        {centerX, (float)height},    // 底部中点
         style
     );
     
     // 绘制水平线(连接屏幕左边和右边)
-    float centerY = height / 2.0f;
     uiView->drawLine(
-        {0.0f, centerY},
-        {static_cast<float>(width), centerY},
+        {0.0f, centerY},           // 左边中点
+        {(float)width, centerY},   // 右边中点
         style
     );
     
@@ -137,10 +141,12 @@ int main() {
         
         // 创建游戏视图
         auto gameView = new GameView();
+        gameView->setZOrder(0);  // 设置较低的zOrder
         scene->addView(gameView);
         
         // 创建UI视图
         auto uiView = new UIView();
+        // UIView构造函数中已经设置了zOrder为100
         scene->addView(uiView);
         
         // 预加载纹理
@@ -156,6 +162,9 @@ int main() {
         
         // 创建UI十字架
         createUICross(uiView);
+        
+        TINA_LOG_INFO("Views initialized - GameView(zOrder: {}), UIView(zOrder: {})",
+            gameView->getZOrder(), uiView->getZOrder());
         
         // 运行引擎
         if (!engine->run()) {

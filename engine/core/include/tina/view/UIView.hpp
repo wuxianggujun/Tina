@@ -34,7 +34,12 @@ namespace Tina {
 
     class UIView : public View {
     public:
-        UIView();
+        UIView() : View("UIView") {
+            // 设置较高的zOrder，确保UI显示在游戏内容之上
+            setZOrder(100);
+            
+            // 初始化渲染状态
+        }
         ~UIView() override = default;
 
         // 基础绘制方法
@@ -54,6 +59,12 @@ namespace Tina {
 
         // 设置背景颜色
         void setBackgroundColor(const UIColor& color);
+
+        // 清除所有绘制命令
+        void clearDrawCommands() {
+            m_drawCommands.clear();
+            TINA_LOG_DEBUG("Cleared all UI draw commands");
+        }
 
     private:
         void initShaders();
