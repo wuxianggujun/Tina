@@ -145,7 +145,7 @@ int main() {
         scene->addView(gameView);
         
         // 创建UI视图
-        auto uiView = new UIView();
+        auto uiView = new UIView("UIView");
         // UIView构造函数中已经设置了zOrder为100
         scene->addView(uiView);
         

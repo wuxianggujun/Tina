@@ -34,12 +34,7 @@ namespace Tina {
 
     class UIView : public View {
     public:
-        UIView() : View("UIView") {
-            // 设置较高的zOrder，确保UI显示在游戏内容之上
-            setZOrder(100);
-            
-            // 初始化渲染状态
-        }
+        UIView(const std::string& name);
         ~UIView() override = default;
 
         // 基础绘制方法

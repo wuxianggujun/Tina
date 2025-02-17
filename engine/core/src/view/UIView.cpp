@@ -4,6 +4,16 @@
 
 namespace Tina {
 
+UIView::UIView(const std::string& name) : View(name) {
+    // 设置较高的zOrder确保UI显示在最上层
+    setZOrder(100);
+    
+    // 设置默认背景色为透明
+    m_backgroundColor = {0.0f, 0.0f, 0.0f, 0.0f};
+    
+    TINA_LOG_INFO("Created UIView '{}' with zOrder {}", name, getZOrder());
+}
+
 void UIView::onAttach() {
     if (!m_initialized) {
         try {
@@ -27,20 +37,11 @@ void UIView::onAttach() {
                 // 设置BatchRenderer的视口
                 batchRenderer->setViewRect(0, 0, width, height);
                 
-                // 设置清除标志和颜色
-                uint32_t bgColor = 
-                    (static_cast<uint32_t>(m_backgroundColor.r * 255) << 24) |
-                    (static_cast<uint32_t>(m_backgroundColor.g * 255) << 16) |
-                    (static_cast<uint32_t>(m_backgroundColor.b * 255) << 8) |
-                    static_cast<uint32_t>(m_backgroundColor.a * 255);
+                // 设置清除标志和颜色 - 对UI使用NONE,避免清除下层内容
+                batchRenderer->setViewClear(BGFX_CLEAR_NONE);
                 
-                batchRenderer->setViewClear(
-                    BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                    bgColor, 1.0f, 0
-                );
-                
-                TINA_LOG_DEBUG("View parameters set - ViewId: {}, Size: {}x{}", 
-                    renderState.viewId, width, height);
+                TINA_LOG_DEBUG("View parameters set - ViewId: {}, Size: {}x{}, ZOrder: {}", 
+                    renderState.viewId, width, height, getZOrder());
             }
 
             m_initialized = true;
@@ -106,10 +107,6 @@ void UIView::beginRender() {
 
 void UIView::endRender() {
     if (m_initialized && m_renderer) {
-        // 执行所有绘制命令
-        for (const auto& cmd : m_drawCommands) {
-            cmd();
-        }
         m_renderer->endScene();
     }
     View::endRender();
@@ -130,9 +127,13 @@ void UIView::render(Scene* scene) {
         // 设置渲染状态,确保UI正确显示
         uint32_t state = BGFX_STATE_WRITE_RGB 
             | BGFX_STATE_WRITE_A
+            | BGFX_STATE_MSAA
             | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
             
         bgfx::setState(state);
+        
+        // 禁用深度测试,确保UI总是显示在最上层
+        batchRenderer->setViewClear(BGFX_CLEAR_NONE);
     }
 
     // 执行所有绘制命令
@@ -165,6 +166,23 @@ bool UIView::onEvent(Event& event) {
         if (m_renderer && m_renderer->getBatchRenderer()) {
             m_renderer->getBatchRenderer()->setViewRect(0, 0, width, height);
         }
+        
+        // 清除现有的绘制命令
+        m_drawCommands.clear();
+        
+        // 重新创建UI十字架
+        float centerX = width * 0.5f;
+        float centerY = height * 0.5f;
+        
+        LineStyle style;
+        style.thickness = 5.0f;
+        style.color = {1.0f, 0.0f, 0.0f, 1.0f};
+        
+        // 重新绘制垂直线和水平线
+        drawLine({centerX, 0.0f}, {centerX, (float)height}, style);
+        drawLine({0.0f, centerY}, {(float)width, centerY}, style);
+        
+        TINA_LOG_INFO("UI cross updated for window size {}x{}", width, height);
         
         handled = true;
     }
@@ -209,28 +227,28 @@ void UIView::drawLine(const glm::vec2& start, const glm::vec2& end, const LineSt
         // 归一化方向
         direction /= length;
         
-        // 计算旋转角度
-        float angle = atan2(direction.y, direction.x);
+        // 计算垂直于线段的向量
+        glm::vec2 normal(-direction.y, direction.x);
         
-        // 计算变换矩阵
-        glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(start, 0.0f));
-        transform = glm::rotate(transform, angle, glm::vec3(0.0f, 0.0f, 1.0f));
+        // 计算线条的实际尺寸
+        glm::vec2 size;
+        if (std::abs(direction.x) > std::abs(direction.y)) {
+            // 水平线
+            size = glm::vec2(length, style.thickness);
+        } else {
+            // 垂直线
+            size = glm::vec2(style.thickness, length);
+        }
         
-        // 计算变换后的终点
-        glm::vec2 transformedEnd = glm::vec2(
-            transform[0][0] * length + transform[3][0],
-            transform[1][0] * length + transform[3][1]
-        );
-        
-        // 使用变换后的坐标绘制quad
+        // 使用正确的位置和大小绘制quad
         m_renderer->drawQuad(
             start,
-            {length, style.thickness},
+            size,
             Color(style.color.r, style.color.g, style.color.b, style.color.a)
         );
         
-        TINA_LOG_DEBUG("Drawing line as quad at ({}, {}) with size ({}, {}) and angle {}",
-            start.x, start.y, length, style.thickness, angle);
+        TINA_LOG_DEBUG("Drawing line as quad at ({}, {}) with size ({}, {})",
+            start.x, start.y, size.x, size.y);
     });
 }
 

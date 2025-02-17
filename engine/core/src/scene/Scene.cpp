@@ -191,11 +191,8 @@ namespace Tina
         // 1. 开始渲染
         view->beginRender();
         
-        // 2. 渲染当前视图
-        if (auto* gameView = dynamic_cast<GameView*>(view))
-        {
-            gameView->render(this);
-        }
+        // 2. 渲染当前视图 - 处理所有View类型
+        view->render(this);
         
         // 3. 递归渲染子视图
         for (auto* child : view->getChildren())
