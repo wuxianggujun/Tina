@@ -5,7 +5,7 @@ namespace Tina {
 
 void SpriteComponent::updateVertexBuffer(void* buffer, uint32_t size) {
     if (size < sizeof(Vertex) * 4) {
-        TINA_LOG_ERROR("Buffer size too small for sprite vertices");
+        TINA_CORE_LOG_ERROR("Buffer size too small for sprite vertices");
         return;
     }
 
@@ -54,7 +54,7 @@ void SpriteComponent::updateVertexBuffer(void* buffer, uint32_t size) {
 
 void SpriteComponent::updateIndexBuffer(void* buffer, uint32_t size) {
     if (size < sizeof(uint16_t) * 6) {
-        TINA_LOG_ERROR("Buffer size too small for sprite indices");
+        TINA_CORE_LOG_ERROR("Buffer size too small for sprite indices");
         return;
     }
 

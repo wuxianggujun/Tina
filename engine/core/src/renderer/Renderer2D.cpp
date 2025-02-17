@@ -41,11 +41,11 @@ namespace Tina
                                    glm::value_ptr(view),
                                    glm::value_ptr(proj)
             );
-            TINA_LOG_DEBUG("Setting view transform with camera matrices");
+            TINA_CORE_LOG_DEBUG("Setting view transform with camera matrices");
         }
         else
         {
-            TINA_LOG_WARN("No camera provided for scene rendering");
+            TINA_CORE_LOG_WARN("No camera provided for scene rendering");
         }
         if (m_BatchRenderer)
         {
@@ -61,7 +61,7 @@ namespace Tina
             if (m_BatchRenderer)
             {
                 m_BatchRenderer->end();
-                TINA_LOG_DEBUG("Scene end - ViewId: {}", m_ViewId);
+                TINA_CORE_LOG_DEBUG("Scene end - ViewId: {}", m_ViewId);
             }
             m_sceneInProgress = false;
         }
@@ -71,14 +71,14 @@ namespace Tina
     {
         if (!m_sceneInProgress)
         {
-            TINA_LOG_WARN("Attempting to draw outside of scene");
+            TINA_CORE_LOG_WARN("Attempting to draw outside of scene");
             return;
         }
 
         if (m_BatchRenderer)
         {
             m_BatchRenderer->drawQuad(position, size, color);
-            TINA_LOG_DEBUG("Drawing quad at ({}, {}) with size ({}, {})",
+            TINA_CORE_LOG_DEBUG("Drawing quad at ({}, {}) with size ({}, {})",
                 position.x, position.y, size.x, size.y);
         }
     }
@@ -88,14 +88,14 @@ namespace Tina
     {
         if (!m_sceneInProgress)
         {
-            TINA_LOG_WARN("Attempting to draw outside of scene");
+            TINA_CORE_LOG_WARN("Attempting to draw outside of scene");
             return;
         }
 
         if (m_BatchRenderer && texture && texture->isValid())
         {
             m_BatchRenderer->drawTexturedQuad(position, size, texture, texCoords, color);
-            TINA_LOG_DEBUG("Drawing sprite at ({}, {}) with size ({}, {}), texture: {}", 
+            TINA_CORE_LOG_DEBUG("Drawing sprite at ({}, {}) with size ({}, {}), texture: {}", 
                 position.x, position.y, size.x, size.y, texture->getName());
         }
     }
@@ -104,7 +104,7 @@ namespace Tina
     {
         if (!m_sceneInProgress)
         {
-            TINA_LOG_WARN("Attempting to draw outside of scene");
+            TINA_CORE_LOG_WARN("Attempting to draw outside of scene");
             return;
         }
 

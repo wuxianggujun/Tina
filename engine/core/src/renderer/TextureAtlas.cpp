@@ -13,13 +13,13 @@ TextureAtlas::~TextureAtlas() {
 
 bool TextureAtlas::addTexture(const std::string& name, const std::shared_ptr<Texture2D>& texture) {
     if (!texture || !texture->isValid()) {
-        TINA_LOG_ERROR("Attempting to add invalid texture to atlas");
+        TINA_CORE_LOG_ERROR("Attempting to add invalid texture to atlas");
         return false;
     }
 
     // 检查纹理是否已存在
     if (m_Regions.find(name) != m_Regions.end()) {
-        TINA_LOG_WARN("Texture '{}' already exists in atlas", name);
+        TINA_CORE_LOG_WARN("Texture '{}' already exists in atlas", name);
         return false;
     }
 
@@ -28,7 +28,7 @@ bool TextureAtlas::addTexture(const std::string& name, const std::shared_ptr<Tex
 
     // 检查纹理大小是否合适
     if (width > ATLAS_SIZE || height > ATLAS_SIZE) {
-        TINA_LOG_ERROR("Texture '{}' is too large for atlas ({}x{})", name, width, height);
+        TINA_CORE_LOG_ERROR("Texture '{}' is too large for atlas ({}x{})", name, width, height);
         return false;
     }
 
@@ -46,7 +46,7 @@ bool TextureAtlas::addTexture(const std::string& name, const std::shared_ptr<Tex
     // 如果没有找到空间,尝试创建新的图集
     if (!node) {
         if (m_AtlasTextures.size() >= MAX_ATLASES) {
-            TINA_LOG_ERROR("Maximum number of texture atlases reached");
+            TINA_CORE_LOG_ERROR("Maximum number of texture atlases reached");
             return false;
         }
         
@@ -58,7 +58,7 @@ bool TextureAtlas::addTexture(const std::string& name, const std::shared_ptr<Tex
         node = findNode(m_RootNodes.back().get(), width, height);
         
         if (!node) {
-            TINA_LOG_ERROR("Failed to find space for texture in new atlas");
+            TINA_CORE_LOG_ERROR("Failed to find space for texture in new atlas");
             return false;
         }
     }

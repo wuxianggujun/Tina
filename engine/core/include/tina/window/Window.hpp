@@ -5,6 +5,7 @@
 #pragma once
 #include "tina/core/Core.hpp"
 #include <GLFW/glfw3.h>
+#include <string>
 
 namespace Tina
 {
@@ -32,9 +33,11 @@ namespace Tina
     public:
         struct WindowConfig
         {
-            const char* title;
-            int32_t width;
-            int32_t height;
+            const char* title = "Tina Engine";  // 默认标题
+            int32_t width = 1280;              // 默认宽度
+            int32_t height = 720;              // 默认高度
+            bool vsync = true;                 // 默认开启垂直同步
+            bool fullscreen = false;           // 默认窗口模式
         };
 
         Window(WindowManager* windowManager, WindowHandle handle, const WindowConfig& config);
@@ -59,6 +62,38 @@ namespace Tina
             glfwGetWindowSize(m_handle, &width, &height);
             return height;
         }
+
+        [[nodiscard]] const char* getTitle() const {
+            return glfwGetWindowTitle(m_handle);
+        }
+
+        [[nodiscard]] bool isVSync() const {
+            return glfwGetWindowAttrib(m_handle, GLFW_DOUBLEBUFFER);
+        }
+
+        [[nodiscard]] bool isFullscreen() const {
+            return glfwGetWindowMonitor(m_handle) != nullptr;
+        }
+
+        // 禁止拷贝
+        Window(const Window&) = delete;
+        Window& operator=(const Window&) = delete;
+
+        // 窗口基本操作
+        void update();
+        void close();
+        void* getNativeHandle() const;
+
+        // 设置窗口属性
+        void setVSync(bool enabled);
+        void setSize(uint32_t width, uint32_t height);
+
+        // 输入状态查询
+        static bool isKeyPressed(int32_t key);
+        static bool isMouseButtonPressed(int32_t button);
+        static void getMousePosition(double& x, double& y);
+        static void setMousePosition(double x, double y);
+        static void setMouseCursor(bool visible);
 
     private:
         WindowManager* m_windowManager;

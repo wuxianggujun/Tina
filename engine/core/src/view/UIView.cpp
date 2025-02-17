@@ -1,6 +1,14 @@
 #include "tina/view/UIView.hpp"
 #include "tina/core/Engine.hpp"
 #include "tina/log/Logger.hpp"
+#include "tina/renderer/Color.hpp"
+#include "tina/scene/Scene.hpp"
+#include "tina/event/Event.hpp"
+#include "tina/core/OrthographicCamera.hpp"
+#include <bgfx/bgfx.h>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/constants.hpp>
+#include <cmath>
 
 namespace Tina {
 
@@ -11,22 +19,34 @@ UIView::UIView(const std::string& name) : View(name) {
     // 设置默认背景色为透明
     m_backgroundColor = {0.0f, 0.0f, 0.0f, 0.0f};
     
-    TINA_LOG_INFO("Created UIView '{}' with zOrder {}", name, getZOrder());
+    TINA_CORE_LOG_INFO("Created UIView '{}' with zOrder {}", name, getZOrder());
+
+    initShaders();
+    initRenderer();
+    initCamera();
+    TINA_CORE_LOG_DEBUG("Created UIView '{}'", name);
+}
+
+UIView::~UIView() {
+    if (bgfx::isValid(m_shaderProgram)) {
+        bgfx::destroy(m_shaderProgram);
+    }
+    m_renderer.reset();
+    TINA_CORE_LOG_DEBUG("Destroyed UIView '{}'", getName());
 }
 
 void UIView::onAttach() {
     if (!m_initialized) {
         try {
-            TINA_LOG_INFO("Initializing UIView");
+            TINA_CORE_LOG_INFO("Initializing UIView");
 
             initShaders();
             initRenderer();
             initCamera();
 
             // 设置view参数
-            if (m_renderer && m_renderer->getBatchRenderer()) {
-                auto* batchRenderer = m_renderer->getBatchRenderer();
-                batchRenderer->setViewId(renderState.viewId);
+            if (m_renderer) {
+                m_renderer->setViewId(renderState.viewId);
 
                 uint32_t width, height;
                 Core::Engine::get().getWindowSize(width, height);
@@ -35,30 +55,31 @@ void UIView::onAttach() {
                 setViewPort(Rect(0, 0, width, height));
                 
                 // 设置BatchRenderer的视口
-                batchRenderer->setViewRect(0, 0, width, height);
+                m_renderer->setViewRect(0, 0, width, height);
                 
                 // 设置清除标志和颜色 - 对UI使用NONE,避免清除下层内容
-                batchRenderer->setViewClear(BGFX_CLEAR_NONE);
+                m_renderer->setViewClear(BGFX_CLEAR_NONE);
                 
-                TINA_LOG_DEBUG("View parameters set - ViewId: {}, Size: {}x{}, ZOrder: {}", 
+                TINA_CORE_LOG_DEBUG("View parameters set - ViewId: {}, Size: {}x{}, ZOrder: {}",
                     renderState.viewId, width, height, getZOrder());
             }
 
             m_initialized = true;
-            TINA_LOG_INFO("UIView initialized successfully");
+            TINA_CORE_LOG_INFO("UIView initialized successfully");
         }
         catch (const std::exception& e) {
-            TINA_LOG_ERROR("Failed to initialize UIView: {}", e.what());
+            TINA_CORE_LOG_ERROR("Failed to initialize UIView: {}", e.what());
             if (bgfx::isValid(m_shaderProgram)) {
                 m_shaderProgram = BGFX_INVALID_HANDLE;
             }
             throw;
         }
     }
+    TINA_CORE_LOG_DEBUG("UIView '{}' attached", getName());
 }
 
 void UIView::onDetach() {
-    TINA_LOG_INFO("Shutting down UIView");
+    TINA_CORE_LOG_INFO("Shutting down UIView");
 
     try {
         if (m_renderer) {
@@ -66,21 +87,22 @@ void UIView::onDetach() {
         }
 
         if (bgfx::isValid(m_shaderProgram)) {
-            TINA_LOG_DEBUG("Destroying shader program");
+            TINA_CORE_LOG_DEBUG("Destroying shader program");
             Core::Engine::get().getShaderManager().destroyProgram(m_shaderProgram);
             m_shaderProgram = BGFX_INVALID_HANDLE;
         }
 
         m_initialized = false;
-        TINA_LOG_INFO("UIView shutdown completed");
+        TINA_CORE_LOG_INFO("UIView shutdown completed");
     }
     catch (const std::exception& e) {
-        TINA_LOG_ERROR("Error during UIView shutdown: {}", e.what());
+        TINA_CORE_LOG_ERROR("Error during UIView shutdown: {}", e.what());
         if (bgfx::isValid(m_shaderProgram)) {
             Core::Engine::get().getShaderManager().destroyProgram(m_shaderProgram);
             m_shaderProgram = BGFX_INVALID_HANDLE;
         }
     }
+    TINA_CORE_LOG_DEBUG("UIView '{}' detached", getName());
 }
 
 void UIView::onUpdate(float deltaTime) {
@@ -101,13 +123,14 @@ void UIView::beginRender() {
     View::beginRender();
     
     if (m_camera) {
-        m_renderer->beginScene(m_camera);
+        m_renderer->begin();
+        m_renderer->setViewTransform(m_camera->getViewMatrix(), m_camera->getProjectionMatrix());
     }
 }
 
 void UIView::endRender() {
     if (m_initialized && m_renderer) {
-        m_renderer->endScene();
+        m_renderer->end();
     }
     View::endRender();
 }
@@ -115,15 +138,13 @@ void UIView::endRender() {
 void UIView::render(Scene* scene) {
     if (!isVisible() || !m_initialized || !m_renderer) return;
 
-    TINA_LOG_DEBUG("UIView starting render with {} draw commands", m_drawCommands.size());
+    TINA_CORE_LOG_DEBUG("UIView starting render with {} draw commands", m_drawCommands.size());
 
     // 开始渲染
     beginRender();
 
     // 设置渲染状态
-    if (m_renderer && m_renderer->getBatchRenderer()) {
-        auto* batchRenderer = m_renderer->getBatchRenderer();
-        
+    if (m_renderer) {
         // 设置渲染状态,确保UI正确显示
         uint32_t state = BGFX_STATE_WRITE_RGB 
             | BGFX_STATE_WRITE_A
@@ -133,8 +154,11 @@ void UIView::render(Scene* scene) {
         bgfx::setState(state);
         
         // 禁用深度测试,确保UI总是显示在最上层
-        batchRenderer->setViewClear(BGFX_CLEAR_NONE);
+        m_renderer->setViewClear(BGFX_CLEAR_NONE);
     }
+
+    // 绘制背景
+    drawBackground();
 
     // 执行所有绘制命令
     for (const auto& cmd : m_drawCommands) {
@@ -144,13 +168,13 @@ void UIView::render(Scene* scene) {
     // 结束渲染
     endRender();
 
-    TINA_LOG_DEBUG("UIView finished rendering {} draw commands", m_drawCommands.size());
+    TINA_CORE_LOG_DEBUG("UIView finished rendering {} draw commands", m_drawCommands.size());
 }
 
 bool UIView::onEvent(Event& event) {
     bool handled = false;
 
-    if (event.type == Event::WindowResize) {
+    if (event.type == Event::Type::WindowResize) {
         uint32_t width = event.windowResize.width;
         uint32_t height = event.windowResize.height;
 
@@ -163,8 +187,8 @@ bool UIView::onEvent(Event& event) {
 
         setViewPort(Rect(0, 0, width, height));
         
-        if (m_renderer && m_renderer->getBatchRenderer()) {
-            m_renderer->getBatchRenderer()->setViewRect(0, 0, width, height);
+        if (m_renderer) {
+            m_renderer->setViewRect(0, 0, width, height);
         }
         
         // 清除现有的绘制命令
@@ -182,7 +206,7 @@ bool UIView::onEvent(Event& event) {
         drawLine({centerX, 0.0f}, {centerX, (float)height}, style);
         drawLine({0.0f, centerY}, {(float)width, centerY}, style);
         
-        TINA_LOG_INFO("UI cross updated for window size {}x{}", width, height);
+        TINA_CORE_LOG_INFO("UI cross updated for window size {}x{}", width, height);
         
         handled = true;
     }
@@ -197,24 +221,34 @@ bool UIView::onEvent(Event& event) {
 void UIView::setBackgroundColor(const UIColor& color) {
     m_backgroundColor = color;
     
-    if (m_renderer && m_renderer->getBatchRenderer()) {
+    if (m_renderer) {
         uint32_t bgColor = 
             (static_cast<uint32_t>(color.r * 255) << 24) |
             (static_cast<uint32_t>(color.g * 255) << 16) |
             (static_cast<uint32_t>(color.b * 255) << 8) |
             static_cast<uint32_t>(color.a * 255);
             
-        m_renderer->getBatchRenderer()->setViewClear(
+        m_renderer->setViewClear(
             BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
             bgColor, 1.0f, 0
         );
     }
 }
 
+void UIView::drawBackground() {
+    if (m_backgroundColor.a > 0.0f) {
+        RectStyle style;
+        style.fillColor = m_backgroundColor;
+        style.filled = true;
+        style.borderThickness = 0.0f;
+        drawRect(getBounds(), style);
+    }
+}
+
 void UIView::drawLine(const glm::vec2& start, const glm::vec2& end, const LineStyle& style) {
     if (!m_renderer) return;
     
-    TINA_LOG_DEBUG("Adding line draw command from ({}, {}) to ({}, {}) with thickness {}",
+    TINA_CORE_LOG_DEBUG("Adding line draw command from ({}, {}) to ({}, {}) with thickness {}",
         start.x, start.y, end.x, end.y, style.thickness);
     
     m_drawCommands.push_back([this, start, end, style]() {
@@ -247,52 +281,54 @@ void UIView::drawLine(const glm::vec2& start, const glm::vec2& end, const LineSt
             Color(style.color.r, style.color.g, style.color.b, style.color.a)
         );
         
-        TINA_LOG_DEBUG("Drawing line as quad at ({}, {}) with size ({}, {})",
+        TINA_CORE_LOG_DEBUG("Drawing line as quad at ({}, {}) with size ({}, {})",
             start.x, start.y, size.x, size.y);
     });
 }
 
-void UIView::drawRect(const glm::vec2& position, const glm::vec2& size, const RectStyle& style) {
+void UIView::drawRect(const Rect& rect, const RectStyle& style) {
     if (!m_renderer) return;
     
-    m_drawCommands.push_back([this, position, size, style]() {
+    m_drawCommands.push_back([this, rect, style]() {
         // 绘制填充
         if (style.filled) {
             m_renderer->drawQuad(
-                position,
-                size,
+                rect.getPosition(),
+                rect.getSize(),
                 Color(style.fillColor.r, style.fillColor.g, style.fillColor.b, style.fillColor.a)
             );
         }
         
         // 绘制边框
         if (style.borderThickness > 0.0f) {
+            LineStyle borderStyle{style.borderColor, style.borderThickness};
+            
             // 上边
             drawLine(
-                position,
-                {position.x + size.x, position.y},
-                {style.borderThickness, style.borderColor}
+                rect.getPosition(),
+                glm::vec2(rect.getRight(), rect.getTop()),
+                borderStyle
             );
             
             // 右边
             drawLine(
-                {position.x + size.x, position.y},
-                {position.x + size.x, position.y + size.y},
-                {style.borderThickness, style.borderColor}
+                glm::vec2(rect.getRight(), rect.getTop()),
+                glm::vec2(rect.getRight(), rect.getBottom()),
+                borderStyle
             );
             
             // 下边
             drawLine(
-                {position.x + size.x, position.y + size.y},
-                {position.x, position.y + size.y},
-                {style.borderThickness, style.borderColor}
+                glm::vec2(rect.getRight(), rect.getBottom()),
+                glm::vec2(rect.getLeft(), rect.getBottom()),
+                borderStyle
             );
             
             // 左边
             drawLine(
-                {position.x, position.y + size.y},
-                position,
-                {style.borderThickness, style.borderColor}
+                glm::vec2(rect.getLeft(), rect.getBottom()),
+                rect.getPosition(),
+                borderStyle
             );
         }
     });
@@ -337,28 +373,26 @@ void UIView::drawCircle(const glm::vec2& center, float radius, const RectStyle& 
         
         // 绘制边框
         if (style.borderThickness > 0.0f) {
+            LineStyle borderStyle{style.borderColor, style.borderThickness};
+            
             for (int i = 0; i < segments; ++i) {
                 int nextIndex = (i + 1) % segments;
-                drawLine(
-                    points[i],
-                    points[nextIndex],
-                    {style.borderThickness, style.borderColor}
-                );
+                drawLine(points[i], points[nextIndex], borderStyle);
             }
         }
     });
 }
 
-void UIView::drawTexture(const std::shared_ptr<Texture2D>& texture, const glm::vec2& position, const glm::vec2& size, const UIColor& tint) {
+void UIView::drawTexture(const Rect& rect, const std::shared_ptr<Texture2D>& texture, const Color& tint) {
     if (!m_renderer || !texture) return;
     
-    m_drawCommands.push_back([this, texture, position, size, tint]() {
-        m_renderer->drawSprite(
-            position,
-            size,
+    m_drawCommands.push_back([this, rect, texture, tint]() {
+        m_renderer->drawTexturedQuad(
+            rect.getPosition(),
+            rect.getSize(),
             texture,
             glm::vec4(0.0f, 0.0f, 1.0f, 1.0f),
-            Color(tint.r, tint.g, tint.b, tint.a)
+            tint
         );
     });
 }
@@ -369,16 +403,16 @@ void UIView::initShaders() {
         if (!bgfx::isValid(m_shaderProgram)) {
             throw std::runtime_error("Failed to create 2D shader program");
         }
-        TINA_LOG_INFO("Successfully loaded 2D shaders");
+        TINA_CORE_LOG_INFO("Successfully loaded 2D shaders");
     }
     catch (const std::exception& e) {
-        TINA_LOG_ERROR("Failed to initialize shaders: {}", e.what());
+        TINA_CORE_LOG_ERROR("Failed to initialize shaders: {}", e.what());
         throw;
     }
 }
 
 void UIView::initRenderer() {
-    m_renderer = MakeUnique<Renderer2D>();
+    m_renderer = std::make_unique<BatchRenderer2D>();
     m_renderer->init(m_shaderProgram);
     m_renderer->setViewId(renderState.viewId);
 }
@@ -395,7 +429,61 @@ void UIView::initCamera() {
     renderState.viewMatrix = m_camera->getViewMatrix();
     renderState.projMatrix = m_camera->getProjectionMatrix();
 
-    TINA_LOG_INFO("Camera initialized with screen space projection {}x{}", width, height);
+    TINA_CORE_LOG_INFO("Camera initialized with screen space projection {}x{}", width, height);
+}
+
+bool UIView::handleMouseMove(Event& event) {
+    if (event.type != Event::MouseMove) return false;
+    
+    // 转换到本地坐标
+    glm::vec2 localPos = globalToLocal({
+        static_cast<float>(event.mousePos.x), 
+        static_cast<float>(event.mousePos.y)
+    });
+    
+    // 检查鼠标是否在视图范围内
+    if (bounds.contains(localPos)) {
+        TINA_CORE_LOG_DEBUG("Mouse moved in UIView '{}' at local position ({}, {})",
+            getName(), localPos.x, localPos.y);
+        return true;
+    }
+    return false;
+}
+
+bool UIView::handleMouseButton(Event& event) {
+    if (event.type != Event::MouseButtonEvent) return false;
+    
+    // 转换到本地坐标
+    glm::vec2 localPos = globalToLocal({
+        static_cast<float>(event.mouseButton.x),
+        static_cast<float>(event.mouseButton.y)
+    });
+    
+    // 检查鼠标是否在视图范围内
+    if (bounds.contains(localPos)) {
+        TINA_CORE_LOG_DEBUG("Mouse button {} {} in UIView '{}' at local position ({}, {})",
+            static_cast<int>(event.mouseButton.button),
+            event.mouseButton.action == GLFW_PRESS ? "pressed" : "released",
+            getName(),
+            localPos.x, localPos.y);
+        return true;
+    }
+    return false;
+}
+
+bool UIView::handleWindowResize(Event& event) {
+    if (event.type != Event::WindowResize) return false;
+    
+    // 更新视图边界
+    bounds.setWidth(static_cast<float>(event.windowResize.width));
+    bounds.setHeight(static_cast<float>(event.windowResize.height));
+    
+    TINA_CORE_LOG_DEBUG("UIView '{}' resized to {}x{}", 
+        getName(),
+        event.windowResize.width,
+        event.windowResize.height);
+    
+    return true;
 }
 
 } // namespace Tina 

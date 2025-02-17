@@ -21,14 +21,14 @@ namespace Tina
         bgfx::UniformHandle handle = bgfx::createUniform(name.c_str(), type);
         if (!bgfx::isValid(handle))
         {
-            TINA_LOG_ERROR("Failed to create uniform: {}", name);
+            TINA_CORE_LOG_ERROR("Failed to create uniform: {}", name);
             return BGFX_INVALID_HANDLE;
         }
 
         UniformInfo info{handle, type, name};
         m_Uniforms[name] = info;
 
-        TINA_LOG_DEBUG("Created uniform: '{}' of type {}", name, static_cast<int>(type));
+        TINA_CORE_LOG_DEBUG("Created uniform: '{}' of type {}", name, static_cast<int>(type));
 
         return handle;
     }
@@ -43,7 +43,7 @@ namespace Tina
         }
         else
         {
-            TINA_LOG_WARN("Attempting to set non-existent uniform: {}", name);
+            TINA_CORE_LOG_WARN("Attempting to set non-existent uniform: {}", name);
         }
     }
 
@@ -88,7 +88,7 @@ namespace Tina
             if (bgfx::isValid(it->second.handle))
             {
                 bgfx::destroy(it->second.handle);
-                TINA_LOG_DEBUG("Destroyed uniform: {}", name);
+                TINA_CORE_LOG_DEBUG("Destroyed uniform: {}", name);
             }
             m_Uniforms.erase(it);
         }
@@ -99,14 +99,14 @@ namespace Tina
         std::lock_guard<std::mutex> lock(m_Mutex);
         if (!m_Initialized) return;
 
-        TINA_LOG_INFO("Shutting down UniformManager");
+        TINA_CORE_LOG_INFO("Shutting down UniformManager");
 
         for (auto& [name,info] : m_Uniforms)
         {
             if (bgfx::isValid(info.handle))
             {
                 bgfx::destroy(info.handle);
-                TINA_LOG_DEBUG("Destroyed uniform: {}", name);
+                TINA_CORE_LOG_DEBUG("Destroyed uniform: {}", name);
             }
         }
         m_Uniforms.clear();

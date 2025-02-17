@@ -61,7 +61,7 @@ namespace Tina
             }
 
             m_ViewProjectionMatrix = m_ProjectionMatrix * m_ViewMatrix;
-            TINA_LOG_DEBUG("Camera projection updated: L={}, R={}, B={}, T={}", left, right, bottom, top);
+            TINA_CORE_LOG_DEBUG("Camera projection updated: L={}, R={}, B={}, T={}", left, right, bottom, top);
         }
 
         void setProjectionType(ProjectionType type)

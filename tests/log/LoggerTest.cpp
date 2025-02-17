@@ -53,8 +53,8 @@ TEST_F(LoggerTest, BasicLogging) {
     auto& logger = Tina::Logger::instance();
     
     // 使用 String 类型进行日志记录
-    TINA_LOG_INFO("TestModule", "This is a test message");
-    TINA_LOG_ERROR("TestModule", "This is an error message");
+    TINA_CORE_LOG_INFO("TestModule", "This is a test message");
+    TINA_CORE_LOG_ERROR("TestModule", "This is an error message");
     
     // 给一些时间让异步日志完成写入
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -77,7 +77,7 @@ TEST_F(LoggerTest, MultiThreadLogging) {
     for (int i = 0; i < NUM_THREADS; ++i) {
         threads.emplace_back([i, MESSAGES_PER_THREAD]() {
             for (int j = 0; j < MESSAGES_PER_THREAD; ++j) {
-                TINA_LOG_INFO("ThreadTest", 
+                TINA_CORE_LOG_INFO("ThreadTest", 
                     "Message {} from thread {}", j, i);
             }
         });
@@ -102,12 +102,12 @@ TEST_F(LoggerTest, LogLevels) {
     logger.setMinLevel(Tina::LogLevel::Info);
     
     // Debug 级别的消息不应该被记录
-    TINA_LOG_DEBUG("TestModule", "This debug message should not appear");
+    TINA_CORE_LOG_DEBUG("TestModule", "This debug message should not appear");
     
     // Info 及以上级别的消息应该被记录
-    TINA_LOG_INFO("TestModule", "This info message should appear");
-    TINA_LOG_WARN("TestModule", "This warning message should appear");
-    TINA_LOG_ERROR("TestModule", "This error message should appear");
+    TINA_CORE_LOG_INFO("TestModule", "This info message should appear");
+    TINA_CORE_LOG_WARN("TestModule", "This warning message should appear");
+    TINA_CORE_LOG_ERROR("TestModule", "This error message should appear");
     
     // 给一些时间让异步日志完成写入
     std::this_thread::sleep_for(std::chrono::milliseconds(100));

@@ -45,18 +45,18 @@ namespace Tina
         glfwInitAllocator(&allocator);
 
         // 验证内存管理器是否正常工作
-        TINA_LOG_DEBUG("Setting up GLFW memory allocator");
+        TINA_CORE_LOG_DEBUG("Setting up GLFW memory allocator");
 
         if (!glfwInit())
         {
-            TINA_LOG_ERROR("WindowManager::initialize", " Failed to initialize GLFW");
+            TINA_CORE_LOG_ERROR("WindowManager::initialize", " Failed to initialize GLFW");
             return false;
         }
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         //glfwSetJoystickCallback(joystickCallback);
-        TINA_LOG_INFO("WindowManager::initialize - GLFW initialized successfully");
+        TINA_CORE_LOG_INFO("WindowManager::initialize - GLFW initialized successfully");
         // 输出初始内存使用情况
-        TINA_LOG_DEBUG("GLFW memory stats - Current: {}MB, Peak: {}MB",
+        TINA_CORE_LOG_DEBUG("GLFW memory stats - Current: {}MB, Peak: {}MB",
             GlfwMemoryManager::getCurrentAllocated() / (1024*1024),
             GlfwMemoryManager::getPeakAllocated() / (1024*1024));
 
@@ -65,12 +65,12 @@ namespace Tina
 
     void WindowManager::terminate()
     {
-        TINA_LOG_INFO("Terminating WindowManager");
+        TINA_CORE_LOG_INFO("Terminating WindowManager");
 
         try {
             // 检查GLFW是否已初始化
             if (!glfwInit()) {
-                TINA_LOG_DEBUG("GLFW not initialized, skipping cleanup");
+                TINA_CORE_LOG_DEBUG("GLFW not initialized, skipping cleanup");
                 return;
             }
 
@@ -98,9 +98,9 @@ namespace Tina
             // 终止 GLFW
             glfwTerminate();
             
-            TINA_LOG_INFO("WindowManager terminated successfully");
+            TINA_CORE_LOG_INFO("WindowManager terminated successfully");
         } catch (const std::exception& e) {
-            TINA_LOG_ERROR("Error during WindowManager termination: {}", e.what());
+            TINA_CORE_LOG_ERROR("Error during WindowManager termination: {}", e.what());
         }
     }
 
@@ -111,7 +111,7 @@ namespace Tina
 
         auto window = std::make_unique<Window>(this, handle, config);
         if (!window->getHandle()) {
-            TINA_LOG_ERROR("WindowManager::createWindow", "Failed to create GLFW window");
+            TINA_CORE_LOG_ERROR("WindowManager::createWindow", "Failed to create GLFW window");
             return WindowHandle{UINT16_MAX};
         }
 
@@ -245,7 +245,7 @@ namespace Tina
 
     void WindowManager::errorCallback(int error, const char* description)
     {
-        TINA_LOG_ERROR("GLFW Error", "({}) {}", error, description);
+        TINA_CORE_LOG_ERROR("GLFW Error", "({}) {}", error, description);
     }
 
     void WindowManager::joystickCallback(int jid, int event)
@@ -257,7 +257,10 @@ namespace Tina
 
     void WindowManager::eventCallback_key(WindowHandle handle, GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods)
     {
-        Event event = createKeyEvent(handle, key, scancode, action, mods);
+        Event::KeyCode keyCode = static_cast<Event::KeyCode>(key);
+        Event::KeyModifier keyMods = static_cast<Event::KeyModifier>(mods);
+        
+        Event event = createKeyEvent(handle, keyCode, scancode, action, keyMods);
         m_context->getEventQueue().pushEvent(event);
     }
 
@@ -277,25 +280,30 @@ namespace Tina
 
     void WindowManager::eventCallback_cursorPos(WindowHandle handle, GLFWwindow* window, double mx, double my)
     {
-        Event event(Event::CursorPos);
-        event.windowHandle = handle;
-        event.cursorPos.x = mx;
-        event.cursorPos.y = my;
+        Event event = createMouseMoveEvent(handle, mx, my);
+        event.mousePos.x = mx;
+        event.mousePos.y = my;
         m_context->getEventQueue().pushEvent(event);
     }
 
     void WindowManager::eventCallback_mouseButton(WindowHandle handle, GLFWwindow* window, int32_t button, int32_t action, int32_t mods)
     {
-        Event event = createMouseButtonEvent(handle, button, action, mods);
+        double x, y;
+        glfwGetCursorPos(window, &x, &y);
+
+        Event::MouseButton mouseButton = static_cast<Event::MouseButton>(button);
+        Event::KeyModifier keyMods = static_cast<Event::KeyModifier>(mods);
+        
+        Event event = createMouseButtonEvent(handle, mouseButton, action, keyMods, x, y);
         m_context->getEventQueue().pushEvent(event);
     }
 
     void WindowManager::eventCallback_windowSize(WindowHandle handle, GLFWwindow* window, int32_t width, int32_t height)
     {
         // 创建窗口大小改变事件
-        TINA_LOG_DEBUG("Creating WindowResize event: {}x{}", width, height);
+        TINA_CORE_LOG_DEBUG("Creating WindowResize event: {}x{}", width, height);
         Event event = createWindowResizeEvent(handle, width, height);
-        TINA_LOG_DEBUG("Created event type: {}", static_cast<int>(event.type));
+        TINA_CORE_LOG_DEBUG("Created event type: {}", static_cast<int>(event.type));
         m_context->getEventQueue().pushEvent(event);
 
     }

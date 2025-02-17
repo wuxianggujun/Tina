@@ -17,7 +17,7 @@ std::shared_ptr<Resource> ShaderLoader::load(const std::string& path) {
     auto fragmentPath = path + ".frag";
 
     if (!std::filesystem::exists(vertexPath) || !std::filesystem::exists(fragmentPath)) {
-        TINA_LOG_ERROR("Shader files not found: {}", path);
+        TINA_CORE_LOG_ERROR("Shader files not found: {}", path);
         return nullptr;
     }
 
@@ -67,18 +67,18 @@ bool ShaderLoader::loadShaderData(const std::string& vertexPath, const std::stri
     // 创建着色器程序
     shader->m_program = bgfx::createProgram(vsh, fsh, true);
     if (!bgfx::isValid(shader->m_program)) {
-        TINA_LOG_ERROR("Failed to create shader program: {} {}", vertexPath, fragmentPath);
+        TINA_CORE_LOG_ERROR("Failed to create shader program: {} {}", vertexPath, fragmentPath);
         return false;
     }
 
-    TINA_LOG_INFO("Loaded shader program: {} {}", vertexPath, fragmentPath);
+    TINA_CORE_LOG_INFO("Loaded shader program: {} {}", vertexPath, fragmentPath);
     return true;
 }
 
 bgfx::ShaderHandle ShaderLoader::loadShaderFile(const std::string& path, bool isVertex) {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file) {
-        TINA_LOG_ERROR("Failed to open shader file: {}", path);
+        TINA_CORE_LOG_ERROR("Failed to open shader file: {}", path);
         return BGFX_INVALID_HANDLE;
     }
 
@@ -87,7 +87,7 @@ bgfx::ShaderHandle ShaderLoader::loadShaderFile(const std::string& path, bool is
 
     std::vector<char> buffer(size);
     if (!file.read(buffer.data(), size)) {
-        TINA_LOG_ERROR("Failed to read shader file: {}", path);
+        TINA_CORE_LOG_ERROR("Failed to read shader file: {}", path);
         return BGFX_INVALID_HANDLE;
     }
 
@@ -95,7 +95,7 @@ bgfx::ShaderHandle ShaderLoader::loadShaderFile(const std::string& path, bool is
     bgfx::ShaderHandle handle = bgfx::createShader(mem);
 
     if (!bgfx::isValid(handle)) {
-        TINA_LOG_ERROR("Failed to create shader: {}", path);
+        TINA_CORE_LOG_ERROR("Failed to create shader: {}", path);
         return BGFX_INVALID_HANDLE;
     }
 

@@ -16,7 +16,7 @@ namespace Tina
         // 初始化实体状态缓存
         m_EntityStates.reserve(1000);
         
-        TINA_LOG_DEBUG("GameViewRenderer initialized with capacity for 1000 entities");
+        TINA_CORE_LOG_DEBUG("GameViewRenderer initialized with capacity for 1000 entities");
     }
 
     void GameViewRenderer::render(Scene* scene, Renderer2D& renderer)
@@ -29,7 +29,7 @@ namespace Tina
         collectRenderables(scene);
         
         // 输出渲染统计
-        TINA_LOG_DEBUG("Rendering {} entities, Cache size: {} entries",
+        TINA_CORE_LOG_DEBUG("Rendering {} entities, Cache size: {} entries",
             m_SortedEntities.size(),
             m_EntityStates.size());
 
@@ -137,7 +137,7 @@ namespace Tina
             state.lastSize = size;
             state.needsUpdate = true;
             
-            TINA_LOG_TRACE("Entity {} transform updated - Pos: ({}, {}), Size: ({}, {})",
+            TINA_CORE_LOG_TRACE("Entity {} transform updated - Pos: ({}, {}), Size: ({}, {})",
                 static_cast<uint32_t>(entity),
                 position.x, position.y,
                 size.x, size.y);
@@ -150,7 +150,7 @@ namespace Tina
         {
             if (!registry.valid(it->first))
             {
-                TINA_LOG_TRACE("Removing invalid entity {} from cache", static_cast<uint32_t>(it->first));
+                TINA_CORE_LOG_TRACE("Removing invalid entity {} from cache", static_cast<uint32_t>(it->first));
                 it = m_EntityStates.erase(it);
             }
             else

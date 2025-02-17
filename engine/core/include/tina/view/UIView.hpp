@@ -1,79 +1,85 @@
 #pragma once
 
-#include "tina/core/Engine.hpp"
-#include "tina/core/OrthographicCamera.hpp"
-#include "tina/renderer/BatchRenderer2D.hpp"
 #include "tina/view/View.hpp"
+#include "tina/ui/UITypes.hpp"
+#include "tina/math/Rect.hpp"
+#include "tina/renderer/Color.hpp"
+#include "tina/renderer/BatchRenderer2D.hpp"
 #include "tina/renderer/Texture2D.hpp"
-#include "tina/renderer/Renderer2D.hpp"
-#include <glm/gtc/matrix_transform.hpp>
+#include "tina/renderer/RenderCommand.hpp"
+#include "tina/core/Core.hpp"
+#include "tina/scene/Scene.hpp"
+#include "tina/event/Event.hpp"
+#include "tina/core/OrthographicCamera.hpp"
+#include <bgfx/bgfx.h>
+#include <glm/vec2.hpp>
+#include <glm/vec4.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <vector>
+#include <functional>
+#include <memory>
 
 namespace Tina {
 
-    // 定义UI元素的基本颜色结构
-    struct UIColor {
-        float r, g, b, a;
-        
-        UIColor(float r = 1.0f, float g = 1.0f, float b = 1.0f, float a = 1.0f)
-            : r(r), g(g), b(b), a(a) {}
-    };
+class TINA_CORE_API UIView : public View {
+public:
+    explicit UIView(const std::string& name = "UIView");
+    ~UIView() override;
 
-    // 定义线条样式
-    struct LineStyle {
-        float thickness = 1.0f;
-        UIColor color;
-    };
+    // 绘制相关方法
+    void drawLine(const glm::vec2& start, const glm::vec2& end, const LineStyle& style = {});
+    void drawRect(const Rect& rect, const RectStyle& style = {});
+    void drawCircle(const glm::vec2& center, float radius, const RectStyle& style = {});
+    void drawEllipse(const Rect& bounds, const RectStyle& style = {});
+    void drawRoundedRect(const Rect& rect, float radius, const RectStyle& style = {});
+    void drawTexture(const Rect& rect, const std::shared_ptr<Texture2D>& texture, const Color& tint = Color::White);
 
-    // 定义矩形样式
-    struct RectStyle {
-        UIColor fillColor;
-        UIColor borderColor;
-        float borderThickness = 0.0f;
-        bool filled = true;
-    };
+    // 设置背景颜色
+    void setBackgroundColor(const UIColor& color);
+    [[nodiscard]] const UIColor& getBackgroundColor() const { return m_backgroundColor; }
 
-    class UIView : public View {
-    public:
-        UIView(const std::string& name);
-        ~UIView() override = default;
+    // 获取视图边界
+    [[nodiscard]] Rect getBounds() const { return bounds; }
+    void setBounds(const Rect& rect) { 
+        bounds = rect;
+        setPosition(rect.getPosition());
+        setSize(rect.getSize());
+    }
 
-        // 基础绘制方法
-        void drawLine(const glm::vec2& start, const glm::vec2& end, const LineStyle& style = LineStyle());
-        void drawRect(const glm::vec2& position, const glm::vec2& size, const RectStyle& style = RectStyle());
-        void drawCircle(const glm::vec2& center, float radius, const RectStyle& style = RectStyle());
-        void drawTexture(const std::shared_ptr<Texture2D>& texture, const glm::vec2& position, const glm::vec2& size, const UIColor& tint = UIColor());
+    // 设置位置和大小
+    void setPosition(const glm::vec2& pos) { position = pos; }
+    void setSize(const glm::vec2& sz) { size = sz; }
+    [[nodiscard]] const glm::vec2& getPosition() const { return position; }
+    [[nodiscard]] const glm::vec2& getSize() const { return size; }
 
-        // View接口实现
-        void onAttach() override;
-        void onDetach() override;
-        void onUpdate(float deltaTime) override;
-        void beginRender() override;
-        void endRender() override;
-        void render(Scene* scene) override;
-        bool onEvent(Event& event) override;
+    // View接口实现
+    void onAttach() override;
+    void onDetach() override;
+    void onUpdate(float deltaTime) override;
+    void beginRender() override;
+    void endRender() override;
+    void render(Scene* scene) override;
+    bool onEvent(Event& event) override;
 
-        // 设置背景颜色
-        void setBackgroundColor(const UIColor& color);
+protected:
+    // 绘制背景
+    virtual void drawBackground();
 
-        // 清除所有绘制命令
-        void clearDrawCommands() {
-            m_drawCommands.clear();
-            TINA_LOG_DEBUG("Cleared all UI draw commands");
-        }
+    // 事件处理
+    bool handleMouseMove(Event& event) override;
+    bool handleMouseButton(Event& event) override;
+    bool handleWindowResize(Event& event) override;
 
-    private:
-        void initShaders();
-        void initRenderer();
-        void initCamera();
+private:
+    void initShaders();
+    void initRenderer();
+    void initCamera();
 
-        UniquePtr<Renderer2D> m_renderer;
-        SharedPtr<OrthographicCamera> m_camera;
-        bgfx::ProgramHandle m_shaderProgram = BGFX_INVALID_HANDLE;
-        bool m_initialized = false;
-
-        // UI状态
-        UIColor m_backgroundColor{0.18f, 0.18f, 0.18f, 1.0f}; // 默认深灰色背景
-        std::vector<std::function<void()>> m_drawCommands; // 存储绘制命令
-    };
+    UIColor m_backgroundColor{0.0f, 0.0f, 0.0f, 0.0f}; // 背景颜色
+    std::unique_ptr<BatchRenderer2D> m_renderer;
+    SharedPtr<OrthographicCamera> m_camera;
+    std::vector<std::function<void()>> m_drawCommands;
+    bgfx::ProgramHandle m_shaderProgram{BGFX_INVALID_HANDLE};
+};
 
 } // namespace Tina 

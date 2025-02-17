@@ -70,7 +70,7 @@ namespace Tina
             auto loaderIt = m_Loaders.find(typeid(T));
             if (loaderIt == m_Loaders.end())
             {
-                TINA_LOG_ERROR("No loader registered for resource type");
+                TINA_CORE_LOG_ERROR("No loader registered for resource type");
                 return nullptr;
             }
 
@@ -136,7 +136,7 @@ namespace Tina
                 it = m_Resources.erase(it);
             }
 
-            TINA_LOG_INFO("All resources released");
+            TINA_CORE_LOG_INFO("All resources released");
         }
 
         // 重新加载资源

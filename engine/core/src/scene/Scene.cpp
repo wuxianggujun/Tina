@@ -14,7 +14,7 @@ namespace Tina
           m_rootView(new View("RootView"))
     {
         TINA_PROFILE_FUNCTION();
-        TINA_LOG_INFO("Created scene: {}", m_name);
+        TINA_CORE_LOG_INFO("Created scene: {}", m_name);
         
         // 初始化根视图
         initializeView(m_rootView);
@@ -26,7 +26,7 @@ namespace Tina
         try
         {
             std::string sceneName = m_name;
-            TINA_LOG_INFO("Destroying scene: {}", sceneName);
+            TINA_CORE_LOG_INFO("Destroying scene: {}", sceneName);
 
             if (m_rootView)
             {
@@ -41,7 +41,7 @@ namespace Tina
         }
         catch (const std::exception& e)
         {
-            TINA_LOG_ERROR("Error in scene destructor: {}", e.what());
+            TINA_CORE_LOG_ERROR("Error in scene destructor: {}", e.what());
         }
     }
 
@@ -62,7 +62,7 @@ namespace Tina
 
         try 
         {
-            TINA_LOG_DEBUG("Adding view '{}' to scene", view->getName());
+            TINA_CORE_LOG_DEBUG("Adding view '{}' to scene", view->getName());
             
             // 1. 建立节点关系
             m_rootView->addChild(view);
@@ -70,11 +70,11 @@ namespace Tina
             // 2. 初始化视图
             initializeView(view);
             
-            TINA_LOG_DEBUG("View '{}' added successfully", view->getName());
+            TINA_CORE_LOG_DEBUG("View '{}' added successfully", view->getName());
         }
         catch (const std::exception& e)
         {
-            TINA_LOG_ERROR("Failed to add view '{}': {}", view->getName(), e.what());
+            TINA_CORE_LOG_ERROR("Failed to add view '{}': {}", view->getName(), e.what());
             m_rootView->removeChild(view);
             throw;
         }
@@ -86,7 +86,7 @@ namespace Tina
 
         try 
         {
-            TINA_LOG_DEBUG("Removing view '{}' from scene", view->getName());
+            TINA_CORE_LOG_DEBUG("Removing view '{}' from scene", view->getName());
             
             // 1. 清理视图
             cleanupView(view);
@@ -94,18 +94,18 @@ namespace Tina
             // 2. 移除节点关系
             m_rootView->removeChild(view);
             
-            TINA_LOG_DEBUG("View '{}' removed successfully", view->getName());
+            TINA_CORE_LOG_DEBUG("View '{}' removed successfully", view->getName());
         }
         catch (const std::exception& e)
         {
-            TINA_LOG_ERROR("Error removing view '{}': {}", view->getName(), e.what());
+            TINA_CORE_LOG_ERROR("Error removing view '{}': {}", view->getName(), e.what());
             throw;
         }
     }
 
     void Scene::onEvent(Event& event)
     {
-        TINA_LOG_DEBUG("Scene: Received event type {}", static_cast<int>(event.type));
+        TINA_CORE_LOG_DEBUG("Scene: Received event type {}", static_cast<int>(event.type));
 
         if (m_rootView)
         {
@@ -128,7 +128,7 @@ namespace Tina
     {
         if (!view) return;
         
-        TINA_LOG_DEBUG("Initializing view '{}'", view->getName());
+        TINA_CORE_LOG_DEBUG("Initializing view '{}'", view->getName());
         
         // 1. 设置视口
         uint32_t width, height;
@@ -152,7 +152,7 @@ namespace Tina
     {
         if (!view) return;
         
-        TINA_LOG_DEBUG("Cleaning up view '{}'", view->getName());
+        TINA_CORE_LOG_DEBUG("Cleaning up view '{}'", view->getName());
         
         // 1. 递归清理子视图
         for (auto* child : view->getChildren())

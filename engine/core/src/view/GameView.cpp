@@ -13,7 +13,7 @@ namespace Tina {
 // 如果后续需要添加更多功能，可以在这里实现
 
 GameView::GameView() : View("GameView") {
-    TINA_LOG_INFO("GameView created");
+    TINA_CORE_LOG_INFO("GameView created");
 }
 
 std::shared_ptr<Texture2D> GameView::loadTexture(const std::string& name, const std::string& path) {
@@ -23,7 +23,7 @@ std::shared_ptr<Texture2D> GameView::loadTexture(const std::string& name, const 
 void GameView::onAttach() {
     if (!m_initialized) {
         try {
-            TINA_LOG_INFO("Initializing GameView");
+            TINA_CORE_LOG_INFO("Initializing GameView");
 
             initShaders();
             initRenderer();
@@ -49,15 +49,15 @@ void GameView::onAttach() {
                     0x303030ff, 1.0f, 0
                 );
                 
-                TINA_LOG_DEBUG("View parameters set - ViewId: {}, Size: {}x{}", 
+                TINA_CORE_LOG_DEBUG("View parameters set - ViewId: {}, Size: {}x{}", 
                     renderState.viewId, width, height);
             }
 
             m_initialized = true;
-            TINA_LOG_INFO("GameView initialized successfully");
+            TINA_CORE_LOG_INFO("GameView initialized successfully");
         }
         catch (const std::exception& e) {
-            TINA_LOG_ERROR("Failed to initialize GameView: {}", e.what());
+            TINA_CORE_LOG_ERROR("Failed to initialize GameView: {}", e.what());
             if (bgfx::isValid(m_shaderProgram)) {
                 m_shaderProgram = BGFX_INVALID_HANDLE;
             }
@@ -67,7 +67,7 @@ void GameView::onAttach() {
 }
 
 void GameView::onDetach() {
-    TINA_LOG_INFO("Shutting down GameView");
+    TINA_CORE_LOG_INFO("Shutting down GameView");
 
     try {
         if (m_renderer) {
@@ -76,16 +76,16 @@ void GameView::onDetach() {
 
         // 使用ShaderManager销毁shader program
         if (bgfx::isValid(m_shaderProgram)) {
-            TINA_LOG_DEBUG("Destroying shader program");
+            TINA_CORE_LOG_DEBUG("Destroying shader program");
             Core::Engine::get().getShaderManager().destroyProgram(m_shaderProgram);
             m_shaderProgram = BGFX_INVALID_HANDLE;
         }
 
         m_initialized = false;
-        TINA_LOG_INFO("GameView shutdown completed");
+        TINA_CORE_LOG_INFO("GameView shutdown completed");
     }
     catch (const std::exception& e) {
-        TINA_LOG_ERROR("Error during GameView shutdown: {}", e.what());
+        TINA_CORE_LOG_ERROR("Error during GameView shutdown: {}", e.what());
         // 即使发生错误也要尝试清理shader
         if (bgfx::isValid(m_shaderProgram)) {
             Core::Engine::get().getShaderManager().destroyProgram(m_shaderProgram);
@@ -179,10 +179,10 @@ void GameView::initShaders() {
         if (!bgfx::isValid(m_shaderProgram)) {
             throw std::runtime_error("Failed to create 2D shader program");
         }
-        TINA_LOG_INFO("Successfully loaded 2D shaders");
+        TINA_CORE_LOG_INFO("Successfully loaded 2D shaders");
     }
     catch (const std::exception& e) {
-        TINA_LOG_ERROR("Failed to initialize shaders: {}", e.what());
+        TINA_CORE_LOG_ERROR("Failed to initialize shaders: {}", e.what());
         throw;
     }
 }
@@ -206,7 +206,7 @@ void GameView::initCamera() {
     renderState.viewMatrix = m_camera->getViewMatrix();
     renderState.projMatrix = m_camera->getProjectionMatrix();
 
-    TINA_LOG_INFO("Camera initialized with screen space projection {}x{}", width, height);
+    TINA_CORE_LOG_INFO("Camera initialized with screen space projection {}x{}", width, height);
 }
 
 } // namespace Tina

@@ -5,14 +5,14 @@ namespace Tina {
 
 std::shared_ptr<Scene> SceneManager::createScene(const std::string& name) {
     if (m_Scenes.find(name) != m_Scenes.end()) {
-        TINA_LOG_WARN("Scene '{}' already exists", name);
+        TINA_CORE_LOG_WARN("Scene '{}' already exists", name);
         return m_Scenes[name];
     }
 
     auto scene = std::make_shared<Scene>(name);
     m_Scenes[name] = scene;
 
-    TINA_LOG_INFO("Created scene '{}'", name);
+    TINA_CORE_LOG_INFO("Created scene '{}'", name);
     return scene;
 }
 
@@ -24,7 +24,7 @@ std::shared_ptr<Scene> SceneManager::loadScene(const std::string& name) {
 void SceneManager::unloadScene(const std::string& name) {
     auto it = m_Scenes.find(name);
     if (it == m_Scenes.end()) {
-        TINA_LOG_WARN("Attempting to unload non-existent scene '{}'", name);
+        TINA_CORE_LOG_WARN("Attempting to unload non-existent scene '{}'", name);
         return;
     }
 
@@ -33,23 +33,23 @@ void SceneManager::unloadScene(const std::string& name) {
     }
 
     m_Scenes.erase(it);
-    TINA_LOG_INFO("Unloaded scene '{}'", name);
+    TINA_CORE_LOG_INFO("Unloaded scene '{}'", name);
 }
 
 void SceneManager::setActiveScene(const std::string& name) {
     auto it = m_Scenes.find(name);
     if (it == m_Scenes.end()) {
-        TINA_LOG_ERROR("Cannot set active scene: scene '{}' does not exist", name);
+        TINA_CORE_LOG_ERROR("Cannot set active scene: scene '{}' does not exist", name);
         return;
     }
 
     if (m_ActiveScene == it->second) {
-        TINA_LOG_WARN("Scene '{}' is already active", name);
+        TINA_CORE_LOG_WARN("Scene '{}' is already active", name);
         return;
     }
 
     m_ActiveScene = it->second;
-    TINA_LOG_INFO("Set active scene to '{}'", name);
+    TINA_CORE_LOG_INFO("Set active scene to '{}'", name);
 }
 
 std::shared_ptr<Scene> SceneManager::getScene(const std::string& name) const {

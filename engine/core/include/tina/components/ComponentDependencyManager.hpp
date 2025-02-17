@@ -26,7 +26,7 @@ public:
         m_Dependencies[componentType].insert(dependencyType);
         m_DependentComponents[dependencyType].insert(componentType);
 
-        TINA_LOG_DEBUG("Registered dependency: {} depends on {}", 
+        TINA_CORE_LOG_DEBUG("Registered dependency: {} depends on {}", 
             typeid(T).name(), typeid(Dependency).name());
     }
 
@@ -91,7 +91,7 @@ public:
         if (it != m_Dependencies.end()) {
             for (const auto& dependency : it->second) {
                 if (!registry.any_of<T>(entity)) {
-                    TINA_LOG_WARN("Entity {} missing required dependency {} for component {}",
+                    TINA_CORE_LOG_WARN("Entity {} missing required dependency {} for component {}",
                         static_cast<uint32_t>(entity),
                         dependency.name(),
                         componentType.name());

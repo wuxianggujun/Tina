@@ -23,7 +23,7 @@ namespace Tina
         const auto it = m_textures.find(name);
         if (it != m_textures.end())
         {
-            TINA_LOG_DEBUG("Texture '{}' already loaded, reusing existing texture", name);
+            TINA_CORE_LOG_DEBUG("Texture '{}' already loaded, reusing existing texture", name);
             return it->second;
         }
 
@@ -33,30 +33,30 @@ namespace Tina
         // 检查目录和文件是否存在
         if (!std::filesystem::exists(resourcePath.parent_path()))
         {
-            TINA_LOG_ERROR("Resource directory does not exist: {}", resourcePath.parent_path().string());
+            TINA_CORE_LOG_ERROR("Resource directory does not exist: {}", resourcePath.parent_path().string());
             return nullptr;
         }
 
         if (!std::filesystem::exists(resourcePath))
         {
-            TINA_LOG_ERROR("Texture file does not exist: {}", resourcePath.string());
+            TINA_CORE_LOG_ERROR("Texture file does not exist: {}", resourcePath.string());
             return nullptr;
         }
 
-        TINA_LOG_DEBUG("Loading texture from path: {}", resourcePath.string());
+        TINA_CORE_LOG_DEBUG("Loading texture from path: {}", resourcePath.string());
 
         // 使用 ResourceManager 加载纹理
         auto texture = ResourceManager::getInstance().load<Texture2D>(resourcePath.string());
         if (!texture)
         {
-            TINA_LOG_ERROR("Failed to load texture through ResourceManager: {}", resourcePath.string());
+            TINA_CORE_LOG_ERROR("Failed to load texture through ResourceManager: {}", resourcePath.string());
             return nullptr;
         }
 
         // 验证纹理是否有效
         if (!texture->isValid() || texture->getWidth() == 0 || texture->getHeight() == 0)
         {
-            TINA_LOG_ERROR("Loaded texture is invalid: {}", resourcePath.string());
+            TINA_CORE_LOG_ERROR("Loaded texture is invalid: {}", resourcePath.string());
             return nullptr;
         }
 
@@ -74,7 +74,7 @@ namespace Tina
             }
         }
 
-        TINA_LOG_INFO("Texture '{}' loaded successfully - Path: {}, Size: {}x{}, Memory: {} KB, Total Memory: {} KB",
+        TINA_CORE_LOG_INFO("Texture '{}' loaded successfully - Path: {}, Size: {}x{}, Memory: {} KB, Total Memory: {} KB",
                       name,
                       resourcePath.string(),
                       texture->getWidth(),
@@ -93,7 +93,7 @@ namespace Tina
         {
             return it->second;
         }
-        TINA_LOG_WARN("Texture '{}' not found or invalid", name);
+        TINA_CORE_LOG_WARN("Texture '{}' not found or invalid", name);
         return nullptr;
     }
 
@@ -106,7 +106,7 @@ namespace Tina
             const auto& texture = it->second;
             if (texture && texture->isValid())
             {
-                TINA_LOG_DEBUG("Releasing texture '{}' - Size: {}x{}, Memory: {} KB",
+                TINA_CORE_LOG_DEBUG("Releasing texture '{}' - Size: {}x{}, Memory: {} KB",
                                name,
                                texture->getWidth(),
                                texture->getHeight(),
@@ -135,7 +135,7 @@ namespace Tina
             }
         }
 
-        TINA_LOG_INFO("Cleared all textures - Total Memory Freed: {} KB", totalMemoryFreed / 1024);
+        TINA_CORE_LOG_INFO("Cleared all textures - Total Memory Freed: {} KB", totalMemoryFreed / 1024);
         m_textures.clear();
     }
 
@@ -156,7 +156,7 @@ namespace Tina
                 }
             }
 
-            TINA_LOG_INFO("TextureManager shutdown - Total Memory Freed: {} KB", totalMemoryFreed / 1024);
+            TINA_CORE_LOG_INFO("TextureManager shutdown - Total Memory Freed: {} KB", totalMemoryFreed / 1024);
             m_textures.clear();
         }
     }

@@ -15,22 +15,34 @@ namespace Tina {
     {
         size_t beforeMem = GlfwMemoryManager::getCurrentAllocated();
 
-        m_handle = glfwCreateWindow(config.width, config.height, config.title, nullptr, nullptr);
+        // 创建窗口
+        m_handle = glfwCreateWindow(config.width, config.height, config.title, 
+            config.fullscreen ? glfwGetPrimaryMonitor() : nullptr, nullptr);
+        
         if (!m_handle)
         {
-            TINA_LOG_ERROR("Window::Window", "Failed to create GLFW window");
+            TINA_CORE_LOG_ERROR("Failed to create GLFW window");
             return;
         }
+
+        // 设置窗口用户指针
         glfwSetWindowUserPointer(m_handle, this);
+
+        // 设置垂直同步
+        glfwMakeContextCurrent(m_handle);
+        glfwSwapInterval(config.vsync ? 1 : 0);
+
         size_t afterMem = GlfwMemoryManager::getCurrentAllocated();
-        TINA_LOG_DEBUG("Window creation memory usage: {} bytes", afterMem - beforeMem);
+        TINA_CORE_LOG_DEBUG("Window creation memory usage: {} bytes", afterMem - beforeMem);
+        TINA_CORE_LOG_DEBUG("Window created: {}x{}, VSync: {}, Fullscreen: {}", 
+            config.width, config.height, config.vsync, config.fullscreen);
     }
 
     Window::~Window()
     {
         if (m_handle)
         {
-            TINA_LOG_DEBUG("Destroying window");
+            TINA_CORE_LOG_DEBUG("Destroying window");
             glfwSetWindowUserPointer(m_handle, nullptr);  // 清除用户指针
             glfwDestroyWindow(m_handle);
             m_handle = nullptr;
@@ -70,4 +82,36 @@ namespace Tina {
         }
     }
 
+    bool Window::isKeyPressed(int32_t key) {
+        GLFWwindow* window = glfwGetCurrentContext();
+        if (!window) return false;
+        return glfwGetKey(window, key) == GLFW_PRESS;
+    }
+
+    bool Window::isMouseButtonPressed(int32_t button) {
+        GLFWwindow* window = glfwGetCurrentContext();
+        if (!window) return false;
+        return glfwGetMouseButton(window, button) == GLFW_PRESS;
+    }
+
+    void Window::getMousePosition(double& x, double& y) {
+        GLFWwindow* window = glfwGetCurrentContext();
+        if (!window) {
+            x = y = 0.0;
+            return;
+        }
+        glfwGetCursorPos(window, &x, &y);
+    }
+
+    void Window::setMousePosition(double x, double y) {
+        GLFWwindow* window = glfwGetCurrentContext();
+        if (!window) return;
+        glfwSetCursorPos(window, x, y);
+    }
+
+    void Window::setMouseCursor(bool visible) {
+        GLFWwindow* window = glfwGetCurrentContext();
+        if (!window) return;
+        glfwSetInputMode(window, GLFW_CURSOR, visible ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
+    }
 } // Tina

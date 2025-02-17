@@ -50,8 +50,8 @@ target_compile_definitions(TinaCore
         SHADER_OUTPUT_DIR="${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/resources/shaders"
 )
 
-# 启用 C++17
-target_compile_features(TinaCore PUBLIC cxx_std_17)
+# 启用 C++20
+target_compile_features(TinaCore PUBLIC cxx_std_20)
 
 # 导出符号
 if(MSVC)

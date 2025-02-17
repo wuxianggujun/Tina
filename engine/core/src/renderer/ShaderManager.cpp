@@ -32,12 +32,12 @@ bgfx::ShaderHandle ShaderManager::loadShader(const std::string& name, const std:
         std::filesystem::path shaderPath = std::filesystem::path(Core::Engine::getExecutablePath()) / "resources" / "shaders";
         #endif
 
-        TINA_LOG_INFO("Loading shader from base path: {}", shaderPath.string());
+        TINA_CORE_LOG_INFO("Loading shader from base path: {}", shaderPath.string());
         
         // 根据平台选择正确的着色器版本
         std::string platformDir;
         const auto rendererType = bgfx::getRendererType();
-        TINA_LOG_INFO("Current renderer type: {}", bgfx::getRendererName(rendererType));
+        TINA_CORE_LOG_INFO("Current renderer type: {}", bgfx::getRendererName(rendererType));
 
         switch (rendererType) {
             case bgfx::RendererType::Direct3D11:
@@ -60,14 +60,14 @@ bgfx::ShaderHandle ShaderManager::loadShader(const std::string& name, const std:
                 break;
         }
         
-        TINA_LOG_INFO("Using shader platform directory: {}", platformDir);
+        TINA_CORE_LOG_INFO("Using shader platform directory: {}", platformDir);
         shaderPath /= platformDir;
         
         // 修改文件名格式以匹配编译输出
         std::string filename = name + "." + type + ".bin";
         shaderPath /= filename;
 
-        TINA_LOG_INFO("Attempting to load shader from: {}", shaderPath.string());
+        TINA_CORE_LOG_INFO("Attempting to load shader from: {}", shaderPath.string());
 
         // 加载着色器二进制数据
         auto shaderData = loadShaderBinary(shaderPath.string());
@@ -83,10 +83,10 @@ bgfx::ShaderHandle ShaderManager::loadShader(const std::string& name, const std:
         // 设置调试名称
         bgfx::setName(handle, (name + "_" + type).c_str());
         
-        TINA_LOG_INFO("Successfully loaded shader: {} ({})", name, type);
+        TINA_CORE_LOG_INFO("Successfully loaded shader: {} ({})", name, type);
         return handle;
     } catch (const std::exception& e) {
-        TINA_LOG_ERROR("Failed to load shader {} ({}): {}", name, type, e.what());
+        TINA_CORE_LOG_ERROR("Failed to load shader {} ({}): {}", name, type, e.what());
         throw;
     }
 }
@@ -127,7 +127,7 @@ void ShaderManager::destroyProgram(bgfx::ProgramHandle handle) {
             const std::string& name = it->first;
             auto& resources = it->second;
 
-            TINA_LOG_DEBUG("Destroying program and shaders: {}", name);
+            TINA_CORE_LOG_DEBUG("Destroying program and shaders: {}", name);
             
             // 销毁shaders
             if (bgfx::isValid(resources.vertexShader)) {
@@ -150,16 +150,16 @@ void ShaderManager::shutdown() {
     TINA_PROFILE_FUNCTION();
     
     if (m_isShutdown) {
-        TINA_LOG_WARN("ShaderManager already shut down");
+        TINA_CORE_LOG_WARN("ShaderManager already shut down");
         return;
     }
     
-    TINA_LOG_DEBUG("Destroying all shader programs");
+    TINA_CORE_LOG_DEBUG("Destroying all shader programs");
     
     // 销毁所有programs及其shaders
     for (const auto& [name, resources] : m_programs) {
         if (bgfx::isValid(resources.program)) {
-            TINA_LOG_DEBUG("Destroying program and shaders: {}", name);
+            TINA_CORE_LOG_DEBUG("Destroying program and shaders: {}", name);
             
             // 销毁shaders
             if (bgfx::isValid(resources.vertexShader)) {
@@ -177,7 +177,7 @@ void ShaderManager::shutdown() {
     m_programs.clear();
     m_isShutdown = true;
     
-    TINA_LOG_DEBUG("ShaderManager shutdown completed");
+    TINA_CORE_LOG_DEBUG("ShaderManager shutdown completed");
 }
 
 } // namespace Tina

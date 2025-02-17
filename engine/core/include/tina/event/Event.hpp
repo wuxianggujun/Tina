@@ -1,6 +1,8 @@
 #pragma once
 
 #include "tina/window/Window.hpp"
+#include <glm/glm.hpp>
+#include <cstdint>
 
 namespace Tina
 {
@@ -8,6 +10,59 @@ namespace Tina
 
     struct Event
     {
+        // 鼠标按钮枚举
+        enum class MouseButton : int32_t
+        {
+            None = -1,
+            Left = 0,
+            Right = 1,
+            Middle = 2
+        };
+
+        // 按键码枚举
+        enum class KeyCode : int32_t
+        {
+            None = 0,
+            A = 65, B, C, D, E, F, G, H, I, J, K, L, M,
+            N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
+            Key0 = 48, Key1, Key2, Key3, Key4, Key5, Key6, Key7, Key8, Key9,
+            F1 = 290, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+            Space = 32,
+            Enter = 257,
+            Tab = 258,
+            Backspace = 259,
+            Escape = 256,
+            Left = 263,
+            Right = 262,
+            Up = 265,
+            Down = 264,
+            Delete = 261,
+            Home = 268,
+            End = 269,
+            PageUp = 266,
+            PageDown = 267,
+            Insert = 260,
+            LeftShift = 340,
+            RightShift = 344,
+            LeftControl = 341,
+            RightControl = 345,
+            LeftAlt = 342,
+            RightAlt = 346,
+            LeftSuper = 343,
+            RightSuper = 347
+        };
+
+        // 按键修饰符
+        enum class KeyModifier : int32_t
+        {
+            None = 0,
+            Shift = 1,
+            Control = 2,
+            Alt = 4,
+            Super = 8
+        };
+
+        // 事件类型枚举
         enum Type
         {
             None = 0,
@@ -20,7 +75,7 @@ namespace Tina
             WindowClose,
             Key,
             Char,
-            MouseButton,
+            MouseButtonEvent,  // 重命名以避免与MouseButton枚举类冲突
             MouseMove,
             MouseScroll,
             MouseEnter,
@@ -57,10 +112,10 @@ namespace Tina
 
             struct
             {
-                int32_t key;
+                KeyCode key;
                 int32_t scancode;
                 int32_t action;
-                int32_t mods;
+                KeyModifier mods;
             } key;
 
             struct
@@ -70,9 +125,11 @@ namespace Tina
 
             struct
             {
-                int32_t button;
+                MouseButton button;
                 int32_t action;
-                int32_t mods;
+                KeyModifier mods;
+                double x;
+                double y;
             } mouseButton;
 
             struct
@@ -80,11 +137,6 @@ namespace Tina
                 double x;
                 double y;
             } mousePos;
-
-            struct {
-                double x;
-                double y;
-            } cursorPos;
 
             struct
             {
@@ -135,12 +187,18 @@ namespace Tina
         {
         }
 
-        Event(Type type)
+        explicit Event(Type type)
             : type(type)
               , windowHandle({UINT16_MAX})
               , handled(false)
         {
         }
+
+        static bool isKeyPressed(KeyCode key);
+        static bool isMouseButtonPressed(MouseButton button);
+        static glm::vec2 getMousePosition();
+        static void setMousePosition(float x, float y);
+        static void setMouseVisible(bool visible);
     };
 
     // Event creation helper functions
@@ -161,7 +219,7 @@ namespace Tina
         return event;
     }
 
-    inline Event createKeyEvent(WindowHandle handle, int32_t key, int32_t scancode, int32_t action, int32_t mods)
+    inline Event createKeyEvent(WindowHandle handle, Event::KeyCode key, int32_t scancode, int32_t action, Event::KeyModifier mods)
     {
         Event event(Event::Key);
         event.windowHandle = handle;
@@ -172,13 +230,15 @@ namespace Tina
         return event;
     }
 
-    inline Event createMouseButtonEvent(WindowHandle handle, int32_t button, int32_t action, int32_t mods)
+    inline Event createMouseButtonEvent(WindowHandle handle, Event::MouseButton button, int32_t action, Event::KeyModifier mods, double x, double y)
     {
-        Event event(Event::MouseButton);
+        Event event(Event::MouseButtonEvent);  // 使用新的事件类型名称
         event.windowHandle = handle;
         event.mouseButton.button = button;
         event.mouseButton.action = action;
         event.mouseButton.mods = mods;
+        event.mouseButton.x = x;
+        event.mouseButton.y = y;
         return event;
     }
 

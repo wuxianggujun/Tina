@@ -36,7 +36,7 @@ public:
                 static_cast<float>(texture->getWidth()),
                 static_cast<float>(texture->getHeight())
             });
-            TINA_LOG_DEBUG("Created sprite with original size: {}x{}", 
+            TINA_CORE_LOG_DEBUG("Created sprite with original size: {}x{}", 
                 texture->getWidth(), texture->getHeight());
         }
     }
@@ -94,7 +94,7 @@ public:
         m_InstanceData.TextureData = m_TextureRect;
         m_InstanceData.TextureIndex = m_Texture ? 0.0f : -1.0f;
 
-        TINA_LOG_DEBUG("Updated sprite render data: pos({},{}), size({},{})",
+        TINA_CORE_LOG_DEBUG("Updated sprite render data: pos({},{}), size({},{})",
             position.x, position.y, finalSize.x, finalSize.y);
     }
 

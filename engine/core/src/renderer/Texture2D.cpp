@@ -83,10 +83,10 @@ namespace Tina
         TINA_PROFILE_FUNCTION();
         try {
             destroy();
-            TINA_LOG_DEBUG("Texture2D destroyed: {}", name);
+            TINA_CORE_LOG_DEBUG("Texture2D destroyed: {}", name);
         }
         catch (const std::exception& e) {
-            TINA_LOG_ERROR("Error in Texture2D destructor: {}", e.what());
+            TINA_CORE_LOG_ERROR("Error in Texture2D destructor: {}", e.what());
         }
     }
 
@@ -178,12 +178,12 @@ namespace Tina
     void Texture2D::update(const void* data, uint32_t width, uint32_t height) {
         TINA_PROFILE_FUNCTION();
         if (!isValid()) {
-            TINA_LOG_ERROR("Cannot update invalid texture");
+            TINA_CORE_LOG_ERROR("Cannot update invalid texture");
             return;
         }
 
         if (width != info.width || height != info.height) {
-            TINA_LOG_ERROR("Update dimensions do not match texture dimensions");
+            TINA_CORE_LOG_ERROR("Update dimensions do not match texture dimensions");
             return;
         }
 

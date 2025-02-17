@@ -21,7 +21,7 @@ namespace Tina
         void* ptr = _aligned_malloc(size, 16);
         if (!ptr)
         {
-            TINA_LOG_ERROR("Glfw memory allocation failed,size:{}", size);
+            TINA_CORE_LOG_ERROR("Glfw memory allocation failed,size:{}", size);
             return nullptr;
         }
         // 更新统计
@@ -49,7 +49,7 @@ namespace Tina
         auto it = s_allocations.find(block);
         if (it == s_allocations.end())
         {
-            TINA_LOG_ERROR("GLFW realloc failed: block not found");
+            TINA_CORE_LOG_ERROR("GLFW realloc failed: block not found");
             return nullptr;
         }
 
@@ -58,7 +58,7 @@ namespace Tina
         void* newPtr = _aligned_realloc(block, size, 16);
         if (!newPtr)
         {
-            TINA_LOG_ERROR("GLFW memory reallocation failed, size: {}", size);
+            TINA_CORE_LOG_ERROR("GLFW memory reallocation failed, size: {}", size);
             return nullptr;
         }
 
@@ -81,7 +81,7 @@ namespace Tina
         auto it = s_allocations.find(block);
         if (it == s_allocations.end())
         {
-            TINA_LOG_ERROR("GLFW dealloc failed: block not found");
+            TINA_CORE_LOG_ERROR("GLFW dealloc failed: block not found");
             return;
         }
 
@@ -93,7 +93,7 @@ namespace Tina
         // 删除记录
         s_allocations.erase(it);
 
-        TINA_LOG_DEBUG("GLFW deallocated {}bytes, total: {}bytes, current: {}bytes",
+        TINA_CORE_LOG_DEBUG("GLFW deallocated {}bytes, total: {}bytes, current: {}bytes",
             size,
             s_totalAllocated.load(),
             s_currentAllocated.load());

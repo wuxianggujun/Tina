@@ -6,8 +6,9 @@
 #include <bgfx/bgfx.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
-
-#include "ViewManager.hpp"
+#include <vector>
+#include "tina/log/Logger.hpp"
+#include "tina/view/ViewManager.hpp"
 #include "tina/core/Node.hpp"
 
 namespace Tina
@@ -31,7 +32,10 @@ namespace Tina
             glm::mat4 projMatrix{1.0f};
         };
 
-        explicit View(const std::string& name = "View"): Node(), renderState(), m_initialized(false)
+        explicit View(const std::string& name = "View")
+            : Node()
+            , renderState()
+            , m_initialized(false)
         {
             this->name = name;
             renderState.viewId = ViewManager::getInstance().allocateViewId();
@@ -42,7 +46,7 @@ namespace Tina
             ViewManager::getInstance().releaseViewId(renderState.viewId);
         }
 
-        // 生命周期
+        // 生命周期方法
         void onAttach() override
         {
             if (!m_initialized)
@@ -59,7 +63,7 @@ namespace Tina
 
         void onUpdate(const float deltaTime) override
         {
-            // 基类默认实现 - 更新子视图
+            // 更新子视图
             for (auto* child : getChildren())
             {
                 if (auto* view = dynamic_cast<View*>(child))
@@ -69,92 +73,12 @@ namespace Tina
             }
         }
 
-
-        // 渲染状态管理
-        void setViewPort(const Rect& viewport)
-        {
-            TINA_LOG_DEBUG("View '{}': Viewport set to {}x{} at ({},{})",
-                           name,
-                           viewport.getWidth(), viewport.getHeight(),
-                           viewport.getX(), viewport.getY());
-
-            renderState.viewport = viewport;
-            renderState.scissor = viewport; // 同时更新裁剪区域
-
-            // 立即更新渲染状态
-            updateRenderState();
-
-            // 通知子视图
-            for (auto* child : getChildren())
-            {
-                if (View* childView = dynamic_cast<View*>(child))
-                {
-                    childView->setViewPort(viewport);
-                }
-            }
-        }
-
-        void setScissor(const Rect& scissor)
-        {
-            renderState.scissor = scissor;
-            updateRenderState();
-        }
-
-        void setClearFlag(uint32_t clearFlag)
-        {
-            renderState.clearFlags = clearFlag;
-            updateRenderState();
-        }
-
-        void setClearColor(uint32_t clearColor)
-        {
-            renderState.clearColor = clearColor;
-            updateRenderState();
-        }
-
-
-        bool onEvent(Event& event) override
-        {
-            bool handled = false;
-
-            if (event.type == Event::WindowResize)
-            {
-                TINA_LOG_INFO("View '{}': Handling WindowResize {}x{}",
-                              name,
-                              event.windowResize.width,
-                              event.windowResize.height);
-
-                // 更新 bgfx 的分辨率和视口
-                bgfx::reset(
-                    event.windowResize.width,
-                    event.windowResize.height,
-                    BGFX_RESET_VSYNC
-                );
-
-                // 更新视口
-                setViewPort(Rect(
-                    0, 0,
-                    event.windowResize.width,
-                    event.windowResize.height
-                ));
-
-                handled = true;
-            }
-
-            // 如果当前视图没有处理事件，传递给子视图
-            if (!handled)
-            {
-                handled = Node::onEvent(event);
-            }
-
-            return handled;
-        }
-
+        // 渲染相关方法
         virtual void beginRender()
         {
             if (!isVisible()) return;
 
-            TINA_LOG_DEBUG("View '{}': Begin render with viewport {}x{}",
+            TINA_CORE_LOG_DEBUG("View '{}': Begin render with viewport {}x{}",
                            name,
                            renderState.viewport.getWidth(),
                            renderState.viewport.getHeight());
@@ -210,6 +134,85 @@ namespace Tina
         {
         }
 
+        // 渲染状态管理
+        void setViewPort(const Rect& viewport)
+        {
+            TINA_CORE_LOG_DEBUG("View '{}': Viewport set to {}x{} at ({},{})",
+                           name,
+                           viewport.getWidth(), viewport.getHeight(),
+                           viewport.getX(), viewport.getY());
+
+            renderState.viewport = viewport;
+            renderState.scissor = viewport; // 同时更新裁剪区域
+
+            // 立即更新渲染状态
+            updateRenderState();
+
+            // 通知子视图
+            for (auto* child : getChildren())
+            {
+                if (View* childView = dynamic_cast<View*>(child))
+                {
+                    childView->setViewPort(viewport);
+                }
+            }
+        }
+
+        void setScissor(const Rect& scissor)
+        {
+            renderState.scissor = scissor;
+            updateRenderState();
+        }
+
+        void setClearFlag(uint32_t clearFlag)
+        {
+            renderState.clearFlags = clearFlag;
+            updateRenderState();
+        }
+
+        void setClearColor(uint32_t clearColor)
+        {
+            renderState.clearColor = clearColor;
+            updateRenderState();
+        }
+
+        bool onEvent(Event& event) override
+        {
+            bool handled = false;
+
+            if (event.type == Event::WindowResize)
+            {
+                TINA_CORE_LOG_INFO("View '{}': Handling WindowResize {}x{}",
+                              name,
+                              event.windowResize.width,
+                              event.windowResize.height);
+
+                // 更新 bgfx 的分辨率和视口
+                bgfx::reset(
+                    event.windowResize.width,
+                    event.windowResize.height,
+                    BGFX_RESET_VSYNC
+                );
+
+                // 更新视口
+                setViewPort(Rect(
+                    0, 0,
+                    event.windowResize.width,
+                    event.windowResize.height
+                ));
+
+                handled = true;
+            }
+
+            // 如果当前视图没有处理事件，传递给子视图
+            if (!handled)
+            {
+                handled = Node::onEvent(event);
+            }
+
+            return handled;
+        }
+
         // 强制更新渲染状态的公共接口
         void forceUpdateRenderState()
         {
@@ -218,11 +221,14 @@ namespace Tina
             beginRender();
         }
 
-        // 强制更新渲染状态
     protected:
+        // 渲染状态
+        RenderState renderState;
+        bool m_initialized;
+
         void updateRenderState()
         {
-            TINA_LOG_DEBUG("View '{}': Updating render state, viewport: {}x{}, scissor: {}x{}",
+            TINA_CORE_LOG_DEBUG("View '{}': Updating render state, viewport: {}x{}, scissor: {}x{}",
                            name,
                            renderState.viewport.getWidth(), renderState.viewport.getHeight(),
                            renderState.scissor.getWidth(), renderState.scissor.getHeight());
@@ -261,10 +267,6 @@ namespace Tina
             // 触发视图渲染
             bgfx::touch(renderState.viewId);
         }
-
-        // 渲染状态
-        RenderState renderState;
-        bool m_initialized;
 
         virtual void initializeView()
         {

@@ -30,7 +30,7 @@ void createTestEntities(Scene* scene) {
         sprite.setLayer(0);
         sprite.setVisible(true);
         
-        TINA_LOG_DEBUG("Created sprite entity {} at position ({}, {})", 
+        TINA_CORE_LOG_DEBUG("Created sprite entity {} at position ({}, {})",
             static_cast<uint32_t>(entity), 
             transform.getPosition().x, 
             transform.getPosition().y);
@@ -74,13 +74,13 @@ void createTestEntities(Scene* scene) {
         rect.setLayer(1);
         rect.setVisible(true);
         
-        TINA_LOG_DEBUG("Created rectangle entity {} at position ({}, {})", 
+        TINA_CORE_LOG_DEBUG("Created rectangle entity {} at position ({}, {})",
             static_cast<uint32_t>(entity), 
             transform.getPosition().x, 
             transform.getPosition().y);
     }
     
-    TINA_LOG_INFO("Created 5 sprites and 95 rectangles");
+    TINA_CORE_LOG_INFO("Created 5 sprites and 95 rectangles");
 }
 
 // 创建UI十字架
@@ -93,7 +93,7 @@ void createUICross(UIView* uiView) {
     style.thickness = 5.0f;  // 增加线条粗细
     style.color = {1.0f, 0.0f, 0.0f, 1.0f}; // 保持鲜艳的红色
     
-    TINA_LOG_INFO("Drawing UI cross at window size {}x{}", width, height);
+    TINA_CORE_LOG_INFO("Drawing UI cross at window size {}x{}", width, height);
     
     // 计算中心点
     float centerX = width * 0.5f;
@@ -113,7 +113,7 @@ void createUICross(UIView* uiView) {
         style
     );
     
-    TINA_LOG_INFO("Created UI cross at center ({}, {})", centerX, centerY);
+    TINA_CORE_LOG_INFO("Created UI cross at center ({}, {})", centerX, centerY);
 }
 
 int main() {
@@ -128,14 +128,14 @@ int main() {
         
         // 初始化引擎
         if (!engine->initialize()) {
-            TINA_LOG_ERROR("Failed to initialize engine");
+            TINA_CORE_LOG_ERROR("Failed to initialize engine");
             return -1;
         }
         
         // 创建场景
         Scene* scene = engine->createScene("Main Scene");
         if (!scene) {
-            TINA_LOG_ERROR("Failed to create scene");
+            TINA_CORE_LOG_ERROR("Failed to create scene");
             return -1;
         }
         
@@ -153,7 +153,7 @@ int main() {
         for (int i = 0; i < 5; i++) {
             auto textureName = "test" + std::to_string(i);
             if (!gameView->loadTexture(textureName, "textures/test.png")) {
-                TINA_LOG_WARN("Failed to load texture: {}", textureName);
+                TINA_CORE_LOG_WARN("Failed to load texture: {}", textureName);
             }
         }
         
@@ -163,19 +163,19 @@ int main() {
         // 创建UI十字架
         createUICross(uiView);
         
-        TINA_LOG_INFO("Views initialized - GameView(zOrder: {}), UIView(zOrder: {})",
+        TINA_CORE_LOG_INFO("Views initialized - GameView(zOrder: {}), UIView(zOrder: {})",
             gameView->getZOrder(), uiView->getZOrder());
         
         // 运行引擎
         if (!engine->run()) {
-            TINA_LOG_ERROR("Engine run failed");
+            TINA_CORE_LOG_ERROR("Engine run failed");
             return -1;
         }
         
         return 0;
     }
     catch (const std::exception& e) {
-        TINA_LOG_ERROR("Application error: {}", e.what());
+        TINA_CORE_LOG_ERROR("Application error: {}", e.what());
         return 1;
     }
 }

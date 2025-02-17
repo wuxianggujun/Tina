@@ -39,7 +39,7 @@ namespace Tina
     public:
         enum class Level : uint8_t
         {
-            Trace = 0,  // 添加Trace级别作为最低级别
+            Trace = 0, // 添加Trace级别作为最低级别
             Debug,
             Info,
             Warn,
@@ -79,29 +79,29 @@ namespace Tina
         }
 
         template <typename... Args>
-        void info(const char* file, uint32_t line,fmt::format_string<Args...> format, Args&&... args)
+        void info(const char* file, uint32_t line, fmt::format_string<Args...> format, Args&&... args)
         {
             if (isLevelEnabled(Level::Info))
             {
-                logImpl(Level::Info,file, line, format, std::forward<Args>(args)...);
+                logImpl(Level::Info, file, line, format, std::forward<Args>(args)...);
             }
         }
 
         template <typename... Args>
-        void warning(const char* file, uint32_t line,fmt::format_string<Args...> format, Args&&... args)
+        void warning(const char* file, uint32_t line, fmt::format_string<Args...> format, Args&&... args)
         {
             if (isLevelEnabled(Level::Warn))
             {
-                logImpl(Level::Warn, file, line,format, std::forward<Args>(args)...);
+                logImpl(Level::Warn, file, line, format, std::forward<Args>(args)...);
             }
         }
 
         template <typename... Args>
-        void error(const char* file, uint32_t line,fmt::format_string<Args...> format, Args&&... args)
+        void error(const char* file, uint32_t line, fmt::format_string<Args...> format, Args&&... args)
         {
             if (isLevelEnabled(Level::Error))
             {
-                logImpl(Level::Error, file, line,format, std::forward<Args>(args)...);
+                logImpl(Level::Error, file, line, format, std::forward<Args>(args)...);
             }
         }
 
@@ -174,9 +174,43 @@ namespace Tina
         std::atomic_bool shouldExit_{false};
     };
 
+
+
+
+    // 日志开关
+#define TINA_CORE_LOGGING_ENABLED
+//#define TINA_CLIENT_LOGGING_ENABLED
+    // 核心日志宏
+#ifdef TINA_CORE_LOGGING_ENABLED
+
+#define TINA_CORE_LOG_TRACE(...) Tina::Logger::getInstance().trace(__FILE__, __LINE__, __VA_ARGS__)
+#define TINA_CORE_LOG_DEBUG(...) Tina::Logger::getInstance().debug(__FILE__, __LINE__, __VA_ARGS__)
+#define TINA_CORE_LOG_INFO(...) Tina::Logger::getInstance().info(__FILE__, __LINE__, __VA_ARGS__)
+#define TINA_CORE_LOG_WARN(...) Tina::Logger::getInstance().warning(__FILE__, __LINE__, __VA_ARGS__)
+#define TINA_CORE_LOG_ERROR(...) Tina::Logger::getInstance().error(__FILE__, __LINE__, __VA_ARGS__)
+
+#else
+#define TINA_CORE_LOG_TRACE(...)
+#define TINA_CORE_LOG_DEBUG(...)
+#define TINA_CORE_LOG_INFO(...)
+#define TINA_CORE_LOG_WARN(...)
+#define TINA_CORE_LOG_ERROR(...)
+#endif
+    // 客户端日志宏
+#ifdef TINA_CLIENT_LOGGING_ENABLED
+
 #define TINA_LOG_TRACE(...) Tina::Logger::getInstance().trace(__FILE__, __LINE__, __VA_ARGS__)
 #define TINA_LOG_DEBUG(...) Tina::Logger::getInstance().debug(__FILE__, __LINE__, __VA_ARGS__)
 #define TINA_LOG_INFO(...) Tina::Logger::getInstance().info(__FILE__, __LINE__, __VA_ARGS__)
 #define TINA_LOG_WARN(...) Tina::Logger::getInstance().warning(__FILE__, __LINE__, __VA_ARGS__)
 #define TINA_LOG_ERROR(...) Tina::Logger::getInstance().error(__FILE__, __LINE__, __VA_ARGS__)
+
+#else
+#define TINA_LOG_TRACE(...)
+#define TINA_LOG_DEBUG(...)
+#define TINA_LOG_INFO(...)
+#define TINA_LOG_WARN(...)
+#define TINA_LOG_ERROR(...)
+#endif
+
 } // namespace Tina

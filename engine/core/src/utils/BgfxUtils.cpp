@@ -90,7 +90,7 @@ namespace Tina::Utils
         }
         else
         {
-            TINA_LOG_ERROR("Failed to load file: {}", filePath);
+            TINA_CORE_LOG_ERROR("Failed to load file: {}", filePath);
         }
 
         return mem;
@@ -120,43 +120,43 @@ namespace Tina::Utils
             filePath.join("metal"); 
             break;
         default:
-            TINA_LOG_ERROR("Unsupported renderer type: {}", bgfx::getRendererName(bgfx::getRendererType()));
+            TINA_CORE_LOG_ERROR("Unsupported renderer type: {}", bgfx::getRendererName(bgfx::getRendererType()));
             return BGFX_INVALID_HANDLE;
         }
 
         std::string fileName = name + ".bin";
         filePath.join(fileName.c_str());
 
-        TINA_LOG_DEBUG("Loading shader '{}' from path: {}", name, filePath.getCPtr());
+        TINA_CORE_LOG_DEBUG("Loading shader '{}' from path: {}", name, filePath.getCPtr());
 
         const bgfx::Memory* mem = loadMem(filePath.getCPtr());
         if (!mem)
         {
-            TINA_LOG_ERROR("Failed to load shader memory for '{}'", name);
+            TINA_CORE_LOG_ERROR("Failed to load shader memory for '{}'", name);
             return BGFX_INVALID_HANDLE;
         }
 
         bgfx::ShaderHandle handle = bgfx::createShader(mem);
         if (!bgfx::isValid(handle))
         {
-            TINA_LOG_ERROR("Failed to create shader '{}' from memory", name);
+            TINA_CORE_LOG_ERROR("Failed to create shader '{}' from memory", name);
             return BGFX_INVALID_HANDLE;
         }
 
         bgfx::setName(handle, name.c_str());
-        TINA_LOG_DEBUG("Successfully loaded shader '{}'", name);
+        TINA_CORE_LOG_DEBUG("Successfully loaded shader '{}'", name);
 
         return handle;
     }
 
     bgfx::ProgramHandle BgfxUtils::loadProgram(const std::string& vsName, const std::string& fsName)
     {
-        TINA_LOG_DEBUG("Loading shader program - VS: '{}', FS: '{}'", vsName, fsName);
+        TINA_CORE_LOG_DEBUG("Loading shader program - VS: '{}', FS: '{}'", vsName, fsName);
 
         bgfx::ShaderHandle vsh = loadShader(vsName);
         if (!bgfx::isValid(vsh))
         {
-            TINA_LOG_ERROR("Failed to load vertex shader '{}'", vsName);
+            TINA_CORE_LOG_ERROR("Failed to load vertex shader '{}'", vsName);
             return BGFX_INVALID_HANDLE;
         }
 
@@ -166,7 +166,7 @@ namespace Tina::Utils
             fsh = loadShader(fsName);
             if (!bgfx::isValid(fsh))
             {
-                TINA_LOG_ERROR("Failed to load fragment shader '{}'", fsName);
+                TINA_CORE_LOG_ERROR("Failed to load fragment shader '{}'", fsName);
                 bgfx::destroy(vsh);
                 return BGFX_INVALID_HANDLE;
             }
@@ -175,11 +175,11 @@ namespace Tina::Utils
         bgfx::ProgramHandle program = bgfx::createProgram(vsh, fsh, true);
         if (!bgfx::isValid(program))
         {
-            TINA_LOG_ERROR("Failed to create program from shaders - VS: '{}', FS: '{}'", vsName, fsName);
+            TINA_CORE_LOG_ERROR("Failed to create program from shaders - VS: '{}', FS: '{}'", vsName, fsName);
             return BGFX_INVALID_HANDLE;
         }
 
-        TINA_LOG_DEBUG("Successfully created shader program - VS: '{}', FS: '{}'", vsName, fsName);
+        TINA_CORE_LOG_DEBUG("Successfully created shader program - VS: '{}', FS: '{}'", vsName, fsName);
         return program;
     }
 
@@ -200,17 +200,17 @@ namespace Tina::Utils
         if (bx::open(reader, filePath.c_str()))
         {
             uint32_t size = (uint32_t)bx::getSize(reader);
-            TINA_LOG_DEBUG("Loading texture file '{}' of size: {} bytes", filePath, size);
+            TINA_CORE_LOG_DEBUG("Loading texture file '{}' of size: {} bytes", filePath, size);
             
             void* data = bx::alloc(&s_allocator, size);
             if (data == nullptr)
             {
-                TINA_LOG_ERROR("Failed to allocate memory for texture data: {} bytes", size);
+                TINA_CORE_LOG_ERROR("Failed to allocate memory for texture data: {} bytes", size);
                 bx::close(reader);
                 return result;
             }
 
-            TINA_LOG_DEBUG("Memory allocated for texture data: {} bytes", size);
+            TINA_CORE_LOG_DEBUG("Memory allocated for texture data: {} bytes", size);
 
             try
             {
@@ -273,30 +273,30 @@ namespace Tina::Utils
                         result.layers = imageContainer->m_numLayers;
                         result.format = bgfx::TextureFormat::Enum(imageContainer->m_format);
                         
-                        TINA_LOG_DEBUG("Texture created successfully");
+                        TINA_CORE_LOG_DEBUG("Texture created successfully");
                     }
                     else
                     {
-                        TINA_LOG_ERROR("Failed to create texture from loaded data");
+                        TINA_CORE_LOG_ERROR("Failed to create texture from loaded data");
                         bimg::imageFree(imageContainer);
                     }
                 }
                 else
                 {
-                    TINA_LOG_ERROR("Failed to parse image data");
+                    TINA_CORE_LOG_ERROR("Failed to parse image data");
                 }
 
                 bx::free(&s_allocator, data);
             }
             catch (const std::exception& e)
             {
-                TINA_LOG_ERROR("Exception during texture loading: {}", e.what());
+                TINA_CORE_LOG_ERROR("Exception during texture loading: {}", e.what());
                 bx::free(&s_allocator, data);
             }
         }
         else
         {
-            TINA_LOG_ERROR("Failed to open texture file: {}", filePath);
+            TINA_CORE_LOG_ERROR("Failed to open texture file: {}", filePath);
         }
 
         return result;

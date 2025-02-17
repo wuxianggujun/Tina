@@ -46,13 +46,13 @@ namespace Tina
 
         if (m_Initialized)
         {
-            TINA_LOG_WARN("BatchRenderer2D already initialized");
+            TINA_CORE_LOG_WARN("BatchRenderer2D already initialized");
             return;
         }
 
         try
         {
-            TINA_LOG_INFO("Initializing BatchRenderer2D");
+            TINA_CORE_LOG_INFO("Initializing BatchRenderer2D");
 
             m_Shader = shader;
 
@@ -82,11 +82,11 @@ namespace Tina
             createBuffers();
 
             m_Initialized = true;
-            TINA_LOG_INFO("BatchRenderer2D initialized successfully");
+            TINA_CORE_LOG_INFO("BatchRenderer2D initialized successfully");
         }
         catch (const std::exception& e)
         {
-            TINA_LOG_ERROR("Failed to initialize BatchRenderer2D: {}", e.what());
+            TINA_CORE_LOG_ERROR("Failed to initialize BatchRenderer2D: {}", e.what());
             shutdown();
             throw;
         }
@@ -137,7 +137,7 @@ namespace Tina
         m_Instances.reserve(initialCapacity);
         m_Textures.reserve(MAX_TEXTURE_SLOTS);
 
-        TINA_LOG_DEBUG("Buffers created - Initial capacity: {}, Instance size: {} bytes",
+        TINA_CORE_LOG_DEBUG("Buffers created - Initial capacity: {}, Instance size: {} bytes",
                        initialCapacity,
                        sizeof(InstanceData));
     }
@@ -190,7 +190,7 @@ namespace Tina
             return;
         }
 
-        TINA_LOG_INFO("Shutting down BatchRenderer2D");
+        TINA_CORE_LOG_INFO("Shutting down BatchRenderer2D");
 
         if (bgfx::isValid(m_VertexBuffer))
         {
@@ -228,7 +228,7 @@ namespace Tina
                 textureMemory += texture->getWidth() * texture->getHeight() * 4;
             }
         }
-        TINA_LOG_DEBUG(
+        TINA_CORE_LOG_DEBUG(
             "Begin frame - Memory Usage:\n\tInstances: {}/{} ({}KB)\n\tActive Textures: {} ({}KB)\n\tTotal: {}KB",
             m_QuadCount, m_Instances.capacity(), instanceMemory/1024,
             m_Textures.size(), textureMemory/1024,
@@ -245,7 +245,7 @@ namespace Tina
         std::lock_guard<std::mutex> lock(m_Mutex);
 
         // 输出本帧的渲染统计
-        TINA_LOG_DEBUG("End frame - Rendering stats:\n\tTotal quads: {}\n\tTexture bindings: {}",
+        TINA_CORE_LOG_DEBUG("End frame - Rendering stats:\n\tTotal quads: {}\n\tTexture bindings: {}",
                        m_QuadCount, m_Textures.size());
 
         if (m_QuadCount > 0)
@@ -319,7 +319,7 @@ namespace Tina
 
         if (!texture || !texture->isValid())
         {
-            TINA_LOG_WARN("Attempting to draw with invalid texture");
+            TINA_CORE_LOG_WARN("Attempting to draw with invalid texture");
             return;
         }
 
@@ -366,7 +366,7 @@ namespace Tina
         {
             if (!texture || !texture->isValid())
             {
-                TINA_LOG_WARN("Invalid texture in drawTexturedQuads");
+                TINA_CORE_LOG_WARN("Invalid texture in drawTexturedQuads");
                 continue;
             }
             if (std::find(m_Textures.begin(), m_Textures.end(), texture) == m_Textures.end())

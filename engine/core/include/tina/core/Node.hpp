@@ -16,7 +16,7 @@ namespace Tina
     public:
         virtual ~Node() = default;
 
-        Node* getParent() const
+        [[nodiscard]] Node* getParent() const
         {
             return parent;
         }
@@ -26,7 +26,7 @@ namespace Tina
             this->parent = parent;
         }
 
-        bool isVisible() const
+        [[nodiscard]] bool isVisible() const
         {
             return visible;
         }
@@ -36,7 +36,7 @@ namespace Tina
             this->visible = visible;
         }
 
-        int32_t getZOrder() const
+        [[nodiscard]] int32_t getZOrder() const
         {
             return zOrder;
         }
@@ -60,7 +60,7 @@ namespace Tina
             children.push_back(child);
         }
 
-        void removeChild(Node* child)
+        void removeChild(const Node* child)
         {
             const auto it = std::find(children.begin(), children.end(), child);
             if (it != children.end())
@@ -70,7 +70,7 @@ namespace Tina
             }
         }
 
-        std::vector<Node*> getChildren() const
+        [[nodiscard]] std::vector<Node*> getChildren() const
         {
             return children;
         }
@@ -85,7 +85,7 @@ namespace Tina
             case Event::MouseMove:
                 handled = handleMouseMove(event);
                 break;
-            case Event::MouseButton:
+            case Event::MouseButtonEvent:
                 handled = handleMouseButton(event);
                 break;
             case Event::WindowResize:
@@ -118,7 +118,7 @@ namespace Tina
         virtual void onUpdate(const float deltaTime) {}
 
         // 坐标转换
-        glm::vec2 globalToLocal(const glm::vec2& point) const
+        [[nodiscard]] glm::vec2 globalToLocal(const glm::vec2& point) const
         {
             if (parent)
             {
@@ -127,7 +127,7 @@ namespace Tina
             return point - position;
         }
 
-        glm::vec2 localToGlobal(const glm::vec2& point) const
+        [[nodiscard]] glm::vec2 localToGlobal(const glm::vec2& point) const
         {
             if (parent)
             {
@@ -158,7 +158,7 @@ namespace Tina
 
         virtual bool handleMouseButton(Event& event)
         {
-            glm::vec2 localPos = globalToLocal({event.mousePos.x, event.mousePos.y});
+            glm::vec2 localPos = globalToLocal({event.mouseButton.x, event.mouseButton.y});
             return bounds.contains(localPos);
         }
 
@@ -166,7 +166,7 @@ namespace Tina
         {
             // 默认实现：更新边界
             bounds.setWidth(static_cast<float>(event.windowResize.width));
-            bounds.setHegiht(static_cast<float>(event.windowResize.height));
+            bounds.setHeight(static_cast<float>(event.windowResize.height));
             return false;
         }
     };

@@ -16,18 +16,18 @@ namespace Tina
         : m_windowManager(std::make_unique<WindowManager>(this))
         , m_eventQueue(std::make_unique<EventQueue>())
     {
-        TINA_LOG_INFO("Context created");
+        TINA_CORE_LOG_INFO("Context created");
     }
 
     Context::~Context() {
-        TINA_LOG_INFO("Context destroying");
+        TINA_CORE_LOG_INFO("Context destroying");
         m_eventQueue.reset();
         m_windowManager.reset();
-        TINA_LOG_INFO("Context destroyed");
+        TINA_CORE_LOG_INFO("Context destroyed");
     }
 
     bool Context::initialize() {
-        TINA_LOG_INFO("Initializing context");
+        TINA_CORE_LOG_INFO("Initializing context");
         return true;
     }
 

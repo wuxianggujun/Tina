@@ -34,7 +34,7 @@ namespace Tina::Core
           , m_isInitialized(false)
     {
         s_Instance = this;
-        TINA_LOG_INFO("Engine created.");
+        TINA_CORE_LOG_INFO("Engine created.");
     }
 
     Engine::~Engine()
@@ -44,14 +44,14 @@ namespace Tina::Core
             shutdown();
         }
         s_Instance = nullptr;
-        TINA_LOG_INFO("Engine destroyed.");
+        TINA_CORE_LOG_INFO("Engine destroyed.");
     }
 
     bool Engine::initialize()
     {
         if (m_isInitialized)
         {
-            TINA_LOG_WARN("Engine already initialized");
+            TINA_CORE_LOG_WARN("Engine already initialized");
             return true;
         }
 
@@ -60,7 +60,7 @@ namespace Tina::Core
             // 初始化窗口管理器
             if (!m_context.getWindowManager().initialize())
             {
-                TINA_LOG_ERROR("Failed to initialize window manager");
+                TINA_CORE_LOG_ERROR("Failed to initialize window manager");
                 return false;
             }
 
@@ -74,7 +74,7 @@ namespace Tina::Core
 
             if (!isValid(m_mainWindow))
             {
-                TINA_LOG_ERROR("Failed to create main window");
+                TINA_CORE_LOG_ERROR("Failed to create main window");
                 return false;
             }
 
@@ -89,7 +89,7 @@ namespace Tina::Core
 
             if (!bgfx::init(init))
             {
-                TINA_LOG_ERROR("Failed to initialize bgfx");
+                TINA_CORE_LOG_ERROR("Failed to initialize bgfx");
                 return false;
             }
 
@@ -98,12 +98,12 @@ namespace Tina::Core
             resourceManager.registerLoader<Texture2D>(std::make_unique<TextureLoader>());
 
             m_isInitialized = true;
-            TINA_LOG_INFO("Engine initialized successfully");
+            TINA_CORE_LOG_INFO("Engine initialized successfully");
             return true;
         }
         catch (const std::exception& e)
         {
-            TINA_LOG_ERROR("Error during initialization: {}", e.what());
+            TINA_CORE_LOG_ERROR("Error during initialization: {}", e.what());
             return false;
         }
     }
@@ -129,15 +129,15 @@ namespace Tina::Core
             peakWorkingSet = std::max(peakWorkingSet, currentWorkingSet);
 
             // 基本内存统计
-            TINA_LOG_DEBUG("Memory Statistics:");
-            TINA_LOG_DEBUG("\tWorking Set: {:.2f}MB (实际占用物理内存) [{:+.2f}MB] (峰值: {:.2f}MB)",
+            TINA_CORE_LOG_DEBUG("Memory Statistics:");
+            TINA_CORE_LOG_DEBUG("\tWorking Set: {:.2f}MB (实际占用物理内存) [{:+.2f}MB] (峰值: {:.2f}MB)",
                            currentWorkingSet,
                            currentWorkingSet - lastWorkingSet,
                            peakWorkingSet);
-            TINA_LOG_DEBUG("\tPrivate Usage: {:.2f}MB (进程独占内存) [{:+.2f}MB]",
+            TINA_CORE_LOG_DEBUG("\tPrivate Usage: {:.2f}MB (进程独占内存) [{:+.2f}MB]",
                            currentPrivateUsage,
                            currentPrivateUsage - lastPrivateUsage);
-            TINA_LOG_DEBUG("\tVirtual Memory: {:.2f}MB (虚拟内存)",
+            TINA_CORE_LOG_DEBUG("\tVirtual Memory: {:.2f}MB (虚拟内存)",
                            pmc.PagefileUsage / (1024.0 * 1024.0));
 
             // 检查内存增长
@@ -146,7 +146,7 @@ namespace Tina::Core
             {
                 if (++growthCount >= 3) // 连续3次增长
                 {
-                    TINA_LOG_WARN("\t内存持续增长! 可能存在泄漏");
+                    TINA_CORE_LOG_WARN("\t内存持续增长! 可能存在泄漏");
                     growthCount = 0;
                 }
             }
@@ -187,12 +187,12 @@ namespace Tina::Core
                     break;
             }
 
-            TINA_LOG_DEBUG("\tMemory Allocation:");
-            TINA_LOG_DEBUG("\t\tCommitted: {:.2f}MB (已分配且可访问)", committedTotal / (1024.0 * 1024.0));
-            TINA_LOG_DEBUG("\t\tPrivate: {:.2f}MB (进程私有已分配)", privateTotal / (1024.0 * 1024.0));
-            TINA_LOG_DEBUG("\t\tImage: {:.2f}MB (DLL和可执行文件)", imageTotal / (1024.0 * 1024.0));
-            TINA_LOG_DEBUG("\t\tMapped: {:.2f}MB (内存映射文件)", mappedTotal / (1024.0 * 1024.0));
-            TINA_LOG_DEBUG("\t\tReserved: {:.2f}MB (预留未分配)", reservedTotal / (1024.0 * 1024.0));
+            TINA_CORE_LOG_DEBUG("\tMemory Allocation:");
+            TINA_CORE_LOG_DEBUG("\t\tCommitted: {:.2f}MB (已分配且可访问)", committedTotal / (1024.0 * 1024.0));
+            TINA_CORE_LOG_DEBUG("\t\tPrivate: {:.2f}MB (进程私有已分配)", privateTotal / (1024.0 * 1024.0));
+            TINA_CORE_LOG_DEBUG("\t\tImage: {:.2f}MB (DLL和可执行文件)", imageTotal / (1024.0 * 1024.0));
+            TINA_CORE_LOG_DEBUG("\t\tMapped: {:.2f}MB (内存映射文件)", mappedTotal / (1024.0 * 1024.0));
+            TINA_CORE_LOG_DEBUG("\t\tReserved: {:.2f}MB (预留未分配)", reservedTotal / (1024.0 * 1024.0));
 
             // 获取堆信息
             HANDLE hHeap = GetProcessHeap();
@@ -231,45 +231,45 @@ namespace Tina::Core
                 float avgBlockSize = (usedBlocks > 0) ? (usedHeapSize / (float)usedBlocks) : 0.0f;
                 float smallBlockRatio = (usedBlocks > 0) ? (smallBlocks * 100.0f / usedBlocks) : 0.0f;
 
-                TINA_LOG_DEBUG("\tHeap Analysis:");
-                TINA_LOG_DEBUG("\t\tTotal: {:.2f}MB ({} blocks)", totalHeapSize / (1024.0 * 1024.0), totalBlocks);
-                TINA_LOG_DEBUG("\t\tUsed: {:.2f}MB ({} blocks, avg {:.2f}KB)",
+                TINA_CORE_LOG_DEBUG("\tHeap Analysis:");
+                TINA_CORE_LOG_DEBUG("\t\tTotal: {:.2f}MB ({} blocks)", totalHeapSize / (1024.0 * 1024.0), totalBlocks);
+                TINA_CORE_LOG_DEBUG("\t\tUsed: {:.2f}MB ({} blocks, avg {:.2f}KB)",
                                usedHeapSize / (1024.0 * 1024.0),
                                usedBlocks,
                                avgBlockSize / 1024.0f);
-                TINA_LOG_DEBUG("\t\tFree: {:.2f}MB (largest block: {:.2f}MB)",
+                TINA_CORE_LOG_DEBUG("\t\tFree: {:.2f}MB (largest block: {:.2f}MB)",
                                freeHeapSize / (1024.0 * 1024.0),
                                largestFreeBlock / (1024.0 * 1024.0));
-                TINA_LOG_DEBUG("\t\tFragmentation: {:.1f}%", fragmentation);
-                TINA_LOG_DEBUG("\t\tSmall Blocks (<1KB): {:.1f}% ({} blocks)",
+                TINA_CORE_LOG_DEBUG("\t\tFragmentation: {:.1f}%", fragmentation);
+                TINA_CORE_LOG_DEBUG("\t\tSmall Blocks (<1KB): {:.1f}% ({} blocks)",
                                smallBlockRatio, smallBlocks);
 
                 // 内存警告和建议
                 if (fragmentation > 15.0f)
-                    TINA_LOG_WARN("\t\t高内存碎片化! 建议实现内存池");
+                    TINA_CORE_LOG_WARN("\t\t高内存碎片化! 建议实现内存池");
 
                 if (usedHeapSize > 0.8f * totalHeapSize)
                 {
-                    TINA_LOG_WARN("\t\t堆内存使用率过高! 建议:");
-                    TINA_LOG_WARN("\t\t1. 增加堆大小 (当前 {:.0f}MB)", totalHeapSize / (1024.0 * 1024.0));
-                    TINA_LOG_WARN("\t\t2. 检查大块内存分配");
-                    TINA_LOG_WARN("\t\t3. 实现资源缓存池");
+                    TINA_CORE_LOG_WARN("\t\t堆内存使用率过高! 建议:");
+                    TINA_CORE_LOG_WARN("\t\t1. 增加堆大小 (当前 {:.0f}MB)", totalHeapSize / (1024.0 * 1024.0));
+                    TINA_CORE_LOG_WARN("\t\t2. 检查大块内存分配");
+                    TINA_CORE_LOG_WARN("\t\t3. 实现资源缓存池");
                 }
 
                 if (smallBlockRatio > 50.0f)
                 {
-                    TINA_LOG_WARN("\t\t小内存块过多! 建议:");
-                    TINA_LOG_WARN("\t\t1. 使用对象池管理小对象");
-                    TINA_LOG_WARN("\t\t2. 合并小内存分配");
-                    TINA_LOG_WARN("\t\t3. 检查临时对象创建");
+                    TINA_CORE_LOG_WARN("\t\t小内存块过多! 建议:");
+                    TINA_CORE_LOG_WARN("\t\t1. 使用对象池管理小对象");
+                    TINA_CORE_LOG_WARN("\t\t2. 合并小内存分配");
+                    TINA_CORE_LOG_WARN("\t\t3. 检查临时对象创建");
                 }
 
                 if (fragmentation > 10.0f && largestFreeBlock < 1024 * 1024) // 1MB
                 {
-                    TINA_LOG_WARN("\t\t内存碎片化严重且无大块可用! 建议:");
-                    TINA_LOG_WARN("\t\t1. 执行堆整理");
-                    TINA_LOG_WARN("\t\t2. 实现内存池");
-                    TINA_LOG_WARN("\t\t3. 预分配大块内存");
+                    TINA_CORE_LOG_WARN("\t\t内存碎片化严重且无大块可用! 建议:");
+                    TINA_CORE_LOG_WARN("\t\t1. 执行堆整理");
+                    TINA_CORE_LOG_WARN("\t\t2. 实现内存池");
+                    TINA_CORE_LOG_WARN("\t\t3. 预分配大块内存");
                 }
             }
         }
@@ -280,7 +280,7 @@ namespace Tina::Core
     {
         if (!m_isInitialized)
         {
-            TINA_LOG_ERROR("Engine not initialized");
+            TINA_CORE_LOG_ERROR("Engine not initialized");
             return false;
         }
 
@@ -351,46 +351,46 @@ namespace Tina::Core
         }
         catch (const std::exception& e)
         {
-            TINA_LOG_ERROR("Error during main loop: {}", e.what());
+            TINA_CORE_LOG_ERROR("Error during main loop: {}", e.what());
             return false;
         }
     }
 
     void Engine::shutdown()
     {
-        TINA_LOG_INFO("Engine shutting down");
+        TINA_CORE_LOG_INFO("Engine shutting down");
 
         // 1. 先关闭场景
         if (m_activeScene)
         {
-            TINA_LOG_DEBUG("Destroying active scene");
+            TINA_CORE_LOG_DEBUG("Destroying active scene");
             m_activeScene.reset();
-            TINA_LOG_DEBUG("Active scene destroyed");
+            TINA_CORE_LOG_DEBUG("Active scene destroyed");
         }
 
         // 2. 完成所有渲染命令
-        TINA_LOG_DEBUG("Finalizing render commands");
+        TINA_CORE_LOG_DEBUG("Finalizing render commands");
         RenderCommandQueue::getInstance().executeAll();
 
         // 3. 提交一帧确保所有渲染完成
-        TINA_LOG_DEBUG("Submitting final frame");
+        TINA_CORE_LOG_DEBUG("Submitting final frame");
         bgfx::frame();
 
         // 4. 关闭资源管理器
-        TINA_LOG_DEBUG("Shutting down resource managers");
+        TINA_CORE_LOG_DEBUG("Shutting down resource managers");
 
         m_uniformManager.shutdown();
         m_textureManager.shutdown();
         m_shaderManager.shutdown();
 
         // 5. 关闭BGFX
-        TINA_LOG_DEBUG("Shutting down BGFX");
+        TINA_CORE_LOG_DEBUG("Shutting down BGFX");
         if (bgfx::getInternalData() && bgfx::getInternalData()->context)
         {
             bgfx::shutdown();
         }
 
-        TINA_LOG_INFO("Engine shutdown completed");
+        TINA_CORE_LOG_INFO("Engine shutdown completed");
     }
 
     const char* Engine::getVersion() const
@@ -414,7 +414,7 @@ namespace Tina::Core
         if (scene)
         {
             m_activeScene.reset(scene);
-            TINA_LOG_INFO("Set active scene: {}", scene->getName());
+            TINA_CORE_LOG_INFO("Set active scene: {}", scene->getName());
         }
     }
 }
