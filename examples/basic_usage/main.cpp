@@ -1,6 +1,7 @@
 #include <tina/core/Engine.hpp>
 #include <tina/scene/Scene.hpp>
 #include <tina/view/GameView.hpp>
+#include <tina/view/UIView.hpp>
 #include <tina/components/Transform2DComponent.hpp>
 #include <tina/components/SpriteComponent.hpp>
 #include <tina/components/RectangleComponent.hpp>
@@ -82,6 +83,35 @@ void createTestEntities(Scene* scene) {
     TINA_LOG_INFO("Created 5 sprites and 95 rectangles");
 }
 
+// 创建UI十字架
+void createUICross(UIView* uiView) {
+    uint32_t width, height;
+    Core::Engine::get().getWindowSize(width, height);
+    
+    // 设置线条样式
+    LineStyle style;
+    style.thickness = 2.0f;
+    style.color = {1.0f, 0.0f, 0.0f, 1.0f}; // 红色
+    
+    // 绘制垂直线(连接屏幕顶部和底部)
+    float centerX = width / 2.0f;
+    uiView->drawLine(
+        {centerX, 0.0f},
+        {centerX, static_cast<float>(height)},
+        style
+    );
+    
+    // 绘制水平线(连接屏幕左边和右边)
+    float centerY = height / 2.0f;
+    uiView->drawLine(
+        {0.0f, centerY},
+        {static_cast<float>(width), centerY},
+        style
+    );
+    
+    TINA_LOG_INFO("Created UI cross at center ({}, {})", centerX, centerY);
+}
+
 int main() {
     // 初始化日志系统
     auto& logger = Tina::Logger::getInstance();
@@ -109,6 +139,10 @@ int main() {
         auto gameView = new GameView();
         scene->addView(gameView);
         
+        // 创建UI视图
+        auto uiView = new UIView();
+        scene->addView(uiView);
+        
         // 预加载纹理
         for (int i = 0; i < 5; i++) {
             auto textureName = "test" + std::to_string(i);
@@ -119,6 +153,9 @@ int main() {
         
         // 创建测试实体
         createTestEntities(scene);
+        
+        // 创建UI十字架
+        createUICross(uiView);
         
         // 运行引擎
         if (!engine->run()) {

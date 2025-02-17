@@ -49,7 +49,7 @@ namespace Tina {
         void onUpdate(float deltaTime) override;
         void beginRender() override;
         void endRender() override;
-        void render() override;
+        void render(Scene* scene) override;
         bool onEvent(Event& event) override;
 
         // 设置背景颜色

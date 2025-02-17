@@ -122,7 +122,7 @@ void UIView::endRender() {
     View::endRender();
 }
 
-void UIView::render() {
+void UIView::render(Scene* scene) {
     if (!isVisible() || !m_initialized || !m_renderer) return;
 
     beginRender();
@@ -193,19 +193,20 @@ void UIView::drawLine(const glm::vec2& start, const glm::vec2& end, const LineSt
         glm::vec2 normal(-direction.y, direction.x);
         normal *= style.thickness * 0.5f;
         
-        // 生成线段的四个顶点
+        // 生成线段的四个顶点位置
         glm::vec2 v0 = start + normal;
-        glm::vec2 v1 = start - normal;
-        glm::vec2 v2 = end + normal;
-        glm::vec2 v3 = end - normal;
+        glm::vec2 v1 = end + normal;
+        glm::vec2 v2 = end - normal;
+        glm::vec2 v3 = start - normal;
         
-        // 使用矩形绘制线段
+        // 计算线段的大小
+        glm::vec2 size = end - start;
+        
+        // 使用单个drawQuad绘制线段
         m_renderer->drawQuad(
-            {v0.x, v0.y, 0.0f},
-            {v1.x, v1.y, 0.0f},
-            {v2.x, v2.y, 0.0f},
-            {v3.x, v3.y, 0.0f},
-            {style.color.r, style.color.g, style.color.b, style.color.a}
+            start,
+            {glm::length(size), style.thickness},
+            Color(style.color.r, style.color.g, style.color.b, style.color.a)
         );
     });
 }
@@ -217,9 +218,9 @@ void UIView::drawRect(const glm::vec2& position, const glm::vec2& size, const Re
         // 绘制填充
         if (style.filled) {
             m_renderer->drawQuad(
-                {position.x, position.y, 0.0f},
-                size.x, size.y,
-                {style.fillColor.r, style.fillColor.g, style.fillColor.b, style.fillColor.a}
+                position,
+                size,
+                Color(style.fillColor.r, style.fillColor.g, style.fillColor.b, style.fillColor.a)
             );
         }
         
@@ -277,12 +278,18 @@ void UIView::drawCircle(const glm::vec2& center, float radius, const RectStyle& 
         
         // 绘制填充
         if (style.filled) {
-            for (int i = 1; i < segments - 1; ++i) {
-                m_renderer->drawTriangle(
-                    {center.x, center.y, 0.0f},
-                    {points[i].x, points[i].y, 0.0f},
-                    {points[i + 1].x, points[i + 1].y, 0.0f},
-                    {style.fillColor.r, style.fillColor.g, style.fillColor.b, style.fillColor.a}
+            // 使用三角扇形绘制圆形填充
+            for (int i = 0; i < segments; ++i) {
+                int nextIndex = (i + 1) % segments;
+                
+                // 计算三角形的大小和位置
+                glm::vec2 triangleSize = points[nextIndex] - points[i];
+                glm::vec2 trianglePos = points[i];
+                
+                m_renderer->drawQuad(
+                    trianglePos,
+                    triangleSize,
+                    Color(style.fillColor.r, style.fillColor.g, style.fillColor.b, style.fillColor.a)
                 );
             }
         }
@@ -305,11 +312,12 @@ void UIView::drawTexture(const std::shared_ptr<Texture2D>& texture, const glm::v
     if (!m_renderer || !texture) return;
     
     m_drawCommands.push_back([this, texture, position, size, tint]() {
-        m_renderer->drawQuad(
-            {position.x, position.y, 0.0f},
-            size.x, size.y,
+        m_renderer->drawSprite(
+            position,
+            size,
             texture,
-            {tint.r, tint.g, tint.b, tint.a}
+            glm::vec4(0.0f, 0.0f, 1.0f, 1.0f),
+            Color(tint.r, tint.g, tint.b, tint.a)
         );
     });
 }
