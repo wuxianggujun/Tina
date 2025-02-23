@@ -19,6 +19,12 @@ namespace Tina {
 
     class EventManager;  // Forward declaration
 
+    // 平台相关句柄封装
+    struct NativeHandles {
+        void* windowHandle;  // Native window handle (nwh)
+        void* displayHandle; // Native display handle (ndt)
+    };
+
     // 窗口事件数据结构
     struct WindowEventData {
         WindowHandle handle;
@@ -70,7 +76,7 @@ namespace Tina {
 
         WindowHandle createWindow(const Window::WindowConfig& config);
         void destroyWindow(WindowHandle handle);
-        Window* getWindow(WindowHandle handle);
+        [[nodiscard]] Window* getWindow(WindowHandle handle) const;
 
         void pollEvents();
         void processMessage();
@@ -89,8 +95,9 @@ namespace Tina {
         [[nodiscard]] GLFWwindow* getGLFWwindow(WindowHandle handle) const;
         WindowHandle findHandle(GLFWwindow* window) const;
 
-        void* getNativeWindowHandle(WindowHandle handle);
-        void* getNativeDisplayHandle();
+        [[nodiscard]] NativeHandles getNativeHandles(WindowHandle handle) const;
+        [[nodiscard]] void* getNativeWindowHandle(WindowHandle handle) const;
+        [[nodiscard]] void* getNativeDisplayHandle() const;
 
         static WindowManager* getInstance() { return s_instance; }
 
@@ -98,13 +105,13 @@ namespace Tina {
         static void errorCallback(int error, const char* description);
         void setupCallbacks(WindowHandle handle, GLFWwindow* window);
 
-        void eventCallback_key(WindowHandle handle, GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods);
-        void eventCallback_char(WindowHandle handle, GLFWwindow* window, uint32_t codepoint);
-        void eventCallback_scroll(WindowHandle handle, GLFWwindow* window, double dx, double dy);
-        void eventCallback_cursorPos(WindowHandle handle, GLFWwindow* window, double mx, double my);
-        void eventCallback_mouseButton(WindowHandle handle, GLFWwindow* window, int32_t button, int32_t action, int32_t mods);
-        void eventCallback_windowSize(WindowHandle handle, GLFWwindow* window, int32_t width, int32_t height);
-        void eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths);
+        void eventCallback_key(WindowHandle handle, GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods) const;
+        void eventCallback_char(WindowHandle handle, GLFWwindow* window, uint32_t codepoint) const;
+        void eventCallback_scroll(WindowHandle handle, GLFWwindow* window, double dx, double dy) const;
+        void eventCallback_cursorPos(WindowHandle handle, GLFWwindow* window, double mx, double my) const;
+        void eventCallback_mouseButton(WindowHandle handle, GLFWwindow* window, int32_t button, int32_t action, int32_t mods) const;
+        void eventCallback_windowSize(WindowHandle handle, GLFWwindow* window, int32_t width, int32_t height) const;
+        void eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths) const;
 
         static WindowManager* s_instance;
         std::unordered_map<uint16_t, std::unique_ptr<Window>> m_windowMap;

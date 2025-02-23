@@ -31,6 +31,12 @@ namespace Tina
     {
         size_t beforeMem = GlfwMemoryManager::getCurrentAllocated();
 
+        // 验证WindowHandle
+        if (!isValid(m_windowHandle)) {
+            TINA_ENGINE_ERROR("Invalid window handle in Window::create");
+            return false;
+        }
+
         // 创建窗口
         m_handle = glfwCreateWindow(config.width, config.height, config.title,
                                     config.fullscreen ? glfwGetPrimaryMonitor() : nullptr, nullptr);
@@ -41,33 +47,47 @@ namespace Tina
             return false;
         }
 
+        TINA_ENGINE_DEBUG("GLFW window created with handle: {}", (void*)m_handle);
+
         // 设置窗口用户指针
         glfwSetWindowUserPointer(m_handle, this);
 
-        // 初始化bgfx平台数据
-        bgfx::PlatformData pd{};
-#if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
-        pd.ndt = glfwGetX11Display();
-        pd.nwh = (void*)(uintptr_t)glfwGetX11Window(m_handle);
-#elif BX_PLATFORM_OSX
-        pd.nwh = glfwGetCocoaWindow(m_handle);
-#elif BX_PLATFORM_WINDOWS
-        pd.nwh = glfwGetWin32Window(m_handle);
-        pd.ndt = m_windowManager->getNativeDisplayHandle();
-#endif
-        bgfx::setPlatformData(pd);
+        // 获取native handles
+        auto handles = m_windowManager->getNativeHandles(m_windowHandle);
+        
+        TINA_ENGINE_DEBUG("Native handles - Window: {}, Display: {}", 
+            (void*)handles.windowHandle, 
+            (void*)handles.displayHandle);
+
+        if (!handles.windowHandle) {
+            TINA_ENGINE_ERROR("Failed to get native window handle");
+            glfwDestroyWindow(m_handle);
+            m_handle = nullptr;
+            return false;
+        }
 
         // 初始化bgfx
+        bgfx::PlatformData pd{};
+        pd.nwh = handles.windowHandle;
+        pd.ndt = handles.displayHandle;
+        bgfx::setPlatformData(pd);
+
         bgfx::Init init;
         init.type = bgfx::RendererType::Count; // 自动选择渲染器
         init.resolution.width = config.width;
         init.resolution.height = config.height;
-        init.resolution.reset = BGFX_RESET_VSYNC;
+        init.resolution.reset = config.vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
         init.platformData = pd;
+        init.debug = true;
+        init.profile = true;
 
+        TINA_ENGINE_INFO("Initializing bgfx with {}x{} resolution", config.width, config.height);
+        
         if (!bgfx::init(init))
         {
             TINA_ENGINE_ERROR("Failed to initialize bgfx");
+            glfwDestroyWindow(m_handle);
+            m_handle = nullptr;
             return false;
         }
 

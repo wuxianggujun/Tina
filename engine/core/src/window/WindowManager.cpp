@@ -87,19 +87,27 @@ namespace Tina
         WindowHandle handle{};
         handle.idx = static_cast<uint16_t>(m_windowMap.size());
 
+        TINA_ENGINE_DEBUG("Creating window with handle index: {}", handle.idx);
+
         auto window = std::make_unique<Window>(this, handle);
-        if (!window->create(config)) {
+        
+        // 先将窗口添加到map中
+        m_windowMap[handle.idx] = std::move(window);
+        
+        // 然后创建窗口
+        if (!m_windowMap[handle.idx]->create(config)) {
             TINA_ENGINE_ERROR("Failed to create window");
+            m_windowMap.erase(handle.idx);
             return WindowHandle{UINT16_MAX};
         }
 
-        m_windowMap[handle.idx] = std::move(window);
         setupCallbacks(handle, m_windowMap[handle.idx]->getHandle());
 
         // 触发窗口创建事件
         const WindowEventData eventData{handle, config.width, config.height};
         onWindowCreate.invoke(eventData);
 
+        TINA_ENGINE_DEBUG("Window created successfully with handle index: {}", handle.idx);
         return handle;
     }
 
@@ -113,7 +121,7 @@ namespace Tina
         }
     }
 
-    Window* WindowManager::getWindow(WindowHandle handle)
+    Window* WindowManager::getWindow(WindowHandle handle) const
     {
         auto it = m_windowMap.find(handle.idx);
         return it != m_windowMap.end() ? it->second.get() : nullptr;
@@ -227,7 +235,7 @@ namespace Tina
         TINA_ENGINE_ERROR("GLFW Error ({}): {}", error, description);
     }
 
-    void WindowManager::eventCallback_key(WindowHandle handle, GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods)
+    void WindowManager::eventCallback_key(WindowHandle handle, GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods) const
     {
         if (m_eventManager) {
             auto event = MakeShared<Event>(Event::Key);
@@ -240,7 +248,7 @@ namespace Tina
         }
     }
 
-    void WindowManager::eventCallback_char(WindowHandle handle, GLFWwindow* window, uint32_t codepoint)
+    void WindowManager::eventCallback_char(WindowHandle handle, GLFWwindow* window, uint32_t codepoint) const
     {
         if (m_eventManager) {
             auto event = MakeShared<Event>(Event::Char);
@@ -250,7 +258,7 @@ namespace Tina
         }
     }
 
-    void WindowManager::eventCallback_scroll(WindowHandle handle, GLFWwindow* window, double dx, double dy)
+    void WindowManager::eventCallback_scroll(WindowHandle handle, GLFWwindow* window, double dx, double dy) const
     {
         if (m_eventManager) {
             auto event = MakeShared<Event>(Event::MouseScroll);
@@ -261,7 +269,7 @@ namespace Tina
         }
     }
 
-    void WindowManager::eventCallback_cursorPos(WindowHandle handle, GLFWwindow* window, double mx, double my)
+    void WindowManager::eventCallback_cursorPos(WindowHandle handle, GLFWwindow* window, double mx, double my) const
     {
         if (m_eventManager) {
             auto event = MakeShared<Event>(Event::MouseMove);
@@ -272,7 +280,7 @@ namespace Tina
         }
     }
 
-    void WindowManager::eventCallback_mouseButton(WindowHandle handle, GLFWwindow* window, int32_t button, int32_t action, int32_t mods)
+    void WindowManager::eventCallback_mouseButton(WindowHandle handle, GLFWwindow* window, int32_t button, int32_t action, int32_t mods) const
     {
         if (m_eventManager) {
             double x, y;
@@ -289,7 +297,7 @@ namespace Tina
         }
     }
 
-    void WindowManager::eventCallback_windowSize(WindowHandle handle, GLFWwindow* window, int32_t width, int32_t height)
+    void WindowManager::eventCallback_windowSize(WindowHandle handle, GLFWwindow* window, int32_t width, int32_t height) const
     {
         if (m_eventManager) {
             auto event = MakeShared<Event>(Event::WindowResize);
@@ -300,7 +308,7 @@ namespace Tina
         }
     }
 
-    void WindowManager::eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths)
+    void WindowManager::eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths) const
     {
         if (m_eventManager) {
             auto event = MakeShared<Event>(Event::DropFile);
@@ -311,32 +319,57 @@ namespace Tina
         }
     }
 
-    void* WindowManager::getNativeWindowHandle(WindowHandle handle)
-    {
-        Window* window = getWindow(handle);
-        if (window)
-        {
-#if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
-            return (void*)(uintptr_t)glfwGetX11Window(window->getHandle());
-#elif BX_PLATFORM_OSX
-            return glfwGetCocoaWindow(window->getHandle());
-#elif BX_PLATFORM_WINDOWS
-            return glfwGetWin32Window(window->getHandle());
-#else
-            return nullptr;
-#endif
+    NativeHandles WindowManager::getNativeHandles(WindowHandle handle) const {
+        NativeHandles handles{nullptr, nullptr};
+        
+        TINA_ENGINE_DEBUG("Getting native handles for window index: {}", handle.idx);
+        
+        if (!isValid(handle)) {
+            TINA_ENGINE_ERROR("Invalid window handle in getNativeHandles");
+            return handles;
         }
-        return nullptr;
+        
+        auto it = m_windowMap.find(handle.idx);
+        if (it == m_windowMap.end()) {
+            TINA_ENGINE_ERROR("Window not found in map for handle index: {}", handle.idx);
+            return handles;
+        }
+
+        GLFWwindow* glfwWindow = it->second->getHandle();
+        if (!glfwWindow) {
+            TINA_ENGINE_ERROR("Invalid GLFW window handle");
+            return handles;
+        }
+
+#if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
+        handles.windowHandle = (void*)(uintptr_t)glfwGetX11Window(glfwWindow);
+        handles.displayHandle = glfwGetX11Display();
+#elif BX_PLATFORM_OSX
+        handles.windowHandle = glfwGetCocoaWindow(glfwWindow);
+        handles.displayHandle = nullptr;
+#elif BX_PLATFORM_WINDOWS
+        handles.windowHandle = glfwGetWin32Window(glfwWindow);
+        handles.displayHandle = nullptr;
+#endif
+
+        TINA_ENGINE_DEBUG("Native handles obtained - Window: {}, Display: {}", 
+            (void*)handles.windowHandle, 
+            (void*)handles.displayHandle);
+            
+        return handles;
     }
 
-    void* WindowManager::getNativeDisplayHandle()
-    {
+    void* WindowManager::getNativeWindowHandle(WindowHandle handle) const {
+        if (!isValid(handle)) {
+            TINA_ENGINE_ERROR("Invalid window handle in getNativeWindowHandle");
+            return nullptr;
+        }
+        return getNativeHandles(handle).windowHandle;
+    }
+
+    void* WindowManager::getNativeDisplayHandle() const {
 #if BX_PLATFORM_LINUX || BX_PLATFORM_BSD
         return glfwGetX11Display();
-#elif BX_PLATFORM_OSX
-        return NULL;
-#elif BX_PLATFORM_WINDOWS
-        return nullptr;
 #else
         return nullptr;
 #endif

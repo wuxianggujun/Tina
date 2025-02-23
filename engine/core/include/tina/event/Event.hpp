@@ -134,12 +134,12 @@ namespace Tina
             const char** paths;
         };
 
-        Event(Type type) : m_type(type), handled(false) {}
+        explicit Event(Type type) : m_type(type), handled(false) {}
         virtual ~Event() = default;
 
-        Type getType() const { return m_type; }
-        const char* getTypeName() const { return getTypeString(m_type); }
-        EventID getEventID() const { return static_cast<EventID>(m_type); }
+        [[nodiscard]] Type getType() const { return m_type; }
+        [[nodiscard]] const char* getTypeName() const { return getTypeString(m_type); }
+        [[nodiscard]] EventID getEventID() const { return static_cast<EventID>(m_type); }
 
         bool handled;
         WindowHandle windowHandle;
