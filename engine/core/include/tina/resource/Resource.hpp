@@ -24,6 +24,18 @@ enum class ResourceState {
 using ResourceTypeID = uintptr_t;
 
 /**
+ * @brief 资源类型注册宏
+ */
+#define TINA_REGISTER_RESOURCE_TYPE(ResourceType) \
+    static ResourceTypeID getStaticTypeID() { \
+        static ResourceTypeID typeID = reinterpret_cast<ResourceTypeID>(&getStaticTypeID); \
+        return typeID; \
+    } \
+    ResourceTypeID getTypeID() const override { \
+        return getStaticTypeID(); \
+    }
+
+/**
  * @brief 资源基类
  * 
  * 所有资源类型都必须继承自此类。
@@ -124,15 +136,5 @@ protected:
     friend class IResourceLoader;  // 允许资源加载器访问protected成员
     friend class ResourceManager;  // 允许资源管理器访问protected成员
 };
-
-/**
- * @brief 资源类型注册宏
- */
-#define TINA_REGISTER_RESOURCE_TYPE(TypeName) \
-    static ResourceTypeID getStaticTypeID() { \
-        static ResourceTypeID typeID = reinterpret_cast<ResourceTypeID>(&getStaticTypeID); \
-        return typeID; \
-    } \
-    ResourceTypeID getTypeID() const override { return getStaticTypeID(); }
 
 } // namespace Tina 

@@ -89,8 +89,22 @@ public:
         if (m_ptr) m_ptr->addRef();
     }
     
+    template<typename U>
+    RefPtr(const RefPtr<U>& other) : m_ptr(dynamic_cast<T*>(other.get())) {
+        if (m_ptr) m_ptr->addRef();
+    }
+    
     RefPtr(RefPtr&& other) noexcept : m_ptr(other.m_ptr) {
         other.m_ptr = nullptr;
+    }
+    
+    template<typename U>
+    RefPtr(RefPtr<U>&& other) noexcept : m_ptr(dynamic_cast<T*>(other.get())) {
+        if (m_ptr == other.get()) {
+            other.release();
+        } else if (m_ptr) {
+            m_ptr->addRef();
+        }
     }
     
     ~RefPtr() {
@@ -106,11 +120,37 @@ public:
         return *this;
     }
     
+    template<typename U>
+    RefPtr& operator=(const RefPtr<U>& other) {
+        T* ptr = dynamic_cast<T*>(other.get());
+        if (m_ptr != ptr) {
+            if (m_ptr) m_ptr->release();
+            m_ptr = ptr;
+            if (m_ptr) m_ptr->addRef();
+        }
+        return *this;
+    }
+    
     RefPtr& operator=(RefPtr&& other) noexcept {
         if (this != &other) {
             if (m_ptr) m_ptr->release();
             m_ptr = other.m_ptr;
             other.m_ptr = nullptr;
+        }
+        return *this;
+    }
+    
+    template<typename U>
+    RefPtr& operator=(RefPtr<U>&& other) noexcept {
+        T* ptr = dynamic_cast<T*>(other.get());
+        if (m_ptr != ptr) {
+            if (m_ptr) m_ptr->release();
+            m_ptr = ptr;
+            if (ptr == other.get()) {
+                other.release();
+            } else if (m_ptr) {
+                m_ptr->addRef();
+            }
         }
         return *this;
     }
@@ -130,6 +170,9 @@ public:
         m_ptr = nullptr;
         return ptr;
     }
+
+    template<typename U>
+    friend class RefPtr;
 
 private:
     T* m_ptr;

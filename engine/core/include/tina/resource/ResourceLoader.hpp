@@ -2,8 +2,11 @@
 
 #include "tina/core/Core.hpp"
 #include "tina/resource/Resource.hpp"
+#include "tina/core/Ref.hpp"
 #include <functional>
 #include <future>
+#include <string>
+#include <memory>
 
 namespace Tina {
 
@@ -23,6 +26,20 @@ using ResourceLoadProgressCallback = std::function<void(float progress, const st
 class TINA_CORE_API IResourceLoader {
 public:
     virtual ~IResourceLoader() = default;
+
+    /**
+     * @brief 获取资源类型ID
+     * @return 资源类型ID
+     */
+    virtual ResourceTypeID getResourceTypeID() const = 0;
+
+    /**
+     * @brief 创建资源实例
+     * @param name 资源名称
+     * @param path 资源路径
+     * @return 创建的资源实例
+     */
+    virtual RefPtr<Resource> createResource(const std::string& name, const std::string& path) = 0;
 
     /**
      * @brief 同步加载资源
@@ -54,12 +71,6 @@ public:
      * @return 资源是否有效
      */
     virtual bool validate(Resource* resource) = 0;
-
-    /**
-     * @brief 获取资源加载器支持的资源类型ID
-     * @return 资源类型ID
-     */
-    virtual ResourceTypeID getResourceTypeID() const = 0;
 
 protected:
     /**
@@ -103,6 +114,9 @@ protected:
 #define TINA_REGISTER_RESOURCE_LOADER(LoaderName, ResourceType) \
     ResourceTypeID getResourceTypeID() const override { \
         return ResourceType::getStaticTypeID(); \
+    } \
+    RefPtr<Resource> createResource(const std::string& name, const std::string& path) override { \
+        return ResourceType::create(name, path); \
     }
 
-} // namespace Tina 
+} // namespace Tina

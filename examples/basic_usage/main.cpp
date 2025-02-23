@@ -1,4 +1,5 @@
 #include <iostream>
+#include <bgfx/bgfx.h>
 
 #include "tina/log/Log.hpp"
 #include "tina/delegate/Delegate.hpp"
@@ -8,12 +9,7 @@
 #include "tina/event/EventManager.hpp"
 #include "tina/resource/ResourceManager.hpp"
 #include "tina/resource/ShaderResource.hpp"
-#include "tina/resource/TextureResource.hpp"
 #include "tina/resource/ShaderLoader.hpp"
-#include "tina/resource/TextureLoader.hpp"
-#include <bgfx/bgfx.h>
-#include <bgfx/platform.h>
-#include <bx/math.h>
 
 using namespace Tina;
 
@@ -51,7 +47,7 @@ public:
     ExampleApp() {
         m_windowManager = WindowManager::getInstance();
         m_eventManager = EventManager::getInstance();
-        // m_resourceManager = ResourceManager::getInstance();
+        m_resourceManager = ResourceManager::getInstance();
     }
 
     bool initialize() {
@@ -65,9 +61,8 @@ public:
         }
 
         // 注册资源加载器
-        // m_resourceManager->registerLoader(std::make_unique<ShaderLoader>());
-        // m_resourceManager->registerLoader(std::make_unique<TextureLoader>());
-
+        m_resourceManager->registerLoader(std::make_unique<ShaderLoader>());
+ \
         // 创建事件处理器
         EventHandler eventHandler;
 
@@ -124,12 +119,12 @@ public:
         bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
 
         // 加载着色器
-        // m_shader = m_resourceManager->loadSync<ShaderResource>("2d", "engine/resources/shaders/2d");
-        // if (!m_shader || !m_shader->isLoaded()) {
-        //     TINA_ENGINE_ERROR("Failed to load shader");
-        //     return false;
-        // }
-        //
+        m_shader = m_resourceManager->loadSync<ShaderResource>("2d", "resources/shaders/");
+        if (!m_shader || !m_shader->isLoaded()) {
+            TINA_ENGINE_ERROR("Failed to load shader");
+            return false;
+        }
+        
         // // 加载纹理
         // m_texture = m_resourceManager->loadSync<TextureResource>("example", "examples/basic_usage/resources/example.png");
         // if (!m_texture || !m_texture->isLoaded()) {
@@ -230,12 +225,11 @@ public:
 private:
     WindowManager* m_windowManager{nullptr};
     EventManager* m_eventManager{nullptr};
-    // ResourceManager* m_resourceManager{nullptr};
+    ResourceManager* m_resourceManager{nullptr};
     WindowHandle m_windowHandle;
     Window* m_window{nullptr};
 
-    // RefPtr<ShaderResource> m_shader;
-    // RefPtr<TextureResource> m_texture;
+    RefPtr<ShaderResource> m_shader;
     bgfx::VertexBufferHandle m_vbh{BGFX_INVALID_HANDLE};
     bgfx::IndexBufferHandle m_ibh{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle m_useTexture{BGFX_INVALID_HANDLE};

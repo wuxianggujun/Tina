@@ -110,8 +110,8 @@ function(add_shader_compile_dir SHADER_DIR)
             file(MAKE_DIRECTORY "${PROFILE_OUTPUT_DIR}")
 
             # 顶点着色器
-            set(VERTEX_OUTPUT "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}.vs.bin")
-            set(VERTEX_HEADER "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}.vs.hpp")
+            set(VERTEX_OUTPUT "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}_vs.bin")
+            set(VERTEX_HEADER "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}_vs.hpp")
 
             # 基本的编译命令（始终生成二进制文件）
             add_custom_command(
@@ -154,8 +154,8 @@ function(add_shader_compile_dir SHADER_DIR)
             endif()
 
             # 片段着色器
-            set(FRAGMENT_OUTPUT "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}.fs.bin")
-            set(FRAGMENT_HEADER "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}.fs.hpp")
+            set(FRAGMENT_OUTPUT "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}_fs.bin")
+            set(FRAGMENT_HEADER "${PROFILE_OUTPUT_DIR}/${SHADER_NAME}_fs.hpp")
 
             # 基本的编译命令（始终生成二进制文件）
             add_custom_command(

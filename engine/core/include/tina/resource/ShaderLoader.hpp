@@ -17,7 +17,7 @@ public:
     TINA_REGISTER_RESOURCE_LOADER(ShaderLoader, ShaderResource)
 
     ShaderLoader() = default;
-    ~ShaderLoader() = default;
+    ~ShaderLoader() override = default;
 
     bool loadSync(Resource* resource, 
         const ResourceLoadProgressCallback& progressCallback = nullptr) override;
@@ -48,4 +48,4 @@ private:
         const std::vector<uint8_t>& fsData);
 };
 
-} // namespace Tina 
+} // namespace Tina

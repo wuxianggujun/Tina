@@ -1,5 +1,6 @@
 #include "tina/resource/ShaderLoader.hpp"
 #include "tina/log/Log.hpp"
+#include "tina/core/filesystem.hpp"
 #include <fstream>
 #include <fmt/format.h>
 
@@ -26,10 +27,37 @@ bool ShaderLoader::loadSync(Resource* resource, const ResourceLoadProgressCallba
 
         // 构建着色器文件路径
         std::filesystem::path sourcePath(resource->getPath());
-        std::filesystem::path vsPath = sourcePath.parent_path() / "compiled" / 
-            (sourcePath.stem().string() + "_vs.bin");
-        std::filesystem::path fsPath = sourcePath.parent_path() / "compiled" / 
-            (sourcePath.stem().string() + "_fs.bin");
+        std::filesystem::path shaderName(resource->getName());  // 获取着色器名称
+        
+        // 根据渲染器类型选择着色器目录
+        std::string rendererDir;
+        switch (bgfx::getRendererType())
+        {
+        case bgfx::RendererType::Direct3D11:
+        case bgfx::RendererType::Direct3D12: 
+            rendererDir = "dx11";
+            break;
+        case bgfx::RendererType::OpenGL:     
+            rendererDir = "glsl";
+            break;
+        case bgfx::RendererType::OpenGLES:   
+            rendererDir = "essl";
+            break;
+        case bgfx::RendererType::Vulkan:     
+            rendererDir = "spirv";
+            break;
+        case bgfx::RendererType::Metal:      
+            rendererDir = "metal";
+            break;
+        default:
+            TINA_ENGINE_ERROR("Unsupported renderer type: {}", bgfx::getRendererName(bgfx::getRendererType()));
+            return false;
+        }
+
+        std::filesystem::path vsPath = sourcePath / rendererDir / 
+            (shaderName.string() + "_vs.bin");
+        std::filesystem::path fsPath = sourcePath / rendererDir / 
+            (shaderName.string() + "_fs.bin");
 
         TINA_ENGINE_DEBUG("Loading shader binaries from:\n  VS: {}\n  FS: {}", 
             vsPath.string(), fsPath.string());
@@ -100,18 +128,9 @@ void ShaderLoader::unload(Resource* resource) {
 }
 
 bool ShaderLoader::validate(Resource* resource) {
-    if (!resource) {
-        TINA_ENGINE_ERROR("Invalid resource pointer");
-        return false;
-    }
-
+    if (!resource) return false;
     auto* shaderResource = dynamic_cast<ShaderResource*>(resource);
-    if (!shaderResource) {
-        TINA_ENGINE_ERROR("Resource is not a ShaderResource");
-        return false;
-    }
-
-    return bgfx::isValid(shaderResource->getProgram());
+    return shaderResource && bgfx::isValid(shaderResource->getProgram());
 }
 
 std::vector<uint8_t> ShaderLoader::loadShaderBinary(const std::filesystem::path& filePath) {

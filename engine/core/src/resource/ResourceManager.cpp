@@ -1,4 +1,5 @@
 #include "tina/resource/ResourceManager.hpp"
+#include "tina/resource/ShaderResource.hpp"
 #include "tina/log/Log.hpp"
 #include <filesystem>
 
@@ -35,7 +36,7 @@ RefPtr<Resource> ResourceManager::loadSync(const std::string& name, const std::s
             TINA_ENGINE_DEBUG("Resource '{}' already loaded", name);
             return it->second;
         }
-        else if (it->second->getState() == ResourceState::Loading) {
+        if (it->second->getState() == ResourceState::Loading) {
             TINA_ENGINE_WARN("Resource '{}' is currently loading", name);
             return nullptr;
         }
@@ -48,18 +49,18 @@ RefPtr<Resource> ResourceManager::loadSync(const std::string& name, const std::s
         return nullptr;
     }
 
-    // 检查文件是否存在
-    if (!std::filesystem::exists(path)) {
-        TINA_ENGINE_ERROR("Resource file not found: {}", path);
-        return nullptr;
-    }
-
-    // 创建资源实例
+    // 创建或获取资源实例
     RefPtr<Resource> resource = it != m_resources.end() ? it->second : nullptr;
     if (!resource) {
-        // TODO: 使用工厂模式创建具体资源类型的实例
-        TINA_ENGINE_ERROR("Resource creation not implemented for type {}", typeID);
-        return nullptr;
+        // 让加载器创建资源实例
+        resource = loader->createResource(name, path);
+        if (!resource) {
+            TINA_ENGINE_ERROR("Failed to create resource instance for '{}'", name);
+            return nullptr;
+        }
+        
+        // 缓存新创建的资源
+        m_resources[name] = resource;
     }
 
     // 加载资源
@@ -71,10 +72,7 @@ RefPtr<Resource> ResourceManager::loadSync(const std::string& name, const std::s
         return nullptr;
     }
 
-    // 缓存资源
-    m_resources[name] = resource;
     TINA_ENGINE_INFO("Successfully loaded resource '{}'", name);
-
     return resource;
 }
 
