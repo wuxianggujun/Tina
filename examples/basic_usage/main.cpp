@@ -1,181 +1,110 @@
-#include <tina/core/Engine.hpp>
-#include <tina/scene/Scene.hpp>
-#include <tina/view/GameView.hpp>
-#include <tina/view/UIView.hpp>
-#include <tina/components/Transform2DComponent.hpp>
-#include <tina/components/SpriteComponent.hpp>
-#include <tina/components/RectangleComponent.hpp>
-#include <tina/log/Logger.hpp>
-#include <tina/renderer/Color.hpp>
-#include <random>
+#include <iostream>
+
+#include "tina/log/Log.hpp"
+#include "tina/delegate/Delegate.hpp"
+#include "tina/window/WindowManager.hpp"
+#include "tina/window/Window.hpp"
+#include <bgfx/bgfx.h>
+#include <bgfx/platform.h>
 
 using namespace Tina;
 
-// 创建测试实体
-void createTestEntities(Scene* scene) {
-    auto& registry = scene->getRegistry();
-    
-    // 创建5个精灵实体
-    for (int i = 0; i < 5; i++) {
-        auto entity = registry.create();
-        
-        // 添加Transform组件
-        auto& transform = registry.emplace<Transform2DComponent>(entity);
-        transform.setPosition({i * 150.0f, 50.0f});
-        transform.setScale({0.2f, 0.2f});
-        
-        // 添加Sprite组件
-        auto& sprite = registry.emplace<SpriteComponent>(entity);
-        sprite.setTexture(Core::Engine::get().getTextureManager().getTexture("test" + std::to_string(i)));
-        sprite.setLayer(0);
-        sprite.setVisible(true);
-        
-        TINA_CORE_LOG_DEBUG("Created sprite entity {} at position ({}, {})",
-            static_cast<uint32_t>(entity), 
-            transform.getPosition().x, 
-            transform.getPosition().y);
+// 事件处理类
+class EventHandler {
+public:
+    void onWindowCreated(const WindowEventData& data) {
+        TINA_ENGINE_INFO("Window created: {}x{}", data.width, data.height);
     }
-    
-    // 创建95个彩色矩形实体
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> colorDist(0.0f, 1.0f);
-    
-    int rows = 10;
-    int cols = 10;
-    float rectWidth = 50.0f;
-    float rectHeight = 50.0f;
-    float spacing = 10.0f;
-    float startX = 50.0f;
-    float startY = 200.0f;
-    
-    for (int i = 0; i < 95; i++) {
-        int row = i / cols;
-        int col = i % cols;
-        
-        auto entity = registry.create();
-        
-        // 添加Transform组件
-        auto& transform = registry.emplace<Transform2DComponent>(entity);
-        transform.setPosition({
-            startX + col * (rectWidth + spacing),
-            startY + row * (rectHeight + spacing)
-        });
-        
-        // 添加Rectangle组件
-        auto& rect = registry.emplace<RectangleComponent>(entity);
-        rect.setSize({rectWidth, rectHeight});
-        rect.setColor(Color(
-            colorDist(gen),
-            colorDist(gen),
-            colorDist(gen),
-            1.0f
-        ));
-        rect.setLayer(1);
-        rect.setVisible(true);
-        
-        TINA_CORE_LOG_DEBUG("Created rectangle entity {} at position ({}, {})",
-            static_cast<uint32_t>(entity), 
-            transform.getPosition().x, 
-            transform.getPosition().y);
+
+    void onWindowResized(const WindowEventData& data) {
+        TINA_ENGINE_INFO("Window resized: {}x{}", data.width, data.height);
+        bgfx::reset(data.width, data.height, BGFX_RESET_VSYNC);
+        bgfx::setViewRect(0, 0, 0, data.width, data.height);
     }
-    
-    TINA_CORE_LOG_INFO("Created 5 sprites and 95 rectangles");
-}
 
-// 创建UI十字架
-void createUICross(UIView* uiView) {
-    uint32_t width, height;
-    Core::Engine::get().getWindowSize(width, height);
-    
-    // 设置线条样式 - 增加粗细并使用更鲜艳的颜色
-    LineStyle style;
-    style.thickness = 5.0f;  // 增加线条粗细
-    style.color = {1.0f, 0.0f, 0.0f, 1.0f}; // 保持鲜艳的红色
-    
-    TINA_CORE_LOG_INFO("Drawing UI cross at window size {}x{}", width, height);
-    
-    // 计算中心点
-    float centerX = width * 0.5f;
-    float centerY = height * 0.5f;
-    
-    // 绘制垂直线(连接屏幕顶部和底部)
-    uiView->drawLine(
-        {centerX, 0.0f},             // 顶部中点
-        {centerX, (float)height},    // 底部中点
-        style
-    );
-    
-    // 绘制水平线(连接屏幕左边和右边)
-    uiView->drawLine(
-        {0.0f, centerY},           // 左边中点
-        {(float)width, centerY},   // 右边中点
-        style
-    );
-    
-    TINA_CORE_LOG_INFO("Created UI cross at center ({}, {})", centerX, centerY);
-}
+    void onKeyPressed(const KeyEventData& data) {
+        if (data.action == GLFW_PRESS) {
+            TINA_ENGINE_INFO("Key pressed: {}", data.key);
+        }
+    }
 
-int main() {
+    void onMouseMoved(const MouseEventData& data) {
+        TINA_ENGINE_DEBUG("Mouse moved: ({}, {})", data.x, data.y);
+    }
+};
+
+int main()
+{
     // 初始化日志系统
-    auto& logger = Tina::Logger::getInstance();
-    logger.init("app.log", true, true);
-    logger.setLogLevel(Tina::Logger::Level::Debug);
+    Tina::Log::init();
     
-    try {
-        // 创建引擎实例
-        UniquePtr<Core::Engine> engine = MakeUnique<Core::Engine>();
-        
-        // 初始化引擎
-        if (!engine->initialize()) {
-            TINA_CORE_LOG_ERROR("Failed to initialize engine");
-            return -1;
-        }
-        
-        // 创建场景
-        Scene* scene = engine->createScene("Main Scene");
-        if (!scene) {
-            TINA_CORE_LOG_ERROR("Failed to create scene");
-            return -1;
-        }
-        
-        // 创建游戏视图
-        auto gameView = new GameView();
-        gameView->setZOrder(0);  // 设置较低的zOrder
-        scene->addView(gameView);
-        
-        // 创建UI视图
-        auto uiView = new UIView("UIView");
-        // UIView构造函数中已经设置了zOrder为100
-        scene->addView(uiView);
-        
-        // 预加载纹理
-        for (int i = 0; i < 5; i++) {
-            auto textureName = "test" + std::to_string(i);
-            if (!gameView->loadTexture(textureName, "textures/test.png")) {
-                TINA_CORE_LOG_WARN("Failed to load texture: {}", textureName);
-            }
-        }
-        
-        // 创建测试实体
-        createTestEntities(scene);
-        
-        // 创建UI十字架
-        createUICross(uiView);
-        
-        TINA_CORE_LOG_INFO("Views initialized - GameView(zOrder: {}), UIView(zOrder: {})",
-            gameView->getZOrder(), uiView->getZOrder());
-        
-        // 运行引擎
-        if (!engine->run()) {
-            TINA_CORE_LOG_ERROR("Engine run failed");
-            return -1;
-        }
-        
-        return 0;
+    // 创建窗口管理器
+    WindowManager windowManager;
+    if (!windowManager.initialize()) {
+        TINA_ENGINE_ERROR("Failed to initialize WindowManager");
+        return -1;
     }
-    catch (const std::exception& e) {
-        TINA_CORE_LOG_ERROR("Application error: {}", e.what());
-        return 1;
+
+    // 创建事件处理器
+    EventHandler eventHandler;
+
+    // 注册事件处理函数
+    windowManager.onWindowCreate.bind<EventHandler, &EventHandler::onWindowCreated>(&eventHandler);
+    windowManager.onWindowResize.bind<EventHandler, &EventHandler::onWindowResized>(&eventHandler);
+    windowManager.onKeyEvent.bind<EventHandler, &EventHandler::onKeyPressed>(&eventHandler);
+    windowManager.onMouseMove.bind<EventHandler, &EventHandler::onMouseMoved>(&eventHandler);
+
+    // 配置窗口
+    Window::WindowConfig windowConfig;
+    windowConfig.title = "Tina Engine Demo";
+    windowConfig.width = 1280;
+    windowConfig.height = 720;
+    windowConfig.vsync = true;
+    windowConfig.fullscreen = false;
+
+    // 创建窗口
+    const WindowHandle windowHandle = windowManager.createWindow(windowConfig);
+    if (!isValid(windowHandle)) {
+        TINA_ENGINE_ERROR("Failed to create window");
+        return -1;
     }
+
+    // 获取窗口指针
+    Window* window = windowManager.getWindow(windowHandle);
+    if (!window) {
+        TINA_ENGINE_ERROR("Failed to get window pointer");
+        return -1;
+    }
+
+    TINA_ENGINE_INFO("Window created successfully");
+    
+    // 主循环
+    while (!window->shouldClose()) {
+        // 处理事件
+        windowManager.pollEvents();
+
+        // 处理窗口消息
+        windowManager.processMessage();
+
+        // 渲染
+        bgfx::touch(0);
+        
+        // 提交渲染
+        bgfx::frame();
+
+        // 处理输入
+        if (Window::isKeyPressed(GLFW_KEY_ESCAPE)) {
+            window->close();
+        }
+    }
+
+    // 关闭bgfx
+    bgfx::shutdown();
+
+    // 清理资源
+    windowManager.destroyWindow(windowHandle);
+    // 关闭日志系统
+    Tina::Log::shutdown();
+    
+    return 0;
 }

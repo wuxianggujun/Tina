@@ -40,8 +40,10 @@ namespace Tina
             bool fullscreen = false;           // 默认窗口模式
         };
 
-        Window(WindowManager* windowManager, WindowHandle handle, const WindowConfig& config);
+        Window(WindowManager* windowManager, WindowHandle handle);
         ~Window();
+
+        bool create(const WindowConfig& config);
         [[nodiscard]] bool shouldClose() const;
 
         [[nodiscard]] GLFWwindow* getHandle() const { return m_handle; }

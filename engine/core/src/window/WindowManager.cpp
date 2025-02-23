@@ -3,19 +3,17 @@
 //
 
 #include "tina/window/WindowManager.hpp"
-#include "tina/log/Logger.hpp"
+#include "tina/log/Log.hpp"
 #include "tina/event/EventQueue.hpp"
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
-#include "tina/core/Context.hpp"
 #include "tina/window/GlfwMemoryManager.hpp"
 
 namespace Tina
 {
     WindowManager* WindowManager::s_instance = nullptr;
 
-    WindowManager::WindowManager(Context* context)
-        : m_context(context)
+    WindowManager::WindowManager()
     {
         s_instance = this;
     }
@@ -41,22 +39,20 @@ namespace Tina
         allocator.deallocate = GlfwMemoryManager::deallocate;
         allocator.user = nullptr;
 
-        // 设置内存分配器 - 这是void函数,直接调用
         glfwInitAllocator(&allocator);
 
-        // 验证内存管理器是否正常工作
-        TINA_CORE_LOG_DEBUG("Setting up GLFW memory allocator");
+        TINA_ENGINE_INFO("Setting up GLFW memory allocator");
 
         if (!glfwInit())
         {
-            TINA_CORE_LOG_ERROR("WindowManager::initialize", " Failed to initialize GLFW");
+            TINA_ENGINE_ERROR("Failed to initialize GLFW");
             return false;
         }
+        
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        //glfwSetJoystickCallback(joystickCallback);
-        TINA_CORE_LOG_INFO("WindowManager::initialize - GLFW initialized successfully");
-        // 输出初始内存使用情况
-        TINA_CORE_LOG_DEBUG("GLFW memory stats - Current: {}MB, Peak: {}MB",
+        TINA_ENGINE_INFO("GLFW initialized successfully");
+        
+        TINA_ENGINE_DEBUG("GLFW memory stats - Current: {}MB, Peak: {}MB",
             GlfwMemoryManager::getCurrentAllocated() / (1024*1024),
             GlfwMemoryManager::getPeakAllocated() / (1024*1024));
 
@@ -65,61 +61,41 @@ namespace Tina
 
     void WindowManager::terminate()
     {
-        TINA_CORE_LOG_INFO("Terminating WindowManager");
+        TINA_ENGINE_INFO("Terminating WindowManager");
 
         try {
-            // 检查GLFW是否已初始化
             if (!glfwInit()) {
-                TINA_CORE_LOG_DEBUG("GLFW not initialized, skipping cleanup");
+                TINA_ENGINE_DEBUG("GLFW not initialized, skipping cleanup");
                 return;
             }
 
-            // 先移除所有回调
-            for (const auto& [idx, window] : m_windowMap) {
-                if (GLFWwindow* handle = window->getHandle()) {
-                    glfwSetWindowUserPointer(handle, nullptr);
-                    glfwSetKeyCallback(handle, nullptr);
-                    glfwSetCharCallback(handle, nullptr);
-                    glfwSetScrollCallback(handle, nullptr);
-                    glfwSetCursorPosCallback(handle, nullptr);
-                    glfwSetMouseButtonCallback(handle, nullptr);
-                    glfwSetWindowSizeCallback(handle, nullptr);
-                    glfwSetDropCallback(handle, nullptr);
-                }
-            }
-
-            // 清理窗口
+            // 清理所有窗口
             m_windowMap.clear();
 
-            // 重置回调
-            glfwSetErrorCallback(nullptr);
-            glfwSetJoystickCallback(nullptr);
-
-            // 终止 GLFW
             glfwTerminate();
-            
-            TINA_CORE_LOG_INFO("WindowManager terminated successfully");
+            TINA_ENGINE_INFO("WindowManager terminated successfully");
         } catch (const std::exception& e) {
-            TINA_CORE_LOG_ERROR("Error during WindowManager termination: {}", e.what());
+            TINA_ENGINE_ERROR("Error during WindowManager termination: {}", e.what());
         }
     }
 
     WindowHandle WindowManager::createWindow(const Window::WindowConfig& config)
     {
-        WindowHandle handle;
+        WindowHandle handle{};
         handle.idx = static_cast<uint16_t>(m_windowMap.size());
 
-        auto window = std::make_unique<Window>(this, handle, config);
-        if (!window->getHandle()) {
-            TINA_CORE_LOG_ERROR("WindowManager::createWindow", "Failed to create GLFW window");
+        auto window = std::make_unique<Window>(this, handle);
+        if (!window->create(config)) {
+            TINA_ENGINE_ERROR("Failed to create window");
             return WindowHandle{UINT16_MAX};
         }
 
         m_windowMap[handle.idx] = std::move(window);
         setupCallbacks(handle, m_windowMap[handle.idx]->getHandle());
 
-        Event event = createWindowEvent(Event::WindowCreate, handle, m_windowMap[handle.idx]->getHandle());
-        m_context->getEventQueue().pushEvent(event);
+        // 触发窗口创建事件
+        const WindowEventData eventData{handle, config.width, config.height};
+        onWindowCreate.invoke(eventData);
 
         return handle;
     }
@@ -128,8 +104,8 @@ namespace Tina
     {
         auto it = m_windowMap.find(handle.idx);
         if (it != m_windowMap.end()) {
-            Event event = createWindowEvent(Event::WindowDestroy, handle);
-            m_context->getEventQueue().pushEvent(event);
+            WindowEventData eventData{handle, 0, 0};
+            onWindowClose.invoke(eventData);
             m_windowMap.erase(it);
         }
     }
@@ -163,11 +139,6 @@ namespace Tina
         glfwPollEvents();
     }
 
-    bool WindowManager::pollEvent(Event& event)
-    {
-        return m_context->getEventQueue().pollEvent(event);
-    }
-
     void WindowManager::processMessage()
     {
         glfwPollEvents();
@@ -176,8 +147,8 @@ namespace Tina
             if (window->shouldClose()) {
                 WindowHandle handle;
                 handle.idx = idx;
-                Event event = createWindowEvent(Event::WindowClose, handle);
-                m_context->getEventQueue().pushEvent(event);
+                WindowEventData eventData{handle, 0, 0};
+                onWindowClose.invoke(eventData);
             }
         }
     }
@@ -245,84 +216,51 @@ namespace Tina
 
     void WindowManager::errorCallback(int error, const char* description)
     {
-        TINA_CORE_LOG_ERROR("GLFW Error", "({}) {}", error, description);
-    }
-
-    void WindowManager::joystickCallback(int jid, int event)
-    {
-        if (WindowManager* manager = WindowManager::getInstance()) {
-            manager->eventCallback_joystick(jid, event);
-        }
+        TINA_ENGINE_ERROR("GLFW Error ({}): {}", error, description);
     }
 
     void WindowManager::eventCallback_key(WindowHandle handle, GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods)
     {
-        Event::KeyCode keyCode = static_cast<Event::KeyCode>(key);
-        Event::KeyModifier keyMods = static_cast<Event::KeyModifier>(mods);
-        
-        Event event = createKeyEvent(handle, keyCode, scancode, action, keyMods);
-        m_context->getEventQueue().pushEvent(event);
+        KeyEventData eventData{handle, key, scancode, action, mods};
+        onKeyEvent.invoke(eventData);
     }
 
     void WindowManager::eventCallback_char(WindowHandle handle, GLFWwindow* window, uint32_t codepoint)
     {
-        Event event(Event::Char);
-        event.windowHandle = handle;
-        event.character.codepoint = codepoint;
-        m_context->getEventQueue().pushEvent(event);
+        CharEventData eventData{handle, codepoint};
+        onChar.invoke(eventData);
     }
 
     void WindowManager::eventCallback_scroll(WindowHandle handle, GLFWwindow* window, double dx, double dy)
     {
-        Event event = createMouseScrollEvent(handle, dx, dy);
-        m_context->getEventQueue().pushEvent(event);
+        ScrollEventData eventData{handle, dx, dy};
+        onScroll.invoke(eventData);
     }
 
     void WindowManager::eventCallback_cursorPos(WindowHandle handle, GLFWwindow* window, double mx, double my)
     {
-        Event event = createMouseMoveEvent(handle, mx, my);
-        event.mousePos.x = mx;
-        event.mousePos.y = my;
-        m_context->getEventQueue().pushEvent(event);
+        MouseEventData eventData{handle, mx, my, 0, 0, 0};
+        onMouseMove.invoke(eventData);
     }
 
     void WindowManager::eventCallback_mouseButton(WindowHandle handle, GLFWwindow* window, int32_t button, int32_t action, int32_t mods)
     {
         double x, y;
         glfwGetCursorPos(window, &x, &y);
-
-        Event::MouseButton mouseButton = static_cast<Event::MouseButton>(button);
-        Event::KeyModifier keyMods = static_cast<Event::KeyModifier>(mods);
-        
-        Event event = createMouseButtonEvent(handle, mouseButton, action, keyMods, x, y);
-        m_context->getEventQueue().pushEvent(event);
+        MouseEventData eventData{handle, x, y, button, action, mods};
+        onMouseButton.invoke(eventData);
     }
 
     void WindowManager::eventCallback_windowSize(WindowHandle handle, GLFWwindow* window, int32_t width, int32_t height)
     {
-        // 创建窗口大小改变事件
-        TINA_CORE_LOG_DEBUG("Creating WindowResize event: {}x{}", width, height);
-        Event event = createWindowResizeEvent(handle, width, height);
-        TINA_CORE_LOG_DEBUG("Created event type: {}", static_cast<int>(event.type));
-        m_context->getEventQueue().pushEvent(event);
-
+        WindowEventData eventData{handle, width, height};
+        onWindowResize.invoke(eventData);
     }
 
     void WindowManager::eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths)
     {
-        Event event(Event::DropFile);
-        event.windowHandle = handle;
-        event.dropFile.count = count;
-        event.dropFile.paths = filePaths;
-        m_context->getEventQueue().pushEvent(event);
-    }
-
-    void WindowManager::eventCallback_joystick(int jid, int action)
-    {
-        Event event(Event::Gamepad);
-        event.gamepad.jid = jid;
-        event.gamepad.action = action;
-        m_context->getEventQueue().pushEvent(event);
+        DropEventData eventData{handle, count, filePaths};
+        onDrop.invoke(eventData);
     }
 
     void* WindowManager::getNativeWindowHandle(WindowHandle handle)
@@ -355,5 +293,4 @@ namespace Tina
         return nullptr;
 #endif
     }
-
 } // namespace Tina

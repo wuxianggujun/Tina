@@ -2,8 +2,8 @@
 
 #include "tina/core/Core.hpp"
 #include "tina/window/Window.hpp"
-#include "tina/event/Event.hpp"
-#include <GLFW/glfw3.h>
+#include "tina/delegate/Delegate.hpp"
+
 #if BX_PLATFORM_WINDOWS
     #define GLFW_EXPOSE_NATIVE_WIN32
 #elif BX_PLATFORM_LINUX
@@ -16,11 +16,51 @@
 #include <memory>
 
 namespace Tina {
-    class Context;
+
+    // 窗口事件数据结构
+    struct WindowEventData {
+        WindowHandle handle;
+        int32_t width;
+        int32_t height;
+    };
+
+    struct KeyEventData {
+        WindowHandle handle;
+        int32_t key;
+        int32_t scancode;
+        int32_t action;
+        int32_t mods;
+    };
+
+    struct MouseEventData {
+        WindowHandle handle;
+        double x;
+        double y;
+        int32_t button;
+        int32_t action;
+        int32_t mods;
+    };
+
+    struct ScrollEventData {
+        WindowHandle handle;
+        double xOffset;
+        double yOffset;
+    };
+
+    struct CharEventData {
+        WindowHandle handle;
+        uint32_t codepoint;
+    };
+
+    struct DropEventData {
+        WindowHandle handle;
+        int32_t count;
+        const char** paths;
+    };
 
     class TINA_CORE_API WindowManager {
     public:
-        explicit WindowManager(Context* context);
+        WindowManager();
         ~WindowManager();
 
         bool initialize();
@@ -31,8 +71,18 @@ namespace Tina {
         Window* getWindow(WindowHandle handle);
 
         void pollEvents();
-        bool pollEvent(Event& event);
         void processMessage();
+
+        // 事件委托
+        MulticastDelegate<void(const WindowEventData&)> onWindowCreate;
+        MulticastDelegate<void(const WindowEventData&)> onWindowClose;
+        MulticastDelegate<void(const WindowEventData&)> onWindowResize;
+        MulticastDelegate<void(const KeyEventData&)> onKeyEvent;
+        MulticastDelegate<void(const MouseEventData&)> onMouseButton;
+        MulticastDelegate<void(const MouseEventData&)> onMouseMove;
+        MulticastDelegate<void(const ScrollEventData&)> onScroll;
+        MulticastDelegate<void(const CharEventData&)> onChar;
+        MulticastDelegate<void(const DropEventData&)> onDrop;
 
         [[nodiscard]] GLFWwindow* getGLFWwindow(WindowHandle handle) const;
         WindowHandle findHandle(GLFWwindow* window) const;
@@ -44,7 +94,6 @@ namespace Tina {
 
     private:
         static void errorCallback(int error, const char* description);
-        static void joystickCallback(int jid, int event);
         void setupCallbacks(WindowHandle handle, GLFWwindow* window);
 
         void eventCallback_key(WindowHandle handle, GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods);
@@ -54,10 +103,8 @@ namespace Tina {
         void eventCallback_mouseButton(WindowHandle handle, GLFWwindow* window, int32_t button, int32_t action, int32_t mods);
         void eventCallback_windowSize(WindowHandle handle, GLFWwindow* window, int32_t width, int32_t height);
         void eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths);
-        void eventCallback_joystick(int jid, int action);
 
         static WindowManager* s_instance;
-        Context* m_context;
         std::unordered_map<uint16_t, std::unique_ptr<Window>> m_windowMap;
     };
-} // Tina
+} // namespace Tina

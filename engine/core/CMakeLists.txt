@@ -39,7 +39,7 @@ target_link_libraries(TinaCore
         glfw
         EnTT::EnTT
         glm
-        Tracy::TracyClient
+        spdlog::spdlog
 )
 
 # 设置编译选项

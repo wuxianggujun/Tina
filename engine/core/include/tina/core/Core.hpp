@@ -37,9 +37,10 @@
 
 // Assertion macros
 #ifdef TINA_DEBUG
-    #define TINA_ASSERT(x, ...) { if(!(x)) { TINA_LOG_ERROR("Assertion Failed: {0}", __VA_ARGS__); __debugbreak(); } }
+    #define TINA_ENGINE_ASSERT(x, ...) { if(!(x)) { Tina::Log::getEngineLogger()->error( __VA_ARGS__); } }
 
-    #define TINA_CORE_ASSERT(x, ...) { if(!(x)) { TINA_CORE_ERROR("Assertion Failed: {0}", __VA_ARGS__); __debugbreak(); } }
+    #define TINA_ASSERT(x, ...) { if(!(x)) { Tina::Log::getApplicationLogger()->error( __VA_ARGS__); } }
+
 #else
     #define TINA_ASSERT(x, ...)
 

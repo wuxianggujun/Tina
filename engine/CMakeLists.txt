@@ -31,8 +31,8 @@ tina_add_third_party(NAME glfw
         GLFW_BUILD_DOCS=OFF
         GLFW_INSTALL=OFF)
 
-tina_add_third_party(NAME tracy
-        PATH ${CMAKE_SOURCE_DIR}/third_party/tracy)
+tina_add_third_party(NAME spdlog
+        PATH ${CMAKE_SOURCE_DIR}/third_party/spdlog)
 
 # GLM 配置
 add_library(glm INTERFACE)

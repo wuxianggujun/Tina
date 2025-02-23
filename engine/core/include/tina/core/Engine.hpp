@@ -6,9 +6,6 @@
 #include "tina/core/Core.hpp"
 #include "tina/core/Context.hpp"
 #include "tina/window/Window.hpp"
-#include "tina/renderer/ShaderManager.hpp"
-#include "tina/renderer/TextureManager.hpp"
-#include "tina/renderer/UniformManager.hpp"
 
 namespace Tina
 {
@@ -28,11 +25,7 @@ namespace Tina::Core
         void shutdown();
         const char* getVersion() const;
         Context& getContext();
-
-        UniformManager& getUniformManager() { return m_uniformManager; }
-        TextureManager& getTextureManager() { return m_textureManager; }
-        ShaderManager& getShaderManager() { return m_shaderManager; }
-
+        
         // 场景管理
         Scene* createScene(const std::string& name);
         void setActiveScene(Scene* scene);
@@ -49,10 +42,7 @@ namespace Tina::Core
         void logMemoryStats();
 
     private:
-        UniformManager m_uniformManager;
-        TextureManager m_textureManager;
-        ShaderManager m_shaderManager;
-
+        
         Context& m_context; // 改为引用
         WindowHandle m_mainWindow;
         UniquePtr<Scene> m_activeScene; // 当前活动场景
