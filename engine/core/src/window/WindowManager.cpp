@@ -151,7 +151,7 @@ namespace Tina
             
             for (const auto& [idx, window] : m_windowMap) {
                 if (window->shouldClose()) {
-                    WindowHandle handle;
+                    WindowHandle handle{};
                     handle.idx = idx;
                     auto event = MakeShared<Event>(Event::WindowClose);
                     event->windowHandle = handle;
