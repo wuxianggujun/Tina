@@ -25,7 +25,7 @@ public:
 
 protected:
     Singleton() = default;
-    ~Singleton() = default;
+   virtual ~Singleton() = default;
 
 private:
     // 禁用拷贝构造和赋值操作

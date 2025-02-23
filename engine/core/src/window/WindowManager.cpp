@@ -4,7 +4,6 @@
 
 #include "tina/window/WindowManager.hpp"
 #include "tina/log/Log.hpp"
-#include "tina/event/EventQueue.hpp"
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
 #include "tina/event/EventManager.hpp"
@@ -12,74 +11,53 @@
 
 namespace Tina
 {
-    WindowManager* WindowManager::s_instance = nullptr;
-
-    WindowManager::WindowManager()
+    WindowManager::WindowManager() : m_eventManager(EventManager::getInstance())
     {
-        s_instance = this;
-        m_eventManager = EventManager::getInstance();
     }
 
     WindowManager::~WindowManager()
     {
-        s_instance = nullptr;
-        m_eventManager = nullptr;
         terminate();
     }
 
     bool WindowManager::initialize()
     {
+        // 设置GLFW内存分配器
+        TINA_ENGINE_INFO(FMT_STRING("Setting up GLFW memory allocator"));
+        GlfwMemoryManager::getInstance()->setupGlfwAllocator();
+
+        // 设置错误回调
         glfwSetErrorCallback(errorCallback);
+
+        // 初始化GLFW
+        if (!glfwInit())
+        {
+            TINA_ENGINE_ERROR(FMT_STRING("Failed to initialize GLFW"));
+            return false;
+        }
 
         // 禁用游戏手柄支持
         glfwInitHint(GLFW_JOYSTICK_HAT_BUTTONS, GLFW_FALSE);
         glfwInitHint(GLFW_COCOA_CHDIR_RESOURCES, GLFW_FALSE);
 
-        // 设置GLFW内存分配器
-        GLFWallocator allocator;
-        allocator.allocate = GlfwMemoryManager::allocate;
-        allocator.reallocate = GlfwMemoryManager::reallocate;
-        allocator.deallocate = GlfwMemoryManager::deallocate;
-        allocator.user = nullptr;
-
-        glfwInitAllocator(&allocator);
-
-        TINA_ENGINE_INFO("Setting up GLFW memory allocator");
-
-        if (!glfwInit())
-        {
-            TINA_ENGINE_ERROR("Failed to initialize GLFW");
-            return false;
-        }
-        
+        // 设置窗口API
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        TINA_ENGINE_INFO("GLFW initialized successfully");
-        
-        TINA_ENGINE_DEBUG("GLFW memory stats - Current: {}MB, Peak: {}MB",
-            GlfwMemoryManager::getCurrentAllocated() / (1024*1024),
-            GlfwMemoryManager::getPeakAllocated() / (1024*1024));
+
+        TINA_ENGINE_INFO(FMT_STRING("GLFW initialized successfully"));
+        TINA_ENGINE_DEBUG(FMT_STRING("GLFW memory stats - Current: {:.2f}MB, Peak: {:.2f}MB"),
+            GlfwMemoryManager::getInstance()->getCurrentMemoryUsage() / 1024.0f / 1024.0f,
+            GlfwMemoryManager::getInstance()->getPeakMemoryUsage() / 1024.0f / 1024.0f);
 
         return true;
     }
 
     void WindowManager::terminate()
     {
-        TINA_ENGINE_INFO("Terminating WindowManager");
+        // 销毁所有窗口
+        m_windowMap.clear();
 
-        try {
-            if (!glfwInit()) {
-                TINA_ENGINE_DEBUG("GLFW not initialized, skipping cleanup");
-                return;
-            }
-
-            // 清理所有窗口
-            m_windowMap.clear();
-
-            glfwTerminate();
-            TINA_ENGINE_INFO("WindowManager terminated successfully");
-        } catch (const std::exception& e) {
-            TINA_ENGINE_ERROR("Error during WindowManager termination: {}", e.what());
-        }
+        // 终止GLFW
+        glfwTerminate();
     }
 
     WindowHandle WindowManager::createWindow(const Window::WindowConfig& config)
@@ -87,7 +65,7 @@ namespace Tina
         WindowHandle handle{};
         handle.idx = static_cast<uint16_t>(m_windowMap.size());
 
-        TINA_ENGINE_DEBUG("Creating window with handle index: {}", handle.idx);
+        TINA_ENGINE_DEBUG(FMT_STRING("Creating window with handle index: {}"), handle.idx);
 
         auto window = std::make_unique<Window>(this, handle);
         
@@ -96,7 +74,7 @@ namespace Tina
         
         // 然后创建窗口
         if (!m_windowMap[handle.idx]->create(config)) {
-            TINA_ENGINE_ERROR("Failed to create window");
+            TINA_ENGINE_ERROR(FMT_STRING("Failed to create window"));
             m_windowMap.erase(handle.idx);
             return WindowHandle{UINT16_MAX};
         }
@@ -107,7 +85,7 @@ namespace Tina
         const WindowEventData eventData{handle, config.width, config.height};
         onWindowCreate.invoke(eventData);
 
-        TINA_ENGINE_DEBUG("Window created successfully with handle index: {}", handle.idx);
+        TINA_ENGINE_DEBUG(FMT_STRING("Window created successfully with handle index: {}"), handle.idx);
         return handle;
     }
 
@@ -232,7 +210,7 @@ namespace Tina
 
     void WindowManager::errorCallback(int error, const char* description)
     {
-        TINA_ENGINE_ERROR("GLFW Error ({}): {}", error, description);
+        TINA_ENGINE_ERROR(FMT_STRING("GLFW Error ({}): {}"), error, description);
     }
 
     void WindowManager::eventCallback_key(WindowHandle handle, GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods) const
@@ -322,22 +300,22 @@ namespace Tina
     NativeHandles WindowManager::getNativeHandles(WindowHandle handle) const {
         NativeHandles handles{nullptr, nullptr};
         
-        TINA_ENGINE_DEBUG("Getting native handles for window index: {}", handle.idx);
+        TINA_ENGINE_DEBUG(FMT_STRING("Getting native handles for window index: {}"), handle.idx);
         
         if (!isValid(handle)) {
-            TINA_ENGINE_ERROR("Invalid window handle in getNativeHandles");
+            TINA_ENGINE_ERROR(FMT_STRING("Invalid window handle in getNativeHandles"));
             return handles;
         }
         
         auto it = m_windowMap.find(handle.idx);
         if (it == m_windowMap.end()) {
-            TINA_ENGINE_ERROR("Window not found in map for handle index: {}", handle.idx);
+            TINA_ENGINE_ERROR(FMT_STRING("Window not found in map for handle index: {}"), handle.idx);
             return handles;
         }
 
         GLFWwindow* glfwWindow = it->second->getHandle();
         if (!glfwWindow) {
-            TINA_ENGINE_ERROR("Invalid GLFW window handle");
+            TINA_ENGINE_ERROR(FMT_STRING("Invalid GLFW window handle"));
             return handles;
         }
 
@@ -352,7 +330,7 @@ namespace Tina
         handles.displayHandle = nullptr;
 #endif
 
-        TINA_ENGINE_DEBUG("Native handles obtained - Window: {}, Display: {}", 
+        TINA_ENGINE_DEBUG(FMT_STRING("Native handles obtained - Window: {}, Display: {}"), 
             (void*)handles.windowHandle, 
             (void*)handles.displayHandle);
             

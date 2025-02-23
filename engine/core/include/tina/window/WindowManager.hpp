@@ -3,6 +3,7 @@
 #include "tina/core/Core.hpp"
 #include "tina/window/Window.hpp"
 #include "tina/delegate/Delegate.hpp"
+#include "tina/core/Singleton.hpp"
 
 #if BX_PLATFORM_WINDOWS
     #define GLFW_EXPOSE_NATIVE_WIN32
@@ -66,8 +67,9 @@ namespace Tina {
         const char** paths;
     };
 
-    class TINA_CORE_API WindowManager {
+    class TINA_CORE_API WindowManager : public Singleton<WindowManager> {
     public:
+        friend class Singleton<WindowManager>;
         WindowManager();
         ~WindowManager();
 
@@ -99,8 +101,6 @@ namespace Tina {
         [[nodiscard]] void* getNativeWindowHandle(WindowHandle handle) const;
         [[nodiscard]] void* getNativeDisplayHandle() const;
 
-        static WindowManager* getInstance() { return s_instance; }
-
     private:
         static void errorCallback(int error, const char* description);
         void setupCallbacks(WindowHandle handle, GLFWwindow* window);
@@ -113,7 +113,6 @@ namespace Tina {
         void eventCallback_windowSize(WindowHandle handle, GLFWwindow* window, int32_t width, int32_t height) const;
         void eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths) const;
 
-        static WindowManager* s_instance;
         std::unordered_map<uint16_t, std::unique_ptr<Window>> m_windowMap;
         EventManager* m_eventManager;
     };

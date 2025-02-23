@@ -3,6 +3,7 @@
 #include "tina/core/Core.hpp"
 #include <atomic>
 #include <cassert>
+#include <memory>
 
 namespace Tina {
 
@@ -133,5 +134,10 @@ public:
 private:
     T* m_ptr;
 };
+
+template<typename To, typename From>
+RefPtr<To> static_pointer_cast(const RefPtr<From>& from) {
+    return RefPtr<To>(static_cast<To*>(from.get()));
+}
 
 } // namespace Tina 
