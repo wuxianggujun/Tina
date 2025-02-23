@@ -17,6 +17,8 @@
 
 namespace Tina {
 
+    class EventManager;  // Forward declaration
+
     // 窗口事件数据结构
     struct WindowEventData {
         WindowHandle handle;
@@ -106,5 +108,6 @@ namespace Tina {
 
         static WindowManager* s_instance;
         std::unordered_map<uint16_t, std::unique_ptr<Window>> m_windowMap;
+        EventManager* m_eventManager;
     };
 } // namespace Tina

@@ -4,6 +4,8 @@
 #include "tina/delegate/Delegate.hpp"
 #include "tina/window/WindowManager.hpp"
 #include "tina/window/Window.hpp"
+#include "tina/event/Event.hpp"
+#include "tina/event/EventManager.hpp"
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
 
@@ -12,24 +14,29 @@ using namespace Tina;
 // 事件处理类
 class EventHandler {
 public:
-    void onWindowCreated(const WindowEventData& data) {
-        TINA_ENGINE_INFO("Window created: {}x{}", data.width, data.height);
+    void onWindowCreated(const EventPtr& event) {
+        TINA_ENGINE_INFO("Window created: {}x{}", 
+            event->windowCreate.width, 
+            event->windowCreate.height);
     }
 
-    void onWindowResized(const WindowEventData& data) {
-        TINA_ENGINE_INFO("Window resized: {}x{}", data.width, data.height);
-        bgfx::reset(data.width, data.height, BGFX_RESET_VSYNC);
-        bgfx::setViewRect(0, 0, 0, data.width, data.height);
+    void onWindowResized(const EventPtr& event) {
+        TINA_ENGINE_INFO("Window resized: {}x{}", 
+            event->windowResize.width, 
+            event->windowResize.height);
+        bgfx::reset(event->windowResize.width, event->windowResize.height, BGFX_RESET_VSYNC);
+        bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(event->windowResize.width), uint16_t(event->windowResize.height));
     }
 
-    void onKeyPressed(const KeyEventData& data) {
-        if (data.action == GLFW_PRESS) {
-            TINA_ENGINE_INFO("Key pressed: {}", data.key);
+    void onKeyPressed(const EventPtr& event) {
+        if (event->key.action == GLFW_PRESS) {
+            TINA_ENGINE_INFO("Key pressed: {}", static_cast<int>(event->key.key));
         }
     }
 
-    void onMouseMoved(const MouseEventData& data) {
-        TINA_ENGINE_DEBUG("Mouse moved: ({}, {})", data.x, data.y);
+    void onMouseMoved(const EventPtr& event) {
+        TINA_ENGINE_DEBUG("Mouse moved: ({}, {})", 
+            event->mousePos.x, event->mousePos.y);
     }
 };
 
@@ -48,11 +55,29 @@ int main()
     // 创建事件处理器
     EventHandler eventHandler;
 
+    // 获取事件管理器
+    auto* eventManager = EventManager::getInstance();
+
     // 注册事件处理函数
-    windowManager.onWindowCreate.bind<EventHandler, &EventHandler::onWindowCreated>(&eventHandler);
-    windowManager.onWindowResize.bind<EventHandler, &EventHandler::onWindowResized>(&eventHandler);
-    windowManager.onKeyEvent.bind<EventHandler, &EventHandler::onKeyPressed>(&eventHandler);
-    windowManager.onMouseMove.bind<EventHandler, &EventHandler::onMouseMoved>(&eventHandler);
+    eventManager->addListener(
+        [&eventHandler](const EventPtr& event) { eventHandler.onWindowCreated(event); },
+        Event::WindowCreate
+    );
+    
+    eventManager->addListener(
+        [&eventHandler](const EventPtr& event) { eventHandler.onWindowResized(event); },
+        Event::WindowResize
+    );
+    
+    eventManager->addListener(
+        [&eventHandler](const EventPtr& event) { eventHandler.onKeyPressed(event); },
+        Event::Key
+    );
+    
+    eventManager->addListener(
+        [&eventHandler](const EventPtr& event) { eventHandler.onMouseMoved(event); },
+        Event::MouseMove
+    );
 
     // 配置窗口
     Window::WindowConfig windowConfig;

@@ -7,6 +7,7 @@
 #include "tina/event/EventQueue.hpp"
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
+#include "tina/event/EventManager.hpp"
 #include "tina/window/GlfwMemoryManager.hpp"
 
 namespace Tina
@@ -16,11 +17,13 @@ namespace Tina
     WindowManager::WindowManager()
     {
         s_instance = this;
+        m_eventManager = EventManager::getInstance();
     }
 
     WindowManager::~WindowManager()
     {
         s_instance = nullptr;
+        m_eventManager = nullptr;
         terminate();
     }
 
@@ -143,12 +146,17 @@ namespace Tina
     {
         glfwPollEvents();
         
-        for (const auto& [idx, window] : m_windowMap) {
-            if (window->shouldClose()) {
-                WindowHandle handle;
-                handle.idx = idx;
-                WindowEventData eventData{handle, 0, 0};
-                onWindowClose.invoke(eventData);
+        if (m_eventManager) {
+            m_eventManager->update();
+            
+            for (const auto& [idx, window] : m_windowMap) {
+                if (window->shouldClose()) {
+                    WindowHandle handle;
+                    handle.idx = idx;
+                    auto event = MakeShared<Event>(Event::WindowClose);
+                    event->windowHandle = handle;
+                    m_eventManager->triggerEvent(event);
+                }
             }
         }
     }
@@ -221,46 +229,86 @@ namespace Tina
 
     void WindowManager::eventCallback_key(WindowHandle handle, GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods)
     {
-        KeyEventData eventData{handle, key, scancode, action, mods};
-        onKeyEvent.invoke(eventData);
+        if (m_eventManager) {
+            auto event = MakeShared<Event>(Event::Key);
+            event->windowHandle = handle;
+            event->key.key = static_cast<Event::KeyCode>(key);
+            event->key.scancode = scancode;
+            event->key.action = action;
+            event->key.mods = static_cast<Event::KeyModifier>(mods);
+            m_eventManager->triggerEvent(event);
+        }
     }
 
     void WindowManager::eventCallback_char(WindowHandle handle, GLFWwindow* window, uint32_t codepoint)
     {
-        CharEventData eventData{handle, codepoint};
-        onChar.invoke(eventData);
+        if (m_eventManager) {
+            auto event = MakeShared<Event>(Event::Char);
+            event->windowHandle = handle;
+            event->character.codepoint = codepoint;
+            m_eventManager->triggerEvent(event);
+        }
     }
 
     void WindowManager::eventCallback_scroll(WindowHandle handle, GLFWwindow* window, double dx, double dy)
     {
-        ScrollEventData eventData{handle, dx, dy};
-        onScroll.invoke(eventData);
+        if (m_eventManager) {
+            auto event = MakeShared<Event>(Event::MouseScroll);
+            event->windowHandle = handle;
+            event->mouseScroll.xoffset = dx;
+            event->mouseScroll.yoffset = dy;
+            m_eventManager->triggerEvent(event);
+        }
     }
 
     void WindowManager::eventCallback_cursorPos(WindowHandle handle, GLFWwindow* window, double mx, double my)
     {
-        MouseEventData eventData{handle, mx, my, 0, 0, 0};
-        onMouseMove.invoke(eventData);
+        if (m_eventManager) {
+            auto event = MakeShared<Event>(Event::MouseMove);
+            event->windowHandle = handle;
+            event->mousePos.x = mx;
+            event->mousePos.y = my;
+            m_eventManager->triggerEvent(event);
+        }
     }
 
     void WindowManager::eventCallback_mouseButton(WindowHandle handle, GLFWwindow* window, int32_t button, int32_t action, int32_t mods)
     {
-        double x, y;
-        glfwGetCursorPos(window, &x, &y);
-        MouseEventData eventData{handle, x, y, button, action, mods};
-        onMouseButton.invoke(eventData);
+        if (m_eventManager) {
+            double x, y;
+            glfwGetCursorPos(window, &x, &y);
+            
+            auto event = MakeShared<Event>(Event::MouseButtonEvent);
+            event->windowHandle = handle;
+            event->mouseButton.button = static_cast<Event::MouseButton>(button);
+            event->mouseButton.action = action;
+            event->mouseButton.mods = static_cast<Event::KeyModifier>(mods);
+            event->mouseButton.x = x;
+            event->mouseButton.y = y;
+            m_eventManager->triggerEvent(event);
+        }
     }
 
     void WindowManager::eventCallback_windowSize(WindowHandle handle, GLFWwindow* window, int32_t width, int32_t height)
     {
-        WindowEventData eventData{handle, width, height};
-        onWindowResize.invoke(eventData);
+        if (m_eventManager) {
+            auto event = MakeShared<Event>(Event::WindowResize);
+            event->windowHandle = handle;
+            event->windowResize.width = width;
+            event->windowResize.height = height;
+            m_eventManager->triggerEvent(event);
+        }
     }
 
     void WindowManager::eventCallback_dropFile(WindowHandle handle, GLFWwindow* window, int32_t count, const char** filePaths)
     {
-        DropEventData eventData{handle, count, filePaths};
-        onDrop.invoke(eventData);
+        if (m_eventManager) {
+            auto event = MakeShared<Event>(Event::DropFile);
+            event->windowHandle = handle;
+            event->dropFile.count = count;
+            event->dropFile.paths = filePaths;
+            m_eventManager->triggerEvent(event);
+        }
     }
 
     void* WindowManager::getNativeWindowHandle(WindowHandle handle)

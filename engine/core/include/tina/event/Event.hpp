@@ -3,23 +3,35 @@
 #include "tina/window/Window.hpp"
 #include <glm/glm.hpp>
 #include <cstdint>
+#include "tina/core/Core.hpp"
+#include <string>
 
 namespace Tina
 {
     struct WindowHandle;
 
-    struct Event
+    using EventID = uint32_t;
+
+    class TINA_CORE_API Event
     {
-        // 鼠标按钮枚举
-        enum class MouseButton : int32_t
+    public:
+        enum Type
         {
-            None = -1,
-            Left = 0,
-            Right = 1,
-            Middle = 2
+            None = 0,
+            WindowCreate,
+            WindowClose,
+            WindowResize,
+            WindowFocus,
+            WindowLostFocus,
+            WindowMoved,
+            Key,
+            Char,
+            MouseButtonEvent,
+            MouseMove,
+            MouseScroll,
+            DropFile
         };
 
-        // 按键码枚举
         enum class KeyCode : int32_t
         {
             None = 0,
@@ -52,7 +64,6 @@ namespace Tina
             RightSuper = 347
         };
 
-        // 按键修饰符
         enum class KeyModifier : int32_t
         {
             None = 0,
@@ -62,143 +73,112 @@ namespace Tina
             Super = 8
         };
 
-        // 事件类型枚举
-        enum Type
+        enum class MouseButton : int32_t
         {
-            None = 0,
-            WindowCreate,
-            WindowDestroy,
-            WindowResize,
-            WindowMove,
-            WindowFocus,
-            WindowLostFocus,
-            WindowClose,
-            Key,
-            Char,
-            MouseButtonEvent,  // 重命名以避免与MouseButton枚举类冲突
-            MouseMove,
-            MouseScroll,
-            MouseEnter,
-            MouseLeave,
-            CursorPos,
-            Gamepad,
-            DropFile,
-            Exit,
-            Count
+            None = -1,
+            Left = 0,
+            Right = 1,
+            Middle = 2
         };
 
-        Type type;
+        struct WindowCreateData
+        {
+            int32_t width;
+            int32_t height;
+            void* nativeWindowHandle;
+        };
+
+        struct WindowResizeData
+        {
+            int32_t width;
+            int32_t height;
+        };
+
+        struct KeyData
+        {
+            KeyCode key;
+            int32_t scancode;
+            int32_t action;
+            KeyModifier mods;
+        };
+
+        struct CharData
+        {
+            uint32_t codepoint;
+        };
+
+        struct MouseButtonData
+        {
+            MouseButton button;
+            int32_t action;
+            KeyModifier mods;
+            double x;
+            double y;
+        };
+
+        struct MousePosData
+        {
+            double x;
+            double y;
+        };
+
+        struct MouseScrollData
+        {
+            double xoffset;
+            double yoffset;
+        };
+
+        struct DropFileData
+        {
+            int32_t count;
+            const char** paths;
+        };
+
+        Event(Type type) : m_type(type), handled(false) {}
+        virtual ~Event() = default;
+
+        Type getType() const { return m_type; }
+        const char* getTypeName() const { return getTypeString(m_type); }
+        EventID getEventID() const { return static_cast<EventID>(m_type); }
+
+        bool handled;
         WindowHandle windowHandle;
-        bool handled = false;
 
         union
         {
-            struct
-            {
-                void* nativeWindowHandle;
-            } window;
-
-            struct
-            {
-                int32_t width;
-                int32_t height;
-            } windowResize;
-
-            struct
-            {
-                int32_t x;
-                int32_t y;
-            } windowPos;
-
-            struct
-            {
-                KeyCode key;
-                int32_t scancode;
-                int32_t action;
-                KeyModifier mods;
-            } key;
-
-            struct
-            {
-                uint32_t codepoint;
-            } character;
-
-            struct
-            {
-                MouseButton button;
-                int32_t action;
-                KeyModifier mods;
-                double x;
-                double y;
-            } mouseButton;
-
-            struct
-            {
-                double x;
-                double y;
-            } mousePos;
-
-            struct
-            {
-                double xoffset;
-                double yoffset;
-            } mouseScroll;
-
-            struct
-            {
-                int32_t entered;
-            } mouseEnter;
-
-            struct
-            {
-                int32_t id;
-                int32_t connected;
-            } gamepadStatus;
-
-            struct
-            {
-                int32_t id;
-                int32_t axis;
-                float value;
-            } gamepadAxis;
-
-            struct
-            {
-                int32_t id;
-                int32_t button;
-                int32_t action;
-            } gamepadButton;
-
-            struct {
-                int32_t jid;
-                int32_t action;
-            } gamepad;
-
-            struct {
-                int32_t count;
-                const char** paths;
-            } dropFile;
+            WindowCreateData windowCreate;
+            WindowResizeData windowResize;
+            KeyData key;
+            CharData character;
+            MouseButtonData mouseButton;
+            MousePosData mousePos;
+            MouseScrollData mouseScroll;
+            DropFileData dropFile;
         };
 
-        Event()
-            : type(None)
-              , windowHandle({UINT16_MAX})
-              , handled(false)
+    protected:
+        static const char* getTypeString(Type type)
         {
+            switch (type)
+            {
+                case WindowCreate: return "WindowCreate";
+                case WindowClose: return "WindowClose";
+                case WindowResize: return "WindowResize";
+                case WindowFocus: return "WindowFocus";
+                case WindowLostFocus: return "WindowLostFocus";
+                case WindowMoved: return "WindowMoved";
+                case Key: return "Key";
+                case Char: return "Char";
+                case MouseButtonEvent: return "MouseButton";
+                case MouseMove: return "MouseMove";
+                case MouseScroll: return "MouseScroll";
+                case DropFile: return "DropFile";
+                default: return "Unknown";
+            }
         }
 
-        explicit Event(Type type)
-            : type(type)
-              , windowHandle({UINT16_MAX})
-              , handled(false)
-        {
-        }
-
-        static bool isKeyPressed(KeyCode key);
-        static bool isMouseButtonPressed(MouseButton button);
-        static glm::vec2 getMousePosition();
-        static void setMousePosition(float x, float y);
-        static void setMouseVisible(bool visible);
+    private:
+        Type m_type;
     };
 
     // Event creation helper functions
@@ -206,7 +186,9 @@ namespace Tina
     {
         Event event(type);
         event.windowHandle = handle;
-        event.window.nativeWindowHandle = nativeHandle;
+        event.windowCreate.width = 0;
+        event.windowCreate.height = 0;
+        event.windowCreate.nativeWindowHandle = nativeHandle;
         return event;
     }
 
@@ -232,7 +214,7 @@ namespace Tina
 
     inline Event createMouseButtonEvent(WindowHandle handle, Event::MouseButton button, int32_t action, Event::KeyModifier mods, double x, double y)
     {
-        Event event(Event::MouseButtonEvent);  // 使用新的事件类型名称
+        Event event(Event::MouseButtonEvent);
         event.windowHandle = handle;
         event.mouseButton.button = button;
         event.mouseButton.action = action;
@@ -259,4 +241,25 @@ namespace Tina
         event.mouseScroll.yoffset = yoffset;
         return event;
     }
+
+    // Event pointer type
+    using EventPtr = std::shared_ptr<Event>;
+
+    // Event declaration macro
+    #define TINA_DECLARE_EVENT(type) \
+        static EventID ID() { return reinterpret_cast<EventID>(&ID); } \
+        EventID getEventID() const override { return ID(); } \
+        const char* getName() const override { return #type; }
+
+    // Event definition macro
+    #define TINA_EVENT_BEGIN(NAME) \
+    class NAME : public Event { \
+    public: \
+        TINA_DECLARE_EVENT(NAME) \
+        static SharedPtr<NAME> create() { return MakeShared<NAME>(); } \
+    private: \
+        explicit NAME() = default; \
+    public:
+
+    #define TINA_EVENT_END() };
 } // namespace Tina
