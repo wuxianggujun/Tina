@@ -10,6 +10,8 @@
 #include "tina/resource/ResourceManager.hpp"
 #include "tina/resource/ShaderResource.hpp"
 #include "tina/resource/ShaderLoader.hpp"
+#include "tina/resource/TextureResource.hpp"
+#include "tina/resource/TextureLoader.hpp"
 
 using namespace Tina;
 
@@ -62,6 +64,7 @@ public:
 
         // 注册资源加载器
         m_resourceManager->registerLoader(std::make_unique<ShaderLoader>());
+        m_resourceManager->registerLoader(std::make_unique<TextureLoader>());
 
         // 创建事件处理器
         EventHandler eventHandler;
@@ -125,6 +128,12 @@ public:
             return false;
         }
 
+        m_texture = m_resourceManager->loadSync<TextureResource>("test.png","resources/textures/");
+        if (!m_texture || !m_texture->isLoaded()) {
+            TINA_ENGINE_ERROR("Failed to load texture");
+            return false;
+        }
+        
         // 创建顶点布局
         bgfx::VertexLayout layout;
         layout.begin()
@@ -159,7 +168,7 @@ public:
 
         // 创建uniform变量
         m_useTexture = bgfx::createUniform("u_useTexture", bgfx::UniformType::Vec4);
-
+        m_textureSampler = bgfx::createUniform("u_texColor", bgfx::UniformType::Sampler);
         return true;
     }
 
@@ -175,8 +184,17 @@ public:
             float useTexture[4] = { 1.0f, 0.0f, 0.0f, 0.0f }; // 启用纹理
             bgfx::setUniform(m_useTexture, useTexture);
 
+            // 设置纹理和采样器
+            if (m_texture && m_texture->isLoaded()) {
+                // 设置纹理单元0的纹理和采样器状态
+                bgfx::setTexture(0, m_textureSampler, m_texture->getHandle(), 
+                    BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | 
+                    BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT);
+            }
+
             // 设置着色器程序
-            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | 
+                BGFX_STATE_BLEND_ALPHA);
 
             // 提交绘制命令
             bgfx::setVertexBuffer(0, m_vbh);
@@ -192,7 +210,13 @@ public:
         // 释放shader资源
         if (m_shader) {
             TINA_ENGINE_DEBUG("Releasing shader reference in ExampleApp::shutdown");
-            m_shader.reset();  // 使用reset()来释放引用
+            m_shader.reset();
+        }
+
+        // 释放纹理资源
+        if (m_texture) {
+            TINA_ENGINE_DEBUG("Releasing texture reference in ExampleApp::shutdown");
+            m_texture.reset();
         }
 
         // 等待所有资源释放完成
@@ -210,6 +234,9 @@ public:
         }
         if (bgfx::isValid(m_useTexture)) {
             bgfx::destroy(m_useTexture);
+        }
+        if (bgfx::isValid(m_textureSampler)) {
+            bgfx::destroy(m_textureSampler);
         }
 
         // 关闭bgfx
@@ -232,9 +259,11 @@ private:
     Window* m_window{nullptr};
 
     RefPtr<ShaderResource> m_shader;  // 保持shader资源的引用
+    RefPtr<TextureResource> m_texture;  // 保持纹理资源的引用
     bgfx::VertexBufferHandle m_vbh{BGFX_INVALID_HANDLE};
     bgfx::IndexBufferHandle m_ibh{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle m_useTexture{BGFX_INVALID_HANDLE};
+    bgfx::UniformHandle m_textureSampler{BGFX_INVALID_HANDLE};
 };
 
 int main() {
