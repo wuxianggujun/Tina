@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tina/resource/Resource.hpp"
+#include "tina/core/RefPtr.hpp"
 #include <bgfx/bgfx.h>
 #include <unordered_map>
 #include <string>
@@ -23,15 +24,21 @@ public:
      * @param path 资源路径
      * @return 着色器资源指针
      */
-    static RefPtr<ShaderResource> create(const std::string& name, const std::string& path) {
-        return RefPtr<ShaderResource>(new ShaderResource(name, path));
-    }
+    static RefPtr<ShaderResource> create(const std::string& name, const std::string& path);
+
+    ~ShaderResource() override;
+
+    /**
+     * @brief 检查着色器是否已加载
+     * @return 如果着色器已加载且程序句柄有效则返回true
+     */
+    bool isLoaded() const override;
 
     /**
      * @brief 获取着色器程序句柄
      * @return 着色器程序句柄
      */
-    bgfx::ProgramHandle getProgram() const { return m_program; }
+    bgfx::ProgramHandle getProgram() const;
 
     /**
      * @brief 获取uniform变量句柄
@@ -48,16 +55,10 @@ public:
      * @param type uniform变量类型
      */
     template<typename T>
-    void setUniform(const std::string& name, const T& value, bgfx::UniformType::Enum type) {
-        auto handle = getUniform(name, type);
-        if (bgfx::isValid(handle)) {
-            bgfx::setUniform(handle, &value);
-        }
-    }
+    void setUniform(const std::string& name, const T& value, bgfx::UniformType::Enum type);
 
 protected:
     ShaderResource(const std::string& name, const std::string& path);
-    ~ShaderResource();
 
     bool load() override;
     void unload() override;
@@ -66,9 +67,12 @@ private:
     // 着色器程序句柄
     bgfx::ProgramHandle m_program{BGFX_INVALID_HANDLE};
 
+    // 加载状态标志
+    bool m_loaded{false};
+
     // uniform变量缓存
     struct UniformInfo {
-        bgfx::UniformHandle handle;
+        bgfx::UniformHandle handle{BGFX_INVALID_HANDLE};
         bgfx::UniformType::Enum type;
     };
     std::unordered_map<std::string, UniformInfo> m_uniforms;
