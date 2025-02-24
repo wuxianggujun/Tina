@@ -9,6 +9,7 @@
 #include <mutex>
 #include <queue>
 #include <future>
+#include <vector>
 
 namespace Tina {
 
@@ -43,7 +44,7 @@ public:
         static_assert(std::is_base_of_v<Resource, T>, "T must inherit from Resource");
         RefPtr<Resource> resource = loadSync(name, path, T::getStaticTypeID(), progressCallback);
         if (!resource) {
-            return nullptr;
+            return RefPtr<T>::null();
         }
         return static_pointer_cast<T>(resource);
     }
@@ -62,7 +63,11 @@ public:
         static_assert(std::is_base_of_v<Resource, T>, "T must inherit from Resource");
         auto future = loadAsync(name, path, T::getStaticTypeID(), progressCallback);
         return std::async(std::launch::deferred, [future]() {
-            return std::static_pointer_cast<T>(future.get());
+            auto resource = future.get();
+            if (!resource) {
+                return RefPtr<T>::null();
+            }
+            return static_pointer_cast<T>(resource);
         });
     }
 
@@ -74,7 +79,11 @@ public:
     template<typename T>
     RefPtr<T> getResource(const std::string& name) const {
         static_assert(std::is_base_of_v<Resource, T>, "T must inherit from Resource");
-        return std::static_pointer_cast<T>(getResource(name));
+        auto resource = getResource(name);
+        if (!resource) {
+            return RefPtr<T>::null();
+        }
+        return static_pointer_cast<T>(resource);
     }
 
     /**
@@ -94,10 +103,50 @@ public:
      */
     void update();
 
+    /**
+     * @brief 关闭资源管理器
+     * 
+     * 在程序退出前调用此方法以确保所有资源被正确释放。
+     * 此方法应该在bgfx关闭前调用。
+     */
+    void shutdown() {
+        TINA_ENGINE_INFO("Shutting down ResourceManager");
+        releaseResources();
+    }
+
 protected:
     friend class Singleton<ResourceManager>;
     ResourceManager() = default;
     ~ResourceManager();
+
+    /**
+     * @brief 在bgfx关闭前释放所有资源
+     */
+    void releaseResources() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        TINA_ENGINE_INFO("Releasing all resources before bgfx shutdown");
+
+        // 先获取所有资源的列表，避免在遍历时修改map
+        std::vector<std::string> resourceNames;
+        resourceNames.reserve(m_resources.size());
+        for (const auto& [name, _] : m_resources) {
+            resourceNames.push_back(name);
+        }
+
+        // 逐个卸载资源
+        for (const auto& name : resourceNames) {
+            TINA_ENGINE_DEBUG("Unloading resource: {}", name);
+            unloadResource(name);
+        }
+
+        // 清空资源映射
+        m_resources.clear();
+
+        // 清空加载器
+        m_loaders.clear();
+
+        TINA_ENGINE_INFO("All resources released");
+    }
 
 private:
     /**

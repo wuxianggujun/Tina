@@ -1,7 +1,8 @@
 #pragma once
 
 #include "tina/core/Core.hpp"
-#include "tina/core/Ref.hpp"
+#include "tina/core/RefCount.hpp"
+#include "tina/core/RefPtr.hpp"
 #include <string>
 #include <chrono>
 
@@ -45,8 +46,56 @@ using ResourceTypeID = uintptr_t;
  * - 资源生命周期管理
  * - 资源依赖管理
  */
-class TINA_CORE_API Resource : public Ref {
+class TINA_CORE_API Resource {
 public:
+    /**
+     * @brief 构造函数
+     * @param name 资源名称
+     * @param path 资源路径
+     */
+    Resource(const std::string& name, const std::string& path);
+    
+    /**
+     * @brief 虚析构函数
+     */
+    virtual ~Resource();
+
+    /**
+     * @brief 获取资源名称
+     * @return 资源名称
+     */
+    const std::string& getName() const;
+
+    /**
+     * @brief 获取资源路径
+     * @return 资源路径
+     */
+    const std::string& getPath() const;
+
+    /**
+     * @brief 获取资源状态
+     * @return 资源状态
+     */
+    ResourceState getState() const;
+
+    /**
+     * @brief 获取资源大小
+     * @return 资源大小(字节)
+     */
+    size_t getSize() const;
+
+    /**
+     * @brief 获取最后修改时间
+     * @return 最后修改时间
+     */
+    std::chrono::system_clock::time_point getLastModified() const;
+
+    /**
+     * @brief 检查资源是否已加载
+     * @return 如果资源已加载则返回true
+     */
+    virtual bool isLoaded() const;
+
     /**
      * @brief 获取资源类型ID
      * @return 资源类型ID
@@ -54,61 +103,25 @@ public:
     virtual ResourceTypeID getTypeID() const = 0;
 
     /**
-     * @brief 获取资源名称
-     * @return 资源名称
+     * @brief 获取引用计数
+     * @return 当前引用计数
      */
-    const std::string& getName() const { return m_name; }
+    int getRefCount() const;
 
     /**
-     * @brief 获取资源路径
-     * @return 资源路径
+     * @brief 增加引用计数
      */
-    const std::string& getPath() const { return m_path; }
+    void addRef();
 
     /**
-     * @brief 获取资源状态
-     * @return 资源状态
+     * @brief 减少引用计数
      */
-    ResourceState getState() const { return m_state; }
-
-    /**
-     * @brief 获取资源大小（字节）
-     * @return 资源大小
-     */
-    size_t getSize() const { return m_size; }
-
-    /**
-     * @brief 获取最后修改时间
-     * @return 最后修改时间
-     */
-    std::chrono::system_clock::time_point getLastModified() const { return m_lastModified; }
-
-    /**
-     * @brief 资源是否已加载
-     * @return 是否已加载
-     */
-    bool isLoaded() const { return m_state == ResourceState::Loaded; }
-
-    /**
-     * @brief 资源是否加载失败
-     * @return 是否加载失败
-     */
-    bool isFailed() const { return m_state == ResourceState::Failed; }
+    void release();
 
 protected:
-    Resource(const std::string& name, const std::string& path)
-        : m_name(name)
-        , m_path(path)
-        , m_state(ResourceState::Unloaded)
-        , m_size(0)
-        , m_lastModified(std::chrono::system_clock::now())
-    {}
-
-    ~Resource() override = default;
-
     /**
      * @brief 加载资源
-     * @return 是否加载成功
+     * @return 如果加载成功则返回true
      */
     virtual bool load() = 0;
 
@@ -121,10 +134,7 @@ protected:
      * @brief 重新加载资源
      * @return 是否重新加载成功
      */
-    virtual bool reload() {
-        unload();
-        return load();
-    }
+    bool reload();
 
     // 资源基本信息
     std::string m_name;                                  // 资源名称
@@ -133,8 +143,11 @@ protected:
     size_t m_size;                                      // 资源大小
     std::chrono::system_clock::time_point m_lastModified; // 最后修改时间
 
+    RefCount m_refCount;    ///< 引用计数
+
     friend class IResourceLoader;  // 允许资源加载器访问protected成员
     friend class ResourceManager;  // 允许资源管理器访问protected成员
+    template<typename T> friend class RefPtr;
 };
 
 } // namespace Tina 

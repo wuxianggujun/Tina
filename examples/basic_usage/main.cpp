@@ -62,7 +62,7 @@ public:
 
         // 注册资源加载器
         m_resourceManager->registerLoader(std::make_unique<ShaderLoader>());
- \
+
         // 创建事件处理器
         EventHandler eventHandler;
 
@@ -124,48 +124,41 @@ public:
             TINA_ENGINE_ERROR("Failed to load shader");
             return false;
         }
-        
-        // // 加载纹理
-        // m_texture = m_resourceManager->loadSync<TextureResource>("example", "examples/basic_usage/resources/example.png");
-        // if (!m_texture || !m_texture->isLoaded()) {
-        //     TINA_ENGINE_ERROR("Failed to load texture");
-        //     return false;
-        // }
 
-        // // 创建顶点布局
-        // bgfx::VertexLayout layout;
-        // layout.begin()
-        //     .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
-        //     .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
-        //     .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Float)
-        //     .end();
-        //
-        // // 创建顶点缓冲
-        // float vertices[] = {
-        //     // pos      uv      color
-        //     -0.5f, -0.5f,  0.0f, 0.0f,  1.0f, 1.0f, 1.0f, 1.0f, // 左下
-        //      0.5f, -0.5f,  1.0f, 0.0f,  1.0f, 1.0f, 1.0f, 1.0f, // 右下
-        //      0.5f,  0.5f,  1.0f, 1.0f,  1.0f, 1.0f, 1.0f, 1.0f, // 右上
-        //     -0.5f,  0.5f,  0.0f, 1.0f,  1.0f, 1.0f, 1.0f, 1.0f  // 左上
-        // };
-        //
-        // m_vbh = bgfx::createVertexBuffer(
-        //     bgfx::copy(vertices, sizeof(vertices)),
-        //     layout
-        // );
-        //
-        // // 创建索引缓冲
-        // uint16_t indices[] = {
-        //     0, 1, 2, // 第一个三角形
-        //     2, 3, 0  // 第二个三角形
-        // };
-        //
-        // m_ibh = bgfx::createIndexBuffer(
-        //     bgfx::copy(indices, sizeof(indices))
-        // );
-        //
-        // // 创建uniform变量
-        // m_useTexture = bgfx::createUniform("u_useTexture", bgfx::UniformType::Vec4);
+        // 创建顶点布局
+        bgfx::VertexLayout layout;
+        layout.begin()
+            .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Float)
+            .end();
+
+        // 创建顶点缓冲
+        float vertices[] = {
+            // pos      uv      color
+            -0.5f, -0.5f,  0.0f, 0.0f,  1.0f, 1.0f, 1.0f, 1.0f, // 左下
+             0.5f, -0.5f,  1.0f, 0.0f,  1.0f, 1.0f, 1.0f, 1.0f, // 右下
+             0.5f,  0.5f,  1.0f, 1.0f,  1.0f, 1.0f, 1.0f, 1.0f, // 右上
+            -0.5f,  0.5f,  0.0f, 1.0f,  1.0f, 1.0f, 1.0f, 1.0f  // 左上
+        };
+
+        m_vbh = bgfx::createVertexBuffer(
+            bgfx::copy(vertices, sizeof(vertices)),
+            layout
+        );
+
+        // 创建索引缓冲
+        uint16_t indices[] = {
+            0, 1, 2, // 第一个三角形
+            2, 3, 0  // 第二个三角形
+        };
+
+        m_ibh = bgfx::createIndexBuffer(
+            bgfx::copy(indices, sizeof(indices))
+        );
+
+        // 创建uniform变量
+        m_useTexture = bgfx::createUniform("u_useTexture", bgfx::UniformType::Vec4);
 
         return true;
     }
@@ -178,20 +171,17 @@ public:
             // 设置渲染状态
             bgfx::touch(0);
 
-            // // 设置uniform变量
-            // float useTexture[4] = { 1.0f, 0.0f, 0.0f, 0.0f }; // 启用纹理
-            // bgfx::setUniform(m_useTexture, useTexture);
-            //
-            // // 设置纹理
-            // bgfx::setTexture(0, m_useTexture, m_texture->getHandle());
-            //
-            // // 设置着色器程序
-            // bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
-            //
-            // // 提交绘制命令
-            // bgfx::setVertexBuffer(0, m_vbh);
-            // bgfx::setIndexBuffer(m_ibh);
-            // bgfx::submit(0, m_shader->getProgram());
+            // 设置uniform变量
+            float useTexture[4] = { 1.0f, 0.0f, 0.0f, 0.0f }; // 启用纹理
+            bgfx::setUniform(m_useTexture, useTexture);
+
+            // 设置着色器程序
+            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
+
+            // 提交绘制命令
+            bgfx::setVertexBuffer(0, m_vbh);
+            bgfx::setIndexBuffer(m_ibh);
+            bgfx::submit(0, m_shader->getProgram());
 
             // 提交帧
             bgfx::frame();
@@ -199,7 +189,20 @@ public:
     }
 
     void shutdown() {
-        // 销毁资源
+        // 释放shader资源
+        if (m_shader) {
+            TINA_ENGINE_DEBUG("Releasing shader reference in ExampleApp::shutdown");
+            m_shader.reset();  // 使用reset()来释放引用
+        }
+
+        // 等待所有资源释放完成
+        bgfx::frame();
+        bgfx::frame();
+
+        // 关闭资源管理器
+        m_resourceManager->shutdown();
+
+        // 销毁顶点和索引缓冲
         if (bgfx::isValid(m_vbh)) {
             bgfx::destroy(m_vbh);
         }
@@ -229,7 +232,7 @@ private:
     WindowHandle m_windowHandle;
     Window* m_window{nullptr};
 
-    RefPtr<ShaderResource> m_shader;
+    RefPtr<ShaderResource> m_shader;  // 保持shader资源的引用
     bgfx::VertexBufferHandle m_vbh{BGFX_INVALID_HANDLE};
     bgfx::IndexBufferHandle m_ibh{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle m_useTexture{BGFX_INVALID_HANDLE};

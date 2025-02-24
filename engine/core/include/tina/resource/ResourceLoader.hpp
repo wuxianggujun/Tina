@@ -2,7 +2,6 @@
 
 #include "tina/core/Core.hpp"
 #include "tina/resource/Resource.hpp"
-#include "tina/core/Ref.hpp"
 #include <functional>
 #include <future>
 #include <string>
@@ -19,9 +18,6 @@ using ResourceLoadProgressCallback = std::function<void(float progress, const st
 
 /**
  * @brief 资源加载器接口
- * 
- * 定义了资源加载器的基本接口。
- * 每种资源类型都需要实现自己的加载器。
  */
 class TINA_CORE_API IResourceLoader {
 public:
@@ -43,8 +39,8 @@ public:
 
     /**
      * @brief 同步加载资源
-     * @param resource 要加载的资源
-     * @param progressCallback 进度回调函数
+     * @param resource 资源指针
+     * @param progressCallback 进度回调
      * @return 是否加载成功
      */
     virtual bool loadSync(Resource* resource, 
@@ -52,23 +48,23 @@ public:
 
     /**
      * @brief 异步加载资源
-     * @param resource 要加载的资源
-     * @param progressCallback 进度回调函数
-     * @return 加载操作的future
+     * @param resource 资源指针
+     * @param progressCallback 进度回调
+     * @return 加载结果的future
      */
     virtual std::future<bool> loadAsync(Resource* resource,
         const ResourceLoadProgressCallback& progressCallback = nullptr) = 0;
 
     /**
      * @brief 卸载资源
-     * @param resource 要卸载的资源
+     * @param resource 资源指针
      */
     virtual void unload(Resource* resource) = 0;
 
     /**
      * @brief 验证资源
-     * @param resource 要验证的资源
-     * @return 资源是否有效
+     * @param resource 资源指针
+     * @return 是否验证通过
      */
     virtual bool validate(Resource* resource) = 0;
 
@@ -111,12 +107,12 @@ protected:
 /**
  * @brief 资源加载器注册宏
  */
-#define TINA_REGISTER_RESOURCE_LOADER(LoaderName, ResourceType) \
+#define TINA_REGISTER_RESOURCE_LOADER(LoaderType, ResourceType) \
     ResourceTypeID getResourceTypeID() const override { \
         return ResourceType::getStaticTypeID(); \
     } \
     RefPtr<Resource> createResource(const std::string& name, const std::string& path) override { \
-        return ResourceType::create(name, path); \
+        return RefPtr<Resource>(ResourceType::create(name, path).get()); \
     }
 
 } // namespace Tina
