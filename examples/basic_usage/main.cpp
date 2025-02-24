@@ -1,6 +1,7 @@
 #include <iostream>
 #include <bgfx/bgfx.h>
 
+#include "bx/math.h"
 #include "tina/log/Log.hpp"
 #include "tina/delegate/Delegate.hpp"
 #include "tina/window/WindowManager.hpp"
@@ -121,6 +122,20 @@ public:
         bgfx::setViewRect(0, 0, 0, windowConfig.width, windowConfig.height);
         bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
 
+        // 设置2D视图矩阵
+        float view[16];
+        bx::mtxIdentity(view); // 使用单位矩阵作为视图矩阵
+        
+        // 设置正交投影矩阵
+        float ortho[16];
+        bx::mtxOrtho(ortho, 
+            0.0f, static_cast<float>(windowConfig.width),   // left, right
+            static_cast<float>(windowConfig.height), 0.0f,  // bottom, top (翻转Y轴，使Y向下为正)
+            0.0f, 100.0f,                                  // near, far
+            0.0f, bgfx::getCaps()->homogeneousDepth);
+            
+        bgfx::setViewTransform(0, view, ortho);
+
         // 加载着色器
         m_shader = m_resourceManager->loadSync<ShaderResource>("2d", "resources/shaders/");
         if (!m_shader || !m_shader->isLoaded()) {
@@ -133,22 +148,38 @@ public:
             TINA_ENGINE_ERROR("Failed to load texture");
             return false;
         }
+
+        // 获取纹理尺寸
+        uint16_t textureWidth = m_texture->getWidth();
+        uint16_t textureHeight = m_texture->getHeight();
         
+        TINA_ENGINE_INFO("Texture loaded successfully - Size: {}x{}, Format: {}, Handle: {}", 
+            textureWidth, textureHeight, 
+            (int)m_texture->getFormat(), 
+            m_texture->getHandle().idx);
+        
+        // 使用纹理原始尺寸
+        float displayWidth = static_cast<float>(textureWidth);
+        float displayHeight = static_cast<float>(textureHeight);
+        
+        // 计算居中位置
+        float posX = (static_cast<float>(windowConfig.width) - displayWidth) * 0.5f;
+        float posY = (static_cast<float>(windowConfig.height) - displayHeight) * 0.5f;
+
         // 创建顶点布局
         bgfx::VertexLayout layout;
         layout.begin()
             .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
             .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
-            .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Float)
             .end();
 
         // 创建顶点缓冲
         float vertices[] = {
-            // pos      uv      color
-            -0.5f, -0.5f,  0.0f, 0.0f,  1.0f, 1.0f, 1.0f, 1.0f, // 左下
-             0.5f, -0.5f,  1.0f, 0.0f,  1.0f, 1.0f, 1.0f, 1.0f, // 右下
-             0.5f,  0.5f,  1.0f, 1.0f,  1.0f, 1.0f, 1.0f, 1.0f, // 右上
-            -0.5f,  0.5f,  0.0f, 1.0f,  1.0f, 1.0f, 1.0f, 1.0f  // 左上
+            // pos (屏幕坐标)     uv (DirectX风格)
+            posX,           posY,            0.0f, 0.0f,     // 左上
+            posX + displayWidth, posY,       1.0f, 0.0f,     // 右上
+            posX + displayWidth, posY + displayHeight, 1.0f, 1.0f,  // 右下
+            posX,           posY + displayHeight, 0.0f, 1.0f   // 左下
         };
 
         m_vbh = bgfx::createVertexBuffer(
@@ -158,8 +189,8 @@ public:
 
         // 创建索引缓冲
         uint16_t indices[] = {
-            0, 1, 2, // 第一个三角形
-            2, 3, 0  // 第二个三角形
+            0, 1, 2,  // 第一个三角形
+            2, 3, 0   // 第二个三角形
         };
 
         m_ibh = bgfx::createIndexBuffer(
@@ -167,8 +198,9 @@ public:
         );
 
         // 创建uniform变量
-        m_useTexture = bgfx::createUniform("u_useTexture", bgfx::UniformType::Vec4);
-        m_textureSampler = bgfx::createUniform("u_texColor", bgfx::UniformType::Sampler);
+        m_textureSampler = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
+        TINA_ENGINE_INFO("Created texture sampler uniform: {}", m_textureSampler.idx);
+
         return true;
     }
 
@@ -177,24 +209,31 @@ public:
             // 处理事件
             m_windowManager->processMessage();
 
+            // 清除帧缓冲
+            bgfx::setViewClear(0,
+                BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
+                0x303030ff, // 深灰色背景
+                1.0f, 0);
+            
             // 设置渲染状态
             bgfx::touch(0);
 
-            // 设置uniform变量
-            float useTexture[4] = { 1.0f, 0.0f, 0.0f, 0.0f }; // 启用纹理
-            bgfx::setUniform(m_useTexture, useTexture);
+            // 设置渲染状态
+            uint64_t state = 0
+                | BGFX_STATE_WRITE_RGB
+                | BGFX_STATE_WRITE_A
+                | BGFX_STATE_MSAA
+                | BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_SRC_ALPHA, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+            bgfx::setState(state);
 
             // 设置纹理和采样器
             if (m_texture && m_texture->isLoaded()) {
-                // 设置纹理单元0的纹理和采样器状态
-                bgfx::setTexture(0, m_textureSampler, m_texture->getHandle(), 
-                    BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | 
-                    BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT);
+                bgfx::setTexture(0, m_textureSampler, m_texture->getHandle(), 0);
+                
+                TINA_ENGINE_DEBUG("Set texture: {} with sampler: {}", 
+                    m_texture->getHandle().idx, 
+                    m_textureSampler.idx);
             }
-
-            // 设置着色器程序
-            bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | 
-                BGFX_STATE_BLEND_ALPHA);
 
             // 提交绘制命令
             bgfx::setVertexBuffer(0, m_vbh);
@@ -232,9 +271,6 @@ public:
         if (bgfx::isValid(m_ibh)) {
             bgfx::destroy(m_ibh);
         }
-        if (bgfx::isValid(m_useTexture)) {
-            bgfx::destroy(m_useTexture);
-        }
         if (bgfx::isValid(m_textureSampler)) {
             bgfx::destroy(m_textureSampler);
         }
@@ -262,7 +298,6 @@ private:
     RefPtr<TextureResource> m_texture;  // 保持纹理资源的引用
     bgfx::VertexBufferHandle m_vbh{BGFX_INVALID_HANDLE};
     bgfx::IndexBufferHandle m_ibh{BGFX_INVALID_HANDLE};
-    bgfx::UniformHandle m_useTexture{BGFX_INVALID_HANDLE};
     bgfx::UniformHandle m_textureSampler{BGFX_INVALID_HANDLE};
 };
 

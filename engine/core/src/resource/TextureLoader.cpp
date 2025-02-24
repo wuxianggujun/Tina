@@ -1,6 +1,6 @@
 #include "tina/resource/TextureLoader.hpp"
 #include "tina/log/Log.hpp"
-#define STB_IMAGE_IMPLEMENTATION
+// #define STB_IMAGE_IMPLEMENTATION
 #include <tina/utils/stb_image.h>
 #include <bimg/bimg.h>
 
@@ -101,9 +101,9 @@ bool TextureLoader::validate(Resource* resource) {
 std::vector<uint8_t> TextureLoader::loadImageFile(const std::filesystem::path& filePath,
     int* width, int* height, int* channels) {
     
-    // 使用stb_image加载图片
-    stbi_set_flip_vertically_on_load(true);
-    unsigned char* data = stbi_load(filePath.string().c_str(), width, height, channels, 0);
+    // 使用stb_image加载图片，强制使用RGBA格式
+    stbi_set_flip_vertically_on_load(false);  // 不翻转图像，因为我们使用DirectX风格的UV坐标
+    unsigned char* data = stbi_load(filePath.string().c_str(), width, height, channels, 4);  // 强制4通道
     
     if (!data) {
         TINA_ENGINE_ERROR("Failed to load image: {}", stbi_failure_reason());
@@ -111,45 +111,66 @@ std::vector<uint8_t> TextureLoader::loadImageFile(const std::filesystem::path& f
     }
 
     // 将数据复制到vector中
-    size_t dataSize = (*width) * (*height) * (*channels);
+    size_t dataSize = (*width) * (*height) * 4;  // 总是使用4通道
     std::vector<uint8_t> buffer(data, data + dataSize);
     
     // 释放stb_image分配的内存
     stbi_image_free(data);
     
+    *channels = 4;  // 更新通道数为4
     return buffer;
 }
 
 bgfx::TextureHandle TextureLoader::createTexture(const void* data, uint16_t width, uint16_t height,
     bgfx::TextureFormat::Enum format) {
     
-    const bgfx::Memory* mem = bgfx::copy(data, width * height * bimg::getBitsPerPixel(bimg::TextureFormat::Enum(format)) / 8);
+    // 计算每像素字节数
+    uint32_t bpp = bimg::getBitsPerPixel(bimg::TextureFormat::Enum(format)) / 8;
+    uint32_t pitch = width * bpp;
+    uint32_t size = pitch * height;
     
-    return bgfx::createTexture2D(
+    TINA_ENGINE_DEBUG("Creating texture - Size: {}x{}, Format: {}, BPP: {}, Total size: {}", 
+        width, height, (int)format, bpp, size);
+    
+    // 检查数据是否有效
+    if (!data) {
+        TINA_ENGINE_ERROR("Texture data is null");
+        return BGFX_INVALID_HANDLE;
+    }
+    
+    // 创建纹理内存
+    const bgfx::Memory* mem = bgfx::copy(data, size);
+    
+    // 设置纹理标志
+    uint64_t flags = BGFX_SAMPLER_U_CLAMP 
+                   | BGFX_SAMPLER_V_CLAMP
+                   | BGFX_SAMPLER_MIN_POINT
+                   | BGFX_SAMPLER_MAG_POINT;
+    
+    // 创建纹理
+    bgfx::TextureHandle handle = bgfx::createTexture2D(
         width,
         height,
-        false,
-        1,
+        false,  // 不使用mipmap
+        1,      // 层数
         format,
-        BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE,
+        flags,
         mem
     );
+    
+    if (!bgfx::isValid(handle)) {
+        TINA_ENGINE_ERROR("Failed to create texture");
+        return BGFX_INVALID_HANDLE;
+    }
+    
+    TINA_ENGINE_INFO("Texture created successfully - Handle: {}, Format: {}, Flags: {:#x}", 
+        handle.idx, (int)format, flags);
+    return handle;
 }
 
 bgfx::TextureFormat::Enum TextureLoader::getTextureFormat(int channels) {
-    switch (channels) {
-        case 1:
-            return bgfx::TextureFormat::R8;
-        case 2:
-            return bgfx::TextureFormat::RG8;
-        case 3:
-            return bgfx::TextureFormat::RGB8;
-        case 4:
-            return bgfx::TextureFormat::RGBA8;
-        default:
-            TINA_ENGINE_ERROR("Unsupported number of channels: {}", channels);
-            return bgfx::TextureFormat::Unknown;
-    }
+    // 始终返回RGBA8格式
+    return bgfx::TextureFormat::RGBA8;
 }
 
 } // namespace Tina 

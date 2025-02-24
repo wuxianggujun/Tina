@@ -3,53 +3,45 @@
 //
 #pragma once
 
-#include "tina/core/Core.hpp"
-#include "tina/core/Context.hpp"
-#include "tina/window/Window.hpp"
+#include "tina/window/WindowManager.hpp"
+#include "tina/event/EventManager.hpp"
+#include "tina/resource/ResourceManager.hpp"
+#include "tina/core/SceneManager.hpp"
+#include "tina/core/Singleton.hpp"
+#include "tina/core/Timer.hpp"
 
 namespace Tina
 {
-    class Scene;
-}
-
-namespace Tina::Core
-{
-    class TINA_CORE_API Engine
+    class TINA_CORE_API Engine : public Singleton<Engine>
     {
-    public:
-        Engine();
-        virtual ~Engine();
+        friend class Singleton<Engine>;
 
-        bool initialize();
+    public:
+        bool initialize(const Window::WindowConfig& config);
         bool run();
         void shutdown();
-        const char* getVersion() const;
-        Context& getContext();
-        
-        // 场景管理
-        Scene* createScene(const std::string& name);
-        void setActiveScene(Scene* scene);
-        Scene* getActiveScene() const { return m_activeScene.get(); }
 
-        // 获取主窗口句柄
-        [[nodiscard]] WindowHandle getMainWindow() const { return m_mainWindow; }
-
-        // 获取窗口尺寸
-        void getWindowSize(uint32_t& width, uint32_t& height) const;
-
-        static Engine& get() { return *s_Instance; }
-
-        void logMemoryStats();
+        [[nodiscard]] WindowManager* getWindowManager() const { return m_windowManager; }
+        [[nodiscard]] EventManager* getEventManager() const { return m_eventManager; }
+        [[nodiscard]] ResourceManager* getResourceManager() const { return m_resourceManager; }
+        [[nodiscard]] SceneManager* getSceneManager() const { return m_sceneManager; }
+        [[nodiscard]] Window* getMainWindow() const { return m_window; }
 
     private:
-        
-        Context& m_context; // 改为引用
-        WindowHandle m_mainWindow;
-        UniquePtr<Scene> m_activeScene; // 当前活动场景
-        uint32_t m_windowWidth;
-        uint32_t m_windowHeight;
-        bool m_isShutdown; // 添加标志位以防止重复调用 shutdown
-        bool m_isInitialized;
-        static Engine* s_Instance;
+        Engine();
+        ~Engine() override;
+
+        void initializeEventHandlers();
+
+        WindowManager* m_windowManager{nullptr};
+        EventManager* m_eventManager{nullptr};
+        ResourceManager* m_resourceManager{nullptr};
+        SceneManager* m_sceneManager{nullptr};
+
+        WindowHandle m_windowHandle{};
+        Window* m_window{nullptr};
+
+        Timer m_timer;
+        float m_targetFPS{60.0f};
     };
 }

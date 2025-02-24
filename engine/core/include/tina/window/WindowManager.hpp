@@ -71,7 +71,7 @@ namespace Tina {
     public:
         friend class Singleton<WindowManager>;
         WindowManager();
-        ~WindowManager();
+        ~WindowManager() override;
 
         bool initialize();
         void terminate();
