@@ -27,7 +27,7 @@ namespace Tina
     {
         if (!m_scenes.empty())
         {
-            m_scenes.back()->update(deltaTime);
+            m_scenes.back()->onUpdate(deltaTime);
         }
     }
 

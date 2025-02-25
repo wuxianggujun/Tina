@@ -20,13 +20,40 @@ public:
 
         // 添加变换组件
         auto* transform = spriteNode->addComponent<Transform>();
-        transform->setPosition({0.0f, 0.0f, 0.0f});
+        transform->setPosition({400.0f, 300.0f, 0.0f}); // 设置到窗口中心位置
 
         // 添加精灵渲染组件
         auto* renderer = spriteNode->addComponent<SpriteRenderer>();
         auto texture = Engine::getInstance()->getResourceManager()->loadSync<TextureResource>("test.png", "resources/textures/");
         renderer->setTexture(texture);
+        
+        // 保存组件引用以便在事件处理中使用
+        m_spriteRenderer = renderer;
+        m_transform = transform;
     }
+
+    void onUpdate(float deltaTime) override {
+        // 处理键盘输入
+        const float moveSpeed = 200.0f * deltaTime;
+        auto* input = Engine::getInstance()->getInputManager();
+        
+        if (input->isKeyPressed(KeyCode::W)) {
+            m_transform->translate({0.0f, -moveSpeed, 0.0f});
+        }
+        if (input->isKeyPressed(KeyCode::S)) {
+            m_transform->translate({0.0f, moveSpeed, 0.0f});
+        }
+        if (input->isKeyPressed(KeyCode::A)) {
+            m_transform->translate({-moveSpeed, 0.0f, 0.0f});
+        }
+        if (input->isKeyPressed(KeyCode::D)) {
+            m_transform->translate({moveSpeed, 0.0f, 0.0f});
+        }
+    }
+
+private:
+    SpriteRenderer* m_spriteRenderer{nullptr};
+    Transform* m_transform{nullptr};
 };
 
 int main() {

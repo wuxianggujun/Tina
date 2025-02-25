@@ -5,6 +5,9 @@
 #include <bx/math.h>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include "tina/core/Engine.hpp"
+#include "tina/resource/ShaderResource.hpp"
+
 namespace Tina {
 
 struct PosTexcoordVertex {
@@ -33,6 +36,15 @@ SpriteRenderer::SpriteRenderer() {
         PosTexcoordVertex::init();
         layoutInitialized = true;
     }
+
+    // 加载着色器程序
+    ResourceManager* resourceManager = Engine::getInstance()->getResourceManager();
+    auto shader = resourceManager->loadSync<ShaderResource>("sprite", "resources/shaders/");
+    if (!shader || !shader->isLoaded()) {
+        TINA_ENGINE_ERROR("Failed to load sprite shader");
+        return;
+    }
+    m_program = shader->getProgram();
 
     // 创建纹理采样器
     m_textureSampler = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);

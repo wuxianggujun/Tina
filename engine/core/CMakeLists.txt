@@ -10,7 +10,7 @@ file(GLOB_RECURSE CORE_HEADER_FILES
 )
 
 # 编译着色器
-add_shader_compile_dir(${CMAKE_SOURCE_DIR}/engine/resources/shaders "2d")
+add_shader_compile_dir(${CMAKE_SOURCE_DIR}/engine/resources/shaders "2d" "sprite")
 
 # 创建核心库
 add_library(TinaCore ${CORE_SOURCE_FILES} ${CORE_HEADER_FILES})

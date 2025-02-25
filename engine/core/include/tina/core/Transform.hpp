@@ -18,6 +18,7 @@ namespace Tina
         void setPosition(const glm::vec3& position) { m_position = position; }
         void setRotation(const glm::quat& rotation) { m_rotation = rotation; }
         void setScale(const glm::vec3& scale) { m_scale = scale; }
+        void translate(const glm::vec3& offset) { m_position += offset; }
 
         [[nodiscard]] const glm::vec3& getPosition() const { return m_position; }
         [[nodiscard]] const glm::quat& getRotation() const { return m_rotation; }

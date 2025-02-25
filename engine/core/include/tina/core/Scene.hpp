@@ -19,7 +19,7 @@ namespace Tina
 
         virtual void onEnter();
         virtual void onExit();
-        virtual void update(float deltaTime);
+        virtual void onUpdate(float deltaTime);
         virtual void render();
 
         Node* createNode(const std::string& name);

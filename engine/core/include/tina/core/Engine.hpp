@@ -9,6 +9,7 @@
 #include "tina/core/SceneManager.hpp"
 #include "tina/core/Singleton.hpp"
 #include "tina/core/Timer.hpp"
+#include "tina/input/InputManager.hpp"
 
 namespace Tina
 {
@@ -25,6 +26,7 @@ namespace Tina
         [[nodiscard]] EventManager* getEventManager() const { return m_eventManager; }
         [[nodiscard]] ResourceManager* getResourceManager() const { return m_resourceManager; }
         [[nodiscard]] SceneManager* getSceneManager() const { return m_sceneManager; }
+        [[nodiscard]] InputManager* getInputManager() const { return InputManager::getInstance(); }
         [[nodiscard]] Window* getMainWindow() const { return m_window; }
 
     private:

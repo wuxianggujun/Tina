@@ -18,7 +18,7 @@ void Scene::onExit() {
     // 场景退出时的清理逻辑
 }
 
-void Scene::update(float deltaTime) {
+void Scene::onUpdate(float deltaTime) {
     // 更新场景中的所有节点
     for (auto& node : m_nodes) {
         if (node) {
