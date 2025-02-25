@@ -3,7 +3,7 @@
 //
 
 #include "tina/core/SceneManager.hpp"
-#include "tina/core/Scene.hpp"
+
 #include "tina/log/Log.hpp"
 
 namespace Tina

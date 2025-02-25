@@ -13,6 +13,4 @@ target_link_libraries(basic_example
 target_include_directories(basic_example
     PRIVATE
         ${CMAKE_SOURCE_DIR}/engine/core/include
-        ${CMAKE_SOURCE_DIR}/engine/network/include
-        ${CMAKE_SOURCE_DIR}/engine/utils/include
 ) 

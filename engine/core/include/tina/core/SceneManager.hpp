@@ -6,12 +6,12 @@
 
 #include "tina/core/Core.hpp"
 #include "tina/core/Singleton.hpp"
+#include "tina/core/Scene.hpp"
 #include <vector>
 
 namespace Tina
 {
-    class Scene;
-
+    
     class TINA_CORE_API SceneManager : public Singleton<SceneManager>
     {
         friend class Singleton<SceneManager>;

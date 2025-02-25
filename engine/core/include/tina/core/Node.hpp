@@ -6,18 +6,19 @@
 
 #include "tina/core/Core.hpp"
 #include <entt/entity/entity.hpp>
+#include "tina/core/Component.hpp"
 #include <vector>
 #include <string>
 
 namespace Tina
 {
     class Scene;
-    class Component;
-
+    
     class TINA_CORE_API Node
     {
     public:
-        explicit Node(Scene* scene, const std::string& name);
+        explicit Node(const std::string& name) : m_scene(nullptr), m_name(name), m_entity(entt::null) {}
+        explicit Node(Scene* scene, const std::string& name) : m_scene(scene), m_name(name), m_entity(entt::null) {}
         virtual ~Node();
 
         template <typename T, typename... Args>
