@@ -148,6 +148,35 @@ protected:
         TINA_ENGINE_INFO("All resources released");
     }
 
+    /**
+     * @brief 在bgfx关闭前释放所有资源
+     */
+    void releaseResources() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        TINA_ENGINE_INFO("Releasing all resources before bgfx shutdown");
+
+        // 先获取所有资源的列表，避免在遍历时修改map
+        std::vector<std::string> resourceNames;
+        resourceNames.reserve(m_resources.size());
+        for (const auto& [name, _] : m_resources) {
+            resourceNames.push_back(name);
+        }
+
+        // 逐个卸载资源
+        for (const auto& name : resourceNames) {
+            TINA_ENGINE_DEBUG("Unloading resource: {}", name);
+            unloadResource(name);
+        }
+
+        // 清空资源映射
+        m_resources.clear();
+
+        // 清空加载器
+        m_loaders.clear();
+
+        TINA_ENGINE_INFO("All resources released");
+    }
+
 private:
     /**
      * @brief 同步加载资源的内部实现
