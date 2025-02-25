@@ -124,12 +124,21 @@ void SpriteRenderer::onDetach(Node* node)
 }
 
 void SpriteRenderer::createBuffers() {
-    // 创建顶点数据
+    // 获取窗口尺寸
+    auto* window = Engine::getInstance()->getMainWindow();
+    float windowWidth = static_cast<float>(window->getWidth());
+    float windowHeight = static_cast<float>(window->getHeight());
+
+    // 计算居中位置
+    float posX = (windowWidth - m_size.x) * 0.5f;
+    float posY = (windowHeight - m_size.y) * 0.5f;
+
+    // 创建顶点数据（使用屏幕坐标系）
     PosTexcoordVertex vertices[4] = {
-        {0.0f,      0.0f,       0.0f, 0.0f},
-        {m_size.x,  0.0f,       1.0f, 0.0f},
-        {m_size.x,  m_size.y,   1.0f, 1.0f},
-        {0.0f,      m_size.y,   0.0f, 1.0f}
+        {posX,          posY,           0.0f, 0.0f}, // 左上
+        {posX + m_size.x, posY,         1.0f, 0.0f}, // 右上
+        {posX + m_size.x, posY + m_size.y, 1.0f, 1.0f}, // 右下
+        {posX,          posY + m_size.y, 0.0f, 1.0f}  // 左下
     };
 
     // 创建顶点缓冲
@@ -140,8 +149,8 @@ void SpriteRenderer::createBuffers() {
 
     // 创建索引数据
     uint16_t indices[] = {
-        0, 1, 2,
-        2, 3, 0
+        0, 1, 2,  // 第一个三角形
+        2, 3, 0   // 第二个三角形
     };
 
     // 创建索引缓冲
@@ -155,12 +164,21 @@ void SpriteRenderer::updateVertexBuffer() {
         return;
     }
 
-    // 更新顶点位置
+    // 获取窗口尺寸
+    auto* window = Engine::getInstance()->getMainWindow();
+    float windowWidth = static_cast<float>(window->getWidth());
+    float windowHeight = static_cast<float>(window->getHeight());
+
+    // 计算居中位置
+    float posX = (windowWidth - m_size.x) * 0.5f;
+    float posY = (windowHeight - m_size.y) * 0.5f;
+
+    // 更新顶点位置（使用屏幕坐标系）
     PosTexcoordVertex vertices[4] = {
-        {0.0f,      0.0f,       0.0f, 0.0f},
-        {m_size.x,  0.0f,       1.0f, 0.0f},
-        {m_size.x,  m_size.y,   1.0f, 1.0f},
-        {0.0f,      m_size.y,   0.0f, 1.0f}
+        {posX,          posY,           0.0f, 0.0f}, // 左上
+        {posX + m_size.x, posY,         1.0f, 0.0f}, // 右上
+        {posX + m_size.x, posY + m_size.y, 1.0f, 1.0f}, // 右下
+        {posX,          posY + m_size.y, 0.0f, 1.0f}  // 左下
     };
 
     // 更新顶点缓冲

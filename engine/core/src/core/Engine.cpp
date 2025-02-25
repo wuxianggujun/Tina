@@ -3,6 +3,8 @@
 //
 
 #include "tina/core/Engine.hpp"
+
+#include "bx/math.h"
 #include "tina/log/Log.hpp"
 #include "tina/resource/ShaderLoader.hpp"
 #include "tina/resource/TextureLoader.hpp"
@@ -49,6 +51,25 @@ namespace Tina
             TINA_ENGINE_ERROR("Failed to initialize SceneManager");
             return false;
         }
+
+        // 设置视口和清屏颜色
+        bgfx::setViewRect(0, 0, 0, config.width, config.height);
+        bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
+
+        // 设置2D视图矩阵
+        float view[16];
+        bx::mtxIdentity(view); // 使用单位矩阵作为视图矩阵
+        
+        // 设置正交投影矩阵
+        float ortho[16];
+        bx::mtxOrtho(ortho, 
+            0.0f, static_cast<float>(config.width),   // left, right
+            static_cast<float>(config.height), 0.0f,  // bottom, top (翻转Y轴，使Y向下为正)
+            0.0f, 100.0f,                            // near, far
+            0.0f, bgfx::getCaps()->homogeneousDepth);
+            
+        bgfx::setViewTransform(0, view, ortho);
+
         TINA_ENGINE_INFO("Engine initialized successfully with target FPS: {}", m_targetFPS);
         return true;
     }
