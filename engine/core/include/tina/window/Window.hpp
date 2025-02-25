@@ -82,7 +82,6 @@ namespace Tina
         Window& operator=(const Window&) = delete;
 
         // 窗口基本操作
-        void update();
         void close();
         void* getNativeHandle() const;
 

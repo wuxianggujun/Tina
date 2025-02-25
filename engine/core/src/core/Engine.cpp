@@ -70,8 +70,14 @@ namespace Tina
             // 更新场景
             m_sceneManager->update(deltaTime);
 
+            // 触发视图渲染
+            bgfx::touch(0);
+
             // 渲染场景
             m_sceneManager->render();
+
+            // 提交帧到GPU
+            bgfx::frame();
 
             // 计算当前帧耗时并等待
             float frameTime = m_timer.getSeconds() - frameStartTime;

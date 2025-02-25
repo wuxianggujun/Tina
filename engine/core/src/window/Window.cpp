@@ -148,11 +148,7 @@ namespace Tina
             glfwSetWindowMonitor(m_handle, nullptr, x, y, width, height, 0);
         }
     }
-
-    void Window::update()
-    {
-        // 这里可以添加窗口更新逻辑
-    }
+    
 
     void Window::close()
     {
