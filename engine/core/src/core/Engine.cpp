@@ -60,12 +60,16 @@ namespace Tina
         float view[16];
         bx::mtxIdentity(view); // 使用单位矩阵作为视图矩阵
         
-        // 设置正交投影矩阵
+        // 设置正交投影矩阵，使用左上角作为原点，扩大可视区域
         float ortho[16];
+        const float viewWidth = static_cast<float>(config.width);
+        const float viewHeight = static_cast<float>(config.height);
+        // const float maxDimension = std::max(viewWidth, viewHeight) * 2.0f; // 扩大可视区域
+        
         bx::mtxOrtho(ortho, 
-            0.0f, static_cast<float>(config.width),   // left, right
-            static_cast<float>(config.height), 0.0f,  // bottom, top (翻转Y轴，使Y向下为正)
-            0.0f, 100.0f,                            // near, far
+            0.0f, viewWidth,           // left, right
+            viewHeight, 0.0f,           // bottom, top (翻转Y轴，使Y轴向下为正)
+            -1.0f, 1.0f,                  // near, far
             0.0f, bgfx::getCaps()->homogeneousDepth);
             
         bgfx::setViewTransform(0, view, ortho);
@@ -172,6 +176,24 @@ namespace Tina
                 bgfx::setViewRect(0, 0, 0,
                                   static_cast<uint16_t>(event->windowResize.width),
                                   static_cast<uint16_t>(event->windowResize.height));
+                
+                // 更新2D视图矩阵
+                float view[16];
+                bx::mtxIdentity(view); // 使用单位矩阵作为视图矩阵
+                
+                // 更新正交投影矩阵，使用左上角作为原点，扩大可视区域
+                float ortho[16];
+                const float viewWidth = static_cast<float>(event->windowResize.width);
+                const float viewHeight = static_cast<float>(event->windowResize.height);
+                // const float maxDimension = std::max(viewWidth, viewHeight) * 2.0f; // 扩大可视区域
+                
+                bx::mtxOrtho(ortho, 
+                    0.0f, viewWidth,           // left, right
+                    viewHeight, 0.0f,           // bottom, top (翻转Y轴，使Y轴向下为正)
+                    -1.0f, 1.0f,                  // near, far
+                    0.0f, bgfx::getCaps()->homogeneousDepth);
+                    
+                bgfx::setViewTransform(0, view, ortho);
             },
             Event::WindowResize
         );

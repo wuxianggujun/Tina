@@ -20,11 +20,21 @@ public:
 
         // 添加变换组件
         auto* transform = spriteNode->addComponent<Transform>();
-        transform->setPosition({400.0f, 300.0f, 0.0f}); // 设置到窗口中心位置
-
+        // transform->setPosition({400.0f, 300.0f, 0.0f}); // 设置到窗口中心位置
+        // 设置精灵在屏幕左上角
+        transform->setPosition({0.0f, 0.0f, 0.0f});
         // 添加精灵渲染组件
         auto* renderer = spriteNode->addComponent<SpriteRenderer>();
         auto texture = Engine::getInstance()->getResourceManager()->loadSync<TextureResource>("test.png", "resources/textures/");
+        
+        // 输出纹理信息
+        if (texture && texture->isLoaded()) {
+            TINA_ENGINE_INFO("Texture loaded - Width: {}, Height: {}", 
+                texture->getWidth(), texture->getHeight());
+        } else {
+            TINA_ENGINE_ERROR("Failed to load texture!");
+        }
+        
         renderer->setTexture(texture);
         
         // 保存组件引用以便在事件处理中使用

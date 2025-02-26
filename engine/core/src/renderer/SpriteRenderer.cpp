@@ -94,15 +94,28 @@ void SpriteRenderer::render() {
     // 设置纹理
     bgfx::setTexture(0, m_textureSampler, m_texture->getHandle());
 
-    // 设置变换矩阵
+    // 使用纹理的原始尺寸，不考虑窗口大小
+    float finalWidth = m_size.x;
+    float finalHeight = m_size.y;
+
+    // 计算变换矩阵
     float mtx[16];
     bx::mtxIdentity(mtx);
-    bx::mtxTranslate(mtx, m_position.x, m_position.y, 0.0f);
-    if (m_rotation != 0.0f) {
-        float rot[16];
-        bx::mtxRotateZ(rot, m_rotation);
-        bx::mtxMul(mtx, mtx, rot);
-    }
+    
+    // 构建完整的变换矩阵：平移 * (旋转 * 缩放)
+    float translation[16];
+    float rotation[16];
+    float scale[16];
+    
+    // 在左上角坐标系中进行变换
+    bx::mtxTranslate(translation, m_position.x, m_position.y, 0.0f);
+    bx::mtxRotateZ(rotation, bx::toRad(m_rotation));
+    bx::mtxScale(scale, finalWidth, finalHeight, 1.0f);
+    
+    // 组合变换：最终变换 = 平移 * (旋转 * 缩放)
+    float temp[16];
+    bx::mtxMul(temp, rotation, scale);
+    bx::mtxMul(mtx, translation, temp);
 
     // 提交渲染命令
     bgfx::setVertexBuffer(0, m_vbh);
@@ -124,21 +137,13 @@ void SpriteRenderer::onDetach(Node* node)
 }
 
 void SpriteRenderer::createBuffers() {
-    // 获取窗口尺寸
-    auto* window = Engine::getInstance()->getMainWindow();
-    float windowWidth = static_cast<float>(window->getWidth());
-    float windowHeight = static_cast<float>(window->getHeight());
-
-    // 计算居中位置
-    float posX = (windowWidth - m_size.x) * 0.5f;
-    float posY = (windowHeight - m_size.y) * 0.5f;
-
-    // 创建顶点数据（使用屏幕坐标系）
+    // 初始化时使用一个单位大小的四边形，实际大小由变换矩阵控制
+    // 在左上角坐标系中，Y轴向下为正
     PosTexcoordVertex vertices[4] = {
-        {posX,          posY,           0.0f, 0.0f}, // 左上
-        {posX + m_size.x, posY,         1.0f, 0.0f}, // 右上
-        {posX + m_size.x, posY + m_size.y, 1.0f, 1.0f}, // 右下
-        {posX,          posY + m_size.y, 0.0f, 1.0f}  // 左下
+        {0.0f, 0.0f,  0.0f, 0.0f}, // 左上
+        {1.0f, 0.0f,  1.0f, 0.0f}, // 右上
+        {1.0f, 1.0f,  1.0f, 1.0f}, // 右下
+        {0.0f, 1.0f,  0.0f, 1.0f}  // 左下
     };
 
     // 创建顶点缓冲
@@ -147,7 +152,7 @@ void SpriteRenderer::createBuffers() {
         PosTexcoordVertex::ms_layout
     );
 
-    // 创建索引数据
+    // 创建索引数据 - 保持顺时针绕序
     uint16_t indices[] = {
         0, 1, 2,  // 第一个三角形
         2, 3, 0   // 第二个三角形
@@ -164,21 +169,12 @@ void SpriteRenderer::updateVertexBuffer() {
         return;
     }
 
-    // 获取窗口尺寸
-    auto* window = Engine::getInstance()->getMainWindow();
-    float windowWidth = static_cast<float>(window->getWidth());
-    float windowHeight = static_cast<float>(window->getHeight());
-
-    // 计算居中位置
-    float posX = (windowWidth - m_size.x) * 0.5f;
-    float posY = (windowHeight - m_size.y) * 0.5f;
-
-    // 更新顶点位置（使用屏幕坐标系）
+    // 使用单位大小的四边形，实际大小由变换矩阵控制
     PosTexcoordVertex vertices[4] = {
-        {posX,          posY,           0.0f, 0.0f}, // 左上
-        {posX + m_size.x, posY,         1.0f, 0.0f}, // 右上
-        {posX + m_size.x, posY + m_size.y, 1.0f, 1.0f}, // 右下
-        {posX,          posY + m_size.y, 0.0f, 1.0f}  // 左下
+        {0.0f, 0.0f,  0.0f, 0.0f}, // 左上
+        {1.0f, 0.0f,  1.0f, 0.0f}, // 右上
+        {1.0f, 1.0f,  1.0f, 1.0f}, // 右下
+        {0.0f, 1.0f,  0.0f, 1.0f}  // 左下
     };
 
     // 更新顶点缓冲
