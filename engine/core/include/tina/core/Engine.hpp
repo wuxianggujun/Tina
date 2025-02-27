@@ -9,7 +9,7 @@
 #include "tina/core/SceneManager.hpp"
 #include "tina/core/Singleton.hpp"
 #include "tina/core/Timer.hpp"
-#include "tina/input/InputManager.hpp"
+#include "tina/event/InputManager.hpp"
 #include "tina/core/Camera2D.hpp"
 
 namespace Tina

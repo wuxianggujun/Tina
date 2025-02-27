@@ -27,6 +27,9 @@ namespace Tina
         m_resourceManager->registerLoader(MakeUnique<ShaderLoader>());
         m_resourceManager->registerLoader(MakeUnique<TextureLoader>());
 
+        // 初始化输入管理器
+        InputManager::getInstance()->initialize();
+
         // 初始化条件处理
         initializeEventHandlers();
 
@@ -77,6 +80,9 @@ namespace Tina
             // 处理窗口事件
             m_windowManager->processMessage();
 
+            // 更新输入管理器
+            InputManager::getInstance()->update();
+
             // 更新场景（传入deltaTime）
             float deltaTime = m_timer.getSeconds(true); // 获取上一帧的时间间
 
@@ -109,6 +115,9 @@ namespace Tina
 
     void Engine::shutdown()
     {
+        // 关闭输入管理器
+        InputManager::getInstance()->shutdown();
+
         if (m_sceneManager)
         {
             m_sceneManager->shutdown();

@@ -25,8 +25,8 @@ TextureResource::~TextureResource() {
 bool TextureResource::isLoaded() const {
     bool baseLoaded = Resource::isLoaded();
     bool handleValid = bgfx::isValid(m_handle);
-    TINA_ENGINE_DEBUG("TextureResource::isLoaded check for: {}, base: {}, handle: {}, refCount: {}", 
-        m_name, baseLoaded, handleValid, getRefCount());
+    // TINA_ENGINE_DEBUG("TextureResource::isLoaded check for: {}, base: {}, handle: {}, refCount: {}", 
+    //     m_name, baseLoaded, handleValid, getRefCount());
     return baseLoaded && handleValid;
 }
 
