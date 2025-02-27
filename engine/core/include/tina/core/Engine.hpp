@@ -10,6 +10,7 @@
 #include "tina/core/Singleton.hpp"
 #include "tina/core/Timer.hpp"
 #include "tina/input/InputManager.hpp"
+#include "tina/core/Camera2D.hpp"
 
 namespace Tina
 {
@@ -28,6 +29,7 @@ namespace Tina
         [[nodiscard]] SceneManager* getSceneManager() const { return m_sceneManager; }
         [[nodiscard]] InputManager* getInputManager() const { return InputManager::getInstance(); }
         [[nodiscard]] Window* getMainWindow() const { return m_window; }
+        [[nodiscard]] Camera2D* getMainCamera() const { return m_mainCamera.get(); }
 
     private:
         Engine();
@@ -42,6 +44,8 @@ namespace Tina
 
         WindowHandle m_windowHandle{};
         Window* m_window{nullptr};
+
+        UniquePtr<Camera2D> m_mainCamera{nullptr};
 
         Timer m_timer;
         float m_targetFPS{60.0f};

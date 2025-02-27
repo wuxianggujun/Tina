@@ -196,6 +196,16 @@ public:
     constexpr operator glm::vec<2, U, glm::defaultp>() const {
         return glm::vec<2, U, glm::defaultp>(static_cast<U>(x), static_cast<U>(y));
     }
+    
+    // 添加相等运算符
+    constexpr bool operator==(const Vec<T, 2>& rhs) const {
+        return x == rhs.x && y == rhs.y;
+    }
+    
+    // 添加不等运算符
+    constexpr bool operator!=(const Vec<T, 2>& rhs) const {
+        return !(*this == rhs);
+    }
 };
 
 // Specialized constructors for Vec3
@@ -226,6 +236,16 @@ public:
             x * rhs.y - y * rhs.x
         );
     }
+    
+    // 添加相等运算符
+    constexpr bool operator==(const Vec<T, 3>& rhs) const {
+        return x == rhs.x && y == rhs.y && z == rhs.z;
+    }
+    
+    // 添加不等运算符
+    constexpr bool operator!=(const Vec<T, 3>& rhs) const {
+        return !(*this == rhs);
+    }
 };
 
 // Specialized constructors for Vec4
@@ -247,6 +267,16 @@ public:
     template<typename U = T>
     constexpr operator glm::vec<4, U, glm::defaultp>() const {
         return glm::vec<4, U, glm::defaultp>(static_cast<U>(x), static_cast<U>(y), static_cast<U>(z), static_cast<U>(w));
+    }
+    
+    // 添加相等运算符
+    constexpr bool operator==(const Vec<T, 4>& rhs) const {
+        return x == rhs.x && y == rhs.y && z == rhs.z && w == rhs.w;
+    }
+    
+    // 添加不等运算符
+    constexpr bool operator!=(const Vec<T, 4>& rhs) const {
+        return !(*this == rhs);
     }
 };
 

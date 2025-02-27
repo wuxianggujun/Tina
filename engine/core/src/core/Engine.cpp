@@ -52,27 +52,15 @@ namespace Tina
             return false;
         }
 
+        // 创建主相机
+        m_mainCamera = MakeUnique<Camera2D>(static_cast<float>(config.width), static_cast<float>(config.height));
+
         // 设置视口和清屏颜色
         bgfx::setViewRect(0, 0, 0, config.width, config.height);
         bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
 
-        // 设置2D视图矩阵
-        float view[16];
-        bx::mtxIdentity(view); // 使用单位矩阵作为视图矩阵
-        
-        // 设置正交投影矩阵，使用左上角作为原点，扩大可视区域
-        float ortho[16];
-        const float viewWidth = static_cast<float>(config.width);
-        const float viewHeight = static_cast<float>(config.height);
-        // const float maxDimension = std::max(viewWidth, viewHeight) * 2.0f; // 扩大可视区域
-        
-        bx::mtxOrtho(ortho, 
-            0.0f, viewWidth,           // left, right
-            viewHeight, 0.0f,           // bottom, top (翻转Y轴，使Y轴向下为正)
-            -1.0f, 1.0f,                  // near, far
-            0.0f, bgfx::getCaps()->homogeneousDepth);
-            
-        bgfx::setViewTransform(0, view, ortho);
+        // 设置相机视图和投影矩阵
+        bgfx::setViewTransform(0, m_mainCamera->getViewMatrix(), m_mainCamera->getProjectionMatrix());
 
         TINA_ENGINE_INFO("Engine initialized successfully with target FPS: {}", m_targetFPS);
         return true;
@@ -91,6 +79,10 @@ namespace Tina
 
             // 更新场景（传入deltaTime）
             float deltaTime = m_timer.getSeconds(true); // 获取上一帧的时间间
+
+            // 确保相机矩阵是最新的
+            m_mainCamera->updateMatrices();
+            bgfx::setViewTransform(0, m_mainCamera->getViewMatrix(), m_mainCamera->getProjectionMatrix());
 
             // 更新场景
             m_sceneManager->update(deltaTime);
@@ -135,6 +127,9 @@ namespace Tina
             }
         }
 
+        // 释放相机资源
+        m_mainCamera = nullptr;
+
         // 关闭日志系统
         Log::shutdown();
     }
@@ -167,33 +162,27 @@ namespace Tina
 
         // 注册窗口调整大小事件
         m_eventManager->addListener(
-            [](const EventPtr& event)
+            [this](const EventPtr& event)
             {
                 TINA_ENGINE_INFO("Window resized: {}x{}",
                                  event->windowResize.width,
                                  event->windowResize.height);
+                
                 bgfx::reset(event->windowResize.width, event->windowResize.height, BGFX_RESET_VSYNC);
                 bgfx::setViewRect(0, 0, 0,
                                   static_cast<uint16_t>(event->windowResize.width),
                                   static_cast<uint16_t>(event->windowResize.height));
                 
-                // 更新2D视图矩阵
-                float view[16];
-                bx::mtxIdentity(view); // 使用单位矩阵作为视图矩阵
-                
-                // 更新正交投影矩阵，使用左上角作为原点，扩大可视区域
-                float ortho[16];
-                const float viewWidth = static_cast<float>(event->windowResize.width);
-                const float viewHeight = static_cast<float>(event->windowResize.height);
-                // const float maxDimension = std::max(viewWidth, viewHeight) * 2.0f; // 扩大可视区域
-                
-                bx::mtxOrtho(ortho, 
-                    0.0f, viewWidth,           // left, right
-                    viewHeight, 0.0f,           // bottom, top (翻转Y轴，使Y轴向下为正)
-                    -1.0f, 1.0f,                  // near, far
-                    0.0f, bgfx::getCaps()->homogeneousDepth);
-                    
-                bgfx::setViewTransform(0, view, ortho);
+                // 更新相机视口大小
+                if (m_mainCamera)
+                {
+                    m_mainCamera->setViewport(
+                        static_cast<float>(event->windowResize.width),
+                        static_cast<float>(event->windowResize.height)
+                    );
+                    m_mainCamera->updateMatrices();
+                    bgfx::setViewTransform(0, m_mainCamera->getViewMatrix(), m_mainCamera->getProjectionMatrix());
+                }
             },
             Event::WindowResize
         );

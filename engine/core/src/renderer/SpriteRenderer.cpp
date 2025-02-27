@@ -7,6 +7,7 @@
 
 #include "tina/core/Engine.hpp"
 #include "tina/resource/ShaderResource.hpp"
+#include "tina/resource/ResourceManager.hpp"
 
 namespace Tina {
 
@@ -94,13 +95,13 @@ void SpriteRenderer::render() {
     // 设置纹理
     bgfx::setTexture(0, m_textureSampler, m_texture->getHandle());
 
-    // 使用纹理的原始尺寸，不考虑窗口大小
+    // 使用纹理的原始尺寸
     float finalWidth = m_size.x;
     float finalHeight = m_size.y;
 
-    // 计算变换矩阵
-    float mtx[16];
-    bx::mtxIdentity(mtx);
+    // 计算模型变换矩阵
+    float modelMatrix[16];
+    bx::mtxIdentity(modelMatrix);
     
     // 构建完整的变换矩阵：平移 * (旋转 * 缩放)
     float translation[16];
@@ -115,12 +116,24 @@ void SpriteRenderer::render() {
     // 组合变换：最终变换 = 平移 * (旋转 * 缩放)
     float temp[16];
     bx::mtxMul(temp, rotation, scale);
-    bx::mtxMul(mtx, translation, temp);
+    bx::mtxMul(modelMatrix, translation, temp);
+
+    // 获取相机
+    Camera2D* camera = m_camera;
+    if (!camera) {
+        // 如果没有设置相机，则使用Engine的主相机
+        camera = Engine::getInstance()->getMainCamera();
+    }
+
+    // 如果有相机，确保其矩阵是最新的
+    if (camera) {
+        camera->updateMatrices();
+    }
 
     // 提交渲染命令
     bgfx::setVertexBuffer(0, m_vbh);
     bgfx::setIndexBuffer(m_ibh);
-    bgfx::setTransform(mtx);
+    bgfx::setTransform(modelMatrix);
     bgfx::submit(0, m_program);
 }
 

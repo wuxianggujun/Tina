@@ -45,7 +45,7 @@ public:
     void onUpdate(float deltaTime) override {
         // 处理键盘输入
         const float moveSpeed = 200.0f * deltaTime;
-        auto* input = Engine::getInstance()->getInputManager();
+        auto* input = Engine::getInstance()->getInsadsputManager();
         
         if (input->isKeyPressed(KeyCode::W)) {
             m_transform->translate({0.0f, -moveSpeed, 0.0f});

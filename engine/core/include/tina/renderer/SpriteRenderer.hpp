@@ -2,6 +2,7 @@
 
 #include "tina/core/Component.hpp"
 #include "tina/resource/TextureResource.hpp"
+#include "tina/core/Camera2D.hpp"
 #include <bgfx/bgfx.h>
 #include <glm/glm.hpp>
 #include <memory>
@@ -33,6 +34,10 @@ public:
     void onAttach(Node* node) override;
     void onDetach(Node* node) override;
     void render() override;
+    
+    // 设置相机引用，如果不设置则使用Engine的主相机
+    void setCamera(Camera2D* camera) { m_camera = camera; }
+    Camera2D* getCamera() const { return m_camera; }
 
 private:
     void createBuffers();
@@ -43,6 +48,8 @@ private:
     glm::vec2 m_size{100.0f, 100.0f};
     float m_rotation{0.0f};
     glm::vec4 m_color{1.0f, 1.0f, 1.0f, 1.0f};
+    
+    Camera2D* m_camera{nullptr}; // 渲染使用的相机，如果为空则使用Engine的主相机
 
     bgfx::DynamicVertexBufferHandle m_vbh{BGFX_INVALID_HANDLE};
     bgfx::IndexBufferHandle m_ibh{BGFX_INVALID_HANDLE};
