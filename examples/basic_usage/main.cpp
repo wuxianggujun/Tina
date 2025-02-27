@@ -18,13 +18,38 @@ public:
         // 创建精灵节点
         auto* spriteNode = createNode("Sprite");
 
+        // 确认节点创建成功
+        if (!spriteNode) {
+            TINA_ENGINE_ERROR("创建节点失败!");
+            return;
+        }
+
+        // 记录调试信息
+        TINA_ENGINE_INFO("创建节点: {}", spriteNode->getName());
+        
         // 添加变换组件
         auto* transform = spriteNode->addComponent<Transform>();
-        // transform->setPosition({400.0f, 300.0f, 0.0f}); // 设置到窗口中心位置
+        if (!transform) {
+            TINA_ENGINE_ERROR("添加Transform组件失败!");
+            return;
+        }
+        TINA_ENGINE_INFO("添加Transform组件成功!");
         // 设置精灵在屏幕左上角
         transform->setPosition({0.0f, 0.0f, 0.0f});
         // 添加精灵渲染组件
+        // 添加精灵渲染组件
         auto* renderer = spriteNode->addComponent<SpriteRenderer>();
+        if (!renderer) {
+            TINA_ENGINE_ERROR("添加SpriteRenderer组件失败!");
+            return;
+        }
+        TINA_ENGINE_INFO("添加SpriteRenderer组件成功!");
+    
+        // 确保精灵渲染器能够找到Transform组件
+        if (!spriteNode->getComponent<Transform>()) {
+            TINA_ENGINE_ERROR("无法获取Transform组件!");
+        }
+        
         auto texture = Engine::getInstance()->getResourceManager()->loadSync<TextureResource>("test.png", "resources/textures/");
         
         // 输出纹理信息

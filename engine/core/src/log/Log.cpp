@@ -9,13 +9,24 @@
 #include <spdlog/sinks/ostream_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
-namespace Tina {
+#ifdef TINA_PLATFORM_WINDOWS
+#include <windows.h>
+#endif
+
+
+namespace Tina
+{
     SharedPtr<spdlog::logger> Log::m_engineLogger;
     SharedPtr<spdlog::logger> Log::m_applicationLogger;
     std::ostringstream Log::m_spdOutput;
-    
+
     void Log::init(const std::string& logFileName)
     {
+        // 在Windows平台上设置控制台UTF-8支持
+#ifdef _WIN32
+        // 设置控制台代码页为UTF-8
+        SetConsoleOutputCP(CP_UTF8);
+#endif
         try
         {
             auto consoleSink = MakeShared<spdlog::sinks::stdout_color_sink_mt>();
@@ -27,17 +38,18 @@ namespace Tina {
             auto spdOutputSink = MakeShared<spdlog::sinks::ostream_sink_mt>(m_spdOutput);
             spdOutputSink->set_formatter(std::make_unique<CustomFormatter>());
 
-            std::vector<spdlog::sink_ptr> sinks = { consoleSink, fileSink, spdOutputSink };
+            std::vector<spdlog::sink_ptr> sinks = {consoleSink, fileSink, spdOutputSink};
 
             m_engineLogger = MakeShared<spdlog::logger>("ENGINE", sinks.begin(), sinks.end());
             m_applicationLogger = MakeShared<spdlog::logger>("TINA", sinks.begin(), sinks.end());
-            
+
             setupLogger(m_engineLogger, sinks);
             setupLogger(m_applicationLogger, sinks);
 
             TINA_ENGINE_INFO("Log system initialized!");
         }
-        catch (const spdlog::spdlog_ex& ex) {
+        catch (const spdlog::spdlog_ex& ex)
+        {
             std::cerr << "Log initialization failed: " << ex.what() << std::endl;
         }
     }

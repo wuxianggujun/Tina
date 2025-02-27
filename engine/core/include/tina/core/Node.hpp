@@ -10,6 +10,8 @@
 #include <vector>
 #include <string>
 
+#include "tina/log/Log.hpp"
+
 namespace Tina
 {
     class Scene;
@@ -24,9 +26,20 @@ namespace Tina
         template <typename T, typename... Args>
         T* addComponent(Args&&... args)
         {
-            T* component = new T(std::forward<Args>(args)...);
-            m_components.push_back(UniquePtr<Component>(component));
-            return component;
+            // 创建组件
+            auto component = MakeUnique<T>(std::forward<Args>(args)...);
+            T* componentPtr = component.get();
+    
+            // 关联组件与节点
+            componentPtr->onAttach(this);  // 确保调用onAttach
+    
+            // 添加到组件列表
+            m_components.push_back(std::move(component));
+            m_componentsByType[typeid(T).hash_code()] = componentPtr;
+    
+            TINA_ENGINE_INFO("组件添加成功: {}", typeid(T).name());
+
+            return componentPtr;
         }
 
         template <typename T>
@@ -54,5 +67,7 @@ namespace Tina
         std::string m_name;
         entt::entity m_entity;
         std::vector<UniquePtr<Component>> m_components;
+        // 添加这个新成员变量，用于按类型快速查找组件
+        std::unordered_map<size_t, Component*> m_componentsByType;
     };
 } // Tina
