@@ -4,7 +4,8 @@
 
 #pragma once
 
-#include "core.hpp"
+#include "../core/core.hpp"
+#include "glm/fwd.hpp"
 
 #ifdef __linux__
 #include <pthread.h>
@@ -145,14 +146,25 @@ namespace Tina
             bool is_hidden = false;
         };
 
+        struct WindowState
+        {
+            u64 style;
+            Rect rect;
+        };
+
+        
         TINA_CORE_API WindowHandle createWindow(const InitWindowArgs& args);
         TINA_CORE_API void showWindow(WindowHandle wnd);
         TINA_CORE_API void hideWindow(WindowHandle wnd);
         TINA_CORE_API bool getEvent(Event& event);
         TINA_CORE_API void destroyWindow(WindowHandle wnd);
+        TINA_CORE_API Rect getWindowScreenRect(WindowHandle win);
+        TINA_CORE_API Point getWindowClientSize(WindowHandle win);
+        TINA_CORE_API void setWindowTitle(WindowHandle win,const Rect& rect);
+        TINA_CORE_API void maximizeWindow(WindowHandle win);
+        TINA_CORE_API void minimizeWindow(WindowHandle wind);
 
-        
-
+        TINA_CORE_API WindowState setFullScreen(WindowHandle win);
         
 
         enum class Keycode : u8

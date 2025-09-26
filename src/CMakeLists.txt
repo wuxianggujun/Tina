@@ -1,4 +1,4 @@
-set(SRC_FILES core/core.hpp core/os.hpp main.cpp)
+set(SRC_FILES core/core.hpp core/os.hpp core/os.cpp main.cpp)
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})
 
