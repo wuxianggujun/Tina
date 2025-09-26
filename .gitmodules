@@ -43,3 +43,12 @@
 [submodule "thirdparty/xxHash"]
 	path = thirdparty/xxHash
 	url = https://github.com/Cyan4973/xxHash.git
+[submodule "thirdparty/utfcpp"]
+	path = thirdparty/utfcpp
+	url = https://github.com/nemtrif/utfcpp.git
+[submodule "thirdparty/EASTL"]
+	path = thirdparty/EASTL
+	url = https://github.com/electronicarts/EASTL.git
+[submodule "thirdparty/EABase"]
+	path = thirdparty/EABase
+	url = https://github.com/electronicarts/EABase.git

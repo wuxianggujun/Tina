@@ -46,3 +46,19 @@ add_subdirectory(lz4/build/cmake)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(XXHASH_BUILD_XXHSUM OFF CACHE BOOL "" FORCE)
 add_subdirectory(xxHash/build/cmake)
+
+# utfcpp (UTF-8 library)
+set(UTF8_TESTS OFF CACHE BOOL "" FORCE)
+set(UTF8_INSTALL OFF CACHE BOOL "" FORCE)
+set(UTF8_SAMPLES OFF CACHE BOOL "" FORCE)
+add_subdirectory(utfcpp)
+
+# EASTL (Electronic Arts STL) and its dependency EABase
+# Don't add EABase manually, let EASTL handle it through FetchContent
+# but point it to our local directory
+
+# Prevent EASTL from downloading EABase by pointing to local directory
+set(FETCHCONTENT_SOURCE_DIR_EABASE "${CMAKE_CURRENT_SOURCE_DIR}/EABase" CACHE PATH "" FORCE)
+set(EASTL_BUILD_BENCHMARK OFF CACHE BOOL "" FORCE)
+set(EASTL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(EASTL)

@@ -1,4 +1,4 @@
-set(SRC_FILES core/core.hpp core/os.hpp core/os.cpp main.cpp)
+set(SRC_FILES core/core.hpp os/os.hpp os/win/os.cpp os/win/WindowApp.hpp os/win/WindowApp.cpp main.cpp)
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})
 
@@ -14,4 +14,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     box2d
     lz4_static
     xxhash
+    utf8cpp
+    EASTL
 )

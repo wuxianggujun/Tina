@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "../core/core.hpp"
+#include "../core/Core.hpp"
 #include "glm/fwd.hpp"
 
 #ifdef __linux__
