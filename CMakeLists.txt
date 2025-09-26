@@ -121,18 +121,19 @@ foreach (FILE ${RESOURCE_FILES})
     endif ()
 endforeach ()
 
-add_subdirectory(dependencies)
-add_subdirectory(engine)
-add_subdirectory(runtime)
+add_subdirectory(thirdparty)
+add_subdirectory(src)
 
 # Examples
-if (TINA_BUILD_EXAMPLES)
+#[[if (TINA_BUILD_EXAMPLES)
     add_subdirectory(samples)
-endif ()
+endif ()]]
 
+#[[
 # Tests
 if (TINA_BUILD_TESTING)
     enable_testing()
     add_subdirectory(tests)
 endif ()
+]]
 

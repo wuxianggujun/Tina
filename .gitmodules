@@ -37,3 +37,9 @@
 [submodule "thirdparty/physx"]
 	path = thirdparty/physx
 	url = https://github.com/NVIDIAGameWorks/PhysX.git
+[submodule "thirdparty/lz4"]
+	path = thirdparty/lz4
+	url = https://github.com/lz4/lz4.git
+[submodule "thirdparty/xxHash"]
+	path = thirdparty/xxHash
+	url = https://github.com/Cyan4973/xxHash.git
