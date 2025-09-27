@@ -1,6 +1,8 @@
 // 简化异步文件系统实现：后台线程读取，主线程分发回调
 
 #include "Resource.hpp"
+#include "../core/Log.hpp"
+#include <filesystem>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -86,4 +88,3 @@ std::unique_ptr<FileSystem> CreateFileSystem() {
 }
 
 } // namespace Tina::Engine
-

@@ -11,6 +11,7 @@
 #include "../core/Core.hpp"
 #include "../core/Log.hpp"
 #include "../core/Hash.hpp"
+#include "../core/Path.hpp"
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -20,16 +21,7 @@
 
 namespace Tina::Engine {
 
-// 轻量 Path 封装（便于后续替换为更完整实现）
-struct Path {
-    std::string str;
-    Path() = default;
-    explicit Path(const char* s) : str(s ? s : "") {}
-    explicit Path(std::string s) : str(std::move(s)) {}
-    bool isEmpty() const { return str.empty(); }
-    const char* c_str() const { return str.c_str(); }
-    std::size_t hash() const { return (std::size_t)Tina::Core::Hash::String64(str); }
-};
+using Path = Tina::Core::Path;
 
 // 资源类型（小写字符串哈希），用于路由到对应管理器
 struct ResourceType {
