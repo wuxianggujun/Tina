@@ -102,11 +102,12 @@ public:
 
     Resource* load(const Path& path) {
         if (path.isEmpty()) return nullptr;
-        auto it = m_resources.find(path.str);
+        std::string key(path.c_str());
+        auto it = m_resources.find(key);
         if (it != m_resources.end()) { it->second->incRefCount(); return it->second.get(); }
         std::unique_ptr<Resource> res(createResource(path));
         Resource* out = res.get();
-        m_resources.emplace(path.str, std::move(res));
+        m_resources.emplace(std::move(key), std::move(res));
         out->incRefCount();
         out->requestLoad(m_fs);
         return out;

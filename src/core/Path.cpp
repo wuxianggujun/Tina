@@ -7,7 +7,7 @@ static inline bool is_slash(char c) { return c == '/' || c == '\\'; }
 
 Path::Path() : m_path{} { recalc(); }
 
-Path::Path(StringView path) {
+Path::Path(string_view path) {
     m_length = u32(normalize(path, m_path, MAX_PATH) - m_path);
     recalc();
 }
@@ -37,7 +37,7 @@ char* Path::normalize(char* path) {
     return dst;
 }
 
-char* Path::normalize(StringView in_path, char* out, u32 out_capacity) {
+char* Path::normalize(string_view in_path, char* out, u32 out_capacity) {
     if (!out || out_capacity == 0) return out;
     char* dst = out;
     const char* src = in_path.data();
@@ -68,7 +68,7 @@ void Path::endUpdate() {
     recalc();
 }
 
-void Path::operator=(StringView rhs) {
+void Path::operator=(string_view rhs) {
     m_length = u32(normalize(rhs, m_path, MAX_PATH) - m_path);
     recalc();
 }
@@ -78,14 +78,13 @@ bool Path::operator!=(const char* rhs) const { return !(*this == rhs); }
 bool Path::operator==(const Path& rhs) const { return m_hash == rhs.m_hash; }
 bool Path::operator!=(const Path& rhs) const { return !(*this == rhs); }
 
-void Path::append(StringView s) {
+void Path::append(string_view s) {
     const size_t cur = m_length;
     const size_t cap = MAX_PATH;
-    if (!s.begin) return;
     size_t n = s.size(); if (n == 0) return;
     size_t to_copy = (cur + n + 1 <= cap) ? n : (cap - cur - 1);
     if (to_copy > 0) {
-        std::memcpy(m_path + cur, s.begin, to_copy);
+        std::memcpy(m_path + cur, s.data(), to_copy);
         m_length = u32(cur + to_copy);
         m_path[m_length] = '\0';
         endUpdate();
@@ -109,16 +108,16 @@ void Path::append(u64 v) {
 }
 
 // 工具：目录、基名、扩展名
-StringView Path::getDir(StringView src) {
+string_view Path::getDir(string_view src) {
     if (src.empty()) return src;
     const char* begin = src.data();
     const char* end = begin + src.size();
     if (end > begin) --end;
     while (end > begin && !is_slash(*(end - 1))) --end;
-    return StringView(begin, (size_t)(end - begin));
+    return string_view(begin, (size_t)(end - begin));
 }
 
-StringView Path::getBasename(StringView src) {
+string_view Path::getBasename(string_view src) {
     if (src.empty()) return src;
     const char* begin = src.data();
     const char* end = begin + src.size();
@@ -127,22 +126,22 @@ StringView Path::getBasename(StringView src) {
     while (b != begin && !is_slash(*b)) --b;
     if (is_slash(*b)) ++b;
     const char* e = b; while (e != end && *e != '.') ++e;
-    return StringView(b, (size_t)(e - b));
+    return string_view(b, (size_t)(e - b));
 }
 
-StringView Path::getExtension(StringView src) {
-    if (src.empty()) return StringView();
+string_view Path::getExtension(string_view src) {
+    if (src.empty()) return string_view();
     const char* begin = src.data();
     const char* end = begin + src.size();
     const char* b = end - 1;
     while (b != begin && *b != '.') --b;
-    if (*b != '.') return StringView();
-    return StringView(b + 1, (size_t)(end - (b + 1)));
+    if (*b != '.') return string_view();
+    return string_view(b + 1, (size_t)(end - (b + 1)));
 }
 
-bool Path::hasExtension(StringView filename, StringView ext) {
-    StringView e = getExtension(filename);
-    if (!e.begin || !ext.begin) return false;
+bool Path::hasExtension(string_view filename, string_view ext) {
+    string_view e = getExtension(filename);
+    if (e.size() == 0 || ext.size() == 0) return false;
     if (e.size() != ext.size()) return false;
     for (size_t i = 0; i < e.size(); ++i) {
         char a = (char)std::tolower((unsigned char)e[i]);
@@ -161,9 +160,9 @@ bool Path::replaceExtension(char* path, const char* ext) {
     if (*ext) return false; *end = '\0'; return true;
 }
 
-bool Path::isSame(StringView a, StringView b) {
-    if (a.size() > 0 && is_slash(a.back())) a.removeSuffix(1);
-    if (b.size() > 0 && is_slash(b.back())) b.removeSuffix(1);
+bool Path::isSame(string_view a, string_view b) {
+    if (a.size() > 0 && is_slash(a.back())) a.remove_suffix(1);
+    if (b.size() > 0 && is_slash(b.back())) b.remove_suffix(1);
     if (a.size() == 0 && b.size() == 1 && b[0] == '.') return true;
     if (b.size() == 0 && a.size() == 1 && a[0] == '.') return true;
     if (a.size() != b.size()) return false;
@@ -172,27 +171,27 @@ bool Path::isSame(StringView a, StringView b) {
 }
 
 // PathInfo
-PathInfo::PathInfo(StringView path) {
+PathInfo::PathInfo(string_view path) {
     extension = Path::getExtension(path);
     basename = Path::getBasename(path);
     dir = Path::getDir(path);
 }
 
 // ResourcePath：解析 "sub:resource"
-StringView ResourcePath::getResource(StringView str) {
+string_view ResourcePath::getResource(string_view str) {
     const char* b = str.data();
     const char* e = b + str.size();
     const char* c = b;
-    while (c != e) { if (*c == ':') return StringView(c + 1, (size_t)(e - (c + 1))); ++c; }
+    while (c != e) { if (*c == ':') return string_view(c + 1, (size_t)(e - (c + 1))); ++c; }
     return str;
 }
 
-StringView ResourcePath::getSubresource(StringView str) {
+string_view ResourcePath::getSubresource(string_view str) {
     const char* b = str.data();
     const char* e = b + str.size();
     const char* c = b;
     while (c != e && *c != ':') ++c;
-    return StringView(b, (size_t)(c - b));
+    return string_view(b, (size_t)(c - b));
 }
 
 } // namespace Tina::Core

@@ -16,9 +16,6 @@
 
 namespace Tina::Core {
 
-// 统一使用 EASTL string_view，避免自定义
-using StringView = string_view;
-
 // 文件路径哈希包装
 struct FilePathHash {
     u64 value = 0;
@@ -31,29 +28,29 @@ struct FilePathHash {
 };
 
 struct PathInfo {
-    explicit PathInfo(StringView path);
-    StringView extension;
-    StringView basename;
-    StringView dir;
+    explicit PathInfo(string_view path);
+    string_view extension;
+    string_view basename;
+    string_view dir;
 };
 
 struct Path {
     // 规范化：返回写入结束位置指针
-    static char* normalize(StringView in_path, char* out, u32 out_capacity);
+    static char* normalize(string_view in_path, char* out, u32 out_capacity);
     static char* normalize(char* in_out_path);
 
-    static StringView getDir(StringView src);
-    static StringView getBasename(StringView src);
-    static StringView getExtension(StringView src);
-    static bool hasExtension(StringView filename, StringView ext);
+    static string_view getDir(string_view src);
+    static string_view getBasename(string_view src);
+    static string_view getExtension(string_view src);
+    static bool hasExtension(string_view filename, string_view ext);
     static bool replaceExtension(char* path, const char* ext);
-    static bool isSame(StringView a, StringView b);
+    static bool isSame(string_view a, string_view b);
 
     Path();
-    explicit Path(StringView path);
+    explicit Path(string_view path);
 
     // 赋值
-    void operator=(StringView rhs);
+    void operator=(string_view rhs);
     bool operator==(const char* rhs) const;
     bool operator!=(const char* rhs) const;
     bool operator==(const Path& rhs) const;
@@ -64,11 +61,11 @@ struct Path {
     const char* c_str() const { return m_path; }
     bool isEmpty() const { return m_path[0] == '\0'; }
     static u32 capacity() { return MAX_PATH; }
-    operator StringView() const { return StringView(m_path, m_length); }
+    operator string_view() const { return string_view(m_path, m_length); }
 
     // 片段追加（字符串 / u64）
-    void append(StringView s);
-    void append(const char* s) { append(StringView(s)); }
+    void append(string_view s);
+    void append(const char* s) { append(string_view(s)); }
     void append(u64 v);
 
     // 手动编辑
@@ -84,8 +81,8 @@ private:
 };
 
 struct ResourcePath {
-    static StringView getSubresource(StringView str);
-    static StringView getResource(StringView str);
+    static string_view getSubresource(string_view str);
+    static string_view getResource(string_view str);
 };
 
 } // namespace Tina::Core
