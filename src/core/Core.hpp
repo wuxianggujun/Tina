@@ -4,10 +4,6 @@
 
 #pragma once
 
-#include <glm/vec2.hpp>
-#include <glm/vec3.hpp>
-#include <glm/vec4.hpp>
-
 #ifndef _WIN32
 #include <signal.h>
 #endif
@@ -117,54 +113,9 @@ namespace Tina
         else flags = E(u64(flags) & ~u64(flag));
     }
 
-    // Math types using GLM
-    using Vec2 = glm::vec2;
-    using Vec3 = glm::vec3; 
-    using Vec4 = glm::vec4;
-    using IVec2 = glm::ivec2;
-    using IVec3 = glm::ivec3;
-    using IVec4 = glm::ivec4;
-    
-    // Convenience aliases
-    using Point = IVec2;      // 2D point with integer coordinates
-    using Size = IVec2;       // 2D size with integer dimensions
-    using Position = Vec2;    // 2D position with float coordinates
-    
-    // Rectangle structure using GLM vectors
-    struct Rect
-    {
-        Point position;       // Top-left corner
-        Size size;           // Width and height
-        
-        Rect() = default;
-        Rect(i32 x, i32 y, i32 w, i32 h) : position(x, y), size(w, h) {}
-        Rect(const Point& pos, const Size& sz) : position(pos), size(sz) {}
-        
-        i32 x() const { return position.x; }
-        i32 y() const { return position.y; }
-        i32 width() const { return size.x; }
-        i32 height() const { return size.y; }
-        
-        i32 right() const { return position.x + size.x; }
-        i32 bottom() const { return position.y + size.y; }
-        
-        Point topLeft() const { return position; }
-        Point topRight() const { return Point(right(), y()); }
-        Point bottomLeft() const { return Point(x(), bottom()); }
-        Point bottomRight() const { return Point(right(), bottom()); }
-        
-        bool contains(const Point& point) const
-        {
-            return point.x >= x() && point.x < right() && 
-                   point.y >= y() && point.y < bottom();
-        }
-        
-        bool intersects(const Rect& other) const
-        {
-            return !(right() <= other.x() || x() >= other.right() ||
-                    bottom() <= other.y() || y() >= other.bottom());
-        }
-    };
+    // Math types are now defined in Math.hpp
+    // For backward compatibility, include Math.hpp if needed
+    // #include "Math.hpp"
 
 
 #ifdef _WIN32
