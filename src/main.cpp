@@ -116,6 +116,8 @@ int main(int /*argc*/, char* /*argv*/[])
     time_cfg.frame_cap_hz = 0; // 0 关闭限帧，依赖 VSync；可改为 60 等数值
     Tina::Core::FrameTimer frame_timer; frame_timer.reset();
     Tina::Core::FixedStepTicker ticker(time_cfg);
+    const bool vsync_on = (init.resolution.reset & BGFX_RESET_VSYNC) != 0;
+    double fps_log_t = 0.0; // 上次 FPS 打印的时间戳（秒）
 
     // 4) 事件循环（使用 os::getEvent），固定逻辑步 + 可变渲染，并驱动资源系统 update()
     bool running = true;
@@ -182,6 +184,18 @@ int main(int /*argc*/, char* /*argv*/[])
 
         bgfx::touch(0);
         bgfx::frame();
+
+        // 每秒打印一次帧率/帧时间与目标设定，便于核对
+        const double now_sec = frame_timer.sinceStartupSeconds();
+        if (now_sec - fps_log_t >= 1.0) {
+            TINA_INFO("FPS: {:.1f} | frame: {:.2f} ms | VSync: {} | Cap: {} Hz | Fixed: {} Hz",
+                      frame_timer.fps(),
+                      frame_timer.frameSeconds() * 1000.0,
+                      vsync_on ? "on" : "off",
+                      time_cfg.frame_cap_hz,
+                      time_cfg.tick_rate);
+            fps_log_t = now_sec;
+        }
 
         // 可选限帧（关闭 VSync 时生效更明显）
         if (time_cfg.frame_cap_hz > 0) {
