@@ -1,5 +1,6 @@
 set(SRC_FILES
     main.cpp
+    os/OS.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})
@@ -9,7 +10,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# SDL3：优先使用子项目提供的目标，其次再 find_package
+# 统一导出/导入宏，单体可执行目标下将核心符号视为“构建中”
+target_compile_definitions(${PROJECT_NAME} PRIVATE BUILDING_CORE)
+
+# SDL3：优先使用子项目提供的目标，其次再 find_package（所有平台均使用 SDL3）
 if (TARGET SDL3::SDL3)
     target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3)
 elseif (TARGET SDL3::SDL3-shared)

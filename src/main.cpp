@@ -1,7 +1,4 @@
-//
-// Created by wuxianggujun on 25-9-26.
 // 使用 SDL3 创建窗口，并将原生窗口句柄交由 bgfx 使用，完成最小渲染循环。
-//
 
 #include <cstdint>
 #include <SDL3/SDL.h>

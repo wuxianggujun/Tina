@@ -5,6 +5,7 @@
 #pragma once
 
 #include "../core/Core.hpp"
+#include "../core/Math.hpp"
 #include "glm/fwd.hpp"
 
 #ifdef __linux__
@@ -25,6 +26,10 @@ namespace Tina
 #endif
 
         enum class KeyCode : u8;
+
+        // 使用 Tina::Math 常用几何类型
+        using Rect = Tina::Math::Rect;
+        using Point = Tina::Math::Point;
 
         enum class MouseButton : i32
         {
@@ -71,7 +76,7 @@ namespace Tina
 
                 struct
                 {
-                    int x, y;
+                    int w, h;
                 } win_size;
 
                 struct
@@ -160,14 +165,15 @@ namespace Tina
         TINA_CORE_API void destroyWindow(WindowHandle wnd);
         TINA_CORE_API Rect getWindowScreenRect(WindowHandle win);
         TINA_CORE_API Point getWindowClientSize(WindowHandle win);
-        TINA_CORE_API void setWindowTitle(WindowHandle win,const Rect& rect);
+        TINA_CORE_API void setWindowTitle(WindowHandle win, const char* title);
         TINA_CORE_API void maximizeWindow(WindowHandle win);
-        TINA_CORE_API void minimizeWindow(WindowHandle wind);
+        TINA_CORE_API void minimizeWindow(WindowHandle win);
 
         TINA_CORE_API WindowState setFullScreen(WindowHandle win);
         
 
-        enum class Keycode : u8
+        // 键码采用 Windows VK 值，跨平台时做映射
+        enum class KeyCode : u8
         {
             LBUTTON = 0x01,
             RBUTTON = 0x02,

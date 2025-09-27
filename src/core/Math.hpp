@@ -4,7 +4,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
-#include <glm/gtx/quaternion.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace Tina {
     namespace Math {
@@ -77,12 +77,12 @@ namespace Tina {
         // Quaternion
         using Quat = glm::quat;
         
-        // Common constants
-        TINA_CORE_API constexpr float PI = glm::pi<float>();
-        TINA_CORE_API constexpr float TWO_PI = 2.0f * PI;
-        TINA_CORE_API constexpr float HALF_PI = PI * 0.5f;
-        TINA_CORE_API constexpr float DEG_TO_RAD = PI / 180.0f;
-        TINA_CORE_API constexpr float RAD_TO_DEG = 180.0f / PI;
+        // Common constants（不导出为 DLL 符号，避免 MSVC 对 dllimport 的限制）
+        inline constexpr float PI = glm::pi<float>();
+        inline constexpr float TWO_PI = 2.0f * PI;
+        inline constexpr float HALF_PI = PI * 0.5f;
+        inline constexpr float DEG_TO_RAD = PI / 180.0f;
+        inline constexpr float RAD_TO_DEG = 180.0f / PI;
         
         // Common functions
         template<typename T>
@@ -228,7 +228,8 @@ namespace Tina {
         }
         
         TINA_CORE_API inline Mat4 toMat4(const Quat& q) {
-            return glm::toMat4(q);
+            // gtc/quaternion 提供 mat4_cast 代替 gtx 的 toMat4
+            return glm::mat4_cast(q);
         }
         
         TINA_CORE_API inline Quat slerp(const Quat& x, const Quat& y, float a) {
