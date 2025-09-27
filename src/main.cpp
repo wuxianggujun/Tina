@@ -6,6 +6,7 @@
 #include <bgfx/platform.h>
 #include "core/Log.hpp"
 #include "os/OS.hpp"
+#include "engine/Resource.hpp"
 
 using Tina::os::Event;
 
@@ -94,12 +95,28 @@ int main(int /*argc*/, char* /*argv*/[])
     bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
     ResetBgfxWithSize(pxW, pxH, init.resolution.reset);
 
-    // 4) 事件循环（使用 os::getEvent），打印日志并在尺寸变化时 reset bgfx
+    // 3.5) 初始化资源系统（异步文件系统 + 资源 Hub/Manager）
+    using namespace Tina::Engine;
+    auto fs = CreateFileSystem();
+    BlobManager blob_rm(*fs);
+    ResourceManagerHub hub; hub.add(BlobResource::TYPE, &blob_rm);
+    // 示例：异步读取一个配置文件（展示资源 READY）
+    Resource* cfg_res = hub.load(BlobResource::TYPE, Path("resources/config/settings.yaml"));
+
+    // 4) 事件循环（使用 os::getEvent），打印日志并在尺寸变化时 reset bgfx；并驱动资源系统 update()
     bool running = true;
     bool fullscreen = false;
     Tina::os::WindowState prev_state{};
     bool relative_mouse = false;
     while (running) {
+        // 驱动资源系统回调
+        hub.update();
+        if (cfg_res && cfg_res->getState() == Resource::State::READY) {
+            TINA_INFO("配置资源加载完成: {} ({} bytes)",
+                      cfg_res->getPath().c_str(),
+                      (int)static_cast<BlobResource*>(cfg_res)->data.size());
+            cfg_res = nullptr; // 仅打印一次
+        }
         Event ev;
         while (Tina::os::getEvent(ev)) {
             LogEvent(ev);

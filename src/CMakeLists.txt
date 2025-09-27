@@ -1,6 +1,8 @@
 set(SRC_FILES
     main.cpp
     os/OS.cpp
+    engine/Resource.hpp
+    engine/FileSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})
