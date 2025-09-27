@@ -102,7 +102,7 @@ int main(int /*argc*/, char* /*argv*/[])
     BlobManager blob_rm(*fs);
     ResourceManagerHub hub; hub.add(BlobResource::TYPE, &blob_rm);
     // 示例：异步读取一个配置文件（展示资源 READY）
-    Resource* cfg_res = hub.load(BlobResource::TYPE, Tina::Core::Path(Tina::Core::StringView("resources/config/settings.yaml")));
+    Resource* cfg_res = hub.load(BlobResource::TYPE, Tina::Core::Path(Tina::Core::StringView{"resources/config/settings.yaml", sizeof("resources/config/settings.yaml") - 1}));
 
     // 4) 事件循环（使用 os::getEvent），打印日志并在尺寸变化时 reset bgfx；并驱动资源系统 update()
     bool running = true;

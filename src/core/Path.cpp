@@ -40,8 +40,8 @@ char* Path::normalize(char* path) {
 char* Path::normalize(StringView in_path, char* out, u32 out_capacity) {
     if (!out || out_capacity == 0) return out;
     char* dst = out;
-    const char* src = in_path.begin;
-    const char* const end = in_path.end;
+    const char* src = in_path.data();
+    const char* const end = in_path.data() + in_path.size();
     if (!src) { *dst = '\0'; return dst; }
     if (in_path.size() == 0) { *dst = '\0'; return dst; }
 
@@ -111,27 +111,33 @@ void Path::append(u64 v) {
 // 工具：目录、基名、扩展名
 StringView Path::getDir(StringView src) {
     if (src.empty()) return src;
-    StringView dir = src; dir.end = src.end; if (dir.size()) dir.removeSuffix(1);
-    while (dir.end > dir.begin && !is_slash(*(dir.end - 1))) --dir.end;
-    return dir;
+    const char* begin = src.data();
+    const char* end = begin + src.size();
+    if (end > begin) --end;
+    while (end > begin && !is_slash(*(end - 1))) --end;
+    return StringView(begin, (size_t)(end - begin));
 }
 
 StringView Path::getBasename(StringView src) {
     if (src.empty()) return src;
-    if (is_slash(src.back())) { StringView t = src; t.removeSuffix(1); src = t; }
-    const char* end = src.end; const char* b = end - 1;
-    while (b != src.begin && !is_slash(*b)) --b;
+    const char* begin = src.data();
+    const char* end = begin + src.size();
+    if (end > begin && is_slash(*(end - 1))) --end;
+    const char* b = end - 1;
+    while (b != begin && !is_slash(*b)) --b;
     if (is_slash(*b)) ++b;
     const char* e = b; while (e != end && *e != '.') ++e;
-    return StringView(b, e);
+    return StringView(b, (size_t)(e - b));
 }
 
 StringView Path::getExtension(StringView src) {
     if (src.empty()) return StringView();
-    const char* b = src.end - 1;
-    while (b != src.begin && *b != '.') --b;
-    if (*b != '.') return StringView(nullptr, nullptr);
-    return StringView(b + 1, src.end);
+    const char* begin = src.data();
+    const char* end = begin + src.size();
+    const char* b = end - 1;
+    while (b != begin && *b != '.') --b;
+    if (*b != '.') return StringView();
+    return StringView(b + 1, (size_t)(end - (b + 1)));
 }
 
 bool Path::hasExtension(StringView filename, StringView ext) {
@@ -174,22 +180,19 @@ PathInfo::PathInfo(StringView path) {
 
 // ResourcePath：解析 "sub:resource"
 StringView ResourcePath::getResource(StringView str) {
-    const char* c = str.begin;
-    if (!c) return str;
-    if (str.end) {
-        while (c != str.end) { if (*c == ':') return StringView(c + 1, str.end); ++c; }
-        return str;
-    }
-    while (*c) { if (*c == ':') return StringView(c + 1, c + std::char_traits<char>::length(c + 1)); ++c; }
+    const char* b = str.data();
+    const char* e = b + str.size();
+    const char* c = b;
+    while (c != e) { if (*c == ':') return StringView(c + 1, (size_t)(e - (c + 1))); ++c; }
     return str;
 }
 
 StringView ResourcePath::getSubresource(StringView str) {
-    StringView ret; ret.begin = str.begin; ret.end = str.begin;
-    if (!ret.begin) return ret;
-    if (str.end) { while (ret.end != str.end && *ret.end != ':') ++ret.end; }
-    else { while (*ret.end && *ret.end != ':') ++ret.end; }
-    return ret;
+    const char* b = str.data();
+    const char* e = b + str.size();
+    const char* c = b;
+    while (c != e && *c != ':') ++c;
+    return StringView(b, (size_t)(c - b));
 }
 
 } // namespace Tina::Core

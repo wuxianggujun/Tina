@@ -11,29 +11,13 @@
 #include "Core.hpp"
 #include "Hash.hpp"
 #include <string>
-#include <string_view>
 #include <cctype>
+#include "StringView.hpp"
 
 namespace Tina::Core {
 
-// 轻量 StringView：指向 [begin, end)；可从 std::string_view 构造
-struct StringView {
-    const char* begin = nullptr;
-    const char* end = nullptr;
-
-    StringView() = default;
-    StringView(const char* b, const char* e) : begin(b), end(e) {}
-    explicit StringView(const char* cstr)
-        : begin(cstr), end(cstr ? cstr + std::char_traits<char>::length(cstr) : nullptr) {}
-    explicit StringView(std::string_view sv) : begin(sv.data()), end(sv.data() + sv.size()) {}
-
-    bool empty() const { return !begin || begin == end || size() == 0; }
-    size_t size() const { return begin && end ? size_t(end - begin) : 0; }
-    char back() const { return *(end - 1); }
-    const char& operator[](size_t i) const { return begin[i]; }
-
-    void removeSuffix(size_t n) { if (size() >= n) end -= n; }
-};
+// 统一使用 EASTL string_view，避免自定义
+using StringView = string_view;
 
 // 文件路径哈希包装
 struct FilePathHash {
@@ -80,7 +64,7 @@ struct Path {
     const char* c_str() const { return m_path; }
     bool isEmpty() const { return m_path[0] == '\0'; }
     static u32 capacity() { return MAX_PATH; }
-    operator StringView() const { return StringView(m_path, m_path + m_length); }
+    operator StringView() const { return StringView(m_path, m_length); }
 
     // 片段追加（字符串 / u64）
     void append(StringView s);
@@ -105,4 +89,3 @@ struct ResourcePath {
 };
 
 } // namespace Tina::Core
-
