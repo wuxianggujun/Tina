@@ -90,12 +90,6 @@ if (BUILD_SHARED_LIBS)
     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 endif ()
 
-#include(Tina)
-# Import the tool cmake script
-include(TinaTool)
-include(BgfxUtil)
-include(SourceGroups)
-include(CompileShaders)
 
 # Automatically update submodule versions
 if (TINA_AUTOUPDATE_SUBMODULE)

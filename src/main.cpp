@@ -10,6 +10,8 @@
 #include "os/OS.hpp"
 #include "engine/Resource.hpp"
 #include "core/Path.hpp"
+#include "renderer/Renderer.hpp"
+#include "renderer/Pipeline.hpp"
 #include "core/Time.hpp"
 
 using Tina::os::Event;
@@ -99,6 +101,11 @@ int main(int /*argc*/, char* /*argv*/[])
     bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
     ResetBgfxWithSize(pxW, pxH, init.resolution.reset);
 
+    // 3.x) 初始化 Renderer/Pipeline
+    Tina::Gfx::Renderer renderer; renderer.setDisplaySize(pxW, pxH);
+    Tina::Gfx::Pipeline pipeline(renderer);
+    pipeline.setViewport(pxW, pxH);
+
     // 3.5) 初始化资源系统（异步文件系统 + 资源 Hub/Manager）
     using namespace Tina::Engine;
     auto fs = CreateFileSystem();
@@ -182,8 +189,11 @@ int main(int /*argc*/, char* /*argv*/[])
         // 渲染（可使用 alpha 做插值渲染）
         const double alpha = ticker.alpha(); (void)alpha;
 
-        bgfx::touch(0);
-        bgfx::frame();
+        renderer.beginFrame();
+        pipeline.begin();
+        // TODO: 填充 DrawItem 并调用 pipeline.addDrawItem(...)
+        pipeline.submit();
+        renderer.endFrame();
 
         // 每秒打印一次帧率/帧时间与目标设定，便于核对
         const double now_sec = frame_timer.sinceStartupSeconds();
