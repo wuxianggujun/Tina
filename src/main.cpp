@@ -4,7 +4,7 @@
 #include <SDL3/SDL.h>
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
-#include <spdlog/spdlog.h>
+#include "core/Log.hpp"
 #include "os/OS.hpp"
 
 using Tina::os::Event;
@@ -21,25 +21,25 @@ static void ResetBgfxWithSize(int w, int h, uint32_t resetFlags)
 static void LogEvent(const Event& e)
 {
     switch (e.type) {
-        case Event::Type::QUIT: spdlog::info("事件: QUIT"); break;
-        case Event::Type::WINDOW_CLOSE: spdlog::info("事件: WINDOW_CLOSE"); break;
-        case Event::Type::WINDOW_MOVE: spdlog::info("事件: WINDOW_MOVE x={}, y={}", e.win_move.x, e.win_move.y); break;
-        case Event::Type::WINDOW_SIZE: spdlog::info("事件: WINDOW_SIZE w={}, h={}", e.win_size.w, e.win_size.h); break;
-        case Event::Type::FOCUS: spdlog::info("事件: FOCUS gained={}", e.focus.gained); break;
-        case Event::Type::KEY: spdlog::info("事件: KEY down={}, code={}, repeat={}", e.key.down, (int)e.key.key_code, e.key.is_repeat); break;
-        case Event::Type::CHAR: spdlog::info("事件: CHAR utf8_first_byte=0x{:02x}", e.text_input.utf8 & 0xff); break;
-        case Event::Type::MOUSE_BUTTON: spdlog::info("事件: MOUSE_BUTTON down={}, button={}", e.mouse_button.down, (int)e.mouse_button.button); break;
-        case Event::Type::MOUSE_MOVE: spdlog::info("事件: MOUSE_MOVE dx={}, dy={}", e.mouse_move.xrel, e.mouse_move.yrel); break;
-        case Event::Type::MOUSE_WHEEL: spdlog::info("事件: MOUSE_WHEEL amount={}", e.mouse_wheel.amount); break;
-        case Event::Type::DROP_FILE: spdlog::info("事件: DROP_FILE handle={}", e.file_drop.handle); break;
+        case Event::Type::QUIT: TINA_INFO("事件: QUIT"); break;
+        case Event::Type::WINDOW_CLOSE: TINA_INFO("事件: WINDOW_CLOSE"); break;
+        case Event::Type::WINDOW_MOVE: TINA_INFO("事件: WINDOW_MOVE x={}, y={}", e.win_move.x, e.win_move.y); break;
+        case Event::Type::WINDOW_SIZE: TINA_INFO("事件: WINDOW_SIZE w={}, h={}", e.win_size.w, e.win_size.h); break;
+        case Event::Type::FOCUS: TINA_INFO("事件: FOCUS gained={}", e.focus.gained); break;
+        case Event::Type::KEY: TINA_INFO("事件: KEY down={}, code={}, repeat={}", e.key.down, (int)e.key.key_code, e.key.is_repeat); break;
+        case Event::Type::CHAR: TINA_INFO("事件: CHAR utf8_first_byte=0x{:02x}", e.text_input.utf8 & 0xff); break;
+        case Event::Type::MOUSE_BUTTON: TINA_INFO("事件: MOUSE_BUTTON down={}, button={}", e.mouse_button.down, (int)e.mouse_button.button); break;
+        case Event::Type::MOUSE_MOVE: TINA_INFO("事件: MOUSE_MOVE dx={}, dy={}", e.mouse_move.xrel, e.mouse_move.yrel); break;
+        case Event::Type::MOUSE_WHEEL: TINA_INFO("事件: MOUSE_WHEEL amount={}", e.mouse_wheel.amount); break;
+        case Event::Type::DROP_FILE: TINA_INFO("事件: DROP_FILE handle={}", e.file_drop.handle); break;
         default: break;
     }
 }
 
 int main(int /*argc*/, char* /*argv*/[])
 {
-    spdlog::set_pattern("[%H:%M:%S] [%^%l%$] %v");
-    spdlog::info("启动 Tina，使用 SDL3 后端的 os 事件系统");
+    Tina::Core::Log::Init("Tina", spdlog::level::info);
+    TINA_INFO("启动 Tina，使用 SDL3 后端的 os 事件系统");
 
     // 1) 通过 os 接口创建窗口（底层 SDL3）
     const int winW = 1280;
@@ -48,7 +48,7 @@ int main(int /*argc*/, char* /*argv*/[])
     args.width = winW; args.height = winH; args.name = "Tina (os + SDL3 + bgfx)";
     Tina::os::WindowHandle window = Tina::os::createWindow(args);
     if (window == Tina::os::INVALID_WINDOW_HANDLE) {
-        spdlog::error("创建窗口失败");
+        TINA_ERROR("创建窗口失败");
         return -1;
     }
 
@@ -70,11 +70,11 @@ int main(int /*argc*/, char* /*argv*/[])
 #endif
     }
     if (nwh == nullptr) {
-        spdlog::error("获取原生窗口句柄失败。当前视频后端: {}", SDL_GetCurrentVideoDriver());
+        TINA_ERROR("获取原生窗口句柄失败。当前视频后端: {}", SDL_GetCurrentVideoDriver());
         Tina::os::destroyWindow(window);
         return -1;
     }
-    spdlog::info("窗口创建完成，原生句柄 nwh={}", (void*)nwh);
+    TINA_INFO("窗口创建完成，原生句柄 nwh={}", (void*)nwh);
 
     // 3) 初始化 bgfx
     bgfx::PlatformData pd{}; pd.nwh = nwh;
@@ -91,7 +91,7 @@ int main(int /*argc*/, char* /*argv*/[])
     init.resolution.height = (uint32_t)pxH;
     init.resolution.reset = BGFX_RESET_VSYNC;
     if (!bgfx::init(init)) {
-        spdlog::error("bgfx 初始化失败: 后端={} 像素尺寸={}x{} nwh={} ", (int)init.type, (int)init.resolution.width, (int)init.resolution.height, nwh);
+        TINA_ERROR("bgfx 初始化失败: 后端={} 像素尺寸={}x{} nwh={} ", (int)init.type, (int)init.resolution.width, (int)init.resolution.height, nwh);
         Tina::os::destroyWindow(window);
         return -1;
     }
@@ -122,6 +122,6 @@ int main(int /*argc*/, char* /*argv*/[])
     // 5) 清理
     bgfx::shutdown();
     Tina::os::destroyWindow(window);
-    spdlog::info("退出 Tina");
+    TINA_INFO("退出 Tina");
     return 0;
 }
