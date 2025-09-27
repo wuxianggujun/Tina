@@ -1,128 +1,127 @@
-// 使用 SDL3 创建窗口，并将原生窗口句柄交由 bgfx 使用，完成最小渲染循环。
+// 使用统一 os 接口（SDL3 实现）创建窗口，事件循环打印日志，bgfx 完成最小渲染循环。
 
 #include <cstdint>
 #include <SDL3/SDL.h>
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
+#include <spdlog/spdlog.h>
+#include "os/OS.hpp"
+
+using Tina::os::Event;
 
 // 将窗口尺寸更新到 bgfx
-static void ResetBgfxWithWindow(SDL_Window* window, uint32_t resetFlags)
+static void ResetBgfxWithSize(int w, int h, uint32_t resetFlags)
 {
-    int w = 0, h = 0;
-    // SDL3 高 DPI 情况下应获取像素尺寸
-    SDL_GetWindowSizeInPixels(window, &w, &h);
-    if (w <= 0 || h <= 0) {
-        // 兜底，避免无效尺寸
-        w = 1280; h = 720;
-    }
+    if (w <= 0 || h <= 0) { w = 1280; h = 720; }
     bgfx::reset((uint32_t)w, (uint32_t)h, resetFlags);
     bgfx::setViewRect(0, 0, 0, (uint16_t)w, (uint16_t)h);
 }
 
+// 打印事件的简单帮助函数（用于测试事件系统）
+static void LogEvent(const Event& e)
+{
+    switch (e.type) {
+        case Event::Type::QUIT: spdlog::info("事件: QUIT"); break;
+        case Event::Type::WINDOW_CLOSE: spdlog::info("事件: WINDOW_CLOSE"); break;
+        case Event::Type::WINDOW_MOVE: spdlog::info("事件: WINDOW_MOVE x={}, y={}", e.win_move.x, e.win_move.y); break;
+        case Event::Type::WINDOW_SIZE: spdlog::info("事件: WINDOW_SIZE w={}, h={}", e.win_size.w, e.win_size.h); break;
+        case Event::Type::FOCUS: spdlog::info("事件: FOCUS gained={}", e.focus.gained); break;
+        case Event::Type::KEY: spdlog::info("事件: KEY down={}, code={}, repeat={}", e.key.down, (int)e.key.key_code, e.key.is_repeat); break;
+        case Event::Type::CHAR: spdlog::info("事件: CHAR utf8_first_byte=0x{:02x}", e.text_input.utf8 & 0xff); break;
+        case Event::Type::MOUSE_BUTTON: spdlog::info("事件: MOUSE_BUTTON down={}, button={}", e.mouse_button.down, (int)e.mouse_button.button); break;
+        case Event::Type::MOUSE_MOVE: spdlog::info("事件: MOUSE_MOVE dx={}, dy={}", e.mouse_move.xrel, e.mouse_move.yrel); break;
+        case Event::Type::MOUSE_WHEEL: spdlog::info("事件: MOUSE_WHEEL amount={}", e.mouse_wheel.amount); break;
+        case Event::Type::DROP_FILE: spdlog::info("事件: DROP_FILE handle={}", e.file_drop.handle); break;
+        default: break;
+    }
+}
+
 int main(int /*argc*/, char* /*argv*/[])
 {
-    // 1) 初始化 SDL（仅视频与事件）
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
-        SDL_Log("SDL_Init 失败: %s", SDL_GetError());
-        return -1;
-    }
+    spdlog::set_pattern("[%H:%M:%S] [%^%l%$] %v");
+    spdlog::info("启动 Tina，使用 SDL3 后端的 os 事件系统");
 
-    // 2) 创建 SDL 窗口
+    // 1) 通过 os 接口创建窗口（底层 SDL3）
     const int winW = 1280;
     const int winH = 720;
-    const SDL_WindowFlags flags = (SDL_WindowFlags)(SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
-    SDL_Window* window = SDL_CreateWindow("Tina (SDL3 + bgfx)", winW, winH, flags);
-    if (!window) {
-        SDL_Log("SDL_CreateWindow 失败: %s", SDL_GetError());
-        SDL_Quit();
+    Tina::os::InitWindowArgs args{};
+    args.width = winW; args.height = winH; args.name = "Tina (os + SDL3 + bgfx)";
+    Tina::os::WindowHandle window = Tina::os::createWindow(args);
+    if (window == Tina::os::INVALID_WINDOW_HANDLE) {
+        spdlog::error("创建窗口失败");
         return -1;
     }
 
-    // 3) 通过 SDL3 窗口属性获取原生窗口句柄，并注入 bgfx 平台数据
+    // 2) 获取原生窗口句柄以初始化 bgfx（从 SDL_Window 属性提取）
     void* nwh = nullptr; // native window handle
     {
-        SDL_PropertiesID props = SDL_GetWindowProperties(window);
+        SDL_Window* sdl_win = (SDL_Window*)window;
+        SDL_PropertiesID props = SDL_GetWindowProperties(sdl_win);
 #if defined(_WIN32)
-        // SDL3 提供属性键 SDL_PROP_WINDOW_WIN32_HWND_POINTER，若头文件宏不可用则使用等价字面串
 #ifdef SDL_PROP_WINDOW_WIN32_HWND_POINTER
         nwh = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
 #else
         nwh = SDL_GetPointerProperty(props, "SDL.window.win32.hwnd", nullptr);
 #endif
 #elif defined(__APPLE__)
-        // macOS 可使用 Cocoa/Metal 句柄，后续扩展：
-        // nwh = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+        // TODO: Cocoa/Metal 句柄
 #elif defined(__linux__)
-        // Linux 平台可按实际后端（X11/Wayland）选择：
-        // Wayland: SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER
-        // X11: SDL_PROP_WINDOW_X11_WINDOW_NUMBER（注意是整数）
+        // TODO: Wayland/X11 句柄
 #endif
     }
-
     if (nwh == nullptr) {
-        SDL_Log("获取原生窗口句柄失败（nwh=null）。当前视频后端: %s", SDL_GetCurrentVideoDriver());
-        SDL_DestroyWindow(window);
-        SDL_Quit();
+        spdlog::error("获取原生窗口句柄失败。当前视频后端: {}", SDL_GetCurrentVideoDriver());
+        Tina::os::destroyWindow(window);
         return -1;
     }
+    spdlog::info("窗口创建完成，原生句柄 nwh={}", (void*)nwh);
 
-    bgfx::PlatformData pd{};
-    pd.nwh = nwh; // Windows: HWND；其他平台后续补齐对应句柄
-    // 可选：同时写入 init.platformData，兼容不同版本用法
-
-    // 4) 初始化 bgfx
+    // 3) 初始化 bgfx
+    bgfx::PlatformData pd{}; pd.nwh = nwh;
     bgfx::Init init{};
 #if defined(_WIN32)
-    // 在部分环境下自动选择可能挑到 D3D12 而初始化失败，强制 D3D11 兼容性更好
-    init.type = bgfx::RendererType::Direct3D11;
+    init.type = bgfx::RendererType::Direct3D11; // 避免自动挑到 D3D12 导致失败
 #else
-    init.type = bgfx::RendererType::Count; // 自动选择最优后端
+    init.type = bgfx::RendererType::Count; // 自动选择
 #endif
     init.platformData = pd;
-    // 初始分辨率将由 reset 时更新
     int pxW = winW, pxH = winH;
-    SDL_GetWindowSizeInPixels(window, &pxW, &pxH);
+    SDL_GetWindowSizeInPixels((SDL_Window*)window, &pxW, &pxH);
     init.resolution.width = (uint32_t)pxW;
     init.resolution.height = (uint32_t)pxH;
     init.resolution.reset = BGFX_RESET_VSYNC;
-
     if (!bgfx::init(init)) {
-        SDL_Log("bgfx::init 失败。后端=%d 像素尺寸=%dx%d nwh=%p", (int)init.type, (int)init.resolution.width, (int)init.resolution.height, nwh);
-        SDL_DestroyWindow(window);
-        SDL_Quit();
+        spdlog::error("bgfx 初始化失败: 后端={} 像素尺寸={}x{} nwh={} ", (int)init.type, (int)init.resolution.width, (int)init.resolution.height, nwh);
+        Tina::os::destroyWindow(window);
         return -1;
     }
-
-    // 设置清屏（颜色/深度/模板）
     bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
-    ResetBgfxWithWindow(window, init.resolution.reset);
+    ResetBgfxWithSize(pxW, pxH, init.resolution.reset);
 
-    // 5) 主循环：事件处理 + 渲染
+    // 4) 事件循环（使用 os::getEvent），打印日志并在尺寸变化时 reset bgfx
     bool running = true;
     while (running) {
-        SDL_Event e;
-        while (SDL_PollEvent(&e)) {
-            switch (e.type) {
-            case SDL_EVENT_QUIT:
-                running = false;
-                break;
-            case SDL_EVENT_WINDOW_RESIZED:
-            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                ResetBgfxWithWindow(window, init.resolution.reset);
-                break;
-            default:
-                break;
+        Event ev;
+        while (Tina::os::getEvent(ev)) {
+            LogEvent(ev);
+            switch (ev.type) {
+                case Event::Type::QUIT:
+                case Event::Type::WINDOW_CLOSE:
+                    running = false; break;
+                case Event::Type::WINDOW_SIZE:
+                    ResetBgfxWithSize(ev.win_size.w, ev.win_size.h, init.resolution.reset);
+                    break;
+                default: break;
             }
         }
 
-        // 触摸视图保证提交，执行清屏
         bgfx::touch(0);
         bgfx::frame();
     }
 
-    // 6) 资源释放
+    // 5) 清理
     bgfx::shutdown();
-    SDL_DestroyWindow(window);
-    SDL_Quit();
+    Tina::os::destroyWindow(window);
+    spdlog::info("退出 Tina");
     return 0;
 }
