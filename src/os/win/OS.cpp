@@ -43,7 +43,9 @@ namespace Tina::os
         WCHAR data[N];
     };
 
-    WindowHandle os::createWindow(const InitWindowArgs& args)
+    WindowHandle os::createWindow(const InitWindowArgs& /*args*/)
     {
+        // 占位实现：当前主流程使用 SDL3 创建窗口，本函数暂返回空句柄以便通过编译。
+        return INVALID_WINDOW_HANDLE;
     }
 }

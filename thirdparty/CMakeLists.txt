@@ -62,3 +62,14 @@ set(FETCHCONTENT_SOURCE_DIR_EABASE "${CMAKE_CURRENT_SOURCE_DIR}/EABase" CACHE PA
 set(EASTL_BUILD_BENCHMARK OFF CACHE BOOL "" FORCE)
 set(EASTL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(EASTL)
+
+# SDL3 (window/input abstraction)
+# 关闭测试与安装，作为子项目集成
+set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/SDL/CMakeLists.txt")
+    add_subdirectory(SDL)
+else()
+    message(WARNING "thirdparty/SDL 未找到，若需 SDL3 集成请确保已克隆到 thirdparty/SDL")
+endif()
