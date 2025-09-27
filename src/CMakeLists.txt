@@ -3,6 +3,7 @@ set(SRC_FILES
     os/OS.cpp
     engine/Resource.hpp
     engine/FileSystem.cpp
+    core/xxhash_impl.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})

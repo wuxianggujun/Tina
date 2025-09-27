@@ -10,6 +10,7 @@
 
 #include "../core/Core.hpp"
 #include "../core/Log.hpp"
+#include "../core/Hash.hpp"
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -27,9 +28,7 @@ struct Path {
     explicit Path(std::string s) : str(std::move(s)) {}
     bool isEmpty() const { return str.empty(); }
     const char* c_str() const { return str.c_str(); }
-    std::size_t hash() const {
-        return std::hash<std::string>{}(str);
-    }
+    std::size_t hash() const { return (std::size_t)Tina::Core::Hash::String64(str); }
 };
 
 // 资源类型（小写字符串哈希），用于路由到对应管理器
@@ -38,9 +37,7 @@ struct ResourceType {
     ResourceType() = default;
     explicit ResourceType(const char* name) {
         if (!name) { type = 0; return; }
-        std::string lower{name};
-        for (char& c : lower) c = (char)tolower((unsigned char)c);
-        type = std::hash<std::string>{}(lower);
+        type = Tina::Core::Hash::StringLower64(name);
     }
     bool valid() const { return type != 0; }
     bool operator==(const ResourceType& rhs) const { return type == rhs.type; }
