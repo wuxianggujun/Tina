@@ -170,6 +170,21 @@ namespace Tina
         TINA_CORE_API void minimizeWindow(WindowHandle win);
 
         TINA_CORE_API WindowState setFullScreen(WindowHandle win);
+        TINA_CORE_API void restoreWindow(WindowHandle win, const WindowState& prev);
+
+        // 坐标换算（对齐文档中 Runner 用法）
+        TINA_CORE_API Point clientToScreen(WindowHandle win, int x, int y);
+        TINA_CORE_API Point screenToClient(WindowHandle win, int x, int y);
+
+        // 鼠标/光标与裁剪
+        TINA_CORE_API void showCursor(bool show);
+        TINA_CORE_API bool setRelativeMouseMode(WindowHandle win, bool enabled);
+        TINA_CORE_API void clipCursor(WindowHandle win, const Rect& rect);
+
+        // 文件拖拽访问器（DROP_FILE 事件配套）
+        TINA_CORE_API int getDropFileCount(void* handle);
+        TINA_CORE_API const char* getDropFile(void* handle, int index);
+        TINA_CORE_API void finishDrag(void* handle);
         
 
         // 键码采用 Windows VK 值，跨平台时做映射

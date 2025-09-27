@@ -79,11 +79,7 @@ int main(int /*argc*/, char* /*argv*/[])
     // 3) 初始化 bgfx
     bgfx::PlatformData pd{}; pd.nwh = nwh;
     bgfx::Init init{};
-#if defined(_WIN32)
-    init.type = bgfx::RendererType::Direct3D11; // 避免自动挑到 D3D12 导致失败
-#else
     init.type = bgfx::RendererType::Count; // 自动选择
-#endif
     init.platformData = pd;
     int pxW = winW, pxH = winH;
     SDL_GetWindowSizeInPixels((SDL_Window*)window, &pxW, &pxH);
@@ -100,6 +96,9 @@ int main(int /*argc*/, char* /*argv*/[])
 
     // 4) 事件循环（使用 os::getEvent），打印日志并在尺寸变化时 reset bgfx
     bool running = true;
+    bool fullscreen = false;
+    Tina::os::WindowState prev_state{};
+    bool relative_mouse = false;
     while (running) {
         Event ev;
         while (Tina::os::getEvent(ev)) {
@@ -111,6 +110,29 @@ int main(int /*argc*/, char* /*argv*/[])
                 case Event::Type::WINDOW_SIZE:
                     ResetBgfxWithSize(ev.win_size.w, ev.win_size.h, init.resolution.reset);
                     break;
+                case Event::Type::KEY:
+                    if (ev.key.down) {
+                        if (ev.key.key_code == Tina::os::KeyCode::F11) {
+                            if (!fullscreen) { prev_state = Tina::os::setFullScreen(window); fullscreen = true; TINA_INFO("切换全屏"); }
+                            else { Tina::os::restoreWindow(window, prev_state); fullscreen = false; TINA_INFO("退出全屏"); }
+                        } else if (ev.key.key_code == Tina::os::KeyCode::R) {
+                            relative_mouse = !relative_mouse;
+                            Tina::os::setRelativeMouseMode(window, relative_mouse);
+                            TINA_INFO("相对鼠标模式: {}", relative_mouse);
+                        } else if (ev.key.key_code == Tina::os::KeyCode::ESCAPE) {
+                            running = false;
+                        }
+                    }
+                    break;
+                case Event::Type::DROP_FILE: {
+                    int n = Tina::os::getDropFileCount(ev.file_drop.handle);
+                    TINA_INFO("拖拽文件数量: {}", n);
+                    for (int i = 0; i < n; ++i) {
+                        const char* path = Tina::os::getDropFile(ev.file_drop.handle, i);
+                        TINA_INFO("  文件[{}]: {}", i, path ? path : "<null>");
+                    }
+                    Tina::os::finishDrag(ev.file_drop.handle);
+                } break;
                 default: break;
             }
         }
