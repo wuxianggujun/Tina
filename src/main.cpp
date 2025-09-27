@@ -4,10 +4,13 @@
 #include <SDL3/SDL.h>
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
+#include <thread>
+#include <chrono>
 #include "core/Log.hpp"
 #include "os/OS.hpp"
 #include "engine/Resource.hpp"
 #include "core/Path.hpp"
+#include "core/Time.hpp"
 
 using Tina::os::Event;
 
@@ -104,12 +107,28 @@ int main(int /*argc*/, char* /*argv*/[])
     // 示例：异步读取一个配置文件（展示资源 READY）
     Resource* cfg_res = hub.load(BlobResource::TYPE, Tina::Core::Path(Tina::Core::string_view{"resources/config/settings.yaml", sizeof("resources/config/settings.yaml") - 1}));
 
-    // 4) 事件循环（使用 os::getEvent），打印日志并在尺寸变化时 reset bgfx；并驱动资源系统 update()
+    // 3.6) 帧计时与固定步（基于 docs/frame_timing.md）
+    Tina::Core::TimeConfig time_cfg{};
+    time_cfg.tick_rate = 60;
+    time_cfg.max_substeps = 4;
+    time_cfg.dt_min = 1.0 / 120.0;
+    time_cfg.dt_max = 1.0 / 20.0;
+    time_cfg.frame_cap_hz = 0; // 0 关闭限帧，依赖 VSync；可改为 60 等数值
+    Tina::Core::FrameTimer frame_timer; frame_timer.reset();
+    Tina::Core::FixedStepTicker ticker(time_cfg);
+
+    // 4) 事件循环（使用 os::getEvent），固定逻辑步 + 可变渲染，并驱动资源系统 update()
     bool running = true;
     bool fullscreen = false;
     Tina::os::WindowState prev_state{};
     bool relative_mouse = false;
     while (running) {
+        frame_timer.beginFrame();
+        double dt = frame_timer.deltaSeconds();
+        if (dt < time_cfg.dt_min) dt = time_cfg.dt_min;
+        if (dt > time_cfg.dt_max) dt = time_cfg.dt_max;
+        ticker.accumulate(dt);
+
         // 驱动资源系统回调
         hub.update();
         if (cfg_res && cfg_res->getState() == Resource::State::READY) {
@@ -155,8 +174,25 @@ int main(int /*argc*/, char* /*argv*/[])
             }
         }
 
+        // 固定逻辑步（这里示例为空，可在此调用物理/规则模拟）
+        ticker.step([&](double fixed_dt){ (void)fixed_dt; /* TODO: 逻辑更新 */ });
+
+        // 渲染（可使用 alpha 做插值渲染）
+        const double alpha = ticker.alpha(); (void)alpha;
+
         bgfx::touch(0);
         bgfx::frame();
+
+        // 可选限帧（关闭 VSync 时生效更明显）
+        if (time_cfg.frame_cap_hz > 0) {
+            const double target = 1.0 / double(time_cfg.frame_cap_hz);
+            const double used = frame_timer.frameSeconds();
+            if (used < target) {
+                const double remain = target - used;
+                const auto ns = (long long)(remain * 1e9);
+                if (ns > 0) std::this_thread::sleep_for(std::chrono::nanoseconds(ns));
+            }
+        }
     }
 
     // 5) 清理
