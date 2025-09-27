@@ -14,7 +14,6 @@
 
 namespace Tina
 {
-    struct StringView;
     struct IAllocator;
 
     namespace os

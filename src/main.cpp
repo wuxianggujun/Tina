@@ -40,7 +40,7 @@ static void LogEvent(const Event& e)
 
 int main(int /*argc*/, char* /*argv*/[])
 {
-    Tina::Core::Log::Init("Tina", spdlog::level::info);
+    Tina::Core::Log::Init("Tina", Tina::Core::Log::Level::Info);
     TINA_INFO("启动 Tina，使用 SDL3 后端的 os 事件系统");
 
     // 1) 通过 os 接口创建窗口（底层 SDL3）

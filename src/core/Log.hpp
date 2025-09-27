@@ -18,16 +18,39 @@ namespace Tina::Core {
 
     class Log {
     public:
+        enum class Level {
+            Trace,
+            Debug,
+            Info,
+            Warn,
+            Error,
+            Critical,
+            Off
+        };
+
+        static ::spdlog::level::level_enum ToSpdLevel(Level l) {
+            using L = ::spdlog::level::level_enum;
+            switch (l) {
+                case Level::Trace: return L::trace;
+                case Level::Debug: return L::debug;
+                case Level::Info: return L::info;
+                case Level::Warn: return L::warn;
+                case Level::Error: return L::err;
+                case Level::Critical: return L::critical;
+                case Level::Off: default: return L::off;
+            }
+        }
+
         // 初始化日志：可自定义 logger 名称、级别与输出 pattern
         static void Init(const char* name = "Tina",
-                         spdlog::level::level_enum level = spdlog::level::info,
+                         Level level = Level::Info,
                          const char* pattern = "[%H:%M:%S.%e] [%^%l%$] [%s:%# %!()] %v")
         {
             auto& logger = Get();
             if (!logger) {
                 logger = spdlog::stdout_color_mt(name);
             }
-            logger->set_level(level);
+            logger->set_level(ToSpdLevel(level));
             logger->set_pattern(pattern);
         }
 
@@ -38,10 +61,10 @@ namespace Tina::Core {
             return s_logger;
         }
 
-        static void SetLevel(spdlog::level::level_enum level)
+        static void SetLevel(Level level)
         {
             auto& logger = Get();
-            if (logger) logger->set_level(level);
+            if (logger) logger->set_level(ToSpdLevel(level));
         }
 
         static void SetPattern(const std::string& pat)
