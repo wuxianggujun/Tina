@@ -19,6 +19,7 @@
 #include "core/Time.hpp"
 #include "game/TileMap.hpp"
 #include "game/Camera2D.hpp"
+#include <box2d/box2d.h>
 #include "physics/Physics2D.hpp"
 
 using Tina::os::Event;
@@ -146,6 +147,7 @@ int main(int /*argc*/, char* /*argv*/[])
         bgfx::VertexBufferHandle vb = BGFX_INVALID_HANDLE;
         bgfx::IndexBufferHandle ib = BGFX_INVALID_HANDLE;
         uint32_t indexCount = 0;
+        b2BodyId staticBody{0}; // 该 chunk 的静态地形刚体（每 tile 一个 box）
         bool valid() const { return bgfx::isValid(vb) && bgfx::isValid(ib) && indexCount>0; }
     };
     const int chunkSize = 32;
@@ -208,6 +210,36 @@ int main(int /*argc*/, char* /*argv*/[])
     physics.setDebrisLimit(800);
     physics.createBounds(0.0f, 0.0f, (float)mapCfg.width, (float)mapCfg.height + 10.0f, 1.0f);
 
+    // 根据当前瓦片为每个 chunk 生成简易静态碰撞体（每 tile 一个 box）
+    auto buildChunkPhysics = [&](int cx, int cy){
+        if (cx < 0 || cy < 0) return;
+        const int idx = cy * cxCount + cx; if (idx < 0 || idx >= (int)chunks.size()) return;
+        auto& ch = chunks[(size_t)idx];
+        if (b2Body_IsValid(ch.staticBody)) b2DestroyBody(ch.staticBody);
+        // 统计是否有实体 tile
+        const int x0i = cx * chunkSize;
+        const int y0i = cy * chunkSize;
+        const int x1i = (x0i + chunkSize > mapCfg.width ? mapCfg.width : x0i + chunkSize);
+        const int y1i = (y0i + chunkSize > mapCfg.height ? mapCfg.height : y0i + chunkSize);
+        bool any = false;
+        for (int y = y0i; y < y1i && !any; ++y)
+            for (int x = x0i; x < x1i; ++x) if (tilemap.get(x,y) != Tina::Game::TileType::Air){ any = true; break; }
+        if (!any) { ch.staticBody = {0}; return; }
+        b2BodyDef bd = b2DefaultBodyDef(); bd.type = b2_staticBody;
+        ch.staticBody = b2CreateBody(physics.world(), &bd);
+        b2ShapeDef sd = b2DefaultShapeDef(); sd.density = 0.0f; sd.material.friction = 0.9f; sd.material.restitution = 0.0f;
+        for (int y = y0i; y < y1i; ++y) {
+            for (int x = x0i; x < x1i; ++x) {
+                if (tilemap.get(x,y) == Tina::Game::TileType::Air) continue;
+                b2Polygon poly = b2MakeOffsetBox(0.5f, 0.5f, b2Vec2{(float)x+0.5f,(float)y+0.5f}, b2Rot_identity);
+                (void)b2CreatePolygonShape(ch.staticBody, &sd, &poly);
+            }
+        }
+    };
+    // 初次为所有 chunk 构建静态体
+    for (int cy = 0; cy < cyCount; ++cy)
+        for (int cx = 0; cx < cxCount; ++cx) buildChunkPhysics(cx, cy);
+
     // 重建指定 chunk（当瓦片变化时调用）
     auto rebuildChunk = [&](int cx, int cy){
         if (cx < 0 || cy < 0) return;
@@ -248,28 +280,51 @@ int main(int /*argc*/, char* /*argv*/[])
             ch.ib = bgfx::createIndexBuffer(memi, BGFX_BUFFER_INDEX32);
             ch.indexCount = (uint32_t)idxv.size();
         }
+        // 同步重建物理静态体
+        buildChunkPhysics(cx, cy);
     };
 
-    // 爆炸：移除半径内的 tile，生成物理碎块，并重建受影响的 chunk
+    // 爆炸：移除半径内的 tile，采样生成有限数量的物理碎块，并重建受影响的 chunk
     auto explodeAt = [&](float wx, float wy, float radius){
+        struct SpawnCand { float cx, cy; float r,g,b,a; float weight; };
+        Tina::Container::Vector<SpawnCand> cands;
         const float r2 = radius*radius;
         const int x0 = (int)std::max(0, (int)std::floor(wx - radius));
         const int y0 = (int)std::max(0, (int)std::floor(wy - radius));
         const int x1 = (int)std::min(mapCfg.width-1, (int)std::ceil(wx + radius));
         const int y1 = (int)std::min(mapCfg.height-1, (int)std::ceil(wy + radius));
+        cands.reserve((size_t)(x1-x0+1)*(y1-y0+1));
         for (int y = y0; y <= y1; ++y) {
             for (int x = x0; x <= x1; ++x) {
                 const float cx = x + 0.5f, cy = y + 0.5f;
                 const float dx = cx - wx, dy = cy - wy;
-                if (dx*dx + dy*dy > r2) continue;
+                const float d2 = dx*dx + dy*dy;
+                if (d2 > r2) continue;
                 auto t = tilemap.get(x,y);
                 if (t == Tina::Game::TileType::Air) continue;
+                // 清除 tile（所有命中均清除）
                 tilemap.set(x,y, Tina::Game::TileType::Air);
                 const auto c = tileColor(t);
-                const float len = std::sqrt(dx*dx + dy*dy) + 1e-3f;
-                const float nx = dx/len, ny = dy/len;
+                const float len = std::sqrt(std::max(d2, 1e-6f));
                 const float speed = 20.0f * (1.0f - (len/radius)*0.5f);
-                physics.spawnDebris(cx, cy, 0.9f, c[0], c[1], c[2], c[3], nx*speed, ny*speed);
+                cands.push_back({cx,cy, c[0],c[1],c[2],c[3], speed});
+            }
+        }
+        // 采样生成碎块，限制单次爆炸的碎块数量
+        const int maxSpawn = 300;
+        const int total = (int)cands.size();
+        if (total > 0) {
+            const int spawn = std::min(maxSpawn, total);
+            const float step = (float)total / (float)spawn;
+            float acc = 0.0f;
+            for (int i = 0; i < spawn; ++i) {
+                int idx = (int)acc; if (idx >= total) idx = total - 1;
+                const auto& s = cands[(size_t)idx];
+                const float dx = s.cx - wx, dy = s.cy - wy;
+                const float len = std::sqrt(dx*dx + dy*dy) + 1e-6f;
+                const float nx = dx/len, ny = dy/len;
+                physics.spawnDebris(s.cx, s.cy, 0.9f, s.r, s.g, s.b, s.a, nx*s.weight, ny*s.weight);
+                acc += step;
             }
         }
         const int cx0 = x0 / chunkSize; const int cx1 = x1 / chunkSize;
@@ -389,10 +444,18 @@ int main(int /*argc*/, char* /*argv*/[])
 
         renderer.beginFrame();
         pipeline.begin();
-        // 相机：设置视图/投影
-        float view_mtx[16], proj_mtx[16];
-        camera.buildViewProj(view_mtx, proj_mtx);
-        bgfx::setViewTransform(0, view_mtx, proj_mtx);
+        // 相机：设置视图/投影（view0: 像素对齐用于地图；view1: 非对齐用于动态碎块）
+        float view_unsnapped[16], proj_mtx[16];
+        camera.buildViewProj(view_unsnapped, proj_mtx);
+        // 像素对齐（仅针对地图）：将相机位置按“每像素的世界单位”对齐，以减少栅格闪烁/走样
+        const float stepX = camera.viewW() / (float)camera.vpW();
+        const float stepY = camera.viewH() / (float)camera.vpH();
+        const float camXsnap = std::floor(camera.x() / stepX) * stepX;
+        const float camYsnap = std::floor(camera.y() / stepY) * stepY;
+        float view_snapped[16]; bx::mtxTranslate(view_snapped, -camXsnap, -camYsnap, 0.0f);
+        // 设置两个视图的矩阵
+        bgfx::setViewTransform(0, view_snapped,   proj_mtx);
+        bgfx::setViewTransform(1, view_unsnapped, proj_mtx);
 
         // 计算视区（世界坐标）
         const float vx0 = camera.x();
@@ -410,7 +473,7 @@ int main(int /*argc*/, char* /*argv*/[])
                 enc->setVertexBuffer(0, ch.vb);
                 enc->setIndexBuffer(ch.ib);
                 enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
-                enc->submit(0, prog_color);
+                enc->submit(0, prog_color); // 地图使用视图0（像素对齐）
                 bgfx::end(enc);
             }
         }
@@ -461,7 +524,7 @@ int main(int /*argc*/, char* /*argv*/[])
                         enc->setVertexBuffer(0, &tvb);
                         enc->setIndexBuffer(&tib);
                         enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
-                        enc->submit(0, prog_color);
+                        enc->submit(1, prog_color); // 碎块使用视图1（非对齐）
                         bgfx::end(enc);
                     }
                 }
