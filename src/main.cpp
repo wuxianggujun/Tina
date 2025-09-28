@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
+#include <bx/math.h>
 #include <thread>
 #include <chrono>
 #include "core/Log.hpp"
@@ -14,6 +15,7 @@
 #include "renderer/Pipeline.hpp"
 #include "renderer/ShaderManager.hpp"
 #include "core/Time.hpp"
+#include "game/TileMap.hpp"
 
 using Tina::os::Event;
 
@@ -101,6 +103,12 @@ int main(int /*argc*/, char* /*argv*/[])
     }
     bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
     ResetBgfxWithSize(pxW, pxH, init.resolution.reset);
+    // 设置视图/投影矩阵（相机）：这里使用单位矩阵，顶点坐标已在 NDC 空间
+    {
+        float view_mtx[16]; bx::mtxIdentity(view_mtx);
+        float proj_mtx[16]; bx::mtxIdentity(proj_mtx);
+        bgfx::setViewTransform(0, view_mtx, proj_mtx);
+    }
 
     // 3.x) 初始化 Renderer/Pipeline
     Tina::Gfx::Renderer renderer; renderer.setDisplaySize(pxW, pxH);
@@ -110,8 +118,69 @@ int main(int /*argc*/, char* /*argv*/[])
     // 3.x.1) 创建着色器管理器并加载着色器程序
     Tina::renderer::ShaderManager shaderManager;
     shaderManager.initialize(); // 使用默认路径 "resources/shaders"
-    
     bgfx::ProgramHandle prog_flat = shaderManager.loadProgram("flat", "flat");
+    bgfx::ProgramHandle prog_color = shaderManager.loadProgram("color", "color");
+
+    // 3.x.2) 生成一个简易泰拉瑞亚风格的颜色方块地图，并构建网格
+    struct ColorVertex { float x, y, z; float r, g, b, a; };
+    bgfx::VertexLayout colorLayout;
+    colorLayout.begin()
+        .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Float)
+    .end();
+
+    Tina::Game::TileMapConfig mapCfg; mapCfg.width = 160; mapCfg.height = 90; // 16:9
+    Tina::Game::TileMap tilemap(mapCfg);
+    tilemap.generate();
+
+    Tina::Container::Vector<ColorVertex> verts;
+    Tina::Container::Vector<uint32_t> indices;
+    verts.reserve((size_t)mapCfg.width * mapCfg.height * 4);
+    indices.reserve((size_t)mapCfg.width * mapCfg.height * 6);
+
+    auto tileColor = [](Tina::Game::TileType t)->Tina::Container::Array<float,4>{
+        switch (t) {
+            case Tina::Game::TileType::Grass: return { {0.18f, 0.72f, 0.28f, 1.0f} };
+            case Tina::Game::TileType::Dirt:  return { {0.55f, 0.38f, 0.22f, 1.0f} };
+            case Tina::Game::TileType::Stone: return { {0.55f, 0.55f, 0.58f, 1.0f} };
+            default:                          return { {0.0f,  0.0f,  0.0f,  0.0f} };
+        }
+    };
+
+    // 将 tile 坐标映射到 NDC [-1,1]
+    const float sx = 2.0f / float(mapCfg.width);
+    const float sy = 2.0f / float(mapCfg.height);
+    for (int y = 0; y < mapCfg.height; ++y) {
+        for (int x = 0; x < mapCfg.width; ++x) {
+            Tina::Game::TileType t = tilemap.get(x, y);
+            if (t == Tina::Game::TileType::Air) continue;
+            const auto c = tileColor(t);
+            const float x0 = -1.0f + x * sx;
+            const float y0 = -1.0f + y * sy;
+            const float x1 = x0 + sx;
+            const float y1 = y0 + sy;
+            const uint32_t base = (uint32_t)verts.size();
+            verts.push_back({ x0, y0, 0.0f, c[0], c[1], c[2], c[3] });
+            verts.push_back({ x1, y0, 0.0f, c[0], c[1], c[2], c[3] });
+            verts.push_back({ x1, y1, 0.0f, c[0], c[1], c[2], c[3] });
+            verts.push_back({ x0, y1, 0.0f, c[0], c[1], c[2], c[3] });
+            indices.push_back(base + 0);
+            indices.push_back(base + 1);
+            indices.push_back(base + 2);
+            indices.push_back(base + 0);
+            indices.push_back(base + 2);
+            indices.push_back(base + 3);
+        }
+    }
+
+    bgfx::VertexBufferHandle vb_tiles = BGFX_INVALID_HANDLE;
+    bgfx::IndexBufferHandle ib_tiles = BGFX_INVALID_HANDLE;
+    if (!verts.empty()) {
+        const bgfx::Memory* memv = bgfx::copy(verts.data(), (uint32_t)(verts.size() * sizeof(ColorVertex)));
+        vb_tiles = bgfx::createVertexBuffer(memv, colorLayout);
+        const bgfx::Memory* memi = bgfx::copy(indices.data(), (uint32_t)(indices.size() * sizeof(uint32_t)));
+        ib_tiles = bgfx::createIndexBuffer(memi, BGFX_BUFFER_INDEX32);
+    }
 
     // 3.5) 初始化资源系统（异步文件系统 + 资源 Hub/Manager）
     using namespace Tina::Engine;
@@ -162,6 +231,13 @@ int main(int /*argc*/, char* /*argv*/[])
                     running = false; break;
                 case Event::Type::WINDOW_SIZE:
                     ResetBgfxWithSize(ev.win_size.w, ev.win_size.h, init.resolution.reset);
+                    pipeline.setViewport(ev.win_size.w, ev.win_size.h);
+                    // 若使用相机投影，这里也应更新投影矩阵
+                    {
+                        float view_mtx[16]; bx::mtxIdentity(view_mtx);
+                        float proj_mtx[16]; bx::mtxIdentity(proj_mtx);
+                        bgfx::setViewTransform(0, view_mtx, proj_mtx);
+                    }
                     break;
                 case Event::Type::KEY:
                     if (ev.key.down) {
@@ -198,25 +274,31 @@ int main(int /*argc*/, char* /*argv*/[])
 
         renderer.beginFrame();
         pipeline.begin();
-        // 提交一个屏幕空间三角形
-        bgfx::VertexLayout layout;
-        layout.begin()
-            .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
-        .end();
-        struct Pos { float x, y, z; };
-        const Pos verts[3] = {
-            { -0.7f, -0.7f, 0.0f },
-            {  0.7f, -0.7f, 0.0f },
-            {  0.0f,  0.7f, 0.0f },
-        };
-        bgfx::TransientVertexBuffer tvb;
-        bgfx::allocTransientVertexBuffer(&tvb, 3, layout);
-        memcpy(tvb.data, verts, sizeof(verts));
-        bgfx::Encoder* enc = renderer.getEncoder();
-        enc->setVertexBuffer(0, &tvb);
-        enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_CULL_CCW);
-        enc->submit(0, prog_flat);
-        bgfx::end(enc);
+        // 提交 TileMap 网格（颜色方块）
+        if (bgfx::isValid(vb_tiles) && bgfx::isValid(ib_tiles) && bgfx::isValid(prog_color)) {
+            bgfx::Encoder* enc = renderer.getEncoder();
+            enc->setVertexBuffer(0, vb_tiles);
+            enc->setIndexBuffer(ib_tiles);
+            enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+            enc->submit(0, prog_color);
+            bgfx::end(enc);
+        } else {
+            // 退化路径：无法创建网格时，用原三角形占位
+            bgfx::VertexLayout layout;
+            layout.begin().add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float).end();
+            struct Pos { float x, y, z; };
+            const Pos tri[3] = {{-0.7f,-0.7f,0},{0.7f,-0.7f,0},{0,0.7f,0}};
+            bgfx::TransientVertexBuffer tvb;
+            if (bgfx::getAvailTransientVertexBuffer(3, layout) >= 3) {
+                bgfx::allocTransientVertexBuffer(&tvb, 3, layout);
+                memcpy(tvb.data, tri, sizeof(tri));
+                bgfx::Encoder* enc = renderer.getEncoder();
+                enc->setVertexBuffer(0, &tvb);
+                enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+                enc->submit(0, prog_flat);
+                bgfx::end(enc);
+            }
+        }
         pipeline.submit();
         
         renderer.endFrame();
@@ -246,6 +328,8 @@ int main(int /*argc*/, char* /*argv*/[])
     }
 
     // 5) 清理：先销毁依赖 bgfx 资源的对象/句柄，再关闭 bgfx
+    if (bgfx::isValid(vb_tiles)) bgfx::destroy(vb_tiles);
+    if (bgfx::isValid(ib_tiles)) bgfx::destroy(ib_tiles);
     shaderManager.cleanup();
     // 额外提交一帧，确保销毁命令被渲染线程消费
     bgfx::frame();

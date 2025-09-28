@@ -5,6 +5,8 @@ set(SRC_FILES
     engine/FileSystem.cpp
     core/Path.cpp
     core/EASTLAlloc.cpp
+    game/TileMap.hpp
+    game/TileMap.cpp
     renderer/Renderer.hpp
     renderer/Pipeline.hpp
     renderer/SortKey.hpp
@@ -21,8 +23,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 # 着色器编译 - 使用 ShaderUtils，在构建目录的 resources/shaders 生成运行期 .bin
 include(ShaderUtils)
-# 仅编译 flat 着色器（按你的命名约定 <name>_vs/_fs）
-add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat)
+# 仅编译所需着色器（按命名约定 <name>_vs/_fs）
+add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color)
 # 确保在可执行文件之前生成着色器
 add_dependencies(${PROJECT_NAME} shaders)
 
