@@ -20,6 +20,7 @@
 #include <EASTL/weak_ptr.h>
 #include <EASTL/functional.h>
 #include <EASTL/algorithm.h>
+#include <EASTL/sort.h>
 #include <EASTL/utility.h>
 #include <EASTL/memory.h>
 

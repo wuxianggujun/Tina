@@ -6,17 +6,14 @@
 #include "OS.hpp"
 
 #include <SDL3/SDL.h>
-#include <deque>
 #include <cstdint>
-#include <unordered_map>
-#include <vector>
-#include <string>
+#include "../core/Container.hpp"
 
 namespace Tina::os {
 
     namespace {
         struct EventQueue {
-            std::deque<Event> q;
+            Tina::Container::Deque<Event> q;
             bool pop(Event& out) {
                 if (q.empty()) return false;
                 out = q.front();
@@ -31,14 +28,14 @@ namespace Tina::os {
             void* user = nullptr;
         };
 
-        std::unordered_map<SDL_Window*, HitTestCtx> g_hittest;
+        Tina::Container::HashMap<SDL_Window*, HitTestCtx> g_hittest;
 
         struct DropData {
-            std::vector<std::string> files;
+            Tina::Container::Vector<Tina::Container::String> files;
         };
 
         // 进行中的拖拽会话，按 windowID 管理
-        std::unordered_map<SDL_WindowID, DropData*> g_drop_sessions;
+        Tina::Container::HashMap<SDL_WindowID, DropData*> g_drop_sessions;
 
         static SDL_HitTestResult SDLCALL sdl_hit_test(SDL_Window* win, const SDL_Point* area, void* data) {
             HitTestCtx* ctx = (HitTestCtx*)data;
@@ -186,7 +183,7 @@ namespace Tina::os {
                         SDL_WindowID wid = e.drop.windowID;
                         auto it = g_drop_sessions.find(wid);
                         if (it != g_drop_sessions.end() && e.drop.data) {
-                            it->second->files.emplace_back(e.drop.data);
+                            it->second->files.emplace_back(Tina::Container::String(e.drop.data));
                         }
                     } break;
                     case SDL_EVENT_DROP_COMPLETE: {

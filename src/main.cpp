@@ -245,7 +245,10 @@ int main(int /*argc*/, char* /*argv*/[])
         }
     }
 
-    // 5) 清理
+    // 5) 清理：先销毁依赖 bgfx 资源的对象/句柄，再关闭 bgfx
+    shaderManager.cleanup();
+    // 额外提交一帧，确保销毁命令被渲染线程消费
+    bgfx::frame();
     bgfx::shutdown();
     Tina::os::destroyWindow(window);
     TINA_INFO("退出 Tina");

@@ -4,6 +4,7 @@ set(SRC_FILES
     engine/Resource.hpp
     engine/FileSystem.cpp
     core/Path.cpp
+    core/EASTLAlloc.cpp
     renderer/Renderer.hpp
     renderer/Pipeline.hpp
     renderer/SortKey.hpp

@@ -9,7 +9,7 @@
 #include "Renderer.hpp"
 #include "SortKey.hpp"
 #include "../core/Math.hpp"
-#include <vector>
+#include "../core/Container.hpp"
 #include <algorithm>
 
 namespace Tina::Gfx {
@@ -57,8 +57,7 @@ public:
 private:
     Renderer& m_renderer;
     Tina::Math::IVec2 m_viewport{1280, 720};
-    std::vector<DrawItem> m_items;
+    Tina::Container::Vector<DrawItem> m_items;
 };
 
 } // namespace Tina::Gfx
-

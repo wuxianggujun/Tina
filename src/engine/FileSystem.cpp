@@ -6,7 +6,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
-#include <queue>
+#include "../core/Container.hpp"
 #include <fstream>
 
 namespace Tina::Engine {
@@ -38,10 +38,11 @@ struct FileSystemImpl : FileSystem {
     }
 
     void processCallbacks() override {
-        std::queue<FinishedItem> local;
+        Tina::Container::Queue<FinishedItem> local;
         {
             std::lock_guard<std::mutex> lk(m_finished_mtx);
-            std::swap(local, m_finished);
+            // eastl::queue 不支持 std::swap 完整容器语义，改为逐个移动
+            while (!m_finished.empty()) { local.push(std::move(m_finished.front())); m_finished.pop(); }
         }
         while (!local.empty()) {
             FinishedItem it = std::move(local.front()); local.pop();
@@ -77,14 +78,14 @@ struct FileSystemImpl : FileSystem {
     }
 
     std::thread m_worker;
-    std::mutex m_mtx; std::condition_variable m_cv; std::queue<AsyncItem> m_queue; bool m_quit = false;
-    std::mutex m_finished_mtx; std::queue<FinishedItem> m_finished;
+    std::mutex m_mtx; std::condition_variable m_cv; Tina::Container::Queue<AsyncItem> m_queue; bool m_quit = false;
+    std::mutex m_finished_mtx; Tina::Container::Queue<FinishedItem> m_finished;
     Tina::u64 m_next_id = 10;
 };
 
 // 工厂函数（暴露给主程序使用）
-std::unique_ptr<FileSystem> CreateFileSystem() {
-    return std::make_unique<FileSystemImpl>();
+Tina::Container::UniquePtr<FileSystem> CreateFileSystem() {
+    return Tina::Container::MakeUnique<FileSystemImpl>();
 }
 
 } // namespace Tina::Engine

@@ -13,11 +13,9 @@
 #include "../core/Hash.hpp"
 #include "../core/Path.hpp"
 #include <functional>
-#include <string>
-#include <unordered_map>
-#include <vector>
-#include <memory>
 #include <cctype>
+#include "../core/Container.hpp"
+#include "../core/Container.hpp"
 
 namespace Tina::Engine {
 
@@ -37,7 +35,7 @@ struct ResourceType {
 
 // 异步文件系统接口
 struct FileSystem {
-    using Content = std::vector<Tina::u8>;
+    using Content = Tina::Container::Vector<Tina::u8>;
     using ContentCallback = std::function<void(const Content&, bool)>; // 主线程回调
     struct AsyncHandle { Tina::u64 id = 0; bool valid() const { return id != 0; } };
     virtual ~FileSystem() = default;
@@ -45,8 +43,8 @@ struct FileSystem {
     virtual void processCallbacks() = 0; // 每帧驱动
 };
 
-// 工厂：由实现文件提供
-std::unique_ptr<FileSystem> CreateFileSystem();
+// 工厂：由实现文件提供（统一 EASTL 智能指针）
+Tina::Container::UniquePtr<FileSystem> CreateFileSystem();
 
 // 资源抽象
 class Resource {
@@ -102,12 +100,12 @@ public:
 
     Resource* load(const Path& path) {
         if (path.isEmpty()) return nullptr;
-        std::string key(path.c_str());
+        Tina::Container::String key(path.c_str());
         auto it = m_resources.find(key);
         if (it != m_resources.end()) { it->second->incRefCount(); return it->second.get(); }
-        std::unique_ptr<Resource> res(createResource(path));
+        Tina::Container::UniquePtr<Resource> res(createResource(path));
         Resource* out = res.get();
-        m_resources.emplace(std::move(key), std::move(res));
+        m_resources.emplace(Tina::Container::String(path.c_str()), std::move(res));
         out->incRefCount();
         out->requestLoad(m_fs);
         return out;
@@ -131,7 +129,7 @@ public:
 
 protected:
     FileSystem& m_fs;
-    std::unordered_map<std::string, std::unique_ptr<Resource>> m_resources;
+    Tina::Container::HashMap<Tina::Container::String, Tina::Container::UniquePtr<Resource>> m_resources;
 };
 
 // Hub：将类型映射到具体管理器
@@ -145,7 +143,7 @@ public:
     void reloadAll() { for (auto& kv : m_rms) kv.second->reloadAll(); }
     void update() { for (auto& kv : m_rms) kv.second->update(); }
 private:
-    std::unordered_map<Tina::u64, ResourceManager*> m_rms;
+    Tina::Container::HashMap<Tina::u64, ResourceManager*> m_rms;
 };
 
 // 示例资源：Blob（原样字节），便于快速验证系统
@@ -155,7 +153,7 @@ struct BlobResource : Resource {
     ResourceType getType() const override { return TYPE; }
     bool load(const FileSystem::Content& blob) override { data = blob; return true; }
     void unload() override { data.clear(); }
-    std::vector<Tina::u8> data;
+    Tina::Container::Vector<Tina::u8> data;
 };
 
 // Blob 管理器
