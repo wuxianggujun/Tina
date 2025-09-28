@@ -190,8 +190,12 @@ int main(int /*argc*/, char* /*argv*/[])
                         const bool isWaterTile = (t == Tina::Game::TileType::Water);
                         float hC = isWaterTile ? 1.0f : (wv / 255.0f);
                         if (hC > 0.001f || isWaterTile) {
-                            float hL = isWaterTile ? 1.0f : (wvL / 255.0f);
-                            float hR = isWaterTile ? 1.0f : (wvR / 255.0f);
+                            Tina::Game::TileType lt = (x>0) ? tilemap.get(x-1,y) : Tina::Game::TileType::Stone;
+                            Tina::Game::TileType rt = (x<mapCfg.width-1) ? tilemap.get(x+1,y) : Tina::Game::TileType::Stone;
+                            float hL = isWaterTile ? 1.0f : ((lt == Tina::Game::TileType::Air) ? (wvL / 255.0f) : hC);
+                            float hR = isWaterTile ? 1.0f : ((rt == Tina::Game::TileType::Air) ? (wvR / 255.0f) : hC);
+                            Tina::Game::TileType up = (y<mapCfg.height-1) ? tilemap.get(x,y+1) : Tina::Game::TileType::Stone;
+                            if (up != Tina::Game::TileType::Air) { hC = hL = hR = 1.0f; }
                             const float topL = std::min(1.0f, std::max(0.0f, 0.5f*(hC + hL)));
                             const float topR = std::min(1.0f, std::max(0.0f, 0.5f*(hC + hR)));
                             const float x0 = (float)x, y0 = (float)y, x1 = x0 + 1.0f;
@@ -337,8 +341,12 @@ int main(int /*argc*/, char* /*argv*/[])
                     const bool isWaterTile = (t == Tina::Game::TileType::Water);
                     float hC = isWaterTile ? 1.0f : (wv / 255.0f);
                     if (hC > 0.001f || isWaterTile) {
-                        float hL = isWaterTile ? 1.0f : (wvL / 255.0f);
-                        float hR = isWaterTile ? 1.0f : (wvR / 255.0f);
+                        Tina::Game::TileType lt = (x>0) ? tilemap.get(x-1,y) : Tina::Game::TileType::Stone;
+                        Tina::Game::TileType rt = (x<mapCfg.width-1) ? tilemap.get(x+1,y) : Tina::Game::TileType::Stone;
+                        float hL = isWaterTile ? 1.0f : ((lt == Tina::Game::TileType::Air) ? (wvL / 255.0f) : hC);
+                        float hR = isWaterTile ? 1.0f : ((rt == Tina::Game::TileType::Air) ? (wvR / 255.0f) : hC);
+                        Tina::Game::TileType up = (y<mapCfg.height-1) ? tilemap.get(x,y+1) : Tina::Game::TileType::Stone;
+                        if (up != Tina::Game::TileType::Air) { hC = hL = hR = 1.0f; }
                         const float topL = std::min(1.0f, std::max(0.0f, 0.5f*(hC + hL)));
                         const float topR = std::min(1.0f, std::max(0.0f, 0.5f*(hC + hR)));
                         const float x0 = (float)x, y0 = (float)y, x1 = x0+1.0f;
