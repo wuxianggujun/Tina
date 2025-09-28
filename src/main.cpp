@@ -224,14 +224,18 @@ int main(int /*argc*/, char* /*argv*/[])
         const int y1i = (y0i + chunkSize > mapCfg.height ? mapCfg.height : y0i + chunkSize);
         bool any = false;
         for (int y = y0i; y < y1i && !any; ++y)
-            for (int x = x0i; x < x1i; ++x) if (tilemap.get(x,y) != Tina::Game::TileType::Air){ any = true; break; }
+            for (int x = x0i; x < x1i; ++x) {
+                auto tt = tilemap.get(x,y);
+                if (tt != Tina::Game::TileType::Air && tt != Tina::Game::TileType::Water) { any = true; break; }
+            }
         if (!any) { ch.staticBody = {0}; return; }
         b2BodyDef bd = b2DefaultBodyDef(); bd.type = b2_staticBody;
         ch.staticBody = b2CreateBody(physics.world(), &bd);
         b2ShapeDef sd = b2DefaultShapeDef(); sd.density = 0.0f; sd.material.friction = 0.9f; sd.material.restitution = 0.0f;
         for (int y = y0i; y < y1i; ++y) {
             for (int x = x0i; x < x1i; ++x) {
-                if (tilemap.get(x,y) == Tina::Game::TileType::Air) continue;
+                auto tt2 = tilemap.get(x,y);
+                if (tt2 == Tina::Game::TileType::Air || tt2 == Tina::Game::TileType::Water) continue;
                 b2Polygon poly = b2MakeOffsetBox(0.5f, 0.5f, b2Vec2{(float)x+0.5f,(float)y+0.5f}, b2Rot_identity);
                 (void)b2CreatePolygonShape(ch.staticBody, &sd, &poly);
             }
@@ -439,9 +443,11 @@ int main(int /*argc*/, char* /*argv*/[])
 
         // 固定逻辑步（物理更新）
         ticker.step([&](double fixed_dt){
+            // 衰减碎块寿命（秒）并渐隐/过期移除
+            physics.decayDebris((float)fixed_dt);
             // 先更新水体的元胞自动机（让湖水向空洞流动）
             int wx0=0, wy0=0, wx1=-1, wy1=-1;
-            if (tilemap.stepWater(1, wx0, wy0, wx1, wy1)) {
+            if (tilemap.stepWater(3, wx0, wy0, wx1, wy1)) {
                 const int cx0 = std::max(0, wx0 / chunkSize);
                 const int cy0 = std::max(0, wy0 / chunkSize);
                 const int cx1 = std::min(cxCount - 1, wx1 / chunkSize);
@@ -512,7 +518,7 @@ int main(int /*argc*/, char* /*argv*/[])
                 bgfx::Encoder* enc = renderer.getEncoder();
                 enc->setVertexBuffer(0, ch.vb);
                 enc->setIndexBuffer(ch.ib);
-                enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+                enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
                 enc->submit(0, prog_color); // 地图使用视图0（像素对齐）
                 bgfx::end(enc);
             }
@@ -563,7 +569,7 @@ int main(int /*argc*/, char* /*argv*/[])
                         bgfx::Encoder* enc = renderer.getEncoder();
                         enc->setVertexBuffer(0, &tvb);
                         enc->setIndexBuffer(&tib);
-                        enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+                        enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
                         enc->submit(1, prog_color); // 碎块使用视图1（非对齐）
                         bgfx::end(enc);
                     }

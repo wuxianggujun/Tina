@@ -67,7 +67,8 @@ void Physics2D::createBounds(float minx, float miny, float maxx, float maxy, flo
 }
 
 Debris* Physics2D::spawnDebris(float cx, float cy, float size, float r, float g, float b, float a,
-                               float vx, float vy, float density, float friction, float restitution)
+                               float vx, float vy, float density, float friction, float restitution,
+                               float ttlSeconds)
 {
     b2BodyDef bd = b2DefaultBodyDef();
     bd.type = b2_dynamicBody;
@@ -86,8 +87,28 @@ Debris* Physics2D::spawnDebris(float cx, float cy, float size, float r, float g,
     b2Body_SetAngularVelocity(body, (vx*vy) * 0.05f);
 
     Debris d; d.body = body; d.r = r; d.g = g; d.b = b; d.a = a; d.size = size;
+    d.life = ttlSeconds; d.lifeMax = ttlSeconds; d.a0 = a;
     m_debris.push_back(d);
     return &m_debris.back();
+}
+
+void Physics2D::decayDebris(float dt)
+{
+    for (size_t i = 0; i < m_debris.size(); ) {
+        Debris& d = m_debris[i];
+        if (!b2Body_IsValid(d.body)) { m_debris.erase(m_debris.begin() + (eastl_size_t)i); continue; }
+        if (d.lifeMax > 0.0f) {
+            d.life -= dt;
+            const float k = (d.life > 0.0f) ? (d.life / d.lifeMax) : 0.0f;
+            d.a = d.a0 * k; // 渐隐
+        }
+        if (d.lifeMax > 0.0f && d.life <= 0.0f) {
+            b2DestroyBody(d.body);
+            m_debris.erase(m_debris.begin() + (eastl_size_t)i);
+        } else {
+            ++i;
+        }
+    }
 }
 
 void Physics2D::cleanupDebris()
