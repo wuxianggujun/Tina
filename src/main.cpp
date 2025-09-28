@@ -7,6 +7,8 @@
 #include <bx/math.h>
 #include <thread>
 #include <chrono>
+#include <cmath>
+#include <algorithm>
 #include "core/Log.hpp"
 #include "os/OS.hpp"
 #include "engine/Resource.hpp"
@@ -17,6 +19,7 @@
 #include "core/Time.hpp"
 #include "game/TileMap.hpp"
 #include "game/Camera2D.hpp"
+#include "physics/Physics2D.hpp"
 
 using Tina::os::Event;
 
@@ -200,6 +203,81 @@ int main(int /*argc*/, char* /*argv*/[])
     camera.setViewHeightWorld((float)mapCfg.height); // 初始：纵向完全显示
     camera.setPosition(0.0f, 0.0f);
 
+    // 物理世界（Box2D）：重力向下，创建边界包围整个地图
+    Tina::Physics::Physics2D physics(-30.0f);
+    physics.createBounds(0.0f, 0.0f, (float)mapCfg.width, (float)mapCfg.height + 10.0f, 1.0f);
+
+    // 重建指定 chunk（当瓦片变化时调用）
+    auto rebuildChunk = [&](int cx, int cy){
+        if (cx < 0 || cy < 0) return;
+        const int idx = cy * cxCount + cx;
+        if (idx < 0 || idx >= (int)chunks.size()) return;
+        auto& ch = chunks[(size_t)idx];
+        if (bgfx::isValid(ch.vb)) { bgfx::destroy(ch.vb); ch.vb = BGFX_INVALID_HANDLE; }
+        if (bgfx::isValid(ch.ib)) { bgfx::destroy(ch.ib); ch.ib = BGFX_INVALID_HANDLE; }
+        ch.indexCount = 0;
+
+        const int x0i = cx * chunkSize;
+        const int y0i = cy * chunkSize;
+        const int x1i = (x0i + chunkSize > mapCfg.width ? mapCfg.width : x0i + chunkSize);
+        const int y1i = (y0i + chunkSize > mapCfg.height ? mapCfg.height : y0i + chunkSize);
+        Tina::Container::Vector<ColorVertex> v;
+        Tina::Container::Vector<uint32_t>    idxv;
+        v.reserve((size_t)(x1i-x0i)*(y1i-y0i));
+        idxv.reserve(v.capacity()*6);
+        for (int y = y0i; y < y1i; ++y) {
+            for (int x = x0i; x < x1i; ++x) {
+                auto t = tilemap.get(x,y);
+                if (t == Tina::Game::TileType::Air) continue;
+                const auto c = tileColor(t);
+                const float x0 = (float)x, y0 = (float)y, x1 = x0+1.0f, y1 = y0+1.0f;
+                const uint32_t base = (uint32_t)v.size();
+                v.push_back({ x0, y0, 0.0f, c[0], c[1], c[2], c[3] });
+                v.push_back({ x1, y0, 0.0f, c[0], c[1], c[2], c[3] });
+                v.push_back({ x1, y1, 0.0f, c[0], c[1], c[2], c[3] });
+                v.push_back({ x0, y1, 0.0f, c[0], c[1], c[2], c[3] });
+                idxv.push_back(base+0); idxv.push_back(base+1); idxv.push_back(base+2);
+                idxv.push_back(base+0); idxv.push_back(base+2); idxv.push_back(base+3);
+            }
+        }
+        if (!v.empty()) {
+            const bgfx::Memory* memv = bgfx::copy(v.data(), (uint32_t)(v.size()*sizeof(ColorVertex)));
+            ch.vb = bgfx::createVertexBuffer(memv, colorLayout);
+            const bgfx::Memory* memi = bgfx::copy(idxv.data(), (uint32_t)(idxv.size()*sizeof(uint32_t)));
+            ch.ib = bgfx::createIndexBuffer(memi, BGFX_BUFFER_INDEX32);
+            ch.indexCount = (uint32_t)idxv.size();
+        }
+    };
+
+    // 爆炸：移除半径内的 tile，生成物理碎块，并重建受影响的 chunk
+    auto explodeAt = [&](float wx, float wy, float radius){
+        const float r2 = radius*radius;
+        const int x0 = (int)std::max(0, (int)std::floor(wx - radius));
+        const int y0 = (int)std::max(0, (int)std::floor(wy - radius));
+        const int x1 = (int)std::min(mapCfg.width-1, (int)std::ceil(wx + radius));
+        const int y1 = (int)std::min(mapCfg.height-1, (int)std::ceil(wy + radius));
+        for (int y = y0; y <= y1; ++y) {
+            for (int x = x0; x <= x1; ++x) {
+                const float cx = x + 0.5f, cy = y + 0.5f;
+                const float dx = cx - wx, dy = cy - wy;
+                if (dx*dx + dy*dy > r2) continue;
+                auto t = tilemap.get(x,y);
+                if (t == Tina::Game::TileType::Air) continue;
+                tilemap.set(x,y, Tina::Game::TileType::Air);
+                const auto c = tileColor(t);
+                const float len = std::sqrt(dx*dx + dy*dy) + 1e-3f;
+                const float nx = dx/len, ny = dy/len;
+                const float speed = 20.0f * (1.0f - (len/radius)*0.5f);
+                physics.spawnDebris(cx, cy, 0.9f, c[0], c[1], c[2], c[3], nx*speed, ny*speed);
+            }
+        }
+        const int cx0 = x0 / chunkSize; const int cx1 = x1 / chunkSize;
+        const int cy0 = y0 / chunkSize; const int cy1 = y1 / chunkSize;
+        for (int cyi = cy0; cyi <= cy1; ++cyi) {
+            for (int cxi = cx0; cxi <= cx1; ++cxi) rebuildChunk(cxi, cyi);
+        }
+    };
+
     // 3.5) 初始化资源系统（异步文件系统 + 资源 Hub/Manager）
     using namespace Tina::Engine;
     auto fs = CreateFileSystem();
@@ -287,12 +365,22 @@ int main(int /*argc*/, char* /*argv*/[])
                     }
                     Tina::os::finishDrag(ev.file_drop.handle);
                 } break;
+                case Event::Type::MOUSE_BUTTON:
+                    if (ev.mouse_button.down && ev.mouse_button.button == Tina::os::MouseButton::LEFT) {
+                        float mx=0.0f, my=0.0f; SDL_MouseButtonFlags btn = SDL_GetMouseState(&mx, &my); (void)btn;
+                        const float u = (pxW>0)? mx / (float)pxW : 0.0f;
+                        const float v = (pxH>0)? 1.0f - my / (float)pxH : 0.0f; // SDL 原点在左上
+                        const float wx = camera.x() + u * camera.viewW();
+                        const float wy = camera.y() + v * camera.viewH();
+                        explodeAt(wx, wy, 3.5f);
+                    }
+                    break;
                 default: break;
             }
         }
 
-        // 固定逻辑步（这里示例为空，可在此调用物理/规则模拟）
-        ticker.step([&](double fixed_dt){ (void)fixed_dt; /* TODO: 逻辑更新 */ });
+        // 固定逻辑步（物理更新）
+        ticker.step([&](double fixed_dt){ physics.step((float)fixed_dt); });
 
         // 渲染（可使用 alpha 做插值渲染）
         const double alpha = ticker.alpha(); (void)alpha;
@@ -322,6 +410,46 @@ int main(int /*argc*/, char* /*argv*/[])
                 enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
                 enc->submit(0, prog_color);
                 bgfx::end(enc);
+            }
+        }
+
+        // 渲染物理碎块（一次性批量）
+        {
+            const auto& dlist = physics.debris();
+            if (!dlist.empty() && bgfx::isValid(prog_color)) {
+                const uint32_t quadCount = (uint32_t)dlist.size();
+                const uint32_t vcount = quadCount * 4;
+                const uint32_t icount = quadCount * 6;
+                bgfx::TransientVertexBuffer tvb; bgfx::TransientIndexBuffer tib;
+                if (bgfx::allocTransientBuffers(&tvb, colorLayout, vcount, &tib, icount, true)) {
+                    struct Vtx { float x,y,z,r,g,b,a; };
+                    Vtx* vptr = (Vtx*)tvb.data;
+                    uint32_t* iptr = (uint32_t*)tib.data;
+                    uint32_t vb = 0, ib = 0;
+                    for (uint32_t i = 0; i < quadCount; ++i) {
+                        const auto& d = dlist[i];
+                        const b2Vec2 p = b2Body_GetPosition(d.body);
+                        const b2Rot q = b2Body_GetRotation(d.body);
+                        const float c = q.c, s = q.s;
+                        const float hs = d.size * 0.5f;
+                        const float local[4][2] = {{-hs,-hs},{+hs,-hs},{+hs,+hs},{-hs,+hs}};
+                        for (int k=0;k<4;++k) {
+                            const float lx = local[k][0], ly = local[k][1];
+                            const float wx = p.x + lx*c - ly*s;
+                            const float wy = p.y + lx*s + ly*c;
+                            vptr[vb + k] = { wx, wy, 0.0f, d.r, d.g, d.b, d.a };
+                        }
+                        iptr[ib+0]=vb+0; iptr[ib+1]=vb+1; iptr[ib+2]=vb+2;
+                        iptr[ib+3]=vb+0; iptr[ib+4]=vb+2; iptr[ib+5]=vb+3;
+                        vb += 4; ib += 6;
+                    }
+                    bgfx::Encoder* enc = renderer.getEncoder();
+                    enc->setVertexBuffer(0, &tvb);
+                    enc->setIndexBuffer(&tib);
+                    enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+                    enc->submit(0, prog_color);
+                    bgfx::end(enc);
+                }
             }
         }
         pipeline.submit();
