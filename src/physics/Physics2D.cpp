@@ -29,6 +29,7 @@ void Physics2D::step(float dt, int velIters, int posIters)
 
 void Physics2D::createBounds(float minx, float miny, float maxx, float maxy, float thickness)
 {
+    m_minx = minx; m_miny = miny; m_maxx = maxx; m_maxy = maxy;
     // 四个边界用静态刚体 + 多边形形状实现
     b2BodyDef bd = b2DefaultBodyDef();
     bd.type = b2_staticBody;
@@ -89,4 +90,37 @@ Debris* Physics2D::spawnDebris(float cx, float cy, float size, float r, float g,
     return &m_debris.back();
 }
 
+void Physics2D::cleanupDebris()
+{
+    // 超出范围或无效的碎块销毁；控制上限
+    const float marginX = 20.0f;
+    const float marginY = 60.0f;
+    for (size_t i = 0; i < m_debris.size(); ) {
+        Debris& d = m_debris[i];
+        bool remove = false;
+        if (!b2Body_IsValid(d.body)) {
+            remove = true;
+        } else {
+            b2Vec2 p = b2Body_GetPosition(d.body);
+            if (p.x < m_minx - marginX || p.x > m_maxx + marginX ||
+                p.y < m_miny - marginY || p.y > m_maxy + marginY) {
+                remove = true;
+            } else if (!b2Body_IsAwake(d.body)) {
+                // 睡眠体也可按需清理：这里不强制，但可扩展
+            }
+        }
+        if (remove) {
+            if (b2Body_IsValid(d.body)) b2DestroyBody(d.body);
+            m_debris.erase(m_debris.begin() + (eastl_size_t)i);
+        } else {
+            ++i;
+        }
+    }
+    // 如果仍超过上限，按 FIFO 方式回收
+    while (m_debris.size() > m_debrisLimit) {
+        Debris& d = m_debris.front();
+        if (b2Body_IsValid(d.body)) b2DestroyBody(d.body);
+        m_debris.erase(m_debris.begin());
+    }
+}
 } // namespace Tina::Physics

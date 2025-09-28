@@ -6,6 +6,7 @@
 #pragma once
 
 #include <box2d/box2d.h>
+#include <cstddef>
 #include "../core/Container.hpp"
 
 namespace Tina::Physics {
@@ -34,8 +35,14 @@ public:
 
     b2WorldId world() const { return m_world; }
 
+    // 设置碎块数量上限，并进行回收（超过上限则销毁最旧碎块）
+    void setDebrisLimit(std::size_t limit) { m_debrisLimit = limit; }
+    void cleanupDebris();
+
 private:
     b2WorldId m_world {0};
+    float m_minx = -1000.0f, m_miny = -1000.0f, m_maxx = 1000.0f, m_maxy = 1000.0f;
+    std::size_t m_debrisLimit = 1500;
     Tina::Container::Vector<Debris> m_debris;
 };
 

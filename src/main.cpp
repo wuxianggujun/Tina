@@ -99,7 +99,7 @@ int main(int /*argc*/, char* /*argv*/[])
     SDL_GetWindowSizeInPixels((SDL_Window*)window, &pxW, &pxH);
     init.resolution.width = (uint32_t)pxW;
     init.resolution.height = (uint32_t)pxH;
-    init.resolution.reset = BGFX_RESET_VSYNC;
+    init.resolution.reset = (uint32_t)(BGFX_RESET_VSYNC | BGFX_RESET_MSAA_X8);
     if (!bgfx::init(init)) {
         TINA_ERROR("bgfx 初始化失败: 后端={} 像素尺寸={}x{} nwh={} ", (int)init.type, (int)init.resolution.width, (int)init.resolution.height, nwh);
         Tina::os::destroyWindow(window);
@@ -205,6 +205,7 @@ int main(int /*argc*/, char* /*argv*/[])
 
     // 物理世界（Box2D）：重力向下，创建边界包围整个地图
     Tina::Physics::Physics2D physics(-30.0f);
+    physics.setDebrisLimit(800);
     physics.createBounds(0.0f, 0.0f, (float)mapCfg.width, (float)mapCfg.height + 10.0f, 1.0f);
 
     // 重建指定 chunk（当瓦片变化时调用）
@@ -329,6 +330,7 @@ int main(int /*argc*/, char* /*argv*/[])
                     ResetBgfxWithSize(ev.win_size.w, ev.win_size.h, init.resolution.reset);
                     pipeline.setViewport(ev.win_size.w, ev.win_size.h);
                     camera.setViewportPixels(ev.win_size.w, ev.win_size.h);
+                    pxW = ev.win_size.w; pxH = ev.win_size.h; // 修正鼠标像素→世界坐标映射
                     break;
                 case Event::Type::KEY:
                     if (ev.key.down) {
@@ -413,11 +415,15 @@ int main(int /*argc*/, char* /*argv*/[])
             }
         }
 
+        // 碎块回收：控制数量、清理超界体
+        physics.cleanupDebris();
+
         // 渲染物理碎块（一次性批量）
         {
             const auto& dlist = physics.debris();
             if (!dlist.empty() && bgfx::isValid(prog_color)) {
                 const uint32_t quadCount = (uint32_t)dlist.size();
+                // 预估最大，实际会按可见性写入
                 const uint32_t vcount = quadCount * 4;
                 const uint32_t icount = quadCount * 6;
                 bgfx::TransientVertexBuffer tvb; bgfx::TransientIndexBuffer tib;
@@ -431,6 +437,10 @@ int main(int /*argc*/, char* /*argv*/[])
                         const b2Vec2 p = b2Body_GetPosition(d.body);
                         const b2Rot q = b2Body_GetRotation(d.body);
                         const float c = q.c, s = q.s;
+                        // 视区裁剪（仅渲染可见碎块）
+                        if (p.x + 1.0f < vx0 || p.x - 1.0f > vx1 || p.y + 1.0f < vy0 || p.y - 1.0f > vy1) {
+                            continue;
+                        }
                         const float hs = d.size * 0.5f;
                         const float local[4][2] = {{-hs,-hs},{+hs,-hs},{+hs,+hs},{-hs,+hs}};
                         for (int k=0;k<4;++k) {
@@ -443,12 +453,17 @@ int main(int /*argc*/, char* /*argv*/[])
                         iptr[ib+3]=vb+0; iptr[ib+4]=vb+2; iptr[ib+5]=vb+3;
                         vb += 4; ib += 6;
                     }
-                    bgfx::Encoder* enc = renderer.getEncoder();
-                    enc->setVertexBuffer(0, &tvb);
-                    enc->setIndexBuffer(&tib);
-                    enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
-                    enc->submit(0, prog_color);
-                    bgfx::end(enc);
+                    if (ib > 0) {
+                        // 调整计数（bgfx 使用 buffer 的 size 字段，允许少于分配量的有效数据）
+                        tvb.size = vb * sizeof(Vtx);
+                        tib.size = ib * sizeof(uint32_t);
+                        bgfx::Encoder* enc = renderer.getEncoder();
+                        enc->setVertexBuffer(0, &tvb);
+                        enc->setIndexBuffer(&tib);
+                        enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
+                        enc->submit(0, prog_color);
+                        bgfx::end(enc);
+                    }
                 }
             }
         }
