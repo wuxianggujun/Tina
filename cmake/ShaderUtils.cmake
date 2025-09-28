@@ -53,17 +53,19 @@ endfunction()
 function(_bgfx_get_profile_path_ext PROFILE PROFILE_PATH_EXT_OUT)
     string(REPLACE "300_es" "essl" PROFILE_PATH_EXT ${PROFILE})
     string(REPLACE "120" "glsl" PROFILE_PATH_EXT ${PROFILE_PATH_EXT})
+    string(REPLACE "spirv" "spv" PROFILE_PATH_EXT ${PROFILE_PATH_EXT})
     string(REPLACE "s_4_0" "dx10" PROFILE_PATH_EXT ${PROFILE_PATH_EXT})
     string(REPLACE "s_5_0" "dx11" PROFILE_PATH_EXT ${PROFILE_PATH_EXT})
     set(${PROFILE_PATH_EXT_OUT} ${PROFILE_PATH_EXT} PARENT_SCOPE)
 endfunction()
 
 # 编译着色器目录
-# add_shader_compile_dir(SHADER_DIR [GENERATE_HEADERS] [DEBUG_SHADERS] shader_names...)
+# add_shader_compile_dir(SHADER_DIR [OUTPUT_DIR output_directory] [GENERATE_HEADERS] [DEBUG_SHADERS] shader_names...)
+# OUTPUT_DIR: 指定输出目录（可选，默认生成到 <build>/CoreData/Shaders/BGFX）
 # GENERATE_HEADERS: 生成 .hpp 头文件
 # DEBUG_SHADERS: 生成 .hlsl 调试文件（默认关闭）
 function(add_shader_compile_dir SHADER_DIR)
-    cmake_parse_arguments(ARGS "GENERATE_HEADERS;DEBUG_SHADERS" "" "" ${ARGN})
+    cmake_parse_arguments(ARGS "GENERATE_HEADERS;DEBUG_SHADERS" "OUTPUT_DIR" "" ${ARGN})
     
     if(NOT EXISTS "${SHADER_DIR}")
         message(FATAL_ERROR "Shader directory ${SHADER_DIR} does not exist")
@@ -76,9 +78,13 @@ function(add_shader_compile_dir SHADER_DIR)
         return()
     endif()
 
-    # 设置输出目录（与运行期 ResourceCache 约定保持一致）
-    # 最终运行时从 CoreData/Shaders/BGFX 下按 profile 读取：glsl/essl/dx10/dx11/spirv/metal
-    set(SHADER_OUTPUT_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/CoreData/Shaders/BGFX")
+    # 设置输出目录（可通过参数配置）
+    if(ARGS_OUTPUT_DIR)
+        set(SHADER_OUTPUT_DIR "${ARGS_OUTPUT_DIR}")
+    else()
+        # 默认输出到构建目录的 resources/shaders 下，运行期按资源目录读取
+        set(SHADER_OUTPUT_DIR "${CMAKE_BINARY_DIR}/resources/shaders")
+    endif()
     file(MAKE_DIRECTORY "${SHADER_OUTPUT_DIR}")
     message(STATUS "Shader output directory: ${SHADER_OUTPUT_DIR}")
 
@@ -422,12 +428,14 @@ function(add_shaders_directory SHADERS_DIR TARGET_OUT_VAR)
     # 查找顶点着色器
     file(GLOB VERTEX_SHADER_FILES CONFIGURE_DEPENDS FOLLOW_SYMLINKS "${SHADERS_DIR}/*.sc")
     list(FILTER VERTEX_SHADER_FILES EXCLUDE REGEX "\.def\.sc$")
-    list(FILTER VERTEX_SHADER_FILES INCLUDE REGEX "[\\\/]((vs_[^\\\/]*\.sc)|([^\\\/]*(\.vert)(\.sc)))$")
+    # 支持三种命名：vs_name.sc、name_vs.sc、*.vert.sc
+    list(FILTER VERTEX_SHADER_FILES INCLUDE REGEX "[\\\/]((vs_[^\\\/]*\.sc)|([^\\\/]*_vs\.sc)|([^\\\/]*(\.vert)(\.sc)))$")
 
     # 查找片段着色器
     file(GLOB FRAGMENT_SHADER_FILES CONFIGURE_DEPENDS FOLLOW_SYMLINKS "${SHADERS_DIR}/*.sc")
     list(FILTER FRAGMENT_SHADER_FILES EXCLUDE REGEX "\.def\.sc$")
-    list(FILTER FRAGMENT_SHADER_FILES INCLUDE REGEX "[\\\/]((fs_[^\\\/]*\.sc)|([^\\\/]*(\.frag)(\.sc)))$")
+    # 支持三种命名：fs_name.sc、name_fs.sc、*.frag.sc
+    list(FILTER FRAGMENT_SHADER_FILES INCLUDE REGEX "[\\\/]((fs_[^\\\/]*\.sc)|([^\\\/]*_fs\.sc)|([^\\\/]*(\.frag)(\.sc)))$")
 
     if (NOT VERTEX_SHADER_FILES AND NOT FRAGMENT_SHADER_FILES)
         message(NOTICE "No shader files in directory")
@@ -446,9 +454,16 @@ function(add_shaders_directory SHADERS_DIR TARGET_OUT_VAR)
         return()
     endif ()
 
-    # 设置输出目录
+    # 头文件输出目录（用于内嵌，可选）
     set(SHADERS_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/include/generated/shaders/${NAMESPACE}")
     file(MAKE_DIRECTORY "${SHADERS_OUT_DIR}")
+
+    # 运行期 .bin 输出目录（用于磁盘加载）
+    if (NOT DEFINED CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+        set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+    endif ()
+    set(RUNTIME_SHADERS_OUT_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/CoreData/Shaders/BGFX")
+    file(MAKE_DIRECTORY "${RUNTIME_SHADERS_OUT_DIR}")
 
     # 编译顶点着色器
     bgfx_compile_shaders(
@@ -472,10 +487,30 @@ function(add_shaders_directory SHADERS_DIR TARGET_OUT_VAR)
         AS_HEADERS
     )
 
+    # 同时编译运行期 .bin（不生成头）
+    bgfx_compile_shaders(
+        TYPE vertex
+        SHADERS ${VERTEX_SHADER_FILES}
+        VARYING_DEF "${VARYING_DEF_LOCATION}"
+        OUTPUT_DIR "${RUNTIME_SHADERS_OUT_DIR}"
+        OUT_FILES_VAR RUNTIME_VERTEX_OUTPUT_FILES
+        INCLUDE_DIRS "${SHADERS_DIR}"
+    )
+    bgfx_compile_shaders(
+        TYPE fragment
+        SHADERS ${FRAGMENT_SHADER_FILES}
+        VARYING_DEF "${VARYING_DEF_LOCATION}"
+        OUTPUT_DIR "${RUNTIME_SHADERS_OUT_DIR}"
+        OUT_FILES_VAR RUNTIME_FRAGMENT_OUTPUT_FILES
+        INCLUDE_DIRS "${SHADERS_DIR}"
+    )
+
     # 合并输出文件列表
     set(OUTPUT_FILES)
     list(APPEND OUTPUT_FILES ${VERTEX_OUTPUT_FILES})
     list(APPEND OUTPUT_FILES ${FRAGMENT_OUTPUT_FILES})
+    list(APPEND OUTPUT_FILES ${RUNTIME_VERTEX_OUTPUT_FILES})
+    list(APPEND OUTPUT_FILES ${RUNTIME_FRAGMENT_OUTPUT_FILES})
 
     list(LENGTH OUTPUT_FILES SHADER_COUNT)
     if (SHADER_COUNT EQUAL 0)

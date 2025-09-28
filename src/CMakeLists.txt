@@ -7,6 +7,8 @@ set(SRC_FILES
     renderer/Renderer.hpp
     renderer/Pipeline.hpp
     renderer/SortKey.hpp
+    renderer/ShaderManager.hpp
+    renderer/ShaderManager.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})
@@ -16,12 +18,17 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# 着色器编译与集成
+# 着色器编译 - 使用 ShaderUtils，在构建目录的 resources/shaders 生成运行期 .bin
 include(ShaderUtils)
-add_shaders_directory("${RESOURCE_DIR}/shaders" TINA_SHADERS_LIB)
-if (TINA_SHADERS_LIB)
-    target_link_libraries(${PROJECT_NAME} PRIVATE ${TINA_SHADERS_LIB})
-endif ()
+# 仅编译 flat 着色器（按你的命名约定 <name>_vs/_fs）
+add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat)
+# 确保在可执行文件之前生成着色器
+add_dependencies(${PROJECT_NAME} shaders)
+
+# 编译期传入统一的着色器根目录（绝对路径，resources 下），代码默认使用该宏
+set(TINA_SHADER_BIN_DIR "${CMAKE_BINARY_DIR}/resources/shaders")
+file(TO_CMAKE_PATH "${TINA_SHADER_BIN_DIR}" TINA_SHADER_BIN_DIR_NORM)
+target_compile_definitions(${PROJECT_NAME} PRIVATE TINA_SHADER_ROOT_DIR="${TINA_SHADER_BIN_DIR_NORM}")
 
 # 统一导出/导入宏，单体可执行目标下将核心符号视为“构建中”
 target_compile_definitions(${PROJECT_NAME} PRIVATE BUILDING_CORE)
