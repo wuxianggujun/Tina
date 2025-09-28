@@ -22,6 +22,8 @@ add_subdirectory(spdlog)
 add_subdirectory(glm)
 
 # RmlUi (UI library)
+# 统一改为静态库，避免运行时依赖 rmlui.dll
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(NO_FONT_INTERFACE_DEFAULT OFF CACHE BOOL "" FORCE)
 set(NO_THIRDPARTY_CONTAINERS OFF CACHE BOOL "" FORCE)
 add_subdirectory(rmlui)
@@ -32,6 +34,8 @@ option(TRACY_ON_DEMAND "" ON)
 add_subdirectory(tracy)
 
 # Box2D (physics)
+# 保证使用静态库，避免运行时依赖 box2dd.dll（Debug 后缀 d）
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(BOX2D_BUILD_UNIT_TESTS OFF CACHE BOOL "" FORCE)
 set(BOX2D_BUILD_TESTBED OFF CACHE BOOL "" FORCE)
 set(BOX2D_BUILD_DOCS OFF CACHE BOOL "" FORCE)

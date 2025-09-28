@@ -28,6 +28,7 @@ set(ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR} CACHE PATH "Root directory path")
 set(BUILD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/build CACHE PATH "Build directory path")
 set(RESOURCE_DIR ${ROOT_DIR}/resources CACHE PATH "Resource directory path")
 set(RESOURCE_DEST_DIR ${CMAKE_BINARY_DIR}/resources CACHE PATH "Resource directory path")
+set(BIN_DIR ${CMAKE_BINARY_DIR}/bin CACHE PATH "Binary output directory path")
 
 # Functional options
 option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "${PROJECT_IS_TOP_LEVEL}")

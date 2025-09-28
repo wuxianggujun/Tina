@@ -16,6 +16,10 @@ set(SRC_FILES
     renderer/SortKey.hpp
     renderer/ShaderManager.hpp
     renderer/ShaderManager.cpp
+    ui/UISystem.hpp
+    ui/UISystem.cpp
+    ui/InfoBar.hpp
+    ui/InfoBar.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})
@@ -69,3 +73,35 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     utf8cpp
     EASTL
 )
+
+# 创建bin目录
+file(MAKE_DIRECTORY "${BIN_DIR}")
+
+# Post-build步骤：拷贝可执行文件到bin目录
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${PROJECT_NAME}> "${BIN_DIR}/"
+    COMMENT "Copying executable to bin directory"
+)
+
+# Post-build步骤：拷贝资源目录到bin目录
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/resources" "${BIN_DIR}/resources"
+    COMMENT "Copying resources to bin directory"
+)
+
+# Post-build步骤：拷贝动态库文件（Windows平台）
+if(WIN32)
+    # 拷贝SDL3动态库
+    if(TARGET SDL3::SDL3-shared)
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:SDL3::SDL3-shared> "${BIN_DIR}/"
+            COMMENT "Copying SDL3 DLL to bin directory"
+        )
+    endif()
+    
+    # 查找并拷贝其他可能的动态库
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E echo "Checking for additional DLL files..."
+        COMMENT "Post-build DLL copy check"
+    )
+endif()

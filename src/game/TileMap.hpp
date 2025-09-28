@@ -53,6 +53,7 @@ public:
     // 说明：采用哈希噪声生成方向场，并叠加一个微小的全局偏移（向右）。
     // 非水区域返回 {0,0}。
     void waterFlow(float wx, float wy, float& outVx, float& outVy) const;
+    void waterFlowAdvanced(float wx, float wy, float& outVx, float& outVy) const;
     // 水位读写（0..255）
     uint8_t water(int x, int y) const { return m_water[index(x,y)]; }
     void setWater(int x, int y, uint8_t lvl) { m_water[index(x,y)] = lvl; }
@@ -62,7 +63,7 @@ public:
     bool stepWater(int iterations, int& outMinX, int& outMinY, int& outMaxX, int& outMaxY);
 
     // 新增：更智能的水流更新，支持压力传播和流速计算
-    bool stepWaterAdvanced(int iterations, int& outMinX, int& outMinY, int& outMaxX, int& outMaxY) { return stepWater(iterations, outMinX, outMinY, outMaxX, outMaxY); }
+    bool stepWaterAdvanced(int iterations, int& outMinX, int& outMinY, int& outMaxX, int& outMaxY);
 
 private:
     int index(int x, int y) const { return y * m_w + x; }

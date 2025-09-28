@@ -23,6 +23,8 @@
 #include "game/Camera2D.hpp"
 #include <box2d/box2d.h>
 #include "physics/Physics2D.hpp"
+#include "ui/UISystem.hpp"
+#include "ui/InfoBar.hpp"
 
 using Tina::os::Event;
 
@@ -464,6 +466,19 @@ int main(int /*argc*/, char* /*argv*/[])
     // 示例：异步读取一个配置文件（展示资源 READY）
     Resource* cfg_res = hub.load(BlobResource::TYPE, Tina::Core::Path(Tina::Core::string_view{"resources/config/settings.yaml", sizeof("resources/config/settings.yaml") - 1}));
 
+    // 3.7) 初始化UI系统
+    Tina::UI::UISystem uiSystem;
+    if (!uiSystem.initialize(pxW, pxH)) {
+        TINA_ERROR("UI系统初始化失败");
+        // 可以选择继续运行或退出
+    }
+    
+    // 创建信息栏
+    Tina::UI::InfoBar infoBar(&uiSystem);
+    if (!infoBar.initialize()) {
+        TINA_ERROR("信息栏初始化失败");
+    }
+
     // 3.6) 帧计时与固定步（基于 docs/frame_timing.md）
     Tina::Core::TimeConfig time_cfg{};
     time_cfg.tick_rate = 60;
@@ -498,6 +513,9 @@ int main(int /*argc*/, char* /*argv*/[])
         }
         Event ev;
         while (Tina::os::getEvent(ev)) {
+            // UI事件处理优先
+            uiSystem.handleEvent(ev);
+            
             // LogEvent(ev);  // 关闭事件日志打印
             switch (ev.type) {
                 case Event::Type::QUIT:
@@ -507,6 +525,7 @@ int main(int /*argc*/, char* /*argv*/[])
                     ResetBgfxWithSize(ev.win_size.w, ev.win_size.h, init.resolution.reset);
                     pipeline.setViewport(ev.win_size.w, ev.win_size.h);
                     camera.setViewportPixels(ev.win_size.w, ev.win_size.h);
+                    uiSystem.setViewportSize(ev.win_size.w, ev.win_size.h);
                     pxW = ev.win_size.w; pxH = ev.win_size.h; // 修正鼠标像素→世界坐标映射
                     break;
                 case Event::Type::KEY:
@@ -530,6 +549,8 @@ int main(int /*argc*/, char* /*argv*/[])
                             camera.setViewHeightWorld(camera.viewH() * 0.9f);
                         } else if (ev.key.key_code == Tina::os::KeyCode::C) { // 缩小（改用 C 键，Q 未在 KeyCode 中定义）
                             camera.setViewHeightWorld(camera.viewH() * 1.1111f);
+                        } else if (ev.key.key_code == Tina::os::KeyCode::F) { // 切换调试信息
+                            infoBar.toggleDebugInfo();
                         } else if (ev.key.key_code == Tina::os::KeyCode::ESCAPE) {
                             running = false;
                         }
@@ -564,7 +585,7 @@ int main(int /*argc*/, char* /*argv*/[])
             physics.decayDebris((float)fixed_dt);
             // 先更新水体的元胞自动机（让湖水向空洞流动）
             int wx0=0, wy0=0, wx1=-1, wy1=-1;
-            if (tilemap.stepWater(3, wx0, wy0, wx1, wy1)) {
+            if (tilemap.stepWaterAdvanced(3, wx0, wy0, wx1, wy1)) {
                 const int cx0 = std::max(0, wx0 / chunkSize);
                 const int cy0 = std::max(0, wy0 / chunkSize);
                 const int cx1 = std::min(cxCount - 1, wx1 / chunkSize);
@@ -593,7 +614,7 @@ int main(int /*argc*/, char* /*argv*/[])
                 b2Vec2 v = b2Body_GetLinearVelocity(d.body);
                 b2Vec2 Fdrag { -linDrag * v.x, -linDrag * v.y };
                 // 流动：朝向水流速度
-                float fx=0, fy=0; tilemap.waterFlow(p.x, p.y, fx, fy);
+                float fx=0, fy=0; tilemap.waterFlowAdvanced(p.x, p.y, fx, fy);
                 b2Vec2 Vt { fx, fy };
                 b2Vec2 Fflow { flowGain * (Vt.x - v.x), flowGain * (Vt.y - v.y) };
                 b2Vec2 F { Fbuoy.x + Fdrag.x + Fflow.x, Fbuoy.y + Fdrag.y + Fflow.y };
@@ -730,6 +751,21 @@ int main(int /*argc*/, char* /*argv*/[])
 
         // 渲染（可使用 alpha 做插值渲染）
         const double alpha = ticker.alpha(); (void)alpha;
+        
+        // 更新UI数据
+        Tina::UI::InfoBarData uiData;
+        uiData.mapWidth = mapCfg.width;
+        uiData.mapHeight = mapCfg.height;
+        uiData.cameraX = camera.x();
+        uiData.cameraY = camera.y();
+        uiData.cameraZoom = (float)mapCfg.height / camera.viewH(); // 计算缩放比例
+        uiData.fps = (float)frame_timer.fps();
+        uiData.chunkCount = (int)chunks.size();
+        uiData.debrisCount = (int)physics.debris().size();
+        infoBar.update(uiData);
+        
+        // 更新UI系统
+        uiSystem.update((float)dt);
 
         renderer.beginFrame();
         pipeline.begin();
@@ -836,6 +872,9 @@ int main(int /*argc*/, char* /*argv*/[])
             }
         }
         pipeline.submit();
+        
+        // 渲染UI系统
+        uiSystem.render();
         
         renderer.endFrame();
 
