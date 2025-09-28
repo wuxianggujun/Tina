@@ -9,6 +9,8 @@
 #include <chrono>
 #include <cmath>
 #include <algorithm>
+#include <cstdlib>
+#include <unordered_map>
 #include "core/Log.hpp"
 #include "os/OS.hpp"
 #include "engine/Resource.hpp"
@@ -309,6 +311,20 @@ int main(int /*argc*/, char* /*argv*/[])
                 if (t == Tina::Game::TileType::Air) continue;
                 // 清除 tile（所有命中均清除）
                 tilemap.set(x,y, Tina::Game::TileType::Air);
+                if (t == Tina::Game::TileType::Water) {
+                    auto randf = [](){ return (float)std::rand() / (float)RAND_MAX; };
+                    const int waterParticles = 8; // 每个水瓦片 8 个粒子
+                    for (int p = 0; p < waterParticles; ++p) {
+                        float px = cx + (randf() - 0.5f) * 0.8f;
+                        float py = cy + (randf() - 0.5f) * 0.8f;
+                        float dxp = px - wx;
+                        float dyp = py - wy;
+                        float vx = dxp * 15.0f + (randf() - 0.5f) * 10.0f;
+                        float vy = dyp * 15.0f + (randf() - 0.5f) * 10.0f;
+                        physics.spawnWaterParticle(px, py, 0.30f, 0.15f, 0.35f, 0.90f, 0.70f, vx, vy, 2.5f);
+                    }
+                    continue; // 不加入固体碎片候选
+                }
                 const auto c = tileColor(t);
                 const float len = std::sqrt(std::max(d2, 1e-6f));
                 const float speed = 20.0f * (1.0f - (len/radius)*0.5f);
@@ -483,6 +499,55 @@ int main(int /*argc*/, char* /*argv*/[])
                 b2Body_ApplyForceToCenter(d.body, F, true);
             }
             physics.step((float)fixed_dt);
+
+            // 水粒子沉淀回瓦片（聚合阈值版）：同一瓦片累计达到阈值才凝结为 Water
+            // 这样可避免出现零星的“单像素水点”
+            int sx0 = +mapCfg.width, sy0 = +mapCfg.height, sx1 = -1, sy1 = -1; bool settled = false;
+            {
+                std::unordered_map<long long, Tina::Container::Vector<b2BodyId>> cell;
+                const auto& dlist2 = physics.debris();
+                for (const auto& dp : dlist2) {
+                    if (!dp.isWater) continue;
+                    if (!b2Body_IsValid(dp.body)) continue;
+                    b2Vec2 p2 = b2Body_GetPosition(dp.body);
+                    b2Vec2 v2 = b2Body_GetLinearVelocity(dp.body);
+                    float speed2 = std::sqrt(v2.x*v2.x + v2.y*v2.y);
+                    int tx2 = (int)std::floor(p2.x);
+                    int ty2 = (int)std::floor(p2.y);
+                    if (tx2 < 0 || ty2 < 0 || tx2 >= mapCfg.width || ty2 >= mapCfg.height) continue;
+                    if (tilemap.get(tx2,ty2) != Tina::Game::TileType::Air) continue;
+                    bool support = (ty2 == 0) || (tilemap.get(tx2, ty2-1) != Tina::Game::TileType::Air);
+                    if (speed2 < 1.2f && support) {
+                        long long key = ((long long)ty2 << 32) | (unsigned)tx2;
+                        cell[key].push_back(dp.body);
+                    }
+                }
+                const int settleCount = 4; // 聚合阈值：至少 4 个粒子凝结为 1 个水瓦片
+                for (auto& kv : cell) {
+                    auto& bodies = kv.second;
+                    if ((int)bodies.size() >= settleCount) {
+                        int tx2 = (int)(kv.first & 0xffffffffu);
+                        int ty2 = (int)(kv.first >> 32);
+                        tilemap.set(tx2, ty2, Tina::Game::TileType::Water);
+                        const int destroyN = settleCount;
+                        for (int i = 0; i < destroyN && i < (int)bodies.size(); ++i) {
+                            if (b2Body_IsValid(bodies[i])) b2DestroyBody(bodies[i]);
+                        }
+                        sx0 = std::min(sx0, tx2); sy0 = std::min(sy0, ty2);
+                        sx1 = std::max(sx1, tx2); sy1 = std::max(sy1, ty2);
+                        settled = true;
+                    }
+                }
+            }
+            if (settled) {
+                const int rcx0 = std::max(0, sx0 / chunkSize);
+                const int rcy0 = std::max(0, sy0 / chunkSize);
+                const int rcx1 = std::min(cxCount - 1, sx1 / chunkSize);
+                const int rcy1 = std::min(cyCount - 1, sy1 / chunkSize);
+                for (int cyi = rcy0; cyi <= rcy1; ++cyi)
+                    for (int cxi = rcx0; cxi <= rcx1; ++cxi)
+                        rebuildChunk(cxi, cyi);
+            }
         });
 
         // 渲染（可使用 alpha 做插值渲染）

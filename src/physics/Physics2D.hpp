@@ -18,6 +18,7 @@ struct Debris {
     float life = 0.0f;     // 剩余寿命（秒）
     float lifeMax = 0.0f;  // 初始寿命（秒）
     float a0 = 1.0f;       // 初始 alpha，用于渐隐
+    bool  isWater = false; // 是否为水粒子（用于沉淀回瓦片）
 };
 
 class Physics2D {
@@ -34,6 +35,10 @@ public:
     Debris* spawnDebris(float cx, float cy, float size, float r, float g, float b, float a,
                         float vx, float vy, float density = 1.0f, float friction = 0.4f, float restitution = 0.1f,
                         float ttlSeconds = 6.0f);
+
+    // 水粒子（轻/低摩擦/短寿命）的快捷创建
+    Debris* spawnWaterParticle(float cx, float cy, float size, float r, float g, float b, float a,
+                               float vx, float vy, float ttlSeconds = 2.5f);
 
     const Tina::Container::Vector<Debris>& debris() const { return m_debris; }
 
@@ -54,4 +59,3 @@ private:
 };
 
 } // namespace Tina::Physics
-

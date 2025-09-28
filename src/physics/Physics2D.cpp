@@ -92,6 +92,17 @@ Debris* Physics2D::spawnDebris(float cx, float cy, float size, float r, float g,
     return &m_debris.back();
 }
 
+Debris* Physics2D::spawnWaterParticle(float cx, float cy, float size, float r, float g, float b, float a,
+                                      float vx, float vy, float ttlSeconds)
+{
+    // 水粒子：低密度、低摩擦、基本无弹性
+    Debris* d = spawnDebris(cx, cy, size, r, g, b, a,
+                            vx, vy, /*density*/0.35f, /*friction*/0.05f, /*restitution*/0.0f,
+                            /*ttl*/ttlSeconds);
+    if (d) d->isWater = true;
+    return d;
+}
+
 void Physics2D::decayDebris(float dt)
 {
     for (size_t i = 0; i < m_debris.size(); ) {
