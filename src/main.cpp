@@ -10,11 +10,11 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdlib>
-#include <unordered_map>
 #include "core/Log.hpp"
 #include "os/OS.hpp"
 #include "engine/Resource.hpp"
 #include "core/Path.hpp"
+#include "core/Container.hpp"
 #include "renderer/Renderer.hpp"
 #include "renderer/Pipeline.hpp"
 #include "renderer/ShaderManager.hpp"
@@ -248,7 +248,7 @@ int main(int /*argc*/, char* /*argv*/[])
         for (int cx = 0; cx < cxCount; ++cx) buildChunkPhysics(cx, cy);
 
     // 重建指定 chunk（当瓦片变化时调用）
-    auto rebuildChunk = [&](int cx, int cy){
+    auto rebuildChunk = [&](int cx, int cy, bool gfxOnly = false){
         if (cx < 0 || cy < 0) return;
         const int idx = cy * cxCount + cx;
         if (idx < 0 || idx >= (int)chunks.size()) return;
@@ -288,7 +288,7 @@ int main(int /*argc*/, char* /*argv*/[])
             ch.indexCount = (uint32_t)idxv.size();
         }
         // 同步重建物理静态体
-        buildChunkPhysics(cx, cy);
+        if (!gfxOnly) buildChunkPhysics(cx, cy);
     };
 
     // 爆炸：移除半径内的 tile，采样生成有限数量的物理碎块，并重建受影响的 chunk
@@ -321,7 +321,7 @@ int main(int /*argc*/, char* /*argv*/[])
                         float dyp = py - wy;
                         float vx = dxp * 15.0f + (randf() - 0.5f) * 10.0f;
                         float vy = dyp * 15.0f + (randf() - 0.5f) * 10.0f;
-                        physics.spawnWaterParticle(px, py, 0.30f, 0.15f, 0.35f, 0.90f, 0.70f, vx, vy, 2.5f);
+                        physics.spawnWaterParticle(px, py, 0.30f, 0.15f, 0.35f, 0.90f, 0.70f, vx, vy, 4.0f);
                     }
                     continue; // 不加入固体碎片候选
                 }
@@ -397,7 +397,7 @@ int main(int /*argc*/, char* /*argv*/[])
         }
         Event ev;
         while (Tina::os::getEvent(ev)) {
-            LogEvent(ev);
+            // LogEvent(ev);  // 关闭事件日志打印
             switch (ev.type) {
                 case Event::Type::QUIT:
                 case Event::Type::WINDOW_CLOSE:
@@ -470,7 +470,7 @@ int main(int /*argc*/, char* /*argv*/[])
                 const int cy1 = std::min(cyCount - 1, wy1 / chunkSize);
                 for (int cyi = cy0; cyi <= cy1; ++cyi)
                     for (int cxi = cx0; cxi <= cx1; ++cxi)
-                        rebuildChunk(cxi, cyi);
+                        rebuildChunk(cxi, cyi, /*gfxOnly*/true);
             }
             // 水体对碎块的流动/浮力/阻力
             const b2Vec2 g = b2World_GetGravity(physics.world());
@@ -500,11 +500,88 @@ int main(int /*argc*/, char* /*argv*/[])
             }
             physics.step((float)fixed_dt);
 
+            // 生成涓涓细流效果：水瓦片持续产生小水滴
+            {
+                auto randf = [](){ return (float)std::rand() / (float)RAND_MAX; };
+                // 遍历所有水瓦片，检查是否需要生成细流
+                for (int y = 1; y < mapCfg.height - 1; ++y) {
+                    for (int x = 1; x < mapCfg.width - 1; ++x) {
+                        if (tilemap.get(x, y) != Tina::Game::TileType::Water) continue;
+                        
+                        // 瀑布效果：水从高处滴落
+                        if (tilemap.get(x, y-1) == Tina::Game::TileType::Air) {
+                            if (std::rand() % 200 < 1) { // 降低概率到 0.5%
+                                physics.spawnWaterParticle(
+                                    x + 0.5f + (randf() - 0.5f) * 0.3f,  // 轻微随机偏移
+                                    y - 0.1f,
+                                    0.2f,  // 小水滴
+                                    0.15f, 0.35f, 0.90f, 0.8f,
+                                    (randf() - 0.5f) * 2.0f,  // 轻微水平速度
+                                    -2.0f + randf() * -1.0f,  // 向下速度
+                                    1.5f   // 较短寿命
+                                );
+                            }
+                        }
+                        
+                        // 水平细流：水从瓦片边缘流出
+                        for (int dx : {-1, 1}) {
+                            int nx = x + dx;
+                            if (nx >= 0 && nx < mapCfg.width && 
+                                tilemap.get(nx, y) == Tina::Game::TileType::Air && 
+                                (y == 0 || tilemap.get(nx, y-1) != Tina::Game::TileType::Air)) { // 有支撑或在底部
+                                if (std::rand() % 300 < 1) { // 降低水平流概率
+                                    physics.spawnWaterParticle(
+                                        x + 0.5f + dx * 0.4f,
+                                        y + 0.3f + (randf() - 0.5f) * 0.2f,
+                                        0.15f,  // 更小的水滴
+                                        0.15f, 0.35f, 0.90f, 0.7f,
+                                        dx * 3.0f + (randf() - 0.5f) * 1.0f,  // 水平流动
+                                        (randf() - 0.5f) * 1.0f,  // 轻微竖直扰动
+                                        1.0f    // 短寿命
+                                    );
+                                }
+                            }
+                        }
+                        
+                        // 压力流：水位差大时生成更多粒子
+                        for (int dy : {-1, 1}) {
+                            for (int dx : {-1, 0, 1}) {
+                                int nx = x + dx, ny = y + dy;
+                                if (nx >= 0 && nx < mapCfg.width && ny >= 0 && ny < mapCfg.height &&
+                                    tilemap.get(nx, ny) == Tina::Game::TileType::Air) {
+                                    // 检查周围是否有较多水瓦片（模拟压力）
+                                    int waterCount = 0;
+                                    for (int sy = y-1; sy <= y+1; ++sy) {
+                                        for (int sx = x-1; sx <= x+1; ++sx) {
+                                            if (sx >= 0 && sx < mapCfg.width && sy >= 0 && sy < mapCfg.height &&
+                                                tilemap.get(sx, sy) == Tina::Game::TileType::Water) {
+                                                waterCount++;
+                                            }
+                                        }
+                                    }
+                                    if (waterCount >= 6 && std::rand() % 400 < 1) { // 进一步降低高压力区域概率
+                                        physics.spawnWaterParticle(
+                                            x + 0.5f + (randf() - 0.5f) * 0.4f,
+                                            y + 0.5f + (randf() - 0.5f) * 0.4f,
+                                            0.18f,
+                                            0.15f, 0.35f, 0.90f, 0.75f,
+                                            (nx - x) * 2.5f + (randf() - 0.5f) * 2.0f,
+                                            (ny - y) * 2.5f + (randf() - 0.5f) * 2.0f,
+                                            1.2f
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // 水粒子沉淀回瓦片（聚合阈值版）：同一瓦片累计达到阈值才凝结为 Water
             // 这样可避免出现零星的“单像素水点”
             int sx0 = +mapCfg.width, sy0 = +mapCfg.height, sx1 = -1, sy1 = -1; bool settled = false;
             {
-                std::unordered_map<long long, Tina::Container::Vector<b2BodyId>> cell;
+                Tina::Container::HashMap<long long, Tina::Container::Vector<b2BodyId>> cell;
                 const auto& dlist2 = physics.debris();
                 for (const auto& dp : dlist2) {
                     if (!dp.isWater) continue;
@@ -522,7 +599,7 @@ int main(int /*argc*/, char* /*argv*/[])
                         cell[key].push_back(dp.body);
                     }
                 }
-                const int settleCount = 4; // 聚合阈值：至少 4 个粒子凝结为 1 个水瓦片
+                const int settleCount = 2; // 聚合阈值：至少 2 个粒子凝结为 1 个水瓦片
                 for (auto& kv : cell) {
                     auto& bodies = kv.second;
                     if ((int)bodies.size() >= settleCount) {
@@ -546,7 +623,7 @@ int main(int /*argc*/, char* /*argv*/[])
                 const int rcy1 = std::min(cyCount - 1, sy1 / chunkSize);
                 for (int cyi = rcy0; cyi <= rcy1; ++cyi)
                     for (int cxi = rcx0; cxi <= rcx1; ++cxi)
-                        rebuildChunk(cxi, cyi);
+                        rebuildChunk(cxi, cyi, /*gfxOnly*/true);
             }
         });
 
