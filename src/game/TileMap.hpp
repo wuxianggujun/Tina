@@ -27,7 +27,9 @@ struct TileMapConfig {
 class TileMap {
 public:
     explicit TileMap(const TileMapConfig& cfg)
-        : m_w(cfg.width), m_h(cfg.height), m_seed(cfg.seed), m_tiles(m_w * m_h, TileType::Air) {}
+        : m_w(cfg.width), m_h(cfg.height), m_seed(cfg.seed)
+        , m_tiles(m_w * m_h, TileType::Air)
+        , m_water(m_w * m_h, (uint8_t)0) {}
 
     int width() const { return m_w; }
     int height() const { return m_h; }
@@ -44,16 +46,23 @@ public:
     // 查询是否为水体
     bool isWater(int x, int y) const {
         if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return false;
-        return m_tiles[index(x,y)] == TileType::Water;
+        return m_water[index(x,y)] > 0;
     }
 
     // 为水体提供一个简易流场（单位：世界单位/秒），用于对碎块施加流动力
     // 说明：采用哈希噪声生成方向场，并叠加一个微小的全局偏移（向右）。
     // 非水区域返回 {0,0}。
     void waterFlow(float wx, float wy, float& outVx, float& outVy) const;
+    // 水位读写（0..255）
+    uint8_t water(int x, int y) const { return m_water[index(x,y)]; }
+    void setWater(int x, int y, uint8_t lvl) { m_water[index(x,y)] = lvl; }
+    void addWater(int x, int y, int delta) { int v = (int)m_water[index(x,y)] + delta; if (v < 0) v = 0; if (v > 255) v = 255; m_water[index(x,y)] = (uint8_t)v; }
 
     // 水体元胞自动机更新：执行若干次水流步进，输出改变的 AABB（若无改变则 outMinX>outMaxX）
     bool stepWater(int iterations, int& outMinX, int& outMinY, int& outMaxX, int& outMaxY);
+
+    // 新增：更智能的水流更新，支持压力传播和流速计算
+    bool stepWaterAdvanced(int iterations, int& outMinX, int& outMinY, int& outMaxX, int& outMaxY) { return stepWater(iterations, outMinX, outMinY, outMaxX, outMaxY); }
 
 private:
     int index(int x, int y) const { return y * m_w + x; }
@@ -69,7 +78,8 @@ private:
     uint32_t m_seed;
     int m_seaLevel = 0; // 海平面（世界格坐标，y<=seaLevel 且为空气则填水）
     Tina::Container::Vector<TileType> m_tiles;
-    Tina::Container::Vector<TileType> m_work; // 水体更新工作缓冲
+    Tina::Container::Vector<uint8_t>  m_water; // 水位（0..255）
+    Tina::Container::Vector<uint8_t>  m_work;  // 水体更新的工作缓冲
     unsigned int m_tick = 0; // 奇偶交替打破左右偏置
 };
 

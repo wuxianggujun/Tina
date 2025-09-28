@@ -56,6 +56,9 @@ float TileMap::noise2f(float x, float y) const
 
 void TileMap::generate()
 {
+    // 初始化/清空水位
+    m_water.resize((size_t)m_w * (size_t)m_h);
+    std::fill(m_water.begin(), m_water.end(), (uint8_t)0);
     // 地表高度：由多频正弦 + 抖动噪声叠加
     const float H0 = m_h * 0.55f;
     m_seaLevel = (int)(m_h * 0.22f); // 海平面（越小水越少）
@@ -95,7 +98,7 @@ void TileMap::generate()
 
         // 海水填充：海平面以下的空腔填充为水
         for (int y = 0; y <= m_seaLevel; ++y) {
-            if (get(x, y) == TileType::Air) set(x, y, TileType::Water);
+            if (get(x, y) == TileType::Air) m_water[index(x,y)] = 255;
         }
     }
 
@@ -117,7 +120,7 @@ void TileMap::generate()
             int groundY = -1;
             for (int yy = m_h - 1; yy >= 0; --yy) {
                 TileType t = get(x, yy);
-                if (t != TileType::Air && t != TileType::Water) { groundY = yy; break; }
+                if (t != TileType::Air) { groundY = yy; break; }
             }
             if (groundY <= 0) continue;
 
@@ -131,7 +134,7 @@ void TileMap::generate()
 
                 // 将下半椭圆（y <= cy）注水；其上半（cy < y <= groundY）挖空为空气
                 if (y <= cy) {
-                    set(x, y, TileType::Water);
+                    m_water[index(x,y)] = 255;
                 } else {
                     set(x, y, TileType::Air);
                 }
@@ -146,7 +149,7 @@ void TileMap::waterFlow(float wx, float wy, float& outVx, float& outVy) const
     int x = (int)std::floor(wx);
     int y = (int)std::floor(wy);
     if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return;
-    if (get(x, y) != TileType::Water) return;
+    if (m_water[index(x,y)] == 0) return;
 
     // 随机场方向 + 海水向右偏移的趋势
     float n = noise2f(wx * 0.5f, wy * 0.5f); // 平滑一些
@@ -167,84 +170,70 @@ bool TileMap::stepWater(int iterations, int& outMinX, int& outMinY, int& outMaxX
 {
     if (iterations < 1) iterations = 1;
     const int W = m_w, H = m_h;
-    if ((int)m_work.size() != W * H) m_work.resize((size_t)W * H, TileType::Air);
+    if ((int)m_work.size() != W * H) m_work.resize((size_t)W * H, (uint8_t)0);
 
     bool anyChanged = false;
     int minx = W, miny = H, maxx = -1, maxy = -1;
 
-    for (int it = 0; it < iterations; ++it) {
-        // 拷贝当前到工作缓冲
-        std::copy(m_tiles.begin(), m_tiles.end(), m_work.begin());
+    const int MAX_DOWN = 64;  // 每步最大下落体积
+    const int MAX_SIDE = 32;  // 每步最大侧流体积
 
+    for (int it = 0; it < iterations; ++it) {
+        std::copy(m_water.begin(), m_water.end(), m_work.begin());
         bool changed = false;
 
-        // 自顶向下扫描，避免同一列中的“多水同落”冲突；左右交替打破偏置
-        for (int y = H - 1; y >= 0; --y) {
-            const bool invert = ((y + (int)m_tick) & 1) != 0;
-            if (!invert) {
-                for (int x = 0; x < W; ++x) {
-                    if (m_tiles[index(x,y)] != TileType::Water) continue;
-                    // 目标顺序：下 -> 斜下(偏置) -> 斜下(反向) -> 侧向(偏置) -> 侧向(反向)
-                    auto tryMove = [&](int nx, int ny)->bool{
-                        if ((unsigned)nx >= (unsigned)W || (unsigned)ny >= (unsigned)H) return false;
-                        if (m_tiles[index(nx,ny)] != TileType::Air) return false; // 仅向空气流动
-                        if (m_work[index(nx,ny)] != TileType::Air) return false;   // 目的地已被占用
-                        m_work[index(nx,ny)] = TileType::Water;
-                        m_work[index(x,y)]   = TileType::Air;
-                        minx = std::min(minx, std::min(x,nx));
-                        maxx = std::max(maxx, std::max(x,nx));
-                        miny = std::min(miny, std::min(y,ny));
-                        maxy = std::max(maxy, std::max(y,ny));
-                        return true;
-                    };
-                    if (y > 0) {
-                        if (tryMove(x, y-1)) { changed = true; continue; }
-                        int dir = ((x + y + (int)m_tick) & 1) ? -1 : +1;
-                        if (tryMove(x+dir, y-1)) { changed = true; continue; }
-                        if (tryMove(x-dir, y-1)) { changed = true; continue; }
-                    }
-                    // 仅在无法下落时尝试侧向扩散
-                    int dir = ((x + y + (int)m_tick) & 1) ? -1 : +1;
-                    if (tryMove(x+dir, y)) { changed = true; continue; }
-                    if (tryMove(x-dir, y)) { changed = true; continue; }
-                }
-            } else {
-                for (int x = W - 1; x >= 0; --x) {
-                    if (m_tiles[index(x,y)] != TileType::Water) continue;
-                    auto tryMove = [&](int nx, int ny)->bool{
-                        if ((unsigned)nx >= (unsigned)W || (unsigned)ny >= (unsigned)H) return false;
-                        if (m_tiles[index(nx,ny)] != TileType::Air) return false;
-                        if (m_work[index(nx,ny)] != TileType::Air) return false;
-                        m_work[index(nx,ny)] = TileType::Water;
-                        m_work[index(x,y)]   = TileType::Air;
-                        minx = std::min(minx, std::min(x,nx));
-                        maxx = std::max(maxx, std::max(x,nx));
-                        miny = std::min(miny, std::min(y,ny));
-                        maxy = std::max(maxy, std::max(y,ny));
-                        return true;
-                    };
-                    if (y > 0) {
-                        if (tryMove(x, y-1)) { changed = true; continue; }
-                        int dir = ((x + y + (int)m_tick) & 1) ? -1 : +1;
-                        if (tryMove(x+dir, y-1)) { changed = true; continue; }
-                        if (tryMove(x-dir, y-1)) { changed = true; continue; }
-                    }
-                    int dir = ((x + y + (int)m_tick) & 1) ? -1 : +1;
-                    if (tryMove(x+dir, y)) { changed = true; continue; }
-                    if (tryMove(x-dir, y)) { changed = true; continue; }
+        // 1) 下落
+        for (int y = H - 1; y >= 1; --y) {
+            for (int x = 0; x < W; ++x) {
+                uint8_t a = m_water[index(x,y)];
+                if (a == 0) continue;
+                if (get(x, y-1) != TileType::Air) continue; // 下面是实心
+                uint8_t b = m_work[index(x, y-1)];
+                int cap = 255 - (int)b;
+                if (cap <= 0) continue;
+                int move = std::min<int>({ (int)a, cap, MAX_DOWN });
+                if (move > 0) {
+                    m_work[index(x,y)]   = (uint8_t)((int)m_work[index(x,y)] - move);
+                    m_work[index(x,y-1)] = (uint8_t)((int)m_work[index(x,y-1)] + move);
+                    minx = std::min(minx, x); maxx = std::max(maxx, x);
+                    miny = std::min(miny, y-1); maxy = std::max(maxy, y);
+                    changed = true;
                 }
             }
         }
 
-        if (!changed) { break; }
+        // 2) 侧向均衡
+        for (int y = 0; y < H; ++y) {
+            for (int x = 0; x < W - 1; ++x) {
+                if (get(x, y) != TileType::Air || get(x+1, y) != TileType::Air) continue;
+                int a = (int)m_work[index(x,y)];
+                int b = (int)m_work[index(x+1,y)];
+                int diff = a - b;
+                if (diff > 1) {
+                    int move = std::min(diff/2, MAX_SIDE);
+                    m_work[index(x,y)]     = (uint8_t)(a - move);
+                    m_work[index(x+1, y)]  = (uint8_t)(b + move);
+                    minx = std::min(minx, x); maxx = std::max(maxx, x+1);
+                    miny = std::min(miny, y); maxy = std::max(maxy, y);
+                    changed = true;
+                } else if (diff < -1) {
+                    int move = std::min((-diff)/2, MAX_SIDE);
+                    m_work[index(x,y)]     = (uint8_t)(a + move);
+                    m_work[index(x+1, y)]  = (uint8_t)(b - move);
+                    minx = std::min(minx, x); maxx = std::max(maxx, x+1);
+                    miny = std::min(miny, y); maxy = std::max(maxy, y);
+                    changed = true;
+                }
+            }
+        }
+
+        if (!changed) break;
         anyChanged = true;
-        // 推进：交换缓冲
-        m_tiles.swap(m_work);
+        m_water.swap(m_work);
         ++m_tick;
     }
 
     outMinX = minx; outMinY = miny; outMaxX = maxx; outMaxY = maxy;
     return anyChanged;
 }
-
 } // namespace Tina::Game

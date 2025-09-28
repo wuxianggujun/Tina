@@ -158,6 +158,13 @@ int main(int /*argc*/, char* /*argv*/[])
     const int cyCount = (mapCfg.height + chunkSize - 1) / chunkSize;
     Tina::Container::Vector<TileChunk> chunks;
     chunks.reserve((size_t)cxCount * cyCount);
+    // 水体叠加层与 chunks 同步的句柄数组
+    Tina::Container::Vector<bgfx::VertexBufferHandle> chunksVBWater;
+    Tina::Container::Vector<bgfx::IndexBufferHandle>  chunksIBWater;
+    Tina::Container::Vector<uint32_t>                 chunksWaterIndexCount;
+    chunksVBWater.reserve((size_t)cxCount * cyCount);
+    chunksIBWater.reserve((size_t)cxCount * cyCount);
+    chunksWaterIndexCount.reserve((size_t)cxCount * cyCount);
     for (int cy = 0; cy < cyCount; ++cy) {
         for (int cx = 0; cx < cxCount; ++cx) {
             const int x0i = cx * chunkSize;
@@ -166,28 +173,58 @@ int main(int /*argc*/, char* /*argv*/[])
             const int y1i = (y0i + chunkSize > mapCfg.height ? mapCfg.height : y0i + chunkSize);
             Tina::Container::Vector<ColorVertex> v;
             Tina::Container::Vector<uint32_t>    idx;
+            Tina::Container::Vector<ColorVertex> vwater;
+            Tina::Container::Vector<uint32_t>    idxwater;
             v.reserve((size_t)(x1i-x0i)*(y1i-y0i));
             idx.reserve(v.capacity()*6);
+            vwater.reserve((size_t)(x1i-x0i)*(y1i-y0i));
+            idxwater.reserve(vwater.capacity()*6);
             for (int y = y0i; y < y1i; ++y) {
                 for (int x = x0i; x < x1i; ++x) {
                     auto t = tilemap.get(x,y);
-                    if (t == Tina::Game::TileType::Air) continue;
-                    const auto c = tileColor(t);
-                    const float x0 = (float)x;
-                    const float y0 = (float)y;
-                    const float x1 = x0 + 1.0f;
-                    const float y1 = y0 + 1.0f;
-                    const uint32_t base = (uint32_t)v.size();
-                    v.push_back({ x0, y0, 0.0f, c[0], c[1], c[2], c[3] });
-                    v.push_back({ x1, y0, 0.0f, c[0], c[1], c[2], c[3] });
-                    v.push_back({ x1, y1, 0.0f, c[0], c[1], c[2], c[3] });
-                    v.push_back({ x0, y1, 0.0f, c[0], c[1], c[2], c[3] });
-                    idx.push_back(base + 0);
-                    idx.push_back(base + 1);
-                    idx.push_back(base + 2);
-                    idx.push_back(base + 0);
-                    idx.push_back(base + 2);
-                    idx.push_back(base + 3);
+                    if (t == Tina::Game::TileType::Air || t == Tina::Game::TileType::Water) {
+                        // 水体叠加层：m_water>0 或 tile 为 Water
+                        const int wv  = (int)tilemap.water(x, y);
+                        const int wvL = (x>0              ) ? (int)tilemap.water(x-1, y) : wv;
+                        const int wvR = (x<mapCfg.width-1 ) ? (int)tilemap.water(x+1, y) : wv;
+                        const bool isWaterTile = (t == Tina::Game::TileType::Water);
+                        float hC = isWaterTile ? 1.0f : (wv / 255.0f);
+                        if (hC > 0.001f || isWaterTile) {
+                            float hL = isWaterTile ? 1.0f : (wvL / 255.0f);
+                            float hR = isWaterTile ? 1.0f : (wvR / 255.0f);
+                            const float topL = std::min(1.0f, std::max(0.0f, 0.5f*(hC + hL)));
+                            const float topR = std::min(1.0f, std::max(0.0f, 0.5f*(hC + hR)));
+                            const float x0 = (float)x, y0 = (float)y, x1 = x0 + 1.0f;
+                            const float yL = y0 + topL, yR = y0 + topR;
+                            const auto cw = tileColor(Tina::Game::TileType::Water);
+                            const float a = std::min(1.0f, std::max(0.25f, cw[3] * (0.6f + 0.4f * hC)));
+                            const uint32_t baseW = (uint32_t)vwater.size();
+                            vwater.push_back({ x0, y0, 0.0f, cw[0], cw[1], cw[2], a });
+                            vwater.push_back({ x1, y0, 0.0f, cw[0], cw[1], cw[2], a });
+                            vwater.push_back({ x1, yR, 0.0f, cw[0], cw[1], cw[2], a });
+                            vwater.push_back({ x0, yL, 0.0f, cw[0], cw[1], cw[2], a });
+                            idxwater.push_back(baseW+0); idxwater.push_back(baseW+1); idxwater.push_back(baseW+2);
+                            idxwater.push_back(baseW+0); idxwater.push_back(baseW+2); idxwater.push_back(baseW+3);
+                        }
+                    } else {
+                        // 实体方块几何
+                        const auto c = tileColor(t);
+                        const float x0 = (float)x;
+                        const float y0 = (float)y;
+                        const float x1 = x0 + 1.0f;
+                        const float y1 = y0 + 1.0f;
+                        const uint32_t base = (uint32_t)v.size();
+                        v.push_back({ x0, y0, 0.0f, c[0], c[1], c[2], c[3] });
+                        v.push_back({ x1, y0, 0.0f, c[0], c[1], c[2], c[3] });
+                        v.push_back({ x1, y1, 0.0f, c[0], c[1], c[2], c[3] });
+                        v.push_back({ x0, y1, 0.0f, c[0], c[1], c[2], c[3] });
+                        idx.push_back(base + 0);
+                        idx.push_back(base + 1);
+                        idx.push_back(base + 2);
+                        idx.push_back(base + 0);
+                        idx.push_back(base + 2);
+                        idx.push_back(base + 3);
+                    }
                 }
             }
             TileChunk ch{}; ch.cx=cx; ch.cy=cy; ch.minx=(float)x0i; ch.miny=(float)y0i; ch.maxx=(float)x1i; ch.maxy=(float)y1i;
@@ -197,6 +234,20 @@ int main(int /*argc*/, char* /*argv*/[])
                 const bgfx::Memory* memi = bgfx::copy(idx.data(), (uint32_t)(idx.size()*sizeof(uint32_t)));
                 ch.ib = bgfx::createIndexBuffer(memi, BGFX_BUFFER_INDEX32);
                 ch.indexCount = (uint32_t)idx.size();
+            }
+            // 创建并保存水体叠加层缓冲句柄（与 chunks 对齐）
+            if (!vwater.empty()) {
+                const bgfx::Memory* memvw = bgfx::copy(vwater.data(), (uint32_t)(vwater.size()*sizeof(ColorVertex)));
+                bgfx::VertexBufferHandle vbw = bgfx::createVertexBuffer(memvw, colorLayout);
+                const bgfx::Memory* memiw = bgfx::copy(idxwater.data(), (uint32_t)(idxwater.size()*sizeof(uint32_t)));
+                bgfx::IndexBufferHandle  ibw = bgfx::createIndexBuffer(memiw, BGFX_BUFFER_INDEX32);
+                chunksVBWater.push_back(vbw);
+                chunksIBWater.push_back(ibw);
+                chunksWaterIndexCount.push_back((uint32_t)idxwater.size());
+            } else {
+                chunksVBWater.push_back(BGFX_INVALID_HANDLE);
+                chunksIBWater.push_back(BGFX_INVALID_HANDLE);
+                chunksWaterIndexCount.push_back(0);
             }
             chunks.push_back(ch);
         }
@@ -255,6 +306,12 @@ int main(int /*argc*/, char* /*argv*/[])
         auto& ch = chunks[(size_t)idx];
         if (bgfx::isValid(ch.vb)) { bgfx::destroy(ch.vb); ch.vb = BGFX_INVALID_HANDLE; }
         if (bgfx::isValid(ch.ib)) { bgfx::destroy(ch.ib); ch.ib = BGFX_INVALID_HANDLE; }
+        // 同时销毁该 chunk 的水体叠加层
+        if (idx >= 0 && idx < (int)chunksVBWater.size()) {
+            if (bgfx::isValid(chunksVBWater[(size_t)idx])) { bgfx::destroy(chunksVBWater[(size_t)idx]); chunksVBWater[(size_t)idx] = BGFX_INVALID_HANDLE; }
+            if (bgfx::isValid(chunksIBWater[(size_t)idx])) { bgfx::destroy(chunksIBWater[(size_t)idx]); chunksIBWater[(size_t)idx] = BGFX_INVALID_HANDLE; }
+            if (idx < (int)chunksWaterIndexCount.size()) chunksWaterIndexCount[(size_t)idx] = 0;
+        }
         ch.indexCount = 0;
 
         const int x0i = cx * chunkSize;
@@ -263,21 +320,50 @@ int main(int /*argc*/, char* /*argv*/[])
         const int y1i = (y0i + chunkSize > mapCfg.height ? mapCfg.height : y0i + chunkSize);
         Tina::Container::Vector<ColorVertex> v;
         Tina::Container::Vector<uint32_t>    idxv;
+        Tina::Container::Vector<ColorVertex> vwater;
+        Tina::Container::Vector<uint32_t>    idxwater;
         v.reserve((size_t)(x1i-x0i)*(y1i-y0i));
         idxv.reserve(v.capacity()*6);
+        vwater.reserve((size_t)(x1i-x0i)*(y1i-y0i));
+        idxwater.reserve(vwater.capacity()*6);
         for (int y = y0i; y < y1i; ++y) {
             for (int x = x0i; x < x1i; ++x) {
                 auto t = tilemap.get(x,y);
-                if (t == Tina::Game::TileType::Air) continue;
-                const auto c = tileColor(t);
-                const float x0 = (float)x, y0 = (float)y, x1 = x0+1.0f, y1 = y0+1.0f;
-                const uint32_t base = (uint32_t)v.size();
-                v.push_back({ x0, y0, 0.0f, c[0], c[1], c[2], c[3] });
-                v.push_back({ x1, y0, 0.0f, c[0], c[1], c[2], c[3] });
-                v.push_back({ x1, y1, 0.0f, c[0], c[1], c[2], c[3] });
-                v.push_back({ x0, y1, 0.0f, c[0], c[1], c[2], c[3] });
-                idxv.push_back(base+0); idxv.push_back(base+1); idxv.push_back(base+2);
-                idxv.push_back(base+0); idxv.push_back(base+2); idxv.push_back(base+3);
+                if (t == Tina::Game::TileType::Air || t == Tina::Game::TileType::Water) {
+                    // 水体叠加层
+                    const int wv  = (int)tilemap.water(x, y);
+                    const int wvL = (x>0              ) ? (int)tilemap.water(x-1, y) : wv;
+                    const int wvR = (x<mapCfg.width-1 ) ? (int)tilemap.water(x+1, y) : wv;
+                    const bool isWaterTile = (t == Tina::Game::TileType::Water);
+                    float hC = isWaterTile ? 1.0f : (wv / 255.0f);
+                    if (hC > 0.001f || isWaterTile) {
+                        float hL = isWaterTile ? 1.0f : (wvL / 255.0f);
+                        float hR = isWaterTile ? 1.0f : (wvR / 255.0f);
+                        const float topL = std::min(1.0f, std::max(0.0f, 0.5f*(hC + hL)));
+                        const float topR = std::min(1.0f, std::max(0.0f, 0.5f*(hC + hR)));
+                        const float x0 = (float)x, y0 = (float)y, x1 = x0+1.0f;
+                        const float yL = y0 + topL, yR = y0 + topR;
+                        const auto cw = tileColor(Tina::Game::TileType::Water);
+                        const float a = std::min(1.0f, std::max(0.25f, cw[3] * (0.6f + 0.4f * hC)));
+                        const uint32_t baseW = (uint32_t)vwater.size();
+                        vwater.push_back({ x0, y0, 0.0f, cw[0], cw[1], cw[2], a });
+                        vwater.push_back({ x1, y0, 0.0f, cw[0], cw[1], cw[2], a });
+                        vwater.push_back({ x1, yR, 0.0f, cw[0], cw[1], cw[2], a });
+                        vwater.push_back({ x0, yL, 0.0f, cw[0], cw[1], cw[2], a });
+                        idxwater.push_back(baseW+0); idxwater.push_back(baseW+1); idxwater.push_back(baseW+2);
+                        idxwater.push_back(baseW+0); idxwater.push_back(baseW+2); idxwater.push_back(baseW+3);
+                    }
+                } else {
+                    const auto c = tileColor(t);
+                    const float x0 = (float)x, y0 = (float)y, x1 = x0+1.0f, y1 = y0+1.0f;
+                    const uint32_t base = (uint32_t)v.size();
+                    v.push_back({ x0, y0, 0.0f, c[0], c[1], c[2], c[3] });
+                    v.push_back({ x1, y0, 0.0f, c[0], c[1], c[2], c[3] });
+                    v.push_back({ x1, y1, 0.0f, c[0], c[1], c[2], c[3] });
+                    v.push_back({ x0, y1, 0.0f, c[0], c[1], c[2], c[3] });
+                    idxv.push_back(base+0); idxv.push_back(base+1); idxv.push_back(base+2);
+                    idxv.push_back(base+0); idxv.push_back(base+2); idxv.push_back(base+3);
+                }
             }
         }
         if (!v.empty()) {
@@ -286,6 +372,13 @@ int main(int /*argc*/, char* /*argv*/[])
             const bgfx::Memory* memi = bgfx::copy(idxv.data(), (uint32_t)(idxv.size()*sizeof(uint32_t)));
             ch.ib = bgfx::createIndexBuffer(memi, BGFX_BUFFER_INDEX32);
             ch.indexCount = (uint32_t)idxv.size();
+        }
+        if (!vwater.empty()) {
+            const bgfx::Memory* memvw = bgfx::copy(vwater.data(), (uint32_t)(vwater.size()*sizeof(ColorVertex)));
+            chunksVBWater[(size_t)idx] = bgfx::createVertexBuffer(memvw, colorLayout);
+            const bgfx::Memory* memiw = bgfx::copy(idxwater.data(), (uint32_t)(idxwater.size()*sizeof(uint32_t)));
+            chunksIBWater[(size_t)idx] = bgfx::createIndexBuffer(memiw, BGFX_BUFFER_INDEX32);
+            chunksWaterIndexCount[(size_t)idx] = (uint32_t)idxwater.size();
         }
         // 同步重建物理静态体
         if (!gfxOnly) buildChunkPhysics(cx, cy);
@@ -669,6 +762,22 @@ int main(int /*argc*/, char* /*argv*/[])
         // 碎块回收：控制数量、清理超界体
         physics.cleanupDebris();
 
+        // 绘制水体叠加层（基于可见区域裁剪）
+        if (bgfx::isValid(prog_color)) {
+            for (size_t i = 0; i < chunks.size(); ++i) {
+                const auto& ch = chunks[i];
+                if (ch.maxx <= vx0 || ch.minx >= vx1 || ch.maxy <= vy0 || ch.miny >= vy1) continue;
+                if (i >= chunksVBWater.size() || i >= chunksIBWater.size() || i >= chunksWaterIndexCount.size()) continue;
+                if (!bgfx::isValid(chunksVBWater[i]) || !bgfx::isValid(chunksIBWater[i]) || chunksWaterIndexCount[i] == 0) continue;
+                bgfx::Encoder* encw = renderer.getEncoder();
+                encw->setVertexBuffer(0, chunksVBWater[i]);
+                encw->setIndexBuffer(chunksIBWater[i]);
+                encw->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
+                encw->submit(0, prog_color);
+                bgfx::end(encw);
+            }
+        }
+
         // 渲染物理碎块（一次性批量）
         {
             const auto& dlist = physics.debris();
@@ -748,6 +857,10 @@ int main(int /*argc*/, char* /*argv*/[])
 
     // 5) 清理：先销毁依赖 bgfx 资源的对象/句柄，再关闭 bgfx
     for (auto& ch : chunks) { if (bgfx::isValid(ch.vb)) bgfx::destroy(ch.vb); if (bgfx::isValid(ch.ib)) bgfx::destroy(ch.ib); }
+    for (size_t i = 0; i < chunksVBWater.size(); ++i) {
+        if (bgfx::isValid(chunksVBWater[i])) bgfx::destroy(chunksVBWater[i]);
+        if (bgfx::isValid(chunksIBWater[i])) bgfx::destroy(chunksIBWater[i]);
+    }
     shaderManager.cleanup();
     // 额外提交一帧，确保销毁命令被渲染线程消费
     bgfx::frame();
