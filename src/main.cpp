@@ -12,6 +12,7 @@
 #include "core/Path.hpp"
 #include "renderer/Renderer.hpp"
 #include "renderer/Pipeline.hpp"
+#include <generated/shaders/src/all.h>
 #include "core/Time.hpp"
 
 using Tina::os::Event;
@@ -106,6 +107,51 @@ int main(int /*argc*/, char* /*argv*/[])
     Tina::Gfx::Pipeline pipeline(renderer);
     pipeline.setViewport(pxW, pxH);
 
+    // 3.x.1) 创建最小着色器 Program（从嵌入头中选择当前后端的变体）
+    auto createProgramFlat = []() -> bgfx::ProgramHandle {
+        const bgfx::RendererType::Enum rt = bgfx::getRendererType();
+        const uint8_t* vs = nullptr; size_t vs_size = 0;
+        const uint8_t* fs = nullptr; size_t fs_size = 0;
+        switch (rt) {
+            case bgfx::RendererType::Direct3D11:
+            case bgfx::RendererType::Direct3D12:
+                vs = vs_flat_dx11; vs_size = sizeof(vs_flat_dx11);
+                fs = fs_flat_dx11; fs_size = sizeof(fs_flat_dx11);
+                break;
+            case bgfx::RendererType::OpenGLES:
+                vs = vs_flat_essl; vs_size = sizeof(vs_flat_essl);
+                fs = fs_flat_essl; fs_size = sizeof(fs_flat_essl);
+                break;
+            case bgfx::RendererType::OpenGL:
+                vs = vs_flat_glsl; vs_size = sizeof(vs_flat_glsl);
+                fs = fs_flat_glsl; fs_size = sizeof(fs_flat_glsl);
+                break;
+            case bgfx::RendererType::Metal:
+#ifdef __APPLE__
+                vs = vs_flat_mtl; vs_size = sizeof(vs_flat_mtl);
+                fs = fs_flat_mtl; fs_size = sizeof(fs_flat_mtl);
+#else
+                // Metal着色器仅在苹果平台可用，其他平台使用DirectX作为备用
+                vs = vs_flat_dx11; vs_size = sizeof(vs_flat_dx11);
+                fs = fs_flat_dx11; fs_size = sizeof(fs_flat_dx11);
+#endif
+                break;
+            case bgfx::RendererType::Vulkan:
+                vs = vs_flat_spv; vs_size = sizeof(vs_flat_spv);
+                fs = fs_flat_spv; fs_size = sizeof(fs_flat_spv);
+                break;
+            default:
+                vs = vs_flat_glsl; vs_size = sizeof(vs_flat_glsl);
+                fs = fs_flat_glsl; fs_size = sizeof(fs_flat_glsl);
+                break;
+        }
+        bgfx::ShaderHandle vsh = bgfx::createShader(bgfx::copy(vs, (uint32_t)vs_size));
+        bgfx::ShaderHandle fsh = bgfx::createShader(bgfx::copy(fs, (uint32_t)fs_size));
+        bgfx::ProgramHandle prog = bgfx::createProgram(vsh, fsh, true);
+        return prog;
+    };
+    bgfx::ProgramHandle prog_flat = createProgramFlat();
+
     // 3.5) 初始化资源系统（异步文件系统 + 资源 Hub/Manager）
     using namespace Tina::Engine;
     auto fs = CreateFileSystem();
@@ -191,8 +237,27 @@ int main(int /*argc*/, char* /*argv*/[])
 
         renderer.beginFrame();
         pipeline.begin();
-        // TODO: 填充 DrawItem 并调用 pipeline.addDrawItem(...)
+        // 提交一个屏幕空间三角形
+        bgfx::VertexLayout layout;
+        layout.begin()
+            .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+        .end();
+        struct Pos { float x, y, z; };
+        const Pos verts[3] = {
+            { -0.7f, -0.7f, 0.0f },
+            {  0.7f, -0.7f, 0.0f },
+            {  0.0f,  0.7f, 0.0f },
+        };
+        bgfx::TransientVertexBuffer tvb;
+        bgfx::allocTransientVertexBuffer(&tvb, 3, layout);
+        memcpy(tvb.data, verts, sizeof(verts));
+        bgfx::Encoder* enc = renderer.getEncoder();
+        enc->setVertexBuffer(0, &tvb);
+        enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_CULL_CCW);
+        enc->submit(0, prog_flat);
+        bgfx::end(enc);
         pipeline.submit();
+        
         renderer.endFrame();
 
         // 每秒打印一次帧率/帧时间与目标设定，便于核对
