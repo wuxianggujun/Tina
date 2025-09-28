@@ -5,6 +5,8 @@ set(SRC_FILES
     engine/FileSystem.cpp
     core/Path.cpp
     core/EASTLAlloc.cpp
+    game/Camera2D.hpp
+    game/Camera2D.cpp
     game/TileMap.hpp
     game/TileMap.cpp
     renderer/Renderer.hpp

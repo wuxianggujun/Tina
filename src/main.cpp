@@ -16,6 +16,7 @@
 #include "renderer/ShaderManager.hpp"
 #include "core/Time.hpp"
 #include "game/TileMap.hpp"
+#include "game/Camera2D.hpp"
 
 using Tina::os::Event;
 
@@ -103,12 +104,6 @@ int main(int /*argc*/, char* /*argv*/[])
     }
     bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
     ResetBgfxWithSize(pxW, pxH, init.resolution.reset);
-    // 设置视图/投影矩阵（相机）：这里使用单位矩阵，顶点坐标已在 NDC 空间
-    {
-        float view_mtx[16]; bx::mtxIdentity(view_mtx);
-        float proj_mtx[16]; bx::mtxIdentity(proj_mtx);
-        bgfx::setViewTransform(0, view_mtx, proj_mtx);
-    }
 
     // 3.x) 初始化 Renderer/Pipeline
     Tina::Gfx::Renderer renderer; renderer.setDisplaySize(pxW, pxH);
@@ -121,7 +116,7 @@ int main(int /*argc*/, char* /*argv*/[])
     bgfx::ProgramHandle prog_flat = shaderManager.loadProgram("flat", "flat");
     bgfx::ProgramHandle prog_color = shaderManager.loadProgram("color", "color");
 
-    // 3.x.2) 生成一个简易泰拉瑞亚风格的颜色方块地图，并构建网格
+    // 3.x.2) 生成一个简易泰拉瑞亚风格的颜色方块地图，并构建网格（世界坐标，每 tile=1.0）
     struct ColorVertex { float x, y, z; float r, g, b, a; };
     bgfx::VertexLayout colorLayout;
     colorLayout.begin()
@@ -133,11 +128,6 @@ int main(int /*argc*/, char* /*argv*/[])
     Tina::Game::TileMap tilemap(mapCfg);
     tilemap.generate();
 
-    Tina::Container::Vector<ColorVertex> verts;
-    Tina::Container::Vector<uint32_t> indices;
-    verts.reserve((size_t)mapCfg.width * mapCfg.height * 4);
-    indices.reserve((size_t)mapCfg.width * mapCfg.height * 6);
-
     auto tileColor = [](Tina::Game::TileType t)->Tina::Container::Array<float,4>{
         switch (t) {
             case Tina::Game::TileType::Grass: return { {0.18f, 0.72f, 0.28f, 1.0f} };
@@ -146,41 +136,69 @@ int main(int /*argc*/, char* /*argv*/[])
             default:                          return { {0.0f,  0.0f,  0.0f,  0.0f} };
         }
     };
-
-    // 将 tile 坐标映射到 NDC [-1,1]
-    const float sx = 2.0f / float(mapCfg.width);
-    const float sy = 2.0f / float(mapCfg.height);
-    for (int y = 0; y < mapCfg.height; ++y) {
-        for (int x = 0; x < mapCfg.width; ++x) {
-            Tina::Game::TileType t = tilemap.get(x, y);
-            if (t == Tina::Game::TileType::Air) continue;
-            const auto c = tileColor(t);
-            const float x0 = -1.0f + x * sx;
-            const float y0 = -1.0f + y * sy;
-            const float x1 = x0 + sx;
-            const float y1 = y0 + sy;
-            const uint32_t base = (uint32_t)verts.size();
-            verts.push_back({ x0, y0, 0.0f, c[0], c[1], c[2], c[3] });
-            verts.push_back({ x1, y0, 0.0f, c[0], c[1], c[2], c[3] });
-            verts.push_back({ x1, y1, 0.0f, c[0], c[1], c[2], c[3] });
-            verts.push_back({ x0, y1, 0.0f, c[0], c[1], c[2], c[3] });
-            indices.push_back(base + 0);
-            indices.push_back(base + 1);
-            indices.push_back(base + 2);
-            indices.push_back(base + 0);
-            indices.push_back(base + 2);
-            indices.push_back(base + 3);
+    // 分块构建网格（chunk 渲染）：仅提交视区内 chunk
+    struct TileChunk {
+        int cx=0, cy=0; // chunk 坐标
+        float minx=0, miny=0, maxx=0, maxy=0; // AABB（世界）
+        bgfx::VertexBufferHandle vb = BGFX_INVALID_HANDLE;
+        bgfx::IndexBufferHandle ib = BGFX_INVALID_HANDLE;
+        uint32_t indexCount = 0;
+        bool valid() const { return bgfx::isValid(vb) && bgfx::isValid(ib) && indexCount>0; }
+    };
+    const int chunkSize = 32;
+    const int cxCount = (mapCfg.width + chunkSize - 1) / chunkSize;
+    const int cyCount = (mapCfg.height + chunkSize - 1) / chunkSize;
+    Tina::Container::Vector<TileChunk> chunks;
+    chunks.reserve((size_t)cxCount * cyCount);
+    for (int cy = 0; cy < cyCount; ++cy) {
+        for (int cx = 0; cx < cxCount; ++cx) {
+            const int x0i = cx * chunkSize;
+            const int y0i = cy * chunkSize;
+            const int x1i = (x0i + chunkSize > mapCfg.width ? mapCfg.width : x0i + chunkSize);
+            const int y1i = (y0i + chunkSize > mapCfg.height ? mapCfg.height : y0i + chunkSize);
+            Tina::Container::Vector<ColorVertex> v;
+            Tina::Container::Vector<uint32_t>    idx;
+            v.reserve((size_t)(x1i-x0i)*(y1i-y0i));
+            idx.reserve(v.capacity()*6);
+            for (int y = y0i; y < y1i; ++y) {
+                for (int x = x0i; x < x1i; ++x) {
+                    auto t = tilemap.get(x,y);
+                    if (t == Tina::Game::TileType::Air) continue;
+                    const auto c = tileColor(t);
+                    const float x0 = (float)x;
+                    const float y0 = (float)y;
+                    const float x1 = x0 + 1.0f;
+                    const float y1 = y0 + 1.0f;
+                    const uint32_t base = (uint32_t)v.size();
+                    v.push_back({ x0, y0, 0.0f, c[0], c[1], c[2], c[3] });
+                    v.push_back({ x1, y0, 0.0f, c[0], c[1], c[2], c[3] });
+                    v.push_back({ x1, y1, 0.0f, c[0], c[1], c[2], c[3] });
+                    v.push_back({ x0, y1, 0.0f, c[0], c[1], c[2], c[3] });
+                    idx.push_back(base + 0);
+                    idx.push_back(base + 1);
+                    idx.push_back(base + 2);
+                    idx.push_back(base + 0);
+                    idx.push_back(base + 2);
+                    idx.push_back(base + 3);
+                }
+            }
+            TileChunk ch{}; ch.cx=cx; ch.cy=cy; ch.minx=(float)x0i; ch.miny=(float)y0i; ch.maxx=(float)x1i; ch.maxy=(float)y1i;
+            if (!v.empty()) {
+                const bgfx::Memory* memv = bgfx::copy(v.data(), (uint32_t)(v.size()*sizeof(ColorVertex)));
+                ch.vb = bgfx::createVertexBuffer(memv, colorLayout);
+                const bgfx::Memory* memi = bgfx::copy(idx.data(), (uint32_t)(idx.size()*sizeof(uint32_t)));
+                ch.ib = bgfx::createIndexBuffer(memi, BGFX_BUFFER_INDEX32);
+                ch.indexCount = (uint32_t)idx.size();
+            }
+            chunks.push_back(ch);
         }
     }
 
-    bgfx::VertexBufferHandle vb_tiles = BGFX_INVALID_HANDLE;
-    bgfx::IndexBufferHandle ib_tiles = BGFX_INVALID_HANDLE;
-    if (!verts.empty()) {
-        const bgfx::Memory* memv = bgfx::copy(verts.data(), (uint32_t)(verts.size() * sizeof(ColorVertex)));
-        vb_tiles = bgfx::createVertexBuffer(memv, colorLayout);
-        const bgfx::Memory* memi = bgfx::copy(indices.data(), (uint32_t)(indices.size() * sizeof(uint32_t)));
-        ib_tiles = bgfx::createIndexBuffer(memi, BGFX_BUFFER_INDEX32);
-    }
+    // 2D 相机（统一坐标系：世界单位=tile，原点左下，y 向上）
+    Tina::Game::Camera2D camera;
+    camera.setViewportPixels(pxW, pxH);
+    camera.setViewHeightWorld((float)mapCfg.height); // 初始：纵向完全显示
+    camera.setPosition(0.0f, 0.0f);
 
     // 3.5) 初始化资源系统（异步文件系统 + 资源 Hub/Manager）
     using namespace Tina::Engine;
@@ -232,12 +250,7 @@ int main(int /*argc*/, char* /*argv*/[])
                 case Event::Type::WINDOW_SIZE:
                     ResetBgfxWithSize(ev.win_size.w, ev.win_size.h, init.resolution.reset);
                     pipeline.setViewport(ev.win_size.w, ev.win_size.h);
-                    // 若使用相机投影，这里也应更新投影矩阵
-                    {
-                        float view_mtx[16]; bx::mtxIdentity(view_mtx);
-                        float proj_mtx[16]; bx::mtxIdentity(proj_mtx);
-                        bgfx::setViewTransform(0, view_mtx, proj_mtx);
-                    }
+                    camera.setViewportPixels(ev.win_size.w, ev.win_size.h);
                     break;
                 case Event::Type::KEY:
                     if (ev.key.down) {
@@ -248,6 +261,18 @@ int main(int /*argc*/, char* /*argv*/[])
                             relative_mouse = !relative_mouse;
                             Tina::os::setRelativeMouseMode(window, relative_mouse);
                             TINA_INFO("相对鼠标模式: {}", relative_mouse);
+                        } else if (ev.key.key_code == Tina::os::KeyCode::W) {
+                            camera.moveBy(0.0f, +2.0f);
+                        } else if (ev.key.key_code == Tina::os::KeyCode::S) {
+                            camera.moveBy(0.0f, -2.0f);
+                        } else if (ev.key.key_code == Tina::os::KeyCode::A) {
+                            camera.moveBy(-2.0f, 0.0f);
+                        } else if (ev.key.key_code == Tina::os::KeyCode::D) {
+                            camera.moveBy(+2.0f, 0.0f);
+                        } else if (ev.key.key_code == Tina::os::KeyCode::E) { // 放大（视区高度变小）
+                            camera.setViewHeightWorld(camera.viewH() * 0.9f);
+                        } else if (ev.key.key_code == Tina::os::KeyCode::C) { // 缩小（改用 C 键，Q 未在 KeyCode 中定义）
+                            camera.setViewHeightWorld(camera.viewH() * 1.1111f);
                         } else if (ev.key.key_code == Tina::os::KeyCode::ESCAPE) {
                             running = false;
                         }
@@ -274,28 +299,28 @@ int main(int /*argc*/, char* /*argv*/[])
 
         renderer.beginFrame();
         pipeline.begin();
-        // 提交 TileMap 网格（颜色方块）
-        if (bgfx::isValid(vb_tiles) && bgfx::isValid(ib_tiles) && bgfx::isValid(prog_color)) {
-            bgfx::Encoder* enc = renderer.getEncoder();
-            enc->setVertexBuffer(0, vb_tiles);
-            enc->setIndexBuffer(ib_tiles);
-            enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
-            enc->submit(0, prog_color);
-            bgfx::end(enc);
-        } else {
-            // 退化路径：无法创建网格时，用原三角形占位
-            bgfx::VertexLayout layout;
-            layout.begin().add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float).end();
-            struct Pos { float x, y, z; };
-            const Pos tri[3] = {{-0.7f,-0.7f,0},{0.7f,-0.7f,0},{0,0.7f,0}};
-            bgfx::TransientVertexBuffer tvb;
-            if (bgfx::getAvailTransientVertexBuffer(3, layout) >= 3) {
-                bgfx::allocTransientVertexBuffer(&tvb, 3, layout);
-                memcpy(tvb.data, tri, sizeof(tri));
+        // 相机：设置视图/投影
+        float view_mtx[16], proj_mtx[16];
+        camera.buildViewProj(view_mtx, proj_mtx);
+        bgfx::setViewTransform(0, view_mtx, proj_mtx);
+
+        // 计算视区（世界坐标）
+        const float vx0 = camera.x();
+        const float vy0 = camera.y();
+        const float vx1 = vx0 + camera.viewW();
+        const float vy1 = vy0 + camera.viewH();
+
+        // 提交可见 chunk（颜色方块）
+        if (bgfx::isValid(prog_color)) {
+            for (const auto& ch : chunks) {
+                // AABB 相交测试
+                if (ch.maxx <= vx0 || ch.minx >= vx1 || ch.maxy <= vy0 || ch.miny >= vy1) continue;
+                if (!ch.valid()) continue;
                 bgfx::Encoder* enc = renderer.getEncoder();
-                enc->setVertexBuffer(0, &tvb);
+                enc->setVertexBuffer(0, ch.vb);
+                enc->setIndexBuffer(ch.ib);
                 enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
-                enc->submit(0, prog_flat);
+                enc->submit(0, prog_color);
                 bgfx::end(enc);
             }
         }
@@ -328,8 +353,7 @@ int main(int /*argc*/, char* /*argv*/[])
     }
 
     // 5) 清理：先销毁依赖 bgfx 资源的对象/句柄，再关闭 bgfx
-    if (bgfx::isValid(vb_tiles)) bgfx::destroy(vb_tiles);
-    if (bgfx::isValid(ib_tiles)) bgfx::destroy(ib_tiles);
+    for (auto& ch : chunks) { if (bgfx::isValid(ch.vb)) bgfx::destroy(ch.vb); if (bgfx::isValid(ch.ib)) bgfx::destroy(ch.ib); }
     shaderManager.cleanup();
     // 额外提交一帧，确保销毁命令被渲染线程消费
     bgfx::frame();
