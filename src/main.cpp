@@ -137,6 +137,7 @@ int main(int /*argc*/, char* /*argv*/[])
             case Tina::Game::TileType::Grass: return { {0.18f, 0.72f, 0.28f, 1.0f} };
             case Tina::Game::TileType::Dirt:  return { {0.55f, 0.38f, 0.22f, 1.0f} };
             case Tina::Game::TileType::Stone: return { {0.55f, 0.55f, 0.58f, 1.0f} };
+            case Tina::Game::TileType::Water: return { {0.15f, 0.35f, 0.90f, 0.95f} };
             default:                          return { {0.0f,  0.0f,  0.0f,  0.0f} };
         }
     };
@@ -437,7 +438,46 @@ int main(int /*argc*/, char* /*argv*/[])
         }
 
         // 固定逻辑步（物理更新）
-        ticker.step([&](double fixed_dt){ physics.step((float)fixed_dt); });
+        ticker.step([&](double fixed_dt){
+            // 先更新水体的元胞自动机（让湖水向空洞流动）
+            int wx0=0, wy0=0, wx1=-1, wy1=-1;
+            if (tilemap.stepWater(1, wx0, wy0, wx1, wy1)) {
+                const int cx0 = std::max(0, wx0 / chunkSize);
+                const int cy0 = std::max(0, wy0 / chunkSize);
+                const int cx1 = std::min(cxCount - 1, wx1 / chunkSize);
+                const int cy1 = std::min(cyCount - 1, wy1 / chunkSize);
+                for (int cyi = cy0; cyi <= cy1; ++cyi)
+                    for (int cxi = cx0; cxi <= cx1; ++cxi)
+                        rebuildChunk(cxi, cyi);
+            }
+            // 水体对碎块的流动/浮力/阻力
+            const b2Vec2 g = b2World_GetGravity(physics.world());
+            const float buoyFactor = 0.85f; // 浮力系数（相对重力）
+            const float linDrag = 1.2f;     // 线性阻力系数
+            const float flowGain = 2.0f;    // 流动跟随强度
+            const auto& dlist = physics.debris();
+            for (const auto& d : dlist) {
+                if (!b2Body_IsValid(d.body)) continue;
+                b2Vec2 p = b2Body_GetPosition(d.body);
+                int tx = (int)std::floor(p.x);
+                int ty = (int)std::floor(p.y);
+                if (tx < 0 || ty < 0 || tx >= mapCfg.width || ty >= mapCfg.height) continue;
+                if (!tilemap.isWater(tx, ty)) continue;
+                // 浮力：抵消部分重力
+                float mass = b2Body_GetMass(d.body);
+                b2Vec2 Fbuoy { -g.x * mass * buoyFactor, -g.y * mass * buoyFactor };
+                // 阻力：与速度相反
+                b2Vec2 v = b2Body_GetLinearVelocity(d.body);
+                b2Vec2 Fdrag { -linDrag * v.x, -linDrag * v.y };
+                // 流动：朝向水流速度
+                float fx=0, fy=0; tilemap.waterFlow(p.x, p.y, fx, fy);
+                b2Vec2 Vt { fx, fy };
+                b2Vec2 Fflow { flowGain * (Vt.x - v.x), flowGain * (Vt.y - v.y) };
+                b2Vec2 F { Fbuoy.x + Fdrag.x + Fflow.x, Fbuoy.y + Fdrag.y + Fflow.y };
+                b2Body_ApplyForceToCenter(d.body, F, true);
+            }
+            physics.step((float)fixed_dt);
+        });
 
         // 渲染（可使用 alpha 做插值渲染）
         const double alpha = ticker.alpha(); (void)alpha;
