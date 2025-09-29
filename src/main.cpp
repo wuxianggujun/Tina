@@ -157,6 +157,13 @@ int main(int /*argc*/, char* /*argv*/[])
             case Tina::Game::TileType::Wood:     return { {0.45f, 0.35f, 0.25f, 1.0f} };
             case Tina::Game::TileType::Leaves:   return { {0.25f, 0.60f, 0.30f, 1.0f} };
             case Tina::Game::TileType::CaveWall: return { {0.40f, 0.40f, 0.45f, 1.0f} };
+            
+            // 装饰类型
+            case Tina::Game::TileType::Flower:         return { {0.95f, 0.45f, 0.75f, 1.0f} }; // 粉红色花朵
+            case Tina::Game::TileType::Grass_Decoration: return { {0.35f, 0.75f, 0.40f, 1.0f} }; // 深绿色草丛
+            case Tina::Game::TileType::Mushroom:       return { {0.65f, 0.35f, 0.25f, 1.0f} }; // 棕红色蘑菇
+            case Tina::Game::TileType::Crystal:        return { {0.75f, 0.85f, 0.95f, 1.0f} }; // 淡蓝色水晶
+            case Tina::Game::TileType::Rock:           return { {0.45f, 0.45f, 0.50f, 1.0f} }; // 灰色石块
             default:                             return { {0.0f,  0.0f,  0.0f,  0.0f} };
         }
     };

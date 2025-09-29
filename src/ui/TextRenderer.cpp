@@ -24,20 +24,48 @@ bool TextRenderer::initialize(int atlasW, int atlasH)
 
     m_atlasW = atlasW;
     m_atlasH = atlasH;
-    m_atlasPixels.resize((size_t)atlasW * atlasH, 0);
+    // 使用 RGBA8 图集，字形覆盖度写入 A 通道，RGB 固定为 1.0（白）
+    m_atlasPixels.resize((size_t)atlasW * atlasH * 4, 0);
 
-    // 创建 R8 图集纹理
-    const bgfx::Memory* mem = bgfx::copy(m_atlasPixels.data(), (uint32_t)m_atlasPixels.size());
+    // 创建可更新（mutable）的图集纹理：_mem 传入 NULL，后续使用 updateTexture2D 写入内容
     m_atlasTex = bgfx::createTexture2D((uint16_t)atlasW, (uint16_t)atlasH, false, 1,
-                                       bgfx::TextureFormat::R8,
+                                       bgfx::TextureFormat::RGBA8,
                                        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
                                        BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
-                                       mem);
+                                       nullptr);
     if (!bgfx::isValid(m_atlasTex)) {
         TINA_ERROR("TextRenderer: 创建图集纹理失败");
         return false;
     }
     m_sText = bgfx::createUniform("s_text", bgfx::UniformType::Sampler);
+    m_sTextTexture = bgfx::createUniform("s_textTexture", bgfx::UniformType::Sampler);
+
+    // 初始化：将图集初始填充为 RGBA = (255,255,255,128)，便于验证采样是否生效
+    {
+        const size_t pxCount = (size_t)m_atlasW * (size_t)m_atlasH;
+        for (size_t i = 0; i < pxCount; ++i) {
+            m_atlasPixels[i*4 + 0] = 255;
+            m_atlasPixels[i*4 + 1] = 255;
+            m_atlasPixels[i*4 + 2] = 255;
+            m_atlasPixels[i*4 + 3] = 128;
+        }
+        const bgfx::Memory* all = bgfx::copy(m_atlasPixels.data(), (uint32_t)m_atlasPixels.size());
+        bgfx::updateTexture2D(m_atlasTex, 0, 0, 0, 0, (uint16_t)m_atlasW, (uint16_t)m_atlasH, all);
+    }
+
+    // 创建 2x2 调试纹理（红、绿、蓝、白），用于快速验证采样绑定
+    {
+        const uint32_t w = 2, h = 2;
+        uint8_t pixels[w*h*4] = {
+            255, 0,   0,   255,   0, 255, 0, 255,
+            0,   0, 255, 255,   255,255,255,255,
+        };
+        const bgfx::Memory* memdbg = bgfx::copy(pixels, sizeof(pixels));
+        m_debugTex = bgfx::createTexture2D((uint16_t)w, (uint16_t)h, false, 1, bgfx::TextureFormat::RGBA8,
+                                           BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
+                                           BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
+                                           memdbg);
+    }
 
     // 顶点布局
     m_layout.begin()
@@ -61,7 +89,9 @@ bool TextRenderer::initialize(int atlasW, int atlasH)
 void TextRenderer::shutdown()
 {
     if (bgfx::isValid(m_atlasTex)) { bgfx::destroy(m_atlasTex); m_atlasTex = BGFX_INVALID_HANDLE; }
+    if (bgfx::isValid(m_debugTex)) { bgfx::destroy(m_debugTex); m_debugTex = BGFX_INVALID_HANDLE; }
     if (bgfx::isValid(m_sText))    { bgfx::destroy(m_sText);    m_sText = BGFX_INVALID_HANDLE; }
+    if (bgfx::isValid(m_sTextTexture)) { bgfx::destroy(m_sTextTexture); m_sTextTexture = BGFX_INVALID_HANDLE; }
     m_shaderMgr.cleanup();
     if (m_font.face) { FT_Done_Face(m_font.face); m_font.face = nullptr; }
     if (m_ft) { FT_Done_FreeType(m_ft); m_ft = nullptr; }
@@ -109,23 +139,29 @@ bool TextRenderer::ensureGlyph(Font& font, int codepoint)
     m_rowH = std::max(m_rowH, gh);
     m_penX += gw + 1;
 
-    // 拷贝到图集像素（stride = atlasW）
+    // 拷贝到图集像素（RGBA，stride = atlasW*4；A=覆盖度，RGB=白）
     for (int y = 0; y < gh; ++y) {
-        uint8_t* dst = m_atlasPixels.data() + (size_t)(dstY + y) * m_atlasW + dstX;
         const int pitch = g->bitmap.pitch;
         const uint8_t* base = g->bitmap.buffer;
         const uint8_t* src = (pitch >= 0)
             ? base + (size_t)y * (size_t)pitch
             : base + (size_t)(gh - 1 - y) * (size_t)(-pitch);
-        memcpy(dst, src, (size_t)gw);
-    }
 
-    // 更新 GPU 纹理子区
-    // 无法直接用一块连续内存提交非连续行；逐行更新
-    for (int y = 0; y < gh; ++y) {
-        const bgfx::Memory* row = bgfx::copy(m_atlasPixels.data() + (size_t)(dstY + y) * m_atlasW + dstX, (uint32_t)gw);
+        // 写入 CPU 缓存
+        uint8_t* dst = m_atlasPixels.data() + ((size_t)(dstY + y) * (size_t)m_atlasW + (size_t)dstX) * 4;
+        for (int x = 0; x < gw; ++x) {
+            dst[x*4 + 0] = 255;
+            dst[x*4 + 1] = 255;
+            dst[x*4 + 2] = 255;
+            dst[x*4 + 3] = src[x];
+        }
+
+        // 提交到 GPU（一次一行，避免 pitch 差异）
+        const bgfx::Memory* row = bgfx::copy(dst, (uint32_t)(gw * 4));
         bgfx::updateTexture2D(m_atlasTex, 0, 0, (uint16_t)dstX, (uint16_t)(dstY + y), (uint16_t)gw, 1, row);
     }
+
+    // 上面已逐行提交（每行 gw*4 字节），此处不重复提交
 
     // 记录字形信息
     Glyph info;
@@ -227,7 +263,13 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
     enc->setTransform(mtx);
     enc->setVertexBuffer(0, &tvb);
     enc->setIndexBuffer(&tib);
-    enc->setTexture(0, m_sText, m_atlasTex);
+    // 先用 HLSL 反射名绑定（s_textTexture），再用通用名绑定（s_text）；二者任意其一生效即可
+    enc->setTexture(0, m_sTextTexture, m_atlasTex,
+        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
+        BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT);
+    enc->setTexture(0, m_sText, m_atlasTex,
+        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
+        BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT);
     enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA | BGFX_STATE_DEPTH_TEST_ALWAYS);
     TINA_INFO("TextRenderer: 提交视图={} 顶点={} 索引={} 文本长度={} 缺失字形={}",
               (int)viewId, (int)verts.size(), (int)idx.size(), (int)utf8.size(), missing);

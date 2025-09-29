@@ -44,6 +44,13 @@ enum class TileType : uint8_t {
     // 地下结构
     CaveWall,       // 洞穴墙壁
     
+    // 装饰类型
+    Flower,         // 花朵
+    Grass_Decoration, // 草丛装饰
+    Mushroom,       // 蘑菇
+    Crystal,        // 水晶
+    Rock,           // 小石块
+    
     MAX_TILE_TYPE
 };
 
@@ -119,13 +126,14 @@ public:
     void generate();
     
     // 分步生成方法
-    void generateBiomes();        // 生成生物群系
-    void generateTerrain();       // 生成基础地形
-    void generateCaves();         // 生成洞穴系统
-    void generateOres();          // 生成矿物
-    void generateVegetation();    // 生成植被
-    void generateDecorations();   // 生成地表装饰
-    void generateWater();         // 生成水体
+    void initializeBasicData();      // 初始化基础数据
+    void generateBiomes();           // 生成生物群系
+    void generateTerrain();          // 生成基础地形
+    void generateCaves();            // 生成洞穴系统
+    void generateOres();             // 生成矿物
+    void generateSurfaceFeatures();  // 统一生成地表特征（植被+装饰）
+    void generateWater();            // 生成水体
+    void postProcessGeneration();    // 后处理优化
 
     // 查询是否为水体 - 改进版本，增强一致性检查
     bool isWater(int x, int y) const {
@@ -203,19 +211,23 @@ private:
     bool shouldGenerateOre(OreType ore, int x, int y, float caveNoise) const;
     TileType oreTypeToTileType(OreType ore) const;
     
-    // 植被生成辅助函数
-    void generateForestVegetation(int x, int y, float vegetationNoise, float forestNoise);
-    void generatePlainsVegetation(int x, int y, float vegetationNoise);
-    void generateDesertVegetation(int x, int y, float vegetationNoise);
-    void generateTundraVegetation(int x, int y, float vegetationNoise);
-    void generateSwampVegetation(int x, int y, float vegetationNoise);
+    // 统一的地表特征生成辅助
+    bool shouldGenerateTree(BiomeType biome, float primaryNoise, float secondaryNoise) const;
+    bool shouldGenerateLargeDecoration(BiomeType biome, float decorationNoise) const;
+    bool shouldGenerateSmallDecoration(BiomeType biome, float primaryNoise) const;
+    
+    void generateTreeForBiome(int x, int y, BiomeType biome, float primaryNoise, float secondaryNoise);
+    void generateLargeDecorationForBiome(int x, int y, BiomeType biome, float decorationNoise);
+    void generateSmallDecorationForBiome(int x, int y, BiomeType biome, float primaryNoise);
+    
+    // 后处理辅助方法
+    void cleanupIsolatedBlocks();
+    void smoothTerrainEdges();
+    void validateLiquidConsistency();
     
     // 树木生成
     void generateTree(int x, int y, int height, bool hasLeaves = true);
     void generateBigTree(int x, int y);
-    
-    // 装饰生成
-    void generateBiomeDecorations(int x, int y, BiomeType biome, float decorationNoise);
 
 private:
     int m_w;
