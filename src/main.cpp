@@ -386,7 +386,42 @@ int main(int /*argc*/, char* /*argv*/[])
         v.reserve((size_t)(x1i-x0i)*(y1i-y0i));
         idxv.reserve(v.capacity()*6);
         vwater.reserve((size_t)(x1i-x0i)*(y1i-y0i));
-        idxwater.reserve(vwater.capacity()*6);
+                    // Greedy 合批实心层（仅在重建时执行，初始构建保持不变）
+            {
+                const int W = x1i - x0i; const int H = y1i - y0i;
+                Tina::Container::Vector<int> solidKey; solidKey.assign((size_t)W * H, 0);
+                for (int yy = 0; yy < H; ++yy)
+                    for (int xx = 0; xx < W; ++xx) {
+                        auto tt = tilemap.get(x0i + xx, y0i + yy);
+                        if (tt != Tina::Game::TileType::Air && tt != Tina::Game::TileType::Water)
+                            solidKey[(size_t)yy * W + xx] = (int)tt;
+                    }
+                Tina::Container::Vector<uint8_t> used; used.assign((size_t)W * H, 0);
+                for (int yy = 0; yy < H; ++yy) {
+                    for (int xx = 0; xx < W; ++xx) {
+                        const int k = solidKey[(size_t)yy * W + xx];
+                        if (k == 0 || used[(size_t)yy * W + xx]) continue;
+                        int w = 0; while (xx + w < W && solidKey[(size_t)yy * W + (xx + w)] == k && !used[(size_t)yy * W + (xx + w)]) ++w;
+                        int h = 1; for (;;) {
+                            if (yy + h >= H) break;
+                            bool ok = true;
+                            for (int xi=0; xi<w; ++xi) { size_t idxc = (size_t)(yy+h)*W + (xx+xi); if (solidKey[idxc] != k || used[idxc]) { ok=false; break; } }
+                            if (!ok) break; ++h;
+                        }
+                        const float X0 = (float)(x0i + xx), Y0 = (float)(y0i + yy);
+                        const float X1 = (float)(x0i + xx + w), Y1 = (float)(y0i + yy + h);
+                        const auto C = tileColor((Tina::Game::TileType)k);
+                        const uint32_t baseG = (uint32_t)v.size();
+                        v.push_back({ X0, Y0, 0.0f, C[0], C[1], C[2], C[3] });
+                        v.push_back({ X1, Y0, 0.0f, C[0], C[1], C[2], C[3] });
+                        v.push_back({ X1, Y1, 0.0f, C[0], C[1], C[2], C[3] });
+                        v.push_back({ X0, Y1, 0.0f, C[0], C[1], C[2], C[3] });
+                        idxv.push_back(baseG+0); idxv.push_back(baseG+1); idxv.push_back(baseG+2);
+                        idxv.push_back(baseG+0); idxv.push_back(baseG+2); idxv.push_back(baseG+3);
+                        for (int yy2=0; yy2<h; ++yy2) for (int xx2=0; xx2<w; ++xx2) used[(size_t)(yy+yy2)*W + (xx+xx2)] = 1;
+                    }
+                }
+            }idxwater.reserve(vwater.capacity()*6);
         for (int y = y0i; y < y1i; ++y) {
             for (int x = x0i; x < x1i; ++x) {
                 auto t = tilemap.get(x,y);
@@ -552,7 +587,7 @@ int main(int /*argc*/, char* /*argv*/[])
     Tina::UI::TextRenderer textRenderer;
     if (!textRenderer.initialize()) {
         TINA_ERROR("TextRenderer 初始化失败");
-    } else {
+                } else {
         // 使用项目内置思源黑体
         if (!textRenderer.loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 28)) {
             TINA_WARN("加载默认字体失败，文本可能无法显示");
@@ -1004,6 +1039,7 @@ int main(int /*argc*/, char* /*argv*/[])
     Tina::Core::Log::Shutdown();
     return 0;
 }
+
 
 
 
