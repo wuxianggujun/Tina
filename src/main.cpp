@@ -909,6 +909,8 @@ int main(int /*argc*/, char* /*argv*/[])
         if (bgfx::isValid(chunksVBWater[i])) bgfx::destroy(chunksVBWater[i]);
         if (bgfx::isValid(chunksIBWater[i])) bgfx::destroy(chunksIBWater[i]);
     }
+    // 先明确关闭InfoBar文档，再关闭UI系统，避免RmlUI shutdown后访问无效文档
+    infoBar.shutdown();
     // 先关闭 UI（销毁其 bgfx 资源），再清理渲染器与 bgfx
     uiSystem.shutdown();
     shaderManager.cleanup();
