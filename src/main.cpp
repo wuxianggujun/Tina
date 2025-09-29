@@ -1,14 +1,24 @@
-﻿// 使用统一 os 接口（SDL3 实现）创建窗口，事件循环打印日志，bgfx 完成最小渲染循环。
+// 使用统一 os 接口（SDL3 实现）创建窗口，事件循环打印日志，bgfx 完成最小渲染循环。
 
 #include <cstdint>
 #include <SDL3/SDL.h>
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
 #include <bx/math.h>
+#if defined(_WIN32)
+#ifdef WIN32_LEAN_AND_MEAN
+#undef WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <gdiplus.h>
+#pragma comment(lib, "gdiplus.lib")
+#endif
+
 #include <thread>
 #include <chrono>
 #include <cmath>
 #include <algorithm>
+#include <functional>
 #include <cstdlib>
 #include "core/Log.hpp"
 #include "os/OS.hpp"
@@ -124,6 +134,9 @@ int main(int /*argc*/, char* /*argv*/[])
     shaderManager.initialize(); // 使用默认路径 "resources/shaders"
     bgfx::ProgramHandle prog_flat = shaderManager.loadProgram("flat", "flat");
     bgfx::ProgramHandle prog_color = shaderManager.loadProgram("color", "color");
+    bgfx::ProgramHandle prog_text = shaderManager.loadProgram("text", "text");
+    // 新增：用于贴图网格（资源纹理）的独立程序，后续优先使用；若缺失则回退到 text
+    bgfx::ProgramHandle prog_sprite = shaderManager.loadProgram("sprite", "sprite");
 
     // 3.x.2) 生成一个简易泰拉瑞亚风格的颜色方块地图，并构建网格（世界坐标，每 tile=1.0）
     struct ColorVertex { float x, y, z; float r, g, b, a; };
@@ -132,6 +145,66 @@ int main(int /*argc*/, char* /*argv*/[])
         .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
         .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Float)
     .end();
+
+    // 用于纹理化网格（与 text_vs/fs 一致）：Position(3), TexCoord0(2), Color0(U8N)
+    struct TexVertex { float x,y,z; float u,v; uint8_t r,g,b,a; };
+    bgfx::VertexLayout texLayout;
+    texLayout.begin()
+        .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+        .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Uint8, true)
+    .end();
+
+    // 加载泥土纹理
+    bgfx::TextureHandle dirtTex;
+    // 贴图网格使用的统一采样器名：s_tex
+    bgfx::UniformHandle uSpriteTex;      // 统一名（推荐）
+#if defined(_WIN32)
+    
+    auto loadTexturePNG = [&](const char* path)->bgfx::TextureHandle {
+        static ULONG_PTR gdipToken = 0; static bool gdipInit = false;
+        if (!gdipInit) { Gdiplus::GdiplusStartupInput si; if (Gdiplus::GdiplusStartup(&gdipToken, &si, nullptr) == 0) gdipInit = true; }
+        if (!gdipInit) return BGFX_INVALID_HANDLE;
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, path, -1, nullptr, 0);
+        std::wstring wpath; wpath.resize((size_t)wlen);
+        MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath.data(), wlen);
+        Gdiplus::Bitmap bmp(wpath.c_str()); if (bmp.GetLastStatus() != Gdiplus::Ok) return BGFX_INVALID_HANDLE;
+        const UINT w = bmp.GetWidth(); const UINT h = bmp.GetHeight();
+        Gdiplus::Rect rc(0,0,(INT)w,(INT)h); Gdiplus::BitmapData bd{};
+        if (bmp.LockBits(&rc, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB, &bd) != Gdiplus::Ok) return BGFX_INVALID_HANDLE;
+        Tina::Container::Vector<uint8_t> rgba; rgba.resize((size_t)w*h*4);
+        const uint8_t* src = (const uint8_t*)bd.Scan0; const int stride = bd.Stride;
+        for (UINT y = 0; y < h; ++y) { const uint8_t* row = src + y * stride; for (UINT x = 0; x < w; ++x) { size_t idx = ((size_t)y*w + x)*4; rgba[idx+2]=row[x*4+0]; rgba[idx+1]=row[x*4+1]; rgba[idx+0]=row[x*4+2]; rgba[idx+3]=row[x*4+3]; } }
+        bmp.UnlockBits(&bd);
+        const bgfx::Memory* mem = bgfx::copy(rgba.data(), (uint32_t)rgba.size());
+        return bgfx::createTexture2D((uint16_t)w,(uint16_t)h,false,1,bgfx::TextureFormat::RGBA8,
+            BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP|BGFX_SAMPLER_MIN_POINT|BGFX_SAMPLER_MAG_POINT, mem);
+    };
+    // 优先尝试相对路径，失败则回退到可执行目录拼接路径
+    auto tryLoadTexture = [&](const char* rel)->bgfx::TextureHandle {
+        bgfx::TextureHandle h = loadTexturePNG(rel);
+        if (!bgfx::isValid(h)) {
+            const char* base = SDL_GetBasePath();
+            if (base) {
+                std::string abs(base);
+                if (!abs.empty() && abs.back() != '/' && abs.back() != '\\') abs.push_back('/');
+                abs += rel;
+                SDL_free((void*)base);
+                h = loadTexturePNG(abs.c_str());
+            }
+        }
+        return h;
+    };
+    dirtTex = tryLoadTexture("resources/textures/dirt_block.png");
+    if (!bgfx::isValid(dirtTex)) {
+        TINA_WARN("泥土纹理加载失败: {} (将在纹理层跳过渲染)", "resources/textures/dirt_block.png");
+    } else {
+        TINA_INFO("泥土纹理加载成功: {}", "resources/textures/dirt_block.png");
+    }
+#else
+    dirtTex = BGFX_INVALID_HANDLE;
+#endif
+    uSpriteTex  = bgfx::createUniform("s_tex", bgfx::UniformType::Sampler);
 
     Tina::Game::TileMapConfig mapCfg; mapCfg.width = 160; mapCfg.height = 90; // 16:9
     Tina::Game::TileMap tilemap(mapCfg);
@@ -193,6 +266,17 @@ int main(int /*argc*/, char* /*argv*/[])
     chunksVBWater.reserve((size_t)cxCount * cyCount);
     chunksIBWater.reserve((size_t)cxCount * cyCount);
     chunksWaterIndexCount.reserve((size_t)cxCount * cyCount);
+    Tina::Container::Vector<bgfx::VertexBufferHandle> chunksVBDirt;
+    Tina::Container::Vector<bgfx::IndexBufferHandle>  chunksIBDirt;
+    Tina::Container::Vector<uint32_t>                 chunksDirtIndexCount;
+    chunksVBDirt.reserve((size_t)cxCount * cyCount);
+    chunksIBDirt.reserve((size_t)cxCount * cyCount);
+    chunksDirtIndexCount.reserve((size_t)cxCount * cyCount);
+
+    // 预声明：重建指定 chunk（用于后续调用捕获，避免“初始化前使用”的编译器诊断）
+    std::function<void(int,int,bool)> rebuildChunk;
+
+
     // 脏标记：仅对脏块做增量重建
     Tina::Container::Vector<uint8_t> chunkDirtySolid;
     Tina::Container::Vector<uint8_t> chunkDirtyWater;
@@ -270,8 +354,8 @@ int main(int /*argc*/, char* /*argv*/[])
                             idxwater.push_back(baseLava+0); idxwater.push_back(baseLava+1); idxwater.push_back(baseLava+2);
                             idxwater.push_back(baseLava+0); idxwater.push_back(baseLava+2); idxwater.push_back(baseLava+3);
                         }
-                    } else {
-                        // 实体方块几何
+                    } else { if (t == Tina::Game::TileType::Dirt) continue;
+                        // 实心方块
                         const auto c = tileColor(t);
                         const float x0 = (float)x;
                         const float y0 = (float)y;
@@ -312,6 +396,33 @@ int main(int /*argc*/, char* /*argv*/[])
                 chunksVBWater.push_back(BGFX_INVALID_HANDLE);
                 chunksIBWater.push_back(BGFX_INVALID_HANDLE);
                 chunksWaterIndexCount.push_back(0);
+            }
+            // 构建泥土（纹理）网格（不依赖是否存在水层）
+            Tina::Container::Vector<TexVertex> vdirt; Tina::Container::Vector<uint32_t> idxdirt;
+            for (int y = y0i; y < y1i; ++y) {
+                for (int x = x0i; x < x1i; ++x) {
+                    if (tilemap.get(x,y) != Tina::Game::TileType::Dirt) continue;
+                    const uint32_t baseT = (uint32_t)vdirt.size();
+                    vdirt.push_back({ (float)x, (float)y, 0.0f, 0.0f, 0.0f, 255,255,255,255 });
+                    vdirt.push_back({ (float)x+1.0f, (float)y, 0.0f, 1.0f, 0.0f, 255,255,255,255 });
+                    vdirt.push_back({ (float)x+1.0f, (float)y+1.0f, 0.0f, 1.0f, 1.0f, 255,255,255,255 });
+                    vdirt.push_back({ (float)x, (float)y+1.0f, 0.0f, 0.0f, 1.0f, 255,255,255,255 });
+                    idxdirt.push_back(baseT+0); idxdirt.push_back(baseT+1); idxdirt.push_back(baseT+2);
+                    idxdirt.push_back(baseT+0); idxdirt.push_back(baseT+2); idxdirt.push_back(baseT+3);
+                }
+            }
+            if (!vdirt.empty()) {
+                const bgfx::Memory* memtd = bgfx::copy(vdirt.data(), (uint32_t)(vdirt.size()*sizeof(TexVertex)));
+                bgfx::VertexBufferHandle vbd = bgfx::createVertexBuffer(memtd, texLayout);
+                const bgfx::Memory* memid = bgfx::copy(idxdirt.data(), (uint32_t)(idxdirt.size()*sizeof(uint32_t)));
+                bgfx::IndexBufferHandle  ibd = bgfx::createIndexBuffer(memid, BGFX_BUFFER_INDEX32);
+                chunksVBDirt.push_back(vbd);
+                chunksIBDirt.push_back(ibd);
+                chunksDirtIndexCount.push_back((uint32_t)idxdirt.size());
+            } else {
+                chunksVBDirt.push_back(BGFX_INVALID_HANDLE);
+                chunksIBDirt.push_back(BGFX_INVALID_HANDLE);
+                chunksDirtIndexCount.push_back(0);
             }
             chunks.push_back(ch);
         }
@@ -363,12 +474,21 @@ int main(int /*argc*/, char* /*argv*/[])
         for (int cx = 0; cx < cxCount; ++cx) buildChunkPhysics(cx, cy);
 
     // 重建指定 chunk（当瓦片变化时调用）
-    auto rebuildChunk = [&](int cx, int cy, bool waterOnly = false){
+    rebuildChunk = [&](int cx, int cy, bool waterOnly = false){
         if (cx < 0 || cy < 0) return;
         const int idx = cy * cxCount + cx;
         if (idx < 0 || idx >= (int)chunks.size()) return;
         auto& ch = chunks[(size_t)idx];
-        if (!waterOnly) { if (bgfx::isValid(ch.vb)) { bgfx::destroy(ch.vb); ch.vb = BGFX_INVALID_HANDLE; } if (bgfx::isValid(ch.ib)) { bgfx::destroy(ch.ib); ch.ib = BGFX_INVALID_HANDLE; } } if (idx >= 0 && idx < (int)chunksVBWater.size()) {
+        if (!waterOnly) {
+            if (bgfx::isValid(ch.vb)) { bgfx::destroy(ch.vb); ch.vb = BGFX_INVALID_HANDLE; }
+            if (bgfx::isValid(ch.ib)) { bgfx::destroy(ch.ib); ch.ib = BGFX_INVALID_HANDLE; }
+            if (idx >= 0 && idx < (int)chunksVBDirt.size()) {
+                if (bgfx::isValid(chunksVBDirt[(size_t)idx])) { bgfx::destroy(chunksVBDirt[(size_t)idx]); chunksVBDirt[(size_t)idx] = BGFX_INVALID_HANDLE; }
+                if (bgfx::isValid(chunksIBDirt[(size_t)idx])) { bgfx::destroy(chunksIBDirt[(size_t)idx]); chunksIBDirt[(size_t)idx] = BGFX_INVALID_HANDLE; }
+                if (idx < (int)chunksDirtIndexCount.size()) chunksDirtIndexCount[(size_t)idx] = 0;
+            }
+        }
+        if (idx >= 0 && idx < (int)chunksVBWater.size()) {
             if (bgfx::isValid(chunksVBWater[(size_t)idx])) { bgfx::destroy(chunksVBWater[(size_t)idx]); chunksVBWater[(size_t)idx] = BGFX_INVALID_HANDLE; }
             if (bgfx::isValid(chunksIBWater[(size_t)idx])) { bgfx::destroy(chunksIBWater[(size_t)idx]); chunksIBWater[(size_t)idx] = BGFX_INVALID_HANDLE; }
             if (idx < (int)chunksWaterIndexCount.size()) chunksWaterIndexCount[(size_t)idx] = 0;
@@ -421,7 +541,8 @@ int main(int /*argc*/, char* /*argv*/[])
                         for (int yy2=0; yy2<h; ++yy2) for (int xx2=0; xx2<w; ++xx2) used[(size_t)(yy+yy2)*W + (xx+xx2)] = 1;
                     }
                 }
-            }idxwater.reserve(vwater.capacity()*6);
+            }
+        idxwater.reserve(vwater.capacity()*6);
         for (int y = y0i; y < y1i; ++y) {
             for (int x = x0i; x < x1i; ++x) {
                 auto t = tilemap.get(x,y);
@@ -500,12 +621,53 @@ int main(int /*argc*/, char* /*argv*/[])
             ch.ib = bgfx::createIndexBuffer(memi, BGFX_BUFFER_INDEX32);
             ch.indexCount = (uint32_t)idxv.size();
         }
+        // 更新水层缓冲（重建）
         if (!vwater.empty()) {
+            // 确保索引可写
+            while ((int)chunksVBWater.size() <= idx) chunksVBWater.push_back(BGFX_INVALID_HANDLE);
+            while ((int)chunksIBWater.size() <= idx) chunksIBWater.push_back(BGFX_INVALID_HANDLE);
+            while ((int)chunksWaterIndexCount.size() <= idx) chunksWaterIndexCount.push_back(0);
             const bgfx::Memory* memvw = bgfx::copy(vwater.data(), (uint32_t)(vwater.size()*sizeof(ColorVertex)));
             chunksVBWater[(size_t)idx] = bgfx::createVertexBuffer(memvw, colorLayout);
             const bgfx::Memory* memiw = bgfx::copy(idxwater.data(), (uint32_t)(idxwater.size()*sizeof(uint32_t)));
             chunksIBWater[(size_t)idx] = bgfx::createIndexBuffer(memiw, BGFX_BUFFER_INDEX32);
             chunksWaterIndexCount[(size_t)idx] = (uint32_t)idxwater.size();
+        } else {
+            if (idx >= 0 && idx < (int)chunksVBWater.size() && bgfx::isValid(chunksVBWater[(size_t)idx])) { bgfx::destroy(chunksVBWater[(size_t)idx]); chunksVBWater[(size_t)idx] = BGFX_INVALID_HANDLE; }
+            if (idx >= 0 && idx < (int)chunksIBWater.size() && bgfx::isValid(chunksIBWater[(size_t)idx])) { bgfx::destroy(chunksIBWater[(size_t)idx]); chunksIBWater[(size_t)idx] = BGFX_INVALID_HANDLE; }
+            if (idx >= 0 && idx < (int)chunksWaterIndexCount.size()) chunksWaterIndexCount[(size_t)idx] = 0;
+        }
+
+        // 构建泥土（纹理）网格（重建）
+        Tina::Container::Vector<TexVertex> vdirt; Tina::Container::Vector<uint32_t> idxdirt;
+        for (int y = y0i; y < y1i; ++y) {
+            for (int x = x0i; x < x1i; ++x) {
+                if (tilemap.get(x,y) != Tina::Game::TileType::Dirt) continue;
+                const uint32_t baseT = (uint32_t)vdirt.size();
+                vdirt.push_back({ (float)x, (float)y, 0.0f, 0.0f, 0.0f, 255,255,255,255 });
+                vdirt.push_back({ (float)x+1.0f, (float)y, 0.0f, 1.0f, 0.0f, 255,255,255,255 });
+                vdirt.push_back({ (float)x+1.0f, (float)y+1.0f, 0.0f, 1.0f, 1.0f, 255,255,255,255 });
+                vdirt.push_back({ (float)x, (float)y+1.0f, 0.0f, 0.0f, 1.0f, 255,255,255,255 });
+                idxdirt.push_back(baseT+0); idxdirt.push_back(baseT+1); idxdirt.push_back(baseT+2);
+                idxdirt.push_back(baseT+0); idxdirt.push_back(baseT+2); idxdirt.push_back(baseT+3);
+            }
+        }
+        if (!vdirt.empty()) {
+            // 确保索引可写
+            while ((int)chunksVBDirt.size() <= idx) chunksVBDirt.push_back(BGFX_INVALID_HANDLE);
+            while ((int)chunksIBDirt.size() <= idx) chunksIBDirt.push_back(BGFX_INVALID_HANDLE);
+            while ((int)chunksDirtIndexCount.size() <= idx) chunksDirtIndexCount.push_back(0);
+            const bgfx::Memory* memtd = bgfx::copy(vdirt.data(), (uint32_t)(vdirt.size()*sizeof(TexVertex)));
+            if (idx >= 0 && idx < (int)chunksVBDirt.size() && bgfx::isValid(chunksVBDirt[(size_t)idx])) bgfx::destroy(chunksVBDirt[(size_t)idx]);
+            chunksVBDirt[(size_t)idx] = bgfx::createVertexBuffer(memtd, texLayout);
+            const bgfx::Memory* memid = bgfx::copy(idxdirt.data(), (uint32_t)(idxdirt.size()*sizeof(uint32_t)));
+            if (idx >= 0 && idx < (int)chunksIBDirt.size() && bgfx::isValid(chunksIBDirt[(size_t)idx])) bgfx::destroy(chunksIBDirt[(size_t)idx]);
+            chunksIBDirt[(size_t)idx] = bgfx::createIndexBuffer(memid, BGFX_BUFFER_INDEX32);
+            chunksDirtIndexCount[(size_t)idx] = (uint32_t)idxdirt.size();
+        } else {
+            if (idx >= 0 && idx < (int)chunksVBDirt.size() && bgfx::isValid(chunksVBDirt[(size_t)idx])) { bgfx::destroy(chunksVBDirt[(size_t)idx]); chunksVBDirt[(size_t)idx]=BGFX_INVALID_HANDLE; }
+            if (idx >= 0 && idx < (int)chunksIBDirt.size() && bgfx::isValid(chunksIBDirt[(size_t)idx])) { bgfx::destroy(chunksIBDirt[(size_t)idx]); chunksIBDirt[(size_t)idx]=BGFX_INVALID_HANDLE; }
+            if (idx >= 0 && idx < (int)chunksDirtIndexCount.size()) chunksDirtIndexCount[(size_t)idx]=0;
         }
         // 同步重建物理静态体
         if (!waterOnly) buildChunkPhysics(cx, cy);
@@ -907,18 +1069,35 @@ int main(int /*argc*/, char* /*argv*/[])
 
         // 提交可见 chunk（颜色方块）
         if (bgfx::isValid(prog_color)) {
-            for (const auto& ch : chunks) {
+            for (const auto& chunk : chunks) {
                 // AABB 相交测试
-                if (ch.maxx <= vx0 || ch.minx >= vx1 || ch.maxy <= vy0 || ch.miny >= vy1) continue;
-                if (!ch.valid()) continue;
+                if (chunk.maxx <= vx0 || chunk.minx >= vx1 || chunk.maxy <= vy0 || chunk.miny >= vy1) continue;
+                if (!chunk.valid()) continue;
                 bgfx::Encoder* enc = renderer.getEncoder();
-                enc->setVertexBuffer(0, ch.vb);
-                enc->setIndexBuffer(ch.ib);
+                enc->setVertexBuffer(0, chunk.vb);
+                enc->setIndexBuffer(chunk.ib);
                 enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
                 enc->submit(0, prog_color); // 地图使用视图0（像素对齐）
                 bgfx::end(enc);
             }
         }
+        // 提交泥土（纹理）层（只使用 sprite 程序和统一采样器 s_tex）
+        if (bgfx::isValid(prog_sprite) && bgfx::isValid(dirtTex)) {
+            for (size_t i = 0; i < chunks.size(); ++i) {
+                const auto& chunkD = chunks[i];
+                if (chunkD.maxx <= vx0 || chunkD.minx >= vx1 || chunkD.maxy <= vy0 || chunkD.miny >= vy1) continue;
+                if (i >= chunksVBDirt.size() || i >= chunksIBDirt.size() || i >= chunksDirtIndexCount.size()) continue;
+                if (!bgfx::isValid(chunksVBDirt[i]) || !bgfx::isValid(chunksIBDirt[i]) || chunksDirtIndexCount[i] == 0) continue;
+                bgfx::Encoder* encd = renderer.getEncoder();
+                encd->setVertexBuffer(0, chunksVBDirt[i]);
+                encd->setIndexBuffer(chunksIBDirt[i]);
+                if (bgfx::isValid(uSpriteTex)) encd->setTexture(0, uSpriteTex, dirtTex);
+                encd->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
+                encd->submit(0, prog_sprite);
+                bgfx::end(encd);
+            }
+        }
+
 
         // 碎块回收：控制数量、清理超界体
         physics.cleanupDebris();
@@ -926,8 +1105,8 @@ int main(int /*argc*/, char* /*argv*/[])
         // 绘制水体叠加层（基于可见区域裁剪）
         if (bgfx::isValid(prog_color)) {
             for (size_t i = 0; i < chunks.size(); ++i) {
-                const auto& ch = chunks[i];
-                if (ch.maxx <= vx0 || ch.minx >= vx1 || ch.maxy <= vy0 || ch.miny >= vy1) continue;
+                const auto& chunkVis = chunks[i];
+                if (chunkVis.maxx <= vx0 || chunkVis.minx >= vx1 || chunkVis.maxy <= vy0 || chunkVis.miny >= vy1) continue;
                 if (i >= chunksVBWater.size() || i >= chunksIBWater.size() || i >= chunksWaterIndexCount.size()) continue;
                 if (!bgfx::isValid(chunksVBWater[i]) || !bgfx::isValid(chunksIBWater[i]) || chunksWaterIndexCount[i] == 0) continue;
                 bgfx::Encoder* encw = renderer.getEncoder();
@@ -1024,11 +1203,18 @@ int main(int /*argc*/, char* /*argv*/[])
     // 注意：必须在 bgfx::shutdown() 之前显式释放 TextRenderer（内部会销毁 bgfx 句柄），
     // 否则其析构函数在 bgfx 已关闭后再调用 bgfx 接口，可能导致退出卡死。
     textRenderer.shutdown();
-    for (auto& ch : chunks) { if (bgfx::isValid(ch.vb)) bgfx::destroy(ch.vb); if (bgfx::isValid(ch.ib)) bgfx::destroy(ch.ib); }
+    for (auto& chunk : chunks) { if (bgfx::isValid(chunk.vb)) bgfx::destroy(chunk.vb); if (bgfx::isValid(chunk.ib)) bgfx::destroy(chunk.ib); }
     for (size_t i = 0; i < chunksVBWater.size(); ++i) {
         if (bgfx::isValid(chunksVBWater[i])) bgfx::destroy(chunksVBWater[i]);
         if (bgfx::isValid(chunksIBWater[i])) bgfx::destroy(chunksIBWater[i]);
     }
+    for (size_t i = 0; i < chunksVBDirt.size(); ++i) {
+        if (bgfx::isValid(chunksVBDirt[i])) bgfx::destroy(chunksVBDirt[i]);
+        if (bgfx::isValid(chunksIBDirt[i])) bgfx::destroy(chunksIBDirt[i]);
+    }
+    if (bgfx::isValid(dirtTex)) bgfx::destroy(dirtTex);
+    if (bgfx::isValid(uSpriteTex)) bgfx::destroy(uSpriteTex);
+
     // 清理渲染资源
     shaderManager.cleanup();
     // 额外提交一帧，确保销毁命令被渲染线程消费
@@ -1039,6 +1225,14 @@ int main(int /*argc*/, char* /*argv*/[])
     Tina::Core::Log::Shutdown();
     return 0;
 }
+
+
+
+
+
+
+
+
 
 
 

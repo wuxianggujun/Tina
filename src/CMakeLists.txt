@@ -31,7 +31,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 # 着色器编译
 include(ShaderUtils)
-add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color text)
+add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color text sprite)
 add_dependencies(${PROJECT_NAME} shaders)
 
 # 传入 shader 根目录给运行时
