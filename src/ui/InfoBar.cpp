@@ -29,13 +29,14 @@ bool InfoBar::initialize() {
     <title>Info Bar</title>
     <style>
         body {
-            font-family: 'Source Han Sans SC', 'Noto Sans SC', sans-serif;
+            font-family: Source Han Sans SC, Noto Sans SC, sans-serif;
             font-size: 14px;
             margin: 0;
             padding: 0;
             background-color: rgba(0, 0, 0, 0.7);
             color: white;
         }
+        span, .info-bar, .info-section { font-family: Source Han Sans SC, Noto Sans SC, sans-serif; }
         
         .info-bar {
             position: absolute;
@@ -44,9 +45,6 @@ bool InfoBar::initialize() {
             right: 0;
             height: 40px;
             background-color: rgba(0, 0, 0, 0.6);
-            border-bottom-width: 1px;
-            border-bottom-style: solid;
-            border-bottom-color: rgba(255, 255, 255, 0.2);
             padding: 8px 16px;
             display: block;
             line-height: 24px;
@@ -64,10 +62,7 @@ bool InfoBar::initialize() {
             margin-right: 4px;
         }
         
-        .info-value {
-            color: white;
-            font-weight: bold;
-        }
+        .info-value { color: white; }
         
         .separator {
             width: 1px;

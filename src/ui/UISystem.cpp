@@ -58,11 +58,12 @@ bool SystemInterface::LogMessage(Rml::Log::Type type, const Rml::String& message
 //=============================================================================
 
 RenderInterface::RenderInterface() : m_nextTextureId(1), m_nextGeometryId(1) {
+    TINA_INFO("UI: RenderInterface ctor");
     // 顶点布局：位置 + UV + 颜色（颜色为 RGBA8 归一化）
     m_layout.begin()
         .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
         .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
-        .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
+        .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Float)
     .end();
 
     // ShaderManager 与 UI 专用着色器
@@ -133,12 +134,17 @@ Rml::CompiledGeometryHandle RenderInterface::CompileGeometry(Rml::Span<const Rml
     if (vertices.empty() || indices.empty()) {
         return 0;
     }
+    static bool logged_once = false;
+    if (!logged_once) {
+        TINA_INFO("UI: CompileGeometry, verts={}, indices={}", (int)vertices.size(), (int)indices.size());
+        logged_once = true;
+    }
     
     // Convert vertices to bgfx format
     struct UIVertex {
         float x, y, z;     // 位置
         float u, v;        // UV
-        uint32_t color;    // 颜色（RGBA8）
+        float r, g, b, a;  // 颜色（float）
     };
     
     Tina::Container::Vector<UIVertex> uiVertices;
@@ -151,10 +157,10 @@ Rml::CompiledGeometryHandle RenderInterface::CompileGeometry(Rml::Span<const Rml
         uiVertex.z = 0.0f;
         uiVertex.u = vertex.tex_coord.x;
         uiVertex.v = vertex.tex_coord.y;
-        uiVertex.color = (uint32_t)vertex.colour.red |
-                         ((uint32_t)vertex.colour.green << 8) |
-                         ((uint32_t)vertex.colour.blue  << 16) |
-                         ((uint32_t)vertex.colour.alpha << 24);
+        uiVertex.r = (float)vertex.colour.red   / 255.0f;
+        uiVertex.g = (float)vertex.colour.green / 255.0f;
+        uiVertex.b = (float)vertex.colour.blue  / 255.0f;
+        uiVertex.a = (float)vertex.colour.alpha / 255.0f;
         uiVertices.push_back(uiVertex);
     }
     
@@ -195,29 +201,26 @@ void RenderInterface::RenderGeometry(Rml::CompiledGeometryHandle geometry, Rml::
     // 设置模型变换：基础为 SetTransform 传入的矩阵，再叠加 translation 偏移
     {
         float mtx[16];
-        if (m_hasTransform) {
-            std::memcpy(mtx, m_transform, sizeof(mtx));
-        } else {
-            bx::mtxIdentity(mtx);
-        }
-        mtx[12] += translation.x;
-        mtx[13] += translation.y;
+        bx::mtxIdentity(mtx);
+        mtx[12] = translation.x;
+        mtx[13] = translation.y;
         bgfx::setTransform(mtx);
     }
 
     // Set render state
     uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA;
-    
+
+    bgfx::Encoder* enc = bgfx::begin(false);
+    if (!enc) return;
+
     if (m_scissorEnabled) {
-        // RmlUI 提供的剪裁矩形以左上为原点，bgfx 的 setScissor 同样以视图左上为原点。
-        // 因此无需翻转 Y，直接传入即可。
         const uint16_t sx = (uint16_t)std::max(0, m_scissorRegion.Left());
         const uint16_t sy = (uint16_t)std::max(0, m_scissorRegion.Top());
         const uint16_t sw = (uint16_t)std::max(0, m_scissorRegion.Width());
         const uint16_t sh = (uint16_t)std::max(0, m_scissorRegion.Height());
-        bgfx::setScissor(sx, sy, sw, sh);
+        enc->setScissor(sx, sy, sw, sh);
     }
-    
+
     // 绑定纹理（有 UI 纹理则使用，否则绑定 1x1 白色）
     if (bgfx::isValid(m_uniformTexture)) {
         bgfx::TextureHandle th = m_whiteTexture;
@@ -228,17 +231,24 @@ void RenderInterface::RenderGeometry(Rml::CompiledGeometryHandle geometry, Rml::
             }
         }
         if (bgfx::isValid(th)) {
-            bgfx::setTexture(0, m_uniformTexture, th);
+            enc->setTexture(0, m_uniformTexture, th);
         }
     }
-    
-    bgfx::setVertexBuffer(0, data.vb);
-    bgfx::setIndexBuffer(data.ib);
-    bgfx::setState(state);
-    
-    if (bgfx::isValid(m_program)) {
-        bgfx::submit(m_currentViewId, m_program);
+
+    enc->setVertexBuffer(0, data.vb);
+    enc->setIndexBuffer(data.ib);
+    enc->setState(state);
+
+    static bool logged_rg_once = false;
+    if (!logged_rg_once) {
+        TINA_INFO("UI: RenderGeometry submit view={} tex={} scissor={} region=({},{} {}x{})", (int)m_currentViewId, (int)texture, m_scissorEnabled ? 1 : 0,
+                  (int)m_scissorRegion.Left(), (int)m_scissorRegion.Top(), (int)m_scissorRegion.Width(), (int)m_scissorRegion.Height());
+        logged_rg_once = true;
     }
+    if (bgfx::isValid(m_program)) {
+        enc->submit(m_currentViewId, m_program);
+    }
+    bgfx::end(enc);
 }
 
 void RenderInterface::ReleaseGeometry(Rml::CompiledGeometryHandle geometry) {
@@ -268,12 +278,17 @@ Rml::TextureHandle RenderInterface::GenerateTexture(Rml::Span<const Rml::byte> s
     if (source.empty() || source_dimensions.x <= 0 || source_dimensions.y <= 0) {
         return 0;
     }
+    static bool logged_tex_once = false;
+    if (!logged_tex_once) {
+        TINA_INFO("UI: GenerateTexture {}x{} ({} bytes)", source_dimensions.x, source_dimensions.y, (int)source.size());
+        logged_tex_once = true;
+    }
     
-    // RmlUI 字体图集通常为单通道 alpha，使用 R8 格式，并采用点采样、边界 clamp
+    // RmlUI 6.x: GenerateTexture 提供 RGBA 预乘 alpha 数据
     const bgfx::Memory* mem = bgfx::copy(source.data(), (uint32_t)source.size());
     bgfx::TextureHandle handle = bgfx::createTexture2D(
         (uint16_t)source_dimensions.x, (uint16_t)source_dimensions.y, false, 1,
-        bgfx::TextureFormat::R8,
+        bgfx::TextureFormat::RGBA8,
         BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
         BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
         mem
@@ -304,14 +319,9 @@ void RenderInterface::ReleaseTexture(Rml::TextureHandle texture) {
 }
 
 void RenderInterface::SetTransform(const Rml::Matrix4f* transform) {
-    if (transform) {
-        // Rml::Matrix4f 按列主序/行主序与 bgfx::setTransform 都接受 float[16]（列主序），
-        // 这里直接拷贝即可（RmlUI 的矩阵定义与 OpenGL 一致）。
-        std::memcpy(m_transform, transform->data(), sizeof(m_transform));
-        m_hasTransform = true;
-    } else {
-        m_hasTransform = false;
-    }
+    // 简化：忽略自定义变换矩阵，依赖 RenderGeometry 的 translation。
+    (void)transform;
+    m_hasTransform = false;
 }
 
 //=============================================================================
@@ -515,6 +525,7 @@ void UISystem::update(float deltaTime) {
 
 void UISystem::render() {
     if (m_context && m_renderInterface) {
+        TINA_INFO("UI: render() begin");
         // 设置UI专用的视图（避免与其他视图冲突，使用较高的ID）
         const uint16_t uiViewId = 15;
         
@@ -533,6 +544,7 @@ void UISystem::render() {
         m_renderInterface->setCurrentViewId(uiViewId);
         
         m_context->Render();
+        TINA_INFO("UI: render() end");
     }
 }
 

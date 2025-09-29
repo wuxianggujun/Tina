@@ -412,8 +412,8 @@ int main(int /*argc*/, char* /*argv*/[])
                 if (d2 > r2) continue;
                 auto t = tilemap.get(x,y);
                 if (t == Tina::Game::TileType::Air) continue;
-                // 清除 tile（所有命中均清除）
-                tilemap.set(x,y, Tina::Game::TileType::Air);
+                // 清除 tile（所有命中均清除）- 使用安全方法确保水位数据一致性
+                tilemap.setSafe(x,y, Tina::Game::TileType::Air);
                 if (t == Tina::Game::TileType::Water) {
                     auto randf = [](){ return (float)std::rand() / (float)RAND_MAX; };
                     const int waterParticles = 8; // 每个水瓦片 8 个粒子

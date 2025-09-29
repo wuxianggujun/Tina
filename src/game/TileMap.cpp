@@ -96,10 +96,7 @@ void TileMap::generate()
             if (n < p) set(x, y, TileType::Air);
         }
 
-        // 海水填充：海平面以下的空腔填充为水
-        for (int y = 0; y <= m_seaLevel; ++y) {
-            if (get(x, y) == TileType::Air) m_water[index(x,y)] = 255;
-        }
+        // 湖泊挖掘完成后，再进行海水填充
     }
 
     // 生成湖泊：选取若干椭圆区域，挖槽并在下半部位注水
@@ -129,15 +126,28 @@ void TileMap::generate()
                 float dy = (y - cy) / ry;
                 if (dx*dx + dy*dy > 1.0f) continue;
 
-                // 仅作用于地表以下，避免天空出现“悬浮水”
+                // 仅作用于地表以下，避免天空出现"悬浮水"
                 if (y > groundY) continue;
 
                 // 将下半椭圆（y <= cy）注水；其上半（cy < y <= groundY）挖空为空气
                 if (y <= cy) {
+                    // 湖泊底部：设置为空气并注满水
+                    set(x, y, TileType::Air);
                     m_water[index(x,y)] = 255;
                 } else {
-                    set(x, y, TileType::Air);
+                    // 湖泊拱顶：使用安全设置，确保清除水位数据
+                    setSafe(x, y, TileType::Air);
                 }
+            }
+        }
+    }
+    
+    // 海水填充：在湖泊生成之后，海平面以下的空腔填充为水（避免覆盖湖泊设置）
+    for (int x = 0; x < m_w; ++x) {
+        for (int y = 0; y <= m_seaLevel; ++y) {
+            if (get(x, y) == TileType::Air && m_water[index(x,y)] == 0) {
+                // 只有在没有水位数据的空气格子才填充海水（避免覆盖湖泊）
+                m_water[index(x,y)] = 255;
             }
         }
     }

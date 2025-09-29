@@ -36,6 +36,17 @@ public:
 
     TileType get(int x, int y) const { return m_tiles[index(x,y)]; }
     void set(int x, int y, TileType t) { m_tiles[index(x,y)] = t; }
+    
+    // 安全的瓦片设置：同时处理瓦片类型和水位数据的一致性
+    void setSafe(int x, int y, TileType t) {
+        if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return;
+        m_tiles[index(x,y)] = t;
+        
+        // 确保数据一致性：非水瓦片时清除水位数据
+        if (t != TileType::Water) {
+            m_water[index(x,y)] = 0;
+        }
+    }
 
     // 生成：
     // - 使用多频正弦形成起伏地表
@@ -43,10 +54,13 @@ public:
     // - 简单洞穴：对地下区域使用哈希噪声阈值挖空
     void generate();
 
-    // 查询是否为水体
+    // 查询是否为水体 - 改进版本，增强一致性检查
     bool isWater(int x, int y) const {
         if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return false;
-        return m_water[index(x,y)] > 0;
+        // 只有在瓦片为Air且有水位数据，或者瓦片就是Water类型时才返回true
+        TileType t = m_tiles[index(x,y)];
+        uint8_t waterLevel = m_water[index(x,y)];
+        return (t == TileType::Air && waterLevel > 0) || (t == TileType::Water);
     }
 
     // 为水体提供一个简易流场（单位：世界单位/秒），用于对碎块施加流动力
@@ -58,6 +72,18 @@ public:
     uint8_t water(int x, int y) const { return m_water[index(x,y)]; }
     void setWater(int x, int y, uint8_t lvl) { m_water[index(x,y)] = lvl; }
     void addWater(int x, int y, int delta) { int v = (int)m_water[index(x,y)] + delta; if (v < 0) v = 0; if (v > 255) v = 255; m_water[index(x,y)] = (uint8_t)v; }
+    
+    // 安全的水位设置：确保瓦片类型与水位数据一致
+    void setWaterSafe(int x, int y, uint8_t lvl) {
+        if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return;
+        m_water[index(x,y)] = lvl;
+        
+        // 如果设置了水位且当前不是Water瓦片，确保瓦片为Air
+        if (lvl > 0 && get(x, y) != TileType::Water && get(x, y) != TileType::Air) {
+            set(x, y, TileType::Air);
+        }
+        // 如果清除了水位且瓦片是Air，保持Air状态（正常）
+    }
 
     // 水体元胞自动机更新：执行若干次水流步进，输出改变的 AABB（若无改变则 outMinX>outMaxX）
     bool stepWater(int iterations, int& outMinX, int& outMinY, int& outMaxX, int& outMaxY);
