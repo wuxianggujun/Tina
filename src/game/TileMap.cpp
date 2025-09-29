@@ -8,53 +8,6 @@
 
 namespace Tina::Game {
 
-// Thomas Wang 的无符号整数哈希
-static inline uint32_t hash_u32(uint32_t x)
-{
-    x ^= x >> 16;
-    x *= 0x7feb352dU;
-    x ^= x >> 15;
-    x *= 0x846ca68bU;
-    x ^= x >> 16;
-    return x;
-}
-
-float TileMap::noise1(int x) const
-{
-    uint32_t n = hash_u32((uint32_t)x ^ (m_seed * 0x9e3779b1u));
-    return float(n & 0x00ffffffu) / float(0x00ffffffu);
-}
-
-float TileMap::noise2(int x, int y) const
-{
-    uint32_t n = hash_u32(((uint32_t)x * 73856093u) ^ ((uint32_t)y * 19349663u) ^ (m_seed * 83492791u));
-    return float(n & 0x00ffffffu) / float(0x00ffffffu);
-}
-
-float TileMap::noise2f(float x, float y) const
-{
-    // 将连续坐标映射为双线性插值的值噪声，形成空间相关性
-    int xi = (int)std::floor(x);
-    int yi = (int)std::floor(y);
-    float fx = x - (float)xi;
-    float fy = y - (float)yi;
-
-    // 样本四个整点噪声
-    float v00 = noise2(xi,     yi    );
-    float v10 = noise2(xi + 1, yi    );
-    float v01 = noise2(xi,     yi + 1);
-    float v11 = noise2(xi + 1, yi + 1);
-
-    // 平滑插值（smoothstep）以减少方格感
-    auto smooth = [](float t){ return t * t * (3.0f - 2.0f * t); };
-    float sx = smooth(fx);
-    float sy = smooth(fy);
-
-    float vx0 = v00 + (v10 - v00) * sx;
-    float vx1 = v01 + (v11 - v01) * sx;
-    return vx0 + (vx1 - vx0) * sy;
-}
-
 void TileMap::generate()
 {
     // 新的分步生成系统
@@ -215,13 +168,19 @@ void TileMap::generateWater()
         }
     }
     
-    // 生成湖泊（保持原有逻辑，但适配新的生物群系）
+    // 生成湖泊（使用新的噪声生成器）
     const int lakeCount = std::max(2, m_w / 80);
     for (int i = 0; i < lakeCount; ++i) {
-        int cx = (int)(noise1(i * 17) * (m_w - 20)) + 10;
-        int cy = (int)(m_h * (0.35f + 0.25f * noise1(i * 31)));
-        float rx = 6.0f + 10.0f * noise1(i * 47);
-        float ry = 4.0f + 8.0f * noise1(i * 61);
+        // 使用新噪声生成器替代旧的 noise1
+        float rand1 = m_noiseGen.oreNoise(static_cast<float>(i * 17), 0.0f, 1);
+        float rand2 = m_noiseGen.oreNoise(static_cast<float>(i * 31), 0.0f, 2);
+        float rand3 = m_noiseGen.oreNoise(static_cast<float>(i * 47), 0.0f, 3);
+        float rand4 = m_noiseGen.oreNoise(static_cast<float>(i * 61), 0.0f, 4);
+        
+        int cx = (int)(rand1 * (m_w - 20)) + 10;
+        int cy = (int)(m_h * (0.35f + 0.25f * rand2));
+        float rx = 6.0f + 10.0f * rand3;
+        float ry = 4.0f + 8.0f * rand4;
 
         int x0 = std::max(1, cx - (int)rx - 1);
         int x1 = std::min(m_w - 2, cx + (int)rx + 1);
@@ -263,8 +222,8 @@ void TileMap::waterFlow(float wx, float wy, float& outVx, float& outVy) const
     if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return;
     if (m_water[index(x,y)] == 0) return;
 
-    // 随机场方向 + 海水向右偏移的趋势
-    float n = noise2f(wx * 0.5f, wy * 0.5f); // 平滑一些
+    // 使用新的噪声生成器
+    float n = m_noiseGen.heightNoise(wx * 0.5f, wy * 0.5f); // 平滑一些
     float ang = n * 6.2831853f;
     float vx = std::cos(ang);
     float vy = std::sin(ang);
@@ -483,6 +442,136 @@ bool TileMap::stepWaterAdvanced(int iterations, int& outMinX, int& outMinY, int&
 
     outMinX = minx; outMinY = miny; outMaxX = maxx; outMaxY = maxy;
     return anyChanged;
+}
+
+// 生物群系确定逻辑
+BiomeType TileMap::determineBiome(float temperature, float humidity, float height) const
+{
+    // 简化的生物群系逻辑
+    // temperature: 0=寒冷, 1=炎热
+    // humidity: 0=干燥, 1=湿润
+    // height: 0=低海拔, 1=高海拔
+    
+    if (height < 0.3f) {
+        return BiomeType::Ocean;  // 低海拔区域为海洋
+    }
+    
+    if (height < 0.4f && humidity > 0.6f) {
+        return BiomeType::Beach;  // 海岸线
+    }
+    
+    if (temperature < 0.3f) {
+        if (height > 0.7f) return BiomeType::Mountain;  // 高寒山地
+        return BiomeType::Tundra;  // 苔原
+    }
+    
+    if (temperature > 0.7f && humidity < 0.3f) {
+        return BiomeType::Desert;  // 沙漠
+    }
+    
+    if (humidity > 0.6f && temperature > 0.4f) {
+        if (height > 0.6f) return BiomeType::Mountain;
+        return BiomeType::Forest;  // 森林
+    }
+    
+    if (humidity < 0.4f && temperature < 0.6f && height > 0.5f) {
+        return BiomeType::Mountain;  // 山地
+    }
+    
+    return BiomeType::Plains;  // 默认平原
+}
+
+TileType TileMap::getSurfaceMaterial(BiomeType biome) const
+{
+    switch (biome) {
+        case BiomeType::Forest:
+        case BiomeType::Plains:
+            return TileType::Grass;
+        case BiomeType::Desert:
+        case BiomeType::Beach:
+            return TileType::Sand;
+        case BiomeType::Tundra:
+        case BiomeType::Mountain:
+            return TileType::Snow;
+        case BiomeType::Swamp:
+            return TileType::Clay;
+        case BiomeType::Ocean:
+        default:
+            return TileType::Stone;
+    }
+}
+
+TileType TileMap::getSubsurfaceMaterial(BiomeType biome, int depth) const
+{
+    // 根据深度和生物群系确定地下材料
+    if (depth <= 0) return getSurfaceMaterial(biome);
+    
+    // 浅层（1-6格深）
+    if (depth <= 6) {
+        switch (biome) {
+            case BiomeType::Desert:
+            case BiomeType::Beach:
+                return TileType::Sand;
+            case BiomeType::Swamp:
+                return TileType::Clay;
+            default:
+                return TileType::Dirt;
+        }
+    }
+    
+    // 深层（7-20格深）
+    if (depth <= 20) {
+        return TileType::Stone;
+    }
+    
+    // 极深层（20格以上）
+    if (depth > 40) {
+        return TileType::Bedrock;  // 基岩层
+    }
+    
+    return TileType::Stone;
+}
+
+bool TileMap::shouldGenerateOre(OreType ore, int x, int y, float caveNoise) const
+{
+    // 计算深度
+    int surfaceY = m_h;
+    for (int sy = m_h - 1; sy >= 0; --sy) {
+        if (get(x, sy) != TileType::Air) {
+            surfaceY = sy;
+            break;
+        }
+    }
+    int depth = surfaceY - y;
+    
+    if (depth < 3) return false;  // 地表附近不生成矿物
+    
+    float oreNoise = m_noiseGen.oreNoise(static_cast<float>(x), static_cast<float>(y), static_cast<int>(ore));
+    
+    // 不同矿物有不同的生成条件
+    switch (ore) {
+        case OreType::Coal:
+            return depth >= 5 && depth <= 25 && oreNoise > 0.7f;
+        case OreType::Iron:
+            return depth >= 8 && depth <= 30 && oreNoise > 0.75f;
+        case OreType::Gold:
+            return depth >= 15 && depth <= 35 && oreNoise > 0.8f;
+        case OreType::Diamond:
+            return depth >= 25 && oreNoise > 0.85f;
+        default:
+            return false;
+    }
+}
+
+TileType TileMap::oreTypeToTileType(OreType ore) const
+{
+    switch (ore) {
+        case OreType::Coal:    return TileType::Coal;
+        case OreType::Iron:    return TileType::Iron;
+        case OreType::Gold:    return TileType::Gold;
+        case OreType::Diamond: return TileType::Diamond;
+        default:               return TileType::Stone;
+    }
 }
 
 } // namespace Tina::Game

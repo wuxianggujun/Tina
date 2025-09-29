@@ -23,8 +23,7 @@
 #include "game/Camera2D.hpp"
 #include <box2d/box2d.h>
 #include "physics/Physics2D.hpp"
-#include "ui/UISystem.hpp"
-#include "ui/InfoBar.hpp"
+#include "ui/TextRenderer.hpp"
 #include "ui/TextRenderer.hpp"
 
 using Tina::os::Event;
@@ -140,11 +139,25 @@ int main(int /*argc*/, char* /*argv*/[])
 
     auto tileColor = [](Tina::Game::TileType t)->Tina::Container::Array<float,4>{
         switch (t) {
-            case Tina::Game::TileType::Grass: return { {0.18f, 0.72f, 0.28f, 1.0f} };
-            case Tina::Game::TileType::Dirt:  return { {0.55f, 0.38f, 0.22f, 1.0f} };
-            case Tina::Game::TileType::Stone: return { {0.55f, 0.55f, 0.58f, 1.0f} };
-            case Tina::Game::TileType::Water: return { {0.15f, 0.35f, 0.90f, 0.95f} };
-            default:                          return { {0.0f,  0.0f,  0.0f,  0.0f} };
+            case Tina::Game::TileType::Grass:    return { {0.18f, 0.72f, 0.28f, 1.0f} };
+            case Tina::Game::TileType::Dirt:     return { {0.55f, 0.38f, 0.22f, 1.0f} };
+            case Tina::Game::TileType::Stone:    return { {0.55f, 0.55f, 0.58f, 1.0f} };
+            case Tina::Game::TileType::Sand:     return { {0.94f, 0.86f, 0.51f, 1.0f} };
+            case Tina::Game::TileType::Snow:     return { {0.95f, 0.95f, 0.98f, 1.0f} };
+            case Tina::Game::TileType::Ice:      return { {0.68f, 0.85f, 0.90f, 1.0f} };
+            case Tina::Game::TileType::Water:    return { {0.15f, 0.35f, 0.90f, 0.95f} };
+            case Tina::Game::TileType::Lava:     return { {0.90f, 0.25f, 0.10f, 1.0f} };
+            case Tina::Game::TileType::Coal:     return { {0.20f, 0.20f, 0.20f, 1.0f} };
+            case Tina::Game::TileType::Iron:     return { {0.60f, 0.55f, 0.50f, 1.0f} };
+            case Tina::Game::TileType::Gold:     return { {0.90f, 0.75f, 0.20f, 1.0f} };
+            case Tina::Game::TileType::Diamond:  return { {0.85f, 0.95f, 0.95f, 1.0f} };
+            case Tina::Game::TileType::Clay:     return { {0.72f, 0.45f, 0.30f, 1.0f} };
+            case Tina::Game::TileType::Bedrock:  return { {0.15f, 0.15f, 0.15f, 1.0f} };
+            case Tina::Game::TileType::Obsidian: return { {0.25f, 0.15f, 0.25f, 1.0f} };
+            case Tina::Game::TileType::Wood:     return { {0.45f, 0.35f, 0.25f, 1.0f} };
+            case Tina::Game::TileType::Leaves:   return { {0.25f, 0.60f, 0.30f, 1.0f} };
+            case Tina::Game::TileType::CaveWall: return { {0.40f, 0.40f, 0.45f, 1.0f} };
+            default:                             return { {0.0f,  0.0f,  0.0f,  0.0f} };
         }
     };
     // 分块构建网格（chunk 渲染）：仅提交视区内 chunk
@@ -468,20 +481,7 @@ int main(int /*argc*/, char* /*argv*/[])
     // 示例：异步读取一个配置文件（展示资源 READY）
     Resource* cfg_res = hub.load(BlobResource::TYPE, Tina::Core::Path(Tina::Core::string_view{"resources/config/settings.yaml", sizeof("resources/config/settings.yaml") - 1}));
 
-    // 3.7) 初始化UI系统
-    Tina::UI::UISystem uiSystem;
-    if (!uiSystem.initialize(pxW, pxH)) {
-        TINA_ERROR("UI系统初始化失败");
-        // 可以选择继续运行或退出
-    }
-    
-    // 创建信息栏
-    Tina::UI::InfoBar infoBar(&uiSystem);
-    if (!infoBar.initialize()) {
-        TINA_ERROR("信息栏初始化失败");
-    }
-    
-    // 3.7.x) 初始化文本渲染器（独立于 RmlUI，可用于直接绘制中文）
+    // 3.7) 初始化文本渲染器（独立于 RmlUI，可用于直接绘制中文）
     Tina::UI::TextRenderer textRenderer;
     if (!textRenderer.initialize()) {
         TINA_ERROR("TextRenderer 初始化失败");
@@ -526,9 +526,6 @@ int main(int /*argc*/, char* /*argv*/[])
         }
         Event ev;
         while (Tina::os::getEvent(ev)) {
-            // UI事件处理优先
-            uiSystem.handleEvent(ev);
-            
             // LogEvent(ev);  // 关闭事件日志打印
             switch (ev.type) {
                 case Event::Type::QUIT:
@@ -538,7 +535,6 @@ int main(int /*argc*/, char* /*argv*/[])
                     ResetBgfxWithSize(ev.win_size.w, ev.win_size.h, init.resolution.reset);
                     pipeline.setViewport(ev.win_size.w, ev.win_size.h);
                     camera.setViewportPixels(ev.win_size.w, ev.win_size.h);
-                    uiSystem.setViewportSize(ev.win_size.w, ev.win_size.h);
                     pxW = ev.win_size.w; pxH = ev.win_size.h; // 修正鼠标像素→世界坐标映射
                     break;
                 case Event::Type::KEY:
@@ -562,8 +558,6 @@ int main(int /*argc*/, char* /*argv*/[])
                             camera.setViewHeightWorld(camera.viewH() * 0.9f);
                         } else if (ev.key.key_code == Tina::os::KeyCode::C) { // 缩小（改用 C 键，Q 未在 KeyCode 中定义）
                             camera.setViewHeightWorld(camera.viewH() * 1.1111f);
-                        } else if (ev.key.key_code == Tina::os::KeyCode::F) { // 切换调试信息
-                            infoBar.toggleDebugInfo();
                         } else if (ev.key.key_code == Tina::os::KeyCode::ESCAPE) {
                             running = false;
                         }
@@ -764,21 +758,15 @@ int main(int /*argc*/, char* /*argv*/[])
 
         // 渲染（可使用 alpha 做插值渲染）
         const double alpha = ticker.alpha(); (void)alpha;
-        
-        // 更新UI数据
-        Tina::UI::InfoBarData uiData;
-        uiData.mapWidth = mapCfg.width;
-        uiData.mapHeight = mapCfg.height;
-        uiData.cameraX = camera.x();
-        uiData.cameraY = camera.y();
-        uiData.cameraZoom = (float)mapCfg.height / camera.viewH(); // 计算缩放比例
-        uiData.fps = (float)frame_timer.fps();
-        uiData.chunkCount = (int)chunks.size();
-        uiData.debrisCount = (int)physics.debris().size();
-        infoBar.update(uiData);
-        
-        // 更新UI系统
-        uiSystem.update((float)dt);
+        // 设置 UI 视图（15）的正交投影矩阵与视口（左上为原点）
+        {
+            const uint16_t uiViewId = 15;
+            float ortho[16];
+            bx::mtxOrtho(ortho, 0.0f, (float)pxW, (float)pxH, 0.0f, -1.0f, 1.0f, 0.0f, bgfx::getCaps()->homogeneousDepth);
+            bgfx::setViewTransform(uiViewId, nullptr, ortho);
+            bgfx::setViewRect(uiViewId, 0, 0, (uint16_t)pxW, (uint16_t)pxH);
+            bgfx::setViewClear(uiViewId, BGFX_CLEAR_DEPTH, 0x00000000, 1.0f, 0);
+        }
 
         renderer.beginFrame();
         pipeline.begin();
@@ -886,9 +874,6 @@ int main(int /*argc*/, char* /*argv*/[])
         }
         pipeline.submit();
         
-        // 更新 + 渲染 UI 系统（RmlUI 需要先 Update 再 Render）
-        uiSystem.update((float)dt);
-        uiSystem.render();
         // 在 UI 视图 15 上直接绘制示例文本（验证中文管线）
         textRenderer.drawText(15, 16.0f, 56.0f, 1.0f, 1.0f, 1.0f, 1.0f,
                               "中文渲染 OK —— Tina 引擎");
@@ -925,10 +910,7 @@ int main(int /*argc*/, char* /*argv*/[])
         if (bgfx::isValid(chunksVBWater[i])) bgfx::destroy(chunksVBWater[i]);
         if (bgfx::isValid(chunksIBWater[i])) bgfx::destroy(chunksIBWater[i]);
     }
-    // 先明确关闭InfoBar文档，再关闭UI系统，避免RmlUI shutdown后访问无效文档
-    infoBar.shutdown();
-    // 先关闭 UI（销毁其 bgfx 资源），再清理渲染器与 bgfx
-    uiSystem.shutdown();
+    // 清理渲染资源
     shaderManager.cleanup();
     // 额外提交一帧，确保销毁命令被渲染线程消费
     bgfx::frame();

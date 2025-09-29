@@ -176,11 +176,6 @@ private:
     bool shouldGenerateOre(OreType ore, int x, int y, float caveNoise) const;
     TileType oreTypeToTileType(OreType ore) const;
 
-    // 简单整型哈希噪声，返回 0..1 (保留兼容性)
-    float noise1(int x) const;
-    float noise2(int x, int y) const;
-    float noise2f(float x, float y) const;
-
 private:
     int m_w;
     int m_h;

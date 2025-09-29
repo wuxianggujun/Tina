@@ -5,6 +5,8 @@ set(SRC_FILES
     engine/FileSystem.cpp
     core/Path.cpp
     core/EASTLAlloc.cpp
+    core/Noise.hpp
+    core/Noise.cpp
     physics/Physics2D.hpp
     physics/Physics2D.cpp
     game/Camera2D.hpp
@@ -16,10 +18,6 @@ set(SRC_FILES
     renderer/SortKey.hpp
     renderer/ShaderManager.hpp
     renderer/ShaderManager.cpp
-    ui/UISystem.hpp
-    ui/UISystem.cpp
-    ui/InfoBar.hpp
-    ui/InfoBar.cpp
     ui/TextRenderer.hpp
     ui/TextRenderer.cpp
 )
@@ -33,7 +31,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 # 着色器编译
 include(ShaderUtils)
-add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color ui text)
+add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color text)
 add_dependencies(${PROJECT_NAME} shaders)
 
 # 传入 shader 根目录给运行时
@@ -65,7 +63,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     spdlog::spdlog
     glm::glm
     freetype
-    rmlui_core
     TracyClient
     box2d
     lz4_static
