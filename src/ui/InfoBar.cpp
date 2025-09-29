@@ -33,27 +33,29 @@ bool InfoBar::initialize() {
             font-size: 14px;
             margin: 0;
             padding: 0;
-            background-color: rgba(0, 0, 0, 0.7);
+            background-color: transparent;
             color: white;
+            width: 100%;
+            height: 100%;
         }
         
         .info-bar {
             position: absolute;
             top: 0;
             left: 0;
-            width: 100%;
+            right: 0;
             height: 40px;
             background-color: rgba(0, 0, 0, 0.6);
             padding: 8px 16px;
-            display: block;
-            line-height: 24px;
+            display: flex;
+            align-items: center;
             z-index: 1000;
         }
         
         .info-section {
             margin-right: 24px;
-            display: inline-block;
-            vertical-align: middle;
+            display: flex;
+            align-items: center;
         }
         
         .info-label {
@@ -61,13 +63,17 @@ bool InfoBar::initialize() {
             margin-right: 4px;
         }
         
-        .info-value { color: white; }
+        .info-value { 
+            color: white; 
+            font-weight: bold;
+        }
         
         .separator {
             width: 1px;
             height: 20px;
             background: rgba(255, 255, 255, 0.2);
             margin: 0 16px;
+            flex-shrink: 0;
         }
         
         .fps {

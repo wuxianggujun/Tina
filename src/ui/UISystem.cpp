@@ -144,8 +144,6 @@ Rml::CompiledGeometryHandle RenderInterface::CompileGeometry(Rml::Span<const Rml
         TINA_WARN("UI: CompileGeometry called with empty data");
         return 0;
     }
-    static int compile_count = 0;
-    TINA_INFO("UI: CompileGeometry #{}, verts={}, indices={}", ++compile_count, (int)vertices.size(), (int)indices.size());
     
     // Convert vertices to bgfx format
     struct UIVertex {
@@ -192,7 +190,6 @@ Rml::CompiledGeometryHandle RenderInterface::CompileGeometry(Rml::Span<const Rml
     data.ib = ib;
     data.indexCount = (uint32_t)indices.size();
     
-    TINA_INFO("UI: Created geometry handle {}", (int)handle);
     return handle;
 }
 
@@ -228,7 +225,7 @@ void RenderInterface::RenderGeometry(Rml::CompiledGeometryHandle geometry, Rml::
         enc->setScissor(sx, sy, sw, sh);
     }
 
-    // 绑定纹理（修复版本：使用更安全的方法）
+    // 绑定纹理（优化版本）
     if (bgfx::isValid(m_uniformTexture)) {
         bgfx::TextureHandle th = BGFX_INVALID_HANDLE;
         
@@ -237,24 +234,17 @@ void RenderInterface::RenderGeometry(Rml::CompiledGeometryHandle geometry, Rml::
             auto texIt = m_textures.find(texture);
             if (texIt != m_textures.end() && bgfx::isValid(texIt->second.handle)) {
                 th = texIt->second.handle;
-                TINA_INFO("UI: Using UI texture handle {} ({}x{})", (int)texture, texIt->second.width, texIt->second.height);
             }
         }
         
         // 如果没有UI纹理或无效，使用白色纹理
         if (!bgfx::isValid(th)) {
             th = m_whiteTexture;
-            TINA_INFO("UI: Using white fallback texture");
         }
         
-        // 最终检查纹理有效性
+        // 设置纹理
         if (bgfx::isValid(th)) {
-            TINA_INFO("UI: Setting texture uniform={}, texture={}", m_uniformTexture.idx, th.idx);
-            
-            // 使用flags参数明确指定纹理访问模式
             enc->setTexture(0, m_uniformTexture, th, BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP);
-            
-            TINA_INFO("UI: Texture binding successful");
         } else {
             TINA_ERROR("UI: All textures invalid, skipping render");
             return;
@@ -308,8 +298,6 @@ Rml::TextureHandle RenderInterface::GenerateTexture(Rml::Span<const Rml::byte> s
         TINA_WARN("UI: GenerateTexture called with invalid data");
         return 0;
     }
-    static int texture_count = 0;
-    TINA_INFO("UI: GenerateTexture #{} {}x{} ({} bytes)", ++texture_count, source_dimensions.x, source_dimensions.y, (int)source.size());
     
     // RmlUI 6.x: GenerateTexture 提供 RGBA 预乘 alpha 数据
     const bgfx::Memory* mem = bgfx::copy(source.data(), (uint32_t)source.size());
@@ -333,7 +321,6 @@ Rml::TextureHandle RenderInterface::GenerateTexture(Rml::Span<const Rml::byte> s
     data.width = source_dimensions.x;
     data.height = source_dimensions.y;
     
-    TINA_INFO("UI: Created texture handle {}", (int)textureId);
     return textureId;
 }
 

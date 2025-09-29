@@ -11,8 +11,12 @@
 #include "Core.hpp"
 #include <memory>
 #include <string>
+#include <vector>
+#include <filesystem>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/basic_file_sink.h>
 
 namespace Tina::Core {
 
@@ -44,14 +48,75 @@ namespace Tina::Core {
         // 初始化日志：可自定义 logger 名称、级别与输出 pattern
         static void Init(const char* name = "Tina",
                          Level level = Level::Info,
-                         const char* pattern = "[%H:%M:%S.%e] [%^%l%$] [%s:%# %!()] %v")
+                         const char* pattern = "[%H:%M:%S.%e] [%^%l%$] [%s:%# %!()] %v",
+                         const char* file_path = nullptr,
+                         size_t max_file_size = 10ull * 1024ull * 1024ull, // 10 MB
+                         size_t max_files = 3,
+                         bool truncate = false)
         {
             auto& logger = Get();
             if (!logger) {
-                logger = spdlog::stdout_color_mt(name);
+                std::vector<spdlog::sink_ptr> sinks;
+                auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+                sinks.push_back(console_sink);
+
+                if (file_path && *file_path) {
+                    try {
+                        namespace fs = std::filesystem;
+                        fs::path p(file_path);
+                        if (p.has_parent_path()) {
+                            fs::create_directories(p.parent_path());
+                        }
+                        spdlog::sink_ptr file_sink;
+                        if (max_file_size > 0 && max_files > 0 && !truncate) {
+                            file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(p.string(), max_file_size, max_files);
+                        } else {
+                            file_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(p.string(), truncate);
+                        }
+                        sinks.push_back(file_sink);
+                    } catch (const std::exception& e) {
+                        // 仅控制台提示，避免抛出影响程序启动
+                        auto fallback = spdlog::stdout_color_mt(name);
+                        fallback->set_level(ToSpdLevel(level));
+                        fallback->set_pattern(pattern);
+                        fallback->warn("日志文件创建失败: {}", e.what());
+                        logger = fallback;
+                    }
+                }
+
+                if (!logger) {
+                    if (!sinks.empty()) {
+                        auto lg = std::make_shared<spdlog::logger>(name, sinks.begin(), sinks.end());
+                        spdlog::register_logger(lg);
+                        logger = lg;
+                    } else {
+                        logger = spdlog::stdout_color_mt(name);
+                    }
+                }
             }
             logger->set_level(ToSpdLevel(level));
-            logger->set_pattern(pattern);
+            // 允许调用方传入 pattern=nullptr/空串以采用内置默认格式
+            const char* kDefaultPattern = "[%H:%M:%S.%e] [%^%l%$] [%s:%# %!()] %v";
+            const char* pat = (pattern && *pattern) ? pattern : kDefaultPattern;
+            logger->set_pattern(pat);
+            logger->flush_on(ToSpdLevel(Level::Info));
+        }
+
+        // 便捷重载：仅设置级别（使用默认名称与默认格式，控制台输出）
+        static void Init(Level level)
+        {
+            Init("Tina", level);
+        }
+
+        // 便捷重载：设置级别与文件输出（使用默认格式）
+        static void InitWithFile(const char* name,
+                                 Level level,
+                                 const char* file_path,
+                                 size_t max_file_size = 10ull * 1024ull * 1024ull,
+                                 size_t max_files = 3,
+                                 bool truncate = false)
+        {
+            Init(name, level, /*pattern*/nullptr, file_path, max_file_size, max_files, truncate);
         }
 
         // 获取全局 logger
@@ -71,6 +136,17 @@ namespace Tina::Core {
         {
             auto& logger = Get();
             if (logger) logger->set_pattern(pat);
+        }
+
+        static void Shutdown()
+        {
+            auto& logger = Get();
+            if (logger) {
+                logger->flush();
+                auto name = logger->name();
+                spdlog::drop(name);
+                logger.reset();
+            }
         }
     };
 }
