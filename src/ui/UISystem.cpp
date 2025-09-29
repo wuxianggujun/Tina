@@ -75,8 +75,12 @@ RenderInterface::RenderInterface() : m_nextTextureId(1), m_nextGeometryId(1) {
     }
 
     // 采样器 uniform
-    if (!bgfx::isValid(m_uniformTexture))
-        m_uniformTexture = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
+    m_uniformTexture = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
+    if (!bgfx::isValid(m_uniformTexture)) {
+        TINA_ERROR("UI: Failed to create texture uniform!");
+    } else {
+        TINA_INFO("UI: Created texture uniform handle {}", m_uniformTexture.idx);
+    }
 
     // 创建 1x1 白色纹理作为无纹理时的占位
     const uint32_t white = 0xffffffffu;
@@ -85,6 +89,11 @@ RenderInterface::RenderInterface() : m_nextTextureId(1), m_nextGeometryId(1) {
                                            BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
                                            BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
                                            mem);
+    if (!bgfx::isValid(m_whiteTexture)) {
+        TINA_ERROR("UI: Failed to create white texture!");
+    } else {
+        TINA_INFO("UI: Created white texture handle {}", m_whiteTexture.idx);
+    }
 }
 
 RenderInterface::~RenderInterface() {
@@ -219,18 +228,40 @@ void RenderInterface::RenderGeometry(Rml::CompiledGeometryHandle geometry, Rml::
         enc->setScissor(sx, sy, sw, sh);
     }
 
-    // 绑定纹理（有 UI 纹理则使用，否则绑定 1x1 白色）
+    // 绑定纹理（修复版本：使用更安全的方法）
     if (bgfx::isValid(m_uniformTexture)) {
-        bgfx::TextureHandle th = m_whiteTexture;
+        bgfx::TextureHandle th = BGFX_INVALID_HANDLE;
+        
+        // 优先使用UI纹理
         if (texture != 0) {
             auto texIt = m_textures.find(texture);
             if (texIt != m_textures.end() && bgfx::isValid(texIt->second.handle)) {
                 th = texIt->second.handle;
+                TINA_INFO("UI: Using UI texture handle {} ({}x{})", (int)texture, texIt->second.width, texIt->second.height);
             }
         }
-        if (bgfx::isValid(th)) {
-            enc->setTexture(0, m_uniformTexture, th);
+        
+        // 如果没有UI纹理或无效，使用白色纹理
+        if (!bgfx::isValid(th)) {
+            th = m_whiteTexture;
+            TINA_INFO("UI: Using white fallback texture");
         }
+        
+        // 最终检查纹理有效性
+        if (bgfx::isValid(th)) {
+            TINA_INFO("UI: Setting texture uniform={}, texture={}", m_uniformTexture.idx, th.idx);
+            
+            // 使用flags参数明确指定纹理访问模式
+            enc->setTexture(0, m_uniformTexture, th, BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP);
+            
+            TINA_INFO("UI: Texture binding successful");
+        } else {
+            TINA_ERROR("UI: All textures invalid, skipping render");
+            return;
+        }
+    } else {
+        TINA_ERROR("UI: Texture uniform invalid");
+        return;
     }
 
     enc->setVertexBuffer(0, data.vb);
