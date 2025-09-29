@@ -81,6 +81,7 @@ public:
         : m_w(cfg.width), m_h(cfg.height), m_seed(cfg.seed)
         , m_tiles(m_w * m_h, TileType::Air)
         , m_water(m_w * m_h, (uint8_t)0)
+        , m_lava(m_w * m_h, (uint8_t)0)
         , m_biomes(m_w * m_h, BiomeType::Plains)
         , m_noiseGen(cfg.seed) {}
 
@@ -145,6 +146,31 @@ public:
     void setWater(int x, int y, uint8_t lvl) { m_water[index(x,y)] = lvl; }
     void addWater(int x, int y, int delta) { int v = (int)m_water[index(x,y)] + delta; if (v < 0) v = 0; if (v > 255) v = 255; m_water[index(x,y)] = (uint8_t)v; }
     
+    // 岩浆位读写（0..255）
+    uint8_t lava(int x, int y) const { 
+        if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return 0;
+        return m_lava[index(x,y)]; 
+    }
+    void setLava(int x, int y, uint8_t lvl) { 
+        if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return;
+        m_lava[index(x,y)] = lvl; 
+    }
+    void addLava(int x, int y, int delta) { 
+        if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return;
+        int v = (int)m_lava[index(x,y)] + delta; 
+        if (v < 0) v = 0; 
+        if (v > 255) v = 255; 
+        m_lava[index(x,y)] = (uint8_t)v; 
+    }
+    
+    // 检查是否为岩浆
+    bool isLava(int x, int y) const {
+        if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return false;
+        TileType t = m_tiles[index(x,y)];
+        uint8_t lavaLevel = m_lava[index(x,y)];
+        return (t == TileType::Air && lavaLevel > 0) || (t == TileType::Lava);
+    }
+    
     // 安全的水位设置：确保瓦片类型与水位数据一致
     void setWaterSafe(int x, int y, uint8_t lvl) {
         if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return;
@@ -200,8 +226,10 @@ private:
     // 主要数据
     Tina::Container::Vector<TileType> m_tiles;
     Tina::Container::Vector<uint8_t>  m_water; // 水位（0..255）
+    Tina::Container::Vector<uint8_t>  m_lava;  // 岩浆位（0..255）
     Tina::Container::Vector<BiomeType> m_biomes; // 生物群系
     Tina::Container::Vector<uint8_t>  m_work;  // 水体更新的工作缓冲
+    Tina::Container::Vector<uint8_t>  m_workLava; // 岩浆更新的工作缓冲
     
     // 噪声生成器
     Tina::Core::NoiseGenerator m_noiseGen;

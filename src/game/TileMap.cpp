@@ -14,6 +14,8 @@ void TileMap::generate()
     // 1. 首先初始化基础数据
     m_water.resize((size_t)m_w * (size_t)m_h);
     std::fill(m_water.begin(), m_water.end(), (uint8_t)0);
+    m_lava.resize((size_t)m_w * (size_t)m_h);
+    std::fill(m_lava.begin(), m_lava.end(), (uint8_t)0);
     m_biomes.resize((size_t)m_w * (size_t)m_h);
     std::fill(m_biomes.begin(), m_biomes.end(), BiomeType::Plains);
     
@@ -26,7 +28,7 @@ void TileMap::generate()
     generateOres();        // 生成矿物
     generateVegetation();  // 生成植被
     generateDecorations(); // 生成地表装饰
-    generateWater();       // 生成水体
+    generateWater();       // 生成水体和岩浆
 }
 
 void TileMap::generateBiomes()
@@ -201,11 +203,56 @@ void TileMap::generateDecorations()
 
 void TileMap::generateWater()
 {
-    // 海水填充
+    // 海水填充 - 只填充地表的海洋区域，不填充地下洞穴
     for (int x = 0; x < m_w; ++x) {
         for (int y = 0; y <= m_seaLevel; ++y) {
             if (get(x, y) == TileType::Air) {
-                m_water[index(x, y)] = 255;
+                // 检查是否为地下洞穴：向上追踪是否直接连接到地表
+                bool isUndergroundCave = false;
+                for (int checkY = y + 1; checkY < m_h; ++checkY) {
+                    TileType checkTile = get(x, checkY);
+                    if (checkTile != TileType::Air) {
+                        // 遇到固体，这是地下洞穴
+                        isUndergroundCave = true;
+                        break;
+                    }
+                }
+                
+                // 只在非地下洞穴的区域填充海水
+                if (!isUndergroundCave) {
+                    m_water[index(x, y)] = 255;
+                }
+            }
+        }
+    }
+    
+    // 地狱层岩浆生成 - 改为液体系统
+    int hellStart = static_cast<int>(m_h * 0.9f);
+    for (int x = 0; x < m_w; ++x) {
+        for (int y = 0; y < hellStart; ++y) {
+            float relativeDepth = static_cast<float>(m_h - y) / static_cast<float>(m_h);
+            
+            // 在地狱层的空气区域填充岩浆（液体）
+            if (relativeDepth >= 0.85f && get(x, y) == TileType::Air) {
+                m_lava[index(x, y)] = 255;
+            }
+            
+            // 在最底层强制生成岩浆湖
+            if (y < m_h * 0.05f) { // 底部5%
+                if (get(x, y) == TileType::Air) {
+                    // 在基岩中挖出岩浆湖
+                    float lavaNoice = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
+                    if (lavaNoice > 0.3f) {
+                        m_lava[index(x, y)] = 255;
+                    }
+                } else if (get(x, y) == TileType::Bedrock) {
+                    // 替换部分基岩为岩浆
+                    float lavaNoice = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
+                    if (lavaNoice > 0.4f) {
+                        set(x, y, TileType::Air);
+                        m_lava[index(x, y)] = 255;
+                    }
+                }
             }
         }
     }
@@ -250,6 +297,66 @@ void TileMap::generateWater()
                     m_water[index(x, y)] = 255;
                 } else {
                     setSafe(x, y, TileType::Air);
+                }
+            }
+        }
+    }
+    
+    // 岩浆-水接触生成黑曜石
+    for (int x = 0; x < m_w; ++x) {
+        for (int y = 0; y < m_h; ++y) {
+            // 检查有岩浆的位置
+            if (m_lava[index(x, y)] > 0 && get(x, y) == TileType::Air) {
+                // 检查周围是否有水
+                bool hasWater = false;
+                for (int dx = -1; dx <= 1; ++dx) {
+                    for (int dy = -1; dy <= 1; ++dy) {
+                        if (dx == 0 && dy == 0) continue;
+                        int nx = x + dx;
+                        int ny = y + dy;
+                        if (nx >= 0 && nx < m_w && ny >= 0 && ny < m_h) {
+                            if (isWater(nx, ny)) {
+                                hasWater = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (hasWater) break;
+                }
+                
+                // 如果岩浆周围有水，生成黑曜石
+                if (hasWater) {
+                    set(x, y, TileType::Obsidian);
+                    m_lava[index(x, y)] = 0;  // 清除岩浆
+                }
+            }
+            
+            // 检查有水的位置
+            if (m_water[index(x, y)] > 0 && get(x, y) == TileType::Air) {
+                // 检查周围是否有岩浆
+                bool hasLava = false;
+                for (int dx = -1; dx <= 1; ++dx) {
+                    for (int dy = -1; dy <= 1; ++dy) {
+                        if (dx == 0 && dy == 0) continue;
+                        int nx = x + dx;
+                        int ny = y + dy;
+                        if (nx >= 0 && nx < m_w && ny >= 0 && ny < m_h) {
+                            if (isLava(nx, ny)) {
+                                hasLava = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (hasLava) break;
+                }
+                
+                // 如果水周围有岩浆，生成黑曜石（较低概率，因为岩浆更热）
+                if (hasLava) {
+                    float obsidianChance = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
+                    if (obsidianChance > 0.6f) {  // 60%概率生成黑曜石
+                        set(x, y, TileType::Obsidian);
+                        m_water[index(x, y)] = 0;  // 清除水
+                    }
                 }
             }
         }
@@ -545,10 +652,13 @@ TileType TileMap::getSurfaceMaterial(BiomeType biome) const
 
 TileType TileMap::getSubsurfaceMaterial(BiomeType biome, int depth) const
 {
-    // 根据深度和生物群系确定地下材料
+    // 泰拉瑞亚风格的分层系统
     if (depth <= 0) return getSurfaceMaterial(biome);
     
-    // 浅层（1-6格深）
+    // 计算相对深度（基于地图高度的百分比）
+    float relativeDepth = static_cast<float>(depth) / static_cast<float>(m_h);
+    
+    // 浅层（1-6格深）- 表土层
     if (depth <= 6) {
         switch (biome) {
             case BiomeType::Desert:
@@ -561,17 +671,33 @@ TileType TileMap::getSubsurfaceMaterial(BiomeType biome, int depth) const
         }
     }
     
-    // 深层（7-20格深）
-    if (depth <= 20) {
+    // 中层（7-25%深度）- 石层过渡
+    if (relativeDepth <= 0.25f) {
         return TileType::Stone;
     }
     
-    // 极深层（20格以上）
-    if (depth > 40) {
-        return TileType::Bedrock;  // 基岩层
+    // 深层（25%-60%深度）- 主石层
+    if (relativeDepth <= 0.6f) {
+        return TileType::Stone;
     }
     
-    return TileType::Stone;
+    // 地狱入口层（60%-75%深度）- 黑曜石过渡层
+    if (relativeDepth <= 0.75f) {
+        // 随机生成黑曜石和石头的混合
+        float obsidianNoise = m_noiseGen.caveNoise(static_cast<float>(depth), static_cast<float>(depth));
+        if (obsidianNoise > 0.4f) {
+            return TileType::Obsidian;
+        }
+        return TileType::Stone;
+    }
+    
+    // 地狱层（75%-90%深度）- 主要是黑曜石
+    if (relativeDepth <= 0.9f) {
+        return TileType::Obsidian;
+    }
+    
+    // 基岩层（90%-100%深度）- 最底层
+    return TileType::Bedrock;
 }
 
 bool TileMap::shouldGenerateOre(OreType ore, int x, int y, float caveNoise) const
@@ -590,16 +716,16 @@ bool TileMap::shouldGenerateOre(OreType ore, int x, int y, float caveNoise) cons
     
     float oreNoise = m_noiseGen.oreNoise(static_cast<float>(x), static_cast<float>(y), static_cast<int>(ore));
     
-    // 不同矿物有不同的生成条件
+    // 大幅降低阈值，让矿物更分散
     switch (ore) {
         case OreType::Coal:
-            return depth >= 5 && depth <= 25 && oreNoise > 0.7f;
+            return depth >= 5 && depth <= 30 && oreNoise > 0.4f;  // 降低阈值
         case OreType::Iron:
-            return depth >= 8 && depth <= 30 && oreNoise > 0.75f;
+            return depth >= 10 && depth <= 40 && oreNoise > 0.45f; // 降低阈值
         case OreType::Gold:
-            return depth >= 15 && depth <= 35 && oreNoise > 0.8f;
+            return depth >= 20 && depth <= 50 && oreNoise > 0.5f;  // 降低阈值
         case OreType::Diamond:
-            return depth >= 25 && oreNoise > 0.85f;
+            return depth >= 35 && depth <= 60 && oreNoise > 0.55f; // 降低阈值
         default:
             return false;
     }

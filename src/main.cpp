@@ -227,6 +227,33 @@ int main(int /*argc*/, char* /*argv*/[])
                             idxwater.push_back(baseW+0); idxwater.push_back(baseW+1); idxwater.push_back(baseW+2);
                             idxwater.push_back(baseW+0); idxwater.push_back(baseW+2); idxwater.push_back(baseW+3);
                         }
+                        
+                        // 岩浆叠加层：m_lava>0
+                        const int lv  = (int)tilemap.lava(x, y);
+                        const int lvL = (x>0              ) ? (int)tilemap.lava(x-1, y) : lv;
+                        const int lvR = (x<mapCfg.width-1 ) ? (int)tilemap.lava(x+1, y) : lv;
+                        float lavaH = lv / 255.0f;
+                        if (lavaH > 0.001f) {
+                            Tina::Game::TileType lt = (x>0) ? tilemap.get(x-1,y) : Tina::Game::TileType::Stone;
+                            Tina::Game::TileType rt = (x<mapCfg.width-1) ? tilemap.get(x+1,y) : Tina::Game::TileType::Stone;
+                            float lavaHL = (lt == Tina::Game::TileType::Air) ? (lvL / 255.0f) : lavaH;
+                            float lavaHR = (rt == Tina::Game::TileType::Air) ? (lvR / 255.0f) : lavaH;
+                            Tina::Game::TileType up = (y<mapCfg.height-1) ? tilemap.get(x,y+1) : Tina::Game::TileType::Stone;
+                            if (up != Tina::Game::TileType::Air) { lavaH = lavaHL = lavaHR = 1.0f; }
+                            const float lavaTopL = std::min(1.0f, std::max(0.0f, 0.5f*(lavaH + lavaHL)));
+                            const float lavaTopR = std::min(1.0f, std::max(0.0f, 0.5f*(lavaH + lavaHR)));
+                            const float x0 = (float)x, y0 = (float)y, x1 = x0 + 1.0f;
+                            const float lavaYL = y0 + lavaTopL, lavaYR = y0 + lavaTopR;
+                            const auto cl = tileColor(Tina::Game::TileType::Lava);
+                            const float lavaA = std::min(1.0f, std::max(0.8f, cl[3] * (0.8f + 0.2f * lavaH))); // 岩浆更不透明
+                            const uint32_t baseLava = (uint32_t)vwater.size();
+                            vwater.push_back({ x0, y0, 0.0f, cl[0], cl[1], cl[2], lavaA });
+                            vwater.push_back({ x1, y0, 0.0f, cl[0], cl[1], cl[2], lavaA });
+                            vwater.push_back({ x1, lavaYR, 0.0f, cl[0], cl[1], cl[2], lavaA });
+                            vwater.push_back({ x0, lavaYL, 0.0f, cl[0], cl[1], cl[2], lavaA });
+                            idxwater.push_back(baseLava+0); idxwater.push_back(baseLava+1); idxwater.push_back(baseLava+2);
+                            idxwater.push_back(baseLava+0); idxwater.push_back(baseLava+2); idxwater.push_back(baseLava+3);
+                        }
                     } else {
                         // 实体方块几何
                         const auto c = tileColor(t);
@@ -377,6 +404,33 @@ int main(int /*argc*/, char* /*argv*/[])
                         vwater.push_back({ x0, yL, 0.0f, cw[0], cw[1], cw[2], a });
                         idxwater.push_back(baseW+0); idxwater.push_back(baseW+1); idxwater.push_back(baseW+2);
                         idxwater.push_back(baseW+0); idxwater.push_back(baseW+2); idxwater.push_back(baseW+3);
+                    }
+                    
+                    // 岩浆叠加层：m_lava>0
+                    const int lv  = (int)tilemap.lava(x, y);
+                    const int lvL = (x>0              ) ? (int)tilemap.lava(x-1, y) : lv;
+                    const int lvR = (x<mapCfg.width-1 ) ? (int)tilemap.lava(x+1, y) : lv;
+                    float lavaH = lv / 255.0f;
+                    if (lavaH > 0.001f) {
+                        Tina::Game::TileType lt = (x>0) ? tilemap.get(x-1,y) : Tina::Game::TileType::Stone;
+                        Tina::Game::TileType rt = (x<mapCfg.width-1) ? tilemap.get(x+1,y) : Tina::Game::TileType::Stone;
+                        float lavaHL = (lt == Tina::Game::TileType::Air) ? (lvL / 255.0f) : lavaH;
+                        float lavaHR = (rt == Tina::Game::TileType::Air) ? (lvR / 255.0f) : lavaH;
+                        Tina::Game::TileType up = (y<mapCfg.height-1) ? tilemap.get(x,y+1) : Tina::Game::TileType::Stone;
+                        if (up != Tina::Game::TileType::Air) { lavaH = lavaHL = lavaHR = 1.0f; }
+                        const float lavaTopL = std::min(1.0f, std::max(0.0f, 0.5f*(lavaH + lavaHL)));
+                        const float lavaTopR = std::min(1.0f, std::max(0.0f, 0.5f*(lavaH + lavaHR)));
+                        const float x0 = (float)x, y0 = (float)y, x1 = x0 + 1.0f;
+                        const float lavaYL = y0 + lavaTopL, lavaYR = y0 + lavaTopR;
+                        const auto cl = tileColor(Tina::Game::TileType::Lava);
+                        const float lavaA = std::min(1.0f, std::max(0.8f, cl[3] * (0.8f + 0.2f * lavaH)));
+                        const uint32_t baseLava = (uint32_t)vwater.size();
+                        vwater.push_back({ x0, y0, 0.0f, cl[0], cl[1], cl[2], lavaA });
+                        vwater.push_back({ x1, y0, 0.0f, cl[0], cl[1], cl[2], lavaA });
+                        vwater.push_back({ x1, lavaYR, 0.0f, cl[0], cl[1], cl[2], lavaA });
+                        vwater.push_back({ x0, lavaYL, 0.0f, cl[0], cl[1], cl[2], lavaA });
+                        idxwater.push_back(baseLava+0); idxwater.push_back(baseLava+1); idxwater.push_back(baseLava+2);
+                        idxwater.push_back(baseLava+0); idxwater.push_back(baseLava+2); idxwater.push_back(baseLava+3);
                     }
                 } else {
                     const auto c = tileColor(t);
@@ -758,9 +812,9 @@ int main(int /*argc*/, char* /*argv*/[])
 
         // 渲染（可使用 alpha 做插值渲染）
         const double alpha = ticker.alpha(); (void)alpha;
-        // 设置 UI 视图（15）的正交投影矩阵与视口（左上为原点）
+        // 设置 UI 视图（2）的正交投影矩阵与视口（左上为原点）
         {
-            const uint16_t uiViewId = 15;
+            const uint16_t uiViewId = 2;
             float ortho[16];
             bx::mtxOrtho(ortho, 0.0f, (float)pxW, (float)pxH, 0.0f, -1.0f, 1.0f, 0.0f, bgfx::getCaps()->homogeneousDepth);
             bgfx::setViewTransform(uiViewId, nullptr, ortho);
@@ -874,23 +928,18 @@ int main(int /*argc*/, char* /*argv*/[])
         }
         pipeline.submit();
 
-        // 配置文本视图 15：像素正交投影（左上为原点，y 向下）
+        // 再次确保 UI 视图 2 的投影/视口/清除在提交文本前已设置（避免被 Pipeline.begin 覆盖）
         {
-            bgfx::setViewRect(15, 0, 0, (uint16_t)pxW, (uint16_t)pxH);
-            float view[16]; bx::mtxIdentity(view);
-            float proj[16];
-            const bgfx::Caps* caps = bgfx::getCaps();
-            bx::mtxOrtho(proj,
-                        0.0f, (float)pxW,         // 左 右（像素）
-                        (float)pxH, 0.0f,         // 下 上（像素，反转Y）
-                        0.0f, 1000.0f,            // 近 远
-                        0.0f,                     // 偏移
-                        caps->homogeneousDepth);
-            bgfx::setViewTransform(15, view, proj);
+            const uint16_t uiViewId = 2;
+            float ortho[16];
+            bx::mtxOrtho(ortho, 0.0f, (float)pxW, (float)pxH, 0.0f, -1.0f, 1.0f, 0.0f, bgfx::getCaps()->homogeneousDepth);
+            bgfx::setViewTransform(uiViewId, nullptr, ortho);
+            bgfx::setViewRect(uiViewId, 0, 0, (uint16_t)pxW, (uint16_t)pxH);
+            bgfx::setViewClear(uiViewId, BGFX_CLEAR_DEPTH, 0x00000000, 1.0f, 0);
         }
 
-        // 在 UI 视图 15 上直接绘制示例文本（验证中文管线）
-        textRenderer.drawText(15, 16.0f, 56.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+        // 在 UI 视图 2 上直接绘制示例文本（验证中文管线）
+        textRenderer.drawText(2, 16.0f, 56.0f, 1.0f, 1.0f, 1.0f, 1.0f,
                               "中文渲染 OK —— Tina 引擎");
         
         renderer.endFrame();
