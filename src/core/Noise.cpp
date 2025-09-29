@@ -153,10 +153,13 @@ float NoiseGenerator::humidityNoise(float x, float y) const {
 }
 
 float NoiseGenerator::caveNoise(float x, float y) const {
-    // 使用湍流噪声生成洞穴
-    float caves1 = m_perlin.turbulence2D(x * 0.02f, y * 0.02f, 3, 0.5f);
-    float caves2 = m_perlin.turbulence2D(x * 0.04f + 500.0f, y * 0.04f + 500.0f, 3, 0.5f);
-    return (caves1 + caves2) * 0.5f;
+    // 使用更大尺度的湍流噪声生成更连续的洞穴
+    float caves1 = m_perlin.turbulence2D(x * 0.015f, y * 0.015f, 3, 0.6f);      // 大尺度洞穴
+    float caves2 = m_perlin.turbulence2D(x * 0.03f + 500.0f, y * 0.03f + 500.0f, 4, 0.4f); // 中等尺度细节
+    float caves3 = m_perlin.fbm2D(x * 0.008f + 1000.0f, y * 0.008f + 1000.0f, 2, 0.5f);     // 更大的连续区域
+    
+    // 组合不同尺度的噪声
+    return caves1 * 0.5f + caves2 * 0.3f + caves3 * 0.2f;
 }
 
 float NoiseGenerator::oreNoise(float x, float y, int oreType) const {

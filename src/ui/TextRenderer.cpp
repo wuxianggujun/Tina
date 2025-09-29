@@ -73,6 +73,8 @@ bool TextRenderer::loadFont(const std::string& path, int pixelSize)
         TINA_ERROR("TextRenderer: 加载字体失败: {}", path);
         return false;
     }
+    // 确保使用 Unicode 字符映射
+    FT_Select_Charmap(m_font.face, FT_ENCODING_UNICODE);
     FT_Set_Pixel_Sizes(m_font.face, 0, (FT_UInt)pixelSize);
     m_font.sizePx = pixelSize;
     m_font.ascender = (int)(m_font.face->size->metrics.ascender >> 6);
@@ -108,7 +110,11 @@ bool TextRenderer::ensureGlyph(Font& font, int codepoint)
     // 拷贝到图集像素（stride = atlasW）
     for (int y = 0; y < gh; ++y) {
         uint8_t* dst = m_atlasPixels.data() + (size_t)(dstY + y) * m_atlasW + dstX;
-        const uint8_t* src = g->bitmap.buffer + (size_t)y * g->bitmap.pitch;
+        const int pitch = g->bitmap.pitch;
+        const uint8_t* base = g->bitmap.buffer;
+        const uint8_t* src = (pitch >= 0)
+            ? base + (size_t)y * (size_t)pitch
+            : base + (size_t)(gh - 1 - y) * (size_t)(-pitch);
         memcpy(dst, src, (size_t)gw);
     }
 
@@ -156,7 +162,8 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
 
     // UTF-8 解码并准备顶点/索引
     Tina::Container::Vector<Vtx> verts;
-    Tina::Container::Vector<uint32_t> idx;
+    // 使用 16 位索引以匹配 bgfx::allocTransientBuffers 默认索引格式
+    Tina::Container::Vector<uint16_t> idx;
     verts.reserve(utf8.size() * 4);
     idx.reserve(utf8.size() * 6);
 
@@ -166,9 +173,11 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
     const char* end = p + utf8.size();
     uint32_t vi = 0;
     int code = 0;
+    int missing = 0;
+    int appended = 0;
     while (utf8Next(p, end, code)) {
         if (code == '\n') { penX = x; baseY += (float)m_font.sizePx; continue; }
-        if (!ensureGlyph(m_font, code)) continue;
+        if (!ensureGlyph(m_font, code)) { ++missing; continue; }
         const Glyph& gph = m_font.glyphs[code];
         float gx0 = penX + (float)gph.bearingX;
         float gy0 = baseY - (float)gph.bearingY;
@@ -178,20 +187,25 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
         verts.push_back({gx1, gy0, 0.0f, gph.u1, gph.v0, r,g,b,a});
         verts.push_back({gx1, gy1, 0.0f, gph.u1, gph.v1, r,g,b,a});
         verts.push_back({gx0, gy1, 0.0f, gph.u0, gph.v1, r,g,b,a});
-        idx.push_back(vi+0); idx.push_back(vi+1); idx.push_back(vi+2);
-        idx.push_back(vi+0); idx.push_back(vi+2); idx.push_back(vi+3);
+        // 顶点数量通常远小于 65535，此处安全转换为 16 位索引
+        idx.push_back(static_cast<uint16_t>(vi+0)); idx.push_back(static_cast<uint16_t>(vi+1)); idx.push_back(static_cast<uint16_t>(vi+2));
+        idx.push_back(static_cast<uint16_t>(vi+0)); idx.push_back(static_cast<uint16_t>(vi+2)); idx.push_back(static_cast<uint16_t>(vi+3));
         vi += 4;
+        ++appended;
         penX += (float)gph.advance; // advance 已为像素（>>6），我们上方转换了
     }
 
-    if (idx.empty()) return;
+    if (idx.empty()) {
+        TINA_WARN("TextRenderer: 无可绘制字形，跳过绘制。缺失字形数={}，字符总数={}", missing, (int)utf8.size());
+        return;
+    }
 
     bgfx::TransientVertexBuffer tvb;
     bgfx::TransientIndexBuffer tib;
     if (!bgfx::allocTransientBuffers(&tvb, m_layout, (uint32_t)verts.size(), &tib, (uint32_t)idx.size()))
         return;
     memcpy(tvb.data, verts.data(), (size_t)verts.size() * sizeof(Vtx));
-    memcpy(tib.data, idx.data(), (size_t)idx.size() * sizeof(uint32_t));
+    memcpy(tib.data, idx.data(), (size_t)idx.size() * sizeof(uint16_t));
 
     bgfx::Encoder* enc = bgfx::begin(false);
     if (!enc) return;
@@ -200,7 +214,7 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
     enc->setVertexBuffer(0, &tvb);
     enc->setIndexBuffer(&tib);
     enc->setTexture(0, m_sText, m_atlasTex);
-    enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
+    enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA | BGFX_STATE_DEPTH_TEST_ALWAYS);
     enc->submit(viewId, m_prog);
     bgfx::end(enc);
 }

@@ -82,24 +82,30 @@ void TileMap::generateCaves()
 {
     // 使用改进的洞穴噪声生成洞穴系统
     for (int x = 1; x < m_w - 1; ++x) {
+        // 首先找到这一列的地表位置
+        int surfaceY = -1;
+        for (int sy = m_h - 1; sy >= 0; --sy) {
+            if (get(x, sy) != TileType::Air) {
+                surfaceY = sy;
+                break;
+            }
+        }
+        if (surfaceY == -1) continue; // 这一列全是空气
+        
         for (int y = 1; y < m_h - 1; ++y) {
             if (get(x, y) == TileType::Air) continue;
             
+            // 计算距离地表的深度
+            int depth = surfaceY - y;
+            if (depth < 5) continue; // 减少最小深度要求
+            
             float caveNoise = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
             
-            // 根据深度调整洞穴密度
-            int surfaceY = m_h;
-            for (int sy = m_h - 1; sy >= 0; --sy) {
-                if (get(x, sy) != TileType::Air) {
-                    surfaceY = sy;
-                    break;
-                }
-            }
+            // 大幅降低阈值 - 湍流噪声很少超过0.6
+            float baseThreshold = 0.35f;  // 基础阈值大幅降低
+            float depthBonus = std::min(depth * 0.005f, 0.2f); // 深度奖励
+            float caveThreshold = baseThreshold - depthBonus; // 越深越容易生成洞穴
             
-            int depth = surfaceY - y;
-            if (depth < 5) continue; // 地表附近不生成洞穴
-            
-            float caveThreshold = 0.3f + 0.01f * depth; // 越深洞穴越多
             if (caveNoise > caveThreshold) {
                 set(x, y, TileType::Air);
             }
