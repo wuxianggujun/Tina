@@ -1,4 +1,4 @@
-// 使用统一 os 接口（SDL3 实现）创建窗口，事件循环打印日志，bgfx 完成最小渲染循环。
+﻿// 使用统一 os 接口（SDL3 实现）创建窗口，事件循环打印日志，bgfx 完成最小渲染循环。
 
 #include <cstdint>
 #include <SDL3/SDL.h>
@@ -193,6 +193,11 @@ int main(int /*argc*/, char* /*argv*/[])
     chunksVBWater.reserve((size_t)cxCount * cyCount);
     chunksIBWater.reserve((size_t)cxCount * cyCount);
     chunksWaterIndexCount.reserve((size_t)cxCount * cyCount);
+    // 脏标记：仅对脏块做增量重建
+    Tina::Container::Vector<uint8_t> chunkDirtySolid;
+    Tina::Container::Vector<uint8_t> chunkDirtyWater;
+    chunkDirtySolid.assign((size_t)cxCount * cyCount, 0);
+    chunkDirtyWater.assign((size_t)cxCount * cyCount, 0);
     for (int cy = 0; cy < cyCount; ++cy) {
         for (int cx = 0; cx < cxCount; ++cx) {
             const int x0i = cx * chunkSize;
@@ -358,20 +363,17 @@ int main(int /*argc*/, char* /*argv*/[])
         for (int cx = 0; cx < cxCount; ++cx) buildChunkPhysics(cx, cy);
 
     // 重建指定 chunk（当瓦片变化时调用）
-    auto rebuildChunk = [&](int cx, int cy, bool gfxOnly = false){
+    auto rebuildChunk = [&](int cx, int cy, bool waterOnly = false){
         if (cx < 0 || cy < 0) return;
         const int idx = cy * cxCount + cx;
         if (idx < 0 || idx >= (int)chunks.size()) return;
         auto& ch = chunks[(size_t)idx];
-        if (bgfx::isValid(ch.vb)) { bgfx::destroy(ch.vb); ch.vb = BGFX_INVALID_HANDLE; }
-        if (bgfx::isValid(ch.ib)) { bgfx::destroy(ch.ib); ch.ib = BGFX_INVALID_HANDLE; }
-        // 同时销毁该 chunk 的水体叠加层
-        if (idx >= 0 && idx < (int)chunksVBWater.size()) {
+        if (!waterOnly) { if (bgfx::isValid(ch.vb)) { bgfx::destroy(ch.vb); ch.vb = BGFX_INVALID_HANDLE; } if (bgfx::isValid(ch.ib)) { bgfx::destroy(ch.ib); ch.ib = BGFX_INVALID_HANDLE; } } if (idx >= 0 && idx < (int)chunksVBWater.size()) {
             if (bgfx::isValid(chunksVBWater[(size_t)idx])) { bgfx::destroy(chunksVBWater[(size_t)idx]); chunksVBWater[(size_t)idx] = BGFX_INVALID_HANDLE; }
             if (bgfx::isValid(chunksIBWater[(size_t)idx])) { bgfx::destroy(chunksIBWater[(size_t)idx]); chunksIBWater[(size_t)idx] = BGFX_INVALID_HANDLE; }
             if (idx < (int)chunksWaterIndexCount.size()) chunksWaterIndexCount[(size_t)idx] = 0;
         }
-        ch.indexCount = 0;
+        if (!waterOnly) { ch.indexCount = 0; }
 
         const int x0i = cx * chunkSize;
         const int y0i = cy * chunkSize;
@@ -471,7 +473,7 @@ int main(int /*argc*/, char* /*argv*/[])
             chunksWaterIndexCount[(size_t)idx] = (uint32_t)idxwater.size();
         }
         // 同步重建物理静态体
-        if (!gfxOnly) buildChunkPhysics(cx, cy);
+        if (!waterOnly) buildChunkPhysics(cx, cy);
     };
 
     // 爆炸：移除半径内的 tile，采样生成有限数量的物理碎块，并重建受影响的 chunk
@@ -534,7 +536,7 @@ int main(int /*argc*/, char* /*argv*/[])
         const int cx0 = x0 / chunkSize; const int cx1 = x1 / chunkSize;
         const int cy0 = y0 / chunkSize; const int cy1 = y1 / chunkSize;
         for (int cyi = cy0; cyi <= cy1; ++cyi) {
-            for (int cxi = cx0; cxi <= cx1; ++cxi) rebuildChunk(cxi, cyi);
+            for (int cxi = cx0; cxi <= cx1; ++cxi) { int cidx = cyi * cxCount + cxi; if (cidx >= 0 && cidx < (int)chunkDirtySolid.size()) { chunkDirtySolid[(size_t)cidx] = 1; chunkDirtyWater[(size_t)cidx] = 1; } }
         }
     };
 
@@ -604,8 +606,7 @@ int main(int /*argc*/, char* /*argv*/[])
                     break;
                 case Event::Type::KEY:
                     if (ev.key.key_code == Tina::os::KeyCode::F11 && ev.key.down) {
-                        if (!fullscreen) { prev_state = Tina::os::setFullScreen(window); fullscreen = true; TINA_INFO("切换全屏"); }
-                        else { Tina::os::restoreWindow(window, prev_state); fullscreen = false; TINA_INFO("退出全屏"); }
+                        if (!fullscreen) { prev_state = Tina::os::setFullScreen(window); fullscreen = true; TINA_INFO("切换全屏"); } else { Tina::os::restoreWindow(window, prev_state); fullscreen = false; TINA_INFO("退出全屏"); }
                     } else if (ev.key.key_code == Tina::os::KeyCode::R && ev.key.down) {
                         relative_mouse = !relative_mouse;
                         Tina::os::setRelativeMouseMode(window, relative_mouse);
@@ -663,7 +664,7 @@ int main(int /*argc*/, char* /*argv*/[])
                 const int cy1 = std::min(cyCount - 1, wy1 / chunkSize);
                 for (int cyi = cy0; cyi <= cy1; ++cyi)
                     for (int cxi = cx0; cxi <= cx1; ++cxi)
-                        rebuildChunk(cxi, cyi, /*gfxOnly*/true);
+                        { int cidx = cyi * cxCount + cxi; if (cidx >= 0 && cidx < (int)chunkDirtyWater.size()) { chunkDirtyWater[(size_t)cidx] = 1; } }
             }
             // 水体对碎块的流动/浮力/阻力
             const b2Vec2 g = b2World_GetGravity(physics.world());
@@ -815,7 +816,7 @@ int main(int /*argc*/, char* /*argv*/[])
                 const int rcy1 = std::min(cyCount - 1, sy1 / chunkSize);
                 for (int cyi = rcy0; cyi <= rcy1; ++cyi)
                     for (int cxi = rcx0; cxi <= rcx1; ++cxi)
-                        rebuildChunk(cxi, cyi, /*gfxOnly*/true);
+                        { int cidx = cyi * cxCount + cxi; if (cidx >= 0 && cidx < (int)chunkDirtyWater.size()) { chunkDirtyWater[(size_t)cidx] = 1; } }
             }
         });
 
@@ -848,7 +849,25 @@ int main(int /*argc*/, char* /*argv*/[])
         // 计算视区（世界坐标）
         const float vx0 = camera.x();
         const float vy0 = camera.y();
-        const float vx1 = vx0 + camera.viewW();
+        const float vx1 = vx0 + camera.viewW(); const float vy1_local = vy0 + camera.viewH();
+        // 重建：仅处理可见范围内的脏块，避免全图重建
+        int rcx0 = std::max(0, (int)std::floor(vx0 / (float)chunkSize));
+        int rcy0 = std::max(0, (int)std::floor(vy0 / (float)chunkSize));
+        int rcx1 = std::min(cxCount - 1, (int)std::floor((vx1-1e-6f) / (float)chunkSize));
+        int rcy1 = std::min(cyCount - 1, (int)std::floor((vy1_local-1e-6f) / (float)chunkSize));
+        int rebuiltSolid = 0, rebuiltWater = 0;
+        for (int cyi = rcy0; cyi <= rcy1; ++cyi) {
+            for (int cxi = rcx0; cxi <= rcx1; ++cxi) {
+                const int cidx = cyi * cxCount + cxi;
+                bool ds = (cidx >= 0 && cidx < (int)chunkDirtySolid.size()) ? (chunkDirtySolid[(size_t)cidx] != 0) : false;
+                bool dw = (cidx >= 0 && cidx < (int)chunkDirtyWater.size()) ? (chunkDirtyWater[(size_t)cidx] != 0) : false;
+                if (!ds && !dw) continue;
+                if (ds) { rebuildChunk(cxi, cyi, /*waterOnly*/false); ++rebuiltSolid; }
+                else if (dw) { rebuildChunk(cxi, cyi, /*waterOnly*/true); ++rebuiltWater; }
+                if (cidx >= 0 && cidx < (int)chunkDirtySolid.size()) chunkDirtySolid[(size_t)cidx] = 0;
+                if (cidx >= 0 && cidx < (int)chunkDirtyWater.size()) chunkDirtyWater[(size_t)cidx] = 0;
+            }
+        }
         const float vy1 = vy0 + camera.viewH();
 
         // 提交可见 chunk（颜色方块）
@@ -945,12 +964,12 @@ int main(int /*argc*/, char* /*argv*/[])
         // 每秒打印一次帧率/帧时间与目标设定，便于核对
         const double now_sec = frame_timer.sinceStartupSeconds();
         if (now_sec - fps_log_t >= 1.0) {
-            TINA_INFO("FPS: {:.1f} | frame: {:.2f} ms | VSync: {} | Cap: {} Hz | Fixed: {} Hz",
+            TINA_INFO("FPS: {:.1f} | frame: {:.2f} ms | VSync: {} | Cap: {} Hz | Fixed: {} Hz | RBld S/W: {}/{}",
                       frame_timer.fps(),
                       frame_timer.frameSeconds() * 1000.0,
                       vsync_on ? "on" : "off",
                       time_cfg.frame_cap_hz,
-                      time_cfg.tick_rate);
+                      time_cfg.tick_rate, rebuiltSolid, rebuiltWater);
             fps_log_t = now_sec;
         }
 
@@ -985,3 +1004,10 @@ int main(int /*argc*/, char* /*argv*/[])
     Tina::Core::Log::Shutdown();
     return 0;
 }
+
+
+
+
+
+
+
