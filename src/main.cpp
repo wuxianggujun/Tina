@@ -25,6 +25,7 @@
 #include "physics/Physics2D.hpp"
 #include "ui/UISystem.hpp"
 #include "ui/InfoBar.hpp"
+#include "ui/TextRenderer.hpp"
 
 using Tina::os::Event;
 
@@ -479,6 +480,17 @@ int main(int /*argc*/, char* /*argv*/[])
     if (!infoBar.initialize()) {
         TINA_ERROR("信息栏初始化失败");
     }
+    
+    // 3.7.x) 初始化文本渲染器（独立于 RmlUI，可用于直接绘制中文）
+    Tina::UI::TextRenderer textRenderer;
+    if (!textRenderer.initialize()) {
+        TINA_ERROR("TextRenderer 初始化失败");
+    } else {
+        // 使用项目内置思源黑体
+        if (!textRenderer.loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 28)) {
+            TINA_WARN("加载默认字体失败，文本可能无法显示");
+        }
+    }
 
     // 3.6) 帧计时与固定步（基于 docs/frame_timing.md）
     Tina::Core::TimeConfig time_cfg{};
@@ -586,7 +598,8 @@ int main(int /*argc*/, char* /*argv*/[])
             physics.decayDebris((float)fixed_dt);
             // 先更新水体的元胞自动机（让湖水向空洞流动）
             int wx0=0, wy0=0, wx1=-1, wy1=-1;
-            if (tilemap.stepWaterAdvanced(3, wx0, wy0, wx1, wy1)) {
+            // 降低每帧水体演化步数，避免过快扩散（原 3 次）
+            if (tilemap.stepWaterAdvanced(1, wx0, wy0, wx1, wy1)) {
                 const int cx0 = std::max(0, wx0 / chunkSize);
                 const int cy0 = std::max(0, wy0 / chunkSize);
                 const int cx1 = std::min(cxCount - 1, wx1 / chunkSize);
@@ -876,6 +889,9 @@ int main(int /*argc*/, char* /*argv*/[])
         // 更新 + 渲染 UI 系统（RmlUI 需要先 Update 再 Render）
         uiSystem.update((float)dt);
         uiSystem.render();
+        // 在 UI 视图 15 上直接绘制示例文本（验证中文管线）
+        textRenderer.drawText(15, 16.0f, 56.0f, 1.0f, 1.0f, 1.0f, 1.0f,
+                              "中文渲染 OK —— Tina 引擎");
         
         renderer.endFrame();
 

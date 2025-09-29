@@ -20,6 +20,8 @@ set(SRC_FILES
     ui/UISystem.cpp
     ui/InfoBar.hpp
     ui/InfoBar.cpp
+    ui/TextRenderer.hpp
+    ui/TextRenderer.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})
@@ -31,7 +33,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 # 着色器编译
 include(ShaderUtils)
-add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color ui)
+add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color ui text)
 add_dependencies(${PROJECT_NAME} shaders)
 
 # 传入 shader 根目录给运行时

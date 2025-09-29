@@ -29,7 +29,7 @@ bool InfoBar::initialize() {
     <title>Info Bar</title>
     <style>
         body {
-            font-family: "Source Han Sans SC";
+            font-family: "Source Han Sans SC", sans-serif;
             font-size: 14px;
             margin: 0;
             padding: 0;

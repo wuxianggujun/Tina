@@ -379,26 +379,66 @@ void UISystem::shutdown() {
 }
 
 static bool LoadDefaultFonts() {
+    TINA_INFO("开始加载默认字体...");
     // 尝试加载字体文件，如果都失败则创建最小fallback字体
     struct FontCand { const char* path; const char* family; Rml::Style::FontWeight weight; bool fallback; };
     Tina::Container::Vector<FontCand> cands;
-    // 将思源黑体作为全局 fallback，确保未指定 family 时也能渲染
-    cands.push_back({"resources/fonts/SourceHanSansSC-Regular.otf", "Source Han Sans SC", Rml::Style::FontWeight::Normal, true});
-    cands.push_back({"resources/fonts/NotoSans-Regular.ttf", "Noto Sans", Rml::Style::FontWeight::Normal, false});
-    cands.push_back({"resources/fonts/Arial.ttf", "Arial", Rml::Style::FontWeight::Normal, true});
+    
+    // 首选项目内置思源黑体（中文优先可控）
+    cands.push_back({"resources/fonts/SourceHanSansSC-Regular.otf", "Source Han Sans SC", Rml::Style::FontWeight::Auto, false});
+    // 其次尝试 Windows 系统字体（都作为 fallback 参与）
+    cands.push_back({"C:/Windows/Fonts/msyh.ttc",   "Microsoft YaHei",    Rml::Style::FontWeight::Auto, true});
+    cands.push_back({"C:/Windows/Fonts/msyhui.ttc", "Microsoft YaHei UI", Rml::Style::FontWeight::Auto, true});
+    cands.push_back({"C:/Windows/Fonts/simsun.ttc", "SimSun",             Rml::Style::FontWeight::Auto, true});
+    cands.push_back({"C:/Windows/Fonts/simhei.ttf", "SimHei",             Rml::Style::FontWeight::Auto, true});
+    // 兜底的西文字体
+    cands.push_back({"resources/fonts/NotoSans-Regular.ttf", "Noto Sans", Rml::Style::FontWeight::Auto, false});
+    cands.push_back({"resources/fonts/Arial.ttf",            "Arial",     Rml::Style::FontWeight::Auto, false});
 
     bool any = false;
     for (const auto& f : cands) {
         FILE* fp = fopen(f.path, "rb");
         if (!fp) continue; 
+        fseek(fp, 0, SEEK_END);
+        long sz = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        Tina::Container::Vector<unsigned char> buf;
+        buf.resize((size_t)sz);
+        fread(buf.data(), 1, (size_t)sz, fp);
         fclose(fp);
-        
-        // 直接使用文件路径加载，让RmlUI自动处理字体解析
-        if (Rml::LoadFontFace(f.path, f.fallback, f.weight)) {
+
+        // 1) 先用文件路径注册（由字体文件内部族名决定 family），并尝试加载所有可用字重
+        bool ok_file = Rml::LoadFontFace(f.path, f.fallback, f.weight);
+        if (ok_file) {
             any = true;
-            TINA_INFO("RmlUI: 加载字体成功: {}{}", f.path, f.fallback ? " (fallback)" : "");
+            TINA_INFO("RmlUI: 加载字体成功: {} -> {}{}", f.path, f.family, f.fallback ? " (fallback)" : "");
         } else {
-            TINA_WARN("RmlUI: 加载字体失败: {}", f.path);
+            TINA_WARN("RmlUI: 加载字体失败: {} -> {}", f.path, f.family);
+        }
+
+        // 2) 再用内存接口为常见别名注册同一份字体，解决 family 名称不一致问题
+        Rml::Span<const Rml::byte> data_span(reinterpret_cast<const Rml::byte*>(buf.data()), buf.size());
+        auto try_alias = [&](const char* alias_family){
+            if (!alias_family || !*alias_family) return false;
+            bool ok = Rml::LoadFontFace(data_span, Rml::String(alias_family), Rml::Style::FontStyle::Normal, Rml::Style::FontWeight::Auto, f.fallback);
+            if (ok) {
+                any = true;
+                TINA_INFO("RmlUI: 通过别名注册字体: {} => {}{}", f.path, alias_family, f.fallback ? " (fallback)" : "");
+            }
+            return ok;
+        };
+
+        std::string p = f.path;
+        for (auto& ch : p) ch = (char)tolower((unsigned char)ch);
+        if (p.find("msyh") != std::string::npos) {
+            try_alias("Microsoft YaHei");
+            try_alias("Microsoft YaHei UI");
+        } else if (p.find("msyhui") != std::string::npos) {
+            try_alias("Microsoft YaHei UI");
+            try_alias("Microsoft YaHei");
+        } else if (p.find("simsun") != std::string::npos) {
+            try_alias("SimSun");
+            try_alias("NSimSun");
         }
     }
 
@@ -415,7 +455,8 @@ static bool LoadDefaultFonts() {
             if (Rml::LoadFontFace(bp, false, Rml::Style::FontWeight::Bold)) {
                 any = true;
                 TINA_INFO("RmlUI: 加载粗体字体成功: {}", bp);
-                break;
+            } else {
+                TINA_WARN("RmlUI: 加载粗体字体失败: {}", bp);
             }
         }
     }

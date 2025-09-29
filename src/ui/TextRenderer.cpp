@@ -1,0 +1,208 @@
+#include "TextRenderer.hpp"
+#include "../core/Log.hpp"
+#include <bx/math.h>
+
+namespace Tina::UI {
+
+namespace {
+struct Vtx {
+    float x, y, z;
+    float u, v;
+    float r, g, b, a;
+};
+}
+
+TextRenderer::TextRenderer() {}
+TextRenderer::~TextRenderer() { shutdown(); }
+
+bool TextRenderer::initialize(int atlasW, int atlasH)
+{
+    if (FT_Init_FreeType(&m_ft)) {
+        TINA_ERROR("TextRenderer: FreeType 初始化失败");
+        return false;
+    }
+
+    m_atlasW = atlasW;
+    m_atlasH = atlasH;
+    m_atlasPixels.resize((size_t)atlasW * atlasH, 0);
+
+    // 创建 R8 图集纹理
+    const bgfx::Memory* mem = bgfx::copy(m_atlasPixels.data(), (uint32_t)m_atlasPixels.size());
+    m_atlasTex = bgfx::createTexture2D((uint16_t)atlasW, (uint16_t)atlasH, false, 1,
+                                       bgfx::TextureFormat::R8,
+                                       BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
+                                       BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
+                                       mem);
+    if (!bgfx::isValid(m_atlasTex)) {
+        TINA_ERROR("TextRenderer: 创建图集纹理失败");
+        return false;
+    }
+    m_sText = bgfx::createUniform("s_text", bgfx::UniformType::Sampler);
+
+    // 顶点布局
+    m_layout.begin()
+        .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+        .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Float)
+    .end();
+
+    // 着色器
+    m_shaderMgr.initialize();
+    m_prog = m_shaderMgr.loadProgram("text", "text");
+    if (!bgfx::isValid(m_prog)) {
+        TINA_ERROR("TextRenderer: 加载 text 着色器失败");
+        return false;
+    }
+    return true;
+}
+
+void TextRenderer::shutdown()
+{
+    if (bgfx::isValid(m_atlasTex)) { bgfx::destroy(m_atlasTex); m_atlasTex = BGFX_INVALID_HANDLE; }
+    if (bgfx::isValid(m_sText))    { bgfx::destroy(m_sText);    m_sText = BGFX_INVALID_HANDLE; }
+    m_shaderMgr.cleanup();
+    if (m_font.face) { FT_Done_Face(m_font.face); m_font.face = nullptr; }
+    if (m_ft) { FT_Done_FreeType(m_ft); m_ft = nullptr; }
+}
+
+bool TextRenderer::loadFont(const std::string& path, int pixelSize)
+{
+    if (!m_ft) return false;
+    if (m_font.face) { FT_Done_Face(m_font.face); m_font = {}; }
+    if (FT_New_Face(m_ft, path.c_str(), 0, &m_font.face)) {
+        TINA_ERROR("TextRenderer: 加载字体失败: {}", path);
+        return false;
+    }
+    FT_Set_Pixel_Sizes(m_font.face, 0, (FT_UInt)pixelSize);
+    m_font.sizePx = pixelSize;
+    m_font.ascender = (int)(m_font.face->size->metrics.ascender >> 6);
+    m_font.glyphs.clear();
+    return true;
+}
+
+bool TextRenderer::ensureGlyph(Font& font, int codepoint)
+{
+    if (font.glyphs.find(codepoint) != font.glyphs.end()) return true;
+    if (FT_Load_Char(font.face, (FT_ULong)codepoint, FT_LOAD_RENDER)) return false;
+    FT_GlyphSlot g = font.face->glyph;
+    int gw = g->bitmap.width;
+    int gh = g->bitmap.rows;
+
+    if (gw == 0 || gh == 0) {
+        Glyph gi; gi.codepoint = codepoint; gi.advance = (int)(g->advance.x >> 6);
+        font.glyphs[codepoint] = gi;
+        return true;
+    }
+
+    // 行打包
+    if (m_penX + gw + 1 >= m_atlasW) { m_penX = 1; m_penY += m_rowH + 1; m_rowH = 0; }
+    if (m_penY + gh + 1 >= m_atlasH) {
+        TINA_ERROR("TextRenderer: 图集已满 ({}x{}), 无法放入更多字形", m_atlasW, m_atlasH);
+        return false;
+    }
+    int dstX = m_penX;
+    int dstY = m_penY;
+    m_rowH = std::max(m_rowH, gh);
+    m_penX += gw + 1;
+
+    // 拷贝到图集像素（stride = atlasW）
+    for (int y = 0; y < gh; ++y) {
+        uint8_t* dst = m_atlasPixels.data() + (size_t)(dstY + y) * m_atlasW + dstX;
+        const uint8_t* src = g->bitmap.buffer + (size_t)y * g->bitmap.pitch;
+        memcpy(dst, src, (size_t)gw);
+    }
+
+    // 更新 GPU 纹理子区
+    // 无法直接用一块连续内存提交非连续行；逐行更新
+    for (int y = 0; y < gh; ++y) {
+        const bgfx::Memory* row = bgfx::copy(m_atlasPixels.data() + (size_t)(dstY + y) * m_atlasW + dstX, (uint32_t)gw);
+        bgfx::updateTexture2D(m_atlasTex, 0, 0, (uint16_t)dstX, (uint16_t)(dstY + y), (uint16_t)gw, 1, row);
+    }
+
+    // 记录字形信息
+    Glyph info;
+    info.codepoint = codepoint;
+    info.w = gw; info.h = gh;
+    info.bearingX = g->bitmap_left;
+    info.bearingY = g->bitmap_top;
+    info.advance  = (int)(g->advance.x >> 6);
+    info.atlasX = dstX; info.atlasY = dstY;
+    info.u0 = (float)dstX / (float)m_atlasW; info.v0 = (float)dstY / (float)m_atlasH;
+    info.u1 = (float)(dstX + gw) / (float)m_atlasW; info.v1 = (float)(dstY + gh) / (float)m_atlasH;
+    font.glyphs[codepoint] = info;
+    return true;
+}
+
+bool TextRenderer::utf8Next(const char*& p, const char* end, int& outCode)
+{
+    if (p >= end) return false;
+    unsigned char c = (unsigned char)*p++; 
+    if (c < 0x80) { outCode = c; return true; }
+    if ((c >> 5) == 0x6 && p < end) {
+        outCode = ((c & 0x1f) << 6) | ((unsigned char)*p++ & 0x3f); return true;
+    } else if ((c >> 4) == 0xe && p + 1 < end) {
+        outCode = ((c & 0x0f) << 12) | (((unsigned char)*p++ & 0x3f) << 6) | ((unsigned char)*p++ & 0x3f); return true;
+    } else if ((c >> 3) == 0x1e && p + 2 < end) {
+        outCode = ((c & 0x07) << 18) | (((unsigned char)*p++ & 0x3f) << 12) | (((unsigned char)*p++ & 0x3f) << 6) | ((unsigned char)*p++ & 0x3f); return true;
+    }
+    outCode = '?'; return true; // 容错
+}
+
+void TextRenderer::drawText(uint16_t viewId, float x, float y,
+                            float r, float g, float b, float a,
+                            const std::string& utf8)
+{
+    if (!m_font.face || !bgfx::isValid(m_prog) || !bgfx::isValid(m_atlasTex)) return;
+
+    // UTF-8 解码并准备顶点/索引
+    Tina::Container::Vector<Vtx> verts;
+    Tina::Container::Vector<uint32_t> idx;
+    verts.reserve(utf8.size() * 4);
+    idx.reserve(utf8.size() * 6);
+
+    float penX = x;
+    float baseY = y + (float)m_font.ascender;
+    const char* p = utf8.data();
+    const char* end = p + utf8.size();
+    uint32_t vi = 0;
+    int code = 0;
+    while (utf8Next(p, end, code)) {
+        if (code == '\n') { penX = x; baseY += (float)m_font.sizePx; continue; }
+        if (!ensureGlyph(m_font, code)) continue;
+        const Glyph& gph = m_font.glyphs[code];
+        float gx0 = penX + (float)gph.bearingX;
+        float gy0 = baseY - (float)gph.bearingY;
+        float gx1 = gx0 + (float)gph.w;
+        float gy1 = gy0 + (float)gph.h;
+        verts.push_back({gx0, gy0, 0.0f, gph.u0, gph.v0, r,g,b,a});
+        verts.push_back({gx1, gy0, 0.0f, gph.u1, gph.v0, r,g,b,a});
+        verts.push_back({gx1, gy1, 0.0f, gph.u1, gph.v1, r,g,b,a});
+        verts.push_back({gx0, gy1, 0.0f, gph.u0, gph.v1, r,g,b,a});
+        idx.push_back(vi+0); idx.push_back(vi+1); idx.push_back(vi+2);
+        idx.push_back(vi+0); idx.push_back(vi+2); idx.push_back(vi+3);
+        vi += 4;
+        penX += (float)gph.advance; // advance 已为像素（>>6），我们上方转换了
+    }
+
+    if (idx.empty()) return;
+
+    bgfx::TransientVertexBuffer tvb;
+    bgfx::TransientIndexBuffer tib;
+    if (!bgfx::allocTransientBuffers(&tvb, m_layout, (uint32_t)verts.size(), &tib, (uint32_t)idx.size()))
+        return;
+    memcpy(tvb.data, verts.data(), (size_t)verts.size() * sizeof(Vtx));
+    memcpy(tib.data, idx.data(), (size_t)idx.size() * sizeof(uint32_t));
+
+    bgfx::Encoder* enc = bgfx::begin(false);
+    if (!enc) return;
+    float mtx[16]; bx::mtxIdentity(mtx);
+    enc->setTransform(mtx);
+    enc->setVertexBuffer(0, &tvb);
+    enc->setIndexBuffer(&tib);
+    enc->setTexture(0, m_sText, m_atlasTex);
+    enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
+    enc->submit(viewId, m_prog);
+    bgfx::end(enc);
+}
+
+} // namespace Tina::UI

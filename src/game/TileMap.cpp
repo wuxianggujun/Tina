@@ -1,5 +1,6 @@
 //
-// TileMap（地形与水体生成）实现
+// TileMap（地形与水体生成）实现 - 改进版
+// 使用柏林噪声、生物群系系统和改进的地形生成
 
 #include "TileMap.hpp"
 #include <cmath>
@@ -56,50 +57,165 @@ float TileMap::noise2f(float x, float y) const
 
 void TileMap::generate()
 {
-    // 初始化/清空水位
+    // 新的分步生成系统
+    // 1. 首先初始化基础数据
     m_water.resize((size_t)m_w * (size_t)m_h);
     std::fill(m_water.begin(), m_water.end(), (uint8_t)0);
-    // 地表高度：由多频正弦 + 抖动噪声叠加
-    const float H0 = m_h * 0.55f;
-    m_seaLevel = (int)(m_h * 0.22f); // 海平面（越小水越少）
-    for (int x = 0; x < m_w; ++x) {
-        float h = H0;
-        const float t = float(x);
-        h += 8.0f * std::sinf(t * 2.0f * 3.1415926f / 64.0f);
-        h += 4.0f * std::sinf(t * 2.0f * 3.1415926f / 23.0f + 1.7f);
-        h += 3.0f * (noise1(x) - 0.5f) * 2.0f;
-        int surface = (int)std::round(std::fmin(std::fmax(h, 8.0f), float(m_h - 8)));
+    m_biomes.resize((size_t)m_w * (size_t)m_h);
+    std::fill(m_biomes.begin(), m_biomes.end(), BiomeType::Plains);
+    
+    m_seaLevel = (int)(m_h * 0.25f);
+    
+    // 2. 分步生成
+    generateBiomes();      // 生成生物群系
+    generateTerrain();     // 生成基础地形
+    generateCaves();       // 生成洞穴系统
+    generateOres();        // 生成矿物
+    generateVegetation();  // 生成植被
+    generateWater();       // 生成水体
+}
 
+void TileMap::generateBiomes()
+{
+    // 使用温度和湿度噪声确定生物群系
+    for (int x = 0; x < m_w; ++x) {
         for (int y = 0; y < m_h; ++y) {
-            if (y > surface) {
+            float temperature = m_noiseGen.temperatureNoise(static_cast<float>(x), static_cast<float>(y));
+            float humidity = m_noiseGen.humidityNoise(static_cast<float>(x), static_cast<float>(y));
+            float height = m_noiseGen.heightNoise(static_cast<float>(x), static_cast<float>(y));
+            
+            BiomeType biome = determineBiome(temperature, humidity, height);
+            setBiome(x, y, biome);
+        }
+    }
+}
+
+void TileMap::generateTerrain()
+{
+    // 使用柏林噪声生成地形高度
+    for (int x = 0; x < m_w; ++x) {
+        float heightNoise = m_noiseGen.heightNoise(static_cast<float>(x), static_cast<float>(m_h * 0.5f));
+        
+        // 将噪声转换为地表高度
+        float baseHeight = m_h * 0.6f;  // 基础高度
+        float variation = m_h * 0.3f;   // 高度变化范围
+        int surfaceY = static_cast<int>(baseHeight + (heightNoise - 0.5f) * variation);
+        surfaceY = std::max(10, std::min(m_h - 10, surfaceY));
+        
+        // 生成垂直地层
+        for (int y = 0; y < m_h; ++y) {
+            if (y > surfaceY) {
                 set(x, y, TileType::Air);
                 continue;
             }
-
-            // 垂直分层
-            if (y == surface) {
-                set(x, y, TileType::Grass);
-            } else if (surface - y <= 6) {
-                set(x, y, TileType::Dirt);
+            
+            BiomeType biome = getBiome(x, y);
+            int depth = surfaceY - y;
+            
+            TileType material;
+            if (depth == 0) {
+                material = getSurfaceMaterial(biome);
             } else {
-                set(x, y, TileType::Stone);
+                material = getSubsurfaceMaterial(biome, depth);
+            }
+            
+            set(x, y, material);
+        }
+    }
+}
+
+void TileMap::generateCaves()
+{
+    // 使用改进的洞穴噪声生成洞穴系统
+    for (int x = 1; x < m_w - 1; ++x) {
+        for (int y = 1; y < m_h - 1; ++y) {
+            if (get(x, y) == TileType::Air) continue;
+            
+            float caveNoise = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
+            
+            // 根据深度调整洞穴密度
+            int surfaceY = m_h;
+            for (int sy = m_h - 1; sy >= 0; --sy) {
+                if (get(x, sy) != TileType::Air) {
+                    surfaceY = sy;
+                    break;
+                }
+            }
+            
+            int depth = surfaceY - y;
+            if (depth < 5) continue; // 地表附近不生成洞穴
+            
+            float caveThreshold = 0.3f + 0.01f * depth; // 越深洞穴越多
+            if (caveNoise > caveThreshold) {
+                set(x, y, TileType::Air);
             }
         }
-
-        // 洞穴挖掘（地表以下）：使用相关噪声以形成团块而非散点
-        for (int y = surface - 2; y >= 2; --y) {
-            // 频率缩放，系数越小结构越大
-            float n = noise2f(x * 0.12f, y * 0.12f);
-            float d = float(surface - y);
-            // 越深越多
-            float p = 0.05f + 0.0025f * d;
-            if (n < p) set(x, y, TileType::Air);
-        }
-
-        // 湖泊挖掘完成后，再进行海水填充
     }
+}
 
-    // 生成湖泊：选取若干椭圆区域，挖槽并在下半部位注水
+void TileMap::generateOres()
+{
+    // 在岩石中生成矿物
+    for (int x = 0; x < m_w; ++x) {
+        for (int y = 0; y < m_h; ++y) {
+            TileType current = get(x, y);
+            if (current != TileType::Stone && current != TileType::Dirt) continue;
+            
+            float caveNoise = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
+            
+            // 检查每种矿物
+            for (int oreInt = 0; oreInt < static_cast<int>(OreType::MAX_ORE_TYPE); ++oreInt) {
+                OreType ore = static_cast<OreType>(oreInt);
+                if (shouldGenerateOre(ore, x, y, caveNoise)) {
+                    set(x, y, oreTypeToTileType(ore));
+                    break; // 每个位置只生成一种矿物
+                }
+            }
+        }
+    }
+}
+
+void TileMap::generateVegetation()
+{
+    // 在地表生成植被
+    for (int x = 0; x < m_w; ++x) {
+        for (int y = m_h - 1; y >= 0; --y) {
+            if (get(x, y) != TileType::Air) {
+                // 找到地表
+                if (y < m_h - 1) {
+                    TileType surface = get(x, y);
+                    BiomeType biome = getBiome(x, y);
+                    
+                    // 根据生物群系在地表生成植被
+                    float vegetation = m_noiseGen.humidityNoise(static_cast<float>(x), static_cast<float>(y));
+                    
+                    if (surface == TileType::Grass && vegetation > 0.7f) {
+                        if (biome == BiomeType::Forest && y < m_h - 3) {
+                            // 生成简单的树
+                            set(x, y + 1, TileType::Wood);
+                            set(x, y + 2, TileType::Wood);
+                            if (y < m_h - 4) set(x, y + 3, TileType::Leaves);
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+}
+
+void TileMap::generateWater()
+{
+    // 海水填充
+    for (int x = 0; x < m_w; ++x) {
+        for (int y = 0; y <= m_seaLevel; ++y) {
+            if (get(x, y) == TileType::Air) {
+                m_water[index(x, y)] = 255;
+            }
+        }
+    }
+    
+    // 生成湖泊（保持原有逻辑，但适配新的生物群系）
     const int lakeCount = std::max(2, m_w / 80);
     for (int i = 0; i < lakeCount; ++i) {
         int cx = (int)(noise1(i * 17) * (m_w - 20)) + 10;
@@ -107,47 +223,33 @@ void TileMap::generate()
         float rx = 6.0f + 10.0f * noise1(i * 47);
         float ry = 4.0f + 8.0f * noise1(i * 61);
 
-        int x0 = std::max(1,  cx - (int)rx - 1);
+        int x0 = std::max(1, cx - (int)rx - 1);
         int x1 = std::min(m_w - 2, cx + (int)rx + 1);
-        int y0 = std::max(1,  cy - (int)ry - 1);
+        int y0 = std::max(1, cy - (int)ry - 1);
         int y1 = std::min(m_h - 2, cy + (int)ry + 1);
 
         for (int x = x0; x <= x1; ++x) {
-            // 找到该列的地表高度（从上往下第一个非空气/非水的格子）
             int groundY = -1;
             for (int yy = m_h - 1; yy >= 0; --yy) {
-                TileType t = get(x, yy);
-                if (t != TileType::Air) { groundY = yy; break; }
+                if (get(x, yy) != TileType::Air) {
+                    groundY = yy;
+                    break;
+                }
             }
             if (groundY <= 0) continue;
 
             for (int y = y0; y <= y1; ++y) {
                 float dx = (x - cx) / rx;
                 float dy = (y - cy) / ry;
-                if (dx*dx + dy*dy > 1.0f) continue;
-
-                // 仅作用于地表以下，避免天空出现"悬浮水"
+                if (dx * dx + dy * dy > 1.0f) continue;
                 if (y > groundY) continue;
 
-                // 将下半椭圆（y <= cy）注水；其上半（cy < y <= groundY）挖空为空气
                 if (y <= cy) {
-                    // 湖泊底部：设置为空气并注满水
                     set(x, y, TileType::Air);
-                    m_water[index(x,y)] = 255;
+                    m_water[index(x, y)] = 255;
                 } else {
-                    // 湖泊拱顶：使用安全设置，确保清除水位数据
                     setSafe(x, y, TileType::Air);
                 }
-            }
-        }
-    }
-    
-    // 海水填充：在湖泊生成之后，海平面以下的空腔填充为水（避免覆盖湖泊设置）
-    for (int x = 0; x < m_w; ++x) {
-        for (int y = 0; y <= m_seaLevel; ++y) {
-            if (get(x, y) == TileType::Air && m_water[index(x,y)] == 0) {
-                // 只有在没有水位数据的空气格子才填充海水（避免覆盖湖泊）
-                m_water[index(x,y)] = 255;
             }
         }
     }
@@ -185,8 +287,9 @@ bool TileMap::stepWater(int iterations, int& outMinX, int& outMinY, int& outMaxX
     bool anyChanged = false;
     int minx = W, miny = H, maxx = -1, maxy = -1;
 
-    const int MAX_DOWN = 64;  // 每步最大下落体积
-    const int MAX_SIDE = 32;  // 每步最大侧流体积
+    // 调低单次可转移体积，避免水体过快扩散
+    const int MAX_DOWN = 16;  // 每步最大下落体积（原 64）
+    const int MAX_SIDE = 8;   // 每步最大侧流体积（原 32）
 
     for (int it = 0; it < iterations; ++it) {
         std::copy(m_water.begin(), m_water.end(), m_work.begin());
@@ -212,7 +315,7 @@ bool TileMap::stepWater(int iterations, int& outMinX, int& outMinY, int& outMaxX
             }
         }
 
-        // 2) 侧向均衡
+        // 2) 侧向均衡（减缓扩散强度）
         for (int y = 0; y < H; ++y) {
             for (int x = 0; x < W - 1; ++x) {
                 if (get(x, y) != TileType::Air || get(x+1, y) != TileType::Air) continue;
@@ -220,14 +323,14 @@ bool TileMap::stepWater(int iterations, int& outMinX, int& outMinY, int& outMaxX
                 int b = (int)m_work[index(x+1,y)];
                 int diff = a - b;
                 if (diff > 1) {
-                    int move = std::min(diff/2, MAX_SIDE);
+                    int move = std::min(std::max(diff/4, 1), MAX_SIDE);
                     m_work[index(x,y)]     = (uint8_t)(a - move);
                     m_work[index(x+1, y)]  = (uint8_t)(b + move);
                     minx = std::min(minx, x); maxx = std::max(maxx, x+1);
                     miny = std::min(miny, y); maxy = std::max(maxy, y);
                     changed = true;
                 } else if (diff < -1) {
-                    int move = std::min((-diff)/2, MAX_SIDE);
+                    int move = std::min(std::max((-diff)/4, 1), MAX_SIDE);
                     m_work[index(x,y)]     = (uint8_t)(a + move);
                     m_work[index(x+1, y)]  = (uint8_t)(b - move);
                     minx = std::min(minx, x); maxx = std::max(maxx, x+1);
@@ -289,8 +392,9 @@ bool TileMap::stepWaterAdvanced(int iterations, int& outMinX, int& outMinY, int&
     bool anyChanged = false;
     int minx = W, miny = H, maxx = -1, maxy = -1;
 
-    const int MAX_DOWN = 64;
-    const int MAX_SIDE = 32;
+    // 调低单次可转移体积，避免水体过快扩散
+    const int MAX_DOWN = 16;  // 原 64
+    const int MAX_SIDE = 8;   // 原 32
 
     for (int it = 0; it < iterations; ++it) {
         std::copy(m_water.begin(), m_water.end(), m_work.begin());
@@ -316,7 +420,7 @@ bool TileMap::stepWaterAdvanced(int iterations, int& outMinX, int& outMinY, int&
             }
         }
 
-        // 2) 相邻对调（侧向均衡）
+        // 2) 相邻对调（侧向均衡，降低强度）
         for (int y = 0; y < H; ++y) {
             for (int x = 0; x < W - 1; ++x) {
                 if (get(x, y) != TileType::Air || get(x+1, y) != TileType::Air) continue;
@@ -324,14 +428,14 @@ bool TileMap::stepWaterAdvanced(int iterations, int& outMinX, int& outMinY, int&
                 int b = (int)m_work[index(x+1,y)];
                 int diff = a - b;
                 if (diff > 1) {
-                    int move = std::min(diff/2, MAX_SIDE);
+                    int move = std::min(std::max(diff/4, 1), MAX_SIDE);
                     m_work[index(x,y)]     = (uint8_t)(a - move);
                     m_work[index(x+1, y)]  = (uint8_t)(b + move);
                     minx = std::min(minx, x); maxx = std::max(maxx, x+1);
                     miny = std::min(miny, y); maxy = std::max(maxy, y);
                     changed = true;
                 } else if (diff < -1) {
-                    int move = std::min((-diff)/2, MAX_SIDE);
+                    int move = std::min(std::max((-diff)/4, 1), MAX_SIDE);
                     m_work[index(x,y)]     = (uint8_t)(a + move);
                     m_work[index(x+1, y)]  = (uint8_t)(b - move);
                     minx = std::min(minx, x); maxx = std::max(maxx, x+1);
@@ -341,31 +445,33 @@ bool TileMap::stepWaterAdvanced(int iterations, int& outMinX, int& outMinY, int&
             }
         }
 
-        // 2.5) 水平“池化”均衡：同一行连续空气段体积均分
-        for (int y = 0; y < H; ++y) {
-            int x = 0;
-            while (x < W) {
-                if (get(x,y) != TileType::Air) { ++x; continue; }
-                int r = x;
-                while (r < W && get(r,y) == TileType::Air) ++r; // [x, r)
-                const int lenSeg = r - x;
-                int sum = 0;
-                for (int xi = x; xi < r; ++xi) sum += (int)m_work[index(xi,y)];
-                if (sum > 0 && lenSeg > 0) {
-                    const int tgt = sum / lenSeg;
-                    int rem = sum - tgt * lenSeg;
-                    for (int xi = x; xi < r; ++xi) {
-                        int nv = tgt + ((xi - x) < rem ? 1 : 0);
-                        int idxc = index(xi,y);
-                        if (nv != (int)m_work[idxc]) {
-                            m_work[idxc] = (uint8_t)nv;
-                            minx = std::min(minx, xi); maxx = std::max(maxx, xi);
-                            miny = std::min(miny, y);  maxy = std::max(maxy, y);
-                            changed = true;
+        // 2.5) 水平“池化”均衡：降低频率（每 4 次迭代执行 1 次），避免瞬间拉平
+        if ( (m_tick & 3) == 0 ) {
+            for (int y = 0; y < H; ++y) {
+                int x = 0;
+                while (x < W) {
+                    if (get(x,y) != TileType::Air) { ++x; continue; }
+                    int r = x;
+                    while (r < W && get(r,y) == TileType::Air) ++r; // [x, r)
+                    const int lenSeg = r - x;
+                    int sum = 0;
+                    for (int xi = x; xi < r; ++xi) sum += (int)m_work[index(xi,y)];
+                    if (sum > 0 && lenSeg > 0) {
+                        const int tgt = sum / lenSeg;
+                        int rem = sum - tgt * lenSeg;
+                        for (int xi = x; xi < r; ++xi) {
+                            int nv = tgt + ((xi - x) < rem ? 1 : 0);
+                            int idxc = index(xi,y);
+                            if (nv != (int)m_work[idxc]) {
+                                m_work[idxc] = (uint8_t)nv;
+                                minx = std::min(minx, xi); maxx = std::max(maxx, xi);
+                                miny = std::min(miny, y);  maxy = std::max(maxy, y);
+                                changed = true;
+                            }
                         }
                     }
+                    x = r;
                 }
-                x = r;
             }
         }
 

@@ -6,16 +6,67 @@
 #pragma once
 
 #include "../core/Container.hpp"
+#include "../core/Noise.hpp"
 #include <cstdint>
 
 namespace Tina::Game {
 
 enum class TileType : uint8_t {
     Air = 0,
+    
+    // 基础地形
     Grass,
     Dirt,
     Stone,
+    Sand,
+    Snow,
+    Ice,
+    
+    // 液体
     Water,
+    Lava,
+    
+    // 矿物
+    Coal,
+    Iron,
+    Gold,
+    Diamond,
+    
+    // 生物群系特有
+    Clay,           // 粘土
+    Bedrock,        // 基岩
+    Obsidian,       // 黑曜石
+    
+    // 植被相关  
+    Wood,           // 木材
+    Leaves,         // 树叶
+    
+    // 地下结构
+    CaveWall,       // 洞穴墙壁
+    
+    MAX_TILE_TYPE
+};
+
+// 生物群系类型
+enum class BiomeType : uint8_t {
+    Ocean,          // 海洋
+    Beach,          // 海滩
+    Forest,         // 森林
+    Plains,         // 平原
+    Desert,         // 沙漠
+    Tundra,         // 苔原
+    Mountain,       // 山地
+    Swamp,          // 沼泽
+    MAX_BIOME_TYPE
+};
+
+// 矿物类型（用于生成）
+enum class OreType : uint8_t {
+    Coal = 0,
+    Iron,
+    Gold, 
+    Diamond,
+    MAX_ORE_TYPE
 };
 
 struct TileMapConfig {
@@ -29,13 +80,25 @@ public:
     explicit TileMap(const TileMapConfig& cfg)
         : m_w(cfg.width), m_h(cfg.height), m_seed(cfg.seed)
         , m_tiles(m_w * m_h, TileType::Air)
-        , m_water(m_w * m_h, (uint8_t)0) {}
+        , m_water(m_w * m_h, (uint8_t)0)
+        , m_biomes(m_w * m_h, BiomeType::Plains)
+        , m_noiseGen(cfg.seed) {}
 
     int width() const { return m_w; }
     int height() const { return m_h; }
 
     TileType get(int x, int y) const { return m_tiles[index(x,y)]; }
     void set(int x, int y, TileType t) { m_tiles[index(x,y)] = t; }
+    
+    // 获取生物群系
+    BiomeType getBiome(int x, int y) const { 
+        if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return BiomeType::Plains;
+        return m_biomes[index(x,y)]; 
+    }
+    void setBiome(int x, int y, BiomeType b) { 
+        if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return;
+        m_biomes[index(x,y)] = b; 
+    }
     
     // 安全的瓦片设置：同时处理瓦片类型和水位数据的一致性
     void setSafe(int x, int y, TileType t) {
@@ -48,11 +111,19 @@ public:
         }
     }
 
-    // 生成：
-    // - 使用多频正弦形成起伏地表
-    // - 表层1格为 Grass，其下若干为 Dirt，再深为 Stone
-    // - 简单洞穴：对地下区域使用哈希噪声阈值挖空
+    // 新的地图生成系统：
+    // - 使用柏林噪声生成自然地形
+    // - 基于温度和湿度的生物群系系统
+    // - 改进的洞穴和矿物生成
     void generate();
+    
+    // 分步生成方法
+    void generateBiomes();        // 生成生物群系
+    void generateTerrain();       // 生成基础地形
+    void generateCaves();         // 生成洞穴系统
+    void generateOres();          // 生成矿物
+    void generateVegetation();    // 生成植被
+    void generateWater();         // 生成水体
 
     // 查询是否为水体 - 改进版本，增强一致性检查
     bool isWater(int x, int y) const {
@@ -94,7 +165,18 @@ public:
 private:
     int index(int x, int y) const { return y * m_w + x; }
 
-    // 简单整型哈希噪声，返回 0..1
+    // 生物群系确定
+    BiomeType determineBiome(float temperature, float humidity, float height) const;
+    
+    // 根据生物群系获取地表材料
+    TileType getSurfaceMaterial(BiomeType biome) const;
+    TileType getSubsurfaceMaterial(BiomeType biome, int depth) const;
+    
+    // 矿物生成辅助
+    bool shouldGenerateOre(OreType ore, int x, int y, float caveNoise) const;
+    TileType oreTypeToTileType(OreType ore) const;
+
+    // 简单整型哈希噪声，返回 0..1 (保留兼容性)
     float noise1(int x) const;
     float noise2(int x, int y) const;
     float noise2f(float x, float y) const;
@@ -104,9 +186,16 @@ private:
     int m_h;
     uint32_t m_seed;
     int m_seaLevel = 0; // 海平面（世界格坐标，y<=seaLevel 且为空气则填水）
+    
+    // 主要数据
     Tina::Container::Vector<TileType> m_tiles;
     Tina::Container::Vector<uint8_t>  m_water; // 水位（0..255）
+    Tina::Container::Vector<BiomeType> m_biomes; // 生物群系
     Tina::Container::Vector<uint8_t>  m_work;  // 水体更新的工作缓冲
+    
+    // 噪声生成器
+    Tina::Core::NoiseGenerator m_noiseGen;
+    
     unsigned int m_tick = 0; // 奇偶交替打破左右偏置
 };
 
