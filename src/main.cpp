@@ -873,7 +873,22 @@ int main(int /*argc*/, char* /*argv*/[])
             }
         }
         pipeline.submit();
-        
+
+        // 配置文本视图 15：像素正交投影（左上为原点，y 向下）
+        {
+            bgfx::setViewRect(15, 0, 0, (uint16_t)pxW, (uint16_t)pxH);
+            float view[16]; bx::mtxIdentity(view);
+            float proj[16];
+            const bgfx::Caps* caps = bgfx::getCaps();
+            bx::mtxOrtho(proj,
+                        0.0f, (float)pxW,         // 左 右（像素）
+                        (float)pxH, 0.0f,         // 下 上（像素，反转Y）
+                        0.0f, 1000.0f,            // 近 远
+                        0.0f,                     // 偏移
+                        caps->homogeneousDepth);
+            bgfx::setViewTransform(15, view, proj);
+        }
+
         // 在 UI 视图 15 上直接绘制示例文本（验证中文管线）
         textRenderer.drawText(15, 16.0f, 56.0f, 1.0f, 1.0f, 1.0f, 1.0f,
                               "中文渲染 OK —— Tina 引擎");
@@ -905,6 +920,9 @@ int main(int /*argc*/, char* /*argv*/[])
     }
 
     // 5) 清理：先销毁依赖 bgfx 资源的对象/句柄，再关闭 bgfx
+    // 注意：必须在 bgfx::shutdown() 之前显式释放 TextRenderer（内部会销毁 bgfx 句柄），
+    // 否则其析构函数在 bgfx 已关闭后再调用 bgfx 接口，可能导致退出卡死。
+    textRenderer.shutdown();
     for (auto& ch : chunks) { if (bgfx::isValid(ch.vb)) bgfx::destroy(ch.vb); if (bgfx::isValid(ch.ib)) bgfx::destroy(ch.ib); }
     for (size_t i = 0; i < chunksVBWater.size(); ++i) {
         if (bgfx::isValid(chunksVBWater[i])) bgfx::destroy(chunksVBWater[i]);

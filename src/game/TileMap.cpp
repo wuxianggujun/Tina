@@ -25,6 +25,7 @@ void TileMap::generate()
     generateCaves();       // 生成洞穴系统
     generateOres();        // 生成矿物
     generateVegetation();  // 生成植被
+    generateDecorations(); // 生成地表装饰
     generateWater();       // 生成水体
 }
 
@@ -47,7 +48,7 @@ void TileMap::generateTerrain()
 {
     // 使用柏林噪声生成地形高度
     for (int x = 0; x < m_w; ++x) {
-        float heightNoise = m_noiseGen.heightNoise(static_cast<float>(x), static_cast<float>(m_h * 0.5f));
+        float heightNoise = m_noiseGen.heightNoise(static_cast<float>(x), 0.0f);
         
         // 将噪声转换为地表高度
         float baseHeight = m_h * 0.6f;  // 基础高度
@@ -130,26 +131,61 @@ void TileMap::generateOres()
 
 void TileMap::generateVegetation()
 {
-    // 在地表生成植被
+    // 增强的植被生成系统
     for (int x = 0; x < m_w; ++x) {
         for (int y = m_h - 1; y >= 0; --y) {
             if (get(x, y) != TileType::Air) {
                 // 找到地表
-                if (y < m_h - 1) {
+                if (y < m_h - 1 && get(x, y + 1) == TileType::Air) {
                     TileType surface = get(x, y);
                     BiomeType biome = getBiome(x, y);
                     
-                    // 根据生物群系在地表生成植被
-                    float vegetation = m_noiseGen.humidityNoise(static_cast<float>(x), static_cast<float>(y));
+                    // 获取植被噪声用于决定是否生成植被
+                    float vegetationNoise = m_noiseGen.humidityNoise(static_cast<float>(x), static_cast<float>(y));
+                    float forestNoise = m_noiseGen.temperatureNoise(static_cast<float>(x * 0.1f), static_cast<float>(y * 0.1f));
                     
-                    if (surface == TileType::Grass && vegetation > 0.7f) {
-                        if (biome == BiomeType::Forest && y < m_h - 3) {
-                            // 生成简单的树
-                            set(x, y + 1, TileType::Wood);
-                            set(x, y + 2, TileType::Wood);
-                            if (y < m_h - 4) set(x, y + 3, TileType::Leaves);
-                        }
+                    // 根据生物群系生成不同的植被
+                    switch (biome) {
+                        case BiomeType::Forest:
+                            generateForestVegetation(x, y, vegetationNoise, forestNoise);
+                            break;
+                        case BiomeType::Plains:
+                            generatePlainsVegetation(x, y, vegetationNoise);
+                            break;
+                        case BiomeType::Desert:
+                            generateDesertVegetation(x, y, vegetationNoise);
+                            break;
+                        case BiomeType::Tundra:
+                            generateTundraVegetation(x, y, vegetationNoise);
+                            break;
+                        case BiomeType::Swamp:
+                            generateSwampVegetation(x, y, vegetationNoise);
+                            break;
+                        default:
+                            break;
                     }
+                }
+                break;
+            }
+        }
+    }
+}
+
+void TileMap::generateDecorations()
+{
+    // 生成各种地表装饰元素
+    for (int x = 0; x < m_w; ++x) {
+        for (int y = m_h - 1; y >= 0; --y) {
+            if (get(x, y) != TileType::Air) {
+                // 找到地表
+                if (y < m_h - 1 && get(x, y + 1) == TileType::Air) {
+                    TileType surface = get(x, y);
+                    BiomeType biome = getBiome(x, y);
+                    
+                    float decorationNoise = m_noiseGen.caveNoise(static_cast<float>(x * 0.7f), static_cast<float>(y * 0.7f));
+                    
+                    // 根据生物群系生成不同的装饰
+                    generateBiomeDecorations(x, y, biome, decorationNoise);
                 }
                 break;
             }
@@ -571,6 +607,261 @@ TileType TileMap::oreTypeToTileType(OreType ore) const
         case OreType::Gold:    return TileType::Gold;
         case OreType::Diamond: return TileType::Diamond;
         default:               return TileType::Stone;
+    }
+}
+
+// 植被生成辅助函数实现
+void TileMap::generateForestVegetation(int x, int y, float vegetationNoise, float forestNoise)
+{
+    TileType surface = get(x, y);
+    if (surface != TileType::Grass) return;
+    
+    // 森林有很高的植被密度
+    if (vegetationNoise > 0.3f) {  // 70%的概率生成植被
+        if (forestNoise > 0.7f) {
+            // 30% 概率生成大树
+            generateBigTree(x, y);
+        } else if (vegetationNoise > 0.5f) {
+            // 50% 概率生成普通树
+            int treeHeight = 3 + static_cast<int>(vegetationNoise * 4);  // 3-7格高
+            generateTree(x, y, treeHeight, true);
+        } else {
+            // 其余生成小灌木
+            if (y < m_h - 2) {
+                set(x, y + 1, TileType::Leaves);
+            }
+        }
+    }
+}
+
+void TileMap::generatePlainsVegetation(int x, int y, float vegetationNoise)
+{
+    TileType surface = get(x, y);
+    if (surface != TileType::Grass) return;
+    
+    // 平原有中等植被密度
+    if (vegetationNoise > 0.7f) {  // 30%的概率
+        if (vegetationNoise > 0.85f) {
+            // 15% 概率生成小树
+            generateTree(x, y, 2 + static_cast<int>(vegetationNoise * 3), true);
+        } else {
+            // 其余生成草丛
+            if (y < m_h - 2) {
+                set(x, y + 1, TileType::Leaves);  // 用树叶代表草丛
+            }
+        }
+    }
+}
+
+void TileMap::generateDesertVegetation(int x, int y, float vegetationNoise)
+{
+    TileType surface = get(x, y);
+    if (surface != TileType::Sand) return;
+    
+    // 沙漠植被稀少
+    if (vegetationNoise > 0.9f) {  // 10%的概率
+        // 生成仙人掌（用木材代表）
+        if (y < m_h - 3) {
+            set(x, y + 1, TileType::Wood);
+            if (vegetationNoise > 0.95f && y < m_h - 4) {
+                set(x, y + 2, TileType::Wood);
+            }
+        }
+    }
+}
+
+void TileMap::generateTundraVegetation(int x, int y, float vegetationNoise)
+{
+    TileType surface = get(x, y);
+    if (surface != TileType::Snow) return;
+    
+    // 苔原植被稀少且矮小
+    if (vegetationNoise > 0.8f) {  // 20%的概率
+        if (y < m_h - 2) {
+            // 生成低矮的冰雪植被
+            set(x, y + 1, TileType::Ice);  // 用冰代表冰雪植被
+        }
+    }
+}
+
+void TileMap::generateSwampVegetation(int x, int y, float vegetationNoise)
+{
+    TileType surface = get(x, y);
+    if (surface != TileType::Clay) return;
+    
+    // 沼泽植被密集但种类单一
+    if (vegetationNoise > 0.4f) {  // 60%的概率
+        if (vegetationNoise > 0.8f) {
+            // 生成沼泽树（较矮）
+            generateTree(x, y, 2 + static_cast<int>(vegetationNoise * 2), false);
+        } else {
+            // 生成沼泽草
+            if (y < m_h - 2) {
+                set(x, y + 1, TileType::Leaves);
+            }
+        }
+    }
+}
+
+void TileMap::generateTree(int x, int y, int height, bool hasLeaves)
+{
+    if (y >= m_h - height - 1 || x < 0 || x >= m_w) return;  // 边界检查
+    
+    // 生成树干
+    for (int h = 1; h <= height; ++h) {
+        if (y + h >= m_h) break;
+        set(x, y + h, TileType::Wood);
+    }
+    
+    // 生成树叶
+    if (hasLeaves && y + height + 1 < m_h) {
+        // 树顶
+        set(x, y + height + 1, TileType::Leaves);
+        
+        // 如果树够高，在树干周围也生成一些树叶
+        if (height >= 4) {
+            int leafY = y + height;
+            // 左右两侧
+            if (x > 0 && leafY < m_h && get(x - 1, leafY) == TileType::Air) {
+                set(x - 1, leafY, TileType::Leaves);
+            }
+            if (x < m_w - 1 && leafY < m_h && get(x + 1, leafY) == TileType::Air) {
+                set(x + 1, leafY, TileType::Leaves);
+            }
+        }
+    }
+}
+
+void TileMap::generateBigTree(int x, int y)
+{
+    int height = 5 + static_cast<int>(m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y)) * 3);  // 5-8格高
+    if (y >= m_h - height - 2 || x < 0 || x >= m_w) return;  // 边界检查
+    
+    // 生成粗树干（有时是2格宽）
+    bool isWide = m_noiseGen.temperatureNoise(static_cast<float>(x), static_cast<float>(y)) > 0.7f;
+    
+    for (int h = 1; h <= height; ++h) {
+        if (y + h >= m_h) break;
+        set(x, y + h, TileType::Wood);
+        
+        // 宽树干
+        if (isWide && x < m_w - 1 && h <= height - 1) {
+            if (get(x + 1, y + h) == TileType::Air) {
+                set(x + 1, y + h, TileType::Wood);
+            }
+        }
+    }
+    
+    // 生成茂密的树冠
+    int leafLevel = y + height;
+    int leafLevel2 = y + height + 1;
+    
+    // 第一层树叶（较大）
+    for (int dx = -2; dx <= 2; ++dx) {
+        for (int dy = 0; dy <= 1; ++dy) {
+            int lx = x + dx;
+            int ly = leafLevel + dy;
+            if (lx >= 0 && lx < m_w && ly >= 0 && ly < m_h && get(lx, ly) == TileType::Air) {
+                // 边缘树叶有一定概率不生成，形成自然形状
+                float edgeProb = m_noiseGen.humidityNoise(static_cast<float>(lx), static_cast<float>(ly));
+                if (std::abs(dx) <= 1 || edgeProb > 0.4f) {
+                    set(lx, ly, TileType::Leaves);
+                }
+            }
+        }
+    }
+    
+    // 第二层树叶（较小）
+    if (leafLevel2 >= 0 && leafLevel2 < m_h) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            int lx = x + dx;
+            if (lx >= 0 && lx < m_w && get(lx, leafLevel2) == TileType::Air) {
+                set(lx, leafLevel2, TileType::Leaves);
+            }
+        }
+    }
+}
+
+void TileMap::generateBiomeDecorations(int x, int y, BiomeType biome, float decorationNoise)
+{
+    switch (biome) {
+        case BiomeType::Mountain:
+            // 山地：生成巨石
+            if (decorationNoise > 0.85f && y < m_h - 2) {
+                set(x, y + 1, TileType::Stone);
+                if (decorationNoise > 0.9f && y < m_h - 3) {
+                    set(x, y + 2, TileType::Stone);
+                }
+            }
+            break;
+            
+        case BiomeType::Desert:
+            // 沙漠：生成沙堆和偶尔的宝石
+            if (decorationNoise > 0.8f && y < m_h - 2) {
+                if (decorationNoise > 0.95f) {
+                    set(x, y + 1, TileType::Gold);  // 罕见的金块
+                } else {
+                    set(x, y + 1, TileType::Sand);  // 沙堆
+                }
+            }
+            break;
+            
+        case BiomeType::Beach:
+            // 海滩：生成贝壳（用钻石代表）和海草
+            if (decorationNoise > 0.85f && y < m_h - 2) {
+                if (decorationNoise > 0.92f) {
+                    set(x, y + 1, TileType::Diamond);  // 贝壳
+                } else {
+                    set(x, y + 1, TileType::Leaves);   // 海草
+                }
+            }
+            break;
+            
+        case BiomeType::Tundra:
+            // 苔原：生成冰块装饰
+            if (decorationNoise > 0.8f && y < m_h - 2) {
+                set(x, y + 1, TileType::Ice);
+            }
+            break;
+            
+        case BiomeType::Plains:
+            // 平原：生成小花（用五彩的矿物代表）
+            if (decorationNoise > 0.88f && y < m_h - 2) {
+                float flowerType = m_noiseGen.humidityNoise(static_cast<float>(x), static_cast<float>(y));
+                if (flowerType > 0.7f) {
+                    set(x, y + 1, TileType::Gold);     // 黄花
+                } else if (flowerType > 0.4f) {
+                    set(x, y + 1, TileType::Iron);     // 白花
+                } else {
+                    set(x, y + 1, TileType::Diamond);  // 蓝花
+                }
+            }
+            break;
+            
+        case BiomeType::Forest:
+            // 森林：生成蘑菇和浆果丛
+            if (decorationNoise > 0.8f && y < m_h - 2) {
+                if (decorationNoise > 0.9f) {
+                    set(x, y + 1, TileType::Coal);     // 蘑菇（黑色）
+                } else {
+                    set(x, y + 1, TileType::Leaves);   // 浆果丛
+                }
+            }
+            break;
+            
+        case BiomeType::Swamp:
+            // 沼泽：生成枯木和泥球
+            if (decorationNoise > 0.75f && y < m_h - 2) {
+                if (decorationNoise > 0.85f) {
+                    set(x, y + 1, TileType::Wood);     // 枯木
+                } else {
+                    set(x, y + 1, TileType::Clay);     // 泥球
+                }
+            }
+            break;
+            
+        default:
+            break;
     }
 }
 

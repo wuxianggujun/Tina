@@ -123,6 +123,7 @@ public:
     void generateCaves();         // 生成洞穴系统
     void generateOres();          // 生成矿物
     void generateVegetation();    // 生成植被
+    void generateDecorations();   // 生成地表装饰
     void generateWater();         // 生成水体
 
     // 查询是否为水体 - 改进版本，增强一致性检查
@@ -175,6 +176,20 @@ private:
     // 矿物生成辅助
     bool shouldGenerateOre(OreType ore, int x, int y, float caveNoise) const;
     TileType oreTypeToTileType(OreType ore) const;
+    
+    // 植被生成辅助函数
+    void generateForestVegetation(int x, int y, float vegetationNoise, float forestNoise);
+    void generatePlainsVegetation(int x, int y, float vegetationNoise);
+    void generateDesertVegetation(int x, int y, float vegetationNoise);
+    void generateTundraVegetation(int x, int y, float vegetationNoise);
+    void generateSwampVegetation(int x, int y, float vegetationNoise);
+    
+    // 树木生成
+    void generateTree(int x, int y, int height, bool hasLeaves = true);
+    void generateBigTree(int x, int y);
+    
+    // 装饰生成
+    void generateBiomeDecorations(int x, int y, BiomeType biome, float decorationNoise);
 
 private:
     int m_w;
