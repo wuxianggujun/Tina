@@ -29,20 +29,19 @@ bool InfoBar::initialize() {
     <title>Info Bar</title>
     <style>
         body {
-            font-family: Source Han Sans SC, Noto Sans SC, sans-serif;
+            font-family: "Source Han Sans SC";
             font-size: 14px;
             margin: 0;
             padding: 0;
             background-color: rgba(0, 0, 0, 0.7);
             color: white;
         }
-        span, .info-bar, .info-section { font-family: Source Han Sans SC, Noto Sans SC, sans-serif; }
         
         .info-bar {
             position: absolute;
             top: 0;
             left: 0;
-            right: 0;
+            width: 100%;
             height: 40px;
             background-color: rgba(0, 0, 0, 0.6);
             padding: 8px 16px;

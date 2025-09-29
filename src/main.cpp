@@ -908,6 +908,8 @@ int main(int /*argc*/, char* /*argv*/[])
         if (bgfx::isValid(chunksVBWater[i])) bgfx::destroy(chunksVBWater[i]);
         if (bgfx::isValid(chunksIBWater[i])) bgfx::destroy(chunksIBWater[i]);
     }
+    // 先关闭 UI（销毁其 bgfx 资源），再清理渲染器与 bgfx
+    uiSystem.shutdown();
     shaderManager.cleanup();
     // 额外提交一帧，确保销毁命令被渲染线程消费
     bgfx::frame();

@@ -132,13 +132,11 @@ void RenderInterface::EnableScissorRegion(bool enable) {
 
 Rml::CompiledGeometryHandle RenderInterface::CompileGeometry(Rml::Span<const Rml::Vertex> vertices, Rml::Span<const int> indices) {
     if (vertices.empty() || indices.empty()) {
+        TINA_WARN("UI: CompileGeometry called with empty data");
         return 0;
     }
-    static bool logged_once = false;
-    if (!logged_once) {
-        TINA_INFO("UI: CompileGeometry, verts={}, indices={}", (int)vertices.size(), (int)indices.size());
-        logged_once = true;
-    }
+    static int compile_count = 0;
+    TINA_INFO("UI: CompileGeometry #{}, verts={}, indices={}", ++compile_count, (int)vertices.size(), (int)indices.size());
     
     // Convert vertices to bgfx format
     struct UIVertex {
@@ -172,6 +170,7 @@ Rml::CompiledGeometryHandle RenderInterface::CompileGeometry(Rml::Span<const Rml
     bgfx::IndexBufferHandle ib = bgfx::createIndexBuffer(memi, BGFX_BUFFER_INDEX32);
     
     if (!bgfx::isValid(vb) || !bgfx::isValid(ib)) {
+        TINA_ERROR("UI: Failed to create bgfx buffers");
         if (bgfx::isValid(vb)) bgfx::destroy(vb);
         if (bgfx::isValid(ib)) bgfx::destroy(ib);
         return 0;
@@ -184,6 +183,7 @@ Rml::CompiledGeometryHandle RenderInterface::CompileGeometry(Rml::Span<const Rml
     data.ib = ib;
     data.indexCount = (uint32_t)indices.size();
     
+    TINA_INFO("UI: Created geometry handle {}", (int)handle);
     return handle;
 }
 
@@ -198,20 +198,18 @@ void RenderInterface::RenderGeometry(Rml::CompiledGeometryHandle geometry, Rml::
         return;
     }
     
-    // 设置模型变换：基础为 SetTransform 传入的矩阵，再叠加 translation 偏移
-    {
-        float mtx[16];
-        bx::mtxIdentity(mtx);
-        mtx[12] = translation.x;
-        mtx[13] = translation.y;
-        bgfx::setTransform(mtx);
-    }
+    // 设置模型变换：使用编码器设置（结合 RmlUI 传入的 translation）
+    float mtx[16];
+    bx::mtxIdentity(mtx);
+    mtx[12] = translation.x;
+    mtx[13] = translation.y;
 
     // Set render state
     uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA;
 
     bgfx::Encoder* enc = bgfx::begin(false);
     if (!enc) return;
+    enc->setTransform(mtx);
 
     if (m_scissorEnabled) {
         const uint16_t sx = (uint16_t)std::max(0, m_scissorRegion.Left());
@@ -276,13 +274,11 @@ Rml::TextureHandle RenderInterface::LoadTexture(Rml::Vector2i& texture_dimension
 Rml::TextureHandle RenderInterface::GenerateTexture(Rml::Span<const Rml::byte> source,
                                                    Rml::Vector2i source_dimensions) {
     if (source.empty() || source_dimensions.x <= 0 || source_dimensions.y <= 0) {
+        TINA_WARN("UI: GenerateTexture called with invalid data");
         return 0;
     }
-    static bool logged_tex_once = false;
-    if (!logged_tex_once) {
-        TINA_INFO("UI: GenerateTexture {}x{} ({} bytes)", source_dimensions.x, source_dimensions.y, (int)source.size());
-        logged_tex_once = true;
-    }
+    static int texture_count = 0;
+    TINA_INFO("UI: GenerateTexture #{} {}x{} ({} bytes)", ++texture_count, source_dimensions.x, source_dimensions.y, (int)source.size());
     
     // RmlUI 6.x: GenerateTexture 提供 RGBA 预乘 alpha 数据
     const bgfx::Memory* mem = bgfx::copy(source.data(), (uint32_t)source.size());
@@ -295,6 +291,7 @@ Rml::TextureHandle RenderInterface::GenerateTexture(Rml::Span<const Rml::byte> s
     );
     
     if (!bgfx::isValid(handle)) {
+        TINA_ERROR("UI: Failed to create texture");
         return 0;
     }
     
@@ -305,6 +302,7 @@ Rml::TextureHandle RenderInterface::GenerateTexture(Rml::Span<const Rml::byte> s
     data.width = source_dimensions.x;
     data.height = source_dimensions.y;
     
+    TINA_INFO("UI: Created texture handle {}", (int)textureId);
     return textureId;
 }
 
@@ -364,17 +362,20 @@ void UISystem::shutdown() {
 
 static bool LoadDefaultFonts() {
     // 尝试加载字体文件，如果都失败则创建最小fallback字体
-    struct FontCand { const char* path; Rml::Style::FontWeight weight; bool fallback; };
+    struct FontCand { const char* path; const char* family; Rml::Style::FontWeight weight; bool fallback; };
     Tina::Container::Vector<FontCand> cands;
-    cands.push_back({"resources/fonts/SourceHanSansSC-Regular.otf", Rml::Style::FontWeight::Normal, false});
-    cands.push_back({"resources/fonts/NotoSans-Regular.ttf",  Rml::Style::FontWeight::Normal, false});
-    cands.push_back({"resources/fonts/Arial.ttf",            Rml::Style::FontWeight::Normal, true});
+    // 将思源黑体作为全局 fallback，确保未指定 family 时也能渲染
+    cands.push_back({"resources/fonts/SourceHanSansSC-Regular.otf", "Source Han Sans SC", Rml::Style::FontWeight::Normal, true});
+    cands.push_back({"resources/fonts/NotoSans-Regular.ttf", "Noto Sans", Rml::Style::FontWeight::Normal, false});
+    cands.push_back({"resources/fonts/Arial.ttf", "Arial", Rml::Style::FontWeight::Normal, true});
 
     bool any = false;
     for (const auto& f : cands) {
         FILE* fp = fopen(f.path, "rb");
         if (!fp) continue; 
         fclose(fp);
+        
+        // 直接使用文件路径加载，让RmlUI自动处理字体解析
         if (Rml::LoadFontFace(f.path, f.fallback, f.weight)) {
             any = true;
             TINA_INFO("RmlUI: 加载字体成功: {}{}", f.path, f.fallback ? " (fallback)" : "");
@@ -525,7 +526,12 @@ void UISystem::update(float deltaTime) {
 
 void UISystem::render() {
     if (m_context && m_renderInterface) {
-        TINA_INFO("UI: render() begin");
+        static bool logged_render_once = false;
+        if (!logged_render_once) {
+            TINA_INFO("UI: render() begin");
+            logged_render_once = true;
+        }
+        
         // 设置UI专用的视图（避免与其他视图冲突，使用较高的ID）
         const uint16_t uiViewId = 15;
         
@@ -544,7 +550,6 @@ void UISystem::render() {
         m_renderInterface->setCurrentViewId(uiViewId);
         
         m_context->Render();
-        TINA_INFO("UI: render() end");
     }
 }
 
