@@ -139,27 +139,28 @@ bool TextRenderer::ensureGlyph(Font& font, int codepoint)
     m_rowH = std::max(m_rowH, gh);
     m_penX += gw + 1;
 
-    // 拷贝到图集像素（RGBA，stride = atlasW*4；A=覆盖度，RGB=白）
+    // 生成连续 RGBA 块（gw x gh），A=覆盖度；用于一次性提交 GPU，减少 update 次数
+    Tina::Container::Vector<uint8_t> block;
+    block.resize((size_t)gw * (size_t)gh * 4);
     for (int y = 0; y < gh; ++y) {
         const int pitch = g->bitmap.pitch;
         const uint8_t* base = g->bitmap.buffer;
         const uint8_t* src = (pitch >= 0)
             ? base + (size_t)y * (size_t)pitch
             : base + (size_t)(gh - 1 - y) * (size_t)(-pitch);
-
-        // 写入 CPU 缓存
-        uint8_t* dst = m_atlasPixels.data() + ((size_t)(dstY + y) * (size_t)m_atlasW + (size_t)dstX) * 4;
+        uint8_t* row = block.data() + (size_t)y * (size_t)gw * 4;
         for (int x = 0; x < gw; ++x) {
-            dst[x*4 + 0] = 255;
-            dst[x*4 + 1] = 255;
-            dst[x*4 + 2] = 255;
-            dst[x*4 + 3] = src[x];
+            row[x*4 + 0] = 255;
+            row[x*4 + 1] = 255;
+            row[x*4 + 2] = 255;
+            row[x*4 + 3] = src[x];
         }
-
-        // 提交到 GPU（一次一行，避免 pitch 差异）
-        const bgfx::Memory* row = bgfx::copy(dst, (uint32_t)(gw * 4));
-        bgfx::updateTexture2D(m_atlasTex, 0, 0, (uint16_t)dstX, (uint16_t)(dstY + y), (uint16_t)gw, 1, row);
+        // 同步写入 CPU 图集缓存
+        uint8_t* dstCpu = m_atlasPixels.data() + ((size_t)(dstY + y) * (size_t)m_atlasW + (size_t)dstX) * 4;
+        memcpy(dstCpu, row, (size_t)gw * 4);
     }
+    const bgfx::Memory* memBlock = bgfx::copy(block.data(), (uint32_t)block.size());
+    bgfx::updateTexture2D(m_atlasTex, 0, 0, (uint16_t)dstX, (uint16_t)dstY, (uint16_t)gw, (uint16_t)gh, memBlock);
 
     // 上面已逐行提交（每行 gw*4 字节），此处不重复提交
 
@@ -211,11 +212,24 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
     const char* end = p + utf8.size();
     uint32_t vi = 0;
     int code = 0;
+    const bool hasKerning = (m_font.face && FT_HAS_KERNING(m_font.face));
+    FT_UInt prevGlyphIdx = 0;
     int missing = 0;
     int appended = 0;
     while (utf8Next(p, end, code)) {
         if (code == '\n') { penX = x; baseY += (float)m_font.sizePx; continue; }
         if (!ensureGlyph(m_font, code)) { ++missing; continue; }
+        // Kerning（字距调整）
+        if (hasKerning) {
+            FT_UInt glyphIdx = FT_Get_Char_Index(m_font.face, (FT_ULong)code);
+            if (prevGlyphIdx != 0 && glyphIdx != 0) {
+                FT_Vector delta{};
+                if (FT_Get_Kerning(m_font.face, prevGlyphIdx, glyphIdx, FT_KERNING_DEFAULT, &delta) == 0) {
+                    penX += (float)(delta.x >> 6);
+                }
+            }
+            prevGlyphIdx = glyphIdx;
+        }
         const Glyph& gph = m_font.glyphs[code];
         float gx0 = penX + (float)gph.bearingX;
         float gy0 = baseY - (float)gph.bearingY;
