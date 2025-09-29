@@ -28,7 +28,16 @@ set(ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR} CACHE PATH "Root directory path")
 set(BUILD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/build CACHE PATH "Build directory path")
 set(RESOURCE_DIR ${ROOT_DIR}/resources CACHE PATH "Resource directory path")
 set(RESOURCE_DEST_DIR ${CMAKE_BINARY_DIR}/resources CACHE PATH "Resource directory path")
-set(BIN_DIR ${CMAKE_BINARY_DIR}/bin CACHE PATH "Binary output directory path")
+# 统一可执行输出目录到构建目录/bin（强制覆盖缓存，避免沿用旧值指向源码根）
+set(BIN_DIR ${CMAKE_BINARY_DIR}/bin CACHE PATH "Binary output directory path" FORCE)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BIN_DIR})
+if (CMAKE_CONFIGURATION_TYPES)
+    foreach(cfg ${CMAKE_CONFIGURATION_TYPES})
+        string(TOUPPER "${cfg}" cfg_up)
+        set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${cfg_up} ${BIN_DIR})
+    endforeach()
+endif()
+message(STATUS "BIN_DIR = ${BIN_DIR}")
 
 # Functional options
 option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "${PROJECT_IS_TOP_LEVEL}")

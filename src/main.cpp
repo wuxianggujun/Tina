@@ -622,8 +622,8 @@ int main(int /*argc*/, char* /*argv*/[])
             }
             physics.step((float)fixed_dt);
 
-            // 生成涓涓细流效果：水瓦片持续产生小水滴
-            {
+            // 生成涓涓细流效果：水瓦片持续产生小水滴（默认关闭，避免“凭空增水”）
+            if (false) {
                 auto randf = [](){ return (float)std::rand() / (float)RAND_MAX; };
                 // 遍历所有水瓦片，检查是否需要生成细流
                 for (int y = 1; y < mapCfg.height - 1; ++y) {
@@ -699,10 +699,9 @@ int main(int /*argc*/, char* /*argv*/[])
                 }
             }
 
-            // 水粒子沉淀回瓦片（聚合阈值版）：同一瓦片累计达到阈值才凝结为 Water
-            // 这样可避免出现零星的“单像素水点”
+            // 水粒子沉淀回瓦片（默认关闭，避免总量非守恒而“越流越多”）
             int sx0 = +mapCfg.width, sy0 = +mapCfg.height, sx1 = -1, sy1 = -1; bool settled = false;
-            {
+            if (false) {
                 Tina::Container::HashMap<long long, Tina::Container::Vector<b2BodyId>> cell;
                 const auto& dlist2 = physics.debris();
                 for (const auto& dp : dlist2) {
@@ -873,7 +872,8 @@ int main(int /*argc*/, char* /*argv*/[])
         }
         pipeline.submit();
         
-        // 渲染UI系统
+        // 更新 + 渲染 UI 系统（RmlUI 需要先 Update 再 Render）
+        uiSystem.update((float)dt);
         uiSystem.render();
         
         renderer.endFrame();

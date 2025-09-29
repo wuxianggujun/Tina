@@ -33,28 +33,30 @@ bool InfoBar::initialize() {
             font-size: 14px;
             margin: 0;
             padding: 0;
-            background: rgba(0, 0, 0, 0.7);
+            background-color: rgba(0, 0, 0, 0.7);
             color: white;
         }
         
         .info-bar {
-            position: fixed;
+            position: absolute;
             top: 0;
             left: 0;
             right: 0;
             height: 40px;
-            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.6));
-            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            background-color: rgba(0, 0, 0, 0.6);
+            border-bottom-width: 1px;
+            border-bottom-style: solid;
+            border-bottom-color: rgba(255, 255, 255, 0.2);
             padding: 8px 16px;
-            display: flex;
-            align-items: center;
+            display: block;
+            line-height: 24px;
             z-index: 1000;
         }
         
         .info-section {
             margin-right: 24px;
-            display: flex;
-            align-items: center;
+            display: inline-block;
+            vertical-align: middle;
         }
         
         .info-label {
@@ -137,7 +139,24 @@ bool InfoBar::initialize() {
         return false;
     }
     
+    // 强制显示文档
     m_document->Show();
+    // 在首次显示后立刻触发一次更新，确保字体与布局解析完成
+    m_uiSystem->getContext()->Update();
+    m_visible = true;
+    
+    // 添加调试日志确认文档状态
+    TINA_INFO("InfoBar document loaded successfully");
+    TINA_INFO("Document visible: {}", m_document->IsVisible() ? "yes" : "no");
+    TINA_INFO("Document children count: {}", m_document->GetNumChildren());
+    
+    // 立即设置一些测试数据以验证UI是否工作
+    if (auto element = m_document->GetElementById("map_width")) {
+        element->SetInnerRML("160");
+        TINA_INFO("Set test data for map_width");
+    } else {
+        TINA_WARN("Could not find map_width element");
+    }
     
     TINA_INFO("InfoBar initialized successfully");
     return true;

@@ -56,6 +56,9 @@ public:
 
     // Transform matrix
     void SetTransform(const Rml::Matrix4f* transform) override;
+    
+    // Additional methods for UI rendering
+    void setCurrentViewId(uint16_t viewId) { m_currentViewId = viewId; }
 
 private:
     struct TextureData {
@@ -77,14 +80,17 @@ private:
     
     bgfx::ProgramHandle m_program;
     bgfx::UniformHandle m_uniformTexture;
-    bgfx::UniformHandle m_uniformTransform;
     bgfx::VertexLayout m_layout;
     Tina::renderer::ShaderManager* m_shaderManager = nullptr;
+    bgfx::TextureHandle m_whiteTexture = BGFX_INVALID_HANDLE;
+    float m_transform[16] = {0};
+    bool m_hasTransform = false;
     
     int m_viewportWidth = 0;
     int m_viewportHeight = 0;
     bool m_scissorEnabled = false;
     Rml::Rectanglei m_scissorRegion;
+    uint16_t m_currentViewId = 0;
 };
 
 // Main UI System class

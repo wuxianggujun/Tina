@@ -29,22 +29,20 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# 着色器编译 - 使用 ShaderUtils，在构建目录的 resources/shaders 生成运行期 .bin
+# 着色器编译
 include(ShaderUtils)
-# 仅编译所需着色器（按命名约定 <name>_vs/_fs）
-add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color)
-# 确保在可执行文件之前生成着色器
+add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color ui)
 add_dependencies(${PROJECT_NAME} shaders)
 
-# 编译期传入统一的着色器根目录（绝对路径，resources 下），代码默认使用该宏
+# 传入 shader 根目录给运行时
 set(TINA_SHADER_BIN_DIR "${CMAKE_BINARY_DIR}/resources/shaders")
 file(TO_CMAKE_PATH "${TINA_SHADER_BIN_DIR}" TINA_SHADER_BIN_DIR_NORM)
 target_compile_definitions(${PROJECT_NAME} PRIVATE TINA_SHADER_ROOT_DIR="${TINA_SHADER_BIN_DIR_NORM}")
 
-# 统一导出/导入宏，单体可执行目标下将核心符号视为“构建中”
+# 统一 defines
 target_compile_definitions(${PROJECT_NAME} PRIVATE BUILDING_CORE)
 
-# SDL3：优先使用子项目提供的目标，其次再 find_package（所有平台均使用 SDL3）
+# SDL3 依赖
 if (TARGET SDL3::SDL3)
     target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3)
 elseif (TARGET SDL3::SDL3-shared)
@@ -54,7 +52,7 @@ else()
     if (SDL3_FOUND)
         target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3)
     else ()
-        message(FATAL_ERROR "未找到 SDL3。请确保 thirdparty/SDL 已通过 add_subdirectory 引入，或在系统中安装 SDL3 并提供 SDL3Config.cmake。")
+        message(FATAL_ERROR "未找到 SDL3，请确保 thirdparty/SDL 通过 add_subdirectory 引入，或系统已安装 SDL3 并提供 SDL3Config.cmake")
     endif ()
 endif ()
 
@@ -74,34 +72,35 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     EASTL
 )
 
-# 创建bin目录
+# 确保 bin 目录存在
 file(MAKE_DIRECTORY "${BIN_DIR}")
 
-# Post-build步骤：拷贝可执行文件到bin目录
+# 拷贝可执行文件到 bin
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${PROJECT_NAME}> "${BIN_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${BIN_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${PROJECT_NAME}> "${BIN_DIR}/"
     COMMENT "Copying executable to bin directory"
 )
 
-# Post-build步骤：拷贝资源目录到bin目录
+# 拷贝资源到 bin/resources
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${BIN_DIR}/resources"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/resources" "${BIN_DIR}/resources"
     COMMENT "Copying resources to bin directory"
 )
 
-# Post-build步骤：拷贝动态库文件（Windows平台）
+# Windows 上拷贝运行时 DLL
 if(WIN32)
-    # 拷贝SDL3动态库
     if(TARGET SDL3::SDL3-shared)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:SDL3::SDL3-shared> "${BIN_DIR}/"
             COMMENT "Copying SDL3 DLL to bin directory"
         )
     endif()
-    
-    # 查找并拷贝其他可能的动态库
+
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E echo "Checking for additional DLL files..."
-        COMMENT "Post-build DLL copy check"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}> "${BIN_DIR}"
+        COMMAND_EXPAND_LISTS
+        COMMENT "Copying runtime DLLs to bin directory"
     )
 endif()
