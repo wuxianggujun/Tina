@@ -11,6 +11,7 @@
 #include "../core/Math.hpp"
 #include "../core/Container.hpp"
 #include <algorithm>
+#include <bx/math.h>
 
 namespace Tina::Gfx {
 
@@ -35,10 +36,22 @@ public:
         ViewDesc v0{ 0, m_viewport, BGFX_INVALID_HANDLE, 0, 0, (uint16_t)m_viewport.x, (uint16_t)m_viewport.y,
                      (uint16_t)(BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH), 0x303030ff, 1.0f };
         ViewDesc v1 = v0; v1.id = 1; v1.clear_flags = 0; // 透明不清屏
-        ViewDesc v2 = v0; v2.id = 2; v2.clear_flags = 0; // UI
+        ViewDesc v2 = v0; v2.id = 2; v2.clear_flags = BGFX_CLEAR_DEPTH; // UI 仅清深度
         m_renderer.setupView(v0);
         m_renderer.setupView(v1);
         m_renderer.setupView(v2);
+
+        // 统一设置 UI 视图(2)的正交投影（像素坐标，左上为原点）
+        {
+            float ortho[16];
+            const bgfx::Caps* caps = bgfx::getCaps();
+            bx::mtxOrtho(ortho,
+                         0.0f, (float)m_viewport.x,
+                         (float)m_viewport.y, 0.0f,
+                         -1.0f, 1.0f, 0.0f,
+                         caps->homogeneousDepth);
+            bgfx::setViewTransform(2, nullptr, ortho);
+        }
         m_items.clear();
     }
 

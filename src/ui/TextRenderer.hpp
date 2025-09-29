@@ -29,6 +29,10 @@ public:
                   float r, float g, float b, float a,
                   const std::string& utf8);
 
+    // 可选：设置/清除裁剪矩形（屏幕像素坐标，针对 UI 视图等像素空间）
+    void setClipRect(int16_t x, int16_t y, uint16_t w, uint16_t h);
+    void clearClipRect();
+
 private:
     struct Glyph {
         int codepoint = 0;
@@ -66,6 +70,9 @@ private:
     Tina::renderer::ShaderManager m_shaderMgr;
     bgfx::ProgramHandle m_prog = BGFX_INVALID_HANDLE;
     bgfx::VertexLayout m_layout;
+
+    bool m_hasClip = false;
+    int16_t m_clipX = 0, m_clipY = 0; uint16_t m_clipW = 0, m_clipH = 0;
 };
 
 } // namespace Tina::UI

@@ -8,7 +8,7 @@ namespace {
 struct Vtx {
     float x, y, z;
     float u, v;
-    float r, g, b, a;
+    uint8_t r, g, b, a; // 颜色压缩为归一化 U8，减少带宽
 };
 }
 
@@ -71,7 +71,7 @@ bool TextRenderer::initialize(int atlasW, int atlasH)
     m_layout.begin()
         .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
         .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
-        .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Uint8, true)
     .end();
 
     // 着色器
@@ -117,7 +117,7 @@ bool TextRenderer::loadFont(const std::string& path, int pixelSize)
 bool TextRenderer::ensureGlyph(Font& font, int codepoint)
 {
     if (font.glyphs.find(codepoint) != font.glyphs.end()) return true;
-    if (FT_Load_Char(font.face, (FT_ULong)codepoint, FT_LOAD_RENDER)) return false;
+    if (FT_Load_Char(font.face, (FT_ULong)codepoint, FT_LOAD_RENDER | FT_LOAD_TARGET_LIGHT)) return false;
     FT_GlyphSlot g = font.face->glyph;
     int gw = g->bitmap.width;
     int gh = g->bitmap.rows;
@@ -235,10 +235,12 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
         float gy0 = baseY - (float)gph.bearingY;
         float gx1 = gx0 + (float)gph.w;
         float gy1 = gy0 + (float)gph.h;
-        verts.push_back({gx0, gy0, 0.0f, gph.u0, gph.v0, r,g,b,a});
-        verts.push_back({gx1, gy0, 0.0f, gph.u1, gph.v0, r,g,b,a});
-        verts.push_back({gx1, gy1, 0.0f, gph.u1, gph.v1, r,g,b,a});
-        verts.push_back({gx0, gy1, 0.0f, gph.u0, gph.v1, r,g,b,a});
+        auto toU8 = [](float v)->uint8_t{ v = bx::clamp(v, 0.0f, 1.0f); return (uint8_t)(v*255.0f + 0.5f); };
+        const uint8_t cr = toU8(r), cg = toU8(g), cb = toU8(b), ca = toU8(a);
+        verts.push_back({gx0, gy0, 0.0f, gph.u0, gph.v0, cr,cg,cb,ca});
+        verts.push_back({gx1, gy0, 0.0f, gph.u1, gph.v0, cr,cg,cb,ca});
+        verts.push_back({gx1, gy1, 0.0f, gph.u1, gph.v1, cr,cg,cb,ca});
+        verts.push_back({gx0, gy1, 0.0f, gph.u0, gph.v1, cr,cg,cb,ca});
         // 顶点数量通常远小于 65535，此处安全转换为 16 位索引
         idx.push_back(static_cast<uint16_t>(vi+0)); idx.push_back(static_cast<uint16_t>(vi+1)); idx.push_back(static_cast<uint16_t>(vi+2));
         idx.push_back(static_cast<uint16_t>(vi+0)); idx.push_back(static_cast<uint16_t>(vi+2)); idx.push_back(static_cast<uint16_t>(vi+3));
@@ -285,10 +287,23 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
         BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
         BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT);
     enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA | BGFX_STATE_DEPTH_TEST_ALWAYS);
+    if (m_hasClip) {
+        enc->setScissor(m_clipX, m_clipY, m_clipW, m_clipH);
+    }
     TINA_INFO("TextRenderer: 提交视图={} 顶点={} 索引={} 文本长度={} 缺失字形={}",
               (int)viewId, (int)verts.size(), (int)idx.size(), (int)utf8.size(), missing);
     enc->submit(viewId, m_prog);
     bgfx::end(enc);
+}
+
+void TextRenderer::setClipRect(int16_t x, int16_t y, uint16_t w, uint16_t h)
+{
+    m_hasClip = true; m_clipX = x; m_clipY = y; m_clipW = w; m_clipH = h;
+}
+
+void TextRenderer::clearClipRect()
+{
+    m_hasClip = false;
 }
 
 } // namespace Tina::UI

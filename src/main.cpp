@@ -135,6 +135,10 @@ int main(int /*argc*/, char* /*argv*/[])
 
     Tina::Game::TileMapConfig mapCfg; mapCfg.width = 160; mapCfg.height = 90; // 16:9
     Tina::Game::TileMap tilemap(mapCfg);
+    
+    // 按键状态跟踪（用于连续WASD移动）
+    bool keyPressed[4] = {false, false, false, false}; // W, A, S, D
+    enum KeyIndex { KEY_W = 0, KEY_A = 1, KEY_S = 2, KEY_D = 3 };
     tilemap.generate();
 
     auto tileColor = [](Tina::Game::TileType t)->Tina::Container::Array<float,4>{
@@ -599,29 +603,27 @@ int main(int /*argc*/, char* /*argv*/[])
                     pxW = ev.win_size.w; pxH = ev.win_size.h; // 修正鼠标像素→世界坐标映射
                     break;
                 case Event::Type::KEY:
-                    if (ev.key.down) {
-                        if (ev.key.key_code == Tina::os::KeyCode::F11) {
-                            if (!fullscreen) { prev_state = Tina::os::setFullScreen(window); fullscreen = true; TINA_INFO("切换全屏"); }
-                            else { Tina::os::restoreWindow(window, prev_state); fullscreen = false; TINA_INFO("退出全屏"); }
-                        } else if (ev.key.key_code == Tina::os::KeyCode::R) {
-                            relative_mouse = !relative_mouse;
-                            Tina::os::setRelativeMouseMode(window, relative_mouse);
-                            TINA_INFO("相对鼠标模式: {}", relative_mouse);
-                        } else if (ev.key.key_code == Tina::os::KeyCode::W) {
-                            camera.moveBy(0.0f, +2.0f);
-                        } else if (ev.key.key_code == Tina::os::KeyCode::S) {
-                            camera.moveBy(0.0f, -2.0f);
-                        } else if (ev.key.key_code == Tina::os::KeyCode::A) {
-                            camera.moveBy(-2.0f, 0.0f);
-                        } else if (ev.key.key_code == Tina::os::KeyCode::D) {
-                            camera.moveBy(+2.0f, 0.0f);
-                        } else if (ev.key.key_code == Tina::os::KeyCode::E) { // 放大（视区高度变小）
-                            camera.setViewHeightWorld(camera.viewH() * 0.9f);
-                        } else if (ev.key.key_code == Tina::os::KeyCode::C) { // 缩小（改用 C 键，Q 未在 KeyCode 中定义）
-                            camera.setViewHeightWorld(camera.viewH() * 1.1111f);
-                        } else if (ev.key.key_code == Tina::os::KeyCode::ESCAPE) {
-                            running = false;
-                        }
+                    if (ev.key.key_code == Tina::os::KeyCode::F11 && ev.key.down) {
+                        if (!fullscreen) { prev_state = Tina::os::setFullScreen(window); fullscreen = true; TINA_INFO("切换全屏"); }
+                        else { Tina::os::restoreWindow(window, prev_state); fullscreen = false; TINA_INFO("退出全屏"); }
+                    } else if (ev.key.key_code == Tina::os::KeyCode::R && ev.key.down) {
+                        relative_mouse = !relative_mouse;
+                        Tina::os::setRelativeMouseMode(window, relative_mouse);
+                        TINA_INFO("相对鼠标模式: {}", relative_mouse);
+                    } else if (ev.key.key_code == Tina::os::KeyCode::W) {
+                        keyPressed[KEY_W] = ev.key.down; // 记录W键状态
+                    } else if (ev.key.key_code == Tina::os::KeyCode::S) {
+                        keyPressed[KEY_S] = ev.key.down; // 记录S键状态
+                    } else if (ev.key.key_code == Tina::os::KeyCode::A) {
+                        keyPressed[KEY_A] = ev.key.down; // 记录A键状态
+                    } else if (ev.key.key_code == Tina::os::KeyCode::D) {
+                        keyPressed[KEY_D] = ev.key.down; // 记录D键状态
+                    } else if (ev.key.key_code == Tina::os::KeyCode::E && ev.key.down) { // 放大（视区高度变小）
+                        camera.setViewHeightWorld(camera.viewH() * 0.9f);
+                    } else if (ev.key.key_code == Tina::os::KeyCode::C && ev.key.down) { // 缩小（改用 C 键，Q 未在 KeyCode 中定义）
+                        camera.setViewHeightWorld(camera.viewH() * 1.1111f);
+                    } else if (ev.key.key_code == Tina::os::KeyCode::ESCAPE && ev.key.down) {
+                        running = false;
                     }
                     break;
                 case Event::Type::DROP_FILE: {
@@ -819,15 +821,14 @@ int main(int /*argc*/, char* /*argv*/[])
 
         // 渲染（可使用 alpha 做插值渲染）
         const double alpha = ticker.alpha(); (void)alpha;
-        // 设置 UI 视图（2）的正交投影矩阵与视口（左上为原点）
-        {
-            const uint16_t uiViewId = 2;
-            float ortho[16];
-            bx::mtxOrtho(ortho, 0.0f, (float)pxW, (float)pxH, 0.0f, -1.0f, 1.0f, 0.0f, bgfx::getCaps()->homogeneousDepth);
-            bgfx::setViewTransform(uiViewId, nullptr, ortho);
-            bgfx::setViewRect(uiViewId, 0, 0, (uint16_t)pxW, (uint16_t)pxH);
-            bgfx::setViewClear(uiViewId, BGFX_CLEAR_DEPTH, 0x00000000, 1.0f, 0);
-        }
+
+        // 每帧WASD移动处理（基于按键状态，确保连续流畅移动）
+        const float moveSpeed = 120.0f; // 世界单位/秒
+        const float frameMove = moveSpeed * (float)frame_timer.frameSeconds(); // 本帧移动距离
+        if (keyPressed[KEY_W]) camera.moveBy(0.0f, +frameMove);
+        if (keyPressed[KEY_S]) camera.moveBy(0.0f, -frameMove);
+        if (keyPressed[KEY_A]) camera.moveBy(-frameMove, 0.0f);
+        if (keyPressed[KEY_D]) camera.moveBy(+frameMove, 0.0f);
 
         renderer.beginFrame();
         pipeline.begin();
@@ -934,16 +935,6 @@ int main(int /*argc*/, char* /*argv*/[])
             }
         }
         pipeline.submit();
-
-        // 再次确保 UI 视图 2 的投影/视口/清除在提交文本前已设置（避免被 Pipeline.begin 覆盖）
-        {
-            const uint16_t uiViewId = 2;
-            float ortho[16];
-            bx::mtxOrtho(ortho, 0.0f, (float)pxW, (float)pxH, 0.0f, -1.0f, 1.0f, 0.0f, bgfx::getCaps()->homogeneousDepth);
-            bgfx::setViewTransform(uiViewId, nullptr, ortho);
-            bgfx::setViewRect(uiViewId, 0, 0, (uint16_t)pxW, (uint16_t)pxH);
-            bgfx::setViewClear(uiViewId, BGFX_CLEAR_DEPTH, 0x00000000, 1.0f, 0);
-        }
 
         // 在 UI 视图 2 上直接绘制示例文本（验证中文管线）
         textRenderer.drawText(2, 16.0f, 56.0f, 1.0f, 1.0f, 1.0f, 1.0f,
