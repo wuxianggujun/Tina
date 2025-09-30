@@ -22,6 +22,12 @@ set(SRC_FILES
     ui/TextRenderer.cpp
     ui/UICore.hpp
     ui/UICore.cpp
+    ui/UINode.hpp
+    ui/UINode.cpp
+    ui/UIComponents.hpp
+    ui/UIComponents.cpp
+    ui/UIEventSystem.hpp
+    ui/UIEventSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})

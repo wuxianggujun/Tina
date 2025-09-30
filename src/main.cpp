@@ -32,8 +32,10 @@
 #include <box2d/box2d.h>
 #include "physics/Physics2D.hpp"
 #include "ui/TextRenderer.hpp"
-#include "ui/TextRenderer.hpp"
 #include "ui/UICore.hpp"
+#include "ui/UINode.hpp"
+#include "ui/UIComponents.hpp"
+#include "ui/UIEventSystem.hpp"
 #include <cstdio>
 
 using Tina::os::Event;
@@ -843,6 +845,60 @@ int main(int /*argc*/, char* /*argv*/[])
         }
     }
 
+    // 3.7.1) 创建 UI 树示例（面板 + 按钮）
+    Tina::UI::UINode uiRoot("UIRoot");
+    uiRoot.setPosition(0, 0);
+    uiRoot.setSize((float)winW, (float)winH);
+
+    // 创建一个调试菜单面板
+    auto* debugPanel = new Tina::UI::UIPanel("DebugPanel");
+    debugPanel->setPosition(10, 100);
+    debugPanel->setSize(220, 180);
+    debugPanel->setColor(0.1f, 0.1f, 0.15f, 0.85f);
+    uiRoot.addChild(debugPanel);
+
+    // 面板标题
+    auto* titleLabel = new Tina::UI::UILabel("TitleLabel");
+    titleLabel->setPosition(10, 10);
+    titleLabel->setSize(200, 30);
+    titleLabel->setText("调试菜单");
+    titleLabel->setColor(1.0f, 1.0f, 0.5f, 1.0f);
+    debugPanel->addChild(titleLabel);
+
+    // 按钮 1：清除水体
+    auto* btnClearWater = new Tina::UI::UIButton("BtnClearWater");
+    btnClearWater->setPosition(10, 50);
+    btnClearWater->setSize(200, 40);
+    btnClearWater->setText("清除所有水");
+    btnClearWater->onClickCallback = [&tilemap, &chunkDirtyWater]() {
+        TINA_INFO("UI 按钮点击：清除所有水");
+        // 清除地图中的所有水
+        for (int y = 0; y < tilemap.height(); ++y) {
+            for (int x = 0; x < tilemap.width(); ++x) {
+                tilemap.setWater(x, y, 0);
+            }
+        }
+        // 标记所有水块区块为脏
+        for (auto& dirty : chunkDirtyWater) dirty = 1;
+    };
+    debugPanel->addChild(btnClearWater);
+
+    // 按钮 2：显示帧时间信息
+    auto* btnToggleInfo = new Tina::UI::UIButton("BtnToggleInfo");
+    btnToggleInfo->setPosition(10, 100);
+    btnToggleInfo->setSize(200, 40);
+    btnToggleInfo->setText("切换信息显示");
+    bool showDetailedInfo = true;
+    btnToggleInfo->onClickCallback = [&showDetailedInfo]() {
+        showDetailedInfo = !showDetailedInfo;
+        TINA_INFO("UI 按钮点击：切换信息显示 = {}", showDetailedInfo);
+    };
+    debugPanel->addChild(btnToggleInfo);
+
+    // 初始化 UI 事件系统
+    Tina::UI::UIEventSystem uiEventSystem;
+    uiEventSystem.setRoot(&uiRoot);
+
     // 3.6) 帧计时与固定步（基于 docs/frame_timing.md）
     Tina::Core::TimeConfig time_cfg{};
     time_cfg.tick_rate = 60;
@@ -932,6 +988,15 @@ int main(int /*argc*/, char* /*argv*/[])
                     break;
                 default: break;
             }
+        }
+
+        // 更新 UI 事件系统（鼠标交互）
+        {
+            float mx = 0.0f, my = 0.0f;
+            SDL_MouseButtonFlags btn = SDL_GetMouseState(&mx, &my);
+            bool leftDown = (btn & SDL_BUTTON_LMASK) != 0;
+            uiEventSystem.updateMouse(mx, my, leftDown);
+            uiEventSystem.processEvents();
         }
 
         // 固定逻辑步（物理更新）
@@ -1289,7 +1354,10 @@ int main(int /*argc*/, char* /*argv*/[])
         // 在 UI 视图 2 上直接绘制示例文本（验证中文管线）
         textRenderer.drawText(2, 16.0f, 56.0f, 1.0f, 1.0f, 1.0f, 1.0f,
                               "中文渲染 OK —— Tina 引擎");
-        
+
+        // 渲染 UI 树（调试菜单面板）
+        uiRoot.render(2, ui);
+
         renderer.endFrame();
 
         // 每秒打印一次帧率/帧时间与目标设定，便于核对
