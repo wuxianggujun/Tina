@@ -506,42 +506,42 @@ int main(int /*argc*/, char* /*argv*/[])
         v.reserve((size_t)(x1i-x0i)*(y1i-y0i));
         idxv.reserve(v.capacity()*6);
         vwater.reserve((size_t)(x1i-x0i)*(y1i-y0i));
-                    // Greedy 合批实心层（仅在重建时执行，初始构建保持不变）
-            {
-                const int W = x1i - x0i; const int H = y1i - y0i;
-                Tina::Container::Vector<int> solidKey; solidKey.assign((size_t)W * H, 0);
-                for (int yy = 0; yy < H; ++yy)
-                    for (int xx = 0; xx < W; ++xx) {
-                        auto tt = tilemap.get(x0i + xx, y0i + yy);
-                        if (tt != Tina::Game::TileType::Air && tt != Tina::Game::TileType::Water)
-                            solidKey[(size_t)yy * W + xx] = (int)tt;
+        // Greedy 合批实心层（仅在完全重建时执行，waterOnly=true 时跳过）
+        if (!waterOnly) {
+            const int W = x1i - x0i; const int H = y1i - y0i;
+            Tina::Container::Vector<int> solidKey; solidKey.assign((size_t)W * H, 0);
+            for (int yy = 0; yy < H; ++yy)
+                for (int xx = 0; xx < W; ++xx) {
+                    auto tt = tilemap.get(x0i + xx, y0i + yy);
+                    if (tt != Tina::Game::TileType::Air && tt != Tina::Game::TileType::Water)
+                        solidKey[(size_t)yy * W + xx] = (int)tt;
+                }
+            Tina::Container::Vector<uint8_t> used; used.assign((size_t)W * H, 0);
+            for (int yy = 0; yy < H; ++yy) {
+                for (int xx = 0; xx < W; ++xx) {
+                    const int k = solidKey[(size_t)yy * W + xx];
+                    if (k == 0 || used[(size_t)yy * W + xx]) continue;
+                    int w = 0; while (xx + w < W && solidKey[(size_t)yy * W + (xx + w)] == k && !used[(size_t)yy * W + (xx + w)]) ++w;
+                    int h = 1; for (;;) {
+                        if (yy + h >= H) break;
+                        bool ok = true;
+                        for (int xi=0; xi<w; ++xi) { size_t idxc = (size_t)(yy+h)*W + (xx+xi); if (solidKey[idxc] != k || used[idxc]) { ok=false; break; } }
+                        if (!ok) break; ++h;
                     }
-                Tina::Container::Vector<uint8_t> used; used.assign((size_t)W * H, 0);
-                for (int yy = 0; yy < H; ++yy) {
-                    for (int xx = 0; xx < W; ++xx) {
-                        const int k = solidKey[(size_t)yy * W + xx];
-                        if (k == 0 || used[(size_t)yy * W + xx]) continue;
-                        int w = 0; while (xx + w < W && solidKey[(size_t)yy * W + (xx + w)] == k && !used[(size_t)yy * W + (xx + w)]) ++w;
-                        int h = 1; for (;;) {
-                            if (yy + h >= H) break;
-                            bool ok = true;
-                            for (int xi=0; xi<w; ++xi) { size_t idxc = (size_t)(yy+h)*W + (xx+xi); if (solidKey[idxc] != k || used[idxc]) { ok=false; break; } }
-                            if (!ok) break; ++h;
-                        }
-                        const float X0 = (float)(x0i + xx), Y0 = (float)(y0i + yy);
-                        const float X1 = (float)(x0i + xx + w), Y1 = (float)(y0i + yy + h);
-                        const auto C = tileColor((Tina::Game::TileType)k);
-                        const uint32_t baseG = (uint32_t)v.size();
-                        v.push_back({ X0, Y0, 0.0f, C[0], C[1], C[2], C[3] });
-                        v.push_back({ X1, Y0, 0.0f, C[0], C[1], C[2], C[3] });
-                        v.push_back({ X1, Y1, 0.0f, C[0], C[1], C[2], C[3] });
-                        v.push_back({ X0, Y1, 0.0f, C[0], C[1], C[2], C[3] });
-                        idxv.push_back(baseG+0); idxv.push_back(baseG+1); idxv.push_back(baseG+2);
-                        idxv.push_back(baseG+0); idxv.push_back(baseG+2); idxv.push_back(baseG+3);
-                        for (int yy2=0; yy2<h; ++yy2) for (int xx2=0; xx2<w; ++xx2) used[(size_t)(yy+yy2)*W + (xx+xx2)] = 1;
-                    }
+                    const float X0 = (float)(x0i + xx), Y0 = (float)(y0i + yy);
+                    const float X1 = (float)(x0i + xx + w), Y1 = (float)(y0i + yy + h);
+                    const auto C = tileColor((Tina::Game::TileType)k);
+                    const uint32_t baseG = (uint32_t)v.size();
+                    v.push_back({ X0, Y0, 0.0f, C[0], C[1], C[2], C[3] });
+                    v.push_back({ X1, Y0, 0.0f, C[0], C[1], C[2], C[3] });
+                    v.push_back({ X1, Y1, 0.0f, C[0], C[1], C[2], C[3] });
+                    v.push_back({ X0, Y1, 0.0f, C[0], C[1], C[2], C[3] });
+                    idxv.push_back(baseG+0); idxv.push_back(baseG+1); idxv.push_back(baseG+2);
+                    idxv.push_back(baseG+0); idxv.push_back(baseG+2); idxv.push_back(baseG+3);
+                    for (int yy2=0; yy2<h; ++yy2) for (int xx2=0; xx2<w; ++xx2) used[(size_t)(yy+yy2)*W + (xx+xx2)] = 1;
                 }
             }
+        }
         idxwater.reserve(vwater.capacity()*6);
         for (int y = y0i; y < y1i; ++y) {
             for (int x = x0i; x < x1i; ++x) {
@@ -601,27 +601,22 @@ int main(int /*argc*/, char* /*argv*/[])
                         idxwater.push_back(baseLava+0); idxwater.push_back(baseLava+1); idxwater.push_back(baseLava+2);
                         idxwater.push_back(baseLava+0); idxwater.push_back(baseLava+2); idxwater.push_back(baseLava+3);
                     }
-                } else {
-                    const auto c = tileColor(t);
-                    const float x0 = (float)x, y0 = (float)y, x1 = x0+1.0f, y1 = y0+1.0f;
-                    const uint32_t base = (uint32_t)v.size();
-                    v.push_back({ x0, y0, 0.0f, c[0], c[1], c[2], c[3] });
-                    v.push_back({ x1, y0, 0.0f, c[0], c[1], c[2], c[3] });
-                    v.push_back({ x1, y1, 0.0f, c[0], c[1], c[2], c[3] });
-                    v.push_back({ x0, y1, 0.0f, c[0], c[1], c[2], c[3] });
-                    idxv.push_back(base+0); idxv.push_back(base+1); idxv.push_back(base+2);
-                    idxv.push_back(base+0); idxv.push_back(base+2); idxv.push_back(base+3);
                 }
+                // 注意：固体瓦片已由 Greedy 合批算法（line 509-544）统一处理
+                // 此处不再单独生成固体顶点，避免重复
             }
         }
-        if (!v.empty()) {
-            const bgfx::Memory* memv = bgfx::copy(v.data(), (uint32_t)(v.size()*sizeof(ColorVertex)));
-            ch.vb = bgfx::createVertexBuffer(memv, colorLayout);
-            const bgfx::Memory* memi = bgfx::copy(idxv.data(), (uint32_t)(idxv.size()*sizeof(uint32_t)));
-            ch.ib = bgfx::createIndexBuffer(memi, BGFX_BUFFER_INDEX32);
-            ch.indexCount = (uint32_t)idxv.size();
+        // 更新固体层缓冲（仅在完全重建时）
+        if (!waterOnly) {
+            if (!v.empty()) {
+                const bgfx::Memory* memv = bgfx::copy(v.data(), (uint32_t)(v.size()*sizeof(ColorVertex)));
+                ch.vb = bgfx::createVertexBuffer(memv, colorLayout);
+                const bgfx::Memory* memi = bgfx::copy(idxv.data(), (uint32_t)(idxv.size()*sizeof(uint32_t)));
+                ch.ib = bgfx::createIndexBuffer(memi, BGFX_BUFFER_INDEX32);
+                ch.indexCount = (uint32_t)idxv.size();
+            }
         }
-        // 更新水层缓冲（重建）
+        // 更新水层缓冲（总是重建）
         if (!vwater.empty()) {
             // 确保索引可写
             while ((int)chunksVBWater.size() <= idx) chunksVBWater.push_back(BGFX_INVALID_HANDLE);
@@ -638,36 +633,38 @@ int main(int /*argc*/, char* /*argv*/[])
             if (idx >= 0 && idx < (int)chunksWaterIndexCount.size()) chunksWaterIndexCount[(size_t)idx] = 0;
         }
 
-        // 构建泥土（纹理）网格（重建）
-        Tina::Container::Vector<TexVertex> vdirt; Tina::Container::Vector<uint32_t> idxdirt;
-        for (int y = y0i; y < y1i; ++y) {
-            for (int x = x0i; x < x1i; ++x) {
-                if (tilemap.get(x,y) != Tina::Game::TileType::Dirt) continue;
-                const uint32_t baseT = (uint32_t)vdirt.size();
-                vdirt.push_back({ (float)x, (float)y, 0.0f, 0.0f, 0.0f, 255,255,255,255 });
-                vdirt.push_back({ (float)x+1.0f, (float)y, 0.0f, 1.0f, 0.0f, 255,255,255,255 });
-                vdirt.push_back({ (float)x+1.0f, (float)y+1.0f, 0.0f, 1.0f, 1.0f, 255,255,255,255 });
-                vdirt.push_back({ (float)x, (float)y+1.0f, 0.0f, 0.0f, 1.0f, 255,255,255,255 });
-                idxdirt.push_back(baseT+0); idxdirt.push_back(baseT+1); idxdirt.push_back(baseT+2);
-                idxdirt.push_back(baseT+0); idxdirt.push_back(baseT+2); idxdirt.push_back(baseT+3);
+        // 构建泥土（纹理）网格（仅在完全重建时）
+        if (!waterOnly) {
+            Tina::Container::Vector<TexVertex> vdirt; Tina::Container::Vector<uint32_t> idxdirt;
+            for (int y = y0i; y < y1i; ++y) {
+                for (int x = x0i; x < x1i; ++x) {
+                    if (tilemap.get(x,y) != Tina::Game::TileType::Dirt) continue;
+                    const uint32_t baseT = (uint32_t)vdirt.size();
+                    vdirt.push_back({ (float)x, (float)y, 0.0f, 0.0f, 0.0f, 255,255,255,255 });
+                    vdirt.push_back({ (float)x+1.0f, (float)y, 0.0f, 1.0f, 0.0f, 255,255,255,255 });
+                    vdirt.push_back({ (float)x+1.0f, (float)y+1.0f, 0.0f, 1.0f, 1.0f, 255,255,255,255 });
+                    vdirt.push_back({ (float)x, (float)y+1.0f, 0.0f, 0.0f, 1.0f, 255,255,255,255 });
+                    idxdirt.push_back(baseT+0); idxdirt.push_back(baseT+1); idxdirt.push_back(baseT+2);
+                    idxdirt.push_back(baseT+0); idxdirt.push_back(baseT+2); idxdirt.push_back(baseT+3);
+                }
             }
-        }
-        if (!vdirt.empty()) {
-            // 确保索引可写
-            while ((int)chunksVBDirt.size() <= idx) chunksVBDirt.push_back(BGFX_INVALID_HANDLE);
-            while ((int)chunksIBDirt.size() <= idx) chunksIBDirt.push_back(BGFX_INVALID_HANDLE);
-            while ((int)chunksDirtIndexCount.size() <= idx) chunksDirtIndexCount.push_back(0);
-            const bgfx::Memory* memtd = bgfx::copy(vdirt.data(), (uint32_t)(vdirt.size()*sizeof(TexVertex)));
-            if (idx >= 0 && idx < (int)chunksVBDirt.size() && bgfx::isValid(chunksVBDirt[(size_t)idx])) bgfx::destroy(chunksVBDirt[(size_t)idx]);
-            chunksVBDirt[(size_t)idx] = bgfx::createVertexBuffer(memtd, texLayout);
-            const bgfx::Memory* memid = bgfx::copy(idxdirt.data(), (uint32_t)(idxdirt.size()*sizeof(uint32_t)));
-            if (idx >= 0 && idx < (int)chunksIBDirt.size() && bgfx::isValid(chunksIBDirt[(size_t)idx])) bgfx::destroy(chunksIBDirt[(size_t)idx]);
-            chunksIBDirt[(size_t)idx] = bgfx::createIndexBuffer(memid, BGFX_BUFFER_INDEX32);
-            chunksDirtIndexCount[(size_t)idx] = (uint32_t)idxdirt.size();
-        } else {
-            if (idx >= 0 && idx < (int)chunksVBDirt.size() && bgfx::isValid(chunksVBDirt[(size_t)idx])) { bgfx::destroy(chunksVBDirt[(size_t)idx]); chunksVBDirt[(size_t)idx]=BGFX_INVALID_HANDLE; }
-            if (idx >= 0 && idx < (int)chunksIBDirt.size() && bgfx::isValid(chunksIBDirt[(size_t)idx])) { bgfx::destroy(chunksIBDirt[(size_t)idx]); chunksIBDirt[(size_t)idx]=BGFX_INVALID_HANDLE; }
-            if (idx >= 0 && idx < (int)chunksDirtIndexCount.size()) chunksDirtIndexCount[(size_t)idx]=0;
+            if (!vdirt.empty()) {
+                // 确保索引可写
+                while ((int)chunksVBDirt.size() <= idx) chunksVBDirt.push_back(BGFX_INVALID_HANDLE);
+                while ((int)chunksIBDirt.size() <= idx) chunksIBDirt.push_back(BGFX_INVALID_HANDLE);
+                while ((int)chunksDirtIndexCount.size() <= idx) chunksDirtIndexCount.push_back(0);
+                const bgfx::Memory* memtd = bgfx::copy(vdirt.data(), (uint32_t)(vdirt.size()*sizeof(TexVertex)));
+                if (idx >= 0 && idx < (int)chunksVBDirt.size() && bgfx::isValid(chunksVBDirt[(size_t)idx])) bgfx::destroy(chunksVBDirt[(size_t)idx]);
+                chunksVBDirt[(size_t)idx] = bgfx::createVertexBuffer(memtd, texLayout);
+                const bgfx::Memory* memid = bgfx::copy(idxdirt.data(), (uint32_t)(idxdirt.size()*sizeof(uint32_t)));
+                if (idx >= 0 && idx < (int)chunksIBDirt.size() && bgfx::isValid(chunksIBDirt[(size_t)idx])) bgfx::destroy(chunksIBDirt[(size_t)idx]);
+                chunksIBDirt[(size_t)idx] = bgfx::createIndexBuffer(memid, BGFX_BUFFER_INDEX32);
+                chunksDirtIndexCount[(size_t)idx] = (uint32_t)idxdirt.size();
+            } else {
+                if (idx >= 0 && idx < (int)chunksVBDirt.size() && bgfx::isValid(chunksVBDirt[(size_t)idx])) { bgfx::destroy(chunksVBDirt[(size_t)idx]); chunksVBDirt[(size_t)idx]=BGFX_INVALID_HANDLE; }
+                if (idx >= 0 && idx < (int)chunksIBDirt.size() && bgfx::isValid(chunksIBDirt[(size_t)idx])) { bgfx::destroy(chunksIBDirt[(size_t)idx]); chunksIBDirt[(size_t)idx]=BGFX_INVALID_HANDLE; }
+                if (idx >= 0 && idx < (int)chunksDirtIndexCount.size()) chunksDirtIndexCount[(size_t)idx]=0;
+            }
         }
         // 同步重建物理静态体
         if (!waterOnly) buildChunkPhysics(cx, cy);
