@@ -33,6 +33,10 @@ public:
     void setClipRect(int16_t x, int16_t y, uint16_t w, uint16_t h);
     void clearClipRect();
 
+    // 文本测量：计算 UTF-8 文本在当前字体下的像素宽高（多行按换行分行）
+    // 注意：测量过程中会按需生成字形，确保与渲染一致
+    void measureText(const std::string& utf8, float& outWidth, float& outHeight);
+
 private:
     struct Glyph {
         int codepoint = 0;

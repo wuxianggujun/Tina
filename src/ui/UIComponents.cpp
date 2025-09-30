@@ -43,10 +43,12 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
     renderer.drawRect(viewId, pos.x, pos.y, size.x, size.y,
                       bgColor.x, bgColor.y, bgColor.z, bgColor.w);
 
-    // 绘制文本（居中）
-    // 简单实现：文本从中心偏移绘制（实际应根据文本宽度计算）
-    float textX = pos.x + size.x * 0.5f - 20.0f; // 粗略居中
-    float textY = pos.y + size.y * 0.5f - 8.0f;
+    // 绘制文本（左对齐，垂直居中，带左边距）
+    // 由于没有文本宽度测量 API，使用左对齐 + padding
+    float tw = 0.0f, th = 0.0f;
+    renderer.measureText(m_text, tw, th);
+    float textX = pos.x + (size.x - tw) * 0.5f;
+    float textY = pos.y + (size.y - th) * 0.5f;
     renderer.drawText(viewId, textX, textY,
                       m_textColor.x, m_textColor.y, m_textColor.z, m_textColor.w,
                       m_text);

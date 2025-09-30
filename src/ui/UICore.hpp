@@ -32,6 +32,13 @@ public:
                   float r, float g, float b, float a,
                   const std::string& utf8);
 
+    // 文本测量代理：返回像素宽高；如未绑定 TextRenderer 返回 false
+    bool measureText(const std::string& utf8, float& outW, float& outH) const {
+        if (!m_text) { outW = outH = 0.0f; return false; }
+        const_cast<TextRenderer*>(m_text)->measureText(utf8, outW, outH);
+        return true;
+    }
+
 private:
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
     bgfx::VertexLayout  m_colorLayout{};
@@ -39,4 +46,3 @@ private:
 };
 
 } // namespace Tina::UI
-

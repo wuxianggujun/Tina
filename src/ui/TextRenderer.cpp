@@ -306,4 +306,43 @@ void TextRenderer::clearClipRect()
     m_hasClip = false;
 }
 
+void TextRenderer::measureText(const std::string& utf8, float& outWidth, float& outHeight)
+{
+    outWidth = 0.0f; outHeight = 0.0f;
+    if (!m_font.face || utf8.empty()) return;
+
+    float lineW = 0.0f;
+    int lines = 1;
+    const char* p = utf8.data();
+    const char* end = p + utf8.size();
+    int code = 0;
+    const bool hasKerning = (m_font.face && FT_HAS_KERNING(m_font.face));
+    FT_UInt prevGlyphIdx = 0;
+
+    while (utf8Next(p, end, code)) {
+        if (code == '\n') {
+            if (lineW > outWidth) outWidth = lineW;
+            lineW = 0.0f;
+            ++lines;
+            prevGlyphIdx = 0;
+            continue;
+        }
+        if (!ensureGlyph(m_font, code)) continue;
+        if (hasKerning) {
+            FT_UInt glyphIdx = FT_Get_Char_Index(m_font.face, (FT_ULong)code);
+            if (prevGlyphIdx != 0 && glyphIdx != 0) {
+                FT_Vector delta{};
+                if (FT_Get_Kerning(m_font.face, prevGlyphIdx, glyphIdx, FT_KERNING_DEFAULT, &delta) == 0) {
+                    lineW += (float)(delta.x >> 6);
+                }
+            }
+            prevGlyphIdx = glyphIdx;
+        }
+        const Glyph& g = m_font.glyphs[code];
+        lineW += (float)g.advance;
+    }
+    if (lineW > outWidth) outWidth = lineW;
+    outHeight = (float)(lines * m_font.sizePx);
+}
+
 } // namespace Tina::UI
