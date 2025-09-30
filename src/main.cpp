@@ -549,17 +549,45 @@ int main(int /*argc*/, char* /*argv*/[])
                 if (t == Tina::Game::TileType::Air || t == Tina::Game::TileType::Water) {
                     // 水体叠加层
                     const int wv  = (int)tilemap.water(x, y);
+                    if (wv == 0 && t != Tina::Game::TileType::Water) continue; // 没有水且不是水瓦片，跳过
+
                     const int wvL = (x>0              ) ? (int)tilemap.water(x-1, y) : wv;
                     const int wvR = (x<mapCfg.width-1 ) ? (int)tilemap.water(x+1, y) : wv;
+                    const int wvU = (y<mapCfg.height-1) ? (int)tilemap.water(x, y+1) : 0;
+
                     const bool isWaterTile = (t == Tina::Game::TileType::Water);
                     float hC = isWaterTile ? 1.0f : (wv / 255.0f);
+
                     if (hC > 0.001f || isWaterTile) {
+                        // 检查周围瓦片类型
                         Tina::Game::TileType lt = (x>0) ? tilemap.get(x-1,y) : Tina::Game::TileType::Stone;
                         Tina::Game::TileType rt = (x<mapCfg.width-1) ? tilemap.get(x+1,y) : Tina::Game::TileType::Stone;
-                        float hL = isWaterTile ? 1.0f : ((lt == Tina::Game::TileType::Air) ? (wvL / 255.0f) : hC);
-                        float hR = isWaterTile ? 1.0f : ((rt == Tina::Game::TileType::Air) ? (wvR / 255.0f) : hC);
                         Tina::Game::TileType up = (y<mapCfg.height-1) ? tilemap.get(x,y+1) : Tina::Game::TileType::Stone;
-                        if (up != Tina::Game::TileType::Air) { hC = hL = hR = 1.0f; }
+
+                        // 改进的水面高度计算：
+                        // 1. 如果上方有水，当前格应该填满（避免空隙）
+                        // 2. 如果左右有水且是空气，使用其水位进行插值
+                        // 3. 如果左右是固体，使用当前格水位
+                        float hL = hC;
+                        float hR = hC;
+
+                        if (up != Tina::Game::TileType::Air) {
+                            // 上方是固体或水瓦片，当前格填满
+                            hC = hL = hR = 1.0f;
+                        } else if (wvU > 0) {
+                            // 上方有水压，当前格应该接近填满（避免柱状水流中间有空隙）
+                            hC = std::max(hC, 0.95f);
+                            hL = hR = hC;
+                        } else {
+                            // 自由表面：考虑左右水位进行平滑插值
+                            if (lt == Tina::Game::TileType::Air) {
+                                hL = (wvL > 0) ? (wvL / 255.0f) : 0.0f;
+                            }
+                            if (rt == Tina::Game::TileType::Air) {
+                                hR = (wvR > 0) ? (wvR / 255.0f) : 0.0f;
+                            }
+                        }
+
                         const float topL = std::min(1.0f, std::max(0.0f, 0.5f*(hC + hL)));
                         const float topR = std::min(1.0f, std::max(0.0f, 0.5f*(hC + hR)));
                         const float x0 = (float)x, y0 = (float)y, x1 = x0+1.0f;
@@ -850,8 +878,8 @@ int main(int /*argc*/, char* /*argv*/[])
             physics.decayDebris((float)fixed_dt);
             // 先更新水体的元胞自动机（让湖水向空洞流动）
             int wx0=0, wy0=0, wx1=-1, wy1=-1;
-            // 降低每帧水体演化步数，避免过快扩散（原 3 次）
-            if (tilemap.stepWaterAdvanced(1, wx0, wy0, wx1, wy1)) {
+            // 增加迭代次数，让水流更快响应（类似泰拉瑞亚）
+            if (tilemap.stepWaterAdvanced(2, wx0, wy0, wx1, wy1)) {
                 const int cx0 = std::max(0, wx0 / chunkSize);
                 const int cy0 = std::max(0, wy0 / chunkSize);
                 const int cx1 = std::min(cxCount - 1, wx1 / chunkSize);

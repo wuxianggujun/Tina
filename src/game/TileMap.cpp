@@ -384,12 +384,30 @@ void TileMap::generateWater()
                 if (dx * dx + dy * dy > 1.0f) continue;
                 if (y > groundY) continue;
 
-                if (y <= cy) {
-                    set(x, y, TileType::Air);
+                // 改进的湖泊生成：
+                // Y坐标：0=底部，H=顶部
+                // cy 是湖泊中心，需要保留 cy 以下的部分作为固体底部
+
+                // 计算当前点相对于椭圆底部的位置
+                float lakeBottom = cy - ry;  // 椭圆底部Y坐标
+                float lakeTop = cy + ry;     // 椭圆顶部Y坐标
+
+                // 只挖 lakeBottom + 30% 到 lakeTop 的部分（保留底部30%作为固体）
+                float digThreshold = lakeBottom + ry * 0.3f;
+
+                if (y >= digThreshold) {
+                    TileType currentTile = get(x, y);
+
+                    // 这部分挖空（但不要挖掉已经是实心装饰/建筑物的方块）
+                    if (currentTile != TileType::Wood && currentTile != TileType::Leaves) {
+                        set(x, y, TileType::Air);
+                    }
+
+                    // 填充整个湖泊区域为水，让水自然演化形成水面
+                    // 关键修复：确保水完全填满，避免底部有空隙
                     m_water[index(x, y)] = 255;
-                } else {
-                    setSafe(x, y, TileType::Air);
                 }
+                // y < digThreshold 的部分保持原样（固体底部）
             }
         }
     }
@@ -720,9 +738,9 @@ bool TileMap::stepWaterAdvanced(int iterations, int& outMinX, int& outMinY, int&
     bool anyChanged = false;
     int minx = W, miny = H, maxx = -1, maxy = -1;
 
-    // 调低单次可转移体积，避免水体过快扩散
-    const int MAX_DOWN = 16;  // 原 64
-    const int MAX_SIDE = 8;   // 原 32
+    // 优化流速：平衡速度和视觉效果
+    const int MAX_DOWN = 48;  // 适中的下落速度，既快又不会太突兀
+    const int MAX_SIDE = 16;  // 适度的侧流速度
 
     for (int it = 0; it < iterations; ++it) {
         std::copy(m_water.begin(), m_water.end(), m_work.begin());
@@ -749,35 +767,60 @@ bool TileMap::stepWaterAdvanced(int iterations, int& outMinX, int& outMinY, int&
         }
 
         // 2) 相邻对调（侧向均衡 + 边缘溢流）
-        //    - 仅当两格均为空气（水平水面）才考虑。
-        //    - 若两侧都无支撑（正下都是空气），不做侧向，避免自由落体区贴壁涓流。
-        //    - 若两侧均有支撑：弱化均衡（diff/4）。
-        //    - 若仅一侧有支撑：从“有支撑侧”向“无支撑侧”小幅溢流（a/3），帮助湖面向洞口补给，但不会贯穿实体角落。
+        //    修复：只有下方是固体（真正的支撑）时才允许侧向流动
+        //    如果下方是空气，水应该优先下落而不是横向扩散
         for (int y = 0; y < H; ++y) {
             for (int x = 0; x < W - 1; ++x) {
                 if (get(x, y) != TileType::Air || get(x+1, y) != TileType::Air) continue;
-                auto hasSupport = [&](int xx, int yy){
-                    if (yy == 0) return true; // 地面视为支撑
-                    // 下方为固体，或下方已有水量，都视为“有支撑”（非自由落体）
-                    return (get(xx, yy-1) != TileType::Air) || (m_work[index(xx, yy-1)] > 0);
+
+                // 修改支撑判断：下方是固体或者下方有足够的水（接近满水位）
+                auto hasSolidSupport = [&](int xx, int yy){
+                    if (yy == 0) return true; // 地面是支撑
+                    // 下方是固体，或者下方有接近满水位的水（>= 200，约78%），都算有支撑
+                    TileType below = get(xx, yy-1);
+                    if (below != TileType::Air) return true; // 固体支撑
+                    // 下方是空气但有大量水，也算有支撑（防止湖泊水流失）
+                    return (m_work[index(xx, yy-1)] >= 200);
                 };
-                const bool supportA = hasSupport(x,   y);
-                const bool supportB = hasSupport(x+1, y);
+                const bool supportA = hasSolidSupport(x,   y);
+                const bool supportB = hasSolidSupport(x+1, y);
                 int a = (int)m_work[index(x,y)];
                 int b = (int)m_work[index(x+1,y)];
-                if (!(supportA || supportB)) continue; // 两侧都无支撑：自由落体区，禁止横向
+
+                // 自由落体时允许少量横向扩散（防止纯柱状下落）
+                if (!(supportA || supportB)) {
+                    int diff = a - b;
+                    if (std::abs(diff) > 8) {  // 只有差异较大时才扩散
+                        int move = std::min(std::max(diff/8, 1), MAX_SIDE/4);  // 极慢的扩散速率
+                        if (diff > 0) {
+                            m_work[index(x,y)]     = (uint8_t)(a - move);
+                            m_work[index(x+1, y)]  = (uint8_t)(b + move);
+                            minx = std::min(minx, x); maxx = std::max(maxx, x+1);
+                            miny = std::min(miny, y); maxy = std::max(maxy, y);
+                            changed = true;
+                        } else {
+                            m_work[index(x,y)]     = (uint8_t)(a + move);
+                            m_work[index(x+1, y)]  = (uint8_t)(b - move);
+                            minx = std::min(minx, x); maxx = std::max(maxx, x+1);
+                            miny = std::min(miny, y); maxy = std::max(maxy, y);
+                            changed = true;
+                        }
+                    }
+                    continue;
+                }
                 if (supportA && supportB) {
-                    // 池面均衡（弱化）
+                    // 两侧都有固体支撑：进行池面均衡
+                    // 使用更快的均衡速度（diff/2），类似泰拉瑞亚
                     int diff = a - b;
                     if (diff > 1) {
-                        int move = std::min(std::max(diff/4, 1), MAX_SIDE);
+                        int move = std::min(std::max(diff/2, 1), MAX_SIDE);
                         m_work[index(x,y)]     = (uint8_t)(a - move);
                         m_work[index(x+1, y)]  = (uint8_t)(b + move);
                         minx = std::min(minx, x); maxx = std::max(maxx, x+1);
                         miny = std::min(miny, y); maxy = std::max(maxy, y);
                         changed = true;
                     } else if (diff < -1) {
-                        int move = std::min(std::max((-diff)/4, 1), MAX_SIDE);
+                        int move = std::min(std::max((-diff)/2, 1), MAX_SIDE);
                         m_work[index(x,y)]     = (uint8_t)(a + move);
                         m_work[index(x+1, y)]  = (uint8_t)(b - move);
                         minx = std::min(minx, x); maxx = std::max(maxx, x+1);
@@ -785,16 +828,17 @@ bool TileMap::stepWaterAdvanced(int iterations, int& outMinX, int& outMinY, int&
                         changed = true;
                     }
                 } else {
-                    // 边缘溢流：从“有支撑侧”向“无支撑侧”小幅转移（不穿角）
+                    // 边缘溢流：从"有支撑侧"向"无支撑侧"转移
+                    // 增加溢流量，让水更自然地流向洞口
                     if (supportA && !supportB && a > 0) {
-                        int move = std::min(std::max(a/3, 1), MAX_SIDE);
+                        int move = std::min(std::max(a/2, 1), MAX_SIDE);  // 从 a/4 提升到 a/2
                         m_work[index(x,y)]     = (uint8_t)(a - move);
                         m_work[index(x+1, y)]  = (uint8_t)(b + move);
                         minx = std::min(minx, x); maxx = std::max(maxx, x+1);
                         miny = std::min(miny, y); maxy = std::max(maxy, y);
                         changed = true;
                     } else if (!supportA && supportB && b > 0) {
-                        int move = std::min(std::max(b/3, 1), MAX_SIDE);
+                        int move = std::min(std::max(b/2, 1), MAX_SIDE);  // 从 b/4 提升到 b/2
                         m_work[index(x,y)]     = (uint8_t)(a + move);
                         m_work[index(x+1, y)]  = (uint8_t)(b - move);
                         minx = std::min(minx, x); maxx = std::max(maxx, x+1);
@@ -814,12 +858,17 @@ bool TileMap::stepWaterAdvanced(int iterations, int& outMinX, int& outMinY, int&
                     int r = x;
                     while (r < W && get(r,y) == TileType::Air) ++r; // [x, r)
                     const int lenSeg = r - x;
-                    // 判断该水平段是否全部“有支撑”（下方非空气）。若有自由落体，跳过池化均衡。
+                    // 判断该水平段是否全部"有支撑"（下方是固体或有足够水）。若有自由落体，跳过池化均衡。
                     bool allSupported = true;
                     if (y > 0) {
                         for (int xi = x; xi < r; ++xi) {
-                            // 池化仅发生在“有实体支撑”的水平段
-                            if (get(xi, y-1) == TileType::Air) { allSupported = false; break; }
+                            // 池化仅发生在"有实体支撑"的水平段
+                            // 支撑 = 下方是固体 或 下方有接近满水位的水
+                            TileType below = get(xi, y-1);
+                            if (below == TileType::Air && m_work[index(xi, y-1)] < 200) {
+                                allSupported = false;
+                                break;
+                            }
                         }
                     }
                     // y==0 视为有支撑
