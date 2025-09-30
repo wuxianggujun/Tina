@@ -20,6 +20,8 @@ set(SRC_FILES
     renderer/ShaderManager.cpp
     ui/TextRenderer.hpp
     ui/TextRenderer.cpp
+    ui/UICore.hpp
+    ui/UICore.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})
