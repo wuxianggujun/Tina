@@ -62,6 +62,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     bgfx
     bx
     bimg
+    bimg_decode
     spdlog::spdlog
     glm::glm
     freetype

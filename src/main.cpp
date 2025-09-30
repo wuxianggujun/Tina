@@ -5,14 +5,12 @@
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
 #include <bx/math.h>
-#if defined(_WIN32)
-#ifdef WIN32_LEAN_AND_MEAN
-#undef WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#include <gdiplus.h>
-#pragma comment(lib, "gdiplus.lib")
-#endif
+// 使用 bimg 进行跨平台纹理加载
+#include <bimg/decode.h>
+#include <bx/allocator.h>
+#include <bx/readerwriter.h>
+#include <bx/file.h>
+#include <bx/error.h>
 
 #include <thread>
 #include <chrono>
@@ -35,6 +33,8 @@
 #include "physics/Physics2D.hpp"
 #include "ui/TextRenderer.hpp"
 #include "ui/TextRenderer.hpp"
+#include "ui/UICore.hpp"
+#include <cstdio>
 
 using Tina::os::Event;
 
@@ -81,6 +81,7 @@ int main(int /*argc*/, char* /*argv*/[])
         TINA_ERROR("创建窗口失败");
         return -1;
     }
+    // 注：UI 文本渲染器绑定在 TextRenderer 初始化完成后进行（见下文）
 
     // 2) 获取原生窗口句柄以初始化 bgfx（从 SDL_Window 属性提取）
     void* nwh = nullptr; // native window handle
@@ -88,15 +89,30 @@ int main(int /*argc*/, char* /*argv*/[])
         SDL_Window* sdl_win = (SDL_Window*)window;
         SDL_PropertiesID props = SDL_GetWindowProperties(sdl_win);
 #if defined(_WIN32)
-#ifdef SDL_PROP_WINDOW_WIN32_HWND_POINTER
+    #ifdef SDL_PROP_WINDOW_WIN32_HWND_POINTER
         nwh = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
-#else
+    #else
         nwh = SDL_GetPointerProperty(props, "SDL.window.win32.hwnd", nullptr);
-#endif
+    #endif
 #elif defined(__APPLE__)
-        // TODO: Cocoa/Metal 句柄
+    #ifdef SDL_PROP_WINDOW_COCOA_WINDOW_POINTER
+        nwh = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+    #endif
 #elif defined(__linux__)
-        // TODO: Wayland/X11 句柄
+        const char* videoDriver = SDL_GetCurrentVideoDriver();
+        if (videoDriver) {
+            if (SDL_strcmp(videoDriver, "x11") == 0) {
+                // X11 窗口句柄
+    #ifdef SDL_PROP_WINDOW_X11_WINDOW_NUMBER
+                nwh = (void*)(uintptr_t)SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
+    #endif
+            } else if (SDL_strcmp(videoDriver, "wayland") == 0) {
+                // Wayland 窗口句柄
+    #ifdef SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER
+                nwh = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
+    #endif
+            }
+        }
 #endif
     }
     if (nwh == nullptr) {
@@ -138,6 +154,10 @@ int main(int /*argc*/, char* /*argv*/[])
     // 新增：用于贴图网格（资源纹理）的独立程序，后续优先使用；若缺失则回退到 text
     bgfx::ProgramHandle prog_sprite = shaderManager.loadProgram("sprite", "sprite");
 
+    // 3.x.1.1) 初始化 UI 渲染器，用于 HUD/提示文本
+    Tina::UI::UIRenderer ui;
+    bool ui_ok = ui.initialize(shaderManager, nullptr); (void)ui_ok;
+
     // 3.x.2) 生成一个简易泰拉瑞亚风格的颜色方块地图，并构建网格（世界坐标，每 tile=1.0）
     struct ColorVertex { float x, y, z; float r, g, b, a; };
     bgfx::VertexLayout colorLayout;
@@ -155,31 +175,74 @@ int main(int /*argc*/, char* /*argv*/[])
         .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Uint8, true)
     .end();
 
-    // 加载泥土纹理
+    // 加载泥土纹理（使用 bimg 进行跨平台纹理加载）
     bgfx::TextureHandle dirtTex;
     // 贴图网格使用的统一采样器名：s_tex
     bgfx::UniformHandle uSpriteTex;      // 统一名（推荐）
-#if defined(_WIN32)
-    
-    auto loadTexturePNG = [&](const char* path)->bgfx::TextureHandle {
-        static ULONG_PTR gdipToken = 0; static bool gdipInit = false;
-        if (!gdipInit) { Gdiplus::GdiplusStartupInput si; if (Gdiplus::GdiplusStartup(&gdipToken, &si, nullptr) == 0) gdipInit = true; }
-        if (!gdipInit) return BGFX_INVALID_HANDLE;
-        int wlen = MultiByteToWideChar(CP_UTF8, 0, path, -1, nullptr, 0);
-        std::wstring wpath; wpath.resize((size_t)wlen);
-        MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath.data(), wlen);
-        Gdiplus::Bitmap bmp(wpath.c_str()); if (bmp.GetLastStatus() != Gdiplus::Ok) return BGFX_INVALID_HANDLE;
-        const UINT w = bmp.GetWidth(); const UINT h = bmp.GetHeight();
-        Gdiplus::Rect rc(0,0,(INT)w,(INT)h); Gdiplus::BitmapData bd{};
-        if (bmp.LockBits(&rc, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB, &bd) != Gdiplus::Ok) return BGFX_INVALID_HANDLE;
-        Tina::Container::Vector<uint8_t> rgba; rgba.resize((size_t)w*h*4);
-        const uint8_t* src = (const uint8_t*)bd.Scan0; const int stride = bd.Stride;
-        for (UINT y = 0; y < h; ++y) { const uint8_t* row = src + y * stride; for (UINT x = 0; x < w; ++x) { size_t idx = ((size_t)y*w + x)*4; rgba[idx+2]=row[x*4+0]; rgba[idx+1]=row[x*4+1]; rgba[idx+0]=row[x*4+2]; rgba[idx+3]=row[x*4+3]; } }
-        bmp.UnlockBits(&bd);
-        const bgfx::Memory* mem = bgfx::copy(rgba.data(), (uint32_t)rgba.size());
-        return bgfx::createTexture2D((uint16_t)w,(uint16_t)h,false,1,bgfx::TextureFormat::RGBA8,
-            BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP|BGFX_SAMPLER_MIN_POINT|BGFX_SAMPLER_MAG_POINT, mem);
+
+    // 跨平台纹理加载函数（使用 bimg）
+    auto loadTexturePNG = [](const char* path)->bgfx::TextureHandle {
+        // 读取文件到内存
+        FILE* file = fopen(path, "rb");
+        if (!file) {
+            return BGFX_INVALID_HANDLE;
+        }
+
+        fseek(file, 0, SEEK_END);
+        long fileSize = ftell(file);
+        fseek(file, 0, SEEK_SET);
+
+        if (fileSize <= 0) {
+            fclose(file);
+            return BGFX_INVALID_HANDLE;
+        }
+
+        void* fileData = malloc(fileSize);
+        if (!fileData) {
+            fclose(file);
+            return BGFX_INVALID_HANDLE;
+        }
+
+        size_t readSize = fread(fileData, 1, fileSize, file);
+        fclose(file);
+
+        if (readSize != (size_t)fileSize) {
+            free(fileData);
+            return BGFX_INVALID_HANDLE;
+        }
+
+        // 使用 bimg 解码图片（使用静态分配器，确保生命周期）
+        static bx::DefaultAllocator s_allocator;
+        bimg::ImageContainer* imageContainer = bimg::imageParse(
+            &s_allocator, fileData, (uint32_t)fileSize, bimg::TextureFormat::RGBA8);
+        free(fileData);
+
+        if (!imageContainer) {
+            return BGFX_INVALID_HANDLE;
+        }
+
+        // 复制图片数据到 bgfx 管理的内存（避免生命周期问题）
+        const bgfx::Memory* mem = bgfx::copy(
+            imageContainer->m_data,
+            imageContainer->m_size
+        );
+
+        bgfx::TextureHandle handle = bgfx::createTexture2D(
+            (uint16_t)imageContainer->m_width,
+            (uint16_t)imageContainer->m_height,
+            false,
+            1,
+            bgfx::TextureFormat::RGBA8,
+            BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
+            mem
+        );
+
+        // 立即释放 bimg 容器，因为数据已经被复制
+        bimg::imageFree(imageContainer);
+
+        return handle;
     };
+
     // 优先尝试相对路径，失败则回退到可执行目录拼接路径
     auto tryLoadTexture = [&](const char* rel)->bgfx::TextureHandle {
         bgfx::TextureHandle h = loadTexturePNG(rel);
@@ -195,16 +258,14 @@ int main(int /*argc*/, char* /*argv*/[])
         }
         return h;
     };
+
     dirtTex = tryLoadTexture("resources/textures/dirt_block.png");
     if (!bgfx::isValid(dirtTex)) {
         TINA_WARN("泥土纹理加载失败: {} (将在纹理层跳过渲染)", "resources/textures/dirt_block.png");
     } else {
         TINA_INFO("泥土纹理加载成功: {}", "resources/textures/dirt_block.png");
     }
-#else
-    dirtTex = BGFX_INVALID_HANDLE;
-#endif
-    uSpriteTex  = bgfx::createUniform("s_tex", bgfx::UniformType::Sampler);
+    uSpriteTex = bgfx::createUniform("s_tex", bgfx::UniformType::Sampler);
 
     Tina::Game::TileMapConfig mapCfg; mapCfg.width = 160; mapCfg.height = 90; // 16:9
     Tina::Game::TileMap tilemap(mapCfg);
@@ -772,6 +833,7 @@ int main(int /*argc*/, char* /*argv*/[])
 
     // 3.7) 初始化文本渲染器（独立于 RmlUI，可用于直接绘制中文）
     Tina::UI::TextRenderer textRenderer;
+    ui.setTextRenderer(&textRenderer);
     if (!textRenderer.initialize()) {
         TINA_ERROR("TextRenderer 初始化失败");
                 } else {
@@ -1193,6 +1255,36 @@ int main(int /*argc*/, char* /*argv*/[])
             }
         }
         pipeline.submit();
+
+        // --- UI HUD（视图 2，像素坐标）---
+        {
+            int tx0 = (int)std::max(0.0f, std::floor(vx0));
+            int ty0 = (int)std::max(0.0f, std::floor(vy0));
+            int tx1 = (int)std::min((float)mapCfg.width - 1.0f, std::floor(vx1 - 1e-6f));
+            int ty1 = (int)std::min((float)mapCfg.height - 1.0f, std::floor(vy1 - 1e-6f));
+            long long waterSum = 0; int waterTiles = 0; int tilesCount = 0;
+            if (tx1 >= tx0 && ty1 >= ty0) {
+                for (int y = ty0; y <= ty1; ++y) {
+                    for (int x = tx0; x <= tx1; ++x) {
+                        int wv = (int)tilemap.water(x, y);
+                        waterSum += wv;
+                        if (wv > 0) ++waterTiles;
+                        ++tilesCount;
+                    }
+                }
+            }
+            const double avgWater = tilesCount > 0 ? (double)waterSum / (255.0 * (double)tilesCount) : 0.0;
+
+            ui.drawRect(2, 10.0f, 10.0f, 392.0f, 64.0f, 0.0f, 0.0f, 0.0f, 0.55f);
+            char line1[160];
+            std::snprintf(line1, sizeof(line1), "FPS: %.1f | 帧时: %.2f ms | 重建 S/W: %d/%d",
+                          frame_timer.fps(), frame_timer.frameSeconds() * 1000.0, rebuiltSolid, rebuiltWater);
+            ui.drawText(2, 18.0f, 30.0f, 1,1,1,1, line1);
+            char line2[160];
+            std::snprintf(line2, sizeof(line2), "视野水块: %d | 平均水位: %.1f%%",
+                          waterTiles, avgWater * 100.0);
+            ui.drawText(2, 18.0f, 52.0f, 0.8f,0.9f,1.0f,1, line2);
+        }
 
         // 在 UI 视图 2 上直接绘制示例文本（验证中文管线）
         textRenderer.drawText(2, 16.0f, 56.0f, 1.0f, 1.0f, 1.0f, 1.0f,
