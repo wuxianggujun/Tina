@@ -39,6 +39,14 @@ public:
         return true;
     }
 
+    bool measureTextExtents(const std::string& utf8, float& outW, float& outH,
+                            float& outTop, float& outBottom) const {
+        if (!m_text) { outW = outH = outTop = outBottom = 0.0f; return false; }
+        const_cast<TextRenderer*>(m_text)->measureTextExtents(utf8, outW, outH, outTop, outBottom);
+        return true;
+    }
+    int textAscenderPx() const { return m_text ? m_text->ascenderPx() : 0; }
+
 private:
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
     bgfx::VertexLayout  m_colorLayout{};

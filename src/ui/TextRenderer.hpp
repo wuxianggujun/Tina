@@ -36,6 +36,15 @@ public:
     // 文本测量：计算 UTF-8 文本在当前字体下的像素宽高（多行按换行分行）
     // 注意：测量过程中会按需生成字形，确保与渲染一致
     void measureText(const std::string& utf8, float& outWidth, float& outHeight);
+    void measureTextExtents(const std::string& utf8,
+                            float& outWidth, float& outHeight,
+                            float& outTop, float& outBottom) const;
+
+    // 像素对齐（开启可显著减少文字轻微模糊/抖动，默认开启）
+    void setPixelSnap(bool enable) { m_pixelSnap = enable; }
+    bool pixelSnap() const { return m_pixelSnap; }
+    int ascenderPx() const { return m_font.ascender; }
+    int descenderPx() const { return m_font.descender; }
 
 private:
     struct Glyph {
@@ -50,7 +59,8 @@ private:
     struct Font {
         FT_Face face = nullptr;
         int sizePx = 0;
-        int ascender = 0; // 像素
+        int ascender = 0;
+        int descender = 0;
         Tina::Container::HashMap<int, Glyph> glyphs;
     };
 
@@ -77,6 +87,10 @@ private:
 
     bool m_hasClip = false;
     int16_t m_clipX = 0, m_clipY = 0; uint16_t m_clipW = 0, m_clipH = 0;
+
+    bool m_pixelSnap = true;
 };
 
 } // namespace Tina::UI
+
+

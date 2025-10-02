@@ -110,6 +110,7 @@ bool TextRenderer::loadFont(const std::string& path, int pixelSize)
     FT_Set_Pixel_Sizes(m_font.face, 0, (FT_UInt)pixelSize);
     m_font.sizePx = pixelSize;
     m_font.ascender = (int)(m_font.face->size->metrics.ascender >> 6);
+    m_font.descender = (int)(m_font.face->size->metrics.descender >> 6);
     m_font.glyphs.clear();
     return true;
 }
@@ -238,6 +239,15 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
         float gy0 = baseY - (float)gph.bearingY;
         float gx1 = gx0 + (float)gph.w;
         float gy1 = gy0 + (float)gph.h;
+
+        // 像素对齐：将顶点位置对齐到整数像素，提升清晰度
+        if (m_pixelSnap) {
+            float sx0 = std::floor(gx0 + 0.5f);
+            float sy0 = std::floor(gy0 + 0.5f);
+            float sx1 = sx0 + (float)gph.w;
+            float sy1 = sy0 + (float)gph.h;
+            gx0 = sx0; gy0 = sy0; gx1 = sx1; gy1 = sy1;
+        }
         auto toU8 = [](float v)->uint8_t{ v = bx::clamp(v, 0.0f, 1.0f); return (uint8_t)(v*255.0f + 0.5f); };
         const uint8_t cr = toU8(r), cg = toU8(g), cb = toU8(b), ca = toU8(a);
         verts.push_back({gx0, gy0, 0.0f, gph.u0, gph.v0, cr,cg,cb,ca});
@@ -346,6 +356,56 @@ void TextRenderer::measureText(const std::string& utf8, float& outWidth, float& 
     }
     if (lineW > outWidth) outWidth = lineW;
     outHeight = (float)(lines * m_font.sizePx);
+}
+
+void TextRenderer::measureTextExtents(const std::string& utf8,
+                                      float& outWidth, float& outHeight,
+                                      float& outTop, float& outBottom) const
+{
+    outWidth = 0.0f; outHeight = 0.0f; outTop = 0.0f; outBottom = 0.0f;
+    if (!m_font.face || utf8.empty()) return;
+
+    float lineW = 0.0f; int lines = 1;
+    float topMax = 0.0f, bottomMax = 0.0f;
+    const char* p = utf8.data();
+    const char* end = p + utf8.size();
+    int code = 0;
+    const bool hasKerning = (m_font.face && FT_HAS_KERNING(m_font.face));
+    FT_UInt prevGlyphIdx = 0;
+
+    while (utf8Next(p, end, code)) {
+        if (code == '\n') {
+            if (lineW > outWidth) outWidth = lineW;
+            lineW = 0.0f; ++lines; prevGlyphIdx = 0;
+            continue;
+        }
+        // 确保已有字形（const_cast 以复用 ensureGlyph）
+        const_cast<TextRenderer*>(this)->ensureGlyph(const_cast<Font&>(m_font), code);
+        auto it = m_font.glyphs.find(code);
+        if (it == m_font.glyphs.end()) continue;
+        const Glyph& g = it->second;
+
+        if (hasKerning) {
+            FT_UInt glyphIdx = FT_Get_Char_Index(m_font.face, (FT_ULong)code);
+            if (prevGlyphIdx != 0 && glyphIdx != 0) {
+                FT_Vector delta{};
+                if (FT_Get_Kerning(m_font.face, prevGlyphIdx, glyphIdx, FT_KERNING_DEFAULT, &delta) == 0) {
+                    lineW += (float)(delta.x >> 6);
+                }
+            }
+            prevGlyphIdx = glyphIdx;
+        }
+
+        lineW += (float)g.advance;
+        // 基于字形 bitmap 尺寸与 bearingY 估计相对基线的上下范围
+        float top = (float)g.bearingY;
+        float bottom = (float)g.h - (float)g.bearingY;
+        if (top > topMax) topMax = top;
+        if (bottom > bottomMax) bottomMax = bottom;
+    }
+    if (lineW > outWidth) outWidth = lineW;
+    outHeight = (float)(lines * m_font.sizePx);
+    outTop = topMax; outBottom = bottomMax;
 }
 
 } // namespace Tina::UI
