@@ -29,6 +29,14 @@ public:
     int barHeight() const { return m_barH; }
     bool hitTest(float x, float y) const;
 
+    // 选择与参数调整
+    void select(int index);
+    int selectedIndex() const { return m_selected; }
+    void setSlotCount(int count) { m_slotCount = std::max(1, count); buildLayout(); }
+    void setSlotSize(int size) { m_slotSize = std::max(8, size); buildLayout(); }
+    void setGap(int gap) { m_gap = std::max(0, gap); buildLayout(); }
+    void setPadding(int pad) { m_padding = std::max(0, pad); buildLayout(); }
+
 private:
     void buildLayout();
 
@@ -53,6 +61,7 @@ private:
     int m_gap = 6;        // 格子间距
     int m_slotSize = 40;  // 格子尺寸（正方形）
     int m_slotCount = 8;  // 默认 8 个格子
+    int m_selected = -1;  // 选中格
 };
 
 } // namespace Tina::UI

@@ -297,7 +297,7 @@ int main(int /*argc*/, char* /*argv*/[])
         }
 
         // UI 文本（视图3，像素坐标，最后绘制）
-        text.drawText(3, 16.0f, 28.0f, 1,1,1,1, "WASD 移动相机，左键注水，右键爆破");
+        float hudY = (float)toolbar.barHeight() + 12.0f; text.drawText(3, 16.0f, hudY, 1,1,1,1, "WASD 移动 | 左键注水 | 右键尘雾爆炸");
 
         particles.render(2);
 

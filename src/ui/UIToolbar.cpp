@@ -89,14 +89,18 @@ void UIToolbar::buildLayout()
 
         // 显示序号
         btn->setText(std::to_string(i + 1));
-        // 点击占位动作
-        btn->onClickCallback = [i]() {
+        // 点击：切换选中并日志
+        btn->onClickCallback = [this, i]() {
+            this->select(i);
             TINA_INFO("Toolbar slot {} clicked (功能占位)", i + 1);
         };
 
         m_bar->addChild(btn);
         m_slots.push_back(btn);
     }
+
+    // 应用当前选中高亮
+    select(m_selected >= 0 && m_selected < (int)m_slots.size() ? m_selected : -1);
 }
 
 bool UIToolbar::hitTest(float x, float y) const
@@ -104,6 +108,35 @@ bool UIToolbar::hitTest(float x, float y) const
     if (!m_bar) return false;
     // 使用 UINode 自带的 containsPoint（基于世界坐标）
     return const_cast<UIPanel*>(m_bar)->containsPoint(x, y);
+}
+
+void UIToolbar::select(int index)
+{
+    // 默认配色
+    const Tina::Math::Vec4 kNormal{0.3f, 0.3f, 0.35f, 0.9f};
+    const Tina::Math::Vec4 kHover {0.4f, 0.4f, 0.5f, 0.9f};
+    const Tina::Math::Vec4 kPressed{0.2f, 0.2f, 0.25f, 0.9f};
+
+    // 选中配色（更亮）
+    const Tina::Math::Vec4 kSN{0.55f, 0.55f, 0.70f, 0.95f};
+    const Tina::Math::Vec4 kSH{0.62f, 0.62f, 0.80f, 0.95f};
+    const Tina::Math::Vec4 kSP{0.45f, 0.45f, 0.60f, 0.95f};
+
+    m_selected = (index >= 0 && index < (int)m_slots.size()) ? index : -1;
+
+    for (int i = 0; i < (int)m_slots.size(); ++i) {
+        auto* btn = m_slots[i];
+        if (!btn) continue;
+        if (i == m_selected) {
+            btn->setNormalColor(kSN.x, kSN.y, kSN.z, kSN.w);
+            btn->setHoverColor (kSH.x, kSH.y, kSH.z, kSH.w);
+            btn->setPressedColor(kSP.x, kSP.y, kSP.z, kSP.w);
+        } else {
+            btn->setNormalColor(kNormal.x, kNormal.y, kNormal.z, kNormal.w);
+            btn->setHoverColor (kHover.x,  kHover.y,  kHover.z,  kHover.w);
+            btn->setPressedColor(kPressed.x, kPressed.y, kPressed.z, kPressed.w);
+        }
+    }
 }
 
 } // namespace Tina::UI
