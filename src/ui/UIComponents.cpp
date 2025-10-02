@@ -43,6 +43,20 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
     renderer.drawRect(viewId, pos.x, pos.y, size.x, size.y,
                       bgColor.x, bgColor.y, bgColor.z, bgColor.w);
 
+    // 若选中，绘制边框高亮（四边细矩形）
+    if (m_selected) {
+        const float t = 2.0f; // 2px 边框
+        const float r = 0.95f, g = 0.85f, b = 0.35f, a = 1.0f; // 金色高亮
+        // 上
+        renderer.drawRect(viewId, pos.x, pos.y, size.x, t, r,g,b,a);
+        // 下
+        renderer.drawRect(viewId, pos.x, pos.y + size.y - t, size.x, t, r,g,b,a);
+        // 左
+        renderer.drawRect(viewId, pos.x, pos.y, t, size.y, r,g,b,a);
+        // 右
+        renderer.drawRect(viewId, pos.x + size.x - t, pos.y, t, size.y, r,g,b,a);
+    }
+
     // 绘制文本（左对齐，垂直居中，带左边距）
     // 由于没有文本宽度测量 API，使用左对齐 + padding
     float tw = 0.0f, th = 0.0f;

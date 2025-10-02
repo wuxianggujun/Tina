@@ -61,6 +61,7 @@ public:
         , m_textColor{1,1,1,1}
         , m_hovered(false)
         , m_pressed(false)
+        , m_selected(false)
     {}
 
     void setText(const std::string& text) { m_text = text; }
@@ -73,9 +74,11 @@ public:
 
     void setHovered(bool h) { m_hovered = h; }
     void setPressed(bool p) { m_pressed = p; }
+    void setSelected(bool s) { m_selected = s; }
 
     bool isHovered() const { return m_hovered; }
     bool isPressed() const { return m_pressed; }
+    bool isSelected() const { return m_selected; }
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
@@ -89,6 +92,7 @@ private:
 
     bool m_hovered;
     bool m_pressed;
+    bool m_selected;
 };
 
 } // namespace Tina::UI

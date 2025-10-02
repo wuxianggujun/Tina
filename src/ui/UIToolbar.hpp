@@ -32,6 +32,7 @@ public:
     // 选择与参数调整
     void select(int index);
     int selectedIndex() const { return m_selected; }
+    int slotCount() const { return (int)m_slots.size(); }
     void setSlotCount(int count) { m_slotCount = std::max(1, count); buildLayout(); }
     void setSlotSize(int size) { m_slotSize = std::max(8, size); buildLayout(); }
     void setGap(int gap) { m_gap = std::max(0, gap); buildLayout(); }

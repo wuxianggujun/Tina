@@ -147,6 +147,17 @@ int main(int /*argc*/, char* /*argv*/[])
             switch (ev.type) {
                 case Event::Type::QUIT:
                 case Event::Type::WINDOW_CLOSE: running = false; break;
+                case Event::Type::MOUSE_WHEEL: {
+                    // 滚轮切换选中工具（向上下一项，向下上一项）
+                    int n = toolbar.slotCount();
+                    if (n > 0) {
+                        int cur = toolbar.selectedIndex();
+                        if (cur < 0) cur = 0;
+                        if (ev.mouse_wheel.amount > 0.0f) cur = (cur + 1) % n;
+                        else if (ev.mouse_wheel.amount < 0.0f) cur = (cur - 1 + n) % n;
+                        toolbar.select(cur);
+                    }
+                } break;
                 case Event::Type::WINDOW_SIZE:
                     pxW = ev.win_size.w; pxH = ev.win_size.h;
                     ResetBgfxWithSize(pxW, pxH, init.resolution.reset);
@@ -210,6 +221,16 @@ int main(int /*argc*/, char* /*argv*/[])
         if (ks[SDL_SCANCODE_D]) camX += move;
         camX = std::clamp(camX, 0.0f, std::max(0.0f, (float)mapCfg.width - viewW));
         camY = std::clamp(camY, 0.0f, std::max(0.0f, (float)mapCfg.height - viewH));
+
+        // 工具栏快捷键（1-8 选择），重复选择幂等
+        if (ks[SDL_SCANCODE_1]) toolbar.select(0);
+        if (ks[SDL_SCANCODE_2]) toolbar.select(1);
+        if (ks[SDL_SCANCODE_3]) toolbar.select(2);
+        if (ks[SDL_SCANCODE_4]) toolbar.select(3);
+        if (ks[SDL_SCANCODE_5]) toolbar.select(4);
+        if (ks[SDL_SCANCODE_6]) toolbar.select(5);
+        if (ks[SDL_SCANCODE_7]) toolbar.select(6);
+        if (ks[SDL_SCANCODE_8]) toolbar.select(7);
 
         // 世界视图（1=固体，2=水）
         bgfx::setViewRect(1, 0, 0, (uint16_t)pxW, (uint16_t)pxH);

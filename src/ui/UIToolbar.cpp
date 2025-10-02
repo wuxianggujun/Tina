@@ -112,30 +112,11 @@ bool UIToolbar::hitTest(float x, float y) const
 
 void UIToolbar::select(int index)
 {
-    // 默认配色
-    const Tina::Math::Vec4 kNormal{0.3f, 0.3f, 0.35f, 0.9f};
-    const Tina::Math::Vec4 kHover {0.4f, 0.4f, 0.5f, 0.9f};
-    const Tina::Math::Vec4 kPressed{0.2f, 0.2f, 0.25f, 0.9f};
-
-    // 选中配色（更亮）
-    const Tina::Math::Vec4 kSN{0.55f, 0.55f, 0.70f, 0.95f};
-    const Tina::Math::Vec4 kSH{0.62f, 0.62f, 0.80f, 0.95f};
-    const Tina::Math::Vec4 kSP{0.45f, 0.45f, 0.60f, 0.95f};
-
     m_selected = (index >= 0 && index < (int)m_slots.size()) ? index : -1;
-
     for (int i = 0; i < (int)m_slots.size(); ++i) {
         auto* btn = m_slots[i];
         if (!btn) continue;
-        if (i == m_selected) {
-            btn->setNormalColor(kSN.x, kSN.y, kSN.z, kSN.w);
-            btn->setHoverColor (kSH.x, kSH.y, kSH.z, kSH.w);
-            btn->setPressedColor(kSP.x, kSP.y, kSP.z, kSP.w);
-        } else {
-            btn->setNormalColor(kNormal.x, kNormal.y, kNormal.z, kNormal.w);
-            btn->setHoverColor (kHover.x,  kHover.y,  kHover.z,  kHover.w);
-            btn->setPressedColor(kPressed.x, kPressed.y, kPressed.z, kPressed.w);
-        }
+        btn->setSelected(i == m_selected);
     }
 }
 
