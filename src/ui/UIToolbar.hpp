@@ -60,10 +60,10 @@ private:
     // 布局参数
     int m_screenW = 0;
     int m_screenH = 0;
-    int m_barH = 48;      // 工具栏高度
-    int m_padding = 8;    // 内边距
-    int m_gap = 6;        // 格子间距
-    int m_slotSize = 40;  // 格子尺寸（正方形）
+    int m_barH = 80;      // 工具栏高度
+    int m_padding = 12;   // 内边距
+    int m_gap = 8;        // 格子间距
+    int m_slotSize = 64;  // 格子尺寸（正方形）
     int m_slotCount = 8;  // 默认 8 个格子
     int m_selected = -1;  // 选中格
 

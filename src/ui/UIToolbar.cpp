@@ -107,6 +107,8 @@ void UIToolbar::buildLayout()
     int barW = contentW + m_padding * 2;
     if (barW > m_screenW) barW = m_screenW; // 兜底
     float barX = (float)((m_screenW - barW) / 2);
+    // 根据按钮尺寸与内边距，动态放大工具栏高度（避免角标与文本拥挤）
+    m_barH = std::max(m_barH, m_slotSize + m_padding * 2);
     m_bar->setSize((float)barW, (float)m_barH);
     m_bar->setPosition(barX, 0.0f);
     if (m_stack) m_stack->setSize((float)barW, (float)m_barH);
@@ -117,19 +119,39 @@ void UIToolbar::buildLayout()
         btn->setSize((float)m_slotSize, (float)m_slotSize);
         btn->setAnchor(Anchor::TopLeft);
 
-        // 显示序号
-        btn->setText(std::to_string(i + 1));
-        // 点击：切换选中并日志
+        // 中央主标识：前三个为“水/挖/爆”，其余占位
+        std::string center;
+        if (i == 0) center = "水";
+        else if (i == 1) center = "挖";
+        else if (i == 2) center = "爆";
+        else center = "";
+        btn->setText(center);
+        // 角标：显示数字编号（放在右下角，避免遮挡中央文字）
+        btn->setBadgeText(std::to_string(i + 1));
+        btn->setBadgeCorner(BadgeCorner::BottomRight);
+
+        // 点击：切换选中
         btn->onClickCallback = [this, i]() {
             this->select(i);
-            TINA_INFO("Toolbar slot {} clicked (功能占位)", i + 1);
+        };
+
+        // 悬停：显示 tooltip（工具 N：名称）
+        btn->onHoverIn = [this, i]() {
+            m_tipVisible = true;
+            const char* name = (i==0?"注水": (i==1?"挖空": (i==2?"爆炸":"工具")));
+            m_tipText = std::string("工具 ") + std::to_string(i+1) + "：" + name;
+        };
+        btn->onHoverOut = [this]() {
+            m_tipVisible = false;
+            m_tipText.clear();
         };
 
         if (m_stack) m_stack->addChild(btn);
         m_slots.push_back(btn);
     }
 
-    // 应用当前选中高亮
+    // 应用当前选中高亮；若当前无选择则默认选中第一个
+    if (m_selected < 0 && !m_slots.empty()) m_selected = 0;
     select(m_selected >= 0 && m_selected < (int)m_slots.size() ? m_selected : -1);
 }
 
@@ -151,3 +173,5 @@ void UIToolbar::select(int index)
 }
 
 } // namespace Tina::UI
+
+

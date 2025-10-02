@@ -1,5 +1,6 @@
 #include "UIComponents.hpp"
 #include "UICore.hpp"
+#include <algorithm>
 
 namespace Tina::UI {
 
@@ -65,6 +66,41 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
                         UIRenderer::AlignH::Center,
                         UIRenderer::AlignV::Center,
                         0.0f, 0.0f);
+
+    // 角标：用于显示数字小角标（可配置位置）
+    if (!m_badgeText.empty()) {
+        float tw=0.0f, th=0.0f;
+        renderer.measureText(m_badgeText, tw, th);
+        const float pad = 3.0f;
+        float bw = std::max(tw * 0.85f + pad*2.0f, 16.0f);
+        float bh = std::clamp(th * 0.60f + pad*1.0f, 14.0f, 22.0f);
+        float bx = pos.x + size.x - bw - 4.0f;
+        float by = pos.y + 4.0f;
+        switch (m_badgeCorner) {
+            case BadgeCorner::TopLeft:
+                bx = pos.x + 4.0f; by = pos.y + 4.0f; break;
+            case BadgeCorner::TopRight:
+                bx = pos.x + size.x - bw - 4.0f; by = pos.y + 4.0f; break;
+            case BadgeCorner::BottomLeft:
+                bx = pos.x + 4.0f; by = pos.y + size.y - bh - 4.0f; break;
+            case BadgeCorner::BottomRight:
+                bx = pos.x + size.x - bw - 4.0f; by = pos.y + size.y - bh - 4.0f; break;
+        }
+        // 背景与描边
+        renderer.drawRect(viewId, bx, by, bw, bh,
+                          m_badgeBgColor.x, m_badgeBgColor.y, m_badgeBgColor.z, m_badgeBgColor.w);
+        renderer.drawRect(viewId, bx, by, bw, 1.0f, 0.95f,0.90f,0.50f, 0.8f);
+        renderer.drawRect(viewId, bx, by+bh-1.0f, bw, 1.0f, 0.95f,0.90f,0.50f, 0.8f);
+        renderer.drawRect(viewId, bx, by, 1.0f, bh, 0.95f,0.90f,0.50f, 0.8f);
+        renderer.drawRect(viewId, bx+bw-1.0f, by, 1.0f, bh, 0.95f,0.90f,0.50f, 0.8f);
+        // 文本
+        renderer.drawTextEx(viewId, bx, by, bw, bh,
+                            m_badgeTextColor.x, m_badgeTextColor.y, m_badgeTextColor.z, m_badgeTextColor.w,
+                            m_badgeText,
+                            UIRenderer::AlignH::Center,
+                            UIRenderer::AlignV::Center,
+                            0.0f, 0.0f);
+    }
 }
 
 } // namespace Tina::UI

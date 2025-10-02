@@ -166,6 +166,63 @@ int main(int /*argc*/, char* /*argv*/[])
                     toolbar.onResize(pxW, pxH);
                     break;
                 case Event::Type::MOUSE_BUTTON:
+                {
+                    bool __toolbarHandled = false;
+                    if (ev.mouse_button.down) {
+                        // 禁用旧右键分支：统一由左键 + 工具选择驱动
+                        if (ev.mouse_button.button == Tina::os::MouseButton::RIGHT) {
+                            __toolbarHandled = true;
+                        }
+                        if (ev.mouse_button.button == Tina::os::MouseButton::LEFT) mouseLeftDown = true;
+                        float mx=0.0f, my=0.0f; SDL_GetMouseState(&mx, &my);
+                        // 若命中 UI，交给 UI 系统处理
+                        if (toolbar.hitTest(mx, my)) {
+                            __toolbarHandled = true;
+                        } else {
+                            float u = (pxW>0)? mx / (float)pxW : 0.0f;
+                            float v = (pxH>0)? 1.0f - my / (float)pxH : 0.0f; // 世界坐标（y 向上）
+                            float wx = camX + u * viewW;
+                            float wy = camY + v * viewH;
+                            int tx = (int)std::floor(wx);
+                            int ty = (int)std::floor(wy);
+                            if (ev.mouse_button.button == Tina::os::MouseButton::LEFT &&
+                                tx>=0 && ty>=0 && tx<mapCfg.width && ty<mapCfg.height) {
+                                int tool = toolbar.selectedIndex(); if (tool < 0) tool = 0;
+                                switch (tool) {
+                                    case 0: // 注水
+                                        tilemap.setWater(tx, ty, 255);
+                                        break;
+                                    case 1: // 挖空（圆形）
+                                    case 2: { // 爆炸：挖空 + 粒子
+                                        const float radius = 3.5f, r2 = radius*radius;
+                                        int x0 = std::max(0, (int)std::floor(wx - radius));
+                                        int y0 = std::max(0, (int)std::floor(wy - radius));
+                                        int x1 = std::min(mapCfg.width-1,  (int)std::ceil(wx + radius));
+                                        int y1 = std::min(mapCfg.height-1, (int)std::ceil(wy + radius));
+                                        for (int y=y0; y<=y1; ++y) for (int x=x0; x<=x1; ++x) {
+                                            float cx = x+0.5f, cy = y+0.5f;
+                                            float dx = cx-wx, dy = cy-wy;
+                                            if (dx*dx+dy*dy <= r2) tilemap.setSafe(x,y, Tina::Game::TileType::Air);
+                                        }
+                                        if (tool == 2) {
+                                            particles.explode(wx, wy,
+                                                              /*count*/ 260,
+                                                              /*speed*/ 6.0f, 14.0f,
+                                                              /*size*/ 0.30f, 0.90f,
+                                                              /*life*/ 0.6f, 1.6f,
+                                                              /*color*/ 0.78f, 0.70f, 0.58f);
+                                        }
+                                    } break;
+                                    default: break;
+                                }
+                                __toolbarHandled = true;
+                            }
+                        }
+                    }
+                    if (__toolbarHandled) { break; }
+                }
+                    break;
+#if 0 // legacy mouse branch (replaced by toolbar-driven tools)
                     if (ev.mouse_button.down) { if (ev.mouse_button.button == Tina::os::MouseButton::LEFT) mouseLeftDown = true;
                         float mx=0.0f, my=0.0f; SDL_GetMouseState(&mx, &my);
                         if (toolbar.hitTest(mx, my)) break;
@@ -206,6 +263,7 @@ int main(int /*argc*/, char* /*argv*/[])
                         }
                     }
                     break;
+#endif
                 default: break;
             }
         }
@@ -318,7 +376,15 @@ int main(int /*argc*/, char* /*argv*/[])
         }
 
         // UI 文本（视图3，像素坐标，最后绘制）
-        float hudY = (float)toolbar.barHeight() + 12.0f; text.drawText(3, 16.0f, hudY, 1,1,1,1, "WASD 移动 | 左键注水 | 右键尘雾爆炸");
+        float hudY = (float)toolbar.barHeight() + 12.0f;
+        uiRenderer.drawTextEx(3,
+                              16.0f, hudY,
+                              (float)pxW - 32.0f, 28.0f,
+                              1,1,1,1,
+                              "WASD 移动 | 左键执行工具 | 滚轮/数字键切换",
+                              Tina::UI::UIRenderer::AlignH::Left,
+                              Tina::UI::UIRenderer::AlignV::Top,
+                              0.0f, 0.0f);
 
         particles.render(2);
 

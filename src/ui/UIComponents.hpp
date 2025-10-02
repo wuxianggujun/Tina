@@ -8,6 +8,8 @@
 
 namespace Tina::UI {
 
+enum class BadgeCorner { TopLeft, TopRight, BottomLeft, BottomRight };
+
 // === Panel：纯色矩形面板 ===
 class UIPanel : public UINode {
 public:
@@ -59,6 +61,9 @@ public:
         , m_hoverColor{0.4f, 0.4f, 0.5f, 0.9f}
         , m_pressedColor{0.2f, 0.2f, 0.25f, 0.9f}
         , m_textColor{1,1,1,1}
+        , m_badgeBgColor{0.18f, 0.18f, 0.20f, 0.95f}
+        , m_badgeTextColor{0.95f, 0.90f, 0.50f, 1.0f}
+        , m_badgeCorner(BadgeCorner::TopRight)
         , m_hovered(false)
         , m_pressed(false)
         , m_selected(false)
@@ -71,6 +76,15 @@ public:
     void setTextColor(float r, float g, float b, float a) { m_textColor = {r,g,b,a}; }
 
     const std::string& getText() const { return m_text; }
+    // 角标（数字小角标）API
+    void setBadgeText(const std::string& text) { m_badgeText = text; }
+    const std::string& badgeText() const { return m_badgeText; }
+    void setBadgeColors(float br, float bg, float bb, float ba,
+                        float tr, float tg, float tb, float ta) {
+        m_badgeBgColor = {br,bg,bb,ba};
+        m_badgeTextColor = {tr,tg,tb,ta};
+    }
+    void setBadgeCorner(BadgeCorner c) { m_badgeCorner = c; }
 
     void setHovered(bool h) { m_hovered = h; }
     void setPressed(bool p) { m_pressed = p; }
@@ -96,7 +110,11 @@ private:
     Tina::Math::Vec4 m_hoverColor;
     Tina::Math::Vec4 m_pressedColor;
     Tina::Math::Vec4 m_textColor;
+    std::string m_badgeText;               // 角标文本（如“1”）
+    Tina::Math::Vec4 m_badgeBgColor;       // 角标背景色
+    Tina::Math::Vec4 m_badgeTextColor;     // 角标文字颜色
 
+    BadgeCorner m_badgeCorner;
     bool m_hovered;
     bool m_pressed;
     bool m_selected;
