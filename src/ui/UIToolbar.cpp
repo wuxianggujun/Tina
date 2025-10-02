@@ -122,7 +122,7 @@ void UIToolbar::buildLayout()
         // 中央主标识：前三个为“水/挖/爆”，其余占位
         std::string center;
         if (i == 0) center = "水";
-        else if (i == 1) center = "挖";
+        else if (i == 1) center = "清";
         else if (i == 2) center = "爆";
         else center = "";
         btn->setText(center);
@@ -138,7 +138,7 @@ void UIToolbar::buildLayout()
         // 悬停：显示 tooltip（工具 N：名称）
         btn->onHoverIn = [this, i]() {
             m_tipVisible = true;
-            const char* name = (i==0?"注水": (i==1?"挖空": (i==2?"爆炸":"工具")));
+            const char* name = (i==0?"注水": (i==1?"清除": (i==2?"爆炸":"工具")));
             m_tipText = std::string("工具 ") + std::to_string(i+1) + "：" + name;
         };
         btn->onHoverOut = [this]() {

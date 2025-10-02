@@ -306,6 +306,38 @@ int main(int /*argc*/, char* /*argv*/[])
         // 粒子更新
         particles.update((float)frameTimer.deltaSeconds());
 
+        // 连续清除：左键按住 + 工具2=清除（避免与工具栏点击冲突，命中 UI 则不执行）
+        {
+            float mx=0.0f, my=0.0f;
+            uint32_t btnMask = (uint32_t)SDL_GetMouseState(&mx, &my);
+#ifdef SDL_BUTTON_MASK
+            bool leftHeld = (btnMask & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) != 0;
+#else
+            bool leftHeld = (btnMask & SDL_BUTTON_LMASK) != 0;
+#endif
+            if (leftHeld && !toolbar.hitTest(mx, my)) {
+                int tool = toolbar.selectedIndex();
+                if (tool == 1) {
+                    // 将鼠标像素坐标映射到世界坐标
+                    float u = (pxW>0)? mx / (float)pxW : 0.0f;
+                    float v = (pxH>0)? 1.0f - my / (float)pxH : 0.0f;
+                    float wx = camX + u * viewW;
+                    float wy = camY + v * viewH;
+                    // 圆形范围清除固体
+                    const float radius = 3.5f, r2 = radius*radius;
+                    int x0 = std::max(0, (int)std::floor(wx - radius));
+                    int y0 = std::max(0, (int)std::floor(wy - radius));
+                    int x1 = std::min(mapCfg.width-1,  (int)std::ceil(wx + radius));
+                    int y1 = std::min(mapCfg.height-1, (int)std::ceil(wy + radius));
+                    for (int y=y0; y<=y1; ++y) for (int x=x0; x<=x1; ++x) {
+                        float cx = x+0.5f, cy = y+0.5f;
+                        float dx = cx-wx, dy = cy-wy;
+                        if (dx*dx+dy*dy <= r2) tilemap.setSafe(x,y, Tina::Game::TileType::Air);
+                    }
+                }
+            }
+        }
+
         // 构建固体网格（即时）
         const int W = mapCfg.width, H = mapCfg.height;
         const int maxTiles = W*H;
