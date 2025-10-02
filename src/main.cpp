@@ -13,6 +13,7 @@
 #include "renderer/ShaderManager.hpp"
 #include "game/TileMap.hpp"
 #include "ui/TextRenderer.hpp"
+#include "ui/UIToolbar.hpp"
 #include "particles/ParticleSystem.hpp"
 
 using Tina::os::Event;
@@ -126,6 +127,11 @@ int main(int /*argc*/, char* /*argv*/[])
     Tina::Game::TileMap tilemap(mapCfg);
     tilemap.generate();
 
+    // UI 渲染器 + 顶部工具栏
+    Tina::UI::UIRenderer uiRenderer;
+    uiRenderer.initialize(*shaderMgr, &text);
+    Tina::UI::UIToolbar toolbar;
+    toolbar.initialize(pxW, pxH, uiRenderer, &text);
     // 相机（世界单位：1=1格）
     float camX = 0.0f, camY = 0.0f;
     float viewW = std::min(80.0f, (float)mapCfg.width), viewH = std::min(60.0f, (float)mapCfg.height);
@@ -133,6 +139,7 @@ int main(int /*argc*/, char* /*argv*/[])
     // 主循环
     Tina::Core::FrameTimer frameTimer; frameTimer.reset();
     bool running = true;
+    bool mouseLeftDown = false;
     while (running) {
         frameTimer.beginFrame();
         Event ev;
@@ -145,10 +152,12 @@ int main(int /*argc*/, char* /*argv*/[])
                     ResetBgfxWithSize(pxW, pxH, init.resolution.reset);
                     bgfx::setViewRect(3, 0, 0, (uint16_t)pxW, (uint16_t)pxH);
                     SetupOrtho(3, 0.0f, (float)pxW, (float)pxH, 0.0f);
+                    toolbar.onResize(pxW, pxH);
                     break;
                 case Event::Type::MOUSE_BUTTON:
-                    if (ev.mouse_button.down) {
+                    if (ev.mouse_button.down) { if (ev.mouse_button.button == Tina::os::MouseButton::LEFT) mouseLeftDown = true;
                         float mx=0.0f, my=0.0f; SDL_GetMouseState(&mx, &my);
+                        if (my < (float)toolbar.barHeight()) break;
                         float u = (pxW>0)? mx / (float)pxW : 0.0f;
                         float v = (pxH>0)? 1.0f - my / (float)pxH : 0.0f; // 映射到世界坐标（y 向上）
                         float wx = camX + u * viewW;
@@ -291,6 +300,17 @@ int main(int /*argc*/, char* /*argv*/[])
         text.drawText(3, 16.0f, 28.0f, 1,1,1,1, "WASD 移动相机，左键注水，右键爆破");
 
         particles.render(2);
+
+        // UI 事件与渲染
+        {
+            float mx=0.0f, my=0.0f; SDL_GetMouseState(&mx, &my);
+            toolbar.events().updateMouse(mx, my, mouseLeftDown);
+            toolbar.events().processEvents();
+            toolbar.update((float)frameTimer.deltaSeconds());
+            toolbar.render(3);
+            // 将 mouseLeftDown 退回到 false，实现一次性点击沿用事件边沿
+            mouseLeftDown = false;
+        }
         bgfx::frame();
     }
 
@@ -303,3 +323,9 @@ int main(int /*argc*/, char* /*argv*/[])
     Tina::Core::Log::Shutdown();
     return 0;
 }
+
+
+
+
+
+
