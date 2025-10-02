@@ -8,6 +8,7 @@
 
 #include "UICore.hpp"
 #include "UIComponents.hpp"
+#include "UILayout.hpp"
 #include "UIEventSystem.hpp"
 #include "../core/Container.hpp"
 
@@ -28,6 +29,7 @@ public:
 
     int barHeight() const { return m_barH; }
     bool hitTest(float x, float y) const;
+    void setMousePos(float x, float y) { m_mouseX = x; m_mouseY = y; }
 
     // 选择与参数调整
     void select(int index);
@@ -49,6 +51,7 @@ private:
     // 根与部件
     UINode* m_root = nullptr;        // 屏幕根（大小=屏幕）
     UIPanel* m_bar = nullptr;        // 顶部栏背景
+    UIHStack* m_stack = nullptr;     // 水平栈布局容器
     Tina::Container::Vector<UIButton*> m_slots; // 格子按钮
 
     // 事件系统
@@ -63,6 +66,11 @@ private:
     int m_slotSize = 40;  // 格子尺寸（正方形）
     int m_slotCount = 8;  // 默认 8 个格子
     int m_selected = -1;  // 选中格
+
+    // Tooltip
+    bool m_tipVisible = false;
+    std::string m_tipText;
+    float m_mouseX = 0.0f, m_mouseY = 0.0f;
 };
 
 } // namespace Tina::UI

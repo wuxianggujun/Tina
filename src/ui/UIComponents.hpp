@@ -79,6 +79,13 @@ public:
     bool isHovered() const { return m_hovered; }
     bool isPressed() const { return m_pressed; }
     bool isSelected() const { return m_selected; }
+    
+    // 可选：悬停回调，便于外部展示 tooltip
+    std::function<void()> onHoverIn;
+    std::function<void()> onHoverOut;
+
+    void onMouseEnter() override { if (onHoverIn) onHoverIn(); }
+    void onMouseLeave() override { if (onHoverOut) onHoverOut(); }
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;

@@ -325,6 +325,7 @@ int main(int /*argc*/, char* /*argv*/[])
         // UI 事件与渲染
         {
             float mx=0.0f, my=0.0f; SDL_GetMouseState(&mx, &my);
+            toolbar.setMousePos(mx, my);
             toolbar.events().updateMouse(mx, my, mouseLeftDown);
             toolbar.events().processEvents();
             toolbar.update((float)frameTimer.deltaSeconds());

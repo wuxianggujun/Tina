@@ -21,6 +21,14 @@ bool UIToolbar::initialize(int screenW, int screenH, UIRenderer& renderer, TextR
     m_bar->setColor(0.10f, 0.10f, 0.12f, 0.85f);
     m_root->addChild(m_bar);
 
+    // 水平栈：用于排列按钮
+    m_stack = new UIHStack("ToolbarStack");
+    m_stack->setAnchor(Anchor::TopLeft);
+    m_stack->setPadding((float)m_padding, (float)m_padding);
+    m_stack->setSpacing((float)m_gap);
+    m_stack->setCrossAlign(CrossAlign::Center);
+    m_bar->addChild(m_stack);
+
     // 初次布局
     buildLayout();
 
@@ -51,6 +59,30 @@ void UIToolbar::render(uint16_t viewId)
 {
     if (m_root && m_renderer) {
         m_root->render(viewId, *m_renderer);
+        // 绘制 Tooltip（悬停提示）
+        if (m_tipVisible && !m_tipText.empty()) {
+            float tw=0.0f, th=0.0f;
+            m_renderer->measureText(m_tipText, tw, th);
+            const float pad = 6.0f;
+            float w = tw + pad*2.0f;
+            float h = th + pad*2.0f;
+            // 默认在鼠标右下方显示，避免出屏幕
+            float x = m_mouseX + 12.0f;
+            float y = m_mouseY + 12.0f;
+            float maxX = (float)m_screenW - w - 2.0f;
+            float maxY = (float)m_screenH - h - 2.0f;
+            if (x > maxX) x = std::max(2.0f, m_mouseX - w - 12.0f);
+            if (y > maxY) y = std::max(2.0f, m_mouseY - h - 12.0f);
+            // 背景与边框
+            m_renderer->drawRect(viewId, x, y, w, h, 0.08f, 0.08f, 0.10f, 0.95f);
+            m_renderer->drawRect(viewId, x, y, w, 1.0f, 0.9f, 0.85f, 0.35f, 1.0f);
+            m_renderer->drawRect(viewId, x, y+h-1.0f, w, 1.0f, 0.9f, 0.85f, 0.35f, 1.0f);
+            m_renderer->drawRect(viewId, x, y, 1.0f, h, 0.9f, 0.85f, 0.35f, 1.0f);
+            m_renderer->drawRect(viewId, x+w-1.0f, y, 1.0f, h, 0.9f, 0.85f, 0.35f, 1.0f);
+            // 文本
+            m_renderer->drawTextEx(viewId, x, y, w, h, 1,1,1,1, m_tipText,
+                                   UIRenderer::AlignH::Center, UIRenderer::AlignV::Center, pad, pad);
+        }
     }
 }
 
@@ -60,7 +92,7 @@ void UIToolbar::buildLayout()
 
     // 清理旧按钮
     for (auto* btn : m_slots) {
-        m_bar->removeChild(btn);
+        if (m_stack) m_stack->removeChild(btn);
         delete btn;
     }
     m_slots.clear();
@@ -77,15 +109,13 @@ void UIToolbar::buildLayout()
     float barX = (float)((m_screenW - barW) / 2);
     m_bar->setSize((float)barW, (float)m_barH);
     m_bar->setPosition(barX, 0.0f);
+    if (m_stack) m_stack->setSize((float)barW, (float)m_barH);
 
     // 创建按钮并布局
     for (int i = 0; i < count; ++i) {
         auto* btn = new UIButton("ToolSlot");
         btn->setSize((float)m_slotSize, (float)m_slotSize);
         btn->setAnchor(Anchor::TopLeft);
-        float x = (float)m_padding + i * (float)(m_slotSize + m_gap);
-        float y = (float)m_padding;
-        btn->setPosition(x, y);
 
         // 显示序号
         btn->setText(std::to_string(i + 1));
@@ -95,7 +125,7 @@ void UIToolbar::buildLayout()
             TINA_INFO("Toolbar slot {} clicked (功能占位)", i + 1);
         };
 
-        m_bar->addChild(btn);
+        if (m_stack) m_stack->addChild(btn);
         m_slots.push_back(btn);
     }
 
