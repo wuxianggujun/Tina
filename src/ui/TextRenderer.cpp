@@ -40,14 +40,14 @@ bool TextRenderer::initialize(int atlasW, int atlasH)
     m_sText = bgfx::createUniform("s_text", bgfx::UniformType::Sampler);
     m_sTextTexture = bgfx::createUniform("s_textTexture", bgfx::UniformType::Sampler);
 
-    // 初始化：将图集初始填充为 RGBA = (255,255,255,128)，便于验证采样是否生效
+    // 初始化：将图集初始填充为 RGBA = (255,255,255,0)，便于验证采样是否生效
     {
         const size_t pxCount = (size_t)m_atlasW * (size_t)m_atlasH;
         for (size_t i = 0; i < pxCount; ++i) {
             m_atlasPixels[i*4 + 0] = 255;
             m_atlasPixels[i*4 + 1] = 255;
             m_atlasPixels[i*4 + 2] = 255;
-            m_atlasPixels[i*4 + 3] = 128;
+            m_atlasPixels[i*4 + 3] = 0;
         }
         const bgfx::Memory* all = bgfx::copy(m_atlasPixels.data(), (uint32_t)m_atlasPixels.size());
         bgfx::updateTexture2D(m_atlasTex, 0, 0, 0, 0, (uint16_t)m_atlasW, (uint16_t)m_atlasH, all);
@@ -172,8 +172,11 @@ bool TextRenderer::ensureGlyph(Font& font, int codepoint)
     info.bearingY = g->bitmap_top;
     info.advance  = (int)(g->advance.x >> 6);
     info.atlasX = dstX; info.atlasY = dstY;
-    info.u0 = (float)dstX / (float)m_atlasW; info.v0 = (float)dstY / (float)m_atlasH;
-    info.u1 = (float)(dstX + gw) / (float)m_atlasW; info.v1 = (float)(dstY + gh) / (float)m_atlasH;
+    // 半像素内缩，减少边缘采样越界带来的伪影
+    const float halfU = 0.5f / (float)m_atlasW;
+    const float halfV = 0.5f / (float)m_atlasH;
+    info.u0 = (float)dstX / (float)m_atlasW + halfU; info.v0 = (float)dstY / (float)m_atlasH + halfV;
+    info.u1 = (float)(dstX + gw) / (float)m_atlasW - halfU; info.v1 = (float)(dstY + gh) / (float)m_atlasH - halfV;
     font.glyphs[codepoint] = info;
     return true;
 }
@@ -346,3 +349,4 @@ void TextRenderer::measureText(const std::string& utf8, float& outWidth, float& 
 }
 
 } // namespace Tina::UI
+
