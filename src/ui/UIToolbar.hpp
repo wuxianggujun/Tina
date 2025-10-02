@@ -27,6 +27,7 @@ public:
     UINode* root() const { return m_root; }
 
     int barHeight() const { return m_barH; }
+    bool hitTest(float x, float y) const;
 
 private:
     void buildLayout();
@@ -55,4 +56,3 @@ private:
 };
 
 } // namespace Tina::UI
-

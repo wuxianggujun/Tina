@@ -15,7 +15,6 @@ bool UIToolbar::initialize(int screenW, int screenH, UIRenderer& renderer, TextR
 
     // 工具栏背景
     m_bar = new UIPanel("Toolbar");
-    m_bar->setSize((float)m_screenW, (float)m_barH);
     m_bar->setAnchor(Anchor::TopLeft);
     m_bar->setPosition(0, 0);
     // 半透明深色背景
@@ -40,9 +39,6 @@ void UIToolbar::onResize(int screenW, int screenH)
 {
     m_screenW = screenW; m_screenH = screenH;
     if (m_root) m_root->setSize((float)m_screenW, (float)m_screenH);
-    if (m_bar) {
-        m_bar->setSize((float)m_screenW, (float)m_barH);
-    }
     buildLayout();
 }
 
@@ -69,11 +65,18 @@ void UIToolbar::buildLayout()
     }
     m_slots.clear();
 
-    // 可容纳按钮数（不超过 m_slotCount）
+    // 可容纳按钮数（不超过 m_slotCount），并据此“以内容宽度”为准，居中整个工具栏
     int avail = std::max(0, m_screenW - m_padding * 2);
     int per = m_slotSize + m_gap;
     int maxSlots = per > 0 ? std::max(1, (avail + m_gap) / per) : m_slotCount;
     int count = std::min(m_slotCount, maxSlots);
+
+    int contentW = count > 0 ? (count * m_slotSize + (count - 1) * m_gap) : 0;
+    int barW = contentW + m_padding * 2;
+    if (barW > m_screenW) barW = m_screenW; // 兜底
+    float barX = (float)((m_screenW - barW) / 2);
+    m_bar->setSize((float)barW, (float)m_barH);
+    m_bar->setPosition(barX, 0.0f);
 
     // 创建按钮并布局
     for (int i = 0; i < count; ++i) {
@@ -94,6 +97,13 @@ void UIToolbar::buildLayout()
         m_bar->addChild(btn);
         m_slots.push_back(btn);
     }
+}
+
+bool UIToolbar::hitTest(float x, float y) const
+{
+    if (!m_bar) return false;
+    // 使用 UINode 自带的 containsPoint（基于世界坐标）
+    return const_cast<UIPanel*>(m_bar)->containsPoint(x, y);
 }
 
 } // namespace Tina::UI

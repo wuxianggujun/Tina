@@ -157,7 +157,7 @@ int main(int /*argc*/, char* /*argv*/[])
                 case Event::Type::MOUSE_BUTTON:
                     if (ev.mouse_button.down) { if (ev.mouse_button.button == Tina::os::MouseButton::LEFT) mouseLeftDown = true;
                         float mx=0.0f, my=0.0f; SDL_GetMouseState(&mx, &my);
-                        if (my < (float)toolbar.barHeight()) break;
+                        if (toolbar.hitTest(mx, my)) break;
                         float u = (pxW>0)? mx / (float)pxW : 0.0f;
                         float v = (pxH>0)? 1.0f - my / (float)pxH : 0.0f; // 映射到世界坐标（y 向上）
                         float wx = camX + u * viewW;
@@ -323,6 +323,7 @@ int main(int /*argc*/, char* /*argv*/[])
     Tina::Core::Log::Shutdown();
     return 0;
 }
+
 
 
 
