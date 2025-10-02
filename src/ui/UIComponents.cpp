@@ -59,17 +59,14 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
 
     // 绘制文本（左对齐，垂直居中，带左边距）
     // 由于没有文本宽度测量 API，使用左对齐 + padding
-    float tw = 0.0f, th = 0.0f, tTop = 0.0f, tBottom = 0.0f;
-    renderer.measureTextExtents(m_text, tw, th, tTop, tBottom);
-    float centerX = pos.x + size.x * 0.5f;
-    float centerY = pos.y + size.y * 0.5f;
-    float textX = centerX - tw * 0.5f;
-    // 根据基线对齐：drawText 的 y 参数 + ascender = 基线 Y
-    float baselineY = centerY + (tTop - tBottom) * 0.5f;
-    float textY = baselineY - renderer.textAscenderPx();
-    renderer.drawText(viewId, textX, textY,
-                      m_textColor.x, m_textColor.y, m_textColor.z, m_textColor.w,
-                      m_text);
+    renderer.drawTextEx(viewId, pos.x, pos.y, size.x, size.y,
+                        m_textColor.x, m_textColor.y, m_textColor.z, m_textColor.w,
+                        m_text,
+                        UIRenderer::AlignH::Center,
+                        UIRenderer::AlignV::Center,
+                        0.0f, 0.0f);
 }
 
 } // namespace Tina::UI
+
+

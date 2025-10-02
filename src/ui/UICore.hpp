@@ -32,6 +32,16 @@ public:
                   float r, float g, float b, float a,
                   const std::string& utf8);
 
+    // 文本扩展绘制：基于矩形与对齐参数绘制，内部使用 TextRenderer 的精确测量与基线对齐
+    enum class AlignH { Left, Center, Right };
+    enum class AlignV { Top, Center, Bottom, Baseline };
+    void drawTextEx(uint16_t viewId, float x, float y, float w, float h,
+                    float r, float g, float b, float a,
+                    const std::string& utf8,
+                    AlignH halign = AlignH::Center,
+                    AlignV valign = AlignV::Center,
+                    float padX = 0.0f, float padY = 0.0f);
+
     // 文本测量代理：返回像素宽高；如未绑定 TextRenderer 返回 false
     bool measureText(const std::string& utf8, float& outW, float& outH) const {
         if (!m_text) { outW = outH = 0.0f; return false; }

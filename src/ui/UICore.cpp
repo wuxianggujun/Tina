@@ -69,4 +69,33 @@ void UIRenderer::drawText(uint16_t viewId, float x, float y,
     m_text->drawText(viewId, x, y, r, g, b, a, utf8.c_str());
 }
 
+void UIRenderer::drawTextEx(uint16_t viewId, float x, float y, float w, float h,
+                            float r, float g, float b, float a,
+                            const std::string& utf8,
+                            AlignH halign, AlignV valign,
+                            float padX, float padY)
+{
+    if (!m_text || w <= 0.0f || h <= 0.0f) return;
+    float tw=0.0f, th=0.0f, tTop=0.0f, tBottom=0.0f;
+    m_text->measureTextExtents(utf8, tw, th, tTop, tBottom);
+
+    // 水平位置
+    float textX = x + padX;
+    if (halign == AlignH::Center) textX = x + (w - tw)*0.5f;
+    else if (halign == AlignH::Right) textX = x + w - padX - tw;
+
+    // 垂直位置（基线）
+    float baselineY = y + padY + tTop; // Top 对齐默认
+    if (valign == AlignV::Center) {
+        baselineY = y + h*0.5f + (tTop - tBottom)*0.5f;
+    } else if (valign == AlignV::Bottom) {
+        baselineY = y + h - padY - tBottom;
+    } else if (valign == AlignV::Baseline) {
+        baselineY = y + h - padY; // 将矩形底边作为基线
+    }
+
+    float textY = baselineY - (float)m_text->ascenderPx();
+    m_text->drawText(viewId, textX, textY, r, g, b, a, utf8);
+}
+
 } // namespace Tina::UI

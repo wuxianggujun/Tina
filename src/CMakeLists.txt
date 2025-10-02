@@ -32,6 +32,7 @@ set(SRC_FILES
     ui/UIEventSystem.cpp
     ui/UIToolbar.hpp
     ui/UIToolbar.cpp
+    ui/UILayout.hpp
 )
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})
