@@ -7,6 +7,8 @@ set(SRC_FILES
     core/EASTLAlloc.cpp
     core/Noise.hpp
     core/Noise.cpp
+    particles/ParticleSystem.hpp
+    particles/ParticleSystem.cpp
     physics/Physics2D.hpp
     physics/Physics2D.cpp
     game/Camera2D.hpp
@@ -39,7 +41,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 # 着色器编译
 include(ShaderUtils)
-add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color text sprite)
+add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color text sprite particle)
 add_dependencies(${PROJECT_NAME} shaders)
 
 # 传入 shader 根目录给运行时

@@ -13,6 +13,7 @@
 #include "renderer/ShaderManager.hpp"
 #include "game/TileMap.hpp"
 #include "ui/TextRenderer.hpp"
+#include "particles/ParticleSystem.hpp"
 
 using Tina::os::Event;
 
@@ -105,6 +106,15 @@ int main(int /*argc*/, char* /*argv*/[])
     Tina::UI::TextRenderer text; if (!text.initialize()) { TINA_ERROR("TextRenderer 初始化失败"); }
     else { (void)text.loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 24); }
 
+    // 粒子系统（纯视觉，不使用物理）
+    Tina::Particles::ParticleSystem2D particles;
+    if (!particles.initialize(*shaderMgr)) {
+        TINA_WARN("ParticleSystem ��ʼ��ʧ��: ����Ч���ڵ");
+    } else {
+        particles.setGlobalAcceleration(0.0f, -12.0f);
+        particles.setDrag(0.10f);
+    }
+
     // 颜色顶点布局
     bgfx::VertexLayout colorLayout; colorLayout.begin()
         .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
@@ -163,6 +173,15 @@ int main(int /*argc*/, char* /*argv*/[])
                                     float dx = cx-wx, dy = cy-wy;
                                     if (dx*dx+dy*dy <= r2) tilemap.setSafe(x,y, Tina::Game::TileType::Air);
                                 }
+                                // 右键爆炸：纯视觉“尘雾”粒子（不启用物理碎块）
+                                if (ev.mouse_button.button == Tina::os::MouseButton::RIGHT) {
+                                    particles.explode(wx, wy,
+                                                      /*count*/ 260,
+                                                      /*speed*/ 6.0f, 14.0f,
+                                                      /*size*/ 0.30f, 0.90f,
+                                                      /*life*/ 0.6f, 1.6f,
+                                                      /*color*/ 0.78f, 0.70f, 0.58f);
+                                }
                             }
                         }
                     }
@@ -195,6 +214,9 @@ int main(int /*argc*/, char* /*argv*/[])
 
         // 水模拟（两次迭代）
         int a=0,b=0,c=0,d=0; tilemap.stepWaterAdvanced(2, a,b,c,d);
+
+        // 粒子更新
+        particles.update((float)frameTimer.deltaSeconds());
 
         // 构建固体网格（即时）
         const int W = mapCfg.width, H = mapCfg.height;
@@ -268,6 +290,7 @@ int main(int /*argc*/, char* /*argv*/[])
         // UI 文本（视图3，像素坐标，最后绘制）
         text.drawText(3, 16.0f, 28.0f, 1,1,1,1, "WASD 移动相机，左键注水，右键爆破");
 
+        particles.render(2);
         bgfx::frame();
     }
 
