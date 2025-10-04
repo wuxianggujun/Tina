@@ -17,11 +17,16 @@ set(SRC_FILES
     game/TileMap.cpp
     game/Player.hpp
     game/Player.cpp
+    game/CoordinateMapper.hpp
+    game/TerrainEditor.hpp
+    game/GameConfig.hpp
     renderer/Renderer.hpp
     renderer/Pipeline.hpp
     renderer/SortKey.hpp
     renderer/ShaderManager.hpp
     renderer/ShaderManager.cpp
+    renderer/TileRenderer.hpp
+    renderer/TileRenderer.cpp
     ui/TextRenderer.hpp
     ui/TextRenderer.cpp
     ui/UICore.hpp

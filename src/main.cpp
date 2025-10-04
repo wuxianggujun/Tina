@@ -15,6 +15,9 @@
 #include "game/Player.hpp"
 #include "game/CoordinateMapper.hpp"
 #include "game/TerrainEditor.hpp"
+#include "game/GameConfig.hpp"
+#include "game/Camera2D.hpp"
+#include "renderer/TileRenderer.hpp"
 #include "ui/TextRenderer.hpp"
 #include "ui/UIToolbar.hpp"
 #include "particles/ParticleSystem.hpp"
@@ -37,32 +40,7 @@ static void SetupOrtho(uint16_t viewId, float l, float r, float t, float b)
     bgfx::setViewTransform(viewId, nullptr, ortho);
 }
 
-struct ColorVertex { float x, y, z; float r, g, b, a; };
-
-static Tina::Container::Array<float,4> tileColor(Tina::Game::TileType t)
-{
-    using Tina::Game::TileType;
-    switch (t) {
-        case TileType::Grass:    return {{0.18f, 0.72f, 0.28f, 1.0f}};
-        case TileType::Dirt:     return {{0.55f, 0.38f, 0.22f, 1.0f}};
-        case TileType::Stone:    return {{0.55f, 0.55f, 0.58f, 1.0f}};
-        case TileType::Sand:     return {{0.94f, 0.86f, 0.51f, 1.0f}};
-        case TileType::Snow:     return {{0.95f, 0.95f, 0.98f, 1.0f}};
-        case TileType::Ice:      return {{0.68f, 0.85f, 0.90f, 1.0f}};
-        case TileType::Water:    return {{0.15f, 0.35f, 0.90f, 0.95f}};
-        case TileType::Lava:     return {{0.90f, 0.25f, 0.10f, 1.0f}};
-        case TileType::Coal:     return {{0.20f, 0.20f, 0.20f, 1.0f}};
-        case TileType::Iron:     return {{0.60f, 0.55f, 0.50f, 1.0f}};
-        case TileType::Gold:     return {{0.90f, 0.75f, 0.20f, 1.0f}};
-        case TileType::Diamond:  return {{0.85f, 0.95f, 0.95f, 1.0f}};
-        case TileType::Clay:     return {{0.72f, 0.45f, 0.30f, 1.0f}};
-        case TileType::Bedrock:  return {{0.15f, 0.15f, 0.15f, 1.0f}};
-        case TileType::Obsidian: return {{0.25f, 0.15f, 0.25f, 1.0f}};
-        case TileType::Wood:     return {{0.45f, 0.35f, 0.25f, 1.0f}};
-        case TileType::Leaves:   return {{0.25f, 0.60f, 0.30f, 1.0f}};
-        default:                 return {{0.0f,  0.0f,  0.0f,  0.0f}};
-    }
-}
+// 颜色由 TileRenderer 管理
 
 int main(int /*argc*/, char* /*argv*/[])
 {
@@ -135,6 +113,8 @@ int main(int /*argc*/, char* /*argv*/[])
     uiRenderer.initialize(*shaderMgr, &text);
     Tina::UI::UIToolbar toolbar;
     toolbar.initialize(pxW, pxH, uiRenderer, &text);
+    // 渲染器
+    Tina::Renderer::TileRenderer tileRenderer; tileRenderer.initialize();
 
     // 玩家角色（生成在地图中央的“自然地表”上，确保头顶有空间且不在液体中）
     Tina::Game::Player player;
@@ -188,6 +168,7 @@ int main(int /*argc*/, char* /*argv*/[])
     // 相机（世界单位：1=1格）- 将改为跟随玩家
     float camX = 0.0f, camY = 0.0f;
     float viewW = std::min(80.0f, (float)mapCfg.width), viewH = std::min(60.0f, (float)mapCfg.height);
+    Tina::Game::Camera2D camera; camera.setViewportPixels(pxW, pxH); camera.setViewHeightWorld(viewH);
 
     // 主循环
     Tina::Core::FrameTimer frameTimer; frameTimer.reset();
@@ -216,6 +197,7 @@ int main(int /*argc*/, char* /*argv*/[])
                     ResetBgfxWithSize(pxW, pxH, init.resolution.reset);
                     bgfx::setViewRect(3, 0, 0, (uint16_t)pxW, (uint16_t)pxH);
                     SetupOrtho(3, 0.0f, (float)pxW, (float)pxH, 0.0f);
+                    camera.setViewportPixels(pxW, pxH);
                     toolbar.onResize(pxW, pxH);
                     break;
                 case Event::Type::MOUSE_BUTTON:
@@ -233,7 +215,7 @@ int main(int /*argc*/, char* /*argv*/[])
                             __toolbarHandled = true;
                         } else {
                             float wx=0.0f, wy=0.0f;
-                            Tina::Game::screenToWorld(mx, my, pxW, pxH, camX, camY, viewW, viewH, wx, wy);
+                            Tina::Game::screenToWorld(mx, my, pxW, pxH, camX, camY, (float)camera.viewW(), (float)camera.viewH(), wx, wy);
                             int tx = (int)std::floor(wx);
                             int ty = (int)std::floor(wy);
                             if (ev.mouse_button.button == Tina::os::MouseButton::LEFT &&
@@ -245,7 +227,7 @@ int main(int /*argc*/, char* /*argv*/[])
                                         break;
                                     case 1: // 挖空（圆形）
                                     case 2: { // 爆炸：挖空 + 粒子
-                                        Tina::Game::excavateCircle(tilemap, wx, wy, 3.5f);
+                                        Tina::Game::excavateCircle(tilemap, wx, wy, Tina::GameConfig::EXCAVATE_RADIUS);
                                         if (tool == 2) {
                                             particles.explode(wx, wy,
                                                               /*count*/ 260,
@@ -328,6 +310,7 @@ int main(int /*argc*/, char* /*argv*/[])
         player.update((float)frameTimer.deltaSeconds(), tilemap);
 
         // 相机平滑跟随玩家
+        viewW = (float)camera.viewW(); // 与 Camera2D 保持一致的视区宽度
         float targetCamX = player.centerX() - viewW * 0.5f;
         float targetCamY = player.centerY() - viewH * 0.5f;
         camX += (targetCamX - camX) * 0.1f;
@@ -348,8 +331,12 @@ int main(int /*argc*/, char* /*argv*/[])
         // 世界视图（1=固体，2=水）
         bgfx::setViewRect(1, 0, 0, (uint16_t)pxW, (uint16_t)pxH);
         bgfx::setViewRect(2, 0, 0, (uint16_t)pxW, (uint16_t)pxH);
-        SetupOrtho(1, camX, camX + viewW, camY, camY + viewH);
-        SetupOrtho(2, camX, camX + viewW, camY, camY + viewH);
+        camera.setViewHeightWorld(viewH);
+        camera.setPosition(camX, camY);
+        float viewM[16], projM[16];
+        camera.buildViewProj(viewM, projM);
+        bgfx::setViewTransform(1, viewM, projM);
+        bgfx::setViewTransform(2, viewM, projM);
 
         // 背景清屏（放在世界视图 1 上）
         bgfx::touch(1);
@@ -375,116 +362,20 @@ int main(int /*argc*/, char* /*argv*/[])
                 if (tool == 1) {
                     // 将鼠标像素坐标映射到世界坐标，并圆形清除固体
                     float wx=0.0f, wy=0.0f;
-                    Tina::Game::screenToWorld(mx, my, pxW, pxH, camX, camY, viewW, viewH, wx, wy);
-                    Tina::Game::excavateCircle(tilemap, wx, wy, 3.5f);
+                    Tina::Game::screenToWorld(mx, my, pxW, pxH, camX, camY, (float)camera.viewW(), (float)camera.viewH(), wx, wy);
+                    Tina::Game::excavateCircle(tilemap, wx, wy, Tina::GameConfig::EXCAVATE_RADIUS);
                 }
             }
         }
 
-        // 构建固体网格（即时）
-        const int W = mapCfg.width, H = mapCfg.height;
-        const int maxTiles = W*H;
-        const uint32_t maxV = (uint32_t)maxTiles * 4;
-        const uint32_t maxI = (uint32_t)maxTiles * 6;
-
-        bgfx::TransientVertexBuffer tvbSolid; bgfx::TransientIndexBuffer tibSolid;
-        if (bgfx::getAvailTransientVertexBuffer(maxV, colorLayout) >= maxV &&
-            bgfx::getAvailTransientIndexBuffer(maxI) >= maxI) {
-            bgfx::allocTransientVertexBuffer(&tvbSolid, maxV, colorLayout);
-            bgfx::allocTransientIndexBuffer(&tibSolid, maxI);
-            ColorVertex* vptr = (ColorVertex*)tvbSolid.data; uint16_t* iptr = (uint16_t*)tibSolid.data;
-            uint32_t vb=0, ib=0;
-            // 从上到下渲染（y从大到小），确保底部物体后绘制，覆盖在上层物体前面
-            for (int y=H-1; y>=0; --y) for (int x=0; x<W; ++x) {
-                auto t = tilemap.get(x,y);
-                if (t == Tina::Game::TileType::Air || t == Tina::Game::TileType::Water || t == Tina::Game::TileType::Lava) continue;
-                auto c4 = tileColor(t);
-                float x0=(float)x, y0=(float)y, x1=x0+1.0f, y1=y0+1.0f;
-                vptr[vb+0] = { x0,y0,0.0f, c4[0],c4[1],c4[2],c4[3] };
-                vptr[vb+1] = { x1,y0,0.0f, c4[0],c4[1],c4[2],c4[3] };
-                vptr[vb+2] = { x1,y1,0.0f, c4[0],c4[1],c4[2],c4[3] };
-                vptr[vb+3] = { x0,y1,0.0f, c4[0],c4[1],c4[2],c4[3] };
-                iptr[ib+0]= (uint16_t)(vb+0); iptr[ib+1]= (uint16_t)(vb+1); iptr[ib+2]= (uint16_t)(vb+2);
-                iptr[ib+3]= (uint16_t)(vb+0); iptr[ib+4]= (uint16_t)(vb+2); iptr[ib+5]= (uint16_t)(vb+3);
-                vb+=4; ib+=6;
-            }
-            if (ib>0) {
-                tvbSolid.size = vb * sizeof(ColorVertex); tibSolid.size = ib * sizeof(uint16_t);
-                bgfx::Encoder* enc = bgfx::begin();
-                enc->setVertexBuffer(0, &tvbSolid);
-                enc->setIndexBuffer(&tibSolid);
-                enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
-                enc->submit(1, progColor);
-                bgfx::end(enc);
-            }
-        }
-
-        // 构建水网格（透明叠加）
-        bgfx::TransientVertexBuffer tvbWater; bgfx::TransientIndexBuffer tibWater;
-        if (bgfx::getAvailTransientVertexBuffer(maxV, colorLayout) >= maxV &&
-            bgfx::getAvailTransientIndexBuffer(maxI) >= maxI) {
-            bgfx::allocTransientVertexBuffer(&tvbWater, maxV, colorLayout);
-            bgfx::allocTransientIndexBuffer(&tibWater, maxI);
-            ColorVertex* vptr = (ColorVertex*)tvbWater.data; uint16_t* iptr = (uint16_t*)tibWater.data;
-            uint32_t vb=0, ib=0;
-            // 从上到下渲染（y从大到小），与固体渲染保持一致
-            for (int y=H-1; y>=0; --y) for (int x=0; x<W; ++x) {
-                int wv = (int)tilemap.water(x,y); if (wv<=0) continue;
-                float hfrac = (float)wv / 255.0f; if (hfrac <= 0.01f) continue;
-                float x0=(float)x, y0=(float)y, x1=x0+1.0f; float yh = y0 + std::min(1.0f, hfrac);
-                auto cw = tileColor(Tina::Game::TileType::Water); float alphaW = std::min(1.0f, std::max(0.25f, cw[3]*(0.6f+0.4f*hfrac)));
-                vptr[vb+0] = { x0,y0,0.0f, cw[0],cw[1],cw[2], alphaW };
-                vptr[vb+1] = { x1,y0,0.0f, cw[0],cw[1],cw[2], alphaW };
-                vptr[vb+2] = { x1,yh,0.0f, cw[0],cw[1],cw[2], alphaW };
-                vptr[vb+3] = { x0,yh,0.0f, cw[0],cw[1],cw[2], alphaW };
-                iptr[ib+0]= (uint16_t)(vb+0); iptr[ib+1]= (uint16_t)(vb+1); iptr[ib+2]= (uint16_t)(vb+2);
-                iptr[ib+3]= (uint16_t)(vb+0); iptr[ib+4]= (uint16_t)(vb+2); iptr[ib+5]= (uint16_t)(vb+3);
-                vb+=4; ib+=6;
-            }
-            if (ib>0) {
-                tvbWater.size = vb * sizeof(ColorVertex); tibWater.size = ib * sizeof(uint16_t);
-                bgfx::Encoder* enc = bgfx::begin();
-                enc->setVertexBuffer(0, &tvbWater);
-                enc->setIndexBuffer(&tibWater);
-                enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
-                enc->submit(2, progColor);
-                bgfx::end(enc);
-            }
-        }
-
-        // 渲染玩家（视图2，与水同层，透明混合）
-        {
-            float px, py, pw, ph;
-            player.getAABB(px, py, pw, ph);
-
-            // 玩家颜色：蓝色半透明
-            const float pr = 0.3f, pg = 0.5f, pb = 0.9f, pa = 0.95f;
-
-            ColorVertex playerVerts[4] = {
-                { px,    py,    0.0f, pr, pg, pb, pa },
-                { px+pw, py,    0.0f, pr, pg, pb, pa },
-                { px+pw, py+ph, 0.0f, pr, pg, pb, pa },
-                { px,    py+ph, 0.0f, pr, pg, pb, pa }
-            };
-            uint16_t playerIndices[6] = { 0, 1, 2, 0, 2, 3 };
-
-            bgfx::TransientVertexBuffer tvbPlayer;
-            bgfx::TransientIndexBuffer tibPlayer;
-            if (bgfx::getAvailTransientVertexBuffer(4, colorLayout) >= 4 &&
-                bgfx::getAvailTransientIndexBuffer(6) >= 6) {
-                bgfx::allocTransientVertexBuffer(&tvbPlayer, 4, colorLayout);
-                bgfx::allocTransientIndexBuffer(&tibPlayer, 6);
-                std::memcpy(tvbPlayer.data, playerVerts, sizeof(playerVerts));
-                std::memcpy(tibPlayer.data, playerIndices, sizeof(playerIndices));
-
-                bgfx::Encoder* enc = bgfx::begin();
-                enc->setVertexBuffer(0, &tvbPlayer);
-                enc->setIndexBuffer(&tibPlayer);
-                enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
-                enc->submit(2, progColor);
-                bgfx::end(enc);
-            }
-        }
+        // 渲染（固体 / 水 / 玩家）
+        tileRenderer.renderSolid(tilemap, 1, progColor, colorLayout);
+        tileRenderer.renderWater(tilemap, 2, progColor, colorLayout);
+        tileRenderer.renderPlayer(player, 2, progColor, colorLayout,
+                                  Tina::GameConfig::PLAYER_COLOR_R,
+                                  Tina::GameConfig::PLAYER_COLOR_G,
+                                  Tina::GameConfig::PLAYER_COLOR_B,
+                                  Tina::GameConfig::PLAYER_COLOR_A);
 
         // UI 文本（视图3，像素坐标，最后绘制）
         float hudY = (float)toolbar.barHeight() + 12.0f;
