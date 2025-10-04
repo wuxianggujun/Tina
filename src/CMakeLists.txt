@@ -15,6 +15,8 @@ set(SRC_FILES
     game/Camera2D.cpp
     game/TileMap.hpp
     game/TileMap.cpp
+    game/Player.hpp
+    game/Player.cpp
     renderer/Renderer.hpp
     renderer/Pipeline.hpp
     renderer/SortKey.hpp

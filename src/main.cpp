@@ -12,6 +12,7 @@
 #include "os/OS.hpp"
 #include "renderer/ShaderManager.hpp"
 #include "game/TileMap.hpp"
+#include "game/Player.hpp"
 #include "ui/TextRenderer.hpp"
 #include "ui/UIToolbar.hpp"
 #include "particles/ParticleSystem.hpp"
@@ -132,7 +133,23 @@ int main(int /*argc*/, char* /*argv*/[])
     uiRenderer.initialize(*shaderMgr, &text);
     Tina::UI::UIToolbar toolbar;
     toolbar.initialize(pxW, pxH, uiRenderer, &text);
-    // 相机（世界单位：1=1格）
+
+    // 玩家角色（生成在地图中央的地表）
+    Tina::Game::Player player;
+    // 找到中央位置的地表高度
+    int spawnX = mapCfg.width / 2;
+    int spawnY = mapCfg.height / 2;
+    // 从中间向下搜索，找到第一个固体方块
+    for (int y = mapCfg.height - 1; y >= 0; --y) {
+        auto t = tilemap.get(spawnX, y);
+        if (t != Tina::Game::TileType::Air && t != Tina::Game::TileType::Water && t != Tina::Game::TileType::Lava) {
+            spawnY = y + 1; // 生成在固体方块的上方
+            break;
+        }
+    }
+    player.spawn((float)spawnX, (float)spawnY);
+
+    // 相机（世界单位：1=1格）- 将改为跟随玩家
     float camX = 0.0f, camY = 0.0f;
     float viewW = std::min(80.0f, (float)mapCfg.width), viewH = std::min(60.0f, (float)mapCfg.height);
 
@@ -268,15 +285,34 @@ int main(int /*argc*/, char* /*argv*/[])
             }
         }
 
-        // 简单 WASD 相机（使用 SDL 键盘状态）
+        // 简单 WASD 相机（使用 SDL 键盘状态）- 改为玩家控制
         // 确保键盘状态已更新（如果这一帧没有事件到来，也要刷新）
         SDL_PumpEvents();
         const bool* ks = SDL_GetKeyboardState(nullptr);
-        float move = 60.0f * (float)frameTimer.deltaSeconds();
-        if (ks[SDL_SCANCODE_W]) camY -= move;
-        if (ks[SDL_SCANCODE_S]) camY += move;
-        if (ks[SDL_SCANCODE_A]) camX -= move;
-        if (ks[SDL_SCANCODE_D]) camX += move;
+
+        // 玩家移动控制
+        player.moveLeft(ks[SDL_SCANCODE_A]);
+        player.moveRight(ks[SDL_SCANCODE_D]);
+
+        // 跳跃（只在按下那一帧触发）
+        static bool wasSpacePressed = false;
+        static bool wasWPressed = false;
+        bool isSpacePressed = ks[SDL_SCANCODE_SPACE];
+        bool isWPressed = ks[SDL_SCANCODE_W];
+        if ((isSpacePressed && !wasSpacePressed) || (isWPressed && !wasWPressed)) {
+            player.jump();
+        }
+        wasSpacePressed = isSpacePressed;
+        wasWPressed = isWPressed;
+
+        // 更新玩家物理
+        player.update((float)frameTimer.deltaSeconds(), tilemap);
+
+        // 相机平滑跟随玩家
+        float targetCamX = player.centerX() - viewW * 0.5f;
+        float targetCamY = player.centerY() - viewH * 0.5f;
+        camX += (targetCamX - camX) * 0.1f;
+        camY += (targetCamY - camY) * 0.1f;
         camX = std::clamp(camX, 0.0f, std::max(0.0f, (float)mapCfg.width - viewW));
         camY = std::clamp(camY, 0.0f, std::max(0.0f, (float)mapCfg.height - viewH));
 
@@ -351,7 +387,8 @@ int main(int /*argc*/, char* /*argv*/[])
             bgfx::allocTransientIndexBuffer(&tibSolid, maxI);
             ColorVertex* vptr = (ColorVertex*)tvbSolid.data; uint16_t* iptr = (uint16_t*)tibSolid.data;
             uint32_t vb=0, ib=0;
-            for (int y=0; y<H; ++y) for (int x=0; x<W; ++x) {
+            // 从上到下渲染（y从大到小），确保底部物体后绘制，覆盖在上层物体前面
+            for (int y=H-1; y>=0; --y) for (int x=0; x<W; ++x) {
                 auto t = tilemap.get(x,y);
                 if (t == Tina::Game::TileType::Air || t == Tina::Game::TileType::Water || t == Tina::Game::TileType::Lava) continue;
                 auto c4 = tileColor(t);
@@ -383,7 +420,8 @@ int main(int /*argc*/, char* /*argv*/[])
             bgfx::allocTransientIndexBuffer(&tibWater, maxI);
             ColorVertex* vptr = (ColorVertex*)tvbWater.data; uint16_t* iptr = (uint16_t*)tibWater.data;
             uint32_t vb=0, ib=0;
-            for (int y=0; y<H; ++y) for (int x=0; x<W; ++x) {
+            // 从上到下渲染（y从大到小），与固体渲染保持一致
+            for (int y=H-1; y>=0; --y) for (int x=0; x<W; ++x) {
                 int wv = (int)tilemap.water(x,y); if (wv<=0) continue;
                 float hfrac = (float)wv / 255.0f; if (hfrac <= 0.01f) continue;
                 float x0=(float)x, y0=(float)y, x1=x0+1.0f; float yh = y0 + std::min(1.0f, hfrac);
@@ -407,13 +445,47 @@ int main(int /*argc*/, char* /*argv*/[])
             }
         }
 
+        // 渲染玩家（视图2，与水同层，透明混合）
+        {
+            float px, py, pw, ph;
+            player.getAABB(px, py, pw, ph);
+
+            // 玩家颜色：蓝色半透明
+            const float pr = 0.3f, pg = 0.5f, pb = 0.9f, pa = 0.95f;
+
+            ColorVertex playerVerts[4] = {
+                { px,    py,    0.0f, pr, pg, pb, pa },
+                { px+pw, py,    0.0f, pr, pg, pb, pa },
+                { px+pw, py+ph, 0.0f, pr, pg, pb, pa },
+                { px,    py+ph, 0.0f, pr, pg, pb, pa }
+            };
+            uint16_t playerIndices[6] = { 0, 1, 2, 0, 2, 3 };
+
+            bgfx::TransientVertexBuffer tvbPlayer;
+            bgfx::TransientIndexBuffer tibPlayer;
+            if (bgfx::getAvailTransientVertexBuffer(4, colorLayout) >= 4 &&
+                bgfx::getAvailTransientIndexBuffer(6) >= 6) {
+                bgfx::allocTransientVertexBuffer(&tvbPlayer, 4, colorLayout);
+                bgfx::allocTransientIndexBuffer(&tibPlayer, 6);
+                std::memcpy(tvbPlayer.data, playerVerts, sizeof(playerVerts));
+                std::memcpy(tibPlayer.data, playerIndices, sizeof(playerIndices));
+
+                bgfx::Encoder* enc = bgfx::begin();
+                enc->setVertexBuffer(0, &tvbPlayer);
+                enc->setIndexBuffer(&tibPlayer);
+                enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
+                enc->submit(2, progColor);
+                bgfx::end(enc);
+            }
+        }
+
         // UI 文本（视图3，像素坐标，最后绘制）
         float hudY = (float)toolbar.barHeight() + 12.0f;
         uiRenderer.drawTextEx(3,
                               16.0f, hudY,
                               (float)pxW - 32.0f, 28.0f,
                               1,1,1,1,
-                              "WASD 移动 | 左键执行工具 | 滚轮/数字键切换",
+                              "A/D 移动 | W/空格 跳跃 | 左键执行工具 | 滚轮/数字键切换",
                               Tina::UI::UIRenderer::AlignH::Left,
                               Tina::UI::UIRenderer::AlignV::Top,
                               0.0f, 0.0f);

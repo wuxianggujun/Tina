@@ -166,42 +166,66 @@ void TileMap::generateOres()
 
 void TileMap::generateSurfaceFeatures()
 {
-    // 统一的地表特征生成系统 - 避免重叠冲突
+    // 统一的地表特征生成系统 - 只在真正的地表生成，不在洞穴顶部生成
     for (int x = 0; x < m_w; ++x) {
+        // 从上往下找到第一个固体方块，这才是真正的地表
+        int surfaceY = -1;
         for (int y = m_h - 1; y >= 0; --y) {
             if (get(x, y) != TileType::Air) {
-                // 找到地表
-                if (y < m_h - 1 && get(x, y + 1) == TileType::Air) {
-                    TileType surface = get(x, y);
-                    BiomeType biome = getBiome(x, y);
-                    
-                    // 获取噪声值
-                    float primaryNoise = m_noiseGen.humidityNoise(static_cast<float>(x), static_cast<float>(y));
-                    float secondaryNoise = m_noiseGen.temperatureNoise(static_cast<float>(x * 0.7f), static_cast<float>(y * 0.7f));
-                    float decorationNoise = m_noiseGen.caveNoise(static_cast<float>(x * 0.3f), static_cast<float>(y * 0.3f));
-                    
-                    // 优先级系统：树木 > 大型装饰 > 小型装饰
-                    bool featureGenerated = false;
-                    
-                    // 第一优先级：生成树木（降低概率）
-                    if (!featureGenerated && shouldGenerateTree(biome, primaryNoise, secondaryNoise)) {
-                        generateTreeForBiome(x, y, biome, primaryNoise, secondaryNoise);
-                        featureGenerated = true;
-                    }
-                    
-                    // 第二优先级：生成大型装饰
-                    if (!featureGenerated && shouldGenerateLargeDecoration(biome, decorationNoise)) {
-                        generateLargeDecorationForBiome(x, y, biome, decorationNoise);
-                        featureGenerated = true;
-                    }
-                    
-                    // 第三优先级：生成小型装饰
-                    if (!featureGenerated && shouldGenerateSmallDecoration(biome, primaryNoise)) {
-                        generateSmallDecorationForBiome(x, y, biome, primaryNoise);
-                        featureGenerated = true;
-                    }
-                }
+                surfaceY = y;
                 break;
+            }
+        }
+
+        // 如果找到了地表，且上方是空气，则在此生成地表特征
+        if (surfaceY >= 0 && surfaceY < m_h - 1 && get(x, surfaceY + 1) == TileType::Air) {
+            TileType surface = get(x, surfaceY);
+            BiomeType biome = getBiome(x, surfaceY);
+
+            // 基础过滤：跳过空气与液体表面
+            if (surface == TileType::Air || surface == TileType::Water || surface == TileType::Lava) continue;
+
+            // 更严格的生成地面判定：
+            // - 树木：只能长在“自然地表”上（草、土、石、沙、雪、冰、粘土）
+            auto isNaturalGroundForTrees = [&](){
+                switch (surface) {
+                    case TileType::Grass:
+                    case TileType::Dirt:
+                    case TileType::Stone:
+                    case TileType::Sand:
+                    case TileType::Snow:
+                    case TileType::Ice:
+                    case TileType::Clay:
+                        return true;
+                    default:
+                        return false; // 例如：木头/树叶/矿石/装饰都不算可长树的地面
+                }
+            };
+
+            // 获取噪声值
+            float primaryNoise = m_noiseGen.humidityNoise(static_cast<float>(x), static_cast<float>(surfaceY));
+            float secondaryNoise = m_noiseGen.temperatureNoise(static_cast<float>(x * 0.7f), static_cast<float>(surfaceY * 0.7f));
+            float decorationNoise = m_noiseGen.caveNoise(static_cast<float>(x * 0.3f), static_cast<float>(surfaceY * 0.3f));
+
+            // 优先级系统：树木 > 大型装饰 > 小型装饰
+            bool featureGenerated = false;
+
+            // 第一优先级：生成树木（降低概率 + 地面校验）
+            if (!featureGenerated && isNaturalGroundForTrees() && shouldGenerateTree(biome, primaryNoise, secondaryNoise)) {
+                generateTreeForBiome(x, surfaceY, biome, primaryNoise, secondaryNoise);
+                featureGenerated = true;
+            }
+
+            // 第二优先级：生成大型装饰（沿用原有判定）
+            if (!featureGenerated && shouldGenerateLargeDecoration(biome, decorationNoise)) {
+                generateLargeDecorationForBiome(x, surfaceY, biome, decorationNoise);
+                featureGenerated = true;
+            }
+
+            // 第三优先级：生成小型装饰（沿用原有判定）
+            if (!featureGenerated && shouldGenerateSmallDecoration(biome, primaryNoise)) {
+                generateSmallDecorationForBiome(x, surfaceY, biome, primaryNoise);
+                featureGenerated = true;
             }
         }
     }
@@ -252,7 +276,7 @@ void TileMap::smoothTerrainEdges()
         for (int y = 1; y < m_h - 1; ++y) {
             TileType current = get(x, y);
             if (current == TileType::Air) continue;
-            
+
             // 检查是否为突出的单个方块
             int airNeighbors = 0;
             for (int dx = -1; dx <= 1; ++dx) {
@@ -263,12 +287,25 @@ void TileMap::smoothTerrainEdges()
                     }
                 }
             }
-            
+
             // 如果周围空气太多，可能是噪点
             if (airNeighbors >= 6 && current != TileType::Wood && current != TileType::Leaves) {
-                float smoothingNoise = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
-                if (smoothingNoise < 0.3f) {
-                    set(x, y, TileType::Air);
+                // 检查上方是否有树木（防止删除树木的支撑）
+                bool hasTreeAbove = false;
+                for (int checkY = y + 1; checkY < std::min(m_h, y + 10); ++checkY) {
+                    TileType above = get(x, checkY);
+                    if (above == TileType::Wood || above == TileType::Leaves) {
+                        hasTreeAbove = true;
+                        break;
+                    }
+                    if (above != TileType::Air) break; // 遇到其他方块就停止检查
+                }
+
+                if (!hasTreeAbove) {
+                    float smoothingNoise = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
+                    if (smoothingNoise < 0.3f) {
+                        set(x, y, TileType::Air);
+                    }
                 }
             }
         }
