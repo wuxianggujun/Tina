@@ -30,6 +30,15 @@ void TileMap::generate()
     postProcessGeneration(); // 7. 最终处理和优化
 }
 
+int TileMap::findSurfaceY(int x) const
+{
+    if ((unsigned)x >= (unsigned)m_w) return -1;
+    for (int y = m_h - 1; y >= 0; --y) {
+        if (get(x, y) != TileType::Air) return y;
+    }
+    return -1;
+}
+
 void TileMap::initializeBasicData()
 {
     // 初始化所有数据数组
@@ -97,13 +106,7 @@ void TileMap::generateCaves()
     // 改进的洞穴生成：降低密度，提高质量
     for (int x = 1; x < m_w - 1; ++x) {
         // 找到地表位置
-        int surfaceY = -1;
-        for (int sy = m_h - 1; sy >= 0; --sy) {
-            if (get(x, sy) != TileType::Air) {
-                surfaceY = sy;
-                break;
-            }
-        }
+        int surfaceY = findSurfaceY(x);
         if (surfaceY == -1) continue;
         
         for (int y = 1; y < m_h - 1; ++y) {
@@ -169,13 +172,7 @@ void TileMap::generateSurfaceFeatures()
     // 统一的地表特征生成系统 - 只在真正的地表生成，不在洞穴顶部生成
     for (int x = 0; x < m_w; ++x) {
         // 从上往下找到第一个固体方块，这才是真正的地表
-        int surfaceY = -1;
-        for (int y = m_h - 1; y >= 0; --y) {
-            if (get(x, y) != TileType::Air) {
-                surfaceY = y;
-                break;
-            }
-        }
+        int surfaceY = findSurfaceY(x);
 
         // 如果找到了地表，且上方是空气，则在此生成地表特征
         if (surfaceY >= 0 && surfaceY < m_h - 1 && get(x, surfaceY + 1) == TileType::Air) {
@@ -185,22 +182,8 @@ void TileMap::generateSurfaceFeatures()
             // 基础过滤：跳过空气与液体表面
             if (surface == TileType::Air || surface == TileType::Water || surface == TileType::Lava) continue;
 
-            // 更严格的生成地面判定：
-            // - 树木：只能长在“自然地表”上（草、土、石、沙、雪、冰、粘土）
-            auto isNaturalGroundForTrees = [&](){
-                switch (surface) {
-                    case TileType::Grass:
-                    case TileType::Dirt:
-                    case TileType::Stone:
-                    case TileType::Sand:
-                    case TileType::Snow:
-                    case TileType::Ice:
-                    case TileType::Clay:
-                        return true;
-                    default:
-                        return false; // 例如：木头/树叶/矿石/装饰都不算可长树的地面
-                }
-            };
+            // 更严格的生成地面判定：仅允许在“自然地表”上长树
+            auto isNaturalGroundForTrees = [&](){ return isNaturalGround(surface); };
 
             // 获取噪声值
             float primaryNoise = m_noiseGen.humidityNoise(static_cast<float>(x), static_cast<float>(surfaceY));
@@ -1051,13 +1034,8 @@ TileType TileMap::getSubsurfaceMaterial(BiomeType biome, int depth) const
 bool TileMap::shouldGenerateOre(OreType ore, int x, int y, float caveNoise) const
 {
     // 计算深度
-    int surfaceY = m_h;
-    for (int sy = m_h - 1; sy >= 0; --sy) {
-        if (get(x, sy) != TileType::Air) {
-            surfaceY = sy;
-            break;
-        }
-    }
+    int surfaceY = findSurfaceY(x);
+    if (surfaceY == -1) surfaceY = m_h; // 若整列为空气，退化为 m_h（深度为负，后续将过滤）
     int depth = surfaceY - y;
     
     if (depth < 3) return false;  // 地表附近不生成矿物

@@ -13,6 +13,8 @@
 #include "renderer/ShaderManager.hpp"
 #include "game/TileMap.hpp"
 #include "game/Player.hpp"
+#include "game/CoordinateMapper.hpp"
+#include "game/TerrainEditor.hpp"
 #include "ui/TextRenderer.hpp"
 #include "ui/UIToolbar.hpp"
 #include "particles/ParticleSystem.hpp"
@@ -141,21 +143,7 @@ int main(int /*argc*/, char* /*argv*/[])
     int spawnY = mapCfg.height / 2; // 兜底值（若未找到合法地表，将被修正）
 
     // 判定“自然地表”：草/土/石/沙/雪/冰/粘土（排除树木、树叶、装饰、矿石等）
-    auto isNaturalGround = [](Tina::Game::TileType t){
-        using Tina::Game::TileType;
-        switch (t) {
-            case TileType::Grass:
-            case TileType::Dirt:
-            case TileType::Stone:
-            case TileType::Sand:
-            case TileType::Snow:
-            case TileType::Ice:
-            case TileType::Clay:
-                return true;
-            default:
-                return false;
-        }
-    };
+    auto isNaturalGround = [&](Tina::Game::TileType t){ return tilemap.isNaturalGround(t); };
 
     // 按列搜索函数：在列 cx 中寻找出生 y（2格净空，非液体）
     auto findSpawnInColumn = [&](int cx, int& outY)->bool {
@@ -244,10 +232,8 @@ int main(int /*argc*/, char* /*argv*/[])
                         if (toolbar.hitTest(mx, my)) {
                             __toolbarHandled = true;
                         } else {
-                            float u = (pxW>0)? mx / (float)pxW : 0.0f;
-                            float v = (pxH>0)? 1.0f - my / (float)pxH : 0.0f; // 世界坐标（y 向上）
-                            float wx = camX + u * viewW;
-                            float wy = camY + v * viewH;
+                            float wx=0.0f, wy=0.0f;
+                            Tina::Game::screenToWorld(mx, my, pxW, pxH, camX, camY, viewW, viewH, wx, wy);
                             int tx = (int)std::floor(wx);
                             int ty = (int)std::floor(wy);
                             if (ev.mouse_button.button == Tina::os::MouseButton::LEFT &&
@@ -255,20 +241,11 @@ int main(int /*argc*/, char* /*argv*/[])
                                 int tool = toolbar.selectedIndex(); if (tool < 0) tool = 0;
                                 switch (tool) {
                                     case 0: // 注水
-                                        tilemap.setWater(tx, ty, 255);
+                                        Tina::Game::placeWater(tilemap, tx, ty, 255);
                                         break;
                                     case 1: // 挖空（圆形）
                                     case 2: { // 爆炸：挖空 + 粒子
-                                        const float radius = 3.5f, r2 = radius*radius;
-                                        int x0 = std::max(0, (int)std::floor(wx - radius));
-                                        int y0 = std::max(0, (int)std::floor(wy - radius));
-                                        int x1 = std::min(mapCfg.width-1,  (int)std::ceil(wx + radius));
-                                        int y1 = std::min(mapCfg.height-1, (int)std::ceil(wy + radius));
-                                        for (int y=y0; y<=y1; ++y) for (int x=x0; x<=x1; ++x) {
-                                            float cx = x+0.5f, cy = y+0.5f;
-                                            float dx = cx-wx, dy = cy-wy;
-                                            if (dx*dx+dy*dy <= r2) tilemap.setSafe(x,y, Tina::Game::TileType::Air);
-                                        }
+                                        Tina::Game::excavateCircle(tilemap, wx, wy, 3.5f);
                                         if (tool == 2) {
                                             particles.explode(wx, wy,
                                                               /*count*/ 260,
@@ -396,22 +373,10 @@ int main(int /*argc*/, char* /*argv*/[])
             if (leftHeld && !toolbar.hitTest(mx, my)) {
                 int tool = toolbar.selectedIndex();
                 if (tool == 1) {
-                    // 将鼠标像素坐标映射到世界坐标
-                    float u = (pxW>0)? mx / (float)pxW : 0.0f;
-                    float v = (pxH>0)? 1.0f - my / (float)pxH : 0.0f;
-                    float wx = camX + u * viewW;
-                    float wy = camY + v * viewH;
-                    // 圆形范围清除固体
-                    const float radius = 3.5f, r2 = radius*radius;
-                    int x0 = std::max(0, (int)std::floor(wx - radius));
-                    int y0 = std::max(0, (int)std::floor(wy - radius));
-                    int x1 = std::min(mapCfg.width-1,  (int)std::ceil(wx + radius));
-                    int y1 = std::min(mapCfg.height-1, (int)std::ceil(wy + radius));
-                    for (int y=y0; y<=y1; ++y) for (int x=x0; x<=x1; ++x) {
-                        float cx = x+0.5f, cy = y+0.5f;
-                        float dx = cx-wx, dy = cy-wy;
-                        if (dx*dx+dy*dy <= r2) tilemap.setSafe(x,y, Tina::Game::TileType::Air);
-                    }
+                    // 将鼠标像素坐标映射到世界坐标，并圆形清除固体
+                    float wx=0.0f, wy=0.0f;
+                    Tina::Game::screenToWorld(mx, my, pxW, pxH, camX, camY, viewW, viewH, wx, wy);
+                    Tina::Game::excavateCircle(tilemap, wx, wy, 3.5f);
                 }
             }
         }

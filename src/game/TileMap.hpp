@@ -98,6 +98,25 @@ public:
     TileType get(int x, int y) const { return m_tiles[index(x,y)]; }
     void set(int x, int y, TileType t) { m_tiles[index(x,y)] = t; }
     
+    // 辅助：边界/材质/地表
+    bool isInBounds(int x, int y) const { return (unsigned)x < (unsigned)m_w && (unsigned)y < (unsigned)m_h; }
+    bool isSolidTile(TileType t) const { return (t != TileType::Air && t != TileType::Water && t != TileType::Lava); }
+    bool isNaturalGround(TileType t) const {
+        switch (t) {
+            case TileType::Grass:
+            case TileType::Dirt:
+            case TileType::Stone:
+            case TileType::Sand:
+            case TileType::Snow:
+            case TileType::Ice:
+            case TileType::Clay:
+                return true;
+            default:
+                return false;
+        }
+    }
+    int findSurfaceY(int x) const; // 从上向下找列 x 上第一个非 Air 的 y；找不到返回 -1
+    
     // 获取生物群系
     BiomeType getBiome(int x, int y) const { 
         if ((unsigned)x >= (unsigned)m_w || (unsigned)y >= (unsigned)m_h) return BiomeType::Plains;
