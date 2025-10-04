@@ -134,19 +134,67 @@ int main(int /*argc*/, char* /*argv*/[])
     Tina::UI::UIToolbar toolbar;
     toolbar.initialize(pxW, pxH, uiRenderer, &text);
 
-    // 玩家角色（生成在地图中央的地表）
+    // 玩家角色（生成在地图中央的“自然地表”上，确保头顶有空间且不在液体中）
     Tina::Game::Player player;
-    // 找到中央位置的地表高度
+    // 选择出生列（地图中央）
     int spawnX = mapCfg.width / 2;
-    int spawnY = mapCfg.height / 2;
-    // 从中间向下搜索，找到第一个固体方块
-    for (int y = mapCfg.height - 1; y >= 0; --y) {
-        auto t = tilemap.get(spawnX, y);
-        if (t != Tina::Game::TileType::Air && t != Tina::Game::TileType::Water && t != Tina::Game::TileType::Lava) {
-            spawnY = y + 1; // 生成在固体方块的上方
-            break;
+    int spawnY = mapCfg.height / 2; // 兜底值（若未找到合法地表，将被修正）
+
+    // 判定“自然地表”：草/土/石/沙/雪/冰/粘土（排除树木、树叶、装饰、矿石等）
+    auto isNaturalGround = [](Tina::Game::TileType t){
+        using Tina::Game::TileType;
+        switch (t) {
+            case TileType::Grass:
+            case TileType::Dirt:
+            case TileType::Stone:
+            case TileType::Sand:
+            case TileType::Snow:
+            case TileType::Ice:
+            case TileType::Clay:
+                return true;
+            default:
+                return false;
+        }
+    };
+
+    // 按列搜索函数：在列 cx 中寻找出生 y（2格净空，非液体）
+    auto findSpawnInColumn = [&](int cx, int& outY)->bool {
+        if (cx < 0 || cx >= mapCfg.width) return false;
+        for (int y = mapCfg.height - 3; y >= 0; --y) { // 预留头顶2格空间
+            auto base = tilemap.get(cx, y);
+            if (!isNaturalGround(base)) continue;
+            if (y + 2 >= mapCfg.height) continue;
+            auto up1 = tilemap.get(cx, y + 1);
+            auto up2 = tilemap.get(cx, y + 2);
+            if (up1 == Tina::Game::TileType::Air && up2 == Tina::Game::TileType::Air &&
+                !tilemap.isWater(cx, y + 1) && !tilemap.isWater(cx, y + 2) &&
+                !tilemap.isLava(cx, y + 1) && !tilemap.isLava(cx, y + 2)) {
+                outY = y + 1; return true;
+            }
+        }
+        return false;
+    };
+
+    // 先尝试中央列
+    bool foundSpawn = findSpawnInColumn(spawnX, spawnY);
+
+    // 如中央列不可用，向左右扩散搜索最近可用列
+    if (!foundSpawn) {
+        int maxRadius = std::min(40, mapCfg.width / 2);
+        for (int dx = 1; dx <= maxRadius && !foundSpawn; ++dx) {
+            int left  = spawnX - dx;
+            int right = spawnX + dx;
+            if (findSpawnInColumn(left, spawnY))  { spawnX = left;  foundSpawn = true; break; }
+            if (findSpawnInColumn(right, spawnY)) { spawnX = right; foundSpawn = true; break; }
         }
     }
+
+    // 兜底：仍未找到就固定到地图中部上方，避免出界
+    if (!foundSpawn) {
+        spawnX = std::clamp(spawnX, 0, mapCfg.width - 1);
+        spawnY = std::clamp(mapCfg.height / 2, 2, mapCfg.height - 3);
+    }
+
     player.spawn((float)spawnX, (float)spawnY);
 
     // 相机（世界单位：1=1格）- 将改为跟随玩家
