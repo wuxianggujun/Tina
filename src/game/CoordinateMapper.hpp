@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cmath>
+#include "Camera2D.hpp"
 
 namespace Tina::Game {
 
@@ -25,6 +26,18 @@ inline void screenToWorld(float mx, float my,
     wy = camY + v * viewH;
 }
 
+// 便捷重载：直接使用 Camera2D 的视区与位置
+inline void screenToWorld(float mx, float my,
+                          int pxW, int pxH,
+                          const Camera2D& cam,
+                          float& wx, float& wy)
+{
+    float u = (pxW > 0) ? (mx / (float)pxW) : 0.0f;
+    float v = (pxH > 0) ? (1.0f - my / (float)pxH) : 0.0f;
+    wx = cam.x() + u * cam.viewW();
+    wy = cam.y() + v * cam.viewH();
+}
+
 // 世界坐标 -> 瓦片网格坐标（向下取整到网格）
 inline void worldToTile(float wx, float wy, int& tx, int& ty)
 {
@@ -33,4 +46,3 @@ inline void worldToTile(float wx, float wy, int& tx, int& ty)
 }
 
 } // namespace Tina::Game
-

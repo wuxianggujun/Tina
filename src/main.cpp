@@ -215,7 +215,7 @@ int main(int /*argc*/, char* /*argv*/[])
                             __toolbarHandled = true;
                         } else {
                             float wx=0.0f, wy=0.0f;
-                            Tina::Game::screenToWorld(mx, my, pxW, pxH, camX, camY, (float)camera.viewW(), (float)camera.viewH(), wx, wy);
+                            Tina::Game::screenToWorld(mx, my, pxW, pxH, camera, wx, wy);
                             int tx = (int)std::floor(wx);
                             int ty = (int)std::floor(wy);
                             if (ev.mouse_button.button == Tina::os::MouseButton::LEFT &&
@@ -362,7 +362,7 @@ int main(int /*argc*/, char* /*argv*/[])
                 if (tool == 1) {
                     // 将鼠标像素坐标映射到世界坐标，并圆形清除固体
                     float wx=0.0f, wy=0.0f;
-                    Tina::Game::screenToWorld(mx, my, pxW, pxH, camX, camY, (float)camera.viewW(), (float)camera.viewH(), wx, wy);
+                    Tina::Game::screenToWorld(mx, my, pxW, pxH, camera, wx, wy);
                     Tina::Game::excavateCircle(tilemap, wx, wy, Tina::GameConfig::EXCAVATE_RADIUS);
                 }
             }

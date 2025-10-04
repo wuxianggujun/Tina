@@ -81,8 +81,8 @@ bool TextRenderer::initialize(int atlasW, int atlasH)
         TINA_ERROR("TextRenderer: 加载 text 着色器失败");
         return false;
     }
-    TINA_INFO("TextRenderer: 初始化完成，图集={}x{}，采样=PointClamp，程序有效={}",
-              m_atlasW, m_atlasH, (int)bgfx::isValid(m_prog));
+    // 降噪：初始化成功的详细日志仅在调试时需要
+    // TINA_INFO("TextRenderer: 初始化完成，图集={}x{}，采样=PointClamp，程序有效={}", m_atlasW, m_atlasH, (int)bgfx::isValid(m_prog));
     return true;
 }
 
@@ -263,7 +263,7 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
     }
 
     if (idx.empty()) {
-        TINA_WARN("TextRenderer: 无可绘制字形，跳过绘制。缺失字形数={}，字符总数={}", missing, (int)utf8.size());
+        // 降噪：无可绘制字形在 UI 空字符串或被裁剪时很常见，不警告
         return;
     }
 
@@ -275,16 +275,7 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
     memcpy(tib.data, idx.data(), (size_t)idx.size() * sizeof(uint16_t));
 
     // 额外日志：打印首个字形的四个顶点位置与 UV，辅助定位坐标系问题
-    if (!verts.empty()) {
-        const Vtx& v0 = verts[0];
-        const Vtx& v1 = verts.size() > 1 ? verts[1] : verts[0];
-        const Vtx& v2 = verts.size() > 2 ? verts[2] : verts[0];
-        const Vtx& v3 = verts.size() > 3 ? verts[3] : verts[0];
-        TINA_INFO("TextRenderer: 首字形 vtx0=({:.1f},{:.1f}) uv0=({:.3f},{:.3f}) vtx1=({:.1f},{:.1f}) uv1=({:.3f},{:.3f})",
-                  v0.x, v0.y, v0.u, v0.v, v1.x, v1.y, v1.u, v1.v);
-        TINA_INFO("TextRenderer: 首字形 vtx2=({:.1f},{:.1f}) uv2=({:.3f},{:.3f}) vtx3=({:.1f},{:.1f}) uv3=({:.3f},{:.3f})",
-                  v2.x, v2.y, v2.u, v2.v, v3.x, v3.y, v3.u, v3.v);
-    }
+    // 降噪：首字形顶点/UV 仅在排障时打印
 
     bgfx::Encoder* enc = bgfx::begin(false);
     if (!enc) { TINA_WARN("TextRenderer: 无法获取 Encoder，放弃绘制"); return; }
@@ -303,8 +294,7 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
     if (m_hasClip) {
         enc->setScissor(m_clipX, m_clipY, m_clipW, m_clipH);
     }
-    TINA_INFO("TextRenderer: 提交视图={} 顶点={} 索引={} 文本长度={} 缺失字形={}",
-              (int)viewId, (int)verts.size(), (int)idx.size(), (int)utf8.size(), missing);
+    // 降噪：绘制统计仅在调试时需要
     enc->submit(viewId, m_prog);
     bgfx::end(enc);
 }

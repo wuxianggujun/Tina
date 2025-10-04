@@ -41,7 +41,25 @@ public:
                       const bgfx::VertexLayout& layout,
                       float r = 0.3f, float g = 0.5f,
                       float b = 0.9f, float a = 0.95f) const;
+
+private:
+    static inline void appendQuad(ColorVertex* vptr, uint16_t* iptr,
+                                  uint32_t& vb, uint32_t& ib,
+                                  float x0, float y0, float x1, float y1,
+                                  float r, float g, float b, float a)
+    {
+        vptr[vb+0] = { x0,y0,0.0f, r,g,b,a };
+        vptr[vb+1] = { x1,y0,0.0f, r,g,b,a };
+        vptr[vb+2] = { x1,y1,0.0f, r,g,b,a };
+        vptr[vb+3] = { x0,y1,0.0f, r,g,b,a };
+        iptr[ib+0] = (uint16_t)(vb+0);
+        iptr[ib+1] = (uint16_t)(vb+1);
+        iptr[ib+2] = (uint16_t)(vb+2);
+        iptr[ib+3] = (uint16_t)(vb+0);
+        iptr[ib+4] = (uint16_t)(vb+2);
+        iptr[ib+5] = (uint16_t)(vb+3);
+        vb += 4; ib += 6;
+    }
 };
 
 } // namespace Tina::Renderer
-

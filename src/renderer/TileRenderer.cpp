@@ -62,13 +62,7 @@ void TileRenderer::renderSolid(const Tina::Game::TileMap& map,
         if (t == TileType::Air || t == TileType::Water || t == TileType::Lava) continue;
         auto c4 = getTileColor(t);
         float x0 = (float)x, y0 = (float)y, x1 = x0 + 1.0f, y1 = y0 + 1.0f;
-        vptr[vb+0] = { x0,y0,0.0f, c4[0],c4[1],c4[2],c4[3] };
-        vptr[vb+1] = { x1,y0,0.0f, c4[0],c4[1],c4[2],c4[3] };
-        vptr[vb+2] = { x1,y1,0.0f, c4[0],c4[1],c4[2],c4[3] };
-        vptr[vb+3] = { x0,y1,0.0f, c4[0],c4[1],c4[2],c4[3] };
-        iptr[ib+0]= (uint16_t)(vb+0); iptr[ib+1]= (uint16_t)(vb+1); iptr[ib+2]= (uint16_t)(vb+2);
-        iptr[ib+3]= (uint16_t)(vb+0); iptr[ib+4]= (uint16_t)(vb+2); iptr[ib+5]= (uint16_t)(vb+3);
-        vb += 4; ib += 6;
+        appendQuad(vptr, iptr, vb, ib, x0, y0, x1, y1, c4[0], c4[1], c4[2], c4[3]);
     }
 
     if (ib > 0) {
@@ -104,16 +98,10 @@ void TileRenderer::renderWater(const Tina::Game::TileMap& map,
     auto cw = getTileColor(TileType::Water);
     for (int y = H - 1; y >= 0; --y) for (int x = 0; x < W; ++x) {
         int wv = (int)map.water(x, y); if (wv <= 0) continue;
-        float hfrac = (float)wv / 255.0f; if (hfrac <= 0.01f) continue;
+        float hfrac = (float)map.water(x, y) / 255.0f; if (hfrac <= 0.01f) continue;
         float x0 = (float)x, y0 = (float)y, x1 = x0 + 1.0f; float yh = y0 + std::min(1.0f, hfrac);
         float alphaW = std::min(1.0f, std::max(0.25f, cw[3] * (0.6f + 0.4f * hfrac)));
-        vptr[vb+0] = { x0,y0,0.0f, cw[0],cw[1],cw[2], alphaW };
-        vptr[vb+1] = { x1,y0,0.0f, cw[0],cw[1],cw[2], alphaW };
-        vptr[vb+2] = { x1,yh,0.0f, cw[0],cw[1],cw[2], alphaW };
-        vptr[vb+3] = { x0,yh,0.0f, cw[0],cw[1],cw[2], alphaW };
-        iptr[ib+0]= (uint16_t)(vb+0); iptr[ib+1]= (uint16_t)(vb+1); iptr[ib+2]= (uint16_t)(vb+2);
-        iptr[ib+3]= (uint16_t)(vb+0); iptr[ib+4]= (uint16_t)(vb+2); iptr[ib+5]= (uint16_t)(vb+3);
-        vb += 4; ib += 6;
+        appendQuad(vptr, iptr, vb, ib, x0, y0, x1, yh, cw[0], cw[1], cw[2], alphaW);
     }
 
     if (ib > 0) {
@@ -135,21 +123,14 @@ void TileRenderer::renderPlayer(const Tina::Game::Player& player,
 {
     float px, py, pw, ph; player.getAABB(px, py, pw, ph);
 
-    ColorVertex verts[4] = {
-        { px,    py,    0.0f, r, g, b, a },
-        { px+pw, py,    0.0f, r, g, b, a },
-        { px+pw, py+ph, 0.0f, r, g, b, a },
-        { px,    py+ph, 0.0f, r, g, b, a }
-    };
-    uint16_t inds[6] = { 0, 1, 2, 0, 2, 3 };
-
     bgfx::TransientVertexBuffer tvb; bgfx::TransientIndexBuffer tib;
     if (bgfx::getAvailTransientVertexBuffer(4, layout) < 4 ||
         bgfx::getAvailTransientIndexBuffer(6) < 6) return;
     bgfx::allocTransientVertexBuffer(&tvb, 4, layout);
     bgfx::allocTransientIndexBuffer(&tib, 6);
-    std::memcpy(tvb.data, verts, sizeof(verts));
-    std::memcpy(tib.data, inds, sizeof(inds));
+    ColorVertex* vptr = (ColorVertex*)tvb.data; uint16_t* iptr = (uint16_t*)tib.data;
+    uint32_t vb = 0, ib = 0;
+    appendQuad(vptr, iptr, vb, ib, px, py, px+pw, py+ph, r, g, b, a);
 
     bgfx::Encoder* enc = bgfx::begin();
     enc->setVertexBuffer(0, &tvb);
@@ -160,4 +141,3 @@ void TileRenderer::renderPlayer(const Tina::Game::Player& player,
 }
 
 } // namespace Tina::Renderer
-
