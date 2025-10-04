@@ -342,16 +342,10 @@ int main(int /*argc*/, char* /*argv*/[])
         player.moveLeft(ks[SDL_SCANCODE_A]);
         player.moveRight(ks[SDL_SCANCODE_D]);
 
-        // 跳跃（只在按下那一帧触发）
-        static bool wasSpacePressed = false;
-        static bool wasWPressed = false;
+        // 跳跃：长按自动连跳（SPACE/W 任一按下即视为按住）
         bool isSpacePressed = ks[SDL_SCANCODE_SPACE];
         bool isWPressed = ks[SDL_SCANCODE_W];
-        if ((isSpacePressed && !wasSpacePressed) || (isWPressed && !wasWPressed)) {
-            player.jump();
-        }
-        wasSpacePressed = isSpacePressed;
-        wasWPressed = isWPressed;
+        player.setJumpHeld(isSpacePressed || isWPressed);
 
         // 更新玩家物理
         player.update((float)frameTimer.deltaSeconds(), tilemap);
