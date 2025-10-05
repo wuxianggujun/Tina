@@ -115,29 +115,6 @@ void TileRenderer::renderWater(const Tina::Game::TileMap& map,
     }
 }
 
-void TileRenderer::renderPlayer(const Tina::Game::Player& player,
-                                uint16_t viewId,
-                                bgfx::ProgramHandle program,
-                                const bgfx::VertexLayout& layout,
-                                float r, float g, float b, float a) const
-{
-    float px, py, pw, ph; player.getAABB(px, py, pw, ph);
-
-    bgfx::TransientVertexBuffer tvb; bgfx::TransientIndexBuffer tib;
-    if (bgfx::getAvailTransientVertexBuffer(4, layout) < 4 ||
-        bgfx::getAvailTransientIndexBuffer(6) < 6) return;
-    bgfx::allocTransientVertexBuffer(&tvb, 4, layout);
-    bgfx::allocTransientIndexBuffer(&tib, 6);
-    ColorVertex* vptr = (ColorVertex*)tvb.data; uint16_t* iptr = (uint16_t*)tib.data;
-    uint32_t vb = 0, ib = 0;
-    appendQuad(vptr, iptr, vb, ib, px, py, px+pw, py+ph, r, g, b, a);
-
-    bgfx::Encoder* enc = bgfx::begin();
-    enc->setVertexBuffer(0, &tvb);
-    enc->setIndexBuffer(&tib);
-    enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
-    enc->submit(viewId, program);
-    bgfx::end(enc);
-}
+// 玩家渲染已迁移至 ECS 的 CharacterRenderSystem
 
 } // namespace Tina::Renderer

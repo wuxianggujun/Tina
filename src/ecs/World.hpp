@@ -5,8 +5,10 @@
 #pragma once
 
 #include "../core/Core.hpp"
+#include "../core/Container.hpp"
 #include "Components.hpp"
 #include <entt/entt.hpp>
+#include <bgfx/bgfx.h>
 
 // 前向声明
 namespace Tina::Game {
@@ -47,7 +49,7 @@ public:
     entt::entity getControlledEntity() const { return m_controlledEntity; }
 
     // 实用工具函数
-    Container::Vector<entt::entity> getAllCharacters() const;
+    Tina::Container::Vector<entt::entity> getAllCharacters() const;
     entt::entity getClosestCharacter(float x, float y, entt::entity exclude = entt::null) const;
     int getCharacterCount() const;
 

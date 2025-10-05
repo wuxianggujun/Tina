@@ -12,7 +12,7 @@
 #include "os/OS.hpp"
 #include "renderer/ShaderManager.hpp"
 #include "game/TileMap.hpp"
-#include "game/Player.hpp"
+#include "ecs/World.hpp"
 #include "game/CoordinateMapper.hpp"
 #include "game/TerrainEditor.hpp"
 #include "game/GameConfig.hpp"
@@ -116,8 +116,8 @@ int main(int /*argc*/, char* /*argv*/[])
     // 渲染器
     Tina::Renderer::TileRenderer tileRenderer; tileRenderer.initialize();
 
-    // 玩家角色（生成在地图中央的“自然地表”上，确保头顶有空间且不在液体中）
-    Tina::Game::Player player;
+    // 使用 ECS 世界管理玩家/角色
+    Tina::ECS::World ecsWorld;
     // 选择出生列（地图中央）
     int spawnX = mapCfg.width / 2;
     int spawnY = mapCfg.height / 2; // 兜底值（若未找到合法地表，将被修正）
@@ -163,7 +163,7 @@ int main(int /*argc*/, char* /*argv*/[])
         spawnY = std::clamp(mapCfg.height / 2, 2, mapCfg.height - 3);
     }
 
-    player.spawn((float)spawnX, (float)spawnY);
+    ecsWorld.createCharacter((float)spawnX, (float)spawnY, /*isPlayerControlled*/ true);
 
     // 相机（世界单位：1=1格）- 将改为跟随玩家
     float camX = 0.0f, camY = 0.0f;
@@ -298,21 +298,31 @@ int main(int /*argc*/, char* /*argv*/[])
         const bool* ks = SDL_GetKeyboardState(nullptr);
 
         // 玩家移动控制
-        player.moveLeft(ks[SDL_SCANCODE_A]);
-        player.moveRight(ks[SDL_SCANCODE_D]);
-
-        // 跳跃：长按自动连跳（SPACE/W 任一按下即视为按住）
-        bool isSpacePressed = ks[SDL_SCANCODE_SPACE];
-        bool isWPressed = ks[SDL_SCANCODE_W];
-        player.setJumpHeld(isSpacePressed || isWPressed);
-
-        // 更新玩家物理
-        player.update((float)frameTimer.deltaSeconds(), tilemap);
+        // ECS 输入与更新
+        Tina::ECS::InputState input{};
+        input.moveLeft  = ks[SDL_SCANCODE_A] || ks[SDL_SCANCODE_LEFT];
+        input.moveRight = ks[SDL_SCANCODE_D] || ks[SDL_SCANCODE_RIGHT];
+        input.jump      = ks[SDL_SCANCODE_W] || ks[SDL_SCANCODE_UP] || ks[SDL_SCANCODE_SPACE];
+        ecsWorld.update((float)frameTimer.deltaSeconds(), tilemap, input);
 
         // 相机平滑跟随玩家
         viewW = (float)camera.viewW(); // 与 Camera2D 保持一致的视区宽度
-        float targetCamX = player.centerX() - viewW * 0.5f;
-        float targetCamY = player.centerY() - viewH * 0.5f;
+        float targetCamX = camX;
+        float targetCamY = camY;
+        {
+            auto e = ecsWorld.getControlledEntity();
+            if (e != entt::null) {
+                auto& reg = ecsWorld.registry();
+                if (reg.any_of<Tina::ECS::Transform, Tina::ECS::PhysicsBody>(e)) {
+                    auto& tr = reg.get<Tina::ECS::Transform>(e);
+                    auto& pb = reg.get<Tina::ECS::PhysicsBody>(e);
+                    float centerX = tr.x + pb.width * 0.5f;
+                    float centerY = tr.y + pb.height * 0.5f;
+                    targetCamX = centerX - viewW * 0.5f;
+                    targetCamY = centerY - viewH * 0.5f;
+                }
+            }
+        }
         camX += (targetCamX - camX) * 0.1f;
         camY += (targetCamY - camY) * 0.1f;
         camX = std::clamp(camX, 0.0f, std::max(0.0f, (float)mapCfg.width - viewW));
@@ -371,11 +381,11 @@ int main(int /*argc*/, char* /*argv*/[])
         // 渲染（固体 / 水 / 玩家）
         tileRenderer.renderSolid(tilemap, 1, progColor, colorLayout);
         tileRenderer.renderWater(tilemap, 2, progColor, colorLayout);
-        tileRenderer.renderPlayer(player, 2, progColor, colorLayout,
-                                  Tina::GameConfig::PLAYER_COLOR_R,
-                                  Tina::GameConfig::PLAYER_COLOR_G,
-                                  Tina::GameConfig::PLAYER_COLOR_B,
-                                  Tina::GameConfig::PLAYER_COLOR_A);
+        ecsWorld.render(2, progColor, colorLayout);
+
+
+
+
 
         // UI 文本（视图3，像素坐标，最后绘制）
         float hudY = (float)toolbar.barHeight() + 12.0f;
@@ -413,6 +423,11 @@ int main(int /*argc*/, char* /*argv*/[])
     Tina::Core::Log::Shutdown();
     return 0;
 }
+
+
+
+
+
 
 
 

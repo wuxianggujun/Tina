@@ -15,8 +15,6 @@ set(SRC_FILES
     game/Camera2D.cpp
     game/TileMap.hpp
     game/TileMap.cpp
-    game/Player.hpp
-    game/Player.cpp
     game/CoordinateMapper.hpp
     game/TerrainEditor.hpp
     game/GameConfig.hpp
@@ -40,6 +38,21 @@ set(SRC_FILES
     ui/UIToolbar.hpp
     ui/UIToolbar.cpp
     ui/UILayout.hpp
+    
+    # ECS
+    ecs/World.hpp
+    ecs/World.cpp
+    ecs/Components.hpp
+    ecs/systems/PlayerInputSystem.hpp
+    ecs/systems/PlayerInputSystem.cpp
+    ecs/systems/CharacterMovementSystem.hpp
+    ecs/systems/CharacterMovementSystem.cpp
+    ecs/systems/PhysicsSystem.hpp
+    ecs/systems/PhysicsSystem.cpp
+    ecs/systems/AISystem.hpp
+    ecs/systems/AISystem.cpp
+    ecs/systems/CharacterRenderSystem.hpp
+    ecs/systems/CharacterRenderSystem.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})
@@ -47,6 +60,7 @@ add_executable(${PROJECT_NAME} ${SRC_FILES})
 # Include directories for project source files
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/thirdparty/entt/single_include
 )
 
 # 着色器编译

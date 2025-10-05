@@ -8,7 +8,6 @@
 #include <bgfx/bgfx.h>
 #include <cstdint>
 #include "../game/TileMap.hpp"
-#include "../game/Player.hpp"
 #include "../core/Container.hpp"
 
 namespace Tina::Renderer {
@@ -33,14 +32,6 @@ public:
                      uint16_t viewId,
                      bgfx::ProgramHandle program,
                      const bgfx::VertexLayout& layout) const;
-
-    // 渲染玩家 AABB（默认蓝色半透明，可传自定义颜色）
-    void renderPlayer(const Tina::Game::Player& player,
-                      uint16_t viewId,
-                      bgfx::ProgramHandle program,
-                      const bgfx::VertexLayout& layout,
-                      float r = 0.3f, float g = 0.5f,
-                      float b = 0.9f, float a = 0.95f) const;
 
 private:
     static inline void appendQuad(ColorVertex* vptr, uint16_t* iptr,
