@@ -84,22 +84,17 @@ void Player::update(float dt, const TileMap& tilemap)
     if (m_moveLeft) moveInput -= 1.0f;
     if (m_moveRight) moveInput += 1.0f;
 
-    // 根据是否在地面调整加速度
-    float accel = m_onGround ? m_moveSpeed * 20.0f : m_moveSpeed * 20.0f * m_airControl;
-    m_vx += moveInput * accel * dt;
-
-    // 摩擦力（地面）
-    if (m_onGround && std::abs(moveInput) < 0.01f) {
-        float drag = m_friction * dt;
-        if (m_vx > 0.0f) {
-            m_vx = std::max(0.0f, m_vx - drag);
-        } else if (m_vx < 0.0f) {
-            m_vx = std::min(0.0f, m_vx + drag);
-        }
+    // 泰拉瑞亚式移动：有输入时加速到目标速度，无输入时立即停止
+    if (std::abs(moveInput) > 0.01f) {
+        // 根据是否在地面调整加速度
+        float accel = m_onGround ? m_moveSpeed * 20.0f : m_moveSpeed * 20.0f * m_airControl;
+        m_vx += moveInput * accel * dt;
+        // 限制最大水平速度
+        m_vx = std::clamp(m_vx, -m_moveSpeed, m_moveSpeed);
+    } else {
+        // 无输入时立即停止（泰拉瑞亚效果）
+        m_vx = 0.0f;
     }
-
-    // 限制最大水平速度
-    m_vx = std::clamp(m_vx, -m_moveSpeed, m_moveSpeed);
 
     // 2. 重力（y 轴向上为正，因此重力应使 vy 逐渐减小）
     m_vy -= m_gravity * dt;
