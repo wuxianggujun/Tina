@@ -231,6 +231,15 @@ void TileMap::generateSurfaceFeatures()
                 generateSmallDecorationForBiome(x, surfaceY, biome, primaryNoise);
                 featureGenerated = true;
             }
+            // 兜底：森林列仍未生成任何表面特征，按湿度概率强制生成一棵小树
+            if (!featureGenerated && biome == BiomeType::Forest) {
+                float fallback = m_noiseGen.humidityNoise(static_cast<float>(x), static_cast<float>(surfaceY));
+                if (fallback > 0.65f) {
+                    int height = 3 + static_cast<int>(primaryNoise * 3);
+                    generateTree(x, surfaceY, height, true);
+                    featureGenerated = true;
+                }
+            }
         }
     }
 }
@@ -618,11 +627,14 @@ bool TileMap::shouldGenerateTree(BiomeType biome, float primaryNoise, float seco
 {
     switch (biome) {
         case BiomeType::Forest:
-            return primaryNoise > 0.4f && secondaryNoise > 0.3f; // 60% * 70% = 42%概率
+            // 放宽阈值，提高森林列的出树率
+            return (primaryNoise > 0.35f && secondaryNoise > 0.25f);
         case BiomeType::Plains:
-            return primaryNoise > 0.85f; // 15%概率
+            // 平原适度稀疏树林
+            return primaryNoise > 0.75f;
         case BiomeType::Swamp:
-            return primaryNoise > 0.6f; // 40%概率
+            // 沼泽适度生成
+            return primaryNoise > 0.50f;
         case BiomeType::Desert:
         case BiomeType::Tundra:
         case BiomeType::Mountain:
@@ -665,6 +677,34 @@ bool TileMap::shouldGenerateSmallDecoration(BiomeType biome, float primaryNoise)
 
 void TileMap::generateTreeForBiome(int x, int y, BiomeType biome, float primaryNoise, float secondaryNoise)
 {
+    // 生成前进行轻量避障：尝试在 x 的 {0,-1,1} 偏移中选择可直立的列
+    auto canReplace = [&](TileType t)->bool {
+        switch (t) {
+            case TileType::Air:
+            case TileType::Flower:
+            case TileType::Grass_Decoration:
+            case TileType::Mushroom:
+            case TileType::Crystal:
+            case TileType::Leaves:
+                return true;
+            default:
+                return false;
+        }
+    };
+    auto tryAdjustX = [&](int baseX, int baseY, int h)->int {
+        for (int dxOpt : {0, -1, 1}) {
+            int nx = baseX + dxOpt;
+            if (nx < 0 || nx >= m_w) continue;
+            bool ok = true;
+            for (int hh = 1; hh <= h; ++hh) {
+                int ty = baseY + hh;
+                if (ty >= m_h) { ok = false; break; }
+                if (!canReplace(get(nx, ty))) { ok = false; break; }
+            }
+            if (ok) return nx;
+        }
+        return baseX;
+    };
     switch (biome) {
         case BiomeType::Forest:
             if (secondaryNoise > 0.8f) {
@@ -1220,3 +1260,4 @@ void TileMap::generateBigTree(int x, int y)
 }
 
 } // namespace Tina::Game
+
