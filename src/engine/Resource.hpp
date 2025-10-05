@@ -44,7 +44,7 @@ struct FileSystem {
 };
 
 // 工厂：由实现文件提供（统一 EASTL 智能指针）
-Tina::Container::UniquePtr<FileSystem> CreateFileSystem();
+Tina::Memory::UniquePtr<FileSystem> CreateFileSystem();
 
 // 资源抽象
 class Resource {
@@ -103,7 +103,7 @@ public:
         Tina::Container::String key(path.c_str());
         auto it = m_resources.find(key);
         if (it != m_resources.end()) { it->second->incRefCount(); return it->second.get(); }
-        Tina::Container::UniquePtr<Resource> res(createResource(path));
+        Tina::Memory::UniquePtr<Resource> res(createResource(path));
         Resource* out = res.get();
         m_resources.emplace(Tina::Container::String(path.c_str()), std::move(res));
         out->incRefCount();
@@ -129,7 +129,7 @@ public:
 
 protected:
     FileSystem& m_fs;
-    Tina::Container::HashMap<Tina::Container::String, Tina::Container::UniquePtr<Resource>> m_resources;
+    Tina::Container::HashMap<Tina::Container::String, Tina::Memory::UniquePtr<Resource>> m_resources;
 };
 
 // Hub：将类型映射到具体管理器

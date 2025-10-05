@@ -84,8 +84,8 @@ struct FileSystemImpl : FileSystem {
 };
 
 // 工厂函数（暴露给主程序使用）
-Tina::Container::UniquePtr<FileSystem> CreateFileSystem() {
-    return Tina::Container::MakeUnique<FileSystemImpl>();
+Tina::Memory::UniquePtr<FileSystem> CreateFileSystem() {
+    return Tina::Memory::MakeUnique<FileSystemImpl>();
 }
 
 } // namespace Tina::Engine

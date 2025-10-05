@@ -117,6 +117,12 @@ namespace Tina
     // For backward compatibility, include Math.hpp if needed
     // #include "Math.hpp"
 
+} // namespace Tina
+
+// 自动引入智能指针（避免忘记引入）
+#include "Memory.hpp"
+
+namespace Tina {
 
 #ifdef _WIN32
 #define TINA_LIBRARY_EXPORT __declspec(dllexport)

@@ -39,6 +39,32 @@ int TileMap::findSurfaceY(int x) const
     return -1;
 }
 
+int TileMap::findGroundSurfaceY(int x) const
+{
+    // 忽略树木/树叶/装饰，仅将自然地表视为地面
+    if ((unsigned)x >= (unsigned)m_w) return -1;
+    auto isDecoration = [&](TileType t)->bool {
+        switch (t) {
+            case TileType::Wood:
+            case TileType::Leaves:
+            case TileType::Flower:
+            case TileType::Grass_Decoration:
+            case TileType::Mushroom:
+            case TileType::Crystal:
+            case TileType::Rock:
+                return true;
+            default:
+                return false;
+        }
+    };
+    for (int y = m_h - 1; y >= 0; --y) {
+        TileType t = get(x, y);
+        if (t == TileType::Air || isDecoration(t)) continue;
+        if (isNaturalGround(t)) return y;
+    }
+    return -1;
+}
+
 void TileMap::initializeBasicData()
 {
     // 初始化所有数据数组
@@ -56,12 +82,11 @@ void TileMap::generateBiomes()
 {
     // 使用温度和湿度噪声确定生物群系
     for (int x = 0; x < m_w; ++x) {
+        float temperature = m_noiseGen.temperatureNoise(static_cast<float>(x), 0.0f);
+        float humidity    = m_noiseGen.humidityNoise(static_cast<float>(x), 0.0f);
+        float heightN     = m_noiseGen.heightNoise(static_cast<float>(x), 0.0f);
+        BiomeType biome   = determineBiome(temperature, humidity, heightN);
         for (int y = 0; y < m_h; ++y) {
-            float temperature = m_noiseGen.temperatureNoise(static_cast<float>(x), static_cast<float>(y));
-            float humidity = m_noiseGen.humidityNoise(static_cast<float>(x), static_cast<float>(y));
-            float height = m_noiseGen.heightNoise(static_cast<float>(x), static_cast<float>(y));
-            
-            BiomeType biome = determineBiome(temperature, humidity, height);
             setBiome(x, y, biome);
         }
     }
@@ -85,17 +110,13 @@ void TileMap::generateTerrain()
                 set(x, y, TileType::Air);
                 continue;
             }
-            
-            BiomeType biome = getBiome(x, y);
             int depth = surfaceY - y;
-            
-            TileType material;
-            if (depth == 0) {
-                material = getSurfaceMaterial(biome);
-            } else {
-                material = getSubsurfaceMaterial(biome, depth);
-            }
-            
+            static_cast<void>(0);
+            // 整列使用统一 biome（已在 generateBiomes 统一设置一列相同值）
+            BiomeType columnBiome = getBiome(x, 0);
+            TileType material = (depth == 0)
+                ? getSurfaceMaterial(columnBiome)
+                : getSubsurfaceMaterial(columnBiome, depth, surfaceY);
             set(x, y, material);
         }
     }
@@ -106,7 +127,7 @@ void TileMap::generateCaves()
     // 改进的洞穴生成：降低密度，提高质量
     for (int x = 1; x < m_w - 1; ++x) {
         // 找到地表位置
-        int surfaceY = findSurfaceY(x);
+        int surfaceY = findGroundSurfaceY(x);
         if (surfaceY == -1) continue;
         
         for (int y = 1; y < m_h - 1; ++y) {
@@ -172,7 +193,7 @@ void TileMap::generateSurfaceFeatures()
     // 统一的地表特征生成系统 - 只在真正的地表生成，不在洞穴顶部生成
     for (int x = 0; x < m_w; ++x) {
         // 从上往下找到第一个固体方块，这才是真正的地表
-        int surfaceY = findSurfaceY(x);
+        int surfaceY = findGroundSurfaceY(x);
 
         // 如果找到了地表，且上方是空气，则在此生成地表特征
         if (surfaceY >= 0 && surfaceY < m_h - 1 && get(x, surfaceY + 1) == TileType::Air) {
@@ -315,6 +336,15 @@ void TileMap::validateLiquidConsistency()
 
 void TileMap::generateWater()
 {
+    // 先按列填充海水：从自然地表之上填充到海平面，避免把地下洞穴填满
+    for (int x = 0; x < m_w; ++x) {
+        int sY = findGroundSurfaceY(x);
+        if (sY >= 0 && sY < m_seaLevel) {
+            for (int y = sY + 1; y <= m_seaLevel; ++y) {
+                if (get(x, y) == TileType::Air) m_water[index(x, y)] = 255;
+            }
+        }
+    }
     // 海水填充 - 只填充地表的海洋区域，不填充地下洞穴
     for (int x = 0; x < m_w; ++x) {
         for (int y = 0; y <= m_seaLevel; ++y) {
@@ -389,13 +419,7 @@ void TileMap::generateWater()
         int y1 = std::min(m_h - 2, cy + (int)ry + 1);
 
         for (int x = x0; x <= x1; ++x) {
-            int groundY = -1;
-            for (int yy = m_h - 1; yy >= 0; --yy) {
-                if (get(x, yy) != TileType::Air) {
-                    groundY = yy;
-                    break;
-                }
-            }
+            int groundY = findGroundSurfaceY(x);
             if (groundY <= 0) continue;
 
             for (int y = y0; y <= y1; ++y) {
@@ -1031,10 +1055,44 @@ TileType TileMap::getSubsurfaceMaterial(BiomeType biome, int depth) const
     return TileType::Bedrock;
 }
 
+TileType TileMap::getSubsurfaceMaterial(BiomeType biome, int depth, int surfaceY) const
+{
+    // 相对“当地表”的分层，层位更稳定
+    if (depth <= 0) return getSurfaceMaterial(biome);
+    // 防卫：surfaceY>=0，否则退回到全局比例
+    float denom = (surfaceY >= 0) ? (float)(surfaceY + 1) : (float)m_h;
+    if (denom < 1.0f) denom = (float)m_h;
+    float relativeDepth = (float)depth / denom;
+
+    // 表土（1-6 格）
+    if (depth <= 6) {
+        switch (biome) {
+            case BiomeType::Desert:
+            case BiomeType::Beach:
+                return TileType::Sand;
+            case BiomeType::Swamp:
+                return TileType::Clay;
+            default:
+                return TileType::Dirt;
+        }
+    }
+    // 浅层至中层：以石为主
+    if (relativeDepth <= 0.25f) return TileType::Stone;
+    if (relativeDepth <= 0.6f)  return TileType::Stone;
+    // 深层：出现少量黑曜石
+    if (relativeDepth <= 0.75f) {
+        float obsidianNoise = m_noiseGen.caveNoise(static_cast<float>(depth), static_cast<float>(depth));
+        if (obsidianNoise > 0.4f) return TileType::Obsidian;
+        return TileType::Stone;
+    }
+    if (relativeDepth <= 0.9f)  return TileType::Obsidian;
+    return TileType::Bedrock;
+}
+
 bool TileMap::shouldGenerateOre(OreType ore, int x, int y, float caveNoise) const
 {
     // 计算深度
-    int surfaceY = findSurfaceY(x);
+    int surfaceY = findGroundSurfaceY(x);
     if (surfaceY == -1) surfaceY = m_h; // 若整列为空气，退化为 m_h（深度为负，后续将过滤）
     int depth = surfaceY - y;
     
@@ -1070,8 +1128,22 @@ TileType TileMap::oreTypeToTileType(OreType ore) const
 
 void TileMap::generateTree(int x, int y, int height, bool hasLeaves)
 {
+    auto canReplace = [&](TileType t)->bool {
+        switch (t) {
+            case TileType::Air:
+            case TileType::Flower:
+            case TileType::Grass_Decoration:
+            case TileType::Mushroom:
+            case TileType::Crystal:
+            case TileType::Leaves:
+                return true;
+            default:
+                return false;
+        }
+    };
     if (y >= m_h - height - 1 || x < 0 || x >= m_w) return;  // 边界检查
     
+    // 生成树干
     // 生成树干
     for (int h = 1; h <= height; ++h) {
         if (y + h >= m_h) break;
@@ -1087,10 +1159,10 @@ void TileMap::generateTree(int x, int y, int height, bool hasLeaves)
         if (height >= 4) {
             int leafY = y + height;
             // 左右两侧
-            if (x > 0 && leafY < m_h && get(x - 1, leafY) == TileType::Air) {
+            if (x > 0 && leafY < m_h && canReplace(get(x - 1, leafY))) {
                 set(x - 1, leafY, TileType::Leaves);
             }
-            if (x < m_w - 1 && leafY < m_h && get(x + 1, leafY) == TileType::Air) {
+            if (x < m_w - 1 && leafY < m_h && canReplace(get(x + 1, leafY))) {
                 set(x + 1, leafY, TileType::Leaves);
             }
         }

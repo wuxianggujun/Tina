@@ -15,9 +15,6 @@
 #include <EASTL/queue.h>
 #include <EASTL/stack.h>
 #include <EASTL/bitset.h>
-#include <EASTL/shared_ptr.h>
-#include <EASTL/unique_ptr.h>
-#include <EASTL/weak_ptr.h>
 #include <EASTL/functional.h>
 #include <EASTL/algorithm.h>
 #include <EASTL/sort.h>
@@ -25,6 +22,8 @@
 #include <EASTL/memory.h>
 
 #include "EASTL/priority_queue.h"
+
+// 注意：智能指针已移至 Memory.hpp（Core.hpp 会自动引入）
 
 namespace Tina {
     namespace Container {
@@ -102,48 +101,21 @@ namespace Tina {
         #endif
         
         // ====================
-        // 智能指针
-        // ====================
-        
-        // 独占指针
-        template<typename T, typename Deleter = eastl::default_delete<T>>
-        using UniquePtr = eastl::unique_ptr<T, Deleter>;
-        
-        // 共享指针
-        template<typename T>
-        using SharedPtr = eastl::shared_ptr<T>;
-        
-        // 弱指针
-        template<typename T>
-        using WeakPtr = eastl::weak_ptr<T>;
-        
-        // ====================
         // 工具类型
         // ====================
-        
+
         // 位集
         template<size_t N>
         using Bitset = eastl::bitset<N>;
-        
+
         // 配对
         template<typename T1, typename T2>
         using Pair = eastl::pair<T1, T2>;
-        
+
         // ====================
         // 常用函数别名
         // ====================
-        
-        // 创建智能指针的便捷函数
-        template<typename T, typename... Args>
-        TINA_CORE_API UniquePtr<T> MakeUnique(Args&&... args) {
-            return eastl::make_unique<T>(eastl::forward<Args>(args)...);
-        }
-        
-        template<typename T, typename... Args>
-        TINA_CORE_API SharedPtr<T> MakeShared(Args&&... args) {
-            return eastl::make_shared<T>(eastl::forward<Args>(args)...);
-        }
-        
+
         // 创建配对的便捷函数
         template<typename T1, typename T2>
         TINA_CORE_API constexpr Pair<eastl::decay_t<T1>, eastl::decay_t<T2>> MakePair(T1&& first, T2&& second) {

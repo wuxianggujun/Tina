@@ -212,6 +212,8 @@ public:
 
     // 水体元胞自动机更新：执行若干次水流步进，输出改变的 AABB（若无改变则 outMinX>outMaxX）
     bool stepWater(int iterations, int& outMinX, int& outMinY, int& outMaxX, int& outMaxY);
+    // 更严格的“地表”查找：忽略树木/树叶/装饰，仅视自然地表为地面
+    int findGroundSurfaceY(int x) const;
 
     // 新增：更智能的水流更新，支持压力传播和流速计算
     bool stepWaterAdvanced(int iterations, int& outMinX, int& outMinY, int& outMaxX, int& outMaxY);
@@ -225,6 +227,7 @@ private:
     // 根据生物群系获取地表材料
     TileType getSurfaceMaterial(BiomeType biome) const;
     TileType getSubsurfaceMaterial(BiomeType biome, int depth) const;
+    TileType getSubsurfaceMaterial(BiomeType biome, int depth, int surfaceY) const;
     
     // 矿物生成辅助
     bool shouldGenerateOre(OreType ore, int x, int y, float caveNoise) const;
