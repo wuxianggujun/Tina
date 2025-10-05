@@ -9,6 +9,7 @@
 #include "systems/PhysicsSystem.hpp"
 #include "systems/CharacterRenderSystem.hpp"
 #include "../game/TileMap.hpp"
+#include "../game/GameConfig.hpp"
 #include "../core/Container.hpp"
 #include <limits>
 #include <algorithm>
@@ -48,7 +49,7 @@ entt::entity World::createCharacter(float x, float y, bool isPlayerControlled) {
     m_registry.emplace<Velocity>(entity, 0.0f, 0.0f);
     m_registry.emplace<PhysicsBody>(entity, 0.8f, 2.0f, 32.0f, false);
     m_registry.emplace<CharacterController>(entity, 8.0f, 14.0f, 0.3f);
-    m_registry.emplace<Renderable>(entity, 1.0f, 0.5f, 0.2f, 1.0f); // 橙色
+    m_registry.emplace<Renderable>(entity, Tina::GameConfig::PLAYER_COLOR_R, Tina::GameConfig::PLAYER_COLOR_G, Tina::GameConfig::PLAYER_COLOR_B, Tina::GameConfig::PLAYER_COLOR_A);
     m_registry.emplace<CharacterTag>(entity);
 
     // 根据控制类型添加控制组件
@@ -126,3 +127,4 @@ int World::getCharacterCount() const {
 }
 
 } // namespace Tina::ECS
+

@@ -355,28 +355,6 @@ void TileMap::generateWater()
         }
     }
     // 海水填充 - 只填充地表的海洋区域，不填充地下洞穴
-    for (int x = 0; x < m_w; ++x) {
-        for (int y = 0; y <= m_seaLevel; ++y) {
-            if (get(x, y) == TileType::Air) {
-                // 检查是否为地下洞穴：向上追踪是否直接连接到地表
-                bool isUndergroundCave = false;
-                for (int checkY = y + 1; checkY < m_h; ++checkY) {
-                    TileType checkTile = get(x, checkY);
-                    if (checkTile != TileType::Air) {
-                        // 遇到固体，这是地下洞穴
-                        isUndergroundCave = true;
-                        break;
-                    }
-                }
-                
-                // 只在非地下洞穴的区域填充海水
-                if (!isUndergroundCave) {
-                    m_water[index(x, y)] = 255;
-                }
-            }
-        }
-    }
-    
     // 地狱层岩浆生成 - 改为液体系统
     int hellStart = static_cast<int>(m_h * 0.9f);
     for (int x = 0; x < m_w; ++x) {
