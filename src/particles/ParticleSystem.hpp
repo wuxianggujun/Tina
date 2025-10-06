@@ -29,7 +29,7 @@ public:
     ParticleSystem2D() = default;
     ~ParticleSystem2D() = default;
 
-    bool initialize(Tina::renderer::ShaderManager& sm, size_t capacity = 4096);
+    bool initialize(Tina::Renderer::ShaderManager& sm, size_t capacity = 4096);
     void shutdown();
 
     // 每帧更新（秒）
@@ -69,4 +69,3 @@ private:
 };
 
 } // namespace Tina::Particles
-

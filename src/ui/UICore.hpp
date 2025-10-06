@@ -19,7 +19,7 @@ public:
     ~UIRenderer() = default;
 
     // 传入 ShaderManager，加载 color 程序；可选绑定 TextRenderer 用于绘制文本
-    bool initialize(Tina::renderer::ShaderManager& sm, TextRenderer* text = nullptr);
+    bool initialize(Tina::Renderer::ShaderManager& sm, TextRenderer* text = nullptr);
     void shutdown();
 
     void setTextRenderer(TextRenderer* text) { m_text = text; }

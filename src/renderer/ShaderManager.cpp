@@ -6,7 +6,7 @@
 #include "core/Log.hpp"
 
 namespace Tina {
-namespace renderer {
+namespace Renderer {
 
 ShaderManager::~ShaderManager() {
     cleanup();
@@ -172,5 +172,5 @@ std::string ShaderManager::buildShaderPath(const std::string& shaderName, Stage 
     return fallback.string();
 }
 
-} // namespace renderer
+} // namespace Renderer
 } // namespace Tina

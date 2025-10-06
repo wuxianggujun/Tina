@@ -61,9 +61,14 @@ void UIEventSystem::processEvents()
     if (!m_mouseDown && m_mouseDownPrev) {
         if (m_pressedNode && m_pressedNode == hitNode) {
             // 只有在同一节点按下并释放才算点击
-            m_pressedNode->onClick();
+            m_pressedNode->onClick();  // 调用虚函数（用于子类重写）
             if (m_pressedNode->onClickCallback) {
-                m_pressedNode->onClickCallback();
+                m_pressedNode->onClickCallback();  // 触发旧的回调
+            }
+
+            // 如果是 UIButton，触发 Signal
+            if (auto* btn = dynamic_cast<UIButton*>(m_pressedNode)) {
+                btn->onClick.emit();  // 触发 Signal 事件
             }
         }
 

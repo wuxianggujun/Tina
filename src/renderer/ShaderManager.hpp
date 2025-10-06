@@ -5,7 +5,7 @@
 #include "../core/Container.hpp"
 
 namespace Tina {
-namespace renderer {
+namespace Renderer {
 
 class ShaderManager {
 public:
@@ -47,5 +47,5 @@ private:
     Tina::Container::HashMap<Tina::Container::String, bgfx::ProgramHandle> m_loadedPrograms;
 };
 
-} // namespace renderer
+} // namespace Renderer
 } // namespace Tina

@@ -17,7 +17,7 @@ static inline uint8_t toU8(float v) {
 }
 }
 
-bool ParticleSystem2D::initialize(Tina::renderer::ShaderManager& sm, size_t capacity)
+bool ParticleSystem2D::initialize(Tina::Renderer::ShaderManager& sm, size_t capacity)
 {
     m_particles.clear();
     m_particles.resize(capacity);

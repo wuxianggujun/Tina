@@ -131,7 +131,7 @@ void GameScene::initializeResources()
     TINA_INFO("GameScene: 初始化资源...");
 
     // 1. 着色器管理器
-    m_shaderMgr = Memory::MakeUnique<renderer::ShaderManager>();
+    m_shaderMgr = Memory::MakeUnique<Renderer::ShaderManager>();
     m_shaderMgr->initialize();
     m_progColor = m_shaderMgr->loadProgram("color", "color");
 

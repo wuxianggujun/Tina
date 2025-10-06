@@ -6,6 +6,7 @@
 
 #include "UINode.hpp"
 #include "../core/Color.hpp"
+#include "../core/Signal.hpp"
 #include "UIColors.hpp"
 
 namespace Tina::UI {
@@ -111,12 +112,23 @@ public:
     bool isPressed() const { return m_pressed; }
     bool isSelected() const { return m_selected; }
 
-    // 可选：悬停回调，便于外部展示 tooltip
-    std::function<void()> onHoverIn;
-    std::function<void()> onHoverOut;
+    // === Signal 事件（推荐使用）===
+    Tina::Core::Signal<> onClick;      // 点击事件（鼠标按下并松开）
+    Tina::Core::Signal<> onHoverEnter; // 鼠标进入
+    Tina::Core::Signal<> onHoverLeave; // 鼠标离开
 
-    void onMouseEnter() override { if (onHoverIn) onHoverIn(); }
-    void onMouseLeave() override { if (onHoverOut) onHoverOut(); }
+    // === 兼容旧代码：函数指针回调（已弃用，建议使用 Signal）===
+    std::function<void()> onHoverIn;   // [弃用] 使用 onHoverEnter.connect() 替代
+    std::function<void()> onHoverOut;  // [弃用] 使用 onHoverLeave.connect() 替代
+
+    void onMouseEnter() override {
+        onHoverEnter.emit();  // 触发 Signal
+        if (onHoverIn) onHoverIn();  // 兼容旧代码
+    }
+    void onMouseLeave() override {
+        onHoverLeave.emit();  // 触发 Signal
+        if (onHoverOut) onHoverOut();  // 兼容旧代码
+    }
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;

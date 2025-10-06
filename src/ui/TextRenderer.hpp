@@ -81,7 +81,7 @@ private:
     bgfx::TextureHandle m_debugTex = BGFX_INVALID_HANDLE;         // 调试 2x2 纹理
 
     // 着色器
-    Tina::renderer::ShaderManager m_shaderMgr;
+    Tina::Renderer::ShaderManager m_shaderMgr;
     bgfx::ProgramHandle m_prog = BGFX_INVALID_HANDLE;
     bgfx::VertexLayout m_layout;
 

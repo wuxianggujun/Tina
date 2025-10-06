@@ -10,7 +10,7 @@ struct ColorVtx {
     float r, g, b, a;
 };
 
-bool UIRenderer::initialize(Tina::renderer::ShaderManager& sm, TextRenderer* text)
+bool UIRenderer::initialize(Tina::Renderer::ShaderManager& sm, TextRenderer* text)
 {
     m_progColor = sm.loadProgram("color", "color");
     if (!bgfx::isValid(m_progColor)) return false;

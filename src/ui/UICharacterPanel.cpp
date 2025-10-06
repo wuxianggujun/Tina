@@ -74,13 +74,21 @@ UICharacterPanel::UICharacterPanel(const std::string& name)
     m_switchButton->setNormalColor(ButtonBlue);      // 蓝色按钮
     m_switchButton->setHoverColor(ButtonBlueHover);  // 蓝色按钮悬停
     m_switchButton->setTextColor(ButtonText);        // 白色文本
-    m_switchButton->onClickCallback = [this]() {
+
+    // 连接 Signal（推荐）
+    m_switchButtonConnection = m_switchButton->onClick.connect([this]() {
+        // 触发面板的 Signal
+        onSwitchControl.emit();
+
+        // 兼容旧代码：触发旧的回调
         if (m_switchControlCallback) {
             m_switchControlCallback();
-            // 点击后隐藏面板
-            setVisible(false);
         }
-    };
+
+        // 点击后隐藏面板
+        setVisible(false);
+    });
+
     m_background->addChild(m_switchButton);
 
     // 初始化事件系统（设置根节点为自己）

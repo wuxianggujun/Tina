@@ -71,7 +71,7 @@ private:
 
 private:
     // 渲染资源
-    Memory::UniquePtr<renderer::ShaderManager> m_shaderMgr;
+    Memory::UniquePtr<Renderer::ShaderManager> m_shaderMgr;
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
 
     Memory::UniquePtr<UI::TextRenderer> m_textRenderer;
