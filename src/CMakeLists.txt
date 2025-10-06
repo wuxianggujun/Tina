@@ -3,6 +3,15 @@ set(SRC_FILES
     os/OS.cpp
     engine/Resource.hpp
     engine/FileSystem.cpp
+    engine/Application.hpp
+    engine/Application.cpp
+    engine/Scene.hpp
+    engine/SceneManager.hpp
+    engine/SceneManager.cpp
+    engine/EventBus.hpp
+    engine/EventBus.cpp
+    game/GameScene.hpp
+    game/GameScene.cpp
     core/Path.cpp
     core/EASTLAlloc.cpp
     core/Noise.hpp
