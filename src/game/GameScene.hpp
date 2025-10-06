@@ -8,6 +8,7 @@
 #include "../game/Camera2D.hpp"
 #include "../renderer/TileRenderer.hpp"
 #include "../ui/TextRenderer.hpp"
+#include "../ui/UICore.hpp"  // UIRenderer
 #include "../ui/UIToolbar.hpp"
 #include "../ui/UICharacterPanel.hpp"
 #include "../particles/ParticleSystem.hpp"
@@ -49,11 +50,16 @@ private:
     // 输入处理
     void handleKeyboard(const Tina::os::Event& event);
     void handleMouse(const Tina::os::Event& event);
+    void handleRightClick(float mx, float my);
+    void handleLeftClick(float mx, float my);
 
     // 工具逻辑
     void useWaterTool(int worldX, int worldY);
     void useDiggerTool(int worldX, int worldY);
     void useExplodeTool(int worldX, int worldY);
+
+    // UI 设置
+    void setupUIView();
 
 private:
     // 渲染资源
@@ -61,6 +67,7 @@ private:
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
 
     Memory::UniquePtr<UI::TextRenderer> m_textRenderer;
+    Memory::UniquePtr<UI::UIRenderer> m_uiRenderer;
     Memory::UniquePtr<Particles::ParticleSystem2D> m_particleSystem;
     Memory::UniquePtr<Renderer::TileRenderer> m_tileRenderer;
 
@@ -75,6 +82,7 @@ private:
 
     // 游戏状态
     entt::entity m_playerEntity = entt::null;
+    entt::entity m_clickedEntity = entt::null;  // 右键点击的角色
     int m_currentTool = 0; // 0=注水器, 1=挖掘器, 2=爆炸器
     bool m_isToolActive = false;
 
