@@ -8,6 +8,7 @@
 #include <bgfx/bgfx.h>
 #include <string>
 #include "../renderer/ShaderManager.hpp"
+#include "../core/Color.hpp"
 #include "TextRenderer.hpp"
 
 namespace Tina::UI {
@@ -27,9 +28,18 @@ public:
     void drawRect(uint16_t viewId, float x, float y, float w, float h,
                   float r, float g, float b, float a);
 
+    // 在指定视图绘制纯色矩形（Core::Color 版本）
+    void drawRect(uint16_t viewId, float x, float y, float w, float h,
+                  const Tina::Core::Color& color);
+
     // 使用 TextRenderer 绘制文本（如未绑定，则忽略调用）
     void drawText(uint16_t viewId, float x, float y,
                   float r, float g, float b, float a,
+                  const std::string& utf8);
+
+    // 使用 TextRenderer 绘制文本（Core::Color 版本）
+    void drawText(uint16_t viewId, float x, float y,
+                  const Tina::Core::Color& color,
                   const std::string& utf8);
 
     // 文本扩展绘制：基于矩形与对齐参数绘制，内部使用 TextRenderer 的精确测量与基线对齐
@@ -37,6 +47,14 @@ public:
     enum class AlignV { Top, Center, Bottom, Baseline };
     void drawTextEx(uint16_t viewId, float x, float y, float w, float h,
                     float r, float g, float b, float a,
+                    const std::string& utf8,
+                    AlignH halign = AlignH::Center,
+                    AlignV valign = AlignV::Center,
+                    float padX = 0.0f, float padY = 0.0f);
+
+    // 文本扩展绘制（Core::Color 版本）
+    void drawTextEx(uint16_t viewId, float x, float y, float w, float h,
+                    const Tina::Core::Color& color,
                     const std::string& utf8,
                     AlignH halign = AlignH::Center,
                     AlignV valign = AlignV::Center,

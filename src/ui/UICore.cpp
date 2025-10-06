@@ -1,6 +1,7 @@
 #include "UICore.hpp"
 #include <bx/math.h>
 #include <cstring>
+#include "../core/Color.hpp"
 
 namespace Tina::UI {
 
@@ -61,12 +62,25 @@ void UIRenderer::drawRect(uint16_t viewId, float x, float y, float w, float h,
     bgfx::end(enc);
 }
 
+void UIRenderer::drawRect(uint16_t viewId, float x, float y, float w, float h,
+                          const Tina::Core::Color& color)
+{
+    drawRect(viewId, x, y, w, h, color.r(), color.g(), color.b(), color.a());
+}
+
 void UIRenderer::drawText(uint16_t viewId, float x, float y,
                           float r, float g, float b, float a,
                           const std::string& utf8)
 {
     if (!m_text) return;
     m_text->drawText(viewId, x, y, r, g, b, a, utf8.c_str());
+}
+
+void UIRenderer::drawText(uint16_t viewId, float x, float y,
+                          const Tina::Core::Color& color,
+                          const std::string& utf8)
+{
+    drawText(viewId, x, y, color.r(), color.g(), color.b(), color.a(), utf8);
 }
 
 void UIRenderer::drawTextEx(uint16_t viewId, float x, float y, float w, float h,
@@ -96,6 +110,16 @@ void UIRenderer::drawTextEx(uint16_t viewId, float x, float y, float w, float h,
 
     float textY = baselineY - (float)m_text->ascenderPx();
     m_text->drawText(viewId, textX, textY, r, g, b, a, utf8);
+}
+
+void UIRenderer::drawTextEx(uint16_t viewId, float x, float y, float w, float h,
+                            const Tina::Core::Color& color,
+                            const std::string& utf8,
+                            AlignH halign, AlignV valign,
+                            float padX, float padY)
+{
+    drawTextEx(viewId, x, y, w, h, color.r(), color.g(), color.b(), color.a(),
+               utf8, halign, valign, padX, padY);
 }
 
 } // namespace Tina::UI

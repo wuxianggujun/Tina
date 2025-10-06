@@ -18,14 +18,12 @@ void UIProgressBar::onRender(uint16_t viewId, UIRenderer& renderer) {
     float h = size.y;
 
     // 1. 绘制背景
-    renderer.drawRect(viewId, x, y, w, h,
-                      m_bgColor.r(), m_bgColor.g(), m_bgColor.b(), m_bgColor.a());
+    renderer.drawRect(viewId, x, y, w, h, m_bgColor);
 
     // 2. 绘制填充部分（根据进度）
     if (m_progress > 0.0f) {
         float fillWidth = w * m_progress;
-        renderer.drawRect(viewId, x, y, fillWidth, h,
-                          m_fillColor.r(), m_fillColor.g(), m_fillColor.b(), m_fillColor.a());
+        renderer.drawRect(viewId, x, y, fillWidth, h, m_fillColor);
     }
 
     // 3. 绘制边框（可选）
@@ -33,17 +31,13 @@ void UIProgressBar::onRender(uint16_t viewId, UIRenderer& renderer) {
         float bw = m_borderWidth;
 
         // 上边框
-        renderer.drawRect(viewId, x, y, w, bw,
-                          m_borderColor.r(), m_borderColor.g(), m_borderColor.b(), m_borderColor.a());
+        renderer.drawRect(viewId, x, y, w, bw, m_borderColor);
         // 下边框
-        renderer.drawRect(viewId, x, y + h - bw, w, bw,
-                          m_borderColor.r(), m_borderColor.g(), m_borderColor.b(), m_borderColor.a());
+        renderer.drawRect(viewId, x, y + h - bw, w, bw, m_borderColor);
         // 左边框
-        renderer.drawRect(viewId, x, y, bw, h,
-                          m_borderColor.r(), m_borderColor.g(), m_borderColor.b(), m_borderColor.a());
+        renderer.drawRect(viewId, x, y, bw, h, m_borderColor);
         // 右边框
-        renderer.drawRect(viewId, x + w - bw, y, bw, h,
-                          m_borderColor.r(), m_borderColor.g(), m_borderColor.b(), m_borderColor.a());
+        renderer.drawRect(viewId, x + w - bw, y, bw, h, m_borderColor);
     }
 }
 
