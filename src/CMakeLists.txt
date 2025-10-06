@@ -38,7 +38,11 @@ set(SRC_FILES
     ui/UIToolbar.hpp
     ui/UIToolbar.cpp
     ui/UILayout.hpp
-    
+    ui/UIProgressBar.hpp
+    ui/UIProgressBar.cpp
+    ui/UICharacterPanel.hpp
+    ui/UICharacterPanel.cpp
+
     # ECS
     ecs/World.hpp
     ecs/World.cpp

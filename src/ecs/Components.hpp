@@ -86,6 +86,29 @@ struct Renderable {
 };
 
 // ====================
+// 角色属性组件
+// ====================
+
+// 8. Name - 角色名称
+struct Name {
+    std::string name = "Unknown";
+};
+
+// 9. Health - 生命值
+struct Health {
+    float current = 100.0f;
+    float max = 100.0f;
+
+    float percentage() const {
+        return max > 0.0f ? (current / max) : 0.0f;
+    }
+
+    bool isDead() const {
+        return current <= 0.0f;
+    }
+};
+
+// ====================
 // 标记组件（用于筛选实体）
 // ====================
 

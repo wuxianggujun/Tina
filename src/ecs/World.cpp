@@ -13,6 +13,7 @@
 #include "../core/Container.hpp"
 #include <limits>
 #include <algorithm>
+#include <string>
 
 namespace Tina::ECS {
 
@@ -51,6 +52,16 @@ entt::entity World::createCharacter(float x, float y, bool isPlayerControlled) {
     m_registry.emplace<CharacterController>(entity, 8.0f, 14.0f, 0.3f);
     m_registry.emplace<Renderable>(entity, Tina::GameConfig::PLAYER_COLOR_R, Tina::GameConfig::PLAYER_COLOR_G, Tina::GameConfig::PLAYER_COLOR_B, Tina::GameConfig::PLAYER_COLOR_A);
     m_registry.emplace<CharacterTag>(entity);
+
+    // 添加角色属性组件
+    static int characterCount = 0;
+    characterCount++;
+    if (isPlayerControlled) {
+        m_registry.emplace<Name>(entity, "玩家");
+    } else {
+        m_registry.emplace<Name>(entity, "角色 #" + std::to_string(characterCount - 1));
+    }
+    m_registry.emplace<Health>(entity, 100.0f, 100.0f);  // 满血100/100
 
     // 根据控制类型添加控制组件
     if (isPlayerControlled) {

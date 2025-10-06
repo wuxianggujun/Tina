@@ -190,6 +190,7 @@ void TileMap::generateOres()
 
 void TileMap::generateSurfaceFeatures()
 {
+    int nextTreeAllowedX = 0;
     // 统一的地表特征生成系统 - 只在真正的地表生成，不在洞穴顶部生成
     for (int x = 0; x < m_w; ++x) {
         // 从上往下找到第一个固体方块，这才是真正的地表
@@ -211,13 +212,67 @@ void TileMap::generateSurfaceFeatures()
             float secondaryNoise = m_noiseGen.temperatureNoise(static_cast<float>(x * 0.7f), static_cast<float>(surfaceY * 0.7f));
             float decorationNoise = m_noiseGen.caveNoise(static_cast<float>(x * 0.3f), static_cast<float>(surfaceY * 0.3f));
 
+            // 邻域扫描：避免与相邻列贴紧成排（检查附近是否已有树干）
+            auto hasNearbyTree = [&]() -> bool {
+                const int scanDX = 2;
+                const int scanDYTop = 6;
+                for (int dx = -scanDX; dx <= scanDX; ++dx) {
+                    int cx = x + dx;
+                    if (cx < 0 || cx >= m_w) continue;
+                    for (int dy = 1; dy <= scanDYTop; ++dy) {
+                        int cy = surfaceY + dy;
+                        if (cy < 0 || cy >= m_h) continue;
+                        if (get(cx, cy) == TileType::Wood) return true;
+                    }
+                }
+                return false;
+            };
+
             // 优先级系统：树木 > 大型装饰 > 小型装饰
             bool featureGenerated = false;
 
-            // 第一优先级：生成树木（降低概率 + 地面校验）
-            if (!featureGenerated && isNaturalGroundForTrees() && shouldGenerateTree(biome, primaryNoise, secondaryNoise)) {
-                generateTreeForBiome(x, surfaceY, biome, primaryNoise, secondaryNoise);
-                featureGenerated = true;
+            // 先尝试带“间距 + 蓝噪声 + 邻域去重”的树木生成（若成功，后续原始块会被跳过）
+            if (!featureGenerated && isNaturalGroundForTrees()) {
+                int baseSpacing = 3;
+                switch (biome) {
+                    case BiomeType::Forest: baseSpacing = 2; break;
+                    case BiomeType::Plains: baseSpacing = 4; break;
+                    case BiomeType::Swamp:  baseSpacing = 3; break;
+                    default: baseSpacing = 5; break;
+                }
+                float jitterN = m_noiseGen.humidityNoise((float)x * 1.37f, (float)surfaceY * 0.53f);
+                int jitter = (jitterN > 0.66f) ? 1 : 0;
+                int requiredSpacing = baseSpacing + jitter;
+                bool spacingOk = (x >= nextTreeAllowedX);
+                float blue = m_noiseGen.oreNoise((float)x * 0.77f, (float)surfaceY * 0.23f, 777);
+                bool blueOk = (blue > 0.35f);
+                if (spacingOk && blueOk && !hasNearbyTree() && shouldGenerateTree(biome, primaryNoise, secondaryNoise)) {
+                    generateTreeForBiome(x, surfaceY, biome, primaryNoise, secondaryNoise);
+                    featureGenerated = true;
+                    nextTreeAllowedX = x + requiredSpacing;
+                }
+            }
+
+            // 第一优先级：生成树木（地面校验 + 间距 + 蓝噪声 + 邻域去重）
+            if (!featureGenerated && isNaturalGroundForTrees()) {
+                int baseSpacing = 3;
+                switch (biome) {
+                    case BiomeType::Forest: baseSpacing = 2; break;
+                    case BiomeType::Plains: baseSpacing = 4; break;
+                    case BiomeType::Swamp:  baseSpacing = 3; break;
+                    default: baseSpacing = 5; break;
+                }
+                float jitterN = m_noiseGen.humidityNoise(static_cast<float>(x) * 1.37f, static_cast<float>(surfaceY) * 0.53f);
+                int jitter = (jitterN > 0.66f) ? 1 : 0;
+                int requiredSpacing = baseSpacing + jitter;
+                bool spacingOk = (x >= nextTreeAllowedX);
+                float blue = m_noiseGen.oreNoise(static_cast<float>(x) * 0.77f, static_cast<float>(surfaceY) * 0.23f, 777);
+                bool blueOk = (blue > 0.35f);
+                if (spacingOk && blueOk && !hasNearbyTree() && shouldGenerateTree(biome, primaryNoise, secondaryNoise)) {
+                    generateTreeForBiome(x, surfaceY, biome, primaryNoise, secondaryNoise);
+                    featureGenerated = true;
+                    nextTreeAllowedX = x + requiredSpacing;
+                }
             }
 
             // 第二优先级：生成大型装饰（沿用原有判定）
@@ -232,12 +287,33 @@ void TileMap::generateSurfaceFeatures()
                 featureGenerated = true;
             }
             // 兜底：森林列仍未生成任何表面特征，按湿度概率强制生成一棵小树
-            if (!featureGenerated && biome == BiomeType::Forest) {
+            if (!featureGenerated && biome == BiomeType::Forest && x >= nextTreeAllowedX && !hasNearbyTree()) {
                 float fallback = m_noiseGen.humidityNoise(static_cast<float>(x), static_cast<float>(surfaceY));
                 if (fallback > 0.65f) {
                     int height = 3 + static_cast<int>(primaryNoise * 3);
                     generateTree(x, surfaceY, height, true);
                     featureGenerated = true;
+                    nextTreeAllowedX = x + 2;
+                }
+            }
+            // 兜底：平原列小概率生成小树，提升可见度
+            if (!featureGenerated && biome == BiomeType::Plains && x >= nextTreeAllowedX && !hasNearbyTree()) {
+                float chance = m_noiseGen.humidityNoise(static_cast<float>(x * 1.3f), static_cast<float>(surfaceY * 0.7f));
+                if (chance > 0.58f) {
+                    int height = 2 + static_cast<int>(primaryNoise * 3);
+                    generateTree(x, surfaceY, height, true);
+                    featureGenerated = true;
+                    nextTreeAllowedX = x + 4;
+                }
+            }
+            // 兜底：沼泽列更易生成矮树（无叶）
+            if (!featureGenerated && biome == BiomeType::Swamp && x >= nextTreeAllowedX && !hasNearbyTree()) {
+                float chance = m_noiseGen.humidityNoise(static_cast<float>(x * 0.9f), static_cast<float>(surfaceY * 0.9f));
+                if (chance > 0.52f) {
+                    int height = 2 + static_cast<int>(primaryNoise * 2);
+                    generateTree(x, surfaceY, height, false);
+                    featureGenerated = true;
+                    nextTreeAllowedX = x + 3;
                 }
             }
         }
@@ -605,14 +681,14 @@ bool TileMap::shouldGenerateTree(BiomeType biome, float primaryNoise, float seco
 {
     switch (biome) {
         case BiomeType::Forest:
-            // 放宽阈值，提高森林列的出树率
-            return (primaryNoise > 0.35f && secondaryNoise > 0.25f);
+            // 进一步放宽阈值，保证森林能明显长树
+            return (primaryNoise > 0.30f && secondaryNoise > 0.20f);
         case BiomeType::Plains:
-            // 平原适度稀疏树林
-            return primaryNoise > 0.75f;
+            // 平原也应能零星生长一些树
+            return primaryNoise > 0.60f;
         case BiomeType::Swamp:
-            // 沼泽适度生成
-            return primaryNoise > 0.50f;
+            // 沼泽树更易出现
+            return primaryNoise > 0.45f;
         case BiomeType::Desert:
         case BiomeType::Tundra:
         case BiomeType::Mountain:
@@ -1238,4 +1314,10 @@ void TileMap::generateBigTree(int x, int y)
 }
 
 } // namespace Tina::Game
+
+
+
+
+
+
 

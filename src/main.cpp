@@ -20,6 +20,7 @@
 #include "renderer/TileRenderer.hpp"
 #include "ui/TextRenderer.hpp"
 #include "ui/UIToolbar.hpp"
+#include "ui/UICharacterPanel.hpp"
 #include "particles/ParticleSystem.hpp"
 
 using Tina::os::Event;
@@ -113,6 +114,11 @@ int main(int /*argc*/, char* /*argv*/[])
     uiRenderer.initialize(*shaderMgr, &text);
     Tina::UI::UIToolbar toolbar;
     toolbar.initialize(pxW, pxH, uiRenderer, &text);
+
+    // 角色信息面板
+    Tina::UI::UICharacterPanel characterPanel;
+    characterPanel.centerOnScreen(pxW, pxH);
+
     // 渲染器
     Tina::Renderer::TileRenderer tileRenderer; tileRenderer.initialize();
 
@@ -163,7 +169,27 @@ int main(int /*argc*/, char* /*argv*/[])
         spawnY = std::clamp(mapCfg.height / 2, 2, mapCfg.height - 3);
     }
 
-    ecsWorld.createCharacter((float)spawnX, (float)spawnY, /*isPlayerControlled*/ true);
+    // 创建玩家角色（玩家控制）
+    auto playerEntity = ecsWorld.createCharacter((float)spawnX, (float)spawnY, /*isPlayerControlled*/ true);
+
+    // 创建额外的AI角色（在玩家附近）
+    // 角色1：玩家右侧5格
+    auto npc1 = ecsWorld.createCharacter((float)spawnX + 5.0f, (float)spawnY, false);
+    ecsWorld.registry().get<Tina::ECS::Renderable>(npc1).r = 0.2f;
+    ecsWorld.registry().get<Tina::ECS::Renderable>(npc1).g = 1.0f;
+    ecsWorld.registry().get<Tina::ECS::Renderable>(npc1).b = 0.2f;  // 绿色
+
+    // 角色2：玩家左侧5格
+    auto npc2 = ecsWorld.createCharacter((float)spawnX - 5.0f, (float)spawnY, false);
+    ecsWorld.registry().get<Tina::ECS::Renderable>(npc2).r = 0.2f;
+    ecsWorld.registry().get<Tina::ECS::Renderable>(npc2).g = 0.5f;
+    ecsWorld.registry().get<Tina::ECS::Renderable>(npc2).b = 1.0f;  // 蓝色
+
+    // 角色3：玩家右侧10格
+    auto npc3 = ecsWorld.createCharacter((float)spawnX + 10.0f, (float)spawnY, false);
+    ecsWorld.registry().get<Tina::ECS::Renderable>(npc3).r = 1.0f;
+    ecsWorld.registry().get<Tina::ECS::Renderable>(npc3).g = 1.0f;
+    ecsWorld.registry().get<Tina::ECS::Renderable>(npc3).b = 0.2f;  // 黄色
 
     // 相机（世界单位：1=1格）- 将改为跟随玩家
     float camX = 0.0f, camY = 0.0f;
@@ -199,45 +225,121 @@ int main(int /*argc*/, char* /*argv*/[])
                     SetupOrtho(3, 0.0f, (float)pxW, (float)pxH, 0.0f);
                     camera.setViewportPixels(pxW, pxH);
                     toolbar.onResize(pxW, pxH);
+                    characterPanel.centerOnScreen(pxW, pxH);
                     break;
                 case Event::Type::MOUSE_BUTTON:
                 {
                     bool __toolbarHandled = false;
                     if (ev.mouse_button.down) {
-                        // 禁用旧右键分支：统一由左键 + 工具选择驱动
+                        // 右键点击：查看角色信息（不切换控制）
                         if (ev.mouse_button.button == Tina::os::MouseButton::RIGHT) {
-                            __toolbarHandled = true;
-                        }
-                        if (ev.mouse_button.button == Tina::os::MouseButton::LEFT) mouseLeftDown = true;
-                        float mx=0.0f, my=0.0f; SDL_GetMouseState(&mx, &my);
-                        // 若命中 UI，交给 UI 系统处理
-                        if (toolbar.hitTest(mx, my)) {
-                            __toolbarHandled = true;
-                        } else {
+                            float mx=0.0f, my=0.0f;
+                            SDL_GetMouseState(&mx, &my);
+
+                            // 转换到世界坐标
                             float wx=0.0f, wy=0.0f;
                             Tina::Game::screenToWorld(mx, my, pxW, pxH, camera, wx, wy);
-                            int tx = (int)std::floor(wx);
-                            int ty = (int)std::floor(wy);
-                            if (ev.mouse_button.button == Tina::os::MouseButton::LEFT &&
-                                tx>=0 && ty>=0 && tx<mapCfg.width && ty<mapCfg.height) {
-                                int tool = toolbar.selectedIndex(); if (tool < 0) tool = 0;
-                                switch (tool) {
-                                    case 0: // 注水
-                                        Tina::Game::placeWater(tilemap, tx, ty, 255);
+
+                            // 检测所有角色
+                            auto& reg = ecsWorld.registry();
+                            auto view = reg.view<Tina::ECS::Transform, Tina::ECS::PhysicsBody,
+                                                 Tina::ECS::Name, Tina::ECS::Health>();
+
+                            bool clickedCharacter = false;
+                            for (auto entity : view) {
+                                auto& transform = view.get<Tina::ECS::Transform>(entity);
+                                auto& body = view.get<Tina::ECS::PhysicsBody>(entity);
+                                auto& name = view.get<Tina::ECS::Name>(entity);
+                                auto& health = view.get<Tina::ECS::Health>(entity);
+
+                                // AABB碰撞检测
+                                if (wx >= transform.x && wx <= transform.x + body.width &&
+                                    wy >= transform.y && wy <= transform.y + body.height) {
+                                    // 点击了角色！更新面板数据
+                                    characterPanel.updateData(name.name, health.percentage());
+                                    characterPanel.setVisible(true);
+                                    clickedCharacter = true;
+                                    TINA_INFO("查看角色信息: {}, 血量: {:.0f}/{:.0f}", name.name, health.current, health.max);
+                                    break;
+                                }
+                            }
+
+                            // 如果没点击角色，隐藏面板
+                            if (!clickedCharacter) {
+                                characterPanel.setVisible(false);
+                            }
+
+                            __toolbarHandled = true;
+                        }
+
+                        // 左键点击：检测角色并切换控制（点击世界则显示工具栏）
+                        if (ev.mouse_button.button == Tina::os::MouseButton::LEFT) {
+                            mouseLeftDown = true;
+                            float mx=0.0f, my=0.0f;
+                            SDL_GetMouseState(&mx, &my);
+
+                            // 如果点击了工具栏，处理工具栏事件
+                            if (toolbar.hitTest(mx, my)) {
+                                __toolbarHandled = true;
+                            } else {
+                                // 转换到世界坐标
+                                float wx=0.0f, wy=0.0f;
+                                Tina::Game::screenToWorld(mx, my, pxW, pxH, camera, wx, wy);
+                                int tx = (int)std::floor(wx);
+                                int ty = (int)std::floor(wy);
+
+                                // 检测所有角色
+                                auto& reg = ecsWorld.registry();
+                                auto view = reg.view<Tina::ECS::Transform, Tina::ECS::PhysicsBody,
+                                                     Tina::ECS::Name, Tina::ECS::Health>();
+
+                                bool clickedCharacter = false;
+                                for (auto entity : view) {
+                                    auto& transform = view.get<Tina::ECS::Transform>(entity);
+                                    auto& body = view.get<Tina::ECS::PhysicsBody>(entity);
+                                    auto& name = view.get<Tina::ECS::Name>(entity);
+
+                                    // AABB碰撞检测
+                                    if (wx >= transform.x && wx <= transform.x + body.width &&
+                                        wy >= transform.y && wy <= transform.y + body.height) {
+                                        // 点击了角色！切换控制权
+                                        ecsWorld.switchControl(entity);
+                                        // 隐藏工具栏（控制角色时不需要编辑地形）
+                                        toolbar.root()->setVisible(false);
+                                        clickedCharacter = true;
+                                        TINA_INFO("切换控制到角色: {}", name.name);
                                         break;
-                                    case 1: // 挖空（圆形）
-                                    case 2: { // 爆炸：挖空 + 粒子
-                                        Tina::Game::excavateCircle(tilemap, wx, wy, Tina::GameConfig::EXCAVATE_RADIUS);
-                                        if (tool == 2) {
-                                            particles.explode(wx, wy,
-                                                              /*count*/ 260,
-                                                              /*speed*/ 6.0f, 14.0f,
-                                                              /*size*/ 0.30f, 0.90f,
-                                                              /*life*/ 0.6f, 1.6f,
-                                                              /*color*/ 0.78f, 0.70f, 0.58f);
+                                    }
+                                }
+
+                                // 如果没点击角色，说明点击了世界
+                                if (!clickedCharacter) {
+                                    // 显示工具栏，允许编辑地形
+                                    toolbar.root()->setVisible(true);
+
+                                    // 执行地形编辑工具
+                                    if (tx>=0 && ty>=0 && tx<mapCfg.width && ty<mapCfg.height) {
+                                        int tool = toolbar.selectedIndex();
+                                        if (tool < 0) tool = 0;
+                                        switch (tool) {
+                                            case 0: // 注水
+                                                Tina::Game::placeWater(tilemap, tx, ty, 255);
+                                                break;
+                                            case 1: // 挖空（圆形）
+                                            case 2: { // 爆炸：挖空 + 粒子
+                                                Tina::Game::excavateCircle(tilemap, wx, wy, Tina::GameConfig::EXCAVATE_RADIUS);
+                                                if (tool == 2) {
+                                                    particles.explode(wx, wy,
+                                                                      /*count*/ 260,
+                                                                      /*speed*/ 6.0f, 14.0f,
+                                                                      /*size*/ 0.30f, 0.90f,
+                                                                      /*life*/ 0.6f, 1.6f,
+                                                                      /*color*/ 0.78f, 0.70f, 0.58f);
+                                                }
+                                            } break;
+                                            default: break;
                                         }
-                                    } break;
-                                    default: break;
+                                    }
                                 }
                                 __toolbarHandled = true;
                             }
@@ -388,12 +490,13 @@ int main(int /*argc*/, char* /*argv*/[])
 
 
         // UI 文本（视图3，像素坐标，最后绘制）
-        float hudY = (float)toolbar.barHeight() + 12.0f;
+        // 如果工具栏可见，文本在工具栏下方；否则在屏幕顶部
+        float hudY = toolbar.root()->isVisible() ? (float)toolbar.barHeight() + 12.0f : 12.0f;
         uiRenderer.drawTextEx(3,
                               16.0f, hudY,
                               (float)pxW - 32.0f, 28.0f,
                               1,1,1,1,
-                              "A/D 移动 | W/空格 跳跃 | 左键执行工具 | 滚轮/数字键切换",
+                              "A/D 移动 | W/空格 跳跃 | 左键点击角色切换控制/点击地形编辑 | 右键查看角色信息 | 滚轮/数字键切换工具",
                               Tina::UI::UIRenderer::AlignH::Left,
                               Tina::UI::UIRenderer::AlignV::Top,
                               0.0f, 0.0f);
@@ -408,6 +511,11 @@ int main(int /*argc*/, char* /*argv*/[])
             toolbar.events().processEvents();
             toolbar.update((float)frameTimer.deltaSeconds());
             toolbar.render(3);
+
+            // 角色信息面板更新与渲染
+            characterPanel.update((float)frameTimer.deltaSeconds());
+            characterPanel.render(3, uiRenderer);
+
             // 将 mouseLeftDown 退回到 false，实现一次性点击沿用事件边沿
             mouseLeftDown = false;
         }
