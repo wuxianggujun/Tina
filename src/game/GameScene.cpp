@@ -148,8 +148,9 @@ void GameScene::initializeResources()
     if (!m_particleSystem->initialize(*m_shaderMgr)) {
         TINA_WARN("ParticleSystem 初始化失败：无粒子效果");
     } else {
-        m_particleSystem->setGlobalAcceleration(0.0f, -12.0f);
-        m_particleSystem->setDrag(0.10f);
+        m_particleSystem->setGlobalAcceleration(GameConfig::PARTICLE_GRAVITY_X,
+                                                 GameConfig::PARTICLE_GRAVITY_Y);
+        m_particleSystem->setDrag(GameConfig::PARTICLE_DRAG);
     }
 
     // 4. 瓦片渲染器
@@ -166,128 +167,171 @@ void GameScene::createGameWorld()
 {
     TINA_INFO("GameScene: 创建游戏世界...");
 
-    // 1. 创建地图
+    createTileMap();
+    createECS();
+    createCamera();
+    createUI();
+
+    // 查找出生点并生成角色
+    int spawnX = 0, spawnY = 0;
+    if (!findSpawnPoint(spawnX, spawnY)) {
+        TINA_WARN("未找到合适出生点，使用地图中心");
+        spawnX = m_tileMap->width() / 2;
+        spawnY = m_tileMap->height() / 2;
+    }
+    spawnCharacters(spawnX, spawnY);
+
+    TINA_INFO("GameScene: 游戏世界创建完成");
+}
+
+void GameScene::createTileMap()
+{
     TileMapConfig mapCfg;
-    mapCfg.width = 160;
-    mapCfg.height = 90;
-    mapCfg.seed = 1337;
+    mapCfg.width = GameConfig::DEFAULT_MAP_WIDTH;
+    mapCfg.height = GameConfig::DEFAULT_MAP_HEIGHT;
+    mapCfg.seed = GameConfig::DEFAULT_MAP_SEED;
 
     m_tileMap = Memory::MakeUnique<TileMap>(mapCfg);
     m_tileMap->generate();
+    TINA_INFO("地图创建完成: {}x{}, 种子={}", mapCfg.width, mapCfg.height, mapCfg.seed);
+}
 
-    // 2. 创建 ECS 世界
+void GameScene::createECS()
+{
     m_ecsWorld = Memory::MakeUnique<ECS::World>();
+    TINA_INFO("ECS 世界创建完成");
+}
 
-    // 3. 创建相机
-    float viewH = std::min(60.0f, (float)mapCfg.height);
+void GameScene::createCamera()
+{
+    float viewH = std::min(GameConfig::DEFAULT_VIEW_HEIGHT, (float)m_tileMap->height());
     m_camera = Memory::MakeUnique<Camera2D>();
     m_camera->setViewportPixels(m_pixelWidth, m_pixelHeight);
     m_camera->setViewHeightWorld(viewH);
+    TINA_INFO("相机创建完成: 视图高度={}", viewH);
+}
 
-    // 4. 创建 UI
-    // 4.1 UI 渲染器（作为成员变量）
+void GameScene::createUI()
+{
+    // UI 渲染器
     m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
     m_uiRenderer->initialize(*m_shaderMgr, m_textRenderer.get());
 
-    // 4.2 工具栏
+    // 工具栏
     m_toolbar = Memory::MakeUnique<UI::UIToolbar>();
     m_toolbar->initialize(m_pixelWidth, m_pixelHeight, *m_uiRenderer, m_textRenderer.get());
 
-    // 4.3 角色面板
+    // 角色面板
     m_characterPanel = Memory::MakeUnique<UI::UICharacterPanel>();
     m_characterPanel->centerOnScreen(m_pixelWidth, m_pixelHeight);
 
-    // 5. 查找玩家出生点
-    int spawnX = mapCfg.width / 2;
-    int spawnY = mapCfg.height / 2;
+    TINA_INFO("UI 创建完成");
+}
 
+bool GameScene::findSpawnPoint(int& outX, int& outY)
+{
+    if (!m_tileMap) return false;
+
+    int mapW = m_tileMap->width();
+    int mapH = m_tileMap->height();
+    int centerX = mapW / 2;
+
+    // Lambda：判断是否为自然地面
     auto isNaturalGround = [&](TileType t) { return m_tileMap->isNaturalGround(t); };
 
-    auto findSpawnInColumn = [&](int cx, int& outY) -> bool {
-        if (cx < 0 || cx >= mapCfg.width) return false;
-        for (int y = mapCfg.height - 3; y >= 0; --y) {
+    // Lambda：在指定列查找出生点（向下扫描，寻找地面 + 两格空气）
+    auto findSpawnInColumn = [&](int cx, int& outYLocal) -> bool {
+        if (cx < 0 || cx >= mapW) return false;
+        for (int y = mapH - GameConfig::SPAWN_OFFSET_FROM_BOTTOM; y >= 0; --y) {
             auto base = m_tileMap->get(cx, y);
             if (!isNaturalGround(base)) continue;
-            if (y + 2 >= mapCfg.height) continue;
+            if (y + 2 >= mapH) continue;
 
             auto up1 = m_tileMap->get(cx, y + 1);
             auto up2 = m_tileMap->get(cx, y + 2);
 
+            // 确保上方两格为空气，且无液体
             if (up1 == TileType::Air && up2 == TileType::Air &&
                 !m_tileMap->isWater(cx, y + 1) && !m_tileMap->isWater(cx, y + 2) &&
                 !m_tileMap->isLava(cx, y + 1) && !m_tileMap->isLava(cx, y + 2)) {
-                outY = y + 1;
+                outYLocal = y + 1;
                 return true;
             }
         }
         return false;
     };
 
-    bool foundSpawn = findSpawnInColumn(spawnX, spawnY);
+    // 1. 优先尝试地图中心
+    bool found = findSpawnInColumn(centerX, outY);
+    if (found) {
+        outX = centerX;
+        return true;
+    }
 
-    if (!foundSpawn) {
-        int maxRadius = std::min(40, mapCfg.width / 2);
-        for (int dx = 1; dx <= maxRadius && !foundSpawn; ++dx) {
-            int left = spawnX - dx;
-            int right = spawnX + dx;
-            if (findSpawnInColumn(left, spawnY)) {
-                spawnX = left;
-                foundSpawn = true;
-                break;
-            }
-            if (findSpawnInColumn(right, spawnY)) {
-                spawnX = right;
-                foundSpawn = true;
-                break;
-            }
+    // 2. 螺旋搜索中心附近
+    int maxRadius = std::min(GameConfig::SPAWN_SEARCH_MAX_RADIUS, mapW / 2);
+    for (int dx = 1; dx <= maxRadius && !found; ++dx) {
+        int left = centerX - dx;
+        int right = centerX + dx;
+        if (findSpawnInColumn(left, outY)) {
+            outX = left;
+            return true;
+        }
+        if (findSpawnInColumn(right, outY)) {
+            outX = right;
+            return true;
         }
     }
 
-    if (!foundSpawn) {
-        spawnX = std::clamp(spawnX, 0, mapCfg.width - 1);
-        spawnY = std::clamp(mapCfg.height / 2, 2, mapCfg.height - 3);
-    }
+    return false;
+}
 
-    // 6. 创建角色
-    // 6.1 玩家
+void GameScene::spawnCharacters(int spawnX, int spawnY)
+{
+    // 1. 玩家
     m_playerEntity = m_ecsWorld->createCharacter((float)spawnX, (float)spawnY, true);
+    TINA_INFO("玩家生成: ({}, {})", spawnX, spawnY);
 
-    // 6.2 NPC
-    auto npc1 = m_ecsWorld->createCharacter((float)spawnX + 5.0f, (float)spawnY, false);
+    // 2. NPC（绿色）
+    auto npc1 = m_ecsWorld->createCharacter(
+        (float)spawnX + GameConfig::NPC_SPAWN_OFFSET_1, (float)spawnY, false);
     m_ecsWorld->registry().get<ECS::Renderable>(npc1).r = 0.2f;
     m_ecsWorld->registry().get<ECS::Renderable>(npc1).g = 1.0f;
     m_ecsWorld->registry().get<ECS::Renderable>(npc1).b = 0.2f;
 
-    auto npc2 = m_ecsWorld->createCharacter((float)spawnX - 5.0f, (float)spawnY, false);
+    // 3. NPC（蓝色）
+    auto npc2 = m_ecsWorld->createCharacter(
+        (float)spawnX - GameConfig::NPC_SPAWN_OFFSET_2, (float)spawnY, false);
     m_ecsWorld->registry().get<ECS::Renderable>(npc2).r = 0.2f;
     m_ecsWorld->registry().get<ECS::Renderable>(npc2).g = 0.5f;
     m_ecsWorld->registry().get<ECS::Renderable>(npc2).b = 1.0f;
 
-    auto npc3 = m_ecsWorld->createCharacter((float)spawnX + 10.0f, (float)spawnY, false);
+    // 4. NPC（黄色）
+    auto npc3 = m_ecsWorld->createCharacter(
+        (float)spawnX + GameConfig::NPC_SPAWN_OFFSET_3, (float)spawnY, false);
     m_ecsWorld->registry().get<ECS::Renderable>(npc3).r = 1.0f;
     m_ecsWorld->registry().get<ECS::Renderable>(npc3).g = 1.0f;
     m_ecsWorld->registry().get<ECS::Renderable>(npc3).b = 0.2f;
 
-    // 7. 设置角色面板回调
-    entt::entity* pClickedEntity = &m_clickedEntity;  // 捕获指针
-    m_characterPanel->setSwitchControlCallback([this, pClickedEntity]() {
-        if (*pClickedEntity != entt::null) {
-            m_ecsWorld->switchControl(*pClickedEntity);
+    // 5. 设置角色面板回调（切换控制）
+    m_characterPanel->setSwitchControlCallback([this]() {
+        if (m_clickedEntity != entt::null) {
+            m_ecsWorld->switchControl(m_clickedEntity);
             m_toolbar->root()->setVisible(false);
             TINA_INFO("切换控制到角色");
         }
     });
 
-    TINA_INFO("GameScene: 游戏世界创建完成");
+    TINA_INFO("角色生成完成: 1 玩家 + 3 NPC");
 }
 
 void GameScene::updateGameLogic(float dt)
 {
-    // 1. 获取键盘输入
+    // 1. 获取键盘输入（SDL 键盘状态适合连续输入，如移动）
     SDL_PumpEvents();
     const bool* ks = SDL_GetKeyboardState(nullptr);
 
-    // 2. ECS 输入与更新
+    // 2. ECS 输入与更新（物理、碰撞、AI 等）
     ECS::InputState input{};
     input.moveLeft = ks[SDL_SCANCODE_A] || ks[SDL_SCANCODE_LEFT];
     input.moveRight = ks[SDL_SCANCODE_D] || ks[SDL_SCANCODE_RIGHT];
@@ -295,28 +339,17 @@ void GameScene::updateGameLogic(float dt)
 
     m_ecsWorld->update(dt, *m_tileMap, input);
 
-    // 3. 水模拟
+    // 3. 水模拟（每帧执行多步流体模拟）
     int a, b, c, d;
-    m_tileMap->stepWaterAdvanced(2, a, b, c, d);
+    m_tileMap->stepWaterAdvanced(GameConfig::WATER_STEP_COUNT, a, b, c, d);
 
-    // 4. 粒子更新
+    // 4. 粒子更新（爆炸、碎片等视觉效果）
     if (m_particleSystem) {
         m_particleSystem->update(dt);
     }
 
-    // 5. 工具栏快捷键
-    if (m_toolbar) {
-        if (ks[SDL_SCANCODE_1]) m_toolbar->select(0);
-        if (ks[SDL_SCANCODE_2]) m_toolbar->select(1);
-        if (ks[SDL_SCANCODE_3]) m_toolbar->select(2);
-        if (ks[SDL_SCANCODE_4]) m_toolbar->select(3);
-        if (ks[SDL_SCANCODE_5]) m_toolbar->select(4);
-        if (ks[SDL_SCANCODE_6]) m_toolbar->select(5);
-        if (ks[SDL_SCANCODE_7]) m_toolbar->select(6);
-        if (ks[SDL_SCANCODE_8]) m_toolbar->select(7);
-    }
-
-    // 6. 连续清除工具（左键按住 + 工具1=挖掘）
+    // 5. 连续清除工具（左键按住 + 工具1=挖掘）
+    // 注：SDL 鼠标状态适合检测按住状态，而非单击
     {
         float mx = 0.0f, my = 0.0f;
         uint32_t btnMask = (uint32_t)SDL_GetMouseState(&mx, &my);
@@ -327,7 +360,7 @@ void GameScene::updateGameLogic(float dt)
 #endif
         if (leftHeld && m_toolbar && !m_toolbar->hitTest(mx, my)) {
             int tool = m_toolbar->selectedIndex();
-            if (tool == 1) {
+            if (tool == 1) {  // 工具1=挖掘器
                 float wx = 0.0f, wy = 0.0f;
                 screenToWorld(mx, my, m_pixelWidth, m_pixelHeight, *m_camera, wx, wy);
                 excavateCircle(*m_tileMap, wx, wy, GameConfig::EXCAVATE_RADIUS);
@@ -335,7 +368,7 @@ void GameScene::updateGameLogic(float dt)
         }
     }
 
-    // 7. UI 更新
+    // 6. UI 更新（工具栏、角色面板）
     if (m_toolbar) {
         float mx = 0.0f, my = 0.0f;
         SDL_GetMouseState(&mx, &my);
@@ -353,7 +386,7 @@ void GameScene::updateGameLogic(float dt)
         m_characterPanel->update(dt);
     }
 
-    // 重置工具激活状态（实现一次性点击）
+    // 重置工具激活状态（实现一次性点击，防止 UI 事件连续触发）
     m_isToolActive = false;
 }
 
@@ -361,7 +394,7 @@ void GameScene::updateCamera(float dt)
 {
     if (!m_camera || !m_ecsWorld) return;
 
-    // 获取视区尺寸
+    // 获取视区尺寸（世界单位）
     float viewW = (float)m_camera->viewW();
     float viewH = (float)m_camera->viewH();
 
@@ -376,21 +409,23 @@ void GameScene::updateCamera(float dt)
             auto& tr = reg.get<ECS::Transform>(controlled);
             auto& pb = reg.get<ECS::PhysicsBody>(controlled);
 
+            // 计算角色中心点
             float centerX = tr.x + pb.width * 0.5f;
             float centerY = tr.y + pb.height * 0.5f;
 
+            // 目标相机位置（角色居中）
             targetCamX = centerX - viewW * 0.5f;
             targetCamY = centerY - viewH * 0.5f;
         }
     }
 
-    // 平滑跟随
+    // 平滑跟随（插值，避免相机抖动）
     float camX = m_camera->x();
     float camY = m_camera->y();
-    camX += (targetCamX - camX) * 0.1f;
-    camY += (targetCamY - camY) * 0.1f;
+    camX += (targetCamX - camX) * GameConfig::CAMERA_SMOOTH_FACTOR;
+    camY += (targetCamY - camY) * GameConfig::CAMERA_SMOOTH_FACTOR;
 
-    // 限制相机边界
+    // 限制相机边界（防止相机超出地图范围）
     if (m_tileMap) {
         int mapW = m_tileMap->width();
         int mapH = m_tileMap->height();
@@ -405,24 +440,26 @@ void GameScene::renderWorld()
 {
     if (!m_tileRenderer || !m_tileMap || !m_camera) return;
 
-    // 构建相机矩阵
+    // 构建相机矩阵（视图矩阵 + 投影矩阵）
     float viewM[16], projM[16];
     m_camera->buildViewProj(viewM, projM);
 
-    // 设置世界视图（view 1 = 固体，view 2 = 液体/角色）
+    // 设置世界视图（view 1 = 固体地形，view 2 = 液体/角色）
+    // 注：分离固体和液体渲染，实现半透明水体效果
     bgfx::setViewRect(1, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
     bgfx::setViewRect(2, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
     bgfx::setViewTransform(1, viewM, projM);
     bgfx::setViewTransform(2, viewM, projM);
 
-    // 设置清屏（view 1 负责清理颜色和深度缓冲）
-    bgfx::setViewClear(1, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
+    // 设置清屏（view 1 负责清理颜色和深度缓冲，防止残影）
+    // 关键：必须调用 setViewClear，touch() 不会清理帧缓冲
+    bgfx::setViewClear(1, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, GameConfig::CLEAR_COLOR, 1.0f, 0);
 
-    // 触摸视图（确保视图被渲染）
+    // 触摸视图（确保视图被渲染，即使没有几何体）
     bgfx::touch(1);
     bgfx::touch(2);
 
-    // 渲染地形
+    // 渲染地形（固体 -> view 1，液体 -> view 2）
     bgfx::VertexLayout colorLayout;
     colorLayout.begin()
         .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
@@ -432,12 +469,12 @@ void GameScene::renderWorld()
     m_tileRenderer->renderSolid(*m_tileMap, 1, m_progColor, colorLayout);
     m_tileRenderer->renderWater(*m_tileMap, 2, m_progColor, colorLayout);
 
-    // 渲染角色
+    // 渲染角色（ECS 实体，view 2 确保在液体层之上）
     if (m_ecsWorld) {
         m_ecsWorld->render(2, m_progColor, colorLayout);
     }
 
-    // 渲染粒子
+    // 渲染粒子（爆炸、碎片等特效，view 2）
     if (m_particleSystem) {
         m_particleSystem->render(2);
     }
@@ -450,10 +487,14 @@ void GameScene::renderUI()
     // UI 视图已在 initializeResources() 中设置
 
     // 渲染提示文本
-    float hudY = m_toolbar->root()->isVisible() ? (float)m_toolbar->barHeight() + 12.0f : 12.0f;
+    float hudY = m_toolbar->root()->isVisible()
+        ? (float)m_toolbar->barHeight() + GameConfig::UI_HUD_PADDING_Y
+        : GameConfig::UI_HUD_PADDING_Y;
+
     m_uiRenderer->drawTextEx(3,
-                             16.0f, hudY,
-                             (float)m_pixelWidth - 32.0f, 28.0f,
+                             GameConfig::UI_HUD_PADDING_X, hudY,
+                             (float)m_pixelWidth - GameConfig::UI_HUD_WIDTH_MARGIN,
+                             GameConfig::UI_HUD_HEIGHT,
                              1, 1, 1, 1,
                              "A/D 移动 | W/空格 跳跃 | 左键地形编辑 | 右键查看角色并切换控制 | 滚轮/数字键切换工具",
                              UI::UIRenderer::AlignH::Left,
@@ -469,9 +510,23 @@ void GameScene::renderUI()
     }
 }
 
-void GameScene::handleKeyboard(const Tina::os::Event& /*event*/)
+void GameScene::handleKeyboard(const Tina::os::Event& event)
 {
-    // 键盘输入在 updateGameLogic() 中处理（SDL 键盘状态）
+    if (!m_toolbar) return;
+    if (event.type != os::Event::Type::KEY || !event.key.down) return;
+
+    // 工具栏快捷键（数字键 1-8，通过事件处理）
+    switch (event.key.key_code) {
+        case os::KeyCode::KEY_1: m_toolbar->select(0); break;
+        case os::KeyCode::KEY_2: m_toolbar->select(1); break;
+        case os::KeyCode::KEY_3: m_toolbar->select(2); break;
+        case os::KeyCode::KEY_4: m_toolbar->select(3); break;
+        case os::KeyCode::KEY_5: m_toolbar->select(4); break;
+        case os::KeyCode::KEY_6: m_toolbar->select(5); break;
+        case os::KeyCode::KEY_7: m_toolbar->select(6); break;
+        case os::KeyCode::KEY_8: m_toolbar->select(7); break;
+        default: break;
+    }
 }
 
 void GameScene::handleMouse(const Tina::os::Event& event)
@@ -583,7 +638,7 @@ void GameScene::handleLeftClick(float mx, float my)
 void GameScene::useWaterTool(int worldX, int worldY)
 {
     if (!m_tileMap) return;
-    placeWater(*m_tileMap, worldX, worldY, 255);
+    placeWater(*m_tileMap, worldX, worldY, GameConfig::WATER_MAX_LEVEL);
 }
 
 void GameScene::useDiggerTool(int worldX, int worldY)
@@ -606,19 +661,20 @@ void GameScene::useExplodeTool(int worldX, int worldY)
 
     // 粒子效果
     m_particleSystem->explode(wx, wy,
-                               /*count*/ 260,
-                               /*speed*/ 6.0f, 14.0f,
-                               /*size*/ 0.30f, 0.90f,
-                               /*life*/ 0.6f, 1.6f,
-                               /*color*/ Core::Color(0.78f, 0.70f, 0.58f, 1.0f));
+                               GameConfig::EXPLODE_PARTICLE_COUNT,
+                               GameConfig::EXPLODE_SPEED_MIN, GameConfig::EXPLODE_SPEED_MAX,
+                               GameConfig::EXPLODE_SIZE_MIN, GameConfig::EXPLODE_SIZE_MAX,
+                               GameConfig::EXPLODE_LIFE_MIN, GameConfig::EXPLODE_LIFE_MAX,
+                               Core::Color(0.78f, 0.70f, 0.58f, 1.0f));
 }
 
 void GameScene::setupUIView()
 {
     // 设置 UI 视图（view 3，像素坐标，y 向下）
+    // 注：UI 使用屏幕坐标系统，原点在左上角，与世界坐标不同
     bgfx::setViewRect(3, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
 
-    // 构建正交矩阵
+    // 构建正交矩阵（2D 投影，无透视）
     float ortho[16];
     const bgfx::Caps* caps = bgfx::getCaps();
     bx::mtxOrtho(ortho,

@@ -53,23 +53,50 @@ namespace Tina::os {
             return static_cast<SDL_Window*>(h);
         }
 
-        // 基础键位映射（可逐步扩展）
+        // SDL_Scancode → KeyCode 映射（完整版本）
         KeyCode map_keycode(SDL_Scancode sc) {
             switch (sc) {
+                // === 数字键（主键盘）===
+                case SDL_SCANCODE_0: return KeyCode::KEY_0;
+                case SDL_SCANCODE_1: return KeyCode::KEY_1;
+                case SDL_SCANCODE_2: return KeyCode::KEY_2;
+                case SDL_SCANCODE_3: return KeyCode::KEY_3;
+                case SDL_SCANCODE_4: return KeyCode::KEY_4;
+                case SDL_SCANCODE_5: return KeyCode::KEY_5;
+                case SDL_SCANCODE_6: return KeyCode::KEY_6;
+                case SDL_SCANCODE_7: return KeyCode::KEY_7;
+                case SDL_SCANCODE_8: return KeyCode::KEY_8;
+                case SDL_SCANCODE_9: return KeyCode::KEY_9;
+
+                // === 字母键 ===
                 case SDL_SCANCODE_A: return KeyCode::A;
+                case SDL_SCANCODE_B: return KeyCode::B;
                 case SDL_SCANCODE_C: return KeyCode::C;
                 case SDL_SCANCODE_D: return KeyCode::D;
                 case SDL_SCANCODE_E: return KeyCode::E;
                 case SDL_SCANCODE_F: return KeyCode::F;
+                case SDL_SCANCODE_G: return KeyCode::G;
+                case SDL_SCANCODE_H: return KeyCode::H;
+                case SDL_SCANCODE_I: return KeyCode::I;
+                case SDL_SCANCODE_J: return KeyCode::J;
                 case SDL_SCANCODE_K: return KeyCode::K;
+                case SDL_SCANCODE_L: return KeyCode::L;
+                case SDL_SCANCODE_M: return KeyCode::M;
+                case SDL_SCANCODE_N: return KeyCode::N;
+                case SDL_SCANCODE_O: return KeyCode::O;
                 case SDL_SCANCODE_P: return KeyCode::P;
+                case SDL_SCANCODE_Q: return KeyCode::Q;
                 case SDL_SCANCODE_R: return KeyCode::R;
                 case SDL_SCANCODE_S: return KeyCode::S;
+                case SDL_SCANCODE_T: return KeyCode::T;
+                case SDL_SCANCODE_U: return KeyCode::U;
                 case SDL_SCANCODE_V: return KeyCode::V;
                 case SDL_SCANCODE_W: return KeyCode::W;
                 case SDL_SCANCODE_X: return KeyCode::X;
                 case SDL_SCANCODE_Y: return KeyCode::Y;
                 case SDL_SCANCODE_Z: return KeyCode::Z;
+
+                // === 功能键 ===
                 case SDL_SCANCODE_F1: return KeyCode::F1;
                 case SDL_SCANCODE_F2: return KeyCode::F2;
                 case SDL_SCANCODE_F3: return KeyCode::F3;
@@ -82,21 +109,53 @@ namespace Tina::os {
                 case SDL_SCANCODE_F10: return KeyCode::F10;
                 case SDL_SCANCODE_F11: return KeyCode::F11;
                 case SDL_SCANCODE_F12: return KeyCode::F12;
+
+                // === 方向键 ===
                 case SDL_SCANCODE_LEFT: return KeyCode::LEFT;
                 case SDL_SCANCODE_RIGHT: return KeyCode::RIGHT;
                 case SDL_SCANCODE_UP: return KeyCode::UP;
                 case SDL_SCANCODE_DOWN: return KeyCode::DOWN;
+
+                // === 特殊键 ===
                 case SDL_SCANCODE_RETURN: return KeyCode::RETURN;
                 case SDL_SCANCODE_ESCAPE: return KeyCode::ESCAPE;
                 case SDL_SCANCODE_SPACE: return KeyCode::SPACE;
                 case SDL_SCANCODE_TAB: return KeyCode::TAB;
                 case SDL_SCANCODE_BACKSPACE: return KeyCode::BACKSPACE;
+                case SDL_SCANCODE_INSERT: return KeyCode::INSERT;
+                case SDL_SCANCODE_DELETE: return KeyCode::DEL;
+                case SDL_SCANCODE_HOME: return KeyCode::HOME;
+                case SDL_SCANCODE_END: return KeyCode::END;
+                case SDL_SCANCODE_PAGEUP: return KeyCode::PAGEUP;
+                case SDL_SCANCODE_PAGEDOWN: return KeyCode::PAGEDOWN;
+
+                // === 修饰键 ===
                 case SDL_SCANCODE_LSHIFT: return KeyCode::LSHIFT;
                 case SDL_SCANCODE_RSHIFT: return KeyCode::RSHIFT;
                 case SDL_SCANCODE_LCTRL: return KeyCode::LCTRL;
                 case SDL_SCANCODE_RCTRL: return KeyCode::RCTRL;
                 case SDL_SCANCODE_LALT: return KeyCode::LALT;
                 case SDL_SCANCODE_RALT: return KeyCode::RALT;
+
+                // === 小键盘数字键 ===
+                case SDL_SCANCODE_KP_0: return KeyCode::NUMPAD0;
+                case SDL_SCANCODE_KP_1: return KeyCode::NUMPAD1;
+                case SDL_SCANCODE_KP_2: return KeyCode::NUMPAD2;
+                case SDL_SCANCODE_KP_3: return KeyCode::NUMPAD3;
+                case SDL_SCANCODE_KP_4: return KeyCode::NUMPAD4;
+                case SDL_SCANCODE_KP_5: return KeyCode::NUMPAD5;
+                case SDL_SCANCODE_KP_6: return KeyCode::NUMPAD6;
+                case SDL_SCANCODE_KP_7: return KeyCode::NUMPAD7;
+                case SDL_SCANCODE_KP_8: return KeyCode::NUMPAD8;
+                case SDL_SCANCODE_KP_9: return KeyCode::NUMPAD9;
+
+                // === 小键盘运算符 ===
+                case SDL_SCANCODE_KP_MULTIPLY: return KeyCode::MULTIPLY;
+                case SDL_SCANCODE_KP_PLUS: return KeyCode::ADD;
+                case SDL_SCANCODE_KP_MINUS: return KeyCode::SUBTRACT;
+                case SDL_SCANCODE_KP_PERIOD: return KeyCode::DECIMAL;
+                case SDL_SCANCODE_KP_DIVIDE: return KeyCode::DIVIDE;
+
                 default: return KeyCode::INVALID;
             }
         }

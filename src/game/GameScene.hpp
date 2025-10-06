@@ -47,6 +47,14 @@ private:
     void renderWorld();
     void renderUI();
 
+    // 世界创建辅助函数
+    void createTileMap();
+    void createECS();
+    void createCamera();
+    void createUI();
+    void spawnCharacters(int spawnX, int spawnY);
+    bool findSpawnPoint(int& outX, int& outY);
+
     // 输入处理
     void handleKeyboard(const Tina::os::Event& event);
     void handleMouse(const Tina::os::Event& event);
@@ -83,8 +91,7 @@ private:
     // 游戏状态
     entt::entity m_playerEntity = entt::null;
     entt::entity m_clickedEntity = entt::null;  // 右键点击的角色
-    int m_currentTool = 0; // 0=注水器, 1=挖掘器, 2=爆炸器
-    bool m_isToolActive = false;
+    bool m_isToolActive = false;  // 标记当前帧是否有工具激活（用于 UI 事件处理）
 
     // 视口尺寸
     int m_pixelWidth = 1280;
