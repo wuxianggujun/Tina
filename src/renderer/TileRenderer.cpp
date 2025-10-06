@@ -10,33 +10,33 @@ namespace Tina::Renderer {
 
 using Tina::Game::TileType;
 
-Tina::Container::Array<float,4> TileRenderer::getTileColor(TileType t) const
+Tina::Core::Color TileRenderer::getTileColor(TileType t) const
 {
     using Tina::Core::Color;
     switch (t) {
-        case TileType::Grass:    return Color::rgba(0.18f, 0.72f, 0.28f, 1.0f).toArray();
-        case TileType::Dirt:     return Color::rgba(0.55f, 0.38f, 0.22f, 1.0f).toArray();
-        case TileType::Stone:    return Color::rgba(0.55f, 0.55f, 0.58f, 1.0f).toArray();
-        case TileType::Sand:     return Color::rgba(0.94f, 0.86f, 0.51f, 1.0f).toArray();
-        case TileType::Snow:     return Color::rgba(0.95f, 0.95f, 0.98f, 1.0f).toArray();
-        case TileType::Ice:      return Color::rgba(0.68f, 0.85f, 0.90f, 1.0f).toArray();
-        case TileType::Water:    return Color::rgba(0.15f, 0.35f, 0.90f, 0.95f).toArray();
-        case TileType::Lava:     return Color::rgba(0.90f, 0.25f, 0.10f, 1.0f).toArray();
-        case TileType::Coal:     return Color::rgba(0.20f, 0.20f, 0.20f, 1.0f).toArray();
-        case TileType::Iron:     return Color::rgba(0.60f, 0.55f, 0.50f, 1.0f).toArray();
-        case TileType::Gold:     return Color::rgba(0.90f, 0.75f, 0.20f, 1.0f).toArray();
-        case TileType::Diamond:  return Color::rgba(0.85f, 0.95f, 0.95f, 1.0f).toArray();
-        case TileType::Clay:     return Color::rgba(0.72f, 0.45f, 0.30f, 1.0f).toArray();
-        case TileType::Bedrock:  return Color::rgba(0.15f, 0.15f, 0.15f, 1.0f).toArray();
-        case TileType::Obsidian: return Color::rgba(0.25f, 0.15f, 0.25f, 1.0f).toArray();
-        case TileType::Wood:     return Color::rgba(0.45f, 0.35f, 0.25f, 1.0f).toArray();
-        case TileType::Leaves:   return Color::rgba(0.25f, 0.60f, 0.30f, 1.0f).toArray();
-        case TileType::Flower:   return Color::rgba(0.85f, 0.40f, 0.70f, 1.0f).toArray();
-        case TileType::Grass_Decoration: return Color::rgba(0.25f, 0.85f, 0.25f, 1.0f).toArray();
-        case TileType::Mushroom: return Color::rgba(0.80f, 0.35f, 0.30f, 1.0f).toArray();
-        case TileType::Crystal:  return Color::rgba(0.85f, 0.95f, 1.0f, 1.0f).toArray();
-        case TileType::Rock:     return Color::rgba(0.45f, 0.45f, 0.48f, 1.0f).toArray();
-        default:                 return Color::rgba(0.0f,  0.0f,  0.0f,  0.0f).toArray();
+        case TileType::Grass:    return Color::rgba(0.18f, 0.72f, 0.28f, 1.0f);
+        case TileType::Dirt:     return Color::rgba(0.55f, 0.38f, 0.22f, 1.0f);
+        case TileType::Stone:    return Color::rgba(0.55f, 0.55f, 0.58f, 1.0f);
+        case TileType::Sand:     return Color::rgba(0.94f, 0.86f, 0.51f, 1.0f);
+        case TileType::Snow:     return Color::rgba(0.95f, 0.95f, 0.98f, 1.0f);
+        case TileType::Ice:      return Color::rgba(0.68f, 0.85f, 0.90f, 1.0f);
+        case TileType::Water:    return Color::rgba(0.15f, 0.35f, 0.90f, 0.95f);
+        case TileType::Lava:     return Color::rgba(0.90f, 0.25f, 0.10f, 1.0f);
+        case TileType::Coal:     return Color::rgba(0.20f, 0.20f, 0.20f, 1.0f);
+        case TileType::Iron:     return Color::rgba(0.60f, 0.55f, 0.50f, 1.0f);
+        case TileType::Gold:     return Color::rgba(0.90f, 0.75f, 0.20f, 1.0f);
+        case TileType::Diamond:  return Color::rgba(0.85f, 0.95f, 0.95f, 1.0f);
+        case TileType::Clay:     return Color::rgba(0.72f, 0.45f, 0.30f, 1.0f);
+        case TileType::Bedrock:  return Color::rgba(0.15f, 0.15f, 0.15f, 1.0f);
+        case TileType::Obsidian: return Color::rgba(0.25f, 0.15f, 0.25f, 1.0f);
+        case TileType::Wood:     return Color::rgba(0.45f, 0.35f, 0.25f, 1.0f);
+        case TileType::Leaves:   return Color::rgba(0.25f, 0.60f, 0.30f, 1.0f);
+        case TileType::Flower:   return Color::rgba(0.85f, 0.40f, 0.70f, 1.0f);
+        case TileType::Grass_Decoration: return Color::rgba(0.25f, 0.85f, 0.25f, 1.0f);
+        case TileType::Mushroom: return Color::rgba(0.80f, 0.35f, 0.30f, 1.0f);
+        case TileType::Crystal:  return Color::rgba(0.85f, 0.95f, 1.0f, 1.0f);
+        case TileType::Rock:     return Color::rgba(0.45f, 0.45f, 0.48f, 1.0f);
+        default:                 return Color::rgba(0.0f,  0.0f,  0.0f,  0.0f);
     }
 }
 
@@ -62,9 +62,9 @@ void TileRenderer::renderSolid(const Tina::Game::TileMap& map,
     for (int y = H - 1; y >= 0; --y) for (int x = 0; x < W; ++x) {
         TileType t = map.get(x, y);
         if (t == TileType::Air || t == TileType::Water || t == TileType::Lava) continue;
-        auto c4 = getTileColor(t);
+        auto col = getTileColor(t);
         float x0 = (float)x, y0 = (float)y, x1 = x0 + 1.0f, y1 = y0 + 1.0f;
-        appendQuad(vptr, iptr, vb, ib, x0, y0, x1, y1, c4[0], c4[1], c4[2], c4[3]);
+        appendQuad(vptr, iptr, vb, ib, x0, y0, x1, y1, col.r(), col.g(), col.b(), col.a());
     }
 
     if (ib > 0) {
@@ -102,8 +102,8 @@ void TileRenderer::renderWater(const Tina::Game::TileMap& map,
         int wv = (int)map.water(x, y); if (wv <= 0) continue;
         float hfrac = (float)map.water(x, y) / 255.0f; if (hfrac <= 0.01f) continue;
         float x0 = (float)x, y0 = (float)y, x1 = x0 + 1.0f; float yh = y0 + std::min(1.0f, hfrac);
-        float alphaW = std::min(1.0f, std::max(0.25f, cw[3] * (0.6f + 0.4f * hfrac)));
-        appendQuad(vptr, iptr, vb, ib, x0, y0, x1, yh, cw[0], cw[1], cw[2], alphaW);
+        float alphaW = std::min(1.0f, std::max(0.25f, cw.a() * (0.6f + 0.4f * hfrac)));
+        appendQuad(vptr, iptr, vb, ib, x0, y0, x1, yh, cw.r(), cw.g(), cw.b(), alphaW);
     }
 
     if (ib > 0) {

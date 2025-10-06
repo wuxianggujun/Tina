@@ -88,7 +88,7 @@ void ParticleSystem2D::render(uint16_t viewId)
     for (const auto& p : m_particles) {
         if (!p.alive) continue;
         const float t = (p.lifeMax > 0.0f) ? (p.life / p.lifeMax) : 0.0f;
-        const float alpha = p.a * bx::pow(bx::max(0.0f, t), 1.2f); // 随寿命衰减
+        const float alpha = p.color.a() * bx::pow(bx::max(0.0f, t), 1.2f); // 随寿命衰减
         const float s = p.size;
 
         // 轴对齐四边形（世界坐标）
@@ -97,9 +97,9 @@ void ParticleSystem2D::render(uint16_t viewId)
         const float x1 = p.x + s * 0.5f;
         const float y1 = p.y + s * 0.5f;
 
-        const uint8_t cr = toU8(p.r);
-        const uint8_t cg = toU8(p.g);
-        const uint8_t cb = toU8(p.b);
+        const uint8_t cr = toU8(p.color.r());
+        const uint8_t cg = toU8(p.color.g());
+        const uint8_t cb = toU8(p.color.b());
         const uint8_t ca = toU8(alpha);
 
         vptr[vb + 0] = { x0, y0, 0.0f, 0.0f, 0.0f, cr,cg,cb,ca };
@@ -133,14 +133,14 @@ void ParticleSystem2D::render(uint16_t viewId)
 }
 
 int ParticleSystem2D::spawnOne(float x, float y, float vx, float vy, float size, float life,
-                               float r, float g, float b, float a)
+                               const Tina::Core::Color& color)
 {
     for (size_t i = 0; i < m_particles.size(); ++i) {
         if (!m_particles[i].alive) {
             Particle& p = m_particles[i];
             p.x = x; p.y = y; p.vx = vx; p.vy = vy;
             p.size = size; p.life = life; p.lifeMax = life;
-            p.r = r; p.g = g; p.b = b; p.a = a; p.alive = true;
+            p.color = color; p.alive = true;
             return static_cast<int>(i);
         }
     }
@@ -151,7 +151,7 @@ void ParticleSystem2D::explode(float wx, float wy, int count,
                                float speedMin, float speedMax,
                                float sizeMin, float sizeMax,
                                float lifeMin, float lifeMax,
-                               float baseR, float baseG, float baseB)
+                               const Tina::Core::Color& baseColor)
 {
     static thread_local std::mt19937 rng{ std::random_device{}() };
     std::uniform_real_distribution<float> u01(0.0f, 1.0f);
@@ -164,11 +164,14 @@ void ParticleSystem2D::explode(float wx, float wy, int count,
         const float size = sizeMin + (sizeMax - sizeMin) * u01(rng);
         const float life = lifeMin + (lifeMax - lifeMin) * u01(rng);
         const float jitter = 0.25f + 0.75f * u01(rng);
-        const float r = bx::clamp(baseR * jitter, 0.0f, 1.0f);
-        const float g = bx::clamp(baseG * jitter, 0.0f, 1.0f);
-        const float b = bx::clamp(baseB * jitter, 0.0f, 1.0f);
-        const float a = 1.0f;
-        spawnOne(wx, wy, vx, vy, size, life, r, g, b, a);
+
+        // 基于基础颜色添加抖动
+        const float r = bx::clamp(baseColor.r() * jitter, 0.0f, 1.0f);
+        const float g = bx::clamp(baseColor.g() * jitter, 0.0f, 1.0f);
+        const float b = bx::clamp(baseColor.b() * jitter, 0.0f, 1.0f);
+        const float a = baseColor.a();
+
+        spawnOne(wx, wy, vx, vy, size, life, Tina::Core::Color(r, g, b, a));
     }
 }
 

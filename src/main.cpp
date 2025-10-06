@@ -322,7 +322,7 @@ int main(int /*argc*/, char* /*argv*/[])
                                                                   /*speed*/ 6.0f, 14.0f,
                                                                   /*size*/ 0.30f, 0.90f,
                                                                   /*life*/ 0.6f, 1.6f,
-                                                                  /*color*/ 0.78f, 0.70f, 0.58f);
+                                                                  /*color*/ Tina::Core::Color(0.78f, 0.70f, 0.58f, 1.0f));
                                             }
                                         } break;
                                         default: break;
@@ -363,14 +363,14 @@ int main(int /*argc*/, char* /*argv*/[])
                                     float dx = cx-wx, dy = cy-wy;
                                     if (dx*dx+dy*dy <= r2) tilemap.setSafe(x,y, Tina::Game::TileType::Air);
                                 }
-                                // 右键爆炸：纯视觉“尘雾”粒子（不启用物理碎块）
+                                // 右键爆炸：纯视觉"尘雾"粒子（不启用物理碎块）
                                 if (ev.mouse_button.button == Tina::os::MouseButton::RIGHT) {
                                     particles.explode(wx, wy,
                                                       /*count*/ 260,
                                                       /*speed*/ 6.0f, 14.0f,
                                                       /*size*/ 0.30f, 0.90f,
                                                       /*life*/ 0.6f, 1.6f,
-                                                      /*color*/ 0.78f, 0.70f, 0.58f);
+                                                      /*color*/ Tina::Core::Color(0.78f, 0.70f, 0.58f, 1.0f));
                                 }
                             }
                         }

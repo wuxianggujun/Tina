@@ -1,6 +1,6 @@
 //
 // 纯视觉2D粒子系统（不依赖物理引擎）
-// - 粒子：位置(x,y)、速度(vx,vy)、颜色(r,g,b,a)、尺寸(size)、寿命(life, lifeMax)
+// - 粒子：位置(x,y)、速度(vx,vy)、颜色(Color)、尺寸(size)、寿命(life, lifeMax)
 // - 支持爆炸型发射（右键示例）与逐帧更新/渲染
 // - 渲染：CPU 生成四边形顶点，bgfx Transient Buffer 提交，粒子着色器使用径向衰减
 //
@@ -9,6 +9,7 @@
 
 #include <bgfx/bgfx.h>
 #include "../core/Container.hpp"
+#include "../core/Color.hpp"
 #include "../renderer/ShaderManager.hpp"
 
 namespace Tina::Particles {
@@ -19,7 +20,7 @@ struct Particle {
     float size = 1.0f;
     float life = 0.0f;     // 剩余寿命（秒）
     float lifeMax = 0.0f;  // 初始寿命（秒）
-    float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f; // 颜色（0..1）
+    Tina::Core::Color color = Tina::Core::Color::White(); // 颜色
     bool alive = false;
 };
 
@@ -37,13 +38,13 @@ public:
     // 渲染到指定视图（要求外部已设置正交投影与视口）
     void render(uint16_t viewId);
 
-    // 右键爆炸示例：在 (wx,wy) 处生成若干粒子
+    // 爆炸效果：在 (wx,wy) 处生成若干粒子，支持 Color 参数
     void explode(float wx, float wy,
                  int count = 300,
                  float speedMin = 8.0f, float speedMax = 22.0f,
                  float sizeMin = 0.15f, float sizeMax = 0.45f,
                  float lifeMin = 0.6f, float lifeMax = 1.2f,
-                 float baseR = 1.0f, float baseG = 0.7f, float baseB = 0.2f);
+                 const Tina::Core::Color& baseColor = Tina::Core::Color(1.0f, 0.7f, 0.2f, 1.0f));
 
     // 参数设置
     void setGlobalAcceleration(float ax, float ay) { m_ax = ax; m_ay = ay; }
@@ -54,7 +55,7 @@ private:
                  float vx, float vy,
                  float size,
                  float life,
-                 float r, float g, float b, float a);
+                 const Tina::Core::Color& color);
 
 private:
     Tina::Container::Vector<Particle> m_particles;

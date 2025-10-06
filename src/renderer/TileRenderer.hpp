@@ -9,6 +9,7 @@
 #include <cstdint>
 #include "../game/TileMap.hpp"
 #include "../core/Container.hpp"
+#include "../core/Color.hpp"
 
 namespace Tina::Renderer {
 
@@ -18,8 +19,8 @@ class TileRenderer {
 public:
     void initialize() {}
 
-    // 从原 main.cpp 迁移：根据 TileType 获取颜色（r,g,b,a）
-    Tina::Container::Array<float,4> getTileColor(Tina::Game::TileType t) const;
+    // 从原 main.cpp 迁移：根据 TileType 获取颜色
+    Tina::Core::Color getTileColor(Tina::Game::TileType t) const;
 
     // 渲染固体瓦片（整格）
     void renderSolid(const Tina::Game::TileMap& map,

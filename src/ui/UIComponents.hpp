@@ -17,51 +17,47 @@ class UIPanel : public UINode {
 public:
     UIPanel(const std::string& name = "Panel")
         : UINode(name)
-    {
-        auto a = Tina::UI::UIColors::PanelBg.toArray();
-        m_color = { a[0], a[1], a[2], a[3] };
-    }
+        , m_color(Tina::UI::UIColors::PanelBg)
+    {}
 
     void setColor(float r, float g, float b, float a) {
-        m_color = {r, g, b, a};
+        m_color = Tina::Core::Color(r, g, b, a);
     }
     void setColor(const Tina::Core::Color& c) {
-        auto a = c.toArray();
-        m_color = { a[0], a[1], a[2], a[3] };
+        m_color = c;
     }
 
-    Tina::Math::Vec4 getColor() const { return m_color; }
+    Tina::Core::Color getColor() const { return m_color; }
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
 
 private:
-    Tina::Math::Vec4 m_color; // RGBA
+    Tina::Core::Color m_color;
 };
 
 // === Label：文本标签 ===
 class UILabel : public UINode {
 public:
     UILabel(const std::string& name = "Label")
-        : UINode(name), m_text("Label"), m_color{1,1,1,1}
-    {
-        auto a = Tina::UI::UIColors::LabelText.toArray();
-        m_color = { a[0], a[1], a[2], a[3] };
-    }
+        : UINode(name)
+        , m_text("Label")
+        , m_color(Tina::UI::UIColors::LabelText)
+    {}
 
     void setText(const std::string& text) { m_text = text; }
-    void setColor(float r, float g, float b, float a) { m_color = {r, g, b, a}; }
-    void setColor(const Tina::Core::Color& c) { auto a=c.toArray(); m_color={a[0],a[1],a[2],a[3]}; }
+    void setColor(float r, float g, float b, float a) { m_color = Tina::Core::Color(r, g, b, a); }
+    void setColor(const Tina::Core::Color& c) { m_color = c; }
 
     const std::string& getText() const { return m_text; }
-    Tina::Math::Vec4 getColor() const { return m_color; }
+    Tina::Core::Color getColor() const { return m_color; }
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
 
 private:
     std::string m_text;
-    Tina::Math::Vec4 m_color;
+    Tina::Core::Color m_color;
 };
 
 // === Button：可点击按钮（背景 + 文本） ===
@@ -70,34 +66,27 @@ public:
     UIButton(const std::string& name = "Button")
         : UINode(name)
         , m_text("Button")
-        , m_normalColor{0,0,0,1}
-        , m_hoverColor{0,0,0,1}
-        , m_pressedColor{0,0,0,1}
-        , m_textColor{1,1,1,1}
-        , m_badgeBgColor{0,0,0,1}
-        , m_badgeTextColor{1,1,1,1}
+        , m_normalColor(Tina::UI::UIColors::ButtonNormal)
+        , m_hoverColor(Tina::UI::UIColors::ButtonHover)
+        , m_pressedColor(Tina::UI::UIColors::ButtonPressed)
+        , m_textColor(Tina::UI::UIColors::ButtonText)
+        , m_badgeBgColor(Tina::UI::UIColors::BadgeBg)
+        , m_badgeTextColor(Tina::UI::UIColors::BadgeText)
         , m_badgeCorner(BadgeCorner::TopRight)
         , m_hovered(false)
         , m_pressed(false)
         , m_selected(false)
-    {
-        auto n = Tina::UI::UIColors::ButtonNormal.toArray(); m_normalColor = {n[0],n[1],n[2],n[3]};
-        auto h = Tina::UI::UIColors::ButtonHover.toArray();  m_hoverColor   = {h[0],h[1],h[2],h[3]};
-        auto p = Tina::UI::UIColors::ButtonPressed.toArray();m_pressedColor = {p[0],p[1],p[2],p[3]};
-        auto t = Tina::UI::UIColors::ButtonText.toArray();   m_textColor    = {t[0],t[1],t[2],t[3]};
-        auto bb= Tina::UI::UIColors::BadgeBg.toArray();      m_badgeBgColor = {bb[0],bb[1],bb[2],bb[3]};
-        auto bt= Tina::UI::UIColors::BadgeText.toArray();    m_badgeTextColor={bt[0],bt[1],bt[2],bt[3]};
-    }
+    {}
 
     void setText(const std::string& text) { m_text = text; }
-    void setNormalColor(float r, float g, float b, float a) { m_normalColor = {r,g,b,a}; }
-    void setHoverColor(float r, float g, float b, float a) { m_hoverColor = {r,g,b,a}; }
-    void setPressedColor(float r, float g, float b, float a) { m_pressedColor = {r,g,b,a}; }
-    void setTextColor(float r, float g, float b, float a) { m_textColor = {r,g,b,a}; }
-    void setNormalColor(const Tina::Core::Color& c) { auto a=c.toArray(); m_normalColor={a[0],a[1],a[2],a[3]}; }
-    void setHoverColor(const Tina::Core::Color& c)  { auto a=c.toArray(); m_hoverColor  ={a[0],a[1],a[2],a[3]}; }
-    void setPressedColor(const Tina::Core::Color& c){ auto a=c.toArray(); m_pressedColor={a[0],a[1],a[2],a[3]}; }
-    void setTextColor(const Tina::Core::Color& c)   { auto a=c.toArray(); m_textColor   ={a[0],a[1],a[2],a[3]}; }
+    void setNormalColor(float r, float g, float b, float a) { m_normalColor = Tina::Core::Color(r, g, b, a); }
+    void setHoverColor(float r, float g, float b, float a) { m_hoverColor = Tina::Core::Color(r, g, b, a); }
+    void setPressedColor(float r, float g, float b, float a) { m_pressedColor = Tina::Core::Color(r, g, b, a); }
+    void setTextColor(float r, float g, float b, float a) { m_textColor = Tina::Core::Color(r, g, b, a); }
+    void setNormalColor(const Tina::Core::Color& c) { m_normalColor = c; }
+    void setHoverColor(const Tina::Core::Color& c) { m_hoverColor = c; }
+    void setPressedColor(const Tina::Core::Color& c) { m_pressedColor = c; }
+    void setTextColor(const Tina::Core::Color& c) { m_textColor = c; }
 
     const std::string& getText() const { return m_text; }
     // 角标（数字小角标）API
@@ -105,13 +94,12 @@ public:
     const std::string& badgeText() const { return m_badgeText; }
     void setBadgeColors(float br, float bg, float bb, float ba,
                         float tr, float tg, float tb, float ta) {
-        m_badgeBgColor = {br,bg,bb,ba};
-        m_badgeTextColor = {tr,tg,tb,ta};
+        m_badgeBgColor = Tina::Core::Color(br, bg, bb, ba);
+        m_badgeTextColor = Tina::Core::Color(tr, tg, tb, ta);
     }
     void setBadgeColors(const Tina::Core::Color& bg, const Tina::Core::Color& text) {
-        auto b=bg.toArray(); auto t=text.toArray();
-        m_badgeBgColor = {b[0],b[1],b[2],b[3]};
-        m_badgeTextColor = {t[0],t[1],t[2],t[3]};
+        m_badgeBgColor = bg;
+        m_badgeTextColor = text;
     }
     void setBadgeCorner(BadgeCorner c) { m_badgeCorner = c; }
 
@@ -122,7 +110,7 @@ public:
     bool isHovered() const { return m_hovered; }
     bool isPressed() const { return m_pressed; }
     bool isSelected() const { return m_selected; }
-    
+
     // 可选：悬停回调，便于外部展示 tooltip
     std::function<void()> onHoverIn;
     std::function<void()> onHoverOut;
@@ -135,13 +123,13 @@ protected:
 
 private:
     std::string m_text;
-    Tina::Math::Vec4 m_normalColor;
-    Tina::Math::Vec4 m_hoverColor;
-    Tina::Math::Vec4 m_pressedColor;
-    Tina::Math::Vec4 m_textColor;
-    std::string m_badgeText;               // 角标文本（如“1”）
-    Tina::Math::Vec4 m_badgeBgColor;       // 角标背景色
-    Tina::Math::Vec4 m_badgeTextColor;     // 角标文字颜色
+    Tina::Core::Color m_normalColor;
+    Tina::Core::Color m_hoverColor;
+    Tina::Core::Color m_pressedColor;
+    Tina::Core::Color m_textColor;
+    std::string m_badgeText;               // 角标文本（如"1"）
+    Tina::Core::Color m_badgeBgColor;      // 角标背景色
+    Tina::Core::Color m_badgeTextColor;    // 角标文字颜色
 
     BadgeCorner m_badgeCorner;
     bool m_hovered;
