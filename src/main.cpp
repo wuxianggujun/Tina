@@ -119,11 +119,24 @@ int main(int /*argc*/, char* /*argv*/[])
     Tina::UI::UICharacterPanel characterPanel;
     characterPanel.centerOnScreen(pxW, pxH);
 
+    // 当前点击的角色实体（用于切换控制回调）
+    entt::entity clickedEntity = entt::null;
+
     // 渲染器
     Tina::Renderer::TileRenderer tileRenderer; tileRenderer.initialize();
 
     // 使用 ECS 世界管理玩家/角色
     Tina::ECS::World ecsWorld;
+
+    // 设置面板的切换控制回调（必须在ecsWorld创建之后）
+    characterPanel.setSwitchControlCallback([&]() {
+        if (clickedEntity != entt::null) {
+            ecsWorld.switchControl(clickedEntity);
+            // 隐藏工具栏（控制角色时不需要编辑地形）
+            toolbar.root()->setVisible(false);
+            TINA_INFO("切换控制到角色");
+        }
+    });
     // 选择出生列（地图中央）
     int spawnX = mapCfg.width / 2;
     int spawnY = mapCfg.height / 2; // 兜底值（若未找到合法地表，将被修正）
@@ -231,7 +244,7 @@ int main(int /*argc*/, char* /*argv*/[])
                 {
                     bool __toolbarHandled = false;
                     if (ev.mouse_button.down) {
-                        // 右键点击：查看角色信息（不切换控制）
+                        // 右键点击：查看角色信息并可以切换控制
                         if (ev.mouse_button.button == Tina::os::MouseButton::RIGHT) {
                             float mx=0.0f, my=0.0f;
                             SDL_GetMouseState(&mx, &my);
@@ -245,7 +258,7 @@ int main(int /*argc*/, char* /*argv*/[])
                             auto view = reg.view<Tina::ECS::Transform, Tina::ECS::PhysicsBody,
                                                  Tina::ECS::Name, Tina::ECS::Health>();
 
-                            bool clickedCharacter = false;
+                            bool clickedCharacterFlag = false;
                             for (auto entity : view) {
                                 auto& transform = view.get<Tina::ECS::Transform>(entity);
                                 auto& body = view.get<Tina::ECS::PhysicsBody>(entity);
@@ -255,24 +268,28 @@ int main(int /*argc*/, char* /*argv*/[])
                                 // AABB碰撞检测
                                 if (wx >= transform.x && wx <= transform.x + body.width &&
                                     wy >= transform.y && wy <= transform.y + body.height) {
-                                    // 点击了角色！更新面板数据
-                                    characterPanel.updateData(name.name, health.percentage());
+                                    // 点击了角色！保存实体并更新面板数据
+                                    clickedEntity = entity;
+                                    bool isControlled = (entity == ecsWorld.getControlledEntity());
+                                    characterPanel.updateData(name.name, health.percentage(), isControlled);
                                     characterPanel.setVisible(true);
-                                    clickedCharacter = true;
-                                    TINA_INFO("查看角色信息: {}, 血量: {:.0f}/{:.0f}", name.name, health.current, health.max);
+                                    clickedCharacterFlag = true;
+                                    TINA_INFO("查看角色信息: {}, 血量: {:.0f}/{:.0f}, 控制状态: {}",
+                                              name.name, health.current, health.max, isControlled ? "是" : "否");
                                     break;
                                 }
                             }
 
                             // 如果没点击角色，隐藏面板
-                            if (!clickedCharacter) {
+                            if (!clickedCharacterFlag) {
                                 characterPanel.setVisible(false);
+                                clickedEntity = entt::null;
                             }
 
                             __toolbarHandled = true;
                         }
 
-                        // 左键点击：检测角色并切换控制（点击世界则显示工具栏）
+                        // 左键点击：地形编辑工具
                         if (ev.mouse_button.button == Tina::os::MouseButton::LEFT) {
                             mouseLeftDown = true;
                             float mx=0.0f, my=0.0f;
@@ -288,57 +305,27 @@ int main(int /*argc*/, char* /*argv*/[])
                                 int tx = (int)std::floor(wx);
                                 int ty = (int)std::floor(wy);
 
-                                // 检测所有角色
-                                auto& reg = ecsWorld.registry();
-                                auto view = reg.view<Tina::ECS::Transform, Tina::ECS::PhysicsBody,
-                                                     Tina::ECS::Name, Tina::ECS::Health>();
-
-                                bool clickedCharacter = false;
-                                for (auto entity : view) {
-                                    auto& transform = view.get<Tina::ECS::Transform>(entity);
-                                    auto& body = view.get<Tina::ECS::PhysicsBody>(entity);
-                                    auto& name = view.get<Tina::ECS::Name>(entity);
-
-                                    // AABB碰撞检测
-                                    if (wx >= transform.x && wx <= transform.x + body.width &&
-                                        wy >= transform.y && wy <= transform.y + body.height) {
-                                        // 点击了角色！切换控制权
-                                        ecsWorld.switchControl(entity);
-                                        // 隐藏工具栏（控制角色时不需要编辑地形）
-                                        toolbar.root()->setVisible(false);
-                                        clickedCharacter = true;
-                                        TINA_INFO("切换控制到角色: {}", name.name);
-                                        break;
-                                    }
-                                }
-
-                                // 如果没点击角色，说明点击了世界
-                                if (!clickedCharacter) {
-                                    // 显示工具栏，允许编辑地形
-                                    toolbar.root()->setVisible(true);
-
-                                    // 执行地形编辑工具
-                                    if (tx>=0 && ty>=0 && tx<mapCfg.width && ty<mapCfg.height) {
-                                        int tool = toolbar.selectedIndex();
-                                        if (tool < 0) tool = 0;
-                                        switch (tool) {
-                                            case 0: // 注水
-                                                Tina::Game::placeWater(tilemap, tx, ty, 255);
-                                                break;
-                                            case 1: // 挖空（圆形）
-                                            case 2: { // 爆炸：挖空 + 粒子
-                                                Tina::Game::excavateCircle(tilemap, wx, wy, Tina::GameConfig::EXCAVATE_RADIUS);
-                                                if (tool == 2) {
-                                                    particles.explode(wx, wy,
-                                                                      /*count*/ 260,
-                                                                      /*speed*/ 6.0f, 14.0f,
-                                                                      /*size*/ 0.30f, 0.90f,
-                                                                      /*life*/ 0.6f, 1.6f,
-                                                                      /*color*/ 0.78f, 0.70f, 0.58f);
-                                                }
-                                            } break;
-                                            default: break;
-                                        }
+                                // 执行地形编辑工具
+                                if (tx>=0 && ty>=0 && tx<mapCfg.width && ty<mapCfg.height) {
+                                    int tool = toolbar.selectedIndex();
+                                    if (tool < 0) tool = 0;
+                                    switch (tool) {
+                                        case 0: // 注水
+                                            Tina::Game::placeWater(tilemap, tx, ty, 255);
+                                            break;
+                                        case 1: // 挖空（圆形）
+                                        case 2: { // 爆炸：挖空 + 粒子
+                                            Tina::Game::excavateCircle(tilemap, wx, wy, Tina::GameConfig::EXCAVATE_RADIUS);
+                                            if (tool == 2) {
+                                                particles.explode(wx, wy,
+                                                                  /*count*/ 260,
+                                                                  /*speed*/ 6.0f, 14.0f,
+                                                                  /*size*/ 0.30f, 0.90f,
+                                                                  /*life*/ 0.6f, 1.6f,
+                                                                  /*color*/ 0.78f, 0.70f, 0.58f);
+                                            }
+                                        } break;
+                                        default: break;
                                     }
                                 }
                                 __toolbarHandled = true;
@@ -496,7 +483,7 @@ int main(int /*argc*/, char* /*argv*/[])
                               16.0f, hudY,
                               (float)pxW - 32.0f, 28.0f,
                               1,1,1,1,
-                              "A/D 移动 | W/空格 跳跃 | 左键点击角色切换控制/点击地形编辑 | 右键查看角色信息 | 滚轮/数字键切换工具",
+                              "A/D 移动 | W/空格 跳跃 | 左键地形编辑 | 右键查看角色并切换控制 | 滚轮/数字键切换工具",
                               Tina::UI::UIRenderer::AlignH::Left,
                               Tina::UI::UIRenderer::AlignV::Top,
                               0.0f, 0.0f);
@@ -512,7 +499,9 @@ int main(int /*argc*/, char* /*argv*/[])
             toolbar.update((float)frameTimer.deltaSeconds());
             toolbar.render(3);
 
-            // 角色信息面板更新与渲染
+            // 角色信息面板事件、更新与渲染
+            characterPanel.events().updateMouse(mx, my, mouseLeftDown);
+            characterPanel.events().processEvents();
             characterPanel.update((float)frameTimer.deltaSeconds());
             characterPanel.render(3, uiRenderer);
 

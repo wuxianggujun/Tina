@@ -239,6 +239,8 @@ private:
     bool shouldGenerateSmallDecoration(BiomeType biome, float primaryNoise) const;
     
     void generateTreeForBiome(int x, int y, BiomeType biome, float primaryNoise, float secondaryNoise);
+    // 统一生长逻辑：内部统一分派到自然化小树/大树
+    void generateTreeForBiomeUnified(int x, int y, BiomeType biome, float primaryNoise, float secondaryNoise);
     void generateLargeDecorationForBiome(int x, int y, BiomeType biome, float decorationNoise);
     void generateSmallDecorationForBiome(int x, int y, BiomeType biome, float primaryNoise);
     
@@ -249,6 +251,8 @@ private:
     
     // 树木生成
     void generateTree(int x, int y, int height, bool hasLeaves = true);
+    // 自然化小树：半圆/圆形树冠 + 边缘噪声打孔
+    void generateTreeNatural(int x, int y, int height, bool hasLeaves = true);
     void generateBigTree(int x, int y);
 
 private:

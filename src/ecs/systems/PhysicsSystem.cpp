@@ -1,57 +1,23 @@
 //
-// 物理系统实现（复用Player.cpp的碰撞检测逻辑）
+// 物理系统实现：与 Player.cpp 的碰撞逻辑保持一致
 //
 
 #include "PhysicsSystem.hpp"
 #include <cmath>
 #include <algorithm>
+#include "../../game/Collision.hpp"
 
 namespace Tina::ECS {
 
 bool PhysicsSystem::isSolid(int tx, int ty, const Tina::Game::TileMap& tilemap) const {
-    if (tx < 0 || ty < 0 || tx >= tilemap.width() || ty >= tilemap.height()) {
-        return true; // 边界视为固体
-    }
-    Tina::Game::TileType t = tilemap.get(tx, ty);
-    return tilemap.isSolidTile(t);
+    // 统一委托至通用实现，消除重复逻辑
+    return Tina::Game::Collision::IsSolid(tx, ty, tilemap);
 }
 
 bool PhysicsSystem::checkCollision(float nx, float ny, float width, float height,
                                    const Tina::Game::TileMap& tilemap) const {
-    // 计算玩家覆盖的瓦片范围
-    const float EPS = 1e-6f;
-    float left   = nx;
-    float right  = nx + width  - EPS;
-    float bottom = ny;
-    float top    = ny + height - EPS;
-    int x0 = (int)std::floor(left);
-    int y0 = (int)std::floor(bottom);
-    int x1 = (int)std::floor(right);
-    int y1 = (int)std::floor(top);
-
-    for (int y = y0; y <= y1; ++y) {
-        for (int x = x0; x <= x1; ++x) {
-            if (isSolid(x, y, tilemap)) {
-                // 检查精确重叠
-                float tileL = (float)x;
-                float tileR = (float)(x + 1);
-                float tileB = (float)y;
-                float tileT = (float)(y + 1);
-
-                float playerL = left;
-                float playerR = right + EPS;
-                float playerB = bottom;
-                float playerT = top + EPS;
-
-                // AABB重叠检测
-                if (playerR > tileL && playerL < tileR &&
-                    playerT > tileB && playerB < tileT) {
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
+    // 统一委托至通用 AABB 碰撞检测
+    return Tina::Game::Collision::CheckAABB(nx, ny, width, height, tilemap);
 }
 
 void PhysicsSystem::update(entt::registry& registry, const Tina::Game::TileMap& tilemap, float dt) {
@@ -73,7 +39,7 @@ void PhysicsSystem::update(entt::registry& registry, const Tina::Game::TileMap& 
         // 2. 水平移动 + 碰撞
         float newX = transform.x + velocity.vx * dt;
         if (checkCollision(newX, transform.y, physics.width, physics.height, tilemap)) {
-            // 对齐到网格边界
+            // 贴靠至瓦片边界
             if (velocity.vx > 0.0f) {
                 int ceilRight = (int)std::ceil(transform.x + physics.width - 1e-6f);
                 newX = (float)ceilRight - physics.width - 0.001f;
@@ -89,12 +55,12 @@ void PhysicsSystem::update(entt::registry& registry, const Tina::Game::TileMap& 
         float newY = transform.y + velocity.vy * dt;
         if (checkCollision(transform.x, newY, physics.width, physics.height, tilemap)) {
             if (velocity.vy > 0.0f) {
-                // 向上撞到天花板
+                // 顶部碰撞，回退到上边界
                 int ceilTop = (int)std::ceil(transform.y + physics.height - 1e-6f);
                 newY = (float)ceilTop - physics.height - 0.001f;
                 velocity.vy = 0.0f;
             } else if (velocity.vy < 0.0f) {
-                // 向下落地
+                // 底部落地
                 int floorBottom = (int)std::floor(transform.y + 1e-6f);
                 newY = (float)floorBottom + 0.001f;
                 velocity.vy = 0.0f;
@@ -105,7 +71,7 @@ void PhysicsSystem::update(entt::registry& registry, const Tina::Game::TileMap& 
         }
         transform.y = newY;
 
-        // 4. 脚底探测（更稳健）
+        // 4. 探测脚下（性能较优）
         if (!physics.onGround) {
             const float EPS = 1e-6f;
             int feetY = (int)std::floor(transform.y - EPS);
@@ -119,7 +85,7 @@ void PhysicsSystem::update(entt::registry& registry, const Tina::Game::TileMap& 
             }
         }
 
-        // 5. 防止掉出地图
+        // 5. 防止越界出图
         if (transform.y < 0.0f) {
             transform.y = 0.0f;
             velocity.vy = 0.0f;
@@ -141,3 +107,4 @@ void PhysicsSystem::update(entt::registry& registry, const Tina::Game::TileMap& 
 }
 
 } // namespace Tina::ECS
+

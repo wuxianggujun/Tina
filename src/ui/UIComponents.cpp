@@ -47,7 +47,8 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
     // 若选中，绘制边框高亮（四边细矩形）
     if (m_selected) {
         const float t = 2.0f; // 2px 边框
-        const float r = 0.95f, g = 0.85f, b = 0.35f, a = 1.0f; // 金色高亮
+        auto hl = Tina::UI::UIColors::SelectionHL.toArray();
+        const float r = hl[0], g = hl[1], b = hl[2], a = hl[3]; // 金色高亮
         // 上
         renderer.drawRect(viewId, pos.x, pos.y, size.x, t, r,g,b,a);
         // 下
@@ -89,10 +90,11 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         // 背景与描边
         renderer.drawRect(viewId, bx, by, bw, bh,
                           m_badgeBgColor.x, m_badgeBgColor.y, m_badgeBgColor.z, m_badgeBgColor.w);
-        renderer.drawRect(viewId, bx, by, bw, 1.0f, 0.95f,0.90f,0.50f, 0.8f);
-        renderer.drawRect(viewId, bx, by+bh-1.0f, bw, 1.0f, 0.95f,0.90f,0.50f, 0.8f);
-        renderer.drawRect(viewId, bx, by, 1.0f, bh, 0.95f,0.90f,0.50f, 0.8f);
-        renderer.drawRect(viewId, bx+bw-1.0f, by, 1.0f, bh, 0.95f,0.90f,0.50f, 0.8f);
+        auto bhc = Tina::UI::UIColors::BadgeHighlight.toArray();
+        renderer.drawRect(viewId, bx, by, bw, 1.0f, bhc[0],bhc[1],bhc[2],bhc[3]);
+        renderer.drawRect(viewId, bx, by+bh-1.0f, bw, 1.0f, bhc[0],bhc[1],bhc[2],bhc[3]);
+        renderer.drawRect(viewId, bx, by, 1.0f, bh, bhc[0],bhc[1],bhc[2],bhc[3]);
+        renderer.drawRect(viewId, bx+bw-1.0f, by, 1.0f, bh, bhc[0],bhc[1],bhc[2],bhc[3]);
         // 文本
         renderer.drawTextEx(viewId, bx, by, bw, bh,
                             m_badgeTextColor.x, m_badgeTextColor.y, m_badgeTextColor.z, m_badgeTextColor.w,

@@ -8,6 +8,29 @@
 
 namespace Tina::Game {
 
+// 统一小树生成：全部走 generateTreeNatural（森林二次分支保留大树）
+void TileMap::generateTreeForBiomeUnified(int x, int y, BiomeType biome, float primaryNoise, float secondaryNoise)
+{
+    switch (biome) {
+        case BiomeType::Forest:
+            if (secondaryNoise > 0.8f) {
+                generateBigTree(x, y);
+            } else {
+                int height = 3 + static_cast<int>(primaryNoise * 4);
+                generateTreeNatural(x, y, height, true);
+            }
+            break;
+        case BiomeType::Plains:
+            generateTreeNatural(x, y, 2 + static_cast<int>(primaryNoise * 3), true);
+            break;
+        case BiomeType::Swamp:
+            generateTreeNatural(x, y, 2 + static_cast<int>(primaryNoise * 2), false);
+            break;
+        default:
+            break;
+    }
+}
+
 void TileMap::generate()
 {
     // 统一的地图生成系统
@@ -247,7 +270,7 @@ void TileMap::generateSurfaceFeatures()
                 float blue = m_noiseGen.oreNoise((float)x * 0.77f, (float)surfaceY * 0.23f, 777);
                 bool blueOk = (blue > 0.35f);
                 if (spacingOk && blueOk && !hasNearbyTree() && shouldGenerateTree(biome, primaryNoise, secondaryNoise)) {
-                    generateTreeForBiome(x, surfaceY, biome, primaryNoise, secondaryNoise);
+                    generateTreeForBiomeUnified( x, surfaceY, biome, primaryNoise, secondaryNoise);
                     featureGenerated = true;
                     nextTreeAllowedX = x + requiredSpacing;
                 }
@@ -269,7 +292,7 @@ void TileMap::generateSurfaceFeatures()
                 float blue = m_noiseGen.oreNoise(static_cast<float>(x) * 0.77f, static_cast<float>(surfaceY) * 0.23f, 777);
                 bool blueOk = (blue > 0.35f);
                 if (spacingOk && blueOk && !hasNearbyTree() && shouldGenerateTree(biome, primaryNoise, secondaryNoise)) {
-                    generateTreeForBiome(x, surfaceY, biome, primaryNoise, secondaryNoise);
+                    generateTreeForBiomeUnified( x, surfaceY, biome, primaryNoise, secondaryNoise);
                     featureGenerated = true;
                     nextTreeAllowedX = x + requiredSpacing;
                 }
@@ -765,7 +788,7 @@ void TileMap::generateTreeForBiome(int x, int y, BiomeType biome, float primaryN
                 generateBigTree(x, y); // 大树
             } else {
                 int height = 3 + static_cast<int>(primaryNoise * 4); // 3-7格高
-                generateTree(x, y, height, true);
+                generateTreeNatural(x, y, height, true);
             }
             break;
         case BiomeType::Plains:
@@ -1261,6 +1284,90 @@ void TileMap::generateTree(int x, int y, int height, bool hasLeaves)
             }
         }
     }
+    // 最小树冠保障：确保至少形成一个 3 片的树冠，避免只有一片树叶
+    if (hasLeaves) {
+        int baseY = y + height;
+        int crownY = baseY + 1;
+        int existing = 0;
+        auto countLeaf = [&](int lx, int ly){
+            if (lx >= 0 && lx < m_w && ly >= 0 && ly < m_h) {
+                if (get(lx, ly) == TileType::Leaves) existing++;
+            }
+        };
+        countLeaf(x, baseY);
+        countLeaf(x - 1, baseY);
+        countLeaf(x + 1, baseY);
+        countLeaf(x, crownY);
+        if (existing < 3) {
+            if (baseY < m_h) {
+                if (canReplace(get(x, baseY))) set(x, baseY, TileType::Leaves);
+                if (x > 0 && canReplace(get(x - 1, baseY))) set(x - 1, baseY, TileType::Leaves);
+                if (x < m_w - 1 && canReplace(get(x + 1, baseY))) set(x + 1, baseY, TileType::Leaves);
+            }
+            if (crownY < m_h && canReplace(get(x, crownY))) set(x, crownY, TileType::Leaves);
+        }
+    }
+    // 自然化树冠：半圆/圆形掩码 + 边缘噪声打孔
+    if (hasLeaves) {
+        const int cx = x;
+        const int cy = y + height; // 以树干顶为中心
+        const int radius = std::min(4, std::max(2, height / 2 + 1));
+        const bool useFullCircle = (height >= 4);
+
+        const int dyStart = useFullCircle ? -radius : 0;
+        const int dyEnd   = radius;
+
+        // 先清理旧的树冠叶片（仅限当前圆/半圆区域内）
+        for (int dy = dyStart; dy <= dyEnd; ++dy) {
+            int ly = cy + dy;
+            if ((unsigned)ly >= (unsigned)m_h) continue;
+            for (int dx = -radius - 1; dx <= radius + 1; ++dx) {
+                int lx = cx + dx;
+                if ((unsigned)lx >= (unsigned)m_w) continue;
+                float d2 = float(dx * dx + dy * dy);
+                float r  = float(radius) + 0.6f;
+                if (d2 <= r * r) {
+                    if (get(lx, ly) == TileType::Leaves) set(lx, ly, TileType::Air);
+                }
+            }
+        }
+
+        // 再按掩码 + 边缘噪声重新铺设树冠
+        for (int dy = dyStart; dy <= dyEnd; ++dy) {
+            int ly = cy + dy;
+            if ((unsigned)ly >= (unsigned)m_h) continue;
+            for (int dx = -radius; dx <= radius; ++dx) {
+                int lx = cx + dx;
+                if ((unsigned)lx >= (unsigned)m_w) continue;
+                float d2 = float(dx * dx + dy * dy);
+                float r  = float(radius) + 0.2f;
+                if (d2 <= r * r) {
+                    float dist = std::sqrt(d2);
+                    bool nearEdge = (dist >= float(radius) - 0.5f);
+                    bool place = true;
+                    if (nearEdge) {
+                        float n = m_noiseGen.humidityNoise((float)lx * 0.91f, (float)ly * 0.87f);
+                        if (n < 0.45f) place = false;
+                    } else {
+                        float n2 = m_noiseGen.caveNoise((float)lx * 0.37f, (float)ly * 0.37f);
+                        if (n2 < 0.05f) place = false;
+                    }
+                    if (place && canReplace(get(lx, ly))) {
+                        set(lx, ly, TileType::Leaves);
+                    }
+                }
+            }
+        }
+
+        // 顶部小帽（可选）：让顶部偶尔更饱满一点
+        int topY = cy + radius + 1;
+        if ((unsigned)topY < (unsigned)m_h) {
+            float capN = m_noiseGen.temperatureNoise((float)cx * 0.77f, (float)topY * 0.33f);
+            if (capN > 0.6f && canReplace(get(cx, topY))) {
+                set(cx, topY, TileType::Leaves);
+            }
+        }
+    }
 }
 
 void TileMap::generateBigTree(int x, int y)
@@ -1311,6 +1418,12 @@ void TileMap::generateBigTree(int x, int y)
             }
         }
     }
+}
+
+// 自然化生成的小树（封装）：当前直接调用 generateTree（已在内部自然化树冠）
+void TileMap::generateTreeNatural(int x, int y, int height, bool hasLeaves)
+{
+    generateTree(x, y, height, hasLeaves);
 }
 
 } // namespace Tina::Game

@@ -1,8 +1,11 @@
 #include "UIToolbar.hpp"
+#include "UIColors.hpp"
 #include "../core/Log.hpp"
 #include <algorithm>
 
 namespace Tina::UI {
+
+using namespace Tina::UI::UIColors;
 
 bool UIToolbar::initialize(int screenW, int screenH, UIRenderer& renderer, TextRenderer* text)
 {
@@ -17,8 +20,7 @@ bool UIToolbar::initialize(int screenW, int screenH, UIRenderer& renderer, TextR
     m_bar = new UIPanel("Toolbar");
     m_bar->setAnchor(Anchor::TopLeft);
     m_bar->setPosition(0, 0);
-    // 半透明深色背景
-    m_bar->setColor(0.10f, 0.10f, 0.12f, 0.85f);
+    m_bar->setColor(ToolbarBg);  // 半透明深色背景
     m_root->addChild(m_bar);
 
     // 水平栈：用于排列按钮

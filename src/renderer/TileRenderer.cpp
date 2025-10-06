@@ -2,6 +2,7 @@
 // TileRenderer 实现
 
 #include "TileRenderer.hpp"
+#include "../core/Color.hpp"
 #include <algorithm>
 #include <cstring>
 
@@ -11,30 +12,31 @@ using Tina::Game::TileType;
 
 Tina::Container::Array<float,4> TileRenderer::getTileColor(TileType t) const
 {
+    using Tina::Core::Color;
     switch (t) {
-        case TileType::Grass:    return {{0.18f, 0.72f, 0.28f, 1.0f}};
-        case TileType::Dirt:     return {{0.55f, 0.38f, 0.22f, 1.0f}};
-        case TileType::Stone:    return {{0.55f, 0.55f, 0.58f, 1.0f}};
-        case TileType::Sand:     return {{0.94f, 0.86f, 0.51f, 1.0f}};
-        case TileType::Snow:     return {{0.95f, 0.95f, 0.98f, 1.0f}};
-        case TileType::Ice:      return {{0.68f, 0.85f, 0.90f, 1.0f}};
-        case TileType::Water:    return {{0.15f, 0.35f, 0.90f, 0.95f}};
-        case TileType::Lava:     return {{0.90f, 0.25f, 0.10f, 1.0f}};
-        case TileType::Coal:     return {{0.20f, 0.20f, 0.20f, 1.0f}};
-        case TileType::Iron:     return {{0.60f, 0.55f, 0.50f, 1.0f}};
-        case TileType::Gold:     return {{0.90f, 0.75f, 0.20f, 1.0f}};
-        case TileType::Diamond:  return {{0.85f, 0.95f, 0.95f, 1.0f}};
-        case TileType::Clay:     return {{0.72f, 0.45f, 0.30f, 1.0f}};
-        case TileType::Bedrock:  return {{0.15f, 0.15f, 0.15f, 1.0f}};
-        case TileType::Obsidian: return {{0.25f, 0.15f, 0.25f, 1.0f}};
-        case TileType::Wood:     return {{0.45f, 0.35f, 0.25f, 1.0f}};
-        case TileType::Leaves:   return {{0.25f, 0.60f, 0.30f, 1.0f}};
-        case TileType::Flower:   return {{0.85f, 0.40f, 0.70f, 1.0f}};
-        case TileType::Grass_Decoration: return {{0.25f, 0.85f, 0.25f, 1.0f}};
-        case TileType::Mushroom: return {{0.80f, 0.35f, 0.30f, 1.0f}};
-        case TileType::Crystal:  return {{0.85f, 0.95f, 1.0f, 1.0f}};
-        case TileType::Rock:     return {{0.45f, 0.45f, 0.48f, 1.0f}};
-        default:                 return {{0.0f,  0.0f,  0.0f,  0.0f}};
+        case TileType::Grass:    return Color::rgba(0.18f, 0.72f, 0.28f, 1.0f).toArray();
+        case TileType::Dirt:     return Color::rgba(0.55f, 0.38f, 0.22f, 1.0f).toArray();
+        case TileType::Stone:    return Color::rgba(0.55f, 0.55f, 0.58f, 1.0f).toArray();
+        case TileType::Sand:     return Color::rgba(0.94f, 0.86f, 0.51f, 1.0f).toArray();
+        case TileType::Snow:     return Color::rgba(0.95f, 0.95f, 0.98f, 1.0f).toArray();
+        case TileType::Ice:      return Color::rgba(0.68f, 0.85f, 0.90f, 1.0f).toArray();
+        case TileType::Water:    return Color::rgba(0.15f, 0.35f, 0.90f, 0.95f).toArray();
+        case TileType::Lava:     return Color::rgba(0.90f, 0.25f, 0.10f, 1.0f).toArray();
+        case TileType::Coal:     return Color::rgba(0.20f, 0.20f, 0.20f, 1.0f).toArray();
+        case TileType::Iron:     return Color::rgba(0.60f, 0.55f, 0.50f, 1.0f).toArray();
+        case TileType::Gold:     return Color::rgba(0.90f, 0.75f, 0.20f, 1.0f).toArray();
+        case TileType::Diamond:  return Color::rgba(0.85f, 0.95f, 0.95f, 1.0f).toArray();
+        case TileType::Clay:     return Color::rgba(0.72f, 0.45f, 0.30f, 1.0f).toArray();
+        case TileType::Bedrock:  return Color::rgba(0.15f, 0.15f, 0.15f, 1.0f).toArray();
+        case TileType::Obsidian: return Color::rgba(0.25f, 0.15f, 0.25f, 1.0f).toArray();
+        case TileType::Wood:     return Color::rgba(0.45f, 0.35f, 0.25f, 1.0f).toArray();
+        case TileType::Leaves:   return Color::rgba(0.25f, 0.60f, 0.30f, 1.0f).toArray();
+        case TileType::Flower:   return Color::rgba(0.85f, 0.40f, 0.70f, 1.0f).toArray();
+        case TileType::Grass_Decoration: return Color::rgba(0.25f, 0.85f, 0.25f, 1.0f).toArray();
+        case TileType::Mushroom: return Color::rgba(0.80f, 0.35f, 0.30f, 1.0f).toArray();
+        case TileType::Crystal:  return Color::rgba(0.85f, 0.95f, 1.0f, 1.0f).toArray();
+        case TileType::Rock:     return Color::rgba(0.45f, 0.45f, 0.48f, 1.0f).toArray();
+        default:                 return Color::rgba(0.0f,  0.0f,  0.0f,  0.0f).toArray();
     }
 }
 
