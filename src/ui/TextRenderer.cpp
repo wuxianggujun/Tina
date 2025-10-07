@@ -15,12 +15,9 @@ struct Vtx {
 TextRenderer::TextRenderer() {}
 TextRenderer::~TextRenderer() { shutdown(); }
 
-bool TextRenderer::initialize(Tina::Renderer::ShaderManager& sm, int atlasW, int atlasH)
+bool TextRenderer::initialize(Tina::Renderer::ShaderManager& sm, Tina::Engine::ResourceManagerHub& hub, int atlasW, int atlasH)
 {
-    if (FT_Init_FreeType(&m_ft)) {
-        TINA_ERROR("TextRenderer: FreeType 初始化失败");
-        return false;
-    }
+    m_resHub = &hub;
 
     m_atlasW = atlasW;
     m_atlasH = atlasH;
@@ -90,31 +87,30 @@ void TextRenderer::shutdown()
     if (bgfx::isValid(m_debugTex)) { bgfx::destroy(m_debugTex); m_debugTex = BGFX_INVALID_HANDLE; }
     if (bgfx::isValid(m_sText))    { bgfx::destroy(m_sText);    m_sText = BGFX_INVALID_HANDLE; }
     // 程序由全局 ShaderManager 管理，这里不做销毁
-    if (m_font.face) { FT_Done_Face(m_font.face); m_font.face = nullptr; }
-    if (m_ft) { FT_Done_FreeType(m_ft); m_ft = nullptr; }
+    m_font.face = nullptr; m_font.glyphs.clear();
+    m_fontRef.reset(); m_resHub = nullptr;
 }
 
 bool TextRenderer::loadFont(const std::string& path, int pixelSize)
 {
-    if (!m_ft) return false;
-    if (m_font.face) { FT_Done_Face(m_font.face); m_font = {}; }
-    if (FT_New_Face(m_ft, path.c_str(), 0, &m_font.face)) {
-        TINA_ERROR("TextRenderer: 加载字体失败: {}", path);
-        return false;
-    }
-    // 确保使用 Unicode 字符映射
-    FT_Select_Charmap(m_font.face, FT_ENCODING_UNICODE);
-    FT_Set_Pixel_Sizes(m_font.face, 0, (FT_UInt)pixelSize);
-    m_font.sizePx = pixelSize;
-    m_font.ascender = (int)(m_font.face->size->metrics.ascender >> 6);
-    m_font.descender = (int)(m_font.face->size->metrics.descender >> 6);
+    if (!m_resHub) return false;
+    auto* fr = m_resHub->load<Tina::Engine::FontResource>(Tina::Engine::Path(path.c_str()));
+    if (!fr) { TINA_ERROR("TextRenderer: 字体资源加载失败: {}", path); return false; }
+    m_fontRef = Tina::Engine::ResourceRef<Tina::Engine::FontResource>(m_resHub, fr);
+    m_requestedFontPx = pixelSize;
     m_font.glyphs.clear();
+
+    // 尝试立即建立 Face；如资源尚未 READY，延迟到后续渲染/测量时再完成
+    if (!ensureFontReady()) {
+        TINA_INFO("TextRenderer: 字体未就绪，等待异步加载完成: {}@{}", path, pixelSize);
+    }
     return true;
 }
 
 bool TextRenderer::ensureGlyph(Font& font, int codepoint)
 {
     if (font.glyphs.find(codepoint) != font.glyphs.end()) return true;
+    if (!font.face) return false;
     if (FT_Load_Char(font.face, (FT_ULong)codepoint, FT_LOAD_RENDER | FT_LOAD_TARGET_LIGHT)) return false;
     FT_GlyphSlot g = font.face->glyph;
     int gw = g->bitmap.width;
@@ -198,7 +194,8 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
                             float r, float g, float b, float a,
                             const std::string& utf8)
 {
-    if (!m_font.face || !bgfx::isValid(m_prog) || !bgfx::isValid(m_atlasTex)) return;
+    if (!bgfx::isValid(m_prog) || !bgfx::isValid(m_atlasTex)) return;
+    if (!ensureFontReady()) return;
 
     // UTF-8 解码并准备顶点/索引
     Tina::Container::Vector<Vtx> verts;
@@ -303,10 +300,27 @@ void TextRenderer::clearClipRect()
     m_hasClip = false;
 }
 
+bool TextRenderer::ensureFontReady()
+{
+    if (m_font.face) return true;
+    if (!m_fontRef.get() || m_requestedFontPx <= 0) return false;
+    if (m_fontRef.get()->getState() != Tina::Engine::Resource::State::READY) return false;
+
+    if (!m_fontRef.get()->ensureFace(m_requestedFontPx)) return false;
+    FT_Face face = m_fontRef.get()->getFace(m_requestedFontPx);
+    if (!face) return false;
+    m_font.face = face;
+    m_font.sizePx = m_requestedFontPx;
+    m_font.ascender = (int)(face->size->metrics.ascender >> 6);
+    m_font.descender = (int)(face->size->metrics.descender >> 6);
+    return true;
+}
+
 void TextRenderer::measureText(const std::string& utf8, float& outWidth, float& outHeight)
 {
     outWidth = 0.0f; outHeight = 0.0f;
-    if (!m_font.face || utf8.empty()) return;
+    if (utf8.empty()) return;
+    if (!ensureFontReady()) return;
 
     float lineW = 0.0f;
     int lines = 1;
@@ -347,7 +361,8 @@ void TextRenderer::measureTextExtents(const std::string& utf8,
                                       float& outTop, float& outBottom) const
 {
     outWidth = 0.0f; outHeight = 0.0f; outTop = 0.0f; outBottom = 0.0f;
-    if (!m_font.face || utf8.empty()) return;
+    if (utf8.empty()) return;
+    if (!const_cast<TextRenderer*>(this)->ensureFontReady()) return;
 
     float lineW = 0.0f; int lines = 1;
     float topMax = 0.0f, bottomMax = 0.0f;

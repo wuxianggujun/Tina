@@ -29,7 +29,7 @@ void PauseScene::onEnter()
 
     // 文本渲染器
     m_textRenderer = Memory::MakeUnique<UI::TextRenderer>();
-    if (!m_textRenderer->initialize(app()->shaders())) {
+    if (!m_textRenderer->initialize(app()->shaders(), app()->resources())) {
         TINA_ERROR("TextRenderer 初始化失败");
     } else {
         m_textRenderer->loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 32);

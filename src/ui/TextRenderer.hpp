@@ -10,6 +10,8 @@
 #include <string>
 #include "../core/Container.hpp"
 #include "../renderer/ShaderManager.hpp"
+#include "../engine/Resource.hpp"
+#include "../engine/Font.hpp"
 
 namespace Tina::UI {
 
@@ -18,8 +20,9 @@ public:
     TextRenderer();
     ~TextRenderer();
 
-    // 使用全局 ShaderManager 加载所需的 text 程序
-    bool initialize(Tina::Renderer::ShaderManager& sm, int atlasW = 2048, int atlasH = 2048);
+    // 使用全局 ShaderManager + 资源中心
+    bool initialize(Tina::Renderer::ShaderManager& sm, Tina::Engine::ResourceManagerHub& hub,
+                    int atlasW = 2048, int atlasH = 2048);
     void shutdown();
 
     // 加载字体（ttf/otf），size 为像素高度
@@ -67,10 +70,13 @@ private:
 
     bool ensureGlyph(Font& font, int codepoint);
     static bool utf8Next(const char*& p, const char* end, int& outCode);
+    bool ensureFontReady();
 
 private:
-    FT_Library m_ft = nullptr;
-    Font m_font; // 当前仅支持加载一个字体（可扩展为多字体）
+    Tina::Engine::ResourceManagerHub* m_resHub = nullptr;
+    Tina::Engine::ResourceRef<Tina::Engine::FontResource> m_fontRef; // 字体句柄（RAII）
+    int m_requestedFontPx = 0;
+    Font m_font; // 当前使用的字体信息（来自 FontResource 指定字号的 Face）
 
     // 图集
     int m_atlasW = 0, m_atlasH = 0;

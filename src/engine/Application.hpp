@@ -18,6 +18,7 @@ class EventBus;
 struct FileSystem;
 class ResourceManagerHub;
 class TextureManager;
+class FontManager;
 
 // 应用程序主类
 class Application {
@@ -117,6 +118,7 @@ private:
     Memory::UniquePtr<ResourceManagerHub> m_resourceHub;   // 资源管理中心
     Memory::UniquePtr<Tina::Renderer::ShaderManager> m_shaderMgr; // 全局着色器管理器
     Memory::UniquePtr<TextureManager> m_textureMgr;        // 纹理资源管理器
+    Memory::UniquePtr<FontManager> m_fontMgr;              // 字体资源管理器
 };
 
 } // namespace Tina::Engine

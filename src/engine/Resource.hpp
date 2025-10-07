@@ -14,7 +14,7 @@
 #include "../core/Path.hpp"
 #include <functional>
 #include <cctype>
-#include "../core/Container.hpp"
+#include <filesystem>
 #include "../core/Container.hpp"
 
 namespace Tina::Engine {
@@ -122,14 +122,55 @@ public:
         }
     }
 
+    // 按路径增量热重载（若存在）
+    void reload(const Path& path) {
+        Tina::Container::String key(path.c_str());
+        auto it = m_resources.find(key);
+        if (it != m_resources.end()) {
+            it->second->unloadNow();
+            it->second->requestLoad(m_fs);
+        }
+    }
+
     // 每帧驱动文件系统回调
-    void update() { m_fs.processCallbacks(); }
+    void update() {
+        m_fs.processCallbacks();
+        // 基础文件监视：检测文件 mtime 变化后自动重载（小项目足够）
+        if (m_enableWatch) {
+            watchAndReloadChanged();
+        }
+    }
 
     virtual Resource* createResource(const Path& path) = 0;
 
 protected:
     FileSystem& m_fs;
     Tina::Container::HashMap<Tina::Container::String, Tina::Memory::UniquePtr<Resource>> m_resources;
+
+private:
+    void watchAndReloadChanged() {
+        namespace fs = std::filesystem;
+        for (auto& kv : m_resources) {
+            const char* cpath = kv.first.c_str();
+            std::error_code ec;
+            auto cur = fs::last_write_time(cpath, ec);
+            if (ec) continue;
+            auto it = m_mtime.find(kv.first);
+            if (it == m_mtime.end()) {
+                m_mtime.emplace(kv.first, cur);
+                continue;
+            }
+            if (cur != it->second) {
+                it->second = cur;
+                kv.second->unloadNow();
+                kv.second->requestLoad(m_fs);
+                TINA_INFO("资源热重载: {}", cpath);
+            }
+        }
+    }
+
+    bool m_enableWatch = true;
+    Tina::Container::HashMap<Tina::Container::String, std::filesystem::file_time_type> m_mtime;
 };
 
 // Hub：将类型映射到具体管理器
@@ -144,10 +185,47 @@ public:
     T* load(const Path& p) {
         return static_cast<T*>(load(T::TYPE, p));
     }
+    void unload(Resource& r) {
+        auto it = m_rms.find(r.getType().type);
+        if (it != m_rms.end()) it->second->unload(r);
+    }
+    void reload(const Path& p) {
+        for (auto& kv : m_rms) kv.second->reload(p);
+    }
     void reloadAll() { for (auto& kv : m_rms) kv.second->reloadAll(); }
     void update() { for (auto& kv : m_rms) kv.second->update(); }
 private:
     Tina::Container::HashMap<Tina::u64, ResourceManager*> m_rms;
+};
+
+// 资源安全句柄：RAII 持有引用计数，离开作用域自动释放引用
+template<typename T>
+class ResourceRef {
+public:
+    ResourceRef() = default;
+    ResourceRef(ResourceManagerHub* hub, T* ptr) : m_hub(hub), m_ptr(ptr) {}
+    ~ResourceRef() { reset(); }
+
+    ResourceRef(const ResourceRef&) = delete;
+    ResourceRef& operator=(const ResourceRef&) = delete;
+
+    ResourceRef(ResourceRef&& other) noexcept { m_hub = other.m_hub; m_ptr = other.m_ptr; other.m_ptr = nullptr; other.m_hub = nullptr; }
+    ResourceRef& operator=(ResourceRef&& other) noexcept {
+        if (this != &other) { reset(); m_hub = other.m_hub; m_ptr = other.m_ptr; other.m_ptr = nullptr; other.m_hub = nullptr; }
+        return *this; }
+
+    void reset() {
+        if (m_ptr && m_hub) { m_hub->unload(*m_ptr); }
+        m_ptr = nullptr; m_hub = nullptr;
+    }
+
+    T* get() const { return m_ptr; }
+    T* operator->() const { return m_ptr; }
+    explicit operator bool() const { return m_ptr != nullptr; }
+
+private:
+    ResourceManagerHub* m_hub = nullptr;
+    T* m_ptr = nullptr;
 };
 
 // 示例资源：Blob（原样字节），便于快速验证系统

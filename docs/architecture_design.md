@@ -522,6 +522,30 @@ app.scenes().replace(Memory::makeUnique<MenuScene>());
 
 ---
 
+### 4. 资源系统（更新）
+
+为了解决多处重复加载/释放与生命周期不一致的问题，引入统一的资源中心与全局 Shader 管理：
+
+- 全局 ShaderManager：由 Application 持有，着色器程序句柄在应用期统一创建/缓存/销毁。
+- Resource 抽象：统一状态机（EMPTY/READY/FAILURE）+ 引用计数。
+- ResourceManager：按路径缓存、异步加载、自动卸载，内建基础文件监视（mtime）。
+- ResourceManagerHub：集中路由到具体资源管理器，支持增量热重载 `reload(path)` 与全量 `reloadAll()`。
+- ResourceRef<T>：RAII 资源句柄，作用域结束自动释放引用，避免悬空指针。
+
+内置资源类型：
+- Texture2DResource（纹理）：使用 bimg_decode 解码；失败时创建 2x2 棋盘占位纹理；由 TextureManager 管理。
+- FontResource（字体）：缓存字体字节，并按需为不同像素大小创建/复用 FT_Face；由 FontManager 管理。
+
+TextRenderer 的接入方式：
+- 初始化：`text.initialize(app.shaders(), app.resources());`
+- 加载字体：`text.loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 24);`
+- 说明：TextRenderer 不再直接持有 FreeType 库/Face，而是通过 FontResource 获取相应字号的 Face；字形图集仍在 TextRenderer 内部维护。
+
+纹理接入建议：
+- UI 图标、游戏贴图等统一通过 `app.resources().load<Texture2DResource>(path)` 获取；无需手动销毁 bgfx 纹理句柄。
+
+---
+
 ### 4. EventBus（基于 Signal）
 
 ```cpp

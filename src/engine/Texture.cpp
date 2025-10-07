@@ -23,8 +23,20 @@ bool Texture2DResource::load(const FileSystem::Content& blob)
 
     const bimg::ImageContainer* image = bimg::imageParse(&s_alloc, blob.data(), (uint32_t)blob.size());
     if (!image) {
-        TINA_ERROR("Texture2D: 解码失败: {}", getPath().c_str());
-        return false;
+        TINA_ERROR("Texture2D: 解码失败，使用 2x2 占位纹理: {}", getPath().c_str());
+        // 2x2 棋盘占位
+        const uint32_t w = 2, h = 2;
+        const uint8_t px[w*h*4] = {
+            255, 0, 255, 255,   50, 50, 50, 255,
+            50,  50, 50,  255,  255, 0, 255, 255,
+        };
+        const bgfx::Memory* mem = bgfx::copy(px, sizeof(px));
+        m_tex = bgfx::createTexture2D((uint16_t)w, (uint16_t)h, false, 1, bgfx::TextureFormat::RGBA8,
+                                      BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
+                                      BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT,
+                                      mem);
+        m_width = (uint16_t)w; m_height = (uint16_t)h;
+        return bgfx::isValid(m_tex);
     }
 
     const bgfx::TextureFormat::Enum fmt = (bgfx::TextureFormat::Enum)image->m_format;
@@ -65,4 +77,3 @@ void Texture2DResource::unload()
 }
 
 } // namespace Tina::Engine
-
