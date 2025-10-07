@@ -12,6 +12,8 @@ set(SRC_FILES
     engine/EventBus.cpp
     game/GameScene.hpp
     game/GameScene.cpp
+    game/PauseScene.hpp
+    game/PauseScene.cpp
     core/Path.cpp
     core/EASTLAlloc.cpp
     core/Noise.hpp

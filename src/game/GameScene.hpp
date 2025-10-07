@@ -33,6 +33,8 @@ public:
     // 生命周期
     void onEnter() override;
     void onExit() override;
+    void onPause() override;
+    void onResume() override;
 
     // 主循环
     void update(float dt) override;

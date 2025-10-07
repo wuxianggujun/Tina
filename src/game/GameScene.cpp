@@ -4,7 +4,9 @@
 //
 
 #include "GameScene.hpp"
+#include "PauseScene.hpp"  // 暂停场景
 #include "../engine/Application.hpp"
+#include "../engine/SceneManager.hpp"  // 场景管理器
 #include "../engine/EventBus.hpp"  // 包含 EventBus 完整定义
 #include "../core/Log.hpp"
 #include "../core/Time.hpp"
@@ -64,6 +66,30 @@ void GameScene::onExit()
     }
 
     m_shaderMgr.reset();
+}
+
+void GameScene::onPause()
+{
+    TINA_INFO("GameScene::onPause - 游戏暂停");
+    // 游戏暂停时，update() 不会被调用，但渲染资源保持有效
+}
+
+void GameScene::onResume()
+{
+    TINA_INFO("GameScene::onResume - 游戏恢复");
+
+    // 防御：如果程序句柄在暂停场景中被销毁，则此处检测并重建
+    if (!bgfx::isValid(m_progColor)) {
+        TINA_WARN("GameScene::onResume - m_progColor 无效，尝试重新加载");
+        m_progColor = m_shaderMgr->loadProgram("color", "color");
+        // 刷新 UI 渲染器内部持有的程序句柄，避免仍指向旧句柄
+        if (m_uiRenderer) {
+            m_uiRenderer->initialize(*m_shaderMgr, m_textRenderer.get());
+        }
+    }
+
+    // 重新设置 UI 视图（view 3）
+    setupUIView();
 }
 
 void GameScene::update(float dt)
@@ -455,6 +481,10 @@ void GameScene::updateCamera(float dt)
 void GameScene::renderWorld()
 {
     if (!m_tileRenderer || !m_tileMap || !m_camera) return;
+    if (!bgfx::isValid(m_progColor)) {
+        TINA_WARN("GameScene::renderWorld - 程序句柄无效，跳过本帧渲染");
+        return;
+    }
 
     // 构建相机矩阵（视图矩阵 + 投影矩阵）
     float viewM[16], projM[16];
@@ -528,8 +558,16 @@ void GameScene::renderUI()
 
 void GameScene::handleKeyboard(const Tina::os::Event& event)
 {
-    // 键盘快捷键已通过 EventBus Signal 订阅处理
-    // 此函数保留用于未来的其他键盘事件处理
+    if (event.type != os::Event::Type::KEY || !event.key.down) return;
+
+    // ESC 键：暂停游戏
+    if (event.key.key_code == os::KeyCode::ESCAPE) {
+        TINA_INFO("GameScene: 按下 ESC，进入暂停菜单");
+        app()->scenes().push(Memory::MakeUnique<PauseScene>());
+        return;
+    }
+
+    // 其他键盘事件已通过 EventBus Signal 订阅处理
 }
 
 void GameScene::handleMouse(const Tina::os::Event& event)
