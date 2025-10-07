@@ -14,6 +14,8 @@ namespace Tina::Engine {
 // 前向声明
 class SceneManager;
 class EventBus;
+struct FileSystem;
+class ResourceManagerHub;
 
 // 应用程序主类
 class Application {
@@ -58,6 +60,12 @@ public:
     // 获取场景管理器（用于场景切换）
     SceneManager& scenes() const { return *m_sceneManager; }
 
+    // 获取文件系统（用于异步IO）
+    FileSystem& fileSystem() const { return *m_fileSystem; }
+
+    // 获取资源管理中心（用于加载资源）
+    ResourceManagerHub& resources() const { return *m_resourceHub; }
+
     // ==================== 帧率和时间信息 ====================
 
     // 获取上一帧的时间间隔（秒）
@@ -100,6 +108,8 @@ private:
     Tina::os::WindowHandle m_window = nullptr;     // 窗口句柄
     Memory::UniquePtr<EventBus> m_eventBus;        // 事件总线（独占所有权）
     Memory::UniquePtr<SceneManager> m_sceneManager;// 场景管理器（独占所有权）
+    Memory::UniquePtr<FileSystem> m_fileSystem;    // 文件系统（异步IO）
+    Memory::UniquePtr<ResourceManagerHub> m_resourceHub; // 资源管理中心
 };
 
 } // namespace Tina::Engine

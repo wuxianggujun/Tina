@@ -1,6 +1,7 @@
 #include "Application.hpp"
 #include "SceneManager.hpp"
 #include "EventBus.hpp"
+#include "Resource.hpp"
 #include "../core/Log.hpp"
 #include "../os/OS.hpp"
 
@@ -91,7 +92,17 @@ void Application::init()
     m_eventBus = Memory::MakeUnique<EventBus>();
     m_sceneManager = Memory::MakeUnique<SceneManager>(this);
 
-    // 6. 初始化时间戳
+    // 6. 创建资源系统
+    m_fileSystem = CreateFileSystem();
+    m_resourceHub = Memory::MakeUnique<ResourceManagerHub>();
+
+    if (!m_fileSystem) {
+        TINA_ERROR("文件系统创建失败");
+    } else {
+        TINA_INFO("资源系统初始化成功");
+    }
+
+    // 7. 初始化时间戳
     m_lastFrameTime = bx::getHPCounter();
 
     TINA_INFO("Application 初始化成功");
@@ -101,8 +112,10 @@ void Application::shutdown()
 {
     TINA_INFO("Application 关闭中...");
 
-    // 清理顺序：场景 → 子系统 → bgfx → 窗口
+    // 清理顺序：场景 → 资源 → 子系统 → bgfx → 窗口
     m_sceneManager.reset();
+    m_resourceHub.reset();
+    m_fileSystem.reset();
     m_eventBus.reset();
 
     bgfx::shutdown();
@@ -205,6 +218,12 @@ void Application::processEvents()
 
 void Application::update(float dt)
 {
+    // 1. 驱动资源系统（处理异步加载回调）
+    if (m_resourceHub) {
+        m_resourceHub->update();
+    }
+
+    // 2. 更新场景
     m_sceneManager->update(dt);
 }
 
