@@ -96,13 +96,17 @@ void Application::init()
     m_fileSystem = CreateFileSystem();
     m_resourceHub = Memory::MakeUnique<ResourceManagerHub>();
 
+    // 7. 全局着色器管理器（必须在 bgfx 初始化后建立，且在 bgfx 关闭前销毁）
+    m_shaderMgr = Memory::MakeUnique<Tina::Renderer::ShaderManager>();
+    m_shaderMgr->initialize();
+
     if (!m_fileSystem) {
         TINA_ERROR("文件系统创建失败");
     } else {
         TINA_INFO("资源系统初始化成功");
     }
 
-    // 7. 初始化时间戳
+    // 8. 初始化时间戳
     m_lastFrameTime = bx::getHPCounter();
 
     TINA_INFO("Application 初始化成功");
@@ -112,11 +116,13 @@ void Application::shutdown()
 {
     TINA_INFO("Application 关闭中...");
 
-    // 清理顺序：场景 → 资源 → 子系统 → bgfx → 窗口
+    // 清理顺序：场景 → 资源 → 着色器 → 子系统 → bgfx → 窗口
     m_sceneManager.reset();
     m_resourceHub.reset();
     m_fileSystem.reset();
     m_eventBus.reset();
+    // 在 bgfx 关闭前确保销毁所有程序句柄
+    m_shaderMgr.reset();
 
     bgfx::shutdown();
 

@@ -24,14 +24,12 @@ void PauseScene::onEnter()
     // 获取窗口尺寸
     app()->getPixelSize(m_pixelWidth, m_pixelHeight);
 
-    // 初始化渲染资源
-    m_shaderMgr = Memory::MakeUnique<Renderer::ShaderManager>();
-    m_shaderMgr->initialize();
-    m_progColor = m_shaderMgr->loadProgram("color", "color");
+    // 初始化渲染资源（使用全局 ShaderManager）
+    m_progColor = app()->shaders().loadProgram("color", "color");
 
     // 文本渲染器
     m_textRenderer = Memory::MakeUnique<UI::TextRenderer>();
-    if (!m_textRenderer->initialize()) {
+    if (!m_textRenderer->initialize(app()->shaders())) {
         TINA_ERROR("TextRenderer 初始化失败");
     } else {
         m_textRenderer->loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 32);
@@ -39,7 +37,7 @@ void PauseScene::onEnter()
 
     // UI 渲染器
     m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
-    m_uiRenderer->initialize(*m_shaderMgr, m_textRenderer.get());
+    m_uiRenderer->initialize(app()->shaders(), m_textRenderer.get());
 
     // 初始化顶点布局
     m_colorLayout.begin()
@@ -70,10 +68,8 @@ void PauseScene::onExit()
     m_uiRenderer.reset();
     m_textRenderer.reset();
     
-    // 不手动销毁 m_progColor，让 ShaderManager 自动管理
-    // 避免双重释放
+    // 不手动销毁 m_progColor，让全局 ShaderManager 自动管理（避免双重释放）
     m_progColor = BGFX_INVALID_HANDLE;
-    m_shaderMgr.reset();
 }
 
 void PauseScene::update(float dt)

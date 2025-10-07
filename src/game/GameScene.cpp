@@ -59,13 +59,8 @@ void GameScene::onExit()
     m_particleSystem.reset();
     m_textRenderer.reset();
 
-    // 销毁 bgfx 程序句柄
-    if (bgfx::isValid(m_progColor)) {
-        bgfx::destroy(m_progColor);
-        m_progColor = BGFX_INVALID_HANDLE;
-    }
-
-    m_shaderMgr.reset();
+    // 程序句柄由全局 ShaderManager 管理，无需手动销毁
+    m_progColor = BGFX_INVALID_HANDLE;
 }
 
 void GameScene::onPause()
@@ -81,10 +76,10 @@ void GameScene::onResume()
     // 防御：如果程序句柄在暂停场景中被销毁，则此处检测并重建
     if (!bgfx::isValid(m_progColor)) {
         TINA_WARN("GameScene::onResume - m_progColor 无效，尝试重新加载");
-        m_progColor = m_shaderMgr->loadProgram("color", "color");
+        m_progColor = app()->shaders().loadProgram("color", "color");
         // 刷新 UI 渲染器内部持有的程序句柄，避免仍指向旧句柄
         if (m_uiRenderer) {
-            m_uiRenderer->initialize(*m_shaderMgr, m_textRenderer.get());
+            m_uiRenderer->initialize(app()->shaders(), m_textRenderer.get());
         }
     }
 
@@ -152,14 +147,12 @@ void GameScene::initializeResources()
 {
     TINA_INFO("GameScene: 初始化资源...");
 
-    // 1. 着色器管理器
-    m_shaderMgr = Memory::MakeUnique<Renderer::ShaderManager>();
-    m_shaderMgr->initialize();
-    m_progColor = m_shaderMgr->loadProgram("color", "color");
+    // 1. 着色器程序（来自全局 ShaderManager）
+    m_progColor = app()->shaders().loadProgram("color", "color");
 
     // 2. 文本渲染器
     m_textRenderer = Memory::MakeUnique<UI::TextRenderer>();
-    if (!m_textRenderer->initialize()) {
+    if (!m_textRenderer->initialize(app()->shaders())) {
         TINA_ERROR("TextRenderer 初始化失败");
     } else {
         m_textRenderer->loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 24);
@@ -167,7 +160,7 @@ void GameScene::initializeResources()
 
     // 3. 粒子系统
     m_particleSystem = Memory::MakeUnique<Particles::ParticleSystem2D>();
-    if (!m_particleSystem->initialize(*m_shaderMgr)) {
+    if (!m_particleSystem->initialize(app()->shaders())) {
         TINA_WARN("ParticleSystem 初始化失败：无粒子效果");
     } else {
         m_particleSystem->setGlobalAcceleration(GameConfig::PARTICLE_GRAVITY_X,
@@ -237,7 +230,7 @@ void GameScene::createUI()
 {
     // UI 渲染器
     m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
-    m_uiRenderer->initialize(*m_shaderMgr, m_textRenderer.get());
+    m_uiRenderer->initialize(app()->shaders(), m_textRenderer.get());
 
     // 工具栏
     m_toolbar = Memory::MakeUnique<UI::UIToolbar>();

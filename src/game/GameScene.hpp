@@ -76,8 +76,7 @@ private:
     void triggerPlayerEvents(float prevX, float prevY, bool wasOnGround);
 
 private:
-    // 渲染资源
-    Memory::UniquePtr<Renderer::ShaderManager> m_shaderMgr;
+    // 渲染资源（着色器来自全局 ShaderManager）
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
 
     Memory::UniquePtr<UI::TextRenderer> m_textRenderer;

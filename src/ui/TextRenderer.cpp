@@ -15,7 +15,7 @@ struct Vtx {
 TextRenderer::TextRenderer() {}
 TextRenderer::~TextRenderer() { shutdown(); }
 
-bool TextRenderer::initialize(int atlasW, int atlasH)
+bool TextRenderer::initialize(Tina::Renderer::ShaderManager& sm, int atlasW, int atlasH)
 {
     if (FT_Init_FreeType(&m_ft)) {
         TINA_ERROR("TextRenderer: FreeType 初始化失败");
@@ -74,9 +74,8 @@ bool TextRenderer::initialize(int atlasW, int atlasH)
         .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Uint8, true)
     .end();
 
-    // 着色器
-    m_shaderMgr.initialize();
-    m_prog = m_shaderMgr.loadProgram("text", "text");
+    // 着色器（由全局 ShaderManager 统一管理与清理）
+    m_prog = sm.loadProgram("text", "text");
     if (!bgfx::isValid(m_prog)) {
         TINA_ERROR("TextRenderer: 加载 text 着色器失败");
         return false;
@@ -92,7 +91,7 @@ void TextRenderer::shutdown()
     if (bgfx::isValid(m_debugTex)) { bgfx::destroy(m_debugTex); m_debugTex = BGFX_INVALID_HANDLE; }
     if (bgfx::isValid(m_sText))    { bgfx::destroy(m_sText);    m_sText = BGFX_INVALID_HANDLE; }
     if (bgfx::isValid(m_sTextTexture)) { bgfx::destroy(m_sTextTexture); m_sTextTexture = BGFX_INVALID_HANDLE; }
-    m_shaderMgr.cleanup();
+    // 程序由全局 ShaderManager 管理，这里不做销毁
     if (m_font.face) { FT_Done_Face(m_font.face); m_font.face = nullptr; }
     if (m_ft) { FT_Done_FreeType(m_ft); m_ft = nullptr; }
 }

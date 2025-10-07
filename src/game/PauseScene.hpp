@@ -47,8 +47,7 @@ private:
     void onQuitClicked();
 
 private:
-    // UI 资源
-    Memory::UniquePtr<Renderer::ShaderManager> m_shaderMgr;
+    // UI 资源（着色器来自全局 ShaderManager）
     Memory::UniquePtr<UI::TextRenderer> m_textRenderer;
     Memory::UniquePtr<UI::UIRenderer> m_uiRenderer;
 

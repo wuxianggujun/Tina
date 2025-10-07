@@ -8,6 +8,7 @@
 
 #include "../core/Memory.hpp"
 #include "../os/OS.hpp"
+#include "../renderer/ShaderManager.hpp"
 
 namespace Tina::Engine {
 
@@ -66,6 +67,9 @@ public:
     // 获取资源管理中心（用于加载资源）
     ResourceManagerHub& resources() const { return *m_resourceHub; }
 
+    // 获取全局着色器管理器（全局唯一，贯穿应用生命周期）
+    Tina::Renderer::ShaderManager& shaders() const { return *m_shaderMgr; }
+
     // ==================== 帧率和时间信息 ====================
 
     // 获取上一帧的时间间隔（秒）
@@ -106,10 +110,11 @@ private:
     int m_pixelHeight = 720;                       // 窗口像素高度
 
     Tina::os::WindowHandle m_window = nullptr;     // 窗口句柄
-    Memory::UniquePtr<EventBus> m_eventBus;        // 事件总线（独占所有权）
-    Memory::UniquePtr<SceneManager> m_sceneManager;// 场景管理器（独占所有权）
-    Memory::UniquePtr<FileSystem> m_fileSystem;    // 文件系统（异步IO）
-    Memory::UniquePtr<ResourceManagerHub> m_resourceHub; // 资源管理中心
+    Memory::UniquePtr<EventBus> m_eventBus;                // 事件总线（独占所有权）
+    Memory::UniquePtr<SceneManager> m_sceneManager;        // 场景管理器（独占所有权）
+    Memory::UniquePtr<FileSystem> m_fileSystem;            // 文件系统（异步IO）
+    Memory::UniquePtr<ResourceManagerHub> m_resourceHub;   // 资源管理中心
+    Memory::UniquePtr<Tina::Renderer::ShaderManager> m_shaderMgr; // 全局着色器管理器
 };
 
 } // namespace Tina::Engine

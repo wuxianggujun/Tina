@@ -18,7 +18,8 @@ public:
     TextRenderer();
     ~TextRenderer();
 
-    bool initialize(int atlasW = 2048, int atlasH = 2048);
+    // 使用全局 ShaderManager 加载所需的 text 程序
+    bool initialize(Tina::Renderer::ShaderManager& sm, int atlasW = 2048, int atlasH = 2048);
     void shutdown();
 
     // 加载字体（ttf/otf），size 为像素高度
@@ -81,7 +82,6 @@ private:
     bgfx::TextureHandle m_debugTex = BGFX_INVALID_HANDLE;         // 调试 2x2 纹理
 
     // 着色器
-    Tina::Renderer::ShaderManager m_shaderMgr;
     bgfx::ProgramHandle m_prog = BGFX_INVALID_HANDLE;
     bgfx::VertexLayout m_layout;
 

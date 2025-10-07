@@ -381,6 +381,8 @@ public:
     ResourceManager& resources() { return *m_resources; }
     EventBus& events() { return *m_eventBus; }
     SceneManager& scenes() { return *m_sceneManager; }
+    // 新增：全局着色器管理器（单例于应用生命周期）
+    Renderer::ShaderManager& shaders() { return *m_shaderManager; }
 
     // 帧率信息
     float deltaTime() const { return m_deltaTime; }
@@ -412,7 +414,7 @@ private:
 - ✅ 管理应用程序生命周期
 - ✅ 初始化核心子系统
 - ✅ 驱动主循环
-- ✅ 提供全局服务访问点
+- ✅ 提供全局服务访问点（事件、场景、资源、着色器）
 
 ---
 
