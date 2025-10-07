@@ -9,7 +9,6 @@
 #include FT_FREETYPE_H
 #include <string>
 #include "../core/Container.hpp"
-#include <EASTL/fixed_hash_map.h>
 #include "../renderer/ShaderManager.hpp"
 #include "../engine/Resource.hpp"
 #include "../engine/Font.hpp"
@@ -66,8 +65,8 @@ private:
         int sizePx = 0;
         int ascender = 0;
         int descender = 0;
-        // 使用 EASTL 固定哈希表，避免运行时 rehash/动态分配引发的调试分配路径
-        eastl::fixed_hash_map<int, Glyph, 4096, 4096, false> glyphs;
+        // 使用项目封装的固定哈希表别名，避免运行时 rehash/动态分配
+        Tina::Container::FixedHashMap<int, Glyph, 4096, 4096, false> glyphs;
     };
 
     bool ensureGlyph(Font& font, int codepoint);

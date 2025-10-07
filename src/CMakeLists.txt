@@ -16,6 +16,8 @@ set(SRC_FILES
     engine/EventBus.cpp
     game/GameScene.hpp
     game/GameScene.cpp
+    game/MenuScene.hpp
+    game/MenuScene.cpp
     game/PauseScene.hpp
     game/PauseScene.cpp
     core/Path.cpp

@@ -102,7 +102,15 @@ public:
         if (path.isEmpty()) return nullptr;
         Tina::Container::String key(path.c_str());
         auto it = m_resources.find(key);
-        if (it != m_resources.end()) { it->second->incRefCount(); return it->second.get(); }
+        if (it != m_resources.end()) {
+            Resource* cached = it->second.get();
+            cached->incRefCount();
+            // 重要：如果资源曾被卸载（状态为 EMPTY），需要重新发起异步加载
+            if (cached->getState() == Resource::State::EMPTY) {
+                cached->requestLoad(m_fs);
+            }
+            return cached;
+        }
         Tina::Memory::UniquePtr<Resource> res(createResource(path));
         Resource* out = res.get();
         m_resources.emplace(Tina::Container::String(path.c_str()), std::move(res));
