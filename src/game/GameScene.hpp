@@ -69,6 +69,10 @@ private:
     // UI 设置
     void setupUIView();
 
+    // EventBus 订阅管理
+    void subscribeToEvents();
+    void triggerPlayerEvents(float prevX, float prevY, bool wasOnGround);
+
 private:
     // 渲染资源
     Memory::UniquePtr<Renderer::ShaderManager> m_shaderMgr;
@@ -87,6 +91,13 @@ private:
     // UI
     Memory::UniquePtr<UI::UIToolbar> m_toolbar;
     Memory::UniquePtr<UI::UICharacterPanel> m_characterPanel;
+
+    // Signal 连接管理（RAII 自动断开）
+    Core::Signal<>::Connection m_switchControlConnection;
+    Core::Signal<int, bool>::Connection m_keyPressedConnection;
+    Core::Signal<float>::Connection m_mouseWheelConnection;
+    Core::Signal<>::Connection m_playerJumpedConnection;
+    Core::Signal<float, float>::Connection m_playerMovedConnection;
 
     // 游戏状态
     entt::entity m_playerEntity = entt::null;

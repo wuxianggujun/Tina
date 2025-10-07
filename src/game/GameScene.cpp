@@ -5,6 +5,7 @@
 
 #include "GameScene.hpp"
 #include "../engine/Application.hpp"
+#include "../engine/EventBus.hpp"  // 包含 EventBus 完整定义
 #include "../core/Log.hpp"
 #include "../core/Time.hpp"
 #include "../game/CoordinateMapper.hpp"
@@ -36,6 +37,14 @@ void GameScene::onEnter()
 void GameScene::onExit()
 {
     TINA_INFO("GameScene::onExit - 退出游戏场景");
+
+    // Signal 连接会自动断开（Connection 析构函数）
+    // 但显式重置更清晰
+    m_switchControlConnection.disconnect();
+    m_keyPressedConnection.disconnect();
+    m_mouseWheelConnection.disconnect();
+    m_playerJumpedConnection.disconnect();
+    m_playerMovedConnection.disconnect();
 
     // 清理资源（按创建逆序）
     m_characterPanel.reset();
@@ -97,20 +106,7 @@ void GameScene::handleEvent(const Tina::os::Event& event)
             break;
 
         case E::Type::MOUSE_WHEEL:
-            // 滚轮切换工具
-            if (m_toolbar) {
-                int n = m_toolbar->slotCount();
-                if (n > 0) {
-                    int cur = m_toolbar->selectedIndex();
-                    if (cur < 0) cur = 0;
-                    if (event.mouse_wheel.amount > 0.0f) {
-                        cur = (cur + 1) % n;
-                    } else if (event.mouse_wheel.amount < 0.0f) {
-                        cur = (cur - 1 + n) % n;
-                    }
-                    m_toolbar->select(cur);
-                }
-            }
+            // 滚轮事件已通过 EventBus Signal 订阅处理
             break;
 
         case E::Type::KEY:
@@ -313,14 +309,17 @@ void GameScene::spawnCharacters(int spawnX, int spawnY)
     m_ecsWorld->registry().get<ECS::Renderable>(npc3).g = 1.0f;
     m_ecsWorld->registry().get<ECS::Renderable>(npc3).b = 0.2f;
 
-    // 5. 设置角色面板回调（切换控制）
-    m_characterPanel->setSwitchControlCallback([this]() {
+    // 5. 订阅角色面板的 Signal 事件（切换控制）
+    m_switchControlConnection = m_characterPanel->onSwitchControl.connect([this]() {
         if (m_clickedEntity != entt::null) {
             m_ecsWorld->switchControl(m_clickedEntity);
             m_toolbar->root()->setVisible(false);
             TINA_INFO("切换控制到角色");
         }
     });
+
+    // 6. 订阅 EventBus 事件
+    subscribeToEvents();
 
     TINA_INFO("角色生成完成: 1 玩家 + 3 NPC");
 }
@@ -337,7 +336,24 @@ void GameScene::updateGameLogic(float dt)
     input.moveRight = ks[SDL_SCANCODE_D] || ks[SDL_SCANCODE_RIGHT];
     input.jump = ks[SDL_SCANCODE_W] || ks[SDL_SCANCODE_UP] || ks[SDL_SCANCODE_SPACE];
 
+    // 记录更新前的玩家状态（用于触发事件）
+    float prevPlayerX = 0.0f, prevPlayerY = 0.0f;
+    bool wasOnGround = false;
+    if (m_playerEntity != entt::null) {
+        auto& reg = m_ecsWorld->registry();
+        if (reg.any_of<ECS::Transform, ECS::PhysicsBody>(m_playerEntity)) {
+            auto& transform = reg.get<ECS::Transform>(m_playerEntity);
+            auto& body = reg.get<ECS::PhysicsBody>(m_playerEntity);
+            prevPlayerX = transform.x;
+            prevPlayerY = transform.y;
+            wasOnGround = body.onGround;  // 驼峰命名
+        }
+    }
+
     m_ecsWorld->update(dt, *m_tileMap, input);
+
+    // 触发玩家事件
+    triggerPlayerEvents(prevPlayerX, prevPlayerY, wasOnGround);
 
     // 3. 水模拟（每帧执行多步流体模拟）
     int a, b, c, d;
@@ -512,21 +528,8 @@ void GameScene::renderUI()
 
 void GameScene::handleKeyboard(const Tina::os::Event& event)
 {
-    if (!m_toolbar) return;
-    if (event.type != os::Event::Type::KEY || !event.key.down) return;
-
-    // 工具栏快捷键（数字键 1-8，通过事件处理）
-    switch (event.key.key_code) {
-        case os::KeyCode::KEY_1: m_toolbar->select(0); break;
-        case os::KeyCode::KEY_2: m_toolbar->select(1); break;
-        case os::KeyCode::KEY_3: m_toolbar->select(2); break;
-        case os::KeyCode::KEY_4: m_toolbar->select(3); break;
-        case os::KeyCode::KEY_5: m_toolbar->select(4); break;
-        case os::KeyCode::KEY_6: m_toolbar->select(5); break;
-        case os::KeyCode::KEY_7: m_toolbar->select(6); break;
-        case os::KeyCode::KEY_8: m_toolbar->select(7); break;
-        default: break;
-    }
+    // 键盘快捷键已通过 EventBus Signal 订阅处理
+    // 此函数保留用于未来的其他键盘事件处理
 }
 
 void GameScene::handleMouse(const Tina::os::Event& event)
@@ -685,6 +688,106 @@ void GameScene::setupUIView()
                  caps ? caps->homogeneousDepth : false);
 
     bgfx::setViewTransform(3, nullptr, ortho);
+}
+
+void GameScene::subscribeToEvents()
+{
+    if (!app()) return;
+
+    // 订阅键盘事件（用于工具栏快捷键）
+    m_keyPressedConnection = app()->events().onKeyPressed.connect(
+        [this](int keycode, bool isRepeat) {
+            if (!m_toolbar || isRepeat) return;
+
+            // 工具栏快捷键（数字键 1-8）
+            switch (keycode) {
+                case (int)os::KeyCode::KEY_1: m_toolbar->select(0); break;
+                case (int)os::KeyCode::KEY_2: m_toolbar->select(1); break;
+                case (int)os::KeyCode::KEY_3: m_toolbar->select(2); break;
+                case (int)os::KeyCode::KEY_4: m_toolbar->select(3); break;
+                case (int)os::KeyCode::KEY_5: m_toolbar->select(4); break;
+                case (int)os::KeyCode::KEY_6: m_toolbar->select(5); break;
+                case (int)os::KeyCode::KEY_7: m_toolbar->select(6); break;
+                case (int)os::KeyCode::KEY_8: m_toolbar->select(7); break;
+                default: break;
+            }
+        }
+    );
+
+    // 订阅鼠标滚轮事件（切换工具）
+    m_mouseWheelConnection = app()->events().onMouseWheel.connect(
+        [this](float amount) {
+            if (!m_toolbar) return;
+
+            int n = m_toolbar->slotCount();
+            if (n > 0) {
+                int cur = m_toolbar->selectedIndex();
+                if (cur < 0) cur = 0;
+                if (amount > 0.0f) {
+                    cur = (cur + 1) % n;
+                } else if (amount < 0.0f) {
+                    cur = (cur - 1 + n) % n;
+                }
+                m_toolbar->select(cur);
+            }
+        }
+    );
+
+    // 订阅玩家跳跃事件（添加粒子效果）
+    m_playerJumpedConnection = app()->events().onPlayerJumped.connect(
+        [this]() {
+            if (!m_particleSystem || m_playerEntity == entt::null) return;
+
+            auto& reg = m_ecsWorld->registry();
+            if (reg.any_of<ECS::Transform>(m_playerEntity)) {
+                auto& transform = reg.get<ECS::Transform>(m_playerEntity);
+                // 在玩家脚下生成跳跃粒子
+                m_particleSystem->explode(
+                    transform.x + 0.5f, transform.y,
+                    5,  // 少量粒子
+                    0.5f, 1.0f,  // 速度范围
+                    0.05f, 0.1f,  // 大小范围
+                    0.3f, 0.5f,  // 生命周期
+                    Core::Color(0.9f, 0.9f, 0.9f, 0.8f)  // 白色粉尘
+                );
+            }
+        }
+    );
+
+    // 订阅玩家移动事件（可用于调试或其他逻辑）
+    m_playerMovedConnection = app()->events().onPlayerMoved.connect(
+        [](float x, float y) {
+            // 未来可以在这里添加脚步声、拖尾效果等
+            // TINA_TRACE("玩家移动到: ({:.2f}, {:.2f})", x, y);
+            (void)x; (void)y;  // 避免未使用参数警告
+        }
+    );
+
+    TINA_INFO("GameScene: EventBus 订阅完成");
+}
+
+void GameScene::triggerPlayerEvents(float prevX, float prevY, bool wasOnGround)
+{
+    if (!app() || m_playerEntity == entt::null) return;
+
+    auto& reg = m_ecsWorld->registry();
+    if (!reg.any_of<ECS::Transform, ECS::PhysicsBody, ECS::Velocity>(m_playerEntity)) return;
+
+    auto& transform = reg.get<ECS::Transform>(m_playerEntity);
+    auto& body = reg.get<ECS::PhysicsBody>(m_playerEntity);
+    auto& velocity = reg.get<ECS::Velocity>(m_playerEntity);
+
+    // 检测跳跃（离地 + 垂直速度向上）
+    if (wasOnGround && !body.onGround && velocity.vy < 0.0f) {
+        app()->events().onPlayerJumped.emit();
+    }
+
+    // 检测移动（位置变化）
+    float dx = transform.x - prevX;
+    float dy = transform.y - prevY;
+    if (std::abs(dx) > 0.01f || std::abs(dy) > 0.01f) {
+        app()->events().onPlayerMoved.emit(transform.x, transform.y);
+    }
 }
 
 } // namespace Tina::Game
