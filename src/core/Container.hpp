@@ -20,6 +20,7 @@
 #include <EASTL/sort.h>
 #include <EASTL/utility.h>
 #include <EASTL/memory.h>
+#include <EASTL/fixed_hash_map.h>
 
 #include "EASTL/priority_queue.h"
 
@@ -67,6 +68,11 @@ namespace Tina {
         // 无序集合（哈希集合）
         template<typename T, typename Hash = eastl::hash<T>, typename Predicate = eastl::equal_to<T>, typename Allocator = eastl::allocator>
         using HashSet = eastl::unordered_set<T, Hash, Predicate, Allocator>;
+
+        // 固定容量哈希映射（无运行期 rehash/动态分配；N=元素槽数，M=桶数）
+        template<typename Key, typename Value, size_t N, size_t M, bool bEnableOverflow = false,
+                 typename Hash = eastl::hash<Key>, typename Predicate = eastl::equal_to<Key>>
+        using FixedHashMap = eastl::fixed_hash_map<Key, Value, N, M, bEnableOverflow, Hash, Predicate>;
         
         // ====================
         // 容器适配器 (Container Adapters)

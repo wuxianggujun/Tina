@@ -8,6 +8,7 @@
 #include "../core/Color.hpp"
 #include "../core/Signal.hpp"
 #include "UIColors.hpp"
+#include <bgfx/bgfx.h>
 
 namespace Tina::UI {
 
@@ -108,6 +109,13 @@ public:
     void setPressed(bool p) { m_pressed = p; }
     void setSelected(bool s) { m_selected = s; }
 
+    void setIconTexture(bgfx::TextureHandle tex) { m_iconTex = tex; }
+    bgfx::TextureHandle iconTexture() const { return m_iconTex; }
+
+    enum class IconLayout { OverlapCenter = 0, IconTopTextBottom, IconLeftTextRight };
+    void setIconLayout(IconLayout l) { m_iconLayout = l; }
+    IconLayout iconLayout() const { return m_iconLayout; }
+
     bool isHovered() const { return m_hovered; }
     bool isPressed() const { return m_pressed; }
     bool isSelected() const { return m_selected; }
@@ -141,6 +149,10 @@ private:
     bool m_hovered;
     bool m_pressed;
     bool m_selected;
+
+    // 可选图标纹理（由外部提供生命周期）
+    bgfx::TextureHandle m_iconTex = BGFX_INVALID_HANDLE;
+    IconLayout m_iconLayout = IconLayout::IconTopTextBottom;
 };
 
 } // namespace Tina::UI

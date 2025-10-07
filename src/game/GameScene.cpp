@@ -81,6 +81,7 @@ void GameScene::update(float dt)
 {
     updateGameLogic(dt);
     updateCamera(dt);
+    ensureToolbarIconsReady();
 }
 
 void GameScene::render()
@@ -225,6 +226,22 @@ void GameScene::createUI()
     // 工具栏
     m_toolbar = Memory::MakeUnique<UI::UIToolbar>();
     m_toolbar->initialize(m_pixelWidth, m_pixelHeight, *m_uiRenderer, m_textRenderer.get());
+    // 通过 TextureManager 加载工具图标（示例使用现有纹理资源）
+    {
+        auto* hub = &app()->resources();
+        if (auto* t0 = hub->load<Tina::Engine::Texture2DResource>(Tina::Engine::Path("resources/textures/player.png"))) {
+            m_iconWater = Tina::Engine::ResourceRef<Tina::Engine::Texture2DResource>(hub, t0);
+            m_toolbar->setSlotIcon(0, t0->handle());
+        }
+        if (auto* t1 = hub->load<Tina::Engine::Texture2DResource>(Tina::Engine::Path("resources/textures/grassland.png"))) {
+            m_iconClean = Tina::Engine::ResourceRef<Tina::Engine::Texture2DResource>(hub, t1);
+            m_toolbar->setSlotIcon(1, t1->handle());
+        }
+        if (auto* t2 = hub->load<Tina::Engine::Texture2DResource>(Tina::Engine::Path("resources/textures/dirt_block.png"))) {
+            m_iconBomb = Tina::Engine::ResourceRef<Tina::Engine::Texture2DResource>(hub, t2);
+            m_toolbar->setSlotIcon(2, t2->handle());
+        }
+    }
 
     // 角色面板
     m_characterPanel = Memory::MakeUnique<UI::UICharacterPanel>();
@@ -396,19 +413,31 @@ void GameScene::updateGameLogic(float dt)
     // 6. UI 更新（工具栏、角色面板）
     if (m_toolbar) {
         float mx = 0.0f, my = 0.0f;
-        SDL_GetMouseState(&mx, &my);
-        m_toolbar->setMousePos(mx, my);
-        m_toolbar->events().updateMouse(mx, my, m_isToolActive);
-        m_toolbar->events().processEvents();
+        uint32_t btnMask = (uint32_t)SDL_GetMouseState(&mx, &my);
+#ifdef SDL_BUTTON_MASK
+        bool leftHeld = (btnMask & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) != 0;
+#else
+        bool leftHeld = (btnMask & SDL_BUTTON_LMASK) != 0;
+#endif
+        // 先更新布局（计算各子节点世界坐标），再做命中测试与事件处理
         m_toolbar->update(dt);
+        m_toolbar->setMousePos(mx, my);
+        m_toolbar->events().updateMouse(mx, my, leftHeld);
+        m_toolbar->events().processEvents();
     }
 
     if (m_characterPanel) {
         float mx = 0.0f, my = 0.0f;
-        SDL_GetMouseState(&mx, &my);
-        m_characterPanel->events().updateMouse(mx, my, m_isToolActive);
-        m_characterPanel->events().processEvents();
+        uint32_t btnMask = (uint32_t)SDL_GetMouseState(&mx, &my);
+#ifdef SDL_BUTTON_MASK
+        bool leftHeld = (btnMask & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) != 0;
+#else
+        bool leftHeld = (btnMask & SDL_BUTTON_LMASK) != 0;
+#endif
+        // 先更新布局，再分发事件
         m_characterPanel->update(dt);
+        m_characterPanel->events().updateMouse(mx, my, leftHeld);
+        m_characterPanel->events().processEvents();
     }
 
     // 重置工具激活状态（实现一次性点击，防止 UI 事件连续触发）
@@ -539,6 +568,23 @@ void GameScene::renderUI()
     }
 }
 
+void GameScene::ensureToolbarIconsReady()
+{
+    if (!m_toolbar) return;
+    auto trySet = [&](int slot, Tina::Engine::ResourceRef<Tina::Engine::Texture2DResource>& ref){
+        auto* r = ref.get();
+        if (!r) return;
+        if (r->getState() == Tina::Engine::Resource::State::READY) {
+            if (bgfx::isValid(r->handle())) {
+                m_toolbar->setSlotIcon(slot, r->handle());
+            }
+        }
+    };
+    trySet(0, m_iconWater);
+    trySet(1, m_iconClean);
+    trySet(2, m_iconBomb);
+}
+
 void GameScene::handleKeyboard(const Tina::os::Event& event)
 {
     if (event.type != os::Event::Type::KEY || !event.key.down) return;
@@ -571,10 +617,11 @@ void GameScene::handleMouse(const Tina::os::Event& event)
     if (event.mouse_button.button == os::MouseButton::LEFT) {
         m_isToolActive = true;
 
-        // 检查是否点击工具栏
+        // 检查是否点击工具栏（直接命中并切换选中，避免依赖事件系统的边沿判定）
         if (m_toolbar && m_toolbar->hitTest(mx, my)) {
-            // 工具栏内部处理点击
-            return;
+            if (m_toolbar->clickAt(mx, my)) {
+                return;
+            }
         }
 
         // 地形编辑工具

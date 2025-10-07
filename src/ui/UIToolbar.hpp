@@ -40,6 +40,15 @@ public:
     void setGap(int gap) { m_gap = std::max(0, gap); buildLayout(); }
     void setPadding(int pad) { m_padding = std::max(0, pad); buildLayout(); }
 
+    // 设置某个格子的图标纹理句柄（由调用方保证句柄生命周期）
+    void setSlotIcon(int index, bgfx::TextureHandle tex);
+
+    // 根据屏幕坐标返回格子索引（-1 表示不在任何格子）
+    int indexAt(float x, float y) const;
+
+    // 处理一次点击（内部计算命中并切换选中），返回是否命中了任一格子
+    bool clickAt(float x, float y);
+
 private:
     void buildLayout();
 

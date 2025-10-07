@@ -75,10 +75,21 @@ public:
     }
     int textAscenderPx() const { return m_text ? m_text->ascenderPx() : 0; }
 
+    // 绘制纹理图片（像素坐标）。
+    // 若未加载 sprite 程序或纹理无效，则忽略绘制。
+    void drawImage(uint16_t viewId, float x, float y, float w, float h,
+                   bgfx::TextureHandle tex,
+                   float r = 1.0f, float g = 1.0f, float b = 1.0f, float a = 1.0f);
+
 private:
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
     bgfx::VertexLayout  m_colorLayout{};
     TextRenderer*       m_text = nullptr;
+
+    // sprite 绘制（贴图）
+    bgfx::ProgramHandle m_progSprite = BGFX_INVALID_HANDLE;
+    bgfx::VertexLayout  m_spriteLayout{};
+    bgfx::UniformHandle m_sTex = BGFX_INVALID_HANDLE;
 };
 
 } // namespace Tina::UI

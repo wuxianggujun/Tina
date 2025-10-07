@@ -13,6 +13,8 @@
 #include "../ui/UICharacterPanel.hpp"
 #include "../particles/ParticleSystem.hpp"
 #include "../game/TerrainEditor.hpp"
+#include "../engine/Resource.hpp"
+#include "../engine/Texture.hpp"
 
 namespace Tina::Game {
 
@@ -48,6 +50,7 @@ private:
     void updateCamera(float dt);
     void renderWorld();
     void renderUI();
+    void ensureToolbarIconsReady();
 
     // 世界创建辅助函数
     void createTileMap();
@@ -108,6 +111,11 @@ private:
     // 视口尺寸
     int m_pixelWidth = 1280;
     int m_pixelHeight = 720;
+
+    // 工具栏图标资源（通过 TextureManager 加载）
+    Tina::Engine::ResourceRef<Tina::Engine::Texture2DResource> m_iconWater;
+    Tina::Engine::ResourceRef<Tina::Engine::Texture2DResource> m_iconClean;
+    Tina::Engine::ResourceRef<Tina::Engine::Texture2DResource> m_iconBomb;
 };
 
 } // namespace Tina::Game

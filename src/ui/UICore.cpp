@@ -19,12 +19,24 @@ bool UIRenderer::initialize(Tina::Renderer::ShaderManager& sm, TextRenderer* tex
         .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Float)
     .end();
     m_text = text;
+
+    // sprite 程序与布局
+    m_progSprite = sm.loadProgram("sprite", "sprite");
+    if (bgfx::isValid(m_progSprite)) {
+        m_spriteLayout.begin()
+            .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Float)
+        .end();
+        m_sTex = bgfx::createUniform("s_tex", bgfx::UniformType::Sampler);
+    }
     return true;
 }
 
 void UIRenderer::shutdown()
 {
     // 程序句柄由 ShaderManager 统一管理与清理，这里无需销毁
+    if (bgfx::isValid(m_sTex)) { bgfx::destroy(m_sTex); m_sTex = BGFX_INVALID_HANDLE; }
 }
 
 void UIRenderer::drawRect(uint16_t viewId, float x, float y, float w, float h,
@@ -120,6 +132,42 @@ void UIRenderer::drawTextEx(uint16_t viewId, float x, float y, float w, float h,
 {
     drawTextEx(viewId, x, y, w, h, color.r(), color.g(), color.b(), color.a(),
                utf8, halign, valign, padX, padY);
+}
+
+void UIRenderer::drawImage(uint16_t viewId, float x, float y, float w, float h,
+                           bgfx::TextureHandle tex,
+                           float r, float g, float b, float a)
+{
+    if (!bgfx::isValid(m_progSprite) || !bgfx::isValid(tex) || w <= 0.0f || h <= 0.0f) return;
+
+    struct SVtx { float x,y,z; float u,v; float r,g,b,a; };
+    SVtx verts[4] = {
+        { x,     y,     0.0f, 0.0f, 0.0f, r,g,b,a },
+        { x+w,   y,     0.0f, 1.0f, 0.0f, r,g,b,a },
+        { x+w,   y+h,   0.0f, 1.0f, 1.0f, r,g,b,a },
+        { x,     y+h,   0.0f, 0.0f, 1.0f, r,g,b,a },
+    };
+    const uint16_t idx[6] = { 0,1,2, 0,2,3 };
+
+    if (bgfx::getAvailTransientVertexBuffer(4, m_spriteLayout) < 4 ||
+        bgfx::getAvailTransientIndexBuffer(6) < 6) return;
+
+    bgfx::TransientVertexBuffer tvb; bgfx::TransientIndexBuffer tib;
+    bgfx::allocTransientVertexBuffer(&tvb, 4, m_spriteLayout);
+    bgfx::allocTransientIndexBuffer(&tib, 6);
+    std::memcpy(tvb.data, verts, sizeof(verts));
+    std::memcpy(tib.data, idx, sizeof(idx));
+
+    bgfx::Encoder* enc = bgfx::begin();
+    if (!enc) return;
+    enc->setVertexBuffer(0, &tvb);
+    enc->setIndexBuffer(&tib);
+    enc->setTexture(0, m_sTex, tex,
+        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
+        BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT);
+    enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
+    enc->submit(viewId, m_progSprite);
+    bgfx::end(enc);
 }
 
 } // namespace Tina::UI

@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <new>
 #include <unordered_set>
+#include <EASTL/fixed_hash_set.h>
 #include <mutex>
 
 #if defined(_MSC_VER)
@@ -21,12 +22,15 @@
 namespace {
     // 防重入标记：防止在 erase 带来的节点释放过程中再次进入 untrack_aligned，造成死锁/递归
     thread_local bool s_in_untrack = false;
+    // 防重入标记：防止在 untrack_aligned 执行期间，其他路径触发的 aligned 分配进入 track_aligned，
+    // 导致在同一线程内对跟踪集合进行嵌套修改（insert/erase），从而引发未定义行为或调试断点。
+    thread_local bool s_in_track = false;
     // 说明：使用“永不析构”的静态堆对象，避免在进程退出阶段因静态析构次序导致
     // untrack_aligned 在容器析构过程中再次访问容器而触发未定义行为。
-    std::unordered_set<void*>& aligned_set()
+    eastl::fixed_hash_set<void*, 65536, 65536, false>& aligned_set()
     {
-        static auto* s = new std::unordered_set<void*>();
-        return *s;
+        static eastl::fixed_hash_set<void*, 65536, 65536, false> s; // 固定容量，避免跟踪集合自身分配
+        return s;
     }
     std::mutex& aligned_set_mutex()
     {
@@ -36,6 +40,10 @@ namespace {
     inline void track_aligned(void* p)
     {
         if (!p) return;
+        // 若当前正处于 untrack 阶段或已在 track 内部，则不要再次尝试跟踪，
+        // 以避免对 aligned_set 进行嵌套修改（insert 过程中容器可能分配/释放自身内存）。
+        if (s_in_untrack || s_in_track) return;
+        struct Guard { Guard(){ s_in_track = true; } ~Guard(){ s_in_track = false; } } _guard;
         std::lock_guard<std::mutex> _g(aligned_set_mutex());
         aligned_set().insert(p);
     }

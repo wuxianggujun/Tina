@@ -54,21 +54,60 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         renderer.drawRect(viewId, pos.x + size.x - t, pos.y, t, size.y, hl);
     }
 
-    // 绘制文本（居中对齐）
-    renderer.drawTextEx(viewId, pos.x, pos.y, size.x, size.y,
-                        m_textColor,
-                        m_text,
-                        UIRenderer::AlignH::Center,
-                        UIRenderer::AlignV::Center,
-                        0.0f, 0.0f);
+    const float pad = 6.0f;
+    bool hasIcon = bgfx::isValid(m_iconTex);
+    if (hasIcon && m_iconLayout == IconLayout::IconTopTextBottom) {
+        // 上图下文：上方正方形图标，下方文本区域
+        float iconSide = std::min(std::max(8.0f, size.x - pad*2.0f), std::max(8.0f, size.y*0.6f - pad*1.0f));
+        float ix = pos.x + (size.x - iconSide) * 0.5f;
+        float iy = pos.y + pad;
+        renderer.drawImage(viewId, ix, iy, iconSide, iconSide, m_iconTex, 1,1,1,0.95f);
+
+        // 文本区域：底部剩余空间
+        float tx = pos.x + pad;
+        float ty = iy + iconSide + 2.0f;
+        float twRect = size.x - pad*2.0f;
+        float thRect = std::max(0.0f, pos.y + size.y - ty - pad);
+        renderer.drawTextEx(viewId, tx, ty, twRect, thRect,
+                            m_textColor, m_text,
+                            UIRenderer::AlignH::Center, UIRenderer::AlignV::Center, 0.0f, 0.0f);
+    } else if (hasIcon && m_iconLayout == IconLayout::IconLeftTextRight) {
+        // 左图右文：左侧正方形图标，右侧文本
+        float iconSide = std::min(size.y - pad*2.0f, size.x * 0.45f);
+        iconSide = std::max(iconSide, 8.0f);
+        float ix = pos.x + pad;
+        float iy = pos.y + (size.y - iconSide) * 0.5f;
+        renderer.drawImage(viewId, ix, iy, iconSide, iconSide, m_iconTex, 1,1,1,0.95f);
+
+        float tx = ix + iconSide + pad;
+        float ty = pos.y + pad;
+        float twRect = std::max(0.0f, pos.x + size.x - pad - tx);
+        float thRect = size.y - pad*2.0f;
+        renderer.drawTextEx(viewId, tx, ty, twRect, thRect,
+                            m_textColor, m_text,
+                            UIRenderer::AlignH::Left, UIRenderer::AlignV::Center, 0.0f, 0.0f);
+    } else {
+        // 默认：居中图标（若有）+ 居中文本（重叠居中模式）
+        if (hasIcon) {
+            float iw = std::max(8.0f, size.x - pad*2.0f);
+            float ih = std::max(8.0f, size.y - pad*2.0f);
+            float side = std::min(iw, ih);
+            float ix = pos.x + (size.x - side) * 0.5f;
+            float iy = pos.y + (size.y - side) * 0.5f;
+            renderer.drawImage(viewId, ix, iy, side, side, m_iconTex, 1,1,1,0.95f);
+        }
+        renderer.drawTextEx(viewId, pos.x, pos.y, size.x, size.y,
+                            m_textColor, m_text,
+                            UIRenderer::AlignH::Center, UIRenderer::AlignV::Center, 0.0f, 0.0f);
+    }
 
     // 角标：用于显示数字小角标（可配置位置）
     if (!m_badgeText.empty()) {
         float tw=0.0f, th=0.0f;
         renderer.measureText(m_badgeText, tw, th);
-        const float pad = 3.0f;
-        float bw = std::max(tw * 0.85f + pad*2.0f, 16.0f);
-        float bh = std::clamp(th * 0.60f + pad*1.0f, 14.0f, 22.0f);
+        const float badgePad = 3.0f;
+        float bw = std::max(tw * 0.85f + badgePad*2.0f, 16.0f);
+        float bh = std::clamp(th * 0.60f + badgePad*1.0f, 14.0f, 22.0f);
         float bx = pos.x + size.x - bw - 4.0f;
         float by = pos.y + 4.0f;
         switch (m_badgeCorner) {

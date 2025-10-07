@@ -88,6 +88,14 @@ void UIToolbar::render(uint16_t viewId)
     }
 }
 
+void UIToolbar::setSlotIcon(int index, bgfx::TextureHandle tex)
+{
+    if (index < 0 || index >= (int)m_slots.size()) return;
+    if (auto* btn = m_slots[index]) {
+        btn->setIconTexture(tex);
+    }
+}
+
 void UIToolbar::buildLayout()
 {
     if (!m_bar) return;
@@ -172,5 +180,26 @@ void UIToolbar::select(int index)
     }
 }
 
-} // namespace Tina::UI
+int UIToolbar::indexAt(float x, float y) const
+{
+    // 从上层到下层检查，优先命中后添加的（与绘制顺序一致）
+    for (int i = (int)m_slots.size() - 1; i >= 0; --i) {
+        const auto* btn = m_slots[i];
+        if (btn && const_cast<UIButton*>(btn)->containsPoint(x, y)) {
+            return i;
+        }
+    }
+    return -1;
+}
 
+bool UIToolbar::clickAt(float x, float y)
+{
+    int idx = indexAt(x, y);
+    if (idx >= 0) {
+        select(idx);
+        return true;
+    }
+    return false;
+}
+
+} // namespace Tina::UI
