@@ -140,6 +140,10 @@ public:
         auto it = m_rms.find(t.type);
         return it == m_rms.end() ? nullptr : it->second->load(p);
     }
+    template<typename T>
+    T* load(const Path& p) {
+        return static_cast<T*>(load(T::TYPE, p));
+    }
     void reloadAll() { for (auto& kv : m_rms) kv.second->reloadAll(); }
     void update() { for (auto& kv : m_rms) kv.second->update(); }
 private:

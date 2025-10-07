@@ -74,8 +74,6 @@ public:
     virtual void onMouseLeave() {}
     virtual void onClick() {}
 
-    std::function<void()> onClickCallback;
-
     // === 名称（调试用） ===
     const std::string& getName() const { return m_name; }
     void setName(const std::string& name) { m_name = name; }

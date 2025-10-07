@@ -73,16 +73,6 @@ void GameScene::onResume()
 {
     TINA_INFO("GameScene::onResume - 游戏恢复");
 
-    // 防御：如果程序句柄在暂停场景中被销毁，则此处检测并重建
-    if (!bgfx::isValid(m_progColor)) {
-        TINA_WARN("GameScene::onResume - m_progColor 无效，尝试重新加载");
-        m_progColor = app()->shaders().loadProgram("color", "color");
-        // 刷新 UI 渲染器内部持有的程序句柄，避免仍指向旧句柄
-        if (m_uiRenderer) {
-            m_uiRenderer->initialize(app()->shaders(), m_textRenderer.get());
-        }
-    }
-
     // 重新设置 UI 视图（view 3）
     setupUIView();
 }

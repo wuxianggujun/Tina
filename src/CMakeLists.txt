@@ -5,6 +5,8 @@ set(SRC_FILES
     engine/FileSystem.cpp
     engine/Application.hpp
     engine/Application.cpp
+    engine/Texture.hpp
+    engine/Texture.cpp
     engine/Scene.hpp
     engine/SceneManager.hpp
     engine/SceneManager.cpp

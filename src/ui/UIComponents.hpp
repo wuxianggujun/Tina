@@ -117,17 +117,11 @@ public:
     Tina::Core::Signal<> onHoverEnter; // 鼠标进入
     Tina::Core::Signal<> onHoverLeave; // 鼠标离开
 
-    // === 兼容旧代码：函数指针回调（已弃用，建议使用 Signal）===
-    std::function<void()> onHoverIn;   // [弃用] 使用 onHoverEnter.connect() 替代
-    std::function<void()> onHoverOut;  // [弃用] 使用 onHoverLeave.connect() 替代
-
     void onMouseEnter() override {
         onHoverEnter.emit();  // 触发 Signal
-        if (onHoverIn) onHoverIn();  // 兼容旧代码
     }
     void onMouseLeave() override {
         onHoverLeave.emit();  // 触发 Signal
-        if (onHoverOut) onHoverOut();  // 兼容旧代码
     }
 
 protected:

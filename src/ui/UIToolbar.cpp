@@ -132,21 +132,19 @@ void UIToolbar::buildLayout()
         btn->setBadgeText(std::to_string(i + 1));
         btn->setBadgeCorner(BadgeCorner::BottomRight);
 
-        // 点击：切换选中
-        btn->onClickCallback = [this, i]() {
-            this->select(i);
-        };
+        // 点击：切换选中（使用 Signal）
+        btn->onClick.connect([this, i]() { this->select(i); });
 
-        // 悬停：显示 tooltip（工具 N：名称）
-        btn->onHoverIn = [this, i]() {
+        // 悬停：显示/隐藏 tooltip（使用 Signal）
+        btn->onHoverEnter.connect([this, i]() {
             m_tipVisible = true;
             const char* name = (i==0?"注水": (i==1?"清除": (i==2?"爆炸":"工具")));
             m_tipText = std::string("工具 ") + std::to_string(i+1) + "：" + name;
-        };
-        btn->onHoverOut = [this]() {
+        });
+        btn->onHoverLeave.connect([this]() {
             m_tipVisible = false;
             m_tipText.clear();
-        };
+        });
 
         if (m_stack) m_stack->addChild(btn);
         m_slots.push_back(btn);
@@ -175,5 +173,4 @@ void UIToolbar::select(int index)
 }
 
 } // namespace Tina::UI
-
 

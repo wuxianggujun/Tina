@@ -34,13 +34,7 @@ bgfx::ProgramHandle ShaderManager::loadProgram(const std::string& vertexShaderNa
     // 检查是否已经加载过
     auto it = m_loadedPrograms.find(programKey);
     if (it != m_loadedPrograms.end()) {
-        // 防御：句柄可能在其他场景被销毁（例如暂停场景清理），此处检测并自动重建
-        if (bgfx::isValid(it->second)) {
-            return it->second;
-        }
-        // 句柄已失效，移除缓存，走重建流程
-        m_loadedPrograms.erase(it);
-        TINA_WARN("ShaderManager: 程序已失效，重新加载: {}", programKey.c_str());
+        return it->second;
     }
 
     // 加载顶点和片段着色器

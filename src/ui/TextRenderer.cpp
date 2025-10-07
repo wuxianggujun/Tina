@@ -38,7 +38,6 @@ bool TextRenderer::initialize(Tina::Renderer::ShaderManager& sm, int atlasW, int
         return false;
     }
     m_sText = bgfx::createUniform("s_text", bgfx::UniformType::Sampler);
-    m_sTextTexture = bgfx::createUniform("s_textTexture", bgfx::UniformType::Sampler);
 
     // 初始化：将图集初始填充为 RGBA = (255,255,255,0)，便于验证采样是否生效
     {
@@ -90,7 +89,6 @@ void TextRenderer::shutdown()
     if (bgfx::isValid(m_atlasTex)) { bgfx::destroy(m_atlasTex); m_atlasTex = BGFX_INVALID_HANDLE; }
     if (bgfx::isValid(m_debugTex)) { bgfx::destroy(m_debugTex); m_debugTex = BGFX_INVALID_HANDLE; }
     if (bgfx::isValid(m_sText))    { bgfx::destroy(m_sText);    m_sText = BGFX_INVALID_HANDLE; }
-    if (bgfx::isValid(m_sTextTexture)) { bgfx::destroy(m_sTextTexture); m_sTextTexture = BGFX_INVALID_HANDLE; }
     // 程序由全局 ShaderManager 管理，这里不做销毁
     if (m_font.face) { FT_Done_Face(m_font.face); m_font.face = nullptr; }
     if (m_ft) { FT_Done_FreeType(m_ft); m_ft = nullptr; }
@@ -283,9 +281,6 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
     enc->setVertexBuffer(0, &tvb);
     enc->setIndexBuffer(&tib);
     // 先用 HLSL 反射名绑定（s_textTexture），再用通用名绑定（s_text）；二者任意其一生效即可
-    enc->setTexture(0, m_sTextTexture, m_atlasTex,
-        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
-        BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT);
     enc->setTexture(0, m_sText, m_atlasTex,
         BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
         BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT);

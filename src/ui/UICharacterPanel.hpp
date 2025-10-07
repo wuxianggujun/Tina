@@ -24,13 +24,8 @@ public:
     // 设置面板位置（居中显示）
     void centerOnScreen(int screenWidth, int screenHeight);
 
-    // === Signal 事件（推荐使用）===
+    // === Signal 事件 ===
     Tina::Core::Signal<> onSwitchControl;  // 切换控制信号
-
-    // === 兼容旧代码：函数指针回调（已弃用，建议使用 Signal）===
-    void setSwitchControlCallback(std::function<void()> callback) {
-        m_switchControlCallback = callback;  // [弃用] 使用 onSwitchControl.connect() 替代
-    }
 
     // 事件系统访问
     UIEventSystem& events() { return m_events; }
@@ -48,7 +43,6 @@ private:
     UILabel* m_controlledLabel = nullptr;  // 当前控制状态标签
 
     UIEventSystem m_events;                // 事件系统
-    std::function<void()> m_switchControlCallback; // [弃用] 切换控制回调
 
     // Signal 连接（必须保存，否则会被 RAII 销毁）
     Tina::Core::Signal<>::Connection m_switchButtonConnection;

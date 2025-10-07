@@ -77,8 +77,7 @@ private:
     Tina::Container::Vector<uint8_t> m_atlasPixels;
     int m_penX = 1, m_penY = 1, m_rowH = 0;
     bgfx::TextureHandle m_atlasTex = BGFX_INVALID_HANDLE;
-    bgfx::UniformHandle m_sText = BGFX_INVALID_HANDLE;           // 兼容 GLSL/Metal 名称
-    bgfx::UniformHandle m_sTextTexture = BGFX_INVALID_HANDLE;     // 兼容 HLSL 反射名
+    bgfx::UniformHandle m_sText = BGFX_INVALID_HANDLE;           // 文本采样器（s_text）
     bgfx::TextureHandle m_debugTex = BGFX_INVALID_HANDLE;         // 调试 2x2 纹理
 
     // 着色器

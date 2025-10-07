@@ -79,12 +79,6 @@ UICharacterPanel::UICharacterPanel(const std::string& name)
     m_switchButtonConnection = m_switchButton->onClick.connect([this]() {
         // 触发面板的 Signal
         onSwitchControl.emit();
-
-        // 兼容旧代码：触发旧的回调
-        if (m_switchControlCallback) {
-            m_switchControlCallback();
-        }
-
         // 点击后隐藏面板
         setVisible(false);
     });

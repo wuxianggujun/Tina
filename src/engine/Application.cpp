@@ -2,6 +2,7 @@
 #include "SceneManager.hpp"
 #include "EventBus.hpp"
 #include "Resource.hpp"
+#include "Texture.hpp"
 #include "../core/Log.hpp"
 #include "../os/OS.hpp"
 
@@ -95,6 +96,13 @@ void Application::init()
     // 6. 创建资源系统
     m_fileSystem = CreateFileSystem();
     m_resourceHub = Memory::MakeUnique<ResourceManagerHub>();
+    // 注册内置资源管理器
+    {
+        // 纹理管理器
+        m_textureMgr = Memory::MakeUnique<TextureManager>(*m_fileSystem);
+        m_resourceHub->add(Texture2DResource::TYPE, m_textureMgr.get());
+        // 也可在此注册其他管理器（例如字体、音频等）
+    }
 
     // 7. 全局着色器管理器（必须在 bgfx 初始化后建立，且在 bgfx 关闭前销毁）
     m_shaderMgr = Memory::MakeUnique<Tina::Renderer::ShaderManager>();
