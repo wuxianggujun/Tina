@@ -168,6 +168,13 @@ void PauseScene::handleEvent(const Tina::os::Event& event)
 
 void PauseScene::createUI()
 {
+    // 若重复创建（例如窗口尺寸变化），先断开旧连接并释放旧 UI
+    m_continueConnection.disconnect();
+    m_quitConnection.disconnect();
+    m_rootNode.reset();
+    m_btnContinue = nullptr;
+    m_btnQuit = nullptr;
+
     // 创建根节点
     m_rootNode = Memory::MakeUnique<UI::UINode>();
     m_rootNode->setPosition(0, 0);
