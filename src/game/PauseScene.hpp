@@ -11,6 +11,7 @@
 #include "../ui/UICore.hpp"
 #include "../ui/UINode.hpp"
 #include "../ui/UIComponents.hpp"
+#include "../ui/UIEventSystem.hpp"
 #include "../ui/TextRenderer.hpp"
 #include "../renderer/ShaderManager.hpp"
 
@@ -57,7 +58,8 @@ private:
     Memory::UniquePtr<UI::UINode> m_rootNode;
     UI::UIButton* m_btnContinue = nullptr;  // 继续游戏按钮
     UI::UIButton* m_btnQuit = nullptr;      // 退出按钮
-    
+    UI::UIEventSystem m_events;             // 统一 Hover/Click 处理
+
     // Signal 连接（必须保存，否则订阅失效）
     Core::Signal<>::Connection m_continueConnection;
     Core::Signal<>::Connection m_quitConnection;

@@ -176,7 +176,7 @@ void MenuScene::render() {
     
     // 渲染版本号
     if (m_textRenderer && m_uiRenderer) {
-        m_uiRenderer->drawTextEx(3, (float)m_pixelWidth - 10, (float)m_pixelHeight - 10,
+        m_uiRenderer->drawTextEx(3, (float)m_pixelWidth - 10 - 100, (float)m_pixelHeight - 10 - 30,
                                  100, 30, 0.5f, 0.5f, 0.5f, 0.5f,
                                  "v1.0.0",
                                  UI::UIRenderer::AlignH::Right,

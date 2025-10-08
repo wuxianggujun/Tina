@@ -47,6 +47,8 @@ void PauseScene::onEnter()
 
     // 创建 UI
     createUI();
+    // 绑定事件系统根节点，统一处理 hover/click
+    m_events.setRoot(m_rootNode.get());
 
     TINA_INFO("PauseScene: 初始化完成");
 }
@@ -106,6 +108,26 @@ void PauseScene::handleEvent(const Tina::os::Event& event)
     }
 
     // 鼠标移动：更新按钮悬停状态
+    // 使用 UIEventSystem 统一处理 hover/click
+    if (event.type == E::Type::MOUSE_MOVE || event.type == E::Type::MOUSE_BUTTON) {
+        float mx = 0.0f, my = 0.0f;
+        SDL_GetMouseState(&mx, &my);
+        bool leftDown = false;
+        if (event.type == E::Type::MOUSE_BUTTON) {
+            leftDown = (event.mouse_button.button == os::MouseButton::LEFT) && event.mouse_button.down;
+        } else {
+            uint32_t mask = (uint32_t)SDL_GetMouseState(nullptr, nullptr);
+#ifdef SDL_BUTTON_MASK
+            leftDown = (mask & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) != 0;
+#else
+            leftDown = (mask & SDL_BUTTON_LMASK) != 0;
+#endif
+        }
+        m_events.updateMouse(mx, my, leftDown);
+        m_events.processEvents();
+    }
+
+    #if 0
     if (event.type == E::Type::MOUSE_MOVE) {
         float mx = 0.0f, my = 0.0f;
         SDL_GetMouseState(&mx, &my);
@@ -153,6 +175,7 @@ void PauseScene::handleEvent(const Tina::os::Event& event)
             }
         }
     }
+    #endif
 
     // 窗口调整大小
     if (event.type == E::Type::WINDOW_SIZE) {
@@ -226,6 +249,9 @@ void PauseScene::createUI()
     m_btnQuit->setPressedColor(0.4f, 0.1f, 0.1f, 1.0f);
     m_quitConnection = m_btnQuit->onClick.connect([this]() { onQuitClicked(); });
     m_rootNode->addChild(m_btnQuit);
+
+    // 更新事件系统根节点，保证重建后事件命中正确
+    m_events.setRoot(m_rootNode.get());
 
     TINA_INFO("PauseScene: UI 创建完成");
 }
@@ -303,3 +329,4 @@ void PauseScene::onQuitClicked()
 }
 
 } // namespace Tina::Game
+
