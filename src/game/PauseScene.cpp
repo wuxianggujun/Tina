@@ -164,11 +164,18 @@ void PauseScene::createUI()
     // 顶层不再放置标题，标题移入面板内部
 
     // 使用布局：居中一个面板，内部垂直栈+若干水平栈，避免纵向堆叠
-    const float panelW = 680.0f;
-    const float panelH = 480.0f;
-    const float btnH = 56.0f;
-    const float rowW = panelW - 32.0f;               // VBox 左右 padding 共 32
-    const float colW = (rowW - 8.0f*2 - 12.0f) * 0.5f; // 行左右 padding=8，列间距=12
+    const float panelW   = 680.0f;
+    const float btnH     = 56.0f;
+    const float pad      = 16.0f;   // VBox 内边距（左右/上下）
+    const float spacing  = 12.0f;   // VBox 子项间距
+    const float titleH   = 44.0f;   // 标题高度
+    const float debugH   = 36.0f;   // 分组标题高度
+    // 子项：标题、顶部行、分组标题、两行两列、底部行 = 6 个
+    const int   childCount = 6;
+    const float contentH = titleH + btnH + debugH + btnH + btnH + btnH;
+    const float panelH   = pad * 2.0f + contentH + spacing * float(childCount - 1);
+    const float rowW     = panelW - pad * 2.0f;               // VBox 左右 padding 共 32
+    const float colW     = (rowW - 8.0f * 2.0f - 12.0f) * 0.5f; // 行左右 padding=8，列间距=12
 
     auto* panel = new UI::UIPanel("PausePanel");
     panel->setColor(0.08f, 0.08f, 0.10f, 0.92f);
@@ -178,8 +185,8 @@ void PauseScene::createUI()
 
     auto* vbox = new UI::UIVStack("VBox");
     vbox->setSize(panelW, panelH);
-    vbox->setPadding(16.0f, 16.0f);
-    vbox->setSpacing(12.0f);
+    vbox->setPadding(pad, pad);
+    vbox->setSpacing(spacing);
     panel->addChild(vbox);
 
     // 标题
@@ -211,7 +218,7 @@ void PauseScene::createUI()
     auto* dbg = new UI::UILabel();
     dbg->setText("调试 / 昼夜");
     dbg->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
-    dbg->setSize(panelW - 32.0f, 36.0f);
+    dbg->setSize(rowW, debugH);
     vbox->addChild(dbg);
 
     // 两行两列的调试网格
