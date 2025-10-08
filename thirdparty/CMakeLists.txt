@@ -77,3 +77,34 @@ if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/SDL/CMakeLists.txt")
 else()
     message(WARNING "thirdparty/SDL 未找到，若需 SDL3 集成请确保已克隆到 thirdparty/SDL")
 endif()
+
+# SDL_mixer (audio mixing library)
+# 依赖 SDL3，提供多格式音频支持（MP3/OGG/FLAC/WAV）
+# 使用内置解码器（dr_libs, stb_vorbis），无需外部依赖
+set(SDL3MIXER_DEPS_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL3MIXER_INSTALL OFF CACHE BOOL "" FORCE)
+set(SDL3MIXER_SAMPLES OFF CACHE BOOL "" FORCE)
+set(SDL3MIXER_TESTS OFF CACHE BOOL "" FORCE)
+set(SDL3MIXER_VENDORED OFF CACHE BOOL "" FORCE)  # 不使用外部依赖
+
+# 使用内置解码器（单头文件库）
+set(SDL3MIXER_MP3_DRMP3 ON CACHE BOOL "" FORCE)           # MP3 解码器（dr_mp3.h）
+set(SDL3MIXER_FLAC_DRFLAC ON CACHE BOOL "" FORCE)         # FLAC 解码器（dr_flac.h）
+set(SDL3MIXER_VORBIS_STB ON CACHE BOOL "" FORCE)          # OGG 解码器（stb_vorbis.h）
+set(SDL3MIXER_WAV ON CACHE BOOL "" FORCE)                 # WAV 解码器（内置）
+
+# 禁用需要外部依赖的解码器
+set(SDL3MIXER_MP3_MPG123 OFF CACHE BOOL "" FORCE)         # 外部 mpg123（禁用）
+set(SDL3MIXER_VORBIS_VORBISFILE OFF CACHE BOOL "" FORCE)  # 外部 Vorbis（禁用）
+set(SDL3MIXER_VORBIS_TREMOR OFF CACHE BOOL "" FORCE)      # 外部 Tremor（禁用）
+set(SDL3MIXER_FLAC_LIBFLAC OFF CACHE BOOL "" FORCE)       # 外部 FLAC（禁用）
+set(SDL3MIXER_OPUS OFF CACHE BOOL "" FORCE)               # 外部 Opus（禁用）
+set(SDL3MIXER_MOD_XMP OFF CACHE BOOL "" FORCE)            # 外部 libxmp（禁用）
+set(SDL3MIXER_MIDI_TIMIDITY OFF CACHE BOOL "" FORCE)      # 外部 Timidity（禁用）
+set(SDL3MIXER_MIDI_FLUIDSYNTH OFF CACHE BOOL "" FORCE)    # 外部 FluidSynth（禁用）
+
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/SDL_mixer/CMakeLists.txt")
+    add_subdirectory(SDL_mixer)
+else()
+    message(WARNING "thirdparty/SDL_mixer 未找到，音频功能将不可用")
+endif()

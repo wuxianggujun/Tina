@@ -1,33 +1,43 @@
 //
 // AudioResource - 音频资源
-// - 使用 SDL3 的 SDL_AudioStream 和 SDL_LoadWAV 实现
-// - 支持 WAV 格式音频文件的加载和播放
+// - 使用 SDL_mixer 实现多格式音频支持
+// - 支持格式：WAV, MP3, OGG, FLAC, MOD, MIDI 等
+// - 基于 SDL3_mixer（3.x）音频管线
+// - 音乐/音效统一以 MIX_Audio 表示，通过 MIX_Track 播放
 //
 
 #pragma once
 
 #include "Resource.hpp"
 #include <SDL3/SDL.h>
+#include <SDL3_mixer/SDL_mixer.h>
 
 namespace Tina::Engine {
 
 /**
- * AudioResource - 音频资源
+ * AudioResource - 音频资源（基于 SDL_mixer）
  * 
  * 职责：
- * - 加载 WAV 文件（使用 SDL_LoadWAV）
- * - 管理音频数据和音频规格
+ * - 加载音频文件（支持 WAV/MP3/OGG/FLAC/MOD/MIDI）
+ * - 管理音频资源（MIX_Audio）
  * - 支持播放控制（播放/暂停/停止/循环）
- * - 音量控制
+ * - 音量控制（独立音量和全局音量）
  * 
  * 设计：
- * - 音频数据：m_audioData（PCM 样本）
- * - 音频规格：m_spec（采样率、声道数、格式）
- * - 播放状态：m_stream（SDL_AudioStream）
- * - 循环控制：m_looping（是否循环）
+ * - 音频资源：MIX_Audio*（统一的音频数据对象）
+ * - 轨道对象：MIX_Track*（用于播放控制，可复用）
+ * - 自动格式检测：根据扩展名自动加载
+ * 
+ * 支持格式：
+ * - WAV：未压缩音频
+ * - MP3：压缩音乐（需要 mpg123）
+ * - OGG：开源压缩格式（需要 Vorbis）
+ * - FLAC：无损压缩（需要 FLAC）
+ * - MOD/XM/S3M：追踪音乐（需要 libxmp）
+ * - MIDI：合成音乐（需要 Timidity）
  * 
  * 使用示例：
- *   auto* audio = hub->load<AudioResource>("sounds/bgm.wav");
+ *   auto* audio = hub->load<AudioResource>("sounds/bgm.mp3");
  *   audio->play(true);  // 循环播放
  *   audio->setVolume(0.5f);  // 50% 音量
  *   audio->stop();
@@ -97,9 +107,10 @@ public:
     float getDuration() const;
 
     /**
-     * 获取音频规格（采样率、声道数等）
+     * 设置/获取全局 Mixer（由 Application 在初始化后设置）
      */
-    const SDL_AudioSpec& getSpec() const { return m_spec; }
+    static void SetGlobalMixer(MIX_Mixer* mixer) { s_mixer = mixer; }
+    static MIX_Mixer* GetGlobalMixer() { return s_mixer; }
 
 protected:
     // Resource 接口实现
@@ -107,33 +118,22 @@ protected:
     void unload() override;
 
 private:
-    // 创建音频流（用于播放）
-    bool createStream();
-    
-    // 销毁音频流
-    void destroyStream();
-    
-    // 填充音频流数据（用于循环播放）
-    void fillStream();
+    // 全局 MIX_Mixer 由应用生命周期管理
+    static inline MIX_Mixer* s_mixer = nullptr;
 
 private:
-    // 音频数据（PCM 样本）
-    Uint8* m_audioData = nullptr;
-    Uint32 m_audioLen = 0;
+    // 音频数据与播放轨道
+    MIX_Audio* m_audio = nullptr;
+    MIX_Track* m_track = nullptr;
     
-    // 音频规格
-    SDL_AudioSpec m_spec = {};
+    // 未来扩展：短音效可共享 m_audio，多轨并行播放
     
     // 播放状态
-    SDL_AudioStream* m_stream = nullptr;
+    bool m_isPlaying = false;
     bool m_looping = false;
-    bool m_paused = false;
     
     // 音量控制（0.0 ~ 1.0）
     float m_volume = 1.0f;
-    
-    // 当前播放位置（用于循环播放）
-    Uint32 m_playbackPosition = 0;
 };
 
 } // namespace Tina::Engine

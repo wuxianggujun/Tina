@@ -12,6 +12,9 @@
 #include <functional>
 #include <mutex>
 
+// 在全局命名空间前向声明 SDL_mixer 的不透明结构体，避免命名空间污染
+struct MIX_Mixer;
+
 namespace Tina::Engine {
 
 // 前向声明
@@ -136,6 +139,9 @@ private:
     Memory::UniquePtr<TextureManager> m_textureMgr;        // 纹理资源管理器
     Memory::UniquePtr<FontManager> m_fontMgr;              // 字体资源管理器
     Memory::UniquePtr<AudioManager> m_audioMgr;            // 音频资源管理器
+
+    // SDL_mixer 3.x 混音器（输出到默认音频设备）
+    MIX_Mixer* m_mixer = nullptr;
 
     // 任务队列（主线程执行）
     std::mutex m_taskMutex;

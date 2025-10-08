@@ -114,6 +114,17 @@ else()
     endif ()
 endif ()
 
+# SDL_mixer 依赖（音频混音库）
+if (TARGET SDL3_mixer::SDL3_mixer)
+    target_link_libraries(${PROJECT_NAME} PRIVATE SDL3_mixer::SDL3_mixer)
+    message(STATUS "SDL_mixer 已链接")
+elseif (TARGET SDL3_mixer::SDL3_mixer-shared)
+    target_link_libraries(${PROJECT_NAME} PRIVATE SDL3_mixer::SDL3_mixer-shared)
+    message(STATUS "SDL_mixer (shared) 已链接")
+else()
+    message(WARNING "SDL_mixer 未找到，音频功能将受限")
+endif ()
+
 target_link_libraries(${PROJECT_NAME} PRIVATE
     bgfx
     bx

@@ -12,6 +12,7 @@
 #include <bgfx/platform.h>
 #include <bx/timer.h>
 #include <SDL3/SDL.h>
+#include <SDL3_mixer/SDL_mixer.h>
 
 namespace Tina::Engine {
 
@@ -87,7 +88,30 @@ void Application::init()
 
     TINA_INFO("bgfx 初始化成功 - 渲染器: {}", bgfx::getRendererName(bgfx::getRendererType()));
 
-    // 4. 设置视图（view 0 = 默认视图，用于清屏）
+    // 4. 初始化 SDL3_mixer（音频系统）
+    if (!MIX_Init()) {
+        TINA_WARN("SDL_mixer 初始化失败：{}", SDL_GetError());
+    } else {
+        TINA_INFO("SDL_mixer 初始化成功");
+    }
+
+    // 创建 Mixer 并打开默认播放设备（44.1kHz, 16位, 立体声）
+    SDL_AudioSpec desired{}; desired.freq = 44100; desired.channels = 2; desired.format = SDL_AUDIO_S16;
+    m_mixer = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired);
+    if (!m_mixer) {
+        TINA_ERROR("SDL_mixer 创建混音器失败：{}", SDL_GetError());
+    } else {
+        TINA_INFO("SDL_mixer 混音器已创建");
+        // 查询实际格式
+        SDL_AudioSpec actual{};
+        if (MIX_GetMixerFormat(m_mixer, &actual)) {
+            TINA_INFO("  采样率: {} Hz, 声道数: {}, 格式: 0x{:X}", actual.freq, actual.channels, static_cast<unsigned int>(actual.format));
+        }
+        // 将全局 Mixer 提供给音频资源
+        AudioResource::SetGlobalMixer(m_mixer);
+    }
+
+    // 5. 设置视图（view 0 = 默认视图，用于清屏）
     bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
     bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(m_pixelWidth), static_cast<uint16_t>(m_pixelHeight));
 
@@ -142,6 +166,14 @@ void Application::shutdown()
     m_eventBus.reset();
     // 在 bgfx 关闭前确保销毁所有程序句柄
     m_shaderMgr.reset();
+
+    // 关闭 SDL_mixer
+    if (m_mixer) {
+        MIX_DestroyMixer(m_mixer);
+        m_mixer = nullptr;
+    }
+    MIX_Quit();
+    TINA_INFO("SDL_mixer 已关闭");
 
     bgfx::shutdown();
 
