@@ -60,7 +60,11 @@ public:
      * @param loop 是否循环播放
      * @return 成功返回 true
      */
-    bool play(bool loop = false);
+    // 播放音频，支持可选淡入（毫秒）
+    bool play(bool loop = false, int fadeInMs = 0);
+
+    // 便捷：一次性播放（内部使用 MIX_PlayAudio；不支持单独设置音量/淡入）
+    bool playOneShot();
 
     /**
      * 暂停播放（可恢复）

@@ -82,6 +82,10 @@ public:
     // 获取音频管理器（用于加载和播放音频）
     AudioManager& audio() const { return *m_audioMgr; }
 
+    // 全局音量控制（0.0 ~ 1.0）
+    void setAudioMasterVolume(float v);
+    float getAudioMasterVolume() const { return m_audioMasterVolume; }
+
     // ==================== 帧率和时间信息 ====================
 
     // 获取上一帧的时间间隔（秒）
@@ -142,6 +146,9 @@ private:
 
     // SDL_mixer 3.x 混音器（输出到默认音频设备）
     MIX_Mixer* m_mixer = nullptr;
+
+    // 全局音量
+    float m_audioMasterVolume = 1.0f;
 
     // 任务队列（主线程执行）
     std::mutex m_taskMutex;

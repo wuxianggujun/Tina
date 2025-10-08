@@ -23,6 +23,15 @@
 
 ## 系统级文档
 
+- **`audio_system.md`** ⭐ 新增
+  - 主题：SDL3_mixer 音频系统（初始化/资源/播放控制/排错）
+  - 适用：在游戏中播放音乐与音效
+  - 状态：可用（2025-10-08）
+  - 关联代码：
+    - 初始化与注入：`src/engine/Application.cpp:95`, `src/engine/Application.cpp:100`, `src/engine/Application.cpp:107`, `src/engine/Application.cpp:111`
+    - 资源加载与播放：`src/engine/AudioResource.cpp:22`, `src/engine/AudioResource.cpp:96`, `src/engine/AudioResource.cpp:115`, `src/engine/AudioResource.cpp:124`
+    - 示例使用：`src/game/GameScene.cpp:40`, `src/game/GameScene.cpp:112`
+
 - **`ui_system_architecture.md`**
   - 主题：UI 体系结构（UINode/UIRenderer/TextRenderer/组件）
   - 适用：UI 组件开发与事件接入
@@ -107,5 +116,6 @@
 
 ## 最近更新
 
+- **2025-10-08**: 新增 `audio_system.md`，并将资源复制机制改为“拷贝 resources 全部，但排除 resources/shaders”
 - **2025-10-06**: 添加 `architecture_design.md`，记录引擎架构重构设计
 - **2025-10-06**: 完成 Core::Color 重构，更新 UI 系统使用 Color 接口

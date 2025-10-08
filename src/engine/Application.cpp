@@ -13,6 +13,7 @@
 #include <bx/timer.h>
 #include <SDL3/SDL.h>
 #include <SDL3_mixer/SDL_mixer.h>
+#include <algorithm>
 
 namespace Tina::Engine {
 
@@ -109,6 +110,8 @@ void Application::init()
         }
         // 将全局 Mixer 提供给音频资源
         AudioResource::SetGlobalMixer(m_mixer);
+        // 应用全局音量
+        MIX_SetMasterGain(m_mixer, std::max(0.0f, std::min(m_audioMasterVolume, 1.0f)));
     }
 
     // 5. 设置视图（view 0 = 默认视图，用于清屏）
@@ -276,6 +279,14 @@ void Application::processEvents()
     }
     // 事件分发完成后，立即执行一次主线程任务队列，减少响应延迟
     flushTasks();
+}
+
+void Application::setAudioMasterVolume(float v)
+{
+    m_audioMasterVolume = std::max(0.0f, std::min(v, 1.0f));
+    if (m_mixer) {
+        MIX_SetMasterGain(m_mixer, m_audioMasterVolume);
+    }
 }
 
 void Application::update(float dt)

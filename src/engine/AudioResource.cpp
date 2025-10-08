@@ -79,7 +79,7 @@ void AudioResource::unload() {
 
 // ==================== 播放控制 ====================
 
-bool AudioResource::play(bool loop) {
+bool AudioResource::play(bool loop, int fadeInMs) {
     if (getState() != State::READY || !m_audio) {
         TINA_WARN("AudioResource::play - 音频未准备好 [{}]", getPath().c_str());
         return false;
@@ -105,11 +105,14 @@ bool AudioResource::play(bool loop) {
         return false;
     }
 
-    // 播放参数（循环）
+    // 播放参数（循环/淡入）
     SDL_PropertiesID opts = SDL_CreateProperties();
     if (opts) {
         const Sint64 loops = loop ? -1 : 0; // -1 = 无限循环，0 = 播放一次
         SDL_SetNumberProperty(opts, MIX_PROP_PLAY_LOOPS_NUMBER, loops);
+        if (fadeInMs > 0) {
+            SDL_SetNumberProperty(opts, MIX_PROP_PLAY_FADE_IN_MILLISECONDS_NUMBER, (Sint64)fadeInMs);
+        }
     }
 
     if (!MIX_PlayTrack(m_track, opts)) {
@@ -126,6 +129,23 @@ bool AudioResource::play(bool loop) {
     m_isPlaying = true;
     m_looping = loop;
     TINA_INFO("AudioResource::play - 开始播放 [{}]，循环: {}", getPath().c_str(), loop);
+    return true;
+}
+
+bool AudioResource::playOneShot() {
+    if (getState() != State::READY || !m_audio) {
+        TINA_WARN("AudioResource::playOneShot - 音频未准备好 [{}]", getPath().c_str());
+        return false;
+    }
+    MIX_Mixer* mixer = GetGlobalMixer();
+    if (!mixer) {
+        TINA_ERROR("AudioResource::playOneShot - 全局 Mixer 未初始化");
+        return false;
+    }
+    if (!MIX_PlayAudio(mixer, m_audio)) {
+        TINA_ERROR("AudioResource::playOneShot - 播放失败：{}", SDL_GetError());
+        return false;
+    }
     return true;
 }
 
