@@ -128,6 +128,8 @@ void UIToolbar::buildLayout()
         auto* btn = new UIButton("ToolSlot");
         btn->setSize((float)m_slotSize, (float)m_slotSize);
         btn->setAnchor(Anchor::TopLeft);
+        // 默认布局：左图标 + 右文本（避免重叠）
+        btn->setIconLayout(UIButton::IconLayout::IconLeftTextRight);
 
         // 中央主标识：前三个为“水/挖/爆”，其余占位
         std::string center;

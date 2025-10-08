@@ -112,6 +112,9 @@ void Application::init()
     m_shaderMgr = Memory::MakeUnique<Tina::Renderer::ShaderManager>();
     m_shaderMgr->initialize();
 
+    // 7.5 预热常用资源（字体/图标），减少首帧等待
+    prewarmCommonAssets();
+
     if (!m_fileSystem) {
         TINA_ERROR("文件系统创建失败");
     } else {
@@ -248,6 +251,38 @@ void Application::update(float dt)
 void Application::render()
 {
     m_sceneManager->render();
+}
+
+void Application::prewarmCommonAssets()
+{
+    if (!m_resourceHub) return;
+
+    // 预热字体与常用图标纹理
+    // 字体：确保 24/32/48 三个字号的 Face
+    Tina::Engine::FontResource* font = m_resourceHub->load<Tina::Engine::FontResource>(Tina::Engine::Path("resources/fonts/SourceHanSansSC-Regular.otf"));
+    Tina::Engine::Texture2DResource* texA = m_resourceHub->load<Tina::Engine::Texture2DResource>(Tina::Engine::Path("resources/textures/player.png"));
+    Tina::Engine::Texture2DResource* texB = m_resourceHub->load<Tina::Engine::Texture2DResource>(Tina::Engine::Path("resources/textures/grassland.png"));
+    Tina::Engine::Texture2DResource* texC = m_resourceHub->load<Tina::Engine::Texture2DResource>(Tina::Engine::Path("resources/textures/dirt_block.png"));
+
+    const uint32_t timeoutMs = 250; // 总等待预算（毫秒）
+    uint32_t waited = 0;
+    while (waited < timeoutMs) {
+        m_resourceHub->update(); // 驱动异步回调
+        bool fontReady = !font || font->getState() == Tina::Engine::Resource::State::READY;
+        bool texAReady = !texA || texA->getState() == Tina::Engine::Resource::State::READY;
+        bool texBReady = !texB || texB->getState() == Tina::Engine::Resource::State::READY;
+        bool texCReady = !texC || texC->getState() == Tina::Engine::Resource::State::READY;
+        if (fontReady && texAReady && texBReady && texCReady) break;
+        SDL_Delay(1);
+        waited += 1;
+    }
+
+    if (font && font->getState() == Tina::Engine::Resource::State::READY) {
+        // 确保常用字号
+        font->ensureFace(24);
+        font->ensureFace(32);
+        font->ensureFace(48);
+    }
 }
 
 } // namespace Tina::Engine

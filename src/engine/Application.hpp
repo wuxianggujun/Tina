@@ -100,6 +100,7 @@ private:
     void processEvents();           // 处理操作系统事件
     void update(float dt);          // 更新逻辑
     void render();                  // 渲染场景
+    void prewarmCommonAssets();     // 预热常用资源（字体/图标），减少首帧等待
 
 private:
     Config m_config;                               // 应用程序配置

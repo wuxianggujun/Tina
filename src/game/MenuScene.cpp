@@ -243,6 +243,18 @@ void MenuScene::handleEvent(const os::Event& event) {
 }
 
 void MenuScene::createUI() {
+    // 若已存在旧 UI，先断开所有信号连接并释放旧根，避免连接持有指向已销毁 Signal 的悬挂指针
+    if (m_rootNode) {
+        m_startConnection.disconnect();
+        m_settingsConnection.disconnect();
+        m_quitConnection.disconnect();
+        m_rootNode.reset();
+        m_buttons.clear();
+        m_btnStart = nullptr;
+        m_btnSettings = nullptr;
+        m_btnQuit = nullptr;
+    }
+
     // 创建根节点
     m_rootNode = Memory::MakeUnique<UI::UINode>();
     m_rootNode->setPosition(0, 0);
