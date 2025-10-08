@@ -123,6 +123,24 @@ void UINode::update(float dt)
     for (auto* child : m_children) {
         child->update(dt);
     }
+
+    // 通用包裹（WrapContent）：依据子项包裹自身尺寸
+    // 注意：MatchParent 的分配应由父容器完成，这里仅处理 WrapContent 回填
+    if (m_layoutW == LayoutDim::WrapContent || m_layoutH == LayoutDim::WrapContent) {
+        float maxRight = 0.0f;
+        float maxBottom = 0.0f;
+        for (auto* child : m_children) {
+            if (!child || !child->isVisible()) continue;
+            Tina::Math::Vec2 cp = child->getPosition(); // 局部坐标（容器 onUpdate 应以 TopLeft 放置）
+            Tina::Math::Vec2 cs = child->getSize();
+            if (cp.x + cs.x > maxRight) maxRight = cp.x + cs.x;
+            if (cp.y + cs.y > maxBottom) maxBottom = cp.y + cs.y;
+        }
+        if (m_layoutW == LayoutDim::WrapContent) m_size.x = maxRight;
+        if (m_layoutH == LayoutDim::WrapContent) m_size.y = maxBottom;
+        // 尺寸变化影响变换
+        m_dirty = true;
+    }
 }
 
 void UINode::render(uint16_t viewId, UIRenderer& renderer)

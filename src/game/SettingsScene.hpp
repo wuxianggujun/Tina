@@ -31,8 +31,6 @@ private:
     void onBack();
     void onSetDay();
     void onSetNight();
-    void onPauseDayNight();
-    void onResumeDayNight();
     void onFwdTime();
     void onBackTime();
 
@@ -42,8 +40,6 @@ private:
     Memory::UniquePtr<UI::UINode> m_root;
     UI::UIButton* m_btnDay = nullptr;
     UI::UIButton* m_btnNight = nullptr;
-    UI::UIButton* m_btnPause = nullptr;
-    UI::UIButton* m_btnResume = nullptr;
     UI::UIButton* m_btnFwd = nullptr;
     UI::UIButton* m_btnBack = nullptr;
     UI::UIButton* m_btnClose = nullptr;
@@ -52,8 +48,6 @@ private:
     // Signal 连接保存
     Core::Signal<>::Connection m_cDay;
     Core::Signal<>::Connection m_cNight;
-    Core::Signal<>::Connection m_cPause;
-    Core::Signal<>::Connection m_cResume;
     Core::Signal<>::Connection m_cFwd;
     Core::Signal<>::Connection m_cBack;
     Core::Signal<>::Connection m_cClose;
@@ -63,4 +57,3 @@ private:
 };
 
 } // namespace Tina::Game
-

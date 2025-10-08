@@ -10,6 +10,7 @@
 
 #include <SDL3/SDL.h>
 #include <bgfx/bgfx.h>
+#include "../ui/UILayout.hpp"
 
 namespace Tina::Game {
 
@@ -40,8 +41,6 @@ void SettingsScene::onExit()
 {
     m_cDay.disconnect();
     m_cNight.disconnect();
-    m_cPause.disconnect();
-    m_cResume.disconnect();
     m_cFwd.disconnect();
     m_cBack.disconnect();
     m_cClose.disconnect();
@@ -98,81 +97,59 @@ void SettingsScene::createUI()
     m_root = Memory::MakeUnique<UI::UINode>("SettingsRoot");
     m_root->setSize((float)m_pixelWidth, (float)m_pixelHeight);
 
-    // 标题
+    // 使用与暂停页一致的“面板 + VBox”布局
+    const float panelW = 520.0f;
+    const float pad    = 16.0f;
+    const float spacing= 12.0f;
+    const float btnH   = 50.0f;
+
+    auto* panel = new UI::UIPanel("SettingsPanel");
+    panel->setColor(0.10f,0.10f,0.12f,0.90f);
+    panel->setSize(panelW, 1.0f);
+    panel->setHeightWrap();
+    m_root->addChild(panel);
+
+    auto* vbox = new UI::UIVStack("VBox");
+    vbox->setSize(panelW, 0.0f);
+    vbox->setHeightWrap();
+    vbox->setPadding(pad, pad);
+    vbox->setSpacing(spacing);
+    panel->addChild(vbox);
+
     auto* title = new UI::UILabel();
     title->setText("设置 / 调试");
     title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
-    title->setPosition((float)m_pixelWidth / 2 - 200, (float)m_pixelHeight / 2 - 180);
-    title->setSize(400, 40);
-    m_root->addChild(title);
+    title->setSize(panelW - pad*2, 44.0f);
+    vbox->addChild(title);
 
-    const float btnW = 280.0f;
-    const float btnH = 50.0f;
-    const float spacing = 14.0f;
-    float x = (float)m_pixelWidth / 2 - btnW / 2;
-    float y = (float)m_pixelHeight / 2 - 110.0f;
+    auto addRowButton = [&](const char* text, auto&& conn){
+        auto* row = new UI::UIHStack("Row");
+        row->setSize(panelW - pad*2, btnH);
+        row->setPadding(0,0);
+        vbox->addChild(row);
+        auto* btn = new UI::UIButton();
+        btn->setText(text);
+        btn->setWidthMatch();
+        btn->setHeight(btnH);
+        row->addChild(btn);
+        return btn;
+    };
 
-    // 切换到白天
-    m_btnDay = new UI::UIButton();
-    m_btnDay->setText("切换到白天");
-    m_btnDay->setPosition(x, y);
-    m_btnDay->setSize(btnW, btnH);
+    m_btnDay = addRowButton("切换到白天", [this]{ onSetDay(); });
     m_cDay = m_btnDay->onClick.connect([this]{ onSetDay(); });
-    m_root->addChild(m_btnDay);
-    y += btnH + spacing;
-
-    // 切换到黑夜
-    m_btnNight = new UI::UIButton();
-    m_btnNight->setText("切换到黑夜");
-    m_btnNight->setPosition(x, y);
-    m_btnNight->setSize(btnW, btnH);
+    m_btnNight = addRowButton("切换到黑夜", [this]{ onSetNight(); });
     m_cNight = m_btnNight->onClick.connect([this]{ onSetNight(); });
-    m_root->addChild(m_btnNight);
-    y += btnH + spacing;
-
-    // 暂停昼夜
-    m_btnPause = new UI::UIButton();
-    m_btnPause->setText("暂停昼夜循环");
-    m_btnPause->setPosition(x, y);
-    m_btnPause->setSize(btnW, btnH);
-    m_cPause = m_btnPause->onClick.connect([this]{ onPauseDayNight(); });
-    m_root->addChild(m_btnPause);
-    y += btnH + spacing;
-
-    // 恢复昼夜
-    m_btnResume = new UI::UIButton();
-    m_btnResume->setText("恢复昼夜循环");
-    m_btnResume->setPosition(x, y);
-    m_btnResume->setSize(btnW, btnH);
-    m_cResume = m_btnResume->onClick.connect([this]{ onResumeDayNight(); });
-    m_root->addChild(m_btnResume);
-    y += btnH + spacing;
-
-    // 时间 +10%
-    m_btnFwd = new UI::UIButton();
-    m_btnFwd->setText("时间 +10%");
-    m_btnFwd->setPosition(x, y);
-    m_btnFwd->setSize(btnW, btnH);
+    m_btnFwd = addRowButton("时间 +10%", [this]{ onFwdTime(); });
     m_cFwd = m_btnFwd->onClick.connect([this]{ onFwdTime(); });
-    m_root->addChild(m_btnFwd);
-    y += btnH + spacing;
-
-    // 时间 -10%
-    m_btnBack = new UI::UIButton();
-    m_btnBack->setText("时间 -10%");
-    m_btnBack->setPosition(x, y);
-    m_btnBack->setSize(btnW, btnH);
+    m_btnBack = addRowButton("时间 -10%", [this]{ onBackTime(); });
     m_cBack = m_btnBack->onClick.connect([this]{ onBackTime(); });
-    m_root->addChild(m_btnBack);
-    y += btnH + spacing;
-
-    // 关闭/返回
-    m_btnClose = new UI::UIButton();
-    m_btnClose->setText("返回");
-    m_btnClose->setPosition(x, y);
-    m_btnClose->setSize(btnW, btnH);
+    m_btnClose = addRowButton("返回", [this]{ onBack(); });
     m_cClose = m_btnClose->onClick.connect([this]{ onBack(); });
-    m_root->addChild(m_btnClose);
+
+    // 触发布局并居中
+    vbox->update(0.0f);
+    panel->update(0.0f);
+    panel->setPosition((m_pixelWidth - panelW)*0.5f, (m_pixelHeight - panel->getSize().y)*0.5f);
 }
 
 void SettingsScene::onBack()
@@ -190,16 +167,6 @@ void SettingsScene::onSetNight()
 {
     // 设定至黑夜中段（默认 0.75）
     app()->events().onSetDayNightNormalized.emit(0.75f);
-}
-
-void SettingsScene::onPauseDayNight()
-{
-    app()->events().onSetDayNightPaused.emit(true);
-}
-
-void SettingsScene::onResumeDayNight()
-{
-    app()->events().onSetDayNightPaused.emit(false);
 }
 
 void SettingsScene::onFwdTime()

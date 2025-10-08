@@ -17,6 +17,13 @@ namespace Tina::UI {
 // 前向声明
 class UIRenderer;
 
+// 布局尺寸语义（类 Android）
+enum class LayoutDim : uint8_t {
+    Exact = 0,      // 使用节点自身 size 数值
+    MatchParent,    // 填满父容器的可用空间（由父容器设置）
+    WrapContent     // 由容器测量子项后回填（或通用节点根据子项包裹）
+};
+
 // UI 锚点：决定子节点相对父节点的对齐方式
 enum class Anchor : uint8_t {
     TopLeft = 0,
@@ -45,8 +52,25 @@ public:
 
     // === 变换（相对于父节点） ===
     void setPosition(float x, float y) { m_position = {x, y}; m_dirty = true; }
-    void setSize(float w, float h) { m_size = {w, h}; m_dirty = true; }
+    void setSize(float w, float h) { m_size = {w, h}; m_dirty = true; m_layoutW = LayoutDim::Exact; m_layoutH = LayoutDim::Exact; }
+    void setWidth(float w) { m_size.x = w; m_dirty = true; m_layoutW = LayoutDim::Exact; }
+    void setHeight(float h) { m_size.y = h; m_dirty = true; m_layoutH = LayoutDim::Exact; }
     void setAnchor(Anchor anchor) { m_anchor = anchor; m_dirty = true; }
+
+    // 布局尺寸语义（Android 风格）
+    void setWidthMatch() { m_layoutW = LayoutDim::MatchParent; }
+    void setHeightMatch() { m_layoutH = LayoutDim::MatchParent; }
+    void setWidthWrap() { m_layoutW = LayoutDim::WrapContent; }
+    void setHeightWrap() { m_layoutH = LayoutDim::WrapContent; }
+    LayoutDim layoutWidth() const { return m_layoutW; }
+    LayoutDim layoutHeight() const { return m_layoutH; }
+
+    // 外边距（容器在布局时可考虑）
+    void setMargin(float l, float t, float r, float b) { m_marginL = l; m_marginT = t; m_marginR = r; m_marginB = b; }
+    float marginLeft() const { return m_marginL; }
+    float marginTop() const { return m_marginT; }
+    float marginRight() const { return m_marginR; }
+    float marginBottom() const { return m_marginB; }
 
     Tina::Math::Vec2 getPosition() const { return m_position; }
     Tina::Math::Vec2 getSize() const { return m_size; }
@@ -98,6 +122,9 @@ protected:
     Tina::Math::Vec2 m_position{0, 0}; // 相对父节点的偏移
     Tina::Math::Vec2 m_size{100, 100};
     Anchor m_anchor = Anchor::TopLeft;
+    LayoutDim m_layoutW = LayoutDim::Exact;
+    LayoutDim m_layoutH = LayoutDim::Exact;
+    float m_marginL = 0.0f, m_marginT = 0.0f, m_marginR = 0.0f, m_marginB = 0.0f;
 
     // 世界变换缓存
     Tina::Math::Vec2 m_worldPos{0, 0};

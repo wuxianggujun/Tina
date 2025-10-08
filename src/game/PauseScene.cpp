@@ -170,21 +170,18 @@ void PauseScene::createUI()
     const float spacing  = 12.0f;   // VBox 子项间距
     const float titleH   = 44.0f;   // 标题高度
     const float debugH   = 36.0f;   // 分组标题高度
-    // 子项：标题、顶部行、分组标题、两行两列、底部行 = 6 个
-    const int   childCount = 6;
-    const float contentH = titleH + btnH + debugH + btnH + btnH + btnH;
-    const float panelH   = pad * 2.0f + contentH + spacing * float(childCount - 1);
     const float rowW     = panelW - pad * 2.0f;               // VBox 左右 padding 共 32
     const float colW     = (rowW - 8.0f * 2.0f - 12.0f) * 0.5f; // 行左右 padding=8，列间距=12
 
     auto* panel = new UI::UIPanel("PausePanel");
     panel->setColor(0.08f, 0.08f, 0.10f, 0.92f);
-    panel->setSize(panelW, panelH);
-    panel->setPosition((m_pixelWidth - panelW) * 0.5f, (m_pixelHeight - panelH) * 0.5f);
+    panel->setSize(panelW, 1.0f);
+    panel->setHeightWrap(); // 交由容器包裹
     m_rootNode->addChild(panel);
 
     auto* vbox = new UI::UIVStack("VBox");
-    vbox->setSize(panelW, panelH);
+    vbox->setSize(panelW, 0.0f);
+    vbox->setHeightWrap(); // 容器自动包裹内容高度
     vbox->setPadding(pad, pad);
     vbox->setSpacing(spacing);
     panel->addChild(vbox);
@@ -251,12 +248,18 @@ void PauseScene::createUI()
 
     m_btnQuit = new UI::UIButton();
     m_btnQuit->setText("退出游戏");
-    m_btnQuit->setSize(rowW, btnH);
+    m_btnQuit->setWidthMatch();
+    m_btnQuit->setHeight(btnH);
     m_btnQuit->setNormalColor(0.6f, 0.2f, 0.2f, 0.95f);
     m_btnQuit->setHoverColor(0.8f, 0.3f, 0.3f, 1.0f);
     m_btnQuit->setPressedColor(0.4f, 0.1f, 0.1f, 1.0f);
     m_quitConnection = m_btnQuit->onClick.connect([this]() { onQuitClicked(); });
     rowBottom->addChild(m_btnQuit);
+
+    // 触发布局计算并回填 Panel 高度，再居中 Panel
+    vbox->update(0.0f);
+    panel->update(0.0f);
+    panel->setPosition((m_pixelWidth - panelW) * 0.5f, (m_pixelHeight - panel->getSize().y) * 0.5f);
 
     // 更新事件系统根节点，保证重建后事件命中正确
     m_events.setRoot(m_rootNode.get());

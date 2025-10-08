@@ -261,64 +261,82 @@ void MenuScene::createUI() {
         m_btnQuit = nullptr;
     }
 
-    // 创建根节点
+    // 创建根节点与居中面板（Android 风格布局：Wrap/Match）
     m_rootNode = Memory::MakeUnique<UI::UINode>();
     m_rootNode->setPosition(0, 0);
     m_rootNode->setSize((float)m_pixelWidth, (float)m_pixelHeight);
-    
-    // 按钮参数
-    const float btnWidth = 300.0f;
-    const float btnHeight = 60.0f;
-    const float btnSpacing = 20.0f;
-    const float btnStartY = (float)m_pixelHeight * 0.5f;
-    
-    // 清空按钮列表
+
+    const float panelW = 520.0f;
+    const float pad    = 16.0f;
+    const float spacing= 12.0f;
+    const float btnH   = 60.0f;
+
+    auto* panel = new UI::UIPanel("MenuPanel");
+    panel->setColor(0.10f,0.10f,0.12f,0.90f);
+    panel->setSize(panelW, 1.0f);
+    panel->setHeightWrap();
+    m_rootNode->addChild(panel);
+
+    auto* vbox = new UI::UIVStack("VBox");
+    vbox->setSize(panelW, 0.0f);
+    vbox->setHeightWrap();
+    vbox->setPadding(pad, pad);
+    vbox->setSpacing(spacing);
+    panel->addChild(vbox);
+
+    // 标题
+    auto* title = new UI::UILabel();
+    title->setText("Tina - 主菜单");
+    title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
+    title->setSize(panelW - pad*2, 44.0f);
+    vbox->addChild(title);
+
+    // 三个按钮（占满行宽）
+    auto addButton = [&](const char* text, const Tina::Core::Color& n, const Tina::Core::Color& h, const Tina::Core::Color& p, auto&& onClick){
+        auto* row = new UI::UIHStack("Row");
+        row->setSize(panelW - pad*2, btnH);
+        row->setPadding(0,0);
+        vbox->addChild(row);
+        auto* btn = new UI::UIButton();
+        btn->setText(text);
+        btn->setWidthMatch();
+        btn->setHeight(btnH);
+        btn->setNormalColor(n);
+        btn->setHoverColor(h);
+        btn->setPressedColor(p);
+        row->addChild(btn);
+        return btn;
+    };
+
     m_buttons.clear();
-    
-    // 开始游戏按钮（绿色）
-    m_btnStart = new UI::UIButton();
-    m_btnStart->setText("开始游戏");
-    m_btnStart->setPosition(
-        (float)m_pixelWidth / 2.0f - btnWidth / 2.0f,
-        btnStartY
-    );
-    m_btnStart->setSize(btnWidth, btnHeight);
-    m_btnStart->setNormalColor(0.15f, 0.68f, 0.38f, 0.9f);   // #27AE60
-    m_btnStart->setHoverColor(0.18f, 0.80f, 0.44f, 1.0f);    // #2ECC71
-    m_btnStart->setPressedColor(0.12f, 0.52f, 0.29f, 1.0f);  // #1E8449
-    m_startConnection = m_btnStart->onClick.connect([this]() { onStartClicked(); });
-    m_rootNode->addChild(m_btnStart);
+    m_btnStart = addButton("开始游戏",
+                           Tina::Core::Color(0.15f,0.68f,0.38f,0.9f),
+                           Tina::Core::Color(0.18f,0.80f,0.44f,1.0f),
+                           Tina::Core::Color(0.12f,0.52f,0.29f,1.0f),
+                           [this]{ onStartClicked(); });
+    m_startConnection = m_btnStart->onClick.connect([this]{ onStartClicked(); });
     m_buttons.push_back(m_btnStart);
-    
-    // 设置按钮（蓝色）
-    m_btnSettings = new UI::UIButton();
-    m_btnSettings->setText("设置");
-    m_btnSettings->setPosition(
-        (float)m_pixelWidth / 2.0f - btnWidth / 2.0f,
-        btnStartY + btnHeight + btnSpacing
-    );
-    m_btnSettings->setSize(btnWidth, btnHeight);
-    m_btnSettings->setNormalColor(0.20f, 0.60f, 0.86f, 0.9f);   // #3498DB
-    m_btnSettings->setHoverColor(0.36f, 0.68f, 0.89f, 1.0f);    // #5DADE2
-    m_btnSettings->setPressedColor(0.16f, 0.45f, 0.65f, 1.0f);  // #2874A6
-    m_settingsConnection = m_btnSettings->onClick.connect([this]() { onSettingsClicked(); });
-    m_rootNode->addChild(m_btnSettings);
+
+    m_btnSettings = addButton("设置",
+                           Tina::Core::Color(0.20f,0.60f,0.86f,0.9f),
+                           Tina::Core::Color(0.36f,0.68f,0.89f,1.0f),
+                           Tina::Core::Color(0.16f,0.45f,0.65f,1.0f),
+                           [this]{ onSettingsClicked(); });
+    m_settingsConnection = m_btnSettings->onClick.connect([this]{ onSettingsClicked(); });
     m_buttons.push_back(m_btnSettings);
-    
-    // 退出游戏按钮（红色）
-    m_btnQuit = new UI::UIButton();
-    m_btnQuit->setText("退出游戏");
-    m_btnQuit->setPosition(
-        (float)m_pixelWidth / 2.0f - btnWidth / 2.0f,
-        btnStartY + (btnHeight + btnSpacing) * 2.0f
-    );
-    m_btnQuit->setSize(btnWidth, btnHeight);
-    m_btnQuit->setNormalColor(0.91f, 0.30f, 0.24f, 0.9f);   // #E74C3C
-    m_btnQuit->setHoverColor(0.93f, 0.44f, 0.39f, 1.0f);    // #EC7063
-    m_btnQuit->setPressedColor(0.75f, 0.22f, 0.17f, 1.0f);  // #C0392B
-    m_quitConnection = m_btnQuit->onClick.connect([this]() { onQuitClicked(); });
-    m_rootNode->addChild(m_btnQuit);
+
+    m_btnQuit = addButton("退出游戏",
+                           Tina::Core::Color(0.91f,0.30f,0.24f,0.9f),
+                           Tina::Core::Color(0.93f,0.44f,0.39f,1.0f),
+                           Tina::Core::Color(0.75f,0.22f,0.17f,1.0f),
+                           [this]{ onQuitClicked(); });
+    m_quitConnection = m_btnQuit->onClick.connect([this]{ onQuitClicked(); });
     m_buttons.push_back(m_btnQuit);
+
+    // 计算与居中
+    vbox->update(0.0f);
+    panel->update(0.0f);
+    panel->setPosition((m_pixelWidth - panelW)*0.5f, (m_pixelHeight - panel->getSize().y)*0.5f);
     
     // 默认选中第一个按钮
     m_selectedButtonIndex = 0;
