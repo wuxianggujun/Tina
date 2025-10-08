@@ -51,6 +51,16 @@ public:
     void setColor(float r, float g, float b, float a) { m_color = Tina::Core::Color(r, g, b, a); }
     void setColor(const Tina::Core::Color& c) { m_color = c; }
 
+    // 文本对齐设置（仅影响渲染，不影响节点布局）
+    enum class TextAlignH { Left, Center, Right };
+    enum class TextAlignV { Top, Center, Bottom, Baseline };
+    void setAlignH(TextAlignH h) { m_alignH = h; }
+    void setAlignV(TextAlignV v) { m_alignV = v; }
+    void setAlignment(TextAlignH h, TextAlignV v) { m_alignH = h; m_alignV = v; }
+
+    TextAlignH alignH() const { return m_alignH; }
+    TextAlignV alignV() const { return m_alignV; }
+
     const std::string& getText() const { return m_text; }
     Tina::Core::Color getColor() const { return m_color; }
 
@@ -60,6 +70,8 @@ protected:
 private:
     std::string m_text;
     Tina::Core::Color m_color;
+    TextAlignH m_alignH = TextAlignH::Left;
+    TextAlignV m_alignV = TextAlignV::Top;
 };
 
 // === Button：可点击按钮（背景 + 文本） ===

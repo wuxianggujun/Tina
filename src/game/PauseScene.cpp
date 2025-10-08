@@ -184,6 +184,8 @@ void PauseScene::createUI()
     auto* title = new UI::UILabel();
     title->setText("游戏已暂停");
     title->setColor(1.0f, 1.0f, 1.0f, 1.0f);
+    // 使标题文本在其矩形内水平/垂直居中
+    title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
     title->setPosition(
         (float)m_pixelWidth / 2 - 200,
         (float)m_pixelHeight / 2 - 150

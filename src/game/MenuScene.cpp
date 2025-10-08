@@ -153,7 +153,7 @@ void MenuScene::render() {
         float titleY = (float)m_pixelHeight * 0.25f;
         
         // 主标题
-        m_uiRenderer->drawTextEx(3, titleX, titleY, 400, 80,
+        m_uiRenderer->drawTextEx(3, titleX - 200.0f, titleY - 40.0f, 400, 80,
                                  1.0f, 1.0f, 1.0f, m_titleAlpha,
                                  "TINA GAME",
                                  UI::UIRenderer::AlignH::Center,
@@ -161,7 +161,7 @@ void MenuScene::render() {
                                  0.0f, 0.0f);
         
         // 副标题（使用较小的透明度）
-        m_uiRenderer->drawTextEx(3, titleX, titleY + 60, 400, 40,
+        m_uiRenderer->drawTextEx(3, titleX - 200.0f, titleY + 60 - 20.0f, 400, 40,
                                  0.7f, 0.7f, 0.7f, m_titleAlpha * 0.8f,
                                  "2D Sandbox Adventure",
                                  UI::UIRenderer::AlignH::Center,

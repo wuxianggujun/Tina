@@ -18,8 +18,30 @@ void UIPanel::onRender(uint16_t viewId, UIRenderer& renderer)
 void UILabel::onRender(uint16_t viewId, UIRenderer& renderer)
 {
     auto pos = getWorldPosition();
-    // 文本默认从左上角绘制，可根据需要调整偏移
-    renderer.drawText(viewId, pos.x + 4, pos.y + 4, m_color, m_text);
+    auto size = getSize();
+
+    // 将 UILabel 内部的对齐枚举映射为 UIRenderer 的对齐枚举
+    UIRenderer::AlignH hAlign;
+    switch (m_alignH) {
+        case TextAlignH::Center: hAlign = UIRenderer::AlignH::Center; break;
+        case TextAlignH::Right:  hAlign = UIRenderer::AlignH::Right;  break;
+        case TextAlignH::Left:
+        default:                 hAlign = UIRenderer::AlignH::Left;   break;
+    }
+    UIRenderer::AlignV vAlign;
+    switch (m_alignV) {
+        case TextAlignV::Center:   vAlign = UIRenderer::AlignV::Center;   break;
+        case TextAlignV::Bottom:   vAlign = UIRenderer::AlignV::Bottom;   break;
+        case TextAlignV::Baseline: vAlign = UIRenderer::AlignV::Baseline; break;
+        case TextAlignV::Top:
+        default:                   vAlign = UIRenderer::AlignV::Top;      break;
+    }
+
+    // 使用扩展文本绘制接口，在节点矩形内绘制文本；默认提供 4px 内边距
+    renderer.drawTextEx(viewId, pos.x, pos.y, size.x, size.y,
+                        m_color, m_text,
+                        hAlign, vAlign,
+                        4.0f, 4.0f);
 }
 
 // === UIButton 实现 ===
@@ -40,7 +62,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
     // 绘制背景
     renderer.drawRect(viewId, pos.x, pos.y, size.x, size.y, bgColor);
 
-    // 若选中，绘制边框高亮（四边细矩形）
+    // 若被选中，绘制边框高亮（细边）
     if (m_selected) {
         const float t = 2.0f; // 2px 边框
         auto hl = Tina::UI::UIColors::SelectionHL;
@@ -57,7 +79,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
     const float pad = 6.0f;
     bool hasIcon = bgfx::isValid(m_iconTex);
     if (hasIcon && m_iconLayout == IconLayout::IconTopTextBottom) {
-        // 上图下文：上方正方形图标，下方文本区域
+        // 图标在上，文本在下
         float iconSide = std::min(std::max(8.0f, size.x - pad*2.0f), std::max(8.0f, size.y*0.6f - pad*1.0f));
         float ix = pos.x + (size.x - iconSide) * 0.5f;
         float iy = pos.y + pad;
@@ -72,7 +94,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
                             m_textColor, m_text,
                             UIRenderer::AlignH::Center, UIRenderer::AlignV::Center, 0.0f, 0.0f);
     } else if (hasIcon && m_iconLayout == IconLayout::IconLeftTextRight) {
-        // 左图右文：左侧正方形图标，右侧文本
+        // 图标在左，文本在右
         float iconSide = std::min(size.y - pad*2.0f, size.x * 0.45f);
         iconSide = std::max(iconSide, 8.0f);
         float ix = pos.x + pad;
@@ -87,7 +109,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
                             m_textColor, m_text,
                             UIRenderer::AlignH::Left, UIRenderer::AlignV::Center, 0.0f, 0.0f);
     } else {
-        // 默认：居中图标（若有）+ 居中文本（重叠居中模式）
+        // 默认：无图标（或中心覆盖图标）+ 文本居中
         if (hasIcon) {
             float iw = std::max(8.0f, size.x - pad*2.0f);
             float ih = std::max(8.0f, size.y - pad*2.0f);
@@ -101,7 +123,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
                             UIRenderer::AlignH::Center, UIRenderer::AlignV::Center, 0.0f, 0.0f);
     }
 
-    // 角标：用于显示数字小角标（可配置位置）
+    // 角标：右上等位置显示的小角标（如数字）
     if (!m_badgeText.empty()) {
         float tw=0.0f, th=0.0f;
         renderer.measureText(m_badgeText, tw, th);
@@ -120,14 +142,14 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
             case BadgeCorner::BottomRight:
                 bx = pos.x + size.x - bw - 4.0f; by = pos.y + size.y - bh - 4.0f; break;
         }
-        // 背景与描边
+        // 角标背景+描边
         renderer.drawRect(viewId, bx, by, bw, bh, m_badgeBgColor);
         auto bhc = Tina::UI::UIColors::BadgeHighlight;
         renderer.drawRect(viewId, bx, by, bw, 1.0f, bhc);
         renderer.drawRect(viewId, bx, by+bh-1.0f, bw, 1.0f, bhc);
         renderer.drawRect(viewId, bx, by, 1.0f, bh, bhc);
         renderer.drawRect(viewId, bx+bw-1.0f, by, 1.0f, bh, bhc);
-        // 文本
+        // 角标文本
         renderer.drawTextEx(viewId, bx, by, bw, bh,
                             m_badgeTextColor,
                             m_badgeText,
@@ -138,5 +160,4 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
 }
 
 } // namespace Tina::UI
-
 
