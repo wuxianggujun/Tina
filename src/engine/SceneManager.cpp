@@ -70,6 +70,30 @@ void SceneManager::clear()
     TINA_INFO("All scenes cleared");
 }
 
+void SceneManager::requestPush(Memory::UniquePtr<Scene> scene)
+{
+    PendingOp op{}; op.type = PendingOp::Type::Push; op.scene = std::move(scene);
+    m_pending.push_back(std::move(op));
+}
+
+void SceneManager::requestPop()
+{
+    PendingOp op{}; op.type = PendingOp::Type::Pop;
+    m_pending.push_back(std::move(op));
+}
+
+void SceneManager::requestReplace(Memory::UniquePtr<Scene> scene)
+{
+    PendingOp op{}; op.type = PendingOp::Type::Replace; op.scene = std::move(scene);
+    m_pending.push_back(std::move(op));
+}
+
+void SceneManager::requestClear()
+{
+    PendingOp op{}; op.type = PendingOp::Type::Clear;
+    m_pending.push_back(std::move(op));
+}
+
 Scene* SceneManager::currentScene() const
 {
     return m_scenes.empty() ? nullptr : m_scenes.back().get();
@@ -78,8 +102,11 @@ Scene* SceneManager::currentScene() const
 void SceneManager::update(float dt)
 {
     if (Scene* scene = currentScene()) {
+        m_dispatching = true;
         scene->update(dt);
+        m_dispatching = false;
     }
+    applyPending();
 }
 
 void SceneManager::render()
@@ -92,7 +119,34 @@ void SceneManager::render()
 void SceneManager::handleEvent(const Tina::os::Event& event)
 {
     if (Scene* scene = currentScene()) {
+        m_dispatching = true;
         scene->handleEvent(event);
+        m_dispatching = false;
+    }
+    applyPending();
+}
+
+void SceneManager::applyPending()
+{
+    if (m_pending.empty()) return;
+    // 取出所有操作，按顺序应用
+    Container::Vector<PendingOp> ops;
+    ops.swap(m_pending);
+    for (auto& op : ops) {
+        switch (op.type) {
+        case PendingOp::Type::Push:
+            push(std::move(op.scene));
+            break;
+        case PendingOp::Type::Pop:
+            pop();
+            break;
+        case PendingOp::Type::Replace:
+            replace(std::move(op.scene));
+            break;
+        case PendingOp::Type::Clear:
+            clear();
+            break;
+        }
     }
 }
 

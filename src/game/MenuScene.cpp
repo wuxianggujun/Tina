@@ -98,13 +98,6 @@ void MenuScene::onExit() {
 }
 
 void MenuScene::update(float dt) {
-    // 若已请求进入游戏场景，在更新阶段执行切换（避开事件处理栈），防止销毁自身时 UIEventSystem 仍在遍历
-    if (m_startRequested) {
-        m_startRequested = false;
-        app()->scenes().replace(Memory::MakeUnique<GameScene>());
-        return;
-    }
-
     // 标题淡入动画
     if (m_titleAlpha < 1.0f) {
         m_titleAlpha += dt * 2.0f;  // 0.5秒淡入
@@ -381,8 +374,8 @@ void MenuScene::renderParticleBackground() {
 
 void MenuScene::onStartClicked() {
     TINA_INFO("MenuScene: 开始游戏按钮被点击");
-    // 切换到游戏场景（延迟到 update 阶段执行，避免在事件处理中销毁自身）
-    m_startRequested = true;
+    // 更安全的方式：请求场景替换；SceneManager 会在事件分发安全点应用
+    app()->scenes().requestReplace(Memory::MakeUnique<GameScene>());
 }
 
 void MenuScene::onSettingsClicked() {

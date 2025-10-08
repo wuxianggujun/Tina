@@ -88,7 +88,6 @@ private:
     // 键盘导航
     int m_selectedButtonIndex = 0;
     Container::Vector<UI::UIButton*> m_buttons;
-    bool m_startRequested = false; // 延迟切换到 GameScene，避免在事件处理中销毁自身
     
     // 视口尺寸
     int m_pixelWidth = 1280;

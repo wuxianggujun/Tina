@@ -25,6 +25,13 @@ public:
     void replace(Memory::UniquePtr<Scene> scene);
     void clear();
 
+    // 建议使用的“延迟场景操作”接口：
+    // 在事件回调或任意时刻调用，SceneManager 会在安全点（事件分发/更新之后）统一应用，避免在回调栈内销毁当前场景
+    void requestPush(Memory::UniquePtr<Scene> scene);
+    void requestPop();
+    void requestReplace(Memory::UniquePtr<Scene> scene);
+    void requestClear();
+
     // 获取当前场景
     Scene* currentScene() const;
     bool isEmpty() const { return m_scenes.empty(); }
@@ -36,8 +43,19 @@ public:
     void handleEvent(const Tina::os::Event& event);
 
 private:
+    // 立即应用所有挂起的场景操作（在非回调栈内的安全点调用）
+    void applyPending();
+
     Application* m_app = nullptr;
     Container::Vector<Memory::UniquePtr<Scene>> m_scenes;
+
+    // 延迟操作队列
+    struct PendingOp {
+        enum class Type { Push, Pop, Replace, Clear } type;
+        Memory::UniquePtr<Scene> scene; // 仅 Push/Replace 使用
+    };
+    Container::Vector<PendingOp> m_pending;
+    bool m_dispatching = false; // 保护：在回调分发期间不直接修改栈
 };
 
 } // namespace Tina::Engine
