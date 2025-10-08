@@ -19,15 +19,37 @@ bool AudioResource::load(const FileSystem::Content& blob) {
         return false;
     }
 
-    // 使用 MIX_LoadAudio_IO 从内存加载音频
+    // 使用指定解码器优先策略加载，避免多解码器探测时第三方库在 stderr 打印噪声
     SDL_IOStream* io = SDL_IOFromConstMem(blob.data(), static_cast<size_t>(blob.size()));
     if (!io) {
         TINA_ERROR("AudioResource::load - 无法创建 IOStream：{}", SDL_GetError());
         return false;
     }
-    
-    // 预解码到内存（predecode=true），并在返回后自动关闭 IO
-    m_audio = MIX_LoadAudio_IO(mixer, io, /*predecode=*/true, /*closeio=*/true);
+
+    auto try_load_with_decoder = [&](const char* decoder) -> MIX_Audio* {
+        SDL_PropertiesID props = SDL_CreateProperties();
+        if (!props) return nullptr;
+        SDL_SetPointerProperty(props, MIX_PROP_AUDIO_LOAD_IOSTREAM_POINTER, io);
+        SDL_SetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_CLOSEIO_BOOLEAN, true);
+        SDL_SetBooleanProperty(props, MIX_PROP_AUDIO_LOAD_PREDECODE_BOOLEAN, true);
+        SDL_SetPointerProperty(props, MIX_PROP_AUDIO_LOAD_PREFERRED_MIXER_POINTER, mixer);
+        if (decoder && *decoder) {
+            SDL_SetStringProperty(props, MIX_PROP_AUDIO_DECODER_STRING, decoder);
+        }
+        MIX_Audio* audio = MIX_LoadAudioWithProperties(props);
+        SDL_DestroyProperties(props);
+        return audio;
+    };
+
+    // 优先尝试 DRMP3（多数情况下内置且安静），失败再尝试 MPG123，最后回退通用路径（可能触发多解码器探测）
+    m_audio = try_load_with_decoder("DRMP3");
+    if (!m_audio) {
+        m_audio = try_load_with_decoder("MPG123");
+    }
+    if (!m_audio) {
+        // 回退：由 SDL_mixer 自行选择解码器（可能在个别平台打印外部库提示）
+        m_audio = MIX_LoadAudio_IO(mixer, io, /*predecode=*/true, /*closeio=*/true);
+    }
     if (!m_audio) {
         TINA_ERROR("AudioResource::load - 无法加载音频文件 [{}]：{}", getPath().c_str(), SDL_GetError());
         return false;
