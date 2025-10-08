@@ -15,7 +15,7 @@
 | 阶段 1：基础架构 | ✅ 完成 | 100% | Application、Scene、SceneManager、EventBus |
 | 阶段 2：游戏逻辑迁移 | ✅ 完成 | 100% | GameScene 完整实现（859 行） |
 | 阶段 3：Signal 系统 | ✅ 完成 | 100% | EventBus + UI Signal + 游戏事件 |
-| 阶段 4：场景扩展 | ⚠️ 部分完成 | 50% | PauseScene ✅ / MenuScene ❌ |
+| 阶段 4：场景扩展 | ✅ 完成 | 100% | PauseScene ✅ / MenuScene ✅ |
 | 阶段 5：资源管理 | ✅ 完成 | 100% | FileSystem + ResourceHub + Texture/Font |
 
 **关键成果**：
@@ -26,7 +26,6 @@
 - ✅ PauseScene 实现（ESC 暂停/恢复游戏）
 
 **待完成**：
-- ❌ MenuScene（主菜单场景）
 - ⚠️ 单元测试覆盖
 - ❌ 调试工具（ImGui 集成）
 
@@ -441,6 +440,7 @@ private:
 - ✅ 初始化核心子系统
 - ✅ 驱动主循环
 - ✅ 提供全局服务访问点（事件、场景、资源、着色器）
+- ✅ 主线程任务队列（post/postDelayed/flush）：在事件分发/渲染后安全点执行
 
 ---
 
@@ -627,6 +627,13 @@ app.events().onPlayerDied.connect_member(&ui, &UI::showGameOver);
 // 触发事件
 app.events().onPlayerDied.emit();
 ```
+
+### 5. MenuScene（主菜单场景）
+
+- 状态：✅ 已实现（按钮：开始游戏/设置/退出；标题淡入动画；粒子/渐变背景）
+- 交互：鼠标交互统一由 UIEventSystem 处理（hover/click），键盘支持↑/↓/Enter/Space/ESC。
+- 场景切换：使用 `SceneManager::requestReplace`，在安全点切换到 GameScene。
+- 资源：字体通过 ResourceManagerHub + FontResource，文本渲染使用全局 ShaderManager 的 text 程序。
 
 #### Signal/Slot 稳定性增强
 - 连接跟踪：Signal 为每个连接分配 ConnectionRecord，Signal 析构时统一将记录失效（sig=nullptr），避免 Connection 析构访问已销毁的 Signal。

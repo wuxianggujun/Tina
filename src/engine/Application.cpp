@@ -283,7 +283,7 @@ void Application::flushTasks()
 void Application::postDelayed(uint32_t delayMs, std::function<void()> fn)
 {
     if (!fn) return;
-    uint64_t nowMs = SDL_GetTicks64();
+    uint64_t nowMs = SDL_GetTicks();
     TimedTask t{}; t.dueMs = nowMs + delayMs; t.fn = std::move(fn);
     std::lock_guard<std::mutex> _g(m_taskMutex);
     m_timedTasks.push_back(std::move(t));
@@ -291,7 +291,7 @@ void Application::postDelayed(uint32_t delayMs, std::function<void()> fn)
 
 void Application::flushTimedTasks()
 {
-    uint64_t nowMs = SDL_GetTicks64();
+    uint64_t nowMs = SDL_GetTicks();
     Tina::Container::Vector<std::function<void()>> toRun;
     {
         std::lock_guard<std::mutex> _g(m_taskMutex);
