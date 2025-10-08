@@ -110,6 +110,7 @@ public:
     // - 在任意线程/回调中请求在主线程操作（如场景切换、UI修改、bgfx调用）
     // - 与 SceneManager 的 request* 协同使用，统一在帧末或事件分发后执行
     void post(std::function<void()> fn);
+    void postDelayed(uint32_t delayMs, std::function<void()> fn);
 
 private:
     Config m_config;                               // 应用程序配置
@@ -134,6 +135,9 @@ private:
     std::mutex m_taskMutex;
     Tina::Container::Vector<std::function<void()>> m_tasks;
     void flushTasks();
+    struct TimedTask { uint64_t dueMs = 0; std::function<void()> fn; };
+    Tina::Container::Vector<TimedTask> m_timedTasks;
+    void flushTimedTasks();
 };
 
 } // namespace Tina::Engine

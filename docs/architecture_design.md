@@ -531,7 +531,7 @@ private:
 } // namespace Tina::Engine
 ```
 
-**使用示例**：
+**使用示例**（立即操作）：
 ```cpp
 // 从主菜单进入游戏
 app.scenes().push(Memory::makeUnique<GameScene>());
@@ -544,6 +544,17 @@ app.scenes().pop();
 
 // 从游戏返回主菜单（销毁游戏场景）
 app.scenes().replace(Memory::makeUnique<MenuScene>());
+```
+
+**推荐使用（延迟操作）**：
+```cpp
+// 避免在事件回调栈内修改场景栈，使用 request* 接口：
+app.scenes().requestPush(Memory::makeUnique<GameScene>());
+app.scenes().requestReplace(Memory::makeUnique<MenuScene>());
+app.scenes().requestPop();
+app.scenes().requestClear();
+
+// SceneManager 会在 handleEvent()/update() 之后的安全点自动应用
 ```
 
 ---
@@ -616,6 +627,22 @@ app.events().onPlayerDied.connect_member(&ui, &UI::showGameOver);
 // 触发事件
 app.events().onPlayerDied.emit();
 ```
+
+#### Signal/Slot 稳定性增强
+- 连接跟踪：Signal 为每个连接分配 ConnectionRecord，Signal 析构时统一将记录失效（sig=nullptr），避免 Connection 析构访问已销毁的 Signal。
+- 线程断言：默认断言在创建线程使用（主线程）；提供 debug 统计接口：连接/断开/触发次数与当前有效槽数量。
+- 最佳实践：
+  - 重建 UI 前先断开旧连接、再销毁 UI 树；或依赖上述安全失效也不会崩，但断开有助于避免重复连接。
+  - 鼠标交互建议统一用 UIEventSystem，避免手写命中逻辑与时序问题。
+
+#### Application 任务队列（post/flush）
+```cpp
+// 在任意线程/回调中投递：
+app.post([&]{ app.scenes().requestReplace(Memory::MakeUnique<GameScene>()); });
+
+// Application 在 processEvents() 完成后与每帧渲染后都会 flushTasks()
+```
+作用：统一“延迟到安全点执行”的机制，避免在回调栈内销毁对象（场景/UI/bgfx资源）。
 
 ---
 

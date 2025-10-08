@@ -288,19 +288,16 @@ void PauseScene::renderOverlay()
 void PauseScene::onContinueClicked()
 {
     TINA_INFO("PauseScene: 继续游戏按钮被点击");
-    app()->scenes().pop();  // 返回 GameScene
+    // 使用延迟场景操作，避免在回调栈内修改场景栈
+    app()->scenes().requestPop();  // 返回 GameScene
 }
 
 void PauseScene::onQuitClicked()
 {
     TINA_INFO("PauseScene: 退出游戏按钮被点击");
-    
-    // 先设置退出标志，然后让主循环自然结束
-    // 主循环检测到 quit() 后会停止，然后清理所有资源
-    app()->quit();
-    
-    // 注意：不要调用 scenes().clear()，会导致当前场景被销毁
-    // 而此时还在 PauseScene 的回调中，会造成访问已销毁对象
+    // 通过任务队列在主线程安全点退出（避免在回调栈内直接退出）
+    auto* a = app();
+    a->post([a]{ a->quit(); });
 }
 
 } // namespace Tina::Game

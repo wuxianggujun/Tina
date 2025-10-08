@@ -17,6 +17,7 @@ SceneManager::~SceneManager()
 void SceneManager::push(Memory::UniquePtr<Scene> scene)
 {
     if (!scene) { TINA_ERROR("SceneManager::push - scene is null"); return; }
+    if (m_dispatching) { requestPush(std::move(scene)); return; }
 
     // 暂停当前场景
     if (!m_scenes.empty()) {
@@ -33,6 +34,7 @@ void SceneManager::push(Memory::UniquePtr<Scene> scene)
 
 void SceneManager::pop()
 {
+    if (m_dispatching) { requestPop(); return; }
     if (m_scenes.empty()) { TINA_WARN("SceneManager::pop - no scenes to pop"); return; }
 
     // 退出当前场景
@@ -47,6 +49,7 @@ void SceneManager::pop()
 void SceneManager::replace(Memory::UniquePtr<Scene> scene)
 {
     if (!scene) { TINA_ERROR("SceneManager::replace - scene is null"); return; }
+    if (m_dispatching) { requestReplace(std::move(scene)); return; }
 
     // 退出当前场景
     if (!m_scenes.empty()) {
@@ -63,6 +66,7 @@ void SceneManager::replace(Memory::UniquePtr<Scene> scene)
 
 void SceneManager::clear()
 {
+    if (m_dispatching) { requestClear(); return; }
     while (!m_scenes.empty()) {
         m_scenes.back()->onExit();
         m_scenes.pop_back();

@@ -592,7 +592,7 @@ void GameScene::handleKeyboard(const Tina::os::Event& event)
     // ESC 键：暂停游戏
     if (event.key.key_code == os::KeyCode::ESCAPE) {
         TINA_INFO("GameScene: 按下 ESC，进入暂停菜单");
-        app()->scenes().push(Memory::MakeUnique<PauseScene>());
+        app()->scenes().requestPush(Memory::MakeUnique<PauseScene>());
         return;
     }
 

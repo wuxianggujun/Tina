@@ -276,6 +276,38 @@ void Application::flushTasks()
     for (auto& fn : local) {
         if (fn) fn();
     }
+    // 同步检查并执行到期的延时任务
+    flushTimedTasks();
+}
+
+void Application::postDelayed(uint32_t delayMs, std::function<void()> fn)
+{
+    if (!fn) return;
+    uint64_t nowMs = SDL_GetTicks64();
+    TimedTask t{}; t.dueMs = nowMs + delayMs; t.fn = std::move(fn);
+    std::lock_guard<std::mutex> _g(m_taskMutex);
+    m_timedTasks.push_back(std::move(t));
+}
+
+void Application::flushTimedTasks()
+{
+    uint64_t nowMs = SDL_GetTicks64();
+    Tina::Container::Vector<std::function<void()>> toRun;
+    {
+        std::lock_guard<std::mutex> _g(m_taskMutex);
+        if (m_timedTasks.empty()) return;
+        // 线性扫描收集到期任务；数量不大时足够
+        auto it = m_timedTasks.begin();
+        while (it != m_timedTasks.end()) {
+            if (it->dueMs <= nowMs) {
+                toRun.push_back(std::move(it->fn));
+                it = m_timedTasks.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    for (auto& fn : toRun) if (fn) fn();
 }
 
 void Application::prewarmCommonAssets()

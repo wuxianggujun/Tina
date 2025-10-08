@@ -34,9 +34,9 @@ int main(int /*argc*/, char* /*argv*/[])
         // 创建应用
         Engine::Application app(config);
 
-        // 创建并推入主菜单场景
+        // 创建并请求推入主菜单场景（延迟到安全点应用）
         auto menuScene = Memory::MakeUnique<Game::MenuScene>();
-        app.scenes().push(std::move(menuScene));
+        app.scenes().requestPush(std::move(menuScene));
 
         // 运行主循环（阻塞直到退出）
         app.run();
