@@ -16,8 +16,14 @@ public:
     UIEventSystem();
     ~UIEventSystem();
 
-    // 设置根节点
-    void setRoot(UINode* root) { m_root = root; }
+    // 设置根节点：切换 UI 树时重置悬停/按下状态，避免悬挂指针
+    void setRoot(UINode* root) {
+        m_root = root;
+        m_hoveredNode = nullptr;
+        m_pressedNode = nullptr;
+        m_mouseDown = false;
+        m_mouseDownPrev = false;
+    }
 
     // 更新鼠标状态（每帧调用）
     void updateMouse(float mouseX, float mouseY, bool mouseDown);

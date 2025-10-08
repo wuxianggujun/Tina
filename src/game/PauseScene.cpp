@@ -133,55 +133,7 @@ void PauseScene::handleEvent(const Tina::os::Event& event)
         m_events.processEvents();
     }
 
-    #if 0
-    if (event.type == E::Type::MOUSE_MOVE) {
-        float mx = 0.0f, my = 0.0f;
-        SDL_GetMouseState(&mx, &my);
-        
-        if (m_btnContinue) {
-            bool hovered = m_btnContinue->containsPoint(mx, my);
-            if (hovered && !m_btnContinue->isHovered()) {
-                m_btnContinue->setHovered(true);
-                m_btnContinue->onMouseEnter();
-            } else if (!hovered && m_btnContinue->isHovered()) {
-                m_btnContinue->setHovered(false);
-                m_btnContinue->onMouseLeave();
-            }
-        }
-        
-        if (m_btnQuit) {
-            bool hovered = m_btnQuit->containsPoint(mx, my);
-            if (hovered && !m_btnQuit->isHovered()) {
-                m_btnQuit->setHovered(true);
-                m_btnQuit->onMouseEnter();
-            } else if (!hovered && m_btnQuit->isHovered()) {
-                m_btnQuit->setHovered(false);
-                m_btnQuit->onMouseLeave();
-            }
-        }
-    }
-
-    // 鼠标点击：处理按钮
-    if (event.type == E::Type::MOUSE_BUTTON && event.mouse_button.down) {
-        if (event.mouse_button.button == os::MouseButton::LEFT) {
-            float mx = 0.0f, my = 0.0f;
-            SDL_GetMouseState(&mx, &my);
-            
-            TINA_INFO("PauseScene: 鼠标点击位置 ({}, {})", mx, my);
-            
-            // 检测按钮点击
-            if (m_btnContinue && m_btnContinue->containsPoint(mx, my)) {
-                TINA_INFO("PauseScene: 点击了继续按钮");
-                m_btnContinue->onClick.emit();
-            } else if (m_btnQuit && m_btnQuit->containsPoint(mx, my)) {
-                TINA_INFO("PauseScene: 点击了退出按钮");
-                m_btnQuit->onClick.emit();
-            } else {
-                TINA_INFO("PauseScene: 点击了空白区域");
-            }
-        }
-    }
-    #endif
+    // 统一通过 UIEventSystem 处理鼠标悬停与点击，移除手动 containsPoint 调试代码
 
     // 窗口调整大小
     if (event.type == E::Type::WINDOW_SIZE) {
@@ -215,7 +167,8 @@ void PauseScene::createUI()
     const float panelW = 680.0f;
     const float panelH = 480.0f;
     const float btnH = 56.0f;
-    const float colW = (panelW - 8.0f*2 - 12.0f) * 0.5f; // 两列（含间距）
+    const float rowW = panelW - 32.0f;               // VBox 左右 padding 共 32
+    const float colW = (rowW - 8.0f*2 - 12.0f) * 0.5f; // 行左右 padding=8，列间距=12
 
     auto* panel = new UI::UIPanel("PausePanel");
     panel->setColor(0.08f, 0.08f, 0.10f, 0.92f);
@@ -236,15 +189,16 @@ void PauseScene::createUI()
     title->setSize(panelW - 32.0f, 44.0f);
     vbox->addChild(title);
 
-    // 第一行：继续 + 设置
+    // 第一行：继续
     auto* rowTop = new UI::UIHStack("RowTop");
-    rowTop->setSize(panelW - 32.0f, btnH);
+    rowTop->setSize(rowW, btnH);
     rowTop->setSpacing(12.0f);
+    rowTop->setPadding(0.0f, 0.0f); // 顶部占满行，无左右内边距，避免右侧溢出
     vbox->addChild(rowTop);
 
     m_btnContinue = new UI::UIButton();
     m_btnContinue->setText("继续游戏 (ESC)");
-    m_btnContinue->setSize(panelW - 32.0f, btnH);
+    m_btnContinue->setSize(rowW, btnH);
     m_btnContinue->setNormalColor(0.2f, 0.6f, 0.2f, 0.95f);
     m_btnContinue->setHoverColor(0.3f, 0.8f, 0.3f, 1.0f);
     m_btnContinue->setPressedColor(0.1f, 0.4f, 0.1f, 1.0f);
@@ -263,8 +217,9 @@ void PauseScene::createUI()
     // 两行两列的调试网格
     auto makeRow = [&](UI::UIButton*& a, const char* ta, UI::UIButton*& b, const char* tb){
         auto* row = new UI::UIHStack("Row");
-        row->setSize(panelW - 32.0f, btnH);
+        row->setSize(rowW, btnH);
         row->setSpacing(12.0f);
+        row->setPadding(8.0f, 8.0f); // 与 colW 计算一致的左右内边距
         vbox->addChild(row);
         a = new UI::UIButton(); a->setText(ta); a->setSize(colW, btnH); row->addChild(a);
         b = new UI::UIButton(); b->setText(tb); b->setSize(colW, btnH); row->addChild(b);
@@ -282,13 +237,14 @@ void PauseScene::createUI()
 
     // 退出按钮独占一行
     auto* rowBottom = new UI::UIHStack("RowBottom");
-    rowBottom->setSize(panelW - 32.0f, btnH);
+    rowBottom->setSize(rowW, btnH);
     rowBottom->setSpacing(12.0f);
+    rowBottom->setPadding(0.0f, 0.0f); // 占满行，无左右内边距
     vbox->addChild(rowBottom);
 
     m_btnQuit = new UI::UIButton();
     m_btnQuit->setText("退出游戏");
-    m_btnQuit->setSize(panelW - 32.0f, btnH);
+    m_btnQuit->setSize(rowW, btnH);
     m_btnQuit->setNormalColor(0.6f, 0.2f, 0.2f, 0.95f);
     m_btnQuit->setHoverColor(0.8f, 0.3f, 0.3f, 1.0f);
     m_btnQuit->setPressedColor(0.4f, 0.1f, 0.1f, 1.0f);
