@@ -12,6 +12,7 @@
 #include "../ui/UINode.hpp"
 #include "../ui/UIComponents.hpp"
 #include "../ui/TextRenderer.hpp"
+#include "../ui/UIEventSystem.hpp"
 #include "../particles/ParticleSystem.hpp"
 #include "../renderer/ShaderManager.hpp"
 
@@ -56,10 +57,7 @@ private:
     void selectPreviousButton();
     void selectNextButton();
     void activateSelectedButton();
-    
-    // 鼠标交互
-    void updateButtonHover(float mx, float my);
-    void handleButtonClick(float mx, float my);
+    // 鼠标交互改为 UIEventSystem 统一处理（不再手写命中与 emit）
 
 private:
     // 渲染资源
@@ -75,6 +73,7 @@ private:
     UI::UIButton* m_btnStart = nullptr;
     UI::UIButton* m_btnSettings = nullptr;
     UI::UIButton* m_btnQuit = nullptr;
+    UI::UIEventSystem m_events;  // 统一处理 hover/click
     
     // Signal 连接
     Core::Signal<>::Connection m_startConnection;
@@ -89,6 +88,7 @@ private:
     // 键盘导航
     int m_selectedButtonIndex = 0;
     Container::Vector<UI::UIButton*> m_buttons;
+    bool m_startRequested = false; // 延迟切换到 GameScene，避免在事件处理中销毁自身
     
     // 视口尺寸
     int m_pixelWidth = 1280;

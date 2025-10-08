@@ -61,6 +61,7 @@ void MenuScene::onEnter() {
     
     // 创建 UI
     createUI();
+    m_events.setRoot(m_rootNode.get());
     
     // 设置 UI 视图（view 3）
     bgfx::setViewRect(3, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
@@ -97,6 +98,13 @@ void MenuScene::onExit() {
 }
 
 void MenuScene::update(float dt) {
+    // 若已请求进入游戏场景，在更新阶段执行切换（避开事件处理栈），防止销毁自身时 UIEventSystem 仍在遍历
+    if (m_startRequested) {
+        m_startRequested = false;
+        app()->scenes().replace(Memory::MakeUnique<GameScene>());
+        return;
+    }
+
     // 标题淡入动画
     if (m_titleAlpha < 1.0f) {
         m_titleAlpha += dt * 2.0f;  // 0.5秒淡入
@@ -208,20 +216,24 @@ void MenuScene::handleEvent(const os::Event& event) {
         }
     }
     
-    // 鼠标移动
-    if (event.type == E::Type::MOUSE_MOVE) {
+    // 鼠标移动/点击：统一交给 UIEventSystem
+    if (event.type == E::Type::MOUSE_MOVE || event.type == E::Type::MOUSE_BUTTON) {
         float mx = 0.0f, my = 0.0f;
         SDL_GetMouseState(&mx, &my);
-        updateButtonHover(mx, my);
-    }
-    
-    // 鼠标点击
-    if (event.type == E::Type::MOUSE_BUTTON && event.mouse_button.down) {
-        if (event.mouse_button.button == os::MouseButton::LEFT) {
-            float mx = 0.0f, my = 0.0f;
-            SDL_GetMouseState(&mx, &my);
-            handleButtonClick(mx, my);
+        bool leftDown = false;
+        if (event.type == E::Type::MOUSE_BUTTON) {
+            leftDown = (event.mouse_button.button == os::MouseButton::LEFT) && event.mouse_button.down;
+        } else {
+            // 保持 hover 精确，读取当前是否按住左键
+            uint32_t mask = (uint32_t)SDL_GetMouseState(nullptr, nullptr);
+#ifdef SDL_BUTTON_MASK
+            leftDown = (mask & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) != 0;
+#else
+            leftDown = (mask & SDL_BUTTON_LMASK) != 0;
+#endif
         }
+        m_events.updateMouse(mx, my, leftDown);
+        m_events.processEvents();
     }
     
     // 窗口调整大小
@@ -237,9 +249,10 @@ void MenuScene::handleEvent(const os::Event& event) {
                      -1.0f, 1.0f, 0.0f, caps ? caps->homogeneousDepth : false);
         bgfx::setViewTransform(3, nullptr, ortho);
         
-        // 重新布局 UI
+        // 重新布局 UI（尽量避免重建；这里简单重建并重置事件根）
         createUI();
-    }
+        m_events.setRoot(m_rootNode.get());
+}
 }
 
 void MenuScene::createUI() {
@@ -368,9 +381,8 @@ void MenuScene::renderParticleBackground() {
 
 void MenuScene::onStartClicked() {
     TINA_INFO("MenuScene: 开始游戏按钮被点击");
-    
-    // 切换到游戏场景
-    app()->scenes().replace(Memory::MakeUnique<GameScene>());
+    // 切换到游戏场景（延迟到 update 阶段执行，避免在事件处理中销毁自身）
+    m_startRequested = true;
 }
 
 void MenuScene::onSettingsClicked() {
@@ -422,34 +434,6 @@ void MenuScene::activateSelectedButton() {
     }
 }
 
-void MenuScene::updateButtonHover(float mx, float my) {
-    // 更新所有按钮的悬停状态
-    for (auto* btn : m_buttons) {
-        if (!btn) continue;
-        
-        bool hovered = btn->containsPoint(mx, my);
-        if (hovered && !btn->isHovered()) {
-            btn->setHovered(true);
-            btn->onMouseEnter();
-        } else if (!hovered && btn->isHovered()) {
-            btn->setHovered(false);
-            btn->onMouseLeave();
-        }
-    }
-}
-
-void MenuScene::handleButtonClick(float mx, float my) {
-    // 检测按钮点击
-    if (m_btnStart && m_btnStart->containsPoint(mx, my)) {
-        TINA_INFO("MenuScene: 点击了开始游戏按钮");
-        m_btnStart->onClick.emit();
-    } else if (m_btnSettings && m_btnSettings->containsPoint(mx, my)) {
-        TINA_INFO("MenuScene: 点击了设置按钮");
-        m_btnSettings->onClick.emit();
-    } else if (m_btnQuit && m_btnQuit->containsPoint(mx, my)) {
-        TINA_INFO("MenuScene: 点击了退出按钮");
-        m_btnQuit->onClick.emit();
-    }
-}
+// 手工 hover/click 逻辑已由 UIEventSystem 接管
 
 } // namespace Tina::Game
