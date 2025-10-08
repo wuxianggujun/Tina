@@ -15,6 +15,7 @@
 #include "../game/TerrainEditor.hpp"
 #include "../engine/Resource.hpp"
 #include "../engine/Texture.hpp"
+#include "../engine/AudioResource.hpp"
 
 namespace Tina::Game {
 
@@ -116,6 +117,10 @@ private:
     Tina::Engine::ResourceRef<Tina::Engine::Texture2DResource> m_iconWater;
     Tina::Engine::ResourceRef<Tina::Engine::Texture2DResource> m_iconClean;
     Tina::Engine::ResourceRef<Tina::Engine::Texture2DResource> m_iconBomb;
+
+    // 音效资源：游戏界面专用（非菜单/暂停）
+    Tina::Engine::ResourceRef<Tina::Engine::AudioResource> m_sfxYingxiao;
+    bool m_sfxStarted = false;
 };
 
 } // namespace Tina::Game

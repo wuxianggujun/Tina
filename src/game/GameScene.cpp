@@ -34,11 +34,29 @@ void GameScene::onEnter()
 
     initializeResources();
     createGameWorld();
+
+    // 加载并准备音效（仅在游戏界面播放）
+    if (auto* hub = &app()->resources()) {
+        auto* sfx = hub->load<Tina::Engine::AudioResource>(Tina::Engine::Path("resources/audio/yingxiao.mp3"));
+        if (sfx) {
+            m_sfxYingxiao = Tina::Engine::ResourceRef<Tina::Engine::AudioResource>(hub, sfx);
+            m_sfxStarted = false; // 等待资源READY后在update里触发播放
+        } else {
+            TINA_WARN("GameScene: 加载音效失败 resources/audio/yingxiao.mp3");
+        }
+    }
 }
 
 void GameScene::onExit()
 {
     TINA_INFO("GameScene::onExit - 退出游戏场景");
+
+    // 停止并释放游戏界面音效
+    if (m_sfxYingxiao) {
+        m_sfxYingxiao->stop();
+        m_sfxYingxiao.reset();
+        m_sfxStarted = false;
+    }
 
     // Signal 连接会自动断开（Connection 析构函数）
     // 但显式重置更清晰
@@ -67,6 +85,9 @@ void GameScene::onPause()
 {
     TINA_INFO("GameScene::onPause - 游戏暂停");
     // 游戏暂停时，update() 不会被调用，但渲染资源保持有效
+    if (m_sfxYingxiao && m_sfxStarted) {
+        m_sfxYingxiao->pause();
+    }
 }
 
 void GameScene::onResume()
@@ -75,6 +96,10 @@ void GameScene::onResume()
 
     // 重新设置 UI 视图（view 3）
     setupUIView();
+
+    if (m_sfxYingxiao && m_sfxStarted) {
+        m_sfxYingxiao->resume();
+    }
 }
 
 void GameScene::update(float dt)
@@ -82,6 +107,19 @@ void GameScene::update(float dt)
     updateGameLogic(dt);
     updateCamera(dt);
     ensureToolbarIconsReady();
+
+    // 若音效已加载完成且尚未开始，则立即播放一次
+    if (!m_sfxStarted && m_sfxYingxiao) {
+        auto state = m_sfxYingxiao->getState();
+        if (state == Tina::Engine::Resource::State::READY) {
+            // 非循环播放，音量可按需调整
+            m_sfxYingxiao->setVolume(1.0f);
+            if (m_sfxYingxiao->play(false)) {
+                m_sfxStarted = true;
+                TINA_INFO("GameScene: 已播放音效 yingxiao.mp3");
+            }
+        }
+    }
 }
 
 void GameScene::render()

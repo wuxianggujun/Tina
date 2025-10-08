@@ -151,7 +151,13 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMENT "Copying executable to bin directory"
 )
 
-# 拷贝资源到 bin/resources
+# 先同步源码 resources（排除 resources/shaders）到构建目录的 resources
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -DSRC="${CMAKE_SOURCE_DIR}/resources" -DDST="${CMAKE_BINARY_DIR}/resources" -P "${CMAKE_SOURCE_DIR}/cmake/CopyResources.cmake"
+    COMMENT "Syncing resources (exclude resources/shaders) into build directory"
+)
+
+# 再将构建目录的 resources 整体复制到运行目录（保留构建生成的 resources/shaders 编译产物）
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${BIN_DIR}/resources"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/resources" "${BIN_DIR}/resources"
