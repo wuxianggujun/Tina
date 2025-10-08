@@ -106,7 +106,6 @@ private:
     Core::Signal<float, float>::Connection m_playerMovedConnection;
     Core::Signal<float>::Connection m_setDayNightConnection;
     Core::Signal<float>::Connection m_adjustDayNightConnection;
-    Core::Signal<bool>::Connection  m_pauseDayNightConnection;
 
     // 游戏状态
     entt::entity m_playerEntity = entt::null;
@@ -130,9 +129,8 @@ private:
     Tina::Engine::ResourceRef<Tina::Engine::AudioResource> m_bgm;
     bool m_bgmStarted = false;
 
-    // 昼夜系统
+    // 昼夜系统（始终推进，不支持暂停）
     DayNight m_dayNight;
-    bool m_dayNightPaused = false;
 };
 
 } // namespace Tina::Game

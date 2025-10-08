@@ -6,7 +6,6 @@
 #include "../engine/Application.hpp"
 #include "../engine/SceneManager.hpp"
 #include "../engine/EventBus.hpp"
-#include "SettingsScene.hpp"
 #include "../ui/UILayout.hpp"
 #include "../core/Log.hpp"
 #include "../ui/UIComponents.hpp"
@@ -63,11 +62,8 @@ void PauseScene::onExit()
     // 断开 Signal 连接
     m_continueConnection.disconnect();
     m_quitConnection.disconnect();
-    m_settingsConnection.disconnect();
     m_cDay.disconnect();
     m_cNight.disconnect();
-    m_cPauseDN.disconnect();
-    m_cResumeDN.disconnect();
     m_cFwd.disconnect();
     m_cBack.disconnect();
 
@@ -248,21 +244,14 @@ void PauseScene::createUI()
 
     m_btnContinue = new UI::UIButton();
     m_btnContinue->setText("继续游戏 (ESC)");
-    m_btnContinue->setSize(colW, btnH);
+    m_btnContinue->setSize(panelW - 32.0f, btnH);
     m_btnContinue->setNormalColor(0.2f, 0.6f, 0.2f, 0.95f);
     m_btnContinue->setHoverColor(0.3f, 0.8f, 0.3f, 1.0f);
     m_btnContinue->setPressedColor(0.1f, 0.4f, 0.1f, 1.0f);
     m_continueConnection = m_btnContinue->onClick.connect([this]() { onContinueClicked(); });
     rowTop->addChild(m_btnContinue);
 
-    m_btnSettings = new UI::UIButton();
-    m_btnSettings->setText("设置");
-    m_btnSettings->setSize(colW, btnH);
-    m_btnSettings->setNormalColor(0.2f, 0.4f, 0.7f, 0.95f);
-    m_btnSettings->setHoverColor(0.3f, 0.6f, 0.9f, 1.0f);
-    m_btnSettings->setPressedColor(0.1f, 0.3f, 0.6f, 1.0f);
-    m_settingsConnection = m_btnSettings->onClick.connect([this]() { onSettingsClicked(); });
-    rowTop->addChild(m_btnSettings);
+    // 设置按钮已移除，保留单行继续按钮
 
     // 分组标题：调试 / 昼夜
     auto* dbg = new UI::UILabel();
@@ -271,7 +260,7 @@ void PauseScene::createUI()
     dbg->setSize(panelW - 32.0f, 36.0f);
     vbox->addChild(dbg);
 
-    // 三行两列的调试网格
+    // 两行两列的调试网格
     auto makeRow = [&](UI::UIButton*& a, const char* ta, UI::UIButton*& b, const char* tb){
         auto* row = new UI::UIHStack("Row");
         row->setSize(panelW - 32.0f, btnH);
@@ -283,14 +272,11 @@ void PauseScene::createUI()
     };
 
     makeRow(m_btnDay,    "切换到白天",   m_btnNight,   "切换到黑夜");
-    makeRow(m_btnPauseDN,"暂停昼夜",     m_btnResumeDN, "恢复昼夜");
     makeRow(m_btnFwd,    "时间 +10%",    m_btnBack,    "时间 -10%");
 
     // 绑定点击
     m_cDay      = m_btnDay->onClick.connect([this]{ onSetDay(); });
     m_cNight    = m_btnNight->onClick.connect([this]{ onSetNight(); });
-    m_cPauseDN  = m_btnPauseDN->onClick.connect([this]{ onPauseDayNight(); });
-    m_cResumeDN = m_btnResumeDN->onClick.connect([this]{ onResumeDayNight(); });
     m_cFwd      = m_btnFwd->onClick.connect([this]{ onFwdTime(); });
     m_cBack     = m_btnBack->onClick.connect([this]{ onBackTime(); });
 
@@ -387,16 +373,9 @@ void PauseScene::onQuitClicked()
     a->post([a]{ a->quit(); });
 }
 
-void PauseScene::onSettingsClicked()
-{
-    TINA_INFO("PauseScene: 设置按钮被点击");
-    app()->scenes().requestPush(Memory::MakeUnique<Tina::Game::SettingsScene>());
-}
-
 void PauseScene::onSetDay()      { app()->events().onSetDayNightNormalized.emit(0.25f); }
 void PauseScene::onSetNight()    { app()->events().onSetDayNightNormalized.emit(0.75f); }
-void PauseScene::onPauseDayNight(){ app()->events().onSetDayNightPaused.emit(true); }
-void PauseScene::onResumeDayNight(){ app()->events().onSetDayNightPaused.emit(false); }
+// 已移除“暂停/恢复昼夜”功能
 void PauseScene::onFwdTime()     { app()->events().onAdjustDayNightNormalized.emit(+0.10f); }
 void PauseScene::onBackTime()    { app()->events().onAdjustDayNightNormalized.emit(-0.10f); }
 

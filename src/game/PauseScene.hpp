@@ -46,12 +46,9 @@ private:
     // 按钮回调
     void onContinueClicked();
     void onQuitClicked();
-    void onSettingsClicked();
     // 调试：昼夜控制
     void onSetDay();
     void onSetNight();
-    void onPauseDayNight();
-    void onResumeDayNight();
     void onFwdTime();
     void onBackTime();
 
@@ -66,12 +63,9 @@ private:
     Memory::UniquePtr<UI::UINode> m_rootNode;
     UI::UIButton* m_btnContinue = nullptr;  // 继续游戏按钮
     UI::UIButton* m_btnQuit = nullptr;      // 退出按钮
-    UI::UIButton* m_btnSettings = nullptr;  // 设置按钮（进入设置页面）
     // 调试按钮
     UI::UIButton* m_btnDay = nullptr;
     UI::UIButton* m_btnNight = nullptr;
-    UI::UIButton* m_btnPauseDN = nullptr;
-    UI::UIButton* m_btnResumeDN = nullptr;
     UI::UIButton* m_btnFwd = nullptr;
     UI::UIButton* m_btnBack = nullptr;
     UI::UIEventSystem m_events;             // 统一 Hover/Click 处理
@@ -79,13 +73,11 @@ private:
     // Signal 连接（必须保存，否则订阅失效）
     Core::Signal<>::Connection m_continueConnection;
     Core::Signal<>::Connection m_quitConnection;
-    Core::Signal<>::Connection m_settingsConnection; // 设置按钮连接
     Core::Signal<>::Connection m_cDay;
     Core::Signal<>::Connection m_cNight;
-    Core::Signal<>::Connection m_cPauseDN;
-    Core::Signal<>::Connection m_cResumeDN;
     Core::Signal<>::Connection m_cFwd;
     Core::Signal<>::Connection m_cBack;
+
     
     // 需要访问 UIRenderer 的顶点布局
     bgfx::VertexLayout m_colorLayout;

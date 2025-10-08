@@ -85,7 +85,6 @@ void GameScene::onExit()
     m_playerMovedConnection.disconnect();
     m_setDayNightConnection.disconnect();
     m_adjustDayNightConnection.disconnect();
-    m_pauseDayNightConnection.disconnect();
 
     // 清理资源（按创建逆序）
     m_characterPanel.reset();
@@ -135,10 +134,8 @@ void GameScene::update(float dt)
     updateCamera(dt);
     ensureToolbarIconsReady();
 
-    // 昼夜推进（可暂停）
-    if (!m_dayNightPaused) {
-        m_dayNight.update(dt);
-    }
+    // 昼夜推进
+    m_dayNight.update(dt);
 
     // 若音效已加载完成且尚未开始，则立即播放一次
     if (!m_sfxStarted && m_sfxYingxiao) {
@@ -928,9 +925,7 @@ void GameScene::subscribeToEvents()
     m_adjustDayNightConnection = app()->events().onAdjustDayNightNormalized.connect([this](float dn){
         m_dayNight.setNormalizedTime(m_dayNight.normalizedTime() + dn);
     });
-    m_pauseDayNightConnection = app()->events().onSetDayNightPaused.connect([this](bool p){
-        m_dayNightPaused = p;
-    });
+    // 已移除暂停/恢复昼夜功能
 
     TINA_INFO("GameScene: EventBus 订阅完成");
 }
