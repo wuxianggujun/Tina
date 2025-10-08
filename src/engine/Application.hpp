@@ -21,6 +21,8 @@ struct FileSystem;
 class ResourceManagerHub;
 class TextureManager;
 class FontManager;
+class AudioManager;
+
 
 // 应用程序主类
 class Application {
@@ -73,6 +75,9 @@ public:
 
     // 获取全局着色器管理器（全局唯一，贯穿应用生命周期）
     Tina::Renderer::ShaderManager& shaders() const { return *m_shaderMgr; }
+
+    // 获取音频管理器（用于加载和播放音频）
+    AudioManager& audio() const { return *m_audioMgr; }
 
     // ==================== 帧率和时间信息 ====================
 
@@ -130,6 +135,7 @@ private:
     Memory::UniquePtr<Tina::Renderer::ShaderManager> m_shaderMgr; // 全局着色器管理器
     Memory::UniquePtr<TextureManager> m_textureMgr;        // 纹理资源管理器
     Memory::UniquePtr<FontManager> m_fontMgr;              // 字体资源管理器
+    Memory::UniquePtr<AudioManager> m_audioMgr;            // 音频资源管理器
 
     // 任务队列（主线程执行）
     std::mutex m_taskMutex;

@@ -7,6 +7,9 @@ set(SRC_FILES
     engine/Application.cpp
     engine/Font.hpp
     engine/Font.cpp
+    engine/AudioResource.hpp
+    engine/AudioResource.cpp
+    engine/AudioManager.hpp
     engine/Texture.hpp
     engine/Texture.cpp
     engine/Scene.hpp

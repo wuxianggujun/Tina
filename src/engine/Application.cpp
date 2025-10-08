@@ -4,6 +4,7 @@
 #include "Resource.hpp"
 #include "Texture.hpp"
 #include "Font.hpp"
+#include "AudioManager.hpp"
 #include "../core/Log.hpp"
 #include "../os/OS.hpp"
 
@@ -105,6 +106,9 @@ void Application::init()
         // 字体管理器
         m_fontMgr = Memory::MakeUnique<FontManager>(*m_fileSystem);
         m_resourceHub->add(FontResource::TYPE, m_fontMgr.get());
+        // 音频管理器
+        m_audioMgr = Memory::MakeUnique<AudioManager>(*m_fileSystem);
+        m_resourceHub->add(AudioResource::TYPE, m_audioMgr.get());
         // 也可在此注册其他管理器（例如音频等）
     }
 
