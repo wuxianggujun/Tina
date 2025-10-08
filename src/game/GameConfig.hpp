@@ -60,5 +60,10 @@ namespace Tina::GameConfig {
     constexpr float UI_HUD_PADDING_Y = 12.0f;
     constexpr float UI_HUD_WIDTH_MARGIN = 32.0f;
     constexpr float UI_HUD_HEIGHT = 28.0f;
-}
 
+    // === 音频（BGM/SFX） ===
+    constexpr const char* BGM_PATH = "resources/audio/bgm.mp3"; // 若不存在，将记录警告
+    constexpr int BGM_FADEIN_MS = 1200;
+    constexpr int BGM_FADEOUT_MS = 400;
+    constexpr float BGM_VOLUME = 0.8f; // 0.0 ~ 1.0
+}

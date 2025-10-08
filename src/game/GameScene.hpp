@@ -121,6 +121,10 @@ private:
     // 音效资源：游戏界面专用（非菜单/暂停）
     Tina::Engine::ResourceRef<Tina::Engine::AudioResource> m_sfxYingxiao;
     bool m_sfxStarted = false;
+
+    // 背景音乐（BGM）：游戏界面循环播放
+    Tina::Engine::ResourceRef<Tina::Engine::AudioResource> m_bgm;
+    bool m_bgmStarted = false;
 };
 
 } // namespace Tina::Game

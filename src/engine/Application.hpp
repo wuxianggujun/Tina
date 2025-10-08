@@ -86,6 +86,12 @@ public:
     void setAudioMasterVolume(float v);
     float getAudioMasterVolume() const { return m_audioMasterVolume; }
 
+    // 分组音量（music / sfx），范围 0.0 ~ 1.0
+    void setMusicVolume(float v);
+    float getMusicVolume() const { return m_audioMusicVolume; }
+    void setSfxVolume(float v);
+    float getSfxVolume() const { return m_audioSfxVolume; }
+
     // ==================== 帧率和时间信息 ====================
 
     // 获取上一帧的时间间隔（秒）
@@ -149,6 +155,8 @@ private:
 
     // 全局音量
     float m_audioMasterVolume = 1.0f;
+    float m_audioMusicVolume = 1.0f;
+    float m_audioSfxVolume = 1.0f;
 
     // 任务队列（主线程执行）
     std::mutex m_taskMutex;

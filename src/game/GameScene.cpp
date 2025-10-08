@@ -40,9 +40,20 @@ void GameScene::onEnter()
         auto* sfx = hub->load<Tina::Engine::AudioResource>(Tina::Engine::Path("resources/audio/yingxiao.mp3"));
         if (sfx) {
             m_sfxYingxiao = Tina::Engine::ResourceRef<Tina::Engine::AudioResource>(hub, sfx);
+            m_sfxYingxiao->setTag("sfx"); // 标记为音效分组
             m_sfxStarted = false; // 等待资源READY后在update里触发播放
         } else {
             TINA_WARN("GameScene: 加载音效失败 resources/audio/yingxiao.mp3");
+        }
+
+        // 加载并准备 BGM（循环播放，仅游戏界面），路径配置见 GameConfig
+        auto* bgmRes = hub->load<Tina::Engine::AudioResource>(Tina::Engine::Path(Tina::GameConfig::BGM_PATH));
+        if (bgmRes) {
+            m_bgm = Tina::Engine::ResourceRef<Tina::Engine::AudioResource>(hub, bgmRes);
+            m_bgm->setTag("music");
+            m_bgmStarted = false;
+        } else {
+            TINA_WARN("GameScene: 加载 BGM 失败 {}", Tina::GameConfig::BGM_PATH);
         }
     }
 }
@@ -56,6 +67,13 @@ void GameScene::onExit()
         m_sfxYingxiao->stop();
         m_sfxYingxiao.reset();
         m_sfxStarted = false;
+    }
+
+    // 停止并释放 BGM（淡出）
+    if (m_bgm) {
+        m_bgm->stop(Tina::GameConfig::BGM_FADEOUT_MS);
+        m_bgm.reset();
+        m_bgmStarted = false;
     }
 
     // Signal 连接会自动断开（Connection 析构函数）
@@ -88,6 +106,9 @@ void GameScene::onPause()
     if (m_sfxYingxiao && m_sfxStarted) {
         m_sfxYingxiao->pause();
     }
+    if (m_bgm && m_bgmStarted) {
+        m_bgm->pause();
+    }
 }
 
 void GameScene::onResume()
@@ -99,6 +120,9 @@ void GameScene::onResume()
 
     if (m_sfxYingxiao && m_sfxStarted) {
         m_sfxYingxiao->resume();
+    }
+    if (m_bgm && m_bgmStarted) {
+        m_bgm->resume();
     }
 }
 
@@ -112,11 +136,23 @@ void GameScene::update(float dt)
     if (!m_sfxStarted && m_sfxYingxiao) {
         auto state = m_sfxYingxiao->getState();
         if (state == Tina::Engine::Resource::State::READY) {
-            // 非循环播放，音量可按需调整
+            // 非循环播放，音量可按需调整，带轻微淡入
             m_sfxYingxiao->setVolume(1.0f);
-            if (m_sfxYingxiao->play(false)) {
+            if (m_sfxYingxiao->play(false, 150)) {
                 m_sfxStarted = true;
                 TINA_INFO("GameScene: 已播放音效 yingxiao.mp3");
+            }
+        }
+    }
+
+    // 若 BGM 已加载完成且尚未开始，则循环并淡入播放
+    if (!m_bgmStarted && m_bgm) {
+        auto state = m_bgm->getState();
+        if (state == Tina::Engine::Resource::State::READY) {
+            m_bgm->setVolume(Tina::GameConfig::BGM_VOLUME);
+            if (m_bgm->play(true, Tina::GameConfig::BGM_FADEIN_MS)) {
+                m_bgmStarted = true;
+                TINA_INFO("GameScene: BGM 播放中 ({})", Tina::GameConfig::BGM_PATH);
             }
         }
     }

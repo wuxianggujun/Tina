@@ -66,6 +66,10 @@ public:
     // 便捷：一次性播放（内部使用 MIX_PlayAudio；不支持单独设置音量/淡入）
     bool playOneShot();
 
+    // 可选：设置播放标签（用于分组音量控制），如 "music" 或 "sfx"
+    void setTag(const char* tag) { m_tag = tag ? tag : ""; }
+    const char* getTag() const { return m_tag.c_str(); }
+
     /**
      * 暂停播放（可恢复）
      */
@@ -79,7 +83,7 @@ public:
     /**
      * 停止播放（重置播放位置）
      */
-    void stop();
+    void stop(int fadeOutMs = 0);
 
     /**
      * 查询是否正在播放
@@ -138,6 +142,9 @@ private:
     
     // 音量控制（0.0 ~ 1.0）
     float m_volume = 1.0f;
+
+    // 分组标签（用于 MIX_TagTrack），空表示不打标签
+    Tina::Container::String m_tag;
 };
 
 } // namespace Tina::Engine

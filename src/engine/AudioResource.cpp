@@ -100,6 +100,11 @@ bool AudioResource::play(bool loop, int fadeInMs) {
         }
     }
 
+    // 若设置了分组标签，则为轨道打上标签（用于分组音量控制）
+    if (!m_tag.empty()) {
+        MIX_TagTrack(m_track, m_tag.c_str());
+    }
+
     if (!MIX_SetTrackAudio(m_track, m_audio)) {
         TINA_ERROR("AudioResource::play - 绑定音频到轨道失败：{}", SDL_GetError());
         return false;
@@ -170,13 +175,21 @@ void AudioResource::resume() {
     TINA_INFO("AudioResource::resume - 恢复播放 [{}]", getPath().c_str());
 }
 
-void AudioResource::stop() {
+void AudioResource::stop(int fadeOutMs) {
     if (!m_isPlaying) {
         return;
     }
-    
     if (m_track) {
-        MIX_StopTrack(m_track, 0);
+        if (fadeOutMs > 0) {
+            SDL_AudioSpec spec{};
+            Sint64 frames = 0;
+            if (m_audio && MIX_GetAudioFormat(m_audio, &spec)) {
+                frames = MIX_MSToFrames(spec.freq, (Sint64)fadeOutMs);
+            }
+            MIX_StopTrack(m_track, frames > 0 ? frames : 0);
+        } else {
+            MIX_StopTrack(m_track, 0);
+        }
     }
     m_isPlaying = false;
     

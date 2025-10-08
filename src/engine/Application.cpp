@@ -112,6 +112,9 @@ void Application::init()
         AudioResource::SetGlobalMixer(m_mixer);
         // 应用全局音量
         MIX_SetMasterGain(m_mixer, std::max(0.0f, std::min(m_audioMasterVolume, 1.0f)));
+        // 应用分组音量（music / sfx）
+        MIX_SetTagGain(m_mixer, "music", std::max(0.0f, std::min(m_audioMusicVolume, 1.0f)));
+        MIX_SetTagGain(m_mixer, "sfx",   std::max(0.0f, std::min(m_audioSfxVolume, 1.0f)));
     }
 
     // 5. 设置视图（view 0 = 默认视图，用于清屏）
@@ -286,6 +289,22 @@ void Application::setAudioMasterVolume(float v)
     m_audioMasterVolume = std::max(0.0f, std::min(v, 1.0f));
     if (m_mixer) {
         MIX_SetMasterGain(m_mixer, m_audioMasterVolume);
+    }
+}
+
+void Application::setMusicVolume(float v)
+{
+    m_audioMusicVolume = std::max(0.0f, std::min(v, 1.0f));
+    if (m_mixer) {
+        MIX_SetTagGain(m_mixer, "music", m_audioMusicVolume);
+    }
+}
+
+void Application::setSfxVolume(float v)
+{
+    m_audioSfxVolume = std::max(0.0f, std::min(v, 1.0f));
+    if (m_mixer) {
+        MIX_SetTagGain(m_mixer, "sfx", m_audioSfxVolume);
     }
 }
 
