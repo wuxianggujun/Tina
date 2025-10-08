@@ -9,6 +9,8 @@
 #include "../core/Memory.hpp"
 #include "../os/OS.hpp"
 #include "../renderer/ShaderManager.hpp"
+#include <functional>
+#include <mutex>
 
 namespace Tina::Engine {
 
@@ -102,6 +104,13 @@ private:
     void render();                  // 渲染场景
     void prewarmCommonAssets();     // 预热常用资源（字体/图标），减少首帧等待
 
+public:
+    // 任务队列（线程安全）：将任务投递到主线程安全点执行
+    // 用途：
+    // - 在任意线程/回调中请求在主线程操作（如场景切换、UI修改、bgfx调用）
+    // - 与 SceneManager 的 request* 协同使用，统一在帧末或事件分发后执行
+    void post(std::function<void()> fn);
+
 private:
     Config m_config;                               // 应用程序配置
     bool m_running = false;                        // 主循环运行标志
@@ -120,6 +129,11 @@ private:
     Memory::UniquePtr<Tina::Renderer::ShaderManager> m_shaderMgr; // 全局着色器管理器
     Memory::UniquePtr<TextureManager> m_textureMgr;        // 纹理资源管理器
     Memory::UniquePtr<FontManager> m_fontMgr;              // 字体资源管理器
+
+    // 任务队列（主线程执行）
+    std::mutex m_taskMutex;
+    Tina::Container::Vector<std::function<void()>> m_tasks;
+    void flushTasks();
 };
 
 } // namespace Tina::Engine

@@ -184,6 +184,9 @@ void Application::run()
         // 4. 渲染
         render();
 
+        // 4.5 执行主线程任务队列（在本帧安全点）
+        flushTasks();
+
         // 5. 提交帧
         bgfx::frame();
     }
@@ -235,6 +238,8 @@ void Application::processEvents()
         // 3. 分发到当前场景
         m_sceneManager->handleEvent(event);
     }
+    // 事件分发完成后，立即执行一次主线程任务队列，减少响应延迟
+    flushTasks();
 }
 
 void Application::update(float dt)
@@ -251,6 +256,26 @@ void Application::update(float dt)
 void Application::render()
 {
     m_sceneManager->render();
+}
+
+void Application::post(std::function<void()> fn)
+{
+    if (!fn) return;
+    std::lock_guard<std::mutex> _g(m_taskMutex);
+    m_tasks.push_back(std::move(fn));
+}
+
+void Application::flushTasks()
+{
+    Tina::Container::Vector<std::function<void()>> local;
+    {
+        std::lock_guard<std::mutex> _g(m_taskMutex);
+        if (m_tasks.empty()) return;
+        local.swap(m_tasks);
+    }
+    for (auto& fn : local) {
+        if (fn) fn();
+    }
 }
 
 void Application::prewarmCommonAssets()
