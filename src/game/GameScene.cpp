@@ -83,6 +83,9 @@ void GameScene::onExit()
     m_mouseWheelConnection.disconnect();
     m_playerJumpedConnection.disconnect();
     m_playerMovedConnection.disconnect();
+    m_setDayNightConnection.disconnect();
+    m_adjustDayNightConnection.disconnect();
+    m_pauseDayNightConnection.disconnect();
 
     // 清理资源（按创建逆序）
     m_characterPanel.reset();
@@ -132,6 +135,11 @@ void GameScene::update(float dt)
     updateCamera(dt);
     ensureToolbarIconsReady();
 
+    // 昼夜推进（可暂停）
+    if (!m_dayNightPaused) {
+        m_dayNight.update(dt);
+    }
+
     // 若音效已加载完成且尚未开始，则立即播放一次
     if (!m_sfxStarted && m_sfxYingxiao) {
         auto state = m_sfxYingxiao->getState();
@@ -161,6 +169,14 @@ void GameScene::update(float dt)
 void GameScene::render()
 {
     renderWorld();
+    // 夜色叠加（绘制在 UI 视图，但早于 UI，确保不影响 UI 可见性）
+    if (m_uiRenderer) {
+        const float a = m_dayNight.overlayAlpha();
+        if (a > 0.001f) {
+            m_uiRenderer->drawRect(3, 0.0f, 0.0f, (float)m_pixelWidth, (float)m_pixelHeight,
+                                   0.0f, 0.0f, 0.0f, a);
+        }
+    }
     renderUI();
 }
 
@@ -904,6 +920,17 @@ void GameScene::subscribeToEvents()
             (void)x; (void)y;  // 避免未使用参数警告
         }
     );
+
+    // === 昼夜系统调试信号 ===
+    m_setDayNightConnection = app()->events().onSetDayNightNormalized.connect([this](float n){
+        m_dayNight.setNormalizedTime(n);
+    });
+    m_adjustDayNightConnection = app()->events().onAdjustDayNightNormalized.connect([this](float dn){
+        m_dayNight.setNormalizedTime(m_dayNight.normalizedTime() + dn);
+    });
+    m_pauseDayNightConnection = app()->events().onSetDayNightPaused.connect([this](bool p){
+        m_dayNightPaused = p;
+    });
 
     TINA_INFO("GameScene: EventBus 订阅完成");
 }

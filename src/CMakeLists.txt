@@ -23,6 +23,9 @@ set(SRC_FILES
     game/MenuScene.cpp
     game/PauseScene.hpp
     game/PauseScene.cpp
+    game/SettingsScene.hpp
+    game/SettingsScene.cpp
+    game/DayNight.hpp
     core/Path.cpp
     core/EASTLAlloc.cpp
     core/Noise.hpp

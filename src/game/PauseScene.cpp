@@ -5,6 +5,9 @@
 #include "PauseScene.hpp"
 #include "../engine/Application.hpp"
 #include "../engine/SceneManager.hpp"
+#include "../engine/EventBus.hpp"
+#include "SettingsScene.hpp"
+#include "../ui/UILayout.hpp"
 #include "../core/Log.hpp"
 #include "../ui/UIComponents.hpp"
 
@@ -60,6 +63,13 @@ void PauseScene::onExit()
     // 断开 Signal 连接
     m_continueConnection.disconnect();
     m_quitConnection.disconnect();
+    m_settingsConnection.disconnect();
+    m_cDay.disconnect();
+    m_cNight.disconnect();
+    m_cPauseDN.disconnect();
+    m_cResumeDN.disconnect();
+    m_cFwd.disconnect();
+    m_cBack.disconnect();
 
     // 清理 UI（必须在渲染资源之前清理）
     m_rootNode.reset();
@@ -203,52 +213,101 @@ void PauseScene::createUI()
     m_rootNode->setPosition(0, 0);
     m_rootNode->setSize((float)m_pixelWidth, (float)m_pixelHeight);
 
-    // 标题文本："游戏已暂停"
+    // 顶层不再放置标题，标题移入面板内部
+
+    // 使用布局：居中一个面板，内部垂直栈+若干水平栈，避免纵向堆叠
+    const float panelW = 680.0f;
+    const float panelH = 480.0f;
+    const float btnH = 56.0f;
+    const float colW = (panelW - 8.0f*2 - 12.0f) * 0.5f; // 两列（含间距）
+
+    auto* panel = new UI::UIPanel("PausePanel");
+    panel->setColor(0.08f, 0.08f, 0.10f, 0.92f);
+    panel->setSize(panelW, panelH);
+    panel->setPosition((m_pixelWidth - panelW) * 0.5f, (m_pixelHeight - panelH) * 0.5f);
+    m_rootNode->addChild(panel);
+
+    auto* vbox = new UI::UIVStack("VBox");
+    vbox->setSize(panelW, panelH);
+    vbox->setPadding(16.0f, 16.0f);
+    vbox->setSpacing(12.0f);
+    panel->addChild(vbox);
+
+    // 标题
     auto* title = new UI::UILabel();
     title->setText("游戏已暂停");
-    title->setColor(1.0f, 1.0f, 1.0f, 1.0f);
-    // 使标题文本在其矩形内水平/垂直居中
     title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
-    title->setPosition(
-        (float)m_pixelWidth / 2 - 200,
-        (float)m_pixelHeight / 2 - 150
-    );
-    title->setSize(400, 60);
-    m_rootNode->addChild(title);
+    title->setSize(panelW - 32.0f, 44.0f);
+    vbox->addChild(title);
 
-    // 按钮样式参数
-    const float btnWidth = 300.0f;
-    const float btnHeight = 60.0f;
-    const float btnSpacing = 20.0f;
-    const float btnStartY = (float)m_pixelHeight / 2 - 30;
+    // 第一行：继续 + 设置
+    auto* rowTop = new UI::UIHStack("RowTop");
+    rowTop->setSize(panelW - 32.0f, btnH);
+    rowTop->setSpacing(12.0f);
+    vbox->addChild(rowTop);
 
-    // 继续游戏按钮
     m_btnContinue = new UI::UIButton();
     m_btnContinue->setText("继续游戏 (ESC)");
-    m_btnContinue->setPosition(
-        (float)m_pixelWidth / 2 - btnWidth / 2,
-        btnStartY
-    );
-    m_btnContinue->setSize(btnWidth, btnHeight);
-    m_btnContinue->setNormalColor(0.2f, 0.6f, 0.2f, 0.9f);   // 绿色
+    m_btnContinue->setSize(colW, btnH);
+    m_btnContinue->setNormalColor(0.2f, 0.6f, 0.2f, 0.95f);
     m_btnContinue->setHoverColor(0.3f, 0.8f, 0.3f, 1.0f);
     m_btnContinue->setPressedColor(0.1f, 0.4f, 0.1f, 1.0f);
     m_continueConnection = m_btnContinue->onClick.connect([this]() { onContinueClicked(); });
-    m_rootNode->addChild(m_btnContinue);
+    rowTop->addChild(m_btnContinue);
 
-    // 退出按钮
+    m_btnSettings = new UI::UIButton();
+    m_btnSettings->setText("设置");
+    m_btnSettings->setSize(colW, btnH);
+    m_btnSettings->setNormalColor(0.2f, 0.4f, 0.7f, 0.95f);
+    m_btnSettings->setHoverColor(0.3f, 0.6f, 0.9f, 1.0f);
+    m_btnSettings->setPressedColor(0.1f, 0.3f, 0.6f, 1.0f);
+    m_settingsConnection = m_btnSettings->onClick.connect([this]() { onSettingsClicked(); });
+    rowTop->addChild(m_btnSettings);
+
+    // 分组标题：调试 / 昼夜
+    auto* dbg = new UI::UILabel();
+    dbg->setText("调试 / 昼夜");
+    dbg->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
+    dbg->setSize(panelW - 32.0f, 36.0f);
+    vbox->addChild(dbg);
+
+    // 三行两列的调试网格
+    auto makeRow = [&](UI::UIButton*& a, const char* ta, UI::UIButton*& b, const char* tb){
+        auto* row = new UI::UIHStack("Row");
+        row->setSize(panelW - 32.0f, btnH);
+        row->setSpacing(12.0f);
+        vbox->addChild(row);
+        a = new UI::UIButton(); a->setText(ta); a->setSize(colW, btnH); row->addChild(a);
+        b = new UI::UIButton(); b->setText(tb); b->setSize(colW, btnH); row->addChild(b);
+        return row;
+    };
+
+    makeRow(m_btnDay,    "切换到白天",   m_btnNight,   "切换到黑夜");
+    makeRow(m_btnPauseDN,"暂停昼夜",     m_btnResumeDN, "恢复昼夜");
+    makeRow(m_btnFwd,    "时间 +10%",    m_btnBack,    "时间 -10%");
+
+    // 绑定点击
+    m_cDay      = m_btnDay->onClick.connect([this]{ onSetDay(); });
+    m_cNight    = m_btnNight->onClick.connect([this]{ onSetNight(); });
+    m_cPauseDN  = m_btnPauseDN->onClick.connect([this]{ onPauseDayNight(); });
+    m_cResumeDN = m_btnResumeDN->onClick.connect([this]{ onResumeDayNight(); });
+    m_cFwd      = m_btnFwd->onClick.connect([this]{ onFwdTime(); });
+    m_cBack     = m_btnBack->onClick.connect([this]{ onBackTime(); });
+
+    // 退出按钮独占一行
+    auto* rowBottom = new UI::UIHStack("RowBottom");
+    rowBottom->setSize(panelW - 32.0f, btnH);
+    rowBottom->setSpacing(12.0f);
+    vbox->addChild(rowBottom);
+
     m_btnQuit = new UI::UIButton();
     m_btnQuit->setText("退出游戏");
-    m_btnQuit->setPosition(
-        (float)m_pixelWidth / 2 - btnWidth / 2,
-        btnStartY + btnHeight + btnSpacing
-    );
-    m_btnQuit->setSize(btnWidth, btnHeight);
-    m_btnQuit->setNormalColor(0.6f, 0.2f, 0.2f, 0.9f);   // 红色
+    m_btnQuit->setSize(panelW - 32.0f, btnH);
+    m_btnQuit->setNormalColor(0.6f, 0.2f, 0.2f, 0.95f);
     m_btnQuit->setHoverColor(0.8f, 0.3f, 0.3f, 1.0f);
     m_btnQuit->setPressedColor(0.4f, 0.1f, 0.1f, 1.0f);
     m_quitConnection = m_btnQuit->onClick.connect([this]() { onQuitClicked(); });
-    m_rootNode->addChild(m_btnQuit);
+    rowBottom->addChild(m_btnQuit);
 
     // 更新事件系统根节点，保证重建后事件命中正确
     m_events.setRoot(m_rootNode.get());
@@ -327,6 +386,19 @@ void PauseScene::onQuitClicked()
     auto* a = app();
     a->post([a]{ a->quit(); });
 }
+
+void PauseScene::onSettingsClicked()
+{
+    TINA_INFO("PauseScene: 设置按钮被点击");
+    app()->scenes().requestPush(Memory::MakeUnique<Tina::Game::SettingsScene>());
+}
+
+void PauseScene::onSetDay()      { app()->events().onSetDayNightNormalized.emit(0.25f); }
+void PauseScene::onSetNight()    { app()->events().onSetDayNightNormalized.emit(0.75f); }
+void PauseScene::onPauseDayNight(){ app()->events().onSetDayNightPaused.emit(true); }
+void PauseScene::onResumeDayNight(){ app()->events().onSetDayNightPaused.emit(false); }
+void PauseScene::onFwdTime()     { app()->events().onAdjustDayNightNormalized.emit(+0.10f); }
+void PauseScene::onBackTime()    { app()->events().onAdjustDayNightNormalized.emit(-0.10f); }
 
 } // namespace Tina::Game
 

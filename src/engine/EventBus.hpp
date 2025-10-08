@@ -31,6 +31,11 @@ public:
     // 工具使用
     Core::Signal<int, int> onToolUsed;  // (x, y)
 
+    // 昼夜系统控制（用于设置页面等调试功能）
+    Core::Signal<float> onSetDayNightNormalized;     // 设置归一化时间 [0,1)
+    Core::Signal<float> onAdjustDayNightNormalized;  // 累加归一化时间（可正可负）
+    Core::Signal<bool>  onSetDayNightPaused;         // 暂停/恢复昼夜推进
+
     // 分发 OS 事件
     void dispatchOSEvent(const Tina::os::Event& event);
 };

@@ -13,6 +13,7 @@
 #include "../ui/UICharacterPanel.hpp"
 #include "../particles/ParticleSystem.hpp"
 #include "../game/TerrainEditor.hpp"
+#include "DayNight.hpp"
 #include "../engine/Resource.hpp"
 #include "../engine/Texture.hpp"
 #include "../engine/AudioResource.hpp"
@@ -103,6 +104,9 @@ private:
     Core::Signal<float>::Connection m_mouseWheelConnection;
     Core::Signal<>::Connection m_playerJumpedConnection;
     Core::Signal<float, float>::Connection m_playerMovedConnection;
+    Core::Signal<float>::Connection m_setDayNightConnection;
+    Core::Signal<float>::Connection m_adjustDayNightConnection;
+    Core::Signal<bool>::Connection  m_pauseDayNightConnection;
 
     // 游戏状态
     entt::entity m_playerEntity = entt::null;
@@ -125,6 +129,10 @@ private:
     // 背景音乐（BGM）：游戏界面循环播放
     Tina::Engine::ResourceRef<Tina::Engine::AudioResource> m_bgm;
     bool m_bgmStarted = false;
+
+    // 昼夜系统
+    DayNight m_dayNight;
+    bool m_dayNightPaused = false;
 };
 
 } // namespace Tina::Game
