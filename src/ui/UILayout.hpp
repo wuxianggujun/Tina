@@ -24,7 +24,8 @@ protected:
         float x = m_padX;
         const auto size = getSize();
         float usedW = 0.0f;
-        for (auto* child : getChildren()) {
+        for (size_t i = 0; i < getChildCount(); ++i) {
+            UINode* child = getChild(i);
             if (!child || !child->isVisible()) continue;
             auto cs = child->getSize();
             const float ml = child->marginLeft();
@@ -71,7 +72,8 @@ protected:
         float y = m_padY;
         const auto size = getSize();
         float maxW = 0.0f;
-        for (auto* child : getChildren()) {
+        for (size_t i = 0; i < getChildCount(); ++i) {
+            UINode* child = getChild(i);
             if (!child || !child->isVisible()) continue;
             auto cs = child->getSize();
             const float ml = child->marginLeft();
@@ -95,7 +97,7 @@ protected:
             if (cs.x > maxW) maxW = cs.x;
         }
         // 移除最后一次多加的 spacing（如果有任何子项）
-        if (!getChildren().empty()) y -= m_spacing;
+        if (getChildCount() > 0) y -= m_spacing;
         float desiredH = y + m_padY;
         if (desiredH < 0.0f) desiredH = 0.0f;
         if (layoutHeight() == LayoutDim::WrapContent && desiredH != size.y) setHeight(desiredH);

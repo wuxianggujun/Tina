@@ -84,10 +84,13 @@ UINode* UIEventSystem::findNodeUnderMouse(UINode* node, float mx, float my)
     }
 
     // 先递归检查子节点（后绘制的在上层）
-    const auto& children = node->getChildren();
-    for (auto it = children.rbegin(); it != children.rend(); ++it) {
-        UINode* hit = findNodeUnderMouse(*it, mx, my);
-        if (hit) return hit;
+    // 从后往前遍历，因为后添加的子节点在上层
+    for (int i = node->getChildCount() - 1; i >= 0; --i) {
+        UINode* child = node->getChild(i);
+        if (child) {
+            UINode* hit = findNodeUnderMouse(child, mx, my);
+            if (hit) return hit;
+        }
     }
 
     // 再检查当前节点
@@ -102,8 +105,11 @@ void UIEventSystem::collectAllNodes(UINode* node, Tina::Container::Vector<UINode
 {
     if (!node) return;
     outList.push_back(node);
-    for (auto* child : node->getChildren()) {
-        collectAllNodes(child, outList);
+    for (size_t i = 0; i < node->getChildCount(); ++i) {
+        UINode* child = node->getChild(i);
+        if (child) {
+            collectAllNodes(child, outList);
+        }
     }
 }
 

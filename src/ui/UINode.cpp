@@ -11,48 +11,49 @@ UINode::UINode(const std::string& name)
 
 UINode::~UINode()
 {
-    // 不负责删除子节点，仅断开关系
-    // 子节点的生命周期由外部（Scene等）管理
-    for (auto* child : m_children) {
-        if (child) {
-            child->m_parent = nullptr;
-        }
-    }
+    // 新版：自动清理所有子节点（通过UniquePtr）
+    // 子节点会递归销毁其子节点
     m_children.clear();
 }
 
-// === 层级管理 ===
+// === 层级管理（新版） ===
 
-void UINode::addChild(UINode* child)
+Memory::UniquePtr<UINode> UINode::removeChild(UINode* child)
 {
-    if (!child || child == this) return;
+    if (!child) return nullptr;
 
-    // 如果已有父节点，先移除
-    if (child->m_parent) {
-        child->m_parent->removeChild(child);
-    }
-
-    child->m_parent = this;
-    m_children.push_back(child);
-    child->m_dirty = true;
-}
-
-void UINode::removeChild(UINode* child)
-{
-    if (!child) return;
-
-    auto it = std::find(m_children.begin(), m_children.end(), child);
+    auto it = std::find_if(m_children.begin(), m_children.end(),
+        [child](const Memory::UniquePtr<UINode>& ptr) {
+            return ptr.get() == child;
+        });
+    
     if (it != m_children.end()) {
-        (*it)->m_parent = nullptr;
+        Memory::UniquePtr<UINode> removed = std::move(*it);
+        removed->m_parent = nullptr;
         m_children.erase(it);
+        return removed;
     }
+    
+    return nullptr;
 }
 
 void UINode::removeFromParent()
 {
     if (m_parent) {
+        // 注意：这会导致自己被销毁（如果父节点拥有所有权）
+        // 调用者需要确保不再使用this指针
         m_parent->removeChild(this);
     }
+}
+
+UINode* UINode::findChild(const std::string& name) const
+{
+    for (const auto& child : m_children) {
+        if (child && child->getName() == name) {
+            return child.get();
+        }
+    }
+    return nullptr;
 }
 
 // === 世界坐标计算 ===
@@ -94,8 +95,8 @@ void UINode::updateWorldTransform()
     m_dirty = false;
 
     // 子节点也需要更新
-    for (auto* child : m_children) {
-        child->m_dirty = true;
+    for (auto& child : m_children) {
+        if (child) child->m_dirty = true;
     }
 }
 
@@ -122,8 +123,8 @@ void UINode::update(float dt)
 
     onUpdate(dt);
 
-    for (auto* child : m_children) {
-        child->update(dt);
+    for (auto& child : m_children) {
+        if (child) child->update(dt);
     }
 
     // 通用包裹（WrapContent）：依据子项包裹自身尺寸
@@ -131,7 +132,8 @@ void UINode::update(float dt)
     if (m_layoutW == LayoutDim::WrapContent || m_layoutH == LayoutDim::WrapContent) {
         float maxRight = 0.0f;
         float maxBottom = 0.0f;
-        for (auto* child : m_children) {
+        for (auto& childPtr : m_children) {
+            UINode* child = childPtr.get();
             if (!child || !child->isVisible()) continue;
             Tina::Math::Vec2 cp = child->getPosition(); // 局部坐标（容器 onUpdate 应以 TopLeft 放置）
             Tina::Math::Vec2 cs = child->getSize();
@@ -151,8 +153,8 @@ void UINode::render(uint16_t viewId, UIRenderer& renderer)
 
     onRender(viewId, renderer);
 
-    for (auto* child : m_children) {
-        child->render(viewId, renderer);
+    for (auto& child : m_children) {
+        if (child) child->render(viewId, renderer);
     }
 }
 

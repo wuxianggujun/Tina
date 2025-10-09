@@ -5,22 +5,25 @@
 // - 支持可见性、激活状态
 // - 提供事件接口（点击、hover等）
 //
-// 【重要】内存管理模型：
-// - UINode 不拥有子节点的所有权，仅持有裸指针
-// - addChild() 不会转移所有权，仅建立父子关系
-// - 析构函数不会删除子节点
-// - 节点的生命周期应由外部（如 Scene）使用智能指针统一管理
+// 【重要】内存管理模型（优化版）：
+// - UINode 拥有子节点的所有权（通过 UniquePtr）
+// - addChild() 转移所有权到父节点
+// - 析构函数自动清理所有子节点
+// - 简化了Scene的UI管理，无需额外容器
 //
 // 使用示例：
 //   auto root = Memory::MakeUnique<UINode>("Root");
-//   auto child = Memory::MakeUnique<UIButton>("Child");
-//   root->addChild(child.get());  // 仅传递裸指针
-//   // Scene 负责持有 root 和 child 的 UniquePtr
+//   auto child = root->createChild<UIButton>("Child");
+//   child->setText("Button");
+//   // 或者：
+//   auto btn = Memory::MakeUnique<UIButton>("Btn");
+//   UIButton* btnPtr = root->addChild(std::move(btn));
 
 #pragma once
 
 #include "../core/Container.hpp"
 #include "../core/Math.hpp"
+#include "../core/Memory.hpp"
 #include <string>
 #include <functional>
 
@@ -55,12 +58,53 @@ public:
     UINode(const std::string& name = "UINode");
     virtual ~UINode();
 
-    // === 层级管理 ===
-    void addChild(UINode* child);
-    void removeChild(UINode* child);
+    // === 层级管理（新版：拥有所有权） ===
+    
+    // 添加子节点（转移所有权）
+    template<typename T>
+    T* addChild(Memory::UniquePtr<T> child) {
+        static_assert(std::is_base_of<UINode, T>::value, "T must derive from UINode");
+        if (!child || child.get() == this) return nullptr;
+        
+        // 如果已有父节点，先移除
+        if (child->m_parent) {
+            child->m_parent->removeChild(child.get());
+        }
+        
+        T* ptr = child.get();
+        child->m_parent = this;
+        child->m_dirty = true;
+        m_children.push_back(std::move(child));
+        return ptr;
+    }
+    
+    // 创建并添加子节点（便捷方法）
+    template<typename T, typename... Args>
+    T* createChild(Args&&... args) {
+        auto child = Memory::MakeUnique<T>(std::forward<Args>(args)...);
+        return addChild(std::move(child));
+    }
+    
+    // 移除子节点（返回所有权）
+    Memory::UniquePtr<UINode> removeChild(UINode* child);
+    
+    // 从父节点移除自己
     void removeFromParent();
+    
+    // 查找子节点
+    UINode* findChild(const std::string& name) const;
+    template<typename T>
+    T* findChild(const std::string& name) const {
+        UINode* node = findChild(name);
+        return node ? dynamic_cast<T*>(node) : nullptr;
+    }
+    
+    // 获取父节点和子节点
     UINode* getParent() const { return m_parent; }
-    const Tina::Container::Vector<UINode*>& getChildren() const { return m_children; }
+    size_t getChildCount() const { return m_children.size(); }
+    UINode* getChild(size_t index) const {
+        return (index < m_children.size()) ? m_children[index].get() : nullptr;
+    }
 
     // === 变换（相对于父节点） ===
     void setPosition(float x, float y) { m_position = {x, y}; m_dirty = true; }
@@ -126,9 +170,9 @@ private:
 protected:
     std::string m_name;
 
-    // 层级
-    UINode* m_parent = nullptr;
-    Tina::Container::Vector<UINode*> m_children;
+    // 层级（新版：拥有子节点所有权）
+    UINode* m_parent = nullptr;  // 弱引用，不拥有
+    Tina::Container::Vector<Memory::UniquePtr<UINode>> m_children;  // 拥有所有权
 
     // 局部变换
     Tina::Math::Vec2 m_position{0, 0}; // 相对父节点的偏移

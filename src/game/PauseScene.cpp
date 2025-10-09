@@ -178,60 +178,58 @@ void PauseScene::createUI()
     const float rowW     = panelW - pad * 2.0f;               // VBox 左右 padding 共 32
     const float colW     = (rowW - 8.0f * 2.0f - 12.0f) * 0.5f; // 行左右 padding=8，列间距=12
 
-    auto* panel = new UI::UIPanel("PausePanel");
+    // 使用新的API：createChild
+    auto* panel = m_rootNode->createChild<UI::UIPanel>("PausePanel");
     panel->setColor(0.08f, 0.08f, 0.10f, 0.92f);
     panel->setSize(panelW, 1.0f);
     panel->setHeightWrap(); // 交由容器包裹
-    m_rootNode->addChild(panel);
 
-    auto* vbox = new UI::UIVStack("VBox");
+    auto* vbox = panel->createChild<UI::UIVStack>("VBox");
     vbox->setSize(panelW, 0.0f);
     vbox->setHeightWrap(); // 容器自动包裹内容高度
     vbox->setPadding(pad, pad);
     vbox->setSpacing(spacing);
-    panel->addChild(vbox);
 
     // 标题
-    auto* title = new UI::UILabel();
+    auto* title = vbox->createChild<UI::UILabel>();
     title->setText("游戏已暂停");
     title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
     title->setSize(panelW - 32.0f, 44.0f);
-    vbox->addChild(title);
 
     // 第一行：继续
-    auto* rowTop = new UI::UIHStack("RowTop");
+    auto* rowTop = vbox->createChild<UI::UIHStack>("RowTop");
     rowTop->setSize(rowW, btnH);
     rowTop->setSpacing(12.0f);
     rowTop->setPadding(0.0f, 0.0f); // 顶部占满行，无左右内边距，避免右侧溢出
-    vbox->addChild(rowTop);
 
-    m_btnContinue = new UI::UIButton();
+    m_btnContinue = rowTop->createChild<UI::UIButton>();
     m_btnContinue->setText("继续游戏 (ESC)");
     m_btnContinue->setSize(rowW, btnH);
     m_btnContinue->setNormalColor(0.2f, 0.6f, 0.2f, 0.95f);
     m_btnContinue->setHoverColor(0.3f, 0.8f, 0.3f, 1.0f);
     m_btnContinue->setPressedColor(0.1f, 0.4f, 0.1f, 1.0f);
     m_continueConnection = m_btnContinue->onClick.connect([this]() { onContinueClicked(); });
-    rowTop->addChild(m_btnContinue);
 
     // 设置按钮已移除，保留单行继续按钮
 
     // 分组标题：调试 / 昼夜
-    auto* dbg = new UI::UILabel();
+    auto* dbg = vbox->createChild<UI::UILabel>();
     dbg->setText("调试 / 昼夜");
     dbg->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
     dbg->setSize(rowW, debugH);
-    vbox->addChild(dbg);
 
     // 两行两列的调试网格
     auto makeRow = [&](UI::UIButton*& a, const char* ta, UI::UIButton*& b, const char* tb){
-        auto* row = new UI::UIHStack("Row");
+        auto* row = vbox->createChild<UI::UIHStack>("Row");
         row->setSize(rowW, btnH);
         row->setSpacing(12.0f);
         row->setPadding(8.0f, 8.0f); // 与 colW 计算一致的左右内边距
-        vbox->addChild(row);
-        a = new UI::UIButton(); a->setText(ta); a->setSize(colW, btnH); row->addChild(a);
-        b = new UI::UIButton(); b->setText(tb); b->setSize(colW, btnH); row->addChild(b);
+        a = row->createChild<UI::UIButton>();
+        a->setText(ta);
+        a->setSize(colW, btnH);
+        b = row->createChild<UI::UIButton>();
+        b->setText(tb);
+        b->setSize(colW, btnH);
         return row;
     };
 
@@ -245,13 +243,12 @@ void PauseScene::createUI()
     m_cBack     = m_btnBack->onClick.connect([this]{ onBackTime(); });
 
     // 退出按钮独占一行
-    auto* rowBottom = new UI::UIHStack("RowBottom");
+    auto* rowBottom = vbox->createChild<UI::UIHStack>("RowBottom");
     rowBottom->setSize(rowW, btnH);
     rowBottom->setSpacing(12.0f);
     rowBottom->setPadding(0.0f, 0.0f); // 占满行，无左右内边距
-    vbox->addChild(rowBottom);
 
-    m_btnQuit = new UI::UIButton();
+    m_btnQuit = rowBottom->createChild<UI::UIButton>();
     m_btnQuit->setText("退出游戏");
     m_btnQuit->setWidthMatch();
     m_btnQuit->setHeight(btnH);
@@ -259,7 +256,6 @@ void PauseScene::createUI()
     m_btnQuit->setHoverColor(0.8f, 0.3f, 0.3f, 1.0f);
     m_btnQuit->setPressedColor(0.4f, 0.1f, 0.1f, 1.0f);
     m_quitConnection = m_btnQuit->onClick.connect([this]() { onQuitClicked(); });
-    rowBottom->addChild(m_btnQuit);
 
     // 触发布局计算并回填 Panel 高度，再居中 Panel
     vbox->update(0.0f);

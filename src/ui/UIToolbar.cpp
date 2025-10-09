@@ -12,24 +12,22 @@ bool UIToolbar::initialize(int screenW, int screenH, UIRenderer& renderer, TextR
     m_screenW = screenW; m_screenH = screenH;
     m_renderer = &renderer; m_text = text;
 
-    // 根节点
+    // 根节点（使用智能指针管理）
     m_root = new UINode("UIRoot");
     m_root->setSize((float)m_screenW, (float)m_screenH);
 
-    // 工具栏背景
-    m_bar = new UIPanel("Toolbar");
+    // 工具栏背景（使用新的API）
+    m_bar = m_root->createChild<UIPanel>("Toolbar");
     m_bar->setAnchor(Anchor::TopLeft);
     m_bar->setPosition(0, 0);
     m_bar->setColor(ToolbarBg);  // 半透明深色背景
-    m_root->addChild(m_bar);
 
     // 水平栈：用于排列按钮
-    m_stack = new UIHStack("ToolbarStack");
+    m_stack = m_bar->createChild<UIHStack>("ToolbarStack");
     m_stack->setAnchor(Anchor::TopLeft);
     m_stack->setPadding((float)m_padding, (float)m_padding);
     m_stack->setSpacing((float)m_gap);
     m_stack->setCrossAlign(CrossAlign::Center);
-    m_bar->addChild(m_stack);
 
     // 初次布局
     buildLayout();
@@ -102,10 +100,10 @@ void UIToolbar::buildLayout()
 {
     if (!m_bar) return;
 
-    // 清理旧按钮
+    // 清理旧按钮（新API会自动管理内存）
     for (auto* btn : m_slots) {
         if (m_stack) m_stack->removeChild(btn);
-        delete btn;
+        // 不需要手动delete，removeChild会处理
     }
     m_slots.clear();
 
@@ -125,14 +123,14 @@ void UIToolbar::buildLayout()
     m_bar->setPosition(barX, 0.0f);
     if (m_stack) m_stack->setSize((float)barW, (float)m_barH);
 
-    // 创建按钮并布局
+    // 创建按钮并布局（使用新的API）
     for (int i = 0; i < count; ++i) {
-        auto* btn = new UIButton("ToolSlot");
+        auto* btn = m_stack->createChild<UIButton>("ToolSlot");
         btn->setSize((float)m_slotSize, (float)m_slotSize);
         btn->setAnchor(Anchor::TopLeft);
         // 默认布局：左图标 + 右文本（避免重叠）
         btn->setIconLayout(UIButton::IconLayout::IconLeftTextRight);
-        // 中央主标识：前三个为“水/挖/爆”，其余占位
+        // 中央主标识：前三个为"水/挖/爆"，其余占位
         std::string center;
         if (i == 0) center = "水";
         else if (i == 1) center = "清";
@@ -172,7 +170,6 @@ void UIToolbar::buildLayout()
             m_tipText.clear();
         });
 
-        if (m_stack) m_stack->addChild(btn);
         m_slots.push_back(btn);
     }
 

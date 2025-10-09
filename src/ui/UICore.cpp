@@ -6,6 +6,7 @@
 #include "UICore.hpp"
 #include <bx/math.h>
 #include <cstring>
+#include <algorithm>
 #include "../core/Color.hpp"
 #include "../core/Log.hpp"
 
@@ -14,7 +15,13 @@ namespace Tina::UI {
 bool UIRenderer::initialize(Tina::Renderer::ShaderManager& sm, TextRenderer* text)
 {
     m_progColor = sm.loadProgram("color", "color");
-    if (!bgfx::isValid(m_progColor)) return false;
+    if (!bgfx::isValid(m_progColor)) {
+        TINA_ERROR("UIRenderer: 无法加载color着色器！");
+        return false;
+    }
+    
+    TINA_INFO("UIRenderer: color着色器加载成功 (handle: {})", m_progColor.idx);
+    
     m_colorLayout.begin()
         .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
         .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Float)
@@ -24,13 +31,18 @@ bool UIRenderer::initialize(Tina::Renderer::ShaderManager& sm, TextRenderer* tex
     // sprite 程序与布局
     m_progSprite = sm.loadProgram("sprite", "sprite");
     if (bgfx::isValid(m_progSprite)) {
+        TINA_INFO("UIRenderer: sprite着色器加载成功 (handle: {})", m_progSprite.idx);
         m_spriteLayout.begin()
             .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
             .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
             .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Float)
         .end();
         m_sTex = bgfx::createUniform("s_tex", bgfx::UniformType::Sampler);
+    } else {
+        TINA_WARN("UIRenderer: sprite着色器加载失败");
     }
+    
+    TINA_INFO("UIRenderer: 初始化完成");
     return true;
 }
 
@@ -46,6 +58,12 @@ void UIRenderer::shutdown()
 
 void UIRenderer::beginFrame(uint16_t viewId)
 {
+    // 保存上一帧统计，重置当前帧
+    if (m_statsEnabled) {
+        m_lastFrameStats = m_frameStats;
+        m_frameStats.reset();
+    }
+    
     // 清理上一帧的缓冲
     m_colorBatch.clear();
     m_spriteBatches.clear();
@@ -56,7 +74,18 @@ void UIRenderer::beginFrame(uint16_t viewId)
 void UIRenderer::drawRect(uint16_t viewId, float x, float y, float w, float h,
                           float r, float g, float b, float a)
 {
-    if (!bgfx::isValid(m_progColor) || w <= 0.0f || h <= 0.0f) return;
+    if (!bgfx::isValid(m_progColor)) {
+        TINA_ERROR("UIRenderer::drawRect - color着色器无效!");
+        return;
+    }
+    
+    if (w <= 0.0f || h <= 0.0f) return;
+    
+    // 检查是否需要创建新批次（防止单个批次过大）
+    if (shouldCreateNewBatch(m_colorBatch.vertices.size(), 4)) {
+        // 如果当前批次已经很大，先flush再继续
+        flushColorBatch();
+    }
 
     // 计算当前批次的基索引（已有顶点数）
     uint16_t baseIdx = static_cast<uint16_t>(m_colorBatch.vertices.size());
@@ -74,6 +103,11 @@ void UIRenderer::drawRect(uint16_t viewId, float x, float y, float w, float h,
     m_colorBatch.indices.push_back(baseIdx + 0);
     m_colorBatch.indices.push_back(baseIdx + 2);
     m_colorBatch.indices.push_back(baseIdx + 3);
+    
+    // 更新统计
+    if (m_statsEnabled) {
+        m_frameStats.rectCount++;
+    }
 }
 
 void UIRenderer::drawRect(uint16_t viewId, float x, float y, float w, float h,
@@ -116,9 +150,19 @@ void UIRenderer::drawImage(uint16_t viewId, float x, float y, float w, float h,
 {
     if (!bgfx::isValid(m_progSprite) || !bgfx::isValid(tex) || w <= 0.0f || h <= 0.0f) return;
 
-    // 找到或创建匹配纹理的批次
-    SpriteBatch* batch = findOrCreateSpriteBatch(tex);
+    // 找到或创建匹配纹理的批次（考虑深度）
+    SpriteBatch* batch = findOrCreateSpriteBatch(tex, m_currentRenderDepth);
     if (!batch) return;
+    
+    // 检查是否需要创建新批次
+    if (shouldCreateNewBatch(batch->vertices.size(), 4)) {
+        // 创建新的批次
+        SpriteBatch newBatch;
+        newBatch.texture = tex;
+        newBatch.currentDepth = m_currentRenderDepth;
+        m_spriteBatches.push_back(newBatch);
+        batch = &m_spriteBatches.back();
+    }
 
     uint16_t baseIdx = static_cast<uint16_t>(batch->vertices.size());
     
@@ -135,14 +179,32 @@ void UIRenderer::drawImage(uint16_t viewId, float x, float y, float w, float h,
     batch->indices.push_back(baseIdx + 0);
     batch->indices.push_back(baseIdx + 2);
     batch->indices.push_back(baseIdx + 3);
+    
+    // 更新统计
+    if (m_statsEnabled) {
+        m_frameStats.imageCount++;
+    }
 }
 
 // 统一提交所有批次
 void UIRenderer::flush()
 {
+    // 根据策略进行排序
+    if (m_batchStrategy == BatchStrategy::DepthSorted) {
+        sortBatchesByDepth();
+    }
+    
     flushColorBatch();
     flushSpriteBatches();
     flushTextCommands();
+    
+    // 计算批处理效率
+    if (m_statsEnabled) {
+        m_frameStats.calculate();
+    }
+    
+    // 重置深度计数器
+    m_currentRenderDepth = 0;
     
     // 清理（为下一帧做准备，但保留内存容量）
     m_colorBatch.vertices.clear();
@@ -158,11 +220,20 @@ void UIRenderer::flush()
 // 提交纯色批次
 void UIRenderer::flushColorBatch()
 {
-    if (m_colorBatch.vertices.empty() || !bgfx::isValid(m_progColor)) return;
+    if (m_colorBatch.vertices.empty()) {
+        // 批次为空，正常情况
+        return;
+    }
+    
+    if (!bgfx::isValid(m_progColor)) {
+        TINA_ERROR("UIRenderer: color着色器无效！无法渲染UI背景");
+        return;
+    }
 
     const uint32_t vcount = static_cast<uint32_t>(m_colorBatch.vertices.size());
     const uint32_t icount = static_cast<uint32_t>(m_colorBatch.indices.size());
     
+    // 添加调试日志
     TINA_INFO("UIRenderer: flushColorBatch - 提交 {} 个矩形", vcount / 4);
     
     // 检查瞬态缓冲区容量
@@ -192,10 +263,14 @@ void UIRenderer::flushColorBatch()
         enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
         enc->submit(m_currentViewId, m_progColor);
         bgfx::end(enc);
+        
+        // 更新统计
+        if (m_statsEnabled) {
+            m_frameStats.drawCalls++;
+            m_frameStats.vertices += vcount;
+            m_frameStats.triangles += icount / 3;
+        }
     }
-    
-    // 性能日志（调试用）
-    // TINA_INFO("UIRenderer: 纯色批次提交 {} 个矩形，1个drawcall", vcount / 4);
 }
 
 // 提交所有纹理批次
@@ -236,32 +311,77 @@ void UIRenderer::flushSpriteBatches()
             enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
             enc->submit(m_currentViewId, m_progSprite);
             bgfx::end(enc);
+            
+            // 更新统计
+            if (m_statsEnabled) {
+                m_frameStats.drawCalls++;
+                m_frameStats.vertices += vcount;
+                m_frameStats.triangles += icount / 3;
+            }
         }
     }
 }
 
-// 查找或创建纹理批次
-UIRenderer::SpriteBatch* UIRenderer::findOrCreateSpriteBatch(bgfx::TextureHandle tex)
+// 查找或创建纹理批次（考虑深度）
+UIRenderer::SpriteBatch* UIRenderer::findOrCreateSpriteBatch(bgfx::TextureHandle tex, uint32_t depth)
 {
-    // 查找是否已有相同纹理的批次
+    // 根据批处理策略查找合适的批次
     for (auto& batch : m_spriteBatches) {
-        if (batch.texture.idx == tex.idx) {
-            return &batch;
+        if (batch.canMerge(tex, depth)) {
+            // 简单策略：只要纹理相同就合并
+            // 深度排序策略：纹理和深度都相同才合并
+            if (m_batchStrategy == BatchStrategy::DepthSorted) {
+                if (batch.currentDepth == depth) {
+                    return &batch;
+                }
+            } else {
+                return &batch;
+            }
         }
     }
     
     // 创建新批次
     SpriteBatch newBatch;
     newBatch.texture = tex;
+    newBatch.currentDepth = depth;
     m_spriteBatches.push_back(newBatch);
     return &m_spriteBatches.back();
+}
+
+// 根据深度排序批次
+void UIRenderer::sortBatchesByDepth()
+{
+    // 对sprite批次按深度排序
+    std::sort(m_spriteBatches.begin(), m_spriteBatches.end(),
+        [](const SpriteBatch& a, const SpriteBatch& b) {
+            return a.currentDepth < b.currentDepth;
+        });
+    
+    // 如果需要，也可以对批次内的元素按深度排序
+    // 但通常批次级别的排序就足够了
+}
+
+// 判断是否需要创建新批次
+bool UIRenderer::shouldCreateNewBatch(uint32_t currentSize, uint32_t newSize) const
+{
+    // 如果加入新元素后超过最大批次大小，则需要新批次
+    return (currentSize + newSize) > m_maxBatchVertices;
 }
 
 // 顶层文本：延迟到 flush() 统一提交
 void UIRenderer::flushTextCommands()
 {
     if (!m_text || m_textCmds.empty()) return;
-    TINA_INFO("UIRenderer: flushTextCommands - 提交 {} 条文本命令", (int)m_textCmds.size());
+    
+    // 移除调试日志，改为性能统计
+    // TINA_INFO("UIRenderer: flushTextCommands - 提交 {} 条文本命令", (int)m_textCmds.size());
+    
+    if (m_statsEnabled) {
+        m_frameStats.textCount += static_cast<uint32_t>(m_textCmds.size());
+        // 文本渲染的drawcall由TextRenderer内部处理，这里估算
+        m_frameStats.drawCalls += static_cast<uint32_t>(m_textCmds.size());
+    }
+    
     for (const auto& cmd : m_textCmds) {
         int prevPx = m_text->currentFontPx();
         bool needRestore = false;
@@ -305,5 +425,25 @@ void UIRenderer::flushTextCommands()
     }
 }
 
+
+// 打印性能统计到日志
+void UIRenderer::logStats() const
+{
+    if (!m_statsEnabled) {
+        TINA_WARN("UIRenderer: 性能统计未启用");
+        return;
+    }
+    
+    const auto& stats = m_lastFrameStats;
+    TINA_INFO("=== UI渲染性能统计 ===");
+    TINA_INFO("Draw Calls: {}", stats.drawCalls);
+    TINA_INFO("顶点数: {}", stats.vertices);
+    TINA_INFO("三角形数: {}", stats.triangles);
+    TINA_INFO("矩形数: {}", stats.rectCount);
+    TINA_INFO("图片数: {}", stats.imageCount);
+    TINA_INFO("文本数: {}", stats.textCount);
+    TINA_INFO("批处理效率: {:.1f}%", stats.batchEfficiency * 100.0f);
+    TINA_INFO("====================");
+}
 
 } // namespace Tina::UI

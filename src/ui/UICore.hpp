@@ -13,6 +13,31 @@
 
 namespace Tina::UI {
 
+// 性能统计结构
+struct RenderStats {
+    uint32_t drawCalls = 0;        // 绘制调用次数
+    uint32_t vertices = 0;          // 顶点数
+    uint32_t triangles = 0;         // 三角形数
+    uint32_t rectCount = 0;         // 矩形数量
+    uint32_t imageCount = 0;        // 图片数量
+    uint32_t textCount = 0;         // 文本数量
+    float batchEfficiency = 0.0f;  // 批处理效率 (1 - drawCalls/totalElements)
+    
+    void reset() {
+        drawCalls = vertices = triangles = 0;
+        rectCount = imageCount = textCount = 0;
+        batchEfficiency = 0.0f;
+    }
+    
+    void calculate() {
+        uint32_t totalElements = rectCount + imageCount + textCount;
+        if (totalElements > 0 && drawCalls > 0) {
+            batchEfficiency = 1.0f - (float)drawCalls / (float)totalElements;
+            batchEfficiency = std::max(0.0f, std::min(1.0f, batchEfficiency));
+        }
+    }
+};
+
 class UIRenderer {
 public:
     UIRenderer() = default;
@@ -115,30 +140,85 @@ public:
     void drawImage(uint16_t viewId, float x, float y, float w, float h,
                    bgfx::TextureHandle tex,
                    float r = 1.0f, float g = 1.0f, float b = 1.0f, float a = 1.0f);
+    
+    // === 批处理优化控制 ===
+    
+    // 设置批处理策略
+    enum class BatchStrategy {
+        Simple,         // 简单批处理（当前实现）
+        DepthSorted,    // 深度排序批处理
+        StateOptimized  // 状态切换优化批处理
+    };
+    void setBatchStrategy(BatchStrategy strategy) { m_batchStrategy = strategy; }
+    BatchStrategy getBatchStrategy() const { return m_batchStrategy; }
+    
+    // 设置最大批次大小（防止单个批次过大）
+    void setMaxBatchSize(uint32_t maxVertices) { m_maxBatchVertices = maxVertices; }
+    uint32_t getMaxBatchSize() const { return m_maxBatchVertices; }
+   
+   // === 性能监控 ===
+   
+   // 获取当前帧的性能统计
+   const RenderStats& getFrameStats() const { return m_frameStats; }
+   
+   // 获取上一帧的性能统计（用于显示）
+   const RenderStats& getLastFrameStats() const { return m_lastFrameStats; }
+   
+   // 启用/禁用性能统计
+   void setStatsEnabled(bool enabled) { m_statsEnabled = enabled; }
+   bool isStatsEnabled() const { return m_statsEnabled; }
+   
+   // 调试：打印性能统计到日志
+   void logStats() const;
 
 private:
     // 顶点结构
     struct ColorVtx {
         float x, y, z;
         float r, g, b, a;
+        // 注意：depth字段仅用于CPU端排序，不传递给GPU
     };
     struct SpriteVtx {
         float x, y, z;
         float u, v;
         float r, g, b, a;
+        // 注意：depth字段仅用于CPU端排序，不传递给GPU
     };
 
-    // 批处理结构
+    // 批处理结构（增强版）
     struct ColorBatch {
         Container::Vector<ColorVtx> vertices;
         Container::Vector<uint16_t> indices;
-        void clear() { vertices.clear(); indices.clear(); }
+        uint32_t currentDepth = 0;  // 当前深度层级
+        
+        void clear() {
+            vertices.clear();
+            indices.clear();
+            currentDepth = 0;
+        }
+        
+        bool canMerge(uint32_t depth) const {
+            // 简单策略：总是合并
+            // 深度排序策略：只合并相同深度
+            return true;  // 将在实现中根据策略判断
+        }
     };
     struct SpriteBatch {
         Container::Vector<SpriteVtx> vertices;
         Container::Vector<uint16_t> indices;
         bgfx::TextureHandle texture = BGFX_INVALID_HANDLE;
-        void clear() { vertices.clear(); indices.clear(); texture = BGFX_INVALID_HANDLE; }
+        uint32_t currentDepth = 0;  // 当前深度层级
+        
+        void clear() {
+            vertices.clear();
+            indices.clear();
+            texture = BGFX_INVALID_HANDLE;
+            currentDepth = 0;
+        }
+        
+        bool canMerge(bgfx::TextureHandle tex, uint32_t depth) const {
+            return texture.idx == tex.idx;  // 相同纹理才能合并
+        }
     };
 
     // 文本命令（延后统一提交，保证文本在图元之上）
@@ -170,10 +250,24 @@ private:
     Container::Vector<TextCmd> m_textCmds;
 
     // 内部工具方法
-    SpriteBatch* findOrCreateSpriteBatch(bgfx::TextureHandle tex);
+    SpriteBatch* findOrCreateSpriteBatch(bgfx::TextureHandle tex, uint32_t depth = 0);
     void flushColorBatch();
     void flushSpriteBatches();
     void flushTextCommands();
+    
+    // 批处理优化
+    void sortBatchesByDepth();
+    bool shouldCreateNewBatch(uint32_t currentSize, uint32_t newSize) const;
+    
+    // 性能统计
+    RenderStats m_frameStats;      // 当前帧统计
+    RenderStats m_lastFrameStats;  // 上一帧统计（用于显示）
+    bool m_statsEnabled = false;   // 是否启用统计
+    
+    // 批处理控制
+    BatchStrategy m_batchStrategy = BatchStrategy::Simple;
+    uint32_t m_maxBatchVertices = 65536;  // 默认最大64K顶点
+    uint32_t m_currentRenderDepth = 0;    // 当前渲染深度
 };
 
 } // namespace Tina::UI

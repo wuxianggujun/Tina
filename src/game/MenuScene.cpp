@@ -324,40 +324,36 @@ void MenuScene::createUI() {
     const float spacing= 12.0f;
     const float btnH   = 60.0f;
 
-    auto* panel = new UI::UIPanel("MenuPanel");
+    // 使用新的API：createChild
+    auto* panel = m_rootNode->createChild<UI::UIPanel>("MenuPanel");
     panel->setColor(0.10f,0.10f,0.12f,0.90f);
     panel->setSize(panelW, 1.0f);
     panel->setHeightWrap();
-    m_rootNode->addChild(panel);
 
-    auto* vbox = new UI::UIVStack("VBox");
+    auto* vbox = panel->createChild<UI::UIVStack>("VBox");
     vbox->setSize(panelW, 0.0f);
     vbox->setHeightWrap();
     vbox->setPadding(pad, pad);
     vbox->setSpacing(spacing);
-    panel->addChild(vbox);
 
     // 标题（增加高度以适配 48 号字体）
-    auto* title = new UI::UILabel();
+    auto* title = vbox->createChild<UI::UILabel>();
     title->setText("Tina - 主菜单");
     title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
     title->setSize(panelW - pad*2, 60.0f);  // 从 44 增加到 60，适配 48 号字体
-    vbox->addChild(title);
 
     // 三个按钮（占满行宽）
     auto addButton = [&](const char* text, const Tina::Core::Color& n, const Tina::Core::Color& h, const Tina::Core::Color& p, auto&& onClick){
-        auto* row = new UI::UIHStack("Row");
+        auto* row = vbox->createChild<UI::UIHStack>("Row");
         row->setSize(panelW - pad*2, btnH);
         row->setPadding(0,0);
-        vbox->addChild(row);
-        auto* btn = new UI::UIButton();
+        auto* btn = row->createChild<UI::UIButton>();
         btn->setText(text);
         btn->setWidthMatch();
         btn->setHeight(btnH);
         btn->setNormalColor(n);
         btn->setHoverColor(h);
         btn->setPressedColor(p);
-        row->addChild(btn);
         return btn;
     };
 

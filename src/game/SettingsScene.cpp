@@ -109,35 +109,31 @@ void SettingsScene::createUI()
     const float spacing= 12.0f;
     const float btnH   = 50.0f;
 
-    auto* panel = new UI::UIPanel("SettingsPanel");
+    // 使用新的API：createChild
+    auto* panel = m_root->createChild<UI::UIPanel>("SettingsPanel");
     panel->setColor(0.10f,0.10f,0.12f,0.90f);
     panel->setSize(panelW, 1.0f);
     panel->setHeightWrap();
-    m_root->addChild(panel);
 
-    auto* vbox = new UI::UIVStack("VBox");
+    auto* vbox = panel->createChild<UI::UIVStack>("VBox");
     vbox->setSize(panelW, 0.0f);
     vbox->setHeightWrap();
     vbox->setPadding(pad, pad);
     vbox->setSpacing(spacing);
-    panel->addChild(vbox);
 
-    auto* title = new UI::UILabel();
+    auto* title = vbox->createChild<UI::UILabel>();
     title->setText("设置 / 调试");
     title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
     title->setSize(panelW - pad*2, 44.0f);
-    vbox->addChild(title);
 
     auto addRowButton = [&](const char* text, auto&& conn){
-        auto* row = new UI::UIHStack("Row");
+        auto* row = vbox->createChild<UI::UIHStack>("Row");
         row->setSize(panelW - pad*2, btnH);
         row->setPadding(0,0);
-        vbox->addChild(row);
-        auto* btn = new UI::UIButton();
+        auto* btn = row->createChild<UI::UIButton>();
         btn->setText(text);
         btn->setWidthMatch();
         btn->setHeight(btnH);
-        row->addChild(btn);
         return btn;
     };
 
