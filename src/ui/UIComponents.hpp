@@ -58,6 +58,10 @@ public:
     void setAlignV(TextAlignV v) { m_alignV = v; }
     void setAlignment(TextAlignH h, TextAlignV v) { m_alignH = h; m_alignV = v; }
 
+    // 文本字号（像素）。0 表示使用当前全局字号
+    void setFontPx(int px) { m_fontPx = std::max(0, px); }
+    int fontPx() const { return m_fontPx; }
+
     TextAlignH alignH() const { return m_alignH; }
     TextAlignV alignV() const { return m_alignV; }
 
@@ -72,6 +76,7 @@ private:
     Tina::Core::Color m_color;
     TextAlignH m_alignH = TextAlignH::Left;
     TextAlignV m_alignV = TextAlignV::Top;
+    int m_fontPx = 0;
 };
 
 // === Button：可点击按钮（背景 + 文本） ===

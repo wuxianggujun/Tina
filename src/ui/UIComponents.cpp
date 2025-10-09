@@ -41,6 +41,7 @@ void UILabel::onRender(uint16_t viewId, UIRenderer& renderer)
     UIRenderer::TextOptions opts{};
     opts.r = m_color.r(); opts.g = m_color.g(); opts.b = m_color.b(); opts.a = m_color.a();
     opts.hAlign = hAlign; opts.vAlign = vAlign; opts.padX = 4.0f; opts.padY = 4.0f;
+    if (m_fontPx > 0) opts.fontPx = m_fontPx;
     renderer.drawTextBox(viewId, pos.x, pos.y, size.x, size.y, m_text, opts);
 }
 

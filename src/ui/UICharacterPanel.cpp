@@ -29,6 +29,7 @@ UICharacterPanel::UICharacterPanel(const std::string& name)
     m_titleLabel->setSize(290, 28);
     m_titleLabel->setText("角色信息");
     m_titleLabel->setColor(TitleGold);  // 金色标题
+    m_titleLabel->setFontPx(22);
     m_background->addChild(m_titleLabel);
 
     // 创建名称标签
@@ -37,6 +38,7 @@ UICharacterPanel::UICharacterPanel(const std::string& name)
     m_nameLabel->setSize(290, 22);
     m_nameLabel->setText("名称: Unknown");
     m_nameLabel->setColor(TextWhite);  // 白色文本
+    m_nameLabel->setFontPx(18);
     m_background->addChild(m_nameLabel);
 
     // 创建控制状态标签
@@ -45,6 +47,7 @@ UICharacterPanel::UICharacterPanel(const std::string& name)
     m_controlledLabel->setSize(290, 20);
     m_controlledLabel->setText("状态: 未控制");
     m_controlledLabel->setColor(TextGray);  // 灰色文本
+    m_controlledLabel->setFontPx(16);
     m_background->addChild(m_controlledLabel);
 
     // 创建血量文本标签
@@ -53,6 +56,7 @@ UICharacterPanel::UICharacterPanel(const std::string& name)
     m_healthLabel->setSize(290, 18);
     m_healthLabel->setText("生命值:");
     m_healthLabel->setColor(TextWhite);  // 白色文本
+    m_healthLabel->setFontPx(14);
     m_background->addChild(m_healthLabel);
 
     // 创建血条
@@ -74,6 +78,7 @@ UICharacterPanel::UICharacterPanel(const std::string& name)
     m_switchButton->setNormalColor(ButtonBlue);      // 蓝色按钮
     m_switchButton->setHoverColor(ButtonBlueHover);  // 蓝色按钮悬停
     m_switchButton->setTextColor(ButtonText);        // 白色文本
+    m_switchButton->setFontPx(16);
 
     // 连接 Signal（推荐）
     m_switchButtonConnection = m_switchButton->onClick.connect([this]() {
