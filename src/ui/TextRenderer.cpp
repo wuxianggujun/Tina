@@ -1,6 +1,8 @@
 #include "TextRenderer.hpp"
 #include "../core/Log.hpp"
 #include <bx/math.h>
+#include <thread>
+#include <chrono>
 
 namespace Tina::UI {
 
@@ -195,7 +197,10 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
                             const std::string& utf8)
 {
     if (!bgfx::isValid(m_prog) || !bgfx::isValid(m_atlasTex)) return;
-    if (!ensureFontReady()) return;
+    if (!ensureFontReady()) {
+        TINA_WARN("TextRenderer: 字体未就绪，无法绘制 (requestedPx={})", m_requestedFontPx);
+        return;
+    }
 
     // UTF-8 解码并准备顶点/索引
     Tina::Container::Vector<Vtx> verts;
@@ -257,37 +262,59 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
     }
 
     if (idx.empty()) {
-        // 降噪：无可绘制字形在 UI 空字符串或被裁剪时很常见，不警告
+        TINA_WARN("TextRenderer: 没有可绘制的字形！文本=[{}], missing={}, appended={}", utf8, missing, appended);
         return;
+    }
+    
+    TINA_INFO("TextRenderer: 准备渲染 {} 个字形，顶点数={}, 索引数={}", appended, verts.size(), idx.size());
+
+    // === 调试：打印第一个顶点的详细信息 ===
+    static int debugCount = 0;
+    if (debugCount++ < 3 && !verts.empty()) {
+        const auto& v = verts[0];
+        TINA_INFO("  首顶点: pos=({:.1f},{:.1f},{:.1f}), uv=({:.3f},{:.3f}), rgba=({},{},{},{})",
+                  v.x, v.y, v.z, v.u, v.v, v.r, v.g, v.b, v.a);
     }
 
     bgfx::TransientVertexBuffer tvb;
     bgfx::TransientIndexBuffer tib;
-    if (!bgfx::allocTransientBuffers(&tvb, m_layout, (uint32_t)verts.size(), &tib, (uint32_t)idx.size()))
+    if (!bgfx::allocTransientBuffers(&tvb, m_layout, (uint32_t)verts.size(), &tib, (uint32_t)idx.size())) {
+        TINA_ERROR("TextRenderer: 无法分配瞬态缓冲区！");
         return;
+    }
     memcpy(tvb.data, verts.data(), (size_t)verts.size() * sizeof(Vtx));
     memcpy(tib.data, idx.data(), (size_t)idx.size() * sizeof(uint16_t));
 
-    // 额外日志：打印首个字形的四个顶点位置与 UV，辅助定位坐标系问题
-    // 降噪：首字形顶点/UV 仅在排障时打印
-
     bgfx::Encoder* enc = bgfx::begin(false);
-    if (!enc) { TINA_WARN("TextRenderer: 无法获取 Encoder，放弃绘制"); return; }
+    if (!enc) { 
+        TINA_ERROR("TextRenderer: 无法获取 Encoder，放弃绘制"); 
+        return; 
+    }
+    
+    // === 调试：输出渲染状态 ===
+    if (debugCount <= 3) {
+        TINA_INFO("  渲染状态: viewId={}, prog.idx={}, tex.idx={}, hasClip={}", 
+                  viewId, m_prog.idx, m_atlasTex.idx, m_hasClip);
+    }
+    
     float mtx[16]; bx::mtxIdentity(mtx);
     enc->setTransform(mtx);
     enc->setVertexBuffer(0, &tvb);
     enc->setIndexBuffer(&tib);
-    // 先用 HLSL 反射名绑定（s_textTexture），再用通用名绑定（s_text）；二者任意其一生效即可
     enc->setTexture(0, m_sText, m_atlasTex,
         BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
         BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT);
-    enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA | BGFX_STATE_DEPTH_TEST_ALWAYS);
+    // 尝试移除 DEPTH_TEST，因为 UI 在 2D 空间不需要深度测试
+    enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
     if (m_hasClip) {
         enc->setScissor(m_clipX, m_clipY, m_clipW, m_clipH);
     }
-    // 降噪：绘制统计仅在调试时需要
     enc->submit(viewId, m_prog);
     bgfx::end(enc);
+    
+    if (debugCount <= 3) {
+        TINA_INFO("  已提交渲染命令");
+    }
 }
 
 void TextRenderer::setClipRect(int16_t x, int16_t y, uint16_t w, uint16_t h)
@@ -304,7 +331,22 @@ bool TextRenderer::ensureFontReady()
 {
     if (m_font.face) return true;
     if (!m_fontRef.get() || m_requestedFontPx <= 0) return false;
-    if (m_fontRef.get()->getState() != Tina::Engine::Resource::State::READY) return false;
+
+    // 改为同步等待资源 READY
+    if (m_fontRef.get()->getState() != Tina::Engine::Resource::State::READY) {
+        const uint32_t timeoutMs = 5000; // 如需无限等待可设为 0
+        uint32_t waited = 0;
+        while (m_fontRef.get()->getState() != Tina::Engine::Resource::State::READY) {
+            m_resHub->update();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            if (timeoutMs > 0 && ++waited >= timeoutMs) {
+                break;
+            }
+        }
+        if (m_fontRef.get()->getState() != Tina::Engine::Resource::State::READY) {
+            return false;
+        }
+    }
 
     if (!m_fontRef.get()->ensureFace(m_requestedFontPx)) return false;
     FT_Face face = m_fontRef.get()->getFace(m_requestedFontPx);

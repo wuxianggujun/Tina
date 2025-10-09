@@ -18,7 +18,7 @@ using namespace Tina;
 int main(int /*argc*/, char* /*argv*/[])
 {
     // 初始化日志系统
-    Core::Log::InitWithFile("Tina", Core::Log::Level::Info,
+    Core::Log::InitWithFile("Tina", Core::Log::Level::Trace,
                             "logs/tina.log", 10ull * 1024ull * 1024ull, 5, false);
     TINA_INFO("启动 Tina 游戏引擎");
 

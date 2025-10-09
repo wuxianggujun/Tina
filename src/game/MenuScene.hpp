@@ -11,7 +11,6 @@
 #include "../ui/UICore.hpp"
 #include "../ui/UINode.hpp"
 #include "../ui/UIComponents.hpp"
-#include "../ui/TextRenderer.hpp"
 #include "../ui/UIEventSystem.hpp"
 #include "../particles/ParticleSystem.hpp"
 #include "../renderer/ShaderManager.hpp"
@@ -61,7 +60,6 @@ private:
 
 private:
     // 渲染资源
-    Memory::UniquePtr<UI::TextRenderer> m_textRenderer;
     Memory::UniquePtr<UI::UIRenderer> m_uiRenderer;
     Memory::UniquePtr<Particles::ParticleSystem2D> m_bgParticles;
     

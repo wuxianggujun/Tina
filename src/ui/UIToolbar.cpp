@@ -82,8 +82,8 @@ void UIToolbar::render(uint16_t viewId)
             m_renderer->drawRect(viewId, x, y, 1.0f, h, 0.9f, 0.85f, 0.35f, 1.0f);
             m_renderer->drawRect(viewId, x+w-1.0f, y, 1.0f, h, 0.9f, 0.85f, 0.35f, 1.0f);
             // 文本
-            m_renderer->drawTextEx(viewId, x, y, w, h, 1,1,1,1, m_tipText,
-                                   UIRenderer::AlignH::Center, UIRenderer::AlignV::Center, pad, pad);
+            m_renderer->drawTextExTop(viewId, x, y, w, h, 1,1,1,1, m_tipText,
+                                      UIRenderer::AlignH::Center, UIRenderer::AlignV::Center, pad, pad);
         }
     }
 }

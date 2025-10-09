@@ -34,17 +34,23 @@ void MenuScene::onEnter() {
     // 初始化渲染资源
     m_progColor = app()->shaders().loadProgram("color", "color");
     
+    // 统一使用 Application 初始化时的默认字号（32），避免切换字号导致异步等待
+    // 如需不同字号，可改为在 Application::prewarmCommonAssets 中确保 48/32/24 Face 并切换前等待 READY
+    
+    // 兼容旧代码：屏蔽本地 TextRenderer 初始化块
+    #if 0
     // 文本渲染器（使用较大字体）
-    m_textRenderer = Memory::MakeUnique<UI::TextRenderer>();
+    app()->textRenderer().loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 48);
     if (!m_textRenderer->initialize(app()->shaders(), app()->resources())) {
         TINA_ERROR("TextRenderer 初始化失败");
     } else {
         m_textRenderer->loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 48);
     }
+    #endif
     
     // UI 渲染器
     m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
-    m_uiRenderer->initialize(app()->shaders(), m_textRenderer.get());
+    m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer());
     
     // 初始化顶点布局
     m_colorLayout.begin()
@@ -70,6 +76,8 @@ void MenuScene::onEnter() {
     bx::mtxOrtho(ortho, 0.0f, (float)m_pixelWidth, (float)m_pixelHeight, 0.0f,
                  -1.0f, 1.0f, 0.0f, caps ? caps->homogeneousDepth : false);
     bgfx::setViewTransform(3, nullptr, ortho);
+    // 确保 UI 按提交顺序渲染，避免默认排序导致文本被后绘制的背景覆盖
+    bgfx::setViewMode(3, bgfx::ViewMode::Sequential);
     
     TINA_INFO("MenuScene: 初始化完成");
 }
@@ -92,7 +100,6 @@ void MenuScene::onExit() {
     // 清理渲染资源
     m_bgParticles.reset();
     m_uiRenderer.reset();
-    m_textRenderer.reset();
     
     m_progColor = BGFX_INVALID_HANDLE;
 }
@@ -138,6 +145,15 @@ void MenuScene::update(float dt) {
 }
 
 void MenuScene::render() {
+    // 设置 UI 视图（view 3）- 每帧都要设置，确保投影矩阵正确
+    bgfx::setViewRect(3, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
+    float ortho[16];
+    const bgfx::Caps* caps = bgfx::getCaps();
+    bx::mtxOrtho(ortho, 0.0f, (float)m_pixelWidth, (float)m_pixelHeight, 0.0f,
+                 -1.0f, 1.0f, 0.0f, caps ? caps->homogeneousDepth : false);
+    bgfx::setViewTransform(3, nullptr, ortho);
+    bgfx::setViewMode(3, bgfx::ViewMode::Sequential);
+    
     // 触摸 view 3
     bgfx::touch(3);
     
@@ -153,7 +169,7 @@ void MenuScene::render() {
     }
     
     // 渲染标题
-    if (m_textRenderer && m_uiRenderer && m_titleAlpha > 0.0f) {
+    if (m_uiRenderer && m_titleAlpha > 0.0f) {
         float titleX = (float)m_pixelWidth / 2.0f;
         float titleY = (float)m_pixelHeight * 0.25f;
         
@@ -177,10 +193,27 @@ void MenuScene::render() {
     // 渲染 UI 按钮
     if (m_rootNode && m_uiRenderer) {
         m_rootNode->render(3, *m_uiRenderer);
+        // 再次绘制标题，确保位于 UI 面板之上
+        if (m_titleAlpha > 0.0f) {
+            float titleX = (float)m_pixelWidth / 2.0f;
+            float titleY = (float)m_pixelHeight * 0.25f;
+            m_uiRenderer->drawTextEx(3, titleX - 200.0f, titleY - 40.0f, 400, 80,
+                                     1.0f, 1.0f, 1.0f, m_titleAlpha,
+                                     "TINA GAME",
+                                     UI::UIRenderer::AlignH::Center,
+                                     UI::UIRenderer::AlignV::Center,
+                                     0.0f, 0.0f);
+            m_uiRenderer->drawTextEx(3, titleX - 200.0f, titleY + 60 - 20.0f, 400, 40,
+                                     0.7f, 0.7f, 0.7f, m_titleAlpha * 0.8f,
+                                     "2D Sandbox Adventure",
+                                     UI::UIRenderer::AlignH::Center,
+                                     UI::UIRenderer::AlignV::Center,
+                                     0.0f, 0.0f);
+        }
     }
     
     // 渲染版本号
-    if (m_textRenderer && m_uiRenderer) {
+    if (m_uiRenderer) {
         m_uiRenderer->drawTextEx(3, (float)m_pixelWidth - 10 - 100, (float)m_pixelHeight - 10 - 30,
                                  100, 30, 0.5f, 0.5f, 0.5f, 0.5f,
                                  "v1.0.0",
@@ -251,6 +284,7 @@ void MenuScene::handleEvent(const os::Event& event) {
         bx::mtxOrtho(ortho, 0.0f, (float)m_pixelWidth, (float)m_pixelHeight, 0.0f,
                      -1.0f, 1.0f, 0.0f, caps ? caps->homogeneousDepth : false);
         bgfx::setViewTransform(3, nullptr, ortho);
+        bgfx::setViewMode(3, bgfx::ViewMode::Sequential);
         
         // 重新布局 UI（尽量避免重建；这里简单重建并重置事件根）
         createUI();
@@ -294,11 +328,11 @@ void MenuScene::createUI() {
     vbox->setSpacing(spacing);
     panel->addChild(vbox);
 
-    // 标题
+    // 标题（增加高度以适配 48 号字体）
     auto* title = new UI::UILabel();
     title->setText("Tina - 主菜单");
     title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
-    title->setSize(panelW - pad*2, 44.0f);
+    title->setSize(panelW - pad*2, 60.0f);  // 从 44 增加到 60，适配 48 号字体
     vbox->addChild(title);
 
     // 三个按钮（占满行宽）
@@ -458,3 +492,4 @@ void MenuScene::activateSelectedButton() {
 // 手工 hover/click 逻辑已由 UIEventSystem 接管
 
 } // namespace Tina::Game
+

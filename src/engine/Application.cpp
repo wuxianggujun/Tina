@@ -7,6 +7,8 @@
 #include "AudioManager.hpp"
 #include "../core/Log.hpp"
 #include "../os/OS.hpp"
+// 全局 TextRenderer 实现
+#include "../ui/TextRenderer.hpp"
 
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
@@ -145,6 +147,16 @@ void Application::init()
     // 7. 全局着色器管理器（必须在 bgfx 初始化后建立，且在 bgfx 关闭前销毁）
     m_shaderMgr = Memory::MakeUnique<Tina::Renderer::ShaderManager>();
     m_shaderMgr->initialize();
+
+    // 初始化全局 TextRenderer（共享给所有 Scene 使用）
+    m_textRenderer = Memory::MakeUnique<Tina::UI::TextRenderer>();
+    if (!m_textRenderer->initialize(*m_shaderMgr, *m_resourceHub)) {
+        TINA_ERROR("Application: TextRenderer 初始化失败");
+    } else {
+        // 使用 48 号字体（MenuScene 标题需要）全局 TextRenderer 只能用一个字号
+        m_textRenderer->loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 48);
+        TINA_INFO("Application: TextRenderer 已加载 48 号字体");
+    }
 
     // 7.5 预热常用资源（字体/图标），减少首帧等待
     prewarmCommonAssets();
@@ -401,11 +413,15 @@ void Application::prewarmCommonAssets()
     }
 
     if (font && font->getState() == Tina::Engine::Resource::State::READY) {
-        // 确保常用字号
-        font->ensureFace(24);
-        font->ensureFace(32);
+        // 确保 48 号 Face（全局 TextRenderer 使用）
         font->ensureFace(48);
+        TINA_INFO("Application: 字体 Face 48 号已预热");
     }
+}
+
+UI::TextRenderer& Application::textRenderer() const
+{
+    return *m_textRenderer;
 }
 
 } // namespace Tina::Engine

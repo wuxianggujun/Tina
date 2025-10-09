@@ -11,7 +11,6 @@
 #include "../ui/UINode.hpp"
 #include "../ui/UIComponents.hpp"
 #include "../ui/UIEventSystem.hpp"
-#include "../ui/TextRenderer.hpp"
 
 namespace Tina::Game {
 
@@ -35,7 +34,6 @@ private:
     void onBackTime();
 
 private:
-    Memory::UniquePtr<UI::TextRenderer> m_textRenderer;
     Memory::UniquePtr<UI::UIRenderer> m_uiRenderer;
     Memory::UniquePtr<UI::UINode> m_root;
     Container::Vector<Memory::UniquePtr<UI::UINode>> m_ownedNodes;  // 统一管理所有节点生命周期

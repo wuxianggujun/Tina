@@ -85,6 +85,17 @@ public:
                     AlignV valign = AlignV::Center,
                     float padX = 0.0f, float padY = 0.0f);
 
+    // 顶层文本绘制（延迟到 flush() 统一提交，确保在所有图元之上）
+    void drawTextTop(uint16_t viewId, float x, float y,
+                     float r, float g, float b, float a,
+                     const std::string& utf8);
+    void drawTextExTop(uint16_t viewId, float x, float y, float w, float h,
+                       float r, float g, float b, float a,
+                       const std::string& utf8,
+                       AlignH halign = AlignH::Center,
+                       AlignV valign = AlignV::Center,
+                       float padX = 0.0f, float padY = 0.0f);
+
     // 文本扩展绘制（Core::Color 版本）
     void drawTextEx(uint16_t viewId, float x, float y, float w, float h,
                     const Tina::Core::Color& color,
@@ -139,6 +150,19 @@ private:
         void clear() { vertices.clear(); indices.clear(); texture = BGFX_INVALID_HANDLE; }
     };
 
+    // 文本命令（延后统一提交，保证文本在图元之上）
+    struct TextCmd {
+        uint16_t viewId = 0;
+        bool isEx = false; // true 使用扩展绘制（带对齐与包围矩形），false 为直接 drawText
+        // 通用
+        float x = 0, y = 0;
+        float r = 1, g = 1, b = 1, a = 1;
+        std::string text;
+        // 扩展参数
+        float w = 0, h = 0; float padX = 0, padY = 0;
+        AlignH hAlign = AlignH::Center; AlignV vAlign = AlignV::Center;
+    };
+
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
     bgfx::VertexLayout  m_colorLayout{};
     TextRenderer*       m_text = nullptr;
@@ -152,11 +176,13 @@ private:
     ColorBatch m_colorBatch;
     Container::Vector<SpriteBatch> m_spriteBatches;
     uint16_t m_currentViewId = 0;
+    Container::Vector<TextCmd> m_textCmds;
 
     // 内部工具方法
     SpriteBatch* findOrCreateSpriteBatch(bgfx::TextureHandle tex);
     void flushColorBatch();
     void flushSpriteBatches();
+    void flushTextCommands();
 };
 
 } // namespace Tina::UI

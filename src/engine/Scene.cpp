@@ -22,7 +22,7 @@ UI::UIRenderer& Scene::ui() {
     if (!m_uiRenderer) {
         m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
         // 不强依赖 TextRenderer，由各具体 Scene 自行管理文本渲染器
-        if (!m_uiRenderer->initialize(app()->shaders(), nullptr)) {
+        if (!m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer())) {
             TINA_ERROR("Scene::ui() - UIRenderer初始化失败");
         }
     }

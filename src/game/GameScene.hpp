@@ -7,7 +7,6 @@
 #include "../ecs/World.hpp"
 #include "../game/Camera2D.hpp"
 #include "../renderer/TileRenderer.hpp"
-#include "../ui/TextRenderer.hpp"
 #include "../ui/UICore.hpp"  // UIRenderer
 #include "../ui/UIToolbar.hpp"
 #include "../ui/UICharacterPanel.hpp"
@@ -84,7 +83,6 @@ private:
     // 渲染资源（着色器来自全局 ShaderManager）
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
 
-    Memory::UniquePtr<UI::TextRenderer> m_textRenderer;
     Memory::UniquePtr<UI::UIRenderer> m_uiRenderer;
     Memory::UniquePtr<Particles::ParticleSystem2D> m_particleSystem;
     Memory::UniquePtr<Renderer::TileRenderer> m_tileRenderer;

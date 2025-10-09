@@ -22,16 +22,19 @@ void SettingsScene::onEnter()
     TINA_INFO("SettingsScene::onEnter - 进入设置页面");
 
     app()->getPixelSize(m_pixelWidth, m_pixelHeight);
+    // 使用全局 TextRenderer（默认 32 号），避免场景内切换字号
 
+    #if 0
     m_textRenderer = Memory::MakeUnique<UI::TextRenderer>();
     if (!m_textRenderer->initialize(app()->shaders(), app()->resources())) {
         TINA_ERROR("SettingsScene: TextRenderer 初始化失败");
     } else {
         m_textRenderer->loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 28);
     }
+    #endif
 
     m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
-    m_uiRenderer->initialize(app()->shaders(), m_textRenderer.get());
+    m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer());
 
     createUI();
     m_events.setRoot(m_root.get());
@@ -47,7 +50,6 @@ void SettingsScene::onExit()
 
     m_root.reset();
     m_uiRenderer.reset();
-    m_textRenderer.reset();
 }
 
 void SettingsScene::update(float dt)

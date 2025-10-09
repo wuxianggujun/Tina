@@ -95,7 +95,7 @@ void GameScene::onExit()
 
     m_tileRenderer.reset();
     m_particleSystem.reset();
-    m_textRenderer.reset();
+    
 
     // 程序句柄由全局 ShaderManager 管理，无需手动销毁
     m_progColor = BGFX_INVALID_HANDLE;
@@ -229,12 +229,16 @@ void GameScene::initializeResources()
     m_progColor = app()->shaders().loadProgram("color", "color");
 
     // 2. 文本渲染器
+    // 改用全局 TextRenderer
+    // 使用全局 TextRenderer（默认 32 号），避免在场景内切换字号
+    #if 0
     m_textRenderer = Memory::MakeUnique<UI::TextRenderer>();
     if (!m_textRenderer->initialize(app()->shaders(), app()->resources())) {
         TINA_ERROR("TextRenderer 初始化失败");
     } else {
         m_textRenderer->loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 24);
     }
+    #endif
 
     // 3. 粒子系统
     m_particleSystem = Memory::MakeUnique<Particles::ParticleSystem2D>();
@@ -308,11 +312,11 @@ void GameScene::createUI()
 {
     // UI 渲染器
     m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
-    m_uiRenderer->initialize(app()->shaders(), m_textRenderer.get());
+    m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer());
 
     // 工具栏
     m_toolbar = Memory::MakeUnique<UI::UIToolbar>();
-    m_toolbar->initialize(m_pixelWidth, m_pixelHeight, *m_uiRenderer, m_textRenderer.get());
+    m_toolbar->initialize(m_pixelWidth, m_pixelHeight, *m_uiRenderer, &app()->textRenderer());
     // 通过 TextureManager 加载工具图标（示例使用现有纹理资源）
     {
         auto* hub = &app()->resources();
@@ -627,7 +631,7 @@ void GameScene::renderWorld()
 
 void GameScene::renderUI()
 {
-    if (!m_toolbar || !m_textRenderer || !m_uiRenderer) return;
+    if (!m_toolbar || !m_uiRenderer) return;
 
     // UI 视图已在 initializeResources() 中设置
 
@@ -847,6 +851,8 @@ void GameScene::setupUIView()
                  caps ? caps->homogeneousDepth : false);
 
     bgfx::setViewTransform(3, nullptr, ortho);
+    // UI 必须按提交顺序绘制，防止默认排序打乱前后关系
+    bgfx::setViewMode(3, bgfx::ViewMode::Sequential);
 }
 
 void GameScene::subscribeToEvents()

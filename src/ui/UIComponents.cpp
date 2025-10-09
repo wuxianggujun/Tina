@@ -38,10 +38,11 @@ void UILabel::onRender(uint16_t viewId, UIRenderer& renderer)
     }
 
     // 使用扩展文本绘制接口，在节点矩形内绘制文本；默认提供 4px 内边距
-    renderer.drawTextEx(viewId, pos.x, pos.y, size.x, size.y,
-                        m_color, m_text,
-                        hAlign, vAlign,
-                        4.0f, 4.0f);
+    renderer.drawTextExTop(viewId, pos.x, pos.y, size.x, size.y,
+                           m_color.r(), m_color.g(), m_color.b(), m_color.a(),
+                           m_text,
+                           hAlign, vAlign,
+                           4.0f, 4.0f);
 }
 
 // === UIButton 实现 ===
@@ -90,9 +91,10 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         float ty = iy + iconSide + 2.0f;
         float twRect = size.x - pad*2.0f;
         float thRect = std::max(0.0f, pos.y + size.y - ty - pad);
-        renderer.drawTextEx(viewId, tx, ty, twRect, thRect,
-                            m_textColor, m_text,
-                            UIRenderer::AlignH::Center, UIRenderer::AlignV::Center, 0.0f, 0.0f);
+        renderer.drawTextExTop(viewId, tx, ty, twRect, thRect,
+                               m_textColor.r(), m_textColor.g(), m_textColor.b(), m_textColor.a(),
+                               m_text,
+                               UIRenderer::AlignH::Center, UIRenderer::AlignV::Center, 0.0f, 0.0f);
     } else if (hasIcon && m_iconLayout == IconLayout::IconLeftTextRight) {
         // 图标在左，文本在右
         float iconSide = std::min(size.y - pad*2.0f, size.x * 0.45f);
@@ -105,9 +107,10 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         float ty = pos.y + pad;
         float twRect = std::max(0.0f, pos.x + size.x - pad - tx);
         float thRect = size.y - pad*2.0f;
-        renderer.drawTextEx(viewId, tx, ty, twRect, thRect,
-                            m_textColor, m_text,
-                            UIRenderer::AlignH::Left, UIRenderer::AlignV::Center, 0.0f, 0.0f);
+        renderer.drawTextExTop(viewId, tx, ty, twRect, thRect,
+                               m_textColor.r(), m_textColor.g(), m_textColor.b(), m_textColor.a(),
+                               m_text,
+                               UIRenderer::AlignH::Left, UIRenderer::AlignV::Center, 0.0f, 0.0f);
     } else {
         // 默认：无图标（或中心覆盖图标）+ 文本居中
         if (hasIcon) {
@@ -150,14 +153,13 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         renderer.drawRect(viewId, bx, by, 1.0f, bh, bhc);
         renderer.drawRect(viewId, bx+bw-1.0f, by, 1.0f, bh, bhc);
         // 角标文本
-        renderer.drawTextEx(viewId, bx, by, bw, bh,
-                            m_badgeTextColor,
-                            m_badgeText,
-                            UIRenderer::AlignH::Center,
-                            UIRenderer::AlignV::Center,
-                            0.0f, 0.0f);
+        renderer.drawTextExTop(viewId, bx, by, bw, bh,
+                               m_badgeTextColor.r(), m_badgeTextColor.g(), m_badgeTextColor.b(), m_badgeTextColor.a(),
+                               m_badgeText,
+                               UIRenderer::AlignH::Center,
+                               UIRenderer::AlignV::Center,
+                               0.0f, 0.0f);
     }
 }
 
 } // namespace Tina::UI
-

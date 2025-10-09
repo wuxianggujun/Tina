@@ -28,18 +28,21 @@ void PauseScene::onEnter()
 
     // 初始化渲染资源（使用全局 ShaderManager）
     m_progColor = app()->shaders().loadProgram("color", "color");
+    // 使用全局 TextRenderer（默认 32 号），无需在场景内切换字号
 
     // 文本渲染器
+    #if 0
     m_textRenderer = Memory::MakeUnique<UI::TextRenderer>();
     if (!m_textRenderer->initialize(app()->shaders(), app()->resources())) {
         TINA_ERROR("TextRenderer 初始化失败");
     } else {
         m_textRenderer->loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 32);
     }
+    #endif
 
     // UI 渲染器
     m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
-    m_uiRenderer->initialize(app()->shaders(), m_textRenderer.get());
+    m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer());
 
     // 初始化顶点布局
     m_colorLayout.begin()
@@ -74,7 +77,7 @@ void PauseScene::onExit()
 
     // 清理渲染资源（按逆序）
     m_uiRenderer.reset();
-    m_textRenderer.reset();
+    
     
     // 不手动销毁 m_progColor，让全局 ShaderManager 自动管理（避免双重释放）
     m_progColor = BGFX_INVALID_HANDLE;
@@ -286,6 +289,8 @@ void PauseScene::renderOverlay()
                  0.0f,
                  caps ? caps->homogeneousDepth : false);
     bgfx::setViewTransform(3, nullptr, ortho);
+    // UI 覆盖层也采用顺序模式，确保遮罩与文字层级可控
+    bgfx::setViewMode(3, bgfx::ViewMode::Sequential);
 
     // 定义全屏四边形顶点（两个三角形）
     struct PosColorVertex {

@@ -87,6 +87,14 @@ void UIRenderer::drawText(uint16_t viewId, float x, float y,
                           const std::string& utf8)
 {
     if (!m_text) return;
+    // 延迟到 flush() 统一提交，避免被后续批次覆盖
+    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = false;
+    cmd.x = x; cmd.y = y; cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8;
+    m_textCmds.push_back(std::move(cmd));
+    return;
+    // 确保文本绘制位于已积累批次之上
+    flushColorBatch();
+    flushSpriteBatches();
     // 文本渲染仍然立即提交（TextRenderer自带批处理）
     m_text->drawText(viewId, x, y, r, g, b, a, utf8.c_str());
 }
@@ -104,7 +112,22 @@ void UIRenderer::drawTextEx(uint16_t viewId, float x, float y, float w, float h,
                             AlignH halign, AlignV valign,
                             float padX, float padY)
 {
-    if (!m_text || w <= 0.0f || h <= 0.0f) return;
+    if (!m_text || w <= 0.0f || h <= 0.0f) {
+        if (!m_text) {
+            TINA_WARN("UIRenderer: 未绑定 TextRenderer，文本无法绘制");
+        }
+        return;
+    }
+    // 提交已积累的批次，保证后续文本在上层
+    flushColorBatch();
+    flushSpriteBatches();
+    // 延迟到 flush() 统一提交（包含布局/对齐信息）
+    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = true;
+    cmd.x = x; cmd.y = y; cmd.w = w; cmd.h = h; cmd.padX = padX; cmd.padY = padY;
+    cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8;
+    cmd.hAlign = halign; cmd.vAlign = valign;
+    m_textCmds.push_back(std::move(cmd));
+    return;
     float tw=0.0f, th=0.0f, tTop=0.0f, tBottom=0.0f;
     m_text->measureTextExtents(utf8, tw, th, tTop, tBottom);
 
@@ -170,6 +193,7 @@ void UIRenderer::flush()
 {
     flushColorBatch();
     flushSpriteBatches();
+    flushTextCommands();
     
     // 清理（为下一帧做准备，但保留内存容量）
     m_colorBatch.vertices.clear();
@@ -179,6 +203,7 @@ void UIRenderer::flush()
         batch.indices.clear();
     }
     m_spriteBatches.clear();
+    m_textCmds.clear();
 }
 
 // 提交纯色批次
@@ -188,6 +213,8 @@ void UIRenderer::flushColorBatch()
 
     const uint32_t vcount = static_cast<uint32_t>(m_colorBatch.vertices.size());
     const uint32_t icount = static_cast<uint32_t>(m_colorBatch.indices.size());
+    
+    TINA_INFO("UIRenderer: flushColorBatch - 提交 {} 个矩形", vcount / 4);
     
     // 检查瞬态缓冲区容量
     if (bgfx::getAvailTransientVertexBuffer(vcount, m_colorLayout) < vcount ||
@@ -206,8 +233,11 @@ void UIRenderer::flushColorBatch()
     std::memcpy(tib.data, m_colorBatch.indices.data(), icount * sizeof(uint16_t));
     
     // 提交单个批次（合并了所有矩形）
-    bgfx::Encoder* enc = bgfx::begin();
+    bgfx::Encoder* enc = bgfx::begin(false);  // 不排序，按顺序渲染
     if (enc) {
+        float mtx[16];
+        bx::mtxIdentity(mtx);
+        enc->setTransform(mtx);  // 显式设置单位矩阵
         enc->setVertexBuffer(0, &tvb);
         enc->setIndexBuffer(&tib);
         enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
@@ -244,8 +274,11 @@ void UIRenderer::flushSpriteBatches()
         std::memcpy(tvb.data, batch.vertices.data(), vcount * sizeof(SpriteVtx));
         std::memcpy(tib.data, batch.indices.data(), icount * sizeof(uint16_t));
         
-        bgfx::Encoder* enc = bgfx::begin();
+        bgfx::Encoder* enc = bgfx::begin(false);  // 不排序，按顺序渲染
         if (enc) {
+            float mtx[16];
+            bx::mtxIdentity(mtx);
+            enc->setTransform(mtx);  // 显式设置单位矩阵
             enc->setVertexBuffer(0, &tvb);
             enc->setIndexBuffer(&tib);
             enc->setTexture(0, m_sTex, batch.texture,
@@ -273,6 +306,58 @@ UIRenderer::SpriteBatch* UIRenderer::findOrCreateSpriteBatch(bgfx::TextureHandle
     newBatch.texture = tex;
     m_spriteBatches.push_back(newBatch);
     return &m_spriteBatches.back();
+}
+
+// 顶层文本：延迟到 flush() 统一提交
+void UIRenderer::flushTextCommands()
+{
+    if (!m_text || m_textCmds.empty()) return;
+    TINA_INFO("UIRenderer: flushTextCommands - 提交 {} 条文本命令", (int)m_textCmds.size());
+    for (const auto& cmd : m_textCmds) {
+        if (!cmd.isEx) {
+            m_text->drawText(cmd.viewId, cmd.x, cmd.y, cmd.r, cmd.g, cmd.b, cmd.a, cmd.text);
+        } else {
+            float tw=0.0f, th=0.0f, tTop=0.0f, tBottom=0.0f;
+            m_text->measureTextExtents(cmd.text, tw, th, tTop, tBottom);
+            float textX = cmd.x + cmd.padX;
+            if (cmd.hAlign == AlignH::Center) textX = cmd.x + (cmd.w - tw)*0.5f;
+            else if (cmd.hAlign == AlignH::Right) textX = cmd.x + cmd.w - cmd.padX - tw;
+            float baselineY = cmd.y + cmd.padY + tTop;
+            if (cmd.vAlign == AlignV::Center) {
+                baselineY = cmd.y + cmd.h*0.5f + (tTop - tBottom)*0.5f;
+            } else if (cmd.vAlign == AlignV::Bottom) {
+                baselineY = cmd.y + cmd.h - cmd.padY - tBottom;
+            } else if (cmd.vAlign == AlignV::Baseline) {
+                baselineY = cmd.y + cmd.h - cmd.padY;
+            }
+            float textY = baselineY - (float)m_text->ascenderPx();
+            m_text->drawText(cmd.viewId, textX, textY, cmd.r, cmd.g, cmd.b, cmd.a, cmd.text);
+        }
+    }
+}
+
+void UIRenderer::drawTextTop(uint16_t viewId, float x, float y,
+                             float r, float g, float b, float a,
+                             const std::string& utf8)
+{
+    if (!m_text) return;
+    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = false;
+    cmd.x = x; cmd.y = y; cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8;
+    m_textCmds.push_back(std::move(cmd));
+}
+
+void UIRenderer::drawTextExTop(uint16_t viewId, float x, float y, float w, float h,
+                               float r, float g, float b, float a,
+                               const std::string& utf8,
+                               AlignH halign, AlignV valign,
+                               float padX, float padY)
+{
+    if (!m_text || w <= 0.0f || h <= 0.0f) return;
+    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = true;
+    cmd.x = x; cmd.y = y; cmd.w = w; cmd.h = h; cmd.padX = padX; cmd.padY = padY;
+    cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8;
+    cmd.hAlign = halign; cmd.vAlign = valign;
+    m_textCmds.push_back(std::move(cmd));
 }
 
 } // namespace Tina::UI
