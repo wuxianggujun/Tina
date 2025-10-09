@@ -97,7 +97,9 @@ void PauseScene::render()
 
     // 3. 渲染 UI（按钮和文本）
     if (m_rootNode && m_uiRenderer) {
+        m_uiRenderer->beginFrame(3);
         m_rootNode->render(3, *m_uiRenderer);
+        m_uiRenderer->flush();
     }
 }
 

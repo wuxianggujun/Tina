@@ -147,6 +147,11 @@ void MenuScene::render() {
     // 渲染粒子背景
     renderParticleBackground();
     
+    // === UI渲染开始（批处理模式） ===
+    if (m_uiRenderer) {
+        m_uiRenderer->beginFrame(3);
+    }
+    
     // 渲染标题
     if (m_textRenderer && m_uiRenderer && m_titleAlpha > 0.0f) {
         float titleX = (float)m_pixelWidth / 2.0f;

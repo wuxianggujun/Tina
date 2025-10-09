@@ -60,7 +60,11 @@ void SettingsScene::render()
 {
     // 触摸 UI 视图
     bgfx::touch(3);
-    if (m_root && m_uiRenderer) m_root->render(3, *m_uiRenderer);
+    if (m_root && m_uiRenderer) {
+        m_uiRenderer->beginFrame(3);
+        m_root->render(3, *m_uiRenderer);
+        m_uiRenderer->flush();
+    }
 }
 
 void SettingsScene::handleEvent(const Tina::os::Event& event)

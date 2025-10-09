@@ -42,6 +42,11 @@ public:
                   const Tina::Core::Color& color,
                   const std::string& utf8);
 
+    // 批处理：统一提交所有缓存的绘制指令
+    // 必须在所有 drawXXX 调用之后，每帧仅调用一次
+    void beginFrame(uint16_t viewId);
+    void flush();
+
     // 文本扩展绘制：基于矩形与对齐参数绘制，内部使用 TextRenderer 的精确测量与基线对齐
     enum class AlignH { Left, Center, Right };
     enum class AlignV { Top, Center, Bottom, Baseline };
@@ -82,6 +87,30 @@ public:
                    float r = 1.0f, float g = 1.0f, float b = 1.0f, float a = 1.0f);
 
 private:
+    // 顶点结构
+    struct ColorVtx {
+        float x, y, z;
+        float r, g, b, a;
+    };
+    struct SpriteVtx {
+        float x, y, z;
+        float u, v;
+        float r, g, b, a;
+    };
+
+    // 批处理结构
+    struct ColorBatch {
+        Container::Vector<ColorVtx> vertices;
+        Container::Vector<uint16_t> indices;
+        void clear() { vertices.clear(); indices.clear(); }
+    };
+    struct SpriteBatch {
+        Container::Vector<SpriteVtx> vertices;
+        Container::Vector<uint16_t> indices;
+        bgfx::TextureHandle texture = BGFX_INVALID_HANDLE;
+        void clear() { vertices.clear(); indices.clear(); texture = BGFX_INVALID_HANDLE; }
+    };
+
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
     bgfx::VertexLayout  m_colorLayout{};
     TextRenderer*       m_text = nullptr;
@@ -90,6 +119,16 @@ private:
     bgfx::ProgramHandle m_progSprite = BGFX_INVALID_HANDLE;
     bgfx::VertexLayout  m_spriteLayout{};
     bgfx::UniformHandle m_sTex = BGFX_INVALID_HANDLE;
+
+    // 批处理缓冲
+    ColorBatch m_colorBatch;
+    Container::Vector<SpriteBatch> m_spriteBatches;
+    uint16_t m_currentViewId = 0;
+
+    // 内部工具方法
+    SpriteBatch* findOrCreateSpriteBatch(bgfx::TextureHandle tex);
+    void flushColorBatch();
+    void flushSpriteBatches();
 };
 
 } // namespace Tina::UI

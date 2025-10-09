@@ -61,6 +61,7 @@ private:
 
     // UI 组件
     Memory::UniquePtr<UI::UINode> m_rootNode;
+    Container::Vector<Memory::UniquePtr<UI::UINode>> m_ownedNodes;  // 统一管理所有节点生命周期
     UI::UIButton* m_btnContinue = nullptr;  // 继续游戏按钮
     UI::UIButton* m_btnQuit = nullptr;      // 退出按钮
     // 调试按钮

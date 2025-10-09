@@ -11,10 +11,12 @@ UINode::UINode(const std::string& name)
 
 UINode::~UINode()
 {
-    // 析构时清理所有子节点
+    // 不负责删除子节点，仅断开关系
+    // 子节点的生命周期由外部（Scene等）管理
     for (auto* child : m_children) {
-        child->m_parent = nullptr;
-        delete child;
+        if (child) {
+            child->m_parent = nullptr;
+        }
     }
     m_children.clear();
 }

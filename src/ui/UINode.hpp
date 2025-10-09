@@ -4,6 +4,18 @@
 // - 支持相对/绝对坐标变换
 // - 支持可见性、激活状态
 // - 提供事件接口（点击、hover等）
+//
+// 【重要】内存管理模型：
+// - UINode 不拥有子节点的所有权，仅持有裸指针
+// - addChild() 不会转移所有权，仅建立父子关系
+// - 析构函数不会删除子节点
+// - 节点的生命周期应由外部（如 Scene）使用智能指针统一管理
+//
+// 使用示例：
+//   auto root = Memory::MakeUnique<UINode>("Root");
+//   auto child = Memory::MakeUnique<UIButton>("Child");
+//   root->addChild(child.get());  // 仅传递裸指针
+//   // Scene 负责持有 root 和 child 的 UniquePtr
 
 #pragma once
 

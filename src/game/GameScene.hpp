@@ -97,6 +97,7 @@ private:
     // UI
     Memory::UniquePtr<UI::UIToolbar> m_toolbar;
     Memory::UniquePtr<UI::UICharacterPanel> m_characterPanel;
+    Container::Vector<Memory::UniquePtr<UI::UINode>> m_ownedNodes;  // 统一管理UI节点生命周期
 
     // Signal 连接管理（RAII 自动断开）
     Core::Signal<>::Connection m_switchControlConnection;
