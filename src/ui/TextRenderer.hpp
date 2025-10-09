@@ -50,6 +50,9 @@ public:
     int ascenderPx() const { return m_font ? m_font->ascender : 0; }
     int descenderPx() const { return m_font ? m_font->descender : 0; }
     int currentFontPx() const { return m_font ? m_font->sizePx : 0; }
+    // 采样器过滤方式：默认点采样（像素风），设置为 true 使用线性过滤（小字号更柔和）
+    void setLinearFilter(bool enable) { m_linearFilter = enable; }
+    bool linearFilter() const { return m_linearFilter; }
     // 切换当前使用的 Face 像素大小（需已通过 loadFont 绑定字体资源）
     // 返回是否切换成功；失败时不改变当前字体
     bool setFontPx(int pixelSize);
@@ -102,6 +105,7 @@ private:
     int16_t m_clipX = 0, m_clipY = 0; uint16_t m_clipW = 0, m_clipH = 0;
 
     bool m_pixelSnap = true;
+    bool m_linearFilter = false;
 };
 
 } // namespace Tina::UI

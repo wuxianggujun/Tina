@@ -302,9 +302,13 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
     enc->setTransform(mtx);
     enc->setVertexBuffer(0, &tvb);
     enc->setIndexBuffer(&tib);
+    // 兼容性：本工程使用的 bgfx 版本无 MIN_LINEAR/MAG_LINEAR 宏。
+    // 线性过滤：不设置 MIN/MAG（默认线性）。像素风：显式设置为 POINT。
+    uint32_t filter = m_linearFilter
+        ? 0u
+        : (BGFX_SAMPLER_MIN_POINT  | BGFX_SAMPLER_MAG_POINT);
     enc->setTexture(0, m_sText, m_atlasTex,
-        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
-        BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT);
+        BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP | filter);
     // 尝试移除 DEPTH_TEST，因为 UI 在 2D 空间不需要深度测试
     enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
     if (m_hasClip) {

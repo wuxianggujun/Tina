@@ -132,18 +132,27 @@ void UIToolbar::buildLayout()
         btn->setAnchor(Anchor::TopLeft);
         // 默认布局：左图标 + 右文本（避免重叠）
         btn->setIconLayout(UIButton::IconLayout::IconLeftTextRight);
-        // 自适应字号：主文本与角标使用相对 slot 尺寸的像素字号
-        int mainPx  = std::clamp(m_slotSize * 38 / 100, 14, 28);  // ~0.38x 高度
-        int badgePx = std::clamp(m_slotSize * 28 / 100, 12, 20);  // 更小的角标
-        btn->setFontPx(mainPx);
-        btn->setBadgeFontPx(badgePx);
-
         // 中央主标识：前三个为“水/挖/爆”，其余占位
         std::string center;
         if (i == 0) center = "水";
         else if (i == 1) center = "清";
         else if (i == 2) center = "爆";
         else center = "";
+        // 自适应字号：主文本与角标使用相对 slot 尺寸的像素字号
+        int mainPx  = std::clamp(m_slotSize * 32 / 100, 12, 26);  // 基础比例
+        int badgePx = std::clamp(m_slotSize * 22 / 100, 10, 18);
+        // 自适应拟合：按可用高度缩放按钮文字（避免顶格过大）
+        if (!center.empty() && m_renderer) {
+            float tw=0.0f, th=0.0f;
+            m_renderer->measureText(center, tw, th, mainPx);
+            const float maxTextH = std::max(8.0f, (float)m_slotSize - (float)m_padding*2.0f);
+            if (th > 0.0f && th > maxTextH) {
+                int fitted = (int)std::floor((double)mainPx * (double)maxTextH / (double)th);
+                mainPx = std::clamp(fitted, 10, mainPx);
+            }
+        }
+        btn->setFontPx(mainPx);
+        btn->setBadgeFontPx(badgePx);
         btn->setText(center);
         // 角标：显示数字编号（放在右下角，避免遮挡中央文字）
         btn->setBadgeText(std::to_string(i + 1));

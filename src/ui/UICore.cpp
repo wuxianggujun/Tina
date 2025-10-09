@@ -270,6 +270,12 @@ void UIRenderer::flushTextCommands()
                 needRestore = true;
             }
         }
+        // 小字号使用线性过滤，提升可读性；否则使用点采样保持锐利
+        bool prevFilter = m_text->linearFilter();
+        bool wantLinear = (cmd.fontPx > 0 ? cmd.fontPx : prevPx) <= 24;
+        if (wantLinear != prevFilter) {
+            m_text->setLinearFilter(wantLinear);
+        }
         if (!(cmd.w > 0.0f && cmd.h > 0.0f)) {
             m_text->drawText(cmd.viewId, cmd.x, cmd.y, cmd.r, cmd.g, cmd.b, cmd.a, cmd.text);
         } else {
@@ -291,6 +297,10 @@ void UIRenderer::flushTextCommands()
         }
         if (needRestore) {
             m_text->setFontPx(prevPx);
+        }
+        // 恢复过滤模式
+        if (m_text->linearFilter() != prevFilter) {
+            m_text->setLinearFilter(prevFilter);
         }
     }
 }

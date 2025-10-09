@@ -93,6 +93,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         UIRenderer::TextOptions to{};
         to.r = m_textColor.r(); to.g = m_textColor.g(); to.b = m_textColor.b(); to.a = m_textColor.a();
         to.hAlign = UIRenderer::AlignH::Center; to.vAlign = UIRenderer::AlignV::Center;
+        if (m_fontPx > 0) to.fontPx = m_fontPx;
         renderer.drawTextBox(viewId, tx, ty, twRect, thRect, m_text, to);
     } else if (hasIcon && m_iconLayout == IconLayout::IconLeftTextRight) {
         // 图标在左，文本在右
@@ -109,6 +110,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         UIRenderer::TextOptions to{};
         to.r = m_textColor.r(); to.g = m_textColor.g(); to.b = m_textColor.b(); to.a = m_textColor.a();
         to.hAlign = UIRenderer::AlignH::Left; to.vAlign = UIRenderer::AlignV::Center;
+        if (m_fontPx > 0) to.fontPx = m_fontPx;
         renderer.drawTextBox(viewId, tx, ty, twRect, thRect, m_text, to);
     } else {
         // 默认：无图标（或中心覆盖图标）+ 文本居中
