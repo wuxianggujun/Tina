@@ -8,6 +8,13 @@
 #pragma once
 
 #include "../os/OS.hpp"
+#include "../core/Memory.hpp"
+#include "SceneRenderer.hpp"  // EASTL的unique_ptr需要完整定义
+
+// 前向声明
+namespace Tina::UI {
+    class UIRenderer;
+}
 
 namespace Tina::Engine {
 
@@ -18,7 +25,8 @@ class Application;
 // 派生类必须实现 update() 和 render() 纯虚函数
 class Scene {
 public:
-    virtual ~Scene() = default;
+    // 虚析构函数（多态基类必须，在.cpp中定义以支持UniquePtr）
+    virtual ~Scene();
 
     // ==================== 生命周期回调 ====================
 
@@ -60,10 +68,32 @@ public:
 protected:
     // 访问Application实例（用于访问events()/scenes()等全局服务）
     Application* app() const { return m_app; }
+    
+    // === UI便捷访问（阶段1：自动化封装） ===
+    
+    // 获取UIRenderer（懒加载，自动初始化）
+    // 用途：Scene子类通过ui()访问UIRenderer，无需手动初始化
+    // 示例：ui().drawRect(...); ui().drawText(...);
+    UI::UIRenderer& ui();
+    
+    // 获取SceneRenderer（懒加载，自动初始化）
+    // 用途：绘制背景、遮罩等，无需了解着色器和顶点布局
+    // 示例：scene().drawGradientBackground(...);
+    SceneRenderer& scene();
+    
+    // 获取UI视图ID（子类可覆盖）
+    // 默认：view 3（UI层）
+    virtual uint16_t uiViewId() const { return 3; }
 
 private:
     Application* m_app = nullptr;  // Application实例指针（不持有所有权）
     bool m_active = true;          // 场景活跃标志（由SceneManager管理）
+    
+    // UI渲染器（懒加载，首次调用ui()时创建）
+    Memory::UniquePtr<UI::UIRenderer> m_uiRenderer;
+    
+    // Scene渲染器（懒加载，首次调用scene()时创建）
+    Memory::UniquePtr<SceneRenderer> m_sceneRenderer;
 
     // SceneManager可以访问私有成员（设置m_app和m_active）
     friend class SceneManager;

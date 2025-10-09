@@ -188,6 +188,11 @@ void MenuScene::render() {
                                  UI::UIRenderer::AlignV::Bottom,
                                  0.0f, 0.0f);
     }
+    
+    // === UI渲染结束（提交批次） ===
+    if (m_uiRenderer) {
+        m_uiRenderer->flush();
+    }
 }
 
 void MenuScene::handleEvent(const os::Event& event) {

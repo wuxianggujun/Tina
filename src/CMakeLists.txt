@@ -13,6 +13,10 @@ set(SRC_FILES
     engine/Texture.hpp
     engine/Texture.cpp
     engine/Scene.hpp
+    engine/Scene.cpp
+    engine/SceneRenderer.hpp
+    engine/SceneRenderer.cpp
+    engine/Scene.cpp
     engine/SceneManager.hpp
     engine/SceneManager.cpp
     engine/EventBus.hpp

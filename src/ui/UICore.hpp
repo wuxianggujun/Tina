@@ -46,6 +46,34 @@ public:
     // 必须在所有 drawXXX 调用之后，每帧仅调用一次
     void beginFrame(uint16_t viewId);
     void flush();
+    
+    // RAII渲染作用域：自动管理beginFrame/flush，防止忘记调用
+    // 使用方式：auto scope = renderer.beginRender(viewId);
+    class RenderScope {
+    public:
+        RenderScope(UIRenderer& renderer, uint16_t viewId)
+            : m_renderer(renderer) {
+            m_renderer.beginFrame(viewId);
+        }
+        
+        ~RenderScope() {
+            m_renderer.flush();  // 析构时自动flush，异常安全
+        }
+        
+        // 禁止复制和移动
+        RenderScope(const RenderScope&) = delete;
+        RenderScope& operator=(const RenderScope&) = delete;
+        RenderScope(RenderScope&&) = delete;
+        RenderScope& operator=(RenderScope&&) = delete;
+        
+    private:
+        UIRenderer& m_renderer;
+    };
+    
+    // 创建RAII作用域（推荐使用，自动管理）
+    RenderScope beginRender(uint16_t viewId) {
+        return RenderScope(*this, viewId);
+    }
 
     // 文本扩展绘制：基于矩形与对齐参数绘制，内部使用 TextRenderer 的精确测量与基线对齐
     enum class AlignH { Left, Center, Right };
