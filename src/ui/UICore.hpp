@@ -32,25 +32,22 @@ public:
     void drawRect(uint16_t viewId, float x, float y, float w, float h,
                   const Tina::Core::Color& color);
 
-    // 使用 TextRenderer 绘制文本（如未绑定，则忽略调用）
+    // 统一文本绘制 API（其余旧 API 已移除）
+    enum class AlignH { Left, Center, Right };
+    enum class AlignV { Top, Center, Bottom, Baseline };
+    struct TextOptions {
+        float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
+        int fontPx = 0;                 // 0 表示使用当前字号
+        AlignH hAlign = AlignH::Left;   // 仅用于 drawTextBox
+        AlignV vAlign = AlignV::Top;    // 仅用于 drawTextBox
+        float padX = 0.0f, padY = 0.0f; // 仅用于 drawTextBox
+    };
     void drawText(uint16_t viewId, float x, float y,
-                  float r, float g, float b, float a,
-                  const std::string& utf8);
-
-    // 使用 TextRenderer 绘制文本（Core::Color 版本）
-    void drawText(uint16_t viewId, float x, float y,
-                  const Tina::Core::Color& color,
-                  const std::string& utf8);
-
-    // 带字号的文本绘制（仅当前次绘制生效，不改变全局字号）
-    void drawTextPx(uint16_t viewId, float x, float y,
-                    float r, float g, float b, float a,
-                    const std::string& utf8,
-                    int fontPx);
-    void drawTextPx(uint16_t viewId, float x, float y,
-                    const Tina::Core::Color& color,
-                    const std::string& utf8,
-                    int fontPx);
+                  const std::string& utf8,
+                  const TextOptions& opts = {});
+    void drawTextBox(uint16_t viewId, float x, float y, float w, float h,
+                     const std::string& utf8,
+                     const TextOptions& opts = {});
 
     // 批处理：统一提交所有缓存的绘制指令
     // 必须在所有 drawXXX 调用之后，每帧仅调用一次
@@ -85,86 +82,30 @@ public:
         return RenderScope(*this, viewId);
     }
 
-    // 文本扩展绘制：基于矩形与对齐参数绘制，内部使用 TextRenderer 的精确测量与基线对齐
-    enum class AlignH { Left, Center, Right };
-    enum class AlignV { Top, Center, Bottom, Baseline };
-    void drawTextEx(uint16_t viewId, float x, float y, float w, float h,
-                    float r, float g, float b, float a,
-                    const std::string& utf8,
-                    AlignH halign = AlignH::Center,
-                    AlignV valign = AlignV::Center,
-                    float padX = 0.0f, float padY = 0.0f);
-    // 指定字号的扩展文本绘制
-    void drawTextExPx(uint16_t viewId, float x, float y, float w, float h,
-                      float r, float g, float b, float a,
-                      const std::string& utf8,
-                      int fontPx,
-                      AlignH halign = AlignH::Center,
-                      AlignV valign = AlignV::Center,
-                      float padX = 0.0f, float padY = 0.0f);
-
-    // 顶层文本绘制（延迟到 flush() 统一提交，确保在所有图元之上）
-    void drawTextTop(uint16_t viewId, float x, float y,
-                     float r, float g, float b, float a,
-                     const std::string& utf8);
-    void drawTextExTop(uint16_t viewId, float x, float y, float w, float h,
-                       float r, float g, float b, float a,
-                       const std::string& utf8,
-                       AlignH halign = AlignH::Center,
-                       AlignV valign = AlignV::Center,
-                       float padX = 0.0f, float padY = 0.0f);
-    // 顶层绘制的字号版本
-    void drawTextTopPx(uint16_t viewId, float x, float y,
-                       float r, float g, float b, float a,
-                       const std::string& utf8,
-                       int fontPx);
-    void drawTextExTopPx(uint16_t viewId, float x, float y, float w, float h,
-                         float r, float g, float b, float a,
-                         const std::string& utf8,
-                         int fontPx,
-                         AlignH halign = AlignH::Center,
-                         AlignV valign = AlignV::Center,
-                         float padX = 0.0f, float padY = 0.0f);
-
-    // 文本扩展绘制（Core::Color 版本）
-    void drawTextEx(uint16_t viewId, float x, float y, float w, float h,
-                    const Tina::Core::Color& color,
-                    const std::string& utf8,
-                    AlignH halign = AlignH::Center,
-                    AlignV valign = AlignV::Center,
-                    float padX = 0.0f, float padY = 0.0f);
-
-    // 文本测量代理：返回像素宽高；如未绑定 TextRenderer 返回 false
-    bool measureText(const std::string& utf8, float& outW, float& outH) const {
+    // 文本测量（可指定字号；fontPx=0 使用当前字号）
+    bool measureText(const std::string& utf8, float& outW, float& outH, int fontPx = 0) const {
         if (!m_text) { outW = outH = 0.0f; return false; }
+        int prev = m_text->currentFontPx();
+        if (fontPx > 0 && fontPx != prev) {
+            if (!const_cast<TextRenderer*>(m_text)->setFontPx(fontPx)) return false;
+            const_cast<TextRenderer*>(m_text)->measureText(utf8, outW, outH);
+            const_cast<TextRenderer*>(m_text)->setFontPx(prev);
+            return true;
+        }
         const_cast<TextRenderer*>(m_text)->measureText(utf8, outW, outH);
         return true;
     }
-
     bool measureTextExtents(const std::string& utf8, float& outW, float& outH,
-                            float& outTop, float& outBottom) const {
-        if (!m_text) { outW = outH = outTop = outBottom = 0.0f; return false; }
-        const_cast<TextRenderer*>(m_text)->measureTextExtents(utf8, outW, outH, outTop, outBottom);
-        return true;
-    }
-    // 指定字号的测量（仅本次调用生效）
-    bool measureTextPx(const std::string& utf8, float& outW, float& outH, int fontPx) const {
-        if (!m_text) { outW = outH = 0.0f; return false; }
-        int prev = m_text->currentFontPx();
-        bool ok = const_cast<TextRenderer*>(m_text)->setFontPx(fontPx);
-        if (!ok) return false;
-        const_cast<TextRenderer*>(m_text)->measureText(utf8, outW, outH);
-        const_cast<TextRenderer*>(m_text)->setFontPx(prev);
-        return true;
-    }
-    bool measureTextExtentsPx(const std::string& utf8, float& outW, float& outH,
-                              float& outTop, float& outBottom, int fontPx) const {
+                            float& outTop, float& outBottom, int fontPx = 0) const {
         if (!m_text) { outW = outH = outTop = outBottom = 0.0f; return false; }
         int prev = m_text->currentFontPx();
-        bool ok = const_cast<TextRenderer*>(m_text)->setFontPx(fontPx);
-        if (!ok) return false;
+        if (fontPx > 0 && fontPx != prev) {
+            if (!const_cast<TextRenderer*>(m_text)->setFontPx(fontPx)) return false;
+            const_cast<TextRenderer*>(m_text)->measureTextExtents(utf8, outW, outH, outTop, outBottom);
+            const_cast<TextRenderer*>(m_text)->setFontPx(prev);
+            return true;
+        }
         const_cast<TextRenderer*>(m_text)->measureTextExtents(utf8, outW, outH, outTop, outBottom);
-        const_cast<TextRenderer*>(m_text)->setFontPx(prev);
         return true;
     }
     int textAscenderPx() const { return m_text ? m_text->ascenderPx() : 0; }
@@ -203,15 +144,14 @@ private:
     // 文本命令（延后统一提交，保证文本在图元之上）
     struct TextCmd {
         uint16_t viewId = 0;
-        bool isEx = false; // true 使用扩展绘制（带对齐与包围矩形），false 为直接 drawText
         // 通用
         float x = 0, y = 0;
         float r = 1, g = 1, b = 1, a = 1;
         std::string text;
         int fontPx = 0; // 0 表示使用当前全局字号
-        // 扩展参数
+        // Box 参数（w/h>0 时启用）
         float w = 0, h = 0; float padX = 0, padY = 0;
-        AlignH hAlign = AlignH::Center; AlignV vAlign = AlignV::Center;
+        AlignH hAlign = AlignH::Left; AlignV vAlign = AlignV::Top;
     };
 
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;

@@ -643,16 +643,17 @@ void GameScene::renderUI()
         : GameConfig::UI_HUD_PADDING_Y;
 
     // HUD 提示使用较小字号，避免过大占屏
-    m_uiRenderer->drawTextExPx(3,
-                               GameConfig::UI_HUD_PADDING_X, hudY,
-                               (float)m_pixelWidth - GameConfig::UI_HUD_WIDTH_MARGIN,
-                               GameConfig::UI_HUD_HEIGHT,
-                               1, 1, 1, 1,
-                               "A/D 移动 | W/空格 跳跃 | 左键地形编辑 | 右键查看角色并切换控制 | 滚轮/数字键切换工具",
-                               24,
-                               UI::UIRenderer::AlignH::Left,
-                               UI::UIRenderer::AlignV::Top,
-                               0.0f, 0.0f);
+    {
+        UI::UIRenderer::TextOptions to{};
+        to.r = 1; to.g = 1; to.b = 1; to.a = 1; to.fontPx = 24;
+        to.hAlign = UI::UIRenderer::AlignH::Left; to.vAlign = UI::UIRenderer::AlignV::Top;
+        m_uiRenderer->drawTextBox(3,
+                                  GameConfig::UI_HUD_PADDING_X, hudY,
+                                  (float)m_pixelWidth - GameConfig::UI_HUD_WIDTH_MARGIN,
+                                  GameConfig::UI_HUD_HEIGHT,
+                                  "A/D 移动 | W/空格 跳跃 | 左键地形编辑 | 右键查看角色并切换控制 | 滚轮/数字键切换工具",
+                                  to);
+    }
 
     // 渲染工具栏
     m_toolbar->render(3);

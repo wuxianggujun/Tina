@@ -89,7 +89,8 @@ void TextRenderer::shutdown()
     if (bgfx::isValid(m_debugTex)) { bgfx::destroy(m_debugTex); m_debugTex = BGFX_INVALID_HANDLE; }
     if (bgfx::isValid(m_sText))    { bgfx::destroy(m_sText);    m_sText = BGFX_INVALID_HANDLE; }
     // 程序由全局 ShaderManager 管理，这里不做销毁
-    m_font.face = nullptr; m_font.glyphs.clear();
+    if (m_font) { m_font->face = nullptr; m_font->glyphs.clear(); }
+    m_fontsCache.clear();
     m_fontRef.reset(); m_resHub = nullptr;
 }
 
@@ -100,7 +101,7 @@ bool TextRenderer::loadFont(const std::string& path, int pixelSize)
     if (!fr) { TINA_ERROR("TextRenderer: 字体资源加载失败: {}", path); return false; }
     m_fontRef = Tina::Engine::ResourceRef<Tina::Engine::FontResource>(m_resHub, fr);
     m_requestedFontPx = pixelSize;
-    m_font.glyphs.clear();
+    if (m_font) m_font->glyphs.clear();
 
     // 尝试立即建立 Face；如资源尚未 READY，延迟到后续渲染/测量时再完成
     if (!ensureFontReady()) {
@@ -210,30 +211,30 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
     idx.reserve(utf8.size() * 6);
 
     float penX = x;
-    float baseY = y + (float)m_font.ascender;
+    float baseY = y + (float)(m_font ? m_font->ascender : 0);
     const char* p = utf8.data();
     const char* end = p + utf8.size();
     uint32_t vi = 0;
     int code = 0;
-    const bool hasKerning = (m_font.face && FT_HAS_KERNING(m_font.face));
+    const bool hasKerning = (m_font && m_font->face && FT_HAS_KERNING(m_font->face));
     FT_UInt prevGlyphIdx = 0;
     int missing = 0;
     int appended = 0;
     while (utf8Next(p, end, code)) {
-        if (code == '\n') { penX = x; baseY += (float)m_font.sizePx; continue; }
-        if (!ensureGlyph(m_font, code)) { ++missing; continue; }
+        if (code == '\n') { penX = x; baseY += (float)(m_font ? m_font->sizePx : 0); continue; }
+        if (!m_font || !ensureGlyph(*m_font, code)) { ++missing; continue; }
         // Kerning（字距调整）
         if (hasKerning) {
-            FT_UInt glyphIdx = FT_Get_Char_Index(m_font.face, (FT_ULong)code);
+            FT_UInt glyphIdx = FT_Get_Char_Index(m_font->face, (FT_ULong)code);
             if (prevGlyphIdx != 0 && glyphIdx != 0) {
                 FT_Vector delta{};
-                if (FT_Get_Kerning(m_font.face, prevGlyphIdx, glyphIdx, FT_KERNING_DEFAULT, &delta) == 0) {
+                if (FT_Get_Kerning(m_font->face, prevGlyphIdx, glyphIdx, FT_KERNING_DEFAULT, &delta) == 0) {
                     penX += (float)(delta.x >> 6);
                 }
             }
             prevGlyphIdx = glyphIdx;
         }
-        const Glyph& gph = m_font.glyphs[code];
+        const Glyph& gph = m_font->glyphs[code];
         float gx0 = penX + (float)gph.bearingX;
         float gy0 = baseY - (float)gph.bearingY;
         float gx1 = gx0 + (float)gph.w;
@@ -329,7 +330,7 @@ void TextRenderer::clearClipRect()
 
 bool TextRenderer::ensureFontReady()
 {
-    if (m_font.face) return true;
+    if (m_font && m_font->face) return true;
     if (!m_fontRef.get() || m_requestedFontPx <= 0) return false;
 
     // 改为同步等待资源 READY
@@ -351,10 +352,21 @@ bool TextRenderer::ensureFontReady()
     if (!m_fontRef.get()->ensureFace(m_requestedFontPx)) return false;
     FT_Face face = m_fontRef.get()->getFace(m_requestedFontPx);
     if (!face) return false;
-    m_font.face = face;
-    m_font.sizePx = m_requestedFontPx;
-    m_font.ascender = (int)(face->size->metrics.ascender >> 6);
-    m_font.descender = (int)(face->size->metrics.descender >> 6);
+    // 获取或创建该字号的 Font 缓存
+    auto it = m_fontsCache.find(m_requestedFontPx);
+    if (it == m_fontsCache.end()) {
+        Font f; f.face = face; f.sizePx = m_requestedFontPx;
+        f.ascender = (int)(face->size->metrics.ascender >> 6);
+        f.descender = (int)(face->size->metrics.descender >> 6);
+        m_fontsCache[m_requestedFontPx] = f;
+        it = m_fontsCache.find(m_requestedFontPx);
+    } else {
+        it->second.face = face;
+        it->second.sizePx = m_requestedFontPx;
+        it->second.ascender = (int)(face->size->metrics.ascender >> 6);
+        it->second.descender = (int)(face->size->metrics.descender >> 6);
+    }
+    m_font = &it->second;
     return true;
 }
 
@@ -366,10 +378,21 @@ bool TextRenderer::setFontPx(int pixelSize)
     FT_Face face = m_fontRef.get()->getFace(pixelSize);
     if (!face) return false;
     m_requestedFontPx = pixelSize;
-    m_font.face = face;
-    m_font.sizePx = pixelSize;
-    m_font.ascender = (int)(face->size->metrics.ascender >> 6);
-    m_font.descender = (int)(face->size->metrics.descender >> 6);
+    // 获取或创建该字号 Font 并切换当前指针
+    auto it = m_fontsCache.find(pixelSize);
+    if (it == m_fontsCache.end()) {
+        Font f; f.face = face; f.sizePx = pixelSize;
+        f.ascender = (int)(face->size->metrics.ascender >> 6);
+        f.descender = (int)(face->size->metrics.descender >> 6);
+        m_fontsCache[pixelSize] = f;
+        it = m_fontsCache.find(pixelSize);
+    } else {
+        it->second.face = face;
+        it->second.sizePx = pixelSize;
+        it->second.ascender = (int)(face->size->metrics.ascender >> 6);
+        it->second.descender = (int)(face->size->metrics.descender >> 6);
+    }
+    m_font = &it->second;
     return true;
 }
 
@@ -384,7 +407,7 @@ void TextRenderer::measureText(const std::string& utf8, float& outWidth, float& 
     const char* p = utf8.data();
     const char* end = p + utf8.size();
     int code = 0;
-    const bool hasKerning = (m_font.face && FT_HAS_KERNING(m_font.face));
+    const bool hasKerning = (m_font && m_font->face && FT_HAS_KERNING(m_font->face));
     FT_UInt prevGlyphIdx = 0;
 
     while (utf8Next(p, end, code)) {
@@ -395,22 +418,22 @@ void TextRenderer::measureText(const std::string& utf8, float& outWidth, float& 
             prevGlyphIdx = 0;
             continue;
         }
-        if (!ensureGlyph(m_font, code)) continue;
+        if (!m_font || !ensureGlyph(*m_font, code)) continue;
         if (hasKerning) {
-            FT_UInt glyphIdx = FT_Get_Char_Index(m_font.face, (FT_ULong)code);
+            FT_UInt glyphIdx = FT_Get_Char_Index(m_font->face, (FT_ULong)code);
             if (prevGlyphIdx != 0 && glyphIdx != 0) {
                 FT_Vector delta{};
-                if (FT_Get_Kerning(m_font.face, prevGlyphIdx, glyphIdx, FT_KERNING_DEFAULT, &delta) == 0) {
+                if (FT_Get_Kerning(m_font->face, prevGlyphIdx, glyphIdx, FT_KERNING_DEFAULT, &delta) == 0) {
                     lineW += (float)(delta.x >> 6);
                 }
             }
             prevGlyphIdx = glyphIdx;
         }
-        const Glyph& g = m_font.glyphs[code];
+        const Glyph& g = m_font->glyphs[code];
         lineW += (float)g.advance;
     }
     if (lineW > outWidth) outWidth = lineW;
-    outHeight = (float)(lines * m_font.sizePx);
+    outHeight = (float)(lines * (m_font ? m_font->sizePx : 0));
 }
 
 void TextRenderer::measureTextExtents(const std::string& utf8,
@@ -426,7 +449,7 @@ void TextRenderer::measureTextExtents(const std::string& utf8,
     const char* p = utf8.data();
     const char* end = p + utf8.size();
     int code = 0;
-    const bool hasKerning = (m_font.face && FT_HAS_KERNING(m_font.face));
+    const bool hasKerning = (m_font && m_font->face && FT_HAS_KERNING(m_font->face));
     FT_UInt prevGlyphIdx = 0;
 
     while (utf8Next(p, end, code)) {
@@ -436,16 +459,18 @@ void TextRenderer::measureTextExtents(const std::string& utf8,
             continue;
         }
         // 确保已有字形（const_cast 以复用 ensureGlyph）
-        const_cast<TextRenderer*>(this)->ensureGlyph(const_cast<Font&>(m_font), code);
-        auto it = m_font.glyphs.find(code);
-        if (it == m_font.glyphs.end()) continue;
+        if (m_font) {
+            const_cast<TextRenderer*>(this)->ensureGlyph(*const_cast<Font*>(m_font), code);
+        }
+        auto it = m_font->glyphs.find(code);
+        if (it == m_font->glyphs.end()) continue;
         const Glyph& g = it->second;
 
         if (hasKerning) {
-            FT_UInt glyphIdx = FT_Get_Char_Index(m_font.face, (FT_ULong)code);
+            FT_UInt glyphIdx = FT_Get_Char_Index(m_font->face, (FT_ULong)code);
             if (prevGlyphIdx != 0 && glyphIdx != 0) {
                 FT_Vector delta{};
-                if (FT_Get_Kerning(m_font.face, prevGlyphIdx, glyphIdx, FT_KERNING_DEFAULT, &delta) == 0) {
+                if (FT_Get_Kerning(m_font->face, prevGlyphIdx, glyphIdx, FT_KERNING_DEFAULT, &delta) == 0) {
                     lineW += (float)(delta.x >> 6);
                 }
             }
@@ -460,7 +485,7 @@ void TextRenderer::measureTextExtents(const std::string& utf8,
         if (bottom > bottomMax) bottomMax = bottom;
     }
     if (lineW > outWidth) outWidth = lineW;
-    outHeight = (float)(lines * m_font.sizePx);
+    outHeight = (float)(lines * (m_font ? m_font->sizePx : 0));
     outTop = topMax; outBottom = bottomMax;
 }
 

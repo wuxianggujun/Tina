@@ -66,7 +66,7 @@ void UIToolbar::render(uint16_t viewId)
             // Tooltip 统一使用较小字号，避免过大遮挡
             const int tipPx = 24;
             float tw=0.0f, th=0.0f;
-            m_renderer->measureTextPx(m_tipText, tw, th, tipPx);
+            m_renderer->measureText(m_tipText, tw, th, tipPx);
             const float pad = 6.0f;
             float w = tw + pad*2.0f;
             float h = th + pad*2.0f;
@@ -84,10 +84,8 @@ void UIToolbar::render(uint16_t viewId)
             m_renderer->drawRect(viewId, x, y, 1.0f, h, 0.9f, 0.85f, 0.35f, 1.0f);
             m_renderer->drawRect(viewId, x+w-1.0f, y, 1.0f, h, 0.9f, 0.85f, 0.35f, 1.0f);
             // 文本（小字号）
-            m_renderer->drawTextExTopPx(viewId, x, y, w, h, 1,1,1,1, m_tipText,
-                                        tipPx,
-                                        UIRenderer::AlignH::Center, UIRenderer::AlignV::Center,
-                                        pad, pad);
+            UIRenderer::TextOptions to{}; to.r = 1; to.g = 1; to.b = 1; to.a = 1; to.fontPx = tipPx; to.hAlign = UIRenderer::AlignH::Center; to.vAlign = UIRenderer::AlignV::Center; to.padX = pad; to.padY = pad;
+            m_renderer->drawTextBox(viewId, x, y, w, h, m_tipText, to);
         }
     }
 }

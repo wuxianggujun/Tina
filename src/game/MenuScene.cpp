@@ -174,20 +174,24 @@ void MenuScene::render() {
         float titleY = (float)m_pixelHeight * 0.25f;
         
         // 主标题
-        m_uiRenderer->drawTextEx(3, titleX - 200.0f, titleY - 40.0f, 400, 80,
-                                 1.0f, 1.0f, 1.0f, m_titleAlpha,
-                                 "TINA GAME",
-                                 UI::UIRenderer::AlignH::Center,
-                                 UI::UIRenderer::AlignV::Center,
-                                 0.0f, 0.0f);
+        {
+            UI::UIRenderer::TextOptions to{};
+            to.r = 1.0f; to.g = 1.0f; to.b = 1.0f; to.a = m_titleAlpha;
+            to.hAlign = UI::UIRenderer::AlignH::Center;
+            to.vAlign = UI::UIRenderer::AlignV::Center;
+            m_uiRenderer->drawTextBox(3, titleX - 200.0f, titleY - 40.0f, 400, 80,
+                                      "TINA GAME", to);
+        }
         
         // 副标题（使用较小的透明度）
-        m_uiRenderer->drawTextEx(3, titleX - 200.0f, titleY + 60 - 20.0f, 400, 40,
-                                 0.7f, 0.7f, 0.7f, m_titleAlpha * 0.8f,
-                                 "2D Sandbox Adventure",
-                                 UI::UIRenderer::AlignH::Center,
-                                 UI::UIRenderer::AlignV::Center,
-                                 0.0f, 0.0f);
+        {
+            UI::UIRenderer::TextOptions to{};
+            to.r = 0.7f; to.g = 0.7f; to.b = 0.7f; to.a = m_titleAlpha * 0.8f;
+            to.hAlign = UI::UIRenderer::AlignH::Center;
+            to.vAlign = UI::UIRenderer::AlignV::Center;
+            m_uiRenderer->drawTextBox(3, titleX - 200.0f, titleY + 60 - 20.0f, 400, 40,
+                                      "2D Sandbox Adventure", to);
+        }
     }
     
     // 渲染 UI 按钮
@@ -197,29 +201,34 @@ void MenuScene::render() {
         if (m_titleAlpha > 0.0f) {
             float titleX = (float)m_pixelWidth / 2.0f;
             float titleY = (float)m_pixelHeight * 0.25f;
-            m_uiRenderer->drawTextEx(3, titleX - 200.0f, titleY - 40.0f, 400, 80,
-                                     1.0f, 1.0f, 1.0f, m_titleAlpha,
-                                     "TINA GAME",
-                                     UI::UIRenderer::AlignH::Center,
-                                     UI::UIRenderer::AlignV::Center,
-                                     0.0f, 0.0f);
-            m_uiRenderer->drawTextEx(3, titleX - 200.0f, titleY + 60 - 20.0f, 400, 40,
-                                     0.7f, 0.7f, 0.7f, m_titleAlpha * 0.8f,
-                                     "2D Sandbox Adventure",
-                                     UI::UIRenderer::AlignH::Center,
-                                     UI::UIRenderer::AlignV::Center,
-                                     0.0f, 0.0f);
+            {
+                UI::UIRenderer::TextOptions to{};
+                to.r = 1.0f; to.g = 1.0f; to.b = 1.0f; to.a = m_titleAlpha;
+                to.hAlign = UI::UIRenderer::AlignH::Center;
+                to.vAlign = UI::UIRenderer::AlignV::Center;
+                m_uiRenderer->drawTextBox(3, titleX - 200.0f, titleY - 40.0f, 400, 80,
+                                          "TINA GAME", to);
+            }
+            {
+                UI::UIRenderer::TextOptions to{};
+                to.r = 0.7f; to.g = 0.7f; to.b = 0.7f; to.a = m_titleAlpha * 0.8f;
+                to.hAlign = UI::UIRenderer::AlignH::Center;
+                to.vAlign = UI::UIRenderer::AlignV::Center;
+                m_uiRenderer->drawTextBox(3, titleX - 200.0f, titleY + 60 - 20.0f, 400, 40,
+                                          "2D Sandbox Adventure", to);
+            }
         }
     }
     
     // 渲染版本号
     if (m_uiRenderer) {
-        m_uiRenderer->drawTextEx(3, (float)m_pixelWidth - 10 - 100, (float)m_pixelHeight - 10 - 30,
-                                 100, 30, 0.5f, 0.5f, 0.5f, 0.5f,
-                                 "v1.0.0",
-                                 UI::UIRenderer::AlignH::Right,
-                                 UI::UIRenderer::AlignV::Bottom,
-                                 0.0f, 0.0f);
+        {
+            UI::UIRenderer::TextOptions to{};
+            to.r = 0.5f; to.g = 0.5f; to.b = 0.5f; to.a = 0.5f;
+            to.hAlign = UI::UIRenderer::AlignH::Right; to.vAlign = UI::UIRenderer::AlignV::Bottom;
+            m_uiRenderer->drawTextBox(3, (float)m_pixelWidth - 10 - 100, (float)m_pixelHeight - 10 - 30,
+                                      100, 30, "v1.0.0", to);
+        }
     }
     
     // === UI渲染结束（提交批次） ===

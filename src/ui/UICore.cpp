@@ -83,53 +83,18 @@ void UIRenderer::drawRect(uint16_t viewId, float x, float y, float w, float h,
 }
 
 void UIRenderer::drawText(uint16_t viewId, float x, float y,
-                          float r, float g, float b, float a,
-                          const std::string& utf8)
+                          const std::string& utf8,
+                          const TextOptions& opts)
 {
     if (!m_text) return;
-    // 延迟到 flush() 统一提交，避免被后续批次覆盖
-    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = false;
-    cmd.x = x; cmd.y = y; cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8;
-    m_textCmds.push_back(std::move(cmd));
-    return;
-    // 确保文本绘制位于已积累批次之上
-    flushColorBatch();
-    flushSpriteBatches();
-    // 文本渲染仍然立即提交（TextRenderer自带批处理）
-    m_text->drawText(viewId, x, y, r, g, b, a, utf8.c_str());
-}
-
-void UIRenderer::drawText(uint16_t viewId, float x, float y,
-                          const Tina::Core::Color& color,
-                          const std::string& utf8)
-{
-    drawText(viewId, x, y, color.r(), color.g(), color.b(), color.a(), utf8);
-}
-
-void UIRenderer::drawTextPx(uint16_t viewId, float x, float y,
-                            float r, float g, float b, float a,
-                            const std::string& utf8,
-                            int fontPx)
-{
-    if (!m_text) return;
-    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = false;
-    cmd.x = x; cmd.y = y; cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8; cmd.fontPx = fontPx;
+    TextCmd cmd{}; cmd.viewId = viewId;
+    cmd.x = x; cmd.y = y; cmd.r = opts.r; cmd.g = opts.g; cmd.b = opts.b; cmd.a = opts.a; cmd.text = utf8; cmd.fontPx = opts.fontPx;
     m_textCmds.push_back(std::move(cmd));
 }
 
-void UIRenderer::drawTextPx(uint16_t viewId, float x, float y,
-                            const Tina::Core::Color& color,
-                            const std::string& utf8,
-                            int fontPx)
-{
-    drawTextPx(viewId, x, y, color.r(), color.g(), color.b(), color.a(), utf8, fontPx);
-}
-
-void UIRenderer::drawTextEx(uint16_t viewId, float x, float y, float w, float h,
-                            float r, float g, float b, float a,
-                            const std::string& utf8,
-                            AlignH halign, AlignV valign,
-                            float padX, float padY)
+void UIRenderer::drawTextBox(uint16_t viewId, float x, float y, float w, float h,
+                             const std::string& utf8,
+                             const TextOptions& opts)
 {
     if (!m_text || w <= 0.0f || h <= 0.0f) {
         if (!m_text) {
@@ -137,68 +102,11 @@ void UIRenderer::drawTextEx(uint16_t viewId, float x, float y, float w, float h,
         }
         return;
     }
-    // 提交已积累的批次，保证后续文本在上层
-    flushColorBatch();
-    flushSpriteBatches();
-    // 延迟到 flush() 统一提交（包含布局/对齐信息）
-    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = true;
-    cmd.x = x; cmd.y = y; cmd.w = w; cmd.h = h; cmd.padX = padX; cmd.padY = padY;
-    cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8;
-    cmd.hAlign = halign; cmd.vAlign = valign;
+    TextCmd cmd{}; cmd.viewId = viewId;
+    cmd.x = x; cmd.y = y; cmd.w = w; cmd.h = h; cmd.padX = opts.padX; cmd.padY = opts.padY;
+    cmd.r = opts.r; cmd.g = opts.g; cmd.b = opts.b; cmd.a = opts.a; cmd.text = utf8; cmd.fontPx = opts.fontPx;
+    cmd.hAlign = opts.hAlign; cmd.vAlign = opts.vAlign;
     m_textCmds.push_back(std::move(cmd));
-    return;
-    float tw=0.0f, th=0.0f, tTop=0.0f, tBottom=0.0f;
-    m_text->measureTextExtents(utf8, tw, th, tTop, tBottom);
-
-    // 水平位置
-    float textX = x + padX;
-    if (halign == AlignH::Center) textX = x + (w - tw)*0.5f;
-    else if (halign == AlignH::Right) textX = x + w - padX - tw;
-
-    // 垂直位置（基线）
-    float baselineY = y + padY + tTop; // Top 对齐默认
-    if (valign == AlignV::Center) {
-        baselineY = y + h*0.5f + (tTop - tBottom)*0.5f;
-    } else if (valign == AlignV::Bottom) {
-        baselineY = y + h - padY - tBottom;
-    } else if (valign == AlignV::Baseline) {
-        baselineY = y + h - padY; // 将矩形底边作为基线
-    }
-
-    float textY = baselineY - (float)m_text->ascenderPx();
-    m_text->drawText(viewId, textX, textY, r, g, b, a, utf8);
-}
-
-void UIRenderer::drawTextExPx(uint16_t viewId, float x, float y, float w, float h,
-                              float r, float g, float b, float a,
-                              const std::string& utf8,
-                              int fontPx,
-                              AlignH halign, AlignV valign,
-                              float padX, float padY)
-{
-    if (!m_text || w <= 0.0f || h <= 0.0f) {
-        if (!m_text) {
-            TINA_WARN("UIRenderer: 未绑定 TextRenderer，文本无法绘制");
-        }
-        return;
-    }
-    flushColorBatch();
-    flushSpriteBatches();
-    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = true;
-    cmd.x = x; cmd.y = y; cmd.w = w; cmd.h = h; cmd.padX = padX; cmd.padY = padY;
-    cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8; cmd.fontPx = fontPx;
-    cmd.hAlign = halign; cmd.vAlign = valign;
-    m_textCmds.push_back(std::move(cmd));
-}
-
-void UIRenderer::drawTextEx(uint16_t viewId, float x, float y, float w, float h,
-                            const Tina::Core::Color& color,
-                            const std::string& utf8,
-                            AlignH halign, AlignV valign,
-                            float padX, float padY)
-{
-    drawTextEx(viewId, x, y, w, h, color.r(), color.g(), color.b(), color.a(),
-               utf8, halign, valign, padX, padY);
 }
 
 // 批处理版本：缓存而不是立即提交
@@ -362,7 +270,7 @@ void UIRenderer::flushTextCommands()
                 needRestore = true;
             }
         }
-        if (!cmd.isEx) {
+        if (!(cmd.w > 0.0f && cmd.h > 0.0f)) {
             m_text->drawText(cmd.viewId, cmd.x, cmd.y, cmd.r, cmd.g, cmd.b, cmd.a, cmd.text);
         } else {
             float tw=0.0f, th=0.0f, tTop=0.0f, tBottom=0.0f;
@@ -387,54 +295,5 @@ void UIRenderer::flushTextCommands()
     }
 }
 
-void UIRenderer::drawTextTop(uint16_t viewId, float x, float y,
-                             float r, float g, float b, float a,
-                             const std::string& utf8)
-{
-    if (!m_text) return;
-    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = false;
-    cmd.x = x; cmd.y = y; cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8;
-    m_textCmds.push_back(std::move(cmd));
-}
-
-void UIRenderer::drawTextTopPx(uint16_t viewId, float x, float y,
-                               float r, float g, float b, float a,
-                               const std::string& utf8,
-                               int fontPx)
-{
-    if (!m_text) return;
-    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = false;
-    cmd.x = x; cmd.y = y; cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8; cmd.fontPx = fontPx;
-    m_textCmds.push_back(std::move(cmd));
-}
-
-void UIRenderer::drawTextExTop(uint16_t viewId, float x, float y, float w, float h,
-                               float r, float g, float b, float a,
-                               const std::string& utf8,
-                               AlignH halign, AlignV valign,
-                               float padX, float padY)
-{
-    if (!m_text || w <= 0.0f || h <= 0.0f) return;
-    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = true;
-    cmd.x = x; cmd.y = y; cmd.w = w; cmd.h = h; cmd.padX = padX; cmd.padY = padY;
-    cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8;
-    cmd.hAlign = halign; cmd.vAlign = valign;
-    m_textCmds.push_back(std::move(cmd));
-}
-
-void UIRenderer::drawTextExTopPx(uint16_t viewId, float x, float y, float w, float h,
-                                 float r, float g, float b, float a,
-                                 const std::string& utf8,
-                                 int fontPx,
-                                 AlignH halign, AlignV valign,
-                                 float padX, float padY)
-{
-    if (!m_text || w <= 0.0f || h <= 0.0f) return;
-    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = true;
-    cmd.x = x; cmd.y = y; cmd.w = w; cmd.h = h; cmd.padX = padX; cmd.padY = padY;
-    cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8; cmd.fontPx = fontPx;
-    cmd.hAlign = halign; cmd.vAlign = valign;
-    m_textCmds.push_back(std::move(cmd));
-}
 
 } // namespace Tina::UI

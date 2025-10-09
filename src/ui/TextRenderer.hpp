@@ -47,9 +47,9 @@ public:
     // 像素对齐（开启可显著减少文字轻微模糊/抖动，默认开启）
     void setPixelSnap(bool enable) { m_pixelSnap = enable; }
     bool pixelSnap() const { return m_pixelSnap; }
-    int ascenderPx() const { return m_font.ascender; }
-    int descenderPx() const { return m_font.descender; }
-    int currentFontPx() const { return m_font.sizePx; }
+    int ascenderPx() const { return m_font ? m_font->ascender : 0; }
+    int descenderPx() const { return m_font ? m_font->descender : 0; }
+    int currentFontPx() const { return m_font ? m_font->sizePx : 0; }
     // 切换当前使用的 Face 像素大小（需已通过 loadFont 绑定字体资源）
     // 返回是否切换成功；失败时不改变当前字体
     bool setFontPx(int pixelSize);
@@ -81,7 +81,10 @@ private:
     Tina::Engine::ResourceManagerHub* m_resHub = nullptr;
     Tina::Engine::ResourceRef<Tina::Engine::FontResource> m_fontRef; // 字体句柄（RAII）
     int m_requestedFontPx = 0;
-    Font m_font; // 当前使用的字体信息（来自 FontResource 指定字号的 Face）
+    // 当前使用的字体（指向缓存中的条目）
+    Font* m_font = nullptr;
+    // 多字号缓存：像素大小 -> Font（含独立字形表）
+    Tina::Container::HashMap<int, Font> m_fontsCache;
 
     // 图集
     int m_atlasW = 0, m_atlasH = 0;
