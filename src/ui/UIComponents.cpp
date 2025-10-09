@@ -121,15 +121,27 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
             float iy = pos.y + (size.y - side) * 0.5f;
             renderer.drawImage(viewId, ix, iy, side, side, m_iconTex, 1,1,1,0.95f);
         }
-        renderer.drawTextEx(viewId, pos.x, pos.y, size.x, size.y,
-                            m_textColor, m_text,
-                            UIRenderer::AlignH::Center, UIRenderer::AlignV::Center, 0.0f, 0.0f);
+        if (m_fontPx > 0) {
+            renderer.drawTextExPx(viewId, pos.x, pos.y, size.x, size.y,
+                                  m_textColor.r(), m_textColor.g(), m_textColor.b(), m_textColor.a(),
+                                  m_text,
+                                  m_fontPx,
+                                  UIRenderer::AlignH::Center, UIRenderer::AlignV::Center, 0.0f, 0.0f);
+        } else {
+            renderer.drawTextEx(viewId, pos.x, pos.y, size.x, size.y,
+                                m_textColor, m_text,
+                                UIRenderer::AlignH::Center, UIRenderer::AlignV::Center, 0.0f, 0.0f);
+        }
     }
 
     // 角标：右上等位置显示的小角标（如数字）
     if (!m_badgeText.empty()) {
         float tw=0.0f, th=0.0f;
-        renderer.measureText(m_badgeText, tw, th);
+        if (m_badgeFontPx > 0) {
+            renderer.measureTextPx(m_badgeText, tw, th, m_badgeFontPx);
+        } else {
+            renderer.measureText(m_badgeText, tw, th);
+        }
         const float badgePad = 3.0f;
         float bw = std::max(tw * 0.85f + badgePad*2.0f, 16.0f);
         float bh = std::clamp(th * 0.60f + badgePad*1.0f, 14.0f, 22.0f);
@@ -153,12 +165,22 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         renderer.drawRect(viewId, bx, by, 1.0f, bh, bhc);
         renderer.drawRect(viewId, bx+bw-1.0f, by, 1.0f, bh, bhc);
         // 角标文本
-        renderer.drawTextExTop(viewId, bx, by, bw, bh,
-                               m_badgeTextColor.r(), m_badgeTextColor.g(), m_badgeTextColor.b(), m_badgeTextColor.a(),
-                               m_badgeText,
-                               UIRenderer::AlignH::Center,
-                               UIRenderer::AlignV::Center,
-                               0.0f, 0.0f);
+        if (m_badgeFontPx > 0) {
+            renderer.drawTextExTopPx(viewId, bx, by, bw, bh,
+                                     m_badgeTextColor.r(), m_badgeTextColor.g(), m_badgeTextColor.b(), m_badgeTextColor.a(),
+                                     m_badgeText,
+                                     m_badgeFontPx,
+                                     UIRenderer::AlignH::Center,
+                                     UIRenderer::AlignV::Center,
+                                     0.0f, 0.0f);
+        } else {
+            renderer.drawTextExTop(viewId, bx, by, bw, bh,
+                                   m_badgeTextColor.r(), m_badgeTextColor.g(), m_badgeTextColor.b(), m_badgeTextColor.a(),
+                                   m_badgeText,
+                                   UIRenderer::AlignH::Center,
+                                   UIRenderer::AlignV::Center,
+                                   0.0f, 0.0f);
+        }
     }
 }
 

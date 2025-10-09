@@ -413,9 +413,13 @@ void Application::prewarmCommonAssets()
     }
 
     if (font && font->getState() == Tina::Engine::Resource::State::READY) {
-        // 确保 48 号 Face（全局 TextRenderer 使用）
-        font->ensureFace(48);
-        TINA_INFO("Application: 字体 Face 48 号已预热");
+        // 预热多个常用字号，减少首次切换等待
+        int sizes[] = {24, 32, 48};
+        for (int s : sizes) {
+            if (font->ensureFace(s)) {
+                TINA_INFO("Application: 字体 Face {} 号已预热", s);
+            }
+        }
     }
 }
 

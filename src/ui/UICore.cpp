@@ -106,6 +106,25 @@ void UIRenderer::drawText(uint16_t viewId, float x, float y,
     drawText(viewId, x, y, color.r(), color.g(), color.b(), color.a(), utf8);
 }
 
+void UIRenderer::drawTextPx(uint16_t viewId, float x, float y,
+                            float r, float g, float b, float a,
+                            const std::string& utf8,
+                            int fontPx)
+{
+    if (!m_text) return;
+    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = false;
+    cmd.x = x; cmd.y = y; cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8; cmd.fontPx = fontPx;
+    m_textCmds.push_back(std::move(cmd));
+}
+
+void UIRenderer::drawTextPx(uint16_t viewId, float x, float y,
+                            const Tina::Core::Color& color,
+                            const std::string& utf8,
+                            int fontPx)
+{
+    drawTextPx(viewId, x, y, color.r(), color.g(), color.b(), color.a(), utf8, fontPx);
+}
+
 void UIRenderer::drawTextEx(uint16_t viewId, float x, float y, float w, float h,
                             float r, float g, float b, float a,
                             const std::string& utf8,
@@ -148,6 +167,28 @@ void UIRenderer::drawTextEx(uint16_t viewId, float x, float y, float w, float h,
 
     float textY = baselineY - (float)m_text->ascenderPx();
     m_text->drawText(viewId, textX, textY, r, g, b, a, utf8);
+}
+
+void UIRenderer::drawTextExPx(uint16_t viewId, float x, float y, float w, float h,
+                              float r, float g, float b, float a,
+                              const std::string& utf8,
+                              int fontPx,
+                              AlignH halign, AlignV valign,
+                              float padX, float padY)
+{
+    if (!m_text || w <= 0.0f || h <= 0.0f) {
+        if (!m_text) {
+            TINA_WARN("UIRenderer: 未绑定 TextRenderer，文本无法绘制");
+        }
+        return;
+    }
+    flushColorBatch();
+    flushSpriteBatches();
+    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = true;
+    cmd.x = x; cmd.y = y; cmd.w = w; cmd.h = h; cmd.padX = padX; cmd.padY = padY;
+    cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8; cmd.fontPx = fontPx;
+    cmd.hAlign = halign; cmd.vAlign = valign;
+    m_textCmds.push_back(std::move(cmd));
 }
 
 void UIRenderer::drawTextEx(uint16_t viewId, float x, float y, float w, float h,
@@ -314,6 +355,13 @@ void UIRenderer::flushTextCommands()
     if (!m_text || m_textCmds.empty()) return;
     TINA_INFO("UIRenderer: flushTextCommands - 提交 {} 条文本命令", (int)m_textCmds.size());
     for (const auto& cmd : m_textCmds) {
+        int prevPx = m_text->currentFontPx();
+        bool needRestore = false;
+        if (cmd.fontPx > 0 && cmd.fontPx != prevPx) {
+            if (m_text->setFontPx(cmd.fontPx)) {
+                needRestore = true;
+            }
+        }
         if (!cmd.isEx) {
             m_text->drawText(cmd.viewId, cmd.x, cmd.y, cmd.r, cmd.g, cmd.b, cmd.a, cmd.text);
         } else {
@@ -333,6 +381,9 @@ void UIRenderer::flushTextCommands()
             float textY = baselineY - (float)m_text->ascenderPx();
             m_text->drawText(cmd.viewId, textX, textY, cmd.r, cmd.g, cmd.b, cmd.a, cmd.text);
         }
+        if (needRestore) {
+            m_text->setFontPx(prevPx);
+        }
     }
 }
 
@@ -346,6 +397,17 @@ void UIRenderer::drawTextTop(uint16_t viewId, float x, float y,
     m_textCmds.push_back(std::move(cmd));
 }
 
+void UIRenderer::drawTextTopPx(uint16_t viewId, float x, float y,
+                               float r, float g, float b, float a,
+                               const std::string& utf8,
+                               int fontPx)
+{
+    if (!m_text) return;
+    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = false;
+    cmd.x = x; cmd.y = y; cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8; cmd.fontPx = fontPx;
+    m_textCmds.push_back(std::move(cmd));
+}
+
 void UIRenderer::drawTextExTop(uint16_t viewId, float x, float y, float w, float h,
                                float r, float g, float b, float a,
                                const std::string& utf8,
@@ -356,6 +418,21 @@ void UIRenderer::drawTextExTop(uint16_t viewId, float x, float y, float w, float
     TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = true;
     cmd.x = x; cmd.y = y; cmd.w = w; cmd.h = h; cmd.padX = padX; cmd.padY = padY;
     cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8;
+    cmd.hAlign = halign; cmd.vAlign = valign;
+    m_textCmds.push_back(std::move(cmd));
+}
+
+void UIRenderer::drawTextExTopPx(uint16_t viewId, float x, float y, float w, float h,
+                                 float r, float g, float b, float a,
+                                 const std::string& utf8,
+                                 int fontPx,
+                                 AlignH halign, AlignV valign,
+                                 float padX, float padY)
+{
+    if (!m_text || w <= 0.0f || h <= 0.0f) return;
+    TextCmd cmd{}; cmd.viewId = viewId; cmd.isEx = true;
+    cmd.x = x; cmd.y = y; cmd.w = w; cmd.h = h; cmd.padX = padX; cmd.padY = padY;
+    cmd.r = r; cmd.g = g; cmd.b = b; cmd.a = a; cmd.text = utf8; cmd.fontPx = fontPx;
     cmd.hAlign = halign; cmd.vAlign = valign;
     m_textCmds.push_back(std::move(cmd));
 }

@@ -130,6 +130,11 @@ void UIToolbar::buildLayout()
         btn->setAnchor(Anchor::TopLeft);
         // 默认布局：左图标 + 右文本（避免重叠）
         btn->setIconLayout(UIButton::IconLayout::IconLeftTextRight);
+        // 自适应字号：主文本与角标使用相对 slot 尺寸的像素字号
+        int mainPx  = std::clamp(m_slotSize * 38 / 100, 14, 28);  // ~0.38x 高度
+        int badgePx = std::clamp(m_slotSize * 28 / 100, 12, 20);  // 更小的角标
+        btn->setFontPx(mainPx);
+        btn->setBadgeFontPx(badgePx);
 
         // 中央主标识：前三个为“水/挖/爆”，其余占位
         std::string center;

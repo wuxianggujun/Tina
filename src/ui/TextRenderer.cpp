@@ -358,6 +358,21 @@ bool TextRenderer::ensureFontReady()
     return true;
 }
 
+bool TextRenderer::setFontPx(int pixelSize)
+{
+    if (pixelSize <= 0) return false;
+    if (!m_resHub || !m_fontRef.get()) return false;
+    if (!m_fontRef.get()->ensureFace(pixelSize)) return false;
+    FT_Face face = m_fontRef.get()->getFace(pixelSize);
+    if (!face) return false;
+    m_requestedFontPx = pixelSize;
+    m_font.face = face;
+    m_font.sizePx = pixelSize;
+    m_font.ascender = (int)(face->size->metrics.ascender >> 6);
+    m_font.descender = (int)(face->size->metrics.descender >> 6);
+    return true;
+}
+
 void TextRenderer::measureText(const std::string& utf8, float& outWidth, float& outHeight)
 {
     outWidth = 0.0f; outHeight = 0.0f;

@@ -132,6 +132,13 @@ public:
     bool isPressed() const { return m_pressed; }
     bool isSelected() const { return m_selected; }
 
+    // 文本字号（像素），0 表示使用全局默认字号
+    void setFontPx(int px) { m_fontPx = std::max(0, px); }
+    int fontPx() const { return m_fontPx; }
+    // 角标字号（像素），0 表示使用全局默认字号
+    void setBadgeFontPx(int px) { m_badgeFontPx = std::max(0, px); }
+    int badgeFontPx() const { return m_badgeFontPx; }
+
     // === Signal 事件（推荐使用）===
     Tina::Core::Signal<> onClick;      // 点击事件（鼠标按下并松开）
     Tina::Core::Signal<> onHoverEnter; // 鼠标进入
@@ -165,6 +172,9 @@ private:
     // 可选图标纹理（由外部提供生命周期）
     bgfx::TextureHandle m_iconTex = BGFX_INVALID_HANDLE;
     IconLayout m_iconLayout = IconLayout::IconTopTextBottom;
+
+    int m_fontPx = 0;
+    int m_badgeFontPx = 0;
 };
 
 } // namespace Tina::UI

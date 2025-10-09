@@ -49,6 +49,10 @@ public:
     bool pixelSnap() const { return m_pixelSnap; }
     int ascenderPx() const { return m_font.ascender; }
     int descenderPx() const { return m_font.descender; }
+    int currentFontPx() const { return m_font.sizePx; }
+    // 切换当前使用的 Face 像素大小（需已通过 loadFont 绑定字体资源）
+    // 返回是否切换成功；失败时不改变当前字体
+    bool setFontPx(int pixelSize);
 
 private:
     struct Glyph {
