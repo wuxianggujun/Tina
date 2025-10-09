@@ -177,8 +177,10 @@ void Application::shutdown()
 {
     TINA_INFO("Application 关闭中...");
 
-    // 清理顺序：场景 → 资源 → 着色器 → 子系统 → bgfx → 窗口
+    // 清理顺序：场景 → 文本渲染器 → 资源/着色器 → 子系统 → bgfx → 窗口
     m_sceneManager.reset();
+    // TextRenderer 持有 bgfx 资源（纹理/Uniform），需在 bgfx::shutdown 前销毁
+    m_textRenderer.reset();
     m_resourceHub.reset();
     m_fileSystem.reset();
     m_eventBus.reset();
@@ -190,6 +192,8 @@ void Application::shutdown()
         MIX_DestroyMixer(m_mixer);
         m_mixer = nullptr;
     }
+    // 清空全局混音器指针，防止后续析构阶段误用
+    AudioResource::SetGlobalMixer(nullptr);
     MIX_Quit();
     TINA_INFO("SDL_mixer 已关闭");
 

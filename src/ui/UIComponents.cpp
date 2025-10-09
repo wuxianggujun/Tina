@@ -136,15 +136,14 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
 
     // 角标：右上等位置显示的小角标（如数字）
     if (!m_badgeText.empty()) {
+        // 角标：固定高度（由字号决定）+ 自适应宽度，确保数字“大小一致”
         float tw=0.0f, th=0.0f;
-        if (m_badgeFontPx > 0) {
-            renderer.measureTextPx(m_badgeText, tw, th, m_badgeFontPx);
-        } else {
-            renderer.measureText(m_badgeText, tw, th);
-        }
+        int px = (m_badgeFontPx > 0) ? m_badgeFontPx : 16;
+        renderer.measureTextPx(m_badgeText, tw, th, px);
         const float badgePad = 3.0f;
-        float bw = std::max(tw * 0.85f + badgePad*2.0f, 16.0f);
-        float bh = std::clamp(th * 0.60f + badgePad*1.0f, 14.0f, 22.0f);
+        float bh = th + badgePad*2.0f;           // 高度只取决于字号
+        float bw = std::max(tw + badgePad*2.0f,  // 宽度根据内容
+                            bh);                  // 至少为正圆
         float bx = pos.x + size.x - bw - 4.0f;
         float by = pos.y + 4.0f;
         switch (m_badgeCorner) {
@@ -165,22 +164,13 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         renderer.drawRect(viewId, bx, by, 1.0f, bh, bhc);
         renderer.drawRect(viewId, bx+bw-1.0f, by, 1.0f, bh, bhc);
         // 角标文本
-        if (m_badgeFontPx > 0) {
-            renderer.drawTextExTopPx(viewId, bx, by, bw, bh,
-                                     m_badgeTextColor.r(), m_badgeTextColor.g(), m_badgeTextColor.b(), m_badgeTextColor.a(),
-                                     m_badgeText,
-                                     m_badgeFontPx,
-                                     UIRenderer::AlignH::Center,
-                                     UIRenderer::AlignV::Center,
-                                     0.0f, 0.0f);
-        } else {
-            renderer.drawTextExTop(viewId, bx, by, bw, bh,
-                                   m_badgeTextColor.r(), m_badgeTextColor.g(), m_badgeTextColor.b(), m_badgeTextColor.a(),
-                                   m_badgeText,
-                                   UIRenderer::AlignH::Center,
-                                   UIRenderer::AlignV::Center,
-                                   0.0f, 0.0f);
-        }
+        renderer.drawTextExTopPx(viewId, bx, by, bw, bh,
+                                 m_badgeTextColor.r(), m_badgeTextColor.g(), m_badgeTextColor.b(), m_badgeTextColor.a(),
+                                 m_badgeText,
+                                 px,
+                                 UIRenderer::AlignH::Center,
+                                 UIRenderer::AlignV::Center,
+                                 0.0f, 0.0f);
     }
 }
 

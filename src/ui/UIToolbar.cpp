@@ -63,8 +63,10 @@ void UIToolbar::render(uint16_t viewId)
         m_root->render(viewId, *m_renderer);
         // 绘制 Tooltip（悬停提示）
         if (m_tipVisible && !m_tipText.empty()) {
+            // Tooltip 统一使用较小字号，避免过大遮挡
+            const int tipPx = 24;
             float tw=0.0f, th=0.0f;
-            m_renderer->measureText(m_tipText, tw, th);
+            m_renderer->measureTextPx(m_tipText, tw, th, tipPx);
             const float pad = 6.0f;
             float w = tw + pad*2.0f;
             float h = th + pad*2.0f;
@@ -81,9 +83,11 @@ void UIToolbar::render(uint16_t viewId)
             m_renderer->drawRect(viewId, x, y+h-1.0f, w, 1.0f, 0.9f, 0.85f, 0.35f, 1.0f);
             m_renderer->drawRect(viewId, x, y, 1.0f, h, 0.9f, 0.85f, 0.35f, 1.0f);
             m_renderer->drawRect(viewId, x+w-1.0f, y, 1.0f, h, 0.9f, 0.85f, 0.35f, 1.0f);
-            // 文本
-            m_renderer->drawTextExTop(viewId, x, y, w, h, 1,1,1,1, m_tipText,
-                                      UIRenderer::AlignH::Center, UIRenderer::AlignV::Center, pad, pad);
+            // 文本（小字号）
+            m_renderer->drawTextExTopPx(viewId, x, y, w, h, 1,1,1,1, m_tipText,
+                                        tipPx,
+                                        UIRenderer::AlignH::Center, UIRenderer::AlignV::Center,
+                                        pad, pad);
         }
     }
 }
