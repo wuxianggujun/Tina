@@ -645,7 +645,7 @@ void GameScene::renderUI()
     // UI 视图已在 initializeResources() 中设置
 
 
-    ui().beginFrame(UI::VIEW_UI);
+    auto __ui_scope = ui().beginRender(UI::VIEW_UI);
     // 渲染提示文本
     float hudY = m_toolbar->root()->isVisible()
         ? (float)m_toolbar->barHeight() + GameConfig::UI_HUD_PADDING_Y
@@ -671,8 +671,6 @@ void GameScene::renderUI()
     if (m_characterPanel) {
         m_characterPanel->render(UI::VIEW_UI, ui());
     }
-
-    ui().flush();
 }
 
 void GameScene::ensureToolbarIconsReady()

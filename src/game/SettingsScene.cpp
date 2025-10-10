@@ -35,8 +35,7 @@ void SettingsScene::onEnter()
     }
     #endif
 
-    m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
-    m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer());
+    // 迁移到新架构：使用 Scene 基类提供的全局 UIRenderer（ui()）
 
     createUI();
     m_events.setRoot(m_root.get());
@@ -51,7 +50,6 @@ void SettingsScene::onExit()
     m_cClose.disconnect();
 
     m_root.reset();
-    m_uiRenderer.reset();
 }
 
 void SettingsScene::update(float dt)
@@ -64,10 +62,9 @@ void SettingsScene::render()
 {
     // 触摸 UI 视图
     bgfx::touch(UI::VIEW_UI);
-    if (m_root && m_uiRenderer) {
-        m_uiRenderer->beginFrame(UI::VIEW_UI);
-        m_root->render(UI::VIEW_UI, *m_uiRenderer);
-        m_uiRenderer->flush();
+    if (m_root) {
+        auto scope = ui().beginRender(UI::VIEW_UI);
+        m_root->render(UI::VIEW_UI, ui());
     }
 }
 

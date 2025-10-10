@@ -8,8 +8,6 @@
 #include "../engine/SceneManager.hpp"
 #include "../core/Log.hpp"
 #include "../game/GameConfig.hpp"
-#include "../renderer/Primitive2D.hpp"
-#include "../renderer/RenderCommandBuilder.hpp"
 #include "../ui/UIConstants.hpp"
 
 #include <SDL3/SDL.h>

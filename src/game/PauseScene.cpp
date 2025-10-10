@@ -8,7 +8,6 @@
 #include "../ui/UILayout.hpp"
 #include "../core/Log.hpp"
 #include "../ui/UIComponents.hpp"
-#include "../renderer/Primitive2D.hpp"
 #include "MenuScene.hpp"
 #include "../engine/TypedEventBus.hpp"
 #include "GameEvents.hpp"
@@ -85,11 +84,12 @@ void PauseScene::update(float dt)
 
 void PauseScene::render()
 {
-    // 1. 确保 view 被清理（不清屏，只是触摸）
+    // 1. 确保 UI 视图有效（触摸 + 设置正交）
     bgfx::touch(uiViewId());
+    setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
 
-    // 2. 渲染半透明遮罩
-    renderOverlay();
+    // 2. 渲染半透明遮罩（使用 SceneRenderer 新架构）
+    scene().drawOverlay(uiViewId(), Tina::Core::Color(0.0f, 0.0f, 0.0f, 0.5f));
 
     // 3. ✅ 使用 Scene 基类的 ui() 方法和 RAII 作用域
     if (m_rootNode) {
@@ -265,12 +265,7 @@ void PauseScene::createUI()
 
 void PauseScene::renderOverlay()
 {
-    // 渲染半透明黑色遮罩（覆盖整个屏幕）。使用 UI 层视图
-    bgfx::setViewRect(UI::VIEW_UI, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
-    // 由全局 Primitive2D 设置正交并绘制半透明全屏遮罩
-    app()->primitives2D().setOrtho(UI::VIEW_UI, (float)m_pixelWidth, (float)m_pixelHeight);
-    // 半透明黑色: ABGR 0x80000000
-    app()->primitives2D().drawFullscreen(UI::VIEW_UI, (float)m_pixelWidth, (float)m_pixelHeight, 0x80000000u, true);
+    // 已迁移到 SceneRenderer::drawOverlay，调用移至 render()
 }
 
 void PauseScene::onContinueClicked()

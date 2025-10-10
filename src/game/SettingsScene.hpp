@@ -34,7 +34,6 @@ private:
     void onBackTime();
 
 private:
-    Memory::UniquePtr<UI::UIRenderer> m_uiRenderer;
     Memory::UniquePtr<UI::UINode> m_root;
     Container::Vector<Memory::UniquePtr<UI::UINode>> m_ownedNodes;  // 统一管理所有节点生命周期
     UI::UIButton* m_btnDay = nullptr;
