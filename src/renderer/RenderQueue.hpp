@@ -61,7 +61,7 @@ struct RenderBatch {
         if (blendMode != cmd.blendMode) return false;
 
         // 纹理相关类型需要检查纹理
-        if (type == RenderType::Sprite || type == RenderType::Particle) {
+        if (type == RenderType::Sprite) {
             if (texture.idx != cmd.data.sprite.texture.idx) return false;
         }
 
@@ -134,7 +134,6 @@ private:
 
     // 状态管理
     uint64_t getRenderState(BlendMode mode) const;
-    void applyRenderState(const RenderCommand& cmd);
 
     // 顶点数据生成
     void generateRectVertices(const RectData& rect, uint8_t* vertices, uint16_t* indices, uint32_t baseVertex);
@@ -155,12 +154,10 @@ private:
     // 默认着色器程序
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle m_progSprite = BGFX_INVALID_HANDLE;
-    bgfx::ProgramHandle m_progText = BGFX_INVALID_HANDLE;
 
     // 顶点布局
     bgfx::VertexLayout m_layoutColor;
     bgfx::VertexLayout m_layoutSprite;
-    bgfx::VertexLayout m_layoutText;
 
     // Uniform句柄
     bgfx::UniformHandle m_sTexture = BGFX_INVALID_HANDLE;

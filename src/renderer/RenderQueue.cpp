@@ -44,7 +44,6 @@ bool RenderQueue::initialize(ShaderManager* shaders) {
     // 加载默认着色器
     m_progColor = m_shaders->loadProgram("color", "color");
     m_progSprite = m_shaders->loadProgram("sprite", "sprite");
-    m_progText = m_shaders->loadProgram("text", "text");
 
     // 初始化顶点布局
     m_layoutColor.begin()
@@ -58,7 +57,6 @@ bool RenderQueue::initialize(ShaderManager* shaders) {
         .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Float)
         .end();
 
-    m_layoutText = m_layoutSprite;  // 文本使用相同布局
 
     // 创建纹理采样器uniform
     m_sTexture = bgfx::createUniform("s_tex", bgfx::UniformType::Sampler);

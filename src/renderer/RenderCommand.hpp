@@ -16,11 +16,7 @@ namespace Tina::Renderer {
 // 渲染类型枚举
 enum class RenderType : uint8_t {
     Rectangle,     // 矩形（纯色）
-    Sprite,        // 精灵（纹理）
-    Text,          // 文本
-    Particle,      // 粒子
-    Tile,          // 瓦片
-    Custom         // 自定义
+    Sprite         // 精灵（纹理）
 };
 
 // 渲染层级定义（用于排序）
@@ -59,44 +55,6 @@ struct SpriteData {
     float rotation = 0.0f;
 };
 
-// 文本数据
-struct TextData {
-    float x, y;
-    float maxWidth = 0.0f;   // 0表示不限制
-    float maxHeight = 0.0f;
-    const char* text = nullptr;  // 指向文本的指针（需要保证生命周期）
-    Core::Color color;
-    uint16_t fontSize = 32;
-    uint8_t hAlign = 0;  // 0=Left, 1=Center, 2=Right
-    uint8_t vAlign = 0;  // 0=Top, 1=Center, 2=Bottom
-};
-
-// 粒子批次数据
-struct ParticleData {
-    bgfx::DynamicVertexBufferHandle vb;
-    bgfx::DynamicIndexBufferHandle ib;
-    uint32_t numVertices;
-    uint32_t numIndices;
-    bgfx::TextureHandle texture;
-    BlendMode blendMode = BlendMode::Alpha;
-};
-
-// 瓦片批次数据
-struct TileData {
-    const void* vertices;  // 顶点数据指针
-    const uint16_t* indices;  // 索引数据指针
-    uint32_t numVertices;
-    uint32_t numIndices;
-    bgfx::VertexLayout layout;
-    bool transparent = false;
-};
-
-// 自定义渲染回调
-using CustomRenderFunc = void(*)(uint16_t viewId, void* userData);
-struct CustomData {
-    CustomRenderFunc callback;
-    void* userData;
-};
 
 // 渲染命令结构
 struct RenderCommand {
@@ -118,10 +76,7 @@ struct RenderCommand {
     union Data {
         RectData rect;
         SpriteData sprite;
-        TextData text;
-        ParticleData particle;
-        TileData tile;
-        CustomData custom;
+        // 已精简：仅保留矩形与精灵所需的数据
 
         // ���合体构造函数（初始化为空）
         Data() { std::memset(this, 0, sizeof(Data)); }

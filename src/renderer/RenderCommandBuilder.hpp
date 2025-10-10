@@ -103,42 +103,7 @@ public:
         return color(c);  // 复用color方法
     }
 
-    // === 文本构建 ===
-    RenderCommandBuilder& text(float x, float y, const char* str) {
-        m_cmd.type = RenderType::Text;
-        m_cmd.data.text = {x, y, 0, 0, str, {1,1,1,1}, 32, 0, 0};
-        return *this;
-    }
-
-    RenderCommandBuilder& fontSize(uint16_t size) {
-        if (m_cmd.type == RenderType::Text) {
-            m_cmd.data.text.fontSize = size;
-        }
-        return *this;
-    }
-
-    RenderCommandBuilder& align(uint8_t hAlign, uint8_t vAlign) {
-        if (m_cmd.type == RenderType::Text) {
-            m_cmd.data.text.hAlign = hAlign;
-            m_cmd.data.text.vAlign = vAlign;
-        }
-        return *this;
-    }
-
-    RenderCommandBuilder& maxSize(float maxWidth, float maxHeight) {
-        if (m_cmd.type == RenderType::Text) {
-            m_cmd.data.text.maxWidth = maxWidth;
-            m_cmd.data.text.maxHeight = maxHeight;
-        }
-        return *this;
-    }
-
-    // === 自定义渲染 ===
-    RenderCommandBuilder& custom(CustomRenderFunc func, void* userData) {
-        m_cmd.type = RenderType::Custom;
-        m_cmd.data.custom = {func, userData};
-        return *this;
-    }
+    // （已移除文本与自定义渲染构建接口，统一由 UIRenderer/TextRenderer 负责）
 
     // 构建并提交
     void submit() {
@@ -208,37 +173,7 @@ namespace QuickDraw {
             .submit();
     }
 
-    // 绘制文本
-    inline void text(RenderQueue& queue, uint16_t viewId, RenderLayer layer,
-                    float x, float y, const char* str,
-                    const Core::Color& color = {1,1,1,1},
-                    uint16_t fontSize = 32,
-                    uint16_t depth = 0) {
-        RenderCommandBuilder(&queue)
-            .view(viewId)
-            .layer(layer)
-            .depth(depth)
-            .text(x, y, str)
-            .color(color)
-            .fontSize(fontSize)
-            .submit();
-    }
-
-    // 绘制背景渐变
-    inline void gradient(RenderQueue& queue, uint16_t viewId,
-                        float x, float y, float w, float h,
-                        const Core::Color& topColor,
-                        const Core::Color& bottomColor) {
-        // 使用两个矩形模拟渐变（简单实现）
-        // TODO: 实现真正的渐变顶点色
-        float halfH = h * 0.5f;
-
-        rect(queue, viewId, RenderLayer::Background,
-             x, y, w, halfH, topColor, 0);
-
-        rect(queue, viewId, RenderLayer::Background,
-             x, y + halfH, w, halfH, bottomColor, 1);
-    }
+    // （已移除 QuickDraw::text 与 QuickDraw::gradient，文本与背景渐变请使用 TextRenderer/SceneRenderer）
 }
 
 } // namespace Tina::Renderer
