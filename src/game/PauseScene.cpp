@@ -16,6 +16,7 @@
 #include <SDL3/SDL.h>
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
+#include "../ui/UIConstants.hpp"
 
 namespace Tina::Game {
 
@@ -264,13 +265,12 @@ void PauseScene::createUI()
 
 void PauseScene::renderOverlay()
 {
-    // 渲染半透明黑色遮罩（覆盖整个屏幕）
-    // 使用 view 3（UI 层）
-    bgfx::setViewRect(3, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
+    // 渲染半透明黑色遮罩（覆盖整个屏幕）。使用 UI 层视图
+    bgfx::setViewRect(UI::VIEW_UI, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
     // 由全局 Primitive2D 设置正交并绘制半透明全屏遮罩
-    app()->primitives2D().setOrtho(3, (float)m_pixelWidth, (float)m_pixelHeight);
+    app()->primitives2D().setOrtho(UI::VIEW_UI, (float)m_pixelWidth, (float)m_pixelHeight);
     // 半透明黑色: ABGR 0x80000000
-    app()->primitives2D().drawFullscreen(3, (float)m_pixelWidth, (float)m_pixelHeight, 0x80000000u, true);
+    app()->primitives2D().drawFullscreen(UI::VIEW_UI, (float)m_pixelWidth, (float)m_pixelHeight, 0x80000000u, true);
 }
 
 void PauseScene::onContinueClicked()

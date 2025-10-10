@@ -87,12 +87,15 @@ struct RenderCommand {
     RenderCommand() : type(RenderType::Rectangle), viewId(0), sortKey(0), blendMode(BlendMode::Alpha), program(BGFX_INVALID_HANDLE), data() {
     }
 
-    // 创建排序键
-    static uint64_t MakeSortKey(RenderLayer layer, RenderType type,
+    // 创建排序键（高位合并 viewId 与 layer，减少跨视图切换导致的批次中断）
+    // 顶部8位：viewLayer = (viewId[5bit] << 3) | layer[3bit]
+    // [63-56]: viewLayer | [55-48]: RenderType | [47-32]: TextureID | [31-16]: Depth | [15-0]: Sequence
+    static uint64_t MakeSortKey(uint16_t viewId, RenderLayer layer, RenderType type,
                                 uint16_t textureId = 0,
                                 uint16_t depth = 0,
                                 uint16_t sequence = 0) {
-        return (static_cast<uint64_t>(layer) << 56) |
+        uint8_t viewLayer = static_cast<uint8_t>(((viewId & 0x1F) << 3) | (static_cast<uint8_t>(layer) & 0x07));
+        return (static_cast<uint64_t>(viewLayer) << 56) |
                (static_cast<uint64_t>(type) << 48) |
                (static_cast<uint64_t>(textureId) << 32) |
                (static_cast<uint64_t>(depth) << 16) |
@@ -108,7 +111,7 @@ struct RenderCommand {
         cmd.viewId = viewId;
         cmd.type = RenderType::Rectangle;
         cmd.data.rect = {x, y, w, h, color, 0.0f};
-        cmd.sortKey = MakeSortKey(layer, RenderType::Rectangle, 0, depth);
+        cmd.sortKey = MakeSortKey(viewId, layer, RenderType::Rectangle, 0, depth);
         cmd.blendMode = (color.a() < 1.0f) ? BlendMode::Alpha : BlendMode::Opaque;
         return cmd;
     }
@@ -122,7 +125,7 @@ struct RenderCommand {
         cmd.type = RenderType::Sprite;
         cmd.data.sprite = {x, y, w, h, texture, 0, 0, 1, 1, {1,1,1,1}, 0};
         // 使用纹理句柄的idx作为textureId用于排序
-        cmd.sortKey = MakeSortKey(layer, RenderType::Sprite, texture.idx, depth);
+        cmd.sortKey = MakeSortKey(viewId, layer, RenderType::Sprite, texture.idx, depth);
         cmd.blendMode = BlendMode::Alpha;
         return cmd;
     }

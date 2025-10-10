@@ -10,6 +10,7 @@
 #include <SDL3/SDL.h>
 #include <bgfx/bgfx.h>
 #include "../ui/UILayout.hpp"
+#include "../ui/UIConstants.hpp"
 #include "../engine/TypedEventBus.hpp"
 #include "GameEvents.hpp"
 
@@ -62,10 +63,10 @@ void SettingsScene::update(float dt)
 void SettingsScene::render()
 {
     // 触摸 UI 视图
-    bgfx::touch(3);
+    bgfx::touch(UI::VIEW_UI);
     if (m_root && m_uiRenderer) {
-        m_uiRenderer->beginFrame(3);
-        m_root->render(3, *m_uiRenderer);
+        m_uiRenderer->beginFrame(UI::VIEW_UI);
+        m_root->render(UI::VIEW_UI, *m_uiRenderer);
         m_uiRenderer->flush();
     }
 }

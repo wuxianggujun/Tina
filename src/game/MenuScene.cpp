@@ -10,6 +10,7 @@
 #include "../game/GameConfig.hpp"
 #include "../renderer/Primitive2D.hpp"
 #include "../renderer/RenderCommandBuilder.hpp"
+#include "../ui/UIConstants.hpp"
 
 #include <SDL3/SDL.h>
 #include <bgfx/bgfx.h>
@@ -46,7 +47,8 @@ void MenuScene::onEnter() {
     createUI();
     m_events.setRoot(m_rootNode.get());
 
-    // 设置UI视图
+    // 设置视图：背景/粒子 view 2，UI view 3
+    setupUIView(UI::VIEW_BACKGROUND, m_pixelWidth, m_pixelHeight);
     setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
 
     TINA_INFO("MenuScene: 初始化完成");
@@ -112,23 +114,26 @@ void MenuScene::update(float dt) {
 void MenuScene::render() {
     // 设置视图（仅在需要时）
     if (m_viewDirty) {
+        // 背景/粒子：view 2；UI：view 3
+        setupUIView(UI::VIEW_BACKGROUND, m_pixelWidth, m_pixelHeight);
         setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
         m_viewDirty = false;
     }
 
-    // 触摸 view
+    // 触摸各视图，保证清屏顺序与提交顺序稳定
+    bgfx::touch(UI::VIEW_BACKGROUND);
     bgfx::touch(uiViewId());
 
     // 渲染渐变背景（使用 SceneRenderer 一次性绘制，无需多层矩形）
     {
         Core::Color topColor{0.1f, 0.2f, 0.4f, 1.0f};
         Core::Color bottomColor{0.05f, 0.1f, 0.2f, 1.0f};
-        scene().drawGradientBackground(uiViewId(), topColor, bottomColor);
+        scene().drawGradientBackground(UI::VIEW_BACKGROUND, topColor, bottomColor);
     }
 
     // 渲染粒子背景
     if (m_bgParticles) {
-        m_bgParticles->render(uiViewId());
+        m_bgParticles->render(UI::VIEW_BACKGROUND);
     }
 
     // 使用传统UI渲染器渲染UI元素
@@ -239,6 +244,9 @@ void MenuScene::handleEvent(const os::Event& event) {
 
         // 同步 SceneRenderer 的屏幕尺寸（供渐变背景使用）
         scene().setScreenSize(m_pixelWidth, m_pixelHeight);
+        // 立即更新两个视图的正交投影，避免本帧拉伸
+        setupUIView(UI::VIEW_BACKGROUND, m_pixelWidth, m_pixelHeight);
+        setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
     }
 }
 

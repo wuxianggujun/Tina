@@ -17,6 +17,7 @@
 #include <SDL3/SDL.h>
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
+#include "../ui/UIConstants.hpp"
 #include <algorithm>
 #include <cmath>
 #include "../renderer/ShaderCatalog.hpp"
@@ -609,31 +610,31 @@ void GameScene::renderWorld()
 
     // 设置世界视图（view 1 = 固体地形，view 2 = 液体/角色）
     // 注：分离固体和液体渲染，实现半透明水体效果
-    bgfx::setViewRect(1, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
-    bgfx::setViewRect(2, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
-    bgfx::setViewTransform(1, viewM, projM);
-    bgfx::setViewTransform(2, viewM, projM);
+    bgfx::setViewRect(UI::VIEW_WORLD_SOLID, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
+    bgfx::setViewRect(UI::VIEW_WORLD_ALPHA, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
+    bgfx::setViewTransform(UI::VIEW_WORLD_SOLID, viewM, projM);
+    bgfx::setViewTransform(UI::VIEW_WORLD_ALPHA, viewM, projM);
 
     // 设置清屏（view 1 负责清理颜色和深度缓冲，防止残影）
     // 关键：必须调用 setViewClear，touch() 不会清理帧缓冲
-    bgfx::setViewClear(1, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, GameConfig::CLEAR_COLOR, 1.0f, 0);
+    bgfx::setViewClear(UI::VIEW_WORLD_SOLID, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, GameConfig::CLEAR_COLOR, 1.0f, 0);
 
     // 触摸视图（确保视图被渲染，即使没有几何体）
-    bgfx::touch(1);
-    bgfx::touch(2);
+    bgfx::touch(UI::VIEW_WORLD_SOLID);
+    bgfx::touch(UI::VIEW_WORLD_ALPHA);
 
     // 渲染地形（固体 -> view 1，液体 -> view 2）
-    m_tileRenderer->renderSolid(*m_tileMap, 1);
-    m_tileRenderer->renderWater(*m_tileMap, 2);
+    m_tileRenderer->renderSolid(*m_tileMap, UI::VIEW_WORLD_SOLID);
+    m_tileRenderer->renderWater(*m_tileMap, UI::VIEW_WORLD_ALPHA);
 
     // 渲染角色（ECS 实体，view 2 确保在液体层之上）
     if (m_ecsWorld) {
-        m_ecsWorld->render(2);
+        m_ecsWorld->render(UI::VIEW_WORLD_ALPHA);
     }
 
     // 渲染粒子（爆炸、碎片等特效，view 2）
     if (m_particleSystem) {
-        m_particleSystem->render(2);
+        m_particleSystem->render(UI::VIEW_WORLD_ALPHA);
     }
 }
 
@@ -644,7 +645,7 @@ void GameScene::renderUI()
     // UI 视图已在 initializeResources() 中设置
 
 
-    ui().beginFrame(3);
+    ui().beginFrame(UI::VIEW_UI);
     // 渲染提示文本
     float hudY = m_toolbar->root()->isVisible()
         ? (float)m_toolbar->barHeight() + GameConfig::UI_HUD_PADDING_Y
@@ -664,11 +665,11 @@ void GameScene::renderUI()
     }
 
     // 渲染工具栏
-    m_toolbar->render(3);
+    m_toolbar->render(UI::VIEW_UI);
 
     // 渲染角色面板
     if (m_characterPanel) {
-        m_characterPanel->render(3, ui());
+        m_characterPanel->render(UI::VIEW_UI, ui());
     }
 
     ui().flush();

@@ -108,7 +108,7 @@ public:
     // 构建并提交
     void submit() {
         // 生成排序键
-        m_cmd.sortKey = RenderCommand::MakeSortKey(m_layer, m_cmd.type, m_textureId, m_depth);
+        m_cmd.sortKey = RenderCommand::MakeSortKey(m_cmd.viewId, m_layer, m_cmd.type, m_textureId, m_depth);
 
         // 提交到队列
         if (m_queue) {
@@ -121,7 +121,7 @@ public:
 
     // 构建并返回命令（不提交）
     RenderCommand build() {
-        m_cmd.sortKey = RenderCommand::MakeSortKey(m_layer, m_cmd.type, m_textureId, m_depth);
+        m_cmd.sortKey = RenderCommand::MakeSortKey(m_cmd.viewId, m_layer, m_cmd.type, m_textureId, m_depth);
         RenderCommand result = m_cmd;
         reset();
         return result;
