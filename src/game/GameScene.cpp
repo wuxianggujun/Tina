@@ -861,7 +861,7 @@ void GameScene::subscribeToEvents()
     if (!app()) return;
 
     // 订阅键盘事件（用于工具栏快捷键）
-    m_keyPressedConnection = app()->events().onKeyPressed.connect(
+    m_keyPressedConnection = app()->osEvents().onKeyPressed.connect(
         [this](int keycode, bool isRepeat) {
             if (!m_toolbar || isRepeat) return;
 
@@ -881,7 +881,7 @@ void GameScene::subscribeToEvents()
     );
 
     // 订阅鼠标滚轮事件（切换工具）
-    m_mouseWheelConnection = app()->events().onMouseWheel.connect(
+    m_mouseWheelConnection = app()->osEvents().onMouseWheel.connect(
         [this](float amount) {
             if (!m_toolbar) return;
 
@@ -900,42 +900,14 @@ void GameScene::subscribeToEvents()
     );
 
     // 订阅玩家跳跃事件（添加粒子效果）
-    m_playerJumpedConnection = app()->events().onPlayerJumped.connect(
-        [this]() {
-            if (!m_particleSystem || m_playerEntity == entt::null) return;
-
-            auto& reg = m_ecsWorld->registry();
-            if (reg.any_of<ECS::Transform>(m_playerEntity)) {
-                auto& transform = reg.get<ECS::Transform>(m_playerEntity);
-                // 在玩家脚下生成跳跃粒子
-                m_particleSystem->explode(
-                    transform.x + 0.5f, transform.y,
-                    5,  // 少量粒子
-                    0.5f, 1.0f,  // 速度范围
-                    0.05f, 0.1f,  // 大小范围
-                    0.3f, 0.5f,  // 生命周期
-                    Core::Color(0.9f, 0.9f, 0.9f, 0.8f)  // 白色粉尘
-                );
-            }
-        }
-    );
+    m_playerJumpedConnection = app()->events().connect<Tina::Game::Events::PlayerJumped, &GameScene::onPlayerJumpedEvt>(*this);
 
     // 订阅玩家移动事件（可用于调试或其他逻辑）
-    m_playerMovedConnection = app()->events().onPlayerMoved.connect(
-        [](float x, float y) {
-            // 未来可以在这里添加脚步声、拖尾效果等
-            // TINA_TRACE("玩家移动到: ({:.2f}, {:.2f})", x, y);
-            (void)x; (void)y;  // 避免未使用参数警告
-        }
-    );
+    m_playerMovedConnection = app()->events().connect<Tina::Game::Events::PlayerMoved, &GameScene::onPlayerMovedEvt>(*this);
 
     // === 昼夜系统调试信号 ===
-    m_setDayNightConnection = app()->events().onSetDayNightNormalized.connect([this](float n){
-        m_dayNight.setNormalizedTime(n);
-    });
-    m_adjustDayNightConnection = app()->events().onAdjustDayNightNormalized.connect([this](float dn){
-        m_dayNight.setNormalizedTime(m_dayNight.normalizedTime() + dn);
-    });
+    m_setDayNightConnection = app()->events().connect<Tina::Game::Events::SetDayNight, &GameScene::onSetDayNight>(*this);
+    m_adjustDayNightConnection = app()->events().connect<Tina::Game::Events::AdjustDayNight, &GameScene::onAdjustDayNight>(*this);
     // 已移除暂停/恢复昼夜功能
 
     TINA_INFO("GameScene: EventBus 订阅完成");
@@ -954,15 +926,47 @@ void GameScene::triggerPlayerEvents(float prevX, float prevY, bool wasOnGround)
 
     // 检测跳跃（离地 + 垂直速度向上）
     if (wasOnGround && !body.onGround && velocity.vy < 0.0f) {
-        app()->events().onPlayerJumped.emit();
+        app()->events().trigger<Tina::Game::Events::PlayerJumped>();
     }
 
     // 检测移动（位置变化）
     float dx = transform.x - prevX;
     float dy = transform.y - prevY;
     if (std::abs(dx) > 0.01f || std::abs(dy) > 0.01f) {
-        app()->events().onPlayerMoved.emit(transform.x, transform.y);
+        app()->events().trigger<Tina::Game::Events::PlayerMoved>(transform.x, transform.y);
     }
 }
 
+// === 强类型事件处理 ===
+void GameScene::onSetDayNight(const Tina::Game::Events::SetDayNight& e)
+{
+    m_dayNight.setNormalizedTime(e.normalized);
+}
+
+void GameScene::onAdjustDayNight(const Tina::Game::Events::AdjustDayNight& e)
+{
+    m_dayNight.setNormalizedTime(m_dayNight.normalizedTime() + e.delta);
+}
+
+void GameScene::onPlayerJumpedEvt(const Tina::Game::Events::PlayerJumped&)
+{
+    if (!m_particleSystem || m_playerEntity == entt::null) return;
+    auto& reg = m_ecsWorld->registry();
+    if (reg.any_of<ECS::Transform>(m_playerEntity)) {
+        auto& transform = reg.get<ECS::Transform>(m_playerEntity);
+        m_particleSystem->explode(
+            transform.x + 0.5f, transform.y,
+            5,
+            0.5f, 1.0f,
+            0.05f, 0.1f,
+            0.3f, 0.5f,
+            Core::Color(0.9f, 0.9f, 0.9f, 0.8f)
+        );
+    }
+}
+
+void GameScene::onPlayerMovedEvt(const Tina::Game::Events::PlayerMoved& e)
+{
+    (void)e; // 目前仅作示例订阅，可加入调试逻辑
+}
 } // namespace Tina::Game

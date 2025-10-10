@@ -1,6 +1,7 @@
 #include "Application.hpp"
 #include "SceneManager.hpp"
 #include "EventBus.hpp"
+#include "TypedEventBus.hpp"
 #include "Resource.hpp"
 #include "Texture.hpp"
 #include "Font.hpp"
@@ -125,6 +126,7 @@ void Application::init()
 
     // 5. 创建核心子系统
     m_eventBus = Memory::MakeUnique<EventBus>();
+    m_typedEvents = Memory::MakeUnique<TypedEventBus>();
     m_sceneManager = Memory::MakeUnique<SceneManager>(this);
 
     // 6. 创建资源系统
@@ -290,7 +292,7 @@ void Application::processEvents()
                 m_pixelWidth, m_pixelHeight);
         }
 
-        // 2. 分发到EventBus
+        // 2. 分发到 OS 事件总线
         m_eventBus->dispatchOSEvent(event);
 
         // 3. 分发到当前场景
@@ -331,7 +333,10 @@ void Application::update(float dt)
         m_resourceHub->update();
     }
 
-    // 2. 更新场景
+    // 2. 驱动强类型事件总线（派发异步事件）
+    if (m_typedEvents) m_typedEvents->update();
+
+    // 3. 更新场景
     m_sceneManager->update(dt);
 }
 

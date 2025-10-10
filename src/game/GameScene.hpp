@@ -13,9 +13,11 @@
 #include "../particles/ParticleSystem.hpp"
 #include "../game/TerrainEditor.hpp"
 #include "DayNight.hpp"
+#include "GameEvents.hpp"
 #include "../engine/Resource.hpp"
 #include "../engine/Texture.hpp"
 #include "../engine/AudioResource.hpp"
+#include "../engine/TypedEventBus.hpp"
 
 namespace Tina::Game {
 
@@ -99,10 +101,10 @@ private:
     Core::Signal<>::Connection m_switchControlConnection;
     Core::Signal<int, bool>::Connection m_keyPressedConnection;
     Core::Signal<float>::Connection m_mouseWheelConnection;
-    Core::Signal<>::Connection m_playerJumpedConnection;
-    Core::Signal<float, float>::Connection m_playerMovedConnection;
-    Core::Signal<float>::Connection m_setDayNightConnection;
-    Core::Signal<float>::Connection m_adjustDayNightConnection;
+    Engine::TypedEventBus::Connection m_playerJumpedConnection;
+    Engine::TypedEventBus::Connection m_playerMovedConnection;
+    Engine::TypedEventBus::Connection m_setDayNightConnection;
+    Engine::TypedEventBus::Connection m_adjustDayNightConnection;
 
     // 游戏状态
     entt::entity m_playerEntity = entt::null;
@@ -128,6 +130,11 @@ private:
 
     // 昼夜系统（始终推进，不支持暂停）
     DayNight m_dayNight;
+    // 强类型事件处理
+    void onSetDayNight(const Tina::Game::Events::SetDayNight& e);
+    void onAdjustDayNight(const Tina::Game::Events::AdjustDayNight& e);
+    void onPlayerJumpedEvt(const Tina::Game::Events::PlayerJumped& e);
+    void onPlayerMovedEvt(const Tina::Game::Events::PlayerMoved& e);
 };
 
 } // namespace Tina::Game

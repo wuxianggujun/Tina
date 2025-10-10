@@ -11,6 +11,8 @@
 #include <SDL3/SDL.h>
 #include <bgfx/bgfx.h>
 #include "../ui/UILayout.hpp"
+#include "../engine/TypedEventBus.hpp"
+#include "GameEvents.hpp"
 
 namespace Tina::Game {
 
@@ -162,23 +164,23 @@ void SettingsScene::onBack()
 void SettingsScene::onSetDay()
 {
     // 设定至白天中段（默认 0.25）
-    app()->events().onSetDayNightNormalized.emit(0.25f);
+    app()->events().trigger<Tina::Game::Events::SetDayNight>(0.25f);
 }
 
 void SettingsScene::onSetNight()
 {
     // 设定至黑夜中段（默认 0.75）
-    app()->events().onSetDayNightNormalized.emit(0.75f);
+    app()->events().trigger<Tina::Game::Events::SetDayNight>(0.75f);
 }
 
 void SettingsScene::onFwdTime()
 {
-    app()->events().onAdjustDayNightNormalized.emit(+0.10f);
+    app()->events().trigger<Tina::Game::Events::AdjustDayNight>(+0.10f);
 }
 
 void SettingsScene::onBackTime()
 {
-    app()->events().onAdjustDayNightNormalized.emit(-0.10f);
+    app()->events().trigger<Tina::Game::Events::AdjustDayNight>(-0.10f);
 }
 
 } // namespace Tina::Game

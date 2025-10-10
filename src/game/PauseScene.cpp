@@ -9,6 +9,8 @@
 #include "../ui/UILayout.hpp"
 #include "../core/Log.hpp"
 #include "../ui/UIComponents.hpp"
+#include "../engine/TypedEventBus.hpp"
+#include "GameEvents.hpp"
 
 #include <SDL3/SDL.h>
 #include <bgfx/bgfx.h>
@@ -344,11 +346,11 @@ void PauseScene::onQuitClicked()
     app()->scenes().requestClear();  // 清空场景栈，返回主菜单
 }
 
-void PauseScene::onSetDay()      { app()->events().onSetDayNightNormalized.emit(0.25f); }
-void PauseScene::onSetNight()    { app()->events().onSetDayNightNormalized.emit(0.75f); }
+void PauseScene::onSetDay()      { app()->events().trigger<Tina::Game::Events::SetDayNight>(0.25f); }
+void PauseScene::onSetNight()    { app()->events().trigger<Tina::Game::Events::SetDayNight>(0.75f); }
 // 已移除“暂停/恢复昼夜”功能
-void PauseScene::onFwdTime()     { app()->events().onAdjustDayNightNormalized.emit(+0.10f); }
-void PauseScene::onBackTime()    { app()->events().onAdjustDayNightNormalized.emit(-0.10f); }
+void PauseScene::onFwdTime()     { app()->events().trigger<Tina::Game::Events::AdjustDayNight>(+0.10f); }
+void PauseScene::onBackTime()    { app()->events().trigger<Tina::Game::Events::AdjustDayNight>(-0.10f); }
 
 } // namespace Tina::Game
 
