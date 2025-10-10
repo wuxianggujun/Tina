@@ -187,6 +187,7 @@ void RenderQueue::beginBatch(const RenderCommand& cmd) {
     }
 
     m_currentBatch->clear();
+    m_currentBatch->viewId = cmd.viewId;
     m_currentBatch->type = cmd.type;
     m_currentBatch->program = cmd.program;
     m_currentBatch->blendMode = cmd.blendMode;
@@ -308,7 +309,8 @@ void RenderQueue::executeBatch(const RenderBatch& batch) {
     bgfx::setState(state);
 
     // 提交
-    bgfx::submit(0, batch.program);  // TODO: 使用正确的viewId
+    // 按批次所属的视图提交（确保使用正确的投影与视口）
+    bgfx::submit(batch.viewId, batch.program);
 
     // 更新统计
     m_stats.numDrawCalls++;

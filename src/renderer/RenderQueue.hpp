@@ -37,6 +37,8 @@ struct RenderStats {
 
 // 渲染批次
 struct RenderBatch {
+    // 所属视图（确保批次内所有命令使用相同 viewId）
+    uint16_t viewId = 0;
     RenderType type;
     bgfx::ProgramHandle program;
     bgfx::TextureHandle texture = BGFX_INVALID_HANDLE;
@@ -52,6 +54,8 @@ struct RenderBatch {
 
     // 是否可以合并新的命令到这个批次
     bool canMerge(const RenderCommand& cmd) const {
+        // 视图不同不可合批（避免提交到错误的 view）
+        if (viewId != cmd.viewId) return false;
         if (type != cmd.type) return false;
         if (program.idx != cmd.program.idx) return false;
         if (blendMode != cmd.blendMode) return false;
