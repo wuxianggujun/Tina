@@ -8,6 +8,7 @@
 #include "../ui/UILayout.hpp"
 #include "../core/Log.hpp"
 #include "../ui/UIComponents.hpp"
+#include "../renderer/Primitive2D.hpp"
 #include "MenuScene.hpp"
 #include "../engine/TypedEventBus.hpp"
 #include "GameEvents.hpp"
@@ -28,8 +29,6 @@ void PauseScene::onEnter()
     // 获取窗口尺寸
     app()->getPixelSize(m_pixelWidth, m_pixelHeight);
 
-    // 初始化渲染资源（使用全局 ShaderManager）
-    m_progColor = app()->shaders().loadProgram("color", "color");
     // 使用全局 TextRenderer（默认 32 号），无需在场景内切换字号
 
     // 文本渲染器
@@ -46,11 +45,7 @@ void PauseScene::onEnter()
     // m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
     // m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer());
 
-    // 初始化顶点布局
-    m_colorLayout.begin()
-        .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
-        .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
-        .end();
+    // 顶点布局/着色器由 Application 的 Primitive2D 统一管理
 
     // 创建 UI
     createUI();
@@ -77,12 +72,7 @@ void PauseScene::onExit()
     m_btnContinue = nullptr;
     m_btnQuit = nullptr;
 
-    // 清理渲染资源（按逆序）
-    // ✅ m_uiRenderer 由 Scene 基类管理
-    
-    
-    // 不手动销毁 m_progColor，让全局 ShaderManager 自动管理（避免双重释放）
-    m_progColor = BGFX_INVALID_HANDLE;
+    // 清理渲染资源由全局 Renderer 管理
 }
 
 void PauseScene::update(float dt)
@@ -276,59 +266,11 @@ void PauseScene::renderOverlay()
 {
     // 渲染半透明黑色遮罩（覆盖整个屏幕）
     // 使用 view 3（UI 层）
-
     bgfx::setViewRect(3, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
-    
-    // 设置正交投影矩阵
-    float ortho[16];
-    const bgfx::Caps* caps = bgfx::getCaps();
-    bx::mtxOrtho(ortho,
-                 0.0f, (float)m_pixelWidth,
-                 (float)m_pixelHeight, 0.0f,
-                 -1.0f, 1.0f,
-                 0.0f,
-                 caps ? caps->homogeneousDepth : false);
-    bgfx::setViewTransform(3, nullptr, ortho);
-    // UI 覆盖层也采用顺序模式，确保遮罩与文字层级可控
-    bgfx::setViewMode(3, bgfx::ViewMode::Sequential);
-
-    // 定义全屏四边形顶点（两个三角形）
-    struct PosColorVertex {
-        float x, y, z;
-        uint32_t abgr;  // bgfx 使用 ABGR 格式
-    };
-
-    // 半透明黑色 (R=0, G=0, B=0, A=128)
-    uint32_t color = 0x80000000;  // ABGR: A=0x80, B=0, G=0, R=0
-
-    PosColorVertex vertices[6] = {
-        // 三角形 1
-        {0.0f,                      0.0f,                       0.0f, color},
-        {(float)m_pixelWidth,       0.0f,                       0.0f, color},
-        {(float)m_pixelWidth,       (float)m_pixelHeight,       0.0f, color},
-        
-        // 三角形 2
-        {0.0f,                      0.0f,                       0.0f, color},
-        {(float)m_pixelWidth,       (float)m_pixelHeight,       0.0f, color},
-        {0.0f,                      (float)m_pixelHeight,       0.0f, color},
-    };
-
-    // 创建瞬态顶点缓冲区
-    if (bgfx::getAvailTransientVertexBuffer(6, m_colorLayout) == 6) {
-        bgfx::TransientVertexBuffer tvb;
-        bgfx::allocTransientVertexBuffer(&tvb, 6, m_colorLayout);
-        bx::memCopy(tvb.data, vertices, sizeof(vertices));
-
-        // 设置状态：启用混合（半透明）
-        uint64_t state = 0
-            | BGFX_STATE_WRITE_RGB
-            | BGFX_STATE_WRITE_A
-            | BGFX_STATE_BLEND_ALPHA;  // Alpha 混合
-
-        bgfx::setState(state);
-        bgfx::setVertexBuffer(0, &tvb);
-        bgfx::submit(3, m_progColor);
-    }
+    // 由全局 Primitive2D 设置正交并绘制半透明全屏遮罩
+    app()->primitives2D().setOrtho(3, (float)m_pixelWidth, (float)m_pixelHeight);
+    // 半透明黑色: ABGR 0x80000000
+    app()->primitives2D().drawFullscreen(3, (float)m_pixelWidth, (float)m_pixelHeight, 0x80000000u, true);
 }
 
 void PauseScene::onContinueClicked()

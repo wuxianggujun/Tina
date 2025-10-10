@@ -52,6 +52,8 @@ set(SRC_FILES
     renderer/ShaderManager.cpp
     renderer/TileRenderer.hpp
     renderer/TileRenderer.cpp
+    renderer/Primitive2D.hpp
+    renderer/Primitive2D.cpp
     ui/TextRenderer.hpp
     ui/TextRenderer.cpp
     ui/UIBatch.hpp

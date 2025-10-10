@@ -15,8 +15,9 @@
 // 在全局命名空间前向声明 SDL_mixer 的不透明结构体，避免命名空间污染
 struct MIX_Mixer;
 
-// 前向声明：UI 文本渲染器（避免在头文件中包含重量级依赖）
+// 前向声明（放在全局命名空间，避免嵌套成 Tina::Engine::Tina::...）
 namespace Tina { namespace UI { class TextRenderer; } }
+namespace Tina { namespace Renderer { class Primitive2D; class ShaderManager; } }
 
 namespace Tina::Engine {
 
@@ -92,6 +93,8 @@ public:
     // ==================== 文本渲染器 ====================
     // 全局 TextRenderer，避免每个 Scene 重复创建与加载字体
     Tina::UI::TextRenderer& textRenderer() const;
+    // 简易 2D 形状渲染器（全局共享）
+    Tina::Renderer::Primitive2D& primitives2D() const;
 
     // 全局音量控制（0.0 ~ 1.0）
     void setAudioMasterVolume(float v);
@@ -165,6 +168,7 @@ private:
     // SDL_mixer 3.x 混音器（输出到默认音频设备）
     // 全局文本渲染器（共享）
     Memory::UniquePtr<Tina::UI::TextRenderer> m_textRenderer;
+    Memory::UniquePtr<Tina::Renderer::Primitive2D> m_prim2D;
 
     MIX_Mixer* m_mixer = nullptr;
 

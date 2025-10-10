@@ -9,6 +9,7 @@
 #include "../engine/SceneManager.hpp"
 #include "../core/Log.hpp"
 #include "../game/GameConfig.hpp"
+#include "../renderer/Primitive2D.hpp"
 
 #include <SDL3/SDL.h>
 #include <bgfx/bgfx.h>
@@ -31,8 +32,7 @@ void MenuScene::onEnter() {
     // 获取窗口尺寸
     app()->getPixelSize(m_pixelWidth, m_pixelHeight);
     
-    // 初始化渲染资源
-    m_progColor = app()->shaders().loadProgram("color", "color");
+    // 渲染资源：基础 2D 形状渲染器由 Application 统一管理（无需每个场景加载 shader）
     
     // 统一使用 Application 初始化时的默认字号（32），避免切换字号导致异步等待
     // 如需不同字号，可改为在 Application::prewarmCommonAssets 中确保 48/32/24 Face 并切换前等待 READY
@@ -52,11 +52,7 @@ void MenuScene::onEnter() {
     // m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
     // m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer());
     
-    // 初始化顶点布局
-    m_colorLayout.begin()
-        .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
-        .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
-        .end();
+    // 顶点布局由全局 Primitive2D 管理
     
     // 创建背景粒子系统
     m_bgParticles = Memory::MakeUnique<Particles::ParticleSystem2D>();
@@ -94,7 +90,7 @@ void MenuScene::onExit() {
     m_bgParticles.reset();
     // ✅ m_uiRenderer 由 Scene 基类管理，无需手动清理
     
-    m_progColor = BGFX_INVALID_HANDLE;
+    // 渐变/矩形着色由全局 Primitive2D 管理
 }
 
 void MenuScene::update(float dt) {
@@ -371,43 +367,15 @@ void MenuScene::createUI() {
 }
 
 void MenuScene::renderGradientBackground() {
-    if (!bgfx::isValid(m_progColor)) return;
-    
     // 渲染渐变背景（从深蓝灰到黑色）
-    struct Vertex {
-        float x, y, z;
-        uint32_t abgr;
-    };
-    
-    // 顶部：深蓝灰 #2C3E50 (ABGR: 0xFF503E2C)
-    uint32_t topColor = 0xFF503E2C;
-    // 底部：黑色 #1A1A1A (ABGR: 0xFF1A1A1A)
-    uint32_t bottomColor = 0xFF1A1A1A;
-    
-    Vertex vertices[6] = {
-        // 三角形 1
-        {0.0f, 0.0f, 0.0f, topColor},
-        {(float)m_pixelWidth, 0.0f, 0.0f, topColor},
-        {(float)m_pixelWidth, (float)m_pixelHeight, 0.0f, bottomColor},
-        
-        // 三角形 2
-        {0.0f, 0.0f, 0.0f, topColor},
-        {(float)m_pixelWidth, (float)m_pixelHeight, 0.0f, bottomColor},
-        {0.0f, (float)m_pixelHeight, 0.0f, bottomColor},
-    };
-    
-    // 创建瞬态顶点缓冲区
-    if (bgfx::getAvailTransientVertexBuffer(6, m_colorLayout) == 6) {
-        bgfx::TransientVertexBuffer tvb;
-        bgfx::allocTransientVertexBuffer(&tvb, 6, m_colorLayout);
-        bx::memCopy(tvb.data, vertices, sizeof(vertices));
-        
-        // 设置状态
-        uint64_t state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A;
-        bgfx::setState(state);
-        bgfx::setVertexBuffer(0, &tvb);
-        bgfx::submit(3, m_progColor);
-    }
+    const uint32_t topColor = 0xFF503E2C;     // 顶部：深蓝灰
+    const uint32_t bottomColor = 0xFF1A1A1A;  // 底部：黑色
+
+    // 设置 UI 视图矩形与正交矩阵
+    bgfx::setViewRect(3, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
+    app()->primitives2D().setOrtho(3, (float)m_pixelWidth, (float)m_pixelHeight);
+    app()->primitives2D().drawVerticalGradient(3, 0.0f, 0.0f, (float)m_pixelWidth, (float)m_pixelHeight,
+                                               topColor, bottomColor);
 }
 
 void MenuScene::renderParticleBackground() {

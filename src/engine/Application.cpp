@@ -2,6 +2,7 @@
 #include "SceneManager.hpp"
 #include "OSEventBus.hpp"
 #include "TypedEventBus.hpp"
+#include "../renderer/Primitive2D.hpp"
 #include "Resource.hpp"
 #include "Texture.hpp"
 #include "Font.hpp"
@@ -160,6 +161,12 @@ void Application::init()
         TINA_INFO("Application: TextRenderer 已加载 48 号字体");
     }
 
+    // 7.2 初始化简易 2D 形状渲染器（集中管理 color 程序与布局）
+    m_prim2D = Memory::MakeUnique<Tina::Renderer::Primitive2D>();
+    if (!m_prim2D->initialize(*m_shaderMgr)) {
+        TINA_WARN("Primitive2D 初始化失败：color 程序不可用");
+    }
+
     // 7.5 预热常用资源（字体/图标），减少首帧等待
     prewarmCommonAssets();
 
@@ -186,8 +193,10 @@ void Application::shutdown()
     m_resourceHub.reset();
     m_fileSystem.reset();
     m_osEventBus.reset();
-    // 在 bgfx 关闭前确保销毁所有程序句柄
+    // 在 bgfx 关闭前确保销毁所有程序句柄（先销毁依赖者，再销毁管理器）
+    m_prim2D.reset();
     m_shaderMgr.reset();
+    m_prim2D.reset();
 
     // 关闭 SDL_mixer
     if (m_mixer) {
@@ -435,6 +444,11 @@ void Application::prewarmCommonAssets()
 UI::TextRenderer& Application::textRenderer() const
 {
     return *m_textRenderer;
+}
+
+Tina::Renderer::Primitive2D& Application::primitives2D() const
+{
+    return *m_prim2D;
 }
 
 } // namespace Tina::Engine

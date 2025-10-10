@@ -61,8 +61,6 @@ private:
     // 渲染资源
     Memory::UniquePtr<Particles::ParticleSystem2D> m_bgParticles;
     
-    bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
-    bgfx::VertexLayout m_colorLayout;
     
     Memory::UniquePtr<UI::UINode> m_rootNode;
     Container::Vector<Memory::UniquePtr<UI::UINode>> m_ownedNodes;  // 统一管理所有节点生命周期

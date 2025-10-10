@@ -56,7 +56,6 @@ private:
     // Memory::UniquePtr<UI::UIRenderer> m_uiRenderer;  //  已由 Scene 基类管理
     Memory::UniquePtr<UI::UINode> m_rootNode;  // UI根节点
 
-    bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
     UI::UIButton* m_btnContinue = nullptr;  // 继续游戏按钮
     UI::UIButton* m_btnQuit = nullptr;      // 退出按钮
     // 调试按钮
@@ -73,10 +72,6 @@ private:
     Core::Signal<>::Connection m_cNight;
     Core::Signal<>::Connection m_cFwd;
     Core::Signal<>::Connection m_cBack;
-
-    
-    // 需要访问 UIRenderer 的顶点布局
-    bgfx::VertexLayout m_colorLayout;
 
     // 视口尺寸
     int m_pixelWidth = 1280;
