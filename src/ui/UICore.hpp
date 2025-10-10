@@ -14,33 +14,9 @@
 #include "UIError.hpp"      // 添加错误处理
 #include "UIBatch.hpp"      // 添加批处理数据结构
 #include "BatchStrategy.hpp" // 添加批处理策略完整定义
+#include "UIPerformanceMonitor.hpp" // 添加性能监控
 
 namespace Tina::UI {
-
-// 性能统计结构
-struct RenderStats {
-    uint32_t drawCalls = 0;        // 绘制调用次数
-    uint32_t vertices = 0;          // 顶点数
-    uint32_t triangles = 0;         // 三角形数
-    uint32_t rectCount = 0;         // 矩形数量
-    uint32_t imageCount = 0;        // 图片数量
-    uint32_t textCount = 0;         // 文本数量
-    float batchEfficiency = 0.0f;  // 批处理效率 (1 - drawCalls/totalElements)
-    
-    void reset() {
-        drawCalls = vertices = triangles = 0;
-        rectCount = imageCount = textCount = 0;
-        batchEfficiency = 0.0f;
-    }
-    
-    void calculate() {
-        uint32_t totalElements = rectCount + imageCount + textCount;
-        if (totalElements > 0 && drawCalls > 0) {
-            batchEfficiency = 1.0f - (float)drawCalls / (float)totalElements;
-            batchEfficiency = std::max(0.0f, std::min(1.0f, batchEfficiency));
-        }
-    }
-};
 
 class UIRenderer {
 public:
@@ -157,18 +133,13 @@ public:
    
    // === 性能监控 ===
    
-   // 获取当前帧的性能统计
-   const RenderStats& getFrameStats() const { return m_frameStats; }
+   // 获取性能监控器
+   UIPerformanceMonitor& getPerformanceMonitor() { return m_perfMonitor; }
+   const UIPerformanceMonitor& getPerformanceMonitor() const { return m_perfMonitor; }
    
-   // 获取上一帧的性能统计（用于显示）
-   const RenderStats& getLastFrameStats() const { return m_lastFrameStats; }
-   
-   // 启用/禁用性能统计
-   void setStatsEnabled(bool enabled) { m_statsEnabled = enabled; }
-   bool isStatsEnabled() const { return m_statsEnabled; }
-   
-   // 调试：打印性能统计到日志
-   void logStats() const;
+   // 便捷方法：启用/禁用性能监控
+   void setPerformanceMonitoringEnabled(bool enabled) { m_perfMonitor.setEnabled(enabled); }
+   bool isPerformanceMonitoringEnabled() const { return m_perfMonitor.isEnabled(); }
 
    // === 错误处理 ===
 
@@ -219,10 +190,8 @@ private:
     // 批处理优化
     bool shouldCreateNewBatch(uint32_t currentSize, uint32_t newSize) const;
     
-    // 性能统计
-    RenderStats m_frameStats;      // 当前帧统计
-    RenderStats m_lastFrameStats;  // 上一帧统计（用于显示）
-    bool m_statsEnabled = false;   // 是否启用统计
+    // 性能监控
+    UIPerformanceMonitor m_perfMonitor;
 
     // 批处理控制
     IBatchStrategy* m_batchStrategy = nullptr;  // 策略指针

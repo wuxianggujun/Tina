@@ -57,6 +57,8 @@ set(SRC_FILES
     ui/UIBatch.hpp
     ui/BatchStrategy.hpp
     ui/BatchStrategy.cpp
+    ui/UIPerformanceMonitor.hpp
+    ui/UIPerformanceMonitor.cpp
     ui/UICore.hpp
     ui/UICore.cpp
     ui/UINode.hpp

@@ -76,11 +76,8 @@ void UIRenderer::shutdown()
 
 void UIRenderer::beginFrame(uint16_t viewId)
 {
-    // 保存上一帧统计，重置当前帧
-    if (m_statsEnabled) {
-        m_lastFrameStats = m_frameStats;
-        m_frameStats.reset();
-    }
+    // 开始性能监控
+    m_perfMonitor.beginFrame();
 
     // 优化：使用 resize(0) 代替 clear() 保留容量，避免内存重分配
     m_colorBatch.vertices.resize(0);
@@ -148,9 +145,7 @@ void UIRenderer::drawRect(uint16_t viewId, float x, float y, float w, float h,
     m_colorBatch.indices.push_back(baseIdx + 3);
     
     // 更新统计
-    if (m_statsEnabled) {
-        m_frameStats.rectCount++;
-    }
+    m_perfMonitor.recordRect();
 }
 
 void UIRenderer::drawRect(uint16_t viewId, float x, float y, float w, float h,
@@ -234,9 +229,7 @@ void UIRenderer::drawImage(uint16_t viewId, float x, float y, float w, float h,
     batch->indices.push_back(baseIdx + 3);
     
     // 更新统计
-    if (m_statsEnabled) {
-        m_frameStats.imageCount++;
-    }
+    m_perfMonitor.recordImage();
 }
 
 // 统一提交所有批次
@@ -251,10 +244,8 @@ void UIRenderer::flush()
     flushSpriteBatches();
     flushTextCommands();
     
-    // 计算批处理效率
-    if (m_statsEnabled) {
-        m_frameStats.calculate();
-    }
+    // 结束性能监控
+    m_perfMonitor.endFrame();
     
     // 重置深度计数器
     m_currentRenderDepth = 0;
@@ -320,11 +311,9 @@ void UIRenderer::flushColorBatch()
         bgfx::end(enc);
         
         // 更新统计
-        if (m_statsEnabled) {
-            m_frameStats.drawCalls++;
-            m_frameStats.vertices += vcount;
-            m_frameStats.triangles += icount / 3;
-        }
+        m_perfMonitor.recordDrawCall();
+        m_perfMonitor.recordVertices(vcount);
+        m_perfMonitor.recordTriangles(icount / 3);
     }
 }
 
@@ -368,11 +357,9 @@ void UIRenderer::flushSpriteBatches()
             bgfx::end(enc);
             
             // 更新统计
-            if (m_statsEnabled) {
-                m_frameStats.drawCalls++;
-                m_frameStats.vertices += vcount;
-                m_frameStats.triangles += icount / 3;
-            }
+            m_perfMonitor.recordDrawCall();
+            m_perfMonitor.recordVertices(vcount);
+            m_perfMonitor.recordTriangles(icount / 3);
         }
     }
 }
@@ -411,10 +398,10 @@ void UIRenderer::flushTextCommands()
     // ✅ 使用TRACE级别日志
     TINA_TRACE("UIRenderer: flushTextCommands - 提交 {} 条文本命令", (int)m_textCmds.size());
     
-    if (m_statsEnabled) {
-        m_frameStats.textCount += static_cast<uint32_t>(m_textCmds.size());
-        // 文本渲染的drawcall由TextRenderer内部处理，这里估算
-        m_frameStats.drawCalls += static_cast<uint32_t>(m_textCmds.size());
+    // 记录文本统计
+    for (size_t i = 0; i < m_textCmds.size(); ++i) {
+        m_perfMonitor.recordText();
+        m_perfMonitor.recordDrawCall();  // 文本渲染的drawcall估算
     }
     
     for (const auto& cmd : m_textCmds) {
@@ -461,25 +448,6 @@ void UIRenderer::flushTextCommands()
 }
 
 
-// 打印性能统计到日志
-void UIRenderer::logStats() const
-{
-    if (!m_statsEnabled) {
-        TINA_WARN("UIRenderer: 性能统计未启用");
-        return;
-    }
-    
-    const auto& stats = m_lastFrameStats;
-    TINA_INFO("=== UI渲染性能统计 ===");
-    TINA_INFO("Draw Calls: {}", stats.drawCalls);
-    TINA_INFO("顶点数: {}", stats.vertices);
-    TINA_INFO("三角形数: {}", stats.triangles);
-    TINA_INFO("矩形数: {}", stats.rectCount);
-    TINA_INFO("图片数: {}", stats.imageCount);
-    TINA_INFO("文本数: {}", stats.textCount);
-    TINA_INFO("批处理效率: {:.1f}%", stats.batchEfficiency * 100.0f);
-    TINA_INFO("====================");
-}
 
 // 内部错误报告实现
 void UIRenderer::reportError(UIErrorCode code, const std::string& message, const std::string& location)
