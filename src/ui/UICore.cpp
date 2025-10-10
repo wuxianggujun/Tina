@@ -5,13 +5,18 @@
 
 #include "UICore.hpp"
 #include "UIConstants.hpp"  // 添加常量定义
+#include "BatchStrategy.hpp" // 添加批处理策略
 #include <bx/math.h>
 #include <cstring>
 #include <algorithm>
 #include "../core/Color.hpp"
 #include "../core/Log.hpp"
+#include "../core/Memory.hpp"
 
 namespace Tina::UI {
+
+// 析构函数定义（需要在这里，因为IBatchStrategy的完整定义在这里可见）
+UIRenderer::~UIRenderer() = default;
 
 bool UIRenderer::initialize(Tina::Renderer::ShaderManager& sm, TextRenderer* text)
 {
@@ -49,8 +54,13 @@ bool UIRenderer::initialize(Tina::Renderer::ShaderManager& sm, TextRenderer* tex
     m_spriteBatches.reserve(DEFAULT_SPRITE_BATCH_RESERVE);
     m_textCmds.reserve(DEFAULT_TEXT_CMD_RESERVE);
 
-    TINA_INFO("UIRenderer: 初始化完成（预分配内存：{}个顶点，{}个批次）",
-              DEFAULT_COLOR_VERTEX_RESERVE, DEFAULT_SPRITE_BATCH_RESERVE);
+    // 初始化默认批处理策略
+    m_defaultStrategy = Memory::MakeUnique<SimpleBatchStrategy>();
+    m_batchStrategy = m_defaultStrategy.get();
+
+    TINA_INFO("UIRenderer: 初始化完成（预分配内存：{}个顶点，{}个批次，策略：{}）",
+              DEFAULT_COLOR_VERTEX_RESERVE, DEFAULT_SPRITE_BATCH_RESERVE,
+              m_batchStrategy->getName());
     return true;
 }
 
@@ -232,9 +242,9 @@ void UIRenderer::drawImage(uint16_t viewId, float x, float y, float w, float h,
 // 统一提交所有批次
 void UIRenderer::flush()
 {
-    // 根据策略进行排序
-    if (m_batchStrategy == BatchStrategy::DepthSorted) {
-        sortBatchesByDepth();
+    // 使用策略对批次进行排序
+    if (m_batchStrategy) {
+        m_batchStrategy->sortSpriteBatches(m_spriteBatches);
     }
     
     flushColorBatch();
@@ -368,20 +378,13 @@ void UIRenderer::flushSpriteBatches()
 }
 
 // 查找或创建纹理批次（考虑深度）
-UIRenderer::SpriteBatch* UIRenderer::findOrCreateSpriteBatch(bgfx::TextureHandle tex, uint32_t depth)
+SpriteBatch* UIRenderer::findOrCreateSpriteBatch(bgfx::TextureHandle tex, uint32_t depth)
 {
     // 根据批处理策略查找合适的批次
     for (auto& batch : m_spriteBatches) {
-        if (batch.canMerge(tex, depth)) {
-            // 简单策略：只要纹理相同就合并
-            // 深度排序策略：纹理和深度都相同才合并
-            if (m_batchStrategy == BatchStrategy::DepthSorted) {
-                if (batch.currentDepth == depth) {
-                    return &batch;
-                }
-            } else {
-                return &batch;
-            }
+        // 使用策略判断是否可以合并
+        if (m_batchStrategy && m_batchStrategy->canMergeSprite(batch, tex, depth, 0)) {
+            return &batch;
         }
     }
     
@@ -391,19 +394,6 @@ UIRenderer::SpriteBatch* UIRenderer::findOrCreateSpriteBatch(bgfx::TextureHandle
     newBatch.currentDepth = depth;
     m_spriteBatches.push_back(newBatch);
     return &m_spriteBatches.back();
-}
-
-// 根据深度排序批次
-void UIRenderer::sortBatchesByDepth()
-{
-    // 对sprite批次按深度排序
-    std::sort(m_spriteBatches.begin(), m_spriteBatches.end(),
-        [](const SpriteBatch& a, const SpriteBatch& b) {
-            return a.currentDepth < b.currentDepth;
-        });
-    
-    // 如果需要，也可以对批次内的元素按深度排序
-    // 但通常批次级别的排序就足够了
 }
 
 // 判断是否需要创建新批次
@@ -502,6 +492,22 @@ void UIRenderer::reportError(UIErrorCode code, const std::string& message, const
         m_errorHandler->onError(m_lastError);
     } else {
         m_defaultErrorHandler.onError(m_lastError);
+    }
+}
+
+// 设置批处理策略
+void UIRenderer::setBatchStrategy(IBatchStrategy* strategy)
+{
+    if (strategy) {
+        m_batchStrategy = strategy;
+        m_maxBatchVertices = strategy->getMaxBatchSize();
+        TINA_INFO("UIRenderer: 切换到批处理策略 '{}' - {}",
+                  strategy->getName(), strategy->getDescription());
+    } else {
+        // 恢复默认策略
+        m_batchStrategy = m_defaultStrategy.get();
+        m_maxBatchVertices = m_defaultStrategy->getMaxBatchSize();
+        TINA_INFO("UIRenderer: 恢复默认批处理策略");
     }
 }
 

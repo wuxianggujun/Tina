@@ -54,6 +54,9 @@ set(SRC_FILES
     renderer/TileRenderer.cpp
     ui/TextRenderer.hpp
     ui/TextRenderer.cpp
+    ui/UIBatch.hpp
+    ui/BatchStrategy.hpp
+    ui/BatchStrategy.cpp
     ui/UICore.hpp
     ui/UICore.cpp
     ui/UINode.hpp

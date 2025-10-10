@@ -117,9 +117,27 @@ void GameScene::onResume()
 {
     TINA_INFO("GameScene::onResume - 游戏恢复");
 
+    // 重新获取当前窗口尺寸（可能在暂停期间改变了）
+    app()->getPixelSize(m_pixelWidth, m_pixelHeight);
+    TINA_INFO("GameScene::onResume - 更新窗口尺寸: {}x{}", m_pixelWidth, m_pixelHeight);
+
+    // 更新相机视口
+    if (m_camera) {
+        m_camera->setViewportPixels(m_pixelWidth, m_pixelHeight);
+    }
+
+    // 更新 UI 组件
+    if (m_toolbar) {
+        m_toolbar->onResize(m_pixelWidth, m_pixelHeight);
+    }
+    if (m_characterPanel) {
+        m_characterPanel->centerOnScreen(m_pixelWidth, m_pixelHeight);
+    }
+
     // 重新设置 UI 视图（view 3）
     setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
 
+    // 恢复音频
     if (m_sfxYingxiao && m_sfxStarted) {
         m_sfxYingxiao->resume();
     }

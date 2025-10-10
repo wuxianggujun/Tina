@@ -50,8 +50,29 @@
 
 ## 技术细节文档
 
+- **`log_system_optimization.md`** ⭐ 新增
+  - 主题：日志系统 EASTL 智能指针优化
+  - 适用：理解日志系统的内存管理改进
+  - 状态：已实施（2025-01-10）
+  - 内容：
+    - std::shared_ptr 到 Memory::SharedPtr 的迁移
+    - spdlog 兼容性处理
+    - 生命周期管理策略
+    - 性能影响分析
+  - 关联代码：`src/core/Log.hpp`
+
+- **`uicore_optimization_summary.md`** ⭐ 新增
+  - 主题：UICore 渲染优化实施总结
+  - 适用：UI 渲染性能优化参考
+  - 状态：已完成（2025-01-10）
+  - 内容：
+    - 内存预分配优化（减少 90% 分配）
+    - 批处理效率���升（85-95%）
+    - 常量定义与错误处理系统
+    - 性能测试与后续优化建议
+
 - **`frame_timing.md`**
-  - 主题：帧时序与固定步长（Accumulator）建议
+  - 主题��帧时序与固定步长（Accumulator）建议
   - 适用：主循环/计时/渲染同步
   - 状态：可用（已更新路径引用）
   - 待办：补充 VSync/视图重置在 `src/main.cpp` 的实际调用点
@@ -157,6 +178,14 @@
 
 ## 最近更新
 
+- **2025-01-10**: 新增 `log_system_optimization.md` - 日志系统 EASTL 智能指针优化
+  - 将日志系统从 `std::shared_ptr` 迁移到 `Memory::SharedPtr`
+  - 处理 spdlog 兼容性问题
+  - 统一引擎内存管理策略
+- **2025-01-10**: 新增 `uicore_optimization_summary.md` - UICore 优化实施总结
+  - 内存管理优化（减少 90% 内存分配）
+  - 批处理效率提升至 85-95%
+  - 新增 UIConstants.hpp 和 UIError.hpp
 - **2025-10-10**: 完成高优先级代码优化（性能提升 20-30%）
   - 新增 `scene_ui_code_review.md` - 代码审查报告（15个问题）
   - 新增 `optimization_progress.md` - 优化进度跟踪

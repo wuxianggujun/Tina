@@ -12,6 +12,8 @@
 #include "TextRenderer.hpp"
 #include "UIConstants.hpp"  // 添加常量定义
 #include "UIError.hpp"      // 添加错误处理
+#include "UIBatch.hpp"      // 添加批处理数据结构
+#include "BatchStrategy.hpp" // 添加批处理策略完整定义
 
 namespace Tina::UI {
 
@@ -43,7 +45,7 @@ struct RenderStats {
 class UIRenderer {
 public:
     UIRenderer() = default;
-    ~UIRenderer() = default;
+    ~UIRenderer();  // 将析构函数定义移到.cpp文件
 
     // 传入 ShaderManager，加载 color 程序；可选绑定 TextRenderer 用于绘制文本
     bool initialize(Tina::Renderer::ShaderManager& sm, TextRenderer* text = nullptr);
@@ -145,14 +147,9 @@ public:
     
     // === 批处理优化控制 ===
     
-    // 设置批处理策略
-    enum class BatchStrategy {
-        Simple,         // 简单批处理（当前实现）
-        DepthSorted,    // 深度排序批处理
-        StateOptimized  // 状态切换优化批处理
-    };
-    void setBatchStrategy(BatchStrategy strategy) { m_batchStrategy = strategy; }
-    BatchStrategy getBatchStrategy() const { return m_batchStrategy; }
+    // 设置批处理策略（新的策略系统）
+    void setBatchStrategy(IBatchStrategy* strategy);
+    IBatchStrategy* getBatchStrategy() const { return m_batchStrategy; }
     
     // 设置最大批次大小（防止单个批次过大）
     void setMaxBatchSize(uint32_t maxVertices) { m_maxBatchVertices = maxVertices; }
@@ -185,55 +182,6 @@ public:
    void setErrorHandler(IUIErrorHandler* handler) { m_errorHandler = handler; }
 
 private:
-    // 顶点结构
-    struct ColorVtx {
-        float x, y, z;
-        float r, g, b, a;
-        // 注意：depth字段仅用于CPU端排序，不传递给GPU
-    };
-    struct SpriteVtx {
-        float x, y, z;
-        float u, v;
-        float r, g, b, a;
-        // 注意：depth字段仅用于CPU端排序，不传递给GPU
-    };
-
-    // 批处理结构（增强版）
-    struct ColorBatch {
-        Container::Vector<ColorVtx> vertices;
-        Container::Vector<uint16_t> indices;
-        uint32_t currentDepth = 0;  // 当前深度层级
-        
-        void clear() {
-            vertices.clear();
-            indices.clear();
-            currentDepth = 0;
-        }
-        
-        bool canMerge(uint32_t depth) const {
-            // 简单策略：总是合并
-            // 深度排序策略：只合并相同深度
-            return true;  // 将在实现中根据策略判断
-        }
-    };
-    struct SpriteBatch {
-        Container::Vector<SpriteVtx> vertices;
-        Container::Vector<uint16_t> indices;
-        bgfx::TextureHandle texture = BGFX_INVALID_HANDLE;
-        uint32_t currentDepth = 0;  // 当前深度层级
-        
-        void clear() {
-            vertices.clear();
-            indices.clear();
-            texture = BGFX_INVALID_HANDLE;
-            currentDepth = 0;
-        }
-        
-        bool canMerge(bgfx::TextureHandle tex, uint32_t depth) const {
-            return texture.idx == tex.idx;  // 相同纹理才能合并
-        }
-    };
-
     // 文本命令（延后统一提交，保证文本在图元之上）
     struct TextCmd {
         uint16_t viewId = 0;
@@ -269,16 +217,16 @@ private:
     void flushTextCommands();
     
     // 批处理优化
-    void sortBatchesByDepth();
     bool shouldCreateNewBatch(uint32_t currentSize, uint32_t newSize) const;
     
     // 性能统计
     RenderStats m_frameStats;      // 当前帧统计
     RenderStats m_lastFrameStats;  // 上一帧统计（用于显示）
     bool m_statsEnabled = false;   // 是否启用统计
-    
+
     // 批处理控制
-    BatchStrategy m_batchStrategy = BatchStrategy::Simple;
+    IBatchStrategy* m_batchStrategy = nullptr;  // 策略指针
+    Memory::UniquePtr<IBatchStrategy> m_defaultStrategy;  // 默认策略
     uint32_t m_maxBatchVertices = DEFAULT_MAX_BATCH_VERTICES;  // 使用常量定义
     uint32_t m_currentRenderDepth = 0;    // 当前渲染深度
 
