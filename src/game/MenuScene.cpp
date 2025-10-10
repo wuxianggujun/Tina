@@ -116,33 +116,11 @@ void MenuScene::render() {
     // 触摸 view
     bgfx::touch(uiViewId());
 
-    // 开始新的帧
-    queue().beginFrame();
-
-    // 使用RenderCommandBuilder构建渲染命令
-    using namespace Renderer;
-
-    // 渲染渐变背景（使用RenderQueue）
+    // 渲染渐变背景（使用 SceneRenderer 一次性绘制，无需多层矩形）
     {
-        // 创建渐变效果：顶部深蓝灰，底部黑色
-        float segments = 5;  // 使用多个矩形模拟渐变
-        float segmentHeight = m_pixelHeight / segments;
-
-        for (int i = 0; i < segments; ++i) {
-            float t = i / (segments - 1.0f);
-            // 插值颜色
-            float r = 0.1f * (1.0f - t) + 0.05f * t;
-            float g = 0.2f * (1.0f - t) + 0.1f * t;
-            float b = 0.4f * (1.0f - t) + 0.2f * t;
-
-            RenderCommandBuilder(&queue())
-                .view(uiViewId())
-                .layer(RenderLayer::Background)
-                .depth(i)
-                .rect(0, i * segmentHeight, (float)m_pixelWidth, segmentHeight)
-                .color(r, g, b, 1.0f)
-                .submit();
-        }
+        Core::Color topColor{0.1f, 0.2f, 0.4f, 1.0f};
+        Core::Color bottomColor{0.05f, 0.1f, 0.2f, 1.0f};
+        scene().drawGradientBackground(uiViewId(), topColor, bottomColor);
     }
 
     // 渲染粒子背景
@@ -193,8 +171,7 @@ void MenuScene::render() {
                                   100, 30, "v1.0.0", to);
     }
 
-    // 刷新RenderQueue（执行所有渲染命令）
-    queue().endFrame();
+    // 不再使用渲染队列提交背景，无需 endFrame()
 }
 
 void MenuScene::handleEvent(const os::Event& event) {
@@ -249,6 +226,9 @@ void MenuScene::handleEvent(const os::Event& event) {
 
         // 更新 UI 布局
         updateUILayout();
+
+        // 同步 SceneRenderer 的屏幕尺寸（供渐变背景使用）
+        scene().setScreenSize(m_pixelWidth, m_pixelHeight);
     }
 }
 

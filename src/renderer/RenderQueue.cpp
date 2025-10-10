@@ -300,7 +300,10 @@ void RenderQueue::executeBatch(const RenderBatch& batch) {
 
     // 设置纹理
     if (bgfx::isValid(batch.texture)) {
-        bgfx::setTexture(0, m_sTexture, batch.texture);
+        // 统一采样器：UI/2D 默认使用点采样与边缘夹取，避免越界采样伪影
+        bgfx::setTexture(0, m_sTexture, batch.texture,
+                         BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
+                         BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT);
         m_stats.numTextureBinds++;
     }
 
