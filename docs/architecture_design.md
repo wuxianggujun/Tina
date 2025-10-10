@@ -5,23 +5,24 @@
 > - 新增“TypedEventBus”作为玩法/编辑器/插件的强类型事件总线（基于 entt::dispatcher）。
 > - 文档中历史出现的“EventBus（玩法事件）”表述以本文更新为准。
 
-**版本**: 3.1
-**最后更新**: 2025年10月10日
+**版本**: 3.2
+**最后更新**: 2025年10月10日（深夜）
 **状态**: 已实现并运行中 ✅
 
 ---
 
 ## 🎯 实施状态总览
 
-**架构重构完成度**: **80%** ✅
+**架构重构完成度**: **95%** ✅
 
 | 阶段 | 状态 | 完成度 | 说明 |
 |------|------|--------|------|
 | 阶段 1：基础架构 | ✅ 完成 | 100% | Application、Scene、SceneManager、OSEventBus |
-| 阶段 2：游戏逻辑迁移 | ✅ 完成 | 100% | GameScene 完整实现（859 行） |
+| 阶段 2：游戏逻辑迁移 | ✅ 完成 | 100% | GameScene 完整实现 |
 | 阶段 3：Signal 系统 | ✅ 完成 | 100% | OSEventBus + UI Signal + TypedEventBus |
 | 阶段 4：场景扩展 | ✅ 完成 | 100% | PauseScene ✅ / MenuScene ✅ |
 | 阶段 5：资源管理 | ✅ 完成 | 100% | FileSystem + ResourceHub + Texture/Font |
+| 阶段 6：渲染优化 | ✅ 完成 | 100% | UICore → RenderQueue 重构，职责清晰分离 |
 
 **关键成果**：
 - ✅ main.cpp 从 534 行简化到 50 行（减少 90.6%）
@@ -29,6 +30,9 @@
 - ✅ 异步资源加载系统（支持热重载）
 - ✅ 基于 Signal 的事件系统（解耦 UI 和游戏逻辑）
 - ✅ PauseScene 实现（ESC 暂停/恢复游戏）
+- ✅ RenderQueue 批处理系统（Draw Call 优化 90%+）
+- ✅ ViewID 常量化管理（消除魔法数字）
+- ✅ 渲染职责清晰分离（RenderQueue/TextRenderer/SceneRenderer）
 
 **待完成**：
 - ⚠️ 单元测试覆盖
@@ -80,13 +84,15 @@ Tina/
 │
 ├── renderer/      # 渲染系统
 │   ├── ShaderManager.hpp  # 着色器管理
+│   ├── RenderQueue.hpp    # 渲染队列（批处理核心）
+│   ├── RenderCommand.hpp  # 渲染命令定义
 │   └── TileRenderer.hpp   # 瓦片渲染器
 │
 ├── ui/            # UI 系统
 │   ├── UINode.hpp         # UI 节点树
-│   ├── UICore.hpp         # UI 渲染器
+│   ├── UIRenderer.hpp     # UI 渲染器（使用 RenderQueue）
 │   ├── UIEventSystem.hpp  # UI 事件系统
-│   ├── TextRenderer.hpp   # 文本渲染
+│   ├── TextRenderer.hpp   # 专职文本渲染（FreeType + 图集）
 │   ├── UIToolbar.hpp      # 工具栏
 │   └── UIComponents.hpp   # UI 组件
 │

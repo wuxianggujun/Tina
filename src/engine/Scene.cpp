@@ -69,4 +69,87 @@ Renderer::RenderQueue& Scene::queue() {
     return *m_renderQueue;
 }
 
+// ==================== 新增：框架渲染方法 ====================
+
+// 框架渲染入口（由Application调用）
+void Scene::renderFrame() {
+    // 1. 准备视图（设置视图矩阵、投影矩阵、清屏等）
+    prepareViews();
+
+    // 2. 调用子类的渲染实现
+    render();
+
+    // 3. 完成视图（touch所有视图）
+    finalizeViews();
+}
+
+// 准备视图（自动设置所有配置的视图）
+void Scene::prepareViews() {
+    // 仅在视图需要更新或首次渲染时重新配置
+    if (m_viewDirty || m_viewSetup.empty()) {
+        // 获取子类的视图配置
+        m_viewSetup = getViewSetup();
+
+        // 设置每个视图
+        for (const auto& view : m_viewSetup) {
+            // 设置视图矩形（所有视图都使用全屏）
+            bgfx::setViewRect(view.id, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
+
+            // 根据类型设置视图变换
+            switch (view.type) {
+            case ViewSetup::World3D:
+                setupWorldView(view.id);
+                break;
+
+            case ViewSetup::UI2D:
+            case ViewSetup::Background2D:
+                // 使用已有的setupUIView方法
+                setupUIView(view.id, m_pixelWidth, m_pixelHeight);
+                break;
+            }
+
+            // 如果需要清屏，设置清屏参数
+            if (view.needsClear) {
+                bgfx::setViewClear(view.id, view.clearFlags, view.clearColor, 1.0f, 0);
+            }
+        }
+
+        m_viewDirty = false;
+    }
+}
+
+// 完成视图（自动touch所有配置的视图）
+void Scene::finalizeViews() {
+    // Touch所有配置的视图，确保它们被渲染
+    for (const auto& view : m_viewSetup) {
+        bgfx::touch(view.id);
+    }
+}
+
+// 设置3D世界视图
+void Scene::setupWorldView(uint16_t viewId) {
+    // 使用默认的单位矩阵，子类应该在render()中自己设置视图矩阵
+    // 这里只是确保视图有一个有效的变换矩阵
+    float identity[16];
+    bx::mtxIdentity(identity);
+    bgfx::setViewTransform(viewId, identity, identity);
+}
+
+// 框架事件处理（先处理通用事件，再调用子类）
+void Scene::handleEventFrame(const Tina::os::Event& event) {
+    using E = Tina::os::Event;
+
+    // 框架自动处理窗口大小变化
+    if (event.type == E::Type::WINDOW_SIZE) {
+        m_pixelWidth = event.win_size.w;
+        m_pixelHeight = event.win_size.h;
+        m_viewDirty = true;
+
+        TINA_INFO("Scene窗口大小更新: {}x{}", m_pixelWidth, m_pixelHeight);
+    }
+
+    // 调用子类的事件处理
+    handleEvent(event);
+}
+
 } // namespace Tina::Engine

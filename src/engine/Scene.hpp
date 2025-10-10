@@ -9,7 +9,9 @@
 
 #include "../os/OS.hpp"
 #include "../core/Memory.hpp"
+#include "../core/Container.hpp"
 #include "SceneRenderer.hpp"  // EASTL的unique_ptr需要完整定义
+#include <bgfx/bgfx.h>
 
 // 前向声明
 namespace Tina::UI {
@@ -57,12 +59,15 @@ public:
     // 参数：dt - 上一帧到当前帧的时间间隔（秒）
     virtual void update(float dt) = 0;
 
-    // 渲染场景（每帧调用）
-    // 注意：仅提交渲染指令，不要直接设置视图矩阵
-    virtual void render() = 0;
+    // 框架渲染入口（由Application调用）
+    // 自动处理视图设置和touch，然后调用子类的render()
+    void renderFrame();
 
-    // 处理输入事件（可选实现）
+    // 处理输入事件（框架会先处理窗口事件，然后调用子类）
     // 参数：event - 操作系统事件（键盘、鼠标、窗口等）
+    void handleEventFrame(const Tina::os::Event& event);
+
+    // 子类可覆盖的事件处理
     virtual void handleEvent(const Tina::os::Event& event) {}
 
     // ==================== 状态查询 ====================
@@ -71,8 +76,46 @@ public:
     bool isActive() const { return m_active; }
 
 protected:
+    // ==================== 视图配置 ====================
+
+    // 视图设置结构体
+    struct ViewSetup {
+        uint16_t id;                           // 视图ID
+        enum Type {
+            World3D,                            // 3D世界视图（使用相机矩阵）
+            UI2D,                               // 2D UI视图（正交投影）
+            Background2D                        // 2D背景视图（正交投影）
+        } type;
+        bool needsClear = false;               // 是否需要清屏
+        uint32_t clearColor = 0x303030ff;      // 清屏颜色
+        uint8_t clearFlags = BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH;  // 清屏标志
+    };
+
+    // 子类覆盖此方法声明需要的视图
+    // 默认配置：只有一个UI视图
+    virtual Container::Vector<ViewSetup> getViewSetup() {
+        return {{ 3, ViewSetup::UI2D }};  // 默认使用view 3作为UI层
+    }
+
+    // 渲染场景内容（子类实现）
+    // 注意：不需要处理视图设置和touch，框架会自动处理
+    virtual void render() = 0;
+
+    // ==================== 辅助方法 ====================
+
     // 访问Application实例（用于访问events()/scenes()等全局服务）
     Application* app() const { return m_app; }
+
+    // 更新窗口尺寸（由Application调用）
+    void updateWindowSize(int width, int height) {
+        m_pixelWidth = width;
+        m_pixelHeight = height;
+        m_viewDirty = true;
+    }
+
+    // 获取窗口尺寸
+    int getPixelWidth() const { return m_pixelWidth; }
+    int getPixelHeight() const { return m_pixelHeight; }
     
     // === UI便捷访问（阶段1：自动化封装） ===
     
@@ -104,6 +147,18 @@ protected:
     Renderer::RenderQueue& queue();
 
 private:
+    // ==================== 框架方法 ====================
+
+    // 准备视图（框架调用，子类不需要关心）
+    void prepareViews();
+
+    // 完成视图（框架调用，子类不需要关心）
+    void finalizeViews();
+
+    // 设置World3D视图
+    void setupWorldView(uint16_t viewId);
+
+private:
     Application* m_app = nullptr;  // Application实例指针（不持有所有权）
     bool m_active = true;          // 场景活跃标志（由SceneManager管理）
 
@@ -115,6 +170,12 @@ private:
 
     // 渲染队列（懒加载，首次调用queue()时创建）
     Memory::UniquePtr<Renderer::RenderQueue> m_renderQueue;
+
+    // 视图管理
+    Container::Vector<ViewSetup> m_viewSetup;  // 缓存的视图配置
+    bool m_viewDirty = true;                   // 视图是否需要更新
+    int m_pixelWidth = 1280;                   // 窗口宽度
+    int m_pixelHeight = 720;                   // 窗口高度
 
     // SceneManager可以访问私有成员（设置m_app和m_active）
     friend class SceneManager;

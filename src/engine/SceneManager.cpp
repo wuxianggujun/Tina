@@ -27,6 +27,12 @@ void SceneManager::push(Memory::UniquePtr<Scene> scene)
 
     // 设置 Application 引用并进入新场景
     scene->m_app = m_app;
+
+    // 初始化场景的窗口大小
+    int w, h;
+    m_app->getPixelSize(w, h);
+    scene->updateWindowSize(w, h);
+
     scene->onEnter();
     m_scenes.push_back(std::move(scene));
     TINA_INFO("Scene pushed - Total scenes: {}", m_scenes.size());
@@ -59,6 +65,12 @@ void SceneManager::replace(Memory::UniquePtr<Scene> scene)
 
     // 进入新场景
     scene->m_app = m_app;
+
+    // 初始化场景的窗口大小
+    int w, h;
+    m_app->getPixelSize(w, h);
+    scene->updateWindowSize(w, h);
+
     scene->onEnter();
     m_scenes.push_back(std::move(scene));
     TINA_INFO("Scene replaced - Total scenes: {}", m_scenes.size());
@@ -116,7 +128,7 @@ void SceneManager::update(float dt)
 void SceneManager::render()
 {
     if (Scene* scene = currentScene()) {
-        scene->render();
+        scene->renderFrame();  // 改为调用renderFrame()，由框架处理视图设置
     }
 }
 
@@ -124,7 +136,7 @@ void SceneManager::handleEvent(const Tina::os::Event& event)
 {
     if (Scene* scene = currentScene()) {
         m_dispatching = true;
-        scene->handleEvent(event);
+        scene->handleEventFrame(event);  // 改为调用handleEventFrame()，由框架先处理
         m_dispatching = false;
     }
     applyPending();
