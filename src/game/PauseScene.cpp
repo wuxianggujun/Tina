@@ -251,7 +251,7 @@ void PauseScene::createUI()
     rowBottom->setPadding(0.0f, 0.0f); // 占满行，无左右内边距
 
     m_btnQuit = rowBottom->createChild<UI::UIButton>();
-    m_btnQuit->setText("退出游戏");
+    m_btnQuit->setText("返回主菜单");
     m_btnQuit->setWidthMatch();
     m_btnQuit->setHeight(btnH);
     m_btnQuit->setNormalColor(0.6f, 0.2f, 0.2f, 0.95f);
@@ -338,10 +338,10 @@ void PauseScene::onContinueClicked()
 
 void PauseScene::onQuitClicked()
 {
-    TINA_INFO("PauseScene: 退出游戏按钮被点击");
-    // 通过任务队列在主线程安全点退出（避免在回调栈内直接退出）
-    auto* a = app();
-    a->post([a]{ a->quit(); });
+    TINA_INFO("PauseScene: 返回主菜单按钮被点击");
+    // 清空所有场景，返回主菜单
+    // 使用延迟场景操作，避免在回调栈内修改场景栈
+    app()->scenes().requestClear();  // 清空场景栈，返回主菜单
 }
 
 void PauseScene::onSetDay()      { app()->events().onSetDayNightNormalized.emit(0.25f); }
