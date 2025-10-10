@@ -19,8 +19,8 @@ set(SRC_FILES
     engine/Scene.cpp
     engine/SceneManager.hpp
     engine/SceneManager.cpp
-    engine/EventBus.hpp
-    engine/EventBus.cpp
+    engine/OSEventBus.hpp
+    engine/OSEventBus.cpp
     game/GameScene.hpp
     game/GameScene.cpp
     game/MenuScene.hpp

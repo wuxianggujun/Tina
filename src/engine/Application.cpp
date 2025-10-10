@@ -1,6 +1,6 @@
 #include "Application.hpp"
 #include "SceneManager.hpp"
-#include "EventBus.hpp"
+#include "OSEventBus.hpp"
 #include "TypedEventBus.hpp"
 #include "Resource.hpp"
 #include "Texture.hpp"
@@ -125,7 +125,7 @@ void Application::init()
     bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(m_pixelWidth), static_cast<uint16_t>(m_pixelHeight));
 
     // 5. 创建核心子系统
-    m_eventBus = Memory::MakeUnique<EventBus>();
+    m_osEventBus = Memory::MakeUnique<OSEventBus>();
     m_typedEvents = Memory::MakeUnique<TypedEventBus>();
     m_sceneManager = Memory::MakeUnique<SceneManager>(this);
 
@@ -185,7 +185,7 @@ void Application::shutdown()
     m_textRenderer.reset();
     m_resourceHub.reset();
     m_fileSystem.reset();
-    m_eventBus.reset();
+    m_osEventBus.reset();
     // 在 bgfx 关闭前确保销毁所有程序句柄
     m_shaderMgr.reset();
 
@@ -293,7 +293,7 @@ void Application::processEvents()
         }
 
         // 2. 分发到 OS 事件总线
-        m_eventBus->dispatchOSEvent(event);
+        m_osEventBus->dispatchOSEvent(event);
 
         // 3. 分发到当前场景
         m_sceneManager->handleEvent(event);

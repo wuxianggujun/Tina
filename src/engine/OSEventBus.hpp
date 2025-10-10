@@ -7,7 +7,7 @@
 namespace Tina::Engine {
 
 // OS 事件总线：将操作系统输入/窗口事件转发为可订阅的 Signal
-class EventBus {
+class OSEventBus {
 public:
     // 窗口事件
     Core::Signal<int, int> onWindowResized;  // (width, height)

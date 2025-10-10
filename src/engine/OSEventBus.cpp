@@ -1,8 +1,8 @@
-#include "EventBus.hpp"
+#include "OSEventBus.hpp"
 
 namespace Tina::Engine {
 
-void EventBus::dispatchOSEvent(const Tina::os::Event& event)
+void OSEventBus::dispatchOSEvent(const Tina::os::Event& event)
 {
     using E = Tina::os::Event;
     switch (event.type) {

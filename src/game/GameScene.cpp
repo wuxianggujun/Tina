@@ -7,7 +7,7 @@
 #include "PauseScene.hpp"  // 暂停场景
 #include "../engine/Application.hpp"
 #include "../engine/SceneManager.hpp"  // 场景管理器
-#include "../engine/EventBus.hpp"  // 包含 EventBus 完整定义
+#include "../engine/OSEventBus.hpp"  // 包含 OS 事件总线定义
 #include "../core/Log.hpp"
 #include "../core/Time.hpp"
 #include "../game/CoordinateMapper.hpp"

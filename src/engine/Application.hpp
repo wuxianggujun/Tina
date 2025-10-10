@@ -22,7 +22,7 @@ namespace Tina::Engine {
 
 // 前向声明
 class SceneManager;
-class EventBus; // OS 事件总线（窗口/输入）
+class OSEventBus; // OS 事件总线（窗口/输入）
 class TypedEventBus; // 强类型事件总线（玩法/编辑器/插件）
 struct FileSystem;
 class ResourceManagerHub;
@@ -69,7 +69,7 @@ public:
     Tina::os::WindowHandle window() const { return m_window; }
 
     // 获取 OS 事件总线（窗口/输入等稳定事件）
-    EventBus& osEvents() const { return *m_eventBus; }
+    OSEventBus& osEvents() const { return *m_osEventBus; }
 
     // 获取强类型事件总线（游戏/编辑器/插件的自定义事件）
     TypedEventBus& events() const { return *m_typedEvents; }
@@ -152,7 +152,7 @@ private:
     int m_pixelHeight = 720;                       // 窗口像素高度
 
     Tina::os::WindowHandle m_window = nullptr;     // 窗口句柄
-    Memory::UniquePtr<EventBus> m_eventBus;                // OS 事件总线
+    Memory::UniquePtr<OSEventBus> m_osEventBus;            // OS 事件总线
     Memory::UniquePtr<TypedEventBus> m_typedEvents;        // 强类型事件总线
     Memory::UniquePtr<SceneManager> m_sceneManager;        // 场景管理器（独占所有权）
     Memory::UniquePtr<FileSystem> m_fileSystem;            // 文件系统（异步IO）
