@@ -58,6 +58,10 @@ set(SRC_FILES
     renderer/ShaderCatalog.cpp
     renderer/SpriteRenderer.hpp
     renderer/SpriteRenderer.cpp
+    renderer/RenderCommand.hpp
+    renderer/RenderQueue.hpp
+    renderer/RenderQueue.cpp
+    renderer/RenderCommandBuilder.hpp
     ui/TextRenderer.hpp
     ui/TextRenderer.cpp
     ui/UIBatch.hpp

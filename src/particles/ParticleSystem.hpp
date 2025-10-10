@@ -38,6 +38,11 @@ public:
     // 渲染到指定视图（要求外部已设置正交投影与视口）
     void render(uint16_t viewId);
 
+    // 发射单个��子
+    void emit(float x, float y, float vx, float vy,
+              float r, float g, float b, float a,
+              float size, float life = 1.0f);
+
     // 爆炸效果：在 (wx,wy) 处生成若干粒子，支持 Color 参数
     void explode(float wx, float wy,
                  int count = 300,

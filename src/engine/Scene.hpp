@@ -16,6 +16,10 @@ namespace Tina::UI {
     class UIRenderer;
 }
 
+namespace Tina::Renderer {
+    class RenderQueue;
+}
+
 namespace Tina::Engine {
 
 // 前向声明
@@ -25,7 +29,8 @@ class Application;
 // 派生类必须实现 update() 和 render() 纯虚函数
 class Scene {
 public:
-    // 虚析构函数（多态基类必须，在.cpp中定义以支持UniquePtr）
+    // 构造函数和析构函数（在.cpp中定义以支持UniquePtr）
+    Scene();
     virtual ~Scene();
 
     // ==================== 生命周期回调 ====================
@@ -91,15 +96,25 @@ protected:
     // 用途：避免每帧重复计算投影矩阵
     void setupUIView(uint16_t viewId, int width, int height);
 
+    // === 渲染队列访问（阶段2：统一渲染命令） ===
+
+    // 获取RenderQueue（懒加载，自动初始化）
+    // 用途：统一的渲染命令队列，支持排序和批处理
+    // 示例：queue().submit(RenderCommand::MakeRect(...));
+    Renderer::RenderQueue& queue();
+
 private:
     Application* m_app = nullptr;  // Application实例指针（不持有所有权）
     bool m_active = true;          // 场景活跃标志（由SceneManager管理）
-    
+
     // UI渲染器（懒加载，首次调用ui()时创建）
     Memory::UniquePtr<UI::UIRenderer> m_uiRenderer;
-    
+
     // Scene渲染器（懒加载，首次调用scene()时创建）
     Memory::UniquePtr<SceneRenderer> m_sceneRenderer;
+
+    // 渲染队列（懒加载，首次调用queue()时创建）
+    Memory::UniquePtr<Renderer::RenderQueue> m_renderQueue;
 
     // SceneManager可以访问私有成员（设置m_app和m_active）
     friend class SceneManager;

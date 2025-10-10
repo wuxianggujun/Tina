@@ -5,6 +5,7 @@
 #include "Scene.hpp"
 #include "Application.hpp"
 #include "../ui/UICore.hpp"
+#include "../renderer/RenderQueue.hpp"
 #include "../core/Log.hpp"
 #include "SceneRenderer.hpp"
 #include <bgfx/bgfx.h>
@@ -12,7 +13,10 @@
 
 namespace Tina::Engine {
 
-// 虚析构函数定义（必须在此处，SceneRenderer是完整类型）
+// 构造函数定义（必须在此处，RenderQueue是完整类型）
+Scene::Scene() = default;
+
+// 虚析构函数定义（必须在此处，RenderQueue是完整类型）
 Scene::~Scene() = default;
 
 // 注意：原先计划在此提供若干便捷访问（shaders()/textRenderer()/fileSystem()/resources()），
@@ -45,13 +49,24 @@ SceneRenderer& Scene::scene() {
 // ✅ 设置UI正交视图（避免每帧重复计算）
 void Scene::setupUIView(uint16_t viewId, int width, int height) {
     bgfx::setViewRect(viewId, 0, 0, (uint16_t)width, (uint16_t)height);
-    
+
     float ortho[16];
     const bgfx::Caps* caps = bgfx::getCaps();
     bx::mtxOrtho(ortho, 0.0f, (float)width, (float)height, 0.0f,
                  -1.0f, 1.0f, 0.0f, caps ? caps->homogeneousDepth : false);
     bgfx::setViewTransform(viewId, nullptr, ortho);
     bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);
+}
+
+// 渲染队列便捷访问（懒加载）
+Renderer::RenderQueue& Scene::queue() {
+    if (!m_renderQueue) {
+        m_renderQueue = Memory::MakeUnique<Renderer::RenderQueue>();
+        if (!m_renderQueue->initialize(&app()->shaders())) {
+            TINA_ERROR("Scene::queue() - RenderQueue初始化失败");
+        }
+    }
+    return *m_renderQueue;
 }
 
 } // namespace Tina::Engine

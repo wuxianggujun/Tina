@@ -147,6 +147,13 @@ int ParticleSystem2D::spawnOne(float x, float y, float vx, float vy, float size,
     return -1; // 容量已满
 }
 
+void ParticleSystem2D::emit(float x, float y, float vx, float vy,
+                            float r, float g, float b, float a,
+                            float size, float life)
+{
+    spawnOne(x, y, vx, vy, size, life, Tina::Core::Color(r, g, b, a));
+}
+
 void ParticleSystem2D::explode(float wx, float wy, int count,
                                float speedMin, float speedMax,
                                float sizeMin, float sizeMax,

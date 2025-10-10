@@ -42,16 +42,13 @@ public:
 private:
     // UI 创建
     void createUI();
-    
-    // 背景渲染
-    void renderGradientBackground();
-    void renderParticleBackground();
-    
+    void updateUILayout();  // 更新UI布局（窗口大小改变时）
+
     // 按钮回调
     void onStartClicked();
     void onSettingsClicked();
     void onQuitClicked();
-    
+
     void selectPreviousButton();
     void selectNextButton();
     void activateSelectedButton();
