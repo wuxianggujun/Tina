@@ -340,7 +340,7 @@ void MenuScene::createUI() {
                            Tina::Core::Color(0.18f,0.80f,0.44f,1.0f),
                            Tina::Core::Color(0.12f,0.52f,0.29f,1.0f),
                            [this]{ onStartClicked(); });
-    m_startConnection = m_btnStart->onClick.connect([this]{ onStartClicked(); });
+    m_startConnection = m_btnStart->onClick.connect(this, &MenuScene::onStartClicked);
     m_buttons.push_back(m_btnStart);
 
     m_btnSettings = addButton("设置",
@@ -348,7 +348,7 @@ void MenuScene::createUI() {
                            Tina::Core::Color(0.36f,0.68f,0.89f,1.0f),
                            Tina::Core::Color(0.16f,0.45f,0.65f,1.0f),
                            [this]{ onSettingsClicked(); });
-    m_settingsConnection = m_btnSettings->onClick.connect([this]{ onSettingsClicked(); });
+    m_settingsConnection = m_btnSettings->onClick.connect(this, &MenuScene::onSettingsClicked);
     m_buttons.push_back(m_btnSettings);
 
     m_btnQuit = addButton("退出游戏",
@@ -356,7 +356,7 @@ void MenuScene::createUI() {
                            Tina::Core::Color(0.93f,0.44f,0.39f,1.0f),
                            Tina::Core::Color(0.75f,0.22f,0.17f,1.0f),
                            [this]{ onQuitClicked(); });
-    m_quitConnection = m_btnQuit->onClick.connect([this]{ onQuitClicked(); });
+    m_quitConnection = m_btnQuit->onClick.connect(this, &MenuScene::onQuitClicked);
     m_buttons.push_back(m_btnQuit);
 
     // 计算与居中

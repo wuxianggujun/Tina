@@ -27,7 +27,7 @@ namespace Tina::Core {
 //
 //   // 成员函数
 //   struct Obj { void onEvt(int, float) {} } o;
-//   auto c2 = sig.connect_member(&o, &Obj::onEvt);
+//   auto c2 = sig.connect(&o, &Obj::onEvt);
 
 template <typename... Args>
 class Signal {
@@ -97,9 +97,19 @@ public:
         return addSlot(std::move(fn), /*once=*/true);
     }
 
-    // 连接成员函数（原始指针版本，调用方需自行保证对象生命周期）
+    // 便捷重载：直接传对象指针与成员函数指针
+    // 用法示例：sig.connect(this, &MyClass::onClick);
     template <typename T>
-    Connection connect_member(T* obj, void (T::*method)(Args...)) {
+    Connection connect(T* obj, void (T::*method)(Args...)) {
+        return connect([obj, method](Args... args) {
+            (obj->*method)(std::forward<Args>(args)...);
+        });
+    }
+
+    // 便捷重载（const 成员函数版本）
+    // 用法示例：sig.connect(this, &MyClass::onClickConst);
+    template <typename T>
+    Connection connect(const T* obj, void (T::*method)(Args...) const) {
         return connect([obj, method](Args... args) {
             (obj->*method)(std::forward<Args>(args)...);
         });
