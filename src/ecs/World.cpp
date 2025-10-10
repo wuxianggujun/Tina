@@ -11,6 +11,7 @@
 #include "../game/TileMap.hpp"
 #include "../game/GameConfig.hpp"
 #include "../core/Container.hpp"
+#include "../renderer/ShaderManager.hpp"
 #include <limits>
 #include <algorithm>
 #include <string>
@@ -38,8 +39,12 @@ void World::update(float dt, const Tina::Game::TileMap& tilemap, const InputStat
     m_physicsSys->update(m_registry, tilemap, dt);
 }
 
-void World::render(uint16_t viewId, bgfx::ProgramHandle program, const bgfx::VertexLayout& layout) {
-    m_renderSys->render(m_registry, viewId, program, layout);
+void World::initializeRenderers(Tina::Renderer::ShaderManager& shaders) {
+    if (m_renderSys) m_renderSys->initialize(shaders);
+}
+
+void World::render(uint16_t viewId) {
+    m_renderSys->render(m_registry, viewId);
 }
 
 entt::entity World::createCharacter(float x, float y, bool isPlayerControlled) {

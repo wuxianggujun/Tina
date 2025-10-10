@@ -98,8 +98,7 @@ void GameScene::onExit()
     m_particleSystem.reset();
     
 
-    // 程序句柄由全局 ShaderManager 管理，无需手动销毁
-    m_progWorld = BGFX_INVALID_HANDLE;
+    // 渲染程序由各渲染器管理，无需手动销毁
 }
 
 void GameScene::onPause()
@@ -246,8 +245,7 @@ void GameScene::initializeResources()
     TINA_INFO("GameScene: 初始化资源...");
 
     // 1. 着色器程序（来自全局 ShaderManager）
-    // 世界基础 program：通过 ShaderCatalog 加载（当前映射到 color，可替换为 world shader）
-    m_progWorld = Tina::Renderer::ShaderCatalog::Load(app()->shaders(), Tina::Renderer::ShaderCatalog::Tag::WorldSolid);
+    // 世界基础管线由各渲染器内部持有（TileRenderer/CharacterRenderSystem）
 
     // 2. 文本渲染器
     // 改用全局 TextRenderer
@@ -273,7 +271,7 @@ void GameScene::initializeResources()
 
     // 4. 瓦片渲染器
     m_tileRenderer = Memory::MakeUnique<Renderer::TileRenderer>();
-    m_tileRenderer->initialize();
+    m_tileRenderer->initialize(app()->shaders());
 
     // 设置 UI 视图（view 3，像素坐标）
     setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
@@ -317,6 +315,7 @@ void GameScene::createTileMap()
 void GameScene::createECS()
 {
     m_ecsWorld = Memory::MakeUnique<ECS::World>();
+    m_ecsWorld->initializeRenderers(app()->shaders());
     TINA_INFO("ECS 世界创建完成");
 }
 
@@ -603,10 +602,6 @@ void GameScene::updateCamera(float dt)
 void GameScene::renderWorld()
 {
     if (!m_tileRenderer || !m_tileMap || !m_camera) return;
-    if (!bgfx::isValid(m_progWorld)) {
-        TINA_WARN("GameScene::renderWorld - 程序句柄无效，跳过本帧渲染");
-        return;
-    }
 
     // 构建相机矩阵（视图矩阵 + 投影矩阵）
     float viewM[16], projM[16];
@@ -628,18 +623,12 @@ void GameScene::renderWorld()
     bgfx::touch(2);
 
     // 渲染地形（固体 -> view 1，液体 -> view 2）
-    bgfx::VertexLayout colorLayout;
-    colorLayout.begin()
-        .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
-        .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Float)
-        .end();
-
-    m_tileRenderer->renderSolid(*m_tileMap, 1, m_progWorld, colorLayout);
-    m_tileRenderer->renderWater(*m_tileMap, 2, m_progWorld, colorLayout);
+    m_tileRenderer->renderSolid(*m_tileMap, 1);
+    m_tileRenderer->renderWater(*m_tileMap, 2);
 
     // 渲染角色（ECS 实体，view 2 确保在液体层之上）
     if (m_ecsWorld) {
-        m_ecsWorld->render(2, m_progWorld, colorLayout);
+        m_ecsWorld->render(2);
     }
 
     // 渲染粒子（爆炸、碎片等特效，view 2）

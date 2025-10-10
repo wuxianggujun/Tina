@@ -17,7 +17,7 @@ struct MIX_Mixer;
 
 // 前向声明（放在全局命名空间，避免嵌套成 Tina::Engine::Tina::...）
 namespace Tina { namespace UI { class TextRenderer; } }
-namespace Tina { namespace Renderer { class Primitive2D; class ShaderManager; } }
+namespace Tina { namespace Renderer { class Primitive2D; class SpriteRenderer; class ShaderManager; } }
 
 namespace Tina::Engine {
 
@@ -95,6 +95,8 @@ public:
     Tina::UI::TextRenderer& textRenderer() const;
     // 简易 2D 形状渲染器（全局共享）
     Tina::Renderer::Primitive2D& primitives2D() const;
+    // 精灵渲染器（全局共享）
+    Tina::Renderer::SpriteRenderer& sprites2D() const;
 
     // 全局音量控制（0.0 ~ 1.0）
     void setAudioMasterVolume(float v);
@@ -169,6 +171,7 @@ private:
     // 全局文本渲染器（共享）
     Memory::UniquePtr<Tina::UI::TextRenderer> m_textRenderer;
     Memory::UniquePtr<Tina::Renderer::Primitive2D> m_prim2D;
+    Memory::UniquePtr<Tina::Renderer::SpriteRenderer> m_sprite2D;
 
     MIX_Mixer* m_mixer = nullptr;
 

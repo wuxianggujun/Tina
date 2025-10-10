@@ -3,12 +3,25 @@
 
 #include "TileRenderer.hpp"
 #include "../core/Color.hpp"
+#include "ShaderManager.hpp"
+#include "ShaderCatalog.hpp"
 #include <algorithm>
 #include <cstring>
 
 namespace Tina::Renderer {
 
 using Tina::Game::TileType;
+
+bool TileRenderer::initialize(ShaderManager& shaders)
+{
+    m_prog = ShaderCatalog::Load(shaders, ShaderCatalog::Tag::WorldSolid);
+    // 顶点布局：Position(float3) + Color(float4)
+    m_layout.begin()
+        .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
+        .add(bgfx::Attrib::Color0,   4, bgfx::AttribType::Float)
+    .end();
+    return bgfx::isValid(m_prog);
+}
 
 Tina::Core::Color TileRenderer::getTileColor(TileType t) const
 {
@@ -40,21 +53,19 @@ Tina::Core::Color TileRenderer::getTileColor(TileType t) const
     }
 }
 
-void TileRenderer::renderSolid(const Tina::Game::TileMap& map,
-                               uint16_t viewId,
-                               bgfx::ProgramHandle program,
-                               const bgfx::VertexLayout& layout) const
+void TileRenderer::renderSolid(const Tina::Game::TileMap& map, uint16_t viewId) const
 {
+    if (!bgfx::isValid(m_prog)) return;
     const int W = map.width(), H = map.height();
     const int maxTiles = W * H;
     const uint32_t maxV = (uint32_t)maxTiles * 4;
     const uint32_t maxI = (uint32_t)maxTiles * 6;
 
     bgfx::TransientVertexBuffer tvb; bgfx::TransientIndexBuffer tib;
-    if (bgfx::getAvailTransientVertexBuffer(maxV, layout) < maxV ||
+    if (bgfx::getAvailTransientVertexBuffer(maxV, m_layout) < maxV ||
         bgfx::getAvailTransientIndexBuffer(maxI) < maxI) return;
 
-    bgfx::allocTransientVertexBuffer(&tvb, maxV, layout);
+    bgfx::allocTransientVertexBuffer(&tvb, maxV, m_layout);
     bgfx::allocTransientIndexBuffer(&tib, maxI);
     ColorVertex* vptr = (ColorVertex*)tvb.data; uint16_t* iptr = (uint16_t*)tib.data;
     uint32_t vb = 0, ib = 0;
@@ -73,26 +84,24 @@ void TileRenderer::renderSolid(const Tina::Game::TileMap& map,
         enc->setVertexBuffer(0, &tvb);
         enc->setIndexBuffer(&tib);
         enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A);
-        enc->submit(viewId, program);
+        enc->submit(viewId, m_prog);
         bgfx::end(enc);
     }
 }
 
-void TileRenderer::renderWater(const Tina::Game::TileMap& map,
-                               uint16_t viewId,
-                               bgfx::ProgramHandle program,
-                               const bgfx::VertexLayout& layout) const
+void TileRenderer::renderWater(const Tina::Game::TileMap& map, uint16_t viewId) const
 {
+    if (!bgfx::isValid(m_prog)) return;
     const int W = map.width(), H = map.height();
     const int maxTiles = W * H;
     const uint32_t maxV = (uint32_t)maxTiles * 4;
     const uint32_t maxI = (uint32_t)maxTiles * 6;
 
     bgfx::TransientVertexBuffer tvb; bgfx::TransientIndexBuffer tib;
-    if (bgfx::getAvailTransientVertexBuffer(maxV, layout) < maxV ||
+    if (bgfx::getAvailTransientVertexBuffer(maxV, m_layout) < maxV ||
         bgfx::getAvailTransientIndexBuffer(maxI) < maxI) return;
 
-    bgfx::allocTransientVertexBuffer(&tvb, maxV, layout);
+    bgfx::allocTransientVertexBuffer(&tvb, maxV, m_layout);
     bgfx::allocTransientIndexBuffer(&tib, maxI);
     ColorVertex* vptr = (ColorVertex*)tvb.data; uint16_t* iptr = (uint16_t*)tib.data;
     uint32_t vb = 0, ib = 0;
@@ -112,7 +121,7 @@ void TileRenderer::renderWater(const Tina::Game::TileMap& map,
         enc->setVertexBuffer(0, &tvb);
         enc->setIndexBuffer(&tib);
         enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
-        enc->submit(viewId, program);
+        enc->submit(viewId, m_prog);
         bgfx::end(enc);
     }
 }

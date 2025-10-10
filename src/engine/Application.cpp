@@ -3,6 +3,7 @@
 #include "OSEventBus.hpp"
 #include "TypedEventBus.hpp"
 #include "../renderer/Primitive2D.hpp"
+#include "../renderer/SpriteRenderer.hpp"
 #include "Resource.hpp"
 #include "Texture.hpp"
 #include "Font.hpp"
@@ -161,10 +162,16 @@ void Application::init()
         TINA_INFO("Application: TextRenderer 已加载 48 号字体");
     }
 
-    // 7.2 初始化简易 2D 形状渲染器（集中管理 color 程序与布局）
+    // 7.2 初始化简易 2D 形状渲染器（集中管理 UI 基础管线）
     m_prim2D = Memory::MakeUnique<Tina::Renderer::Primitive2D>();
     if (!m_prim2D->initialize(*m_shaderMgr)) {
         TINA_WARN("Primitive2D 初始化失败：color 程序不可用");
+    }
+
+    // 7.3 初始化全局 SpriteRenderer（可用于世界/工具层的 2D 纹理绘制）
+    m_sprite2D = Memory::MakeUnique<Tina::Renderer::SpriteRenderer>();
+    if (!m_sprite2D->initialize(*m_shaderMgr)) {
+        TINA_WARN("SpriteRenderer 初始化失败：sprite 程序不可用");
     }
 
     // 7.5 预热常用资源（字体/图标），减少首帧等待
@@ -195,6 +202,7 @@ void Application::shutdown()
     m_osEventBus.reset();
     // 在 bgfx 关闭前确保销毁所有程序句柄（先销毁依赖者，再销毁管理器）
     m_prim2D.reset();
+    m_sprite2D.reset();
     m_shaderMgr.reset();
     m_prim2D.reset();
 
@@ -449,6 +457,11 @@ UI::TextRenderer& Application::textRenderer() const
 Tina::Renderer::Primitive2D& Application::primitives2D() const
 {
     return *m_prim2D;
+}
+
+Tina::Renderer::SpriteRenderer& Application::sprites2D() const
+{
+    return *m_sprite2D;
 }
 
 } // namespace Tina::Engine

@@ -15,6 +15,8 @@ namespace Tina::Game {
     class TileMap;
 }
 
+namespace Tina::Renderer { class ShaderManager; }
+
 namespace Tina::ECS {
 
 // 前向声明系统类
@@ -38,7 +40,8 @@ public:
 
     // 核心更新和渲染
     void update(float dt, const Tina::Game::TileMap& tilemap, const InputState& input);
-    void render(uint16_t viewId, bgfx::ProgramHandle program, const bgfx::VertexLayout& layout);
+    void initializeRenderers(Tina::Renderer::ShaderManager& shaders);
+    void render(uint16_t viewId);
 
     // 角色管理
     entt::entity createCharacter(float x, float y, bool isPlayerControlled = false);

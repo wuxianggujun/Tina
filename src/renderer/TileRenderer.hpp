@@ -11,28 +11,24 @@
 #include "../core/Container.hpp"
 #include "../core/Color.hpp"
 
+namespace Tina { namespace Renderer { class ShaderManager; } }
+
 namespace Tina::Renderer {
 
 struct ColorVertex { float x, y, z; float r, g, b, a; };
 
 class TileRenderer {
 public:
-    void initialize() {}
+    bool initialize(ShaderManager& shaders);
 
     // 从原 main.cpp 迁移：根据 TileType 获取颜色
     Tina::Core::Color getTileColor(Tina::Game::TileType t) const;
 
     // 渲染固体瓦片（整格）
-    void renderSolid(const Tina::Game::TileMap& map,
-                     uint16_t viewId,
-                     bgfx::ProgramHandle program,
-                     const bgfx::VertexLayout& layout) const;
+    void renderSolid(const Tina::Game::TileMap& map, uint16_t viewId) const;
 
     // 渲染水体（按水位分数渲染部分高度，启用透明混合）
-    void renderWater(const Tina::Game::TileMap& map,
-                     uint16_t viewId,
-                     bgfx::ProgramHandle program,
-                     const bgfx::VertexLayout& layout) const;
+    void renderWater(const Tina::Game::TileMap& map, uint16_t viewId) const;
 
 private:
     static inline void appendQuad(ColorVertex* vptr, uint16_t* iptr,
@@ -52,6 +48,9 @@ private:
         iptr[ib+5] = (uint16_t)(vb+3);
         vb += 4; ib += 6;
     }
+private:
+    bgfx::ProgramHandle m_prog = BGFX_INVALID_HANDLE;
+    bgfx::VertexLayout m_layout{}; // Position(float3) + Color(float4)
 };
 
 } // namespace Tina::Renderer
