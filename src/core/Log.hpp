@@ -9,7 +9,8 @@
 #pragma once
 
 #include "Core.hpp"
-#include <memory>
+#include "Memory.hpp"  // 使用封装的 EASTL 智能指针
+#include <memory>      // 仍需要 std::shared_ptr 用于 spdlog 兼容
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -56,6 +57,7 @@ namespace Tina::Core {
         {
             auto& logger = Get();
             if (!logger) {
+                // spdlog 内部使用 std::shared_ptr，这里仍需要使用 std 版本的 sinks
                 std::vector<spdlog::sink_ptr> sinks;
                 auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
                 sinks.push_back(console_sink);
@@ -76,21 +78,26 @@ namespace Tina::Core {
                         sinks.push_back(file_sink);
                     } catch (const std::exception& e) {
                         // 仅控制台提示，避免抛出影响程序启动
-                        auto fallback = spdlog::stdout_color_mt(name);
-                        fallback->set_level(ToSpdLevel(level));
-                        fallback->set_pattern(pattern);
-                        fallback->warn("日志文件创建失败: {}", e.what());
-                        logger = fallback;
+                        // 注意：spdlog 函数返回 std::shared_ptr，需要转换为 Memory::SharedPtr
+                        auto fallback_std = spdlog::stdout_color_mt(name);
+                        fallback_std->set_level(ToSpdLevel(level));
+                        fallback_std->set_pattern(pattern);
+                        fallback_std->warn("日志文件创建失败: {}", e.what());
+                        // 转换为 Memory::SharedPtr
+                        logger = Memory::SharedPtr<spdlog::logger>(fallback_std.get(), [fallback_std](spdlog::logger*){});
                     }
                 }
 
                 if (!logger) {
                     if (!sinks.empty()) {
-                        auto lg = std::make_shared<spdlog::logger>(name, sinks.begin(), sinks.end());
-                        spdlog::register_logger(lg);
-                        logger = lg;
+                        auto lg_std = std::make_shared<spdlog::logger>(name, sinks.begin(), sinks.end());
+                        spdlog::register_logger(lg_std);
+                        // 转换为 Memory::SharedPtr
+                        logger = Memory::SharedPtr<spdlog::logger>(lg_std.get(), [lg_std](spdlog::logger*){});
                     } else {
-                        logger = spdlog::stdout_color_mt(name);
+                        auto console_std = spdlog::stdout_color_mt(name);
+                        // 转换为 Memory::SharedPtr
+                        logger = Memory::SharedPtr<spdlog::logger>(console_std.get(), [console_std](spdlog::logger*){});
                     }
                 }
             }
@@ -120,9 +127,9 @@ namespace Tina::Core {
         }
 
         // 获取全局 logger
-        static std::shared_ptr<spdlog::logger>& Get()
+        static Memory::SharedPtr<spdlog::logger>& Get()
         {
-            static std::shared_ptr<spdlog::logger> s_logger;
+            static Memory::SharedPtr<spdlog::logger> s_logger;
             return s_logger;
         }
 

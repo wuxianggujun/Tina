@@ -10,6 +10,8 @@
 #include "../renderer/ShaderManager.hpp"
 #include "../core/Color.hpp"
 #include "TextRenderer.hpp"
+#include "UIConstants.hpp"  // 添加常量定义
+#include "UIError.hpp"      // 添加错误处理
 
 namespace Tina::UI {
 
@@ -171,6 +173,17 @@ public:
    // 调试：打印性能统计到日志
    void logStats() const;
 
+   // === 错误处理 ===
+
+   // 获取最后的错误
+   const UIError& getLastError() const { return m_lastError; }
+
+   // 清除错误
+   void clearError() { m_lastError.clear(); }
+
+   // 设置错误处理器
+   void setErrorHandler(IUIErrorHandler* handler) { m_errorHandler = handler; }
+
 private:
     // 顶点结构
     struct ColorVtx {
@@ -266,8 +279,20 @@ private:
     
     // 批处理控制
     BatchStrategy m_batchStrategy = BatchStrategy::Simple;
-    uint32_t m_maxBatchVertices = 65536;  // 默认最大64K顶点
+    uint32_t m_maxBatchVertices = DEFAULT_MAX_BATCH_VERTICES;  // 使用常量定义
     uint32_t m_currentRenderDepth = 0;    // 当前渲染深度
+
+    // 性能优化：瞬态缓冲区容量缓存
+    uint32_t m_availableTransientVB = 0;
+    uint32_t m_availableTransientIB = 0;
+
+    // 错误处理
+    UIError m_lastError;
+    IUIErrorHandler* m_errorHandler = nullptr;
+    DefaultUIErrorHandler m_defaultErrorHandler;
+
+    // 内部错误报告方法
+    void reportError(UIErrorCode code, const std::string& message, const std::string& location);
 };
 
 } // namespace Tina::UI

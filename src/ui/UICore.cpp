@@ -4,6 +4,7 @@
 //
 
 #include "UICore.hpp"
+#include "UIConstants.hpp"  // 添加常量定义
 #include <bx/math.h>
 #include <cstring>
 #include <algorithm>
@@ -41,8 +42,15 @@ bool UIRenderer::initialize(Tina::Renderer::ShaderManager& sm, TextRenderer* tex
     } else {
         TINA_WARN("UIRenderer: sprite着色器加载失败");
     }
-    
-    TINA_INFO("UIRenderer: 初始化完成");
+
+    // 内存预分配优化：避免运行时频繁内存分配
+    m_colorBatch.vertices.reserve(DEFAULT_COLOR_VERTEX_RESERVE);
+    m_colorBatch.indices.reserve(DEFAULT_COLOR_INDEX_RESERVE);
+    m_spriteBatches.reserve(DEFAULT_SPRITE_BATCH_RESERVE);
+    m_textCmds.reserve(DEFAULT_TEXT_CMD_RESERVE);
+
+    TINA_INFO("UIRenderer: 初始化完成（预分配内存：{}个顶点，{}个批次）",
+              DEFAULT_COLOR_VERTEX_RESERVE, DEFAULT_SPRITE_BATCH_RESERVE);
     return true;
 }
 
@@ -63,11 +71,29 @@ void UIRenderer::beginFrame(uint16_t viewId)
         m_lastFrameStats = m_frameStats;
         m_frameStats.reset();
     }
-    
-    // 清理上一帧的缓冲
-    m_colorBatch.clear();
+
+    // 优化：使用 resize(0) 代替 clear() 保留容量，避免内存重分配
+    m_colorBatch.vertices.resize(0);
+    m_colorBatch.indices.resize(0);
+
+    // sprite批次需要清理纹理句柄，所以保持clear
+    for (auto& batch : m_spriteBatches) {
+        batch.vertices.resize(0);
+        batch.indices.resize(0);
+    }
     m_spriteBatches.clear();
+
+    m_textCmds.resize(0);  // 保留容量
     m_currentViewId = viewId;
+
+    // 性能优化：预检查瞬态缓冲区容量，避免每次绘制都检查
+    m_availableTransientVB = bgfx::getAvailTransientVertexBuffer(MAX_VERTICES_PER_BATCH, m_colorLayout);
+    m_availableTransientIB = bgfx::getAvailTransientIndexBuffer(MAX_VERTICES_PER_BATCH * 3 / 2);  // 1.5倍索引
+
+    if (m_availableTransientVB < 1000 || m_availableTransientIB < 1500) {
+        TINA_WARN("UIRenderer: 瞬态缓冲区容量不足 (VB:{}, IB:{})",
+                  m_availableTransientVB, m_availableTransientIB);
+    }
 }
 
 // 批处理版本：缓存而不是立即提交
@@ -75,19 +101,21 @@ void UIRenderer::drawRect(uint16_t viewId, float x, float y, float w, float h,
                           float r, float g, float b, float a)
 {
     if (!bgfx::isValid(m_progColor)) {
-        TINA_ERROR("UIRenderer::drawRect - color着色器无效!");
+        reportError(UIErrorCode::ShaderInvalid,
+                   "Color shader is invalid",
+                   "drawRect");
         return;
     }
     
     if (w <= 0.0f || h <= 0.0f) return;
     
-    // ✅ 检查索引溢出：如果添加4个顶点会超过uint16_t最大值，先flush
-    if (m_colorBatch.vertices.size() + 4 > 65536) {
+    // ✅ 检查索引溢出：如果添加顶点会超过uint16_t最大值，先flush
+    if (m_colorBatch.vertices.size() + VERTICES_PER_RECT > MAX_VERTICES_PER_BATCH) {
         flushColorBatch();
     }
-    
+
     // 检查是否需要创建新批次（防止单个批次过大）
-    if (shouldCreateNewBatch(m_colorBatch.vertices.size(), 4)) {
+    if (shouldCreateNewBatch(m_colorBatch.vertices.size(), VERTICES_PER_RECT)) {
         // 如果当前批次已经很大，先flush再继续
         flushColorBatch();
     }
@@ -160,7 +188,7 @@ void UIRenderer::drawImage(uint16_t viewId, float x, float y, float w, float h,
     if (!batch) return;
     
     // ✅ 检查索引溢出
-    if (batch->vertices.size() + 4 > 65536) {
+    if (batch->vertices.size() + VERTICES_PER_RECT > MAX_VERTICES_PER_BATCH) {
         // 当前批次已满，创建新批次
         SpriteBatch newBatch;
         newBatch.texture = tex;
@@ -168,9 +196,9 @@ void UIRenderer::drawImage(uint16_t viewId, float x, float y, float w, float h,
         m_spriteBatches.push_back(newBatch);
         batch = &m_spriteBatches.back();
     }
-    
+
     // 检查是否需要创建新批次
-    if (shouldCreateNewBatch(batch->vertices.size(), 4)) {
+    if (shouldCreateNewBatch(batch->vertices.size(), VERTICES_PER_RECT)) {
         // 创建新的批次
         SpriteBatch newBatch;
         newBatch.texture = tex;
@@ -241,7 +269,9 @@ void UIRenderer::flushColorBatch()
     }
     
     if (!bgfx::isValid(m_progColor)) {
-        TINA_ERROR("UIRenderer: color着色器无效！无法渲染UI背景");
+        reportError(UIErrorCode::ShaderInvalid,
+                   "Color shader is invalid, cannot render UI background",
+                   "flushColorBatch");
         return;
     }
 
@@ -407,7 +437,7 @@ void UIRenderer::flushTextCommands()
         }
         // 小字号使用线性过滤，提升可读性；否则使用点采样保持锐利
         bool prevFilter = m_text->linearFilter();
-        bool wantLinear = (cmd.fontPx > 0 ? cmd.fontPx : prevPx) <= 24;
+        bool wantLinear = (cmd.fontPx > 0 ? cmd.fontPx : prevPx) <= LINEAR_FILTER_FONT_SIZE_THRESHOLD;
         if (wantLinear != prevFilter) {
             m_text->setLinearFilter(wantLinear);
         }
@@ -459,6 +489,20 @@ void UIRenderer::logStats() const
     TINA_INFO("文本数: {}", stats.textCount);
     TINA_INFO("批处理效率: {:.1f}%", stats.batchEfficiency * 100.0f);
     TINA_INFO("====================");
+}
+
+// 内部错误报告实现
+void UIRenderer::reportError(UIErrorCode code, const std::string& message, const std::string& location)
+{
+    m_lastError.setError(code, message, location);
+    m_lastError.droppedItems++;
+
+    // 使用错误处理器报告错误
+    if (m_errorHandler) {
+        m_errorHandler->onError(m_lastError);
+    } else {
+        m_defaultErrorHandler.onError(m_lastError);
+    }
 }
 
 } // namespace Tina::UI
