@@ -1,7 +1,7 @@
 # Tina UI 系统架构文档
 
 > **版本**: 1.0
-> **日期**: 2025-01-XX
+> **最后更新**: 2025-10-10
 > **适用项目**: Tina 2D 沙盒游戏引擎
 
 ---
@@ -1305,6 +1305,54 @@ while (running) {
 
 ---
 
-**文档版本**: 1.0
-**最后更新**: 2025-01-XX
-**作者**: Tina 开发团队
+## 批处理优化系统（2025-10更新）
+
+### RAII 渲染作用域
+
+UIRenderer 提供 RAII 作用域，自动管理 beginFrame/flush：
+
+```cpp
+void MyScene::render() {
+    auto scope = ui().beginRender(uiViewId());
+    m_rootNode->render(uiViewId(), ui());
+    // scope 析构时自动 flush
+}
+```
+
+### 性能统计
+
+```cpp
+ui().setStatsEnabled(true);  // 启用统计
+const auto& stats = ui().getLastFrameStats();
+```
+
+---
+
+## Signal 事件系统（2025-10更新）
+
+UIButton 使用 Signal 事件：
+
+```cpp
+m_btnConnection = btn->onClick.connect([this]() {
+    onStartClicked();
+});
+```
+
+UINode 拥有子节点所有权：
+
+```cpp
+auto* btn = m_rootNode->createChild<UI::UIButton>("Btn");
+```
+
+---
+
+## 相关文档
+
+- [scene_system.md](scene_system.md) - Scene 系统架构
+- [scene-best-practices.md](scene-best-practices.md) - Scene 开发最佳实践
+
+---
+
+**文档版本**: 1.1
+**最后更新**: 2025-10-10
+**维护者**: Tina 引擎团队

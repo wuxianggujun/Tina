@@ -53,7 +53,7 @@
 - **`frame_timing.md`**
   - 主题：帧时序与固定步长（Accumulator）建议
   - 适用：主循环/计时/渲染同步
-  - 状态：可用（建议将历史引用的 engine 路径说明调整为 `src/main.cpp` + `Tina::Core::FrameTimer`）
+  - 状态：可用（已更新路径引用）
   - 待办：补充 VSync/视图重置在 `src/main.cpp` 的实际调用点
 
 - **`world-coordinate-system.md`**
@@ -64,13 +64,35 @@
     - 说明 UI 使用独立视图（见 `src/main.cpp` 中 view=3 与 `SetupOrtho`）
     - 引用 `src/game/CoordinateMapper.hpp` 的屏幕-世界换算
 
-## 已删除文档（过时/不适用当前工程）
+- **`scene-best-practices.md`**
+  - 主题：Scene 开发最佳实践与规范
+  - 适用：创建新 Scene、使用 Scene 基类 API
+  - 状态：可用（2025-10-10 更新）
+  - 内容：
+    - Scene 基类便捷方法使用（ui()/scene()/app()）
+    - 资源管理规范
+    - 生命周期管理
+    - 常见错误和调试技巧
 
-- `resource_system.md`
-  - 原因：描述 Lumix 的资源体系/Hub/编译管线，与当前工程不符（Tina 仅使用 `ShaderManager` + 简单资源拷贝）
+- **`future_development.md`**
+  - 主题：引擎未来发展规划与扩展建议
+  - 适用：功能规划、技术债务追踪
+  - 状态：可用（持续更新）
+  - 内容：
+    - 模块扩展建议（配置系统、音频系统、存档系统等）
+    - 技术债务清单
+    - 长期愿景与路线图
 
-- `window_events.md`
-  - 原因：基于 Lumix 平台层的事件/窗口处理；当前 Tina 为 SDL3 + `src/os/OS.hpp` 的封装，路径/接口不一致
+- **`scene_system.md`** ✅ 已完成
+  - 主题：Scene 系统架构与使用指南
+  - 适用：场景开发、场景切换、生命周期管理
+  - 状态：可用（2025-10-10）
+  - 内容：
+    - Scene/SceneManager/SceneRenderer 核心类设计
+    - 生命周期管理（onEnter/onExit/onPause/onResume）
+    - 场景切换流程（push/pop/replace/clear）
+    - 便捷访问方法（app()/ui()/scene()）
+    - 完整使用示例和最佳实践
 
 ## 规划中的文档（建议后续新增）
 
@@ -90,15 +112,7 @@
     - TileRenderer 色板来源
     - 昼夜/生物群系调制规划
 
-- **`scene_system.md`** 🔥 高优先级（依赖架构重构）
-  - 内容要点：
-    - Scene 基类设计与生命周期
-    - SceneManager 场景栈管理
-    - 场景切换流程（push/pop/replace）
-    - GameScene/MenuScene/PauseScene 示例
-    - 场景间数据传递
-
-- **`resource_management.md`**（依赖架构重构）
+- **`resource_management.md`**
   - 内容要点：
     - ResourceManager 统一接口
     - ShaderManager/TextureManager/FontManager
@@ -110,12 +124,14 @@
 - 每篇文档开头建议包含：简介 / 适用范围 / 当前状态 / 最后更新时间
 - 代码路径统一使用工作区相对路径（如 `src/...`），避免外部工程引用
 - 文档更新应与代码改动同步，提交信息需标注"影响范围"（渲染/物理/UI/工具等）
-- 🔥 标记表示高优先级文档
 - ✅ 标记表示已完成的待办事项
 - ⏳ 标记表示进行中的待办事项
 
 ## 最近更新
 
-- **2025-10-08**: 新增 `audio_system.md`，并将资源复制机制改为“拷贝 resources 全部，但排除 resources/shaders”
+- **2025-10-10**: 新增 `scene_system.md`，完整的 Scene 系统架构文档
+- **2025-10-10**: 更新 `ui_system_architecture.md`，添加批处理优化和 Signal 事件系统说明
+- **2025-10-10**: 清理过时文档，删除 6 个临时设计文档和重复分析文档
+- **2025-10-08**: 新增 `audio_system.md`，并将资源复制机制改为"拷贝 resources 全部，但排除 resources/shaders"
 - **2025-10-06**: 添加 `architecture_design.md`，记录引擎架构重构设计
 - **2025-10-06**: 完成 Core::Color 重构，更新 UI 系统使用 Color 接口
