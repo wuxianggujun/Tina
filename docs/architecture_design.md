@@ -1,5 +1,10 @@
 # Tina 引擎架构设计文档
 
+> 更新说明（2025-10-10）：
+> - 原“EventBus”（固定字段总线）已重命名为“OSEventBus”，仅承载 OS 输入/窗口事件。
+> - 新增“TypedEventBus”作为玩法/编辑器/插件的强类型事件总线（基于 entt::dispatcher）。
+> - 文档中历史出现的“EventBus（玩法事件）”表述以本文更新为准。
+
 **版本**: 3.1
 **最后更新**: 2025年10月10日
 **状态**: 已实现并运行中 ✅
@@ -12,9 +17,9 @@
 
 | 阶段 | 状态 | 完成度 | 说明 |
 |------|------|--------|------|
-| 阶段 1：基础架构 | ✅ 完成 | 100% | Application、Scene、SceneManager、EventBus |
+| 阶段 1：基础架构 | ✅ 完成 | 100% | Application、Scene、SceneManager、OSEventBus |
 | 阶段 2：游戏逻辑迁移 | ✅ 完成 | 100% | GameScene 完整实现（859 行） |
-| 阶段 3：Signal 系统 | ✅ 完成 | 100% | EventBus + UI Signal + 游戏事件 |
+| 阶段 3：Signal 系统 | ✅ 完成 | 100% | OSEventBus + UI Signal + TypedEventBus |
 | 阶段 4：场景扩展 | ✅ 完成 | 100% | PauseScene ✅ / MenuScene ✅ |
 | 阶段 5：资源管理 | ✅ 完成 | 100% | FileSystem + ResourceHub + Texture/Font |
 

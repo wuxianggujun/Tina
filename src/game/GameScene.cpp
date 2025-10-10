@@ -224,7 +224,7 @@ void GameScene::handleEvent(const Tina::os::Event& event)
             break;
 
         case E::Type::MOUSE_WHEEL:
-            // 滚轮事件已通过 EventBus Signal 订阅处理
+            // 滚轮事件已通过 OSEventBus Signal 订阅处理
             break;
 
         case E::Type::KEY:
@@ -452,7 +452,7 @@ void GameScene::spawnCharacters(int spawnX, int spawnY)
         }
     });
 
-    // 6. 订阅 EventBus 事件
+    // 6. 订阅事件（OS 输入 + 强类型玩法事件）
     subscribeToEvents();
 
     TINA_INFO("角色生成完成: 1 玩家 + 3 NPC");
@@ -711,7 +711,7 @@ void GameScene::handleKeyboard(const Tina::os::Event& event)
         return;
     }
 
-    // 其他键盘事件已通过 EventBus Signal 订阅处理
+    // 其他键盘事件已通过 OSEventBus Signal 订阅处理
 }
 
 void GameScene::handleMouse(const Tina::os::Event& event)
@@ -910,7 +910,7 @@ void GameScene::subscribeToEvents()
     m_adjustDayNightConnection = app()->events().connect<Tina::Game::Events::AdjustDayNight, &GameScene::onAdjustDayNight>(*this);
     // 已移除暂停/恢复昼夜功能
 
-    TINA_INFO("GameScene: EventBus 订阅完成");
+    TINA_INFO("GameScene: 事件订阅完成");
 }
 
 void GameScene::triggerPlayerEvents(float prevX, float prevY, bool wasOnGround)

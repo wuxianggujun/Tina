@@ -5,7 +5,6 @@
 #include "SettingsScene.hpp"
 #include "../engine/Application.hpp"
 #include "../engine/SceneManager.hpp"
-#include "../engine/OSEventBus.hpp"
 #include "../core/Log.hpp"
 
 #include <SDL3/SDL.h>

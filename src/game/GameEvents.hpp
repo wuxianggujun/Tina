@@ -1,6 +1,6 @@
 //
 // GameEvents - 游戏层强类型事件定义
-// - 将原 EventBus 中的玩法事件迁移为强类型事件
+// - 将原（已废弃的固定字段总线）中的玩法事件迁移为强类型事件（TypedEventBus）
 
 #pragma once
 
@@ -23,4 +23,3 @@ struct PlayerMoved {
 };
 
 } // namespace Tina::Game::Events
-

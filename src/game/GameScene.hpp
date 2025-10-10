@@ -75,7 +75,7 @@ private:
     void useExplodeTool(int worldX, int worldY);
 
     // UI 设置
-    // EventBus 订阅管理
+    // 事件订阅管理（OS 输入 + 强类型事件）
     void subscribeToEvents();
     void triggerPlayerEvents(float prevX, float prevY, bool wasOnGround);
 

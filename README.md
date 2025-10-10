@@ -78,6 +78,27 @@ make
 - **[PainterEngine](https://github.com/matrixcascade/PainterEngine)**
 - **[ElvenEngine](https://github.com/denyskryvytskyi/ElvenEngine)**
 
+## 事件系统（简述）
+
+引擎提供双层事件体系：
+
+- `OSEventBus`（OS 层）：窗口与输入事件（键盘/鼠标/窗口大小）。访问：`app()->osEvents()`。
+- `TypedEventBus`（玩法层）：强类型事件（基于 entt::dispatcher），无需改引擎源码即可扩展。访问：`app()->events()`。
+
+示例：
+
+```cpp
+// OS：订阅键盘事件
+auto c1 = app()->osEvents().onKeyPressed.connect(this, &MyScene::onKey);
+
+// 玩法：定义并触发强类型事件
+struct SetDayNight { float normalized; };
+auto c2 = app()->events().connect<SetDayNight, &MyScene::onSetDayNight>(*this);
+app()->events().trigger<SetDayNight>(0.25f);
+```
+
+详细说明请见 docs/event_system.md。
+
 ## Acknowledgments
 
 - Thanks to JetBrains for providing open-source project free License
