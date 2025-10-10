@@ -1,11 +1,11 @@
 //
-// Camera2D 实现
+// Camera2D 实现（引擎层）
 
 #include "Camera2D.hpp"
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 
-namespace Tina::Game {
+namespace Tina::Engine {
 
 void Camera2D::buildViewProj(float* outView16, float* outProj16) const
 {
@@ -24,4 +24,5 @@ void Camera2D::buildViewProj(float* outView16, float* outProj16) const
                  homogeneous);
 }
 
-} // namespace Tina::Game
+} // namespace Tina::Engine
+

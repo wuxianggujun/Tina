@@ -8,6 +8,7 @@
 #include "../engine/Application.hpp"
 #include "../engine/SceneManager.hpp"  // 场景管理器
 #include "../engine/OSEventBus.hpp"  // 包含 OS 事件总线定义
+#include "../engine/Camera2D.hpp"  // 相机
 #include "../core/Log.hpp"
 #include "../core/Time.hpp"
 #include "../game/CoordinateMapper.hpp"
@@ -323,7 +324,7 @@ void GameScene::createECS()
 void GameScene::createCamera()
 {
     float viewH = std::min(GameConfig::DEFAULT_VIEW_HEIGHT, (float)m_tileMap->height());
-    m_camera = Memory::MakeUnique<Camera2D>();
+    m_camera = Memory::MakeUnique<Engine::Camera2D>();
     m_camera->setViewportPixels(m_pixelWidth, m_pixelHeight);
     m_camera->setViewHeightWorld(viewH);
     TINA_INFO("相机创建完成: 视图高度={}", viewH);

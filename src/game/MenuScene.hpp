@@ -39,6 +39,10 @@ public:
     void render() override;
     void handleEvent(const Tina::os::Event& event) override;
 
+protected:
+    // 视图配置（使用新架构）
+    Container::Vector<ViewSetup> getViewSetup() override;
+
 private:
     // UI 创建
     void createUI();
@@ -81,13 +85,6 @@ private:
     int m_selectedButtonIndex = 0;
     Container::Vector<UI::UIButton*> m_buttons;
     
-    // 视口尺寸
-    int m_pixelWidth = 1280;
-    int m_pixelHeight = 720;
-    
-    // ✅ 视图脏标记（窗口大小变化时设置）
-    bool m_viewDirty = true;
-
     // UI 缩放
     float m_uiScale = 1.0f;
 };

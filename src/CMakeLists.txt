@@ -38,8 +38,8 @@ set(SRC_FILES
     particles/ParticleSystem.cpp
     physics/Physics2D.hpp
     physics/Physics2D.cpp
-    game/Camera2D.hpp
-    game/Camera2D.cpp
+    engine/Camera2D.hpp
+    engine/Camera2D.cpp
     game/TileMap.hpp
     game/TileMap.cpp
     game/CoordinateMapper.hpp

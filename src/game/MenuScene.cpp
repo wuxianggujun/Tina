@@ -27,11 +27,18 @@ MenuScene::MenuScene() {
 
 MenuScene::~MenuScene() = default;
 
+// 视图配置（使用新架构）
+Container::Vector<Engine::Scene::ViewSetup> MenuScene::getViewSetup() {
+    return {
+        { UI::VIEW_BACKGROUND, Engine::Scene::ViewSetup::Background2D, false },  // 背景视图
+        { UI::VIEW_UI, Engine::Scene::ViewSetup::UI2D, false }                   // UI视图
+    };
+}
+
 void MenuScene::onEnter() {
     TINA_INFO("MenuScene::onEnter - 进入主菜单");
 
-    // 获取窗口尺寸
-    app()->getPixelSize(m_pixelWidth, m_pixelHeight);
+    // 计算UI缩放（窗口尺寸已由基类自动设置）
     computeUIScale();
 
     // 创建背景粒子系统
@@ -44,10 +51,6 @@ void MenuScene::onEnter() {
     // 创建 UI
     createUI();
     m_events.setRoot(m_rootNode.get());
-
-    // 设置视图：背景/粒子 view 2，UI view 3
-    setupUIView(UI::VIEW_BACKGROUND, m_pixelWidth, m_pixelHeight);
-    setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
 
     TINA_INFO("MenuScene: 初始化完成");
 }
@@ -88,7 +91,7 @@ void MenuScene::update(float dt) {
 
             // 生成随机粒子（星星效果）
             for (int i = 0; i < 2; ++i) {
-                float x = (float)(std::rand() % m_pixelWidth);
+                float x = (float)(std::rand() % getPixelWidth());
                 float y = -10.0f;  // 从顶部生成
 
                 // 随机大小和亮度
@@ -110,17 +113,7 @@ void MenuScene::update(float dt) {
 }
 
 void MenuScene::render() {
-    // 设置视图（仅在需要时）
-    if (m_viewDirty) {
-        // 背景/粒子：view 2；UI：view 3
-        setupUIView(UI::VIEW_BACKGROUND, m_pixelWidth, m_pixelHeight);
-        setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
-        m_viewDirty = false;
-    }
-
-    // 触摸各视图，保证清屏顺序与提交顺序稳定
-    bgfx::touch(UI::VIEW_BACKGROUND);
-    bgfx::touch(uiViewId());
+    // 框架已自动处理视图设置和touch
 
     // 渲染渐变背景（使用 SceneRenderer 一次性绘制，无需多层矩形）
     {
@@ -139,8 +132,8 @@ void MenuScene::render() {
 
     // 渲染标题
     if (m_titleAlpha > 0.0f) {
-        float titleX = (float)m_pixelWidth / 2.0f;
-        float titleY = (float)m_pixelHeight * 0.25f;
+        float titleX = (float)getPixelWidth() / 2.0f;
+        float titleY = (float)getPixelHeight() * 0.25f;
 
         // 主标题（随窗口缩放字号与包围盒）
         {
@@ -179,7 +172,7 @@ void MenuScene::render() {
         UI::UIRenderer::TextOptions to{};
         to.r = 0.5f; to.g = 0.5f; to.b = 0.5f; to.a = 0.5f;
         to.hAlign = UI::UIRenderer::AlignH::Right; to.vAlign = UI::UIRenderer::AlignV::Bottom;
-        ui().drawTextBox(uiViewId(), (float)m_pixelWidth - 10 - 100, (float)m_pixelHeight - 10 - 30,
+        ui().drawTextBox(uiViewId(), (float)getPixelWidth() - 10 - 100, (float)getPixelHeight() - 10 - 30,
                                   100, 30, "v1.0.0", to);
     }
 
@@ -232,19 +225,14 @@ void MenuScene::handleEvent(const os::Event& event) {
 
     // 窗口调整大小
     if (event.type == E::Type::WINDOW_SIZE) {
-        // 更新像素尺寸
-        app()->getPixelSize(m_pixelWidth, m_pixelHeight);
-        m_viewDirty = true;  // 标记视图需要更新
+        // 窗口大小已由基类自动处理
 
         // 更新 UI 布局
         computeUIScale();
         updateUILayout();
 
         // 同步 SceneRenderer 的屏幕尺寸（供渐变背景使用）
-        scene().setScreenSize(m_pixelWidth, m_pixelHeight);
-        // 立即更新两个视图的正交投影，避免本帧拉伸
-        setupUIView(UI::VIEW_BACKGROUND, m_pixelWidth, m_pixelHeight);
-        setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
+        scene().setScreenSize(getPixelWidth(), getPixelHeight());
     }
 }
 
@@ -252,11 +240,11 @@ void MenuScene::createUI() {
     // 创建根节点
     m_rootNode = Memory::MakeUnique<UI::UINode>("RootNode");
     m_rootNode->setPosition(0, 0);
-    m_rootNode->setSize((float)m_pixelWidth, (float)m_pixelHeight);
+    m_rootNode->setSize((float)getPixelWidth(), (float)getPixelHeight());
 
     // 计算按钮位置
-    float centerX = m_pixelWidth / 2.0f;
-    float startY = m_pixelHeight * 0.5f;
+    float centerX = getPixelWidth() / 2.0f;
+    float startY = getPixelHeight() * 0.5f;
     float buttonWidth = 200.0f * m_uiScale;
     float buttonHeight = 50.0f * m_uiScale;
     float buttonSpacing = 20.0f * m_uiScale;
@@ -385,11 +373,11 @@ void MenuScene::updateUILayout() {
     if (!m_rootNode) return;
 
     // 更新根节点大小
-    m_rootNode->setSize((float)m_pixelWidth, (float)m_pixelHeight);
+    m_rootNode->setSize((float)getPixelWidth(), (float)getPixelHeight());
 
     // 重新计算中心位置
-    float centerX = m_pixelWidth / 2.0f;
-    float startY = m_pixelHeight * 0.5f;
+    float centerX = getPixelWidth() / 2.0f;
+    float startY = getPixelHeight() * 0.5f;
     float buttonWidth = 200.0f * m_uiScale;
     float buttonHeight = 50.0f * m_uiScale;
     float buttonSpacing = 20.0f * m_uiScale;
@@ -425,8 +413,8 @@ void MenuScene::updateUILayout() {
 void MenuScene::computeUIScale() {
     const float baseW = 1280.0f;
     const float baseH = 720.0f;
-    float sx = (float)m_pixelWidth / baseW;
-    float sy = (float)m_pixelHeight / baseH;
+    float sx = (float)getPixelWidth() / baseW;
+    float sy = (float)getPixelHeight() / baseH;
     float s = std::min(sx, sy);
     m_uiScale = std::max(0.75f, std::min(s, 2.0f));
 }

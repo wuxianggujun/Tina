@@ -1,14 +1,14 @@
 //
-// 简易 2D 相机（世界坐标统一）
-// - 以世界坐标为单位（tile 尺寸=1.0）
-// - 视口以像素维度决定宽高比，视区高度（世界单位）可配置
-// - 提供计算 bgfx 视图/投影矩阵的方法（正交投影，y 轴向上，原点在左下）
+// Camera2D - 简易 2D 相机（引擎层）
+// - 世界单位：以 tile=1.0 计量
+// - 视口像素决定宽高比，视区高度（世界单位）可配置
+// - 提供生成 bgfx 视图/投影矩阵（正交，原点左下，y 向上）
 
 #pragma once
 
 #include <cstdint>
 
-namespace Tina::Game {
+namespace Tina::Engine {
 
 class Camera2D {
 public:
@@ -34,5 +34,5 @@ private:
     float m_viewH = 30.0f;        // 视区高度（世界单位）
 };
 
-} // namespace Tina::Game
+} // namespace Tina::Engine
 

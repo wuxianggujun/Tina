@@ -5,7 +5,7 @@
 #include "../renderer/ShaderManager.hpp"
 #include "../game/TileMap.hpp"
 #include "../ecs/World.hpp"
-#include "../game/Camera2D.hpp"
+#include "../engine/Camera2D.hpp"
 #include "../renderer/TileRenderer.hpp"
 #include "../ui/UICore.hpp"  // UIRenderer
 #include "../ui/UIToolbar.hpp"
@@ -89,7 +89,7 @@ private:
     // 游戏世界
     Memory::UniquePtr<TileMap> m_tileMap;
     Memory::UniquePtr<ECS::World> m_ecsWorld;
-    Memory::UniquePtr<Camera2D> m_camera;
+    Memory::UniquePtr<Engine::Camera2D> m_camera;
 
     // UI
     Memory::UniquePtr<UI::UIToolbar> m_toolbar;

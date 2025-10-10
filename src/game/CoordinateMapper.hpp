@@ -6,7 +6,7 @@
 #pragma once
 
 #include <cmath>
-#include "Camera2D.hpp"
+#include "../engine/Camera2D.hpp"
 
 namespace Tina::Game {
 
@@ -29,7 +29,7 @@ inline void screenToWorld(float mx, float my,
 // 便捷重载：直接使用 Camera2D 的视区与位置
 inline void screenToWorld(float mx, float my,
                           int pxW, int pxH,
-                          const Camera2D& cam,
+                          const Tina::Engine::Camera2D& cam,
                           float& wx, float& wy)
 {
     float u = (pxW > 0) ? (mx / (float)pxW) : 0.0f;
