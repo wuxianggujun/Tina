@@ -11,12 +11,14 @@
 #include "UILayout.hpp"
 #include "UIEventSystem.hpp"
 #include "../core/Container.hpp"
+#include "../core/Memory.hpp"
 
 namespace Tina::UI {
 
 class UIToolbar {
 public:
-    bool initialize(int screenW, int screenH, UIRenderer& renderer, TextRenderer* text);
+    // 迁移至新架构：仅依赖 UIRenderer
+    bool initialize(int screenW, int screenH, UIRenderer& renderer);
     void shutdown();
 
     void onResize(int screenW, int screenH);
@@ -25,7 +27,7 @@ public:
 
     // 事件系统对接
     UIEventSystem& events() { return m_events; }
-    UINode* root() const { return m_root; }
+    UINode* root() const { return m_root.get(); }
 
     int barHeight() const { return m_barH; }
     bool hitTest(float x, float y) const;
@@ -55,10 +57,9 @@ private:
 private:
     // 渲染
     UIRenderer* m_renderer = nullptr;
-    TextRenderer* m_text = nullptr;
 
     // 根与部件
-    UINode* m_root = nullptr;        // 屏幕根（大小=屏幕）
+    Memory::UniquePtr<UINode> m_root; // 屏幕根（大小=屏幕）
     UIPanel* m_bar = nullptr;        // 顶部栏背景
     UIHStack* m_stack = nullptr;     // 水平栈布局容器
     Tina::Container::Vector<UIButton*> m_slots; // 格子按钮

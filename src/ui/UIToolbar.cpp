@@ -7,13 +7,13 @@ namespace Tina::UI {
 
 using namespace Tina::UI::UIColors;
 
-bool UIToolbar::initialize(int screenW, int screenH, UIRenderer& renderer, TextRenderer* text)
+bool UIToolbar::initialize(int screenW, int screenH, UIRenderer& renderer)
 {
     m_screenW = screenW; m_screenH = screenH;
-    m_renderer = &renderer; m_text = text;
+    m_renderer = &renderer;
 
     // 根节点（使用智能指针管理）
-    m_root = new UINode("UIRoot");
+    m_root = Memory::MakeUnique<UINode>("UIRoot");
     m_root->setSize((float)m_screenW, (float)m_screenH);
 
     // 工具栏背景（使用新的API）
@@ -33,14 +33,14 @@ bool UIToolbar::initialize(int screenW, int screenH, UIRenderer& renderer, TextR
     buildLayout();
 
     // 事件系统根
-    m_events.setRoot(m_root);
+    m_events.setRoot(m_root.get());
     return true;
 }
 
 void UIToolbar::shutdown()
 {
-    if (m_root) { delete m_root; m_root = nullptr; }
-    m_bar = nullptr; m_slots.clear();
+    m_root.reset();
+    m_bar = nullptr; m_stack = nullptr; m_slots.clear();
 }
 
 void UIToolbar::onResize(int screenW, int screenH)

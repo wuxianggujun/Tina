@@ -335,7 +335,7 @@ void GameScene::createUI()
 
     // 工具栏
     m_toolbar = Memory::MakeUnique<UI::UIToolbar>();
-    m_toolbar->initialize(m_pixelWidth, m_pixelHeight, ui(), &app()->textRenderer());
+    m_toolbar->initialize(m_pixelWidth, m_pixelHeight, ui());
     // 通过 TextureManager 加载工具图标（示例使用现有纹理资源）
     {
         auto* hub = &app()->resources();
