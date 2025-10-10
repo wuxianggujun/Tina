@@ -43,6 +43,7 @@ private:
     // UI 创建
     void createUI();
     void updateUILayout();  // 更新UI布局（窗口大小改变时）
+    void computeUIScale();  // 计算 UI 缩放系数（基于参考分辨率）
 
     // 按钮回调
     void onStartClicked();
@@ -86,6 +87,9 @@ private:
     
     // ✅ 视图脏标记（窗口大小变化时设置）
     bool m_viewDirty = true;
+
+    // UI 缩放
+    float m_uiScale = 1.0f;
 };
 
 } // namespace Tina::Game

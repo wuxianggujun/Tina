@@ -16,6 +16,8 @@
 #include <bx/math.h>
 #include <cstdlib>
 #include <ctime>
+#include <algorithm>
+#include <cmath>
 
 namespace Tina::Game {
 
@@ -31,6 +33,7 @@ void MenuScene::onEnter() {
 
     // 获取窗口尺寸
     app()->getPixelSize(m_pixelWidth, m_pixelHeight);
+    computeUIScale();
 
     // 创建背景粒子系统
     m_bgParticles = Memory::MakeUnique<Particles::ParticleSystem2D>();
@@ -136,24 +139,30 @@ void MenuScene::render() {
         float titleX = (float)m_pixelWidth / 2.0f;
         float titleY = (float)m_pixelHeight * 0.25f;
 
-        // 主标题
+        // 主标题（随窗口缩放字号与包围盒）
         {
             UI::UIRenderer::TextOptions to{};
             to.r = 1.0f; to.g = 1.0f; to.b = 1.0f; to.a = m_titleAlpha;
             to.hAlign = UI::UIRenderer::AlignH::Center;
             to.vAlign = UI::UIRenderer::AlignV::Center;
-            ui().drawTextBox(uiViewId(), titleX - 200.0f, titleY - 40.0f, 400, 80,
+            to.fontPx = std::max(28, (int)std::lround(64.0f * m_uiScale));
+            float halfW = 200.0f * m_uiScale;
+            float halfH = 40.0f * m_uiScale;
+            ui().drawTextBox(uiViewId(), titleX - halfW, titleY - halfH, halfW * 2.0f, halfH * 2.0f,
                                       "TINA GAME", to);
         }
 
-        // 副标题
+        // 副标题（随窗口缩放字号与包围盒）
         {
             UI::UIRenderer::TextOptions to{};
             to.r = 0.7f; to.g = 0.7f; to.b = 0.7f; to.a = m_titleAlpha * 0.8f;
             to.hAlign = UI::UIRenderer::AlignH::Center;
             to.vAlign = UI::UIRenderer::AlignV::Center;
-            ui().drawTextBox(uiViewId(), titleX - 200.0f, titleY + 60 - 20.0f, 400, 40,
-                                      "2D Sandbox Adventure", to);
+            to.fontPx = std::max(18, (int)std::lround(32.0f * m_uiScale));
+            float boxW = 400.0f * m_uiScale;
+            float boxH = 40.0f * m_uiScale;
+            ui().drawTextBox(uiViewId(), titleX - boxW * 0.5f, titleY + (60.0f * m_uiScale) - boxH * 0.5f,
+                                      boxW, boxH, "2D Sandbox Adventure", to);
         }
     }
 
@@ -225,6 +234,7 @@ void MenuScene::handleEvent(const os::Event& event) {
         m_viewDirty = true;  // 标记视图需要更新
 
         // 更新 UI 布局
+        computeUIScale();
         updateUILayout();
 
         // 同步 SceneRenderer 的屏幕尺寸（供渐变背景使用）
@@ -241,14 +251,15 @@ void MenuScene::createUI() {
     // 计算按钮位置
     float centerX = m_pixelWidth / 2.0f;
     float startY = m_pixelHeight * 0.5f;
-    float buttonWidth = 200.0f;
-    float buttonHeight = 50.0f;
-    float buttonSpacing = 20.0f;
+    float buttonWidth = 200.0f * m_uiScale;
+    float buttonHeight = 50.0f * m_uiScale;
+    float buttonSpacing = 20.0f * m_uiScale;
+    int buttonFontPx = std::max(18, (int)std::lround(32.0f * m_uiScale));
 
     // 创建按钮面板（半透明背景）
     auto panel = Memory::MakeUnique<UI::UIPanel>("ButtonPanel");
-    panel->setPosition(centerX - 150, startY - 50);
-    panel->setSize(300, 250);
+    panel->setPosition(centerX - 150.0f * m_uiScale, startY - 50.0f * m_uiScale);
+    panel->setSize(300.0f * m_uiScale, 250.0f * m_uiScale);
     panel->setColor(Core::Color{0.1f, 0.1f, 0.15f, 0.8f});
     // panel->setCornerRadius(10.0f);  // UIPanel 不支持圆角
 
@@ -257,7 +268,7 @@ void MenuScene::createUI() {
     btnStart->setPosition(centerX - buttonWidth/2, startY);  // 使用屏幕绝对坐标
     btnStart->setSize(buttonWidth, buttonHeight);
     btnStart->setText("开始游戏");
-    btnStart->setFontPx(32);
+    btnStart->setFontPx(buttonFontPx);
     btnStart->setNormalColor(Core::Color{0.2f, 0.3f, 0.5f, 0.9f});
     btnStart->setHoverColor(Core::Color{0.3f, 0.4f, 0.6f, 1.0f});
     btnStart->setPressedColor(Core::Color{0.1f, 0.2f, 0.4f, 1.0f});
@@ -271,7 +282,7 @@ void MenuScene::createUI() {
     btnSettings->setPosition(centerX - buttonWidth/2, startY + buttonHeight + buttonSpacing);  // 使用屏幕绝对坐标
     btnSettings->setSize(buttonWidth, buttonHeight);
     btnSettings->setText("游戏设置");
-    btnSettings->setFontPx(32);
+    btnSettings->setFontPx(buttonFontPx);
     btnSettings->setNormalColor(Core::Color{0.2f, 0.3f, 0.5f, 0.9f});
     btnSettings->setHoverColor(Core::Color{0.3f, 0.4f, 0.6f, 1.0f});
     btnSettings->setPressedColor(Core::Color{0.1f, 0.2f, 0.4f, 1.0f});
@@ -285,7 +296,7 @@ void MenuScene::createUI() {
     btnQuit->setPosition(centerX - buttonWidth/2, startY + 2 * (buttonHeight + buttonSpacing));  // 使用屏幕绝对坐标
     btnQuit->setSize(buttonWidth, buttonHeight);
     btnQuit->setText("退出游戏");
-    btnQuit->setFontPx(32);
+    btnQuit->setFontPx(buttonFontPx);
     btnQuit->setNormalColor(Core::Color{0.4f, 0.2f, 0.2f, 0.9f});  // 红色调
     btnQuit->setHoverColor(Core::Color{0.5f, 0.3f, 0.3f, 1.0f});
     btnQuit->setPressedColor(Core::Color{0.3f, 0.1f, 0.1f, 1.0f});
@@ -373,28 +384,45 @@ void MenuScene::updateUILayout() {
     // 重新计算中心位置
     float centerX = m_pixelWidth / 2.0f;
     float startY = m_pixelHeight * 0.5f;
-    float buttonWidth = 200.0f;
-    float buttonHeight = 50.0f;
-    float buttonSpacing = 20.0f;
+    float buttonWidth = 200.0f * m_uiScale;
+    float buttonHeight = 50.0f * m_uiScale;
+    float buttonSpacing = 20.0f * m_uiScale;
 
     // 更新面板位置（第一个子节点）
     if (m_rootNode->getChildCount() > 0) {
         auto* panel = m_rootNode->getChild(0);
         if (panel) {
-            panel->setPosition(centerX - 150, startY - 50);
+            panel->setPosition(centerX - 150.0f * m_uiScale, startY - 50.0f * m_uiScale);
+            panel->setSize(300.0f * m_uiScale, 250.0f * m_uiScale);
         }
     }
 
     // 更新按钮位置
+    int buttonFontPx = std::max(18, (int)std::lround(32.0f * m_uiScale));
     if (m_btnStart) {
         m_btnStart->setPosition(centerX - buttonWidth/2, startY);
+        m_btnStart->setSize(buttonWidth, buttonHeight);
+        m_btnStart->setFontPx(buttonFontPx);
     }
     if (m_btnSettings) {
         m_btnSettings->setPosition(centerX - buttonWidth/2, startY + buttonHeight + buttonSpacing);
+        m_btnSettings->setSize(buttonWidth, buttonHeight);
+        m_btnSettings->setFontPx(buttonFontPx);
     }
     if (m_btnQuit) {
         m_btnQuit->setPosition(centerX - buttonWidth/2, startY + 2 * (buttonHeight + buttonSpacing));
+        m_btnQuit->setSize(buttonWidth, buttonHeight);
+        m_btnQuit->setFontPx(buttonFontPx);
     }
+}
+
+void MenuScene::computeUIScale() {
+    const float baseW = 1280.0f;
+    const float baseH = 720.0f;
+    float sx = (float)m_pixelWidth / baseW;
+    float sy = (float)m_pixelHeight / baseH;
+    float s = std::min(sx, sy);
+    m_uiScale = std::max(0.75f, std::min(s, 2.0f));
 }
 
 } // namespace Tina::Game
