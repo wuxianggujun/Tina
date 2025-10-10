@@ -54,6 +54,8 @@ set(SRC_FILES
     renderer/TileRenderer.cpp
     renderer/Primitive2D.hpp
     renderer/Primitive2D.cpp
+    renderer/ShaderCatalog.hpp
+    renderer/ShaderCatalog.cpp
     ui/TextRenderer.hpp
     ui/TextRenderer.cpp
     ui/UIBatch.hpp
@@ -103,7 +105,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 # 着色器编译
 include(ShaderUtils)
-add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color text sprite particle)
+add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color text sprite particle ui world)
 add_dependencies(${PROJECT_NAME} shaders)
 
 # 传入 shader 根目录给运行时

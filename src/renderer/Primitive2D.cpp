@@ -3,6 +3,7 @@
 
 #include "Primitive2D.hpp"
 #include "ShaderManager.hpp"
+#include "ShaderCatalog.hpp"
 #include <bx/math.h>
 
 namespace Tina::Renderer {
@@ -12,8 +13,8 @@ Primitive2D::~Primitive2D() = default;
 
 bool Primitive2D::initialize(ShaderManager& shaders)
 {
-    // 使用引擎内置的 color 着色器程序
-    m_progColor = shaders.loadProgram("color", "color");
+    // 使用逻辑目录加载 UI 基础程序（当前映射到内置 color，可随时替换）
+    m_progColor = ShaderCatalog::Load(shaders, ShaderCatalog::Tag::UiSolid);
 
     // 顶点布局：位置 + 颜色
     m_posColorLayout.begin()
@@ -93,4 +94,3 @@ void Primitive2D::drawVerticalGradient(uint16_t viewId, float x, float y, float 
 }
 
 } // namespace Tina::Renderer
-

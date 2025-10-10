@@ -19,6 +19,7 @@
 #include <bx/math.h>
 #include <algorithm>
 #include <cmath>
+#include "../renderer/ShaderCatalog.hpp"
 
 namespace Tina::Game {
 
@@ -98,7 +99,7 @@ void GameScene::onExit()
     
 
     // 程序句柄由全局 ShaderManager 管理，无需手动销毁
-    m_progColor = BGFX_INVALID_HANDLE;
+    m_progWorld = BGFX_INVALID_HANDLE;
 }
 
 void GameScene::onPause()
@@ -245,7 +246,8 @@ void GameScene::initializeResources()
     TINA_INFO("GameScene: 初始化资源...");
 
     // 1. 着色器程序（来自全局 ShaderManager）
-    m_progColor = app()->shaders().loadProgram("color", "color");
+    // 世界基础 program：通过 ShaderCatalog 加载（当前映射到 color，可替换为 world shader）
+    m_progWorld = Tina::Renderer::ShaderCatalog::Load(app()->shaders(), Tina::Renderer::ShaderCatalog::Tag::WorldSolid);
 
     // 2. 文本渲染器
     // 改用全局 TextRenderer
@@ -601,7 +603,7 @@ void GameScene::updateCamera(float dt)
 void GameScene::renderWorld()
 {
     if (!m_tileRenderer || !m_tileMap || !m_camera) return;
-    if (!bgfx::isValid(m_progColor)) {
+    if (!bgfx::isValid(m_progWorld)) {
         TINA_WARN("GameScene::renderWorld - 程序句柄无效，跳过本帧渲染");
         return;
     }
@@ -632,12 +634,12 @@ void GameScene::renderWorld()
         .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Float)
         .end();
 
-    m_tileRenderer->renderSolid(*m_tileMap, 1, m_progColor, colorLayout);
-    m_tileRenderer->renderWater(*m_tileMap, 2, m_progColor, colorLayout);
+    m_tileRenderer->renderSolid(*m_tileMap, 1, m_progWorld, colorLayout);
+    m_tileRenderer->renderWater(*m_tileMap, 2, m_progWorld, colorLayout);
 
     // 渲染角色（ECS 实体，view 2 确保在液体层之上）
     if (m_ecsWorld) {
-        m_ecsWorld->render(2, m_progColor, colorLayout);
+        m_ecsWorld->render(2, m_progWorld, colorLayout);
     }
 
     // 渲染粒子（爆炸、碎片等特效，view 2）
