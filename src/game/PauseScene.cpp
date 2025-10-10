@@ -8,6 +8,7 @@
 #include "../ui/UILayout.hpp"
 #include "../core/Log.hpp"
 #include "../ui/UIComponents.hpp"
+#include "MenuScene.hpp"
 #include "../engine/TypedEventBus.hpp"
 #include "GameEvents.hpp"
 
@@ -340,9 +341,10 @@ void PauseScene::onContinueClicked()
 void PauseScene::onQuitClicked()
 {
     TINA_INFO("PauseScene: 返回主菜单按钮被点击");
-    // 清空所有场景，返回主菜单
+    // 清空所有场景后，压入主菜单
     // 使用延迟场景操作，避免在回调栈内修改场景栈
-    app()->scenes().requestClear();  // 清空场景栈，返回主菜单
+    app()->scenes().requestClear();
+    app()->scenes().requestPush(Memory::MakeUnique<MenuScene>());
 }
 
 void PauseScene::onSetDay()      { app()->events().trigger<Tina::Game::Events::SetDayNight>(0.25f); }
