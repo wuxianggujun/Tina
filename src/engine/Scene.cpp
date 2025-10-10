@@ -7,6 +7,8 @@
 #include "../ui/UICore.hpp"
 #include "../core/Log.hpp"
 #include "SceneRenderer.hpp"
+#include <bgfx/bgfx.h>
+#include <bx/math.h>
 
 namespace Tina::Engine {
 
@@ -38,6 +40,18 @@ SceneRenderer& Scene::scene() {
         m_sceneRenderer->initialize(app()->shaders(), w, h);
     }
     return *m_sceneRenderer;
+}
+
+// ✅ 设置UI正交视图（避免每帧重复计算）
+void Scene::setupUIView(uint16_t viewId, int width, int height) {
+    bgfx::setViewRect(viewId, 0, 0, (uint16_t)width, (uint16_t)height);
+    
+    float ortho[16];
+    const bgfx::Caps* caps = bgfx::getCaps();
+    bx::mtxOrtho(ortho, 0.0f, (float)width, (float)height, 0.0f,
+                 -1.0f, 1.0f, 0.0f, caps ? caps->homogeneousDepth : false);
+    bgfx::setViewTransform(viewId, nullptr, ortho);
+    bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);
 }
 
 } // namespace Tina::Engine

@@ -52,7 +52,6 @@ private:
     void onSettingsClicked();
     void onQuitClicked();
     
-    // 键盘导航
     void selectPreviousButton();
     void selectNextButton();
     void activateSelectedButton();
@@ -60,13 +59,11 @@ private:
 
 private:
     // 渲染资源
-    Memory::UniquePtr<UI::UIRenderer> m_uiRenderer;
     Memory::UniquePtr<Particles::ParticleSystem2D> m_bgParticles;
     
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
     bgfx::VertexLayout m_colorLayout;
     
-    // UI 组件
     Memory::UniquePtr<UI::UINode> m_rootNode;
     Container::Vector<Memory::UniquePtr<UI::UINode>> m_ownedNodes;  // 统一管理所有节点生命周期
     UI::UIButton* m_btnStart = nullptr;
@@ -91,6 +88,9 @@ private:
     // 视口尺寸
     int m_pixelWidth = 1280;
     int m_pixelHeight = 720;
+    
+    // ✅ 视图脏标记（窗口大小变化时设置）
+    bool m_viewDirty = true;
 };
 
 } // namespace Tina::Game

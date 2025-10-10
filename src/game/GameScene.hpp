@@ -73,8 +73,6 @@ private:
     void useExplodeTool(int worldX, int worldY);
 
     // UI 设置
-    void setupUIView();
-
     // EventBus 订阅管理
     void subscribeToEvents();
     void triggerPlayerEvents(float prevX, float prevY, bool wasOnGround);
@@ -83,7 +81,7 @@ private:
     // 渲染资源（着色器来自全局 ShaderManager）
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
 
-    Memory::UniquePtr<UI::UIRenderer> m_uiRenderer;
+    // Memory::UniquePtr<UI::UIRenderer> m_uiRenderer;  //  已由 Scene 基类管理
     Memory::UniquePtr<Particles::ParticleSystem2D> m_particleSystem;
     Memory::UniquePtr<Renderer::TileRenderer> m_tileRenderer;
 

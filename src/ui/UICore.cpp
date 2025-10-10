@@ -81,6 +81,11 @@ void UIRenderer::drawRect(uint16_t viewId, float x, float y, float w, float h,
     
     if (w <= 0.0f || h <= 0.0f) return;
     
+    // ✅ 检查索引溢出：如果添加4个顶点会超过uint16_t最大值，先flush
+    if (m_colorBatch.vertices.size() + 4 > 65536) {
+        flushColorBatch();
+    }
+    
     // 检查是否需要创建新批次（防止单个批次过大）
     if (shouldCreateNewBatch(m_colorBatch.vertices.size(), 4)) {
         // 如果当前批次已经很大，先flush再继续
@@ -153,6 +158,16 @@ void UIRenderer::drawImage(uint16_t viewId, float x, float y, float w, float h,
     // 找到或创建匹配纹理的批次（考虑深度）
     SpriteBatch* batch = findOrCreateSpriteBatch(tex, m_currentRenderDepth);
     if (!batch) return;
+    
+    // ✅ 检查索引溢出
+    if (batch->vertices.size() + 4 > 65536) {
+        // 当前批次已满，创建新批次
+        SpriteBatch newBatch;
+        newBatch.texture = tex;
+        newBatch.currentDepth = m_currentRenderDepth;
+        m_spriteBatches.push_back(newBatch);
+        batch = &m_spriteBatches.back();
+    }
     
     // 检查是否需要创建新批次
     if (shouldCreateNewBatch(batch->vertices.size(), 4)) {
@@ -233,8 +248,8 @@ void UIRenderer::flushColorBatch()
     const uint32_t vcount = static_cast<uint32_t>(m_colorBatch.vertices.size());
     const uint32_t icount = static_cast<uint32_t>(m_colorBatch.indices.size());
     
-    // 添加调试日志
-    TINA_INFO("UIRenderer: flushColorBatch - 提交 {} 个矩形", vcount / 4);
+    // ✅ 移除性能日志，改为TRACE级别（默认不输出）
+    TINA_TRACE("UIRenderer: flushColorBatch - 提交 {} 个矩形", vcount / 4);
     
     // 检查瞬态缓冲区容量
     if (bgfx::getAvailTransientVertexBuffer(vcount, m_colorLayout) < vcount ||
@@ -373,8 +388,8 @@ void UIRenderer::flushTextCommands()
 {
     if (!m_text || m_textCmds.empty()) return;
     
-    // 移除调试日志，改为性能统计
-    // TINA_INFO("UIRenderer: flushTextCommands - 提交 {} 条文本命令", (int)m_textCmds.size());
+    // ✅ 使用TRACE级别日志
+    TINA_TRACE("UIRenderer: flushTextCommands - 提交 {} 条文本命令", (int)m_textCmds.size());
     
     if (m_statsEnabled) {
         m_frameStats.textCount += static_cast<uint32_t>(m_textCmds.size());

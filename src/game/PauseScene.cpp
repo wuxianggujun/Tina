@@ -40,9 +40,9 @@ void PauseScene::onEnter()
     }
     #endif
 
-    // UI 渲染器
-    m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
-    m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer());
+    // ✅ 使用 Scene 基类提供的 ui() 方法
+    // m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
+    // m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer());
 
     // 初始化顶点布局
     m_colorLayout.begin()
@@ -76,7 +76,7 @@ void PauseScene::onExit()
     m_btnQuit = nullptr;
 
     // 清理渲染资源（按逆序）
-    m_uiRenderer.reset();
+    // ✅ m_uiRenderer 由 Scene 基类管理
     
     
     // 不手动销毁 m_progColor，让全局 ShaderManager 自动管理（避免双重释放）
@@ -92,17 +92,16 @@ void PauseScene::update(float dt)
 
 void PauseScene::render()
 {
-    // 1. 确保 view 3 被清理（不清屏，只是触摸）
-    bgfx::touch(3);
+    // 1. 确保 view 被清理（不清屏，只是触摸）
+    bgfx::touch(uiViewId());
 
     // 2. 渲染半透明遮罩
     renderOverlay();
 
-    // 3. 渲染 UI（按钮和文本）
-    if (m_rootNode && m_uiRenderer) {
-        m_uiRenderer->beginFrame(3);
-        m_rootNode->render(3, *m_uiRenderer);
-        m_uiRenderer->flush();
+    // 3. ✅ 使用 Scene 基类的 ui() 方法和 RAII 作用域
+    if (m_rootNode) {
+        auto scope = ui().beginRender(uiViewId());
+        m_rootNode->render(uiViewId(), ui());
     }
 }
 
@@ -144,6 +143,9 @@ void PauseScene::handleEvent(const Tina::os::Event& event)
     if (event.type == E::Type::WINDOW_SIZE) {
         m_pixelWidth = event.win_size.w;
         m_pixelHeight = event.win_size.h;
+        
+        // ✅ 标记视图为脏（如果需要）
+        // m_viewDirty = true;
         
         // 重新布局 UI
         if (m_rootNode) {

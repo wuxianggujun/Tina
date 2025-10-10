@@ -84,6 +84,12 @@ protected:
     // 获取UI视图ID（子类可覆盖）
     // 默认：view 3（UI层）
     virtual uint16_t uiViewId() const { return 3; }
+    
+    // === 便捷方法：视图设置 ===
+    
+    // 设置UI正交视图（像素坐标，左上角为原点）
+    // 用途：避免每帧重复计算投影矩阵
+    void setupUIView(uint16_t viewId, int width, int height);
 
 private:
     Application* m_app = nullptr;  // Application实例指针（不持有所有权）

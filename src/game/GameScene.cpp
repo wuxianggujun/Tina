@@ -118,7 +118,7 @@ void GameScene::onResume()
     TINA_INFO("GameScene::onResume - 游戏恢复");
 
     // 重新设置 UI 视图（view 3）
-    setupUIView();
+    setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
 
     if (m_sfxYingxiao && m_sfxStarted) {
         m_sfxYingxiao->resume();
@@ -167,10 +167,11 @@ void GameScene::render()
 {
     renderWorld();
     // 夜色叠加（绘制在 UI 视图，但早于 UI，确保不影响 UI 可见性）
-    if (m_uiRenderer) {
+    // 使用基类提供的 ui() 方法访问 UIRenderer
+    {
         const float a = m_dayNight.overlayAlpha();
         if (a > 0.001f) {
-            m_uiRenderer->drawRect(3, 0.0f, 0.0f, (float)m_pixelWidth, (float)m_pixelHeight,
+            ui().drawRect(3, 0.0f, 0.0f, (float)m_pixelWidth, (float)m_pixelHeight,
                                    0.0f, 0.0f, 0.0f, a);
         }
     }
@@ -201,7 +202,7 @@ void GameScene::handleEvent(const Tina::os::Event& event)
             }
 
             // 更新 UI 视图的正交矩阵
-            setupUIView();
+            setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
             break;
 
         case E::Type::MOUSE_WHEEL:
@@ -255,7 +256,7 @@ void GameScene::initializeResources()
     m_tileRenderer->initialize();
 
     // 设置 UI 视图（view 3，像素坐标）
-    setupUIView();
+    setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
 
     TINA_INFO("GameScene: 资源初始化完成");
 }
@@ -310,13 +311,11 @@ void GameScene::createCamera()
 
 void GameScene::createUI()
 {
-    // UI 渲染器
-    m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
-    m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer());
+    // UI 渲染器由基类 Scene 管理，通过 ui() 方法访问
 
     // 工具栏
     m_toolbar = Memory::MakeUnique<UI::UIToolbar>();
-    m_toolbar->initialize(m_pixelWidth, m_pixelHeight, *m_uiRenderer, &app()->textRenderer());
+    m_toolbar->initialize(m_pixelWidth, m_pixelHeight, ui(), &app()->textRenderer());
     // 通过 TextureManager 加载工具图标（示例使用现有纹理资源）
     {
         auto* hub = &app()->resources();
@@ -631,12 +630,12 @@ void GameScene::renderWorld()
 
 void GameScene::renderUI()
 {
-    if (!m_toolbar || !m_uiRenderer) return;
+    if (!m_toolbar) return;
 
     // UI 视图已在 initializeResources() 中设置
 
 
-    m_uiRenderer->beginFrame(3);
+    ui().beginFrame(3);
     // 渲染提示文本
     float hudY = m_toolbar->root()->isVisible()
         ? (float)m_toolbar->barHeight() + GameConfig::UI_HUD_PADDING_Y
@@ -647,7 +646,7 @@ void GameScene::renderUI()
         UI::UIRenderer::TextOptions to{};
         to.r = 1; to.g = 1; to.b = 1; to.a = 1; to.fontPx = 24;
         to.hAlign = UI::UIRenderer::AlignH::Left; to.vAlign = UI::UIRenderer::AlignV::Top;
-        m_uiRenderer->drawTextBox(3,
+        ui().drawTextBox(uiViewId(),
                                   GameConfig::UI_HUD_PADDING_X, hudY,
                                   (float)m_pixelWidth - GameConfig::UI_HUD_WIDTH_MARGIN,
                                   GameConfig::UI_HUD_HEIGHT,
@@ -660,10 +659,10 @@ void GameScene::renderUI()
 
     // 渲染角色面板
     if (m_characterPanel) {
-        m_characterPanel->render(3, *m_uiRenderer);
+        m_characterPanel->render(3, ui());
     }
-    
-    m_uiRenderer->flush();
+
+    ui().flush();
 }
 
 void GameScene::ensureToolbarIconsReady()
@@ -837,26 +836,7 @@ void GameScene::useExplodeTool(int worldX, int worldY)
                                Core::Color(0.78f, 0.70f, 0.58f, 1.0f));
 }
 
-void GameScene::setupUIView()
-{
-    // 设置 UI 视图（view 3，像素坐标，y 向下）
-    // 注：UI 使用屏幕坐标系统，原点在左上角，与世界坐标不同
-    bgfx::setViewRect(3, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
-
-    // 构建正交矩阵（2D 投影，无透视）
-    float ortho[16];
-    const bgfx::Caps* caps = bgfx::getCaps();
-    bx::mtxOrtho(ortho,
-                 0.0f, (float)m_pixelWidth,   // left, right
-                 (float)m_pixelHeight, 0.0f,  // bottom, top（y 向下）
-                 -1.0f, 1.0f,                 // near, far
-                 0.0f,                         // offset
-                 caps ? caps->homogeneousDepth : false);
-
-    bgfx::setViewTransform(3, nullptr, ortho);
-    // UI 必须按提交顺序绘制，防止默认排序打乱前后关系
-    bgfx::setViewMode(3, bgfx::ViewMode::Sequential);
-}
+// setupUIView 方法已移至基类 Scene 中实现
 
 void GameScene::subscribeToEvents()
 {

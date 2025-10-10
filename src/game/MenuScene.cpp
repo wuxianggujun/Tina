@@ -48,9 +48,9 @@ void MenuScene::onEnter() {
     }
     #endif
     
-    // UI 渲染器
-    m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
-    m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer());
+    // ✅ 使用 Scene 基类提供的 ui() 方法，无需手动创建
+    // m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
+    // m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer());
     
     // 初始化顶点布局
     m_colorLayout.begin()
@@ -69,15 +69,8 @@ void MenuScene::onEnter() {
     createUI();
     m_events.setRoot(m_rootNode.get());
     
-    // 设置 UI 视图（view 3）
-    bgfx::setViewRect(3, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
-    float ortho[16];
-    const bgfx::Caps* caps = bgfx::getCaps();
-    bx::mtxOrtho(ortho, 0.0f, (float)m_pixelWidth, (float)m_pixelHeight, 0.0f,
-                 -1.0f, 1.0f, 0.0f, caps ? caps->homogeneousDepth : false);
-    bgfx::setViewTransform(3, nullptr, ortho);
-    // 确保 UI 按提交顺序渲染，避免默认排序导致文本被后绘制的背景覆盖
-    bgfx::setViewMode(3, bgfx::ViewMode::Sequential);
+    // ✅ 使用 Scene 基类提供的便捷方法
+    setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
     
     TINA_INFO("MenuScene: 初始化完成");
 }
@@ -99,7 +92,7 @@ void MenuScene::onExit() {
     
     // 清理渲染资源
     m_bgParticles.reset();
-    m_uiRenderer.reset();
+    // ✅ m_uiRenderer 由 Scene 基类管理，无需手动清理
     
     m_progColor = BGFX_INVALID_HANDLE;
 }
@@ -145,17 +138,14 @@ void MenuScene::update(float dt) {
 }
 
 void MenuScene::render() {
-    // 设置 UI 视图（view 3）- 每帧都要设置，确保投影矩阵正确
-    bgfx::setViewRect(3, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
-    float ortho[16];
-    const bgfx::Caps* caps = bgfx::getCaps();
-    bx::mtxOrtho(ortho, 0.0f, (float)m_pixelWidth, (float)m_pixelHeight, 0.0f,
-                 -1.0f, 1.0f, 0.0f, caps ? caps->homogeneousDepth : false);
-    bgfx::setViewTransform(3, nullptr, ortho);
-    bgfx::setViewMode(3, bgfx::ViewMode::Sequential);
+    // ✅ 使用 Scene 基类方法设置视图（只在窗口大小变化时设置）
+    if (m_viewDirty) {
+        setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
+        m_viewDirty = false;
+    }
     
-    // 触摸 view 3
-    bgfx::touch(3);
+    // 触摸 view
+    bgfx::touch(uiViewId());
     
     // 渲染背景
     renderGradientBackground();
@@ -163,13 +153,11 @@ void MenuScene::render() {
     // 渲染粒子背景
     renderParticleBackground();
     
-    // === UI渲染开始（批处理模式） ===
-    if (m_uiRenderer) {
-        m_uiRenderer->beginFrame(3);
-    }
+    // ✅ 使用 Scene 基类的 ui() 方法和 RAII 作用域
+    auto scope = ui().beginRender(uiViewId());
     
     // 渲染标题
-    if (m_uiRenderer && m_titleAlpha > 0.0f) {
+    if (m_titleAlpha > 0.0f) {
         float titleX = (float)m_pixelWidth / 2.0f;
         float titleY = (float)m_pixelHeight * 0.25f;
         
@@ -179,7 +167,7 @@ void MenuScene::render() {
             to.r = 1.0f; to.g = 1.0f; to.b = 1.0f; to.a = m_titleAlpha;
             to.hAlign = UI::UIRenderer::AlignH::Center;
             to.vAlign = UI::UIRenderer::AlignV::Center;
-            m_uiRenderer->drawTextBox(3, titleX - 200.0f, titleY - 40.0f, 400, 80,
+            ui().drawTextBox(uiViewId(), titleX - 200.0f, titleY - 40.0f, 400, 80,
                                       "TINA GAME", to);
         }
         
@@ -189,14 +177,14 @@ void MenuScene::render() {
             to.r = 0.7f; to.g = 0.7f; to.b = 0.7f; to.a = m_titleAlpha * 0.8f;
             to.hAlign = UI::UIRenderer::AlignH::Center;
             to.vAlign = UI::UIRenderer::AlignV::Center;
-            m_uiRenderer->drawTextBox(3, titleX - 200.0f, titleY + 60 - 20.0f, 400, 40,
+            ui().drawTextBox(uiViewId(), titleX - 200.0f, titleY + 60 - 20.0f, 400, 40,
                                       "2D Sandbox Adventure", to);
         }
     }
     
     // 渲染 UI 按钮
-    if (m_rootNode && m_uiRenderer) {
-        m_rootNode->render(3, *m_uiRenderer);
+    if (m_rootNode) {
+        m_rootNode->render(uiViewId(), ui());
         // 再次绘制标题，确保位于 UI 面板之上
         if (m_titleAlpha > 0.0f) {
             float titleX = (float)m_pixelWidth / 2.0f;
@@ -206,7 +194,7 @@ void MenuScene::render() {
                 to.r = 1.0f; to.g = 1.0f; to.b = 1.0f; to.a = m_titleAlpha;
                 to.hAlign = UI::UIRenderer::AlignH::Center;
                 to.vAlign = UI::UIRenderer::AlignV::Center;
-                m_uiRenderer->drawTextBox(3, titleX - 200.0f, titleY - 40.0f, 400, 80,
+                ui().drawTextBox(uiViewId(), titleX - 200.0f, titleY - 40.0f, 400, 80,
                                           "TINA GAME", to);
             }
             {
@@ -214,27 +202,22 @@ void MenuScene::render() {
                 to.r = 0.7f; to.g = 0.7f; to.b = 0.7f; to.a = m_titleAlpha * 0.8f;
                 to.hAlign = UI::UIRenderer::AlignH::Center;
                 to.vAlign = UI::UIRenderer::AlignV::Center;
-                m_uiRenderer->drawTextBox(3, titleX - 200.0f, titleY + 60 - 20.0f, 400, 40,
+                ui().drawTextBox(uiViewId(), titleX - 200.0f, titleY + 60 - 20.0f, 400, 40,
                                           "2D Sandbox Adventure", to);
             }
         }
     }
     
     // 渲染版本号
-    if (m_uiRenderer) {
-        {
-            UI::UIRenderer::TextOptions to{};
-            to.r = 0.5f; to.g = 0.5f; to.b = 0.5f; to.a = 0.5f;
-            to.hAlign = UI::UIRenderer::AlignH::Right; to.vAlign = UI::UIRenderer::AlignV::Bottom;
-            m_uiRenderer->drawTextBox(3, (float)m_pixelWidth - 10 - 100, (float)m_pixelHeight - 10 - 30,
-                                      100, 30, "v1.0.0", to);
-        }
+    {
+        UI::UIRenderer::TextOptions to{};
+        to.r = 0.5f; to.g = 0.5f; to.b = 0.5f; to.a = 0.5f;
+        to.hAlign = UI::UIRenderer::AlignH::Right; to.vAlign = UI::UIRenderer::AlignV::Bottom;
+        ui().drawTextBox(uiViewId(), (float)m_pixelWidth - 10 - 100, (float)m_pixelHeight - 10 - 30,
+                                  100, 30, "v1.0.0", to);
     }
     
-    // === UI渲染结束（提交批次） ===
-    if (m_uiRenderer) {
-        m_uiRenderer->flush();
-    }
+    // ✅ RAII 作用域自动 flush，无需手动调用
 }
 
 void MenuScene::handleEvent(const os::Event& event) {
@@ -286,14 +269,8 @@ void MenuScene::handleEvent(const os::Event& event) {
         m_pixelWidth = event.win_size.w;
         m_pixelHeight = event.win_size.h;
         
-        // 重新设置 UI 视图
-        bgfx::setViewRect(3, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
-        float ortho[16];
-        const bgfx::Caps* caps = bgfx::getCaps();
-        bx::mtxOrtho(ortho, 0.0f, (float)m_pixelWidth, (float)m_pixelHeight, 0.0f,
-                     -1.0f, 1.0f, 0.0f, caps ? caps->homogeneousDepth : false);
-        bgfx::setViewTransform(3, nullptr, ortho);
-        bgfx::setViewMode(3, bgfx::ViewMode::Sequential);
+        // ✅ 标记视图为脏，下一帧重新设置
+        m_viewDirty = true;
         
         // 重新布局 UI（尽量避免重建；这里简单重建并重置事件根）
         createUI();

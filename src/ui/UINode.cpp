@@ -83,6 +83,9 @@ void UINode::updateWorldTransform()
 {
     if (!m_dirty) return;
 
+    // ✅ 保存旧的世界坐标，用于检测是否真正变化
+    Tina::Math::Vec2 oldWorldPos = m_worldPos;
+
     if (m_parent) {
         Tina::Math::Vec2 parentWorld = m_parent->getWorldPosition();
         Tina::Math::Vec2 offset = anchorOffset();
@@ -94,9 +97,11 @@ void UINode::updateWorldTransform()
 
     m_dirty = false;
 
-    // 子节点也需要更新
-    for (auto& child : m_children) {
-        if (child) child->m_dirty = true;
+    // ✅ 只有世界坐标真正变化时才标记子节点（减少不必要的重算）
+    if (oldWorldPos.x != m_worldPos.x || oldWorldPos.y != m_worldPos.y) {
+        for (auto& child : m_children) {
+            if (child) child->m_dirty = true;
+        }
     }
 }
 
