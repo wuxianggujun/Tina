@@ -317,9 +317,9 @@ void Application::processEvents()
             // 通过事件系统发送窗口调整事件
             m_eventSystem->trigger(Events::WindowResizedEvent(m_pixelWidth, m_pixelHeight));
 
-            // 通知当前场景更新窗口尺寸
-            if (m_sceneManager && m_sceneManager->currentScene()) {
-                m_sceneManager->currentScene()->updateWindowSize(m_pixelWidth, m_pixelHeight);
+            // 通知所有场景更新窗口尺寸（包括暂停的场景）
+            if (m_sceneManager) {
+                m_sceneManager->updateAllScenesWindowSize(m_pixelWidth, m_pixelHeight);
             }
         }
 

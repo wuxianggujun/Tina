@@ -170,6 +170,9 @@ void GameScene::onResume()
 
 void GameScene::update(float dt)
 {
+    // 处理防抖动的窗口调整
+    processPendingResize(dt);
+
     // 处理输入
     handleInput();
 

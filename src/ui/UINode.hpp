@@ -31,6 +31,7 @@ namespace Tina::UI {
 
 // 前向声明
 class UIRenderer;
+class UILayoutManager;
 
 // 布局尺寸语义（类 Android）
 enum class LayoutDim : uint8_t {
@@ -146,14 +147,17 @@ public:
     bool containsPoint(float worldX, float worldY);
 
     // === 布局系统 ===
-    // 请求重新布局（标记布局失效，在下次访问前自动执行）
+    // 请求重新布局（标记布局失效，使用布局管理器处理）
     void requestLayout();
 
-    // 立即执行布局（强制同步布局，通常不需要手动调用）
+    // 立即执行布局（通过布局管理器处理依赖）
     void performLayoutNow();
 
     // 检查布局是否需要更新
     bool needsLayout() const { return m_layoutDirty; }
+
+    // 标记布局已完成（由布局管理器调用）
+    void markLayoutClean() { m_layoutDirty = false; }
 
     // === 渲染与更新 ===
     void update(float dt); // 递归更新自身及子节点（不包括布局）
@@ -184,9 +188,12 @@ protected:
     // === 子类可覆盖的回调 ===
 
     // 布局回调：计算并设置子节点的 position 和 size
-    // 在布局失效后，首次访问坐标前自动调用
+    // 在布局失效后，由布局管理器调用
     // 注意：只负责布局子节点，不要在这里做动画或状态更新
     virtual void onLayout() {}
+
+    // 友元类：允许布局管理器访问内部状态
+    friend class UILayoutManager;
 
     // 更新回调：处理动画、状态更新等（不包括布局）
     virtual void onUpdate(float dt) {}

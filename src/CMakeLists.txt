@@ -18,6 +18,8 @@ set(SRC_FILES
     engine/Scene.cpp
     engine/SceneManager.hpp
     engine/SceneManager.cpp
+    engine/SceneStateManager.hpp
+    engine/SceneStateManager.cpp
     engine/EventCore.hpp
     engine/EventQueue.hpp
     engine/EventDispatcher.hpp
@@ -86,6 +88,8 @@ set(SRC_FILES
     ui/UIToolbar.hpp
     ui/UIToolbar.cpp
     ui/UILayout.hpp
+    ui/UILayoutManager.hpp
+    ui/UILayoutManager.cpp
     ui/UIProgressBar.hpp
     ui/UIProgressBar.cpp
     ui/UICharacterPanel.hpp

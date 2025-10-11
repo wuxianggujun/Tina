@@ -16,6 +16,17 @@
 
 namespace Tina::UI {
 
+// 工具栏状态（用于保存/恢复）
+struct ToolbarState {
+    int selectedIndex = -1;
+    int slotCount = 8;
+    int slotSize = 64;
+    int gap = 8;
+    int padding = 12;
+    int barHeight = 80;
+    bool visible = true;
+};
+
 class UIToolbar : public UINode {
 public:
     // 迁移至新架构：仅依赖 UIRenderer
@@ -57,6 +68,10 @@ public:
 
     // 处理一次点击（内部计算命中并切换选中），返回是否命中了任一格子
     bool clickAt(float x, float y);
+
+    // === 状态管理（用于场景切换） ===
+    ToolbarState getState() const;
+    void setState(const ToolbarState& state);
 
 private:
     void buildLayout();

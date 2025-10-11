@@ -134,6 +134,16 @@ void SceneManager::render()
 
 // 事件处理已经迁移到新的事件系统
 
+void SceneManager::updateAllScenesWindowSize(int width, int height)
+{
+    // 通知场景栈中的所有场景更新窗口尺寸
+    for (auto& scene : m_scenes) {
+        if (scene) {
+            scene->updateWindowSize(width, height);
+        }
+    }
+}
+
 void SceneManager::applyPending()
 {
     if (m_pending.empty()) return;

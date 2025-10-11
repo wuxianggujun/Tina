@@ -38,6 +38,13 @@ public:
     void render() override;
     // 事件处理已迁移到 InputSystem
 
+    // 窗口尺寸更新
+    void updateWindowSize(int width, int height) override;
+
+protected:
+    // 实际应用窗口调整（覆盖基类方法）
+    void applyWindowResize(int width, int height) override;
+
 private:
     void createUI();
     void handleInput();     // 处理输入
@@ -77,6 +84,10 @@ private:
     // 视口尺寸
     int m_pixelWidth = 1280;
     int m_pixelHeight = 720;
+
+    // UI缩放和布局
+    float m_uiScale = 1.0f;
+    UI::UIPanel* m_panel = nullptr;  // 保存面板引用以便调整位置
 };
 
 } // namespace Tina::Game

@@ -1,5 +1,7 @@
 #include "UINode.hpp"
 #include "UICore.hpp"
+#include "UILayoutManager.hpp"
+#include "../core/Log.hpp"
 #include <algorithm>
 
 namespace Tina::UI {
@@ -7,10 +9,15 @@ namespace Tina::UI {
 UINode::UINode(const std::string& name)
     : m_name(name)
 {
+    // 注册到布局管理器
+    GetLayoutManager().registerNode(this);
 }
 
 UINode::~UINode()
 {
+    // 从布局管理器注销
+    GetLayoutManager().unregisterNode(this);
+
     // 新版：自动清理所有子节点（通过UniquePtr）
     // 子节点会递归销毁其子节点
     m_children.clear();
@@ -111,7 +118,7 @@ Tina::Math::Vec2 UINode::getWorldPosition()
     return m_worldPos;
 }
 
-// === 布局系统 ===
+// === 布局系统（使用布局管理器） ===
 
 void UINode::requestLayout()
 {
@@ -121,43 +128,17 @@ void UINode::requestLayout()
 
     // 布局变化会影响坐标，标记坐标也需要更新
     m_dirty = true;
+
+    // 通知布局管理器
+    GetLayoutManager().requestLayout(this);
 }
 
 void UINode::performLayoutNow()
 {
     if (!m_layoutDirty) return;  // 布局是最新的，无需重新计算
 
-    // 递归执行布局：先布局子节点，再布局自己
-    for (auto& child : m_children) {
-        if (child) {
-            child->performLayoutNow();
-        }
-    }
-
-    // 执行当前节点的布局逻辑（计算子节点的 position）
-    onLayout();
-
-    // 基类默认行为：处理 WrapContent（包裹子节点）
-    // 注意：MatchParent 应该由父容器在 onLayout() 中处理
-    if (m_layoutW == LayoutDim::WrapContent || m_layoutH == LayoutDim::WrapContent) {
-        float maxRight = 0.0f;
-        float maxBottom = 0.0f;
-        for (auto& childPtr : m_children) {
-            UINode* child = childPtr.get();
-            if (!child || !child->isVisible()) continue;
-            Tina::Math::Vec2 cp = child->getPosition();
-            Tina::Math::Vec2 cs = child->getSize();
-            if (cp.x + cs.x > maxRight) maxRight = cp.x + cs.x;
-            if (cp.y + cs.y > maxBottom) maxBottom = cp.y + cs.y;
-        }
-        if (m_layoutW == LayoutDim::WrapContent) m_size.x = maxRight;
-        if (m_layoutH == LayoutDim::WrapContent) m_size.y = maxBottom;
-    }
-
-    m_layoutDirty = false;
-
-    // 布局完成后，标记坐标需要更新
-    m_dirty = true;
+    // 使用布局管理器执行（会自动处理依赖）
+    GetLayoutManager().performLayoutNow(this);
 }
 
 // === 点测试 ===

@@ -9,6 +9,7 @@
 #include "../ui/UILayout.hpp"
 #include "../core/Log.hpp"
 #include "../ui/UIComponents.hpp"
+#include "../ui/UIUtils.hpp"
 #include "MenuScene.hpp"
 #include "../engine/EventSystem.hpp"
 #include "GameEvents.hpp"
@@ -78,6 +79,9 @@ void PauseScene::onExit()
 
 void PauseScene::update(float dt)
 {
+    // 处理防抖动的窗口调整
+    processPendingResize(dt);
+
     // 处理输入
     handleInput();
 
@@ -103,6 +107,50 @@ void PauseScene::render()
 }
 
 // handleEvent 已删除，输入处理移至 update() 中使用 InputSystem
+
+void PauseScene::updateWindowSize(int width, int height)
+{
+    // 调用基类更新（触发防抖动）
+    Scene::updateWindowSize(width, height);
+}
+
+// 覆盖实际应用窗口调整的方法
+void PauseScene::applyWindowResize(int width, int height)
+{
+    // 更新场景的窗口尺寸（重要！createUI需要使用这些值）
+    m_pixelWidth = width;
+    m_pixelHeight = height;
+
+    // 调用基类的实际应用方法
+    Scene::applyWindowResize(width, height);
+
+    // 计算新的缩放比例
+    float newScale = UI::UIUtils::calculateUIScale(width, height);
+
+    // 如果缩放变化较大，需要重建UI
+    if (std::abs(newScale - m_uiScale) > 0.1f) {
+        m_uiScale = newScale;
+        createUI();  // 重建UI
+        TINA_INFO("PauseScene: 重建UI，新缩放比例: {}", m_uiScale);
+    } else {
+        // 只需重新居中面板
+        if (m_panel && m_rootNode) {
+            m_rootNode->setSize((float)width, (float)height);
+
+            // 重新计算居中位置
+            float panelW = m_panel->getSize().x;
+            float panelH = m_panel->getSize().y;
+            auto [centerX, centerY] = UI::UIUtils::calculateCenterPosition(
+                (float)width, (float)height, panelW, panelH);
+
+            m_panel->setPosition(centerX, centerY);
+            m_rootNode->requestLayout();
+            m_rootNode->performLayoutNow();
+
+            TINA_INFO("PauseScene: 重新居中面板到 ({}, {})", centerX, centerY);
+        }
+    }
+}
 
 void PauseScene::handleInput()
 {
@@ -132,29 +180,38 @@ void PauseScene::createUI()
     m_rootNode.reset();
     m_btnContinue = nullptr;
     m_btnQuit = nullptr;
+    m_panel = nullptr;  // 重置面板引用
 
     // 创建根节点
-    m_rootNode = Memory::MakeUnique<UI::UINode>();
+    m_rootNode = Memory::MakeUnique<UI::UINode>("PauseRoot");
     m_rootNode->setPosition(0, 0);
     m_rootNode->setSize((float)m_pixelWidth, (float)m_pixelHeight);
 
     // 顶层不再放置标题，标题移入面板内部
 
     // 使用布局：居中一个面板，内部垂直栈+若干水平栈，避免纵向堆叠
-    const float panelW   = 680.0f;
-    const float btnH     = 56.0f;
-    const float pad      = 16.0f;   // VBox 内边距（左右/上下）
-    const float spacing  = 12.0f;   // VBox 子项间距
-    const float titleH   = 44.0f;   // 标题高度
-    const float debugH   = 36.0f;   // 分组标题高度
+    // 使用存储的缩放比例（如果没有设置，则计算）
+    if (m_uiScale == 1.0f) {
+        m_uiScale = UI::UIUtils::calculateUIScale(m_pixelWidth, m_pixelHeight);
+    }
+    float scale = m_uiScale;
+
+    const float panelW   = 680.0f * scale;
+    const float btnH     = 56.0f * scale;
+    const float pad      = 16.0f * scale;   // VBox 内边距（左右/上下）
+    const float spacing  = 12.0f * scale;   // VBox 子项间距
+    const float titleH   = 44.0f * scale;   // 标题高度
+    const float debugH   = 36.0f * scale;   // 分组标题高度
     const float rowW     = panelW - pad * 2.0f;               // VBox 左右 padding 共 32
-    const float colW     = (rowW - 8.0f * 2.0f - 12.0f) * 0.5f; // 行左右 padding=8，列间距=12
+    const float colW     = (rowW - 8.0f * scale * 2.0f - 12.0f * scale) * 0.5f; // 行左右 padding=8，列间距=12
 
     // 使用新的API：createChild
-    auto* panel = m_rootNode->createChild<UI::UIPanel>("PausePanel");
-    panel->setColor(0.08f, 0.08f, 0.10f, 0.92f);
-    panel->setSize(panelW, 1.0f);
-    panel->setHeightWrap(); // 交由容器包裹
+    m_panel = m_rootNode->createChild<UI::UIPanel>("PausePanel");  // 保存面板引用
+    m_panel->setColor(0.08f, 0.08f, 0.10f, 0.92f);
+    m_panel->setSize(panelW, 1.0f);
+    m_panel->setHeightWrap(); // 交由容器包裹
+
+    auto* panel = m_panel;  // 为了兼容后续代码
 
     auto* vbox = panel->createChild<UI::UIVStack>("VBox");
     vbox->setSize(panelW, 0.0f);
@@ -166,7 +223,7 @@ void PauseScene::createUI()
     auto* title = vbox->createChild<UI::UILabel>();
     title->setText("游戏已暂停");
     title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
-    title->setSize(panelW - 32.0f, 44.0f);
+    title->setSize(panelW - pad * 2.0f, titleH);
 
     // 第一行：继续
     auto* rowTop = vbox->createChild<UI::UIHStack>("RowTop");
@@ -230,9 +287,29 @@ void PauseScene::createUI()
     m_quitConnection = m_btnQuit->onClick.connect(this, &PauseScene::onQuitClicked);
 
     // 触发布局计算并回填 Panel 高度，再居中 Panel
-    vbox->update(0.0f);
-    panel->update(0.0f);
-    panel->setPosition((m_pixelWidth - panelW) * 0.5f, (m_pixelHeight - panel->getSize().y) * 0.5f);
+    // 重要：使用performLayoutNow()确保布局立即完成，这样getSize()才能返回正确的值
+    vbox->requestLayout();
+    panel->requestLayout();
+
+    // 调试：执行布局前的尺寸
+    TINA_INFO("PauseScene: 布局前 - vbox高度: {}, panel高度: {}",
+              vbox->getSize().y, panel->getSize().y);
+
+    panel->performLayoutNow();  // 强制立即执行布局（包括所有子节点）
+
+    // 调试：执行布局后的尺寸
+    TINA_INFO("PauseScene: 布局后 - vbox高度: {}, panel高度: {}",
+              vbox->getSize().y, panel->getSize().y);
+
+    // 现在可以安全地获取panel的实际高度来计算居中位置
+    float panelHeight = panel->getSize().y;
+    float centerX = (m_pixelWidth - panelW) * 0.5f;
+    float centerY = (m_pixelHeight - panelHeight) * 0.5f;
+
+    TINA_INFO("PauseScene: 面板居中 - 屏幕({}x{}), 面板({}x{}), 中心位置({}, {})",
+              m_pixelWidth, m_pixelHeight, panelW, panelHeight, centerX, centerY);
+
+    panel->setPosition(centerX, centerY);
 
     // 更新事件系统根节点，保证重建后事件命中正确
     m_events.setRoot(m_rootNode.get());

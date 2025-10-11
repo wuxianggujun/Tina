@@ -42,6 +42,9 @@ public:
     void render();
     // void handleEvent(const Event& event);  // TODO: 更新为使用新的Event系统
 
+    // 窗口尺寸更新（通知所有场景）
+    void updateAllScenesWindowSize(int width, int height);
+
 private:
     // 立即应用所有挂起的场景操作（在非回调栈内的安全点调用）
     void applyPending();

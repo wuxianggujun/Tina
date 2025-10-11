@@ -46,18 +46,17 @@ void UIToolbar::shutdown()
 void UIToolbar::onResize(int screenW, int screenH)
 {
     m_screenW = screenW; m_screenH = screenH;
+
     if (m_root) {
         m_root->setSize((float)m_screenW, (float)m_screenH);
-        // ✅ 关键修复：先更新根节点的布局，确保子节点计算位置时有正确的父节点尺寸
+        // 使用新的布局管理器，会自动处理依赖
         m_root->requestLayout();
-        m_root->performLayoutNow();
     }
 
-    // 在根节点布局更新后，再重建工具栏布局
+    // 重建工具栏布局
     buildLayout();
 
-    // ✅ buildLayout() 后再次执行布局，确保新创建的节点位置正确
-    // 这是必要的，因为buildLayout()会创建新的子节点
+    // 使用布局管理器执行，会自动处理所有依赖节点
     if (m_root) {
         m_root->performLayoutNow();
     }
@@ -137,11 +136,10 @@ void UIToolbar::buildLayout()
     m_barH = std::max(m_barH, m_slotSize + m_padding * 2);
     m_bar->setSize((float)barW, (float)m_barH);
     m_bar->setPosition(barX, 0.0f);
-    // ✅ 确保位置更新后立即标记布局需要更新
+    // 使用新的布局系统，只需标记一次
     m_bar->requestLayout();
     if (m_stack) {
         m_stack->setSize((float)barW, (float)m_barH);
-        m_stack->requestLayout();
     }
 
     // 创建按钮并布局（使用新的API）
@@ -240,6 +238,41 @@ bool UIToolbar::clickAt(float x, float y)
         return true;
     }
     return false;
+}
+
+// === 状态管理 ===
+
+ToolbarState UIToolbar::getState() const
+{
+    ToolbarState state;
+    state.selectedIndex = m_selected;
+    state.slotCount = m_slotCount;
+    state.slotSize = m_slotSize;
+    state.gap = m_gap;
+    state.padding = m_padding;
+    state.barHeight = m_barH;
+    state.visible = m_root ? m_root->isVisible() : true;
+    return state;
+}
+
+void UIToolbar::setState(const ToolbarState& state)
+{
+    m_selected = state.selectedIndex;
+    m_slotCount = state.slotCount;
+    m_slotSize = state.slotSize;
+    m_gap = state.gap;
+    m_padding = state.padding;
+    m_barH = state.barHeight;
+
+    if (m_root) {
+        m_root->setVisible(state.visible);
+    }
+
+    // 重建布局以应用新状态
+    buildLayout();
+
+    // 恢复选中状态
+    select(m_selected);
 }
 
 } // namespace Tina::UI

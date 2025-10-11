@@ -49,8 +49,17 @@ void Scene::removeUIRoot(UI::UINode* root) {
     }
 }
 
-// 更新窗口尺寸
+// 更新窗口尺寸（带防抖动）
 void Scene::updateWindowSize(int width, int height) {
+    // 标记有待处理的窗口调整
+    m_pendingResize = true;
+    m_pendingWidth = width;
+    m_pendingHeight = height;
+    m_resizeTimer = 0.1f;  // 100ms 延迟
+}
+
+// 实际应用窗口尺寸更新
+void Scene::applyWindowResize(int width, int height) {
     m_pixelWidth = width;
     m_pixelHeight = height;
     m_viewDirty = true;
@@ -74,6 +83,18 @@ void Scene::updateWindowSize(int width, int height) {
 
     // 自动调用子类的窗口大小改变回调（可选，用于特殊逻辑）
     onWindowSizeChanged(width, height);
+}
+
+// 处理防抖动
+void Scene::processPendingResize(float dt) {
+    if (m_pendingResize && m_resizeTimer > 0) {
+        m_resizeTimer -= dt;
+        if (m_resizeTimer <= 0) {
+            // 时间到，应用窗口调整
+            applyWindowResize(m_pendingWidth, m_pendingHeight);
+            m_pendingResize = false;
+        }
+    }
 }
 
 // 注意：原先计划在此提供若干便捷访问（shaders()/textRenderer()/fileSystem()/resources()），

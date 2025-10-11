@@ -12,6 +12,7 @@
 #include <bgfx/bgfx.h>
 #include "../ui/UILayout.hpp"
 #include "../ui/UIConstants.hpp"
+#include "../ui/UIUtils.hpp"
 #include "../engine/EventSystem.hpp"
 #include "GameEvents.hpp"
 
@@ -55,10 +56,11 @@ void SettingsScene::onExit()
 
 void SettingsScene::update(float dt)
 {
+    // 处理防抖动的窗口调整
+    processPendingResize(dt);
+
     // 处理输入
     handleInput();
-
-    (void)dt;
     if (m_root) m_root->update(dt);
 }
 
@@ -73,6 +75,28 @@ void SettingsScene::render()
 }
 
 // handleEvent 已删除，输入处理移至 update() 中使用 InputSystem
+
+void SettingsScene::updateWindowSize(int width, int height)
+{
+    // 调用基类更新（触发防抖动）
+    Scene::updateWindowSize(width, height);
+}
+
+// 覆盖实际应用窗口调整的方法
+void SettingsScene::applyWindowResize(int width, int height)
+{
+    // 更新场景的窗口尺寸（重要！createUI需要使用这些值）
+    m_pixelWidth = width;
+    m_pixelHeight = height;
+
+    // 调用基类的实际应用方法
+    Scene::applyWindowResize(width, height);
+
+    // 重新创建 UI 以适应新的窗口大小
+    createUI();
+
+    TINA_INFO("SettingsScene: 窗口大小更新为 {}x{}", width, height);
+}
 
 void SettingsScene::handleInput()
 {
@@ -99,11 +123,15 @@ void SettingsScene::createUI()
     m_root = Memory::MakeUnique<UI::UINode>("SettingsRoot");
     m_root->setSize((float)m_pixelWidth, (float)m_pixelHeight);
 
-    // 使用与暂停页一致的“面板 + VBox”布局
-    const float panelW = 520.0f;
-    const float pad    = 16.0f;
-    const float spacing= 12.0f;
-    const float btnH   = 50.0f;
+    // 根据窗口大小自适应缩放
+    float scale = UI::UIUtils::calculateUIScale(m_pixelWidth, m_pixelHeight);
+
+    // 使用与暂停页一致的"面板 + VBox"布局
+    const float panelW = 520.0f * scale;
+    const float pad    = 16.0f * scale;
+    const float spacing= 12.0f * scale;
+    const float btnH   = 50.0f * scale;
+    const float titleH = 44.0f * scale;
 
     // 使用新的API：createChild
     auto* panel = m_root->createChild<UI::UIPanel>("SettingsPanel");
@@ -120,7 +148,7 @@ void SettingsScene::createUI()
     auto* title = vbox->createChild<UI::UILabel>();
     title->setText("设置 / 调试");
     title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
-    title->setSize(panelW - pad*2, 44.0f);
+    title->setSize(panelW - pad*2, titleH);
 
     auto addRowButton = [&](const char* text, auto&& conn){
         auto* row = vbox->createChild<UI::UIHStack>("Row");
@@ -145,9 +173,16 @@ void SettingsScene::createUI()
     m_cClose = m_btnClose->onClick.connect(this, &SettingsScene::onBack);
 
     // 触发布局并居中
-    vbox->update(0.0f);
-    panel->update(0.0f);
-    panel->setPosition((m_pixelWidth - panelW)*0.5f, (m_pixelHeight - panel->getSize().y)*0.5f);
+    // 使用performLayoutNow()确保布局立即完成
+    vbox->requestLayout();
+    panel->requestLayout();
+    panel->performLayoutNow();  // 强制立即执行布局
+
+    // 获取实际高度并居中
+    float panelHeight = panel->getSize().y;
+    float centerX = (m_pixelWidth - panelW) * 0.5f;
+    float centerY = (m_pixelHeight - panelHeight) * 0.5f;
+    panel->setPosition(centerX, centerY);
 }
 
 void SettingsScene::onBack()

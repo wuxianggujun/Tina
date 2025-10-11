@@ -124,8 +124,17 @@ protected:
     // 移除UI根节点（通常在onExit时调用，或根节点销毁前调用）
     void removeUIRoot(UI::UINode* root);
 
-    // 更新窗口尺寸（由Application调用）
-    void updateWindowSize(int width, int height);
+    // 更新窗口尺寸（由Application调用，带防抖动）
+    virtual void updateWindowSize(int width, int height);
+
+protected:
+    // 实际应用窗口尺寸更新（子类可以覆盖）
+    virtual void applyWindowResize(int width, int height);
+
+    // 处理防抖动（在update中调用）
+    void processPendingResize(float dt);
+
+public:
 
     // 获取窗口尺寸
     int getPixelWidth() const { return m_pixelWidth; }
@@ -194,6 +203,12 @@ private:
     bool m_viewDirty = true;                   // 视图是否需要更新
     int m_pixelWidth = 1280;                   // 窗口宽度
     int m_pixelHeight = 720;                   // 窗口高度
+
+    // 窗口调整防抖动
+    bool m_pendingResize = false;              // 是否有待处理的窗口调整
+    int m_pendingWidth = 0;                    // 待处理的宽度
+    int m_pendingHeight = 0;                   // 待处理的高度
+    float m_resizeTimer = 0.0f;                // 防抖动计时器
 
     // 场景相机（Scene默认有2D相机）
     Memory::UniquePtr<Camera2D> m_camera;
