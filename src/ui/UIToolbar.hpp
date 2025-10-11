@@ -12,16 +12,23 @@
 #include "UIEventSystem.hpp"
 #include "../core/Container.hpp"
 #include "../core/Memory.hpp"
+#include "UINode.hpp"  // 引入UINode基类
 
 namespace Tina::UI {
 
-class UIToolbar {
+class UIToolbar : public UINode {
 public:
     // 迁移至新架构：仅依赖 UIRenderer
     bool initialize(int screenW, int screenH, UIRenderer& renderer);
     void shutdown();
 
-    void onResize(int screenW, int screenH);
+    // 覆盖UINode的onWindowSizeChanged()方法（框架自动调用）
+    void onWindowSizeChanged(int screenW, int screenH) override {
+        onResize(screenW, screenH);
+        // 不需要调用父类的默认实现，因为UIToolbar自己管理子节点
+    }
+
+    void onResize(int screenW, int screenH);  // 内部布局方法
     void update(float dt);
     void render(uint16_t viewId);
 

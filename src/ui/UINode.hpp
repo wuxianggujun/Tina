@@ -154,6 +154,18 @@ public:
     virtual void onMouseLeave() {}
     virtual void onClick() {}
 
+    // === 窗口尺寸变化回调（框架自动调用） ===
+    // 默认实现：递归通知所有子节点
+    // 子类可覆盖以实现自定义布局逻辑（如重新计算居中位置）
+    virtual void onWindowSizeChanged(int width, int height) {
+        // 默认递归通知所有子节点
+        for (auto& child : m_children) {
+            if (child) {
+                child->onWindowSizeChanged(width, height);
+            }
+        }
+    }
+
     // === 名称（调试用） ===
     const std::string& getName() const { return m_name; }
     void setName(const std::string& name) { m_name = name; }

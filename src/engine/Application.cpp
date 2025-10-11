@@ -1,7 +1,9 @@
 #include "Application.hpp"
 #include "SceneManager.hpp"
-#include "OSEventBus.hpp"
-#include "TypedEventBus.hpp"
+#include "InputSystem.hpp"
+#include "EngineEvents.hpp"
+#include "EventSystem.hpp"
+#include "Window.hpp"
 #include "../renderer/Primitive2D.hpp"
 #include "../renderer/SpriteRenderer.hpp"
 #include "Resource.hpp"
@@ -9,7 +11,6 @@
 #include "Font.hpp"
 #include "AudioManager.hpp"
 #include "../core/Log.hpp"
-#include "../os/OS.hpp"
 // 全局 TextRenderer 实现
 #include "../ui/TextRenderer.hpp"
 
@@ -40,33 +41,23 @@ void Application::init()
     TINA_INFO("Application 初始化中...");
 
     // 1. 创建窗口
-    Tina::os::InitWindowArgs args{};
-    args.name = m_config.windowTitle;
-    args.width = static_cast<uint32_t>(m_config.windowWidth);
-    args.height = static_cast<uint32_t>(m_config.windowHeight);
+    WindowDesc desc{};
+    desc.title = m_config.windowTitle;
+    desc.width = m_config.windowWidth;
+    desc.height = m_config.windowHeight;
+    desc.resizable = true;
 
-    m_window = Tina::os::createWindow(args);
-    if (m_window == Tina::os::INVALID_WINDOW_HANDLE) {
+    m_window = Memory::MakeUnique<Window>();
+    if (!m_window->create(desc)) {
         TINA_ERROR("创建窗口失败");
         return;
     }
 
     // 2. 获取原生窗口句柄（用于bgfx）
-    void* nwh = nullptr;
-    {
-        SDL_Window* sdl_win = static_cast<SDL_Window*>(m_window);
-        SDL_PropertiesID props = SDL_GetWindowProperties(sdl_win);
-#ifdef SDL_PROP_WINDOW_WIN32_HWND_POINTER
-        nwh = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
-#else
-        nwh = SDL_GetPointerProperty(props, "SDL.window.win32.hwnd", nullptr);
-#endif
-    }
-
+    void* nwh = m_window->getNativeHandle();
     if (!nwh) {
         TINA_ERROR("无法获取原生窗口句柄");
-        Tina::os::destroyWindow(m_window);
-        m_window = Tina::os::INVALID_WINDOW_HANDLE;
+        m_window.reset();
         return;
     }
 
@@ -79,7 +70,7 @@ void Application::init()
     bgfxInit.platformData = pd;
 
     // 获取实际像素尺寸（考虑DPI缩放）
-    SDL_GetWindowSizeInPixels(static_cast<SDL_Window*>(m_window), &m_pixelWidth, &m_pixelHeight);
+    m_window->getSize(m_pixelWidth, m_pixelHeight);
 
     bgfxInit.resolution.width = static_cast<uint32_t>(m_pixelWidth);
     bgfxInit.resolution.height = static_cast<uint32_t>(m_pixelHeight);
@@ -87,8 +78,7 @@ void Application::init()
 
     if (!bgfx::init(bgfxInit)) {
         TINA_ERROR("bgfx 初始化失败");
-        Tina::os::destroyWindow(m_window);
-        m_window = Tina::os::INVALID_WINDOW_HANDLE;
+        m_window.reset();
         return;
     }
 
@@ -127,8 +117,9 @@ void Application::init()
     bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(m_pixelWidth), static_cast<uint16_t>(m_pixelHeight));
 
     // 5. 创建核心子系统
-    m_osEventBus = Memory::MakeUnique<OSEventBus>();
-    m_typedEvents = Memory::MakeUnique<TypedEventBus>();
+    m_eventSystem = Memory::MakeUnique<EventSystem>();
+    m_inputSystem = Memory::MakeUnique<InputSystem>();
+    m_inputSystem->initialize();  // 初始化输入系统
     m_sceneManager = Memory::MakeUnique<SceneManager>(this);
 
     // 6. 创建资源系统
@@ -199,7 +190,8 @@ void Application::shutdown()
     m_textRenderer.reset();
     m_resourceHub.reset();
     m_fileSystem.reset();
-    m_osEventBus.reset();
+    m_eventSystem.reset();
+    m_inputSystem.reset();
     // 在 bgfx 关闭前确保销毁所有程序句柄（先销毁依赖者，再销毁管理器）
     m_prim2D.reset();
     m_sprite2D.reset();
@@ -218,10 +210,8 @@ void Application::shutdown()
 
     bgfx::shutdown();
 
-    if (m_window != Tina::os::INVALID_WINDOW_HANDLE) {
-        Tina::os::destroyWindow(m_window);
-        m_window = Tina::os::INVALID_WINDOW_HANDLE;
-    }
+    // 销毁窗口
+    m_window.reset();
 
     TINA_INFO("Application 已关闭");
 }
@@ -252,19 +242,25 @@ void Application::run()
         // 计算FPS
         m_fps = (m_deltaTime > 0.0f) ? (1.0f / m_deltaTime) : 60.0f;
 
-        // 2. 处理事件
+        // 2. 处理事件（必须先处理，SDL_PollEvent会更新状态）
         processEvents();
 
-        // 3. 更新逻辑
+        // 3. 输入系统帧开始（保存上一帧状态，查询最新状态）
+        if (m_inputSystem) m_inputSystem->beginFrame();
+
+        // 4. 更新逻辑
         update(m_deltaTime);
 
-        // 4. 渲染
+        // 5. 渲染
         render();
 
-        // 4.5 执行主线程任务队列（在本帧安全点）
+        // 6. 输入系统帧结束（处理文本输入缓冲）
+        if (m_inputSystem) m_inputSystem->endFrame();
+
+        // 7. 执行主线程任务队列（在本帧安全点）
         flushTasks();
 
-        // 5. 提交帧
+        // 8. 提交帧
         bgfx::frame();
     }
 
@@ -273,23 +269,33 @@ void Application::run()
 
 void Application::processEvents()
 {
-    Tina::os::Event event;
-    while (Tina::os::getEvent(event)) {
-        // 1. 处理全局事件
-        if (event.type == Tina::os::Event::Type::QUIT ||
-            event.type == Tina::os::Event::Type::WINDOW_CLOSE) {
+    SDL_Event event;
+    while (Window::pollEvent(event)) {
+        // 1. InputSystem 处理特殊事件（滚轮、文本输入）
+        if (m_inputSystem) {
+            // InputSystem 在 beginFrame 中查询状态即可
+        }
+
+        // 2. 处理全局事件
+        if (event.type == SDL_EVENT_QUIT) {
             TINA_INFO("接收到退出事件");
             quit();
             continue;
         }
 
-        if (event.type == Tina::os::Event::Type::WINDOW_SIZE) {
+        if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+            TINA_INFO("接收到窗口关闭事件");
+            quit();
+            continue;
+        }
+
+        if (event.type == SDL_EVENT_WINDOW_RESIZED) {
             // 更新窗口尺寸
-            m_config.windowWidth = event.win_size.w;
-            m_config.windowHeight = event.win_size.h;
+            m_config.windowWidth = event.window.data1;
+            m_config.windowHeight = event.window.data2;
 
             // 获取实际像素尺寸
-            SDL_GetWindowSizeInPixels(static_cast<SDL_Window*>(m_window), &m_pixelWidth, &m_pixelHeight);
+            m_window->getSize(m_pixelWidth, m_pixelHeight);
 
             // 重置bgfx
             bgfx::reset(
@@ -307,13 +313,18 @@ void Application::processEvents()
             TINA_INFO("窗口调整: {}x{} (像素: {}x{})",
                 m_config.windowWidth, m_config.windowHeight,
                 m_pixelWidth, m_pixelHeight);
+
+            // 通过事件系统发送窗口调整事件
+            m_eventSystem->trigger(Events::WindowResizedEvent(m_pixelWidth, m_pixelHeight));
+
+            // 通知当前场景更新窗口尺寸
+            if (m_sceneManager && m_sceneManager->currentScene()) {
+                m_sceneManager->currentScene()->updateWindowSize(m_pixelWidth, m_pixelHeight);
+            }
         }
 
-        // 2. 分发到 OS 事件总线
-        m_osEventBus->dispatchOSEvent(event);
-
-        // 3. 分发到当前场景
-        m_sceneManager->handleEvent(event);
+        // 3. 将其他 SDL 事件转换为新的事件系统事件（按需添加）
+        // TODO: 根据需要添加更多事件类型的转换
     }
     // 事件分发完成后，立即执行一次主线程任务队列，减少响应延迟
     flushTasks();
@@ -350,8 +361,10 @@ void Application::update(float dt)
         m_resourceHub->update();
     }
 
-    // 2. 驱动强类型事件总线（派发异步事件）
-    if (m_typedEvents) m_typedEvents->update();
+    // 2. 驱动事件系统（处理事件队列）
+    if (m_eventSystem) {
+        m_eventSystem->update(); // 每帧处理事件队列
+    }
 
     // 3. 更新场景
     m_sceneManager->update(dt);

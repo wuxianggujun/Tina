@@ -25,6 +25,9 @@ public:
     float viewH() const { return m_viewH; }
     float viewW() const { return m_viewH * (float)m_vpW / (float)m_vpH; }
 
+    // 获取缩放比例（像素/世界单位）
+    float getZoom() const { return (float)m_vpH / m_viewH; }
+
     // 生成视图/投影矩阵（供 bgfx::setViewTransform 使用）
     void buildViewProj(float* outView16, float* outProj16) const;
 

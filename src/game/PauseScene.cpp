@@ -5,14 +5,15 @@
 #include "PauseScene.hpp"
 #include "../engine/Application.hpp"
 #include "../engine/SceneManager.hpp"
+#include "../engine/InputSystem.hpp"  // 添加 InputSystem 头文件
 #include "../ui/UILayout.hpp"
 #include "../core/Log.hpp"
 #include "../ui/UIComponents.hpp"
 #include "MenuScene.hpp"
-#include "../engine/TypedEventBus.hpp"
+#include "../engine/EventSystem.hpp"
 #include "GameEvents.hpp"
 
-#include <SDL3/SDL.h>
+// #include <SDL3/SDL.h>  // 不再需要SDL，使用os封装
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 #include "../ui/UIConstants.hpp"
@@ -77,6 +78,9 @@ void PauseScene::onExit()
 
 void PauseScene::update(float dt)
 {
+    // 处理输入
+    handleInput();
+
     if (m_rootNode) {
         m_rootNode->update(dt);
     }
@@ -98,53 +102,26 @@ void PauseScene::render()
     }
 }
 
-void PauseScene::handleEvent(const Tina::os::Event& event)
+// handleEvent 已删除，输入处理移至 update() 中使用 InputSystem
+
+void PauseScene::handleInput()
 {
-    using E = Tina::os::Event;
+    // 使用 InputSystem 进行输入处理
+    auto* appPtr = app();
+    if (!appPtr) return;
+    auto& input = appPtr->input();
 
     // ESC 键：返回游戏
-    if (event.type == E::Type::KEY && event.key.down) {
-        if (event.key.key_code == os::KeyCode::ESCAPE) {
-            onContinueClicked();
-            return;
-        }
+    if (input.isKeyPressed(Engine::KeyCode::Escape)) {
+        onContinueClicked();
+        return;
     }
 
-    // 鼠标移动：更新按钮悬停状态
-    // 使用 UIEventSystem 统一处理 hover/click
-    if (event.type == E::Type::MOUSE_MOVE || event.type == E::Type::MOUSE_BUTTON) {
-        float mx = 0.0f, my = 0.0f;
-        SDL_GetMouseState(&mx, &my);
-        bool leftDown = false;
-        if (event.type == E::Type::MOUSE_BUTTON) {
-            leftDown = (event.mouse_button.button == os::MouseButton::LEFT) && event.mouse_button.down;
-        } else {
-            uint32_t mask = (uint32_t)SDL_GetMouseState(nullptr, nullptr);
-#ifdef SDL_BUTTON_MASK
-            leftDown = (mask & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) != 0;
-#else
-            leftDown = (mask & SDL_BUTTON_LMASK) != 0;
-#endif
-        }
-        m_events.updateMouse(mx, my, leftDown);
-        m_events.processEvents();
-    }
-
-    // 统一通过 UIEventSystem 处理鼠标悬停与点击，移除手动 containsPoint 调试代码
-
-    // 窗口调整大小
-    if (event.type == E::Type::WINDOW_SIZE) {
-        m_pixelWidth = event.win_size.w;
-        m_pixelHeight = event.win_size.h;
-        
-        // ✅ 标记视图为脏（如果需要）
-        // m_viewDirty = true;
-        
-        // 重新布局 UI
-        if (m_rootNode) {
-            createUI();  // 简单重建
-        }
-    }
+    // 鼠标移动/点击：使用 UIEventSystem 统一处理
+    auto mousePos = input.getMousePosition();
+    bool leftDown = input.isMouseButtonDown(Engine::MouseButton::Left);
+    m_events.updateMouse(mousePos.x, mousePos.y, leftDown);
+    m_events.processEvents();
 }
 
 void PauseScene::createUI()
@@ -284,11 +261,30 @@ void PauseScene::onQuitClicked()
     app()->scenes().requestPush(Memory::MakeUnique<MenuScene>());
 }
 
-void PauseScene::onSetDay()      { app()->events().trigger<Tina::Game::Events::SetDayNight>(0.25f); }
-void PauseScene::onSetNight()    { app()->events().trigger<Tina::Game::Events::SetDayNight>(0.75f); }
-// 已移除“暂停/恢复昼夜”功能
-void PauseScene::onFwdTime()     { app()->events().trigger<Tina::Game::Events::AdjustDayNight>(+0.10f); }
-void PauseScene::onBackTime()    { app()->events().trigger<Tina::Game::Events::AdjustDayNight>(-0.10f); }
+void PauseScene::onSetDay() {
+    Tina::Game::Events::SetDayNight event;
+    event.normalized = 0.25f;
+    app()->events().trigger(event);
+}
+
+void PauseScene::onSetNight() {
+    Tina::Game::Events::SetDayNight event;
+    event.normalized = 0.75f;
+    app()->events().trigger(event);
+}
+
+// 已移除"暂停/恢复昼夜"功能
+void PauseScene::onFwdTime() {
+    Tina::Game::Events::AdjustDayNight event;
+    event.delta = +0.10f;
+    app()->events().trigger(event);
+}
+
+void PauseScene::onBackTime() {
+    Tina::Game::Events::AdjustDayNight event;
+    event.delta = -0.10f;
+    app()->events().trigger(event);
+}
 
 } // namespace Tina::Game
 

@@ -33,11 +33,12 @@ public:
     // 生命周期
     void onEnter() override;
     void onExit() override;
+    // 注意：不再需要覆盖onWindowSizeChanged，MenuRootNode会自动处理
 
     // 主循环
     void update(float dt) override;
     void render() override;
-    void handleEvent(const Tina::os::Event& event) override;
+    // 事件处理已迁移到 InputSystem
 
 protected:
     // 视图配置（使用新架构）
@@ -48,6 +49,9 @@ private:
     void createUI();
     void updateUILayout();  // 更新UI布局（窗口大小改变时）
     void computeUIScale();  // 计算 UI 缩放系数（基于参考分辨率）
+
+    // 输入处理
+    void handleInput();
 
     // 按钮回调
     void onStartClicked();
@@ -60,11 +64,32 @@ private:
     // 鼠标交互改为 UIEventSystem 统一处理（不再手写命中与 emit）
 
 private:
+    // 自定义根节点类（覆盖onWindowSizeChanged以调用updateUILayout）
+    class MenuRootNode : public UI::UINode {
+    public:
+        MenuRootNode(MenuScene* scene) : UINode("MenuRoot"), m_scene(scene) {}
+
+        void onWindowSizeChanged(int width, int height) override {
+            // 更新尺寸
+            setSize((float)width, (float)height);
+            // 调用MenuScene的布局更新
+            if (m_scene) {
+                m_scene->computeUIScale();
+                m_scene->updateUILayout();
+            }
+            // 递归通知子节点
+            UINode::onWindowSizeChanged(width, height);
+        }
+
+    private:
+        MenuScene* m_scene = nullptr;
+    };
+
     // 渲染资源
     Memory::UniquePtr<Particles::ParticleSystem2D> m_bgParticles;
-    
-    
-    Memory::UniquePtr<UI::UINode> m_rootNode;
+
+
+    Memory::UniquePtr<MenuRootNode> m_rootNode;
     Container::Vector<Memory::UniquePtr<UI::UINode>> m_ownedNodes;  // 统一管理所有节点生命周期
     UI::UIButton* m_btnStart = nullptr;
     UI::UIButton* m_btnSettings = nullptr;

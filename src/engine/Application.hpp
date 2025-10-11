@@ -7,7 +7,6 @@
 #pragma once
 
 #include "../core/Memory.hpp"
-#include "../os/OS.hpp"
 #include "../renderer/ShaderManager.hpp"
 #include <functional>
 #include <mutex>
@@ -22,9 +21,10 @@ namespace Tina { namespace Renderer { class Primitive2D; class SpriteRenderer; c
 namespace Tina::Engine {
 
 // 前向声明
+class Window;
+class InputSystem;
 class SceneManager;
-class OSEventBus; // OS 事件总线（窗口/输入）
-class TypedEventBus; // 强类型事件总线（玩法/编辑器/插件）
+class EventSystem;  // 新的统一事件系统（替代 OSEventBus 和 TypedEventBus）
 struct FileSystem;
 class ResourceManagerHub;
 class TextureManager;
@@ -66,17 +66,17 @@ public:
 
     // ==================== 访问核心系统 ====================
 
-    // 获取窗口句柄
-    Tina::os::WindowHandle window() const { return m_window; }
-
-    // 获取 OS 事件总线（窗口/输入等稳定事件）
-    OSEventBus& osEvents() const { return *m_osEventBus; }
-
-    // 获取强类型事件总线（游戏/编辑器/插件的自定义事件）
-    TypedEventBus& events() const { return *m_typedEvents; }
+    // 获取统一事件系统（替代旧的 OSEventBus 和 TypedEventBus）
+    EventSystem& events() const { return *m_eventSystem; }
 
     // 获取场景管理器（用于场景切换）
     SceneManager& scenes() const { return *m_sceneManager; }
+
+    // 获取输入系统
+    InputSystem& input() const { return *m_inputSystem; }
+
+    // 获取窗口
+    Window& window() const { return *m_window; }
 
     // 获取文件系统（用于异步IO）
     FileSystem& fileSystem() const { return *m_fileSystem; }
@@ -156,9 +156,9 @@ private:
     int m_pixelWidth = 1280;                       // 窗口像素宽度
     int m_pixelHeight = 720;                       // 窗口像素高度
 
-    Tina::os::WindowHandle m_window = nullptr;     // 窗口句柄
-    Memory::UniquePtr<OSEventBus> m_osEventBus;            // OS 事件总线
-    Memory::UniquePtr<TypedEventBus> m_typedEvents;        // 强类型事件总线
+    Memory::UniquePtr<Window> m_window;                    // 窗口管理
+    Memory::UniquePtr<InputSystem> m_inputSystem;          // 输入系统
+    Memory::UniquePtr<EventSystem> m_eventSystem;          // 统一事件系统（新）
     Memory::UniquePtr<SceneManager> m_sceneManager;        // 场景管理器（独占所有权）
     Memory::UniquePtr<FileSystem> m_fileSystem;            // 文件系统（异步IO）
     Memory::UniquePtr<ResourceManagerHub> m_resourceHub;   // 资源管理中心

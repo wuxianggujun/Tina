@@ -7,15 +7,16 @@
 
 #pragma once
 
-#include "../os/OS.hpp"
 #include "../core/Memory.hpp"
 #include "../core/Container.hpp"
 #include "SceneRenderer.hpp"  // EASTL的unique_ptr需要完整定义
+#include "Camera2D.hpp"       // Scene默认有2D相机
 #include <bgfx/bgfx.h>
 
 // 前向声明
 namespace Tina::UI {
     class UIRenderer;
+    class UINode;  // 前向声明UINode
 }
 
 namespace Tina::Renderer {
@@ -26,6 +27,7 @@ namespace Tina::Engine {
 
 // 前向声明
 class Application;
+class InputSystem;
 
 // 场景基类
 // 派生类必须实现 update() 和 render() 纯虚函数
@@ -53,6 +55,11 @@ public:
     // 用途：恢复游戏逻辑、刷新状态、恢复音效
     virtual void onResume() {}
 
+    // 窗口大小改变时调用（由框架自动调用）
+    // 用途：更新UI布局、重新计算缩放、调整相机视口
+    // 参数：width - 新的像素宽度，height - 新的像素高度
+    virtual void onWindowSizeChanged(int width, int height) {}
+
     // ==================== 主循环接口 ====================
 
     // 更新逻辑（每帧调用）
@@ -65,10 +72,10 @@ public:
 
     // 处理输入事件（框架会先处理窗口事件，然后调用子类）
     // 参数：event - 操作系统事件（键盘、鼠标、窗口等）
-    void handleEventFrame(const Tina::os::Event& event);
+    // void handleEventFrame(const Event& event); // TODO: 迁移到新的事件系统
 
     // 子类可覆盖的事件处理
-    virtual void handleEvent(const Tina::os::Event& event) {}
+    // virtual void handleEvent(const Event& event) {} // TODO: 迁移到新的事件系统
 
     // ==================== 状态查询 ====================
 
@@ -106,17 +113,28 @@ protected:
     // 访问Application实例（用于访问events()/scenes()等全局服务）
     Application* app() const { return m_app; }
 
+    // 访问输入系统（便捷方法）
+    InputSystem* input() const;
+
+    // === UI根节点管理（框架自动处理窗口resize） ===
+    // Scene子类在创建顶层UI节点后调用此方法注册
+    // 窗口resize时，框架会自动调用所有根节点的onWindowSizeChanged()
+    void addUIRoot(UI::UINode* root);
+
+    // 移除UI根节点（通常在onExit时调用，或根节点销毁前调用）
+    void removeUIRoot(UI::UINode* root);
+
     // 更新窗口尺寸（由Application调用）
-    void updateWindowSize(int width, int height) {
-        m_pixelWidth = width;
-        m_pixelHeight = height;
-        m_viewDirty = true;
-    }
+    void updateWindowSize(int width, int height);
 
     // 获取窗口尺寸
     int getPixelWidth() const { return m_pixelWidth; }
     int getPixelHeight() const { return m_pixelHeight; }
-    
+
+    // 获取场景的相机（Scene默认有2D相机）
+    Camera2D* camera() { return m_camera.get(); }
+    const Camera2D* camera() const { return m_camera.get(); }
+
     // === UI便捷访问（阶段1：自动化封装） ===
     
     // 获取UIRenderer（懒加载，自动初始化）
@@ -177,8 +195,16 @@ private:
     int m_pixelWidth = 1280;                   // 窗口宽度
     int m_pixelHeight = 720;                   // 窗口高度
 
+    // 场景相机（Scene默认有2D相机）
+    Memory::UniquePtr<Camera2D> m_camera;
+
+    // UI根节点列表（框架自动管理resize通知）
+    Container::Vector<UI::UINode*> m_uiRoots;
+
     // SceneManager可以访问私有成员（设置m_app和m_active）
     friend class SceneManager;
+    // Application可以访问私有成员（调用updateWindowSize等）
+    friend class Application;
 };
 
 } // namespace Tina::Engine

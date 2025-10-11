@@ -132,15 +132,7 @@ void SceneManager::render()
     }
 }
 
-void SceneManager::handleEvent(const Tina::os::Event& event)
-{
-    if (Scene* scene = currentScene()) {
-        m_dispatching = true;
-        scene->handleEventFrame(event);  // 改为调用handleEventFrame()，由框架先处理
-        m_dispatching = false;
-    }
-    applyPending();
-}
+// 事件处理已经迁移到新的事件系统
 
 void SceneManager::applyPending()
 {

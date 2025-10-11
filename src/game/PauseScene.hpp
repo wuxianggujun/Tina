@@ -36,10 +36,11 @@ public:
     // 主循环
     void update(float dt) override;
     void render() override;
-    void handleEvent(const Tina::os::Event& event) override;
+    // 事件处理已迁移到 InputSystem
 
 private:
     void createUI();
+    void handleInput();     // 处理输入
     void renderOverlay();  // 渲染半透明遮罩
 
     // 按钮回调

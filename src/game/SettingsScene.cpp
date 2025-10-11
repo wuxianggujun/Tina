@@ -5,13 +5,14 @@
 #include "SettingsScene.hpp"
 #include "../engine/Application.hpp"
 #include "../engine/SceneManager.hpp"
+#include "../engine/InputSystem.hpp"  // 添加 InputSystem 头文件
 #include "../core/Log.hpp"
 
-#include <SDL3/SDL.h>
+// #include <SDL3/SDL.h>  // 不再需要SDL，使用os封装
 #include <bgfx/bgfx.h>
 #include "../ui/UILayout.hpp"
 #include "../ui/UIConstants.hpp"
-#include "../engine/TypedEventBus.hpp"
+#include "../engine/EventSystem.hpp"
 #include "GameEvents.hpp"
 
 namespace Tina::Game {
@@ -54,6 +55,9 @@ void SettingsScene::onExit()
 
 void SettingsScene::update(float dt)
 {
+    // 处理输入
+    handleInput();
+
     (void)dt;
     if (m_root) m_root->update(dt);
 }
@@ -68,33 +72,26 @@ void SettingsScene::render()
     }
 }
 
-void SettingsScene::handleEvent(const Tina::os::Event& event)
+// handleEvent 已删除，输入处理移至 update() 中使用 InputSystem
+
+void SettingsScene::handleInput()
 {
-    using E = Tina::os::Event;
-    if (event.type == E::Type::KEY && event.key.down) {
-        if (event.key.key_code == os::KeyCode::ESCAPE) {
-            onBack();
-            return;
-        }
+    // 使用 InputSystem 进行输入处理
+    auto* appPtr = app();
+    if (!appPtr) return;
+    auto& input = appPtr->input();
+
+    // ESC 键：返回
+    if (input.isKeyPressed(Engine::KeyCode::Escape)) {
+        onBack();
+        return;
     }
 
-    if (event.type == E::Type::MOUSE_MOVE || event.type == E::Type::MOUSE_BUTTON) {
-        float mx = 0.0f, my = 0.0f;
-        SDL_GetMouseState(&mx, &my);
-        bool leftDown = false;
-        if (event.type == E::Type::MOUSE_BUTTON) {
-            leftDown = (event.mouse_button.button == os::MouseButton::LEFT) && event.mouse_button.down;
-        } else {
-            uint32_t mask = (uint32_t)SDL_GetMouseState(nullptr, nullptr);
-#ifdef SDL_BUTTON_MASK
-            leftDown = (mask & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) != 0;
-#else
-            leftDown = (mask & SDL_BUTTON_LMASK) != 0;
-#endif
-        }
-        m_events.updateMouse(mx, my, leftDown);
-        m_events.processEvents();
-    }
+    // 鼠标移动/点击：使用 UIEventSystem 统一处理
+    auto mousePos = input.getMousePosition();
+    bool leftDown = input.isMouseButtonDown(Engine::MouseButton::Left);
+    m_events.updateMouse(mousePos.x, mousePos.y, leftDown);
+    m_events.processEvents();
 }
 
 void SettingsScene::createUI()
@@ -161,23 +158,31 @@ void SettingsScene::onBack()
 void SettingsScene::onSetDay()
 {
     // 设定至白天中段（默认 0.25）
-    app()->events().trigger<Tina::Game::Events::SetDayNight>(0.25f);
+    Tina::Game::Events::SetDayNight event;
+    event.normalized = 0.25f;
+    app()->events().trigger(event);
 }
 
 void SettingsScene::onSetNight()
 {
     // 设定至黑夜中段（默认 0.75）
-    app()->events().trigger<Tina::Game::Events::SetDayNight>(0.75f);
+    Tina::Game::Events::SetDayNight event;
+    event.normalized = 0.75f;
+    app()->events().trigger(event);
 }
 
 void SettingsScene::onFwdTime()
 {
-    app()->events().trigger<Tina::Game::Events::AdjustDayNight>(+0.10f);
+    Tina::Game::Events::AdjustDayNight event;
+    event.delta = +0.10f;
+    app()->events().trigger(event);
 }
 
 void SettingsScene::onBackTime()
 {
-    app()->events().trigger<Tina::Game::Events::AdjustDayNight>(-0.10f);
+    Tina::Game::Events::AdjustDayNight event;
+    event.delta = -0.10f;
+    app()->events().trigger(event);
 }
 
 } // namespace Tina::Game

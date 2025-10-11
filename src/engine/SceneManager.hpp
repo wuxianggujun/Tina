@@ -40,7 +40,7 @@ public:
     // 主循环分发
     void update(float dt);
     void render();
-    void handleEvent(const Tina::os::Event& event);
+    // void handleEvent(const Event& event);  // TODO: 更新为使用新的Event系统
 
 private:
     // 立即应用所有挂起的场景操作（在非回调栈内的安全点调用）

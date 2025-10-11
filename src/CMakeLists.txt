@@ -1,6 +1,5 @@
 set(SRC_FILES
     main.cpp
-    os/OS.cpp
     engine/Resource.hpp
     engine/FileSystem.cpp
     engine/Application.hpp
@@ -19,8 +18,15 @@ set(SRC_FILES
     engine/Scene.cpp
     engine/SceneManager.hpp
     engine/SceneManager.cpp
-    engine/OSEventBus.hpp
-    engine/OSEventBus.cpp
+    engine/EventCore.hpp
+    engine/EventQueue.hpp
+    engine/EventDispatcher.hpp
+    engine/EventSystem.hpp
+    engine/Events.hpp
+    engine/Window.hpp
+    engine/Window.cpp
+    engine/InputSystem.hpp
+    engine/InputSystem.cpp
     game/GameScene.hpp
     game/GameScene.cpp
     game/MenuScene.hpp

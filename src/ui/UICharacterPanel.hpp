@@ -24,6 +24,11 @@ public:
     // 设置面板位置（居中显示）
     void centerOnScreen(int screenWidth, int screenHeight);
 
+    // 覆盖UINode的onWindowSizeChanged()方法（框架自动调用）
+    void onWindowSizeChanged(int screenWidth, int screenHeight) override {
+        centerOnScreen(screenWidth, screenHeight);
+    }
+
     // === Signal 事件 ===
     Tina::Core::Signal<> onSwitchControl;  // 切换控制信号
 

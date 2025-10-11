@@ -6,11 +6,12 @@
 #include "GameScene.hpp"
 #include "../engine/Application.hpp"
 #include "../engine/SceneManager.hpp"
+#include "../engine/InputSystem.hpp"  // 添加 InputSystem 头文件
 #include "../core/Log.hpp"
 #include "../game/GameConfig.hpp"
 #include "../ui/UIConstants.hpp"
 
-#include <SDL3/SDL.h>
+// #include <SDL3/SDL.h>  // 不再需要SDL，使用os封装
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 #include <cstdlib>
@@ -52,6 +53,9 @@ void MenuScene::onEnter() {
     createUI();
     m_events.setRoot(m_rootNode.get());
 
+    // 注册UI根节点到框架（框架会自动处理窗口resize）
+    addUIRoot(m_rootNode.get());
+
     TINA_INFO("MenuScene: 初始化完成");
 }
 
@@ -74,7 +78,13 @@ void MenuScene::onExit() {
     m_bgParticles.reset();
 }
 
+// 注意：不再需要onWindowSizeChanged()方法
+// MenuRootNode会自动处理窗口resize并调用computeUIScale()和updateUILayout()
+
 void MenuScene::update(float dt) {
+    // 处理输入
+    handleInput();
+
     // 标题淡入动画
     if (m_titleAlpha < 1.0f) {
         m_titleAlpha += dt * 2.0f;  // 0.5秒淡入
@@ -179,66 +189,38 @@ void MenuScene::render() {
     // 不再使用渲染队列提交背景，无需 endFrame()
 }
 
-void MenuScene::handleEvent(const os::Event& event) {
-    using E = os::Event;
+// handleEvent 已删除，输入处理移至 update() 中使用 InputSystem
+
+void MenuScene::handleInput() {
+    // 使用 InputSystem 进行输入处理
+    auto* appPtr = app();
+    if (!appPtr) return;
+    auto& input = appPtr->input();
 
     // 键盘导航
-    if (event.type == E::Type::KEY && event.key.down) {
-        switch (event.key.key_code) {
-            case os::KeyCode::UP:
-                selectPreviousButton();
-                break;
-            case os::KeyCode::DOWN:
-                selectNextButton();
-                break;
-            case os::KeyCode::RETURN:
-            case os::KeyCode::SPACE:
-                activateSelectedButton();
-                break;
-            case os::KeyCode::ESCAPE:
-                onQuitClicked();
-                break;
-            default:
-                break;
-        }
+    if (input.isKeyPressed(Engine::KeyCode::Up)) {
+        selectPreviousButton();
+    }
+    if (input.isKeyPressed(Engine::KeyCode::Down)) {
+        selectNextButton();
+    }
+    if (input.isKeyPressed(Engine::KeyCode::Enter) || input.isKeyPressed(Engine::KeyCode::Space)) {
+        activateSelectedButton();
+    }
+    if (input.isKeyPressed(Engine::KeyCode::Escape)) {
+        onQuitClicked();
     }
 
-    // 鼠标移动/点击：统一交给 UIEventSystem
-    if (event.type == E::Type::MOUSE_MOVE || event.type == E::Type::MOUSE_BUTTON) {
-        float mx = 0.0f, my = 0.0f;
-        SDL_GetMouseState(&mx, &my);
-        bool leftDown = false;
-        if (event.type == E::Type::MOUSE_BUTTON) {
-            leftDown = (event.mouse_button.button == os::MouseButton::LEFT) && event.mouse_button.down;
-        } else {
-            // 保持 hover 精确，读取当前是否按住左键
-            uint32_t mask = (uint32_t)SDL_GetMouseState(nullptr, nullptr);
-#ifdef SDL_BUTTON_MASK
-            leftDown = (mask & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) != 0;
-#else
-            leftDown = (mask & SDL_BUTTON_LMASK) != 0;
-#endif
-        }
-        m_events.updateMouse(mx, my, leftDown);
-        m_events.processEvents();
-    }
-
-    // 窗口调整大小
-    if (event.type == E::Type::WINDOW_SIZE) {
-        // 窗口大小已由基类自动处理
-
-        // 更新 UI 布局
-        computeUIScale();
-        updateUILayout();
-
-        // 同步 SceneRenderer 的屏幕尺寸（供渐变背景使用）
-        scene().setScreenSize(getPixelWidth(), getPixelHeight());
-    }
+    // 鼠标移动/点击
+    auto mousePos = input.getMousePosition();
+    bool leftDown = input.isMouseButtonDown(Engine::MouseButton::Left);
+    m_events.updateMouse(mousePos.x, mousePos.y, leftDown);
+    m_events.processEvents();
 }
 
 void MenuScene::createUI() {
-    // 创建根节点
-    m_rootNode = Memory::MakeUnique<UI::UINode>("RootNode");
+    // 创建自定义根节点（会自动处理窗口resize）
+    m_rootNode = Memory::MakeUnique<MenuRootNode>(this);
     m_rootNode->setPosition(0, 0);
     m_rootNode->setSize((float)getPixelWidth(), (float)getPixelHeight());
 

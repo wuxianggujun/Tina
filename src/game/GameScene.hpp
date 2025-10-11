@@ -5,7 +5,7 @@
 #include "../renderer/ShaderManager.hpp"
 #include "../game/TileMap.hpp"
 #include "../ecs/World.hpp"
-#include "../engine/Camera2D.hpp"
+// Camera2D现在由Scene基类提供
 #include "../renderer/TileRenderer.hpp"
 #include "../ui/UICore.hpp"  // UIRenderer
 #include "../ui/UIToolbar.hpp"
@@ -17,7 +17,7 @@
 #include "../engine/Resource.hpp"
 #include "../engine/Texture.hpp"
 #include "../engine/AudioResource.hpp"
-#include "../engine/TypedEventBus.hpp"
+#include "../engine/EventSystem.hpp"
 
 namespace Tina::Game {
 
@@ -40,11 +40,16 @@ public:
     void onExit() override;
     void onPause() override;
     void onResume() override;
+    // 注意：不再需要覆盖onWindowSizeChanged，UI组件已通过registerResizable注册到框架
 
     // 主循环
     void update(float dt) override;
     void render() override;
-    void handleEvent(const Tina::os::Event& event) override;
+    // 事件处理已迁移到 InputSystem
+
+protected:
+    // 视图配置（使用新架构）
+    Container::Vector<ViewSetup> getViewSetup() override;
 
 private:
     void initializeResources();
@@ -64,8 +69,7 @@ private:
     bool findSpawnPoint(int& outX, int& outY);
 
     // 输入处理
-    void handleKeyboard(const Tina::os::Event& event);
-    void handleMouse(const Tina::os::Event& event);
+    void handleInput();
     void handleRightClick(float mx, float my);
     void handleLeftClick(float mx, float my);
 
@@ -89,7 +93,7 @@ private:
     // 游戏世界
     Memory::UniquePtr<TileMap> m_tileMap;
     Memory::UniquePtr<ECS::World> m_ecsWorld;
-    Memory::UniquePtr<Engine::Camera2D> m_camera;
+    // Camera2D现在由Scene基类提供，不需要自己的了
 
     // UI
     Memory::UniquePtr<UI::UIToolbar> m_toolbar;
@@ -100,10 +104,7 @@ private:
     Core::Signal<>::Connection m_switchControlConnection;
     Core::Signal<int, bool>::Connection m_keyPressedConnection;
     Core::Signal<float>::Connection m_mouseWheelConnection;
-    Engine::TypedEventBus::Connection m_playerJumpedConnection;
-    Engine::TypedEventBus::Connection m_playerMovedConnection;
-    Engine::TypedEventBus::Connection m_setDayNightConnection;
-    Engine::TypedEventBus::Connection m_adjustDayNightConnection;
+    // 注意：新事件系统不需要存储连接对象，订阅在场景生命周期内持久有效
 
     // 游戏状态
     entt::entity m_playerEntity = entt::null;

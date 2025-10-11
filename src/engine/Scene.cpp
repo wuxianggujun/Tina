@@ -4,20 +4,77 @@
 
 #include "Scene.hpp"
 #include "Application.hpp"
+#include "InputSystem.hpp"
 #include "../ui/UICore.hpp"
+#include "../ui/UINode.hpp"  // 引入UINode完整定义
 #include "../renderer/RenderQueue.hpp"
 #include "../core/Log.hpp"
 #include "SceneRenderer.hpp"
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
+#include <algorithm>  // for std::find, std::remove
 
 namespace Tina::Engine {
 
 // 构造函数定义（必须在此处，RenderQueue是完整类型）
-Scene::Scene() = default;
+Scene::Scene() {
+    // Scene默认创建一个2D相机
+    m_camera = Memory::MakeUnique<Camera2D>();
+    // 设置默认视口（会在窗口大小更新时自动调整）
+    m_camera->setViewportPixels(m_pixelWidth, m_pixelHeight);
+    m_camera->setViewHeightWorld(20.0f);  // 默认视野高度20个单位
+}
 
 // 虚析构函数定义（必须在此处，RenderQueue是完整类型）
 Scene::~Scene() = default;
+
+// 访问输入系统
+InputSystem* Scene::input() const {
+    return m_app ? &m_app->input() : nullptr;
+}
+
+// UI根节点管理
+void Scene::addUIRoot(UI::UINode* root) {
+    if (root && std::find(m_uiRoots.begin(), m_uiRoots.end(), root) == m_uiRoots.end()) {
+        m_uiRoots.push_back(root);
+    }
+}
+
+void Scene::removeUIRoot(UI::UINode* root) {
+    if (root) {
+        m_uiRoots.erase(
+            std::remove(m_uiRoots.begin(), m_uiRoots.end(), root),
+            m_uiRoots.end()
+        );
+    }
+}
+
+// 更新窗口尺寸
+void Scene::updateWindowSize(int width, int height) {
+    m_pixelWidth = width;
+    m_pixelHeight = height;
+    m_viewDirty = true;
+
+    // 更新SceneRenderer的屏幕尺寸（如果已初始化）
+    if (m_sceneRenderer) {
+        m_sceneRenderer->setScreenSize(width, height);
+    }
+
+    // 更新相机视口
+    if (m_camera) {
+        m_camera->setViewportPixels(width, height);
+    }
+
+    // 自动通知所有UI根节点（框架自动处理，递归通知整个UI树）
+    for (auto* root : m_uiRoots) {
+        if (root) {
+            root->onWindowSizeChanged(width, height);
+        }
+    }
+
+    // 自动调用子类的窗口大小改变回调（可选，用于特殊逻辑）
+    onWindowSizeChanged(width, height);
+}
 
 // 注意：原先计划在此提供若干便捷访问（shaders()/textRenderer()/fileSystem()/resources()），
 // 但与当前 Application 接口不完全一致（不存在 textRenderer()）。为避免接口不匹配，
@@ -128,28 +185,17 @@ void Scene::finalizeViews() {
 
 // 设置3D世界视图
 void Scene::setupWorldView(uint16_t viewId) {
-    // 使用默认的单位矩阵，子类应该在render()中自己设置视图矩阵
-    // 这里只是确保视图有一个有效的变换矩阵
-    float identity[16];
-    bx::mtxIdentity(identity);
-    bgfx::setViewTransform(viewId, identity, identity);
-}
-
-// 框架事件处理（先处理通用事件，再调用子类）
-void Scene::handleEventFrame(const Tina::os::Event& event) {
-    using E = Tina::os::Event;
-
-    // 框架自动处理窗口大小变化
-    if (event.type == E::Type::WINDOW_SIZE) {
-        m_pixelWidth = event.win_size.w;
-        m_pixelHeight = event.win_size.h;
-        m_viewDirty = true;
-
-        TINA_INFO("Scene窗口大小更新: {}x{}", m_pixelWidth, m_pixelHeight);
+    // 使用场景的相机生成视图和投影矩阵
+    if (m_camera) {
+        float viewMatrix[16], projMatrix[16];
+        m_camera->buildViewProj(viewMatrix, projMatrix);
+        bgfx::setViewTransform(viewId, viewMatrix, projMatrix);
+    } else {
+        // 备用：如果没有相机，使用单位矩阵
+        float identity[16];
+        bx::mtxIdentity(identity);
+        bgfx::setViewTransform(viewId, identity, identity);
     }
-
-    // 调用子类的事件处理
-    handleEvent(event);
 }
 
 } // namespace Tina::Engine

@@ -7,15 +7,15 @@
 #include "PauseScene.hpp"  // 暂停场景
 #include "../engine/Application.hpp"
 #include "../engine/SceneManager.hpp"  // 场景管理器
-#include "../engine/OSEventBus.hpp"  // 包含 OS 事件总线定义
-#include "../engine/Camera2D.hpp"  // 相机
+#include "../engine/InputSystem.hpp"  // 添加 InputSystem 头文件
+// Camera2D由Scene基类提供
 #include "../core/Log.hpp"
 #include "../core/Time.hpp"
 #include "../game/CoordinateMapper.hpp"
 #include "../game/TerrainEditor.hpp"
 #include "../game/GameConfig.hpp"
 
-#include <SDL3/SDL.h>
+// #include <SDL3/SDL.h>  // 不再需要SDL，使用os封装
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 #include "../ui/UIConstants.hpp"
@@ -27,6 +27,15 @@ namespace Tina::Game {
 
 GameScene::GameScene() = default;
 GameScene::~GameScene() = default;
+
+// 视图配置（使用新架构）
+Container::Vector<Engine::Scene::ViewSetup> GameScene::getViewSetup() {
+    return {
+        { UI::VIEW_WORLD_SOLID, Engine::Scene::ViewSetup::World3D, true, GameConfig::CLEAR_COLOR, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH },
+        { UI::VIEW_WORLD_ALPHA, Engine::Scene::ViewSetup::World3D, false },
+        { UI::VIEW_UI, Engine::Scene::ViewSetup::UI2D, false }
+    };
+}
 
 void GameScene::onEnter()
 {
@@ -84,15 +93,14 @@ void GameScene::onExit()
     m_switchControlConnection.disconnect();
     m_keyPressedConnection.disconnect();
     m_mouseWheelConnection.disconnect();
-    m_playerJumpedConnection.disconnect();
-    m_playerMovedConnection.disconnect();
-    m_setDayNightConnection.disconnect();
-    m_adjustDayNightConnection.disconnect();
+
+    // 新事件系统：在场景退出时取消订阅
+    // TODO: 实现取消订阅机制（可选，如果需要更精细的控制）
 
     // 清理资源（按创建逆序）
     m_characterPanel.reset();
     m_toolbar.reset();
-    m_camera.reset();
+    // 相机由基类管理，不需要手动reset
     m_ecsWorld.reset();
     m_tileMap.reset();
 
@@ -124,8 +132,8 @@ void GameScene::onResume()
     TINA_INFO("GameScene::onResume - 更新窗口尺寸: {}x{}", m_pixelWidth, m_pixelHeight);
 
     // 更新相机视口
-    if (m_camera) {
-        m_camera->setViewportPixels(m_pixelWidth, m_pixelHeight);
+    if (camera()) {
+        camera()->setViewportPixels(m_pixelWidth, m_pixelHeight);
     }
 
     // 更新 UI 组件
@@ -148,8 +156,14 @@ void GameScene::onResume()
     }
 }
 
+// 注意：不再需要onWindowSizeChanged()方法
+// UI组件已通过addUIRoot()注册到框架，框架自动调用它们的onWindowSizeChanged()
+
 void GameScene::update(float dt)
 {
+    // 处理输入
+    handleInput();
+
     updateGameLogic(dt);
     updateCamera(dt);
     ensureToolbarIconsReady();
@@ -198,47 +212,58 @@ void GameScene::render()
     renderUI();
 }
 
-void GameScene::handleEvent(const Tina::os::Event& event)
+// handleEvent 已删除，输入处理移至 update() 中使用 InputSystem
+
+void GameScene::handleInput()
 {
-    using E = Tina::os::Event;
+    // 使用 InputSystem 进行输入处理
+    auto* appPtr = app();
+    if (!appPtr) return;
+    auto& input = appPtr->input();
 
-    switch (event.type) {
-        case E::Type::WINDOW_SIZE:
-            // 窗口调整大小
-            m_pixelWidth = event.win_size.w;
-            m_pixelHeight = event.win_size.h;
+    // 键盘输入处理
+    if (input.isKeyPressed(Engine::KeyCode::Escape)) {
+        // 进入暂停菜单
+        TINA_INFO("GameScene: 按下 ESC，进入暂停菜单");
+        appPtr->scenes().requestPush(Memory::MakeUnique<PauseScene>());
+        return;
+    }
 
-            // 更新相机视口
-            if (m_camera) {
-                m_camera->setViewportPixels(m_pixelWidth, m_pixelHeight);
+    // 鼠标输入处理
+    auto mousePos = input.getMousePosition();
+    float mx = mousePos.x, my = mousePos.y;
+
+    // 右键：查看角色信息
+    if (input.isMouseButtonPressed(Engine::MouseButton::Right)) {
+        handleRightClick(mx, my);
+    }
+
+    // 左键：工具栏或地形编辑
+    if (input.isMouseButtonPressed(Engine::MouseButton::Left)) {
+        m_isToolActive = true;
+
+        // 检查是否点击工具栏
+        if (m_toolbar && m_toolbar->hitTest(mx, my)) {
+            if (m_toolbar->clickAt(mx, my)) {
+                return;
             }
+        }
 
-            // 更新 UI
-            if (m_toolbar) {
-                m_toolbar->onResize(m_pixelWidth, m_pixelHeight);
-            }
-            if (m_characterPanel) {
-                m_characterPanel->centerOnScreen(m_pixelWidth, m_pixelHeight);
-            }
+        // 地形编辑工具
+        handleLeftClick(mx, my);
+    }
 
-            // 更新 UI 视图的正交矩阵
-            setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
-            break;
+    // 当鼠标按钮释放时，停止工具活动
+    if (input.isMouseButtonReleased(Engine::MouseButton::Left)) {
+        m_isToolActive = false;
+    }
 
-        case E::Type::MOUSE_WHEEL:
-            // 滚轮事件已通过 OSEventBus Signal 订阅处理
-            break;
-
-        case E::Type::KEY:
-            handleKeyboard(event);
-            break;
-
-        case E::Type::MOUSE_BUTTON:
-            handleMouse(event);
-            break;
-
-        default:
-            break;
+    // 鼠标中键：拖动相机视图
+    if (camera() && input.isMouseButtonDown(Engine::MouseButton::Middle)) {
+        auto delta = input.getMouseDelta();
+        // 反向移动相机（拖动感觉更自然）
+        float worldScale = camera()->getZoom();
+        camera()->moveBy(-delta.x / worldScale, -delta.y / worldScale);
     }
 }
 
@@ -323,11 +348,13 @@ void GameScene::createECS()
 
 void GameScene::createCamera()
 {
+    // 使用基类提供的相机，只需要配置它
     float viewH = std::min(GameConfig::DEFAULT_VIEW_HEIGHT, (float)m_tileMap->height());
-    m_camera = Memory::MakeUnique<Engine::Camera2D>();
-    m_camera->setViewportPixels(m_pixelWidth, m_pixelHeight);
-    m_camera->setViewHeightWorld(viewH);
-    TINA_INFO("相机创建完成: 视图高度={}", viewH);
+    if (camera()) {
+        camera()->setViewportPixels(m_pixelWidth, m_pixelHeight);
+        camera()->setViewHeightWorld(viewH);
+        TINA_INFO("相机配置完成: 视图高度={}", viewH);
+    }
 }
 
 void GameScene::createUI()
@@ -337,6 +364,9 @@ void GameScene::createUI()
     // 工具栏
     m_toolbar = Memory::MakeUnique<UI::UIToolbar>();
     m_toolbar->initialize(m_pixelWidth, m_pixelHeight, ui());
+    // 注册到框架，自动处理窗口resize
+    addUIRoot(m_toolbar.get());
+
     // 通过 TextureManager 加载工具图标（示例使用现有纹理资源）
     {
         auto* hub = &app()->resources();
@@ -357,6 +387,8 @@ void GameScene::createUI()
     // 角色面板
     m_characterPanel = Memory::MakeUnique<UI::UICharacterPanel>();
     m_characterPanel->centerOnScreen(m_pixelWidth, m_pixelHeight);
+    // 注册到框架，自动处理窗口resize
+    addUIRoot(m_characterPanel.get());
 
     TINA_INFO("UI 创建完成");
 }
@@ -463,15 +495,20 @@ void GameScene::spawnCharacters(int spawnX, int spawnY)
 
 void GameScene::updateGameLogic(float dt)
 {
-    // 1. 获取键盘输入（SDL 键盘状态适合连续输入，如移动）
-    SDL_PumpEvents();
-    const bool* ks = SDL_GetKeyboardState(nullptr);
+    // 1. 获取键盘输入（使用InputSystem）
+    auto* appPtr = app();
+    if (!appPtr) return;
+    auto& inputSys = appPtr->input();
 
     // 2. ECS 输入与更新（物理、碰撞、AI 等）
     ECS::InputState input{};
-    input.moveLeft = ks[SDL_SCANCODE_A] || ks[SDL_SCANCODE_LEFT];
-    input.moveRight = ks[SDL_SCANCODE_D] || ks[SDL_SCANCODE_RIGHT];
-    input.jump = ks[SDL_SCANCODE_W] || ks[SDL_SCANCODE_UP] || ks[SDL_SCANCODE_SPACE];
+    input.moveLeft = inputSys.isKeyDown(Engine::KeyCode::A) ||
+                    inputSys.isKeyDown(Engine::KeyCode::Left);
+    input.moveRight = inputSys.isKeyDown(Engine::KeyCode::D) ||
+                     inputSys.isKeyDown(Engine::KeyCode::Right);
+    input.jump = inputSys.isKeyDown(Engine::KeyCode::W) ||
+                inputSys.isKeyDown(Engine::KeyCode::Up) ||
+                inputSys.isKeyDown(Engine::KeyCode::Space);
 
     // 记录更新前的玩家状态（用于触发事件）
     float prevPlayerX = 0.0f, prevPlayerY = 0.0f;
@@ -504,18 +541,15 @@ void GameScene::updateGameLogic(float dt)
     // 5. 连续清除工具（左键按住 + 工具1=挖掘）
     // 注：SDL 鼠标状态适合检测按住状态，而非单击
     {
-        float mx = 0.0f, my = 0.0f;
-        uint32_t btnMask = (uint32_t)SDL_GetMouseState(&mx, &my);
-#ifdef SDL_BUTTON_MASK
-        bool leftHeld = (btnMask & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) != 0;
-#else
-        bool leftHeld = (btnMask & SDL_BUTTON_LMASK) != 0;
-#endif
+        auto mousePos = inputSys.getMousePosition();
+        float mx = mousePos.x, my = mousePos.y;
+        bool leftHeld = inputSys.isMouseButtonDown(Engine::MouseButton::Left);
+
         if (leftHeld && m_toolbar && !m_toolbar->hitTest(mx, my)) {
             int tool = m_toolbar->selectedIndex();
             if (tool == 1) {  // 工具1=挖掘器
                 float wx = 0.0f, wy = 0.0f;
-                screenToWorld(mx, my, m_pixelWidth, m_pixelHeight, *m_camera, wx, wy);
+                screenToWorld(mx, my, m_pixelWidth, m_pixelHeight, *camera(), wx, wy);
                 excavateCircle(*m_tileMap, wx, wy, GameConfig::EXCAVATE_RADIUS);
             }
         }
@@ -523,13 +557,10 @@ void GameScene::updateGameLogic(float dt)
 
     // 6. UI 更新（工具栏、角色面板）
     if (m_toolbar) {
-        float mx = 0.0f, my = 0.0f;
-        uint32_t btnMask = (uint32_t)SDL_GetMouseState(&mx, &my);
-#ifdef SDL_BUTTON_MASK
-        bool leftHeld = (btnMask & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) != 0;
-#else
-        bool leftHeld = (btnMask & SDL_BUTTON_LMASK) != 0;
-#endif
+        auto mousePos = inputSys.getMousePosition();
+        float mx = mousePos.x, my = mousePos.y;
+        bool leftHeld = inputSys.isMouseButtonDown(Engine::MouseButton::Left);
+
         // 先更新布局（计算各子节点世界坐标），再做命中测试与事件处理
         m_toolbar->update(dt);
         m_toolbar->setMousePos(mx, my);
@@ -538,13 +569,10 @@ void GameScene::updateGameLogic(float dt)
     }
 
     if (m_characterPanel) {
-        float mx = 0.0f, my = 0.0f;
-        uint32_t btnMask = (uint32_t)SDL_GetMouseState(&mx, &my);
-#ifdef SDL_BUTTON_MASK
-        bool leftHeld = (btnMask & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) != 0;
-#else
-        bool leftHeld = (btnMask & SDL_BUTTON_LMASK) != 0;
-#endif
+        auto mousePos = inputSys.getMousePosition();
+        float mx = mousePos.x, my = mousePos.y;
+        bool leftHeld = inputSys.isMouseButtonDown(Engine::MouseButton::Left);
+
         // 先更新布局，再分发事件
         m_characterPanel->update(dt);
         m_characterPanel->events().updateMouse(mx, my, leftHeld);
@@ -557,15 +585,15 @@ void GameScene::updateGameLogic(float dt)
 
 void GameScene::updateCamera(float dt)
 {
-    if (!m_camera || !m_ecsWorld) return;
+    if (!camera() || !m_ecsWorld) return;
 
     // 获取视区尺寸（世界单位）
-    float viewW = (float)m_camera->viewW();
-    float viewH = (float)m_camera->viewH();
+    float viewW = (float)camera()->viewW();
+    float viewH = (float)camera()->viewH();
 
     // 获取当前控制的角色位置
-    float targetCamX = m_camera->x();
-    float targetCamY = m_camera->y();
+    float targetCamX = camera()->x();
+    float targetCamY = camera()->y();
 
     auto controlled = m_ecsWorld->getControlledEntity();
     if (controlled != entt::null) {
@@ -585,8 +613,8 @@ void GameScene::updateCamera(float dt)
     }
 
     // 平滑跟随（插值，避免相机抖动）
-    float camX = m_camera->x();
-    float camY = m_camera->y();
+    float camX = camera()->x();
+    float camY = camera()->y();
     camX += (targetCamX - camX) * GameConfig::CAMERA_SMOOTH_FACTOR;
     camY += (targetCamY - camY) * GameConfig::CAMERA_SMOOTH_FACTOR;
 
@@ -598,31 +626,14 @@ void GameScene::updateCamera(float dt)
         camY = std::clamp(camY, 0.0f, std::max(0.0f, (float)mapH - viewH));
     }
 
-    m_camera->setPosition(camX, camY);
+    camera()->setPosition(camX, camY);
 }
 
 void GameScene::renderWorld()
 {
-    if (!m_tileRenderer || !m_tileMap || !m_camera) return;
+    if (!m_tileRenderer || !m_tileMap || !camera()) return;
 
-    // 构建相机矩阵（视图矩阵 + 投影矩阵）
-    float viewM[16], projM[16];
-    m_camera->buildViewProj(viewM, projM);
-
-    // 设置世界视图（view 1 = 固体地形，view 2 = 液体/角色）
-    // 注：分离固体和液体渲染，实现半透明水体效果
-    bgfx::setViewRect(UI::VIEW_WORLD_SOLID, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
-    bgfx::setViewRect(UI::VIEW_WORLD_ALPHA, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
-    bgfx::setViewTransform(UI::VIEW_WORLD_SOLID, viewM, projM);
-    bgfx::setViewTransform(UI::VIEW_WORLD_ALPHA, viewM, projM);
-
-    // 设置清屏（view 1 负责清理颜色和深度缓冲，防止残影）
-    // 关键：必须调用 setViewClear，touch() 不会清理帧缓冲
-    bgfx::setViewClear(UI::VIEW_WORLD_SOLID, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, GameConfig::CLEAR_COLOR, 1.0f, 0);
-
-    // 触摸视图（确保视图被渲染，即使没有几何体）
-    bgfx::touch(UI::VIEW_WORLD_SOLID);
-    bgfx::touch(UI::VIEW_WORLD_ALPHA);
+    // 框架已经自动设置了视图和相机矩阵，不需要手动调用bgfx了！
 
     // 渲染地形（固体 -> view 1，液体 -> view 2）
     m_tileRenderer->renderSolid(*m_tileMap, UI::VIEW_WORLD_SOLID);
@@ -691,57 +702,15 @@ void GameScene::ensureToolbarIconsReady()
     trySet(2, m_iconBomb);
 }
 
-void GameScene::handleKeyboard(const Tina::os::Event& event)
-{
-    if (event.type != os::Event::Type::KEY || !event.key.down) return;
-
-    // ESC 键：暂停游戏
-    if (event.key.key_code == os::KeyCode::ESCAPE) {
-        TINA_INFO("GameScene: 按下 ESC，进入暂停菜单");
-        app()->scenes().requestPush(Memory::MakeUnique<PauseScene>());
-        return;
-    }
-
-    // 其他键盘事件已通过 OSEventBus Signal 订阅处理
-}
-
-void GameScene::handleMouse(const Tina::os::Event& event)
-{
-    if (event.type != os::Event::Type::MOUSE_BUTTON) return;
-    if (!event.mouse_button.down) return;  // 只处理按下事件
-
-    float mx = 0.0f, my = 0.0f;
-    SDL_GetMouseState(&mx, &my);
-
-    // 右键：查看角色信息
-    if (event.mouse_button.button == os::MouseButton::RIGHT) {
-        handleRightClick(mx, my);
-        return;
-    }
-
-    // 左键：工具栏或地形编辑
-    if (event.mouse_button.button == os::MouseButton::LEFT) {
-        m_isToolActive = true;
-
-        // 检查是否点击工具栏（直接命中并切换选中，避免依赖事件系统的边沿判定）
-        if (m_toolbar && m_toolbar->hitTest(mx, my)) {
-            if (m_toolbar->clickAt(mx, my)) {
-                return;
-            }
-        }
-
-        // 地形编辑工具
-        handleLeftClick(mx, my);
-    }
-}
+// handleKeyboard 和 handleMouse 已删除，功能合并到 handleInput
 
 void GameScene::handleRightClick(float mx, float my)
 {
-    if (!m_ecsWorld || !m_camera || !m_characterPanel) return;
+    if (!m_ecsWorld || !camera() || !m_characterPanel) return;
 
     // 转换到世界坐标
     float wx = 0.0f, wy = 0.0f;
-    screenToWorld(mx, my, m_pixelWidth, m_pixelHeight, *m_camera, wx, wy);
+    screenToWorld(mx, my, m_pixelWidth, m_pixelHeight, *camera(), wx, wy);
 
     // 检测所有角色
     auto& reg = m_ecsWorld->registry();
@@ -779,11 +748,11 @@ void GameScene::handleRightClick(float mx, float my)
 
 void GameScene::handleLeftClick(float mx, float my)
 {
-    if (!m_tileMap || !m_camera || !m_toolbar) return;
+    if (!m_tileMap || !camera() || !m_toolbar) return;
 
     // 转换到世界坐标
     float wx = 0.0f, wy = 0.0f;
-    screenToWorld(mx, my, m_pixelWidth, m_pixelHeight, *m_camera, wx, wy);
+    screenToWorld(mx, my, m_pixelWidth, m_pixelHeight, *camera(), wx, wy);
 
     int tx = (int)std::floor(wx);
     int ty = (int)std::floor(wy);
@@ -820,7 +789,7 @@ void GameScene::useWaterTool(int worldX, int worldY)
 
 void GameScene::useDiggerTool(int worldX, int worldY)
 {
-    if (!m_tileMap || !m_camera) return;
+    if (!m_tileMap || !camera()) return;
     float wx = (float)worldX + 0.5f;
     float wy = (float)worldY + 0.5f;
     excavateCircle(*m_tileMap, wx, wy, GameConfig::EXCAVATE_RADIUS);
@@ -828,7 +797,7 @@ void GameScene::useDiggerTool(int worldX, int worldY)
 
 void GameScene::useExplodeTool(int worldX, int worldY)
 {
-    if (!m_tileMap || !m_camera || !m_particleSystem) return;
+    if (!m_tileMap || !camera() || !m_particleSystem) return;
 
     float wx = (float)worldX + 0.5f;
     float wy = (float)worldY + 0.5f;
@@ -851,57 +820,26 @@ void GameScene::subscribeToEvents()
 {
     if (!app()) return;
 
+    // TODO: 使用新事件系统替换键盘事件订阅
     // 订阅键盘事件（用于工具栏快捷键）
-    m_keyPressedConnection = app()->osEvents().onKeyPressed.connect(
-        [this](int keycode, bool isRepeat) {
-            if (!m_toolbar || isRepeat) return;
+    // m_keyPressedConnection = app()->osEvents().onKeyPressed.connect(...);
 
-            // 工具栏快捷键（数字键 1-8）
-            switch (keycode) {
-                case (int)os::KeyCode::KEY_1: m_toolbar->select(0); break;
-                case (int)os::KeyCode::KEY_2: m_toolbar->select(1); break;
-                case (int)os::KeyCode::KEY_3: m_toolbar->select(2); break;
-                case (int)os::KeyCode::KEY_4: m_toolbar->select(3); break;
-                case (int)os::KeyCode::KEY_5: m_toolbar->select(4); break;
-                case (int)os::KeyCode::KEY_6: m_toolbar->select(5); break;
-                case (int)os::KeyCode::KEY_7: m_toolbar->select(6); break;
-                case (int)os::KeyCode::KEY_8: m_toolbar->select(7); break;
-                default: break;
-            }
-        }
-    );
-
+    // TODO: 使用新事件系统替换鼠标滚轮事件订阅
     // 订阅鼠标滚轮事件（切换工具）
-    m_mouseWheelConnection = app()->osEvents().onMouseWheel.connect(
-        [this](float amount) {
-            if (!m_toolbar) return;
+    // m_mouseWheelConnection = app()->osEvents().onMouseWheel.connect(...);
 
-            int n = m_toolbar->slotCount();
-            if (n > 0) {
-                int cur = m_toolbar->selectedIndex();
-                if (cur < 0) cur = 0;
-                if (amount > 0.0f) {
-                    cur = (cur + 1) % n;
-                } else if (amount < 0.0f) {
-                    cur = (cur - 1 + n) % n;
-                }
-                m_toolbar->select(cur);
-            }
-        }
-    );
+    // 订阅玩家跳跃事件（添加粒子效果） - 使用新事件系统
+    app()->events().subscribe<Tina::Game::Events::PlayerJumped>(this, &GameScene::onPlayerJumpedEvt);
 
-    // 订阅玩家跳跃事件（添加粒子效果）
-    m_playerJumpedConnection = app()->events().connect<Tina::Game::Events::PlayerJumped, &GameScene::onPlayerJumpedEvt>(*this);
+    // 订阅玩家移动事件（可用于调试或其他逻辑） - 使用新事件系统
+    app()->events().subscribe<Tina::Game::Events::PlayerMoved>(this, &GameScene::onPlayerMovedEvt);
 
-    // 订阅玩家移动事件（可用于调试或其他逻辑）
-    m_playerMovedConnection = app()->events().connect<Tina::Game::Events::PlayerMoved, &GameScene::onPlayerMovedEvt>(*this);
-
-    // === 昼夜系统调试信号 ===
-    m_setDayNightConnection = app()->events().connect<Tina::Game::Events::SetDayNight, &GameScene::onSetDayNight>(*this);
-    m_adjustDayNightConnection = app()->events().connect<Tina::Game::Events::AdjustDayNight, &GameScene::onAdjustDayNight>(*this);
+    // === 昼夜系统调试信号 === - 使用新事件系统
+    app()->events().subscribe<Tina::Game::Events::SetDayNight>(this, &GameScene::onSetDayNight);
+    app()->events().subscribe<Tina::Game::Events::AdjustDayNight>(this, &GameScene::onAdjustDayNight);
     // 已移除暂停/恢复昼夜功能
 
-    TINA_INFO("GameScene: 事件订阅完成");
+    TINA_INFO("GameScene: 事件订阅完成（新事件系统）");
 }
 
 void GameScene::triggerPlayerEvents(float prevX, float prevY, bool wasOnGround)
@@ -917,14 +855,18 @@ void GameScene::triggerPlayerEvents(float prevX, float prevY, bool wasOnGround)
 
     // 检测跳跃（离地 + 垂直速度向上）
     if (wasOnGround && !body.onGround && velocity.vy < 0.0f) {
-        app()->events().trigger<Tina::Game::Events::PlayerJumped>();
+        Tina::Game::Events::PlayerJumped jumpEvent;
+        app()->events().trigger(jumpEvent);
     }
 
     // 检测移动（位置变化）
     float dx = transform.x - prevX;
     float dy = transform.y - prevY;
     if (std::abs(dx) > 0.01f || std::abs(dy) > 0.01f) {
-        app()->events().trigger<Tina::Game::Events::PlayerMoved>(transform.x, transform.y);
+        Tina::Game::Events::PlayerMoved moveEvent;
+        moveEvent.x = transform.x;
+        moveEvent.y = transform.y;
+        app()->events().trigger(moveEvent);
     }
 }
 
@@ -941,7 +883,9 @@ void GameScene::onAdjustDayNight(const Tina::Game::Events::AdjustDayNight& e)
 
 void GameScene::onPlayerJumpedEvt(const Tina::Game::Events::PlayerJumped&)
 {
-    if (!m_particleSystem || m_playerEntity == entt::null) return;
+    // 防御性检查：确保场景资源仍然有效
+    if (!m_ecsWorld || !m_particleSystem || m_playerEntity == entt::null) return;
+
     auto& reg = m_ecsWorld->registry();
     if (reg.any_of<ECS::Transform>(m_playerEntity)) {
         auto& transform = reg.get<ECS::Transform>(m_playerEntity);
