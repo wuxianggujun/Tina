@@ -145,8 +145,18 @@ public:
     // === 点测试（用于事件分发） ===
     bool containsPoint(float worldX, float worldY);
 
+    // === 布局系统 ===
+    // 请求重新布局（标记布局失效，在下次访问前自动执行）
+    void requestLayout();
+
+    // 立即执行布局（强制同步布局，通常不需要手动调用）
+    void performLayoutNow();
+
+    // 检查布局是否需要更新
+    bool needsLayout() const { return m_layoutDirty; }
+
     // === 渲染与更新 ===
-    void update(float dt); // 递归更新自身及子节点
+    void update(float dt); // 递归更新自身及子节点（不包括布局）
     void render(uint16_t viewId, UIRenderer& renderer); // 递归渲染
 
     // === 事件回调（子类可覆盖，或通过函数对象绑定） ===
@@ -171,8 +181,17 @@ public:
     void setName(const std::string& name) { m_name = name; }
 
 protected:
-    // 子类实现具体绘制逻辑
+    // === 子类可覆盖的回调 ===
+
+    // 布局回调：计算并设置子节点的 position 和 size
+    // 在布局失效后，首次访问坐标前自动调用
+    // 注意：只负责布局子节点，不要在这里做动画或状态更新
+    virtual void onLayout() {}
+
+    // 更新回调：处理动画、状态更新等（不包括布局）
     virtual void onUpdate(float dt) {}
+
+    // 渲染回调：绘制节点自身
     virtual void onRender(uint16_t viewId, UIRenderer& renderer) {}
 
 private:
@@ -196,7 +215,10 @@ protected:
 
     // 世界变换缓存
     Tina::Math::Vec2 m_worldPos{0, 0};
-    bool m_dirty = true;
+    bool m_dirty = true;        // 坐标脏标记（需要重新计算世界坐标）
+
+    // 布局系统
+    bool m_layoutDirty = true;  // 布局脏标记（需要重新布局子节点）
 
     // 状态
     bool m_visible = true;

@@ -46,8 +46,21 @@ void UIToolbar::shutdown()
 void UIToolbar::onResize(int screenW, int screenH)
 {
     m_screenW = screenW; m_screenH = screenH;
-    if (m_root) m_root->setSize((float)m_screenW, (float)m_screenH);
+    if (m_root) {
+        m_root->setSize((float)m_screenW, (float)m_screenH);
+        // ✅ 关键修复：先更新根节点的布局，确保子节点计算位置时有正确的父节点尺寸
+        m_root->requestLayout();
+        m_root->performLayoutNow();
+    }
+
+    // 在根节点布局更新后，再重建工具栏布局
     buildLayout();
+
+    // ✅ buildLayout() 后再次执行布局，确保新创建的节点位置正确
+    // 这是必要的，因为buildLayout()会创建新的子节点
+    if (m_root) {
+        m_root->performLayoutNow();
+    }
 }
 
 void UIToolbar::update(float dt)
@@ -107,11 +120,14 @@ void UIToolbar::buildLayout()
     }
     m_slots.clear();
 
-    // 可容纳按钮数（不超过 m_slotCount），并据此“以内容宽度”为准，居中整个工具栏
+    // 可容纳按钮数（不超过 m_slotCount），并据此"以内容宽度"为准，居中整个工具栏
     int avail = std::max(0, m_screenW - m_padding * 2);
     int per = m_slotSize + m_gap;
     int maxSlots = per > 0 ? std::max(1, (avail + m_gap) / per) : m_slotCount;
     int count = std::min(m_slotCount, maxSlots);
+
+    TINA_INFO("UIToolbar::buildLayout: screenW={}, avail={}, per={}, maxSlots={}, m_slotCount={}, count={}",
+              m_screenW, avail, per, maxSlots, m_slotCount, count);
 
     int contentW = count > 0 ? (count * m_slotSize + (count - 1) * m_gap) : 0;
     int barW = contentW + m_padding * 2;
@@ -121,7 +137,12 @@ void UIToolbar::buildLayout()
     m_barH = std::max(m_barH, m_slotSize + m_padding * 2);
     m_bar->setSize((float)barW, (float)m_barH);
     m_bar->setPosition(barX, 0.0f);
-    if (m_stack) m_stack->setSize((float)barW, (float)m_barH);
+    // ✅ 确保位置更新后立即标记布局需要更新
+    m_bar->requestLayout();
+    if (m_stack) {
+        m_stack->setSize((float)barW, (float)m_barH);
+        m_stack->requestLayout();
+    }
 
     // 创建按钮并布局（使用新的API）
     for (int i = 0; i < count; ++i) {
@@ -182,6 +203,10 @@ bool UIToolbar::hitTest(float x, float y) const
 {
     if (!m_bar) return false;
     // 使用 UINode 自带的 containsPoint（基于世界坐标）
+    // auto wp = const_cast<UIPanel*>(m_bar)->getWorldPosition();
+    // auto sz = m_bar->getSize();
+    // TINA_INFO("UIToolbar::hitTest: 鼠标({}, {}), 工具栏世界坐标({}, {}), 尺寸({}, {})",
+    //           x, y, wp.x, wp.y, sz.x, sz.y);
     return const_cast<UIPanel*>(m_bar)->containsPoint(x, y);
 }
 

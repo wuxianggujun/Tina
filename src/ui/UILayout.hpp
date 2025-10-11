@@ -13,13 +13,13 @@ enum class CrossAlign { Start, Center, End };
 class UIHStack : public UINode {
 public:
     UIHStack(const std::string& name = "HStack") : UINode(name) {}
-    void setSpacing(float s) { m_spacing = s; m_dirty = true; }
-    void setPadding(float px, float py) { m_padX = px; m_padY = py; m_dirty = true; }
-    void setCrossAlign(CrossAlign a) { m_cross = a; m_dirty = true; }
+    void setSpacing(float s) { m_spacing = s; requestLayout(); }
+    void setPadding(float px, float py) { m_padX = px; m_padY = py; requestLayout(); }
+    void setCrossAlign(CrossAlign a) { m_cross = a; requestLayout(); }
 
 protected:
-    void onUpdate(float dt) override {
-        (void)dt;
+    // ✅ 布局逻辑移到 onLayout()，在需要时自动执行
+    void onLayout() override {
         // 简单流式布局
         float x = m_padX;
         const auto size = getSize();
@@ -62,13 +62,13 @@ private:
 class UIVStack : public UINode {
 public:
     UIVStack(const std::string& name = "VStack") : UINode(name) {}
-    void setSpacing(float s) { m_spacing = s; m_dirty = true; }
-    void setPadding(float px, float py) { m_padX = px; m_padY = py; m_dirty = true; }
-    void setCrossAlign(CrossAlign a) { m_cross = a; m_dirty = true; }
+    void setSpacing(float s) { m_spacing = s; requestLayout(); }
+    void setPadding(float px, float py) { m_padX = px; m_padY = py; requestLayout(); }
+    void setCrossAlign(CrossAlign a) { m_cross = a; requestLayout(); }
 
 protected:
-    void onUpdate(float dt) override {
-        (void)dt;
+    // ✅ 布局逻辑移到 onLayout()
+    void onLayout() override {
         float y = m_padY;
         const auto size = getSize();
         float maxW = 0.0f;
@@ -91,8 +91,6 @@ protected:
             child->setPosition(x, y + mt);
             y += mt + cs.y + mb;
             // 下一个可见子项再加 spacing
-            // 简化：无预先统计，直接在下次迭代中判断
-            // 为了不多加一次 spacing，在本次就先加，并在循环结束后统一修正
             y += m_spacing;
             if (cs.x > maxW) maxW = cs.x;
         }

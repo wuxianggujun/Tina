@@ -263,11 +263,11 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
     }
 
     if (idx.empty()) {
-        TINA_WARN("TextRenderer: 没有可绘制的字形！文本=[{}], missing={}, appended={}", utf8, missing, appended);
+        // TINA_WARN("TextRenderer: 没有可绘制的字形！文本=[{}], missing={}, appended={}", utf8, missing, appended);
         return;
     }
-    
-    TINA_INFO("TextRenderer: 准备渲染 {} 个字形，顶点数={}, 索引数={}", appended, verts.size(), idx.size());
+
+    // TINA_INFO("TextRenderer: 准备渲染 {} 个字形，顶点数={}, 索引数={}", appended, verts.size(), idx.size());
 
     // === 调试：打印第一个顶点的详细信息 ===
     static int debugCount = 0;

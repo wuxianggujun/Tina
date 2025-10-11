@@ -279,8 +279,8 @@ void UIRenderer::flushColorBatch()
     const uint32_t vcount = static_cast<uint32_t>(m_colorBatch.vertices.size());
     const uint32_t icount = static_cast<uint32_t>(m_colorBatch.indices.size());
     
-    // ✅ 移除性能日志，改为TRACE级别（默认不输出）
-    TINA_TRACE("UIRenderer: flushColorBatch - 提交 {} 个矩形", vcount / 4);
+    // ✅ 性能日志（已注释，避免刷屏）
+    // TINA_TRACE("UIRenderer: flushColorBatch - 提交 {} 个矩形", vcount / 4);
     
     // 检查瞬态缓冲区容量
     if (bgfx::getAvailTransientVertexBuffer(vcount, m_colorLayout) < vcount ||
@@ -395,8 +395,8 @@ void UIRenderer::flushTextCommands()
 {
     if (!m_text || m_textCmds.empty()) return;
     
-    // ✅ 使用TRACE级别日志
-    TINA_TRACE("UIRenderer: flushTextCommands - 提交 {} 条文本命令", (int)m_textCmds.size());
+    // ✅ 性能日志（已注释，避免刷屏）
+    // TINA_TRACE("UIRenderer: flushTextCommands - 提交 {} 条文本命令", (int)m_textCmds.size());
     
     // 记录文本统计
     for (size_t i = 0; i < m_textCmds.size(); ++i) {

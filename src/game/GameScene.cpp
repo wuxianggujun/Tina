@@ -138,8 +138,17 @@ void GameScene::onResume()
 
     // 更新 UI 组件
     if (m_toolbar) {
+        // ✅ 确保工具栏可见（可能在切换角色控制时被隐藏了）
+        if (m_toolbar->root()) {
+            m_toolbar->root()->setVisible(true);
+        }
         m_toolbar->onResize(m_pixelWidth, m_pixelHeight);
+
+        // ✅ 关键修复：onResize() 会调用 buildLayout() 重新创建所有按钮
+        // 新创建的按钮没有图标，需要重新设置
+        ensureToolbarIconsReady();
     }
+
     if (m_characterPanel) {
         m_characterPanel->centerOnScreen(m_pixelWidth, m_pixelHeight);
     }
@@ -244,10 +253,13 @@ void GameScene::handleInput()
 
         // 检查是否点击工具栏
         if (m_toolbar && m_toolbar->hitTest(mx, my)) {
+            // TINA_INFO("工具栏命中测试通过: 鼠标({}, {}), 窗口尺寸: {}x{}", mx, my, m_pixelWidth, m_pixelHeight);
             if (m_toolbar->clickAt(mx, my)) {
                 return;
             }
-        }
+        } // else if (m_toolbar) {
+            // TINA_INFO("工具栏命中测试失败: 鼠标({}, {}), 窗口尺寸: {}x{}", mx, my, m_pixelWidth, m_pixelHeight);
+        // }
 
         // 地形编辑工具
         handleLeftClick(mx, my);
@@ -264,6 +276,36 @@ void GameScene::handleInput()
         // 反向移动相机（拖动感觉更自然）
         float worldScale = camera()->getZoom();
         camera()->moveBy(-delta.x / worldScale, -delta.y / worldScale);
+    }
+
+    // 鼠标滚轮：切换工具
+    float wheelDelta = input.getMouseWheelDelta();
+    if (wheelDelta != 0.0f && m_toolbar) {
+        int currentIndex = m_toolbar->selectedIndex();
+        int slotCount = m_toolbar->slotCount();
+        if (slotCount > 0) {
+            int newIndex = currentIndex;
+            if (wheelDelta > 0) {
+                // 向上滚动，切换到上一个工具
+                newIndex = (currentIndex - 1 + slotCount) % slotCount;
+            } else {
+                // 向下滚动，切换到下一个工具
+                newIndex = (currentIndex + 1) % slotCount;
+            }
+            m_toolbar->select(newIndex);
+            TINA_INFO("GameScene: 滚轮切换工具 {} -> {}", currentIndex, newIndex);
+        }
+    }
+
+    // 数字键1-8：快速切换工具
+    for (int i = 0; i < 8; ++i) {
+        auto key = static_cast<Engine::KeyCode>('1' + i);
+        if (input.isKeyPressed(key) && m_toolbar) {
+            if (i < m_toolbar->slotCount()) {
+                m_toolbar->select(i);
+                TINA_INFO("GameScene: 数字键切换工具 {}", i);
+            }
+        }
     }
 }
 
@@ -490,6 +532,20 @@ void GameScene::spawnCharacters(int spawnX, int spawnY)
     // 6. 订阅事件（OS 输入 + 强类型玩法事件）
     subscribeToEvents();
 
+    // 7. 初始化相机位置到玩家位置（避免从地图左下角开始）
+    if (camera() && m_ecsWorld && m_playerEntity != entt::null) {
+        auto& registry = m_ecsWorld->registry();
+        if (registry.valid(m_playerEntity) && registry.all_of<ECS::Transform>(m_playerEntity)) {
+            auto& playerTransform = registry.get<ECS::Transform>(m_playerEntity);
+            // 将相机中心设置到玩家位置
+            float viewW = camera()->viewW();
+            float viewH = camera()->viewH();
+            camera()->setPosition(playerTransform.x - viewW * 0.5f,
+                                  playerTransform.y - viewH * 0.5f);
+            TINA_INFO("相机初始化到玩家位置: ({}, {})", playerTransform.x, playerTransform.y);
+        }
+    }
+
     TINA_INFO("角色生成完成: 1 玩家 + 3 NPC");
 }
 
@@ -652,7 +708,19 @@ void GameScene::renderWorld()
 
 void GameScene::renderUI()
 {
-    if (!m_toolbar) return;
+    if (!m_toolbar) {
+        TINA_WARN("renderUI: m_toolbar 不存在！");
+        return;
+    }
+
+    // 添加调试日志
+    static int frameCount = 0;
+    if (frameCount++ % 60 == 0) {  // 每60帧打印一次
+        TINA_INFO("renderUI: m_toolbar={}, root visible={}, slotCount={}",
+                  (void*)m_toolbar.get(),
+                  m_toolbar->root() ? m_toolbar->root()->isVisible() : false,
+                  m_toolbar->slotCount());
+    }
 
     // UI 视图已在 initializeResources() 中设置
 

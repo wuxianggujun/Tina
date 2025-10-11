@@ -242,11 +242,11 @@ void Application::run()
         // 计算FPS
         m_fps = (m_deltaTime > 0.0f) ? (1.0f / m_deltaTime) : 60.0f;
 
-        // 2. 处理事件（必须先处理，SDL_PollEvent会更新状态）
-        processEvents();
-
-        // 3. 输入系统帧开始（保存上一帧状态，查询最新状态）
+        // 2. 输入系统帧开始（重置增量值，保存上一帧状态）
         if (m_inputSystem) m_inputSystem->beginFrame();
+
+        // 3. 处理事件（在beginFrame之后，这样滚轮事件才能被正确记录）
+        processEvents();
 
         // 4. 更新逻辑
         update(m_deltaTime);
@@ -273,7 +273,7 @@ void Application::processEvents()
     while (Window::pollEvent(event)) {
         // 1. InputSystem 处理特殊事件（滚轮、文本输入）
         if (m_inputSystem) {
-            // InputSystem 在 beginFrame 中查询状态即可
+            m_inputSystem->processSDLEvent(&event);
         }
 
         // 2. 处理全局事件
