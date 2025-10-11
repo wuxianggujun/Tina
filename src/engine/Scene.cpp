@@ -85,17 +85,6 @@ void Scene::applyWindowResize(int width, int height) {
     onWindowSizeChanged(width, height);
 }
 
-// 处理防抖动
-void Scene::processPendingResize(float dt) {
-    if (m_pendingResize && m_resizeTimer > 0) {
-        m_resizeTimer -= dt;
-        if (m_resizeTimer <= 0) {
-            // 时间到，应用窗口调整
-            applyWindowResize(m_pendingWidth, m_pendingHeight);
-            m_pendingResize = false;
-        }
-    }
-}
 
 // 注意：原先计划在此提供若干便捷访问（shaders()/textRenderer()/fileSystem()/resources()），
 // 但与当前 Application 接口不完全一致（不存在 textRenderer()）。为避免接口不匹配，
@@ -147,7 +136,23 @@ Renderer::RenderQueue& Scene::queue() {
     return *m_renderQueue;
 }
 
-// ==================== 新增：框架渲染方法 ====================
+// ==================== 新增：框架方法 ====================
+
+// 框架更新入口（自动处理防抖动）
+void Scene::updateFrame(float dt) {
+    // 1. 处理防抖动的窗口调整
+    if (m_pendingResize && m_resizeTimer > 0) {
+        m_resizeTimer -= dt;
+        if (m_resizeTimer <= 0) {
+            // 时间到，应用窗口调整
+            applyWindowResize(m_pendingWidth, m_pendingHeight);
+            m_pendingResize = false;
+        }
+    }
+
+    // 2. 调用子类的更新逻辑
+    update(dt);
+}
 
 // 框架渲染入口（由Application调用）
 void Scene::renderFrame() {

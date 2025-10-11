@@ -62,7 +62,11 @@ public:
 
     // ==================== 主循环接口 ====================
 
-    // 更新逻辑（每帧调用）
+    // 框架更新入口（由Application/SceneManager调用）
+    // 自动处理防抖动，然后调用子类的update()
+    void updateFrame(float dt);
+
+    // 更新逻辑（子类实现）
     // 参数：dt - 上一帧到当前帧的时间间隔（秒）
     virtual void update(float dt) = 0;
 
@@ -130,9 +134,6 @@ protected:
 protected:
     // 实际应用窗口尺寸更新（子类可以覆盖）
     virtual void applyWindowResize(int width, int height);
-
-    // 处理防抖动（在update中调用）
-    void processPendingResize(float dt);
 
 public:
 

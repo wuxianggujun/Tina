@@ -56,9 +56,6 @@ void SettingsScene::onExit()
 
 void SettingsScene::update(float dt)
 {
-    // 处理防抖动的窗口调整
-    processPendingResize(dt);
-
     // 处理输入
     handleInput();
     if (m_root) m_root->update(dt);

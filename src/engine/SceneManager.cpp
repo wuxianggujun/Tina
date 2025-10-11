@@ -119,7 +119,7 @@ void SceneManager::update(float dt)
 {
     if (Scene* scene = currentScene()) {
         m_dispatching = true;
-        scene->update(dt);
+        scene->updateFrame(dt);  // 调用框架方法，自动处理防抖动
         m_dispatching = false;
     }
     applyPending();
