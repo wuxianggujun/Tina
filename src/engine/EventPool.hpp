@@ -107,7 +107,7 @@ public:
     template<typename E, typename... Args>
     E* create(Args&&... args) {
         E* event = acquire<E>();
-        *event = E{eastl::forward<Args>(args)...};
+        *event = E{Container::Forward<Args>(args)...};
         return event;
     }
 
@@ -164,7 +164,7 @@ public:
     // 创建池化事件（RAII）
     template<typename E, typename... Args>
     PooledEvent<E> makePooled(Args&&... args) {
-        return PooledEvent<E>(create<E>(eastl::forward<Args>(args)...));
+        return PooledEvent<E>(create<E>(Container::Forward<Args>(args)...));
     }
 
     // 打印池统计信息
@@ -189,14 +189,14 @@ private:
 // 使用事件池触发事件
 template<typename E, typename... Args>
 void triggerPooledEvent(EventSystem& eventSystem, Args&&... args) {
-    auto pooledEvent = EventPoolManager::getInstance().makePooled<E>(eastl::forward<Args>(args)...);
+    auto pooledEvent = EventPoolManager::getInstance().makePooled<E>(Container::Forward<Args>(args)...);
     eventSystem.trigger(*pooledEvent);
 }
 
 // 使用事件池入队事件
 template<typename E, typename... Args>
 void enqueuePooledEvent(EventSystem& eventSystem, Args&&... args) {
-    auto pooledEvent = EventPoolManager::getInstance().makePooled<E>(eastl::forward<Args>(args)...);
+    auto pooledEvent = EventPoolManager::getInstance().makePooled<E>(Container::Forward<Args>(args)...);
     eventSystem.enqueue(*pooledEvent);
     // pooledEvent 析构时会自动归还到池中
 }

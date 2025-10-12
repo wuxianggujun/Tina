@@ -9,7 +9,6 @@
 #include "../core/Time.hpp"
 #include "../core/Log.hpp"
 #include "../core/Container.hpp"  // 使用封装的容器
-#include <EASTL/algorithm.h>      // 需要 min/max/sort
 #include <chrono>
 
 namespace Tina::Engine {
@@ -28,8 +27,8 @@ struct EventPerfData {
     void record(double timeMs) {
         count++;
         totalTime += timeMs;
-        minTime = eastl::min(minTime, timeMs);
-        maxTime = eastl::max(maxTime, timeMs);
+        minTime = Min(minTime, timeMs);
+        maxTime = Max(maxTime, timeMs);
         avgTime = totalTime / count;
     }
 
@@ -124,18 +123,18 @@ private:
 
     void printHotEvents() const {
         // 收集并排序
-        Vector<eastl::pair<EventTypeId, uint32_t>> events;
+        Vector<Pair<EventTypeId, uint32_t>> events;
         for (const auto& [typeId, data] : m_perfData) {
             events.push_back({typeId, data.count});
         }
 
         // 按触发次数排序
-        eastl::sort(events.begin(), events.end(),
+        Sort(events.begin(), events.end(),
             [](const auto& a, const auto& b) { return a.second > b.second; });
 
         // 打印前5个
         TINA_INFO("热点事件（TOP 5）:");
-        for (size_t i = 0; i < eastl::min<size_t>(5, events.size()); ++i) {
+        for (size_t i = 0; i < Min<size_t>(5, events.size()); ++i) {
             TINA_INFO("  {}: {} - {} 次",
                 i + 1,
                 eventTypeIdToString(events[i].first),

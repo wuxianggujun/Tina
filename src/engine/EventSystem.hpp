@@ -72,7 +72,7 @@ public:
     // 订阅事件（lambda 或函数对象），返回 RAII 令牌
     template<typename E>
     SubscriptionToken subscribe(EventHandler<E> handler) {
-        auto id = m_dispatcher.subscribe<E>(eastl::move(handler));
+        auto id = m_dispatcher.subscribe<E>(Container::Move(handler));
 
         // 返回 RAII 令牌，析构时自动取消订阅
         return SubscriptionToken([this, id, typeId = E::TYPE_ID]() {
@@ -309,9 +309,7 @@ private:
     Array<EventQueue<EVENT_QUEUE_CAPACITY>, 3> m_priorityQueues;
 
     // 延迟事件队列（最小堆）
-    eastl::priority_queue<DelayedEvent,
-                         Vector<DelayedEvent>,
-                         eastl::greater<DelayedEvent>> m_delayedEvents;
+    PriorityQueue<DelayedEvent, Vector<DelayedEvent>, Greater<DelayedEvent>> m_delayedEvents;
 };
 
 } // namespace Tina::Engine

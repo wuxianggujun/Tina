@@ -21,6 +21,9 @@
 #include <EASTL/utility.h>
 #include <EASTL/memory.h>
 #include <EASTL/fixed_hash_map.h>
+#include <EASTL/fixed_vector.h>
+#include <EASTL/fixed_function.h>
+#include <EASTL/bonus/ring_buffer.h>
 
 #include "EASTL/priority_queue.h"
 
@@ -242,6 +245,80 @@ namespace Tina {
         using IntList = Vector<i32>;
         using FloatList = Vector<float>;
         using DoubleList = Vector<double>;
-        
+
+        // ====================
+        // 固定容量容器 (Fixed Capacity Containers)
+        // ====================
+
+        // 固定容量向量（栈分配，无动态内存）
+        template<typename T, size_t N, bool bEnableOverflow = true>
+        using FixedVector = eastl::fixed_vector<T, N, bEnableOverflow>;
+
+        // 环形缓冲区（适合队列操作）
+        template<typename T, typename Container = Vector<T>>
+        using RingBuffer = eastl::ring_buffer<T, Container>;
+
+        // ====================
+        // 函数对象类型
+        // ====================
+
+        // 固定大小函数对象（避免堆分配）
+        template<int SIZE_IN_BYTES, typename R, typename... Args>
+        using FixedFunction = eastl::fixed_function<SIZE_IN_BYTES, R(Args...)>;
+
+        // ====================
+        // 比较器和谓词
+        // ====================
+
+        // 比较器
+        template<typename T>
+        using Less = eastl::less<T>;
+
+        template<typename T>
+        using Greater = eastl::greater<T>;
+
+        template<typename T>
+        using EqualTo = eastl::equal_to<T>;
+
+        template<typename T>
+        using NotEqualTo = eastl::not_equal_to<T>;
+
+        // ====================
+        // 类型特性
+        // ====================
+
+        template<typename T>
+        using RemoveReference = eastl::remove_reference<T>;
+
+        template<typename T>
+        using DecayType = eastl::decay_t<T>;
+
+        // ====================
+        // 工具函数扩展
+        // ====================
+
+        // 移动语义
+        template<typename T>
+        TINA_CORE_API constexpr typename eastl::remove_reference<T>::type&& Move(T&& t) noexcept {
+            return eastl::move(t);
+        }
+
+        // 完美转发
+        template<typename T>
+        TINA_CORE_API constexpr T&& Forward(typename eastl::remove_reference<T>::type& t) noexcept {
+            return eastl::forward<T>(t);
+        }
+
+        template<typename T>
+        TINA_CORE_API constexpr T&& Forward(typename eastl::remove_reference<T>::type&& t) noexcept {
+            return eastl::forward<T>(t);
+        }
+
+        // 交换
+        template<typename T>
+        TINA_CORE_API void Swap(T& a, T& b) {
+            eastl::swap(a, b);
+        }
+
     } // namespace Container
 } // namespace Tina

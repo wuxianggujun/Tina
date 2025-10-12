@@ -8,11 +8,11 @@
 
 #include "EventCore.hpp"
 #include "../core/Log.hpp"
-#include <EASTL/bonus/ring_buffer.h>
-#include <EASTL/vector.h>
-#include <EASTL/fixed_vector.h>
+#include "../core/Container.hpp"
 
 namespace Tina::Engine {
+
+using namespace Tina::Container;
 
 // ==================== 通用事件包装器 ====================
 
@@ -57,7 +57,7 @@ struct EventWrapper {
 
 // ==================== 事件队列 ====================
 
-// 事件队列（基于 eastl::ring_buffer，FIFO，无动态分配）
+// 事件队列（基于 ring_buffer，FIFO，无动态分配）
 template<size_t Capacity = EVENT_QUEUE_CAPACITY>
 class EventQueue {
 public:
@@ -150,8 +150,8 @@ public:
     }
 
 private:
-    using BufferContainer = eastl::fixed_vector<EventWrapper, Capacity, false>;
-    eastl::ring_buffer<EventWrapper, BufferContainer> m_buffer;
+    using BufferContainer = FixedVector<EventWrapper, Capacity, false>;
+    RingBuffer<EventWrapper, BufferContainer> m_buffer;
 
     // 统计信息
     uint64_t m_pushCount = 0;
@@ -161,7 +161,7 @@ private:
 
 // ==================== 对象池（可选，用于减少事件分配） ====================
 
-// 简单的对象池实现（基于 eastl::fixed_vector）
+// 简单的对象池实现（基于 fixed_vector）
 template<typename T, size_t Capacity = EVENT_POOL_CAPACITY>
 class ObjectPool {
 public:
@@ -206,8 +206,8 @@ public:
     uint64_t getExhaustedCount() const { return m_exhaustedCount; }
 
 private:
-    eastl::fixed_vector<T, Capacity, false> m_storage;  // 不允许溢出
-    eastl::vector<T*> m_freeList;
+    FixedVector<T, Capacity, false> m_storage;  // 不允许溢出
+    Vector<T*> m_freeList;
 
     uint64_t m_allocCount = 0;
     uint64_t m_deallocCount = 0;

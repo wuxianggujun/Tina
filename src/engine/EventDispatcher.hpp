@@ -10,20 +10,20 @@
 #include "EventQueue.hpp"
 #include "../core/Log.hpp"
 #include "../core/Container.hpp"  // 使用封装的容器
-#include <EASTL/fixed_function.h>
-#include <EASTL/unique_ptr.h>
-#include <EASTL/algorithm.h>
+#include "../core/Memory.hpp"     // 使用封装的智能指针
 #include <atomic>
 
 namespace Tina::Engine {
 
 using namespace Tina::Container;  // 使用容器命名空间
+using Tina::Memory::UniquePtr;    // 导入智能指针类型
+using Tina::Memory::MakeUnique;
 
 // ==================== 事件处理器类型 ====================
 
-// 事件处理器（使用 eastl::fixed_function，64 字节栈内存）
+// 事件处理器（使用 fixed_function，64 字节栈内存）
 template<typename E>
-using EventHandler = eastl::fixed_function<HANDLER_FUNCTION_SIZE, void(const E&)>;
+using EventHandler = FixedFunction<HANDLER_FUNCTION_SIZE, void, const E&>;
 
 // 订阅ID类型
 using SubscriptionId = uint64_t;
@@ -68,11 +68,11 @@ struct TypedHandlerWrapper : HandlerWrapperBase {
     }
 
     void addHandler(SubscriptionId id, EventHandler<E> handler) {
-        handlers.push_back({id, eastl::move(handler)});
+        handlers.push_back({id, Container::Move(handler)});
     }
 
     bool removeHandler(SubscriptionId id) override {
-        auto it = eastl::find_if(handlers.begin(), handlers.end(),
+        auto it = Container::FindIf(handlers.begin(), handlers.end(),
             [id](const HandlerWithId<E>& item) { return item.id == id; });
         if (it != handlers.end()) {
             handlers.erase(it);
@@ -117,7 +117,7 @@ public:
         // 获取或创建对应类型的包装器
         auto& wrapper = m_handlers[typeId];
         if (!wrapper) {
-            wrapper = eastl::make_unique<TypedHandlerWrapper<E>>();
+            wrapper = MakeUnique<TypedHandlerWrapper<E>>();
         }
 
         // 类型安全检查（运行时）
@@ -128,7 +128,7 @@ public:
         }
 
         SubscriptionId id = m_nextSubscriptionId++;
-        typedWrapper->addHandler(id, eastl::move(handler));
+        typedWrapper->addHandler(id, Container::Move(handler));
         ++m_subscribeCount;
         return id;
     }
@@ -311,7 +311,7 @@ public:
 
 private:
     // 处理器数组（按事件类型索引）
-    Array<eastl::unique_ptr<HandlerWrapperBase>,
+    Array<UniquePtr<HandlerWrapperBase>,
           static_cast<size_t>(EventTypeId::MaxEventTypes)> m_handlers;
 
     // 统计信息

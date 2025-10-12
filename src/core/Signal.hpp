@@ -182,8 +182,8 @@ private:
     }
 
     void cleanup() {
-        // 使用 eastl::remove_if 移除无效槽
-        auto it = eastl::remove_if(m_slots.begin(), m_slots.end(), [](const Slot& s){ return !s.valid; });
+        // 使用 RemoveIf 移除无效槽
+        auto it = Container::RemoveIf(m_slots.begin(), m_slots.end(), [](const Slot& s){ return !s.valid; });
         m_slots.erase(it, m_slots.end());
     }
 
