@@ -147,8 +147,16 @@ public:
     void setEnabled(bool e) { if (m_enabled != e) { m_enabled = e; bumpTreeVersion(); } }
     bool isVisible() const { return m_visible; }
     bool isEnabled() const { return m_enabled; }
+    // 交互能力开关（用于命中与事件过滤）
     void setInteractable(bool i) { if (m_interactable != i) { m_interactable = i; bumpTreeVersion(); } }
     bool isInteractable() const { return m_interactable; }
+    void setClickable(bool v) { if (m_clickable != v) { m_clickable = v; bumpTreeVersion(); } }
+    bool isClickable() const { return m_clickable; }
+    void setHoverable(bool v) { if (m_hoverable != v) { m_hoverable = v; bumpTreeVersion(); } }
+    bool isHoverable() const { return m_hoverable; }
+    void setFocusable(bool v) { if (m_focusable != v) { m_focusable = v; bumpTreeVersion(); } }
+    bool isFocusable() const { return m_focusable; }
+    // 呈现顺序（越大越上层）
     void setZIndex(int z) { if (m_zIndex != z) { m_zIndex = z; bumpTreeVersion(); } }
     int zIndex() const { return m_zIndex; }
 
@@ -242,6 +250,9 @@ protected:
     bool m_visible = true;
     bool m_enabled = true;
     bool m_interactable = true;
+    bool m_clickable = true;
+    bool m_hoverable = true;
+    bool m_focusable = false;
     int m_zIndex = 0;
 
     // ==================== 结构变更版本（用于命中索引置脏） ====================

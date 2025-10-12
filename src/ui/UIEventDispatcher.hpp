@@ -196,6 +196,7 @@ private:
     void rebuildIndex();
     void collectAllNodes(UINode* node, Container::Vector<UINode*>& outList);
     UINode* findNodeUnderMouseIndexed(float x, float y);
+    UINode* findNodeUnderMouseIndexedIf(float x, float y, const std::function<bool(UINode*)>& pred);
 
 private:
     UINode* m_root = nullptr;
@@ -256,3 +257,4 @@ protected:
 };
 
 } // namespace Tina::UI
+

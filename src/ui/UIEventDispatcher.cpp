@@ -137,7 +137,7 @@ void UIEventDispatcher::handleMouseInput(float x, float y, bool leftDown) {
 
     // 处理点击事件
     if (leftDown && !m_mouseDownPrev) {
-        // Mouse Down
+        // Mouse Down（仅对可点击目标）
         m_pressedNode = hitNode;
         if (m_pressedNode) {
             UIMouseEvent downEvent(UIEvent::Type::MouseDown, m_pressedNode, x, y);
@@ -164,9 +164,9 @@ void UIEventDispatcher::handleMouseInput(float x, float y, bool leftDown) {
         m_pressedNode = nullptr;
     }
 
-    // Mouse Move
-    if (hitNode) {
-        UIMouseEvent moveEvent(UIEvent::Type::MouseMove, hitNode, x, y);
+    // Mouse Move 发送给可 hover 的目标
+    if (m_hoveredNode) {
+        UIMouseEvent moveEvent(UIEvent::Type::MouseMove, m_hoveredNode, x, y);
         dispatchEvent(moveEvent);
     }
 }
@@ -291,3 +291,8 @@ void UIEventDispatcher::collectAllNodes(UINode* node, Container::Vector<UINode*>
 }
 
 } // namespace Tina::UI
+
+
+
+
+
