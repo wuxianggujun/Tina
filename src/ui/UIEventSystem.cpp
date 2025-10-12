@@ -1,5 +1,6 @@
 #include "UIEventSystem.hpp"
 #include "UIComponents.hpp"
+#include "../core/Log.hpp"
 
 namespace Tina::UI {
 
@@ -52,6 +53,8 @@ void UIEventSystem::processEvents()
     // 按下时记录
     if (m_mouseDown && !m_mouseDownPrev) {
         m_pressedNode = hitNode;
+        TINA_DEBUG("UIEventSystem: 鼠标按下，节点={}",
+            m_pressedNode ? m_pressedNode->getName() : "null");
         if (auto* btn = dynamic_cast<UIButton*>(m_pressedNode)) {
             btn->setPressed(true);
         }
@@ -59,14 +62,14 @@ void UIEventSystem::processEvents()
 
     // 释放时触发 click
     if (!m_mouseDown && m_mouseDownPrev) {
+        TINA_DEBUG("UIEventSystem: 鼠标释放，按下节点={}, 当前节点={}",
+            m_pressedNode ? m_pressedNode->getName() : "null",
+            hitNode ? hitNode->getName() : "null");
+
         if (m_pressedNode && m_pressedNode == hitNode) {
             // 只有在同一节点按下并释放才算点击
+            TINA_INFO("UIEventSystem: 触发点击事件，节点={}", m_pressedNode->getName());
             m_pressedNode->onClick();  // 调用虚函数（用于子类重写）
-
-            // 如果是 UIButton，触发 Signal
-            if (auto* btn = dynamic_cast<UIButton*>(m_pressedNode)) {
-                btn->onClick.emit();  // 触发 Signal 事件
-            }
         }
 
         // 清除按下状态

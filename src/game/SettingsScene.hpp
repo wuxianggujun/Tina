@@ -51,13 +51,6 @@ private:
     UI::UIButton* m_btnClose = nullptr;
     UI::UIEventSystem m_events;
 
-    // Signal 连接保存
-    Core::Signal<>::Connection m_cDay;
-    Core::Signal<>::Connection m_cNight;
-    Core::Signal<>::Connection m_cFwd;
-    Core::Signal<>::Connection m_cBack;
-    Core::Signal<>::Connection m_cClose;
-
     int m_pixelWidth = 1280;
     int m_pixelHeight = 720;
 };

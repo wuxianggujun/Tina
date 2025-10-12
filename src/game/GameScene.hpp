@@ -102,10 +102,6 @@ private:
     Memory::UniquePtr<UI::UICharacterPanel> m_characterPanel;
     Container::Vector<Memory::UniquePtr<UI::UINode>> m_ownedNodes;  // 统一管理UI节点生命周期
 
-    // Signal 连接管理（RAII 自动断开）
-    Core::Signal<>::Connection m_switchControlConnection;
-    Core::Signal<int, bool>::Connection m_keyPressedConnection;
-    Core::Signal<float>::Connection m_mouseWheelConnection;
 
     // 事件订阅管理器（RAII 自动取消订阅）
     Engine::SubscriptionManager m_eventSubscriptions;

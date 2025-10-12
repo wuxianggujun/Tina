@@ -1,5 +1,6 @@
 #include "UIComponents.hpp"
 #include "UICore.hpp"
+#include "../core/Log.hpp"
 #include <algorithm>
 
 namespace Tina::UI {
@@ -46,6 +47,13 @@ void UILabel::onRender(uint16_t viewId, UIRenderer& renderer)
 }
 
 // === UIButton 实现 ===
+
+void UIButton::onClick() {
+    // 直接调用回调，最高效（无日志、无对象分配）
+    if (m_clickCallback) {
+        m_clickCallback();
+    }
+}
 
 void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
 {

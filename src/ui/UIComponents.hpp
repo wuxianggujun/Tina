@@ -6,8 +6,9 @@
 
 #include "UINode.hpp"
 #include "../core/Color.hpp"
-#include "../core/Signal.hpp"
 #include "UIColors.hpp"
+#include "UIEvents.hpp"
+#include "../engine/EventSystem.hpp"
 #include <bgfx/bgfx.h>
 
 namespace Tina::UI {
@@ -144,17 +145,32 @@ public:
     void setBadgeFontPx(int px) { m_badgeFontPx = std::max(0, px); }
     int badgeFontPx() const { return m_badgeFontPx; }
 
-    // === Signal 事件（推荐使用）===
-    Tina::Core::Signal<> onClick;      // 点击事件（鼠标按下并松开）
-    Tina::Core::Signal<> onHoverEnter; // 鼠标进入
-    Tina::Core::Signal<> onHoverLeave; // 鼠标离开
+    // === 事件系统访问 ===
+    void setEventSystem(Engine::EventSystem* eventSystem) {
+        m_eventSystem = eventSystem;
+    }
 
+    // === 鼠标事件处理 ===
     void onMouseEnter() override {
-        onHoverEnter.emit();  // 触发 Signal
+        if (m_eventSystem) {
+            ButtonHoverEnterEvent event(this, Container::String(getName().c_str()));
+            m_eventSystem->trigger(event);
+        }
     }
+
     void onMouseLeave() override {
-        onHoverLeave.emit();  // 触发 Signal
+        if (m_eventSystem) {
+            ButtonHoverLeaveEvent event(this, Container::String(getName().c_str()));
+            m_eventSystem->trigger(event);
+        }
     }
+
+    // 设置点击回调函数
+    using ClickCallback = std::function<void()>;
+    void setOnClickCallback(const ClickCallback& callback) { m_clickCallback = callback; }
+
+    // 重写 onClick 虚函数，响应鼠标点击
+    void onClick() override;  // 定义在 cpp 文件中以便添加日志
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
@@ -180,6 +196,12 @@ private:
 
     int m_fontPx = 0;
     int m_badgeFontPx = 0;
+
+    // 事件系统指针（由外部设置）
+    Engine::EventSystem* m_eventSystem = nullptr;
+
+    // 点击回调函数
+    ClickCallback m_clickCallback;
 };
 
 } // namespace Tina::UI

@@ -96,12 +96,6 @@ void GameScene::onExit()
         m_bgmStarted = false;
     }
 
-    // Signal 连接会自动断开（Connection 析构函数）
-    // 但显式重置更清晰
-    m_switchControlConnection.disconnect();
-    m_keyPressedConnection.disconnect();
-    m_mouseWheelConnection.disconnect();
-
     // 新事件系统：在场景退出时取消订阅
     // TODO: 实现取消订阅机制（可选，如果需要更精细的控制）
 
@@ -614,14 +608,8 @@ void GameScene::spawnCharacters(int spawnX, int spawnY)
     m_ecsWorld->registry().get<ECS::Renderable>(npc3).g = 1.0f;
     m_ecsWorld->registry().get<ECS::Renderable>(npc3).b = 0.2f;
 
-    // 5. 订阅角色面板的 Signal 事件（切换控制）
-    m_switchControlConnection = m_characterPanel->onSwitchControl.connect([this]() {
-        if (m_clickedEntity != entt::null) {
-            m_ecsWorld->switchControl(m_clickedEntity);
-            m_toolbar->root()->setVisible(false);
-            TINA_INFO("切换控制到角色");
-        }
-    });
+    // 5. 角色面板切换控制处理
+    // TODO: 使用事件系统替代 Signal
 
     // 6. 订阅事件（OS 输入 + 强类型玩法事件）
     subscribeToEvents();

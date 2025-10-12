@@ -45,12 +45,6 @@ void SettingsScene::onEnter()
 
 void SettingsScene::onExit()
 {
-    m_cDay.disconnect();
-    m_cNight.disconnect();
-    m_cFwd.disconnect();
-    m_cBack.disconnect();
-    m_cClose.disconnect();
-
     m_root.reset();
 }
 
@@ -159,15 +153,10 @@ void SettingsScene::createUI()
     };
 
     m_btnDay = addRowButton("切换到白天", [this]{ onSetDay(); });
-    m_cDay = m_btnDay->onClick.connect(this, &SettingsScene::onSetDay);
     m_btnNight = addRowButton("切换到黑夜", [this]{ onSetNight(); });
-    m_cNight = m_btnNight->onClick.connect(this, &SettingsScene::onSetNight);
     m_btnFwd = addRowButton("时间 +10%", [this]{ onFwdTime(); });
-    m_cFwd = m_btnFwd->onClick.connect(this, &SettingsScene::onFwdTime);
     m_btnBack = addRowButton("时间 -10%", [this]{ onBackTime(); });
-    m_cBack = m_btnBack->onClick.connect(this, &SettingsScene::onBackTime);
     m_btnClose = addRowButton("返回", [this]{ onBack(); });
-    m_cClose = m_btnClose->onClick.connect(this, &SettingsScene::onBack);
 
     // 触发布局并居中
     // 使用performLayoutNow()确保布局立即完成

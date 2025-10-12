@@ -8,7 +8,8 @@
 #include "UIComponents.hpp"
 #include "UIProgressBar.hpp"
 #include "UIEventSystem.hpp"
-#include "../core/Signal.hpp"
+#include "UIEvents.hpp"
+#include "../engine/EventSystem.hpp"
 #include "../ecs/Components.hpp"
 
 namespace Tina::UI {
@@ -29,8 +30,17 @@ public:
         centerOnScreen(screenWidth, screenHeight);
     }
 
-    // === Signal 事件 ===
-    Tina::Core::Signal<> onSwitchControl;  // 切换控制信号
+    // === 事件系统 ===
+    void setEventSystem(Engine::EventSystem* eventSystem) {
+        m_eventSystem = eventSystem;
+        // 同时设置给按钮
+        if (m_switchButton) {
+            m_switchButton->setEventSystem(eventSystem);
+        }
+    }
+
+    // 触发切换控制事件
+    void onSwitchControlClicked();
 
     // 事件系统访问
     UIEventSystem& events() { return m_events; }
@@ -47,10 +57,11 @@ private:
     UIButton* m_switchButton = nullptr;    // 切换控制按钮
     UILabel* m_controlledLabel = nullptr;  // 当前控制状态标签
 
-    UIEventSystem m_events;                // 事件系统
+    UIEventSystem m_events;                // UI事件系统（局部）
+    Engine::EventSystem* m_eventSystem = nullptr; // 全局事件系统指针
 
-    // Signal 连接（必须保存，否则会被 RAII 销毁）
-    Tina::Core::Signal<>::Connection m_switchButtonConnection;
+    // 按钮点击事件订阅令牌
+    Engine::SubscriptionToken m_switchButtonClickToken;
 };
 
 } // namespace Tina::UI

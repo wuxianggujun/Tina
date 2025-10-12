@@ -73,14 +73,6 @@ private:
     UI::UIButton* m_btnBack = nullptr;
     UI::UIEventSystem m_events;             // 统一 Hover/Click 处理
 
-    // Signal 连接（必须保存，否则订阅失效）
-    Core::Signal<>::Connection m_continueConnection;
-    Core::Signal<>::Connection m_quitConnection;
-    Core::Signal<>::Connection m_cDay;
-    Core::Signal<>::Connection m_cNight;
-    Core::Signal<>::Connection m_cFwd;
-    Core::Signal<>::Connection m_cBack;
-
     // 视口尺寸
     int m_pixelWidth = 1280;
     int m_pixelHeight = 720;

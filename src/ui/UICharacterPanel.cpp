@@ -74,13 +74,8 @@ UICharacterPanel::UICharacterPanel(const std::string& name)
     m_switchButton->setTextColor(ButtonText);        // 白色文本
     m_switchButton->setFontPx(16);
 
-    // 连接 Signal（推荐）
-    m_switchButtonConnection = m_switchButton->onClick.connect([this]() {
-        // 触发面板的 Signal
-        onSwitchControl.emit();
-        // 点击后隐藏面板
-        setVisible(false);
-    });
+    // TODO: 使用事件系统处理按钮点击
+    // 目前暂时无法处理切换控制功能
 
     // 初始化事件系统（设置根节点为自己）
     m_events.setRoot(this);

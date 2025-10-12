@@ -95,12 +95,7 @@ private:
     UI::UIButton* m_btnSettings = nullptr;
     UI::UIButton* m_btnQuit = nullptr;
     UI::UIEventSystem m_events;  // 统一处理 hover/click
-    
-    // Signal 连接
-    Core::Signal<>::Connection m_startConnection;
-    Core::Signal<>::Connection m_settingsConnection;
-    Core::Signal<>::Connection m_quitConnection;
-    
+
     // 动画状态
     float m_titleAlpha = 0.0f;
     float m_titleScale = 0.8f;

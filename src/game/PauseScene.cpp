@@ -61,14 +61,6 @@ void PauseScene::onExit()
 {
     TINA_INFO("PauseScene::onExit - 退出暂停菜单");
 
-    // 断开 Signal 连接
-    m_continueConnection.disconnect();
-    m_quitConnection.disconnect();
-    m_cDay.disconnect();
-    m_cNight.disconnect();
-    m_cFwd.disconnect();
-    m_cBack.disconnect();
-
     // 清理 UI（必须在渲染资源之前清理）
     m_rootNode.reset();
     m_btnContinue = nullptr;
@@ -173,9 +165,7 @@ void PauseScene::handleInput()
 
 void PauseScene::createUI()
 {
-    // 若重复创建（例如窗口尺寸变化），先断开旧连接并释放旧 UI
-    m_continueConnection.disconnect();
-    m_quitConnection.disconnect();
+    // 若重复创建（例如窗口尺寸变化），先释放旧 UI
     m_rootNode.reset();
     m_btnContinue = nullptr;
     m_btnQuit = nullptr;
@@ -236,7 +226,6 @@ void PauseScene::createUI()
     m_btnContinue->setNormalColor(0.2f, 0.6f, 0.2f, 0.95f);
     m_btnContinue->setHoverColor(0.3f, 0.8f, 0.3f, 1.0f);
     m_btnContinue->setPressedColor(0.1f, 0.4f, 0.1f, 1.0f);
-    m_continueConnection = m_btnContinue->onClick.connect(this, &PauseScene::onContinueClicked);
 
     // 设置按钮已移除，保留单行继续按钮
 
@@ -264,12 +253,6 @@ void PauseScene::createUI()
     makeRow(m_btnDay,    "切换到白天",   m_btnNight,   "切换到黑夜");
     makeRow(m_btnFwd,    "时间 +10%",    m_btnBack,    "时间 -10%");
 
-    // 绑定点击（使用便捷重载：对象指针 + 成员函数）
-    m_cDay      = m_btnDay->onClick.connect(this, &PauseScene::onSetDay);
-    m_cNight    = m_btnNight->onClick.connect(this, &PauseScene::onSetNight);
-    m_cFwd      = m_btnFwd->onClick.connect(this, &PauseScene::onFwdTime);
-    m_cBack     = m_btnBack->onClick.connect(this, &PauseScene::onBackTime);
-
     // 退出按钮独占一行
     auto* rowBottom = vbox->createChild<UI::UIHStack>("RowBottom");
     rowBottom->setSize(rowW, btnH);
@@ -283,7 +266,6 @@ void PauseScene::createUI()
     m_btnQuit->setNormalColor(0.6f, 0.2f, 0.2f, 0.95f);
     m_btnQuit->setHoverColor(0.8f, 0.3f, 0.3f, 1.0f);
     m_btnQuit->setPressedColor(0.4f, 0.1f, 0.1f, 1.0f);
-    m_quitConnection = m_btnQuit->onClick.connect(this, &PauseScene::onQuitClicked);
 
     // 触发布局计算并回填 Panel 高度，再居中 Panel
     // 重要：使用performLayoutNow()确保布局立即完成，这样getSize()才能返回正确的值

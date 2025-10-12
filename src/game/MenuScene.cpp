@@ -56,16 +56,13 @@ void MenuScene::onEnter() {
     // 注册UI根节点到框架（框架会自动处理窗口resize）
     addUIRoot(m_rootNode.get());
 
+    // 使用直接回调，无需事件订阅（更高效）
+
     TINA_INFO("MenuScene: 初始化完成");
 }
 
 void MenuScene::onExit() {
     TINA_INFO("MenuScene::onExit - 退出主菜单");
-
-    // 断开 Signal 连接
-    m_startConnection.disconnect();
-    m_settingsConnection.disconnect();
-    m_quitConnection.disconnect();
 
     // 清理 UI
     m_rootNode.reset();
@@ -249,9 +246,11 @@ void MenuScene::createUI() {
     btnStart->setHoverColor(Core::Color{0.3f, 0.4f, 0.6f, 1.0f});
     btnStart->setPressedColor(Core::Color{0.1f, 0.2f, 0.4f, 1.0f});
     // btnStart->setCornerRadius(5.0f);  // UIButton 不支持圆角
-    m_startConnection = btnStart->onClick.connect([this]() { onStartClicked(); });
     m_btnStart = btnStart.get();
     m_buttons.push_back(m_btnStart);
+
+    // 直接设置回调（最高效）
+    btnStart->setOnClickCallback([this]() { onStartClicked(); });
 
     // 创建设置按钮
     auto btnSettings = Memory::MakeUnique<UI::UIButton>("BtnSettings");
@@ -263,9 +262,11 @@ void MenuScene::createUI() {
     btnSettings->setHoverColor(Core::Color{0.3f, 0.4f, 0.6f, 1.0f});
     btnSettings->setPressedColor(Core::Color{0.1f, 0.2f, 0.4f, 1.0f});
     // btnSettings->setCornerRadius(5.0f);  // UIButton 不支持圆角
-    m_settingsConnection = btnSettings->onClick.connect([this]() { onSettingsClicked(); });
     m_btnSettings = btnSettings.get();
     m_buttons.push_back(m_btnSettings);
+
+    // 直接设置回调（最高效）
+    btnSettings->setOnClickCallback([this]() { onSettingsClicked(); });
 
     // 创建退出按钮
     auto btnQuit = Memory::MakeUnique<UI::UIButton>("BtnQuit");
@@ -277,9 +278,11 @@ void MenuScene::createUI() {
     btnQuit->setHoverColor(Core::Color{0.5f, 0.3f, 0.3f, 1.0f});
     btnQuit->setPressedColor(Core::Color{0.3f, 0.1f, 0.1f, 1.0f});
     // btnQuit->setCornerRadius(5.0f);  // UIButton 不支持圆角
-    m_quitConnection = btnQuit->onClick.connect([this]() { onQuitClicked(); });
     m_btnQuit = btnQuit.get();
     m_buttons.push_back(m_btnQuit);
+
+    // 直接设置回调（最高效）
+    btnQuit->setOnClickCallback([this]() { onQuitClicked(); });
 
     // 直接添加到根节点，不使用面板作为父节点
     m_rootNode->addChild(std::move(panel));
@@ -347,8 +350,14 @@ void MenuScene::selectNextButton() {
 void MenuScene::activateSelectedButton() {
     if (m_buttons.empty()) return;
 
-    // 触发选中按钮的点击事件
-    m_buttons[m_selectedButtonIndex]->onClick.emit();
+    // 直接调用对应的处理函数
+    if (m_selectedButtonIndex == 0 && m_btnStart) {
+        onStartClicked();
+    } else if (m_selectedButtonIndex == 1 && m_btnSettings) {
+        onSettingsClicked();
+    } else if (m_selectedButtonIndex == 2 && m_btnQuit) {
+        onQuitClicked();
+    }
 }
 
 void MenuScene::updateUILayout() {
