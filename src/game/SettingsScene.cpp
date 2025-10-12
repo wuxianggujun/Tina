@@ -41,6 +41,9 @@ void SettingsScene::onEnter()
 
     createUI();
     m_events.setRoot(m_root.get());
+
+    // 订阅 UI 按钮点击事件
+    m_btnClickToken = app()->events().subscribe<UI::ButtonClickEvent>(this, &SettingsScene::onUIButtonClicked);
 }
 
 void SettingsScene::onExit()
@@ -141,7 +144,7 @@ void SettingsScene::createUI()
     title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
     title->setSize(panelW - pad*2, titleH);
 
-    auto addRowButton = [&](const char* text, auto&& conn){
+    auto addRowButton = [&](const char* text){
         auto* row = vbox->createChild<UI::UIHStack>("Row");
         row->setSize(panelW - pad*2, btnH);
         row->setPadding(0,0);
@@ -152,11 +155,25 @@ void SettingsScene::createUI()
         return btn;
     };
 
-    m_btnDay = addRowButton("切换到白天", [this]{ onSetDay(); });
-    m_btnNight = addRowButton("切换到黑夜", [this]{ onSetNight(); });
-    m_btnFwd = addRowButton("时间 +10%", [this]{ onFwdTime(); });
-    m_btnBack = addRowButton("时间 -10%", [this]{ onBackTime(); });
-    m_btnClose = addRowButton("返回", [this]{ onBack(); });
+    m_btnDay = addRowButton("切换到白天");
+    m_btnDay->setButtonId(BTN_DAY);
+    m_btnDay->setEventSystem(&app()->events());
+    
+    m_btnNight = addRowButton("切换到黑夜");
+    m_btnNight->setButtonId(BTN_NIGHT);
+    m_btnNight->setEventSystem(&app()->events());
+    
+    m_btnFwd = addRowButton("时间 +10%");
+    m_btnFwd->setButtonId(BTN_FWD);
+    m_btnFwd->setEventSystem(&app()->events());
+    
+    m_btnBack = addRowButton("时间 -10%");
+    m_btnBack->setButtonId(BTN_BACK);
+    m_btnBack->setEventSystem(&app()->events());
+    
+    m_btnClose = addRowButton("返回");
+    m_btnClose->setButtonId(BTN_CLOSE);
+    m_btnClose->setEventSystem(&app()->events());
 
     // 触发布局并居中
     // 使用performLayoutNow()确保布局立即完成
@@ -204,6 +221,18 @@ void SettingsScene::onBackTime()
     Tina::Game::Events::AdjustDayNight event;
     event.delta = -0.10f;
     app()->events().trigger(event);
+}
+
+void SettingsScene::onUIButtonClicked(const UI::ButtonClickEvent& e)
+{
+    switch (e.buttonId) {
+        case BTN_DAY:   onSetDay();  break;
+        case BTN_NIGHT: onSetNight(); break;
+        case BTN_FWD:   onFwdTime();  break;
+        case BTN_BACK:  onBackTime(); break;
+        case BTN_CLOSE: onBack();     break;
+        default: break;
+    }
 }
 
 } // namespace Tina::Game

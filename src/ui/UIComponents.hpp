@@ -96,6 +96,7 @@ public:
         , m_hovered(false)
         , m_pressed(false)
         , m_selected(false)
+        , m_buttonId(s_nextButtonId++)  // 自动分配唯一ID
     {}
 
     void setText(const std::string& text) { m_text = text; }
@@ -163,18 +164,12 @@ public:
         setPressed(false);
     }
 
-    // 设置点击回调函数
-    using ClickCallback = std::function<void()>;
-    void setOnClickCallback(const ClickCallback& callback) { m_clickCallback = callback; }
-
-    // 便捷方法：直接绑定到对象的成员函数（避免手写 lambda）
-    template<typename T>
-    void connectClick(T* obj, void (T::*method)()) {
-        m_clickCallback = [obj, method]() { (obj->*method)(); };
-    }
+    // 设置按钮ID（用于事件识别）
+    void setButtonId(uint32_t id) { m_buttonId = id; }
+    uint32_t getButtonId() const { return m_buttonId; }
 
     // 重写 onClick 虚函数，响应鼠标点击
-    void onClick() override;  // 定义在 cpp 文件中以便添加日志
+    void onClick() override;  // 定义在 cpp 文件中，触发事件
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
@@ -204,8 +199,9 @@ private:
     // 事件系统指针（由外部设置）
     Engine::EventSystem* m_eventSystem = nullptr;
 
-    // 点击回调函数
-    ClickCallback m_clickCallback;
+    // 按钮ID（用于事件识别）
+    uint32_t m_buttonId = 0;
+    static inline uint32_t s_nextButtonId = 1;
 };
 
 } // namespace Tina::UI

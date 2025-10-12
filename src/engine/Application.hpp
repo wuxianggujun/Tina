@@ -68,6 +68,7 @@ public:
 
     // 获取统一事件系统（替代旧的 OSEventBus 和 TypedEventBus）
     EventSystem& events() const { return *m_eventSystem; }
+    EventSystem* getEventSystem() const { return m_eventSystem.get(); }  // 别名，返回指针
 
     // 获取场景管理器（用于场景切换）
     SceneManager& scenes() const { return *m_sceneManager; }

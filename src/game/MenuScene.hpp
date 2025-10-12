@@ -14,6 +14,7 @@
 #include "../ui/UIEventSystem.hpp"
 #include "../particles/ParticleSystem.hpp"
 #include "../renderer/ShaderManager.hpp"
+#include "../engine/SubscriptionToken.hpp"
 
 namespace Tina::Game {
 
@@ -53,10 +54,20 @@ private:
     // 输入处理
     void handleInput();
 
+    // 按钮ID枚举
+    enum ButtonId {
+        BTN_START = 1,
+        BTN_SETTINGS = 2,
+        BTN_QUIT = 3
+    };
+
     // 按钮回调
     void onStartClicked();
     void onSettingsClicked();
     void onQuitClicked();
+
+    // 按钮事件处理
+    void onButtonClicked(const UI::ButtonClickEvent& event);
 
     void selectPreviousButton();
     void selectNextButton();
@@ -107,6 +118,9 @@ private:
     
     // UI 缩放
     float m_uiScale = 1.0f;
+
+    // 事件订阅令牌
+    Engine::SubscriptionToken m_btnClickToken;
 };
 
 } // namespace Tina::Game

@@ -8,6 +8,8 @@
 #include "../engine/EventCore.hpp"
 #include "../core/Container.hpp"
 #include <cstdint>
+#include <cstring>  // for std::strlen, std::memcpy
+#include <algorithm>  // for std::min
 
 namespace Tina::UI {
 
@@ -64,16 +66,24 @@ struct UIEventBase {
 
 // ==================== 具体 UI 事件 ====================
 
-// 按钮点击事件
-struct ButtonClickEvent : UIEventBase {
-    static constexpr Engine::EventTypeId TYPE_ID =
-        static_cast<Engine::EventTypeId>(UIEventType::ButtonClick);
+// 按钮点击事件（优化版本 - POD类型）
+TINA_EVENT(ButtonClickEvent, UIButtonClicked) {
+    uint32_t buttonId = 0;              // 按钮ID
+    char buttonName[64] = {0};          // 按钮名称（固定大小）
+    void* source = nullptr;              // 按钮指针（可选）
+    int mouseX = 0;                      // 鼠标X坐标
+    int mouseY = 0;                      // 鼠标Y坐标
 
-    int mouseX = 0;
-    int mouseY = 0;
-
-    ButtonClickEvent(void* button = nullptr, const String& name = "")
-        : UIEventBase(UIEventType::ButtonClick, button, name) {}
+    ButtonClickEvent() = default;
+    ButtonClickEvent(uint32_t id, const char* name = nullptr, void* btn = nullptr)
+        : buttonId(id), source(btn) {
+        if (name) {
+            size_t len = std::strlen(name);
+            len = std::min(len, size_t(63));
+            std::memcpy(buttonName, name, len);
+        }
+        this->priority = Engine::EventPriority::Medium;
+    }
 };
 
 // 鼠标进入事件

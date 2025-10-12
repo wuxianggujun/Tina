@@ -50,23 +50,31 @@ void UILabel::onRender(uint16_t viewId, UIRenderer& renderer)
 // === UIButton 实现 ===
 
 void UIButton::onClick() {
-    // 优先通过事件系统触发（支持冒泡、捕获、preventDefault）
+    // 通过全局事件系统触发按钮点击事件（POD类型，高性能）
+    if (m_eventSystem) {
+        // 创建POD类型的按钮点击事件
+        ButtonClickEvent clickEvent(m_buttonId, getName().c_str(), this);
+
+        // TODO: 获取鼠标位置
+        // clickEvent.mouseX = ...;
+        // clickEvent.mouseY = ...;
+
+        // 立即触发事件（同步）
+        m_eventSystem->trigger(clickEvent);
+
+        #ifdef DEBUG
+        TINA_DEBUG("按钮 '{}' (ID: {}) 被点击", getName(), m_buttonId);
+        #endif
+    } else {
+        TINA_WARN("按钮 '{}' 没有关联事件系统", getName());
+    }
+
+    // 也可以通过UIEventDispatcher触发（支持冒泡）- 保留兼容性
     auto* dispatcher = getEventDispatcher();
     if (dispatcher) {
-        // 创建点击事件并分发
         UIClickEvent event(UIEvent::Type::Click, this, 0, 0);
         event.setBubbles(true);  // 支持冒泡
         dispatcher->dispatchEvent(event);
-
-        // 如果事件被阻止，不执行回调
-        if (event.isDefaultPrevented()) {
-            return;
-        }
-    }
-
-    // 后备方案：如果没有事件系统或事件未阻止，执行回调
-    if (m_clickCallback) {
-        m_clickCallback();
     }
 }
 
