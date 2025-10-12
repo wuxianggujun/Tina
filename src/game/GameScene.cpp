@@ -123,6 +123,7 @@ void GameScene::onExit()
 void GameScene::onPause()
 {
     TINA_INFO("GameScene::onPause - 游戏暂停");
+
     // 游戏暂停时，update() 不会被调用，但渲染资源保持有效
     if (m_sfxYingxiao && m_sfxStarted) {
         m_sfxYingxiao->pause();
@@ -143,6 +144,40 @@ void GameScene::onResume()
     // 更新相机视口
     if (camera()) {
         camera()->setViewportPixels(m_pixelWidth, m_pixelHeight);
+
+        // 立即将相机定位到当前控制的角色
+        // 这比保存/恢复相机位置更直接、更可靠
+        if (m_ecsWorld) {
+            auto controlled = m_ecsWorld->getControlledEntity();
+            if (controlled != entt::null) {
+                auto& reg = m_ecsWorld->registry();
+                if (reg.any_of<ECS::Transform, ECS::PhysicsBody>(controlled)) {
+                    auto& tr = reg.get<ECS::Transform>(controlled);
+                    auto& pb = reg.get<ECS::PhysicsBody>(controlled);
+
+                    // 计算角色中心点
+                    float centerX = tr.x + pb.width * 0.5f;
+                    float centerY = tr.y + pb.height * 0.5f;
+
+                    // 将相机居中到角色
+                    float viewW = camera()->viewW();
+                    float viewH = camera()->viewH();
+                    float camX = centerX - viewW * 0.5f;
+                    float camY = centerY - viewH * 0.5f;
+
+                    // 限制相机边界
+                    if (m_tileMap) {
+                        int mapW = m_tileMap->width();
+                        int mapH = m_tileMap->height();
+                        camX = std::clamp(camX, 0.0f, std::max(0.0f, (float)mapW - viewW));
+                        camY = std::clamp(camY, 0.0f, std::max(0.0f, (float)mapH - viewH));
+                    }
+
+                    camera()->setPosition(camX, camY);
+                    TINA_INFO("相机重新定位到角色位置: ({}, {})", centerX, centerY);
+                }
+            }
+        }
     }
 
     // 更新 UI 组件
@@ -549,8 +584,9 @@ void GameScene::spawnCharacters(int spawnX, int spawnY)
             // 将相机中心设置到玩家位置
             float viewW = camera()->viewW();
             float viewH = camera()->viewH();
-            camera()->setPosition(playerTransform.x - viewW * 0.5f,
-                                  playerTransform.y - viewH * 0.5f);
+            float initialCamX = playerTransform.x - viewW * 0.5f;
+            float initialCamY = playerTransform.y - viewH * 0.5f;
+            camera()->setPosition(initialCamX, initialCamY);
             TINA_INFO("相机初始化到玩家位置: ({}, {})", playerTransform.x, playerTransform.y);
         }
     }
