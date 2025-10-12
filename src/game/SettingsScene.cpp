@@ -166,6 +166,13 @@ void SettingsScene::createUI()
     m_btnBack  = addRowButton("时间 -10%");
     m_btnClose = addRowButton("返回");
 
+    // 绑定点击（内部经事件系统按ID路由）
+    if (m_btnDay)   m_btnDay->setOnClick([this]{ onSetDay();   });
+    if (m_btnNight) m_btnNight->setOnClick([this]{ onSetNight(); });
+    if (m_btnFwd)   m_btnFwd->setOnClick([this]{ onFwdTime();  });
+    if (m_btnBack)  m_btnBack->setOnClick([this]{ onBackTime(); });
+    if (m_btnClose) m_btnClose->setOnClick([this]{ onBack();     });
+
     // 触发布局并居中
     // 使用performLayoutNow()确保布局立即完成
     vbox->requestLayout();
@@ -177,6 +184,9 @@ void SettingsScene::createUI()
     float centerX = (m_pixelWidth - panelW) * 0.5f;
     float centerY = (m_pixelHeight - panelHeight) * 0.5f;
     panel->setPosition(centerX, centerY);
+
+    // 更新事件系统根节点，确保重建后事件命中正确并自动注入总线
+    m_events.setRoot(m_root.get());
 }
 
 void SettingsScene::onBack()

@@ -285,6 +285,11 @@ void MenuScene::createUI() {
 
     // 事件系统与ID由路由器在 bind 时设置
 
+    // 绑定按钮点击（内部经事件系统路由）
+    if (m_btnStart)    m_btnStart->setOnClick([this]{ onStartClicked(); });
+    if (m_btnSettings) m_btnSettings->setOnClick([this]{ onSettingsClicked(); });
+    if (m_btnQuit)     m_btnQuit->setOnClick([this]{ onQuitClicked(); });
+
     // 直接添加到根节点，不使用面板作为父节点
     m_rootNode->addChild(std::move(panel));
     m_rootNode->addChild(std::move(btnStart));
