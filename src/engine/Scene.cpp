@@ -49,13 +49,31 @@ void Scene::removeUIRoot(UI::UINode* root) {
     }
 }
 
-// 更新窗口尺寸（带防抖动）
+// 更新窗口尺寸（智能防抖动）
 void Scene::updateWindowSize(int width, int height) {
-    // 标记有待处理的窗口调整
-    m_pendingResize = true;
-    m_pendingWidth = width;
-    m_pendingHeight = height;
-    m_resizeTimer = 0.1f;  // 100ms 延迟
+    // 计算变化幅度
+    int deltaW = std::abs(width - m_pixelWidth);
+    int deltaH = std::abs(height - m_pixelHeight);
+
+    // 如果是大幅度变化（如最大化/最小化），立即应用
+    // 阈值：宽或高变化超过30%，或绝对值超过300像素
+    bool isLargeChange = (deltaW > m_pixelWidth * 0.3f || deltaH > m_pixelHeight * 0.3f ||
+                          deltaW > 300 || deltaH > 300);
+
+    if (isLargeChange) {
+        // 大幅度变化，立即应用，避免卡顿
+        TINA_INFO("窗口大幅变化: {}x{} -> {}x{}，立即应用",
+                  m_pixelWidth, m_pixelHeight, width, height);
+        applyWindowResize(width, height);
+        m_pendingResize = false;
+        m_resizeTimer = 0.0f;
+    } else {
+        // 小幅度变化，使用防抖动（降低延迟到30ms）
+        m_pendingResize = true;
+        m_pendingWidth = width;
+        m_pendingHeight = height;
+        m_resizeTimer = 0.03f;  // 30ms 延迟，更快响应
+    }
 }
 
 // 实际应用窗口尺寸更新

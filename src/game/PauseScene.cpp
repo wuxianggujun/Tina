@@ -124,12 +124,14 @@ void PauseScene::applyWindowResize(int width, int height)
     // 计算新的缩放比例
     float newScale = UI::UIUtils::calculateUIScale(width, height);
 
-    // 如果缩放变化较大，需要重建UI
-    if (std::abs(newScale - m_uiScale) > 0.1f) {
+    // 如果缩放变化非常大，才重建UI（提高阈值，减少重建）
+    if (std::abs(newScale - m_uiScale) > 0.3f) {
         m_uiScale = newScale;
         createUI();  // 重建UI
         TINA_INFO("PauseScene: 重建UI，新缩放比例: {}", m_uiScale);
     } else {
+        // 更新缩放但不重建
+        m_uiScale = newScale;
         // 只需重新居中面板
         if (m_panel && m_rootNode) {
             m_rootNode->setSize((float)width, (float)height);

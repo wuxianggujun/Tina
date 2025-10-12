@@ -188,8 +188,7 @@ void GameScene::onResume()
         }
         m_toolbar->onResize(m_pixelWidth, m_pixelHeight);
 
-        // ✅ 关键修复：onResize() 会调用 buildLayout() 重新创建所有按钮
-        // 新创建的按钮没有图标，需要重新设置
+        // 确保工具栏图标已加载（以防资源加载延迟）
         ensureToolbarIconsReady();
     }
 

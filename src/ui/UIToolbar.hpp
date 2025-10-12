@@ -74,7 +74,8 @@ public:
     void setState(const ToolbarState& state);
 
 private:
-    void buildLayout();
+    void buildLayout();     // 重建所有UI元素
+    void updateLayout();    // 只更新位置，不重建
 
 private:
     // 渲染

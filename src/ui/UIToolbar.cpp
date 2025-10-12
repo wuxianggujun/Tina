@@ -49,15 +49,14 @@ void UIToolbar::onResize(int screenW, int screenH)
 
     if (m_root) {
         m_root->setSize((float)m_screenW, (float)m_screenH);
-        // 使用新的布局管理器，会自动处理依赖
-        m_root->requestLayout();
     }
 
-    // 重建工具栏布局
-    buildLayout();
+    // 只调整位置，不重建UI
+    updateLayout();
 
     // 使用布局管理器执行，会自动处理所有依赖节点
     if (m_root) {
+        m_root->requestLayout();
         m_root->performLayoutNow();
     }
 }
@@ -106,6 +105,26 @@ void UIToolbar::setSlotIcon(int index, bgfx::TextureHandle tex)
     if (auto* btn = m_slots[index]) {
         btn->setIconTexture(tex);
     }
+}
+
+void UIToolbar::updateLayout()
+{
+    if (!m_bar) return;
+
+    // 计算工具栏的新位置（居中）
+    int avail = m_screenW - m_padding * 2;
+    int per = m_slotSize + m_gap;
+    int maxSlots = (per > 0) ? ((avail + m_gap) / per) : 0;
+    int count = std::min(m_slotCount, maxSlots);
+
+    int contentW = count > 0 ? (count * m_slotSize + (count - 1) * m_gap) : 0;
+    int barW = contentW + m_padding * 2;
+    if (barW > m_screenW) barW = m_screenW;
+    float barX = (float)((m_screenW - barW) / 2);
+
+    // 只更新位置和大小，不重建
+    m_bar->setPosition(barX, 0.0f);
+    m_bar->setSize((float)barW, (float)m_barH);
 }
 
 void UIToolbar::buildLayout()
