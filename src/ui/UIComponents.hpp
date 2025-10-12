@@ -169,6 +169,12 @@ public:
     using ClickCallback = std::function<void()>;
     void setOnClickCallback(const ClickCallback& callback) { m_clickCallback = callback; }
 
+    // 便捷方法：直接绑定到对象的成员函数（避免手写 lambda）
+    template<typename T>
+    void connectClick(T* obj, void (T::*method)()) {
+        m_clickCallback = [obj, method]() { (obj->*method)(); };
+    }
+
     // 重写 onClick 虚函数，响应鼠标点击
     void onClick() override;  // 定义在 cpp 文件中以便添加日志
 

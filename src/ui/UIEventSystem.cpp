@@ -5,11 +5,26 @@
 namespace Tina::UI {
 
 UIEventSystem::UIEventSystem()
+    : m_dispatcher(std::make_unique<UIEventDispatcher>())
 {
 }
 
 UIEventSystem::~UIEventSystem()
 {
+}
+
+void UIEventSystem::setRoot(UINode* root)
+{
+    m_root = root;
+    m_hoveredNode = nullptr;
+    m_pressedNode = nullptr;
+    m_mouseDown = false;
+    m_mouseDownPrev = false;
+
+    // 同时设置给分发器
+    if (m_dispatcher) {
+        m_dispatcher->setRoot(root);
+    }
 }
 
 void UIEventSystem::updateMouse(float mouseX, float mouseY, bool mouseDown)
@@ -23,6 +38,17 @@ void UIEventSystem::updateMouse(float mouseX, float mouseY, bool mouseDown)
 void UIEventSystem::processEvents()
 {
     if (!m_root) return;
+
+    // 根据模式选择处理方式
+    if (m_useAdvancedEvents && m_dispatcher) {
+        processEventsAdvanced();
+    } else {
+        processEventsSimple();
+    }
+}
+
+void UIEventSystem::processEventsSimple()
+{
 
     // 查找鼠标下的节点（深度优先，后绘制的节点优先）
     UINode* hitNode = findNodeUnderMouse(m_root, m_mouseX, m_mouseY);
@@ -114,6 +140,15 @@ void UIEventSystem::collectAllNodes(UINode* node, Tina::Container::Vector<UINode
             collectAllNodes(child, outList);
         }
     }
+}
+
+void UIEventSystem::processEventsAdvanced()
+{
+    // 使用高级事件分发器处理
+    if (!m_dispatcher) return;
+
+    // 让分发器处理所有鼠标输入
+    m_dispatcher->handleMouseInput(m_mouseX, m_mouseY, m_mouseDown);
 }
 
 } // namespace Tina::UI

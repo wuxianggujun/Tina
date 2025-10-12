@@ -106,6 +106,9 @@ public:
     UINode* getChild(size_t index) const {
         return (index < m_children.size()) ? m_children[index].get() : nullptr;
     }
+    const Tina::Container::Vector<Memory::UniquePtr<UINode>>& getChildren() const {
+        return m_children;
+    }
 
     // === 变换（相对于父节点） ===
     void setPosition(float x, float y) { m_position = {x, y}; m_dirty = true; }

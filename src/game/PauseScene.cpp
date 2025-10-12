@@ -226,6 +226,7 @@ void PauseScene::createUI()
     m_btnContinue->setNormalColor(0.2f, 0.6f, 0.2f, 0.95f);
     m_btnContinue->setHoverColor(0.3f, 0.8f, 0.3f, 1.0f);
     m_btnContinue->setPressedColor(0.1f, 0.4f, 0.1f, 1.0f);
+    m_btnContinue->connectClick(this, &PauseScene::onContinueClicked);
 
     // 设置按钮已移除，保留单行继续按钮
 
@@ -251,7 +252,12 @@ void PauseScene::createUI()
     };
 
     makeRow(m_btnDay,    "切换到白天",   m_btnNight,   "切换到黑夜");
+    m_btnDay->connectClick(this, &PauseScene::onSetDay);
+    m_btnNight->connectClick(this, &PauseScene::onSetNight);
+
     makeRow(m_btnFwd,    "时间 +10%",    m_btnBack,    "时间 -10%");
+    m_btnFwd->connectClick(this, &PauseScene::onFwdTime);
+    m_btnBack->connectClick(this, &PauseScene::onBackTime);
 
     // 退出按钮独占一行
     auto* rowBottom = vbox->createChild<UI::UIHStack>("RowBottom");
@@ -266,6 +272,7 @@ void PauseScene::createUI()
     m_btnQuit->setNormalColor(0.6f, 0.2f, 0.2f, 0.95f);
     m_btnQuit->setHoverColor(0.8f, 0.3f, 0.3f, 1.0f);
     m_btnQuit->setPressedColor(0.4f, 0.1f, 0.1f, 1.0f);
+    m_btnQuit->connectClick(this, &PauseScene::onQuitClicked);
 
     // 触发布局计算并回填 Panel 高度，再居中 Panel
     // 重要：使用performLayoutNow()确保布局立即完成，这样getSize()才能返回正确的值
