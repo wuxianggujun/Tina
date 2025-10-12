@@ -13,6 +13,8 @@
 #include <EASTL/vector.h>
 #include <EASTL/array.h>
 #include <EASTL/unique_ptr.h>
+#include <EASTL/algorithm.h>
+#include <atomic>
 
 namespace Tina::Engine {
 
@@ -22,6 +24,9 @@ namespace Tina::Engine {
 template<typename E>
 using EventHandler = eastl::fixed_function<HANDLER_FUNCTION_SIZE, void(const E&)>;
 
+// 订阅ID类型
+using SubscriptionId = uint64_t;
+
 // ==================== 类型擦除包装器 ====================
 
 // 处理器包装器基类（用于类型擦除）
@@ -29,20 +34,29 @@ struct HandlerWrapperBase {
     virtual ~HandlerWrapperBase() = default;
     virtual void invoke(const EventWrapper& event) = 0;
     virtual size_t getHandlerCount() const = 0;
+    virtual bool removeHandler(SubscriptionId id) = 0;
+    virtual void clear() = 0;
+};
+
+// 带ID的处理器
+template<typename E>
+struct HandlerWithId {
+    SubscriptionId id;
+    EventHandler<E> handler;
 };
 
 // 具体类型的处理器包装器
 template<typename E>
 struct TypedHandlerWrapper : HandlerWrapperBase {
-    eastl::vector<EventHandler<E>> handlers;
+    eastl::vector<HandlerWithId<E>> handlers;
 
     void invoke(const EventWrapper& event) override {
         // 从 EventWrapper 中提取具体事件
         const E* concreteEvent = event.as<E>();
         if (concreteEvent) {
-            for (auto& handler : handlers) {
-                if (handler) {  // 检查有效性
-                    handler(*concreteEvent);
+            for (auto& item : handlers) {
+                if (item.handler) {  // 检查有效性
+                    item.handler(*concreteEvent);
                 }
             }
         }
@@ -52,11 +66,21 @@ struct TypedHandlerWrapper : HandlerWrapperBase {
         return handlers.size();
     }
 
-    void addHandler(EventHandler<E> handler) {
-        handlers.push_back(eastl::move(handler));
+    void addHandler(SubscriptionId id, EventHandler<E> handler) {
+        handlers.push_back({id, eastl::move(handler)});
     }
 
-    void clear() {
+    bool removeHandler(SubscriptionId id) override {
+        auto it = eastl::find_if(handlers.begin(), handlers.end(),
+            [id](const HandlerWithId<E>& item) { return item.id == id; });
+        if (it != handlers.end()) {
+            handlers.erase(it);
+            return true;
+        }
+        return false;
+    }
+
+    void clear() override {
         handlers.clear();
     }
 };
@@ -65,7 +89,7 @@ struct TypedHandlerWrapper : HandlerWrapperBase {
 
 class EventDispatcher {
 public:
-    EventDispatcher() {
+    EventDispatcher() : m_nextSubscriptionId(1) {
         // 初始化处理器数组（所有元素为 nullptr）
         for (auto& wrapper : m_handlers) {
             wrapper = nullptr;
@@ -80,13 +104,13 @@ public:
 
     // ==================== 订阅事件 ====================
 
-    // 订阅事件（lambda 或函数对象）
+    // 订阅事件（lambda 或函数对象），返回订阅ID
     template<typename E>
-    void subscribe(EventHandler<E> handler) {
+    SubscriptionId subscribe(EventHandler<E> handler) {
         auto typeId = static_cast<uint32_t>(E::TYPE_ID);
         if (typeId >= static_cast<uint32_t>(EventTypeId::MaxEventTypes)) {
             TINA_ERROR("无效的事件类型 ID: {}", typeId);
-            return;
+            return 0;
         }
 
         // 获取或创建对应类型的包装器
@@ -99,27 +123,57 @@ public:
         auto* typedWrapper = dynamic_cast<TypedHandlerWrapper<E>*>(wrapper.get());
         if (!typedWrapper) {
             TINA_ERROR("事件类型不匹配: {}", eventTypeIdToString(E::TYPE_ID));
-            return;
+            return 0;
         }
 
-        typedWrapper->addHandler(eastl::move(handler));
+        SubscriptionId id = m_nextSubscriptionId++;
+        typedWrapper->addHandler(id, eastl::move(handler));
         ++m_subscribeCount;
+        return id;
     }
 
     // 便捷订阅：成员函数
     template<typename E, typename T>
-    void subscribe(T* obj, void (T::*method)(const E&)) {
-        subscribe<E>([obj, method](const E& e) {
+    SubscriptionId subscribe(T* obj, void (T::*method)(const E&)) {
+        return subscribe<E>([obj, method](const E& e) {
             (obj->*method)(e);
         });
     }
 
     // 便捷订阅：const 成员函数
     template<typename E, typename T>
-    void subscribe(const T* obj, void (T::*method)(const E&) const) {
-        subscribe<E>([obj, method](const E& e) {
+    SubscriptionId subscribe(const T* obj, void (T::*method)(const E&) const) {
+        return subscribe<E>([obj, method](const E& e) {
             (obj->*method)(e);
         });
+    }
+
+    // 取消订阅
+    void unsubscribe(EventTypeId typeId, SubscriptionId id) {
+        auto typeIndex = static_cast<uint32_t>(typeId);
+        if (typeIndex >= m_handlers.size()) {
+            return;
+        }
+
+        auto& wrapper = m_handlers[typeIndex];
+        if (wrapper && wrapper->removeHandler(id)) {
+            --m_subscribeCount;
+        }
+    }
+
+    // 取消某个类型的所有订阅
+    void unsubscribeAll(EventTypeId typeId) {
+        auto typeIndex = static_cast<uint32_t>(typeId);
+        if (typeIndex >= m_handlers.size()) {
+            return;
+        }
+
+        auto& wrapper = m_handlers[typeIndex];
+        if (wrapper) {
+            auto count = wrapper->getHandlerCount();
+            wrapper->clear();
+            m_subscribeCount -= count;
+        }
     }
 
     // ==================== 分发事件 ====================
@@ -262,6 +316,8 @@ private:
     // 统计信息
     uint64_t m_subscribeCount = 0;
     uint64_t m_dispatchCount = 0;
+    // 订阅ID生成器
+    std::atomic<SubscriptionId> m_nextSubscriptionId;
 };
 
 } // namespace Tina::Engine

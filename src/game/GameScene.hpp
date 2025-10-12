@@ -18,6 +18,7 @@
 #include "../engine/Texture.hpp"
 #include "../engine/AudioResource.hpp"
 #include "../engine/EventSystem.hpp"
+#include "../engine/SubscriptionToken.hpp"  // 添加订阅令牌管理
 
 namespace Tina::Game {
 
@@ -104,12 +105,15 @@ private:
     Core::Signal<>::Connection m_switchControlConnection;
     Core::Signal<int, bool>::Connection m_keyPressedConnection;
     Core::Signal<float>::Connection m_mouseWheelConnection;
-    // 注意：新事件系统不需要存储连接对象，订阅在场景生命周期内持久有效
+
+    // 事件订阅管理器（RAII 自动取消订阅）
+    Engine::SubscriptionManager m_eventSubscriptions;
 
     // 游戏状态
     entt::entity m_playerEntity = entt::null;
     entt::entity m_clickedEntity = entt::null;  // 右键点击的角色
     bool m_isToolActive = false;  // 标记当前帧是否有工具激活（用于 UI 事件处理）
+    bool m_isExiting = false;  // 标记场景是否正在退出
 
     // 视口尺寸
     int m_pixelWidth = 1280;

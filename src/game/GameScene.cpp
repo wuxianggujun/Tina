@@ -25,7 +25,7 @@
 
 namespace Tina::Game {
 
-GameScene::GameScene() = default;
+GameScene::GameScene() : m_isExiting(false) {}
 GameScene::~GameScene() = default;
 
 // 视图配置（使用新架构）
@@ -74,6 +74,16 @@ void GameScene::onExit()
 {
     TINA_INFO("GameScene::onExit - 退出游戏场景");
 
+    // 标记场景正在退出，防止事件处理器继续执行
+    m_isExiting = true;
+
+    // 重要！立即清理 ECS 世界，防止事件处理器访问无效实体
+    // 这必须在其他资源清理前执行
+    m_playerEntity = entt::null;  // 先标记玩家实体为无效
+    if (m_ecsWorld) {
+        m_ecsWorld.reset();  // 立即销毁 ECS 世界
+    }
+
     // 停止并释放游戏界面音效
     if (m_sfxYingxiao) {
         m_sfxYingxiao->stop();
@@ -101,7 +111,7 @@ void GameScene::onExit()
     m_characterPanel.reset();
     m_toolbar.reset();
     // 相机由基类管理，不需要手动reset
-    m_ecsWorld.reset();
+    // m_ecsWorld 已在开头清理
     m_tileMap.reset();
 
     m_tileRenderer.reset();
@@ -912,7 +922,8 @@ void GameScene::subscribeToEvents()
 
 void GameScene::triggerPlayerEvents(float prevX, float prevY, bool wasOnGround)
 {
-    if (!app() || m_playerEntity == entt::null) return;
+    // 安全检查：场景退出时不触发事件
+    if (m_isExiting || !app() || m_playerEntity == entt::null) return;
 
     auto& reg = m_ecsWorld->registry();
     if (!reg.any_of<ECS::Transform, ECS::PhysicsBody, ECS::Velocity>(m_playerEntity)) return;
@@ -941,18 +952,24 @@ void GameScene::triggerPlayerEvents(float prevX, float prevY, bool wasOnGround)
 // === 强类型事件处理 ===
 void GameScene::onSetDayNight(const Tina::Game::Events::SetDayNight& e)
 {
+    // 安全检查：场景正在退出时不处理事件
+    if (m_isExiting) return;
+
     m_dayNight.setNormalizedTime(e.normalized);
 }
 
 void GameScene::onAdjustDayNight(const Tina::Game::Events::AdjustDayNight& e)
 {
+    // 安全检查：场景正在退出时不处理事件
+    if (m_isExiting) return;
+
     m_dayNight.setNormalizedTime(m_dayNight.normalizedTime() + e.delta);
 }
 
 void GameScene::onPlayerJumpedEvt(const Tina::Game::Events::PlayerJumped&)
 {
     // 防御性检查：确保场景资源仍然有效
-    if (!m_ecsWorld || !m_particleSystem || m_playerEntity == entt::null) return;
+    if (m_isExiting || !m_ecsWorld || !m_particleSystem || m_playerEntity == entt::null) return;
 
     auto& reg = m_ecsWorld->registry();
     if (reg.any_of<ECS::Transform>(m_playerEntity)) {
@@ -970,6 +987,9 @@ void GameScene::onPlayerJumpedEvt(const Tina::Game::Events::PlayerJumped&)
 
 void GameScene::onPlayerMovedEvt(const Tina::Game::Events::PlayerMoved& e)
 {
+    // 安全检查：场景正在退出时不处理事件
+    if (m_isExiting) return;
+
     (void)e; // 目前仅作示例订阅，可加入调试逻辑
 }
 } // namespace Tina::Game
