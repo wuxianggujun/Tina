@@ -154,6 +154,11 @@ void UIEventDispatcher::handleMouseInput(float x, float y, bool leftDown) {
 
         // Click (只在同一节点上按下和释放才触发)
         if (m_pressedNode && m_pressedNode == hitNode) {
+            // 如果节点可聚焦，设置焦点
+            if (m_pressedNode->isFocusable()) {
+                setFocus(m_pressedNode);
+            }
+
             UIMouseEvent clickEvent(UIEvent::Type::Click, m_pressedNode, x, y);
             dispatchEvent(clickEvent);
             if (!clickEvent.isDefaultPrevented()) {
@@ -241,13 +246,34 @@ UINode* UIEventDispatcher::findNodeUnderMouse(UINode* node, float x, float y) {
 // 基于扁平索引的命中检测（性能优先）
 UINode* UIEventDispatcher::findNodeUnderMouseIndexed(float x, float y) {
     if (!m_root) return nullptr;
+
+    // 优化：先检查根节点边界，提前退出
+    auto rootPos = m_root->getWorldPosition();
+    auto rootSize = m_root->getSize();
+    if (x < rootPos.x || x > rootPos.x + rootSize.x ||
+        y < rootPos.y || y > rootPos.y + rootSize.y) {
+        return nullptr;  // 鼠标在整个UI树外部，直接返回
+    }
+
     if (m_needRebuildIndex) {
         rebuildIndex();
         m_needRebuildIndex = false;
     }
+
+    // 从后向前遍历（后面的元素z-index更高）
     for (int i = static_cast<int>(m_indexedNodes.size()) - 1; i >= 0; --i) {
         UINode* n = m_indexedNodes[static_cast<size_t>(i)];
         if (!n->isVisible() || !n->isEnabled()) continue;
+
+        // 优化：先做粗略边界检查，避免调用 containsPoint
+        auto pos = n->getWorldPosition();
+        auto size = n->getSize();
+        if (x < pos.x || x > pos.x + size.x ||
+            y < pos.y || y > pos.y + size.y) {
+            continue;  // 快速跳过不相交的节点
+        }
+
+        // 精确检查（如果节点有自定义形状）
         if (n->containsPoint(x, y)) return n;
     }
     return nullptr;
@@ -287,6 +313,105 @@ void UIEventDispatcher::collectAllNodes(UINode* node, Container::Vector<UINode*>
     const auto& children = node->getChildren();
     for (const auto& ch : children) {
         if (ch.get()) collectAllNodes(ch.get(), outList);
+    }
+}
+
+// === 焦点管理实现 ===
+
+void UIEventDispatcher::setFocus(UINode* node) {
+    if (m_focusedNode == node) return;
+
+    // 先发送 blur 事件给旧焦点
+    if (m_focusedNode) {
+        UIFocusEvent blurEvent(UIEvent::Type::Blur, m_focusedNode);
+        dispatchEvent(blurEvent);
+    }
+
+    m_focusedNode = node;
+
+    // 再发送 focus 事件给新焦点
+    if (m_focusedNode) {
+        UIFocusEvent focusEvent(UIEvent::Type::Focus, m_focusedNode);
+        dispatchEvent(focusEvent);
+    }
+}
+
+void UIEventDispatcher::focusNext() {
+    if (!m_root) return;
+
+    // 收集所有可聚焦节点
+    Container::Vector<UINode*> focusableNodes;
+    collectFocusableNodes(m_root, focusableNodes);
+
+    if (focusableNodes.empty()) return;
+
+    // 找到当前焦点的索引
+    int currentIndex = -1;
+    for (int i = 0; i < static_cast<int>(focusableNodes.size()); ++i) {
+        if (focusableNodes[i] == m_focusedNode) {
+            currentIndex = i;
+            break;
+        }
+    }
+
+    // 移动到下一个
+    int nextIndex = (currentIndex + 1) % focusableNodes.size();
+    setFocus(focusableNodes[nextIndex]);
+}
+
+void UIEventDispatcher::focusPrevious() {
+    if (!m_root) return;
+
+    Container::Vector<UINode*> focusableNodes;
+    collectFocusableNodes(m_root, focusableNodes);
+
+    if (focusableNodes.empty()) return;
+
+    int currentIndex = -1;
+    for (int i = 0; i < static_cast<int>(focusableNodes.size()); ++i) {
+        if (focusableNodes[i] == m_focusedNode) {
+            currentIndex = i;
+            break;
+        }
+    }
+
+    // 移动到上一个
+    int prevIndex = (currentIndex <= 0) ? focusableNodes.size() - 1 : currentIndex - 1;
+    setFocus(focusableNodes[prevIndex]);
+}
+
+void UIEventDispatcher::collectFocusableNodes(UINode* node, Container::Vector<UINode*>& outList) {
+    if (!node || !node->isVisible() || !node->isEnabled()) return;
+
+    if (node->isFocusable()) {
+        outList.push_back(node);
+    }
+
+    const auto& children = node->getChildren();
+    for (const auto& child : children) {
+        collectFocusableNodes(child.get(), outList);
+    }
+}
+
+void UIEventDispatcher::handleKeyInput(int key, bool down) {
+    // Tab 键切换焦点
+    if (key == 9 && down) {  // Tab key
+        focusNext();
+        return;
+    }
+
+    // Shift+Tab 反向切换
+    if (key == 353 && down) {  // Shift+Tab
+        focusPrevious();
+        return;
+    }
+
+    // 将键盘事件发送给焦点节点
+    if (m_focusedNode) {
+        UIKeyEvent keyEvent(down ? UIEvent::Type::KeyDown : UIEvent::Type::KeyUp,
+                            m_focusedNode, key);
+        keyEvent.setBubbles(true);  // 键盘事件支持冒泡
+        dispatchEvent(keyEvent);
     }
 }
 

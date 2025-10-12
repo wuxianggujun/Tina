@@ -1,5 +1,6 @@
 #include "UIComponents.hpp"
 #include "UICore.hpp"
+#include "UIEventDispatcher.hpp"
 #include "../core/Log.hpp"
 #include <algorithm>
 
@@ -49,7 +50,21 @@ void UILabel::onRender(uint16_t viewId, UIRenderer& renderer)
 // === UIButton 实现 ===
 
 void UIButton::onClick() {
-    // 直接调用回调，最高效（无日志、无对象分配）
+    // 优先通过事件系统触发（支持冒泡、捕获、preventDefault）
+    auto* dispatcher = getEventDispatcher();
+    if (dispatcher) {
+        // 创建点击事件并分发
+        UIClickEvent event(UIEvent::Type::Click, this, 0, 0);
+        event.setBubbles(true);  // 支持冒泡
+        dispatcher->dispatchEvent(event);
+
+        // 如果事件被阻止，不执行回调
+        if (event.isDefaultPrevented()) {
+            return;
+        }
+    }
+
+    // 后备方案：如果没有事件系统或事件未阻止，执行回调
     if (m_clickCallback) {
         m_clickCallback();
     }

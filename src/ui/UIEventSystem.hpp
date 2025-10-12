@@ -39,6 +39,8 @@ public:
     }
 
 private:
+    void setDispatcherRecursive(UINode* node, UIEventDispatcher* dispatcher);
+
     UINode* m_root = nullptr;
     UINode* m_hoveredNode = nullptr;
     UINode* m_pressedNode = nullptr;

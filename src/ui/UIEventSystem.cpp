@@ -22,6 +22,20 @@ void UIEventSystem::setRoot(UINode* root)
 
     if (m_dispatcher) {
         m_dispatcher->setRoot(root);
+
+        // 递归设置所有节点的 dispatcher
+        setDispatcherRecursive(root, m_dispatcher.get());
+    }
+}
+
+void UIEventSystem::setDispatcherRecursive(UINode* node, UIEventDispatcher* dispatcher)
+{
+    if (!node) return;
+
+    node->setEventDispatcher(dispatcher);
+
+    for (size_t i = 0; i < node->getChildCount(); ++i) {
+        setDispatcherRecursive(node->getChild(i), dispatcher);
     }
 }
 

@@ -138,6 +138,47 @@ private:
     bool m_ctrlKey, m_shiftKey, m_altKey;
 };
 
+// 点击事件（简化版，用于按钮）
+class UIClickEvent : public UIMouseEvent {
+public:
+    UIClickEvent(Type type, UINode* target, float x, float y)
+        : UIMouseEvent(type, target, x, y, 0) {}
+};
+
+// 焦点事件
+class UIFocusEvent : public UIEvent {
+public:
+    UIFocusEvent(Type type, UINode* target)
+        : UIEvent(type, target) {}
+};
+
+// 键盘事件
+class UIKeyEvent : public UIEvent {
+public:
+    UIKeyEvent(Type type, UINode* target, int keyCode)
+        : UIEvent(type, target)
+        , m_keyCode(keyCode)
+        , m_ctrlKey(false)
+        , m_shiftKey(false)
+        , m_altKey(false) {}
+
+    int getKeyCode() const { return m_keyCode; }
+
+    bool isCtrlPressed() const { return m_ctrlKey; }
+    bool isShiftPressed() const { return m_shiftKey; }
+    bool isAltPressed() const { return m_altKey; }
+
+    void setModifiers(bool ctrl, bool shift, bool alt) {
+        m_ctrlKey = ctrl;
+        m_shiftKey = shift;
+        m_altKey = alt;
+    }
+
+private:
+    int m_keyCode;
+    bool m_ctrlKey, m_shiftKey, m_altKey;
+};
+
 // ==================== 事件监听器 ====================
 
 using EventHandler = std::function<void(UIEvent&)>;
@@ -182,6 +223,18 @@ public:
     // 索引更新：当 UI 结构/可见性/启用状态发生变化时，调用以重建命中索引
     void markIndexDirty() { m_needRebuildIndex = true; }
 
+    // === 焦点管理 ===
+    void setFocus(UINode* node);
+    UINode* getFocusedNode() const { return m_focusedNode; }
+    void clearFocus() { setFocus(nullptr); }
+
+    // 焦点导航
+    void focusNext();
+    void focusPrevious();
+
+    // 键盘输入处理
+    void handleKeyInput(int key, bool down);
+
 private:
     // 构建事件路径（从根到目标）
     void buildEventPath(UINode* target, Container::Vector<UINode*>& path);
@@ -195,6 +248,7 @@ private:
     // 命中索引重建与节点收集
     void rebuildIndex();
     void collectAllNodes(UINode* node, Container::Vector<UINode*>& outList);
+    void collectFocusableNodes(UINode* node, Container::Vector<UINode*>& outList);
     UINode* findNodeUnderMouseIndexed(float x, float y);
     UINode* findNodeUnderMouseIndexedIf(float x, float y, const std::function<bool(UINode*)>& pred);
 
@@ -212,6 +266,9 @@ private:
     float m_mouseX = 0, m_mouseY = 0;
     bool m_mouseDown = false;
     bool m_mouseDownPrev = false;
+
+    // 焦点管理
+    UINode* m_focusedNode = nullptr;
 
     // 简易空间索引：将节点扁平化并缓存（自底向上命中，顶层优先）
     Container::Vector<UINode*> m_indexedNodes;

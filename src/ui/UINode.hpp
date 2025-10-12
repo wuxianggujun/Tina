@@ -33,6 +33,7 @@ namespace Tina::UI {
 // 前向声明
 class UIRenderer;
 class UILayoutManager;
+class UIEventDispatcher;
 
 // 布局尺寸语义（类 Android）
 enum class LayoutDim : uint8_t {
@@ -203,6 +204,10 @@ public:
     const std::string& getName() const { return m_name; }
     void setName(const std::string& name) { m_name = name; }
 
+    // === 事件分发器支持 ===
+    void setEventDispatcher(UIEventDispatcher* dispatcher) { m_dispatcher = dispatcher; }
+    UIEventDispatcher* getEventDispatcher() const { return m_dispatcher; }
+
 protected:
     // === 子类可覆盖的回调 ===
 
@@ -254,6 +259,9 @@ protected:
     bool m_hoverable = true;
     bool m_focusable = false;
     int m_zIndex = 0;
+
+    // 事件分发器（由场景或事件系统设置）
+    UIEventDispatcher* m_dispatcher = nullptr;
 
     // ==================== 结构变更版本（用于命中索引置脏） ====================
 public:
