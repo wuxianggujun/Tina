@@ -10,6 +10,7 @@
 #include "../core/Log.hpp"
 #include "../core/Container.hpp"
 #include <type_traits>
+#include <cstring>  // for std::memcpy
 
 namespace Tina::Engine {
 
@@ -18,44 +19,52 @@ using namespace Tina::Container;
 // ==================== 通用事件包装器 ====================
 
 // 事件包装器（用于存储任意类型的事件）
+// 重要：只支持POD类型事件，确保内存安全
 struct EventWrapper {
     EventTypeId typeId = EventTypeId::None;
     uint32_t timestamp = 0;
     EventPriority priority = EventPriority::Medium;
 
-    // 事件数据（使用 union 节省内存）
-    union EventData {
-        // 预留空间存储事件数据（128 字节应该足够大部分事件）
-        alignas(8) uint8_t buffer[128];
-
-        EventData() {}
-        ~EventData() {}
-    } data;
+    // 事件数据缓冲区
+    // 注意：只支持trivially copyable和trivially destructible的类型
+    // 不需要调用析构函数，因为只存储POD数据
+    alignas(8) uint8_t data[128];  // 128字节应该足够大部分事件
 
     EventWrapper() = default;
 
-    // 从具体事件构造
+    // 从具体事件构造（只接受POD类型）
     template<typename E>
     explicit EventWrapper(const E& event) {
-        static_assert(sizeof(E) <= sizeof(EventData), "事件大小超过 128 字节");
+        static_assert(sizeof(E) <= sizeof(data), "事件大小超过 128 字节");
+        static_assert(std::is_trivially_copyable_v<E>, "事件必须是 trivially copyable");
+        static_assert(std::is_trivially_destructible_v<E>, "事件必须是 trivially destructible");
+
         typeId = E::TYPE_ID;
-        static_assert(std::is_trivially_copyable_v<E>, "Event must be trivially copyable");
-        static_assert(std::is_trivially_destructible_v<E>, "Event must be trivially destructible");
         timestamp = event.timestamp;
         priority = event.priority;
-        new (data.buffer) E(event);  // 放置 new
+
+        // 使用memcpy进行POD数据拷贝，避免placement new
+        std::memcpy(data, &event, sizeof(E));
     }
 
     // 获取事件指针（需要外部保证类型正确）
     template<typename E>
     const E* as() const {
-        return reinterpret_cast<const E*>(data.buffer);
+        static_assert(std::is_trivially_copyable_v<E>, "事件必须是 trivially copyable");
+        static_assert(std::is_trivially_destructible_v<E>, "事件必须是 trivially destructible");
+        return reinterpret_cast<const E*>(data);
     }
 
     template<typename E>
     E* as() {
-        return reinterpret_cast<E*>(data.buffer);
+        static_assert(std::is_trivially_copyable_v<E>, "事件必须是 trivially copyable");
+        static_assert(std::is_trivially_destructible_v<E>, "事件必须是 trivially destructible");
+        return reinterpret_cast<E*>(data);
     }
+
+    // 拷贝构造和赋值（POD类型，使用默认实现）
+    EventWrapper(const EventWrapper&) = default;
+    EventWrapper& operator=(const EventWrapper&) = default;
 };
 
 // ==================== 事件队列 ====================

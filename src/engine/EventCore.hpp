@@ -110,6 +110,7 @@ enum class EventPriority : uint8_t {
 // ==================== CRTP 事件基类 ====================
 
 // 事件基类（使用 CRTP 实现静态多态）
+// 注意：不使用虚函数，保持POD特性以提高性能
 template<typename Derived, EventTypeId TypeId>
 struct Event {
     // 编译期类型 ID
@@ -122,8 +123,8 @@ struct Event {
     // 获取类型 ID（方便运行时查询）
     EventTypeId getTypeId() const { return TYPE_ID; }
 
-    // 虚析构函数（用于多态删除）
-    virtual ~Event() = default;
+    // 不使用虚析构函数，保持trivially destructible
+    // CRTP模式不需要虚函数，完全使用静态多态
 };
 
 // ==================== 宏简化事件定义 ====================

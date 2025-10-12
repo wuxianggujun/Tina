@@ -75,10 +75,8 @@ public:
     SubscriptionToken subscribe(EventHandler<E> handler) {
         auto id = m_dispatcher.subscribe<E>(Container::Move(handler));
 
-        // 返回 RAII 令牌，析构时自动取消订阅
-        return SubscriptionToken([this, id, typeId = E::TYPE_ID]() {
-            m_dispatcher.unsubscribe(typeId, id);
-        });
+        // 返回优化的RAII令牌，直接存储必要信息
+        return SubscriptionToken(&m_dispatcher, E::TYPE_ID, id);
     }
 
     // 订阅事件（成员函数），返回 RAII 令牌
@@ -86,10 +84,8 @@ public:
     SubscriptionToken subscribe(T* obj, void (T::*method)(const E&)) {
         auto id = m_dispatcher.subscribe<E>(obj, method);
 
-        // 返回 RAII 令牌，析构时自动取消订阅
-        return SubscriptionToken([this, id, typeId = E::TYPE_ID]() {
-            m_dispatcher.unsubscribe(typeId, id);
-        });
+        // 返回优化的RAII令牌，直接存储必要信息
+        return SubscriptionToken(&m_dispatcher, E::TYPE_ID, id);
     }
 
     // 订阅事件（const 成员函数），返回 RAII 令牌
@@ -97,10 +93,8 @@ public:
     SubscriptionToken subscribe(const T* obj, void (T::*method)(const E&) const) {
         auto id = m_dispatcher.subscribe<E>(obj, method);
 
-        // 返回 RAII 令牌，析构时自动取消订阅
-        return SubscriptionToken([this, id, typeId = E::TYPE_ID]() {
-            m_dispatcher.unsubscribe(typeId, id);
-        });
+        // 返回优化的RAII令牌，直接存储必要信息
+        return SubscriptionToken(&m_dispatcher, E::TYPE_ID, id);
     }
 
     // ==================== 发送事件 ====================

@@ -25,6 +25,8 @@ set(SRC_FILES
     engine/EventDispatcher.hpp
     engine/EventSystem.hpp
     engine/Events.hpp
+    engine/SubscriptionToken.hpp
+    engine/SubscriptionToken.cpp
     engine/Window.hpp
     engine/Window.cpp
     engine/InputSystem.hpp

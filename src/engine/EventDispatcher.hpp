@@ -1,7 +1,8 @@
 //
-// EventDispatcher.hpp - 事件分发器（基于 EASTL fixed_function）
+// EventDispatcher.hpp - 优化后的事件分发器
 // 职责：订阅事件、分发事件、管理处理器
 // 性能：O(1) 订阅，O(H) 分发（H 是处理器数量）
+// 优化：移除dynamic_cast，使用静态分发，减少动态内存分配
 //
 
 #pragma once
@@ -12,6 +13,7 @@
 #include "../core/Container.hpp"  // 使用封装的容器
 #include "../core/Memory.hpp"     // 使用封装的智能指针
 #include <atomic>
+#include <type_traits>
 
 namespace Tina::Engine {
 
@@ -28,38 +30,83 @@ using EventHandler = FixedFunction<HANDLER_FUNCTION_SIZE, void, const E&>;
 // 订阅ID类型
 using SubscriptionId = uint64_t;
 
-// ==================== 类型擦除包装器 ====================
+// ==================== 优化的处理器存储 ====================
 
-// 处理器包装器基类（用于类型擦除）
-struct HandlerWrapperBase {
-    virtual ~HandlerWrapperBase() = default;
-    virtual void invoke(const EventWrapper& event) = 0;
+// 单个事件类型的处理器容器
+template<typename E>
+class TypedEventHandlers {
+public:
+    struct HandlerEntry {
+        SubscriptionId id;
+        EventHandler<E> handler;
+    };
+
+    // 添加处理器
+    SubscriptionId add(EventHandler<E> handler) {
+        SubscriptionId id = m_nextId++;
+        m_handlers.push_back({id, Container::Move(handler)});
+        return id;
+    }
+
+    // 移除处理器
+    bool remove(SubscriptionId id) {
+        auto it = Container::FindIf(m_handlers.begin(), m_handlers.end(),
+            [id](const HandlerEntry& entry) { return entry.id == id; });
+
+        if (it != m_handlers.end()) {
+            m_handlers.erase(it);
+            return true;
+        }
+        return false;
+    }
+
+    // 分发事件到所有处理器
+    void dispatch(const E& event) {
+        for (auto& entry : m_handlers) {
+            if (entry.handler) {
+                entry.handler(event);
+            }
+        }
+    }
+
+    // 清除所有处理器
+    void clear() {
+        m_handlers.clear();
+    }
+
+    // 获取处理器数量
+    size_t size() const {
+        return m_handlers.size();
+    }
+
+private:
+    Vector<HandlerEntry> m_handlers;
+    static inline std::atomic<SubscriptionId> m_nextId{1};
+};
+
+// ==================== 处理器存储管理器 ====================
+
+// 处理器存储的基类（用于类型擦除）
+class HandlerStorageBase {
+public:
+    virtual ~HandlerStorageBase() = default;
+    virtual void dispatchWrapper(const EventWrapper& wrapper) = 0;
     virtual size_t getHandlerCount() const = 0;
     virtual bool removeHandler(SubscriptionId id) = 0;
     virtual void clear() = 0;
 };
 
-// 带ID的处理器
+// 具体类型的处理器存储
 template<typename E>
-struct HandlerWithId {
-    SubscriptionId id;
-    EventHandler<E> handler;
-};
+class TypedHandlerStorage : public HandlerStorageBase {
+public:
+    TypedEventHandlers<E> handlers;
 
-// 具体类型的处理器包装器
-template<typename E>
-struct TypedHandlerWrapper : HandlerWrapperBase {
-    Vector<HandlerWithId<E>> handlers;
-
-    void invoke(const EventWrapper& event) override {
-        // 从 EventWrapper 中提取具体事件
-        const E* concreteEvent = event.as<E>();
-        if (concreteEvent) {
-            for (auto& item : handlers) {
-                if (item.handler) {  // 检查有效性
-                    item.handler(*concreteEvent);
-                }
-            }
+    void dispatchWrapper(const EventWrapper& wrapper) override {
+        // 直接转换，不使用dynamic_cast
+        const E* event = wrapper.as<E>();
+        if (event) {
+            handlers.dispatch(*event);
         }
     }
 
@@ -67,18 +114,8 @@ struct TypedHandlerWrapper : HandlerWrapperBase {
         return handlers.size();
     }
 
-    void addHandler(SubscriptionId id, EventHandler<E> handler) {
-        handlers.push_back({id, Container::Move(handler)});
-    }
-
     bool removeHandler(SubscriptionId id) override {
-        auto it = Container::FindIf(handlers.begin(), handlers.end(),
-            [id](const HandlerWithId<E>& item) { return item.id == id; });
-        if (it != handlers.end()) {
-            handlers.erase(it);
-            return true;
-        }
-        return false;
+        return handlers.remove(id);
     }
 
     void clear() override {
@@ -86,15 +123,13 @@ struct TypedHandlerWrapper : HandlerWrapperBase {
     }
 };
 
-// ==================== 事件分发器 ====================
+// ==================== 优化的事件分发器 ====================
 
 class EventDispatcher {
 public:
     EventDispatcher() : m_nextSubscriptionId(1) {
-        // 初始化处理器数组（所有元素为 nullptr）
-        for (auto& wrapper : m_handlers) {
-            wrapper = nullptr;
-        }
+        // 预分配所有可能的处理器存储
+        initializeHandlerStorages();
     }
 
     ~EventDispatcher() = default;
@@ -114,22 +149,19 @@ public:
             return 0;
         }
 
-        // 获取或创建对应类型的包装器
-        auto& wrapper = m_handlers[typeId];
-        if (!wrapper) {
-            wrapper = MakeUnique<TypedHandlerWrapper<E>>();
-        }
-
-        // 类型安全检查（运行时）
-        auto* typedWrapper = dynamic_cast<TypedHandlerWrapper<E>*>(wrapper.get());
-        if (!typedWrapper) {
-            TINA_ERROR("事件类型不匹配: {}", eventTypeIdToString(E::TYPE_ID));
+        // 获取对应类型的处理器存储
+        auto* storage = getTypedStorage<E>(typeId);
+        if (!storage) {
+            TINA_ERROR("无法获取事件类型 {} 的处理器存储", eventTypeIdToString(E::TYPE_ID));
             return 0;
         }
 
-        SubscriptionId id = m_nextSubscriptionId++;
-        typedWrapper->addHandler(id, Container::Move(handler));
+        SubscriptionId id = storage->handlers.add(Container::Move(handler));
         ++m_subscribeCount;
+
+        // 记录订阅信息，用于取消订阅
+        m_subscriptions[id] = typeId;
+
         return id;
     }
 
@@ -152,28 +184,39 @@ public:
     // 取消订阅
     void unsubscribe(EventTypeId typeId, SubscriptionId id) {
         auto typeIndex = static_cast<uint32_t>(typeId);
-        if (typeIndex >= m_handlers.size()) {
+        if (typeIndex >= m_handlerStorages.size()) {
             return;
         }
 
-        auto& wrapper = m_handlers[typeIndex];
-        if (wrapper && wrapper->removeHandler(id)) {
+        auto& storage = m_handlerStorages[typeIndex];
+        if (storage && storage->removeHandler(id)) {
             --m_subscribeCount;
+            m_subscriptions.erase(id);
         }
     }
 
     // 取消某个类型的所有订阅
     void unsubscribeAll(EventTypeId typeId) {
         auto typeIndex = static_cast<uint32_t>(typeId);
-        if (typeIndex >= m_handlers.size()) {
+        if (typeIndex >= m_handlerStorages.size()) {
             return;
         }
 
-        auto& wrapper = m_handlers[typeIndex];
-        if (wrapper) {
-            auto count = wrapper->getHandlerCount();
-            wrapper->clear();
+        auto& storage = m_handlerStorages[typeIndex];
+        if (storage) {
+            auto count = storage->getHandlerCount();
+            storage->clear();
             m_subscribeCount -= count;
+
+            // 清理订阅映射表
+            auto it = m_subscriptions.begin();
+            while (it != m_subscriptions.end()) {
+                if (it->second == typeIndex) {
+                    it = m_subscriptions.erase(it);
+                } else {
+                    ++it;
+                }
+            }
         }
     }
 
@@ -183,35 +226,27 @@ public:
     template<typename E>
     void dispatch(const E& event) {
         auto typeId = static_cast<uint32_t>(E::TYPE_ID);
-        if (typeId >= m_handlers.size()) {
+        if (typeId >= m_handlerStorages.size()) {
             return;
         }
 
-        auto& wrapper = m_handlers[typeId];
-        if (wrapper) {
-            // 仅零拷贝直派：避免实例化 EventWrapper（非平凡类型也可支持）
-            if (auto* typed = dynamic_cast<TypedHandlerWrapper<E>*>(wrapper.get())) {
-                for (auto& item : typed->handlers) {
-                    if (item.handler) item.handler(event);
-                }
-                ++m_dispatchCount;
-            } else {
-                // 没有匹配的类型包装，无法派发（可能无订阅或类型不一致）
-                TINA_WARN("EventDispatcher: 类型不匹配或未建立处理器: {}", eventTypeIdToString(E::TYPE_ID));
-            }
+        auto* storage = getTypedStorage<E>(typeId);
+        if (storage) {
+            storage->handlers.dispatch(event);
+            ++m_dispatchCount;
         }
     }
 
     // 分发事件包装器（用于队列出队后）
     void dispatch(const EventWrapper& event) {
         auto typeId = static_cast<uint32_t>(event.typeId);
-        if (typeId >= m_handlers.size()) {
+        if (typeId >= m_handlerStorages.size()) {
             return;
         }
 
-        auto& wrapper = m_handlers[typeId];
-        if (wrapper) {
-            wrapper->invoke(event);
+        auto& storage = m_handlerStorages[typeId];
+        if (storage) {
+            storage->dispatchWrapper(event);
             ++m_dispatchCount;
         }
     }
@@ -234,10 +269,10 @@ public:
             auto& batch = batches[typeId];
             if (batch.empty()) continue;
 
-            auto& wrapper = m_handlers[typeId];
-            if (wrapper) {
+            auto& storage = m_handlerStorages[typeId];
+            if (storage) {
                 for (auto* event : batch) {
-                    wrapper->invoke(*event);
+                    storage->dispatchWrapper(*event);
                 }
             }
         }
@@ -249,9 +284,12 @@ public:
 
     // 清除所有处理器
     void clearAll() {
-        for (auto& wrapper : m_handlers) {
-            wrapper.reset();
+        for (auto& storage : m_handlerStorages) {
+            if (storage) {
+                storage->clear();
+            }
         }
+        m_subscriptions.clear();
         resetStats();
     }
 
@@ -259,8 +297,18 @@ public:
     template<typename E>
     void clear() {
         auto typeId = static_cast<uint32_t>(E::TYPE_ID);
-        if (typeId < m_handlers.size()) {
-            m_handlers[typeId].reset();
+        if (typeId < m_handlerStorages.size() && m_handlerStorages[typeId]) {
+            m_handlerStorages[typeId]->clear();
+
+            // 清理订阅映射表
+            auto it = m_subscriptions.begin();
+            while (it != m_subscriptions.end()) {
+                if (it->second == typeId) {
+                    it = m_subscriptions.erase(it);
+                } else {
+                    ++it;
+                }
+            }
         }
     }
 
@@ -273,20 +321,20 @@ public:
     template<typename E>
     size_t getHandlerCount() const {
         auto typeId = static_cast<uint32_t>(E::TYPE_ID);
-        if (typeId >= m_handlers.size()) {
+        if (typeId >= m_handlerStorages.size()) {
             return 0;
         }
 
-        auto& wrapper = m_handlers[typeId];
-        return wrapper ? wrapper->getHandlerCount() : 0;
+        auto& storage = m_handlerStorages[typeId];
+        return storage ? storage->getHandlerCount() : 0;
     }
 
     // 获取所有处理器总数
     size_t getTotalHandlerCount() const {
         size_t total = 0;
-        for (const auto& wrapper : m_handlers) {
-            if (wrapper) {
-                total += wrapper->getHandlerCount();
+        for (const auto& storage : m_handlerStorages) {
+            if (storage) {
+                total += storage->getHandlerCount();
             }
         }
         return total;
@@ -306,24 +354,47 @@ public:
         TINA_INFO("  总处理器数: {}", getTotalHandlerCount());
 
         // 打印每种事件类型的处理器数量
-        for (uint32_t i = 0; i < m_handlers.size(); ++i) {
-            if (m_handlers[i] && m_handlers[i]->getHandlerCount() > 0) {
+        for (uint32_t i = 0; i < m_handlerStorages.size(); ++i) {
+            if (m_handlerStorages[i] && m_handlerStorages[i]->getHandlerCount() > 0) {
                 auto typeId = static_cast<EventTypeId>(i);
                 TINA_INFO("    {}: {} 个处理器",
                     eventTypeIdToString(typeId),
-                    m_handlers[i]->getHandlerCount());
+                    m_handlerStorages[i]->getHandlerCount());
             }
         }
     }
 
 private:
-    // 处理器数组（按事件类型索引）
-    Array<UniquePtr<HandlerWrapperBase>,
-          static_cast<size_t>(EventTypeId::MaxEventTypes)> m_handlers;
+    // 初始化处理器存储
+    void initializeHandlerStorages() {
+        // 为每种事件类型预分配存储
+        // 这里需要根据实际的事件类型创建对应的TypedHandlerStorage
+        // 由于模板限制，我们需要显式实例化每种类型
+        m_handlerStorages.resize(static_cast<size_t>(EventTypeId::MaxEventTypes));
+    }
+
+    // 获取具体类型的存储（延迟创建）
+    template<typename E>
+    TypedHandlerStorage<E>* getTypedStorage(uint32_t typeId) {
+        if (!m_handlerStorages[typeId]) {
+            // 延迟创建，避免预分配所有类型
+            m_handlerStorages[typeId] = MakeUnique<TypedHandlerStorage<E>>();
+        }
+        // 静态转换，避免dynamic_cast
+        return static_cast<TypedHandlerStorage<E>*>(m_handlerStorages[typeId].get());
+    }
+
+private:
+    // 处理器存储数组（按事件类型索引）
+    Vector<UniquePtr<HandlerStorageBase>> m_handlerStorages;
+
+    // 订阅ID到类型ID的映射（用于取消订阅）
+    HashMap<SubscriptionId, uint32_t> m_subscriptions;
 
     // 统计信息
     uint64_t m_subscribeCount = 0;
     uint64_t m_dispatchCount = 0;
+
     // 订阅ID生成器
     std::atomic<SubscriptionId> m_nextSubscriptionId;
 };

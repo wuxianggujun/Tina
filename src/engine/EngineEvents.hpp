@@ -8,7 +8,8 @@
 
 #include "EventCore.hpp"
 #include "../core/Math.hpp"
-#include <string>
+#include <cstring>    // for std::memset, std::memcpy, std::strlen
+#include <algorithm>  // for std::min
 
 namespace Tina::Engine::Events {
 
@@ -82,12 +83,20 @@ struct KeyReleasedEvent : public Event<KeyReleasedEvent, EventTypeId::KeyRelease
 
 // 文本输入事件（用于输入法）
 struct TextInputEvent : public Event<TextInputEvent, EventTypeId::TextInput> {
+    static constexpr size_t MAX_TEXT_LENGTH = 32;
     uint32_t utf32;
-    std::string text;
+    char text[MAX_TEXT_LENGTH];  // 固定大小数组，保持POD
+    uint8_t textLength;           // 实际文本长度
 
-    TextInputEvent(uint32_t code = 0, const std::string& str = "")
-        : utf32(code), text(str)
+    TextInputEvent(uint32_t code = 0, const char* str = nullptr)
+        : utf32(code), textLength(0)
     {
+        std::memset(text, 0, MAX_TEXT_LENGTH);
+        if (str) {
+            size_t len = std::strlen(str);
+            textLength = static_cast<uint8_t>(std::min(len, MAX_TEXT_LENGTH - 1));
+            std::memcpy(text, str, textLength);
+        }
         this->priority = EventPriority::Medium;
     }
 };
@@ -217,12 +226,20 @@ struct WindowClosedEvent : public Event<WindowClosedEvent, EventTypeId::WindowCl
 
 // 文件拖放事件
 struct FileDroppedEvent : public Event<FileDroppedEvent, EventTypeId::DropFile> {
-    std::string filepath;
-    int x, y; // 拖放位置
+    static constexpr size_t MAX_PATH_LENGTH = 260;  // Windows MAX_PATH
+    char filepath[MAX_PATH_LENGTH];  // 固定大小数组，保持POD
+    uint16_t pathLength;              // 实际路径长度
+    int x, y;                         // 拖放位置
 
-    FileDroppedEvent(const std::string& path = "", int px = 0, int py = 0)
-        : filepath(path), x(px), y(py)
+    FileDroppedEvent(const char* path = nullptr, int px = 0, int py = 0)
+        : pathLength(0), x(px), y(py)
     {
+        std::memset(filepath, 0, MAX_PATH_LENGTH);
+        if (path) {
+            size_t len = std::strlen(path);
+            pathLength = static_cast<uint16_t>(std::min(len, MAX_PATH_LENGTH - 1));
+            std::memcpy(filepath, path, pathLength);
+        }
         this->priority = EventPriority::Medium;
     }
 };
