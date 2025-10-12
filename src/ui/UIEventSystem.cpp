@@ -1,4 +1,5 @@
 #include "UIEventSystem.hpp"
+#include "UIComponents.hpp"
 #include "../core/Log.hpp"
 
 namespace Tina::UI {
@@ -12,6 +13,15 @@ UIEventSystem::~UIEventSystem()
 {
 }
 
+void UIEventSystem::setGlobalEventSystem(::Tina::Engine::EventSystem* engineEvents)
+{
+    m_engineEvents = engineEvents;
+    // 若已存在根节点，立即注入到现有树
+    if (m_root && m_dispatcher) {
+        setDispatcherRecursive(m_root, m_dispatcher.get());
+    }
+}
+
 void UIEventSystem::setRoot(UINode* root)
 {
     m_root = root;
@@ -23,7 +33,7 @@ void UIEventSystem::setRoot(UINode* root)
     if (m_dispatcher) {
         m_dispatcher->setRoot(root);
 
-        // 递归设置所有节点的 dispatcher
+        // 递归设置所有节点的 dispatcher，并在有需要时注入事件系统
         setDispatcherRecursive(root, m_dispatcher.get());
     }
 }
@@ -33,6 +43,13 @@ void UIEventSystem::setDispatcherRecursive(UINode* node, UIEventDispatcher* disp
     if (!node) return;
 
     node->setEventDispatcher(dispatcher);
+
+    // 可选：将引擎事件系统注入到按钮
+    if (m_engineEvents) {
+        if (auto* btn = dynamic_cast<UIButton*>(node)) {
+            btn->setEventSystem(m_engineEvents);
+        }
+    }
 
     for (size_t i = 0; i < node->getChildCount(); ++i) {
         setDispatcherRecursive(node->getChild(i), dispatcher);
@@ -55,4 +72,3 @@ void UIEventSystem::processEvents()
 }
 
 } // namespace Tina::UI
-

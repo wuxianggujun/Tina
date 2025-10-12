@@ -11,12 +11,18 @@
 #include "../core/Container.hpp"
 #include <memory>
 
+// 前向声明引擎事件系统，避免头文件相互依赖
+namespace Tina { namespace Engine { class EventSystem; } }
+
 namespace Tina::UI {
 
 class UIEventSystem {
 public:
     UIEventSystem();
     ~UIEventSystem();
+
+    // 设置全局引擎事件系统（用于将 UI 的点击等事件转发到 Engine::EventSystem）
+    void setGlobalEventSystem(::Tina::Engine::EventSystem* engineEvents);
 
     // 输入采集
     void setRoot(UINode* root);
@@ -49,7 +55,9 @@ private:
     bool m_mouseDown = false;
     bool m_mouseDownPrev = false;
     std::unique_ptr<UIEventDispatcher> m_dispatcher;
+
+    // 引擎事件系统（可选）：若设置，将自动注入到 UIButton 以便触发引擎级 UI 事件
+    ::Tina::Engine::EventSystem* m_engineEvents = nullptr;
 };
 
 } // namespace Tina::UI
-

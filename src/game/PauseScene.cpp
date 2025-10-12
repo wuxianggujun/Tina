@@ -54,9 +54,16 @@ void PauseScene::onEnter()
     // 绑定事件系统根节点，统一处理 hover/click
     m_events.setRoot(m_rootNode.get());
 
-    // 订阅统一按钮点击事件（基于 Engine::EventSystem）
-    // 使用 RAII 令牌自动反订阅
-    m_btnClickToken = app()->events().subscribe<UI::ButtonClickEvent>(this, &PauseScene::onUIButtonClicked);
+    // 注入引擎事件系统（用于自动转发 ButtonClickEvent）
+    m_events.setGlobalEventSystem(&app()->events());
+
+    // 节点直绑：按钮自身回调（内部仍会触发引擎事件）
+    if (m_btnContinue) m_btnContinue->setOnClick([this]{ onContinueClicked(); });
+    if (m_btnDay)      m_btnDay->setOnClick([this]{ onSetDay(); });
+    if (m_btnNight)    m_btnNight->setOnClick([this]{ onSetNight(); });
+    if (m_btnFwd)      m_btnFwd->setOnClick([this]{ onFwdTime(); });
+    if (m_btnBack)     m_btnBack->setOnClick([this]{ onBackTime(); });
+    if (m_btnQuit)     m_btnQuit->setOnClick([this]{ onQuitClicked(); });
 
     TINA_INFO("PauseScene: 初始化完成");
 }
@@ -230,9 +237,6 @@ void PauseScene::createUI()
     m_btnContinue->setNormalColor(0.2f, 0.6f, 0.2f, 0.95f);
     m_btnContinue->setHoverColor(0.3f, 0.8f, 0.3f, 1.0f);
     m_btnContinue->setPressedColor(0.1f, 0.4f, 0.1f, 1.0f);
-    // 设置按钮ID与事件系统
-    m_btnContinue->setButtonId(ButtonId::BTN_CONTINUE);
-    m_btnContinue->setEventSystem(&app()->events());
 
     // 设置按钮已移除，保留单行继续按钮
 
@@ -258,16 +262,8 @@ void PauseScene::createUI()
     };
 
     makeRow(m_btnDay,    "切换到白天",   m_btnNight,   "切换到黑夜");
-    m_btnDay->setButtonId(ButtonId::BTN_DAY);
-    m_btnDay->setEventSystem(&app()->events());
-    m_btnNight->setButtonId(ButtonId::BTN_NIGHT);
-    m_btnNight->setEventSystem(&app()->events());
 
     makeRow(m_btnFwd,    "时间 +10%",    m_btnBack,    "时间 -10%");
-    m_btnFwd->setButtonId(ButtonId::BTN_FWD);
-    m_btnFwd->setEventSystem(&app()->events());
-    m_btnBack->setButtonId(ButtonId::BTN_BACK);
-    m_btnBack->setEventSystem(&app()->events());
 
     // 退出按钮独占一行
     auto* rowBottom = vbox->createChild<UI::UIHStack>("RowBottom");
@@ -282,8 +278,7 @@ void PauseScene::createUI()
     m_btnQuit->setNormalColor(0.6f, 0.2f, 0.2f, 0.95f);
     m_btnQuit->setHoverColor(0.8f, 0.3f, 0.3f, 1.0f);
     m_btnQuit->setPressedColor(0.4f, 0.1f, 0.1f, 1.0f);
-    m_btnQuit->setButtonId(ButtonId::BTN_QUIT);
-    m_btnQuit->setEventSystem(&app()->events());
+    
 
     // 触发布局计算并回填 Panel 高度，再居中 Panel
     // 重要：使用performLayoutNow()确保布局立即完成，这样getSize()才能返回正确的值
@@ -319,20 +314,6 @@ void PauseScene::createUI()
 void PauseScene::renderOverlay()
 {
     // 已迁移到 SceneRenderer::drawOverlay，调用移至 render()
-}
-
-// 统一按钮点击事件处理：根据按钮ID路由到具体回调
-void PauseScene::onUIButtonClicked(const UI::ButtonClickEvent& e)
-{
-    switch (e.buttonId) {
-        case ButtonId::BTN_CONTINUE: onContinueClicked(); break;
-        case ButtonId::BTN_DAY:      onSetDay();          break;
-        case ButtonId::BTN_NIGHT:    onSetNight();        break;
-        case ButtonId::BTN_FWD:      onFwdTime();         break;
-        case ButtonId::BTN_BACK:     onBackTime();        break;
-        case ButtonId::BTN_QUIT:     onQuitClicked();     break;
-        default: break;
-    }
 }
 
 void PauseScene::onContinueClicked()

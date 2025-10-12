@@ -13,7 +13,6 @@
 #include "../ui/UIComponents.hpp"
 #include "../ui/UIEventSystem.hpp"
 #include "../renderer/ShaderManager.hpp"
-#include "../engine/SubscriptionToken.hpp"
 
 namespace Tina::Game {
 
@@ -59,9 +58,6 @@ private:
     void onFwdTime();
     void onBackTime();
 
-    // 统一按钮点击事件回调（EventSystem）
-    void onUIButtonClicked(const UI::ButtonClickEvent& e);
-
 
 private:
     // UI 资源（着色器来自全局 ShaderManager）
@@ -85,8 +81,7 @@ private:
     float m_uiScale = 1.0f;
     UI::UIPanel* m_panel = nullptr;  // 保存面板引用以便调整位置
 
-    // 事件订阅令牌
-    Engine::SubscriptionToken m_btnClickToken;
+    // 使用 UIEventSystem + 节点直绑（无需路由器）
 
     // 按钮ID枚举（用于事件分发）
     enum ButtonId : uint32_t {

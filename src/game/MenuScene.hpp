@@ -14,7 +14,6 @@
 #include "../ui/UIEventSystem.hpp"
 #include "../particles/ParticleSystem.hpp"
 #include "../renderer/ShaderManager.hpp"
-#include "../engine/SubscriptionToken.hpp"
 
 namespace Tina::Game {
 
@@ -66,9 +65,6 @@ private:
     void onSettingsClicked();
     void onQuitClicked();
 
-    // 按钮事件处理
-    void onButtonClicked(const UI::ButtonClickEvent& event);
-
     void selectPreviousButton();
     void selectNextButton();
     void activateSelectedButton();
@@ -119,8 +115,7 @@ private:
     // UI 缩放
     float m_uiScale = 1.0f;
 
-    // 事件订阅令牌
-    Engine::SubscriptionToken m_btnClickToken;
+    // 使用 UIEventSystem + 节点直绑（无需路由器）
 };
 
 } // namespace Tina::Game

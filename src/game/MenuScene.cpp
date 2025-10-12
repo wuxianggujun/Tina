@@ -56,8 +56,11 @@ void MenuScene::onEnter() {
     // 注册UI根节点到框架（框架会自动处理窗口resize）
     addUIRoot(m_rootNode.get());
 
-    // 订阅统一按钮点击事件（基于 Engine::EventSystem），使用按钮ID路由
-    m_btnClickToken = app()->events().subscribe<UI::ButtonClickEvent>(this, &MenuScene::onButtonClicked);
+    // 注入引擎事件系统 + 节点直绑
+    m_events.setGlobalEventSystem(&app()->events());
+    if (m_btnStart)    m_btnStart->setOnClick([this]{ onStartClicked(); });
+    if (m_btnSettings) m_btnSettings->setOnClick([this]{ onSettingsClicked(); });
+    if (m_btnQuit)     m_btnQuit->setOnClick([this]{ onQuitClicked(); });
 
     TINA_INFO("MenuScene: 初始化完成");
 }
@@ -250,9 +253,7 @@ void MenuScene::createUI() {
     m_btnStart = btnStart.get();
     m_buttons.push_back(m_btnStart);
 
-    // 设置按钮ID和事件系统
-    btnStart->setButtonId(ButtonId::BTN_START);
-    btnStart->setEventSystem(&app()->events());
+    // 事件系统与ID由路由器在 bind 时设置
 
     // 创建设置按钮
     auto btnSettings = Memory::MakeUnique<UI::UIButton>("BtnSettings");
@@ -267,9 +268,7 @@ void MenuScene::createUI() {
     m_btnSettings = btnSettings.get();
     m_buttons.push_back(m_btnSettings);
 
-    // 设置按钮ID和事件系统
-    btnSettings->setButtonId(ButtonId::BTN_SETTINGS);
-    btnSettings->setEventSystem(&app()->events());
+    // 事件系统与ID由路由器在 bind 时设置
 
     // 创建退出按钮
     auto btnQuit = Memory::MakeUnique<UI::UIButton>("BtnQuit");
@@ -284,9 +283,7 @@ void MenuScene::createUI() {
     m_btnQuit = btnQuit.get();
     m_buttons.push_back(m_btnQuit);
 
-    // 设置按钮ID和事件系统
-    btnQuit->setButtonId(ButtonId::BTN_QUIT);
-    btnQuit->setEventSystem(&app()->events());
+    // 事件系统与ID由路由器在 bind 时设置
 
     // 直接添加到根节点，不使用面板作为父节点
     m_rootNode->addChild(std::move(panel));
@@ -317,15 +314,7 @@ void MenuScene::onQuitClicked() {
     app()->quit();
 }
 
-// 统一处理 UI 按钮点击事件
-void MenuScene::onButtonClicked(const UI::ButtonClickEvent& event) {
-    switch (event.buttonId) {
-        case BTN_START:    onStartClicked();    break;
-        case BTN_SETTINGS: onSettingsClicked(); break;
-        case BTN_QUIT:     onQuitClicked();     break;
-        default: break;
-    }
-}
+// 无需额外路由函数，事件由路由器直接回调
 
 void MenuScene::selectPreviousButton() {
     if (m_buttons.empty()) return;

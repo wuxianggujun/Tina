@@ -11,7 +11,6 @@
 #include "../ui/UINode.hpp"
 #include "../ui/UIComponents.hpp"
 #include "../ui/UIEventSystem.hpp"
-#include "../engine/SubscriptionToken.hpp"
 
 namespace Tina::Game {
 
@@ -41,7 +40,6 @@ private:
     void onSetNight();
     void onFwdTime();
     void onBackTime();
-    void onUIButtonClicked(const UI::ButtonClickEvent& e);
 
 private:
     Memory::UniquePtr<UI::UINode> m_root;
@@ -52,9 +50,6 @@ private:
     UI::UIButton* m_btnBack = nullptr;
     UI::UIButton* m_btnClose = nullptr;
     UI::UIEventSystem m_events;
-
-    // 事件订阅令牌
-    Engine::SubscriptionToken m_btnClickToken;
 
     int m_pixelWidth = 1280;
     int m_pixelHeight = 720;

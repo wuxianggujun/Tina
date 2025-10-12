@@ -9,6 +9,7 @@
 #include "UIColors.hpp"
 #include "UIEvents.hpp"
 #include "../engine/EventSystem.hpp"
+#include "../engine/SubscriptionToken.hpp"
 #include <bgfx/bgfx.h>
 
 namespace Tina::UI {
@@ -149,6 +150,9 @@ public:
     // === 事件系统访问 ===
     void setEventSystem(Engine::EventSystem* eventSystem) {
         m_eventSystem = eventSystem;
+        if (m_hasPendingClick && m_eventSystem) {
+            subscribeClickFromPending();
+        }
     }
 
     // === 鼠标事件处理 ===
@@ -168,8 +172,24 @@ public:
     void setButtonId(uint32_t id) { m_buttonId = id; }
     uint32_t getButtonId() const { return m_buttonId; }
 
-    // 重写 onClick 虚函数，响应鼠标点击
+    // 重写 onClick 虚函数，响应鼠标点击（会触发引擎事件 + UI 冒泡）
     void onClick() override;  // 定义在 cpp 文件中，触发事件
+
+    // 直观接口：设置按钮点击处理器（内部通过引擎事件系统按ID路由）
+    template<typename F>
+    void setOnClick(F&& handler) {
+        m_pendingClick = {};
+        m_pendingClick = Tina::Container::Forward<F>(handler);
+        m_hasPendingClick = true;
+        if (m_eventSystem) {
+            subscribeClickFromPending();
+        }
+    }
+    void clearOnClick() {
+        m_clickToken.reset();
+        m_pendingClick = {};
+        m_hasPendingClick = false;
+    }
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
@@ -196,12 +216,31 @@ private:
     int m_fontPx = 0;
     int m_badgeFontPx = 0;
 
-    // 事件系统指针（由外部设置）
+    // 事件系统指针（由外部设置或由 UIEventSystem 注入）
     Engine::EventSystem* m_eventSystem = nullptr;
 
     // 按钮ID（用于事件识别）
     uint32_t m_buttonId = 0;
     static inline uint32_t s_nextButtonId = 1;
+
+    // 通过引擎事件系统触发/订阅点击
+    Engine::SubscriptionToken m_clickToken;            // 订阅令牌（点击）
+    Tina::Container::FixedFunction<128, void> m_pendingClick; // 暂存回调（事件系统未注入时）
+    bool m_hasPendingClick = false;
+
+    void subscribeClickFromPending() {
+        if (!m_hasPendingClick || !m_eventSystem) return;
+        m_clickToken.reset();
+        auto id = m_buttonId;
+        m_clickToken = m_eventSystem->subscribe<ButtonClickEvent>(
+            [this, id](const ButtonClickEvent& e) {
+                if (e.buttonId == id) {
+                    if (m_pendingClick) m_pendingClick();
+                }
+            }
+        );
+        m_hasPendingClick = false;
+    }
 };
 
 } // namespace Tina::UI
