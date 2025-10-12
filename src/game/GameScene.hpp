@@ -19,6 +19,7 @@
 #include "../engine/AudioResource.hpp"
 #include "../engine/EventSystem.hpp"
 #include "../engine/SubscriptionToken.hpp"  // 添加订阅令牌管理
+#include "../engine/EventHelpers.hpp"  // 添加事件辅助工具
 
 namespace Tina::Game {
 

@@ -9,14 +9,15 @@
 #include "EventCore.hpp"
 #include "EventQueue.hpp"
 #include "../core/Log.hpp"
+#include "../core/Container.hpp"  // 使用封装的容器
 #include <EASTL/fixed_function.h>
-#include <EASTL/vector.h>
-#include <EASTL/array.h>
 #include <EASTL/unique_ptr.h>
 #include <EASTL/algorithm.h>
 #include <atomic>
 
 namespace Tina::Engine {
+
+using namespace Tina::Container;  // 使用容器命名空间
 
 // ==================== 事件处理器类型 ====================
 
@@ -48,7 +49,7 @@ struct HandlerWithId {
 // 具体类型的处理器包装器
 template<typename E>
 struct TypedHandlerWrapper : HandlerWrapperBase {
-    eastl::vector<HandlerWithId<E>> handlers;
+    Vector<HandlerWithId<E>> handlers;
 
     void invoke(const EventWrapper& event) override {
         // 从 EventWrapper 中提取具体事件
@@ -209,10 +210,10 @@ public:
     }
 
     // 批量分发（性能优化：按类型分组）
-    void dispatchBatch(const eastl::vector<EventWrapper>& events) {
+    void dispatchBatch(const Vector<EventWrapper>& events) {
         // 按类型分组
-        eastl::array<eastl::vector<const EventWrapper*>,
-                     static_cast<size_t>(EventTypeId::MaxEventTypes)> batches;
+        Array<Vector<const EventWrapper*>,
+              static_cast<size_t>(EventTypeId::MaxEventTypes)> batches;
 
         for (const auto& event : events) {
             auto typeId = static_cast<uint32_t>(event.typeId);
@@ -310,8 +311,8 @@ public:
 
 private:
     // 处理器数组（按事件类型索引）
-    eastl::array<eastl::unique_ptr<HandlerWrapperBase>,
-                 static_cast<size_t>(EventTypeId::MaxEventTypes)> m_handlers;
+    Array<eastl::unique_ptr<HandlerWrapperBase>,
+          static_cast<size_t>(EventTypeId::MaxEventTypes)> m_handlers;
 
     // 统计信息
     uint64_t m_subscribeCount = 0;

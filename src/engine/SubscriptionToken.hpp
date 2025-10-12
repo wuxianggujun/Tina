@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include "../core/Memory.hpp"
+#include "../core/Container.hpp"  // 使用封装的容器
 
 namespace Tina::Engine {
 
@@ -97,7 +98,7 @@ public:
     }
 
 private:
-    std::vector<SubscriptionToken> m_tokens;
+    Container::Vector<SubscriptionToken> m_tokens;
 };
 
 } // namespace Tina::Engine

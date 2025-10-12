@@ -11,10 +11,12 @@
 #include "EventDispatcher.hpp"
 #include "SubscriptionToken.hpp"  // 添加订阅令牌支持
 #include "../core/Log.hpp"
+#include "../core/Container.hpp"  // 使用封装的容器
 #include <EASTL/priority_queue.h>
-#include <EASTL/array.h>
 
 namespace Tina::Engine {
+
+using namespace Tina::Container;  // 使用容器命名空间
 
 // ==================== 延迟事件包装器 ====================
 
@@ -105,6 +107,9 @@ public:
     // 立即触发事件（同步，直接分发）
     template<typename E>
     void trigger(const E& event) {
+        #ifdef DEBUG
+        TINA_TRACE("触发事件: {}", eventTypeIdToString(E::TYPE_ID));
+        #endif
         m_dispatcher.dispatch(event);
     }
 
@@ -301,11 +306,11 @@ private:
     EventDispatcher m_dispatcher;
 
     // 优先级队列（3 个：高/中/低）
-    eastl::array<EventQueue<EVENT_QUEUE_CAPACITY>, 3> m_priorityQueues;
+    Array<EventQueue<EVENT_QUEUE_CAPACITY>, 3> m_priorityQueues;
 
     // 延迟事件队列（最小堆）
     eastl::priority_queue<DelayedEvent,
-                         eastl::vector<DelayedEvent>,
+                         Vector<DelayedEvent>,
                          eastl::greater<DelayedEvent>> m_delayedEvents;
 };
 

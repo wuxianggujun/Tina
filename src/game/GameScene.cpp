@@ -897,28 +897,18 @@ void GameScene::subscribeToEvents()
 {
     if (!app()) return;
 
-    // 使用 SubscriptionManager 自动管理订阅生命周期
-    // 场景销毁时会自动取消所有订阅
-
-    // 订阅玩家跳跃事件（添加粒子效果）
-    m_eventSubscriptions.add(
-        app()->events().subscribe<Tina::Game::Events::PlayerJumped>(this, &GameScene::onPlayerJumpedEvt)
-    );
-
-    // 订阅玩家移动事件（可用于调试或其他逻辑）
-    m_eventSubscriptions.add(
-        app()->events().subscribe<Tina::Game::Events::PlayerMoved>(this, &GameScene::onPlayerMovedEvt)
-    );
-
-    // 昼夜系统调试信号
-    m_eventSubscriptions.add(
-        app()->events().subscribe<Tina::Game::Events::SetDayNight>(this, &GameScene::onSetDayNight)
-    );
-    m_eventSubscriptions.add(
-        app()->events().subscribe<Tina::Game::Events::AdjustDayNight>(this, &GameScene::onAdjustDayNight)
+    // 使用便捷宏批量订阅事件（更简洁）
+    TINA_SUBSCRIBE_EVENTS(
+        TINA_SUBSCRIBE_EVENT(m_eventSubscriptions, Tina::Game::Events::PlayerJumped, GameScene::onPlayerJumpedEvt);
+        TINA_SUBSCRIBE_EVENT(m_eventSubscriptions, Tina::Game::Events::PlayerMoved, GameScene::onPlayerMovedEvt);
+        TINA_SUBSCRIBE_EVENT(m_eventSubscriptions, Tina::Game::Events::SetDayNight, GameScene::onSetDayNight);
+        TINA_SUBSCRIBE_EVENT(m_eventSubscriptions, Tina::Game::Events::AdjustDayNight, GameScene::onAdjustDayNight);
     );
 
     TINA_INFO("GameScene: 事件订阅完成（使用 RAII 自动管理）");
+
+    // 调试模式下打印事件统计
+    PRINT_EVENT_STATS();
 }
 
 void GameScene::triggerPlayerEvents(float prevX, float prevY, bool wasOnGround)
