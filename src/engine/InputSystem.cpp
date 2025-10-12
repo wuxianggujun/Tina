@@ -422,6 +422,28 @@ void InputSystem::updateMouseState() {
     // 获取鼠标位置
     float mx = 0.0f, my = 0.0f;
     uint32_t btnMask = SDL_GetMouseState(&mx, &my);
+
+    // 调试：检查鼠标坐标系统
+    static int debugCounter = 0;
+    if (++debugCounter % 30 == 0 && (btnMask & SDL_BUTTON_MASK(1))) {
+        SDL_Window* window = SDL_GetMouseFocus();
+        if (window) {
+            int logicalW = 0, logicalH = 0;
+            int pixelW = 0, pixelH = 0;
+            SDL_GetWindowSize(window, &logicalW, &logicalH);
+            SDL_GetWindowSizeInPixels(window, &pixelW, &pixelH);
+
+            TINA_DEBUG("鼠标坐标调试:");
+            TINA_DEBUG("  SDL返回鼠标: ({}, {})", mx, my);
+            TINA_DEBUG("  逻辑窗口: {}x{}", logicalW, logicalH);
+            TINA_DEBUG("  像素窗口: {}x{}", pixelW, pixelH);
+            TINA_DEBUG("  鼠标/逻辑比例: ({:.4f}, {:.4f})", mx/logicalW, my/logicalH);
+            TINA_DEBUG("  鼠标/像素比例: ({:.4f}, {:.4f})", mx/pixelW, my/pixelH);
+        }
+    }
+
+    // 暂时不做任何转换，直接使用SDL返回的坐标
+
     m_mouseX = mx;
     m_mouseY = my;
 

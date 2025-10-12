@@ -69,8 +69,8 @@ void Application::init()
     bgfxInit.type = bgfx::RendererType::Count; // 自动选择渲染器
     bgfxInit.platformData = pd;
 
-    // 获取实际像素尺寸（考虑DPI缩放）
-    m_window->getSize(m_pixelWidth, m_pixelHeight);
+    // 获取物理像素尺寸（用于bgfx渲染）
+    m_window->getSizeInPixels(m_pixelWidth, m_pixelHeight);
 
     bgfxInit.resolution.width = static_cast<uint32_t>(m_pixelWidth);
     bgfxInit.resolution.height = static_cast<uint32_t>(m_pixelHeight);
@@ -294,8 +294,8 @@ void Application::processEvents()
             m_config.windowWidth = event.window.data1;
             m_config.windowHeight = event.window.data2;
 
-            // 获取实际像素尺寸
-            m_window->getSize(m_pixelWidth, m_pixelHeight);
+            // 获取物理像素尺寸（用于bgfx渲染）
+            m_window->getSizeInPixels(m_pixelWidth, m_pixelHeight);
 
             // 重置bgfx
             bgfx::reset(

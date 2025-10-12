@@ -63,9 +63,13 @@ public:
 
     // 尺寸
     void setSize(int width, int height);
+    // 获取窗口逻辑尺寸（用于鼠标坐标等UI操作）
     void getSize(int& width, int& height) const;
     int getWidth() const;
     int getHeight() const;
+
+    // 获取窗口物理像素尺寸（用于渲染）
+    void getSizeInPixels(int& width, int& height) const;
 
     // 位置
     void setPosition(int x, int y);

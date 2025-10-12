@@ -224,6 +224,42 @@ void GameScene::onWindowSizeChanged(int width, int height)
     if (m_characterPanel) {
         m_characterPanel->centerOnScreen(width, height);
     }
+
+    // 重要：窗口大小改变后，需要重新计算相机位置
+    // 因为视野宽度改变了，相机需要重新定位以保持角色居中
+    if (camera() && m_ecsWorld) {
+        float viewW = camera()->viewW();
+        float viewH = camera()->viewH();
+
+        auto controlled = m_ecsWorld->getControlledEntity();
+        if (controlled != entt::null) {
+            auto& reg = m_ecsWorld->registry();
+            if (reg.any_of<ECS::Transform, ECS::PhysicsBody>(controlled)) {
+                auto& tr = reg.get<ECS::Transform>(controlled);
+                auto& pb = reg.get<ECS::PhysicsBody>(controlled);
+
+                // 计算角色中心点
+                float centerX = tr.x + pb.width * 0.5f;
+                float centerY = tr.y + pb.height * 0.5f;
+
+                // 立即更新相机位置（不使用平滑）
+                float camX = centerX - viewW * 0.5f;
+                float camY = centerY - viewH * 0.5f;
+
+                // 限制相机边界
+                if (m_tileMap) {
+                    int mapW = m_tileMap->width();
+                    int mapH = m_tileMap->height();
+                    camX = std::clamp(camX, 0.0f, std::max(0.0f, (float)mapW - viewW));
+                    camY = std::clamp(camY, 0.0f, std::max(0.0f, (float)mapH - viewH));
+                }
+
+                camera()->setPosition(camX, camY);
+                TINA_DEBUG("窗口大小改变后重新定位相机: ({:.1f}, {:.1f}), 视野: {:.1f}x{:.1f}",
+                          camX, camY, viewW, viewH);
+            }
+        }
+    }
 }
 
 void GameScene::update(float dt)
@@ -664,11 +700,28 @@ void GameScene::updateGameLogic(float dt)
             int tool = m_toolbar->selectedIndex();
             if (tool == 1) {  // 工具1=挖掘器
                 float wx = 0.0f, wy = 0.0f;
-                // 添加调试日志查看坐标转换
+
+                // 详细调试：检查窗口尺寸一致性
+                int sceneW = getPixelWidth();
+                int sceneH = getPixelHeight();
+                int camVpW = camera()->vpW();
+                int camVpH = camera()->vpH();
+
+                // 如果尺寸不一致，强制更新相机视口
+                if (sceneW != camVpW || sceneH != camVpH) {
+                    TINA_WARN("检测到窗口尺寸不一致！Scene:{}x{} vs Camera:{}x{}, 强制同步",
+                             sceneW, sceneH, camVpW, camVpH);
+                    camera()->setViewportPixels(sceneW, sceneH);
+                    // 重新获取更新后的值
+                    camVpW = camera()->vpW();
+                    camVpH = camera()->vpH();
+                }
+
                 TINA_DEBUG("工具使用 - 鼠标:({}, {}) 窗口:{}x{} 相机:({}, {}) 视野:{}x{}",
-                          mx, my, getPixelWidth(), getPixelHeight(),
+                          mx, my, sceneW, sceneH,
                           camera()->x(), camera()->y(), camera()->viewW(), camera()->viewH());
-                screenToWorld(mx, my, getPixelWidth(), getPixelHeight(), *camera(), wx, wy);
+
+                screenToWorld(mx, my, sceneW, sceneH, *camera(), wx, wy);
                 TINA_DEBUG("转换后世界坐标:({}, {})", wx, wy);
                 excavateCircle(*m_tileMap, wx, wy, GameConfig::EXCAVATE_RADIUS);
             }
@@ -840,9 +893,16 @@ void GameScene::handleRightClick(float mx, float my)
 {
     if (!m_ecsWorld || !camera() || !m_characterPanel) return;
 
+    // 确保相机视口与窗口尺寸同步
+    int pixelW = getPixelWidth();
+    int pixelH = getPixelHeight();
+    if (pixelW != camera()->vpW() || pixelH != camera()->vpH()) {
+        camera()->setViewportPixels(pixelW, pixelH);
+    }
+
     // 转换到世界坐标
     float wx = 0.0f, wy = 0.0f;
-    screenToWorld(mx, my, getPixelWidth(), getPixelHeight(), *camera(), wx, wy);
+    screenToWorld(mx, my, pixelW, pixelH, *camera(), wx, wy);
 
     // 检测所有角色
     auto& reg = m_ecsWorld->registry();
@@ -882,9 +942,28 @@ void GameScene::handleLeftClick(float mx, float my)
 {
     if (!m_tileMap || !camera() || !m_toolbar) return;
 
+    // 获取窗口和相机状态
+    int pixelW = getPixelWidth();
+    int pixelH = getPixelHeight();
+    int camVpW = camera()->vpW();
+    int camVpH = camera()->vpH();
+
+    // 确保相机视口与窗口尺寸同步
+    if (pixelW != camVpW || pixelH != camVpH) {
+        camera()->setViewportPixels(pixelW, pixelH);
+    }
+
     // 转换到世界坐标
     float wx = 0.0f, wy = 0.0f;
-    screenToWorld(mx, my, getPixelWidth(), getPixelHeight(), *camera(), wx, wy);
+    screenToWorld(mx, my, pixelW, pixelH, *camera(), wx, wy);
+
+    // 调试：输出转换细节
+    float camX = camera()->x();
+    float camY = camera()->y();
+    float viewW = camera()->viewW();
+    float viewH = camera()->viewH();
+    TINA_DEBUG("点击调试 - 鼠标:({:.0f},{:.0f}) 相机:({:.1f},{:.1f}) 视野:{:.1f}x{:.1f} → 世界:({:.2f},{:.2f})",
+              mx, my, camX, camY, viewW, viewH, wx, wy);
 
     int tx = (int)std::floor(wx);
     int ty = (int)std::floor(wy);

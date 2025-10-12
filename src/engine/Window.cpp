@@ -36,7 +36,8 @@ bool Window::create(const WindowDesc& desc) {
     }
 
     // 设置窗口标志
-    uint32_t flags = SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    // 注意：移除SDL_WINDOW_HIGH_PIXEL_DENSITY，因为它在Windows上可能导致坐标不一致
+    uint32_t flags = 0;
 
     if (desc.fullscreen) {
         flags |= SDL_WINDOW_FULLSCREEN;
@@ -114,6 +115,7 @@ void Window::getSize(int& width, int& height) const {
         width = height = 0;
         return;
     }
+    // 使用SDL_GetWindowSize获取逻辑尺寸，这是SDL事件和鼠标坐标使用的坐标系
     SDL_GetWindowSize(static_cast<SDL_Window*>(m_window), &width, &height);
 }
 
@@ -127,6 +129,15 @@ int Window::getHeight() const {
     int w, h;
     getSize(w, h);
     return h;
+}
+
+void Window::getSizeInPixels(int& width, int& height) const {
+    if (!m_window) {
+        width = height = 0;
+        return;
+    }
+    // 使用SDL_GetWindowSizeInPixels获取物理像素尺寸（用于渲染）
+    SDL_GetWindowSizeInPixels(static_cast<SDL_Window*>(m_window), &width, &height);
 }
 
 void Window::setPosition(int x, int y) {

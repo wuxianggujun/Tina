@@ -10,8 +10,8 @@ void UILayoutManager::registerNode(UINode* node)
     if (!node) return;
 
     m_nodes.insert(node);
-    TINA_DEBUG("UILayoutManager: 注册节点 '{}', 总节点数: {}",
-               node->getName(), m_nodes.size());
+    // TINA_DEBUG("UILayoutManager: 注册节点 '{}', 总节点数: {}",
+    //            node->getName(), m_nodes.size());
 }
 
 void UILayoutManager::unregisterNode(UINode* node)
@@ -23,8 +23,8 @@ void UILayoutManager::unregisterNode(UINode* node)
     m_depthCache.erase(node);
     m_layoutInProgress.erase(node);
 
-    TINA_DEBUG("UILayoutManager: 注销节点 '{}', 剩余节点数: {}",
-               node->getName(), m_nodes.size());
+    // TINA_DEBUG("UILayoutManager: 注销节点 '{}', 剩余节点数: {}",
+    //            node->getName(), m_nodes.size());
 }
 
 void UILayoutManager::requestLayout(UINode* node)
@@ -49,8 +49,8 @@ void UILayoutManager::requestLayout(UINode* node)
         }
     }
 
-    TINA_DEBUG("UILayoutManager: 请求布局 '{}', 脏节点数: {}",
-                   node->getName(), m_dirtyNodes.size());
+    // TINA_DEBUG("UILayoutManager: 请求布局 '{}', 脏节点数: {}",
+    //                node->getName(), m_dirtyNodes.size());
 
     // 非批处理模式下立即执行
     if (!m_batchMode) {
@@ -62,7 +62,7 @@ void UILayoutManager::performPendingLayouts()
 {
     if (m_dirtyNodes.empty()) return;
 
-    TINA_DEBUG("UILayoutManager: 执行批量布局, 脏节点数: {}", m_dirtyNodes.size());
+    // TINA_DEBUG("UILayoutManager: 执行批量布局, 脏节点数: {}", m_dirtyNodes.size());
 
     // 拓扑排序获取正确的布局顺序
     auto sortedNodes = topologicalSort(m_dirtyNodes);
@@ -235,7 +235,7 @@ void UILayoutManager::performNodeLayout(UINode* node)
     // 移除正在布局标记
     m_layoutInProgress.erase(node);
 
-    TINA_DEBUG("UILayoutManager: 完成节点 '{}' 的布局", node->getName());
+    // TINA_DEBUG("UILayoutManager: 完成节点 '{}' 的布局", node->getName());
 }
 
 } // namespace Tina::UI

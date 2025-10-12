@@ -32,10 +32,7 @@ inline void screenToWorld(float mx, float my,
                           const Tina::Engine::Camera2D& cam,
                           float& wx, float& wy)
 {
-    float u = (pxW > 0) ? (mx / (float)pxW) : 0.0f;
-    float v = (pxH > 0) ? (1.0f - my / (float)pxH) : 0.0f;
-    wx = cam.x() + u * cam.viewW();
-    wy = cam.y() + v * cam.viewH();
+    screenToWorld(mx, my, pxW, pxH, cam.x(), cam.y(), cam.viewW(), cam.viewH(), wx, wy);
 }
 
 // 世界坐标 -> 瓦片网格坐标（向下取整到网格）
