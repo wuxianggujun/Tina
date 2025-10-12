@@ -113,7 +113,6 @@ private:
     entt::entity m_playerEntity = entt::null;
     entt::entity m_clickedEntity = entt::null;  // 右键点击的角色
     bool m_isToolActive = false;  // 标记当前帧是否有工具激活（用于 UI 事件处理）
-    bool m_isExiting = false;  // 标记场景是否正在退出
 
     // 视口尺寸
     int m_pixelWidth = 1280;

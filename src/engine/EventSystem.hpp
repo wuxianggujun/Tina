@@ -9,6 +9,7 @@
 #include "EventCore.hpp"
 #include "EventQueue.hpp"
 #include "EventDispatcher.hpp"
+#include "SubscriptionToken.hpp"  // 添加订阅令牌支持
 #include "../core/Log.hpp"
 #include <EASTL/priority_queue.h>
 #include <EASTL/array.h>
@@ -66,22 +67,37 @@ public:
 
     // ==================== 订阅事件 ====================
 
-    // 订阅事件（lambda 或函数对象）
+    // 订阅事件（lambda 或函数对象），返回 RAII 令牌
     template<typename E>
-    void subscribe(EventHandler<E> handler) {
-        m_dispatcher.subscribe<E>(eastl::move(handler));
+    SubscriptionToken subscribe(EventHandler<E> handler) {
+        auto id = m_dispatcher.subscribe<E>(eastl::move(handler));
+
+        // 返回 RAII 令牌，析构时自动取消订阅
+        return SubscriptionToken([this, id, typeId = E::TYPE_ID]() {
+            m_dispatcher.unsubscribe(typeId, id);
+        });
     }
 
-    // 订阅事件（成员函数）
+    // 订阅事件（成员函数），返回 RAII 令牌
     template<typename E, typename T>
-    void subscribe(T* obj, void (T::*method)(const E&)) {
-        m_dispatcher.subscribe<E>(obj, method);
+    SubscriptionToken subscribe(T* obj, void (T::*method)(const E&)) {
+        auto id = m_dispatcher.subscribe<E>(obj, method);
+
+        // 返回 RAII 令牌，析构时自动取消订阅
+        return SubscriptionToken([this, id, typeId = E::TYPE_ID]() {
+            m_dispatcher.unsubscribe(typeId, id);
+        });
     }
 
-    // 订阅事件（const 成员函数）
+    // 订阅事件（const 成员函数），返回 RAII 令牌
     template<typename E, typename T>
-    void subscribe(const T* obj, void (T::*method)(const E&) const) {
-        m_dispatcher.subscribe<E>(obj, method);
+    SubscriptionToken subscribe(const T* obj, void (T::*method)(const E&) const) {
+        auto id = m_dispatcher.subscribe<E>(obj, method);
+
+        // 返回 RAII 令牌，析构时自动取消订阅
+        return SubscriptionToken([this, id, typeId = E::TYPE_ID]() {
+            m_dispatcher.unsubscribe(typeId, id);
+        });
     }
 
     // ==================== 发送事件 ====================
