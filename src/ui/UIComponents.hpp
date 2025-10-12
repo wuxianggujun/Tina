@@ -156,6 +156,7 @@ public:
             ButtonHoverEnterEvent event(this, Container::String(getName().c_str()));
             m_eventSystem->trigger(event);
         }
+        setHovered(true);
     }
 
     void onMouseLeave() override {
@@ -163,6 +164,15 @@ public:
             ButtonHoverLeaveEvent event(this, Container::String(getName().c_str()));
             m_eventSystem->trigger(event);
         }
+        setHovered(false);
+    }
+
+    void onMouseDown(float /*x*/, float /*y*/) override {
+        setPressed(true);
+    }
+
+    void onMouseUp(float /*x*/, float /*y*/) override {
+        setPressed(false);
     }
 
     // 设置点击回调函数

@@ -115,6 +115,7 @@ void UIEventDispatcher::handleMouseInput(float x, float y, bool leftDown) {
         if (m_hoveredNode) {
             UIMouseEvent leaveEvent(UIEvent::Type::MouseLeave, m_hoveredNode, x, y);
             dispatchEvent(leaveEvent);
+            m_hoveredNode->onMouseLeave();
         }
 
         m_hoveredNode = hitNode;
@@ -123,6 +124,7 @@ void UIEventDispatcher::handleMouseInput(float x, float y, bool leftDown) {
         if (m_hoveredNode) {
             UIMouseEvent enterEvent(UIEvent::Type::MouseEnter, m_hoveredNode, x, y);
             dispatchEvent(enterEvent);
+            m_hoveredNode->onMouseEnter();
         }
     }
 
@@ -133,18 +135,23 @@ void UIEventDispatcher::handleMouseInput(float x, float y, bool leftDown) {
         if (m_pressedNode) {
             UIMouseEvent downEvent(UIEvent::Type::MouseDown, m_pressedNode, x, y);
             dispatchEvent(downEvent);
+            m_pressedNode->onMouseDown(x, y);
         }
     } else if (!leftDown && m_mouseDownPrev) {
         // Mouse Up
         if (hitNode) {
             UIMouseEvent upEvent(UIEvent::Type::MouseUp, hitNode, x, y);
             dispatchEvent(upEvent);
+            hitNode->onMouseUp(x, y);
         }
 
         // Click (只在同一节点上按下和释放才触发)
         if (m_pressedNode && m_pressedNode == hitNode) {
             UIMouseEvent clickEvent(UIEvent::Type::Click, m_pressedNode, x, y);
             dispatchEvent(clickEvent);
+            if (!clickEvent.isDefaultPrevented()) {
+                m_pressedNode->onClick();
+            }
         }
 
         m_pressedNode = nullptr;

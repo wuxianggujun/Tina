@@ -158,7 +158,7 @@ public:
     ~UIEventDispatcher() = default;
 
     // 设置根节点
-    void setRoot(UINode* root) { m_root = root; }
+    void setRoot(UINode* root) { m_root = root; m_needRebuildIndex = true; }
 
     // 分发事件（完整的捕获-目标-冒泡流程）
     void dispatchEvent(UIEvent& event);
@@ -178,6 +178,9 @@ public:
     // 处理鼠标输入（生成并分发事件）
     void handleMouseInput(float x, float y, bool leftDown);
 
+    // 索引更新：当 UI 结构/可见性/启用状态发生变化时，调用以重建命中索引
+    void markIndexDirty() { m_needRebuildIndex = true; }
+
 private:
     // 构建事件路径（从根到目标）
     void buildEventPath(UINode* target, Container::Vector<UINode*>& path);
@@ -187,6 +190,10 @@ private:
 
     // 查找鼠标下的节点
     UINode* findNodeUnderMouse(UINode* node, float x, float y);
+
+    // 命中索引重建与节点收集
+    void rebuildIndex();
+    void collectAllNodes(UINode* node, Container::Vector<UINode*>& outList);
 
 private:
     UINode* m_root = nullptr;
@@ -202,6 +209,10 @@ private:
     float m_mouseX = 0, m_mouseY = 0;
     bool m_mouseDown = false;
     bool m_mouseDownPrev = false;
+
+    // 简易空间索引：将节点扁平化并缓存（自底向上命中，顶层优先）
+    Container::Vector<UINode*> m_indexedNodes;
+    bool m_needRebuildIndex = true;
 };
 
 // ==================== UINode 扩展 ====================

@@ -169,6 +169,8 @@ public:
     // === 事件回调（子类可覆盖，或通过函数对象绑定） ===
     virtual void onMouseEnter() {}
     virtual void onMouseLeave() {}
+    virtual void onMouseDown(float /*x*/, float /*y*/) {}
+    virtual void onMouseUp(float /*x*/, float /*y*/) {}
     virtual void onClick() {}
 
     // === 窗口尺寸变化回调（框架自动调用） ===
