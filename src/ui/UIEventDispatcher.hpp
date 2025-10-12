@@ -10,6 +10,7 @@
 #include "../core/Log.hpp"
 #include <functional>
 #include <unordered_map>
+#include <cstdint>
 
 namespace Tina::UI {
 
@@ -194,6 +195,7 @@ private:
     // 命中索引重建与节点收集
     void rebuildIndex();
     void collectAllNodes(UINode* node, Container::Vector<UINode*>& outList);
+    UINode* findNodeUnderMouseIndexed(float x, float y);
 
 private:
     UINode* m_root = nullptr;
@@ -213,6 +215,7 @@ private:
     // 简易空间索引：将节点扁平化并缓存（自底向上命中，顶层优先）
     Container::Vector<UINode*> m_indexedNodes;
     bool m_needRebuildIndex = true;
+    uint64_t m_lastTreeVersion = 0;
 };
 
 // ==================== UINode 扩展 ====================

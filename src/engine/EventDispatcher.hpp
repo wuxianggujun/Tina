@@ -189,9 +189,16 @@ public:
 
         auto& wrapper = m_handlers[typeId];
         if (wrapper) {
-            EventWrapper eventWrapper(event);
-            wrapper->invoke(eventWrapper);
-            ++m_dispatchCount;
+            // 仅零拷贝直派：避免实例化 EventWrapper（非平凡类型也可支持）
+            if (auto* typed = dynamic_cast<TypedHandlerWrapper<E>*>(wrapper.get())) {
+                for (auto& item : typed->handlers) {
+                    if (item.handler) item.handler(event);
+                }
+                ++m_dispatchCount;
+            } else {
+                // 没有匹配的类型包装，无法派发（可能无订阅或类型不一致）
+                TINA_WARN("EventDispatcher: 类型不匹配或未建立处理器: {}", eventTypeIdToString(E::TYPE_ID));
+            }
         }
     }
 

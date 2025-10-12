@@ -13,6 +13,7 @@
 #include "../core/Log.hpp"
 #include "../core/Container.hpp"  // 使用封装的容器
 #include <EASTL/priority_queue.h>
+#include <type_traits>
 
 namespace Tina::Engine {
 
@@ -116,6 +117,8 @@ public:
     // 入队事件（异步，下一帧处理）
     template<typename E>
     bool enqueue(const E& event) {
+        static_assert(std::is_trivially_copyable_v<E>, "Event enqueued must be trivially copyable");
+        static_assert(std::is_trivially_destructible_v<E>, "Event enqueued must be trivially destructible");
         // 根据优先级选择队列
         auto priority = static_cast<uint8_t>(event.priority);
         if (priority >= m_priorityQueues.size()) {
@@ -127,6 +130,8 @@ public:
     // 入队事件（指定优先级）
     template<typename E>
     bool enqueue(const E& event, EventPriority priority) {
+        static_assert(std::is_trivially_copyable_v<E>, "Event enqueued must be trivially copyable");
+        static_assert(std::is_trivially_destructible_v<E>, "Event enqueued must be trivially destructible");
         auto priorityIndex = static_cast<uint8_t>(priority);
         if (priorityIndex >= m_priorityQueues.size()) {
             priorityIndex = static_cast<uint8_t>(EventPriority::Medium);
@@ -137,6 +142,8 @@ public:
     // 延迟触发事件（指定延迟毫秒数）
     template<typename E>
     void scheduleDelayed(const E& event, uint32_t delayMs) {
+        static_assert(std::is_trivially_copyable_v<E>, "Event scheduled must be trivially copyable");
+        static_assert(std::is_trivially_destructible_v<E>, "Event scheduled must be trivially destructible");
         uint64_t triggerTime = getCurrentTimeMs() + delayMs;
         DelayedEvent delayed;
         delayed.triggerTime = triggerTime;

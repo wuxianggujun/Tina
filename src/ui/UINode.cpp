@@ -6,6 +6,11 @@
 
 namespace Tina::UI {
 
+// 静态 UI 树版本号，用于命中索引置脏
+std::atomic<uint64_t> UINode::s_treeVersion{1};
+uint64_t UINode::treeVersion() { return s_treeVersion.load(std::memory_order_relaxed); }
+void UINode::bumpTreeVersion() { s_treeVersion.fetch_add(1, std::memory_order_relaxed); }
+
 UINode::UINode(const std::string& name)
     : m_name(name)
 {
@@ -38,6 +43,7 @@ Memory::UniquePtr<UINode> UINode::removeChild(UINode* child)
         Memory::UniquePtr<UINode> removed = std::move(*it);
         removed->m_parent = nullptr;
         m_children.erase(it);
+        bumpTreeVersion();
         return removed;
     }
     
@@ -50,6 +56,7 @@ void UINode::removeFromParent()
         // 注意：这会导致自己被销毁（如果父节点拥有所有权）
         // 调用者需要确保不再使用this指针
         m_parent->removeChild(this);
+        bumpTreeVersion();
     }
 }
 
@@ -193,3 +200,7 @@ void UINode::render(uint16_t viewId, UIRenderer& renderer)
 }
 
 } // namespace Tina::UI
+
+
+
+

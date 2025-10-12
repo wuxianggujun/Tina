@@ -24,6 +24,7 @@
 #include "../core/Container.hpp"
 #include "../core/Math.hpp"
 #include "../core/Memory.hpp"
+#include <atomic>
 #include <string>
 #include <functional>
 
@@ -76,6 +77,7 @@ public:
         child->m_parent = this;
         child->m_dirty = true;
         m_children.push_back(std::move(child));
+        bumpTreeVersion();
         return ptr;
     }
     
@@ -141,10 +143,14 @@ public:
     Tina::Math::Vec2 getWorldSize() { return m_size; } // 暂不支持缩放
 
     // === 状态 ===
-    void setVisible(bool v) { m_visible = v; }
-    void setEnabled(bool e) { m_enabled = e; }
+    void setVisible(bool v) { if (m_visible != v) { m_visible = v; bumpTreeVersion(); } }
+    void setEnabled(bool e) { if (m_enabled != e) { m_enabled = e; bumpTreeVersion(); } }
     bool isVisible() const { return m_visible; }
     bool isEnabled() const { return m_enabled; }
+    void setInteractable(bool i) { if (m_interactable != i) { m_interactable = i; bumpTreeVersion(); } }
+    bool isInteractable() const { return m_interactable; }
+    void setZIndex(int z) { if (m_zIndex != z) { m_zIndex = z; bumpTreeVersion(); } }
+    int zIndex() const { return m_zIndex; }
 
     // === 点测试（用于事件分发） ===
     bool containsPoint(float worldX, float worldY);
@@ -235,6 +241,15 @@ protected:
     // 状态
     bool m_visible = true;
     bool m_enabled = true;
+    bool m_interactable = true;
+    int m_zIndex = 0;
+
+    // ==================== 结构变更版本（用于命中索引置脏） ====================
+public:
+    static uint64_t treeVersion();
+    static void bumpTreeVersion();
+private:
+    static std::atomic<uint64_t> s_treeVersion;
 };
 
 } // namespace Tina::UI

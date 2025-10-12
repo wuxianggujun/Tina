@@ -106,8 +106,15 @@ void UIEventDispatcher::handleMouseInput(float x, float y, bool leftDown) {
 
     if (!m_root) return;
 
+    // 自动检测 UI 树版本变化，标记索引需要重建
+    uint64_t ver = UINode::treeVersion();
+    if (m_lastTreeVersion != ver) {
+        m_lastTreeVersion = ver;
+        m_needRebuildIndex = true;
+    }
+
     // 查找鼠标下的节点
-    UINode* hitNode = findNodeUnderMouse(m_root, x, y);
+    UINode* hitNode = findNodeUnderMouseIndexed(x, y);
 
     // 处理 hover 事件
     if (hitNode != m_hoveredNode) {
@@ -184,7 +191,9 @@ void UIEventDispatcher::triggerListeners(UINode* node, UIEvent& event) {
     bool isCapture = (event.getPhase() == UIEvent::Phase::Capture);
     bool isTarget = (event.getPhase() == UIEvent::Phase::Target);
 
-    for (const auto& listener : typeIt->second) {
+    // 使用快照遍历，避免回调中修改监听列表导致迭代不稳定
+    auto listenersSnapshot = typeIt->second;
+    for (const auto& listener : listenersSnapshot) {
         if (event.isImmediatePropagationStopped()) break;
 
         // 检查监听器是否应该在当前阶段触发
@@ -227,6 +236,58 @@ UINode* UIEventDispatcher::findNodeUnderMouse(UINode* node, float x, float y) {
     }
 
     return nullptr;
+}
+
+// 基于扁平索引的命中检测（性能优先）
+UINode* UIEventDispatcher::findNodeUnderMouseIndexed(float x, float y) {
+    if (!m_root) return nullptr;
+    if (m_needRebuildIndex) {
+        rebuildIndex();
+        m_needRebuildIndex = false;
+    }
+    for (int i = static_cast<int>(m_indexedNodes.size()) - 1; i >= 0; --i) {
+        UINode* n = m_indexedNodes[static_cast<size_t>(i)];
+        if (!n->isVisible() || !n->isEnabled()) continue;
+        if (n->containsPoint(x, y)) return n;
+    }
+    return nullptr;
+}
+
+void UIEventDispatcher::rebuildIndex() {
+    m_indexedNodes.clear();
+    if (!m_root) return;
+
+    // 收集所有节点并记录序号（用于稳定排序）
+    Tina::Container::Vector<UINode*> all;
+    collectAllNodes(m_root, all);
+
+    struct Item { UINode* node; int z; size_t seq; };
+    Tina::Container::Vector<Item> items;
+    items.reserve(all.size());
+    size_t seq = 0;
+    for (auto* n : all) {
+        if (!n) continue;
+        if (!n->isInteractable()) continue; // 仅索引可交互节点
+        items.push_back(Item{ n, n->zIndex(), seq++ });
+    }
+
+    // 按 zIndex 升序稳定排序（保证同 zIndex 按遍历顺序）
+    Tina::Container::Sort(items.begin(), items.end(), [](const Item& a, const Item& b){
+        if (a.z != b.z) return a.z < b.z;
+        return a.seq < b.seq;
+    });
+
+    m_indexedNodes.reserve(items.size());
+    for (const auto& it : items) m_indexedNodes.push_back(it.node);
+}
+
+void UIEventDispatcher::collectAllNodes(UINode* node, Container::Vector<UINode*>& outList) {
+    if (!node) return;
+    outList.push_back(node);
+    const auto& children = node->getChildren();
+    for (const auto& ch : children) {
+        if (ch.get()) collectAllNodes(ch.get(), outList);
+    }
 }
 
 } // namespace Tina::UI

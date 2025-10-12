@@ -9,6 +9,7 @@
 #include "EventCore.hpp"
 #include "../core/Log.hpp"
 #include "../core/Container.hpp"
+#include <type_traits>
 
 namespace Tina::Engine {
 
@@ -38,6 +39,8 @@ struct EventWrapper {
     explicit EventWrapper(const E& event) {
         static_assert(sizeof(E) <= sizeof(EventData), "事件大小超过 128 字节");
         typeId = E::TYPE_ID;
+        static_assert(std::is_trivially_copyable_v<E>, "Event must be trivially copyable");
+        static_assert(std::is_trivially_destructible_v<E>, "Event must be trivially destructible");
         timestamp = event.timestamp;
         priority = event.priority;
         new (data.buffer) E(event);  // 放置 new
@@ -73,6 +76,8 @@ public:
     // 入队事件（拷贝）
     template<typename E>
     bool push(const E& event) {
+        static_assert(std::is_trivially_copyable_v<E>, "Event must be trivially copyable for queueing");
+        static_assert(std::is_trivially_destructible_v<E>, "Event must be trivially destructible for queueing");
         if (m_buffer.size() >= Capacity) {
             ++m_overflowCount;
             TINA_WARN("事件队列已满，丢弃事件：{}", eventTypeIdToString(E::TYPE_ID));
@@ -88,6 +93,8 @@ public:
     // 入队事件（移动）
     template<typename E>
     bool push(E&& event) {
+        static_assert(std::is_trivially_copyable_v<E>, "Event must be trivially copyable for queueing");
+        static_assert(std::is_trivially_destructible_v<E>, "Event must be trivially destructible for queueing");
         if (m_buffer.size() >= Capacity) {
             ++m_overflowCount;
             TINA_WARN("事件队列已满，丢弃事件：{}", eventTypeIdToString(E::TYPE_ID));

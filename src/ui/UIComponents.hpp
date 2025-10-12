@@ -151,21 +151,9 @@ public:
     }
 
     // === 鼠标事件处理 ===
-    void onMouseEnter() override {
-        if (m_eventSystem) {
-            ButtonHoverEnterEvent event(this, Container::String(getName().c_str()));
-            m_eventSystem->trigger(event);
-        }
-        setHovered(true);
-    }
+    void onMouseEnter() override { setHovered(true); }
 
-    void onMouseLeave() override {
-        if (m_eventSystem) {
-            ButtonHoverLeaveEvent event(this, Container::String(getName().c_str()));
-            m_eventSystem->trigger(event);
-        }
-        setHovered(false);
-    }
+    void onMouseLeave() override { setHovered(false); }
 
     void onMouseDown(float /*x*/, float /*y*/) override {
         setPressed(true);
