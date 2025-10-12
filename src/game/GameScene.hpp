@@ -42,7 +42,7 @@ public:
     void onExit() override;
     void onPause() override;
     void onResume() override;
-    // 注意：不再需要覆盖onWindowSizeChanged，UI组件已通过registerResizable注册到框架
+    void onWindowSizeChanged(int width, int height) override;
 
     // 主循环
     void update(float dt) override;
@@ -115,9 +115,7 @@ private:
     entt::entity m_clickedEntity = entt::null;  // 右键点击的角色
     bool m_isToolActive = false;  // 标记当前帧是否有工具激活（用于 UI 事件处理）
 
-    // 视口尺寸
-    int m_pixelWidth = 1280;
-    int m_pixelHeight = 720;
+    // 视口尺寸由基类Scene管理，使用基类的 m_pixelWidth 和 m_pixelHeight
 
     // 工具栏图标资源（通过 TextureManager 加载）
     Tina::Engine::ResourceRef<Tina::Engine::Texture2DResource> m_iconWater;

@@ -78,6 +78,8 @@ void Scene::updateWindowSize(int width, int height) {
 
 // 实际应用窗口尺寸更新
 void Scene::applyWindowResize(int width, int height) {
+    TINA_DEBUG("Scene::applyWindowResize - 更新窗口尺寸: {}x{} -> {}x{}",
+              m_pixelWidth, m_pixelHeight, width, height);
     m_pixelWidth = width;
     m_pixelHeight = height;
     m_viewDirty = true;

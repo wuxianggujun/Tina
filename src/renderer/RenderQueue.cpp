@@ -5,9 +5,9 @@
 #include "RenderQueue.hpp"
 #include "ShaderManager.hpp"
 #include "../core/Log.hpp"
+#include "../core/STLCompat.hpp"  // 使用 STL 兼容层
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
-#include <cstring>
 
 namespace Tina::Renderer {
 
@@ -25,7 +25,7 @@ struct SpriteVertex {
 
 RenderQueue::RenderQueue() {
     m_commands.reserve(1000);
-    m_sortedCommands.reserve(1000);
+    m_sortIndices.reserve(1000);  // 预分配索引数组
     m_completedBatches.reserve(100);
 }
 
@@ -128,9 +128,13 @@ void RenderQueue::flush() {
     if (m_batchingEnabled) {
         processBatches();
     } else {
-        // 直接执行每个命令
-        for (const auto& cmd : (m_sortingEnabled ? m_sortedCommands : m_commands)) {
-            executeCommand(cmd);
+        // 直接执行每个命令（使用索引访问）
+        size_t cmdCount = m_commands.size();
+        for (size_t i = 0; i < cmdCount; ++i) {
+            uint32_t cmdIndex = m_sortingEnabled && !m_sortIndices.empty()
+                              ? m_sortIndices[i]
+                              : static_cast<uint32_t>(i);
+            executeCommand(m_commands[cmdIndex]);
         }
     }
 
@@ -140,7 +144,7 @@ void RenderQueue::flush() {
 
 void RenderQueue::clear() {
     m_commands.clear();
-    m_sortedCommands.clear();
+    m_sortIndices.clear();  // 清空索引数组
     m_completedBatches.clear();
     if (m_currentBatch) {
         m_currentBatch->clear();
@@ -148,17 +152,35 @@ void RenderQueue::clear() {
 }
 
 void RenderQueue::sortCommands() {
-    m_sortedCommands = m_commands;  // 复制
-    std::sort(m_sortedCommands.begin(), m_sortedCommands.end(),
-              [](const RenderCommand& a, const RenderCommand& b) {
-                  return a.sortKey < b.sortKey;
-              });
+    // 索引排序优化：不复制命令，只排序索引
+    size_t cmdCount = m_commands.size();
+
+    // 初始化索引数组
+    m_sortIndices.resize(cmdCount);
+    for (size_t i = 0; i < cmdCount; ++i) {
+        m_sortIndices[i] = static_cast<uint32_t>(i);
+    }
+
+    // 使用 EASTL 排序索引而不是命令本身
+    // 这避免了复制大量数据，只需要移动 4 字节的索引
+    Tina::stl::sort(m_sortIndices.begin(), m_sortIndices.end(),
+                    [this](uint32_t a, uint32_t b) {
+                        return m_commands[a].sortKey < m_commands[b].sortKey;
+                    });
 }
 
 void RenderQueue::processBatches() {
-    const auto& cmds = m_sortingEnabled ? m_sortedCommands : m_commands;
+    // 使用索引访问命令，避免复制
+    size_t cmdCount = m_commands.size();
 
-    for (const auto& cmd : cmds) {
+    for (size_t i = 0; i < cmdCount; ++i) {
+        // 根据是否排序选择索引
+        uint32_t cmdIndex = m_sortingEnabled && !m_sortIndices.empty()
+                          ? m_sortIndices[i]
+                          : static_cast<uint32_t>(i);
+
+        const auto& cmd = m_commands[cmdIndex];
+
         // 检查是否可以合并到当前批次
         if (m_currentBatch && m_currentBatch->canMerge(cmd)) {
             addToBatch(cmd);
@@ -288,9 +310,9 @@ void RenderQueue::executeBatch(const RenderBatch& batch) {
     bgfx::allocTransientVertexBuffer(&tvb, batch.numVertices, batch.layout);
     bgfx::allocTransientIndexBuffer(&tib, batch.numIndices);
 
-    // 复制数据
-    std::memcpy(tvb.data, batch.vertexData.data(), batch.vertexData.size());
-    std::memcpy(tib.data, batch.indexData.data(), batch.indexData.size() * sizeof(uint16_t));
+    // 复制数据（使用 C 标准库的 memcpy，这是性能关键路径）
+    Tina::stl::memcpy(tvb.data, batch.vertexData.data(), batch.vertexData.size());
+    Tina::stl::memcpy(tib.data, batch.indexData.data(), batch.indexData.size() * sizeof(uint16_t));
 
     // 设置缓冲区
     bgfx::setVertexBuffer(0, &tvb);
@@ -369,8 +391,8 @@ void RenderQueue::generateRectVertices(const RectData& rect, uint8_t* vertices,
     if (rect.rotation != 0.0f) {
         float cx = rect.x + rect.w * 0.5f;
         float cy = rect.y + rect.h * 0.5f;
-        float cos = std::cos(rect.rotation);
-        float sin = std::sin(rect.rotation);
+        float cos = Tina::stl::cos(rect.rotation);
+        float sin = Tina::stl::sin(rect.rotation);
 
         auto rotatePoint = [&](float px, float py, float& ox, float& oy) {
             float dx = px - cx;
@@ -414,8 +436,8 @@ void RenderQueue::generateSpriteVertices(const SpriteData& sprite, uint8_t* vert
         // 带旋转的精灵
         float cx = sprite.x + sprite.w * 0.5f;
         float cy = sprite.y + sprite.h * 0.5f;
-        float cos = std::cos(sprite.rotation);
-        float sin = std::sin(sprite.rotation);
+        float cos = Tina::stl::cos(sprite.rotation);
+        float sin = Tina::stl::sin(sprite.rotation);
 
         auto rotatePoint = [&](float px, float py, float& ox, float& oy) {
             float dx = px - cx;

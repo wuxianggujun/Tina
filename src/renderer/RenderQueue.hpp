@@ -8,8 +8,7 @@
 #include "RenderCommand.hpp"
 #include "../core/Container.hpp"
 #include "../core/Memory.hpp"
-#include <algorithm>
-#include <unordered_map>
+#include "../core/STLCompat.hpp"  // 使用 STL 兼容层
 
 namespace Tina::Renderer {
 
@@ -142,7 +141,9 @@ private:
 private:
     // 渲染命令队列
     Container::Vector<RenderCommand> m_commands;
-    Container::Vector<RenderCommand> m_sortedCommands;  // 排序后的命令
+
+    // 索引排序优化：避免复制整个命令向量
+    Container::Vector<uint32_t> m_sortIndices;  // 排序索引，避免复制数据
 
     // 当前批次
     Memory::UniquePtr<RenderBatch> m_currentBatch;

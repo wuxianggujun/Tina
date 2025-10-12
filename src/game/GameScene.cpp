@@ -41,8 +41,7 @@ void GameScene::onEnter()
 {
     TINA_INFO("GameScene::onEnter - 进入游戏场景");
 
-    // 获取窗口尺寸
-    app()->getPixelSize(m_pixelWidth, m_pixelHeight);
+    // 获取窗口尺寸（Scene基类会在applyWindowResize中自动更新）
 
     initializeResources();
     createGameWorld();
@@ -137,13 +136,12 @@ void GameScene::onResume()
 {
     TINA_INFO("GameScene::onResume - 游戏恢复");
 
-    // 重新获取当前窗口尺寸（可能在暂停期间改变了）
-    app()->getPixelSize(m_pixelWidth, m_pixelHeight);
-    TINA_INFO("GameScene::onResume - 更新窗口尺寸: {}x{}", m_pixelWidth, m_pixelHeight);
+    // 窗口尺寸已由Scene基类自动管理
+    TINA_INFO("GameScene::onResume - 当前窗口尺寸: {}x{}", getPixelWidth(), getPixelHeight());
 
     // 更新相机视口
     if (camera()) {
-        camera()->setViewportPixels(m_pixelWidth, m_pixelHeight);
+        camera()->setViewportPixels(getPixelWidth(), getPixelHeight());
 
         // 立即将相机定位到当前控制的角色
         // 这比保存/恢复相机位置更直接、更可靠
@@ -186,18 +184,18 @@ void GameScene::onResume()
         if (m_toolbar->root()) {
             m_toolbar->root()->setVisible(true);
         }
-        m_toolbar->onResize(m_pixelWidth, m_pixelHeight);
+        m_toolbar->onResize(getPixelWidth(), getPixelHeight());
 
         // 确保工具栏图标已加载（以防资源加载延迟）
         ensureToolbarIconsReady();
     }
 
     if (m_characterPanel) {
-        m_characterPanel->centerOnScreen(m_pixelWidth, m_pixelHeight);
+        m_characterPanel->centerOnScreen(getPixelWidth(), getPixelHeight());
     }
 
     // 重新设置 UI 视图（view 3）
-    setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
+    setupUIView(uiViewId(), getPixelWidth(), getPixelHeight());
 
     // 恢复音频
     if (m_sfxYingxiao && m_sfxStarted) {
@@ -208,8 +206,25 @@ void GameScene::onResume()
     }
 }
 
-// 注意：不再需要onWindowSizeChanged()方法
-// UI组件已通过addUIRoot()注册到框架，框架自动调用它们的onWindowSizeChanged()
+void GameScene::onWindowSizeChanged(int width, int height)
+{
+    TINA_INFO("GameScene::onWindowSizeChanged - 窗口尺寸变化: {}x{}", width, height);
+
+    // 基类Scene已经更新了m_pixelWidth和m_pixelHeight
+    // 但我们需要确保相关组件也立即更新
+
+    // 更新UI视图
+    setupUIView(uiViewId(), width, height);
+
+    // 通知工具栏尺寸变化（虽然框架会自动调用，但确保立即生效）
+    if (m_toolbar) {
+        m_toolbar->onResize(width, height);
+    }
+
+    if (m_characterPanel) {
+        m_characterPanel->centerOnScreen(width, height);
+    }
+}
 
 void GameScene::update(float dt)
 {
@@ -257,7 +272,7 @@ void GameScene::render()
     {
         const float a = m_dayNight.overlayAlpha();
         if (a > 0.001f) {
-            ui().drawRect(3, 0.0f, 0.0f, (float)m_pixelWidth, (float)m_pixelHeight,
+            ui().drawRect(3, 0.0f, 0.0f, (float)getPixelWidth(), (float)getPixelHeight(),
                                    0.0f, 0.0f, 0.0f, a);
         }
     }
@@ -296,12 +311,12 @@ void GameScene::handleInput()
 
         // 检查是否点击工具栏
         if (m_toolbar && m_toolbar->hitTest(mx, my)) {
-            // TINA_INFO("工具栏命中测试通过: 鼠标({}, {}), 窗口尺寸: {}x{}", mx, my, m_pixelWidth, m_pixelHeight);
+            // TINA_INFO("工具栏命中测试通过: 鼠标({}, {}), 窗口尺寸: {}x{}", mx, my, getPixelWidth(), getPixelHeight());
             if (m_toolbar->clickAt(mx, my)) {
                 return;
             }
         } // else if (m_toolbar) {
-            // TINA_INFO("工具栏命中测试失败: 鼠标({}, {}), 窗口尺寸: {}x{}", mx, my, m_pixelWidth, m_pixelHeight);
+            // TINA_INFO("工具栏命中测试失败: 鼠标({}, {}), 窗口尺寸: {}x{}", mx, my, getPixelWidth(), getPixelHeight());
         // }
 
         // 地形编辑工具
@@ -386,7 +401,7 @@ void GameScene::initializeResources()
     m_tileRenderer->initialize(app()->shaders());
 
     // 设置 UI 视图（view 3，像素坐标）
-    setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
+    setupUIView(uiViewId(), getPixelWidth(), getPixelHeight());
 
     TINA_INFO("GameScene: 资源初始化完成");
 }
@@ -436,7 +451,7 @@ void GameScene::createCamera()
     // 使用基类提供的相机，只需要配置它
     float viewH = std::min(GameConfig::DEFAULT_VIEW_HEIGHT, (float)m_tileMap->height());
     if (camera()) {
-        camera()->setViewportPixels(m_pixelWidth, m_pixelHeight);
+        camera()->setViewportPixels(getPixelWidth(), getPixelHeight());
         camera()->setViewHeightWorld(viewH);
         TINA_INFO("相机配置完成: 视图高度={}", viewH);
     }
@@ -448,7 +463,7 @@ void GameScene::createUI()
 
     // 工具栏
     m_toolbar = Memory::MakeUnique<UI::UIToolbar>();
-    m_toolbar->initialize(m_pixelWidth, m_pixelHeight, ui());
+    m_toolbar->initialize(getPixelWidth(), getPixelHeight(), ui());
     // 注册到框架，自动处理窗口resize
     addUIRoot(m_toolbar.get());
 
@@ -471,7 +486,7 @@ void GameScene::createUI()
 
     // 角色面板
     m_characterPanel = Memory::MakeUnique<UI::UICharacterPanel>();
-    m_characterPanel->centerOnScreen(m_pixelWidth, m_pixelHeight);
+    m_characterPanel->centerOnScreen(getPixelWidth(), getPixelHeight());
     // 注册到框架，自动处理窗口resize
     addUIRoot(m_characterPanel.get());
 
@@ -649,7 +664,12 @@ void GameScene::updateGameLogic(float dt)
             int tool = m_toolbar->selectedIndex();
             if (tool == 1) {  // 工具1=挖掘器
                 float wx = 0.0f, wy = 0.0f;
-                screenToWorld(mx, my, m_pixelWidth, m_pixelHeight, *camera(), wx, wy);
+                // 添加调试日志查看坐标转换
+                TINA_DEBUG("工具使用 - 鼠标:({}, {}) 窗口:{}x{} 相机:({}, {}) 视野:{}x{}",
+                          mx, my, getPixelWidth(), getPixelHeight(),
+                          camera()->x(), camera()->y(), camera()->viewW(), camera()->viewH());
+                screenToWorld(mx, my, getPixelWidth(), getPixelHeight(), *camera(), wx, wy);
+                TINA_DEBUG("转换后世界坐标:({}, {})", wx, wy);
                 excavateCircle(*m_tileMap, wx, wy, GameConfig::EXCAVATE_RADIUS);
             }
         }
@@ -782,7 +802,7 @@ void GameScene::renderUI()
         to.hAlign = UI::UIRenderer::AlignH::Left; to.vAlign = UI::UIRenderer::AlignV::Top;
         ui().drawTextBox(uiViewId(),
                                   GameConfig::UI_HUD_PADDING_X, hudY,
-                                  (float)m_pixelWidth - GameConfig::UI_HUD_WIDTH_MARGIN,
+                                  (float)getPixelWidth() - GameConfig::UI_HUD_WIDTH_MARGIN,
                                   GameConfig::UI_HUD_HEIGHT,
                                   "A/D 移动 | W/空格 跳跃 | 左键地形编辑 | 右键查看角色并切换控制 | 滚轮/数字键切换工具",
                                   to);
@@ -822,7 +842,7 @@ void GameScene::handleRightClick(float mx, float my)
 
     // 转换到世界坐标
     float wx = 0.0f, wy = 0.0f;
-    screenToWorld(mx, my, m_pixelWidth, m_pixelHeight, *camera(), wx, wy);
+    screenToWorld(mx, my, getPixelWidth(), getPixelHeight(), *camera(), wx, wy);
 
     // 检测所有角色
     auto& reg = m_ecsWorld->registry();
@@ -864,7 +884,7 @@ void GameScene::handleLeftClick(float mx, float my)
 
     // 转换到世界坐标
     float wx = 0.0f, wy = 0.0f;
-    screenToWorld(mx, my, m_pixelWidth, m_pixelHeight, *camera(), wx, wy);
+    screenToWorld(mx, my, getPixelWidth(), getPixelHeight(), *camera(), wx, wy);
 
     int tx = (int)std::floor(wx);
     int ty = (int)std::floor(wy);
