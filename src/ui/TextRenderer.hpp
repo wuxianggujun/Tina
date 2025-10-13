@@ -33,22 +33,19 @@ public:
                   float r, float g, float b, float a,
                   const std::string& utf8);
 
-    // 可选：设置/清除裁剪矩形（屏幕像素坐标，针对 UI 视图等像素空间）
     void setClipRect(int16_t x, int16_t y, uint16_t w, uint16_t h);
     void clearClipRect();
 
     // 文本测量：计算 UTF-8 文本在当前字体下的像素宽高（多行按换行分行）
     // 注意：测量过程中会按需生成字形，确保与渲染一致
     void measureText(const std::string& utf8, float& outWidth, float& outHeight);
-    void measureTextExtents(const std::string& utf8,
-                            float& outWidth, float& outHeight,
-                            float& outTop, float& outBottom) const;
+    void measureTextExtents(const std::string& utf8, float& outWidth, float& outHeight,
+                            float& outTop, float& outBottom);
 
     // 像素对齐（开启可显著减少文字轻微模糊/抖动，默认开启）
     void setPixelSnap(bool enable) { m_pixelSnap = enable; }
     bool pixelSnap() const { return m_pixelSnap; }
     int ascenderPx() const { return m_font ? m_font->ascender : 0; }
-    int descenderPx() const { return m_font ? m_font->descender : 0; }
     int currentFontPx() const { return m_font ? m_font->sizePx : 0; }
     // 采样器过滤方式：默认点采样（像素风），设置为 true 使用线性过滤（小字号更柔和）
     void setLinearFilter(bool enable) { m_linearFilter = enable; }

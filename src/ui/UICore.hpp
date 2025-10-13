@@ -88,29 +88,30 @@ public:
     }
 
     // 文本测量（可指定字号；fontPx=0 使用当前字号）
-    bool measureText(const std::string& utf8, float& outW, float& outH, int fontPx = 0) const {
+    // 注意：这些方法不是 const，因为内部需要临时修改字体大小
+    bool measureText(const std::string& utf8, float& outW, float& outH, int fontPx = 0) {
         if (!m_text) { outW = outH = 0.0f; return false; }
         int prev = m_text->currentFontPx();
         if (fontPx > 0 && fontPx != prev) {
-            if (!const_cast<TextRenderer*>(m_text)->setFontPx(fontPx)) return false;
-            const_cast<TextRenderer*>(m_text)->measureText(utf8, outW, outH);
-            const_cast<TextRenderer*>(m_text)->setFontPx(prev);
+            if (!m_text->setFontPx(fontPx)) return false;
+            m_text->measureText(utf8, outW, outH);
+            m_text->setFontPx(prev);
             return true;
         }
-        const_cast<TextRenderer*>(m_text)->measureText(utf8, outW, outH);
+        m_text->measureText(utf8, outW, outH);
         return true;
     }
     bool measureTextExtents(const std::string& utf8, float& outW, float& outH,
-                            float& outTop, float& outBottom, int fontPx = 0) const {
+                            float& outTop, float& outBottom, int fontPx = 0) {
         if (!m_text) { outW = outH = outTop = outBottom = 0.0f; return false; }
         int prev = m_text->currentFontPx();
         if (fontPx > 0 && fontPx != prev) {
-            if (!const_cast<TextRenderer*>(m_text)->setFontPx(fontPx)) return false;
-            const_cast<TextRenderer*>(m_text)->measureTextExtents(utf8, outW, outH, outTop, outBottom);
-            const_cast<TextRenderer*>(m_text)->setFontPx(prev);
+            if (!m_text->setFontPx(fontPx)) return false;
+            m_text->measureTextExtents(utf8, outW, outH, outTop, outBottom);
+            m_text->setFontPx(prev);
             return true;
         }
-        const_cast<TextRenderer*>(m_text)->measureTextExtents(utf8, outW, outH, outTop, outBottom);
+        m_text->measureTextExtents(utf8, outW, outH, outTop, outBottom);
         return true;
     }
     int textAscenderPx() const { return m_text ? m_text->ascenderPx() : 0; }

@@ -440,13 +440,11 @@ void TextRenderer::measureText(const std::string& utf8, float& outWidth, float& 
     outHeight = (float)(lines * (m_font ? m_font->sizePx : 0));
 }
 
-void TextRenderer::measureTextExtents(const std::string& utf8,
-                                      float& outWidth, float& outHeight,
-                                      float& outTop, float& outBottom) const
+void TextRenderer::measureTextExtents(const std::string& utf8, float& outWidth, float& outHeight, float& outTop, float& outBottom)
 {
     outWidth = 0.0f; outHeight = 0.0f; outTop = 0.0f; outBottom = 0.0f;
     if (utf8.empty()) return;
-    if (!const_cast<TextRenderer*>(this)->ensureFontReady()) return;
+    if (!ensureFontReady()) return;
 
     float lineW = 0.0f; int lines = 1;
     float topMax = 0.0f, bottomMax = 0.0f;
@@ -462,14 +460,12 @@ void TextRenderer::measureTextExtents(const std::string& utf8,
             lineW = 0.0f; ++lines; prevGlyphIdx = 0;
             continue;
         }
-        // 确保已有字形（const_cast 以复用 ensureGlyph）
-        if (m_font) {
-            const_cast<TextRenderer*>(this)->ensureGlyph(*const_cast<Font*>(m_font), code);
-        }
+        // 确保已有字形
+        ensureGlyph(*m_font, code);
         auto it = m_font->glyphs.find(code);
         if (it == m_font->glyphs.end()) continue;
         const Glyph& g = it->second;
-
+        
         if (hasKerning) {
             FT_UInt glyphIdx = FT_Get_Char_Index(m_font->face, (FT_ULong)code);
             if (prevGlyphIdx != 0 && glyphIdx != 0) {

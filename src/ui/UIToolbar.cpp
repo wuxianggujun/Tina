@@ -205,15 +205,11 @@ void UIToolbar::buildLayout()
     select(m_selected >= 0 && m_selected < (int)m_slots.size() ? m_selected : -1);
 }
 
-bool UIToolbar::hitTest(float x, float y) const
+bool UIToolbar::hitTest(float x, float y)
 {
     if (!m_bar) return false;
     // 使用 UINode 自带的 containsPoint（基于世界坐标）
-    // auto wp = const_cast<UIPanel*>(m_bar)->getWorldPosition();
-    // auto sz = m_bar->getSize();
-    // TINA_INFO("UIToolbar::hitTest: 鼠标({}, {}), 工具栏世界坐标({}, {}), 尺寸({}, {})",
-    //           x, y, wp.x, wp.y, sz.x, sz.y);
-    return const_cast<UIPanel*>(m_bar)->containsPoint(x, y);
+    return m_bar->containsPoint(x, y);
 }
 
 void UIToolbar::select(int index)
@@ -230,8 +226,8 @@ int UIToolbar::indexAt(float x, float y) const
 {
     // 从上层到下层检查，优先命中后添加的（与绘制顺序一致）
     for (int i = (int)m_slots.size() - 1; i >= 0; --i) {
-        const auto* btn = m_slots[i];
-        if (btn && const_cast<UIButton*>(btn)->containsPoint(x, y)) {
+        auto* btn = m_slots[i];
+        if (btn && btn->containsPoint(x, y)) {
             return i;
         }
     }

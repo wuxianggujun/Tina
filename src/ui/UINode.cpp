@@ -150,22 +150,21 @@ void UINode::performLayoutNow()
 {
     if (!m_layoutDirty) return;  // 布局是最新的，无需重新计算
 
-    // 使用布局管理器执行（会自动处理依赖）
     GetLayoutManager().performLayoutNow(this);
 }
 
 // === 点测试 ===
 
-bool UINode::containsPoint(float worldX, float worldY)
+bool UINode::containsPoint(float x, float y)
 {
     // ✅ 关键修复：在访问坐标前，确保布局是最新的
     if (m_layoutDirty) {
-        const_cast<UINode*>(this)->performLayoutNow();
+        performLayoutNow();
     }
 
     Tina::Math::Vec2 wp = getWorldPosition();
-    return worldX >= wp.x && worldX < wp.x + m_size.x &&
-           worldY >= wp.y && worldY < wp.y + m_size.y;
+    return x >= wp.x && x < wp.x + m_size.x &&
+           y >= wp.y && y < wp.y + m_size.y;
 }
 
 // === 更新与渲染 ===

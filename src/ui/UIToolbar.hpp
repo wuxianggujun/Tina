@@ -48,7 +48,7 @@ public:
     UINode* root() const { return m_root.get(); }
 
     int barHeight() const { return m_barH; }
-    bool hitTest(float x, float y) const;
+    bool hitTest(float x, float y);  // 移除 const（需要调用 containsPoint）
     void setMousePos(float x, float y) { m_mouseX = x; m_mouseY = y; }
 
     // 选择与参数调整

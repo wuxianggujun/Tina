@@ -34,8 +34,9 @@ namespace {
     }
     std::mutex& aligned_set_mutex()
     {
-        static auto* m = new std::mutex();
-        return *m;
+        // ✅ 使用 Meyer's Singleton，自动管理生命周期
+        static std::mutex m;
+        return m;
     }
     inline void track_aligned(void* p)
     {
