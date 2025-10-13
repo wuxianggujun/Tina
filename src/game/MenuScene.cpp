@@ -240,18 +240,48 @@ void MenuScene::createUI() {
     m_rootNode->setPosition(0, 0);
     m_rootNode->setSize((float)getPixelWidth(), (float)getPixelHeight());
 
-    // 计算按钮位置
+    // 计算按钮位置（确保三个按钮在面板中垂直居中，且避免与标题重叠）
     float centerX = getPixelWidth() / 2.0f;
-    float startY = getPixelHeight() * 0.5f;
     float buttonWidth = 200.0f * m_uiScale;
     float buttonHeight = 50.0f * m_uiScale;
     float buttonSpacing = 20.0f * m_uiScale;
     int buttonFontPx = std::max(18, (int)std::lround(32.0f * m_uiScale));
 
+    // 计算标题区域的底部位置（与render函数中的标题布局保持一致）
+    float titleY = getPixelHeight() * 0.25f;
+    // 副标题：位置 titleY + 60 - boxH/2，高度 boxH = 40，所以底部 = titleY + 60 + 20 = titleY + 80
+    float subtitleBottom = titleY + 80.0f * m_uiScale;  // 副标题底部
+
+    // 计算三个按钮的总高度
+    float totalButtonsHeight = 3 * buttonHeight + 2 * buttonSpacing;
+
+    // 面板尺寸：按钮总高度 + 上下各留30像素边距
+    float panelHeight = totalButtonsHeight + 60.0f * m_uiScale;
+    float panelWidth = 300.0f * m_uiScale;
+
+    // 面板直接放在标题下方固定距离处（不再在剩余空间中居中）
+    float spacing = 40.0f * m_uiScale;  // 标题和面板之间的间距
+    float panelTop = subtitleBottom + spacing;
+
+    // 如果面板会超出屏幕底部，则向上调整
+    float panelBottom = panelTop + panelHeight;
+    float bottomMargin = 20.0f * m_uiScale;
+    if (panelBottom > getPixelHeight() - bottomMargin) {
+        panelTop = getPixelHeight() - panelHeight - bottomMargin;
+        // 确保不会覆盖标题（保留最小间距）
+        float minSpacing = 10.0f * m_uiScale;
+        if (panelTop < subtitleBottom + minSpacing) {
+            panelTop = subtitleBottom + minSpacing;
+        }
+    }
+
+    // 按钮起始位置：面板顶部 + 上边距
+    float startY = panelTop + 30.0f * m_uiScale;
+
     // 创建按钮面板（半透明背景）
     auto panel = Memory::MakeUnique<UI::UIPanel>("ButtonPanel");
-    panel->setPosition(centerX - 150.0f * m_uiScale, startY - 50.0f * m_uiScale);
-    panel->setSize(300.0f * m_uiScale, 250.0f * m_uiScale);
+    panel->setPosition(centerX - panelWidth / 2.0f, panelTop);
+    panel->setSize(panelWidth, panelHeight);
     panel->setColor(Core::Color{0.1f, 0.1f, 0.15f, 0.8f});
     panel->setInteractable(false);  // 🔧 关键修复：面板不响应事件，让按钮能被命中
     // panel->setCornerRadius(10.0f);  // UIPanel 不支持圆角
@@ -398,19 +428,49 @@ void MenuScene::updateUILayout() {
     // 更新根节点大小
     m_rootNode->setSize((float)getPixelWidth(), (float)getPixelHeight());
 
-    // 重新计算中心位置
+    // 重新计算中心位置和按钮布局（与 createUI 保持一致）
     float centerX = getPixelWidth() / 2.0f;
-    float startY = getPixelHeight() * 0.5f;
     float buttonWidth = 200.0f * m_uiScale;
     float buttonHeight = 50.0f * m_uiScale;
     float buttonSpacing = 20.0f * m_uiScale;
+
+    // 计算标题区域的底部位置（与render函数中的标题布局保持一致）
+    float titleY = getPixelHeight() * 0.25f;
+    // 副标题：位置 titleY + 60 - boxH/2，高度 boxH = 40，所以底部 = titleY + 60 + 20 = titleY + 80
+    float subtitleBottom = titleY + 80.0f * m_uiScale;  // 副标题底部
+
+    // 计算三个按钮的总高度
+    float totalButtonsHeight = 3 * buttonHeight + 2 * buttonSpacing;
+
+    // 面板尺寸：按钮总高度 + 上下各留30像素边距
+    float panelHeight = totalButtonsHeight + 60.0f * m_uiScale;
+    float panelWidth = 300.0f * m_uiScale;
+
+    // 面板直接放在标题下方固定距离处（不再在剩余空间中居中）
+    float spacing = 40.0f * m_uiScale;  // 标题和面板之间的间距
+    float panelTop = subtitleBottom + spacing;
+
+    // 如果面板会超出屏幕底部，则向上调整
+    float panelBottom = panelTop + panelHeight;
+    float bottomMargin = 20.0f * m_uiScale;
+    if (panelBottom > getPixelHeight() - bottomMargin) {
+        panelTop = getPixelHeight() - panelHeight - bottomMargin;
+        // 确保不会覆盖标题（保留最小间距）
+        float minSpacing = 10.0f * m_uiScale;
+        if (panelTop < subtitleBottom + minSpacing) {
+            panelTop = subtitleBottom + minSpacing;
+        }
+    }
+
+    // 按钮起始位置：面板顶部 + 上边距
+    float startY = panelTop + 30.0f * m_uiScale;
 
     // 更新面板位置（第一个子节点）
     if (m_rootNode->getChildCount() > 0) {
         auto* panel = m_rootNode->getChild(0);
         if (panel) {
-            panel->setPosition(centerX - 150.0f * m_uiScale, startY - 50.0f * m_uiScale);
-            panel->setSize(300.0f * m_uiScale, 250.0f * m_uiScale);
+            panel->setPosition(centerX - panelWidth / 2.0f, panelTop);
+            panel->setSize(panelWidth, panelHeight);
         }
     }
 
