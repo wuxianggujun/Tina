@@ -48,8 +48,13 @@ void WorldSelectScene::onExit() {
     m_btnEnter = m_btnCreate = m_btnBack = nullptr;
 }
 
-void WorldSelectScene::update(float /*dt*/) {
+void WorldSelectScene::update(float dt) {
     handleInput();
+
+    // 更新 UI 树（包括 UIListView 的滚轮处理）
+    if (m_root) {
+        m_root->update(dt);
+    }
 }
 
 void WorldSelectScene::render() {

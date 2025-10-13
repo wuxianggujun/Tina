@@ -9,8 +9,10 @@
 #include "UIColors.hpp"
 #include "../core/Container.hpp"
 #include "../core/Color.hpp"
+#include "../core/Log.hpp"  // 添加 Log 头文件
 #include "../engine/Application.hpp"
 #include "../engine/InputSystem.hpp"  // 需要完整类型以调用方法
+#include <bgfx/bgfx.h>  // 添加 bgfx 头文件以使用 setScissor
 #include <functional>
 #include <string>
 #include <algorithm>
@@ -99,11 +101,19 @@ protected:
             if (m_doubleClickTimer < 0.0f) m_doubleClickTimer = 0.0f;
         }
 
-        // 悬停时响应鼠标滚轮
-        if (m_hovered) {
-            if (auto* app = Tina::Engine::Application::instance()) {
-                float wheel = app->input().getMouseWheelDelta();
-                if (wheel != 0.0f) {
+        // 响应鼠标滚轮（不依赖 hover 状态，直接检查鼠标位置）
+        if (auto* app = Tina::Engine::Application::instance()) {
+            float wheel = app->input().getMouseWheelDelta();
+            if (wheel != 0.0f) {
+                // 检查鼠标是否在列表区域内
+                auto world = getWorldPosition();
+                auto size = getSize();
+                float mx = app->input().getMouseX();
+                float my = app->input().getMouseY();
+                bool inside = (mx >= world.x && mx <= world.x + size.x &&
+                              my >= world.y && my <= world.y + size.y);
+
+                if (inside) {
                     // 约定：正值向上滚动（内容向下移动）
                     scrollBy(-wheel * m_itemHeight * 2.0f);
                 }
@@ -117,8 +127,18 @@ protected:
         auto size = getSize();
         renderer.drawRect(viewId, world.x, world.y, size.x, size.y, Tina::UI::UIColors::PanelBg);
 
+        // 设置裁剪区域（bgfx scissor）
+        uint16_t scissorX = static_cast<uint16_t>(std::max(0.0f, world.x));
+        uint16_t scissorY = static_cast<uint16_t>(std::max(0.0f, world.y));
+        uint16_t scissorW = static_cast<uint16_t>(size.x);
+        uint16_t scissorH = static_cast<uint16_t>(size.y);
+        bgfx::setScissor(scissorX, scissorY, scissorW, scissorH);
+
         // 计算可见范围
-        if (m_itemHeight <= 0.0f) return;
+        if (m_itemHeight <= 0.0f) {
+            bgfx::setScissor();  // 重置裁剪
+            return;
+        }
         int first = (int)(m_scroll / m_itemHeight);
         if (first < 0) first = 0;
         int visibleRows = (int)(size.y / m_itemHeight) + 2;
@@ -139,6 +159,12 @@ protected:
         // 绘制行
         for (int i = first; i < last; ++i) {
             float y = world.y + (i * m_itemHeight - m_scroll);
+
+            // 跳过完全超出裁剪区域的项
+            if (y + m_itemHeight < world.y || y > world.y + size.y) {
+                continue;
+            }
+
             // 行背景
             const bool isSel = (i == m_selected);
             const bool isHover = (i == hoverIndex);
@@ -169,6 +195,9 @@ protected:
             float thumbY = trackY + (trackH - thumbH) * t;
             renderer.drawRect(viewId, trackX, thumbY, barW, thumbH, 1, 1, 1, 0.6f);
         }
+
+        // 重置裁剪区域
+        bgfx::setScissor();
     }
 
 private:
