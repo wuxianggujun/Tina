@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <chrono>
 #include <typeinfo>
+#include <cstdio>
 
 namespace Tina::Engine {
 
@@ -134,7 +135,20 @@ struct CustomEvent {
     static EventTypeId initTypeId() {
         const char* name = typeid(Derived).name();
         Core::Hash::Hash64 hash = Core::Hash::String64(name);
-        return static_cast<EventTypeId>(static_cast<uint32_t>(EventTypeId::Custom) + (hash % 256));
+        
+        // 🔧 改进哈希分布：混合高位和低位，减少冲突
+        // CustomEnd - Custom = 512 - 256 = 256 个可用位置
+        constexpr uint32_t CUSTOM_RANGE = 256;
+        uint32_t hash32 = static_cast<uint32_t>(hash ^ (hash >> 32));  // 混合高低位
+        uint32_t offset = hash32 % CUSTOM_RANGE;
+        uint32_t typeId = static_cast<uint32_t>(EventTypeId::Custom) + offset;
+        
+        // 调试输出：使用 printf 避免循环依赖，fflush 确保立即输出
+        printf("[CustomEvent] Type='%s' Hash=%llu Hash32=%u TypeId=%u\n", 
+               name, (unsigned long long)hash, hash32, typeId);
+        fflush(stdout);  // 立即刷新缓冲区
+        
+        return static_cast<EventTypeId>(typeId);
     }
 };
 

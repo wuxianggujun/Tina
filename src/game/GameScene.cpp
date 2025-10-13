@@ -930,20 +930,35 @@ void GameScene::handleRightClick(float mx, float my)
     float wx = 0.0f, wy = 0.0f;
     screenToWorld(mx, my, pixelW, pixelH, *camera(), wx, wy);
 
+    TINA_DEBUG("右键点击 - 屏幕:({:.0f},{:.0f}) → 世界:({:.2f},{:.2f})", mx, my, wx, wy);
+
     // 检测所有角色
     auto& reg = m_ecsWorld->registry();
     auto view = reg.view<ECS::Transform, ECS::PhysicsBody, ECS::Name, ECS::Health>();
 
     bool clickedCharacter = false;
+    int characterCount = 0;
     for (auto entity : view) {
         auto& transform = view.get<ECS::Transform>(entity);
         auto& body = view.get<ECS::PhysicsBody>(entity);
         auto& name = view.get<ECS::Name>(entity);
         auto& health = view.get<ECS::Health>(entity);
 
-        // AABB 碰撞检测
-        if (wx >= transform.x && wx <= transform.x + body.width &&
-            wy >= transform.y && wy <= transform.y + body.height) {
+        characterCount++;
+        
+        // 🔧 扩大点击范围，让角色更容易被点击
+        constexpr float CLICK_PADDING = 1.0f;  // 额外的点击范围（世界单位）
+        float minX = transform.x - CLICK_PADDING;
+        float maxX = transform.x + body.width + CLICK_PADDING;
+        float minY = transform.y - CLICK_PADDING;
+        float maxY = transform.y + body.height + CLICK_PADDING;
+        
+        TINA_DEBUG("  角色[{}]: 位置({:.2f},{:.2f}) 尺寸({:.2f}x{:.2f}) 点击范围({:.2f}~{:.2f}, {:.2f}~{:.2f})",
+                  name.name, transform.x, transform.y, body.width, body.height,
+                  minX, maxX, minY, maxY);
+
+        // AABB 碰撞检测（带扩展范围）
+        if (wx >= minX && wx <= maxX && wy >= minY && wy <= maxY) {
             // 点击了角色
             m_clickedEntity = entity;
             bool isControlled = (entity == m_ecsWorld->getControlledEntity());
@@ -951,10 +966,14 @@ void GameScene::handleRightClick(float mx, float my)
             m_characterPanel->setVisible(true);
             clickedCharacter = true;
 
-            TINA_INFO("查看角色信息: {}, 血量: {:.0f}/{:.0f}, 控制状态: {}",
+            TINA_INFO("✓ 查看角色信息: {}, 血量: {:.0f}/{:.0f}, 控制状态: {}",
                       name.name, health.current, health.max, isControlled ? "是" : "否");
             break;
         }
+    }
+    
+    if (!clickedCharacter) {
+        TINA_DEBUG("未点击到角色（共检测{}个角色）", characterCount);
     }
 
     // 如果没点击角色，隐藏面板
