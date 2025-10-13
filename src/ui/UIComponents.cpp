@@ -53,13 +53,35 @@ void UILabel::onRender(uint16_t viewId, UIRenderer& renderer)
 void UIButton::onClick() {
     TINA_INFO("UIButton::onClick - 按钮 '{}' 被点击！", getName());
     
-    // 🔧 修复：只使用本地回调，避免事件捕获/冒泡导致多次触发
-    // 如果需要事件分发，应该在外部订阅 ButtonClickEvent，而不是在这里触发
-    if (m_pendingClick) {
-        TINA_INFO("按钮 '{}' 调用本地回调", getName());
-        m_pendingClick();
+    // 🎯 正确的架构：事件优先，回调作为默认行为
+    // 1. 先触发事件（单一事实来源，支持捕获/冒泡/拦截）
+    // 2. 若未取消默认行为，再执行本地回调
+    
+    // 步骤1：触发事件（总是触发，系统统一可见）
+    if (eventSystem()) {
+        Engine::ButtonClickEvent clickEvent(m_buttonId, getName().c_str());
+        clickEvent.target = this;
+        clickEvent.mouseX = eventSystem()->uiContext().mouseX;
+        clickEvent.mouseY = eventSystem()->uiContext().mouseY;
+        clickEvent.button = 0;  // 左键
+        
+        // 触发事件（支持捕获/目标/冒泡，可被拦截）
+        TINA_DEBUG("按钮 '{}' - 触发事件（事件总线）", getName());
+        eventSystem()->triggerUIEvent(clickEvent, this);
+        
+        // 步骤2：若未取消默认行为，执行本地回调
+        if (!clickEvent.defaultPrevented && m_pendingClick) {
+            TINA_DEBUG("按钮 '{}' - 执行默认行为（本地回调）", getName());
+            m_pendingClick();
+        } else if (clickEvent.defaultPrevented) {
+            TINA_INFO("按钮 '{}' - 默认行为被取消", getName());
+        }
     } else {
-        TINA_DEBUG("按钮 '{}' 没有本地回调", getName());
+        // 降级：没有事件系统，直接执行本地回调
+        TINA_WARN("按钮 '{}' - 没有事件系统，直接执行回调", getName());
+        if (m_pendingClick) {
+            m_pendingClick();
+        }
     }
 }
 

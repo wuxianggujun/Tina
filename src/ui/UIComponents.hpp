@@ -146,13 +146,13 @@ public:
 
     // === 事件系统访问 ===
     // 注意：使用 UINode::setEventSystem 设置事件系统
-    // 这里重载以处理延迟订阅
-    void setEventSystem(Engine::EventSystem* eventSystem) {
-        UINode::setEventSystem(eventSystem);
-        if (m_hasPendingClick && eventSystem) {
-            subscribeClickFromPending();
-        }
-    }
+    // 🔧 修复：不再需要延迟订阅
+    // void setEventSystem(Engine::EventSystem* eventSystem) {
+    //     UINode::setEventSystem(eventSystem);
+    //     if (m_hasPendingClick && eventSystem) {
+    //         subscribeClickFromPending();
+    //     }
+    // }
 
     // === 鼠标事件处理 ===
     void onMouseEnter() override { setHovered(true); }
@@ -174,18 +174,19 @@ public:
     // 重写 onClick 虚函数，响应鼠标点击（会触发引擎事件 + UI 冒泡）
     void onClick() override;  // 定义在 cpp 文件中，触发事件
 
-    // 直观接口：设置按钮点击处理器（内部通过引擎事件系统按ID路由）
+    // 直观接口：设置按钮点击处理器（作为默认行为）
     template<typename F>
     void setOnClick(F&& handler) {
         m_pendingClick = {};
         m_pendingClick = Tina::Container::Forward<F>(handler);
         m_hasPendingClick = true;
-        if (m_eventSystem) {
-            subscribeClickFromPending();
-        }
+        // 🔧 修复：不再通过事件订阅，直接在 onClick() 中调用
+        // if (m_eventSystem) {
+        //     subscribeClickFromPending();
+        // }
     }
     void clearOnClick() {
-        m_clickToken.reset();
+        // m_clickToken.reset();  // 不再需要
         m_pendingClick = {};
         m_hasPendingClick = false;
     }
@@ -221,21 +222,22 @@ private:
 
     // 通过引擎事件系统触发/订阅点击
     Engine::SubscriptionToken m_clickToken;            // 订阅令牌（点击）
-    Tina::Container::FixedFunction<128, void> m_pendingClick; // 暂存回调（事件系统未注入时）
+    Tina::Container::FixedFunction<128, void> m_pendingClick; // 本地回调（默认行为）
     bool m_hasPendingClick = false;
 
-    void subscribeClickFromPending() {
-        if (!m_hasPendingClick || !eventSystem()) return;
-        m_clickToken.reset();
-        auto id = m_buttonId;
-        m_clickToken = eventSystem()->subscribe<Engine::ButtonClickEvent>(
-            [this, id](const Engine::ButtonClickEvent& e) {
-                if (e.buttonId == id) {
-                    if (m_pendingClick) m_pendingClick();
-                }
-            }
-        );
-    }
+    // 🔧 修复：不再需要订阅事件，直接在 onClick() 中调用
+    // void subscribeClickFromPending() {
+    //     if (!m_hasPendingClick || !eventSystem()) return;
+    //     m_clickToken.reset();
+    //     auto id = m_buttonId;
+    //     m_clickToken = eventSystem()->subscribe<Engine::ButtonClickEvent>(
+    //         [this, id](const Engine::ButtonClickEvent& e) {
+    //             if (e.buttonId == id) {
+    //                 if (m_pendingClick) m_pendingClick();
+    //             }
+    //         }
+    //     );
+    // }
 };
 
 } // namespace Tina::UI

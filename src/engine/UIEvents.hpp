@@ -70,6 +70,9 @@ struct ButtonClickEvent : UIEvent<ButtonClickEvent, EventTypeId::UIButtonClicked
     float mouseY = 0;
     int button = 0;  // 0=left, 1=middle, 2=right
     
+    // 🎯 关键：支持取消默认行为
+    bool defaultPrevented = false;
+    
     ButtonClickEvent() {
         this->priority = EventPriority::Low;
     }
@@ -83,6 +86,11 @@ struct ButtonClickEvent : UIEvent<ButtonClickEvent, EventTypeId::UIButtonClicked
             buttonName[len] = '\0';
         }
         this->priority = EventPriority::Low;
+    }
+    
+    // 🎯 取消默认行为（阻止本地回调执行）
+    void preventDefault() {
+        defaultPrevented = true;
     }
 };
 
