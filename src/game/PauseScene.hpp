@@ -11,8 +11,8 @@
 #include "../ui/UICore.hpp"
 #include "../ui/UINode.hpp"
 #include "../ui/UIComponents.hpp"
-#include "../ui/UIEventSystem.hpp"
 #include "../renderer/ShaderManager.hpp"
+#include "../engine/SubscriptionToken.hpp"
 
 namespace Tina::Game {
 
@@ -71,7 +71,8 @@ private:
     UI::UIButton* m_btnNight = nullptr;
     UI::UIButton* m_btnFwd = nullptr;
     UI::UIButton* m_btnBack = nullptr;
-    UI::UIEventSystem m_events;             // 统一 Hover/Click 处理
+    
+    Engine::SubscriptionManager m_eventSubscriptions;  // 事件订阅管理
 
     // 视口尺寸
     int m_pixelWidth = 1280;

@@ -1,6 +1,7 @@
 #include "UIComponents.hpp"
 #include "UICore.hpp"
-#include "UIEventDispatcher.hpp"
+#include "../engine/UIEvents.hpp"
+#include "../engine/EventSystem.hpp"
 #include "../core/Log.hpp"
 #include <algorithm>
 
@@ -50,31 +51,15 @@ void UILabel::onRender(uint16_t viewId, UIRenderer& renderer)
 // === UIButton 实现 ===
 
 void UIButton::onClick() {
-    // 通过全局事件系统触发按钮点击事件（POD类型，高性能）
-    if (m_eventSystem) {
-        // 创建POD类型的按钮点击事件
-        ButtonClickEvent clickEvent(m_buttonId, getName().c_str(), this);
-
-        // TODO: 获取鼠标位置
-        // clickEvent.mouseX = ...;
-        // clickEvent.mouseY = ...;
-
-        // 立即触发事件（同步）
-        m_eventSystem->trigger(clickEvent);
-
-        #ifdef DEBUG
-        TINA_DEBUG("按钮 '{}' (ID: {}) 被点击", getName(), m_buttonId);
-        #endif
+    TINA_INFO("UIButton::onClick - 按钮 '{}' 被点击！", getName());
+    
+    // 🔧 修复：只使用本地回调，避免事件捕获/冒泡导致多次触发
+    // 如果需要事件分发，应该在外部订阅 ButtonClickEvent，而不是在这里触发
+    if (m_pendingClick) {
+        TINA_INFO("按钮 '{}' 调用本地回调", getName());
+        m_pendingClick();
     } else {
-        TINA_WARN("按钮 '{}' 没有关联事件系统", getName());
-    }
-
-    // 也可以通过UIEventDispatcher触发（支持冒泡）- 保留兼容性
-    auto* dispatcher = getEventDispatcher();
-    if (dispatcher) {
-        UIClickEvent event(UIEvent::Type::Click, this, 0, 0);
-        event.setBubbles(true);  // 支持冒泡
-        dispatcher->dispatchEvent(event);
+        TINA_DEBUG("按钮 '{}' 没有本地回调", getName());
     }
 }
 

@@ -1,6 +1,7 @@
 #include "UINode.hpp"
 #include "UICore.hpp"
 #include "UILayoutManager.hpp"
+#include "../engine/Application.hpp"
 #include "../core/Log.hpp"
 #include <algorithm>
 
@@ -16,6 +17,11 @@ UINode::UINode(const std::string& name)
 {
     // 注册到布局管理器
     GetLayoutManager().registerNode(this);
+    
+    // 自动获取并设置引擎事件系统
+    if (auto* app = Engine::Application::instance()) {
+        m_eventSystem = &app->events();
+    }
 }
 
 UINode::~UINode()

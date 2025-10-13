@@ -23,17 +23,22 @@
 
 namespace Tina::Engine {
 
+// 定义静态单例指针
+Application* Application::s_instance = nullptr;
+
 Application::Application(const Config& config)
     : m_config(config)
     , m_pixelWidth(config.windowWidth)
     , m_pixelHeight(config.windowHeight)
 {
+    s_instance = this;
     init();
 }
 
 Application::~Application()
 {
     shutdown();
+    s_instance = nullptr;
 }
 
 void Application::init()

@@ -11,7 +11,7 @@
 #include "../game/GameConfig.hpp"
 #include "../ui/UIConstants.hpp"
 
-// #include <SDL3/SDL.h>  // 不再需要SDL，使用os封装
+#include <SDL3/SDL.h>  // 临时需要：直接获取鼠标坐标
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 #include <cstdlib>
@@ -51,22 +51,21 @@ void MenuScene::onEnter() {
 
     // 创建 UI
     createUI();
-    m_events.setRoot(m_rootNode.get());
 
     // 注册UI根节点到框架（框架会自动处理窗口resize）
     addUIRoot(m_rootNode.get());
-
-    // 注入引擎事件系统 + 节点直绑
-    m_events.setGlobalEventSystem(&app()->events());
-    if (m_btnStart)    m_btnStart->setOnClick([this]{ onStartClicked(); });
-    if (m_btnSettings) m_btnSettings->setOnClick([this]{ onSettingsClicked(); });
-    if (m_btnQuit)     m_btnQuit->setOnClick([this]{ onQuitClicked(); });
-
-    TINA_INFO("MenuScene: 初始化完成");
+    
+    // 设置UI根节点到事件系统（用于命中测试）
+    app()->events().setUIRoot(m_rootNode.get());
 }
 
 void MenuScene::onExit() {
     TINA_INFO("MenuScene::onExit - 退出主菜单");
+
+    // 🔧 关键：先清空事件系统的UI根节点，避免访问已销毁的UI
+    if (app()) {
+        app()->events().setUIRoot(nullptr);
+    }
 
     // 清理 UI
     m_rootNode.reset();
@@ -195,8 +194,16 @@ void MenuScene::render() {
 void MenuScene::handleInput() {
     // 使用 InputSystem 进行输入处理
     auto* appPtr = app();
-    if (!appPtr) return;
+    if (!appPtr) {
+        TINA_WARN("MenuScene::handleInput - app() 返回 nullptr！");
+        return;
+    }
     auto& input = appPtr->input();
+    
+    static int callCount = 0;
+    if (++callCount % 60 == 0) {
+        TINA_DEBUG("MenuScene::handleInput 被调用 (第{}次)", callCount);
+    }
 
     // 键盘导航
     if (input.isKeyPressed(Engine::KeyCode::Up)) {
@@ -212,11 +219,19 @@ void MenuScene::handleInput() {
         onQuitClicked();
     }
 
-    // 鼠标移动/点击
-    auto mousePos = input.getMousePosition();
+    // 更新UI输入到引擎事件系统
+    // 临时方案：直接从 SDL 获取鼠标坐标（InputSystem 的坐标有问题）
+    float mx, my;
+    SDL_GetMouseState(&mx, &my);
     bool leftDown = input.isMouseButtonDown(Engine::MouseButton::Left);
-    m_events.updateMouse(mousePos.x, mousePos.y, leftDown);
-    m_events.processEvents();
+    
+    static int uiInputCount = 0;
+    if (++uiInputCount % 60 == 0) {
+        TINA_DEBUG("MenuScene - 调用 updateUIInput: 鼠标({}, {}), 按下: {}", 
+                   mx, my, leftDown);
+    }
+    
+    app()->events().updateUIInput(mx, my, leftDown);
 }
 
 void MenuScene::createUI() {
@@ -238,6 +253,7 @@ void MenuScene::createUI() {
     panel->setPosition(centerX - 150.0f * m_uiScale, startY - 50.0f * m_uiScale);
     panel->setSize(300.0f * m_uiScale, 250.0f * m_uiScale);
     panel->setColor(Core::Color{0.1f, 0.1f, 0.15f, 0.8f});
+    panel->setInteractable(false);  // 🔧 关键修复：面板不响应事件，让按钮能被命中
     // panel->setCornerRadius(10.0f);  // UIPanel 不支持圆角
 
     // 创建开始按钮（直接使用屏幕坐标）
@@ -284,6 +300,13 @@ void MenuScene::createUI() {
     m_buttons.push_back(m_btnQuit);
 
     // 事件系统与ID由路由器在 bind 时设置
+
+    // 调试：打印按钮信息（在 move 之前）
+    TINA_INFO("MenuScene - 按钮创建完成:");
+    TINA_INFO("  开始按钮: 位置({}, {}), 尺寸({}, {}), 可交互: {}", 
+              m_btnStart->getPosition().x, m_btnStart->getPosition().y,
+              m_btnStart->getSize().x, m_btnStart->getSize().y,
+              m_btnStart->isInteractable());
 
     // 绑定按钮点击（内部经事件系统路由）
     if (m_btnStart)    m_btnStart->setOnClick([this]{ onStartClicked(); });

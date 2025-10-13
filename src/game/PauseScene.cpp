@@ -14,7 +14,7 @@
 #include "../engine/EventSystem.hpp"
 #include "GameEvents.hpp"
 
-// #include <SDL3/SDL.h>  // 不再需要SDL，使用os封装
+#include <SDL3/SDL.h>  // 临时需要：直接获取鼠标坐标
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 #include "../ui/UIConstants.hpp"
@@ -43,7 +43,6 @@ void PauseScene::onEnter()
     }
     #endif
 
-    // ✅ 使用 Scene 基类提供的 ui() 方法
     // m_uiRenderer = Memory::MakeUnique<UI::UIRenderer>();
     // m_uiRenderer->initialize(app()->shaders(), &app()->textRenderer());
 
@@ -51,13 +50,11 @@ void PauseScene::onEnter()
 
     // 创建 UI
     createUI();
-    // 绑定事件系统根节点，统一处理 hover/click
-    m_events.setRoot(m_rootNode.get());
-
-    // 注入引擎事件系统（用于自动转发 ButtonClickEvent）
-    m_events.setGlobalEventSystem(&app()->events());
-
-    // 节点直绑：按钮自身回调（内部仍会触发引擎事件）
+    
+    // 设置UI根节点到事件系统（用于命中测试）
+    app()->events().setUIRoot(m_rootNode.get());
+    
+    // 绑定按钮回调（EventSystem 已自动连接）
     if (m_btnContinue) m_btnContinue->setOnClick([this]{ onContinueClicked(); });
     if (m_btnDay)      m_btnDay->setOnClick([this]{ onSetDay(); });
     if (m_btnNight)    m_btnNight->setOnClick([this]{ onSetNight(); });
@@ -71,6 +68,11 @@ void PauseScene::onEnter()
 void PauseScene::onExit()
 {
     TINA_INFO("PauseScene::onExit - 退出暂停菜单");
+
+    // 🔧 关键：先清空事件系统的UI根节点，避免访问已销毁的UI
+    if (app()) {
+        app()->events().setUIRoot(nullptr);
+    }
 
     // 清理 UI（必须在渲染资源之前清理）
     m_rootNode.reset();
@@ -167,11 +169,12 @@ void PauseScene::handleInput()
         return;
     }
 
-    // 鼠标移动/点击：使用 UIEventSystem 统一处理
-    auto mousePos = input.getMousePosition();
+    // 更新UI输入到引擎事件系统
+    // 临时方案：直接从 SDL 获取鼠标坐标
+    float mx, my;
+    SDL_GetMouseState(&mx, &my);
     bool leftDown = input.isMouseButtonDown(Engine::MouseButton::Left);
-    m_events.updateMouse(mousePos.x, mousePos.y, leftDown);
-    m_events.processEvents();
+    app()->events().updateUIInput(mx, my, leftDown);
 }
 
 void PauseScene::createUI()
@@ -311,15 +314,11 @@ void PauseScene::createUI()
 
     panel->setPosition(centerX, centerY);
 
-    // 更新事件系统根节点，保证重建后事件命中正确
-    m_events.setRoot(m_rootNode.get());
-
     TINA_INFO("PauseScene: UI 创建完成");
 }
 
 void PauseScene::renderOverlay()
 {
-    // 已迁移到 SceneRenderer::drawOverlay，调用移至 render()
 }
 
 void PauseScene::onContinueClicked()

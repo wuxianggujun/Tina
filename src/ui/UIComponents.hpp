@@ -1,13 +1,10 @@
-//
 // UI 具体组件：Panel（面板）、Label（文本标签）、Button（按钮）
-//
-
 #pragma once
 
 #include "UINode.hpp"
 #include "../core/Color.hpp"
 #include "UIColors.hpp"
-#include "UIEvents.hpp"
+#include "../engine/UIEvents.hpp"  // 使用统一的UI事件
 #include "../engine/EventSystem.hpp"
 #include "../engine/SubscriptionToken.hpp"
 #include <bgfx/bgfx.h>
@@ -148,9 +145,11 @@ public:
     int badgeFontPx() const { return m_badgeFontPx; }
 
     // === 事件系统访问 ===
+    // 注意：使用 UINode::setEventSystem 设置事件系统
+    // 这里重载以处理延迟订阅
     void setEventSystem(Engine::EventSystem* eventSystem) {
-        m_eventSystem = eventSystem;
-        if (m_hasPendingClick && m_eventSystem) {
+        UINode::setEventSystem(eventSystem);
+        if (m_hasPendingClick && eventSystem) {
             subscribeClickFromPending();
         }
     }
@@ -216,9 +215,6 @@ private:
     int m_fontPx = 0;
     int m_badgeFontPx = 0;
 
-    // 事件系统指针（由外部设置或由 UIEventSystem 注入）
-    Engine::EventSystem* m_eventSystem = nullptr;
-
     // 按钮ID（用于事件识别）
     uint32_t m_buttonId = 0;
     static inline uint32_t s_nextButtonId = 1;
@@ -229,17 +225,16 @@ private:
     bool m_hasPendingClick = false;
 
     void subscribeClickFromPending() {
-        if (!m_hasPendingClick || !m_eventSystem) return;
+        if (!m_hasPendingClick || !eventSystem()) return;
         m_clickToken.reset();
         auto id = m_buttonId;
-        m_clickToken = m_eventSystem->subscribe<ButtonClickEvent>(
-            [this, id](const ButtonClickEvent& e) {
+        m_clickToken = eventSystem()->subscribe<Engine::ButtonClickEvent>(
+            [this, id](const Engine::ButtonClickEvent& e) {
                 if (e.buttonId == id) {
                     if (m_pendingClick) m_pendingClick();
                 }
             }
         );
-        m_hasPendingClick = false;
     }
 };
 

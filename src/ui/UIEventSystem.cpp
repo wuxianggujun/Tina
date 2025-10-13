@@ -42,13 +42,9 @@ void UIEventSystem::setDispatcherRecursive(UINode* node, UIEventDispatcher* disp
 {
     if (!node) return;
 
-    node->setEventDispatcher(dispatcher);
-
-    // 可选：将引擎事件系统注入到按钮
+    // 已移除 setEventDispatcher，直接设置引擎事件系统
     if (m_engineEvents) {
-        if (auto* btn = dynamic_cast<UIButton*>(node)) {
-            btn->setEventSystem(m_engineEvents);
-        }
+        node->setEventSystem(m_engineEvents);
     }
 
     for (size_t i = 0; i < node->getChildCount(); ++i) {

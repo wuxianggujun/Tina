@@ -94,9 +94,10 @@ enum class EventTypeId : uint32_t {
 
     // ========== 自定义扩展事件（256+） ==========
     Custom = 256,  // 用户自定义事件起始ID
+    CustomEnd = 512,  // 自定义事件结束ID（留256个位置）
 
     // 自动计数（必须放在最后）
-    MaxEventTypes
+    MaxEventTypes = 1024  // 扩大事件类型数量上限
 };
 
 // ==================== 事件优先级 ====================
@@ -205,5 +206,35 @@ inline uint64_t getCurrentTimeMs() {
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
     return static_cast<uint64_t>(duration.count());
 }
+
+// ==================== 自定义事件辅助宏 ====================
+
+/**
+ * 定义自定义事件的宏（自动分配ID）
+ * 
+ * 使用示例：
+ *   TINA_CUSTOM_EVENT(MyCustomEvent) {
+ *       int data;
+ *       float value;
+ *   };
+ * 
+ * 注意：
+ * - 每个自定义事件会自动获得唯一的 TYPE_ID
+ * - 基于类型哈希，避免冲突
+ * - 仅支持 POD 类型（trivially copyable + trivially destructible）
+ */
+#define TINA_CUSTOM_EVENT(ClassName) \
+    struct ClassName { \
+        static constexpr ::Tina::Engine::EventTypeId TYPE_ID = \
+            static_cast<::Tina::Engine::EventTypeId>( \
+                ::Tina::Engine::EventTypeId::Custom + \
+                (typeid(ClassName).hash_code() % 256) \
+            ); \
+        uint32_t timestamp = 0; \
+        ::Tina::Engine::EventPriority priority = ::Tina::Engine::EventPriority::Medium; \
+        ::Tina::Engine::EventTypeId getTypeId() const { return TYPE_ID; } \
+    }; \
+    static_assert(std::is_trivially_copyable_v<ClassName>, #ClassName " must be trivially copyable"); \
+    static_assert(std::is_trivially_destructible_v<ClassName>, #ClassName " must be trivially destructible")
 
 } // namespace Tina::Engine

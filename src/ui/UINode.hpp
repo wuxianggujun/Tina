@@ -28,12 +28,14 @@
 #include <string>
 #include <functional>
 
+// 引擎事件系统前向声明（必须在 namespace Tina::UI 外部）
+namespace Tina::Engine { class EventSystem; }
+
 namespace Tina::UI {
 
 // 前向声明
 class UIRenderer;
 class UILayoutManager;
-class UIEventDispatcher;
 
 // 布局尺寸语义（类 Android）
 enum class LayoutDim : uint8_t {
@@ -181,11 +183,11 @@ public:
     void update(float dt); // 递归更新自身及子节点（不包括布局）
     void render(uint16_t viewId, UIRenderer& renderer); // 递归渲染
 
-    // === 事件回调（子类可覆盖，或通过函数对象绑定） ===
+    // === 事件回调（子类可覆盖） ===
     virtual void onMouseEnter() {}
     virtual void onMouseLeave() {}
-    virtual void onMouseDown(float /*x*/, float /*y*/) {}
-    virtual void onMouseUp(float /*x*/, float /*y*/) {}
+    virtual void onMouseDown(float x, float y) { (void)x; (void)y; }
+    virtual void onMouseUp(float x, float y) { (void)x; (void)y; }
     virtual void onClick() {}
 
     // === 窗口尺寸变化回调（框架自动调用） ===
@@ -204,9 +206,9 @@ public:
     const std::string& getName() const { return m_name; }
     void setName(const std::string& name) { m_name = name; }
 
-    // === 事件分发器支持 ===
-    void setEventDispatcher(UIEventDispatcher* dispatcher) { m_dispatcher = dispatcher; }
-    UIEventDispatcher* getEventDispatcher() const { return m_dispatcher; }
+    // === 引擎事件系统支持 ===
+    void setEventSystem(Tina::Engine::EventSystem* eventSystem) { m_eventSystem = eventSystem; }
+    Tina::Engine::EventSystem* eventSystem() const { return m_eventSystem; }
 
 protected:
     // === 子类可覆盖的回调 ===
@@ -260,8 +262,8 @@ protected:
     bool m_focusable = false;
     int m_zIndex = 0;
 
-    // 事件分发器（由场景或事件系统设置）
-    UIEventDispatcher* m_dispatcher = nullptr;
+    // 引擎事件系统（由场景设置）
+    Tina::Engine::EventSystem* m_eventSystem = nullptr;
 
     // ==================== 结构变更版本（用于命中索引置脏） ====================
 public:

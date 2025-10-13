@@ -52,6 +52,9 @@ public:
     Application& operator=(const Application&) = delete;
     Application(Application&&) = delete;
     Application& operator=(Application&&) = delete;
+    
+    // 获取全局单例实例（用于UI系统自动获取EventSystem）
+    static Application* instance() { return s_instance; }
 
     // ==================== 主循环控制 ====================
 
@@ -188,6 +191,9 @@ private:
     struct TimedTask { uint64_t dueMs = 0; std::function<void()> fn; };
     Tina::Container::Vector<TimedTask> m_timedTasks;
     void flushTimedTasks();
+    
+    // 全局单例实例
+    static Application* s_instance;
 };
 
 } // namespace Tina::Engine

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <atomic>
 #include "../core/Container.hpp"  // 使用封装的容器
 
 namespace Tina::Engine {
@@ -19,6 +20,7 @@ using SubscriptionId = uint64_t;
  * - 移除std::function，避免动态内存分配
  * - 直接存储必要的信息
  * - 更轻量级的实现
+ * - 添加生命周期安全检查（防止悬空指针）
  */
 class SubscriptionToken {
 public:
@@ -28,7 +30,8 @@ public:
     SubscriptionToken(EventDispatcher* dispatcher, EventTypeId typeId, SubscriptionId id)
         : m_dispatcher(dispatcher)
         , m_typeId(static_cast<uint32_t>(typeId))
-        , m_subscriptionId(id) {}
+        , m_subscriptionId(id)
+        , m_valid(true) {}
 
     // 禁止复制
     SubscriptionToken(const SubscriptionToken&) = delete;
@@ -38,9 +41,11 @@ public:
     SubscriptionToken(SubscriptionToken&& other) noexcept
         : m_dispatcher(other.m_dispatcher)
         , m_typeId(other.m_typeId)
-        , m_subscriptionId(other.m_subscriptionId) {
+        , m_subscriptionId(other.m_subscriptionId)
+        , m_valid(other.m_valid.load(std::memory_order_relaxed)) {
         other.m_dispatcher = nullptr;
         other.m_subscriptionId = 0;
+        other.m_valid.store(false, std::memory_order_relaxed);
     }
 
     SubscriptionToken& operator=(SubscriptionToken&& other) noexcept {
@@ -49,8 +54,10 @@ public:
             m_dispatcher = other.m_dispatcher;
             m_typeId = other.m_typeId;
             m_subscriptionId = other.m_subscriptionId;
+            m_valid.store(other.m_valid.load(std::memory_order_relaxed), std::memory_order_relaxed);
             other.m_dispatcher = nullptr;
             other.m_subscriptionId = 0;
+            other.m_valid.store(false, std::memory_order_relaxed);
         }
         return *this;
     }
@@ -64,7 +71,15 @@ public:
 
     // 检查是否有效
     bool isValid() const {
-        return m_dispatcher != nullptr && m_subscriptionId != 0;
+        return m_valid.load(std::memory_order_acquire) && 
+               m_dispatcher != nullptr && 
+               m_subscriptionId != 0;
+    }
+
+    // 失效令牌（当 EventDispatcher 销毁时调用）
+    void invalidate() {
+        m_valid.store(false, std::memory_order_release);
+        m_dispatcher = nullptr;
     }
 
     // 重置令牌（取消当前订阅）
@@ -81,12 +96,12 @@ private:
     EventDispatcher* m_dispatcher = nullptr;
     uint32_t m_typeId = 0;
     SubscriptionId m_subscriptionId = 0;
+    std::atomic<bool> m_valid{false};  // 原子标志，防止多线程竞争
 };
 
 /**
  * 订阅管理器 - 管理多个订阅
  *
- * 用于Scene等需要管理多个事件订阅的类
  */
 class SubscriptionManager {
 public:
@@ -111,7 +126,11 @@ public:
 
     // 取消所有订阅
     void unsubscribeAll() {
-        m_tokens.clear();  // 令牌析构时会自动取消订阅
+        // 显式调用 unsubscribe 确保清理
+        for (auto& token : m_tokens) {
+            token.unsubscribe();
+        }
+        m_tokens.clear();
     }
 
     // 获取订阅数量

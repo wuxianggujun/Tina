@@ -11,9 +11,9 @@
 #include "../ui/UICore.hpp"
 #include "../ui/UINode.hpp"
 #include "../ui/UIComponents.hpp"
-#include "../ui/UIEventSystem.hpp"
 #include "../particles/ParticleSystem.hpp"
 #include "../renderer/ShaderManager.hpp"
+#include "../engine/SubscriptionToken.hpp"
 
 namespace Tina::Game {
 
@@ -101,7 +101,8 @@ private:
     UI::UIButton* m_btnStart = nullptr;
     UI::UIButton* m_btnSettings = nullptr;
     UI::UIButton* m_btnQuit = nullptr;
-    UI::UIEventSystem m_events;  // 统一处理 hover/click
+    
+    Engine::SubscriptionManager m_eventSubscriptions;  // 事件订阅管理
 
     // 动画状态
     float m_titleAlpha = 0.0f;

@@ -152,7 +152,7 @@ public:
         // 获取对应类型的处理器存储
         auto* storage = getTypedStorage<E>(typeId);
         if (!storage) {
-            TINA_ERROR("无法获取事件类型 {} 的处理器存储", eventTypeIdToString(E::TYPE_ID));
+            TINA_ERROR("无法获取事件类型 {} 的处理器存储（可能是类型冲突）", eventTypeIdToString(E::TYPE_ID));
             return 0;
         }
 
@@ -227,6 +227,7 @@ public:
     void dispatch(const E& event) {
         auto typeId = static_cast<uint32_t>(E::TYPE_ID);
         if (typeId >= m_handlerStorages.size()) {
+            TINA_WARN("事件类型ID {} 超出范围", typeId);
             return;
         }
 
@@ -234,6 +235,8 @@ public:
         if (storage) {
             storage->handlers.dispatch(event);
             ++m_dispatchCount;
+        } else {
+            TINA_WARN("无法分发事件 {}（存储为空）", eventTypeIdToString(E::TYPE_ID));
         }
     }
 
@@ -373,14 +376,28 @@ private:
         m_handlerStorages.resize(static_cast<size_t>(EventTypeId::MaxEventTypes));
     }
 
-    // 获取具体类型的存储（延迟创建）
+    // 获取具体类型的存储（延迟创建，带类型安全检查）
     template<typename E>
     TypedHandlerStorage<E>* getTypedStorage(uint32_t typeId) {
+        // 计算类型哈希
+        size_t typeHash = typeid(E).hash_code();
+        
         if (!m_handlerStorages[typeId]) {
             // 延迟创建，避免预分配所有类型
             m_handlerStorages[typeId] = MakeUnique<TypedHandlerStorage<E>>();
+            m_typeHashes[typeId] = typeHash;  // 记录类型哈希
+        } else {
+            // 类型安全检查：确保同一个 typeId 不会被不同类型使用
+            auto it = m_typeHashes.find(typeId);
+            if (it != m_typeHashes.end() && it->second != typeHash) {
+                TINA_ERROR("事件类型冲突！typeId={} ({}) 已被其他类型占用（hash: {} vs {}）",
+                          typeId, eventTypeIdToString(static_cast<EventTypeId>(typeId)),
+                          it->second, typeHash);
+                return nullptr;
+            }
         }
-        // 静态转换，避免dynamic_cast
+        
+        // 静态转换（已通过类型检查，安全）
         return static_cast<TypedHandlerStorage<E>*>(m_handlerStorages[typeId].get());
     }
 
@@ -390,6 +407,9 @@ private:
 
     // 订阅ID到类型ID的映射（用于取消订阅）
     HashMap<SubscriptionId, uint32_t> m_subscriptions;
+    
+    // 类型ID到类型哈希的映射（用于类型安全检查）
+    HashMap<uint32_t, size_t> m_typeHashes;
 
     // 统计信息
     uint64_t m_subscribeCount = 0;

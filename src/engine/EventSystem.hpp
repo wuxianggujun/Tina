@@ -15,9 +15,48 @@
 #include <EASTL/priority_queue.h>
 #include <type_traits>
 
+// 前向声明 UI 类型
+namespace Tina::UI { class UINode; }
+
 namespace Tina::Engine {
 
 using namespace Tina::Container;  // 使用容器命名空间
+
+// ==================== UI 事件支持 ====================
+
+// UI事件上下文（状态跟踪）
+struct UIEventContext {
+    UI::UINode* root = nullptr;
+    UI::UINode* hoveredNode = nullptr;
+    UI::UINode* pressedNode = nullptr;
+    UI::UINode* focusedNode = nullptr;
+    float mouseX = 0, mouseY = 0;
+    bool mouseDown = false;
+    bool mouseDownPrev = false;
+};
+
+// UI事件传播阶段
+enum class UIEventPhase {
+    Capture,    // 捕获阶段（从根到目标）
+    Target,     // 目标阶段
+    Bubble      // 冒泡阶段（从目标到根）
+};
+
+// UI事件基类（带传播控制）
+template<typename Derived, EventTypeId TypeId>
+struct UIEvent : Event<Derived, TypeId> {
+    UI::UINode* target = nullptr;           // 事件目标
+    UI::UINode* currentTarget = nullptr;    // 当前处理节点
+    UIEventPhase phase = UIEventPhase::Target;
+    bool propagationStopped = false;
+    bool immediatePropagationStopped = false;
+    
+    void stopPropagation() { propagationStopped = true; }
+    void stopImmediatePropagation() { 
+        propagationStopped = true;
+        immediatePropagationStopped = true;
+    }
+};
 
 // ==================== 延迟事件包装器 ====================
 
@@ -118,7 +157,15 @@ public:
         if (priority >= m_priorityQueues.size()) {
             priority = static_cast<uint8_t>(EventPriority::Medium);
         }
-        return m_priorityQueues[priority].push(event);
+        bool success = m_priorityQueues[priority].push(event);
+        
+        // 检查队列使用率，发出告警
+        if (!success) {
+            ++m_totalOverflowCount;
+            checkQueueHealth();
+        }
+        
+        return success;
     }
 
     // 入队事件（指定优先级）
@@ -185,6 +232,19 @@ public:
             m_delayedEvents.pop();
         }
     }
+    
+    // 检查队列健康状态（溢出告警）
+    void checkQueueHealth() {
+        // 每100次溢出打印一次告警
+        if (m_totalOverflowCount % 100 == 1) {
+            TINA_WARN("EventSystem: 事件队列溢出 {} 次，请考虑增大队列容量或优化事件处理", m_totalOverflowCount);
+            
+            auto stats = getQueueStats();
+            TINA_INFO("  队列状态: High={}, Medium={}, Low={}, Delayed={}",
+                     stats.highPrioritySize, stats.mediumPrioritySize, 
+                     stats.lowPrioritySize, stats.delayedEventCount);
+        }
+    }
 
     // ==================== 统计信息 ====================
 
@@ -230,6 +290,63 @@ public:
         return stats;
     }
 
+    // ==================== UI事件处理（新增） ====================
+    
+    // 设置UI根节点
+    void setUIRoot(UI::UINode* root) {
+        m_uiContext.root = root;
+        // 🔧 关键修复：清空旧的UI状态，避免访问已销毁的节点
+        m_uiContext.hoveredNode = nullptr;
+        m_uiContext.pressedNode = nullptr;
+    }
+    
+    // 更新UI输入（每帧调用）
+    void updateUIInput(float mouseX, float mouseY, bool mouseDown);
+    
+    // 获取UI上下文
+    UIEventContext& uiContext() { return m_uiContext; }
+    const UIEventContext& uiContext() const { return m_uiContext; }
+    
+    // 触发UI事件（带捕获/冒泡）
+    template<typename E>
+    void triggerUIEvent(E& event, UI::UINode* target) {
+        static_assert(std::is_base_of_v<UIEvent<E, E::TYPE_ID>, E>, 
+                     "UI事件必须继承自 UIEvent");
+        
+        if (!target) return;
+        
+        event.target = target;
+        
+        // 1. 构建事件路径（从根到目标）
+        Vector<UI::UINode*> path;
+        buildEventPath(target, path);
+        
+        // 2. 捕获阶段（从根到目标，不包括目标）
+        event.phase = UIEventPhase::Capture;
+        for (size_t i = 0; i < path.size() - 1 && !event.propagationStopped; ++i) {
+            event.currentTarget = path[i];
+            m_dispatcher.dispatch(event);  // 分发给订阅者
+            if (event.immediatePropagationStopped) break;
+        }
+        
+        // 3. 目标阶段
+        if (!event.propagationStopped) {
+            event.phase = UIEventPhase::Target;
+            event.currentTarget = target;
+            m_dispatcher.dispatch(event);
+        }
+        
+        // 4. 冒泡阶段（从目标到根，不包括目标）
+        if (!event.propagationStopped) {
+            event.phase = UIEventPhase::Bubble;
+            for (int i = static_cast<int>(path.size()) - 2; i >= 0 && !event.propagationStopped; --i) {
+                event.currentTarget = path[i];
+                m_dispatcher.dispatch(event);
+                if (event.immediatePropagationStopped) break;
+            }
+        }
+    }
+    
     // 打印完整统计信息
     void printStats() const {
         TINA_INFO("========== EventSystem 统计 ==========");
@@ -311,6 +428,17 @@ private:
 
     // 延迟事件队列（最小堆）
     PriorityQueue<DelayedEvent, Vector<DelayedEvent>, Greater<DelayedEvent>> m_delayedEvents;
+    
+    // 统计信息
+    uint64_t m_totalOverflowCount = 0;  // 总溢出次数
+    
+    // UI事件上下文
+    UIEventContext m_uiContext;
+    
+    // UI事件内部方法
+    void buildEventPath(UI::UINode* target, Vector<UI::UINode*>& path);
+    UI::UINode* findNodeUnderMouse(UI::UINode* node, float x, float y);
+    void handleMouseInput();
 };
 
 } // namespace Tina::Engine
