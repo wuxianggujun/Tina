@@ -161,6 +161,8 @@ void UIRenderer::drawText(uint16_t viewId, float x, float y,
     if (!m_text) return;
     TextCmd cmd{}; cmd.viewId = viewId;
     cmd.x = x; cmd.y = y; cmd.r = opts.r; cmd.g = opts.g; cmd.b = opts.b; cmd.a = opts.a; cmd.text = utf8; cmd.fontPx = opts.fontPx;
+    // 记录当前裁剪状态
+    cmd.hasClip = m_hasClip; cmd.clipX = m_clipX; cmd.clipY = m_clipY; cmd.clipW = m_clipW; cmd.clipH = m_clipH;
     m_textCmds.push_back(std::move(cmd));
 }
 
@@ -178,6 +180,8 @@ void UIRenderer::drawTextBox(uint16_t viewId, float x, float y, float w, float h
     cmd.x = x; cmd.y = y; cmd.w = w; cmd.h = h; cmd.padX = opts.padX; cmd.padY = opts.padY;
     cmd.r = opts.r; cmd.g = opts.g; cmd.b = opts.b; cmd.a = opts.a; cmd.text = utf8; cmd.fontPx = opts.fontPx;
     cmd.hAlign = opts.hAlign; cmd.vAlign = opts.vAlign;
+    // 记录当前裁剪状态
+    cmd.hasClip = m_hasClip; cmd.clipX = m_clipX; cmd.clipY = m_clipY; cmd.clipW = m_clipW; cmd.clipH = m_clipH;
     m_textCmds.push_back(std::move(cmd));
 }
 
@@ -307,6 +311,10 @@ void UIRenderer::flushColorBatch()
         enc->setVertexBuffer(0, &tvb);
         enc->setIndexBuffer(&tib);
         enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
+        // 应用裁剪区域（如有）
+        if (m_hasClip) {
+            enc->setScissor(m_clipX, m_clipY, m_clipW, m_clipH);
+        }
         enc->submit(m_currentViewId, m_progColor);
         bgfx::end(enc);
         
@@ -353,6 +361,10 @@ void UIRenderer::flushSpriteBatches()
                 BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP |
                 BGFX_SAMPLER_MIN_POINT | BGFX_SAMPLER_MAG_POINT);
             enc->setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_BLEND_ALPHA);
+            // 应用裁剪区域（如有）
+            if (m_hasClip) {
+                enc->setScissor(m_clipX, m_clipY, m_clipW, m_clipH);
+            }
             enc->submit(m_currentViewId, m_progSprite);
             bgfx::end(enc);
             
@@ -405,6 +417,9 @@ void UIRenderer::flushTextCommands()
     }
     
     for (const auto& cmd : m_textCmds) {
+        // 每条命令单独设置裁剪
+        if (cmd.hasClip) m_text->setClipRect(cmd.clipX, cmd.clipY, cmd.clipW, cmd.clipH);
+        else             m_text->clearClipRect();
         int prevPx = m_text->currentFontPx();
         bool needRestore = false;
         if (cmd.fontPx > 0 && cmd.fontPx != prevPx) {

@@ -87,6 +87,27 @@ public:
         return RenderScope(*this, viewId);
     }
 
+    // === 裁剪区域（Scissor）支持 ===
+    // 设置/清除裁剪区域（像素坐标，原点左上）
+    // 该裁剪区域会作用于本渲染器提交的所有批次与文本绘制
+    void setClipRect(int16_t x, int16_t y, uint16_t w, uint16_t h) {
+        // 当裁剪区域发生变化时，先提交当前批次，防止不同裁剪混批
+        if (!m_hasClip || m_clipX != x || m_clipY != y || m_clipW != w || m_clipH != h) {
+            // 提交当前已缓存的矩形/图片批次（使用旧裁剪）
+            flushColorBatch();
+            flushSpriteBatches();
+        }
+        m_hasClip = true; m_clipX = x; m_clipY = y; m_clipW = w; m_clipH = h;
+    }
+    void clearClipRect() {
+        if (m_hasClip) {
+            // 清除裁剪前，提交当前批次（使用旧裁剪）
+            flushColorBatch();
+            flushSpriteBatches();
+        }
+        m_hasClip = false;
+    }
+
     // 文本测量（可指定字号；fontPx=0 使用当前字号）
     // 注意：这些方法不是 const，因为内部需要临时修改字体大小
     bool measureText(const std::string& utf8, float& outW, float& outH, int fontPx = 0) {
@@ -165,6 +186,12 @@ private:
         // Box 参数（w/h>0 时启用）
         float w = 0, h = 0; float padX = 0, padY = 0;
         AlignH hAlign = AlignH::Left; AlignV vAlign = AlignV::Top;
+        // 每条文本命令的独立裁剪（避免受后续 setClipRect 影响）
+        bool     hasClip = false;
+        int16_t  clipX = 0;
+        int16_t  clipY = 0;
+        uint16_t clipW = 0;
+        uint16_t clipH = 0;
     };
 
     bgfx::ProgramHandle m_progColor = BGFX_INVALID_HANDLE;
@@ -211,6 +238,13 @@ private:
 
     // 内部错误报告方法
     void reportError(UIErrorCode code, const std::string& message, const std::string& location);
+
+    // === Scissor 状态 ===
+    bool     m_hasClip = false;
+    int16_t  m_clipX = 0;
+    int16_t  m_clipY = 0;
+    uint16_t m_clipW = 0;
+    uint16_t m_clipH = 0;
 };
 
 } // namespace Tina::UI

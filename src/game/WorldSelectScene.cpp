@@ -132,7 +132,11 @@ void WorldSelectScene::updateLayout() {
     const float baseW = 1280.0f, baseH = 720.0f;
     float sx = (float)getPixelWidth() / baseW;
     float sy = (float)getPixelHeight() / baseH;
-    m_uiScale = std::max(0.75f, std::min(sx, sy));
+    float newScale = std::max(0.75f, std::min(sx, sy));
+
+    // 只有在缩放改变时才更新布局
+    bool scaleChanged = std::abs(newScale - m_uiScale) > 0.01f;
+    m_uiScale = newScale;
 
     if (!m_root) return;
     m_root->setSize((float)getPixelWidth(), (float)getPixelHeight());
@@ -143,10 +147,30 @@ void WorldSelectScene::updateLayout() {
     float top = 100.0f * m_uiScale;
 
     if (m_list) {
-        m_list->setSize(listW, listH);
-        m_list->setPosition(cx - listW * 0.5f, top);
-        m_list->setItemHeight(std::max(28.0f, 36.0f * m_uiScale));
-        m_list->setFontPx(std::max(16, (int)std::lround(20.0f * m_uiScale)));
+        float newItemHeight = std::max(28.0f, 36.0f * m_uiScale);
+        int newFontPx = std::max(16, (int)std::lround(20.0f * m_uiScale));
+
+        // 只在真正需要时更新
+        if (scaleChanged || m_list->getSize().x != listW || m_list->getSize().y != listH) {
+            m_list->setSize(listW, listH);
+        }
+
+        float newPosX = cx - listW * 0.5f;
+        float newPosY = top;
+        auto currentPos = m_list->getPosition();
+        if (std::abs(currentPos.x - newPosX) > 0.1f || std::abs(currentPos.y - newPosY) > 0.1f) {
+            m_list->setPosition(newPosX, newPosY);
+            TINA_DEBUG("WorldSelectScene::updateLayout - 更新列表位置: ({}, {}) -> ({}, {})",
+                      currentPos.x, currentPos.y, newPosX, newPosY);
+        }
+
+        if (scaleChanged || std::abs(m_list->itemHeight() - newItemHeight) > 0.1f) {
+            m_list->setItemHeight(newItemHeight);
+        }
+
+        if (m_list->fontPx() != newFontPx) {
+            m_list->setFontPx(newFontPx);
+        }
     }
 
     float btnY = top + listH + 20.0f * m_uiScale;
@@ -228,6 +252,14 @@ void WorldSelectScene::loadWorldList() {
     const char* defaults[] = { "草原世界", "沙漠世界", "雪原世界" };
     for (auto* name : defaults) {
         WorldItem w; w.name = name; w.seed = hashSeed(w.name);
+        m_worlds.push_back(w);
+    }
+
+    // 调试：补充更多示例项，便于验证列表可滚动与裁剪
+    // 如不需要可删除以下循环
+    for (int i = 1; i <= 40; ++i) {
+        WorldItem w; w.name = std::string("测试世界 ") + std::to_string(i);
+        w.seed = hashSeed(w.name);
         m_worlds.push_back(w);
     }
 }

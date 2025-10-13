@@ -12,7 +12,7 @@
 #include "../core/Log.hpp"  // 添加 Log 头文件
 #include "../engine/Application.hpp"
 #include "../engine/InputSystem.hpp"  // 需要完整类型以调用方法
-#include <bgfx/bgfx.h>  // 添加 bgfx 头文件以使用 setScissor
+#include <bgfx/bgfx.h>  // （保留渲染依赖）
 #include <functional>
 #include <string>
 #include <algorithm>
@@ -55,7 +55,15 @@ public:
     }
 
     // 外观参数
-    void setItemHeight(float h) { m_itemHeight = (h > 8.0f ? h : 8.0f); }
+    void setItemHeight(float h) {
+        float oldHeight = m_itemHeight;
+        m_itemHeight = (h > 8.0f ? h : 8.0f);
+        if (oldHeight != m_itemHeight) {
+            TINA_DEBUG("UIListView::setItemHeight - {} -> {}, scroll before: {}", oldHeight, m_itemHeight, m_scroll);
+            clampScroll();  // 高度改变后重新限制滚动范围
+            TINA_DEBUG("UIListView::setItemHeight - scroll after: {}", m_scroll);
+        }
+    }
     float itemHeight() const { return m_itemHeight; }
     void setFontPx(int px) { m_fontPx = px; }
     int fontPx() const { return m_fontPx; }
@@ -113,9 +121,20 @@ protected:
                 bool inside = (mx >= world.x && mx <= world.x + size.x &&
                               my >= world.y && my <= world.y + size.y);
 
+                TINA_INFO("🎯 UIListView::onUpdate - 滚轮={}, 鼠标=({},{}), 列表=({},{},{}x{}), inside={}, scroll={}",
+                         wheel, mx, my, world.x, world.y, size.x, size.y, inside, m_scroll);
+
                 if (inside) {
-                    // 约定：正值向上滚动（内容向下移动）
-                    scrollBy(-wheel * m_itemHeight * 2.0f);
+                    float contentH = m_items.size() * m_itemHeight;
+                    // 仅当内容高度超过视口高度时才滚动
+                    if (contentH > size.y && m_itemHeight > 0.0f) {
+                        float oldScroll = m_scroll;
+                        // 约定：正值向上滚动（内容向下移动）
+                        scrollBy(-wheel * m_itemHeight * 2.0f);
+                        if (m_scroll != oldScroll) {
+                            TINA_INFO("✅ UIListView 滚动: {} -> {}", oldScroll, m_scroll);
+                        }
+                    }
                 }
             }
         }
@@ -125,20 +144,32 @@ protected:
         auto world = getWorldPosition();
         auto size = getSize();
 
-        // 背景
-        renderer.drawRect(viewId, world.x, world.y, size.x, size.y, Tina::UI::UIColors::PanelBg);
+        // 调试：跟踪世界坐标与滚动量
+        TINA_DEBUG("UIListView::onRender - world=({},{}), size=({},{}) scroll={}",
+                   world.x, world.y, size.x, size.y, m_scroll);
+
+        // 背景（限定在自身边界内）
+        auto clipRectDraw = [&](float x, float y, float w, float h, const Tina::Core::Color& c){
+            float x0 = std::max(x, world.x);
+            float y0 = std::max(y, world.y);
+            float x1 = std::min(x + w, world.x + size.x);
+            float y1 = std::min(y + h, world.y + size.y);
+            if (x1 <= x0 || y1 <= y0) return;
+            renderer.drawRect(viewId, x0, y0, x1 - x0, y1 - y0, c);
+        };
+        clipRectDraw(world.x, world.y, size.x, size.y, Tina::UI::UIColors::PanelBg);
 
         // 设置裁剪区域（防止列表项绘制超出列表边界）
-        // 注意：bgfx 的 scissor 使用像素坐标，原点在左上角
+        // 注意：UI 坐标原点在左上角，像素为单位
         uint16_t scissorX = static_cast<uint16_t>(std::max(0.0f, world.x));
         uint16_t scissorY = static_cast<uint16_t>(std::max(0.0f, world.y));
         uint16_t scissorW = static_cast<uint16_t>(std::min(size.x, 65535.0f));
         uint16_t scissorH = static_cast<uint16_t>(std::min(size.y, 65535.0f));
-        bgfx::setScissor(scissorX, scissorY, scissorW, scissorH);
+        renderer.setClipRect((int16_t)scissorX, (int16_t)scissorY, scissorW, scissorH);
 
         // 计算可见范围
         if (m_itemHeight <= 0.0f) {
-            bgfx::setScissor();  // 重置裁剪
+            renderer.clearClipRect();  // 重置裁剪
             return;
         }
 
@@ -169,7 +200,7 @@ protected:
             Tina::Core::Color rowBg = isSel ? Tina::UI::UIColors::ButtonHover :
                                      (isHover ? Tina::UI::UIColors::ButtonPressed :
                                                Tina::UI::UIColors::PanelBg);
-            renderer.drawRect(viewId, world.x + 1, y, size.x - 2, m_itemHeight - 1, rowBg);
+            clipRectDraw(world.x + 1, y, size.x - 2, m_itemHeight - 1, rowBg);
 
             // 文本
             UIRenderer::TextOptions to{};
@@ -185,18 +216,18 @@ protected:
             float trackX = world.x + size.x - barW - 2.0f;
             float trackY = world.y + 2.0f;
             float trackH = size.y - 4.0f;
-            renderer.drawRect(viewId, trackX, trackY, barW, trackH, 0, 0, 0, 0.3f);
+            clipRectDraw(trackX, trackY, barW, trackH, Tina::Core::Color(0,0,0,0.3f));
 
             float ratio = size.y / contentH;
             float thumbH = std::max(20.0f, trackH * ratio);
             float maxScroll = contentH - size.y;
             float t = (maxScroll > 0.0f) ? (m_scroll / maxScroll) : 0.0f;
             float thumbY = trackY + (trackH - thumbH) * t;
-            renderer.drawRect(viewId, trackX, thumbY, barW, thumbH, 1, 1, 1, 0.6f);
+            clipRectDraw(trackX, thumbY, barW, thumbH, Tina::Core::Color(1,1,1,0.6f));
         }
 
         // 重置裁剪区域（让后续渲染不受影响）
-        bgfx::setScissor();
+        renderer.clearClipRect();
     }
 
 private:
