@@ -298,6 +298,7 @@ public:
         // 🔧 关键修复：清空旧的UI状态，避免访问已销毁的节点
         m_uiContext.hoveredNode = nullptr;
         m_uiContext.pressedNode = nullptr;
+        m_uiContext.focusedNode = nullptr;
     }
     
     // 更新UI输入（每帧调用）

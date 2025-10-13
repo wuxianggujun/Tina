@@ -11,8 +11,7 @@
 #include <functional>
 #include <mutex>
 
-// 在全局命名空间前向声明 SDL_mixer 的不透明结构体，避免命名空间污染
-struct MIX_Mixer;
+// SDL_mixer 的不透明结构体已通过 void* 隐藏，不再需要前向声明
 
 // 前向声明（放在全局命名空间，避免嵌套成 Tina::Engine::Tina::...）
 namespace Tina { namespace UI { class TextRenderer; } }
@@ -172,12 +171,13 @@ private:
     Memory::UniquePtr<AudioManager> m_audioMgr;            // 音频资源管理器
 
     // SDL_mixer 3.x 混音器（输出到默认音频设备）
+    // 使用 void* 隐藏 SDL 依赖，实际类型为 MIX_Mixer*
+    void* m_mixer = nullptr;
+    
     // 全局文本渲染器（共享）
     Memory::UniquePtr<Tina::UI::TextRenderer> m_textRenderer;
     Memory::UniquePtr<Tina::Renderer::Primitive2D> m_prim2D;
     Memory::UniquePtr<Tina::Renderer::SpriteRenderer> m_sprite2D;
-
-    MIX_Mixer* m_mixer = nullptr;
 
     // 全局音量
     float m_audioMasterVolume = 1.0f;

@@ -177,7 +177,12 @@ void PauseScene::handleInput()
 
 void PauseScene::createUI()
 {
-    // 若重复创建（例如窗口尺寸变化），先释放旧 UI
+    // 🔧 关键修复：若重复创建（例如窗口尺寸变化），先清空事件系统的UI引用
+    if (m_rootNode && app()) {
+        app()->events().setUIRoot(nullptr);
+    }
+    
+    // 然后释放旧 UI
     m_rootNode.reset();
     m_btnContinue = nullptr;
     m_btnQuit = nullptr;
@@ -311,6 +316,11 @@ void PauseScene::createUI()
               m_pixelWidth, m_pixelHeight, panelW, panelHeight, centerX, centerY);
 
     panel->setPosition(centerX, centerY);
+
+    // 🔧 关键修复：重新设置UI根节点到事件系统
+    if (app()) {
+        app()->events().setUIRoot(m_rootNode.get());
+    }
 
     TINA_INFO("PauseScene: UI 创建完成");
 }

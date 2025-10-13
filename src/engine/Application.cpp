@@ -105,16 +105,17 @@ void Application::init()
         TINA_INFO("SDL_mixer 混音器已创建");
         // 查询实际格式
         SDL_AudioSpec actual{};
-        if (MIX_GetMixerFormat(m_mixer, &actual)) {
+        MIX_Mixer* mixer = static_cast<MIX_Mixer*>(m_mixer);
+        if (MIX_GetMixerFormat(mixer, &actual)) {
             TINA_INFO("  采样率: {} Hz, 声道数: {}, 格式: 0x{:X}", actual.freq, actual.channels, static_cast<unsigned int>(actual.format));
         }
         // 将全局 Mixer 提供给音频资源
         AudioResource::SetGlobalMixer(m_mixer);
         // 应用全局音量
-        MIX_SetMasterGain(m_mixer, std::max(0.0f, std::min(m_audioMasterVolume, 1.0f)));
+        MIX_SetMasterGain(mixer, std::max(0.0f, std::min(m_audioMasterVolume, 1.0f)));
         // 应用分组音量（music / sfx）
-        MIX_SetTagGain(m_mixer, "music", std::max(0.0f, std::min(m_audioMusicVolume, 1.0f)));
-        MIX_SetTagGain(m_mixer, "sfx",   std::max(0.0f, std::min(m_audioSfxVolume, 1.0f)));
+        MIX_SetTagGain(mixer, "music", std::max(0.0f, std::min(m_audioMusicVolume, 1.0f)));
+        MIX_SetTagGain(mixer, "sfx",   std::max(0.0f, std::min(m_audioSfxVolume, 1.0f)));
     }
 
     // 5. 设置视图（view 0 = 默认视图，用于清屏）
@@ -205,7 +206,7 @@ void Application::shutdown()
 
     // 关闭 SDL_mixer
     if (m_mixer) {
-        MIX_DestroyMixer(m_mixer);
+        MIX_DestroyMixer(static_cast<MIX_Mixer*>(m_mixer));
         m_mixer = nullptr;
     }
     // 清空全局混音器指针，防止后续析构阶段误用
@@ -339,7 +340,7 @@ void Application::setAudioMasterVolume(float v)
 {
     m_audioMasterVolume = std::max(0.0f, std::min(v, 1.0f));
     if (m_mixer) {
-        MIX_SetMasterGain(m_mixer, m_audioMasterVolume);
+        MIX_SetMasterGain(static_cast<MIX_Mixer*>(m_mixer), m_audioMasterVolume);
     }
 }
 
@@ -347,7 +348,7 @@ void Application::setMusicVolume(float v)
 {
     m_audioMusicVolume = std::max(0.0f, std::min(v, 1.0f));
     if (m_mixer) {
-        MIX_SetTagGain(m_mixer, "music", m_audioMusicVolume);
+        MIX_SetTagGain(static_cast<MIX_Mixer*>(m_mixer), "music", m_audioMusicVolume);
     }
 }
 
@@ -355,7 +356,7 @@ void Application::setSfxVolume(float v)
 {
     m_audioSfxVolume = std::max(0.0f, std::min(v, 1.0f));
     if (m_mixer) {
-        MIX_SetTagGain(m_mixer, "sfx", m_audioSfxVolume);
+        MIX_SetTagGain(static_cast<MIX_Mixer*>(m_mixer), "sfx", m_audioSfxVolume);
     }
 }
 

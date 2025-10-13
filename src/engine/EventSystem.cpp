@@ -104,15 +104,16 @@ void EventSystem::handleMouseInput() {
     // 查找鼠标下的节点
     UI::UINode* nodeUnderMouse = findNodeUnderMouse(m_uiContext.root, mx, my);
     
-    static UI::UINode* lastNode = nullptr;
-    if (nodeUnderMouse != lastNode) {
-        if (nodeUnderMouse) {
-            TINA_INFO("EventSystem - 鼠标进入节点: {}", nodeUnderMouse->getName());
-        } else {
-            TINA_INFO("EventSystem - 鼠标离开所有节点");
-        }
-        lastNode = nodeUnderMouse;
-    }
+    // 🔧 修复：移除静态变量，避免悬空指针
+    // static UI::UINode* lastNode = nullptr;
+    // if (nodeUnderMouse != lastNode) {
+    //     if (nodeUnderMouse) {
+    //         TINA_INFO("EventSystem - 鼠标进入节点: {}", nodeUnderMouse->getName());
+    //     } else {
+    //         TINA_INFO("EventSystem - 鼠标离开所有节点");
+    //     }
+    //     lastNode = nodeUnderMouse;
+    // }
     
     // 处理 hover 状态变化
     if (nodeUnderMouse != m_uiContext.hoveredNode) {
