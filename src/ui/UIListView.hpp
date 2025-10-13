@@ -122,16 +122,18 @@ protected:
     }
 
     void onRender(uint16_t viewId, UIRenderer& renderer) override {
-        // 背景
         auto world = getWorldPosition();
         auto size = getSize();
+
+        // 背景
         renderer.drawRect(viewId, world.x, world.y, size.x, size.y, Tina::UI::UIColors::PanelBg);
 
-        // 设置裁剪区域（bgfx scissor）
+        // 设置裁剪区域（防止列表项绘制超出列表边界）
+        // 注意：bgfx 的 scissor 使用像素坐标，原点在左上角
         uint16_t scissorX = static_cast<uint16_t>(std::max(0.0f, world.x));
         uint16_t scissorY = static_cast<uint16_t>(std::max(0.0f, world.y));
-        uint16_t scissorW = static_cast<uint16_t>(size.x);
-        uint16_t scissorH = static_cast<uint16_t>(size.y);
+        uint16_t scissorW = static_cast<uint16_t>(std::min(size.x, 65535.0f));
+        uint16_t scissorH = static_cast<uint16_t>(std::min(size.y, 65535.0f));
         bgfx::setScissor(scissorX, scissorY, scissorW, scissorH);
 
         // 计算可见范围
@@ -139,9 +141,10 @@ protected:
             bgfx::setScissor();  // 重置裁剪
             return;
         }
+
         int first = (int)(m_scroll / m_itemHeight);
         if (first < 0) first = 0;
-        int visibleRows = (int)(size.y / m_itemHeight) + 2;
+        int visibleRows = (int)(size.y / m_itemHeight) + 2;  // +2 用于缓冲
         int last = std::min((int)m_items.size(), first + visibleRows);
 
         // 当前鼠标所在行（用于hover高亮）
@@ -156,20 +159,16 @@ protected:
             }
         }
 
-        // 绘制行
+        // 绘制列表项
         for (int i = first; i < last; ++i) {
             float y = world.y + (i * m_itemHeight - m_scroll);
-
-            // 跳过完全超出裁剪区域的项
-            if (y + m_itemHeight < world.y || y > world.y + size.y) {
-                continue;
-            }
 
             // 行背景
             const bool isSel = (i == m_selected);
             const bool isHover = (i == hoverIndex);
-            Tina::Core::Color rowBg = isSel ? Tina::UI::UIColors::ButtonHover : (isHover ? Tina::UI::UIColors::ButtonPressed : Tina::UI::UIColors::PanelBg);
-            // 稍微加深选中/悬停背景
+            Tina::Core::Color rowBg = isSel ? Tina::UI::UIColors::ButtonHover :
+                                     (isHover ? Tina::UI::UIColors::ButtonPressed :
+                                               Tina::UI::UIColors::PanelBg);
             renderer.drawRect(viewId, world.x + 1, y, size.x - 2, m_itemHeight - 1, rowBg);
 
             // 文本
@@ -179,7 +178,7 @@ protected:
             renderer.drawText(viewId, world.x + 10, y + 6, m_items[i], to);
         }
 
-        // 简易滚动条（仅指示比例）
+        // 滚动条（仅在内容超出时显示）
         float contentH = m_items.size() * m_itemHeight;
         if (contentH > size.y) {
             float barW = 6.0f;
@@ -196,7 +195,7 @@ protected:
             renderer.drawRect(viewId, trackX, thumbY, barW, thumbH, 1, 1, 1, 0.6f);
         }
 
-        // 重置裁剪区域
+        // 重置裁剪区域（让后续渲染不受影响）
         bgfx::setScissor();
     }
 

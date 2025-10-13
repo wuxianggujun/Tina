@@ -170,7 +170,14 @@ void Scene::updateFrame(float dt) {
         }
     }
 
-    // 2. 调用子类的更新逻辑
+    // 2. 自动更新所有UI根节点（让Scene不需要手动调用）
+    for (auto* root : m_uiRoots) {
+        if (root) {
+            root->update(dt);
+        }
+    }
+
+    // 3. 调用子类的更新逻辑
     update(dt);
 }
 

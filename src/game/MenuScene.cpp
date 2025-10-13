@@ -122,11 +122,6 @@ void MenuScene::update(float dt) {
 
         m_bgParticles->update(dt);
     }
-
-    // 更新 UI 树
-    if (m_rootNode) {
-        m_rootNode->update(dt);
-    }
 }
 
 void MenuScene::render() {
