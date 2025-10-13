@@ -11,6 +11,7 @@
 #include "UIEvents.hpp"
 #include "../engine/EventSystem.hpp"
 #include "../ecs/Components.hpp"
+#include <functional>
 
 namespace Tina::UI {
 
@@ -44,6 +45,15 @@ public:
 
     // 事件系统访问
     UIEventSystem& events() { return m_events; }
+
+    // 命中测试（检查鼠标是否在面板内）
+    bool hitTest(float mouseX, float mouseY) const {
+        // 使用 const_cast 临时解决，或者改为非 const 方法
+        auto pos = const_cast<UICharacterPanel*>(this)->getWorldPosition();
+        auto size = getSize();
+        return mouseX >= pos.x && mouseX <= pos.x + size.x &&
+               mouseY >= pos.y && mouseY <= pos.y + size.y;
+    }
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;

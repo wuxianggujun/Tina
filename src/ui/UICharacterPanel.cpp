@@ -5,6 +5,7 @@
 #include "UICharacterPanel.hpp"
 #include "UICore.hpp"
 #include "UIColors.hpp"
+#include "../game/GameEvents.hpp"
 
 namespace Tina::UI {
 
@@ -74,8 +75,10 @@ UICharacterPanel::UICharacterPanel(const std::string& name)
     m_switchButton->setTextColor(ButtonText);        // 白色文本
     m_switchButton->setFontPx(16);
 
-    // TODO: 使用事件系统处理按钮点击
-    // 目前暂时无法处理切换控制功能
+    // 🔧 设置按钮点击回调
+    m_switchButton->setOnClick([this]{ 
+        onSwitchControlClicked(); 
+    });
 
     // 初始化事件系统（设置根节点为自己）
     m_events.setRoot(this);
@@ -115,6 +118,19 @@ void UICharacterPanel::centerOnScreen(int screenWidth, int screenHeight) {
 
 void UICharacterPanel::onRender(uint16_t viewId, UIRenderer& renderer) {
     // 基类会自动渲染所有子节点
+}
+
+void UICharacterPanel::onSwitchControlClicked() {
+    TINA_INFO("UICharacterPanel: 切换控制按钮被点击");
+    
+    // 🎯 使用事件系统触发切换控制事件
+    if (m_eventSystem) {
+        Tina::Game::Events::SwitchControlEntity event;
+        m_eventSystem->trigger(event);
+        TINA_INFO("UICharacterPanel: 已触发 SwitchControlEntity 事件");
+    } else {
+        TINA_WARN("UICharacterPanel: 全局事件系统未设置");
+    }
 }
 
 } // namespace Tina::UI

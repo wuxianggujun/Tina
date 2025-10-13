@@ -74,6 +74,7 @@ private:
     void handleInput();
     void handleRightClick(float mx, float my);
     void handleLeftClick(float mx, float my);
+    void onSwitchControlClicked(const Tina::Game::Events::SwitchControlEntity& e);  // 切换控制角色（事件处理）
 
     // 工具逻辑
     void useWaterTool(int worldX, int worldY);

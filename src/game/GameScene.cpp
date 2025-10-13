@@ -335,6 +335,20 @@ void GameScene::handleInput()
     if (input.isMouseButtonPressed(Engine::MouseButton::Left)) {
         m_isToolActive = true;
 
+        // 🔧 优先检查角色面板（如果可见）
+        if (m_characterPanel && m_characterPanel->isVisible()) {
+            if (m_characterPanel->hitTest(mx, my)) {
+                // 点击了面板内部，由事件系统处理
+                return;
+            } else {
+                // 点击了面板外部，关闭面板
+                m_characterPanel->setVisible(false);
+                m_clickedEntity = entt::null;
+                TINA_INFO("点击面板外部，关闭角色面板");
+                return;
+            }
+        }
+
         // 检查是否点击工具栏
         if (m_toolbar && m_toolbar->hitTest(mx, my)) {
             // TINA_INFO("工具栏命中测试通过: 鼠标({}, {}), 窗口尺寸: {}x{}", mx, my, getPixelWidth(), getPixelHeight());
@@ -515,6 +529,9 @@ void GameScene::createUI()
     m_characterPanel->centerOnScreen(getPixelWidth(), getPixelHeight());
     // 注册到框架，自动处理窗口resize
     addUIRoot(m_characterPanel.get());
+    
+    // 🎯 设置全局事件系统（让面板可以触发事件）
+    m_characterPanel->setEventSystem(&app()->events());
 
     TINA_INFO("UI 创建完成");
 }
@@ -873,6 +890,31 @@ void GameScene::ensureToolbarIconsReady()
 
 // handleKeyboard 和 handleMouse 已删除，功能合并到 handleInput
 
+void GameScene::onSwitchControlClicked(const Tina::Game::Events::SwitchControlEntity&)
+{
+    if (!m_ecsWorld || m_clickedEntity == entt::null) {
+        TINA_WARN("GameScene: 无法切换控制，没有选中的角色");
+        return;
+    }
+
+    // 切换控制到点击的角色
+    m_ecsWorld->switchControl(m_clickedEntity);
+    
+    // 更新面板显示
+    auto& reg = m_ecsWorld->registry();
+    if (reg.any_of<ECS::Name, ECS::Health>(m_clickedEntity)) {
+        auto& name = reg.get<ECS::Name>(m_clickedEntity);
+        auto& health = reg.get<ECS::Health>(m_clickedEntity);
+        m_characterPanel->updateData(name.name, health.percentage(), true);
+    }
+    
+    // 隐藏面板
+    m_characterPanel->setVisible(false);
+    m_clickedEntity = entt::null;
+    
+    TINA_INFO("GameScene: 已切换控制角色");
+}
+
 void GameScene::handleRightClick(float mx, float my)
 {
     if (!m_ecsWorld || !camera() || !m_characterPanel) return;
@@ -1021,6 +1063,7 @@ void GameScene::subscribeToEvents()
         TINA_SUBSCRIBE_EVENT(m_eventSubscriptions, Tina::Game::Events::PlayerMoved, GameScene::onPlayerMovedEvt);
         TINA_SUBSCRIBE_EVENT(m_eventSubscriptions, Tina::Game::Events::SetDayNight, GameScene::onSetDayNight);
         TINA_SUBSCRIBE_EVENT(m_eventSubscriptions, Tina::Game::Events::AdjustDayNight, GameScene::onAdjustDayNight);
+        TINA_SUBSCRIBE_EVENT(m_eventSubscriptions, Tina::Game::Events::SwitchControlEntity, GameScene::onSwitchControlClicked);
     );
 
     TINA_INFO("GameScene: 事件订阅完成（使用 RAII 自动管理）");

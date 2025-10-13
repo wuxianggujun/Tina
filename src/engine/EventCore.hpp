@@ -7,8 +7,10 @@
 #pragma once
 
 #include "../core/Core.hpp"
+#include "../core/Hash.hpp"
 #include <cstdint>
 #include <chrono>
+#include <typeinfo>
 
 namespace Tina::Engine {
 
@@ -127,6 +129,35 @@ struct Event {
     // 不使用虚析构函数，保持trivially destructible
     // CRTP模式不需要虚函数，完全使用静态多态
 };
+
+// ==================== 自定义事件基类（游戏层扩展） ====================
+
+// 自定义事件模板（运行时生成唯一 ID，无需修改引擎代码）
+// 用法：struct MyEvent : public CustomEvent<MyEvent> { ... };
+template<typename Derived>
+struct CustomEvent {
+    // 🎯 使用运行时类型哈希自动生成唯一 ID
+    // 注意：ID 在首次访问时计算并缓存
+    static EventTypeId TYPE_ID;
+
+    // 运行时数据
+    uint32_t timestamp = 0;
+    EventPriority priority = EventPriority::Medium;
+
+    // 获取类型 ID
+    EventTypeId getTypeId() const { return TYPE_ID; }
+    
+    // 初始化类型 ID（静态初始化）
+    static EventTypeId initTypeId() {
+        const char* name = typeid(Derived).name();
+        Core::Hash::Hash64 hash = Core::Hash::String64(name);
+        return static_cast<EventTypeId>(static_cast<uint32_t>(EventTypeId::Custom) + (hash % 256));
+    }
+};
+
+// 静态成员定义
+template<typename Derived>
+EventTypeId CustomEvent<Derived>::TYPE_ID = CustomEvent<Derived>::initTypeId();
 
 // ==================== 宏简化事件定义 ====================
 
