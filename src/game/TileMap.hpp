@@ -6,7 +6,7 @@
 #pragma once
 
 #include "../core/Container.hpp"
-#include "../core/Noise.hpp"
+#include "../core/Map2DNoise.hpp"
 #include <cstdint>
 
 namespace Tina::Game {
@@ -90,7 +90,7 @@ public:
         , m_water(m_w * m_h, (uint8_t)0)
         , m_lava(m_w * m_h, (uint8_t)0)
         , m_biomes(m_w * m_h, BiomeType::Plains)
-        , m_noiseGen(cfg.seed) {}
+        , m_mapNoise(cfg.seed) {}
 
     int width() const { return m_w; }
     int height() const { return m_h; }
@@ -270,7 +270,7 @@ private:
     Tina::Container::Vector<uint8_t>  m_workLava; // 岩浆更新的工作缓冲
     
     // 噪声生成器
-    Tina::Core::NoiseGenerator m_noiseGen;
+    Tina::Core::Map2DNoise m_mapNoise;
     
     unsigned int m_tick = 0; // 奇偶交替打破左右偏置
 };

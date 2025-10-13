@@ -28,10 +28,11 @@ void SceneManager::push(Memory::UniquePtr<Scene> scene)
     // 设置 Application 引用并进入新场景
     scene->m_app = m_app;
 
-    // 初始化场景的窗口大小
+    // 关键修复：立即应用窗口大小，避免防抖动延迟
+    // 场景刚创建时必须立即同步窗口尺寸，否则会使用默认值1280x720
     int w, h;
     m_app->getPixelSize(w, h);
-    scene->updateWindowSize(w, h);
+    scene->applyWindowResize(w, h);  // 直接调用applyWindowResize，跳过防抖动
 
     scene->onEnter();
     m_scenes.push_back(std::move(scene));
@@ -66,10 +67,11 @@ void SceneManager::replace(Memory::UniquePtr<Scene> scene)
     // 进入新场景
     scene->m_app = m_app;
 
-    // 初始化场景的窗口大小
+    // 关键修复：立即应用窗口大小，避免防抖动延迟
+    // 场景刚创建时必须立即同步窗口尺寸，否则会使用默认值1280x720
     int w, h;
     m_app->getPixelSize(w, h);
-    scene->updateWindowSize(w, h);
+    scene->applyWindowResize(w, h);  // 直接调用applyWindowResize，跳过防抖动
 
     scene->onEnter();
     m_scenes.push_back(std::move(scene));

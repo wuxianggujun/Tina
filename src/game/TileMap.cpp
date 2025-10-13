@@ -105,9 +105,9 @@ void TileMap::generateBiomes()
 {
     // 使用温度和湿度噪声确定生物群系
     for (int x = 0; x < m_w; ++x) {
-        float temperature = m_noiseGen.temperatureNoise(static_cast<float>(x), 0.0f);
-        float humidity    = m_noiseGen.humidityNoise(static_cast<float>(x), 0.0f);
-        float heightN     = m_noiseGen.heightNoise(static_cast<float>(x), 0.0f);
+        float temperature = m_mapNoise.getTemperature(static_cast<float>(x), 0.0f);
+        float humidity    = m_mapNoise.getHumidity(static_cast<float>(x), 0.0f);
+        float heightN     = m_mapNoise.getTerrainHeight(static_cast<float>(x), 0.0f);
         BiomeType biome   = determineBiome(temperature, humidity, heightN);
         for (int y = 0; y < m_h; ++y) {
             setBiome(x, y, biome);
@@ -119,7 +119,7 @@ void TileMap::generateTerrain()
 {
     // 使用柏林噪声生成地形高度
     for (int x = 0; x < m_w; ++x) {
-        float heightNoise = m_noiseGen.heightNoise(static_cast<float>(x), 0.0f);
+        float heightNoise = m_mapNoise.getTerrainHeight(static_cast<float>(x), 0.0f);
         
         // 将噪声转换为地表高度
         float baseHeight = m_h * 0.6f;  // 基础高度
@@ -159,15 +159,13 @@ void TileMap::generateCaves()
             int depth = surfaceY - y;
             if (depth < 8) continue; // 增加最小深度，减少浅层洞穴
             
-            float caveNoise = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
-            
             // 提高阈值，减少洞穴密度
             float baseThreshold = 0.45f;  // 提高基础阈值
             float depthBonus = std::min(depth * 0.003f, 0.15f); // 减少深度奖励
             float caveThreshold = baseThreshold - depthBonus;
             
             // 额外的连通性检查：避免孤立的小洞
-            if (caveNoise > caveThreshold) {
+            if (m_mapNoise.shouldGenerateCave(static_cast<float>(x), static_cast<float>(y), caveThreshold)) {
                 // 检查周围是否有其他空气，确保洞穴连通
                 int airCount = 0;
                 for (int dx = -1; dx <= 1; ++dx) {
@@ -181,7 +179,8 @@ void TileMap::generateCaves()
                 }
                 
                 // 只有周围有足够空气或噪声值很高时才生成
-                if (airCount >= 1 || caveNoise > caveThreshold + 0.1f) {
+                float caveDensity = m_mapNoise.getCaveDensity(static_cast<float>(x), static_cast<float>(y));
+                if (airCount >= 1 || caveDensity > caveThreshold + 0.1f) {
                     set(x, y, TileType::Air);
                 }
             }
@@ -197,12 +196,12 @@ void TileMap::generateOres()
             TileType current = get(x, y);
             if (current != TileType::Stone && current != TileType::Dirt) continue;
             
-            float caveNoise = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
+            float caveDensity = m_mapNoise.getCaveDensity(static_cast<float>(x), static_cast<float>(y));
             
             // 检查每种矿物
             for (int oreInt = 0; oreInt < static_cast<int>(OreType::MAX_ORE_TYPE); ++oreInt) {
                 OreType ore = static_cast<OreType>(oreInt);
-                if (shouldGenerateOre(ore, x, y, caveNoise)) {
+                if (shouldGenerateOre(ore, x, y, caveDensity)) {
                     set(x, y, oreTypeToTileType(ore));
                     break; // 每个位置只生成一种矿物
                 }
@@ -231,9 +230,9 @@ void TileMap::generateSurfaceFeatures()
             auto isNaturalGroundForTrees = [&](){ return isNaturalGround(surface); };
 
             // 获取噪声值
-            float primaryNoise = m_noiseGen.humidityNoise(static_cast<float>(x), static_cast<float>(surfaceY));
-            float secondaryNoise = m_noiseGen.temperatureNoise(static_cast<float>(x * 0.7f), static_cast<float>(surfaceY * 0.7f));
-            float decorationNoise = m_noiseGen.caveNoise(static_cast<float>(x * 0.3f), static_cast<float>(surfaceY * 0.3f));
+            float primaryNoise = m_mapNoise.getHumidity(static_cast<float>(x), static_cast<float>(surfaceY));
+            float secondaryNoise = m_mapNoise.getTemperature(static_cast<float>(x * 0.7f), static_cast<float>(surfaceY * 0.7f));
+            float decorationNoise = m_mapNoise.getDecorationDensity(static_cast<float>(x * 0.3f), static_cast<float>(surfaceY * 0.3f));
 
             // 邻域扫描：避免与相邻列贴紧成排（检查附近是否已有树干）
             auto hasNearbyTree = [&]() -> bool {
@@ -263,11 +262,11 @@ void TileMap::generateSurfaceFeatures()
                     case BiomeType::Swamp:  baseSpacing = 3; break;
                     default: baseSpacing = 5; break;
                 }
-                float jitterN = m_noiseGen.humidityNoise((float)x * 1.37f, (float)surfaceY * 0.53f);
+                float jitterN = m_mapNoise.getHumidity((float)x * 1.37f, (float)surfaceY * 0.53f);
                 int jitter = (jitterN > 0.66f) ? 1 : 0;
                 int requiredSpacing = baseSpacing + jitter;
                 bool spacingOk = (x >= nextTreeAllowedX);
-                float blue = m_noiseGen.oreNoise((float)x * 0.77f, (float)surfaceY * 0.23f, 777);
+                float blue = m_mapNoise.getOreDensity((float)x * 0.77f, (float)surfaceY * 0.23f, 777);
                 bool blueOk = (blue > 0.35f);
                 if (spacingOk && blueOk && !hasNearbyTree() && shouldGenerateTree(biome, primaryNoise, secondaryNoise)) {
                     generateTreeForBiomeUnified( x, surfaceY, biome, primaryNoise, secondaryNoise);
@@ -285,11 +284,11 @@ void TileMap::generateSurfaceFeatures()
                     case BiomeType::Swamp:  baseSpacing = 3; break;
                     default: baseSpacing = 5; break;
                 }
-                float jitterN = m_noiseGen.humidityNoise(static_cast<float>(x) * 1.37f, static_cast<float>(surfaceY) * 0.53f);
+                float jitterN = m_mapNoise.getHumidity(static_cast<float>(x) * 1.37f, static_cast<float>(surfaceY) * 0.53f);
                 int jitter = (jitterN > 0.66f) ? 1 : 0;
                 int requiredSpacing = baseSpacing + jitter;
                 bool spacingOk = (x >= nextTreeAllowedX);
-                float blue = m_noiseGen.oreNoise(static_cast<float>(x) * 0.77f, static_cast<float>(surfaceY) * 0.23f, 777);
+                float blue = m_mapNoise.getOreDensity(static_cast<float>(x) * 0.77f, static_cast<float>(surfaceY) * 0.23f, 777);
                 bool blueOk = (blue > 0.35f);
                 if (spacingOk && blueOk && !hasNearbyTree() && shouldGenerateTree(biome, primaryNoise, secondaryNoise)) {
                     generateTreeForBiomeUnified( x, surfaceY, biome, primaryNoise, secondaryNoise);
@@ -311,7 +310,7 @@ void TileMap::generateSurfaceFeatures()
             }
             // 兜底：森林列仍未生成任何表面特征，按湿度概率强制生成一棵小树
             if (!featureGenerated && biome == BiomeType::Forest && x >= nextTreeAllowedX && !hasNearbyTree()) {
-                float fallback = m_noiseGen.humidityNoise(static_cast<float>(x), static_cast<float>(surfaceY));
+                float fallback = m_mapNoise.getHumidity(static_cast<float>(x), static_cast<float>(surfaceY));
                 if (fallback > 0.65f) {
                     int height = 3 + static_cast<int>(primaryNoise * 3);
                     generateTree(x, surfaceY, height, true);
@@ -321,7 +320,7 @@ void TileMap::generateSurfaceFeatures()
             }
             // 兜底：平原列小概率生成小树，提升可见度
             if (!featureGenerated && biome == BiomeType::Plains && x >= nextTreeAllowedX && !hasNearbyTree()) {
-                float chance = m_noiseGen.humidityNoise(static_cast<float>(x * 1.3f), static_cast<float>(surfaceY * 0.7f));
+                float chance = m_mapNoise.getHumidity(static_cast<float>(x * 1.3f), static_cast<float>(surfaceY * 0.7f));
                 if (chance > 0.58f) {
                     int height = 2 + static_cast<int>(primaryNoise * 3);
                     generateTree(x, surfaceY, height, true);
@@ -331,7 +330,7 @@ void TileMap::generateSurfaceFeatures()
             }
             // 兜底：沼泽列更易生成矮树（无叶）
             if (!featureGenerated && biome == BiomeType::Swamp && x >= nextTreeAllowedX && !hasNearbyTree()) {
-                float chance = m_noiseGen.humidityNoise(static_cast<float>(x * 0.9f), static_cast<float>(surfaceY * 0.9f));
+                float chance = m_mapNoise.getHumidity(static_cast<float>(x * 0.9f), static_cast<float>(surfaceY * 0.9f));
                 if (chance > 0.52f) {
                     int height = 2 + static_cast<int>(primaryNoise * 2);
                     generateTree(x, surfaceY, height, false);
@@ -414,7 +413,7 @@ void TileMap::smoothTerrainEdges()
                 }
 
                 if (!hasTreeAbove) {
-                    float smoothingNoise = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
+                    float smoothingNoise = m_mapNoise.getCaveDensity(static_cast<float>(x), static_cast<float>(y));
                     if (smoothingNoise < 0.3f) {
                         set(x, y, TileType::Air);
                     }
@@ -469,13 +468,13 @@ void TileMap::generateWater()
             if (y < m_h * 0.05f) { // 底部5%
                 if (get(x, y) == TileType::Air) {
                     // 在基岩中挖出岩浆湖
-                    float lavaNoice = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
+                    float lavaNoice = m_mapNoise.getCaveDensity(static_cast<float>(x), static_cast<float>(y));
                     if (lavaNoice > 0.3f) {
                         m_lava[index(x, y)] = 255;
                     }
                 } else if (get(x, y) == TileType::Bedrock) {
                     // 替换部分基岩为岩浆
-                    float lavaNoice = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
+                    float lavaNoice = m_mapNoise.getCaveDensity(static_cast<float>(x), static_cast<float>(y));
                     if (lavaNoice > 0.4f) {
                         set(x, y, TileType::Air);
                         m_lava[index(x, y)] = 255;
@@ -489,10 +488,10 @@ void TileMap::generateWater()
     const int lakeCount = std::max(2, m_w / 80);
     for (int i = 0; i < lakeCount; ++i) {
         // 使用新噪声生成器替代旧的 noise1
-        float rand1 = m_noiseGen.oreNoise(static_cast<float>(i * 17), 0.0f, 1);
-        float rand2 = m_noiseGen.oreNoise(static_cast<float>(i * 31), 0.0f, 2);
-        float rand3 = m_noiseGen.oreNoise(static_cast<float>(i * 47), 0.0f, 3);
-        float rand4 = m_noiseGen.oreNoise(static_cast<float>(i * 61), 0.0f, 4);
+        float rand1 = m_mapNoise.getOreDensity(static_cast<float>(i * 17), 0.0f, 1);
+        float rand2 = m_mapNoise.getOreDensity(static_cast<float>(i * 31), 0.0f, 2);
+        float rand3 = m_mapNoise.getOreDensity(static_cast<float>(i * 47), 0.0f, 3);
+        float rand4 = m_mapNoise.getOreDensity(static_cast<float>(i * 61), 0.0f, 4);
         
         int cx = (int)(rand1 * (m_w - 20)) + 10;
         int cy = (int)(m_h * (0.35f + 0.25f * rand2));
@@ -592,7 +591,7 @@ void TileMap::generateWater()
                 
                 // 如果水周围有岩浆，生成黑曜石（较低概率，因为岩浆更热）
                 if (hasLava) {
-                    float obsidianChance = m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y));
+                    float obsidianChance = m_mapNoise.getCaveDensity(static_cast<float>(x), static_cast<float>(y));
                     if (obsidianChance > 0.6f) {  // 60%概率生成黑曜石
                         set(x, y, TileType::Obsidian);
                         m_water[index(x, y)] = 0;  // 清除水
@@ -612,7 +611,7 @@ void TileMap::waterFlow(float wx, float wy, float& outVx, float& outVy) const
     if (m_water[index(x,y)] == 0) return;
 
     // 使用新的噪声生成器
-    float n = m_noiseGen.heightNoise(wx * 0.5f, wy * 0.5f); // 平滑一些
+    float n = m_mapNoise.getTerrainHeight(wx * 0.5f, wy * 0.5f); // 平滑一些
     float ang = n * 6.2831853f;
     float vx = std::cos(ang);
     float vy = std::sin(ang);
@@ -1156,7 +1155,7 @@ TileType TileMap::getSubsurfaceMaterial(BiomeType biome, int depth) const
     // 地狱入口层（60%-75%深度）- 黑曜石过渡层
     if (relativeDepth <= 0.75f) {
         // 随机生成黑曜石和石头的混合
-        float obsidianNoise = m_noiseGen.caveNoise(static_cast<float>(depth), static_cast<float>(depth));
+        float obsidianNoise = m_mapNoise.getCaveDensity(static_cast<float>(depth), static_cast<float>(depth));
         if (obsidianNoise > 0.4f) {
             return TileType::Obsidian;
         }
@@ -1198,7 +1197,7 @@ TileType TileMap::getSubsurfaceMaterial(BiomeType biome, int depth, int surfaceY
     if (relativeDepth <= 0.6f)  return TileType::Stone;
     // 深层：出现少量黑曜石
     if (relativeDepth <= 0.75f) {
-        float obsidianNoise = m_noiseGen.caveNoise(static_cast<float>(depth), static_cast<float>(depth));
+        float obsidianNoise = m_mapNoise.getCaveDensity(static_cast<float>(depth), static_cast<float>(depth));
         if (obsidianNoise > 0.4f) return TileType::Obsidian;
         return TileType::Stone;
     }
@@ -1215,7 +1214,7 @@ bool TileMap::shouldGenerateOre(OreType ore, int x, int y, float caveNoise) cons
     
     if (depth < 3) return false;  // 地表附近不生成矿物
     
-    float oreNoise = m_noiseGen.oreNoise(static_cast<float>(x), static_cast<float>(y), static_cast<int>(ore));
+    float oreNoise = m_mapNoise.getOreDensity(static_cast<float>(x), static_cast<float>(y), static_cast<int>(ore));
     
     // 大幅降低阈值，让矿物更分散
     switch (ore) {
@@ -1346,10 +1345,10 @@ void TileMap::generateTree(int x, int y, int height, bool hasLeaves)
                     bool nearEdge = (dist >= float(radius) - 0.5f);
                     bool place = true;
                     if (nearEdge) {
-                        float n = m_noiseGen.humidityNoise((float)lx * 0.91f, (float)ly * 0.87f);
+                        float n = m_mapNoise.getHumidity((float)lx * 0.91f, (float)ly * 0.87f);
                         if (n < 0.45f) place = false;
                     } else {
-                        float n2 = m_noiseGen.caveNoise((float)lx * 0.37f, (float)ly * 0.37f);
+                        float n2 = m_mapNoise.getCaveDensity((float)lx * 0.37f, (float)ly * 0.37f);
                         if (n2 < 0.05f) place = false;
                     }
                     if (place && canReplace(get(lx, ly))) {
@@ -1362,7 +1361,7 @@ void TileMap::generateTree(int x, int y, int height, bool hasLeaves)
         // 顶部小帽（可选）：让顶部偶尔更饱满一点
         int topY = cy + radius + 1;
         if ((unsigned)topY < (unsigned)m_h) {
-            float capN = m_noiseGen.temperatureNoise((float)cx * 0.77f, (float)topY * 0.33f);
+            float capN = m_mapNoise.getTemperature((float)cx * 0.77f, (float)topY * 0.33f);
             if (capN > 0.6f && canReplace(get(cx, topY))) {
                 set(cx, topY, TileType::Leaves);
             }
@@ -1372,11 +1371,11 @@ void TileMap::generateTree(int x, int y, int height, bool hasLeaves)
 
 void TileMap::generateBigTree(int x, int y)
 {
-    int height = 5 + static_cast<int>(m_noiseGen.caveNoise(static_cast<float>(x), static_cast<float>(y)) * 3);  // 5-8格高
+    int height = 5 + static_cast<int>(m_mapNoise.getCaveDensity(static_cast<float>(x), static_cast<float>(y)) * 3);  // 5-8格高
     if (y >= m_h - height - 2 || x < 0 || x >= m_w) return;  // 边界检查
     
     // 生成粗树干（有时是2格宽）
-    bool isWide = m_noiseGen.temperatureNoise(static_cast<float>(x), static_cast<float>(y)) > 0.7f;
+    bool isWide = m_mapNoise.getTemperature(static_cast<float>(x), static_cast<float>(y)) > 0.7f;
     
     for (int h = 1; h <= height; ++h) {
         if (y + h >= m_h) break;
@@ -1401,7 +1400,7 @@ void TileMap::generateBigTree(int x, int y)
             int ly = leafLevel + dy;
             if (lx >= 0 && lx < m_w && ly >= 0 && ly < m_h && get(lx, ly) == TileType::Air) {
                 // 边缘树叶有一定概率不生成，形成自然形状
-                float edgeProb = m_noiseGen.humidityNoise(static_cast<float>(lx), static_cast<float>(ly));
+                float edgeProb = m_mapNoise.getHumidity(static_cast<float>(lx), static_cast<float>(ly));
                 if (std::abs(dx) <= 1 || edgeProb > 0.4f) {
                     set(lx, ly, TileType::Leaves);
                 }

@@ -45,6 +45,8 @@ set(SRC_FILES
     core/EASTLAlloc.cpp
     core/Noise.hpp
     core/Noise.cpp
+    core/Map2DNoise.hpp
+    core/Map2DNoise.cpp
     particles/ParticleSystem.hpp
     particles/ParticleSystem.cpp
     physics/Physics2D.hpp
