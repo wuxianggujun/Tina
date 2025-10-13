@@ -4,6 +4,7 @@
 
 #include "MenuScene.hpp"
 #include "GameScene.hpp"
+#include "WorldSelectScene.hpp"
 #include "SettingsScene.hpp"
 #include "../engine/Application.hpp"
 #include "../engine/SceneManager.hpp"
@@ -327,8 +328,8 @@ void MenuScene::createUI() {
 
 void MenuScene::onStartClicked() {
     TINA_INFO("MenuScene: 开始游戏按钮被点击");
-    // 切换到游戏场景
-    app()->scenes().replace(Memory::MakeUnique<GameScene>());
+    // 进入世界选择场景
+    app()->scenes().replace(Memory::MakeUnique<WorldSelectScene>());
 }
 
 void MenuScene::onSettingsClicked() {

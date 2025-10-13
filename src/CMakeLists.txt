@@ -40,6 +40,8 @@ set(SRC_FILES
     game/PauseScene.cpp
     game/SettingsScene.hpp
     game/SettingsScene.cpp
+    game/WorldSelectScene.hpp
+    game/WorldSelectScene.cpp
     game/DayNight.hpp
     core/Path.cpp
     core/EASTLAlloc.cpp
@@ -101,6 +103,8 @@ set(SRC_FILES
     ui/UIProgressBar.cpp
     ui/UICharacterPanel.hpp
     ui/UICharacterPanel.cpp
+    ui/UIListView.hpp
+    ui/UIListView.cpp
 
     # ECS
     ecs/World.hpp

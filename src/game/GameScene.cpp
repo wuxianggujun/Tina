@@ -472,7 +472,7 @@ void GameScene::createTileMap()
     TileMapConfig mapCfg;
     mapCfg.width = GameConfig::DEFAULT_MAP_WIDTH;
     mapCfg.height = GameConfig::DEFAULT_MAP_HEIGHT;
-    mapCfg.seed = GameConfig::DEFAULT_MAP_SEED;
+    mapCfg.seed = m_worldSeed.has_value() ? (int)m_worldSeed.value() : GameConfig::DEFAULT_MAP_SEED;
 
     m_tileMap = Memory::MakeUnique<TileMap>(mapCfg);
     m_tileMap->generate();

@@ -20,6 +20,7 @@
 #include "../engine/EventSystem.hpp"
 #include "../engine/SubscriptionToken.hpp"  // 添加订阅令牌管理
 #include "../engine/EventHelpers.hpp"  // 添加事件辅助工具
+#include <EASTL/optional.h>
 
 namespace Tina::Game {
 
@@ -35,6 +36,7 @@ namespace Tina::Game {
 class GameScene : public Engine::Scene {
 public:
     GameScene();
+    explicit GameScene(uint32_t worldSeed) : m_worldSeed(worldSeed) {}
     ~GameScene() override;
 
     // 生命周期
@@ -134,6 +136,9 @@ private:
     void onAdjustDayNight(const Tina::Game::Events::AdjustDayNight& e);
     void onPlayerJumpedEvt(const Tina::Game::Events::PlayerJumped& e);
     void onPlayerMovedEvt(const Tina::Game::Events::PlayerMoved& e);
+
+    // 世界参数（可由选择界面注入）
+    eastl::optional<uint32_t> m_worldSeed;
 };
 
 } // namespace Tina::Game

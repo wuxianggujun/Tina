@@ -167,7 +167,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         if (m_fontPx > 0) to.fontPx = m_fontPx;
         renderer.drawTextBox(viewId, tx, ty, twRect, thRect, m_text, to);
     } else {
-        // 默认：无图标（或中心覆盖图标）+ 文本居中
+        // 默认：无图标（或中心覆盖图标）+ 文本精确居中
         if (hasIcon) {
             float iw = std::max(8.0f, size.x - pad*2.0f);
             float ih = std::max(8.0f, size.y - pad*2.0f);
@@ -176,10 +176,14 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
             float iy = pos.y + (size.y - side) * 0.5f;
             renderer.drawImage(viewId, ix, iy, side, side, m_iconTex, 1,1,1,0.95f);
         }
+
+        // 使用 drawTextBox 的居中对齐（内部基于字形度量计算基线，垂直居中更准确）
         UIRenderer::TextOptions to{};
         to.r = m_textColor.r(); to.g = m_textColor.g(); to.b = m_textColor.b(); to.a = m_textColor.a();
-        to.hAlign = UIRenderer::AlignH::Center; to.vAlign = UIRenderer::AlignV::Center;
-        to.fontPx = m_fontPx > 0 ? m_fontPx : 0;
+        to.hAlign = UIRenderer::AlignH::Center;
+        to.vAlign = UIRenderer::AlignV::Center;
+        to.fontPx = (m_fontPx > 0 ? m_fontPx : 0);
+        to.padX = 0.0f; to.padY = 0.0f;
         renderer.drawTextBox(viewId, pos.x, pos.y, size.x, size.y, m_text, to);
     }
 
