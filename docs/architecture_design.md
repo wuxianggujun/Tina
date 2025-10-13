@@ -91,7 +91,7 @@ Tina/
 ├── ui/            # UI 系统
 │   ├── UINode.hpp         # UI 节点树
 │   ├── UIRenderer.hpp     # UI 渲染器（使用 RenderQueue）
-│   ├── UIEventSystem.hpp  # UI 事件系统
+│   ├── （已移除）UIEventSystem  # UI 事件由 Engine::EventSystem 统一处理
 │   ├── TextRenderer.hpp   # 专职文本渲染（FreeType + 图集）
 │   ├── UIToolbar.hpp      # 工具栏
 │   └── UIComponents.hpp   # UI 组件
@@ -642,7 +642,7 @@ app.events().onPlayerDied.emit();
 ### 5. MenuScene（主菜单场景）
 
 - 状态：✅ 已实现（按钮：开始游戏/设置/退出；标题淡入动画；粒子/渐变背景）
-- 交互：鼠标交互统一由 UIEventSystem 处理（hover/click），键盘支持↑/↓/Enter/Space/ESC。
+- 交互：鼠标交互统一由 Engine::EventSystem 处理（handleMouseInput；支持捕获/目标/冒泡），键盘支持↑/↓/Enter/Space/ESC。
 - 场景切换：使用 `SceneManager::requestReplace`，在安全点切换到 GameScene。
 - 资源：字体通过 ResourceManagerHub + FontResource，文本渲染使用全局 ShaderManager 的 text 程序。
 
@@ -651,7 +651,7 @@ app.events().onPlayerDied.emit();
 - 线程断言：默认断言在创建线程使用（主线程）；提供 debug 统计接口：连接/断开/触发次数与当前有效槽数量。
 - 最佳实践：
   - 重建 UI 前先断开旧连接、再销毁 UI 树；或依赖上述安全失效也不会崩，但断开有助于避免重复连接。
-  - 鼠标交互建议统一用 UIEventSystem，避免手写命中逻辑与时序问题。
+  - 鼠标交互建议统一由 Engine::EventSystem 处理，避免手写命中逻辑与时序问题。
 
 #### Application 任务队列（post/flush）
 ```cpp

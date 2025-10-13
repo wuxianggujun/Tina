@@ -1,8 +1,37 @@
 #include "EventSystem.hpp"
 #include "../ui/UINode.hpp"
 #include "../core/Log.hpp"
+// Container.hpp 已经包含了所有需要的算法封装
 
 namespace Tina::Engine {
+
+// ==================== UI 根节点设置 ====================
+
+void EventSystem::setUIRoot(Memory::SharedPtr<UI::UINode> root) {
+    m_uiContext.root = root;  // 自动转换为 WeakPtr
+    // 清空子节点引用（它们的生命周期由root保证）
+    m_uiContext.hoveredNode = nullptr;
+    m_uiContext.pressedNode = nullptr;
+    m_uiContext.focusedNode = nullptr;
+}
+
+void EventSystem::setUIRoot(UI::UINode* root) {
+    if (root) {
+        try {
+            m_uiContext.root = root->getWeakPtr();
+        } catch (...) {
+            // 如果节点不是由 shared_ptr 管理，回退到空
+            m_uiContext.root.reset();
+        }
+    } else {
+        m_uiContext.root.reset();
+    }
+    m_uiContext.hoveredNode = nullptr;
+    m_uiContext.pressedNode = nullptr;
+    m_uiContext.focusedNode = nullptr;
+}
+
+// ==================== UI 输入更新 ====================
 
 // 更新UI输入（每帧调用）
 void EventSystem::updateUIInput(float mouseX, float mouseY, bool mouseDown) {
@@ -13,8 +42,9 @@ void EventSystem::updateUIInput(float mouseX, float mouseY, bool mouseDown) {
     
     static int debugCounter = 0;
     if (++debugCounter % 60 == 0) {  // 每60帧打印一次
+        auto root = m_uiContext.root.lock();
         TINA_INFO("EventSystem::updateUIInput - 鼠标: ({}, {}), 按下: {}, 根节点: {}",
-                   mouseX, mouseY, mouseDown, m_uiContext.root ? "有" : "无");
+                   mouseX, mouseY, mouseDown, root ? "有" : "无");
     }
     
     // 处理鼠标输入
@@ -32,8 +62,8 @@ void EventSystem::buildEventPath(UI::UINode* target, Vector<UI::UINode*>& path) 
         current = current->getParent();
     }
     
-    // 反转路径（变为从根到目标）
-    std::reverse(path.begin(), path.end());
+    // ✅ 使用项目封装的 Reverse（Container.hpp）
+    Container::Reverse(path.begin(), path.end());
 }
 
 // 查找鼠标下的节点（递归，深度优先，后序遍历确保上层节点优先）
@@ -54,8 +84,8 @@ UI::UINode* EventSystem::findNodeUnderMouse(UI::UINode* node, float x, float y) 
         }
     }
     
-    // 按 zIndex 降序排序
-    std::sort(sortedChildren.begin(), sortedChildren.end(), 
+    // ✅ 按 zIndex 降序排序（使用项目封装的 Sort）
+    Container::Sort(sortedChildren.begin(), sortedChildren.end(), 
         [](UI::UINode* a, UI::UINode* b) {
             return a->zIndex() > b->zIndex();
         });
@@ -91,8 +121,10 @@ UI::UINode* EventSystem::findNodeUnderMouse(UI::UINode* node, float x, float y) 
 
 // 处理鼠标输入（内部实现）
 void EventSystem::handleMouseInput() {
-    if (!m_uiContext.root) {
-        TINA_WARN("EventSystem::handleMouseInput - 没有UI根节点！");
+    // ✅ 尝试锁定根节点的 weak_ptr
+    auto root = m_uiContext.root.lock();
+    if (!root) {
+        // 根节点已销毁或未设置，安全返回
         return;
     }
     
@@ -102,7 +134,7 @@ void EventSystem::handleMouseInput() {
     bool mouseDownPrev = m_uiContext.mouseDownPrev;
     
     // 查找鼠标下的节点
-    UI::UINode* nodeUnderMouse = findNodeUnderMouse(m_uiContext.root, mx, my);
+    UI::UINode* nodeUnderMouse = findNodeUnderMouse(root.get(), mx, my);
     
     // 🔧 修复：移除静态变量，避免悬空指针
     // static UI::UINode* lastNode = nullptr;
@@ -115,51 +147,45 @@ void EventSystem::handleMouseInput() {
     //     lastNode = nodeUnderMouse;
     // }
     
-    // 处理 hover 状态变化
+    // ✅ 处理 hover 状态变化
     if (nodeUnderMouse != m_uiContext.hoveredNode) {
         // 鼠标离开旧节点
         if (m_uiContext.hoveredNode && m_uiContext.hoveredNode->isHoverable()) {
             m_uiContext.hoveredNode->onMouseLeave();
-            
-            // 触发 MouseLeave 事件（不需要捕获/冒泡）
-            // MouseLeaveEvent event;
-            // event.target = m_uiContext.hoveredNode;
-            // dispatch(event);
         }
         
         // 鼠标进入新节点
         if (nodeUnderMouse && nodeUnderMouse->isHoverable()) {
             nodeUnderMouse->onMouseEnter();
-            
-            // 触发 MouseEnter 事件（不需要捕获/冒泡）
-            // MouseEnterEvent event;
-            // event.target = nodeUnderMouse;
-            // dispatch(event);
         }
         
         m_uiContext.hoveredNode = nodeUnderMouse;
     }
     
-    // 处理鼠标按下
+    // ✅ 处理鼠标按下
     if (mouseDown && !mouseDownPrev) {
         if (nodeUnderMouse && nodeUnderMouse->isClickable()) {
+            TINA_INFO("EventSystem - 鼠标按下节点: {}", nodeUnderMouse->getName());
             m_uiContext.pressedNode = nodeUnderMouse;
             nodeUnderMouse->onMouseDown(mx, my);
         }
     }
     
-    // 处理鼠标释放
+    // ✅ 处理鼠标释放
     if (!mouseDown && mouseDownPrev) {
         if (m_uiContext.pressedNode) {
+            TINA_INFO("EventSystem - 鼠标释放在节点: {}", m_uiContext.pressedNode->getName());
             m_uiContext.pressedNode->onMouseUp(mx, my);
             
             // 如果释放时仍在同一节点上，触发点击
             if (m_uiContext.pressedNode == nodeUnderMouse) {
+                TINA_INFO("EventSystem - 触发点击: {}", m_uiContext.pressedNode->getName());
                 m_uiContext.pressedNode->onClick();
+            } else {
+                TINA_INFO("EventSystem - 释放位置不在按下节点上，不触发点击");
             }
-            
-            m_uiContext.pressedNode = nullptr;
         }
+        m_uiContext.pressedNode = nullptr;
     }
 }
 

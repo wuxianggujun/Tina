@@ -149,7 +149,7 @@ std::vector<UINode*> UILayoutManager::topologicalSort(const std::unordered_set<U
     std::vector<UINode*> result(nodes.begin(), nodes.end());
 
     // 按深度排序：父节点先于子节点
-    std::sort(result.begin(), result.end(), [this](UINode* a, UINode* b) {
+    Container::Sort(result.begin(), result.end(), [this](UINode* a, UINode* b) {
         int depthA = getNodeDepth(a);
         int depthB = getNodeDepth(b);
 

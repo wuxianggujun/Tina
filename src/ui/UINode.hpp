@@ -58,10 +58,28 @@ enum class Anchor : uint8_t {
 };
 
 // UI 节点基类
-class UINode {
+// ✅ 支持 shared_from_this，允许从 this 获取 shared_ptr
+class UINode : public eastl::enable_shared_from_this<UINode> {
 public:
     UINode(const std::string& name = "UINode");
     virtual ~UINode();
+    
+    // === 智能指针支持（新增） ===
+    
+    /**
+     * 获取指向自身的 shared_ptr
+     * 注意：只有当节点已被 shared_ptr 管理时才能调用
+     */
+    Memory::SharedPtr<UINode> getSharedPtr() {
+        return shared_from_this();
+    }
+    
+    /**
+     * 获取指向自身的 weak_ptr（用于观察）
+     */
+    Memory::WeakPtr<UINode> getWeakPtr() {
+        return weak_from_this();
+    }
 
     // === 层级管理（新版：拥有所有权） ===
     

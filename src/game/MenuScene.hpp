@@ -95,8 +95,8 @@ private:
     // 渲染资源
     Memory::UniquePtr<Particles::ParticleSystem2D> m_bgParticles;
 
-
-    Memory::UniquePtr<MenuRootNode> m_rootNode;
+    // ✅ 改用 SharedPtr 持有根节点，支持 weak_ptr 观察
+    Memory::SharedPtr<MenuRootNode> m_rootNode;
     Container::Vector<Memory::UniquePtr<UI::UINode>> m_ownedNodes;  // 统一管理所有节点生命周期
     UI::UIButton* m_btnStart = nullptr;
     UI::UIButton* m_btnSettings = nullptr;

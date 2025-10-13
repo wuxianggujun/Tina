@@ -62,7 +62,8 @@ private:
 private:
     // UI 资源（着色器来自全局 ShaderManager）
     // Memory::UniquePtr<UI::UIRenderer> m_uiRenderer;  //  已由 Scene 基类管理
-    Memory::UniquePtr<UI::UINode> m_rootNode;  // UI根节点
+    // ✅ 改用 SharedPtr 持有根节点，支持 weak_ptr 观察
+    Memory::SharedPtr<UI::UINode> m_rootNode;  // UI根节点
 
     UI::UIButton* m_btnContinue = nullptr;  // 继续游戏按钮
     UI::UIButton* m_btnQuit = nullptr;      // 退出按钮

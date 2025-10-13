@@ -177,19 +177,15 @@ void PauseScene::handleInput()
 
 void PauseScene::createUI()
 {
-    // 🔧 关键修复：若重复创建（例如窗口尺寸变化），先清空事件系统的UI引用
-    if (m_rootNode && app()) {
-        app()->events().setUIRoot(nullptr);
-    }
-    
-    // 然后释放旧 UI
+    // ✅ 智能指针重构：SharedPtr 自动管理生命周期
+    // 释放旧 UI（SharedPtr 自动通知所有 WeakPtr）
     m_rootNode.reset();
     m_btnContinue = nullptr;
     m_btnQuit = nullptr;
     m_panel = nullptr;  // 重置面板引用
 
-    // 创建根节点
-    m_rootNode = Memory::MakeUnique<UI::UINode>("PauseRoot");
+    // ✅ 使用 MakeShared 创建根节点
+    m_rootNode = Memory::MakeShared<UI::UINode>("PauseRoot");
     m_rootNode->setPosition(0, 0);
     m_rootNode->setSize((float)m_pixelWidth, (float)m_pixelHeight);
 
@@ -317,9 +313,9 @@ void PauseScene::createUI()
 
     panel->setPosition(centerX, centerY);
 
-    // 🔧 关键修复：重新设置UI根节点到事件系统
+    // ✅ 设置UI根节点到事件系统（传递 SharedPtr）
     if (app()) {
-        app()->events().setUIRoot(m_rootNode.get());
+        app()->events().setUIRoot(m_rootNode);
     }
 
     TINA_INFO("PauseScene: UI 创建完成");

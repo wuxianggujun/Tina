@@ -25,11 +25,12 @@ using namespace Tina::Container;  // 使用容器命名空间
 // ==================== UI 事件支持 ====================
 
 // UI事件上下文（状态跟踪）
+// ✅ 根节点使用 WeakPtr，子节点使用裸指针（生命周期由根节点保证）
 struct UIEventContext {
-    UI::UINode* root = nullptr;
-    UI::UINode* hoveredNode = nullptr;
-    UI::UINode* pressedNode = nullptr;
-    UI::UINode* focusedNode = nullptr;
+    Memory::WeakPtr<UI::UINode> root;         // 根节点：WeakPtr
+    UI::UINode* hoveredNode = nullptr;        // 子节点：裸指针（由root保证生命周期）
+    UI::UINode* pressedNode = nullptr;        // 子节点：裸指针
+    UI::UINode* focusedNode = nullptr;        // 子节点：裸指针
     float mouseX = 0, mouseY = 0;
     bool mouseDown = false;
     bool mouseDownPrev = false;
@@ -292,14 +293,11 @@ public:
 
     // ==================== UI事件处理（新增） ====================
     
-    // 设置UI根节点
-    void setUIRoot(UI::UINode* root) {
-        m_uiContext.root = root;
-        // 🔧 关键修复：清空旧的UI状态，避免访问已销毁的节点
-        m_uiContext.hoveredNode = nullptr;
-        m_uiContext.pressedNode = nullptr;
-        m_uiContext.focusedNode = nullptr;
-    }
+    // 设置UI根节点（接受 SharedPtr）
+    void setUIRoot(Memory::SharedPtr<UI::UINode> root);
+    
+    // 设置UI根节点（兼容裸指针）
+    void setUIRoot(UI::UINode* root);
     
     // 更新UI输入（每帧调用）
     void updateUIInput(float mouseX, float mouseY, bool mouseDown);

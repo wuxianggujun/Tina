@@ -183,7 +183,7 @@ void UIEventDispatcher::buildEventPath(UINode* target, Container::Vector<UINode*
         node = node->getParent();
     }
     // 反转路径，使其从根到目标
-    std::reverse(path.begin(), path.end());
+    Container::Reverse(path.begin(), path.end());
 }
 
 void UIEventDispatcher::triggerListeners(UINode* node, UIEvent& event) {

@@ -55,16 +55,16 @@ void MenuScene::onEnter() {
     // 注册UI根节点到框架（框架会自动处理窗口resize）
     addUIRoot(m_rootNode.get());
     
-    // 设置UI根节点到事件系统（用于命中测试）
-    app()->events().setUIRoot(m_rootNode.get());
+    // ✅ 设置UI根节点到事件系统（传递 SharedPtr）
+    app()->events().setUIRoot(m_rootNode);
 }
 
 void MenuScene::onExit() {
     TINA_INFO("MenuScene::onExit - 退出主菜单");
 
-    // 🔧 关键：先清空事件系统的UI根节点，避免访问已销毁的UI
+    // ✅ 清空事件系统的UI根节点（SharedPtr 会自动处理）
     if (app()) {
-        app()->events().setUIRoot(nullptr);
+        app()->events().setUIRoot(Memory::SharedPtr<UI::UINode>());
     }
 
     // 清理 UI
@@ -233,8 +233,8 @@ void MenuScene::handleInput() {
 }
 
 void MenuScene::createUI() {
-    // 创建自定义根节点（会自动处理窗口resize）
-    m_rootNode = Memory::MakeUnique<MenuRootNode>(this);
+    // ✅ 使用 MakeShared 创建根节点（支持 weak_ptr 观察）
+    m_rootNode = Memory::MakeShared<MenuRootNode>(this);
     m_rootNode->setPosition(0, 0);
     m_rootNode->setSize((float)getPixelWidth(), (float)getPixelHeight());
 
