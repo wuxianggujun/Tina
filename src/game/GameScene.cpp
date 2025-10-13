@@ -15,7 +15,6 @@
 #include "../game/TerrainEditor.hpp"
 #include "../game/GameConfig.hpp"
 
-// #include <SDL3/SDL.h>  // 不再需要SDL，使用os封装
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 #include "../ui/UIConstants.hpp"
@@ -95,10 +94,7 @@ void GameScene::onExit()
         m_bgm.reset();
         m_bgmStarted = false;
     }
-
-    // 新事件系统：在场景退出时取消订阅
-    // TODO: 实现取消订阅机制（可选，如果需要更精细的控制）
-
+    
     // 清理资源（按创建逆序）
     m_characterPanel.reset();
     m_toolbar.reset();

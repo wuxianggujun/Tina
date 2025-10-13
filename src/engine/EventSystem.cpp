@@ -40,12 +40,15 @@ void EventSystem::updateUIInput(float mouseX, float mouseY, bool mouseDown) {
     m_uiContext.mouseDownPrev = m_uiContext.mouseDown;
     m_uiContext.mouseDown = mouseDown;
     
+    // 调试：每秒打印一次状态（60fps）
+    #ifdef TINA_DEBUG_UI_INPUT
     static int debugCounter = 0;
-    if (++debugCounter % 60 == 0) {  // 每60帧打印一次
+    if (++debugCounter % 60 == 0) {
         auto root = m_uiContext.root.lock();
-        TINA_INFO("EventSystem::updateUIInput - 鼠标: ({}, {}), 按下: {}, 根节点: {}",
+        TINA_DEBUG("EventSystem - 鼠标: ({}, {}), 按下: {}, 根节点: {}",
                    mouseX, mouseY, mouseDown, root ? "有" : "无");
     }
+    #endif
     
     // 处理鼠标输入
     handleMouseInput();
@@ -136,18 +139,7 @@ void EventSystem::handleMouseInput() {
     // 查找鼠标下的节点
     UI::UINode* nodeUnderMouse = findNodeUnderMouse(root.get(), mx, my);
     
-    // 🔧 修复：移除静态变量，避免悬空指针
-    // static UI::UINode* lastNode = nullptr;
-    // if (nodeUnderMouse != lastNode) {
-    //     if (nodeUnderMouse) {
-    //         TINA_INFO("EventSystem - 鼠标进入节点: {}", nodeUnderMouse->getName());
-    //     } else {
-    //         TINA_INFO("EventSystem - 鼠标离开所有节点");
-    //     }
-    //     lastNode = nodeUnderMouse;
-    // }
-    
-    // ✅ 处理 hover 状态变化
+    // 处理 hover 状态变化
     if (nodeUnderMouse != m_uiContext.hoveredNode) {
         // 鼠标离开旧节点
         if (m_uiContext.hoveredNode && m_uiContext.hoveredNode->isHoverable()) {
@@ -165,7 +157,6 @@ void EventSystem::handleMouseInput() {
     // ✅ 处理鼠标按下
     if (mouseDown && !mouseDownPrev) {
         if (nodeUnderMouse && nodeUnderMouse->isClickable()) {
-            TINA_INFO("EventSystem - 鼠标按下节点: {}", nodeUnderMouse->getName());
             m_uiContext.pressedNode = nodeUnderMouse;
             nodeUnderMouse->onMouseDown(mx, my);
         }
@@ -174,15 +165,11 @@ void EventSystem::handleMouseInput() {
     // ✅ 处理鼠标释放
     if (!mouseDown && mouseDownPrev) {
         if (m_uiContext.pressedNode) {
-            TINA_INFO("EventSystem - 鼠标释放在节点: {}", m_uiContext.pressedNode->getName());
             m_uiContext.pressedNode->onMouseUp(mx, my);
             
             // 如果释放时仍在同一节点上，触发点击
             if (m_uiContext.pressedNode == nodeUnderMouse) {
-                TINA_INFO("EventSystem - 触发点击: {}", m_uiContext.pressedNode->getName());
                 m_uiContext.pressedNode->onClick();
-            } else {
-                TINA_INFO("EventSystem - 释放位置不在按下节点上，不触发点击");
             }
         }
         m_uiContext.pressedNode = nullptr;
