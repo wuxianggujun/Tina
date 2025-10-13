@@ -108,6 +108,32 @@ public:
         m_hasClip = false;
     }
 
+    // === 裁剪栈（嵌套裁剪支持） ===
+    // 裁剪矩形结构
+    struct ClipRect {
+        int16_t x, y;
+        uint16_t w, h;
+        bool active;
+
+        ClipRect() : x(0), y(0), w(0), h(0), active(false) {}
+        ClipRect(int16_t x_, int16_t y_, uint16_t w_, uint16_t h_)
+            : x(x_), y(y_), w(w_), h(h_), active(true) {}
+    };
+
+    // 推入裁剪区域（与当前裁剪相交）
+    // 支持嵌套容器裁剪，自动处理裁剪相交
+    void pushClip(float x, float y, float w, float h);
+
+    // 弹出裁剪区域
+    void popClip();
+
+    // 获取当前裁剪栈深度
+    size_t getClipStackDepth() const { return m_clipStack.size(); }
+
+    // 便捷方法：绘制裁剪后的矩形（自动处理几何裁剪）
+    void drawRectClipped(uint16_t viewId, float x, float y, float w, float h,
+                         const Tina::Core::Color& color);
+
     // 文本测量（可指定字号；fontPx=0 使用当前字号）
     // 注意：这些方法不是 const，因为内部需要临时修改字体大小
     bool measureText(const std::string& utf8, float& outW, float& outH, int fontPx = 0) {
@@ -245,6 +271,9 @@ private:
     int16_t  m_clipY = 0;
     uint16_t m_clipW = 0;
     uint16_t m_clipH = 0;
+
+    // 裁剪栈
+    Container::Vector<ClipRect> m_clipStack;
 };
 
 } // namespace Tina::UI

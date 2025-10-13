@@ -494,4 +494,104 @@ void UIRenderer::setBatchStrategy(IBatchStrategy* strategy)
     }
 }
 
+// ==================== 裁剪栈实现 ====================
+
+void UIRenderer::pushClip(float x, float y, float w, float h)
+{
+    // 像素对齐（避免半像素问题）
+    int16_t clipX = static_cast<int16_t>(std::floor(x));
+    int16_t clipY = static_cast<int16_t>(std::floor(y));
+    uint16_t clipW = static_cast<uint16_t>(std::ceil(w));
+    uint16_t clipH = static_cast<uint16_t>(std::ceil(h));
+
+    // 如果栈不为空，与栈顶裁剪相交
+    if (!m_clipStack.empty()) {
+        const auto& parent = m_clipStack.back();
+        if (parent.active) {
+            // 计算相交区域
+            int16_t x0 = std::max(clipX, parent.x);
+            int16_t y0 = std::max(clipY, parent.y);
+            int16_t x1 = std::min(static_cast<int16_t>(clipX + clipW),
+                                 static_cast<int16_t>(parent.x + parent.w));
+            int16_t y1 = std::min(static_cast<int16_t>(clipY + clipH),
+                                 static_cast<int16_t>(parent.y + parent.h));
+
+            // 如果相交区域无效，推入空裁剪
+            if (x1 <= x0 || y1 <= y0) {
+                m_clipStack.emplace_back();  // 非激活裁剪
+                setClipRect(0, 0, 0, 0);
+                return;
+            }
+
+            clipX = x0;
+            clipY = y0;
+            clipW = static_cast<uint16_t>(x1 - x0);
+            clipH = static_cast<uint16_t>(y1 - y0);
+        }
+    }
+
+    // 推入裁剪栈
+    m_clipStack.emplace_back(clipX, clipY, clipW, clipH);
+
+    // 设置硬件裁剪
+    setClipRect(clipX, clipY, clipW, clipH);
+
+    #ifdef TINA_UI_DEBUG_CLIP
+    TINA_TRACE("UIRenderer::pushClip - 栈深度: {}, 裁剪区域: ({},{},{}x{})",
+               m_clipStack.size(), clipX, clipY, clipW, clipH);
+    #endif
+}
+
+void UIRenderer::popClip()
+{
+    if (m_clipStack.empty()) {
+        TINA_WARN("UIRenderer::popClip - 裁剪栈为空，忽略");
+        return;
+    }
+
+    // 弹出栈顶
+    m_clipStack.pop_back();
+
+    // 恢复父裁剪
+    if (!m_clipStack.empty()) {
+        const auto& parent = m_clipStack.back();
+        if (parent.active) {
+            setClipRect(parent.x, parent.y, parent.w, parent.h);
+        } else {
+            clearClipRect();
+        }
+    } else {
+        // 栈空，清除裁剪
+        clearClipRect();
+    }
+
+    #ifdef TINA_UI_DEBUG_CLIP
+    TINA_TRACE("UIRenderer::popClip - 栈深度: {}", m_clipStack.size());
+    #endif
+}
+
+void UIRenderer::drawRectClipped(uint16_t viewId, float x, float y, float w, float h,
+                                  const Tina::Core::Color& color)
+{
+    // 如果没有裁剪，直接绘制
+    if (!m_hasClip) {
+        drawRect(viewId, x, y, w, h, color);
+        return;
+    }
+
+    // 计算裁剪后的矩形
+    float x0 = std::max(x, static_cast<float>(m_clipX));
+    float y0 = std::max(y, static_cast<float>(m_clipY));
+    float x1 = std::min(x + w, static_cast<float>(m_clipX + m_clipW));
+    float y1 = std::min(y + h, static_cast<float>(m_clipY + m_clipH));
+
+    // 如果完全在裁剪区域外，跳过
+    if (x1 <= x0 || y1 <= y0) {
+        return;
+    }
+
+    // 绘制裁剪后的矩形
+    drawRect(viewId, x0, y0, x1 - x0, y1 - y0, color);
+}
+
 } // namespace Tina::UI
