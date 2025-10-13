@@ -14,7 +14,7 @@
 #include "../engine/EventSystem.hpp"
 #include "GameEvents.hpp"
 
-#include <SDL3/SDL.h>  // 临时需要：直接获取鼠标坐标
+// #include <SDL3/SDL.h>  // 不再需要：使用 InputSystem
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 #include "../ui/UIConstants.hpp"
@@ -170,11 +170,9 @@ void PauseScene::handleInput()
     }
 
     // 更新UI输入到引擎事件系统
-    // 临时方案：直接从 SDL 获取鼠标坐标
-    float mx, my;
-    SDL_GetMouseState(&mx, &my);
+    auto mousePos = input.getMousePosition();
     bool leftDown = input.isMouseButtonDown(Engine::MouseButton::Left);
-    app()->events().updateUIInput(mx, my, leftDown);
+    app()->events().updateUIInput(mousePos.x, mousePos.y, leftDown);
 }
 
 void PauseScene::createUI()
