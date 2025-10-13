@@ -71,6 +71,9 @@ struct ButtonClickEvent : UIEvent<ButtonClickEvent, EventTypeId::UIButtonClicked
     int button = 0;  // 0=left, 1=middle, 2=right
     
     // 🎯 关键：支持取消默认行为
+    // 注意：preventDefault() 仅取消默认行为，不阻断事件传播
+    //       stopPropagation() 仅阻断后续订阅者，不取消默认行为
+    //       两者可以同时使用
     bool defaultPrevented = false;
     
     ButtonClickEvent() {
@@ -89,9 +92,15 @@ struct ButtonClickEvent : UIEvent<ButtonClickEvent, EventTypeId::UIButtonClicked
     }
     
     // 🎯 取消默认行为（阻止本地回调执行）
+    // 语义：只影响默认行为，不影响事件传播
+    // 使用场景：在捕获阶段拦截危险操作，弹出确认对话框
     void preventDefault() {
         defaultPrevented = true;
     }
+    
+    // 注意：stopPropagation() 继承自 UIEvent
+    // 语义：只阻断后续订阅者，不影响默认行为
+    // 使用场景：阻止事件冒泡到父节点
 };
 
 // ==================== 文本输入事件 ====================

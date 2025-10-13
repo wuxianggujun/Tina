@@ -51,11 +51,24 @@ void UILabel::onRender(uint16_t viewId, UIRenderer& renderer)
 // === UIButton 实现 ===
 
 void UIButton::onClick() {
+    // 🛡️ 工程化改进1：禁用态早返回
+    if (!isInteractable() || !isEnabled()) {
+        TINA_DEBUG("按钮 '{}' 被禁用，忽略点击", getName());
+        return;
+    }
+    
+    // 🛡️ 工程化改进2：重入保护
+    static bool isProcessing = false;
+    if (isProcessing) {
+        TINA_WARN("按钮 '{}' 重入保护：忽略递归点击", getName());
+        return;
+    }
+    isProcessing = true;
+    
     TINA_INFO("UIButton::onClick - 按钮 '{}' 被点击！", getName());
     
     // 🎯 正确的架构：事件优先，回调作为默认行为
-    // 1. 先触发事件（单一事实来源，支持捕获/冒泡/拦截）
-    // 2. 若未取消默认行为，再执行本地回调
+    // 执行顺序契约：捕获 → 目标 → 冒泡 → （若未 defaultPrevented）本地回调
     
     // 步骤1：触发事件（总是触发，系统统一可见）
     if (eventSystem()) {
@@ -83,6 +96,8 @@ void UIButton::onClick() {
             m_pendingClick();
         }
     }
+    
+    isProcessing = false;
 }
 
 void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
