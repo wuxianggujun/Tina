@@ -143,11 +143,6 @@ struct CustomEvent {
         uint32_t offset = hash32 % CUSTOM_RANGE;
         uint32_t typeId = static_cast<uint32_t>(EventTypeId::Custom) + offset;
         
-        // 调试输出：使用 printf 避免循环依赖，fflush 确保立即输出
-        printf("[CustomEvent] Type='%s' Hash=%llu Hash32=%u TypeId=%u\n", 
-               name, (unsigned long long)hash, hash32, typeId);
-        fflush(stdout);  // 立即刷新缓冲区
-        
         return static_cast<EventTypeId>(typeId);
     }
 };
