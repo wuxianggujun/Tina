@@ -8,32 +8,28 @@
 
 namespace Tina::Game::Events {
 
-// ==================== 引擎预定义事件（可选使用） ====================
+// ==================== 游戏自定义事件（使用 CustomEvent） ====================
+// 所有游戏特定事件都使用 CustomEvent，无需修改引擎代码
 
-// 设置昼夜时间事件
-struct SetDayNight : public Engine::Event<SetDayNight, Engine::EventTypeId::SetDayNight> {
-    float normalized = 0.0f; // [0,1)
-};
-
-// 玩家跳跃事件
-struct PlayerJumped : public Engine::Event<PlayerJumped, Engine::EventTypeId::PlayerJumped> {
-};
-
-// 玩家移动事件
-struct PlayerMoved : public Engine::Event<PlayerMoved, Engine::EventTypeId::PlayerMoved> {
+// 玩家事件
+struct PlayerMoved : public Engine::CustomEvent<PlayerMoved> {
     float x = 0.0f;
     float y = 0.0f;
 };
 
-// ==================== 游戏自定义事件（使用 CustomEvent） ====================
-// 这些事件不需要在引擎中预定义，完全由游戏层控制
+struct PlayerJumped : public Engine::CustomEvent<PlayerJumped> {
+};
 
-// 调整昼夜时间事件（游戏自定义）
+// 昼夜系统事件
+struct SetDayNight : public Engine::CustomEvent<SetDayNight> {
+    float normalized = 0.0f; // [0,1)
+};
+
 struct AdjustDayNight : public Engine::CustomEvent<AdjustDayNight> {
     float delta = 0.0f; // 可正可负
 };
 
-// 切换控制角色事件（游戏自定义）
+// 控制系统事件
 struct SwitchControlEntity : public Engine::CustomEvent<SwitchControlEntity> {
     // 事件本身不需要携带数据，GameScene 知道当前点击的是哪个角色
 };

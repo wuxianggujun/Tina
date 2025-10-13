@@ -59,32 +59,15 @@ enum class EventTypeId : uint32_t {
     DropFile,
 
     // ========== 游戏事件（96-191） ==========
-    PlayerMoved,
-    PlayerJumped,
-    PlayerDied,
-    PlayerRespawned,
-
-    EnemySpawned,
-    EnemyDied,
-
-    ItemPickedUp,
-    ItemDropped,
-    ItemUsed,
-
-    ToolSelected,
-    ToolUsed,
-
+    // 注意：这里只保留通用的游戏事件，具体游戏逻辑事件应使用 CustomEvent
+    
+    // 游戏生命周期
     GamePaused,
     GameResumed,
     GameOver,
-
+    
     LevelLoaded,
     LevelUnloaded,
-
-    SetDayNight,  // 昼夜切换
-
-    ScoreChanged,
-    HealthChanged,
 
     // ========== UI 事件（192-255） ==========
     UIButtonClicked,
@@ -199,25 +182,11 @@ inline const char* eventTypeIdToString(EventTypeId id) {
         case EventTypeId::DropFile: return "DropFile";
 
         // 游戏事件
-        case EventTypeId::PlayerMoved: return "PlayerMoved";
-        case EventTypeId::PlayerJumped: return "PlayerJumped";
-        case EventTypeId::PlayerDied: return "PlayerDied";
-        case EventTypeId::PlayerRespawned: return "PlayerRespawned";
-        case EventTypeId::EnemySpawned: return "EnemySpawned";
-        case EventTypeId::EnemyDied: return "EnemyDied";
-        case EventTypeId::ItemPickedUp: return "ItemPickedUp";
-        case EventTypeId::ItemDropped: return "ItemDropped";
-        case EventTypeId::ItemUsed: return "ItemUsed";
-        case EventTypeId::ToolSelected: return "ToolSelected";
-        case EventTypeId::ToolUsed: return "ToolUsed";
         case EventTypeId::GamePaused: return "GamePaused";
         case EventTypeId::GameResumed: return "GameResumed";
         case EventTypeId::GameOver: return "GameOver";
         case EventTypeId::LevelLoaded: return "LevelLoaded";
         case EventTypeId::LevelUnloaded: return "LevelUnloaded";
-        case EventTypeId::SetDayNight: return "SetDayNight";
-        case EventTypeId::ScoreChanged: return "ScoreChanged";
-        case EventTypeId::HealthChanged: return "HealthChanged";
 
         // UI 事件
         case EventTypeId::UIButtonClicked: return "UIButtonClicked";
