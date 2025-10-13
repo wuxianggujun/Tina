@@ -42,13 +42,9 @@ void SettingsScene::onEnter()
     createUI();
     m_events.setRoot(m_root.get());
 
-    // 注入引擎事件系统 + 节点直绑
+    // 注入引擎事件系统
     m_events.setGlobalEventSystem(&app()->events());
-    if (m_btnDay)   m_btnDay->setOnClick([this]{ onSetDay();   });
-    if (m_btnNight) m_btnNight->setOnClick([this]{ onSetNight(); });
-    if (m_btnFwd)   m_btnFwd->setOnClick([this]{ onFwdTime();  });
-    if (m_btnBack)  m_btnBack->setOnClick([this]{ onBackTime(); });
-    if (m_btnClose) m_btnClose->setOnClick([this]{ onBack();     });
+    // 按钮事件已在 createUI() 中绑定
 }
 
 void SettingsScene::onExit()
@@ -65,11 +61,17 @@ void SettingsScene::update(float dt)
 
 void SettingsScene::render()
 {
-    // 触摸 UI 视图
-    bgfx::touch(UI::VIEW_UI);
+    // 1. 触摸 UI 视图并设置正交投影
+    bgfx::touch(uiViewId());
+    setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
+
+    // 2. 渲染半透明遮罩（使用 SceneRenderer 新架构）
+    scene().drawOverlay(uiViewId(), Tina::Core::Color(0.0f, 0.0f, 0.0f, 0.5f));
+
+    // 3. 渲染 UI
     if (m_root) {
-        auto scope = ui().beginRender(UI::VIEW_UI);
-        m_root->render(UI::VIEW_UI, ui());
+        auto scope = ui().beginRender(uiViewId());
+        m_root->render(uiViewId(), ui());
     }
 }
 
@@ -91,10 +93,28 @@ void SettingsScene::applyWindowResize(int width, int height)
     // 调用基类的实际应用方法
     Scene::applyWindowResize(width, height);
 
-    // 重新创建 UI 以适应新的窗口大小
-    createUI();
+    // 计算新的缩放比例
+    float newScale = UI::UIUtils::calculateUIScale(width, height);
 
-    TINA_INFO("SettingsScene: 窗口大小更新为 {}x{}", width, height);
+    // 如果缩放变化非常大，才重建UI（避免频繁重建导致事件系统崩溃）
+    if (m_uiScale == 0.0f || std::abs(newScale - m_uiScale) > 0.3f) {
+        m_uiScale = newScale;
+        
+        // 🔧 关键修复：重建UI前先清空事件系统，避免访问已销毁的节点
+        m_events.setRoot(nullptr);
+        
+        createUI();
+        TINA_INFO("SettingsScene: 重建UI，新缩放比例: {}", m_uiScale);
+    } else {
+        // 更新缩放但不重建（简单调整布局）
+        m_uiScale = newScale;
+        if (m_root) {
+            m_root->setSize((float)width, (float)height);
+            m_root->requestLayout();
+            m_root->performLayoutNow();
+        }
+        TINA_INFO("SettingsScene: 更新布局，缩放比例: {}", m_uiScale);
+    }
 }
 
 void SettingsScene::handleInput()
@@ -107,6 +127,11 @@ void SettingsScene::handleInput()
     // ESC 键：返回
     if (input.isKeyPressed(Engine::KeyCode::Escape)) {
         onBack();
+        return;
+    }
+
+    // 🔧 安全检查：只有在UI根节点有效时才处理鼠标事件
+    if (!m_root) {
         return;
     }
 
@@ -126,15 +151,16 @@ void SettingsScene::createUI()
     float scale = UI::UIUtils::calculateUIScale(m_pixelWidth, m_pixelHeight);
 
     // 使用与暂停页一致的"面板 + VBox"布局
-    const float panelW = 520.0f * scale;
-    const float pad    = 16.0f * scale;
-    const float spacing= 12.0f * scale;
+    const float panelW = 600.0f * scale;
+    const float pad    = 20.0f * scale;
+    const float spacing= 16.0f * scale;
     const float btnH   = 50.0f * scale;
-    const float titleH = 44.0f * scale;
+    const float titleH = 48.0f * scale;
+    const float sectionH = 36.0f * scale;
 
     // 使用新的API：createChild
     auto* panel = m_root->createChild<UI::UIPanel>("SettingsPanel");
-    panel->setColor(0.10f,0.10f,0.12f,0.90f);
+    panel->setColor(0.10f,0.10f,0.12f,0.92f);
     panel->setSize(panelW, 1.0f);
     panel->setHeightWrap();
 
@@ -144,11 +170,22 @@ void SettingsScene::createUI()
     vbox->setPadding(pad, pad);
     vbox->setSpacing(spacing);
 
+    // 主标题
     auto* title = vbox->createChild<UI::UILabel>();
-    title->setText("设置 / 调试");
+    title->setText("游戏设置");
     title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
     title->setSize(panelW - pad*2, titleH);
 
+    // 辅助函数：添加分组标题
+    auto addSection = [&](const char* text) {
+        auto* section = vbox->createChild<UI::UILabel>();
+        section->setText(text);
+        section->setAlignment(UI::UILabel::TextAlignH::Left, UI::UILabel::TextAlignV::Center);
+        section->setSize(panelW - pad*2, sectionH);
+        return section;
+    };
+
+    // 辅助函数：添加按钮行
     auto addRowButton = [&](const char* text){
         auto* row = vbox->createChild<UI::UIHStack>("Row");
         row->setSize(panelW - pad*2, btnH);
@@ -160,24 +197,48 @@ void SettingsScene::createUI()
         return btn;
     };
 
-    m_btnDay   = addRowButton("切换到白天");
-    m_btnNight = addRowButton("切换到黑夜");
-    m_btnFwd   = addRowButton("时间 +10%");
-    m_btnBack  = addRowButton("时间 -10%");
-    m_btnClose = addRowButton("返回");
+    // === 音频设置 ===
+    addSection("音频设置");
+    m_btnDay   = addRowButton("主音量: 100%");  // TODO: 实现音量调节
+    m_btnNight = addRowButton("音效音量: 100%"); // TODO: 实现音效音量
+    m_btnFwd   = addRowButton("音乐音量: 100%"); // TODO: 实现音乐音量
 
-    // 绑定点击（内部经事件系统按ID路由）
-    if (m_btnDay)   m_btnDay->setOnClick([this]{ onSetDay();   });
-    if (m_btnNight) m_btnNight->setOnClick([this]{ onSetNight(); });
-    if (m_btnFwd)   m_btnFwd->setOnClick([this]{ onFwdTime();  });
-    if (m_btnBack)  m_btnBack->setOnClick([this]{ onBackTime(); });
-    if (m_btnClose) m_btnClose->setOnClick([this]{ onBack();     });
+    // === 图形设置 ===
+    addSection("图形设置");
+    m_btnBack  = addRowButton("全屏模式: 关闭"); // TODO: 实现全屏切换
+
+    // === 控制设置 ===
+    addSection("控制设置");
+    auto* btnControls = addRowButton("按键绑定..."); // TODO: 实现按键绑定界面
+    btnControls->setOnClick([]{ 
+        TINA_INFO("SettingsScene: 按键绑定功能待实现");
+    });
+
+    // 返回按钮
+    m_btnClose = addRowButton("返回");
+    m_btnClose->setNormalColor(0.3f, 0.3f, 0.35f, 0.95f);
+    m_btnClose->setHoverColor(0.4f, 0.4f, 0.45f, 1.0f);
+    m_btnClose->setPressedColor(0.2f, 0.2f, 0.25f, 1.0f);
+
+    // 绑定点击（暂时使用占位功能）
+    if (m_btnDay)   m_btnDay->setOnClick([]{ 
+        TINA_INFO("SettingsScene: 主音量调节功能待实现");
+    });
+    if (m_btnNight) m_btnNight->setOnClick([]{ 
+        TINA_INFO("SettingsScene: 音效音量调节功能待实现");
+    });
+    if (m_btnFwd)   m_btnFwd->setOnClick([]{ 
+        TINA_INFO("SettingsScene: 音乐音量调节功能待实现");
+    });
+    if (m_btnBack)  m_btnBack->setOnClick([]{ 
+        TINA_INFO("SettingsScene: 全屏切换功能待实现");
+    });
+    if (m_btnClose) m_btnClose->setOnClick([this]{ onBack(); });
 
     // 触发布局并居中
-    // 使用performLayoutNow()确保布局立即完成
     vbox->requestLayout();
     panel->requestLayout();
-    panel->performLayoutNow();  // 强制立即执行布局
+    panel->performLayoutNow();
 
     // 获取实际高度并居中
     float panelHeight = panel->getSize().y;
@@ -185,7 +246,7 @@ void SettingsScene::createUI()
     float centerY = (m_pixelHeight - panelHeight) * 0.5f;
     panel->setPosition(centerX, centerY);
 
-    // 更新事件系统根节点，确保重建后事件命中正确并自动注入总线
+    // 更新事件系统根节点
     m_events.setRoot(m_root.get());
 }
 
@@ -194,35 +255,8 @@ void SettingsScene::onBack()
     app()->scenes().requestPop();
 }
 
-void SettingsScene::onSetDay()
-{
-    // 设定至白天中段（默认 0.25）
-    Tina::Game::Events::SetDayNight event;
-    event.normalized = 0.25f;
-    app()->events().trigger(event);
-}
-
-void SettingsScene::onSetNight()
-{
-    // 设定至黑夜中段（默认 0.75）
-    Tina::Game::Events::SetDayNight event;
-    event.normalized = 0.75f;
-    app()->events().trigger(event);
-}
-
-void SettingsScene::onFwdTime()
-{
-    Tina::Game::Events::AdjustDayNight event;
-    event.delta = +0.10f;
-    app()->events().trigger(event);
-}
-
-void SettingsScene::onBackTime()
-{
-    Tina::Game::Events::AdjustDayNight event;
-    event.delta = -0.10f;
-    app()->events().trigger(event);
-}
+// 这些方法已移除，设置界面不再包含昼夜调试功能
+// 昼夜调试功能保留在 PauseScene 中
 
 // 无需集中路由函数，事件由路由器直接回调
 

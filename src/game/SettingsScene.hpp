@@ -1,6 +1,6 @@
 //
-// SettingsScene - 设置/调试页面
-// - 目的：快速切换昼夜、暂停/恢复昼夜推进等
+// SettingsScene - 游戏设置页面
+// - 目的：配置游戏选项（音量、画质、按键绑定等）
 //
 
 #pragma once
@@ -36,10 +36,6 @@ private:
     void createUI();
     void handleInput();     // 处理输入
     void onBack();
-    void onSetDay();
-    void onSetNight();
-    void onFwdTime();
-    void onBackTime();
 
 private:
     Memory::UniquePtr<UI::UINode> m_root;
@@ -53,6 +49,7 @@ private:
 
     int m_pixelWidth = 1280;
     int m_pixelHeight = 720;
+    float m_uiScale = 0.0f;  // UI缩放比例（用于判断是否需要重建UI）
 
     enum ButtonId : uint32_t {
         BTN_DAY   = 201,

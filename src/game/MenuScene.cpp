@@ -4,6 +4,7 @@
 
 #include "MenuScene.hpp"
 #include "GameScene.hpp"
+#include "SettingsScene.hpp"
 #include "../engine/Application.hpp"
 #include "../engine/SceneManager.hpp"
 #include "../engine/InputSystem.hpp"  // 添加 InputSystem 头文件
@@ -332,7 +333,8 @@ void MenuScene::onStartClicked() {
 
 void MenuScene::onSettingsClicked() {
     TINA_INFO("MenuScene: 设置按钮被点击");
-    // TODO: 实现设置场景
+    // 推入设置场景（不替换，可以返回）
+    app()->scenes().push(Memory::MakeUnique<SettingsScene>());
 }
 
 void MenuScene::onQuitClicked() {

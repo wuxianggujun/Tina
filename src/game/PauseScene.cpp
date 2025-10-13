@@ -348,9 +348,11 @@ void PauseScene::onSetDay() {
 }
 
 void PauseScene::onSetNight() {
+    TINA_INFO("PauseScene::onSetNight - 触发设置黑夜事件 (normalized=0.75)");
     Tina::Game::Events::SetDayNight event;
     event.normalized = 0.75f;
     app()->events().trigger(event);
+    TINA_INFO("PauseScene::onSetNight - 事件已触发");
 }
 
 // 已移除"暂停/恢复昼夜"功能

@@ -200,7 +200,14 @@ public:
     ~UIEventDispatcher() = default;
 
     // 设置根节点
-    void setRoot(UINode* root) { m_root = root; m_needRebuildIndex = true; }
+    void setRoot(UINode* root) { 
+        m_root = root; 
+        m_needRebuildIndex = true;
+        // 🔧 关键修复：清空所有缓存的节点指针，避免访问已销毁的节点
+        m_hoveredNode = nullptr;
+        m_pressedNode = nullptr;
+        m_focusedNode = nullptr;
+    }
 
     // 分发事件（完整的捕获-目标-冒泡流程）
     void dispatchEvent(UIEvent& event);

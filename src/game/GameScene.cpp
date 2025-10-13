@@ -1060,7 +1060,9 @@ void GameScene::triggerPlayerEvents(float prevX, float prevY, bool wasOnGround)
 // === 强类型事件处理 ===
 void GameScene::onSetDayNight(const Tina::Game::Events::SetDayNight& e)
 {
+    TINA_INFO("GameScene::onSetDayNight - 接收到事件 normalized={:.2f}", e.normalized);
     m_dayNight.setNormalizedTime(e.normalized);
+    TINA_INFO("GameScene::onSetDayNight - 昼夜时间已设置为 {:.2f}", m_dayNight.normalizedTime());
 }
 
 void GameScene::onAdjustDayNight(const Tina::Game::Events::AdjustDayNight& e)
