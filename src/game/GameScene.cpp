@@ -139,7 +139,7 @@ void GameScene::onResume()
             auto controlled = m_ecsWorld->getControlledEntity();
             if (controlled != entt::null) {
                 auto& reg = m_ecsWorld->registry();
-                if (reg.any_of<ECS::Transform, ECS::PhysicsBody>(controlled)) {
+                if (reg.all_of<ECS::Transform, ECS::PhysicsBody>(controlled)) {
                     auto& tr = reg.get<ECS::Transform>(controlled);
                     auto& pb = reg.get<ECS::PhysicsBody>(controlled);
 
@@ -224,7 +224,7 @@ void GameScene::onWindowSizeChanged(int width, int height)
         auto controlled = m_ecsWorld->getControlledEntity();
         if (controlled != entt::null) {
             auto& reg = m_ecsWorld->registry();
-            if (reg.any_of<ECS::Transform, ECS::PhysicsBody>(controlled)) {
+            if (reg.all_of<ECS::Transform, ECS::PhysicsBody>(controlled)) {
                 auto& tr = reg.get<ECS::Transform>(controlled);
                 auto& pb = reg.get<ECS::PhysicsBody>(controlled);
 
@@ -630,15 +630,18 @@ void GameScene::spawnCharacters(int spawnX, int spawnY)
     // 7. 初始化相机位置到玩家位置（避免从地图左下角开始）
     if (camera() && m_ecsWorld && m_playerEntity != entt::null) {
         auto& registry = m_ecsWorld->registry();
-        if (registry.valid(m_playerEntity) && registry.all_of<ECS::Transform>(m_playerEntity)) {
-            auto& playerTransform = registry.get<ECS::Transform>(m_playerEntity);
-            // 将相机中心设置到玩家位置
+        if (registry.valid(m_playerEntity) && registry.all_of<ECS::Transform, ECS::PhysicsBody>(m_playerEntity)) {
+            auto& tr = registry.get<ECS::Transform>(m_playerEntity);
+            auto& pb = registry.get<ECS::PhysicsBody>(m_playerEntity);
+            // 将相机中心设置到玩家中心
+            float centerX = tr.x + pb.width * 0.5f;
+            float centerY = tr.y + pb.height * 0.5f;
             float viewW = camera()->viewW();
             float viewH = camera()->viewH();
-            float initialCamX = playerTransform.x - viewW * 0.5f;
-            float initialCamY = playerTransform.y - viewH * 0.5f;
+            float initialCamX = centerX - viewW * 0.5f;
+            float initialCamY = centerY - viewH * 0.5f;
             camera()->setPosition(initialCamX, initialCamY);
-            TINA_INFO("相机初始化到玩家位置: ({}, {})", playerTransform.x, playerTransform.y);
+            TINA_INFO("相机初始化到玩家位置: ({}, {})", centerX, centerY);
         }
     }
 
@@ -772,7 +775,7 @@ void GameScene::updateCamera(float dt)
     auto controlled = m_ecsWorld->getControlledEntity();
     if (controlled != entt::null) {
         auto& reg = m_ecsWorld->registry();
-        if (reg.any_of<ECS::Transform, ECS::PhysicsBody>(controlled)) {
+        if (reg.all_of<ECS::Transform, ECS::PhysicsBody>(controlled)) {
             auto& tr = reg.get<ECS::Transform>(controlled);
             auto& pb = reg.get<ECS::PhysicsBody>(controlled);
 
@@ -899,6 +902,35 @@ void GameScene::onSwitchControlClicked(const Tina::Game::Events::SwitchControlEn
 
     // 切换控制到点击的角色
     m_ecsWorld->switchControl(m_clickedEntity);
+    
+    // 立刻将相机对准新的受控角色（避免等待平滑插值）
+    if (camera()) {
+        auto controlled = m_ecsWorld->getControlledEntity();
+        if (controlled != entt::null) {
+            auto& reg = m_ecsWorld->registry();
+            if (reg.all_of<ECS::Transform, ECS::PhysicsBody>(controlled)) {
+                auto& tr = reg.get<ECS::Transform>(controlled);
+                auto& pb = reg.get<ECS::PhysicsBody>(controlled);
+
+                float centerX = tr.x + pb.width * 0.5f;
+                float centerY = tr.y + pb.height * 0.5f;
+                float viewW = camera()->viewW();
+                float viewH = camera()->viewH();
+                float camX = centerX - viewW * 0.5f;
+                float camY = centerY - viewH * 0.5f;
+
+                if (m_tileMap) {
+                    int mapW = m_tileMap->width();
+                    int mapH = m_tileMap->height();
+                    camX = std::clamp(camX, 0.0f, std::max(0.0f, (float)mapW - viewW));
+                    camY = std::clamp(camY, 0.0f, std::max(0.0f, (float)mapH - viewH));
+                }
+
+                camera()->setPosition(camX, camY);
+                TINA_INFO("相机已对准新受控角色: ({:.1f},{:.1f})", centerX, centerY);
+            }
+        }
+    }
     
     // 更新面板显示
     auto& reg = m_ecsWorld->registry();

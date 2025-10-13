@@ -188,27 +188,20 @@ void Scene::renderFrame() {
 
 // 准备视图（自动设置所有配置的视图）
 void Scene::prepareViews() {
-    // 仅在视图需要更新或首次渲染时重新配置
-    if (m_viewDirty || m_viewSetup.empty()) {
-        // 获取子类的视图配置
+    // 如果还没有视图配置，或标记为需要更新，则刷新基本的视图矩形/清屏等静态参数
+    if (m_viewSetup.empty()) {
         m_viewSetup = getViewSetup();
+        m_viewDirty = true;
+    }
 
-        // 设置每个视图
+    if (m_viewDirty) {
         for (const auto& view : m_viewSetup) {
             // 设置视图矩形（所有视图都使用全屏）
             bgfx::setViewRect(view.id, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
 
-            // 根据类型设置视图变换
-            switch (view.type) {
-            case ViewSetup::World3D:
-                setupWorldView(view.id);
-                break;
-
-            case ViewSetup::UI2D:
-            case ViewSetup::Background2D:
-                // 使用已有的setupUIView方法
+            // UI/背景视图的正交投影在尺寸变化时更新即可
+            if (view.type == ViewSetup::UI2D || view.type == ViewSetup::Background2D) {
                 setupUIView(view.id, m_pixelWidth, m_pixelHeight);
-                break;
             }
 
             // 如果需要清屏，设置清屏参数
@@ -216,8 +209,14 @@ void Scene::prepareViews() {
                 bgfx::setViewClear(view.id, view.clearFlags, view.clearColor, 1.0f, 0);
             }
         }
-
         m_viewDirty = false;
+    }
+
+    // 相机变换需要每帧更新（相机可能在update中移动）
+    for (const auto& view : m_viewSetup) {
+        if (view.type == ViewSetup::World3D) {
+            setupWorldView(view.id);
+        }
     }
 }
 
