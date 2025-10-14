@@ -138,21 +138,24 @@ void WorldSelectScene::createUI() {
     m_createDialog->setZIndex(1000);    // 设置高zIndex确保对话框在最上层
     m_createDialog->setEventSystem(&app()->events());
 
-    // 在对话框内容区域添加提示文本和输入框
+    // 在对话框内容区域添加提示文本和输入框（使用响应式布局）
     auto contentArea = m_createDialog->getContentArea();
     if (contentArea) {
-        // 提示文本
+        // 获取ContentArea的实际宽度
+        auto contentSize = contentArea->getSize();
+        float contentW = contentSize.x;
+        
+        // 提示文本（宽度跟随ContentArea，高度固定）
         auto label = contentArea->createChild<UI::UILabel>("PromptLabel");
         label->setText("请输入世界名称：");
-        label->setFontPx(20);
         label->setPosition(0, 20);
-        label->setSize(460, 30);
+        label->setSize(contentW, 30);  // 使用ContentArea的宽度
 
-        // 文本输入框
+        // 文本输入框（宽度跟随ContentArea，高度固定）
         auto textEdit = contentArea->createChild<UI::UITextEdit>("WorldNameInput");
         m_worldNameInput = textEdit;
         m_worldNameInput->setPosition(0, 60);
-        m_worldNameInput->setSize(460, 40);
+        m_worldNameInput->setSize(contentW, 40);  // 使用ContentArea的宽度
         m_worldNameInput->setPlaceholder("例如：我的世界");
         m_worldNameInput->setMaxLength(50);
         m_worldNameInput->setFontPx(18);

@@ -44,6 +44,12 @@ enum class LayoutDim : uint8_t {
     WrapContent     // 由容器测量子项后回填（或通用节点根据子项包裹）
 };
 
+// 尺寸模式（响应式布局）
+enum class SizeMode : uint8_t {
+    Fixed = 0,      // 固定尺寸（像素）
+    Percent         // 百分比尺寸（相对于父节点）
+};
+
 // UI 对齐系统：支持水平和垂直方向独立对齐
 // 
 // 设计理念：
@@ -183,6 +189,7 @@ public:
     // 设置尺寸（支持链式调用）
     UINode* setSize(float w, float h) { 
         m_size = {w, h}; 
+        m_sizeMode = SizeMode::Fixed;  // 固定尺寸
         m_dirty = true; 
         m_layoutW = LayoutDim::Exact; 
         m_layoutH = LayoutDim::Exact;
@@ -195,6 +202,31 @@ public:
             applyAlignment();
         }
         
+        return this;
+    }
+    
+    // 设置百分比尺寸（相对于父节点，支持链式调用）
+    UINode* setSizePercent(float widthPercent, float heightPercent) {
+        m_sizePercent = {widthPercent, heightPercent};
+        m_sizeMode = SizeMode::Percent;
+        m_dirty = true;
+        
+        // 立即计算实际尺寸
+        updatePercentSize();
+        
+        return this;
+    }
+    
+    // 设置最小/最大尺寸约束
+    UINode* setMinSize(float minW, float minH) {
+        m_minSize = {minW, minH};
+        updatePercentSize();  // 重新应用约束
+        return this;
+    }
+    
+    UINode* setMaxSize(float maxW, float maxH) {
+        m_maxSize = {maxW, maxH};
+        updatePercentSize();  // 重新应用约束
         return this;
     }
     
@@ -401,6 +433,7 @@ public:
         for (auto& child : m_children) {
             if (child) {
                 child->m_dirty = true;  // 标记为dirty，强制重新计算世界坐标
+                child->updatePercentSize();  // ✅ 更新百分比尺寸
                 child->onWindowSizeChanged(width, height);
             }
         }
@@ -462,6 +495,33 @@ private:
             case VAlign::Bottom: m_position.y = -m_size.y; break;
         }
     }
+    
+    // 更新百分比尺寸（根据父节点尺寸计算实际尺寸）
+    void updatePercentSize() {
+        if (m_sizeMode != SizeMode::Percent || !m_parent) return;
+        
+        auto parentSize = m_parent->getSize();
+        
+        // 计算百分比尺寸
+        float w = parentSize.x * m_sizePercent.x;
+        float h = parentSize.y * m_sizePercent.y;
+        
+        // 应用最小/最大尺寸约束
+        w = std::max(m_minSize.x, std::min(m_maxSize.x, w));
+        h = std::max(m_minSize.y, std::min(m_maxSize.y, h));
+        
+        // 更新实际尺寸
+        if (m_size.x != w || m_size.y != h) {
+            m_size = {w, h};
+            m_dirty = true;
+            markChildrenDirty();
+            
+            // 重新应用对齐
+            if ((m_hAlign != HAlign::Left || m_vAlign != VAlign::Top) && !m_manualPosition) {
+                applyAlignment();
+            }
+        }
+    }
 
 protected:
     std::string m_name;
@@ -479,6 +539,12 @@ protected:
     LayoutDim m_layoutW = LayoutDim::Exact;
     LayoutDim m_layoutH = LayoutDim::Exact;
     float m_marginL = 0.0f, m_marginT = 0.0f, m_marginR = 0.0f, m_marginB = 0.0f;
+    
+    // 响应式尺寸系统
+    SizeMode m_sizeMode = SizeMode::Fixed;           // 尺寸模式
+    Tina::Math::Vec2 m_sizePercent{1.0f, 1.0f};      // 百分比尺寸（0.0-1.0）
+    Tina::Math::Vec2 m_minSize{0, 0};                // 最小尺寸约束
+    Tina::Math::Vec2 m_maxSize{10000, 10000};        // 最大尺寸约束
 
     // 世界变换缓存
     Tina::Math::Vec2 m_worldPos{0, 0};

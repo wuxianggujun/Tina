@@ -73,6 +73,7 @@ protected:
 private:
     void createDialogUI();
     void updateDialogPosition();  // 更新对话框居中位置
+    void relayoutDialogContent(); // 重新布局对话框内容（响应式）
     void onConfirmClicked();
     void onCancelClicked();
     void handleKeyPressed(const Tina::Engine::Events::KeyPressedEvent& e);

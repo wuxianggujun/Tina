@@ -42,6 +42,20 @@ public:
     UIPanel* setHeight(float h) { UINode::setHeight(h); return this; }
     UIPanel* setPosition(float x, float y) { UINode::setPosition(x, y); return this; }
     
+    // 响应式尺寸方法
+    UIPanel* setSizePercent(float widthPercent, float heightPercent) { 
+        UINode::setSizePercent(widthPercent, heightPercent); 
+        return this; 
+    }
+    UIPanel* setMinSize(float minW, float minH) { 
+        UINode::setMinSize(minW, minH); 
+        return this; 
+    }
+    UIPanel* setMaxSize(float maxW, float maxH) { 
+        UINode::setMaxSize(maxW, maxH); 
+        return this; 
+    }
+    
     // 对齐方法
     UIPanel* setAlign(HAlign h, VAlign v) { UINode::setAlign(h, v); return this; }
     UIPanel* setHAlign(HAlign h) { UINode::setHAlign(h); return this; }
