@@ -7,6 +7,7 @@
 #include "InputSystem.hpp"
 #include "../ui/UICore.hpp"
 #include "../ui/UINode.hpp"  // 引入UINode完整定义
+#include "../ui/UILayoutManager.hpp"  // 引入UILayoutManager完整定义
 #include "../renderer/RenderQueue.hpp"
 #include "../core/Log.hpp"
 #include "SceneRenderer.hpp"
@@ -23,6 +24,9 @@ Scene::Scene() {
     // 设置默认视口（会在窗口大小更新时自动调整）
     m_camera->setViewportPixels(m_pixelWidth, m_pixelHeight);
     m_camera->setViewHeightWorld(20.0f);  // 默认视野高度20个单位
+    
+    // 创建UI布局管理器（每个Scene拥有自己的实例）
+    m_uiLayoutManager = Memory::MakeUnique<UI::UILayoutManager>();
 }
 
 // 虚析构函数定义（必须在此处，RenderQueue是完整类型）
@@ -37,11 +41,17 @@ InputSystem* Scene::input() const {
 void Scene::addUIRoot(UI::UINode* root) {
     if (root && std::find(m_uiRoots.begin(), m_uiRoots.end(), root) == m_uiRoots.end()) {
         m_uiRoots.push_back(root);
+        
+        // 为整个UI树设置布局管理器并注册
+        registerUITreeToLayoutManager(root);
     }
 }
 
 void Scene::removeUIRoot(UI::UINode* root) {
     if (root) {
+        // 从布局管理器注销整个UI树
+        unregisterUITreeFromLayoutManager(root);
+        
         m_uiRoots.erase(
             std::remove(m_uiRoots.begin(), m_uiRoots.end(), root),
             m_uiRoots.end()
@@ -248,6 +258,42 @@ void Scene::setupWorldView(uint16_t viewId) {
         bx::mtxIdentity(identity);
         bgfx::setViewTransform(viewId, identity, identity);
     }
+}
+
+// 递归注册UI树到布局管理器
+void Scene::registerUITreeToLayoutManager(UI::UINode* node) {
+    if (!node || !m_uiLayoutManager) return;
+    
+    // 设置布局管理器指针
+    node->setLayoutManager(m_uiLayoutManager.get());
+    
+    // 注册节点
+    m_uiLayoutManager->registerNode(node);
+    
+    // 递归注册所有子节点
+    for (size_t i = 0; i < node->getChildCount(); ++i) {
+        if (auto* child = node->getChild(i)) {
+            registerUITreeToLayoutManager(child);
+        }
+    }
+}
+
+// 递归注销UI树从布局管理器
+void Scene::unregisterUITreeFromLayoutManager(UI::UINode* node) {
+    if (!node || !m_uiLayoutManager) return;
+    
+    // 递归注销所有子节点
+    for (size_t i = 0; i < node->getChildCount(); ++i) {
+        if (auto* child = node->getChild(i)) {
+            unregisterUITreeFromLayoutManager(child);
+        }
+    }
+    
+    // 注销节点
+    m_uiLayoutManager->unregisterNode(node);
+    
+    // 清除布局管理器指针
+    node->setLayoutManager(nullptr);
 }
 
 } // namespace Tina::Engine

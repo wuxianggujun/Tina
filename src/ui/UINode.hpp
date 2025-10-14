@@ -236,6 +236,10 @@ public:
     void setEventSystem(Tina::Engine::EventSystem* eventSystem) { m_eventSystem = eventSystem; }
     Tina::Engine::EventSystem* eventSystem() const { return m_eventSystem; }
 
+    // === 布局管理器支持 ===
+    void setLayoutManager(UILayoutManager* layoutManager) { m_layoutManager = layoutManager; }
+    UILayoutManager* layoutManager() const { return m_layoutManager; }
+
 protected:
     // === 子类可覆盖的回调 ===
 
@@ -291,6 +295,9 @@ protected:
 
     // 引擎事件系统（由场景设置）
     Tina::Engine::EventSystem* m_eventSystem = nullptr;
+
+    // 布局管理器（由场景设置）
+    UILayoutManager* m_layoutManager = nullptr;
 
     // ==================== 结构变更版本（用于命中索引置脏） ====================
 public:

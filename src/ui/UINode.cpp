@@ -15,8 +15,8 @@ void UINode::bumpTreeVersion() { s_treeVersion.fetch_add(1, std::memory_order_re
 UINode::UINode(const std::string& name)
     : m_name(name)
 {
-    // 注册到布局管理器
-    GetLayoutManager().registerNode(this);
+    // 注意：不再自动注册到全局布局管理器
+    // 布局管理器由Scene设置，在addUIRoot时注册
     
     // 自动获取并设置引擎事件系统
     if (auto* app = Engine::Application::instance()) {
@@ -26,8 +26,10 @@ UINode::UINode(const std::string& name)
 
 UINode::~UINode()
 {
-    // 从布局管理器注销
-    GetLayoutManager().unregisterNode(this);
+    // 从布局管理器注销（如果有）
+    if (m_layoutManager) {
+        m_layoutManager->unregisterNode(this);
+    }
 
     // 新版：自动清理所有子节点（通过UniquePtr）
     // 子节点会递归销毁其子节点
@@ -135,22 +137,22 @@ Tina::Math::Vec2 UINode::getWorldPosition()
 
 void UINode::requestLayout()
 {
-    if (m_layoutDirty) return;  // 已经标记，无需重复
-
     m_layoutDirty = true;
-
-    // 布局变化会影响坐标，标记坐标也需要更新
     m_dirty = true;
 
-    // 通知布局管理器
-    GetLayoutManager().requestLayout(this);
+    // 通知布局管理器（如果有）
+    if (m_layoutManager) {
+        m_layoutManager->requestLayout(this);
+    }
 }
 
 void UINode::performLayoutNow()
 {
     if (!m_layoutDirty) return;  // 布局是最新的，无需重新计算
 
-    GetLayoutManager().performLayoutNow(this);
+    if (m_layoutManager) {
+        m_layoutManager->performLayoutNow(this);
+    }
 }
 
 // === 点测试 ===

@@ -10,7 +10,6 @@
 #include <unordered_set>
 #include <queue>
 #include <algorithm>
-#include "../core/Singleton.hpp"
 #include "../core/Log.hpp"
 
 namespace Tina::UI {
@@ -18,8 +17,8 @@ namespace Tina::UI {
 // 前向声明
 class UINode;
 
-class UILayoutManager : public Core::Singleton<UILayoutManager> {
-    friend class Core::Singleton<UILayoutManager>;
+// 注意：不再是单例，每个Scene拥有自己的实例
+class UILayoutManager {
 
 public:
     // 注册/注销节点
@@ -46,10 +45,17 @@ public:
     void setBatchMode(bool enabled) { m_batchMode = enabled; }
     bool isBatchMode() const { return m_batchMode; }
 
-private:
+public:
     UILayoutManager() = default;
     ~UILayoutManager() = default;
+    
+    // 禁止拷贝和移动（保持资源管理安全）
+    UILayoutManager(const UILayoutManager&) = delete;
+    UILayoutManager& operator=(const UILayoutManager&) = delete;
+    UILayoutManager(UILayoutManager&&) = delete;
+    UILayoutManager& operator=(UILayoutManager&&) = delete;
 
+private:
     // 构建节点的布局依赖图
     void buildDependencyGraph(UINode* root, std::unordered_set<UINode*>& visited,
                             std::vector<UINode*>& sortedNodes);
@@ -83,10 +89,5 @@ private:
     size_t m_totalLayoutsPerformed = 0;
     size_t m_layoutBatchCount = 0;
 };
-
-// 便捷访问
-inline UILayoutManager& GetLayoutManager() {
-    return UILayoutManager::getInstance();
-}
 
 } // namespace Tina::UI

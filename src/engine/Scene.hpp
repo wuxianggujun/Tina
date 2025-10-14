@@ -17,6 +17,7 @@
 namespace Tina::UI {
     class UIRenderer;
     class UINode;  // 前向声明UINode
+    class UILayoutManager;  // 前向声明UILayoutManager
 }
 
 namespace Tina::Renderer {
@@ -185,6 +186,10 @@ private:
 
     // 设置World3D视图
     void setupWorldView(uint16_t viewId);
+    
+    // UI树管理辅助方法
+    void registerUITreeToLayoutManager(UI::UINode* node);
+    void unregisterUITreeFromLayoutManager(UI::UINode* node);
 
 private:
     Application* m_app = nullptr;  // Application实例指针（不持有所有权）
@@ -216,6 +221,9 @@ private:
 
     // UI根节点列表（框架自动管理resize通知）
     Container::Vector<UI::UINode*> m_uiRoots;
+    
+    // UI布局管理器（每个Scene拥有自己的实例）
+    Memory::UniquePtr<UI::UILayoutManager> m_uiLayoutManager;
 
     // SceneManager可以访问私有成员（设置m_app和m_active）
     friend class SceneManager;
