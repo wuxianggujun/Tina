@@ -3,10 +3,9 @@
 
 #include "UINode.hpp"
 #include "UIComponents.hpp"
+#include "UILayoutContainers.hpp"  // ✅ 添加布局容器
 #include "../core/Color.hpp"
-#include "../core/Container.hpp"
-#include "../engine/SubscriptionToken.hpp"
-#include "../engine/EngineEvents.hpp"
+#include "../engine/EventSystem.hpp"
 #include <functional>
 
 namespace Tina::UI {
@@ -88,7 +87,8 @@ private:
     // UI组件
     UIPanel* m_dialogPanel = nullptr;    // 对话框面板
     UILabel* m_titleLabel = nullptr;     // 标题标签
-    UINode* m_contentArea = nullptr;     // 内容区域
+    UIVBox* m_contentArea = nullptr;     // ✅ 内容区域（改为VBox）
+    UIHBox* m_buttonBox = nullptr;       // ✅ 按钮区域（新增HBox）
     UIButton* m_btnConfirm = nullptr;    // 确定按钮
     UIButton* m_btnCancel = nullptr;     // 取消按钮
 

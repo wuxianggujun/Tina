@@ -1,5 +1,7 @@
 #include "UIDialog.hpp"
 #include "UICore.hpp"
+#include "../engine/InputCodes.hpp"   // ✅ KeyCode定义
+#include "../engine/EngineEvents.hpp" // ✅ KeyPressedEvent定义
 
 namespace Tina::UI {
 
@@ -114,53 +116,53 @@ void UIDialog::createDialogUI() {
     TINA_DEBUG("  对话框世界位置: ({}, {})", panelWorldPos.x, panelWorldPos.y);
     TINA_DEBUG("  预期中心: ({}, {})", parentSize.x * 0.5f, parentSize.y * 0.5f);
 
-    // ✅ 使用响应式布局：所有子元素相对于对话框面板
+    // ✅ 使用布局容器：简洁优雅的布局
     
-    // 边框效果（通过一个稍大的底层面板实现）
+    // 边框效果
     auto border = m_dialogPanel->createChild<UIPanel>("BorderPanel");
     border->setPosition(-3, -3);
-    border->setSizePercent(1.0f, 1.0f);  // ✅ 100%填充（会被position偏移）
+    border->setSizePercent(1.0f, 1.0f);
     border->setColor(Tina::Core::Color(0.05f, 0.05f, 0.1f, 1.0f));
     border->setZIndex(-1);
 
-    // 标题栏（使用百分比宽度，固定高度）
+    // 标题栏
     auto titleLabel = m_dialogPanel->createChild<UILabel>("TitleLabel");
     m_titleLabel = titleLabel;
     m_titleLabel->setText(m_title);
     m_titleLabel->setColor(m_titleColor);
     m_titleLabel->setFontPx(24);
     m_titleLabel->setPosition(20, 20);
-    m_titleLabel->setSize(dialogW - 40, 40);  // 宽度 = 对话框宽度 - 左右边距
+    m_titleLabel->setSize(dialogW - 40, 40);
     m_titleLabel->setAlignment(UILabel::TextAlignH::Center, UILabel::TextAlignV::Center);
 
-    // 内容区域（使用百分比尺寸）
-    auto content = m_dialogPanel->createChild<UINode>("ContentArea");
-    m_contentArea = content;
+    // ✅ 内容区域（使用VBox）
+    auto contentVBox = m_dialogPanel->createChild<UIVBox>("ContentVBox");
+    m_contentArea = contentVBox;
     m_contentArea->setPosition(20, 70);
-    m_contentArea->setSize(dialogW - 40, dialogH - 130);  // 动态计算尺寸
+    m_contentArea->setSpacing(20);       // 子元素间距20px
+    m_contentArea->setPadding(0);        // 无内边距（外部已有边距）
+    m_contentArea->setFillWidth(true);   // 子元素宽度自动填充
+    m_contentArea->setSize(dialogW - 40, dialogH - 130);  // ✅ 最后设置尺寸，触发布局
 
-    // 按钮区域（使用相对布局）
-    const float btnW = 120.0f;
-    const float btnH = 40.0f;
-    const float btnGap = 20.0f;
-    const float btnY = dialogH - 60.0f;  // ✅ 距离底部60px（动态计算）
-    const float cx = dialogW * 0.5f;
-    const float leftX  = cx - (btnGap * 0.5f) - btnW;
-    const float rightX = cx + (btnGap * 0.5f);
+    // ✅ 按钮区域（使用HBox）
+    auto buttonHBox = m_dialogPanel->createChild<UIHBox>("ButtonHBox");
+    m_buttonBox = buttonHBox;
+    m_buttonBox->setSize(dialogW, 60);
+    m_buttonBox->setPosition(0, dialogH - 60);
+    m_buttonBox->setSpacing(20);
+    m_buttonBox->setJustify(UIHBox::Justify::Center);  // 居中对齐
 
-    auto btnCancel = m_dialogPanel->createChild<UIButton>("BtnCancel");
+    auto btnCancel = m_buttonBox->createChild<UIButton>("BtnCancel");
     m_btnCancel = btnCancel;
     m_btnCancel->setText("取消");
-    m_btnCancel->setSize(btnW, btnH);
-    m_btnCancel->setPosition(leftX, btnY);
+    m_btnCancel->setSize(120, 40);
     m_btnCancel->setFontPx(20);
     m_btnCancel->setOnClick([this]{ onCancelClicked(); });
 
-    auto btnConfirm = m_dialogPanel->createChild<UIButton>("BtnConfirm");
+    auto btnConfirm = m_buttonBox->createChild<UIButton>("BtnConfirm");
     m_btnConfirm = btnConfirm;
     m_btnConfirm->setText("确定");
-    m_btnConfirm->setSize(btnW, btnH);
-    m_btnConfirm->setPosition(rightX, btnY);
+    m_btnConfirm->setSize(120, 40);
     m_btnConfirm->setFontPx(20);
     m_btnConfirm->setOnClick([this]{ onConfirmClicked(); });
 }
@@ -190,33 +192,17 @@ void UIDialog::relayoutDialogContent() {
         m_titleLabel->setSize(dialogW - 40, 40);
     }
     
-    // 更新内容区域尺寸
+    // ✅ 更新内容区域尺寸（VBox会自动重新布局子元素）
     if (m_contentArea) {
         m_contentArea->setSize(dialogW - 40, dialogH - 130);
-        
-        // ✅ 重要：更新ContentArea的所有子元素宽度
-        // 因为它们的宽度应该跟随ContentArea
-        auto& children = m_contentArea->getChildren();
-        for (auto& child : children) {
-            if (child) {
-                auto childSize = child->getSize();
-                // 保持高度不变，只更新宽度
-                child->setSize(dialogW - 40, childSize.y);
-            }
-        }
+        // ✅ 不需要手动更新子元素！VBox自动处理！
     }
     
-    // 更新按钮位置
-    if (m_btnCancel && m_btnConfirm) {
-        const float btnW = 120.0f;
-        const float btnGap = 20.0f;
-        const float btnY = dialogH - 60.0f;
-        const float cx = dialogW * 0.5f;
-        const float leftX  = cx - (btnGap * 0.5f) - btnW;
-        const float rightX = cx + (btnGap * 0.5f);
-        
-        m_btnCancel->setPosition(leftX, btnY);
-        m_btnConfirm->setPosition(rightX, btnY);
+    // ✅ 更新按钮区域尺寸（HBox会自动重新布局按钮）
+    if (m_buttonBox) {
+        m_buttonBox->setSize(dialogW, 60);
+        m_buttonBox->setPosition(0, dialogH - 60);
+        // ✅ 不需要手动更新按钮位置！HBox自动处理！
     }
 }
 
@@ -242,7 +228,7 @@ void UIDialog::onCancelClicked() {
 }
 
 void UIDialog::handleKeyPressed(const Tina::Engine::Events::KeyPressedEvent& e) {
-    using Tina::Engine::Events::KeyCode;
+    using Tina::Engine::KeyCode;  // ✅ KeyCode在Engine命名空间，不是Events
     if (e.isRepeat) return;  // 避免长按重复触发
     if (e.key == KeyCode::Enter) {
         onConfirmClicked();
