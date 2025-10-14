@@ -63,8 +63,8 @@ public:
         }
     }
     float itemHeight() const { return m_itemHeight; }
-    void setFontPx(int px) { m_fontPx = px; }
-    int fontPx() const { return m_fontPx; }
+    void setFontPx(Container::Optional<int> px) { m_fontPx = px; }
+    Container::Optional<int> fontPx() const { return m_fontPx; }
 
     // 滚轮配置
     void setWheelInvert(bool invert) { m_wheelInvert = invert; }
@@ -189,7 +189,7 @@ protected:
             // 文本
             UIRenderer::TextOptions to{};
             to.r = 1; to.g = 1; to.b = 1; to.a = 1;
-            to.fontPx = (m_fontPx > 0 ? m_fontPx : 20);
+            to.fontPx = (m_fontPx.value_or(20));
             renderer.drawText(viewId, world.x + 10, y + 6, m_items[i], to);
         }
 
@@ -246,7 +246,7 @@ private:
 private:
     Items m_items;
     float m_itemHeight = 32.0f;
-    int m_fontPx = 20;
+    Container::Optional<int> m_fontPx = 20;  // 默认20px
     float m_scroll = 0.0f;         // 当前滚动位置（插值后）
     float m_scrollTarget = 0.0f;   // 目标滚动位置
     int m_selected = -1;

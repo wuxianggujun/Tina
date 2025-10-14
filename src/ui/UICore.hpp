@@ -9,6 +9,7 @@
 #include <string>
 #include <map>
 #include "../renderer/ShaderManager.hpp"
+#include "../core/Container.hpp"  // 包含 Optional 定义
 #include "../core/Color.hpp"
 #include "TextRenderer.hpp"
 #include "UIConstants.hpp"  // 添加常量定义
@@ -43,7 +44,7 @@ public:
     enum class AlignV { Top, Center, Bottom, Baseline };
     struct TextOptions {
         float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
-        int fontPx = 0;                 // 0 表示使用当前字号
+        Container::Optional<int> fontPx;      // nullopt = 使用当前全局字号，有值 = 使用指定字号
         AlignH hAlign = AlignH::Left;   // 仅用于 drawTextBox
         AlignV vAlign = AlignV::Top;    // 仅用于 drawTextBox
         float padX = 0.0f, padY = 0.0f; // 仅用于 drawTextBox
@@ -140,13 +141,13 @@ public:
     void drawRectClipped(uint16_t viewId, float x, float y, float w, float h,
                          const Tina::Core::Color& color);
 
-    // 文本测量（可指定字号；fontPx=0 使用当前字号）
+    // 文本测量（可指定字号；nullopt = 使用当前字号）
     // 注意：这些方法不是 const，因为内部需要临时修改字体大小
-    bool measureText(const std::string& utf8, float& outW, float& outH, int fontPx = 0) {
+    bool measureText(const std::string& utf8, float& outW, float& outH, Container::Optional<int> fontPx = Container::nullopt) {
         if (!m_text) { outW = outH = 0.0f; return false; }
         int prev = m_text->currentFontPx();
-        if (fontPx > 0 && fontPx != prev) {
-            if (!m_text->setFontPx(fontPx)) return false;
+        if (fontPx.has_value() && fontPx.value() != prev) {
+            if (!m_text->setFontPx(fontPx.value())) return false;
             m_text->measureText(utf8, outW, outH);
             m_text->setFontPx(prev);
             return true;
@@ -155,11 +156,11 @@ public:
         return true;
     }
     bool measureTextExtents(const std::string& utf8, float& outW, float& outH,
-                            float& outTop, float& outBottom, int fontPx = 0) {
+                            float& outTop, float& outBottom, Container::Optional<int> fontPx = Container::nullopt) {
         if (!m_text) { outW = outH = outTop = outBottom = 0.0f; return false; }
         int prev = m_text->currentFontPx();
-        if (fontPx > 0 && fontPx != prev) {
-            if (!m_text->setFontPx(fontPx)) return false;
+        if (fontPx.has_value() && fontPx.value() != prev) {
+            if (!m_text->setFontPx(fontPx.value())) return false;
             m_text->measureTextExtents(utf8, outW, outH, outTop, outBottom);
             m_text->setFontPx(prev);
             return true;
@@ -214,7 +215,7 @@ private:
         float x = 0, y = 0;
         float r = 1, g = 1, b = 1, a = 1;
         std::string text;
-        int fontPx = 0; // 0 表示使用当前全局字号
+        Container::Optional<int> fontPx; // nullopt = 使用当前全局字号
         // Box 参数（w/h>0 时启用）
         float w = 0, h = 0; float padX = 0, padY = 0;
         AlignH hAlign = AlignH::Left; AlignV vAlign = AlignV::Top;

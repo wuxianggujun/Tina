@@ -58,9 +58,9 @@ public:
     void setAlignV(TextAlignV v) { m_alignV = v; }
     void setAlignment(TextAlignH h, TextAlignV v) { m_alignH = h; m_alignV = v; }
 
-    // 文本字号（像素）。0 表示使用当前全局字号
-    void setFontPx(int px) { m_fontPx = std::max(0, px); }
-    int fontPx() const { return m_fontPx; }
+    // 文本字号（像素）。nullopt 表示使用当前全局字号
+    void setFontPx(Container::Optional<int> px) { m_fontPx = px; }
+    Container::Optional<int> fontPx() const { return m_fontPx; }
 
     TextAlignH alignH() const { return m_alignH; }
     TextAlignV alignV() const { return m_alignV; }
@@ -76,7 +76,7 @@ private:
     Tina::Core::Color m_color;
     TextAlignH m_alignH = TextAlignH::Left;
     TextAlignV m_alignV = TextAlignV::Top;
-    int m_fontPx = 0;
+    Container::Optional<int> m_fontPx;
 };
 
 // === Button：可点击按钮（背景 + 文本） ===
@@ -138,12 +138,12 @@ public:
     bool isPressed() const { return m_pressed; }
     bool isSelected() const { return m_selected; }
 
-    // 文本字号（像素），0 表示使用全局默认字号
-    void setFontPx(int px) { m_fontPx = std::max(0, px); }
-    int fontPx() const { return m_fontPx; }
-    // 角标字号（像素），0 表示使用全局默认字号
-    void setBadgeFontPx(int px) { m_badgeFontPx = std::max(0, px); }
-    int badgeFontPx() const { return m_badgeFontPx; }
+    // 文本字号（像素），nullopt 表示使用全局默认字号
+    void setFontPx(Container::Optional<int> px) { m_fontPx = px; }
+    Container::Optional<int> fontPx() const { return m_fontPx; }
+    // 角标字号（像素），nullopt 表示使用全局默认字号
+    void setBadgeFontPx(Container::Optional<int> px) { m_badgeFontPx = px; }
+    Container::Optional<int> badgeFontPx() const { return m_badgeFontPx; }
 
     // === 事件系统访问 ===
     // 注意：使用 UINode::setEventSystem 设置事件系统
@@ -214,8 +214,8 @@ private:
     bgfx::TextureHandle m_iconTex = BGFX_INVALID_HANDLE;
     IconLayout m_iconLayout = IconLayout::IconTopTextBottom;
 
-    int m_fontPx = 0;
-    int m_badgeFontPx = 0;
+    Container::Optional<int> m_fontPx;
+    Container::Optional<int> m_badgeFontPx;
 
     // 按钮ID（用于事件识别）
     uint32_t m_buttonId = 0;

@@ -429,14 +429,15 @@ void UIRenderer::flushLayerTextCommands(UIRenderer::LayerBatches& L)
         else             m_text->clearClipRect();
         int prevPx = m_text->currentFontPx();
         bool needRestore = false;
-        if (cmd.fontPx > 0 && cmd.fontPx != prevPx) {
-            if (m_text->setFontPx(cmd.fontPx)) {
+        if (cmd.fontPx.has_value() && cmd.fontPx.value() != prevPx) {
+            if (m_text->setFontPx(cmd.fontPx.value())) {
                 needRestore = true;
             }
         }
         // 小字号使用线性过滤，提升可读性；否则使用点采样保持锐利
         bool prevFilter = m_text->linearFilter();
-        bool wantLinear = (cmd.fontPx > 0 ? cmd.fontPx : prevPx) <= LINEAR_FILTER_FONT_SIZE_THRESHOLD;
+        int effectiveFontPx = cmd.fontPx.value_or(prevPx);
+        bool wantLinear = effectiveFontPx <= LINEAR_FILTER_FONT_SIZE_THRESHOLD;
         if (wantLinear != prevFilter) {
             m_text->setLinearFilter(wantLinear);
         }

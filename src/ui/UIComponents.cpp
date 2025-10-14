@@ -44,7 +44,7 @@ void UILabel::onRender(uint16_t viewId, UIRenderer& renderer)
     UIRenderer::TextOptions opts{};
     opts.r = m_color.r(); opts.g = m_color.g(); opts.b = m_color.b(); opts.a = m_color.a();
     opts.hAlign = hAlign; opts.vAlign = vAlign; opts.padX = 4.0f; opts.padY = 4.0f;
-    if (m_fontPx > 0) opts.fontPx = m_fontPx;
+    opts.fontPx = m_fontPx;  // 直接赋值 optional
     renderer.drawTextBox(viewId, pos.x, pos.y, size.x, size.y, m_text, opts);
 }
 
@@ -147,7 +147,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         UIRenderer::TextOptions to{};
         to.r = m_textColor.r(); to.g = m_textColor.g(); to.b = m_textColor.b(); to.a = m_textColor.a();
         to.hAlign = UIRenderer::AlignH::Center; to.vAlign = UIRenderer::AlignV::Center;
-        if (m_fontPx > 0) to.fontPx = m_fontPx;
+        to.fontPx = m_fontPx;  // 直接赋值 optional
         renderer.drawTextBox(viewId, tx, ty, twRect, thRect, m_text, to);
     } else if (hasIcon && m_iconLayout == IconLayout::IconLeftTextRight) {
         // 图标在左，文本在右
@@ -164,7 +164,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         UIRenderer::TextOptions to{};
         to.r = m_textColor.r(); to.g = m_textColor.g(); to.b = m_textColor.b(); to.a = m_textColor.a();
         to.hAlign = UIRenderer::AlignH::Left; to.vAlign = UIRenderer::AlignV::Center;
-        if (m_fontPx > 0) to.fontPx = m_fontPx;
+        to.fontPx = m_fontPx;  // 直接赋值 optional
         renderer.drawTextBox(viewId, tx, ty, twRect, thRect, m_text, to);
     } else {
         // 默认：无图标（或中心覆盖图标）+ 文本精确居中
@@ -182,7 +182,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         to.r = m_textColor.r(); to.g = m_textColor.g(); to.b = m_textColor.b(); to.a = m_textColor.a();
         to.hAlign = UIRenderer::AlignH::Center;
         to.vAlign = UIRenderer::AlignV::Center;
-        to.fontPx = (m_fontPx > 0 ? m_fontPx : 0);
+        to.fontPx = m_fontPx;  // 直接赋值 optional
         to.padX = 0.0f; to.padY = 0.0f;
         renderer.drawTextBox(viewId, pos.x, pos.y, size.x, size.y, m_text, to);
     }
@@ -191,8 +191,8 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
     if (!m_badgeText.empty()) {
         // 角标：固定高度（由字号决定）+ 自适应宽度，确保数字“大小一致”
         float tw=0.0f, th=0.0f;
-        int px = (m_badgeFontPx > 0) ? m_badgeFontPx : 16;
-        renderer.measureText(m_badgeText, tw, th, px);
+        Container::Optional<int> badgePx = m_badgeFontPx.has_value() ? m_badgeFontPx : Container::Optional<int>(16);
+        renderer.measureText(m_badgeText, tw, th, badgePx);
         const float badgePad = 3.0f;
         float bh = th + badgePad*2.0f;           // 高度只取决于字号
         float bw = std::max(tw + badgePad*2.0f,  // 宽度根据内容
@@ -219,7 +219,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         // 角标文本
         UIRenderer::TextOptions bo{};
         bo.r = m_badgeTextColor.r(); bo.g = m_badgeTextColor.g(); bo.b = m_badgeTextColor.b(); bo.a = m_badgeTextColor.a();
-        bo.fontPx = px; bo.hAlign = UIRenderer::AlignH::Center; bo.vAlign = UIRenderer::AlignV::Center;
+        bo.fontPx = badgePx; bo.hAlign = UIRenderer::AlignH::Center; bo.vAlign = UIRenderer::AlignV::Center;
         renderer.drawTextBox(viewId, bx, by, bw, bh, m_badgeText, bo);
     }
 }

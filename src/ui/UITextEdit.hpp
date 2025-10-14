@@ -67,8 +67,8 @@ public:
     size_t getMaxLength() const { return m_maxLength; }
 
     // === 字体大小 ===
-    void setFontPx(int px) { m_fontPx = std::max(0, px); }
-    int fontPx() const { return m_fontPx; }
+    void setFontPx(Container::Optional<int> px) { m_fontPx = px; }
+    Container::Optional<int> fontPx() const { return m_fontPx; }
 
     // === 焦点状态 ===
     bool isFocused() const { return m_focused; }
@@ -127,7 +127,7 @@ private:
     // 配置
     bool m_multiline;             // 是否支持多行
     size_t m_maxLength;           // 最大字符数（0表示无限制）
-    int m_fontPx;                 // 字体大小（0表示使用默认）
+    Container::Optional<int> m_fontPx;  // 字体大小（nullopt 表示使用默认）
 
     // 事件订阅
     Engine::SubscriptionToken m_keyPressedToken;

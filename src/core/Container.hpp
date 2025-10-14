@@ -24,6 +24,7 @@
 #include <EASTL/fixed_vector.h>
 #include <EASTL/fixed_function.h>
 #include <EASTL/bonus/ring_buffer.h>
+#include <EASTL/optional.h>  // C++17 optional 支持
 
 #include "EASTL/priority_queue.h"
 
@@ -265,6 +266,18 @@ namespace Tina {
         // 固定大小函数对象（避免堆分配）
         template<int SIZE_IN_BYTES, typename R, typename... Args>
         using FixedFunction = eastl::fixed_function<SIZE_IN_BYTES, R(Args...)>;
+
+        // ====================
+        // 可选值类型 (Optional)
+        // ====================
+
+        // 可选值（表示可能没有值的类型）
+        template<typename T>
+        using Optional = eastl::optional<T>;
+
+        // nullopt 常量（表示空值）
+        using eastl::nullopt;
+        using eastl::nullopt_t;
 
         // ====================
         // 比较器和谓词
