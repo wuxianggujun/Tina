@@ -125,6 +125,8 @@ void Application::init()
     // 5. 创建核心子系统
     m_eventSystem = Memory::MakeUnique<EventSystem>();
     m_inputSystem = Memory::MakeUnique<InputSystem>();
+    m_inputSystem->setEventSystem(m_eventSystem.get());  // 设置事件系统引用
+    m_inputSystem->setWindow(m_window.get());  // 设置窗口引用（用于文本输入）
     m_inputSystem->initialize();  // 初始化输入系统
     m_sceneManager = Memory::MakeUnique<SceneManager>(this);
 
@@ -370,6 +372,13 @@ void Application::update(float dt)
     // 2. 驱动事件系统（处理事件队列）
     if (m_eventSystem) {
         m_eventSystem->update(); // 每帧处理事件队列
+        
+        // 更新UI输入（鼠标交互、点击、悬停等）
+        if (m_inputSystem) {
+            auto mousePos = m_inputSystem->getMousePosition();
+            bool mouseDown = m_inputSystem->isMouseButtonDown(MouseButton::Left);
+            m_eventSystem->updateUIInput(mousePos.x, mousePos.y, mouseDown);
+        }
     }
 
     // 3. 更新场景

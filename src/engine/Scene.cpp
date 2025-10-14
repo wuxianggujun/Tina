@@ -30,7 +30,19 @@ Scene::Scene() {
 }
 
 // 虚析构函数定义（必须在此处，RenderQueue是完整类型）
-Scene::~Scene() = default;
+Scene::~Scene() {
+    // ⚠️ 重要：必须在布局管理器销毁前清理所有UI根节点
+    // 否则UINode析构时会访问已销毁的布局管理器
+    for (auto* root : m_uiRoots) {
+        if (root) {
+            unregisterUITreeFromLayoutManager(root);
+        }
+    }
+    m_uiRoots.clear();
+    
+    // 现在可以安全地销毁布局管理器和其他资源
+    // （UniquePtr会自动按声明逆序析构）
+}
 
 // 访问输入系统
 InputSystem* Scene::input() const {

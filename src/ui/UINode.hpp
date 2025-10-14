@@ -220,9 +220,11 @@ public:
     // 默认实现：递归通知所有子节点
     // 子类可覆盖以实现自定义布局逻辑（如重新计算居中位置）
     virtual void onWindowSizeChanged(int width, int height) {
-        // 默认递归通知所有子节点
+        // ⚠️ 重要：标记所有子节点为dirty，让Anchor偏移重新计算
+        // 因为父节点尺寸变化会影响Anchor的锚点位置
         for (auto& child : m_children) {
             if (child) {
+                child->m_dirty = true;  // 标记为dirty，强制重新计算世界坐标
                 child->onWindowSizeChanged(width, height);
             }
         }

@@ -14,6 +14,10 @@
 
 namespace Tina::Engine {
 
+// 前向声明
+class EventSystem;
+class Window;
+
 // ==================== 输入系统主类 ====================
 
 class InputSystem {
@@ -102,6 +106,14 @@ public:
     // 调试输出
     void debugPrint() const;
 
+    // ==================== 事件系统集成 ====================
+
+    // 设置事件系统（由Application设置）
+    void setEventSystem(EventSystem* eventSystem) { m_eventSystem = eventSystem; }
+    
+    // 设置窗口（用于文本输入）
+    void setWindow(Window* window) { m_window = window; }
+
 private:
     // ==================== 内部状态 ====================
 
@@ -125,6 +137,12 @@ private:
     bool m_textInputActive;
     std::string m_textInput;
     std::string m_textInputBuffer;  // 临时缓冲
+
+    // 事件系统引用（用于发布输入事件）
+    EventSystem* m_eventSystem = nullptr;
+    
+    // 窗口引用（用于文本输入）
+    Window* m_window = nullptr;
 
     // ==================== 内部方法 ====================
 

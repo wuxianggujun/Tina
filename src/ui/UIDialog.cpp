@@ -7,12 +7,8 @@ namespace Tina::UI {
 void UIDialog::show() {
     if (m_visible) return;
     m_visible = true;
+    ensureUICreated();
     setVisible(true);
-
-    // 如果还没创建UI，现在创建
-    if (!m_dialogPanel) {
-        createDialogUI();
-    }
 
     // 订阅键盘按下事件：支持 Enter 确认、Escape 取消
     if (eventSystem() && !m_keyToken) {

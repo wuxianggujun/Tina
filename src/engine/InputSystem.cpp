@@ -3,6 +3,9 @@
 //
 
 #include "InputSystem.hpp"
+#include "Window.hpp"
+#include "EventSystem.hpp"
+#include "EngineEvents.hpp"
 #include "../core/Log.hpp"
 #include <SDL3/SDL.h>
 #include <cstring>
@@ -100,6 +103,12 @@ void InputSystem::processSDLEvent(void* sdlEvent) {
         case SDL_EVENT_TEXT_INPUT:
             if (m_textInputActive) {
                 m_textInputBuffer += event->text.text;
+                
+                // 发布文本输入事件（立即发布，不等待endFrame）
+                if (m_eventSystem && event->text.text[0] != '\0') {
+                    Events::TextInputEvent textEvent(0, event->text.text);
+                    m_eventSystem->trigger(textEvent);
+                }
             }
             break;
 
@@ -223,16 +232,26 @@ void InputSystem::startTextInput() {
     if (!m_textInputActive) {
         m_textInputActive = true;
         m_textInput.clear();
-        SDL_StartTextInput(nullptr);
+        
+        // 获取SDL窗口句柄
+        SDL_Window* sdlWindow = m_window ? static_cast<SDL_Window*>(m_window->getSDLWindow()) : nullptr;
+        SDL_StartTextInput(sdlWindow);
+        
+        // 设置输入法候选框位置（可选）
+        if (sdlWindow) {
+            SDL_Rect rect = { 0, 0, 400, 30 };  // 默认位置，后续可以根据输入框位置动态设置
+            SDL_SetTextInputArea(sdlWindow, &rect, 0);
+        }
     }
 }
 
 void InputSystem::stopTextInput() {
     if (m_textInputActive) {
         m_textInputActive = false;
-        // SDL3 中 SDL_StopTextInput 需要窗口参数
-        // TODO: 需要传入窗口句柄
-        SDL_StopTextInput(nullptr);
+        
+        // 获取SDL窗口句柄
+        SDL_Window* sdlWindow = m_window ? static_cast<SDL_Window*>(m_window->getSDLWindow()) : nullptr;
+        SDL_StopTextInput(sdlWindow);
     }
 }
 
