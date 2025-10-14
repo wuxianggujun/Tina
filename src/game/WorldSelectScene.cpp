@@ -131,6 +131,9 @@ void WorldSelectScene::createUI() {
     m_createDialog = m_root->addChild(std::move(dialog));
     m_createDialog->setTitle("新建世界");
     m_createDialog->setSize((float)getPixelWidth(), (float)getPixelHeight());
+    // 需求：对话框未覆盖区域应保持正常显示（不做全屏变暗）
+    // 这里将遮罩色设为完全透明，仅保留模态拦截与面板本身。
+    m_createDialog->setMaskColor(Core::Color(0.0f, 0.0f, 0.0f, 0.0f));
     m_createDialog->setVisible(false);  // 默认隐藏
     m_createDialog->setZIndex(1000);    // 设置高zIndex确保对话框在最上层
     m_createDialog->setEventSystem(&app()->events());
@@ -279,7 +282,7 @@ void WorldSelectScene::handleInput() {
         }
     }
     // 同步 UI 输入到引擎事件系统（让按钮正常响应）
-    a->events().updateUIInput(in.getMouseX(), in.getMouseY(), in.isMouseButtonDown(Engine::MouseButton::Left));
+    a->events().updateUIInput(in.getMouseX(), in.getMouseY(), in.isMouseButtonDown(Engine::MouseButton::Left), in.getMouseWheelDelta());
 }
 
 void WorldSelectScene::onBackClicked() {

@@ -231,7 +231,7 @@ void MenuScene::handleInput() {
                    mousePos.x, mousePos.y, leftDown);
     }
     
-    app()->events().updateUIInput(mousePos.x, mousePos.y, leftDown);
+    app()->events().updateUIInput(mousePos.x, mousePos.y, leftDown, input.getMouseWheelDelta());
 }
 
 void MenuScene::createUI() {

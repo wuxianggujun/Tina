@@ -116,3 +116,19 @@ struct TextChangedEvent : UIEvent<TextChangedEvent, EventTypeId::UITextChanged> 
 };
 
 } // namespace Tina::Engine
+
+// ==================== UI 滚轮事件（新增） ====================
+namespace Tina::Engine {
+
+struct UIMouseWheelEvent : UIEvent<UIMouseWheelEvent, EventTypeId::UIMouseWheel> {
+    float deltaX = 0.0f;
+    float deltaY = 0.0f;
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+
+    UIMouseWheelEvent() {
+        this->priority = EventPriority::Low;  // UI事件低优先级
+    }
+};
+
+} // namespace Tina::Engine

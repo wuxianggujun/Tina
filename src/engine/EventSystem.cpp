@@ -1,6 +1,7 @@
 #include "EventSystem.hpp"
 #include "../ui/UINode.hpp"
 #include "../core/Log.hpp"
+#include "UIEvents.hpp"
 // Container.hpp 已经包含了所有需要的算法封装
 
 namespace Tina::Engine {
@@ -50,8 +51,19 @@ void EventSystem::updateUIInput(float mouseX, float mouseY, bool mouseDown) {
     }
     #endif
     
-    // 处理鼠标输入
-    handleMouseInput();
+    // 处理鼠标输入（无滚轮增量）
+    handleMouseInput(0.0f);
+}
+
+// 重载：包含滚轮增量
+void EventSystem::updateUIInput(float mouseX, float mouseY, bool mouseDown, float wheelDeltaY) {
+    m_uiContext.mouseX = mouseX;
+    m_uiContext.mouseY = mouseY;
+    m_uiContext.mouseDownPrev = m_uiContext.mouseDown;
+    m_uiContext.mouseDown = mouseDown;
+
+    // 处理鼠标输入（带滚轮增量）
+    handleMouseInput(wheelDeltaY);
 }
 
 // 构建事件路径（从根到目标）
@@ -123,7 +135,7 @@ UI::UINode* EventSystem::findNodeUnderMouse(UI::UINode* node, float x, float y) 
 }
 
 // 处理鼠标输入（内部实现）
-void EventSystem::handleMouseInput() {
+void EventSystem::handleMouseInput(float wheelDeltaY) {
     // ✅ 尝试锁定根节点的 weak_ptr
     auto root = m_uiContext.root.lock();
     if (!root) {
@@ -173,6 +185,20 @@ void EventSystem::handleMouseInput() {
             }
         }
         m_uiContext.pressedNode = nullptr;
+    }
+
+    // ✅ 分发滚轮事件（UI 事件 + 虚函数回调）
+    if (wheelDeltaY != 0.0f && nodeUnderMouse) {
+        // 先调用虚方法，便于控件即时响应
+        nodeUnderMouse->onMouseWheel(0.0f, wheelDeltaY);
+
+        // 再分发 UI 事件（带捕获/冒泡），供需要的订阅者监听
+        UIMouseWheelEvent evt;
+        evt.deltaX = 0.0f;
+        evt.deltaY = wheelDeltaY;
+        evt.mouseX = mx;
+        evt.mouseY = my;
+        triggerUIEvent(evt, nodeUnderMouse);
     }
 }
 

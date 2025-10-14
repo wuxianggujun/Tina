@@ -301,6 +301,8 @@ public:
     
     // 更新UI输入（每帧调用）
     void updateUIInput(float mouseX, float mouseY, bool mouseDown);
+    // 重载：包含滚轮增量（dy），用于分发 UIMouseWheel 事件
+    void updateUIInput(float mouseX, float mouseY, bool mouseDown, float wheelDeltaY);
     
     // 获取UI上下文
     UIEventContext& uiContext() { return m_uiContext; }
@@ -437,7 +439,7 @@ private:
     // UI事件内部方法
     void buildEventPath(UI::UINode* target, Vector<UI::UINode*>& path);
     UI::UINode* findNodeUnderMouse(UI::UINode* node, float x, float y);
-    void handleMouseInput();
+    void handleMouseInput(float wheelDeltaY = 0.0f);
 };
 
 } // namespace Tina::Engine

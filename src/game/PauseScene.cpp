@@ -172,7 +172,7 @@ void PauseScene::handleInput()
     // 更新UI输入到引擎事件系统
     auto mousePos = input.getMousePosition();
     bool leftDown = input.isMouseButtonDown(Engine::MouseButton::Left);
-    app()->events().updateUIInput(mousePos.x, mousePos.y, leftDown);
+    app()->events().updateUIInput(mousePos.x, mousePos.y, leftDown, input.getMouseWheelDelta());
 }
 
 void PauseScene::createUI()

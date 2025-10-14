@@ -207,6 +207,8 @@ public:
     virtual void onMouseDown(float x, float y) { (void)x; (void)y; }
     virtual void onMouseUp(float x, float y) { (void)x; (void)y; }
     virtual void onClick() {}
+    // 新增：鼠标滚轮事件（dx/dy 为像素/刻度）
+    virtual void onMouseWheel(float dx, float dy) { (void)dx; (void)dy; }
 
     // === 窗口尺寸变化回调（框架自动调用） ===
     // 默认实现：递归通知所有子节点

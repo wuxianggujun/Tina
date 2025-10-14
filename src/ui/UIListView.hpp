@@ -110,6 +110,17 @@ public:
             m_doubleClickTimer = DOUBLE_CLICK_THRESHOLD;
         }
     }
+    // 新增：滚轮事件改为走 UI 事件系统分发（由 EventSystem 调用）
+    void onMouseWheel(float dx, float dy) override {
+        (void)dx;
+        if (dy == 0.0f) return;
+        auto size = getSize();
+        float contentH = m_items.size() * m_itemHeight;
+        if (contentH > size.y && m_itemHeight > 0.0f) {
+            float direction = m_wheelInvert ? 1.0f : -1.0f;
+            scrollBy(direction * dy * m_itemHeight * m_wheelStep);
+        }
+    }
 
 protected:
     void onUpdate(float dt) override {
@@ -127,29 +138,7 @@ protected:
             m_scroll = m_scrollTarget;
         }
 
-        // 响应鼠标滚轮（不依赖 hover 状态，直接检查鼠标位置）
-        if (auto* app = Tina::Engine::Application::instance()) {
-            float wheel = app->input().getMouseWheelDelta();
-            if (wheel != 0.0f) {
-                // 检查鼠标是否在列表区域内
-                auto world = getWorldPosition();
-                auto size = getSize();
-                float mx = app->input().getMouseX();
-                float my = app->input().getMouseY();
-                bool inside = (mx >= world.x && mx <= world.x + size.x &&
-                              my >= world.y && my <= world.y + size.y);
-
-                if (inside) {
-                    float contentH = m_items.size() * m_itemHeight;
-                    // 仅当内容高度超过视口高度时才滚动
-                    if (contentH > size.y && m_itemHeight > 0.0f) {
-                        // 应用滚轮方向和步长配置
-                        float direction = m_wheelInvert ? 1.0f : -1.0f;
-                        scrollBy(direction * wheel * m_itemHeight * m_wheelStep);
-                    }
-                }
-            }
-        }
+        // 滚轮逻辑已改为 onMouseWheel 处理，这里不再直接轮询输入
     }
 
     void onRender(uint16_t viewId, UIRenderer& renderer) override {
