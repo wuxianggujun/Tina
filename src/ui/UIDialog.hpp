@@ -25,7 +25,8 @@ public:
         , m_titleColor(1.0f, 1.0f, 1.0f, 1.0f)
         , m_visible(false)
     {
-        setClickable(true);  // 允许点击遮罩关闭
+        setClickable(true);     // 允许点击遮罩关闭
+        setInteractable(true);  // 阻止事件穿透到下层UI
     }
 
     // === 显示/隐藏 ===
@@ -57,11 +58,15 @@ public:
     // === 鼠标事件 ===
     void onClick() override;
 
+    // === 窗口尺寸变化回调 ===
+    void onWindowSizeChanged(int width, int height) override;
+
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
 
 private:
     void createDialogUI();
+    void updateDialogPosition();  // 更新对话框居中位置
     void onConfirmClicked();
     void onCancelClicked();
 

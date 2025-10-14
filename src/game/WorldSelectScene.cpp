@@ -132,6 +132,7 @@ void WorldSelectScene::createUI() {
     m_createDialog->setTitle("新建世界");
     m_createDialog->setSize((float)getPixelWidth(), (float)getPixelHeight());
     m_createDialog->setVisible(false);  // 默认隐藏
+    m_createDialog->setZIndex(1000);    // 设置高zIndex确保对话框在最上层
     m_createDialog->setEventSystem(&app()->events());
 
     // 在对话框内容区域添加提示文本和输入框
