@@ -188,6 +188,8 @@ void PauseScene::createUI()
     m_rootNode = Memory::MakeShared<UI::UINode>("PauseRoot");
     m_rootNode->setPosition(0, 0);
     m_rootNode->setSize((float)m_pixelWidth, (float)m_pixelHeight);
+    // 顶层暂停界面置于覆盖层，确保不被下层文本遮挡
+    m_rootNode->setLayer(UI::LAYER_OVERLAY);
 
     // 顶层不再放置标题，标题移入面板内部
 

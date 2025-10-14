@@ -184,6 +184,8 @@ public:
     // === 渲染分层（UIRenderer 层号） ===
     void setLayer(int layer) { m_layer = layer; }
     int layer() const { return m_layer; }
+    // 便捷：同时设置事件命中顺序与渲染层
+    void setZAndLayer(int z, int layer) { setZIndex(z); setLayer(layer); }
 
     // === 点测试（用于事件分发） ===
     bool containsPoint(float worldX, float worldY);
