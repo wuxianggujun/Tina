@@ -47,7 +47,11 @@ public:
 
     // === 内容区域访问 ===
     // 返回内容区域节点，可以添加自定义UI组件
-    UINode* getContentArea() const { return m_contentArea; }
+    // 注意：如果对话框UI还未创建，会自动创建
+    UINode* getContentArea();
+
+    // 强制创建UI（即使对话框隐藏）
+    void ensureUICreated() { if (!m_dialogPanel) createDialogUI(); }
 
     // === 回调设置 ===
     void setOnConfirm(std::function<void()> callback) { m_onConfirm = std::move(callback); }

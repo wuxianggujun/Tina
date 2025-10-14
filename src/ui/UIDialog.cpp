@@ -32,6 +32,13 @@ void UIDialog::hide() {
     m_keyToken.reset();
 }
 
+// === 内容区域访问 ===
+UINode* UIDialog::getContentArea() {
+    // 如果UI还未创建，先创建
+    ensureUICreated();
+    return m_contentArea;
+}
+
 // === 内容设置 ===
 void UIDialog::setTitle(const std::string& title) {
     m_title = title;
