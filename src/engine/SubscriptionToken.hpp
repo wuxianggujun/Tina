@@ -76,6 +76,11 @@ public:
                m_subscriptionId != 0;
     }
 
+    // 便捷：布尔转换与取反运算符
+    // 用法：if (token) { ... } / if (!token) { ... }
+    explicit operator bool() const noexcept { return isValid(); }
+    bool operator!() const noexcept { return !isValid(); }
+
     // 失效令牌（当 EventDispatcher 销毁时调用）
     void invalidate() {
         m_valid.store(false, std::memory_order_release);

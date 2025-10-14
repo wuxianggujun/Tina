@@ -13,12 +13,23 @@ void UIDialog::show() {
     if (!m_dialogPanel) {
         createDialogUI();
     }
+
+    // 订阅键盘按下事件：支持 Enter 确认、Escape 取消
+    if (eventSystem() && !m_keyToken) {
+        m_keyToken = eventSystem()->subscribe<Tina::Engine::Events::KeyPressedEvent>(
+            [this](const Tina::Engine::Events::KeyPressedEvent& e) {
+                if (m_visible) handleKeyPressed(e);
+            }
+        );
+    }
 }
 
 void UIDialog::hide() {
     if (!m_visible) return;
     m_visible = false;
     setVisible(false);
+    // 取消键盘订阅
+    m_keyToken.reset();
 }
 
 // === 内容设置 ===
@@ -174,6 +185,16 @@ void UIDialog::onCancelClicked() {
     hide();
     if (m_onCancel) {
         m_onCancel();
+    }
+}
+
+void UIDialog::handleKeyPressed(const Tina::Engine::Events::KeyPressedEvent& e) {
+    using Tina::Engine::Events::KeyCode;
+    if (e.isRepeat) return;  // 避免长按重复触发
+    if (e.key == KeyCode::Enter) {
+        onConfirmClicked();
+    } else if (e.key == KeyCode::Escape) {
+        onCancelClicked();
     }
 }
 

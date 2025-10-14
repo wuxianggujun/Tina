@@ -269,6 +269,13 @@ void WorldSelectScene::updateLayout() {
 void WorldSelectScene::handleInput() {
     auto* a = app(); if (!a) return;
     auto& in = a->input();
+    // 若对话框可见，场景级键盘导航与快捷键暂停，交由对话框处理
+    if (m_createDialog && m_createDialog->isDialogVisible()) {
+        a->events().updateUIInput(in.getMouseX(), in.getMouseY(),
+                                  in.isMouseButtonDown(Engine::MouseButton::Left),
+                                  in.getMouseWheelDelta());
+        return;
+    }
     if (in.isKeyPressed(Engine::KeyCode::Escape)) { onBackClicked(); return; }
     if (in.isKeyPressed(Engine::KeyCode::Enter)) { onEnterClicked(); return; }
     if (m_list) {

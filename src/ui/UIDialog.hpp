@@ -5,6 +5,8 @@
 #include "UIComponents.hpp"
 #include "../core/Color.hpp"
 #include "../core/Container.hpp"
+#include "../engine/SubscriptionToken.hpp"
+#include "../engine/EngineEvents.hpp"
 #include <functional>
 
 namespace Tina::UI {
@@ -69,6 +71,7 @@ private:
     void updateDialogPosition();  // 更新对话框居中位置
     void onConfirmClicked();
     void onCancelClicked();
+    void handleKeyPressed(const Tina::Engine::Events::KeyPressedEvent& e);
 
 private:
     std::string m_title;
@@ -87,6 +90,9 @@ private:
     // 回调
     std::function<void()> m_onConfirm;
     std::function<void()> m_onCancel;
-};
+
+    // 事件订阅（用于处理 Enter / Escape 快捷键）
+    Tina::Engine::SubscriptionToken m_keyToken;
+}; 
 
 } // namespace Tina::UI
