@@ -82,17 +82,14 @@ void UIDialog::createDialogUI() {
     float dialogW = 500;
     float dialogH = 300;
 
-    // 对话框面板（使用 Anchor 居中）
-    // 原理：Anchor::MiddleCenter 提供父节点中心点的偏移
-    //      position 设置为 -size/2 让自身中心对齐父节点中心
+    // 对话框面板（使用流式API，简洁优雅）
     auto panel = createChild<UIPanel>("DialogPanel");
     m_dialogPanel = panel;
-    m_dialogPanel->setAnchor(Anchor::MiddleCenter);
-    m_dialogPanel->setPosition(-dialogW * 0.5f, -dialogH * 0.5f);
-    m_dialogPanel->setSize(dialogW, dialogH);
-    m_dialogPanel->setColor(m_dialogBgColor);
-    m_dialogPanel->setInteractable(true);  // 阻止事件穿透到下层
-    m_dialogPanel->setClickable(true);
+    m_dialogPanel->setSize(dialogW, dialogH)
+                 ->center()
+                 ->setColor(m_dialogBgColor)
+                 ->setInteractable(true)
+                 ->setClickable(true);  // ✅ 完美的链式调用！
 
     // 渲染层：将整个对话框（含子节点）置于更高层，确保覆盖下层文本
     setLayer(LAYER_DIALOG); // 使用统一常量

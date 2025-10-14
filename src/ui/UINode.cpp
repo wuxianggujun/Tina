@@ -87,17 +87,20 @@ Tina::Math::Vec2 UINode::anchorOffset() const
     const auto psize = m_parent->getSize();
     float ox = 0, oy = 0;
 
-    switch (m_anchor) {
-    case Anchor::TopLeft:       ox = 0;          oy = 0;          break;
-    case Anchor::TopCenter:     ox = psize.x/2;  oy = 0;          break;
-    case Anchor::TopRight:      ox = psize.x;    oy = 0;          break;
-    case Anchor::MiddleLeft:    ox = 0;          oy = psize.y/2;  break;
-    case Anchor::MiddleCenter:  ox = psize.x/2;  oy = psize.y/2;  break;
-    case Anchor::MiddleRight:   ox = psize.x;    oy = psize.y/2;  break;
-    case Anchor::BottomLeft:    ox = 0;          oy = psize.y;    break;
-    case Anchor::BottomCenter:  ox = psize.x/2;  oy = psize.y;    break;
-    case Anchor::BottomRight:   ox = psize.x;    oy = psize.y;    break;
+    // 水平锚点偏移
+    switch (m_hAlign) {
+        case HAlign::Left:   ox = 0; break;
+        case HAlign::Center: ox = psize.x * 0.5f; break;
+        case HAlign::Right:  ox = psize.x; break;
     }
+
+    // 垂直锚点偏移
+    switch (m_vAlign) {
+        case VAlign::Top:    oy = 0; break;
+        case VAlign::Middle: oy = psize.y * 0.5f; break;
+        case VAlign::Bottom: oy = psize.y; break;
+    }
+
     return {ox, oy};
 }
 

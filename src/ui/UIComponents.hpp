@@ -22,14 +22,50 @@ public:
         , m_color(Tina::UI::UIColors::PanelBg)
     {}
 
-    void setColor(float r, float g, float b, float a) {
+    // === 颜色设置 ===
+    UIPanel* setColor(float r, float g, float b, float a) {
         m_color = Tina::Core::Color(r, g, b, a);
+        return this;
     }
-    void setColor(const Tina::Core::Color& c) {
+    UIPanel* setColor(const Tina::Core::Color& c) {
         m_color = c;
+        return this;
     }
 
     Tina::Core::Color getColor() const { return m_color; }
+
+    // === 重写父类方法以支持链式调用（返回UIPanel*） ===
+    
+    // 变换方法
+    UIPanel* setSize(float w, float h) { UINode::setSize(w, h); return this; }
+    UIPanel* setWidth(float w) { UINode::setWidth(w); return this; }
+    UIPanel* setHeight(float h) { UINode::setHeight(h); return this; }
+    UIPanel* setPosition(float x, float y) { UINode::setPosition(x, y); return this; }
+    
+    // 对齐方法
+    UIPanel* setAlign(HAlign h, VAlign v) { UINode::setAlign(h, v); return this; }
+    UIPanel* setHAlign(HAlign h) { UINode::setHAlign(h); return this; }
+    UIPanel* setVAlign(VAlign v) { UINode::setVAlign(v); return this; }
+    UIPanel* center() { UINode::center(); return this; }
+    UIPanel* centerH() { UINode::centerH(); return this; }
+    UIPanel* centerV() { UINode::centerV(); return this; }
+    UIPanel* alignTop() { UINode::alignTop(); return this; }
+    UIPanel* alignBottom() { UINode::alignBottom(); return this; }
+    UIPanel* alignLeft() { UINode::alignLeft(); return this; }
+    UIPanel* alignRight() { UINode::alignRight(); return this; }
+    UIPanel* alignTopLeft() { UINode::alignTopLeft(); return this; }
+    UIPanel* alignTopRight() { UINode::alignTopRight(); return this; }
+    UIPanel* alignBottomLeft() { UINode::alignBottomLeft(); return this; }
+    UIPanel* alignBottomRight() { UINode::alignBottomRight(); return this; }
+    
+    // 状态方法
+    UIPanel* setVisible(bool v) { UINode::setVisible(v); return this; }
+    UIPanel* setEnabled(bool e) { UINode::setEnabled(e); return this; }
+    UIPanel* setInteractable(bool i) { UINode::setInteractable(i); return this; }
+    UIPanel* setClickable(bool v) { UINode::setClickable(v); return this; }
+    UIPanel* setHoverable(bool v) { UINode::setHoverable(v); return this; }
+    UIPanel* setFocusable(bool v) { UINode::setFocusable(v); return this; }
+    UIPanel* setZIndex(int z) { UINode::setZIndex(z); return this; }
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;

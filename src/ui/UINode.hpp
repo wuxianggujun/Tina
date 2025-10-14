@@ -44,7 +44,44 @@ enum class LayoutDim : uint8_t {
     WrapContent     // 由容器测量子项后回填（或通用节点根据子项包裹）
 };
 
-// UI 锚点：决定子节点相对父节点的对齐方式
+// UI 对齐系统：支持水平和垂直方向独立对齐
+// 
+// 设计理念：
+//   - 水平对齐（HAlign）和垂直对齐（VAlign）独立控制
+//   - 可以任意组合，灵活性强
+//   - 自动计算position，无需手动计算
+// 
+// 工作原理：
+//   worldPos = parentWorld + anchorOffset(hAlign, vAlign) + position
+// 
+// 使用示例：
+//   // 居中
+//   panel->setAlign(HAlign::Center, VAlign::Middle);
+//   
+//   // 右下角
+//   panel->setAlign(HAlign::Right, VAlign::Bottom);
+//   
+//   // 只设置水平居中，垂直保持原样
+//   panel->setHAlign(HAlign::Center);
+//   
+//   // 只设置垂直居中，水平保持原样
+//   panel->setVAlign(VAlign::Middle);
+
+// 水平对齐方式
+enum class HAlign : uint8_t {
+    Left = 0,    // 左对齐：锚点在父节点左边缘 (0)
+    Center,      // 水平居中：锚点在父节点水平中心 (parentW/2)
+    Right        // 右对齐：锚点在父节点右边缘 (parentW)
+};
+
+// 垂直对齐方式
+enum class VAlign : uint8_t {
+    Top = 0,     // 顶部对齐：锚点在父节点顶部 (0)
+    Middle,      // 垂直居中：锚点在父节点垂直中心 (parentH/2)
+    Bottom       // 底部对齐：锚点在父节点底部 (parentH)
+};
+
+// 【兼容性】保留旧的Anchor枚举（内部转换为HAlign+VAlign）
 enum class Anchor : uint8_t {
     TopLeft = 0,
     TopCenter,
@@ -134,17 +171,155 @@ public:
     }
 
     // === 变换（相对于父节点） ===
-    void setPosition(float x, float y) { m_position = {x, y}; m_dirty = true; }
-    void setSize(float w, float h) { m_size = {w, h}; m_dirty = true; m_layoutW = LayoutDim::Exact; m_layoutH = LayoutDim::Exact; }
-    void setWidth(float w) { m_size.x = w; m_dirty = true; m_layoutW = LayoutDim::Exact; }
-    void setHeight(float h) { m_size.y = h; m_dirty = true; m_layoutH = LayoutDim::Exact; }
-    void setAnchor(Anchor anchor) { m_anchor = anchor; m_dirty = true; }
+    
+    // 设置位置（支持链式调用）
+    UINode* setPosition(float x, float y) { 
+        m_position = {x, y}; 
+        m_dirty = true;
+        m_manualPosition = true;  // 标记为手动设置的position
+        return this;
+    }
+    
+    // 设置尺寸（支持链式调用）
+    UINode* setSize(float w, float h) { 
+        m_size = {w, h}; 
+        m_dirty = true; 
+        m_layoutW = LayoutDim::Exact; 
+        m_layoutH = LayoutDim::Exact;
+        
+        // ⚠️ 重要：尺寸变化会影响子节点的Anchor偏移
+        markChildrenDirty();
+        
+        // ✅ 智能：如果之前设置过对齐且没有手动设置position，自动重新应用对齐
+        if ((m_hAlign != HAlign::Left || m_vAlign != VAlign::Top) && !m_manualPosition) {
+            applyAlignment();
+        }
+        
+        return this;
+    }
+    
+    // 设置宽度（支持链式调用）
+    UINode* setWidth(float w) { 
+        m_size.x = w; 
+        m_dirty = true; 
+        m_layoutW = LayoutDim::Exact;
+        markChildrenDirty();
+        
+        if ((m_hAlign != HAlign::Left || m_vAlign != VAlign::Top) && !m_manualPosition) {
+            applyAlignment();
+        }
+        
+        return this;
+    }
+    
+    // 设置高度（支持链式调用）
+    UINode* setHeight(float h) { 
+        m_size.y = h; 
+        m_dirty = true; 
+        m_layoutH = LayoutDim::Exact;
+        markChildrenDirty();
+        
+        if ((m_hAlign != HAlign::Left || m_vAlign != VAlign::Top) && !m_manualPosition) {
+            applyAlignment();
+        }
+        
+        return this;
+    }
+    
+    // === 对齐系统（推荐使用，灵活性强） ===
+    
+    // 设置水平和垂直对齐（支持链式调用）
+    UINode* setAlign(HAlign hAlign, VAlign vAlign) {
+        m_hAlign = hAlign;
+        m_vAlign = vAlign;
+        m_dirty = true;
+        m_manualPosition = false;
+        applyAlignment();
+        return this;
+    }
+    
+    // 只设置水平对齐（垂直保持不变）
+    UINode* setHAlign(HAlign hAlign) {
+        m_hAlign = hAlign;
+        m_dirty = true;
+        m_manualPosition = false;
+        applyAlignment();
+        return this;
+    }
+    
+    // 只设置垂直对齐（水平保持不变）
+    UINode* setVAlign(VAlign vAlign) {
+        m_vAlign = vAlign;
+        m_dirty = true;
+        m_manualPosition = false;
+        applyAlignment();
+        return this;
+    }
+    
+    // 设置对齐和额外偏移
+    UINode* setAlignWithOffset(HAlign hAlign, VAlign vAlign, float offsetX, float offsetY) {
+        m_hAlign = hAlign;
+        m_vAlign = vAlign;
+        m_dirty = true;
+        applyAlignment();
+        m_position.x += offsetX;
+        m_position.y += offsetY;
+        m_manualPosition = false;
+        return this;
+    }
+    
+    // 【兼容性】旧的Anchor API（内部转换为HAlign+VAlign）
+    UINode* setAnchor(Anchor anchor) {
+        // 转换Anchor到HAlign+VAlign
+        switch (anchor) {
+            case Anchor::TopLeft:       return setAlign(HAlign::Left, VAlign::Top);
+            case Anchor::TopCenter:     return setAlign(HAlign::Center, VAlign::Top);
+            case Anchor::TopRight:      return setAlign(HAlign::Right, VAlign::Top);
+            case Anchor::MiddleLeft:    return setAlign(HAlign::Left, VAlign::Middle);
+            case Anchor::MiddleCenter:  return setAlign(HAlign::Center, VAlign::Middle);
+            case Anchor::MiddleRight:   return setAlign(HAlign::Right, VAlign::Middle);
+            case Anchor::BottomLeft:    return setAlign(HAlign::Left, VAlign::Bottom);
+            case Anchor::BottomCenter:  return setAlign(HAlign::Center, VAlign::Bottom);
+            case Anchor::BottomRight:   return setAlign(HAlign::Right, VAlign::Bottom);
+        }
+        return this;
+    }
+
+    // === 流式布局API（便捷方法） ===
+    
+    // 完全居中
+    UINode* center() { return setAlign(HAlign::Center, VAlign::Middle); }
+    
+    // 水平居中（垂直保持不变）
+    UINode* centerH() { return setHAlign(HAlign::Center); }
+    
+    // 垂直居中（水平保持不变）
+    UINode* centerV() { return setVAlign(VAlign::Middle); }
+    
+    // 快速对齐（组合方式）
+    UINode* alignTop() { return setAlign(HAlign::Center, VAlign::Top); }
+    UINode* alignBottom() { return setAlign(HAlign::Center, VAlign::Bottom); }
+    UINode* alignLeft() { return setAlign(HAlign::Left, VAlign::Middle); }
+    UINode* alignRight() { return setAlign(HAlign::Right, VAlign::Middle); }
+    UINode* alignTopLeft() { return setAlign(HAlign::Left, VAlign::Top); }
+    UINode* alignTopRight() { return setAlign(HAlign::Right, VAlign::Top); }
+    UINode* alignBottomLeft() { return setAlign(HAlign::Left, VAlign::Bottom); }
+    UINode* alignBottomRight() { return setAlign(HAlign::Right, VAlign::Bottom); }
+    
+    // 带边距的对齐
+    UINode* alignBottomRightWithMargin(float marginX, float marginY) {
+        return setAlignWithOffset(HAlign::Right, VAlign::Bottom, -marginX, -marginY);
+    }
+    
+    UINode* alignTopLeftWithMargin(float marginX, float marginY) {
+        return setAlignWithOffset(HAlign::Left, VAlign::Top, marginX, marginY);
+    }
 
     // 布局尺寸语义（Android 风格）
-    void setWidthMatch() { m_layoutW = LayoutDim::MatchParent; }
-    void setHeightMatch() { m_layoutH = LayoutDim::MatchParent; }
-    void setWidthWrap() { m_layoutW = LayoutDim::WrapContent; }
-    void setHeightWrap() { m_layoutH = LayoutDim::WrapContent; }
+    UINode* setWidthMatch() { m_layoutW = LayoutDim::MatchParent; return this; }
+    UINode* setHeightMatch() { m_layoutH = LayoutDim::MatchParent; return this; }
+    UINode* setWidthWrap() { m_layoutW = LayoutDim::WrapContent; return this; }
+    UINode* setHeightWrap() { m_layoutH = LayoutDim::WrapContent; return this; }
     LayoutDim layoutWidth() const { return m_layoutW; }
     LayoutDim layoutHeight() const { return m_layoutH; }
 
@@ -157,28 +332,29 @@ public:
 
     Tina::Math::Vec2 getPosition() const { return m_position; }
     Tina::Math::Vec2 getSize() const { return m_size; }
-    Anchor getAnchor() const { return m_anchor; }
+    HAlign getHAlign() const { return m_hAlign; }
+    VAlign getVAlign() const { return m_vAlign; }
 
     // === 世界坐标（自动计算） ===
     Tina::Math::Vec2 getWorldPosition();
     Tina::Math::Vec2 getWorldSize() { return m_size; } // 暂不支持缩放
 
-    // === 状态 ===
-    void setVisible(bool v) { if (m_visible != v) { m_visible = v; bumpTreeVersion(); } }
-    void setEnabled(bool e) { if (m_enabled != e) { m_enabled = e; bumpTreeVersion(); } }
+    // === 状态（支持链式调用） ===
+    UINode* setVisible(bool v) { if (m_visible != v) { m_visible = v; bumpTreeVersion(); } return this; }
+    UINode* setEnabled(bool e) { if (m_enabled != e) { m_enabled = e; bumpTreeVersion(); } return this; }
     bool isVisible() const { return m_visible; }
     bool isEnabled() const { return m_enabled; }
     // 交互能力开关（用于命中与事件过滤）
-    void setInteractable(bool i) { if (m_interactable != i) { m_interactable = i; bumpTreeVersion(); } }
+    UINode* setInteractable(bool i) { if (m_interactable != i) { m_interactable = i; bumpTreeVersion(); } return this; }
     bool isInteractable() const { return m_interactable; }
-    void setClickable(bool v) { if (m_clickable != v) { m_clickable = v; bumpTreeVersion(); } }
+    UINode* setClickable(bool v) { if (m_clickable != v) { m_clickable = v; bumpTreeVersion(); } return this; }
     bool isClickable() const { return m_clickable; }
-    void setHoverable(bool v) { if (m_hoverable != v) { m_hoverable = v; bumpTreeVersion(); } }
+    UINode* setHoverable(bool v) { if (m_hoverable != v) { m_hoverable = v; bumpTreeVersion(); } return this; }
     bool isHoverable() const { return m_hoverable; }
-    void setFocusable(bool v) { if (m_focusable != v) { m_focusable = v; bumpTreeVersion(); } }
+    UINode* setFocusable(bool v) { if (m_focusable != v) { m_focusable = v; bumpTreeVersion(); } return this; }
     bool isFocusable() const { return m_focusable; }
     // 呈现顺序（越大越上层）
-    void setZIndex(int z) { if (m_zIndex != z) { m_zIndex = z; bumpTreeVersion(); } }
+    UINode* setZIndex(int z) { if (m_zIndex != z) { m_zIndex = z; bumpTreeVersion(); } return this; }
     int zIndex() const { return m_zIndex; }
 
     // === 渲染分层（UIRenderer 层号） ===
@@ -262,6 +438,30 @@ protected:
 private:
     void updateWorldTransform();
     Tina::Math::Vec2 anchorOffset() const;
+    
+    // 标记所有子节点为dirty（当父节点尺寸变化时调用）
+    void markChildrenDirty() {
+        for (auto& child : m_children) {
+            if (child) child->m_dirty = true;
+        }
+    }
+    
+    // 根据HAlign和VAlign自动计算并应用对齐位置
+    void applyAlignment() {
+        // 水平对齐
+        switch (m_hAlign) {
+            case HAlign::Left:   m_position.x = 0; break;
+            case HAlign::Center: m_position.x = -m_size.x * 0.5f; break;
+            case HAlign::Right:  m_position.x = -m_size.x; break;
+        }
+        
+        // 垂直对齐
+        switch (m_vAlign) {
+            case VAlign::Top:    m_position.y = 0; break;
+            case VAlign::Middle: m_position.y = -m_size.y * 0.5f; break;
+            case VAlign::Bottom: m_position.y = -m_size.y; break;
+        }
+    }
 
 protected:
     std::string m_name;
@@ -273,7 +473,9 @@ protected:
     // 局部变换
     Tina::Math::Vec2 m_position{0, 0}; // 相对父节点的偏移
     Tina::Math::Vec2 m_size{100, 100};
-    Anchor m_anchor = Anchor::TopLeft;
+    HAlign m_hAlign = HAlign::Left;    // 水平对齐方式
+    VAlign m_vAlign = VAlign::Top;     // 垂直对齐方式
+    bool m_manualPosition = false;     // 是否手动设置了position（用于智能对齐重新应用）
     LayoutDim m_layoutW = LayoutDim::Exact;
     LayoutDim m_layoutH = LayoutDim::Exact;
     float m_marginL = 0.0f, m_marginT = 0.0f, m_marginR = 0.0f, m_marginB = 0.0f;
