@@ -90,10 +90,6 @@ set(SRC_FILES
     ui/UINode.cpp
     ui/UIComponents.hpp
     ui/UIComponents.cpp
-    ui/UIEventSystem.hpp
-    ui/UIEventSystem.cpp
-    ui/UIEventDispatcher.hpp
-    ui/UIEventDispatcher.cpp
     ui/UIToolbar.hpp
     ui/UIToolbar.cpp
     ui/UILayout.hpp

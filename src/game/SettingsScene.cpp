@@ -40,10 +40,6 @@ void SettingsScene::onEnter()
     // 迁移到新架构：使用 Scene 基类提供的全局 UIRenderer（ui()）
 
     createUI();
-    m_events.setRoot(m_root.get());
-
-    // 注入引擎事件系统
-    m_events.setGlobalEventSystem(&app()->events());
     // 按钮事件已在 createUI() 中绑定
 }
 
@@ -100,8 +96,7 @@ void SettingsScene::applyWindowResize(int width, int height)
     if (m_uiScale == 0.0f || std::abs(newScale - m_uiScale) > 0.3f) {
         m_uiScale = newScale;
         
-        // 🔧 关键修复：重建UI前先清空事件系统，避免访问已销毁的节点
-        m_events.setRoot(nullptr);
+        // 事件系统已统一为 Engine::EventSystem，无需清空本地路由
         
         createUI();
         TINA_INFO("SettingsScene: 重建UI，新缩放比例: {}", m_uiScale);
@@ -135,11 +130,11 @@ void SettingsScene::handleInput()
         return;
     }
 
-    // 鼠标移动/点击：使用 UIEventSystem 统一处理
+    // 鼠标移动/点击/滚轮：统一推送到引擎事件系统进行命中与分发
     auto mousePos = input.getMousePosition();
     bool leftDown = input.isMouseButtonDown(Engine::MouseButton::Left);
-    m_events.updateMouse(mousePos.x, mousePos.y, leftDown);
-    m_events.processEvents();
+    app()->events().setUIRoot(m_root.get()); // 确保根节点设置（UniquePtr -> raw）
+    app()->events().updateUIInput(mousePos.x, mousePos.y, leftDown, input.getMouseWheelDelta());
 }
 
 void SettingsScene::createUI()
@@ -246,8 +241,8 @@ void SettingsScene::createUI()
     float centerY = (m_pixelHeight - panelHeight) * 0.5f;
     panel->setPosition(centerX, centerY);
 
-    // 更新事件系统根节点
-    m_events.setRoot(m_root.get());
+    // 根节点供引擎事件系统使用
+    if (auto* a = app()) a->events().setUIRoot(m_root.get());
 }
 
 void SettingsScene::onBack()

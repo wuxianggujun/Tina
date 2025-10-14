@@ -7,8 +7,7 @@
 #include "UINode.hpp"
 #include "UIComponents.hpp"
 #include "UIProgressBar.hpp"
-#include "UIEventSystem.hpp"
-#include "UIEvents.hpp"
+#include "../engine/UIEvents.hpp"
 #include "../engine/EventSystem.hpp"
 #include "../ecs/Components.hpp"
 #include <functional>
@@ -43,8 +42,6 @@ public:
     // 触发切换控制事件
     void onSwitchControlClicked();
 
-    // 事件系统访问
-    UIEventSystem& events() { return m_events; }
 
     // 命中测试（检查鼠标是否在面板内）
     bool hitTest(float mouseX, float mouseY) const {
@@ -67,7 +64,7 @@ private:
     UIButton* m_switchButton = nullptr;    // 切换控制按钮
     UILabel* m_controlledLabel = nullptr;  // 当前控制状态标签
 
-    UIEventSystem m_events;                // UI事件系统（局部）
+    // 兼容移除：局部 UIEventSystem 已删除，统一走 Engine::EventSystem
     Engine::EventSystem* m_eventSystem = nullptr; // 全局事件系统指针
 
     // 按钮点击事件订阅令牌

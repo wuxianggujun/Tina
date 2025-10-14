@@ -32,8 +32,6 @@ bool UIToolbar::initialize(int screenW, int screenH, UIRenderer& renderer)
     // 初次布局
     buildLayout();
 
-    // 事件系统根
-    m_events.setRoot(m_root.get());
     return true;
 }
 

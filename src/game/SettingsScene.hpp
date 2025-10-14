@@ -10,7 +10,6 @@
 #include "../ui/UICore.hpp"
 #include "../ui/UINode.hpp"
 #include "../ui/UIComponents.hpp"
-#include "../ui/UIEventSystem.hpp"
 
 namespace Tina::Game {
 
@@ -45,7 +44,7 @@ private:
     UI::UIButton* m_btnFwd = nullptr;
     UI::UIButton* m_btnBack = nullptr;
     UI::UIButton* m_btnClose = nullptr;
-    UI::UIEventSystem m_events;
+    // 兼容移除：旧 UIEventSystem 已删除，使用 Engine::EventSystem
 
     int m_pixelWidth = 1280;
     int m_pixelHeight = 720;

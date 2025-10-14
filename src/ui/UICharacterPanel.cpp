@@ -80,9 +80,6 @@ UICharacterPanel::UICharacterPanel(const std::string& name)
         onSwitchControlClicked(); 
     });
 
-    // 初始化事件系统（设置根节点为自己）
-    m_events.setRoot(this);
-
     // 默认隐藏
     setVisible(false);
 }

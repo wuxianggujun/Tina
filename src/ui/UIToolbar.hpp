@@ -9,7 +9,6 @@
 #include "UICore.hpp"
 #include "UIComponents.hpp"
 #include "UILayout.hpp"
-#include "UIEventSystem.hpp"
 #include "../core/Container.hpp"
 #include "../core/Memory.hpp"
 #include "UINode.hpp"  // 引入UINode基类
@@ -43,8 +42,6 @@ public:
     void update(float dt);
     void render(uint16_t viewId);
 
-    // 事件系统对接
-    UIEventSystem& events() { return m_events; }
     UINode* root() const { return m_root.get(); }
 
     int barHeight() const { return m_barH; }
@@ -87,8 +84,7 @@ private:
     UIHStack* m_stack = nullptr;     // 水平栈布局容器
     Tina::Container::Vector<UIButton*> m_slots; // 格子按钮
 
-    // 事件系统
-    UIEventSystem m_events;
+    // 事件系统：已统一由 Engine::EventSystem 处理，这里不再保留本地系统
 
     // 布局参数
     int m_screenW = 0;

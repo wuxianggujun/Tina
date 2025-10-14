@@ -53,6 +53,11 @@ constexpr uint32_t DEPTH_SORTED_MAX_VERTICES = 32768;     // 深度排序时使�
 constexpr int LINEAR_FILTER_FONT_SIZE_THRESHOLD = 24;     // 小于此字号使用线性过滤
 constexpr int DEFAULT_FONT_SIZE = 16;                      // 默认字号
 
+// ==================== 渲染层常量（大的在上） ====================
+constexpr int LAYER_DEFAULT = 0;    // 默认层
+constexpr int LAYER_OVERLAY = 50;   // 覆盖层（如遮罩/菜单）
+constexpr int LAYER_DIALOG  = 100;  // 对话框/模态层
+
 // ==================== 性能监控相关常量 ====================
 
 // 性能统计

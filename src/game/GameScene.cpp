@@ -741,8 +741,10 @@ void GameScene::updateGameLogic(float dt)
         // 先更新布局（计算各子节点世界坐标），再做命中测试与事件处理
         m_toolbar->update(dt);
         m_toolbar->setMousePos(mx, my);
-        m_toolbar->events().updateMouse(mx, my, leftHeld);
-        m_toolbar->events().processEvents();
+        if (m_toolbar->root()) {
+            app()->events().setUIRoot(m_toolbar->root());
+            app()->events().updateUIInput(mx, my, leftHeld, inputSys.getMouseWheelDelta());
+        }
     }
 
     if (m_characterPanel) {
@@ -752,8 +754,8 @@ void GameScene::updateGameLogic(float dt)
 
         // 先更新布局，再分发事件
         m_characterPanel->update(dt);
-        m_characterPanel->events().updateMouse(mx, my, leftHeld);
-        m_characterPanel->events().processEvents();
+        app()->events().setUIRoot(m_characterPanel.get());
+        app()->events().updateUIInput(mx, my, leftHeld, inputSys.getMouseWheelDelta());
     }
 
     // 重置工具激活状态（实现一次性点击，防止 UI 事件连续触发）

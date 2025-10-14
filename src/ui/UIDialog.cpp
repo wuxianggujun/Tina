@@ -92,7 +92,7 @@ void UIDialog::createDialogUI() {
     m_dialogPanel->setClickable(true);
 
     // 渲染层：将整个对话框（含子节点）置于更高层，确保覆盖下层文本
-    setLayer(100);
+    setLayer(LAYER_DIALOG); // 使用统一常量
 
     // 调试：打印父节点尺寸和对话框位置
     auto parentSize = getSize();
