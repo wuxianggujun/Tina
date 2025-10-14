@@ -65,11 +65,7 @@ void UIDialog::onClick() {
 void UIDialog::onRender(uint16_t viewId, UIRenderer& renderer) {
     if (!m_visible) return;
 
-    // 渲染顺序栅栏：
-    // 目的：避免下层控件（如列表）的文本在“统一文本延迟提交”时盖住本对话框面板。
-    // 机制：先 flush 掉此前累积的图元与文本，再绘制本对话框（面板/标题/按钮文本）。
-    // 这样对话框的面板矩形将提交在列表文本之后，从而把其正确遮住。
-    renderer.flush();
+    // 使用分层渲染：对话框设置在更高层，无需手动 flush。
 
     // 1. 绘制半透明遮罩层（全屏）
     auto size = getSize();
@@ -94,6 +90,9 @@ void UIDialog::createDialogUI() {
     m_dialogPanel->setColor(m_dialogBgColor);
     m_dialogPanel->setInteractable(true);  // 阻止事件穿透到下层
     m_dialogPanel->setClickable(true);
+
+    // 渲染层：将整个对话框（含子节点）置于更高层，确保覆盖下层文本
+    setLayer(100);
 
     // 调试：打印父节点尺寸和对话框位置
     auto parentSize = getSize();

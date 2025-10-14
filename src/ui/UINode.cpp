@@ -197,15 +197,20 @@ void UINode::render(uint16_t viewId, UIRenderer& renderer)
         performLayoutNow();
     }
 
-    onRender(viewId, renderer);
+    // 分层：若本节点未显式设置层（m_layer==0），继承父层；否则切换到自身层。
+    int prevLayer = renderer.currentLayer();
+    int targetLayer = (m_layer != 0 ? m_layer : prevLayer);
+    bool pushed = false;
+    if (targetLayer != prevLayer) { renderer.pushLayer(targetLayer); pushed = true; }
 
+    onRender(viewId, renderer);
     for (auto& child : m_children) {
         if (child) child->render(viewId, renderer);
     }
+
+    if (pushed) renderer.popLayer();
 }
 
 } // namespace Tina::UI
-
-
 
 

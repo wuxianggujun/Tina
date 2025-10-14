@@ -48,11 +48,7 @@ bool UIRenderer::initialize(Tina::Renderer::ShaderManager& sm, TextRenderer* tex
         TINA_WARN("UIRenderer: sprite着色器加载失败");
     }
 
-    // 内存预分配优化：避免运行时频繁内存分配
-    m_colorBatch.vertices.reserve(DEFAULT_COLOR_VERTEX_RESERVE);
-    m_colorBatch.indices.reserve(DEFAULT_COLOR_INDEX_RESERVE);
-    m_spriteBatches.reserve(DEFAULT_SPRITE_BATCH_RESERVE);
-    m_textCmds.reserve(DEFAULT_TEXT_CMD_RESERVE);
+    // 分层批处理在首次使用各层时分配内存；无需在此预分配全局缓冲
 
     // 初始化默认批处理策略
     m_defaultStrategy = Memory::MakeUnique<SimpleBatchStrategy>();
@@ -70,8 +66,7 @@ void UIRenderer::shutdown()
     if (bgfx::isValid(m_sTex)) { bgfx::destroy(m_sTex); m_sTex = BGFX_INVALID_HANDLE; }
     
     // 清理批处理缓冲
-    m_colorBatch.clear();
-    m_spriteBatches.clear();
+    m_layers.clear();
 }
 
 void UIRenderer::beginFrame(uint16_t viewId)
@@ -79,18 +74,10 @@ void UIRenderer::beginFrame(uint16_t viewId)
     // 开始性能监控
     m_perfMonitor.beginFrame();
 
-    // 优化：使用 resize(0) 代替 clear() 保留容量，避免内存重分配
-    m_colorBatch.vertices.resize(0);
-    m_colorBatch.indices.resize(0);
-
-    // sprite批次需要清理纹理句柄，所以保持clear
-    for (auto& batch : m_spriteBatches) {
-        batch.vertices.resize(0);
-        batch.indices.resize(0);
-    }
-    m_spriteBatches.clear();
-
-    m_textCmds.resize(0);  // 保留容量
+    // 分层批处理：新帧清理所有层并压入默认层0
+    m_layers.clear();
+    m_layerStack.clear();
+    m_layerStack.push_back(0);
     m_currentViewId = viewId;
 
     // 性能优化：预检查瞬态缓冲区容量，避免每次绘制都检查
@@ -116,33 +103,36 @@ void UIRenderer::drawRect(uint16_t viewId, float x, float y, float w, float h,
     
     if (w <= 0.0f || h <= 0.0f) return;
     
-    // ✅ 检查索引溢出：如果添加顶点会超过uint16_t最大值，先flush
-    if (m_colorBatch.vertices.size() + VERTICES_PER_RECT > MAX_VERTICES_PER_BATCH) {
-        flushColorBatch();
+    auto& layer = m_layers[currentLayer()];
+    ColorBatch& colorBatch = layer.color;
+
+    // ✅ 检查索引溢出：如果添加顶点会超过uint16_t最大值，先flush本层
+    if (colorBatch.vertices.size() + VERTICES_PER_RECT > MAX_VERTICES_PER_BATCH) {
+        flushLayerColorBatch(layer);
     }
 
     // 检查是否需要创建新批次（防止单个批次过大）
-    if (shouldCreateNewBatch(m_colorBatch.vertices.size(), VERTICES_PER_RECT)) {
-        // 如果当前批次已经很大，先flush再继续
-        flushColorBatch();
+    if (shouldCreateNewBatch(colorBatch.vertices.size(), VERTICES_PER_RECT)) {
+        // 如果当前批次已经很大，先flush再继续（本层）
+        flushLayerColorBatch(layer);
     }
 
     // 计算当前批次的基索引（已有顶点数）
-    uint16_t baseIdx = static_cast<uint16_t>(m_colorBatch.vertices.size());
-    
+    uint16_t baseIdx = static_cast<uint16_t>(colorBatch.vertices.size());
+
     // 添加4个顶点
-    m_colorBatch.vertices.push_back({ x,     y,     0.0f, r,g,b,a });
-    m_colorBatch.vertices.push_back({ x+w,   y,     0.0f, r,g,b,a });
-    m_colorBatch.vertices.push_back({ x+w,   y+h,   0.0f, r,g,b,a });
-    m_colorBatch.vertices.push_back({ x,     y+h,   0.0f, r,g,b,a });
-    
+    colorBatch.vertices.push_back({ x,     y,     0.0f, r,g,b,a });
+    colorBatch.vertices.push_back({ x+w,   y,     0.0f, r,g,b,a });
+    colorBatch.vertices.push_back({ x+w,   y+h,   0.0f, r,g,b,a });
+    colorBatch.vertices.push_back({ x,     y+h,   0.0f, r,g,b,a });
+
     // 添加6个索引（2个三角形）
-    m_colorBatch.indices.push_back(baseIdx + 0);
-    m_colorBatch.indices.push_back(baseIdx + 1);
-    m_colorBatch.indices.push_back(baseIdx + 2);
-    m_colorBatch.indices.push_back(baseIdx + 0);
-    m_colorBatch.indices.push_back(baseIdx + 2);
-    m_colorBatch.indices.push_back(baseIdx + 3);
+    colorBatch.indices.push_back(baseIdx + 0);
+    colorBatch.indices.push_back(baseIdx + 1);
+    colorBatch.indices.push_back(baseIdx + 2);
+    colorBatch.indices.push_back(baseIdx + 0);
+    colorBatch.indices.push_back(baseIdx + 2);
+    colorBatch.indices.push_back(baseIdx + 3);
     
     // 更新统计
     m_perfMonitor.recordRect();
@@ -163,7 +153,7 @@ void UIRenderer::drawText(uint16_t viewId, float x, float y,
     cmd.x = x; cmd.y = y; cmd.r = opts.r; cmd.g = opts.g; cmd.b = opts.b; cmd.a = opts.a; cmd.text = utf8; cmd.fontPx = opts.fontPx;
     // 记录当前裁剪状态
     cmd.hasClip = m_hasClip; cmd.clipX = m_clipX; cmd.clipY = m_clipY; cmd.clipW = m_clipW; cmd.clipH = m_clipH;
-    m_textCmds.push_back(std::move(cmd));
+    m_layers[currentLayer()].texts.push_back(std::move(cmd));
 }
 
 void UIRenderer::drawTextBox(uint16_t viewId, float x, float y, float w, float h,
@@ -182,7 +172,7 @@ void UIRenderer::drawTextBox(uint16_t viewId, float x, float y, float w, float h
     cmd.hAlign = opts.hAlign; cmd.vAlign = opts.vAlign;
     // 记录当前裁剪状态
     cmd.hasClip = m_hasClip; cmd.clipX = m_clipX; cmd.clipY = m_clipY; cmd.clipW = m_clipW; cmd.clipH = m_clipH;
-    m_textCmds.push_back(std::move(cmd));
+    m_layers[currentLayer()].texts.push_back(std::move(cmd));
 }
 
 // 批处理版本：缓存而不是立即提交
@@ -192,8 +182,9 @@ void UIRenderer::drawImage(uint16_t viewId, float x, float y, float w, float h,
 {
     if (!bgfx::isValid(m_progSprite) || !bgfx::isValid(tex) || w <= 0.0f || h <= 0.0f) return;
 
-    // 找到或创建匹配纹理的批次（考虑深度）
-    SpriteBatch* batch = findOrCreateSpriteBatch(tex, m_currentRenderDepth);
+    // 找到或创建匹配纹理的批次（考虑深度） - 分层
+    auto& layer = m_layers[currentLayer()];
+    SpriteBatch* batch = findOrCreateSpriteBatch(layer.sprites, tex, m_currentRenderDepth);
     if (!batch) return;
     
     // ✅ 检查索引溢出
@@ -202,8 +193,8 @@ void UIRenderer::drawImage(uint16_t viewId, float x, float y, float w, float h,
         SpriteBatch newBatch;
         newBatch.texture = tex;
         newBatch.currentDepth = m_currentRenderDepth;
-        m_spriteBatches.push_back(newBatch);
-        batch = &m_spriteBatches.back();
+        layer.sprites.push_back(newBatch);
+        batch = &layer.sprites.back();
     }
 
     // 检查是否需要创建新批次
@@ -212,8 +203,8 @@ void UIRenderer::drawImage(uint16_t viewId, float x, float y, float w, float h,
         SpriteBatch newBatch;
         newBatch.texture = tex;
         newBatch.currentDepth = m_currentRenderDepth;
-        m_spriteBatches.push_back(newBatch);
-        batch = &m_spriteBatches.back();
+        layer.sprites.push_back(newBatch);
+        batch = &layer.sprites.back();
     }
 
     uint16_t baseIdx = static_cast<uint16_t>(batch->vertices.size());
@@ -236,17 +227,19 @@ void UIRenderer::drawImage(uint16_t viewId, float x, float y, float w, float h,
     m_perfMonitor.recordImage();
 }
 
-// 统一提交所有批次
+// 统一提交所有批次（按层：先图元/图片，后文本）
 void UIRenderer::flush()
 {
-    // 使用策略对批次进行排序
-    if (m_batchStrategy) {
-        m_batchStrategy->sortSpriteBatches(m_spriteBatches);
+    // 使用策略对每层的精灵批次进行排序，并按层提交
+    for (auto& kv : m_layers) {
+        auto& L = kv.second;
+        if (m_batchStrategy) {
+            m_batchStrategy->sortSpriteBatches(L.sprites);
+        }
+        flushLayerColorBatch(L);
+        flushLayerSpriteBatches(L);
+        flushLayerTextCommands(L);
     }
-    
-    flushColorBatch();
-    flushSpriteBatches();
-    flushTextCommands();
     
     // 结束性能监控
     m_perfMonitor.endFrame();
@@ -254,21 +247,14 @@ void UIRenderer::flush()
     // 重置深度计数器
     m_currentRenderDepth = 0;
     
-    // 清理（为下一帧做准备，但保留内存容量）
-    m_colorBatch.vertices.clear();
-    m_colorBatch.indices.clear();
-    for (auto& batch : m_spriteBatches) {
-        batch.vertices.clear();
-        batch.indices.clear();
-    }
-    m_spriteBatches.clear();
-    m_textCmds.clear();
+    // 清理（为下一帧做准备）
+    m_layers.clear();
 }
 
-// 提交纯色批次
-void UIRenderer::flushColorBatch()
+// 提交当前层的纯色批次
+void UIRenderer::flushLayerColorBatch(UIRenderer::LayerBatches& L)
 {
-    if (m_colorBatch.vertices.empty()) {
+    if (L.color.vertices.empty()) {
         // 批次为空，正常情况
         return;
     }
@@ -280,8 +266,8 @@ void UIRenderer::flushColorBatch()
         return;
     }
 
-    const uint32_t vcount = static_cast<uint32_t>(m_colorBatch.vertices.size());
-    const uint32_t icount = static_cast<uint32_t>(m_colorBatch.indices.size());
+    const uint32_t vcount = static_cast<uint32_t>(L.color.vertices.size());
+    const uint32_t icount = static_cast<uint32_t>(L.color.indices.size());
     
     // ✅ 性能日志（已注释，避免刷屏）
     // TINA_TRACE("UIRenderer: flushColorBatch - 提交 {} 个矩形", vcount / 4);
@@ -299,8 +285,8 @@ void UIRenderer::flushColorBatch()
     bgfx::allocTransientVertexBuffer(&tvb, vcount, m_colorLayout);
     bgfx::allocTransientIndexBuffer(&tib, icount);
     
-    std::memcpy(tvb.data, m_colorBatch.vertices.data(), vcount * sizeof(ColorVtx));
-    std::memcpy(tib.data, m_colorBatch.indices.data(), icount * sizeof(uint16_t));
+    std::memcpy(tvb.data, L.color.vertices.data(), vcount * sizeof(ColorVtx));
+    std::memcpy(tib.data, L.color.indices.data(), icount * sizeof(uint16_t));
     
     // 提交单个批次（合并了所有矩形）
     bgfx::Encoder* enc = bgfx::begin(false);  // 不排序，按顺序渲染
@@ -325,12 +311,12 @@ void UIRenderer::flushColorBatch()
     }
 }
 
-// 提交所有纹理批次
-void UIRenderer::flushSpriteBatches()
+// 提交当前层的所有纹理批次
+void UIRenderer::flushLayerSpriteBatches(UIRenderer::LayerBatches& L)
 {
     if (!bgfx::isValid(m_progSprite)) return;
 
-    for (auto& batch : m_spriteBatches) {
+    for (auto& batch : L.sprites) {
         if (batch.vertices.empty()) continue;
 
         const uint32_t vcount = static_cast<uint32_t>(batch.vertices.size());
@@ -376,11 +362,32 @@ void UIRenderer::flushSpriteBatches()
     }
 }
 
-// 查找或创建纹理批次（考虑深度）
-SpriteBatch* UIRenderer::findOrCreateSpriteBatch(bgfx::TextureHandle tex, uint32_t depth)
+// 分层 API 实现
+void UIRenderer::pushLayer(int layer) {
+    m_layerStack.push_back(layer);
+}
+
+void UIRenderer::popLayer() {
+    if (!m_layerStack.empty()) m_layerStack.pop_back();
+}
+
+int UIRenderer::currentLayer() const {
+    return m_layerStack.empty() ? 0 : m_layerStack.back();
+}
+
+// 在裁剪切换时，提交所有层的颜色与图片批次，避免不同裁剪混批
+void UIRenderer::flushAllColorsAndSprites() {
+    for (auto& kv : m_layers) {
+        flushLayerColorBatch(kv.second);
+        flushLayerSpriteBatches(kv.second);
+    }
+}
+
+// 查找或创建纹理批次（考虑深度） - 分层版本
+SpriteBatch* UIRenderer::findOrCreateSpriteBatch(Container::Vector<SpriteBatch>& batches, bgfx::TextureHandle tex, uint32_t depth)
 {
     // 根据批处理策略查找合适的批次
-    for (auto& batch : m_spriteBatches) {
+    for (auto& batch : batches) {
         // 使用策略判断是否可以合并
         if (m_batchStrategy && m_batchStrategy->canMergeSprite(batch, tex, depth, 0)) {
             return &batch;
@@ -391,8 +398,8 @@ SpriteBatch* UIRenderer::findOrCreateSpriteBatch(bgfx::TextureHandle tex, uint32
     SpriteBatch newBatch;
     newBatch.texture = tex;
     newBatch.currentDepth = depth;
-    m_spriteBatches.push_back(newBatch);
-    return &m_spriteBatches.back();
+    batches.push_back(newBatch);
+    return &batches.back();
 }
 
 // 判断是否需要创建新批次
@@ -402,21 +409,21 @@ bool UIRenderer::shouldCreateNewBatch(uint32_t currentSize, uint32_t newSize) co
     return (currentSize + newSize) > m_maxBatchVertices;
 }
 
-// 顶层文本：延迟到 flush() 统一提交
-void UIRenderer::flushTextCommands()
+// 文本：延迟到 flush()，按层提交
+void UIRenderer::flushLayerTextCommands(UIRenderer::LayerBatches& L)
 {
-    if (!m_text || m_textCmds.empty()) return;
+    if (!m_text || L.texts.empty()) return;
     
     // ✅ 性能日志（已注释，避免刷屏）
     // TINA_TRACE("UIRenderer: flushTextCommands - 提交 {} 条文本命令", (int)m_textCmds.size());
     
     // 记录文本统计
-    for (size_t i = 0; i < m_textCmds.size(); ++i) {
+    for (size_t i = 0; i < L.texts.size(); ++i) {
         m_perfMonitor.recordText();
         m_perfMonitor.recordDrawCall();  // 文本渲染的drawcall估算
     }
     
-    for (const auto& cmd : m_textCmds) {
+    for (const auto& cmd : L.texts) {
         // 每条命令单独设置裁剪
         if (cmd.hasClip) m_text->setClipRect(cmd.clipX, cmd.clipY, cmd.clipW, cmd.clipH);
         else             m_text->clearClipRect();

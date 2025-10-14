@@ -7,6 +7,7 @@
 
 #include <bgfx/bgfx.h>
 #include <string>
+#include <map>
 #include "../renderer/ShaderManager.hpp"
 #include "../core/Color.hpp"
 #include "TextRenderer.hpp"
@@ -54,6 +55,13 @@ public:
                      const std::string& utf8,
                      const TextOptions& opts = {});
 
+    // === 渲染分层（按层递增顺序提交） ===
+    // 用途：避免控件间手动 flush，通过层号控制覆盖关系。
+    // 规则：同一层内先提交图元/图片，后提交文本；层号越大越靠上。
+    void pushLayer(int layer);
+    void popLayer();
+    int currentLayer() const;
+
     // 批处理：统一提交所有缓存的绘制指令
     // 必须在所有 drawXXX 调用之后，每帧仅调用一次
     void beginFrame(uint16_t viewId);
@@ -94,16 +102,14 @@ public:
         // 当裁剪区域发生变化时，先提交当前批次，防止不同裁剪混批
         if (!m_hasClip || m_clipX != x || m_clipY != y || m_clipW != w || m_clipH != h) {
             // 提交当前已缓存的矩形/图片批次（使用旧裁剪）
-            flushColorBatch();
-            flushSpriteBatches();
+            flushAllColorsAndSprites();
         }
         m_hasClip = true; m_clipX = x; m_clipY = y; m_clipW = w; m_clipH = h;
     }
     void clearClipRect() {
         if (m_hasClip) {
             // 清除裁剪前，提交当前批次（使用旧裁剪）
-            flushColorBatch();
-            flushSpriteBatches();
+            flushAllColorsAndSprites();
         }
         m_hasClip = false;
     }
@@ -229,17 +235,18 @@ private:
     bgfx::VertexLayout  m_spriteLayout{};
     bgfx::UniformHandle m_sTex = BGFX_INVALID_HANDLE;
 
-    // 批处理缓冲
-    ColorBatch m_colorBatch;
-    Container::Vector<SpriteBatch> m_spriteBatches;
+    // 批处理缓冲（分层）
+    struct LayerBatches { ColorBatch color; Container::Vector<SpriteBatch> sprites; Container::Vector<TextCmd> texts; };
+    std::map<int, LayerBatches> m_layers;   // 按层号有序
+    Container::Vector<int> m_layerStack;    // 层栈（支持嵌套）
     uint16_t m_currentViewId = 0;
-    Container::Vector<TextCmd> m_textCmds;
 
     // 内部工具方法
-    SpriteBatch* findOrCreateSpriteBatch(bgfx::TextureHandle tex, uint32_t depth = 0);
-    void flushColorBatch();
-    void flushSpriteBatches();
-    void flushTextCommands();
+    SpriteBatch* findOrCreateSpriteBatch(Container::Vector<SpriteBatch>& batches, bgfx::TextureHandle tex, uint32_t depth = 0);
+    void flushLayerColorBatch(LayerBatches& L);
+    void flushLayerSpriteBatches(LayerBatches& L);
+    void flushLayerTextCommands(LayerBatches& L);
+    void flushAllColorsAndSprites();
     
     // 批处理优化
     bool shouldCreateNewBatch(uint32_t currentSize, uint32_t newSize) const;

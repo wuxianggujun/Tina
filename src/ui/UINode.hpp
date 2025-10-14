@@ -181,6 +181,10 @@ public:
     void setZIndex(int z) { if (m_zIndex != z) { m_zIndex = z; bumpTreeVersion(); } }
     int zIndex() const { return m_zIndex; }
 
+    // === 渲染分层（UIRenderer 层号） ===
+    void setLayer(int layer) { m_layer = layer; }
+    int layer() const { return m_layer; }
+
     // === 点测试（用于事件分发） ===
     bool containsPoint(float worldX, float worldY);
 
@@ -281,6 +285,7 @@ protected:
     bool m_hoverable = true;
     bool m_focusable = false;
     int m_zIndex = 0;
+    int m_layer = 0;  // 渲染层（较大者在上），由 UIRenderer 控制
 
     // 引擎事件系统（由场景设置）
     Tina::Engine::EventSystem* m_eventSystem = nullptr;
