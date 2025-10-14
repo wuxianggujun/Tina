@@ -54,6 +54,12 @@ void UIDialog::onClick() {
 void UIDialog::onRender(uint16_t viewId, UIRenderer& renderer) {
     if (!m_visible) return;
 
+    // 渲染顺序栅栏：
+    // 目的：避免下层控件（如列表）的文本在“统一文本延迟提交”时盖住本对话框面板。
+    // 机制：先 flush 掉此前累积的图元与文本，再绘制本对话框（面板/标题/按钮文本）。
+    // 这样对话框的面板矩形将提交在列表文本之后，从而把其正确遮住。
+    renderer.flush();
+
     // 1. 绘制半透明遮罩层（全屏）
     auto size = getSize();
     renderer.drawRect(viewId, 0, 0, size.x, size.y, m_maskColor);
@@ -113,19 +119,28 @@ void UIDialog::createDialogUI() {
     m_contentArea->setSize(460, 160);
 
     // 按钮区域
+    // 底部按钮：左右对称布局（间距=20，按钮宽=120）
+    const float btnW = 120.0f;
+    const float btnH = 40.0f;
+    const float btnGap = 20.0f;
+    const float btnY = 240.0f; // 距离面板顶部 240
+    const float cx = dialogW * 0.5f;
+    const float leftX  = cx - (btnGap * 0.5f) - btnW; // 250 - 10 - 120 = 120
+    const float rightX = cx + (btnGap * 0.5f);        // 250 + 10        = 260
+
     auto btnCancel = m_dialogPanel->createChild<UIButton>("BtnCancel");
     m_btnCancel = btnCancel;
     m_btnCancel->setText("取消");
-    m_btnCancel->setSize(120, 40);
-    m_btnCancel->setPosition(140, 240);
+    m_btnCancel->setSize(btnW, btnH);
+    m_btnCancel->setPosition(leftX, btnY);
     m_btnCancel->setFontPx(20);
     m_btnCancel->setOnClick([this]{ onCancelClicked(); });
 
     auto btnConfirm = m_dialogPanel->createChild<UIButton>("BtnConfirm");
     m_btnConfirm = btnConfirm;
     m_btnConfirm->setText("确定");
-    m_btnConfirm->setSize(120, 40);
-    m_btnConfirm->setPosition(280, 240);
+    m_btnConfirm->setSize(btnW, btnH);
+    m_btnConfirm->setPosition(rightX, btnY);
     m_btnConfirm->setFontPx(20);
     m_btnConfirm->setOnClick([this]{ onConfirmClicked(); });
 }
