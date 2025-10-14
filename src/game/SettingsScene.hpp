@@ -44,7 +44,7 @@ private:
     UI::UIButton* m_btnFwd = nullptr;
     UI::UIButton* m_btnBack = nullptr;
     UI::UIButton* m_btnClose = nullptr;
-    // 兼容移除：旧 UIEventSystem 已删除，使用 Engine::EventSystem
+    // 事件统一由 Engine::EventSystem 分发
 
     int m_pixelWidth = 1280;
     int m_pixelHeight = 720;

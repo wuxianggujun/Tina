@@ -253,6 +253,6 @@ void SettingsScene::onBack()
 // 这些方法已移除，设置界面不再包含昼夜调试功能
 // 昼夜调试功能保留在 PauseScene 中
 
-// 无需集中路由函数，事件由路由器直接回调
+// 事件统一由 Engine::EventSystem 分发
 
 } // namespace Tina::Game

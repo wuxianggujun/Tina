@@ -64,7 +64,7 @@ private:
     UIButton* m_switchButton = nullptr;    // 切换控制按钮
     UILabel* m_controlledLabel = nullptr;  // 当前控制状态标签
 
-    // 兼容移除：局部 UIEventSystem 已删除，统一走 Engine::EventSystem
+    // 事件统一由 Engine::EventSystem 分发
     Engine::EventSystem* m_eventSystem = nullptr; // 全局事件系统指针
 
     // 按钮点击事件订阅令牌

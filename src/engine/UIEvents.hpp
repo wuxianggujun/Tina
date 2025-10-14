@@ -1,6 +1,5 @@
 //
-// UIEvents.hpp - 统一的UI事件定义（集成到引擎事件系统）
-// 替代原有的 ui/UIEvents.hpp
+// UIEvents.hpp - 统一的 UI 事件定义（集成到引擎事件系统）
 //
 
 #pragma once

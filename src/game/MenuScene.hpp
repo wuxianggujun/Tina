@@ -68,7 +68,7 @@ private:
     void selectPreviousButton();
     void selectNextButton();
     void activateSelectedButton();
-    // 鼠标交互改为 UIEventSystem 统一处理（不再手写命中与 emit）
+    // 鼠标交互统一由 Engine::EventSystem 命中与分发
 
 private:
     // 自定义根节点类（覆盖onWindowSizeChanged以调用updateUILayout）
@@ -116,7 +116,7 @@ private:
     // UI 缩放
     float m_uiScale = 1.0f;
 
-    // 使用 UIEventSystem + 节点直绑（无需路由器）
+    // 事件统一由 Engine::EventSystem 分发
 };
 
 } // namespace Tina::Game

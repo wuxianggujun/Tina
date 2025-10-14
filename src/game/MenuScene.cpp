@@ -239,6 +239,8 @@ void MenuScene::createUI() {
     m_rootNode = Memory::MakeShared<MenuRootNode>(this);
     m_rootNode->setPosition(0, 0);
     m_rootNode->setSize((float)getPixelWidth(), (float)getPixelHeight());
+    // 顶层主菜单置于覆盖层
+    m_rootNode->setLayer(UI::LAYER_OVERLAY);
 
     // 计算按钮位置（确保三个按钮在面板中垂直居中，且避免与标题重叠）
     float centerX = getPixelWidth() / 2.0f;
@@ -299,7 +301,7 @@ void MenuScene::createUI() {
     m_btnStart = btnStart.get();
     m_buttons.push_back(m_btnStart);
 
-    // 事件系统与ID由路由器在 bind 时设置
+    // 事件由 Engine::EventSystem 分发
 
     // 创建设置按钮
     auto btnSettings = Memory::MakeUnique<UI::UIButton>("BtnSettings");
@@ -314,7 +316,7 @@ void MenuScene::createUI() {
     m_btnSettings = btnSettings.get();
     m_buttons.push_back(m_btnSettings);
 
-    // 事件系统与ID由路由器在 bind 时设置
+    // 事件由 Engine::EventSystem 分发
 
     // 创建退出按钮
     auto btnQuit = Memory::MakeUnique<UI::UIButton>("BtnQuit");
@@ -329,7 +331,7 @@ void MenuScene::createUI() {
     m_btnQuit = btnQuit.get();
     m_buttons.push_back(m_btnQuit);
 
-    // 事件系统与ID由路由器在 bind 时设置
+    // 事件由 Engine::EventSystem 分发
 
     // 调试：打印按钮信息（在 move 之前）
     TINA_INFO("MenuScene - 按钮创建完成:");
@@ -373,7 +375,7 @@ void MenuScene::onQuitClicked() {
     app()->quit();
 }
 
-// 无需额外路由函数，事件由路由器直接回调
+// 事件统一由 Engine::EventSystem 分发
 
 void MenuScene::selectPreviousButton() {
     if (m_buttons.empty()) return;

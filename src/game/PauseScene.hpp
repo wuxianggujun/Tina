@@ -83,7 +83,7 @@ private:
     float m_uiScale = 1.0f;
     UI::UIPanel* m_panel = nullptr;  // 保存面板引用以便调整位置
 
-    // 使用 UIEventSystem + 节点直绑（无需路由器）
+    // 事件统一由 Engine::EventSystem 分发
 
     // 按钮ID枚举（用于事件分发）
     enum ButtonId : uint32_t {
