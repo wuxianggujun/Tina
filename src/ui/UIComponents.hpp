@@ -1,4 +1,4 @@
-// UI 具体组件：Panel（面板）、Label（文本标签）、Button（按钮）
+// UI 具体组件：Panel（面板）、Label（文本标签）、Button（按钮）、TextEdit（文本编辑框）
 #pragma once
 
 #include "UINode.hpp"
@@ -7,6 +7,7 @@
 #include "../engine/UIEvents.hpp"  // 使用统一的UI事件
 #include "../engine/EventSystem.hpp"
 #include "../engine/SubscriptionToken.hpp"
+#include "UITextEdit.hpp"  // 文本编辑框
 #include <bgfx/bgfx.h>
 
 namespace Tina::UI {

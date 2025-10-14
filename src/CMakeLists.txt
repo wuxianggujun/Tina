@@ -105,6 +105,10 @@ set(SRC_FILES
     ui/UICharacterPanel.cpp
     ui/UIListView.hpp
     ui/UIListView.cpp
+    ui/UITextEdit.hpp
+    ui/UITextEdit.cpp
+    ui/UIDialog.hpp
+    ui/UIDialog.cpp
 
     # ECS
     ecs/World.hpp

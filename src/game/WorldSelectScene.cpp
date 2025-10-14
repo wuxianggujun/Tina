@@ -46,6 +46,8 @@ void WorldSelectScene::onExit() {
     m_root.reset();
     m_list = nullptr;
     m_btnEnter = m_btnCreate = m_btnBack = nullptr;
+    m_createDialog = nullptr;
+    m_worldNameInput = nullptr;
 }
 
 void WorldSelectScene::update(float /*dt*/) {
@@ -123,6 +125,72 @@ void WorldSelectScene::createUI() {
     if (m_btnEnter) m_btnEnter->setOnClick([this]{ onEnterClicked(); });
     if (m_btnCreate) m_btnCreate->setOnClick([this]{ onCreateClicked(); });
     if (m_btnBack) m_btnBack->setOnClick([this]{ onBackClicked(); });
+
+    // 创建"新建世界"对话框
+    auto dialog = Memory::MakeUnique<UI::UIDialog>("CreateWorldDialog");
+    m_createDialog = m_root->addChild(std::move(dialog));
+    m_createDialog->setTitle("新建世界");
+    m_createDialog->setSize((float)getPixelWidth(), (float)getPixelHeight());
+    m_createDialog->setVisible(false);  // 默认隐藏
+    m_createDialog->setEventSystem(&app()->events());
+
+    // 在对话框内容区域添加提示文本和输入框
+    auto contentArea = m_createDialog->getContentArea();
+    if (contentArea) {
+        // 提示文本
+        auto label = contentArea->createChild<UI::UILabel>("PromptLabel");
+        label->setText("请输入世界名称：");
+        label->setFontPx(20);
+        label->setPosition(0, 20);
+        label->setSize(460, 30);
+
+        // 文本输入框
+        auto textEdit = contentArea->createChild<UI::UITextEdit>("WorldNameInput");
+        m_worldNameInput = textEdit;
+        m_worldNameInput->setPosition(0, 60);
+        m_worldNameInput->setSize(460, 40);
+        m_worldNameInput->setPlaceholder("例如：我的世界");
+        m_worldNameInput->setMaxLength(50);
+        m_worldNameInput->setFontPx(18);
+        m_worldNameInput->setEventSystem(&app()->events());
+    }
+
+    // 设置对话框回调
+    m_createDialog->setOnConfirm([this]() {
+        // 确定按钮：读取输入框内容，创建世界
+        if (!m_worldNameInput) return;
+
+        std::string worldName = m_worldNameInput->getText();
+        if (worldName.empty()) {
+            worldName = "新世界 " + std::to_string(m_worlds.size() + 1);
+        }
+
+        // 创建世界
+        WorldItem item;
+        item.name = worldName;
+        item.seed = (uint32_t)std::time(nullptr) ^ (uint32_t)(m_worlds.size() * 2654435761u);
+        m_worlds.push_back(item);
+
+        // 更新列表
+        if (m_list) {
+            auto names = m_list->items();
+            names.push_back(item.name);
+            m_list->setItems(names);
+            m_list->setSelectedIndex((int)names.size() - 1);
+        }
+
+        // 清空输入框
+        m_worldNameInput->clear();
+
+        TINA_INFO("创建新世界: '{}' (seed={})", item.name, item.seed);
+    });
+
+    m_createDialog->setOnCancel([this]() {
+        // 取消按钮：清空输入框
+        if (m_worldNameInput) {
+            m_worldNameInput->clear();
+        }
+    });
 
     // 初始布局
     updateLayout();
@@ -219,18 +287,14 @@ void WorldSelectScene::onBackClicked() {
 }
 
 void WorldSelectScene::onCreateClicked() {
-    // 新建世界：在内存中添加一个项（名称+随机种子），实际持久化后续再接入
-    WorldItem item;
-    int n = (int)m_worlds.size() + 1;
-    item.name = std::string("新世界 ") + std::to_string(n);
-    item.seed = (uint32_t)std::time(nullptr) ^ (uint32_t)(n * 2654435761u);
-    m_worlds.push_back(item);
+    // 显示新建世界对话框
+    if (m_createDialog) {
+        m_createDialog->show();
 
-    if (m_list) {
-        auto names = m_list->items();
-        names.push_back(item.name);
-        m_list->setItems(names);
-        m_list->setSelectedIndex((int)names.size() - 1);
+        // 设置输入框焦点
+        if (m_worldNameInput) {
+            m_worldNameInput->setFocus(true);
+        }
     }
 }
 

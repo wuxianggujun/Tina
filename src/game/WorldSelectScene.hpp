@@ -8,6 +8,8 @@
 #include "../ui/UICore.hpp"
 #include "../ui/UIComponents.hpp"
 #include "../ui/UIListView.hpp"
+#include "../ui/UIDialog.hpp"
+#include "../ui/UITextEdit.hpp"
 #include "../core/Memory.hpp"
 
 namespace Tina::Game {
@@ -62,6 +64,8 @@ private:
     UI::UIButton* m_btnEnter = nullptr;
     UI::UIButton* m_btnCreate = nullptr;
     UI::UIButton* m_btnBack = nullptr;
+    UI::UIDialog* m_createDialog = nullptr;      // 新建世界对话框
+    UI::UITextEdit* m_worldNameInput = nullptr;  // 世界名称输入框
 
     // 布局比例
     float m_uiScale = 1.0f;
