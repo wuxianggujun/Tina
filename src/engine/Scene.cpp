@@ -231,6 +231,12 @@ void Scene::prepareViews() {
 
             if (view.needsClear) {
                 bgfx::setViewClear(view.id, view.clearFlags, view.clearColor, 1.0f, 0);
+                TINA_INFO("Scene::prepareViews - View {} 设置清屏: color=0x{:08x}, flags={}", 
+                         view.id, view.clearColor, view.clearFlags);
+            } else {
+                // ✅ 关键修复：不清屏的view也需要重置clear标志，否则可能保留之前场景的清屏设置
+                bgfx::setViewClear(view.id, BGFX_CLEAR_NONE);
+                TINA_INFO("Scene::prepareViews - View {} 禁用清屏", view.id);
             }
         }
         m_viewDirty = false;

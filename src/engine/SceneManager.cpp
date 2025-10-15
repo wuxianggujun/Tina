@@ -54,7 +54,12 @@ void SceneManager::pop()
     m_scenes.pop_back();
 
     // 恢复上一个场景
-    if (!m_scenes.empty()) { m_scenes.back()->m_active = true; m_scenes.back()->onResume(); }
+    if (!m_scenes.empty()) {
+        m_scenes.back()->m_active = true;
+        // ✅ 标记视图为dirty，确保下一帧重新应用视图配置（修复pop后视图丢失问题）
+        m_scenes.back()->m_viewDirty = true;
+        m_scenes.back()->onResume();
+    }
     TINA_INFO("Scene popped - Total scenes: {}", m_scenes.size());
 }
 

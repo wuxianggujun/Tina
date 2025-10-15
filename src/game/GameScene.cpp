@@ -292,6 +292,11 @@ void GameScene::update(float dt)
 
 void GameScene::render()
 {
+    static int renderCount = 0;
+    if (renderCount++ % 60 == 0) {
+        TINA_INFO("GameScene::render 被调用（第{}次）", renderCount);
+    }
+    
     renderWorld();
     // 夜色叠加（绘制在 UI 视图，但早于 UI，确保不影响 UI 可见性）
     // 使用基类提供的 ui() 方法访问 UIRenderer
@@ -808,20 +813,29 @@ void GameScene::updateCamera(float dt)
 
 void GameScene::renderWorld()
 {
-    if (!m_tileRenderer || !m_tileMap || !camera()) return;
+    if (!m_tileRenderer || !m_tileMap || !camera()) {
+        TINA_WARN("renderWorld: 缺少必要组件 - tileRenderer={}, tileMap={}, camera={}",
+                  (void*)m_tileRenderer.get(), (void*)m_tileMap.get(), (void*)camera());
+        return;
+    }
+
+    static int worldRenderCount = 0;
+    if (worldRenderCount++ % 60 == 0) {
+        TINA_INFO("GameScene::renderWorld 被调用（第{}次）", worldRenderCount);
+    }
 
     // 框架已经自动设置了视图和相机矩阵，不需要手动调用bgfx了！
 
-    // 渲染地形（固体 -> view 1，液体 -> view 2）
+    // 渲染地形（固体 -> view 2，液体 -> view 3）
     m_tileRenderer->renderSolid(*m_tileMap, UI::VIEW_WORLD_SOLID);
     m_tileRenderer->renderWater(*m_tileMap, UI::VIEW_WORLD_ALPHA);
 
-    // 渲染角色（ECS 实体，view 2 确保在液体层之上）
+    // 渲染角色（ECS 实体，view 3 确保在液体层之上）
     if (m_ecsWorld) {
         m_ecsWorld->render(UI::VIEW_WORLD_ALPHA);
     }
 
-    // 渲染粒子（爆炸、碎片等特效，view 2）
+    // 渲染粒子（爆炸、碎片等特效，view 3）
     if (m_particleSystem) {
         m_particleSystem->render(UI::VIEW_WORLD_ALPHA);
     }

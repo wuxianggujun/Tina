@@ -57,14 +57,13 @@ void SettingsScene::update(float dt)
 
 void SettingsScene::render()
 {
-    // 1. 触摸 UI 视图并设置正交投影
-    bgfx::touch(uiViewId());
-    setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
+    // ✅ 框架已经自动处理视图设置和touch（prepareViews/finalizeViews）
+    // 不需要手动调用 bgfx::touch() 和 setupUIView()
 
-    // 2. 渲染半透明遮罩（使用 SceneRenderer 新架构）
+    // 1. 渲染半透明遮罩（使用 SceneRenderer 新架构）
     scene().drawOverlay(uiViewId(), Tina::Core::Color(0.0f, 0.0f, 0.0f, 0.5f));
 
-    // 3. 渲染 UI
+    // 2. 渲染 UI
     if (m_root) {
         auto scope = ui().beginRender(uiViewId());
         m_root->render(uiViewId(), ui());

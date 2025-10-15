@@ -94,14 +94,13 @@ void PauseScene::update(float dt)
 
 void PauseScene::render()
 {
-    // 1. 确保 UI 视图有效（触摸 + 设置正交）
-    bgfx::touch(uiViewId());
-    setupUIView(uiViewId(), m_pixelWidth, m_pixelHeight);
+    // ✅ 框架已经自动处理视图设置和touch（prepareViews/finalizeViews）
+    // 不需要手动调用 bgfx::touch() 和 setupUIView()
 
-    // 2. 渲染半透明遮罩（使用 SceneRenderer 新架构）
+    // 1. 渲染半透明遮罩（使用 SceneRenderer 新架构）
     scene().drawOverlay(uiViewId(), Tina::Core::Color(0.0f, 0.0f, 0.0f, 0.5f));
 
-    // 3. ✅ 使用 Scene 基类的 ui() 方法和 RAII 作用域
+    // 2. ✅ 使用 Scene 基类的 ui() 方法和 RAII 作用域
     if (m_rootNode) {
         auto scope = ui().beginRender(uiViewId());
         m_rootNode->render(uiViewId(), ui());
