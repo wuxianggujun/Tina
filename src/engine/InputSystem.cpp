@@ -351,68 +351,86 @@ void InputSystem::updateKeyboardState() {
     // 映射SDL扫描码到我们的KeyCode
     // 注意：这里只映射常用按键，可以根据需要扩展
 
+    // ✅ 发送按键事件（检测新按下的按键）
+    auto sendKeyEvent = [this](KeyCode key, const bool* sdlKeys, SDL_Scancode scancode) {
+        size_t idx = static_cast<size_t>(key);
+        bool isDown = sdlKeys[scancode];
+        bool wasDown = m_keysLast[idx];
+        m_keys[idx] = isDown;
+        
+        // 如果按键刚按下，发送KeyPressedEvent
+        if (isDown && !wasDown && m_eventSystem) {
+            Events::KeyPressedEvent event;
+            event.key = key;
+            event.shift = isShiftDown();
+            event.ctrl = isCtrlDown();
+            event.alt = isAltDown();
+            m_eventSystem->trigger(event);
+        }
+    };
+
     // 字母键 A-Z
-    m_keys[static_cast<size_t>(KeyCode::A)] = sdlKeys[SDL_SCANCODE_A];
-    m_keys[static_cast<size_t>(KeyCode::B)] = sdlKeys[SDL_SCANCODE_B];
-    m_keys[static_cast<size_t>(KeyCode::C)] = sdlKeys[SDL_SCANCODE_C];
-    m_keys[static_cast<size_t>(KeyCode::D)] = sdlKeys[SDL_SCANCODE_D];
-    m_keys[static_cast<size_t>(KeyCode::E)] = sdlKeys[SDL_SCANCODE_E];
-    m_keys[static_cast<size_t>(KeyCode::F)] = sdlKeys[SDL_SCANCODE_F];
-    m_keys[static_cast<size_t>(KeyCode::G)] = sdlKeys[SDL_SCANCODE_G];
-    m_keys[static_cast<size_t>(KeyCode::H)] = sdlKeys[SDL_SCANCODE_H];
-    m_keys[static_cast<size_t>(KeyCode::I)] = sdlKeys[SDL_SCANCODE_I];
-    m_keys[static_cast<size_t>(KeyCode::J)] = sdlKeys[SDL_SCANCODE_J];
-    m_keys[static_cast<size_t>(KeyCode::K)] = sdlKeys[SDL_SCANCODE_K];
-    m_keys[static_cast<size_t>(KeyCode::L)] = sdlKeys[SDL_SCANCODE_L];
-    m_keys[static_cast<size_t>(KeyCode::M)] = sdlKeys[SDL_SCANCODE_M];
-    m_keys[static_cast<size_t>(KeyCode::N)] = sdlKeys[SDL_SCANCODE_N];
-    m_keys[static_cast<size_t>(KeyCode::O)] = sdlKeys[SDL_SCANCODE_O];
-    m_keys[static_cast<size_t>(KeyCode::P)] = sdlKeys[SDL_SCANCODE_P];
-    m_keys[static_cast<size_t>(KeyCode::Q)] = sdlKeys[SDL_SCANCODE_Q];
-    m_keys[static_cast<size_t>(KeyCode::R)] = sdlKeys[SDL_SCANCODE_R];
-    m_keys[static_cast<size_t>(KeyCode::S)] = sdlKeys[SDL_SCANCODE_S];
-    m_keys[static_cast<size_t>(KeyCode::T)] = sdlKeys[SDL_SCANCODE_T];
-    m_keys[static_cast<size_t>(KeyCode::U)] = sdlKeys[SDL_SCANCODE_U];
-    m_keys[static_cast<size_t>(KeyCode::V)] = sdlKeys[SDL_SCANCODE_V];
-    m_keys[static_cast<size_t>(KeyCode::W)] = sdlKeys[SDL_SCANCODE_W];
-    m_keys[static_cast<size_t>(KeyCode::X)] = sdlKeys[SDL_SCANCODE_X];
-    m_keys[static_cast<size_t>(KeyCode::Y)] = sdlKeys[SDL_SCANCODE_Y];
-    m_keys[static_cast<size_t>(KeyCode::Z)] = sdlKeys[SDL_SCANCODE_Z];
+    sendKeyEvent(KeyCode::A, sdlKeys, SDL_SCANCODE_A);
+    sendKeyEvent(KeyCode::B, sdlKeys, SDL_SCANCODE_B);
+    sendKeyEvent(KeyCode::C, sdlKeys, SDL_SCANCODE_C);
+    sendKeyEvent(KeyCode::D, sdlKeys, SDL_SCANCODE_D);
+    sendKeyEvent(KeyCode::E, sdlKeys, SDL_SCANCODE_E);
+    sendKeyEvent(KeyCode::F, sdlKeys, SDL_SCANCODE_F);
+    sendKeyEvent(KeyCode::G, sdlKeys, SDL_SCANCODE_G);
+    sendKeyEvent(KeyCode::H, sdlKeys, SDL_SCANCODE_H);
+    sendKeyEvent(KeyCode::I, sdlKeys, SDL_SCANCODE_I);
+    sendKeyEvent(KeyCode::J, sdlKeys, SDL_SCANCODE_J);
+    sendKeyEvent(KeyCode::K, sdlKeys, SDL_SCANCODE_K);
+    sendKeyEvent(KeyCode::L, sdlKeys, SDL_SCANCODE_L);
+    sendKeyEvent(KeyCode::M, sdlKeys, SDL_SCANCODE_M);
+    sendKeyEvent(KeyCode::N, sdlKeys, SDL_SCANCODE_N);
+    sendKeyEvent(KeyCode::O, sdlKeys, SDL_SCANCODE_O);
+    sendKeyEvent(KeyCode::P, sdlKeys, SDL_SCANCODE_P);
+    sendKeyEvent(KeyCode::Q, sdlKeys, SDL_SCANCODE_Q);
+    sendKeyEvent(KeyCode::R, sdlKeys, SDL_SCANCODE_R);
+    sendKeyEvent(KeyCode::S, sdlKeys, SDL_SCANCODE_S);
+    sendKeyEvent(KeyCode::T, sdlKeys, SDL_SCANCODE_T);
+    sendKeyEvent(KeyCode::U, sdlKeys, SDL_SCANCODE_U);
+    sendKeyEvent(KeyCode::V, sdlKeys, SDL_SCANCODE_V);
+    sendKeyEvent(KeyCode::W, sdlKeys, SDL_SCANCODE_W);
+    sendKeyEvent(KeyCode::X, sdlKeys, SDL_SCANCODE_X);
+    sendKeyEvent(KeyCode::Y, sdlKeys, SDL_SCANCODE_Y);
+    sendKeyEvent(KeyCode::Z, sdlKeys, SDL_SCANCODE_Z);
 
-    // 数字键 0-9
-    m_keys[static_cast<size_t>(KeyCode::Num0)] = sdlKeys[SDL_SCANCODE_0];
-    m_keys[static_cast<size_t>(KeyCode::Num1)] = sdlKeys[SDL_SCANCODE_1];
-    m_keys[static_cast<size_t>(KeyCode::Num2)] = sdlKeys[SDL_SCANCODE_2];
-    m_keys[static_cast<size_t>(KeyCode::Num3)] = sdlKeys[SDL_SCANCODE_3];
-    m_keys[static_cast<size_t>(KeyCode::Num4)] = sdlKeys[SDL_SCANCODE_4];
-    m_keys[static_cast<size_t>(KeyCode::Num5)] = sdlKeys[SDL_SCANCODE_5];
-    m_keys[static_cast<size_t>(KeyCode::Num6)] = sdlKeys[SDL_SCANCODE_6];
-    m_keys[static_cast<size_t>(KeyCode::Num7)] = sdlKeys[SDL_SCANCODE_7];
-    m_keys[static_cast<size_t>(KeyCode::Num8)] = sdlKeys[SDL_SCANCODE_8];
-    m_keys[static_cast<size_t>(KeyCode::Num9)] = sdlKeys[SDL_SCANCODE_9];
+    // 数字键 0-9  
+    sendKeyEvent(KeyCode::Num0, sdlKeys, SDL_SCANCODE_0);
+    sendKeyEvent(KeyCode::Num1, sdlKeys, SDL_SCANCODE_1);
+    sendKeyEvent(KeyCode::Num2, sdlKeys, SDL_SCANCODE_2);
+    sendKeyEvent(KeyCode::Num3, sdlKeys, SDL_SCANCODE_3);
+    sendKeyEvent(KeyCode::Num4, sdlKeys, SDL_SCANCODE_4);
+    sendKeyEvent(KeyCode::Num5, sdlKeys, SDL_SCANCODE_5);
+    sendKeyEvent(KeyCode::Num6, sdlKeys, SDL_SCANCODE_6);
+    sendKeyEvent(KeyCode::Num7, sdlKeys, SDL_SCANCODE_7);
+    sendKeyEvent(KeyCode::Num8, sdlKeys, SDL_SCANCODE_8);
+    sendKeyEvent(KeyCode::Num9, sdlKeys, SDL_SCANCODE_9);
 
-    // 控制键
-    m_keys[static_cast<size_t>(KeyCode::Space)] = sdlKeys[SDL_SCANCODE_SPACE];
-    m_keys[static_cast<size_t>(KeyCode::Enter)] = sdlKeys[SDL_SCANCODE_RETURN];
-    m_keys[static_cast<size_t>(KeyCode::Escape)] = sdlKeys[SDL_SCANCODE_ESCAPE];
-    m_keys[static_cast<size_t>(KeyCode::Tab)] = sdlKeys[SDL_SCANCODE_TAB];
-    m_keys[static_cast<size_t>(KeyCode::Backspace)] = sdlKeys[SDL_SCANCODE_BACKSPACE];
-    m_keys[static_cast<size_t>(KeyCode::Delete)] = sdlKeys[SDL_SCANCODE_DELETE];
-    m_keys[static_cast<size_t>(KeyCode::Insert)] = sdlKeys[SDL_SCANCODE_INSERT];
+    // 控制键（✅ 关键：Backspace和Delete）
+    sendKeyEvent(KeyCode::Space, sdlKeys, SDL_SCANCODE_SPACE);
+    sendKeyEvent(KeyCode::Enter, sdlKeys, SDL_SCANCODE_RETURN);
+    sendKeyEvent(KeyCode::Escape, sdlKeys, SDL_SCANCODE_ESCAPE);
+    sendKeyEvent(KeyCode::Tab, sdlKeys, SDL_SCANCODE_TAB);
+    sendKeyEvent(KeyCode::Backspace, sdlKeys, SDL_SCANCODE_BACKSPACE);
+    sendKeyEvent(KeyCode::Delete, sdlKeys, SDL_SCANCODE_DELETE);
+    sendKeyEvent(KeyCode::Insert, sdlKeys, SDL_SCANCODE_INSERT);
 
     // 方向键
-    m_keys[static_cast<size_t>(KeyCode::Left)] = sdlKeys[SDL_SCANCODE_LEFT];
-    m_keys[static_cast<size_t>(KeyCode::Right)] = sdlKeys[SDL_SCANCODE_RIGHT];
-    m_keys[static_cast<size_t>(KeyCode::Up)] = sdlKeys[SDL_SCANCODE_UP];
-    m_keys[static_cast<size_t>(KeyCode::Down)] = sdlKeys[SDL_SCANCODE_DOWN];
+    sendKeyEvent(KeyCode::Left, sdlKeys, SDL_SCANCODE_LEFT);
+    sendKeyEvent(KeyCode::Right, sdlKeys, SDL_SCANCODE_RIGHT);
+    sendKeyEvent(KeyCode::Up, sdlKeys, SDL_SCANCODE_UP);
+    sendKeyEvent(KeyCode::Down, sdlKeys, SDL_SCANCODE_DOWN);
 
     // 导航键
-    m_keys[static_cast<size_t>(KeyCode::Home)] = sdlKeys[SDL_SCANCODE_HOME];
-    m_keys[static_cast<size_t>(KeyCode::End)] = sdlKeys[SDL_SCANCODE_END];
-    m_keys[static_cast<size_t>(KeyCode::PageUp)] = sdlKeys[SDL_SCANCODE_PAGEUP];
-    m_keys[static_cast<size_t>(KeyCode::PageDown)] = sdlKeys[SDL_SCANCODE_PAGEDOWN];
+    sendKeyEvent(KeyCode::Home, sdlKeys, SDL_SCANCODE_HOME);
+    sendKeyEvent(KeyCode::End, sdlKeys, SDL_SCANCODE_END);
+    sendKeyEvent(KeyCode::PageUp, sdlKeys, SDL_SCANCODE_PAGEUP);
+    sendKeyEvent(KeyCode::PageDown, sdlKeys, SDL_SCANCODE_PAGEDOWN);
 
-    // 修饰键
+    // 修饰键（不发送事件，只更新状态）
     m_keys[static_cast<size_t>(KeyCode::LeftShift)] = sdlKeys[SDL_SCANCODE_LSHIFT];
     m_keys[static_cast<size_t>(KeyCode::RightShift)] = sdlKeys[SDL_SCANCODE_RSHIFT];
     m_keys[static_cast<size_t>(KeyCode::LeftCtrl)] = sdlKeys[SDL_SCANCODE_LCTRL];
@@ -423,18 +441,18 @@ void InputSystem::updateKeyboardState() {
     m_keys[static_cast<size_t>(KeyCode::RightSuper)] = sdlKeys[SDL_SCANCODE_RGUI];
 
     // 功能键 F1-F12
-    m_keys[static_cast<size_t>(KeyCode::F1)] = sdlKeys[SDL_SCANCODE_F1];
-    m_keys[static_cast<size_t>(KeyCode::F2)] = sdlKeys[SDL_SCANCODE_F2];
-    m_keys[static_cast<size_t>(KeyCode::F3)] = sdlKeys[SDL_SCANCODE_F3];
-    m_keys[static_cast<size_t>(KeyCode::F4)] = sdlKeys[SDL_SCANCODE_F4];
-    m_keys[static_cast<size_t>(KeyCode::F5)] = sdlKeys[SDL_SCANCODE_F5];
-    m_keys[static_cast<size_t>(KeyCode::F6)] = sdlKeys[SDL_SCANCODE_F6];
-    m_keys[static_cast<size_t>(KeyCode::F7)] = sdlKeys[SDL_SCANCODE_F7];
-    m_keys[static_cast<size_t>(KeyCode::F8)] = sdlKeys[SDL_SCANCODE_F8];
-    m_keys[static_cast<size_t>(KeyCode::F9)] = sdlKeys[SDL_SCANCODE_F9];
-    m_keys[static_cast<size_t>(KeyCode::F10)] = sdlKeys[SDL_SCANCODE_F10];
-    m_keys[static_cast<size_t>(KeyCode::F11)] = sdlKeys[SDL_SCANCODE_F11];
-    m_keys[static_cast<size_t>(KeyCode::F12)] = sdlKeys[SDL_SCANCODE_F12];
+    sendKeyEvent(KeyCode::F1, sdlKeys, SDL_SCANCODE_F1);
+    sendKeyEvent(KeyCode::F2, sdlKeys, SDL_SCANCODE_F2);
+    sendKeyEvent(KeyCode::F3, sdlKeys, SDL_SCANCODE_F3);
+    sendKeyEvent(KeyCode::F4, sdlKeys, SDL_SCANCODE_F4);
+    sendKeyEvent(KeyCode::F5, sdlKeys, SDL_SCANCODE_F5);
+    sendKeyEvent(KeyCode::F6, sdlKeys, SDL_SCANCODE_F6);
+    sendKeyEvent(KeyCode::F7, sdlKeys, SDL_SCANCODE_F7);
+    sendKeyEvent(KeyCode::F8, sdlKeys, SDL_SCANCODE_F8);
+    sendKeyEvent(KeyCode::F9, sdlKeys, SDL_SCANCODE_F9);
+    sendKeyEvent(KeyCode::F10, sdlKeys, SDL_SCANCODE_F10);
+    sendKeyEvent(KeyCode::F11, sdlKeys, SDL_SCANCODE_F11);
+    sendKeyEvent(KeyCode::F12, sdlKeys, SDL_SCANCODE_F12);
 }
 
 void InputSystem::updateMouseState() {

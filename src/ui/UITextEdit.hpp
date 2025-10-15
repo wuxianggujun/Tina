@@ -62,8 +62,8 @@ public:
     void setMultiline(bool enable) { m_multiline = enable; }
     bool isMultiline() const { return m_multiline; }
 
-    // === 最大长度限制 ===
-    void setMaxLength(size_t length) { m_maxLength = length; }
+    // === 最大长度限制（按UTF-8字符数，类似Android的InputFilter.LengthFilter）===
+    void setMaxLength(size_t length) { m_maxLength = length; }  // length = 字符数，0表示无限制
     size_t getMaxLength() const { return m_maxLength; }
 
     // === 字体大小 ===
@@ -134,6 +134,12 @@ private:
     Engine::SubscriptionToken m_keyPressedToken;
     Engine::SubscriptionToken m_textInputToken;
 
+    // UIRenderer缓存（用于文本测量）
+    UIRenderer* m_renderer;
+    
+    // 文本滚动偏移量（用于水平滚动）
+    float m_scrollOffsetX = 0.0f;
+
     // 内部方法
     void setupEventHandlers();
     void cleanupEventHandlers();
@@ -143,6 +149,7 @@ private:
     void deleteChar(bool forward);
     size_t getPosFromX(float x);  // 根据X坐标获取光标位置
     float getXFromPos(size_t pos); // 根据光标位置获取X坐标
+    void ensureCursorVisible();    // 确保光标可见（自动滚动）
 };
 
 } // namespace Tina::UI
