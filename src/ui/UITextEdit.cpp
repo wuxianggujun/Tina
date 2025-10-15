@@ -18,58 +18,81 @@
 
 namespace Tina::UI {
 
-// === UTF-8 辅助函数：计算字符数 ===
-static size_t getUTF8CharCount(const std::string& str) {
+// ============================================================================
+// UTF-8 ↔ UTF-32 转换辅助函数（使用utfcpp库）
+// 
+// TODO: 未来支持复杂Emoji（字形簇）
+// - 当前实现将每个Unicode code point视为一个字符
+// - 例如：👨‍👩‍👧‍👦 (家庭Emoji) 会被当成4个字符处理
+// - 如需正确支持，考虑引入libgrapheme库进行字形簇分割
+// - 参考：https://github.com/libjpeg-turbo/libgrapheme
+// ============================================================================
+
+// UTF-8 → UTF-32字符数组
+static Container::Vector<char32_t> utf8ToChars(const Container::String& utf8Str) {
+    Container::Vector<char32_t> result;
+    if (utf8Str.empty()) return result;
+    
     try {
-        return utf8::distance(str.begin(), str.end());
-    } catch (const utf8::exception&) {
-        // UTF-8序列损坏，降级为字节数
-        return str.length();
+        utf8::utf8to32(utf8Str.begin(), utf8Str.end(), eastl::back_inserter(result));
+    } catch (const utf8::exception& e) {
+        TINA_ERROR("UTF-8 decode error: {}", e.what());
+        result.clear();
     }
+    return result;
 }
 
-// === 文本设置 ===
+// UTF-32字符数组 → UTF-8
+static Container::String charsToUTF8(const Container::Vector<char32_t>& chars) {
+    Container::String result;
+    if (chars.empty()) return result;
+    
+    try {
+        utf8::utf32to8(chars.begin(), chars.end(), eastl::back_inserter(result));
+    } catch (const utf8::exception& e) {
+        TINA_ERROR("UTF-32 encode error: {}", e.what());
+        result.clear();
+    }
+    return result;
+}
+
+// ============================================================================
+// 公共API
+// ============================================================================
+
+// === 设置文本（从UTF-8） ===
 void UITextEdit::setText(const std::string& text) {
-    // ✅ UTF-8验证：拒绝无效的UTF-8序列
-    if (!utf8::is_valid(text.begin(), text.end())) {
-        TINA_ERROR("UITextEdit::setText - Invalid UTF-8 sequence rejected, text not set");
-        return;
+    // ✅ 转换为UTF-32字符数组
+    m_chars = utf8ToChars(Container::String(text.c_str()));
+    
+    // 应用字符数限制
+    if (m_maxLength > 0 && m_chars.size() > m_maxLength) {
+        m_chars.resize(m_maxLength);
+        TINA_WARN("UITextEdit::setText - Text truncated to {} chars", m_maxLength);
     }
-
-    // ✅ 按字符数限制（参考Android）
-    if (m_maxLength > 0) {
-        size_t charCount = getUTF8CharCount(text);
-        if (charCount > m_maxLength) {
-            // 截断到maxLength个字符
-            auto it = text.begin();
-            size_t count = 0;
-            while (it != text.end() && count < m_maxLength) {
-                auto next_it = it;
-                try {
-                    utf8::next(next_it, text.end());
-                    it = next_it;
-                    count++;
-                } catch (const utf8::exception&) {
-                    break;
-                }
-            }
-            m_text = text.substr(0, std::distance(text.begin(), it));
-            TINA_WARN("UITextEdit::setText - Text truncated to {} chars (limit={})", 
-                      getUTF8CharCount(m_text), m_maxLength);
-        } else {
-            m_text = text;
-        }
-    } else {
-        m_text = text;
-    }
-
+    
+    // 更新UTF-8缓存
+    m_utf8Cache = text;
+    m_utf8Dirty = false;
+    
     // 调整光标位置
-    if (m_cursorPos > m_text.length()) {
-        m_cursorPos = m_text.length();
+    if (m_cursorPos > m_chars.size()) {
+        m_cursorPos = m_chars.size();
     }
-
+    
     // 清除选择
     clearSelection();
+}
+
+// === 获取文本（转为UTF-8） ===
+std::string UITextEdit::getText() const {
+    if (m_utf8Dirty) {
+        // 延迟转换：只在需要时才转换
+        Container::String eastlStr = charsToUTF8(m_chars);
+        m_utf8Cache = std::string(eastlStr.c_str());
+        m_utf8Dirty = false;
+    }
+    return m_utf8Cache;
 }
 
 // === 测量（根据文本/字号估计自然尺寸） ===
@@ -84,12 +107,12 @@ Tina::Math::Vec2 UITextEdit::measureContent(float availableWidth, float /*availa
         if (m_fontPx.has_value() && m_fontPx.value() > 0 && m_fontPx.value() != prev) {
             if (tr.setFontPx(m_fontPx.value())) needRestore = true;
         }
-        const std::string& src = m_text.empty() ? m_placeholder : m_text;
+        std::string src = m_chars.empty() ? std::string(m_placeholder.c_str()) : getText();
         tr.measureText(src, tw, th);
         if (needRestore) tr.setFontPx(prev);
     } else {
         // 无法测量时使用保守估计
-        tw = std::max(100.0f, (float)m_text.size() * 8.0f);
+        tw = std::max(100.0f, (float)m_chars.size() * 8.0f);
         th = 20.0f;
     }
     // 内边距（与渲染一致）
@@ -135,7 +158,7 @@ void UITextEdit::setFocus(bool focus) {
 
 // === 光标操作 ===
 void UITextEdit::setCursorPos(size_t pos) {
-    m_cursorPos = std::min(pos, m_text.length());
+    m_cursorPos = std::min(pos, m_chars.size());
     m_cursorBlinkTime = 0.0f;  // 重置闪烁
     clearSelection();
     ensureCursorVisible();  // ✅ 自动滚动
@@ -144,47 +167,20 @@ void UITextEdit::setCursorPos(size_t pos) {
 void UITextEdit::moveCursor(int delta) {
     if (delta == 0) return;
     
-    // ✅ 按UTF-8字符移动，而不是按字节移动
-    if (delta < 0) {
-        // 向左移动：找到前一个UTF-8字符
-        int steps = -delta;
-        while (steps > 0 && m_cursorPos > 0) {
-            auto it = m_text.begin() + m_cursorPos;
-            try {
-                utf8::prior(it, m_text.begin());
-                m_cursorPos = std::distance(m_text.begin(), it);
-            } catch (const utf8::exception&) {
-                // UTF-8错误，降级为字节移动
-                m_cursorPos = (m_cursorPos > 0) ? (m_cursorPos - 1) : 0;
-            }
-            steps--;
-        }
-    } else {
-        // 向右移动：找到下一个UTF-8字符
-        int steps = delta;
-        while (steps > 0 && m_cursorPos < m_text.length()) {
-            auto it = m_text.begin() + m_cursorPos;
-            try {
-                utf8::next(it, m_text.end());
-                m_cursorPos = std::distance(m_text.begin(), it);
-            } catch (const utf8::exception&) {
-                // UTF-8错误，降级为字节移动
-                m_cursorPos = std::min(m_cursorPos + 1, m_text.length());
-            }
-            steps--;
-        }
-    }
+    // ✅ 超简单的加减法！不再需要utf8::prior/next！
+    int newPos = static_cast<int>(m_cursorPos) + delta;
+    m_cursorPos = static_cast<size_t>(Container::Max(0, Container::Min(newPos, static_cast<int>(m_chars.size()))));
     
     m_cursorBlinkTime = 0.0f;
-    ensureCursorVisible();  // ✅ 自动滚动
+    ensureCursorVisible();
 }
 
 // === 选择操作 ===
 void UITextEdit::selectAll() {
-    if (m_text.empty()) return;
+    if (m_chars.empty()) return;
     m_selectionStart = 0;
-    m_selectionEnd = static_cast<int>(m_text.length());
-    m_cursorPos = m_text.length();
+    m_selectionEnd = static_cast<int>(m_chars.size());
+    m_cursorPos = m_chars.size();
 }
 
 void UITextEdit::clearSelection() {
@@ -198,7 +194,10 @@ std::string UITextEdit::getSelectedText() const {
     int start = std::min(m_selectionStart, m_selectionEnd);
     int end = std::max(m_selectionStart, m_selectionEnd);
 
-    return m_text.substr(start, end - start);
+    // 返回选中的UTF-8文本
+    Container::Vector<char32_t> selectedChars(m_chars.begin() + start, m_chars.begin() + end);
+    Container::String result = charsToUTF8(selectedChars);
+    return result.c_str();
 }
 
 void UITextEdit::deleteSelection() {
@@ -207,7 +206,8 @@ void UITextEdit::deleteSelection() {
     int start = std::min(m_selectionStart, m_selectionEnd);
     int end = std::max(m_selectionStart, m_selectionEnd);
 
-    m_text.erase(start, end - start);
+    m_chars.erase(m_chars.begin() + start, m_chars.begin() + end);
+    m_utf8Dirty = true;
     m_cursorPos = start;
     clearSelection();
 }
@@ -272,6 +272,16 @@ void UITextEdit::onClick() {
     setFocus(true);
 }
 
+// === 布局回调（大小变化时由UI系统自动调用）===
+void UITextEdit::onLayout() {
+    UINode::onLayout();  // 调用父类
+    
+    // ✅ 大小改变了，重新计算滚动偏移确保光标可见
+    if (m_renderer) {
+        ensureCursorVisible();
+    }
+}
+
 // === 渲染 ===
 void UITextEdit::onRender(uint16_t viewId, UIRenderer& renderer) {
     // 缓存renderer指针用于文本测量
@@ -282,6 +292,15 @@ void UITextEdit::onRender(uint16_t viewId, UIRenderer& renderer) {
 
     // 1. 绘制背景
     renderer.drawRect(viewId, worldPos.x, worldPos.y, size.x, size.y, m_bgColor);
+    
+    // ✅ 2. 设置裁剪矩形（防止文本超出输入框）
+    float padding = 4.0f;
+    renderer.pushClip(
+        worldPos.x + padding, 
+        worldPos.y + padding,
+        size.x - padding * 2, 
+        size.y - padding * 2
+    );
 
     // 2. 绘制选择高亮（✅ 应用水平滚动）
     if (hasSelection()) {
@@ -290,7 +309,6 @@ void UITextEdit::onRender(uint16_t viewId, UIRenderer& renderer) {
 
         float startX = getXFromPos(selStart);
         float endX = getXFromPos(selEnd);
-        float padding = 4.0f;
 
         renderer.drawRect(viewId,
             worldPos.x + padding + startX - m_scrollOffsetX,
@@ -308,18 +326,17 @@ void UITextEdit::onRender(uint16_t viewId, UIRenderer& renderer) {
     opts.a = m_textColor.a();
     opts.fontPx = m_fontPx;
 
-    float padding = 4.0f;
-
-    if (m_text.empty() && !m_focused) {
+    if (m_chars.empty() && !m_focused) {
         // 显示占位符（无滚动）
         opts.r = m_placeholderColor.r();
         opts.g = m_placeholderColor.g();
         opts.b = m_placeholderColor.b();
         opts.a = m_placeholderColor.a();
-        renderer.drawText(viewId, worldPos.x + padding, worldPos.y + padding, m_placeholder, opts);
+        std::string placeholderStr(m_placeholder.c_str());
+        renderer.drawText(viewId, worldPos.x + padding, worldPos.y + padding, placeholderStr, opts);
     } else {
         // 显示实际文本（✅ 应用滚动偏移）
-        renderer.drawText(viewId, worldPos.x + padding - m_scrollOffsetX, worldPos.y + padding, m_text, opts);
+        renderer.drawText(viewId, worldPos.x + padding - m_scrollOffsetX, worldPos.y + padding, getText(), opts);
     }
 
     // 4. 绘制光标（仅在聚焦且闪烁可见时，✅ 应用滚动偏移）
@@ -334,6 +351,9 @@ void UITextEdit::onRender(uint16_t viewId, UIRenderer& renderer) {
             size.y - padding * 2,
             m_cursorColor);
     }
+    
+    // ✅ 移除裁剪矩形
+    renderer.popClip();
 }
 
 // === 更新 ===
@@ -420,7 +440,7 @@ void UITextEdit::handleKeyPressed(const Engine::Events::KeyPressedEvent& e) {
             break;
 
         case KeyCode::Delete:
-            TINA_INFO("UITextEdit: Delete pressed, cursorPos={}, textLength={}", m_cursorPos, m_text.length());
+            TINA_INFO("UITextEdit: Delete pressed, cursorPos={}, textLength={}", m_cursorPos, m_chars.size());
             if (hasSelection()) {
                 deleteSelection();
             } else {
@@ -456,7 +476,7 @@ void UITextEdit::handleKeyPressed(const Engine::Events::KeyPressedEvent& e) {
                 if (m_selectionStart < 0) {
                     m_selectionStart = static_cast<int>(m_cursorPos);
                 }
-                if (m_cursorPos < m_text.length()) {
+                if (m_cursorPos < m_chars.size()) {
                     moveCursor(1);  // ✅ 按UTF-8字符移动
                     m_selectionEnd = static_cast<int>(m_cursorPos);
                 }
@@ -479,7 +499,7 @@ void UITextEdit::handleKeyPressed(const Engine::Events::KeyPressedEvent& e) {
             break;
 
         case KeyCode::End:
-            m_cursorPos = m_text.length();
+            m_cursorPos = m_chars.size();
             m_cursorBlinkTime = 0.0f;
             if (!e.shift) clearSelection();
             break;
@@ -539,134 +559,75 @@ void UITextEdit::handleTextInput(const Engine::Events::TextInputEvent& e) {
     }
 }
 
-// === 插入文本 ===
+// === 插入文本（从UTF-8） ===
 void UITextEdit::insertText(const std::string& text) {
     if (text.empty()) return;
-
-    // ✅ UTF-8验证：拒绝无效的UTF-8序列
-    if (!utf8::is_valid(text.begin(), text.end())) {
-        TINA_WARN("UITextEdit::insertText - Invalid UTF-8 sequence rejected");
-        return;
-    }
-
+    
     // 删除选中内容
     if (hasSelection()) {
         deleteSelection();
     }
-
-    // ✅ 按字符数限制（参考Android实现）
+    
+    // ✅ 转换为UTF-32字符
+    Container::Vector<char32_t> inputChars = utf8ToChars(Container::String(text.c_str()));
+    if (inputChars.empty()) {
+        TINA_WARN("UITextEdit::insertText - Invalid UTF-8, rejected");
+        return;
+    }
+    
+    // 检查字符数限制
     if (m_maxLength > 0) {
-        size_t currentCharCount = getUTF8CharCount(m_text);
-        size_t inputCharCount = getUTF8CharCount(text);
-        
-        // 检查是否超出字符数限制
-        if (currentCharCount >= m_maxLength) {
-            TINA_WARN("UITextEdit::insertText - Max character count reached ({}/{}), text rejected", 
-                      currentCharCount, m_maxLength);
+        size_t currentCount = m_chars.size();
+        if (currentCount >= m_maxLength) {
+            TINA_WARN("UITextEdit::insertText - Max char limit reached ({}/{})", 
+                      currentCount, m_maxLength);
             return;
         }
-
-        // 计算可插入的字符数
-        size_t availableChars = m_maxLength - currentCharCount;
         
-        if (inputCharCount <= availableChars) {
-            // 完整插入
-            m_text.insert(m_cursorPos, text);
-            m_cursorPos += text.length();
-            TINA_INFO("UITextEdit::insertText - Inserted '{}', charCount={}/{} (bytes={})", 
-                      text, currentCharCount + inputCharCount, m_maxLength, m_text.length());
-        } else {
-            // 需要截断：只插入部分字符
-            std::string toInsert;
-            auto it = text.begin();
-            size_t charCount = 0;
-            
-            while (it != text.end() && charCount < availableChars) {
-                auto next_it = it;
-                try {
-                    utf8::next(next_it, text.end());
-                    toInsert.append(it, next_it);
-                    it = next_it;
-                    charCount++;
-                } catch (const utf8::exception&) {
-                    break;
-                }
-            }
-            
-            if (!toInsert.empty()) {
-                m_text.insert(m_cursorPos, toInsert);
-                m_cursorPos += toInsert.length();
-                TINA_INFO("UITextEdit::insertText - Inserted '{}' (truncated from {} to {} chars), charCount={}/{}", 
-                          toInsert, inputCharCount, charCount, currentCharCount + charCount, m_maxLength);
-            }
+        // 计算可插入的字符数
+        size_t available = m_maxLength - currentCount;
+        if (inputChars.size() > available) {
+            inputChars.resize(available);  // ✅ 简单截断！
+            TINA_INFO("UITextEdit::insertText - Truncated to {} chars", available);
         }
-    } else {
-        // 无限制
-        m_text.insert(m_cursorPos, text);
-        m_cursorPos += text.length();
-        size_t charCount = getUTF8CharCount(m_text);
-        TINA_INFO("UITextEdit::insertText - Inserted '{}', charCount={} (no limit, bytes={})", 
-                  text, charCount, m_text.length());
     }
-
+    
+    // ✅ 插入字符（超简单！）
+    m_chars.insert(m_chars.begin() + m_cursorPos, inputChars.begin(), inputChars.end());
+    m_cursorPos += inputChars.size();
+    
+    // 标记缓存失效
+    m_utf8Dirty = true;
     m_cursorBlinkTime = 0.0f;
-    ensureCursorVisible();  // ✅ 自动滚动
+    ensureCursorVisible();
+    
+    TINA_INFO("UITextEdit::insertText - Inserted {} chars, total={}/{}", 
+              inputChars.size(), m_chars.size(), m_maxLength > 0 ? m_maxLength : 999);
 }
 
-// === 删除字符 ===
+// === 删除字符（超简单！不再需要UTF-8判断） ===
 void UITextEdit::deleteChar(bool forward) {
-    if (m_text.empty()) return;
-
-    TINA_INFO("UITextEdit::deleteChar - forward={}, cursorPos={}, textLength={}, text='{}'", 
-              forward, m_cursorPos, m_text.length(), m_text);
-
+    if (m_chars.empty()) return;
+    
     if (forward) {
-        // Delete：删除光标后的UTF-8字符
-        if (m_cursorPos < m_text.length()) {
-            // 使用utfcpp找到下一个UTF-8字符的位置
-            auto it = m_text.begin() + m_cursorPos;
-            auto next_it = it;
-            try {
-                utf8::next(next_it, m_text.end());  // 移动到下一个UTF-8字符
-                size_t charLen = std::distance(it, next_it);
-                m_text.erase(m_cursorPos, charLen);
-                TINA_INFO("UITextEdit::deleteChar - After delete forward (charLen={}), text='{}'", charLen, m_text);
-            } catch (const utf8::exception& e) {
-                // UTF-8序列损坏：降级为删除1字节（尝试修复乱码）
-                TINA_WARN("UITextEdit::deleteChar - UTF-8 error: {}, fallback to 1-byte delete", e.what());
-                m_text.erase(m_cursorPos, 1);
-                TINA_INFO("UITextEdit::deleteChar - After fallback delete, text='{}'", m_text);
-            }
-        } else {
-            TINA_WARN("UITextEdit::deleteChar - Cannot delete forward, cursor at end");
+        // Delete：删除光标后的字符
+        if (m_cursorPos < m_chars.size()) {
+            m_chars.erase(m_chars.begin() + m_cursorPos);  // ✅ 一行搞定！
+            TINA_INFO("UITextEdit::deleteChar - Deleted forward at pos {}", m_cursorPos);
         }
     } else {
-        // Backspace：删除光标前的UTF-8字符
+        // Backspace：删除光标前的字符
         if (m_cursorPos > 0) {
-            // 使用utfcpp找到前一个UTF-8字符的位置
-            auto it = m_text.begin() + m_cursorPos;
-            auto prev_it = it;
-            try {
-                utf8::prior(prev_it, m_text.begin());  // 移动到前一个UTF-8字符
-                size_t prevPos = std::distance(m_text.begin(), prev_it);
-                size_t charLen = m_cursorPos - prevPos;
-                m_text.erase(prevPos, charLen);
-                m_cursorPos = prevPos;
-                TINA_INFO("UITextEdit::deleteChar - After backspace (charLen={}), text='{}'", charLen, m_text);
-            } catch (const utf8::exception& e) {
-                // UTF-8序列损坏：降级为删除1字节（尝试修复乱码）
-                TINA_WARN("UITextEdit::deleteChar - UTF-8 error: {}, fallback to 1-byte delete", e.what());
-                m_text.erase(m_cursorPos - 1, 1);
-                m_cursorPos--;
-                TINA_INFO("UITextEdit::deleteChar - After fallback delete, text='{}'", m_text);
-            }
-        } else {
-            TINA_WARN("UITextEdit::deleteChar - Cannot backspace, cursor at start");
+            m_chars.erase(m_chars.begin() + m_cursorPos - 1);  // ✅ 一行搞定！
+            m_cursorPos--;
+            TINA_INFO("UITextEdit::deleteChar - Backspace at pos {}", m_cursorPos);
         }
     }
-
+    
+    // 标记缓存失效
+    m_utf8Dirty = true;
     m_cursorBlinkTime = 0.0f;
-    ensureCursorVisible();  // ✅ 自动滚动
+    ensureCursorVisible();
 }
 
 // === 确保光标可见（自动滚动）===
@@ -676,6 +637,15 @@ void UITextEdit::ensureCursorVisible() {
     float padding = 4.0f;
     float availableWidth = getSize().x - padding * 2;
     float cursorX = getXFromPos(m_cursorPos);
+    
+    // ✅ 计算整个文本的宽度
+    float textWidth = getXFromPos(m_chars.size());
+    
+    // ✅ 优化：如果文本完全能放下，重置滚动为0（窗口变大时）
+    if (textWidth <= availableWidth) {
+        m_scrollOffsetX = 0;
+        return;
+    }
     
     // 光标相对于可视区域的位置
     float visibleCursorX = cursorX - m_scrollOffsetX;
@@ -689,15 +659,24 @@ void UITextEdit::ensureCursorVisible() {
         m_scrollOffsetX = cursorX - (availableWidth - rightMargin);
     }
     
-    // 如果光标超出左边界
-    if (visibleCursorX < 0) {
-        // 向右滚动，让光标回到左边
-        m_scrollOffsetX = cursorX;
+    // 左边距：光标需要距离左边界至少20px
+    float leftMargin = 20.0f;
+    
+    // 如果光标超出左边界（带左边距）
+    if (visibleCursorX < leftMargin) {
+        // 向右滚动，让光标距离左边界leftMargin
+        m_scrollOffsetX = Container::Max(0.0f, cursorX - leftMargin);
     }
     
     // 限制滚动范围：不能滚动到负数
     if (m_scrollOffsetX < 0) {
         m_scrollOffsetX = 0;
+    }
+    
+    // ✅ 限制滚动范围：不要滚动超过必要的距离（避免右侧出现空白）
+    float maxScroll = Container::Max(0.0f, textWidth - availableWidth + 20.0f);
+    if (m_scrollOffsetX > maxScroll) {
+        m_scrollOffsetX = maxScroll;
     }
 }
 
@@ -707,22 +686,25 @@ size_t UITextEdit::getPosFromX(float x) {
     x -= padding;
 
     if (x <= 0) return 0;
-    if (m_text.empty()) return 0;
+    if (m_chars.empty()) return 0;
 
     // ✅ 使用真实的文本测量
     if (!m_renderer) {
         // 降级方案：使用固定字符宽度估算
         float charWidth = 8.0f;
         size_t pos = static_cast<size_t>(x / charWidth);
-        return std::min(pos, m_text.length());
+        return std::min(pos, m_chars.size());
     }
 
-    // 逐字符测量，找到最接近的位置
+    // ✅ 逐字符测量（使用UTF-32索引）
     float currentX = 0.0f;
-    for (size_t i = 0; i < m_text.length(); ++i) {
-        std::string substr = m_text.substr(0, i + 1);
+    for (size_t i = 0; i < m_chars.size(); ++i) {
+        // 将前i+1个UTF-32字符转为UTF-8测量
+        Container::Vector<char32_t> subChars(m_chars.begin(), m_chars.begin() + i + 1);
+        Container::String substr = charsToUTF8(subChars);
+        
         float w = 0.0f, h = 0.0f;
-        if (m_renderer->measureText(substr, w, h, m_fontPx)) {
+        if (m_renderer->measureText(substr.c_str(), w, h, m_fontPx)) {
             if (w > x) {
                 // 找到了超过x的位置，判断是i还是i+1更接近
                 float prevW = currentX;
@@ -733,11 +715,11 @@ size_t UITextEdit::getPosFromX(float x) {
         }
     }
 
-    return m_text.length();
+    return m_chars.size();
 }
 
 float UITextEdit::getXFromPos(size_t pos) {
-    if (pos == 0 || m_text.empty()) return 0.0f;
+    if (pos == 0 || m_chars.empty()) return 0.0f;
 
     // ✅ 使用真实的文本测量
     if (!m_renderer) {
@@ -746,10 +728,13 @@ float UITextEdit::getXFromPos(size_t pos) {
         return pos * charWidth;
     }
 
-    // 测量从开头到pos位置的文本宽度
-    std::string substr = m_text.substr(0, std::min(pos, m_text.length()));
+    // ✅ 测量从开头到pos位置（UTF-32字符索引）
+    size_t charCount = std::min(pos, m_chars.size());
+    Container::Vector<char32_t> subChars(m_chars.begin(), m_chars.begin() + charCount);
+    Container::String substr = charsToUTF8(subChars);
+    
     float w = 0.0f, h = 0.0f;
-    if (m_renderer->measureText(substr, w, h, m_fontPx)) {
+    if (m_renderer->measureText(substr.c_str(), w, h, m_fontPx)) {
         return w;
     }
 

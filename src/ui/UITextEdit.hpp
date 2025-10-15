@@ -21,7 +21,6 @@ class UITextEdit : public UINode {
 public:
     UITextEdit(const std::string& name = "TextEdit")
         : UINode(name)
-        , m_text("")
         , m_placeholder("请输入文本...")
         , m_bgColor(Tina::UI::UIColors::PanelBg)
         , m_textColor(Tina::UI::UIColors::LabelText)
@@ -44,12 +43,12 @@ public:
 
     // === 文本内容 ===
     void setText(const std::string& text);
-    const std::string& getText() const { return m_text; }
+    std::string getText() const;  // 返回值（需要转换）
     void clear() { setText(""); }
 
     // === 占位符文本 ===
-    void setPlaceholder(const std::string& text) { m_placeholder = text; }
-    const std::string& getPlaceholder() const { return m_placeholder; }
+    void setPlaceholder(const std::string& text) { m_placeholder = Container::String(text.c_str()); }
+    const char* getPlaceholder() const { return m_placeholder.c_str(); }
 
     // === 颜色设置 ===
     void setBgColor(const Tina::Core::Color& c) { m_bgColor = c; }
@@ -99,12 +98,17 @@ public:
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
     void onUpdate(float dt) override;
+    void onLayout() override;  // ✅ 布局变化时重新计算滚动
     Tina::Math::Vec2 measureContent(float availableWidth, float availableHeight) override;
 
 private:
-    // 文本内容
-    std::string m_text;
-    std::string m_placeholder;
+    // ✅ UTF-32字符数组（内部表示）- 参考Godot引擎的实现
+    Container::Vector<char32_t> m_chars;
+    Container::String m_placeholder;  // Placeholder仍用UTF-8（不常修改）
+    
+    // UTF-8缓存（用于渲染和getText()）- 使用std::string便于返回
+    mutable std::string m_utf8Cache;
+    mutable bool m_utf8Dirty = true;
 
     // 颜色配置
     Tina::Core::Color m_bgColor;
@@ -117,7 +121,7 @@ private:
     bool m_focused;
 
     // 光标
-    size_t m_cursorPos;           // 光标位置（字符索引）
+    size_t m_cursorPos;           // 光标位置（UTF-32字符索引，不是字节索引）
     float m_cursorBlinkTime;      // 光标闪烁计时器
 
     // 选择区域
