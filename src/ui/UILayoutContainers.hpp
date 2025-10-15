@@ -132,7 +132,11 @@ protected:
         if (m_layouting) return;  // ✅ 避免递归
         m_layouting = true;
 
-        // WrapContent：使用测量结果（仅影响包裹轴）
+        // WrapContent：使用测量结果（两轴）
+        if (layoutWidth() == LayoutDim::WrapContent) {
+            measure(std::numeric_limits<float>::infinity(), m_size.y);
+            applyMeasuredWidth();
+        }
         if (layoutHeight() == LayoutDim::WrapContent) {
             measure(m_size.x, std::numeric_limits<float>::infinity());
             applyMeasuredHeight();
@@ -141,20 +145,22 @@ protected:
         float contentWidth = m_size.x - m_paddingL - m_paddingR;
         float contentHeight = m_size.y - m_paddingT - m_paddingB;
 
-        // 第一遍：统计固定高度与 MatchParent 个数
+        // 第一遍：统计固定高度、MatchParent 个数与可见数量
         float fixedHeight = 0.0f;
         int matchCount = 0;
+        int visibleCount = 0;
         for (auto& child : m_children) {
             if (!child || !child->isVisible()) continue;
+            ++visibleCount;
             if (child->layoutHeight() == LayoutDim::MatchParent) {
-                matchCount++;
+                ++matchCount;
             } else {
-                fixedHeight += child->marginTop() + child->getSize().y + child->marginBottom() + m_spacing;
+                fixedHeight += child->marginTop() + child->getSize().y + child->marginBottom();
             }
         }
-        if (fixedHeight > 0 && !m_children.empty()) fixedHeight -= m_spacing; // 去掉最后一次spacing
-        float remaining = std::max(0.0f, contentHeight - fixedHeight);
-        float eachMatchH = (matchCount > 0) ? std::max(0.0f, remaining - m_spacing * std::max(0, matchCount - 1)) / matchCount : 0.0f;
+        float totalSpacing = (visibleCount > 1) ? m_spacing * (visibleCount - 1) : 0.0f;
+        float remaining = std::max(0.0f, contentHeight - fixedHeight - totalSpacing);
+        float eachMatchH = (matchCount > 0) ? (remaining / matchCount) : 0.0f;
 
         // 第二遍：实际布局
         float y = m_paddingT;
@@ -189,7 +195,12 @@ protected:
 
             y += mt;
             child->setPosition(x, y);
-            y += childH + mb + m_spacing;
+            y += childH + mb;
+            // 间距：元素之间才加
+            if (visibleCount > 1) {
+                --visibleCount;
+                y += m_spacing;
+            }
         }
 
         m_layouting = false;  // ✅ 重置标志
@@ -327,10 +338,14 @@ protected:
     void onLayout() override {
         if (m_layouting) return;  // ✅ 避免递归
         m_layouting = true;
-        // WrapContent：使用测量结果
+        // WrapContent：使用测量结果（两轴）
         if (layoutWidth() == LayoutDim::WrapContent) {
             measure(std::numeric_limits<float>::infinity(), m_size.y);
             applyMeasuredWidth();
+        }
+        if (layoutHeight() == LayoutDim::WrapContent) {
+            measure(m_size.x, std::numeric_limits<float>::infinity());
+            applyMeasuredHeight();
         }
 
         float contentWidth = m_size.x - m_paddingL - m_paddingR;
@@ -355,8 +370,8 @@ protected:
             return;
         }
         // 预分配 MatchParent 宽度（等分剩余空间，考虑间距）
-        float fixedWidth = totalChildWidth + m_spacing * (visibleCount - 1);
-        float remaining = std::max(0.0f, contentWidth - fixedWidth);
+        float totalSpacingNominal = (visibleCount > 1) ? m_spacing * (visibleCount - 1) : 0.0f;
+        float remaining = std::max(0.0f, contentWidth - totalChildWidth - totalSpacingNominal);
         float eachMatchW = (matchCount > 0) ? remaining / matchCount : 0.0f;
 
         // 计算起始位置和间距
@@ -368,10 +383,10 @@ protected:
                 x = m_paddingL;
                 break;
             case Justify::Center:
-                x = m_paddingL + (contentWidth - (totalChildWidth + spacing * (visibleCount - 1) + eachMatchW * matchCount)) * 0.5f;
+                x = m_paddingL + (contentWidth - (totalChildWidth + totalSpacingNominal + eachMatchW * matchCount)) * 0.5f;
                 break;
             case Justify::End:
-                x = m_paddingL + (contentWidth - (totalChildWidth + spacing * (visibleCount - 1) + eachMatchW * matchCount));
+                x = m_paddingL + (contentWidth - (totalChildWidth + totalSpacingNominal + eachMatchW * matchCount));
                 break;
             case Justify::SpaceBetween:
                 x = m_paddingL;
@@ -576,6 +591,15 @@ protected:
     void onLayout() override {
         if (m_layouting) return;  // ✅ 避免递归
         m_layouting = true;
+        // WrapContent：按轴应用测量结果
+        if (layoutWidth() == LayoutDim::WrapContent) {
+            measure(std::numeric_limits<float>::infinity(), m_size.y);
+            applyMeasuredWidth();
+        }
+        if (layoutHeight() == LayoutDim::WrapContent) {
+            measure(m_size.x, std::numeric_limits<float>::infinity());
+            applyMeasuredHeight();
+        }
         
         float contentWidth = m_size.x - m_paddingL - m_paddingR;
         float contentHeight = m_size.y - m_paddingT - m_paddingB;

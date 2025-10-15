@@ -107,7 +107,7 @@ void UICharacterPanel::updateData(const std::string& name, float healthPercent, 
 }
 
 void UICharacterPanel::centerOnScreen(int screenWidth, int screenHeight) {
-    setAnchor(Anchor::MiddleCenter);
+    setAlign(HAlign::Center, VAlign::Middle);
     float x = (screenWidth - getSize().x) * 0.5f;
     float y = (screenHeight - getSize().y) * 0.5f;
     setPosition(x, y);

@@ -2,6 +2,7 @@
 #include "UICore.hpp"
 #include "../engine/UIEvents.hpp"
 #include "../engine/EventSystem.hpp"
+#include "../engine/Application.hpp"
 #include "../core/Log.hpp"
 #include <algorithm>
 
@@ -46,6 +47,27 @@ void UILabel::onRender(uint16_t viewId, UIRenderer& renderer)
     opts.hAlign = hAlign; opts.vAlign = vAlign; opts.padX = 4.0f; opts.padY = 4.0f;
     opts.fontPx = m_fontPx;  // 直接赋值 optional
     renderer.drawTextBox(viewId, pos.x, pos.y, size.x, size.y, m_text, opts);
+}
+
+Tina::Math::Vec2 UILabel::measureContent(float availableWidth, float /*availableHeight*/)
+{
+    (void)availableWidth;
+    auto* app = Tina::Engine::Application::instance();
+    if (!app) return getSize();
+
+    float tw = 0.0f, th = 0.0f;
+    auto& tr = app->textRenderer();
+    int prev = tr.currentFontPx();
+    bool needRestore = false;
+    if (m_fontPx.has_value() && m_fontPx.value() > 0 && m_fontPx.value() != prev) {
+        if (tr.setFontPx(m_fontPx.value())) needRestore = true;
+    }
+    tr.measureText(m_text, tw, th);
+    if (needRestore) tr.setFontPx(prev);
+
+    const float padX = 4.0f;
+    const float padY = 4.0f;
+    return {tw + padX * 2.0f, th + padY * 2.0f};
 }
 
 // === UIButton 实现 ===
@@ -222,6 +244,47 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         bo.fontPx = badgePx; bo.hAlign = UIRenderer::AlignH::Center; bo.vAlign = UIRenderer::AlignV::Center;
         renderer.drawTextBox(viewId, bx, by, bw, bh, m_badgeText, bo);
     }
+}
+
+Tina::Math::Vec2 UIButton::measureContent(float availableWidth, float /*availableHeight*/)
+{
+    (void)availableWidth;
+    auto* app = Tina::Engine::Application::instance();
+    float tw = 0.0f, th = 0.0f;
+    if (app) {
+        auto& tr = app->textRenderer();
+        int prev = tr.currentFontPx();
+        bool needRestore = false;
+        if (m_fontPx.has_value() && m_fontPx.value() > 0 && m_fontPx.value() != prev) {
+            if (tr.setFontPx(m_fontPx.value())) needRestore = true;
+        }
+        tr.measureText(m_text, tw, th);
+        if (needRestore) tr.setFontPx(prev);
+    } else {
+        tw = 60.0f; th = 20.0f;
+    }
+
+    const float pad = 8.0f;
+    float minH = std::max(th + pad * 2.0f, 28.0f);
+    float minW = std::max(tw + pad * 2.0f, 60.0f);
+
+    if (bgfx::isValid(m_iconTex)) {
+        float iconW = std::max(16.0f, minH - pad * 2.0f);
+        switch (m_iconLayout) {
+            case IconLayout::IconLeftTextRight:
+                minW += iconW + pad;
+                break;
+            case IconLayout::IconTopTextBottom:
+                minH = std::max(minH, iconW + th + pad * 3.0f);
+                minW = std::max(minW, iconW + pad * 2.0f);
+                break;
+            case IconLayout::OverlapCenter:
+            default:
+                break;
+        }
+    }
+
+    return {minW, minH};
 }
 
 } // namespace Tina::UI

@@ -99,6 +99,7 @@ public:
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
     void onUpdate(float dt) override;
+    Tina::Math::Vec2 measureContent(float availableWidth, float availableHeight) override;
 
 private:
     // 文本内容

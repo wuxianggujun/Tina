@@ -120,6 +120,7 @@ public:
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
+    Tina::Math::Vec2 measureContent(float availableWidth, float availableHeight) override;
 
 private:
     std::string m_text;
@@ -244,6 +245,7 @@ public:
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
+    Tina::Math::Vec2 measureContent(float availableWidth, float availableHeight) override;
 
 private:
     std::string m_text;

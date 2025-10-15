@@ -2,6 +2,7 @@
 #include "UICore.hpp"
 #include "../engine/EngineEvents.hpp"
 #include "../engine/InputSystem.hpp"
+#include "../engine/Application.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
 
@@ -31,6 +32,38 @@ void UITextEdit::setText(const std::string& text) {
 
     // 清除选择
     clearSelection();
+}
+
+// === 测量（根据文本/字号估计自然尺寸） ===
+Tina::Math::Vec2 UITextEdit::measureContent(float availableWidth, float /*availableHeight*/)
+{
+    auto* app = Tina::Engine::Application::instance();
+    float tw = 0.0f, th = 0.0f;
+    if (app) {
+        auto& tr = app->textRenderer();
+        int prev = tr.currentFontPx();
+        bool needRestore = false;
+        if (m_fontPx.has_value() && m_fontPx.value() > 0 && m_fontPx.value() != prev) {
+            if (tr.setFontPx(m_fontPx.value())) needRestore = true;
+        }
+        const std::string& src = m_text.empty() ? m_placeholder : m_text;
+        tr.measureText(src, tw, th);
+        if (needRestore) tr.setFontPx(prev);
+    } else {
+        // 无法测量时使用保守估计
+        tw = std::max(100.0f, (float)m_text.size() * 8.0f);
+        th = 20.0f;
+    }
+    // 内边距（与渲染一致）
+    const float pad = 4.0f;
+    float minW = tw + pad * 2.0f;
+    float minH = th + pad * 2.0f;
+    // 单行模式：高度至少 28
+    if (!m_multiline) minH = std::max(minH, 28.0f);
+
+    // 在可用宽度约束下返回期望值（不硬性裁剪）
+    (void)availableWidth;
+    return {minW, minH};
 }
 
 // === 焦点管理 ===

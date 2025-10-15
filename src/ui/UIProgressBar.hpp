@@ -44,6 +44,7 @@ public:
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
+    Tina::Math::Vec2 measureContent(float availableWidth, float availableHeight) override;
 
 private:
     float m_progress;                  // 当前进度（0-1）

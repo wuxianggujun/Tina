@@ -24,6 +24,7 @@
 #include "../core/Container.hpp"
 #include "../core/Math.hpp"
 #include "../core/Memory.hpp"
+#include "../core/Log.hpp"
 #include <atomic>
 #include <string>
 #include <functional>
@@ -89,18 +90,6 @@ enum class VAlign : uint8_t {
     Bottom       // 底部对齐：锚点在父节点底部 (parentH)
 };
 
-// 【兼容性】保留旧的Anchor枚举（内部转换为HAlign+VAlign）
-enum class Anchor : uint8_t {
-    TopLeft = 0,
-    TopCenter,
-    TopRight,
-    MiddleLeft,
-    MiddleCenter,
-    MiddleRight,
-    BottomLeft,
-    BottomCenter,
-    BottomRight
-};
 
 // UI 节点基类
 // ✅ 支持 shared_from_this，允许从 this 获取 shared_ptr
@@ -212,14 +201,11 @@ public:
     }
     
     // 设置百分比尺寸（相对于父节点，支持链式调用）
-    // 注意：仅对传入 >0 的轴生效；<=0 表示不改变该轴模式（兼容示例：setSizePercent(0, 1.0f)）
+    // 严格：两个轴同时采用百分比模式（轴向独立请使用 setWidthPercent/setHeightPercent）
     UINode* setSizePercent(float widthPercent, float heightPercent) {
-        if (widthPercent > 0.0f) { m_widthMode = SizeMode::Percent; m_widthPercent = widthPercent; }
-        if (heightPercent > 0.0f) { m_heightMode = SizeMode::Percent; m_heightPercent = heightPercent; }
-        m_dirty = true;
-        updatePercentSize();
-        requestLayout();
-        return this;
+        m_widthMode = SizeMode::Percent;  m_widthPercent = widthPercent;
+        m_heightMode = SizeMode::Percent; m_heightPercent = heightPercent;
+        m_dirty = true; updatePercentSize(); requestLayout(); return this;
     }
 
     // 轴向独立：仅设置宽度为百分比
@@ -236,12 +222,30 @@ public:
     // 设置最小/最大尺寸约束
     UINode* setMinSize(float minW, float minH) {
         m_minSize = {minW, minH};
+        // 约束一致性：若 min > max，则调整 max 到 min 并警告
+        if (m_maxSize.x > 0 && m_minSize.x > m_maxSize.x) {
+            TINA_WARN("UINode '{}': minWidth ({}) > maxWidth ({}), 调整 maxWidth = minWidth", m_name, m_minSize.x, m_maxSize.x);
+            m_maxSize.x = m_minSize.x;
+        }
+        if (m_maxSize.y > 0 && m_minSize.y > m_maxSize.y) {
+            TINA_WARN("UINode '{}': minHeight ({}) > maxHeight ({}), 调整 maxHeight = minHeight", m_name, m_minSize.y, m_maxSize.y);
+            m_maxSize.y = m_minSize.y;
+        }
         updatePercentSize();  // 重新应用约束
         return this;
     }
     
     UINode* setMaxSize(float maxW, float maxH) {
         m_maxSize = {maxW, maxH};
+        // 约束一致性：若 max < min，则调整 min 到 max 并警告
+        if (m_maxSize.x > 0 && m_minSize.x > m_maxSize.x) {
+            TINA_WARN("UINode '{}': maxWidth ({}) < minWidth ({}), 调整 minWidth = maxWidth", m_name, m_maxSize.x, m_minSize.x);
+            m_minSize.x = m_maxSize.x;
+        }
+        if (m_maxSize.y > 0 && m_minSize.y > m_maxSize.y) {
+            TINA_WARN("UINode '{}': maxHeight ({}) < minHeight ({}), 调整 minHeight = maxHeight", m_name, m_maxSize.y, m_minSize.y);
+            m_minSize.y = m_maxSize.y;
+        }
         updatePercentSize();  // 重新应用约束
         return this;
     }
@@ -318,22 +322,7 @@ public:
         return this;
     }
     
-    // 【兼容性】旧的Anchor API（内部转换为HAlign+VAlign）
-    UINode* setAnchor(Anchor anchor) {
-        // 转换Anchor到HAlign+VAlign
-        switch (anchor) {
-            case Anchor::TopLeft:       return setAlign(HAlign::Left, VAlign::Top);
-            case Anchor::TopCenter:     return setAlign(HAlign::Center, VAlign::Top);
-            case Anchor::TopRight:      return setAlign(HAlign::Right, VAlign::Top);
-            case Anchor::MiddleLeft:    return setAlign(HAlign::Left, VAlign::Middle);
-            case Anchor::MiddleCenter:  return setAlign(HAlign::Center, VAlign::Middle);
-            case Anchor::MiddleRight:   return setAlign(HAlign::Right, VAlign::Middle);
-            case Anchor::BottomLeft:    return setAlign(HAlign::Left, VAlign::Bottom);
-            case Anchor::BottomCenter:  return setAlign(HAlign::Center, VAlign::Bottom);
-            case Anchor::BottomRight:   return setAlign(HAlign::Right, VAlign::Bottom);
-        }
-        return this;
-    }
+    // 兼容API已移除：请使用 setAlign()/setHAlign()/setVAlign()
 
     // === 流式布局API（便捷方法） ===
     

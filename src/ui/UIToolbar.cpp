@@ -19,7 +19,7 @@ bool UIToolbar::initialize(int screenW, int screenH, UIRenderer& renderer)
 
     // 工具栏背景（使用新的API）
     m_bar = m_root->createChild<UIPanel>("Toolbar");
-    m_bar->setAnchor(Anchor::TopLeft);
+    m_bar->setAlign(HAlign::Left, VAlign::Top);
     m_bar->setPosition(0, 0);
     m_bar->setColor(ToolbarBg);  // 半透明深色背景
 
@@ -141,7 +141,7 @@ void UIToolbar::buildLayout()
     for (int i = 0; i < count; ++i) {
         auto* btn = m_stack->createChild<UIButton>("ToolSlot");
         btn->setSize((float)m_slotSize, (float)m_slotSize);
-        btn->setAnchor(Anchor::TopLeft);
+        btn->setAlign(HAlign::Left, VAlign::Top);
         // 默认布局：左图标 + 右文本（避免重叠）
         btn->setIconLayout(UIButton::IconLayout::IconLeftTextRight);
         // 中央主标识：前三个为"水/挖/爆"，其余占位

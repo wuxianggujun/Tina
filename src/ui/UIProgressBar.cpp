@@ -41,4 +41,13 @@ void UIProgressBar::onRender(uint16_t viewId, UIRenderer& renderer) {
     }
 }
 
+Tina::Math::Vec2 UIProgressBar::measureContent(float availableWidth, float /*availableHeight*/)
+{
+    (void)availableWidth;
+    // 进度条的自然尺寸：至少宽100，高度由边框与最小视觉高度决定
+    const float minW = 100.0f;
+    const float minH = std::max(12.0f, m_borderWidth * 2.0f + 6.0f);
+    return {minW, minH};
+}
+
 } // namespace Tina::UI
