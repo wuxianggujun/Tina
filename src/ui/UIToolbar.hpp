@@ -75,7 +75,6 @@ public:
 
 private:
     void buildLayout();     // 重建所有UI元素
-    void updateLayout();    // 只更新位置，不重建
 
 private:
     // 渲染

@@ -100,14 +100,6 @@ public:
         onLayout();
         m_layoutDirty = false;  // 清除dirty标志
     }
-    
-    // ⚠️ 已废弃：布局现在自动执行
-    [[deprecated("布局现在自动执行，无需手动调用forceLayout()")]]
-    void forceLayout() {
-        m_layouting = false;
-        onLayout();
-        m_layoutDirty = false;
-    }
 
 protected:
     void onLayout() override {
@@ -121,8 +113,21 @@ protected:
             if (!child || !child->isVisible()) continue;
             
             auto childSize = child->getSize();
-            float childWidth = m_fillWidth ? contentWidth : childSize.x;
+            float childWidth = childSize.x;
+            
+            // ✅ 支持WidthMatch：子元素填充父容器宽度
+            if (m_fillWidth || child->layoutWidth() == LayoutDim::MatchParent) {
+                childWidth = contentWidth;
+                child->setWidth(childWidth);
+            }
+            
             float childHeight = childSize.y;
+            
+            // ✅ 支持HeightMatch：子元素填充剩余高度
+            if (child->layoutHeight() == LayoutDim::MatchParent) {
+                // TODO: 计算剩余高度并分配
+                childHeight = childSize.y;
+            }
             
             // 计算水平位置（根据对齐方式）
             float x = m_paddingL;
@@ -258,14 +263,6 @@ public:
         onLayout();
         m_layoutDirty = false;  // 清除dirty标志
     }
-    
-    // ⚠️ 已废弃：布局现在自动执行
-    [[deprecated("布局现在自动执行，无需手动调用forceLayout()")]]
-    void forceLayout() {
-        m_layouting = false;
-        onLayout();
-        m_layoutDirty = false;
-    }
 
 protected:
     void onLayout() override {
@@ -325,7 +322,21 @@ protected:
             
             auto childSize = child->getSize();
             float childWidth = childSize.x;
-            float childHeight = m_fillHeight ? contentHeight : childSize.y;
+            
+            // ✅ 支持WidthMatch：子元素填充剩余宽度
+            if (child->layoutWidth() == LayoutDim::MatchParent) {
+                float availableWidth = contentWidth - totalChildWidth + childWidth;
+                childWidth = std::max(0.0f, availableWidth);
+                child->setWidth(childWidth);
+            }
+            
+            float childHeight = childSize.y;
+            
+            // ✅ 支持HeightMatch：子元素填充父容器高度
+            if (m_fillHeight || child->layoutHeight() == LayoutDim::MatchParent) {
+                childHeight = contentHeight;
+                child->setHeight(childHeight);
+            }
             
             // 计算垂直位置（根据对齐方式）
             float y = m_paddingT;
@@ -448,14 +459,6 @@ public:
         m_layouting = false;  // 重置标志
         onLayout();
         m_layoutDirty = false;  // 清除dirty标志
-    }
-    
-    // ⚠️ 已废弃：布局现在自动执行
-    [[deprecated("布局现在自动执行，无需手动调用forceLayout()")]]
-    void forceLayout() {
-        m_layouting = false;
-        onLayout();
-        m_layoutDirty = false;
     }
 
 protected:
