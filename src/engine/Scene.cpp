@@ -5,6 +5,7 @@
 #include "Scene.hpp"
 #include "Application.hpp"
 #include "InputSystem.hpp"
+#include "EventSystem.hpp"  // ✅ 需要EventSystem完整定义以调用subscribe/unsubscribe
 #include "../ui/UICore.hpp"
 #include "../ui/UINode.hpp"  // 引入UINode完整定义
 #include "../ui/UILayoutManager.hpp"  // 引入UILayoutManager完整定义
@@ -100,33 +101,29 @@ void Scene::updateWindowSize(int width, int height) {
 
 // 实际应用窗口尺寸更新
 void Scene::applyWindowResize(int width, int height) {
-    TINA_DEBUG("Scene::applyWindowResize - 更新窗口尺寸: {}x{} -> {}x{}",
-              m_pixelWidth, m_pixelHeight, width, height);
     m_pixelWidth = width;
     m_pixelHeight = height;
     m_viewDirty = true;
 
-    // 更新SceneRenderer的屏幕尺寸（如果已初始化）
+    // 更新渲染器和相机
     if (m_sceneRenderer) {
         m_sceneRenderer->setScreenSize(width, height);
     }
-
-    // 更新相机视口
     if (m_camera) {
         m_camera->setViewportPixels(width, height);
     }
 
-    // 自动通知所有UI根节点（框架自动处理，递归通知整个UI树）
+    // 通知所有UI根节点
     for (auto* root : m_uiRoots) {
         if (root) {
+            root->setSize((float)width, (float)height);
             root->onWindowSizeChanged(width, height);
         }
     }
 
-    // 自动调用子类的窗口大小改变回调（可选，用于特殊逻辑）
+    // 调用子类回调
     onWindowSizeChanged(width, height);
 }
-
 
 // 注意：原先计划在此提供若干便捷访问（shaders()/textRenderer()/fileSystem()/resources()），
 // 但与当前 Application 接口不完全一致（不存在 textRenderer()）。为避免接口不匹配，
@@ -220,25 +217,48 @@ void Scene::renderFrame() {
     finalizeViews();
 }
 
+// ✅ 事件驱动：设置事件监听器
+void Scene::setupEventHandlers() {
+    if (!m_app || !m_app->getEventSystem()) return;
+    
+    // 订阅窗口resize事件
+    m_windowResizeToken = m_app->getEventSystem()->subscribe<Events::WindowResizedEvent>(
+        [this](const Events::WindowResizedEvent& e) {
+            // ✅ Application已经在processEvents中提交了空帧，bgfx::reset已生效
+            // 现在可以立即更新视图矩形
+            m_viewDirty = true;
+            TINA_DEBUG("Scene收到WindowResizedEvent: {}x{}, 标记视图更新", e.width, e.height);
+        }
+    );
+}
+
+// ✅ 事件驱动：清理事件监听器
+void Scene::cleanupEventHandlers() {
+    // SubscriptionToken是RAII的，析构时自动取消订阅
+    // 但我们可以手动调用unsubscribe以立即清理
+    m_windowResizeToken.unsubscribe();
+}
+
 // 准备视图（自动设置所有配置的视图）
 void Scene::prepareViews() {
-    // 如果还没有视图配置，或标记为需要更新，则刷新基本的视图矩形/清屏等静态参数
+    // 如果还没有视图配置，获取配置
     if (m_viewSetup.empty()) {
         m_viewSetup = getViewSetup();
-        m_viewDirty = true;
+        TINA_DEBUG("Scene::prepareViews - 初始化视图配置，视图数量: {}", m_viewSetup.size());
     }
 
+    // ✅ 简单实现：直接使用m_pixelWidth/Height，不使用bgfx::getStats()
     if (m_viewDirty) {
+        TINA_DEBUG("Scene::prepareViews - 更新视图: {}x{}, 视图数量: {}", 
+                  m_pixelWidth, m_pixelHeight, m_viewSetup.size());
+
         for (const auto& view : m_viewSetup) {
-            // 设置视图矩形（所有视图都使用全屏）
             bgfx::setViewRect(view.id, 0, 0, (uint16_t)m_pixelWidth, (uint16_t)m_pixelHeight);
 
-            // UI/背景视图的正交投影在尺寸变化时更新即可
             if (view.type == ViewSetup::UI2D || view.type == ViewSetup::Background2D) {
                 setupUIView(view.id, m_pixelWidth, m_pixelHeight);
             }
 
-            // 如果需要清屏，设置清屏参数
             if (view.needsClear) {
                 bgfx::setViewClear(view.id, view.clearFlags, view.clearColor, 1.0f, 0);
             }

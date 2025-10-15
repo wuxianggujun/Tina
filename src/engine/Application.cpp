@@ -305,27 +305,24 @@ void Application::processEvents()
             // 获取物理像素尺寸（用于bgfx渲染）
             m_window->getSizeInPixels(m_pixelWidth, m_pixelHeight);
 
-            // 重置bgfx
+            // ✅ 调用bgfx::reset
+            TINA_DEBUG("Application - 调用 bgfx::reset({}x{})", m_pixelWidth, m_pixelHeight);
             bgfx::reset(
                 static_cast<uint32_t>(m_pixelWidth),
                 static_cast<uint32_t>(m_pixelHeight),
                 BGFX_RESET_VSYNC | BGFX_RESET_MSAA_X8
             );
 
-            // 更新视图矩形
-            bgfx::setViewRect(0, 0, 0,
-                static_cast<uint16_t>(m_pixelWidth),
-                static_cast<uint16_t>(m_pixelHeight)
-            );
-
             TINA_INFO("窗口调整: {}x{} (像素: {}x{})",
                 m_config.windowWidth, m_config.windowHeight,
                 m_pixelWidth, m_pixelHeight);
-
+            
             // 通过事件系统发送窗口调整事件
             m_eventSystem->trigger(Events::WindowResizedEvent(m_pixelWidth, m_pixelHeight));
 
-            // 通知所有场景更新窗口尺寸（包括暂停的场景）
+            // ✅ 立即通知所有场景更新窗口尺寸
+            // Scene::prepareViews会使用bgfx::getStats()同步framebuffer尺寸
+            // 并显式设置UI根节点尺寸，确保UI绘制覆盖整个窗口
             if (m_sceneManager) {
                 m_sceneManager->updateAllScenesWindowSize(m_pixelWidth, m_pixelHeight);
             }

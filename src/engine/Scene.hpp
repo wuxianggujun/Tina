@@ -11,6 +11,8 @@
 #include "../core/Container.hpp"
 #include "SceneRenderer.hpp"  // EASTL的unique_ptr需要完整定义
 #include "Camera2D.hpp"       // Scene默认有2D相机
+#include "SubscriptionToken.hpp"  // ✅ 事件订阅token
+#include "EngineEvents.hpp"   // ✅ WindowResizedEvent
 #include <bgfx/bgfx.h>
 
 // 前向声明
@@ -106,7 +108,7 @@ protected:
     // 子类覆盖此方法声明需要的视图
     // 默认配置：只有一个UI视图
     virtual Container::Vector<ViewSetup> getViewSetup() {
-        return {{ 3, ViewSetup::UI2D }};  // 默认使用view 3作为UI层
+        return {{ 3, ViewSetup::UI2D, true }};  // 默认清屏，避免resize残留
     }
 
     // 渲染场景内容（子类实现）
@@ -190,6 +192,10 @@ private:
     // UI树管理辅助方法
     void registerUITreeToLayoutManager(UI::UINode* node);
     void unregisterUITreeFromLayoutManager(UI::UINode* node);
+    
+    // ✅ 事件监听管理（由SceneManager调用）
+    void setupEventHandlers();
+    void cleanupEventHandlers();
 
 private:
     Application* m_app = nullptr;  // Application实例指针（不持有所有权）
@@ -207,8 +213,11 @@ private:
     // 视图管理
     Container::Vector<ViewSetup> m_viewSetup;  // 缓存的视图配置
     bool m_viewDirty = true;                   // 视图是否需要更新
-    int m_pixelWidth = 1280;                   // 窗口宽度
-    int m_pixelHeight = 720;                   // 窗口高度
+    int m_pixelWidth = 1280;                   // 当前窗口宽度
+    int m_pixelHeight = 720;                   // 当前窗口高度
+    
+    // ✅ 事件驱动：订阅窗口resize事件
+    SubscriptionToken m_windowResizeToken;
 
     // 窗口调整防抖动
     bool m_pendingResize = false;              // 是否有待处理的窗口调整

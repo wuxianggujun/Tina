@@ -25,8 +25,11 @@ void SceneManager::push(Memory::UniquePtr<Scene> scene)
         m_scenes.back()->m_active = false;
     }
 
-    // 设置 Application 引用并进入新场景
+    // 设置 Application 引用
     scene->m_app = m_app;
+    
+    // ✅ 设置事件监听器（必须在m_app设置后）
+    scene->setupEventHandlers();
 
     // 关键修复：立即应用窗口大小，避免防抖动延迟
     // 场景刚创建时必须立即同步窗口尺寸，否则会使用默认值1280x720
@@ -46,6 +49,8 @@ void SceneManager::pop()
 
     // 退出当前场景
     m_scenes.back()->onExit();
+    // ✅ 清理事件监听器
+    m_scenes.back()->cleanupEventHandlers();
     m_scenes.pop_back();
 
     // 恢复上一个场景
@@ -61,11 +66,15 @@ void SceneManager::replace(Memory::UniquePtr<Scene> scene)
     // 退出当前场景
     if (!m_scenes.empty()) {
         m_scenes.back()->onExit();
+        // ✅ 清理事件监听器
+        m_scenes.back()->cleanupEventHandlers();
         m_scenes.pop_back();
     }
 
     // 进入新场景
     scene->m_app = m_app;
+    // ✅ 设置事件监听器
+    scene->setupEventHandlers();
 
     // 关键修复：立即应用窗口大小，避免防抖动延迟
     // 场景刚创建时必须立即同步窗口尺寸，否则会使用默认值1280x720
