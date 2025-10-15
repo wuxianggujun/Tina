@@ -164,6 +164,7 @@ protected:
 
         // 第二遍：实际布局
         float y = m_paddingT;
+        int index = 0;  // 当前可见元素索引
         for (auto& child : m_children) {
             if (!child || !child->isVisible()) continue;
 
@@ -196,9 +197,10 @@ protected:
             y += mt;
             child->setPosition(x, y);
             y += childH + mb;
-            // 间距：元素之间才加
-            if (visibleCount > 1) {
-                --visibleCount;
+            
+            // 间距：不是最后一个元素才加
+            ++index;
+            if (index < visibleCount) {
                 y += m_spacing;
             }
         }
@@ -405,6 +407,7 @@ protected:
         }
         
         // 布局子元素
+        int index = 0;  // 当前可见元素索引
         for (auto& child : m_children) {
             if (!child || !child->isVisible()) continue;
             
@@ -444,7 +447,12 @@ protected:
             child->setPosition(x, y);
             // 不在这里递归触发布局，交由布局管理器批处理
             
-            x += childWidth + spacing;
+            // 间距：不是最后一个元素才加
+            x += childWidth;
+            ++index;
+            if (index < visibleCount) {
+                x += spacing;
+            }
         }
         
         m_layouting = false;  // ✅ 重置标志
