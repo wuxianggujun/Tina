@@ -109,7 +109,7 @@ protected:
     // 子类覆盖此方法声明需要的视图
     // 默认配置：只有一个UI视图
     virtual Container::Vector<ViewSetup> getViewSetup() {
-        return {{ 3, ViewSetup::UI2D, true }};  // 默认清屏，避免resize残留
+        return {{ UI::VIEW_UI, ViewSetup::UI2D, true }};  // 默认清屏，避免resize残留
     }
 
     // 渲染场景内容（子类实现）

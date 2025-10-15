@@ -13,6 +13,7 @@
 #include "AudioManager.hpp"
 #include "../core/Log.hpp"
 #include "../ui/TextRenderer.hpp"
+#include "../ui/UIConstants.hpp"  // ✅ VIEW_CLEAR等常量定义
 
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
@@ -115,8 +116,8 @@ void Application::init()
     }
 
     // 5. 设置默认视图
-    bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
-    bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(m_pixelWidth), static_cast<uint16_t>(m_pixelHeight));
+    bgfx::setViewClear(UI::VIEW_CLEAR, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
+    bgfx::setViewRect(UI::VIEW_CLEAR, 0, 0, static_cast<uint16_t>(m_pixelWidth), static_cast<uint16_t>(m_pixelHeight));
 
     // 6. 创建核心子系统
     m_eventSystem = Memory::MakeUnique<EventSystem>();

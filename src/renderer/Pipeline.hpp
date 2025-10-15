@@ -1,6 +1,6 @@
 //
 // 简易 Pipeline：分桶/排序/提交
-// - 视图布局：0 Opaque, 1 Transparent, 3 UI（建议统一使用 UIConstants 中的定义）
+// - 视图布局：使用 UIConstants 中的定义
 // - 提供添加绘制项接口（当前为占位，实际项目可替换为网格/材质）
 
 #pragma once
@@ -10,6 +10,7 @@
 #include "SortKey.hpp"
 #include "../core/Math.hpp"
 #include "../core/Container.hpp"
+#include "../ui/UIConstants.hpp"  // ✅ 使用统一的view常量定义
 #include <algorithm>
 #include <bx/math.h>
 
@@ -32,16 +33,16 @@ public:
     void setViewport(int w, int h) { m_viewport = { w, h }; }
 
     void begin() {
-        // 配置视图
-        ViewDesc v0{ 0, m_viewport, BGFX_INVALID_HANDLE, 0, 0, (uint16_t)m_viewport.x, (uint16_t)m_viewport.y,
+        // 配置视图（使用UIConstants中的定义）
+        ViewDesc v0{ Tina::UI::VIEW_WORLD_SOLID, m_viewport, BGFX_INVALID_HANDLE, 0, 0, (uint16_t)m_viewport.x, (uint16_t)m_viewport.y,
                      (uint16_t)(BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH), 0x303030ff, 1.0f };
-        ViewDesc v1 = v0; v1.id = 1; v1.clear_flags = 0; // 透明不清屏
-        ViewDesc v2 = v0; v2.id = 3; v2.clear_flags = BGFX_CLEAR_DEPTH; // UI 仅清深度
+        ViewDesc v1 = v0; v1.id = Tina::UI::VIEW_WORLD_ALPHA; v1.clear_flags = 0; // 透明不清屏
+        ViewDesc v2 = v0; v2.id = Tina::UI::VIEW_UI; v2.clear_flags = BGFX_CLEAR_DEPTH; // UI 仅清深度
         m_renderer.setupView(v0);
         m_renderer.setupView(v1);
         m_renderer.setupView(v2);
 
-        // 统一设置 UI 视图(3)的正交投影（像素坐标，左上为原点）
+        // 统一设置 UI 视图的正交投影（像素坐标，左上为原点）
         {
             float ortho[16];
             const bgfx::Caps* caps = bgfx::getCaps();
@@ -50,7 +51,7 @@ public:
                          (float)m_viewport.y, 0.0f,
                          -1.0f, 1.0f, 0.0f,
                          caps->homogeneousDepth);
-            bgfx::setViewTransform(3, nullptr, ortho);
+            bgfx::setViewTransform(Tina::UI::VIEW_UI, nullptr, ortho);
         }
         m_items.clear();
     }
@@ -61,9 +62,9 @@ public:
         // 按 sort_key 排序
         std::sort(m_items.begin(), m_items.end(), [](const DrawItem& a, const DrawItem& b){ return a.sort_key < b.sort_key; });
         // 演示：这里只做 touch，防止提交空视图导致上一帧残影
-        bgfx::touch(0);
-        bgfx::touch(1);
-        bgfx::touch(3);
+        bgfx::touch(Tina::UI::VIEW_WORLD_SOLID);
+        bgfx::touch(Tina::UI::VIEW_WORLD_ALPHA);
+        bgfx::touch(Tina::UI::VIEW_UI);
         // 将来在此处获取 Encoder 并提交 drawcall
     }
 
