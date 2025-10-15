@@ -13,6 +13,7 @@
 #include "MenuScene.hpp"
 #include "../engine/EventSystem.hpp"
 #include "GameEvents.hpp"
+#include "../ui/UILayoutContainers.hpp"  // ✅ 使用新的布局容器
 
 // #include <SDL3/SDL.h>  // 不再需要：使用 InputSystem
 #include <bgfx/bgfx.h>
@@ -212,28 +213,36 @@ void PauseScene::createUI()
     // 使用新的API：createChild
     m_panel = m_rootNode->createChild<UI::UIPanel>("PausePanel");  // 保存面板引用
     m_panel->setColor(0.08f, 0.08f, 0.10f, 0.92f);
-    m_panel->setSize(panelW, 1.0f);
-    m_panel->setHeightWrap(); // 交由容器包裹
 
     auto* panel = m_panel;  // 为了兼容后续代码
 
-    auto* vbox = panel->createChild<UI::UIVStack>("VBox");
-    vbox->setSize(panelW, 0.0f);
-    vbox->setHeightWrap(); // 容器自动包裹内容高度
-    vbox->setPadding(pad, pad);
+    // ✅ 使用新的UIVBox布局容器
+    auto* vbox = panel->createChild<UI::UIVBox>("VBox");
+    vbox->setPadding(pad);
     vbox->setSpacing(spacing);
+    
+    // ✅ 计算总高度：标题 + 继续按钮 + 分组标题 + 2行调试按钮 + 退出按钮 + 间距 + 内边距
+    float totalHeight = pad * 2 +  // 上下内边距
+                        titleH + spacing +
+                        btnH + spacing +
+                        debugH + spacing +
+                        btnH + spacing +
+                        btnH + spacing +
+                        btnH;
+    
+    vbox->setSize(panelW, totalHeight);
+    panel->setSize(panelW, totalHeight);
 
     // 标题
     auto* title = vbox->createChild<UI::UILabel>();
     title->setText("游戏已暂停");
+    title->setHeight(titleH);
     title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
-    title->setSize(panelW - pad * 2.0f, titleH);
 
     // 第一行：继续
-    auto* rowTop = vbox->createChild<UI::UIHStack>("RowTop");
+    auto* rowTop = vbox->createChild<UI::UIHBox>("RowTop");
     rowTop->setSize(rowW, btnH);
     rowTop->setSpacing(12.0f);
-    rowTop->setPadding(0.0f, 0.0f); // 顶部占满行，无左右内边距，避免右侧溢出
 
     m_btnContinue = rowTop->createChild<UI::UIButton>();
     m_btnContinue->setText("继续游戏 (ESC)");
@@ -242,27 +251,28 @@ void PauseScene::createUI()
     m_btnContinue->setHoverColor(0.3f, 0.8f, 0.3f, 1.0f);
     m_btnContinue->setPressedColor(0.1f, 0.4f, 0.1f, 1.0f);
     m_btnContinue->setOnClick([this]{ onContinueClicked(); });
+    rowTop->forceLayout();
 
     // 设置按钮已移除，保留单行继续按钮
 
     // 分组标题：调试 / 昼夜
     auto* dbg = vbox->createChild<UI::UILabel>();
     dbg->setText("调试 / 昼夜");
+    dbg->setHeight(debugH);
     dbg->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
-    dbg->setSize(rowW, debugH);
 
     // 两行两列的调试网格
     auto makeRow = [&](UI::UIButton*& a, const char* ta, UI::UIButton*& b, const char* tb){
-        auto* row = vbox->createChild<UI::UIHStack>("Row");
+        auto* row = vbox->createChild<UI::UIHBox>("Row");
         row->setSize(rowW, btnH);
         row->setSpacing(12.0f);
-        row->setPadding(8.0f, 8.0f); // 与 colW 计算一致的左右内边距
         a = row->createChild<UI::UIButton>();
         a->setText(ta);
         a->setSize(colW, btnH);
         b = row->createChild<UI::UIButton>();
         b->setText(tb);
         b->setSize(colW, btnH);
+        row->forceLayout();
         return row;
     };
 
@@ -275,45 +285,27 @@ void PauseScene::createUI()
     m_btnBack->setOnClick([this]{ onBackTime(); });
 
     // 退出按钮独占一行
-    auto* rowBottom = vbox->createChild<UI::UIHStack>("RowBottom");
+    auto* rowBottom = vbox->createChild<UI::UIHBox>("RowBottom");
     rowBottom->setSize(rowW, btnH);
     rowBottom->setSpacing(12.0f);
-    rowBottom->setPadding(0.0f, 0.0f); // 占满行，无左右内边距
 
     m_btnQuit = rowBottom->createChild<UI::UIButton>();
     m_btnQuit->setText("返回主菜单");
-    m_btnQuit->setWidthMatch();
-    m_btnQuit->setHeight(btnH);
+    m_btnQuit->setSize(rowW, btnH);
     m_btnQuit->setNormalColor(0.6f, 0.2f, 0.2f, 0.95f);
     m_btnQuit->setHoverColor(0.8f, 0.3f, 0.3f, 1.0f);
     m_btnQuit->setPressedColor(0.4f, 0.1f, 0.1f, 1.0f);
     m_btnQuit->setOnClick([this]{ onQuitClicked(); });
+    rowBottom->forceLayout();
+    vbox->forceLayout();  // 递归布局所有子元素
     
-
-    // 触发布局计算并回填 Panel 高度，再居中 Panel
-    // 重要：使用performLayoutNow()确保布局立即完成，这样getSize()才能返回正确的值
-    vbox->requestLayout();
-    panel->requestLayout();
-
-    // 调试：执行布局前的尺寸
-    TINA_INFO("PauseScene: 布局前 - vbox高度: {}, panel高度: {}",
-              vbox->getSize().y, panel->getSize().y);
-
-    panel->performLayoutNow();  // 强制立即执行布局（包括所有子节点）
-
-    // 调试：执行布局后的尺寸
-    TINA_INFO("PauseScene: 布局后 - vbox高度: {}, panel高度: {}",
-              vbox->getSize().y, panel->getSize().y);
-
-    // 现在可以安全地获取panel的实际高度来计算居中位置
-    float panelHeight = panel->getSize().y;
+    // 居中面板
     float centerX = (m_pixelWidth - panelW) * 0.5f;
-    float centerY = (m_pixelHeight - panelHeight) * 0.5f;
-
-    TINA_INFO("PauseScene: 面板居中 - 屏幕({}x{}), 面板({}x{}), 中心位置({}, {})",
-              m_pixelWidth, m_pixelHeight, panelW, panelHeight, centerX, centerY);
-
+    float centerY = (m_pixelHeight - totalHeight) * 0.5f;
     panel->setPosition(centerX, centerY);
+    
+    TINA_INFO("PauseScene: 面板居中 - 屏幕({}x{}), 面板({}x{}), 中心位置({}, {})",
+              m_pixelWidth, m_pixelHeight, panelW, totalHeight, centerX, centerY);
 
     // ✅ 设置UI根节点到事件系统（传递 SharedPtr）
     if (app()) {

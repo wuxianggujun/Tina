@@ -44,10 +44,12 @@ enum class LayoutDim : uint8_t {
     WrapContent     // 由容器测量子项后回填（或通用节点根据子项包裹）
 };
 
-// 尺寸模式（响应式布局）
+// 尺寸模式（响应式布局）- 扩展版
 enum class SizeMode : uint8_t {
     Fixed = 0,      // 固定尺寸（像素）
-    Percent         // 百分比尺寸（相对于父节点）
+    Percent,        // 百分比尺寸（相对于父节点）
+    Auto,           // 内容自适应（根据子元素或文本内容）
+    Fill            // 填充剩余空间（在布局容器中使用）
 };
 
 // UI 对齐系统：支持水平和垂直方向独立对齐
@@ -403,7 +405,7 @@ public:
     void requestLayout();
 
     // 立即执行布局（通过布局管理器处理依赖）
-    void performLayoutNow();
+    virtual void performLayoutNow();
 
     // 检查布局是否需要更新
     bool needsLayout() const { return m_layoutDirty; }

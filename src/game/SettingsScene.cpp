@@ -11,6 +11,7 @@
 // #include <SDL3/SDL.h>  // 不再需要SDL，使用os封装
 #include <bgfx/bgfx.h>
 #include "../ui/UILayout.hpp"
+#include "../ui/UILayoutContainers.hpp"  // ✅ 使用新的布局容器
 #include "../ui/UIConstants.hpp"
 #include "../ui/UIUtils.hpp"
 #include "../engine/EventSystem.hpp"
@@ -159,36 +160,53 @@ void SettingsScene::createUI()
     panel->setSize(panelW, 1.0f);
     panel->setHeightWrap();
 
-    auto* vbox = panel->createChild<UI::UIVStack>("VBox");
-    vbox->setSize(panelW, 0.0f);
-    vbox->setHeightWrap();
-    vbox->setPadding(pad, pad);
+    // ✅ 使用新的UIVBox布局容器
+    auto* vbox = panel->createChild<UI::UIVBox>("VBox");
+    vbox->setPadding(pad);
+    vbox->setFillWidth(true);
     vbox->setSpacing(spacing);
+    
+    // ✅ 计算总高度：标题 + 3个分组标题 + 7个按钮 + 间距 + 内边距
+    // 标题(1) + 音频分组(1) + 音频按钮(3) + 图形分组(1) + 图形按钮(1) + 控制分组(1) + 控制按钮(1) + 返回按钮(1)
+    float totalHeight = pad * 2 +  // 上下内边距
+                        titleH + spacing +
+                        sectionH + spacing +  // 音频设置
+                        btnH + spacing +
+                        btnH + spacing +
+                        btnH + spacing +
+                        sectionH + spacing +  // 图形设置
+                        btnH + spacing +
+                        sectionH + spacing +  // 控制设置
+                        btnH + spacing +
+                        btnH;  // 返回按钮
+    
+    vbox->setSize(panelW, totalHeight);
+    panel->setSize(panelW, totalHeight);
 
     // 主标题
     auto* title = vbox->createChild<UI::UILabel>();
     title->setText("游戏设置");
+    title->setHeight(titleH);
     title->setAlignment(UI::UILabel::TextAlignH::Center, UI::UILabel::TextAlignV::Center);
-    title->setSize(panelW - pad*2, titleH);
 
     // 辅助函数：添加分组标题
     auto addSection = [&](const char* text) {
         auto* section = vbox->createChild<UI::UILabel>();
         section->setText(text);
+        section->setHeight(sectionH);
         section->setAlignment(UI::UILabel::TextAlignH::Left, UI::UILabel::TextAlignV::Center);
-        section->setSize(panelW - pad*2, sectionH);
         return section;
     };
 
     // 辅助函数：添加按钮行
     auto addRowButton = [&](const char* text){
-        auto* row = vbox->createChild<UI::UIHStack>("Row");
-        row->setSize(panelW - pad*2, btnH);
-        row->setPadding(0,0);
+        auto* row = vbox->createChild<UI::UIHBox>("Row");
+        float rowWidth = panelW - pad * 2;
+        row->setSize(rowWidth, btnH);
         auto* btn = row->createChild<UI::UIButton>();
         btn->setText(text);
-        btn->setWidthMatch();
-        btn->setHeight(btnH);
+        btn->setSize(rowWidth, btnH);
+        row->forceLayout();
         return btn;
     };
 
@@ -229,16 +247,11 @@ void SettingsScene::createUI()
         TINA_INFO("SettingsScene: 全屏切换功能待实现");
     });
     if (m_btnClose) m_btnClose->setOnClick([this]{ onBack(); });
+    vbox->forceLayout();
 
-    // 触发布局并居中
-    vbox->requestLayout();
-    panel->requestLayout();
-    panel->performLayoutNow();
-
-    // 获取实际高度并居中
-    float panelHeight = panel->getSize().y;
+    // 居中面板
     float centerX = (m_pixelWidth - panelW) * 0.5f;
-    float centerY = (m_pixelHeight - panelHeight) * 0.5f;
+    float centerY = (m_pixelHeight - totalHeight) * 0.5f;
     panel->setPosition(centerX, centerY);
 
     // 根节点供引擎事件系统使用

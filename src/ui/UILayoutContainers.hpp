@@ -8,6 +8,8 @@
 #pragma once
 
 #include "UINode.hpp"
+#include "../core/Log.hpp"  // ✅ 添加日志支持
+#include <algorithm>
 
 namespace Tina::UI {
 
@@ -82,15 +84,35 @@ public:
     float getSpacing() const { return m_spacing; }
     bool isFillWidth() const { return m_fillWidth; }
     
-    // ✅ 重写setSize，在尺寸变化时触发布局
+    // ✅ 重写setSize，自动标记需要布局
     UIVBox* setSize(float w, float h) {
-        UINode::setSize(w, h);
-        onLayout();  // 尺寸变化时重新布局
+        if (m_size.x != w || m_size.y != h) {
+            UINode::setSize(w, h);
+            requestLayout();  // ✅ 自动标记dirty
+        }
         return this;
+    }
+    
+    // ✅ 重写performLayoutNow，直接调用onLayout
+    void performLayoutNow() override {
+        if (!needsLayout()) return;
+        m_layouting = false;  // 重置标志
+        onLayout();
+        m_layoutDirty = false;  // 清除dirty标志
+    }
+    
+    // ✅ 强制执行布局（用于调试和特殊情况）
+    void forceLayout() {
+        m_layouting = false;  // 重置标志
+        onLayout();
+        m_layoutDirty = false;  // 清除dirty标志
     }
 
 protected:
     void onLayout() override {
+        if (m_layouting) return;  // ✅ 避免递归
+        m_layouting = true;
+        
         float y = m_paddingT;
         float contentWidth = m_size.x - m_paddingL - m_paddingR;
         
@@ -121,8 +143,15 @@ protected:
                 child->setWidth(childWidth);
             }
             
+            // ✅ 递归布局：如果子元素需要布局，触发它的布局
+            if (child->needsLayout()) {
+                child->performLayoutNow();
+            }
+            
             y += childHeight + m_spacing;
         }
+        
+        m_layouting = false;  // ✅ 重置标志
     }
 
 private:
@@ -131,6 +160,7 @@ private:
     float m_paddingR = 0.0f, m_paddingB = 0.0f;
     bool m_fillWidth = true;          // 默认子元素宽度填充
     HAlign m_childAlign = HAlign::Left;
+    bool m_layouting = false;         // ✅ 布局标志，防止递归
 };
 
 // ============================================================================
@@ -211,15 +241,35 @@ public:
         return this;
     }
     
-    // ✅ 重写setSize，在尺寸变化时触发布局
+    // ✅ 重写setSize，自动标记需要布局
     UIHBox* setSize(float w, float h) {
-        UINode::setSize(w, h);
-        onLayout();  // 尺寸变化时重新布局
+        if (m_size.x != w || m_size.y != h) {
+            UINode::setSize(w, h);
+            requestLayout();  // ✅ 自动标记dirty
+        }
         return this;
+    }
+    
+    // ✅ 重写performLayoutNow，直接调用onLayout
+    void performLayoutNow() override {
+        if (!needsLayout()) return;
+        m_layouting = false;  // 重置标志
+        onLayout();
+        m_layoutDirty = false;  // 清除dirty标志
+    }
+    
+    // ✅ 强制执行布局（用于调试和特殊情况）
+    void forceLayout() {
+        m_layouting = false;  // 重置标志
+        onLayout();
+        m_layoutDirty = false;  // 清除dirty标志
     }
 
 protected:
     void onLayout() override {
+        if (m_layouting) return;  // ✅ 避免递归
+        m_layouting = true;
+        
         float contentWidth = m_size.x - m_paddingL - m_paddingR;
         float contentHeight = m_size.y - m_paddingT - m_paddingB;
         
@@ -232,7 +282,10 @@ protected:
             visibleCount++;
         }
         
-        if (visibleCount == 0) return;
+        if (visibleCount == 0) {
+            m_layouting = false;  // ✅ 重置标志
+            return;
+        }
         
         // 计算起始位置和间距
         float x = m_paddingL;
@@ -291,8 +344,15 @@ protected:
                 child->setHeight(childHeight);
             }
             
+            // ✅ 递归布局：如果子元素需要布局，触发它的布局
+            if (child->needsLayout()) {
+                child->performLayoutNow();
+            }
+            
             x += childWidth + spacing;
         }
+        
+        m_layouting = false;  // ✅ 重置标志
     }
 
 private:
@@ -302,6 +362,7 @@ private:
     bool m_fillHeight = false;        // 默认子元素高度不填充
     Justify m_justify = Justify::Start;
     VAlign m_childAlign = VAlign::Middle;
+    bool m_layouting = false;         // ✅ 布局标志，防止递归
 };
 
 // ============================================================================
@@ -370,15 +431,35 @@ public:
         return this;
     }
     
-    // ✅ 重写setSize，在尺寸变化时触发布局
+    // ✅ 重写setSize，自动标记需要布局
     UIGrid* setSize(float w, float h) {
-        UINode::setSize(w, h);
-        onLayout();  // 尺寸变化时重新布局
+        if (m_size.x != w || m_size.y != h) {
+            UINode::setSize(w, h);
+            requestLayout();  // ✅ 自动标记dirty
+        }
         return this;
+    }
+    
+    // ✅ 重写performLayoutNow，直接调用onLayout
+    void performLayoutNow() override {
+        if (!needsLayout()) return;
+        m_layouting = false;  // 重置标志
+        onLayout();
+        m_layoutDirty = false;  // 清除dirty标志
+    }
+    
+    // ✅ 强制执行布局（用于调试和特殊情况）
+    void forceLayout() {
+        m_layouting = false;  // 重置标志
+        onLayout();
+        m_layoutDirty = false;  // 清除dirty标志
     }
 
 protected:
     void onLayout() override {
+        if (m_layouting) return;  // ✅ 避免递归
+        m_layouting = true;
+        
         float contentWidth = m_size.x - m_paddingL - m_paddingR;
         float contentHeight = m_size.y - m_paddingT - m_paddingB;
         
@@ -389,7 +470,10 @@ protected:
             columns = std::max(1, columns);
         }
         
-        if (columns <= 0) return;
+        if (columns <= 0) {
+            m_layouting = false;  // ✅ 重置标志
+            return;
+        }
         
         // 计算单元格尺寸
         float cellWidth = (contentWidth - m_spacingH * (columns - 1)) / columns;
@@ -435,9 +519,16 @@ protected:
             
             child->setPosition(cellX, cellY);
             
+            // ✅ 递归布局：如果子元素需要布局，触发它的布局
+            if (child->needsLayout()) {
+                child->performLayoutNow();
+            }
+            
             maxRowHeight = std::max(maxRowHeight, childHeight);
             index++;
         }
+        
+        m_layouting = false;  // ✅ 重置标志
     }
 
 private:
@@ -450,6 +541,7 @@ private:
     float m_paddingR = 0.0f, m_paddingB = 0.0f;
     HAlign m_cellHAlign = HAlign::Left;
     VAlign m_cellVAlign = VAlign::Top;
+    bool m_layouting = false;         // ✅ 布局标志，防止递归
 };
 
 } // namespace Tina::UI

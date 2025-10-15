@@ -1,5 +1,6 @@
 #include "UIToolbar.hpp"
 #include "UIColors.hpp"
+#include "UILayoutContainers.hpp"  // ✅ 使用新的布局容器
 #include "../core/Log.hpp"
 #include <algorithm>
 
@@ -22,12 +23,12 @@ bool UIToolbar::initialize(int screenW, int screenH, UIRenderer& renderer)
     m_bar->setPosition(0, 0);
     m_bar->setColor(ToolbarBg);  // 半透明深色背景
 
-    // 水平栈：用于排列按钮
-    m_stack = m_bar->createChild<UIHStack>("ToolbarStack");
-    m_stack->setAnchor(Anchor::TopLeft);
-    m_stack->setPadding((float)m_padding, (float)m_padding);
+    // ✅ 使用新的UIHBox布局容器
+    m_stack = m_bar->createChild<UIHBox>("ToolbarStack");
+    m_stack->setPadding((float)m_padding);
     m_stack->setSpacing((float)m_gap);
-    m_stack->setCrossAlign(CrossAlign::Center);
+    m_stack->setJustify(UIHBox::Justify::Start);  // 左对齐
+    m_stack->setChildAlign(VAlign::Middle);       // 垂直居中
 
     // 初次布局
     buildLayout();
@@ -123,6 +124,12 @@ void UIToolbar::updateLayout()
     // 只更新位置和大小，不重建
     m_bar->setPosition(barX, 0.0f);
     m_bar->setSize((float)barW, (float)m_barH);
+    
+    // ✅ 同时更新UIHBox的尺寸并强制布局
+    if (m_stack) {
+        m_stack->setSize((float)barW, (float)m_barH);
+        m_stack->forceLayout();
+    }
 }
 
 void UIToolbar::buildLayout()
@@ -142,9 +149,6 @@ void UIToolbar::buildLayout()
     int maxSlots = per > 0 ? std::max(1, (avail + m_gap) / per) : m_slotCount;
     int count = std::min(m_slotCount, maxSlots);
 
-    TINA_INFO("UIToolbar::buildLayout: screenW={}, avail={}, per={}, maxSlots={}, m_slotCount={}, count={}",
-              m_screenW, avail, per, maxSlots, m_slotCount, count);
-
     int contentW = count > 0 ? (count * m_slotSize + (count - 1) * m_gap) : 0;
     int barW = contentW + m_padding * 2;
     if (barW > m_screenW) barW = m_screenW; // 兜底
@@ -153,13 +157,13 @@ void UIToolbar::buildLayout()
     m_barH = std::max(m_barH, m_slotSize + m_padding * 2);
     m_bar->setSize((float)barW, (float)m_barH);
     m_bar->setPosition(barX, 0.0f);
-    // 使用新的布局系统，只需标记一次
-    m_bar->requestLayout();
+    
+    // ✅ 先设置UIHBox的尺寸，再添加子元素
     if (m_stack) {
         m_stack->setSize((float)barW, (float)m_barH);
     }
 
-    // 创建按钮并布局（使用新的API）
+    // 创建按钮并布局
     for (int i = 0; i < count; ++i) {
         auto* btn = m_stack->createChild<UIButton>("ToolSlot");
         btn->setSize((float)m_slotSize, (float)m_slotSize);
@@ -197,7 +201,7 @@ void UIToolbar::buildLayout()
 
         m_slots.push_back(btn);
     }
-
+    
     // 应用当前选中高亮；若当前无选择则默认选中第一个
     if (m_selected < 0 && !m_slots.empty()) m_selected = 0;
     select(m_selected >= 0 && m_selected < (int)m_slots.size() ? m_selected : -1);

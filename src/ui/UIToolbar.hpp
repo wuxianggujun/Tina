@@ -15,6 +15,9 @@
 
 namespace Tina::UI {
 
+// ✅ 前向声明新的布局容器
+class UIHBox;
+
 // 工具栏状态（用于保存/恢复）
 struct ToolbarState {
     int selectedIndex = -1;
@@ -81,7 +84,7 @@ private:
     // 根与部件
     Memory::UniquePtr<UINode> m_root; // 屏幕根（大小=屏幕）
     UIPanel* m_bar = nullptr;        // 顶部栏背景
-    UIHStack* m_stack = nullptr;     // 水平栈布局容器
+    UIHBox* m_stack = nullptr;       // ✅ 使用新的UIHBox布局容器
     Tina::Container::Vector<UIButton*> m_slots; // 格子按钮
 
     // 事件系统：已统一由 Engine::EventSystem 处理，这里不再保留本地系统

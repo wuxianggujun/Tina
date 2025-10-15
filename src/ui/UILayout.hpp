@@ -1,5 +1,18 @@
 //
-// 轻量布局容器：水平/垂直栈
+// ⚠️ 已废弃：旧的布局容器
+// 
+// 请使用新的布局容器：
+// - UIHBox (替代 UIHStack)
+// - UIVBox (替代 UIVStack)
+// - UIGrid (网格布局)
+//
+// 新容器位于：UILayoutContainers.hpp
+// 
+// 新容器的优势：
+// - 更强大的对齐和分布选项
+// - 递归保护，防止布局崩溃
+// - 统一的API设计
+// - 更好的性能
 //
 
 #pragma once
@@ -10,7 +23,8 @@ namespace Tina::UI {
 
 enum class CrossAlign { Start, Center, End };
 
-class UIHStack : public UINode {
+// ⚠️ 已废弃：请使用 UIHBox (UILayoutContainers.hpp)
+class [[deprecated("Use UIHBox from UILayoutContainers.hpp instead")]] UIHStack : public UINode {
 public:
     UIHStack(const std::string& name = "HStack") : UINode(name) {}
     void setSpacing(float s) { m_spacing = s; requestLayout(); }
@@ -59,7 +73,8 @@ private:
     CrossAlign m_cross = CrossAlign::Center;
 };
 
-class UIVStack : public UINode {
+// ⚠️ 已废弃：请使用 UIVBox (UILayoutContainers.hpp)
+class [[deprecated("Use UIVBox from UILayoutContainers.hpp instead")]] UIVStack : public UINode {
 public:
     UIVStack(const std::string& name = "VStack") : UINode(name) {}
     void setSpacing(float s) { m_spacing = s; requestLayout(); }
