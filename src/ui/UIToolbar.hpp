@@ -8,7 +8,6 @@
 
 #include "UICore.hpp"
 #include "UIComponents.hpp"
-#include "UILayout.hpp"
 #include "../core/Container.hpp"
 #include "../core/Memory.hpp"
 #include "UINode.hpp"  // 引入UINode基类

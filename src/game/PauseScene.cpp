@@ -6,7 +6,6 @@
 #include "../engine/Application.hpp"
 #include "../engine/SceneManager.hpp"
 #include "../engine/InputSystem.hpp"  // 添加 InputSystem 头文件
-#include "../ui/UILayout.hpp"
 #include "../core/Log.hpp"
 #include "../ui/UIComponents.hpp"
 #include "../ui/UIUtils.hpp"
