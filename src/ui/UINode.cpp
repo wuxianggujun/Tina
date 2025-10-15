@@ -3,6 +3,7 @@
 #include "UILayoutManager.hpp"
 #include "../engine/Application.hpp"
 #include "../core/Log.hpp"
+#include <limits>
 #include <algorithm>
 
 namespace Tina::UI {
@@ -142,10 +143,17 @@ void UINode::requestLayout()
 {
     m_layoutDirty = true;
     m_dirty = true;
+    // 失效测量缓存
+    m_measureCacheValid = false;
 
     // 通知布局管理器（如果有）
     if (m_layoutManager) {
         m_layoutManager->requestLayout(this);
+    }
+
+    // 向上冒泡，保证父容器根据子变化重新测量/布局
+    if (m_parent) {
+        m_parent->requestLayout();
     }
 }
 
@@ -218,4 +226,65 @@ void UINode::render(uint16_t viewId, UIRenderer& renderer)
 
 } // namespace Tina::UI
 
+// ====== 测量实现 ======
 
+namespace Tina::UI {
+
+Tina::Math::Vec2 UINode::measure(float availableWidth, float availableHeight)
+{
+    // 若约束与缓存一致，直接返回
+    if (m_measureCacheValid &&
+        m_measureConstraintW == availableWidth &&
+        m_measureConstraintH == availableHeight) {
+        return m_measuredSize;
+    }
+
+    // 调用子类测量
+    m_measuredSize = measureContent(availableWidth, availableHeight);
+
+    // 应用约束
+    m_measuredSize.x = std::max(m_minSize.x, std::min(m_maxSize.x, m_measuredSize.x));
+    m_measuredSize.y = std::max(m_minSize.y, std::min(m_maxSize.y, m_measuredSize.y));
+
+    // 缓存
+    m_measureCacheValid = true;
+    m_measureConstraintW = availableWidth;
+    m_measureConstraintH = availableHeight;
+    return m_measuredSize;
+}
+
+void UINode::setMeasuredSize(const Tina::Math::Vec2& size)
+{
+    m_measuredSize = size;
+    m_measureCacheValid = true;
+}
+
+void UINode::applyMeasuredSize()
+{
+    // 仅更新实际尺寸，不修改 layoutW/H 语义
+    if (m_size.x != m_measuredSize.x || m_size.y != m_measuredSize.y) {
+        m_size = m_measuredSize;
+        m_dirty = true;
+        markChildrenDirty();
+    }
+}
+
+void UINode::applyMeasuredWidth()
+{
+    if (m_size.x != m_measuredSize.x) {
+        m_size.x = m_measuredSize.x;
+        m_dirty = true;
+        markChildrenDirty();
+    }
+}
+
+void UINode::applyMeasuredHeight()
+{
+    if (m_size.y != m_measuredSize.y) {
+        m_size.y = m_measuredSize.y;
+        m_dirty = true;
+        markChildrenDirty();
+    }
+}
+
+} // namespace Tina::UI

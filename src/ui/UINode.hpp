@@ -194,7 +194,8 @@ public:
     // 设置尺寸（支持链式调用）
     UINode* setSize(float w, float h) { 
         m_size = {w, h}; 
-        m_sizeMode = SizeMode::Fixed;  // 固定尺寸
+        m_widthMode = SizeMode::Fixed;  // 固定尺寸（宽）
+        m_heightMode = SizeMode::Fixed; // 固定尺寸（高）
         m_dirty = true; 
         m_layoutW = LayoutDim::Exact; 
         m_layoutH = LayoutDim::Exact;
@@ -211,15 +212,25 @@ public:
     }
     
     // 设置百分比尺寸（相对于父节点，支持链式调用）
+    // 注意：仅对传入 >0 的轴生效；<=0 表示不改变该轴模式（兼容示例：setSizePercent(0, 1.0f)）
     UINode* setSizePercent(float widthPercent, float heightPercent) {
-        m_sizePercent = {widthPercent, heightPercent};
-        m_sizeMode = SizeMode::Percent;
+        if (widthPercent > 0.0f) { m_widthMode = SizeMode::Percent; m_widthPercent = widthPercent; }
+        if (heightPercent > 0.0f) { m_heightMode = SizeMode::Percent; m_heightPercent = heightPercent; }
         m_dirty = true;
-        
-        // 立即计算实际尺寸
         updatePercentSize();
-        
+        requestLayout();
         return this;
+    }
+
+    // 轴向独立：仅设置宽度为百分比
+    UINode* setWidthPercent(float widthPercent) {
+        m_widthMode = SizeMode::Percent; m_widthPercent = widthPercent;
+        m_dirty = true; updatePercentSize(); requestLayout(); return this;
+    }
+    // 轴向独立：仅设置高度为百分比
+    UINode* setHeightPercent(float heightPercent) {
+        m_heightMode = SizeMode::Percent; m_heightPercent = heightPercent;
+        m_dirty = true; updatePercentSize(); requestLayout(); return this;
     }
     
     // 设置最小/最大尺寸约束
@@ -240,6 +251,7 @@ public:
         m_size.x = w; 
         m_dirty = true; 
         m_layoutW = LayoutDim::Exact;
+        m_widthMode = SizeMode::Fixed;
         markChildrenDirty();
         
         if ((m_hAlign != HAlign::Left || m_vAlign != VAlign::Top) && !m_manualPosition) {
@@ -254,6 +266,7 @@ public:
         m_size.y = h; 
         m_dirty = true; 
         m_layoutH = LayoutDim::Exact;
+        m_heightMode = SizeMode::Fixed;
         markChildrenDirty();
         
         if ((m_hAlign != HAlign::Left || m_vAlign != VAlign::Top) && !m_manualPosition) {
@@ -403,6 +416,18 @@ public:
     // === 点测试（用于事件分发） ===
     bool containsPoint(float worldX, float worldY);
 
+    // === 测量阶段（Measure Phase） ===
+    // 测量入口：根据可用空间计算期望尺寸（带缓存）
+    Tina::Math::Vec2 measure(float availableWidth, float availableHeight);
+
+    // 设置测量结果（不改变 layout 语义）
+    void setMeasuredSize(const Tina::Math::Vec2& size);
+
+    // 应用测量结果到实际尺寸（不改变 layoutW/H）
+    void applyMeasuredSize();
+    void applyMeasuredWidth();
+    void applyMeasuredHeight();
+
     // === 布局系统 ===
     // 请求重新布局（标记布局失效，使用布局管理器处理）
     void requestLayout();
@@ -442,6 +467,8 @@ public:
                 child->onWindowSizeChanged(width, height);
             }
         }
+        // 触发布局：窗口变化后需要重新测量/布局
+        requestLayout();
     }
 
     // === 名称（调试用） ===
@@ -463,6 +490,14 @@ protected:
     // 在布局失效后，由布局管理器调用
     // 注意：只负责布局子节点，不要在这里做动画或状态更新
     virtual void onLayout() {}
+
+    // 测量回调：子类覆盖以根据子内容/文本计算期望尺寸
+    // availableWidth/availableHeight 为父容器可用空间约束
+    // 默认实现：返回当前固定尺寸
+    virtual Tina::Math::Vec2 measureContent(float availableWidth, float availableHeight) {
+        (void)availableWidth; (void)availableHeight;
+        return m_size;
+    }
 
     // 友元类：允许布局管理器访问内部状态
     friend class UILayoutManager;
@@ -503,25 +538,26 @@ private:
     
     // 更新百分比尺寸（根据父节点尺寸计算实际尺寸）
     void updatePercentSize() {
-        if (m_sizeMode != SizeMode::Percent || !m_parent) return;
-        
+        if (!m_parent) return;
         auto parentSize = m_parent->getSize();
-        
-        // 计算百分比尺寸
-        float w = parentSize.x * m_sizePercent.x;
-        float h = parentSize.y * m_sizePercent.y;
-        
+
+        float w = m_size.x;
+        float h = m_size.y;
+        if (m_widthMode == SizeMode::Percent) {
+            w = parentSize.x * m_widthPercent;
+        }
+        if (m_heightMode == SizeMode::Percent) {
+            h = parentSize.y * m_heightPercent;
+        }
+
         // 应用最小/最大尺寸约束
         w = std::max(m_minSize.x, std::min(m_maxSize.x, w));
         h = std::max(m_minSize.y, std::min(m_maxSize.y, h));
-        
-        // 更新实际尺寸
+
         if (m_size.x != w || m_size.y != h) {
             m_size = {w, h};
             m_dirty = true;
             markChildrenDirty();
-            
-            // 重新应用对齐
             if ((m_hAlign != HAlign::Left || m_vAlign != VAlign::Top) && !m_manualPosition) {
                 applyAlignment();
             }
@@ -545,9 +581,11 @@ protected:
     LayoutDim m_layoutH = LayoutDim::Exact;
     float m_marginL = 0.0f, m_marginT = 0.0f, m_marginR = 0.0f, m_marginB = 0.0f;
     
-    // 响应式尺寸系统
-    SizeMode m_sizeMode = SizeMode::Fixed;           // 尺寸模式
-    Tina::Math::Vec2 m_sizePercent{1.0f, 1.0f};      // 百分比尺寸（0.0-1.0）
+    // 响应式尺寸系统（轴向独立）
+    SizeMode m_widthMode = SizeMode::Fixed;          // 宽度尺寸模式
+    SizeMode m_heightMode = SizeMode::Fixed;         // 高度尺寸模式
+    float m_widthPercent = 1.0f;                     // 宽度百分比（0.0-1.0）
+    float m_heightPercent = 1.0f;                    // 高度百分比（0.0-1.0）
     Tina::Math::Vec2 m_minSize{0, 0};                // 最小尺寸约束
     Tina::Math::Vec2 m_maxSize{10000, 10000};        // 最大尺寸约束
 
@@ -557,6 +595,12 @@ protected:
 
     // 布局系统
     bool m_layoutDirty = true;  // 布局脏标记（需要重新布局子节点）
+
+    // 测量缓存
+    Tina::Math::Vec2 m_measuredSize{0, 0};
+    bool m_measureCacheValid = false;
+    float m_measureConstraintW = 0.0f;
+    float m_measureConstraintH = 0.0f;
 
     // 状态
     bool m_visible = true;

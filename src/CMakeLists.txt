@@ -92,7 +92,7 @@ set(SRC_FILES
     ui/UIComponents.cpp
     ui/UIToolbar.hpp
     ui/UIToolbar.cpp
-    ui/UILayout.hpp
+    # 旧的 ui/UILayout.hpp 已移除，使用新的容器头文件（仅作为头文件，无需列入构建清单）
     ui/UILayoutManager.hpp
     ui/UILayoutManager.cpp
     ui/UIProgressBar.hpp

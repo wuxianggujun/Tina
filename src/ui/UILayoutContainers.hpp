@@ -10,6 +10,7 @@
 #include "UINode.hpp"
 #include "../core/Log.hpp"  // ✅ 添加日志支持
 #include <algorithm>
+#include <limits>
 
 namespace Tina::UI {
 
@@ -102,61 +103,95 @@ public:
     }
 
 protected:
+    // 测量：计算包裹尺寸（考虑padding/spacing/margin）
+    Tina::Math::Vec2 measureContent(float availableWidth, float availableHeight) override {
+        (void)availableHeight;
+        float contentWidth = availableWidth - m_paddingL - m_paddingR;
+        if (contentWidth < 0) contentWidth = 0;
+
+        float totalH = m_paddingT + m_paddingB;
+        float maxChildW = 0.0f;
+        for (auto& child : m_children) {
+            if (!child || !child->isVisible()) continue;
+            float ml = child->marginLeft();
+            float mr = child->marginRight();
+            float mt = child->marginTop();
+            float mb = child->marginBottom();
+            float childAvailW = std::max(0.0f, contentWidth - ml - mr);
+            auto ms = child->measure(childAvailW, std::numeric_limits<float>::infinity());
+            totalH += mt + ms.y + mb + m_spacing;
+            float totalChildW = ml + ms.x + mr;
+            if (totalChildW > maxChildW) maxChildW = totalChildW;
+        }
+        if (!m_children.empty()) totalH -= m_spacing;
+        float desiredW = maxChildW + m_paddingL + m_paddingR;
+        return {desiredW, totalH};
+    }
+
     void onLayout() override {
         if (m_layouting) return;  // ✅ 避免递归
         m_layouting = true;
-        
-        float y = m_paddingT;
+
+        // WrapContent：使用测量结果（仅影响包裹轴）
+        if (layoutHeight() == LayoutDim::WrapContent) {
+            measure(m_size.x, std::numeric_limits<float>::infinity());
+            applyMeasuredHeight();
+        }
+
         float contentWidth = m_size.x - m_paddingL - m_paddingR;
-        
+        float contentHeight = m_size.y - m_paddingT - m_paddingB;
+
+        // 第一遍：统计固定高度与 MatchParent 个数
+        float fixedHeight = 0.0f;
+        int matchCount = 0;
         for (auto& child : m_children) {
             if (!child || !child->isVisible()) continue;
-            
-            auto childSize = child->getSize();
-            float childWidth = childSize.x;
-            
-            // ✅ 支持WidthMatch：子元素填充父容器宽度
-            if (m_fillWidth || child->layoutWidth() == LayoutDim::MatchParent) {
-                childWidth = contentWidth;
-                child->setWidth(childWidth);
-            }
-            
-            float childHeight = childSize.y;
-            
-            // ✅ 支持HeightMatch：子元素填充剩余高度
             if (child->layoutHeight() == LayoutDim::MatchParent) {
-                // TODO: 计算剩余高度并分配
-                childHeight = childSize.y;
+                matchCount++;
+            } else {
+                fixedHeight += child->marginTop() + child->getSize().y + child->marginBottom() + m_spacing;
             }
-            
-            // 计算水平位置（根据对齐方式）
-            float x = m_paddingL;
-            switch (m_childAlign) {
-                case HAlign::Left:
-                    x = m_paddingL;
-                    break;
-                case HAlign::Center:
-                    x = m_paddingL + (contentWidth - childWidth) * 0.5f;
-                    break;
-                case HAlign::Right:
-                    x = m_paddingL + (contentWidth - childWidth);
-                    break;
-            }
-            
-            // 设置子元素位置和尺寸
-            child->setPosition(x, y);
-            if (m_fillWidth) {
-                child->setWidth(childWidth);
-            }
-            
-            // ✅ 递归布局：如果子元素需要布局，触发它的布局
-            if (child->needsLayout()) {
-                child->performLayoutNow();
-            }
-            
-            y += childHeight + m_spacing;
         }
-        
+        if (fixedHeight > 0 && !m_children.empty()) fixedHeight -= m_spacing; // 去掉最后一次spacing
+        float remaining = std::max(0.0f, contentHeight - fixedHeight);
+        float eachMatchH = (matchCount > 0) ? std::max(0.0f, remaining - m_spacing * std::max(0, matchCount - 1)) / matchCount : 0.0f;
+
+        // 第二遍：实际布局
+        float y = m_paddingT;
+        for (auto& child : m_children) {
+            if (!child || !child->isVisible()) continue;
+
+            float ml = child->marginLeft();
+            float mr = child->marginRight();
+            float mt = child->marginTop();
+            float mb = child->marginBottom();
+
+            float childW = child->getSize().x;
+            float childH = child->getSize().y;
+
+            if (m_fillWidth || child->layoutWidth() == LayoutDim::MatchParent) {
+                childW = std::max(0.0f, contentWidth - ml - mr);
+                child->setWidth(childW);
+                child->requestLayout();
+            }
+            if (child->layoutHeight() == LayoutDim::MatchParent) {
+                childH = std::max(0.0f, eachMatchH - mt - mb);
+                child->setHeight(childH);
+                child->requestLayout();
+            }
+
+            float x = m_paddingL + ml;
+            switch (m_childAlign) {
+                case HAlign::Left:   x = m_paddingL + ml; break;
+                case HAlign::Center: x = m_paddingL + (contentWidth - (childW + ml + mr)) * 0.5f + ml; break;
+                case HAlign::Right:  x = m_paddingL + (contentWidth - (childW + ml + mr)) + ml; break;
+            }
+
+            y += mt;
+            child->setPosition(x, y);
+            y += childH + mb + m_spacing;
+        }
+
         m_layouting = false;  // ✅ 重置标志
     }
 
@@ -265,19 +300,53 @@ public:
     }
 
 protected:
+    // 测量：计算包裹尺寸（考虑padding/spacing/margin）
+    Tina::Math::Vec2 measureContent(float availableWidth, float availableHeight) override {
+        (void)availableHeight;
+        float contentWidth = availableWidth - m_paddingL - m_paddingR;
+        if (contentWidth < 0) contentWidth = 0;
+        float totalW = m_paddingL + m_paddingR;
+        float maxH = 0.0f;
+        for (auto& child : m_children) {
+            if (!child || !child->isVisible()) continue;
+            float ml = child->marginLeft();
+            float mr = child->marginRight();
+            float mt = child->marginTop();
+            float mb = child->marginBottom();
+            auto ms = child->measure(std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity());
+            totalW += ml + ms.x + mr + m_spacing;
+            float childTotalH = mt + ms.y + mb;
+            if (childTotalH > maxH) maxH = childTotalH;
+        }
+        if (!m_children.empty()) totalW -= m_spacing;
+        float desiredW = totalW;
+        float desiredH = maxH + m_paddingT + m_paddingB;
+        return {desiredW, desiredH};
+    }
+
     void onLayout() override {
         if (m_layouting) return;  // ✅ 避免递归
         m_layouting = true;
-        
+        // WrapContent：使用测量结果
+        if (layoutWidth() == LayoutDim::WrapContent) {
+            measure(std::numeric_limits<float>::infinity(), m_size.y);
+            applyMeasuredWidth();
+        }
+
         float contentWidth = m_size.x - m_paddingL - m_paddingR;
         float contentHeight = m_size.y - m_paddingT - m_paddingB;
         
         // 计算所有可见子元素的总宽度
         float totalChildWidth = 0;
         int visibleCount = 0;
+        int matchCount = 0;
         for (auto& child : m_children) {
             if (!child || !child->isVisible()) continue;
-            totalChildWidth += child->getSize().x;
+            if (child->layoutWidth() == LayoutDim::MatchParent) {
+                matchCount++;
+            } else {
+                totalChildWidth += child->getSize().x;
+            }
             visibleCount++;
         }
         
@@ -285,7 +354,11 @@ protected:
             m_layouting = false;  // ✅ 重置标志
             return;
         }
-        
+        // 预分配 MatchParent 宽度（等分剩余空间，考虑间距）
+        float fixedWidth = totalChildWidth + m_spacing * (visibleCount - 1);
+        float remaining = std::max(0.0f, contentWidth - fixedWidth);
+        float eachMatchW = (matchCount > 0) ? remaining / matchCount : 0.0f;
+
         // 计算起始位置和间距
         float x = m_paddingL;
         float spacing = m_spacing;
@@ -295,23 +368,23 @@ protected:
                 x = m_paddingL;
                 break;
             case Justify::Center:
-                x = m_paddingL + (contentWidth - totalChildWidth - spacing * (visibleCount - 1)) * 0.5f;
+                x = m_paddingL + (contentWidth - (totalChildWidth + spacing * (visibleCount - 1) + eachMatchW * matchCount)) * 0.5f;
                 break;
             case Justify::End:
-                x = m_paddingL + (contentWidth - totalChildWidth - spacing * (visibleCount - 1));
+                x = m_paddingL + (contentWidth - (totalChildWidth + spacing * (visibleCount - 1) + eachMatchW * matchCount));
                 break;
             case Justify::SpaceBetween:
                 x = m_paddingL;
                 if (visibleCount > 1) {
-                    spacing = (contentWidth - totalChildWidth) / (visibleCount - 1);
+                    spacing = (contentWidth - (totalChildWidth + eachMatchW * matchCount)) / (visibleCount - 1);
                 }
                 break;
             case Justify::SpaceAround:
-                spacing = (contentWidth - totalChildWidth) / visibleCount;
+                spacing = (contentWidth - (totalChildWidth + eachMatchW * matchCount)) / visibleCount;
                 x = m_paddingL + spacing * 0.5f;
                 break;
             case Justify::SpaceEvenly:
-                spacing = (contentWidth - totalChildWidth) / (visibleCount + 1);
+                spacing = (contentWidth - (totalChildWidth + eachMatchW * matchCount)) / (visibleCount + 1);
                 x = m_paddingL + spacing;
                 break;
         }
@@ -325,9 +398,9 @@ protected:
             
             // ✅ 支持WidthMatch：子元素填充剩余宽度
             if (child->layoutWidth() == LayoutDim::MatchParent) {
-                float availableWidth = contentWidth - totalChildWidth + childWidth;
-                childWidth = std::max(0.0f, availableWidth);
+                childWidth = std::max(0.0f, eachMatchW);
                 child->setWidth(childWidth);
+                child->requestLayout();
             }
             
             float childHeight = childSize.y;
@@ -336,6 +409,7 @@ protected:
             if (m_fillHeight || child->layoutHeight() == LayoutDim::MatchParent) {
                 childHeight = contentHeight;
                 child->setHeight(childHeight);
+                child->requestLayout();
             }
             
             // 计算垂直位置（根据对齐方式）
@@ -353,14 +427,7 @@ protected:
             }
             
             child->setPosition(x, y);
-            if (m_fillHeight) {
-                child->setHeight(childHeight);
-            }
-            
-            // ✅ 递归布局：如果子元素需要布局，触发它的布局
-            if (child->needsLayout()) {
-                child->performLayoutNow();
-            }
+            // 不在这里递归触发布局，交由布局管理器批处理
             
             x += childWidth + spacing;
         }
@@ -462,6 +529,50 @@ public:
     }
 
 protected:
+    // 测量：根据可用宽度与列数/列宽预估网格所需尺寸
+    Tina::Math::Vec2 measureContent(float availableWidth, float availableHeight) override {
+        (void)availableHeight;
+        float contentWidth = availableWidth - m_paddingL - m_paddingR;
+        if (contentWidth < 1.0f) contentWidth = 1.0f;
+
+        // 计算列数与单元格宽度
+        int columns = m_columns;
+        if (!m_fixedColumns && m_columnWidth > 0) {
+            columns = static_cast<int>((contentWidth + m_spacingH) / (m_columnWidth + m_spacingH));
+            columns = std::max(1, columns);
+        }
+        if (columns <= 0) columns = 1;
+        float cellWidth = (contentWidth - m_spacingH * (columns - 1)) / columns;
+
+        // 逐个测量子项，计算行高
+        Tina::Container::Vector<float> rowHeights;
+        int index = 0;
+        for (auto& child : m_children) {
+            if (!child || !child->isVisible()) continue;
+            int row = index / columns;
+            if (row >= (int)rowHeights.size()) rowHeights.push_back(0.0f);
+
+            float ml = child->marginLeft();
+            float mr = child->marginRight();
+            float mt = child->marginTop();
+            float mb = child->marginBottom();
+            float childAvailW = std::max(0.0f, cellWidth - ml - mr);
+            auto ms = child->measure(childAvailW, std::numeric_limits<float>::infinity());
+            float totalH = mt + ms.y + mb;
+            if (totalH > rowHeights[row]) rowHeights[row] = totalH;
+            ++index;
+        }
+
+        float totalHeight = m_paddingT + m_paddingB;
+        for (size_t r = 0; r < rowHeights.size(); ++r) {
+            if (r > 0) totalHeight += m_spacingV;
+            totalHeight += rowHeights[r];
+        }
+
+        float desiredWidth = m_paddingL + m_paddingR + columns * cellWidth + m_spacingH * (columns - 1);
+        return {desiredWidth, totalHeight};
+    }
+
     void onLayout() override {
         if (m_layouting) return;  // ✅ 避免递归
         m_layouting = true;
@@ -483,55 +594,56 @@ protected:
         
         // 计算单元格尺寸
         float cellWidth = (contentWidth - m_spacingH * (columns - 1)) / columns;
-        
-        // 布局子元素
-        int index = 0;
+        // 收集可见子节点
+        Tina::Container::Vector<UINode*> items;
+        items.reserve(m_children.size());
+        for (auto& c : m_children) if (c && c->isVisible()) items.push_back(c.get());
+
+        // 计算每行最大高度
+        int count = static_cast<int>(items.size());
+        int rows = (count + columns - 1) / columns;
+        Tina::Container::Vector<float> rowHeights;
+        rowHeights.resize(rows, 0.0f);
+        for (int i = 0; i < count; ++i) {
+            int row = i / columns;
+            auto* ch = items[i];
+            float mt = ch->marginTop();
+            float mb = ch->marginBottom();
+            auto sz = ch->getSize();
+            float total = mt + sz.y + mb;
+            if (total > rowHeights[row]) rowHeights[row] = total;
+        }
+
+        // 布局子元素（使用行高做垂直对齐）
         float y = m_paddingT;
-        float maxRowHeight = 0;
-        
-        for (auto& child : m_children) {
-            if (!child || !child->isVisible()) continue;
-            
-            int col = index % columns;
-            int row = index / columns;
-            
-            // 新行
-            if (col == 0 && index > 0) {
-                y += maxRowHeight + m_spacingV;
-                maxRowHeight = 0;
-            }
-            
+        for (int i = 0; i < count; ++i) {
+            int col = i % columns;
+            int row = i / columns;
+            if (col == 0 && i > 0) y += rowHeights[row - 1] + m_spacingV;
+
             float x = m_paddingL + col * (cellWidth + m_spacingH);
-            
-            auto childSize = child->getSize();
-            float childWidth = childSize.x;
-            float childHeight = childSize.y;
-            
-            // 单元格内对齐
+            auto* child = items[i];
+            auto sz = child->getSize();
+            float ml = child->marginLeft();
+            float mr = child->marginRight();
+            float mt = child->marginTop();
+            float mb = child->marginBottom();
+            float childWidth = sz.x;
+            float childHeight = sz.y;
+
             float cellX = x;
             float cellY = y;
-            
             switch (m_cellHAlign) {
-                case HAlign::Left:
-                    cellX = x;
-                    break;
-                case HAlign::Center:
-                    cellX = x + (cellWidth - childWidth) * 0.5f;
-                    break;
-                case HAlign::Right:
-                    cellX = x + (cellWidth - childWidth);
-                    break;
+                case HAlign::Left:   cellX = x + ml; break;
+                case HAlign::Center: cellX = x + (cellWidth - (childWidth + ml + mr)) * 0.5f + ml; break;
+                case HAlign::Right:  cellX = x + (cellWidth - (childWidth + ml + mr)) + ml; break;
             }
-            
+            switch (m_cellVAlign) {
+                case VAlign::Top:    cellY = y + mt; break;
+                case VAlign::Middle: cellY = y + (rowHeights[row] - (childHeight + mt + mb)) * 0.5f + mt; break;
+                case VAlign::Bottom: cellY = y + (rowHeights[row] - (childHeight + mt + mb)) + mt; break;
+            }
             child->setPosition(cellX, cellY);
-            
-            // ✅ 递归布局：如果子元素需要布局，触发它的布局
-            if (child->needsLayout()) {
-                child->performLayoutNow();
-            }
-            
-            maxRowHeight = std::max(maxRowHeight, childHeight);
-            index++;
         }
         
         m_layouting = false;  // ✅ 重置标志

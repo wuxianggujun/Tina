@@ -199,6 +199,11 @@ void Scene::updateFrame(float dt) {
         }
     }
 
+    // 2.5 批量执行挂起的布局，确保本帧布局一致
+    if (m_uiLayoutManager) {
+        m_uiLayoutManager->performPendingLayouts();
+    }
+
     // 3. 调用子类的更新逻辑
     update(dt);
 }

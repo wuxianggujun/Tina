@@ -2,6 +2,7 @@
 #include "UINode.hpp"
 #include "../core/Log.hpp"
 #include <stack>
+#include <limits>
 
 namespace Tina::UI {
 
@@ -189,45 +190,23 @@ int UILayoutManager::getNodeDepth(UINode* node)
 
 void UILayoutManager::performNodeLayout(UINode* node)
 {
-    if (!node) return;
+    if (!node || !node->needsLayout()) return;
 
     // 标记正在布局（防止递归）
     m_layoutInProgress.insert(node);
 
-    // 执行节点的布局逻辑
-    node->onLayout();
-
-    // 处理 WrapContent 尺寸计算
+    // 先测量：如有 WrapContent 轴，使用父尺寸作为约束
     if (node->layoutWidth() == LayoutDim::WrapContent ||
         node->layoutHeight() == LayoutDim::WrapContent) {
-
-        float maxRight = 0.0f;
-        float maxBottom = 0.0f;
-
-        // 先确保所有子节点的布局已经完成
-        for (size_t i = 0; i < node->getChildCount(); ++i) {
-            UINode* child = node->getChild(i);
-            if (!child || !child->isVisible()) continue;
-
-            // 如果子节点需要布局，先执行
-            if (child->needsLayout()) {
-                performNodeLayout(child);
-            }
-
-            auto cp = child->getPosition();
-            auto cs = child->getSize();
-
-            maxRight = std::max(maxRight, cp.x + cs.x);
-            maxBottom = std::max(maxBottom, cp.y + cs.y);
-        }
-
-        if (node->layoutWidth() == LayoutDim::WrapContent) {
-            node->setWidth(maxRight);
-        }
-        if (node->layoutHeight() == LayoutDim::WrapContent) {
-            node->setHeight(maxBottom);
-        }
+        float availW = node->getParent() ? node->getParent()->getSize().x : std::numeric_limits<float>::infinity();
+        float availH = node->getParent() ? node->getParent()->getSize().y : std::numeric_limits<float>::infinity();
+        node->measure(availW, availH);
+        if (node->layoutWidth() == LayoutDim::WrapContent) node->applyMeasuredWidth();
+        if (node->layoutHeight() == LayoutDim::WrapContent) node->applyMeasuredHeight();
     }
+
+    // 执行节点的布局逻辑
+    node->onLayout();
 
     // 标记布局完成
     node->markLayoutClean();
