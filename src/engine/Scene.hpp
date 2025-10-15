@@ -219,12 +219,6 @@ private:
     // ✅ 事件驱动：订阅窗口resize事件
     SubscriptionToken m_windowResizeToken;
 
-    // 窗口调整防抖动
-    bool m_pendingResize = false;              // 是否有待处理的窗口调整
-    int m_pendingWidth = 0;                    // 待处理的宽度
-    int m_pendingHeight = 0;                   // 待处理的高度
-    float m_resizeTimer = 0.0f;                // 防抖动计时器
-
     // 场景相机（Scene默认有2D相机）
     Memory::UniquePtr<Camera2D> m_camera;
 

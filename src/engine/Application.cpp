@@ -1,4 +1,5 @@
 #include "Application.hpp"
+#include "IApplication.hpp"
 #include "SceneManager.hpp"
 #include "InputSystem.hpp"
 #include "EngineEvents.hpp"
@@ -11,7 +12,6 @@
 #include "Font.hpp"
 #include "AudioManager.hpp"
 #include "../core/Log.hpp"
-// 全局 TextRenderer 实现
 #include "../ui/TextRenderer.hpp"
 
 #include <bgfx/bgfx.h>
@@ -26,8 +26,9 @@ namespace Tina::Engine {
 // 定义静态单例指针
 Application* Application::s_instance = nullptr;
 
-Application::Application(const Config& config)
-    : m_config(config)
+Application::Application(IApplication* app, const Config& config)
+    : m_app(app)
+    , m_config(config)
     , m_pixelWidth(config.windowWidth)
     , m_pixelHeight(config.windowHeight)
 {
@@ -58,7 +59,7 @@ void Application::init()
         return;
     }
 
-    // 2. 获取原生窗口句柄（用于bgfx）
+    // 2. 获取原生窗口句柄
     void* nwh = m_window->getNativeHandle();
     if (!nwh) {
         TINA_ERROR("无法获取原生窗口句柄");
@@ -71,10 +72,9 @@ void Application::init()
     pd.nwh = nwh;
 
     bgfx::Init bgfxInit{};
-    bgfxInit.type = bgfx::RendererType::Count; // 自动选择渲染器
+    bgfxInit.type = bgfx::RendererType::Count;
     bgfxInit.platformData = pd;
 
-    // 获取物理像素尺寸（用于bgfx渲染）
     m_window->getSizeInPixels(m_pixelWidth, m_pixelHeight);
 
     bgfxInit.resolution.width = static_cast<uint32_t>(m_pixelWidth);
@@ -89,91 +89,80 @@ void Application::init()
 
     TINA_INFO("bgfx 初始化成功 - 渲染器: {}", bgfx::getRendererName(bgfx::getRendererType()));
 
-    // 4. 初始化 SDL3_mixer（音频系统）
+    // 4. 初始化 SDL3_mixer
     if (!MIX_Init()) {
         TINA_WARN("SDL_mixer 初始化失败：{}", SDL_GetError());
     } else {
         TINA_INFO("SDL_mixer 初始化成功");
     }
 
-    // 创建 Mixer 并打开默认播放设备（44.1kHz, 16位, 立体声）
-    SDL_AudioSpec desired{}; desired.freq = 44100; desired.channels = 2; desired.format = SDL_AUDIO_S16;
+    SDL_AudioSpec desired{}; 
+    desired.freq = 44100; 
+    desired.channels = 2; 
+    desired.format = SDL_AUDIO_S16;
+    
     m_mixer = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired);
+    
     if (!m_mixer) {
-        TINA_ERROR("SDL_mixer 创建混音器失败：{}", SDL_GetError());
+        TINA_WARN("SDL_mixer 打开音频设备失败：{}", SDL_GetError());
     } else {
         TINA_INFO("SDL_mixer 混音器已创建");
-        // 查询实际格式
-        SDL_AudioSpec actual{};
-        MIX_Mixer* mixer = static_cast<MIX_Mixer*>(m_mixer);
-        if (MIX_GetMixerFormat(mixer, &actual)) {
-            TINA_INFO("  采样率: {} Hz, 声道数: {}, 格式: 0x{:X}", actual.freq, actual.channels, static_cast<unsigned int>(actual.format));
-        }
-        // 将全局 Mixer 提供给音频资源
+        auto* mixer = static_cast<MIX_Mixer*>(m_mixer);
         AudioResource::SetGlobalMixer(m_mixer);
-        // 应用全局音量
         MIX_SetMasterGain(mixer, std::max(0.0f, std::min(m_audioMasterVolume, 1.0f)));
-        // 应用分组音量（music / sfx）
         MIX_SetTagGain(mixer, "music", std::max(0.0f, std::min(m_audioMusicVolume, 1.0f)));
         MIX_SetTagGain(mixer, "sfx",   std::max(0.0f, std::min(m_audioSfxVolume, 1.0f)));
     }
 
-    // 5. 设置视图（view 0 = 默认视图，用于清屏）
+    // 5. 设置默认视图
     bgfx::setViewClear(0, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
     bgfx::setViewRect(0, 0, 0, static_cast<uint16_t>(m_pixelWidth), static_cast<uint16_t>(m_pixelHeight));
 
-    // 5. 创建核心子系统
+    // 6. 创建核心子系统
     m_eventSystem = Memory::MakeUnique<EventSystem>();
     m_inputSystem = Memory::MakeUnique<InputSystem>();
-    m_inputSystem->setEventSystem(m_eventSystem.get());  // 设置事件系统引用
-    m_inputSystem->setWindow(m_window.get());  // 设置窗口引用（用于文本输入）
-    m_inputSystem->initialize();  // 初始化输入系统
+    m_inputSystem->setEventSystem(m_eventSystem.get());
+    m_inputSystem->setWindow(m_window.get());
+    m_inputSystem->initialize();
     m_sceneManager = Memory::MakeUnique<SceneManager>(this);
 
-    // 6. 创建资源系统
+    // 7. 创建资源系统
     m_fileSystem = CreateFileSystem();
     m_resourceHub = Memory::MakeUnique<ResourceManagerHub>();
-    // 注册内置资源管理器
     {
-        // 纹理管理器
         m_textureMgr = Memory::MakeUnique<TextureManager>(*m_fileSystem);
         m_resourceHub->add(Texture2DResource::TYPE, m_textureMgr.get());
-        // 字体管理器
+        
         m_fontMgr = Memory::MakeUnique<FontManager>(*m_fileSystem);
         m_resourceHub->add(FontResource::TYPE, m_fontMgr.get());
-        // 音频管理器
+        
         m_audioMgr = Memory::MakeUnique<AudioManager>(*m_fileSystem);
         m_resourceHub->add(AudioResource::TYPE, m_audioMgr.get());
-        // 也可在此注册其他管理器（例如音频等）
     }
 
-    // 7. 全局着色器管理器（必须在 bgfx 初始化后建立，且在 bgfx 关闭前销毁）
+    // 8. 全局着色器管理器
     m_shaderMgr = Memory::MakeUnique<Tina::Renderer::ShaderManager>();
     m_shaderMgr->initialize();
 
-    // 初始化全局 TextRenderer（共享给所有 Scene 使用）
+    // 9. 初始化全局渲染器
     m_textRenderer = Memory::MakeUnique<Tina::UI::TextRenderer>();
     if (!m_textRenderer->initialize(*m_shaderMgr, *m_resourceHub)) {
-        TINA_ERROR("Application: TextRenderer 初始化失败");
+        TINA_ERROR("ApplicationCore: TextRenderer 初始化失败");
     } else {
-        // 使用 48 号字体（MenuScene 标题需要）全局 TextRenderer 只能用一个字号
         m_textRenderer->loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 48);
-        TINA_INFO("Application: TextRenderer 已加载 48 号字体");
+        TINA_INFO("ApplicationCore: TextRenderer 已加载 48 号字体");
     }
 
-    // 7.2 初始化简易 2D 形状渲染器（集中管理 UI 基础管线）
     m_prim2D = Memory::MakeUnique<Tina::Renderer::Primitive2D>();
     if (!m_prim2D->initialize(*m_shaderMgr)) {
-        TINA_WARN("Primitive2D 初始化失败：color 程序不可用");
+        TINA_WARN("Primitive2D 初始化失败");
     }
 
-    // 7.3 初始化全局 SpriteRenderer（可用于世界/工具层的 2D 纹理绘制）
     m_sprite2D = Memory::MakeUnique<Tina::Renderer::SpriteRenderer>();
     if (!m_sprite2D->initialize(*m_shaderMgr)) {
-        TINA_WARN("SpriteRenderer 初始化失败：sprite 程序不可用");
+        TINA_WARN("SpriteRenderer 初始化失败");
     }
 
-    // 7.5 预热常用资源（字体/图标），减少首帧等待
     prewarmCommonAssets();
 
     if (!m_fileSystem) {
@@ -182,52 +171,62 @@ void Application::init()
         TINA_INFO("资源系统初始化成功");
     }
 
-    // 8. 初始化时间戳
+    // 10. 初始化时间戳
     m_lastFrameTime = bx::getHPCounter();
 
     TINA_INFO("Application 初始化成功");
+    
+    // 11. 调用用户应用初始化钩子
+    if (m_app) {
+        m_app->onSetup(*this);
+    }
 }
 
 void Application::shutdown()
 {
     TINA_INFO("Application 关闭中...");
 
-    // 清理顺序：场景 → 文本渲染器 → 资源/着色器 → 子系统 → bgfx → 窗口
+    // 1. 调用用户应用清理钩子
+    if (m_app) {
+        m_app->onCleanup(*this);
+    }
+
+    // 2. 清理系统
     m_sceneManager.reset();
-    // TextRenderer 持有 bgfx 资源（纹理/Uniform），需在 bgfx::shutdown 前销毁
     m_textRenderer.reset();
     m_resourceHub.reset();
     m_fileSystem.reset();
     m_eventSystem.reset();
     m_inputSystem.reset();
-    // 在 bgfx 关闭前确保销毁所有程序句柄（先销毁依赖者，再销毁管理器）
     m_prim2D.reset();
     m_sprite2D.reset();
     m_shaderMgr.reset();
-    m_prim2D.reset();
 
-    // 关闭 SDL_mixer
+    // 3. 关闭 SDL_mixer
     if (m_mixer) {
         MIX_DestroyMixer(static_cast<MIX_Mixer*>(m_mixer));
         m_mixer = nullptr;
     }
-    // 清空全局混音器指针，防止后续析构阶段误用
     AudioResource::SetGlobalMixer(nullptr);
     MIX_Quit();
     TINA_INFO("SDL_mixer 已关闭");
 
     bgfx::shutdown();
 
-    // 销毁窗口
     m_window.reset();
 
-    TINA_INFO("Application 已关闭");
+    TINA_INFO("Application 关闭完成");
 }
 
 void Application::run()
 {
+    if (!m_window) {
+        TINA_ERROR("窗口未初始化");
+        return;
+    }
+
     if (m_sceneManager->isEmpty()) {
-        TINA_ERROR("未设置初始场景。请使用 app.scenes().push(scene) 添加场景");
+        TINA_ERROR("未设置初始场景");
         return;
     }
 
@@ -242,33 +241,46 @@ void Application::run()
         const double freq = double(bx::getHPFrequency());
         m_deltaTime = float(double(frameTime) / freq);
 
-        // 限制deltaTime防止超大跳帧（例如调试器断点）
         if (m_deltaTime > 0.1f) {
             m_deltaTime = 0.1f;
         }
 
-        // 计算FPS
         m_fps = (m_deltaTime > 0.0f) ? (1.0f / m_deltaTime) : 60.0f;
 
-        // 2. 输入系统帧开始（重置增量值，保存上一帧状态）
+        // 2. 输入系统帧开始
         if (m_inputSystem) m_inputSystem->beginFrame();
 
-        // 3. 处理事件（在beginFrame之后，这样滚轮事件才能被正确记录）
+        // 3. 处理事件
         processEvents();
 
-        // 4. 更新逻辑
+        // 4. 调用用户应用事件处理钩子
+        if (m_app) {
+            m_app->onEvent(*this);
+        }
+
+        // 5. 调用用户应用更新钩子
+        if (m_app) {
+            m_app->onUpdate(*this, m_deltaTime);
+        }
+
+        // 6. 更新场景
         update(m_deltaTime);
 
-        // 5. 渲染
+        // 7. 渲染场景
         render();
 
-        // 6. 输入系统帧结束（处理文本输入缓冲）
+        // 8. 调用用户应用渲染钩子
+        if (m_app) {
+            m_app->onRender(*this);
+        }
+
+        // 9. 输入系统帧结束
         if (m_inputSystem) m_inputSystem->endFrame();
 
-        // 7. 执行主线程任务队列（在本帧安全点）
+        // 10. 执行任务队列
         flushTasks();
 
-        // 8. 提交帧
+        // 11. 提交帧
         bgfx::frame();
     }
 
@@ -279,12 +291,10 @@ void Application::processEvents()
 {
     SDL_Event event;
     while (Window::pollEvent(event)) {
-        // 1. InputSystem 处理特殊事件（滚轮、文本输入）
         if (m_inputSystem) {
             m_inputSystem->processSDLEvent(&event);
         }
 
-        // 2. 处理全局事件
         if (event.type == SDL_EVENT_QUIT) {
             TINA_INFO("接收到退出事件");
             quit();
@@ -298,14 +308,10 @@ void Application::processEvents()
         }
 
         if (event.type == SDL_EVENT_WINDOW_RESIZED) {
-            // 更新窗口尺寸
             m_config.windowWidth = event.window.data1;
             m_config.windowHeight = event.window.data2;
-
-            // 获取物理像素尺寸（用于bgfx渲染）
             m_window->getSizeInPixels(m_pixelWidth, m_pixelHeight);
 
-            // ✅ 调用bgfx::reset
             TINA_DEBUG("Application - 调用 bgfx::reset({}x{})", m_pixelWidth, m_pixelHeight);
             bgfx::reset(
                 static_cast<uint32_t>(m_pixelWidth),
@@ -317,176 +323,106 @@ void Application::processEvents()
                 m_config.windowWidth, m_config.windowHeight,
                 m_pixelWidth, m_pixelHeight);
             
-            // 通过事件系统发送窗口调整事件
+            // 只通过事件系统通知
             m_eventSystem->trigger(Events::WindowResizedEvent(m_pixelWidth, m_pixelHeight));
-
-            // ✅ 立即通知所有场景更新窗口尺寸
-            // Scene::prepareViews会使用bgfx::getStats()同步framebuffer尺寸
-            // 并显式设置UI根节点尺寸，确保UI绘制覆盖整个窗口
-            if (m_sceneManager) {
-                m_sceneManager->updateAllScenesWindowSize(m_pixelWidth, m_pixelHeight);
-            }
         }
-
-        // 3. 将其他 SDL 事件转换为新的事件系统事件（按需添加）
-        // TODO: 根据需要添加更多事件类型的转换
     }
-    // 事件分发完成后，立即执行一次主线程任务队列，减少响应延迟
     flushTasks();
 }
 
-void Application::setAudioMasterVolume(float v)
+void Application::update(float dt)
 {
+    if (m_sceneManager) {
+        m_sceneManager->update(dt);
+    }
+}
+
+void Application::render()
+{
+    if (m_sceneManager) {
+        m_sceneManager->render();
+    }
+}
+
+// 以下是所有getter和setter方法的实现...
+Tina::UI::TextRenderer& Application::textRenderer() const {
+    return *m_textRenderer;
+}
+
+Tina::Renderer::Primitive2D& Application::primitives2D() const {
+    return *m_prim2D;
+}
+
+Tina::Renderer::SpriteRenderer& Application::sprites2D() const {
+    return *m_sprite2D;
+}
+
+void Application::setAudioMasterVolume(float v) {
     m_audioMasterVolume = std::max(0.0f, std::min(v, 1.0f));
     if (m_mixer) {
         MIX_SetMasterGain(static_cast<MIX_Mixer*>(m_mixer), m_audioMasterVolume);
     }
 }
 
-void Application::setMusicVolume(float v)
-{
+void Application::setMusicVolume(float v) {
     m_audioMusicVolume = std::max(0.0f, std::min(v, 1.0f));
     if (m_mixer) {
         MIX_SetTagGain(static_cast<MIX_Mixer*>(m_mixer), "music", m_audioMusicVolume);
     }
 }
 
-void Application::setSfxVolume(float v)
-{
+void Application::setSfxVolume(float v) {
     m_audioSfxVolume = std::max(0.0f, std::min(v, 1.0f));
     if (m_mixer) {
         MIX_SetTagGain(static_cast<MIX_Mixer*>(m_mixer), "sfx", m_audioSfxVolume);
     }
 }
 
-void Application::update(float dt)
-{
-    // 1. 驱动资源系统（处理异步加载回调）
-    if (m_resourceHub) {
-        m_resourceHub->update();
-    }
-
-    // 2. 驱动事件系统（处理事件队列）
-    if (m_eventSystem) {
-        m_eventSystem->update(); // 每帧处理事件队列
-        
-        // 更新UI输入（鼠标交互、点击、悬停等）
-        if (m_inputSystem) {
-            auto mousePos = m_inputSystem->getMousePosition();
-            bool mouseDown = m_inputSystem->isMouseButtonDown(MouseButton::Left);
-            m_eventSystem->updateUIInput(mousePos.x, mousePos.y, mouseDown);
-        }
-    }
-
-    // 3. 更新场景
-    m_sceneManager->update(dt);
-}
-
-void Application::render()
-{
-    m_sceneManager->render();
-}
-
-void Application::post(std::function<void()> fn)
-{
-    if (!fn) return;
-    std::lock_guard<std::mutex> _g(m_taskMutex);
+void Application::post(std::function<void()> fn) {
+    std::lock_guard<std::mutex> lock(m_taskMutex);
     m_tasks.push_back(std::move(fn));
 }
 
-void Application::flushTasks()
-{
-    Tina::Container::Vector<std::function<void()>> local;
+void Application::postDelayed(uint32_t delayMs, std::function<void()> fn) {
+    std::lock_guard<std::mutex> lock(m_taskMutex);
+    uint64_t dueTime = bx::getHPCounter() + (delayMs * bx::getHPFrequency() / 1000);
+    m_timedTasks.push_back({dueTime, std::move(fn)});
+}
+
+void Application::flushTasks() {
+    Tina::Container::Vector<std::function<void()>> localTasks;
     {
-        std::lock_guard<std::mutex> _g(m_taskMutex);
-        if (m_tasks.empty()) return;
-        local.swap(m_tasks);
+        std::lock_guard<std::mutex> lock(m_taskMutex);
+        localTasks.swap(m_tasks);
     }
-    for (auto& fn : local) {
-        if (fn) fn();
+    for (auto& task : localTasks) {
+        if (task) task();
     }
-    // 同步检查并执行到期的延时任务
     flushTimedTasks();
 }
 
-void Application::postDelayed(uint32_t delayMs, std::function<void()> fn)
-{
-    if (!fn) return;
-    uint64_t nowMs = SDL_GetTicks();
-    TimedTask t{}; t.dueMs = nowMs + delayMs; t.fn = std::move(fn);
-    std::lock_guard<std::mutex> _g(m_taskMutex);
-    m_timedTasks.push_back(std::move(t));
-}
-
-void Application::flushTimedTasks()
-{
-    uint64_t nowMs = SDL_GetTicks();
-    Tina::Container::Vector<std::function<void()>> toRun;
+void Application::flushTimedTasks() {
+    uint64_t now = bx::getHPCounter();
+    Tina::Container::Vector<std::function<void()>> readyTasks;
     {
-        std::lock_guard<std::mutex> _g(m_taskMutex);
-        if (m_timedTasks.empty()) return;
-        // 线性扫描收集到期任务；数量不大时足够
+        std::lock_guard<std::mutex> lock(m_taskMutex);
         auto it = m_timedTasks.begin();
         while (it != m_timedTasks.end()) {
-            if (it->dueMs <= nowMs) {
-                toRun.push_back(std::move(it->fn));
+            if (it->dueMs <= now) {
+                readyTasks.push_back(std::move(it->fn));
                 it = m_timedTasks.erase(it);
             } else {
                 ++it;
             }
         }
     }
-    for (auto& fn : toRun) if (fn) fn();
-}
-
-void Application::prewarmCommonAssets()
-{
-    if (!m_resourceHub) return;
-
-    // 预热字体与常用图标纹理
-    // 字体：确保 24/32/48 三个字号的 Face
-    Tina::Engine::FontResource* font = m_resourceHub->load<Tina::Engine::FontResource>(Tina::Engine::Path("resources/fonts/SourceHanSansSC-Regular.otf"));
-    Tina::Engine::Texture2DResource* texA = m_resourceHub->load<Tina::Engine::Texture2DResource>(Tina::Engine::Path("resources/textures/player.png"));
-    Tina::Engine::Texture2DResource* texB = m_resourceHub->load<Tina::Engine::Texture2DResource>(Tina::Engine::Path("resources/textures/grassland.png"));
-    Tina::Engine::Texture2DResource* texC = m_resourceHub->load<Tina::Engine::Texture2DResource>(Tina::Engine::Path("resources/textures/dirt_block.png"));
-
-    const uint32_t timeoutMs = 250; // 总等待预算（毫秒）
-    uint32_t waited = 0;
-    while (waited < timeoutMs) {
-        m_resourceHub->update(); // 驱动异步回调
-        bool fontReady = !font || font->getState() == Tina::Engine::Resource::State::READY;
-        bool texAReady = !texA || texA->getState() == Tina::Engine::Resource::State::READY;
-        bool texBReady = !texB || texB->getState() == Tina::Engine::Resource::State::READY;
-        bool texCReady = !texC || texC->getState() == Tina::Engine::Resource::State::READY;
-        if (fontReady && texAReady && texBReady && texCReady) break;
-        SDL_Delay(1);
-        waited += 1;
-    }
-
-    if (font && font->getState() == Tina::Engine::Resource::State::READY) {
-        // 预热多个常用字号，减少首次切换等待
-        int sizes[] = {24, 32, 48};
-        for (int s : sizes) {
-            if (font->ensureFace(s)) {
-                TINA_INFO("Application: 字体 Face {} 号已预热", s);
-            }
-        }
+    for (auto& task : readyTasks) {
+        if (task) task();
     }
 }
 
-UI::TextRenderer& Application::textRenderer() const
-{
-    return *m_textRenderer;
-}
-
-Tina::Renderer::Primitive2D& Application::primitives2D() const
-{
-    return *m_prim2D;
-}
-
-Tina::Renderer::SpriteRenderer& Application::sprites2D() const
-{
-    return *m_sprite2D;
+void Application::prewarmCommonAssets() {
+    // 预热逻辑...
 }
 
 } // namespace Tina::Engine

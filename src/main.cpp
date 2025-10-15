@@ -31,8 +31,8 @@ int main(int /*argc*/, char* /*argv*/[])
         config.vsync = true;
         config.msaa = 8;
 
-        // 创建应用
-        Engine::Application app(config);
+        // 创建应用（不使用IApplication扩展，传nullptr）
+        Engine::Application app(nullptr, config);
 
         // 创建并立即推入主菜单场景（保证 run() 前已有初始场景）
         auto menuScene = Memory::MakeUnique<Game::MenuScene>();

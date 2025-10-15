@@ -72,31 +72,11 @@ void Scene::removeUIRoot(UI::UINode* root) {
     }
 }
 
-// 更新窗口尺寸（智能防抖动）
+// 更新窗口尺寸（简化版：直接应用，不防抖）
+// 注意：正常情况下通过WindowResizedEvent事件触发
+// 这个方法主要用于SceneManager在场景初始化时同步窗口尺寸
 void Scene::updateWindowSize(int width, int height) {
-    // 计算变化幅度
-    int deltaW = std::abs(width - m_pixelWidth);
-    int deltaH = std::abs(height - m_pixelHeight);
-
-    // 如果是大幅度变化（如最大化/最小化），立即应用
-    // 阈值：宽或高变化超过30%，或绝对值超过300像素
-    bool isLargeChange = (deltaW > m_pixelWidth * 0.3f || deltaH > m_pixelHeight * 0.3f ||
-                          deltaW > 300 || deltaH > 300);
-
-    if (isLargeChange) {
-        // 大幅度变化，立即应用，避免卡顿
-        TINA_INFO("窗口大幅变化: {}x{} -> {}x{}，立即应用",
-                  m_pixelWidth, m_pixelHeight, width, height);
-        applyWindowResize(width, height);
-        m_pendingResize = false;
-        m_resizeTimer = 0.0f;
-    } else {
-        // 小幅度变化，使用防抖动（降低延迟到30ms）
-        m_pendingResize = true;
-        m_pendingWidth = width;
-        m_pendingHeight = height;
-        m_resizeTimer = 0.03f;  // 30ms 延迟，更快响应
-    }
+    applyWindowResize(width, height);
 }
 
 // 实际应用窗口尺寸更新
@@ -177,26 +157,16 @@ Renderer::RenderQueue& Scene::queue() {
 
 // ==================== 新增：框架方法 ====================
 
-// 框架更新入口（自动处理防抖动）
+// 框架更新入口
 void Scene::updateFrame(float dt) {
-    // 1. 处理防抖动的窗口调整
-    if (m_pendingResize && m_resizeTimer > 0) {
-        m_resizeTimer -= dt;
-        if (m_resizeTimer <= 0) {
-            // 时间到，应用窗口调整
-            applyWindowResize(m_pendingWidth, m_pendingHeight);
-            m_pendingResize = false;
-        }
-    }
-
-    // 2. 自动更新所有UI根节点（让Scene不需要手动调用）
+    // 1. 自动更新所有UI根节点
     for (auto* root : m_uiRoots) {
         if (root) {
             root->update(dt);
         }
     }
 
-    // 2.5 批量执行挂起的布局，确保本帧布局一致
+    // 2. 批量执行挂起的布局，确保本帧布局一致
     if (m_uiLayoutManager) {
         m_uiLayoutManager->performPendingLayouts();
     }
@@ -224,10 +194,10 @@ void Scene::setupEventHandlers() {
     // 订阅窗口resize事件
     m_windowResizeToken = m_app->getEventSystem()->subscribe<Events::WindowResizedEvent>(
         [this](const Events::WindowResizedEvent& e) {
-            // ✅ Application已经在processEvents中提交了空帧，bgfx::reset已生效
-            // 现在可以立即更新视图矩形
-            m_viewDirty = true;
-            TINA_DEBUG("Scene收到WindowResizedEvent: {}x{}, 标记视图更新", e.width, e.height);
+            // ✅ 直接应用窗口尺寸变化（不经过防抖动）
+            // Application已调用bgfx::reset，这里立即更新Scene状态
+            applyWindowResize(e.width, e.height);
+            TINA_DEBUG("Scene收到WindowResizedEvent: {}x{}, 已应用", e.width, e.height);
         }
     );
 }

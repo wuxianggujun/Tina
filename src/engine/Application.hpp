@@ -1,7 +1,7 @@
 //
-// Application - 应用程序主类
-// - 职责：管理应用程序生命周期、封装窗口和bgfx、提供全局服务访问
-// - 设计：引擎架构的入口点，协调场景管理器和事件总线
+// Application - 应用程序框架核心
+// - 职责：管理生命周期、封装窗口和bgfx、提供全局服务访问
+// - 设计：框架核心 + 用户扩展接口（IApplication）
 //
 
 #pragma once
@@ -11,9 +11,7 @@
 #include <functional>
 #include <mutex>
 
-// SDL_mixer 的不透明结构体已通过 void* 隐藏，不再需要前向声明
-
-// 前向声明（放在全局命名空间，避免嵌套成 Tina::Engine::Tina::...）
+// 前向声明
 namespace Tina { namespace UI { class TextRenderer; } }
 namespace Tina { namespace Renderer { class Primitive2D; class SpriteRenderer; class ShaderManager; } }
 
@@ -23,15 +21,17 @@ namespace Tina::Engine {
 class Window;
 class InputSystem;
 class SceneManager;
-class EventSystem;  // 新的统一事件系统（替代 OSEventBus 和 TypedEventBus）
+class EventSystem;
 struct FileSystem;
 class ResourceManagerHub;
 class TextureManager;
 class FontManager;
 class AudioManager;
+class IApplication;
 
-
-// 应用程序主类
+/// 应用程序框架核心
+/// 负责管理所有框架级别的功能
+/// 用户通过IApplication接口扩展自定义逻辑
 class Application {
 public:
     // 应用程序配置
@@ -43,7 +43,10 @@ public:
         uint32_t msaa = 8;                 // 多重采样抗锯齿
     };
 
-    explicit Application(const Config& config);
+    /// 构造函数
+    /// @param app 用户应用实例（可选，用于生命周期回调）
+    /// @param config 应用配置
+    explicit Application(IApplication* app, const Config& config);
     ~Application();
 
     // 禁止拷贝和移动
@@ -52,60 +55,41 @@ public:
     Application(Application&&) = delete;
     Application& operator=(Application&&) = delete;
     
-    // 获取全局单例实例（用于UI系统自动获取EventSystem）
+    // 获取全局单例实例
     static Application* instance() { return s_instance; }
 
     // ==================== 主循环控制 ====================
 
-    // 启动主循环（阻塞直到quit()被调用或所有场景退出）
+    /// 启动主循环（阻塞直到quit()被调用或所有场景退出）
     void run();
 
-    // 退出主循环
+    /// 退出主循环
     void quit() { m_running = false; }
 
-    // 查询主循环是否在运行
+    /// 查询主循环是否在运行
     bool isRunning() const { return m_running; }
 
     // ==================== 访问核心系统 ====================
 
-    // 获取统一事件系统（替代旧的 OSEventBus 和 TypedEventBus）
     EventSystem& events() const { return *m_eventSystem; }
-    EventSystem* getEventSystem() const { return m_eventSystem.get(); }  // 别名，返回指针
-
-    // 获取场景管理器（用于场景切换）
+    EventSystem* getEventSystem() const { return m_eventSystem.get(); }
+    
     SceneManager& scenes() const { return *m_sceneManager; }
-
-    // 获取输入系统
     InputSystem& input() const { return *m_inputSystem; }
-
-    // 获取窗口
     Window& window() const { return *m_window; }
-
-    // 获取文件系统（用于异步IO）
     FileSystem& fileSystem() const { return *m_fileSystem; }
-
-    // 获取资源管理中心（用于加载资源）
     ResourceManagerHub& resources() const { return *m_resourceHub; }
-
-    // 获取全局着色器管理器（全局唯一，贯穿应用生命周期）
     Tina::Renderer::ShaderManager& shaders() const { return *m_shaderMgr; }
-
-    // 获取音频管理器（用于加载和播放音频）
     AudioManager& audio() const { return *m_audioMgr; }
 
-    // ==================== 文本渲染器 ====================
-    // 全局 TextRenderer，避免每个 Scene 重复创建与加载字体
+    // 全局渲染器
     Tina::UI::TextRenderer& textRenderer() const;
-    // 简易 2D 形状渲染器（全局共享）
     Tina::Renderer::Primitive2D& primitives2D() const;
-    // 精灵渲染器（全局共享）
     Tina::Renderer::SpriteRenderer& sprites2D() const;
 
-    // 全局音量控制（0.0 ~ 1.0）
+    // 音频控制
     void setAudioMasterVolume(float v);
     float getAudioMasterVolume() const { return m_audioMasterVolume; }
-
-    // 分组音量（music / sfx），范围 0.0 ~ 1.0
     void setMusicVolume(float v);
     float getMusicVolume() const { return m_audioMusicVolume; }
     void setSfxVolume(float v);
@@ -113,86 +97,70 @@ public:
 
     // ==================== 帧率和时间信息 ====================
 
-    // 获取上一帧的时间间隔（秒）
     float deltaTime() const { return m_deltaTime; }
-
-    // 获取当前帧率（FPS）
     float fps() const { return m_fps; }
 
     // ==================== 窗口信息 ====================
 
-    // 获取窗口宽度（像素）
     int windowWidth() const { return m_pixelWidth; }
-
-    // 获取窗口高度（像素）
     int windowHeight() const { return m_pixelHeight; }
-
-    // 获取窗口像素尺寸（用于渲染器和UI）
     void getPixelSize(int& outW, int& outH) const {
         outW = m_pixelWidth;
         outH = m_pixelHeight;
     }
 
-private:
-    void init();                    // 初始化（窗口、bgfx、子系统）
-    void shutdown();                // 清理（场景、bgfx、窗口）
-    void processEvents();           // 处理操作系统事件
-    void update(float dt);          // 更新逻辑
-    void render();                  // 渲染场景
-    void prewarmCommonAssets();     // 预热常用资源（字体/图标），减少首帧等待
+    // ==================== 任务队列 ====================
 
-public:
-    // 任务队列（线程安全）：将任务投递到主线程安全点执行
-    // 用途：
-    // - 在任意线程/回调中请求在主线程操作（如场景切换、UI修改、bgfx调用）
-    // - 与 SceneManager 的 request* 协同使用，统一在帧末或事件分发后执行
     void post(std::function<void()> fn);
     void postDelayed(uint32_t delayMs, std::function<void()> fn);
 
 private:
-    Config m_config;                               // 应用程序配置
-    bool m_running = false;                        // 主循环运行标志
-    float m_deltaTime = 0.0f;                      // 帧时间间隔（秒）
-    float m_fps = 60.0f;                           // 当前帧率
-    uint64_t m_lastFrameTime = 0;                  // 上一帧时间戳（用于计算deltaTime）
+    void init();
+    void shutdown();
+    void processEvents();
+    void update(float dt);
+    void render();
+    void prewarmCommonAssets();
+    void flushTasks();
+    void flushTimedTasks();
 
-    int m_pixelWidth = 1280;                       // 窗口像素宽度
-    int m_pixelHeight = 720;                       // 窗口像素高度
+private:
+    IApplication* m_app = nullptr;                     // 用户应用实例（可选）
+    Config m_config;
+    bool m_running = false;
+    float m_deltaTime = 0.0f;
+    float m_fps = 60.0f;
+    uint64_t m_lastFrameTime = 0;
 
-    Memory::UniquePtr<Window> m_window;                    // 窗口管理
-    Memory::UniquePtr<InputSystem> m_inputSystem;          // 输入系统
-    Memory::UniquePtr<EventSystem> m_eventSystem;          // 统一事件系统（新）
-    Memory::UniquePtr<SceneManager> m_sceneManager;        // 场景管理器（独占所有权）
-    Memory::UniquePtr<FileSystem> m_fileSystem;            // 文件系统（异步IO）
-    Memory::UniquePtr<ResourceManagerHub> m_resourceHub;   // 资源管理中心
-    Memory::UniquePtr<Tina::Renderer::ShaderManager> m_shaderMgr; // 全局着色器管理器
-    Memory::UniquePtr<TextureManager> m_textureMgr;        // 纹理资源管理器
-    Memory::UniquePtr<FontManager> m_fontMgr;              // 字体资源管理器
-    Memory::UniquePtr<AudioManager> m_audioMgr;            // 音频资源管理器
+    int m_pixelWidth = 1280;
+    int m_pixelHeight = 720;
 
-    // SDL_mixer 3.x 混音器（输出到默认音频设备）
-    // 使用 void* 隐藏 SDL 依赖，实际类型为 MIX_Mixer*
+    Memory::UniquePtr<Window> m_window;
+    Memory::UniquePtr<InputSystem> m_inputSystem;
+    Memory::UniquePtr<EventSystem> m_eventSystem;
+    Memory::UniquePtr<SceneManager> m_sceneManager;
+    Memory::UniquePtr<FileSystem> m_fileSystem;
+    Memory::UniquePtr<ResourceManagerHub> m_resourceHub;
+    Memory::UniquePtr<Tina::Renderer::ShaderManager> m_shaderMgr;
+    Memory::UniquePtr<TextureManager> m_textureMgr;
+    Memory::UniquePtr<FontManager> m_fontMgr;
+    Memory::UniquePtr<AudioManager> m_audioMgr;
+
     void* m_mixer = nullptr;
     
-    // 全局文本渲染器（共享）
     Memory::UniquePtr<Tina::UI::TextRenderer> m_textRenderer;
     Memory::UniquePtr<Tina::Renderer::Primitive2D> m_prim2D;
     Memory::UniquePtr<Tina::Renderer::SpriteRenderer> m_sprite2D;
 
-    // 全局音量
     float m_audioMasterVolume = 1.0f;
     float m_audioMusicVolume = 1.0f;
     float m_audioSfxVolume = 1.0f;
 
-    // 任务队列（主线程执行）
     std::mutex m_taskMutex;
     Tina::Container::Vector<std::function<void()>> m_tasks;
-    void flushTasks();
     struct TimedTask { uint64_t dueMs = 0; std::function<void()> fn; };
     Tina::Container::Vector<TimedTask> m_timedTasks;
-    void flushTimedTasks();
     
-    // 全局单例实例
     static Application* s_instance;
 };
 

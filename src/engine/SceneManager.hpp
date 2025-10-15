@@ -6,6 +6,9 @@
 
 namespace Tina::Engine {
 
+// 前向声明
+class Application;
+
 /**
  * SceneManager - 场景管理器
  *
