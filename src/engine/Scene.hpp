@@ -66,7 +66,7 @@ public:
     // ==================== 主循环接口 ====================
 
     // 框架更新入口（由Application/SceneManager调用）
-    // 自动处理防抖动，然后调用子类的update()
+    // 自动更新UI根节点，然后调用子类的update()
     void updateFrame(float dt);
 
     // 更新逻辑（子类实现）
@@ -131,7 +131,7 @@ protected:
     // 移除UI根节点（通常在onExit时调用，或根节点销毁前调用）
     void removeUIRoot(UI::UINode* root);
 
-    // 更新窗口尺寸（由Application调用，带防抖动）
+    // 更新窗口尺寸（由Application调用）
     virtual void updateWindowSize(int width, int height);
 
 protected:

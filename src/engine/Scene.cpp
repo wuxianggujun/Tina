@@ -194,7 +194,7 @@ void Scene::setupEventHandlers() {
     // 订阅窗口resize事件
     m_windowResizeToken = m_app->getEventSystem()->subscribe<Events::WindowResizedEvent>(
         [this](const Events::WindowResizedEvent& e) {
-            // ✅ 直接应用窗口尺寸变化（不经过防抖动）
+            // ✅ 直接应用窗口尺寸变化
             // Application已调用bgfx::reset，这里立即更新Scene状态
             applyWindowResize(e.width, e.height);
             TINA_DEBUG("Scene收到WindowResizedEvent: {}x{}, 已应用", e.width, e.height);

@@ -31,11 +31,11 @@ void SceneManager::push(Memory::UniquePtr<Scene> scene)
     // ✅ 设置事件监听器（必须在m_app设置后）
     scene->setupEventHandlers();
 
-    // 关键修复：立即应用窗口大小，避免防抖动延迟
-    // 场景刚创建时必须立即同步窗口尺寸，否则会使用默认值1280x720
+    // 立即同步窗口尺寸，确保场景初始状态正确
+    // 场景刚创建时必须使用当前窗口尺寸，否则会使用默认值1280x720
     int w, h;
     m_app->getPixelSize(w, h);
-    scene->applyWindowResize(w, h);  // 直接调用applyWindowResize，跳过防抖动
+    scene->applyWindowResize(w, h);
 
     scene->onEnter();
     m_scenes.push_back(std::move(scene));
@@ -76,11 +76,11 @@ void SceneManager::replace(Memory::UniquePtr<Scene> scene)
     // ✅ 设置事件监听器
     scene->setupEventHandlers();
 
-    // 关键修复：立即应用窗口大小，避免防抖动延迟
-    // 场景刚创建时必须立即同步窗口尺寸，否则会使用默认值1280x720
+    // 立即同步窗口尺寸，确保场景初始状态正确
+    // 场景刚创建时必须使用当前窗口尺寸，否则会使用默认值1280x720
     int w, h;
     m_app->getPixelSize(w, h);
-    scene->applyWindowResize(w, h);  // 直接调用applyWindowResize，跳过防抖动
+    scene->applyWindowResize(w, h);
 
     scene->onEnter();
     m_scenes.push_back(std::move(scene));
@@ -130,7 +130,7 @@ void SceneManager::update(float dt)
 {
     if (Scene* scene = currentScene()) {
         m_dispatching = true;
-        scene->updateFrame(dt);  // 调用框架方法，自动处理防抖动
+        scene->updateFrame(dt);  // 调用框架方法，自动处理UI更新
         m_dispatching = false;
     }
     applyPending();

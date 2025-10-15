@@ -1,7 +1,8 @@
 //
 // Application - 应用程序框架核心
-// - 职责：管理生命周期、封装窗口和bgfx、提供全局服务访问
-// - 设计：框架核心 + 用户扩展接口（IApplication）
+// - 职责：管理窗口、bgfx、场景栈、输入、事件、资源等核心系统
+// - 设计：框架核心类，通过IApplication接口支持用户扩展
+// - 用法：创建Application实例，推入Scene，调用run()启动主循环
 //
 
 #pragma once
@@ -30,8 +31,21 @@ class AudioManager;
 class IApplication;
 
 /// 应用程序框架核心
-/// 负责管理所有框架级别的功能
-/// 用户通过IApplication接口扩展自定义逻辑
+/// 
+/// **职责：**
+/// - 管理窗口生命周期（创建、销毁、resize）
+/// - 管理bgfx渲染器（初始化、reset、shutdown）
+/// - 管理核心系统（场景、输入、事件、资源、音频）
+/// - 运行主循环（事件处理、更新、渲染）
+/// - 提供全局服务访问接口
+/// 
+/// **使用示例：**
+/// ```cpp
+/// Application::Config config;
+/// Application app(nullptr, config);
+/// app.scenes().push(MakeUnique<MenuScene>());
+/// app.run();
+/// ```
 class Application {
 public:
     // 应用程序配置

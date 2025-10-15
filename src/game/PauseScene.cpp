@@ -112,7 +112,7 @@ void PauseScene::render()
 
 void PauseScene::updateWindowSize(int width, int height)
 {
-    // 调用基类更新（触发防抖动）
+    // 调用基类更新
     Scene::updateWindowSize(width, height);
 }
 

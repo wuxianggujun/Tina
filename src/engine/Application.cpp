@@ -147,10 +147,10 @@ void Application::init()
     // 9. 初始化全局渲染器
     m_textRenderer = Memory::MakeUnique<Tina::UI::TextRenderer>();
     if (!m_textRenderer->initialize(*m_shaderMgr, *m_resourceHub)) {
-        TINA_ERROR("ApplicationCore: TextRenderer 初始化失败");
+        TINA_ERROR("Application: TextRenderer 初始化失败");
     } else {
         m_textRenderer->loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 48);
-        TINA_INFO("ApplicationCore: TextRenderer 已加载 48 号字体");
+        TINA_INFO("Application: TextRenderer 已加载 48 号字体");
     }
 
     m_prim2D = Memory::MakeUnique<Tina::Renderer::Primitive2D>();
