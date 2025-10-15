@@ -21,8 +21,8 @@ WorldSelectScene::~WorldSelectScene() = default;
 
 Container::Vector<Engine::Scene::ViewSetup> WorldSelectScene::getViewSetup() {
     return {
-        { UI::VIEW_BACKGROUND, Engine::Scene::ViewSetup::Background2D, false },
-        { UI::VIEW_UI, Engine::Scene::ViewSetup::UI2D, false }
+        { UI::VIEW_BACKGROUND, Engine::Scene::ViewSetup::Background2D, true },  // 背景视图（清屏）
+        { UI::VIEW_UI, Engine::Scene::ViewSetup::UI2D, false }                  // UI视图（叠加）
     };
 }
 

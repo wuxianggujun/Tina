@@ -12,12 +12,12 @@ namespace Tina::UI {
 
 // ==================== 视图ID（全局约定） ====================
 // 说明：统一管理 bgfx view 的编号，减少魔术数字分散
-// 建议：0 用于清屏/默认；1 可留给世界/3D；2 用于背景/特效；3 用于 UI
+// bgfx按view ID从小到大渲染，所以背景view必须比UI view的ID小
 constexpr uint16_t VIEW_CLEAR        = 0; // 清屏/默认
-constexpr uint16_t VIEW_WORLD_SOLID  = 1; // 世界-不透明（地形/静态）
-constexpr uint16_t VIEW_WORLD_ALPHA  = 2; // 世界-半透明/角色/特效 或 菜单背景
-constexpr uint16_t VIEW_BACKGROUND   = VIEW_WORLD_ALPHA; // 别名：菜单/过场背景
-constexpr uint16_t VIEW_UI           = 3; // UI 图层
+constexpr uint16_t VIEW_BACKGROUND   = 1; // 菜单/过场背景（MenuScene、WorldSelectScene专用）
+constexpr uint16_t VIEW_WORLD_SOLID  = 2; // 世界-不透明（地形/静态）
+constexpr uint16_t VIEW_WORLD_ALPHA  = 3; // 世界-半透明/角色/特效
+constexpr uint16_t VIEW_UI           = 4; // UI 图层（最上层）
 
 // 可选：强类型枚举（如需更严格的类型控制，可逐步替换）
 enum class ViewId : uint16_t {

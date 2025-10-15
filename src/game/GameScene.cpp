@@ -298,14 +298,12 @@ void GameScene::render()
     {
         const float a = m_dayNight.overlayAlpha();
         if (a > 0.001f) {
-            ui().drawRect(3, 0.0f, 0.0f, (float)getPixelWidth(), (float)getPixelHeight(),
+            ui().drawRect(uiViewId(), 0.0f, 0.0f, (float)getPixelWidth(), (float)getPixelHeight(),
                                    0.0f, 0.0f, 0.0f, a);
         }
     }
     renderUI();
 }
-
-// handleEvent 已删除，输入处理移至 update() 中使用 InputSystem
 
 void GameScene::handleInput()
 {

@@ -9,6 +9,7 @@
 
 #include "../core/Memory.hpp"
 #include "../core/Container.hpp"
+#include "../ui/UIConstants.hpp"  // ✅ VIEW_UI等常量定义
 #include "SceneRenderer.hpp"  // EASTL的unique_ptr需要完整定义
 #include "Camera2D.hpp"       // Scene默认有2D相机
 #include "SubscriptionToken.hpp"  // ✅ 事件订阅token
@@ -161,8 +162,8 @@ public:
     SceneRenderer& scene();
     
     // 获取UI视图ID（子类可覆盖）
-    // 默认：view 3（UI层）
-    virtual uint16_t uiViewId() const { return 3; }
+    // 默认：VIEW_UI（UI层）
+    virtual uint16_t uiViewId() const { return UI::VIEW_UI; }
     
     // === 便捷方法：视图设置 ===
     
