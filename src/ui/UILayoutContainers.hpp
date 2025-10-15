@@ -101,11 +101,12 @@ public:
         m_layoutDirty = false;  // 清除dirty标志
     }
     
-    // ✅ 强制执行布局（用于调试和特殊情况）
+    // ⚠️ 已废弃：布局现在自动执行
+    [[deprecated("布局现在自动执行，无需手动调用forceLayout()")]]
     void forceLayout() {
-        m_layouting = false;  // 重置标志
+        m_layouting = false;
         onLayout();
-        m_layoutDirty = false;  // 清除dirty标志
+        m_layoutDirty = false;
     }
 
 protected:
@@ -258,11 +259,12 @@ public:
         m_layoutDirty = false;  // 清除dirty标志
     }
     
-    // ✅ 强制执行布局（用于调试和特殊情况）
+    // ⚠️ 已废弃：布局现在自动执行
+    [[deprecated("布局现在自动执行，无需手动调用forceLayout()")]]
     void forceLayout() {
-        m_layouting = false;  // 重置标志
+        m_layouting = false;
         onLayout();
-        m_layoutDirty = false;  // 清除dirty标志
+        m_layoutDirty = false;
     }
 
 protected:
@@ -448,11 +450,12 @@ public:
         m_layoutDirty = false;  // 清除dirty标志
     }
     
-    // ✅ 强制执行布局（用于调试和特殊情况）
+    // ⚠️ 已废弃：布局现在自动执行
+    [[deprecated("布局现在自动执行，无需手动调用forceLayout()")]]
     void forceLayout() {
-        m_layouting = false;  // 重置标志
+        m_layouting = false;
         onLayout();
-        m_layoutDirty = false;  // 清除dirty标志
+        m_layoutDirty = false;
     }
 
 protected:

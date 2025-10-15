@@ -206,7 +206,6 @@ void SettingsScene::createUI()
         auto* btn = row->createChild<UI::UIButton>();
         btn->setText(text);
         btn->setSize(rowWidth, btnH);
-        row->forceLayout();
         return btn;
     };
 
@@ -247,7 +246,6 @@ void SettingsScene::createUI()
         TINA_INFO("SettingsScene: 全屏切换功能待实现");
     });
     if (m_btnClose) m_btnClose->setOnClick([this]{ onBack(); });
-    vbox->forceLayout();
 
     // 居中面板
     float centerX = (m_pixelWidth - panelW) * 0.5f;

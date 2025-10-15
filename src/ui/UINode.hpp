@@ -140,10 +140,13 @@ public:
         }
         
         T* ptr = child.get();
-        child->m_parent = this;
-        child->m_dirty = true;
+        ptr->m_parent = this;
         m_children.push_back(std::move(child));
         bumpTreeVersion();
+        
+        // ✅ 自动标记父容器需要重新布局
+        requestLayout();
+        
         return ptr;
     }
     

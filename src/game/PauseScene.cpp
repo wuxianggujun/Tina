@@ -251,7 +251,6 @@ void PauseScene::createUI()
     m_btnContinue->setHoverColor(0.3f, 0.8f, 0.3f, 1.0f);
     m_btnContinue->setPressedColor(0.1f, 0.4f, 0.1f, 1.0f);
     m_btnContinue->setOnClick([this]{ onContinueClicked(); });
-    rowTop->forceLayout();
 
     // 设置按钮已移除，保留单行继续按钮
 
@@ -272,7 +271,6 @@ void PauseScene::createUI()
         b = row->createChild<UI::UIButton>();
         b->setText(tb);
         b->setSize(colW, btnH);
-        row->forceLayout();
         return row;
     };
 
@@ -296,8 +294,6 @@ void PauseScene::createUI()
     m_btnQuit->setHoverColor(0.8f, 0.3f, 0.3f, 1.0f);
     m_btnQuit->setPressedColor(0.4f, 0.1f, 0.1f, 1.0f);
     m_btnQuit->setOnClick([this]{ onQuitClicked(); });
-    rowBottom->forceLayout();
-    vbox->forceLayout();  // 递归布局所有子元素
     
     // 居中面板
     float centerX = (m_pixelWidth - panelW) * 0.5f;
