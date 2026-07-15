@@ -55,6 +55,12 @@ public:
 
     // ==================== 可选实现的方法 ====================
 
+    /// 固定步长 Simulation 钩子（默认60 Hz，在变量更新之前调用）。
+    virtual void onFixedUpdate(Application& core, float fixedDt) {
+        (void)core;
+        (void)fixedDt;
+    }
+
     /// 每帧更新钩子（在场景更新之前调用）
     /// **调用时机：** 事件处理后，场景更新前
     /// **调用频率：** 每帧一次

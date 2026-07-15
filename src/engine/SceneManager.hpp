@@ -41,6 +41,7 @@ public:
     size_t sceneCount() const { return m_scenes.size(); }
 
     // 主循环分发
+    void fixedUpdate(float fixedDt);
     void update(float dt);
     void render();
     // void handleEvent(const Event& event);  // TODO: 更新为使用新的Event系统

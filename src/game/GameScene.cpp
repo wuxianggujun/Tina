@@ -265,12 +265,8 @@ void GameScene::update(float dt)
     // 处理输入
     handleInput();
 
-    updateGameLogic(dt);
     updateCamera(dt);
     ensureToolbarIconsReady();
-
-    // 昼夜推进
-    m_dayNight.update(dt);
 
     // 若音效已加载完成且尚未开始，则立即播放一次
     if (!m_sfxStarted && m_sfxYingxiao) {
@@ -296,6 +292,12 @@ void GameScene::update(float dt)
             }
         }
     }
+}
+
+void GameScene::fixedUpdate(float fixedDt)
+{
+    updateGameLogic(fixedDt);
+    m_dayNight.update(fixedDt);
 }
 
 void GameScene::render()

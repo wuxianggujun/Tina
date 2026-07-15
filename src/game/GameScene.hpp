@@ -47,6 +47,7 @@ public:
     void onWindowSizeChanged(int width, int height) override;
 
     // 主循环
+    void fixedUpdate(float fixedDt) override;
     void update(float dt) override;
     void render() override;
     // 事件处理已迁移到 InputSystem

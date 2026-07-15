@@ -290,6 +290,14 @@ void Application::run()
     }
 
     m_running = true;
+    m_frameIndex = 0;
+    m_interpolationAlpha = 0.0f;
+    m_lastFrameTime = bx::getHPCounter();
+    Core::TimeConfig timeConfig{};
+    timeConfig.tick_rate = m_config.simulationHz;
+    timeConfig.max_substeps = m_config.maxSimulationSteps;
+    timeConfig.dt_max = 0.1;
+    m_fixedTicker.reset(timeConfig);
     TINA_INFO("Application 主循环启动");
 
     while (m_running && !m_sceneManager->isEmpty()) {
@@ -331,29 +339,38 @@ void Application::run()
             m_app->onEvent(*this);
         }
 
-        // 7. 调用用户应用更新钩子
+        // 7. 固定步长 Simulation；单帧追赶次数由配置限制。
+        m_fixedTicker.accumulate(m_deltaTime);
+        m_fixedTicker.step([this](double fixedDelta) {
+            const float step = static_cast<float>(fixedDelta);
+            if (m_app) m_app->onFixedUpdate(*this, step);
+            if (m_sceneManager) m_sceneManager->fixedUpdate(step);
+        });
+        m_interpolationAlpha = static_cast<float>(m_fixedTicker.alpha());
+
+        // 8. 调用用户应用变量更新钩子
         if (m_app) {
             m_app->onUpdate(*this, m_deltaTime);
         }
 
-        // 8. 更新场景
+        // 9. 更新场景和统一UI阶段
         update(m_deltaTime);
 
-        // 9. 渲染场景
+        // 10. 渲染场景
         render();
 
-        // 10. 调用用户应用渲染钩子
+        // 11. 调用用户应用渲染钩子
         if (m_app) {
             m_app->onRender(*this);
         }
 
-        // 11. 输入系统帧结束
+        // 12. 输入系统帧结束
         if (m_inputSystem) m_inputSystem->endFrame();
 
-        // 12. 执行任务队列
+        // 13. 执行任务队列
         flushTasks();
 
-        // 13. 提交帧
+        // 14. 提交帧
         bgfx::frame();
 
         ++m_frameIndex;

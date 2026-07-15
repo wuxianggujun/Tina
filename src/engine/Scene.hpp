@@ -70,6 +70,9 @@ public:
     // 自动更新UI根节点，然后调用子类的update()
     void updateFrame(float dt);
 
+    // 固定步长 Simulation；默认无操作。
+    virtual void fixedUpdate(float fixedDt) { (void)fixedDt; }
+
     // 更新逻辑（子类实现）
     // 参数：dt - 上一帧到当前帧的时间间隔（秒）
     virtual void update(float dt) = 0;

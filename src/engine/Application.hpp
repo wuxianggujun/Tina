@@ -8,6 +8,7 @@
 #pragma once
 
 #include "../core/Memory.hpp"
+#include "../core/time/FrameTimer.hpp"
 #include "../renderer/ShaderManager.hpp"
 #include <functional>
 #include <mutex>
@@ -57,6 +58,8 @@ public:
         bool vsync = true;                 // 垂直同步
         uint32_t msaa = 8;                 // 多重采样抗锯齿
         uint64_t maxFrames = 0;            // 0=持续运行；非0用于可重复冒烟验证
+        int simulationHz = 60;             // 固定 Simulation 频率
+        int maxSimulationSteps = 4;        // 单个渲染帧允许的最大追赶步数
     };
 
     /// 构造函数
@@ -118,6 +121,9 @@ public:
 
     float deltaTime() const { return m_deltaTime; }
     float fps() const { return m_fps; }
+    float fixedDeltaTime() const { return static_cast<float>(m_fixedTicker.fixedDelta()); }
+    float interpolationAlpha() const { return m_interpolationAlpha; }
+    uint64_t frameIndex() const { return m_frameIndex; }
 
     // ==================== 窗口信息 ====================
 
@@ -155,6 +161,8 @@ private:
     float m_fps = 60.0f;
     uint64_t m_lastFrameTime = 0;
     uint64_t m_frameIndex = 0;
+    Core::FixedStepTicker m_fixedTicker{Core::TimeConfig{}};
+    float m_interpolationAlpha = 0.0f;
 
     int m_pixelWidth = 1280;
     int m_pixelHeight = 720;

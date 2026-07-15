@@ -137,6 +137,16 @@ Scene* SceneManager::currentScene() const
     return m_scenes.empty() ? nullptr : m_scenes.back().get();
 }
 
+void SceneManager::fixedUpdate(float fixedDt)
+{
+    if (Scene* scene = currentScene()) {
+        m_dispatching = true;
+        scene->fixedUpdate(fixedDt);
+        m_dispatching = false;
+    }
+    // 场景操作留到 variable update 末尾提交，避免同一 Render Frame 内切换多次。
+}
+
 void SceneManager::update(float dt)
 {
     if (Scene* scene = currentScene()) {
