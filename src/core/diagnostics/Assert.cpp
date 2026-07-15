@@ -43,7 +43,7 @@ AssertAction reportAssertion(const AssertFailure& failure) noexcept
 void handleAssertion(
     std::string_view expression,
     std::string_view message,
-    std::source_location location) noexcept
+    SourceLocation location) noexcept
 {
     switch (reportAssertion(AssertFailure{expression, message, location})) {
     case AssertAction::Continue:

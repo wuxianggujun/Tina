@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../base/Compiler.hpp"
+#include "../base/SourceLocation.hpp"
 
-#include <source_location>
 #include <string_view>
 
 namespace Tina::Core::Diagnostics {
@@ -16,7 +16,7 @@ enum class AssertAction {
 struct AssertFailure {
     std::string_view expression;
     std::string_view message;
-    std::source_location location;
+    SourceLocation location;
 };
 
 using AssertHandler = AssertAction (*)(const AssertFailure&) noexcept;
@@ -26,7 +26,7 @@ TINA_CORE_API AssertAction reportAssertion(const AssertFailure& failure) noexcep
 TINA_CORE_API void handleAssertion(
     std::string_view expression,
     std::string_view message = {},
-    std::source_location location = std::source_location::current()) noexcept;
+    SourceLocation location = SourceLocation::current()) noexcept;
 
 [[nodiscard]] constexpr std::string_view assertMessage() noexcept
 {
@@ -47,7 +47,7 @@ TINA_CORE_API void handleAssertion(
             ::Tina::Core::Diagnostics::handleAssertion(                                             \
                 #expression,                                                                        \
                 ::Tina::Core::Diagnostics::assertMessage(__VA_ARGS__),                              \
-                std::source_location::current());                                                   \
+                ::Tina::Core::SourceLocation::current());                                           \
         }                                                                                           \
     } while (false)
 #else

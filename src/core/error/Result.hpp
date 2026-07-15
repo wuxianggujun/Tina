@@ -158,7 +158,7 @@ using Status = Result<void>;
 [[nodiscard]] inline Failure failure(
     ErrorCode code,
     std::string_view message = {},
-    std::source_location location = std::source_location::current())
+    SourceLocation location = SourceLocation::current())
 {
     return Failure(Error{code, message, location});
 }

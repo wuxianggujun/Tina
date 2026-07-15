@@ -14,6 +14,7 @@
 - Runtime 时间：固定步长、插值、禁用 Simulation、最大追赶步和异常步消费；
 - Event：优先级队列、RAII Token、dispatcher 先销毁和立即取消订阅；
 - Resource：共享 FileSystem 唯一 completion pump、主线程预算、取消和过期 generation 隔离。
+- 同一组16项测试已在 Linux Clang 14 下启用 ASan/UBSan 并通过。
 
 ## 待补自动化门禁
 
@@ -21,7 +22,7 @@
 - Scene 延迟 push/pop/replace；
 - UI dirty 布局、单次 hit-test 与 Capture/Target/Bubble；
 - Render Pass 顺序、typed handle generation 和 NullRenderDevice 资源计数；
-- Linux Clang ASan/UBSan。
+- 完整 Tina 游戏的 Linux Clang ASan/UBSan 构建与运行（当前测试程序已通过）。
 
 Windows 和 Linux 必须分别构建；Linux Clang 额外运行 ASan/UBSan 配置。
 

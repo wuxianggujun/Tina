@@ -9,8 +9,6 @@
 #include <new>
 #include <cstddef>
 #include <cstdlib>
-#include <new>
-#include <unordered_set>
 #include <EASTL/fixed_hash_set.h>
 #include <mutex>
 
@@ -57,6 +55,87 @@ namespace {
         auto it = aligned_set().find(p);
         if (it != aligned_set().end()) { aligned_set().erase(it); return true; }
         return false;
+    }
+}
+
+// The translation unit replaces global delete overloads because EASTL always
+// deallocates through delete[]. Replace the matching allocation side as well;
+// otherwise ordinary std::allocator allocations use the runtime operator new
+// and are later released by our free-based delete, which is undefined behavior.
+void* operator new(std::size_t size)
+{
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) {
+        return memory;
+    }
+    throw std::bad_alloc();
+}
+
+void* operator new[](std::size_t size)
+{
+    return ::operator new(size);
+}
+
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept
+{
+    try {
+        return ::operator new(size);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept
+{
+    try {
+        return ::operator new[](size);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void* operator new(std::size_t size, std::align_val_t alignment)
+{
+    void* memory = nullptr;
+#if defined(_MSC_VER)
+    memory = _aligned_malloc(size == 0 ? 1 : size, static_cast<std::size_t>(alignment));
+#else
+    if (posix_memalign(&memory,
+                       static_cast<std::size_t>(alignment),
+                       size == 0 ? 1 : size) != 0) {
+        memory = nullptr;
+    }
+#endif
+    if (!memory) {
+        throw std::bad_alloc();
+    }
+    track_aligned(memory);
+    return memory;
+}
+
+void* operator new[](std::size_t size, std::align_val_t alignment)
+{
+    return ::operator new(size, alignment);
+}
+
+void* operator new(std::size_t size,
+                   std::align_val_t alignment,
+                   const std::nothrow_t&) noexcept
+{
+    try {
+        return ::operator new(size, alignment);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void* operator new[](std::size_t size,
+                     std::align_val_t alignment,
+                     const std::nothrow_t&) noexcept
+{
+    try {
+        return ::operator new[](size, alignment);
+    } catch (...) {
+        return nullptr;
     }
 }
 

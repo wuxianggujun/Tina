@@ -7,6 +7,7 @@ add_library(tina_core STATIC
     base/EnumFlags.hpp
     base/Platform.hpp
     base/ScopeExit.hpp
+    base/SourceLocation.hpp
     base/Types.hpp
     time/Clock.cpp
     time/Clock.hpp

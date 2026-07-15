@@ -1,8 +1,8 @@
 #pragma once
 
+#include "../base/SourceLocation.hpp"
 #include "../base/Types.hpp"
 
-#include <source_location>
 #include <string>
 #include <string_view>
 
@@ -24,14 +24,14 @@ enum class ErrorCode : u16 {
 struct Error final {
     ErrorCode code = ErrorCode::Internal;
     std::string message;
-    std::source_location location = std::source_location::current();
+    SourceLocation location = SourceLocation::current();
 
     Error() = default;
 
     explicit Error(
         ErrorCode errorCode,
         std::string_view errorMessage = {},
-        std::source_location source = std::source_location::current())
+        SourceLocation source = SourceLocation::current())
         : code(errorCode), message(errorMessage), location(source)
     {
     }
