@@ -19,6 +19,8 @@ Tina 是使用 C++20 开发的 2D/3D 游戏引擎项目。平台与输入层使�
 - 音频已迁移到 miniaudio；
 - Core 已增加强类型、Result、Assert、ScopeExit、Clock 和 FrameTimer；
 - Windows/Linux CMake Preset 已建立。
+- `GameScene` 已通过真实 2D TileMap、ECS、中文 UI 和音频冒烟；
+- `Smoke3DScene` 已通过右手透视相机、深度测试和静态索引 Mesh 冒烟。
 
 ## 构建
 
@@ -33,6 +35,16 @@ cmake --build --preset windows-vs2022-debug
 
 ```powershell
 out\build\windows-msvc-vs2022\bin\Debug\tina_tests.exe
+```
+
+运行时验收入口：
+
+```powershell
+# 完整 2D + 自研 UI
+out\build\windows-msvc-vs2022\bin\Debug\Tina.exe --smoke-game --smoke-frames=120
+
+# 最小 3D：Perspective Camera + Depth Test + Indexed Cube
+out\build\windows-msvc-vs2022\bin\Debug\Tina.exe --smoke-3d --smoke-frames=120
 ```
 
 详细状态与约束从 [文档索引](docs/README.md) 开始阅读。所有源码、文档、日志和配置统一使用 UTF-8，MSVC 强制启用 `/utf-8`。

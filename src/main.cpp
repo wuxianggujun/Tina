@@ -13,6 +13,7 @@
 #include "engine/SceneManager.hpp"  // 需要完整定义才能调用 scenes()
 #include "game/MenuScene.hpp"
 #include "game/GameScene.hpp"
+#include "game/Smoke3DScene.hpp"
 
 #include <charconv>
 #include <string_view>
@@ -35,12 +36,17 @@ int main(int argc, char* argv[])
         config.vsync = true;
         config.msaa = 8;
 
-        bool startGameScene = false;
+        enum class StartupScene { Menu, Game2D, Smoke3D };
+        StartupScene startupScene = StartupScene::Menu;
         constexpr std::string_view framePrefix = "--smoke-frames=";
         for (int i = 1; i < argc; ++i) {
             const std::string_view argument = argv[i] ? argv[i] : "";
             if (argument == "--smoke-game") {
-                startGameScene = true;
+                startupScene = StartupScene::Game2D;
+                continue;
+            }
+            if (argument == "--smoke-3d") {
+                startupScene = StartupScene::Smoke3D;
                 continue;
             }
             if (argument.starts_with(framePrefix)) {
@@ -63,8 +69,10 @@ int main(int argc, char* argv[])
         }
 
         // 冒烟模式可直接进入完整2D世界和自研UI；默认仍进入主菜单。
-        if (startGameScene) {
+        if (startupScene == StartupScene::Game2D) {
             app.scenes().push(Memory::MakeUnique<Game::GameScene>(12345u));
+        } else if (startupScene == StartupScene::Smoke3D) {
+            app.scenes().push(Memory::MakeUnique<Game::Smoke3DScene>());
         } else {
             app.scenes().push(Memory::MakeUnique<Game::MenuScene>());
         }

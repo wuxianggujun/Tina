@@ -8,14 +8,20 @@
 - 测试依赖由固定 vcpkg baseline 提供；
 - 测试日志不得包含路径外的敏感环境变量或凭据。
 
-## 覆盖范围
+## 当前自动化覆盖（16项）
 
-- Core：Result、ScopeExit、EnumFlags、Assert、Clock、FrameTimer；
-- Runtime：固定步长、最大追赶步、阶段顺序、失败回滚；
-- Event：订阅析构、队列顺序、dispatcher 先销毁；
-- Resource：状态转换、取消、过期 generation、唯一 completion pump；
-- Scene/UI：延迟 push/pop、布局 dirty、hit-test、Capture/Target/Bubble；
-- Render：Pass 顺序、typed handle generation、资源释放计数。
+- Core：Result、ScopeExit、EnumFlags、Assert、Clock、FrameTimer、FixedStepTicker、基础类型和 Legacy Compatibility；
+- Runtime 时间：固定步长、插值、禁用 Simulation、最大追赶步和异常步消费；
+- Event：优先级队列、RAII Token、dispatcher 先销毁和立即取消订阅；
+- Resource：共享 FileSystem 唯一 completion pump、主线程预算、取消和过期 generation 隔离。
+
+## 待补自动化门禁
+
+- Application 初始化失败回滚和析构顺序；
+- Scene 延迟 push/pop/replace；
+- UI dirty 布局、单次 hit-test 与 Capture/Target/Bubble；
+- Render Pass 顺序、typed handle generation 和 NullRenderDevice 资源计数；
+- Linux Clang ASan/UBSan。
 
 Windows 和 Linux 必须分别构建；Linux Clang 额外运行 ASan/UBSan 配置。
 
@@ -33,4 +39,10 @@ Windows 和 Linux 必须分别构建；Linux Clang 额外运行 ASan/UBSan 配�
 ./Tina --smoke-game --smoke-frames=120
 ```
 
-两个命令都必须返回0，并在日志中出现正常初始化、达到帧数、场景退出、资源管理器释放、bgfx 和窗口关闭记录。
+运行右手透视相机、深度测试和静态索引 Cube：
+
+```bash
+./Tina --smoke-3d --smoke-frames=120
+```
+
+三个命令都必须返回0，并在日志中出现正常初始化、达到帧数、场景退出、资源管理器释放、bgfx 和窗口关闭记录。3D 路径还必须出现 `Smoke3DScene released vertex and index buffers`，且不得出现 `BGFX LEAK` 或 `MEMORY LEAK`。

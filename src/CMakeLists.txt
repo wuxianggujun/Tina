@@ -36,6 +36,8 @@ set(SRC_FILES
     engine/InputSystem.cpp
     game/GameScene.hpp
     game/GameScene.cpp
+    game/Smoke3DScene.hpp
+    game/Smoke3DScene.cpp
     game/MenuScene.hpp
     game/MenuScene.cpp
     game/PauseScene.hpp
@@ -51,6 +53,8 @@ set(SRC_FILES
     physics/Physics2D.cpp
     engine/Camera2D.hpp
     engine/Camera2D.cpp
+    engine/Camera3D.hpp
+    engine/Camera3D.cpp
     game/TileMap.hpp
     game/TileMap.cpp
     game/CoordinateMapper.hpp
@@ -69,6 +73,8 @@ set(SRC_FILES
     renderer/ShaderCatalog.cpp
     renderer/SpriteRenderer.hpp
     renderer/SpriteRenderer.cpp
+    renderer/SimpleMeshRenderer.hpp
+    renderer/SimpleMeshRenderer.cpp
     renderer/RenderCommand.hpp
     renderer/RenderQueue.hpp
     renderer/RenderQueue.cpp
