@@ -9,27 +9,45 @@ namespace Tina::Engine {
 // ==================== UI 根节点设置 ====================
 
 void EventSystem::setUIRoot(Memory::SharedPtr<UI::UINode> root) {
-    m_uiContext.root = root;  // 自动转换为 WeakPtr
-    // 清空子节点引用（它们的生命周期由root保证）
-    m_uiContext.hoveredNode = nullptr;
-    m_uiContext.pressedNode = nullptr;
-    m_uiContext.focusedNode = nullptr;
+    Vector<UI::UINode*> roots;
+    if (root) roots.push_back(root.get());
+    setUIRoots(roots);
+    m_uiContext.rootOwner = root;
+    m_uiContext.rootOwnerRequired = static_cast<bool>(root);
 }
 
 void EventSystem::setUIRoot(UI::UINode* root) {
-    if (root) {
-        try {
-            m_uiContext.root = root->getWeakPtr();
-        } catch (...) {
-            // 如果节点不是由 shared_ptr 管理，回退到空
-            m_uiContext.root.reset();
+    Vector<UI::UINode*> roots;
+    if (root) roots.push_back(root);
+    setUIRoots(roots);
+}
+
+void EventSystem::setUIRoots(const Vector<UI::UINode*>& roots) {
+    const uint64_t treeVersion = UI::UINode::treeVersion();
+    bool changed = treeVersion != m_uiContext.treeVersion ||
+                   roots.size() != m_uiContext.roots.size();
+    if (!changed) {
+        for (size_t i = 0; i < roots.size(); ++i) {
+            if (roots[i] != m_uiContext.roots[i]) {
+                changed = true;
+                break;
+            }
         }
-    } else {
-        m_uiContext.root.reset();
     }
-    m_uiContext.hoveredNode = nullptr;
-    m_uiContext.pressedNode = nullptr;
-    m_uiContext.focusedNode = nullptr;
+
+    if (changed) {
+        m_uiContext.treeVersion = treeVersion;
+        m_uiContext.roots.clear();
+        for (UI::UINode* root : roots) {
+            if (root) m_uiContext.roots.push_back(root);
+        }
+        m_uiContext.hoveredNode = nullptr;
+        m_uiContext.pressedNode = nullptr;
+        m_uiContext.focusedNode = nullptr;
+    }
+
+    m_uiContext.rootOwner.reset();
+    m_uiContext.rootOwnerRequired = false;
 }
 
 // ==================== UI 输入更新 ====================
@@ -45,9 +63,8 @@ void EventSystem::updateUIInput(float mouseX, float mouseY, bool mouseDown) {
     #ifdef TINA_DEBUG_UI_INPUT
     static int debugCounter = 0;
     if (++debugCounter % 60 == 0) {
-        auto root = m_uiContext.root.lock();
         TINA_DEBUG("EventSystem - 鼠标: ({}, {}), 按下: {}, 根节点: {}",
-                   mouseX, mouseY, mouseDown, root ? "有" : "无");
+                   mouseX, mouseY, mouseDown, m_uiContext.roots.empty() ? "无" : "有");
     }
     #endif
     
@@ -136,10 +153,16 @@ UI::UINode* EventSystem::findNodeUnderMouse(UI::UINode* node, float x, float y) 
 
 // 处理鼠标输入（内部实现）
 void EventSystem::handleMouseInput(float wheelDeltaY) {
-    // ✅ 尝试锁定根节点的 weak_ptr
-    auto root = m_uiContext.root.lock();
-    if (!root) {
-        // 根节点已销毁或未设置，安全返回
+    if (m_uiContext.rootOwnerRequired && m_uiContext.rootOwner.expired()) {
+        m_uiContext.roots.clear();
+        m_uiContext.hoveredNode = nullptr;
+        m_uiContext.pressedNode = nullptr;
+        m_uiContext.focusedNode = nullptr;
+        m_uiContext.rootOwnerRequired = false;
+        m_uiContext.treeVersion = 0;
+        return;
+    }
+    if (m_uiContext.roots.empty()) {
         return;
     }
     
@@ -148,8 +171,11 @@ void EventSystem::handleMouseInput(float wheelDeltaY) {
     bool mouseDown = m_uiContext.mouseDown;
     bool mouseDownPrev = m_uiContext.mouseDownPrev;
     
-    // 查找鼠标下的节点
-    UI::UINode* nodeUnderMouse = findNodeUnderMouse(root.get(), mx, my);
+    // 顶层节点后注册者视为更靠上；整帧只选择一个最终目标并路由一次。
+    UI::UINode* nodeUnderMouse = nullptr;
+    for (size_t i = m_uiContext.roots.size(); i > 0 && !nodeUnderMouse; --i) {
+        nodeUnderMouse = findNodeUnderMouse(m_uiContext.roots[i - 1], mx, my);
+    }
     
     // 处理 hover 状态变化
     if (nodeUnderMouse != m_uiContext.hoveredNode) {

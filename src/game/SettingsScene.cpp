@@ -51,7 +51,7 @@ void SettingsScene::update(float dt)
 {
     // 处理输入
     handleInput();
-    if (m_root) m_root->update(dt);
+    (void)dt;
 }
 
 void SettingsScene::render()
@@ -123,20 +123,11 @@ void SettingsScene::handleInput()
         return;
     }
 
-    // 🔧 安全检查：只有在UI根节点有效时才处理鼠标事件
-    if (!m_root) {
-        return;
-    }
-
-    // 鼠标移动/点击/滚轮：统一推送到引擎事件系统进行命中与分发
-    auto mousePos = input.getMousePosition();
-    bool leftDown = input.isMouseButtonDown(Engine::MouseButton::Left);
-    app()->events().setUIRoot(m_root.get()); // 确保根节点设置（UniquePtr -> raw）
-    app()->events().updateUIInput(mousePos.x, mousePos.y, leftDown, input.getMouseWheelDelta());
 }
 
 void SettingsScene::createUI()
 {
+    if (m_root) removeUIRoot(m_root.get());
     m_root = Memory::MakeUnique<UI::UINode>("SettingsRoot");
     m_root->setSize((float)m_pixelWidth, (float)m_pixelHeight);
 
@@ -249,8 +240,7 @@ void SettingsScene::createUI()
     float centerY = (m_pixelHeight - totalHeight) * 0.5f;
     panel->setPosition(centerX, centerY);
 
-    // 根节点供引擎事件系统使用
-    if (auto* a = app()) a->events().setUIRoot(m_root.get());
+    addUIRoot(m_root.get());
 }
 
 void SettingsScene::onBack()

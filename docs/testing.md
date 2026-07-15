@@ -18,3 +18,19 @@
 - Render：Pass 顺序、typed handle generation、资源释放计数。
 
 Windows 和 Linux 必须分别构建；Linux Clang 额外运行 ASan/UBSan 配置。
+
+## 运行冒烟
+
+菜单 2D + 中文 UI，正常提交120帧后退出：
+
+```bash
+./Tina --smoke-frames=120
+```
+
+直接进入完整 2D TileMap、ECS、Toolbar 和 CharacterPanel：
+
+```bash
+./Tina --smoke-game --smoke-frames=120
+```
+
+两个命令都必须返回0，并在日志中出现正常初始化、达到帧数、场景退出、资源管理器释放、bgfx 和窗口关闭记录。

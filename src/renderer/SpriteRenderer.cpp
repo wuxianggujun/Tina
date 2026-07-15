@@ -7,8 +7,14 @@
 
 namespace Tina::Renderer {
 
+SpriteRenderer::~SpriteRenderer()
+{
+    shutdown();
+}
+
 bool SpriteRenderer::initialize(ShaderManager& shaders)
 {
+    shutdown();
     m_prog = ShaderCatalog::Load(shaders, ShaderCatalog::Tag::Sprite);
     if (!bgfx::isValid(m_prog)) return false;
 
@@ -19,7 +25,17 @@ bool SpriteRenderer::initialize(ShaderManager& shaders)
     .end();
 
     m_sTex = bgfx::createUniform("s_tex", bgfx::UniformType::Sampler);
-    return true;
+    return bgfx::isValid(m_sTex);
+}
+
+void SpriteRenderer::shutdown()
+{
+    if (bgfx::isValid(m_sTex)) {
+        bgfx::destroy(m_sTex);
+        m_sTex = BGFX_INVALID_HANDLE;
+    }
+    // Program 由 ShaderManager 统一拥有。
+    m_prog = BGFX_INVALID_HANDLE;
 }
 
 void SpriteRenderer::draw(uint16_t viewId,

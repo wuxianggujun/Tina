@@ -32,14 +32,7 @@ Scene::Scene() {
 
 // 虚析构函数定义（必须在此处，RenderQueue是完整类型）
 Scene::~Scene() {
-    // ⚠️ 重要：必须在布局管理器销毁前清理所有UI根节点
-    // 否则UINode析构时会访问已销毁的布局管理器
-    for (auto* root : m_uiRoots) {
-        if (root) {
-            unregisterUITreeFromLayoutManager(root);
-        }
-    }
-    m_uiRoots.clear();
+    clearUIRoots();
     
     // 现在可以安全地销毁布局管理器和其他资源
     // （UniquePtr会自动按声明逆序析构）
@@ -70,6 +63,13 @@ void Scene::removeUIRoot(UI::UINode* root) {
             m_uiRoots.end()
         );
     }
+}
+
+void Scene::clearUIRoots() {
+    for (auto* root : m_uiRoots) {
+        if (root) unregisterUITreeFromLayoutManager(root);
+    }
+    m_uiRoots.clear();
 }
 
 // 更新窗口尺寸（简化版：直接应用，不防抖）
@@ -159,20 +159,33 @@ Renderer::RenderQueue& Scene::queue() {
 
 // 框架更新入口
 void Scene::updateFrame(float dt) {
-    // 1. 自动更新所有UI根节点
+    // 1. 子类更新游戏/页面状态；其中产生的布局请求在本帧统一提交。
+    update(dt);
+
+    // 2. 更新UI节点动画和状态，不隐式执行布局。
     for (auto* root : m_uiRoots) {
         if (root) {
             root->update(dt);
         }
     }
 
-    // 2. 批量执行挂起的布局，确保本帧布局一致
+    // 3. 每帧至多执行一次批量布局。
     if (m_uiLayoutManager) {
         m_uiLayoutManager->performPendingLayouts();
     }
 
-    // 3. 调用子类的更新逻辑
-    update(dt);
+    // 4. 布局完成后只做一次命中测试与 routed event 分发。
+    if (m_app && m_app->getEventSystem()) {
+        m_app->events().setUIRoots(m_uiRoots);
+        if (InputSystem* inputSystem = input()) {
+            const auto mouse = inputSystem->getMousePosition();
+            m_app->events().updateUIInput(
+                mouse.x,
+                mouse.y,
+                inputSystem->isMouseButtonDown(MouseButton::Left),
+                inputSystem->getMouseWheelDelta());
+        }
+    }
 }
 
 // 框架渲染入口（由Application调用）
@@ -276,36 +289,15 @@ void Scene::setupWorldView(uint16_t viewId) {
 // 递归注册UI树到布局管理器
 void Scene::registerUITreeToLayoutManager(UI::UINode* node) {
     if (!node || !m_uiLayoutManager) return;
-    
-    // 设置布局管理器指针
+
+    // UINode 会递归注册整棵树，后续动态添加的子节点也会继承管理器。
     node->setLayoutManager(m_uiLayoutManager.get());
-    
-    // 注册节点
-    m_uiLayoutManager->registerNode(node);
-    
-    // 递归注册所有子节点
-    for (size_t i = 0; i < node->getChildCount(); ++i) {
-        if (auto* child = node->getChild(i)) {
-            registerUITreeToLayoutManager(child);
-        }
-    }
 }
 
 // 递归注销UI树从布局管理器
 void Scene::unregisterUITreeFromLayoutManager(UI::UINode* node) {
     if (!node || !m_uiLayoutManager) return;
-    
-    // 递归注销所有子节点
-    for (size_t i = 0; i < node->getChildCount(); ++i) {
-        if (auto* child = node->getChild(i)) {
-            unregisterUITreeFromLayoutManager(child);
-        }
-    }
-    
-    // 注销节点
-    m_uiLayoutManager->unregisterNode(node);
-    
-    // 清除布局管理器指针
+
     node->setLayoutManager(nullptr);
 }
 

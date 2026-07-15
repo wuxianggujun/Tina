@@ -130,6 +130,7 @@ public:
         
         T* ptr = child.get();
         ptr->m_parent = this;
+        ptr->setLayoutManager(m_layoutManager);
         m_children.push_back(std::move(child));
         bumpTreeVersion();
         
@@ -469,7 +470,7 @@ public:
     Tina::Engine::EventSystem* eventSystem() const { return m_eventSystem; }
 
     // === 布局管理器支持 ===
-    void setLayoutManager(UILayoutManager* layoutManager) { m_layoutManager = layoutManager; }
+    void setLayoutManager(UILayoutManager* layoutManager);
     UILayoutManager* layoutManager() const { return m_layoutManager; }
 
 protected:

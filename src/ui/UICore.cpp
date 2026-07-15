@@ -16,7 +16,10 @@
 namespace Tina::UI {
 
 // 析构函数定义（需要在这里，因为IBatchStrategy的完整定义在这里可见）
-UIRenderer::~UIRenderer() = default;
+UIRenderer::~UIRenderer()
+{
+    shutdown();
+}
 
 bool UIRenderer::initialize(Tina::Renderer::ShaderManager& sm, TextRenderer* text)
 {
@@ -67,6 +70,8 @@ void UIRenderer::shutdown()
     
     // 清理批处理缓冲
     m_layers.clear();
+    m_layerStack.clear();
+    m_text = nullptr;
 }
 
 void UIRenderer::beginFrame(uint16_t viewId)

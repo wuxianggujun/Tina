@@ -50,9 +50,6 @@ void PauseScene::onEnter()
     // 创建 UI
     createUI();
     
-    // 设置UI根节点到事件系统（用于命中测试）
-    app()->events().setUIRoot(m_rootNode.get());
-    
     // 绑定按钮回调（EventSystem 已自动连接）
     if (m_btnContinue) m_btnContinue->setOnClick([this]{ onContinueClicked(); });
     if (m_btnDay)      m_btnDay->setOnClick([this]{ onSetDay(); });
@@ -68,11 +65,6 @@ void PauseScene::onExit()
 {
     TINA_INFO("PauseScene::onExit - 退出暂停菜单");
 
-    // 🔧 关键：先清空事件系统的UI根节点，避免访问已销毁的UI
-    if (app()) {
-        app()->events().setUIRoot(nullptr);
-    }
-
     // 清理 UI（必须在渲染资源之前清理）
     m_rootNode.reset();
     m_btnContinue = nullptr;
@@ -86,9 +78,7 @@ void PauseScene::update(float dt)
     // 处理输入
     handleInput();
 
-    if (m_rootNode) {
-        m_rootNode->update(dt);
-    }
+    (void)dt;
 }
 
 void PauseScene::render()
@@ -167,16 +157,12 @@ void PauseScene::handleInput()
         return;
     }
 
-    // 更新UI输入到引擎事件系统
-    auto mousePos = input.getMousePosition();
-    bool leftDown = input.isMouseButtonDown(Engine::MouseButton::Left);
-    app()->events().updateUIInput(mousePos.x, mousePos.y, leftDown, input.getMouseWheelDelta());
 }
 
 void PauseScene::createUI()
 {
-    // ✅ 智能指针重构：SharedPtr 自动管理生命周期
-    // 释放旧 UI（SharedPtr 自动通知所有 WeakPtr）
+    // 重建前先注销旧树，避免布局管理器保留悬空节点。
+    if (m_rootNode) removeUIRoot(m_rootNode.get());
     m_rootNode.reset();
     m_btnContinue = nullptr;
     m_btnQuit = nullptr;
@@ -300,10 +286,7 @@ void PauseScene::createUI()
     TINA_INFO("PauseScene: 面板居中 - 屏幕({}x{}), 面板({}x{}), 中心位置({}, {})",
               m_pixelWidth, m_pixelHeight, panelW, totalHeight, centerX, centerY);
 
-    // ✅ 设置UI根节点到事件系统（传递 SharedPtr）
-    if (app()) {
-        app()->events().setUIRoot(m_rootNode);
-    }
+    addUIRoot(m_rootNode.get());
 
     TINA_INFO("PauseScene: UI 创建完成");
 }

@@ -20,6 +20,7 @@
 #include <bgfx/bgfx.h>
 #include <bx/timer.h>
 #include <algorithm>
+#include <exception>
 
 namespace Tina::Engine {
 namespace {
@@ -50,17 +51,34 @@ Application::Application(IApplication* app, const Config& config)
     , m_pixelWidth(config.windowWidth)
     , m_pixelHeight(config.windowHeight)
 {
+    if (s_instance) {
+        TINA_ERROR("同一进程中只能存在一个 Application 实例");
+        return;
+    }
+
     s_instance = this;
-    init();
+    try {
+        if (!init()) {
+            TINA_ERROR("Application 初始化失败，开始回滚已创建的子系统");
+            shutdown();
+        }
+    } catch (...) {
+        TINA_ERROR("Application 初始化期间发生异常，开始回滚已创建的子系统");
+        shutdown();
+        s_instance = nullptr;
+        throw;
+    }
 }
 
 Application::~Application()
 {
     shutdown();
-    s_instance = nullptr;
+    if (s_instance == this) {
+        s_instance = nullptr;
+    }
 }
 
-void Application::init()
+bool Application::init()
 {
     TINA_INFO("Application 初始化中...");
 
@@ -74,15 +92,14 @@ void Application::init()
     m_window = Memory::MakeUnique<Window>();
     if (!m_window->create(desc)) {
         TINA_ERROR("创建窗口失败");
-        return;
+        return false;
     }
 
     // 2. 获取原生窗口句柄
     void* nwh = m_window->getNativeHandle();
     if (!nwh) {
         TINA_ERROR("无法获取原生窗口句柄");
-        m_window.reset();
-        return;
+        return false;
     }
 
     // 3. 初始化bgfx
@@ -105,8 +122,7 @@ void Application::init()
 
     if (!bgfx::init(bgfxInit)) {
         TINA_ERROR("bgfx 初始化失败");
-        m_window.reset();
-        return;
+        return false;
     }
     m_bgfxInitialized = true;
 
@@ -131,19 +147,22 @@ void Application::init()
     m_eventSystem = Memory::MakeUnique<EventSystem>();
     if (!m_eventSystem->initialize()) {
         TINA_ERROR("EventSystem 初始化失败");
-        return;
+        return false;
     }
     m_inputSystem = Memory::MakeUnique<InputSystem>();
     m_inputSystem->setEventSystem(m_eventSystem.get());
     m_inputSystem->setWindow(m_window.get());
-    m_inputSystem->initialize();
+    if (!m_inputSystem->initialize()) {
+        TINA_ERROR("InputSystem 初始化失败");
+        return false;
+    }
     m_sceneManager = Memory::MakeUnique<SceneManager>(this);
 
     // 7. 创建资源系统
     m_fileSystem = CreateFileSystem();
     if (!m_fileSystem) {
         TINA_ERROR("文件系统创建失败");
-        return;
+        return false;
     }
     m_resourceHub = Memory::MakeUnique<ResourceManagerHub>(*m_fileSystem);
     {
@@ -165,6 +184,7 @@ void Application::init()
     m_textRenderer = Memory::MakeUnique<Tina::UI::TextRenderer>();
     if (!m_textRenderer->initialize(*m_shaderMgr, *m_resourceHub)) {
         TINA_ERROR("Application: TextRenderer 初始化失败");
+        return false;
     } else {
         m_textRenderer->loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 48);
         TINA_INFO("Application: TextRenderer 已加载 48 号字体");
@@ -172,40 +192,55 @@ void Application::init()
 
     m_prim2D = Memory::MakeUnique<Tina::Renderer::Primitive2D>();
     if (!m_prim2D->initialize(*m_shaderMgr)) {
-        TINA_WARN("Primitive2D 初始化失败");
+        TINA_ERROR("Primitive2D 初始化失败");
+        return false;
     }
 
     m_sprite2D = Memory::MakeUnique<Tina::Renderer::SpriteRenderer>();
     if (!m_sprite2D->initialize(*m_shaderMgr)) {
-        TINA_WARN("SpriteRenderer 初始化失败");
+        TINA_ERROR("SpriteRenderer 初始化失败");
+        return false;
     }
 
     prewarmCommonAssets();
 
-    if (!m_fileSystem) {
-        TINA_ERROR("文件系统创建失败");
-    } else {
-        TINA_INFO("资源系统初始化成功");
-    }
+    TINA_INFO("资源系统初始化成功");
 
     // 10. 初始化时间戳
     m_lastFrameTime = bx::getHPCounter();
 
     TINA_INFO("Application 初始化成功");
+    m_initialized = true;
     
     // 11. 调用用户应用初始化钩子
     if (m_app) {
         m_app->onSetup(*this);
+        m_setupCompleted = true;
     }
+
+    return true;
 }
 
 void Application::shutdown()
 {
+    if (m_shutdownCompleted) {
+        return;
+    }
+    m_shutdownCompleted = true;
+    m_running = false;
+
     TINA_INFO("Application 关闭中...");
 
     // 1. 调用用户应用清理钩子
-    if (m_app) {
-        m_app->onCleanup(*this);
+    if (m_app && m_setupCompleted) {
+        try {
+            m_app->onCleanup(*this);
+        } catch (const std::exception& error) {
+            TINA_ERROR("IApplication::onCleanup 异常: {}", error.what());
+        } catch (...) {
+            TINA_ERROR("IApplication::onCleanup 发生未知异常");
+        }
+        m_setupCompleted = false;
     }
 
     // 2. 先销毁所有依赖 bgfx、资源与窗口的上层对象。
@@ -236,14 +271,16 @@ void Application::shutdown()
     }
 
     m_window.reset();
+    m_initialized = false;
 
     TINA_INFO("Application 关闭完成");
 }
 
 void Application::run()
 {
-    if (!m_window) {
-        TINA_ERROR("窗口未初始化");
+    if (!m_initialized || !m_window || !m_sceneManager || !m_inputSystem ||
+        !m_eventSystem || !m_resourceHub || !m_bgfxInitialized) {
+        TINA_ERROR("Application 未完整初始化，拒绝启动主循环");
         return;
     }
 
@@ -318,6 +355,12 @@ void Application::run()
 
         // 13. 提交帧
         bgfx::frame();
+
+        ++m_frameIndex;
+        if (m_config.maxFrames > 0 && m_frameIndex >= m_config.maxFrames) {
+            TINA_INFO("已完成配置的 {} 帧，正常结束冒烟运行", m_config.maxFrames);
+            quit();
+        }
     }
 
     TINA_INFO("Application 主循环结束");

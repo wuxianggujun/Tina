@@ -35,14 +35,10 @@ void WorldSelectScene::onEnter() {
     // 创建 UI
     createUI();
     addUIRoot(m_root.get());
-    app()->events().setUIRoot(m_root);
 }
 
 void WorldSelectScene::onExit() {
     // 清理 UI
-    if (app()) {
-        app()->events().setUIRoot(Memory::SharedPtr<UI::UINode>());
-    }
     m_root.reset();
     m_list = nullptr;
     m_btnEnter = m_btnCreate = m_btnBack = nullptr;
@@ -270,9 +266,6 @@ void WorldSelectScene::handleInput() {
     auto& in = a->input();
     // 若对话框可见，场景级键盘导航与快捷键暂停，交由对话框处理
     if (m_createDialog && m_createDialog->isDialogVisible()) {
-        a->events().updateUIInput(in.getMouseX(), in.getMouseY(),
-                                  in.isMouseButtonDown(Engine::MouseButton::Left),
-                                  in.getMouseWheelDelta());
         return;
     }
     if (in.isKeyPressed(Engine::KeyCode::Escape)) { onBackClicked(); return; }
@@ -287,8 +280,6 @@ void WorldSelectScene::handleInput() {
             m_list->setSelectedIndex(sel);
         }
     }
-    // 同步 UI 输入到引擎事件系统（让按钮正常响应）
-    a->events().updateUIInput(in.getMouseX(), in.getMouseY(), in.isMouseButtonDown(Engine::MouseButton::Left), in.getMouseWheelDelta());
 }
 
 void WorldSelectScene::onBackClicked() {

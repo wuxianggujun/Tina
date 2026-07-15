@@ -56,6 +56,7 @@ public:
         const char* windowTitle = "Tina";  // 窗口标题
         bool vsync = true;                 // 垂直同步
         uint32_t msaa = 8;                 // 多重采样抗锯齿
+        uint64_t maxFrames = 0;            // 0=持续运行；非0用于可重复冒烟验证
     };
 
     /// 构造函数
@@ -83,6 +84,9 @@ public:
 
     /// 查询主循环是否在运行
     bool isRunning() const { return m_running; }
+
+    /// 查询所有必需子系统是否已经完整初始化。
+    bool isInitialized() const { return m_initialized; }
 
     // ==================== 访问核心系统 ====================
 
@@ -130,7 +134,7 @@ public:
     void postDelayed(uint32_t delayMs, std::function<void()> fn);
 
 private:
-    void init();
+    bool init();
     void shutdown();
     void processEvents();
     void update(float dt);
@@ -144,9 +148,13 @@ private:
     IApplication* m_app = nullptr;                     // 用户应用实例（可选）
     Config m_config;
     bool m_running = false;
+    bool m_initialized = false;
+    bool m_setupCompleted = false;
+    bool m_shutdownCompleted = false;
     float m_deltaTime = 0.0f;
     float m_fps = 60.0f;
     uint64_t m_lastFrameTime = 0;
+    uint64_t m_frameIndex = 0;
 
     int m_pixelWidth = 1280;
     int m_pixelHeight = 720;

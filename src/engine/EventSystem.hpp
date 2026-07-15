@@ -24,10 +24,12 @@ using namespace Tina::Container;  // 使用容器命名空间
 
 // ==================== UI 事件支持 ====================
 
-// UI事件上下文（状态跟踪）
-// ✅ 根节点使用 WeakPtr，子节点使用裸指针（生命周期由根节点保证）
+// UI事件上下文（状态跟踪）。一个窗口只有一个上下文，但可观察场景的多个顶层根节点。
 struct UIEventContext {
-    Memory::WeakPtr<UI::UINode> root;         // 根节点：WeakPtr
+    Vector<UI::UINode*> roots;                // 非拥有；由当前 Scene 保证帧内生命周期
+    Memory::WeakPtr<UI::UINode> rootOwner;    // SharedPtr 兼容入口的存活观察
+    bool rootOwnerRequired = false;
+    uint64_t treeVersion = 0;
     UI::UINode* hoveredNode = nullptr;        // 子节点：裸指针（由root保证生命周期）
     UI::UINode* pressedNode = nullptr;        // 子节点：裸指针
     UI::UINode* focusedNode = nullptr;        // 子节点：裸指针
@@ -108,6 +110,15 @@ public:
             queue.clear();
         }
         clearDelayed();
+        m_uiContext.roots.clear();
+        m_uiContext.rootOwner.reset();
+        m_uiContext.rootOwnerRequired = false;
+        m_uiContext.treeVersion = 0;
+        m_uiContext.hoveredNode = nullptr;
+        m_uiContext.pressedNode = nullptr;
+        m_uiContext.focusedNode = nullptr;
+        m_uiContext.mouseDown = false;
+        m_uiContext.mouseDownPrev = false;
         m_initialized = false;
         TINA_INFO("EventSystem 关闭完成");
     }
@@ -302,6 +313,9 @@ public:
     
     // 设置UI根节点（兼容裸指针）
     void setUIRoot(UI::UINode* root);
+
+    // 设置当前场景的顶层UI节点；一次输入更新只执行一次命中与路由。
+    void setUIRoots(const Vector<UI::UINode*>& roots);
     
     // 更新UI输入（每帧调用）
     void updateUIInput(float mouseX, float mouseY, bool mouseDown);

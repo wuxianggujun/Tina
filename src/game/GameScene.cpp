@@ -516,7 +516,7 @@ void GameScene::createUI()
     m_toolbar = Memory::MakeUnique<UI::UIToolbar>();
     m_toolbar->initialize(getPixelWidth(), getPixelHeight(), ui());
     // 注册到框架，自动处理窗口resize
-    addUIRoot(m_toolbar.get());
+    addUIRoot(m_toolbar->root());
 
     // 通过 TextureManager 加载工具图标（示例使用现有纹理资源）
     {
@@ -747,26 +747,8 @@ void GameScene::updateGameLogic(float dt)
     if (m_toolbar) {
         auto mousePos = inputSys.getMousePosition();
         float mx = mousePos.x, my = mousePos.y;
-        bool leftHeld = inputSys.isMouseButtonDown(Engine::MouseButton::Left);
 
-        // 先更新布局（计算各子节点世界坐标），再做命中测试与事件处理
-        m_toolbar->update(dt);
         m_toolbar->setMousePos(mx, my);
-        if (m_toolbar->root()) {
-            app()->events().setUIRoot(m_toolbar->root());
-            app()->events().updateUIInput(mx, my, leftHeld, inputSys.getMouseWheelDelta());
-        }
-    }
-
-    if (m_characterPanel) {
-        auto mousePos = inputSys.getMousePosition();
-        float mx = mousePos.x, my = mousePos.y;
-        bool leftHeld = inputSys.isMouseButtonDown(Engine::MouseButton::Left);
-
-        // 先更新布局，再分发事件
-        m_characterPanel->update(dt);
-        app()->events().setUIRoot(m_characterPanel.get());
-        app()->events().updateUIInput(mx, my, leftHeld, inputSys.getMouseWheelDelta());
     }
 
     // 重置工具激活状态（实现一次性点击，防止 UI 事件连续触发）

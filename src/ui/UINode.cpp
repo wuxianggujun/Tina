@@ -16,6 +16,7 @@ void UINode::bumpTreeVersion() { s_treeVersion.fetch_add(1, std::memory_order_re
 UINode::UINode(const std::string& name)
     : m_name(name)
 {
+    bumpTreeVersion();
     // 注意：不再自动注册到全局布局管理器
     // 布局管理器由Scene设置，在addUIRoot时注册
     
@@ -27,6 +28,7 @@ UINode::UINode(const std::string& name)
 
 UINode::~UINode()
 {
+    bumpTreeVersion();
     // 从布局管理器注销（如果有）
     if (m_layoutManager) {
         m_layoutManager->unregisterNode(this);
@@ -35,6 +37,24 @@ UINode::~UINode()
     // 新版：自动清理所有子节点（通过UniquePtr）
     // 子节点会递归销毁其子节点
     m_children.clear();
+}
+
+void UINode::setLayoutManager(UILayoutManager* layoutManager)
+{
+    if (m_layoutManager == layoutManager) return;
+
+    if (m_layoutManager) {
+        m_layoutManager->unregisterNode(this);
+    }
+    m_layoutManager = layoutManager;
+    if (m_layoutManager) {
+        m_layoutManager->registerNode(this);
+        if (m_layoutDirty) m_layoutManager->requestLayout(this);
+    }
+
+    for (auto& child : m_children) {
+        if (child) child->setLayoutManager(layoutManager);
+    }
 }
 
 // === 层级管理（新版） ===
@@ -51,6 +71,7 @@ Memory::UniquePtr<UINode> UINode::removeChild(UINode* child)
     if (it != m_children.end()) {
         Memory::UniquePtr<UINode> removed = std::move(*it);
         removed->m_parent = nullptr;
+        removed->setLayoutManager(nullptr);
         m_children.erase(it);
         bumpTreeVersion();
         return removed;
@@ -186,11 +207,6 @@ void UINode::update(float dt)
 {
     if (!m_enabled) return;
 
-    // ✅ 在更新前确保布局是最新的
-    if (m_layoutDirty) {
-        performLayoutNow();
-    }
-
     // 更新自身状态（动画、交互等）
     onUpdate(dt);
 
@@ -203,12 +219,6 @@ void UINode::update(float dt)
 void UINode::render(uint16_t viewId, UIRenderer& renderer)
 {
     if (!m_visible) return;
-
-    // ✅ 在渲染前确保布局是最新的
-    // 这很重要：如果场景恢复时没有先 update()，布局可能还没执行
-    if (m_layoutDirty) {
-        performLayoutNow();
-    }
 
     // 分层：若本节点未显式设置层（m_layer==0），继承父层；否则切换到自身层。
     int prevLayer = renderer.currentLayer();

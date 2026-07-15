@@ -12,10 +12,14 @@
 #include "engine/Application.hpp"
 #include "engine/SceneManager.hpp"  // 需要完整定义才能调用 scenes()
 #include "game/MenuScene.hpp"
+#include "game/GameScene.hpp"
+
+#include <charconv>
+#include <string_view>
 
 using namespace Tina;
 
-int main(int /*argc*/, char* /*argv*/[])
+int main(int argc, char* argv[])
 {
     // 初始化日志系统
     Core::Log::InitWithFile("Tina", Core::Log::Level::Trace,
@@ -31,12 +35,39 @@ int main(int /*argc*/, char* /*argv*/[])
         config.vsync = true;
         config.msaa = 8;
 
+        bool startGameScene = false;
+        constexpr std::string_view framePrefix = "--smoke-frames=";
+        for (int i = 1; i < argc; ++i) {
+            const std::string_view argument = argv[i] ? argv[i] : "";
+            if (argument == "--smoke-game") {
+                startGameScene = true;
+                continue;
+            }
+            if (argument.starts_with(framePrefix)) {
+                const std::string_view value = argument.substr(framePrefix.size());
+                uint64_t frames = 0;
+                const auto result = std::from_chars(value.data(), value.data() + value.size(), frames);
+                if (result.ec != std::errc{} || result.ptr != value.data() + value.size() || frames == 0) {
+                    TINA_ERROR("无效参数: {}", argument);
+                    return 2;
+                }
+                config.maxFrames = frames;
+            }
+        }
+
         // 创建应用（不使用IApplication扩展，传nullptr）
         Engine::Application app(nullptr, config);
+        if (!app.isInitialized()) {
+            TINA_ERROR("Tina 初始化失败");
+            return 1;
+        }
 
-        // 创建并立即推入主菜单场景（保证 run() 前已有初始场景）
-        auto menuScene = Memory::MakeUnique<Game::MenuScene>();
-        app.scenes().push(std::move(menuScene));
+        // 冒烟模式可直接进入完整2D世界和自研UI；默认仍进入主菜单。
+        if (startGameScene) {
+            app.scenes().push(Memory::MakeUnique<Game::GameScene>(12345u));
+        } else {
+            app.scenes().push(Memory::MakeUnique<Game::MenuScene>());
+        }
 
         // 运行主循环（阻塞直到退出）
         app.run();

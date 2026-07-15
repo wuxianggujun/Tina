@@ -13,9 +13,10 @@ namespace Tina::Renderer {
 class SpriteRenderer {
 public:
     SpriteRenderer() = default;
-    ~SpriteRenderer() = default;
+    ~SpriteRenderer();
 
     bool initialize(ShaderManager& shaders);
+    void shutdown();
 
     // 渲染一张精灵（左上坐标 + 尺寸，颜色乘法）
     void draw(uint16_t viewId,

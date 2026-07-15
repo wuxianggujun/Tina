@@ -4,10 +4,12 @@
 
 现有 UI 是 Retained Tree，包含 UINode、Panel、Button、Toolbar、Dialog、List、TextEdit、Measure/Layout 和自研事件路由。
 
+每个窗口由 EventSystem 持有一个 UIEventContext。当前 Scene 可注册多个顶层 UI 树，但每帧只在统一 UI Phase 中选择一个最上层目标，随后执行 Capture → Target → Bubble；场景代码不再各自重复提交 Pointer 输入。Scene 切换会先停止 UI 观察并注销整棵布局树，再释放节点所有权。
+
+布局请求由每 Scene 的 UILayoutManager 批量处理，每帧最多提交一次。`UINode::update()`、`render()` 和 hit-test 不再隐式触发布局；运行时新增子节点会继承并注册到同一个布局管理器。
+
 ## 已知问题
 
-- UIContext 只有一个全局 root，而 GameScene 一帧内可能切换多个 root 并重复处理输入；
-- 动态 addChild 后布局管理器继承与注册不完整；
 - requestLayout 的上下传播会重复扩大 dirty 范围；
 - hit-test、节点事件和全局 EventBus 存在重复分发风险。
 

@@ -1,5 +1,6 @@
 #include "SceneManager.hpp"
 #include "Application.hpp"
+#include "EventSystem.hpp"
 #include "../core/Log.hpp"
 
 namespace Tina::Engine {
@@ -47,10 +48,11 @@ void SceneManager::pop()
     if (m_dispatching) { requestPop(); return; }
     if (m_scenes.empty()) { TINA_WARN("SceneManager::pop - no scenes to pop"); return; }
 
-    // 退出当前场景
-    m_scenes.back()->onExit();
-    // ✅ 清理事件监听器
+    // 先让事件系统停止观察UI，再注销布局/事件，最后允许场景释放所有权。
+    m_app->events().setUIRoot(nullptr);
     m_scenes.back()->cleanupEventHandlers();
+    m_scenes.back()->clearUIRoots();
+    m_scenes.back()->onExit();
     m_scenes.pop_back();
 
     // 恢复上一个场景
@@ -70,9 +72,10 @@ void SceneManager::replace(Memory::UniquePtr<Scene> scene)
 
     // 退出当前场景
     if (!m_scenes.empty()) {
-        m_scenes.back()->onExit();
-        // ✅ 清理事件监听器
+        m_app->events().setUIRoot(nullptr);
         m_scenes.back()->cleanupEventHandlers();
+        m_scenes.back()->clearUIRoots();
+        m_scenes.back()->onExit();
         m_scenes.pop_back();
     }
 
@@ -96,6 +99,9 @@ void SceneManager::clear()
 {
     if (m_dispatching) { requestClear(); return; }
     while (!m_scenes.empty()) {
+        m_app->events().setUIRoot(nullptr);
+        m_scenes.back()->cleanupEventHandlers();
+        m_scenes.back()->clearUIRoots();
         m_scenes.back()->onExit();
         m_scenes.pop_back();
     }

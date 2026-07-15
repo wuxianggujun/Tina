@@ -56,17 +56,10 @@ void MenuScene::onEnter() {
     // 注册UI根节点到框架（框架会自动处理窗口resize）
     addUIRoot(m_rootNode.get());
     
-    // ✅ 设置UI根节点到事件系统（传递 SharedPtr）
-    app()->events().setUIRoot(m_rootNode);
 }
 
 void MenuScene::onExit() {
     TINA_INFO("MenuScene::onExit - 退出主菜单");
-
-    // ✅ 清空事件系统的UI根节点（SharedPtr 会自动处理）
-    if (app()) {
-        app()->events().setUIRoot(Memory::SharedPtr<UI::UINode>());
-    }
 
     // 清理 UI
     m_rootNode.reset();
@@ -220,17 +213,6 @@ void MenuScene::handleInput() {
         onQuitClicked();
     }
 
-    // 更新UI输入到引擎事件系统
-    auto mousePos = input.getMousePosition();
-    bool leftDown = input.isMouseButtonDown(Engine::MouseButton::Left);
-    
-    static int uiInputCount = 0;
-    if (++uiInputCount % 60 == 0) {
-        TINA_DEBUG("MenuScene - 调用 updateUIInput: 鼠标({}, {}), 按下: {}", 
-                   mousePos.x, mousePos.y, leftDown);
-    }
-    
-    app()->events().updateUIInput(mousePos.x, mousePos.y, leftDown, input.getMouseWheelDelta());
 }
 
 void MenuScene::createUI() {
