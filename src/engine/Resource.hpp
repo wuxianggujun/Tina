@@ -15,6 +15,7 @@
 #include <functional>
 #include <cctype>
 #include <filesystem>
+#include <memory>
 #include "../core/Container.hpp"
 
 namespace Tina::Engine {
@@ -40,7 +41,9 @@ struct FileSystem {
     struct AsyncHandle { Tina::u64 id = 0; bool valid() const { return id != 0; } };
     virtual ~FileSystem() = default;
     virtual AsyncHandle getContent(const Path& file, ContentCallback cb) = 0;
-    virtual void processCallbacks() = 0; // 每帧驱动
+    virtual void cancel(AsyncHandle handle) = 0;
+    // 仅主线程调用；maxCallbacks=0 表示排空当前 completion 队列。
+    virtual size_t processCallbacks(size_t maxCallbacks) = 0;
 };
 
 // 工厂：由实现文件提供（统一 EASTL 智能指针）
@@ -49,54 +52,117 @@ Tina::Memory::UniquePtr<FileSystem> CreateFileSystem();
 // 资源抽象
 class Resource {
 public:
-    enum class State : Tina::u32 { EMPTY = 0, READY, FAILURE };
+    enum class State : Tina::u32 {
+        UNLOADED = 0,
+        EMPTY = UNLOADED, // 兼容旧调用点
+        QUEUED,
+        LOADING,
+        READY_CPU,
+        UPLOAD_QUEUED,
+        READY,
+        FAILURE,
+        CANCELLED
+    };
     explicit Resource(Path p) : m_path(std::move(p)) {}
-    virtual ~Resource() = default;
+    virtual ~Resource() {
+        cancelLoad();
+        m_lifetime.reset();
+    }
 
     virtual ResourceType getType() const = 0;
     const Path& getPath() const { return m_path; }
 
     // 状态与引用
     State getState() const { return m_state; }
+    Tina::u64 generation() const { return m_generation; }
+    bool isLoading() const { return m_loading; }
     Tina::u32 incRefCount() { return ++m_refcount; }
     Tina::u32 decRefCount() { return m_refcount > 0 ? --m_refcount : 0; }
 
     // 发起加载（由管理器调用），文件结果在主线程回调中推进状态
     void requestLoad(FileSystem& fs) {
-        if (m_state != State::EMPTY) return;
+        if (m_state == State::QUEUED || m_state == State::LOADING ||
+            m_state == State::READY_CPU || m_state == State::UPLOAD_QUEUED ||
+            m_state == State::READY) {
+            return;
+        }
+
+        const Tina::u64 requestGeneration = ++m_generation;
+        const std::weak_ptr<unsigned char> lifetime = m_lifetime;
+        m_fileSystem = &fs;
         m_loading = true;
-        m_handle = fs.getContent(m_path, [this](const FileSystem::Content& data, bool ok){
+        m_state = State::QUEUED;
+        m_handle = fs.getContent(m_path, [this, lifetime, requestGeneration](const FileSystem::Content& data, bool ok){
+            if (lifetime.expired() || requestGeneration != m_generation || !m_loading) return;
+
+            m_loading = false;
+            m_handle = {};
             if (!ok) { fail(); return; }
-            if (!load(data)) { fail(); return; }
+
+            m_state = State::READY_CPU;
+            // 当前资源实现的解析与 GPU 上传都在受预算约束的主线程 completion 阶段执行。
+            m_state = State::UPLOAD_QUEUED;
+            if (!load(data)) {
+                unload();
+                fail();
+                return;
+            }
             m_state = State::READY;
         });
+
+        if (!m_handle.valid()) {
+            m_loading = false;
+            fail();
+        } else if (m_state == State::QUEUED && requestGeneration == m_generation) {
+            m_state = State::LOADING;
+        }
+    }
+
+    void cancelLoad() {
+        if (!m_loading) return;
+
+        ++m_generation;
+        if (m_fileSystem && m_handle.valid()) {
+            m_fileSystem->cancel(m_handle);
+        }
+        m_handle = {};
+        m_loading = false;
+        m_state = State::CANCELLED;
     }
 
     // 资源卸载
     void unloadNow() {
-        if (m_state == State::EMPTY) return;
+        if (m_state == State::UNLOADED) return;
+        cancelLoad();
         unload();
-        m_state = State::EMPTY;
+        m_state = State::UNLOADED;
     }
 
 protected:
     virtual bool load(const FileSystem::Content& blob) = 0; // 解析数据
     virtual void unload() = 0;                               // 释放资源
 
-    void fail() { m_state = State::FAILURE; }
+    void fail() {
+        m_loading = false;
+        m_handle = {};
+        m_state = State::FAILURE;
+    }
 
     Path m_path;
-    State m_state = State::EMPTY;
+    State m_state = State::UNLOADED;
     bool m_loading = false;
     FileSystem::AsyncHandle m_handle{};
+    FileSystem* m_fileSystem = nullptr;
+    Tina::u64 m_generation = 0;
     Tina::u32 m_refcount = 0;
+    std::shared_ptr<unsigned char> m_lifetime = std::make_shared<unsigned char>(0);
 };
 
 // 资源管理器基类
 class ResourceManager {
 public:
     explicit ResourceManager(FileSystem& fs) : m_fs(fs) {}
-    virtual ~ResourceManager() = default;
+    virtual ~ResourceManager() { shutdown(); }
 
     Resource* load(const Path& path) {
         if (path.isEmpty()) return nullptr;
@@ -106,7 +172,9 @@ public:
             Resource* cached = it->second.get();
             cached->incRefCount();
             // 重要：如果资源曾被卸载（状态为 EMPTY），需要重新发起异步加载
-            if (cached->getState() == Resource::State::EMPTY) {
+            if (cached->getState() == Resource::State::UNLOADED ||
+                cached->getState() == Resource::State::FAILURE ||
+                cached->getState() == Resource::State::CANCELLED) {
                 cached->requestLoad(m_fs);
             }
             return cached;
@@ -140,13 +208,20 @@ public:
         }
     }
 
-    // 每帧驱动文件系统回调
+    // FileSystem completion 由 Hub 每帧统一泵送一次；Manager 只处理本类型维护任务。
     void update() {
-        m_fs.processCallbacks();
         // 基础文件监视：检测文件 mtime 变化后自动重载（小项目足够）
         if (m_enableWatch) {
             watchAndReloadChanged();
         }
+    }
+
+    void shutdown() {
+        for (auto& kv : m_resources) {
+            kv.second->unloadNow();
+        }
+        m_resources.clear();
+        m_mtime.clear();
     }
 
     virtual Resource* createResource(const Path& path) = 0;
@@ -184,7 +259,18 @@ private:
 // Hub：将类型映射到具体管理器
 class ResourceManagerHub {
 public:
-    void add(ResourceType t, ResourceManager* rm) { m_rms[t.type] = rm; }
+    explicit ResourceManagerHub(FileSystem& fs, size_t completionBudget = 8)
+        : m_fileSystem(&fs)
+        , m_completionBudget(completionBudget == 0 ? 1 : completionBudget) {}
+
+    void add(ResourceType t, ResourceManager* rm) {
+        auto it = m_rms.find(t.type);
+        if (it == m_rms.end()) {
+            m_rms.emplace(t.type, rm);
+        } else {
+            it->second = rm;
+        }
+    }
     Resource* load(ResourceType t, const Path& p) {
         auto it = m_rms.find(t.type);
         return it == m_rms.end() ? nullptr : it->second->load(p);
@@ -201,8 +287,23 @@ public:
         for (auto& kv : m_rms) kv.second->reload(p);
     }
     void reloadAll() { for (auto& kv : m_rms) kv.second->reloadAll(); }
-    void update() { for (auto& kv : m_rms) kv.second->update(); }
+    size_t update() {
+        const size_t completed = m_fileSystem
+            ? m_fileSystem->processCallbacks(m_completionBudget)
+            : 0;
+        for (auto& kv : m_rms) kv.second->update();
+        return completed;
+    }
+    size_t drainCompletions() {
+        return m_fileSystem ? m_fileSystem->processCallbacks(0) : 0;
+    }
+    void setCompletionBudget(size_t completionBudget) {
+        m_completionBudget = completionBudget == 0 ? 1 : completionBudget;
+    }
+    size_t completionBudget() const { return m_completionBudget; }
 private:
+    FileSystem* m_fileSystem = nullptr;
+    size_t m_completionBudget = 8;
     Tina::Container::HashMap<Tina::u64, ResourceManager*> m_rms;
 };
 

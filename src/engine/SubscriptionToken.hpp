@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <atomic>
+#include <memory>
 #include "../core/Container.hpp"  // 使用封装的容器
 
 namespace Tina::Engine {
@@ -27,10 +28,12 @@ public:
     SubscriptionToken() = default;
 
     // 创建一个有效的订阅令牌
-    SubscriptionToken(EventDispatcher* dispatcher, EventTypeId typeId, SubscriptionId id)
+    SubscriptionToken(EventDispatcher* dispatcher, EventTypeId typeId, SubscriptionId id,
+                      std::weak_ptr<std::atomic_bool> dispatcherLifetime)
         : m_dispatcher(dispatcher)
         , m_typeId(static_cast<uint32_t>(typeId))
         , m_subscriptionId(id)
+        , m_dispatcherLifetime(std::move(dispatcherLifetime))
         , m_valid(true) {}
 
     // 禁止复制
@@ -42,6 +45,7 @@ public:
         : m_dispatcher(other.m_dispatcher)
         , m_typeId(other.m_typeId)
         , m_subscriptionId(other.m_subscriptionId)
+        , m_dispatcherLifetime(std::move(other.m_dispatcherLifetime))
         , m_valid(other.m_valid.load(std::memory_order_relaxed)) {
         other.m_dispatcher = nullptr;
         other.m_subscriptionId = 0;
@@ -54,6 +58,7 @@ public:
             m_dispatcher = other.m_dispatcher;
             m_typeId = other.m_typeId;
             m_subscriptionId = other.m_subscriptionId;
+            m_dispatcherLifetime = std::move(other.m_dispatcherLifetime);
             m_valid.store(other.m_valid.load(std::memory_order_relaxed), std::memory_order_relaxed);
             other.m_dispatcher = nullptr;
             other.m_subscriptionId = 0;
@@ -71,8 +76,10 @@ public:
 
     // 检查是否有效
     bool isValid() const {
-        return m_valid.load(std::memory_order_acquire) && 
-               m_dispatcher != nullptr && 
+        const auto lifetime = m_dispatcherLifetime.lock();
+        return lifetime && lifetime->load(std::memory_order_acquire) &&
+               m_valid.load(std::memory_order_acquire) &&
+               m_dispatcher != nullptr &&
                m_subscriptionId != 0;
     }
 
@@ -85,6 +92,7 @@ public:
     void invalidate() {
         m_valid.store(false, std::memory_order_release);
         m_dispatcher = nullptr;
+        m_dispatcherLifetime.reset();
     }
 
     // 重置令牌（取消当前订阅）
@@ -101,6 +109,7 @@ private:
     EventDispatcher* m_dispatcher = nullptr;
     uint32_t m_typeId = 0;
     SubscriptionId m_subscriptionId = 0;
+    std::weak_ptr<std::atomic_bool> m_dispatcherLifetime;
     std::atomic<bool> m_valid{false};  // 原子标志，防止多线程竞争
 };
 

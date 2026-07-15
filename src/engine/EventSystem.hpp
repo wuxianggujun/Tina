@@ -77,7 +77,7 @@ struct DelayedEvent {
 class EventSystem {
 public:
     EventSystem() = default;
-    ~EventSystem() = default;
+    ~EventSystem() { shutdown(); }
 
     // 禁止拷贝
     EventSystem(const EventSystem&) = delete;
@@ -87,24 +87,28 @@ public:
 
     // 初始化
     bool initialize() {
+        if (m_initialized) return true;
         TINA_INFO("EventSystem 初始化...");
         m_dispatcher.resetStats();
         for (auto& queue : m_priorityQueues) {
             queue.clear();
         }
         clearDelayed();
+        m_initialized = true;
         TINA_INFO("EventSystem 初始化完成");
         return true;
     }
 
     // 关闭
     void shutdown() {
+        if (!m_initialized) return;
         TINA_INFO("EventSystem 关闭...");
         m_dispatcher.clearAll();
         for (auto& queue : m_priorityQueues) {
             queue.clear();
         }
         clearDelayed();
+        m_initialized = false;
         TINA_INFO("EventSystem 关闭完成");
     }
 
@@ -116,7 +120,7 @@ public:
         auto id = m_dispatcher.subscribe<E>(Container::Move(handler));
 
         // 返回优化的RAII令牌，直接存储必要信息
-        return SubscriptionToken(&m_dispatcher, E::TYPE_ID, id);
+        return SubscriptionToken(&m_dispatcher, E::TYPE_ID, id, m_dispatcher.lifetimeToken());
     }
 
     // 订阅事件（成员函数），返回 RAII 令牌
@@ -125,7 +129,7 @@ public:
         auto id = m_dispatcher.subscribe<E>(obj, method);
 
         // 返回优化的RAII令牌，直接存储必要信息
-        return SubscriptionToken(&m_dispatcher, E::TYPE_ID, id);
+        return SubscriptionToken(&m_dispatcher, E::TYPE_ID, id, m_dispatcher.lifetimeToken());
     }
 
     // 订阅事件（const 成员函数），返回 RAII 令牌
@@ -134,7 +138,7 @@ public:
         auto id = m_dispatcher.subscribe<E>(obj, method);
 
         // 返回优化的RAII令牌，直接存储必要信息
-        return SubscriptionToken(&m_dispatcher, E::TYPE_ID, id);
+        return SubscriptionToken(&m_dispatcher, E::TYPE_ID, id, m_dispatcher.lifetimeToken());
     }
 
     // ==================== 发送事件 ====================
@@ -435,6 +439,7 @@ private:
     
     // UI事件上下文
     UIEventContext m_uiContext;
+    bool m_initialized = false;
     
     // UI事件内部方法
     void buildEventPath(UI::UINode* target, Vector<UI::UINode*>& path);

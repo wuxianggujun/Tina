@@ -13,6 +13,7 @@
 #include "../core/Container.hpp"  // 使用封装的容器
 #include "../core/Memory.hpp"     // 使用封装的智能指针
 #include <atomic>
+#include <memory>
 #include <type_traits>
 
 namespace Tina::Engine {
@@ -127,16 +128,22 @@ public:
 
 class EventDispatcher {
 public:
-    EventDispatcher() : m_nextSubscriptionId(1) {
+    EventDispatcher()
+        : m_lifetime(std::make_shared<std::atomic_bool>(true))
+        , m_nextSubscriptionId(1) {
         // 预分配所有可能的处理器存储
         initializeHandlerStorages();
     }
 
-    ~EventDispatcher() = default;
+    ~EventDispatcher() {
+        invalidateTokens();
+    }
 
     // 禁止拷贝
     EventDispatcher(const EventDispatcher&) = delete;
     EventDispatcher& operator=(const EventDispatcher&) = delete;
+
+    std::weak_ptr<std::atomic_bool> lifetimeToken() const { return m_lifetime; }
 
     // ==================== 订阅事件 ====================
 
@@ -294,6 +301,8 @@ public:
         }
         m_subscriptions.clear();
         resetStats();
+        invalidateTokens();
+        m_lifetime = std::make_shared<std::atomic_bool>(true);
     }
 
     // 清除指定类型的处理器
@@ -368,6 +377,12 @@ public:
     }
 
 private:
+    void invalidateTokens() noexcept {
+        if (m_lifetime) {
+            m_lifetime->store(false, std::memory_order_release);
+        }
+    }
+
     // 初始化处理器存储
     void initializeHandlerStorages() {
         // 为每种事件类型预分配存储
@@ -414,6 +429,9 @@ private:
     // 统计信息
     uint64_t m_subscribeCount = 0;
     uint64_t m_dispatchCount = 0;
+
+    // 令牌仅在该生命周期标记有效时才允许解引用 dispatcher。
+    std::shared_ptr<std::atomic_bool> m_lifetime;
 
     // 订阅ID生成器
     std::atomic<SubscriptionId> m_nextSubscriptionId;

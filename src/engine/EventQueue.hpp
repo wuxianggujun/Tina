@@ -73,7 +73,8 @@ struct EventWrapper {
 template<size_t Capacity = EVENT_QUEUE_CAPACITY>
 class EventQueue {
 public:
-    EventQueue() = default;
+    // EASTL ring_buffer 要求底层容器在构造时已经 resize，并保留一个哨兵槽区分满/空。
+    EventQueue() : m_buffer(Capacity) {}
     ~EventQueue() = default;
 
     // 禁止拷贝
@@ -166,7 +167,7 @@ public:
     }
 
 private:
-    using BufferContainer = FixedVector<EventWrapper, Capacity, false>;
+    using BufferContainer = FixedVector<EventWrapper, Capacity + 1, false>;
     RingBuffer<EventWrapper, BufferContainer> m_buffer;
 
     // 统计信息

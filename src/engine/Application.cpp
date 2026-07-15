@@ -129,6 +129,10 @@ void Application::init()
 
     // 6. 创建核心子系统
     m_eventSystem = Memory::MakeUnique<EventSystem>();
+    if (!m_eventSystem->initialize()) {
+        TINA_ERROR("EventSystem 初始化失败");
+        return;
+    }
     m_inputSystem = Memory::MakeUnique<InputSystem>();
     m_inputSystem->setEventSystem(m_eventSystem.get());
     m_inputSystem->setWindow(m_window.get());
@@ -137,7 +141,11 @@ void Application::init()
 
     // 7. 创建资源系统
     m_fileSystem = CreateFileSystem();
-    m_resourceHub = Memory::MakeUnique<ResourceManagerHub>();
+    if (!m_fileSystem) {
+        TINA_ERROR("文件系统创建失败");
+        return;
+    }
+    m_resourceHub = Memory::MakeUnique<ResourceManagerHub>(*m_fileSystem);
     {
         m_textureMgr = Memory::MakeUnique<TextureManager>(*m_fileSystem);
         m_resourceHub->add(Texture2DResource::TYPE, m_textureMgr.get());
@@ -217,6 +225,9 @@ void Application::shutdown()
     m_fileSystem.reset();
 
     m_inputSystem.reset();
+    if (m_eventSystem) {
+        m_eventSystem->shutdown();
+    }
     m_eventSystem.reset();
 
     if (m_bgfxInitialized) {
@@ -268,34 +279,44 @@ void Application::run()
             break;
         }
 
-        // 4. 调用用户应用事件处理钩子
+        // 4. 按优先级分发排队/延迟事件。输入快照与 UI routed event 保持独立。
+        if (m_eventSystem) {
+            m_eventSystem->update();
+        }
+
+        // 5. 每帧仅在这里泵送一次异步资源 completion，并受上传预算约束。
+        if (m_resourceHub) {
+            m_resourceHub->update();
+        }
+
+        // 6. 调用用户应用事件处理钩子
         if (m_app) {
             m_app->onEvent(*this);
         }
 
-        // 5. 调用用户应用更新钩子
+        // 7. 调用用户应用更新钩子
         if (m_app) {
             m_app->onUpdate(*this, m_deltaTime);
         }
 
-        // 6. 更新场景
+        // 8. 更新场景
         update(m_deltaTime);
 
-        // 7. 渲染场景
+        // 9. 渲染场景
         render();
 
-        // 8. 调用用户应用渲染钩子
+        // 10. 调用用户应用渲染钩子
         if (m_app) {
             m_app->onRender(*this);
         }
 
-        // 9. 输入系统帧结束
+        // 11. 输入系统帧结束
         if (m_inputSystem) m_inputSystem->endFrame();
 
-        // 10. 执行任务队列
+        // 12. 执行任务队列
         flushTasks();
 
-        // 11. 提交帧
+        // 13. 提交帧
         bgfx::frame();
     }
 
