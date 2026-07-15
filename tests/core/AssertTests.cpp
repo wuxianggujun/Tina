@@ -1,4 +1,4 @@
-#include "TestHarness.hpp"
+#include <gtest/gtest.h>
 
 #include "core/diagnostics/Assert.hpp"
 
@@ -21,19 +21,22 @@ Core::Diagnostics::AssertAction captureAssertion(
     return Core::Diagnostics::AssertAction::Continue;
 }
 
-} // namespace
-
-void runAssertTests()
+TEST(AssertTest, CustomHandlerReceivesFailureContext)
 {
     using namespace Core::Diagnostics;
+
+    CapturedExpression.clear();
+    CapturedMessage.clear();
+    CapturedLine = 0;
 
     const AssertHandler previousHandler = setAssertHandler(&captureAssertion);
     handleAssertion("value != nullptr", "test failure");
     setAssertHandler(previousHandler);
 
-    TINA_TEST_CHECK(CapturedExpression == "value != nullptr");
-    TINA_TEST_CHECK(CapturedMessage == "test failure");
-    TINA_TEST_CHECK(CapturedLine > 0);
+    EXPECT_EQ(CapturedExpression, "value != nullptr");
+    EXPECT_EQ(CapturedMessage, "test failure");
+    EXPECT_GT(CapturedLine, 0U);
 }
 
+} // namespace
 } // namespace Tina::Tests

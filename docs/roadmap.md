@@ -8,7 +8,7 @@
 
 ## M1 构建与生命周期
 
-- 自制 TestHarness 迁移到 GoogleTest 直接执行；
+- GoogleTest 独立测试程序迁移（已完成，直接运行 `tina_tests`）；
 - 修复 Application 初始化、Frame Phase、Event/Resource pump 和 shutdown；
 - 建立资源释放回归测试。
 

@@ -95,7 +95,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_library(tina_project_options INTERFACE)
 add_library(Tina::ProjectOptions ALIAS tina_project_options)
-target_compile_features(tina_project_options INTERFACE cxx_std_23)
+target_compile_features(tina_project_options INTERFACE cxx_std_20)
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(tina_project_options INTERFACE
@@ -143,7 +143,6 @@ endif ()]]
 
 # Tests
 if (TINA_BUILD_TESTING)
-    enable_testing()
     add_subdirectory(tests)
 endif ()
 

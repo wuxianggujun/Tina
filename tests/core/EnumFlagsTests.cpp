@@ -1,4 +1,4 @@
-#include "TestHarness.hpp"
+#include <gtest/gtest.h>
 
 #include "core/base/EnumFlags.hpp"
 #include "core/base/Types.hpp"
@@ -24,22 +24,22 @@ struct Tina::EnableEnumFlags<Tina::Tests::Permission> : std::true_type {
 
 namespace Tina::Tests {
 
-void runEnumFlagsTests()
+TEST(EnumFlagsTest, SupportsTypedBitOperations)
 {
     static_assert(EnumFlagsEnabled<Permission>);
     static_assert(!EnumFlagsEnabled<PlainEnum>);
 
     Permission permissions = Permission::Read | Permission::Write;
-    TINA_TEST_CHECK(isFlagSet(permissions, Permission::Read));
-    TINA_TEST_CHECK(!isFlagSet(permissions, Permission::Execute));
-    TINA_TEST_CHECK(hasAllFlags(permissions, Permission::Read | Permission::Write));
-    TINA_TEST_CHECK(!hasAllFlags(Permission::Read, Permission::Read | Permission::Write));
-    TINA_TEST_CHECK(hasAnyFlag(Permission::Read, Permission::Read | Permission::Execute));
+    EXPECT_TRUE(isFlagSet(permissions, Permission::Read));
+    EXPECT_FALSE(isFlagSet(permissions, Permission::Execute));
+    EXPECT_TRUE(hasAllFlags(permissions, Permission::Read | Permission::Write));
+    EXPECT_FALSE(hasAllFlags(Permission::Read, Permission::Read | Permission::Write));
+    EXPECT_TRUE(hasAnyFlag(Permission::Read, Permission::Read | Permission::Execute));
 
     setFlag(permissions, Permission::Execute, true);
-    TINA_TEST_CHECK(isFlagSet(permissions, Permission::Execute));
+    EXPECT_TRUE(isFlagSet(permissions, Permission::Execute));
     setFlag(permissions, Permission::Write, false);
-    TINA_TEST_CHECK(!isFlagSet(permissions, Permission::Write));
+    EXPECT_FALSE(isFlagSet(permissions, Permission::Write));
 }
 
 } // namespace Tina::Tests

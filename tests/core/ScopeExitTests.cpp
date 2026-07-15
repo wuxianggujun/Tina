@@ -1,4 +1,4 @@
-#include "TestHarness.hpp"
+#include <gtest/gtest.h>
 
 #include "core/base/ScopeExit.hpp"
 
@@ -6,7 +6,6 @@
 #include <type_traits>
 
 namespace Tina::Tests {
-
 namespace {
 
 struct ThrowingCallback {
@@ -20,23 +19,21 @@ concept SupportsScopeExit = requires {
 
 static_assert(!SupportsScopeExit<ThrowingCallback>);
 
-} // namespace
-
-void runScopeExitTests()
+TEST(ScopeExitTest, RunsUnlessReleasedAndSupportsMoveOnlyCallbacks)
 {
     bool invoked = false;
     {
         auto guard = Core::makeScopeExit([&invoked]() noexcept { invoked = true; });
-        TINA_TEST_CHECK(!invoked);
+        EXPECT_FALSE(invoked);
     }
-    TINA_TEST_CHECK(invoked);
+    EXPECT_TRUE(invoked);
 
     invoked = false;
     {
         auto guard = Core::makeScopeExit([&invoked]() noexcept { invoked = true; });
         guard.release();
     }
-    TINA_TEST_CHECK(!invoked);
+    EXPECT_FALSE(invoked);
 
     int movedValue = 0;
     {
@@ -46,7 +43,8 @@ void runScopeExitTests()
             });
         static_assert(!std::is_copy_constructible_v<decltype(guard)>);
     }
-    TINA_TEST_CHECK(movedValue == 42);
+    EXPECT_EQ(movedValue, 42);
 }
 
+} // namespace
 } // namespace Tina::Tests

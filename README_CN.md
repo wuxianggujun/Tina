@@ -1,6 +1,6 @@
 # Tina 游戏引擎
 
-Tina 是使用 C++23 开发的 2D/3D 游戏引擎项目。平台与输入层使用 GLFW，渲染使用 bgfx，音频使用 miniaudio，ECS 使用 EnTT，UI 为完全自研的 Retained UI。
+Tina 是使用 C++20 开发的 2D/3D 游戏引擎项目。平台与输入层使用 GLFW，渲染使用 bgfx，音频使用 miniaudio，ECS 使用 EnTT，UI 为完全自研的 Retained UI。
 
 ## 当前目标
 
@@ -22,7 +22,7 @@ Tina 是使用 C++23 开发的 2D/3D 游戏引擎项目。平台与输入层使�
 
 ## 构建
 
-需要 CMake、C++23 编译器和 `VCPKG_ROOT`。Windows 使用 MSVC，Linux 使用 GCC/Clang + Ninja。
+需要 CMake、C++20 编译器和 `VCPKG_ROOT`。Windows 使用 MSVC，Linux 使用 GCC/Clang + Ninja。
 
 ```powershell
 cmake --preset windows-msvc-vs2022

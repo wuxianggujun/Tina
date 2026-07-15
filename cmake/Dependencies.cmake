@@ -11,6 +11,10 @@ find_package(spdlog CONFIG REQUIRED)
 find_package(utf8cpp CONFIG REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
 
+if(TINA_BUILD_TESTING)
+    find_package(GTest CONFIG REQUIRED)
+endif()
+
 # The miniaudio vcpkg port intentionally installs only miniaudio.h. Tina owns the single
 # MINIAUDIO_IMPLEMENTATION translation unit in src/platform/audio.
 find_path(TINA_MINIAUDIO_INCLUDE_DIR NAMES miniaudio.h REQUIRED)

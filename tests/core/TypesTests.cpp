@@ -1,4 +1,4 @@
-#include "TestHarness.hpp"
+#include <gtest/gtest.h>
 
 #include "core/base/Platform.hpp"
 #include "core/base/Types.hpp"
@@ -8,7 +8,7 @@
 
 namespace Tina::Tests {
 
-void runTypesTests()
+TEST(TypesTest, PlatformAndIntegerAliasesMatchTheProcess)
 {
     static_assert(std::is_same_v<i8, std::int8_t>);
     static_assert(std::is_same_v<u64, std::uint64_t>);
@@ -17,8 +17,8 @@ void runTypesTests()
     static_assert(Core::CurrentOperatingSystem != Core::OperatingSystem::Unknown);
     static_assert(Core::CurrentCompiler != Core::Compiler::Unknown);
 
-    TINA_TEST_CHECK(sizeof(uintptr) == sizeof(void*));
-    TINA_TEST_CHECK(Core::IsWindows || Core::IsLinux || Core::IsMacOS);
+    EXPECT_EQ(sizeof(uintptr), sizeof(void*));
+    EXPECT_TRUE(Core::IsWindows || Core::IsLinux || Core::IsMacOS);
 }
 
 } // namespace Tina::Tests

@@ -86,37 +86,5 @@
       "configurePreset": "linux-wayland",
       "jobs": 2
     }
-  ],
-  "testPresets": [
-    {
-      "name": "windows-debug",
-      "configurePreset": "windows-msvc",
-      "configuration": "Debug",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "windows-vs2022-debug",
-      "configurePreset": "windows-msvc-vs2022",
-      "configuration": "Debug",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "linux-debug",
-      "configurePreset": "linux-ninja",
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "linux-wayland-debug",
-      "configurePreset": "linux-wayland",
-      "output": {
-        "outputOnFailure": true
-      }
-    }
   ]
 }
