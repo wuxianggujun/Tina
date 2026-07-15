@@ -81,6 +81,16 @@ fabric.properties
 /.idea
 *.bin
 /build
+/vcpkg_installed/
+/.cache/
+/.tmp/
+/logs/
+/log/
+/tmp/
+/artifacts/
+/captures/
+*.log
+CMakeUserPresets.json
 
 .arts
 CMakeSettings.json
