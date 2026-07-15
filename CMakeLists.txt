@@ -28,6 +28,16 @@ set(ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR} CACHE PATH "Root directory path")
 set(BUILD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/build CACHE PATH "Build directory path")
 set(RESOURCE_DIR ${ROOT_DIR}/resources CACHE PATH "Resource directory path")
 set(RESOURCE_DEST_DIR ${CMAKE_BINARY_DIR}/resources CACHE PATH "Resource directory path")
+# 统一可执行输出目录到构建目录/bin（强制覆盖缓存，避免沿用旧值指向源码根）
+set(BIN_DIR ${CMAKE_BINARY_DIR}/bin CACHE PATH "Binary output directory path" FORCE)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BIN_DIR})
+if (CMAKE_CONFIGURATION_TYPES)
+    foreach(cfg ${CMAKE_CONFIGURATION_TYPES})
+        string(TOUPPER "${cfg}" cfg_up)
+        set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${cfg_up} ${BIN_DIR})
+    endforeach()
+endif()
+message(STATUS "BIN_DIR = ${BIN_DIR}")
 
 # Functional options
 option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "${PROJECT_IS_TOP_LEVEL}")
@@ -90,12 +100,6 @@ if (BUILD_SHARED_LIBS)
     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 endif ()
 
-#include(Tina)
-# Import the tool cmake script
-include(TinaTool)
-include(BgfxUtil)
-include(SourceGroups)
-include(CompileShaders)
 
 # Automatically update submodule versions
 if (TINA_AUTOUPDATE_SUBMODULE)
@@ -121,18 +125,19 @@ foreach (FILE ${RESOURCE_FILES})
     endif ()
 endforeach ()
 
-add_subdirectory(dependencies)
-add_subdirectory(engine)
-add_subdirectory(runtime)
+add_subdirectory(thirdparty)
+add_subdirectory(src)
 
 # Examples
-if (TINA_BUILD_EXAMPLES)
+#[[if (TINA_BUILD_EXAMPLES)
     add_subdirectory(samples)
-endif ()
+endif ()]]
 
+#[[
 # Tests
 if (TINA_BUILD_TESTING)
     enable_testing()
     add_subdirectory(tests)
 endif ()
+]]
 

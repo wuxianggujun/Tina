@@ -84,3 +84,6 @@ fabric.properties
 
 .arts
 CMakeSettings.json
+/.claude/
+/隔离一下/
+/temp/

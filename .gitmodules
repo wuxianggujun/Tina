@@ -1,36 +1,60 @@
-[submodule "dependencies/stb-cmake"]
-	path = dependencies/stb-cmake
-	url = https://github.com/wuxianggujun/stb-cmake.git
-[submodule "dependencies/googletest"]
-	path = dependencies/googletest
-	url = https://github.com/google/googletest.git
-[submodule "dependencies/entt"]
-	path = dependencies/entt
+[submodule "thirdparty/entt"]
+	path = thirdparty/entt
 	url = https://github.com/skypjack/entt.git
-[submodule "dependencies/bgfx.cmake"]
-	path = dependencies/bgfx.cmake
+[submodule "thirdparty/bgfx.cmake"]
+	path = thirdparty/bgfx.cmake
 	url = https://github.com/bkaradzic/bgfx.cmake.git
-[submodule "dependencies/spdlog"]
-	path = dependencies/spdlog
+[submodule "thirdparty/spdlog"]
+	path = thirdparty/spdlog
 	url = https://github.com/gabime/spdlog.git
-[submodule "dependencies/glfw"]
-	path = dependencies/glfw
+[submodule "thirdparty/glfw"]
+	path = thirdparty/glfw
 	url = https://github.com/glfw/glfw.git
-[submodule "dependencies/glm"]
-	path = dependencies/glm
+[submodule "thirdparty/glm"]
+	path = thirdparty/glm
 	url = https://github.com/g-truc/glm.git
-[submodule "dependencies/tracy"]
-	path = dependencies/tracy
-	url = https://github.com/wolfpld/tracy.git
-[submodule "dependencies/yaml-cpp"]
-	path = dependencies/yaml-cpp
+[submodule "thirdparty/yaml-cpp"]
+	path = thirdparty/yaml-cpp
 	url = https://github.com/jbeder/yaml-cpp.git
-[submodule "dependencies/ctrack"]
-	path = dependencies/ctrack
-	url = https://github.com/Compaile/ctrack.git
-[submodule "dependencies/icu"]
-	path = dependencies/icu
-	url = https://github.com/unicode-org/icu.git
-[submodule "dependencies/fmt"]
-	path = dependencies/fmt
+[submodule "thirdparty/fmt"]
+	path = thirdparty/fmt
 	url = https://github.com/fmtlib/fmt.git
+[submodule "thirdparty/imgui"]
+	path = thirdparty/imgui
+	url = https://github.com/ocornut/imgui.git
+[submodule "thirdparty/rmlui"]
+	path = thirdparty/rmlui
+	url = https://github.com/mikke89/RmlUi.git
+[submodule "thirdparty/tracy"]
+	path = thirdparty/tracy
+	url = https://github.com/wolfpld/tracy.git
+[submodule "thirdparty/freetype"]
+	path = thirdparty/freetype
+	url = https://gitlab.freedesktop.org/freetype/freetype.git
+[submodule "thirdparty/box2d"]
+	path = thirdparty/box2d
+	url = https://github.com/erincatto/box2d.git
+[submodule "thirdparty/physx"]
+	path = thirdparty/physx
+	url = https://github.com/NVIDIAGameWorks/PhysX.git
+[submodule "thirdparty/lz4"]
+	path = thirdparty/lz4
+	url = https://github.com/lz4/lz4.git
+[submodule "thirdparty/xxHash"]
+	path = thirdparty/xxHash
+	url = https://github.com/Cyan4973/xxHash.git
+[submodule "thirdparty/utfcpp"]
+	path = thirdparty/utfcpp
+	url = https://github.com/nemtrif/utfcpp.git
+[submodule "thirdparty/EASTL"]
+	path = thirdparty/EASTL
+	url = https://github.com/electronicarts/EASTL.git
+[submodule "thirdparty/EABase"]
+	path = thirdparty/EABase
+	url = https://github.com/electronicarts/EABase.git
+[submodule "thirdparty/SDL"]
+	path = thirdparty/SDL
+	url = https://github.com/libsdl-org/SDL.git
+[submodule "thirdparty/SDL_mixer"]
+	path = thirdparty/SDL_mixer
+	url = https://github.com/libsdl-org/SDL_mixer.git

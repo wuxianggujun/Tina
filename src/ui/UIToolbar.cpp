@@ -1,0 +1,258 @@
+#include "UIToolbar.hpp"
+#include "UIColors.hpp"
+#include "UILayoutContainers.hpp"  // ✅ 使用新的布局容器
+#include "../core/Log.hpp"
+#include <algorithm>
+
+namespace Tina::UI {
+
+using namespace Tina::UI::UIColors;
+
+bool UIToolbar::initialize(int screenW, int screenH, UIRenderer& renderer)
+{
+    m_screenW = screenW; m_screenH = screenH;
+    m_renderer = &renderer;
+
+    // 根节点（使用智能指针管理）
+    m_root = Memory::MakeUnique<UINode>("UIRoot");
+    m_root->setSize((float)m_screenW, (float)m_screenH);
+
+    // 工具栏背景（使用新的API）
+    m_bar = m_root->createChild<UIPanel>("Toolbar");
+    m_bar->setAlign(HAlign::Left, VAlign::Top);
+    m_bar->setPosition(0, 0);
+    m_bar->setColor(ToolbarBg);  // 半透明深色背景
+
+    // ✅ 使用新的UIHBox布局容器
+    m_stack = m_bar->createChild<UIHBox>("ToolbarStack");
+    m_stack->setPadding((float)m_padding);
+    m_stack->setSpacing((float)m_gap);
+    m_stack->setJustify(UIHBox::Justify::Start);  // 左对齐
+    m_stack->setChildAlign(VAlign::Middle);       // 垂直居中
+
+    // 初次布局
+    buildLayout();
+
+    return true;
+}
+
+void UIToolbar::shutdown()
+{
+    m_root.reset();
+    m_bar = nullptr; m_stack = nullptr; m_slots.clear();
+}
+
+void UIToolbar::onResize(int screenW, int screenH)
+{
+    m_screenW = screenW; m_screenH = screenH;
+
+    if (m_root) {
+        m_root->setSize((float)m_screenW, (float)m_screenH);
+    }
+
+    // ✅ 窗口大小变化时，重新构建工具栏（重新计算尺寸和位置）
+    buildLayout();
+
+    // 使用布局管理器执行，会自动处理所有依赖节点
+    if (m_root) {
+        m_root->requestLayout();
+        m_root->performLayoutNow();
+    }
+}
+
+void UIToolbar::update(float dt)
+{
+    if (m_root) m_root->update(dt);
+}
+
+void UIToolbar::render(uint16_t viewId)
+{
+    if (m_root && m_renderer) {
+        m_root->render(viewId, *m_renderer);
+        // 绘制 Tooltip（悬停提示）
+        if (m_tipVisible && !m_tipText.empty()) {
+            // Tooltip 统一使用较小字号，避免过大遮挡
+            const int tipPx = 24;
+            float tw=0.0f, th=0.0f;
+            m_renderer->measureText(m_tipText, tw, th, tipPx);
+            const float pad = 6.0f;
+            float w = tw + pad*2.0f;
+            float h = th + pad*2.0f;
+            // 默认在鼠标右下方显示，避免出屏幕
+            float x = m_mouseX + 12.0f;
+            float y = m_mouseY + 12.0f;
+            float maxX = (float)m_screenW - w - 2.0f;
+            float maxY = (float)m_screenH - h - 2.0f;
+            if (x > maxX) x = std::max(2.0f, m_mouseX - w - 12.0f);
+            if (y > maxY) y = std::max(2.0f, m_mouseY - h - 12.0f);
+            // 背景与边框
+            m_renderer->drawRect(viewId, x, y, w, h, 0.08f, 0.08f, 0.10f, 0.95f);
+            m_renderer->drawRect(viewId, x, y, w, 1.0f, 0.9f, 0.85f, 0.35f, 1.0f);
+            m_renderer->drawRect(viewId, x, y+h-1.0f, w, 1.0f, 0.9f, 0.85f, 0.35f, 1.0f);
+            m_renderer->drawRect(viewId, x, y, 1.0f, h, 0.9f, 0.85f, 0.35f, 1.0f);
+            m_renderer->drawRect(viewId, x+w-1.0f, y, 1.0f, h, 0.9f, 0.85f, 0.35f, 1.0f);
+            // 文本（小字号）
+            UIRenderer::TextOptions to{}; to.r = 1; to.g = 1; to.b = 1; to.a = 1; to.fontPx = tipPx; to.hAlign = UIRenderer::AlignH::Center; to.vAlign = UIRenderer::AlignV::Center; to.padX = pad; to.padY = pad;
+            m_renderer->drawTextBox(viewId, x, y, w, h, m_tipText, to);
+        }
+    }
+}
+
+void UIToolbar::setSlotIcon(int index, bgfx::TextureHandle tex)
+{
+    if (index < 0 || index >= (int)m_slots.size()) return;
+    if (auto* btn = m_slots[index]) {
+        btn->setIconTexture(tex);
+    }
+}
+
+void UIToolbar::buildLayout()
+{
+    if (!m_bar) return;
+
+    // 清理旧按钮（新API会自动管理内存）
+    for (auto* btn : m_slots) {
+        if (m_stack) m_stack->removeChild(btn);
+        // 不需要手动delete，removeChild会处理
+    }
+    m_slots.clear();
+
+    // 可容纳按钮数（不超过 m_slotCount），并据此"以内容宽度"为准，居中整个工具栏
+    int avail = std::max(0, m_screenW - m_padding * 2);
+    int per = m_slotSize + m_gap;
+    int maxSlots = per > 0 ? std::max(1, (avail + m_gap) / per) : m_slotCount;
+    int count = std::min(m_slotCount, maxSlots);
+
+    int contentW = count > 0 ? (count * m_slotSize + (count - 1) * m_gap) : 0;
+    int barW = contentW + m_padding * 2;
+    if (barW > m_screenW) barW = m_screenW; // 兜底
+    float barX = (float)((m_screenW - barW) / 2);
+    // 根据按钮尺寸与内边距，动态放大工具栏高度（避免角标与文本拥挤）
+    m_barH = std::max(m_barH, m_slotSize + m_padding * 2);
+    m_bar->setSize((float)barW, (float)m_barH);
+    m_bar->setPosition(barX, 0.0f);
+    
+    // ✅ 先设置UIHBox的尺寸，再添加子元素
+    if (m_stack) {
+        m_stack->setSize((float)barW, (float)m_barH);
+    }
+
+    // 创建按钮并布局
+    for (int i = 0; i < count; ++i) {
+        auto* btn = m_stack->createChild<UIButton>("ToolSlot");
+        btn->setSize((float)m_slotSize, (float)m_slotSize);
+        btn->setAlign(HAlign::Left, VAlign::Top);
+        // 默认布局：左图标 + 右文本（避免重叠）
+        btn->setIconLayout(UIButton::IconLayout::IconLeftTextRight);
+        // 中央主标识：前三个为"水/挖/爆"，其余占位
+        std::string center;
+        if (i == 0) center = "水";
+        else if (i == 1) center = "清";
+        else if (i == 2) center = "爆";
+        else center = "";
+        // 自适应字号：主文本与角标使用相对 slot 尺寸的像素字号
+        int mainPx  = std::clamp(m_slotSize * 32 / 100, 12, 26);  // 基础比例
+        int badgePx = std::clamp(m_slotSize * 22 / 100, 10, 18);
+        // 自适应拟合：按可用高度缩放按钮文字（避免顶格过大）
+        if (!center.empty() && m_renderer) {
+            float tw=0.0f, th=0.0f;
+            m_renderer->measureText(center, tw, th, mainPx);
+            const float maxTextH = std::max(8.0f, (float)m_slotSize - (float)m_padding*2.0f);
+            if (th > 0.0f && th > maxTextH) {
+                int fitted = (int)std::floor((double)mainPx * (double)maxTextH / (double)th);
+                mainPx = std::clamp(fitted, 10, mainPx);
+            }
+        }
+        btn->setFontPx(mainPx);
+        btn->setBadgeFontPx(badgePx);
+        btn->setText(center);
+        // 角标：显示数字编号（放在右下角，避免遮挡中央文字）
+        btn->setBadgeText(std::to_string(i + 1));
+        btn->setBadgeCorner(BadgeCorner::BottomRight);
+
+        // TODO: 使用事件系统处理按钮点击和悬停
+        // 目前暂时无法处理，需要重构事件系统
+
+        m_slots.push_back(btn);
+    }
+    
+    // 应用当前选中高亮；若当前无选择则默认选中第一个
+    if (m_selected < 0 && !m_slots.empty()) m_selected = 0;
+    select(m_selected >= 0 && m_selected < (int)m_slots.size() ? m_selected : -1);
+}
+
+bool UIToolbar::hitTest(float x, float y)
+{
+    if (!m_bar) return false;
+    // 使用 UINode 自带的 containsPoint（基于世界坐标）
+    return m_bar->containsPoint(x, y);
+}
+
+void UIToolbar::select(int index)
+{
+    m_selected = (index >= 0 && index < (int)m_slots.size()) ? index : -1;
+    for (int i = 0; i < (int)m_slots.size(); ++i) {
+        auto* btn = m_slots[i];
+        if (!btn) continue;
+        btn->setSelected(i == m_selected);
+    }
+}
+
+int UIToolbar::indexAt(float x, float y) const
+{
+    // 从上层到下层检查，优先命中后添加的（与绘制顺序一致）
+    for (int i = (int)m_slots.size() - 1; i >= 0; --i) {
+        auto* btn = m_slots[i];
+        if (btn && btn->containsPoint(x, y)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool UIToolbar::clickAt(float x, float y)
+{
+    int idx = indexAt(x, y);
+    if (idx >= 0) {
+        select(idx);
+        return true;
+    }
+    return false;
+}
+
+// === 状态管理 ===
+
+ToolbarState UIToolbar::getState() const
+{
+    ToolbarState state;
+    state.selectedIndex = m_selected;
+    state.slotCount = m_slotCount;
+    state.slotSize = m_slotSize;
+    state.gap = m_gap;
+    state.padding = m_padding;
+    state.barHeight = m_barH;
+    state.visible = m_root ? m_root->isVisible() : true;
+    return state;
+}
+
+void UIToolbar::setState(const ToolbarState& state)
+{
+    m_selected = state.selectedIndex;
+    m_slotCount = state.slotCount;
+    m_slotSize = state.slotSize;
+    m_gap = state.gap;
+    m_padding = state.padding;
+    m_barH = state.barHeight;
+
+    if (m_root) {
+        m_root->setVisible(state.visible);
+    }
+
+    // 重建布局以应用新状态
+    buildLayout();
+
+    // 恢复选中状态
+    select(m_selected);
+}
+
+} // namespace Tina::UI

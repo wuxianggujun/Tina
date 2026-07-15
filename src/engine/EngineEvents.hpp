@@ -1,0 +1,213 @@
+//
+// EngineEvents.hpp - 引擎核心事件定义
+// 职责：定义系统级、输入、窗口等核心事件
+// 使用高性能事件系统的强类型事件
+//
+
+#pragma once
+
+#include "EventCore.hpp"
+#include "InputCodes.hpp"  // 输入代码定义（KeyCode, MouseButton 等）
+#include "../core/Math.hpp"
+#include <cstring>    // for std::memset, std::memcpy, std::strlen
+#include <algorithm>  // for std::min
+
+namespace Tina::Engine::Events {
+
+// ==================== 输入事件 ====================
+
+// 使用 Engine 命名空间中的 KeyCode 和 MouseButton（定义在 InputCodes.hpp）
+using Tina::Engine::KeyCode;
+using Tina::Engine::MouseButton;
+
+// 键盘按下事件
+struct KeyPressedEvent : public Event<KeyPressedEvent, EventTypeId::KeyPressed> {
+    KeyCode key;
+    bool isRepeat;
+    bool shift, ctrl, alt;
+
+    KeyPressedEvent(KeyCode k = KeyCode::Unknown, bool repeat = false,
+                   bool s = false, bool c = false, bool a = false)
+        : key(k), isRepeat(repeat), shift(s), ctrl(c), alt(a)
+    {
+        this->priority = EventPriority::High;
+    }
+};
+
+// 键盘释放事件
+struct KeyReleasedEvent : public Event<KeyReleasedEvent, EventTypeId::KeyReleased> {
+    KeyCode key;
+    bool shift, ctrl, alt;
+
+    KeyReleasedEvent(KeyCode k = KeyCode::Unknown,
+                    bool s = false, bool c = false, bool a = false)
+        : key(k), shift(s), ctrl(c), alt(a)
+    {
+        this->priority = EventPriority::High;
+    }
+};
+
+// 文本输入事件（用于输入法）
+struct TextInputEvent : public Event<TextInputEvent, EventTypeId::TextInput> {
+    static constexpr size_t MAX_TEXT_LENGTH = 32;
+    uint32_t utf32;
+    char text[MAX_TEXT_LENGTH];  // 固定大小数组，保持POD
+    uint8_t textLength;           // 实际文本长度
+
+    TextInputEvent(uint32_t code = 0, const char* str = nullptr)
+        : utf32(code), textLength(0)
+    {
+        std::memset(text, 0, MAX_TEXT_LENGTH);
+        if (str) {
+            size_t len = std::strlen(str);
+            textLength = static_cast<uint8_t>(std::min(len, MAX_TEXT_LENGTH - 1));
+            std::memcpy(text, str, textLength);
+        }
+        this->priority = EventPriority::Medium;
+    }
+};
+
+// 鼠标按下事件
+struct MouseButtonPressedEvent : public Event<MouseButtonPressedEvent, EventTypeId::MouseButtonPressed> {
+    MouseButton button;
+    int x, y;
+    int clicks; // 单击/双击/三击
+
+    MouseButtonPressedEvent(MouseButton btn = MouseButton::Left,
+                           int px = 0, int py = 0, int c = 1)
+        : button(btn), x(px), y(py), clicks(c)
+    {
+        this->priority = EventPriority::High;
+    }
+};
+
+// 鼠标释放事件
+struct MouseButtonReleasedEvent : public Event<MouseButtonReleasedEvent, EventTypeId::MouseButtonReleased> {
+    MouseButton button;
+    int x, y;
+
+    MouseButtonReleasedEvent(MouseButton btn = MouseButton::Left,
+                            int px = 0, int py = 0)
+        : button(btn), x(px), y(py)
+    {
+        this->priority = EventPriority::High;
+    }
+};
+
+// 鼠标移动事件
+struct MouseMovedEvent : public Event<MouseMovedEvent, EventTypeId::MouseMoved> {
+    int x, y;
+    int deltaX, deltaY;
+    bool dragging;
+
+    MouseMovedEvent(int px = 0, int py = 0, int dx = 0, int dy = 0, bool drag = false)
+        : x(px), y(py), deltaX(dx), deltaY(dy), dragging(drag)
+    {
+        this->priority = EventPriority::Low;  // 移动事件优先级较低
+    }
+};
+
+// 鼠标滚轮事件
+struct MouseWheelEvent : public Event<MouseWheelEvent, EventTypeId::MouseWheel> {
+    float deltaX, deltaY;
+    int x, y; // 鼠标位置
+
+    MouseWheelEvent(float dx = 0, float dy = 0, int px = 0, int py = 0)
+        : deltaX(dx), deltaY(dy), x(px), y(py)
+    {
+        this->priority = EventPriority::Medium;
+    }
+};
+
+// ==================== 窗口事件 ====================
+
+// 窗口大小改变事件
+struct WindowResizedEvent : public Event<WindowResizedEvent, EventTypeId::WindowResized> {
+    int width, height;
+    float aspectRatio;
+
+    WindowResizedEvent(int w = 0, int h = 0)
+        : width(w), height(h)
+        , aspectRatio(h > 0 ? float(w) / float(h) : 1.0f)
+    {
+        this->priority = EventPriority::High;
+    }
+};
+
+// 窗口移动事件
+struct WindowMovedEvent : public Event<WindowMovedEvent, EventTypeId::WindowMoved> {
+    int x, y;
+
+    WindowMovedEvent(int px = 0, int py = 0)
+        : x(px), y(py)
+    {
+        this->priority = EventPriority::Low;
+    }
+};
+
+// 窗口获得焦点事件
+struct WindowFocusGainedEvent : public Event<WindowFocusGainedEvent, EventTypeId::WindowFocused> {
+    WindowFocusGainedEvent()
+    {
+        this->priority = EventPriority::Medium;
+    }
+};
+
+// 窗口失去焦点事件
+struct WindowFocusLostEvent : public Event<WindowFocusLostEvent, EventTypeId::WindowUnfocused> {
+    WindowFocusLostEvent()
+    {
+        this->priority = EventPriority::Medium;
+    }
+};
+
+// 窗口最小化事件
+struct WindowMinimizedEvent : public Event<WindowMinimizedEvent, EventTypeId::WindowMinimized> {
+    WindowMinimizedEvent()
+    {
+        this->priority = EventPriority::High;
+    }
+};
+
+// 窗口恢复事件
+struct WindowRestoredEvent : public Event<WindowRestoredEvent, EventTypeId::WindowRestored> {
+    WindowRestoredEvent()
+    {
+        this->priority = EventPriority::High;
+    }
+};
+
+// 窗口关闭事件
+struct WindowClosedEvent : public Event<WindowClosedEvent, EventTypeId::WindowClosed> {
+    bool cancelable;
+
+    WindowClosedEvent(bool can_cancel = true)
+        : cancelable(can_cancel)
+    {
+        this->priority = EventPriority::High;
+    }
+};
+
+// ==================== 文件事件 ====================
+
+// 文件拖放事件
+struct FileDroppedEvent : public Event<FileDroppedEvent, EventTypeId::DropFile> {
+    static constexpr size_t MAX_PATH_LENGTH = 260;  // Windows MAX_PATH
+    char filepath[MAX_PATH_LENGTH];  // 固定大小数组，保持POD
+    uint16_t pathLength;              // 实际路径长度
+    int x, y;                         // 拖放位置
+
+    FileDroppedEvent(const char* path = nullptr, int px = 0, int py = 0)
+        : pathLength(0), x(px), y(py)
+    {
+        std::memset(filepath, 0, MAX_PATH_LENGTH);
+        if (path) {
+            size_t len = std::strlen(path);
+            pathLength = static_cast<uint16_t>(std::min(len, MAX_PATH_LENGTH - 1));
+            std::memcpy(filepath, path, pathLength);
+        }
+        this->priority = EventPriority::Medium;
+    }
+};
+
+} // namespace Tina::Engine::Events

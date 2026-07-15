@@ -1,0 +1,429 @@
+#include "Application.hpp"
+#include "IApplication.hpp"
+#include "SceneManager.hpp"
+#include "InputSystem.hpp"
+#include "EngineEvents.hpp"
+#include "EventSystem.hpp"
+#include "Window.hpp"
+#include "../renderer/Primitive2D.hpp"
+#include "../renderer/SpriteRenderer.hpp"
+#include "Resource.hpp"
+#include "Texture.hpp"
+#include "Font.hpp"
+#include "AudioManager.hpp"
+#include "../core/Log.hpp"
+#include "../ui/TextRenderer.hpp"
+#include "../ui/UIConstants.hpp"  // ✅ VIEW_CLEAR等常量定义
+
+#include <bgfx/bgfx.h>
+#include <bgfx/platform.h>
+#include <bx/timer.h>
+#include <SDL3/SDL.h>
+#include <SDL3_mixer/SDL_mixer.h>
+#include <algorithm>
+
+namespace Tina::Engine {
+
+// 定义静态单例指针
+Application* Application::s_instance = nullptr;
+
+Application::Application(IApplication* app, const Config& config)
+    : m_app(app)
+    , m_config(config)
+    , m_pixelWidth(config.windowWidth)
+    , m_pixelHeight(config.windowHeight)
+{
+    s_instance = this;
+    init();
+}
+
+Application::~Application()
+{
+    shutdown();
+    s_instance = nullptr;
+}
+
+void Application::init()
+{
+    TINA_INFO("Application 初始化中...");
+
+    // 1. 创建窗口
+    WindowDesc desc{};
+    desc.title = m_config.windowTitle;
+    desc.width = m_config.windowWidth;
+    desc.height = m_config.windowHeight;
+    desc.resizable = true;
+
+    m_window = Memory::MakeUnique<Window>();
+    if (!m_window->create(desc)) {
+        TINA_ERROR("创建窗口失败");
+        return;
+    }
+
+    // 2. 获取原生窗口句柄
+    void* nwh = m_window->getNativeHandle();
+    if (!nwh) {
+        TINA_ERROR("无法获取原生窗口句柄");
+        m_window.reset();
+        return;
+    }
+
+    // 3. 初始化bgfx
+    bgfx::PlatformData pd{};
+    pd.nwh = nwh;
+
+    bgfx::Init bgfxInit{};
+    bgfxInit.type = bgfx::RendererType::Count;
+    bgfxInit.platformData = pd;
+
+    m_window->getSizeInPixels(m_pixelWidth, m_pixelHeight);
+
+    bgfxInit.resolution.width = static_cast<uint32_t>(m_pixelWidth);
+    bgfxInit.resolution.height = static_cast<uint32_t>(m_pixelHeight);
+    bgfxInit.resolution.reset = BGFX_RESET_VSYNC | BGFX_RESET_MSAA_X8;
+
+    if (!bgfx::init(bgfxInit)) {
+        TINA_ERROR("bgfx 初始化失败");
+        m_window.reset();
+        return;
+    }
+
+    TINA_INFO("bgfx 初始化成功 - 渲染器: {}", bgfx::getRendererName(bgfx::getRendererType()));
+
+    // 4. 初始化 SDL3_mixer
+    if (!MIX_Init()) {
+        TINA_WARN("SDL_mixer 初始化失败：{}", SDL_GetError());
+    } else {
+        TINA_INFO("SDL_mixer 初始化成功");
+    }
+
+    SDL_AudioSpec desired{}; 
+    desired.freq = 44100; 
+    desired.channels = 2; 
+    desired.format = SDL_AUDIO_S16;
+    
+    m_mixer = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired);
+    
+    if (!m_mixer) {
+        TINA_WARN("SDL_mixer 打开音频设备失败：{}", SDL_GetError());
+    } else {
+        TINA_INFO("SDL_mixer 混音器已创建");
+        auto* mixer = static_cast<MIX_Mixer*>(m_mixer);
+        AudioResource::SetGlobalMixer(m_mixer);
+        MIX_SetMasterGain(mixer, std::max(0.0f, std::min(m_audioMasterVolume, 1.0f)));
+        MIX_SetTagGain(mixer, "music", std::max(0.0f, std::min(m_audioMusicVolume, 1.0f)));
+        MIX_SetTagGain(mixer, "sfx",   std::max(0.0f, std::min(m_audioSfxVolume, 1.0f)));
+    }
+
+    // 5. 设置默认视图
+    bgfx::setViewClear(UI::VIEW_CLEAR, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x303030ff, 1.0f, 0);
+    bgfx::setViewRect(UI::VIEW_CLEAR, 0, 0, static_cast<uint16_t>(m_pixelWidth), static_cast<uint16_t>(m_pixelHeight));
+
+    // 6. 创建核心子系统
+    m_eventSystem = Memory::MakeUnique<EventSystem>();
+    m_inputSystem = Memory::MakeUnique<InputSystem>();
+    m_inputSystem->setEventSystem(m_eventSystem.get());
+    m_inputSystem->setWindow(m_window.get());
+    m_inputSystem->initialize();
+    m_sceneManager = Memory::MakeUnique<SceneManager>(this);
+
+    // 7. 创建资源系统
+    m_fileSystem = CreateFileSystem();
+    m_resourceHub = Memory::MakeUnique<ResourceManagerHub>();
+    {
+        m_textureMgr = Memory::MakeUnique<TextureManager>(*m_fileSystem);
+        m_resourceHub->add(Texture2DResource::TYPE, m_textureMgr.get());
+        
+        m_fontMgr = Memory::MakeUnique<FontManager>(*m_fileSystem);
+        m_resourceHub->add(FontResource::TYPE, m_fontMgr.get());
+        
+        m_audioMgr = Memory::MakeUnique<AudioManager>(*m_fileSystem);
+        m_resourceHub->add(AudioResource::TYPE, m_audioMgr.get());
+    }
+
+    // 8. 全局着色器管理器
+    m_shaderMgr = Memory::MakeUnique<Tina::Renderer::ShaderManager>();
+    m_shaderMgr->initialize();
+
+    // 9. 初始化全局渲染器
+    m_textRenderer = Memory::MakeUnique<Tina::UI::TextRenderer>();
+    if (!m_textRenderer->initialize(*m_shaderMgr, *m_resourceHub)) {
+        TINA_ERROR("Application: TextRenderer 初始化失败");
+    } else {
+        m_textRenderer->loadFont("resources/fonts/SourceHanSansSC-Regular.otf", 48);
+        TINA_INFO("Application: TextRenderer 已加载 48 号字体");
+    }
+
+    m_prim2D = Memory::MakeUnique<Tina::Renderer::Primitive2D>();
+    if (!m_prim2D->initialize(*m_shaderMgr)) {
+        TINA_WARN("Primitive2D 初始化失败");
+    }
+
+    m_sprite2D = Memory::MakeUnique<Tina::Renderer::SpriteRenderer>();
+    if (!m_sprite2D->initialize(*m_shaderMgr)) {
+        TINA_WARN("SpriteRenderer 初始化失败");
+    }
+
+    prewarmCommonAssets();
+
+    if (!m_fileSystem) {
+        TINA_ERROR("文件系统创建失败");
+    } else {
+        TINA_INFO("资源系统初始化成功");
+    }
+
+    // 10. 初始化时间戳
+    m_lastFrameTime = bx::getHPCounter();
+
+    TINA_INFO("Application 初始化成功");
+    
+    // 11. 调用用户应用初始化钩子
+    if (m_app) {
+        m_app->onSetup(*this);
+    }
+}
+
+void Application::shutdown()
+{
+    TINA_INFO("Application 关闭中...");
+
+    // 1. 调用用户应用清理钩子
+    if (m_app) {
+        m_app->onCleanup(*this);
+    }
+
+    // 2. 清理系统
+    m_sceneManager.reset();
+    m_textRenderer.reset();
+    m_resourceHub.reset();
+    m_fileSystem.reset();
+    m_eventSystem.reset();
+    m_inputSystem.reset();
+    m_prim2D.reset();
+    m_sprite2D.reset();
+    m_shaderMgr.reset();
+
+    // 3. 关闭 SDL_mixer
+    if (m_mixer) {
+        MIX_DestroyMixer(static_cast<MIX_Mixer*>(m_mixer));
+        m_mixer = nullptr;
+    }
+    AudioResource::SetGlobalMixer(nullptr);
+    MIX_Quit();
+    TINA_INFO("SDL_mixer 已关闭");
+
+    bgfx::shutdown();
+
+    m_window.reset();
+
+    TINA_INFO("Application 关闭完成");
+}
+
+void Application::run()
+{
+    if (!m_window) {
+        TINA_ERROR("窗口未初始化");
+        return;
+    }
+
+    if (m_sceneManager->isEmpty()) {
+        TINA_ERROR("未设置初始场景");
+        return;
+    }
+
+    m_running = true;
+    TINA_INFO("Application 主循环启动");
+
+    while (m_running && !m_sceneManager->isEmpty()) {
+        // 1. 计算帧时间
+        uint64_t now = bx::getHPCounter();
+        const int64_t frameTime = now - m_lastFrameTime;
+        m_lastFrameTime = now;
+        const double freq = double(bx::getHPFrequency());
+        m_deltaTime = float(double(frameTime) / freq);
+
+        if (m_deltaTime > 0.1f) {
+            m_deltaTime = 0.1f;
+        }
+
+        m_fps = (m_deltaTime > 0.0f) ? (1.0f / m_deltaTime) : 60.0f;
+
+        // 2. 输入系统帧开始
+        if (m_inputSystem) m_inputSystem->beginFrame();
+
+        // 3. 处理事件
+        processEvents();
+
+        // 4. 调用用户应用事件处理钩子
+        if (m_app) {
+            m_app->onEvent(*this);
+        }
+
+        // 5. 调用用户应用更新钩子
+        if (m_app) {
+            m_app->onUpdate(*this, m_deltaTime);
+        }
+
+        // 6. 更新场景
+        update(m_deltaTime);
+
+        // 7. 渲染场景
+        render();
+
+        // 8. 调用用户应用渲染钩子
+        if (m_app) {
+            m_app->onRender(*this);
+        }
+
+        // 9. 输入系统帧结束
+        if (m_inputSystem) m_inputSystem->endFrame();
+
+        // 10. 执行任务队列
+        flushTasks();
+
+        // 11. 提交帧
+        bgfx::frame();
+    }
+
+    TINA_INFO("Application 主循环结束");
+}
+
+void Application::processEvents()
+{
+    SDL_Event event;
+    while (Window::pollEvent(event)) {
+        if (m_inputSystem) {
+            m_inputSystem->processSDLEvent(&event);
+        }
+
+        if (event.type == SDL_EVENT_QUIT) {
+            TINA_INFO("接收到退出事件");
+            quit();
+            continue;
+        }
+
+        if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+            TINA_INFO("接收到窗口关闭事件");
+            quit();
+            continue;
+        }
+
+        if (event.type == SDL_EVENT_WINDOW_RESIZED) {
+            m_config.windowWidth = event.window.data1;
+            m_config.windowHeight = event.window.data2;
+            m_window->getSizeInPixels(m_pixelWidth, m_pixelHeight);
+
+            TINA_DEBUG("Application - 调用 bgfx::reset({}x{})", m_pixelWidth, m_pixelHeight);
+            bgfx::reset(
+                static_cast<uint32_t>(m_pixelWidth),
+                static_cast<uint32_t>(m_pixelHeight),
+                BGFX_RESET_VSYNC | BGFX_RESET_MSAA_X8
+            );
+
+            TINA_INFO("窗口调整: {}x{} (像素: {}x{})",
+                m_config.windowWidth, m_config.windowHeight,
+                m_pixelWidth, m_pixelHeight);
+            
+            // 只通过事件系统通知
+            m_eventSystem->trigger(Events::WindowResizedEvent(m_pixelWidth, m_pixelHeight));
+        }
+    }
+    flushTasks();
+}
+
+void Application::update(float dt)
+{
+    if (m_sceneManager) {
+        m_sceneManager->update(dt);
+    }
+}
+
+void Application::render()
+{
+    if (m_sceneManager) {
+        m_sceneManager->render();
+    }
+}
+
+// 以下是所有getter和setter方法的实现...
+Tina::UI::TextRenderer& Application::textRenderer() const {
+    return *m_textRenderer;
+}
+
+Tina::Renderer::Primitive2D& Application::primitives2D() const {
+    return *m_prim2D;
+}
+
+Tina::Renderer::SpriteRenderer& Application::sprites2D() const {
+    return *m_sprite2D;
+}
+
+void Application::setAudioMasterVolume(float v) {
+    m_audioMasterVolume = std::max(0.0f, std::min(v, 1.0f));
+    if (m_mixer) {
+        MIX_SetMasterGain(static_cast<MIX_Mixer*>(m_mixer), m_audioMasterVolume);
+    }
+}
+
+void Application::setMusicVolume(float v) {
+    m_audioMusicVolume = std::max(0.0f, std::min(v, 1.0f));
+    if (m_mixer) {
+        MIX_SetTagGain(static_cast<MIX_Mixer*>(m_mixer), "music", m_audioMusicVolume);
+    }
+}
+
+void Application::setSfxVolume(float v) {
+    m_audioSfxVolume = std::max(0.0f, std::min(v, 1.0f));
+    if (m_mixer) {
+        MIX_SetTagGain(static_cast<MIX_Mixer*>(m_mixer), "sfx", m_audioSfxVolume);
+    }
+}
+
+void Application::post(std::function<void()> fn) {
+    std::lock_guard<std::mutex> lock(m_taskMutex);
+    m_tasks.push_back(std::move(fn));
+}
+
+void Application::postDelayed(uint32_t delayMs, std::function<void()> fn) {
+    std::lock_guard<std::mutex> lock(m_taskMutex);
+    uint64_t dueTime = bx::getHPCounter() + (delayMs * bx::getHPFrequency() / 1000);
+    m_timedTasks.push_back({dueTime, std::move(fn)});
+}
+
+void Application::flushTasks() {
+    Tina::Container::Vector<std::function<void()>> localTasks;
+    {
+        std::lock_guard<std::mutex> lock(m_taskMutex);
+        localTasks.swap(m_tasks);
+    }
+    for (auto& task : localTasks) {
+        if (task) task();
+    }
+    flushTimedTasks();
+}
+
+void Application::flushTimedTasks() {
+    uint64_t now = bx::getHPCounter();
+    Tina::Container::Vector<std::function<void()>> readyTasks;
+    {
+        std::lock_guard<std::mutex> lock(m_taskMutex);
+        auto it = m_timedTasks.begin();
+        while (it != m_timedTasks.end()) {
+            if (it->dueMs <= now) {
+                readyTasks.push_back(std::move(it->fn));
+                it = m_timedTasks.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    for (auto& task : readyTasks) {
+        if (task) task();
+    }
+}
+
+void Application::prewarmCommonAssets() {
+    // 预热逻辑...
+}
+
+} // namespace Tina::Engine
