@@ -13,7 +13,6 @@
 #include "../game/GameConfig.hpp"
 #include "../ui/UIConstants.hpp"
 
-// #include <SDL3/SDL.h>  // 不再需要：使用 InputSystem
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 #include <cstdlib>

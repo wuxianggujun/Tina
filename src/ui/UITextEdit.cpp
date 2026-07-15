@@ -3,8 +3,8 @@
 #include "../engine/EngineEvents.hpp"
 #include "../engine/InputSystem.hpp"
 #include "../engine/Application.hpp"
+#include "../engine/Window.hpp"
 #include "../core/Log.hpp"
-#include <SDL3/SDL.h>
 #include <algorithm>
 #include <utf8.h>
 
@@ -216,18 +216,20 @@ void UITextEdit::deleteSelection() {
 void UITextEdit::copy() {
     if (!hasSelection()) return;
     std::string selected = getSelectedText();
-    if (!selected.empty()) {
-        SDL_SetClipboardText(selected.c_str());
+    if (selected.empty()) return;
+
+    if (auto* app = Engine::Application::instance()) {
+        app->window().setClipboardText(selected.c_str());
     }
 }
 
 void UITextEdit::paste() {
-    if (!SDL_HasClipboardText()) return;
+    auto* app = Engine::Application::instance();
+    if (!app) return;
 
-    char* clipText = SDL_GetClipboardText();
-    if (clipText) {
+    const char* clipText = app->window().getClipboardText();
+    if (clipText && clipText[0] != '\0') {
         insertText(clipText);
-        SDL_free(clipText);
     }
 }
 

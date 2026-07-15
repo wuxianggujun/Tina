@@ -14,7 +14,6 @@
 #include "GameEvents.hpp"
 #include "../ui/UILayoutContainers.hpp"  // ✅ 使用新的布局容器
 
-// #include <SDL3/SDL.h>  // 不再需要：使用 InputSystem
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
 #include "../ui/UIConstants.hpp"

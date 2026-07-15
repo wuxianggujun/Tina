@@ -28,6 +28,7 @@ class ResourceManagerHub;
 class TextureManager;
 class FontManager;
 class AudioManager;
+class AudioEngine;
 class IApplication;
 
 /// 应用程序框架核心
@@ -137,6 +138,7 @@ private:
     void prewarmCommonAssets();
     void flushTasks();
     void flushTimedTasks();
+    void discardPendingTasks();
 
 private:
     IApplication* m_app = nullptr;                     // 用户应用实例（可选）
@@ -159,8 +161,8 @@ private:
     Memory::UniquePtr<TextureManager> m_textureMgr;
     Memory::UniquePtr<FontManager> m_fontMgr;
     Memory::UniquePtr<AudioManager> m_audioMgr;
-
-    void* m_mixer = nullptr;
+    Memory::UniquePtr<AudioEngine> m_audioEngine;
+    bool m_bgfxInitialized = false;
     
     Memory::UniquePtr<Tina::UI::TextRenderer> m_textRenderer;
     Memory::UniquePtr<Tina::Renderer::Primitive2D> m_prim2D;

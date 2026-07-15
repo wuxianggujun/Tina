@@ -5,7 +5,16 @@
 # ##############################################################################
 
 cmake_minimum_required(VERSION 3.20...3.30)
-project(Tina VERSION 0.0.1 LANGUAGES CXX)
+project(Tina VERSION 0.0.1 LANGUAGES C CXX)
+
+# Keep every MSVC translation unit on UTF-8, including bundled source dependencies.
+# The C++ language standard remains target-scoped through Tina::ProjectOptions.
+if (MSVC)
+    add_compile_options(
+        "$<$<COMPILE_LANGUAGE:C>:/utf-8>"
+        "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
+    )
+endif ()
 
 if(POLICY CMP0175)
     cmake_policy(SET CMP0175 OLD)
@@ -42,9 +51,18 @@ message(STATUS "BIN_DIR = ${BIN_DIR}")
 # Functional options
 option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
-option(TINA_BUILD_TESTING "Turn on Tina's Google Tests" ON)
+option(TINA_BUILD_TESTING "Build Tina tests" ON)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
 option(TINA_BUILD_WAYLAND "Build Wayland" OFF)
+
+if (TINA_BUILD_WAYLAND)
+    if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
+        NOT "wayland" IN_LIST VCPKG_MANIFEST_FEATURES)
+        message(FATAL_ERROR
+            "TINA_BUILD_WAYLAND requires the vcpkg manifest feature 'wayland'. "
+            "Use the linux-wayland preset or set VCPKG_MANIFEST_FEATURES=wayland.")
+    endif ()
+endif ()
 
 list(APPEND CMAKE_MODULE_PATH ${ROOT_DIR}/cmake)
 
@@ -65,7 +83,7 @@ endif ()
 #
 # ##############################################################################
 
-if (NOT CMAKE_BUILD_TYPE)
+if (NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     message(STATUS "Setting build type to 'Release' as none was specified.")
     set(CMAKE_BUILD_TYPE
             Release
@@ -73,27 +91,21 @@ if (NOT CMAKE_BUILD_TYPE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
 endif ()
 
-include(CheckCXXCompilerFlag)
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-# CMakeLists.txt
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNOMINMAX")
 
-if ("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
-    set(CMAKE_CXX_STANDARD 20)
-endif ()
+add_library(tina_project_options INTERFACE)
+add_library(Tina::ProjectOptions ALIAS tina_project_options)
+target_compile_features(tina_project_options INTERFACE cxx_std_23)
 
-if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -Wall -O3") # ALL WARNINGS
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(tina_project_options INTERFACE
+        -Wall
+        -Wextra
+        "$<$<CONFIG:Release>:-O3>"
+    )
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-    set(CMAKE_CXX_EXTENSIONS OFF)
-    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} /MP")    # MULTICORE BUILDS
-    # Hide the console in release mode
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /ENTRY:mainCRTStartup")
-    endif ()
+    # Bound compiler-level parallelism so it does not multiply the MSBuild /m value from presets.
+    target_compile_options(tina_project_options INTERFACE /MP2 /Zc:__cplusplus)
 endif()
 
 if (BUILD_SHARED_LIBS)
@@ -105,13 +117,6 @@ endif ()
 if (TINA_AUTOUPDATE_SUBMODULE)
     include(UpdateSubmodules)
 endif ()
-
-if (MSVC) 
-    add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
-    add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
-    string(APPEND CMAKE_CXX_FLAGS " /Zc:__cplusplus /MP")
-endif ()
-
 
 # 必须重新加载cmake才会生效
 file(GLOB_RECURSE RESOURCE_FILES "${RESOURCE_DIR}/*")
@@ -125,7 +130,10 @@ foreach (FILE ${RESOURCE_FILES})
     endif ()
 endforeach ()
 
+include(Dependencies)
+
 add_subdirectory(thirdparty)
+add_subdirectory(src/core)
 add_subdirectory(src)
 
 # Examples
@@ -133,11 +141,9 @@ add_subdirectory(src)
     add_subdirectory(samples)
 endif ()]]
 
-#[[
 # Tests
 if (TINA_BUILD_TESTING)
     enable_testing()
     add_subdirectory(tests)
 endif ()
-]]
 

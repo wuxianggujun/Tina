@@ -91,7 +91,7 @@
    - 昼夜时间调整
 
 ### 🎵 音频系统
-- **基于SDL_mixer** - 支持MP3/WAV/OGG
+- **基于 miniaudio** - 支持 MP3/WAV/FLAC
 - **音效管理** - 淡入淡出、音量控制
 - **分组管理** - 音效/音乐独立控制
 - **异步加载** - 资源懒加载
@@ -201,9 +201,9 @@ make -j$(nproc)
 
 | 库 | 版本 | 用途 |
 |---|---|---|
-| [bgfx](https://github.com/bkaradzic/bgfx.cmake.git) | latest | 跨平台渲染库（支持DX11/OpenGL/Vulkan） |
-| [SDL2](https://www.libsdl.org/) | 2.0+ | 窗口管理、输入处理 |
-| [SDL_mixer](https://www.libsdl.org/projects/SDL_mixer/) | 2.0+ | 音频播放（MP3/WAV/OGG） |
+| [bgfx](https://github.com/bkaradzic/bgfx.cmake.git) | v1.149.9360-557 | 跨平台渲染库（支持 DX11/OpenGL/Vulkan） |
+| [GLFW](https://github.com/glfw/glfw) | 3.4 | 窗口管理、输入处理与剪贴板 |
+| [miniaudio](https://github.com/mackron/miniaudio) | 0.11.25 | 音频播放与混音（MP3/WAV/FLAC） |
 | [EnTT](https://github.com/skypjack/entt.git) | 3.x | 实体组件系统（ECS） |
 | [spdlog](https://github.com/gabime/spdlog.git) | 1.x | 高性能日志库 |
 | [stb](https://github.com/wuxianggujun/stb-cmake.git) | latest | 图像加载、TrueType字体 |

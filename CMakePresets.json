@@ -1,0 +1,122 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "TINA_BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "windows-msvc",
+      "displayName": "Windows x64 (MSVC + vcpkg)",
+      "inherits": "base",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "windows-msvc-vs2022",
+      "displayName": "Windows x64 (Visual Studio 2022 + vcpkg)",
+      "inherits": "base",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "linux-ninja",
+      "displayName": "Linux (Ninja + vcpkg)",
+      "inherits": "base",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-wayland",
+      "displayName": "Linux Wayland (Ninja + vcpkg)",
+      "inherits": "linux-ninja",
+      "cacheVariables": {
+        "TINA_BUILD_WAYLAND": "ON",
+        "VCPKG_MANIFEST_FEATURES": "wayland"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-debug",
+      "configurePreset": "windows-msvc",
+      "configuration": "Debug",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vs2022-debug",
+      "configurePreset": "windows-msvc-vs2022",
+      "configuration": "Debug",
+      "jobs": 2
+    },
+    {
+      "name": "linux-debug",
+      "configurePreset": "linux-ninja",
+      "jobs": 2
+    },
+    {
+      "name": "linux-wayland-debug",
+      "configurePreset": "linux-wayland",
+      "jobs": 2
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-debug",
+      "configurePreset": "windows-msvc",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-vs2022-debug",
+      "configurePreset": "windows-msvc-vs2022",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-debug",
+      "configurePreset": "linux-ninja",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-wayland-debug",
+      "configurePreset": "linux-wayland",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

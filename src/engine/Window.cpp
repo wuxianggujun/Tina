@@ -1,402 +1,531 @@
 //
-// Window.cpp - 窗口管理实现（SDL3）
+// Window.cpp - GLFW window wrapper.
 //
 
 #include "Window.hpp"
-#include "InputSystem.hpp"  // 包含 KeyCode 和 MouseButton 定义
 #include "../core/Log.hpp"
-#include <SDL3/SDL.h>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
+
+#include <GLFW/glfw3.h>
+
+#if defined(_WIN32)
+#define GLFW_EXPOSE_NATIVE_WIN32
+#elif defined(__APPLE__)
+#define GLFW_EXPOSE_NATIVE_COCOA
+#elif defined(__linux__)
+#define GLFW_EXPOSE_NATIVE_X11
+#if defined(TINA_GLFW_ENABLE_WAYLAND)
+#define GLFW_EXPOSE_NATIVE_WAYLAND
+#define TINA_GLFW_HAS_NATIVE_WAYLAND 1
+#endif
+#endif
+
+#include <GLFW/glfw3native.h>
+
+#include <algorithm>
+#include <cstdint>
 
 namespace Tina::Engine {
+namespace {
 
-Window::Window()
-    : m_window(nullptr)
+int g_glfwRefCount = 0;
+
+bool ensureGlfwInitialized()
 {
+    if (g_glfwRefCount > 0) {
+        ++g_glfwRefCount;
+        return true;
+    }
+
+    if (glfwInit() != GLFW_TRUE) {
+        const char* description = nullptr;
+        glfwGetError(&description);
+        TINA_ERROR("glfwInit failed: {}", description ? description : "unknown error");
+        return false;
+    }
+
+    g_glfwRefCount = 1;
+    return true;
 }
 
-Window::~Window() {
+void releaseGlfw()
+{
+    if (g_glfwRefCount <= 0) {
+        return;
+    }
+
+    --g_glfwRefCount;
+    if (g_glfwRefCount == 0) {
+        glfwTerminate();
+    }
+}
+
+GLFWmonitor* primaryMonitor()
+{
+    return glfwGetPrimaryMonitor();
+}
+
+} // namespace
+
+Window::Window() = default;
+
+Window::~Window()
+{
     destroy();
 }
 
-bool Window::create(const WindowDesc& desc) {
+bool Window::create(const WindowDesc& desc)
+{
     if (m_window) {
         TINA_ERROR("Window already created");
         return false;
     }
 
-    // 保存描述
-    m_desc = desc;
-    m_title = desc.title;
-
-    // SDL初始化（如果还没初始化）
-    // SDL3 中 SDL_Init 返回 bool
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        TINA_ERROR("SDL_Init failed: {}", SDL_GetError());
+    if (!ensureGlfwInitialized()) {
         return false;
     }
+    m_ownsGlfw = true;
 
-    // 设置窗口标志
-    // 注意：移除SDL_WINDOW_HIGH_PIXEL_DENSITY，因为它在Windows上可能导致坐标不一致
-    uint32_t flags = 0;
+    m_desc = desc;
+    m_title = desc.title ? desc.title : "";
+    m_windowedWidth = std::max(1, desc.width);
+    m_windowedHeight = std::max(1, desc.height);
+
+    glfwDefaultWindowHints();
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    glfwWindowHint(GLFW_VISIBLE, desc.visible ? GLFW_TRUE : GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, desc.resizable ? GLFW_TRUE : GLFW_FALSE);
+    glfwWindowHint(GLFW_DECORATED, desc.borderless ? GLFW_FALSE : GLFW_TRUE);
+    glfwWindowHint(GLFW_MAXIMIZED, desc.maximized ? GLFW_TRUE : GLFW_FALSE);
+
+    GLFWmonitor* monitor = nullptr;
+    int width = std::max(1, desc.width);
+    int height = std::max(1, desc.height);
 
     if (desc.fullscreen) {
-        flags |= SDL_WINDOW_FULLSCREEN;
-    }
-    if (desc.resizable) {
-        flags |= SDL_WINDOW_RESIZABLE;
-    }
-    if (!desc.visible) {
-        flags |= SDL_WINDOW_HIDDEN;
-    }
-    if (desc.maximized) {
-        flags |= SDL_WINDOW_MAXIMIZED;
-    }
-    if (desc.borderless) {
-        flags |= SDL_WINDOW_BORDERLESS;
-    }
-
-    // SDL3 中 SDL_CreateWindow 的参数改变了，不再包含位置参数
-    // 创建窗口
-    m_window = SDL_CreateWindow(
-        desc.title,
-        desc.width, desc.height,
-        flags
-    );
-
-    // 如果需要设置位置，在创建后设置
-    if (m_window) {
-        if (desc.x != -1 && desc.y != -1) {
-            SDL_SetWindowPosition((SDL_Window*)m_window, desc.x, desc.y);
+        monitor = primaryMonitor();
+        if (monitor) {
+            const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+            if (mode) {
+                width = mode->width;
+                height = mode->height;
+            }
         }
     }
 
+    m_window = glfwCreateWindow(width, height, m_title.c_str(), monitor, nullptr);
     if (!m_window) {
-        TINA_ERROR("SDL_CreateWindow failed: {}", SDL_GetError());
+        const char* description = nullptr;
+        glfwGetError(&description);
+        TINA_ERROR("glfwCreateWindow failed: {}", description ? description : "unknown error");
+        releaseGlfw();
+        m_ownsGlfw = false;
         return false;
     }
 
-    TINA_INFO("Window created: {}x{} '{}'", desc.width, desc.height, desc.title);
+    if (!desc.fullscreen) {
+        if (desc.x != -1 && desc.y != -1) {
+            glfwSetWindowPos(m_window, desc.x, desc.y);
+        } else {
+            center();
+        }
+        glfwGetWindowPos(m_window, &m_windowedX, &m_windowedY);
+        glfwGetWindowSize(m_window, &m_windowedWidth, &m_windowedHeight);
+    }
+
+    TINA_INFO("Window created with GLFW: {}x{} '{}'", width, height, m_title.c_str());
     return true;
 }
 
-void Window::destroy() {
+void Window::destroy()
+{
     if (m_window) {
-        SDL_DestroyWindow(static_cast<SDL_Window*>(m_window));
+        glfwDestroyWindow(m_window);
         m_window = nullptr;
         TINA_INFO("Window destroyed");
     }
+
+    if (m_ownsGlfw) {
+        releaseGlfw();
+        m_ownsGlfw = false;
+    }
 }
 
-bool Window::isValid() const {
+bool Window::isValid() const
+{
     return m_window != nullptr;
 }
 
-// ==================== 窗口属性 ====================
-
-void Window::setTitle(const char* title) {
-    if (!m_window) return;
-    m_title = title;
-    SDL_SetWindowTitle(static_cast<SDL_Window*>(m_window), title);
+void Window::setTitle(const char* title)
+{
+    m_title = title ? title : "";
+    if (m_window) {
+        glfwSetWindowTitle(m_window, m_title.c_str());
+    }
 }
 
-const char* Window::getTitle() const {
+const char* Window::getTitle() const
+{
     return m_title.c_str();
 }
 
-void Window::setSize(int width, int height) {
-    if (!m_window) return;
-    SDL_SetWindowSize(static_cast<SDL_Window*>(m_window), width, height);
+void Window::setSize(int width, int height)
+{
+    if (!m_window) {
+        return;
+    }
+
+    width = std::max(1, width);
+    height = std::max(1, height);
+    glfwSetWindowSize(m_window, width, height);
     m_desc.width = width;
     m_desc.height = height;
+
+    if (!isFullscreen()) {
+        m_windowedWidth = width;
+        m_windowedHeight = height;
+    }
 }
 
-void Window::getSize(int& width, int& height) const {
+void Window::getSize(int& width, int& height) const
+{
     if (!m_window) {
-        width = height = 0;
+        width = 0;
+        height = 0;
         return;
     }
-    // 使用SDL_GetWindowSize获取逻辑尺寸，这是SDL事件和鼠标坐标使用的坐标系
-    SDL_GetWindowSize(static_cast<SDL_Window*>(m_window), &width, &height);
+
+    glfwGetWindowSize(m_window, &width, &height);
 }
 
-int Window::getWidth() const {
-    int w, h;
-    getSize(w, h);
-    return w;
+int Window::getWidth() const
+{
+    int width = 0;
+    int height = 0;
+    getSize(width, height);
+    return width;
 }
 
-int Window::getHeight() const {
-    int w, h;
-    getSize(w, h);
-    return h;
+int Window::getHeight() const
+{
+    int width = 0;
+    int height = 0;
+    getSize(width, height);
+    return height;
 }
 
-void Window::getSizeInPixels(int& width, int& height) const {
+void Window::getSizeInPixels(int& width, int& height) const
+{
+    getFramebufferSize(width, height);
+}
+
+void Window::getFramebufferSize(int& width, int& height) const
+{
     if (!m_window) {
-        width = height = 0;
+        width = 0;
+        height = 0;
         return;
     }
-    // 使用SDL_GetWindowSizeInPixels获取物理像素尺寸（用于渲染）
-    SDL_GetWindowSizeInPixels(static_cast<SDL_Window*>(m_window), &width, &height);
+
+    glfwGetFramebufferSize(m_window, &width, &height);
 }
 
-void Window::setPosition(int x, int y) {
-    if (!m_window) return;
-    SDL_SetWindowPosition(static_cast<SDL_Window*>(m_window), x, y);
-}
-
-void Window::getPosition(int& x, int& y) const {
-    if (!m_window) {
-        x = y = 0;
+void Window::setPosition(int x, int y)
+{
+    if (!m_window || isFullscreen()) {
         return;
     }
-    SDL_GetWindowPosition(static_cast<SDL_Window*>(m_window), &x, &y);
+
+    glfwSetWindowPos(m_window, x, y);
+    m_windowedX = x;
+    m_windowedY = y;
 }
 
-// ==================== 显示状态 ====================
+void Window::getPosition(int& x, int& y) const
+{
+    if (!m_window) {
+        x = 0;
+        y = 0;
+        return;
+    }
 
-void Window::show() {
-    if (!m_window) return;
-    SDL_ShowWindow(static_cast<SDL_Window*>(m_window));
+    glfwGetWindowPos(m_window, &x, &y);
+}
+
+void Window::show()
+{
+    if (!m_window) {
+        return;
+    }
+
+    glfwShowWindow(m_window);
     m_desc.visible = true;
 }
 
-void Window::hide() {
-    if (!m_window) return;
-    SDL_HideWindow(static_cast<SDL_Window*>(m_window));
+void Window::hide()
+{
+    if (!m_window) {
+        return;
+    }
+
+    glfwHideWindow(m_window);
     m_desc.visible = false;
 }
 
-bool Window::isVisible() const {
-    if (!m_window) return false;
-    uint32_t flags = SDL_GetWindowFlags(static_cast<SDL_Window*>(m_window));
-    return !(flags & SDL_WINDOW_HIDDEN);
+bool Window::isVisible() const
+{
+    return m_window && glfwGetWindowAttrib(m_window, GLFW_VISIBLE) == GLFW_TRUE;
 }
 
-void Window::minimize() {
-    if (!m_window) return;
-    SDL_MinimizeWindow(static_cast<SDL_Window*>(m_window));
+void Window::minimize()
+{
+    if (m_window) {
+        glfwIconifyWindow(m_window);
+    }
 }
 
-void Window::maximize() {
-    if (!m_window) return;
-    SDL_MaximizeWindow(static_cast<SDL_Window*>(m_window));
+void Window::maximize()
+{
+    if (!m_window) {
+        return;
+    }
+
+    glfwMaximizeWindow(m_window);
     m_desc.maximized = true;
 }
 
-void Window::restore() {
-    if (!m_window) return;
-    SDL_RestoreWindow(static_cast<SDL_Window*>(m_window));
+void Window::restore()
+{
+    if (!m_window) {
+        return;
+    }
+
+    glfwRestoreWindow(m_window);
     m_desc.maximized = false;
 }
 
-bool Window::isMinimized() const {
-    if (!m_window) return false;
-    uint32_t flags = SDL_GetWindowFlags(static_cast<SDL_Window*>(m_window));
-    return (flags & SDL_WINDOW_MINIMIZED) != 0;
+bool Window::isMinimized() const
+{
+    return m_window && glfwGetWindowAttrib(m_window, GLFW_ICONIFIED) == GLFW_TRUE;
 }
 
-bool Window::isMaximized() const {
-    if (!m_window) return false;
-    uint32_t flags = SDL_GetWindowFlags(static_cast<SDL_Window*>(m_window));
-    return (flags & SDL_WINDOW_MAXIMIZED) != 0;
+bool Window::isMaximized() const
+{
+    return m_window && glfwGetWindowAttrib(m_window, GLFW_MAXIMIZED) == GLFW_TRUE;
 }
 
-// ==================== 全屏 ====================
+void Window::setFullscreen(bool fullscreen)
+{
+    if (!m_window || fullscreen == isFullscreen()) {
+        return;
+    }
 
-void Window::setFullscreen(bool fullscreen) {
-    if (!m_window) return;
+    if (fullscreen) {
+        glfwGetWindowPos(m_window, &m_windowedX, &m_windowedY);
+        glfwGetWindowSize(m_window, &m_windowedWidth, &m_windowedHeight);
 
-    SDL_SetWindowFullscreen(
-        static_cast<SDL_Window*>(m_window),
-        fullscreen ? SDL_WINDOW_FULLSCREEN : 0
-    );
+        GLFWmonitor* monitor = primaryMonitor();
+        const GLFWvidmode* mode = monitor ? glfwGetVideoMode(monitor) : nullptr;
+        if (monitor && mode) {
+            glfwSetWindowMonitor(
+                m_window,
+                monitor,
+                0,
+                0,
+                mode->width,
+                mode->height,
+                mode->refreshRate
+            );
+        }
+    } else {
+        glfwSetWindowMonitor(
+            m_window,
+            nullptr,
+            m_windowedX,
+            m_windowedY,
+            std::max(1, m_windowedWidth),
+            std::max(1, m_windowedHeight),
+            GLFW_DONT_CARE
+        );
+    }
+
     m_desc.fullscreen = fullscreen;
 }
 
-bool Window::isFullscreen() const {
-    if (!m_window) return false;
-    uint32_t flags = SDL_GetWindowFlags(static_cast<SDL_Window*>(m_window));
-    return (flags & SDL_WINDOW_FULLSCREEN) != 0;
+bool Window::isFullscreen() const
+{
+    return m_window && glfwGetWindowMonitor(m_window) != nullptr;
 }
 
-void Window::toggleFullscreen() {
+void Window::toggleFullscreen()
+{
     setFullscreen(!isFullscreen());
 }
 
-// ==================== 其他属性 ====================
-
-void Window::setResizable(bool resizable) {
-    if (!m_window) return;
-    SDL_SetWindowResizable(static_cast<SDL_Window*>(m_window), resizable ? true : false);
+void Window::setResizable(bool resizable)
+{
+    if (m_window) {
+        glfwSetWindowAttrib(m_window, GLFW_RESIZABLE, resizable ? GLFW_TRUE : GLFW_FALSE);
+    }
     m_desc.resizable = resizable;
 }
 
-bool Window::isResizable() const {
-    if (!m_window) return false;
-    uint32_t flags = SDL_GetWindowFlags(static_cast<SDL_Window*>(m_window));
-    return (flags & SDL_WINDOW_RESIZABLE) != 0;
+bool Window::isResizable() const
+{
+    return m_window && glfwGetWindowAttrib(m_window, GLFW_RESIZABLE) == GLFW_TRUE;
 }
 
-void Window::setBorderless(bool borderless) {
-    if (!m_window) return;
-    SDL_SetWindowBordered(static_cast<SDL_Window*>(m_window), borderless ? false : true);
+void Window::setBorderless(bool borderless)
+{
+    if (m_window) {
+        glfwSetWindowAttrib(m_window, GLFW_DECORATED, borderless ? GLFW_FALSE : GLFW_TRUE);
+    }
     m_desc.borderless = borderless;
 }
 
-bool Window::isBorderless() const {
-    if (!m_window) return false;
-    uint32_t flags = SDL_GetWindowFlags(static_cast<SDL_Window*>(m_window));
-    return (flags & SDL_WINDOW_BORDERLESS) != 0;
+bool Window::isBorderless() const
+{
+    return m_window && glfwGetWindowAttrib(m_window, GLFW_DECORATED) == GLFW_FALSE;
 }
 
-void Window::focus() {
-    if (!m_window) return;
-    SDL_RaiseWindow(static_cast<SDL_Window*>(m_window));
+void Window::focus()
+{
+    if (m_window) {
+        glfwFocusWindow(m_window);
+    }
 }
 
-bool Window::hasFocus() const {
-    if (!m_window) return false;
-    uint32_t flags = SDL_GetWindowFlags(static_cast<SDL_Window*>(m_window));
-    return (flags & SDL_WINDOW_INPUT_FOCUS) != 0;
+bool Window::hasFocus() const
+{
+    return m_window && glfwGetWindowAttrib(m_window, GLFW_FOCUSED) == GLFW_TRUE;
 }
 
-// ==================== 平台相关 ====================
+void* Window::getNativeHandle() const
+{
+    if (!m_window) {
+        return nullptr;
+    }
 
-void* Window::getNativeHandle() const {
-    if (!m_window) return nullptr;
-
-    SDL_PropertiesID props = SDL_GetWindowProperties(static_cast<SDL_Window*>(m_window));
-
-#ifdef _WIN32
-    // Windows: 返回HWND
-    return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+#if defined(_WIN32)
+    return glfwGetWin32Window(m_window);
 #elif defined(__APPLE__)
-    // macOS: 返回NSWindow*
-    return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+    return glfwGetCocoaWindow(m_window);
 #elif defined(__linux__)
-    // Linux: 返回X11 Window或Wayland surface
-    void* handle = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_WINDOW_POINTER, nullptr);
-    if (!handle) {
-        handle = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
+#if defined(TINA_GLFW_HAS_NATIVE_WAYLAND)
+    if (glfwGetPlatform() == GLFW_PLATFORM_WAYLAND) {
+        return glfwGetWaylandWindow(m_window);
     }
-    return handle;
+#endif
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(glfwGetX11Window(m_window)));
 #else
     return nullptr;
 #endif
 }
 
-void* Window::getNativeDisplayHandle() const {
-    if (!m_window) return nullptr;
+void* Window::getNativeDisplayHandle() const
+{
+    if (!m_window) {
+        return nullptr;
+    }
 
-    SDL_PropertiesID props = SDL_GetWindowProperties(static_cast<SDL_Window*>(m_window));
-
-#ifdef __linux__
-    // Linux X11: 返回Display*
-    void* display = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr);
-    if (display) return display;
-
-    // Linux Wayland: 返回wl_display*
-    return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr);
+#if defined(__linux__)
+#if defined(TINA_GLFW_HAS_NATIVE_WAYLAND)
+    if (glfwGetPlatform() == GLFW_PLATFORM_WAYLAND) {
+        return glfwGetWaylandDisplay();
+    }
+#endif
+    return glfwGetX11Display();
 #else
     return nullptr;
 #endif
 }
 
-// ==================== 工具方法 ====================
+bool Window::usesWayland() const
+{
+#if defined(__linux__) && defined(TINA_GLFW_HAS_NATIVE_WAYLAND)
+    return m_window && glfwGetPlatform() == GLFW_PLATFORM_WAYLAND;
+#else
+    return false;
+#endif
+}
 
-void Window::center() {
-    if (!m_window) return;
+void Window::center()
+{
+    if (!m_window || isFullscreen()) {
+        return;
+    }
 
-    // 获取显示器尺寸
-    SDL_DisplayID displayID = SDL_GetPrimaryDisplay();
-    const SDL_DisplayMode *mode = SDL_GetDesktopDisplayMode(displayID);
-    if (mode) {
-        int w, h;
-        getSize(w, h);
+    GLFWmonitor* monitor = primaryMonitor();
+    if (!monitor) {
+        return;
+    }
 
-        int x = (mode->w - w) / 2;
-        int y = (mode->h - h) / 2;
+    int monitorX = 0;
+    int monitorY = 0;
+    int monitorWidth = 0;
+    int monitorHeight = 0;
+    glfwGetMonitorWorkarea(monitor, &monitorX, &monitorY, &monitorWidth, &monitorHeight);
 
-        setPosition(x, y);
+    int windowWidth = 0;
+    int windowHeight = 0;
+    glfwGetWindowSize(m_window, &windowWidth, &windowHeight);
+
+    const int x = monitorX + (monitorWidth - windowWidth) / 2;
+    const int y = monitorY + (monitorHeight - windowHeight) / 2;
+    glfwSetWindowPos(m_window, x, y);
+    m_windowedX = x;
+    m_windowedY = y;
+}
+
+void Window::flash()
+{
+    if (m_window) {
+        glfwRequestWindowAttention(m_window);
     }
 }
 
-void Window::flash() {
-    if (!m_window) return;
-    SDL_FlashWindow(static_cast<SDL_Window*>(m_window), SDL_FLASH_UNTIL_FOCUSED);
-}
-
-void Window::setOpacity(float opacity) {
-    if (!m_window) return;
-    SDL_SetWindowOpacity(static_cast<SDL_Window*>(m_window), opacity);
-}
-
-// SDL扫描码到自定义KeyCode的映射
-static KeyCode mapSDLScancodeToKeyCode(int scancode) {
-    // 字母键 A-Z (SDL_SCANCODE_A=4 → KeyCode::A='A'=65)
-    if (scancode >= SDL_SCANCODE_A && scancode <= SDL_SCANCODE_Z) {
-        return static_cast<KeyCode>('A' + (scancode - SDL_SCANCODE_A));
-    }
-
-    // 数字键 0-9 (SDL_SCANCODE_0=39 → KeyCode::Num0='0'=48)
-    if (scancode >= SDL_SCANCODE_1 && scancode <= SDL_SCANCODE_9) {
-        return static_cast<KeyCode>('1' + (scancode - SDL_SCANCODE_1));
-    }
-    if (scancode == SDL_SCANCODE_0) {
-        return KeyCode::Num0;
-    }
-
-    // 功能键和特殊键（直接映射）
-    switch (scancode) {
-        case SDL_SCANCODE_ESCAPE: return KeyCode::Escape;
-        case SDL_SCANCODE_SPACE: return KeyCode::Space;
-        case SDL_SCANCODE_RETURN: return KeyCode::Enter;
-        case SDL_SCANCODE_TAB: return KeyCode::Tab;
-        case SDL_SCANCODE_BACKSPACE: return KeyCode::Backspace;
-        case SDL_SCANCODE_DELETE: return KeyCode::Delete;
-
-        case SDL_SCANCODE_LEFT: return KeyCode::Left;
-        case SDL_SCANCODE_RIGHT: return KeyCode::Right;
-        case SDL_SCANCODE_UP: return KeyCode::Up;
-        case SDL_SCANCODE_DOWN: return KeyCode::Down;
-
-        case SDL_SCANCODE_HOME: return KeyCode::Home;
-        case SDL_SCANCODE_END: return KeyCode::End;
-        case SDL_SCANCODE_PAGEUP: return KeyCode::PageUp;
-        case SDL_SCANCODE_PAGEDOWN: return KeyCode::PageDown;
-
-        case SDL_SCANCODE_LSHIFT: return KeyCode::LeftShift;
-        case SDL_SCANCODE_RSHIFT: return KeyCode::RightShift;
-        case SDL_SCANCODE_LCTRL: return KeyCode::LeftCtrl;
-        case SDL_SCANCODE_RCTRL: return KeyCode::RightCtrl;
-        case SDL_SCANCODE_LALT: return KeyCode::LeftAlt;
-        case SDL_SCANCODE_RALT: return KeyCode::RightAlt;
-
-        case SDL_SCANCODE_F1: return KeyCode::F1;
-        case SDL_SCANCODE_F2: return KeyCode::F2;
-        case SDL_SCANCODE_F3: return KeyCode::F3;
-        case SDL_SCANCODE_F4: return KeyCode::F4;
-        case SDL_SCANCODE_F5: return KeyCode::F5;
-        case SDL_SCANCODE_F6: return KeyCode::F6;
-        case SDL_SCANCODE_F7: return KeyCode::F7;
-        case SDL_SCANCODE_F8: return KeyCode::F8;
-        case SDL_SCANCODE_F9: return KeyCode::F9;
-        case SDL_SCANCODE_F10: return KeyCode::F10;
-        case SDL_SCANCODE_F11: return KeyCode::F11;
-        case SDL_SCANCODE_F12: return KeyCode::F12;
-
-        default: return KeyCode::Unknown;
+void Window::setOpacity(float opacity)
+{
+    if (m_window) {
+        glfwSetWindowOpacity(m_window, std::clamp(opacity, 0.0f, 1.0f));
     }
 }
 
-// 事件轮询实现（直接返回 SDL_Event）
-bool Window::pollEvent(SDL_Event& outEvent) {
-    return SDL_PollEvent(&outEvent) != 0;
+void Window::pollEvents()
+{
+    glfwPollEvents();
 }
 
-void Window::pumpEvents() {
-    SDL_PumpEvents();
+bool Window::shouldClose() const
+{
+    return m_window && glfwWindowShouldClose(m_window) == GLFW_TRUE;
+}
+
+void Window::requestClose()
+{
+    if (m_window) {
+        glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+    }
+}
+
+const char* Window::getClipboardText() const
+{
+    return m_window ? glfwGetClipboardString(m_window) : nullptr;
+}
+
+void Window::setClipboardText(const char* text)
+{
+    if (m_window) {
+        glfwSetClipboardString(m_window, text ? text : "");
+    }
 }
 
 } // namespace Tina::Engine

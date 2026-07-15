@@ -11,18 +11,35 @@
 #include "Texture.hpp"
 #include "Font.hpp"
 #include "AudioManager.hpp"
+#include "AudioEngine.hpp"
+#include "AudioResource.hpp"
 #include "../core/Log.hpp"
 #include "../ui/TextRenderer.hpp"
 #include "../ui/UIConstants.hpp"  // ✅ VIEW_CLEAR等常量定义
 
 #include <bgfx/bgfx.h>
-#include <bgfx/platform.h>
 #include <bx/timer.h>
-#include <SDL3/SDL.h>
-#include <SDL3_mixer/SDL_mixer.h>
 #include <algorithm>
 
 namespace Tina::Engine {
+namespace {
+
+uint32_t makeResetFlags(const Application::Config& config)
+{
+    uint32_t flags = config.vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE;
+    if (config.msaa >= 16) {
+        flags |= BGFX_RESET_MSAA_X16;
+    } else if (config.msaa >= 8) {
+        flags |= BGFX_RESET_MSAA_X8;
+    } else if (config.msaa >= 4) {
+        flags |= BGFX_RESET_MSAA_X4;
+    } else if (config.msaa >= 2) {
+        flags |= BGFX_RESET_MSAA_X2;
+    }
+    return flags;
+}
+
+} // namespace
 
 // 定义静态单例指针
 Application* Application::s_instance = nullptr;
@@ -71,6 +88,10 @@ void Application::init()
     // 3. 初始化bgfx
     bgfx::PlatformData pd{};
     pd.nwh = nwh;
+    pd.ndt = m_window->getNativeDisplayHandle();
+    if (m_window->usesWayland()) {
+        pd.type = bgfx::NativeWindowHandleType::Wayland;
+    }
 
     bgfx::Init bgfxInit{};
     bgfxInit.type = bgfx::RendererType::Count;
@@ -80,39 +101,26 @@ void Application::init()
 
     bgfxInit.resolution.width = static_cast<uint32_t>(m_pixelWidth);
     bgfxInit.resolution.height = static_cast<uint32_t>(m_pixelHeight);
-    bgfxInit.resolution.reset = BGFX_RESET_VSYNC | BGFX_RESET_MSAA_X8;
+    bgfxInit.resolution.reset = makeResetFlags(m_config);
 
     if (!bgfx::init(bgfxInit)) {
         TINA_ERROR("bgfx 初始化失败");
         m_window.reset();
         return;
     }
+    m_bgfxInitialized = true;
 
     TINA_INFO("bgfx 初始化成功 - 渲染器: {}", bgfx::getRendererName(bgfx::getRendererType()));
 
-    // 4. 初始化 SDL3_mixer
-    if (!MIX_Init()) {
-        TINA_WARN("SDL_mixer 初始化失败：{}", SDL_GetError());
+    // 4. 初始化 miniaudio。音频失败不会阻止无声模式下继续运行。
+    m_audioEngine = Memory::MakeUnique<AudioEngine>();
+    if (!m_audioEngine->initialize()) {
+        TINA_WARN("miniaudio 初始化失败，应用将以无声模式运行");
+        m_audioEngine.reset();
     } else {
-        TINA_INFO("SDL_mixer 初始化成功");
-    }
-
-    SDL_AudioSpec desired{}; 
-    desired.freq = 44100; 
-    desired.channels = 2; 
-    desired.format = SDL_AUDIO_S16;
-    
-    m_mixer = MIX_CreateMixerDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &desired);
-    
-    if (!m_mixer) {
-        TINA_WARN("SDL_mixer 打开音频设备失败：{}", SDL_GetError());
-    } else {
-        TINA_INFO("SDL_mixer 混音器已创建");
-        auto* mixer = static_cast<MIX_Mixer*>(m_mixer);
-        AudioResource::SetGlobalMixer(m_mixer);
-        MIX_SetMasterGain(mixer, std::max(0.0f, std::min(m_audioMasterVolume, 1.0f)));
-        MIX_SetTagGain(mixer, "music", std::max(0.0f, std::min(m_audioMusicVolume, 1.0f)));
-        MIX_SetTagGain(mixer, "sfx",   std::max(0.0f, std::min(m_audioSfxVolume, 1.0f)));
+        m_audioEngine->setMasterVolume(m_audioMasterVolume);
+        m_audioEngine->setMusicVolume(m_audioMusicVolume);
+        m_audioEngine->setSfxVolume(m_audioSfxVolume);
     }
 
     // 5. 设置默认视图
@@ -192,27 +200,29 @@ void Application::shutdown()
         m_app->onCleanup(*this);
     }
 
-    // 2. 清理系统
+    // 2. 先销毁所有依赖 bgfx、资源与窗口的上层对象。
     m_sceneManager.reset();
+    discardPendingTasks();
     m_textRenderer.reset();
-    m_resourceHub.reset();
-    m_fileSystem.reset();
-    m_eventSystem.reset();
-    m_inputSystem.reset();
     m_prim2D.reset();
     m_sprite2D.reset();
+
+    // ResourceManager 持有具体资源；必须先于 FileSystem、AudioEngine 和 bgfx 销毁。
+    m_resourceHub.reset();
+    m_audioMgr.reset();
+    m_fontMgr.reset();
+    m_textureMgr.reset();
+    m_audioEngine.reset();
     m_shaderMgr.reset();
+    m_fileSystem.reset();
 
-    // 3. 关闭 SDL_mixer
-    if (m_mixer) {
-        MIX_DestroyMixer(static_cast<MIX_Mixer*>(m_mixer));
-        m_mixer = nullptr;
+    m_inputSystem.reset();
+    m_eventSystem.reset();
+
+    if (m_bgfxInitialized) {
+        bgfx::shutdown();
+        m_bgfxInitialized = false;
     }
-    AudioResource::SetGlobalMixer(nullptr);
-    MIX_Quit();
-    TINA_INFO("SDL_mixer 已关闭");
-
-    bgfx::shutdown();
 
     m_window.reset();
 
@@ -254,6 +264,10 @@ void Application::run()
         // 3. 处理事件
         processEvents();
 
+        if (!m_running) {
+            break;
+        }
+
         // 4. 调用用户应用事件处理钩子
         if (m_app) {
             m_app->onEvent(*this);
@@ -290,41 +304,42 @@ void Application::run()
 
 void Application::processEvents()
 {
-    SDL_Event event;
-    while (Window::pollEvent(event)) {
-        if (m_inputSystem) {
-            m_inputSystem->processSDLEvent(&event);
-        }
+    m_window->pollEvents();
 
-        if (event.type == SDL_EVENT_QUIT) {
-            TINA_INFO("接收到退出事件");
-            quit();
-            continue;
-        }
+    if (m_window->shouldClose()) {
+        TINA_INFO("接收到窗口关闭请求");
+        quit();
+        flushTasks();
+        return;
+    }
 
-        if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
-            TINA_INFO("接收到窗口关闭事件");
-            quit();
-            continue;
-        }
+    int logicalWidth = 0;
+    int logicalHeight = 0;
+    int pixelWidth = 0;
+    int pixelHeight = 0;
+    m_window->getSize(logicalWidth, logicalHeight);
+    m_window->getFramebufferSize(pixelWidth, pixelHeight);
 
-        if (event.type == SDL_EVENT_WINDOW_RESIZED) {
-            m_config.windowWidth = event.window.data1;
-            m_config.windowHeight = event.window.data2;
-            m_window->getSizeInPixels(m_pixelWidth, m_pixelHeight);
+    const bool framebufferChanged = pixelWidth > 0 && pixelHeight > 0
+        && (pixelWidth != m_pixelWidth || pixelHeight != m_pixelHeight);
+    if (framebufferChanged) {
+        m_config.windowWidth = logicalWidth;
+        m_config.windowHeight = logicalHeight;
+        m_pixelWidth = pixelWidth;
+        m_pixelHeight = pixelHeight;
 
-            TINA_DEBUG("Application - 调用 bgfx::reset({}x{})", m_pixelWidth, m_pixelHeight);
-            bgfx::reset(
-                static_cast<uint32_t>(m_pixelWidth),
-                static_cast<uint32_t>(m_pixelHeight),
-                BGFX_RESET_VSYNC | BGFX_RESET_MSAA_X8
-            );
+        TINA_DEBUG("Application - 调用 bgfx::reset({}x{})", m_pixelWidth, m_pixelHeight);
+        bgfx::reset(
+            static_cast<uint32_t>(m_pixelWidth),
+            static_cast<uint32_t>(m_pixelHeight),
+            makeResetFlags(m_config)
+        );
 
-            TINA_INFO("窗口调整: {}x{} (像素: {}x{})",
-                m_config.windowWidth, m_config.windowHeight,
-                m_pixelWidth, m_pixelHeight);
-            
-            // 只通过事件系统通知
+        TINA_INFO("窗口调整: {}x{} (像素: {}x{})",
+            m_config.windowWidth, m_config.windowHeight,
+            m_pixelWidth, m_pixelHeight);
+
+        if (m_eventSystem) {
             m_eventSystem->trigger(Events::WindowResizedEvent(m_pixelWidth, m_pixelHeight));
         }
     }
@@ -360,22 +375,22 @@ Tina::Renderer::SpriteRenderer& Application::sprites2D() const {
 
 void Application::setAudioMasterVolume(float v) {
     m_audioMasterVolume = std::max(0.0f, std::min(v, 1.0f));
-    if (m_mixer) {
-        MIX_SetMasterGain(static_cast<MIX_Mixer*>(m_mixer), m_audioMasterVolume);
+    if (m_audioEngine) {
+        m_audioEngine->setMasterVolume(m_audioMasterVolume);
     }
 }
 
 void Application::setMusicVolume(float v) {
     m_audioMusicVolume = std::max(0.0f, std::min(v, 1.0f));
-    if (m_mixer) {
-        MIX_SetTagGain(static_cast<MIX_Mixer*>(m_mixer), "music", m_audioMusicVolume);
+    if (m_audioEngine) {
+        m_audioEngine->setMusicVolume(m_audioMusicVolume);
     }
 }
 
 void Application::setSfxVolume(float v) {
     m_audioSfxVolume = std::max(0.0f, std::min(v, 1.0f));
-    if (m_mixer) {
-        MIX_SetTagGain(static_cast<MIX_Mixer*>(m_mixer), "sfx", m_audioSfxVolume);
+    if (m_audioEngine) {
+        m_audioEngine->setSfxVolume(m_audioSfxVolume);
     }
 }
 
@@ -420,6 +435,17 @@ void Application::flushTimedTasks() {
     for (auto& task : readyTasks) {
         if (task) task();
     }
+}
+
+void Application::discardPendingTasks() {
+    Tina::Container::Vector<std::function<void()>> pendingTasks;
+    Tina::Container::Vector<TimedTask> pendingTimedTasks;
+    {
+        std::lock_guard<std::mutex> lock(m_taskMutex);
+        pendingTasks.swap(m_tasks);
+        pendingTimedTasks.swap(m_timedTasks);
+    }
+    // 在资源管理器仍存活时于锁外析构捕获对象。
 }
 
 void Application::prewarmCommonAssets() {

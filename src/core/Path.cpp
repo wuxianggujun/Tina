@@ -8,7 +8,7 @@ static inline bool is_slash(char c) { return c == '/' || c == '\\'; }
 Path::Path() : m_path{} { recalc(); }
 
 Path::Path(string_view path) {
-    m_length = u32(normalize(path, m_path, MAX_PATH) - m_path);
+    m_length = u32(normalize(path, m_path, MaxPathLength) - m_path);
     recalc();
 }
 
@@ -69,7 +69,7 @@ void Path::endUpdate() {
 }
 
 void Path::operator=(string_view rhs) {
-    m_length = u32(normalize(rhs, m_path, MAX_PATH) - m_path);
+    m_length = u32(normalize(rhs, m_path, MaxPathLength) - m_path);
     recalc();
 }
 
@@ -80,7 +80,7 @@ bool Path::operator!=(const Path& rhs) const { return !(*this == rhs); }
 
 void Path::append(string_view s) {
     const size_t cur = m_length;
-    const size_t cap = MAX_PATH;
+    const size_t cap = MaxPathLength;
     size_t n = s.size(); if (n == 0) return;
     size_t to_copy = (cur + n + 1 <= cap) ? n : (cap - cur - 1);
     if (to_copy > 0) {
@@ -101,7 +101,7 @@ static inline char* u64ToDec(char* out, char* end, u64 v) {
 
 void Path::append(u64 v) {
     char* out = m_path + m_length;
-    char* end = m_path + MAX_PATH;
+    char* end = m_path + MaxPathLength;
     out = u64ToDec(out, end, v);
     m_length = u32(out - m_path);
     endUpdate();

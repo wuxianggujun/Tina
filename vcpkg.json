@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "tina",
+  "version-string": "0.0.1",
+  "dependencies": [
+    "box2d",
+    "entt",
+    {
+      "name": "freetype",
+      "default-features": false
+    },
+    "glfw3",
+    "glm",
+    "miniaudio",
+    "spdlog",
+    "utfcpp",
+    "xxhash"
+  ],
+  "features": {
+    "wayland": {
+      "description": "Build the vcpkg GLFW dependency with its Wayland backend.",
+      "supports": "linux",
+      "dependencies": [
+        {
+          "name": "glfw3",
+          "features": [
+            "wayland"
+          ]
+        }
+      ]
+    }
+  }
+}

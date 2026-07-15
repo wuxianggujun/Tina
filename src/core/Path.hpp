@@ -2,7 +2,7 @@
 // 路径系统：Path / PathInfo / ResourcePath
 // 目标：
 // - 规范化路径：统一为正斜杠，去重连续分隔符，处理前缀 "./"
-// - 固定缓冲：避免频繁堆分配（使用 Core.hpp 的 MAX_PATH）
+// - 固定缓冲：避免频繁堆分配（使用 Core::MaxPathLength）
 // - 稳定哈希：基于 xxHash（见 core/Hash.hpp），用于资源查找与 .res 命名
 // - 实用函数：获取目录/基名/扩展名、替换扩展、追加片段
 
@@ -60,7 +60,7 @@ struct Path {
     FilePathHash getHash() const { return m_hash; }
     const char* c_str() const { return m_path; }
     bool isEmpty() const { return m_path[0] == '\0'; }
-    static u32 capacity() { return MAX_PATH; }
+    static u32 capacity() { return MaxPathLength; }
     operator string_view() const { return string_view(m_path, m_length); }
 
     // 片段追加（字符串 / u64）
@@ -75,7 +75,7 @@ struct Path {
 private:
     void recalc();
 
-    char m_path[MAX_PATH]{};
+    char m_path[MaxPathLength]{};
     u32 m_length = 0;
     FilePathHash m_hash{};
 };

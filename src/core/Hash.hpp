@@ -10,8 +10,8 @@
 #include <string_view>
 #include <cctype>
 
-// 直接包含xxHash，使用默认函数名（避免命名空间宏导致的问题）
-#include "../../thirdparty/xxHash/xxhash.h"
+// xxHash is supplied by vcpkg; keep the dependency behind this small adapter.
+#include <xxhash.h>
 
 namespace Tina::Core::Hash {
 

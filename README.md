@@ -91,7 +91,7 @@ A 2D sandbox game engine developed with modern C++17, featuring bgfx rendering b
    - Day-night time adjustment
 
 ### 🎵 Audio System
-- **SDL_mixer based** - Supports MP3/WAV/OGG
+- **miniaudio based** - Supports MP3/WAV/FLAC
 - **Audio management** - Fade in/out, volume control
 - **Group management** - Independent control for sound effects and music
 - **Async loading** - Lazy resource loading
@@ -201,9 +201,9 @@ make -j$(nproc)
 
 | Library | Version | Purpose |
 |---|---|---|
-| [bgfx](https://github.com/bkaradzic/bgfx.cmake.git) | latest | Cross-platform rendering (supports DX11/OpenGL/Vulkan) |
-| [SDL2](https://www.libsdl.org/) | 2.0+ | Window management, input handling |
-| [SDL_mixer](https://www.libsdl.org/projects/SDL_mixer/) | 2.0+ | Audio playback (MP3/WAV/OGG) |
+| [bgfx](https://github.com/bkaradzic/bgfx.cmake.git) | v1.149.9360-557 | Cross-platform rendering (supports DX11/OpenGL/Vulkan) |
+| [GLFW](https://github.com/glfw/glfw) | 3.4 | Window management, input handling and clipboard |
+| [miniaudio](https://github.com/mackron/miniaudio) | 0.11.25 | Audio playback and mixing (MP3/WAV/FLAC) |
 | [EnTT](https://github.com/skypjack/entt.git) | 3.x | Entity Component System (ECS) |
 | [spdlog](https://github.com/gabime/spdlog.git) | 1.x | High-performance logging library |
 | [stb](https://github.com/wuxianggujun/stb-cmake.git) | latest | Image loading, TrueType fonts |

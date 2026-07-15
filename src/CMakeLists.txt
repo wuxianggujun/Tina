@@ -8,6 +8,8 @@ set(SRC_FILES
     engine/Font.cpp
     engine/AudioResource.hpp
     engine/AudioResource.cpp
+    engine/AudioEngine.hpp
+    engine/AudioEngine.cpp
     engine/AudioManager.hpp
     engine/Texture.hpp
     engine/Texture.cpp
@@ -43,12 +45,6 @@ set(SRC_FILES
     game/WorldSelectScene.hpp
     game/WorldSelectScene.cpp
     game/DayNight.hpp
-    core/Path.cpp
-    core/EASTLAlloc.cpp
-    core/Noise.hpp
-    core/Noise.cpp
-    core/Map2DNoise.hpp
-    core/Map2DNoise.cpp
     particles/ParticleSystem.hpp
     particles/ParticleSystem.cpp
     physics/Physics2D.hpp
@@ -122,12 +118,15 @@ set(SRC_FILES
     ecs/systems/CharacterRenderSystem.cpp
 )
 
+add_subdirectory(platform/audio)
+
 add_executable(${PROJECT_NAME} ${SRC_FILES})
+target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23)
+set_target_properties(${PROJECT_NAME} PROPERTIES CXX_EXTENSIONS OFF)
 
 # Include directories for project source files
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/thirdparty/entt/single_include
 )
 
 # 着色器编译
@@ -141,46 +140,26 @@ file(TO_CMAKE_PATH "${TINA_SHADER_BIN_DIR}" TINA_SHADER_BIN_DIR_NORM)
 target_compile_definitions(${PROJECT_NAME} PRIVATE TINA_SHADER_ROOT_DIR="${TINA_SHADER_BIN_DIR_NORM}")
 
 # 统一 defines
-target_compile_definitions(${PROJECT_NAME} PRIVATE BUILDING_CORE)
-
-# SDL3 依赖
-if (TARGET SDL3::SDL3)
-    target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3)
-elseif (TARGET SDL3::SDL3-shared)
-    target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3-shared)
-else()
-    find_package(SDL3 CONFIG QUIET)
-    if (SDL3_FOUND)
-        target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3)
-    else ()
-        message(FATAL_ERROR "未找到 SDL3，请确保 thirdparty/SDL 通过 add_subdirectory 引入，或系统已安装 SDL3 并提供 SDL3Config.cmake")
-    endif ()
-endif ()
-
-# SDL_mixer 依赖（音频混音库）
-if (TARGET SDL3_mixer::SDL3_mixer)
-    target_link_libraries(${PROJECT_NAME} PRIVATE SDL3_mixer::SDL3_mixer)
-    message(STATUS "SDL_mixer 已链接")
-elseif (TARGET SDL3_mixer::SDL3_mixer-shared)
-    target_link_libraries(${PROJECT_NAME} PRIVATE SDL3_mixer::SDL3_mixer-shared)
-    message(STATUS "SDL_mixer (shared) 已链接")
-else()
-    message(WARNING "SDL_mixer 未找到，音频功能将受限")
-endif ()
+if(UNIX AND NOT APPLE AND TINA_BUILD_WAYLAND)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE TINA_GLFW_ENABLE_WAYLAND=1)
+endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
+    Tina::ProjectOptions
+    Tina::CoreLegacy
+    Tina::Procedural
     bgfx
     bx
     bimg
     bimg_decode
+    glfw
+    Tina::Miniaudio
+    EnTT::EnTT
     spdlog::spdlog
     glm::glm
-    freetype
-    TracyClient
-    box2d
-    lz4_static
-    xxhash
-    utf8cpp
+    Freetype::Freetype
+    box2d::box2d
+    utf8cpp::utf8cpp
     EASTL
 )
 
@@ -209,13 +188,6 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 
 # Windows 上拷贝运行时 DLL
 if(WIN32)
-    if(TARGET SDL3::SDL3-shared)
-        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:SDL3::SDL3-shared> "${BIN_DIR}/"
-            COMMENT "Copying SDL3 DLL to bin directory"
-        )
-    endif()
-
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}> "${BIN_DIR}"
         COMMAND_EXPAND_LISTS

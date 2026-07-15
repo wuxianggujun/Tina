@@ -8,7 +8,6 @@
 #include "../engine/InputSystem.hpp"  // 添加 InputSystem 头文件
 #include "../core/Log.hpp"
 
-// #include <SDL3/SDL.h>  // 不再需要SDL，使用os封装
 #include <bgfx/bgfx.h>
 #include "../ui/UILayoutContainers.hpp"  // ✅ 使用新的布局容器
 #include "../ui/UIConstants.hpp"

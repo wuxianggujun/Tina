@@ -2,7 +2,6 @@
 #include <fstream>
 #include <filesystem>
 #include <iostream>
-#include <SDL3/SDL.h>
 #include "core/Log.hpp"
 
 namespace Tina {
@@ -16,12 +15,7 @@ void ShaderManager::initialize(const std::string& shaderRootPath) {
     namespace fs = std::filesystem;
     fs::path p(shaderRootPath);
     if (!p.is_absolute()) {
-        const char* base = SDL_GetBasePath();
-        if (base) {
-            fs::path basep(base);
-            SDL_free((void*)base);
-            p = basep / p;
-        }
+        p = fs::absolute(p);
     }
     m_shaderRootPath = p.lexically_normal().string();
     TINA_INFO("ShaderManager 初始化，根路径: {}", m_shaderRootPath);

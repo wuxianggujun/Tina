@@ -1,10 +1,8 @@
 //
 // AudioResource - 音频资源
-// - 使用 SDL_mixer 实现多格式音频支持
-// - 支持格式：WAV, MP3, OGG, FLAC, MOD, MIDI 等
-// - 基于 SDL3_mixer（3.x）音频管线
-// - 音乐/音效统一以 MIX_Audio 表示，通过 MIX_Track 播放
-// - 使用 Pimpl 模式隐藏 SDL 依赖
+// - 使用 miniaudio 内置解码器播放 WAV、MP3、FLAC
+// - 支持 Music/SFX 分组、循环、淡入淡出和 one-shot
+// - 使用 Pimpl 模式隐藏 miniaudio 依赖
 //
 
 #pragma once
@@ -14,26 +12,20 @@
 
 namespace Tina::Engine {
 
+class AudioEngine;
+
 /**
- * AudioResource - 音频资源（基于 SDL_mixer）
+ * AudioResource - 音频资源（基于 miniaudio）
  * 
  * 职责：
- * - 加载音频文件（支持 WAV/MP3/OGG/FLAC/MOD/MIDI）
+ * - 从 FileSystem 内存数据加载 WAV/MP3/FLAC
  * - 管理音频资源
  * - 支持播放控制（播放/暂停/停止/循环）
  * - 音量控制（独立音量和全局音量）
  * 
  * 设计：
- * - 使用 Pimpl 模式隐藏 SDL 实现细节
- * - 自动格式检测：根据扩展名自动加载
- * 
- * 支持格式：
- * - WAV：未压缩音频
- * - MP3：压缩音乐（需要 mpg123）
- * - OGG：开源压缩格式（需要 Vorbis）
- * - FLAC：无损压缩（需要 FLAC）
- * - MOD/XM/S3M：追踪音乐（需要 libxmp）
- * - MIDI：合成音乐（需要 Timidity）
+ * - 使用 Pimpl 模式隐藏 miniaudio 实现细节
+ * - 预解码为 PCM，避免播放期间持有 FileSystem 临时数据
  * 
  * 使用示例：
  *   auto* audio = hub->load<AudioResource>("sounds/bgm.mp3");
@@ -127,16 +119,18 @@ public:
     float getDuration() const;
 
     /**
-     * 设置全局 Mixer（由 Application 在初始化后设置）
-     * @param mixer 不透明指针，实际类型为 MIX_Mixer*
+     * 绑定全局 AudioEngine（通常由 Application 在初始化后设置）
      */
-    static void SetGlobalMixer(void* mixer);
+    static void SetGlobalAudioEngine(AudioEngine* engine) noexcept;
     
     /**
-     * 获取全局 Mixer
-     * @return 不透明指针，实际类型为 MIX_Mixer*
+     * 获取全局 AudioEngine
      */
-    static void* GetGlobalMixer();
+    static AudioEngine* GetGlobalAudioEngine() noexcept;
+
+    // 兼容旧调用点：不透明指针现在必须指向 AudioEngine。
+    static void SetGlobalMixer(void* audioEngine) noexcept;
+    static void* GetGlobalMixer() noexcept;
 
 protected:
     // Resource 接口实现
@@ -144,7 +138,7 @@ protected:
     void unload() override;
 
 private:
-    // Pimpl 实现类（隐藏 SDL 依赖）
+    // Pimpl 实现类（隐藏 miniaudio 依赖）
     struct Impl;
     Memory::UniquePtr<Impl> m_impl;
 };

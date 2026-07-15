@@ -20,6 +20,7 @@
 #include "../ui/UIConstants.hpp"
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include "../renderer/ShaderCatalog.hpp"
 
 namespace Tina::Game {
@@ -90,8 +91,15 @@ void GameScene::onExit()
 
     // 停止并释放 BGM（淡出）
     if (m_bgm) {
-        m_bgm->stop(Tina::GameConfig::BGM_FADEOUT_MS);
-        m_bgm.reset();
+        constexpr int fadeOutMs = Tina::GameConfig::BGM_FADEOUT_MS;
+        m_bgm->stop(fadeOutMs);
+
+        // ResourceRef 归零会立即卸载 PCM，因此让引用存活到淡出结束。
+        auto deferredBgm = std::make_shared<
+            Tina::Engine::ResourceRef<Tina::Engine::AudioResource>>(std::move(m_bgm));
+        app()->postDelayed(static_cast<uint32_t>(fadeOutMs), [deferredBgm]() {
+            deferredBgm->reset();
+        });
         m_bgmStarted = false;
     }
     
@@ -697,7 +705,7 @@ void GameScene::updateGameLogic(float dt)
     }
 
     // 5. 连续清除工具（左键按住 + 工具1=挖掘）
-    // 注：SDL 鼠标状态适合检测按住状态，而非单击
+    // 注：轮询鼠标状态适合检测按住状态，而非单击
     {
         auto mousePos = inputSys.getMousePosition();
         float mx = mousePos.x, my = mousePos.y;

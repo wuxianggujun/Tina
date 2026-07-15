@@ -209,22 +209,22 @@ namespace Tina {
         
         // 最小最大算法
         template<typename T>
-        TINA_CORE_API constexpr const T& Min(const T& a, const T& b) {
+        TINA_CORE_API constexpr T Min(const T& a, const T& b) {
             return eastl::min(a, b);
         }
         
         template<typename T>
-        TINA_CORE_API constexpr const T& Max(const T& a, const T& b) {
+        TINA_CORE_API constexpr T Max(const T& a, const T& b) {
             return eastl::max(a, b);
         }
         
         template<typename T, typename Compare>
-        TINA_CORE_API constexpr const T& Min(const T& a, const T& b, Compare comp) {
+        TINA_CORE_API constexpr T Min(const T& a, const T& b, Compare comp) {
             return eastl::min(a, b, comp);
         }
         
         template<typename T, typename Compare>
-        TINA_CORE_API constexpr const T& Max(const T& a, const T& b, Compare comp) {
+        TINA_CORE_API constexpr T Max(const T& a, const T& b, Compare comp) {
             return eastl::max(a, b, comp);
         }
         

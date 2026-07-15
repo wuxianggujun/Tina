@@ -1,5 +1,5 @@
 //
-// InputSystem.cpp - 输入系统实现
+// InputSystem.cpp - GLFW-backed keyboard, mouse, and committed text input.
 //
 
 #include "InputSystem.hpp"
@@ -7,338 +7,320 @@
 #include "EventSystem.hpp"
 #include "EngineEvents.hpp"
 #include "../core/Log.hpp"
-#include <SDL3/SDL.h>
-#include <cstring>
+
+#include <GLFW/glfw3.h>
+
+#include <cstdint>
+#include <string>
 
 namespace Tina::Engine {
+namespace {
 
-// 全局输入系统实例（由Application管理）
-static InputSystem* g_inputSystem = nullptr;
+InputSystem* g_inputSystem = nullptr;
 
-InputSystem* GetInput() {
+InputSystem* inputFromWindow(GLFWwindow* window)
+{
+    return window ? static_cast<InputSystem*>(glfwGetWindowUserPointer(window)) : nullptr;
+}
+
+bool isValidIndex(KeyCode key)
+{
+    return static_cast<size_t>(key) < static_cast<size_t>(KeyCode::MaxKeys);
+}
+
+bool isValidIndex(MouseButton button)
+{
+    return static_cast<size_t>(button) < static_cast<size_t>(MouseButton::MaxButtons);
+}
+
+std::string encodeUtf8(unsigned int codepoint)
+{
+    std::string out;
+
+    if (codepoint <= 0x7F) {
+        out.push_back(static_cast<char>(codepoint));
+    } else if (codepoint <= 0x7FF) {
+        out.push_back(static_cast<char>(0xC0 | ((codepoint >> 6) & 0x1F)));
+        out.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    } else if (codepoint <= 0xFFFF) {
+        if (codepoint >= 0xD800 && codepoint <= 0xDFFF) {
+            return {};
+        }
+        out.push_back(static_cast<char>(0xE0 | ((codepoint >> 12) & 0x0F)));
+        out.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    } else if (codepoint <= 0x10FFFF) {
+        out.push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
+        out.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    }
+
+    return out;
+}
+
+} // namespace
+
+InputSystem* GetInput()
+{
     return g_inputSystem;
 }
 
 InputSystem::InputSystem()
-    : m_mouseX(0), m_mouseY(0)
-    , m_mouseXLast(0), m_mouseYLast(0)
-    , m_mouseDeltaX(0), m_mouseDeltaY(0)
-    , m_mouseWheel(0), m_mouseWheelDelta(0)
+    : m_mouseX(0.0f)
+    , m_mouseY(0.0f)
+    , m_mouseXLast(0.0f)
+    , m_mouseYLast(0.0f)
+    , m_mouseDeltaX(0.0f)
+    , m_mouseDeltaY(0.0f)
+    , m_mouseWheel(0.0f)
+    , m_mouseWheelDelta(0.0f)
+    , m_mouseWheelDeltaX(0.0f)
     , m_mouseVisible(true)
     , m_mouseLocked(false)
     , m_textInputActive(false)
 {
-    // 清零所有数组
     m_keys.fill(false);
     m_keysLast.fill(false);
     m_mouseButtons.fill(false);
     m_mouseButtonsLast.fill(false);
 }
 
-InputSystem::~InputSystem() {
+InputSystem::~InputSystem()
+{
     shutdown();
 }
 
-bool InputSystem::initialize() {
-    // 设置为全局实例
+bool InputSystem::initialize()
+{
     g_inputSystem = this;
-
-    TINA_INFO("InputSystem initialized");
+    installCallbacks();
+    updateKeyboardState();
+    updateMouseState();
+    TINA_INFO("InputSystem initialized with GLFW");
     return true;
 }
 
-void InputSystem::shutdown() {
-    if (g_inputSystem == this) {
-        g_inputSystem = nullptr;
-    }
-
-    // 停止文本输入
+void InputSystem::shutdown()
+{
     if (m_textInputActive) {
         stopTextInput();
+    }
+
+    uninstallCallbacks();
+
+    if (g_inputSystem == this) {
+        g_inputSystem = nullptr;
     }
 
     TINA_INFO("InputSystem shutdown");
 }
 
-// ==================== 生命周期 ====================
+void InputSystem::setWindow(Window* window)
+{
+    if (m_window == window) {
+        return;
+    }
 
-void InputSystem::beginFrame() {
-    // 保存上一帧状态
+    uninstallCallbacks();
+    m_window = window;
+    m_glfwWindow = m_window ? m_window->getGLFWWindow() : nullptr;
+    installCallbacks();
+}
+
+void InputSystem::beginFrame()
+{
     m_keysLast = m_keys;
     m_mouseButtonsLast = m_mouseButtons;
 
-    // 保存上一帧鼠标位置
     m_mouseXLast = m_mouseX;
     m_mouseYLast = m_mouseY;
+    m_mouseDeltaX = 0.0f;
+    m_mouseDeltaY = 0.0f;
 
-    // 重置增量值
-    m_mouseWheelDelta = 0;
+    m_mouseWheelDelta = 0.0f;
+    m_mouseWheelDeltaX = 0.0f;
     m_textInputBuffer.clear();
 
-    // 更新输入状态（从SDL获取）
     updateKeyboardState();
     updateMouseState();
-
-    // 计算鼠标增量
-    m_mouseDeltaX = m_mouseX - m_mouseXLast;
-    m_mouseDeltaY = m_mouseY - m_mouseYLast;
 }
 
-void InputSystem::endFrame() {
-    // 处理文本输入缓冲
+void InputSystem::endFrame()
+{
     if (m_textInputActive && !m_textInputBuffer.empty()) {
         m_textInput += m_textInputBuffer;
     }
 }
 
-void InputSystem::processSDLEvent(void* sdlEvent) {
-    SDL_Event* event = static_cast<SDL_Event*>(sdlEvent);
-
-    switch (event->type) {
-        case SDL_EVENT_MOUSE_WHEEL:
-            m_mouseWheelDelta = event->wheel.y;
-            m_mouseWheel += m_mouseWheelDelta;
-            break;
-
-        case SDL_EVENT_TEXT_INPUT:
-            if (m_textInputActive) {
-                m_textInputBuffer += event->text.text;
-                
-                // 发布文本输入事件（立即发布，不等待endFrame）
-                if (m_eventSystem && event->text.text[0] != '\0') {
-                    Events::TextInputEvent textEvent(0, event->text.text);
-                    m_eventSystem->trigger(textEvent);
-                }
-            }
-            break;
-
-        case SDL_EVENT_KEY_DOWN:
-            // 处理按键重复（用于长按删除等）
-            if (event->key.repeat && m_eventSystem) {
-                KeyCode key = mapSDLScancode(event->key.scancode);
-                if (key != KeyCode::Unknown) {
-                    Events::KeyPressedEvent keyEvent;
-                    keyEvent.key = key;
-                    keyEvent.isRepeat = true;
-                    keyEvent.shift = isShiftDown();
-                    keyEvent.ctrl = isCtrlDown();
-                    keyEvent.alt = isAltDown();
-                    m_eventSystem->trigger(keyEvent);
-                }
-            }
-            break;
-
-        // 注意：键盘和鼠标按键事件在updateKeyboardState/updateMouseState中处理
-    }
+bool InputSystem::isKeyDown(KeyCode key) const
+{
+    return isValidIndex(key) ? m_keys[static_cast<size_t>(key)] : false;
 }
 
-// ==================== 键盘输入 ====================
-
-bool InputSystem::isKeyDown(KeyCode key) const {
-    size_t index = static_cast<size_t>(key);
-    return index < m_keys.size() ? m_keys[index] : false;
-}
-
-bool InputSystem::isKeyPressed(KeyCode key) const {
-    size_t index = static_cast<size_t>(key);
+bool InputSystem::isKeyPressed(KeyCode key) const
+{
+    const size_t index = static_cast<size_t>(key);
     return index < m_keys.size() ? (m_keys[index] && !m_keysLast[index]) : false;
 }
 
-bool InputSystem::isKeyReleased(KeyCode key) const {
-    size_t index = static_cast<size_t>(key);
+bool InputSystem::isKeyReleased(KeyCode key) const
+{
+    const size_t index = static_cast<size_t>(key);
     return index < m_keys.size() ? (!m_keys[index] && m_keysLast[index]) : false;
 }
 
-bool InputSystem::isAnyKeyDown() const {
+bool InputSystem::isAnyKeyDown() const
+{
     for (bool key : m_keys) {
-        if (key) return true;
+        if (key) {
+            return true;
+        }
     }
     return false;
 }
 
-bool InputSystem::isAnyKeyPressed() const {
+bool InputSystem::isAnyKeyPressed() const
+{
     for (size_t i = 0; i < m_keys.size(); ++i) {
-        if (m_keys[i] && !m_keysLast[i]) return true;
+        if (m_keys[i] && !m_keysLast[i]) {
+            return true;
+        }
     }
     return false;
 }
 
-bool InputSystem::isShiftDown() const {
+bool InputSystem::isShiftDown() const
+{
     return isKeyDown(KeyCode::LeftShift) || isKeyDown(KeyCode::RightShift);
 }
 
-bool InputSystem::isCtrlDown() const {
+bool InputSystem::isCtrlDown() const
+{
     return isKeyDown(KeyCode::LeftCtrl) || isKeyDown(KeyCode::RightCtrl);
 }
 
-bool InputSystem::isAltDown() const {
+bool InputSystem::isAltDown() const
+{
     return isKeyDown(KeyCode::LeftAlt) || isKeyDown(KeyCode::RightAlt);
 }
 
-bool InputSystem::isSuperDown() const {
+bool InputSystem::isSuperDown() const
+{
     return isKeyDown(KeyCode::LeftSuper) || isKeyDown(KeyCode::RightSuper);
 }
 
-bool InputSystem::isKeyCombo(KeyCode key, bool shift, bool ctrl, bool alt) const {
-    return isKeyDown(key) &&
-           (shift == isShiftDown()) &&
-           (ctrl == isCtrlDown()) &&
-           (alt == isAltDown());
+bool InputSystem::isKeyCombo(KeyCode key, bool shift, bool ctrl, bool alt) const
+{
+    return isKeyDown(key)
+        && shift == isShiftDown()
+        && ctrl == isCtrlDown()
+        && alt == isAltDown();
 }
 
-// ==================== 鼠标输入 ====================
-
-Math::Vec2 InputSystem::getMousePosition() const {
+Math::Vec2 InputSystem::getMousePosition() const
+{
     return Math::Vec2(m_mouseX, m_mouseY);
 }
 
-Math::Vec2 InputSystem::getMouseDelta() const {
+Math::Vec2 InputSystem::getMouseDelta() const
+{
     return Math::Vec2(m_mouseDeltaX, m_mouseDeltaY);
 }
 
-bool InputSystem::isMouseButtonDown(MouseButton button) const {
-    size_t index = static_cast<size_t>(button);
-    return index < m_mouseButtons.size() ? m_mouseButtons[index] : false;
+bool InputSystem::isMouseButtonDown(MouseButton button) const
+{
+    return isValidIndex(button) ? m_mouseButtons[static_cast<size_t>(button)] : false;
 }
 
-bool InputSystem::isMouseButtonPressed(MouseButton button) const {
-    size_t index = static_cast<size_t>(button);
-    return index < m_mouseButtons.size() ?
-           (m_mouseButtons[index] && !m_mouseButtonsLast[index]) : false;
+bool InputSystem::isMouseButtonPressed(MouseButton button) const
+{
+    const size_t index = static_cast<size_t>(button);
+    return index < m_mouseButtons.size()
+        ? (m_mouseButtons[index] && !m_mouseButtonsLast[index])
+        : false;
 }
 
-bool InputSystem::isMouseButtonReleased(MouseButton button) const {
-    size_t index = static_cast<size_t>(button);
-    return index < m_mouseButtons.size() ?
-           (!m_mouseButtons[index] && m_mouseButtonsLast[index]) : false;
+bool InputSystem::isMouseButtonReleased(MouseButton button) const
+{
+    const size_t index = static_cast<size_t>(button);
+    return index < m_mouseButtons.size()
+        ? (!m_mouseButtons[index] && m_mouseButtonsLast[index])
+        : false;
 }
 
-bool InputSystem::isAnyMouseButtonDown() const {
+bool InputSystem::isAnyMouseButtonDown() const
+{
     for (bool button : m_mouseButtons) {
-        if (button) return true;
+        if (button) {
+            return true;
+        }
     }
     return false;
 }
 
-void InputSystem::setMouseVisible(bool visible) {
-    if (m_mouseVisible != visible) {
-        m_mouseVisible = visible;
-        // SDL3 中 SDL_ShowCursor 不再接受参数，使用 SDL_SetCursorVisible
-        if (visible) {
-            SDL_ShowCursor();
-        } else {
-            SDL_HideCursor();
-        }
+void InputSystem::setMouseVisible(bool visible)
+{
+    if (m_mouseVisible == visible) {
+        return;
     }
+
+    m_mouseVisible = visible;
+    updateCursorMode();
 }
 
-void InputSystem::setMouseLocked(bool locked) {
-    if (m_mouseLocked != locked) {
-        m_mouseLocked = locked;
-        // SDL3 中 SDL_SetRelativeMouseMode 改名为 SDL_SetWindowRelativeMouseMode
-        // 但这需要窗口句柄，暂时注释掉
-        // TODO: 需要传入窗口句柄来设置相对鼠标模式
-        // SDL_SetWindowRelativeMouseMode(window, locked);
+void InputSystem::setMouseLocked(bool locked)
+{
+    if (m_mouseLocked == locked) {
+        return;
     }
+
+    m_mouseLocked = locked;
+    updateCursorMode();
 }
 
-// ==================== 文本输入 ====================
-
-void InputSystem::startTextInput() {
-    if (!m_textInputActive) {
-        m_textInputActive = true;
-        m_textInput.clear();
-        
-        // 获取SDL窗口句柄
-        SDL_Window* sdlWindow = m_window ? static_cast<SDL_Window*>(m_window->getSDLWindow()) : nullptr;
-        SDL_StartTextInput(sdlWindow);
-        
-        // 设置输入法候选框位置（可选）
-        if (sdlWindow) {
-            SDL_Rect rect = { 0, 0, 400, 30 };  // 默认位置，后续可以根据输入框位置动态设置
-            SDL_SetTextInputArea(sdlWindow, &rect, 0);
-        }
-    }
-}
-
-void InputSystem::stopTextInput() {
+void InputSystem::startTextInput()
+{
     if (m_textInputActive) {
-        m_textInputActive = false;
-        
-        // 获取SDL窗口句柄
-        SDL_Window* sdlWindow = m_window ? static_cast<SDL_Window*>(m_window->getSDLWindow()) : nullptr;
-        SDL_StopTextInput(sdlWindow);
+        return;
     }
+
+    m_textInputActive = true;
+    m_textInput.clear();
+    m_textInputBuffer.clear();
 }
 
-// ==================== 工具方法 ====================
-
-const char* InputSystem::getKeyName(KeyCode key) {
-    switch (key) {
-        case KeyCode::A: return "A";
-        case KeyCode::B: return "B";
-        case KeyCode::C: return "C";
-        case KeyCode::D: return "D";
-        case KeyCode::E: return "E";
-        case KeyCode::F: return "F";
-        case KeyCode::G: return "G";
-        case KeyCode::H: return "H";
-        case KeyCode::I: return "I";
-        case KeyCode::J: return "J";
-        case KeyCode::K: return "K";
-        case KeyCode::L: return "L";
-        case KeyCode::M: return "M";
-        case KeyCode::N: return "N";
-        case KeyCode::O: return "O";
-        case KeyCode::P: return "P";
-        case KeyCode::Q: return "Q";
-        case KeyCode::R: return "R";
-        case KeyCode::S: return "S";
-        case KeyCode::T: return "T";
-        case KeyCode::U: return "U";
-        case KeyCode::V: return "V";
-        case KeyCode::W: return "W";
-        case KeyCode::X: return "X";
-        case KeyCode::Y: return "Y";
-        case KeyCode::Z: return "Z";
-        case KeyCode::Space: return "Space";
-        case KeyCode::Enter: return "Enter";
-        case KeyCode::Escape: return "Escape";
-        case KeyCode::Left: return "Left";
-        case KeyCode::Right: return "Right";
-        case KeyCode::Up: return "Up";
-        case KeyCode::Down: return "Down";
-        case KeyCode::LeftShift: return "LShift";
-        case KeyCode::RightShift: return "RShift";
-        case KeyCode::LeftCtrl: return "LCtrl";
-        case KeyCode::RightCtrl: return "RCtrl";
-        case KeyCode::LeftAlt: return "LAlt";
-        case KeyCode::RightAlt: return "RAlt";
-        default: return "Unknown";
+void InputSystem::stopTextInput()
+{
+    if (!m_textInputActive) {
+        return;
     }
+
+    m_textInputActive = false;
 }
 
-const char* InputSystem::getMouseButtonName(MouseButton button) {
-    switch (button) {
-        case MouseButton::Left: return "Left";
-        case MouseButton::Right: return "Right";
-        case MouseButton::Middle: return "Middle";
-        case MouseButton::X1: return "X1";
-        case MouseButton::X2: return "X2";
-        default: return "Unknown";
-    }
+const char* InputSystem::getKeyName(KeyCode key)
+{
+    return Tina::Engine::getKeyName(key);
 }
 
-void InputSystem::debugPrint() const {
+const char* InputSystem::getMouseButtonName(MouseButton button)
+{
+    return Tina::Engine::getMouseButtonName(button);
+}
+
+void InputSystem::debugPrint() const
+{
     TINA_DEBUG("=== InputSystem Debug ===");
     TINA_DEBUG("Mouse: ({:.0f}, {:.0f}) Delta: ({:.0f}, {:.0f})",
                m_mouseX, m_mouseY, m_mouseDeltaX, m_mouseDeltaY);
 
-    // 打印按下的键
     std::string keys;
     for (size_t i = 0; i < m_keys.size(); ++i) {
         if (m_keys[i]) {
-            if (!keys.empty()) keys += ", ";
+            if (!keys.empty()) {
+                keys += ", ";
+            }
             keys += getKeyName(static_cast<KeyCode>(i));
         }
     }
@@ -346,11 +328,12 @@ void InputSystem::debugPrint() const {
         TINA_DEBUG("Keys down: {}", keys);
     }
 
-    // 打印按下的鼠标按键
     std::string buttons;
     for (size_t i = 0; i < m_mouseButtons.size(); ++i) {
         if (m_mouseButtons[i]) {
-            if (!buttons.empty()) buttons += ", ";
+            if (!buttons.empty()) {
+                buttons += ", ";
+            }
             buttons += getMouseButtonName(static_cast<MouseButton>(i));
         }
     }
@@ -359,231 +342,442 @@ void InputSystem::debugPrint() const {
     }
 }
 
-// ==================== 内部方法 ====================
-
-void InputSystem::updateKeyboardState() {
-    const bool* sdlKeys = SDL_GetKeyboardState(nullptr);
-
-    // 映射SDL扫描码到我们的KeyCode
-    // 注意：这里只映射常用按键，可以根据需要扩展
-
-    // ✅ 发送按键事件（检测新按下的按键）
-    auto sendKeyEvent = [this](KeyCode key, const bool* sdlKeys, SDL_Scancode scancode) {
-        size_t idx = static_cast<size_t>(key);
-        bool isDown = sdlKeys[scancode];
-        bool wasDown = m_keysLast[idx];
-        m_keys[idx] = isDown;
-        
-        // 如果按键刚按下，发送KeyPressedEvent
-        if (isDown && !wasDown && m_eventSystem) {
-            Events::KeyPressedEvent event;
-            event.key = key;
-            event.shift = isShiftDown();
-            event.ctrl = isCtrlDown();
-            event.alt = isAltDown();
-            m_eventSystem->trigger(event);
-        }
-    };
-
-    // 字母键 A-Z
-    sendKeyEvent(KeyCode::A, sdlKeys, SDL_SCANCODE_A);
-    sendKeyEvent(KeyCode::B, sdlKeys, SDL_SCANCODE_B);
-    sendKeyEvent(KeyCode::C, sdlKeys, SDL_SCANCODE_C);
-    sendKeyEvent(KeyCode::D, sdlKeys, SDL_SCANCODE_D);
-    sendKeyEvent(KeyCode::E, sdlKeys, SDL_SCANCODE_E);
-    sendKeyEvent(KeyCode::F, sdlKeys, SDL_SCANCODE_F);
-    sendKeyEvent(KeyCode::G, sdlKeys, SDL_SCANCODE_G);
-    sendKeyEvent(KeyCode::H, sdlKeys, SDL_SCANCODE_H);
-    sendKeyEvent(KeyCode::I, sdlKeys, SDL_SCANCODE_I);
-    sendKeyEvent(KeyCode::J, sdlKeys, SDL_SCANCODE_J);
-    sendKeyEvent(KeyCode::K, sdlKeys, SDL_SCANCODE_K);
-    sendKeyEvent(KeyCode::L, sdlKeys, SDL_SCANCODE_L);
-    sendKeyEvent(KeyCode::M, sdlKeys, SDL_SCANCODE_M);
-    sendKeyEvent(KeyCode::N, sdlKeys, SDL_SCANCODE_N);
-    sendKeyEvent(KeyCode::O, sdlKeys, SDL_SCANCODE_O);
-    sendKeyEvent(KeyCode::P, sdlKeys, SDL_SCANCODE_P);
-    sendKeyEvent(KeyCode::Q, sdlKeys, SDL_SCANCODE_Q);
-    sendKeyEvent(KeyCode::R, sdlKeys, SDL_SCANCODE_R);
-    sendKeyEvent(KeyCode::S, sdlKeys, SDL_SCANCODE_S);
-    sendKeyEvent(KeyCode::T, sdlKeys, SDL_SCANCODE_T);
-    sendKeyEvent(KeyCode::U, sdlKeys, SDL_SCANCODE_U);
-    sendKeyEvent(KeyCode::V, sdlKeys, SDL_SCANCODE_V);
-    sendKeyEvent(KeyCode::W, sdlKeys, SDL_SCANCODE_W);
-    sendKeyEvent(KeyCode::X, sdlKeys, SDL_SCANCODE_X);
-    sendKeyEvent(KeyCode::Y, sdlKeys, SDL_SCANCODE_Y);
-    sendKeyEvent(KeyCode::Z, sdlKeys, SDL_SCANCODE_Z);
-
-    // 数字键 0-9  
-    sendKeyEvent(KeyCode::Num0, sdlKeys, SDL_SCANCODE_0);
-    sendKeyEvent(KeyCode::Num1, sdlKeys, SDL_SCANCODE_1);
-    sendKeyEvent(KeyCode::Num2, sdlKeys, SDL_SCANCODE_2);
-    sendKeyEvent(KeyCode::Num3, sdlKeys, SDL_SCANCODE_3);
-    sendKeyEvent(KeyCode::Num4, sdlKeys, SDL_SCANCODE_4);
-    sendKeyEvent(KeyCode::Num5, sdlKeys, SDL_SCANCODE_5);
-    sendKeyEvent(KeyCode::Num6, sdlKeys, SDL_SCANCODE_6);
-    sendKeyEvent(KeyCode::Num7, sdlKeys, SDL_SCANCODE_7);
-    sendKeyEvent(KeyCode::Num8, sdlKeys, SDL_SCANCODE_8);
-    sendKeyEvent(KeyCode::Num9, sdlKeys, SDL_SCANCODE_9);
-
-    // 控制键（✅ 关键：Backspace和Delete）
-    sendKeyEvent(KeyCode::Space, sdlKeys, SDL_SCANCODE_SPACE);
-    sendKeyEvent(KeyCode::Enter, sdlKeys, SDL_SCANCODE_RETURN);
-    sendKeyEvent(KeyCode::Escape, sdlKeys, SDL_SCANCODE_ESCAPE);
-    sendKeyEvent(KeyCode::Tab, sdlKeys, SDL_SCANCODE_TAB);
-    sendKeyEvent(KeyCode::Backspace, sdlKeys, SDL_SCANCODE_BACKSPACE);
-    sendKeyEvent(KeyCode::Delete, sdlKeys, SDL_SCANCODE_DELETE);
-    sendKeyEvent(KeyCode::Insert, sdlKeys, SDL_SCANCODE_INSERT);
-
-    // 方向键
-    sendKeyEvent(KeyCode::Left, sdlKeys, SDL_SCANCODE_LEFT);
-    sendKeyEvent(KeyCode::Right, sdlKeys, SDL_SCANCODE_RIGHT);
-    sendKeyEvent(KeyCode::Up, sdlKeys, SDL_SCANCODE_UP);
-    sendKeyEvent(KeyCode::Down, sdlKeys, SDL_SCANCODE_DOWN);
-
-    // 导航键
-    sendKeyEvent(KeyCode::Home, sdlKeys, SDL_SCANCODE_HOME);
-    sendKeyEvent(KeyCode::End, sdlKeys, SDL_SCANCODE_END);
-    sendKeyEvent(KeyCode::PageUp, sdlKeys, SDL_SCANCODE_PAGEUP);
-    sendKeyEvent(KeyCode::PageDown, sdlKeys, SDL_SCANCODE_PAGEDOWN);
-
-    // 修饰键（不发送事件，只更新状态）
-    m_keys[static_cast<size_t>(KeyCode::LeftShift)] = sdlKeys[SDL_SCANCODE_LSHIFT];
-    m_keys[static_cast<size_t>(KeyCode::RightShift)] = sdlKeys[SDL_SCANCODE_RSHIFT];
-    m_keys[static_cast<size_t>(KeyCode::LeftCtrl)] = sdlKeys[SDL_SCANCODE_LCTRL];
-    m_keys[static_cast<size_t>(KeyCode::RightCtrl)] = sdlKeys[SDL_SCANCODE_RCTRL];
-    m_keys[static_cast<size_t>(KeyCode::LeftAlt)] = sdlKeys[SDL_SCANCODE_LALT];
-    m_keys[static_cast<size_t>(KeyCode::RightAlt)] = sdlKeys[SDL_SCANCODE_RALT];
-    m_keys[static_cast<size_t>(KeyCode::LeftSuper)] = sdlKeys[SDL_SCANCODE_LGUI];
-    m_keys[static_cast<size_t>(KeyCode::RightSuper)] = sdlKeys[SDL_SCANCODE_RGUI];
-
-    // 功能键 F1-F12
-    sendKeyEvent(KeyCode::F1, sdlKeys, SDL_SCANCODE_F1);
-    sendKeyEvent(KeyCode::F2, sdlKeys, SDL_SCANCODE_F2);
-    sendKeyEvent(KeyCode::F3, sdlKeys, SDL_SCANCODE_F3);
-    sendKeyEvent(KeyCode::F4, sdlKeys, SDL_SCANCODE_F4);
-    sendKeyEvent(KeyCode::F5, sdlKeys, SDL_SCANCODE_F5);
-    sendKeyEvent(KeyCode::F6, sdlKeys, SDL_SCANCODE_F6);
-    sendKeyEvent(KeyCode::F7, sdlKeys, SDL_SCANCODE_F7);
-    sendKeyEvent(KeyCode::F8, sdlKeys, SDL_SCANCODE_F8);
-    sendKeyEvent(KeyCode::F9, sdlKeys, SDL_SCANCODE_F9);
-    sendKeyEvent(KeyCode::F10, sdlKeys, SDL_SCANCODE_F10);
-    sendKeyEvent(KeyCode::F11, sdlKeys, SDL_SCANCODE_F11);
-    sendKeyEvent(KeyCode::F12, sdlKeys, SDL_SCANCODE_F12);
-}
-
-void InputSystem::updateMouseState() {
-    // 获取鼠标位置
-    float mx = 0.0f, my = 0.0f;
-    uint32_t btnMask = SDL_GetMouseState(&mx, &my);
-
-    // 调试：检查鼠标坐标系统
-    static int debugCounter = 0;
-    if (++debugCounter % 30 == 0 && (btnMask & SDL_BUTTON_MASK(1))) {
-        SDL_Window* window = SDL_GetMouseFocus();
-        if (window) {
-            int logicalW = 0, logicalH = 0;
-            int pixelW = 0, pixelH = 0;
-            SDL_GetWindowSize(window, &logicalW, &logicalH);
-            SDL_GetWindowSizeInPixels(window, &pixelW, &pixelH);
-
-            TINA_DEBUG("鼠标坐标调试:");
-            TINA_DEBUG("  SDL返回鼠标: ({}, {})", mx, my);
-            TINA_DEBUG("  逻辑窗口: {}x{}", logicalW, logicalH);
-            TINA_DEBUG("  像素窗口: {}x{}", pixelW, pixelH);
-            TINA_DEBUG("  鼠标/逻辑比例: ({:.4f}, {:.4f})", mx/logicalW, my/logicalH);
-            TINA_DEBUG("  鼠标/像素比例: ({:.4f}, {:.4f})", mx/pixelW, my/pixelH);
-        }
+void InputSystem::installCallbacks()
+{
+    if (!m_glfwWindow || m_callbacksInstalled) {
+        return;
     }
 
-    // 暂时不做任何转换，直接使用SDL返回的坐标
-
-    m_mouseX = mx;
-    m_mouseY = my;
-
-    // 更新鼠标按键状态
-    m_mouseButtons[static_cast<size_t>(MouseButton::Left)] = (btnMask & SDL_BUTTON_MASK(1)) != 0;
-    m_mouseButtons[static_cast<size_t>(MouseButton::Right)] = (btnMask & SDL_BUTTON_MASK(3)) != 0;
-    m_mouseButtons[static_cast<size_t>(MouseButton::Middle)] = (btnMask & SDL_BUTTON_MASK(2)) != 0;
-    m_mouseButtons[static_cast<size_t>(MouseButton::X1)] = (btnMask & SDL_BUTTON_MASK(4)) != 0;
-    m_mouseButtons[static_cast<size_t>(MouseButton::X2)] = (btnMask & SDL_BUTTON_MASK(5)) != 0;
+    glfwSetWindowUserPointer(m_glfwWindow, this);
+    glfwSetKeyCallback(m_glfwWindow, &InputSystem::keyCallback);
+    glfwSetCharCallback(m_glfwWindow, &InputSystem::charCallback);
+    glfwSetScrollCallback(m_glfwWindow, &InputSystem::scrollCallback);
+    glfwSetCursorPosCallback(m_glfwWindow, &InputSystem::cursorPosCallback);
+    glfwSetMouseButtonCallback(m_glfwWindow, &InputSystem::mouseButtonCallback);
+    updateCursorMode();
+    m_callbacksInstalled = true;
 }
 
-KeyCode InputSystem::mapSDLScancode(int scancode) const {
-    // SDL扫描码到KeyCode的映射（扩展版）
-    switch (scancode) {
-        // 字母键
-        case SDL_SCANCODE_A: return KeyCode::A;
-        case SDL_SCANCODE_B: return KeyCode::B;
-        case SDL_SCANCODE_C: return KeyCode::C;
-        case SDL_SCANCODE_D: return KeyCode::D;
-        case SDL_SCANCODE_E: return KeyCode::E;
-        case SDL_SCANCODE_F: return KeyCode::F;
-        case SDL_SCANCODE_G: return KeyCode::G;
-        case SDL_SCANCODE_H: return KeyCode::H;
-        case SDL_SCANCODE_I: return KeyCode::I;
-        case SDL_SCANCODE_J: return KeyCode::J;
-        case SDL_SCANCODE_K: return KeyCode::K;
-        case SDL_SCANCODE_L: return KeyCode::L;
-        case SDL_SCANCODE_M: return KeyCode::M;
-        case SDL_SCANCODE_N: return KeyCode::N;
-        case SDL_SCANCODE_O: return KeyCode::O;
-        case SDL_SCANCODE_P: return KeyCode::P;
-        case SDL_SCANCODE_Q: return KeyCode::Q;
-        case SDL_SCANCODE_R: return KeyCode::R;
-        case SDL_SCANCODE_S: return KeyCode::S;
-        case SDL_SCANCODE_T: return KeyCode::T;
-        case SDL_SCANCODE_U: return KeyCode::U;
-        case SDL_SCANCODE_V: return KeyCode::V;
-        case SDL_SCANCODE_W: return KeyCode::W;
-        case SDL_SCANCODE_X: return KeyCode::X;
-        case SDL_SCANCODE_Y: return KeyCode::Y;
-        case SDL_SCANCODE_Z: return KeyCode::Z;
-        
-        // 数字键
-        case SDL_SCANCODE_0: return KeyCode::Num0;
-        case SDL_SCANCODE_1: return KeyCode::Num1;
-        case SDL_SCANCODE_2: return KeyCode::Num2;
-        case SDL_SCANCODE_3: return KeyCode::Num3;
-        case SDL_SCANCODE_4: return KeyCode::Num4;
-        case SDL_SCANCODE_5: return KeyCode::Num5;
-        case SDL_SCANCODE_6: return KeyCode::Num6;
-        case SDL_SCANCODE_7: return KeyCode::Num7;
-        case SDL_SCANCODE_8: return KeyCode::Num8;
-        case SDL_SCANCODE_9: return KeyCode::Num9;
-        
-        // 控制键（✅ 关键：支持长按删除）
-        case SDL_SCANCODE_SPACE: return KeyCode::Space;
-        case SDL_SCANCODE_RETURN: return KeyCode::Enter;
-        case SDL_SCANCODE_ESCAPE: return KeyCode::Escape;
-        case SDL_SCANCODE_TAB: return KeyCode::Tab;
-        case SDL_SCANCODE_BACKSPACE: return KeyCode::Backspace;
-        case SDL_SCANCODE_DELETE: return KeyCode::Delete;
-        case SDL_SCANCODE_INSERT: return KeyCode::Insert;
-        
-        // 方向键
-        case SDL_SCANCODE_LEFT: return KeyCode::Left;
-        case SDL_SCANCODE_RIGHT: return KeyCode::Right;
-        case SDL_SCANCODE_UP: return KeyCode::Up;
-        case SDL_SCANCODE_DOWN: return KeyCode::Down;
-        
-        // 导航键
-        case SDL_SCANCODE_HOME: return KeyCode::Home;
-        case SDL_SCANCODE_END: return KeyCode::End;
-        case SDL_SCANCODE_PAGEUP: return KeyCode::PageUp;
-        case SDL_SCANCODE_PAGEDOWN: return KeyCode::PageDown;
-        
+void InputSystem::uninstallCallbacks()
+{
+    if (!m_glfwWindow || !m_callbacksInstalled) {
+        m_callbacksInstalled = false;
+        return;
+    }
+
+    if (glfwGetWindowUserPointer(m_glfwWindow) == this) {
+        glfwSetKeyCallback(m_glfwWindow, nullptr);
+        glfwSetCharCallback(m_glfwWindow, nullptr);
+        glfwSetScrollCallback(m_glfwWindow, nullptr);
+        glfwSetCursorPosCallback(m_glfwWindow, nullptr);
+        glfwSetMouseButtonCallback(m_glfwWindow, nullptr);
+        glfwSetWindowUserPointer(m_glfwWindow, nullptr);
+    }
+
+    m_callbacksInstalled = false;
+}
+
+void InputSystem::updateKeyboardState()
+{
+    if (!m_glfwWindow) {
+        m_keys.fill(false);
+        return;
+    }
+
+    const auto update = [this](KeyCode key, int glfwKey) {
+        const size_t index = static_cast<size_t>(key);
+        if (index >= m_keys.size()) {
+            return;
+        }
+        const int state = glfwGetKey(m_glfwWindow, glfwKey);
+        m_keys[index] = state == GLFW_PRESS || state == GLFW_REPEAT;
+    };
+
+    update(KeyCode::A, GLFW_KEY_A);
+    update(KeyCode::B, GLFW_KEY_B);
+    update(KeyCode::C, GLFW_KEY_C);
+    update(KeyCode::D, GLFW_KEY_D);
+    update(KeyCode::E, GLFW_KEY_E);
+    update(KeyCode::F, GLFW_KEY_F);
+    update(KeyCode::G, GLFW_KEY_G);
+    update(KeyCode::H, GLFW_KEY_H);
+    update(KeyCode::I, GLFW_KEY_I);
+    update(KeyCode::J, GLFW_KEY_J);
+    update(KeyCode::K, GLFW_KEY_K);
+    update(KeyCode::L, GLFW_KEY_L);
+    update(KeyCode::M, GLFW_KEY_M);
+    update(KeyCode::N, GLFW_KEY_N);
+    update(KeyCode::O, GLFW_KEY_O);
+    update(KeyCode::P, GLFW_KEY_P);
+    update(KeyCode::Q, GLFW_KEY_Q);
+    update(KeyCode::R, GLFW_KEY_R);
+    update(KeyCode::S, GLFW_KEY_S);
+    update(KeyCode::T, GLFW_KEY_T);
+    update(KeyCode::U, GLFW_KEY_U);
+    update(KeyCode::V, GLFW_KEY_V);
+    update(KeyCode::W, GLFW_KEY_W);
+    update(KeyCode::X, GLFW_KEY_X);
+    update(KeyCode::Y, GLFW_KEY_Y);
+    update(KeyCode::Z, GLFW_KEY_Z);
+
+    update(KeyCode::Num0, GLFW_KEY_0);
+    update(KeyCode::Num1, GLFW_KEY_1);
+    update(KeyCode::Num2, GLFW_KEY_2);
+    update(KeyCode::Num3, GLFW_KEY_3);
+    update(KeyCode::Num4, GLFW_KEY_4);
+    update(KeyCode::Num5, GLFW_KEY_5);
+    update(KeyCode::Num6, GLFW_KEY_6);
+    update(KeyCode::Num7, GLFW_KEY_7);
+    update(KeyCode::Num8, GLFW_KEY_8);
+    update(KeyCode::Num9, GLFW_KEY_9);
+
+    update(KeyCode::Space, GLFW_KEY_SPACE);
+    update(KeyCode::Enter, GLFW_KEY_ENTER);
+    update(KeyCode::Escape, GLFW_KEY_ESCAPE);
+    update(KeyCode::Tab, GLFW_KEY_TAB);
+    update(KeyCode::Backspace, GLFW_KEY_BACKSPACE);
+    update(KeyCode::Delete, GLFW_KEY_DELETE);
+    update(KeyCode::Insert, GLFW_KEY_INSERT);
+
+    update(KeyCode::Left, GLFW_KEY_LEFT);
+    update(KeyCode::Right, GLFW_KEY_RIGHT);
+    update(KeyCode::Up, GLFW_KEY_UP);
+    update(KeyCode::Down, GLFW_KEY_DOWN);
+
+    update(KeyCode::Home, GLFW_KEY_HOME);
+    update(KeyCode::End, GLFW_KEY_END);
+    update(KeyCode::PageUp, GLFW_KEY_PAGE_UP);
+    update(KeyCode::PageDown, GLFW_KEY_PAGE_DOWN);
+
+    update(KeyCode::LeftShift, GLFW_KEY_LEFT_SHIFT);
+    update(KeyCode::RightShift, GLFW_KEY_RIGHT_SHIFT);
+    update(KeyCode::LeftCtrl, GLFW_KEY_LEFT_CONTROL);
+    update(KeyCode::RightCtrl, GLFW_KEY_RIGHT_CONTROL);
+    update(KeyCode::LeftAlt, GLFW_KEY_LEFT_ALT);
+    update(KeyCode::RightAlt, GLFW_KEY_RIGHT_ALT);
+    update(KeyCode::LeftSuper, GLFW_KEY_LEFT_SUPER);
+    update(KeyCode::RightSuper, GLFW_KEY_RIGHT_SUPER);
+
+    update(KeyCode::F1, GLFW_KEY_F1);
+    update(KeyCode::F2, GLFW_KEY_F2);
+    update(KeyCode::F3, GLFW_KEY_F3);
+    update(KeyCode::F4, GLFW_KEY_F4);
+    update(KeyCode::F5, GLFW_KEY_F5);
+    update(KeyCode::F6, GLFW_KEY_F6);
+    update(KeyCode::F7, GLFW_KEY_F7);
+    update(KeyCode::F8, GLFW_KEY_F8);
+    update(KeyCode::F9, GLFW_KEY_F9);
+    update(KeyCode::F10, GLFW_KEY_F10);
+    update(KeyCode::F11, GLFW_KEY_F11);
+    update(KeyCode::F12, GLFW_KEY_F12);
+}
+
+void InputSystem::updateMouseState()
+{
+    if (!m_glfwWindow) {
+        m_mouseButtons.fill(false);
+        return;
+    }
+
+    double x = 0.0;
+    double y = 0.0;
+    glfwGetCursorPos(m_glfwWindow, &x, &y);
+    m_mouseX = static_cast<float>(x);
+    m_mouseY = static_cast<float>(y);
+
+    const auto update = [this](MouseButton button, int glfwButton) {
+        const size_t index = static_cast<size_t>(button);
+        if (index >= m_mouseButtons.size()) {
+            return;
+        }
+        m_mouseButtons[index] = glfwGetMouseButton(m_glfwWindow, glfwButton) == GLFW_PRESS;
+    };
+
+    update(MouseButton::Left, GLFW_MOUSE_BUTTON_LEFT);
+    update(MouseButton::Right, GLFW_MOUSE_BUTTON_RIGHT);
+    update(MouseButton::Middle, GLFW_MOUSE_BUTTON_MIDDLE);
+    update(MouseButton::X1, GLFW_MOUSE_BUTTON_4);
+    update(MouseButton::X2, GLFW_MOUSE_BUTTON_5);
+}
+
+void InputSystem::updateCursorMode()
+{
+    if (!m_glfwWindow) {
+        return;
+    }
+
+    if (m_mouseLocked) {
+        glfwSetInputMode(m_glfwWindow, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    } else {
+        glfwSetInputMode(m_glfwWindow, GLFW_CURSOR, m_mouseVisible ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
+    }
+}
+
+KeyCode InputSystem::mapGLFWKey(int key) const
+{
+    switch (key) {
+        case GLFW_KEY_A: return KeyCode::A;
+        case GLFW_KEY_B: return KeyCode::B;
+        case GLFW_KEY_C: return KeyCode::C;
+        case GLFW_KEY_D: return KeyCode::D;
+        case GLFW_KEY_E: return KeyCode::E;
+        case GLFW_KEY_F: return KeyCode::F;
+        case GLFW_KEY_G: return KeyCode::G;
+        case GLFW_KEY_H: return KeyCode::H;
+        case GLFW_KEY_I: return KeyCode::I;
+        case GLFW_KEY_J: return KeyCode::J;
+        case GLFW_KEY_K: return KeyCode::K;
+        case GLFW_KEY_L: return KeyCode::L;
+        case GLFW_KEY_M: return KeyCode::M;
+        case GLFW_KEY_N: return KeyCode::N;
+        case GLFW_KEY_O: return KeyCode::O;
+        case GLFW_KEY_P: return KeyCode::P;
+        case GLFW_KEY_Q: return KeyCode::Q;
+        case GLFW_KEY_R: return KeyCode::R;
+        case GLFW_KEY_S: return KeyCode::S;
+        case GLFW_KEY_T: return KeyCode::T;
+        case GLFW_KEY_U: return KeyCode::U;
+        case GLFW_KEY_V: return KeyCode::V;
+        case GLFW_KEY_W: return KeyCode::W;
+        case GLFW_KEY_X: return KeyCode::X;
+        case GLFW_KEY_Y: return KeyCode::Y;
+        case GLFW_KEY_Z: return KeyCode::Z;
+
+        case GLFW_KEY_0: return KeyCode::Num0;
+        case GLFW_KEY_1: return KeyCode::Num1;
+        case GLFW_KEY_2: return KeyCode::Num2;
+        case GLFW_KEY_3: return KeyCode::Num3;
+        case GLFW_KEY_4: return KeyCode::Num4;
+        case GLFW_KEY_5: return KeyCode::Num5;
+        case GLFW_KEY_6: return KeyCode::Num6;
+        case GLFW_KEY_7: return KeyCode::Num7;
+        case GLFW_KEY_8: return KeyCode::Num8;
+        case GLFW_KEY_9: return KeyCode::Num9;
+
+        case GLFW_KEY_F1: return KeyCode::F1;
+        case GLFW_KEY_F2: return KeyCode::F2;
+        case GLFW_KEY_F3: return KeyCode::F3;
+        case GLFW_KEY_F4: return KeyCode::F4;
+        case GLFW_KEY_F5: return KeyCode::F5;
+        case GLFW_KEY_F6: return KeyCode::F6;
+        case GLFW_KEY_F7: return KeyCode::F7;
+        case GLFW_KEY_F8: return KeyCode::F8;
+        case GLFW_KEY_F9: return KeyCode::F9;
+        case GLFW_KEY_F10: return KeyCode::F10;
+        case GLFW_KEY_F11: return KeyCode::F11;
+        case GLFW_KEY_F12: return KeyCode::F12;
+        case GLFW_KEY_F13: return KeyCode::F13;
+        case GLFW_KEY_F14: return KeyCode::F14;
+        case GLFW_KEY_F15: return KeyCode::F15;
+        case GLFW_KEY_F16: return KeyCode::F16;
+        case GLFW_KEY_F17: return KeyCode::F17;
+        case GLFW_KEY_F18: return KeyCode::F18;
+        case GLFW_KEY_F19: return KeyCode::F19;
+        case GLFW_KEY_F20: return KeyCode::F20;
+        case GLFW_KEY_F21: return KeyCode::F21;
+        case GLFW_KEY_F22: return KeyCode::F22;
+        case GLFW_KEY_F23: return KeyCode::F23;
+        case GLFW_KEY_F24: return KeyCode::F24;
+
+        case GLFW_KEY_ESCAPE: return KeyCode::Escape;
+        case GLFW_KEY_SPACE: return KeyCode::Space;
+        case GLFW_KEY_ENTER: return KeyCode::Enter;
+        case GLFW_KEY_TAB: return KeyCode::Tab;
+        case GLFW_KEY_BACKSPACE: return KeyCode::Backspace;
+        case GLFW_KEY_DELETE: return KeyCode::Delete;
+        case GLFW_KEY_INSERT: return KeyCode::Insert;
+
+        case GLFW_KEY_LEFT: return KeyCode::Left;
+        case GLFW_KEY_RIGHT: return KeyCode::Right;
+        case GLFW_KEY_UP: return KeyCode::Up;
+        case GLFW_KEY_DOWN: return KeyCode::Down;
+        case GLFW_KEY_HOME: return KeyCode::Home;
+        case GLFW_KEY_END: return KeyCode::End;
+        case GLFW_KEY_PAGE_UP: return KeyCode::PageUp;
+        case GLFW_KEY_PAGE_DOWN: return KeyCode::PageDown;
+
+        case GLFW_KEY_LEFT_SHIFT: return KeyCode::LeftShift;
+        case GLFW_KEY_RIGHT_SHIFT: return KeyCode::RightShift;
+        case GLFW_KEY_LEFT_CONTROL: return KeyCode::LeftCtrl;
+        case GLFW_KEY_RIGHT_CONTROL: return KeyCode::RightCtrl;
+        case GLFW_KEY_LEFT_ALT: return KeyCode::LeftAlt;
+        case GLFW_KEY_RIGHT_ALT: return KeyCode::RightAlt;
+        case GLFW_KEY_LEFT_SUPER: return KeyCode::LeftSuper;
+        case GLFW_KEY_RIGHT_SUPER: return KeyCode::RightSuper;
+
+        case GLFW_KEY_CAPS_LOCK: return KeyCode::CapsLock;
+        case GLFW_KEY_NUM_LOCK: return KeyCode::NumLock;
+        case GLFW_KEY_SCROLL_LOCK: return KeyCode::ScrollLock;
+
+        case GLFW_KEY_MINUS: return KeyCode::Minus;
+        case GLFW_KEY_EQUAL: return KeyCode::Equals;
+        case GLFW_KEY_LEFT_BRACKET: return KeyCode::LeftBracket;
+        case GLFW_KEY_RIGHT_BRACKET: return KeyCode::RightBracket;
+        case GLFW_KEY_BACKSLASH: return KeyCode::Backslash;
+        case GLFW_KEY_SEMICOLON: return KeyCode::Semicolon;
+        case GLFW_KEY_APOSTROPHE: return KeyCode::Quote;
+        case GLFW_KEY_COMMA: return KeyCode::Comma;
+        case GLFW_KEY_PERIOD: return KeyCode::Period;
+        case GLFW_KEY_SLASH: return KeyCode::Slash;
+        case GLFW_KEY_GRAVE_ACCENT: return KeyCode::Grave;
+
+        case GLFW_KEY_KP_0: return KeyCode::Numpad0;
+        case GLFW_KEY_KP_1: return KeyCode::Numpad1;
+        case GLFW_KEY_KP_2: return KeyCode::Numpad2;
+        case GLFW_KEY_KP_3: return KeyCode::Numpad3;
+        case GLFW_KEY_KP_4: return KeyCode::Numpad4;
+        case GLFW_KEY_KP_5: return KeyCode::Numpad5;
+        case GLFW_KEY_KP_6: return KeyCode::Numpad6;
+        case GLFW_KEY_KP_7: return KeyCode::Numpad7;
+        case GLFW_KEY_KP_8: return KeyCode::Numpad8;
+        case GLFW_KEY_KP_9: return KeyCode::Numpad9;
+        case GLFW_KEY_KP_DIVIDE: return KeyCode::NumpadDivide;
+        case GLFW_KEY_KP_MULTIPLY: return KeyCode::NumpadMultiply;
+        case GLFW_KEY_KP_SUBTRACT: return KeyCode::NumpadMinus;
+        case GLFW_KEY_KP_ADD: return KeyCode::NumpadPlus;
+        case GLFW_KEY_KP_ENTER: return KeyCode::NumpadEnter;
+        case GLFW_KEY_KP_DECIMAL: return KeyCode::NumpadDecimal;
+
+        case GLFW_KEY_PRINT_SCREEN: return KeyCode::PrintScreen;
+        case GLFW_KEY_PAUSE: return KeyCode::Pause;
+        case GLFW_KEY_MENU: return KeyCode::Menu;
+
         default: return KeyCode::Unknown;
     }
 }
 
-MouseButton InputSystem::mapSDLMouseButton(int button) const {
+MouseButton InputSystem::mapGLFWMouseButton(int button) const
+{
     switch (button) {
-        case SDL_BUTTON_LEFT: return MouseButton::Left;
-        case SDL_BUTTON_RIGHT: return MouseButton::Right;
-        case SDL_BUTTON_MIDDLE: return MouseButton::Middle;
-        case SDL_BUTTON_X1: return MouseButton::X1;
-        case SDL_BUTTON_X2: return MouseButton::X2;
-        default: return MouseButton::Left;
+        case GLFW_MOUSE_BUTTON_LEFT: return MouseButton::Left;
+        case GLFW_MOUSE_BUTTON_RIGHT: return MouseButton::Right;
+        case GLFW_MOUSE_BUTTON_MIDDLE: return MouseButton::Middle;
+        case GLFW_MOUSE_BUTTON_4: return MouseButton::X1;
+        case GLFW_MOUSE_BUTTON_5: return MouseButton::X2;
+        default: return MouseButton::MaxButtons;
+    }
+}
+
+void InputSystem::handleKey(int key, int action)
+{
+    const KeyCode mapped = mapGLFWKey(key);
+    if (mapped == KeyCode::Unknown || !isValidIndex(mapped)) {
+        return;
+    }
+
+    const size_t index = static_cast<size_t>(mapped);
+    if (action == GLFW_PRESS) {
+        m_keys[index] = true;
+        emitKeyPressed(mapped, false);
+    } else if (action == GLFW_REPEAT) {
+        m_keys[index] = true;
+        emitKeyPressed(mapped, true);
+    } else if (action == GLFW_RELEASE) {
+        m_keys[index] = false;
+    }
+}
+
+void InputSystem::handleChar(unsigned int codepoint)
+{
+    if (!m_textInputActive) {
+        return;
+    }
+
+    const std::string utf8 = encodeUtf8(codepoint);
+    if (utf8.empty()) {
+        return;
+    }
+
+    appendCommittedText(codepoint, utf8);
+}
+
+void InputSystem::handleScroll(double offsetX, double offsetY)
+{
+    m_mouseWheelDeltaX += static_cast<float>(offsetX);
+    m_mouseWheelDelta += static_cast<float>(offsetY);
+    m_mouseWheel += static_cast<float>(offsetY);
+}
+
+void InputSystem::handleCursorPos(double x, double y)
+{
+    m_mouseX = static_cast<float>(x);
+    m_mouseY = static_cast<float>(y);
+    m_mouseDeltaX = m_mouseX - m_mouseXLast;
+    m_mouseDeltaY = m_mouseY - m_mouseYLast;
+}
+
+void InputSystem::handleMouseButton(int button, int action)
+{
+    const MouseButton mapped = mapGLFWMouseButton(button);
+    if (!isValidIndex(mapped)) {
+        return;
+    }
+
+    const size_t index = static_cast<size_t>(mapped);
+    if (action == GLFW_PRESS) {
+        m_mouseButtons[index] = true;
+    } else if (action == GLFW_RELEASE) {
+        m_mouseButtons[index] = false;
+    }
+}
+
+void InputSystem::emitKeyPressed(KeyCode key, bool repeat)
+{
+    if (!m_eventSystem) {
+        return;
+    }
+
+    Events::KeyPressedEvent event;
+    event.key = key;
+    event.isRepeat = repeat;
+    event.shift = isShiftDown();
+    event.ctrl = isCtrlDown();
+    event.alt = isAltDown();
+    m_eventSystem->trigger(event);
+}
+
+void InputSystem::appendCommittedText(unsigned int codepoint, const std::string& utf8)
+{
+    m_textInputBuffer += utf8;
+
+    if (m_eventSystem) {
+        Events::TextInputEvent event(codepoint, utf8.c_str());
+        m_eventSystem->trigger(event);
+    }
+}
+
+void InputSystem::keyCallback(GLFWwindow* window, int key, int, int action, int)
+{
+    if (InputSystem* input = inputFromWindow(window)) {
+        input->handleKey(key, action);
+    }
+}
+
+void InputSystem::charCallback(GLFWwindow* window, unsigned int codepoint)
+{
+    if (InputSystem* input = inputFromWindow(window)) {
+        input->handleChar(codepoint);
+    }
+}
+
+void InputSystem::scrollCallback(GLFWwindow* window, double offsetX, double offsetY)
+{
+    if (InputSystem* input = inputFromWindow(window)) {
+        input->handleScroll(offsetX, offsetY);
+    }
+}
+
+void InputSystem::cursorPosCallback(GLFWwindow* window, double x, double y)
+{
+    if (InputSystem* input = inputFromWindow(window)) {
+        input->handleCursorPos(x, y);
+    }
+}
+
+void InputSystem::mouseButtonCallback(GLFWwindow* window, int button, int action, int)
+{
+    if (InputSystem* input = inputFromWindow(window)) {
+        input->handleMouseButton(button, action);
     }
 }
 
