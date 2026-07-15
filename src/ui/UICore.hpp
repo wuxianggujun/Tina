@@ -50,11 +50,15 @@ public:
         float padX = 0.0f, padY = 0.0f; // 仅用于 drawTextBox
     };
     void drawText(uint16_t viewId, float x, float y,
+                  const std::string& utf8);
+    void drawText(uint16_t viewId, float x, float y,
                   const std::string& utf8,
-                  const TextOptions& opts = {});
+                  const TextOptions& opts);
+    void drawTextBox(uint16_t viewId, float x, float y, float w, float h,
+                     const std::string& utf8);
     void drawTextBox(uint16_t viewId, float x, float y, float w, float h,
                      const std::string& utf8,
-                     const TextOptions& opts = {});
+                     const TextOptions& opts);
 
     // === 渲染分层（按层递增顺序提交） ===
     // 用途：避免控件间手动 flush，通过层号控制覆盖关系。

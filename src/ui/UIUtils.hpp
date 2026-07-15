@@ -31,8 +31,12 @@ public:
      * @param config 缩放配置（可选）
      * @return 计算得出的缩放比例
      */
+    static float calculateUIScale(int windowWidth, int windowHeight) {
+        return calculateUIScale(windowWidth, windowHeight, ScaleConfig{});
+    }
+
     static float calculateUIScale(int windowWidth, int windowHeight,
-                                 const ScaleConfig& config = ScaleConfig{}) {
+                                  const ScaleConfig& config) {
         float scale = 1.0f;
 
         // 小于基准尺寸时缩小

@@ -145,6 +145,12 @@ void UIRenderer::drawRect(uint16_t viewId, float x, float y, float w, float h,
 }
 
 void UIRenderer::drawText(uint16_t viewId, float x, float y,
+                          const std::string& utf8)
+{
+    drawText(viewId, x, y, utf8, TextOptions{});
+}
+
+void UIRenderer::drawText(uint16_t viewId, float x, float y,
                           const std::string& utf8,
                           const TextOptions& opts)
 {
@@ -154,6 +160,12 @@ void UIRenderer::drawText(uint16_t viewId, float x, float y,
     // 记录当前裁剪状态
     cmd.hasClip = m_hasClip; cmd.clipX = m_clipX; cmd.clipY = m_clipY; cmd.clipW = m_clipW; cmd.clipH = m_clipH;
     m_layers[currentLayer()].texts.push_back(std::move(cmd));
+}
+
+void UIRenderer::drawTextBox(uint16_t viewId, float x, float y, float w, float h,
+                             const std::string& utf8)
+{
+    drawTextBox(viewId, x, y, w, h, utf8, TextOptions{});
 }
 
 void UIRenderer::drawTextBox(uint16_t viewId, float x, float y, float w, float h,

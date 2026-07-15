@@ -3,6 +3,7 @@
 #include <bx/math.h>
 #include <thread>
 #include <chrono>
+#include <utility>
 
 namespace Tina::UI {
 
@@ -121,7 +122,7 @@ bool TextRenderer::ensureGlyph(Font& font, int codepoint)
 
     if (gw == 0 || gh == 0) {
         Glyph gi; gi.codepoint = codepoint; gi.advance = (int)(g->advance.x >> 6);
-        font.glyphs[codepoint] = gi;
+        font.glyphs.emplace(codepoint, gi);
         return true;
     }
 
@@ -174,23 +175,59 @@ bool TextRenderer::ensureGlyph(Font& font, int codepoint)
     const float halfV = 0.5f / (float)m_atlasH;
     info.u0 = (float)dstX / (float)m_atlasW + halfU; info.v0 = (float)dstY / (float)m_atlasH + halfV;
     info.u1 = (float)(dstX + gw) / (float)m_atlasW - halfU; info.v1 = (float)(dstY + gh) / (float)m_atlasH - halfV;
-    font.glyphs[codepoint] = info;
+    font.glyphs.emplace(codepoint, info);
     return true;
 }
 
 bool TextRenderer::utf8Next(const char*& p, const char* end, int& outCode)
 {
     if (p >= end) return false;
-    unsigned char c = (unsigned char)*p++; 
+    const auto c = static_cast<unsigned char>(*p++);
     if (c < 0x80) { outCode = c; return true; }
-    if ((c >> 5) == 0x6 && p < end) {
-        outCode = ((c & 0x1f) << 6) | ((unsigned char)*p++ & 0x3f); return true;
-    } else if ((c >> 4) == 0xe && p + 1 < end) {
-        outCode = ((c & 0x0f) << 12) | (((unsigned char)*p++ & 0x3f) << 6) | ((unsigned char)*p++ & 0x3f); return true;
-    } else if ((c >> 3) == 0x1e && p + 2 < end) {
-        outCode = ((c & 0x07) << 18) | (((unsigned char)*p++ & 0x3f) << 12) | (((unsigned char)*p++ & 0x3f) << 6) | ((unsigned char)*p++ & 0x3f); return true;
+
+    const auto isContinuation = [](unsigned char byte) {
+        return (byte & 0xc0u) == 0x80u;
+    };
+    const auto remaining = static_cast<size_t>(end - p);
+
+    if ((c & 0xe0u) == 0xc0u && remaining >= 1) {
+        const auto b1 = static_cast<unsigned char>(p[0]);
+        if (isContinuation(b1)) {
+            const int codepoint = ((c & 0x1fu) << 6) | (b1 & 0x3fu);
+            if (codepoint >= 0x80) {
+                p += 1;
+                outCode = codepoint;
+                return true;
+            }
+        }
+    } else if ((c & 0xf0u) == 0xe0u && remaining >= 2) {
+        const auto b1 = static_cast<unsigned char>(p[0]);
+        const auto b2 = static_cast<unsigned char>(p[1]);
+        if (isContinuation(b1) && isContinuation(b2)) {
+            const int codepoint = ((c & 0x0fu) << 12) | ((b1 & 0x3fu) << 6) | (b2 & 0x3fu);
+            if (codepoint >= 0x800 && !(codepoint >= 0xd800 && codepoint <= 0xdfff)) {
+                p += 2;
+                outCode = codepoint;
+                return true;
+            }
+        }
+    } else if ((c & 0xf8u) == 0xf0u && remaining >= 3) {
+        const auto b1 = static_cast<unsigned char>(p[0]);
+        const auto b2 = static_cast<unsigned char>(p[1]);
+        const auto b3 = static_cast<unsigned char>(p[2]);
+        if (isContinuation(b1) && isContinuation(b2) && isContinuation(b3)) {
+            const int codepoint = ((c & 0x07u) << 18) | ((b1 & 0x3fu) << 12) |
+                                  ((b2 & 0x3fu) << 6) | (b3 & 0x3fu);
+            if (codepoint >= 0x10000 && codepoint <= 0x10ffff) {
+                p += 3;
+                outCode = codepoint;
+                return true;
+            }
+        }
     }
-    outCode = '?'; return true; // 容错
+
+    outCode = 0xfffd;
+    return true;
 }
 
 void TextRenderer::drawText(uint16_t viewId, float x, float y,
@@ -234,7 +271,9 @@ void TextRenderer::drawText(uint16_t viewId, float x, float y,
             }
             prevGlyphIdx = glyphIdx;
         }
-        const Glyph& gph = m_font->glyphs[code];
+        const auto glyphIt = m_font->glyphs.find(code);
+        if (glyphIt == m_font->glyphs.end()) { ++missing; continue; }
+        const Glyph& gph = glyphIt->second;
         float gx0 = penX + (float)gph.bearingX;
         float gy0 = baseY - (float)gph.bearingY;
         float gx1 = gx0 + (float)gph.w;
@@ -362,7 +401,7 @@ bool TextRenderer::ensureFontReady()
         Font f; f.face = face; f.sizePx = m_requestedFontPx;
         f.ascender = (int)(face->size->metrics.ascender >> 6);
         f.descender = (int)(face->size->metrics.descender >> 6);
-        m_fontsCache[m_requestedFontPx] = f;
+        m_fontsCache.emplace(m_requestedFontPx, std::move(f));
         it = m_fontsCache.find(m_requestedFontPx);
     } else {
         it->second.face = face;
@@ -388,7 +427,7 @@ bool TextRenderer::setFontPx(int pixelSize)
         Font f; f.face = face; f.sizePx = pixelSize;
         f.ascender = (int)(face->size->metrics.ascender >> 6);
         f.descender = (int)(face->size->metrics.descender >> 6);
-        m_fontsCache[pixelSize] = f;
+        m_fontsCache.emplace(pixelSize, std::move(f));
         it = m_fontsCache.find(pixelSize);
     } else {
         it->second.face = face;
@@ -433,7 +472,9 @@ void TextRenderer::measureText(const std::string& utf8, float& outWidth, float& 
             }
             prevGlyphIdx = glyphIdx;
         }
-        const Glyph& g = m_font->glyphs[code];
+        const auto glyphIt = m_font->glyphs.find(code);
+        if (glyphIt == m_font->glyphs.end()) continue;
+        const Glyph& g = glyphIt->second;
         lineW += (float)g.advance;
     }
     if (lineW > outWidth) outWidth = lineW;
