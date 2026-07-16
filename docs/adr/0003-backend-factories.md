@@ -1,7 +1,8 @@
 # ADR 0003：具体 backend 由 bootstrap factory 注入
 
-- 状态：Proposed
+- 状态：Accepted
 - 日期：2026-07-16
+- 接受日期：2026-07-17
 
 ## 背景
 

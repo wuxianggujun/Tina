@@ -1,7 +1,7 @@
 # vNext 设计冻结清单
 
-> 状态：候选冻结。架构与接口 P0 已形成推荐决定；固定 hard-gate machine profile 仍需建立，
-> 且只有用户确认本轮设计后才创建实现 worktree。
+> 状态：分片冻结。Backend 组合、Runtime/State 与 C++ 错误边界已经接受并进入 Null Runtime
+> 实现；固定 hard-gate machine profile 仍需建立。
 
 Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未关闭的工程风险记录在
 [风险登记](risks.md)。本文是 Proposed/Accepted/Deferred 状态的权威汇总，Roadmap 只描述顺序。
@@ -128,12 +128,12 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 
 | 决策 | 状态 | 当前决定 | 影响 |
 | --- | --- | --- | --- |
-| Backend 组合 | [Proposed](adr/0003-backend-factories.md) | `Create(config, factories)`；production 与 headless/null 由 bootstrap 注入 | 消除 Runtime 对具体 backend 依赖 |
-| Runtime/State | [Proposed](adr/0014-runtime-phase-and-state.md) | `IGameApplication` lifecycle-only + `IGameState` 唯一帧入口；Frame Update 后提交状态命令 | 消除名称歧义、双帧入口与首帧 UI 时序冲突 |
+| Backend 组合 | [Accepted](adr/0003-backend-factories.md) | `Create(config, factories)`；production 与 headless/null 由 bootstrap 注入 | 消除 Runtime 对具体 backend 依赖 |
+| Runtime/State | [Accepted](adr/0014-runtime-phase-and-state.md) | `IGameApplication` lifecycle-only + `IGameState` 唯一帧入口；Frame Update 后提交状态命令 | 消除名称歧义、双帧入口与首帧 UI 时序冲突 |
 | RenderFrame 所有权 | Proposed | 轻量 RenderFrame view 放入 Runtime-private owning RenderFramePacket；Render SPI 只暴露 FramePinSink，资源/Atlas/surface pin 到 completion | 消除依赖环、UI 重复 extraction、backend 越界与在途 UAF |
 | UI 增量管线 | Proposed | 细粒度 dirty、一次 layout、持久 PaintCache、稳定 snapshot、相邻兼容 batching | 高性能且保持命中/透明顺序 |
 | Frame/Input | [Proposed](adr/0015-input-and-fixed-step.md) | InputFrame 保序、UI 先路由；Action 分 Simulation/Frame domain；每个 substep 独立 commit | 防输入穿透、同帧丢边沿、双重执行和追赶步错误 |
-| C++ exception | [Proposed](adr/0004-exceptions-and-errors.md) | 编译开启；公共 API 用 Result/Status，Engine/Frame/Worker/C callback 边界捕获 | pmr/第三方兼容、错误边界 |
+| C++ exception | [Accepted](adr/0004-exceptions-and-errors.md) | 编译开启；公共 API 用 Result/Status，Engine/Frame/Worker/C callback 边界捕获 | pmr/第三方兼容、错误边界 |
 | Generation | [Accepted](adr/0019-generation-handles.md) | 32位 generation，回绕 retire；UINodeId 所有构建编码 owner WindowId，Debug cookie 只诊断 | stale/跨 registry 安全 |
 | Asset 生命周期 | [Proposed](adr/0016-asset-ownership-and-retirement.md) | 弱 Handle、强 Lease、UploadTicket 和 retirement ledger | GPU/Audio 异步 UAF 防护 |
 | ContentHash | [Accepted](adr/0007-standard-containers-and-hash.md) | 版本化 XXH3-128；安全校验未来另选密码学 Hash | Cooker cache 与格式稳定性 |
@@ -143,8 +143,9 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 | 固定 hard-gate 机器 | [Proposed](adr/0018-benchmark-protocol.md) | 当前开发机只做 provisional baseline；需创建稳定 machine profile 后才阻断绝对耗时 | 绝对 p99 是否可信 |
 | Cooked 布局 | [Accepted](adr/0009-cooked-assets-and-cgltf.md) | 每 Asset 独立文件 + 事务 Manifest + `tina_asset_format`；Bundle/Patch 后置 | Cooker/Runtime 一致性 |
 
-当前真正需要继续讨论并确认的是前四项接口/语义、Asset 强弱所有权、Worker 默认值和
-benchmark/hard-gate 规则；GLFW、Tracy、EASTL、bgfx、Cooked/cgltf 与测试调度不再重复摇摆。
+当前仍需在相应切片开始前确认的是 RenderFrame 所有权、UI 增量管线、Frame/Input、Asset 强弱
+所有权、Worker 默认值和 benchmark/hard-gate 规则；Backend、Runtime/State、C++ 错误边界、GLFW、
+Tracy、EASTL、bgfx、Cooked/cgltf 与测试调度不再重复摇摆。
 
 ## P1：垂直切片内确认
 
@@ -173,12 +174,12 @@ benchmark/hard-gate 规则；GLFW、Tracy、EASTL、bgfx、Cooked/cgltf 与测�
 
 ## 冻结后的第一项实施
 
-第一切片实现 `tina_core + tina_platform(headless) + tina_task + tina_runtime + tina_render/
-NullRenderDevice + tina_tests + tina_bench + tina_sample_null`，并建立 `scene/asset/ui/audio` 被最终
-Phase Context 和关闭顺序需要的最小契约/Empty 或 Disabled 生命周期壳。它们只允许返回空集合、
-Unavailable 或 Disabled，不实现 World、加载、Widget、Glyph 或真实设备，也不链接 EnTT、
-FreeType、miniaudio、asset format/cgltf。
+第一切片 M6-A 实现 `tina_core + tina_platform(headless) + tina_task(DisabledTaskSystem) +
+tina_runtime + tina_render/NullRenderDevice + tina_tests + tina_sample_null`。它只固定
+`EngineHost::Create(config, factories)`、单个 initial `IGameState`、阶段错误边界、初始化逆序回滚、
+关闭顺序，以及 request-exit-after-frame 的完整帧语义。
 
-该切片一次固定最终 EngineHost 所有权、Frame Pipeline、Metrics、失败注入和 shutdown 顺序，
-完成300帧/10,000帧无泄漏运行。Trace backend 固定为 `none`，且不链接 GLFW/bgfx/EnTT/
-FreeType/miniaudio/Tracy/cgltf；不迁移现有2D、UI 或 Asset 内容，避免首个提交失去可定位性。
+M6-A 不建立无真实消费者的 `scene/asset/ui/audio` 空壳，不实现 Worker、Pass Scheduler、完整
+GameStateStack/Commands、Asset、UI、Audio、Tracy 或 benchmark 协议。它完成300帧与10,000帧
+Null 运行，且不链接 GLFW/bgfx/EnTT/FreeType/miniaudio/Tracy/cgltf。后续切片必须先接受自己的
+P0/P1 决定，再加入对应模块和 benchmark；这样每个提交都可独立定位和回滚。

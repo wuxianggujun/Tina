@@ -1,7 +1,8 @@
 # ADR 0014：EngineHost 阶段 Context + IGameApplication/IGameState
 
-- 状态：Proposed
+- 状态：Accepted
 - 日期：2026-07-17
+- 接受日期：2026-07-17
 
 ## 背景
 
@@ -12,7 +13,7 @@
 单个通用 EngineContext 会把 Service Locator 换一个名字；二值 pause/resume 也无法表达“停止
 Fixed/Input 但继续 Render”的覆盖状态。
 
-## 推荐决定
+## 决定
 
 - `EngineHost` 是唯一非全局 module owner，通过短生命周期 Phase Context 暴露最小能力；
 - `IGameApplication` 只负责游戏程序启动/停止：创建恰好一个 initial `IGameState`，没有帧回调；
@@ -58,6 +59,17 @@ State Transition Commit 位于 Frame Update 与 Render Scene Extraction 之间�
 完成 Render/UI snapshot，下一帧开始命中，且不会要求第二次 layout。已提交 State 退出固定为：
 从后续 dispatch 移除并关闭 ingress → signal cancellation → TaskGroup barrier/join → `onExit` → RAII
 析构与残留断言。
+
+## 实现分期
+
+首个 Null Runtime 切片只实现已提交的单个 initial State，以及
+`FrameUpdateContext::requestExitAfterFrame()`。该请求是主线程幂等 latch：当前帧仍须完成
+Render Scene Extraction、UI、Null Render submit/present 与 Deferred Cleanup；只有这些阶段全部
+成功后才正常退出，同帧错误优先于退出请求。首帧 `frameIndex` 为0，Deferred Cleanup 完成后才递增。
+
+`GameStateStack`、`GameStateCommands`、多 State 传播与 Transition Commit 的公共最终语义在本 ADR
+冻结，但实现推迟到具备真实 Menu/Settings/Gameplay 消费者的切片。首个切片不得为证明未来接口而
+预先实现空队列、假状态栈或无消费者策略。
 
 ## 代价
 

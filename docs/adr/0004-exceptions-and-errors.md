@@ -1,7 +1,8 @@
 # ADR 0004：保持 C++ exception，模块边界转 Result/Status
 
-- 状态：Proposed
+- 状态：Accepted
 - 日期：2026-07-16
+- 接受日期：2026-07-17
 
 ## 背景
 
