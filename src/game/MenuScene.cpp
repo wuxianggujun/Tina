@@ -194,11 +194,6 @@ void MenuScene::handleInput() {
     }
     auto& input = appPtr->input();
     
-    static int callCount = 0;
-    if (++callCount % 60 == 0) {
-        TINA_DEBUG("MenuScene::handleInput 被调用 (第{}次)", callCount);
-    }
-
     // 键盘导航
     if (input.isKeyPressed(Engine::KeyCode::Up)) {
         selectPreviousButton();

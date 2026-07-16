@@ -24,27 +24,32 @@ Tina 是使用 C++20 开发的 2D/3D 游戏引擎项目。平台与输入层使�
 
 ## 构建
 
-需要 CMake、C++20 编译器和 `VCPKG_ROOT`。Windows 使用 MSVC，Linux 使用 GCC/Clang + Ninja。
+需要 CMake、C++20 编译器和 `VCPKG_ROOT`。Windows 当前验证环境为 Visual Studio 2026 18.4.3、MSVC 19.50，Linux 使用 GCC/Clang + Ninja。
+
+Visual Studio 2026 的生成器名为 `Visual Studio 18 2026`。本机 PATH 中的 CMake 3.31 尚不识别该生成器，应使用 Visual Studio 自带的 CMake 4.2.3 或更高版本：
 
 ```powershell
-cmake --preset windows-msvc-vs2022
-cmake --build --preset windows-vs2022-debug
+$cmake = 'D:\Program Files\Microsoft Visual Studio\18\Professional\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+& $cmake --preset windows-msvc
+& $cmake --build --preset windows-debug
 ```
 
 测试构建完成后直接运行 `tina_tests`，不通过额外测试调度器：
 
 ```powershell
-out\build\windows-msvc-vs2022\bin\Debug\tina_tests.exe
+out\build\windows-msvc\bin\tina_tests.exe
 ```
 
 运行时验收入口：
 
 ```powershell
 # 完整 2D + 自研 UI
-out\build\windows-msvc-vs2022\bin\Debug\Tina.exe --smoke-game --smoke-frames=120
+out\build\windows-msvc\bin\Tina.exe --smoke-game --smoke-frames=300
 
 # 最小 3D：Perspective Camera + Depth Test + Indexed Cube
-out\build\windows-msvc-vs2022\bin\Debug\Tina.exe --smoke-3d --smoke-frames=120
+out\build\windows-msvc\bin\Tina.exe --smoke-3d --smoke-frames=300
 ```
+
+项目不使用 CTest 调度；测试直接运行固定 GoogleTest 1.17.0 生成的 `tina_tests`。
 
 详细状态与约束从 [文档索引](docs/README.md) 开始阅读。所有源码、文档、日志和配置统一使用 UTF-8，MSVC 强制启用 `/utf-8`。

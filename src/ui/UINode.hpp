@@ -131,6 +131,7 @@ public:
         T* ptr = child.get();
         ptr->m_parent = this;
         ptr->setLayoutManager(m_layoutManager);
+        ptr->setEventSystem(m_eventSystem);
         m_children.push_back(std::move(child));
         bumpTreeVersion();
         
@@ -466,7 +467,8 @@ public:
     void setName(const std::string& name) { m_name = name; }
 
     // === 引擎事件系统支持 ===
-    void setEventSystem(Tina::Engine::EventSystem* eventSystem) { m_eventSystem = eventSystem; }
+    // 由 Scene 显式注入，并递归传播给整棵树。后续动态添加的子节点会继承该上下文。
+    void setEventSystem(Tina::Engine::EventSystem* eventSystem);
     Tina::Engine::EventSystem* eventSystem() const { return m_eventSystem; }
 
     // === 布局管理器支持 ===

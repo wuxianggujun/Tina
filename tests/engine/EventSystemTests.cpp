@@ -9,6 +9,13 @@ struct QueuedTestEvent : Event<QueuedTestEvent, EventTypeId::GamePaused> {
     int value = 0;
 };
 
+TEST(EventSystemTest, KeepsPerInstanceInlineStorageWithinStackBudget)
+{
+    constexpr std::size_t maxInlineBytes = 64 * 1024;
+    EXPECT_LT(sizeof(EventSystem), maxInlineBytes)
+        << "EventSystem instances must remain safe for the default Windows thread stack";
+}
+
 TEST(EventSystemTest, DispatchesQueuedEventsInPriorityOrder)
 {
     EventSystem events;

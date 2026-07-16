@@ -1,7 +1,5 @@
 #include "UINode.hpp"
-#include "UICore.hpp"
 #include "UILayoutManager.hpp"
-#include "../engine/Application.hpp"
 #include "../core/Log.hpp"
 #include <limits>
 #include <algorithm>
@@ -17,13 +15,7 @@ UINode::UINode(const std::string& name)
     : m_name(name)
 {
     bumpTreeVersion();
-    // 注意：不再自动注册到全局布局管理器
-    // 布局管理器由Scene设置，在addUIRoot时注册
-    
-    // 自动获取并设置引擎事件系统
-    if (auto* app = Engine::Application::instance()) {
-        m_eventSystem = &app->events();
-    }
+    // 布局与事件上下文均由 Scene 在 addUIRoot() 时显式注入。
 }
 
 UINode::~UINode()
@@ -54,6 +46,14 @@ void UINode::setLayoutManager(UILayoutManager* layoutManager)
 
     for (auto& child : m_children) {
         if (child) child->setLayoutManager(layoutManager);
+    }
+}
+
+void UINode::setEventSystem(Tina::Engine::EventSystem* eventSystem)
+{
+    m_eventSystem = eventSystem;
+    for (auto& child : m_children) {
+        if (child) child->setEventSystem(eventSystem);
     }
 }
 
@@ -191,11 +191,8 @@ void UINode::performLayoutNow()
 
 bool UINode::containsPoint(float x, float y)
 {
-    // ✅ 关键修复：在访问坐标前，确保布局是最新的
-    if (m_layoutDirty) {
-        performLayoutNow();
-    }
-
+    // hit-test 必须是只读阶段。Scene::updateFrame() 会先批量提交布局，
+    // 再执行一次命中测试，禁止在这里产生第二次布局。
     Tina::Math::Vec2 wp = getWorldPosition();
     return x >= wp.x && x < wp.x + m_size.x &&
            y >= wp.y && y < wp.y + m_size.y;
@@ -214,24 +211,6 @@ void UINode::update(float dt)
     for (auto& child : m_children) {
         if (child) child->update(dt);
     }
-}
-
-void UINode::render(uint16_t viewId, UIRenderer& renderer)
-{
-    if (!m_visible) return;
-
-    // 分层：若本节点未显式设置层（m_layer==0），继承父层；否则切换到自身层。
-    int prevLayer = renderer.currentLayer();
-    int targetLayer = (m_layer != 0 ? m_layer : prevLayer);
-    bool pushed = false;
-    if (targetLayer != prevLayer) { renderer.pushLayer(targetLayer); pushed = true; }
-
-    onRender(viewId, renderer);
-    for (auto& child : m_children) {
-        if (child) child->render(viewId, renderer);
-    }
-
-    if (pushed) renderer.popLayer();
 }
 
 } // namespace Tina::UI

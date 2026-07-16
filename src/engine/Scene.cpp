@@ -290,14 +290,16 @@ void Scene::setupWorldView(uint16_t viewId) {
 void Scene::registerUITreeToLayoutManager(UI::UINode* node) {
     if (!node || !m_uiLayoutManager) return;
 
-    // UINode 会递归注册整棵树，后续动态添加的子节点也会继承管理器。
+    // UINode 会递归注册整棵树，后续动态添加的子节点也会继承上下文。
     node->setLayoutManager(m_uiLayoutManager.get());
+    node->setEventSystem(m_app ? m_app->getEventSystem() : nullptr);
 }
 
 // 递归注销UI树从布局管理器
 void Scene::unregisterUITreeFromLayoutManager(UI::UINode* node) {
     if (!node || !m_uiLayoutManager) return;
 
+    node->setEventSystem(nullptr);
     node->setLayoutManager(nullptr);
 }
 

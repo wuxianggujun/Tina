@@ -1,6 +1,6 @@
 //
 // EventQueue.hpp - 事件队列（基于 EASTL ring_buffer）
-// 职责：FIFO 事件队列，零动态内存分配
+// 职责：FIFO 事件队列，构造时一次性预分配、帧内零动态内存分配
 // 性能：O(1) 入队/出队，固定容量
 //
 
@@ -69,7 +69,7 @@ struct EventWrapper {
 
 // ==================== 事件队列 ====================
 
-// 事件队列（基于 ring_buffer，FIFO，无动态分配）
+// 事件队列（基于 ring_buffer，FIFO，构造后无动态分配）
 template<size_t Capacity = EVENT_QUEUE_CAPACITY>
 class EventQueue {
 public:
@@ -167,7 +167,10 @@ public:
     }
 
 private:
-    using BufferContainer = FixedVector<EventWrapper, Capacity + 1, false>;
+    // 4096 个 EventWrapper 约占 576 KiB。若使用 FixedVector，EventSystem
+    // 的三个队列会把约 1.7 MiB 直接放进对象，超过 Windows 默认线程栈。
+    // 动态 Vector 仍只在构造时分配一次，保留固定容量和帧内零分配语义。
+    using BufferContainer = Vector<EventWrapper>;
     RingBuffer<EventWrapper, BufferContainer> m_buffer;
 
     // 统计信息

@@ -90,6 +90,7 @@ set(SRC_FILES
     ui/UICore.cpp
     ui/UINode.hpp
     ui/UINode.cpp
+    ui/UINodeRender.cpp
     ui/UIComponents.hpp
     ui/UIComponents.cpp
     ui/UIToolbar.hpp

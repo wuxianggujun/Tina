@@ -132,18 +132,7 @@ UI::UINode* EventSystem::findNodeUnderMouse(UI::UINode* node, float x, float y) 
     
     // 检查当前节点
     if (node->isInteractable()) {
-        auto wp = node->getWorldPosition();
-        auto sz = node->getSize();
-        bool hit = node->containsPoint(x, y);
-        
-        // 调试：打印所有可交互节点的信息
-        static int debugCount = 0;
-        if (++debugCount % 300 == 0 && node->getName().find("Btn") != std::string::npos) {
-            TINA_INFO("检查节点 '{}': 世界坐标({}, {}), 尺寸({}, {}), 鼠标({}, {}), 命中: {}",
-                     node->getName(), wp.x, wp.y, sz.x, sz.y, x, y, hit);
-        }
-        
-        if (hit) {
+        if (node->containsPoint(x, y)) {
             return node;
         }
     }
