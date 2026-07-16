@@ -37,11 +37,12 @@ Release 的四条 300 帧运行路径均已正常返回 0，且未出现 fatal�
 - Core 当前：C++23 `std::expected` Result/Status、稳定 Error domain/code、origin/native code/context
   chain、ScopeExit noexcept invoke/move、EnumFlags `std::to_underlying`、Assert、强类型 Duration、
   可注入 Monotonic Clock、固定步钳制/time scale/最多4步/丢弃与余量、基础类型和 Legacy
-  Compatibility；Error/Result/MonotonicClock/FixedStepAccumulator 另有逐头独立编译门禁；
-- Core vNext 待补：Metric current/peak/reset、Trace 开关、MemoryTag、UTF-8/Unicode 路径、
+  Compatibility，以及 MemoryTag、并发 MemoryTracker、Counting PMR、无回退 FrameArena；公共
+  memory/error/time 头另有逐头独立编译门禁；
+- Core vNext 待补：完整 Metric frame/lifetime reset、Trace 开关、UTF-8/Unicode 路径、
   原子写失败恢复、generation ID、Ensure/CrashContext；
 - Core 专用结构：StaticVector 满容量与无 heap fallback、InlineFunction 大小/移动/自销毁、
-  FrameArena 对齐/reset/OOM/高水位、GenerationPool stale handle；
+  GenerationPool stale handle；FrameArena 对齐/reset/OOM/高水位/零回退已完成；
 - Task：有界队列、QueueFull/停止后拒绝、TaskGroup 取消与 barrier、owner/generation 迟到任务、
   异常不逃出线程、IO/CPU executor 隔离和确定性合并；
 - Runtime 时间：新 FixedStepAccumulator 已覆盖固定步长、真实 delta 钳制、time scale、插值、

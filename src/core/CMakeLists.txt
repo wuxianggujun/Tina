@@ -8,12 +8,20 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/Assert.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/error/Error.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/error/Result.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/memory/CountingMemoryResource.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/memory/FrameArena.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/memory/MemoryStatistics.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/memory/MemoryTag.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/memory/MemoryTracker.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/time/FixedStepAccumulator.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/time/MonotonicClock.hpp
     diagnostics/Assert.cpp
     diagnostics/Assert.hpp
     error/Error.hpp
     error/Result.hpp
+    memory/CountingMemoryResource.cpp
+    memory/FrameArena.cpp
+    memory/MemoryTracker.cpp
     base/Compiler.hpp
     base/EnumFlags.hpp
     base/Platform.hpp

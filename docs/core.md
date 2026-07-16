@@ -222,8 +222,10 @@ Carbon Memory Tracker 展示了成熟内存诊断需要覆盖的边界，但 Tin
    arena 只有测得热点后再增加。
 
 内存 tracker 自己不能通过被跟踪路径分配，否则会递归。OOM、`size * count` 溢出、非法
-alignment、null free、double free 诊断和 tracker shutdown 顺序都需要测试。CPU allocator
-统计与 GPU/Asset 资源计数是不同体系，不能用一次全局 new hook 假装覆盖全部资源。
+alignment、计数下溢和 tracker shutdown 顺序都需要测试。没有逐指针表时不能可靠声称检测
+任意 pointer、错误 size/alignment 或 double free；首期由 PMR 前置条件、ASan 和专用诊断配置
+覆盖。CPU allocator 统计与 GPU/Asset 资源计数是不同体系，不能用一次全局 new hook 假装
+覆盖全部资源。
 
 ## 错误、断言与崩溃
 
@@ -285,7 +287,7 @@ Cooker 依赖原子写保证失败时旧产物仍有效。路径测试覆盖空�
 - Diagnostics owner/sink 先后顺序、级别短路不求值、Worker completion 日志、sink failure 不递归、
   敏感字段过滤与 shutdown flush；
 - UTF-8/Wide 非法序列、Unicode 路径和原子写失败恢复；
-- MemoryTag current/peak、OOM、溢出、alignment 和 tracker 自递归；
+- MemoryTag current/peak、全量无分配 snapshot、OOM、溢出、alignment、并发计数和 tracker 自递归；
 - StaticVector 的满容量、构造/析构/移动和无堆分配；InlineFunction 的大小限制、移动和
   回调自销毁；FrameArena 的对齐、reset、OOM 与高水位；
 - generation ID 的 stale handle、wrap policy 和类型隔离；
@@ -299,3 +301,8 @@ MetricsRegistry、TraceZone 空后端、线程/队列命名、MemoryTag、FrameA
 和原子文件写。StaticVector/InlineFunction 在首个真实消费者出现时加入；Callstack 符号化、
 完整 crash upload、更多 arena、复杂 histogram 与无锁容器都延后，直到 Runtime、Asset 或
 Render 出现真实需求和 profiling 证据。
+
+实施状态（2026-07-17）：`MemoryTag`、原子 `MemoryTracker`、`CountingMemoryResource` 和 owning
+`FrameArena` 已进入 `include/tina/core/memory`。Arena 只在 `Create` 取得一次 backing block，
+支持 PMR、对齐/溢出/OOM 计数、epoch/reset 和零 heap fallback；`MemorySystem` 聚合 owner、
+完整 Metrics/Trace 和 GenerationPool 仍属于后续独立批次。

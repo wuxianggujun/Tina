@@ -285,41 +285,50 @@ Carbon 的 Tracy 0.13.1 集成记录过 Debug/Release `NDEBUG` 导致 `Profiler`
 
 ```cpp
 enum class MemoryTag : std::uint8_t {
-    Core,
-    Platform,
-    Task,
-    Runtime,
-    Scene,
-    Render,
-    UI,
-    Asset,
-    Audio,
-    Temporary,
-    Count
+    Invalid = 0,
+    Core = 1,
+    Platform = 2,
+    Task = 3,
+    RuntimePersistent = 4,
+    RuntimeFrame = 5,
+    Scene = 6,
+    Asset = 7,
+    RenderCpu = 8,
+    UI = 9,
+    Audio = 10,
+    Physics2D = 11,
+    Cooker = 12,
+    Count = 13
 };
 
-struct MemoryStats {
+struct MemoryStatistics {
     std::size_t currentBytes;
     std::size_t peakBytes;
     std::uint64_t allocationCount;
     std::uint64_t deallocationCount;
     std::uint64_t failedAllocationCount;
+    std::uint64_t invalidDeallocationCount;
 };
 
-class MemorySystem final {
+class MemoryTracker final {
 public:
-    [[nodiscard]] std::pmr::memory_resource& resource(MemoryTag tag) noexcept;
-    [[nodiscard]] MemoryStats stats(MemoryTag tag) const noexcept;
-    [[nodiscard]] MemorySnapshot snapshot() const;
+    [[nodiscard]] MemoryStatistics snapshot(MemoryTag tag) const noexcept;
+    [[nodiscard]] MemorySnapshot snapshot() const noexcept;
 };
 ```
 
+当前 Core 已实现固定原子数组 `MemoryTracker` 和不拥有依赖的 `CountingMemoryResource`；后续
+`EngineHost` 的 `MemorySystem` 只负责组合并拥有一组 tracker/resource，不再发明第二套计数。
 每个 tag 对应一个 Tina-owned `CountingMemoryResource`，包装配置的 upstream resource。
 模块初始化时取得 resource 引用并保存在自己的 allocator-aware 对象中，热点分配不查询
-字符串 Map。`MemorySnapshot` 只在帧边界或诊断请求时创建。
+字符串 Map。`MemorySnapshot` 是无分配的固定数组；并发更新期间属于观测快照，在 Runtime
+barrier/帧边界读取时才视为一致检查点。
 
 Release 保留低成本 current/peak/failed counters；逐指针 callstack、guard page 和完整泄漏
 Map 只在专用诊断配置启用，避免性能工具本身改变常规帧行为。
+基础 tracker 只能发现字节计数下溢，不能可靠证明任意指针、错误 size/alignment 或 double free；
+这些问题由 PMR 调用契约、ASan 和后续专用诊断 allocator 覆盖。tracker、wrapper、upstream
+按此顺序缩短生命周期，且 Tina 接受的 upstream `deallocate` 必须不抛异常。
 
 ## FrameMemory 与 Arena
 
@@ -333,14 +342,20 @@ enum class FrameArenaKind : std::uint8_t {
     Temporary
 };
 
-class FrameArena final {
+class FrameArena final : public std::pmr::memory_resource {
 public:
+    [[nodiscard]] static Result<FrameArena> Create(
+        FrameArenaConfig config,
+        std::pmr::memory_resource& upstream);
     [[nodiscard]] void* tryAllocate(
         std::size_t bytes,
         std::size_t alignment) noexcept;
+    template<class T>
+        requires std::is_trivially_destructible_v<T>
+    [[nodiscard]] T* tryAllocateUninitializedArray(std::size_t count) noexcept;
     void reset() noexcept;
-    [[nodiscard]] std::size_t usedBytes() const noexcept;
-    [[nodiscard]] std::size_t peakBytes() const noexcept;
+    [[nodiscard]] FrameArenaStatistics statistics() const noexcept;
+    [[nodiscard]] std::uint64_t epoch() const noexcept;
 };
 ```
 
@@ -348,8 +363,11 @@ public:
 
 - Engine 创建时一次性分配 backing storage，帧内不增长；
 - 线性分配，单次对象不单独 free；
+- `tryAllocate(0, alignment)` 仍返回可释放的 arena 地址并消耗1字节；typed array 的 count 0
+  返回 `nullptr` 但不记为容量失败；
 - 满容量返回 `nullptr`、增加 failed metric，由当前 builder 返回 `CapacityExceeded`；
 - 不静默回退系统堆；
+- `reset` 只逻辑释放字节并推进 epoch，不调用对象析构；非平凡对象必须在 reset 前显式析构；
 - reset 前必须完成使用该 Arena 的所有 Task；
 - Scene command arena 在 command commit 后重置；
 - Render/UI arena 属于固定容量 `RenderFramePacket` slot，只有 SubmissionTicket completion 后重置；
