@@ -50,6 +50,16 @@ bool isValidIndex(MouseButton button)
     return static_cast<size_t>(button) < static_cast<size_t>(MouseButton::MaxButtons);
 }
 
+bool isValidIndex(GamepadButton button)
+{
+    return static_cast<size_t>(button) < static_cast<size_t>(GamepadButton::MaxButtons);
+}
+
+bool isValidIndex(GamepadAxis axis)
+{
+    return static_cast<size_t>(axis) < static_cast<size_t>(GamepadAxis::MaxAxes);
+}
+
 std::string encodeUtf8(unsigned int codepoint)
 {
     std::string out;
@@ -229,6 +239,12 @@ InputSystem::InputSystem()
     m_keysLast.fill(false);
     m_mouseButtons.fill(false);
     m_mouseButtonsLast.fill(false);
+    m_gamepadButtons.fill(false);
+    m_gamepadButtonsLast.fill(false);
+    m_gamepadAxes.fill(0.0f);
+    m_gamepadDirections.fill(false);
+    m_gamepadDirectionsLast.fill(false);
+    m_gamepadDirectionRepeatAt.fill(0.0);
 }
 
 InputSystem::~InputSystem()
@@ -242,6 +258,9 @@ bool InputSystem::initialize()
     installCallbacks();
     updateKeyboardState();
     updateMouseState();
+    updateGamepadState();
+    m_gamepadButtonsLast = m_gamepadButtons;
+    m_gamepadDirectionsLast = m_gamepadDirections;
     TINA_INFO("InputSystem initialized with GLFW");
     return true;
 }
@@ -253,6 +272,14 @@ void InputSystem::shutdown()
     }
 
     uninstallCallbacks();
+
+    m_gamepadId = -1;
+    m_gamepadButtons.fill(false);
+    m_gamepadButtonsLast.fill(false);
+    m_gamepadAxes.fill(0.0f);
+    m_gamepadDirections.fill(false);
+    m_gamepadDirectionsLast.fill(false);
+    m_gamepadDirectionRepeatAt.fill(0.0);
 
     if (g_inputSystem == this) {
         g_inputSystem = nullptr;
@@ -277,6 +304,8 @@ void InputSystem::beginFrame()
 {
     m_keysLast = m_keys;
     m_mouseButtonsLast = m_mouseButtons;
+    m_gamepadButtonsLast = m_gamepadButtons;
+    m_gamepadDirectionsLast = m_gamepadDirections;
 
     m_mouseXLast = m_mouseX;
     m_mouseYLast = m_mouseY;
@@ -289,6 +318,8 @@ void InputSystem::beginFrame()
 
     updateKeyboardState();
     updateMouseState();
+    updateGamepadState();
+    dispatchGamepadUIActions();
 }
 
 void InputSystem::endFrame()
@@ -402,6 +433,34 @@ bool InputSystem::isAnyMouseButtonDown() const
         }
     }
     return false;
+}
+
+bool InputSystem::isGamepadButtonDown(GamepadButton button) const
+{
+    return isValidIndex(button)
+        ? m_gamepadButtons[static_cast<size_t>(button)]
+        : false;
+}
+
+bool InputSystem::isGamepadButtonPressed(GamepadButton button) const
+{
+    if (!isValidIndex(button)) return false;
+    const size_t index = static_cast<size_t>(button);
+    return m_gamepadButtons[index] && !m_gamepadButtonsLast[index];
+}
+
+bool InputSystem::isGamepadButtonReleased(GamepadButton button) const
+{
+    if (!isValidIndex(button)) return false;
+    const size_t index = static_cast<size_t>(button);
+    return !m_gamepadButtons[index] && m_gamepadButtonsLast[index];
+}
+
+float InputSystem::getGamepadAxis(GamepadAxis axis) const
+{
+    return isValidIndex(axis)
+        ? m_gamepadAxes[static_cast<size_t>(axis)]
+        : 0.0f;
 }
 
 void InputSystem::setMouseVisible(bool visible)
@@ -833,6 +892,151 @@ void InputSystem::updateMouseState()
     update(MouseButton::Middle, GLFW_MOUSE_BUTTON_MIDDLE);
     update(MouseButton::X1, GLFW_MOUSE_BUTTON_4);
     update(MouseButton::X2, GLFW_MOUSE_BUTTON_5);
+}
+
+void InputSystem::updateGamepadState()
+{
+    int gamepadId = -1;
+    if (m_gamepadId >= GLFW_JOYSTICK_1 && m_gamepadId <= GLFW_JOYSTICK_LAST &&
+        glfwJoystickPresent(m_gamepadId) == GLFW_TRUE &&
+        glfwJoystickIsGamepad(m_gamepadId) == GLFW_TRUE) {
+        gamepadId = m_gamepadId;
+    } else {
+        for (int candidate = GLFW_JOYSTICK_1;
+             candidate <= GLFW_JOYSTICK_LAST; ++candidate) {
+            if (glfwJoystickPresent(candidate) == GLFW_TRUE &&
+                glfwJoystickIsGamepad(candidate) == GLFW_TRUE) {
+                gamepadId = candidate;
+                break;
+            }
+        }
+    }
+
+    GLFWgamepadstate state{};
+    if (gamepadId < 0 || glfwGetGamepadState(gamepadId, &state) != GLFW_TRUE) {
+        if (m_gamepadId >= 0) {
+            TINA_INFO("Gamepad disconnected: id={}", m_gamepadId);
+        }
+        m_gamepadId = -1;
+        m_gamepadButtons.fill(false);
+        m_gamepadAxes.fill(0.0f);
+        m_gamepadDirections.fill(false);
+        return;
+    }
+
+    if (gamepadId != m_gamepadId) {
+        const char* name = glfwGetGamepadName(gamepadId);
+        TINA_INFO("Gamepad connected: id={}, name='{}'", gamepadId,
+                  name ? name : "Unknown");
+    }
+    m_gamepadId = gamepadId;
+
+    const auto setButton = [this, &state](GamepadButton button, int glfwButton) {
+        m_gamepadButtons[static_cast<size_t>(button)] =
+            state.buttons[glfwButton] == GLFW_PRESS;
+    };
+    setButton(GamepadButton::A, GLFW_GAMEPAD_BUTTON_A);
+    setButton(GamepadButton::B, GLFW_GAMEPAD_BUTTON_B);
+    setButton(GamepadButton::X, GLFW_GAMEPAD_BUTTON_X);
+    setButton(GamepadButton::Y, GLFW_GAMEPAD_BUTTON_Y);
+    setButton(GamepadButton::LeftBumper, GLFW_GAMEPAD_BUTTON_LEFT_BUMPER);
+    setButton(GamepadButton::RightBumper, GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER);
+    setButton(GamepadButton::LeftStick, GLFW_GAMEPAD_BUTTON_LEFT_THUMB);
+    setButton(GamepadButton::RightStick, GLFW_GAMEPAD_BUTTON_RIGHT_THUMB);
+    setButton(GamepadButton::Start, GLFW_GAMEPAD_BUTTON_START);
+    setButton(GamepadButton::Back, GLFW_GAMEPAD_BUTTON_BACK);
+    setButton(GamepadButton::DPadUp, GLFW_GAMEPAD_BUTTON_DPAD_UP);
+    setButton(GamepadButton::DPadDown, GLFW_GAMEPAD_BUTTON_DPAD_DOWN);
+    setButton(GamepadButton::DPadLeft, GLFW_GAMEPAD_BUTTON_DPAD_LEFT);
+    setButton(GamepadButton::DPadRight, GLFW_GAMEPAD_BUTTON_DPAD_RIGHT);
+
+    m_gamepadAxes[static_cast<size_t>(GamepadAxis::LeftX)] =
+        state.axes[GLFW_GAMEPAD_AXIS_LEFT_X];
+    m_gamepadAxes[static_cast<size_t>(GamepadAxis::LeftY)] =
+        state.axes[GLFW_GAMEPAD_AXIS_LEFT_Y];
+    m_gamepadAxes[static_cast<size_t>(GamepadAxis::RightX)] =
+        state.axes[GLFW_GAMEPAD_AXIS_RIGHT_X];
+    m_gamepadAxes[static_cast<size_t>(GamepadAxis::RightY)] =
+        state.axes[GLFW_GAMEPAD_AXIS_RIGHT_Y];
+    m_gamepadAxes[static_cast<size_t>(GamepadAxis::LeftTrigger)] =
+        state.axes[GLFW_GAMEPAD_AXIS_LEFT_TRIGGER];
+    m_gamepadAxes[static_cast<size_t>(GamepadAxis::RightTrigger)] =
+        state.axes[GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER];
+
+    constexpr float engageThreshold = 0.60f;
+    constexpr float releaseThreshold = 0.40f;
+    const float leftX = getGamepadAxis(GamepadAxis::LeftX);
+    const float leftY = getGamepadAxis(GamepadAxis::LeftY);
+    const auto negativeAxis = [](float value, bool wasActive) {
+        return value <= -(wasActive ? releaseThreshold : engageThreshold);
+    };
+    const auto positiveAxis = [](float value, bool wasActive) {
+        return value >= (wasActive ? releaseThreshold : engageThreshold);
+    };
+
+    // Direction order matches UINavigationAction: Left, Right, Up, Down.
+    m_gamepadDirections[0] = isGamepadButtonDown(GamepadButton::DPadLeft) ||
+        negativeAxis(leftX, m_gamepadDirectionsLast[0]);
+    m_gamepadDirections[1] = isGamepadButtonDown(GamepadButton::DPadRight) ||
+        positiveAxis(leftX, m_gamepadDirectionsLast[1]);
+    m_gamepadDirections[2] = isGamepadButtonDown(GamepadButton::DPadUp) ||
+        negativeAxis(leftY, m_gamepadDirectionsLast[2]);
+    m_gamepadDirections[3] = isGamepadButtonDown(GamepadButton::DPadDown) ||
+        positiveAxis(leftY, m_gamepadDirectionsLast[3]);
+
+    if (m_gamepadDirections[0] && m_gamepadDirections[1]) {
+        m_gamepadDirections[0] = false;
+        m_gamepadDirections[1] = false;
+    }
+    if (m_gamepadDirections[2] && m_gamepadDirections[3]) {
+        m_gamepadDirections[2] = false;
+        m_gamepadDirections[3] = false;
+    }
+}
+
+void InputSystem::dispatchGamepadUIActions()
+{
+    if (!m_eventSystem) return;
+
+    constexpr double initialRepeatDelay = 0.35;
+    constexpr double repeatInterval = 0.10;
+    constexpr std::array<UINavigationAction, 4> actions{
+        UINavigationAction::Left,
+        UINavigationAction::Right,
+        UINavigationAction::Up,
+        UINavigationAction::Down
+    };
+    const double now = glfwGetTime();
+    for (size_t index = 0; index < actions.size(); ++index) {
+        if (!m_gamepadDirections[index]) {
+            m_gamepadDirectionRepeatAt[index] = 0.0;
+            continue;
+        }
+
+        if (!m_gamepadDirectionsLast[index]) {
+            m_eventSystem->dispatchUINavigationAction(
+                actions[index], UINavigationPhase::Pressed);
+            m_gamepadDirectionRepeatAt[index] = now + initialRepeatDelay;
+        } else if (now >= m_gamepadDirectionRepeatAt[index]) {
+            m_eventSystem->dispatchUINavigationAction(
+                actions[index], UINavigationPhase::Repeated);
+            m_gamepadDirectionRepeatAt[index] = now + repeatInterval;
+        }
+    }
+
+    const auto dispatchButton = [this](GamepadButton button,
+                                       UINavigationAction action) {
+        if (isGamepadButtonPressed(button)) {
+            m_eventSystem->dispatchUINavigationAction(
+                action, UINavigationPhase::Pressed);
+        }
+        if (isGamepadButtonReleased(button)) {
+            m_eventSystem->dispatchUINavigationAction(
+                action, UINavigationPhase::Released);
+        }
+    };
+    dispatchButton(GamepadButton::A, UINavigationAction::Accept);
+    dispatchButton(GamepadButton::B, UINavigationAction::Cancel);
 }
 
 void InputSystem::updateCursorMode()

@@ -59,6 +59,21 @@ enum class UIFocusDirection {
     Down
 };
 
+enum class UINavigationAction {
+    Left,
+    Right,
+    Up,
+    Down,
+    Accept,
+    Cancel
+};
+
+enum class UINavigationPhase {
+    Pressed,
+    Repeated,
+    Released
+};
+
 // UI事件基类（带传播控制）
 template<typename Derived, EventTypeId TypeId>
 struct UIEvent : Event<Derived, TypeId> {
@@ -368,6 +383,9 @@ public:
     void clearKeyboardFocus() { setKeyboardFocus({}); }
     bool focusNext(bool reverse = false);
     bool focusDirectional(UIFocusDirection direction);
+    bool dispatchUINavigationAction(
+        UINavigationAction action,
+        UINavigationPhase phase = UINavigationPhase::Pressed);
     bool beginFocusScope(UI::NodeId root, UI::NodeId initialFocus = {});
     bool endFocusScope(UI::NodeId root);
     UI::NodeId activeFocusScopeId() const {

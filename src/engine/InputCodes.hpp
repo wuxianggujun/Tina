@@ -108,7 +108,7 @@ enum class MouseButton : u8 {
     MaxButtons = 8
 };
 
-// ==================== 手柄按键代码（预留） ====================
+// ==================== 标准手柄输入 ====================
 
 enum class GamepadButton : u8 {
     A = 0, B, X, Y,
@@ -118,6 +118,17 @@ enum class GamepadButton : u8 {
     DPadUp, DPadDown, DPadLeft, DPadRight,
 
     MaxButtons = 16
+};
+
+enum class GamepadAxis : u8 {
+    LeftX = 0,
+    LeftY,
+    RightX,
+    RightY,
+    LeftTrigger,
+    RightTrigger,
+
+    MaxAxes
 };
 
 // ==================== 辅助函数（可选） ====================

@@ -60,6 +60,6 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 
 项目不使用 CTest 调度；测试直接运行固定 GoogleTest 1.17.0 生成的 `tina_tests`。
 
-当前 UI 已具备 generation `NodeId`、Pointer Capture、Focus/Tab、KeyDown/KeyUp 的 Capture/Target/Bubble 路由、方向键空间焦点导航、可嵌套 Modal Focus Scope、Button 的 Enter/Space pressed/release 生命周期与单次激活、每窗口 Theme/DPI、嵌套 Clip、通用 `UIScrollView`、十万行范围计算的 ListView 虚拟化，以及 Windows 原生 IME preedit/composition。Dialog 不再订阅全局键盘事件，Escape 仅在焦点控件未消费时沿祖先链处理；Scene 会在 `onEnter`/`onResume` 交互前激活对应 UI roots。相关行为由 45 项 GoogleTest 覆盖。窗口与基础输入仍使用 GLFW；IME 通过 Win32 IMM32 补充，不引入其他窗口或输入库。
+当前 UI 已具备 generation `NodeId`、Pointer Capture、Focus/Tab、KeyDown/KeyUp 的 Capture/Target/Bubble 路由、方向键空间焦点导航、可嵌套 Modal Focus Scope、Button 的 Enter/Space pressed/release 生命周期与单次激活、每窗口 Theme/DPI、嵌套 Clip、通用 `UIScrollView`、十万行范围计算的 ListView 虚拟化，以及 Windows 原生 IME preedit/composition。GLFW 标准手柄的 D-pad/左摇杆可驱动空间导航，A/B 映射为 Accept/Cancel；摇杆带回滞并支持方向长按重复，语义导航仍服从最上层 Modal Focus Scope。Dialog 不再订阅全局键盘事件，Escape 仅在焦点控件未消费时沿祖先链处理；Scene 会在 `onEnter`/`onResume` 交互前激活对应 UI roots。相关行为由 46 项 GoogleTest 覆盖。窗口与基础输入只使用 GLFW；IME 通过 Win32 IMM32 补充，不引入其他窗口或输入库。
 
 详细状态与约束从 [文档索引](docs/README.md) 开始阅读。所有源码、文档、日志和配置统一使用 UTF-8，MSVC 强制启用 `/utf-8`。

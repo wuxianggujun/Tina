@@ -476,6 +476,40 @@ bool EventSystem::focusDirectional(UIFocusDirection direction)
     return bestId ? setKeyboardFocus(bestId) : false;
 }
 
+bool EventSystem::dispatchUINavigationAction(UINavigationAction action,
+                                             UINavigationPhase phase)
+{
+    if (phase != UINavigationPhase::Released) {
+        switch (action) {
+            case UINavigationAction::Left:
+                return focusDirectional(UIFocusDirection::Left);
+            case UINavigationAction::Right:
+                return focusDirectional(UIFocusDirection::Right);
+            case UINavigationAction::Up:
+                return focusDirectional(UIFocusDirection::Up);
+            case UINavigationAction::Down:
+                return focusDirectional(UIFocusDirection::Down);
+            case UINavigationAction::Accept:
+            case UINavigationAction::Cancel:
+                break;
+        }
+    }
+
+    if (action != UINavigationAction::Accept &&
+        action != UINavigationAction::Cancel) {
+        return false;
+    }
+
+    const KeyCode key = action == UINavigationAction::Accept
+        ? KeyCode::Enter
+        : KeyCode::Escape;
+    if (phase == UINavigationPhase::Released) {
+        return dispatchKeyReleasedToFocused(key);
+    }
+    return dispatchKeyPressedToFocused(
+        key, phase == UINavigationPhase::Repeated);
+}
+
 bool EventSystem::dispatchKeyPressedToFocused(KeyCode key, bool isRepeat,
                                               bool shift, bool ctrl, bool alt)
 {

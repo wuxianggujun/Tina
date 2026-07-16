@@ -683,6 +683,61 @@ TEST(UIRuntimeTest, UnhandledFocusedKeyFallsBackToAncestors)
     EXPECT_EQ(root->keyPressedCount, 1);
 }
 
+TEST(UIRuntimeTest, SemanticNavigationRespectsFocusScopeAndActivationLifecycle)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto root = Memory::MakeUnique<TrackingNode>("Root");
+    auto background = Memory::MakeUnique<TrackingNode>("Background");
+    background->setFocusable(true);
+    TrackingNode* backgroundNode = root->addChild(std::move(background));
+
+    auto modal = Memory::MakeUnique<UINode>("Modal");
+    auto first = Memory::MakeUnique<TrackingNode>("First");
+    first->setFocusable(true);
+    first->keyboardActivatable = true;
+    first->setPosition(100.0f, 100.0f);
+    TrackingNode* firstNode = modal->addChild(std::move(first));
+    auto second = Memory::MakeUnique<TrackingNode>("Second");
+    second->setFocusable(true);
+    second->keyboardActivatable = true;
+    second->setPosition(200.0f, 100.0f);
+    TrackingNode* secondNode = modal->addChild(std::move(second));
+    UINode* modalNode = root->addChild(std::move(modal));
+
+    events.setUIRoots({root.get()});
+    ASSERT_TRUE(events.setKeyboardFocus(backgroundNode->nodeId()));
+    ASSERT_TRUE(events.beginFocusScope(modalNode->nodeId(), firstNode->nodeId()));
+
+    EXPECT_TRUE(events.dispatchUINavigationAction(
+        Engine::UINavigationAction::Right));
+    EXPECT_EQ(events.focusedNodeId(), secondNode->nodeId());
+
+    EXPECT_TRUE(events.dispatchUINavigationAction(
+        Engine::UINavigationAction::Accept,
+        Engine::UINavigationPhase::Pressed));
+    EXPECT_EQ(secondNode->lastKey, Engine::KeyCode::Enter);
+    EXPECT_EQ(secondNode->clickCount, 1);
+
+    EXPECT_FALSE(events.dispatchUINavigationAction(
+        Engine::UINavigationAction::Accept,
+        Engine::UINavigationPhase::Repeated));
+    EXPECT_EQ(secondNode->clickCount, 1);
+    secondNode->consumeKeyRelease = true;
+    EXPECT_TRUE(events.dispatchUINavigationAction(
+        Engine::UINavigationAction::Accept,
+        Engine::UINavigationPhase::Released));
+    EXPECT_EQ(secondNode->lastReleasedKey, Engine::KeyCode::Enter);
+
+    root->consumeKey = true;
+    EXPECT_TRUE(events.dispatchUINavigationAction(
+        Engine::UINavigationAction::Cancel,
+        Engine::UINavigationPhase::Pressed));
+    EXPECT_EQ(root->lastKey, Engine::KeyCode::Escape);
+    EXPECT_EQ(events.focusedNodeId(), secondNode->nodeId());
+}
+
 TEST(UIRuntimeTest, EventContextIsInheritedByDynamicChildren)
 {
     Engine::EventSystem events;

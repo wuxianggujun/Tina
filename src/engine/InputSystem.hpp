@@ -56,6 +56,13 @@ public:
     bool isMouseButtonReleased(MouseButton button) const;
     bool isAnyMouseButtonDown() const;
 
+    bool isGamepadConnected() const { return m_gamepadId >= 0; }
+    int getGamepadId() const { return m_gamepadId; }
+    bool isGamepadButtonDown(GamepadButton button) const;
+    bool isGamepadButtonPressed(GamepadButton button) const;
+    bool isGamepadButtonReleased(GamepadButton button) const;
+    float getGamepadAxis(GamepadAxis axis) const;
+
     float getMouseWheel() const { return m_mouseWheel; }
     float getMouseWheelDelta() const { return m_mouseWheelDelta; }
 
@@ -100,6 +107,8 @@ private:
 
     void updateKeyboardState();
     void updateMouseState();
+    void updateGamepadState();
+    void dispatchGamepadUIActions();
     void updateCursorMode();
 
     KeyCode mapGLFWKey(int key) const;
@@ -136,6 +145,14 @@ private:
     float m_mouseWheelDeltaX;
     std::array<bool, static_cast<size_t>(MouseButton::MaxButtons)> m_mouseButtons;
     std::array<bool, static_cast<size_t>(MouseButton::MaxButtons)> m_mouseButtonsLast;
+
+    int m_gamepadId = -1;
+    std::array<bool, static_cast<size_t>(GamepadButton::MaxButtons)> m_gamepadButtons{};
+    std::array<bool, static_cast<size_t>(GamepadButton::MaxButtons)> m_gamepadButtonsLast{};
+    std::array<float, static_cast<size_t>(GamepadAxis::MaxAxes)> m_gamepadAxes{};
+    std::array<bool, 4> m_gamepadDirections{};
+    std::array<bool, 4> m_gamepadDirectionsLast{};
+    std::array<double, 4> m_gamepadDirectionRepeatAt{};
 
     bool m_mouseVisible;
     bool m_mouseLocked;
