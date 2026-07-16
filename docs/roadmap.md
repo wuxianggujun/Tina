@@ -36,41 +36,102 @@
 - 完成 Button action 的独立重入保护、异常恢复和回调销毁目标安全门禁；
 - Retained Tree、generation NodeId、路由、Focus/Capture、Modal、Theme/DPI、Scroll/List、
   TextEdit/IME 与 GLFW 手柄导航已有可运行基线；
-- Checkbox、Slider、可注入手柄轮询测试、可访问语义和截图回归移到 M7，不继续用控件
+- Checkbox、Slider、可注入手柄轮询测试、可访问语义和截图回归移到 M11，不继续用控件
   数量挤占 Runtime/Render/Asset 生命周期工作。
 
-## M5 Carbon 取证与 Runtime/Scene 边界（当前）
+## M5 vNext 设计审计、候选冻结与 Carbon Core（当前）
 
 - 官方 Carbon 对应模块已下载到被忽略的 `temp/carbon-engine`，并记录 URL、精确提交和
   研究用途；参考源码不进入 Tina 依赖或提交；
-- 已完成 Runtime、Window/Input/UI、Render、Asset/Cooker、Scheduler、Simulation 和
-  Audio 的采纳/拒绝矩阵，明确不复制 Blue/Python、全局对象、原始指针回调和历史 API；
+- 已完成 Runtime、Window/Input/UI、Render、Asset/Cooker、Scheduler、Simulation、
+  Audio 和 Core 的采纳/拒绝矩阵；
+- 已形成 core、platform/platform_glfw、task、runtime、scene、asset_format/asset、render/
+  render_bgfx、ui/ui_freetype、audio/audio_miniaudio、profile_tracy、assetc 的候选职责和单向
+  依赖，等待本轮确认；
+- 已形成 factory 注入、阶段 Context、IGame/AppStateStack、Frame Pipeline、generation + owner、
+  Render Extraction、Asset Handle/Lease/Ticket 和 UI Display List 的候选契约；
+- 决定 Core diagnostics 的最小范围：Metrics、TraceZone 空后端、MemoryTag、可注入 Clock、
+  CrashContext 和 UTF-8 原子 IO；不复制 Carbon 的全局 allocator/profiler/thread API；
+- vNext 不依赖 EASTL，也不自研通用 STL；只实现 StaticVector、InlineFunction、FrameArena、
+  GenerationPool 等有真实消费者的专用结构；xxHash 作为私有 Hash backend 保留；
+- 采用中端桌面1080p、120 FPS设计目标/60 FPS硬门禁；直接 GoogleTest 检查确定性契约，
+  独立 Release `tina_bench` 记录 phase p50/p95/p99 与内存/分配；
+- 采用 Tina-owned Trace/Metrics 前端与可选 Tracy 0.13.1 Profile backend；benchmark 默认
+  关闭 profiler，Profile preset 用相同 workload 定位回退，不同时引入第二套 profiler；
+- 已形成 MemorySystem tag、FrameArena reset 点、跨模块资源矩阵，以及 CPU/IO/Main executor、
+  TaskGroup、背压、barrier 和无强杀 shutdown 候选状态机；
+- 补齐 Platform/Input、Audio、公共 API、依赖治理、风险登记与 ADR；性能基准冻结 schema、
+  workload version/checksum、独立进程统计、baseline fingerprint 和 Tracy/Metrics A/B；
+- 设计冻结前只更新文档和取证，不修改 Runtime 源码；冻结后创建独立 worktree 开始迁移。
 
-- 为 Application 初始化阶段增加依赖注入 seam，补所有失败点的逆序回滚和析构顺序测试；
-- 补 Scene 延迟 push/pop/replace、暂停/恢复与 UI roots 激活门禁；
-- 以 generation `EntityId` 和明确的 World command/query 逐步替代 GameScene 对 EnTT registry 的直接访问；
-- 为 fixed phase 增加 World mutation barrier/deferred command buffer 与 interpolation snapshot 门禁；
-- 将 World 的具体输入、TileMap 和 bgfx 渲染依赖拆到适配或 extraction 边界；
-- 明确服务所有权和关闭顺序，再按测试保护逐步提取 Engine Context；
-- 不进行一次性 `EngineHost` 大重写。
+## M6 Null Runtime 垂直切片
 
-## M6 Render 与 Asset 边界
+- 建立 `EngineHost::Create(config, factories)`、EngineConfig、阶段 Context 与最小 IGame；
+- 初始化阶段支持失败注入，并覆盖任意失败点逆序回滚、析构顺序、重复 shutdown；
+- 接入可注入 Clock、固定60 Hz/最多4步、唯一 Frame Phase 和阶段指标；
+- 建立 Headless Platform、TaskSystem、FrameArena、GenerationPool 和 MemoryTag；专用容器以
+  首个消费者为触发点；
+- 实现 NullRenderDevice、typed generation handle 和最小 Pass Scheduler；
+- 建立 Scene/Asset/UI/Audio 的最小公共契约与 Empty/Disabled 生命周期壳，只为一次固定最终
+  Context/初始化/关闭顺序；不接 EnTT、FreeType、miniaudio、Cooked format 或产品功能；
+- 增加 `tina_sample_null` 与 `tina_bench` schema v1；无 GLFW/bgfx/EnTT/FreeType/miniaudio/
+  Tracy/cgltf 依赖连续
+  运行300帧和10,000帧并直接通过 GoogleTest。
+- Null/Bench 稳定后用独立提交加入 `tina_profile_tracy` 与 Bench-equivalent Profile preset，
+  验证 zone/frame/thread capture、正常 shutdown、唯一 Client 和 Tracy/Metrics A/B；发布/bench
+  仍保持 backend none。
 
-- 统一 Render Pass/View 所有权、clear/load/store 规则、命名/统计、失败停止和 GPU 资源计数；
-- 增加 typed generation handle、NullRenderDevice 和小型帧内 Pass Scheduler，不引入
-  Carbon 的动态 Step 类型体系或自研多后端 RHI；
-- 把异步资源拆成后台 CPU Decode 与主线程/GPU Upload 两个队列，并按任务数、字节数、
-  时间三种预算；
-- 把 shader/cooker 做成独立构建目标；
-- 在 GPU 上传阶段稳定后实现 AssetId、schema、依赖清单、内容 Hash、增量 Cook 和最小
-  静态 glTF；Cooker 必须先验证生成产物再原子写盘。
+## M7 Platform 与 UI 垂直切片
 
-## M7 产品 UI 与设置接入
+- 实现 `tina_platform_glfw` 并迁移 GLFW Window/Input，不引入 SDL/SDL3；Windows IME 继续
+  只使用 IMM32；
+- 保留独立 InputFrame（最终 Snapshot + 有序 transitions）、Event Queue 和 UI routed event；
+- 迁移 generation NodeId、Focus/Capture、Modal、Theme/DPI、中文字体和 TextEdit/IME；
+- UI 输出后端无关 Display List，并形成 Label、Button、Modal 的可运行样例；
+- 为窗口失焦/销毁、composition、手柄回滞和输入重复建立自动化门禁。
 
-- 增加 Checkbox、Slider，将设置页的主音量、音乐、音效和全屏从占位按钮接入真实后端；
-- 为 GLFW 手柄轮询、回滞和长按重复提供可注入测试，不用实体硬件替代自动化；
-- 将 UI 绘制收敛为后端无关 Display List，再建立基础可访问语义和稳定截图回归；
-- Dropdown、TreeView、多行文本和复杂 shaping 只按真实场景需求增加。
+## M8 Scene 与 2D 垂直切片
+
+- EnTT 只作为内部存储，公共接口只暴露 generation `EntityId`；
+- 建立 Local/Parent/World Transform、层级循环检测和阶段末 command commit；
+- 建立 Camera、SpriteRenderer 与只读 Render Extraction；
+- 2D 样例显示 Sprite、中文 Label 和 Button，验证固定步、插值和资源释放；
+- World 不依赖 GLFW 输入、具体 TileMap 或 bgfx。
+
+## M9 Render 与 3D 垂直切片
+
+- 公共 RenderDevice 只使用 Tina typed handle/descriptors；bgfx 类型只在实现层；
+- 固定 Opaque3D、Sprite2D、UI、Present Pass，明确 clear/load/store、失败停止和资源计数；
+- bgfx 后端支持 Perspective、depth、静态 Mesh 和离线 shader；
+- 3D 样例持续显示非空 Mesh，并验证退出时 buffer/texture/pipeline 零泄漏；
+- 不引入完整自研多后端 RHI、PBR、阴影、动画或后处理。
+
+## M10 Asset 与 Cooker 垂直切片
+
+- 后台 CPU Decode 与主线程/GPU Upload 分队列，按任务数、字节数、时间预算；
+- Asset 状态、generation 和取消贯穿两阶段，迟到任务不能复活旧 slot；
+- 实现弱 Handle/强 Lease、UploadTicket/retirement、稳定128位 AssetId、`tina_asset_format`、
+  依赖 DAG、内容 Hash 和事务 Manifest；
+- `tina_assetc` 执行 Parse → Validate → Build → Validate Cooked → Atomic Write；
+- 固定 cgltf v1.15；最小 glTF 只支持静态三角 Mesh 和基础材质，不支持特性返回明确诊断。
+
+## M11 产品 UI 与 Audio
+
+- 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
+- `tina_audio_miniaudio` 作为唯一真实 backend，通过 generation voice handle、命令队列和
+  主线程 completion 保证关闭安全；
+- 覆盖 callback 0分配/0阻塞、command/completion 满容量、设备 Disabled、Music underrun、
+  Asset lease ACK 和300帧资源归零；
+- 增加基础可访问语义和稳定截图回归；
+- Dropdown、TreeView、多行文本、复杂 shaping 和 IME 候选窗只按真实需求增加。
+
+## M12 Legacy 删除
+
+- 新切片覆盖 2D、UI、3D、Asset 与 Audio 的必要路径；
+- 旧 Application、CoreLegacy、EASTL/EABase、公开 EnTT/bgfx 边界和路径资源接口确认零引用；
+- Windows/Linux 构建、直接 GoogleTest、所有 smoke 与资源计数通过；
+- 删除旧 target、旧源码和无用依赖形成独立可回滚提交；
+- vNext 分支合入最新已提交的 `dev` 并复验后，才合并回干净主工作区。
 
 ## 后续能力
 

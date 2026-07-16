@@ -4,25 +4,32 @@ Tina 是以 C++23 为目标语言基线的 2D/3D 游戏引擎项目。平台与�
 
 ## 当前目标
 
-当前阶段不是推倒重写，而是在现有大量修改之上完成一条可验证的运行链路：
+当前阶段允许不兼容旧 API 的完整 vNext 重构，但不会用一个长期不可运行的大提交替换全部
+Runtime。现有2D/UI/3D路径继续作为验收基线，新架构按可独立构建和运行的垂直切片迁移：
 
 - 保证现有 2D 场景和自研 UI 能启动、交互和正确释放资源；
 - 修复 Application、Event、Resource、Scene 和 UI 的生命周期与每帧驱动顺序；
 - 使用直接运行的 GoogleTest 可执行文件覆盖核心行为；
 - 增加最小 3D 冒烟场景，验证透视相机、深度测试和静态 Mesh；
 - 参考 Carbon Engine 的 Frame Step、资源 Load/Prepare/Upload 和 GPU 生命周期，但保持 Tina 架构小而清晰。
+- 采用 Tina-owned Trace/Metrics 和可选 Tracy 定位热点，独立 `tina_bench` 建立可重复性能回归；
+- 新 target 不使用 EASTL，也不自研通用 STL；标准库/`std::pmr` 加少量专用固定容量结构。
 
 当前旧文档已经替换，但旧源码架构仍是正在运行的主实现，并未完全删除。迁移状态和删除门禁见 [架构总览](docs/architecture.md)。物理后端固定为 2D Box2D 3.x 与 3D Jolt，不引入第三套物理引擎。
 
-## 已完成基线
+## 当前 Legacy 已完成基线
 
-- 依赖迁移到 vcpkg manifest，bgfx 与 EASTL 保留源码依赖；
+- 现有 Legacy target 的包依赖已迁移到 vcpkg manifest；bgfx 与 EASTL/EABase 仍是源码依赖；
+  这是当前实现事实，不是 vNext 的最终依赖方案；
 - Window/Input 已迁移到 GLFW；
 - 音频已迁移到 miniaudio；
 - Core 已增加强类型、Result、Assert、ScopeExit、Clock 和 FrameTimer；
 - Windows/Linux CMake Preset 已建立。
 - `GameScene` 已通过真实 2D TileMap、ECS、中文 UI 和音频冒烟；
 - `Smoke3DScene` 已通过右手透视相机、深度测试和静态索引 Mesh 冒烟。
+
+vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EABase；具体版本、可见性与
+删除门禁见[第三方依赖与版本治理](docs/dependencies.md)。
 
 ## 构建
 
@@ -71,4 +78,7 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 
 当前 UI 已具备 generation `NodeId`、Pointer Capture、Focus/Tab、KeyDown/KeyUp 的 Capture/Target/Bubble 路由、方向键空间焦点导航、可嵌套 Modal Focus Scope、Button 的 Enter/Space pressed/release 生命周期与单次激活、每窗口 Theme/DPI、嵌套 Clip、通用 `UIScrollView`、十万行范围计算的 ListView 虚拟化，以及 Windows 原生 IME preedit/composition。每个 Button action 具有独立重入保护、异常恢复和回调自销毁安全性；routed click 目标在路由中删除后通过 generation `NodeId` 立即失效。GLFW 标准手柄的 D-pad/左摇杆可驱动空间导航，A/B 映射为 Accept/Cancel；摇杆带回滞并支持方向长按重复，语义导航仍服从最上层 Modal Focus Scope。Dialog 不再订阅全局键盘事件，Escape 仅在焦点控件未消费时沿祖先链处理；Scene 会在 `onEnter`/`onResume` 交互前激活对应 UI roots。窗口与基础输入只使用 GLFW；IME 通过 Win32 IMM32 补充，不引入其他窗口或输入库。测试数量和平台验证结果只在 [测试文档](docs/testing.md) 中维护。
 
-不了解整体设计时，先阅读 [设计导读](docs/design.md)，再从 [文档索引](docs/README.md) 进入各模块。所有源码、文档、日志和配置统一使用 UTF-8，MSVC 强制启用 `/utf-8`。
+不了解整体设计时，先阅读 [设计导读](docs/design.md)，再从 [文档索引](docs/README.md) 进入各模块；
+候选/已接受/后置状态以 [设计冻结清单](docs/design-freeze.md)与
+[ADR 索引](docs/adr/README.md)为准。所有源码、文档、日志和配置统一使用 UTF-8，MSVC
+强制启用 `/utf-8`。

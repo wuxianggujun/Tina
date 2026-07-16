@@ -23,6 +23,10 @@ stateDiagram-v2
 
 Scene 切换目前缺少完整自动化门禁。下一步应覆盖：回调中 push/pop/replace、同帧多个操作、暂停/恢复顺序、UI roots 激活、空栈和退出时 pending operation 的处理。
 
+vNext 迁移时旧 Scene 转为 `IAppState`，不照搬二值 `onPause/onResume`。StatePolicy 分别决定
+Fixed/Variable/Input/UI/Render 是否向下传播；push/replace 使用事务 enter，失败保留旧栈，
+pop/replace 的 exit `noexcept` 且恰好一次。旧 pending operation 只有在这些门禁齐全后才删除。
+
 ## 当前 World/ECS
 
 `World` 使用 EnTT 保存角色组件并持有输入、AI、移动、碰撞和渲染系统。当前实现仍存在明显的边界泄漏：
@@ -48,10 +52,34 @@ Scene 切换目前缺少完整自动化门禁。下一步应覆盖：回调中 p
 目标数据流：
 
 ```text
-Input Snapshot -> game commands -> fixed-step World systems
+InputFrame -> UI consumption -> game commands -> fixed-step World systems
 World components -> render extraction -> Render Scene -> Renderer/bgfx
 Scene state -> UI model/actions -> retained UI tree -> UI Display List
 ```
+
+## vNext 内存与并行契约
+
+- EnTT 组件池属于 `World` 的 Scene memory domain，组件不得保存 FrameArena 指针；
+- fixed phase 中只读或写入互不相交 chunk 的系统可以提交 CPU Task；结构变化只写每 Worker
+  私有 command buffer；
+- barrier 后按稳定 worker/chunk/index 顺序合并 command，再统一创建、销毁和修改层级；
+- 每个 fixed substep 都执行 previous snapshot → jobs/barrier → command commit → transform
+  propagation；第 N 步提交对第 N+1 步可见；
+- 新 Transform 令 previous=current，销毁后不进入 extraction；Render 只在 previous/current 的
+  position/quaternion/scale 间插值，不逐元素插值矩阵；
+- Render Extraction 把连续 `RenderItem` 写入当前帧 Render Arena，Renderer 不回查 World；
+- `EntityId` 的 generation 在任务开始和提交两端校验，迟到任务不能修改复用后的 slot；
+- 只有 profiling 证明系统工作量覆盖调度成本时才并行，小集合继续直接 for-loop。
+
+内存容量、零稳态分配和基准工作负载见 [性能预算与内存系统](performance-memory.md)；任务
+barrier、取消和确定性合并见 [Task System](task-system.md)。
+
+层级命令必须写明语义：reparent 默认保持 world，也可显式 keep-local；父实体销毁默认把子
+实体 reparent 到 root 并保持 world，递归销毁使用独立命令。批量 commit 在包含本批所有新边
+的临时图上检测循环后才修改 registry。Quaternion 写入时归一化，近零值返回错误；非均匀
+scale 可用于渲染，但物理后端不支持时必须拒绝/显式近似。首期每个启用 World pass 的
+primary RenderView 恰好选择一个 active Camera，零个或多个都产生确定诊断；纯 UI/Present
+帧允许没有 World view/Camera。
 
 ## 近期验收条件
 
@@ -60,3 +88,7 @@ Scene state -> UI model/actions -> retained UI tree -> UI Display List
 - stale `EntityId` 不能解析到复用后的实体；
 - 新增 World API 不暴露 EnTT、bgfx、GLFW 或具体 UI 类型；
 - fixed update 只修改 Simulation 状态，渲染提取不反向修改 World。
+- reparent keep-world/keep-local、父销毁、同批循环、Quaternion 异常、World view 零/多 Camera
+  诊断及纯 UI 零 Camera 合法路径均有测试；
+- 50,000活跃 Transform 与20,000可见 RenderItem 的固定基准记录 p50/p95/p99，稳态
+  command/extraction 的 Tina-owned 动态分配增量为0。

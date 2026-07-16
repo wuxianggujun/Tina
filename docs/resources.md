@@ -17,6 +17,64 @@ FileSystem 提供异步读取和 best-effort 取消，ResourceManagerHub 管理 
 
 ## 下一阶段契约
 
-将 Decode 与 Upload 拆成两个队列：后台线程只做文件读取和 CPU Decode，主线程 Asset Completion 只提交 CPU 结果，Render Upload 阶段按字节数与任务数预算创建 GPU 资源。状态转换、取消和 generation 校验必须贯穿两个队列，GPU 上传和销毁只发生在明确的 Render Phase。
+将 Decode 与 Upload 拆成两个队列：IO Executor 只做阻塞文件读取，CPU Worker 做 Decode，
+主线程 Asset Completion 只提交 CPU 结果，Render Upload 阶段按任务数、字节数和时间三重
+预算创建 GPU 资源。状态转换、取消和 generation 校验必须贯穿读取、Decode、Completion
+和 Upload，GPU 上传和销毁只发生在明确的 Render Phase。
 
-退出顺序为：停止接收请求 → 取消后台任务 → 排空 completion → 停止 Scene/UI → 释放 GPU 资源 → 停止音频 → 销毁窗口与平台层。
+Asset CPU payload 属于 Asset memory domain 和对应 slot generation；进入 Upload 后由独立
+staging allocation 持有，不能借用 Worker scratch 或 FrameArena。完成、取消、失败与迟到
+generation 都必须归还 payload/staging 并更新 current/peak/failed 指标。
+
+公共生命周期类型分开：
+
+- `AssetId`：稳定128位逻辑身份，来自 Cooked Manifest，不等于路径或 ContentHash；
+- `AssetHandle<T>`：弱 typed generation lookup，不延长 payload 生命周期；
+- `AssetLease<T>`：强引用，跨 Task、GPU upload、Audio callback 或 Render frame 保存数据时
+  必须持有；
+- `UploadTicket`：拥有已提交 GPU staging，backend completion/fence 后才释放；
+- retirement ledger：跟踪 DestroyQueued/Retiring/Released，物理释放前不递减 GPU/Audio
+  resource count。
+
+### AssetId、元数据与 Cook key
+
+`AssetId` 在资源首次执行显式 import 时一次性分配，并持久写入项目 Asset Catalog/相邻 metadata；
+普通 `cook` 是只读源目录的确定性操作，遇到缺失或重复 AssetId 必须报错，不能在构建中偷偷
+生成新身份。移动/重命名源文件时保留 metadata，因此 ID 不变；“复制为新 Asset”必须由 import
+分配新 ID，直接复制出重复 metadata 会得到包含两条路径的诊断。Manifest 使用固定小写
+32 hex（或等价规范二进制）序列化，解析时拒绝全0和重复 ID。
+
+ContentHash 与 AssetId 分离。Cook cache key 至少覆盖：源内容、规范化 import settings、所有
+必需依赖的 Cooked ContentHash、Cooker build/version、目标平台、schema/type version 和 shader
+ABI；任一项变化都不能错误命中旧产物。对于同一锁定输入，Cooked bytes 和 Manifest 排序必须
+确定，时间戳、绝对路径、机器名和随机数不得进入产物。
+
+GPU Asset 在 Upload 阶段成功后只进入下一帧的 ready snapshot；CPU-only Asset 在 main
+completion 后同样按帧边界发布。逻辑取消可阻止 Ready，却不能提前释放已提交 GPU/Audio
+数据。首期没有自动 LRU eviction，避免未观测的卸载/重载抖动；只支持显式 unload 和 shutdown。
+
+依赖在调度前验证为 DAG：self/cycle、缺失必需依赖和依赖类型错误返回完整 chain；父 Asset
+在所有必需依赖 Ready 前不能 Ready。Retry 使用新 request generation。Fallback 必须由
+Asset 类型显式声明，不能把损坏 Mesh/Shader 静默替成另一个资源。
+
+Runtime 与 Cooker 通过独立 `tina_asset_format` 共享 wire schema。Header 至少验证 magic、
+schema、asset type/version、target platform、endianness、payload size/alignment、dependency
+table 和 ContentHash；不可信 size/count 在分配前检查上限。Cooker 在 staging 目录写入并
+重新读取验证所有产物，最后原子替换 Manifest，保证崩溃后旧 Manifest 不指向半成品。
+
+Cooker 把源目录视为不可信输入边界。外部 URI 先按 UTF-8 规范化并相对当前 Asset/source root
+解析，拒绝绝对路径、UNC/device path、远程 HTTP(S)、NUL、`..`/symlink 解析后逃出允许根的
+路径；data URI 只有在类型和 decoded size 上限内才允许。输出文件名来自验证后的 AssetId/
+类型，不拼接源文件提供的路径。glTF accessor/count/stride/offset、图片尺寸、解压后字节数、
+依赖深度和总产物大小都在分配/乘法前检查上限。
+
+XXH3 ContentHash 只发现缓存变化和非对抗性损坏，不能证明恶意包可信；即使 Hash 匹配，
+Runtime 仍执行完整边界/schema/type 检查。发布包签名或密码学完整性属于后续独立安全 ADR。
+
+退出顺序为：Scene/UI 停止产生请求 → Asset 停止接收并 requestStop → IO/CPU Task barrier →
+Audio 停止 callback 并释放 Asset lease → 丢弃失效 completion/upload → 释放 CPU/GPU Asset →
+Render shutdown → Task join → Platform shutdown。Task queue 与内存矩阵分别见
+[Task System](task-system.md)和 [性能预算与内存系统](performance-memory.md)。
+
+这里的“释放 Asset”包含等待 UploadTicket、GPU deferred destroy 和 Audio callback ACK；如果
+硬 deadline 内无法获得物理完成，Engine 必须 fast-fail，不能继续释放其 backing memory。

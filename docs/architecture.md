@@ -2,9 +2,16 @@
 
 ## 当前实现
 
-Tina 仍以单个游戏可执行文件为主，源码按 Core、Engine、Renderer、UI、ECS 和 Game 组织。第三方包由 vcpkg manifest 管理，bgfx、EASTL、EABase 保持固定源码版本。
+Tina 仍以单个游戏可执行文件为主，源码按 Core、Engine、Renderer、UI、ECS 和 Game 组织。
+现有 Legacy target 的包依赖由 vcpkg manifest 管理，bgfx、EASTL、EABase 仍保持固定源码
+版本；其中 EASTL/EABase 只属于迁移期现状，不是 vNext 目标依赖。
 
-依赖方向应保持为：Core → Platform/Engine → ECS/Renderer/UI → Game。第三方类型不得继续向不相关层扩散。
+Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Game；它不是 vNext 目标图。
+新 target 的权威依赖关系见 [vNext 目标架构](vnext-architecture.md)，第三方类型不得继续向
+不相关层扩散。
+
+“当前实现”不再作为 vNext 的最终模块形态。完整目标和迁移策略见
+[Tina vNext 目标架构](vnext-architecture.md)。
 
 ## 已知问题
 
@@ -27,7 +34,7 @@ Tina 仍以单个游戏可执行文件为主，源码按 Core、Engine、Rendere
 | EnTT 边界 | 尚未收敛 | `World` 暴露 `entt::registry`，GameScene 直接访问 |
 | bgfx 边界 | 尚未收敛 | Renderer、UI 和部分公共结构仍直接暴露 bgfx handle/type |
 | 路径资源系统 | 仍在使用 | Cooked Asset、稳定 AssetId 和独立 GPU upload queue 尚未落地 |
-| 新 Runtime 接口 | 尚未落地 | `EngineHost`、`EngineContext`、RenderDevice 和 NullRenderDevice 仍是目标设计 |
+| 新 Runtime 接口 | 尚未落地 | `EngineHost`、EngineFactories、阶段 Context、RenderDevice 和 NullRenderDevice 仍是目标设计 |
 
 因此不能用“删除旧 `src`”作为下一步。正确顺序是：建立新边界和测试 → 迁移调用点 → 确认旧接口零引用 → 通过 2D/UI/3D 验收 → 在独立提交中删除旧实现。
 
@@ -42,8 +49,19 @@ Tina 仍以单个游戏可执行文件为主，源码按 Core、Engine、Rendere
 ## 目标契约
 
 - 不新增全局 Singleton 或 Service Locator；
+- 以 `EngineHost::Create(EngineConfig, EngineFactories) -> Result` 作为唯一非全局组合根；
+- 生产 bootstrap 注入 GLFW/bgfx/miniaudio factories，Null slice 注入 Headless/Null factories；
 - 初始化必须显式返回错误，失败后按逆序释放已创建资源；
+- `tina_core`、`tina_platform`、`tina_platform_glfw`、`tina_task`、`tina_runtime`、`tina_scene`、
+  `tina_asset_format`、`tina_asset`、`tina_render`、`tina_render_bgfx`、`tina_ui`、
+  `tina_ui_freetype`、`tina_audio`、`tina_audio_miniaudio`、`tina_profile_tracy` 与 `tina_assetc`
+  形成单向依赖；
+- vNext target 不依赖 EASTL；标准库/`std::pmr` 承担通用容器，Tina 只提供少量经过测试的
+  固定容量和 generation 专用结构；xxHash 只藏在 Hash adapter 后；
 - 2D/3D 共享右手 Y-up 世界，2D 位于 XY 平面；
 - bgfx 只出现在渲染实现层；
 - 自研 UI 只输出后端无关 DisplayList；
-- 每个阶段都能独立测试和提交，不进行不可验证的大爆炸重写。
+- EnTT 只作为 Scene 内部存储，模块接口只暴露 generation `EntityId`；
+- MemorySystem 由 EngineHost 拥有，通用持久内存按模块 tag 统计，帧临时数据按 phase Arena
+  分配；Task 只通过有界 CPU/IO/Main executor 和显式 barrier 跨线程；
+- 完整目标可以不兼容旧 API，但实施按可运行垂直切片推进，不进行不可验证的大爆炸提交。

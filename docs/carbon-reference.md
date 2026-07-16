@@ -25,6 +25,7 @@ Carbon 最值得 Tina 学习的是长期运行后形成的阶段边界、预算�
 
 | 领域 | Carbon 证据 | Tina 采纳 | Tina 明确拒绝 |
 | --- | --- | --- | --- |
+| Core | `ScopeGuard`、Time、Telemetry/Statistics、命名锁/线程、Memory Tracker、Callstack/Crash 和细粒度测试 | 保留 Tina 现代 Result/ScopeExit/chrono；增加 owned Metrics、TraceZone、MemoryTag、CrashContext、UTF-8 原子 IO | 全局 new/delete、宏式分配、强杀线程、全局 profiler/crash pointer、32位 FNV 资产身份 |
 | 进程与 Runtime | `exefile` 按模块启动，并用退出守卫逆序关闭日志、计时器和运行时 | 把 Application 初始化拆成可注入阶段；每阶段成功后登记回滚；补失败点与析构顺序测试 | Blue 动态函数表、Python/Stackless 启动链、巨型全局组合根 |
 | Window/Input | `Tr2MainWindow` 分离 Down/Up/Move/Wheel、Key/Char、Focus、Close；Windows 按下建立 Capture，释放后解除 | 保持 GLFW；继续使用独立输入快照、普通事件队列和 UI routed event；补窗口失焦/销毁时统一取消 Capture 与 composition | 复制 Win32 风格枚举、消息宏或 Carbon 窗口 API；引入 SDL/SDL3 |
 | UI/IME | `IUILib.h` 体现 MouseDown/Up/CaptureChanged 与 Set/KillFocus 分离；`ime` 显式拥有窗口 HIMC 上下文 | 保留 Tina 的 generation `NodeId`、Capture/Target/Bubble、Modal Focus Scope 和 IMM32；只借鉴上下文所有权 | 旧全局 UI 状态、固定 256 wchar 缓冲、全局 IMM32 函数指针；把 ImGui Viewer 当 CarbonUI |
@@ -47,9 +48,28 @@ Carbon 最值得 Tina 学习的是长期运行后形成的阶段边界、预算�
 
 Tina 当前 `Application::shutdown()` 已按上层对象、资源、音频、事件、bgfx、窗口的
 顺序幂等释放，但初始化仍直接创建真实 GLFW/bgfx/miniaudio 对象，难以逐失败点测试，
-并保留静态 `Application::instance()`。下一步不是一次性重写 `EngineHost`，而是先提取
-小型 subsystem factory/phase seam，使测试能在 Window、bgfx、Event、Input、Resource、
-TextRenderer 等任意阶段注入失败并验证逆序回滚。完成迁移前不再增加新的全局访问点。
+并保留静态 `Application::instance()`。vNext 目标明确改为非全局 `EngineHost`，但按可运行
+垂直切片迁移：先以 Null Runtime 建立 subsystem factory/phase seam，使测试能在 Window、
+RenderDevice、Event、Input、Resource 等任意阶段注入失败并验证逆序回滚，再逐步迁入
+2D/UI/3D。完成迁移前不再增加新的全局访问点。
+
+### Core：学习可观测契约，不复制历史基础库
+
+Carbon Core 将 Scope Guard、高精度时间、线程/锁命名、Telemetry Zone、每帧/生命周期
+Statistics、内存跟踪、调用栈、崩溃字段、UTF-8 转换和文件路径分别测试。对 Tina 最重要
+的启发是：Core 的正确性不是一个 umbrella header，而是一组可独立验证的底层契约。
+
+Tina 已有更现代的 `Result`、`ScopeExit`、`std::chrono` Clock 和 `FixedStepTicker`，应继续
+保留。vNext 增加 EngineHost-owned `MetricsRegistry`、后端无关 `TraceZone`、MemoryTag
+current/peak、CrashContext、UTF-8 路径与原子写；线程使用 `std::jthread/stop_token`，只在
+平台层增加名称和优先级适配。全局 `new/delete` 替换、分配宏、`CcpKillThread`、全局
+`BeCrashes`、函数指针加 `void*` 回调和32位 FNV 资产身份明确不采纳。完整专项矩阵见
+[tina_core 设计与 Carbon Core 取证](core.md)。
+
+Carbon Core 的 `WITH_TELEMETRY` 实际接入 Tracy 0.13.1，并对 zone、lock、连接状态做专门
+测试；本地13个参考仓库未发现 `TinyProfile` 模块。Tina 因此采用自有 Trace/Metrics 前端 +
+可选 Tracy backend，同时保留独立 `tina_bench`。Profiler 负责解释热点，不能取代固定
+workload、固定门禁机和 p50/p95/p99 回归基准。
 
 Carbon Audio 也提供了反例：当前公开 `AudManager` 析构对
 `m_soundPrioritization` 存在重复删除路径，`InitLowLevel()` 或 `InitSound()` 中途失败时也
@@ -109,17 +129,14 @@ Tina 当前 miniaudio 路径只需要先保证 Engine/Resource/Voice 的关闭�
 
 ## 调整后的推进顺序
 
-1. Runtime lifecycle gate：为 Application 阶段引入失败注入，验证所有失败点逆序回滚、
-   `onSetup/onCleanup` 配对和重复 shutdown；暂不进行 EngineHost 大重写。
-2. Render contract gate：实现最小 Pass Scheduler、命名/顺序/失败停止、typed generation
-   handle、NullRenderDevice 和资源计数；继续用 bgfx 作为唯一真实后端。
-3. Asset two-phase gate：把当前 completion 中连续执行的 decode/upload 拆开，增加
-   任务数、字节数、时间预算和 generation 取消测试。
-4. Scene mutation gate：为固定步引入 deferred command buffer，测试层级变更、实体删除
-   与 interpolation snapshot。
-5. Product UI：在上述边界稳定后实现设置页真正需要的 Checkbox、Slider，再推进
-   Display List、可访问语义和截图回归；不按控件数量衡量 UI 完成度。
-6. Cooker：Render/Asset 句柄稳定后落地最小 `tina_assetc`、Cooked Manifest 和 glTF。
+1. 冻结完整 vNext 模块、Core 契约、公共接口、Frame Pipeline 和依赖方向；
+2. Null Runtime：新 `EngineHost`、失败回滚、Metrics 和 NullRenderDevice 连续300帧；
+3. Platform/UI：迁移 GLFW、InputFrame（最终 Snapshot + 有序 transitions）、中文、IMM32 与基础 UI；
+4. Scene/2D：generation Entity、command buffer、render extraction 与 Sprite；
+5. Render/3D：typed handle、Pass Scheduler、bgfx、Perspective 与 depth；
+6. Asset/Cooker：双阶段队列、AssetId、Manifest 和最小静态 glTF；
+7. Product UI/Audio：Checkbox、Slider、设置后端与 miniaudio 生命周期；
+8. 新路径覆盖全部验收后独立删除 Legacy。
 
-每批修改继续遵守 MSVC 2026 与 Linux 构建、直接执行 GoogleTest、不使用 CTest、
+每批修改继续遵守 Visual Studio 2026 / MSVC 19.50 与 Linux 构建、直接执行 GoogleTest、不使用 CTest、
 运行 2D/UI/3D 对应冒烟、验证资源释放、更新 UTF-8 文档和独立提交。

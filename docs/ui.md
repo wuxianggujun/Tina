@@ -35,7 +35,7 @@ Windows 文本输入保持两条独立通道：GLFW character callback 只提交
 
 布局请求由每 Scene 的 UILayoutManager 批量处理，每帧最多提交一次。`UINode::update()`、`render()` 和 `containsPoint()` 均不再隐式触发布局。逻辑节点与 bgfx 渲染实现已拆文件，使布局和事件可以在无 GPU 的 GoogleTest 中验证。
 
-Windows/MSVC 2026 与 Linux/GCC 当前已有自动化门禁覆盖：hit-test 不隐式布局、重叠节点只命中最上层、Capture/Target/Bubble 顺序、动态子节点继承上下文、stale NodeId、上下文先析构、节点移除/自移除安全失效、捕获外释放、正反向焦点遍历、焦点 KeyDown 路由/默认取消/重复键抑制/路由中删除目标、KeyUp 完整路由/停止传播后的局部清理/generation 失效、方向键 beam 优先与隐藏/禁用过滤、Modal Focus Scope 限制/嵌套恢复/自动失效、设备无关语义导航的 scope/Accept/Cancel 生命周期、未处理按键向祖先回退、每窗口 Theme/DPI 隔离、200% DPI 逻辑坐标命中、裁剪命中边界、ScrollView 钳制/祖先滚轮路由、十万行虚拟范围、Button action 重入/异常/自销毁，以及 composition 与 committed text 的事件隔离。
+Visual Studio 2026 / MSVC 19.50 与 Linux/GCC 当前已有自动化门禁覆盖：hit-test 不隐式布局、重叠节点只命中最上层、Capture/Target/Bubble 顺序、动态子节点继承上下文、stale NodeId、上下文先析构、节点移除/自移除安全失效、捕获外释放、正反向焦点遍历、焦点 KeyDown 路由/默认取消/重复键抑制/路由中删除目标、KeyUp 完整路由/停止传播后的局部清理/generation 失效、方向键 beam 优先与隐藏/禁用过滤、Modal Focus Scope 限制/嵌套恢复/自动失效、设备无关语义导航的 scope/Accept/Cancel 生命周期、未处理按键向祖先回退、每窗口 Theme/DPI 隔离、200% DPI 逻辑坐标命中、裁剪命中边界、ScrollView 钳制/祖先滚轮路由、十万行虚拟范围、Button action 重入/异常/自销毁，以及 composition 与 committed text 的事件隔离。
 
 ## 已知问题
 
@@ -50,9 +50,93 @@ Windows/MSVC 2026 与 Linux/GCC 当前已有自动化门禁覆盖：hit-test 不
 
 ## 目标契约
 
-每个活动 Scene/窗口只拥有一个 UIContext 和一个逻辑 Root；一次 Input Snapshot 只执行一次 hit-test，按 Capture → Target → Bubble 路由。Measure dirty 向上收敛，Layout/Transform dirty 只在父输出变化时向下传播；hit-test 和 render 不允许隐式触发布局。
+每个 Window 只拥有一个 UIContext；AppState 可以拥有若干 retained roots，但只向窗口 Context
+注册/注销，不拥有 Node registry、Focus、Capture 或 Layout Manager。首期只有一个 primary
+Window。Platform InputFrame 中每个有序 Pointer transition 最多执行一次 hit-test，并按
+Capture → Target → Bubble 路由；不能把一整帧多个 Down/Up/Wheel/Text transition 压成一次
+交互。
+Measure dirty 向上收敛，Layout/Transform dirty 只在父输出变化时向下传播；hit-test 和 render
+不允许隐式触发布局。
+
+UI Phase 拆成两段：玩法 Action Mapping 前先用上一帧已提交布局执行 Input Routing 并输出
+消费掩码；Variable Update 后再执行 model commit、最多一次布局和 DisplayList。AppState 新
+root 必须先显式布局，下一帧才开放命中；UI action 引发的 push/pop/replace 在 Deferred
+Cleanup 提交，因此当前 routed event 不会销毁正在遍历的状态，也不会让点击穿透到玩法。
+
+vNext 不提供每帧重建树的 `buildUI(UIContext&)`；`UIUpdateContext` 只允许更新 retained model、
+style、action 和 dirty state，Runtime 负责生成 DisplayList。
 
 UI 绘制输出 Quad、Text、Clip DisplayList，由 Renderer 批处理。中文文本统一走 UTF-8 与 FreeType Glyph Atlas。
+
+### 字体、中文与 Glyph Atlas 生命周期
+
+Runtime 不按文件路径打开字体。Cooker 产出 Font Asset，UI/字体任务持有 `AssetLease<FontData>`；
+`tina_ui_freetype` 只把拥有生命周期的字体 bytes + face/size/glyph request 转成 CPU bitmap/metrics，
+Atlas page、generation GlyphHandle、UV 和 GPU texture 仍由 `tina_ui`/Render typed handle 管理。
+FreeType face 不跨 Worker 并发共享；需要并行时每个 raster worker 使用自己的 library/face 实例。
+
+首屏中文字体和 fallback chain 在 AppState 开放输入前预热。运行时缺字进入有界 raster queue，
+完成后经 main completion + GPU upload budget 发布，并从下一帧可见；迟到结果重新校验 Font/
+Atlas generation。等待期间使用确定 fallback glyph/advance，完成只标记对应 Text measure dirty，
+hit-test/render 不得暗中触发布局。Atlas 使用固定 page/byte 上限，page eviction 只在 Deferred
+Cleanup 且当前 DisplayList/GPU ticket 已退役后发生；满容量不能覆盖仍在用 UV。
+
+UTF-8 解码错误产生 U+FFFD 与结构化诊断，不越界；首期没有复杂 shaping，文档与样例必须明确
+支持范围，不能把 CJK/emoji/combining sequence 的 codepoint 逐字渲染宣称为完整排版。
+
+### 设置页首批表单控件
+
+`Checkbox` 与 `Slider` 是 vNext Product UI 的首批新增控件，因为当前设置页确实需要全屏开关
+和 Master/Music/SFX 音量。首期不建设反射式 Data Binding；AppState 拥有明确的
+`SettingsModel`，控件 action 调用窄的 Settings/Window/Audio 接口，失败时恢复 model 并显示
+UTF-8 错误。控件销毁、回调替换和回调内删除自身必须延续 Button 已验证的安全语义。
+
+`Checkbox` 契约：
+
+- 值只有 checked/unchecked；indeterminate 等真实需求出现后再扩展；
+- Pointer click、Space/Enter 和 Gamepad Accept 走同一个 default action，一次按下/释放最多
+  切换一次；被 `preventDefault()`、disabled 或 modal scope 拦截时不改变值；
+- 值实际变化后才发送带新 `bool` 的 change action，程序化 `setChecked` 可明确选择是否通知；
+- Focus、Hover、Pressed、Checked、Disabled 都是 Theme state，不由业务代码手写颜色。
+
+`Slider` 契约：
+
+- `min/max/value/step` 必须有限且 `min <= max`、`step > 0`；输入先 clamp，再以 min 为原点
+  做稳定量化，浮点比较使用由 step 推导的容差；
+- Pointer down 建立 capture，拖动与 pointer up 即使离开轨道也保持同一交互；Left/Down 减一
+  step，Right/Up 加一 step，Home/End 到边界，Gamepad 导航复用同一语义；
+- `normalizedValue` 在 `min == max` 时确定返回0，不能除零；只有量化后的值实际改变才发送
+  `float` change action，单帧最多提交一次最终值；
+- 轨道、填充、thumb、Focus、Hover、Dragging、Disabled 使用 Theme token，并在100%/150%/
+  200% DPI 下保持最小命中尺寸。
+
+两者至少暴露 Role、Name、Value、Enabled、Focused 与可执行 Action 的基础语义节点；这不是完整
+读屏实现，但从第一个新控件开始禁止把可访问性完全后补。参数化 change action 使用 Tina
+自有、实例级的受控 dispatch；不引入全局 signal bus，也不让异常穿过 UI route 边界。
+
+### 基础可访问语义与 Theme token
+
+每个交互节点可持久保存小型 `Semantics`：Role、UTF-8 Name/Description、Value/Range、
+Checked/Enabled/Focused 状态、可执行 Action 和可选 `labelledBy NodeId`。装饰节点默认不进入语义
+树；语义子序与可见 UI 树顺序稳定一致。TextEdit 默认不把密码或 composition 正文写入诊断，
+语义失效仍通过 generation NodeId 检查。首期先提供可查询的内部语义树和 GoogleTest；Windows
+UI Automation/Linux AT-SPI adapter 在独立平台设计完成前不得用 FrameArena 裸指针或跨线程
+直接访问 UINode。
+
+Theme 至少把 Color、Typography、Spacing、Radius、Border、FocusRing、MinimumHitSize 定义为
+每窗口值 token。Widget 只解析 token + 显式局部 override，不保存指向可变全局 Theme 的裸引用；
+主题或 DPI revision 变化只标记受影响 style/layout，不能无条件重建整棵树。品牌色和业务间距
+留在产品 Theme，不硬编码进 Checkbox/Slider 等通用控件。
+
+Retained Node、Style、Text model 和 glyph metadata 属于 UI tagged persistent resource；Measure/
+Layout scratch 与 DisplayList 分别使用当前帧 UI Arena。节点不得保存 FrameArena 指针，
+DisplayList command 只在本帧 UI Pass 前有效。UI tree 只允许主线程结构修改；后台字体/图片
+任务返回 generation handle，由主线程 completion 提交。
+
+性能门禁以 dirty 行为而不是控件数量衡量：无变化 UI 的 layout 次数和 Tina-owned 动态分配
+增量都为0；
+5,000逻辑节点与100,000行虚拟列表基准只处理 dirty/可见集合，并记录 layout、hit-test、
+DisplayList build 和 batch p50/p95/p99。统一预算见 [性能预算与内存系统](performance-memory.md)。
 
 ## 推进顺序
 
