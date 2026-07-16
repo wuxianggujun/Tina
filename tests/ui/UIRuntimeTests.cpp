@@ -5,8 +5,6 @@
 #include "ui/UILayoutManager.hpp"
 #include "ui/UINode.hpp"
 
-#include <array>
-
 namespace Tina::UI::Tests {
 namespace {
 
@@ -22,8 +20,21 @@ public:
 
     int clickCount = 0;
     int layoutCount = 0;
+    int mouseUpCount = 0;
+    int pointerMoveCount = 0;
+    int focusGainedCount = 0;
+    int focusLostCount = 0;
+    int captureGainedCount = 0;
+    int captureLostCount = 0;
 
     void onClick() override { ++clickCount; }
+    void onMouseUp(float, float) override { ++mouseUpCount; }
+    void onPointerMove(float, float) override { ++pointerMoveCount; }
+    void onFocusGained() override { ++focusGainedCount; }
+    void onFocusLost() override { ++focusLostCount; }
+    void onPointerCaptureChanged(bool captured) override {
+        captured ? ++captureGainedCount : ++captureLostCount;
+    }
 
 protected:
     void onLayout() override { ++layoutCount; }
@@ -84,15 +95,17 @@ TEST(UIRuntimeTest, RoutedEventUsesCaptureTargetBubbleOrder)
     UINode* targetNode = target.get();
     parent->addChild(std::move(target));
     root->addChild(std::move(parent));
+    events.setUIRoots({root.get()});
 
     struct Visit {
         Engine::UIEventPhase phase;
         UINode* node;
+        NodeId nodeId;
     };
     Container::Vector<Visit> visits;
     auto token = events.subscribe<Engine::ButtonClickEvent>(
         [&visits](const Engine::ButtonClickEvent& event) {
-            visits.push_back({event.phase, event.currentTarget});
+            visits.push_back({event.phase, event.currentTarget, event.currentTargetId});
         });
 
     Engine::ButtonClickEvent click(7, "Target");
@@ -101,12 +114,163 @@ TEST(UIRuntimeTest, RoutedEventUsesCaptureTargetBubbleOrder)
     ASSERT_EQ(visits.size(), 5U);
     EXPECT_EQ(visits[0].phase, Engine::UIEventPhase::Capture);
     EXPECT_EQ(visits[0].node, root.get());
+    EXPECT_EQ(visits[0].nodeId, root->nodeId());
     EXPECT_EQ(visits[1].phase, Engine::UIEventPhase::Capture);
     EXPECT_EQ(visits[2].phase, Engine::UIEventPhase::Target);
     EXPECT_EQ(visits[2].node, targetNode);
+    EXPECT_EQ(visits[2].nodeId, targetNode->nodeId());
     EXPECT_EQ(visits[3].phase, Engine::UIEventPhase::Bubble);
     EXPECT_EQ(visits[4].phase, Engine::UIEventPhase::Bubble);
     EXPECT_EQ(visits[4].node, root.get());
+}
+
+TEST(UIRuntimeTest, StaleNodeIdNeverResolvesAfterSlotReuse)
+{
+    Engine::EventSystem events;
+    UINode first("First");
+    first.setEventSystem(&events);
+    const NodeId staleId = first.nodeId();
+    ASSERT_EQ(events.resolveUINode(staleId), &first);
+
+    first.setEventSystem(nullptr);
+    EXPECT_EQ(events.resolveUINode(staleId), nullptr);
+
+    UINode replacement("Replacement");
+    replacement.setEventSystem(&events);
+    const NodeId replacementId = replacement.nodeId();
+
+    EXPECT_EQ(replacementId.index, staleId.index);
+    EXPECT_NE(replacementId.generation, staleId.generation);
+    EXPECT_EQ(events.resolveUINode(staleId), nullptr);
+    EXPECT_EQ(events.resolveUINode(replacementId), &replacement);
+}
+
+TEST(UIRuntimeTest, NodeCanOutliveItsWindowEventContextSafely)
+{
+    UINode node("LongLivedNode");
+    NodeId oldId;
+    {
+        Engine::EventSystem events;
+        node.setEventSystem(&events);
+        oldId = node.nodeId();
+        ASSERT_TRUE(oldId);
+        ASSERT_EQ(node.eventSystem(), &events);
+    }
+
+    EXPECT_EQ(node.eventSystem(), nullptr);
+    EXPECT_NO_FATAL_FAILURE(node.setEventSystem(nullptr));
+    EXPECT_FALSE(node.nodeId());
+}
+
+TEST(UIRuntimeTest, RemovingFocusedCapturedNodeInvalidatesAllInteractionHandles)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto root = Memory::MakeUnique<UINode>("Root");
+    root->setSize(200.0f, 200.0f);
+    root->setInteractable(false);
+
+    auto child = Memory::MakeUnique<TrackingNode>("Child");
+    child->setSize(100.0f, 100.0f);
+    child->setFocusable(true);
+    TrackingNode* childNode = root->addChild(std::move(child));
+    events.setUIRoots({root.get()});
+
+    const NodeId staleId = childNode->nodeId();
+    events.updateUIInput(25.0f, 25.0f, true);
+    ASSERT_EQ(events.focusedNodeId(), staleId);
+    ASSERT_EQ(events.capturedNodeId(), staleId);
+
+    auto removed = root->removeChild(childNode);
+    ASSERT_NE(removed, nullptr);
+
+    EXPECT_EQ(events.resolveUINode(staleId), nullptr);
+    EXPECT_FALSE(events.focusedNodeId());
+    EXPECT_FALSE(events.capturedNodeId());
+    EXPECT_FALSE(events.pressedNodeId());
+    EXPECT_FALSE(events.hoveredNodeId());
+    EXPECT_EQ(static_cast<TrackingNode*>(removed.get())->focusLostCount, 1);
+    EXPECT_EQ(static_cast<TrackingNode*>(removed.get())->captureLostCount, 1);
+}
+
+TEST(UIRuntimeTest, RemoveFromParentKeepsNodeAliveUntilDetachCompletes)
+{
+    class LifetimeNode final : public UINode {
+    public:
+        explicit LifetimeNode(bool& destroyed)
+            : UINode("LifetimeNode"), m_destroyed(destroyed) {}
+        ~LifetimeNode() override { m_destroyed = true; }
+
+    private:
+        bool& m_destroyed;
+    };
+
+    auto root = Memory::MakeUnique<UINode>("Root");
+    bool destroyed = false;
+    auto child = Memory::MakeUnique<LifetimeNode>(destroyed);
+    LifetimeNode* childNode = root->addChild(std::move(child));
+
+    ASSERT_FALSE(destroyed);
+    childNode->removeFromParent();
+
+    EXPECT_TRUE(destroyed);
+    EXPECT_EQ(root->getChildCount(), 0U);
+}
+
+TEST(UIRuntimeTest, PointerCaptureDeliversMoveAndReleaseOutsideWithoutClick)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto root = Memory::MakeUnique<UINode>("Root");
+    root->setSize(200.0f, 200.0f);
+    root->setInteractable(false);
+
+    auto child = Memory::MakeUnique<TrackingNode>("Child");
+    child->setSize(50.0f, 50.0f);
+    TrackingNode* childNode = root->addChild(std::move(child));
+    events.setUIRoots({root.get()});
+
+    events.updateUIInput(25.0f, 25.0f, true);
+    ASSERT_EQ(events.capturedNodeId(), childNode->nodeId());
+
+    events.updateUIInput(150.0f, 150.0f, true);
+    events.updateUIInput(150.0f, 150.0f, false);
+
+    EXPECT_EQ(childNode->pointerMoveCount, 1);
+    EXPECT_EQ(childNode->mouseUpCount, 1);
+    EXPECT_EQ(childNode->clickCount, 0);
+    EXPECT_EQ(childNode->captureGainedCount, 1);
+    EXPECT_EQ(childNode->captureLostCount, 1);
+    EXPECT_FALSE(events.capturedNodeId());
+}
+
+TEST(UIRuntimeTest, FocusTraversalUsesTreeOrderAndSupportsReverse)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto root = Memory::MakeUnique<UINode>("Root");
+    auto first = Memory::MakeUnique<TrackingNode>("First");
+    first->setFocusable(true);
+    TrackingNode* firstNode = root->addChild(std::move(first));
+    auto second = Memory::MakeUnique<TrackingNode>("Second");
+    second->setFocusable(true);
+    TrackingNode* secondNode = root->addChild(std::move(second));
+    events.setUIRoots({root.get()});
+
+    ASSERT_TRUE(events.focusNext());
+    EXPECT_EQ(events.focusedNodeId(), firstNode->nodeId());
+    ASSERT_TRUE(events.focusNext());
+    EXPECT_EQ(events.focusedNodeId(), secondNode->nodeId());
+    ASSERT_TRUE(events.focusNext(true));
+    EXPECT_EQ(events.focusedNodeId(), firstNode->nodeId());
+
+    EXPECT_EQ(firstNode->focusGainedCount, 2);
+    EXPECT_EQ(firstNode->focusLostCount, 1);
+    EXPECT_EQ(secondNode->focusGainedCount, 1);
+    EXPECT_EQ(secondNode->focusLostCount, 1);
 }
 
 TEST(UIRuntimeTest, EventContextIsInheritedByDynamicChildren)

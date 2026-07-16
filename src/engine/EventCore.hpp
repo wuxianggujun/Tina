@@ -78,6 +78,11 @@ enum class EventTypeId : uint32_t {
     UIFocusLost,
     UITextChanged,
     UIMouseWheel,
+    UIPointerMove,
+    UIPointerDown,
+    UIPointerUp,
+    UIPointerClick,
+    UIPointerCaptureChanged,
 
     // ========== 自定义扩展事件（256+） ==========
     Custom = 256,  // 用户自定义事件起始ID
@@ -206,6 +211,11 @@ inline const char* eventTypeIdToString(EventTypeId id) {
         case EventTypeId::UIFocusLost: return "UIFocusLost";
         case EventTypeId::UITextChanged: return "UITextChanged";
         case EventTypeId::UIMouseWheel: return "UIMouseWheel";
+        case EventTypeId::UIPointerMove: return "UIPointerMove";
+        case EventTypeId::UIPointerDown: return "UIPointerDown";
+        case EventTypeId::UIPointerUp: return "UIPointerUp";
+        case EventTypeId::UIPointerClick: return "UIPointerClick";
+        case EventTypeId::UIPointerCaptureChanged: return "UIPointerCaptureChanged";
 
         default: return "Unknown";
     }

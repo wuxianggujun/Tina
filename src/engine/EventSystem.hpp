@@ -12,7 +12,10 @@
 #include "SubscriptionToken.hpp"  // 添加订阅令牌支持
 #include "../core/Log.hpp"
 #include "../core/Container.hpp"  // 使用封装的容器
+#include "../ui/NodeId.hpp"
 #include <EASTL/priority_queue.h>
+#include <atomic>
+#include <memory>
 #include <type_traits>
 
 // 前向声明 UI 类型
@@ -26,16 +29,18 @@ using namespace Tina::Container;  // 使用容器命名空间
 
 // UI事件上下文（状态跟踪）。一个窗口只有一个上下文，但可观察场景的多个顶层根节点。
 struct UIEventContext {
-    Vector<UI::UINode*> roots;                // 非拥有；由当前 Scene 保证帧内生命周期
+    Vector<UI::NodeId> roots;                 // 非拥有；通过窗口级 generation registry 解析
     Memory::WeakPtr<UI::UINode> rootOwner;    // SharedPtr 兼容入口的存活观察
     bool rootOwnerRequired = false;
-    uint64_t treeVersion = 0;
-    UI::UINode* hoveredNode = nullptr;        // 子节点：裸指针（由root保证生命周期）
-    UI::UINode* pressedNode = nullptr;        // 子节点：裸指针
-    UI::UINode* focusedNode = nullptr;        // 子节点：裸指针
+    UI::NodeId hoveredNode;
+    UI::NodeId pressedNode;
+    UI::NodeId focusedNode;
+    UI::NodeId capturedNode;
     float mouseX = 0, mouseY = 0;
+    float previousMouseX = 0, previousMouseY = 0;
     bool mouseDown = false;
     bool mouseDownPrev = false;
+    bool hasPointerPosition = false;
 };
 
 // UI事件传播阶段
@@ -50,6 +55,8 @@ template<typename Derived, EventTypeId TypeId>
 struct UIEvent : Event<Derived, TypeId> {
     UI::UINode* target = nullptr;           // 事件目标
     UI::UINode* currentTarget = nullptr;    // 当前处理节点
+    UI::NodeId targetId;
+    UI::NodeId currentTargetId;
     UIEventPhase phase = UIEventPhase::Target;
     bool propagationStopped = false;
     bool immediatePropagationStopped = false;
@@ -79,7 +86,10 @@ struct DelayedEvent {
 class EventSystem {
 public:
     EventSystem() = default;
-    ~EventSystem() { shutdown(); }
+    ~EventSystem() {
+        shutdown();
+        if (m_lifetime) m_lifetime->store(false, std::memory_order_release);
+    }
 
     // 禁止拷贝
     EventSystem(const EventSystem&) = delete;
@@ -110,15 +120,14 @@ public:
             queue.clear();
         }
         clearDelayed();
+        resetUIInteractionState(true);
         m_uiContext.roots.clear();
         m_uiContext.rootOwner.reset();
         m_uiContext.rootOwnerRequired = false;
-        m_uiContext.treeVersion = 0;
-        m_uiContext.hoveredNode = nullptr;
-        m_uiContext.pressedNode = nullptr;
-        m_uiContext.focusedNode = nullptr;
         m_uiContext.mouseDown = false;
         m_uiContext.mouseDownPrev = false;
+        m_uiContext.hasPointerPosition = false;
+        invalidateAllUINodes();
         m_initialized = false;
         TINA_INFO("EventSystem 关闭完成");
     }
@@ -325,6 +334,26 @@ public:
     // 获取UI上下文
     UIEventContext& uiContext() { return m_uiContext; }
     const UIEventContext& uiContext() const { return m_uiContext; }
+
+    // UINode 通过 Scene 显式接入当前窗口上下文。NodeId 只在本 EventSystem
+    // 实例内有效，slot 复用时 generation 必须递增。
+    UI::NodeId attachUINode(UI::UINode* node);
+    void detachUINode(UI::NodeId id, UI::UINode* node);
+    void notifyUINodeStateChanged(UI::NodeId id);
+    UI::UINode* resolveUINode(UI::NodeId id) const;
+    UI::NodeId idForUINode(const UI::UINode* node) const;
+    bool isUINodeAlive(UI::NodeId id) const { return resolveUINode(id) != nullptr; }
+
+    bool setKeyboardFocus(UI::NodeId id);
+    void clearKeyboardFocus() { setKeyboardFocus({}); }
+    bool focusNext(bool reverse = false);
+    UI::NodeId focusedNodeId() const { return m_uiContext.focusedNode; }
+
+    bool setPointerCapture(UI::NodeId id);
+    void releasePointerCapture(UI::NodeId requester = {});
+    UI::NodeId capturedNodeId() const { return m_uiContext.capturedNode; }
+    UI::NodeId hoveredNodeId() const { return m_uiContext.hoveredNode; }
+    UI::NodeId pressedNodeId() const { return m_uiContext.pressedNode; }
     
     // 触发UI事件（带捕获/冒泡）
     template<typename E>
@@ -333,25 +362,39 @@ public:
                      "UI事件必须继承自 UIEvent");
         
         if (!target) return;
+
+        const UI::NodeId targetId = idForUINode(target);
+        if (resolveUINode(targetId) != target) return;
         
         event.target = target;
+        event.targetId = targetId;
         
         // 1. 构建事件路径（从根到目标）
-        Vector<UI::UINode*> path;
+        Vector<UI::NodeId> path;
         buildEventPath(target, path);
+        if (path.empty()) return;
         
         // 2. 捕获阶段（从根到目标，不包括目标）
         event.phase = UIEventPhase::Capture;
         for (size_t i = 0; i < path.size() - 1 && !event.propagationStopped; ++i) {
-            event.currentTarget = path[i];
+            UI::UINode* current = resolveUINode(path[i]);
+            if (!current) continue;
+            event.target = resolveUINode(targetId);
+            if (!event.target) return;
+            event.currentTarget = current;
+            event.currentTargetId = path[i];
             m_dispatcher.dispatch(event);  // 分发给订阅者
             if (event.immediatePropagationStopped) break;
         }
         
         // 3. 目标阶段
         if (!event.propagationStopped) {
+            UI::UINode* liveTarget = resolveUINode(targetId);
+            if (!liveTarget) return;
             event.phase = UIEventPhase::Target;
-            event.currentTarget = target;
+            event.target = liveTarget;
+            event.currentTarget = liveTarget;
+            event.currentTargetId = targetId;
             m_dispatcher.dispatch(event);
         }
         
@@ -359,7 +402,13 @@ public:
         if (!event.propagationStopped) {
             event.phase = UIEventPhase::Bubble;
             for (int i = static_cast<int>(path.size()) - 2; i >= 0 && !event.propagationStopped; --i) {
-                event.currentTarget = path[i];
+                UI::UINode* liveTarget = resolveUINode(targetId);
+                if (!liveTarget) return;
+                UI::UINode* current = resolveUINode(path[static_cast<size_t>(i)]);
+                if (!current) continue;
+                event.target = liveTarget;
+                event.currentTarget = current;
+                event.currentTargetId = path[static_cast<size_t>(i)];
                 m_dispatcher.dispatch(event);
                 if (event.immediatePropagationStopped) break;
             }
@@ -395,6 +444,7 @@ public:
 
     EventDispatcher& dispatcher() { return m_dispatcher; }
     const EventDispatcher& dispatcher() const { return m_dispatcher; }
+    std::weak_ptr<std::atomic_bool> lifetimeToken() const { return m_lifetime; }
 
 private:
     // ==================== 内部更新方法 ====================
@@ -453,12 +503,24 @@ private:
     
     // UI事件上下文
     UIEventContext m_uiContext;
+    struct UINodeSlot {
+        UI::UINode* node = nullptr;
+        uint32_t generation = 1;
+    };
+    Vector<UINodeSlot> m_uiNodeSlots;
+    Vector<uint32_t> m_freeUINodeSlots;
+    std::shared_ptr<std::atomic_bool> m_lifetime = std::make_shared<std::atomic_bool>(true);
     bool m_initialized = false;
     
     // UI事件内部方法
-    void buildEventPath(UI::UINode* target, Vector<UI::UINode*>& path);
-    UI::UINode* findNodeUnderMouse(UI::UINode* node, float x, float y);
-    void handleMouseInput(float wheelDeltaY = 0.0f);
+    void buildEventPath(UI::UINode* target, Vector<UI::NodeId>& path);
+    UI::NodeId findNodeUnderMouse(UI::UINode* node, float x, float y);
+    void handleMouseInput(float wheelDeltaY, bool pointerMoved);
+    bool isInActiveUITree(UI::NodeId id) const;
+    void sanitizeUIInteractionState();
+    void resetUIInteractionState(bool notifyNodes);
+    void invalidateAllUINodes();
+    void collectFocusableNodes(UI::UINode* node, Vector<UI::NodeId>& nodes) const;
 };
 
 } // namespace Tina::Engine

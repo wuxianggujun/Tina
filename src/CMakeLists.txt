@@ -88,6 +88,7 @@ set(SRC_FILES
     ui/UIPerformanceMonitor.cpp
     ui/UICore.hpp
     ui/UICore.cpp
+    ui/NodeId.hpp
     ui/UINode.hpp
     ui/UINode.cpp
     ui/UINodeRender.cpp

@@ -1,6 +1,6 @@
 # Carbon Engine 参考边界
 
-本地 `temp/Carbon Engine` 只作为设计参考，不进入 Git 提交或 Tina 构建。
+本地 `temp/carbon-engine` 只作为设计参考，不进入 Git 提交或 Tina 构建。
 
 ## 借鉴
 
@@ -9,6 +9,7 @@
 - 队列支持取消、暂停、预算、pending 指标和主线程 time slice；
 - GPU 资源具有显式 Prepare/Release 生命周期；
 - Render Pass 明确颜色/深度 load/store 行为。
+- UI 输入把 MouseDown/Up/Move、Capture Changed、Set/Kill Focus 分成独立事件；Windows 路径在按下时 `SetCapture`、释放时 `ReleaseCapture`。Tina 只借鉴这一生命周期契约，使用自己的 NodeId 和 routed event 实现。
 
 ## 不复制
 

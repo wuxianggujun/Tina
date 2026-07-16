@@ -37,8 +37,10 @@ $cmake = 'D:\Program Files\Microsoft Visual Studio\18\Professional\Common7\IDE\C
 测试构建完成后直接运行 `tina_tests`，不通过额外测试调度器：
 
 ```powershell
-out\build\windows-msvc\bin\tina_tests.exe
+out\build\windows-msvc\bin\Debug\tina_tests.exe
 ```
+
+Visual Studio 的测试程序和 GTest 运行库按配置隔离在 `bin\Debug`、`bin\Release`，避免 Debug/Release CRT 混用；Linux 单配置构建仍输出到 `bin`。
 
 运行时验收入口：
 

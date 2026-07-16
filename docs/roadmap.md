@@ -16,7 +16,8 @@
 
 - 统一每个 Scene 的 UI 树所有权，并由 EventSystem 对当前 roots 做单次输入路由；
 - 修复布局注册、显式事件上下文注入、hit-test 隐式布局和单次输入路由；
-- 增加 UI 布局、唯一命中、路由顺序和动态子树上下文 GoogleTest；
+- 引入 generation NodeId，统一 Pointer Capture、Focus/Tab 和节点销毁安全失效；
+- 增加 UI 布局、唯一命中、路由顺序、动态子树上下文和交互生命周期 GoogleTest；
 - 运行主菜单或独立 2D/UI 冒烟程序。
 
 ## M3 最小 3D（已完成）
@@ -27,7 +28,7 @@
 
 ## Later
 
-近期 UI：generation NodeId、Pointer Capture、统一 Focus/Tab、Style/Theme、DPI 与 IME composition。
+近期 UI：Style/Theme、DPI、Scroll/ListView 虚拟化、键盘/手柄导航与 IME composition。
 
 构建：将 Runtime 与完整 shaderc/Tint 离线工具链解耦，避免首次 Release Runtime 构建强制编译全部 shader 工具；隔离 EASTL/bgfx 等第三方告警，并清理旧源码自身的 GCC/MSVC 告警。
 

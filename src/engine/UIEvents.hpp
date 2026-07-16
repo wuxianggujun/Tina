@@ -13,7 +13,7 @@ namespace Tina::Engine {
 // ==================== 鼠标事件 ====================
 
 // 鼠标点击事件
-struct MouseClickEvent : UIEvent<MouseClickEvent, EventTypeId::UIButtonClicked> {
+struct MouseClickEvent : UIEvent<MouseClickEvent, EventTypeId::UIPointerClick> {
     float mouseX = 0;
     float mouseY = 0;
     int button = 0;  // 0=left, 1=middle, 2=right
@@ -21,6 +21,36 @@ struct MouseClickEvent : UIEvent<MouseClickEvent, EventTypeId::UIButtonClicked> 
     MouseClickEvent() {
         this->priority = EventPriority::Low;  // UI事件低优先级
     }
+};
+
+struct PointerMoveEvent : UIEvent<PointerMoveEvent, EventTypeId::UIPointerMove> {
+    uint32_t pointerId = 0;
+    float mouseX = 0;
+    float mouseY = 0;
+    float deltaX = 0;
+    float deltaY = 0;
+};
+
+struct PointerDownEvent : UIEvent<PointerDownEvent, EventTypeId::UIPointerDown> {
+    uint32_t pointerId = 0;
+    float mouseX = 0;
+    float mouseY = 0;
+    int button = 0;
+};
+
+struct PointerUpEvent : UIEvent<PointerUpEvent, EventTypeId::UIPointerUp> {
+    uint32_t pointerId = 0;
+    float mouseX = 0;
+    float mouseY = 0;
+    int button = 0;
+};
+
+struct PointerCaptureChangedEvent
+    : UIEvent<PointerCaptureChangedEvent, EventTypeId::UIPointerCaptureChanged> {
+    uint32_t pointerId = 0;
+    UI::NodeId previousCapture;
+    UI::NodeId nextCapture;
+    bool captured = false;
 };
 
 // 鼠标进入事件

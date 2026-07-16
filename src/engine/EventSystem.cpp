@@ -1,14 +1,106 @@
 #include "EventSystem.hpp"
+
 #include "../ui/UINode.hpp"
 #include "../core/Log.hpp"
 #include "UIEvents.hpp"
-// Container.hpp 已经包含了所有需要的算法封装
+
+#include <algorithm>
 
 namespace Tina::Engine {
+namespace {
 
-// ==================== UI 根节点设置 ====================
+uint32_t nextGeneration(uint32_t generation)
+{
+    ++generation;
+    return generation == 0 ? 1 : generation;
+}
 
-void EventSystem::setUIRoot(Memory::SharedPtr<UI::UINode> root) {
+} // namespace
+
+// ==================== UI node registry ====================
+
+UI::NodeId EventSystem::attachUINode(UI::UINode* node)
+{
+    if (!node) return {};
+
+    uint32_t index = 0;
+    if (!m_freeUINodeSlots.empty()) {
+        index = m_freeUINodeSlots.back();
+        m_freeUINodeSlots.pop_back();
+        m_uiNodeSlots[index].node = node;
+    } else {
+        index = static_cast<uint32_t>(m_uiNodeSlots.size());
+        UINodeSlot slot;
+        slot.node = node;
+        m_uiNodeSlots.push_back(slot);
+    }
+
+    return UI::NodeId{index, m_uiNodeSlots[index].generation};
+}
+
+void EventSystem::detachUINode(UI::NodeId id, UI::UINode* node)
+{
+    if (!id || id.index >= m_uiNodeSlots.size()) return;
+
+    UINodeSlot& slot = m_uiNodeSlots[id.index];
+    if (slot.generation != id.generation || slot.node != node) return;
+
+    m_uiContext.roots.erase(
+        std::remove(m_uiContext.roots.begin(), m_uiContext.roots.end(), id),
+        m_uiContext.roots.end());
+
+    if (m_uiContext.focusedNode == id) setKeyboardFocus({});
+    if (m_uiContext.capturedNode == id) releasePointerCapture(id);
+    if (m_uiContext.hoveredNode == id) {
+        m_uiContext.hoveredNode = {};
+        if (node->isHoverable()) node->onMouseLeave();
+    }
+    if (m_uiContext.pressedNode == id) m_uiContext.pressedNode = {};
+
+    slot.node = nullptr;
+    slot.generation = nextGeneration(slot.generation);
+    m_freeUINodeSlots.push_back(id.index);
+
+    // Removing a root also invalidates interaction owned by still-registered
+    // descendants. Resolve through generation handles before notifying them.
+    sanitizeUIInteractionState();
+}
+
+void EventSystem::notifyUINodeStateChanged(UI::NodeId id)
+{
+    if (isUINodeAlive(id)) sanitizeUIInteractionState();
+}
+
+UI::UINode* EventSystem::resolveUINode(UI::NodeId id) const
+{
+    if (!id || id.index >= m_uiNodeSlots.size()) return nullptr;
+    const UINodeSlot& slot = m_uiNodeSlots[id.index];
+    return slot.generation == id.generation ? slot.node : nullptr;
+}
+
+UI::NodeId EventSystem::idForUINode(const UI::UINode* node) const
+{
+    if (!node) return {};
+    const UI::NodeId id = node->nodeId();
+    return resolveUINode(id) == node ? id : UI::NodeId{};
+}
+
+void EventSystem::invalidateAllUINodes()
+{
+    m_freeUINodeSlots.clear();
+    m_freeUINodeSlots.reserve(m_uiNodeSlots.size());
+    for (uint32_t i = 0; i < m_uiNodeSlots.size(); ++i) {
+        UINodeSlot& slot = m_uiNodeSlots[i];
+        slot.node = nullptr;
+        slot.generation = nextGeneration(slot.generation);
+        m_freeUINodeSlots.push_back(i);
+    }
+}
+
+// ==================== UI roots ====================
+
+void EventSystem::setUIRoot(Memory::SharedPtr<UI::UINode> root)
+{
     Vector<UI::UINode*> roots;
     if (root) roots.push_back(root.get());
     setUIRoots(roots);
@@ -16,19 +108,27 @@ void EventSystem::setUIRoot(Memory::SharedPtr<UI::UINode> root) {
     m_uiContext.rootOwnerRequired = static_cast<bool>(root);
 }
 
-void EventSystem::setUIRoot(UI::UINode* root) {
+void EventSystem::setUIRoot(UI::UINode* root)
+{
     Vector<UI::UINode*> roots;
     if (root) roots.push_back(root);
     setUIRoots(roots);
 }
 
-void EventSystem::setUIRoots(const Vector<UI::UINode*>& roots) {
-    const uint64_t treeVersion = UI::UINode::treeVersion();
-    bool changed = treeVersion != m_uiContext.treeVersion ||
-                   roots.size() != m_uiContext.roots.size();
+void EventSystem::setUIRoots(const Vector<UI::UINode*>& roots)
+{
+    Vector<UI::NodeId> rootIds;
+    rootIds.reserve(roots.size());
+    for (UI::UINode* root : roots) {
+        if (!root) continue;
+        if (root->eventSystem() != this) root->setEventSystem(this);
+        if (resolveUINode(root->nodeId()) == root) rootIds.push_back(root->nodeId());
+    }
+
+    bool changed = rootIds.size() != m_uiContext.roots.size();
     if (!changed) {
-        for (size_t i = 0; i < roots.size(); ++i) {
-            if (roots[i] != m_uiContext.roots[i]) {
+        for (size_t i = 0; i < rootIds.size(); ++i) {
+            if (rootIds[i] != m_uiContext.roots[i]) {
                 changed = true;
                 break;
             }
@@ -36,184 +136,383 @@ void EventSystem::setUIRoots(const Vector<UI::UINode*>& roots) {
     }
 
     if (changed) {
-        m_uiContext.treeVersion = treeVersion;
-        m_uiContext.roots.clear();
-        for (UI::UINode* root : roots) {
-            if (root) m_uiContext.roots.push_back(root);
-        }
-        m_uiContext.hoveredNode = nullptr;
-        m_uiContext.pressedNode = nullptr;
-        m_uiContext.focusedNode = nullptr;
+        m_uiContext.roots = Container::Move(rootIds);
+        sanitizeUIInteractionState();
     }
 
     m_uiContext.rootOwner.reset();
     m_uiContext.rootOwnerRequired = false;
 }
 
-// ==================== UI 输入更新 ====================
+bool EventSystem::isInActiveUITree(UI::NodeId id) const
+{
+    UI::UINode* node = resolveUINode(id);
+    if (!node) return false;
 
-// 更新UI输入（每帧调用）
-void EventSystem::updateUIInput(float mouseX, float mouseY, bool mouseDown) {
-    m_uiContext.mouseX = mouseX;
-    m_uiContext.mouseY = mouseY;
-    m_uiContext.mouseDownPrev = m_uiContext.mouseDown;
-    m_uiContext.mouseDown = mouseDown;
-    
-    // 调试：每秒打印一次状态（60fps）
-    #ifdef TINA_DEBUG_UI_INPUT
-    static int debugCounter = 0;
-    if (++debugCounter % 60 == 0) {
-        TINA_DEBUG("EventSystem - 鼠标: ({}, {}), 按下: {}, 根节点: {}",
-                   mouseX, mouseY, mouseDown, m_uiContext.roots.empty() ? "无" : "有");
+    UI::UINode* root = node;
+    while (root->getParent()) root = root->getParent();
+    const UI::NodeId rootId = root->nodeId();
+    for (UI::NodeId activeRoot : m_uiContext.roots) {
+        if (activeRoot == rootId && resolveUINode(activeRoot) == root) return true;
     }
-    #endif
-    
-    // 处理鼠标输入（无滚轮增量）
-    handleMouseInput(0.0f);
+    return false;
 }
 
-// 重载：包含滚轮增量
-void EventSystem::updateUIInput(float mouseX, float mouseY, bool mouseDown, float wheelDeltaY) {
+// ==================== focus and pointer capture ====================
+
+bool EventSystem::setKeyboardFocus(UI::NodeId id)
+{
+    UI::UINode* next = resolveUINode(id);
+    if (next && (!isInActiveUITree(id) || !next->isVisible() || !next->isEnabled() ||
+                 !next->isFocusable())) {
+        return false;
+    }
+    if (!next) id = {};
+
+    const UI::NodeId previousId = m_uiContext.focusedNode;
+    if (previousId == id) return true;
+
+    m_uiContext.focusedNode = id;
+
+    if (UI::UINode* previous = resolveUINode(previousId)) {
+        previous->onFocusLost();
+        if (resolveUINode(previousId) == previous) {
+            FocusLostEvent event;
+            triggerUIEvent(event, previous);
+        }
+    }
+
+    // A focus callback may have made a nested focus request.
+    if (m_uiContext.focusedNode != id) return true;
+
+    if (UI::UINode* current = resolveUINode(id)) {
+        current->onFocusGained();
+        if (resolveUINode(id) == current) {
+            FocusGainedEvent event;
+            triggerUIEvent(event, current);
+        }
+    }
+    return true;
+}
+
+void EventSystem::collectFocusableNodes(UI::UINode* node, Vector<UI::NodeId>& nodes) const
+{
+    if (!node || !node->isVisible() || !node->isEnabled()) return;
+    if (node->isFocusable() && resolveUINode(node->nodeId()) == node) {
+        nodes.push_back(node->nodeId());
+    }
+    for (const auto& child : node->getChildren()) {
+        if (child) collectFocusableNodes(child.get(), nodes);
+    }
+}
+
+bool EventSystem::focusNext(bool reverse)
+{
+    Vector<UI::NodeId> focusable;
+    for (UI::NodeId rootId : m_uiContext.roots) {
+        collectFocusableNodes(resolveUINode(rootId), focusable);
+    }
+    if (focusable.empty()) return false;
+
+    int currentIndex = -1;
+    for (size_t i = 0; i < focusable.size(); ++i) {
+        if (focusable[i] == m_uiContext.focusedNode) {
+            currentIndex = static_cast<int>(i);
+            break;
+        }
+    }
+
+    size_t nextIndex = 0;
+    if (reverse) {
+        nextIndex = currentIndex < 0
+            ? focusable.size() - 1
+            : (static_cast<size_t>(currentIndex) + focusable.size() - 1) % focusable.size();
+    } else {
+        nextIndex = static_cast<size_t>(currentIndex + 1) % focusable.size();
+    }
+    return setKeyboardFocus(focusable[nextIndex]);
+}
+
+bool EventSystem::setPointerCapture(UI::NodeId id)
+{
+    UI::UINode* next = resolveUINode(id);
+    if (!next || !isInActiveUITree(id) || !next->isVisible() || !next->isEnabled()) {
+        return false;
+    }
+
+    const UI::NodeId previousId = m_uiContext.capturedNode;
+    if (previousId == id) return true;
+    m_uiContext.capturedNode = id;
+
+    if (UI::UINode* previous = resolveUINode(previousId)) {
+        previous->onPointerCaptureChanged(false);
+        if (resolveUINode(previousId) == previous) {
+            PointerCaptureChangedEvent event;
+            event.previousCapture = previousId;
+            event.nextCapture = id;
+            event.captured = false;
+            triggerUIEvent(event, previous);
+        }
+    }
+
+    if (m_uiContext.capturedNode != id) return true;
+    if (UI::UINode* current = resolveUINode(id)) {
+        current->onPointerCaptureChanged(true);
+        if (resolveUINode(id) == current) {
+            PointerCaptureChangedEvent event;
+            event.previousCapture = previousId;
+            event.nextCapture = id;
+            event.captured = true;
+            triggerUIEvent(event, current);
+        }
+    }
+    return true;
+}
+
+void EventSystem::releasePointerCapture(UI::NodeId requester)
+{
+    const UI::NodeId previousId = m_uiContext.capturedNode;
+    if (!previousId || (requester && requester != previousId)) return;
+
+    m_uiContext.capturedNode = {};
+    if (UI::UINode* previous = resolveUINode(previousId)) {
+        previous->onPointerCaptureChanged(false);
+        if (resolveUINode(previousId) == previous) {
+            PointerCaptureChangedEvent event;
+            event.previousCapture = previousId;
+            event.nextCapture = {};
+            event.captured = false;
+            triggerUIEvent(event, previous);
+        }
+    }
+}
+
+void EventSystem::sanitizeUIInteractionState()
+{
+    auto isActive = [this](UI::NodeId id) {
+        UI::UINode* node = resolveUINode(id);
+        return node && isInActiveUITree(id) && node->isVisible() && node->isEnabled();
+    };
+
+    if (m_uiContext.focusedNode) {
+        UI::UINode* node = resolveUINode(m_uiContext.focusedNode);
+        if (!isActive(m_uiContext.focusedNode) || !node->isFocusable()) setKeyboardFocus({});
+    }
+    if (m_uiContext.capturedNode && !isActive(m_uiContext.capturedNode)) {
+        releasePointerCapture();
+    }
+    if (m_uiContext.pressedNode) {
+        UI::UINode* node = resolveUINode(m_uiContext.pressedNode);
+        if (!isActive(m_uiContext.pressedNode) || !node->isClickable()) {
+            m_uiContext.pressedNode = {};
+        }
+    }
+    if (m_uiContext.hoveredNode) {
+        UI::UINode* node = resolveUINode(m_uiContext.hoveredNode);
+        if (!isActive(m_uiContext.hoveredNode) || !node->isHoverable() || !node->isInteractable()) {
+            const UI::NodeId oldId = m_uiContext.hoveredNode;
+            m_uiContext.hoveredNode = {};
+            if (UI::UINode* old = resolveUINode(oldId)) old->onMouseLeave();
+        }
+    }
+}
+
+void EventSystem::resetUIInteractionState(bool notifyNodes)
+{
+    const UI::NodeId hovered = m_uiContext.hoveredNode;
+    const UI::NodeId focused = m_uiContext.focusedNode;
+    const UI::NodeId captured = m_uiContext.capturedNode;
+
+    m_uiContext.hoveredNode = {};
+    m_uiContext.pressedNode = {};
+    m_uiContext.focusedNode = {};
+    m_uiContext.capturedNode = {};
+
+    if (!notifyNodes) return;
+    if (UI::UINode* node = resolveUINode(hovered)) node->onMouseLeave();
+    if (UI::UINode* node = resolveUINode(focused)) node->onFocusLost();
+    if (UI::UINode* node = resolveUINode(captured)) node->onPointerCaptureChanged(false);
+}
+
+// ==================== input update and routed dispatch ====================
+
+void EventSystem::updateUIInput(float mouseX, float mouseY, bool mouseDown)
+{
+    updateUIInput(mouseX, mouseY, mouseDown, 0.0f);
+}
+
+void EventSystem::updateUIInput(float mouseX, float mouseY, bool mouseDown, float wheelDeltaY)
+{
+    const bool pointerMoved = m_uiContext.hasPointerPosition &&
+        (mouseX != m_uiContext.mouseX || mouseY != m_uiContext.mouseY);
+
+    m_uiContext.previousMouseX = m_uiContext.hasPointerPosition ? m_uiContext.mouseX : mouseX;
+    m_uiContext.previousMouseY = m_uiContext.hasPointerPosition ? m_uiContext.mouseY : mouseY;
     m_uiContext.mouseX = mouseX;
     m_uiContext.mouseY = mouseY;
     m_uiContext.mouseDownPrev = m_uiContext.mouseDown;
     m_uiContext.mouseDown = mouseDown;
+    m_uiContext.hasPointerPosition = true;
 
-    // 处理鼠标输入（带滚轮增量）
-    handleMouseInput(wheelDeltaY);
+    handleMouseInput(wheelDeltaY, pointerMoved);
 }
 
-// 构建事件路径（从根到目标）
-void EventSystem::buildEventPath(UI::UINode* target, Vector<UI::UINode*>& path) {
-    if (!target) return;
-    
-    // 从目标向上遍历到根
+void EventSystem::buildEventPath(UI::UINode* target, Vector<UI::NodeId>& path)
+{
     UI::UINode* current = target;
     while (current) {
-        path.push_back(current);
+        const UI::NodeId id = current->nodeId();
+        if (resolveUINode(id) != current) {
+            path.clear();
+            return;
+        }
+        path.push_back(id);
         current = current->getParent();
     }
-    
-    // ✅ 使用项目封装的 Reverse（Container.hpp）
     Container::Reverse(path.begin(), path.end());
 }
 
-// 查找鼠标下的节点（递归，深度优先，后序遍历确保上层节点优先）
-UI::UINode* EventSystem::findNodeUnderMouse(UI::UINode* node, float x, float y) {
-    if (!node || !node->isVisible() || !node->isEnabled()) {
-        return nullptr;
+UI::NodeId EventSystem::findNodeUnderMouse(UI::UINode* node, float x, float y)
+{
+    if (!node || resolveUINode(node->nodeId()) != node ||
+        !node->isVisible() || !node->isEnabled()) {
+        return {};
     }
-    
-    // 先检查子节点（后序遍历，子节点优先）
-    // 按 zIndex 排序（高 zIndex 优先）
-    auto& children = node->getChildren();
-    Container::Vector<UI::UINode*> sortedChildren;
+
+    const auto& children = node->getChildren();
+    Vector<UI::UINode*> sortedChildren;
     sortedChildren.reserve(children.size());
-    
-    for (auto& child : children) {
-        if (child) {
-            sortedChildren.push_back(child.get());
-        }
+    for (const auto& child : children) {
+        if (child) sortedChildren.push_back(child.get());
     }
-    
-    // ✅ 按 zIndex 降序排序（使用项目封装的 Sort）
-    Container::Sort(sortedChildren.begin(), sortedChildren.end(), 
-        [](UI::UINode* a, UI::UINode* b) {
-            return a->zIndex() > b->zIndex();
-        });
-    
-    // 递归检查子节点
-    for (auto* child : sortedChildren) {
-        UI::UINode* found = findNodeUnderMouse(child, x, y);
-        if (found) {
-            return found;
-        }
+    Container::Sort(sortedChildren.begin(), sortedChildren.end(),
+        [](UI::UINode* lhs, UI::UINode* rhs) { return lhs->zIndex() > rhs->zIndex(); });
+
+    for (UI::UINode* child : sortedChildren) {
+        UI::NodeId found = findNodeUnderMouse(child, x, y);
+        if (found) return found;
     }
-    
-    // 检查当前节点
-    if (node->isInteractable()) {
-        if (node->containsPoint(x, y)) {
-            return node;
-        }
-    }
-    
-    return nullptr;
+
+    if (node->isInteractable() && node->containsPoint(x, y)) return node->nodeId();
+    return {};
 }
 
-// 处理鼠标输入（内部实现）
-void EventSystem::handleMouseInput(float wheelDeltaY) {
+void EventSystem::handleMouseInput(float wheelDeltaY, bool pointerMoved)
+{
     if (m_uiContext.rootOwnerRequired && m_uiContext.rootOwner.expired()) {
         m_uiContext.roots.clear();
-        m_uiContext.hoveredNode = nullptr;
-        m_uiContext.pressedNode = nullptr;
-        m_uiContext.focusedNode = nullptr;
+        resetUIInteractionState(true);
         m_uiContext.rootOwnerRequired = false;
-        m_uiContext.treeVersion = 0;
         return;
     }
-    if (m_uiContext.roots.empty()) {
-        return;
+
+    sanitizeUIInteractionState();
+    if (m_uiContext.roots.empty()) return;
+
+    const float mouseX = m_uiContext.mouseX;
+    const float mouseY = m_uiContext.mouseY;
+
+    UI::NodeId hitId;
+    for (size_t i = m_uiContext.roots.size(); i > 0 && !hitId; --i) {
+        hitId = findNodeUnderMouse(resolveUINode(m_uiContext.roots[i - 1]), mouseX, mouseY);
     }
-    
-    float mx = m_uiContext.mouseX;
-    float my = m_uiContext.mouseY;
-    bool mouseDown = m_uiContext.mouseDown;
-    bool mouseDownPrev = m_uiContext.mouseDownPrev;
-    
-    // 顶层节点后注册者视为更靠上；整帧只选择一个最终目标并路由一次。
-    UI::UINode* nodeUnderMouse = nullptr;
-    for (size_t i = m_uiContext.roots.size(); i > 0 && !nodeUnderMouse; --i) {
-        nodeUnderMouse = findNodeUnderMouse(m_uiContext.roots[i - 1], mx, my);
-    }
-    
-    // 处理 hover 状态变化
-    if (nodeUnderMouse != m_uiContext.hoveredNode) {
-        // 鼠标离开旧节点
-        if (m_uiContext.hoveredNode && m_uiContext.hoveredNode->isHoverable()) {
-            m_uiContext.hoveredNode->onMouseLeave();
+
+    if (hitId != m_uiContext.hoveredNode) {
+        const UI::NodeId oldHover = m_uiContext.hoveredNode;
+        m_uiContext.hoveredNode = hitId;
+
+        if (UI::UINode* old = resolveUINode(oldHover); old && old->isHoverable()) {
+            MouseLeaveEvent event;
+            event.mouseX = mouseX;
+            event.mouseY = mouseY;
+            triggerUIEvent(event, old);
+            if (resolveUINode(oldHover) == old) old->onMouseLeave();
         }
-        
-        // 鼠标进入新节点
-        if (nodeUnderMouse && nodeUnderMouse->isHoverable()) {
-            nodeUnderMouse->onMouseEnter();
-        }
-        
-        m_uiContext.hoveredNode = nodeUnderMouse;
-    }
-    
-    // ✅ 处理鼠标按下
-    if (mouseDown && !mouseDownPrev) {
-        if (nodeUnderMouse && nodeUnderMouse->isClickable()) {
-            m_uiContext.pressedNode = nodeUnderMouse;
-            nodeUnderMouse->onMouseDown(mx, my);
+        if (UI::UINode* current = resolveUINode(hitId); current && current->isHoverable()) {
+            MouseEnterEvent event;
+            event.mouseX = mouseX;
+            event.mouseY = mouseY;
+            triggerUIEvent(event, current);
+            if (resolveUINode(hitId) == current) current->onMouseEnter();
         }
     }
-    
-    // ✅ 处理鼠标释放
-    if (!mouseDown && mouseDownPrev) {
-        if (m_uiContext.pressedNode) {
-            m_uiContext.pressedNode->onMouseUp(mx, my);
-            
-            // 如果释放时仍在同一节点上，触发点击
-            if (m_uiContext.pressedNode == nodeUnderMouse) {
-                m_uiContext.pressedNode->onClick();
+
+    const UI::NodeId routedPointer = m_uiContext.capturedNode
+        ? m_uiContext.capturedNode
+        : hitId;
+    if (pointerMoved) {
+        if (UI::UINode* target = resolveUINode(routedPointer)) {
+            PointerMoveEvent event;
+            event.mouseX = mouseX;
+            event.mouseY = mouseY;
+            event.deltaX = mouseX - m_uiContext.previousMouseX;
+            event.deltaY = mouseY - m_uiContext.previousMouseY;
+            triggerUIEvent(event, target);
+            if (resolveUINode(routedPointer) == target) target->onPointerMove(mouseX, mouseY);
+        }
+    }
+
+    if (m_uiContext.mouseDown && !m_uiContext.mouseDownPrev) {
+        if (UI::UINode* target = resolveUINode(hitId)) {
+            if (target->isFocusable()) setKeyboardFocus(hitId);
+            else clearKeyboardFocus();
+
+            if (target->isClickable()) {
+                m_uiContext.pressedNode = hitId;
+                setPointerCapture(hitId);
+            }
+
+            if (UI::UINode* liveTarget = resolveUINode(hitId)) {
+                PointerDownEvent event;
+                event.mouseX = mouseX;
+                event.mouseY = mouseY;
+                triggerUIEvent(event, liveTarget);
+                if (resolveUINode(hitId) == liveTarget && liveTarget->isClickable()) {
+                    liveTarget->onMouseDown(mouseX, mouseY);
+                }
+            }
+        } else {
+            clearKeyboardFocus();
+        }
+    }
+
+    if (!m_uiContext.mouseDown && m_uiContext.mouseDownPrev) {
+        const UI::NodeId pressedId = m_uiContext.pressedNode;
+        const UI::NodeId releaseTargetId = m_uiContext.capturedNode
+            ? m_uiContext.capturedNode
+            : hitId;
+
+        if (UI::UINode* target = resolveUINode(releaseTargetId)) {
+            PointerUpEvent event;
+            event.mouseX = mouseX;
+            event.mouseY = mouseY;
+            triggerUIEvent(event, target);
+            if (resolveUINode(releaseTargetId) == target) target->onMouseUp(mouseX, mouseY);
+        }
+
+        if (pressedId && pressedId == hitId) {
+            if (UI::UINode* target = resolveUINode(pressedId)) {
+                MouseClickEvent event;
+                event.mouseX = mouseX;
+                event.mouseY = mouseY;
+                triggerUIEvent(event, target);
+                if (resolveUINode(pressedId) == target) target->onClick();
             }
         }
-        m_uiContext.pressedNode = nullptr;
+
+        m_uiContext.pressedNode = {};
+        releasePointerCapture();
     }
 
-    // ✅ 分发滚轮事件（UI 事件 + 虚函数回调）
-    if (wheelDeltaY != 0.0f && nodeUnderMouse) {
-        // 先调用虚方法，便于控件即时响应
-        nodeUnderMouse->onMouseWheel(0.0f, wheelDeltaY);
-
-        // 再分发 UI 事件（带捕获/冒泡），供需要的订阅者监听
-        UIMouseWheelEvent evt;
-        evt.deltaX = 0.0f;
-        evt.deltaY = wheelDeltaY;
-        evt.mouseX = mx;
-        evt.mouseY = my;
-        triggerUIEvent(evt, nodeUnderMouse);
+    if (wheelDeltaY != 0.0f) {
+        if (UI::UINode* target = resolveUINode(hitId)) {
+            UIMouseWheelEvent event;
+            event.deltaY = wheelDeltaY;
+            event.mouseX = mouseX;
+            event.mouseY = mouseY;
+            triggerUIEvent(event, target);
+            if (resolveUINode(hitId) == target) target->onMouseWheel(0.0f, wheelDeltaY);
+        }
     }
 }
 

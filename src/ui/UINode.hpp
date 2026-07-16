@@ -25,7 +25,9 @@
 #include "../core/Math.hpp"
 #include "../core/Memory.hpp"
 #include "../core/Log.hpp"
+#include "NodeId.hpp"
 #include <atomic>
+#include <memory>
 #include <string>
 #include <functional>
 
@@ -381,18 +383,18 @@ public:
     Tina::Math::Vec2 getWorldSize() { return m_size; } // 暂不支持缩放
 
     // === 状态（支持链式调用） ===
-    UINode* setVisible(bool v) { if (m_visible != v) { m_visible = v; bumpTreeVersion(); } return this; }
-    UINode* setEnabled(bool e) { if (m_enabled != e) { m_enabled = e; bumpTreeVersion(); } return this; }
+    UINode* setVisible(bool visible);
+    UINode* setEnabled(bool enabled);
     bool isVisible() const { return m_visible; }
     bool isEnabled() const { return m_enabled; }
     // 交互能力开关（用于命中与事件过滤）
-    UINode* setInteractable(bool i) { if (m_interactable != i) { m_interactable = i; bumpTreeVersion(); } return this; }
+    UINode* setInteractable(bool interactable);
     bool isInteractable() const { return m_interactable; }
-    UINode* setClickable(bool v) { if (m_clickable != v) { m_clickable = v; bumpTreeVersion(); } return this; }
+    UINode* setClickable(bool clickable);
     bool isClickable() const { return m_clickable; }
-    UINode* setHoverable(bool v) { if (m_hoverable != v) { m_hoverable = v; bumpTreeVersion(); } return this; }
+    UINode* setHoverable(bool hoverable);
     bool isHoverable() const { return m_hoverable; }
-    UINode* setFocusable(bool v) { if (m_focusable != v) { m_focusable = v; bumpTreeVersion(); } return this; }
+    UINode* setFocusable(bool focusable);
     bool isFocusable() const { return m_focusable; }
     // 呈现顺序（越大越上层）
     UINode* setZIndex(int z) { if (m_zIndex != z) { m_zIndex = z; bumpTreeVersion(); } return this; }
@@ -441,9 +443,13 @@ public:
     virtual void onMouseLeave() {}
     virtual void onMouseDown(float x, float y) { (void)x; (void)y; }
     virtual void onMouseUp(float x, float y) { (void)x; (void)y; }
+    virtual void onPointerMove(float x, float y) { (void)x; (void)y; }
     virtual void onClick() {}
     // 新增：鼠标滚轮事件（dx/dy 为像素/刻度）
     virtual void onMouseWheel(float dx, float dy) { (void)dx; (void)dy; }
+    virtual void onFocusGained() {}
+    virtual void onFocusLost() {}
+    virtual void onPointerCaptureChanged(bool captured) { (void)captured; }
 
     // === 窗口尺寸变化回调（框架自动调用） ===
     // 默认实现：递归通知所有子节点
@@ -469,7 +475,14 @@ public:
     // === 引擎事件系统支持 ===
     // 由 Scene 显式注入，并递归传播给整棵树。后续动态添加的子节点会继承该上下文。
     void setEventSystem(Tina::Engine::EventSystem* eventSystem);
-    Tina::Engine::EventSystem* eventSystem() const { return m_eventSystem; }
+    Tina::Engine::EventSystem* eventSystem() const;
+    NodeId nodeId() const { return m_nodeId; }
+    bool requestFocus();
+    void clearFocus();
+    bool hasFocus() const;
+    bool capturePointer();
+    void releasePointerCapture();
+    bool hasPointerCapture() const;
 
     // === 布局管理器支持 ===
     void setLayoutManager(UILayoutManager* layoutManager);
@@ -606,6 +619,8 @@ protected:
 
     // 引擎事件系统（由场景设置）
     Tina::Engine::EventSystem* m_eventSystem = nullptr;
+    std::weak_ptr<std::atomic_bool> m_eventSystemLifetime;
+    NodeId m_nodeId;
 
     // 布局管理器（由场景设置）
     UILayoutManager* m_layoutManager = nullptr;

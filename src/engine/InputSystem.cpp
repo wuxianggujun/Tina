@@ -733,6 +733,9 @@ void InputSystem::emitKeyPressed(KeyCode key, bool repeat)
     event.shift = isShiftDown();
     event.ctrl = isCtrlDown();
     event.alt = isAltDown();
+    if (key == KeyCode::Tab && !repeat) {
+        m_eventSystem->focusNext(event.shift);
+    }
     m_eventSystem->trigger(event);
 }
 

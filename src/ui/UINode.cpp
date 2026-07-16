@@ -1,5 +1,6 @@
 #include "UINode.hpp"
 #include "UILayoutManager.hpp"
+#include "../engine/EventSystem.hpp"
 #include "../core/Log.hpp"
 #include <limits>
 #include <algorithm>
@@ -21,6 +22,8 @@ UINode::UINode(const std::string& name)
 UINode::~UINode()
 {
     bumpTreeVersion();
+    setEventSystem(nullptr);
+
     // 从布局管理器注销（如果有）
     if (m_layoutManager) {
         m_layoutManager->unregisterNode(this);
@@ -51,10 +54,131 @@ void UINode::setLayoutManager(UILayoutManager* layoutManager)
 
 void UINode::setEventSystem(Tina::Engine::EventSystem* eventSystem)
 {
+    if (!eventSystem && !m_eventSystem) {
+        for (auto& child : m_children) {
+            if (child) child->setEventSystem(nullptr);
+        }
+        return;
+    }
+
+    if (m_eventSystem == eventSystem && this->eventSystem() == eventSystem) {
+        if (m_eventSystem && !m_eventSystem->isUINodeAlive(m_nodeId)) {
+            m_nodeId = m_eventSystem->attachUINode(this);
+        }
+        for (auto& child : m_children) {
+            if (child) child->setEventSystem(eventSystem);
+        }
+        return;
+    }
+
+    if (this->eventSystem()) {
+        m_eventSystem->detachUINode(m_nodeId, this);
+    }
+
     m_eventSystem = eventSystem;
+    m_eventSystemLifetime = m_eventSystem ? m_eventSystem->lifetimeToken()
+                                         : std::weak_ptr<std::atomic_bool>{};
+    m_nodeId = m_eventSystem ? m_eventSystem->attachUINode(this) : NodeId{};
     for (auto& child : m_children) {
         if (child) child->setEventSystem(eventSystem);
     }
+}
+
+Tina::Engine::EventSystem* UINode::eventSystem() const
+{
+    if (!m_eventSystem) return nullptr;
+    const auto lifetime = m_eventSystemLifetime.lock();
+    return lifetime && lifetime->load(std::memory_order_acquire) ? m_eventSystem : nullptr;
+}
+
+UINode* UINode::setVisible(bool visible)
+{
+    if (m_visible == visible) return this;
+    m_visible = visible;
+    bumpTreeVersion();
+    if (auto* events = eventSystem()) events->notifyUINodeStateChanged(m_nodeId);
+    return this;
+}
+
+UINode* UINode::setEnabled(bool enabled)
+{
+    if (m_enabled == enabled) return this;
+    m_enabled = enabled;
+    bumpTreeVersion();
+    if (auto* events = eventSystem()) events->notifyUINodeStateChanged(m_nodeId);
+    return this;
+}
+
+UINode* UINode::setInteractable(bool interactable)
+{
+    if (m_interactable == interactable) return this;
+    m_interactable = interactable;
+    bumpTreeVersion();
+    if (auto* events = eventSystem()) events->notifyUINodeStateChanged(m_nodeId);
+    return this;
+}
+
+UINode* UINode::setClickable(bool clickable)
+{
+    if (m_clickable == clickable) return this;
+    m_clickable = clickable;
+    bumpTreeVersion();
+    if (auto* events = eventSystem()) events->notifyUINodeStateChanged(m_nodeId);
+    return this;
+}
+
+UINode* UINode::setHoverable(bool hoverable)
+{
+    if (m_hoverable == hoverable) return this;
+    m_hoverable = hoverable;
+    bumpTreeVersion();
+    if (auto* events = eventSystem()) events->notifyUINodeStateChanged(m_nodeId);
+    return this;
+}
+
+UINode* UINode::setFocusable(bool focusable)
+{
+    if (m_focusable == focusable) return this;
+    m_focusable = focusable;
+    bumpTreeVersion();
+    if (auto* events = eventSystem()) events->notifyUINodeStateChanged(m_nodeId);
+    return this;
+}
+
+bool UINode::requestFocus()
+{
+    auto* events = eventSystem();
+    return events && events->setKeyboardFocus(m_nodeId);
+}
+
+void UINode::clearFocus()
+{
+    if (auto* events = eventSystem(); events && events->focusedNodeId() == m_nodeId) {
+        events->clearKeyboardFocus();
+    }
+}
+
+bool UINode::hasFocus() const
+{
+    auto* events = eventSystem();
+    return events && events->focusedNodeId() == m_nodeId;
+}
+
+bool UINode::capturePointer()
+{
+    auto* events = eventSystem();
+    return events && events->setPointerCapture(m_nodeId);
+}
+
+void UINode::releasePointerCapture()
+{
+    if (auto* events = eventSystem()) events->releasePointerCapture(m_nodeId);
+}
+
+bool UINode::hasPointerCapture() const
+{
+    auto* events = eventSystem();
+    return events && events->capturedNodeId() == m_nodeId;
 }
 
 // === 层级管理（新版） ===
@@ -71,6 +195,7 @@ Memory::UniquePtr<UINode> UINode::removeChild(UINode* child)
     if (it != m_children.end()) {
         Memory::UniquePtr<UINode> removed = std::move(*it);
         removed->m_parent = nullptr;
+        removed->setEventSystem(nullptr);
         removed->setLayoutManager(nullptr);
         m_children.erase(it);
         bumpTreeVersion();
@@ -82,12 +207,13 @@ Memory::UniquePtr<UINode> UINode::removeChild(UINode* child)
 
 void UINode::removeFromParent()
 {
-    if (m_parent) {
-        // 注意：这会导致自己被销毁（如果父节点拥有所有权）
-        // 调用者需要确保不再使用this指针
-        m_parent->removeChild(this);
-        bumpTreeVersion();
-    }
+    if (!m_parent) return;
+
+    // Keep the returned owner alive until this member function finishes. If
+    // the temporary were discarded immediately, `this` would be destroyed
+    // before removeFromParent() returns.
+    auto removed = m_parent->removeChild(this);
+    (void)removed;
 }
 
 UINode* UINode::findChild(const std::string& name) const

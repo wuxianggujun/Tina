@@ -40,6 +40,7 @@ public:
         setFocusable(true);
         setClickable(true);
     }
+    ~UITextEdit() override;
 
     // === 文本内容 ===
     void setText(const std::string& text);
@@ -94,6 +95,8 @@ public:
     void onMouseDown(float x, float y) override;
     void onMouseUp(float x, float y) override;
     void onClick() override;
+    void onFocusGained() override;
+    void onFocusLost() override;
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
@@ -139,7 +142,7 @@ private:
     Engine::SubscriptionToken m_textInputToken;
 
     // UIRenderer缓存（用于文本测量）
-    UIRenderer* m_renderer;
+    UIRenderer* m_renderer = nullptr;
     
     // 文本滚动偏移量（用于水平滚动）
     float m_scrollOffsetX = 0.0f;
@@ -147,6 +150,7 @@ private:
     // 内部方法
     void setupEventHandlers();
     void cleanupEventHandlers();
+    void applyFocusState(bool focused);
     void handleKeyPressed(const Engine::Events::KeyPressedEvent& e);
     void handleTextInput(const Engine::Events::TextInputEvent& e);
     void insertText(const std::string& text);

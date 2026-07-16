@@ -60,6 +60,11 @@ static Container::String charsToUTF8(const Container::Vector<char32_t>& chars) {
 // 公共API
 // ============================================================================
 
+UITextEdit::~UITextEdit()
+{
+    applyFocusState(false);
+}
+
 // === 设置文本（从UTF-8） ===
 void UITextEdit::setText(const std::string& text) {
     // ✅ 转换为UTF-32字符数组
@@ -129,9 +134,29 @@ Tina::Math::Vec2 UITextEdit::measureContent(float availableWidth, float /*availa
 
 // === 焦点管理 ===
 void UITextEdit::setFocus(bool focus) {
-    if (m_focused == focus) return;
+    if (eventSystem()) {
+        if (focus) {
+            requestFocus();
+        } else {
+            clearFocus();
+        }
+        return;
+    }
 
-    TINA_INFO("UITextEdit::setFocus - name='{}', focus={}", getName(), focus);
+    // Standalone/tool usage without a window UIContext.
+    applyFocusState(focus);
+}
+
+void UITextEdit::onFocusGained() {
+    applyFocusState(true);
+}
+
+void UITextEdit::onFocusLost() {
+    applyFocusState(false);
+}
+
+void UITextEdit::applyFocusState(bool focus) {
+    if (m_focused == focus) return;
 
     m_focused = focus;
 
@@ -139,7 +164,6 @@ void UITextEdit::setFocus(bool focus) {
         // 获得焦点：启动文本输入模式，订阅事件
         if (auto* input = Tina::Engine::GetInput()) {
             input->startTextInput();
-            TINA_INFO("UITextEdit::setFocus - 文本输入模式已启动");
         } else {
             TINA_WARN("UITextEdit::setFocus - 无法获取InputSystem");
         }
@@ -149,7 +173,6 @@ void UITextEdit::setFocus(bool focus) {
         // 失去焦点：停止文本输入模式，取消订阅
         if (auto* input = Tina::Engine::GetInput()) {
             input->stopTextInput();
-            TINA_INFO("UITextEdit::setFocus - 文本输入模式已停止");
         }
         cleanupEventHandlers();
         clearSelection();
@@ -268,9 +291,8 @@ void UITextEdit::onMouseUp(float x, float y) {
 void UITextEdit::onClick() {
     UINode::onClick();
 
-    TINA_INFO("UITextEdit::onClick - name='{}'", getName());
-    
-    // 点击获得焦点
+    // Pointer down normally focuses the node before click. Keep this request
+    // for programmatic onClick() calls as well.
     setFocus(true);
 }
 
@@ -393,13 +415,9 @@ void UITextEdit::setupEventHandlers() {
         return;
     }
 
-    TINA_INFO("UITextEdit::setupEventHandlers - name='{}'", getName());
-
     // 订阅键盘按键事件
     m_keyPressedToken = eventSystem()->subscribe<Engine::Events::KeyPressedEvent>(
         [this](const Engine::Events::KeyPressedEvent& e) {
-            TINA_INFO("UITextEdit - KeyPressed event received, key={}, focused={}", 
-                      static_cast<int>(e.key), m_focused);
             if (m_focused) {
                 handleKeyPressed(e);
             }
@@ -409,14 +427,12 @@ void UITextEdit::setupEventHandlers() {
     // 订阅文本输入事件
     m_textInputToken = eventSystem()->subscribe<Engine::Events::TextInputEvent>(
         [this](const Engine::Events::TextInputEvent& e) {
-            TINA_INFO("UITextEdit - TextInput event received, focused={}", m_focused);
             if (m_focused) {
                 handleTextInput(e);
             }
         }
     );
     
-    TINA_INFO("UITextEdit::setupEventHandlers - 事件订阅完成");
 }
 
 void UITextEdit::cleanupEventHandlers() {
@@ -540,9 +556,7 @@ void UITextEdit::handleKeyPressed(const Engine::Events::KeyPressedEvent& e) {
             break;
 
         case KeyCode::Tab:
-            // Tab键：不处理（避免插入Tab字符导致乱码）
-            // TODO: 可以用于焦点切换
-            TINA_INFO("UITextEdit: Tab key ignored");
+            // InputSystem 在分发 KeyPressedEvent 前已交给窗口 UIContext 切换焦点。
             break;
 
         case KeyCode::Escape:
