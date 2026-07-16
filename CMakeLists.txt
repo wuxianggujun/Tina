@@ -4,7 +4,7 @@
 #
 # ##############################################################################
 
-cmake_minimum_required(VERSION 3.20...3.30)
+cmake_minimum_required(VERSION 3.25...4.2)
 project(Tina VERSION 0.0.1 LANGUAGES C CXX)
 
 # Keep every MSVC translation unit on UTF-8, including bundled source dependencies.
@@ -55,6 +55,9 @@ option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "$
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_TESTING "Build Tina tests" ON)
 option(TINA_BUILD_SHADERS "Build cooked runtime shaders with the bundled shader compiler" ON)
+option(TINA_BUILD_LEGACY "Build the existing Tina game/runtime during vNext migration" ON)
+option(TINA_BUILD_RENDER_BGFX "Build the private vNext bgfx render backend" OFF)
+option(TINA_BUILD_BENCHMARKS "Build Tina benchmark executables" OFF)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
 option(TINA_BUILD_WAYLAND "Build Wayland" OFF)
 
@@ -98,7 +101,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_library(tina_project_options INTERFACE)
 add_library(Tina::ProjectOptions ALIAS tina_project_options)
-target_compile_features(tina_project_options INTERFACE cxx_std_20)
+target_compile_features(tina_project_options INTERFACE cxx_std_23)
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(tina_project_options INTERFACE
@@ -121,23 +124,32 @@ if (TINA_AUTOUPDATE_SUBMODULE)
     include(UpdateSubmodules)
 endif ()
 
-# 必须重新加载cmake才会生效
-file(GLOB_RECURSE RESOURCE_FILES "${RESOURCE_DIR}/*")
+# Legacy still consumes the source resource tree directly. Null/vNext-only configure must not scan
+# or copy it; Cooked asset staging will be owned by the later Asset vertical slice.
+if(TINA_BUILD_LEGACY)
+    file(GLOB_RECURSE RESOURCE_FILES "${RESOURCE_DIR}/*")
 
-foreach (FILE ${RESOURCE_FILES})
-    if (NOT FILE MATCHES "/shaders/")
-        file(RELATIVE_PATH REL_PATH "${RESOURCE_DIR}" "${FILE}")
-        get_filename_component(REAL_PATH "${REL_PATH}" DIRECTORY)
-        file(MAKE_DIRECTORY "${RESOURCE_DEST_DIR}/${REAL_PATH}")
-        file(COPY "${FILE}" DESTINATION "${RESOURCE_DEST_DIR}/${REAL_PATH}")
-    endif ()
-endforeach ()
+    foreach (FILE ${RESOURCE_FILES})
+        if (NOT FILE MATCHES "/shaders/")
+            file(RELATIVE_PATH REL_PATH "${RESOURCE_DIR}" "${FILE}")
+            get_filename_component(REAL_PATH "${REL_PATH}" DIRECTORY)
+            file(MAKE_DIRECTORY "${RESOURCE_DEST_DIR}/${REAL_PATH}")
+            file(COPY "${FILE}" DESTINATION "${RESOURCE_DEST_DIR}/${REAL_PATH}")
+        endif ()
+    endforeach ()
+endif()
 
 include(Dependencies)
 
-add_subdirectory(thirdparty)
+if(TINA_BUILD_LEGACY OR TINA_BUILD_RENDER_BGFX OR TINA_BUILD_SHADERS)
+    add_subdirectory(thirdparty)
+endif()
+
 add_subdirectory(src/core)
-add_subdirectory(src)
+
+if(TINA_BUILD_LEGACY)
+    add_subdirectory(src)
+endif()
 
 # Examples
 #[[if (TINA_BUILD_EXAMPLES)

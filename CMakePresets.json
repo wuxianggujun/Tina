@@ -40,6 +40,18 @@
       }
     },
     {
+      "name": "windows-msvc-vnext",
+      "displayName": "Windows x64 vNext Null (MSVC 2026 + C++23)",
+      "inherits": "windows-msvc",
+      "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext",
+      "cacheVariables": {
+        "TINA_BUILD_LEGACY": "OFF",
+        "TINA_BUILD_RENDER_BGFX": "OFF",
+        "TINA_BUILD_SHADERS": "OFF",
+        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON"
+      }
+    },
+    {
       "name": "linux-ninja",
       "displayName": "Linux (Ninja + vcpkg)",
       "inherits": "base",
@@ -61,6 +73,20 @@
         "TINA_BUILD_WAYLAND": "ON",
         "VCPKG_MANIFEST_FEATURES": "wayland"
       }
+    },
+    {
+      "name": "linux-gcc13-vnext",
+      "displayName": "Linux vNext Null (GCC 13 + C++23)",
+      "inherits": "linux-ninja",
+      "binaryDir": "${sourceDir}/out/build/linux-gcc13-vnext",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc-13",
+        "CMAKE_CXX_COMPILER": "g++-13",
+        "TINA_BUILD_LEGACY": "OFF",
+        "TINA_BUILD_RENDER_BGFX": "OFF",
+        "TINA_BUILD_SHADERS": "OFF",
+        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -77,6 +103,12 @@
       "jobs": 2
     },
     {
+      "name": "windows-vnext-debug",
+      "configurePreset": "windows-msvc-vnext",
+      "configuration": "Debug",
+      "jobs": 2
+    },
+    {
       "name": "linux-debug",
       "configurePreset": "linux-ninja",
       "jobs": 2
@@ -84,6 +116,11 @@
     {
       "name": "linux-wayland-debug",
       "configurePreset": "linux-wayland",
+      "jobs": 2
+    },
+    {
+      "name": "linux-gcc13-vnext-debug",
+      "configurePreset": "linux-gcc13-vnext",
       "jobs": 2
     }
   ]

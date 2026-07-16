@@ -5,11 +5,12 @@
 
 | 风险 | 等级 | 触发信号 | 缓解 | 关闭条件 |
 | --- | --- | --- | --- | --- |
-| Legacy 与 vNext 长期双架构 | P0 | 新功能同时改两套 Runtime、桥接层增长 | 垂直切片、Legacy 只修 blocker、零引用清单、`TINA_BUILD_LEGACY` 默认 OFF | vNext-only 全门禁后删除 Legacy |
+| Legacy 与 vNext 长期双架构 | P0 | 新功能同时改两套 Runtime、桥接层增长 | 垂直切片、Legacy 只修 blocker、零引用清单；迁移期默认 ON，vNext preset 固定 OFF，覆盖门禁后再翻默认值 | vNext-only 全门禁后删除 Legacy |
 | Factory/模块依赖形成环 | P0 | Runtime include 具体 GLFW/bgfx/miniaudio 或 Scene/Render 互相 include | backend factories、依赖图自动检查、public header compile test | 所有目标只按冻结图链接 |
 | `IGameApplication`/`IGameState` 再次形成双帧入口 | P0 | 程序入口出现 fixed/update/render，World/UI 可放两个位置 | `IGameApplication` lifecycle-only、`IGameState` 唯一帧接口、API consumer test | 公共入口无 IFrameClient/双回调且状态顺序测试通过 |
 | State transition/exit 出现双重清理、Worker UAF 或首帧延迟 | P0 | onExit 前 owner 已失效、barrier 前释放 Worker 所读成员、同帧2次布局、新 root 到N+2才交互 | Frame Update 后唯一 transition commit；关闭 ingress→cancel→barrier/join→onExit→RAII | 失败注入、单布局、下一帧输入和残留归零测试通过 |
 | bgfx 通过 header/target/native escape 泄漏 | P0 | Game/UI/Scene 出现 bgfx token、RenderDevice/ViewId 或 backend public link | API 三层、desktop bootstrap、forbidden scan、依赖闭包、外部 SDK consumer | vNext public/install tree与game target零 backend 泄漏 |
+| Legacy D3D11 Debug 关闭警告掩盖真实泄漏 | P1 | bgfx `ID3D11InfoQueue` 关闭报告 `RefCount is 4`，而 Tina handle 未报告 `BGFX LEAK` | 区分上游 debug-interface 引用与 Tina resource ledger；vNext Null/bgfx backend 分别做 typed handle、packet、GPU completion 归零 | Debug/Release 后端门禁无 Tina 资源残留，并对上游警告形成已验证处置结论 |
 | UI dirty/批处理破坏性能或遮挡 | P0 | 单 leaf 触发全树布局、每帧分配、为合批跨透明顺序重排 | 细粒度 dirty、PaintCache、committed paint-hit snapshot、相邻合并与 checksum | 5k节点/100k列表门禁和截图/paint checksum通过 |
 | M7-M9 临时资源路径污染最终边界 | P1 | UI/Sprite/Cube 直接读源文件或创建 backend resource | 版本化 Cooked fixture/procedural geometry、M10替换清单、禁止路径加载 | 正式 Asset样例替换 fixture且接口不变 |
 | FrameArena 容量误判/UAF | P0 | failed count、跨 reset 指针、barrier timeout | 无 heap fallback、owner/barrier、peak×安全系数、ASan | 各 workload 10k 帧0失败且生命周期测试通过 |

@@ -35,10 +35,14 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 ## 构建
 
-目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。当前 CMake target 尚保留 `cxx_std_20`，需要在独立实现任务中统一恢复 C++23 并完成跨平台验证。Windows 当前验证环境为 Visual Studio 2026 18.4.3、MSVC 19.50 和 CMake 4.2.3，Linux 使用 GCC/Clang + Ninja。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
+目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、MSVC 19.50 和 CMake 4.2.3 下通过 vNext 最小图、Legacy Debug、直接 GoogleTest 以及 UI/3D 300 帧冒烟；Linux 正式门禁要求 GCC 13+ 或 Clang 17+，当前 WSL 的 GCC 11/CMake 3.22 不能算作 vNext C++23 验证。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
 
 ```powershell
 cmake --version
+cmake --preset windows-msvc-vnext
+cmake --build --preset windows-vnext-debug --target tina_tests
+out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe
+
 cmake --preset windows-msvc
 cmake --build --preset windows-debug --target Tina tina_tests
 ```

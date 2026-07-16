@@ -22,11 +22,12 @@ Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Ga
 
 ## 旧架构删除状态
 
-结论：旧文档已经替换，但旧源码架构没有完全删除。当前也不存在 `TINA_BUILD_LEGACY` 开关或一套可独立运行的新 Runtime；现有旧架构就是 Tina 当前主实现，不能直接整目录删除。
+结论：旧文档已经替换，但旧源码架构没有完全删除。`TINA_BUILD_LEGACY` 与 vNext-only preset 已落地，能够把旧依赖和产品 target 排除出最小构建图；新的 `EngineHost` Runtime 仍未实现，因此现有旧架构依然是当前可运行主实现，不能直接整目录删除。
 
 | 范围 | 状态 | 证据或影响 |
 | --- | --- | --- |
 | 旧阶段文档 | 已删除/替换 | `docs` 只保留当前架构、契约、验证和 Roadmap |
+| Legacy 构建隔离 | 首批完成 | vNext preset 同时关闭 Legacy、vNext bgfx backend 与 shader：不发现 Legacy package、不进入 bgfx/EASTL、不复制旧资源，也不建立 `Tina` target |
 | 单体游戏 target | 仍在使用 | 主程序仍由一个 `Tina` executable 汇集 Engine、Game、Renderer、UI 和 ECS |
 | Core compatibility | 仍在使用 | 主程序和测试仍链接 `Tina::CoreLegacy` |
 | `Application` 组合根 | 仍在使用 | 继续持有 Window、Input、Event、Scene、Resource、Audio 和渲染服务 |

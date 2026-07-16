@@ -39,7 +39,7 @@
 - Checkbox、Slider、可注入手柄轮询测试、可访问语义和截图回归移到 M11，不继续用控件
   数量挤占 Runtime/Render/Asset 生命周期工作。
 
-## M5 vNext 设计审计、候选冻结与 Carbon Core（当前）
+## M5 vNext 设计审计、候选冻结与 Carbon Core（已完成）
 
 - 官方 Carbon 对应模块已下载到被忽略的 `temp/carbon-engine`，并记录 URL、精确提交和
   研究用途；参考源码不进入 Tina 依赖或提交；
@@ -63,9 +63,11 @@
   TaskGroup、背压、barrier 和无强杀 shutdown 候选状态机；
 - 补齐 Platform/Input、Audio、公共 API、依赖治理、风险登记与 ADR；性能基准冻结 schema、
   workload version/checksum、独立进程统计、baseline fingerprint 和 Tracy/Metrics A/B；
-- 设计冻结前只更新文档和取证，不修改 Runtime 源码；冻结后创建独立 worktree 开始迁移。
+- 设计冻结前只更新文档和取证，不修改 Runtime 源码；冻结后在独立 `codex/` 迁移分支按可回滚批次实施。
 
 ## M6 Null Runtime 与公共入口垂直切片
+
+实施状态（2026-07-17）：第一批构建地基已完成。Tina 自有 target 已统一 C++23；新增 `TINA_BUILD_LEGACY`、`TINA_BUILD_RENDER_BGFX`、`TINA_BUILD_BENCHMARKS`；vcpkg Legacy feature、`windows-msvc-vnext` 与 `linux-gcc13-vnext` 已建立。Windows vNext 最小图 10/10、Legacy Debug 50/50、UI/3D 各300帧通过。Linux 正式 C++23 工具链和下列 Runtime/Core 能力仍按本里程碑继续实施，不能因构建地基通过而标记 M6 完成。
 
 - 建立 `EngineHost::Create(config, factories)`、EngineConfig、阶段 Context、lifecycle-only
   `IGameApplication` 和唯一帧入口 `IGameState`；删除候选公共 `IFrameClient`；

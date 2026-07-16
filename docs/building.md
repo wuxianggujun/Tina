@@ -5,7 +5,7 @@
 | 当前/Legacy 门禁 | 要求 | 当前验证环境 |
 | --- | --- | --- |
 | Windows | Visual Studio 2026 x64、CMake、`VCPKG_ROOT` | VS 18.4.3、MSVC 19.50.35717、CMake 4.2.3 |
-| Linux | GCC 或 Clang、Ninja、CMake、`VCPKG_ROOT` | Ubuntu 22.04 / GCC 11.4 当前 C++20 门禁 |
+| Linux | GCC 或 Clang、Ninja、CMake、`VCPKG_ROOT` | Ubuntu 22.04 / GCC 11.4 仅为迁移前 Legacy 历史门禁 |
 
 | vNext 正式目标 | 最低目标 |
 | --- | --- |
@@ -13,9 +13,9 @@
 | Linux GCC | GCC 13+，统一 C++23，Ninja |
 | Linux Clang | Clang 17+，统一 C++23；独立 ASan/UBSan preset |
 
-Tina 的设计目标是 C++23，但当前自有 target 仍请求 `cxx_std_20`。语言标准需要在独立实现任务中统一恢复并通过 MSVC/GCC/Clang 门禁，本文档不把尚未落地的迁移写成已完成。使用 Preset 时 CMake 至少需要 3.25。先确认当前终端没有命中旧版 CMake：
+Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 继续强制 `/utf-8` 与 `/Zc:__cplusplus`。MSVC 19.50 是当前完整验证基线，CMake 将 `cxx_std_23` 映射为该工具链的 `stdcpplatest`。使用 Preset 时 CMake 至少需要 3.25。
 
-MSVC 19.50 是当前完整验证基线。Ubuntu 22.04 自带的 GCC 11/Clang 14 只能作为 Tina 当前所用 C++23 子集的兼容门禁；计划使用更多 C++23 标准库能力时，Linux 正式工具链应提升到 GCC 13+ 或 Clang 17+。
+Ubuntu 22.04 自带的 GCC 11/Clang 14 与 CMake 3.22 不构成 vNext 正式 C++23 门禁。`linux-gcc13-vnext` 已固定 GCC 13，但只有在实际安装 GCC 13+、CMake 3.25+ 并完成构建运行后才能标记 Linux 通过；Clang 仍要求 17+ 与独立 ASan/UBSan preset。
 
 ```powershell
 cmake --version
@@ -33,6 +33,18 @@ cmake --preset windows-msvc
 cmake --build --preset windows-debug --target Tina tina_tests
 out\build\windows-msvc\bin\Debug\tina_tests.exe
 ```
+
+## Windows vNext 最小构建
+
+该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，只构建零 Legacy 依赖的 Core 与直接 GoogleTest 门禁：
+
+```powershell
+cmake --preset windows-msvc-vnext
+cmake --build --preset windows-vnext-debug --target tina_tests
+out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
+```
+
+当前最小图只解析 GoogleTest 1.17.0，不进入 GLFW、bgfx、EASTL、EnTT、FreeType、miniaudio、Box2D 或 xxHash。后续 M6 target 在同一 preset 中逐批加入。
 
 ## Windows Release
 
@@ -58,29 +70,25 @@ cmake --build --preset linux-debug --target Tina tina_tests
 ./out/build/linux-ninja/bin/tina_tests --gtest_color=no
 ```
 
-只做无 GPU 的编译、链接和单元测试门禁时，应使用独立 compile-gate preset/build 目录关闭
-shader，避免在 `linux-ninja` 同一 cache 留下 `OFF` 后误拿去做运行包。目标命令为：
+只做 vNext 无 GPU 的编译、链接和单元测试门禁时，使用独立 `linux-gcc13-vnext` 目录，避免污染 Legacy 可运行构建：
 
 ```bash
-cmake --preset linux-compile-gate
-cmake --build --preset linux-compile-gate-debug --target Tina tina_tests
-./out/build/linux-compile-gate/bin/tina_tests --gtest_color=no
+cmake --preset linux-gcc13-vnext
+cmake --build --preset linux-gcc13-vnext-debug --target tina_tests
+./out/build/linux-gcc13-vnext/bin/tina_tests --gtest_color=no
 ```
 
-该 preset 尚未落地；在实现前临时使用 `-DTINA_BUILD_SHADERS=OFF` 时必须指定不同
-`-B out/build/linux-compile-gate`。输出不包含 cooked shader，不能用作运行包。当前仓库还
-没有可直接使用的 Clang ASan/UBSan preset，因此 Sanitizer 在补齐配置和验证前保持“待完成”。
+该输出不包含 Legacy 产品、窗口、渲染后端或 cooked shader，不能用作运行包。当前仓库还没有可直接使用的 Clang ASan/UBSan preset，因此 Sanitizer 在补齐配置和验证前保持“待完成”。
 
 ## vNext 目标 Preset
 
-下列名称是设计契约，尚未出现在当前 `CMakePresets.json`：
+`windows-msvc-vnext` 与 `linux-gcc13-vnext` 已落地。下列性能与 Sanitizer 名称仍是后续设计契约：
 
 | Preset | 优化/插桩 | 用途 |
 | --- | --- | --- |
 | `windows-bench` / `linux-bench` | Release、Trace none、VSync off、固定 worker | 正式 `tina_bench` |
 | `windows-profile` / `linux-profile` | 与 Bench 相同优化/CRT/assert/LTO、保留符号、Tracy on | 定位同 workload 回退 |
 | `linux-clang-sanitize` | Debug/RelWithDebInfo + ASan/UBSan、Trace none | 生命周期/UB 门禁 |
-| `linux-compile-gate` | 独立目录、Shaders off | 无 GPU 编译与测试 |
 
 Bench/Profile 不能只用两个默认 CMake build type 猜测“优化差不多”；最终 flags 和依赖
 fingerprint 写入 benchmark JSON。Tracy 只由 Profile preset 的 optional vcpkg feature解析，
@@ -110,12 +118,14 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 | --- | --- | --- |
 | `TINA_BUILD_TESTING` | `ON` | 构建 `tina_tests` |
 | `TINA_BUILD_SHADERS` | `ON` | 构建运行时 shader；关闭后只适合编译/链接门禁 |
+| `TINA_BUILD_LEGACY` | `ON` | 迁移期构建现有游戏与旧模块；vNext preset 固定关闭 |
+| `TINA_BUILD_RENDER_BGFX` | `OFF` | 后续启用私有 vNext bgfx backend，不改变 Game SDK 边界 |
+| `TINA_BUILD_BENCHMARKS` | `OFF` | 后续构建独立 `tina_bench` |
 | `TINA_BUILD_WAYLAND` | `OFF` | Linux Wayland 构建，需要对应 vcpkg feature |
 | `TINA_AUTOUPDATE_SUBMODULE` | `OFF` | 是否自动更新源码依赖，日常构建应保持关闭 |
 | `TINA_BUILD_DOCS` | `ON` | 当前为预留选项，尚未注册文档生成 target |
 
 测试直接运行 GoogleTest 生成的 `tina_tests`，项目不使用 CTest 调度。
 
-vNext 还将增加 `TINA_BUILD_LEGACY`、`TINA_BUILD_BENCHMARKS`、`TINA_PROFILE_BACKEND` 和
-Tracy lock/memory 子选项；在真正加入 CMake 前只记录为目标，不能把表述当成当前可用命令。
+vNext 后续还将增加 `TINA_PROFILE_BACKEND` 和 Tracy lock/memory 子选项；在真正加入 CMake 前只记录为目标，不能把表述当成当前可用命令。
 完整依赖可见性、版本和许可证门禁见 [第三方依赖与版本治理](dependencies.md)。

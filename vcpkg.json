@@ -2,22 +2,30 @@
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "tina",
   "version-string": "0.0.1",
+  "default-features": [
+    "legacy"
+  ],
   "dependencies": [
-    "box2d",
-    "entt",
-    {
-      "name": "freetype",
-      "default-features": false
-    },
-    "glfw3",
-    "gtest",
-    "glm",
-    "miniaudio",
-    "spdlog",
-    "utfcpp",
-    "xxhash"
+    "gtest"
   ],
   "features": {
+    "legacy": {
+      "description": "Dependencies used only by the existing Tina runtime during vNext migration.",
+      "dependencies": [
+        "box2d",
+        "entt",
+        {
+          "name": "freetype",
+          "default-features": false
+        },
+        "glfw3",
+        "glm",
+        "miniaudio",
+        "spdlog",
+        "utfcpp",
+        "xxhash"
+      ]
+    },
     "wayland": {
       "description": "Build the vcpkg GLFW dependency with its Wayland backend.",
       "supports": "linux",

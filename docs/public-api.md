@@ -117,16 +117,16 @@ public:
     [[nodiscard]] virtual GameStatePolicy initialPolicy() const noexcept = 0;
 
     virtual Core::Status fixedUpdate(FixedUpdateContext&) {
-        return Core::Status::Ok();
+        return Core::success();
     }
     virtual Core::Status updateFrame(FrameUpdateContext&) {
-        return Core::Status::Ok();
+        return Core::success();
     }
     virtual Core::Status extractRenderScene(RenderSceneExtractionContext&) const {
-        return Core::Status::Ok();
+        return Core::success();
     }
     virtual Core::Status updateUI(UIUpdateContext&) {
-        return Core::Status::Ok();
+        return Core::success();
     }
 };
 ```

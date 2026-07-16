@@ -137,7 +137,7 @@ set(SRC_FILES
 add_subdirectory(platform/audio)
 
 add_executable(${PROJECT_NAME} ${SRC_FILES})
-target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_20)
+target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23)
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_EXTENSIONS OFF)
 
 # Include directories for project source files

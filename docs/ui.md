@@ -100,20 +100,20 @@ public:
         TRY(ui.setAction(apply_, UIActionKind::Activate, [this] {
             intent_ = SettingsIntent::Apply;
         }));
-        return Core::Status::Ok();
+        return Core::success();
     }
 
     Core::Status updateUI(Tina::UIUpdateContext& context) override {
         auto ui = TRY(context.uiTree(root_));
         TRY(ui.setSliderValue(volume_, model_.masterVolume));
-        return Core::Status::Ok();
+        return Core::success();
     }
 
     Core::Status updateFrame(Tina::FrameUpdateContext& context) override {
         if (std::exchange(intent_, SettingsIntent::None) == SettingsIntent::Apply) {
             TRY(context.gameStateCommands().requestPopSelf());
         }
-        return Core::Status::Ok();
+        return Core::success();
     }
 
     [[nodiscard]] Tina::GameStatePolicy initialPolicy() const noexcept override {

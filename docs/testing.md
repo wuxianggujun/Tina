@@ -11,7 +11,16 @@
 
 ## 已验证基线
 
-以下结果对应 2026-07-16 的 `dev` 验证基线（含 Button action 生命周期修复）。测试数量只在本文件维护；后续新增但尚未完成全平台验证的测试不计入已验证基线。
+当前迁移结果对应 2026-07-17 的 `codex/tina-vnext-runtime`：
+
+| 平台 | 构建图 | 配置 | GoogleTest | 状态 |
+| --- | --- | --- | --- | --- |
+| Windows 11 / MSVC 19.50 | vNext 最小图，Legacy/bgfx/EASTL 关闭 | Debug C++23 | 10/10 | 通过 |
+| Windows 11 / MSVC 19.50 | 完整 Legacy | Debug C++23 | 50/50 | 通过 |
+
+同一 C++23 Debug 构建的 `--smoke-ui` 与 `--smoke-3d` 均连续300帧、返回0且无残留进程；3D 场景明确释放 vertex/index buffer。bgfx D3D11 Debug backend 在关闭 `ID3D11InfoQueue` 时仍报告上游 `RefCount is 4 (expected 0)` 警告，它不是 Tina handle 的 `BGFX LEAK` 报告，但必须在私有 vNext backend 的资源计数门禁中继续追踪，不能用“进程正常退出”替代零泄漏证据。
+
+以下是 2026-07-16 的迁移前完整平台历史基线（含 Button action 生命周期修复）：
 
 | 平台 | 工具链 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
@@ -131,18 +140,17 @@ workload 启用。Tracy overhead 与常驻 Metrics off/on overhead 分开记录�
 
 Windows Debug 直接运行 `out/build/windows-msvc/bin/Debug/tina_tests.exe`，Release 使用对应的 `bin/Release/tina_tests.exe`；`Tina.exe`、shaderc 和 app-local DLL 同样按配置隔离，禁止使用共享 `bin/Tina.exe` 判断配置。Linux 单配置构建直接运行 `out/build/<preset>/bin/tina_tests`。
 
-只验证 Runtime 和测试源码的 Linux 编译/链接时，目标使用独立 compile-gate preset，避免
-污染可运行 `linux-ninja` cache：
+只验证 vNext Core/Runtime 和测试源码的 Linux 编译/链接时，使用独立 GCC 13 preset，避免
+污染可运行的 Legacy `linux-ninja` cache：
 
 ```bash
-cmake --preset linux-compile-gate
-cmake --build --preset linux-compile-gate-debug --target Tina tina_tests
-./out/build/linux-compile-gate/bin/tina_tests --gtest_color=no
+cmake --preset linux-gcc13-vnext
+cmake --build --preset linux-gcc13-vnext-debug --target tina_tests
+./out/build/linux-gcc13-vnext/bin/tina_tests --gtest_color=no
 ```
 
-该 preset 尚未落地；临时手工关闭 shader 时也必须指定独立 `-B` 目录。
-`TINA_BUILD_SHADERS=OFF` 输出不含 cooked shader，不能作为可运行包或发布包。Windows 运行
-验收与正式 Linux 包必须保持默认 `ON`。
+该 preset 已落地但当前 WSL 尚缺 GCC 13 与 CMake 3.25+，因此仍是未验证门禁。
+`TINA_BUILD_SHADERS=OFF` 输出不含 Legacy 产品和 cooked shader，不能作为可运行包或发布包。
 
 ## 当前 Legacy 运行冒烟
 
