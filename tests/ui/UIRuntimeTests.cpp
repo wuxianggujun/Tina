@@ -4,7 +4,9 @@
 #include "engine/UIEvents.hpp"
 #include "ui/UILayoutManager.hpp"
 #include "ui/UINode.hpp"
+#include "ui/UIScrollView.hpp"
 #include "ui/UIUtils.hpp"
+#include "ui/UIVirtualList.hpp"
 
 namespace Tina::UI::Tests {
 namespace {
@@ -346,6 +348,82 @@ TEST(UIRuntimeTest, LogicalPointerCoordinatesHitFramebufferSpaceNodesAtHighDpi)
     events.updateUIInputLogical(50.0f, 50.0f, false);
 
     EXPECT_EQ(childNode->clickCount, 1);
+}
+
+TEST(UIRuntimeTest, ClippedChildrenCannotReceivePointerOutsideViewport)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto root = Memory::MakeUnique<UINode>("Root");
+    root->setSize(300.0f, 300.0f);
+    root->setInteractable(false);
+
+    auto viewport = Memory::MakeUnique<UINode>("Viewport");
+    viewport->setSize(100.0f, 100.0f);
+    viewport->setInteractable(false);
+    viewport->setClipChildren(true);
+    UINode* viewportNode = root->addChild(std::move(viewport));
+
+    auto child = Memory::MakeUnique<TrackingNode>("OutsideChild");
+    child->setPosition(0.0f, 150.0f);
+    child->setSize(50.0f, 50.0f);
+    TrackingNode* childNode = viewportNode->addChild(std::move(child));
+    events.setUIRoots({root.get()});
+
+    events.updateUIInput(25.0f, 175.0f, true);
+    events.updateUIInput(25.0f, 175.0f, false);
+    EXPECT_EQ(childNode->clickCount, 0);
+
+    viewportNode->setClipChildren(false);
+    events.updateUIInput(25.0f, 175.0f, true);
+    events.updateUIInput(25.0f, 175.0f, false);
+    EXPECT_EQ(childNode->clickCount, 1);
+}
+
+TEST(UIRuntimeTest, ScrollViewClampsContentAndReceivesWheelFromDescendant)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto scroll = Memory::MakeUnique<UIScrollView>("Scroll");
+    scroll->setSize(100.0f, 100.0f);
+    scroll->setContentSize(100.0f, 300.0f);
+    scroll->setSmoothScroll(false);
+    UIScrollView* scrollNode = scroll.get();
+
+    auto button = Memory::MakeUnique<TrackingNode>("ContentButton");
+    button->setSize(50.0f, 50.0f);
+    scrollNode->content()->addChild(std::move(button));
+    events.setUIRoots({scrollNode});
+
+    events.updateUIInput(25.0f, 25.0f, false, -1.0f);
+    scrollNode->update(0.0f);
+    EXPECT_FLOAT_EQ(scrollNode->scrollOffset().y, 48.0f);
+
+    scrollNode->scrollTo(0.0f, 1000.0f);
+    EXPECT_FLOAT_EQ(scrollNode->scrollOffset().y, 200.0f);
+    EXPECT_FLOAT_EQ(scrollNode->content()->getPosition().y, -200.0f);
+
+    scrollNode->setContentSize(100.0f, 50.0f);
+    EXPECT_FLOAT_EQ(scrollNode->scrollOffset().y, 0.0f);
+    EXPECT_FLOAT_EQ(scrollNode->targetScrollOffset().y, 0.0f);
+}
+
+TEST(UIRuntimeTest, VirtualListRangeStaysBoundedForLargeDataSets)
+{
+    const UIVisibleRange range = calculateVisibleRows(
+        100000, 32.0f, 96.0f, 3200.0f, 1);
+
+    EXPECT_EQ(range.first, 99U);
+    EXPECT_EQ(range.end, 104U);
+    EXPECT_EQ(range.count(), 5U);
+    EXPECT_LT(range.count(), 100000U);
+
+    const UIVisibleRange tail = calculateVisibleRows(
+        100000, 32.0f, 96.0f, 99999999.0f, 1);
+    EXPECT_EQ(tail.end, 100000U);
+    EXPECT_LE(tail.count(), 4U);
 }
 
 } // namespace

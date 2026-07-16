@@ -12,6 +12,7 @@
 namespace Tina::Engine::Events {
     struct KeyPressedEvent;
     struct TextInputEvent;
+    struct TextCompositionEvent;
 }
 
 namespace Tina::UI {
@@ -70,7 +71,7 @@ public:
     bool isMultiline() const { return m_multiline; }
 
     // === 最大长度限制（按UTF-8字符数，类似Android的InputFilter.LengthFilter）===
-    void setMaxLength(size_t length) { m_maxLength = length; }  // length = 字符数，0表示无限制
+    void setMaxLength(size_t length);  // length = 字符数，0表示无限制
     size_t getMaxLength() const { return m_maxLength; }
 
     // === 字体大小 ===
@@ -80,6 +81,8 @@ public:
     // === 焦点状态 ===
     bool isFocused() const { return m_focused; }
     void setFocus(bool focus);
+    bool isComposing() const { return m_compositionActive; }
+    std::string getCompositionText() const;
 
     // === 光标操作 ===
     void setCursorPos(size_t pos);
@@ -152,6 +155,12 @@ private:
     // 事件订阅
     Engine::SubscriptionToken m_keyPressedToken;
     Engine::SubscriptionToken m_textInputToken;
+    Engine::SubscriptionToken m_textCompositionToken;
+
+    // IME preedit 使用独立缓冲区，只有 TextInputEvent 才会修改正文。
+    Container::Vector<char32_t> m_compositionChars;
+    size_t m_compositionCursor = 0;
+    bool m_compositionActive = false;
 
     // UIRenderer缓存（用于文本测量）
     UIRenderer* m_renderer = nullptr;
@@ -165,10 +174,14 @@ private:
     void applyFocusState(bool focused);
     void handleKeyPressed(const Engine::Events::KeyPressedEvent& e);
     void handleTextInput(const Engine::Events::TextInputEvent& e);
+    void handleTextComposition(const Engine::Events::TextCompositionEvent& e);
+    void clearComposition();
     void insertText(const std::string& text);
     void deleteChar(bool forward);
     size_t getPosFromX(float x);  // 根据X坐标获取光标位置
     float getXFromPos(size_t pos); // 根据光标位置获取X坐标
+    float getCompositionX(size_t compositionPos);
+    std::string buildDisplayText() const;
     void ensureCursorVisible();    // 确保光标可见（自动滚动）
     Container::Optional<int> resolvedFontPx() const;
     float resolvedPadding() const;

@@ -16,7 +16,7 @@ namespace Tina::Game {
 
 class WorldSelectScene : public Engine::Scene {
 public:
-    WorldSelectScene();
+    explicit WorldSelectScene(bool openCreateDialogOnEnter = false);
     ~WorldSelectScene() override;
 
     // 生命周期
@@ -69,6 +69,7 @@ private:
 
     // 布局比例
     float m_uiScale = 1.0f;
+    bool m_openCreateDialogOnEnter = false;
 };
 
 } // namespace Tina::Game

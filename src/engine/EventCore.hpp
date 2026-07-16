@@ -51,6 +51,7 @@ enum class EventTypeId : uint32_t {
     KeyPressed,
     KeyReleased,
     TextInput,
+    TextComposition,
 
     MouseMoved,
     MouseButtonPressed,
@@ -190,6 +191,7 @@ inline const char* eventTypeIdToString(EventTypeId id) {
         case EventTypeId::KeyPressed: return "KeyPressed";
         case EventTypeId::KeyReleased: return "KeyReleased";
         case EventTypeId::TextInput: return "TextInput";
+        case EventTypeId::TextComposition: return "TextComposition";
         case EventTypeId::MouseMoved: return "MouseMoved";
         case EventTypeId::MouseButtonPressed: return "MouseButtonPressed";
         case EventTypeId::MouseButtonReleased: return "MouseButtonReleased";

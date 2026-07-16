@@ -10,6 +10,7 @@ add_executable(tina_tests
     core/TypesWindowsAfterTests.cpp
     core/TypesWindowsBeforeTests.cpp
     engine/EventSystemTests.cpp
+    engine/Camera3DTests.cpp
     engine/ResourceTests.cpp
     ui/UIRuntimeTests.cpp
     ${PROJECT_SOURCE_DIR}/src/engine/EventSystem.cpp
@@ -17,6 +18,7 @@ add_executable(tina_tests
     ${PROJECT_SOURCE_DIR}/src/ui/UINode.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/UILayoutManager.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/UIStyle.cpp
+    ${PROJECT_SOURCE_DIR}/src/ui/UIScrollView.cpp
 )
 
 set_source_files_properties(core/AssertReleaseCompileTests.cpp PROPERTIES COMPILE_DEFINITIONS NDEBUG)
@@ -27,19 +29,6 @@ target_link_libraries(tina_tests PRIVATE
     Tina::CoreLegacy
     GTest::gtest_main
     spdlog::spdlog
+    bx
 )
 set_target_properties(tina_tests PROPERTIES CXX_EXTENSIONS OFF)
-
-# Visual Studio is a multi-config generator. Keeping Debug and Release test
-# executables in the same directory lets vcpkg's app-local deployment leave a
-# same-timestamp GTest DLL from the other configuration in place, which mixes
-# incompatible MSVC iterator-debug/CRT ABIs before main(). Isolate only the
-# test runtime outputs; Tina's resource working directory remains unchanged.
-if(CMAKE_CONFIGURATION_TYPES)
-    foreach(config ${CMAKE_CONFIGURATION_TYPES})
-        string(TOUPPER "${config}" config_upper)
-        set_target_properties(tina_tests PROPERTIES
-            "RUNTIME_OUTPUT_DIRECTORY_${config_upper}" "${BIN_DIR}/${config}"
-        )
-    endforeach()
-endif()

@@ -419,21 +419,24 @@ UI::NodeId EventSystem::findNodeUnderMouse(UI::UINode* node, float x, float y)
         return {};
     }
 
-    const auto& children = node->getChildren();
-    Vector<UI::UINode*> sortedChildren;
-    sortedChildren.reserve(children.size());
-    for (const auto& child : children) {
-        if (child) sortedChildren.push_back(child.get());
-    }
-    Container::Sort(sortedChildren.begin(), sortedChildren.end(),
-        [](UI::UINode* lhs, UI::UINode* rhs) { return lhs->zIndex() > rhs->zIndex(); });
+    const bool insideNode = node->containsPoint(x, y);
+    if (!node->clipsChildren() || insideNode) {
+        const auto& children = node->getChildren();
+        Vector<UI::UINode*> sortedChildren;
+        sortedChildren.reserve(children.size());
+        for (const auto& child : children) {
+            if (child) sortedChildren.push_back(child.get());
+        }
+        Container::Sort(sortedChildren.begin(), sortedChildren.end(),
+            [](UI::UINode* lhs, UI::UINode* rhs) { return lhs->zIndex() > rhs->zIndex(); });
 
-    for (UI::UINode* child : sortedChildren) {
-        UI::NodeId found = findNodeUnderMouse(child, x, y);
-        if (found) return found;
+        for (UI::UINode* child : sortedChildren) {
+            UI::NodeId found = findNodeUnderMouse(child, x, y);
+            if (found) return found;
+        }
     }
 
-    if (node->isInteractable() && node->containsPoint(x, y)) return node->nodeId();
+    if (node->isInteractable() && insideNode) return node->nodeId();
     return {};
 }
 
@@ -545,13 +548,20 @@ void EventSystem::handleMouseInput(float wheelDeltaY, bool pointerMoved)
     }
 
     if (wheelDeltaY != 0.0f) {
-        if (UI::UINode* target = resolveUINode(hitId)) {
+        UI::UINode* wheelTarget = resolveUINode(hitId);
+        while (wheelTarget && !wheelTarget->acceptsMouseWheel()) {
+            wheelTarget = wheelTarget->getParent();
+        }
+        if (wheelTarget) {
+            const UI::NodeId wheelTargetId = wheelTarget->nodeId();
             UIMouseWheelEvent event;
             event.deltaY = wheelDeltaY;
             event.mouseX = mouseX;
             event.mouseY = mouseY;
-            triggerUIEvent(event, target);
-            if (resolveUINode(hitId) == target) target->onMouseWheel(0.0f, wheelDeltaY);
+            triggerUIEvent(event, wheelTarget);
+            if (resolveUINode(wheelTargetId) == wheelTarget) {
+                wheelTarget->onMouseWheel(0.0f, wheelDeltaY);
+            }
         }
     }
 }

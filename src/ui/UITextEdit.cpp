@@ -87,6 +87,7 @@ UITextEdit::~UITextEdit()
 
 // === 设置文本（从UTF-8） ===
 void UITextEdit::setText(const std::string& text) {
+    clearComposition();
     // ✅ 转换为UTF-32字符数组
     m_chars = utf8ToChars(Container::String(text.c_str()));
     
@@ -96,8 +97,9 @@ void UITextEdit::setText(const std::string& text) {
         TINA_WARN("UITextEdit::setText - Text truncated to {} chars", m_maxLength);
     }
     
-    // 更新UTF-8缓存
-    m_utf8Cache = text;
+    // 缓存必须反映应用最大长度后的真实正文，不能保留被截断的输入。
+    const Container::String normalized = charsToUTF8(m_chars);
+    m_utf8Cache = std::string(normalized.c_str());
     m_utf8Dirty = false;
     
     // 调整光标位置
@@ -168,6 +170,27 @@ void UITextEdit::setFocus(bool focus) {
     applyFocusState(focus);
 }
 
+std::string UITextEdit::getCompositionText() const
+{
+    const Container::String text = charsToUTF8(m_compositionChars);
+    return std::string(text.c_str());
+}
+
+void UITextEdit::setMaxLength(size_t length)
+{
+    m_maxLength = length;
+    if (m_maxLength == 0 || m_chars.size() <= m_maxLength) {
+        return;
+    }
+
+    m_chars.resize(m_maxLength);
+    m_cursorPos = std::min(m_cursorPos, m_chars.size());
+    m_utf8Dirty = true;
+    clearSelection();
+    clearComposition();
+    ensureCursorVisible();
+}
+
 void UITextEdit::onFocusGained() {
     applyFocusState(true);
 }
@@ -196,6 +219,7 @@ void UITextEdit::applyFocusState(bool focus) {
             input->stopTextInput();
         }
         cleanupEventHandlers();
+        clearComposition();
         clearSelection();
     }
 }
@@ -289,8 +313,10 @@ void UITextEdit::onMouseDown(float x, float y) {
 
     // 记录拖拽起始位置
     m_dragging = true;
-    // ✅ 考虑滚动偏移
-    size_t pos = getPosFromX(x + m_scrollOffsetX);
+    // EventSystem 传入 framebuffer 全局坐标；这里只转换一次为控件局部坐标。
+    const auto worldPos = getWorldPosition();
+    const float localX = x - worldPos.x;
+    size_t pos = getPosFromX(localX + m_scrollOffsetX);
     m_cursorPos = pos;
     m_selectionStart = static_cast<int>(pos);
     m_selectionEnd = static_cast<int>(pos);
@@ -395,13 +421,32 @@ void UITextEdit::onRender(uint16_t viewId, UIRenderer& renderer) {
         std::string placeholderStr(m_placeholder.c_str());
         renderer.drawText(viewId, worldPos.x + padding, worldPos.y + padding, placeholderStr, opts);
     } else {
-        // 显示实际文本（✅ 应用滚动偏移）
-        renderer.drawText(viewId, worldPos.x + padding - m_scrollOffsetX, worldPos.y + padding, getText(), opts);
+        // 正文与 IME preedit 一起显示，但 preedit 不写入正文。
+        renderer.drawText(viewId, worldPos.x + padding - m_scrollOffsetX,
+                          worldPos.y + padding, buildDisplayText(), opts);
+    }
+
+    float cursorX = m_compositionActive
+        ? getCompositionX(m_compositionCursor)
+        : getXFromPos(m_cursorPos);
+
+    if (m_compositionActive && !m_compositionChars.empty()) {
+        const float compositionStartX = getCompositionX(0);
+        const float compositionEndX = getCompositionX(m_compositionChars.size());
+        const float underlineHeight = uiContext()
+            ? std::max(1.0f, uiContext()->viewport().dp(1.0f))
+            : 1.0f;
+        renderer.drawRect(
+            viewId,
+            worldPos.x + padding + compositionStartX - m_scrollOffsetX,
+            worldPos.y + size.y - padding - underlineHeight,
+            std::max(underlineHeight, compositionEndX - compositionStartX),
+            underlineHeight,
+            cursorColor);
     }
 
     // 4. 绘制光标（仅在聚焦且闪烁可见时，✅ 应用滚动偏移）
     if (m_focused && static_cast<int>(m_cursorBlinkTime * 2.0f) % 2 == 0) {
-        float cursorX = getXFromPos(m_cursorPos);
         float cursorWidth = 2.0f;
 
         renderer.drawRect(viewId,
@@ -410,6 +455,16 @@ void UITextEdit::onRender(uint16_t viewId, UIRenderer& renderer) {
             cursorWidth,
             size.y - padding * 2,
             cursorColor);
+    }
+
+    if (m_focused) {
+        if (auto* input = Tina::Engine::GetInput()) {
+            input->setTextInputRect(
+                worldPos.x + padding + cursorX - m_scrollOffsetX,
+                worldPos.y + padding,
+                2.0f,
+                std::max(1.0f, size.y - padding * 2.0f));
+        }
     }
     
     // ✅ 移除裁剪矩形
@@ -472,12 +527,21 @@ void UITextEdit::setupEventHandlers() {
             }
         }
     );
+
+    m_textCompositionToken = eventSystem()->subscribe<Engine::Events::TextCompositionEvent>(
+        [this](const Engine::Events::TextCompositionEvent& e) {
+            if (m_focused) {
+                handleTextComposition(e);
+            }
+        }
+    );
     
 }
 
 void UITextEdit::cleanupEventHandlers() {
     m_keyPressedToken.reset();
     m_textInputToken.reset();
+    m_textCompositionToken.reset();
 }
 
 // === 键盘输入处理 ===
@@ -485,6 +549,23 @@ void UITextEdit::handleKeyPressed(const Engine::Events::KeyPressedEvent& e) {
     // 注意：KeyCode 现在来自 Engine 命名空间（定义在 InputSystem.hpp）
     // Engine::Events::KeyCode 只是一个别名
     using KeyCode = Engine::Events::KeyCode;
+
+    if (m_compositionActive && !e.ctrl && !e.alt) {
+        switch (e.key) {
+            case KeyCode::Backspace:
+            case KeyCode::Delete:
+            case KeyCode::Left:
+            case KeyCode::Right:
+            case KeyCode::Home:
+            case KeyCode::End:
+            case KeyCode::Enter:
+            case KeyCode::Escape:
+                // 这些按键属于当前输入法 composition，不能同时修改正文。
+                return;
+            default:
+                break;
+        }
+    }
 
     // 处理特殊按键
     switch (e.key) {
@@ -611,8 +692,49 @@ void UITextEdit::handleKeyPressed(const Engine::Events::KeyPressedEvent& e) {
 // === 文本输入处理 ===
 void UITextEdit::handleTextInput(const Engine::Events::TextInputEvent& e) {
     if (e.textLength > 0) {
+        clearComposition();
         insertText(std::string(e.text, e.textLength));
     }
+}
+
+void UITextEdit::handleTextComposition(const Engine::Events::TextCompositionEvent& e)
+{
+    using Engine::Events::TextCompositionPhase;
+    switch (e.phase) {
+        case TextCompositionPhase::Started:
+            m_compositionActive = true;
+            m_compositionChars.clear();
+            m_compositionCursor = 0;
+            if (hasSelection()) {
+                m_cursorPos = static_cast<size_t>(
+                    std::min(m_selectionStart, m_selectionEnd));
+            }
+            break;
+
+        case TextCompositionPhase::Updated: {
+            m_compositionActive = true;
+            const std::string composition(e.text, e.textLength);
+            m_compositionChars = utf8ToChars(Container::String(composition.c_str()));
+            m_compositionCursor = std::min<size_t>(
+                e.cursorCodepoint, m_compositionChars.size());
+            ensureCursorVisible();
+            break;
+        }
+
+        case TextCompositionPhase::Ended:
+        case TextCompositionPhase::Cancelled:
+            clearComposition();
+            ensureCursorVisible();
+            break;
+    }
+    m_cursorBlinkTime = 0.0f;
+}
+
+void UITextEdit::clearComposition()
+{
+    m_compositionActive = false;
+    m_compositionChars.clear();
+    m_compositionCursor = 0;
 }
 
 // === 插入文本（从UTF-8） ===
@@ -692,10 +814,20 @@ void UITextEdit::ensureCursorVisible() {
     
     const float padding = resolvedPadding();
     float availableWidth = getSize().x - padding * 2;
-    float cursorX = getXFromPos(m_cursorPos);
+    float cursorX = m_compositionActive
+        ? getCompositionX(m_compositionCursor)
+        : getXFromPos(m_cursorPos);
     
     // ✅ 计算整个文本的宽度
     float textWidth = getXFromPos(m_chars.size());
+    if (m_compositionActive) {
+        float measuredWidth = 0.0f;
+        float measuredHeight = 0.0f;
+        if (m_renderer->measureText(
+                buildDisplayText(), measuredWidth, measuredHeight, resolvedFontPx())) {
+            textWidth = measuredWidth;
+        }
+    }
     
     // ✅ 优化：如果文本完全能放下，重置滚动为0（窗口变大时）
     if (textWidth <= availableWidth) {
@@ -797,6 +929,41 @@ float UITextEdit::getXFromPos(size_t pos) {
     // 降级方案
     float charWidth = 8.0f;
     return pos * charWidth;
+}
+
+float UITextEdit::getCompositionX(size_t compositionPos)
+{
+    compositionPos = std::min(compositionPos, m_compositionChars.size());
+    Container::Vector<char32_t> prefix;
+    prefix.reserve(m_cursorPos + compositionPos);
+    prefix.insert(prefix.end(), m_chars.begin(), m_chars.begin() + m_cursorPos);
+    prefix.insert(prefix.end(), m_compositionChars.begin(),
+                  m_compositionChars.begin() + compositionPos);
+
+    if (!m_renderer) {
+        return static_cast<float>(prefix.size()) * 8.0f;
+    }
+
+    const Container::String utf8 = charsToUTF8(prefix);
+    float width = 0.0f;
+    float height = 0.0f;
+    if (m_renderer->measureText(utf8.c_str(), width, height, resolvedFontPx())) {
+        return width;
+    }
+    return static_cast<float>(prefix.size()) * 8.0f;
+}
+
+std::string UITextEdit::buildDisplayText() const
+{
+    if (!m_compositionActive || m_compositionChars.empty()) {
+        return getText();
+    }
+
+    Container::Vector<char32_t> display = m_chars;
+    display.insert(display.begin() + m_cursorPos,
+                   m_compositionChars.begin(), m_compositionChars.end());
+    const Container::String utf8 = charsToUTF8(display);
+    return std::string(utf8.c_str());
 }
 
 } // namespace Tina::UI

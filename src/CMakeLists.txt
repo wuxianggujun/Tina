@@ -55,6 +55,7 @@ set(SRC_FILES
     engine/Camera2D.cpp
     engine/Camera3D.hpp
     engine/Camera3D.cpp
+    engine/PerspectiveProjection.hpp
     game/TileMap.hpp
     game/TileMap.cpp
     game/CoordinateMapper.hpp
@@ -108,6 +109,9 @@ set(SRC_FILES
     ui/UICharacterPanel.cpp
     ui/UIListView.hpp
     ui/UIListView.cpp
+    ui/UIVirtualList.hpp
+    ui/UIScrollView.hpp
+    ui/UIScrollView.cpp
     ui/UITextEdit.hpp
     ui/UITextEdit.cpp
     ui/UIDialog.hpp
@@ -140,10 +144,16 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# 着色器编译
-include(ShaderUtils)
-add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color text sprite particle ui world)
-add_dependencies(${PROJECT_NAME} shaders)
+# Runtime 的正常可运行构建默认离线编译 shader。纯编译/链接门禁可关闭该
+# 阶段，避免为不启动 GPU 的测试目标构建完整 shaderc/Tint 工具链。
+if(TINA_BUILD_SHADERS)
+    include(ShaderUtils)
+    add_shader_compile_dir("${RESOURCE_DIR}/shaders" flat color text sprite particle ui world)
+    add_dependencies(${PROJECT_NAME} shaders)
+else()
+    message(STATUS
+        "TINA_BUILD_SHADERS=OFF: Tina will compile and link, but the output is not a runnable package")
+endif()
 
 # 传入 shader 根目录给运行时
 set(TINA_SHADER_BIN_DIR "${CMAKE_BINARY_DIR}/resources/shaders")
@@ -174,15 +184,14 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     EASTL
 )
 
-# 确保 bin 目录存在
-file(MAKE_DIRECTORY "${BIN_DIR}")
+if(WIN32)
+    # Native IME composition and candidate positioning.
+    target_link_libraries(${PROJECT_NAME} PRIVATE imm32 comctl32)
+endif()
 
-# 拷贝可执行文件到 bin
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${BIN_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${PROJECT_NAME}> "${BIN_DIR}/"
-    COMMENT "Copying executable to bin directory"
-)
+# 确保单配置和多配置输出根目录存在；可执行文件由 CMake 直接输出到
+# $<TARGET_FILE_DIR:Tina>，不再额外复制到共享路径覆盖其他配置。
+file(MAKE_DIRECTORY "${BIN_DIR}")
 
 # 先同步源码 resources（排除 resources/shaders）到构建目录的 resources
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
@@ -192,16 +201,16 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 
 # 再将构建目录的 resources 整体复制到运行目录（保留构建生成的 resources/shaders 编译产物）
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${BIN_DIR}/resources"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/resources" "${BIN_DIR}/resources"
-    COMMENT "Copying resources to bin directory"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/resources"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/resources" "$<TARGET_FILE_DIR:${PROJECT_NAME}>/resources"
+    COMMENT "Copying resources next to the executable"
 )
 
 # Windows 上拷贝运行时 DLL
 if(WIN32)
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}> "${BIN_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}> "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
         COMMAND_EXPAND_LISTS
-        COMMENT "Copying runtime DLLs to bin directory"
+        COMMENT "Copying runtime DLLs next to the executable"
     )
 endif()

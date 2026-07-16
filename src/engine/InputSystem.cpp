@@ -8,10 +8,27 @@
 #include "EngineEvents.hpp"
 #include "../core/Log.hpp"
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#include <CommCtrl.h>
+#include <imm.h>
+#endif
+
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace Tina::Engine {
 namespace {
@@ -58,6 +75,134 @@ std::string encodeUtf8(unsigned int codepoint)
 
     return out;
 }
+
+std::string truncateUtf8(std::string_view text, size_t maxBytes)
+{
+    if (text.size() <= maxBytes) {
+        return std::string(text);
+    }
+
+    size_t length = maxBytes;
+    while (length > 0 &&
+           (static_cast<unsigned char>(text[length]) & 0xC0U) == 0x80U) {
+        --length;
+    }
+    return std::string(text.substr(0, length));
+}
+
+#if defined(_WIN32)
+
+constexpr UINT_PTR NATIVE_IME_SUBCLASS_ID = 0x54494E41U; // 'TINA'
+
+std::wstring readCompositionString(HIMC inputContext, DWORD index)
+{
+    const LONG byteCount = ImmGetCompositionStringW(inputContext, index, nullptr, 0);
+    if (byteCount <= 0) {
+        return {};
+    }
+
+    std::wstring value(static_cast<size_t>(byteCount) / sizeof(wchar_t), L'\0');
+    const LONG copied = ImmGetCompositionStringW(
+        inputContext, index, value.data(), static_cast<DWORD>(byteCount));
+    if (copied <= 0) {
+        return {};
+    }
+    value.resize(static_cast<size_t>(copied) / sizeof(wchar_t));
+    return value;
+}
+
+std::string utf16ToUtf8(std::wstring_view text)
+{
+    if (text.empty()) {
+        return {};
+    }
+
+    const int required = WideCharToMultiByte(
+        CP_UTF8, WC_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()),
+        nullptr, 0, nullptr, nullptr);
+    if (required <= 0) {
+        return {};
+    }
+
+    std::string result(static_cast<size_t>(required), '\0');
+    const int converted = WideCharToMultiByte(
+        CP_UTF8, WC_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()),
+        result.data(), required, nullptr, nullptr);
+    if (converted <= 0) {
+        return {};
+    }
+    result.resize(static_cast<size_t>(converted));
+    return result;
+}
+
+uint32_t utf16OffsetToCodepoint(std::wstring_view text, LONG utf16Offset)
+{
+    const size_t end = std::min(
+        text.size(), utf16Offset > 0 ? static_cast<size_t>(utf16Offset) : size_t{0});
+    uint32_t count = 0;
+    for (size_t index = 0; index < end; ++index, ++count) {
+        const wchar_t current = text[index];
+        if (current >= 0xD800 && current <= 0xDBFF && index + 1 < end) {
+            const wchar_t next = text[index + 1];
+            if (next >= 0xDC00 && next <= 0xDFFF) {
+                ++index;
+            }
+        }
+    }
+    return count;
+}
+
+LRESULT CALLBACK nativeImeSubclassProc(HWND window, UINT message, WPARAM wParam,
+                                       LPARAM lParam, UINT_PTR, DWORD_PTR referenceData)
+{
+    auto* input = reinterpret_cast<InputSystem*>(referenceData);
+    if (!input) {
+        return DefSubclassProc(window, message, wParam, lParam);
+    }
+
+    switch (message) {
+        case WM_IME_STARTCOMPOSITION:
+            if (input->isTextInputActive()) {
+                input->beginTextComposition();
+            }
+            break;
+
+        case WM_IME_COMPOSITION:
+            if (input->isTextInputActive()) {
+                HIMC inputContext = ImmGetContext(window);
+                if (inputContext) {
+                    if ((lParam & GCS_COMPSTR) != 0) {
+                        const std::wstring composition =
+                            readCompositionString(inputContext, GCS_COMPSTR);
+                        const LONG cursor =
+                            ImmGetCompositionStringW(inputContext, GCS_CURSORPOS, nullptr, 0);
+                        input->updateTextComposition(
+                            utf16ToUtf8(composition),
+                            utf16OffsetToCodepoint(composition, cursor));
+                    }
+                    ImmReleaseContext(window, inputContext);
+                }
+
+                // GLFW's Win32 window procedure continues to own committed text
+                // delivery through its character callback. Only clear preedit here.
+                if ((lParam & GCS_RESULTSTR) != 0) {
+                    input->endTextComposition(false);
+                }
+            }
+            break;
+
+        case WM_IME_ENDCOMPOSITION:
+            input->endTextComposition(false);
+            break;
+
+        default:
+            break;
+    }
+
+    return DefSubclassProc(window, message, wParam, lParam);
+}
+
+#endif
 
 } // namespace
 
@@ -288,6 +433,7 @@ void InputSystem::startTextInput()
     m_textInputActive = true;
     m_textInput.clear();
     m_textInputBuffer.clear();
+    updateNativeTextInputRect();
 }
 
 void InputSystem::stopTextInput()
@@ -297,6 +443,95 @@ void InputSystem::stopTextInput()
     }
 
     m_textInputActive = false;
+    const bool wasComposing = m_textCompositionActive;
+    endTextComposition(true);
+    if (wasComposing) {
+        cancelNativeTextComposition();
+    }
+}
+
+void InputSystem::setTextInputRect(float x, float y, float width, float height)
+{
+    width = std::max(1.0f, width);
+    height = std::max(1.0f, height);
+    if (std::abs(m_textInputRectX - x) < 0.5f &&
+        std::abs(m_textInputRectY - y) < 0.5f &&
+        std::abs(m_textInputRectWidth - width) < 0.5f &&
+        std::abs(m_textInputRectHeight - height) < 0.5f) {
+        return;
+    }
+
+    m_textInputRectX = x;
+    m_textInputRectY = y;
+    m_textInputRectWidth = width;
+    m_textInputRectHeight = height;
+    updateNativeTextInputRect();
+}
+
+void InputSystem::beginTextComposition()
+{
+    if (!m_textInputActive || m_textCompositionActive) {
+        return;
+    }
+
+    m_textCompositionActive = true;
+    m_textComposition.clear();
+    m_textCompositionCursor = 0;
+    m_textCompositionSelectionLength = 0;
+    updateNativeTextInputRect();
+
+    if (m_eventSystem) {
+        Events::TextCompositionEvent event(
+            Events::TextCompositionPhase::Started, "", 0, 0);
+        m_eventSystem->trigger(event);
+    }
+}
+
+void InputSystem::updateTextComposition(std::string_view utf8,
+                                        uint32_t cursorCodepoint,
+                                        uint32_t selectionLength)
+{
+    if (!m_textInputActive) {
+        return;
+    }
+    if (!m_textCompositionActive) {
+        beginTextComposition();
+    }
+
+    m_textComposition = truncateUtf8(
+        utf8, Events::TextCompositionEvent::MAX_TEXT_LENGTH - 1);
+    m_textCompositionCursor = std::min<uint32_t>(
+        cursorCodepoint, std::numeric_limits<uint16_t>::max());
+    m_textCompositionSelectionLength = std::min<uint32_t>(
+        selectionLength, std::numeric_limits<uint16_t>::max());
+
+    if (m_eventSystem) {
+        Events::TextCompositionEvent event(
+            Events::TextCompositionPhase::Updated,
+            m_textComposition.c_str(),
+            static_cast<uint16_t>(m_textCompositionCursor),
+            static_cast<uint16_t>(m_textCompositionSelectionLength));
+        m_eventSystem->trigger(event);
+    }
+}
+
+void InputSystem::endTextComposition(bool cancelled)
+{
+    if (!m_textCompositionActive) {
+        return;
+    }
+
+    m_textCompositionActive = false;
+    m_textComposition.clear();
+    m_textCompositionCursor = 0;
+    m_textCompositionSelectionLength = 0;
+
+    if (m_eventSystem) {
+        Events::TextCompositionEvent event(
+            cancelled ? Events::TextCompositionPhase::Cancelled
+                      : Events::TextCompositionPhase::Ended);
+        m_eventSystem->trigger(event);
+    }
 }
 
 const char* InputSystem::getKeyName(KeyCode key)
@@ -356,10 +591,13 @@ void InputSystem::installCallbacks()
     glfwSetMouseButtonCallback(m_glfwWindow, &InputSystem::mouseButtonCallback);
     updateCursorMode();
     m_callbacksInstalled = true;
+    installNativeTextInput();
 }
 
 void InputSystem::uninstallCallbacks()
 {
+    uninstallNativeTextInput();
+
     if (!m_glfwWindow || !m_callbacksInstalled) {
         m_callbacksInstalled = false;
         return;
@@ -375,6 +613,103 @@ void InputSystem::uninstallCallbacks()
     }
 
     m_callbacksInstalled = false;
+}
+
+void InputSystem::installNativeTextInput()
+{
+#if defined(_WIN32)
+    if (m_nativeTextInputInstalled || !m_window) {
+        return;
+    }
+    auto* nativeWindow = static_cast<HWND>(m_window->getNativeHandle());
+    if (!nativeWindow) {
+        return;
+    }
+
+    if (SetWindowSubclass(
+            nativeWindow, nativeImeSubclassProc, NATIVE_IME_SUBCLASS_ID,
+            reinterpret_cast<DWORD_PTR>(this))) {
+        m_nativeTextInputInstalled = true;
+    } else {
+        TINA_WARN("Unable to install Win32 IME composition bridge");
+    }
+#endif
+}
+
+void InputSystem::uninstallNativeTextInput()
+{
+#if defined(_WIN32)
+    if (!m_nativeTextInputInstalled) {
+        return;
+    }
+    if (m_window) {
+        if (auto* nativeWindow = static_cast<HWND>(m_window->getNativeHandle())) {
+            RemoveWindowSubclass(
+                nativeWindow, nativeImeSubclassProc, NATIVE_IME_SUBCLASS_ID);
+        }
+    }
+    m_nativeTextInputInstalled = false;
+#endif
+}
+
+void InputSystem::updateNativeTextInputRect()
+{
+#if defined(_WIN32)
+    if (!m_textInputActive || !m_window) {
+        return;
+    }
+    auto* nativeWindow = static_cast<HWND>(m_window->getNativeHandle());
+    if (!nativeWindow) {
+        return;
+    }
+
+    HIMC inputContext = ImmGetContext(nativeWindow);
+    if (!inputContext) {
+        return;
+    }
+
+    const auto clampCoordinate = [](float value) {
+        return static_cast<LONG>(std::clamp(
+            value,
+            static_cast<float>(std::numeric_limits<LONG>::min()),
+            static_cast<float>(std::numeric_limits<LONG>::max())));
+    };
+    const POINT caretPoint{
+        clampCoordinate(m_textInputRectX),
+        clampCoordinate(m_textInputRectY + m_textInputRectHeight)};
+
+    COMPOSITIONFORM compositionForm{};
+    compositionForm.dwStyle = CFS_POINT;
+    compositionForm.ptCurrentPos = caretPoint;
+    ImmSetCompositionWindow(inputContext, &compositionForm);
+
+    CANDIDATEFORM candidateForm{};
+    candidateForm.dwIndex = 0;
+    candidateForm.dwStyle = CFS_CANDIDATEPOS;
+    candidateForm.ptCurrentPos = caretPoint;
+    ImmSetCandidateWindow(inputContext, &candidateForm);
+
+    ImmReleaseContext(nativeWindow, inputContext);
+#endif
+}
+
+void InputSystem::cancelNativeTextComposition()
+{
+#if defined(_WIN32)
+    if (!m_window) {
+        return;
+    }
+    auto* nativeWindow = static_cast<HWND>(m_window->getNativeHandle());
+    if (!nativeWindow) {
+        return;
+    }
+    HIMC inputContext = ImmGetContext(nativeWindow);
+    if (!inputContext) {
+        return;
+    }
+    ImmNotifyIME(inputContext, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+    ImmReleaseContext(nativeWindow, inputContext);
+#endif
 }
 
 void InputSystem::updateKeyboardState()

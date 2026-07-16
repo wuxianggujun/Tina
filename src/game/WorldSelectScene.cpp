@@ -17,7 +17,10 @@
 
 namespace Tina::Game {
 
-WorldSelectScene::WorldSelectScene() = default;
+WorldSelectScene::WorldSelectScene(bool openCreateDialogOnEnter)
+    : m_openCreateDialogOnEnter(openCreateDialogOnEnter)
+{
+}
 WorldSelectScene::~WorldSelectScene() = default;
 
 Container::Vector<Engine::Scene::ViewSetup> WorldSelectScene::getViewSetup() {
@@ -36,6 +39,10 @@ void WorldSelectScene::onEnter() {
     // 创建 UI
     createUI();
     addUIRoot(m_root.get());
+    if (m_openCreateDialogOnEnter) {
+        onCreateClicked();
+        TINA_INFO("UI smoke scene ready: virtual list, dialog, Chinese text and focused TextEdit");
+    }
 }
 
 void WorldSelectScene::onExit() {

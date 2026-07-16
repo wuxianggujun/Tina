@@ -14,6 +14,7 @@
 #include "game/MenuScene.hpp"
 #include "game/GameScene.hpp"
 #include "game/Smoke3DScene.hpp"
+#include "game/WorldSelectScene.hpp"
 
 #include <charconv>
 #include <string_view>
@@ -36,7 +37,7 @@ int main(int argc, char* argv[])
         config.vsync = true;
         config.msaa = 8;
 
-        enum class StartupScene { Menu, Game2D, Smoke3D };
+        enum class StartupScene { Menu, Game2D, UI, Smoke3D };
         StartupScene startupScene = StartupScene::Menu;
         constexpr std::string_view framePrefix = "--smoke-frames=";
         for (int i = 1; i < argc; ++i) {
@@ -47,6 +48,10 @@ int main(int argc, char* argv[])
             }
             if (argument == "--smoke-3d") {
                 startupScene = StartupScene::Smoke3D;
+                continue;
+            }
+            if (argument == "--smoke-ui") {
+                startupScene = StartupScene::UI;
                 continue;
             }
             if (argument.starts_with(framePrefix)) {
@@ -61,6 +66,18 @@ int main(int argc, char* argv[])
             }
         }
 
+        switch (startupScene) {
+            case StartupScene::UI:
+                config.windowTitle = "Tina - UI Smoke";
+                break;
+            case StartupScene::Smoke3D:
+                config.windowTitle = "Tina - 3D Smoke";
+                break;
+            case StartupScene::Menu:
+            case StartupScene::Game2D:
+                break;
+        }
+
         // 创建应用（不使用IApplication扩展，传nullptr）
         Engine::Application app(nullptr, config);
         if (!app.isInitialized()) {
@@ -71,6 +88,8 @@ int main(int argc, char* argv[])
         // 冒烟模式可直接进入完整2D世界和自研UI；默认仍进入主菜单。
         if (startupScene == StartupScene::Game2D) {
             app.scenes().push(Memory::MakeUnique<Game::GameScene>(12345u));
+        } else if (startupScene == StartupScene::UI) {
+            app.scenes().push(Memory::MakeUnique<Game::WorldSelectScene>(true));
         } else if (startupScene == StartupScene::Smoke3D) {
             app.scenes().push(Memory::MakeUnique<Game::Smoke3DScene>());
         } else {

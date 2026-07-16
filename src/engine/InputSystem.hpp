@@ -8,7 +8,9 @@
 #include "../core/Math.hpp"
 #include "InputCodes.hpp"
 #include <array>
+#include <cstdint>
 #include <string>
+#include <string_view>
 
 struct GLFWwindow;
 
@@ -68,6 +70,18 @@ public:
     const std::string& getTextInput() const { return m_textInput; }
     void clearTextInput() { m_textInput.clear(); }
 
+    // UI 传入 framebuffer client coordinates；Windows IMM32 使用同一坐标系
+    // 定位 composition/candidate 窗口，其他平台安全退化为仅保存位置。
+    void setTextInputRect(float x, float y, float width, float height);
+
+    // 平台桥接与测试入口。composition 永远不会直接写入已提交文本。
+    void beginTextComposition();
+    void updateTextComposition(std::string_view utf8, uint32_t cursorCodepoint,
+                               uint32_t selectionLength = 0);
+    void endTextComposition(bool cancelled = false);
+    bool isTextCompositionActive() const { return m_textCompositionActive; }
+    const std::string& getTextComposition() const { return m_textComposition; }
+
     static const char* getKeyName(KeyCode key);
     static const char* getMouseButtonName(MouseButton button);
 
@@ -79,6 +93,10 @@ public:
 private:
     void installCallbacks();
     void uninstallCallbacks();
+    void installNativeTextInput();
+    void uninstallNativeTextInput();
+    void updateNativeTextInputRect();
+    void cancelNativeTextComposition();
 
     void updateKeyboardState();
     void updateMouseState();
@@ -124,11 +142,20 @@ private:
     bool m_textInputActive;
     std::string m_textInput;
     std::string m_textInputBuffer;
+    bool m_textCompositionActive = false;
+    std::string m_textComposition;
+    uint32_t m_textCompositionCursor = 0;
+    uint32_t m_textCompositionSelectionLength = 0;
+    float m_textInputRectX = 0.0f;
+    float m_textInputRectY = 0.0f;
+    float m_textInputRectWidth = 1.0f;
+    float m_textInputRectHeight = 1.0f;
 
     EventSystem* m_eventSystem = nullptr;
     Window* m_window = nullptr;
     GLFWwindow* m_glfwWindow = nullptr;
     bool m_callbacksInstalled = false;
+    bool m_nativeTextInputInstalled = false;
 };
 
 InputSystem* GetInput();

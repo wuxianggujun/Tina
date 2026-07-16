@@ -18,8 +18,9 @@
 - 修复布局注册、显式事件上下文注入、hit-test 隐式布局和单次输入路由；
 - 引入 generation NodeId，统一 Pointer Capture、Focus/Tab 和节点销毁安全失效；
 - 引入每窗口 UIContext、Dark/Light/Custom Theme、DPI/content scale 和用户缩放，修正高 DPI 命中与场景布局；
+- 增加嵌套 Clip、通用 ScrollView、ListView 可见行虚拟化和 Windows 原生 IME composition；
 - 增加 UI 布局、唯一命中、路由顺序、动态子树上下文和交互生命周期 GoogleTest；
-- 运行主菜单或独立 2D/UI 冒烟程序。
+- 增加 `--smoke-ui`，实际运行虚拟列表、对话框、中文和已聚焦 TextEdit。
 
 ## M3 最小 3D（已完成）
 
@@ -29,8 +30,8 @@
 
 ## Later
 
-近期 UI：通用 Clip/ScrollView、ListView 虚拟化、键盘/手柄导航与 IME composition；Style/Theme 和 DPI 已完成首轮。
+近期 UI：统一 Button/TextEdit 的键盘与手柄导航、焦点视觉、可访问语义和截图回归；Clip/ScrollView、ListView 虚拟化、Style/Theme、DPI 与 Windows IME composition 已完成首轮。
 
-构建：将 Runtime 与完整 shaderc/Tint 离线工具链解耦，避免首次 Release Runtime 构建强制编译全部 shader 工具；隔离 EASTL/bgfx 等第三方告警，并清理旧源码自身的 GCC/MSVC 告警。
+构建：编译/链接门禁已可通过 `TINA_BUILD_SHADERS=OFF` 跳过 shaderc/Tint，正常可运行构建仍默认离线编译 shader；下一步把 cooker/预编译 shader 包做成独立 target，并隔离 EASTL/bgfx 等第三方告警、清理旧源码自身的 GCC/MSVC 告警。
 
 后续能力：Cooked Asset、Box2D/PhysX 模块、PBR、阴影、动画、脚本和编辑器。

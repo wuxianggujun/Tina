@@ -43,7 +43,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BIN_DIR})
 if (CMAKE_CONFIGURATION_TYPES)
     foreach(cfg ${CMAKE_CONFIGURATION_TYPES})
         string(TOUPPER "${cfg}" cfg_up)
-        set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${cfg_up} ${BIN_DIR})
+        # Debug/Release binaries and app-local DLLs are ABI-incompatible. Keep
+        # every executable, including Tina and shaderc, in its own config dir.
+        set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${cfg_up} ${BIN_DIR}/${cfg})
     endforeach()
 endif()
 message(STATUS "BIN_DIR = ${BIN_DIR}")
@@ -52,6 +54,7 @@ message(STATUS "BIN_DIR = ${BIN_DIR}")
 option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_TESTING "Build Tina tests" ON)
+option(TINA_BUILD_SHADERS "Build cooked runtime shaders with the bundled shader compiler" ON)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
 option(TINA_BUILD_WAYLAND "Build Wayland" OFF)
 

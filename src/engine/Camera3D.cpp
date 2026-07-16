@@ -1,4 +1,5 @@
 #include "Camera3D.hpp"
+#include "PerspectiveProjection.hpp"
 
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
@@ -42,13 +43,9 @@ void Camera3D::applyToView(uint16_t viewId) const
     float view[16];
     float projection[16];
     bx::mtxLookAt(view, eye, target, up, bx::Handedness::Right);
-    bx::mtxProj(projection,
-                bx::toRad(m_verticalFovDegrees),
-                aspect,
-                m_nearPlane,
-                m_farPlane,
-                bgfx::getCaps()->homogeneousDepth,
-                bx::Handedness::Right);
+    buildRightHandedPerspective(
+        projection, m_verticalFovDegrees, aspect, m_nearPlane, m_farPlane,
+        bgfx::getCaps()->homogeneousDepth);
     bgfx::setViewTransform(viewId, view, projection);
 }
 

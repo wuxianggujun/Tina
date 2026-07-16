@@ -13,9 +13,14 @@ void UINode::render(uint16_t viewId, UIRenderer& renderer)
     if (changedLayer) renderer.pushLayer(targetLayer);
 
     onRender(viewId, renderer);
+    if (m_clipChildren) {
+        const auto world = getWorldPosition();
+        renderer.pushClip(world.x, world.y, m_size.x, m_size.y);
+    }
     for (auto& child : m_children) {
         if (child) child->render(viewId, renderer);
     }
+    if (m_clipChildren) renderer.popClip();
 
     if (changedLayer) renderer.popLayer();
 }

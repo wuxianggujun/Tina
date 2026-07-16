@@ -67,6 +67,44 @@ struct TextInputEvent : public Event<TextInputEvent, EventTypeId::TextInput> {
     }
 };
 
+enum class TextCompositionPhase : uint8_t {
+    Started,
+    Updated,
+    Ended,
+    Cancelled
+};
+
+// 输入法预编辑事件。它与 TextInputEvent 严格分离：本事件只承载尚未提交的
+// composition/preedit，最终字符仍由 TextInputEvent 提交。
+struct TextCompositionEvent
+    : public Event<TextCompositionEvent, EventTypeId::TextComposition> {
+    static constexpr size_t MAX_TEXT_LENGTH = 256;
+
+    TextCompositionPhase phase;
+    char text[MAX_TEXT_LENGTH];
+    uint16_t textLength;
+    uint16_t cursorCodepoint;
+    uint16_t selectionLength;
+
+    TextCompositionEvent(TextCompositionPhase eventPhase = TextCompositionPhase::Ended,
+                         const char* composition = nullptr,
+                         uint16_t cursor = 0,
+                         uint16_t selection = 0)
+        : phase(eventPhase)
+        , textLength(0)
+        , cursorCodepoint(cursor)
+        , selectionLength(selection)
+    {
+        std::memset(text, 0, MAX_TEXT_LENGTH);
+        if (composition) {
+            const size_t len = std::strlen(composition);
+            textLength = static_cast<uint16_t>(std::min(len, MAX_TEXT_LENGTH - 1));
+            std::memcpy(text, composition, textLength);
+        }
+        this->priority = EventPriority::High;
+    }
+};
+
 // 鼠标按下事件
 struct MouseButtonPressedEvent : public Event<MouseButtonPressedEvent, EventTypeId::MouseButtonPressed> {
     MouseButton button;

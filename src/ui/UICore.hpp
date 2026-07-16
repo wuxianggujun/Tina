@@ -126,7 +126,9 @@ public:
         uint16_t w, h;
         bool active;
 
-        ClipRect() : x(0), y(0), w(0), h(0), active(false) {}
+        // A stack entry always represents an active clip. The default value is
+        // an empty intersection and must continue clipping nested descendants.
+        ClipRect() : x(0), y(0), w(0), h(0), active(true) {}
         ClipRect(int16_t x_, int16_t y_, uint16_t w_, uint16_t h_)
             : x(x_), y(y_), w(w_), h(h_), active(true) {}
     };

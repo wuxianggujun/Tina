@@ -404,6 +404,8 @@ public:
     // === 渲染分层（UIRenderer 层号） ===
     void setLayer(int layer) { m_layer = layer; }
     int layer() const { return m_layer; }
+    void setClipChildren(bool clip) { m_clipChildren = clip; }
+    bool clipsChildren() const { return m_clipChildren; }
     // 便捷：同时设置事件命中顺序与渲染层
     void setZAndLayer(int z, int layer) { setZIndex(z); setLayer(layer); }
 
@@ -448,6 +450,7 @@ public:
     virtual void onClick() {}
     // 新增：鼠标滚轮事件（dx/dy 为像素/刻度）
     virtual void onMouseWheel(float dx, float dy) { (void)dx; (void)dy; }
+    virtual bool acceptsMouseWheel() const { return false; }
     virtual void onFocusGained() {}
     virtual void onFocusLost() {}
     virtual void onPointerCaptureChanged(bool captured) { (void)captured; }
@@ -585,6 +588,7 @@ protected:
     HAlign m_hAlign = HAlign::Left;    // 水平对齐方式
     VAlign m_vAlign = VAlign::Top;     // 垂直对齐方式
     bool m_manualPosition = false;     // 是否手动设置了position（用于智能对齐重新应用）
+    bool m_clipChildren = false;       // 子树是否裁剪到本节点矩形
     LayoutDim m_layoutW = LayoutDim::Exact;
     LayoutDim m_layoutH = LayoutDim::Exact;
     float m_marginL = 0.0f, m_marginT = 0.0f, m_marginR = 0.0f, m_marginB = 0.0f;

@@ -523,6 +523,12 @@ void UIRenderer::setBatchStrategy(IBatchStrategy* strategy)
 
 void UIRenderer::pushClip(float x, float y, float w, float h)
 {
+    if (w <= 0.0f || h <= 0.0f) {
+        m_clipStack.emplace_back();
+        setClipRect(0, 0, 0, 0);
+        return;
+    }
+
     // 像素对齐（避免半像素问题）
     int16_t clipX = static_cast<int16_t>(std::floor(x));
     int16_t clipY = static_cast<int16_t>(std::floor(y));
@@ -532,6 +538,11 @@ void UIRenderer::pushClip(float x, float y, float w, float h)
     // 如果栈不为空，与栈顶裁剪相交
     if (!m_clipStack.empty()) {
         const auto& parent = m_clipStack.back();
+        if (parent.w == 0 || parent.h == 0) {
+            m_clipStack.emplace_back();
+            setClipRect(0, 0, 0, 0);
+            return;
+        }
         if (parent.active) {
             // 计算相交区域
             int16_t x0 = std::max(clipX, parent.x);
@@ -543,7 +554,7 @@ void UIRenderer::pushClip(float x, float y, float w, float h)
 
             // 如果相交区域无效，推入空裁剪
             if (x1 <= x0 || y1 <= y0) {
-                m_clipStack.emplace_back();  // 非激活裁剪
+                m_clipStack.emplace_back();  // 空裁剪，后代继续继承
                 setClipRect(0, 0, 0, 0);
                 return;
             }
@@ -580,11 +591,7 @@ void UIRenderer::popClip()
     // 恢复父裁剪
     if (!m_clipStack.empty()) {
         const auto& parent = m_clipStack.back();
-        if (parent.active) {
-            setClipRect(parent.x, parent.y, parent.w, parent.h);
-        } else {
-            clearClipRect();
-        }
+        setClipRect(parent.x, parent.y, parent.w, parent.h);
     } else {
         // 栈空，清除裁剪
         clearClipRect();

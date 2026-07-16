@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "engine/EngineEvents.hpp"
 #include "engine/EventSystem.hpp"
 
 namespace Tina::Engine {
@@ -75,6 +76,38 @@ TEST(EventSystemTest, ResetImmediatelyStopsFurtherDelivery)
     events.trigger(QueuedTestEvent{});
 
     EXPECT_EQ(deliveries, 1);
+}
+
+TEST(EventSystemTest, TextCompositionLifecycleStaysSeparateFromCommittedText)
+{
+    EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    Container::Vector<Events::TextCompositionPhase> phases;
+    std::string preedit;
+    uint16_t cursor = 0;
+    auto subscription = events.subscribe<Events::TextCompositionEvent>(
+        [&phases, &preedit, &cursor](const Events::TextCompositionEvent& event) {
+            phases.push_back(event.phase);
+            preedit.assign(event.text, event.textLength);
+            cursor = event.cursorCodepoint;
+        });
+
+    events.trigger(Events::TextCompositionEvent(
+        Events::TextCompositionPhase::Started));
+    events.trigger(Events::TextCompositionEvent(
+        Events::TextCompositionPhase::Updated, "中文", 1));
+    ASSERT_EQ(preedit, "中文");
+    EXPECT_EQ(cursor, 1);
+    events.trigger(Events::TextCompositionEvent(
+        Events::TextCompositionPhase::Cancelled));
+
+    ASSERT_EQ(phases.size(), 3U);
+    EXPECT_EQ(phases[0], Events::TextCompositionPhase::Started);
+    EXPECT_EQ(phases[1], Events::TextCompositionPhase::Updated);
+    EXPECT_EQ(phases[2], Events::TextCompositionPhase::Cancelled);
+    EXPECT_STREQ(eventTypeIdToString(EventTypeId::TextComposition),
+                 "TextComposition");
 }
 
 } // namespace

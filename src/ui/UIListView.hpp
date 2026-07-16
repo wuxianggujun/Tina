@@ -7,6 +7,8 @@
 #include "UINode.hpp"
 #include "UICore.hpp"
 #include "UIColors.hpp"
+#include "UIContext.hpp"
+#include "UIVirtualList.hpp"
 #include "../core/Container.hpp"
 #include "../core/Color.hpp"
 #include "../core/Log.hpp"  // 添加 Log 头文件
@@ -33,6 +35,7 @@ public:
     void setItems(const Items& items) {
         m_items = items;
         clampScroll();
+        clampScrollTarget();
     }
     void addItem(const std::string& text) {
         m_items.push_back(text);
@@ -42,6 +45,7 @@ public:
         m_items.clear();
         m_selected = -1;
         m_scroll = 0.0f;
+        m_scrollTarget = 0.0f;
     }
     const Items& items() const { return m_items; }
 
@@ -60,6 +64,7 @@ public:
         m_itemHeight = (h > 8.0f ? h : 8.0f);
         if (oldHeight != m_itemHeight) {
             clampScroll();  // 高度改变后重新限制滚动范围
+            clampScrollTarget();
         }
     }
     float itemHeight() const { return m_itemHeight; }
@@ -85,6 +90,10 @@ public:
     // 滚动控制（供场景使用）
     void scrollBy(float deltaPx) { m_scrollTarget += deltaPx; clampScrollTarget(); }
     void scrollTo(float offsetPx) { m_scrollTarget = offsetPx; clampScrollTarget(); }
+    float scrollOffset() const { return m_scroll; }
+    UIVisibleRange visibleRange() const {
+        return calculateVisibleRows(m_items.size(), m_itemHeight, getSize().y, m_scroll);
+    }
 
     // 事件处理
     void onMouseEnter() override { m_hovered = true; }
@@ -121,6 +130,7 @@ public:
             scrollBy(direction * dy * m_itemHeight * m_wheelStep);
         }
     }
+    bool acceptsMouseWheel() const override { return true; }
 
 protected:
     void onUpdate(float dt) override {
@@ -131,8 +141,12 @@ protected:
         }
 
         // 平滑滚动插值
+        clampScrollTarget();
         if (m_smoothScroll && std::abs(m_scroll - m_scrollTarget) > 0.1f) {
-            m_scroll += (m_scrollTarget - m_scroll) * m_smoothScrollSpeed;
+            const float alpha = 1.0f - std::pow(
+                1.0f - m_smoothScrollSpeed,
+                std::clamp(dt, 0.0f, 0.25f) * 60.0f);
+            m_scroll += (m_scrollTarget - m_scroll) * alpha;
             clampScroll();
         } else {
             m_scroll = m_scrollTarget;
@@ -145,8 +159,27 @@ protected:
         auto world = getWorldPosition();
         auto size = getSize();
 
+        const UIStyle* panelStyle = nullptr;
+        const UIStyle* buttonStyle = nullptr;
+        const UIStyle* labelStyle = nullptr;
+        if (const auto* context = uiContext()) {
+            panelStyle = &context->theme().style(UIStyleRole::Panel);
+            buttonStyle = &context->theme().style(UIStyleRole::Button);
+            labelStyle = &context->theme().style(UIStyleRole::Label);
+        }
+        const Tina::Core::Color panelColor = panelStyle
+            ? panelStyle->backgroundColor : Tina::UI::UIColors::PanelBg;
+        const Tina::Core::Color normalRowColor = buttonStyle
+            ? buttonStyle->backgroundColor : Tina::UI::UIColors::PanelBg;
+        const Tina::Core::Color hoverRowColor = buttonStyle
+            ? buttonStyle->hoverColor : Tina::UI::UIColors::ButtonPressed;
+        const Tina::Core::Color selectedRowColor = buttonStyle
+            ? buttonStyle->activeColor : Tina::UI::UIColors::ButtonHover;
+        const Tina::Core::Color textColor = labelStyle
+            ? labelStyle->textColor : Tina::Core::Color::White();
+
         // 背景（使用裁剪栈自动处理边界）
-        renderer.drawRectClipped(viewId, world.x, world.y, size.x, size.y, Tina::UI::UIColors::PanelBg);
+        renderer.drawRectClipped(viewId, world.x, world.y, size.x, size.y, panelColor);
 
         // 推入裁剪区域（自动与父容器相交）
         renderer.pushClip(world.x, world.y, size.x, size.y);
@@ -157,16 +190,19 @@ protected:
             return;
         }
 
-        int first = (int)(m_scroll / m_itemHeight);
-        if (first < 0) first = 0;
-        int visibleRows = (int)std::ceil(size.y / m_itemHeight) + 1;  // 精确计算 +1 缓冲
-        int last = std::min((int)m_items.size(), first + visibleRows);
+        const UIVisibleRange range = visibleRange();
+        const int first = static_cast<int>(range.first);
+        const int last = static_cast<int>(range.end);
 
         // 当前鼠标所在行（用于hover高亮）
         int hoverIndex = -1;
         if (auto* app = Tina::Engine::Application::instance()) {
             float mx = app->input().getMouseX();
             float my = app->input().getMouseY();
+            if (const auto* context = uiContext()) {
+                mx = context->viewport().toFramebufferX(mx);
+                my = context->viewport().toFramebufferY(my);
+            }
             bool inside = (mx >= world.x && mx <= world.x + size.x && my >= world.y && my <= world.y + size.y);
             if (inside) {
                 float localY = my - world.y;
@@ -181,15 +217,24 @@ protected:
             // 行背景
             const bool isSel = (i == m_selected);
             const bool isHover = (i == hoverIndex);
-            Tina::Core::Color rowBg = isSel ? Tina::UI::UIColors::ButtonHover :
-                                     (isHover ? Tina::UI::UIColors::ButtonPressed :
-                                               Tina::UI::UIColors::PanelBg);
+            Tina::Core::Color rowBg = isSel ? selectedRowColor :
+                                     (isHover ? hoverRowColor : normalRowColor);
             renderer.drawRectClipped(viewId, world.x + 1, y, size.x - 2, m_itemHeight - 1, rowBg);
 
             // 文本
             UIRenderer::TextOptions to{};
-            to.r = 1; to.g = 1; to.b = 1; to.a = 1;
-            to.fontPx = (m_fontPx.value_or(20));
+            to.r = textColor.r();
+            to.g = textColor.g();
+            to.b = textColor.b();
+            to.a = textColor.a();
+            if (m_fontPx.has_value()) {
+                to.fontPx = m_fontPx;
+            } else if (const auto* context = uiContext()) {
+                to.fontPx = context->viewport().fontPx(
+                    context->theme().style(UIStyleRole::Label).fontSize);
+            } else {
+                to.fontPx = 20;
+            }
             renderer.drawText(viewId, world.x + 10, y + 6, m_items[i], to);
         }
 
@@ -200,14 +245,20 @@ protected:
             float trackX = world.x + size.x - barW - 2.0f;
             float trackY = world.y + 2.0f;
             float trackH = size.y - 4.0f;
-            renderer.drawRectClipped(viewId, trackX, trackY, barW, trackH, Tina::Core::Color(0,0,0,0.3f));
+            const Tina::Core::Color trackColor = panelStyle
+                ? panelStyle->borderColor.withAlpha(0.35f)
+                : Tina::Core::Color(0, 0, 0, 0.3f);
+            const Tina::Core::Color thumbColor = buttonStyle
+                ? buttonStyle->foregroundColor.withAlpha(0.75f)
+                : Tina::Core::Color(1, 1, 1, 0.6f);
+            renderer.drawRectClipped(viewId, trackX, trackY, barW, trackH, trackColor);
 
             float ratio = size.y / contentH;
             float thumbH = std::max(20.0f, trackH * ratio);
             float maxScroll = contentH - size.y;
             float t = (maxScroll > 0.0f) ? (m_scroll / maxScroll) : 0.0f;
             float thumbY = trackY + (trackH - thumbH) * t;
-            renderer.drawRectClipped(viewId, trackX, thumbY, barW, thumbH, Tina::Core::Color(1,1,1,0.6f));
+            renderer.drawRectClipped(viewId, trackX, thumbY, barW, thumbH, thumbColor);
         }
 
         // 弹出裁剪区域
@@ -246,7 +297,7 @@ private:
 private:
     Items m_items;
     float m_itemHeight = 32.0f;
-    Container::Optional<int> m_fontPx = 20;  // 默认20px
+    Container::Optional<int> m_fontPx = Container::nullopt;
     float m_scroll = 0.0f;         // 当前滚动位置（插值后）
     float m_scrollTarget = 0.0f;   // 目标滚动位置
     int m_selected = -1;
