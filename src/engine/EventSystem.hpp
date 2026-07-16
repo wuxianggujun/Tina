@@ -368,6 +368,11 @@ public:
     void clearKeyboardFocus() { setKeyboardFocus({}); }
     bool focusNext(bool reverse = false);
     bool focusDirectional(UIFocusDirection direction);
+    bool beginFocusScope(UI::NodeId root, UI::NodeId initialFocus = {});
+    bool endFocusScope(UI::NodeId root);
+    UI::NodeId activeFocusScopeId() const {
+        return m_focusScopes.empty() ? UI::NodeId{} : m_focusScopes.back().root;
+    }
     UI::NodeId focusedNodeId() const { return m_uiContext.focusedNode; }
     bool dispatchKeyPressedToFocused(KeyCode key, bool isRepeat = false,
                                      bool shift = false, bool ctrl = false,
@@ -534,8 +539,13 @@ private:
         UI::UINode* node = nullptr;
         uint32_t generation = 1;
     };
+    struct UIFocusScopeEntry {
+        UI::NodeId root;
+        UI::NodeId restoreFocus;
+    };
     Vector<UINodeSlot> m_uiNodeSlots;
     Vector<uint32_t> m_freeUINodeSlots;
+    Vector<UIFocusScopeEntry> m_focusScopes;
     std::shared_ptr<std::atomic_bool> m_lifetime = std::make_shared<std::atomic_bool>(true);
     bool m_initialized = false;
     
@@ -544,10 +554,15 @@ private:
     UI::NodeId findNodeUnderMouse(UI::UINode* node, float x, float y);
     void handleMouseInput(float wheelDeltaY, bool pointerMoved);
     bool isInActiveUITree(UI::NodeId id) const;
+    bool isNodeAvailableForInteraction(UI::NodeId id) const;
+    bool isNodeWithinSubtree(UI::NodeId id, UI::NodeId root) const;
+    bool isNodeWithinActiveFocusScope(UI::NodeId id) const;
     void sanitizeUIInteractionState();
     void resetUIInteractionState(bool notifyNodes);
     void invalidateAllUINodes();
     void collectFocusableNodes(UI::UINode* node, Vector<UI::NodeId>& nodes) const;
+    void collectFocusTraversalNodes(Vector<UI::NodeId>& nodes) const;
+    void restoreFocusAfterScopeChange(UI::NodeId preferred);
     void requestUILayoutForRoots();
 };
 

@@ -196,6 +196,7 @@ private:
     // UI树管理辅助方法
     void registerUITreeToLayoutManager(UI::UINode* node);
     void unregisterUITreeFromLayoutManager(UI::UINode* node);
+    void syncUIRootsToEventSystem();
     void clearUIRoots();
     
     // ✅ 事件监听管理（由SceneManager调用）

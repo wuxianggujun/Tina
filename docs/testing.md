@@ -9,7 +9,7 @@
 - 测试依赖由固定 vcpkg baseline 提供；
 - 测试日志不得包含路径外的敏感环境变量或凭据。
 
-## 当前自动化覆盖（41项）
+## 当前自动化覆盖（45项）
 
 - Core：Result、ScopeExit、EnumFlags、Assert、Clock、FrameTimer、FixedStepTicker、基础类型和 Legacy Compatibility；
 - Runtime 时间：固定步长、插值、禁用 Simulation、最大追赶步和异常步消费；
@@ -17,15 +17,15 @@
 - Event：优先级队列、RAII Token、dispatcher 先销毁、立即取消订阅，以及 IME composition 与已提交文本分离；
 - Resource：共享 FileSystem 唯一 completion pump、主线程预算、取消和过期 generation 隔离。
 - Windows 栈预算：EventSystem 实例不得重新引入超过默认线程栈预算的大块 inline queue；
-- UI：hit-test 不隐式布局、重叠节点唯一命中、Capture/Target/Bubble 顺序、动态子节点上下文继承、stale NodeId 失效、上下文先析构、节点移除/自移除生命周期、Pointer Capture 外部释放、Tab/Shift+Tab 焦点遍历、焦点 KeyDown 路由/默认取消/重复键抑制/路由中删除目标、KeyUp 完整路由/停止传播后的局部清理/路由中删除目标、方向键 beam 优先与隐藏/禁用节点过滤、每窗口 Theme/DPI 隔离、200% DPI 逻辑坐标命中、裁剪边界、ScrollView 滚轮/钳制和十万行虚拟范围。
+- UI：hit-test 不隐式布局、重叠节点唯一命中、Capture/Target/Bubble 顺序、动态子节点上下文继承、stale NodeId 失效、上下文先析构、节点移除/自移除生命周期、Pointer Capture 外部释放、Tab/Shift+Tab 焦点遍历、焦点 KeyDown 路由/默认取消/重复键抑制/路由中删除目标、KeyUp 完整路由/停止传播后的局部清理/路由中删除目标、方向键 beam 优先与隐藏/禁用节点过滤、Modal Focus Scope 限制/嵌套恢复/自动失效、未处理按键向祖先回退、每窗口 Theme/DPI 隔离、200% DPI 逻辑坐标命中、裁剪边界、ScrollView 滚轮/钳制和十万行虚拟范围。
 
-41 项测试已在 Windows 11、Visual Studio 2026 18.4.3、MSVC 19.50.35717 的 Debug/Release 下直接运行通过；Ubuntu 22.04/GCC 由同一直接执行门禁验证，Clang ASan/UBSan 仍是独立门禁。
+45 项测试已在 Windows 11、Visual Studio 2026 18.4.3、MSVC 19.50.35717 的 Debug/Release 下直接运行通过；Ubuntu 22.04/GCC 由同一直接执行门禁验证，Clang ASan/UBSan 仍是独立门禁。
 
 ## 待补自动化门禁
 
 - Application 初始化失败回滚和析构顺序；
 - Scene 延迟 push/pop/replace；
-- UI 多指针/多按键、触摸输入、手柄导航、Modal Focus Scope、焦点回调中的延迟销毁、可访问语义和截图级键盘激活视觉状态；
+- UI 多指针/多按键、触摸输入、手柄导航、焦点回调中的延迟销毁、可访问语义和截图级键盘激活视觉状态；
 - Render Pass 顺序、typed handle generation 和 NullRenderDevice 资源计数；
 - 完整 Tina 游戏的 Linux Clang ASan/UBSan 构建与运行（当前测试程序已通过）。
 
@@ -70,6 +70,6 @@ cmake --build out/build/linux-compile-gate --parallel --target Tina tina_tests
 ./Tina --smoke-3d --smoke-frames=300
 ```
 
-四个命令都必须返回0，并在日志中出现正常初始化、达到帧数、场景退出、资源管理器释放、bgfx 和窗口关闭记录。UI 路径还必须出现 `UI smoke scene ready`；3D 路径必须肉眼或截图确认透视 Cube 可见，并出现 `Smoke3DScene released vertex and index buffers`，且不得出现 `BGFX LEAK` 或 `MEMORY LEAK`。只检查 exit code 和 buffer 生命周期不足以证明画面正确。
+四个命令都必须返回0，并在日志中出现正常初始化、达到帧数、场景退出、资源管理器释放、bgfx 和窗口关闭记录。UI 路径还必须出现 `UI smoke scene ready`，且不得出现 `无法建立模态焦点范围`；3D 路径必须肉眼或截图确认透视 Cube 可见，并出现 `Smoke3DScene released vertex and index buffers`，且不得出现 `BGFX LEAK` 或 `MEMORY LEAK`。只检查 exit code 和 buffer 生命周期不足以证明画面正确。
 
 bgfx Debug/D3D11 当前会在关闭 InfoQueue 时输出一次 `RefCount is 4 (expected 0)`；同一代码的 MSVC Release 300 帧验证无该提示、无 stderr、无 leak marker，因此将其记录为第三方 Debug layer 诊断噪声，不作为 Tina 资源泄漏结论。

@@ -24,16 +24,16 @@ public:
         , m_maskColor(0.0f, 0.0f, 0.0f, 0.6f)
         , m_dialogBgColor(0.2f, 0.2f, 0.25f, 1.0f)
         , m_titleColor(1.0f, 1.0f, 1.0f, 1.0f)
-        , m_visible(false)
     {
         setClickable(true);     // 允许点击遮罩关闭
         setInteractable(true);  // 阻止事件穿透到下层UI
+        setVisible(false);
     }
 
     // === 显示/隐藏 ===
     void show();
     void hide();
-    bool isDialogVisible() const { return m_visible; }
+    bool isDialogVisible() const { return isVisible(); }
 
     // === 内容设置 ===
     void setTitle(const std::string& title);
@@ -62,6 +62,8 @@ public:
 
     // === 鼠标事件 ===
     void onClick() override;
+    bool onKeyPressed(Tina::Engine::KeyCode key, bool isRepeat,
+                      bool shift, bool ctrl, bool alt) override;
 
     // === 窗口尺寸变化回调 ===
     void onWindowSizeChanged(int width, int height) override;
@@ -75,14 +77,12 @@ private:
     void relayoutDialogContent(); // 重新布局对话框内容（响应式）
     void onConfirmClicked();
     void onCancelClicked();
-    void handleKeyPressed(const Tina::Engine::Events::KeyPressedEvent& e);
 
 private:
     std::string m_title;
     Tina::Core::Color m_maskColor;      // 遮罩层颜色
     Tina::Core::Color m_dialogBgColor;  // 对话框背景颜色
     Tina::Core::Color m_titleColor;     // 标题颜色
-    bool m_visible;
 
     // UI组件
     UIPanel* m_dialogPanel = nullptr;    // 对话框面板
@@ -96,8 +96,6 @@ private:
     std::function<void()> m_onConfirm;
     std::function<void()> m_onCancel;
 
-    // 事件订阅（用于处理 Enter / Escape 快捷键）
-    Tina::Engine::SubscriptionToken m_keyToken;
 }; 
 
 } // namespace Tina::UI

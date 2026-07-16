@@ -189,13 +189,45 @@ bool EventSystem::isInActiveUITree(UI::NodeId id) const
     return false;
 }
 
+bool EventSystem::isNodeAvailableForInteraction(UI::NodeId id) const
+{
+    UI::UINode* node = resolveUINode(id);
+    if (!node || !isInActiveUITree(id)) return false;
+
+    for (UI::UINode* current = node; current; current = current->getParent()) {
+        if (resolveUINode(current->nodeId()) != current ||
+            !current->isVisible() || !current->isEnabled()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool EventSystem::isNodeWithinSubtree(UI::NodeId id, UI::NodeId root) const
+{
+    UI::UINode* node = resolveUINode(id);
+    UI::UINode* scopeRoot = resolveUINode(root);
+    if (!node || !scopeRoot) return false;
+
+    for (UI::UINode* current = node; current; current = current->getParent()) {
+        if (resolveUINode(current->nodeId()) != current) return false;
+        if (current == scopeRoot) return true;
+    }
+    return false;
+}
+
+bool EventSystem::isNodeWithinActiveFocusScope(UI::NodeId id) const
+{
+    return m_focusScopes.empty() || isNodeWithinSubtree(id, m_focusScopes.back().root);
+}
+
 // ==================== focus and pointer capture ====================
 
 bool EventSystem::setKeyboardFocus(UI::NodeId id)
 {
     UI::UINode* next = resolveUINode(id);
-    if (next && (!isInActiveUITree(id) || !next->isVisible() || !next->isEnabled() ||
-                 !next->isFocusable())) {
+    if (next && (!isNodeAvailableForInteraction(id) || !next->isFocusable() ||
+                 !isNodeWithinActiveFocusScope(id))) {
         return false;
     }
     if (!next) id = {};
@@ -226,6 +258,56 @@ bool EventSystem::setKeyboardFocus(UI::NodeId id)
     return true;
 }
 
+bool EventSystem::beginFocusScope(UI::NodeId root, UI::NodeId initialFocus)
+{
+    sanitizeUIInteractionState();
+    UI::UINode* scopeRoot = resolveUINode(root);
+    if (!scopeRoot || !isNodeAvailableForInteraction(root)) return false;
+
+    if (!m_focusScopes.empty() && !isNodeWithinSubtree(root, m_focusScopes.back().root)) {
+        return false;
+    }
+    for (const UIFocusScopeEntry& scope : m_focusScopes) {
+        if (scope.root == root) return scope.root == activeFocusScopeId();
+    }
+
+    const UI::NodeId previousFocus = m_uiContext.focusedNode;
+    m_focusScopes.push_back({root, previousFocus});
+
+    auto isFocusableInScope = [this, root](UI::NodeId id) {
+        UI::UINode* node = resolveUINode(id);
+        return node && node->isFocusable() && isNodeAvailableForInteraction(id) &&
+               isNodeWithinSubtree(id, root);
+    };
+
+    UI::NodeId nextFocus = initialFocus;
+    if (!isFocusableInScope(nextFocus)) {
+        nextFocus = isFocusableInScope(previousFocus) ? previousFocus : UI::NodeId{};
+    }
+    if (!nextFocus) {
+        Vector<UI::NodeId> focusable;
+        collectFocusableNodes(scopeRoot, focusable);
+        if (!focusable.empty()) nextFocus = focusable.front();
+    }
+
+    return nextFocus ? setKeyboardFocus(nextFocus) : setKeyboardFocus({});
+}
+
+bool EventSystem::endFocusScope(UI::NodeId root)
+{
+    if (!root || m_focusScopes.empty()) return false;
+
+    for (size_t index = m_focusScopes.size(); index > 0; --index) {
+        if (m_focusScopes[index - 1].root != root) continue;
+
+        const UI::NodeId restoreFocus = m_focusScopes[index - 1].restoreFocus;
+        m_focusScopes.resize(index - 1);
+        restoreFocusAfterScopeChange(restoreFocus);
+        return true;
+    }
+    return false;
+}
+
 void EventSystem::collectFocusableNodes(UI::UINode* node, Vector<UI::NodeId>& nodes) const
 {
     if (!node || !node->isVisible() || !node->isEnabled()) return;
@@ -237,12 +319,40 @@ void EventSystem::collectFocusableNodes(UI::UINode* node, Vector<UI::NodeId>& no
     }
 }
 
+void EventSystem::collectFocusTraversalNodes(Vector<UI::NodeId>& nodes) const
+{
+    if (!m_focusScopes.empty()) {
+        collectFocusableNodes(resolveUINode(m_focusScopes.back().root), nodes);
+        return;
+    }
+    for (UI::NodeId rootId : m_uiContext.roots) {
+        collectFocusableNodes(resolveUINode(rootId), nodes);
+    }
+}
+
+void EventSystem::restoreFocusAfterScopeChange(UI::NodeId preferred)
+{
+    UI::UINode* preferredNode = resolveUINode(preferred);
+    if (preferredNode && preferredNode->isFocusable() &&
+        isNodeAvailableForInteraction(preferred) &&
+        isNodeWithinActiveFocusScope(preferred) && setKeyboardFocus(preferred)) {
+        return;
+    }
+
+    Vector<UI::NodeId> focusable;
+    collectFocusTraversalNodes(focusable);
+    if (!focusable.empty()) {
+        setKeyboardFocus(focusable.front());
+    } else {
+        setKeyboardFocus({});
+    }
+}
+
 bool EventSystem::focusNext(bool reverse)
 {
+    sanitizeUIInteractionState();
     Vector<UI::NodeId> focusable;
-    for (UI::NodeId rootId : m_uiContext.roots) {
-        collectFocusableNodes(resolveUINode(rootId), focusable);
-    }
+    collectFocusTraversalNodes(focusable);
     if (focusable.empty()) return false;
 
     int currentIndex = -1;
@@ -269,9 +379,7 @@ bool EventSystem::focusDirectional(UIFocusDirection direction)
     sanitizeUIInteractionState();
 
     Vector<UI::NodeId> focusable;
-    for (UI::NodeId rootId : m_uiContext.roots) {
-        collectFocusableNodes(resolveUINode(rootId), focusable);
-    }
+    collectFocusTraversalNodes(focusable);
     if (focusable.empty()) return false;
 
     UI::UINode* current = resolveUINode(m_uiContext.focusedNode);
@@ -385,11 +493,16 @@ bool EventSystem::dispatchKeyPressedToFocused(KeyCode key, bool isRepeat,
     focused = resolveUINode(focusedId);
     if (!focused || m_uiContext.focusedNode != focusedId) return true;
 
-    const bool handled = focused->onKeyPressed(key, isRepeat, shift, ctrl, alt);
-    if (handled) return true;
+    Vector<UI::NodeId> defaultPath;
+    buildEventPath(focused, defaultPath);
+    for (size_t index = defaultPath.size(); index > 0; --index) {
+        UI::UINode* handler = resolveUINode(defaultPath[index - 1]);
+        if (!handler) return true;
+        if (handler->onKeyPressed(key, isRepeat, shift, ctrl, alt)) return true;
 
-    focused = resolveUINode(focusedId);
-    if (!focused || m_uiContext.focusedNode != focusedId) return true;
+        focused = resolveUINode(focusedId);
+        if (!focused || m_uiContext.focusedNode != focusedId) return true;
+    }
 
     const bool isActivationKey = key == KeyCode::Enter ||
                                  key == KeyCode::NumpadEnter ||
@@ -478,27 +591,46 @@ void EventSystem::releasePointerCapture(UI::NodeId requester)
 
 void EventSystem::sanitizeUIInteractionState()
 {
-    auto isActive = [this](UI::NodeId id) {
-        UI::UINode* node = resolveUINode(id);
-        return node && isInActiveUITree(id) && node->isVisible() && node->isEnabled();
-    };
+    UI::NodeId restoreFocus;
+    bool removedFocusScope = false;
+    while (!m_focusScopes.empty()) {
+        const size_t last = m_focusScopes.size() - 1;
+        const UIFocusScopeEntry& scope = m_focusScopes[last];
+        bool valid = isNodeAvailableForInteraction(scope.root);
+        if (valid && last > 0) {
+            valid = isNodeWithinSubtree(scope.root, m_focusScopes[last - 1].root);
+        }
+        if (valid) break;
+
+        restoreFocus = scope.restoreFocus;
+        m_focusScopes.pop_back();
+        removedFocusScope = true;
+    }
+    if (removedFocusScope) restoreFocusAfterScopeChange(restoreFocus);
 
     if (m_uiContext.focusedNode) {
         UI::UINode* node = resolveUINode(m_uiContext.focusedNode);
-        if (!isActive(m_uiContext.focusedNode) || !node->isFocusable()) setKeyboardFocus({});
+        if (!isNodeAvailableForInteraction(m_uiContext.focusedNode) ||
+            !node->isFocusable() ||
+            !isNodeWithinActiveFocusScope(m_uiContext.focusedNode)) {
+            restoreFocusAfterScopeChange({});
+        }
     }
-    if (m_uiContext.capturedNode && !isActive(m_uiContext.capturedNode)) {
+    if (m_uiContext.capturedNode &&
+        !isNodeAvailableForInteraction(m_uiContext.capturedNode)) {
         releasePointerCapture();
     }
     if (m_uiContext.pressedNode) {
         UI::UINode* node = resolveUINode(m_uiContext.pressedNode);
-        if (!isActive(m_uiContext.pressedNode) || !node->isClickable()) {
+        if (!isNodeAvailableForInteraction(m_uiContext.pressedNode) ||
+            !node->isClickable()) {
             m_uiContext.pressedNode = {};
         }
     }
     if (m_uiContext.hoveredNode) {
         UI::UINode* node = resolveUINode(m_uiContext.hoveredNode);
-        if (!isActive(m_uiContext.hoveredNode) || !node->isHoverable() || !node->isInteractable()) {
+        if (!isNodeAvailableForInteraction(m_uiContext.hoveredNode) ||
+            !node->isHoverable() || !node->isInteractable()) {
             const UI::NodeId oldId = m_uiContext.hoveredNode;
             m_uiContext.hoveredNode = {};
             if (UI::UINode* old = resolveUINode(oldId)) old->onMouseLeave();
@@ -516,6 +648,7 @@ void EventSystem::resetUIInteractionState(bool notifyNodes)
     m_uiContext.pressedNode = {};
     m_uiContext.focusedNode = {};
     m_uiContext.capturedNode = {};
+    m_focusScopes.clear();
 
     if (!notifyNodes) return;
     if (UI::UINode* node = resolveUINode(hovered)) node->onMouseLeave();

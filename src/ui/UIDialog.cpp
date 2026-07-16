@@ -1,33 +1,24 @@
 #include "UIDialog.hpp"
 #include "UICore.hpp"
-#include "../engine/InputCodes.hpp"   // ✅ KeyCode定义
-#include "../engine/EngineEvents.hpp" // ✅ KeyPressedEvent定义
 
 namespace Tina::UI {
 
 // === 显示/隐藏 ===
 void UIDialog::show() {
-    if (m_visible) return;
-    m_visible = true;
+    if (isVisible()) return;
     ensureUICreated();
     setVisible(true);
 
-    // 订阅键盘按下事件：支持 Enter 确认、Escape 取消
-    if (eventSystem() && !m_keyToken) {
-        m_keyToken = eventSystem()->subscribe<Tina::Engine::Events::KeyPressedEvent>(
-            [this](const Tina::Engine::Events::KeyPressedEvent& e) {
-                if (m_visible) handleKeyPressed(e);
-            }
-        );
+    if (auto* events = eventSystem();
+        events && !events->beginFocusScope(nodeId())) {
+        TINA_WARN("UIDialog '{}': 无法建立模态焦点范围", getName());
     }
 }
 
 void UIDialog::hide() {
-    if (!m_visible) return;
-    m_visible = false;
+    if (!isVisible()) return;
+    if (auto* events = eventSystem()) events->endFocusScope(nodeId());
     setVisible(false);
-    // 取消键盘订阅
-    m_keyToken.reset();
 }
 
 // === 内容区域访问 ===
@@ -66,9 +57,21 @@ void UIDialog::onClick() {
     }
 }
 
+bool UIDialog::onKeyPressed(Tina::Engine::KeyCode key, bool isRepeat,
+                            bool shift, bool ctrl, bool alt)
+{
+    (void)shift;
+    if (!isVisible() || isRepeat || ctrl || alt ||
+        key != Tina::Engine::KeyCode::Escape) {
+        return false;
+    }
+    onCancelClicked();
+    return true;
+}
+
 // === 渲染 ===
 void UIDialog::onRender(uint16_t viewId, UIRenderer& renderer) {
-    if (!m_visible) return;
+    if (!isVisible()) return;
 
     // 使用分层渲染：对话框设置在更高层，无需手动 flush。
 
@@ -224,16 +227,6 @@ void UIDialog::onCancelClicked() {
     hide();
     if (m_onCancel) {
         m_onCancel();
-    }
-}
-
-void UIDialog::handleKeyPressed(const Tina::Engine::Events::KeyPressedEvent& e) {
-    using Tina::Engine::KeyCode;  // ✅ KeyCode在Engine命名空间，不是Events
-    if (e.isRepeat) return;  // 避免长按重复触发
-    if (e.key == KeyCode::Enter) {
-        onConfirmClicked();
-    } else if (e.key == KeyCode::Escape) {
-        onCancelClicked();
     }
 }
 

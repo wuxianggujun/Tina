@@ -24,6 +24,7 @@ void SceneManager::push(Memory::UniquePtr<Scene> scene)
     if (!m_scenes.empty()) {
         m_scenes.back()->onPause();
         m_scenes.back()->m_active = false;
+        m_app->events().setUIRoot(nullptr);
     }
 
     // 设置 Application 引用
@@ -60,6 +61,7 @@ void SceneManager::pop()
         m_scenes.back()->m_active = true;
         // ✅ 标记视图为dirty，确保下一帧重新应用视图配置（修复pop后视图丢失问题）
         m_scenes.back()->m_viewDirty = true;
+        m_scenes.back()->syncUIRootsToEventSystem();
         m_scenes.back()->onResume();
     }
     TINA_INFO("Scene popped - Total scenes: {}", m_scenes.size());

@@ -50,6 +50,7 @@ void Scene::addUIRoot(UI::UINode* root) {
         
         // 为整个UI树设置布局管理器并注册
         registerUITreeToLayoutManager(root);
+        syncUIRootsToEventSystem();
     }
 }
 
@@ -62,6 +63,7 @@ void Scene::removeUIRoot(UI::UINode* root) {
             std::remove(m_uiRoots.begin(), m_uiRoots.end(), root),
             m_uiRoots.end()
         );
+        syncUIRootsToEventSystem();
     }
 }
 
@@ -159,24 +161,26 @@ Renderer::RenderQueue& Scene::queue() {
 
 // 框架更新入口
 void Scene::updateFrame(float dt) {
-    // 1. 子类更新游戏/页面状态；其中产生的布局请求在本帧统一提交。
+    // 1. 先激活当前场景的根树，保证 onEnter/onResume 后的焦点和输入状态一致。
+    syncUIRootsToEventSystem();
+
+    // 2. 子类更新游戏/页面状态；其中产生的布局请求在本帧统一提交。
     update(dt);
 
-    // 2. 更新UI节点动画和状态，不隐式执行布局。
+    // 3. 更新UI节点动画和状态，不隐式执行布局。
     for (auto* root : m_uiRoots) {
         if (root) {
             root->update(dt);
         }
     }
 
-    // 3. 每帧至多执行一次批量布局。
+    // 4. 每帧至多执行一次批量布局。
     if (m_uiLayoutManager) {
         m_uiLayoutManager->performPendingLayouts();
     }
 
-    // 4. 布局完成后只做一次命中测试与 routed event 分发。
+    // 5. 布局完成后只做一次命中测试与 routed event 分发。
     if (m_app && m_app->getEventSystem()) {
-        m_app->events().setUIRoots(m_uiRoots);
         if (InputSystem* inputSystem = input()) {
             const auto mouse = inputSystem->getMousePosition();
             m_app->events().updateUIInputLogical(
@@ -301,6 +305,12 @@ void Scene::unregisterUITreeFromLayoutManager(UI::UINode* node) {
 
     node->setEventSystem(nullptr);
     node->setLayoutManager(nullptr);
+}
+
+void Scene::syncUIRootsToEventSystem() {
+    if (m_active && m_app && m_app->getEventSystem()) {
+        m_app->events().setUIRoots(m_uiRoots);
+    }
 }
 
 } // namespace Tina::Engine

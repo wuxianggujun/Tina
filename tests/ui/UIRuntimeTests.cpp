@@ -547,6 +547,142 @@ TEST(UIRuntimeTest, DirectionalFocusPrefersBeamAndSkipsUnavailableNodes)
     EXPECT_EQ(events.focusedNodeId(), diagonalNode->nodeId());
 }
 
+TEST(UIRuntimeTest, FocusScopeTrapsDirectAndTraversalFocus)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto root = Memory::MakeUnique<UINode>("Root");
+    auto background = Memory::MakeUnique<TrackingNode>("Background");
+    background->setFocusable(true);
+    TrackingNode* backgroundNode = root->addChild(std::move(background));
+
+    auto modal = Memory::MakeUnique<UINode>("Modal");
+    auto first = Memory::MakeUnique<TrackingNode>("First");
+    first->setFocusable(true);
+    first->setPosition(100.0f, 100.0f);
+    first->setSize(40.0f, 40.0f);
+    TrackingNode* firstNode = modal->addChild(std::move(first));
+    auto second = Memory::MakeUnique<TrackingNode>("Second");
+    second->setFocusable(true);
+    second->setPosition(200.0f, 100.0f);
+    second->setSize(40.0f, 40.0f);
+    TrackingNode* secondNode = modal->addChild(std::move(second));
+    UINode* modalNode = root->addChild(std::move(modal));
+
+    events.setUIRoots({root.get()});
+    ASSERT_TRUE(events.setKeyboardFocus(backgroundNode->nodeId()));
+    ASSERT_TRUE(events.beginFocusScope(modalNode->nodeId()));
+
+    EXPECT_EQ(events.activeFocusScopeId(), modalNode->nodeId());
+    EXPECT_EQ(events.focusedNodeId(), firstNode->nodeId());
+    EXPECT_FALSE(events.setKeyboardFocus(backgroundNode->nodeId()));
+    EXPECT_TRUE(events.focusDirectional(Engine::UIFocusDirection::Right));
+    EXPECT_EQ(events.focusedNodeId(), secondNode->nodeId());
+    EXPECT_TRUE(events.focusNext());
+    EXPECT_EQ(events.focusedNodeId(), firstNode->nodeId());
+    EXPECT_TRUE(events.focusNext(true));
+    EXPECT_EQ(events.focusedNodeId(), secondNode->nodeId());
+
+    EXPECT_TRUE(events.endFocusScope(modalNode->nodeId()));
+    EXPECT_FALSE(events.activeFocusScopeId());
+    EXPECT_EQ(events.focusedNodeId(), backgroundNode->nodeId());
+}
+
+TEST(UIRuntimeTest, NestedFocusScopesRestoreInStackOrder)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto root = Memory::MakeUnique<UINode>("Root");
+    auto background = Memory::MakeUnique<TrackingNode>("Background");
+    background->setFocusable(true);
+    TrackingNode* backgroundNode = root->addChild(std::move(background));
+
+    auto outer = Memory::MakeUnique<UINode>("OuterModal");
+    auto outerButton = Memory::MakeUnique<TrackingNode>("OuterButton");
+    outerButton->setFocusable(true);
+    TrackingNode* outerButtonNode = outer->addChild(std::move(outerButton));
+    auto inner = Memory::MakeUnique<UINode>("InnerModal");
+    auto innerButton = Memory::MakeUnique<TrackingNode>("InnerButton");
+    innerButton->setFocusable(true);
+    TrackingNode* innerButtonNode = inner->addChild(std::move(innerButton));
+    UINode* innerNode = outer->addChild(std::move(inner));
+    UINode* outerNode = root->addChild(std::move(outer));
+
+    events.setUIRoots({root.get()});
+    ASSERT_TRUE(events.setKeyboardFocus(backgroundNode->nodeId()));
+    ASSERT_TRUE(events.beginFocusScope(outerNode->nodeId(), outerButtonNode->nodeId()));
+    ASSERT_TRUE(events.beginFocusScope(innerNode->nodeId(), innerButtonNode->nodeId()));
+    EXPECT_EQ(events.focusedNodeId(), innerButtonNode->nodeId());
+    EXPECT_FALSE(events.setKeyboardFocus(outerButtonNode->nodeId()));
+
+    EXPECT_TRUE(events.endFocusScope(innerNode->nodeId()));
+    EXPECT_EQ(events.activeFocusScopeId(), outerNode->nodeId());
+    EXPECT_EQ(events.focusedNodeId(), outerButtonNode->nodeId());
+
+    ASSERT_TRUE(events.beginFocusScope(innerNode->nodeId(), innerButtonNode->nodeId()));
+    EXPECT_TRUE(events.endFocusScope(outerNode->nodeId()));
+    EXPECT_FALSE(events.activeFocusScopeId());
+    EXPECT_EQ(events.focusedNodeId(), backgroundNode->nodeId());
+}
+
+TEST(UIRuntimeTest, FocusScopeAutoRestoresWhenRootIsHiddenOrRemoved)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto root = Memory::MakeUnique<UINode>("Root");
+    auto background = Memory::MakeUnique<TrackingNode>("Background");
+    background->setFocusable(true);
+    TrackingNode* backgroundNode = root->addChild(std::move(background));
+    auto modal = Memory::MakeUnique<UINode>("Modal");
+    auto modalButton = Memory::MakeUnique<TrackingNode>("ModalButton");
+    modalButton->setFocusable(true);
+    modal->addChild(std::move(modalButton));
+    UINode* modalNode = root->addChild(std::move(modal));
+
+    events.setUIRoots({root.get()});
+    ASSERT_TRUE(events.setKeyboardFocus(backgroundNode->nodeId()));
+    ASSERT_TRUE(events.beginFocusScope(modalNode->nodeId()));
+
+    modalNode->setVisible(false);
+    EXPECT_FALSE(events.activeFocusScopeId());
+    EXPECT_EQ(events.focusedNodeId(), backgroundNode->nodeId());
+
+    modalNode->setVisible(true);
+    ASSERT_TRUE(events.beginFocusScope(modalNode->nodeId()));
+    const NodeId staleModalId = modalNode->nodeId();
+    auto removed = root->removeChild(modalNode);
+    ASSERT_NE(removed, nullptr);
+    EXPECT_EQ(events.resolveUINode(staleModalId), nullptr);
+    EXPECT_FALSE(events.activeFocusScopeId());
+    EXPECT_EQ(events.focusedNodeId(), backgroundNode->nodeId());
+}
+
+TEST(UIRuntimeTest, UnhandledFocusedKeyFallsBackToAncestors)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto root = Memory::MakeUnique<TrackingNode>("RootHandler");
+    root->consumeKey = true;
+    auto target = Memory::MakeUnique<TrackingNode>("FocusedTarget");
+    target->setFocusable(true);
+    TrackingNode* targetNode = root->addChild(std::move(target));
+    events.setUIRoots({root.get()});
+    ASSERT_TRUE(events.setKeyboardFocus(targetNode->nodeId()));
+
+    EXPECT_TRUE(events.dispatchKeyPressedToFocused(Engine::KeyCode::Escape));
+    EXPECT_EQ(targetNode->keyPressedCount, 1);
+    EXPECT_EQ(root->keyPressedCount, 1);
+
+    targetNode->consumeKey = true;
+    EXPECT_TRUE(events.dispatchKeyPressedToFocused(Engine::KeyCode::Escape));
+    EXPECT_EQ(targetNode->keyPressedCount, 2);
+    EXPECT_EQ(root->keyPressedCount, 1);
+}
+
 TEST(UIRuntimeTest, EventContextIsInheritedByDynamicChildren)
 {
     Engine::EventSystem events;

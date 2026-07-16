@@ -10,7 +10,7 @@
 - GPU 资源具有显式 Prepare/Release 生命周期；
 - Render Pass 明确颜色/深度 load/store 行为。
 - UI 输入把 MouseDown/Up/Move、Capture Changed、Set/Kill Focus 分成独立事件；Windows 路径在按下时 `SetCapture`、释放时 `ReleaseCapture`。Tina 只借鉴这一生命周期契约，使用自己的 NodeId 和 routed event 实现。
-- Carbon 还把 KeyDown、KeyUp、Char 与 Set/Kill Focus 分开。Tina 已按这一边界实现独立 KeyDown/KeyUp routed event、Button pressed/release 清理和 UTF-8/IME composition 通道，并继续使用自己的 generation NodeId、Capture/Target/Bubble 与空间焦点导航，不复制 Carbon 的枚举或窗口回调 API。
+- Carbon 还把 KeyDown、KeyUp、Char 与 Set/Kill Focus 分开。Tina 已按这一边界实现独立 KeyDown/KeyUp routed event、Button pressed/release 清理和 UTF-8/IME composition 通道，并继续使用自己的 generation NodeId、Capture/Target/Bubble、空间焦点导航和 Modal Focus Scope，不复制 Carbon 的枚举或窗口回调 API。`UIDialog` 不再订阅全局游戏按键；焦点控件未处理的按键才向祖先回退，Escape 由 Dialog 祖先处理，Enter 不绕过 TextEdit 强制确认。
 
 ## 不复制
 
