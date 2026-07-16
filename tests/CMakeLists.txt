@@ -2,6 +2,11 @@ set(TINA_CORE_TEST_SOURCES
     core/AssertReleaseCompileTests.cpp
     core/AssertTests.cpp
     core/EnumFlagsTests.cpp
+    core/header_isolation/ErrorHeader.cpp
+    core/header_isolation/FixedStepAccumulatorHeader.cpp
+    core/header_isolation/MonotonicClockHeader.cpp
+    core/header_isolation/ResultHeader.cpp
+    core/PublicHeaderIsolationTests.cpp
     core/ResultTests.cpp
     core/ScopeExitTests.cpp
     core/TimeTests.cpp
@@ -18,6 +23,7 @@ set_source_files_properties(
 )
 
 target_compile_features(tina_tests PRIVATE cxx_std_23)
+target_include_directories(tina_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 target_link_libraries(tina_tests PRIVATE
     Tina::ProjectOptions
     Tina::Core
@@ -28,6 +34,7 @@ set_target_properties(tina_tests PROPERTIES CXX_EXTENSIONS OFF)
 if(TINA_BUILD_LEGACY)
     target_sources(tina_tests PRIVATE
         core/LegacyCompatibilityTests.cpp
+        core/LegacyTimeTests.cpp
         engine/Camera3DTests.cpp
         engine/EventSystemTests.cpp
         engine/ResourceTests.cpp

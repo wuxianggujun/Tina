@@ -15,6 +15,20 @@ Application 初始化现在保留明确的成功状态；任一必需子系统�
 - Scene 操作和资源上传/销毁还没有完全归入独立 Frame Phase；
 - 当前 Application 仍承担过多系统所有权，尚未收敛到 EngineHost/factory/阶段 Context 接口。
 
+## vNext 已落地基础
+
+M6 第二批已建立 C++23 Core 运行时基础，但尚未把 Legacy Application 切到 EngineHost：
+
+- `Result<T>/Status` 使用 `std::expected`，Error 已包含稳定 domain/code、origin、native code
+  和 UTF-8 context chain；
+- `IMonotonicClock`/`SteadyMonotonicClock` 可由 Runtime 构造注入，测试使用 Manual Clock；
+- `FixedStepAccumulator` 已明确真实 delta 钳制、gameplay time scale、variable `updateDelta`、
+  固定步计划、最多4步、超额整步丢弃与 interpolation；
+- vNext 公共头位于 `include/tina`，Legacy 时间类型只留在 `src/core` 兼容层。
+
+这批代码是后续 Frame Pipeline 的可测试基础，不代表 EngineHost、Headless Platform 或 Null
+RenderDevice 已经完成。
+
 ## vNext 所有权
 
 vNext 以 `EngineHost::Create(EngineConfig, EngineFactories)` 建立唯一组合根；普通游戏通过
@@ -106,6 +120,11 @@ Commit/Layout/Paint Cache/Display List → GPU Upload Budget → Assemble immuta
 Render Pass → Present → Deferred Cleanup。
 
 Simulation 默认固定 60 Hz，每帧最多追赶4步；Render 使用可变帧率和 interpolation alpha。
+Runtime 每帧把单次单调时钟采样差传给
+`FixedStepAccumulator::advance(realDelta, gameplayTimeScale)`：先钳制真实 delta，再计算缩放后的
+`updateDelta`；超额整步 Simulation 债务被丢弃，小于一个 fixed delta 的余量保留。真实时间、
+玩法缩放时间、被拒绝的真实时间和被丢弃的 Simulation 时间分别记录，UI/Asset/Audio timeout
+仍使用未缩放真实时间。
 所有队列必须有预算、统计和唯一所有者。InputFrame、普通 Event Queue 与 UI routed event
 相互分离；UI 先产生消费掩码，避免玩法输入穿透。Pressed/Released Action 只由下一个实际
 fixed tick 消费一次，本帧0步不丢失、4步不重复。`IGameState` 结构变更只在 Frame Update 后提交；

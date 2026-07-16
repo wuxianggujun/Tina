@@ -59,7 +59,8 @@ Carbon Core 将 Scope Guard、高精度时间、线程/锁命名、Telemetry Zon
 Statistics、内存跟踪、调用栈、崩溃字段、UTF-8 转换和文件路径分别测试。对 Tina 最重要
 的启发是：Core 的正确性不是一个 umbrella header，而是一组可独立验证的底层契约。
 
-Tina 已有更现代的 `Result`、`ScopeExit`、`std::chrono` Clock 和 `FixedStepTicker`，应继续
+Tina 已有 C++23 `std::expected` Result、`ScopeExit`、可注入 `IMonotonicClock` 和
+`FixedStepAccumulator`；旧 `FixedStepTicker` 仅作为 Legacy 兼容，应继续
 保留。vNext 增加 EngineHost-owned `MetricsRegistry`、后端无关 `TraceZone`、MemoryTag
 current/peak、CrashContext、UTF-8 路径与原子写；线程使用 `std::jthread/stop_token`，只在
 平台层增加名称和优先级适配。全局 `new/delete` 替换、分配宏、`CcpKillThread`、全局

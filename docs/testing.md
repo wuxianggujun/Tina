@@ -15,8 +15,9 @@
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
-| Windows 11 / MSVC 19.50 | vNext 最小图，Legacy/bgfx/EASTL 关闭 | Debug C++23 | 10/10 | 通过 |
-| Windows 11 / MSVC 19.50 | 完整 Legacy | Debug C++23 | 50/50 | 通过 |
+| Windows 11 / MSVC 19.50 | vNext 最小图，Legacy/bgfx/EASTL 关闭 | Debug C++23 | 14/14 | 通过 |
+| Windows 11 / MSVC 19.50 | vNext 最小图，Legacy/bgfx/EASTL 关闭 | Release C++23 | 14/14 | 通过 |
+| Windows 11 / MSVC 19.50 | 完整 Legacy | Debug C++23 | 57/57 | 通过 |
 
 同一 C++23 Debug 构建的 `--smoke-ui` 与 `--smoke-3d` 均连续300帧、返回0且无残留进程；3D 场景明确释放 vertex/index buffer。bgfx D3D11 Debug backend 在关闭 `ID3D11InfoQueue` 时仍报告上游 `RefCount is 4 (expected 0)` 警告，它不是 Tina handle 的 `BGFX LEAK` 报告，但必须在私有 vNext backend 的资源计数门禁中继续追踪，不能用“进程正常退出”替代零泄漏证据。
 
@@ -33,14 +34,19 @@ Release 的四条 300 帧运行路径均已正常返回 0，且未出现 fatal�
 
 ## 当前自动化覆盖与 vNext 门禁
 
-- Core 当前：Result、ScopeExit、EnumFlags、Assert、Clock、FrameTimer、FixedStepTicker、基础类型和 Legacy Compatibility；
-- Core vNext：Result context、FakeClock、Metric current/peak/reset、Trace 开关、MemoryTag、
-  UTF-8/Unicode 路径、原子写失败恢复、generation ID、Ensure/CrashContext；
+- Core 当前：C++23 `std::expected` Result/Status、稳定 Error domain/code、origin/native code/context
+  chain、ScopeExit noexcept invoke/move、EnumFlags `std::to_underlying`、Assert、强类型 Duration、
+  可注入 Monotonic Clock、固定步钳制/time scale/最多4步/丢弃与余量、基础类型和 Legacy
+  Compatibility；Error/Result/MonotonicClock/FixedStepAccumulator 另有逐头独立编译门禁；
+- Core vNext 待补：Metric current/peak/reset、Trace 开关、MemoryTag、UTF-8/Unicode 路径、
+  原子写失败恢复、generation ID、Ensure/CrashContext；
 - Core 专用结构：StaticVector 满容量与无 heap fallback、InlineFunction 大小/移动/自销毁、
   FrameArena 对齐/reset/OOM/高水位、GenerationPool stale handle；
 - Task：有界队列、QueueFull/停止后拒绝、TaskGroup 取消与 barrier、owner/generation 迟到任务、
   异常不逃出线程、IO/CPU executor 隔离和确定性合并；
-- Runtime 时间：固定步长、插值、禁用 Simulation、最大追赶步和异常步消费；
+- Runtime 时间：新 FixedStepAccumulator 已覆盖固定步长、真实 delta 钳制、time scale、插值、
+  最大追赶步、超额整步丢弃、非零余量、reset 和非法输入不改状态；Legacy FixedStepTicker
+  继续覆盖旧 Application 的异常步消费；
 - 3D Camera：60° 垂直 FOV 必须按 bx 要求以 degrees 进入投影矩阵，防止误转 radians 后 Cube 近距离铺满屏幕；
 - Event：优先级队列、RAII Token、dispatcher 先销毁、立即取消订阅，以及 IME composition 与已提交文本分离；
 - Resource：共享 FileSystem 唯一 completion pump、主线程预算、取消和过期 generation 隔离。

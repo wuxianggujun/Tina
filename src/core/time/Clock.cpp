@@ -2,6 +2,11 @@
 
 namespace Tina::Core {
 
+MonotonicTimePoint SteadyMonotonicClock::now() const noexcept
+{
+    return MonotonicNativeClock::now();
+}
+
 Clock::TimePoint Clock::now() noexcept
 {
     return NativeClock::now();

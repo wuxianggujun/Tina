@@ -1,6 +1,6 @@
 # vNext 公共接口与生命周期规则
 
-> 状态：候选冻结。本文定义语义和命名；实现前用 public-header consumer 固化可编译草案。
+> 状态：候选冻结并分批实施。Core 公共基础已用 public-header consumer 固化；其余接口按垂直切片落地。
 
 ## 公开类型命名规则
 
@@ -40,6 +40,38 @@ vNext 承诺同一仓库、同一工具链构建下的 C++ source API，不承�
 
 所有已安装/Game SDK header 必须零第三方类型、宏和传递 include。EnTT 作为 Scene 内部存储也
 不能出现在 Game SDK；“内部使用第三方”从来不是公开类型例外。
+
+## Core 公共基础
+
+Core 头文件从 `include/tina/core/...` 暴露，调用方不需要 `src` include root：
+
+```cpp
+namespace Tina::Core {
+
+template<class Value>
+using Result = std::expected<Value, Error>;
+
+using Status = Result<void>;
+
+enum class ErrorDomain : std::uint16_t;
+
+struct ErrorCode {
+    ErrorDomain domain;
+    std::uint32_t value;
+};
+
+class IMonotonicClock {
+public:
+    virtual ~IMonotonicClock() = default;
+    [[nodiscard]] virtual MonotonicTimePoint now() const noexcept = 0;
+};
+
+} // namespace Tina::Core
+```
+
+`Result/Status` 是 alias，因此每个返回它们的函数自身都必须写 `[[nodiscard]]`。Error domain/code
+使用显式、只追加的稳定编号；Core 通用错误写成 `CoreErrorCode::InvalidArgument`，模块错误使用
+`RuntimeErrorCode`、`AssetErrorCode` 等完整领域名，避免一个无限增长的全局 enum。
 
 ## 最小启动接口
 
@@ -233,8 +265,11 @@ struct FrameTiming {
 };
 ```
 
-`realDelta` 未缩放但经过有限性检查；Simulation accumulator 接受的 delta 有上限。time scale 只
-影响玩法，不影响 Platform/UI/Asset/Audio/diagnostics wall timeout。
+`realDelta` 未缩放但经过有限性检查；`FixedStepAccumulator` 先把它钳制为
+`acceptedRealDelta`，再应用 gameplay time scale 得到 `updateDelta`。超出真实 delta 上限的部分
+记为 `rejectedRealDelta`；最多4步之后仍存在的完整 Simulation 步记为
+`discardedSimulationDelta`，只保留小于一步的余量计算 interpolation。time scale 只影响玩法，
+不影响 Platform/UI/Asset/Audio/diagnostics wall timeout。
 
 `FixedUpdateContext` 只提供目标 tick 的 `SimulationActionSnapshot`；`FrameUpdateContext` 只提供当前
 帧 `FrameActionSnapshot`。0 fixed-step 帧保留 Simulation edge，最多4步也只消费一次；同一隐式
@@ -294,7 +329,8 @@ factory 接受窄 CreateParams 并返回 `Result<unique_ptr<Interface>>`；成�
 
 ## 错误与异常
 
-公共 API 使用 `Result/Status`；外部文件/config 错误使用稳定 category/code + UTF-8 context chain，
+公共 API 使用 C++23 `std::expected` alias `Result/Status`；外部文件/config 错误使用稳定
+`ErrorDomain + ErrorCode`、origin SourceLocation、可选 native integer code 与 UTF-8 context chain，
 assert 不处理用户数据。所有 size/count/offset 在分配前检查溢出，所有异步 completion 提交前
 重新校验 owner + generation。
 

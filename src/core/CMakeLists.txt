@@ -1,4 +1,15 @@
 add_library(tina_core STATIC
+    ${PROJECT_SOURCE_DIR}/include/tina/core/base/Compiler.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/base/EnumFlags.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/base/Platform.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/base/ScopeExit.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/base/SourceLocation.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/base/Types.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/Assert.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/error/Error.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/error/Result.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/time/FixedStepAccumulator.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/time/MonotonicClock.hpp
     diagnostics/Assert.cpp
     diagnostics/Assert.hpp
     error/Error.hpp
@@ -11,13 +22,20 @@ add_library(tina_core STATIC
     base/Types.hpp
     time/Clock.cpp
     time/Clock.hpp
+    time/FixedStepAccumulator.cpp
     time/FrameTimer.hpp
 )
 add_library(Tina::Core ALIAS tina_core)
 
 target_compile_features(tina_core PUBLIC cxx_std_23)
-target_include_directories(tina_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(tina_core
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
+)
 target_link_libraries(tina_core PRIVATE Tina::ProjectOptions)
+target_compile_definitions(tina_core PRIVATE TINA_CORE_BUILDING)
 set_target_properties(tina_core PROPERTIES CXX_EXTENSIONS OFF)
 
 if(TINA_BUILD_LEGACY)

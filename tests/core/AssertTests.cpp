@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include "core/diagnostics/Assert.hpp"
+#include <tina/core/diagnostics/Assert.hpp>
 
 #include <cstdint>
 #include <string>

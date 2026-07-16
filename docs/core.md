@@ -1,6 +1,6 @@
 # tina_core 设计与 Carbon Core 取证
 
-> 状态：设计讨论稿。Carbon Core 是经验样本，不是 Tina 的依赖或移植源。
+> 状态：设计已冻结并分批实施。Carbon Core 是经验样本，不是 Tina 的依赖或移植源。
 
 ## 结论
 
@@ -15,17 +15,22 @@ Tina 不应复制 Carbon 的历史包袱。vNext 保留现有现代 C++ 基础�
 
 当前 `tina_core` 已经包含：
 
-- `base`：固定宽度类型、Platform/Compiler、SourceLocation、EnumFlags；
-- `error`：`Result<T>`、`Status`、`ErrorCode`、带来源位置的 `Error`；
-- `time`：基于 `std::chrono::steady_clock` 的 `Clock`、`FrameTimer`、60 Hz/最多4步的
-  `FixedStepTicker`；
+- `base`：固定宽度类型、Platform/Compiler、C++23 SourceLocation/EnumFlags 和只接受
+  `noexcept invoke + noexcept move` callback 的 ScopeExit；
+- `error`：以 C++23 `std::expected` 实现的 `Result<T>`/`Status`，显式稳定编号的
+  `ErrorDomain + ErrorCode`，以及 origin、native integer code 和 UTF-8 context chain；
+- `time`：强类型 `Duration/MonotonicTimePoint`、可注入 `IMonotonicClock`、
+  `SteadyMonotonicClock` 与新 Runtime 使用的 `FixedStepAccumulator`；
 - `diagnostics`：可替换 handler 的 `TINA_ASSERT`；
-- RAII：只接受 `noexcept` callback 的 `ScopeExit`。
+- `include/tina/core/...`：不借用 `src` include root、无第三方 header 的正式公共面。
+
+旧 `Clock/FrameTimer/FixedStepTicker` 只保留在 `src/core` forwarding/compatibility 路径，供
+Legacy Application 迁移期间继续使用；它们不是 vNext Game SDK。
 
 EASTL、xxHash、旧 `Memory.hpp/Path.hpp/Time.hpp` 已隔离在 `tina_core_legacy`。vNext 的新决定
 是：EASTL 只随 Legacy 存续，迁移结束后删除；xxHash 从 Legacy 中解耦，作为窄接口后的
-私有 Hash 后端保留。我们继续迁移调用点，而不是重写已经更现代的 `Result`、`ScopeExit`
-和 Clock，也不把旧 `Container.hpp` 复制到新 Core。
+私有 Hash 后端保留。`Result` 已用 C++23 `std::expected` 收敛，ScopeExit/Clock 则保留语义并
+建立更窄、更清晰的新接口；我们不把旧 `Container.hpp` 复制到新 Core。
 
 当前缺口主要是：
 
@@ -42,7 +47,7 @@ EASTL、xxHash、旧 `Memory.hpp/Path.hpp/Time.hpp` 已隔离在 `tina_core_lega
 | 子域 | 目标能力 | 不属于 Core |
 | --- | --- | --- |
 | `core/base` | Types、Result/Error、SourceLocation、EnumFlags、ScopeExit、专用 generation ID | 游戏配置、窗口、渲染 |
-| `core/time` | SteadyClock、SystemClock 边界、Duration/TimePoint、可注入 `IClock` | Frame Pipeline 所有权 |
+| `core/time` | SteadyMonotonicClock、SystemClock 边界、Duration/TimePoint、可注入 `IMonotonicClock` | Frame Pipeline 所有权 |
 | `core/concurrency` | 协作停止、命名和可观测包装；优先标准库 primitive | 线程池策略、Asset job 类型 |
 | `core/diagnostics` | Log、Assert/Ensure、Metric、TraceZone、CrashContext | Tracy SDK 公共类型、上传服务 |
 | `core/memory` | MemoryTag、当前/峰值计数、`std::pmr` 统计资源、FrameArena | 全局 allocator 替换、通用对象池 |
@@ -84,7 +89,7 @@ xxHash 不随 EASTL 删除。它只通过窄 adapter 服务 `ContentHash`、Cook
 | Carbon 能力 | 可学习的工程契约 | Tina 的实现方向 | 明确不采纳 |
 | --- | --- | --- | --- |
 | `CcpScopeGuard` | 初始化成功后立刻登记逆操作 | 保留现有类型安全、`noexcept` 的 `ScopeExit`，Runtime 用它构建阶段回滚 | 大量 0/1/2 参数特化、调用约定宏 |
-| `CcpTime` | 高精度单调时间与 UTC/日历时间分离 | `steady_clock` 测耗时，`system_clock` 只处理墙钟；通过 `IClock` 做确定性测试 | 无单位 `uint64_t timestamp + frequency` 作为公共 API |
+| `CcpTime` | 高精度单调时间与 UTC/日历时间分离 | `steady_clock` 测耗时，`system_clock` 只处理墙钟；通过 `IMonotonicClock` 做确定性测试 | 无单位 `uint64_t timestamp + frequency` 作为公共 API |
 | `CcpMutex/Semaphore` | 长生命周期锁和 semaphore 必须有 telemetry 名称 | `std::mutex/scoped_lock/counting_semaphore` 为基础，外加可选命名/等待统计 | 无证据重写 OS 同步原语、公开 Acquire/Release 风格 |
 | `CcpThread` | 线程注册、名称、优先级和 CPU 时间有诊断价值 | `std::jthread + stop_token`；线程名称/优先级下沉 platform adapter | `CcpKillThread`、裸 HANDLE、当前 header 的 Windows/Apple 限制 |
 | `CcpTelemetry` | RAII Zone、线程/锁/内存跟踪、明确 capture 状态 | Tina-owned trace 宏语义、EngineHost-owned `TraceSession`、可选 Tracy 编译期 adapter，空后端零开销 | 业务可访问的全局 profiler、函数指针 + `void*` 回调、首期 fiber/tasklet |
@@ -100,13 +105,17 @@ xxHash 不随 EASTL 删除。它只通过窄 adapter 服务 `ContentHash`、Cook
 
 耗时、帧节奏和墙钟是不同概念：
 
-- `SteadyClock`：单调，供 delta、timeout、profile 使用；
+- `SteadyMonotonicClock`：单调，供 delta、timeout、profile 使用；
 - `SystemClock`：UTC/日历时间，只用于日志时间戳、文件元数据等；
-- `IClock`：测试注入，不进入每个热点调用的虚函数链；由拥有 timeout/调度策略的对象保存；
+- `IMonotonicClock`：测试注入，不进入每个热点调用的虚函数链；由拥有 timeout/调度策略的对象保存；
 - `Duration`/`TimePoint`：使用强类型，禁止把毫秒、tick 和秒混在裸整数中。
 
-现有 `FixedStepTicker` 应保留，但 Runtime 需要用 FakeClock 测试 0 delta、超大 delta、非有限
-输入、time scale、最多4步和 interpolation，而不是依赖真实 sleep。
+`FixedStepAccumulator::advance(realDelta, gameplayTimeScale)` 先验证真实 delta 和 time scale，
+再把真实 delta 钳制到 `maximumAcceptedRealDelta`，最后缩放为 `updateDelta`。默认固定步长
+1/60 秒、真实 delta 上限250 ms、每帧最多4步；超额整步债务被丢弃并单独计数，但小于一步的
+余量保留用于 interpolation。`realDelta`、`acceptedRealDelta`、`rejectedRealDelta`、
+`updateDelta` 和 `discardedSimulationDelta` 不混成一个模糊数值。测试使用 Manual Clock，
+不依赖真实 sleep。旧 `FixedStepTicker` 只作为 Legacy 行为回归保留。
 
 ## 并发与任务边界
 
@@ -226,7 +235,9 @@ alignment、null free、double free 诊断和 tracker shutdown 顺序都需要�
 | 可继续但违反内部预期 | `TINA_ENSURE` | 记录一次完整上下文；只有状态仍安全时继续 |
 | 可恢复失败 | `Result<T, Error>` | 初始化、IO、资产、设备创建、非法外部数据显式返回 |
 
-`Error` 后续需要稳定 category/code、UTF-8 message、SourceLocation 和可追加 context chain。
+`Error` 已提供稳定 `ErrorDomain + ErrorCode`、UTF-8 message、origin SourceLocation、可选 native
+integer code 和按传播顺序追加的 context chain。Domain/code 数值只允许追加，不能重排；Core
+通用错误位于 `CoreErrorCode`，Runtime/Asset/Render 等模块各自定义窄 code namespace。
 `ICrashSink` 由 `EngineHost` 注入并拥有；CrashContext 只保存小型 key/value、最后阶段、线程、
 场景和资源计数等非敏感 breadcrumb。崩溃路径尽量不分配，优先保存 raw address，正常工具
 或后处理再符号化。
@@ -240,7 +251,7 @@ Tina 公共模块边界统一返回 `Result/Status`，热点正常流程不使�
 ## UTF-8、路径和文件
 
 公共字符串和路径输入使用 UTF-8。Windows adapter 在调用 Win32 API 前严格转换为 UTF-16；
-非法 UTF-8 返回 `ErrorCode::InvalidArgument`，不能使用系统 locale 猜测。
+非法 UTF-8 返回 `CoreErrorCode::InvalidArgument`，不能使用系统 locale 猜测。
 
 Core IO 首期只提供：
 
@@ -265,9 +276,10 @@ Cooker 依赖原子写保证失败时旧产物仍有效。路径测试覆盖空�
 
 ## Core 验收清单
 
-- `Result` 的 value/error、移动、context chain 和 misuse 行为；
+- `std::expected` Result 的 value/error、移动、context chain、native code 和 misuse 行为；
 - `ScopeExit` 移动、release、异常安全和逆序回滚；
-- Steady/System/FakeClock 与 FixedStepTicker 的确定性测试；
+- SteadyMonotonic/Manual Clock 与 FixedStepAccumulator 的钳制、time scale、最多4步、丢弃量、
+  非零余量和失败不改状态测试；SystemClock 尚待 IO/日志消费者落地；
 - Metric 的 frame reset、lifetime、current/peak、跨线程计数和 snapshot；
 - Trace backend 开/关不改变业务结果；
 - Diagnostics owner/sink 先后顺序、级别短路不求值、Worker completion 日志、sink failure 不递归、

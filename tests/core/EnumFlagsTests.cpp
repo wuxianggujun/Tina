@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "core/base/EnumFlags.hpp"
-#include "core/base/Types.hpp"
+#include <tina/core/base/EnumFlags.hpp>
+#include <tina/core/base/Types.hpp>
 
 namespace Tina::Tests {
 

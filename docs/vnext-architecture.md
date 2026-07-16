@@ -1,6 +1,6 @@
 # Tina vNext 目标架构
 
-> 状态：设计讨论稿。本文描述完整目标，不代表相关接口已经在当前源码中落地。
+> 状态：目标架构已冻结并按 M6–M12 分批实施；各章节的“已落地”状态以 Roadmap 和测试记录为准。
 
 ## 设计结论
 
@@ -21,7 +21,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | --- | --- |
 | 平台 | Windows 与 Linux |
 | Windows 主门禁 | Visual Studio 2026 / MSVC 19.50 |
-| 语言 | 目标 C++23；所有 Tina target 统一后再宣称迁移完成 |
+| 语言 | C++23；Tina 自有 target 已统一，Linux GCC 13+/Clang 17+ 门禁仍待实测 |
 | 编码 | 源码、文档、资源清单和日志均为 UTF-8；MSVC 强制 `/utf-8` |
 | 窗口与基础输入 | GLFW；不使用 SDL/SDL3 |
 | Windows IME | IMM32，只存在于 Windows 平台适配层 |
@@ -337,9 +337,12 @@ Platform Poll
 - Present 后只执行延迟销毁和回收，不重新进入玩法更新；
 - 所有跨帧句柄都带 generation，迟到任务必须重新校验。
 
-Runtime 记录未裁剪 `realDelta`，但 Simulation accumulator 使用经验证的有限、非负、上限
-配置（默认250 ms）的 delta。最多4步后丢弃超额时间债务、保留小于一个 fixed delta 的余量，
-并增加 dropped-time metric。暂停只停止对应 `IGameState` 的 gameplay/fixed/frame-update dispatch；
+Runtime 记录未裁剪 `realDelta`。已落地的 `FixedStepAccumulator` 先验证它和 gameplay time
+scale，再按默认250 ms上限得到 `acceptedRealDelta`，缩放为 `updateDelta` 并生成固定步计划。
+最多4步后丢弃超额完整 Simulation 步、保留小于一个 fixed delta 的余量，并分别累计
+`rejectedRealDelta` 与 `discardedSimulationDelta` metric。暂停通过 time scale 0 停止 gameplay
+时间推进，不影响 Platform/UI/Asset/Audio/diagnostics 的未缩放 wall timeout。状态 policy 仍可
+停止对应 `IGameState` 的 gameplay/fixed/frame-update dispatch；
 Platform、UI、Asset、Audio 和必要 Render 仍推进。最小化窗口跳过无效 surface 的 Render/
 Present 并使用平台等待避免 busy loop，但继续处理关闭和异步完成。
 

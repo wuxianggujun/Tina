@@ -1,4 +1,4 @@
-#include "core/diagnostics/Assert.hpp"
+#include <tina/core/diagnostics/Assert.hpp>
 
 namespace {
 

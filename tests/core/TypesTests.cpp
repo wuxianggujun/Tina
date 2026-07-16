@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "core/base/Platform.hpp"
-#include "core/base/Types.hpp"
+#include <tina/core/base/Platform.hpp>
+#include <tina/core/base/Types.hpp>
 
 #include <cstdint>
 #include <type_traits>
