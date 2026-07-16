@@ -15,11 +15,16 @@
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
-| Windows 11 / MSVC 19.50 | vNext 最小图，Legacy/bgfx/EASTL 关闭 | Debug C++23 | 37/37 | 通过 |
-| Windows 11 / MSVC 19.50 | vNext 最小图，Legacy/bgfx/EASTL 关闭 | Release C++23 | 37/37 | 通过 |
-| Windows 11 / MSVC 19.50 | 完整 Legacy | Debug C++23 | 80/80 | 通过 |
+| Windows 11 / MSVC 19.50 | vNext M6-A：Core/Platform/Task/Render/Runtime，Legacy/真实 backend 关闭 | Debug C++23 | 92/92 | 通过 |
+| Windows 11 / MSVC 19.50 | vNext M6-A：Core/Platform/Task/Render/Runtime，Legacy/真实 backend 关闭 | Release C++23 | 92/92 | 通过 |
+| Windows 11 / MSVC 19.50 | Legacy ON 与 vNext M6-A 共存构建 | Debug C++23 | 135/135 | 通过 |
+| Ubuntu 22.04 / GCC 13.4 | vNext M6-A，Legacy/真实 backend 关闭 | Debug C++23 | 92/92 | 通过 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext M6-A，ASan/UBSan | Debug C++23 | 92/92 | 通过 |
 
-同一 C++23 Release 构建的 `--smoke-ui`、`--smoke-game` 与 `--smoke-3d` 均连续300帧、返回0且无残留进程；2D 路径明确卸载音频/纹理/ECS/TileMap 所属场景，3D 场景明确释放 vertex/index buffer。bgfx D3D11 Debug backend 在关闭 `ID3D11InfoQueue` 时仍报告上游 `RefCount is 4 (expected 0)` 警告，它不是 Tina handle 的 `BGFX LEAK` 报告，但必须在私有 vNext backend 的资源计数门禁中继续追踪，不能用“进程正常退出”替代零泄漏证据。
+同一 M6-A 构建的 `tina_sample_null` 已在 Debug/Release 分别连续运行300帧和10,000帧，四次均
+返回0，并验证 `IGameState::onExit` 与 `IGameApplication::onShutdown` 恰好一次。该样例组合
+Headless Platform、Disabled TaskSystem 与 NullRenderDevice，不加入或链接 GLFW、bgfx、EnTT、
+FreeType、miniaudio、SDL/SDL3；它不证明真实窗口、GPU、Scene/Asset/UI/Audio 已经可用。
 
 以下是 2026-07-16 的迁移前完整平台历史基线（含 Button action 生命周期修复）：
 
@@ -28,9 +33,13 @@
 | Windows 11 | VS 2026 18.4.3 / MSVC 19.50.35717 | Debug | 50/50 | 通过 |
 | Windows 11 | VS 2026 18.4.3 / MSVC 19.50.35717 | Release | 50/50 | 通过 |
 | Ubuntu 22.04 | GCC 11.4 | 单配置门禁 | 50/50 | 通过 |
-| Linux | Clang + ASan/UBSan | 尚未建立可复现 preset | 未验证 | 待完成 |
+| Linux | Clang + ASan/UBSan | 迁移前无可复现 preset | 未验证 | 历史缺口 |
 
-Release 的四条 300 帧运行路径均已正常返回 0，且未出现 fatal、`BGFX LEAK` 或 `MEMORY LEAK`。这证明主循环和退出资源链路通过，不等同于截图级画面验收或实体手柄兼容性验收。
+本批已经重新配置和构建 Legacy ON Debug 共存图，并直接执行135/135。菜单、
+2D/UI、3D 四条 Debug 路径均完成300帧并正常返回0；日志确认 Scene、Audio、Input、
+Event、Window 正常关闭，3D vertex/index buffer 已释放，未留下 Tina 进程。这证明主循环
+和退出资源链路通过，不等同于新的截图级画面验收或实体手柄兼容性验收。迁移前表中
+GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
 
 ## 当前自动化覆盖与 vNext 门禁
 
@@ -41,14 +50,22 @@ Release 的四条 300 帧运行路径均已正常返回 0，且未出现 fatal�
   memory/error/time/id 头另有逐头独立编译门禁；
 - Core vNext 待补：完整 Metric frame/lifetime reset、Trace 开关、UTF-8/Unicode 路径、
   原子写失败恢复、Ensure/CrashContext；owner-aware generation ID/Pool 已完成；
-- Core 专用结构：StaticVector 满容量与无 heap fallback、InlineFunction 大小/移动/自销毁、
-  GenerationPool 的 fixed storage、stale/wrong-owner、构造回滚、析构和 wrap helper 已完成；
-  FrameArena 对齐/reset/OOM/高水位/零回退已完成；
-- Task：有界队列、QueueFull/停止后拒绝、TaskGroup 取消与 barrier、owner/generation 迟到任务、
+- Core 专用结构：GenerationPool 的 fixed storage、stale/wrong-owner、构造回滚、析构和 wrap
+  helper 已完成；FrameArena 对齐/reset/OOM/高水位/零回退已完成；StaticVector/InlineFunction
+  尚未实现，只在出现真实消费者时加入；
+- Task 后续：有界队列、QueueFull/停止后拒绝、TaskGroup 取消与 barrier、owner/generation 迟到任务、
   异常不逃出线程、IO/CPU executor 隔离和确定性合并；
 - Runtime 时间：新 FixedStepAccumulator 已覆盖固定步长、真实 delta 钳制、time scale、插值、
   最大追赶步、超额整步丢弃、非零余量、reset 和非法输入不改状态；Legacy FixedStepTicker
   继续覆盖旧 Application 的异常步消费；
+- Runtime M6-A：完整 factory bundle/config 在产生副作用前校验；Clock/Platform/Task/Render 的
+  failure、success-null 与 throw 覆盖逆序回滚；Ready Host 直接析构、startup transaction、
+  run-once、0/1/4 fixed steps、当帧退出仍完成 extraction/UI/submit/present、失败清理及300帧
+  Null Runtime 均有直接 GoogleTest；EngineConfig 还覆盖 `maximumStepsPerFrame > 4` 的硬拒绝，
+  EngineHost Create/run 为 `noexcept` 边界；
+- Platform/Task/Render M6-A：Headless shutdown 后拒绝 poll，Disabled TaskSystem 始终 idle 且
+  shutdown 幂等；NullRenderDevice 强制连续 frame index 和 submit/present 配对，300帧始终
+  `liveResources == 0`；各模块公共头均有独立编译门禁；
 - 3D Camera：60° 垂直 FOV 必须按 bx 要求以 degrees 进入投影矩阵，防止误转 radians 后 Cube 近距离铺满屏幕；
 - Event：优先级队列、RAII Token、dispatcher 先销毁、立即取消订阅，以及 IME composition 与已提交文本分离；
 - Resource：共享 FileSystem 唯一 completion pump、主线程预算、取消和过期 generation 隔离。
@@ -57,9 +74,8 @@ Release 的四条 300 帧运行路径均已正常返回 0，且未出现 fatal�
 
 ## 待补自动化门禁
 
-- Legacy Application 现有失败点继续回归；vNext EngineHost 对每个 injected factory/初始化阶段
-  覆盖逆序回滚、`IGameApplication` 无帧回调、initial State enter/layout 失败不调用 `onExit`、
-  run 只调用一次、`onShutdown` 恰好一次和重复 shutdown；
+- Legacy Application 现有失败点继续回归；M6-A 尚未覆盖的 initial UI layout、GameStateStack
+  与后续模块初始化失败点要随对应消费者加入；
 - `IGameState` top-only、structural 与 policy-change 合计每 State 每帧最多一个 command，验证
   replace 后再请求 policy-change 返回 `AlreadyQueued`；覆盖 queue/completion capacity、sequence、
   completion slot 的 Reserved/Delivered/Diagnostics 回收，以及 `initialPolicy` 单次采样；
@@ -69,7 +85,7 @@ Release 的四条 300 帧运行路径均已正常返回 0，且未出现 fatal�
 - State Transition Commit 后新 State 同帧只 layout 一次、下一帧输入生效；pop/replace 按“关闭
   ingress → cancel → barrier/join → onExit → RAII 析构”清理 roots/focus/capture/TaskGroup，onExit
   恰好一次，Worker 不能观察已释放的 State 成员；
-- Platform：Headless 不链接 GLFW、Window/Gamepad stale generation、失焦合成 release、
+- Platform 后续：Window/Gamepad stale generation、失焦合成 release、
   fixed 0/1/4步的 Action edge 只消费一次、DPI 和 IMM32 窗口销毁顺序；
 - 2D world picking 在 Action Mapping 使用 last-presented Camera/Surface revision 转换一次；0步后
   Camera 移动/resize 也不得改变已锁存 WorldPointerSample；viewport 外明确 no-hit；
@@ -108,8 +124,8 @@ Release 的四条 300 帧运行路径均已正常返回 0，且未出现 fatal�
 - 在途 RenderFramePacket 期间卸载 Asset、退役 Atlas、关闭 Surface 和注入 Pass 失败仍保持引用
   有效；completion 后 packet/lease/pin/resource count 归零；纯 UI/2D-only/3D-only/无内容/
   SurfaceSuspended 的 initial clear 次数固定，UI-only/2D-only depth allocation count 为0；
-- Render Pass 顺序、禁用与失败停止、临时资源清理、typed handle generation、
-  NullRenderDevice 资源计数和连续300帧；vNext-null 完全不 add_subdirectory/link/load bgfx；
+- Render Pass 顺序、禁用与失败停止、临时资源清理、typed handle generation 与
+  RenderFramePacket 引用保活；
 - Asset CPU Decode/GPU Upload 双队列的 generation 取消，以及任务数、字节、时间预算和
   饥饿保护；弱 Handle/强 Lease、UploadTicket/retirement、依赖循环/失败链、Cooker 的损坏/
   不支持 glTF、生成后验证、事务 Manifest 和增量更新；
@@ -125,7 +141,9 @@ Release 的四条 300 帧运行路径均已正常返回 0，且未出现 fatal�
   不支持特性诊断；
 - 完整 Tina 游戏的 Linux GCC/Clang production backend 2D/UI/3D 运行，以及 Clang ASan/UBSan preset。
 
-Windows 和 Linux 必须分别构建。项目直接运行 GoogleTest 可执行文件，不使用 CTest 调度；Clang ASan/UBSan 在仓库提供可复现配置并实际通过前不得标记为已验证。
+Windows 和 Linux 必须分别构建。项目直接运行 GoogleTest 可执行文件，不使用 CTest 调度；
+Clang ASan/UBSan 使用项目固定的 Clang22 + libstdc++15 chainload toolchain，不能只换 compiler
+可执行文件却继续绑定旧系统标准库。
 
 vNext 的每个垂直切片先通过模块级 GoogleTest，再启动对应样例。Null Runtime 连续300帧；
 Platform/UI、Scene/2D、Render/3D、Asset/Cooker 分别保留独立运行入口。测试程序返回0、日志
@@ -146,7 +164,24 @@ shutdown；空后端与 Tracy 后端必须产生相同业务结果。Bench/Profi
 LTO 语义，只改变插桩和符号；正式 `tina_bench` 默认关闭 Tracy，需要定位回退时才用相同
 workload 启用。Tracy overhead 与常驻 Metrics off/on overhead 分开记录。
 
-Windows Debug 直接运行 `out/build/windows-msvc/bin/Debug/tina_tests.exe`，Release 使用对应的 `bin/Release/tina_tests.exe`；`Tina.exe`、shaderc 和 app-local DLL 同样按配置隔离，禁止使用共享 `bin/Tina.exe` 判断配置。Linux 单配置构建直接运行 `out/build/<preset>/bin/tina_tests`。
+Windows M6-A 的完整直接门禁为：
+
+```powershell
+cmake --preset windows-msvc-vnext
+cmake --build --preset windows-vnext-debug --target tina_tests tina_sample_null
+out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
+out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=10000
+
+cmake --build --preset windows-vnext-release --target tina_tests tina_sample_null
+out\build\windows-msvc-vnext\bin\Release\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Release\tina_sample_null.exe --frames=300
+out\build\windows-msvc-vnext\bin\Release\tina_sample_null.exe --frames=10000
+```
+
+Visual Studio 多配置输出必须使用对应的 `bin/Debug` 或 `bin/Release`，不能混用 GoogleTest DLL。
+Legacy 的 `Tina.exe`、shaderc 和 app-local DLL 同样按配置隔离。Linux 单配置构建直接运行
+`out/build/<preset>/bin/tina_tests`。
 
 只验证 vNext Core/Runtime 和测试源码的 Linux 编译/链接时，使用独立 GCC 13 preset，避免
 污染可运行的 Legacy `linux-ninja` cache：
@@ -157,8 +192,9 @@ cmake --build --preset linux-gcc13-vnext-debug --target tina_tests
 ./out/build/linux-gcc13-vnext/bin/tina_tests --gtest_color=no
 ```
 
-该 preset 已落地但当前 WSL 尚缺 GCC 13 与 CMake 3.25+，因此仍是未验证门禁。
-`TINA_BUILD_SHADERS=OFF` 输出不含 Legacy 产品和 cooked shader，不能作为可运行包或发布包。
+该 preset 已在隔离的 GCC 13.4/CMake 4.2.3 工具链上实际通过。`TINA_BUILD_SHADERS=OFF` 输出
+不含 Legacy 产品和 cooked shader，只能作为 Headless 验证程序，
+不能作为游戏产品或发布包。
 
 ## 当前 Legacy 运行冒烟
 
@@ -194,18 +230,19 @@ bgfx Debug/D3D11 当前会在关闭 InfoQueue 时输出一次 `RefCount is 4 (ex
 
 ## vNext 独立样例门禁
 
-以下是目标 executable，不得用当前 `Tina --smoke-*` 的结果冒充：
+`tina_sample_null` 已落地，其余 executable 仍是后续里程碑目标；不得用当前 Legacy
+`Tina --smoke-*` 的结果冒充 vNext 样例：
 
-| 样例 | 主要证明 | 资源策略 |
-| --- | --- | --- |
-| `tina_sample_null` | EngineHost、`IGameApplication`/`IGameState`、RenderFramePacket、300/10,000帧生命周期 | 无第三方 backend |
-| `tina_sample_ui` | committed snapshot、dirty/Flex/PaintCache、中文、Modal、TextEdit、DisplayList | M7 内置 Cooked Font/Texture fixture |
-| `tina_sample_2d_infrastructure` | Camera2D、Sprite layer/order、world picking、UI overlay | M8 内置 Cooked Sprite fixture |
-| `tina_sample_3d_infrastructure` | Perspective、depth、canonical Mesh、Unlit pipeline | M9 procedural Cube |
-| `tina_sample_2d` | Cooked TileMap/Tileset、chunk、角色/Tile AABB、Box2D dynamic body、正式 UI | M10/M11 Catalog/Manifest |
-| `tina_sample_3d` | Cooked glTF -> Mesh/Material/Prefab、culling/instance | M10 Catalog/Manifest |
+| 样例 | 状态 | 主要证明 | 资源策略 |
+| --- | --- | --- | --- |
+| `tina_sample_null` | M6-A 已实现 | EngineHost、单个 `IGameState`、Headless/Disabled/Null、300/10,000帧生命周期 | 无真实第三方 backend |
+| `tina_sample_ui` | 未实现 | committed snapshot、dirty/Flex/PaintCache、中文、Modal、TextEdit、DisplayList | M7 内置 Cooked Font/Texture fixture |
+| `tina_sample_2d_infrastructure` | 未实现 | Camera2D、Sprite layer/order、world picking、UI overlay | M8 内置 Cooked Sprite fixture |
+| `tina_sample_3d_infrastructure` | 未实现 | Perspective、depth、canonical Mesh、Unlit pipeline | M9 procedural Cube |
+| `tina_sample_2d` | 未实现 | Cooked TileMap/Tileset、chunk、角色/Tile AABB、Box2D dynamic body、正式 UI | M10/M11 Catalog/Manifest |
+| `tina_sample_3d` | 未实现 | Cooked glTF -> Mesh/Material/Prefab、culling/instance | M10 Catalog/Manifest |
 
-M7 已建立私有最小 production Surface/UI Pass；M9 只扩展3D。游戏 sample source、Game SDK
+M7 将建立私有最小 production Surface/UI Pass；M9 只扩展3D。游戏 sample source、Game SDK
 header 和 UI public header 不出现 bgfx。结构化验收使用 backend-neutral 字段：
 
 ```text

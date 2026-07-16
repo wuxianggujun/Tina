@@ -1,6 +1,6 @@
 # Runtime 与 Frame Pipeline
 
-## 当前实现
+## 当前实现：Legacy 产品路径
 
 Application 已集成 GLFW Window/Input、EventSystem、资源管理器、miniaudio、SceneManager 和 bgfx。Core 提供 Clock 与 FrameTimer。
 
@@ -13,25 +13,39 @@ Application 初始化现在保留明确的成功状态；任一必需子系统�
 ## 已知问题
 
 - Scene 操作和资源上传/销毁还没有完全归入独立 Frame Phase；
-- 当前 Application 仍承担过多系统所有权，尚未收敛到 EngineHost/factory/阶段 Context 接口。
+- Legacy Application 仍承担过多系统所有权，尚未迁移到 vNext EngineHost/factory/阶段 Context。
 
-## vNext 已落地基础
+## vNext M6-A 已落地生命周期内核
 
-M6 第二批已建立 C++23 Core 运行时基础，但尚未把 Legacy Application 切到 EngineHost：
+M6-A 已把 C++23 Core 基础接入一个可独立运行的 Headless Runtime；它与 Legacy Application
+并存，不改变现有产品路径：
 
 - `Result<T>/Status` 使用 `std::expected`，Error 已包含稳定 domain/code、origin、native code
   和 UTF-8 context chain；
 - `IMonotonicClock`/`SteadyMonotonicClock` 可由 Runtime 构造注入，测试使用 Manual Clock；
 - `FixedStepAccumulator` 已明确真实 delta 钳制、gameplay time scale、variable `updateDelta`、
   固定步计划、最多4步、超额整步丢弃与 interpolation；
-- vNext 公共头位于 `include/tina`，Legacy 时间类型只留在 `src/core` 兼容层。
+- vNext 公共头位于 `include/tina`，Legacy 时间类型只留在 `src/core` 兼容层；
+- `EngineHost::Create(config, factories)` 已按 Clock → Platform → Task → Render 创建模块，任一步
+  失败都逆序回滚；销毁顺序固定为 Render → Task → Platform → Clock；Create/run 均为
+  `noexcept` 边界，普通异常转换为结构化 Error，硬 OOM 若连 Error 都无法构造则 fatal；
+- `EngineConfig` 在任何 factory 前完成校验，并硬拒绝 `maximumStepsPerFrame > 4`；
+- `IGameApplication`、单个已提交 `IGameState` 与最小阶段 Context 已落地；创建 initial State 或
+  `onEnter` 失败不调用 candidate `onExit`/Application `onShutdown`，提交后退出或失败则各调用一次；
+- Headless Platform、Disabled TaskSystem、生命周期级 NullRenderDevice 已分别位于
+  `tina_platform`、`tina_task`、`tina_render`，`tina_runtime` 只依赖 Tina SPI；
+- 当前帧循环为 Poll Platform → Fixed Update（0..4）→ Frame Update → Render Scene Extraction
+  → UI Update → Null submit → present；`requestExitAfterFrame()` 会完成当帧 submit/present 后退出；
+- `tina_sample_null --frames=N` 已在 MSVC 2026 Debug/Release 连续通过300帧与10,000帧，且
+  vNext Null 构建图不加入或链接 GLFW、bgfx、EnTT、FreeType、miniaudio、SDL/SDL3。
 
-这批代码是后续 Frame Pipeline 的可测试基础，不代表 EngineHost、Headless Platform 或 Null
-RenderDevice 已经完成。
+M6-A 只证明生命周期、回滚、固定步和空提交契约。它没有完整 GameStateStack/commands、CPU/IO
+worker、Event/Input、Pass Scheduler、RenderFramePacket，也没有 Scene、Asset、UI、Audio 或真实
+Platform/Render backend；这些能力不能从同名 Phase Context 的存在推断为已经实现。
 
-## vNext 所有权
+## 完整 vNext 所有权目标
 
-vNext 以 `EngineHost::Create(EngineConfig, EngineFactories)` 建立唯一组合根；普通游戏通过
+vNext 以 `EngineHost::Create(const EngineConfig&, EngineFactories)` 建立唯一组合根；普通游戏通过
 `Desktop::CreateEngine(config)` 使用隐藏具体 backend 的默认组合。成功创建后 EngineHost 接管
 所有权，Runtime 本身不依赖具体 backend。`IGameApplication` 只创建初始 `IGameState` 和接收
 最终 shutdown；逐帧 Fixed Update/Frame Update/Render Scene Extraction/UI Update 只由
@@ -47,7 +61,7 @@ candidate `onExit` 或 Application `onShutdown`。Frame 回调返回 Status，
 异常在 `IGameApplication`/`IGameState`/Task/C callback 边界转换。完整接口和迁移切片见
 [vNext 目标架构](vnext-architecture.md)。
 
-目标初始化顺序为：Diagnostics → MemorySystem → Headless/GLFW Platform → TaskSystem →
+完整目标初始化顺序为：Diagnostics → MemorySystem → Headless/GLFW Platform → TaskSystem →
 RenderDevice → AssetSystem → AudioEngine → Window UIContext → `IGameApplication`/initial `IGameState`。
 统一关闭顺序为：
 
@@ -90,6 +104,12 @@ fixed loop 消费。这三种语义不能为了复用一个 EventBus 而合并�
 
 ## IGameApplication 与 IGameState 调用顺序
 
+M6-A 当前只有一个 State，实际顺序为：create initial State → `onEnter` → sample policy → frame
+loop → `onExit` → Application `onShutdown` → module shutdown。尚未实现 initial UI snapshot、
+GameStateStack、TaskGroup barrier 或状态命令提交。
+
+完整目标顺序为：
+
 ```text
 EngineHost::run(gameApplication)
   -> begin startup transaction
@@ -110,7 +130,7 @@ EngineHost::run(gameApplication)
 帧客户端，Menu、Settings、Game2D、Game3D、Pause 都使用同一接口。完整命名、示例和 policy
 见[游戏程序入口与状态栈](gameplay.md)。
 
-## 目标 Frame 契约
+## 完整目标 Frame 契约
 
 帧阶段固定为：Poll Platform → InputFrame Finalize（Snapshot + ordered transitions）→ Event Queue → Asset CPU Completion → Audio
 Completion → UI Input Routing → Gameplay Action Mapping → Fixed Loop（每个 tick 内部 barrier +

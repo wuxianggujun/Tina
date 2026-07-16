@@ -20,7 +20,7 @@ Core 专项设计及 Carbon Core 取证见 [tina_core 设计](core.md)；性能/
 
 | 领域 | 当前决定 | 原因 |
 | --- | --- | --- |
-| 语言与编码 | Tina target 已统一为 C++23、UTF-8，MSVC 使用 `/utf-8`；Windows 已验证，Linux GCC13+/Clang17+ 待门禁 | 语言升级必须同时保留 Legacy 回归与独立 vNext 构建，不能只改文档 |
+| 语言与编码 | Tina target 已统一为 C++23、UTF-8，MSVC 使用 `/utf-8`；Windows MSVC 19.50、Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 已通过门禁 | 语言升级必须同时保留 Legacy 回归与独立 vNext 构建，不能只改文档 |
 | 窗口与基础输入 | GLFW，不引入 SDL/SDL3 | 保持平台层单一；Windows IME 仅用 IMM32 补充 |
 | 渲染 | bgfx | 先复用成熟后端，不在当前阶段自研 RHI |
 | UI | Tina 自研 Retained UI | 服务游戏内 UI；vNext 用带 owner 的 generation `UINodeId` 管理交互生命周期 |

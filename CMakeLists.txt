@@ -58,6 +58,7 @@ option(TINA_BUILD_SHADERS "Build cooked runtime shaders with the bundled shader 
 option(TINA_BUILD_LEGACY "Build the existing Tina game/runtime during vNext migration" ON)
 option(TINA_BUILD_RENDER_BGFX "Build the private vNext bgfx render backend" OFF)
 option(TINA_BUILD_BENCHMARKS "Build Tina benchmark executables" OFF)
+option(TINA_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
 option(TINA_BUILD_WAYLAND "Build Wayland" OFF)
 
@@ -99,6 +100,11 @@ endif ()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Tina does not publish or consume C++ modules yet. CMake 4.x otherwise enables
+# dependency scanning for some Clang C++23 toolchains and requires an optional
+# clang-scan-deps executable even though this source graph contains no modules.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 add_library(tina_project_options INTERFACE)
 add_library(Tina::ProjectOptions ALIAS tina_project_options)
 target_compile_features(tina_project_options INTERFACE cxx_std_23)
@@ -139,6 +145,21 @@ if(TINA_BUILD_LEGACY)
     endforeach ()
 endif()
 
+if(TINA_ENABLE_SANITIZERS)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT MSVC)
+        target_compile_options(tina_project_options INTERFACE
+            -fsanitize=address,undefined
+            -fno-omit-frame-pointer
+        )
+        target_link_options(tina_project_options INTERFACE
+            -fsanitize=address,undefined
+        )
+    else()
+        message(FATAL_ERROR
+            "TINA_ENABLE_SANITIZERS currently requires GCC or Clang on a Unix-like target")
+    endif()
+endif()
+
 include(Dependencies)
 
 if(TINA_BUILD_LEGACY OR TINA_BUILD_RENDER_BGFX OR TINA_BUILD_SHADERS)
@@ -147,14 +168,23 @@ endif()
 
 add_subdirectory(src/core)
 
+# vNext modules are independent from the Legacy product graph. Explicit binary
+# directories keep src/platform and Legacy src/platform/audio from competing
+# for the same nested build directory while both architectures coexist.
+set(TINA_VNEXT_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/vnext")
+add_subdirectory(src/platform "${TINA_VNEXT_BINARY_DIR}/platform")
+add_subdirectory(src/task "${TINA_VNEXT_BINARY_DIR}/task")
+add_subdirectory(src/render "${TINA_VNEXT_BINARY_DIR}/render")
+add_subdirectory(src/runtime "${TINA_VNEXT_BINARY_DIR}/runtime")
+
 if(TINA_BUILD_LEGACY)
     add_subdirectory(src)
 endif()
 
 # Examples
-#[[if (TINA_BUILD_EXAMPLES)
+if (TINA_BUILD_EXAMPLES)
     add_subdirectory(samples)
-endif ()]]
+endif ()
 
 # Tests
 if (TINA_BUILD_TESTING)

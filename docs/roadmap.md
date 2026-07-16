@@ -67,26 +67,40 @@
 
 ## M6 Null Runtime 与公共入口垂直切片
 
-实施状态（2026-07-17）：前四批已按独立提交完成。Tina 自有 target 已统一 C++23；新增 `TINA_BUILD_LEGACY`、`TINA_BUILD_RENDER_BGFX`、`TINA_BUILD_BENCHMARKS`；vcpkg Legacy feature、`windows-msvc-vnext` 与 `linux-gcc13-vnext` 已建立。Core 已迁到独立 `include/tina` 公共面，Result/Status 已使用 `std::expected`，稳定 Error domain/code/context、可注入 Monotonic Clock、FixedStepAccumulator、MemoryTag、并发计数 PMR、无回退 FrameArena 和 owner-aware GenerationPool 已落地。当前 Windows vNext Debug/Release 37/37、Legacy Debug 80/80；Release UI/2D游戏/3D 各300帧均返回0且无残留进程，3D 明确释放 vertex/index buffer。Linux 正式 C++23 工具链和下列 Runtime/Core 能力仍按本里程碑继续实施，不能因 Core 地基通过而标记 M6 完成。
+实施状态（2026-07-17）：M6-A 生命周期内核已完成。Tina 自有 target 已统一 C++23；
+`tina_core`、`tina_platform`、`tina_task`、`tina_render`、`tina_runtime` 五个 target 与
+`tina_sample_null` 已加入 vNext-only 构建图。Windows MSVC 2026 Debug/Release、Linux GCC 13.4
+与 Clang 22.1.8 + libstdc++15 ASan/UBSan 直接 GoogleTest 均为92/92；Null sample 连续运行
+300帧和10,000帧并返回0。M6-A 没有加入或
+链接 GLFW、bgfx、EnTT、FreeType、miniaudio、SDL/SDL3。Legacy ON Debug 共存图已构建并直接
+通过135/135；菜单、2D/UI、3D 四条 Legacy Debug 产品路径均完成300帧并正常回收资源。M6
+仍不因生命周期内核通过而整体完成。
 
-- 建立 `EngineHost::Create(config, factories)`、EngineConfig、阶段 Context、lifecycle-only
-  `IGameApplication` 和唯一帧入口 `IGameState`；删除候选公共 `IFrameClient`；
-- 初始化阶段支持失败注入，并覆盖任意失败点逆序回滚、析构顺序、重复 shutdown；
-- 接入可注入 Clock、固定60 Hz/最多4步、唯一 Frame Phase 和阶段指标；其中 Clock 与固定步
-  accumulator 已完成，EngineHost Frame Pipeline 接线待后续批次；
-- 建立 Headless Platform 和 TaskSystem；owner-aware GenerationPool、FrameArena/MemoryTag 已完成，专用容器以
-  首个消费者为触发点；
-- 实现 NullRenderDevice、typed generation handle、最小 Pass Scheduler，以及
-  `RenderFrame = World RenderScene + UIDisplayList + RenderSurfaceState + timing`；Runtime private
-  `RenderFramePacket`/pool 负责保活到 submission completion；
-- 建立 Scene/Asset/UI/Audio 的最小公共契约与 Empty/Disabled 生命周期壳，只为一次固定最终
-  Context/初始化/关闭顺序；不接 EnTT、FreeType、miniaudio、Cooked format 或产品功能；
-- 增加 `tina_sample_null` 与 `tina_bench` schema v1；无 GLFW/bgfx/EnTT/FreeType/miniaudio/
-  Tracy/cgltf 依赖连续
-  运行300帧和10,000帧并直接通过 GoogleTest。
-- Null/Bench 稳定后用独立提交加入 `tina_profile_tracy` 与 Bench-equivalent Profile preset，
-  验证 zone/frame/thread capture、正常 shutdown、唯一 Client 和 Tracy/Metrics A/B；发布/bench
-  仍保持 backend none。
+M6-A 已完成：
+
+- `EngineHost::Create(config, factories)`、当前最小 `EngineConfig`、阶段 Context、lifecycle-only
+  `IGameApplication` 与单个 `IGameState`；
+- Clock → Platform → Task → Render 创建、任意 factory failure/null/throw 的逆序回滚、Ready Host
+  析构、run-once、幂等 shutdown 与提交前/后的游戏回调清理语义；
+- 可注入 Clock、固定60 Hz/最多4步、0/1/4步时序，以及 Poll → Fixed → Frame → Extraction → UI
+  → Null submit/present 的 M6-A Frame Pipeline；
+- Headless Platform、Disabled TaskSystem 与生命周期级 NullRenderDevice；Null backend 强制
+  submit/present 配对和连续 frame index，300帧资源计数保持为0；
+- C++23 Core 的 `std::expected` Result/Status、稳定 Error、FixedStepAccumulator、MemoryTag、
+  并发计数 PMR、无回退 FrameArena 与 owner-aware GenerationPool；
+- `windows-vnext-debug`/`windows-vnext-release` build preset、直接 `tina_tests` 与
+  `tina_sample_null --frames=N` 门禁。
+
+M6 后续但尚未实现：
+
+- 完整 GameStateStack/commands/policy propagation、Event/Input 与 State TaskGroup；
+- 有界 CPU/IO/Main worker、阶段指标与完整 shutdown deadline/fatal-stop；
+- typed render resource handle、Pass Scheduler、World RenderScene/UIDisplayList、Runtime-private
+  RenderFramePacket/pool 与 submission completion 保活；
+- Scene、Asset、UI、Audio 的真实契约和消费者；不为固定初始化顺序预先制造无消费者空壳；
+- `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
+- Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；完整 GLFW/bgfx
+  产品图仍必须在对应切片重新验证。
 
 ## M7 Platform、最小 Surface 与高性能 UI 垂直切片
 
@@ -170,4 +184,4 @@
 - 只有 profiling 证明需要后才把已落地的 Box2D step 接入 Task System；Jolt 作为唯一 3D 后端在
   真实玩法出现后接入；PhysX、Bullet、Rapier 不进入依赖或构建；不统一 2D/3D Physics API；
 - PBR、阴影、动画、脚本和编辑器均等待 Runtime、Render、Asset 基础契约稳定；
-- Linux/GCC 告警先区分第三方与 Tina 自身，再按模块清理；Clang ASan/UBSan 需要可复现 preset 和实际门禁结果。
+- Linux/GCC 告警先区分第三方与 Tina 自身，再按模块清理；持续保持并复验 Clang 22 + libstdc++15 ASan/UBSan 可复现门禁。

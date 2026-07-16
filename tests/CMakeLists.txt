@@ -23,7 +23,23 @@ set(TINA_CORE_TEST_SOURCES
     core/TypesWindowsBeforeTests.cpp
 )
 
-add_executable(tina_tests ${TINA_CORE_TEST_SOURCES})
+set(TINA_RUNTIME_TEST_SOURCES
+    platform/header_isolation/PlatformBackendHeader.cpp
+    platform/PlatformBackendTests.cpp
+    render/header_isolation/RenderDeviceHeader.cpp
+    render/NullRenderDeviceTests.cpp
+    runtime/header_isolation/EngineFactoriesHeader.cpp
+    runtime/header_isolation/EngineHostHeader.cpp
+    runtime/header_isolation/GameApplicationHeader.cpp
+    runtime/RuntimeLifecycleTests.cpp
+    task/header_isolation/TaskSystemHeader.cpp
+    task/TaskSystemTests.cpp
+)
+
+add_executable(tina_tests
+    ${TINA_CORE_TEST_SOURCES}
+    ${TINA_RUNTIME_TEST_SOURCES}
+)
 
 set_source_files_properties(
     core/AssertReleaseCompileTests.cpp
@@ -35,6 +51,10 @@ target_include_directories(tina_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 target_link_libraries(tina_tests PRIVATE
     Tina::ProjectOptions
     Tina::Core
+    Tina::Platform
+    Tina::Render
+    Tina::Runtime
+    Tina::Task
     GTest::gtest_main
 )
 set_target_properties(tina_tests PROPERTIES CXX_EXTENSIONS OFF)

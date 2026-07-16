@@ -8,7 +8,7 @@ struct BitFieldValue {
 
 // This translation unit is compiled with NDEBUG even in the Debug test target. A disabled
 // assertion must not instantiate or evaluate its expression (sizeof(bit-field) is ill-formed).
-[[maybe_unused]] void compileDisabledAssertion(BitFieldValue value)
+[[maybe_unused]] void compileDisabledAssertion([[maybe_unused]] BitFieldValue value)
 {
     TINA_ASSERT(value.enabled);
 }

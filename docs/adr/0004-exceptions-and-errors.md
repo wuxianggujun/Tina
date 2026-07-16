@@ -16,12 +16,19 @@
 命令入口捕获异常、追加上下文并转换。析构、rollback、`onExit`、`onShutdown` 和实时 callback
 必须 `noexcept`。
 
+结构化 `Error` 本身使用 `std::string/vector`，因此“物理内存彻底耗尽”时无法诚实保证仍能分配
+错误消息。Engine create/run 等最外层 API 同样标记 `noexcept`：正常 `bad_alloc` 在尚有错误报告
+余量时转换为 `OutOfMemory`；若连 emergency Error 都无法构造，则由 `noexcept` 终止进程。首期不为
+未经实际故障模型证明的需求建设全局无分配 emergency arena。这里的 fatal 例外只针对无法构造
+错误对象的硬 OOM，不允许普通 factory/callback exception 越过边界。
+
 ## 结果
 
 - 兼容标准库和固定第三方依赖；
 - 错误能跨模块稳定表达并带 phase/task/asset 上下文；
 - 每个线程/C callback 边界都需要测试；
 - noexcept 路径抛出属于不可恢复 invariant，必须终止而不是吞掉。
+- 硬 OOM 的最终 fallback 是终止；不能把所有内存耗尽错误宣传为可恢复。
 
 ## 被拒绝方案
 

@@ -29,7 +29,7 @@
 | Audio callback 违反实时约束 | P1 | underrun、callback p99 接近 period、callback 中分配/锁等待 | 固定命令、SPSC、预分配、平台 profiler 交叉验证 | 1/32/128 voice 门禁0分配/0阻塞且 period 有余量 |
 | 自研文本/IME 跨平台差异 | P1 | 中文缺字、composition 丢失、Linux preedit 不一致 | 打包字体、UTF-8 边界、IMM32 测试、Linux 明确降级 | Windows 完整门禁，Linux 支持范围文档化 |
 | 跨 GPU 截图抖动 | P1 | driver/font 变化导致像素差 | 固定 reference profile、感知/区域阈值、逻辑测试优先 | 截图门禁误报率达到约定范围 |
-| C++23 Linux 工具链不足 | P1 | GCC 11/Clang 14 缺库能力 | Legacy 兼容门禁与 vNext GCC13+/Clang17+ 分离 | 正式 vNext Linux preset 构建运行通过 |
+| C++23 Linux 工具链不足 | P1 | GCC 11/Clang 14 缺库能力 | Legacy 兼容门禁与 vNext GCC 13.4、Clang 22.x + libstdc++15.x chainload 基线分离 | 正式 vNext Linux preset 构建运行通过 |
 | 第三方升级破坏 ABI/许可 | P1 | 新类型泄漏、包体/性能/notice 变化 | 固定版本、单依赖提交、license/CVE/bench gate | 升级 checklist 全通过 |
 
 每个 P0 风险在首个受影响切片开始前必须有自动化门禁或明确的 fail-safe；只写日志但继续

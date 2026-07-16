@@ -35,7 +35,7 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 ## 构建
 
-目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、MSVC 19.50 和 CMake 4.2.3 下通过 vNext 最小图、Legacy Debug、直接 GoogleTest 以及 UI/3D 300 帧冒烟；Linux 正式门禁要求 GCC 13+ 或 Clang 17+，当前 WSL 的 GCC 11/CMake 3.22 不能算作 vNext C++23 验证。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
+目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、MSVC 19.50 和 CMake 4.2.3 下通过 vNext 最小图、Legacy Debug、直接 GoogleTest 以及 UI/3D 300 帧冒烟；Linux vNext Null 图已实际通过 GCC 13.4，以及 Clang 22.1.8 + libstdc++ 15.2 的 ASan/UBSan 门禁。Clang preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22.04 自带的旧 libstdc++。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
 
 ```powershell
 cmake --version

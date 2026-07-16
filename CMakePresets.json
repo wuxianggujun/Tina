@@ -45,6 +45,8 @@
       "inherits": "windows-msvc",
       "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext",
       "cacheVariables": {
+        "TINA_BUILD_EXAMPLES": "ON",
+        "TINA_BUILD_TESTING": "ON",
         "TINA_BUILD_LEGACY": "OFF",
         "TINA_BUILD_RENDER_BGFX": "OFF",
         "TINA_BUILD_SHADERS": "OFF",
@@ -82,10 +84,36 @@
       "cacheVariables": {
         "CMAKE_C_COMPILER": "gcc-13",
         "CMAKE_CXX_COMPILER": "g++-13",
+        "TINA_BUILD_EXAMPLES": "ON",
+        "TINA_BUILD_TESTING": "ON",
         "TINA_BUILD_LEGACY": "OFF",
         "TINA_BUILD_RENDER_BGFX": "OFF",
         "TINA_BUILD_SHADERS": "OFF",
         "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON"
+      }
+    },
+    {
+      "name": "linux-clang22-vnext",
+      "displayName": "Linux vNext Null (Clang 22 + libstdc++ 15)",
+      "inherits": "linux-ninja",
+      "binaryDir": "${sourceDir}/out/build/linux-clang22-vnext",
+      "cacheVariables": {
+        "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/linux-clang22-libstdcxx15.cmake",
+        "TINA_BUILD_EXAMPLES": "ON",
+        "TINA_BUILD_TESTING": "ON",
+        "TINA_BUILD_LEGACY": "OFF",
+        "TINA_BUILD_RENDER_BGFX": "OFF",
+        "TINA_BUILD_SHADERS": "OFF",
+        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON"
+      }
+    },
+    {
+      "name": "linux-clang22-vnext-sanitize",
+      "displayName": "Linux vNext Null (Clang 22 + libstdc++ 15 + ASan/UBSan)",
+      "inherits": "linux-clang22-vnext",
+      "binaryDir": "${sourceDir}/out/build/linux-clang22-vnext-sanitize",
+      "cacheVariables": {
+        "TINA_ENABLE_SANITIZERS": "ON"
       }
     }
   ],
@@ -109,6 +137,12 @@
       "jobs": 2
     },
     {
+      "name": "windows-vnext-release",
+      "configurePreset": "windows-msvc-vnext",
+      "configuration": "Release",
+      "jobs": 2
+    },
+    {
       "name": "linux-debug",
       "configurePreset": "linux-ninja",
       "jobs": 2
@@ -121,6 +155,16 @@
     {
       "name": "linux-gcc13-vnext-debug",
       "configurePreset": "linux-gcc13-vnext",
+      "jobs": 2
+    },
+    {
+      "name": "linux-clang22-vnext-debug",
+      "configurePreset": "linux-clang22-vnext",
+      "jobs": 2
+    },
+    {
+      "name": "linux-clang22-vnext-sanitize-debug",
+      "configurePreset": "linux-clang22-vnext-sanitize",
       "jobs": 2
     }
   ]

@@ -1,6 +1,7 @@
 # vNext 公共接口与生命周期规则
 
-> 状态：候选冻结并分批实施。Core 公共基础已用 public-header consumer 固化；其余接口按垂直切片落地。
+> 状态：分批实施。Core 与 M6-A 生命周期子集已经落地；完整状态栈、worker、Scene/Asset/UI/Audio、
+> Desktop bootstrap 与真实 backend 仍是后续契约。下文会明确标注当前接口与完整目标。
 
 ## 公开类型命名规则
 
@@ -28,9 +29,13 @@ Tina 不把所有可链接 header 都称为“用户 API”：
 | Engine Module SPI | Tina 模块、backend adapter 和测试 | EngineFactories、RenderDevice typed handle/descriptor、RenderFrame、FramePinSink、Pass Scheduler |
 | Backend Private | 具体 adapter | GLFW、bgfx/bx/bimg、FreeType、miniaudio、EnTT 等第三方类型 |
 
-Game SDK 不提供 RenderDevice、GPU resource handle、native window/surface 或第三方 factory。
-`tina_bootstrap_desktop` 提供只使用 Tina 类型的 `Desktop::CreateEngine(config)`，普通游戏无需
-知道生产组合实际使用 GLFW/bgfx/FreeType/miniaudio。
+M6-A 当前 Game SDK 只实现 `EngineHost`、`IGameApplication`、单个 `IGameState`、
+`GameStatePolicy` 与最小 Phase Context；表中 World/Asset/UI、`GameStateCommands`、typed render
+handle/descriptor 和 Pass Scheduler 均未实现。
+
+完整 Game SDK 不提供 RenderDevice、GPU resource handle、native window/surface 或第三方 factory。
+后续 `tina_bootstrap_desktop` 将提供只使用 Tina 类型的 `Desktop::CreateEngine(config)`，让普通
+游戏无需知道生产组合实际使用 GLFW/bgfx/FreeType/miniaudio。
 
 ## ABI 范围
 
@@ -75,11 +80,25 @@ public:
 
 ## 最小启动接口
 
+M6-A 当前可用接口为：
+
 ```cpp
 class EngineHost final {
 public:
-    Core::Result<RunExitReason> run(IGameApplication& gameApplication);
+    [[nodiscard]] static Core::Result<std::unique_ptr<EngineHost>> Create(
+        const EngineConfig& config,
+        EngineFactories factories) noexcept;
+
+    [[nodiscard]] Core::Result<RunExitReason> run(IGameApplication& gameApplication) noexcept;
 };
+```
+
+`EngineFactories` 是高级集成/测试 SPI。当前 `tina_sample_null` 显式注入 Clock、Headless Platform、
+Disabled TaskSystem 和 NullRenderDevice；`EngineHost` 由 main 的 `unique_ptr` 唯一拥有。
+
+面向普通桌面游戏的后续组合入口为：
+
+```cpp
 
 namespace Desktop {
 
@@ -89,19 +108,9 @@ CreateEngine(EngineConfig config);
 } // namespace Desktop
 ```
 
-高级集成和测试 SPI：
-
-```cpp
-class EngineHost final {
-public:
-    [[nodiscard]] static Core::Result<std::unique_ptr<EngineHost>> Create(
-        EngineConfig config,
-        EngineFactories factories);
-};
-```
-
-`Desktop::CreateEngine` 只是组合 helper，不是 Singleton。返回的 EngineHost 仍由 main 的
-`unique_ptr` 唯一拥有，不能从游戏代码全局查询。
+`Desktop::CreateEngine` 尚未实现；它会是组合 helper，不是 Singleton，也不能从游戏代码全局查询。
+M6-A target 当前只承诺 build-tree consumer；正式 `Tina::GameSDK`、`install(EXPORT ...)`、版本化
+package config 与外部 SDK consumer 门禁会在 Desktop Bootstrap 切片统一加入，当前不伪装成可安装 SDK。
 
 ## IGameApplication：游戏程序入口
 
@@ -110,7 +119,7 @@ public:
 ```cpp
 class IGameApplication {
 public:
-    virtual ~IGameApplication() = default;
+    virtual ~IGameApplication() noexcept = default;
 
     [[nodiscard]] virtual Core::Result<std::unique_ptr<IGameState>>
     createInitialState(GameStartupContext& context) = 0;
@@ -120,9 +129,11 @@ public:
 ```
 
 - `createInitialState` 每次 `run()` 只调用一次；返回恰好一个 initial State；
-- 初始 State enter、initial policy 采样和首份 UI layout/snapshot 全部成功后启动事务才 commit；
-  之前失败自动回滚，不调用 candidate `onExit` 或 Application `onShutdown`；
-- commit 后无论正常退出还是帧错误，所有 State 退出后调用一次 `onShutdown`；
+- M6-A 在 initial State `onEnter` 成功并采样 `initialPolicy()` 后 commit；创建或 enter 失败自动
+  回滚，不调用 candidate `onExit` 或 Application `onShutdown`；首份 UI layout/snapshot 将在 UI
+  切片加入后纳入同一启动事务；
+- commit 后无论正常退出还是帧错误，当前 State `onExit` 后调用一次 `onShutdown`；完整状态栈
+  加入后扩展为所有 committed State 按规定顺序退出；
 - 它没有 fixed/update/render/UI 回调；
 - 可以拥有不依赖 Engine handle 的 Settings/Save repository，并通过构造函数显式传给 State；
 - 不得保存 Phase Context、AssetLease、EntityId、UINodeId、Render handle 或 Engine module owner。
@@ -142,7 +153,7 @@ struct GameStatePolicy {
 
 class IGameState {
 public:
-    virtual ~IGameState() = default;
+    virtual ~IGameState() noexcept = default;
 
     virtual Core::Status onEnter(GameStateEnterContext& context) = 0;
     virtual void onExit(GameStateExitContext& context) noexcept = 0;
@@ -167,6 +178,9 @@ Menu、Settings、Game2D、Game3D、Pause 都实现 `IGameState`。默认空帧�
 编写无意义 boilerplate。World、UI roots、订阅、Asset lease 和 State TaskGroup 只属于已提交
 State。
 
+M6-A 只持有一个 committed State：`initialPolicy()` 已采样，但尚无下层 State 可传播或阻断；
+`GameStateCommands`、栈传播与状态提交均未实现。以下传播和命令规则是完整 Runtime 目标。
+
 Gameplay Input、UI Input、Fixed Update、Frame Update 从栈顶向下按各自 committed policy 传播，
 Render Scene Extraction/UI visible roots 从最底可见层向上。`initialPolicy()` 只在成功 `onEnter`
 后采样一次；Runtime 持有唯一 committed policy，后续只能通过状态命令修改，不能靠成员变量
@@ -176,7 +190,7 @@ Render Scene Extraction/UI visible roots 从最底可见层向上。`initialPoli
 Update 结束后的 State Transition Commit 提交。首期 `blocksRenderBelow` 同时决定下层 World 和
 UI root 可见性。
 
-## GameStateCommands：唯一状态变化入口
+## GameStateCommands：后续唯一状态变化入口
 
 ```cpp
 struct GameStateCommandId {
@@ -234,6 +248,20 @@ public:
 
 Context 是不可复制/移动、只在当前 callback 有效的 capability view：
 
+| M6-A Context | 当前可访问能力 |
+| --- | --- |
+| `GameStartupContext` / `GameStateEnterContext` | 只读 `EngineConfig` |
+| `FixedUpdateContext` | `FrameTiming` 与 `FixedUpdateTiming` |
+| `FrameUpdateContext` | `FrameTiming` 与 `requestExitAfterFrame()` |
+| `RenderSceneExtractionContext` / `UIUpdateContext` | 只读 `FrameTiming` |
+| `GameStateExitContext` / `GameShutdownContext` | `RunStopCause` 与可选 Runtime failure |
+
+`runtimeFailure()` 返回 callback-only 的只读借用，只保证在当前 `onExit`/`onShutdown` 调用期间
+有效；回调可以复制稳定 code/message 供诊断，但不得保存 Error 指针或 Context。
+
+M6-A Context 不提供 World、Input、Asset、Task、UI writer 或 Render writer。完整垂直切片将按能力
+逐项扩展，下表是目标边界，不是当前 API：
+
 | Context | 可访问能力 | 明确禁止 |
 | --- | --- | --- |
 | `GameStartupContext` | 只读 config/capability、游戏级启动回滚 | World/UI root、RenderDevice、保存 Context |
@@ -256,12 +284,22 @@ Builder/Writer 使用 sticky first-error：第一次失败后后续 append 为�
 ```cpp
 struct FrameTiming {
     Duration realDelta;
+    Duration acceptedRealDelta;
+    Duration rejectedRealDelta;
     Duration updateDelta;
+    Duration discardedSimulationDelta;
     Duration fixedDelta;
     double interpolation;
     std::uint64_t frameIndex;
-    std::uint64_t simulationTick;
+    std::uint64_t completedSimulationTicks;
+    std::uint32_t fixedStepCount;
+};
+
+struct FixedUpdateTiming {
+    Duration fixedDelta;
+    std::uint64_t simulationTickIndex;
     std::uint32_t fixedStepIndexInFrame;
+    std::uint32_t fixedStepCountInFrame;
 };
 ```
 
@@ -271,50 +309,61 @@ struct FrameTiming {
 `discardedSimulationDelta`，只保留小于一步的余量计算 interpolation。time scale 只影响玩法，
 不影响 Platform/UI/Asset/Audio/diagnostics wall timeout。
 
-`FixedUpdateContext` 只提供目标 tick 的 `SimulationActionSnapshot`；`FrameUpdateContext` 只提供当前
-帧 `FrameActionSnapshot`。0 fixed-step 帧保留 Simulation edge，最多4步也只消费一次；同一隐式
-Pressed 不会在两个域重复执行。
+M6-A 只提供上述时间数据；`SimulationActionSnapshot` 与 `FrameActionSnapshot` 尚未实现。完整
+Input 切片会让 fixed context 只读取目标 tick 的 Simulation Action、frame context 只读取当帧
+Frame Action，并保证0步保留 edge、最多4步也只消费一次。
 
 ## EngineConfig
 
 `EngineConfig` 是可复制纯值，Create 前一次性验证：
 
-- product name、UTF-8 日志/资源根、primary window logical size/title/fullscreen/vsync；
-- fixed delta（默认1/60 s）、max fixed steps（默认4）、max accepted real delta；
-- CPU/IO worker、Task/Event/Input queue、shutdown deadline；
-- FrameArena、UI、Asset completion/upload、Audio command 和 Render resource 预算；
-- Headless/production policy、Metrics/trace capture 策略。
+- M6-A 当前字段：UTF-8 `applicationName`、fixed delta（默认1/60 s）、max fixed steps（固定上限4，
+  配置默认4）、
+  max accepted real delta、gameplay time scale 与 shutdown deadline；
+- 后续字段：日志/资源根、primary window、CPU/IO worker、Task/Event/Input queue、FrameArena、
+  UI/Asset/Audio/Render 预算、backend policy 与 Metrics/trace capture 策略。
 
-默认值集中在 `EngineConfig::Defaults()`。0/非有限 delta、尺寸/容量乘法溢出、冲突 backend
-组合必须在创建模块前返回 `InvalidConfig`。
+默认值集中在 `EngineConfig::Defaults()`。M6-A 已在创建任何模块前拒绝空/非法 UTF-8 应用名、
+0/非有限时间值、`maximumStepsPerFrame > 4`、非法 time scale 与 shutdown deadline；尺寸、容量
+和 backend 组合验证随对应字段加入。`Create` 通过 `const EngineConfig&` 接收输入，并在自身
+`noexcept`/`try` 边界内复制所有权，避免调用前的字符串复制逃出异常边界。当前 Disabled
+TaskSystem 没有等待过程，因此 shutdown deadline 只完成配置校验；有界 Worker 切片必须在它
+真正驱动“请求停止 → 有界等待 → fatal-stop”后才能宣称 deadline 已实施。
 
 ## EngineFactories SPI
 
-`EngineFactories` 只属于组合/测试 SPI，是一次性移动值，不是运行期 registry。每个 type-erased
-factory 接受窄 CreateParams 并返回 `Result<unique_ptr<Interface>>`；成功即由 EngineHost 接管并
-登记逆操作。
+`EngineFactories` 只属于组合/测试 SPI，是一次性移动值，不是运行期 registry。M6-A 包含
+MonotonicClock、Platform、TaskSystem、RenderDevice 四个 move-only factory；每个 type-erased
+factory 接受窄 CreateParams 并返回 `Result<unique_ptr<Interface>>`，成功即由 EngineHost 接管并
+登记逆操作。缺少任一 factory 会在调用任何 factory 前失败。
 
 - Runtime 不依赖具体 GLFW/bgfx/miniaudio factory；
 - `tina_bootstrap_desktop` 的一个 composition translation unit 选择真实 adapter；
-- Headless + NullRender + DisabledUI/Audio 是显式组合，不是生产失败后的静默降级；
+- Headless + DisabledTask + NullRender 是当前显式组合，不是生产失败后的静默降级；Disabled
+  UI/Audio 尚未实现；
 - factory 不保存 CreateParams、不注册全局对象、不后台完成半创建；
 - backend shutdown 幂等且由 EngineHost 唯一调用。
 
 ## Handle、借用与 API 可见性
 
-| 类型 | API 层 | Owner/寿命 | 失败方式 |
-| --- | --- | --- | --- |
-| `EngineHost` | Game SDK | main `unique_ptr`，直到 shutdown | Create/run `Result` |
-| Phase Context/Writer | Game SDK | Runtime stack，当前 callback | Status/sticky error |
-| `EntityId/UINodeId/WindowId` | Game SDK | 对应 registry generation + owner | invalid/stale/wrong owner |
-| `AssetHandle<T>` | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
-| `AssetLease<T>` | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
-| Render typed handle | Engine Module SPI | RenderDevice registry 到 retire | invalid/stale/wrong device |
-| `UIDisplayListView/RenderFrame` | Engine Module SPI | 所属 Runtime-private RenderFramePacket 生命周期 | CapacityExceeded/invalid ref |
-| `RenderFramePacket` | Runtime Private | Runtime 固定容量 pool；backend completion 前 owning | PoolExhausted/submit failure |
+下表同时列出 M6-A 已实现的最小接口和后续已冻结目标，不能把“目标”行理解成当前已有 API：
 
-所有 generation handle 使用强类型 Tag，并在所有构建中校验非零 registry owner token、slot index
+| 类型 | 状态 | API 层 | Owner/寿命 | 失败方式 |
+| --- | --- | --- | --- | --- |
+| `EngineHost` | M6-A 已实现 | Game SDK | main `unique_ptr`，直到 shutdown | Create/run `Result` |
+| 最小 Phase Context | M6-A 已实现 | Game SDK | Runtime stack，当前 callback | callback `Status` |
+| `WindowId/UINodeId` | M7 目标 | Game SDK | Window/UI registry generation + owner | invalid/stale/wrong owner |
+| `EntityId` | M8 目标 | Game SDK | World registry generation + owner | invalid/stale/wrong owner |
+| `AssetHandle<T>` | M10 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
+| `AssetLease<T>` | M10 目标 | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
+| Render typed handle | M7/M9 目标 | Engine Module SPI | RenderDevice registry 到 retire | invalid/stale/wrong device |
+| 最小 `RenderFrame` | M6-A 已实现 | Engine Module SPI | 当前 submit 调用 | submit `Status` |
+| `UIDisplayListView` | M7 目标 | Engine Module SPI | 所属 Runtime-private RenderFramePacket 生命周期 | CapacityExceeded/invalid ref |
+| `RenderFramePacket` | M7 目标、Runtime Private | Runtime Private | Runtime 固定容量 pool；backend completion 前 owning | PoolExhausted/submit failure |
+
+M6-A 已实现的通用 `GenerationPool` 使用强类型 Tag，并在所有构建中校验非零 registry owner token、slot index
 和32位 generation；owner token 由当前单一 Core 链接镜像自动单调分配，registry 销毁后也不复用。
+后续 Entity/UI/Render/Asset handle 必须复用该契约，而不是各自重新发明弱校验 ID。
 若未来插件各自静态链接 Core，必须改为 EngineHost-owned/单一导出 allocator。`UINodeId` 还在 Game SDK
 语义上显式编码并校验 owner `WindowId`。Debug 可再保存更宽的 Engine/registry cookie 立即诊断
 跨 Host/World/Window/Device 使用，但不承担 Release 正确性。Game component 保存 AssetHandle 和
@@ -339,14 +388,20 @@ assert 不处理用户数据。所有 size/count/offset 在分配前检查溢出
 重新校验 owner + generation。
 
 C++ exception 保持开启以兼容标准库/第三方，但会在 Engine、`IGameApplication`、`IGameState`、Task
-和 C callback 边界转换为结构化错误。析构、rollback、`onExit`、`onShutdown`、Audio callback
-必须 `noexcept`；热点正常路径不使用 throw 控制流程。
+和 C callback 边界尽力转换为结构化错误。M6-A 的 `EngineHost::Create/run` 已标为 `noexcept`；若
+系统已耗尽到连返回 `Error` 所需内存都无法分配，则按 fatal/terminate 处理，不能承诺继续构造
+一个错误对象。析构、rollback、`onExit`、`onShutdown`、Audio callback 必须 `noexcept`；热点
+正常路径不使用 throw 控制流程。
 
 ## 公共接口验收
 
-- `tina_game_api_consumer` 不添加第三方 include path即可包含全部 Game SDK header；
+M6-A 已验证：
+
 - `IGameApplication` 没有逐帧虚函数，`IGameState` 是唯一帧行为接口；
-- 每个 public header 单独 include 和编译，不依赖 umbrella 偶然顺序；
-- public include/install tree 通过 forbidden-token 和 dependency-closure 检查；
-- 示例只使用 `Desktop::CreateEngine + IGameApplication + IGameState` 即可运行 UI/2D/3D；
-- Null sample 完全不 add_subdirectory/link/load GLFW/bgfx/FreeType/miniaudio。
+- Core/Platform/Task/Render/Runtime 的 public header 逐头独立 include 和编译；
+- `tina_sample_null` 只使用 Tina C++23 API 与显式 factory SPI，构建图不加入或链接
+  GLFW/bgfx/EnTT/FreeType/miniaudio/SDL/SDL3；
+- Windows Debug/Release 与 Linux GCC/Clang 直接 GoogleTest 均92/92，Null sample 通过300帧和10,000帧。
+
+后续验收：`tina_game_api_consumer`/Game SDK umbrella、完整 forbidden-token/dependency-closure、
+`Desktop::CreateEngine`，以及只使用 Game SDK 运行 UI/2D/3D 产品样例。

@@ -1,8 +1,11 @@
 # 架构总览
 
-## 当前实现
+## 当前双轨实现
 
-Tina 仍以单个游戏可执行文件为主，源码按 Core、Engine、Renderer、UI、ECS 和 Game 组织。
+Tina 当前处于 Legacy 产品与 vNext 垂直切片并存的迁移期。Legacy 仍以单个游戏可执行文件为主，
+源码按 Core、Engine、Renderer、UI、ECS 和 Game 组织；M6-A 已建立独立的 `tina_core`、
+`tina_platform`、`tina_task`、`tina_render`、`tina_runtime` 五个 C++23 target，以及不依赖真实
+窗口和 GPU 的 `tina_sample_null`。
 现有 Legacy target 的包依赖由 vcpkg manifest 管理，bgfx、EASTL、EABase 仍保持固定源码
 版本；其中 EASTL/EABase 只属于迁移期现状，不是 vNext 目标依赖。
 
@@ -22,7 +25,10 @@ Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Ga
 
 ## 旧架构删除状态
 
-结论：旧文档已经替换，但旧源码架构没有完全删除。`TINA_BUILD_LEGACY` 与 vNext-only preset 已落地，能够把旧依赖和产品 target 排除出最小构建图；新的 `EngineHost` Runtime 仍未实现，因此现有旧架构依然是当前可运行主实现，不能直接整目录删除。
+结论：旧文档已经替换，但旧源码架构没有完全删除。`TINA_BUILD_LEGACY` 与 vNext-only preset
+已落地，能够把旧依赖和产品 target 排除出最小构建图。M6-A 的 `EngineHost` 生命周期内核已经
+可独立运行，但它还没有生产窗口、真实渲染、Scene/Asset/UI/Audio 或完整状态栈，因此 Legacy
+仍是当前 2D/UI/3D 产品实现，不能直接整目录删除。
 
 | 范围 | 状态 | 证据或影响 |
 | --- | --- | --- |
@@ -35,7 +41,8 @@ Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Ga
 | EnTT 边界 | 尚未收敛 | `World` 暴露 `entt::registry`，GameScene 直接访问 |
 | bgfx 边界 | 尚未收敛 | Renderer、UI 和部分公共结构仍直接暴露 bgfx handle/type |
 | 路径资源系统 | 仍在使用 | Cooked Asset、稳定 AssetId 和独立 GPU upload queue 尚未落地 |
-| 新 Runtime 接口 | 尚未落地 | `EngineHost`、`IGameApplication`、`IGameState`、阶段 Context、Render SPI 和 NullRenderDevice 仍是目标设计 |
+| vNext M6-A Runtime | 已完成生命周期切片 | `EngineHost`、`IGameApplication`、单个 `IGameState`、最小阶段 Context、Backend SPI、Headless Platform、Disabled TaskSystem 与 NullRenderDevice 已落地 |
+| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene/Asset/UI/Audio、Desktop bootstrap 与真实 backend 仍按后续切片实施 |
 
 因此不能用“删除旧 `src`”作为下一步。正确顺序是：建立新边界和测试 → 迁移调用点 → 确认旧接口零引用 → 通过 2D/UI/3D 验收 → 在独立提交中删除旧实现。
 
@@ -61,8 +68,9 @@ Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Ga
 - vNext target 不依赖 EASTL；标准库/`std::pmr` 承担通用容器，Tina 只提供少量经过测试的
   固定容量和 generation 专用结构；xxHash 只藏在 Hash adapter 后；
 - 2D/3D 共享右手 Y-up 世界，2D 位于 XY 平面；
-- Game SDK、Tina public header 和 Phase Context 均不暴露 RenderDevice/native handle/bgfx；
-  bgfx 只出现在 `tina_render_bgfx` 私有实现和离线 shader 工具；
+- Game SDK 和 Phase Context 不暴露 RenderDevice/native handle；Tina module public header 可以暴露
+  纯 Tina Render SPI，但任何公共头都不暴露 bgfx/native 类型；bgfx 只出现在
+  `tina_render_bgfx` 私有实现和离线 shader 工具；
 - 自研 UI 只输出后端无关 DisplayList，以细粒度 dirty、PaintCache 和 committed snapshot
   实现无变化 UI 的0布局/0 PaintCache rebuild/0 Tina heap allocation；
 - EnTT 只作为 Scene 内部存储，模块接口只暴露 generation `EntityId`；

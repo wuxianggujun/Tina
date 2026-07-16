@@ -21,7 +21,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | --- | --- |
 | 平台 | Windows 与 Linux |
 | Windows 主门禁 | Visual Studio 2026 / MSVC 19.50 |
-| 语言 | C++23；Tina 自有 target 已统一，Linux GCC 13+/Clang 17+ 门禁仍待实测 |
+| 语言 | C++23；Tina 自有 target 已统一，Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 已实测 |
 | 编码 | 源码、文档、资源清单和日志均为 UTF-8；MSVC 强制 `/utf-8` |
 | 窗口与基础输入 | GLFW；不使用 SDL/SDL3 |
 | Windows IME | IMM32，只存在于 Windows 平台适配层 |
