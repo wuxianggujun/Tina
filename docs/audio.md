@@ -27,7 +27,7 @@ Enabled/Disabled -> Stopping -> Stopped
 ```
 
 - `EngineHost` 拥有 `AudioEngine`；初始化失败只有在配置声明 Audio 必需时才令 Engine 创建失败；
-- `AudioVoiceId { index, generation }` 只标识 voice slot，不是 AssetId；slot 复用前增加 generation；
+- `AudioVoiceId { owner, index, generation }` 只标识 AudioEngine voice slot，不是 AssetId；slot 复用前增加 generation；
 - `AssetHandle<T>` 是可失效查询句柄，不能独自保证 payload 存活；正在播放或排队上传的声音
   必须持有 `AssetLease<AudioClip>` 强引用；
 - AudioEngine 持有 active lease，直到 callback 确认 voice 停止并由主线程 completion 回收；

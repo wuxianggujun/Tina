@@ -9,6 +9,8 @@
 #include <tina/core/diagnostics/Assert.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/core/id/GenerationId.hpp>
+#include <tina/core/id/GenerationPool.hpp>
 #include <tina/core/memory/CountingMemoryResource.hpp>
 #include <tina/core/memory/FrameArena.hpp>
 #include <tina/core/memory/MemoryStatistics.hpp>
@@ -22,12 +24,15 @@
 
 namespace Tina::Tests {
 
+struct IsolationGenerationTag;
+
 TEST(PublicHeaderIsolationTest, PublicCoreSurfaceUsesOnlyTheInstalledIncludeRoot)
 {
     static_assert(__cpp_lib_expected >= 202202L);
     static_assert(std::is_same_v<Core::Result<int>, std::expected<int, Core::Error>>);
     static_assert(Core::ProcessBitCount == sizeof(void*) * 8U);
     static_assert(Core::MemoryTagCount == 13U);
+    static_assert(!Core::GenerationId<IsolationGenerationTag>{}.hasValue());
     SUCCEED();
 }
 

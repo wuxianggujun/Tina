@@ -379,6 +379,22 @@ public:
 优先调用 `FrameArena::tryAllocate` 或在边界预留容量。需要 pmr 容器时，在 phase 边界捕获
 分配失败并转换为 `Result`；不允许异常穿过主循环或后台线程入口。
 
+## Generation registry
+
+`GenerationPool<T, Tag>::Create(capacity, resource)` 在初始化期只分配一次固定 slot block；此后
+`tryEmplace/tryGet/erase/clear` 不增长、不回退 heap。`GenerationId<Tag>` 包含非零 owner token、
+slot index 和32位 generation：Tag 在编译期隔离类型，owner 在 Release 隔离同类型 registry，
+generation 隔离同 slot 的旧生命周期。owner token 由当前 `tina_core` 链接镜像内的单调计数器
+自动生成，pool 销毁后也不复用；计数器不保存 registry、不参与查找，因此不是 Service Locator
+或全局对象仓库。未来若插件/DLL 各自静态链接 Core，必须改由单一 EngineHost/导出 allocator 发号，
+不能依赖每个链接镜像各自的计数器。
+
+满容量或32位 owner token 空间耗尽返回 `CapacityExceeded`，对象构造异常在 factory 边界转换为
+`Result` 且不消费 free slot。
+erase 后先推进 generation 再复用；若下一代会从 `UINT32_MAX` 回绕，则永久 retire 该 slot。
+runtime handle 不序列化，异步任务在执行和 completion 两端重新 resolve。`GenerationEraseResult`
+明确区分 invalid、wrong owner、out of range 和 stale，热点 lookup 只返回 pointer/nullptr。
+
 ## 专用结构失败策略
 
 | 结构 | 满容量/失败 | 生命周期约束 |
@@ -386,7 +402,7 @@ public:
 | `StaticVector<T,N>` | `tryEmplaceBack` 返回空指针/失败；不 heap fallback | 正确构造、移动、逆序析构非平凡 `T` |
 | `InlineFunction<Sig,N>` | 过大/过对齐 callable 编译期拒绝 | move-only；销毁与调用中自失效安全 |
 | `FrameArena` | `tryAllocate` 返回 `nullptr` 并计数 | reset 前所有借用者完成 |
-| `GenerationPool<T,Tag>` | 满容量返回 `CapacityExceeded` | stale ID 永不解析到新对象；generation 回绕时 retire slot |
+| `GenerationPool<T,Tag>` | 满容量返回 `CapacityExceeded` | wrong owner/stale ID 永不解析到新对象；generation 回绕时 retire slot |
 | `SpscRingQueue<T,N>` | `tryPush/tryPop` 显式返回 false | 只能一个 producer、一个 consumer |
 
 可恢复的外部输入、Asset 数据和 Cooker 错误返回 `Result`。配置容量被内部稳态场景突破属于

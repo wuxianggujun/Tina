@@ -313,9 +313,13 @@ factory 接受窄 CreateParams 并返回 `Result<unique_ptr<Interface>>`；成�
 | `UIDisplayListView/RenderFrame` | Engine Module SPI | 所属 Runtime-private RenderFramePacket 生命周期 | CapacityExceeded/invalid ref |
 | `RenderFramePacket` | Runtime Private | Runtime 固定容量 pool；backend completion 前 owning | PoolExhausted/submit failure |
 
-所有 generation handle 使用强类型 Tag。`UINodeId` 在所有构建中编码并校验 owner `WindowId`；
-其他 handle 通过所属 capability/registry 校验，Debug 再保存 Engine/registry cookie 立即诊断
-跨 World/Window/Device 使用。Game component 保存 AssetHandle 和语义属性，不保存 Render typed handle。
+所有 generation handle 使用强类型 Tag，并在所有构建中校验非零 registry owner token、slot index
+和32位 generation；owner token 由当前单一 Core 链接镜像自动单调分配，registry 销毁后也不复用。
+若未来插件各自静态链接 Core，必须改为 EngineHost-owned/单一导出 allocator。`UINodeId` 还在 Game SDK
+语义上显式编码并校验 owner `WindowId`。Debug 可再保存更宽的 Engine/registry cookie 立即诊断
+跨 Host/World/Window/Device 使用，但不承担 Release 正确性。Game component 保存 AssetHandle 和
+语义属性，不保存 Render typed handle。普通 Game SDK 不提供 raw parts factory；handle 只能由所属
+registry 创建并返回。
 
 ## 第三方与 native 零泄漏
 

@@ -8,6 +8,8 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/Assert.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/error/Error.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/error/Result.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/id/GenerationId.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/id/GenerationPool.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/memory/CountingMemoryResource.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/memory/FrameArena.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/memory/MemoryStatistics.hpp
@@ -19,6 +21,9 @@ add_library(tina_core STATIC
     diagnostics/Assert.hpp
     error/Error.hpp
     error/Result.hpp
+    id/GenerationId.cpp
+    id/GenerationId.hpp
+    id/GenerationPool.hpp
     memory/CountingMemoryResource.cpp
     memory/FrameArena.cpp
     memory/MemoryTracker.cpp

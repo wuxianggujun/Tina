@@ -70,7 +70,7 @@ Tina 不会因为只需要 EASTL 的一部分就复制其实现。自研范围�
 - `StaticVector<T, N>`：对象内存储、无 heap fallback、满容量返回失败；
 - `InlineFunction<Signature, Bytes>`：小对象内联、禁止动态分配；
 - `FrameArena`：按帧线性分配、统一 reset、对齐与高水位统计；
-- `GenerationPool<T, Tag>`：slot/generation 生命周期与 stale handle 检测；
+- `GenerationPool<T, Tag>`：owner/slot/generation 生命周期与 stale/wrong-owner 检测；
 - `SpscRingQueue<T, N>`：仅在 Audio/Upload 单生产者单消费者路径测得需要后实现。
 
 其余使用 `std::vector/string/optional/variant/unique_ptr` 等标准类型；需要生命周期 allocator
@@ -272,7 +272,8 @@ Cooker 依赖原子写保证失败时旧产物仍有效。路径测试覆盖空�
 - `ContentHash`：版本化128位非密码学内容 Hash，用于增量 Cook、缓存和非对抗性损坏检测；
   安全完整性使用独立密码学 Hash/签名；
 - `StringId`：固定算法的 64 位运行时 ID，Debug 保存原文并检测碰撞；
-- `EntityId/UINodeId/RenderHandle`：index + generation；UINodeId 另含 owner WindowId，不使用内容 hash。
+- `EntityId/UINodeId/RenderHandle`：owner token + index + generation；UINodeId 另含语义 owner WindowId，
+  不使用内容 hash。
 
 类型之间不提供隐式转换，避免把“身份”“内容版本”“容器 hash”混为一个整数。
 
@@ -290,7 +291,7 @@ Cooker 依赖原子写保证失败时旧产物仍有效。路径测试覆盖空�
 - MemoryTag current/peak、全量无分配 snapshot、OOM、溢出、alignment、并发计数和 tracker 自递归；
 - StaticVector 的满容量、构造/析构/移动和无堆分配；InlineFunction 的大小限制、移动和
   回调自销毁；FrameArena 的对齐、reset、OOM 与高水位；
-- generation ID 的 stale handle、wrap policy 和类型隔离；
+- generation ID 的 stale/wrong-owner handle、wrap retire、固定容量/零稳态分配和类型隔离；
 - Assert/Ensure handler、death test、CrashContext 容量和敏感字段限制；
 - Visual Studio 2026 / MSVC 19.50 与 Linux GCC/Clang 直接执行 GoogleTest，不通过 CTest 调度。
 
@@ -305,4 +306,7 @@ Render 出现真实需求和 profiling 证据。
 实施状态（2026-07-17）：`MemoryTag`、原子 `MemoryTracker`、`CountingMemoryResource` 和 owning
 `FrameArena` 已进入 `include/tina/core/memory`。Arena 只在 `Create` 取得一次 backing block，
 支持 PMR、对齐/溢出/OOM 计数、epoch/reset 和零 heap fallback；`MemorySystem` 聚合 owner、
-完整 Metrics/Trace 和 GenerationPool 仍属于后续独立批次。
+完整 Metrics/Trace 仍属于后续独立批次。`GenerationId<Tag>` 与固定容量 `GenerationPool<T,Tag>`
+已落地：ID 编码非零 owner token/index/32位 generation，Create 只分配一次 slot block，构造失败
+不消费 slot，erase 立即使 stale ID 失效，回绕策略为永久 retire。owner token 由 Core 自动单调分配，
+pool 销毁后也不复用，跨 pool ID 在 Release 确定拒绝。

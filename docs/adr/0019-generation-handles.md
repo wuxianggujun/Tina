@@ -12,18 +12,25 @@ UINodeId 误传。
 ## 决定
 
 EntityId、UINodeId、WindowId、GamepadId、RenderHandle、AudioVoiceId 和 Asset runtime handle
-都使用强类型 Tag 隔离的 index + 32位 generation。0 为 invalid；slot 每次复用先增加 generation，
-回绕时永久 retire 而不再次复用。`UINodeId` 额外编码 owner `WindowId`，所有构建都校验
-owner + generation；其他 API 同时受 owner capability/registry 限制。Debug handle/调用点再携带
-Engine/registry cookie 诊断跨 Host/World/Device 使用，但 Debug 数据不承担 Release 正确性。
+都使用强类型 Tag 隔离的非零 owner token + index + 32位 generation。0 generation 和0 owner
+均为 invalid；slot 每次复用先增加 generation，回绕时永久 retire 而不再次复用。owner token
+由当前 `tina_core` 链接镜像内的单调计数器自动发放，pool 销毁后也不复用；它只负责生成身份，
+不提供查找、生命周期或服务定位。32位 token 空间耗尽时创建新 pool 明确返回 `CapacityExceeded`。
+因此当前单一 Core 链接模型下，Release
+也能拒绝另一个 pool 中恰好相同的 index/generation。`UINodeId` 的 Game SDK 语义仍显式
+组合 owner `WindowId`，内部 slot id 同时校验 UIContext token。Debug handle/调用点再携带更宽的
+Engine/registry cookie 帮助定位，但 Debug 数据不承担 Release 正确性。
 稳定序列化身份使用 AssetId/业务 ID，不能保存 runtime generation handle。
+普通 Game SDK 只能从所属 registry 获得 handle，不能从 raw owner/index/generation 手工构造。
 
 ## 结果
 
-- stale 和跨类型误用确定失败；
-- registry 需要 retire 计数、容量门禁和 owner 测试；
+- stale、wrong-owner 和跨类型误用确定失败；
+- registry 需要 retire 计数、容量门禁、owner 唯一性和耗尽诊断；
 - Debug cookie 增加少量诊断数据，但不成为 Release 正确性的唯一保障；
 - 异步任务在执行与 completion 两端都必须重新解析 generation。
+- 若未来允许多个插件/DLL 各自静态链接 Tina Core，token source 必须提升为 EngineHost-owned 或
+  单一导出 allocator；在此之前不宣称跨多个 Core 链接镜像唯一。
 
 ## 被拒绝方案
 

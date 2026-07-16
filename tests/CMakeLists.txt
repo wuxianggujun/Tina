@@ -6,12 +6,15 @@ set(TINA_CORE_TEST_SOURCES
     core/header_isolation/CountingMemoryResourceHeader.cpp
     core/header_isolation/FixedStepAccumulatorHeader.cpp
     core/header_isolation/FrameArenaHeader.cpp
+    core/header_isolation/GenerationIdHeader.cpp
+    core/header_isolation/GenerationPoolHeader.cpp
     core/header_isolation/MemoryTrackerHeader.cpp
     core/header_isolation/MonotonicClockHeader.cpp
     core/header_isolation/ResultHeader.cpp
     core/PublicHeaderIsolationTests.cpp
     core/ResultTests.cpp
     core/FrameArenaTests.cpp
+    core/GenerationPoolTests.cpp
     core/MemoryTrackerTests.cpp
     core/ScopeExitTests.cpp
     core/TimeTests.cpp

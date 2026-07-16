@@ -154,7 +154,7 @@ BufferHandle       TextureHandle       SamplerHandle
 ShaderHandle       PipelineHandle      RenderTargetHandle
 ```
 
-每种 handle 都是不同 Tag 的 `index + generation`，不能隐式互转，并受具体 RenderDevice registry
+每种 handle 都是不同 Tag 的 `owner token + index + generation`，不能隐式互转，并受具体 RenderDevice registry
 约束；Debug 增加 owner cookie。Destroy 立即令逻辑 generation 失效，物理资源进入 retirement
 ledger，直到 backend completion/fence 后才释放和递减实际计数。
 

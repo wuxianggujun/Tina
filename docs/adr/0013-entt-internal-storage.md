@@ -11,7 +11,7 @@
 ## 决定
 
 `tina_scene` 继续使用 EnTT 作为内部 ECS 存储，但公共接口只暴露 Tina 强类型
-`EntityId(index, generation)`、组件 query/view 和 command。固定更新中的结构变更进入
+`EntityId(owner, index, generation)`、组件 query/view 和 command。固定更新中的结构变更进入
 Worker-local command buffer，barrier 后稳定合并；Render 只消费 extraction 结果，不读取
 registry。公共 header 和跨模块 descriptor 不出现 EnTT 类型。
 

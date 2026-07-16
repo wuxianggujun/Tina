@@ -67,14 +67,14 @@
 
 ## M6 Null Runtime 与公共入口垂直切片
 
-实施状态（2026-07-17）：前三批正在按独立提交推进。Tina 自有 target 已统一 C++23；新增 `TINA_BUILD_LEGACY`、`TINA_BUILD_RENDER_BGFX`、`TINA_BUILD_BENCHMARKS`；vcpkg Legacy feature、`windows-msvc-vnext` 与 `linux-gcc13-vnext` 已建立。Core 已迁到独立 `include/tina` 公共面，Result/Status 已使用 `std::expected`，稳定 Error domain/code/context、可注入 Monotonic Clock、FixedStepAccumulator、MemoryTag、并发计数 PMR 和无回退 FrameArena 已落地。当前 Windows vNext Debug/Release 27/27、Legacy Debug 70/70、UI/3D 各300帧通过。Linux 正式 C++23 工具链和下列 Runtime/Core 能力仍按本里程碑继续实施，不能因 Core 地基通过而标记 M6 完成。
+实施状态（2026-07-17）：前四批已按独立提交完成。Tina 自有 target 已统一 C++23；新增 `TINA_BUILD_LEGACY`、`TINA_BUILD_RENDER_BGFX`、`TINA_BUILD_BENCHMARKS`；vcpkg Legacy feature、`windows-msvc-vnext` 与 `linux-gcc13-vnext` 已建立。Core 已迁到独立 `include/tina` 公共面，Result/Status 已使用 `std::expected`，稳定 Error domain/code/context、可注入 Monotonic Clock、FixedStepAccumulator、MemoryTag、并发计数 PMR、无回退 FrameArena 和 owner-aware GenerationPool 已落地。当前 Windows vNext Debug/Release 37/37、Legacy Debug 80/80；Release UI/2D游戏/3D 各300帧均返回0且无残留进程，3D 明确释放 vertex/index buffer。Linux 正式 C++23 工具链和下列 Runtime/Core 能力仍按本里程碑继续实施，不能因 Core 地基通过而标记 M6 完成。
 
 - 建立 `EngineHost::Create(config, factories)`、EngineConfig、阶段 Context、lifecycle-only
   `IGameApplication` 和唯一帧入口 `IGameState`；删除候选公共 `IFrameClient`；
 - 初始化阶段支持失败注入，并覆盖任意失败点逆序回滚、析构顺序、重复 shutdown；
 - 接入可注入 Clock、固定60 Hz/最多4步、唯一 Frame Phase 和阶段指标；其中 Clock 与固定步
   accumulator 已完成，EngineHost Frame Pipeline 接线待后续批次；
-- 建立 Headless Platform、TaskSystem 和 GenerationPool；FrameArena/MemoryTag 已完成，专用容器以
+- 建立 Headless Platform 和 TaskSystem；owner-aware GenerationPool、FrameArena/MemoryTag 已完成，专用容器以
   首个消费者为触发点；
 - 实现 NullRenderDevice、typed generation handle、最小 Pass Scheduler，以及
   `RenderFrame = World RenderScene + UIDisplayList + RenderSurfaceState + timing`；Runtime private

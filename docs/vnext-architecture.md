@@ -131,7 +131,7 @@ Tina 只实现具有明确引擎语义、标准库不能直接表达的最小结
 | `StaticVector<T, N>` | 对象内存储、永不回退到堆、满容量显式失败、可导出 `span` | Render/UI 帧命令 |
 | `InlineFunction<Signature, Bytes>` | 固定内联存储、禁止堆分配、过大 callable 编译期拒绝 | Event/Task 小回调 |
 | `FrameArena` | 线性分配、对齐校验、整帧 reset、当前/峰值统计 | Render Scene Extraction/UI Layout |
-| `GenerationPool<T, Tag>` | index + generation、stale handle 失败、slot 复用可测试 | Entity/Node/Render/Asset handle |
+| `GenerationPool<T, Tag>` | owner token + index + generation、wrong-owner/stale 失败、slot 复用可测试 | Entity/Node/Render/Asset handle |
 | `SpscRingQueue<T, N>` | 固定容量、单生产者/单消费者、明确 full/empty | 只有 Audio/Upload profiling 证明需要时 |
 
 不首期自研 DynamicVector、String、HashMap、SharedPtr、Sort 或通用无锁容器。每个 Tina 专用
@@ -139,7 +139,7 @@ Tina 只实现具有明确引擎语义、标准库不能直接表达的最小结
 
 xxHash 与 EASTL 分开决策。vNext 保留 xxHash 为私有算法后端：`ContentHash` 使用明确版本的
 128 位算法支持增量 Cook 和缓存；`StringId` 可使用固定64位算法/seed，并在 Debug 保存原文
-检测碰撞。`AssetId` 是独立稳定128位身份，generation handle 是 index + generation。路径
+检测碰撞。`AssetId` 是独立稳定128位身份，generation handle 是 owner token + index + generation。路径
 相等不能只比较 Hash，安全签名或不可信包完整性也不能使用非密码学 xxHash。
 
 完整预算、MemorySystem、FrameArena 复用点和跨模块资源矩阵见
@@ -348,7 +348,7 @@ Present 并使用平台等待避免 busy loop，但继续处理关闭和异步�
 
 ## Scene 与 Render Scene Extraction
 
-`World` 对外只暴露 Tina 的 `EntityId { index, generation }`、组件命令和查询接口，EnTT
+`World` 对外只暴露 Tina 的 `EntityId { owner, index, generation }`、组件命令和查询接口，EnTT
 registry 只存在于实现文件中。
 
 统一空间约定：右手坐标系、Y-up、-Z forward、单位米，2D 位于 XY 平面。Transform 至少
@@ -417,8 +417,8 @@ Ready/FrameOpen -> SurfaceSuspended -> Ready
   零尺寸 attachment，也不 busy-present；
 - 首期 device lost 作为结构化 fatal run error 并安全退出，不承诺透明重建所有 GPU 资源；
 - `beginFrame/endFrame` 不成对、跨 device/owner 使用 handle、重复 destroy 和 submit stale
-  generation 都是可测试错误；Debug handle 增加 owner cookie，避免相同 index/generation 在
-  另一个 registry 中被误解析；
+  generation 都是可测试错误；Release handle 的 owner token 阻止相同 index/generation 在不同
+  registry 中碰巧命中，Debug 可增加更宽 cookie 和创建调用点改善诊断；
 - deferred destroy 由 backend completion/frame fence 决定，不能硬编码“延迟 N 帧即安全”；
 - Pass 失败停止依赖提交，但仍关闭 marker、回收 CPU frame data，并把已提交 GPU ticket 转入
   正常 retire；
