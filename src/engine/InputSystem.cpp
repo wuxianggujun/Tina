@@ -1070,7 +1070,13 @@ void InputSystem::emitKeyPressed(KeyCode key, bool repeat)
     event.alt = isAltDown();
     if (key == KeyCode::Tab && !repeat) {
         m_eventSystem->focusNext(event.shift);
+    } else {
+        m_eventSystem->dispatchKeyPressedToFocused(
+            key, repeat, event.shift, event.ctrl, event.alt);
     }
+
+    // Keep the engine-level event for gameplay and compatibility. Focused UI
+    // controls no longer subscribe globally; they receive the routed event above.
     m_eventSystem->trigger(event);
 }
 

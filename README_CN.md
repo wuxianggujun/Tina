@@ -60,6 +60,6 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 
 项目不使用 CTest 调度；测试直接运行固定 GoogleTest 1.17.0 生成的 `tina_tests`。
 
-当前 UI 已具备 generation `NodeId`、Pointer Capture、Focus/Tab、每窗口 Theme/DPI、嵌套 Clip、通用 `UIScrollView`、十万行范围计算的 ListView 虚拟化，以及 Windows 原生 IME preedit/composition。窗口与基础输入仍使用 GLFW；IME 通过 Win32 IMM32 补充，不引入其他窗口或输入库。
+当前 UI 已具备 generation `NodeId`、Pointer Capture、Focus/Tab、焦点按键 Capture/Target/Bubble 路由、Button 的 Enter/Space 激活与焦点视觉、每窗口 Theme/DPI、嵌套 Clip、通用 `UIScrollView`、十万行范围计算的 ListView 虚拟化，以及 Windows 原生 IME preedit/composition。窗口与基础输入仍使用 GLFW；IME 通过 Win32 IMM32 补充，不引入其他窗口或输入库。
 
 详细状态与约束从 [文档索引](docs/README.md) 开始阅读。所有源码、文档、日志和配置统一使用 UTF-8，MSVC 强制启用 `/utf-8`。

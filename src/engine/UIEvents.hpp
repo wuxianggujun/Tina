@@ -5,6 +5,7 @@
 #pragma once
 
 #include "EventSystem.hpp"
+#include "InputCodes.hpp"
 #include <cstring>
 #include <algorithm>
 
@@ -92,6 +93,35 @@ struct FocusLostEvent : UIEvent<FocusLostEvent, EventTypeId::UIFocusLost> {
 // ==================== 按钮事件（高级封装） ====================
 
 // 按钮点击事件（直接继承 UIEvent，包含鼠标信息）
+// Keyboard input is routed only through the currently focused generation
+// NodeId. preventDefault() cancels the focused control's local default action
+// without changing Capture -> Target -> Bubble propagation.
+struct UIKeyPressedEvent : UIEvent<UIKeyPressedEvent, EventTypeId::UIKeyPressed> {
+    KeyCode key = KeyCode::Unknown;
+    bool isRepeat = false;
+    bool shift = false;
+    bool ctrl = false;
+    bool alt = false;
+    mutable bool defaultPrevented = false;
+
+    UIKeyPressedEvent() {
+        this->priority = EventPriority::High;
+    }
+
+    UIKeyPressedEvent(KeyCode keyCode, bool repeat, bool shiftDown,
+                      bool ctrlDown, bool altDown)
+        : key(keyCode)
+        , isRepeat(repeat)
+        , shift(shiftDown)
+        , ctrl(ctrlDown)
+        , alt(altDown)
+    {
+        this->priority = EventPriority::High;
+    }
+
+    void preventDefault() const { defaultPrevented = true; }
+};
+
 struct ButtonClickEvent : UIEvent<ButtonClickEvent, EventTypeId::UIButtonClicked> {
     uint32_t buttonId = 0;
     char buttonName[64] = {0};
@@ -103,7 +133,7 @@ struct ButtonClickEvent : UIEvent<ButtonClickEvent, EventTypeId::UIButtonClicked
     // 注意：preventDefault() 仅取消默认行为，不阻断事件传播
     //       stopPropagation() 仅阻断后续订阅者，不取消默认行为
     //       两者可以同时使用
-    bool defaultPrevented = false;
+    mutable bool defaultPrevented = false;
     
     ButtonClickEvent() {
         this->priority = EventPriority::Low;
@@ -123,7 +153,7 @@ struct ButtonClickEvent : UIEvent<ButtonClickEvent, EventTypeId::UIButtonClicked
     // 🎯 取消默认行为（阻止本地回调执行）
     // 语义：只影响默认行为，不影响事件传播
     // 使用场景：在捕获阶段拦截危险操作，弹出确认对话框
-    void preventDefault() {
+    void preventDefault() const {
         defaultPrevented = true;
     }
     

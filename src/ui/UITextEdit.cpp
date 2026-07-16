@@ -199,6 +199,13 @@ void UITextEdit::onFocusLost() {
     applyFocusState(false);
 }
 
+bool UITextEdit::onKeyPressed(Engine::KeyCode key, bool isRepeat,
+                              bool shift, bool ctrl, bool alt)
+{
+    return handleKeyPressed(
+        Engine::Events::KeyPressedEvent(key, isRepeat, shift, ctrl, alt));
+}
+
 void UITextEdit::applyFocusState(bool focus) {
     if (m_focused == focus) return;
 
@@ -510,15 +517,6 @@ void UITextEdit::setupEventHandlers() {
         return;
     }
 
-    // 订阅键盘按键事件
-    m_keyPressedToken = eventSystem()->subscribe<Engine::Events::KeyPressedEvent>(
-        [this](const Engine::Events::KeyPressedEvent& e) {
-            if (m_focused) {
-                handleKeyPressed(e);
-            }
-        }
-    );
-
     // 订阅文本输入事件
     m_textInputToken = eventSystem()->subscribe<Engine::Events::TextInputEvent>(
         [this](const Engine::Events::TextInputEvent& e) {
@@ -539,13 +537,12 @@ void UITextEdit::setupEventHandlers() {
 }
 
 void UITextEdit::cleanupEventHandlers() {
-    m_keyPressedToken.reset();
     m_textInputToken.reset();
     m_textCompositionToken.reset();
 }
 
 // === 键盘输入处理 ===
-void UITextEdit::handleKeyPressed(const Engine::Events::KeyPressedEvent& e) {
+bool UITextEdit::handleKeyPressed(const Engine::Events::KeyPressedEvent& e) {
     // 注意：KeyCode 现在来自 Engine 命名空间（定义在 InputSystem.hpp）
     // Engine::Events::KeyCode 只是一个别名
     using KeyCode = Engine::Events::KeyCode;
@@ -559,9 +556,10 @@ void UITextEdit::handleKeyPressed(const Engine::Events::KeyPressedEvent& e) {
             case KeyCode::Home:
             case KeyCode::End:
             case KeyCode::Enter:
+            case KeyCode::NumpadEnter:
             case KeyCode::Escape:
                 // 这些按键属于当前输入法 composition，不能同时修改正文。
-                return;
+                return true;
             default:
                 break;
         }
@@ -668,6 +666,7 @@ void UITextEdit::handleKeyPressed(const Engine::Events::KeyPressedEvent& e) {
             break;
 
         case KeyCode::Enter:
+        case KeyCode::NumpadEnter:
             if (m_multiline) {
                 insertText("\n");
             } else {
@@ -686,6 +685,27 @@ void UITextEdit::handleKeyPressed(const Engine::Events::KeyPressedEvent& e) {
 
         default:
             break;
+    }
+
+    switch (e.key) {
+        case KeyCode::Backspace:
+        case KeyCode::Delete:
+        case KeyCode::Left:
+        case KeyCode::Right:
+        case KeyCode::Home:
+        case KeyCode::End:
+        case KeyCode::Enter:
+        case KeyCode::NumpadEnter:
+        case KeyCode::Escape:
+            return true;
+        case KeyCode::A:
+        case KeyCode::C:
+        case KeyCode::V:
+        case KeyCode::X:
+            return e.ctrl;
+        case KeyCode::Tab:
+        default:
+            return false;
     }
 }
 

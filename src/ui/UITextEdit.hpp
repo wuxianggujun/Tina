@@ -107,6 +107,8 @@ public:
     void onClick() override;
     void onFocusGained() override;
     void onFocusLost() override;
+    bool onKeyPressed(Engine::KeyCode key, bool isRepeat,
+                      bool shift, bool ctrl, bool alt) override;
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
@@ -153,7 +155,6 @@ private:
     Container::Optional<int> m_fontPx;  // 字体大小（nullopt 表示使用默认）
 
     // 事件订阅
-    Engine::SubscriptionToken m_keyPressedToken;
     Engine::SubscriptionToken m_textInputToken;
     Engine::SubscriptionToken m_textCompositionToken;
 
@@ -172,7 +173,7 @@ private:
     void setupEventHandlers();
     void cleanupEventHandlers();
     void applyFocusState(bool focused);
-    void handleKeyPressed(const Engine::Events::KeyPressedEvent& e);
+    bool handleKeyPressed(const Engine::Events::KeyPressedEvent& e);
     void handleTextInput(const Engine::Events::TextInputEvent& e);
     void handleTextComposition(const Engine::Events::TextCompositionEvent& e);
     void clearComposition();

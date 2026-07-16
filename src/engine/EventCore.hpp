@@ -84,6 +84,7 @@ enum class EventTypeId : uint32_t {
     UIPointerUp,
     UIPointerClick,
     UIPointerCaptureChanged,
+    UIKeyPressed,
 
     // ========== 自定义扩展事件（256+） ==========
     Custom = 256,  // 用户自定义事件起始ID
@@ -218,6 +219,7 @@ inline const char* eventTypeIdToString(EventTypeId id) {
         case EventTypeId::UIPointerUp: return "UIPointerUp";
         case EventTypeId::UIPointerClick: return "UIPointerClick";
         case EventTypeId::UIPointerCaptureChanged: return "UIPointerCaptureChanged";
+        case EventTypeId::UIKeyPressed: return "UIKeyPressed";
 
         default: return "Unknown";
     }

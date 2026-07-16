@@ -194,7 +194,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
     renderer.drawRect(viewId, pos.x, pos.y, size.x, size.y, bgColor);
 
     // 若被选中，绘制边框高亮（细边）
-    if (m_selected) {
+    if (m_selected || hasFocus()) {
         const float t = 2.0f; // 2px 边框
         const auto hl = style ? style->borderColor : Tina::UI::UIColors::SelectionHL;
         // 上

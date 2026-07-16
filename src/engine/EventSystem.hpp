@@ -7,6 +7,7 @@
 #pragma once
 
 #include "EventCore.hpp"
+#include "InputCodes.hpp"
 #include "EventQueue.hpp"
 #include "EventDispatcher.hpp"
 #include "SubscriptionToken.hpp"  // 添加订阅令牌支持
@@ -59,11 +60,11 @@ struct UIEvent : Event<Derived, TypeId> {
     UI::NodeId targetId;
     UI::NodeId currentTargetId;
     UIEventPhase phase = UIEventPhase::Target;
-    bool propagationStopped = false;
-    bool immediatePropagationStopped = false;
+    mutable bool propagationStopped = false;
+    mutable bool immediatePropagationStopped = false;
     
-    void stopPropagation() { propagationStopped = true; }
-    void stopImmediatePropagation() { 
+    void stopPropagation() const { propagationStopped = true; }
+    void stopImmediatePropagation() const {
         propagationStopped = true;
         immediatePropagationStopped = true;
     }
@@ -360,6 +361,9 @@ public:
     void clearKeyboardFocus() { setKeyboardFocus({}); }
     bool focusNext(bool reverse = false);
     UI::NodeId focusedNodeId() const { return m_uiContext.focusedNode; }
+    bool dispatchKeyPressedToFocused(KeyCode key, bool isRepeat = false,
+                                     bool shift = false, bool ctrl = false,
+                                     bool alt = false);
 
     bool setPointerCapture(UI::NodeId id);
     void releasePointerCapture(UI::NodeId requester = {});

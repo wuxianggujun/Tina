@@ -29,12 +29,24 @@ public:
     int focusLostCount = 0;
     int captureGainedCount = 0;
     int captureLostCount = 0;
+    int keyPressedCount = 0;
+    Engine::KeyCode lastKey = Engine::KeyCode::Unknown;
+    bool consumeKey = false;
+    bool keyboardActivatable = false;
 
     void onClick() override { ++clickCount; }
     void onMouseUp(float, float) override { ++mouseUpCount; }
     void onPointerMove(float, float) override { ++pointerMoveCount; }
     void onFocusGained() override { ++focusGainedCount; }
     void onFocusLost() override { ++focusLostCount; }
+    bool onKeyPressed(Engine::KeyCode key, bool, bool, bool, bool) override {
+        ++keyPressedCount;
+        lastKey = key;
+        return consumeKey;
+    }
+    bool supportsKeyboardActivation() const override {
+        return keyboardActivatable;
+    }
     void onPointerCaptureChanged(bool captured) override {
         captured ? ++captureGainedCount : ++captureLostCount;
     }
@@ -274,6 +286,112 @@ TEST(UIRuntimeTest, FocusTraversalUsesTreeOrderAndSupportsReverse)
     EXPECT_EQ(firstNode->focusLostCount, 1);
     EXPECT_EQ(secondNode->focusGainedCount, 1);
     EXPECT_EQ(secondNode->focusLostCount, 1);
+}
+
+TEST(UIRuntimeTest, FocusedKeyUsesCaptureTargetBubbleAndRunsDefaultActivationOnce)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto root = Memory::MakeUnique<UINode>("Root");
+    auto parent = Memory::MakeUnique<UINode>("Parent");
+    auto target = Memory::MakeUnique<TrackingNode>("KeyboardTarget");
+    target->setFocusable(true);
+    target->keyboardActivatable = true;
+    TrackingNode* targetNode = target.get();
+    UINode* parentNode = parent.get();
+    parent->addChild(std::move(target));
+    root->addChild(std::move(parent));
+    events.setUIRoots({root.get()});
+    ASSERT_TRUE(events.setKeyboardFocus(targetNode->nodeId()));
+
+    struct Visit {
+        Engine::UIEventPhase phase;
+        UINode* node;
+    };
+    Container::Vector<Visit> visits;
+    auto routeToken = events.subscribe<Engine::UIKeyPressedEvent>(
+        [&visits](const Engine::UIKeyPressedEvent& event) {
+            visits.push_back({event.phase, event.currentTarget});
+        });
+
+    EXPECT_TRUE(events.dispatchKeyPressedToFocused(Engine::KeyCode::Space));
+    ASSERT_EQ(visits.size(), 5U);
+    EXPECT_EQ(visits[0].phase, Engine::UIEventPhase::Capture);
+    EXPECT_EQ(visits[0].node, root.get());
+    EXPECT_EQ(visits[1].node, parentNode);
+    EXPECT_EQ(visits[2].phase, Engine::UIEventPhase::Target);
+    EXPECT_EQ(visits[2].node, targetNode);
+    EXPECT_EQ(visits[4].phase, Engine::UIEventPhase::Bubble);
+    EXPECT_EQ(visits[4].node, root.get());
+    EXPECT_EQ(targetNode->keyPressedCount, 1);
+    EXPECT_EQ(targetNode->lastKey, Engine::KeyCode::Space);
+    EXPECT_EQ(targetNode->clickCount, 1);
+
+    visits.clear();
+    EXPECT_FALSE(events.dispatchKeyPressedToFocused(
+        Engine::KeyCode::Space, true));
+    EXPECT_EQ(targetNode->keyPressedCount, 2);
+    EXPECT_EQ(targetNode->clickCount, 1);
+}
+
+TEST(UIRuntimeTest, FocusedKeyDefaultCanBeCancelledWithoutStoppingPropagation)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto root = Memory::MakeUnique<UINode>("Root");
+    auto target = Memory::MakeUnique<TrackingNode>("KeyboardTarget");
+    target->setFocusable(true);
+    target->keyboardActivatable = true;
+    TrackingNode* targetNode = root->addChild(std::move(target));
+    events.setUIRoots({root.get()});
+    ASSERT_TRUE(events.setKeyboardFocus(targetNode->nodeId()));
+
+    int bubbleVisits = 0;
+    auto token = events.subscribe<Engine::UIKeyPressedEvent>(
+        [&bubbleVisits](const Engine::UIKeyPressedEvent& event) {
+            if (event.phase == Engine::UIEventPhase::Capture &&
+                event.currentTarget == event.target->getParent()) {
+                event.preventDefault();
+            }
+            if (event.phase == Engine::UIEventPhase::Bubble) ++bubbleVisits;
+        });
+
+    EXPECT_TRUE(events.dispatchKeyPressedToFocused(Engine::KeyCode::Enter));
+    EXPECT_EQ(targetNode->keyPressedCount, 0);
+    EXPECT_EQ(targetNode->clickCount, 0);
+    EXPECT_EQ(bubbleVisits, 1);
+}
+
+TEST(UIRuntimeTest, FocusedKeyRouteRevalidatesGenerationAfterTargetRemoval)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto root = Memory::MakeUnique<UINode>("Root");
+    auto target = Memory::MakeUnique<TrackingNode>("RemovedDuringKeyRoute");
+    target->setFocusable(true);
+    TrackingNode* targetNode = root->addChild(std::move(target));
+    events.setUIRoots({root.get()});
+    const NodeId staleId = targetNode->nodeId();
+    ASSERT_TRUE(events.setKeyboardFocus(staleId));
+
+    bool removedDuringCapture = false;
+    auto token = events.subscribe<Engine::UIKeyPressedEvent>(
+        [&root, &removedDuringCapture](const Engine::UIKeyPressedEvent& event) {
+            if (event.phase != Engine::UIEventPhase::Capture ||
+                event.currentTarget != root.get()) {
+                return;
+            }
+            auto removed = root->removeChild(event.target);
+            removedDuringCapture = removed != nullptr;
+        });
+
+    EXPECT_TRUE(events.dispatchKeyPressedToFocused(Engine::KeyCode::Enter));
+    EXPECT_TRUE(removedDuringCapture);
+    EXPECT_EQ(events.resolveUINode(staleId), nullptr);
+    EXPECT_FALSE(events.focusedNodeId());
 }
 
 TEST(UIRuntimeTest, EventContextIsInheritedByDynamicChildren)

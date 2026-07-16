@@ -262,6 +262,41 @@ bool EventSystem::focusNext(bool reverse)
     return setKeyboardFocus(focusable[nextIndex]);
 }
 
+bool EventSystem::dispatchKeyPressedToFocused(KeyCode key, bool isRepeat,
+                                              bool shift, bool ctrl, bool alt)
+{
+    sanitizeUIInteractionState();
+    const UI::NodeId focusedId = m_uiContext.focusedNode;
+    UI::UINode* focused = resolveUINode(focusedId);
+    if (!focused || !isInActiveUITree(focusedId)) return false;
+
+    UIKeyPressedEvent routedEvent(key, isRepeat, shift, ctrl, alt);
+    triggerUIEvent(routedEvent, focused);
+    if (routedEvent.defaultPrevented) return true;
+
+    // A routed-event callback may remove the target or move focus. Never run a
+    // default action through the stale raw pointer captured above.
+    focused = resolveUINode(focusedId);
+    if (!focused || m_uiContext.focusedNode != focusedId) return true;
+
+    const bool handled = focused->onKeyPressed(key, isRepeat, shift, ctrl, alt);
+    if (handled) return true;
+
+    focused = resolveUINode(focusedId);
+    if (!focused || m_uiContext.focusedNode != focusedId) return true;
+
+    const bool isActivationKey = key == KeyCode::Enter ||
+                                 key == KeyCode::NumpadEnter ||
+                                 key == KeyCode::Space;
+    if (!isRepeat && !ctrl && !alt && isActivationKey &&
+        focused->supportsKeyboardActivation() && focused->isEnabled() &&
+        focused->isInteractable()) {
+        focused->onClick();
+        return true;
+    }
+    return false;
+}
+
 bool EventSystem::setPointerCapture(UI::NodeId id)
 {
     UI::UINode* next = resolveUINode(id);

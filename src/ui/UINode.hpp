@@ -25,6 +25,7 @@
 #include "../core/Math.hpp"
 #include "../core/Memory.hpp"
 #include "../core/Log.hpp"
+#include "../engine/InputCodes.hpp"
 #include "NodeId.hpp"
 #include <atomic>
 #include <memory>
@@ -451,6 +452,16 @@ public:
     // 新增：鼠标滚轮事件（dx/dy 为像素/刻度）
     virtual void onMouseWheel(float dx, float dy) { (void)dx; (void)dy; }
     virtual bool acceptsMouseWheel() const { return false; }
+    virtual bool onKeyPressed(Tina::Engine::KeyCode key, bool isRepeat,
+                              bool shift, bool ctrl, bool alt) {
+        (void)key;
+        (void)isRepeat;
+        (void)shift;
+        (void)ctrl;
+        (void)alt;
+        return false;
+    }
+    virtual bool supportsKeyboardActivation() const { return false; }
     virtual void onFocusGained() {}
     virtual void onFocusLost() {}
     virtual void onPointerCaptureChanged(bool captured) { (void)captured; }

@@ -153,7 +153,9 @@ public:
         , m_pressed(false)
         , m_selected(false)
         , m_buttonId(s_nextButtonId++)  // 自动分配唯一ID
-    {}
+    {
+        setFocusable(true);
+    }
 
     void setText(const std::string& text) { m_text = text; }
     void setNormalColor(float r, float g, float b, float a) { m_normalColor = Tina::Core::Color(r, g, b, a); m_normalColorOverride = true; }
@@ -230,6 +232,9 @@ public:
     void onMouseUp(float /*x*/, float /*y*/) override {
         setPressed(false);
     }
+
+    void onFocusLost() override { setPressed(false); }
+    bool supportsKeyboardActivation() const override { return true; }
 
     // 设置按钮ID（用于事件识别）
     void setButtonId(uint32_t id) { m_buttonId = id; }
