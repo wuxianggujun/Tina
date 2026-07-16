@@ -4,6 +4,7 @@
 #include "engine/UIEvents.hpp"
 #include "ui/UILayoutManager.hpp"
 #include "ui/UINode.hpp"
+#include "ui/UIUtils.hpp"
 
 namespace Tina::UI::Tests {
 namespace {
@@ -290,6 +291,61 @@ TEST(UIRuntimeTest, EventContextIsInheritedByDynamicChildren)
     root.setEventSystem(nullptr);
     EXPECT_EQ(childNode->eventSystem(), nullptr);
     EXPECT_EQ(grandchildNode->eventSystem(), nullptr);
+}
+
+TEST(UIRuntimeTest, ThemeAndDpiStateAreIsolatedPerWindowContext)
+{
+    Engine::EventSystem firstWindow;
+    Engine::EventSystem secondWindow;
+
+    const auto firstRevision = firstWindow.windowUIContext().scaleRevision();
+    ASSERT_TRUE(firstWindow.updateUIViewport(1280, 720, 2560, 1440));
+    const auto& viewport = firstWindow.windowUIContext().viewport();
+    EXPECT_FLOAT_EQ(viewport.framebufferScaleX, 2.0f);
+    EXPECT_FLOAT_EQ(viewport.framebufferScaleY, 2.0f);
+    EXPECT_FLOAT_EQ(viewport.toFramebufferX(100.0f), 200.0f);
+    EXPECT_FLOAT_EQ(viewport.toFramebufferY(75.0f), 150.0f);
+    EXPECT_FLOAT_EQ(viewport.dp(8.0f), 16.0f);
+    EXPECT_EQ(viewport.fontPx(16), 32);
+    EXPECT_FLOAT_EQ(UIUtils::calculateCanvasScale(firstWindow.windowUIContext()), 2.0f);
+    EXPECT_FLOAT_EQ(UIUtils::calculateUIScale(firstWindow.windowUIContext()), 2.0f);
+    EXPECT_GT(firstWindow.windowUIContext().scaleRevision(), firstRevision);
+
+    const auto stableRevision = firstWindow.windowUIContext().scaleRevision();
+    EXPECT_FALSE(firstWindow.updateUIViewport(1280, 720, 2560, 1440));
+    EXPECT_EQ(firstWindow.windowUIContext().scaleRevision(), stableRevision);
+
+    ASSERT_TRUE(firstWindow.setUIUserScale(1.25f));
+    EXPECT_FLOAT_EQ(firstWindow.windowUIContext().viewport().effectiveScale(), 2.5f);
+    EXPECT_FLOAT_EQ(secondWindow.windowUIContext().viewport().effectiveScale(), 1.0f);
+
+    firstWindow.setUITheme(UITheme::light());
+    EXPECT_EQ(firstWindow.windowUIContext().theme().kind(), UIThemeKind::Light);
+    EXPECT_EQ(secondWindow.windowUIContext().theme().kind(), UIThemeKind::Dark);
+    EXPECT_LT(firstWindow.windowUIContext().theme().style(UIStyleRole::Label).textColor.r(),
+              secondWindow.windowUIContext().theme().style(UIStyleRole::Label).textColor.r());
+}
+
+TEST(UIRuntimeTest, LogicalPointerCoordinatesHitFramebufferSpaceNodesAtHighDpi)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+    ASSERT_TRUE(events.updateUIViewport(100, 100, 200, 200));
+
+    auto root = Memory::MakeUnique<UINode>("Root");
+    root->setSize(200.0f, 200.0f);
+    root->setInteractable(false);
+
+    auto child = Memory::MakeUnique<TrackingNode>("HighDpiTarget");
+    child->setPosition(80.0f, 80.0f);
+    child->setSize(40.0f, 40.0f);
+    TrackingNode* childNode = root->addChild(std::move(child));
+    events.setUIRoots({root.get()});
+
+    events.updateUIInputLogical(50.0f, 50.0f, true);
+    events.updateUIInputLogical(50.0f, 50.0f, false);
+
+    EXPECT_EQ(childNode->clickCount, 1);
 }
 
 } // namespace

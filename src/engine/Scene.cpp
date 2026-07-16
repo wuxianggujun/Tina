@@ -179,7 +179,7 @@ void Scene::updateFrame(float dt) {
         m_app->events().setUIRoots(m_uiRoots);
         if (InputSystem* inputSystem = input()) {
             const auto mouse = inputSystem->getMousePosition();
-            m_app->events().updateUIInput(
+            m_app->events().updateUIInputLogical(
                 mouse.x,
                 mouse.y,
                 inputSystem->isMouseButtonDown(MouseButton::Left),

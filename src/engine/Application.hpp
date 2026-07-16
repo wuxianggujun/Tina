@@ -14,7 +14,7 @@
 #include <mutex>
 
 // 前向声明
-namespace Tina { namespace UI { class TextRenderer; } }
+namespace Tina { namespace UI { class TextRenderer; class UIContext; } }
 namespace Tina { namespace Renderer { class Primitive2D; class SpriteRenderer; class ShaderManager; } }
 
 namespace Tina::Engine {
@@ -95,6 +95,8 @@ public:
 
     EventSystem& events() const { return *m_eventSystem; }
     EventSystem* getEventSystem() const { return m_eventSystem.get(); }
+    Tina::UI::UIContext& uiContext();
+    const Tina::UI::UIContext& uiContext() const;
     
     SceneManager& scenes() const { return *m_sceneManager; }
     InputSystem& input() const { return *m_inputSystem; }

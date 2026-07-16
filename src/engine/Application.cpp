@@ -149,6 +149,13 @@ bool Application::init()
         TINA_ERROR("EventSystem 初始化失败");
         return false;
     }
+    {
+        int logicalWidth = 0;
+        int logicalHeight = 0;
+        m_window->getSize(logicalWidth, logicalHeight);
+        m_eventSystem->updateUIViewport(
+            logicalWidth, logicalHeight, m_pixelWidth, m_pixelHeight);
+    }
     m_inputSystem = Memory::MakeUnique<InputSystem>();
     m_inputSystem->setEventSystem(m_eventSystem.get());
     m_inputSystem->setWindow(m_window.get());
@@ -400,6 +407,10 @@ void Application::processEvents()
     int pixelHeight = 0;
     m_window->getSize(logicalWidth, logicalHeight);
     m_window->getFramebufferSize(pixelWidth, pixelHeight);
+    if (m_eventSystem) {
+        m_eventSystem->updateUIViewport(
+            logicalWidth, logicalHeight, pixelWidth, pixelHeight);
+    }
 
     const bool framebufferChanged = pixelWidth > 0 && pixelHeight > 0
         && (pixelWidth != m_pixelWidth || pixelHeight != m_pixelHeight);
@@ -444,6 +455,14 @@ void Application::render()
 // 以下是所有getter和setter方法的实现...
 Tina::UI::TextRenderer& Application::textRenderer() const {
     return *m_textRenderer;
+}
+
+Tina::UI::UIContext& Application::uiContext() {
+    return m_eventSystem->windowUIContext();
+}
+
+const Tina::UI::UIContext& Application::uiContext() const {
+    return m_eventSystem->windowUIContext();
 }
 
 Tina::Renderer::Primitive2D& Application::primitives2D() const {

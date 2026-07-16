@@ -115,7 +115,7 @@ void PauseScene::applyWindowResize(int width, int height)
     Scene::applyWindowResize(width, height);
 
     // 计算新的缩放比例
-    float newScale = UI::UIUtils::calculateUIScale(width, height);
+    float newScale = UI::UIUtils::calculateUIScale(app()->uiContext());
 
     // 如果缩放变化非常大，才重建UI（提高阈值，减少重建）
     if (std::abs(newScale - m_uiScale) > 0.3f) {
@@ -180,7 +180,7 @@ void PauseScene::createUI()
     // 使用布局：居中一个面板，内部垂直栈+若干水平栈，避免纵向堆叠
     // 使用存储的缩放比例（如果没有设置，则计算）
     if (m_uiScale == 1.0f) {
-        m_uiScale = UI::UIUtils::calculateUIScale(m_pixelWidth, m_pixelHeight);
+        m_uiScale = UI::UIUtils::calculateUIScale(app()->uiContext());
     }
     float scale = m_uiScale;
 

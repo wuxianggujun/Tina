@@ -1,5 +1,6 @@
 #include "UIComponents.hpp"
 #include "UICore.hpp"
+#include "UIContext.hpp"
 #include "../engine/UIEvents.hpp"
 #include "../engine/EventSystem.hpp"
 #include "../engine/Application.hpp"
@@ -7,17 +8,56 @@
 #include <algorithm>
 
 namespace Tina::UI {
+namespace {
+
+const UIStyle* styleFor(const UINode& node, UIStyleRole role)
+{
+    const UIContext* context = node.uiContext();
+    return context ? &context->theme().style(role) : nullptr;
+}
+
+Container::Optional<int> themedFontPx(const UINode& node,
+                                      Container::Optional<int> explicitFont,
+                                      const UIStyle* style)
+{
+    if (explicitFont.has_value() || !style) return explicitFont;
+    const UIContext* context = node.uiContext();
+    return context ? Container::Optional<int>(context->viewport().fontPx(style->fontSize))
+                   : Container::Optional<int>(style->fontSize);
+}
+
+} // namespace
 
 // === UIPanel 实现 ===
+
+Tina::Core::Color UIPanel::getColor() const
+{
+    if (!m_colorOverride) {
+        if (const UIStyle* style = styleFor(*this, UIStyleRole::Panel)) {
+            return style->backgroundColor;
+        }
+    }
+    return m_color;
+}
 
 void UIPanel::onRender(uint16_t viewId, UIRenderer& renderer)
 {
     auto pos = getWorldPosition();
     auto size = getSize();
-    renderer.drawRect(viewId, pos.x, pos.y, size.x, size.y, m_color);
+    renderer.drawRect(viewId, pos.x, pos.y, size.x, size.y, getColor());
 }
 
 // === UILabel 实现 ===
+
+Tina::Core::Color UILabel::getColor() const
+{
+    if (!m_colorOverride) {
+        if (const UIStyle* style = styleFor(*this, UIStyleRole::Label)) {
+            return style->textColor;
+        }
+    }
+    return m_color;
+}
 
 void UILabel::onRender(uint16_t viewId, UIRenderer& renderer)
 {
@@ -43,9 +83,11 @@ void UILabel::onRender(uint16_t viewId, UIRenderer& renderer)
 
     // 使用统一文本接口，在节点矩形内绘制；默认提供 4px 内边距
     UIRenderer::TextOptions opts{};
-    opts.r = m_color.r(); opts.g = m_color.g(); opts.b = m_color.b(); opts.a = m_color.a();
+    const UIStyle* style = styleFor(*this, UIStyleRole::Label);
+    const Tina::Core::Color color = getColor();
+    opts.r = color.r(); opts.g = color.g(); opts.b = color.b(); opts.a = color.a();
     opts.hAlign = hAlign; opts.vAlign = vAlign; opts.padX = 4.0f; opts.padY = 4.0f;
-    opts.fontPx = m_fontPx;  // 直接赋值 optional
+    opts.fontPx = themedFontPx(*this, m_fontPx, style);
     renderer.drawTextBox(viewId, pos.x, pos.y, size.x, size.y, m_text, opts);
 }
 
@@ -59,8 +101,9 @@ Tina::Math::Vec2 UILabel::measureContent(float availableWidth, float /*available
     auto& tr = app->textRenderer();
     int prev = tr.currentFontPx();
     bool needRestore = false;
-    if (m_fontPx.has_value() && m_fontPx.value() > 0 && m_fontPx.value() != prev) {
-        if (tr.setFontPx(m_fontPx.value())) needRestore = true;
+    const auto resolvedFont = themedFontPx(*this, m_fontPx, styleFor(*this, UIStyleRole::Label));
+    if (resolvedFont.has_value() && resolvedFont.value() > 0 && resolvedFont.value() != prev) {
+        if (tr.setFontPx(resolvedFont.value())) needRestore = true;
     }
     tr.measureText(m_text, tw, th);
     if (needRestore) tr.setFontPx(prev);
@@ -128,11 +171,23 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
     auto size = getSize();
 
     // 根据状态选择背景色
-    Tina::Core::Color bgColor = m_normalColor;
-    if (m_pressed) {
-        bgColor = m_pressedColor;
-    } else if (m_hovered) {
-        bgColor = m_hoverColor;
+    const UIStyle* style = styleFor(*this, UIStyleRole::Button);
+    const Tina::Core::Color normalColor = !m_normalColorOverride && style
+        ? style->backgroundColor : m_normalColor;
+    const Tina::Core::Color hoverColor = !m_hoverColorOverride && style
+        ? style->hoverColor : m_hoverColor;
+    const Tina::Core::Color pressedColor = !m_pressedColorOverride && style
+        ? style->activeColor : m_pressedColor;
+    const Tina::Core::Color textColor = !m_textColorOverride && style
+        ? (isEnabled() ? style->textColor : style->textDisabledColor)
+        : m_textColor;
+    const auto resolvedFont = themedFontPx(*this, m_fontPx, style);
+
+    Tina::Core::Color bgColor = isEnabled() || !style ? normalColor : style->disabledColor;
+    if (m_pressed && isEnabled()) {
+        bgColor = pressedColor;
+    } else if (m_hovered && isEnabled()) {
+        bgColor = hoverColor;
     }
 
     // 绘制背景
@@ -141,7 +196,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
     // 若被选中，绘制边框高亮（细边）
     if (m_selected) {
         const float t = 2.0f; // 2px 边框
-        auto hl = Tina::UI::UIColors::SelectionHL;
+        const auto hl = style ? style->borderColor : Tina::UI::UIColors::SelectionHL;
         // 上
         renderer.drawRect(viewId, pos.x, pos.y, size.x, t, hl);
         // 下
@@ -167,9 +222,9 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         float twRect = size.x - pad*2.0f;
         float thRect = std::max(0.0f, pos.y + size.y - ty - pad);
         UIRenderer::TextOptions to{};
-        to.r = m_textColor.r(); to.g = m_textColor.g(); to.b = m_textColor.b(); to.a = m_textColor.a();
+        to.r = textColor.r(); to.g = textColor.g(); to.b = textColor.b(); to.a = textColor.a();
         to.hAlign = UIRenderer::AlignH::Center; to.vAlign = UIRenderer::AlignV::Center;
-        to.fontPx = m_fontPx;  // 直接赋值 optional
+        to.fontPx = resolvedFont;
         renderer.drawTextBox(viewId, tx, ty, twRect, thRect, m_text, to);
     } else if (hasIcon && m_iconLayout == IconLayout::IconLeftTextRight) {
         // 图标在左，文本在右
@@ -184,9 +239,9 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
         float twRect = std::max(0.0f, pos.x + size.x - pad - tx);
         float thRect = size.y - pad*2.0f;
         UIRenderer::TextOptions to{};
-        to.r = m_textColor.r(); to.g = m_textColor.g(); to.b = m_textColor.b(); to.a = m_textColor.a();
+        to.r = textColor.r(); to.g = textColor.g(); to.b = textColor.b(); to.a = textColor.a();
         to.hAlign = UIRenderer::AlignH::Left; to.vAlign = UIRenderer::AlignV::Center;
-        to.fontPx = m_fontPx;  // 直接赋值 optional
+        to.fontPx = resolvedFont;
         renderer.drawTextBox(viewId, tx, ty, twRect, thRect, m_text, to);
     } else {
         // 默认：无图标（或中心覆盖图标）+ 文本精确居中
@@ -201,10 +256,10 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
 
         // 使用 drawTextBox 的居中对齐（内部基于字形度量计算基线，垂直居中更准确）
         UIRenderer::TextOptions to{};
-        to.r = m_textColor.r(); to.g = m_textColor.g(); to.b = m_textColor.b(); to.a = m_textColor.a();
+        to.r = textColor.r(); to.g = textColor.g(); to.b = textColor.b(); to.a = textColor.a();
         to.hAlign = UIRenderer::AlignH::Center;
         to.vAlign = UIRenderer::AlignV::Center;
-        to.fontPx = m_fontPx;  // 直接赋值 optional
+        to.fontPx = resolvedFont;
         to.padX = 0.0f; to.padY = 0.0f;
         renderer.drawTextBox(viewId, pos.x, pos.y, size.x, size.y, m_text, to);
     }
@@ -255,8 +310,9 @@ Tina::Math::Vec2 UIButton::measureContent(float availableWidth, float /*availabl
         auto& tr = app->textRenderer();
         int prev = tr.currentFontPx();
         bool needRestore = false;
-        if (m_fontPx.has_value() && m_fontPx.value() > 0 && m_fontPx.value() != prev) {
-            if (tr.setFontPx(m_fontPx.value())) needRestore = true;
+        const auto resolvedFont = themedFontPx(*this, m_fontPx, styleFor(*this, UIStyleRole::Button));
+        if (resolvedFont.has_value() && resolvedFont.value() > 0 && resolvedFont.value() != prev) {
+            if (tr.setFontPx(resolvedFont.value())) needRestore = true;
         }
         tr.measureText(m_text, tw, th);
         if (needRestore) tr.setFontPx(prev);

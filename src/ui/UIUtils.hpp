@@ -1,6 +1,9 @@
 #pragma once
 
+#include "UIContext.hpp"
+
 #include <algorithm>
+#include <utility>
 
 namespace Tina::UI {
 
@@ -67,6 +70,33 @@ public:
         }
 
         return scale;
+    }
+
+    // UI nodes are laid out in framebuffer pixels, while responsive breakpoints
+    // belong to logical window units. Multiplying by the per-window density
+    // exactly once keeps physical sizing and pointer hit-testing consistent.
+    static float calculateUIScale(const UIContext& context) {
+        return calculateUIScale(context, ScaleConfig{});
+    }
+
+    static float calculateUIScale(const UIContext& context,
+                                  const ScaleConfig& config) {
+        const auto& viewport = context.viewport();
+        return calculateUIScale(viewport.logicalWidth, viewport.logicalHeight, config)
+             * viewport.effectiveScale();
+    }
+
+    static float calculateCanvasScale(const UIContext& context,
+                                      float baseWidth = 1280.0f,
+                                      float baseHeight = 720.0f,
+                                      float minScale = 0.75f,
+                                      float maxScale = 2.0f) {
+        const auto& viewport = context.viewport();
+        const float logicalScale = std::min(
+            static_cast<float>(viewport.logicalWidth) / baseWidth,
+            static_cast<float>(viewport.logicalHeight) / baseHeight);
+        return std::clamp(logicalScale, minScale, maxScale)
+             * viewport.effectiveScale();
     }
 
     /**

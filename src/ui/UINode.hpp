@@ -39,6 +39,7 @@ namespace Tina::UI {
 // 前向声明
 class UIRenderer;
 class UILayoutManager;
+class UIContext;
 
 // 布局尺寸语义（类 Android）
 enum class LayoutDim : uint8_t {
@@ -476,6 +477,8 @@ public:
     // 由 Scene 显式注入，并递归传播给整棵树。后续动态添加的子节点会继承该上下文。
     void setEventSystem(Tina::Engine::EventSystem* eventSystem);
     Tina::Engine::EventSystem* eventSystem() const;
+    UIContext* uiContext();
+    const UIContext* uiContext() const;
     NodeId nodeId() const { return m_nodeId; }
     bool requestFocus();
     void clearFocus();

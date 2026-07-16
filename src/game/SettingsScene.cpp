@@ -88,7 +88,7 @@ void SettingsScene::applyWindowResize(int width, int height)
     Scene::applyWindowResize(width, height);
 
     // 计算新的缩放比例
-    float newScale = UI::UIUtils::calculateUIScale(width, height);
+    float newScale = UI::UIUtils::calculateUIScale(app()->uiContext());
 
     // 如果缩放变化非常大，才重建UI（避免频繁重建导致事件系统崩溃）
     if (m_uiScale == 0.0f || std::abs(newScale - m_uiScale) > 0.3f) {
@@ -132,7 +132,7 @@ void SettingsScene::createUI()
     m_root->setSize((float)m_pixelWidth, (float)m_pixelHeight);
 
     // 根据窗口大小自适应缩放
-    float scale = UI::UIUtils::calculateUIScale(m_pixelWidth, m_pixelHeight);
+    float scale = UI::UIUtils::calculateUIScale(app()->uiContext());
 
     // 使用与暂停页一致的"面板 + VBox"布局
     const float panelW = 600.0f * scale;

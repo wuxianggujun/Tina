@@ -12,6 +12,7 @@
 #include "../core/Log.hpp"
 #include "../game/GameConfig.hpp"
 #include "../ui/UIConstants.hpp"
+#include "../ui/UIUtils.hpp"
 
 #include <bgfx/bgfx.h>
 #include <bx/math.h>
@@ -472,12 +473,14 @@ void MenuScene::updateUILayout() {
 }
 
 void MenuScene::computeUIScale() {
-    const float baseW = 1280.0f;
-    const float baseH = 720.0f;
-    float sx = (float)getPixelWidth() / baseW;
-    float sy = (float)getPixelHeight() / baseH;
-    float s = std::min(sx, sy);
-    m_uiScale = std::max(0.75f, std::min(s, 2.0f));
+    if (auto* application = app()) {
+        m_uiScale = UI::UIUtils::calculateCanvasScale(application->uiContext());
+        return;
+    }
+
+    const float scaleX = static_cast<float>(getPixelWidth()) / 1280.0f;
+    const float scaleY = static_cast<float>(getPixelHeight()) / 720.0f;
+    m_uiScale = std::clamp(std::min(scaleX, scaleY), 0.75f, 2.0f);
 }
 
 } // namespace Tina::Game

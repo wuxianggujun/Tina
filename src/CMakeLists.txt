@@ -89,6 +89,9 @@ set(SRC_FILES
     ui/UICore.hpp
     ui/UICore.cpp
     ui/NodeId.hpp
+    ui/UIContext.hpp
+    ui/UIStyle.hpp
+    ui/UIStyle.cpp
     ui/UINode.hpp
     ui/UINode.cpp
     ui/UINodeRender.cpp

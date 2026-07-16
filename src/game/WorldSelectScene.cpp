@@ -10,6 +10,7 @@
 #include "../engine/InputSystem.hpp"
 #include "../core/Log.hpp"
 #include "../ui/UIConstants.hpp"
+#include "../ui/UIUtils.hpp"
 
 #include <algorithm>
 #include <ctime>
@@ -196,10 +197,14 @@ void WorldSelectScene::createUI() {
 }
 
 void WorldSelectScene::updateLayout() {
-    const float baseW = 1280.0f, baseH = 720.0f;
-    float sx = (float)getPixelWidth() / baseW;
-    float sy = (float)getPixelHeight() / baseH;
-    float newScale = std::max(0.75f, std::min(sx, sy));
+    float newScale = 1.0f;
+    if (auto* application = app()) {
+        newScale = UI::UIUtils::calculateCanvasScale(application->uiContext());
+    } else {
+        const float scaleX = static_cast<float>(getPixelWidth()) / 1280.0f;
+        const float scaleY = static_cast<float>(getPixelHeight()) / 720.0f;
+        newScale = std::clamp(std::min(scaleX, scaleY), 0.75f, 2.0f);
+    }
 
     // 只有在缩放改变时才更新布局
     bool scaleChanged = std::abs(newScale - m_uiScale) > 0.01f;

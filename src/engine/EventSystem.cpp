@@ -99,6 +99,35 @@ void EventSystem::invalidateAllUINodes()
 
 // ==================== UI roots ====================
 
+void EventSystem::requestUILayoutForRoots()
+{
+    for (UI::NodeId rootId : m_uiContext.roots) {
+        if (UI::UINode* root = resolveUINode(rootId)) root->requestLayout();
+    }
+}
+
+bool EventSystem::updateUIViewport(int logicalWidth, int logicalHeight,
+                                   int framebufferWidth, int framebufferHeight)
+{
+    const bool changed = m_windowUIContext.updateViewport(
+        logicalWidth, logicalHeight, framebufferWidth, framebufferHeight);
+    if (changed) requestUILayoutForRoots();
+    return changed;
+}
+
+void EventSystem::setUITheme(UI::UITheme theme)
+{
+    m_windowUIContext.setTheme(std::move(theme));
+    requestUILayoutForRoots();
+}
+
+bool EventSystem::setUIUserScale(float scale)
+{
+    const bool changed = m_windowUIContext.setUserScale(scale);
+    if (changed) requestUILayoutForRoots();
+    return changed;
+}
+
 void EventSystem::setUIRoot(Memory::SharedPtr<UI::UINode> root)
 {
     Vector<UI::UINode*> roots;
@@ -355,6 +384,17 @@ void EventSystem::updateUIInput(float mouseX, float mouseY, bool mouseDown, floa
     m_uiContext.hasPointerPosition = true;
 
     handleMouseInput(wheelDeltaY, pointerMoved);
+}
+
+void EventSystem::updateUIInputLogical(float mouseX, float mouseY, bool mouseDown,
+                                       float wheelDeltaY)
+{
+    const UI::UIViewportMetrics& viewport = m_windowUIContext.viewport();
+    updateUIInput(
+        viewport.toFramebufferX(mouseX),
+        viewport.toFramebufferY(mouseY),
+        mouseDown,
+        wheelDeltaY);
 }
 
 void EventSystem::buildEventPath(UI::UINode* target, Vector<UI::NodeId>& path)

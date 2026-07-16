@@ -91,6 +91,18 @@ Tina::Engine::EventSystem* UINode::eventSystem() const
     return lifetime && lifetime->load(std::memory_order_acquire) ? m_eventSystem : nullptr;
 }
 
+UIContext* UINode::uiContext()
+{
+    auto* events = eventSystem();
+    return events ? &events->windowUIContext() : nullptr;
+}
+
+const UIContext* UINode::uiContext() const
+{
+    auto* events = eventSystem();
+    return events ? &events->windowUIContext() : nullptr;
+}
+
 UINode* UINode::setVisible(bool visible)
 {
     if (m_visible == visible) return this;

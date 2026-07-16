@@ -25,14 +25,17 @@ public:
     // === 颜色设置 ===
     UIPanel* setColor(float r, float g, float b, float a) {
         m_color = Tina::Core::Color(r, g, b, a);
+        m_colorOverride = true;
         return this;
     }
     UIPanel* setColor(const Tina::Core::Color& c) {
         m_color = c;
+        m_colorOverride = true;
         return this;
     }
+    void useThemeColor() { m_colorOverride = false; }
 
-    Tina::Core::Color getColor() const { return m_color; }
+    Tina::Core::Color getColor() const;
 
     // === 重写父类方法以支持链式调用（返回UIPanel*） ===
     
@@ -86,6 +89,7 @@ protected:
 
 private:
     Tina::Core::Color m_color;
+    bool m_colorOverride = false;
 };
 
 // === Label：文本标签 ===
@@ -98,8 +102,9 @@ public:
     {}
 
     void setText(const std::string& text) { m_text = text; }
-    void setColor(float r, float g, float b, float a) { m_color = Tina::Core::Color(r, g, b, a); }
-    void setColor(const Tina::Core::Color& c) { m_color = c; }
+    void setColor(float r, float g, float b, float a) { m_color = Tina::Core::Color(r, g, b, a); m_colorOverride = true; }
+    void setColor(const Tina::Core::Color& c) { m_color = c; m_colorOverride = true; }
+    void useThemeColor() { m_colorOverride = false; }
 
     // 文本对齐设置（仅影响渲染，不影响节点布局）
     enum class TextAlignH { Left, Center, Right };
@@ -116,7 +121,7 @@ public:
     TextAlignV alignV() const { return m_alignV; }
 
     const std::string& getText() const { return m_text; }
-    Tina::Core::Color getColor() const { return m_color; }
+    Tina::Core::Color getColor() const;
 
 protected:
     void onRender(uint16_t viewId, UIRenderer& renderer) override;
@@ -125,6 +130,7 @@ protected:
 private:
     std::string m_text;
     Tina::Core::Color m_color;
+    bool m_colorOverride = false;
     TextAlignH m_alignH = TextAlignH::Left;
     TextAlignV m_alignV = TextAlignV::Top;
     Container::Optional<int> m_fontPx;
@@ -150,14 +156,20 @@ public:
     {}
 
     void setText(const std::string& text) { m_text = text; }
-    void setNormalColor(float r, float g, float b, float a) { m_normalColor = Tina::Core::Color(r, g, b, a); }
-    void setHoverColor(float r, float g, float b, float a) { m_hoverColor = Tina::Core::Color(r, g, b, a); }
-    void setPressedColor(float r, float g, float b, float a) { m_pressedColor = Tina::Core::Color(r, g, b, a); }
-    void setTextColor(float r, float g, float b, float a) { m_textColor = Tina::Core::Color(r, g, b, a); }
-    void setNormalColor(const Tina::Core::Color& c) { m_normalColor = c; }
-    void setHoverColor(const Tina::Core::Color& c) { m_hoverColor = c; }
-    void setPressedColor(const Tina::Core::Color& c) { m_pressedColor = c; }
-    void setTextColor(const Tina::Core::Color& c) { m_textColor = c; }
+    void setNormalColor(float r, float g, float b, float a) { m_normalColor = Tina::Core::Color(r, g, b, a); m_normalColorOverride = true; }
+    void setHoverColor(float r, float g, float b, float a) { m_hoverColor = Tina::Core::Color(r, g, b, a); m_hoverColorOverride = true; }
+    void setPressedColor(float r, float g, float b, float a) { m_pressedColor = Tina::Core::Color(r, g, b, a); m_pressedColorOverride = true; }
+    void setTextColor(float r, float g, float b, float a) { m_textColor = Tina::Core::Color(r, g, b, a); m_textColorOverride = true; }
+    void setNormalColor(const Tina::Core::Color& c) { m_normalColor = c; m_normalColorOverride = true; }
+    void setHoverColor(const Tina::Core::Color& c) { m_hoverColor = c; m_hoverColorOverride = true; }
+    void setPressedColor(const Tina::Core::Color& c) { m_pressedColor = c; m_pressedColorOverride = true; }
+    void setTextColor(const Tina::Core::Color& c) { m_textColor = c; m_textColorOverride = true; }
+    void useThemeColors() {
+        m_normalColorOverride = false;
+        m_hoverColorOverride = false;
+        m_pressedColorOverride = false;
+        m_textColorOverride = false;
+    }
 
     const std::string& getText() const { return m_text; }
     // 角标（数字小角标）API
@@ -253,6 +265,10 @@ private:
     Tina::Core::Color m_hoverColor;
     Tina::Core::Color m_pressedColor;
     Tina::Core::Color m_textColor;
+    bool m_normalColorOverride = false;
+    bool m_hoverColorOverride = false;
+    bool m_pressedColorOverride = false;
+    bool m_textColorOverride = false;
     std::string m_badgeText;               // 角标文本（如"1"）
     Tina::Core::Color m_badgeBgColor;      // 角标背景色
     Tina::Core::Color m_badgeTextColor;    // 角标文字颜色

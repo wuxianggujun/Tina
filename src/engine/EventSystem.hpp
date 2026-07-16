@@ -13,6 +13,7 @@
 #include "../core/Log.hpp"
 #include "../core/Container.hpp"  // 使用封装的容器
 #include "../ui/NodeId.hpp"
+#include "../ui/UIContext.hpp"
 #include <EASTL/priority_queue.h>
 #include <atomic>
 #include <memory>
@@ -330,10 +331,21 @@ public:
     void updateUIInput(float mouseX, float mouseY, bool mouseDown);
     // 重载：包含滚轮增量（dy），用于分发 UIMouseWheel 事件
     void updateUIInput(float mouseX, float mouseY, bool mouseDown, float wheelDeltaY);
+    // GLFW cursor coordinates are window-logical units. Convert them exactly
+    // once before hit-testing framebuffer-space UI nodes.
+    void updateUIInputLogical(float mouseX, float mouseY, bool mouseDown,
+                              float wheelDeltaY = 0.0f);
     
     // 获取UI上下文
     UIEventContext& uiContext() { return m_uiContext; }
     const UIEventContext& uiContext() const { return m_uiContext; }
+
+    UI::UIContext& windowUIContext() { return m_windowUIContext; }
+    const UI::UIContext& windowUIContext() const { return m_windowUIContext; }
+    bool updateUIViewport(int logicalWidth, int logicalHeight,
+                          int framebufferWidth, int framebufferHeight);
+    void setUITheme(UI::UITheme theme);
+    bool setUIUserScale(float scale);
 
     // UINode 通过 Scene 显式接入当前窗口上下文。NodeId 只在本 EventSystem
     // 实例内有效，slot 复用时 generation 必须递增。
@@ -503,6 +515,7 @@ private:
     
     // UI事件上下文
     UIEventContext m_uiContext;
+    UI::UIContext m_windowUIContext;
     struct UINodeSlot {
         UI::UINode* node = nullptr;
         uint32_t generation = 1;
@@ -521,6 +534,7 @@ private:
     void resetUIInteractionState(bool notifyNodes);
     void invalidateAllUINodes();
     void collectFocusableNodes(UI::UINode* node, Vector<UI::NodeId>& nodes) const;
+    void requestUILayoutForRoots();
 };
 
 } // namespace Tina::Engine

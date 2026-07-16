@@ -1,5 +1,6 @@
 #include "UITextEdit.hpp"
 #include "UICore.hpp"
+#include "UIContext.hpp"
 #include "../engine/EngineEvents.hpp"
 #include "../engine/InputSystem.hpp"
 #include "../engine/Application.hpp"
@@ -17,6 +18,25 @@
 #endif
 
 namespace Tina::UI {
+
+Container::Optional<int> UITextEdit::resolvedFontPx() const
+{
+    if (m_fontPx.has_value() && m_fontPx.value() > 0) return m_fontPx;
+    if (const auto* context = uiContext()) {
+        return context->viewport().fontPx(
+            context->theme().style(UIStyleRole::TextEdit).fontSize);
+    }
+    return Container::nullopt;
+}
+
+float UITextEdit::resolvedPadding() const
+{
+    if (const auto* context = uiContext()) {
+        return context->viewport().dp(
+            context->theme().style(UIStyleRole::TextEdit).padding);
+    }
+    return 4.0f;
+}
 
 // ============================================================================
 // UTF-8 ↔ UTF-32 转换辅助函数（使用utfcpp库）
@@ -109,8 +129,9 @@ Tina::Math::Vec2 UITextEdit::measureContent(float availableWidth, float /*availa
         auto& tr = app->textRenderer();
         int prev = tr.currentFontPx();
         bool needRestore = false;
-        if (m_fontPx.has_value() && m_fontPx.value() > 0 && m_fontPx.value() != prev) {
-            if (tr.setFontPx(m_fontPx.value())) needRestore = true;
+        const auto fontPx = resolvedFontPx();
+        if (fontPx.has_value() && fontPx.value() > 0 && fontPx.value() != prev) {
+            if (tr.setFontPx(fontPx.value())) needRestore = true;
         }
         std::string src = m_chars.empty() ? std::string(m_placeholder.c_str()) : getText();
         tr.measureText(src, tw, th);
@@ -121,7 +142,7 @@ Tina::Math::Vec2 UITextEdit::measureContent(float availableWidth, float /*availa
         th = 20.0f;
     }
     // 内边距（与渲染一致）
-    const float pad = 4.0f;
+    const float pad = resolvedPadding();
     float minW = tw + pad * 2.0f;
     float minH = th + pad * 2.0f;
     // 单行模式：高度至少 28
@@ -314,11 +335,26 @@ void UITextEdit::onRender(uint16_t viewId, UIRenderer& renderer) {
     auto worldPos = getWorldPosition();
     auto size = getSize();
 
+    const UIStyle* style = nullptr;
+    if (const auto* context = uiContext()) {
+        style = &context->theme().style(UIStyleRole::TextEdit);
+    }
+    const auto& backgroundColor = (!m_hasExplicitBgColor && style)
+        ? style->backgroundColor : m_bgColor;
+    const auto& textColor = (!m_hasExplicitTextColor && style)
+        ? style->textColor : m_textColor;
+    const auto& placeholderColor = (!m_hasExplicitPlaceholderColor && style)
+        ? style->textDisabledColor : m_placeholderColor;
+    const auto& cursorColor = (!m_hasExplicitCursorColor && style)
+        ? style->caretColor : m_cursorColor;
+    const auto& selectionColor = (!m_hasExplicitSelectionColor && style)
+        ? style->selectionColor : m_selectionColor;
+
     // 1. 绘制背景
-    renderer.drawRect(viewId, worldPos.x, worldPos.y, size.x, size.y, m_bgColor);
+    renderer.drawRect(viewId, worldPos.x, worldPos.y, size.x, size.y, backgroundColor);
     
     // ✅ 2. 设置裁剪矩形（防止文本超出输入框）
-    float padding = 4.0f;
+    const float padding = resolvedPadding();
     renderer.pushClip(
         worldPos.x + padding, 
         worldPos.y + padding,
@@ -339,23 +375,23 @@ void UITextEdit::onRender(uint16_t viewId, UIRenderer& renderer) {
             worldPos.y + padding,
             endX - startX,
             size.y - padding * 2,
-            m_selectionColor);
+            selectionColor);
     }
 
     // 3. 绘制文本或占位符（✅ 应用水平滚动）
     UIRenderer::TextOptions opts;
-    opts.r = m_textColor.r();
-    opts.g = m_textColor.g();
-    opts.b = m_textColor.b();
-    opts.a = m_textColor.a();
-    opts.fontPx = m_fontPx;
+    opts.r = textColor.r();
+    opts.g = textColor.g();
+    opts.b = textColor.b();
+    opts.a = textColor.a();
+    opts.fontPx = resolvedFontPx();
 
     if (m_chars.empty() && !m_focused) {
         // 显示占位符（无滚动）
-        opts.r = m_placeholderColor.r();
-        opts.g = m_placeholderColor.g();
-        opts.b = m_placeholderColor.b();
-        opts.a = m_placeholderColor.a();
+        opts.r = placeholderColor.r();
+        opts.g = placeholderColor.g();
+        opts.b = placeholderColor.b();
+        opts.a = placeholderColor.a();
         std::string placeholderStr(m_placeholder.c_str());
         renderer.drawText(viewId, worldPos.x + padding, worldPos.y + padding, placeholderStr, opts);
     } else {
@@ -373,7 +409,7 @@ void UITextEdit::onRender(uint16_t viewId, UIRenderer& renderer) {
             worldPos.y + padding,
             cursorWidth,
             size.y - padding * 2,
-            m_cursorColor);
+            cursorColor);
     }
     
     // ✅ 移除裁剪矩形
@@ -397,6 +433,10 @@ void UITextEdit::onUpdate(float dt) {
         auto* input = Tina::Engine::GetInput();
         if (input) {
             auto mousePos = input->getMousePosition();
+            if (const auto* context = uiContext()) {
+                mousePos.x = context->viewport().toFramebufferX(mousePos.x);
+                mousePos.y = context->viewport().toFramebufferY(mousePos.y);
+            }
             auto worldPos = getWorldPosition();
             float localX = mousePos.x - worldPos.x;
 
@@ -650,7 +690,7 @@ void UITextEdit::deleteChar(bool forward) {
 void UITextEdit::ensureCursorVisible() {
     if (!m_renderer) return;
     
-    float padding = 4.0f;
+    const float padding = resolvedPadding();
     float availableWidth = getSize().x - padding * 2;
     float cursorX = getXFromPos(m_cursorPos);
     
@@ -698,7 +738,7 @@ void UITextEdit::ensureCursorVisible() {
 
 // === 坐标与位置转换 ===
 size_t UITextEdit::getPosFromX(float x) {
-    float padding = 4.0f;
+    const float padding = resolvedPadding();
     x -= padding;
 
     if (x <= 0) return 0;
@@ -720,7 +760,7 @@ size_t UITextEdit::getPosFromX(float x) {
         Container::String substr = charsToUTF8(subChars);
         
         float w = 0.0f, h = 0.0f;
-        if (m_renderer->measureText(substr.c_str(), w, h, m_fontPx)) {
+        if (m_renderer->measureText(substr.c_str(), w, h, resolvedFontPx())) {
             if (w > x) {
                 // 找到了超过x的位置，判断是i还是i+1更接近
                 float prevW = currentX;
@@ -750,7 +790,7 @@ float UITextEdit::getXFromPos(size_t pos) {
     Container::String substr = charsToUTF8(subChars);
     
     float w = 0.0f, h = 0.0f;
-    if (m_renderer->measureText(substr.c_str(), w, h, m_fontPx)) {
+    if (m_renderer->measureText(substr.c_str(), w, h, resolvedFontPx())) {
         return w;
     }
 

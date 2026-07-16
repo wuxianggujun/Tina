@@ -35,7 +35,7 @@ public:
         , m_dragging(false)
         , m_multiline(false)
         , m_maxLength(0)
-        , m_fontPx(0)
+        , m_fontPx(Container::nullopt)
     {
         setFocusable(true);
         setClickable(true);
@@ -52,11 +52,18 @@ public:
     const char* getPlaceholder() const { return m_placeholder.c_str(); }
 
     // === 颜色设置 ===
-    void setBgColor(const Tina::Core::Color& c) { m_bgColor = c; }
-    void setTextColor(const Tina::Core::Color& c) { m_textColor = c; }
-    void setPlaceholderColor(const Tina::Core::Color& c) { m_placeholderColor = c; }
-    void setCursorColor(const Tina::Core::Color& c) { m_cursorColor = c; }
-    void setSelectionColor(const Tina::Core::Color& c) { m_selectionColor = c; }
+    void setBgColor(const Tina::Core::Color& c) { m_bgColor = c; m_hasExplicitBgColor = true; }
+    void setTextColor(const Tina::Core::Color& c) { m_textColor = c; m_hasExplicitTextColor = true; }
+    void setPlaceholderColor(const Tina::Core::Color& c) { m_placeholderColor = c; m_hasExplicitPlaceholderColor = true; }
+    void setCursorColor(const Tina::Core::Color& c) { m_cursorColor = c; m_hasExplicitCursorColor = true; }
+    void setSelectionColor(const Tina::Core::Color& c) { m_selectionColor = c; m_hasExplicitSelectionColor = true; }
+    void useThemeColors() noexcept {
+        m_hasExplicitBgColor = false;
+        m_hasExplicitTextColor = false;
+        m_hasExplicitPlaceholderColor = false;
+        m_hasExplicitCursorColor = false;
+        m_hasExplicitSelectionColor = false;
+    }
 
     // === 多行模式 ===
     void setMultiline(bool enable) { m_multiline = enable; }
@@ -119,6 +126,11 @@ private:
     Tina::Core::Color m_placeholderColor;
     Tina::Core::Color m_cursorColor;
     Tina::Core::Color m_selectionColor;
+    bool m_hasExplicitBgColor = false;
+    bool m_hasExplicitTextColor = false;
+    bool m_hasExplicitPlaceholderColor = false;
+    bool m_hasExplicitCursorColor = false;
+    bool m_hasExplicitSelectionColor = false;
 
     // 焦点状态
     bool m_focused;
@@ -158,6 +170,8 @@ private:
     size_t getPosFromX(float x);  // 根据X坐标获取光标位置
     float getXFromPos(size_t pos); // 根据光标位置获取X坐标
     void ensureCursorVisible();    // 确保光标可见（自动滚动）
+    Container::Optional<int> resolvedFontPx() const;
+    float resolvedPadding() const;
 };
 
 } // namespace Tina::UI

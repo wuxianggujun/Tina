@@ -16,6 +16,7 @@ add_executable(tina_tests
     ${PROJECT_SOURCE_DIR}/src/engine/SubscriptionToken.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/UINode.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/UILayoutManager.cpp
+    ${PROJECT_SOURCE_DIR}/src/ui/UIStyle.cpp
 )
 
 set_source_files_properties(core/AssertReleaseCompileTests.cpp PROPERTIES COMPILE_DEFINITIONS NDEBUG)
