@@ -28,7 +28,7 @@ Carbon 最值得 Tina 学习的是长期运行后形成的阶段边界、预算�
 | Core | `ScopeGuard`、Time、Telemetry/Statistics、命名锁/线程、Memory Tracker、Callstack/Crash 和细粒度测试 | 保留 Tina 现代 Result/ScopeExit/chrono；增加 owned Metrics、TraceZone、MemoryTag、CrashContext、UTF-8 原子 IO | 全局 new/delete、宏式分配、强杀线程、全局 profiler/crash pointer、32位 FNV 资产身份 |
 | 进程与 Runtime | `exefile` 按模块启动，并用退出守卫逆序关闭日志、计时器和运行时 | 把 Application 初始化拆成可注入阶段；每阶段成功后登记回滚；补失败点与析构顺序测试 | Blue 动态函数表、Python/Stackless 启动链、巨型全局组合根 |
 | Window/Input | `Tr2MainWindow` 分离 Down/Up/Move/Wheel、Key/Char、Focus、Close；Windows 按下建立 Capture，释放后解除 | 保持 GLFW；继续使用独立输入快照、普通事件队列和 UI routed event；补窗口失焦/销毁时统一取消 Capture 与 composition | 复制 Win32 风格枚举、消息宏或 Carbon 窗口 API；引入 SDL/SDL3 |
-| UI/IME | `IUILib.h` 体现 MouseDown/Up/CaptureChanged 与 Set/KillFocus 分离；`ime` 显式拥有窗口 HIMC 上下文 | 保留 Tina 的 generation `NodeId`、Capture/Target/Bubble、Modal Focus Scope 和 IMM32；只借鉴上下文所有权 | 旧全局 UI 状态、固定 256 wchar 缓冲、全局 IMM32 函数指针；把 ImGui Viewer 当 CarbonUI |
+| UI/IME | `IUILib.h` 体现 MouseDown/Up/CaptureChanged 与 Set/KillFocus 分离；`ime` 显式拥有窗口 HIMC 上下文 | 把 Tina Legacy generation `NodeId` 语义迁移为带 owner 的 `UINodeId`，保留 Capture/Target/Bubble、Modal Focus Scope 和 IMM32；只借鉴上下文所有权 | 旧全局 UI 状态、固定 256 wchar 缓冲、全局 IMM32 函数指针；把 ImGui Viewer 当 CarbonUI |
 | Render | `TriRenderJob` 顺序执行命名 Step，统一 GPU marker/CPU-GPU 计时，并在失败或中断时检查、修复 RT/DS 栈；Trinity 有 Stub 后端 | 小型顺序 Pass Scheduler、命名和统计、显式资源状态、失败后清理、NullRenderDevice | 数十种运行时可配置 Step、跨帧 `IN_PROGRESS`、隐式 Push/Pop 状态作为公共 API、完整自研多后端 RHI |
 | 异步资源 | `BlueAsyncRes` 后台 `DoLoad`、主线程 `DoPrepare`，支持取消、队列泵送和后台内存预留 | 分离 CPU Decode 与 GPU Upload；generation/取消贯穿两队列；同时按任务数、字节和时间预算 | 原始 `this` 回调、析构前要求外部手工清空监听、多个 bool 拼出的模糊状态 |
 | 资源交付 | `resources` 使用版本化 ResourceGroup、校验和、Bundle/Patch 与无效版本测试 | Cooked Manifest 包含 schema、稳定 AssetId、依赖、内容 hash 和产物位置；明确 Bundle/Patch 层 | 把交付分组误当运行时 typed asset registry，或直接采用 Carbon 私有格式 |
@@ -82,7 +82,7 @@ Carbon Audio 也提供了反例：当前公开 `AudManager` 析构对
 `ReleaseCapture`，并把 Mouse、Key、Char、Focus 和 Close 回调分开。这个契约与 Tina
 当前单次 hit-test、Pointer Capture、KeyDown/KeyUp、TextInput/Composition 分流一致。
 
-Carbon 的公开 `IUILib.h` 是 Win32 风格的历史接口；Tina 的 generation `NodeId`、
+Carbon 的公开 `IUILib.h` 是 Win32 风格的历史接口；Tina vNext 的 generation `UINodeId`、
 节点删除后重新解析、RAII 订阅、Modal Focus Scope 和每窗口 `UIContext` 更适合当前
 目标。Carbon 参考不会改变 Tina 的自研 UI 路线，也不能替代 Checkbox、Slider、
 可访问语义和 Display List 的自主设计。
@@ -132,10 +132,10 @@ Tina 当前 miniaudio 路径只需要先保证 Engine/Resource/Voice 的关闭�
 1. 冻结完整 vNext 模块、Core 契约、公共接口、Frame Pipeline 和依赖方向；
 2. Null Runtime：新 `EngineHost`、失败回滚、Metrics 和 NullRenderDevice 连续300帧；
 3. Platform/UI：迁移 GLFW、InputFrame（最终 Snapshot + 有序 transitions）、中文、IMM32 与基础 UI；
-4. Scene/2D：generation Entity、command buffer、render extraction 与 Sprite；
+4. Scene/2D：generation Entity、command buffer、Render Scene Extraction 与 Sprite；
 5. Render/3D：typed handle、Pass Scheduler、bgfx、Perspective 与 depth；
 6. Asset/Cooker：双阶段队列、AssetId、Manifest 和最小静态 glTF；
-7. Product UI/Audio：Checkbox、Slider、设置后端与 miniaudio 生命周期；
+7. Product 2D/UI/Audio：正式 TileMap/Box2D、Checkbox、Slider、设置后端与 miniaudio 生命周期；
 8. 新路径覆盖全部验收后独立删除 Legacy。
 
 每批修改继续遵守 Visual Studio 2026 / MSVC 19.50 与 Linux 构建、直接执行 GoogleTest、不使用 CTest、

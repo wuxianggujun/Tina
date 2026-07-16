@@ -30,11 +30,40 @@ generation 都必须归还 payload/staging 并更新 current/peak/failed 指标�
 
 - `AssetId`：稳定128位逻辑身份，来自 Cooked Manifest，不等于路径或 ContentHash；
 - `AssetHandle<T>`：弱 typed generation lookup，不延长 payload 生命周期；
-- `AssetLease<T>`：强引用，跨 Task、GPU upload、Audio callback 或 Render frame 保存数据时
+- `AssetLease<T>`：强引用，跨 Task、GPU upload、Audio callback 或 RenderFramePacket 保存数据时
   必须持有；
 - `UploadTicket`：拥有已提交 GPU staging，backend completion/fence 后才释放；
 - retirement ledger：跟踪 DestroyQueued/Retiring/Released，物理释放前不递减 GPU/Audio
   resource count。
+
+### 首期 Cooked 类型
+
+| 领域 | 类型 | 主要依赖/说明 |
+| --- | --- | --- |
+| 通用渲染 | `Texture2DAsset`、`ShaderAsset` | 颜色空间/format/mip 与 Tina Shader ABI；backend payload 私有 |
+| UI | `FontAsset` | owning bytes、face metadata、确定 fallback chain；Runtime 不按路径开字体 |
+| 2D | `SpriteAsset`、`TilesetAsset`、`TileMapAsset` | UV/pivot/PPU、tile flags/layer/chunk/collision metadata |
+| 3D | `StaticMeshAsset`、`MaterialAsset`、`PrefabAsset` | Mesh/Submesh/bounds、UnlitBaseColor、节点层级与资产引用 |
+| Audio | `AudioClipAsset`/stream metadata | PCM/压缩 payload 与 miniaudio backend 类型分离 |
+
+Scene/Game component 保存上述 `AssetHandle<T>`，不保存 Render Buffer/Texture/Pipeline handle。
+World/UI extraction 在当前 ready snapshot 中解析资源，并把 lease、FrameResourceRef 和 Atlas pin
+通过 Render SPI 的 `FramePinSink` 登记；Runtime-private owning `RenderFramePacket` 到 backend
+completion 前不得释放。Asset/UI 不 include 或访问 packet 类型。游戏代码不能绕过 AssetSystem
+直接创建 GPU 资源。
+
+M7–M9 在完整 Cooker 落地前只使用版本化、确定性的内置 Cooked fixture 或 procedural geometry。
+Fixture 也必须走同一 wire schema/AssetHandle/RenderFramePacket 接口，不允许恢复 Runtime 路径读取，
+M10 起正式产品样例改用 Catalog/Manifest；hermetic、版本锁定的 fixture 继续保留给 infrastructure
+sample 和 module test，避免测试依赖外部资产目录或 Cooker 现场状态。
+
+`ShaderAsset` 的逻辑外壳包含 ABI version、interface/layout hash、binding table 和 Tina target；
+shaderc profile/二进制只属于 backend payload。`MaterialAsset` 依赖 Shader/Texture/Sampler schema，
+Cooker 离线验证 slot 和常量布局，Runtime 不在 draw 热点按字符串查询 uniform。
+
+glTF 首期转换为 StaticMesh/Texture2D/Material/Prefab；2D importer 生成 Sprite/Tileset/TileMap。
+Prefab 实例化和 TileMap 运行时边界分别见[3D 游戏架构](game-3d.md)和
+[2D 游戏架构](game-2d.md)。
 
 ### AssetId、元数据与 Cook key
 

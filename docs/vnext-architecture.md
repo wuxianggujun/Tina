@@ -46,19 +46,22 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | `tina_platform` | Window/Input/Event 公共描述、Headless backend、线程命名和不透明 Render surface | `tina_core`、OS 最小适配 | GLFW 公共类型、文件/资产 IO、Scene、Renderer、UI Widget |
 | `tina_platform_glfw` | GLFW Window/Input/Gamepad、DPI、Windows IMM32 的具体 backend | core/platform、GLFW、OS API | Scene、Asset、UI Widget、bgfx 类型 |
 | `tina_task` | 有界任务队列、协作取消、后台工作与主线程 completion | `tina_core`、`tina_platform` 的线程命名能力 | Asset 类型、渲染命令、强杀线程 |
-| `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、AppStateStack | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
-| `tina_scene` | World、generation `EntityId`、Transform、Camera、render components | core、render descriptors、EnTT 内部实现 | GLFW 输入、TileMap 玩法、bgfx 类型 |
+| `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、GameStateStack、RenderFramePacket/pool | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
+| `tina_scene` | World、generation `EntityId`、Transform、Camera、render components 与资产解析 facade | core、asset 公共接口、render descriptors、EnTT 内部实现 | GLFW 输入、TileMap 玩法、bgfx 类型 |
 | `tina_asset` | Asset 状态机、依赖、取消、CPU completion 与 GPU upload 协议 | core/task、render 接口、asset_format | 直接解析源 glTF、具体 bgfx 调用 |
 | `tina_asset_format` | Runtime/Cooker 共享的 Cooked header、schema、类型、依赖和 hash 编解码 | core | Asset registry、窗口、GPU、源格式 parser |
-| `tina_render` | typed handle、资源描述、RenderScene、DisplayList、Pass Scheduler | core | bgfx 公开类型、Scene registry、平台窗口细节 |
+| `tina_render` | typed handle、资源描述、RenderScene/DisplayList view、RenderSurfaceState、FramePinSink、Pass Scheduler | core | bgfx 公开类型、Scene registry、平台窗口细节、Asset/UI/Platform concrete pin |
 | `tina_render_bgfx` | bgfx 设备实现、shader/texture/buffer 上传与 Present | core/platform/render、bgfx | 游戏组件、源资产解析 |
-| `tina_ui` | Retained Tree、布局、路由输入、焦点、Widget、DisplayList、Glyph Atlas 和字体 rasterizer 接口 | core、platform InputFrame、render 描述 | bgfx/FreeType 类型、全局 UI 状态、隐式布局 |
+| `tina_ui` | Retained Tree、布局、路由输入、焦点、Widget、DisplayList、Glyph Atlas 和字体 rasterizer 接口 | core、platform InputFrame、asset 公共接口、render 描述 | bgfx/FreeType 类型、全局 UI 状态、隐式布局 |
 | `tina_ui_freetype` | FreeType glyph rasterizer 的具体 adapter | core、ui、FreeType | Widget/Scene、Render backend、全局字体服务 |
 | `tina_audio` | AudioEngine、Bus/voice generation handle、实时命令/完成队列、Disabled backend | core/task、asset lease | miniaudio 类型、World/ECS、callback 内 IO/分配 |
 | `tina_audio_miniaudio` | miniaudio 设备/callback/stream backend | core、audio、miniaudio | Gameplay/World/UI、Asset registry 直接查询 |
+| `tina_physics2d` | Tina PhysicsBodyId/PhysicsWorld2D/command/contact API 与 Box2D 3.x 私有实现 | core、Box2D PRIVATE | Box2D 公共类型、Scene/ECS、3D 物理、强行统一 Physics API |
 | `tina_profile_tracy` | Tina Trace 到 Tracy 的可选编译期 adapter | core、固定版本 Tracy Client | Engine 公共 API、发布包强制依赖 |
 | `tina_assetc` | 源资产验证、Cook、Manifest 和原子写盘 | core、asset_format、固定源格式工具 | Runtime 窗口、在线 GPU 依赖 |
-| samples/tests | 选择具体 factories，执行2D/UI/3D垂直验收和模块契约测试 | 公共接口、所需具体 backend | 访问模块内部存储绕过契约 |
+| `tina_bootstrap_desktop` | 用纯 Tina API 组合 GLFW/bgfx/FreeType/miniaudio 的默认桌面 EngineHost | runtime 与具体 production adapters | 在 public header 暴露第三方类型、全局 Engine |
+| samples/game | 调用 desktop bootstrap，执行2D/UI/3D产品与垂直验收 | Game SDK、bootstrap、按需 physics2d | 直接链接/包含 bgfx/Box2D、访问模块内部存储 |
+| tests | 使用 Null/失败注入 factories 验证模块契约 | Game SDK、Engine Module SPI、test adapters | 让测试捷径进入生产 API |
 
 `tina_core` 内部会按职责分目录，但首期仍保持一个物理 target；只有出现真实的链接、构建
 时间或平台依赖需求时才拆 target，避免用大量微型库制造复杂度。
@@ -85,18 +88,23 @@ flowchart TD
     Render --> Asset
     Core --> AssetFormat["tina_asset_format"]
     AssetFormat --> Asset
+    Asset --> Scene
+    Asset --> UI
     Asset --> Runtime
     Task --> Audio["tina_audio"]
     Asset --> Audio
     Audio --> Runtime
     Audio --> Miniaudio["tina_audio_miniaudio"]
+    Core --> Physics2D["tina_physics2d"]
     Core --> Trace["tina_profile_tracy"]
     AssetFormat --> AssetC["tina_assetc"]
-    Runtime --> Samples["samples / game"]
-    Bgfx --> Samples
-    Glfw --> Samples
-    Freetype --> Samples
-    Miniaudio --> Samples
+    Runtime --> Desktop["tina_bootstrap_desktop"]
+    Bgfx --> Desktop
+    Glfw --> Desktop
+    Freetype --> Desktop
+    Miniaudio --> Desktop
+    Desktop --> Samples["samples / game"]
+    Physics2D --> Samples
     Trace --> Samples
 ```
 
@@ -122,7 +130,7 @@ Tina 只实现具有明确引擎语义、标准库不能直接表达的最小结
 | --- | --- | --- |
 | `StaticVector<T, N>` | 对象内存储、永不回退到堆、满容量显式失败、可导出 `span` | Render/UI 帧命令 |
 | `InlineFunction<Signature, Bytes>` | 固定内联存储、禁止堆分配、过大 callable 编译期拒绝 | Event/Task 小回调 |
-| `FrameArena` | 线性分配、对齐校验、整帧 reset、当前/峰值统计 | Render Extraction/UI Layout |
+| `FrameArena` | 线性分配、对齐校验、整帧 reset、当前/峰值统计 | Render Scene Extraction/UI Layout |
 | `GenerationPool<T, Tag>` | index + generation、stale handle 失败、slot 复用可测试 | Entity/Node/Render/Asset handle |
 | `SpscRingQueue<T, N>` | 固定容量、单生产者/单消费者、明确 full/empty | 只有 Audio/Upload profiling 证明需要时 |
 
@@ -154,88 +162,103 @@ public:
         EngineConfig config,
         EngineFactories factories);
 
-    Core::Result<RunExitReason> run(IGame& game);
+    Core::Result<RunExitReason> run(IGameApplication& gameApplication);
 };
 
-class IFrameClient {
+class IGameApplication {
 public:
-    virtual ~IFrameClient() = default;
-    virtual Core::Status fixedUpdate(FixedUpdateContext& context) = 0;
-    virtual Core::Status update(UpdateContext& context) = 0;
-    virtual Core::Status extractRender(RenderExtractionContext& context) = 0;
-    virtual Core::Status updateUI(UIUpdateContext& context) = 0;
+    virtual ~IGameApplication() = default;
+    virtual Core::Result<std::unique_ptr<IGameState>>
+    createInitialState(GameStartupContext& context) = 0;
+    virtual void onShutdown(GameShutdownContext& context) noexcept = 0;
 };
 
-class IGame : public IFrameClient {
+class IGameState {
 public:
-    virtual ~IGame() = default;
-    virtual Core::Status onStart(StartContext& context) = 0;
-    virtual void onStop(StopContext& context) noexcept = 0;
+    virtual ~IGameState() = default;
+    virtual Core::Status onEnter(GameStateEnterContext& context) = 0;
+    virtual void onExit(GameStateExitContext& context) noexcept = 0;
+    virtual GameStatePolicy initialPolicy() const noexcept = 0;
+    virtual Core::Status fixedUpdate(FixedUpdateContext& context);
+    virtual Core::Status updateFrame(FrameUpdateContext& context);
+    virtual Core::Status extractRenderScene(RenderSceneExtractionContext& context) const;
+    virtual Core::Status updateUI(UIUpdateContext& context);
 };
 ```
 
-生产 executable 负责构造 `GlfwPlatformFactory + BgfxRenderFactory + FreeTypeRasterizerFactory +
-MiniaudioBackendFactory`；Null sample 使用 `HeadlessPlatformFactory + NullRenderFactory +
-DisabledUI/DisabledAudioFactory`。Factory
-只创建实例，成功后所有权立即转交 EngineHost 并登记逆操作。`EngineConfig` 是可验证的纯值
-配置，不偷偷保存 owning service；具体 factory 也不能通过全局注册表发现。
+普通游戏 executable 调用 `Desktop::CreateEngine(config)`；`tina_bootstrap_desktop` 的单一组合
+translation unit 私有构造 GLFW/bgfx/FreeType/miniaudio factories，public header 只包含 Tina
+类型。Null sample 和失败注入测试使用 `HeadlessPlatformFactory + NullRenderFactory +
+DisabledUI/DisabledAudioFactory`。Factory 只创建实例，成功后所有权立即转交 EngineHost 并登记
+逆操作。`EngineConfig` 是可验证纯值，factory 不能通过全局注册表发现 service。
 
 阶段 Context 是不可复制、只在当前回调有效的 capability view：
 
 | Context | 可访问能力 | 明确禁止 |
 | --- | --- | --- |
-| `StartContext` | 注册初始 AppState、加载请求、订阅与启动事务回滚 | 保存 Context、直接拥有 Engine module |
-| `StateEnterContext` | 暂存 World/UI roots/订阅/TaskGroup 与回滚动作，commit 前不可接收输入 | 直接激活 root、修改旧栈、保存 Context |
-| `StateExitContext` | 释放状态订阅/资源并读取只读退出原因 | 新建 Task/Asset/Window、重新激活自身 |
+| `GameStartupContext` | 只读启动配置与游戏级回滚 | 创建 World/UI root、保存 Context、直接拥有 Engine module |
+| `GameStateEnterContext` | 暂存 World/`UIRootBuilder`/订阅/TaskGroup 与回滚动作，commit 前不可接收输入 | 直接激活 root、修改旧栈、保存 Context |
+| `GameStateExitContext` | TaskGroup 已 join 后读取退出原因；State 释放自己的 RAII owner | 新建 Task/Asset/Window、重新激活自身、直接改 Runtime registry |
 | `FixedUpdateContext` | fixed timing、Simulation Action、World query/command、当前 TaskGroup | Frame/UI Action、Window/bgfx、保存 FrameArena span |
-| `UpdateContext` | real/unscaled delta、Frame Action、Asset query、状态切换请求 | Simulation edge、直接 commit 状态、阻塞 IO |
-| `RenderExtractionContext` | interpolation、只读 World view、`RenderSceneBuilder` | 修改 World、保存 builder/descriptor |
-| `UIUpdateContext` | Retained roots/model action、UI dirty 请求 | 每帧重建 UIContext、直接提交 bgfx |
-| `StopContext` | 只允许撤销订阅/状态和查询关闭诊断 | 创建新 Asset/Task/Window |
+| `FrameUpdateContext` | 每 Render Frame 一次的 real/unscaled delta、Frame Action、Asset query、状态切换请求 | Simulation edge、直接 commit 状态、阻塞 IO |
+| `RenderSceneExtractionContext` | interpolation、只读 World view、`RenderSceneWriter` | 修改 World、保存 writer/descriptor |
+| `UIUpdateContext` | 绑定已拥有 root 的 `UITreeUpdater`、model/action/dirty 请求 | 创建新 root、每帧重建 UIContext、直接提交 bgfx |
+| `GameShutdownContext` | 只允许撤销游戏级注册和查询关闭诊断 | 创建新 Asset/Task/Window |
 
-所有 frame callback 返回 `Status`。Builder 同时保存 sticky first-error；Runtime 在回调返回后
+所有 frame callback 返回 `Status`。Writer/Updater 同时保存 sticky first-error；Runtime 在回调返回后
 检查两者，`CapacityExceeded`、device failure 或异常都会转成结构化 `Error`，不能继续提交
-半帧。C++ exception 保持开启以兼容标准库与第三方，但会在 Engine、IGame、Task、C callback
+半帧。C++ exception 保持开启以兼容标准库与第三方，但会在 Engine、`IGameApplication`、
+`IGameState`、Task、C callback
 边界捕获；热点正常路径不通过 throw 控制流程。
 
-### AppState、World 与 UI 所有权
+### IGameState、World 与 UI 所有权
 
-`IGame` 是永久 bottom layer，EngineHost 在 `run()` 期间借用它；Runtime 拥有 overlay
-`AppStateStack`，其中每项是 `unique_ptr<IAppState>`。`IAppState` 实现与 `IFrameClient` 相同
-的阶段回调，并声明 fixed、variable、gameplay input、UI input、render 五类向下阻断规则。
+`IGameApplication` 是游戏程序启动/停止入口，没有帧回调；Runtime 在启动事务中接管它返回的
+恰好一个 `unique_ptr<IGameState>`，并独占 `GameStateStack`。Menu、Settings、Game2D、Game3D、
+Pause 等所有逐帧行为只出现在 `IGameState`，避免程序入口和 State 两套更新位置。
 
-`IAppState` 另有事务式 `onEnter(StateEnterContext&) -> Status`、`onExit(StateExitContext&) noexcept`
-和 enter 时冻结的 `StatePolicy`。vNext 不保留另一套二值 `onPause/onResume`：一个状态可能只被
+`IGameState` 提供事务式 `onEnter(GameStateEnterContext&) -> Status`、
+`onExit(GameStateExitContext&) noexcept`、默认空帧回调和只采样一次的 `initialPolicy()`。
+vNext 不保留另一套二值 `onPause/onResume`：一个状态可能只被
 阻断 Fixed/Input 但继续 Render，二值 Paused 无法准确表达。Runtime 每帧按 policy 计算各 phase
-可见集合；状态需要改变策略时提交 policy-change request，并同 push/pop 一样只在 Deferred
-Cleanup 生效。
+可见集合；Runtime 持有唯一 committed policy，状态需要改变策略时提交 policy-change request，
+并同 push/pop 一样只在 Frame Update 后的 State Transition Commit 生效。
 
 ```mermaid
 flowchart TD
     Host["EngineHost"] --> Modules["Platform / Task / Render / Asset / Audio"]
     Host --> WindowUI["primary Window + UIContext"]
-    Host --> Stack["AppStateStack"]
-    Host -. borrows during run .-> Game["IGame bottom layer"]
-    Stack --> State["IAppState unique_ptr"]
+    Host --> Stack["GameStateStack"]
+    Host -. start/shutdown .-> Game["IGameApplication"]
+    Stack --> State["IGameState unique_ptr"]
     State --> World["optional World"]
     State --> Roots["registered UI roots"]
     WindowUI --> Registry["Node registry / Focus / Capture / Layout"]
 ```
 
-AppState 可以拥有一个 World 和若干 UI root，但不拥有窗口级 `UIContext`。vNext 不再保留
-第二套并列的 SceneManager 栈；旧 Scene 在迁移时转换成 IAppState，World 只是数据世界。
+`IGameState` 可以拥有一个 World 和若干 move-only `UIRootOwner`，但不拥有窗口级 `UIContext`。
+vNext 不再保留第二套并列的 SceneManager 栈；旧 Scene 在迁移时转换成 IGameState，World
+只是数据世界。`UIContext` 由 Runtime WindowRecord 唯一拥有，Platform/Event 只投递输入。
 首期只有一个 primary Window/UIContext，多窗口保留 `WindowId` 扩展点但不进入验收范围。
 
-Update/Input 从栈顶向下传播直到对应 block flag；Render 从最底可见层向上构建。所有
-push/pop/replace 请求只排队，在 Deferred Cleanup 的唯一提交点执行；当前帧回调集合保持
-稳定，新状态完成 enter 和首轮显式 layout 后，从下一帧开始接收输入。旧状态退出时先注销
-UI roots/订阅并停止自己的 TaskGroup，再释放 World。
+Gameplay/UI Input、Fixed Update、Frame Update 从栈顶向下传播直到对应 committed block flag；
+Render 从最底可见层向上构建。
+所有状态请求只在 Frame Update 排队，并在该阶段结束后的唯一 State Transition Commit 执行；
+Input/Fixed/Frame Update 的当帧回调集合保持稳定。新状态成功 enter 后参与同帧 Render Scene
+Extraction 和唯一一次 UI layout/snapshot，从下一帧开始接收输入。
 
-push/replace 在旧栈仍完整时先构造新状态并运行 enter transaction；失败就逆序撤销新状态，
-旧栈和 phase policy 不变，且不调用新状态 `onExit`。成功后才原子提交 stack/policy，再对被
-替换状态调用一次 `onExit` 并销毁。pop 先从下一帧 dispatch 集合移除目标、撤销 roots/focus/
-capture、停止 TaskGroup，再调用一次 `onExit`。`onExit` 抛出属于 invariant failure，不能恢复
-成“半退出”状态。
+push/replace 在旧栈仍完整时运行 candidate enter transaction；失败就逆序撤销并直接析构
+candidate，旧栈和 committed policy 不变，且不调用 candidate `onExit`。成功后采样一次
+`initialPolicy()` 并原子提交 stack/policy。
+
+Enter 期间创建的 TaskGroup 属于同一事务：Task 可执行，但 completion 在 commit 前不可发布；
+失败固定 close ingress、requestStop、barrier/join，再逆序撤销 staged owner 和析构 candidate。
+
+已提交 State 的退出顺序固定为：先从后续 phase/UI eligibility 移除并关闭 command/task/event
+ingress，清理该 root 的 Focus/Capture/Modal，再 signal TaskGroup cancellation；Runtime 随即
+barrier/join TaskGroup 并丢弃迟到 completion，之后才调用一次 `onExit`，让 State 释放自己的
+RAII owner，最后析构 State 并断言 roots/订阅/lease/TaskGroup 无残留。Runtime 不在 `onExit`
+前销毁这些 owner。`onExit` 抛出属于 invariant failure，不能恢复成“半退出”状态。
 
 ### Engine 状态
 
@@ -248,9 +271,11 @@ run:    Ready -> Starting -> Running -> Stopping -> Stopped
 - `Create` 失败不返回 EngineHost，已成功模块逆序回滚；
 - `run()` 每个 EngineHost 只允许调用一次；窗口关闭、游戏请求退出和 fatal error 都映射为
   `RunExitReason`，错误仍通过 `Result` 保留上下文；
-- `onStart` 的状态/订阅注册属于 Start transaction；成功才 commit，失败自动撤销且不调用
-  `onStop`；
-- `onStart` 成功后 `onStop` 恰好一次，即使帧回调失败也一样；`onStop` 必须 `noexcept`；
+- `createInitialState + initialState.onEnter + initial UI layout/snapshot` 属于 Game startup
+  transaction；成功才 commit，失败自动撤销，不调用 candidate `onExit` 或
+  `IGameApplication::onShutdown`；
+- startup commit 后先让全部 `IGameState::onExit` 恰好一次，再调用一次
+  `IGameApplication::onShutdown`；即使帧回调失败也一样，两个退出回调都必须 `noexcept`；
 - 析构 Ready 但未 run 的 Host 只关闭模块；Stopped/Failed 再次 shutdown 幂等；
 - Context、builder、`span/string_view` 和 FrameArena 数据禁止保存到回调之外。
 
@@ -279,14 +304,15 @@ Platform Poll
          Fixed Jobs -> Barrier
          Stable Command Merge -> Commit
          World Transform Propagation
-  -> Variable Update
-  -> Render Extraction
+  -> Frame Update (variable delta)
+  -> State Transition Commit
+       queued push/pop/replace/policy-change only
+  -> Render Scene Extraction
   -> UI Model Commit / Layout / Display List
   -> GPU Upload Budget
   -> Render Pass Scheduler
   -> Present
   -> Deferred Cleanup
-       AppState transition commit
        generation/deferred resource retire
 ```
 
@@ -298,11 +324,12 @@ Platform Poll
   使用上一帧稳定布局；每个 Pointer transition 最多 hit-test 一次，新 root 首次 layout 前不开放命中；
 - `pressed/released` Action 只由下一个实际 fixed tick 消费一次；本帧0个 tick 时保留，4个
   tick 时也不会重复4次；held state 可供每个 tick 读取；
-- Action Map 将输入显式分为 Simulation/Frame domain：Simulation edge 只进 Fixed Context，
-  Frame edge 只进当帧 Update Context，禁止同一隐式 edge 被 variable/fixed 各执行一次；
+- Action Map 将输入显式分为 Simulation/Frame domain：Simulation edge 只进
+  `FixedUpdateContext`，Frame edge 只进当帧 `FrameUpdateContext`，禁止同一隐式 edge 被
+  frame/fixed 各执行一次；
 - 每个 fixed substep 都在 barrier 后提交自己的 World commands，使第 N 步结果对第 N+1 步
   可见；遍历中不直接破坏实体/层级；
-- Render Extraction 生成当前帧不可变 `RenderScene`，Renderer 不访问 EnTT registry；
+- Render Scene Extraction 生成当前帧不可变 `RenderScene`，Renderer 不访问 EnTT registry；
 - UI 每帧最多批量布局一次，hit-test 和 render 不允许隐式触发布局；
 - CPU completion 与 GPU upload 是两个队列，分别按任务数、字节数和时间预算；
 - GPU Asset 在 Upload 阶段成功后只进入“下一帧可见”的 ready snapshot；当前帧 extraction/UI
@@ -312,11 +339,11 @@ Platform Poll
 
 Runtime 记录未裁剪 `realDelta`，但 Simulation accumulator 使用经验证的有限、非负、上限
 配置（默认250 ms）的 delta。最多4步后丢弃超额时间债务、保留小于一个 fixed delta 的余量，
-并增加 dropped-time metric。暂停只停止对应 AppState 的 gameplay/fixed/variable dispatch；
+并增加 dropped-time metric。暂停只停止对应 `IGameState` 的 gameplay/fixed/frame-update dispatch；
 Platform、UI、Asset、Audio 和必要 Render 仍推进。最小化窗口跳过无效 surface 的 Render/
 Present 并使用平台等待避免 busy loop，但继续处理关闭和异步完成。
 
-## Scene 与 Render Extraction
+## Scene 与 Render Scene Extraction
 
 `World` 对外只暴露 Tina 的 `EntityId { index, generation }`、组件命令和查询接口，EnTT
 registry 只存在于实现文件中。
@@ -338,14 +365,27 @@ RenderScene 的每个启用 World pass 的 `RenderView` 显式选择一个 activ
 零个或多个 Camera 都返回诊断而非依赖遍历偶然顺序。纯 UI/Present 或 Headless 帧可以没有
 World view 和 Camera；首期只支持一个 primary World view，多视口/画中画后置。
 
-`RenderSceneBuilder` 从 World 提取 Camera、Mesh、Sprite 和 UI 所需的只读数据。Scene
-组件保存 Tina typed handles 和材质/几何引用，不保存 bgfx handle。这样 NullRenderDevice
-与 bgfx 后端能消费同一份描述。
+Scene/Runtime integration 的 `RenderSceneWriter` 从 World 提取 Camera、Mesh/Sprite、Bounds 和
+Material 语义，并用当帧 Asset ready snapshot 解析为 `FrameResourceRef` 与 backend-neutral render
+packet；TileMap 的 tile span 先转为 `TileChunkRenderPacket`，不进入 Render SPI。UI Phase 单独
+冻结 `UIDisplayListView`。Runtime 把 Platform `SurfaceSnapshot` 转换成 render-owned
+`RenderSurfaceState`，与前两者组合成轻量 `RenderFrame` view，并放入 Runtime-private owning
+`RenderFramePacket`；Scene 组件保存 AssetHandle，不保存 GPU/bgfx handle。
+
+`tina_runtime` 物理拥有 packet pool；每个 `RenderFramePacket` 组合 Render 的 FrameArena/
+FrameResourceTable/SubmissionTicket 与固定容量的类型擦除 FrameLifetimePin set、Runtime-private
+SurfaceLeasePin，从 extraction 保活到 backend completion。Scene/UI 不 include Runtime，只把
+固定 inline storage 的 move-only `FrameLifetimePin` 转移给 Render SPI 的窄 `FramePinSink`；Runtime
+packet 只用固定容量 `StaticVector` 保存类型擦除 pin，kind 仅用于指标且禁止 downcast；Surface pin
+由 Runtime 直接保存，SubmissionTicket 在 submit 后附加。`tina_render` 的低层 writer 只接收已解析 FrameResourceRef，
+不反向依赖 `tina_asset`；`tina_render_bgfx` 只实现 RenderDevice descriptor/resource/submit SPI，
+不理解 RenderScene、TileMap 或 Widget。
 
 ## Render 设备与 Pass
 
-公共 `RenderDevice` 只提供 generation typed handle 和资源描述。首期只需要 Buffer、Texture、
-Sampler、Shader、Pipeline 等实际被 2D/UI/3D 使用的资源，不建设完整多后端 RHI。
+Tina 模块内部 Render SPI 只提供 generation typed handle 和资源描述；Game SDK 与 Phase Context
+不暴露 RenderDevice。首期只需要 Buffer、Texture、Sampler、Shader、Pipeline、RenderTarget 等
+实际被 2D/UI/3D 使用的资源，不建设完整多后端 RHI。
 
 首期声明式 Pass 为：
 
@@ -452,17 +492,23 @@ Skin、Animation、Morph 与压缩扩展返回明确诊断，不静默忽略。S
 Scope、Theme/DPI、Scroll/List、TextEdit/IME 和手柄导航是应迁移的有效能力，不因 vNext
 重构而丢弃。
 
-vNext 中每个 Window 拥有一个 `UIContext`。UI 树只输出后端无关的 Quad、Text、Clip
-Display List，由 Render 层批处理。布局采用 Measure/Layout 与 Flex 子集；每个有序 Pointer
-transition 最多 hit-test 一次。Button、Panel、Label、Checkbox、Slider 等 Widget 复用同一套节点、
-action 和 routed event 契约，不通过全局回调访问 Runtime。
+vNext 中 Runtime WindowRecord 唯一拥有 `UIContext`。`IGameState` 只持有 move-only `UIRootOwner`
+和带 owner WindowId 的 generation UINodeId；Platform/Event 不拥有 UI 状态。UI 树输出后端无关的 Quad、Image、
+GlyphRange、Clip DisplayList，由 Render 层保持 paint order 批处理。
 
-早期 `IGame::buildUI(UIContext&)` 容易被理解为 Immediate UI 式每帧重建，现已改为
-`updateUI(UIUpdateContext&)`：AppState 在 enter/exit 时创建、注册和销毁 retained roots，
-每帧只更新 model、style 和 dirty state。Runtime 先用上一帧已提交布局路由输入，再在玩法
-Update 后统一执行 model commit、最多一次 layout 和 DisplayList build。UI action 请求的
-AppState 变化在 Deferred Cleanup 提交，新状态从下一帧接收输入，因此不会发生点击穿透或
-路由中销毁当前树。
+布局采用一次 Measure/Arrange 的 Flex-lite；每个有序 Pointer transition 最多 hit-test 一次。
+UI 全程使用 window-logical coordinate，只有 DisplayList extraction 转 framebuffer pixel。细粒度
+Style/Measure/Arrange/Transform/Paint/HitTest/Order/Semantics dirty 只更新受影响范围；无变化 UI
+必须0布局、0 PaintCache rebuild、0 Tina heap allocation。
+
+`IGameState::updateUI(UIUpdateContext&)` 每帧只更新 retained model、style、action 和 dirty state；
+root 只在 enter/exit 创建/销毁。Runtime 先用上一帧 committed snapshot 路由输入，再在玩法
+Update 后提交结构命令、最多一次 layout、更新 dirty PaintCache 并冻结 DisplayList。UI action
+只写 State intent，`updateFrame()` 再排队 `IGameState` 变化，因此不会点击穿透或在路由中销毁当前栈。
+
+文本 measure/layout 与 FreeType raster 分离；迟到 glyph 发布沿用既定 advance，只标 Paint
+dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数据结构、API、Metrics 和门禁
+见[高性能自研 UI](ui.md)。
 
 ## 迁移策略
 
@@ -479,7 +525,8 @@ AppState 变化在 Deferred Cleanup 提交，新状态从下一帧接收输入�
 4. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D
    样例；
 5. **Asset**：双阶段队列、Cooked Manifest、纹理和静态 glTF 从 cooker 进入 2D/3D；
-6. **产品 UI/Audio**：设置页 Checkbox/Slider 接入 miniaudio 与 fullscreen；
+6. **产品 2D/UI/Audio**：正式 Catalog TileMap、Box2D dynamic body、设置页 Checkbox/Slider 接入
+   miniaudio 与 fullscreen；
 7. **Legacy 删除**：确认旧接口零引用后，按模块独立删除旧 target/实现和无用依赖，不执行
    模糊的整目录删除。
 
@@ -506,16 +553,21 @@ vNext-only preset 设为 OFF；当新2D/UI/3D/Audio 覆盖门禁后先把默认�
 - Linux GCC 与 Clang 构建；正式支持前还要运行 GLFW/bgfx 2D/UI/3D，Clang sanitizer 只有真实
   运行通过后才能标记完成；
 - NullRenderDevice 300帧 smoke 与10,000帧 lifecycle/benchmark；
-- 2D 显示 Sprite、中文 Label 和可交互 Button；
+- M8 infrastructure：`tina_sample_2d_infrastructure` 使用内置 fixture 显示 Sprite、中文 Label 和
+  可交互 Button，只证明 Scene/2D/UI 接口；
 - UI 验证 Modal、Focus、Pointer Capture、TextEdit/IME、Checkbox 与 Slider；
-- 3D 显示透视相机下的静态 Mesh，验证 depth 与资源释放；
+- M9 infrastructure：`tina_sample_3d_infrastructure` 使用 procedural Mesh 验证 Perspective、depth
+  与资源释放；
+- M12 删除 Legacy 前：正式 `tina_sample_2d` 必须通过最终 Catalog/Manifest 加载 TileMap/Tileset、
+  角色碰撞、Box2D dynamic body 和 UI overlay；正式 `tina_sample_3d` 必须通过最终 Cooker 加载
+  glTF/Material/Prefab。Infrastructure fixture 不能替代这两个 product gate；
 - 初始化失败点、Frame accumulator、Scene command、Asset cancel、Pass 顺序、UI layout/routing
   都有直接 GoogleTest；
 - 进程退出码、日志、资源计数和实际画面分别记录，不能用退出码 0 代替视觉结论。
 
 ## 剩余冻结事项
 
-Backend factory、阶段 Context、AppState/World/UI 所有权、C++ exception、32位 generation 回绕
+Backend factory、阶段 Context、`IGameState`/World/UI 所有权、C++ exception、32位 generation 回绕
 retire、XXH3-128、Asset Handle/Lease/Ticket、Trace/Tracy 和 `tina_bench` schema/统计协议均已
 形成 Accepted ADR 或候选决定。尚未闭合的是：
 

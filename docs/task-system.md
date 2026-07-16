@@ -74,7 +74,8 @@ callable size histogram；超过容量的任务改为显式 payload handle，不
 ## 生命周期与捕获规则
 
 - Task 只捕获不可变值、小型句柄或 generation ID；
-- 捕获裸 `this` 时，所属对象必须拥有 TaskGroup，并在析构前 requestStop + barrier；
+- 捕获裸 `this` 时，所属对象必须拥有 TaskGroup，并在 `onExit` 释放任何被 Task 访问的成员前
+  完成 requestStop + barrier；仅在析构前等待还不够；
 - Asset/Entity/Node/Render handle 在执行和 completion 两端都重新校验 generation；
 - Worker 结果写入私有 output，主线程 completion 在唯一 phase 提交；
 - Task 不直接修改 World、UI tree 或 RenderDevice；
@@ -106,8 +107,9 @@ Platform/Input
        schedule parallel pure jobs
        waitAtBarrier
        commit World commands
-  -> Variable Update
-  -> Render Extraction
+  -> Frame Update (variable delta)
+  -> State Transition Commit (no worker wait)
+  -> Render Scene Extraction
        schedule independent extraction chunks when worthwhile
        waitAtBarrier
        merge deterministic outputs
@@ -120,7 +122,7 @@ Platform/Input
 Task 调度不能改变确定性提交顺序。并行 chunk 使用稳定 index，合并按 chunk/index 排序；
 禁止用 Worker 完成先后决定 Entity、RenderItem 或 Event 顺序。
 
-Main Thread 每帧不做通用 `wait()`。只有 Fixed Simulation 和 Render Extraction 的显式 barrier
+Main Thread 每帧不做通用 `wait()`。只有 Fixed Simulation 和 Render Scene Extraction 的显式 barrier
 可以等待当前 phase 的有限 TaskGroup，并记录等待时间。超过 deadline 时生成诊断；不能
 让 Worker 在后台继续写已经进入下一阶段或已 reset 的 FrameArena。deadline 超时后 Engine
 立即进入 fatal-stop，保留 Arena 和 owner 对象、请求协作取消并继续等待 join；绝不 reset
@@ -138,7 +140,7 @@ Accepting
 
 Engine 关闭顺序：
 
-1. 停止游戏和 AppState 产生新任务；
+1. 停止 `IGameApplication` 和 `IGameState` 产生新任务；
 2. Scene/UI 请求停止并完成自己拥有的 TaskGroup；
 3. Asset 停止接收、取消 generation，等待 IO/CPU job 结束，但仍保留已被 Audio 引用的资源；
 4. Audio 停止 callback/command producer，并释放 Asset handle；

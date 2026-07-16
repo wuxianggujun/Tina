@@ -5,13 +5,16 @@
 
 ## 背景
 
-generation 只能阻止迟到结果逻辑提交，不能阻止 GPU 已提交 upload、Render frame 或 Audio
+generation 只能阻止迟到结果逻辑提交，不能阻止 GPU 已提交 upload、RenderFramePacket 或 Audio
 callback 继续读取 payload。若取消后立即释放，仍会 UAF；若所有 Handle 都是强引用，又会让
 缓存和卸载语义不可控。
 
 ## 推荐决定
 
 `AssetHandle<T>` 是弱 generation lookup，`AssetLease<T>` 是跨 Task/Render/Audio 的强引用；
+Asset/UI 通过 Render SPI 的窄 FramePinSink 把类型擦除的 frame lease/Atlas pin 登记到每个
+Runtime-private RenderFramePacket；Surface pin 由 Runtime 直接保存，SubmissionTicket 在
+RenderDevice submit 后附加，二者都不经过 sink；
 GPU upload 用拥有 staging 的 UploadTicket，GPU/Audio 销毁进入 DestroyQueued→Retiring→Released
 账本。逻辑 cancel/unload 先使新查询失效，物理内存/资源计数只有 backend fence/completion 或
 audio ACK 后释放。Ready 只在下一帧 snapshot 发布，首期不做自动 LRU。

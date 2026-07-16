@@ -18,7 +18,7 @@ ADR 记录已经接受或被替代的架构决定。主题文档描述完整设�
 | [0011](0011-retained-ui.md) | Accepted | 自研 Retained UI，输出后端无关 DisplayList |
 | [0012](0012-miniaudio-backend.md) | Accepted | miniaudio 是唯一真实音频后端 |
 | [0013](0013-entt-internal-storage.md) | Accepted | EnTT 只作为 Scene 内部 ECS 存储 |
-| [0014](0014-runtime-phase-and-state.md) | Proposed | EngineHost 阶段 Context + IGame/AppStateStack |
+| [0014](0014-runtime-phase-and-state.md) | Proposed | IGameApplication 程序入口 + IGameState 唯一帧状态接口 |
 | [0015](0015-input-and-fixed-step.md) | Proposed | InputFrame、Action domain 与逐 substep 提交 |
 | [0016](0016-asset-ownership-and-retirement.md) | Proposed | 弱 Handle、强 Lease 与物理退役账本 |
 | [0017](0017-bounded-task-system.md) | Proposed | 有界结构化 Task System，不 detach/强杀 |

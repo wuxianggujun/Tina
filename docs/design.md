@@ -13,6 +13,8 @@ Core 专项设计及 Carbon Core 取证见 [tina_core 设计](core.md)；性能/
 [性能预算与内存系统](performance-memory.md)和 [Task System](task-system.md)。公共 API、平台
 输入、Audio、依赖治理和风险分别见 [公共接口](public-api.md)、[Platform/Input](platform-input.md)、
 [Audio](audio.md)、[依赖治理](dependencies.md)与[风险登记](risks.md)。
+游戏入口、2D 和3D的具体用法分别见[游戏程序入口与状态栈](gameplay.md)、
+[2D 游戏架构](game-2d.md)和[3D 游戏架构](game-3d.md)。
 
 ## 已确定的技术边界
 
@@ -21,7 +23,7 @@ Core 专项设计及 Carbon Core 取证见 [tina_core 设计](core.md)；性能/
 | 语言与编码 | 目标基线为 C++23、UTF-8，MSVC 使用 `/utf-8`；当前 CMake 尚为 C++20 | 后续独立恢复 C++23，不能只改文档而跳过跨平台验证 |
 | 窗口与基础输入 | GLFW，不引入 SDL/SDL3 | 保持平台层单一；Windows IME 仅用 IMM32 补充 |
 | 渲染 | bgfx | 先复用成熟后端，不在当前阶段自研 RHI |
-| UI | Tina 自研 Retained UI | 服务游戏内 UI，并用 generation `NodeId` 管理交互生命周期 |
+| UI | Tina 自研 Retained UI | 服务游戏内 UI；vNext 用带 owner 的 generation `UINodeId` 管理交互生命周期 |
 | ECS | EnTT | 当前仍暴露 registry 与 `entt::entity`；新接口应逐步收敛到 Tina `EntityId` |
 | 容器与内存 | vNext 不依赖 EASTL；默认标准库与 `std::pmr`，只自研少量固定容量/生命周期专用结构 | 不重写 STL；把性能投入到零帧分配、数据布局、Arena 和可观测预算 |
 | Hash | xxHash 保留为私有后端 | 用于 ContentHash、缓存和 StringId；不作为 AssetId、EntityId 或安全签名 |
@@ -80,10 +82,10 @@ Frame timing
 
 | 领域 | 当前实现 | 近期目标 | 暂不建设 |
 | --- | --- | --- | --- |
-| Runtime | `Application` 持有多数服务 | `EngineHost::Create(config, factories)`、阶段 Context、IGame + AppStateStack，按垂直切片接管 | 新全局组合根、长期双向桥接旧/新 Runtime |
-| Scene/ECS | Scene 栈、延迟操作、Scene 自有 UI roots；World 仍暴露 EnTT/bgfx | 测试切换提交点，并逐步引入 `EntityId` 与 render extraction | 编辑器式多 World 管理 |
-| UI | Retained Tree、路由事件、焦点、IME、虚拟列表 | 完成 action 生命周期、常用表单控件、可访问语义和截图门禁 | 用 UI 系统直接承担完整编辑器 |
-| Render | 多条 2D/3D 路径直接提交 bgfx | 先统一 Pass/View 所有权，再引入 typed handle 与 UI Display List | 自研多后端 RHI、完整 Render Graph |
+| Runtime | `Application` 持有多数服务 | `EngineHost`、阶段 Context、`IGameApplication` + Runtime-private GameStateStack，按垂直切片接管 | 新全局组合根、长期双向桥接旧/新 Runtime |
+| Scene/ECS | Scene 栈、延迟操作、Scene 自有 UI roots；World 仍暴露 EnTT/bgfx | 测试切换提交点，并逐步引入 `EntityId` 与 Render Scene Extraction | 编辑器式多 World 管理 |
+| UI | Retained Tree、路由事件、焦点、IME、虚拟列表 | UIContext/dirty/PaintCache/DisplayList 零 bgfx边界，之后补表单控件和语义 | 用 UI 系统直接承担完整编辑器 |
+| Render | 多条 2D/3D 路径直接提交 bgfx | RenderFrame、Game SDK/Render SPI/backend 三层隔离；游戏不接触 RenderDevice/bgfx | 自研多后端 RHI、完整 Render Graph |
 | Asset | 按路径异步读取，主线程 completion 有任务预算 | 分离 CPU decode 与 GPU upload，再设计稳定 AssetId/Cooker | 当前直接上完整热重载编辑器管线 |
 | Physics | Box2D 工具封装尚未接入玩法，Jolt 尚未集成 | 2D 正式接入 Box2D，3D 只接入 Jolt，并分别建立性能门禁 | 第三套物理后端或强行统一 2D/3D Physics API |
 
@@ -96,9 +98,9 @@ Carbon 对应模块取证已经完成，详细证据和采纳/拒绝矩阵见
 1. **设计冻结**：确认 Core、Runtime、Scene、Render、Asset、UI 的所有权、接口和依赖图；
 2. **Null Runtime**：Core/Task/Headless Platform、新 `EngineHost`、失败回滚、固定帧阶段、
    Metrics、NullRenderDevice、`tina_bench` 连续300帧/10,000帧；
-3. **Platform/UI**：GLFW、InputFrame（最终 Snapshot + 有序 transitions）、中文字体、IMM32 和基础可交互 UI；
-4. **Scene/2D**：generation `EntityId`、Transform、command buffer、render extraction 和 Sprite；
-5. **Render/3D**：typed handle、Pass Scheduler、bgfx backend、Perspective 和 depth；
+3. **Platform/UI**：GLFW、最小私有 Surface/UI Pass、后端无关 DisplayList、中文字体和 IMM32；
+4. **Scene/2D**：generation `EntityId`、Camera2D/Sprite、TileMap feature 边界和 Render Scene Extraction；
+5. **Render/3D**：内部 typed handle/Pass Scheduler、Perspective/depth、Mesh/Material/Shader ABI；
 6. **Asset/Cooker**：CPU Decode/GPU Upload 双队列、AssetId、Manifest 和最小静态 glTF；
 7. **产品能力**：Checkbox/Slider 设置页、miniaudio 生命周期和必要的可访问语义；
 8. **Legacy 删除**：旧接口零引用且全部门禁通过后，独立删除旧 target、源码和依赖。

@@ -30,10 +30,13 @@ UTF-8 路径、读取和原子文件写入统一属于 `tina_core/io` 的 OS-spe
   Scene、UI 或 RenderDevice；
 - 后台线程不能调用 GLFW，也不能保存原生窗口指针。
 
-Platform 与 Render 之间只交换窄的 `RenderSurfaceDescriptor`。其中的原生句柄是不透明借用，
-只允许 `tina_render_bgfx` 在创建/重置 surface 时读取；游戏、Scene、UI 和公共 Render API
-看不到 `HWND`、X11、Wayland 或 GLFW 类型。窗口销毁前 Runtime 必须先停止对应 surface 的
-提交并完成 Render barrier。
+Game SDK 的 Platform API 只暴露 `WindowId` 与 logical/framebuffer/content-scale metrics。
+Platform 与 Render backend 通过不安装到 Game SDK 的 integration SPI 交换 generation
+`SurfaceToken`、无原生句柄的 `SurfaceSnapshot(extent, scale, revision, suspended)`，以及创建/
+重置期的 `NativeSurfaceLease`。Lease payload 是 Tina-owned POD，只允许 `tina_render_bgfx` 私有
+映射；游戏、Scene、UI 和公共 Render API 看不到 `HWND`、X11、Wayland、GLFW 或
+`bgfx::PlatformData`。窗口销毁前 Runtime 必须停止对应 surface 提交、通过 Render barrier并
+释放 lease。
 
 ## 每帧 InputFrame
 
@@ -73,19 +76,24 @@ fixed step：
 - Simulation `held/axis` 状态可供本帧所有 fixed step 读取；未被 UI 消费的 Down/Up transition
   转成 Simulation Action edge 后，由第一个实际执行的 fixed step 消费一次；
 - 如果本帧没有 fixed step，待消费 Action 保留到下一次 fixed step，不静默丢失；
-- Frame Action edge 只在当前 Variable Update 消费一次，帧末丢弃，不在0个 fixed step 时保留；
+- Frame Action edge 只在当前 Frame Update 消费一次，帧末丢弃，不在0个 fixed step 时保留；
 - Pointer delta、wheel、文本和 UI navigation 每个 Render Frame 最多消费一次，不重复给4个
   fixed step；
 - 回放/确定性测试只记录归一化 Simulation Action 与目标 simulation tick，而不是 GLFW key
   code；Frame Action 只用于相机/表现等非确定性帧逻辑。
 
 UI 使用同一 InputFrame 的有序 transition 生成 Pointer/Key/Navigation routed event。每个 Pointer
-transition 最多 hit-test 一次；有 Capture 时直接解析 captured NodeId，需要判定 click 的 release
+transition 最多 hit-test 一次；有 Capture 时直接解析 captured UINodeId，需要判定 click 的 release
 再做一次且仅一次 release-position hit-test。UI `preventDefault()` 不回写 Platform 数据，而是
 按 transition sequence 写入本帧独立的 `InputConsumption`。Gameplay Action Mapping 只读取未
-消费 transition；持续 `held` 是否被遮挡由 AppState 的 Input Context/Action Map 明确决定，
+消费 transition；持续 `held` 是否被遮挡由 `IGameState` 的 Input Context/Action Map 明确决定，
 不能依赖 UI 修改全局键盘状态。消费记录只活到当前 Render Frame，回放记录最终 Action 与
-目标 simulation tick，不记录 UI 内部 NodeId。
+目标 simulation tick，不记录 UI 内部 UINodeId。
+
+World pointer action 不能等到未来 fixed tick 再用“最新 Camera”换算。Action Mapping 对未被 UI
+消费的 transition，使用与该 `InputFrame` 对应的 last-presented Camera/Surface snapshot 转换
+一次，并把 world point、camera revision、surface revision 和 input sequence 一起写入
+Simulation Action。0 fixed-step 帧只延迟消费这份结果，不重新计算；viewport 外输入显式 no-hit。
 
 ## 三条事件通道
 
@@ -102,10 +110,10 @@ transition 最多 hit-test 一次；有 Capture 时直接解析 captured NodeId�
 
 - 窗口失焦时合成所有 held key/button 的 release，清除 Pointer Capture、keyboard pressed、
   Gamepad repeat 和未提交 composition；
-- 鼠标按下建立的 OS capture 与 UI `NodeId` capture 分开记录，两者在释放、失焦、窗口关闭
+- 鼠标按下建立的 OS capture 与 UI `UINodeId` capture 分开记录，两者在释放、失焦、窗口关闭
   或目标失效时成对清理；
-- GLFW logical size、framebuffer size 与 content scale 是三个不同量；UI 逻辑坐标只做一次
-  明确转换，Render 使用 framebuffer pixel；
+- GLFW logical size、framebuffer size 与 content scale 是三个不同量；UI layout、Pointer event
+  和 hit-test 始终使用 logical coordinate，只有 DisplayList extraction 转 framebuffer pixel；
 - Windows IMM32 context 由窗口 adapter 拥有，subclass/association 必须在窗口销毁前恢复；
 - `TextInputEvent` 只包含已提交 UTF-8；`TextCompositionEvent` 保存 preedit、codepoint cursor
   和 Started/Updated/Ended/Cancelled；

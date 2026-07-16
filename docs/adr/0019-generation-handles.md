@@ -7,15 +7,16 @@
 
 裸指针和单纯 slot index 无法阻止删除后复用；只有 index+generation 仍可能在另一个同类型
 World/Window/Device registry 中碰巧命中。把所有 ID 做成一个通用整数又会允许 EntityId 与
-NodeId 误传。
+UINodeId 误传。
 
 ## 决定
 
-EntityId、NodeId、WindowId、GamepadId、RenderHandle、AudioVoiceId 和 Asset runtime handle
+EntityId、UINodeId、WindowId、GamepadId、RenderHandle、AudioVoiceId 和 Asset runtime handle
 都使用强类型 Tag 隔离的 index + 32位 generation。0 为 invalid；slot 每次复用先增加 generation，
-回绕时永久 retire 而不再次复用。每个 API 同时受 owner registry 限制，Debug handle/调用点
-携带 owner cookie 立即诊断跨 World/Window/Device 使用；Release 通过能力化调用面避免错误
-owner 可表达。稳定序列化身份使用 AssetId/业务 ID，不能保存 runtime generation handle。
+回绕时永久 retire 而不再次复用。`UINodeId` 额外编码 owner `WindowId`，所有构建都校验
+owner + generation；其他 API 同时受 owner capability/registry 限制。Debug handle/调用点再携带
+Engine/registry cookie 诊断跨 Host/World/Device 使用，但 Debug 数据不承担 Release 正确性。
+稳定序列化身份使用 AssetId/业务 ID，不能保存 runtime generation handle。
 
 ## 结果
 

@@ -14,9 +14,10 @@ Tina 的“性能优先”必须由相同工作负载、相同工具链和相同
 | Main Thread p99 | 不超过 6.5 ms | 不超过 13.5 ms |
 | GPU Frame p99 | 不超过 8.0 ms | 有校准 timestamp 时不超过16.0 ms；否则只作 informational |
 | Fixed Simulation | 60 Hz | 每个 Render Frame 最多4步 |
-| Tina-owned 稳态动态分配 | Fixed Update、Render Extraction、无变化 UI 为0 | 从0变为非0立即阻断 |
+| Tina-owned 稳态动态分配 | Fixed Update、Render Scene Extraction、无变化 UI 为0 | 从0变为非0立即阻断 |
 | Asset GPU Upload | 默认不超过1.0 ms/帧 | 同时受任务数与字节数限制 |
 | UI Layout | dirty 时每窗口每帧最多1次 | 无变化 UI 不得重复布局 |
+| UI 增量更新 | 无变化时 Style/Layout/PaintCache rebuild 均为0 | 任一无原因非0立即阻断 |
 
 主线程和 GPU 分别计时，不能相加伪造总帧时间。120 FPS 是架构设计目标；60 FPS 是任何
 发布样例不得突破的底线。目标硬件的 CPU、GPU、内存、驱动、电源模式和系统版本必须写入
@@ -57,15 +58,22 @@ handle count 分账报告。
 | --- | --- | --- |
 | Null Runtime | 300帧及10,000帧长跑 | 生命周期、每帧固定开销、资源计数 |
 | Entity/Transform | 100,000 slots、50,000活跃 Transform | generation resolve、层级传播、command commit |
-| Render Extraction | 20,000可见 RenderItem | 连续写入、排序、批次、零稳态分配 |
-| 2D | 10,000 Sprite，其中大部分可合批 | extraction、batch count、GPU submit |
-| 3D | 5,000静态实例、基础深度 | culling、sort、draw/instance count |
-| UI | 5,000逻辑节点；100,000行虚拟列表、约100行可见 | dirty propagation、单次布局、DisplayList |
+| Render Scene Extraction | 20,000可见 RenderItem | 连续写入、排序、批次、零稳态分配 |
+| 2D Sprite | 10,000 Sprite，其中大部分共享 Atlas | 稳定 layer/order、batch/draw/texture switch |
+| 2D TileMap | 256x256、Camera 滚动和局部编辑 | chunk culling、dirty rebuild、collision query |
+| 3D | 5,000静态实例、基础深度 | bounds/culling、sort、draw/instance count |
+| UI 静态/局部 dirty | 5,000逻辑节点 | style/layout/PaintCache dirty 范围、DisplayList/batch |
+| UI 虚拟列表 | 100,000行、约100行可见+overscan | 创建/访问节点数、滚动、hit-test visited count |
 | Event | 每帧10,000次短事件投递 | queue、订阅解析、回调开销 |
 | Asset | 256个完成项积压 | 三重预算、饥饿保护、generation cancel |
 
 场景规模必须可配置，默认值只用于同版本回归。实际游戏样例继续承担画面正确性和交互验收，
 不能用合成基准替代。
+
+UI workload 还记录 nodes visible/interactive、dirty measure/arrange/paint/order、layout pass/node、
+hit-test count/visited、PaintCache rebuild、DisplayList command/bytes、batch/draw/texture/clip switch、
+glyph cache/raster/upload/atlas page，以及 route/layout/paint/display/submit ns。无变化帧允许遍历
+可见 PaintCache entry 组装本帧 view，但不能重新 style、layout、shape 或构建 local paint。
 
 ## 测量方法
 
@@ -344,9 +352,10 @@ public:
 - 不静默回退系统堆；
 - reset 前必须完成使用该 Arena 的所有 Task；
 - Scene command arena 在 command commit 后重置；
-- Render/UI arena 在 Render Pass 已消费全部 CPU descriptor 后重置；
-- GPU 或异步 IO 需要跨帧数据时必须复制到自己的 staging allocation，并由 completion 释放；
-- 禁止把 `bgfx::makeRef` 指向即将 reset 的 FrameArena；无法证明生命周期时使用复制语义。
+- Render/UI arena 属于固定容量 `RenderFramePacket` slot，只有 SubmissionTicket completion 后重置；
+- GPU 或异步 IO 需要跨帧数据时由 packet/staging owning allocation 持有并由 completion 释放；
+- backend-private 代码禁止把 `bgfx::makeRef` 指向 packet 之外即将 reset 的 Arena；无法证明
+  生命周期时使用复制语义。
 
 `std::pmr::memory_resource` 的 `allocate` 失败以 `std::bad_alloc` 表达，因此无异常的帧内构建器
 优先调用 `FrameArena::tryAllocate` 或在边界预留容量。需要 pmr 容器时，在 phase 边界捕获
@@ -373,9 +382,10 @@ public:
 | Engine/模块对象 | 对应 `MemoryTag` resource | `EngineHost` | 逆序 shutdown |
 | Scene 组件 | EnTT 内部池，使用 Scene resource adapter | `World` | entity destroy/World shutdown |
 | Scene commands | `FrameArena::SceneCommands` | Runtime phase | command commit 后 |
-| RenderScene/RenderItem | `FrameArena::RenderExtraction` | 当前 Frame | Render Pass 消费后 |
+| RenderScene/RenderItem/FrameResourceTable | packet FrameArena | `RenderFramePacket` | SubmissionTicket completion 后 |
 | UI retained nodes | UI tagged resource | `UIContext` | node/context 销毁 |
-| UI DisplayList | `FrameArena::UIDisplayList` | 当前 Frame | UI Pass 消费后 |
+| UI PaintCache/committed snapshot | UI tagged resource | `UIContext` | revision retire/node/context 销毁 |
+| UI DisplayList/Atlas generation pin | packet FrameArena + pin set | `RenderFramePacket` | SubmissionTicket completion 后 |
 | Asset CPU payload | Asset tagged resource | Asset slot generation | upload/cancel/failure后 |
 | GPU upload staging | Asset/Render staging allocation | upload request | 后端 completion 后 |
 | GPU resource | 后端原生资源计数 | `RenderDevice` | deferred GPU destroy |

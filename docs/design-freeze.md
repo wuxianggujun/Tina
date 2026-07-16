@@ -13,7 +13,8 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 - Tina 是游戏优先的 2D/3D Runtime，不以编辑器优先；
 - Windows/Linux，Visual Studio 2026 / MSVC 19.50 为 Windows 主门禁，目标 C++23 与全链路 UTF-8；
 - GLFW + Windows IMM32，不使用 SDL/SDL3；
-- bgfx 是首个且唯一真实 Render backend，公共接口不暴露 bgfx；
+- bgfx 是首个且唯一真实 Render backend，Game SDK、Tina module public header 和 Phase Context
+  均不暴露 RenderDevice/native handle/bgfx；普通游戏只调用 desktop bootstrap；
 - EnTT 只作为 Scene 内部存储；
 - Tina 自研 Retained UI，不使用 RmlUi/ImGui 作为游戏 UI；
 - GoogleTest 1.17.0 直接运行，不使用 CTest 调度；
@@ -38,18 +39,20 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 ### 模块与所有权
 
 - 目标模块为 core、platform、platform_glfw、task、runtime、scene、asset_format、asset、render、
-  render_bgfx、ui、ui_freetype、audio、audio_miniaudio、profile_tracy、assetc 和 samples/tests；
-- `EngineHost::Create(EngineConfig, EngineFactories) -> Result` 是唯一非全局组合根；具体 backend
-  由 bootstrap 显式注入，Null Runtime 不链接 GLFW/bgfx/miniaudio；
+  render_bgfx、ui、ui_freetype、audio、audio_miniaudio、profile_tracy、assetc、
+  physics2d、bootstrap_desktop 和 samples/tests；
+- `EngineHost` 是唯一非全局组合根；普通游戏通过 `tina_bootstrap_desktop` 的纯 Tina API 创建，
+  高级测试通过 `Create(config, factories)` 注入；Null Runtime 不链接 GLFW/bgfx/miniaudio；
 - 禁止 Singleton、Service Locator 和新的 `Application::instance()`；
 - 初始化每成功一步登记逆序回滚，失败不得留下半初始化对象；
-- Frame Phase、队列泵送、Scene/AppState 结构变更和 shutdown 都有唯一提交点。
+- Frame Phase、队列泵送、Scene/`IGameState` 结构变更和 shutdown 都有唯一提交点；
+- `IGameApplication` 只创建 initial `IGameState` 和接收 shutdown，`IGameState` 是唯一帧行为入口。
 
 ### 性能与内存
 
 - 中端桌面1080p，120 FPS设计目标、60 FPS硬门禁；
 - 记录 phase p50/p95/p99、current/peak、allocation、queue depth 和资源计数；
-- Fixed Update、Render Extraction、无变化 UI 的 Tina-owned 稳态动态分配为0；进程/第三方 heap
+- Fixed Update、Render Scene Extraction、无变化 UI 的 Tina-owned 稳态动态分配为0；进程/第三方 heap
   由平台工具另行交叉验证；
 - EngineHost-owned MemorySystem，按 MemoryTag 提供 counting pmr resource；
 - Scene command、Render extraction、UI DisplayList 使用独立 FrameArena；
@@ -87,25 +90,31 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 
 ### Scene、Render、Asset 与 UI
 
-- `EntityId/NodeId/RenderHandle/AssetHandle` 都带 generation；
+- `EntityId/UINodeId/RenderHandle/AssetHandle` 都带 generation；`UINodeId` 在所有构建中编码并
+  校验 owner `WindowId`，Debug cookie 只补充诊断；
 - generation handle 同时受 owner registry 限制，Debug 使用 owner cookie 检测跨 World/Device；
 - fixed update 中结构变更写 command buffer，每个 substep barrier 后稳定提交；
 - InputFrame 保留最终设备状态与有序 transitions；UI 使用上一帧稳定布局逐 transition 路由，
   先于 Gameplay Action Mapping 产生消费掩码；
-- Renderer 只消费不可变 RenderScene，不访问 EnTT；
+- World RenderScene 与 UI DisplayList 分别冻结，统一组合为 RenderFrame view；Runtime-private owning
+  RenderFramePacket 持有 FrameArena/资源 lease/Atlas/surface pin/submit ticket 到 backend
+  completion；Renderer 不访问 EnTT；
 - Pass 固定从 Opaque3D、Sprite2D、UI、Present 起步；
 - Asset 使用弱 Handle、强 Lease、UploadTicket/retirement ledger，以及 IO → CPU Decode → Main
   Completion → GPU Upload 四段路径和三重预算；
 - Runtime 只读取 Cooked Asset，Cooker 先验证产物再原子写；
-- UI tree retained、主线程拥有，输出后端无关 DisplayList；无变化 UI 不重复布局。
+- UI tree retained、UIContext 主线程唯一拥有，输出后端无关 DisplayList；细粒度 dirty、持久
+  PaintCache 和稳定 paint/hit snapshot 保证无变化 UI 0布局、0 PaintCache rebuild、0 Tina heap allocation。
 
 ### 实施与验证
 
 - 设计冻结后创建独立 `codex/` 分支和 worktree，不复制/stash/提交主工作区差异；
 - 双架构迁移期 `TINA_BUILD_LEGACY=ON` 保留当前游戏，并有 vNext-only OFF preset；覆盖完整
   2D/UI/3D/Audio 门禁后翻为 OFF，最终删除选项和旧实现；
-- 垂直切片顺序为 Null Runtime → Platform/UI → Scene/2D → Render/3D → Asset/Cooker →
-  Product UI/Audio → Legacy 删除；
+- 垂直切片顺序为 Null Runtime → Platform/最小 Surface/UI → Scene/2D → Render/3D → Asset/Cooker →
+  Product 2D/UI/Audio → Legacy 删除；
+- M7–M9 只使用版本化内置 Cooked fixture/procedural geometry；M7 已建立私有最小 bgfx UI Pass，
+  M9 只扩展3D，禁止 UI 临时调用 Legacy renderer；
 - 每批都有代码、直接 GoogleTest、对应可运行样例、资源回收证据、UTF-8 文档和独立提交；
 - `tina_bench` Release 直接运行，普通 CI 不用不稳定的绝对微秒阈值；
 - Exit code、资源计数、性能数据和实际画面分别验收。
@@ -120,10 +129,12 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 | 决策 | 状态 | 当前决定 | 影响 |
 | --- | --- | --- | --- |
 | Backend 组合 | [Proposed](adr/0003-backend-factories.md) | `Create(config, factories)`；production 与 headless/null 由 bootstrap 注入 | 消除 Runtime 对具体 backend 依赖 |
-| Runtime/State | [Proposed](adr/0014-runtime-phase-and-state.md) | 阶段 Context + IGame bottom layer + Runtime-owned overlay AppStateStack | 生命周期、错误和输入传播 |
+| Runtime/State | [Proposed](adr/0014-runtime-phase-and-state.md) | `IGameApplication` lifecycle-only + `IGameState` 唯一帧入口；Frame Update 后提交状态命令 | 消除名称歧义、双帧入口与首帧 UI 时序冲突 |
+| RenderFrame 所有权 | Proposed | 轻量 RenderFrame view 放入 Runtime-private owning RenderFramePacket；Render SPI 只暴露 FramePinSink，资源/Atlas/surface pin 到 completion | 消除依赖环、UI 重复 extraction、backend 越界与在途 UAF |
+| UI 增量管线 | Proposed | 细粒度 dirty、一次 layout、持久 PaintCache、稳定 snapshot、相邻兼容 batching | 高性能且保持命中/透明顺序 |
 | Frame/Input | [Proposed](adr/0015-input-and-fixed-step.md) | InputFrame 保序、UI 先路由；Action 分 Simulation/Frame domain；每个 substep 独立 commit | 防输入穿透、同帧丢边沿、双重执行和追赶步错误 |
 | C++ exception | [Proposed](adr/0004-exceptions-and-errors.md) | 编译开启；公共 API 用 Result/Status，Engine/Frame/Worker/C callback 边界捕获 | pmr/第三方兼容、错误边界 |
-| Generation | [Accepted](adr/0019-generation-handles.md) | 32位 generation，回绕 retire；强类型 Tag + owner registry，Debug owner cookie | stale/跨 registry 安全 |
+| Generation | [Accepted](adr/0019-generation-handles.md) | 32位 generation，回绕 retire；UINodeId 所有构建编码 owner WindowId，Debug cookie 只诊断 | stale/跨 registry 安全 |
 | Asset 生命周期 | [Proposed](adr/0016-asset-ownership-and-retirement.md) | 弱 Handle、强 Lease、UploadTicket 和 retirement ledger | GPU/Audio 异步 UAF 防护 |
 | ContentHash | [Accepted](adr/0007-standard-containers-and-hash.md) | 版本化 XXH3-128；安全校验未来另选密码学 Hash | Cooker cache 与格式稳定性 |
 | Worker 默认 | [Proposed](adr/0017-bounded-task-system.md) | 交互运行默认 `max(1, hardware_threads-1)`；IO 默认1；benchmark 必须显式 worker 数 | 可复现性与扩展性 |

@@ -83,12 +83,12 @@ callback 只消费已准备 PCM；buffer underrun 计数但不阻塞等待磁盘
 
 ## Frame Pipeline 与关闭顺序
 
-Audio command 在 Variable Update/玩法阶段产生，在当帧末主线程批量 flush；Audio completion
+Audio command 在 Frame Update/玩法阶段产生，在当帧末主线程批量 flush；Audio completion
 在下一帧固定的 `Audio Completion` 子阶段提交，不直接从 callback 进入 EventBus。
 
 关闭必须遵守：
 
-1. Game/AppState/Scene 停止产生 Play；
+1. `IGameApplication`/`IGameState`/Scene 停止产生 Play；
 2. Asset 停止新请求，但保留 active Audio lease；
 3. Audio 发送不可丢的 StopAll/Shutdown，停止 callback 与流式 producer；
 4. 主线程 drain completion，释放全部 Audio lease 和 voice slot；

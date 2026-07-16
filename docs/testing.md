@@ -41,27 +41,58 @@ Release 的四条 300 帧运行路径均已正常返回 0，且未出现 fatal�
 ## 待补自动化门禁
 
 - Legacy Application 现有失败点继续回归；vNext EngineHost 对每个 injected factory/初始化阶段
-  覆盖逆序回滚、Start transaction、run 只调用一次、onStop 恰好一次和重复 shutdown；
-- AppState push/replace enter 失败保持旧栈、成功后的 policy 从下一帧生效、pop/replace roots/
-  focus/capture/TaskGroup 清理、onExit 恰好一次，以及 Fixed/Input 被遮挡但 Render 仍可见；
+  覆盖逆序回滚、`IGameApplication` 无帧回调、initial State enter/layout 失败不调用 `onExit`、
+  run 只调用一次、`onShutdown` 恰好一次和重复 shutdown；
+- `IGameState` top-only、structural 与 policy-change 合计每 State 每帧最多一个 command，验证
+  replace 后再请求 policy-change 返回 `AlreadyQueued`；覆盖 queue/completion capacity、sequence、
+  completion slot 的 Reserved/Delivered/Diagnostics 回收，以及 `initialPolicy` 单次采样；
+- push/replace enter 失败保持旧栈且不调 candidate onExit；失败注入必须在 enter 中真实启动读取
+  staged owner 的 Task，验证 completion 在 commit 前不可发布，回滚先 cancel + barrier/join、再释放
+  Worker 可访问的 owner，最终 Task/owner/completion 计数归零；
+- State Transition Commit 后新 State 同帧只 layout 一次、下一帧输入生效；pop/replace 按“关闭
+  ingress → cancel → barrier/join → onExit → RAII 析构”清理 roots/focus/capture/TaskGroup，onExit
+  恰好一次，Worker 不能观察已释放的 State 成员；
 - Platform：Headless 不链接 GLFW、Window/Gamepad stale generation、失焦合成 release、
   fixed 0/1/4步的 Action edge 只消费一次、DPI 和 IMM32 窗口销毁顺序；
+- 2D world picking 在 Action Mapping 使用 last-presented Camera/Surface revision 转换一次；0步后
+  Camera 移动/resize 也不得改变已锁存 WorldPointerSample；viewport 外明确 no-hit；
+- Camera2D 覆盖 NaN/Inf/非正投影值、`x + width`/`y + height` 越界、零 Surface suspension 和
+  Catalog canonical PPM mismatch；PixelPerfect 覆盖强制 CameraAndSprites snap/nearest sampler、
+  Camera 相对旋转、Size override 与最终 texel basis/origin 校验，不合格 Camera 不生成 view、
+  不合格 Sprite 被去重诊断并跳过；
 - Scene 延迟 push/pop/replace，以及 fixed phase mutation barrier、延迟实体销毁和
   interpolation snapshot；
+- UI WindowRecord 唯一 ownership、RootOwner rollback、UINodeId cross-window owner 校验/回绕 retire、committed
+  paint-hit snapshot、细粒度 dirty 和布局中新增 dirty 不丢；
+- UIInputScopeSnapshot 对多个 eligible State roots 只做一次全局 hit-test；阻断/恢复时 Pointer Cancel、
+  Focus history、Modal root scope 与 generation 失效顺序固定；
+- Transform/scroll/clip 只重建 composite snapshot，不重建 local PaintCache；Visible/Hidden/Collapsed
+  dirty 传播完整，相同 effective clip 确定性 intern 为同一 ClipId；
+- 无变化 UI 必须 Style/Layout/PaintCache rebuild=0且 Tina heap allocation delta=0；每窗口 layout
+  <=1、每 Pointer transition hit-test<=1，dirty leaf 不重排无关 subtree；
 - UI 多指针/多按键、触摸输入、GLFW 手柄轮询/回滞/长按重复的可注入测试、实体手柄矩阵、焦点回调中的延迟销毁、可访问语义和截图级激活视觉状态；
 - Checkbox 的 Pointer/Keyboard/Gamepad 单次切换、disabled/preventDefault、回调自销毁；Slider
   的有限性校验、clamp/step 量化、min==max、capture 拖动、Home/End、每帧单次 change 与 DPI
   命中；设置 backend 失败时 model 回滚且不留下错误全屏/音量状态；
-- UI Semantics 的 Role/Name/Range/Checked/Enabled/Focused、labelledBy stale NodeId、装饰节点过滤
+- UI Semantics 的 Role/Name/Range/Checked/Enabled/Focused、labelledBy stale UINodeId、装饰节点过滤
   和稳定树序；Theme/DPI revision 只使必要 style/layout dirty，敏感 TextEdit 正文不进诊断；
 - Font Asset lease、UTF-8 非法序列替换、中文 fallback、Atlas page 满容量/退役、raster completion
-  stale generation，以及 glyph 未就绪/发布时不会从 hit-test/render 隐式布局；
+  stale generation；text measure 与 raster 分离，glyph 发布只 Paint dirty，不改变既定 advance；
 - InputFrame 同 Poll 的 Down→Up、多次 Wheel/Text/Composition sequence、Move 不跨边界合并、
   transition 满容量 resync，以及 UI consumption 后固定步0/1/4次的 Action edge 语义；
 - Simulation/Frame Action domain 不重复投递：0步帧保留 Simulation edge、Frame edge 当帧一次，
   replay 只记录带目标 tick 的 Simulation Action；
+- Game SDK umbrella header 在无 bgfx/GLFW/EnTT include path 下独立编译；public source/include、
+  module direct/public dependency 通过第三方 forbidden-token/target 检查；外部 Game consumer
+  只声明 Game SDK + desktop bootstrap 也能完成生产链接；可选 `Tina::Physics2D` consumer 在无
+  Box2D include path 下单独编译和链接；
+- RenderScene 与 UIDisplayList 分别只生成一次并汇入 RenderFramePacket；DisplayList 不含 Widget/bgfx，
+  相邻兼容 batching 保持 paint checksum；
+- 在途 RenderFramePacket 期间卸载 Asset、退役 Atlas、关闭 Surface 和注入 Pass 失败仍保持引用
+  有效；completion 后 packet/lease/pin/resource count 归零；纯 UI/2D-only/3D-only/无内容/
+  SurfaceSuspended 的 initial clear 次数固定，UI-only/2D-only depth allocation count 为0；
 - Render Pass 顺序、禁用与失败停止、临时资源清理、typed handle generation、
-  NullRenderDevice 资源计数和连续300帧；
+  NullRenderDevice 资源计数和连续300帧；vNext-null 完全不 add_subdirectory/link/load bgfx；
 - Asset CPU Decode/GPU Upload 双队列的 generation 取消，以及任务数、字节、时间预算和
   饥饿保护；弱 Handle/强 Lease、UploadTicket/retirement、依赖循环/失败链、Cooker 的损坏/
   不支持 glTF、生成后验证、事务 Manifest 和增量更新；
@@ -71,7 +102,11 @@ Release 的四条 300 帧运行路径均已正常返回 0，且未出现 fatal�
   Runtime 即使 ContentHash 匹配也拒绝越界 payload/dependency table；
 - Audio：Voice generation、command/completion 满容量、callback 0分配/0阻塞、设备 Disabled、
   Stop/自然结束竞争、Asset lease ACK 和重复 shutdown；
-- 完整 Tina 游戏的 Linux GCC/Clang GLFW/bgfx 2D/UI/3D 运行，以及 Clang ASan/UBSan preset。
+- 2D layer/order/alpha、Camera resize/world picking、Tile chunk culling/dirty rebuild、Tile AABB/
+  Box2D 分工和 UI overlay 不穿透；
+- 3D Camera/Material/Texture/depth occlusion、bounds/culling/instance、resize、Cooked glTF/Prefab 和
+  不支持特性诊断；
+- 完整 Tina 游戏的 Linux GCC/Clang production backend 2D/UI/3D 运行，以及 Clang ASan/UBSan preset。
 
 Windows 和 Linux 必须分别构建。项目直接运行 GoogleTest 可执行文件，不使用 CTest 调度；Clang ASan/UBSan 在仓库提供可复现配置并实际通过前不得标记为已验证。
 
@@ -109,7 +144,7 @@ cmake --build --preset linux-compile-gate-debug --target Tina tina_tests
 `TINA_BUILD_SHADERS=OFF` 输出不含 cooked shader，不能作为可运行包或发布包。Windows 运行
 验收与正式 Linux 包必须保持默认 `ON`。
 
-## 运行冒烟
+## 当前 Legacy 运行冒烟
 
 构建命令和环境前提见 [构建与运行](building.md)。以下命令描述验收入口，不替代构建步骤。
 
@@ -140,3 +175,29 @@ cmake --build --preset linux-compile-gate-debug --target Tina tina_tests
 四个命令都必须返回0，并在日志中出现正常初始化、达到帧数、场景退出、资源管理器释放、bgfx 和窗口关闭记录。UI 路径还必须出现 `UI smoke scene ready`，且不得出现 `无法建立模态焦点范围`；3D 路径必须肉眼或截图确认透视 Cube 可见，并出现 `Smoke3DScene released vertex and index buffers`，且不得出现 `BGFX LEAK` 或 `MEMORY LEAK`。只检查 exit code 和 buffer 生命周期不足以证明画面正确。
 
 bgfx Debug/D3D11 当前会在关闭 InfoQueue 时输出一次 `RefCount is 4 (expected 0)`；同一代码的 MSVC Release 300 帧验证无该提示、无 stderr、无 leak marker，因此将其记录为第三方 Debug layer 诊断噪声，不作为 Tina 资源泄漏结论。
+
+## vNext 独立样例门禁
+
+以下是目标 executable，不得用当前 `Tina --smoke-*` 的结果冒充：
+
+| 样例 | 主要证明 | 资源策略 |
+| --- | --- | --- |
+| `tina_sample_null` | EngineHost、`IGameApplication`/`IGameState`、RenderFramePacket、300/10,000帧生命周期 | 无第三方 backend |
+| `tina_sample_ui` | committed snapshot、dirty/Flex/PaintCache、中文、Modal、TextEdit、DisplayList | M7 内置 Cooked Font/Texture fixture |
+| `tina_sample_2d_infrastructure` | Camera2D、Sprite layer/order、world picking、UI overlay | M8 内置 Cooked Sprite fixture |
+| `tina_sample_3d_infrastructure` | Perspective、depth、canonical Mesh、Unlit pipeline | M9 procedural Cube |
+| `tina_sample_2d` | Cooked TileMap/Tileset、chunk、角色/Tile AABB、Box2D dynamic body、正式 UI | M10/M11 Catalog/Manifest |
+| `tina_sample_3d` | Cooked glTF -> Mesh/Material/Prefab、culling/instance | M10 Catalog/Manifest |
+
+M7 已建立私有最小 production Surface/UI Pass；M9 只扩展3D。游戏 sample source、Game SDK
+header 和 UI public header 不出现 bgfx。结构化验收使用 backend-neutral 字段：
+
+```text
+RenderDevice stopped
+render.resources.current = 0
+render.retirement.pending = 0
+ui.resources.current = 0
+```
+
+具体 backend 的 InfoQueue/debug marker 只属于 adapter test/log，不成为 Game API 或通用样例
+成功条件。每个可见样例仍分别保存返回码、资源计数、性能结果和实际截图。

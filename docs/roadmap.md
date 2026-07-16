@@ -46,10 +46,11 @@
 - 已完成 Runtime、Window/Input/UI、Render、Asset/Cooker、Scheduler、Simulation、
   Audio 和 Core 的采纳/拒绝矩阵；
 - 已形成 core、platform/platform_glfw、task、runtime、scene、asset_format/asset、render/
-  render_bgfx、ui/ui_freetype、audio/audio_miniaudio、profile_tracy、assetc 的候选职责和单向
+  render_bgfx、ui/ui_freetype、audio/audio_miniaudio、profile_tracy、assetc、bootstrap_desktop
+  的候选职责和单向
   依赖，等待本轮确认；
-- 已形成 factory 注入、阶段 Context、IGame/AppStateStack、Frame Pipeline、generation + owner、
-  Render Extraction、Asset Handle/Lease/Ticket 和 UI Display List 的候选契约；
+- 已形成 factory 注入、阶段 Context、`IGameApplication`/`IGameState`/Runtime-private GameStateStack、Frame Pipeline、generation + owner、
+  Render Scene Extraction、Asset Handle/Lease/Ticket 和 UI Display List 的候选契约；
 - 决定 Core diagnostics 的最小范围：Metrics、TraceZone 空后端、MemoryTag、可注入 Clock、
   CrashContext 和 UTF-8 原子 IO；不复制 Carbon 的全局 allocator/profiler/thread API；
 - vNext 不依赖 EASTL，也不自研通用 STL；只实现 StaticVector、InlineFunction、FrameArena、
@@ -64,14 +65,17 @@
   workload version/checksum、独立进程统计、baseline fingerprint 和 Tracy/Metrics A/B；
 - 设计冻结前只更新文档和取证，不修改 Runtime 源码；冻结后创建独立 worktree 开始迁移。
 
-## M6 Null Runtime 垂直切片
+## M6 Null Runtime 与公共入口垂直切片
 
-- 建立 `EngineHost::Create(config, factories)`、EngineConfig、阶段 Context 与最小 IGame；
+- 建立 `EngineHost::Create(config, factories)`、EngineConfig、阶段 Context、lifecycle-only
+  `IGameApplication` 和唯一帧入口 `IGameState`；删除候选公共 `IFrameClient`；
 - 初始化阶段支持失败注入，并覆盖任意失败点逆序回滚、析构顺序、重复 shutdown；
 - 接入可注入 Clock、固定60 Hz/最多4步、唯一 Frame Phase 和阶段指标；
 - 建立 Headless Platform、TaskSystem、FrameArena、GenerationPool 和 MemoryTag；专用容器以
   首个消费者为触发点；
-- 实现 NullRenderDevice、typed generation handle 和最小 Pass Scheduler；
+- 实现 NullRenderDevice、typed generation handle、最小 Pass Scheduler，以及
+  `RenderFrame = World RenderScene + UIDisplayList + RenderSurfaceState + timing`；Runtime private
+  `RenderFramePacket`/pool 负责保活到 submission completion；
 - 建立 Scene/Asset/UI/Audio 的最小公共契约与 Empty/Disabled 生命周期壳，只为一次固定最终
   Context/初始化/关闭顺序；不接 EnTT、FreeType、miniaudio、Cooked format 或产品功能；
 - 增加 `tina_sample_null` 与 `tina_bench` schema v1；无 GLFW/bgfx/EnTT/FreeType/miniaudio/
@@ -81,29 +85,42 @@
   验证 zone/frame/thread capture、正常 shutdown、唯一 Client 和 Tracy/Metrics A/B；发布/bench
   仍保持 backend none。
 
-## M7 Platform 与 UI 垂直切片
+## M7 Platform、最小 Surface 与高性能 UI 垂直切片
 
 - 实现 `tina_platform_glfw` 并迁移 GLFW Window/Input，不引入 SDL/SDL3；Windows IME 继续
   只使用 IMM32；
+- 建立 `tina_bootstrap_desktop` 和私有最小 `tina_render_bgfx` Surface/UI Pass；Game SDK、
+  `tina_ui` public header 和 `IGameState` 不 include/link bgfx；
 - 保留独立 InputFrame（最终 Snapshot + 有序 transitions）、Event Queue 和 UI routed event；
-- 迁移 generation NodeId、Focus/Capture、Modal、Theme/DPI、中文字体和 TextEdit/IME；
-- UI 输出后端无关 Display List，并形成 Label、Button、Modal 的可运行样例；
+- 建立 WindowRecord-owned UIContext、带 owner 的 generation UINodeId、move-only RootOwner、committed
+  paint/hit snapshot、细粒度 dirty、Flex-lite、持久 PaintCache 和后端无关 DisplayList；
+- 迁移 Focus/Capture、Modal、Theme/DPI、中文字体和 TextEdit/IME；文本 layout 与 glyph raster
+  分离，Atlas 具有 generation/预算/retirement；
+- 使用版本化内置 Cooked Font/Texture fixture 形成 Label、Button、Modal 样例；禁止 Runtime
+  路径加载和 Legacy UIRenderer；
 - 为窗口失焦/销毁、composition、手柄回滞和输入重复建立自动化门禁。
 
 ## M8 Scene 与 2D 垂直切片
 
 - EnTT 只作为内部存储，公共接口只暴露 generation `EntityId`；
 - 建立 Local/Parent/World Transform、层级循环检测和阶段末 command commit；
-- 建立 Camera、SpriteRenderer 与只读 Render Extraction；
-- 2D 样例显示 Sprite、中文 Label 和 Button，验证固定步、插值和资源释放；
+- 建立 Camera2D、SpriteRenderer2D、稳定 layer/order、只读 Render Scene Extraction 和 chunk culling
+  接口；基础样例使用内置 Cooked Sprite fixture；
+- 定义 TileMap 为 gameplay feature、`IGridCollisionProvider` 和 Tile AABB/Box2D 分工；正式
+  TileMap 产品路径在 M10/M11 接入 Cooked 资产并验收；
+- 2D infrastructure 样例显示 Sprite、中文 Label/Button，验证 fixed-step、插值、world picking、
+  UI 输入不穿透和资源释放；
 - World 不依赖 GLFW 输入、具体 TileMap 或 bgfx。
 
 ## M9 Render 与 3D 垂直切片
 
-- 公共 RenderDevice 只使用 Tina typed handle/descriptors；bgfx 类型只在实现层；
+- Tina Engine Module Render SPI 只使用 typed handle/descriptors；Game SDK/Phase Context 不暴露
+  RenderDevice，bgfx 类型只在 `tina_render_bgfx` 私有层；
 - 固定 Opaque3D、Sprite2D、UI、Present Pass，明确 clear/load/store、失败停止和资源计数；
-- bgfx 后端支持 Perspective、depth、静态 Mesh 和离线 shader；
-- 3D 样例持续显示非空 Mesh，并验证退出时 buffer/texture/pipeline 零泄漏；
+- 扩展 M7 backend 支持 Perspective、depth、canonical static Mesh、UnlitBaseColor Material v1、
+  Shader ABI、bounds/culling 和静态 instancing；
+- procedural 3D infrastructure 样例持续显示非空 Mesh，并验证 resize、depth 和退出时
+  buffer/texture/pipeline 零泄漏；
 - 不引入完整自研多后端 RHI、PBR、阴影、动画或后处理。
 
 ## M10 Asset 与 Cooker 垂直切片
@@ -113,11 +130,20 @@
 - 实现弱 Handle/强 Lease、UploadTicket/retirement、稳定128位 AssetId、`tina_asset_format`、
   依赖 DAG、内容 Hash 和事务 Manifest；
 - `tina_assetc` 执行 Parse → Validate → Build → Validate Cooked → Atomic Write；
-- 固定 cgltf v1.15；最小 glTF 只支持静态三角 Mesh 和基础材质，不支持特性返回明确诊断。
+- 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
+  Sprite/Tileset/TileMap；不支持特性返回明确诊断；
+- 为正式产品路径把 M7–M9 的内置 fixture 替换为 Catalog/Manifest 资产；hermetic、版本锁定的
+  infrastructure/module-test fixture 继续保留；新增 Cooked glTF/Material/Prefab 3D 产品样例。
 
-## M11 产品 UI 与 Audio
+## M11 产品 2D、UI 与 Audio
 
 - 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
+- 建立 `tina_physics2d`，公共 header 只暴露 Tina PhysicsBodyId/PhysicsWorld2D/command/contact，Box2D 3.x 作为
+  PRIVATE 实现；完成创建/step/contact/query/关闭和资源归零门禁；
+- 建立单线程 `tina_physics2d_bench` 基线；只有 step p99 超预算才在后续独立提交接入 Box2D
+  worker callbacks，不把未验证并行作为 M11 正确性的前置条件；
+- 以当前游戏为正式 2D 产品门禁：Cooked TileMap/Tileset、Camera2D、chunk culling/dirty rebuild、
+  CharacterController2D/Tile AABB、至少一个 Box2D dynamic body 和 UI overlay；
 - `tina_audio_miniaudio` 作为唯一真实 backend，通过 generation voice handle、命令队列和
   主线程 completion 保证关闭安全；
 - 覆盖 callback 0分配/0阻塞、command/completion 满容量、设备 Disabled、Music underrun、
@@ -128,6 +154,9 @@
 ## M12 Legacy 删除
 
 - 新切片覆盖 2D、UI、3D、Asset 与 Audio 的必要路径；
+- 正式 `tina_sample_2d` 只使用最终 Catalog/Manifest，并覆盖 Cooked TileMap、角色/Box2D/UI；
+  正式 `tina_sample_3d` 只使用最终 Cooker 产物并覆盖 glTF/Material/Prefab；M8/M9 fixture 样例
+  不能替代产品门禁；
 - 旧 Application、CoreLegacy、EASTL/EABase、公开 EnTT/bgfx 边界和路径资源接口确认零引用；
 - Windows/Linux 构建、直接 GoogleTest、所有 smoke 与资源计数通过；
 - 删除旧 target、旧源码和无用依赖形成独立可回滚提交；
@@ -135,6 +164,7 @@
 
 ## 后续能力
 
-- 现有 Box2D `Physics2D` 收敛为唯一 2D 后端并接入任务系统；Jolt 作为唯一 3D 后端在真实玩法出现后接入；PhysX、Bullet、Rapier 不进入依赖或构建；不统一 2D/3D Physics API；
+- 只有 profiling 证明需要后才把已落地的 Box2D step 接入 Task System；Jolt 作为唯一 3D 后端在
+  真实玩法出现后接入；PhysX、Bullet、Rapier 不进入依赖或构建；不统一 2D/3D Physics API；
 - PBR、阴影、动画、脚本和编辑器均等待 Runtime、Render、Asset 基础契约稳定；
 - Linux/GCC 告警先区分第三方与 Tina 自身，再按模块清理；Clang ASan/UBSan 需要可复现 preset 和实际门禁结果。

@@ -23,8 +23,8 @@ stateDiagram-v2
 
 Scene 切换目前缺少完整自动化门禁。下一步应覆盖：回调中 push/pop/replace、同帧多个操作、暂停/恢复顺序、UI roots 激活、空栈和退出时 pending operation 的处理。
 
-vNext 迁移时旧 Scene 转为 `IAppState`，不照搬二值 `onPause/onResume`。StatePolicy 分别决定
-Fixed/Variable/Input/UI/Render 是否向下传播；push/replace 使用事务 enter，失败保留旧栈，
+vNext 迁移时旧 Scene 转为 `IGameState`，不照搬二值 `onPause/onResume`。GameStatePolicy 分别决定
+Fixed Update/Frame Update/Gameplay Input/UI Input/Render 是否向下传播；push/replace 使用事务 enter，失败保留旧栈，
 pop/replace 的 exit `noexcept` 且恰好一次。旧 pending operation 只有在这些门禁齐全后才删除。
 
 ## 当前 World/ECS
@@ -46,15 +46,18 @@ pop/replace 的 exit `noexcept` 且恰好一次。旧 pending operation 只有�
 2. 把 `createCharacter`、控制对象切换、Transform/Renderable 修改等高频操作改成明确的 World command/query。
 3. GameScene 不再直接访问 registry 后，才把 registry getter 降为模块内部接口。
 4. 把输入快照转换为玩法 command，World 不读取 GLFW 或全局输入状态。
-5. 把渲染改为 extraction：World 输出后端无关 Render Scene，Renderer 消费并分配 bgfx view/pass。
-6. TileMap 碰撞通过小接口或只读查询传入；Box2D 保持独立 2D 模块，不与未来 3D 物理强行统一。
+5. 把渲染改为 extraction：World 只输出后端无关 RenderScene；Game component 保存 AssetHandle/
+   材质语义，不保存 GPU handle，Render 内部才映射 pass/resource。
+6. TileMap 属于 gameplay feature，通过只读 `IGridCollisionProvider` 传给角色/碰撞系统；Box2D
+   保持独立 2D 模块，不与未来 3D 物理强行统一。
 
 目标数据流：
 
 ```text
 InputFrame -> UI consumption -> game commands -> fixed-step World systems
-World components -> render extraction -> Render Scene -> Renderer/bgfx
-Scene state -> UI model/actions -> retained UI tree -> UI Display List
+World components -> Render Scene Extraction -> RenderScene --+
+                                                    +-> RenderFrame -> Pass Scheduler
+IGameState UI model -> retained UI tree -> DisplayList+
 ```
 
 ## vNext 内存与并行契约
@@ -67,7 +70,7 @@ Scene state -> UI model/actions -> retained UI tree -> UI Display List
   propagation；第 N 步提交对第 N+1 步可见；
 - 新 Transform 令 previous=current，销毁后不进入 extraction；Render 只在 previous/current 的
   position/quaternion/scale 间插值，不逐元素插值矩阵；
-- Render Extraction 把连续 `RenderItem` 写入当前帧 Render Arena，Renderer 不回查 World；
+- Render Scene Extraction 把连续 `RenderItem` 写入当前帧 Render Arena，Renderer 不回查 World；
 - `EntityId` 的 generation 在任务开始和提交两端校验，迟到任务不能修改复用后的 slot；
 - 只有 profiling 证明系统工作量覆盖调度成本时才并行，小集合继续直接 for-loop。
 
@@ -92,3 +95,6 @@ primary RenderView 恰好选择一个 active Camera，零个或多个都产生�
   诊断及纯 UI 零 Camera 合法路径均有测试；
 - 50,000活跃 Transform 与20,000可见 RenderItem 的固定基准记录 p50/p95/p99，稳态
   command/extraction 的 Tina-owned 动态分配增量为0。
+
+游戏入口、2D TileMap/Camera/Sprite 和3D Mesh/Material/Prefab 的完整落点分别见
+[游戏程序入口与状态栈](gameplay.md)、[2D 游戏架构](game-2d.md)和[3D 游戏架构](game-3d.md)。

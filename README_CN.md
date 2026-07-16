@@ -1,6 +1,6 @@
 # Tina 游戏引擎
 
-Tina 是以 C++23 为目标语言基线的 2D/3D 游戏引擎项目。平台与输入层使用 GLFW，渲染使用 bgfx，音频使用 miniaudio，ECS 使用 EnTT，UI 为完全自研的 Retained UI。
+Tina 是以 C++23 为目标语言基线的 2D/3D 游戏引擎项目。平台与输入层使用 GLFW，私有渲染后端使用 bgfx，音频使用 miniaudio，ECS 使用 EnTT，UI 为完全自研的 Retained UI。游戏侧公共 API 不暴露 bgfx、GLFW 或其他第三方类型。
 
 ## 当前目标
 
@@ -11,6 +11,8 @@ Runtime。现有2D/UI/3D路径继续作为验收基线，新架构按可独立�
 - 修复 Application、Event、Resource、Scene 和 UI 的生命周期与每帧驱动顺序；
 - 使用直接运行的 GoogleTest 可执行文件覆盖核心行为；
 - 增加最小 3D 冒烟场景，验证透视相机、深度测试和静态 Mesh；
+- 以 `IGameApplication` 表示“整个游戏程序入口”，以 `IGameState` 表示“菜单、关卡、暂停等逐帧运行状态”，不再使用含义模糊的 `IGame`；
+- 建立细粒度 dirty、单次布局、持久 Paint Cache 和稳定 Display List 的高性能 Retained UI；
 - 参考 Carbon Engine 的 Frame Step、资源 Load/Prepare/Upload 和 GPU 生命周期，但保持 Tina 架构小而清晰。
 - 采用 Tina-owned Trace/Metrics 和可选 Tracy 定位热点，独立 `tina_bench` 建立可重复性能回归；
 - 新 target 不使用 EASTL，也不自研通用 STL；标准库/`std::pmr` 加少量专用固定容量结构。
@@ -78,7 +80,10 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 
 当前 UI 已具备 generation `NodeId`、Pointer Capture、Focus/Tab、KeyDown/KeyUp 的 Capture/Target/Bubble 路由、方向键空间焦点导航、可嵌套 Modal Focus Scope、Button 的 Enter/Space pressed/release 生命周期与单次激活、每窗口 Theme/DPI、嵌套 Clip、通用 `UIScrollView`、十万行范围计算的 ListView 虚拟化，以及 Windows 原生 IME preedit/composition。每个 Button action 具有独立重入保护、异常恢复和回调自销毁安全性；routed click 目标在路由中删除后通过 generation `NodeId` 立即失效。GLFW 标准手柄的 D-pad/左摇杆可驱动空间导航，A/B 映射为 Accept/Cancel；摇杆带回滞并支持方向长按重复，语义导航仍服从最上层 Modal Focus Scope。Dialog 不再订阅全局键盘事件，Escape 仅在焦点控件未消费时沿祖先链处理；Scene 会在 `onEnter`/`onResume` 交互前激活对应 UI roots。窗口与基础输入只使用 GLFW；IME 通过 Win32 IMM32 补充，不引入其他窗口或输入库。测试数量和平台验证结果只在 [测试文档](docs/testing.md) 中维护。
 
-不了解整体设计时，先阅读 [设计导读](docs/design.md)，再从 [文档索引](docs/README.md) 进入各模块；
+上段的 `NodeId` 是当前 Legacy 类型名；vNext Game SDK 使用职责更明确、并在所有构建校验
+owner `WindowId` 的 `UINodeId`，两者不能被文档混称为已完成迁移。
+
+不了解整体设计时，先阅读 [设计导读](docs/design.md)，再阅读[游戏程序与状态接口](docs/gameplay.md)、[高性能 UI](docs/ui.md)和[后端无关渲染](docs/rendering.md)，或从 [文档索引](docs/README.md) 进入各模块；
 候选/已接受/后置状态以 [设计冻结清单](docs/design-freeze.md)与
 [ADR 索引](docs/adr/README.md)为准。所有源码、文档、日志和配置统一使用 UTF-8，MSVC
 强制启用 `/utf-8`。

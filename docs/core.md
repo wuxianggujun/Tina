@@ -155,7 +155,8 @@ public:
 ```
 
 日志、Metrics、Trace 和 Crash 是四条不同通道。`Diagnostics` 由 EngineHost 拥有，模块在构造时
-取得不可拥有的窄 `DiagnosticChannel`，IGame/AppState 只从当前 Phase Context 取得 view；业务
+取得不可拥有的窄 `DiagnosticChannel`，`IGameApplication`/`IGameState` 只从注入的生命周期或
+Phase Context 取得 view；业务
 代码不能通过全局 `Logger::instance()` 查找 sink。Log record 固定包含 level、稳定 category、
 UTF-8 message、SourceLocation、thread/phase 和可选小型结构化字段，不允许动态高基数 category。
 
@@ -232,8 +233,8 @@ alignment、null free、double free 诊断和 tracker shutdown 顺序都需要�
 
 C++ exception 作为编译能力保持开启，原因是标准库、`std::pmr` 与第三方依赖可能抛出；但
 Tina 公共模块边界统一返回 `Result/Status`，热点正常流程不使用 throw。Engine create/run、
-IGame/AppState、Worker、音频/平台 C callback 和 Cooker 命令入口是强制 catch 边界；捕获后
-追加 phase/task/asset 上下文并转换。析构、rollback、`onStop` 和实时 callback 必须 `noexcept`，
+`IGameApplication`/`IGameState`、Worker、音频/平台 C callback 和 Cooker 命令入口是强制 catch
+边界；捕获后追加 phase/task/asset 上下文并转换。析构、rollback、`onShutdown`、`onExit` 和实时 callback 必须 `noexcept`，
 若其内部仍抛出则视为 programmer invariant 并终止，不能吞掉后继续。
 
 ## UTF-8、路径和文件
@@ -258,7 +259,7 @@ Cooker 依赖原子写保证失败时旧产物仍有效。路径测试覆盖空�
 - `ContentHash`：版本化128位非密码学内容 Hash，用于增量 Cook、缓存和非对抗性损坏检测；
   安全完整性使用独立密码学 Hash/签名；
 - `StringId`：固定算法的 64 位运行时 ID，Debug 保存原文并检测碰撞；
-- `EntityId/NodeId/RenderHandle`：index + generation，不使用内容 hash。
+- `EntityId/UINodeId/RenderHandle`：index + generation；UINodeId 另含 owner WindowId，不使用内容 hash。
 
 类型之间不提供隐式转换，避免把“身份”“内容版本”“容器 hash”混为一个整数。
 

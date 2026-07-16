@@ -6,7 +6,8 @@
 ## 原则
 
 - 依赖必须解决 Tina 当前不应自研的问题，并隐藏在最窄 adapter 后；
-- 公共 Tina API 不暴露第三方类型，除非该第三方明确就是模块内部存储且永不跨边界；
+- 所有已安装/Game SDK/Tina module public header 都不暴露第三方类型、宏或传递 include；第三方
+  即使作为模块内部存储也不是公开类型例外；
 - Configure/Build 不自动更新 submodule，`TINA_AUTOUPDATE_SUBMODULE` 日常保持 OFF；
 - Runtime 不下载源码、编译 shader 或解析源资产；所有发布资产来自可重复 Cooker；
 - 每次升级单独提交，包含版本/许可证变化、Windows/Linux 构建、直接 GoogleTest、对应 smoke
@@ -26,7 +27,7 @@
 | [Tracy 0.13.1](https://github.com/wolfpld/tracy) | 开发 Profile capture | vcpkg optional feature | `tina_profile_tracy` | 可选；发布和正式 bench 禁用 |
 | [cgltf v1.15](https://github.com/jkuhlmann/cgltf) | `tina_assetc` 解析 glTF | 固定单文件 + LICENSE/精确提交 | Cooker 源格式 adapter | 待接入 |
 | [GoogleTest 1.17.0](https://github.com/google/googletest/releases) | 单元/集成契约测试 | vcpkg baseline | tests only | 固定；直接运行，不用 CTest |
-| Box2D 3.x | 唯一 2D Physics backend | vcpkg | `tina_physics2d` | 当前依赖、玩法接入后置 |
+| Box2D 3.x | 唯一 2D Physics backend | vcpkg | `tina_physics2d` PRIVATE | 当前 Legacy 已依赖；vNext 产品接入 M11 |
 | Jolt | 唯一 3D Physics backend | ADR 0010 + 接入时固定版本 | `tina_physics3d` | 未接入，真实3D玩法后置 |
 | EASTL/EABase | Legacy 容器 | 当前 submodule | Legacy only | vNext 禁止，零引用后删除 |
 
@@ -68,6 +69,18 @@ TINA_BUILD_SHADERS=ON|OFF
 - cgltf implementation 宏只在 `tina_assetc` 的一个 `.cpp` 定义；
 - 第三方 include 默认 `PRIVATE/SYSTEM`，Tina public header 的 include-what-you-use 测试不得依赖
   传递 include 偶然成功。
+- vNext target 不再把整个 `${PROJECT_SOURCE_DIR}/src` 作为 PUBLIC include root；公开 header 使用
+  target-scoped `include/tina/...`，实现目录 PRIVATE；
+- `tina_render_bgfx` 对 bgfx/bx/bimg 的依赖只能是 PRIVATE/SYSTEM；Scene/UI/Asset/Runtime 的
+  direct link/public interface/include/definition 出现它们时 configure 直接失败。Game/Sample 只
+  直接链接 `Tina::GameSDK`、`Tina::DesktopBootstrap` 和按需的公开扩展模块（首个为
+  `Tina::Physics2D`）；最终生产链接经 bootstrap 带入 backend object/library 是实现闭包，不向
+  游戏源码传播 header、宏或 target 选择；
+- 源码 policy gate 除 render_bgfx、离线 shader tool 和 adapter test 外禁止 `<bgfx/...>`、
+  `bgfx::`、`BGFX_`、`bx::`、`bimg::`；
+- vNext Null preset 完全不 add_subdirectory/link/load bgfx；安装到 staging 后由无第三方 include
+  path 的外部 Game SDK consumer 再编译一次；`Tina::Physics2D` 的安装 consumer 必须在没有
+  Box2D include path、宏或 direct link 的环境独立编译，证明 Box2D 始终为 PRIVATE 实现依赖。
 
 ## 许可证与发布
 

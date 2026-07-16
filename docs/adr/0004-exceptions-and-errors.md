@@ -11,8 +11,9 @@
 ## 决定
 
 所有 Tina target 保持 C++ exception 能力。公共模块 API 使用 `Result/Status`；热点正常路径
-不 throw。Engine create/run、IGame/AppState、Worker、Platform/Audio C callback 和 Cooker
-命令入口捕获异常、追加上下文并转换。析构、rollback、onStop 和实时 callback 必须 noexcept。
+不 throw。Engine create/run、`IGameApplication`/`IGameState`、Worker、Platform/Audio C callback 和 Cooker
+命令入口捕获异常、追加上下文并转换。析构、rollback、`onExit`、`onShutdown` 和实时 callback
+必须 `noexcept`。
 
 ## 结果
 
