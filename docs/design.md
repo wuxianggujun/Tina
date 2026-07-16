@@ -75,11 +75,24 @@ Frame timing
 
 ## 推荐推进顺序
 
-1. 先补生命周期门禁：Button action、Application 初始化回滚、Scene 延迟操作、GPU 资源计数。
-2. 再补游戏真正会使用的 UI：Checkbox、Slider，以及可注入的手柄导航测试和基础可访问语义。
-3. 统一 Render Pass/View 与 UI Display List，避免新控件继续扩大 bgfx 直接依赖。
-4. 在渲染资源所有权稳定后建设 Cooked Asset、AssetId 和最小 glTF cooker。
-5. 只有上述契约稳定后，再评估是否需要把 `Application` 收敛为 `EngineHost/EngineContext`。
+Carbon 对应模块取证已经完成，详细证据和采纳/拒绝矩阵见
+[Carbon Engine 参考取证](carbon-reference.md)。这次分析改变了短期优先级：先停止横向
+增加 UI 控件，补齐跨模块生命周期门禁，再回到产品 UI。
+
+1. 为 Application 的 Window、bgfx、Event、Input、Resource 和 Renderer 初始化阶段增加
+   可注入失败点，验证逆序回滚；不进行一次性 `EngineHost` 重写。
+2. 参考 Trinity Render Job 的命名、计时与失败恢复，建立小型帧内 Pass Scheduler、
+   typed generation handle、NullRenderDevice 和 GPU 资源计数；不复制动态 Step 类型体系。
+3. 参考 BlueAsyncRes 把当前资源 completion 中连续执行的 CPU Decode/GPU Upload 拆成
+   两个队列，并同时按任务数、字节和时间预算。
+4. 参考 Destiny 在 fixed phase 中增加 World mutation barrier/deferred command buffer，
+   保证实体销毁、层级变更和 interpolation snapshot 不互相踩生命周期。
+5. 上述边界稳定后实现设置页真正需要的 Checkbox、Slider，并继续收敛 UI Display List、
+   可访问语义和截图回归；不按控件数量衡量 UI 完成度。
+6. 在 Render/Asset 所有权稳定后建设 `tina_assetc`、Cooked Manifest、AssetId 和最小
+   静态 glTF cooker。
+7. 只有这些契约稳定后，再评估是否需要把 `Application` 收敛为
+   `EngineHost/EngineContext`。
 
 每一步都必须能独立构建、直接运行 GoogleTest，并至少通过对应的 2D、UI 或 3D 冒烟路径。进程返回 0 只能证明运行和释放链路；画面正确、实体手柄兼容性等结论必须单独记录证据。
 

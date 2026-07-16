@@ -34,10 +34,15 @@ Release 的四条 300 帧运行路径均已正常返回 0，且未出现 fatal�
 
 ## 待补自动化门禁
 
-- Application 初始化失败回滚和析构顺序；
-- Scene 延迟 push/pop/replace；
+- Application 在 Window、bgfx、Event、Input、Resource、TextRenderer、Primitive2D 和
+  SpriteRenderer 任意阶段失败时的逆序回滚、重复 shutdown 与 onSetup/onCleanup 配对；
+- Scene 延迟 push/pop/replace，以及 fixed phase mutation barrier、延迟实体销毁和
+  interpolation snapshot；
 - UI 多指针/多按键、触摸输入、GLFW 手柄轮询/回滞/长按重复的可注入测试、实体手柄矩阵、焦点回调中的延迟销毁、可访问语义和截图级激活视觉状态；
-- Render Pass 顺序、typed handle generation 和 NullRenderDevice 资源计数；
+- Render Pass 顺序、禁用与失败停止、临时资源清理、typed handle generation、
+  NullRenderDevice 资源计数和连续300帧；
+- Asset CPU Decode/GPU Upload 双队列的 generation 取消，以及任务数、字节、时间预算和
+  饥饿保护；Cooker 的损坏/不支持 glTF、生成后验证、原子写入和 Manifest 增量更新；
 - 完整 Tina 游戏的 Linux Clang ASan/UBSan preset、构建、测试与运行。
 
 Windows 和 Linux 必须分别构建。项目直接运行 GoogleTest 可执行文件，不使用 CTest 调度；Clang ASan/UBSan 在仓库提供可复现配置并实际通过前不得标记为已验证。

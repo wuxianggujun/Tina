@@ -1,23 +1,125 @@
-# Carbon Engine 参考边界
+# Carbon Engine 参考取证与 Tina 决策
 
-本地 `temp/carbon-engine` 只作为设计参考，不进入 Git 提交或 Tina 构建。
+## 参考范围
 
-## 借鉴
+Carbon 只作为成熟工程经验来源，不作为 Tina 的依赖或兼容目标。官方源码来自
+[Carbon Engine GitHub 组织](https://github.com/carbonengine)，产品与模块关系以
+[Fenris Carbon 页面](https://fenris.com/carbon)为补充说明。
 
-- Render Step 使用明确状态、名称和 CPU/GPU profiling scope；
-- 资源分为后台 Load、主线程 Prepare/GPU Upload；
-- 队列支持取消、暂停、预算、pending 指标和主线程 time slice；
-- GPU 资源具有显式 Prepare/Release 生命周期；
-- Render Pass 明确颜色/深度 load/store 行为。
-- UI 输入把 MouseDown/Up/Move、Capture Changed、Set/Kill Focus 分成独立事件；Windows 路径在按下时 `SetCapture`、释放时 `ReleaseCapture`。Tina 只借鉴这一生命周期契约，使用自己的 NodeId 和 routed event 实现。
-- Carbon 还把 KeyDown、KeyUp、Char 与 Set/Kill Focus 分开。Tina 已按这一边界实现独立 KeyDown/KeyUp routed event、Button pressed/release 清理和 UTF-8/IME composition 通道，并继续使用自己的 generation NodeId、Capture/Target/Bubble、空间焦点导航和 Modal Focus Scope，不复制 Carbon 的枚举或窗口回调 API。`UIDialog` 不再订阅全局游戏按键；焦点控件未处理的按键才向祖先回退，Escape 由 Dialog 祖先处理，Enter 不绕过 TextEdit 强制确认。
+2026-07-16 已在本地 `temp/carbon-engine` 建立 13 个仓库的只读研究基线：
+`core`、`exefile`、`trinity`、`ime`、`blue`、`resources`、`scheduler`、
+`math`、`mesh`、`imagetools`、`imageio`、`audio` 和 `destiny`。各仓库 URL、
+精确提交与用途记录在被 Git 忽略的 `temp/carbon-engine/REFERENCE_VERSIONS.md`；
+参考源码不会进入 Tina 提交、构建或发布包。
 
-## 不复制
+官方组织当前没有独立公开的 `CarbonUI` 仓库。可研究的公开 UI 底层主要位于
+`trinity/trinity/UI`；`mesh` 中的工具界面使用 ImGui，只是资产查看器，不是
+CarbonUI 的 Retained Widget 实现。因此不能声称已经取得或复用 CarbonUI 控件源码。
 
-- Python 暴露与生成绑定；
-- 完整自研多后端 RHI；
-- 巨型静态 Renderer 和全局设备对象；
-- 为历史兼容保留的双轨 API；
-- 大量运行时可配置 RenderJob 类型。
+## 结论摘要
 
-Tina 采用固定、短小、可测试的 Frame Pipeline，并继续依赖 bgfx 处理图形后端差异。
+Carbon 最值得 Tina 学习的是长期运行后形成的阶段边界、预算、失败恢复和延迟变更；
+不值得复制的是 Python/Blue 暴露、全局对象、原始指针回调、庞大的历史 API 和特定
+产品数据格式。部分公开源码本身也包含明显历史债务，所以“运行多年”只能证明很多
+设计问题值得研究，不能替代 Tina 自己的 RAII、generation handle 和自动化门禁。
+
+| 领域 | Carbon 证据 | Tina 采纳 | Tina 明确拒绝 |
+| --- | --- | --- | --- |
+| 进程与 Runtime | `exefile` 按模块启动，并用退出守卫逆序关闭日志、计时器和运行时 | 把 Application 初始化拆成可注入阶段；每阶段成功后登记回滚；补失败点与析构顺序测试 | Blue 动态函数表、Python/Stackless 启动链、巨型全局组合根 |
+| Window/Input | `Tr2MainWindow` 分离 Down/Up/Move/Wheel、Key/Char、Focus、Close；Windows 按下建立 Capture，释放后解除 | 保持 GLFW；继续使用独立输入快照、普通事件队列和 UI routed event；补窗口失焦/销毁时统一取消 Capture 与 composition | 复制 Win32 风格枚举、消息宏或 Carbon 窗口 API；引入 SDL/SDL3 |
+| UI/IME | `IUILib.h` 体现 MouseDown/Up/CaptureChanged 与 Set/KillFocus 分离；`ime` 显式拥有窗口 HIMC 上下文 | 保留 Tina 的 generation `NodeId`、Capture/Target/Bubble、Modal Focus Scope 和 IMM32；只借鉴上下文所有权 | 旧全局 UI 状态、固定 256 wchar 缓冲、全局 IMM32 函数指针；把 ImGui Viewer 当 CarbonUI |
+| Render | `TriRenderJob` 顺序执行命名 Step，统一 GPU marker/CPU-GPU 计时，并在失败或中断时检查、修复 RT/DS 栈；Trinity 有 Stub 后端 | 小型顺序 Pass Scheduler、命名和统计、显式资源状态、失败后清理、NullRenderDevice | 数十种运行时可配置 Step、跨帧 `IN_PROGRESS`、隐式 Push/Pop 状态作为公共 API、完整自研多后端 RHI |
+| 异步资源 | `BlueAsyncRes` 后台 `DoLoad`、主线程 `DoPrepare`，支持取消、队列泵送和后台内存预留 | 分离 CPU Decode 与 GPU Upload；generation/取消贯穿两队列；同时按任务数、字节和时间预算 | 原始 `this` 回调、析构前要求外部手工清空监听、多个 bool 拼出的模糊状态 |
+| 资源交付 | `resources` 使用版本化 ResourceGroup、校验和、Bundle/Patch 与无效版本测试 | Cooked Manifest 包含 schema、稳定 AssetId、依赖、内容 hash 和产物位置；明确 Bundle/Patch 层 | 把交付分组误当运行时 typed asset registry，或直接采用 Carbon 私有格式 |
+| Cooker | `mesh` 先构建 CMF，再验证生成结果，最后写文件；处理器有独立命令与诊断 | `tina_assetc` 采用 Parse → Validate → Build → Validate Cooked → Atomic Write；错误返回源路径与不支持特性 | CMF、FBX 工具链、Viewer ImGui 和产品专用处理命令进入首期 Runtime |
+| Scheduler | Scheduler 支持按时间或任务数量运行，并保证极小预算下至少推进一个任务 | completion/upload queue 采用可观测预算和饥饿保护 | Greenlet、Python Tasklet/Channel、全局回调进入 Tina 首期 |
+| 固定步模拟 | Destiny 保留 accumulator 余量、限制追赶、保留 old/new state，并在 evolve 外处理 moribund 对象 | 继续 60 Hz、最多4步和 interpolation；增加 Simulation mutation barrier 与 deferred command buffer | 1秒 MMO tick、Ballpark 单体、Python 事件和产品 bubble 逻辑 |
+| Audio | Carbon Audio 有 `Uninitialized/Disabled/Enabled` 和 SoundBank 状态；后台回调通过主线程队列通知；按距离/可见性/重要性裁剪声音 | 保持 miniaudio；后续使用 generation `AudioVoiceId`、音频命令队列、主线程 completion 和 voice budget | Wwise 依赖、`g_audioManager`、回调 cookie 裸指针和 Carbon 的产品元数据格式 |
+| 坐标转换 | Carbon Audio 在 Wwise 适配边界显式执行 RH→LH 转换 | Tina 内部统一右手、Y-up、-Z forward，只在第三方后端适配层转换并测试 | 在 World、组件或玩法代码中混用坐标约定 |
+
+## 关键取证
+
+### Runtime：学习分阶段回滚，不照搬全局运行时
+
+`exefile` 的启动流程把模块加载、崩溃报告、Socket Logger、Windows timer resolution、
+控制台、路径和脚本运行时分成顺序阶段，并在成功后立即登记对应的退出动作。这证明
+“初始化阶段必须拥有自己的逆操作”是成熟 Runtime 的核心契约。
+
+Tina 当前 `Application::shutdown()` 已按上层对象、资源、音频、事件、bgfx、窗口的
+顺序幂等释放，但初始化仍直接创建真实 GLFW/bgfx/miniaudio 对象，难以逐失败点测试，
+并保留静态 `Application::instance()`。下一步不是一次性重写 `EngineHost`，而是先提取
+小型 subsystem factory/phase seam，使测试能在 Window、bgfx、Event、Input、Resource、
+TextRenderer 等任意阶段注入失败并验证逆序回滚。完成迁移前不再增加新的全局访问点。
+
+Carbon Audio 也提供了反例：当前公开 `AudManager` 析构对
+`m_soundPrioritization` 存在重复删除路径，`InitLowLevel()` 或 `InitSound()` 中途失败时也
+没有逐阶段回滚。这进一步说明 Tina 必须依赖自动化失败注入和 RAII，而不能因为代码
+来自成熟引擎就默认生命周期正确。
+
+### Window/UI：Tina 已有更现代的句柄安全
+
+`Tr2MainWindow_Windows.cpp` 在鼠标按下时 `SetCapture`、对应释放时
+`ReleaseCapture`，并把 Mouse、Key、Char、Focus 和 Close 回调分开。这个契约与 Tina
+当前单次 hit-test、Pointer Capture、KeyDown/KeyUp、TextInput/Composition 分流一致。
+
+Carbon 的公开 `IUILib.h` 是 Win32 风格的历史接口；Tina 的 generation `NodeId`、
+节点删除后重新解析、RAII 订阅、Modal Focus Scope 和每窗口 `UIContext` 更适合当前
+目标。Carbon 参考不会改变 Tina 的自研 UI 路线，也不能替代 Checkbox、Slider、
+可访问语义和 Display List 的自主设计。
+
+### Render：采用 Step 契约，缩小为显式 Pass
+
+`TriRenderJob::Run()` 会复制当前步骤，按顺序执行 `BeginExecute → Execute →
+EndExecute`，并在 Step 返回失败、终止或跨帧未完成时停止。每个 Step 统一建立 GPU
+marker 和计时；Job 记录执行前 RT/DS 栈深度，异常退出时尝试恢复。
+
+Tina 应保留这些可观测性与失败恢复思想，但把公共模型缩小为固定帧内 Pass：3D
+Opaque、2D、UI、Present。每个 Pass 显式声明名称、顺序、读写资源与 clear/load/store，
+执行失败后停止后续依赖 Pass，并由调度器收敛临时资源。bgfx 类型只存在于实现层，
+NullRenderDevice 用同一描述验证顺序、generation handle 和资源计数。
+
+### Asset/Cooker：形成 CPU、GPU、交付三条边界
+
+Carbon 的 `BlueAsyncRes` 把后台加载与主线程 Prepare 分开，`IBlueResMan` 提供主线程
+queue pump、取消、暂停和后台内存预留。`resources` 解决版本化文件清单、Bundle 和
+Patch，`mesh` 则执行“生成后验证再写盘”。三者承担不同职责，不能合并成一个
+ResourceManager。
+
+Tina 对应拆分为：
+
+1. Runtime Asset：`AssetId`、状态机、generation、依赖和客户端句柄；
+2. Decode/Upload：后台 CPU decode 与主线程/GPU upload 两个预算队列；
+3. Cook/Delivery：`tina_assetc` 生成并验证 Cooked Asset，Manifest 管理 schema、
+   content hash、依赖与产物位置，Bundle/Patch 以后单独增加。
+
+首个 glTF 版本仍只支持静态三角形 Mesh、节点层级、Position/Normal/UV0/Index、基础
+颜色和纹理；Skin、Animation、Morph 与压缩扩展必须返回明确诊断，不能静默降级。
+
+### Simulation 与 Audio：延迟变更比新功能更重要
+
+Destiny 的 Ballpark 会保留 accumulator 余量、限制过量追赶，并保存 old/new 状态供
+插值；演化中的对象只标记 moribund，真正删除在阶段外按预算执行。Tina 当前固定 60 Hz、
+最多4步和 interpolation 已对齐，下一项应是 World mutation barrier：fixed update 中的
+创建、销毁和层级变化写入 command buffer，在阶段末统一提交。
+
+Carbon Audio 的声音裁剪会考虑距离、是否在衰减范围、2D/vital、可见性和当前事件数。
+这适合成为 Tina 未来的 voice budget 输入，但首期不引入 Wwise、SoundBank 或产品 JSON。
+Tina 当前 miniaudio 路径只需要先保证 Engine/Resource/Voice 的关闭顺序、异步回调不触碰
+已销毁对象，以及坐标转换只发生在后端适配层。
+
+## 调整后的推进顺序
+
+1. Runtime lifecycle gate：为 Application 阶段引入失败注入，验证所有失败点逆序回滚、
+   `onSetup/onCleanup` 配对和重复 shutdown；暂不进行 EngineHost 大重写。
+2. Render contract gate：实现最小 Pass Scheduler、命名/顺序/失败停止、typed generation
+   handle、NullRenderDevice 和资源计数；继续用 bgfx 作为唯一真实后端。
+3. Asset two-phase gate：把当前 completion 中连续执行的 decode/upload 拆开，增加
+   任务数、字节数、时间预算和 generation 取消测试。
+4. Scene mutation gate：为固定步引入 deferred command buffer，测试层级变更、实体删除
+   与 interpolation snapshot。
+5. Product UI：在上述边界稳定后实现设置页真正需要的 Checkbox、Slider，再推进
+   Display List、可访问语义和截图回归；不按控件数量衡量 UI 完成度。
+6. Cooker：Render/Asset 句柄稳定后落地最小 `tina_assetc`、Cooked Manifest 和 glTF。
+
+每批修改继续遵守 MSVC 2026 与 Linux 构建、直接执行 GoogleTest、不使用 CTest、
+运行 2D/UI/3D 对应冒烟、验证资源释放、更新 UTF-8 文档和独立提交。
