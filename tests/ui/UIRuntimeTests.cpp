@@ -147,6 +147,35 @@ TEST(UIRuntimeTest, RoutedEventUsesCaptureTargetBubbleOrder)
     EXPECT_EQ(visits[4].node, root.get());
 }
 
+TEST(UIRuntimeTest, RoutedClickStopsWhenTargetIsRemovedDuringCapture)
+{
+    Engine::EventSystem events;
+    ASSERT_TRUE(events.initialize());
+
+    auto root = Memory::MakeUnique<UINode>("Root");
+    auto target = Memory::MakeUnique<UINode>("Target");
+    UINode* targetNode = root->addChild(std::move(target));
+    events.setUIRoots({root.get()});
+    const NodeId staleId = targetNode->nodeId();
+
+    int deliveries = 0;
+    auto token = events.subscribe<Engine::ButtonClickEvent>(
+        [&root, &deliveries](const Engine::ButtonClickEvent& event) {
+            ++deliveries;
+            if (event.phase == Engine::UIEventPhase::Capture &&
+                event.currentTarget == root.get()) {
+                root->removeChild(event.target);
+            }
+        });
+
+    Engine::ButtonClickEvent click(7, "Target");
+    events.triggerUIEvent(click, targetNode);
+
+    EXPECT_EQ(deliveries, 1);
+    EXPECT_EQ(events.resolveUINode(staleId), nullptr);
+    EXPECT_EQ(root->getChildCount(), 0U);
+}
+
 TEST(UIRuntimeTest, StaleNodeIdNeverResolvesAfterSlotReuse)
 {
     Engine::EventSystem events;

@@ -2,11 +2,11 @@
 #pragma once
 
 #include "UINode.hpp"
+#include "UIAction.hpp"
 #include "../core/Color.hpp"
 #include "UIColors.hpp"
 #include "../engine/UIEvents.hpp"  // 使用统一的UI事件
 #include "../engine/EventSystem.hpp"
-#include "../engine/SubscriptionToken.hpp"
 #include "UITextEdit.hpp"  // 文本编辑框
 #include <bgfx/bgfx.h>
 
@@ -210,16 +210,6 @@ public:
     void setBadgeFontPx(Container::Optional<int> px) { m_badgeFontPx = px; }
     Container::Optional<int> badgeFontPx() const { return m_badgeFontPx; }
 
-    // === 事件系统访问 ===
-    // 注意：使用 UINode::setEventSystem 设置事件系统
-    // 🔧 修复：不再需要延迟订阅
-    // void setEventSystem(Engine::EventSystem* eventSystem) {
-    //     UINode::setEventSystem(eventSystem);
-    //     if (m_hasPendingClick && eventSystem) {
-    //         subscribeClickFromPending();
-    //     }
-    // }
-
     // === 鼠标事件处理 ===
     void onMouseEnter() override { setHovered(true); }
 
@@ -277,18 +267,10 @@ public:
     // 直观接口：设置按钮点击处理器（作为默认行为）
     template<typename F>
     void setOnClick(F&& handler) {
-        m_pendingClick = {};
-        m_pendingClick = Tina::Container::Forward<F>(handler);
-        m_hasPendingClick = true;
-        // 🔧 修复：不再通过事件订阅，直接在 onClick() 中调用
-        // if (m_eventSystem) {
-        //     subscribeClickFromPending();
-        // }
+        m_clickAction.setHandler(Tina::Container::Forward<F>(handler));
     }
     void clearOnClick() {
-        // m_clickToken.reset();  // 不再需要
-        m_pendingClick = {};
-        m_hasPendingClick = false;
+        m_clickAction.clearHandler();
     }
 
 protected:
@@ -326,24 +308,7 @@ private:
     uint32_t m_buttonId = 0;
     static inline uint32_t s_nextButtonId = 1;
 
-    // 通过引擎事件系统触发/订阅点击
-    Engine::SubscriptionToken m_clickToken;            // 订阅令牌（点击）
-    Tina::Container::FixedFunction<128, void> m_pendingClick; // 本地回调（默认行为）
-    bool m_hasPendingClick = false;
-
-    // 🔧 修复：不再需要订阅事件，直接在 onClick() 中调用
-    // void subscribeClickFromPending() {
-    //     if (!m_hasPendingClick || !eventSystem()) return;
-    //     m_clickToken.reset();
-    //     auto id = m_buttonId;
-    //     m_clickToken = eventSystem()->subscribe<Engine::ButtonClickEvent>(
-    //         [this, id](const Engine::ButtonClickEvent& e) {
-    //             if (e.buttonId == id) {
-    //                 if (m_pendingClick) m_pendingClick();
-    //             }
-    //         }
-    //     );
-    // }
+    UIAction m_clickAction;
 };
 
 } // namespace Tina::UI

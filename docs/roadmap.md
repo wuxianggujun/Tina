@@ -1,10 +1,10 @@
 # Roadmap
 
-## M0 基线保护（已完成）
+## M0 可构建基线（已完成）
 
-- 删除旧 worktree；
-- 以当前 GLFW/miniaudio/vcpkg/Core 修改为主建立独立分支；
-- 创建不可丢失的基线提交。
+- 固定 GLFW、miniaudio、vcpkg、bgfx 与 Core 基线；
+- 建立 Windows/Linux Preset、独立 GoogleTest 可执行文件和可回滚提交；
+- 明确不使用 SDL/SDL3 和 CTest 调度。
 
 ## M1 构建与生命周期（已完成首轮）
 
@@ -31,10 +31,32 @@
 - 建立独立 `--smoke-3d` 运行入口，不影响现有 2D 游戏；
 - 验证退出时 GPU 资源全部释放。
 
-## Later
+## M4 UI 可靠性与常用控件（当前）
 
-近期 UI：焦点 KeyDown/KeyUp 路由、Button 键盘 pressed 生命周期、方向键/GLFW 标准手柄空间导航和 Modal Focus Scope 已完成首轮；下一步补实体手柄自动化注入、可访问语义和截图回归。Clip/ScrollView、ListView 虚拟化、Style/Theme、DPI 与 Windows IME composition 已完成首轮。
+- 完成 Button action 的独立重入保护、异常恢复和回调销毁目标安全门禁；
+- 增加 Checkbox、Slider，优先满足设置菜单和游戏内参数调整；
+- 为 GLFW 手柄轮询、回滞和长按重复提供可注入测试，不用实体硬件替代自动化；
+- 建立基础可访问语义和稳定截图回归；
+- 在继续增加复杂控件前，将 UI 绘制收敛为后端无关 Display List。
 
-构建：编译/链接门禁已可通过 `TINA_BUILD_SHADERS=OFF` 跳过 shaderc/Tint，正常可运行构建仍默认离线编译 shader；下一步把 cooker/预编译 shader 包做成独立 target。Linux/GCC 现有告警债务包括 EASTL 模板告警、虚函数未使用参数、少量未使用局部变量和 RenderCommand 初始化顺序，后续应先隔离第三方告警，再按模块清理 Tina 自身告警，避免混入功能提交。
+## M5 Runtime 与 Scene 边界
 
-后续能力：Cooked Asset、Box2D/PhysX 模块、PBR、阴影、动画、脚本和编辑器。
+- 补 Application 初始化失败回滚和析构顺序测试；
+- 补 Scene 延迟 push/pop/replace、暂停/恢复与 UI roots 激活门禁；
+- 以 generation `EntityId` 和明确的 World command/query 逐步替代 GameScene 对 EnTT registry 的直接访问；
+- 将 World 的具体输入、TileMap 和 bgfx 渲染依赖拆到适配或 extraction 边界；
+- 明确服务所有权和关闭顺序，再按测试保护逐步提取 Engine Context；
+- 不进行一次性 `EngineHost` 大重写。
+
+## M6 Render 与 Asset 边界
+
+- 统一 Render Pass/View 所有权、clear/load/store 规则和 GPU 资源计数；
+- 增加 typed handle、NullRenderDevice 和小型 Pass Scheduler；
+- 把 shader/cooker 做成独立构建目标；
+- 在 GPU 上传阶段稳定后实现 AssetId、依赖清单、内容 Hash、增量 Cook 和最小静态 glTF。
+
+## 后续能力
+
+- 现有 Box2D `Physics2D` 收敛为唯一 2D 后端并接入任务系统；Jolt 作为唯一 3D 后端在真实玩法出现后接入；PhysX、Bullet、Rapier 不进入依赖或构建；不统一 2D/3D Physics API；
+- PBR、阴影、动画、脚本和编辑器均等待 Runtime、Render、Asset 基础契约稳定；
+- Linux/GCC 告警先区分第三方与 Tina 自身，再按模块清理；Clang ASan/UBSan 需要可复现 preset 和实际门禁结果。

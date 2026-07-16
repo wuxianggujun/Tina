@@ -1,6 +1,6 @@
 # Tina 游戏引擎
 
-Tina 是使用 C++20 开发的 2D/3D 游戏引擎项目。平台与输入层使用 GLFW，渲染使用 bgfx，音频使用 miniaudio，ECS 使用 EnTT，UI 为完全自研的 Retained UI。
+Tina 是以 C++23 为目标语言基线的 2D/3D 游戏引擎项目。平台与输入层使用 GLFW，渲染使用 bgfx，音频使用 miniaudio，ECS 使用 EnTT，UI 为完全自研的 Retained UI。
 
 ## 当前目标
 
@@ -11,6 +11,8 @@ Tina 是使用 C++20 开发的 2D/3D 游戏引擎项目。平台与输入层使�
 - 使用直接运行的 GoogleTest 可执行文件覆盖核心行为；
 - 增加最小 3D 冒烟场景，验证透视相机、深度测试和静态 Mesh；
 - 参考 Carbon Engine 的 Frame Step、资源 Load/Prepare/Upload 和 GPU 生命周期，但保持 Tina 架构小而清晰。
+
+当前旧文档已经替换，但旧源码架构仍是正在运行的主实现，并未完全删除。迁移状态和删除门禁见 [架构总览](docs/architecture.md)。物理后端固定为 2D Box2D 3.x 与 3D Jolt，不引入第三套物理引擎。
 
 ## 已完成基线
 
@@ -24,14 +26,12 @@ Tina 是使用 C++20 开发的 2D/3D 游戏引擎项目。平台与输入层使�
 
 ## 构建
 
-需要 CMake、C++20 编译器和 `VCPKG_ROOT`。Windows 当前验证环境为 Visual Studio 2026 18.4.3、MSVC 19.50，Linux 使用 GCC/Clang + Ninja。
-
-Visual Studio 2026 的生成器名为 `Visual Studio 18 2026`。本机系统 `PATH` 已配置 `D:\Programs\CMake\bin`，当前使用 CMake 4.2.3；不要再调用不识别该生成器的旧版 CMake：
+目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。当前 CMake target 尚保留 `cxx_std_20`，需要在独立实现任务中统一恢复 C++23 并完成跨平台验证。Windows 当前验证环境为 Visual Studio 2026 18.4.3、MSVC 19.50 和 CMake 4.2.3，Linux 使用 GCC/Clang + Ninja。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
 
 ```powershell
-$cmake = 'D:\Programs\CMake\bin\cmake.exe'
-& $cmake --preset windows-msvc
-& $cmake --build --preset windows-debug
+cmake --version
+cmake --preset windows-msvc
+cmake --build --preset windows-debug --target Tina tina_tests
 ```
 
 测试构建完成后直接运行 `tina_tests`，不通过额外测试调度器：
@@ -40,7 +40,16 @@ $cmake = 'D:\Programs\CMake\bin\cmake.exe'
 out\build\windows-msvc\bin\Debug\tina_tests.exe
 ```
 
+Release 使用同一个 Visual Studio 多配置构建目录：
+
+```powershell
+cmake --build out\build\windows-msvc --config Release --target Tina tina_tests --parallel 2
+out\build\windows-msvc\bin\Release\tina_tests.exe
+```
+
 Visual Studio 的测试程序和 GTest 运行库按配置隔离在 `bin\Debug`、`bin\Release`，避免 Debug/Release CRT 混用；Linux 单配置构建仍输出到 `bin`。
+
+完整 Windows/Linux 构建说明、选项和门禁限制见 [构建与运行](docs/building.md)。
 
 运行时验收入口：
 
@@ -60,6 +69,6 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 
 项目不使用 CTest 调度；测试直接运行固定 GoogleTest 1.17.0 生成的 `tina_tests`。
 
-当前 UI 已具备 generation `NodeId`、Pointer Capture、Focus/Tab、KeyDown/KeyUp 的 Capture/Target/Bubble 路由、方向键空间焦点导航、可嵌套 Modal Focus Scope、Button 的 Enter/Space pressed/release 生命周期与单次激活、每窗口 Theme/DPI、嵌套 Clip、通用 `UIScrollView`、十万行范围计算的 ListView 虚拟化，以及 Windows 原生 IME preedit/composition。GLFW 标准手柄的 D-pad/左摇杆可驱动空间导航，A/B 映射为 Accept/Cancel；摇杆带回滞并支持方向长按重复，语义导航仍服从最上层 Modal Focus Scope。Dialog 不再订阅全局键盘事件，Escape 仅在焦点控件未消费时沿祖先链处理；Scene 会在 `onEnter`/`onResume` 交互前激活对应 UI roots。相关行为由 46 项 GoogleTest 覆盖。窗口与基础输入只使用 GLFW；IME 通过 Win32 IMM32 补充，不引入其他窗口或输入库。
+当前 UI 已具备 generation `NodeId`、Pointer Capture、Focus/Tab、KeyDown/KeyUp 的 Capture/Target/Bubble 路由、方向键空间焦点导航、可嵌套 Modal Focus Scope、Button 的 Enter/Space pressed/release 生命周期与单次激活、每窗口 Theme/DPI、嵌套 Clip、通用 `UIScrollView`、十万行范围计算的 ListView 虚拟化，以及 Windows 原生 IME preedit/composition。每个 Button action 具有独立重入保护、异常恢复和回调自销毁安全性；routed click 目标在路由中删除后通过 generation `NodeId` 立即失效。GLFW 标准手柄的 D-pad/左摇杆可驱动空间导航，A/B 映射为 Accept/Cancel；摇杆带回滞并支持方向长按重复，语义导航仍服从最上层 Modal Focus Scope。Dialog 不再订阅全局键盘事件，Escape 仅在焦点控件未消费时沿祖先链处理；Scene 会在 `onEnter`/`onResume` 交互前激活对应 UI roots。窗口与基础输入只使用 GLFW；IME 通过 Win32 IMM32 补充，不引入其他窗口或输入库。测试数量和平台验证结果只在 [测试文档](docs/testing.md) 中维护。
 
-详细状态与约束从 [文档索引](docs/README.md) 开始阅读。所有源码、文档、日志和配置统一使用 UTF-8，MSVC 强制启用 `/utf-8`。
+不了解整体设计时，先阅读 [设计导读](docs/design.md)，再从 [文档索引](docs/README.md) 进入各模块。所有源码、文档、日志和配置统一使用 UTF-8，MSVC 强制启用 `/utf-8`。

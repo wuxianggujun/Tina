@@ -12,6 +12,7 @@ add_executable(tina_tests
     engine/EventSystemTests.cpp
     engine/Camera3DTests.cpp
     engine/ResourceTests.cpp
+    ui/UIActionTests.cpp
     ui/UIRuntimeTests.cpp
     ${PROJECT_SOURCE_DIR}/src/engine/EventSystem.cpp
     ${PROJECT_SOURCE_DIR}/src/engine/SubscriptionToken.cpp

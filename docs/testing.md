@@ -9,7 +9,20 @@
 - 测试依赖由固定 vcpkg baseline 提供；
 - 测试日志不得包含路径外的敏感环境变量或凭据。
 
-## 当前自动化覆盖（46项）
+## 已验证基线
+
+以下结果对应 2026-07-16 的 `dev` 验证基线（含 Button action 生命周期修复）。测试数量只在本文件维护；后续新增但尚未完成全平台验证的测试不计入已验证基线。
+
+| 平台 | 工具链 | 配置 | GoogleTest | 状态 |
+| --- | --- | --- | --- | --- |
+| Windows 11 | VS 2026 18.4.3 / MSVC 19.50.35717 | Debug | 50/50 | 通过 |
+| Windows 11 | VS 2026 18.4.3 / MSVC 19.50.35717 | Release | 50/50 | 通过 |
+| Ubuntu 22.04 | GCC 11.4 | 单配置门禁 | 50/50 | 通过 |
+| Linux | Clang + ASan/UBSan | 尚未建立可复现 preset | 未验证 | 待完成 |
+
+Release 的四条 300 帧运行路径均已正常返回 0，且未出现 fatal、`BGFX LEAK` 或 `MEMORY LEAK`。这证明主循环和退出资源链路通过，不等同于截图级画面验收或实体手柄兼容性验收。
+
+## 当前自动化覆盖
 
 - Core：Result、ScopeExit、EnumFlags、Assert、Clock、FrameTimer、FixedStepTicker、基础类型和 Legacy Compatibility；
 - Runtime 时间：固定步长、插值、禁用 Simulation、最大追赶步和异常步消费；
@@ -17,9 +30,7 @@
 - Event：优先级队列、RAII Token、dispatcher 先销毁、立即取消订阅，以及 IME composition 与已提交文本分离；
 - Resource：共享 FileSystem 唯一 completion pump、主线程预算、取消和过期 generation 隔离。
 - Windows 栈预算：EventSystem 实例不得重新引入超过默认线程栈预算的大块 inline queue；
-- UI：hit-test 不隐式布局、重叠节点唯一命中、Capture/Target/Bubble 顺序、动态子节点上下文继承、stale NodeId 失效、上下文先析构、节点移除/自移除生命周期、Pointer Capture 外部释放、Tab/Shift+Tab 焦点遍历、焦点 KeyDown 路由/默认取消/重复键抑制/路由中删除目标、KeyUp 完整路由/停止传播后的局部清理/路由中删除目标、方向键 beam 优先与隐藏/禁用节点过滤、Modal Focus Scope 限制/嵌套恢复/自动失效、设备无关语义导航的 scope/Accept/Cancel 生命周期、未处理按键向祖先回退、每窗口 Theme/DPI 隔离、200% DPI 逻辑坐标命中、裁剪边界、ScrollView 滚轮/钳制和十万行虚拟范围。
-
-46 项测试已在 Windows 11、Visual Studio 2026 18.4.3、MSVC 19.50.35717 的 Debug/Release 下直接运行通过；Ubuntu 22.04/GCC 由同一直接执行门禁验证，Clang ASan/UBSan 仍是独立门禁。
+- UI：hit-test 不隐式布局、重叠节点唯一命中、Capture/Target/Bubble 顺序、动态子节点上下文继承、stale NodeId 失效、上下文先析构、节点移除/自移除生命周期、Pointer Capture 外部释放、Tab/Shift+Tab 焦点遍历、焦点 KeyDown 路由/默认取消/重复键抑制/路由中删除目标、KeyUp 完整路由/停止传播后的局部清理/路由中删除目标、方向键 beam 优先与隐藏/禁用节点过滤、Modal Focus Scope 限制/嵌套恢复/自动失效、设备无关语义导航的 scope/Accept/Cancel 生命周期、未处理按键向祖先回退、每窗口 Theme/DPI 隔离、200% DPI 逻辑坐标命中、裁剪边界、ScrollView 滚轮/钳制和十万行虚拟范围；Button action 还覆盖实例级重入隔离、异常后恢复、不同 action 嵌套、回调销毁自身，以及 Capture 阶段删除 routed click 目标后的 generation 失效。
 
 ## 待补自动化门禁
 
@@ -27,24 +38,25 @@
 - Scene 延迟 push/pop/replace；
 - UI 多指针/多按键、触摸输入、GLFW 手柄轮询/回滞/长按重复的可注入测试、实体手柄矩阵、焦点回调中的延迟销毁、可访问语义和截图级激活视觉状态；
 - Render Pass 顺序、typed handle generation 和 NullRenderDevice 资源计数；
-- 完整 Tina 游戏的 Linux Clang ASan/UBSan 构建与运行（当前测试程序已通过）。
+- 完整 Tina 游戏的 Linux Clang ASan/UBSan preset、构建、测试与运行。
 
-Windows 和 Linux 必须分别构建；Linux Clang 额外运行 ASan/UBSan 配置。项目直接运行 GoogleTest 可执行文件，不使用 CTest 调度。
+Windows 和 Linux 必须分别构建。项目直接运行 GoogleTest 可执行文件，不使用 CTest 调度；Clang ASan/UBSan 在仓库提供可复现配置并实际通过前不得标记为已验证。
 
 Windows Debug 直接运行 `out/build/windows-msvc/bin/Debug/tina_tests.exe`，Release 使用对应的 `bin/Release/tina_tests.exe`；`Tina.exe`、shaderc 和 app-local DLL 同样按配置隔离，禁止使用共享 `bin/Tina.exe` 判断配置。Linux 单配置构建直接运行 `out/build/<preset>/bin/tina_tests`。
 
-只验证 Runtime 和测试源码的 Linux 编译/链接时，可以关闭 bundled shader compiler，避免构建 shaderc/Tint 的完整离线工具链：
+只验证 Runtime 和测试源码的 Linux 编译/链接时，可以通过 Linux preset 关闭 bundled shader compiler，避免构建 shaderc/Tint 的完整离线工具链：
 
 ```bash
-cmake -S . -B out/build/linux-compile-gate \
-  -DTINA_BUILD_SHADERS=OFF -DTINA_BUILD_TESTING=ON
-cmake --build out/build/linux-compile-gate --parallel --target Tina tina_tests
-./out/build/linux-compile-gate/bin/tina_tests --gtest_color=no
+cmake --preset linux-ninja -DTINA_BUILD_SHADERS=OFF
+cmake --build --preset linux-debug --target Tina tina_tests
+./out/build/linux-ninja/bin/tina_tests --gtest_color=no
 ```
 
 `TINA_BUILD_SHADERS=OFF` 只用于无 GPU 的编译/链接门禁；输出不含 cooked shader，不能作为可运行包或发布包。Windows 运行验收与正式 Linux 包必须保持默认 `ON`。
 
 ## 运行冒烟
+
+构建命令和环境前提见 [构建与运行](building.md)。以下命令描述验收入口，不替代构建步骤。
 
 菜单 2D + 中文 UI，正常提交300帧后退出：
 

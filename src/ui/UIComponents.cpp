@@ -115,54 +115,41 @@ Tina::Math::Vec2 UILabel::measureContent(float availableWidth, float /*available
 
 // === UIButton 实现 ===
 
-void UIButton::onClick() {
-    // 🛡️ 工程化改进1：禁用态早返回
+void UIButton::onClick()
+{
     if (!isInteractable() || !isEnabled()) {
         TINA_DEBUG("按钮 '{}' 被禁用，忽略点击", getName());
         return;
     }
-    
-    // 🛡️ 工程化改进2：重入保护
-    static bool isProcessing = false;
-    if (isProcessing) {
+
+    const UIActionDispatchResult result = m_clickAction.dispatch(
+        [this](const UIAction::Handler& handler) {
+            TINA_INFO("UIButton::onClick - 按钮 '{}' 被点击！", getName());
+
+            Engine::EventSystem* events = eventSystem();
+            if (events) {
+                const NodeId clickedId = nodeId();
+                Engine::ButtonClickEvent clickEvent(m_buttonId, getName().c_str());
+                clickEvent.mouseX = events->uiContext().mouseX;
+                clickEvent.mouseY = events->uiContext().mouseY;
+                clickEvent.button = 0;
+
+                events->triggerUIEvent(clickEvent, this);
+
+                // A routed subscriber may detach and destroy the button.
+                if (events->resolveUINode(clickedId) != this) return;
+                if (clickEvent.defaultPrevented) {
+                    TINA_INFO("按钮 '{}' - 默认行为被取消", getName());
+                    return;
+                }
+            }
+
+            if (handler) handler();
+        });
+
+    if (result == UIActionDispatchResult::Reentrant) {
         TINA_WARN("按钮 '{}' 重入保护：忽略递归点击", getName());
-        return;
     }
-    isProcessing = true;
-    
-    TINA_INFO("UIButton::onClick - 按钮 '{}' 被点击！", getName());
-    
-    // 🎯 正确的架构：事件优先，回调作为默认行为
-    // 执行顺序契约：捕获 → 目标 → 冒泡 → （若未 defaultPrevented）本地回调
-    
-    // 步骤1：触发事件（总是触发，系统统一可见）
-    if (eventSystem()) {
-        Engine::ButtonClickEvent clickEvent(m_buttonId, getName().c_str());
-        clickEvent.target = this;
-        clickEvent.mouseX = eventSystem()->uiContext().mouseX;
-        clickEvent.mouseY = eventSystem()->uiContext().mouseY;
-        clickEvent.button = 0;  // 左键
-        
-        // 触发事件（支持捕获/目标/冒泡，可被拦截）
-        TINA_DEBUG("按钮 '{}' - 触发事件（事件总线）", getName());
-        eventSystem()->triggerUIEvent(clickEvent, this);
-        
-        // 步骤2：若未取消默认行为，执行本地回调
-        if (!clickEvent.defaultPrevented && m_pendingClick) {
-            TINA_DEBUG("按钮 '{}' - 执行默认行为（本地回调）", getName());
-            m_pendingClick();
-        } else if (clickEvent.defaultPrevented) {
-            TINA_INFO("按钮 '{}' - 默认行为被取消", getName());
-        }
-    } else {
-        // 降级：没有事件系统，直接执行本地回调
-        TINA_WARN("按钮 '{}' - 没有事件系统，直接执行回调", getName());
-        if (m_pendingClick) {
-            m_pendingClick();
-        }
-    }
-    
-    isProcessing = false;
 }
 
 void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
