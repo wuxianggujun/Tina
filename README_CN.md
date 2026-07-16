@@ -26,10 +26,10 @@ Tina 是使用 C++20 开发的 2D/3D 游戏引擎项目。平台与输入层使�
 
 需要 CMake、C++20 编译器和 `VCPKG_ROOT`。Windows 当前验证环境为 Visual Studio 2026 18.4.3、MSVC 19.50，Linux 使用 GCC/Clang + Ninja。
 
-Visual Studio 2026 的生成器名为 `Visual Studio 18 2026`。本机 PATH 中的 CMake 3.31 尚不识别该生成器，应使用 Visual Studio 自带的 CMake 4.2.3 或更高版本：
+Visual Studio 2026 的生成器名为 `Visual Studio 18 2026`。本机系统 `PATH` 已配置 `D:\Programs\CMake\bin`，当前使用 CMake 4.2.3；不要再调用不识别该生成器的旧版 CMake：
 
 ```powershell
-$cmake = 'D:\Program Files\Microsoft Visual Studio\18\Professional\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+$cmake = 'D:\Programs\CMake\bin\cmake.exe'
 & $cmake --preset windows-msvc
 & $cmake --build --preset windows-debug
 ```
@@ -60,6 +60,6 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 
 项目不使用 CTest 调度；测试直接运行固定 GoogleTest 1.17.0 生成的 `tina_tests`。
 
-当前 UI 已具备 generation `NodeId`、Pointer Capture、Focus/Tab、焦点按键 Capture/Target/Bubble 路由、Button 的 Enter/Space 激活与焦点视觉、每窗口 Theme/DPI、嵌套 Clip、通用 `UIScrollView`、十万行范围计算的 ListView 虚拟化，以及 Windows 原生 IME preedit/composition。窗口与基础输入仍使用 GLFW；IME 通过 Win32 IMM32 补充，不引入其他窗口或输入库。
+当前 UI 已具备 generation `NodeId`、Pointer Capture、Focus/Tab、KeyDown/KeyUp 的 Capture/Target/Bubble 路由、方向键空间焦点导航、Button 的 Enter/Space pressed/release 生命周期与单次激活、每窗口 Theme/DPI、嵌套 Clip、通用 `UIScrollView`、十万行范围计算的 ListView 虚拟化，以及 Windows 原生 IME preedit/composition。相关行为由 41 项 GoogleTest 覆盖。窗口与基础输入仍使用 GLFW；IME 通过 Win32 IMM32 补充，不引入其他窗口或输入库。
 
 详细状态与约束从 [文档索引](docs/README.md) 开始阅读。所有源码、文档、日志和配置统一使用 UTF-8，MSVC 强制启用 `/utf-8`。

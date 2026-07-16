@@ -184,7 +184,7 @@ void UIButton::onRender(uint16_t viewId, UIRenderer& renderer)
     const auto resolvedFont = themedFontPx(*this, m_fontPx, style);
 
     Tina::Core::Color bgColor = isEnabled() || !style ? normalColor : style->disabledColor;
-    if (m_pressed && isEnabled()) {
+    if (isPressed() && isEnabled()) {
         bgColor = pressedColor;
     } else if (m_hovered && isEnabled()) {
         bgColor = hoverColor;

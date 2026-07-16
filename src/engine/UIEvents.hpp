@@ -122,6 +122,30 @@ struct UIKeyPressedEvent : UIEvent<UIKeyPressedEvent, EventTypeId::UIKeyPressed>
     void preventDefault() const { defaultPrevented = true; }
 };
 
+// Physical key release stays separate from committed text and composition.
+// Propagation can be stopped, while the focused control still receives its
+// local release callback so transient pressed state cannot become stuck.
+struct UIKeyReleasedEvent : UIEvent<UIKeyReleasedEvent, EventTypeId::UIKeyReleased> {
+    KeyCode key = KeyCode::Unknown;
+    bool shift = false;
+    bool ctrl = false;
+    bool alt = false;
+
+    UIKeyReleasedEvent() {
+        this->priority = EventPriority::High;
+    }
+
+    UIKeyReleasedEvent(KeyCode keyCode, bool shiftDown,
+                       bool ctrlDown, bool altDown)
+        : key(keyCode)
+        , shift(shiftDown)
+        , ctrl(ctrlDown)
+        , alt(altDown)
+    {
+        this->priority = EventPriority::High;
+    }
+};
+
 struct ButtonClickEvent : UIEvent<ButtonClickEvent, EventTypeId::UIButtonClicked> {
     uint32_t buttonId = 0;
     char buttonName[64] = {0};

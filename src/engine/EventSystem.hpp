@@ -52,6 +52,13 @@ enum class UIEventPhase {
     Bubble      // 冒泡阶段（从目标到根）
 };
 
+enum class UIFocusDirection {
+    Left,
+    Right,
+    Up,
+    Down
+};
+
 // UI事件基类（带传播控制）
 template<typename Derived, EventTypeId TypeId>
 struct UIEvent : Event<Derived, TypeId> {
@@ -360,10 +367,13 @@ public:
     bool setKeyboardFocus(UI::NodeId id);
     void clearKeyboardFocus() { setKeyboardFocus({}); }
     bool focusNext(bool reverse = false);
+    bool focusDirectional(UIFocusDirection direction);
     UI::NodeId focusedNodeId() const { return m_uiContext.focusedNode; }
     bool dispatchKeyPressedToFocused(KeyCode key, bool isRepeat = false,
                                      bool shift = false, bool ctrl = false,
                                      bool alt = false);
+    bool dispatchKeyReleasedToFocused(KeyCode key, bool shift = false,
+                                      bool ctrl = false, bool alt = false);
 
     bool setPointerCapture(UI::NodeId id);
     void releasePointerCapture(UI::NodeId requester = {});

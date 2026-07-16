@@ -1009,6 +1009,7 @@ void InputSystem::handleKey(int key, int action)
         emitKeyPressed(mapped, true);
     } else if (action == GLFW_RELEASE) {
         m_keys[index] = false;
+        emitKeyReleased(mapped);
     }
 }
 
@@ -1068,15 +1069,51 @@ void InputSystem::emitKeyPressed(KeyCode key, bool repeat)
     event.shift = isShiftDown();
     event.ctrl = isCtrlDown();
     event.alt = isAltDown();
+    bool handledByUI = false;
     if (key == KeyCode::Tab && !repeat) {
         m_eventSystem->focusNext(event.shift);
     } else {
-        m_eventSystem->dispatchKeyPressedToFocused(
+        handledByUI = m_eventSystem->dispatchKeyPressedToFocused(
             key, repeat, event.shift, event.ctrl, event.alt);
+
+        if (!handledByUI && !repeat && !event.shift && !event.ctrl && !event.alt) {
+            switch (key) {
+                case KeyCode::Left:
+                    m_eventSystem->focusDirectional(UIFocusDirection::Left);
+                    break;
+                case KeyCode::Right:
+                    m_eventSystem->focusDirectional(UIFocusDirection::Right);
+                    break;
+                case KeyCode::Up:
+                    m_eventSystem->focusDirectional(UIFocusDirection::Up);
+                    break;
+                case KeyCode::Down:
+                    m_eventSystem->focusDirectional(UIFocusDirection::Down);
+                    break;
+                default:
+                    break;
+            }
+        }
     }
 
     // Keep the engine-level event for gameplay and compatibility. Focused UI
     // controls no longer subscribe globally; they receive the routed event above.
+    m_eventSystem->trigger(event);
+}
+
+void InputSystem::emitKeyReleased(KeyCode key)
+{
+    if (!m_eventSystem) {
+        return;
+    }
+
+    Events::KeyReleasedEvent event(
+        key, isShiftDown(), isCtrlDown(), isAltDown());
+    m_eventSystem->dispatchKeyReleasedToFocused(
+        event.key, event.shift, event.ctrl, event.alt);
+
+    // Gameplay continues to observe the device-level release independently
+    // from focused UI routing.
     m_eventSystem->trigger(event);
 }
 

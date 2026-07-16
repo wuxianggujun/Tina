@@ -5,6 +5,8 @@
 #include "UIEvents.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace Tina::Engine {
 namespace {
@@ -262,6 +264,110 @@ bool EventSystem::focusNext(bool reverse)
     return setKeyboardFocus(focusable[nextIndex]);
 }
 
+bool EventSystem::focusDirectional(UIFocusDirection direction)
+{
+    sanitizeUIInteractionState();
+
+    Vector<UI::NodeId> focusable;
+    for (UI::NodeId rootId : m_uiContext.roots) {
+        collectFocusableNodes(resolveUINode(rootId), focusable);
+    }
+    if (focusable.empty()) return false;
+
+    UI::UINode* current = resolveUINode(m_uiContext.focusedNode);
+    if (!current) return setKeyboardFocus(focusable.front());
+
+    const Math::Vec2 currentPosition = current->getWorldPosition();
+    const Math::Vec2 currentSize = current->getSize();
+    const float currentLeft = currentPosition.x;
+    const float currentRight = currentPosition.x + currentSize.x;
+    const float currentTop = currentPosition.y;
+    const float currentBottom = currentPosition.y + currentSize.y;
+    const float currentCenterX = (currentLeft + currentRight) * 0.5f;
+    const float currentCenterY = (currentTop + currentBottom) * 0.5f;
+
+    auto intervalGap = [](float firstMin, float firstMax,
+                          float secondMin, float secondMax) {
+        if (secondMin > firstMax) return secondMin - firstMax;
+        if (firstMin > secondMax) return firstMin - secondMax;
+        return 0.0f;
+    };
+
+    UI::NodeId bestId;
+    bool bestOutsideBeam = true;
+    float bestScore = std::numeric_limits<float>::max();
+    size_t bestOrder = std::numeric_limits<size_t>::max();
+
+    for (size_t order = 0; order < focusable.size(); ++order) {
+        const UI::NodeId candidateId = focusable[order];
+        if (candidateId == m_uiContext.focusedNode) continue;
+
+        UI::UINode* candidate = resolveUINode(candidateId);
+        if (!candidate) continue;
+
+        const Math::Vec2 candidatePosition = candidate->getWorldPosition();
+        const Math::Vec2 candidateSize = candidate->getSize();
+        const float candidateLeft = candidatePosition.x;
+        const float candidateRight = candidatePosition.x + candidateSize.x;
+        const float candidateTop = candidatePosition.y;
+        const float candidateBottom = candidatePosition.y + candidateSize.y;
+        const float candidateCenterX = (candidateLeft + candidateRight) * 0.5f;
+        const float candidateCenterY = (candidateTop + candidateBottom) * 0.5f;
+
+        float primaryDistance = 0.0f;
+        float crossDistance = 0.0f;
+        float crossGap = 0.0f;
+        switch (direction) {
+            case UIFocusDirection::Left:
+                primaryDistance = currentCenterX - candidateCenterX;
+                crossDistance = candidateCenterY - currentCenterY;
+                crossGap = intervalGap(currentTop, currentBottom,
+                                       candidateTop, candidateBottom);
+                break;
+            case UIFocusDirection::Right:
+                primaryDistance = candidateCenterX - currentCenterX;
+                crossDistance = candidateCenterY - currentCenterY;
+                crossGap = intervalGap(currentTop, currentBottom,
+                                       candidateTop, candidateBottom);
+                break;
+            case UIFocusDirection::Up:
+                primaryDistance = currentCenterY - candidateCenterY;
+                crossDistance = candidateCenterX - currentCenterX;
+                crossGap = intervalGap(currentLeft, currentRight,
+                                       candidateLeft, candidateRight);
+                break;
+            case UIFocusDirection::Down:
+                primaryDistance = candidateCenterY - currentCenterY;
+                crossDistance = candidateCenterX - currentCenterX;
+                crossGap = intervalGap(currentLeft, currentRight,
+                                       candidateLeft, candidateRight);
+                break;
+        }
+        if (primaryDistance <= 0.0f) continue;
+
+        // Candidates that overlap the perpendicular beam are preferred even
+        // when a diagonal candidate is slightly closer. Within each class,
+        // use a deterministic weighted distance and finally tree order.
+        const bool outsideBeam = crossGap > 0.0f;
+        const float crossWeight = outsideBeam ? 4.0f : 0.25f;
+        const float score = primaryDistance * primaryDistance +
+                            crossDistance * crossDistance * crossWeight;
+        const bool betterBeam = bestId && bestOutsideBeam && !outsideBeam;
+        const bool sameBeam = !bestId || outsideBeam == bestOutsideBeam;
+        const bool betterScore = sameBeam &&
+            (score < bestScore ||
+             (std::abs(score - bestScore) <= 0.001f && order < bestOrder));
+        if (!bestId || betterBeam || betterScore) {
+            bestId = candidateId;
+            bestOutsideBeam = outsideBeam;
+            bestScore = score;
+            bestOrder = order;
+        }
+    }
+
+    return bestId ? setKeyboardFocus(bestId) : false;
+}
+
 bool EventSystem::dispatchKeyPressedToFocused(KeyCode key, bool isRepeat,
                                               bool shift, bool ctrl, bool alt)
 {
@@ -295,6 +401,25 @@ bool EventSystem::dispatchKeyPressedToFocused(KeyCode key, bool isRepeat,
         return true;
     }
     return false;
+}
+
+bool EventSystem::dispatchKeyReleasedToFocused(KeyCode key, bool shift,
+                                               bool ctrl, bool alt)
+{
+    sanitizeUIInteractionState();
+    const UI::NodeId focusedId = m_uiContext.focusedNode;
+    UI::UINode* focused = resolveUINode(focusedId);
+    if (!focused || !isInActiveUITree(focusedId)) return false;
+
+    UIKeyReleasedEvent routedEvent(key, shift, ctrl, alt);
+    triggerUIEvent(routedEvent, focused);
+
+    // Key release is a lifecycle cleanup point. Propagation controls do not
+    // suppress the focused control's local cleanup, but generation and focus
+    // are revalidated before calling it.
+    focused = resolveUINode(focusedId);
+    if (!focused || m_uiContext.focusedNode != focusedId) return true;
+    return focused->onKeyReleased(key, shift, ctrl, alt);
 }
 
 bool EventSystem::setPointerCapture(UI::NodeId id)

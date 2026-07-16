@@ -112,6 +112,7 @@ private:
     void handleMouseButton(int button, int action);
 
     void emitKeyPressed(KeyCode key, bool repeat);
+    void emitKeyReleased(KeyCode key);
     void appendCommittedText(unsigned int codepoint, const std::string& utf8);
 
     static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);

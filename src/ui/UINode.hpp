@@ -461,6 +461,14 @@ public:
         (void)alt;
         return false;
     }
+    virtual bool onKeyReleased(Tina::Engine::KeyCode key,
+                               bool shift, bool ctrl, bool alt) {
+        (void)key;
+        (void)shift;
+        (void)ctrl;
+        (void)alt;
+        return false;
+    }
     virtual bool supportsKeyboardActivation() const { return false; }
     virtual void onFocusGained() {}
     virtual void onFocusLost() {}

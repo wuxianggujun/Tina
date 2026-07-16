@@ -200,7 +200,7 @@ public:
     IconLayout iconLayout() const { return m_iconLayout; }
 
     bool isHovered() const { return m_hovered; }
-    bool isPressed() const { return m_pressed; }
+    bool isPressed() const { return m_pressed || m_keyboardPressed; }
     bool isSelected() const { return m_selected; }
 
     // 文本字号（像素），nullopt 表示使用全局默认字号
@@ -233,7 +233,38 @@ public:
         setPressed(false);
     }
 
-    void onFocusLost() override { setPressed(false); }
+    bool onKeyPressed(Tina::Engine::KeyCode key, bool isRepeat,
+                      bool shift, bool ctrl, bool alt) override {
+        (void)shift;
+        const bool activationKey = key == Tina::Engine::KeyCode::Enter ||
+                                   key == Tina::Engine::KeyCode::NumpadEnter ||
+                                   key == Tina::Engine::KeyCode::Space;
+        if (activationKey && !isRepeat && !ctrl && !alt &&
+            isEnabled() && isInteractable()) {
+            m_keyboardPressed = true;
+        }
+        // EventSystem owns the single non-repeat activation default action.
+        return false;
+    }
+
+    bool onKeyReleased(Tina::Engine::KeyCode key, bool shift,
+                       bool ctrl, bool alt) override {
+        (void)shift;
+        (void)ctrl;
+        (void)alt;
+        const bool activationKey = key == Tina::Engine::KeyCode::Enter ||
+                                   key == Tina::Engine::KeyCode::NumpadEnter ||
+                                   key == Tina::Engine::KeyCode::Space;
+        if (!activationKey) return false;
+        const bool wasKeyboardPressed = m_keyboardPressed;
+        m_keyboardPressed = false;
+        return wasKeyboardPressed;
+    }
+
+    void onFocusLost() override {
+        setPressed(false);
+        m_keyboardPressed = false;
+    }
     bool supportsKeyboardActivation() const override { return true; }
 
     // 设置按钮ID（用于事件识别）
@@ -281,6 +312,7 @@ private:
     BadgeCorner m_badgeCorner;
     bool m_hovered;
     bool m_pressed;
+    bool m_keyboardPressed = false;
     bool m_selected;
 
     // 可选图标纹理（由外部提供生命周期）
