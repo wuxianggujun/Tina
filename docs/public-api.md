@@ -1,7 +1,8 @@
 # vNext 公共接口与生命周期规则
 
-> 状态：分批实施。Core、M6-A 生命周期与 M7-A Headless Platform/Input 子集已经落地；完整状态栈、worker、Scene/Asset/UI/Audio、
-> Desktop bootstrap、GLFW/DPI/Windows IMM32 与真实渲染 backend 仍是后续契约。下文会明确标注当前接口与完整目标。
+> 状态：分批实施。Core、M6-A 生命周期、M7-A Platform/Input 与首个私有 GLFW Window/Keyboard/
+> Pointer/committed text adapter 已落地；完整状态栈、worker、Scene/Asset/UI/Audio、Desktop bootstrap、
+> Native Surface/bgfx、production Gamepad、完整 DPI 与 Windows IMM32 仍是后续契约。
 
 ## 公开类型命名规则
 
@@ -94,7 +95,12 @@ public:
 ```
 
 `EngineFactories` 是高级集成/测试 SPI。当前 `tina_sample_null` 显式注入 Clock、Headless Platform、
-Disabled TaskSystem 和 NullRenderDevice；`EngineHost` 由 main 的 `unique_ptr` 唯一拥有。
+Disabled TaskSystem 和 NullRenderDevice；`tina_sample_platform` 只把 Platform factory 换成私有 GLFW
+adapter，仍使用 NullRender。`EngineHost` 由 main 的 `unique_ptr` 唯一拥有。
+
+Create、run 与析构属于同一 owner-thread 生命周期：跨线程 `run` 返回 `WrongOwnerThread` 且不
+消耗 run-once；跨线程析构在调用 native backend 前 `terminate`。Game SDK 不提供把 EngineHost
+转交后台线程运行/销毁的捷径。
 
 面向普通桌面游戏的后续组合入口为：
 
@@ -408,8 +414,8 @@ windowed render slot。
 
 - Runtime 不依赖具体 GLFW/bgfx/miniaudio factory；
 - `tina_bootstrap_desktop` 的一个 composition translation unit 选择真实 adapter；
-- Headless + DisabledTask + NullRender 是当前显式组合，不是生产失败后的静默降级；Disabled
-  UI/Audio 尚未实现；
+- Headless + DisabledTask + NullRender 与 GLFW + DisabledTask + NullRender 是当前两条显式组合，
+  不是生产失败后的静默降级；Disabled UI/Audio 尚未实现；
 - factory 不保存 CreateParams、不注册全局对象、不后台完成半创建；
 - backend shutdown 幂等且由 EngineHost 唯一调用。
 
@@ -448,7 +454,7 @@ M7-A GLFW+Null 组合不构造伪 lease，GLFW/bgfx 失败也不得静默降级 
 | --- | --- | --- | --- | --- |
 | `EngineHost` | M6-A 已实现 | Game SDK | main `unique_ptr`，直到 shutdown | Create/run `Result` |
 | 最小 Phase Context | M6-A 已实现 | Game SDK | Runtime stack，当前 callback | callback `Status` |
-| `WindowId` | M7-A generation 类型与 Headless 契约已实现；生产 registry 为下一 GLFW 子切片 | Game SDK / Module SPI | 当前用于 frame identity/owner 校验；后续由 Platform Window registry 拥有 | invalid/identity mismatch；生产 stale lookup 待 GLFW registry |
+| `WindowId` | M7-A generation 类型、Headless 契约与生产 GLFW registry 已实现 | Game SDK / Module SPI | GLFW backend-owned Window registry；首期一个 primary slot | invalid/stale/wrong owner/identity mismatch |
 | `WindowSurfaceId` | M7-B 目标 | Runtime integration SPI | Platform surface registry generation | invalid/stale/wrong owner/revision |
 | `UINodeId` | M7-C 目标 | Game SDK | Window-owned UI registry generation + WindowId owner | invalid/stale/wrong owner |
 | `EntityId` | M8 目标 | Game SDK | World registry generation + owner | invalid/stale/wrong owner |
@@ -494,16 +500,19 @@ C++ exception 保持开启以兼容标准库/第三方，但会在 Engine、`IGa
 
 ## 公共接口验收
 
-M6-A/M7-A Headless 内核已验证：
+M6-A/M7-A Headless 内核与首个 GLFW adapter 已验证：
 
 - `IGameApplication` 没有逐帧虚函数，`IGameState` 是唯一帧行为接口；
 - Core/Platform/Task/Render/Runtime 的 public header 逐头独立 include 和编译；
 - `tina_sample_null` 只使用 Tina C++23 API 与显式 factory SPI，构建图不加入或链接
   GLFW/bgfx/EnTT/FreeType/miniaudio/SDL/SDL3；
+- `createGlfwPlatformBackend` 的 public module header 只包含 Tina 类型；GLFW/native handle 保持在
+  `tina_platform_glfw` PRIVATE 实现中，样例仍看不到 `GLFWwindow*`；
 - Platform/Input public header 可独立编译，Runtime SPI owner 不通过 Game Context 暴露 dispatch/shutdown；
 - `PrimaryPointerId`、Gamepad snapshot 同 owner/slot 唯一、跨帧 retained source 与最终 snapshot、
   Platform lifecycle dispatch/RAII subscription 行为使用直接 GoogleTest 覆盖；最终平台与数量结果只在
   [测试文档](testing.md) 维护。
 
 后续验收：`tina_game_api_consumer`/Game SDK umbrella、完整 forbidden-token/dependency-closure、
-`Desktop::CreateEngine`、完整 GLFW/DPI/Windows IMM32，以及只使用 Game SDK 运行 UI/2D/3D 产品样例。
+`Desktop::CreateEngine`、Native Surface/bgfx、production Gamepad、完整 DPI/Windows IMM32，以及只使用
+Game SDK 运行 UI/2D/3D 产品样例。

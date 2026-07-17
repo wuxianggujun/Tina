@@ -176,6 +176,42 @@ TEST(PlatformFrameBuilderTest, ValidatesCapacityAndSnapshotRevision)
     EXPECT_FALSE(builder.finishFrame().has_value());
 }
 
+TEST(PlatformFrameBuilderTest, DiscardsPartialFrameAndAllowsNextMonotonicFrame)
+{
+    auto poolResult = TestWindowPool::Create(1);
+    ASSERT_TRUE(poolResult.has_value());
+    const Platform::WindowId window = createWindowId(*poolResult);
+    auto builderResult = Platform::PlatformFrameBuilder::Create();
+    ASSERT_TRUE(builderResult.has_value());
+    auto& builder = *builderResult;
+
+    ASSERT_TRUE(builder.beginFrame({1}).has_value());
+    EXPECT_EQ(builder.appendInputTransition(Platform::KeyTransition{
+                  .window = window,
+                  .key = Platform::Key::A,
+                  .state = Platform::DigitalTransition::Down,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+    EXPECT_TRUE(builder.discardFrame());
+    EXPECT_FALSE(builder.discardFrame());
+
+    ASSERT_TRUE(builder.beginFrame({2}).has_value());
+    EXPECT_EQ(builder.appendInputTransition(Platform::KeyTransition{
+                  .window = window,
+                  .key = Platform::Key::B,
+                  .state = Platform::DigitalTransition::Down,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+    auto nextInput = validWindowInput(window);
+    nextInput.heldKeys.set(static_cast<Core::usize>(Platform::Key::B));
+    EXPECT_TRUE(builder.setPrimaryWindowSnapshot(validWindowMetrics(window), nextInput));
+    auto frame = builder.finishFrame();
+    ASSERT_TRUE(frame.has_value());
+    EXPECT_EQ(frame->id(), Platform::PlatformFrameId{2});
+    ASSERT_EQ(frame->inputTransitions().size(), 1U);
+    EXPECT_EQ(frame->inputTransitions().front().sequence, 2U);
+}
+
 TEST(PlatformFrameBuilderTest, PreservesEdgesAndOnlyCoalescesAdjacentPointerMoves)
 {
     auto poolResult = TestWindowPool::Create(1);

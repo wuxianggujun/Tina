@@ -27,7 +27,7 @@ Carbon 最值得 Tina 学习的是长期运行后形成的阶段边界、预算�
 | --- | --- | --- | --- |
 | Core | `ScopeGuard`、Time、Telemetry/Statistics、命名锁/线程、Memory Tracker、Callstack/Crash 和细粒度测试 | 保留 Tina 现代 Result/ScopeExit/chrono；增加 owned Metrics、TraceZone、MemoryTag、CrashContext、UTF-8 原子 IO | 全局 new/delete、宏式分配、强杀线程、全局 profiler/crash pointer、32位 FNV 资产身份 |
 | 进程与 Runtime | `exefile` 按模块启动，并用退出守卫逆序关闭日志、计时器和运行时 | 把 Application 初始化拆成可注入阶段；每阶段成功后登记回滚；补失败点与析构顺序测试 | Blue 动态函数表、Python/Stackless 启动链、巨型全局组合根 |
-| Window/Input | `Tr2MainWindow` 分离 Down/Up/Move/Wheel、Key/Char、Focus、Close；Windows 按下建立 Capture，释放后解除 | 保持 GLFW；继续使用独立输入快照、普通事件队列和 UI routed event；补窗口失焦/销毁时统一取消 Capture 与 composition | 复制 Win32 风格枚举、消息宏或 Carbon 窗口 API；引入 SDL/SDL3 |
+| Window/Input | `Tr2MainWindow` 分离 Down/Up/Move/Wheel、Key/Char、Focus、Close；Windows 按下建立 Capture，释放后解除 | 保持 GLFW；独立实现 normalized WindowCreatePlan、hidden create transaction、generation registry、callback collect/final snapshot 与 scope rollback；继续分离输入快照、生命周期通知和 UI routed event | 复制 Carbon 源码/Win32 风格枚举、消息宏、native pointer 或 Carbon 窗口 API；引入 SDL/SDL3 |
 | UI/IME | `IUILib.h` 体现 MouseDown/Up/CaptureChanged 与 Set/KillFocus 分离；`ime` 显式拥有窗口 HIMC 上下文 | 把 Tina Legacy generation `NodeId` 语义迁移为带 owner 的 `UINodeId`，保留 Capture/Target/Bubble、Modal Focus Scope 和 IMM32；只借鉴上下文所有权 | 旧全局 UI 状态、固定 256 wchar 缓冲、全局 IMM32 函数指针；把 ImGui Viewer 当 CarbonUI |
 | Render | `TriRenderJob` 顺序执行命名 Step，统一 GPU marker/CPU-GPU 计时，并在失败或中断时检查、修复 RT/DS 栈；Trinity 有 Stub 后端 | 小型顺序 Pass Scheduler、命名和统计、显式资源状态、失败后清理、NullRenderDevice | 数十种运行时可配置 Step、跨帧 `IN_PROGRESS`、隐式 Push/Pop 状态作为公共 API、完整自研多后端 RHI |
 | 异步资源 | `BlueAsyncRes` 后台 `DoLoad`、主线程 `DoPrepare`，支持取消、队列泵送和后台内存预留 | 分离 CPU Decode 与 GPU Upload；generation/取消贯穿两队列；同时按任务数、字节和时间预算 | 原始 `this` 回调、析构前要求外部手工清空监听、多个 bool 拼出的模糊状态 |
@@ -87,6 +87,17 @@ Carbon 的公开 `IUILib.h` 是 Win32 风格的历史接口；Tina vNext 的 gen
 节点删除后重新解析、RAII 订阅、Modal Focus Scope 和每窗口 `UIContext` 更适合当前
 目标。Carbon 参考不会改变 Tina 的自研 UI 路线，也不能替代 Checkbox、Slider、
 可访问语义和 Display List 的自主设计。
+
+本批 GLFW adapter 只采纳上述**阶段与所有权思想**，没有复制 Carbon 实现：先把 Tina
+`PrimaryWindowConfig` 规范化为内部 `WindowCreatePlan`，再以 hidden `GLFW_NO_API` window 完成
+generation registry、callback 和 initial snapshot 后才显示；C callback 只采集 Tina transition，
+Poll 统一冻结 final snapshot；任一步失败由 scope rollback 逆序撤销。对应源码、类型名、错误码、
+测试 seam 和 CMake target 全部由 Tina 独立实现。
+
+明确拒绝把 Carbon 的原生 Win32 枚举、消息宏、raw native pointer、Blue/Python入口、全局 callback
+或全局 service 移入 Tina。Carbon 仓库不进入 Tina 构建、链接、提交或发布包；“成熟引擎运行多年”
+只说明这些问题值得研究，不能替代 Tina 的166项基础测试、17项 GLFW专项测试、样例运行和资源
+回收证据。
 
 ### Render：采用 Step 契约，缩小为显式 Pass
 

@@ -54,6 +54,22 @@
       }
     },
     {
+      "name": "windows-msvc-vnext-platform",
+      "displayName": "Windows x64 vNext Platform (MSVC 2026 + GLFW + C++23)",
+      "inherits": "windows-msvc",
+      "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-platform",
+      "cacheVariables": {
+        "TINA_BUILD_EXAMPLES": "ON",
+        "TINA_BUILD_TESTING": "ON",
+        "TINA_BUILD_LEGACY": "OFF",
+        "TINA_BUILD_PLATFORM_GLFW": "ON",
+        "TINA_BUILD_RENDER_BGFX": "OFF",
+        "TINA_BUILD_SHADERS": "OFF",
+        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON",
+        "VCPKG_MANIFEST_FEATURES": "platform-glfw"
+      }
+    },
+    {
       "name": "linux-ninja",
       "displayName": "Linux (Ninja + vcpkg)",
       "inherits": "base",
@@ -93,6 +109,26 @@
       }
     },
     {
+      "name": "linux-gcc13-vnext-platform",
+      "displayName": "Linux vNext Platform (GCC 13 + GLFW + C++23)",
+      "inherits": "linux-gcc13-vnext",
+      "binaryDir": "${sourceDir}/out/build/linux-gcc13-vnext-platform",
+      "cacheVariables": {
+        "TINA_BUILD_PLATFORM_GLFW": "ON",
+        "VCPKG_MANIFEST_FEATURES": "platform-glfw"
+      }
+    },
+    {
+      "name": "linux-gcc13-vnext-platform-wayland",
+      "displayName": "Linux vNext Platform (GCC 13 + GLFW X11/Wayland + C++23)",
+      "inherits": "linux-gcc13-vnext-platform",
+      "binaryDir": "${sourceDir}/out/build/linux-gcc13-vnext-platform-wayland",
+      "cacheVariables": {
+        "TINA_BUILD_WAYLAND": "ON",
+        "VCPKG_MANIFEST_FEATURES": "platform-glfw;wayland"
+      }
+    },
+    {
       "name": "linux-clang22-vnext",
       "displayName": "Linux vNext Null (Clang 22 + libstdc++ 15)",
       "inherits": "linux-ninja",
@@ -108,12 +144,41 @@
       }
     },
     {
+      "name": "linux-clang22-vnext-platform",
+      "displayName": "Linux vNext Platform (Clang 22 + GLFW + C++23)",
+      "inherits": "linux-clang22-vnext",
+      "binaryDir": "${sourceDir}/out/build/linux-clang22-vnext-platform",
+      "cacheVariables": {
+        "TINA_BUILD_PLATFORM_GLFW": "ON",
+        "VCPKG_MANIFEST_FEATURES": "platform-glfw"
+      }
+    },
+    {
       "name": "linux-clang22-vnext-sanitize",
       "displayName": "Linux vNext Null (Clang 22 + libstdc++ 15 + ASan/UBSan)",
       "inherits": "linux-clang22-vnext",
       "binaryDir": "${sourceDir}/out/build/linux-clang22-vnext-sanitize",
       "cacheVariables": {
         "TINA_ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "linux-clang22-vnext-platform-sanitize",
+      "displayName": "Linux vNext Platform (Clang 22 + GLFW + ASan/UBSan)",
+      "inherits": "linux-clang22-vnext-platform",
+      "binaryDir": "${sourceDir}/out/build/linux-clang22-vnext-platform-sanitize",
+      "cacheVariables": {
+        "TINA_ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "linux-clang22-vnext-platform-wayland-sanitize",
+      "displayName": "Linux vNext Platform (Clang 22 + GLFW X11/Wayland + ASan/UBSan)",
+      "inherits": "linux-clang22-vnext-platform-sanitize",
+      "binaryDir": "${sourceDir}/out/build/linux-clang22-vnext-platform-wayland-sanitize",
+      "cacheVariables": {
+        "TINA_BUILD_WAYLAND": "ON",
+        "VCPKG_MANIFEST_FEATURES": "platform-glfw;wayland"
       }
     }
   ],
@@ -143,6 +208,18 @@
       "jobs": 2
     },
     {
+      "name": "windows-vnext-platform-debug",
+      "configurePreset": "windows-msvc-vnext-platform",
+      "configuration": "Debug",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vnext-platform-release",
+      "configurePreset": "windows-msvc-vnext-platform",
+      "configuration": "Release",
+      "jobs": 2
+    },
+    {
       "name": "linux-debug",
       "configurePreset": "linux-ninja",
       "jobs": 2
@@ -158,13 +235,38 @@
       "jobs": 2
     },
     {
+      "name": "linux-gcc13-vnext-platform-debug",
+      "configurePreset": "linux-gcc13-vnext-platform",
+      "jobs": 2
+    },
+    {
+      "name": "linux-gcc13-vnext-platform-wayland-debug",
+      "configurePreset": "linux-gcc13-vnext-platform-wayland",
+      "jobs": 2
+    },
+    {
       "name": "linux-clang22-vnext-debug",
       "configurePreset": "linux-clang22-vnext",
       "jobs": 2
     },
     {
+      "name": "linux-clang22-vnext-platform-debug",
+      "configurePreset": "linux-clang22-vnext-platform",
+      "jobs": 2
+    },
+    {
       "name": "linux-clang22-vnext-sanitize-debug",
       "configurePreset": "linux-clang22-vnext-sanitize",
+      "jobs": 2
+    },
+    {
+      "name": "linux-clang22-vnext-platform-sanitize-debug",
+      "configurePreset": "linux-clang22-vnext-platform-sanitize",
+      "jobs": 2
+    },
+    {
+      "name": "linux-clang22-vnext-platform-wayland-sanitize-debug",
+      "configurePreset": "linux-clang22-vnext-platform-wayland-sanitize",
       "jobs": 2
     }
   ]

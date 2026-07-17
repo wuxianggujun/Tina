@@ -17,6 +17,7 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/memory/MemoryTracker.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/time/FixedStepAccumulator.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/time/MonotonicClock.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/text/Utf8.hpp
     diagnostics/Assert.cpp
     diagnostics/Assert.hpp
     error/Error.hpp

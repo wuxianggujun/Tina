@@ -12,5 +12,11 @@ inline constexpr Core::ErrorCode PlatformSequenceExhausted{Core::ErrorDomain::Pl
 inline constexpr Core::ErrorCode InvalidInputPayload{Core::ErrorDomain::Platform, 6};
 inline constexpr Core::ErrorCode InvalidFrameSnapshot{Core::ErrorDomain::Platform, 7};
 inline constexpr Core::ErrorCode InvalidPlatformEventPayload{Core::ErrorDomain::Platform, 8};
+inline constexpr Core::ErrorCode BackendAlreadyActive{Core::ErrorDomain::Platform, 9};
+inline constexpr Core::ErrorCode BackendInitializationFailed{Core::ErrorDomain::Platform, 10};
+inline constexpr Core::ErrorCode WindowCreationFailed{Core::ErrorDomain::Platform, 11};
+inline constexpr Core::ErrorCode BackendOperationFailed{Core::ErrorDomain::Platform, 12};
+inline constexpr Core::ErrorCode CallbackFrameAssemblyFailed{Core::ErrorDomain::Platform, 13};
+inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::Platform, 14};
 
 } // namespace Tina::Platform::PlatformErrorCode

@@ -1,8 +1,9 @@
 # Platform、Window 与 Input 契约
 
 > 状态：vNext Input 契约已由 ADR 0015 接受；M7-A Headless 的 `PlatformFrameView`、Action Mapper、
-> fixed-step latch 与 `PlatformEventDispatcher` 已实现。完整 M7 GLFW 窗口、DPI 和 Windows IMM32
-> adapter 仍是目标，不得把下面的桌面契约误写成当前已完成能力。
+> fixed-step latch 与 `PlatformEventDispatcher` 已实现，首个私有 GLFW desktop adapter 也已完成
+> Window/Keyboard/Pointer/Focus/resize/close/committed text。Native Surface/bgfx、production Gamepad、
+> Windows IMM32 composition、OS Pointer Capture 与完整 DPI/UI 门禁仍是后续能力。
 
 ## 结论
 
@@ -15,7 +16,7 @@ Render 公共接口不能包含 `GLFWwindow*`、Win32 `HWND` 或平台键值。
 | Target | 职责 | 依赖 |
 | --- | --- | --- |
 | `tina_platform` | `WindowId`、Window/Input/Event 描述、线程命名、不透明 Render surface、Headless test backend | `tina_core`、OS 最小适配 |
-| `tina_platform_glfw` | GLFW 生命周期、真实窗口、键鼠、Gamepad、DPI、Windows IMM32 | `tina_core`、`tina_platform`、GLFW、Windows 时使用 IMM32 |
+| `tina_platform_glfw` | 最终职责为 GLFW 生命周期、真实窗口、键鼠、Gamepad、DPI、Windows IMM32；当前只完成 Window/Keyboard/Pointer/committed text 子集 | `tina_core`、`tina_platform`、GLFW、Windows 时使用 IMM32 |
 
 `tina_platform` 不提供第二套通用窗口框架；拆 target 只为隔离第三方类型和支持无窗口测试。
 UTF-8 路径、读取和原子文件写入统一属于 `tina_core/io` 的 OS-specific `.cpp`，Platform 不再
@@ -23,11 +24,14 @@ UTF-8 路径、读取和原子文件写入统一属于 `tina_core/io` 的 OS-spe
 
 ## 所有权与线程
 
-- `EngineHost` 在主线程创建并销毁 Platform backend；
-- GLFW 初始化、事件轮询、窗口创建/销毁和大多数窗口操作只在主线程执行；
+- `EngineHost::Create`、`run` 与销毁必须位于同一 owner thread；桌面 bootstrap 最终把该线程定义为
+  Engine 主线程。跨线程 `run` 返回结构化 `WrongOwnerThread` 且不消耗 run-once，跨线程销毁在
+  调用 native API 前 `terminate`；
+- GLFW 初始化、事件轮询、窗口创建/销毁和窗口操作只在该 owner thread 执行；
 - 每个窗口使用 generation `WindowId`，stale ID 不能解析到复用后的窗口；
-- 首个产品切片只支持一个主窗口，但所有输入、DPI、Focus 与 UIContext 状态都按 Window
-  保存，不使用进程级可变全局；
+- 首个产品切片只支持一个主窗口，但所有 Window/Input/DPI/Focus 状态都保存在 backend-owned
+  Window record，不使用进程级全局保存这些事实。唯一例外是一个 process-wide atomic GLFW backend
+  lease，用来拒绝同进程并存的第二个 Tina GLFW owner；shutdown 后显式释放该 lease；
 - 主窗口 OS CloseRequested 只设置不可取消的 Platform control latch；Platform Poll 返回该 outcome
   后，Runtime 在下一个 frame 开始前进入统一 shutdown。它既不进入当前生命周期
   `PlatformEventDispatcher`，也不进入未来通用 Runtime Event Queue；平台 callback 本身不销毁
@@ -56,7 +60,7 @@ string/span 都由 Platform backend owning；API 借用寿命在 Engine 结束�
 的固定容量 owning latch。
 
 ```text
-Platform backend poll（当前为 Headless；GLFW/native callback 为完整 M7 目标）
+Platform backend poll（Headless 与当前 GLFW adapter 共用同一契约）
   -> normalize platform events
   -> primary CloseRequested?
        yes: return PlatformPollResult::ExitRequested
@@ -70,6 +74,37 @@ Platform backend poll（当前为 Headless；GLFW/native callback 为完整 M7 �
             -> InputTransitionConsumption + ContinuousControlClaims
             -> game action mapping / fixed input latch
 ```
+
+## 当前 GLFW desktop adapter
+
+当前实现按以下创建事务工作：
+
+```text
+validate PrimaryWindowConfig and capacities
+  -> acquire the one-process GLFW lease
+  -> glfwInit
+  -> normalize WindowCreatePlan
+  -> create hidden GLFW_NO_API primary window
+  -> publish generation WindowId registry slot
+  -> register noexcept callbacks and read initial snapshot
+  -> optionally show the fully initialized window
+```
+
+任一步失败都以 scope rollback 逆序销毁窗口、终止 GLFW 并释放 process lease。title 必须是无内嵌
+NUL 的严格 UTF-8，logical extent 必须非零且可表示为 GLFW `int`；当前只接受 Windowed 与
+BorderlessFullscreen，不承诺 exclusive fullscreen。公共 factory header 只返回 Tina
+`IPlatformBackend`，不暴露 `GLFWwindow*` 或 native handle。
+
+GLFW C callback 不调用 UI、Gameplay 或销毁系统，只更新 backend-owned final state、向当前有界
+`PlatformFrameBuilder` 追加归一化 transition，或记录 first-sticky failure。Poll 的任一操作、callback
+或 finalize 失败都会 `discardFrame()`；后续 Poll 重新从 final physical snapshot 发出两条 stream reset，
+不发布半帧。adapter 不安装/接管 GLFW 的进程级 error callback；每个 owner-thread 操作通过
+`glfwGetError()` 获取并复制 native error code/context。
+
+当前 producer 覆盖 Keyboard press/release/repeat、Primary Pointer move/button/wheel、Focus、logical/
+framebuffer/content-scale/visible/iconified metrics、resize、close 与 GLFW char callback 提供的 committed
+Unicode scalar。Gamepad registry/sampled diff、Windows preedit/composition、OS Pointer Capture、
+UI routed consumption producer和 Native Surface 均尚未接入。
 
 `WindowInputSnapshot` 按窗口保存：
 
@@ -229,6 +264,9 @@ Platform control outcome：既不进入 `PlatformEventDispatcher`，也不进入
 - 窗口失焦时生成 `InputCancelTransition(reason=FocusLost)`，取消所有 held key/button 的交互语义并清除
   Pointer Capture、keyboard pressed、Gamepad repeat 和未提交 composition；不得伪造普通 Up，
   以免触发 release-position click 或 Gameplay Released；
+- 当前 GLFW adapter 在发布一次 FocusLost cancel 后立即清空 final held，并精确吞掉 GLFW 随后可能
+  产生的 synthetic key/button release；窗口重新获得焦点后真实 Down 正常恢复，同 control 的新 Down
+  会先解除 stale-release mask，避免误吞随后真实 Up；
 - 鼠标按下建立的 OS capture 与 UI `UINodeId` capture 分开记录，两者在释放、失焦、窗口关闭
   或目标失效时成对清理；
 - GLFW logical size、framebuffer size 与 content scale 是三个不同量；UI layout、Pointer event
@@ -280,15 +318,18 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
   异常不得穿过 C callback，failure 由下一次 `pollFrame` 以 `Result` 返回，callback 不直接调用
   UI、Gameplay 或销毁系统；
 - `CloseRequested` 是正常且不可取消的 Platform control outcome，不得混入 error path；
+- adapter 不接管 GLFW 全局 error callback；操作级错误从 owner thread 的 `glfwGetError()` 复制到
+  Tina Error，避免与同进程其他 GLFW consumer 争夺 callback ownership；
 - 日志只记录 UTF-8 操作名、错误码和必要上下文，不写用户输入正文或敏感 clipboard。
 
 ## 验收
 
-当前 M7-A Headless 已验证：
+当前 M7-A Headless 与 GLFW Window 子切片已验证：
 
 - Headless backend 不链接、不加载 GLFW，Null Runtime 可连续运行300帧和10,000帧并完成一次性逆序关闭；
 - WindowId/GamepadId generation identity、跨帧 lifecycle mismatch、Focus/设备断开
-  `InputCancelTransition` 有直接测试；生产 Window/Gamepad registry 的 stale lookup 仍属于 GLFW adapter；该
+  `InputCancelTransition` 有直接测试；生产 Window registry 已由 GLFW adapter 持有，production
+  Gamepad registry 仍后置；该
   cleanup transition 不触发
   click、Released action 或普通 Up 订阅；
 - `CloseRequested` 只产生一次不可取消的 Platform control outcome；本次 Poll 返回后、任何
@@ -305,12 +346,29 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
   且不会永久 stuck；
 - M7-A 只接受 `PrimaryPointerId`；Gamepad snapshot 同 owner、slot 唯一，Engine 级 Gamepad 输入每帧
   只路由一次到 primary window；跨帧 retained active/suppressed source 与最终 held snapshot 一致；
-- Platform 生命周期通知与 Headless Input/Action 映射互不重复投递；UI producer 尚未实现；公共头文件
-  不含 GLFW/SDL 类型，Headless backend 不链接、不加载 GLFW 或 SDL。
+- Platform 生命周期通知与 Headless/Input Action 映射互不重复投递；UI producer 尚未实现；公共头文件
+  不含 GLFW/SDL 类型，Headless backend 不链接、不加载 GLFW 或 SDL；
+- GLFW 专项17项直接覆盖 hidden `NO_API` snapshot、process lease、严格配置校验、Keyboard/Pointer/
+  Unicode/repeat/focus filter、close partial-frame、失败 Poll recovery 与 resize revision；基础测试166项
+  继续独立运行，两个 executable 均不使用 CTest；
+- Windows MSVC 2026 Debug/Release 均通过基础166/166、GLFW专项17/17与零延迟样例300帧；可见
+  样例另行验证中文标题、Escape Frame Action与原生关闭路径。Linux GCC 13 X11通过166/166、
+  17/17与样例300帧。Clang X11也通过相同门禁：基础测试不使用 suppression，只有 GLFW/X11
+  进程使用精确 `leak:_XimOpenIM`，对应专项8次3264 B与样例1次408 B的libX11 XIM retention；
+  GCC 13 Wayland 双后端产物在带 `wl_seat` 的嵌套 Weston 9 下通过166/166、17/17与
+  样例300帧，并通过移除 `DISPLAY` 与断言 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND`
+  确认真正使用 Wayland；同一产物强制 X11 后17/17与样例300帧再次通过。纯
+  Weston headless 无 `wl_seat` 会命中锁定 GLFW 3.4 的已知初始化崩溃，不是 Tina
+  回归，也不属于当前支持范围。Clang 22 双后端 sanitizer 产物同样通过：基础
+  166/166无 suppression；强制 Wayland 后17/17与样例300帧通过且 `_XimOpenIM`
+  匹配为0；强制 X11 后17/17与样例300帧通过，仅精确抑制 `_XimOpenIM`
+  （专项8次/3264 B、样例1次/408 B）。第三方 GLFW 本身未被 sanitizer 插桩，门禁不宣称
+  完整覆盖其内部实现。
 
-完整 M7 GLFW/DPI/IMM32 仍需达到：
+完整 M7-E Platform 输入仍需达到：
 
-- Visual Studio 2026 / MSVC 19.50 与 Linux GLFW backend 能创建、resize、最小化、恢复并正常关闭窗口；
+- 最小化、恢复与 OS Pointer Capture 的真实交互门禁；
 - 100%、150%、200% DPI 下 Pointer 命中和 framebuffer viewport 一致；
 - Windows IMM32 composition/commit/cancel 与窗口销毁顺序通过测试；
-- GLFW adapter 保持 M7-A 已冻结的 Primary Pointer、Gamepad owner/slot、最终快照和生命周期分发契约。
+- production GLFW Gamepad sampled diff/registry 保持 M7-A 已冻结的 owner/slot、最终快照和生命周期
+  分发契约。

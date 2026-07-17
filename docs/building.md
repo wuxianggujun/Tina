@@ -64,6 +64,35 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=10000
 EnTT、FreeType、miniaudio、Box2D、xxHash 或 SDL/SDL3。`tina_sample_null` 只组合 Headless Platform、
 Disabled TaskSystem 与 NullRenderDevice。
 
+## Windows vNext GLFW Platform
+
+GLFW adapter 使用独立 build tree 和 vcpkg `platform-glfw` feature，不改变上面的 Null 依赖闭包。
+它只创建 `GLFW_NO_API` 窗口并组合 NullRender；当前不创建 Native Surface 或 bgfx device：
+
+```powershell
+cmake --preset windows-msvc-vnext-platform
+cmake --build --preset windows-vnext-platform-debug `
+  --target tina_tests tina_platform_glfw_tests tina_sample_platform
+out\build\windows-msvc-vnext-platform\bin\Debug\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-platform\bin\Debug\tina_platform_glfw_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-platform\bin\Debug\tina_sample_platform.exe `
+  --frames=300 --frame-delay-ms=0
+```
+
+Release 必须在 Debug build 结束后串行执行：
+
+```powershell
+cmake --build --preset windows-vnext-platform-release `
+  --target tina_tests tina_platform_glfw_tests tina_sample_platform
+out\build\windows-msvc-vnext-platform\bin\Release\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-platform\bin\Release\tina_platform_glfw_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-platform\bin\Release\tina_sample_platform.exe `
+  --frames=300 --frame-delay-ms=0
+```
+
+Windows 构建会把 GLFW runtime DLL 复制到对应 `bin/<Config>`。样例不带参数时以16 ms 的演示延迟
+显示1800帧；自动门禁必须显式使用 `--frame-delay-ms=0`，这条 sleep 路径不属于 benchmark。
+
 ## Windows vNext Release
 
 vNext 已提供独立 Release build preset，仍复用同一个 Visual Studio 多配置构建目录：
@@ -128,10 +157,75 @@ UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 不能作为游戏产品或发布包。GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 的隔离门禁已经通过，
 但仍不能用 Ubuntu 22.04 的旧工具链降级冒充正式结果。
 
+## Linux vNext GLFW Platform
+
+X11 adapter 使用独立 platform preset。基础测试无需显示环境；GLFW 专项与样例在 CI/WSL 中应由
+`xvfb-run` 提供隔离 X server：
+
+```bash
+cmake --preset linux-gcc13-vnext-platform
+cmake --build --preset linux-gcc13-vnext-platform-debug \
+  --target tina_tests tina_platform_glfw_tests tina_sample_platform
+./out/build/linux-gcc13-vnext-platform/bin/tina_tests --gtest_color=no
+xvfb-run -a ./out/build/linux-gcc13-vnext-platform/bin/tina_platform_glfw_tests --gtest_color=no
+xvfb-run -a ./out/build/linux-gcc13-vnext-platform/bin/tina_sample_platform \
+  --frames=300 --frame-delay-ms=0
+
+cmake --preset linux-clang22-vnext-platform-sanitize
+cmake --build --preset linux-clang22-vnext-platform-sanitize-debug \
+  --target tina_tests tina_platform_glfw_tests tina_sample_platform
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+./out/build/linux-clang22-vnext-platform-sanitize/bin/tina_tests --gtest_color=no
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+LSAN_OPTIONS=suppressions="$PWD/cmake/sanitizers/lsan-x11.supp":print_suppressions=1 \
+xvfb-run -a ./out/build/linux-clang22-vnext-platform-sanitize/bin/tina_platform_glfw_tests \
+  --gtest_color=no
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+LSAN_OPTIONS=suppressions="$PWD/cmake/sanitizers/lsan-x11.supp":print_suppressions=1 \
+xvfb-run -a ./out/build/linux-clang22-vnext-platform-sanitize/bin/tina_sample_platform \
+  --frames=300 --frame-delay-ms=0
+```
+
+基础 `tina_tests` 故意不设置 `LSAN_OPTIONS`。只有初始化 GLFW/X11 的两个进程使用
+`cmake/sanitizers/lsan-x11.supp` 中唯一的 `_XimOpenIM` 精确规则；它对应 Ubuntu 22.04 libX11
+关闭 XIM 后保留的 allocation（专项测试8次3264 B，样例1次408 B），不能扩展为宽泛 suppression。
+
+Wayland 使用单独的 `linux-gcc13-vnext-platform-wayland` 与
+`linux-clang22-vnext-platform-wayland-sanitize` preset，它们同时启用 manifest 的
+`platform-glfw;wayland` feature。GCC 13 双后端产物已在受控环境完成两条运行门禁：
+
+- Xvfb 为 Weston 9 `x11-backend` 提供 `wl_seat`，启动嵌套 Weston 后从子进程环境移除
+  `DISPLAY`，并断言 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND`；基础测试166/166、GLFW专项
+  17/17 与样例300帧通过；
+- 同一双后端产物随后在 Xvfb 下强制选择 X11，GLFW专项17/17与样例300帧再次通过。
+
+运行门禁需要真实 Wayland session，或像上述 Weston 一样显式提供 `wl_seat` 的受控
+compositor。纯 Weston headless 在没有 `wl_seat` 时会命中项目锁定 GLFW 3.4 的已知
+初始化崩溃；这不是 Tina 回归，也不表示 Tina 支持无 seat compositor。
+
+Clang 22 的同类双后端 sanitizer 产物也已完成门禁：
+
+- 基础 `tina_tests` 在 ASan/UBSan/LSan 下不使用任何 suppression，166/166通过；
+- 带 `wl_seat` 的嵌套 Weston 强制 Wayland 后，GLFW专项17/17与样例300帧通过，
+  `_XimOpenIM` 精确 suppression 匹配计数为0；
+- 同一产物在 Xvfb 下强制 X11 后，专项17/17与样例300帧通过；此路径仅
+  精确抑制 libX11 `_XimOpenIM`，专项8次/3264 B、样例1次/408 B。
+
+Sanitizer 插桩覆盖 Tina 自有 target；由 vcpkg 提供的第三方 GLFW 本身未被
+sanitizer 插桩。因此该门禁证明 Tina 代码、边界交互和生命周期未被 sanitizer 报错，
+不等于对 GLFW 内部路径进行了完整插桩检查。配置/构建成功不能替代运行结果，
+最终状态记录在[测试文档](testing.md)。
+
 ## vNext 目标 Preset
 
-`windows-msvc-vnext`、`linux-gcc13-vnext`、`linux-clang22-vnext` 与
-`linux-clang22-vnext-sanitize` 已落地。下列性能名称仍是后续设计契约：
+`windows-msvc-vnext`、`windows-msvc-vnext-platform`、`linux-gcc13-vnext`、
+`linux-gcc13-vnext-platform`、`linux-gcc13-vnext-platform-wayland`、`linux-clang22-vnext`、
+`linux-clang22-vnext-platform`、`linux-clang22-vnext-sanitize`、
+`linux-clang22-vnext-platform-sanitize` 与 `linux-clang22-vnext-platform-wayland-sanitize` 已落地。
+下列性能名称仍是后续设计契约：
 
 | Preset | 优化/插桩 | 用途 |
 | --- | --- | --- |
@@ -164,9 +258,10 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 
 | 选项 | 默认值 | 用途 |
 | --- | --- | --- |
-| `TINA_BUILD_TESTING` | `ON` | 构建 `tina_tests` |
+| `TINA_BUILD_TESTING` | `ON` | 构建基础 `tina_tests`；启用 GLFW adapter 时也构建其独立专项测试 |
 | `TINA_BUILD_SHADERS` | `ON` | 构建运行时 shader；关闭后只适合编译/链接门禁 |
 | `TINA_BUILD_LEGACY` | `ON` | 迁移期构建现有游戏与旧模块；vNext preset 固定关闭 |
+| `TINA_BUILD_PLATFORM_GLFW` | `OFF` | 构建私有 vNext GLFW Window/Input adapter；需启用 vcpkg `platform-glfw` feature，不改变 Game SDK 边界 |
 | `TINA_BUILD_RENDER_BGFX` | `OFF` | 后续启用私有 vNext bgfx backend，不改变 Game SDK 边界 |
 | `TINA_BUILD_BENCHMARKS` | `OFF` | 后续构建独立 `tina_bench` |
 | `TINA_ENABLE_SANITIZERS` | `OFF` | GCC/Clang Unix target 同时启用 ASan/UBSan；其他工具链配置时报错 |

@@ -16,7 +16,11 @@ struct EngineFactories;
 class IGameApplication;
 
 class EngineHost final {
-public:
+  public:
+    // Create, run, and destruction are one owner-thread lifetime. A native
+    // platform backend may require that owner to be the process main/platform
+    // thread. run rejects another thread and destruction on another thread
+    // terminates before invoking backend APIs.
     ~EngineHost() noexcept;
 
     EngineHost(const EngineHost&) = delete;
@@ -24,13 +28,12 @@ public:
     EngineHost(EngineHost&&) = delete;
     EngineHost& operator=(EngineHost&&) = delete;
 
-    [[nodiscard]] static Core::Result<std::unique_ptr<EngineHost>> Create(
-        const EngineConfig& config,
-        EngineFactories factories) noexcept;
+    [[nodiscard]] static Core::Result<std::unique_ptr<EngineHost>> Create(const EngineConfig& config,
+                                                                          EngineFactories factories) noexcept;
 
     [[nodiscard]] Core::Result<RunExitReason> run(IGameApplication& gameApplication) noexcept;
 
-private:
+  private:
     explicit EngineHost(std::unique_ptr<Detail::EngineHostImplementation> implementation) noexcept;
 
     std::unique_ptr<Detail::EngineHostImplementation> m_implementation;

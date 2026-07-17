@@ -3,8 +3,9 @@
 - 状态：Accepted
 - 日期：2026-07-16
 - 接受日期：2026-07-17
-- 实施状态：M7-A Headless Platform/Input、Action Mapper、fixed-step latch 与
-  `PlatformEventDispatcher` 已落地；完整 M7 GLFW、DPI、Windows IMM32 和 UI producer 仍是目标
+- 实施状态：M7-A Headless Platform/Input、Action Mapper、fixed-step latch、
+  `PlatformEventDispatcher` 与私有 GLFW Window/Keyboard/Pointer/committed text producer 已落地；
+  production Gamepad、完整 DPI、Windows IMM32 和 UI producer 仍是目标
 
 ## 背景
 
@@ -103,8 +104,8 @@ command merge/commit 与 Transform propagation，Render 使用 previous/current 
 - 每 substep barrier/commit 有固定成本，需要 benchmark 后再并行。
 - GLFW standard gamepad 只能轮询最终 sampled state，因此只能为相邻 Poll 之间观察到的状态差
   生成 transition；无法承诺捕获两次 Poll 之间已经完成的物理 Down→Up。该限制必须进入能力说明
-  和 replay 语义，不能为补齐它引入 SDL/SDL3；对应 GLFW/DPI/IMM32 adapter 仍属于完整 M7 目标，
-  但不得改变已落地的 Headless 契约。
+  和 replay 语义，不能为补齐它引入 SDL/SDL3；当前 GLFW窗口/键鼠 producer 不得改变已落地的
+  Headless 契约，production Gamepad、完整 DPI与 IMM32仍属于完整 M7目标。
 
 ## 被拒绝方案
 

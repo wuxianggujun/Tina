@@ -44,7 +44,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | --- | --- | --- | --- |
 | `tina_core` | 基础类型、Result、时间、诊断、UTF-8 路径/原子 IO、ID/Hash、轻量内存统计、少量专用容器 | 标准库、OS-specific `.cpp`、私有 xxHash adapter | GLFW、bgfx、EnTT、EASTL、游戏逻辑、全局服务 |
 | `tina_platform` | Window/Input/Event 公共描述、Headless backend、线程命名和不透明 Render surface | `tina_core`、OS 最小适配 | GLFW 公共类型、文件/资产 IO、Scene、Renderer、UI Widget |
-| `tina_platform_glfw` | GLFW Window/Input/Gamepad、DPI、Windows IMM32 的具体 backend | core/platform、GLFW、OS API | Scene、Asset、UI Widget、bgfx 类型 |
+| `tina_platform_glfw` | 最终承载 GLFW Window/Input/Gamepad、DPI、Windows IMM32；当前已完成 Window/Keyboard/Pointer/Focus/resize/close/committed text | core/platform、GLFW、OS API | Scene、Asset、UI Widget、bgfx 类型 |
 | `tina_task` | 有界任务队列、协作取消、后台工作与主线程 completion | `tina_core`、`tina_platform` 的线程命名能力 | Asset 类型、渲染命令、强杀线程 |
 | `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、GameStateStack、RenderFramePacket/pool | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
 | `tina_scene` | World、generation `EntityId`、Transform、Camera、render components 与资产解析 facade | core、asset 公共接口、render descriptors、EnTT 内部实现 | GLFW 输入、TileMap 玩法、bgfx 类型 |
@@ -159,10 +159,10 @@ struct EngineFactories;
 class EngineHost final {
 public:
     static Core::Result<std::unique_ptr<EngineHost>> Create(
-        EngineConfig config,
-        EngineFactories factories);
+        const EngineConfig& config,
+        EngineFactories factories) noexcept;
 
-    Core::Result<RunExitReason> run(IGameApplication& gameApplication);
+    Core::Result<RunExitReason> run(IGameApplication& gameApplication) noexcept;
 };
 
 class IGameApplication {
@@ -185,6 +185,10 @@ public:
     virtual Core::Status updateUI(UIUpdateContext& context);
 };
 ```
+
+当前实现把 Create、run 和析构冻结为同一 owner-thread 生命周期。错误线程调用 `run` 返回
+`WrongOwnerThread` 且不消耗唯一运行机会；错误线程析构在进入任何 native backend shutdown 前
+`terminate`。这是 GLFW 等桌面窗口系统的硬正确性边界，不是可由后台线程调度的普通任务。
 
 普通游戏 executable 调用 `Desktop::CreateEngine(config)`；`tina_bootstrap_desktop` 的单一组合
 translation unit 私有构造 GLFW/bgfx/FreeType/miniaudio factories，public header 只包含 Tina
@@ -527,9 +531,9 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
 1. **Null Runtime（已完成 M6-A）**：`tina_core + tina_platform(headless) + tina_task +
    tina_runtime + tina_render/NullRenderDevice + tina_tests + tina_sample_null`；不建立无消费者的
    scene/asset/ui/audio 空壳，已完成300帧和10,000帧、初始化回滚、阶段顺序与析构门禁；
-2. **M7-A Platform/Input（Headless 内核已完成）**：`PlatformFrameView`/Action latch 与 Headless
-   backend 已落地，Builder 直接注入和 Runtime test adapter 覆盖 wiring；私有 GLFW `NO_API`
-   窗口、可复用 adapter 注入层与 NullRender 样例为下一独立提交；
+2. **M7-A Platform/Input（Headless + 首个 GLFW desktop adapter 已完成）**：`PlatformFrameView`/
+   Action latch、Headless backend、私有 GLFW `NO_API` Window/Keyboard/Pointer/committed text producer
+   与 NullRender 样例已落地；基础166项与 GLFW 专项17项保持为两个直接运行的测试 executable；
 3. **M7-B Surface**：move-only Native Window Surface lease、bgfx clear/present 与 resize/suspend/drain；
 4. **M7-C–E UI/IME/Gamepad**：增量 UIContext/DisplayList、Label/Button/Modal + FreeType、
    IMM32/Gamepad/DPI 门禁；
@@ -561,9 +565,12 @@ vNext-only preset 设为 OFF；当新2D/UI/3D/Audio 覆盖门禁后先把默认�
 
 ## 验收门禁
 
-- Visual Studio 2026 / MSVC 19.50 Debug/Release configure、build 与直接执行 `tina_tests`；
+- Visual Studio 2026 / MSVC 19.50 Debug/Release configure、build 与直接执行基础 `tina_tests`；启用
+  GLFW adapter 时另行直接执行 `tina_platform_glfw_tests`，两者均不使用 CTest；
 - Linux GCC 与 Clang 构建；正式支持前还要运行 GLFW/bgfx 2D/UI/3D，Clang sanitizer 只有真实
   运行通过后才能标记完成；
+- GLFW X11 与 Wayland 使用独立 preset 和真实/隔离 display server 运行；configure/build 成功不等于
+  窗口门禁通过，第三方 sanitizer 报告也必须完成归因或稳定抑制后才能标记最终通过；
 - NullRenderDevice 300帧 smoke 与10,000帧 lifecycle/benchmark；
 - M8 infrastructure：`tina_sample_2d_infrastructure` 使用内置 fixture 显示 Sprite、中文 Label 和
   可交互 Button，只证明 Scene/2D/UI 接口；

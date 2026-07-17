@@ -19,10 +19,11 @@ Runtime。现有2D/UI/3D路径继续作为验收基线，新架构按可独立�
 
 当前旧文档已经替换，但旧源码架构仍是正在运行的主实现，并未完全删除。迁移状态和删除门禁见 [架构总览](docs/architecture.md)。物理后端固定为 2D Box2D 3.x 与 3D Jolt，不引入第三套物理引擎。
 
-vNext 已完成 C++23 Headless Runtime 生命周期内核和 M7-A Platform/Input 内核：有界
-`PlatformFrameView`、Platform 生命周期分发、Simulation/Frame Action 语义已经接入真实 Runtime
-阶段。下一个桌面子切片是私有 GLFW `NO_API` 窗口与 NullRender 样例；Native Surface/bgfx 仍属于
-M7-B，UI Core、可见中文 UI 与 IMM32 分别放在后续切片，避免形成一个无法定位问题的巨型提交。
+vNext 已完成 C++23 Headless Runtime 生命周期内核、M7-A Platform/Input 内核和首个桌面适配切片：
+私有 `tina_platform_glfw` 已能创建 `GLFW_NO_API` 窗口，并把键盘、Pointer、Focus、resize、close
+与已提交 UTF-8 文本归一化到同一份有界 `PlatformFrameView`；`tina_sample_platform` 使用
+NullRender 验证真实窗口而不创建 GPU Surface。Native Surface/bgfx 仍属于 M7-B，production
+Gamepad、Windows IMM32 composition、UI Core 与可见中文 UI 分别放在后续切片。
 
 ## 当前 Legacy 已完成基线
 
@@ -40,7 +41,7 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 ## 构建
 
-目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、MSVC 19.50 和 CMake 4.2.3 下通过 vNext 最小图、Legacy Debug、直接 GoogleTest 以及 UI/3D 300 帧冒烟；Linux vNext Null 图已实际通过 GCC 13.4，以及 Clang 22.1.8 + libstdc++ 15.2 的 ASan/UBSan 门禁。Clang preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22.04 自带的旧 libstdc++。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
+目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、MSVC 19.50 和 CMake 4.2.3 下通过 vNext Null 与 GLFW Debug/Release 图、基础166项、GLFW专项17项及平台样例300帧，也保留 Legacy UI/3D冒烟；Linux vNext 已通过 GCC 13 和 Clang 22 的 X11/Wayland 双后端门禁，Wayland 均使用带 `wl_seat` 的嵌套 Weston 9。Clang 路径已通过 ASan/UBSan/LSan，但由 vcpkg 提供的第三方 GLFW 本身未被 sanitizer 插桩；详细边界见[测试文档](docs/testing.md)。Clang preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22.04 自带的旧 libstdc++。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
 
 ```powershell
 cmake --version
@@ -48,11 +49,19 @@ cmake --preset windows-msvc-vnext
 cmake --build --preset windows-vnext-debug --target tina_tests
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe
 
+# 可选 GLFW + NullRender 平台切片
+cmake --preset windows-msvc-vnext-platform
+cmake --build --preset windows-vnext-platform-debug --target tina_tests tina_platform_glfw_tests tina_sample_platform
+out\build\windows-msvc-vnext-platform\bin\Debug\tina_tests.exe
+out\build\windows-msvc-vnext-platform\bin\Debug\tina_platform_glfw_tests.exe
+out\build\windows-msvc-vnext-platform\bin\Debug\tina_sample_platform.exe --frames=300 --frame-delay-ms=0
+
 cmake --preset windows-msvc
 cmake --build --preset windows-debug --target Tina tina_tests
 ```
 
-测试构建完成后直接运行 `tina_tests`，不通过额外测试调度器：
+测试构建完成后直接运行基础 `tina_tests`；启用 GLFW adapter 时再直接运行独立的
+`tina_platform_glfw_tests`。两者都不通过额外测试调度器：
 
 ```powershell
 out\build\windows-msvc\bin\Debug\tina_tests.exe
@@ -85,7 +94,8 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-game --smoke-frames=300
 out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 ```
 
-项目不使用 CTest 调度；测试直接运行固定 GoogleTest 1.17.0 生成的 `tina_tests`。
+项目不使用 CTest 调度；测试直接运行固定 GoogleTest 1.17.0 生成的基础 `tina_tests` 与按需构建的
+adapter 专项测试。当前精确数量和平台矩阵只在[测试文档](docs/testing.md)维护。
 
 当前 Legacy UI 已具备 generation `NodeId`、Pointer Capture、Focus/Tab、KeyDown/KeyUp 的 Capture/Target/Bubble 路由、方向键空间焦点导航、可嵌套 Modal Focus Scope、Button 的 Enter/Space pressed/release 生命周期与单次激活、每窗口 Theme/DPI、嵌套 Clip、通用 `UIScrollView`、十万行范围计算的 ListView 虚拟化，以及 Windows 原生 IME preedit/composition。每个 Button action 具有独立重入保护、异常恢复和回调自销毁安全性；routed click 目标在路由中删除后通过 generation `NodeId` 立即失效。GLFW 标准手柄的 D-pad/左摇杆可驱动空间导航，A/B 映射为 Accept/Cancel；摇杆带回滞并支持方向长按重复，语义导航仍服从最上层 Modal Focus Scope。Dialog 不再订阅全局键盘事件，Escape 仅在焦点控件未消费时沿祖先链处理；Scene 会在 `onEnter`/`onResume` 交互前激活对应 UI roots。窗口与基础输入只使用 GLFW；IME 通过 Win32 IMM32 补充，不引入其他窗口或输入库。测试数量和平台验证结果只在 [测试文档](docs/testing.md) 中维护。
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/error/Result.hpp>
+#include <tina/core/text/Utf8.hpp>
 #include <tina/platform/Input.hpp>
 #include <tina/platform/PlatformErrors.hpp>
 #include <tina/platform/Window.hpp>
@@ -521,6 +522,31 @@ class PlatformFrameBuilder final {
                                  std::span<const PlatformEvent>(eventStorage_.get(), eventCount_), diagnostics_);
     }
 
+    // Abandons a partially assembled poll after a backend error or close
+    // request. Global sequence numbers remain consumed so a later successful
+    // frame can never reuse an identity already observed by a callback.
+    [[nodiscard]] bool discardFrame() noexcept
+    {
+        if (!frameOpen_)
+        {
+            return false;
+        }
+        frameOpen_ = false;
+        frameId_ = {};
+        windowCount_ = 0;
+        gamepadCount_ = 0;
+        inputCount_ = 0;
+        eventCount_ = 0;
+        inputTextByteCount_ = 0;
+        inputResetWritten_ = false;
+        eventResetWritten_ = false;
+        invalidInputPayload_ = false;
+        invalidPlatformEventPayload_ = false;
+        previousAppendWasPointerMove_ = false;
+        diagnostics_ = {};
+        return true;
+    }
+
     [[nodiscard]] PlatformFrameCapacityConfig capacities() const noexcept
     {
         return capacities_;
@@ -535,79 +561,10 @@ class PlatformFrameBuilder final {
     {
     }
 
-    [[nodiscard]] static std::optional<u32> countStrictUtf8Codepoints(std::string_view text) noexcept
-    {
-        usize index = 0;
-        u32 codepointCount = 0;
-        while (index < text.size())
-        {
-            const auto first = static_cast<unsigned char>(text[index]);
-            if (first <= 0x7FU)
-            {
-                if (first == 0U)
-                {
-                    return std::nullopt;
-                }
-                ++index;
-                ++codepointCount;
-                continue;
-            }
-
-            usize continuationCount = 0;
-            char32_t codePoint = 0;
-            char32_t minimumCodePoint = 0;
-            if ((first & 0xE0U) == 0xC0U)
-            {
-                continuationCount = 1;
-                codePoint = first & 0x1FU;
-                minimumCodePoint = 0x80U;
-            } else if ((first & 0xF0U) == 0xE0U)
-            {
-                continuationCount = 2;
-                codePoint = first & 0x0FU;
-                minimumCodePoint = 0x800U;
-            } else if ((first & 0xF8U) == 0xF0U)
-            {
-                continuationCount = 3;
-                codePoint = first & 0x07U;
-                minimumCodePoint = 0x10000U;
-            } else
-            {
-                return std::nullopt;
-            }
-
-            if (continuationCount > text.size() - index - 1U)
-            {
-                return std::nullopt;
-            }
-            for (usize offset = 1; offset <= continuationCount; ++offset)
-            {
-                const auto next = static_cast<unsigned char>(text[index + offset]);
-                if ((next & 0xC0U) != 0x80U)
-                {
-                    return std::nullopt;
-                }
-                codePoint = (codePoint << 6U) | (next & 0x3FU);
-            }
-            if (codePoint < minimumCodePoint || codePoint > 0x10FFFFU || (codePoint >= 0xD800U && codePoint <= 0xDFFFU))
-            {
-                return std::nullopt;
-            }
-            index += continuationCount + 1U;
-            ++codepointCount;
-        }
-        return codepointCount;
-    }
-
-    [[nodiscard]] static bool isStrictUtf8WithoutNul(std::string_view text) noexcept
-    {
-        return countStrictUtf8Codepoints(text).has_value();
-    }
-
     [[nodiscard]] FrameBatchAppendResult copyTextViewIntoArena(std::string_view source, std::string_view& destination,
                                                                u64 resetSequence) noexcept
     {
-        if (!isStrictUtf8WithoutNul(source))
+        if (!Core::isStrictUtf8WithoutNul(source))
         {
             invalidInputPayload_ = true;
             previousAppendWasPointerMove_ = false;
@@ -650,7 +607,8 @@ class PlatformFrameBuilder final {
         }
         if (auto* composition = std::get_if<TextCompositionTransition>(&payload); composition != nullptr)
         {
-            const std::optional<u32> preeditCodepoints = countStrictUtf8Codepoints(composition->preeditUtf8);
+            const std::optional<u32> preeditCodepoints =
+                Core::countStrictUtf8CodepointsWithoutNul(composition->preeditUtf8);
             if (!preeditCodepoints.has_value() || composition->cursorCodepoint > *preeditCodepoints)
             {
                 invalidInputPayload_ = true;

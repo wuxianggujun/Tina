@@ -2,8 +2,9 @@
 
 - 状态：Accepted
 - 日期：2026-07-17
-- 实施状态：当前仅 M7-A Headless Platform/Input 契约已落地；本 ADR 的 GLFW window/surface lease、
-  DPI、Windows IMM32 与 bgfx 交接均是完整 M7 后续目标，不是当前可运行 backend
+- 实施状态：M7-A Headless Platform/Input 与私有 GLFW `NO_API` primary window 已落地，可使用
+  NullRender运行；本ADR的 NativeWindowSurfaceLease、bgfx交接、surface revision/state machine、
+  完整 DPI 与 Windows IMM32仍是 M7后续目标
 
 ## 背景
 
@@ -197,8 +198,9 @@ packet 完成提交；若 snapshot 为 Suspended，则仍完成 Extraction/UI/Re
 
 ## 结果
 
-- 当前 M7-A Headless 已提供可验证的 Platform frame、Primary Pointer、Gamepad snapshot、生命周期
-  dispatcher 与 close outcome 基线；下面的 GLFW/DPI/IMM32/surface 结果要在完整 M7 adapter 落地后验收；
+- 当前 M7-A Headless 与 GLFW Window 子切片已提供可验证的 Platform frame、Primary Pointer、
+  Window registry、Keyboard/Pointer/committed text、生命周期 dispatcher 与 close outcome 基线；
+  production Gamepad、完整 DPI/IMM32和本ADR的 surface结果仍需后续验收；
 - GLFW 保持窗口、输入、DPI、IME 与关闭语义的唯一 owner，bgfx 只负责渲染；
 - opaque lease 在不泄漏 native/bgfx 类型的前提下，强制窗口晚于 RenderDevice 销毁；
 - resize、最小化和关闭使用可测试的 surfaceRevision/state machine，不依赖 callback 偶然顺序；
@@ -208,7 +210,8 @@ packet 完成提交；若 snapshot 为 Suspended，则仍完成 Extraction/UI/Re
 
 ## 验收
 
-- 首先复用 M7-A Headless 门禁，证明 GLFW adapter 仍只接受 `PrimaryPointerId`、Gamepad snapshot
+- 首先复用 M7-A Headless 与当前 GLFW Window 门禁，证明后续 Surface adapter 仍只接受
+  `PrimaryPointerId`、Gamepad snapshot
   同 owner/slot 唯一、retained active/suppressed source 与最终 snapshot 一致，且 CloseRequested 不进入
   `PlatformEventDispatcher` 或未来通用 Runtime Event Queue；
 - 注入 window 创建、lease 获取、bgfx init 和 surface reconfigure 每个失败点，验证完整逆序回滚、

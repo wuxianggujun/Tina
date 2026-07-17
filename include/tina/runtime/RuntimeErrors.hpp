@@ -24,6 +24,7 @@ inline constexpr Core::ErrorCode ShutdownDeadlineExceeded{Core::ErrorDomain::Run
 inline constexpr Core::ErrorCode PlatformEventDispatcherStopped{Core::ErrorDomain::Runtime, 9};
 inline constexpr Core::ErrorCode RecursivePlatformEventDispatch{Core::ErrorDomain::Runtime, 10};
 inline constexpr Core::ErrorCode PlatformEventCallbackThrewException{Core::ErrorDomain::Runtime, 11};
+inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::Runtime, 12};
 
 } // namespace RuntimeErrorCode
 

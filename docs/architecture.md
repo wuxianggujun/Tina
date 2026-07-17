@@ -4,8 +4,9 @@
 
 Tina 当前处于 Legacy 产品与 vNext 垂直切片并存的迁移期。Legacy 仍以单个游戏可执行文件为主，
 源码按 Core、Engine、Renderer、UI、ECS 和 Game 组织；vNext 已建立独立的 `tina_core`、
-`tina_platform`、`tina_task`、`tina_render`、`tina_runtime` 五个 C++23 target，以及不依赖真实
-窗口和 GPU 的 `tina_sample_null`。M7-A 已在这些 target 内加入有界 Platform Frame、输入
+`tina_platform`、`tina_task`、`tina_render`、`tina_runtime` 五个基础 C++23 target，以及可选的
+`tina_platform_glfw` adapter。`tina_sample_null` 不依赖真实窗口和 GPU；`tina_sample_platform`
+则把私有 GLFW `NO_API` 窗口与 NullRender 组合。M7-A 已加入有界 Platform Frame、输入
 Snapshot/Transition、Platform 生命周期订阅以及 Simulation/Frame Action Mapping。
 现有 Legacy target 的包依赖由 vcpkg manifest 管理，bgfx、EASTL、EABase 仍保持固定源码
 版本；其中 EASTL/EABase 只属于迁移期现状，不是 vNext 目标依赖。
@@ -27,14 +28,14 @@ Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Ga
 ## 旧架构删除状态
 
 结论：旧文档已经替换，但旧源码架构没有完全删除。`TINA_BUILD_LEGACY` 与 vNext-only preset
-已落地，能够把旧依赖和产品 target 排除出最小构建图。`EngineHost` 生命周期与 M7-A Platform/Input
-内核已经可独立运行，但它还没有生产窗口、真实渲染、Scene/Asset/UI/Audio 或完整状态栈，因此 Legacy
-仍是当前 2D/UI/3D 产品实现，不能直接整目录删除。
+已落地，能够把旧依赖和产品 target 排除出最小构建图。`EngineHost` 生命周期、M7-A Platform/Input
+内核和私有 GLFW 窗口子切片已经可独立运行；它仍没有 Native Surface、真实 GPU 渲染、
+Scene/Asset/UI/Audio 或完整状态栈，因此 Legacy 仍是当前 2D/UI/3D 产品实现，不能直接整目录删除。
 
 | 范围 | 状态 | 证据或影响 |
 | --- | --- | --- |
 | 旧阶段文档 | 已删除/替换 | `docs` 只保留当前架构、契约、验证和 Roadmap |
-| Legacy 构建隔离 | 首批完成 | vNext preset 同时关闭 Legacy、vNext bgfx backend 与 shader：不发现 Legacy package、不进入 bgfx/EASTL、不复制旧资源，也不建立 `Tina` target |
+| Legacy 构建隔离 | 首批完成 | Null vNext preset 关闭 Legacy、GLFW、vNext bgfx backend 与 shader；platform preset 只额外启用私有 GLFW feature，仍不进入 bgfx/EASTL、不复制旧资源，也不建立 `Tina` target |
 | 单体游戏 target | 仍在使用 | 主程序仍由一个 `Tina` executable 汇集 Engine、Game、Renderer、UI 和 ECS |
 | Core compatibility | 仍在使用 | 主程序和测试仍链接 `Tina::CoreLegacy` |
 | `Application` 组合根 | 仍在使用 | 继续持有 Window、Input、Event、Scene、Resource、Audio 和渲染服务 |
@@ -43,8 +44,9 @@ Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Ga
 | bgfx 边界 | 尚未收敛 | Renderer、UI 和部分公共结构仍直接暴露 bgfx handle/type |
 | 路径资源系统 | 仍在使用 | Cooked Asset、稳定 AssetId 和独立 GPU upload queue 尚未落地 |
 | vNext M6-A Runtime | 已完成生命周期切片 | `EngineHost`、`IGameApplication`、单个 `IGameState`、最小阶段 Context、Backend SPI、Headless Platform、Disabled TaskSystem 与 NullRenderDevice 已落地 |
-| vNext M7-A Platform/Input | 已完成 Headless 内核切片 | 固定容量 `PlatformFrameBuilder`、final Snapshot、保序 transition、generation-typed `GamepadId` 与帧内生命周期一致性校验、Runtime-private `PlatformEventDispatcher`、RAII 订阅和 Simulation/Frame Action Mapper 已落地；production GLFW registry/polling 仍属下一子提交 |
-| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene/Asset/UI/Audio、Desktop bootstrap 与真实 backend 仍按后续切片实施 |
+| vNext M7-A Platform/Input | 已完成 Headless 内核与首个桌面 adapter 切片 | 固定容量 `PlatformFrameBuilder`、final Snapshot、保序 transition、Runtime-private `PlatformEventDispatcher`、Action Mapper，以及私有 GLFW Window/Keyboard/Pointer/committed text producer 已落地；IMM32、production Gamepad 与完整 DPI 门禁后置 |
+| vNext GLFW 边界 | 已形成可运行切片 | `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
+| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Native Surface、Pass Scheduler/RenderFramePacket、Scene/Asset/UI/Audio、Desktop bootstrap 与真实 Render backend 仍按后续切片实施 |
 
 因此不能用“删除旧 `src`”作为下一步。正确顺序是：建立新边界和测试 → 迁移调用点 → 确认旧接口零引用 → 通过 2D/UI/3D 验收 → 在独立提交中删除旧实现。
 

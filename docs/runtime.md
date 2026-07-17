@@ -15,9 +15,10 @@ Application 初始化现在保留明确的成功状态；任一必需子系统�
 - Scene 操作和资源上传/销毁还没有完全归入独立 Frame Phase；
 - Legacy Application 仍承担过多系统所有权，尚未迁移到 vNext EngineHost/factory/阶段 Context。
 
-## vNext M6-A/M7-A 已落地 Headless Runtime 内核
+## vNext Runtime 内核与首个 GLFW Platform 切片
 
-M6-A 已把 C++23 Core 基础接入一个可独立运行的 Headless Runtime，M7-A 又接入 Platform/Input；它与 Legacy Application
+M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A 又接入 Platform/Input，并以
+独立提交加入私有 GLFW Window/Keyboard/Pointer/committed text producer；它们与 Legacy Application
 并存，不改变现有产品路径：
 
 - `Result<T>/Status` 使用 `std::expected`，Error 已包含稳定 domain/code、origin、native code
@@ -29,6 +30,9 @@ M6-A 已把 C++23 Core 基础接入一个可独立运行的 Headless Runtime，M
 - `EngineHost::Create(config, factories)` 已按 Clock → Platform → Task → Render 创建模块，任一步
   失败都逆序回滚；销毁顺序固定为 Render → Task → Platform → Clock；Create/run 均为
   `noexcept` 边界，普通异常转换为结构化 Error，硬 OOM 若连 Error 都无法构造则 fatal；
+- `EngineHost::Create`、`run` 与销毁组成同一个 owner-thread 生命周期。跨线程 `run` 返回
+  `WrongOwnerThread` 且不消耗 run-once；跨线程销毁会在调用任何 native API 前终止进程，不能
+  通过错误线程冒险释放桌面窗口资源；
 - `EngineConfig` 在任何 factory 前完成校验，并硬拒绝 `maximumStepsPerFrame > 4`；
 - `EngineConfig::platformFrameCapacities`、`inputActions` 与 `platformEventSubscriptions` 已按职责
   分离；Platform raw/event/text storage 在 backend 创建时一次性分配，Poll 期间不扩容；
@@ -42,16 +46,22 @@ M6-A 已把 C++23 Core 基础接入一个可独立运行的 Headless Runtime，M
   `onEnter` 失败不调用 candidate `onExit`/Application `onShutdown`，提交后退出或失败则各调用一次；
 - Headless Platform、Disabled TaskSystem、生命周期级 NullRenderDevice 已分别位于
   `tina_platform`、`tina_task`、`tina_render`，`tina_runtime` 只依赖 Tina SPI；
+- 可选 `tina_platform_glfw` 通过无第三方类型的 factory SPI 接入 Runtime，GLFW 只在 adapter
+  实现层可见；`tina_sample_platform` 仍显式注入 GLFW + DisabledTask + NullRender，尚未实现
+  面向普通游戏的 Desktop bootstrap；
 - 当前帧循环为 Poll Platform → frame/payload/capacity/sequence 预校验 → Platform lifecycle dispatch
   → Action Mapping → Fixed Update（0..4）→ Frame Update → Render Scene Extraction → UI Update
   → Null submit → present；`requestExitAfterFrame()` 会完成当帧 submit/present 后退出；
 - `tina_sample_null --frames=N` 已在 MSVC 2026 Debug/Release 连续通过300帧与10,000帧，且
   vNext Null 构建图不加入或链接 GLFW、bgfx、EnTT、FreeType、miniaudio、SDL/SDL3。
 
-当前 Headless 内核只证明生命周期、回滚、固定步、Platform/Input 和空提交契约。它没有完整
+当前 Null 与 GLFW+Null 两条路径证明生命周期、回滚、固定步、Platform/Input、真实窗口与空提交契约。
+GLFW close 在 Poll 中只返回不可取消的 tagged outcome，并丢弃尚未提交的 partial frame；Runtime 在
+任何 Game callback 前停止。Escape 则经 Frame Action 调用 `requestExitAfterFrame()`，完成当帧
+Null submit/present 后退出。当前实现没有完整
 GameStateStack/commands、CPU/IO worker、通用 Runtime Event Queue、Pass Scheduler、RenderFramePacket，
-也没有 Scene、Asset、UI、Audio 或真实
-Platform/Render backend；这些能力不能从同名 Phase Context 的存在推断为已经实现。
+也没有 Scene、Asset、UI、Audio、Native Surface 或真实 Render backend；这些能力不能从同名 Phase
+Context 或真实 GLFW 窗口的存在推断为已经实现。
 
 ## 完整 vNext 所有权目标
 

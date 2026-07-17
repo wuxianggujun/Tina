@@ -94,8 +94,9 @@ M6-A 已完成：
 M6 生命周期之后仍未实现：
 
 - 完整 GameStateStack/commands/policy propagation、通用 Runtime Event Queue 与 State TaskGroup；
-- M7-A 已补齐有界 PlatformFrame/Input/Action 与 Platform lifecycle dispatch；私有 GLFW desktop
-  adapter、UI routed consumption producer 和连续 axis mapping 仍在后续子切片；
+- M7-A 已补齐有界 PlatformFrame/Input/Action、Platform lifecycle dispatch，以及私有 GLFW
+  Window/Keyboard/Pointer/committed text desktop adapter；UI routed consumption producer、IMM32、
+  production Gamepad 和连续 axis mapping 仍在后续子切片；
 - 有界 CPU/IO/Main worker、阶段指标与完整 shutdown deadline/fatal-stop；
 - typed render resource handle、Pass Scheduler、World RenderScene/UIDisplayList、Runtime-private
   RenderFramePacket/pool 与 submission completion 保活；
@@ -110,10 +111,21 @@ M7 分为五个独立提交，不将 GLFW、bgfx、FreeType、IMM32 和完整 UI
 
 ### M7-A PlatformFrame 与 Input correctness
 
-实施状态（2026-07-17）：Headless Platform/Input 内核已完成；下列 GLFW `NO_API` 窗口与
-`tina_sample_platform` 是本里程碑下一独立提交，不能把 Headless 结果冒充真实窗口验收。
-Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan
-均直接通过162/162项 GoogleTest；Null sample 在各门禁连续运行300帧和10,000帧并正常退出。
+实施状态（2026-07-17）：Headless Platform/Input 内核与私有 GLFW `NO_API` desktop adapter 已按
+两个独立提交落地。基础测试固定166项，GLFW adapter 专项固定17项，必须作为两个 executable
+分别直接运行；Null sample 继续覆盖300帧和10,000帧，`tina_sample_platform` 覆盖真实窗口300帧。
+Linux GCC 13 X11 已通过166/166、17/17与样例300帧。Clang X11 对libX11 `_XimOpenIM` 的XIM
+retention使用唯一精确 LSan suppression 后，基础166/166（无 suppression）、专项17/17
+（8次3264 B）与样例300帧（1次408 B）均通过。Windows MSVC 2026 Debug/Release也均
+通过166/166、17/17与零延迟样例300帧。GCC 13 X11/Wayland 双后端产物也已通过：带
+`wl_seat` 的嵌套 Weston 9 中基础166/166、专项17/17与样例300帧通过，并在移除
+`DISPLAY` 后断言 GLFW 实际选择 Wayland；同一产物强制 X11 后专项与样例复验通过。
+纯 Weston headless 无 `wl_seat` 会触发锁定 GLFW 3.4 的已知初始化崩溃，不是 Tina 回归，
+也不在当前支持范围。Clang 22 X11/Wayland 双后端 sanitizer 产物也已通过：基础
+166/166无 suppression；Wayland 下专项17/17与样例300帧通过且 `_XimOpenIM` 匹配为0；
+同一产物强制 X11 后17/17与300帧通过，仅使用精确 `_XimOpenIM` 抑制（专项
+8次/3264 B、样例1次/408 B）。该门禁未对 vcpkg 第三方 GLFW 本身插桩，不宣称完整
+覆盖 GLFW 内部实现。
 
 - **已完成**：`tina_platform` 实现 generation `WindowId`、`PrimaryWindowConfig`、`WindowMetricsSnapshot`、
   `PlatformFrameView`、`WindowInputSnapshot`、有序 `InputTransitionBatch` 与 `PlatformEventBatch`；
@@ -128,12 +140,15 @@ Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15
 - **已完成**：Runtime 建立只承载 resize/focus 等平台生命周期的有界 private `PlatformEventDispatcher`；Game SDK
   只暴露 `PlatformEventSubscriptions` 与 RAII subscription；
   OS CloseRequested 只走 control outcome，不进入队列；这不是通用 Gameplay EventBus；
-- **下一提交**：实现私有 `tina_platform_glfw`：`GLFW_NO_API` 主窗口、create/destroy/poll、close/focus/
-  resize 与键鼠；不引入 SDL/SDL3，callback 只写预分配 buffer/sticky failure；
-- **下一提交**：`tina_sample_platform` 用 GLFW Window + NullRender；Escape 通过 Frame Action 请求完整当帧后退出，
-  `--frames=N` 可自动退出；GLFW 失败不得静默降级 Headless；
-- 本切片不实现 native surface/bgfx、UI tree、FreeType、IMM32、production GLFW Gamepad
-  adapter/registry/navigation、通用 Gameplay EventBus 或多窗口。
+- **已完成**：私有 `tina_platform_glfw` 使用 hidden `GLFW_NO_API` create transaction、generation
+  Window registry、单进程 backend lease和 owner-thread约束，实现 create/destroy/poll、close/focus/
+  resize、键盘、Primary Pointer 与 committed UTF-8 text；callback 只写有界 buffer/sticky failure；
+- **已完成**：`tina_sample_platform` 用 GLFW Window + NullRender；Escape 通过 Frame Action 请求完成
+  当前帧后退出，`--frames=N --frame-delay-ms=0` 可自动退出；GLFW失败不静默降级 Headless；
+- **已完成**：公共 factory header 不含 GLFW/native 类型，Null 构建图不加入或链接 GLFW；
+  `tina_platform_glfw_tests` 与基础 `tina_tests` 分离，不使用 CTest；
+- 本切片不实现 Native Surface/bgfx、UI tree、FreeType、IMM32、production GLFW Gamepad adapter/
+  registry/navigation、OS Pointer Capture、通用 Gameplay EventBus 或多窗口。下一实现切片为 M7-B。
 
 ### M7-B Native Window Surface 与最小 bgfx
 

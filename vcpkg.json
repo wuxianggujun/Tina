@@ -9,6 +9,12 @@
     "gtest"
   ],
   "features": {
+    "platform-glfw": {
+      "description": "Build the private Tina vNext GLFW platform adapter.",
+      "dependencies": [
+        "glfw3"
+      ]
+    },
     "legacy": {
       "description": "Dependencies used only by the existing Tina runtime during vNext migration.",
       "dependencies": [

@@ -11,6 +11,7 @@ set(TINA_CORE_TEST_SOURCES
     core/header_isolation/MemoryTrackerHeader.cpp
     core/header_isolation/MonotonicClockHeader.cpp
     core/header_isolation/ResultHeader.cpp
+    core/header_isolation/Utf8Header.cpp
     core/PublicHeaderIsolationTests.cpp
     core/ResultTests.cpp
     core/FrameArenaTests.cpp
@@ -19,12 +20,14 @@ set(TINA_CORE_TEST_SOURCES
     core/ScopeExitTests.cpp
     core/TimeTests.cpp
     core/TypesTests.cpp
+    core/Utf8Tests.cpp
     core/TypesWindowsAfterTests.cpp
     core/TypesWindowsBeforeTests.cpp
 )
 
 set(TINA_RUNTIME_TEST_SOURCES
     platform/header_isolation/InputHeader.cpp
+    platform/header_isolation/GlfwPlatformFactoryHeader.cpp
     platform/header_isolation/PlatformBackendHeader.cpp
     platform/header_isolation/PlatformFrameHeader.cpp
     platform/header_isolation/WindowHeader.cpp
@@ -90,4 +93,8 @@ if(TINA_BUILD_LEGACY)
         spdlog::spdlog
         bx
     )
+endif()
+
+if(TINA_BUILD_PLATFORM_GLFW)
+    add_subdirectory(platform_glfw)
 endif()

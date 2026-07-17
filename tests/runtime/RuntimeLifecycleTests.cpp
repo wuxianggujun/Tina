@@ -20,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <variant>
@@ -1399,6 +1400,29 @@ TEST(EngineHostCreationTest, DestroyingReadyHostWithoutRunShutsModulesDownInReve
                           "platform.destroy",
                           "clock.destroy",
                       }));
+}
+
+TEST(EngineHostThreadAffinityTest, RejectsRunOnAnotherThreadWithoutConsumingTheHost)
+{
+    RuntimeProbe runtime;
+    runtime.platformExitRequested = true;
+    auto host = createRuntimeHost(runtime);
+    ASSERT_TRUE(host.has_value()) << host.error().message;
+    GameProbe gameProbe;
+    gameProbe.runtime = &runtime;
+    ScriptedGameApplication application{gameProbe};
+    std::optional<Core::Result<RunExitReason>> crossThreadResult;
+
+    std::thread worker([&] { crossThreadResult.emplace((*host)->run(application)); });
+    worker.join();
+
+    ASSERT_TRUE(crossThreadResult.has_value());
+    ASSERT_FALSE(crossThreadResult->has_value());
+    EXPECT_EQ(crossThreadResult->error().code, RuntimeErrorCode::WrongOwnerThread);
+
+    auto ownerThreadRun = (*host)->run(application);
+    ASSERT_TRUE(ownerThreadRun.has_value()) << ownerThreadRun.error().message;
+    EXPECT_EQ(*ownerThreadRun, RunExitReason::PrimaryWindowRequestedClose);
 }
 
 struct StartupFailureCase final {

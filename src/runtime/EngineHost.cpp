@@ -20,6 +20,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -324,12 +325,16 @@ class EngineHostImplementation final {
                              std::unique_ptr<Runtime::Input::ActionMapper> actionMapper, EngineModules modules) noexcept
         : m_config(std::move(config)), m_fixedStepAccumulator(std::move(fixedStepAccumulator)),
           m_platformEventDispatcher(std::move(platformEventDispatcher)), m_actionMapper(std::move(actionMapper)),
-          m_modules(std::move(modules))
+          m_modules(std::move(modules)), m_ownerThread(std::this_thread::get_id())
     {
     }
 
     ~EngineHostImplementation() noexcept
     {
+        if (std::this_thread::get_id() != m_ownerThread)
+        {
+            std::terminate();
+        }
         if (m_lifecycleState == LifecycleState::Ready)
         {
             m_lifecycleState = LifecycleState::Stopping;
@@ -344,6 +349,11 @@ class EngineHostImplementation final {
 
     [[nodiscard]] Core::Result<RunExitReason> run(IGameApplication& gameApplication)
     {
+        if (std::this_thread::get_id() != m_ownerThread)
+        {
+            return Core::failure(RuntimeErrorCode::WrongOwnerThread,
+                                 "EngineHost::run must execute on the thread that created the host");
+        }
         if (m_lifecycleState != LifecycleState::Ready)
         {
             return Core::failure(RuntimeErrorCode::EngineRunAlreadyStarted, "EngineHost::run may be called only once");
@@ -686,6 +696,7 @@ class EngineHostImplementation final {
     PlatformEventDispatcher m_platformEventDispatcher;
     std::unique_ptr<Runtime::Input::ActionMapper> m_actionMapper;
     EngineModules m_modules;
+    std::thread::id m_ownerThread;
     std::unique_ptr<IGameState> m_gameState;
     [[maybe_unused]] GameStatePolicy m_committedPolicy{};
     LifecycleState m_lifecycleState = LifecycleState::Ready;

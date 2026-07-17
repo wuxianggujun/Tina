@@ -18,6 +18,10 @@ class IPlatformBackend {
   public:
     virtual ~IPlatformBackend() = default;
 
+    // A production backend is thread-affine: factory creation, every poll,
+    // shutdown, and destruction must occur on the same owner thread. Native
+    // adapters may additionally require that owner to be the process platform
+    // thread; see the concrete factory contract.
     [[nodiscard]] virtual Core::Result<PlatformPollResult> pollFrame() = 0;
     virtual void shutdown() noexcept = 0;
 };
