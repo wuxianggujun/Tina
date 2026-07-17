@@ -3,10 +3,11 @@
 - 状态：Accepted
 - 日期：2026-07-16
 - 修订：2026-07-18
-- 实施状态：M7-C1b 已在 C++23 standalone `tina_ui` 树核心上实现 layout value/dirty API、固定容量 PMR
-  side array/dirty queue/layout scratch、Flex-lite 非递归 Measure/Arrange、双缓冲 committed layout
-  snapshot 和结构+布局原子发布；hit route、PaintCache/DisplayList、文本/Glyph Atlas、widgets、
-  bgfx UI pass 与 Runtime UI producer 仍后置。
+- 实施状态：M7-C1b 已实现事务式 Flex-lite layout；M7-C1c-a 已实现固定容量 PMR Pointer policy/
+  route-ancestry scratch、`Ignore`/`Targetable`、双缓冲 `UICommittedHitView` 与成功 `commitLayout()` 的
+  structure/layout/hit 原子发布。point hit-test、反向目标选择、Capture→Target→Bubble 路由、
+  Focus/Capture/Modal、Button、paint snapshot/DisplayList、dirty subtree pruning、nested clip、文本/
+  Glyph Atlas、bgfx UI pass 与 Runtime UI producer 仍后置。
 
 ## 背景
 
@@ -23,7 +24,7 @@ Legacy UI 已验证部分产品交互，但它的类型、API 和生命周期不
 `tina_ui` 实现独立的 Retained UI。每个 Runtime WindowRecord 唯一拥有一个 `UIContext`；
 `IGameState` 只持有 move-only root owner，并用包含 owner WindowId 与 generation 的 `UINodeId`
 引用节点。Game SDK 不拥有 `UIContext`，也不能取得 Widget、PaintCache 或 Render backend 指针。
-当前 M7-C1b `tina_ui` 仍只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；Font Asset 与 Render descriptor/
+当前 M7-C1b/C1c-a `tina_ui` 仍只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；Font Asset 与 Render descriptor/
 DisplayList 依赖在后续 asset/render 切片进入。
 
 FreeType 只存在于可选生产适配器 `tina_ui_freetype`。Headless、Null UI 和公共 Widget API 不解析
@@ -63,6 +64,13 @@ content box 后只解析一次，不重新 Measure 父级，也不迭代求 fixe
 Measure/Arrange，尚不能依据 dirty leaf 跳过无关 subtree。后续实现必须在不改变本 ADR 事务、容量
 和 committed snapshot 契约的前提下，把工作量收敛到实际失效区域。
 
+M7-C1c-a 又加入 `UIPointerHitPolicy::{Ignore, Targetable}` 与双缓冲 `UICommittedHitView`。每份 view
+保存 effective-visible route-ancestry entry，保留 `Ignore` 祖先并省略 `Hidden`/`Collapsed` 子树；同一
+view 内的 paint ordinal 唯一且严格递增，并携带 structure/layout/paint-order/hit revision。仅 policy
+变化的 hit-only commit 为0次 layout。当前 effective clip 仅为 `viewport ∩ worldRect`，hit rebuild 仍
+线性扫描整份 committed layout。该数据基础尚不执行 point hit-test、逆 paint order 选 target 或事件
+路由，也不实现独立 z-order/stacking 或 nested clip。
+
 ### 每帧事务与 committed snapshot
 
 一个 `UIContext` 的帧处理固定为：
@@ -79,11 +87,12 @@ layout barrier 后发生的结构、样式和布局 mutation 延迟到下一帧�
 committed hit snapshot 与 committed paint snapshot 使用相同的 tree revision、layout revision 和 paint order
 revision；revision 不一致属于生命周期错误，当前帧不得提交部分 UI。
 
-M7-C1b 的 `commitLayout(viewportSize)` 已作为 structure+layout 的原子发布入口：pending structure
-只在候选 layout 全部验证并构建成功后与 layout snapshot 一起切换；`commitStructure()` 仅保留为
-M7-C1a 结构诊断 seam，Runtime 不得把二者拆开发布。viewport 变化即使没有 mutation 也重排；相同
+M7-C1c-a 的 `commitLayout(viewportSize)` 已作为 structure/layout/hit 的事务发布入口：它按需构建
+受影响候选，并只在全部验证成功后原子切换；`commitStructure()` 仅保留为 M7-C1a 结构诊断 seam，
+可单独发布结构并保留旧 layout/hit，Runtime 不得把二者拆开发布。viewport 变化即使没有 mutation 也重排；相同
 viewport 且无 structure/layout dirty 时不增加 revision、不执行 layout pass。非法 viewport、候选
-几何算术溢出、dirty queue 或 layout snapshot 容量不足都保留旧 published snapshot 与 pending dirty。
+几何算术溢出、dirty queue、layout snapshot 或 hit snapshot 容量不足都保留旧 published snapshot 与
+pending dirty。
 
 无变化 UI 必须满足以下硬门禁：
 
@@ -96,9 +105,10 @@ viewport 且无 structure/layout dirty 时不增加 revision、不执行 layout 
 测试和 Metrics 至少记录 layout pass、style resolve、PaintCache rebuild、display command、dirty high-water、
 capacity failure 与 Tina allocation delta。每窗口 layout pass 每帧只能为 `0` 或 `1`。
 
-当前直接测试已覆盖50,000节点深树的非递归布局，以及首次发布后连续300次同 viewport、无 mutation
-commit 的0 layout pass、revision 不变和 supplied UI PMR allocation count 不增加；它不等价于
-PaintCache/DisplayList/进程 heap 或 GPU 资源门禁已经完成。
+当前直接测试已覆盖50,000节点深树的非递归布局/hit snapshot，以及首次发布后连续300次同 viewport、
+无 mutation commit 的0 layout pass、revision 不变和 supplied UI PMR allocation count 不增加；新增15项
+committed hit snapshot 测试后 `tina_ui_tests` 共54/54。它不等价于 point query/route、PaintCache/
+DisplayList、进程 heap 或 GPU 资源门禁已经完成。
 
 ### PaintCache、DisplayList 与批处理
 
@@ -128,6 +138,9 @@ pipeline、texture、sampler、blend、effective clip 完全兼容的命令；�
 立即结束 batch。禁止为了减少 draw call 跨透明命令、跨节点或跨 clip 全局排序。
 
 ### 输入 consumption、claim 与路由边界
+
+本节是 Accepted 目标语义。M7-C1c-a 只提供 committed hit/route-ancestry 数据，尚未实现 point query、
+反向目标选择、listener dispatch、Capture → Target → Bubble 执行、Focus/Capture/Modal 或 Runtime producer。
 
 Runtime 将平台输入转为后端无关 `UIInputTransition` 序列，再调用 UI 路由；UI 不读取 GLFW，不修改
 全局 Input Snapshot，也不直接调用 Gameplay 输入接口。每个 Pointer transition 最多使用 committed hit
@@ -161,9 +174,10 @@ Focus、hover、capture 和 Modal Scope 的变更在当前路由批次结束后�
 `UIContext::Create` 必须显式接收节点/root、mutation、dirty queue、route depth、PaintCache bytes、clip intern、
 DisplayList command、text run/glyph ref 与 frame pin 容量。运行期禁止隐藏扩容、系统 allocator fallback 或
 因容量不足退回全树 heap rebuild。
-当前 M7-C1b 的 `UIContext::Create(ownerWindow, capacities, memory_resource)` 已用 supplied PMR
-固定分配 tree/id、style/dirty side array、dirty queue、layout scratch 与 committed structure/layout
-双缓冲；`dirtyQueueCapacity` 和 `layoutSnapshotCapacity` 为0时从 node capacity 派生，非0时不得超过
+当前 M7-C1b/C1c-a 的 `UIContext::Create(ownerWindow, capacities, memory_resource)` 已用 supplied PMR
+固定分配 tree/id、style/pointer-policy/dirty side array、dirty queue、layout/route-ancestry scratch 与
+committed structure/layout/hit 双缓冲；`dirtyQueueCapacity`、`layoutSnapshotCapacity` 和
+`hitSnapshotCapacity` 为0时从 node capacity 派生，非0时不得超过
 node capacity。small control-plane 对象和 off-thread `UIRootOwner` release 队列仍在 Create 期间
 使用默认 heap 预分配。owner thread 析构 `UIRootOwner` 立即回收；非 owner thread 只入队 root id，
 由下一次 owner-thread UI mutation/commit drain 并物理回收。
@@ -197,8 +211,9 @@ Checkbox、Slider、ScrollView、VirtualList、TextEdit、IME、复杂 shaping �
 - Render backend 可以批处理 UI，但不能改变透明绘制语义或把 backend 生命周期反向泄漏给 UI；
 - Tina 需要自行承担控件、文本 shaping、可访问性和视觉回归成本，并以垂直切片逐步交付。
 
-M7-C1b 只完成无变化布局零工作和 changed-frame 单 pass 的基础；“CPU 成本由实际变化区域决定”仍需
-后续 dirty subtree pruning 证明，不能从 dirty bit/queue 已存在直接推断。
+M7-C1b/C1c-a 只完成无变化布局零工作、changed-frame 单 pass 与 committed hit-snapshot 数据基础；
+“CPU 成本由实际变化区域决定”仍需后续 dirty subtree pruning 证明，不能从 dirty bit/queue 或 hit view
+已存在直接推断。point hit query、事件路由、Widget 和可见 UI 同样不能由 snapshot 推断。
 
 ## 被拒绝方案
 

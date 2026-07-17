@@ -52,9 +52,10 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
   `acquirePrimaryWindowSurfaceLease()`、`primaryWindowSurfaceSnapshot()` 与
   `publishPrimaryWindow()`；`tina_sample_platform` 仍显式注入 GLFW + DisabledTask + NullRender，
   M7-B2 已实现面向普通游戏的 `Desktop::CreateEngine` clear-only Desktop bootstrap；
-- M7-C1b 已在独立 `tina_ui` 树核心上实现 generation `UINodeId`、`UIContext`、`UIRootOwner`
-  RAII、结构/布局 snapshot、UI-owned input route-result view ABI 与事务式 Flex-lite layout；它尚未
-  接入 Runtime 帧循环成为 UI producer；
+- M7-C1b/C1c-a 已在独立 `tina_ui` 树核心上实现 generation `UINodeId`、`UIContext`、`UIRootOwner`
+  RAII、结构/布局 snapshot、UI-owned input route-result view ABI、事务式 Flex-lite layout，以及固定容量
+  Pointer policy/route-ancestry scratch 与双缓冲 `UICommittedHitView`；它尚未接入 Runtime 帧循环成为
+  UI producer，也尚无 point hit query 或事件路由；
 - 当前帧循环为 Poll Platform → frame/payload/capacity/sequence 预校验 → Platform lifecycle dispatch
   → Action Mapping → Fixed Update（0..4）→ Frame Update → Render Scene Extraction → UI Update
   → Null submit → present；`requestExitAfterFrame()` 会完成当帧 submit/present 后退出；
@@ -69,9 +70,10 @@ Null submit/present 后退出。M7-B1 已有 backend-neutral Native Surface hand
 拒绝 metrics revision 回退、surface facts 在旧 metrics revision 上变化，以及 surface revision 跳号/回退。
 当前实现仍没有完整 GameStateStack/commands、CPU/IO worker、通用 Runtime Event Queue、
 Pass Scheduler/RenderFramePacket，也没有 Scene、Asset 或 Audio。Render 只完成 clear-only bgfx
-Desktop smoke；UI 只完成 standalone `tina_ui` 树核心、route-result view ABI 与事务式 Flex-lite
-layout foundation，dirty subtree pruning、hit route、DisplayList、widgets、FreeType、bgfx UI pass 与
-Runtime UI producer 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或 clear-only
+Desktop smoke；UI 只完成 standalone `tina_ui` 树核心、route-result view ABI、事务式 Flex-lite layout
+和 committed hit-snapshot 数据基础。point hit-test、反向目标选择、Capture→Target→Bubble 路由、
+Focus/Capture/Modal、Button、paint snapshot/DisplayList、nested clip、dirty subtree pruning、FreeType、
+bgfx UI pass 与 Runtime UI producer 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或 clear-only
 Desktop smoke 推断为已经实现。
 
 ## 完整 vNext 所有权目标

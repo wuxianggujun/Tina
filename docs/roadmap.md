@@ -101,7 +101,8 @@ M6 生命周期之后仍未实现：
 - typed render resource handle、Pass Scheduler、World RenderScene/UIDisplayList、Runtime-private
   RenderFramePacket/pool 与 submission completion 保活；
 - Scene、Asset、Audio 的真实契约和消费者，以及 Runtime-integrated UI producer/layout/render
-  pipeline；M7-C1b C++23 standalone `tina_ui` tree/layout foundation 已实现，但尚未接入 Runtime；
+  pipeline；M7-C1b/C1c-a C++23 standalone `tina_ui` tree/layout/committed-hit foundation 已实现，
+  但尚未接入 Runtime；
 - `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
 - Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；M7-B2 Desktop bgfx
   X11 图也已完成 GCC 13.4 和 Clang 22.1.8 + ASan/UBSan/LSan 的183/22/11直接测试及300帧门禁。
@@ -211,10 +212,17 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   同 viewport 无变化为0 pass；finite/算术溢出/容量失败保留旧 snapshot 与 pending dirty；
 - **已完成 M7-C1b 门禁**：50,000节点深树非递归 layout，以及首次发布后连续300次无变化 commit
   的0 layout pass、revision 不变与0新增 supplied UI PMR allocation；
+- **已完成 M7-C1c-a**：固定容量 PMR Pointer policy/route-ancestry scratch、`Ignore`/`Targetable`、
+  双缓冲 `UICommittedHitView`；同一 view 内 entry 的 paint ordinal 唯一且严格递增，view 携带 structure/layout/
+  paint-order/hit revision；hit-only commit 为0次 layout，成功 `commitLayout()` 事务发布 structure/layout/hit，
+  任一候选失败时三份旧 snapshot 均保持不变；
+- **已完成 M7-C1c-a 门禁**：15项 committed hit snapshot 测试，总计 `tina_ui_tests` 54/54；覆盖
+  50,000节点非递归快照、stale generation、固定容量失败和 supplied UI PMR 释放；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
   subtree 尚未实现；
-- **仍后置**：dirty subtree pruning、hit route、PaintCache/DisplayList、text/glyph、widgets、
-  FreeType、bgfx UI pass 与 Runtime UI producer；
+- **仍后置**：dirty subtree pruning、point hit-test、反向目标选择、Capture→Target→Bubble 路由、
+  Focus/Capture/Modal、Button 交互、paint snapshot/DisplayList、nested clip、text/glyph、FreeType、
+  bgfx UI pass 与 Runtime UI producer；
 - 后续继续实现后端无关 Quad/Text/Clip DisplayList、FramePinSink/capacity rollback 和相邻兼容 batching
   contract；Null UI 直接测试 route/layout/paint order，不链接 FreeType/bgfx；
 - 硬门禁：无变化 UI 每帧0 layout、0 PaintCache rebuild、0 Tina heap allocation。

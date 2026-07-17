@@ -47,6 +47,7 @@ struct NormalizedCapacityConfig final {
     usize rootCapacity = 0;
     usize dirtyQueueCapacity = 0;
     usize layoutSnapshotCapacity = 0;
+    usize hitSnapshotCapacity = 0;
 };
 
 struct NodeRecord final {
@@ -401,8 +402,12 @@ struct ResolvedLength final {
     const usize layoutSnapshotCapacity = config.layoutSnapshotCapacity == 0
         ? config.nodeCapacity
         : config.layoutSnapshotCapacity;
+    const usize hitSnapshotCapacity = config.hitSnapshotCapacity == 0
+        ? config.nodeCapacity
+        : config.hitSnapshotCapacity;
     if (dirtyQueueCapacity > config.nodeCapacity
-        || layoutSnapshotCapacity > config.nodeCapacity) {
+        || layoutSnapshotCapacity > config.nodeCapacity
+        || hitSnapshotCapacity > config.nodeCapacity) {
         return fail(
             UIErrorCode::InvalidContextConfig,
             "UI derived capacities cannot exceed node capacity");
@@ -413,12 +418,23 @@ struct ResolvedLength final {
         .rootCapacity = config.rootCapacity,
         .dirtyQueueCapacity = dirtyQueueCapacity,
         .layoutSnapshotCapacity = layoutSnapshotCapacity,
+        .hitSnapshotCapacity = hitSnapshotCapacity,
     };
 }
 
 [[nodiscard]] bool sameNode(UINodeId left, UINodeId right) noexcept
 {
     return left == right;
+}
+
+[[nodiscard]] bool isValidPointerHitPolicy(UIPointerHitPolicy policy) noexcept
+{
+    switch (policy) {
+    case UIPointerHitPolicy::Ignore:
+    case UIPointerHitPolicy::Targetable:
+        return true;
+    }
+    return false;
 }
 
 } // namespace
@@ -431,19 +447,27 @@ struct UIContext::Impl final {
     NodePool nodes;
     std::pmr::vector<UINodeId> idsByIndex;
     std::pmr::vector<UILayoutStyle> layoutStylesByIndex;
+    std::pmr::vector<UIPointerHitPolicy> pointerHitPoliciesByIndex;
     std::pmr::vector<UIDirty> dirtyByIndex;
     std::pmr::vector<u8> dirtyQueuedByIndex;
     std::pmr::vector<UINodeId> dirtyQueue;
     std::pmr::vector<LayoutScratchState> layoutScratchByIndex;
     std::pmr::vector<u32> layoutOrderScratch;
+    std::pmr::vector<u32> hitEntryIndexByNodeIndex;
     std::array<std::pmr::vector<UICommittedNodeEntry>, 2> committedBuffers;
     std::array<std::pmr::vector<UICommittedLayoutEntry>, 2> committedLayoutBuffers;
+    std::array<std::pmr::vector<UICommittedHitEntry>, 2> committedHitBuffers;
     std::vector<UINodeId> deferredRootDestroyBuffer;
     usize publishedBufferIndex = 0;
     usize publishedLayoutBufferIndex = 0;
+    usize publishedHitBufferIndex = 0;
     u64 committedRevision = 0;
     u64 committedLayoutRevision = 0;
     u64 committedLayoutStructureRevision = 0;
+    u64 committedHitRevision = 0;
+    u64 committedHitStructureRevision = 0;
+    u64 committedHitLayoutRevision = 0;
+    u64 committedHitPaintOrderRevision = 0;
     UILogicalSize committedViewportSize{};
     bool hasCommittedViewport = false;
     usize liveRootCount = 0;
@@ -451,8 +475,11 @@ struct UIContext::Impl final {
     u32 lastRootIndex = InvalidNodeIndex;
     bool structureDirty = false;
     bool layoutDirty = false;
+    bool hitDirty = false;
     LayoutPassStatistics lastLayoutPass{};
     usize dirtyQueueHighWater = 0;
+    usize committedHitTargetCount = 0;
+    usize lastHitRebuildCount = 0;
 
     Impl(
         Platform::WindowId owner,
@@ -468,17 +495,22 @@ struct UIContext::Impl final {
           nodes(std::move(nodePool)),
           idsByIndex(&resource),
           layoutStylesByIndex(&resource),
+          pointerHitPoliciesByIndex(&resource),
           dirtyByIndex(&resource),
           dirtyQueuedByIndex(&resource),
           dirtyQueue(&resource),
           layoutScratchByIndex(&resource),
           layoutOrderScratch(&resource),
+          hitEntryIndexByNodeIndex(&resource),
           committedBuffers{
               std::pmr::vector<UICommittedNodeEntry>(&resource),
               std::pmr::vector<UICommittedNodeEntry>(&resource)},
           committedLayoutBuffers{
               std::pmr::vector<UICommittedLayoutEntry>(&resource),
-              std::pmr::vector<UICommittedLayoutEntry>(&resource)}
+              std::pmr::vector<UICommittedLayoutEntry>(&resource)},
+          committedHitBuffers{
+              std::pmr::vector<UICommittedHitEntry>(&resource),
+              std::pmr::vector<UICommittedHitEntry>(&resource)}
     {
     }
 
@@ -504,6 +536,7 @@ struct UIContext::Impl final {
             .rootCapacity = normalized.rootCapacity,
             .dirtyQueueCapacity = normalized.dirtyQueueCapacity,
             .layoutSnapshotCapacity = normalized.layoutSnapshotCapacity,
+            .hitSnapshotCapacity = normalized.hitSnapshotCapacity,
         };
 
         auto impl = std::unique_ptr<Impl>(new Impl(
@@ -515,15 +548,23 @@ struct UIContext::Impl final {
             resource));
         impl->idsByIndex.resize(normalized.nodeCapacity);
         impl->layoutStylesByIndex.resize(normalized.nodeCapacity);
+        impl->pointerHitPoliciesByIndex.resize(
+            normalized.nodeCapacity,
+            UIPointerHitPolicy::Ignore);
         impl->dirtyByIndex.resize(normalized.nodeCapacity, UIDirty::None);
         impl->dirtyQueuedByIndex.resize(normalized.nodeCapacity, 0);
         impl->dirtyQueue.reserve(normalized.dirtyQueueCapacity);
         impl->layoutScratchByIndex.resize(normalized.nodeCapacity);
         impl->layoutOrderScratch.reserve(normalized.nodeCapacity);
+        impl->hitEntryIndexByNodeIndex.resize(
+            normalized.nodeCapacity,
+            InvalidUIHitEntryIndex);
         impl->committedBuffers[0].reserve(normalized.nodeCapacity);
         impl->committedBuffers[1].reserve(normalized.nodeCapacity);
         impl->committedLayoutBuffers[0].reserve(normalized.layoutSnapshotCapacity);
         impl->committedLayoutBuffers[1].reserve(normalized.layoutSnapshotCapacity);
+        impl->committedHitBuffers[0].reserve(normalized.hitSnapshotCapacity);
+        impl->committedHitBuffers[1].reserve(normalized.hitSnapshotCapacity);
         impl->deferredRootDestroyBuffer.reserve(normalized.rootCapacity);
         return impl;
     }
@@ -1177,6 +1218,84 @@ struct UIContext::Impl final {
         }
     }
 
+    [[nodiscard]] Core::Result<usize> buildCommittedHit(
+        std::pmr::vector<UICommittedHitEntry>& output,
+        std::span<const UICommittedLayoutEntry> layoutEntries)
+    {
+        usize visibleEntryCount = 0;
+        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries) {
+            if (layoutEntry.effectiveVisibility == UIVisibility::Visible) {
+                ++visibleEntryCount;
+            }
+        }
+        if (visibleEntryCount > capacityConfig.hitSnapshotCapacity) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI committed hit snapshot capacity has been exhausted");
+        }
+
+        output.clear();
+        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries) {
+            hitEntryIndexByNodeIndex[layoutEntry.node.index()] = InvalidUIHitEntryIndex;
+        }
+        usize targetCount = 0;
+
+        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries) {
+            if (layoutEntry.effectiveVisibility != UIVisibility::Visible) {
+                continue;
+            }
+            if (!contains(layoutEntry.node)) {
+                return fail(
+                    UIErrorCode::InvalidNode,
+                    "UI hit snapshot layout references a stale node");
+            }
+
+            const u32 nodeIndex = layoutEntry.node.index();
+            const NodeRecord* record = recordByIndex(nodeIndex);
+            if (record == nullptr) {
+                return fail(
+                    UIErrorCode::InvalidNode,
+                    "UI hit snapshot node record is unavailable");
+            }
+
+            const UIPointerHitPolicy policy = pointerHitPoliciesByIndex[nodeIndex];
+            if (!isValidPointerHitPolicy(policy)) {
+                return fail(
+                    UIErrorCode::InvalidPointerPolicy,
+                    "UI hit snapshot contains an invalid pointer policy");
+            }
+
+            const u32 entryIndex = static_cast<u32>(output.size());
+            u32 parentEntryIndex = InvalidUIHitEntryIndex;
+            u32 rootEntryIndex = entryIndex;
+            if (record->parentIndex != InvalidNodeIndex) {
+                parentEntryIndex = hitEntryIndexByNodeIndex[record->parentIndex];
+                rootEntryIndex = hitEntryIndexByNodeIndex[record->rootIndex];
+                if (parentEntryIndex == InvalidUIHitEntryIndex
+                    || rootEntryIndex == InvalidUIHitEntryIndex) {
+                    return fail(
+                        UIErrorCode::InvalidNode,
+                        "UI hit snapshot visible ancestry is incomplete");
+                }
+            }
+
+            output.push_back(UICommittedHitEntry{
+                .node = layoutEntry.node,
+                .parentEntryIndex = parentEntryIndex,
+                .rootEntryIndex = rootEntryIndex,
+                .worldRect = layoutEntry.worldRect,
+                .effectiveClip = layoutEntry.effectiveClip,
+                .paintOrdinal = layoutEntry.paintOrdinal,
+                .policy = policy,
+            });
+            hitEntryIndexByNodeIndex[nodeIndex] = entryIndex;
+            if (policy == UIPointerHitPolicy::Targetable) {
+                ++targetCount;
+            }
+        }
+        return targetCount;
+    }
+
     [[nodiscard]] static bool isFiniteLayoutRect(UILogicalRect rect) noexcept
     {
         return std::isfinite(rect.x)
@@ -1324,6 +1443,7 @@ struct UIContext::Impl final {
             return;
         }
         layoutStylesByIndex[index] = {};
+        pointerHitPoliciesByIndex[index] = UIPointerHitPolicy::Ignore;
         dirtyByIndex[index] = UIDirty::None;
         dirtyQueuedByIndex[index] = 0;
         layoutScratchByIndex[index] = {};
@@ -1333,6 +1453,7 @@ struct UIContext::Impl final {
     {
         structureDirty = true;
         layoutDirty = true;
+        hitDirty = true;
     }
 
     void compactDirtyQueue() noexcept
@@ -1383,7 +1504,6 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidNode, "UI dirty node is invalid");
         }
 
-        compactDirtyQueue();
         layoutOrderScratch.clear();
         u32 index = node.index();
         while (index != InvalidNodeIndex) {
@@ -1400,6 +1520,11 @@ struct UIContext::Impl final {
             if (dirtyQueuedByIndex[dirtyIndex] == 0) {
                 ++requiredQueueEntries;
             }
+        }
+        if (dirtyQueue.size() > capacityConfig.dirtyQueueCapacity
+            || requiredQueueEntries
+                > capacityConfig.dirtyQueueCapacity - dirtyQueue.size()) {
+            compactDirtyQueue();
         }
         if (dirtyQueue.size() > capacityConfig.dirtyQueueCapacity
             || requiredQueueEntries
@@ -1431,6 +1556,32 @@ struct UIContext::Impl final {
         }
         dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
         layoutDirty = true;
+        hitDirty = true;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status markHitTestDirty(UINodeId node)
+    {
+        if (!contains(node) || node.index() >= dirtyByIndex.size()) {
+            return fail(UIErrorCode::InvalidNode, "UI hit-test dirty node is invalid");
+        }
+
+        const u32 index = node.index();
+        if (dirtyQueuedByIndex[index] == 0) {
+            if (dirtyQueue.size() >= capacityConfig.dirtyQueueCapacity) {
+                compactDirtyQueue();
+            }
+            if (dirtyQueue.size() >= capacityConfig.dirtyQueueCapacity) {
+                return fail(
+                    UIErrorCode::CapacityExceeded,
+                    "UI dirty queue capacity has been exhausted");
+            }
+            dirtyQueue.push_back(node);
+            dirtyQueuedByIndex[index] = 1;
+        }
+        dirtyByIndex[index] |= UIDirty::HitTest;
+        dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
+        hitDirty = true;
         return Core::success();
     }
 
@@ -1440,6 +1591,7 @@ struct UIContext::Impl final {
         std::fill(dirtyQueuedByIndex.begin(), dirtyQueuedByIndex.end(), 0);
         dirtyQueue.clear();
         layoutDirty = false;
+        hitDirty = false;
     }
 
     [[nodiscard]] bool isNodeWithinRoot(UINodeId root, UINodeId node) const noexcept
@@ -1726,6 +1878,45 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status setPointerHitPolicyFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        UIPointerHitPolicy policy)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue()) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        if (!contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater root is no longer alive");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node)) {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        if (!isValidPointerHitPolicy(policy)) {
+            return fail(
+                UIErrorCode::InvalidPointerPolicy,
+                "UI pointer hit policy is not recognized");
+        }
+
+        UIPointerHitPolicy& currentPolicy = pointerHitPoliciesByIndex[node.index()];
+        if (currentPolicy == policy) {
+            return Core::success();
+        }
+        if (Core::Status dirtyStatus = markHitTestDirty(node); !dirtyStatus) {
+            return dirtyStatus;
+        }
+        currentPolicy = policy;
+        return Core::success();
+    }
+
     void appendCommittedTree(
         u32 index,
         u32& ordinal,
@@ -1804,12 +1995,16 @@ struct UIContext::Impl final {
         viewportSize.height = normalizeFloat(viewportSize.height);
         const bool viewportChanged = !hasCommittedViewport
             || viewportSize != committedViewportSize;
+        const bool layoutNeedsCommit = structureDirty || layoutDirty || viewportChanged;
+        const bool hitNeedsCommit = hitDirty || layoutNeedsCommit || committedHitRevision == 0;
 
-        if (!structureDirty && !layoutDirty && !viewportChanged) {
+        if (!layoutNeedsCommit && !hitNeedsCommit) {
             lastLayoutPass = {};
+            lastHitRebuildCount = 0;
             return Core::success();
         }
-        if (nodes.activeCount() > capacityConfig.layoutSnapshotCapacity) {
+        if (layoutNeedsCommit
+            && nodes.activeCount() > capacityConfig.layoutSnapshotCapacity) {
             return fail(
                 UIErrorCode::CapacityExceeded,
                 "UI committed layout snapshot capacity has been exhausted");
@@ -1820,34 +2015,77 @@ struct UIContext::Impl final {
             buildCommittedStructure(committedBuffers[writeStructureBufferIndex]);
         }
 
-        const usize writeLayoutBufferIndex = 1 - publishedLayoutBufferIndex;
-        std::pmr::vector<UICommittedLayoutEntry>& writeLayout =
-            committedLayoutBuffers[writeLayoutBufferIndex];
-        writeLayout.clear();
-
-        buildLayoutOrder(layoutOrderScratch);
+        usize writeLayoutBufferIndex = publishedLayoutBufferIndex;
         LayoutPassStatistics pass{};
-        pass.passCount = layoutOrderScratch.empty() ? 0 : 1;
-        prepareLayoutState(viewportSize, layoutOrderScratch);
-        measureLayout(viewportSize, layoutOrderScratch, pass);
-        arrangeLayout(viewportSize, layoutOrderScratch, pass);
-        if (Core::Status candidateStatus = validateLayoutCandidate(layoutOrderScratch);
-            !candidateStatus) {
-            return candidateStatus;
+        std::span<const UICommittedLayoutEntry> candidateLayoutEntries{};
+        if (layoutNeedsCommit) {
+            writeLayoutBufferIndex = 1 - publishedLayoutBufferIndex;
+            std::pmr::vector<UICommittedLayoutEntry>& writeLayout =
+                committedLayoutBuffers[writeLayoutBufferIndex];
+            writeLayout.clear();
+
+            buildLayoutOrder(layoutOrderScratch);
+            pass.passCount = layoutOrderScratch.empty() ? 0 : 1;
+            prepareLayoutState(viewportSize, layoutOrderScratch);
+            measureLayout(viewportSize, layoutOrderScratch, pass);
+            arrangeLayout(viewportSize, layoutOrderScratch, pass);
+            if (Core::Status candidateStatus = validateLayoutCandidate(layoutOrderScratch);
+                !candidateStatus) {
+                return candidateStatus;
+            }
+            buildCommittedLayout(writeLayout, layoutOrderScratch);
+            candidateLayoutEntries = std::span<const UICommittedLayoutEntry>(
+                writeLayout.data(),
+                writeLayout.size());
+        } else {
+            const std::pmr::vector<UICommittedLayoutEntry>& currentLayout =
+                committedLayoutBuffers[publishedLayoutBufferIndex];
+            candidateLayoutEntries = std::span<const UICommittedLayoutEntry>(
+                currentLayout.data(),
+                currentLayout.size());
         }
-        buildCommittedLayout(writeLayout, layoutOrderScratch);
+
+        const u64 candidateStructureRevision = committedRevision + (structureDirty ? 1u : 0u);
+        const u64 candidateLayoutRevision = committedLayoutRevision + (layoutNeedsCommit ? 1u : 0u);
+        // C1c-a derives paint order solely from committed tree preorder. A
+        // future independent Order mutation must advance this stamp without
+        // conflating it with hit-only policy changes.
+        const u64 candidatePaintOrderRevision = candidateStructureRevision;
+        usize writeHitBufferIndex = publishedHitBufferIndex;
+        usize candidateHitTargetCount = committedHitTargetCount;
+        if (hitNeedsCommit) {
+            writeHitBufferIndex = 1 - publishedHitBufferIndex;
+            auto hitResult = buildCommittedHit(
+                committedHitBuffers[writeHitBufferIndex],
+                candidateLayoutEntries);
+            if (!hitResult) {
+                return Core::failure(hitResult.error());
+            }
+            candidateHitTargetCount = *hitResult;
+        }
 
         if (structureDirty) {
             publishedBufferIndex = writeStructureBufferIndex;
             ++committedRevision;
             structureDirty = false;
         }
-        publishedLayoutBufferIndex = writeLayoutBufferIndex;
-        ++committedLayoutRevision;
-        committedLayoutStructureRevision = committedRevision;
-        committedViewportSize = viewportSize;
-        hasCommittedViewport = true;
-        lastLayoutPass = pass;
+        if (layoutNeedsCommit) {
+            publishedLayoutBufferIndex = writeLayoutBufferIndex;
+            ++committedLayoutRevision;
+            committedLayoutStructureRevision = candidateStructureRevision;
+            committedViewportSize = viewportSize;
+            hasCommittedViewport = true;
+        }
+        if (hitNeedsCommit) {
+            publishedHitBufferIndex = writeHitBufferIndex;
+            ++committedHitRevision;
+            committedHitStructureRevision = candidateStructureRevision;
+            committedHitLayoutRevision = candidateLayoutRevision;
+            committedHitPaintOrderRevision = candidatePaintOrderRevision;
+            committedHitTargetCount = candidateHitTargetCount;
+        }
+        lastLayoutPass = layoutNeedsCommit ? pass : LayoutPassStatistics{};
+        lastHitRebuildCount = hitNeedsCommit ? 1 : 0;
         clearDirtyState();
         return Core::success();
     }
@@ -1873,6 +2111,19 @@ struct UIContext::Impl final {
         };
     }
 
+    [[nodiscard]] UICommittedHitView committedHit() const noexcept
+    {
+        const std::pmr::vector<UICommittedHitEntry>& entries =
+            committedHitBuffers[publishedHitBufferIndex];
+        return UICommittedHitView{
+            std::span<const UICommittedHitEntry>(entries.data(), entries.size()),
+            committedHitStructureRevision,
+            committedHitLayoutRevision,
+            committedHitPaintOrderRevision,
+            committedHitRevision,
+        };
+    }
+
     [[nodiscard]] UIContextStatistics statistics() const noexcept
     {
         return UIContextStatistics{
@@ -1880,6 +2131,7 @@ struct UIContext::Impl final {
             .rootCapacity = capacityConfig.rootCapacity,
             .dirtyQueueCapacity = capacityConfig.dirtyQueueCapacity,
             .layoutSnapshotCapacity = capacityConfig.layoutSnapshotCapacity,
+            .hitSnapshotCapacity = capacityConfig.hitSnapshotCapacity,
             .liveNodeCount = nodes.activeCount(),
             .liveRootCount = liveRootCount,
             .committedNodeCount = committedBuffers[publishedBufferIndex].size(),
@@ -1887,13 +2139,19 @@ struct UIContext::Impl final {
             .committedLayoutNodeCount =
                 committedLayoutBuffers[publishedLayoutBufferIndex].size(),
             .layoutRevision = committedLayoutRevision,
+            .committedHitNodeCount = committedHitBuffers[publishedHitBufferIndex].size(),
+            .committedHitTargetCount = committedHitTargetCount,
+            .hitRevision = committedHitRevision,
+            .paintOrderRevision = committedHitPaintOrderRevision,
             .dirty = structureDirty,
             .layoutDirty = layoutDirty,
+            .hitDirty = hitDirty,
             .lastLayoutPassCount = lastLayoutPass.passCount,
             .lastLayoutMeasuredNodeCount = lastLayoutPass.measuredNodeCount,
             .lastLayoutArrangedNodeCount = lastLayoutPass.arrangedNodeCount,
             .lastLayoutPercentMeasureFallbackCount =
                 lastLayoutPass.percentMeasureFallbackCount,
+            .lastHitRebuildCount = lastHitRebuildCount,
             .dirtyQueuePendingCount = validDirtyQueueCount(),
             .dirtyQueueHighWater = dirtyQueueHighWater,
         };
@@ -2058,6 +2316,16 @@ Core::Status UITreeUpdater::setLayoutStyle(UINodeId node, const UILayoutStyle& s
     return m_context->setLayoutStyleFromUpdater(m_root, node, style);
 }
 
+Core::Status UITreeUpdater::setPointerHitPolicy(
+    UINodeId node,
+    UIPointerHitPolicy policy)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setPointerHitPolicyFromUpdater(m_root, node, policy);
+}
+
 Core::Status UITreeUpdater::destroy(UINodeId node)
 {
     if (m_context == nullptr) {
@@ -2178,6 +2446,11 @@ UICommittedLayoutView UIContext::committedLayout() const noexcept
     return m_impl->committedLayout();
 }
 
+UICommittedHitView UIContext::committedHit() const noexcept
+{
+    return m_impl->committedHit();
+}
+
 UIContextStatistics UIContext::statistics() const noexcept
 {
     return m_impl->statistics();
@@ -2209,6 +2482,14 @@ Core::Status UIContext::setLayoutStyleFromUpdater(
     const UILayoutStyle& style)
 {
     return m_impl->setLayoutStyleFromUpdater(updaterRoot, node, style);
+}
+
+Core::Status UIContext::setPointerHitPolicyFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId node,
+    UIPointerHitPolicy policy)
+{
+    return m_impl->setPointerHitPolicyFromUpdater(updaterRoot, node, policy);
 }
 
 Core::Status UIContext::destroyNodeFromUpdater(UINodeId updaterRoot, UINodeId node)

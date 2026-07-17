@@ -14,5 +14,6 @@ inline constexpr Core::ErrorCode InvalidParent{Core::ErrorDomain::UI, 7};
 inline constexpr Core::ErrorCode RootRequired{Core::ErrorDomain::UI, 8};
 inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::UI, 9};
 inline constexpr Core::ErrorCode InvalidLayout{Core::ErrorDomain::UI, 10};
+inline constexpr Core::ErrorCode InvalidPointerPolicy{Core::ErrorDomain::UI, 11};
 
 } // namespace Tina::UI::UIErrorCode

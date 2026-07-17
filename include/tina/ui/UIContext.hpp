@@ -3,9 +3,11 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/platform/Window.hpp>
+#include <tina/ui/UICommittedHit.hpp>
 #include <tina/ui/UICommittedLayout.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
 #include <tina/ui/UIErrors.hpp>
+#include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIWidgetKind.hpp>
@@ -33,6 +35,9 @@ struct UIContextCapacityConfig final {
     // do not grow at runtime.
     usize dirtyQueueCapacity = 0;
     usize layoutSnapshotCapacity = 0;
+    // Counts every effectively visible route-ancestry entry, including nodes
+    // whose pointer policy is Ignore; it is not a targetable-node capacity.
+    usize hitSnapshotCapacity = 0;
 };
 
 struct UIContextStatistics final {
@@ -40,20 +45,27 @@ struct UIContextStatistics final {
     usize rootCapacity = 0;
     usize dirtyQueueCapacity = 0;
     usize layoutSnapshotCapacity = 0;
+    usize hitSnapshotCapacity = 0;
     usize liveNodeCount = 0;
     usize liveRootCount = 0;
     usize committedNodeCount = 0;
     u64 committedRevision = 0;
     usize committedLayoutNodeCount = 0;
     u64 layoutRevision = 0;
+    usize committedHitNodeCount = 0;
+    usize committedHitTargetCount = 0;
+    u64 hitRevision = 0;
+    u64 paintOrderRevision = 0;
     bool dirty = false;       // Structure dirty kept for M7-C1a compatibility.
     bool layoutDirty = false; // Style/structure changes still requiring layout.
+    bool hitDirty = false;
     usize lastLayoutPassCount = 0;
     usize lastLayoutMeasuredNodeCount = 0;
     usize lastLayoutArrangedNodeCount = 0;
     // Percent values skipped while an Auto axis lacked a definite Measure
     // basis. Arrange may still resolve them once against the final content box.
     usize lastLayoutPercentMeasureFallbackCount = 0;
+    usize lastHitRebuildCount = 0;
     usize dirtyQueuePendingCount = 0;
     usize dirtyQueueHighWater = 0;
 };
@@ -125,6 +137,9 @@ public:
 
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
+    [[nodiscard]] Core::Status setPointerHitPolicy(
+        UINodeId node,
+        UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status destroy(UINodeId node);
 
 private:
@@ -137,7 +152,7 @@ private:
 };
 
 // Single-owner-thread retained-tree context for one WindowId. The supplied PMR
-// resource backs bounded tree/id/style/dirty/layout scratch and committed
+// resource backs bounded tree/id/style/dirty/layout/hit scratch and committed
 // snapshot storage and must outlive the context. Small control-plane objects
 // and cross-thread release queues allocate only during Create() from the process
 // default heap.
@@ -167,6 +182,7 @@ public:
     [[nodiscard]] UICommittedStructureView committedStructure() const noexcept;
     [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize);
     [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;
+    [[nodiscard]] UICommittedHitView committedHit() const noexcept;
     [[nodiscard]] UIContextStatistics statistics() const noexcept;
     [[nodiscard]] usize liveNodeCount() const noexcept;
     [[nodiscard]] usize liveRootCount() const noexcept;
@@ -186,6 +202,10 @@ private:
         UINodeId updaterRoot,
         UINodeId node,
         const UILayoutStyle& style);
+    [[nodiscard]] Core::Status setPointerHitPolicyFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status destroyNodeFromUpdater(UINodeId updaterRoot, UINodeId node);
     void destroyRootFromOwner(UINodeId root) noexcept;
     [[nodiscard]] bool isAliveInRoot(UINodeId updaterRoot, UINodeId node) const noexcept;

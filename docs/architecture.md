@@ -5,8 +5,8 @@
 Tina 当前处于 Legacy 产品与 vNext 垂直切片并存的迁移期。Legacy 仍以单个游戏可执行文件为主，
 源码按 Core、Engine、Renderer、UI、ECS 和 Game 组织；vNext 已建立独立的 `tina_core`、
 `tina_platform`、`tina_task`、`tina_render`、`tina_runtime` 五个基础 C++23 target，以及可选的
-`tina_platform_glfw` adapter、私有 `tina_render_bgfx` backend、Desktop bootstrap 和 M7-C1b
-`tina_ui` tree/layout foundation。`tina_sample_null` 不依赖真实窗口和 GPU；`tina_sample_platform`
+`tina_platform_glfw` adapter、私有 `tina_render_bgfx` backend、Desktop bootstrap 和 M7-C1b/M7-C1c-a
+`tina_ui` tree/layout/committed-hit foundation。`tina_sample_null` 不依赖真实窗口和 GPU；`tina_sample_platform`
 把私有 GLFW `NO_API` 窗口与 NullRender 组合；`tina_sample_desktop` 通过
 `Tina::Desktop::CreateEngine(config)` 私有组合 `SteadyClock + GLFW WindowSurface + DisabledTaskSystem + bgfx`，
 默认运行300帧真实 GPU deep-blue clear/present。M7-A 已加入有界 Platform Frame、输入
@@ -16,7 +16,10 @@ generation `WindowSurfaceId`、无原生句柄的 `WindowSurfaceSnapshot`、move
 Desktop 产品接线和真实 GPU 冒烟；M7-C1a 已建立 standalone `tina_ui` tree core，M7-C1b 在保持
 只 PUBLIC 依赖 Core/Platform 的前提下，实现 `UILayoutLength/UILayoutStyle/UIDirty`、固定容量
 PMR style/dirty side array 与 dirty queue、非递归 Flex-lite Measure/Arrange、双缓冲 committed
-layout snapshot，以及 pending structure+layout 的原子发布。
+layout snapshot，以及 pending structure+layout 的原子发布。M7-C1c-a 又加入固定容量 PMR Pointer policy/
+route-ancestry scratch、`Ignore`/`Targetable`、双缓冲 `UICommittedHitView` 与 structure/layout/paint-order/hit
+revision；同一 view 内 entry 的 paint ordinal 唯一且严格递增，hit-only commit 为0次 layout，失败的
+`commitLayout()` 不发布 structure/layout/hit 三份候选 snapshot。
 现有 Legacy target 的包依赖由 vcpkg manifest 管理，bgfx、EASTL、EABase 仍保持固定源码
 版本；其中 EASTL/EABase 只属于迁移期现状，不是 vNext 目标依赖。
 
@@ -56,9 +59,9 @@ Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Ga
 | vNext M7-A Platform/Input | 已完成 Headless 内核与首个桌面 adapter 切片 | 固定容量 `PlatformFrameBuilder`、final Snapshot、保序 transition、Runtime-private `PlatformEventDispatcher`、Action Mapper，以及私有 GLFW Window/Keyboard/Pointer/committed text producer 已落地；IMM32、production Gamepad 与完整 DPI 门禁后置 |
 | vNext M7-B1 WindowSurface handoff | 已完成私有 surface 所有权切片 | Platform/Render 通过 tagged composition 接线；`NativeWindowSurfaceLease` move-only 且 PIMPL；Win32/X11/Wayland native binding 只在私有 TU 解码；Render 创建失败和窗口发布失败会逆序释放 lease；NullRender 可验证 suspended/resume、surface revision 与 submission index |
 | vNext M7-B2 Desktop + bgfx | 已完成私有 clear-only backend core、Desktop bootstrap 与真实 GPU smoke | `Tina::RenderBgfx` 只 PUBLIC 依赖 `Tina::Render`，bgfx 与 WindowSurface bridge 均为 PRIVATE；`Tina::Desktop::CreateEngine` 私有组合 SteadyClock、GLFW WindowSurface、DisabledTaskSystem 与 bgfx；planner 覆盖 1×1 bootstrap、resize/resume、content-scale-only 和 suspended skip；Windows Debug/Release 真实 D3D11 Intel Iris Xe 300帧通过 |
-| vNext M7-C1b UI tree/layout foundation | 已完成 standalone `tina_ui` 树与布局基础 | `Tina::UI` 只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；在 generation `UINodeId`、`UIContext`、move-only `UIRootOwner`、结构 snapshot 与 route-result ABI 上，已实现 layout/dirty 类型、固定容量 PMR side array/queue/scratch、node→root 原子 dirty 传播、Flex-lite 非递归 Measure/Arrange、viewport 重排、同 viewport no-op 与 structure+layout 双缓冲原子发布；当前 changed frame 仍全树 layout，hit route、PaintCache/DisplayList、文本/Glyph Atlas、widgets、bgfx UI pass 与 Runtime producer 后置 |
+| vNext M7-C1b/C1c-a UI tree/layout/hit-snapshot foundation | 已完成 standalone `tina_ui` 树、布局与 committed hit 数据基础 | `Tina::UI` 只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；在 generation `UINodeId`、`UIContext`、move-only `UIRootOwner`、结构 snapshot 与 route-result ABI 上，已实现 layout/dirty 类型、固定容量 PMR side array/queue/scratch、Flex-lite 非递归 Measure/Arrange、双缓冲 `UICommittedHitView` 和 structure/layout/hit 事务发布；hit entry 使用 `Ignore`/`Targetable`，同一 view 内 paint ordinal 唯一、严格递增。当前 changed frame 与 hit rebuild 仍全树扫描；point hit-test、反向目标选择、Capture→Target→Bubble 路由、Focus/Capture/Modal、Button、paint snapshot/DisplayList、nested clip、bgfx UI pass 与 Runtime producer 后置 |
 | vNext GLFW 边界 | 已形成可运行切片 | `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
-| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene/Asset/Audio、Runtime-integrated UI pipeline 与 submission drain 仍按后续切片实施；Desktop clear-only GPU 冒烟和 standalone `tina_ui` tree/layout foundation 不代表这些路径完成 |
+| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene/Asset/Audio、Runtime-integrated UI pipeline 与 submission drain 仍按后续切片实施；Desktop clear-only GPU 冒烟和 standalone `tina_ui` tree/layout/committed-hit foundation 不代表这些路径完成 |
 
 因此不能用“删除旧 `src`”作为下一步。正确顺序是：建立新边界和测试 → 迁移调用点 → 确认旧接口零引用 → 通过 2D/UI/3D 验收 → 在独立提交中删除旧实现。
 
