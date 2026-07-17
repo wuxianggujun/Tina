@@ -450,7 +450,8 @@ Game SDK 的 integration SPI 中实现：
 Desktop bootstrap 只构造 tagged factory bundle，不在外部创建或持有 owner；EngineHost 统一执行
 Clock → Platform → Task → lease（仅 WindowSurface）→ Render 的事务和逆序回滚。Null/Headless 与
 M7-A GLFW+Null 组合不构造伪 lease，GLFW/bgfx 失败也不得静默降级 Null。M7-B1 覆盖 lease/
-snapshot/deferred publish/runtime handoff；M7-B2 才实现真实 `tina_render_bgfx` device。完整 factory
+snapshot/deferred publish/runtime handoff；M7-B2 已建立私有 `tina_render_bgfx` device core，Desktop
+bootstrap 仍待把该 factory 封装成产品入口。完整 factory
 签名与 Surface state machine 见 [ADR 0020](adr/0020-window-surface-handoff.md)。
 
 ## Handle、借用与 API 可见性

@@ -66,8 +66,8 @@ Disabled TaskSystem 与 NullRenderDevice。
 ## Windows vNext GLFW Platform
 
 GLFW adapter 使用独立 build tree 和 vcpkg `platform-glfw` feature，不改变上面的 Null 依赖闭包。
-它创建 `GLFW_NO_API` 窗口、发布 M7-B1 WindowSurface snapshot/lease，并组合 NullRender；当前不创建
-真实 bgfx device，私有 bgfx clear/present 是 M7-B2：
+它创建 `GLFW_NO_API` 窗口、发布 M7-B1 WindowSurface snapshot/lease，并组合 NullRender。M7-B2
+私有 bgfx clear-only core 使用单独 preset 构建；Desktop bootstrap 与真实 GPU 样例仍在下一提交接线：
 
 ```powershell
 cmake --preset windows-msvc-vnext-platform
@@ -77,6 +77,11 @@ out\build\windows-msvc-vnext-platform\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_platform_glfw_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_sample_platform.exe `
   --frames=300 --frame-delay-ms=0
+
+cmake --preset windows-msvc-vnext-bgfx
+cmake --build --preset windows-vnext-bgfx-debug `
+  --target tina_tests tina_platform_glfw_tests tina_render_bgfx_tests
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
 ```
 
 Release 必须在 Debug build 结束后串行执行：

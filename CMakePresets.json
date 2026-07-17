@@ -70,6 +70,15 @@
       }
     },
     {
+      "name": "windows-msvc-vnext-bgfx",
+      "displayName": "Windows x64 vNext bgfx (MSVC 2026 + GLFW + C++23)",
+      "inherits": "windows-msvc-vnext-platform",
+      "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-bgfx",
+      "cacheVariables": {
+        "TINA_BUILD_RENDER_BGFX": "ON"
+      }
+    },
+    {
       "name": "linux-ninja",
       "displayName": "Linux (Ninja + vcpkg)",
       "inherits": "base",
@@ -216,6 +225,18 @@
     {
       "name": "windows-vnext-platform-release",
       "configurePreset": "windows-msvc-vnext-platform",
+      "configuration": "Release",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vnext-bgfx-debug",
+      "configurePreset": "windows-msvc-vnext-bgfx",
+      "configuration": "Debug",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vnext-bgfx-release",
+      "configurePreset": "windows-msvc-vnext-bgfx",
       "configuration": "Release",
       "jobs": 2
     },

@@ -326,7 +326,8 @@ bgfx Debug/D3D11 当前会在关闭 InfoQueue 时输出一次 `RefCount is 4 (ex
 | `tina_sample_2d` | 未实现 | Cooked TileMap/Tileset、chunk、角色/Tile AABB、Box2D dynamic body、正式 UI | M10/M11 Catalog/Manifest |
 | `tina_sample_3d` | 未实现 | Cooked glTF -> Mesh/Material/Prefab、culling/instance | M10 Catalog/Manifest |
 
-M7-B2 后续将建立私有最小 bgfx clear/present；M7-C/M7-D 建立 UI DisplayList/UI Pass，M9 只扩展3D。游戏 sample source、Game SDK
+M7-B2 已建立私有最小 bgfx clear/present core、7项 planner 测试与4项 factory/lease 回滚测试；下一提交补 Desktop bootstrap 和
+真实 GPU 300帧冒烟。M7-C/M7-D 建立 UI DisplayList/UI Pass，M9 只扩展3D。游戏 sample source、Game SDK
 header 和 UI public header 不出现 bgfx。结构化验收使用 backend-neutral 字段：
 
 ```text

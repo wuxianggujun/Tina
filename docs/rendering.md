@@ -1,6 +1,6 @@
 # 渲染架构与 bgfx 边界
 
-> 状态：vNext 目标契约已接受，M7-B1 WindowSurface handoff 已实现；真实 bgfx device 仍未实现。
+> 状态：vNext 目标契约已接受；M7-B1 WindowSurface handoff 与 M7-B2 私有 bgfx clear-only core 已实现，Desktop 产品接线和真实 GPU 冒烟待完成。
 > bgfx 是 Tina 的实现依赖，不是游戏开发 API。
 
 ## 当前 Legacy 事实
@@ -196,7 +196,8 @@ NativeWindowSurfaceLease(move-only PIMPL；public API 只有 surface identity)
 解码为 backend `PlatformData`。Game、Scene、UI 和公共 Render API 看不到 GLFWwindow、HWND、
 X11/Wayland、`bgfx::PlatformData` 或无类型 window/display 指针。生产 factory 成功后由具体
 Render backend 持有 move-only lease。M7-B1 已实现 lease、snapshot、deferred publish 与 Runtime
-handoff；M7-B2 才实现真实 bgfx clear/present/resize/suspend/drain。Window 销毁前必须停止 surface
+handoff；M7-B2 已实现私有 bgfx device core、clear/present、resize/resume planner 与 suspended skip，
+Desktop bootstrap、真实 GPU 门禁和 submission ticket/drain 仍待完成。Window 销毁前必须停止 surface
 submit、drain 真实 submission、关闭 RenderDevice/bgfx，再释放 lease，最后由 Platform 销毁 GLFW
 window。
 

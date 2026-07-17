@@ -11,5 +11,8 @@ inline constexpr Core::ErrorCode UnexpectedFrameIndex{Core::ErrorDomain::Render,
 inline constexpr Core::ErrorCode InvalidSurfaceState{Core::ErrorDomain::Render, 5};
 inline constexpr Core::ErrorCode SurfaceReconfigureFailed{Core::ErrorDomain::Render, 6};
 inline constexpr Core::ErrorCode NativeWindowBindingChangedUnsupported{Core::ErrorDomain::Render, 7};
+inline constexpr Core::ErrorCode DeviceInitializationFailed{Core::ErrorDomain::Render, 8};
+inline constexpr Core::ErrorCode InvalidNativeWindowBinding{Core::ErrorDomain::Render, 9};
+inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::Render, 10};
 
 } // namespace Tina::Render::RenderErrorCode

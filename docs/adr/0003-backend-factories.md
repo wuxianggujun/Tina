@@ -42,7 +42,8 @@ Platform/Render 实例。配置是纯值，factory bundle 是一次性组合输�
 窗口化 production 组合还必须遵守 [ADR 0020](0020-window-surface-handoff.md)：Platform 先创建主窗口，
 内部 `WindowSurfaceRenderDeviceFactory` 再接收 move-only `NativeWindowSurfaceLease`。M7-A GLFW+Null
 使用 Independent 分支且不获取伪 lease；Null/Headless 同样不创建伪 lease。M7-B1 已实现 lease、
-snapshot、延迟发布与 Runtime handoff；M7-B2 的真实 bgfx device 仍未实现。任一真实 backend 失败
+snapshot、延迟发布与 Runtime handoff；M7-B2 已实现私有 bgfx clear-only core，Desktop bootstrap
+与真实 GPU 冒烟仍待接线。任一真实 backend 失败
 都不得通过全局状态或静默降级绕过。
 
 ## 结果

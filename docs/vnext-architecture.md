@@ -536,8 +536,9 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
    Action latch、Headless backend、私有 GLFW `NO_API` Window/Keyboard/Pointer/committed text producer
    与 NullRender 样例已落地；加入 M7-B1 覆盖后，基础183项与 GLFW 专项22项保持为两个直接运行的测试 executable；
 3. **M7-B Surface**：M7-B1 已完成 move-only Native Window Surface lease、snapshot/revision、
-   deferred publish、Runtime handoff 与 NullRender suspended path；M7-B2 继续实现私有 bgfx
-   clear/present 与 resize/suspend/drain；
+   deferred publish、Runtime handoff 与 NullRender suspended path；M7-B2 已完成私有 bgfx
+   clear-only core、resize/resume planner 和 suspended skip，继续接入 Desktop bootstrap、真实 GPU
+   冒烟与 submission ticket/drain；
 4. **M7-C–E UI/IME/Gamepad**：增量 UIContext/DisplayList、Label/Button/Modal + FreeType、
    IMM32/Gamepad/DPI 门禁；
 5. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；

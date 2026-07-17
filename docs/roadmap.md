@@ -149,12 +149,13 @@ Debug/Release也均通过183/183、22/22与Null/GLFW样例各300帧。GCC 13 X11
   `tina_platform_glfw_tests` 与基础 `tina_tests` 分离，不使用 CTest；
 - 本切片当时不实现 WindowSurface handoff 或真实 bgfx、UI tree、FreeType、IMM32、production GLFW Gamepad adapter/
   registry/navigation、OS Pointer Capture、通用 Gameplay EventBus 或多窗口。WindowSurface handoff 已由
-  M7-B1 完成；真实 bgfx clear/present 仍是 M7-B2。
+  M7-B1 完成；M7-B2 bgfx core 已完成，Desktop 产品接线与真实 GPU 冒烟继续推进。
 
 ### M7-B Native Window Surface 与最小 bgfx
 
-实施状态（2026-07-17）：M7-B1 private WindowSurface handoff 已完成；真实 bgfx clear/present 拆到
-M7-B2。Windows 最新门禁在 MSVC 19.50.35717 与 CMake 4.2.3 下通过 Debug/Release 基础183/183、
+实施状态（2026-07-17）：M7-B1 private WindowSurface handoff 与 M7-B2 private bgfx clear-only core 已完成；
+Desktop bootstrap 和真实 GPU 冒烟是下一提交。Windows 最新门禁在 MSVC 19.50 与 CMake 4.2.3 下
+通过 Debug 基础183/183、GLFW专项22/22、bgfx专项11/11，并通过 Release bgfx专项11/11；此前 M7-B1 的 Debug/Release 基础183/183、
 GLFW专项22/22、Null样例300帧、WindowSurface GLFW样例300帧；`TINA_BUILD_TESTING=OFF` 的 production-style
 GLFW样例300帧也已通过。Linux M7-B1 门禁已在 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer、
 GCC 13 与 Clang 22 X11/Wayland 双后端通过基础183/183、GLFW专项22/22和300帧样例；
@@ -173,7 +174,11 @@ Clang 基础测试无 suppression，Wayland匹配0，X11仅精确抑制 `_XimOpe
   surface revision 跳号/回退、事实未变却递增，以及本帧 Window metrics、revision、identity 不一致；
 - **已完成 M7-B1**：NullRender 分离 `engineFrameIndex` 与 `submissionIndex`；Suspended 帧继续进入
   Render maintenance，但不 Present、不增加 submission index；
-- **M7-B2**：建立 `tina_bootstrap_desktop` 和私有最小 bgfx clear/present；Game SDK/Phase Context 不暴露
+- **已完成 M7-B2 core**：建立可选 `tina_render_bgfx`、真实 bgfx init/clear/touch/frame/shutdown、
+  owner-thread 与 move-only lease 生命周期；初始 Suspended 使用内部1×1 bootstrap，resize/resume 才 reset，
+  content-scale-only 不 reset，Suspended 不 clear/present/递增 submission；7项纯 Tina planner 测试与4项 factory/lease 回滚测试
+  不向 public header 暴露 native/bgfx 类型；
+- **M7-B2 下一提交**：建立 `tina_bootstrap_desktop` 和300帧真实 GPU 样例；Game SDK/Phase Context 不暴露
   RenderDevice/native/bgfx，Engine Module SPI 只暴露纯 Tina Render 类型。
 
 ### M7-C 增量 UI Core 与 Null DisplayList

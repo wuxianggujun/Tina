@@ -199,5 +199,5 @@ M7 不作为一个巨型提交：M7-A 先分为已完成的 PlatformFrame/Input 
 PlatformFrameBuilder 直接注入和 Runtime test adapter，以及紧随其后的私有 GLFW `NO_API` 窗口 +
 NullRender 子切片；可复用 production-like PlatformBackend test double 随 GLFW adapter 测试加入；M7-B1 已实现
 Native Window Surface lease、surface snapshot、WindowSurface-aware composition 与 NullRender suspended 语义；
-M7-B2 再实现私有 bgfx clear/present；M7-C 实现 UIContext、增量 layout/PaintCache 与 Null DisplayList；M7-D 实现
+M7-B2 已实现私有 bgfx clear-only core，继续接入 Desktop bootstrap 与真实 GPU 门禁；M7-C 实现 UIContext、增量 layout/PaintCache 与 Null DisplayList；M7-D 实现
 Label/Button/Modal + FreeType 可见样例；M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。

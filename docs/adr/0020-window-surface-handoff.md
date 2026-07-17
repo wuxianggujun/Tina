@@ -4,8 +4,9 @@
 - 日期：2026-07-17
 - 实施状态：M7-B1 已落地 `NativeWindowSurfaceLease`、`WindowSurfaceId`、surface snapshot/
   revision、延迟 `publishPrimaryWindow()`、Runtime handoff 与 NullRender suspended path；
-  M7-B2 的真实 `tina_render_bgfx` clear/present/resize/suspend/drain 仍未实现，完整 DPI 与
-  Windows IMM32 仍是后续目标。
+  M7-B2 已落地私有 `tina_render_bgfx` clear-only core、初始 suspended 的 1×1 device bootstrap、
+  resize/resume planner、content-scale-only no-reset、suspended skip 与逆序 shutdown。Desktop
+  bootstrap、真实 GPU 冒烟、submission ticket/drain、完整 DPI 与 Windows IMM32 仍是后续目标。
 
 ## 背景
 
@@ -169,6 +170,9 @@ Creating -> Active <-> Suspended -> Closing -> Draining -> Closed
 - Suspended 保留 window、native lease、RenderDevice 和已有 GPU 资源。Runtime 继续处理
   Platform polling/lifecycle dispatch、Simulation、Asset completion 与必要的 backend retirement，但不创建 surface
   attachment、不 clear、不提交 surface frame、不 Present；平台等待/限频避免 busy loop；
+- 若首次创建 RenderDevice 时 surface 已经 Suspended，bgfx adapter 只用内部 1×1 resolution 完成
+  device bootstrap。该 1×1 不代表有效 surface attachment，不 clear、不产生 submissionIndex、也不 Present；
+  首个 Active snapshot 必须先按最新 framebuffer extent 执行 reset，再接受 submission；
 - 恢复为非零 extent 时提交新 surfaceRevision，backend 先应用最新 extent/attachment，再接受首个
   Active submission。恢复失败进入 `Failed`，不能假装仍 Suspended 无限重试；
 - GLFW close callback 只写入 sticky、不可取消的 close latch。Platform `pollFrame()` 返回 tagged
@@ -214,8 +218,8 @@ packet 完成提交；若 snapshot 为 Suspended，则仍完成 Extraction/UI/Re
 - 当前 M7-A Headless 与 GLFW Window 子切片已提供可验证的 Platform frame、Primary Pointer、
   Window registry、Keyboard/Pointer/committed text、生命周期 dispatcher 与 close outcome 基线；
   M7-B1 已在此基础上实现 surface lease、snapshot、延迟窗口发布、Runtime 转换为
-  `RenderSurfaceState` 以及 `SkippedSuspendedSurface` 路径；production Gamepad、完整 DPI/IMM32
-  和 M7-B2 真实 bgfx device 仍需后续验收；
+  `RenderSurfaceState` 以及 `SkippedSuspendedSurface` 路径；M7-B2 已建立真实 bgfx device core，
+  Desktop 产品接线、真实 GPU 冒烟、production Gamepad 与完整 DPI/IMM32 仍需后续验收；
 - GLFW 保持窗口、输入、DPI、IME 与关闭语义的唯一 owner，bgfx 只负责渲染；
 - opaque lease 在不泄漏 native/bgfx 类型的前提下，强制窗口晚于 RenderDevice 销毁；
 - resize、最小化和关闭使用可测试的 surfaceRevision/state machine，不依赖 callback 偶然顺序；

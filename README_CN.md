@@ -24,8 +24,9 @@ vNext 已完成 C++23 Headless Runtime 生命周期内核、M7-A Platform/Input 
 并把键盘、Pointer、Focus、resize、close 与已提交 UTF-8 文本归一化到同一份有界
 `PlatformFrameView`；Runtime 通过 generation `WindowSurfaceId`、无原生句柄的
 `WindowSurfaceSnapshot` 和 move-only `NativeWindowSurfaceLease` 把窗口 surface 交给 Render
-组合，Game SDK 不暴露 native 或 bgfx 类型。`tina_sample_platform` 仍使用 NullRender 验证真实窗口；
-真实私有 bgfx clear/present 后端属于 M7-B2。production Gamepad、Windows IMM32 composition、UI Core
+组合，Game SDK 不暴露 native 或 bgfx 类型。M7-B2 已加入私有 bgfx clear-only core、resize/resume
+planner 与 suspended skip；`tina_sample_platform` 仍使用 NullRender，下一提交再接 Desktop bootstrap
+与真实 GPU 300帧冒烟。production Gamepad、Windows IMM32 composition、UI Core
 与可见中文 UI 分别放在后续切片。
 
 ## 当前 Legacy 已完成基线

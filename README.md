@@ -18,8 +18,9 @@ The C++23 headless lifecycle kernel, M7-A platform/input kernel, the first deskt
 and M7-B1 private WindowSurface handoff are complete. The private `tina_platform_glfw` backend now
 creates a `GLFW_NO_API` window, normalizes keyboard/pointer/focus/resize/close/committed UTF-8 text
 into the same bounded `PlatformFrameView`, and hands a move-only window surface lease to the render
-composition without exposing native or bgfx types. `tina_sample_platform` still uses NullRender; the
-real private bgfx clear/present backend is M7-B2. IMM32 composition, production gamepad input, and
+composition without exposing native or bgfx types. M7-B2 now provides the private bgfx clear-only
+core with resize/resume and suspended-surface planning; `tina_sample_platform` still uses NullRender
+until the Desktop bootstrap and real-GPU smoke are wired. IMM32 composition, production gamepad input, and
 retained UI remain later slices.
 
 The active design, verified status, and build instructions are maintained in
