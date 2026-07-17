@@ -19,31 +19,33 @@
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2：Core/Platform/Input/Task/Render/Runtime/UI、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Debug C++23 | 183/183 | 通过；GLFW 22/22、bgfx 11/11、独立 UI 75/75 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2：Core/Platform/Input/Task/Render/Runtime/UI、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Release C++23 | 183/183 | 通过；GLFW 22/22、bgfx 11/11、独立 UI 75/75 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a：Core/Platform/Input/Task/Render/Runtime/UI、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Debug C++23 | 185/185 | 本次基础185/185、GLFW 23/23；bgfx 11/11与独立 UI 75/75为上一门禁 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a：Core/Platform/Input/Task/Render/Runtime/UI、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Release C++23 | 185/185 | 本次基础185/185、GLFW 23/23；bgfx 11/11与独立 UI 75/75为上一门禁 |
 | Windows 11 / MSVC 19.50 | Legacy ON 与 vNext M6-A 共存构建 | Debug C++23 | 135/135 | 通过 |
-| Ubuntu 22.04 / GCC 13.4 | vNext M6-A/M7-A/M7-B1/M7-C1b/C1c-a/C1c-b1/C1c-b2：X11 WindowSurface handoff + UI tree/layout/committed-hit/query/route core，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 183/183 | 通过；独立 Null UI 门禁75/75，无诊断，二次构建无 warning |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext M6-A/M7-A/M7-B1/M7-C1b/C1c-a/C1c-b1/C1c-b2：X11 WindowSurface handoff + UI tree/layout/committed-hit/query/route core，ASan/UBSan/LSan，基础测试无 suppression | Debug C++23 | 183/183 | 通过；独立 Null UI 门禁75/75，无 sanitizer 诊断，二次构建无 warning |
+| Ubuntu 22.04 / GCC 13.4 | vNext M6-A/M7-A/M7-B1/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a：X11 WindowSurface handoff + event-time Pointer/UI tree/layout/committed-hit/query/route core，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 185/185 | 本次基础与GLFW 23/23通过且无诊断；独立 Null UI 75/75为上一门禁 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext M6-A/M7-A/M7-B1/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a：X11 WindowSurface handoff + event-time Pointer/UI tree/layout/committed-hit/query/route core，ASan/UBSan/LSan，基础测试无 suppression | Debug C++23 | 185/185 | 通过；GLFW 23/23，仅精确抑制第三方 XIM retention；无 Tina sanitizer 诊断 |
 
 GLFW adapter 和 bgfx adapter 测试是独立 executable，不能把多个进程伪写成单个合并测试数。当前测试拓扑为：
 
 | 构建图 | 基础 GoogleTest | GLFW 专项 GoogleTest | bgfx 专项 GoogleTest | 状态 |
 | --- | ---: | ---: | ---: | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 183/183 | 22/22 | 11/11 | 通过；独立 UI 75/75、Null样例300帧、WindowSurface GLFW样例300帧、真实 D3D11 Intel Iris Xe Desktop样例默认300帧返回0 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 183/183 | 22/22 | 11/11 | 通过；独立 UI 75/75、Null样例300帧、WindowSurface GLFW样例300帧、真实 D3D11 Intel Iris Xe Desktop样例默认300帧返回0 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 production-style | 测试 target 关闭 | 不构建 | 不构建 | `TINA_BUILD_TESTING=OFF`，GLFW样例300帧返回0 |
-| Ubuntu 22.04 / GCC 13.4 + GLFW X11 | 183/183 | 22/22 | 未运行 | 通过；独立 Null UI 门禁75/75且无诊断，二次构建无 warning；Null样例300帧、WindowSurface GLFW样例300帧返回0 |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11 + ASan/UBSan/LSan | 183/183 | 22/22 | 未运行 | 通过；独立 Null UI 门禁75/75且无 sanitizer 诊断，二次构建无 warning；基础测试无 suppression，Null/GLFW样例各300帧；`_XimOpenIM` 精确 suppression 仅专项命中12次/4896 B、GLFW样例命中1次/408 B |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 185/185 | 23/23 | 11/11（上一门禁） | 本次复验基础/GLFW，并将 WindowSurface GLFW样例重新链接后运行1800帧；独立 UI 75/75及其余产品样例为上一门禁 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 185/185 | 23/23 | 11/11（上一门禁） | 本次复验基础/GLFW；独立 UI 75/75与Release产品样例为上一门禁 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 production-style | 测试 target 关闭 | 不构建 | 不构建 | 上一门禁：`TINA_BUILD_TESTING=OFF`，GLFW样例300帧返回0 |
+| Ubuntu 22.04 / GCC 13.4 + GLFW X11 | 185/185 | 23/23 | 未运行 | 通过；本次 event-time Pointer 门禁无 warning；独立 Null UI 历史门禁75/75，Null样例与WindowSurface GLFW样例历史门禁各300帧返回0 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11 + ASan/UBSan/LSan | 185/185 | 23/23 | 未运行 | 通过；本次基础测试无 suppression且无诊断；GLFW仅精确抑制第三方 `_XimOpenIM`，13次/5304 B；独立 UI 与样例数字保留上一切片门禁 |
 | Ubuntu 22.04 / GCC 13.4 + GLFW X11/Wayland 双后端 | 183/183 | 22/22 | 未运行 | 通过；嵌套 Weston 9 强制 Wayland 与 Xvfb 强制 X11 均通过基础、专项与300帧样例 |
 | Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11/Wayland 双后端 + ASan/UBSan/LSan | 183/183 | 22/22 | 未运行 | 通过；基础测试无 suppression且Null样例300帧；Wayland专项与样例 suppression 命中0，X11专项命中12次/4896 B、样例命中1次/408 B |
 
-Windows 与 Linux 当前都是“183项基础测试 + 22项GLFW专项测试”，两个 executable 均已实际返回0。
+Windows MSVC Debug/Release 与 Linux GCC X11 当前都是“185项基础测试 + 23项GLFW专项测试”，
+两个 executable 均已直接运行并返回0；新增门禁覆盖 Button/Wheel 事件时 logical position、非有限坐标拒绝、
+Move 语义边界和 GLFW `A → Button/Wheel → B` 的帧末位置隔离。
 Windows bgfx 构建另有独立 `tina_render_bgfx_tests` 11/11，Debug/Release 均实际返回0；该结果
 只覆盖当前 clear-only bgfx core、factory/lease 回滚和 Desktop smoke，不覆盖后续
 Scene/UI/Pass Scheduler/submission ticket，也不声明 resize、最小化、恢复的真实自动化通过。
 M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、committed hit snapshot、纯 point query 与 synthetic route 使用独立
 `tina_ui_tests`。当前 Windows 11 / MSVC 19.50 Debug/Release 均直接 GoogleTest 75/75 通过；Linux
-GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均基础 `tina_tests` 183/183、
+GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均基础 `tina_tests` 185/185、
 `tina_ui_tests` 75/75；Clang 无 sanitizer 诊断。初次 GCC 暴露的 routed-pointer callback `requires`
 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
 X11 在隔离 X server 下运行。GCC Wayland 门禁由 Xvfb 托载
@@ -55,9 +57,10 @@ Weston 9 `x11-backend` 并提供 `wl_seat`；移除 `DISPLAY` 后断言
 该问题不是 Tina 回归，当前门禁也不声明支持无 seat compositor；Wayland 环境必须是真实
 session 或显式提供 `wl_seat` 的受控 compositor。
 
-当前 Clang X11 的基础 `tina_tests` 在**无 suppression**条件下通过183/183。只有会初始化 GLFW/X11 的
+当前 Clang X11 的基础 `tina_tests` 在**无 suppression**条件下通过185/185。只有会初始化 GLFW/X11 的
 专项测试与样例使用 `cmake/sanitizers/lsan-x11.supp` 中唯一的 `leak:_XimOpenIM`：Ubuntu 22.04
-libX11 在 GLFW 调用 `XCloseIM` 后保留 XIM allocation，专项测试12次共4896 B，样例1次408 B。
+libX11 在 GLFW 调用 `XCloseIM` 后保留 XIM allocation，当前23项专项测试共13次/5304 B；样例1次/408 B
+是上一产品门禁结果。
 抑制按第三方符号精确匹配，Tina allocation 仍由 LSan 阻断；不得增加宽泛的 module/category
 suppression来隐藏 Tina 泄漏。
 
@@ -314,12 +317,13 @@ out\build\windows-msvc-vnext-bgfx\bin\Release\tina_render_bgfx_tests.exe --gtest
 out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
 ```
 
-当前 Windows 最新结果是 Debug/Release 均基础183/183、GLFW专项22/22、bgfx专项11/11、Null样例300帧、
-WindowSurface GLFW样例300帧与真实 D3D11 Intel Iris Xe Desktop样例默认300帧返回0；另有
+当前 Windows C1c-b3a 结果是 Debug/Release 均基础185/185、GLFW专项23/23，Debug WindowSurface GLFW
+样例在最终头布局下重新链接并运行1800帧返回0。bgfx专项11/11、Null样例300帧、Release产品样例与真实
+D3D11 Intel Iris Xe Desktop样例默认300帧是上一产品门禁结果；上一门禁另有
 `TINA_BUILD_TESTING=OFF` production-style WindowSurface GLFW样例300帧返回0。
-Linux M7-B2 Desktop/bgfx X11 门禁也已通过：GCC 13.4 为183/183、22/22、11/11和 Desktop 300帧；
-Clang 22.1.8 + ASan/UBSan/LSan 为相同的183/22/11和 Desktop 300帧。Clang 基础/bgfx测试无
-suppression；X11精确 suppression 在GLFW专项命中12次/4896 B、Desktop命中1次/408 B。
+Linux 当前 Pointer/Input 为 GCC 与 Clang sanitizer 基础185/185、GLFW专项23/23；M7-B2 Desktop/bgfx
+产品门禁仍记录 GCC 183/22/11 与 Clang 183/22/11、Desktop 300帧。Clang 当前基础测试无 suppression；
+X11精确 suppression 在23项GLFW专项命中13次/5304 B，Desktop上一门禁命中1次/408 B。
 Clang Desktop 使用 bgfx Vulkan，但 WSL2 adapter 是 llvmpipe 软件实现，不计作硬件 GPU 门禁。
 Linux X11、Wayland和 Clang LSan精确 suppression的完整命令见[构建与运行](building.md)。
 

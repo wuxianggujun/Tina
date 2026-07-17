@@ -283,6 +283,125 @@ TEST(PlatformFrameBuilderTest, PreservesEdgesAndOnlyCoalescesAdjacentPointerMove
     EXPECT_DOUBLE_EQ(mergedMove->deltaY, 6.0);
 }
 
+TEST(PlatformFrameBuilderTest, PreservesPointerEventTimeLogicalPositions)
+{
+    auto poolResult = TestWindowPool::Create(1);
+    ASSERT_TRUE(poolResult.has_value());
+    auto& pool = *poolResult;
+    const Platform::WindowId window = createWindowId(pool);
+
+    auto builderResult = Platform::PlatformFrameBuilder::Create({
+        .inputTransitionCapacity = 4,
+        .platformEventCapacity = 1,
+    });
+    ASSERT_TRUE(builderResult.has_value());
+    auto& builder = *builderResult;
+    ASSERT_TRUE(builder.beginFrame({1}).has_value());
+
+    EXPECT_EQ(builder.appendInputTransition(Platform::PointerButtonTransition{
+                  .window = window,
+                  .pointer = Platform::PrimaryPointerId,
+                  .button = Platform::PointerButton::Primary,
+                  .state = Platform::DigitalTransition::Down,
+                  .logicalX = 10.0,
+                  .logicalY = 20.0,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+    EXPECT_EQ(builder.appendInputTransition(Platform::PointerWheelTransition{
+                  .window = window,
+                  .pointer = Platform::PrimaryPointerId,
+                  .deltaX = 0.5,
+                  .deltaY = -1.0,
+                  .logicalX = 11.0,
+                  .logicalY = 21.0,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+
+    auto finalInput = validWindowInput(window, 1);
+    finalInput.pointer.logicalX = 100.0;
+    finalInput.pointer.logicalY = 200.0;
+    finalInput.pointer.heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
+    EXPECT_TRUE(builder.setPrimaryWindowSnapshot(validWindowMetrics(window, 1), finalInput));
+
+    auto frame = builder.finishFrame();
+    ASSERT_TRUE(frame.has_value()) << frame.error().message;
+    const auto transitions = frame->inputTransitions();
+    ASSERT_EQ(transitions.size(), 2U);
+
+    const auto* button = std::get_if<Platform::PointerButtonTransition>(&transitions[0].payload);
+    ASSERT_NE(button, nullptr);
+    EXPECT_DOUBLE_EQ(button->logicalX, 10.0);
+    EXPECT_DOUBLE_EQ(button->logicalY, 20.0);
+
+    const auto* wheel = std::get_if<Platform::PointerWheelTransition>(&transitions[1].payload);
+    ASSERT_NE(wheel, nullptr);
+    EXPECT_DOUBLE_EQ(wheel->logicalX, 11.0);
+    EXPECT_DOUBLE_EQ(wheel->logicalY, 21.0);
+    ASSERT_NE(frame->primaryWindow(), nullptr);
+    EXPECT_DOUBLE_EQ(frame->primaryWindow()->input.pointer.logicalX, 100.0);
+    EXPECT_DOUBLE_EQ(frame->primaryWindow()->input.pointer.logicalY, 200.0);
+}
+
+TEST(PlatformFrameBuilderTest, DoesNotCoalescePointerMovesAcrossButtonTransitions)
+{
+    auto poolResult = TestWindowPool::Create(1);
+    ASSERT_TRUE(poolResult.has_value());
+    auto& pool = *poolResult;
+    const Platform::WindowId window = createWindowId(pool);
+
+    auto builderResult = Platform::PlatformFrameBuilder::Create({
+        .inputTransitionCapacity = 4,
+        .platformEventCapacity = 1,
+    });
+    ASSERT_TRUE(builderResult.has_value());
+    auto& builder = *builderResult;
+    ASSERT_TRUE(builder.beginFrame({1}).has_value());
+
+    EXPECT_EQ(builder.appendInputTransition(Platform::PointerMoveTransition{
+                  .window = window,
+                  .pointer = Platform::PrimaryPointerId,
+                  .logicalX = 8.0,
+                  .logicalY = 9.0,
+                  .deltaX = 2.0,
+                  .deltaY = 3.0,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+    EXPECT_EQ(builder.appendInputTransition(Platform::PointerButtonTransition{
+                  .window = window,
+                  .pointer = Platform::PrimaryPointerId,
+                  .button = Platform::PointerButton::Primary,
+                  .state = Platform::DigitalTransition::Down,
+                  .logicalX = 8.0,
+                  .logicalY = 9.0,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+    EXPECT_EQ(builder.appendInputTransition(Platform::PointerMoveTransition{
+                  .window = window,
+                  .pointer = Platform::PrimaryPointerId,
+                  .logicalX = 12.0,
+                  .logicalY = 14.0,
+                  .deltaX = 4.0,
+                  .deltaY = 5.0,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+
+    auto finalInput = validWindowInput(window, 1);
+    finalInput.pointer.logicalX = 12.0;
+    finalInput.pointer.logicalY = 14.0;
+    finalInput.pointer.accumulatedDeltaX = 6.0;
+    finalInput.pointer.accumulatedDeltaY = 8.0;
+    finalInput.pointer.heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
+    EXPECT_TRUE(builder.setPrimaryWindowSnapshot(validWindowMetrics(window, 1), finalInput));
+
+    auto frame = builder.finishFrame();
+    ASSERT_TRUE(frame.has_value()) << frame.error().message;
+    const auto transitions = frame->inputTransitions();
+    ASSERT_EQ(transitions.size(), 3U);
+    EXPECT_NE(std::get_if<Platform::PointerMoveTransition>(&transitions[0].payload), nullptr);
+    EXPECT_NE(std::get_if<Platform::PointerButtonTransition>(&transitions[1].payload), nullptr);
+    EXPECT_NE(std::get_if<Platform::PointerMoveTransition>(&transitions[2].payload), nullptr);
+}
+
 TEST(PlatformFrameBuilderTest, RejectsPointerMoveCoalesceDeltaOverflow)
 {
     auto poolResult = TestWindowPool::Create(1);
@@ -347,7 +466,11 @@ TEST(PlatformFrameBuilderTest, ReservesResetSlotsAndKeepsFinalSnapshotWritable)
                   .state = Platform::DigitalTransition::Up,
               }),
               Platform::FrameBatchAppendResult::Appended);
-    EXPECT_EQ(builder.appendInputTransition(Platform::PointerWheelTransition{.window = window}),
+    EXPECT_EQ(builder.appendInputTransition(Platform::PointerWheelTransition{
+                  .window = window,
+                  .logicalX = 4.0,
+                  .logicalY = 5.0,
+              }),
               Platform::FrameBatchAppendResult::ResetInserted);
     EXPECT_EQ(builder.appendInputTransition(Platform::KeyTransition{
                   .window = window,
@@ -563,6 +686,14 @@ TEST(PlatformFrameBuilderTest, RejectsInvalidInputTransitionPayloads)
         .window = window,
         .pointer = Platform::PrimaryPointerId + 1,
     });
+    expectInvalidInputPayload(Platform::PointerButtonTransition{
+        .window = window,
+        .logicalX = std::numeric_limits<double>::quiet_NaN(),
+    });
+    expectInvalidInputPayload(Platform::PointerButtonTransition{
+        .window = window,
+        .logicalY = std::numeric_limits<double>::infinity(),
+    });
     expectInvalidInputPayload(Platform::PointerMoveTransition{
         .window = window,
         .logicalX = std::numeric_limits<double>::quiet_NaN(),
@@ -574,6 +705,14 @@ TEST(PlatformFrameBuilderTest, RejectsInvalidInputTransitionPayloads)
     expectInvalidInputPayload(Platform::PointerWheelTransition{
         .window = window,
         .deltaY = std::numeric_limits<double>::infinity(),
+    });
+    expectInvalidInputPayload(Platform::PointerWheelTransition{
+        .window = window,
+        .logicalX = std::numeric_limits<double>::quiet_NaN(),
+    });
+    expectInvalidInputPayload(Platform::PointerWheelTransition{
+        .window = window,
+        .logicalY = std::numeric_limits<double>::infinity(),
     });
     expectInvalidInputPayload(Platform::PointerWheelTransition{
         .window = window,

@@ -5,8 +5,8 @@
 - 接受日期：2026-07-17
 - 实施状态：M7-A Headless Platform/Input、Action Mapper、fixed-step latch、
   `PlatformEventDispatcher` 与私有 GLFW Window/Keyboard/Pointer/committed text producer 已落地；
-  M7-C1a 已落地 UI-owned route-result view ABI；production Gamepad、完整 DPI、Windows IMM32 和
-  Runtime UI producer 仍是目标
+  M7-C1a 已落地 UI-owned route-result view ABI，M7-C1c-b3a 已让 Pointer Button/Wheel 固化事件时
+  logical position；production Gamepad、完整 DPI、Windows IMM32 和 Runtime UI producer 仍是目标
 
 ## 背景
 
@@ -74,6 +74,10 @@ Key、Pointer Button 与 Gamepad Button 的最后一个未被后续 cancel/raw r
 M7-A 仅接受 `PrimaryPointerId`（0）：Pointer snapshot、Button/Move/Wheel transition 与 pointer binding
 使用其他 id 均结构化失败。同一帧所有 `GamepadSnapshot` 必须来自同一个 registry owner，每个 slot
 index 唯一；同 slot 的不同 generation 不能同时作为最终快照。
+Pointer Button/Wheel transition 必须保存该事件发生时的 window-logical position。UI hit-test 不得用
+Poll 结束时的最终 Pointer snapshot 替换它；否则 Button/Wheel 后同 Poll 内的 Move 会改变历史事件的
+目标。生产 GLFW adapter 使用按 callback 顺序维护的 backend-owned pointer state 固化该坐标，builder
+同时拒绝非有限位置。
 
 M7-A Action Mapper 由 Runtime 唯一拥有，只实现 EngineConfig 注册的单一 immutable default Input
 Context（priority=0）。UI consumption/claim 优先；未来多 Context 以显式 priority 决胜，同 priority

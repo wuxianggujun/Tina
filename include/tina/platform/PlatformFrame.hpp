@@ -714,7 +714,8 @@ class PlatformFrameBuilder final {
         if (const auto* value = std::get_if<PointerButtonTransition>(&payload); value != nullptr)
         {
             return value->window.hasValue() && value->pointer == PrimaryPointerId &&
-                   isValidPointerButton(value->button) && isValidDigitalTransition(value->state);
+                   isValidPointerButton(value->button) && isValidDigitalTransition(value->state) &&
+                   isFinite(value->logicalX) && isFinite(value->logicalY);
         }
         if (const auto* value = std::get_if<PointerMoveTransition>(&payload); value != nullptr)
         {
@@ -723,8 +724,8 @@ class PlatformFrameBuilder final {
         }
         if (const auto* value = std::get_if<PointerWheelTransition>(&payload); value != nullptr)
         {
-            return value->window.hasValue() && value->pointer == PrimaryPointerId && isFinite(value->deltaX) &&
-                   isFinite(value->deltaY);
+            return value->window.hasValue() && value->pointer == PrimaryPointerId && isFinite(value->logicalX) &&
+                   isFinite(value->logicalY) && isFinite(value->deltaX) && isFinite(value->deltaY);
         }
         if (const auto* value = std::get_if<GamepadButtonTransition>(&payload); value != nullptr)
         {

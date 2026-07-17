@@ -255,6 +255,10 @@ struct PointerButtonTransition final {
     PointerId pointer = PrimaryPointerId;
     PointerButton button = PointerButton::Primary;
     DigitalTransition state = DigitalTransition::Down;
+    // Position captured for this exact transition. It must not be replaced
+    // with the poll-ending PointerSnapshot position by downstream routing.
+    double logicalX = 0.0;
+    double logicalY = 0.0;
 };
 
 struct PointerMoveTransition final {
@@ -271,6 +275,11 @@ struct PointerWheelTransition final {
     PointerId pointer = PrimaryPointerId;
     double deltaX = 0.0;
     double deltaY = 0.0;
+    // Appended after the original aggregate fields so existing positional
+    // initializers keep their delta semantics. Position and delta are both
+    // window-logical values captured for this exact transition.
+    double logicalX = 0.0;
+    double logicalY = 0.0;
 };
 
 struct GamepadButtonTransition final {

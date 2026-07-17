@@ -24,7 +24,8 @@ revision；同一 view 内 entry 的 paint ordinal 唯一且严格递增，hit-o
 `queryPointerHit()`：反向扫描 committed hit entry，并返回 route index、snapshot revision 与 visited count。
 M7-C1c-b2 又实现 synthetic routed pointer event：固定容量 route path/listener storage、48-byte fixed-inline
 `noexcept` callback、generation-safe RAII token、Capture→Target→Bubble、stop/consume、mutation-safe
-invalidation 与 route/commit reentrancy guard；Runtime producer、持久 Pointer Capture、Focus/Modal、
+invalidation 与 route/commit reentrancy guard；M7-C1c-b3a 又让 Platform Button/Wheel transition 固化
+事件时 logical position，避免 Runtime producer 用帧末坐标改变历史 hit-test；Runtime producer、持久 Pointer Capture、Focus/Modal、
 Button default action 和 DisplayList 仍未完成。
 现有 Legacy target 的包依赖由 vcpkg manifest 管理，bgfx、EASTL、EABase 仍保持固定源码
 版本；其中 EASTL/EABase 只属于迁移期现状，不是 vNext 目标依赖。

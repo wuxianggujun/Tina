@@ -342,6 +342,9 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             ++eventPumpStatsForTest_.pollEventsCalls;
 #endif
         }
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
+        emitQueuedPointerEventsForTest();
+#endif
         collectingFrame_ = false;
 
         if (auto status = checkGlfwOperation(waitForEvents ? "glfwWaitEventsTimeout" : "glfwPollEvents"); !status)
@@ -730,6 +733,39 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status
+    queuePointerEventsForNextPollForTest(std::span<const Detail::GlfwPointerInjection> events) noexcept
+    {
+        if (stopped_ || !hasLiveWindow())
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The GLFW test backend is stopped");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW test operation must run on the creating thread");
+        }
+        if (events.size() > queuedPointerEventsForTest_.size() || queuedPointerEventCountForTest_ != 0)
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "The GLFW pointer test event queue is unavailable");
+        }
+        for (const Detail::GlfwPointerInjection& event : events)
+        {
+            if (!isValidPointerInjectionForTest(event))
+            {
+                return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                     "The GLFW pointer test event is invalid");
+            }
+        }
+        queuedPointerEventCountForTest_ = events.size();
+        for (usize index = 0; index < queuedPointerEventCountForTest_; ++index)
+        {
+            queuedPointerEventsForTest_[index] = events[index];
+        }
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Result<Detail::GlfwEventPumpStats> eventPumpStatsForTest() const noexcept
     {
         if (stopped_ || !hasLiveWindow())
@@ -909,18 +945,34 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         {
             return;
         }
-        const bool held = action == GLFW_PRESS;
-        const DigitalTransition transition = held ? DigitalTransition::Down : DigitalTransition::Up;
-        if (!focusFilter_.shouldAccept(*button, transition))
+        onPointerButton(*button, action == GLFW_PRESS ? DigitalTransition::Down : DigitalTransition::Up);
+    }
+
+    void onPointerButton(PointerButton button, DigitalTransition transition) noexcept
+    {
+        if (!collectingFrame_)
         {
             return;
         }
-        input_.pointer.heldButtons.set(static_cast<usize>(*button), held);
+        if (!focusFilter_.shouldAccept(button, transition))
+        {
+            return;
+        }
+
+        appendAcceptedPointerButton(button, transition);
+    }
+
+    void appendAcceptedPointerButton(PointerButton button, DigitalTransition transition) noexcept
+    {
+        const bool held = transition == DigitalTransition::Down;
+        input_.pointer.heldButtons.set(static_cast<usize>(button), held);
         recordAppend(frameBuilder_.appendInputTransition(PointerButtonTransition{
             .window = windowId_,
             .pointer = PrimaryPointerId,
-            .button = *button,
+            .button = button,
             .state = transition,
+            .logicalX = input_.pointer.logicalX,
+            .logicalY = input_.pointer.logicalY,
         }));
     }
 
@@ -935,8 +987,53 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             .pointer = PrimaryPointerId,
             .deltaX = deltaX,
             .deltaY = deltaY,
+            .logicalX = input_.pointer.logicalX,
+            .logicalY = input_.pointer.logicalY,
         }));
     }
+
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
+    [[nodiscard]] static bool isValidPointerInjectionForTest(const Detail::GlfwPointerInjection& event) noexcept
+    {
+        switch (event.kind)
+        {
+        case Detail::GlfwPointerInjectionKind::CursorPosition:
+            return std::isfinite(event.logicalX) && std::isfinite(event.logicalY);
+        case Detail::GlfwPointerInjectionKind::Button:
+            return static_cast<usize>(event.button) < PointerButtonCount &&
+                   (event.transition == DigitalTransition::Down || event.transition == DigitalTransition::Up);
+        case Detail::GlfwPointerInjectionKind::Wheel:
+            return std::isfinite(event.wheelDeltaX) && std::isfinite(event.wheelDeltaY);
+        }
+        return false;
+    }
+
+    void emitQueuedPointerEventsForTest() noexcept
+    {
+        const usize queuedCount = queuedPointerEventCountForTest_;
+        queuedPointerEventCountForTest_ = 0;
+        for (usize index = 0; index < queuedCount && callbackFailure_ == CallbackAssemblyFailure::None; ++index)
+        {
+            const Detail::GlfwPointerInjection& event = queuedPointerEventsForTest_[index];
+            switch (event.kind)
+            {
+            case Detail::GlfwPointerInjectionKind::CursorPosition:
+                onCursorPosition(event.logicalX, event.logicalY);
+                break;
+            case Detail::GlfwPointerInjectionKind::Button:
+                // The hidden integration-test window is intentionally not
+                // focused. Focus filtering has its own direct tests; this
+                // seam enters after that filter so it exercises the exact
+                // accepted-event position capture and frame assembly path.
+                appendAcceptedPointerButton(event.button, event.transition);
+                break;
+            case Detail::GlfwPointerInjectionKind::Wheel:
+                onScroll(event.wheelDeltaX, event.wheelDeltaY);
+                break;
+            }
+        }
+    }
+#endif
 
     void onFocus(int focused) noexcept
     {
@@ -1083,9 +1180,12 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     bool metricsDirty_ = false;
     bool closeRequested_ = false;
 #if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
+    static constexpr usize MaximumQueuedPointerEventsForTest = 16;
     bool failNextPollForTest_ = false;
     bool forceSuspendedWaitPathForTest_ = false;
     double suspendedWaitTimeoutForTest_ = SuspendedEventWaitTimeoutSeconds;
+    std::array<Detail::GlfwPointerInjection, MaximumQueuedPointerEventsForTest> queuedPointerEventsForTest_{};
+    usize queuedPointerEventCountForTest_ = 0;
     Detail::GlfwEventPumpStats eventPumpStatsForTest_{};
 #endif
     bool stopped_ = false;
@@ -1316,6 +1416,17 @@ Core::Status forceGlfwSuspendedWaitPathForTest(IPlatformBackend& backend, double
         return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
     }
     return glfwBackend->forceSuspendedWaitPathForTest(waitTimeoutSeconds);
+}
+
+Core::Status queueGlfwPointerEventsForNextPollForTest(
+    IPlatformBackend& backend, std::span<const GlfwPointerInjection> events) noexcept
+{
+    auto* glfwBackend = glfwBackendForTest(backend);
+    if (glfwBackend == nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
+    }
+    return glfwBackend->queuePointerEventsForNextPollForTest(events);
 }
 
 Core::Result<GlfwEventPumpStats> glfwEventPumpStatsForTest(IPlatformBackend& backend) noexcept

@@ -232,6 +232,9 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   Debug/Release、Linux GCC 13.4、Linux Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均通过，Clang
   无 sanitizer 诊断；初次 GCC 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次
   GCC/Clang 构建无 warning；
+- **已完成 M7-C1c-b3a**：Pointer Button/Wheel transition 固化事件时 window-logical position，
+  `PlatformFrameBuilder` 拒绝非有限坐标，私有 GLFW producer 按 callback 顺序保存位置；新增 builder
+  与真实 GLFW 集成门禁证明 `A → Button/Wheel → B` 中事件仍使用 A，帧末 B 不会覆盖历史坐标；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
   subtree 尚未实现；
 - **仍后置**：Runtime UI producer、dirty subtree pruning、持久 Pointer Capture、Focus/Modal、

@@ -4,7 +4,8 @@
 > fixed-step latch 与 `PlatformEventDispatcher` 已实现，首个私有 GLFW desktop adapter 也已完成
 > Window/Keyboard/Pointer/Focus/resize/close/committed text。M7-B1 已完成私有 WindowSurface handoff；
 > M7-B2 已完成私有真实 bgfx clear/present 和 Desktop smoke，production Gamepad、Windows IMM32 composition、OS Pointer
-> Capture 与完整 DPI/UI 门禁仍是后续能力。
+> Capture 与完整 DPI/UI 门禁仍是后续能力。M7-C1c-b3a 已补齐 Pointer Button/Wheel 的事件时
+> logical position，Runtime UI producer 不得再用帧末 Pointer snapshot 猜测命中位置。
 
 ## 结论
 
@@ -128,6 +129,9 @@ Gamepad registry 与最终 sampled state 属于 Engine，不复制进每个 Wind
 `InputTransitionBatch` 保存 Key/Button Down/Up、Pointer Move、Wheel、Gamepad observed button/axis
 change、已提交 UTF-8 text、composition、`InputCancelTransition` 和 `InputStreamReset`；每项都有适用的
 window/device/pointer id 与单调 sequence。
+Pointer Button 与 Wheel 还携带该条 transition 发生时的 window-logical position；该坐标由 backend
+按 callback 顺序固化，独立于 Poll 结束时的 `PointerSnapshot`。Runtime/UI 只能使用 transition 自带
+坐标做 hit-test，不能用帧末位置倒推，否则同帧 Button/Wheel 之后继续 Move 会命中错误节点。
 连续 Move 只有在中间不存在 Button/Wheel/Capture/Focus 边界时才可合并，文本、composition、
 Down/Up 与设备连接绝不合并。批次使用预分配有界存储：先合并可合并 Move；仍满时记录
 `InputOverflow` metric，并使用预留 control slot 写入不可丢的 `InputStreamReset`。Reset 使本帧
@@ -345,7 +349,8 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
   使 Gameplay digital control 保持 suppressed，直至真实 Up；
   axis/pointer continuous mapping 尚未实现；
 - keyboard/pointer/text/composition 在同一 Poll 内的 Down→Up 与多事件保持 sequence，Move 合并
-  不跨语义边界；Gamepad 只保证相邻 Poll sampled diff，不声称恢复 Poll 间完整 Down→Up；
+  不跨语义边界；Pointer Button/Wheel 保存事件时 logical position，后续帧末 Move 不会覆盖该位置；
+  Gamepad 只保证相邻 Poll sampled diff，不声称恢复 Poll 间完整 Down→Up；
 - Raw `InputTransitionBatch` 与 Simulation action latch 满容量时都通过保留的 reset/control slot
   发出显式 reset，取消 transient edge/repeat/capture，保留最终 physical state，并让仍 held/non-neutral
   的 control 进入 suppression；replay 记录 reset、最终 normalized state 与 tick 绑定，重放结果确定
@@ -360,12 +365,12 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
   surface snapshot 只由 committed metrics 派生、resize/content-scale/suspend 改变才递增
   `surfaceRevision`，以及 NullRender suspended 帧维护调用但不 present、不增加 submission index；
 - Windows 最新门禁在 MSVC 19.50.35717 与 CMake 4.2.3 下通过：Debug/Release 基础
-  `tina_tests` 183/183、GLFW专项22/22、`tina_sample_null` 300帧、`tina_sample_platform`
-  300帧；`TINA_BUILD_TESTING=OFF` 的 production-style GLFW 样例300帧也通过；
-- Linux M7-B1 门禁同样通过基础183/183、GLFW专项22/22与样例300帧。GCC 13.4 X11 的
-  Null/GLFW样例各通过300帧；Clang 22.1.8 X11 sanitizer 图的基础测试不使用 suppression，
-  Null/GLFW样例各通过300帧，只有 GLFW/X11 进程使用精确 `leak:_XimOpenIM`，对应专项
-  12次/4896 B与GLFW样例1次/408 B的libX11 XIM retention；GCC 13 Wayland 双后端产物
+  `tina_tests` 185/185、GLFW专项23/23；本次另运行 WindowSurface GLFW样例1800帧返回0。
+  `tina_sample_null` 300帧与 `TINA_BUILD_TESTING=OFF` production-style GLFW样例300帧是上一门禁结果；
+- Linux 当前 Pointer/Input 门禁通过基础185/185、GLFW专项23/23；Clang 22.1.8 X11 sanitizer
+  图的当前基础测试不使用 suppression，只有 GLFW/X11 专项进程使用精确 `leak:_XimOpenIM`，对应
+  13次/5304 B的libX11 XIM retention。GCC 13.4 与 Clang X11 的 Null/GLFW样例各300帧均为
+  上一产品门禁，其中 Clang GLFW样例命中1次/408 B。GCC 13 Wayland 双后端产物
   在带 `wl_seat` 的嵌套 Weston 9 下通过183/183、22/22与样例300帧，并通过移除
   `DISPLAY` 与断言 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND` 确认真正使用 Wayland；
   同一产物强制 X11 后也通过183/183、22/22与样例300帧。纯

@@ -6,6 +6,7 @@
 #include "GlfwBackendTestAccess.hpp"
 #include "WindowSurfaceLeaseAccess.hpp"
 
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <string_view>
@@ -46,6 +47,80 @@ TEST(GlfwBackendIntegrationTests, HiddenWindowPublishesCoherentPrimarySnapshot)
     auto stoppedPoll = (*backend)->pollFrame();
     ASSERT_FALSE(stoppedPoll.has_value());
     EXPECT_EQ(stoppedPoll.error().code, PlatformErrorCode::BackendStopped);
+}
+
+TEST(GlfwBackendIntegrationTests, PointerButtonAndWheelKeepEventTimeLogicalPosition)
+{
+    auto backend = createGlfwPlatformBackend(hiddenWindowParams());
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+
+    constexpr double CursorAX = 32.0;
+    constexpr double CursorAY = 48.0;
+    constexpr double CursorBX = 96.0;
+    constexpr double CursorBY = 128.0;
+    const std::array events{
+        Detail::GlfwPointerInjection{
+            .kind = Detail::GlfwPointerInjectionKind::CursorPosition,
+            .logicalX = CursorAX,
+            .logicalY = CursorAY,
+        },
+        Detail::GlfwPointerInjection{
+            .kind = Detail::GlfwPointerInjectionKind::Button,
+            .button = PointerButton::Primary,
+            .transition = DigitalTransition::Down,
+        },
+        Detail::GlfwPointerInjection{
+            .kind = Detail::GlfwPointerInjectionKind::Wheel,
+            .wheelDeltaX = 1.25,
+            .wheelDeltaY = -2.5,
+        },
+        Detail::GlfwPointerInjection{
+            .kind = Detail::GlfwPointerInjectionKind::CursorPosition,
+            .logicalX = CursorBX,
+            .logicalY = CursorBY,
+        },
+    };
+    ASSERT_TRUE(Detail::queueGlfwPointerEventsForNextPollForTest(**backend, events).has_value());
+
+    auto poll = (*backend)->pollFrame();
+    ASSERT_TRUE(poll.has_value()) << poll.error().message;
+    ASSERT_TRUE(poll->isContinueFrame());
+    ASSERT_NE(poll->frame(), nullptr);
+    const auto transitions = poll->frame()->inputTransitions();
+    ASSERT_EQ(transitions.size(), 4U);
+
+    const auto* firstMove = std::get_if<PointerMoveTransition>(&transitions[0].payload);
+    ASSERT_NE(firstMove, nullptr);
+    EXPECT_DOUBLE_EQ(firstMove->logicalX, CursorAX);
+    EXPECT_DOUBLE_EQ(firstMove->logicalY, CursorAY);
+
+    const auto* button = std::get_if<PointerButtonTransition>(&transitions[1].payload);
+    ASSERT_NE(button, nullptr);
+    EXPECT_EQ(button->button, PointerButton::Primary);
+    EXPECT_EQ(button->state, DigitalTransition::Down);
+    EXPECT_DOUBLE_EQ(button->logicalX, CursorAX);
+    EXPECT_DOUBLE_EQ(button->logicalY, CursorAY);
+
+    const auto* wheel = std::get_if<PointerWheelTransition>(&transitions[2].payload);
+    ASSERT_NE(wheel, nullptr);
+    EXPECT_DOUBLE_EQ(wheel->logicalX, CursorAX);
+    EXPECT_DOUBLE_EQ(wheel->logicalY, CursorAY);
+    EXPECT_DOUBLE_EQ(wheel->deltaX, 1.25);
+    EXPECT_DOUBLE_EQ(wheel->deltaY, -2.5);
+
+    const auto* secondMove = std::get_if<PointerMoveTransition>(&transitions[3].payload);
+    ASSERT_NE(secondMove, nullptr);
+    EXPECT_DOUBLE_EQ(secondMove->logicalX, CursorBX);
+    EXPECT_DOUBLE_EQ(secondMove->logicalY, CursorBY);
+    EXPECT_DOUBLE_EQ(secondMove->deltaX, CursorBX - CursorAX);
+    EXPECT_DOUBLE_EQ(secondMove->deltaY, CursorBY - CursorAY);
+
+    const WindowFrameSnapshot* primary = poll->frame()->primaryWindow();
+    ASSERT_NE(primary, nullptr);
+    EXPECT_DOUBLE_EQ(primary->input.pointer.logicalX, CursorBX);
+    EXPECT_DOUBLE_EQ(primary->input.pointer.logicalY, CursorBY);
+    EXPECT_TRUE(primary->input.pointer.isHeld(PointerButton::Primary));
+    (*backend)->shutdown();
 }
 
 TEST(GlfwBackendIntegrationTests, SuspendedPacingWaitsForEventsAcrossThreeHundredFrames)

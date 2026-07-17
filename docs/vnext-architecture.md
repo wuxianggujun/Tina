@@ -519,7 +519,9 @@ layout，失败的 `commitLayout()` 不发布任何 structure/layout/hit 候选�
 `queryPointerHit()` 已按反向 paint order 实现 world/clip point query，并返回 route index/revision/visited count。
 M7-C1c-b2 已实现 synthetic routed pointer event：固定容量 route path/listener storage、48-byte fixed-inline
 `noexcept` callback、generation-safe RAII token、Capture→Target→Bubble、stop/consume、route 中 add/reset/destroy
-安全失效与 route/commit reentrancy guard。当前 `tina_ui` 仍只依赖 Core/Platform；Runtime UI producer、
+安全失效与 route/commit reentrancy guard。M7-C1c-b3a 已让 Button/Wheel raw transition 固化事件时
+window-logical position，最终 Pointer snapshot 只表示 Poll 结束状态，不能替代 route 输入。当前 `tina_ui`
+仍只依赖 Core/Platform；Runtime UI producer、
 持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、dirty subtree pruning、
 FreeType 与 bgfx UI pass 仍未实现。完整目标中 UI 树输出后端无关的 Quad、Image、
 GlyphRange、Clip DisplayList，由 Render 层保持 paint order 批处理。

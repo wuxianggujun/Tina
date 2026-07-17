@@ -363,7 +363,9 @@ Focus lost、设备断开和 `InputStreamReset` 取消 transient edge、repeat�
 都不伪造会激活按钮的普通 Up。
 
 M7-A 的 Pointer snapshot、Pointer Button/Move/Wheel transition 与 pointer binding 只接受
-`PrimaryPointerId`（0），多 Pointer 是后续契约。`PlatformFrameBuilder` 还要求同一帧所有
+`PrimaryPointerId`（0），多 Pointer 是后续契约。M7-C1c-b3a 已让 Button/Wheel transition 携带
+事件时 window-logical position；它与帧末 Pointer snapshot 明确分离，Runtime UI route 不得用后者
+倒推历史命中位置。`PlatformFrameBuilder` 还要求同一帧所有
 `GamepadSnapshot` 使用同一 `GamepadId` owner，且一个 slot 只能出现一个 generation；Connect/Disconnect
 必须与最终 snapshot 及同 Poll 的 cancel/reset 证据一致。
 

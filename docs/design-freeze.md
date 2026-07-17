@@ -131,7 +131,9 @@ structure/layout/hit 三份 snapshot。当前 changed frame 仍对整棵 live tr
 `queryPointerHit()` 已在 M7-C1c-b1 按反向 paint order 实现无分配的 world/clip point query，并返回
 route index/revision/visited count；M7-C1c-b2 已实现 fixed-capacity synthetic listener route，包括
 generation-safe RAII token、48-byte fixed-inline `noexcept` callback、Capture→Target→Bubble、stop/consume、
-route 中 add/reset/destroy 安全失效与 route/commit reentrancy guard。Runtime producer、持久 Pointer Capture、
+route 中 add/reset/destroy 安全失效与 route/commit reentrancy guard。M7-C1c-b3a 已让 Platform Pointer
+Button/Wheel transition 固化事件时 logical position，禁止 Runtime 用帧末 Pointer snapshot 猜测历史命中。
+Runtime producer、持久 Pointer Capture、
 Focus/Modal、Button default action、paint snapshot/DisplayList、dirty subtree pruning 与 nested clip 尚未实现，
 不能把目标误写成现状。
 

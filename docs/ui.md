@@ -307,6 +307,8 @@ listener；`consumeInputTransition()` 只标记结果 consumed，不等于 Widge
 和递归 route 都有结构化语义或拒绝路径；容量不足时不派发任何 partial callback。当前仍没有持久
 Pointer Capture、Focus/Hover/Modal、Button default behavior、独立 z-order/stacking 或 nested clip policy；
 paint order 来自稳定 tree preorder，hit rebuild 仍线性扫描整份 committed layout，尚未按 dirty subtree 剪枝。
+M7-C1c-b3a 已在 Platform raw transition 层补齐 Button/Wheel 的事件时 logical position；未来 Runtime
+producer 必须原样传入 `UIPointerInputEvent.position`，不得使用帧末 Pointer snapshot 覆盖历史坐标。
 
 ## Flex-lite v1
 
