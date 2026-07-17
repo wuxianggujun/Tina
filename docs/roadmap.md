@@ -104,18 +104,60 @@ M6 后续但尚未实现：
 
 ## M7 Platform、最小 Surface 与高性能 UI 垂直切片
 
-- 实现 `tina_platform_glfw` 并迁移 GLFW Window/Input，不引入 SDL/SDL3；Windows IME 继续
-  只使用 IMM32；
-- 建立 `tina_bootstrap_desktop` 和私有最小 `tina_render_bgfx` Surface/UI Pass；Game SDK、
-  `tina_ui` public header 和 `IGameState` 不 include/link bgfx；
-- 保留独立 InputFrame（最终 Snapshot + 有序 transitions）、Event Queue 和 UI routed event；
-- 建立 WindowRecord-owned UIContext、带 owner 的 generation UINodeId、move-only RootOwner、committed
-  paint/hit snapshot、细粒度 dirty、Flex-lite、持久 PaintCache 和后端无关 DisplayList；
-- 迁移 Focus/Capture、Modal、Theme/DPI、中文字体和 TextEdit/IME；文本 layout 与 glyph raster
-  分离，Atlas 具有 generation/预算/retirement；
-- 使用版本化内置 Cooked Font/Texture fixture 形成 Label、Button、Modal 样例；禁止 Runtime
-  路径加载和 Legacy UIRenderer；
-- 为窗口失焦/销毁、composition、手柄回滞和输入重复建立自动化门禁。
+M7 分为五个独立提交，不将 GLFW、bgfx、FreeType、IMM32 和完整 UI 同时并入。
+
+### M7-A PlatformFrame 与 Input correctness
+
+- `tina_platform` 实现 generation `WindowId`、`PrimaryWindowConfig`、`WindowMetricsSnapshot`、
+  `PlatformFrameView`、`WindowInputSnapshot`、有序 `InputTransitionBatch` 与 `PlatformEventBatch`；
+- tests-only Scripted backend 可精确注入 Down→Up、Focus Cancel、overflow reset、resize/focus/close；
+  Headless 仍不链接 GLFW；
+- Runtime 建立空 UI consumption seam、`InputTransitionConsumption`、`ContinuousControlClaims`、
+  digital Action Map 和有序 Simulation Action latch，验证0/1/4 fixed-step 只消费一次；
+- `EngineConfig::input` 注册唯一 Engine default Input Context 的 digital bindings，并按已冻结默认/
+  硬上限一次性分配 raw/event/claim/action storage；Escape 不走 backend shortcut；
+- Runtime 建立只承载 resize/focus 等平台生命周期的有界 `PlatformEventQueue` 与 RAII subscription；
+  OS CloseRequested 只走 control outcome，不进入队列；这不是通用 Gameplay EventBus；
+- 实现私有 `tina_platform_glfw`：`GLFW_NO_API` 主窗口、create/destroy/poll、close/focus/
+  resize 与键鼠；不引入 SDL/SDL3，callback 只写预分配 buffer/sticky failure；
+- `tina_sample_platform` 用 GLFW Window + NullRender；Escape 通过 Frame Action 请求完整当帧后退出，
+  `--frames=N` 可自动退出；GLFW 失败不得静默降级 Headless；
+- 本切片不实现 native surface/bgfx、UI tree、FreeType、IMM32、Gamepad、通用 Gameplay EventBus 或多窗口。
+
+### M7-B Native Window Surface 与最小 bgfx
+
+- 按 ADR 0020 实现 move-only `NativeWindowSurfaceLease` 与内部
+  `PlatformAwareRenderFactory`；只有 `tina_render_bgfx` 私有 decoder 可解析 native payload；
+- 实现 Creating → Active ↔ Suspended → Closing → Draining → Closed，独立
+  `engineFrameIndex`/`submissionIndex`，覆盖 resize revision、300 suspended frames 与 drain 顺序；
+- 建立 `tina_bootstrap_desktop` 和私有最小 bgfx clear/present；Game SDK/Phase Context 不暴露
+  RenderDevice/native/bgfx，Engine Module SPI 只暴露纯 Tina Render 类型。
+
+### M7-C 增量 UI Core 与 Null DisplayList
+
+- 建立 WindowRecord-owned `UIContext`、Window-owned generation `UINodeId`、move-only RootOwner、
+  committed hit/paint snapshot、Flex-lite、细粒度 dirty 和持久 PaintCache；
+- 实现后端无关 Quad/Text/Clip DisplayList、FramePinSink/capacity rollback 和相邻兼容 batching
+  contract；Null UI 直接测试 route/layout/paint order，不链接 FreeType/bgfx；
+- 硬门禁：无变化 UI 每帧0 layout、0 PaintCache rebuild、0 Tina heap allocation。
+
+### M7-D 可见 UI 与中文字体
+
+- `tina_ui_freetype` 只在生产 adapter 中使用 FreeType，text layout 与 glyph raster 分离，
+  Atlas 带 generation/预算/retirement；
+- 扩展私有 `tina_render_bgfx` 实现后端无关 `UIDisplayListView` 的 UI Pass、内置 UI shader 与
+  Atlas texture upload；`tina_ui` 不链接 bgfx，也不暴露 view id/handle；
+- 使用版本化内置 Cooked Font/Texture fixture 形成 Panel、中文 Label、Button、Modal 可运行样例；
+  禁止 Runtime 路径加载源字体、直接调用 bgfx 或复用 Legacy UIRenderer/API。
+
+### M7-E Platform 完整输入
+
+- Windows IME 只使用私有 IMM32 adapter；补 Focus/Capture/composition 取消与窗口销毁顺序；
+- 接入 GLFW standard Gamepad sampled diff、primary-window routing、回滞/重复/Accept/Cancel；不伪造
+  两次 Poll 之间不可观测的 Down→Up；
+- 把 Gamepad connect/disconnect 生命周期加入 M7-A 的 `PlatformEventBatch/PlatformEventQueue`，断连先
+  产生 `InputCancelTransition` 再回收 generation；
+- 完成100%/150%/200% DPI、键鼠、composition、实体手柄与资源回收门禁。
 
 ## M8 Scene 与 2D 垂直切片
 

@@ -84,15 +84,19 @@ join；超过硬 shutdown deadline 仍有线程访问 Engine 内存时记录 Cra
 
 ## Event Queue 契约
 
-Runtime Event Queue 只承载主线程生命周期事件，例如 Window、设备连接、Asset 状态通知和
-App 自定义短事件；它不是 UI routed event，也不是 fixed gameplay command queue。
+Runtime Event Queue 只承载主线程生命周期事件，例如 Window resize/focus、
+设备连接、Asset 状态通知和 App 自定义短事件；它不是 UI routed event，也不是
+fixed gameplay command queue。首期窗口关闭不可取消，因此只作为
+`PlatformPollResult::ExitRequested` tagged 分支返回；Runtime 在 Poll 后、新帧开始前停止，不创建
+`PlatformFrameView` 或 engine frame index，也不再重复
+入队同义 `CloseRequested` 事件。
 
 - 后台线程只能写入有界 ingress queue，主线程在 Event Phase 按 sequence 稳定合并；
 - Event payload 在 dispatch 期间不可变，跨帧 payload 必须 owning，不能借用 Worker/Arena；
 - 订阅返回 RAII `SubscriptionToken`，dispatcher 先销毁、回调中退订和订阅者自销毁都安全；
 - dispatch 中新增订阅从下一事件生效，取消立即阻止尚未开始的回调；
 - 同一 dispatcher 的递归 dispatch 默认入队到当前事件之后，禁止无界递归调用栈；
-- 队列满时 Window close/fatal 等控制事件使用预留容量且不可丢；可丢 telemetry/refresh 事件
+- 队列满时 fatal 与已定义为可观察的控制事件使用预留容量且不可丢；可丢 telemetry/refresh 事件
   必须由事件类型显式声明并记录 dropped metric；
 - Event handler 不直接 push/pop `IGameState`、销毁 World、等待 Task 或取得
   `GameStateCommands`；它只写当前 State intent，由随后的 `updateFrame()` 转为延迟状态命令；
@@ -132,7 +136,7 @@ EngineHost::run(gameApplication)
 
 ## 完整目标 Frame 契约
 
-帧阶段固定为：Poll Platform → InputFrame Finalize（Snapshot + ordered transitions）→ Event Queue → Asset CPU Completion → Audio
+帧阶段固定为：Poll Platform → `PlatformFrameView` Finalize（Snapshot + ordered transitions）→ Event Queue → Asset CPU Completion → Audio
 Completion → UI Input Routing → Gameplay Action Mapping → Fixed Loop（每个 tick 内部 barrier +
 command commit + transform propagation）→ Frame Update（variable delta）→ State Transition Commit →
 Render Scene Extraction → UI Model
@@ -145,8 +149,8 @@ Runtime 每帧把单次单调时钟采样差传给
 `updateDelta`；超额整步 Simulation 债务被丢弃，小于一个 fixed delta 的余量保留。真实时间、
 玩法缩放时间、被拒绝的真实时间和被丢弃的 Simulation 时间分别记录，UI/Asset/Audio timeout
 仍使用未缩放真实时间。
-所有队列必须有预算、统计和唯一所有者。InputFrame、普通 Event Queue 与 UI routed event
-相互分离；UI 先产生消费掩码，避免玩法输入穿透。Pressed/Released Action 只由下一个实际
+所有队列必须有预算、统计和唯一所有者。`PlatformFrameView`、普通 Event Queue 与 UI routed event
+相互分离；UI 先产生 transition consumption 与 continuous control claims，避免玩法输入穿透。Pressed/Released Action 只由下一个实际
 fixed tick 消费一次，本帧0步不丢失、4步不重复。`IGameState` 结构变更只在 Frame Update 后提交；
 新状态参与同帧 Render/UI snapshot，下一帧才接收输入；World command 在每个 fixed substep 末提交。
 

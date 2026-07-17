@@ -19,11 +19,12 @@ ADR 记录已经接受或被替代的架构决定。主题文档描述完整设�
 | [0012](0012-miniaudio-backend.md) | Accepted | miniaudio 是唯一真实音频后端 |
 | [0013](0013-entt-internal-storage.md) | Accepted | EnTT 只作为 Scene 内部 ECS 存储 |
 | [0014](0014-runtime-phase-and-state.md) | Accepted | IGameApplication 程序入口 + IGameState 唯一帧状态接口 |
-| [0015](0015-input-and-fixed-step.md) | Proposed | InputFrame、Action domain 与逐 substep 提交 |
+| [0015](0015-input-and-fixed-step.md) | Accepted | PlatformFrameView、Action domain 与逐 substep 提交 |
 | [0016](0016-asset-ownership-and-retirement.md) | Proposed | 弱 Handle、强 Lease 与物理退役账本 |
 | [0017](0017-bounded-task-system.md) | Proposed | 有界结构化 Task System，不 detach/强杀 |
 | [0018](0018-benchmark-protocol.md) | Proposed | 版本化 benchmark 协议与固定门禁机 |
 | [0019](0019-generation-handles.md) | Accepted | 强类型 generation handle + owner 边界 |
+| [0020](0020-window-surface-handoff.md) | Accepted | 主窗口、move-only native surface lease 与 bgfx 交接 |
 
 新增 ADR 从 [模板](0000-template.md) 复制。替代旧决定时新建 ADR，并把旧记录状态改为
 Superseded 和链接新编号；不要改写历史理由。

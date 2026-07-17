@@ -1,7 +1,7 @@
 # vNext 设计冻结清单
 
-> 状态：分片冻结。Backend 组合、Runtime/State 与 C++ 错误边界已经接受并进入 Null Runtime
-> 实现；固定 hard-gate machine profile 仍需建立。
+> 状态：分片冻结。Backend 组合、Runtime/State、C++ 错误边界、M7 Input/UI 与
+> Window Surface 所有权已经接受；固定 hard-gate machine profile 仍需建立。
 
 Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未关闭的工程风险记录在
 [风险登记](risks.md)。本文是 Proposed/Accepted/Deferred 状态的权威汇总，Roadmap 只描述顺序。
@@ -13,8 +13,9 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 - Tina 是游戏优先的 2D/3D Runtime，不以编辑器优先；
 - Windows/Linux，Visual Studio 2026 / MSVC 19.50 为 Windows 主门禁，目标 C++23 与全链路 UTF-8；
 - GLFW + Windows IMM32，不使用 SDL/SDL3；
-- bgfx 是首个且唯一真实 Render backend，Game SDK、Tina module public header 和 Phase Context
-  均不暴露 RenderDevice/native handle/bgfx；普通游戏只调用 desktop bootstrap；
+- bgfx 是首个且唯一真实 Render backend；Game SDK 与 Phase Context 不暴露
+  `RenderDevice`/native handle/bgfx，Engine Module SPI 只可暴露纯 Tina Render 类型，任何已安装
+  public header 都不出现 bgfx/GLFW/Win32 类型；普通游戏只调用 desktop bootstrap；
 - EnTT 只作为 Scene 内部存储；
 - Tina 自研 Retained UI，不使用 RmlUi/ImGui 作为游戏 UI；
 - GoogleTest 1.17.0 直接运行，不使用 CTest 调度；
@@ -94,8 +95,15 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
   校验 owner `WindowId`，Debug cookie 只补充诊断；
 - generation handle 同时受 owner registry 限制，Debug 使用 owner cookie 检测跨 World/Device；
 - fixed update 中结构变更写 command buffer，每个 substep barrier 后稳定提交；
-- InputFrame 保留最终设备状态与有序 transitions；UI 使用上一帧稳定布局逐 transition 路由，
-  先于 Gameplay Action Mapping 产生消费掩码；
+- `PlatformFrameView` 保留每窗口最终 `WindowInputSnapshot` 与有序 transition batch；
+  UI 使用上一帧稳定布局逐 transition 路由，先于 Gameplay Action Mapping 产生
+  `InputTransitionConsumption` 与 `ContinuousControlClaims`；被 UI 消费的 Down 在匹配
+  release 前一直抑制 Gameplay held，axis claim 保持到 neutral；
+- 0 fixed-step 帧把有序 `SimulationActionTransitionBatch` 保留到下一个未完成
+  simulation tick；Focus lost、断连与 overflow 生成 `InputCancelTransition`/`InputStreamReset`，不伪造可点击
+  的普通 Up；
+- M7-A 的 Action bindings 只由 `EngineConfig::input` 注册到 Runtime-owned default Context；raw/event/
+  claim/Simulation/Frame/binding 默认容量为256/64/64/128/128/64，运行期固定且受文档硬上限约束；
 - World RenderScene 与 UI DisplayList 分别冻结，统一组合为 RenderFrame view；Runtime-private owning
   RenderFramePacket 持有 FrameArena/资源 lease/Atlas/surface pin/submit ticket 到 backend
   completion；Renderer 不访问 EnTT；
@@ -113,7 +121,7 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
   2D/UI/3D/Audio 门禁后翻为 OFF，最终删除选项和旧实现；
 - 垂直切片顺序为 Null Runtime → Platform/最小 Surface/UI → Scene/2D → Render/3D → Asset/Cooker →
   Product 2D/UI/Audio → Legacy 删除；
-- M7–M9 只使用版本化内置 Cooked fixture/procedural geometry；M7 已建立私有最小 bgfx UI Pass，
+- M7–M9 只使用版本化内置 Cooked fixture/procedural geometry；M7 将分片建立私有最小 bgfx UI Pass，
   M9 只扩展3D，禁止 UI 临时调用 Legacy renderer；
 - 每批都有代码、直接 GoogleTest、对应可运行样例、资源回收证据、UTF-8 文档和独立提交；
 - `tina_bench` Release 直接运行，普通 CI 不用不稳定的绝对微秒阈值；
@@ -128,11 +136,11 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 
 | 决策 | 状态 | 当前决定 | 影响 |
 | --- | --- | --- | --- |
-| Backend 组合 | [Accepted](adr/0003-backend-factories.md) | `Create(config, factories)`；production 与 headless/null 由 bootstrap 注入 | 消除 Runtime 对具体 backend 依赖 |
+| Backend 组合 | [Accepted](adr/0003-backend-factories.md) | `Create(config, factories)`；M7-B 使用 Independent 或 WindowSurface 的 tagged composition，bootstrap 只选 factory、EngineHost 唯一创建/回滚 owner | 消除 Runtime 对具体 backend 依赖与 lease 接线歧义 |
 | Runtime/State | [Accepted](adr/0014-runtime-phase-and-state.md) | `IGameApplication` lifecycle-only + `IGameState` 唯一帧入口；Frame Update 后提交状态命令 | 消除名称歧义、双帧入口与首帧 UI 时序冲突 |
-| RenderFrame 所有权 | Proposed | 轻量 RenderFrame view 放入 Runtime-private owning RenderFramePacket；Render SPI 只暴露 FramePinSink，资源/Atlas/surface pin 到 completion | 消除依赖环、UI 重复 extraction、backend 越界与在途 UAF |
-| UI 增量管线 | Proposed | 细粒度 dirty、一次 layout、持久 PaintCache、稳定 snapshot、相邻兼容 batching | 高性能且保持命中/透明顺序 |
-| Frame/Input | [Proposed](adr/0015-input-and-fixed-step.md) | InputFrame 保序、UI 先路由；Action 分 Simulation/Frame domain；每个 substep 独立 commit | 防输入穿透、同帧丢边沿、双重执行和追赶步错误 |
+| RenderFrame/Surface 所有权 | [Accepted](adr/0020-window-surface-handoff.md) | bgfx backend 在 factory 成功后持有 move-only window surface lease，Runtime 持有 owning RenderFramePacket；Render SPI 只暴露纯 Tina view/pin sink | 消除 native 泄漏、依赖环、backend 越界与在途 UAF |
+| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | 细粒度 dirty、每帧至多一次 layout、持久 PaintCache、committed hit/paint snapshot、相邻兼容 batching | 高性能且保持命中/透明顺序 |
+| Frame/Input | [Accepted](adr/0015-input-and-fixed-step.md) | 保序 PlatformFrame、UI transition consumption + continuous claims；Action 分 Simulation/Frame domain；每个 substep 独立 commit | 防输入穿透、0步帧丢边沿、双重执行和追赶步错误 |
 | C++ exception | [Accepted](adr/0004-exceptions-and-errors.md) | 编译开启；公共 API 用 Result/Status，Engine/Frame/Worker/C callback 边界捕获 | pmr/第三方兼容、错误边界 |
 | Generation | [Accepted](adr/0019-generation-handles.md) | 32位 generation，回绕 retire；UINodeId 所有构建编码 owner WindowId，Debug cookie 只诊断 | stale/跨 registry 安全 |
 | Asset 生命周期 | [Proposed](adr/0016-asset-ownership-and-retirement.md) | 弱 Handle、强 Lease、UploadTicket 和 retirement ledger | GPU/Audio 异步 UAF 防护 |
@@ -143,19 +151,19 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 | 固定 hard-gate 机器 | [Proposed](adr/0018-benchmark-protocol.md) | 当前开发机只做 provisional baseline；需创建稳定 machine profile 后才阻断绝对耗时 | 绝对 p99 是否可信 |
 | Cooked 布局 | [Accepted](adr/0009-cooked-assets-and-cgltf.md) | 每 Asset 独立文件 + 事务 Manifest + `tina_asset_format`；Bundle/Patch 后置 | Cooker/Runtime 一致性 |
 
-当前仍需在相应切片开始前确认的是 RenderFrame 所有权、UI 增量管线、Frame/Input、Asset 强弱
-所有权、Worker 默认值和 benchmark/hard-gate 规则；Backend、Runtime/State、C++ 错误边界、GLFW、
-Tracy、EASTL、bgfx、Cooked/cgltf 与测试调度不再重复摇摆。
+当前仍需在相应切片开始前确认的是 Asset 强弱所有权、Worker 默认值和
+benchmark/hard-gate 规则；Backend、Runtime/State、C++ 错误边界、GLFW、Input、UI、
+Window Surface、Tracy、EASTL、bgfx、Cooked/cgltf 与测试调度不再重复摇摆。
 
 ## P1：垂直切片内确认
 
-- StaticVector 的首批容量和哪些溢出可安全丢弃；
+- 后续非 Input 消费者的 StaticVector 容量和哪些溢出可安全丢弃；M7-A Input 容量已在主题文档冻结；
 - Fixed Simulation 首批并行系统和 chunk size；
 - FrameArena、Task callable inline、CPU/IO/Main completion queue 默认容量与线程栈预算；
 - RenderScene、UI DisplayList 与 upload staging 的默认字节预算；
 - 每个 benchmark 的 absolute noise floor、MAD 稳定阈值和 hard-gate machine profile；
 - Audio voice/command/completion/stream buffer 容量与 callback period 门禁；
-- Linux 正式 Clang/GCC 版本和 sanitizer preset；
+- 完整 GLFW/bgfx Linux 产品图的 X11/Wayland 选择与 sanitizer 复验；
 - UI Screenshot 的参考 GPU、字体和允许像素差。
 
 这些不阻塞完整目标架构冻结，但必须在对应切片编码前确认并写入 ADR 或主题文档。
@@ -172,7 +180,7 @@ Tracy、EASTL、bgfx、Cooked/cgltf 与测试调度不再重复摇摆。
 - Bundle/Patch、资产远程分发；
 - Jolt 3D 物理，直到真实3D玩法需要；Box2D/Jolt 不统一 API。
 
-## 冻结后的第一项实施
+## 已完成的第一切片与下一项实施
 
 第一切片 M6-A 实现 `tina_core + tina_platform(headless) + tina_task(DisabledTaskSystem) +
 tina_runtime + tina_render/NullRenderDevice + tina_tests + tina_sample_null`。它只固定
@@ -183,3 +191,8 @@ M6-A 不建立无真实消费者的 `scene/asset/ui/audio` 空壳，不实现 Wo
 GameStateStack/Commands、Asset、UI、Audio、Tracy 或 benchmark 协议。它完成300帧与10,000帧
 Null 运行，且不链接 GLFW/bgfx/EnTT/FreeType/miniaudio/Tracy/cgltf。后续切片必须先接受自己的
 P0/P1 决定，再加入对应模块和 benchmark；这样每个提交都可独立定位和回滚。
+
+M7 不作为一个巨型提交：M7-A 先实现 PlatformFrame/Input correctness、Scripted/Headless
+backend、GLFW `NO_API` 窗口 + NullRender 样例；M7-B 再实现 Native Window Surface lease 与
+bgfx clear/present；M7-C 实现 UIContext、增量 layout/PaintCache 与 Null DisplayList；M7-D 实现
+Label/Button/Modal + FreeType 可见样例；M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。

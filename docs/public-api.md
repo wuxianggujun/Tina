@@ -26,7 +26,7 @@ Tina 不把所有可链接 header 都称为“用户 API”：
 | 层级 | 面向对象 | 主要类型 |
 | --- | --- | --- |
 | Game SDK | 普通游戏代码 | `IGameApplication`、`IGameState`、`GameStateCommands`、World/Camera/component、AssetHandle、UI Widget |
-| Engine Module SPI | Tina 模块、backend adapter 和测试 | EngineFactories、RenderDevice typed handle/descriptor、RenderFrame、FramePinSink、Pass Scheduler |
+| Engine Module SPI | Tina 模块、backend adapter 和测试 | EngineFactories、PlatformFrameView、RenderDevice typed handle/descriptor、RenderFrame、FramePinSink、Pass Scheduler |
 | Backend Private | 具体 adapter | GLFW、bgfx/bx/bimg、FreeType、miniaudio、EnTT 等第三方类型 |
 
 M6-A 当前 Game SDK 只实现 `EngineHost`、`IGameApplication`、单个 `IGameState`、
@@ -313,6 +313,54 @@ M6-A 只提供上述时间数据；`SimulationActionSnapshot` 与 `FrameActionSn
 Input 切片会让 fixed context 只读取目标 tick 的 Simulation Action、frame context 只读取当帧
 Frame Action，并保证0步保留 edge、最多4步也只消费一次。
 
+## M7 PlatformFrame 与 Action 接口
+
+M7-A 已冻结下列职责完整的名称；它们是下一切片目标，不是 M6-A 已实现 API：
+
+| 类型 | API 层 | 职责与寿命 |
+| --- | --- | --- |
+| `WindowId` | Game SDK / Module SPI | 带 generation 的窗口标识，不能还原 native handle |
+| `PrimaryWindowConfig` | Desktop bootstrap / Module SPI | UTF-8 title、logical extent、窗口模式和能力策略的纯值配置 |
+| `WindowMetricsSnapshot` | Game SDK 只读 / Module SPI | logical/framebuffer extent、content scale、focus/minimized/visible 与唯一 metrics revision；不保存 Render surface suspended |
+| `PlatformPollResult` | Engine Module SPI | `ContinueFrame{PlatformFrameView}` 或 `ExitRequested` 的 tagged union；失败只通过外层 `Result` |
+| `PlatformFrameView` | Engine Module SPI | 只存在于 Continue 分支的 Poll/Input-phase borrowed view，包含 metrics/input/device snapshot、platform event 和 transition batch；Engine 结束该 phase 后失效 |
+| `WindowInputSnapshot` | Engine Module SPI | 该窗口在本次 Poll 结束时的 held/axis/pointer 最终状态，引用同一 metrics revision |
+| `InputTransitionBatch` | Engine Module SPI | 按 platform sequence 排序的有界 transition；不保存 GLFW key code 之类 backend 值 |
+| `PlatformEventBatch` / `PlatformEventQueue` | Engine Module SPI / Runtime | resize/focus/device lifecycle 的有界帧批次与 RAII 订阅队列；OS CloseRequested 不进入该队列 |
+| `InputTransitionConsumption` | Runtime/UI integration | 只标记本帧哪些 sequence 已由 UI 消费 |
+| `ContinuousControlClaims` | Runtime/UI integration | 只描述当前 UI route 的 held/axis/pointer ownership；Action Mapper 据此更新跨帧 suppression |
+| `InputActionId` | Game SDK | 显式的语义 Action 标识，不暴露物理键值为 gameplay contract |
+| `SimulationActionSnapshot` | Game SDK | 当前 simulation tick 的 state/axis + 有序 edge batch |
+| `FrameActionSnapshot` | Game SDK | 仅当前 Render Frame 可用一次的 camera/presentation/UI 外围 Action |
+
+`PlatformFrameView` 及其 span 只在当前 Poll/Input phase 有效，不能保存；backend storage 即使到
+下一次 Poll 才复用，也不延长 API 借用寿命。Runtime 先让 UI 产生
+transition consumption 和 continuous claims，再映射 Gameplay Action。被消费的 Down 建立
+`suppressedUntilReleaseOrNeutral`，匹配 Up 只解除 suppression，不补发 Gameplay edge；axis 回到
+neutral 才解除。
+Focus lost、设备断开和 `InputStreamReset` 取消 transient edge、repeat、Capture 与 composition，
+但不把跨帧状态粗暴清零：Action Mapper 对 resync 后仍 held/non-neutral 的 control 保留
+`suppressedUntilReleaseOrNeutral`；Simulation latch 插入 reset marker 并保留最终 action state。它们
+都不伪造会激活按钮的普通 Up。
+
+M7-A 的 Action Mapper 由 Runtime 拥有；`EngineConfig::input.digitalBindings` 是唯一注册入口，首批
+只有 priority=0 的 Engine default Input Context。`InputConfig` 还固定 raw/platform event/claims/
+Simulation/Frame action/binding 容量；默认分别为256/64/64/128/128/64，硬上限分别为
+4096/1024/1024/4096/4096/4096。批次另有不可被普通项占用的 reset slot，运行期不得扩容。
+
+0 fixed-step 帧不把 Down→Up 压成布尔值；Runtime 保存有界、有序
+`SimulationActionTransitionBatch`，并把它绑定到“下一个未完成 simulation tick”。第一个实际
+fixed step 消费 batch 一次，同帧后续3个追赶步只读最终 held/axis。回放记录最终
+Action state、ordered edges 和明确 target tick，不记录 GLFW 或 UI node。
+
+`FixedUpdateContext::simulationActions()` 只暴露目标 tick snapshot；
+`FrameUpdateContext::frameActions()` 只暴露当帧 snapshot。窗口关闭是不可取消的
+`PlatformPollResult::ExitRequested`，该分支不创建 `PlatformFrameView`、不分配 engine frame index；
+Runtime 在 Poll 后、新帧开始前停止，不再向 EventQueue
+重复发布同义 `CloseRequested`。游戏内 Escape/退出按钮继续通过 Frame Action 调用
+`requestExitAfterFrame()`，保证当帧逻辑阶段与 Deferred Cleanup 完整结束；Active surface 正常
+submit/present，Suspended surface 返回明确 skipped 结果且不伪造 GPU submission。
+
 ## EngineConfig
 
 `EngineConfig` 是可复制纯值，Create 前一次性验证：
@@ -335,7 +383,9 @@ TaskSystem 没有等待过程，因此 shutdown deadline 只完成配置校验�
 `EngineFactories` 只属于组合/测试 SPI，是一次性移动值，不是运行期 registry。M6-A 包含
 MonotonicClock、Platform、TaskSystem、RenderDevice 四个 move-only factory；每个 type-erased
 factory 接受窄 CreateParams 并返回 `Result<unique_ptr<Interface>>`，成功即由 EngineHost 接管并
-登记逆操作。缺少任一 factory 会在调用任何 factory 前失败。
+登记逆操作。缺少任一 factory 会在调用任何 factory 前失败。它是当前已实现的无 Surface 依赖
+最小接口，M7-B 会由下面的 tagged `EngineCompositionFactories` 取代，而不是再加一个可能同时填写的
+windowed render slot。
 
 - Runtime 不依赖具体 GLFW/bgfx/miniaudio factory；
 - `tina_bootstrap_desktop` 的一个 composition translation unit 选择真实 adapter；
@@ -343,6 +393,33 @@ factory 接受窄 CreateParams 并返回 `Result<unique_ptr<Interface>>`，成�
   UI/Audio 尚未实现；
 - factory 不保存 CreateParams、不注册全局对象、不后台完成半创建；
 - backend shutdown 幂等且由 EngineHost 唯一调用。
+
+### M7-B Window Surface integration SPI
+
+Windowed production 组合不能继续使用空 `RenderDeviceCreateParams`。M7-B 将在不安装到
+Game SDK 的 integration SPI 中实现：
+
+- `EngineCompositionFactories::platformRender` 是二选一 tagged union：
+  `IndependentPlatformRenderFactories{PlatformBackendFactory, RenderDeviceFactory}` 用于
+  Headless+Null/M7-A GLFW+Null；
+  `WindowSurfacePlatformRenderFactories{WindowedPlatformBackendFactory,
+  PlatformAwareRenderFactory}` 用于 GLFW+bgfx；
+- `IWindowedPlatformBackend` 同时实现 `IPlatformBackend` 和下面的 provider，因此 EngineHost 不做
+  RTTI/native escape；
+- `IPrimaryWindowSurfaceProvider::acquirePrimarySurfaceLease()` 返回 move-only
+  `NativeWindowSurfaceLease`；
+- `PlatformAwareRenderFactory` 在创建期接收 lease rvalue，成功后由具体 Render backend
+  持有，失败时在 factory 内完整回滚；
+- lease 只有 `tina_render_bgfx` 私有 decoder 可解析，没有 public native/`void*` getter；
+- `WindowSurfaceId` 与 `WindowSurfaceSnapshot` 是 Platform/Runtime integration 的清晰名称；
+  Render module 只接收转换后的 `RenderSurfaceState`；
+- shutdown 顺序固定为停止新 packet → drain submission → RenderDevice/bgfx shutdown →
+  lease release → GLFW window destroy → GLFW terminate。
+
+Desktop bootstrap 只构造 tagged factory bundle，不在外部创建或持有 owner；EngineHost 统一执行
+Clock → Platform → Task → lease（仅 WindowSurface）→ Render 的事务和逆序回滚。Null/Headless 与
+M7-A GLFW+Null 组合不构造伪 lease，GLFW/bgfx 失败也不得静默降级 Null。完整 factory
+签名与 Surface state machine 见 [ADR 0020](adr/0020-window-surface-handoff.md)。
 
 ## Handle、借用与 API 可见性
 
@@ -352,14 +429,16 @@ factory 接受窄 CreateParams 并返回 `Result<unique_ptr<Interface>>`，成�
 | --- | --- | --- | --- | --- |
 | `EngineHost` | M6-A 已实现 | Game SDK | main `unique_ptr`，直到 shutdown | Create/run `Result` |
 | 最小 Phase Context | M6-A 已实现 | Game SDK | Runtime stack，当前 callback | callback `Status` |
-| `WindowId/UINodeId` | M7 目标 | Game SDK | Window/UI registry generation + owner | invalid/stale/wrong owner |
+| `WindowId` | M7-A 目标 | Game SDK / Module SPI | Window registry generation | invalid/stale/wrong owner |
+| `WindowSurfaceId` | M7-B 目标 | Runtime integration SPI | Platform surface registry generation | invalid/stale/wrong owner/revision |
+| `UINodeId` | M7-C 目标 | Game SDK | Window-owned UI registry generation + WindowId owner | invalid/stale/wrong owner |
 | `EntityId` | M8 目标 | Game SDK | World registry generation + owner | invalid/stale/wrong owner |
 | `AssetHandle<T>` | M10 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
 | `AssetLease<T>` | M10 目标 | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
 | Render typed handle | M7/M9 目标 | Engine Module SPI | RenderDevice registry 到 retire | invalid/stale/wrong device |
 | 最小 `RenderFrame` | M6-A 已实现 | Engine Module SPI | 当前 submit 调用 | submit `Status` |
-| `UIDisplayListView` | M7 目标 | Engine Module SPI | 所属 Runtime-private RenderFramePacket 生命周期 | CapacityExceeded/invalid ref |
-| `RenderFramePacket` | M7 目标、Runtime Private | Runtime Private | Runtime 固定容量 pool；backend completion 前 owning | PoolExhausted/submit failure |
+| `UIDisplayListView` | M7-C 目标 | Engine Module SPI | 所属 Runtime-private RenderFramePacket 生命周期 | CapacityExceeded/invalid ref |
+| `RenderFramePacket` | M7-B/C 目标、Runtime Private | Runtime Private | Runtime 固定容量 pool；backend completion 前 owning | PoolExhausted/submit failure |
 
 M6-A 已实现的通用 `GenerationPool` 使用强类型 Tag，并在所有构建中校验非零 registry owner token、slot index
 和32位 generation；owner token 由当前单一 Core 链接镜像自动单调分配，registry 销毁后也不复用。
@@ -373,8 +452,9 @@ registry 创建并返回。
 ## 第三方与 native 零泄漏
 
 - Game SDK 与 Tina module public header 禁止 GLFW/bgfx/bx/bimg/FreeType/miniaudio/EnTT 类型；
+  Engine Module SPI 可公开纯 Tina `RenderDevice`/descriptor，但 Game SDK/Phase Context 不可见；
 - 游戏代码不获得 RenderDevice、native Window、GPU handle、ViewId 或 shader uniform；
-- Platform/Render 的 NativeSurfaceLease 位于内部 integration SPI，不安装到 Game SDK；
+- Platform/Render 的 `NativeWindowSurfaceLease` 位于内部 integration SPI，不安装到 Game SDK；
 - 公共错误只返回 Tina category/code、可选 native integer code 和 UTF-8 context；
 - public umbrella header 在没有第三方 include path 的外部 consumer 中独立编译。
 

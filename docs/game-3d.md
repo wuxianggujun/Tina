@@ -50,7 +50,7 @@ struct PerspectiveCamera {
 - 世界为右手坐标、Y-up、-Z forward、单位米；
 - FOV 公共 API 明确使用 degrees，不接受含糊裸 radians；
 - `0 < near < far`，所有数值必须 finite，越界在组件写入时返回错误；
-- aspect 来自当前有效 `SurfaceSnapshot` viewport，不存储在 Camera component；
+- aspect 来自当前有效 `WindowSurfaceSnapshot` viewport，不存储在 Camera component；
 - 每个启用 World view 首期恰好一个 active Camera，零个或多个都返回稳定诊断；
 - upper layer 只表达 Tina Camera descriptor。D3D/OpenGL 的 clip depth、origin 和 projection
   差异只在 Render backend 生成矩阵时处理，不能泄漏成玩法条件分支。

@@ -30,8 +30,16 @@ Widget、AssetHandle 或 RenderScene。ShaderAsset 的 Tina ABI 与私有 backen
 shaderc profile、BGFX flag 或 Uniform/Program handle。
 
 Surface initial clear/load 由 RenderFrame attachment ops 唯一定义，Scheduler 绑定到首个 enabled
-content pass；无 content 时发 clear-only operation，SurfaceSuspended 时不 clear/present。纯 UI、
+content pass；无 content 时发 clear-only operation，surface 为 `Suspended` 时不 clear/present。纯 UI、
 2D-only 和3D-only不能各自发明第二套 clear owner。
+
+主窗口创建、Tina-owned opaque surface lease 交接、resize revision、suspend/resume 以及
+close/drain 的完整所有权契约由 [ADR 0020](0020-window-surface-handoff.md) 冻结。bgfx backend
+不得创建或销毁 GLFW window；它只能消费 bootstrap 通过内部 integration SPI 移交的
+`NativeWindowSurfaceLease`，并且必须在释放该 lease 前停止新提交、完成在途 submission、关闭
+bgfx surface/device。`surfaceSuspended` 是单个 surface 的状态，不是整个 `RenderDevice` 的状态。
+Game SDK、Phase Context 和 Tina module public header 均不得因此获得 native handle、opaque payload
+访问器或 bgfx 类型。
 
 ## 结果
 
@@ -42,6 +50,8 @@ content pass；无 content 时发 clear-only operation，SurfaceSuspended 时不
 - public-header compile、forbidden-token、CMake dependency closure、无 bgfx Null preset 和外部
   SDK consumer 形成自动化硬门禁，不能只依赖人工约定。
 - 在途 packet 的 Asset unload、Atlas retire、Surface shutdown 和 Pass failure 必须有保活/归零测试。
+- `engineFrameIndex` 与 backend `submissionIndex` 独立；surface suspended 的跳帧不能伪造提交、
+  Present 或 completion ticket。
 
 ## 被拒绝方案
 

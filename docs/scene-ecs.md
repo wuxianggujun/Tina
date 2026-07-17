@@ -54,7 +54,7 @@ pop/replace 的 exit `noexcept` 且恰好一次。旧 pending operation 只有�
 目标数据流：
 
 ```text
-InputFrame -> UI consumption -> game commands -> fixed-step World systems
+PlatformFrameView -> UI consumption/claims -> game commands -> fixed-step World systems
 World components -> Render Scene Extraction -> RenderScene --+
                                                     +-> RenderFrame -> Pass Scheduler
 IGameState UI model -> retained UI tree -> DisplayList+

@@ -132,7 +132,7 @@ Tina 当前 miniaudio 路径只需要先保证 Engine/Resource/Voice 的关闭�
 
 1. 冻结完整 vNext 模块、Core 契约、公共接口、Frame Pipeline 和依赖方向；
 2. Null Runtime：新 `EngineHost`、失败回滚、Metrics 和 NullRenderDevice 连续300帧；
-3. Platform/UI：迁移 GLFW、InputFrame（最终 Snapshot + 有序 transitions）、中文、IMM32 与基础 UI；
+3. Platform/UI：迁移 GLFW、`PlatformFrameView`（最终 Snapshot + 有序 transitions）、中文、IMM32 与基础 UI；
 4. Scene/2D：generation Entity、command buffer、Render Scene Extraction 与 Sprite；
 5. Render/3D：typed handle、Pass Scheduler、bgfx、Perspective 与 depth；
 6. Asset/Cooker：双阶段队列、AssetId、Manifest 和最小静态 glTF；

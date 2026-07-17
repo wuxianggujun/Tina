@@ -1,6 +1,6 @@
 # 高性能自研 UI
 
-> 状态：vNext 候选冻结。Tina UI 是游戏内 Retained UI，不是 Immediate UI，也不是桌面编辑器工具包。
+> 状态：vNext 目标契约已接受，M7 尚未实现。Tina UI 是游戏内 Retained UI，不是 Immediate UI，也不是桌面编辑器工具包。
 
 ## 当前 Legacy 基线
 
@@ -23,9 +23,9 @@ Focus/Tab/方向导航、Modal Focus Scope、Theme/DPI、Clip、ScrollView、十
 ## 目标数据流
 
 ```text
-ordered InputFrame transitions
+ordered PlatformFrameView transitions
   -> route against previous CommittedUISnapshot
-  -> transition-level InputConsumption
+  -> InputTransitionConsumption + ContinuousControlClaims
   -> gameplay Action Mapping
   -> IGameState model/intent update
   -> UI structural command commit
@@ -54,7 +54,7 @@ UIContext
   Committed paint + hit-test + semantics snapshots
 ```
 
-Platform/Event 只把 `InputFrame` 交给 UIContext，不拥有节点、Focus、Capture 或 Layout。
+Platform/Event 只把 `PlatformFrameView` 的 UI-eligible transitions 交给 UIContext，不拥有节点、Focus、Capture 或 Layout。
 `IGameState` 持有 move-only `UIRootOwner` 和非 owning `UINodeId`，不持有 UIContext、Renderer、
 UINode 裸指针或跨帧 writer。
 
@@ -256,12 +256,12 @@ registration 生成每窗口不可变 `UIInputScopeSnapshot`。它按视觉层�
 不是对每个 State 依次 hit-test。这样“栈顶到栈底传播”表示 eligibility 计算顺序，不是重复分发。
 
 State/root 变为 ineligible 时，在下一份 input snapshot 发布前完成以下事务：有效 Pointer Capture
-先收到一次 Cancel 再释放；Focus 记录为该 root 的弱 `UINodeId` history，并转移到最上层 eligible
+先收到一次 `PointerCancel` 再释放；Focus 记录为该 root 的弱 `UINodeId` history，并转移到最上层 eligible
 root 的默认焦点；Modal scope 不允许跨 root。重新变为 eligible 时，仅在 history 仍通过 owner +
 generation 校验且未被新 modal 覆盖时恢复焦点。状态命令在路由结束后提交，因此当前 transition
 始终使用同一份 scope snapshot。
 
-- `InputFrame` 保留 ordered transitions；每个需要 target 的 Pointer transition最多一次 hit-test；
+- `PlatformFrameView` 保留 ordered transitions；每个需要 target 的 Pointer transition最多一次 hit-test；
 - 已有 Pointer Capture 的 transition 直接解析 captured UINodeId，通常0次 hit-test；
 - hit-test 逆 paint order 扫描 committed hit entries，以 bounds/clip 提前剪枝；首期不上 BVH，
   先记录 visited count，只有 profiling 证明需要才加分块索引；
@@ -270,10 +270,13 @@ generation 校验且未被新 modal 覆盖时恢复焦点。状态命令在路�
 - Capture -> Target -> Bubble 后执行可被 `preventDefault()` 取消的 Widget default action；
 - route 中新增 listener/child 从下一 transition/snapshot 生效；删除立即 tombstone、route 后回收；
 - Pointer Capture 按 pointerId 保存。首期 Mouse 使用 pointerId=0，不把预留字段宣称为触摸支持；
-- Focus、Modal、Keyboard、Gamepad Accept/Cancel 复用同一 default action 生命周期。
+- Focus、Modal、Keyboard、Gamepad Accept/BackNavigation 复用同一 default action 生命周期。
 
-UI 返回 transition-level `InputConsumptionMask`，Gameplay Action Mapping 只读取未消费 transition。
-UI routed listener 不复用 Runtime EventBus；二者的生命周期、顺序和 payload 不同。
+UI 返回只属于当前 Platform frame 的 `InputTransitionConsumption`，以及当帧
+`ContinuousControlClaims`。Gameplay Action Mapping 只读取未消费 transition 与未 claim control；
+被 UI 消费的 digital Down 由 Action Mapper 跨帧抑制到真实 release，axis 抑制到 neutral。
+Focus lost、断连和 `InputStreamReset` 产生 `InputCancelTransition`，不伪造可激活 Button 的普通 Up。UI routed
+listener 不复用 Runtime EventBus；二者的生命周期、顺序和 payload 不同。
 
 ## PaintCache、DisplayList 与批处理
 

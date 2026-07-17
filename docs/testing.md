@@ -66,11 +66,14 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
 - Platform/Task/Render M6-A：Headless shutdown 后拒绝 poll，Disabled TaskSystem 始终 idle 且
   shutdown 幂等；NullRenderDevice 强制连续 frame index 和 submit/present 配对，300帧始终
   `liveResources == 0`；各模块公共头均有独立编译门禁；
-- 3D Camera：60° 垂直 FOV 必须按 bx 要求以 degrees 进入投影矩阵，防止误转 radians 后 Cube 近距离铺满屏幕；
-- Event：优先级队列、RAII Token、dispatcher 先销毁、立即取消订阅，以及 IME composition 与已提交文本分离；
-- Resource：共享 FileSystem 唯一 completion pump、主线程预算、取消和过期 generation 隔离。
-- Windows 栈预算：EventSystem 实例不得重新引入超过默认线程栈预算的大块 inline queue；
-- UI：hit-test 不隐式布局、重叠节点唯一命中、Capture/Target/Bubble 顺序、动态子节点上下文继承、stale NodeId 失效、上下文先析构、节点移除/自移除生命周期、Pointer Capture 外部释放、Tab/Shift+Tab 焦点遍历、焦点 KeyDown 路由/默认取消/重复键抑制/路由中删除目标、KeyUp 完整路由/停止传播后的局部清理/路由中删除目标、方向键 beam 优先与隐藏/禁用节点过滤、Modal Focus Scope 限制/嵌套恢复/自动失效、设备无关语义导航的 scope/Accept/Cancel 生命周期、未处理按键向祖先回退、每窗口 Theme/DPI 隔离、200% DPI 逻辑坐标命中、裁剪边界、ScrollView 滚轮/钳制和十万行虚拟范围；Button action 还覆盖实例级重入隔离、异常后恢复、不同 action 嵌套、回调销毁自身，以及 Capture 阶段删除 routed click 目标后的 generation 失效。
+
+以下仍是 Legacy 共存构建的回归覆盖，不能当作 vNext UI/Scene/Asset 已实现：
+
+- Legacy 3D Camera：60° 垂直 FOV 必须按 bx 要求以 degrees 进入投影矩阵，防止误转 radians 后 Cube 近距离铺满屏幕；
+- Legacy Event：优先级队列、RAII Token、dispatcher 先销毁、立即取消订阅，以及 IME composition 与已提交文本分离；
+- Legacy Resource：共享 FileSystem 唯一 completion pump、主线程预算、取消和过期 generation 隔离；
+- Legacy Windows 栈预算：EventSystem 实例不得重新引入超过默认线程栈预算的大块 inline queue；
+- Legacy UI：hit-test 不隐式布局、重叠节点唯一命中、Capture/Target/Bubble 顺序、动态子节点上下文继承、stale NodeId 失效、上下文先析构、节点移除/自移除生命周期、Pointer Capture 外部释放、Tab/Shift+Tab 焦点遍历、焦点 KeyDown 路由/默认取消/重复键抑制/路由中删除目标、KeyUp 完整路由/停止传播后的局部清理/路由中删除目标、方向键 beam 优先与隐藏/禁用节点过滤、Modal Focus Scope 限制/嵌套恢复/自动失效、设备无关语义导航的 scope/Accept/Cancel 生命周期、未处理按键向祖先回退、每窗口 Theme/DPI 隔离、200% DPI 逻辑坐标命中、裁剪边界、ScrollView 滚轮/钳制和十万行虚拟范围；Button action 还覆盖实例级重入隔离、异常后恢复、不同 action 嵌套、回调销毁自身，以及 Capture 阶段删除 routed click 目标后的 generation 失效。
 
 ## 待补自动化门禁
 
@@ -85,7 +88,7 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
 - State Transition Commit 后新 State 同帧只 layout 一次、下一帧输入生效；pop/replace 按“关闭
   ingress → cancel → barrier/join → onExit → RAII 析构”清理 roots/focus/capture/TaskGroup，onExit
   恰好一次，Worker 不能观察已释放的 State 成员；
-- Platform 后续：Window/Gamepad stale generation、失焦合成 release、
+- Platform 后续：Window/Gamepad stale generation、失焦 `InputCancelTransition`、
   fixed 0/1/4步的 Action edge 只消费一次、DPI 和 IMM32 窗口销毁顺序；
 - 2D world picking 在 Action Mapping 使用 last-presented Camera/Surface revision 转换一次；0步后
   Camera 移动/resize 也不得改变已锁存 WorldPointerSample；viewport 外明确 no-hit；
@@ -111,10 +114,16 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   和稳定树序；Theme/DPI revision 只使必要 style/layout dirty，敏感 TextEdit 正文不进诊断；
 - Font Asset lease、UTF-8 非法序列替换、中文 fallback、Atlas page 满容量/退役、raster completion
   stale generation；text measure 与 raster 分离，glyph 发布只 Paint dirty，不改变既定 advance；
-- InputFrame 同 Poll 的 Down→Up、多次 Wheel/Text/Composition sequence、Move 不跨边界合并、
-  transition 满容量 resync，以及 UI consumption 后固定步0/1/4次的 Action edge 语义；
-- Simulation/Frame Action domain 不重复投递：0步帧保留 Simulation edge、Frame edge 当帧一次，
-  replay 只记录带目标 tick 的 Simulation Action；
+- PlatformFrameView 同 Poll 的 Down→Up、多次 Wheel/Text/Composition sequence、Move 不跨边界合并；
+  raw batch 满容量发出不可丢 `InputStreamReset`，Simulation action latch 满容量发出
+  `SimulationInputStreamReset`，不产生 stuck held/capture；
+- UI-consumed Down 建立 `suppressedUntilReleaseOrNeutral`，真实 Up 只解除抑制；Focus lost/断连/
+  reset 发出 `InputCancelTransition` 而不是可点击的普通 Up；GLFW Gamepad 只验证相邻 Poll sampled diff；
+- Simulation/Frame Action domain 不重复投递：多个0步帧的 ordered Simulation batch 绑定 next
+  uncompleted tick，1/4步时只在首个实际 tick 消费一次；Frame edge 当帧一次，replay
+  只记录 target tick、normalized state、ordered edge 和 reset marker；
+- OS CloseRequested 只产生一次 `PlatformPollResult::ExitRequested`，不创建 frame view/engine frame
+  index；Poll 后、新帧 phase 前停止，EventQueue 中不存在同义关闭事件；
 - Game SDK umbrella header 在无 bgfx/GLFW/EnTT include path 下独立编译；public source/include、
   module direct/public dependency 通过第三方 forbidden-token/target 检查；外部 Game consumer
   只声明 Game SDK + desktop bootstrap 也能完成生产链接；可选 `Tina::Physics2D` consumer 在无
@@ -123,7 +132,7 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   相邻兼容 batching 保持 paint checksum；
 - 在途 RenderFramePacket 期间卸载 Asset、退役 Atlas、关闭 Surface 和注入 Pass 失败仍保持引用
   有效；completion 后 packet/lease/pin/resource count 归零；纯 UI/2D-only/3D-only/无内容/
-  SurfaceSuspended 的 initial clear 次数固定，UI-only/2D-only depth allocation count 为0；
+  `Suspended` surface 的 initial clear 次数固定，UI-only/2D-only depth allocation count 为0；
 - Render Pass 顺序、禁用与失败停止、临时资源清理、typed handle generation 与
   RenderFramePacket 引用保活；
 - Asset CPU Decode/GPU Upload 双队列的 generation 取消，以及任务数、字节、时间预算和

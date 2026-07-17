@@ -19,6 +19,11 @@ Runtime。现有2D/UI/3D路径继续作为验收基线，新架构按可独立�
 
 当前旧文档已经替换，但旧源码架构仍是正在运行的主实现，并未完全删除。迁移状态和删除门禁见 [架构总览](docs/architecture.md)。物理后端固定为 2D Box2D 3.x 与 3D Jolt，不引入第三套物理引擎。
 
+vNext M6-A 已完成 C++23 Headless Runtime 生命周期内核。下一个实施切片是 M7-A：
+`PlatformFrameView`/Action latch、Scripted/Headless 测试 backend、私有 GLFW `NO_API` 窗口
+与 NullRender 样例。Native Surface/bgfx、UI Core、可见中文 UI 与 IMM32/Gamepad 分别放在
+M7-B–E，避免形成一个无法定位问题的巨型提交。
+
 ## 当前 Legacy 已完成基线
 
 - 现有 Legacy target 的包依赖已迁移到 vcpkg manifest；bgfx 与 EASTL/EABase 仍是源码依赖；

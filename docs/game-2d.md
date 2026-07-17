@@ -18,7 +18,7 @@ Game2DState
   -> tina_render_bgfx private backend
 ```
 
-World 不读取 GLFW/InputFrame，不 include 具体 TileMap，不持有 Renderer、ShaderManager、view id
+World 不读取 GLFW/`PlatformFrameView`，不 include 具体 TileMap，不持有 Renderer、ShaderManager、view id
 或 bgfx handle。输入先映射成 Simulation Action，再由 Game2DState/玩法系统写 World command。
 
 ## 坐标与 Camera2D
@@ -55,7 +55,7 @@ struct Camera2D {
 };
 ```
 
-Aspect 只来自当前 `SurfaceSnapshot` 的有效 viewport，不能由游戏缓存旧窗口宽高。Resize、DPI
+Aspect 只来自当前 `WindowSurfaceSnapshot` 的有效 viewport，不能由游戏缓存旧窗口宽高。Resize、DPI
 和最小化在帧边界生效。`FixedWorldHeight2D` 的实际 framebuffer PPM 为
 `viewportPixelHeight / heightMeters`；`PixelPerfect2D` 使用
 `integerScale = max(1, floor(viewportPixelHeight / referenceHeightPixels))`、
@@ -83,7 +83,7 @@ previous/current interpolation -> camera view transform -> optional pixel snap -
 接口预留 normalized viewport，不把策略硬编码进 shader。
 
 World picking 在 Gameplay Action Mapping 阶段完成一次：只有 UI 未消费 Pointer transition，才用
-该 `InputFrame` 对应的 last-presented `Camera2DSnapshot + SurfaceSnapshot` 将 logical coordinate
+该 `PlatformFrameView` 对应的 last-presented `Camera2DSnapshot + WindowSurfaceSnapshot` 将 logical coordinate
 转换为 `WorldPointerSample { positionMeters, cameraRevision, surfaceRevision, inputSequence }`。
 Simulation edge 即使跨0 fixed-step 帧保留，也保存这份 world point，不在消费 tick 用新 Camera
 重新换算；viewport 外输入返回明确的 no-hit。
@@ -200,7 +200,7 @@ Physics/Transform 同步固定为：
 ## 2D 每帧数据流
 
 ```text
-InputFrame
+PlatformFrameView
   -> UI routing / consumption
   -> Simulation Action latch
   -> Game2DState::fixedUpdate
@@ -231,7 +231,7 @@ InputFrame
 - `2D.TileMap.Scroll.256x256`：Camera 滚动、chunk culling、可见 tile 与 rebuild 数；
 - `2D.TileMap.DirtyChunks`：单点/矩形编辑只更新受影响 chunk；
 - `2D.Collision.TileAABB.Queries`：角色 sweep 和批量 query p50/p95/p99；
-- `2D.UIOverlay.InputConsumption`：UI 覆盖世界时 Pointer 不穿透。
+- `2D.UIOverlay.InputTransitionConsumption`：UI 覆盖世界时 Pointer 不穿透。
 
 记录 `visibleChunks`、`culledChunks`、`visibleSprites`、`batches`、`draws`、`textureSwitches`、
 `tileRebuilds`、`collisionQueries` 和各阶段 p50/p95/p99。Fixed Update、Render Scene Extraction 的

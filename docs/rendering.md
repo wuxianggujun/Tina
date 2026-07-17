@@ -1,6 +1,6 @@
 # 渲染架构与 bgfx 边界
 
-> 状态：vNext 候选冻结。bgfx 是 Tina 的实现依赖，不是游戏开发 API。
+> 状态：vNext 目标契约已接受，M7 尚未实现。bgfx 是 Tina 的实现依赖，不是游戏开发 API。
 
 ## 当前 Legacy 事实
 
@@ -60,8 +60,8 @@ struct RenderFrame {
 };
 ```
 
-`RenderSurfaceState` 是 `tina_render` 自己的纯值类型，只包含 framebuffer extent、format、revision
-和 suspended 等调度所需字段。Runtime 在帧边界从 Platform `SurfaceSnapshot` 显式转换并同时取得
+`RenderSurfaceState` 是 `tina_render` 自己的纯值类型，只包含 framebuffer extent、format、surfaceRevision
+和 suspended 等调度所需字段。Runtime 在帧边界从 Platform `WindowSurfaceSnapshot` 显式转换并同时取得
 owning `SurfaceLeasePin`；`tina_render` 因此不 include 或依赖 `tina_platform`。
 
 Game-facing `RenderSceneWriter` 位于 Scene/Runtime integration，使用当帧 Asset ready snapshot 把
@@ -84,7 +84,7 @@ RenderFramePacket
   tina_render::RenderFrameArena
   tina_render::FrameResourceTable (FrameResourceRef -> internal typed resource)
   StaticVector<tina_render::FrameLifetimePin, kMaxFramePins>
-  Runtime-private SurfaceLeasePin(surface token + revision)
+  Runtime-private SurfaceLeasePin(WindowSurfaceId + surfaceRevision)
   tina_render::SubmissionTicket (submit 后进入 in-flight)
 ```
 
@@ -180,18 +180,22 @@ Game SDK 的 Window API 只暴露 `WindowId` 和逻辑/Framebuffer metrics。Pla
 通过不安装到 Game SDK 的 integration SPI 协作：
 
 ```text
-SurfaceToken(index, generation)
-SurfaceSnapshot(extent, contentScale, revision, suspended)
-NativeSurfaceLease(kind, opaque Tina-owned POD payload)
+WindowSurfaceId(index, generation)
+WindowSurfaceSnapshot(extent, contentScale, sourceMetricsRevision, surfaceRevision, suspended)
+NativeWindowSurfaceLease(kind, opaque Tina-owned POD payload)
 ```
 
-只有 `tina_render_bgfx` 在创建/重置 surface 时把 `NativeSurfaceLease` 映射为 backend
+只有 `tina_render_bgfx` 在创建/重置 surface 时把 `NativeWindowSurfaceLease` 映射为 backend
 `PlatformData`。Game、Scene、UI 和公共 Render API 看不到 GLFWwindow、HWND、X11/Wayland、
-`bgfx::PlatformData` 或无类型 window/display 指针。Window 销毁前必须停止 surface submit、通过
-Render barrier并释放 lease。
+`bgfx::PlatformData` 或无类型 window/display 指针。生产 factory 成功后由 bgfx backend
+持有 move-only lease。Window 销毁前必须停止 surface submit、drain 真实 submission、关闭
+RenderDevice/bgfx，再释放 lease，最后由 Platform 销毁 GLFW window。
 
-Resize/content-scale 只在帧边界更新 revision；0×0 或最小化进入 `SurfaceSuspended`，跳过
-attachment 创建与 Present，并使用平台等待避免 busy loop。首期 device lost 返回结构化 fatal
+Resize/content-scale 只在帧边界更新 surfaceRevision；0×0 或最小化进入 surface
+`Suspended`，跳过 attachment 创建、surface submission 与 Present，并使用平台等待避免 busy loop。
+RenderDevice 仍保持 Ready 以处理 retirement/诊断。Runtime `engineFrameIndex` 与真实
+`submissionIndex` 独立；Suspended 帧不伪造 ticket/completion。OS CloseRequested 在 Poll 后、
+新帧 phase 前关闭 ingress，不发最后一帧 packet。首期 device lost 返回结构化 fatal
 run error并安全退出，不承诺透明恢复全部 GPU 资源。
 
 ## RenderView 与 Pass Scheduler
@@ -328,7 +332,7 @@ Tina category/code、可选 native integer code 和 UTF-8 context，不返回 bg
    一致的 pass/order/resource-lifetime checksum；
 9. 在途 packet 期间卸载 Asset、退役 Atlas、关闭 Surface 和注入 Pass 失败均保持引用有效，ticket
    完成后 packet/lease/pin/resource count 全部归零；
-10. 纯 UI、2D-only、3D-only、无 content 和 SurfaceSuspended 分别验证 initial clear 恰好一次或0次。
+10. 纯 UI、2D-only、3D-only、无 content 和 `Suspended` surface 分别验证 initial clear 恰好一次或0次。
 
 ## Roadmap 与验收解释
 

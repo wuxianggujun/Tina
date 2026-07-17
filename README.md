@@ -13,5 +13,10 @@ ambiguous `IGame` name is not part of the vNext API.
 Profiling uses Tina-owned trace points with optional Tracy; reproducible performance regression is
 handled separately by `tina_bench`. SDL/SDL3 and CTest are not part of the target architecture.
 
+The C++23 headless lifecycle kernel is complete. The next vertical slice is M7-A: explicit
+`PlatformFrameView` and action-latch semantics, scripted/headless platform tests, and a private
+GLFW `NO_API` window sample using NullRender. Native surface/bgfx and retained UI remain separate
+M7-B–E slices.
+
 The active design, verified status, and build instructions are maintained in
 the [Chinese documentation](README_CN.md).

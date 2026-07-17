@@ -64,8 +64,10 @@ State Transition Commit 位于 Frame Update 与 Render Scene Extraction 之间�
 
 首个 Null Runtime 切片只实现已提交的单个 initial State，以及
 `FrameUpdateContext::requestExitAfterFrame()`。该请求是主线程幂等 latch：当前帧仍须完成
-Render Scene Extraction、UI、Null Render submit/present 与 Deferred Cleanup；只有这些阶段全部
-成功后才正常退出，同帧错误优先于退出请求。首帧 `frameIndex` 为0，Deferred Cleanup 完成后才递增。
+Render Scene Extraction、UI、Render 处理与 Deferred Cleanup；只有这些阶段全部成功后才正常退出，
+同帧错误优先于退出请求。M6-A Null backend 的 Render 处理必然是 submit/present；M7 之后 Active
+surface 正常 submit/present，Suspended surface 返回明确 `SkippedSurfaceSuspended` 并回滚 frame-local
+pin，不伪造 GPU submission。首帧 `frameIndex` 为0，Deferred Cleanup 完成后才递增。
 
 `GameStateStack`、`GameStateCommands`、多 State 传播与 Transition Commit 的公共最终语义在本 ADR
 冻结，但实现推迟到具备真实 Menu/Settings/Gameplay 消费者的切片。首个切片不得为证明未来接口而

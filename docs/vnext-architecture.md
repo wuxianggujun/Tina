@@ -52,7 +52,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | `tina_asset_format` | Runtime/Cooker 共享的 Cooked header、schema、类型、依赖和 hash 编解码 | core | Asset registry、窗口、GPU、源格式 parser |
 | `tina_render` | typed handle、资源描述、RenderScene/DisplayList view、RenderSurfaceState、FramePinSink、Pass Scheduler | core | bgfx 公开类型、Scene registry、平台窗口细节、Asset/UI/Platform concrete pin |
 | `tina_render_bgfx` | bgfx 设备实现、shader/texture/buffer 上传与 Present | core/platform/render、bgfx | 游戏组件、源资产解析 |
-| `tina_ui` | Retained Tree、布局、路由输入、焦点、Widget、DisplayList、Glyph Atlas 和字体 rasterizer 接口 | core、platform InputFrame、asset 公共接口、render 描述 | bgfx/FreeType 类型、全局 UI 状态、隐式布局 |
+| `tina_ui` | Retained Tree、布局、路由输入、焦点、Widget、DisplayList、Glyph Atlas 和字体 rasterizer 接口 | core、platform `PlatformFrameView`、asset 公共接口、render 描述 | bgfx/FreeType 类型、全局 UI 状态、隐式布局 |
 | `tina_ui_freetype` | FreeType glyph rasterizer 的具体 adapter | core、ui、FreeType | Widget/Scene、Render backend、全局字体服务 |
 | `tina_audio` | AudioEngine、Bus/voice generation handle、实时命令/完成队列、Disabled backend | core/task、asset lease | miniaudio 类型、World/ECS、callback 内 IO/分配 |
 | `tina_audio_miniaudio` | miniaudio 设备/callback/stream backend | core、audio、miniaudio | Gameplay/World/UI、Asset registry 直接查询 |
@@ -292,7 +292,7 @@ run:    Ready -> Starting -> Running -> Stopping -> Stopped
 
 ```text
 Platform Poll
-  -> InputFrame Finalize (Snapshot + ordered transitions)
+  -> PlatformFrameView Finalize (Snapshot + ordered transitions)
   -> Event Queue
   -> Asset CPU Completion
   -> Audio Completion
@@ -318,7 +318,7 @@ Platform Poll
 
 状态和数据流约束：
 
-- InputFrame、普通 Event Queue、UI routed event 是三条独立通道；InputFrame 同时保留最终设备
+- PlatformFrameView、普通 Event Queue、UI routed event 是三条独立通道；PlatformFrameView 同时保留最终设备
   状态和有序 transition，不能用单个 pressed/released 布尔值代替同帧事件顺序；
 - UI 输入先于玩法 Action Mapping，消费掩码阻止同一 Pointer/Key 同时触发 UI 与玩法；UI
   使用上一帧稳定布局；每个 Pointer transition 最多 hit-test 一次，新 root 首次 layout 前不开放命中；
@@ -371,7 +371,7 @@ World view 和 Camera；首期只支持一个 primary World view，多视口/画
 Scene/Runtime integration 的 `RenderSceneWriter` 从 World 提取 Camera、Mesh/Sprite、Bounds 和
 Material 语义，并用当帧 Asset ready snapshot 解析为 `FrameResourceRef` 与 backend-neutral render
 packet；TileMap 的 tile span 先转为 `TileChunkRenderPacket`，不进入 Render SPI。UI Phase 单独
-冻结 `UIDisplayListView`。Runtime 把 Platform `SurfaceSnapshot` 转换成 render-owned
+冻结 `UIDisplayListView`。Runtime 把 Platform `WindowSurfaceSnapshot` 转换成 render-owned
 `RenderSurfaceState`，与前两者组合成轻量 `RenderFrame` view，并放入 Runtime-private owning
 `RenderFramePacket`；Scene 组件保存 AssetHandle，不保存 GPU/bgfx handle。
 
@@ -405,16 +405,20 @@ Pass 显式声明名称、顺序、读写资源及 clear/load/store 语义。执
 Headless 的 Present 是可计数 no-op；启用集合在执行前由不可变 RenderScene/Surface 状态决定。
 
 RenderDevice 只允许主线程调用资源 create/destroy、`beginFrame`、submit 和 `endFrame/present`；
-bgfx 可以拥有内部线程，但 Tina 不从任意 Worker 并发提交。设备状态固定为：
+bgfx 可以拥有内部线程，但 Tina 不从任意 Worker 并发提交。设备状态与单个 Window Surface
+状态必须分离：
 
 ```text
-Uninitialized -> Ready -> FrameOpen -> Ready
-Ready/FrameOpen -> SurfaceSuspended -> Ready
-任意活动状态 -> DeviceLost/Fatal -> ShuttingDown -> Stopped
+RenderDevice: Uninitialized -> Ready -> FrameOpen -> Ready
+              任意活动状态 -> DeviceLost/Fatal -> ShuttingDown -> Stopped
+WindowSurface: Creating -> Active <-> Suspended -> Closing -> Draining -> Closed
 ```
 
 - Window resize/content-scale 事件只在帧边界更新 surface；0×0/minimized 进入 Suspended，不创建
-  零尺寸 attachment，也不 busy-present；
+  零尺寸 attachment，不发 surface submission/present，也不 busy-present；RenderDevice 仍为
+  Ready 并可处理 retirement/诊断；
+- Runtime `engineFrameIndex` 与真实 `submissionIndex` 分离；Suspended 帧不伪造 ticket 或
+  completion，GPU 退役只依赖真实 submission completion；
 - 首期 device lost 作为结构化 fatal run error 并安全退出，不承诺透明重建所有 GPU 资源；
 - `beginFrame/endFrame` 不成对、跨 device/owner 使用 handle、重复 destroy 和 submit stale
   generation 都是可测试错误；Release handle 的 owner token 阻止相同 index/generation 在不同
@@ -518,19 +522,21 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
 设计冻结后再创建独立 `codex/` 分支和 worktree。主工作区未提交内容不复制、不 stash、
 不代替用户提交。实施按以下垂直切片推进：
 
-1. **Null Runtime**：`tina_core + tina_platform(headless) + tina_task + tina_runtime +
-   tina_render/NullRenderDevice + tina_tests + tina_bench + tina_sample_null`，并为最终 Context/
-   shutdown 建立 scene/asset/ui/audio 的最小契约和 Empty/Disabled 生命周期壳；连续运行300帧和
-   10,000帧，覆盖初始化失败回滚、阶段顺序和析构；不链接 GLFW/bgfx/EnTT/FreeType/miniaudio/
-   Tracy/cgltf，也不实现 World、Asset load、Widget/Glyph 或真实音频；
-2. **Platform/UI**：GLFW 输入、中文字体、IMM32、Label/Button/Modal 形成可运行 UI 样例；
-3. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；
-4. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D
+1. **Null Runtime（已完成 M6-A）**：`tina_core + tina_platform(headless) + tina_task +
+   tina_runtime + tina_render/NullRenderDevice + tina_tests + tina_sample_null`；不建立无消费者的
+   scene/asset/ui/audio 空壳，已完成300帧和10,000帧、初始化回滚、阶段顺序与析构门禁；
+2. **M7-A Platform/Input**：`PlatformFrameView`/Action latch、Scripted/Headless backend、GLFW `NO_API`
+   窗口 + NullRender 样例；
+3. **M7-B Surface**：move-only Native Window Surface lease、bgfx clear/present 与 resize/suspend/drain；
+4. **M7-C–E UI/IME/Gamepad**：增量 UIContext/DisplayList、Label/Button/Modal + FreeType、
+   IMM32/Gamepad/DPI 门禁；
+5. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；
+6. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D
    样例；
-5. **Asset**：双阶段队列、Cooked Manifest、纹理和静态 glTF 从 cooker 进入 2D/3D；
-6. **产品 2D/UI/Audio**：正式 Catalog TileMap、Box2D dynamic body、设置页 Checkbox/Slider 接入
+7. **Asset**：双阶段队列、Cooked Manifest、纹理和静态 glTF 从 cooker 进入 2D/3D；
+8. **产品 2D/UI/Audio**：正式 Catalog TileMap、Box2D dynamic body、设置页 Checkbox/Slider 接入
    miniaudio 与 fullscreen；
-7. **Legacy 删除**：确认旧接口零引用后，按模块独立删除旧 target/实现和无用依赖，不执行
+9. **Legacy 删除**：确认旧接口零引用后，按模块独立删除旧 target/实现和无用依赖，不执行
    模糊的整目录删除。
 
 每个切片包含代码、GoogleTest、构建/运行证据、UTF-8 文档和一个可回滚提交。只有新分支

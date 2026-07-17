@@ -22,10 +22,10 @@
 | GPU/Audio 异步物理寿命 | P0 | logical cancel 后 staging/PCM UAF、退出挂起 | Lease、UploadTicket、retirement ledger、callback ACK | 取消竞争与300帧退出资源归零 |
 | RenderFrame 在途引用失效 | P0 | Asset unload/Atlas eviction/Surface close 后 submit 仍引用旧内存 | owning RenderFramePacket、统一 lease/pin/ticket、固定 packet pool | 在途失败注入与 completion 后全计数归零 |
 | Shutdown deadline 后继续析构 | P0 | barrier 超时后 Arena/模块仍释放、后台线程继续访问 | 协作取消、owner 保活、CrashContext、硬 deadline 后 fast-fail | timeout 注入证明不会 reset/free 活跃内存 |
-| 控制事件/完成队列饱和 | P0 | Close/Fatal/Stop/Completion 被普通流量挤掉，退出死锁 | 有界队列、控制预留容量、每类 full 策略、current/peak/rejected 指标 | 满容量与饥饿测试仍能停止并回收 |
-| UI 输入穿透/首帧布局 | P1 | 点击菜单同时触发玩法、新 root 命中旧 geometry | UIInputScopeSnapshot、单次路由/消费、transition commit 后同帧 layout、下一帧输入 | 自动化路由和场景切换测试通过 |
-| Fixed 输入边沿丢失/重复 | P1 | 0步丢 pressed、4步触发4次、UI 消费后玩法仍响应 | 不可变 Snapshot、per-frame consumption、tick latch、回放 checksum | 0/1/4步与暂停/失焦测试通过 |
-| 同帧输入顺序/批次溢出 | P1 | Down→Up 丢边沿、Wheel/Text 乱序、held/capture 卡住 | InputFrame 有序 transition、Move 安全合并、满容量受控 resync | 顺序/溢出/恢复与回放测试通过 |
+| 控制事件/完成队列饱和 | P0 | Fatal/Stop/Completion 被普通流量挤掉，退出死锁 | 有界队列、控制预留容量、每类 full 策略、current/peak/rejected 指标；OS Close 独立为 Platform control outcome | 满容量与饥饿测试仍能停止并回收 |
+| UI 输入穿透/首帧布局 | P1 | 点击菜单同时触发玩法、UI-consumed Down 后 held 跨帧穿透、新 root 命中旧 geometry | UIInputScopeSnapshot、transition consumption + continuous claims、suppressed-until-release/neutral、单次 layout | 自动化路由、持续控制和场景切换测试通过 |
+| Fixed 输入边沿丢失/重复 | P1 | 多个0步帧丢 Down→Up、4步触发4次 | 不可变 Snapshot、ordered tick latch、显式 reset、回放 checksum | 0/1/4步与暂停/失焦测试通过 |
+| 同帧输入顺序/批次溢出 | P1 | Down→Up 丢边沿、Wheel/Text 乱序、held/capture 卡住 | PlatformFrameView 有序 transition、Move 安全合并、满容量显式 InputStreamReset | 顺序/溢出/恢复与回放测试通过 |
 | Audio callback 违反实时约束 | P1 | underrun、callback p99 接近 period、callback 中分配/锁等待 | 固定命令、SPSC、预分配、平台 profiler 交叉验证 | 1/32/128 voice 门禁0分配/0阻塞且 period 有余量 |
 | 自研文本/IME 跨平台差异 | P1 | 中文缺字、composition 丢失、Linux preedit 不一致 | 打包字体、UTF-8 边界、IMM32 测试、Linux 明确降级 | Windows 完整门禁，Linux 支持范围文档化 |
 | 跨 GPU 截图抖动 | P1 | driver/font 变化导致像素差 | 固定 reference profile、感知/区域阈值、逻辑测试优先 | 截图门禁误报率达到约定范围 |

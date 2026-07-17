@@ -1,7 +1,8 @@
-# ADR 0015：InputFrame、Action domain 与逐 substep 提交
+# ADR 0015：PlatformFrameView、Action domain 与逐 substep 提交
 
-- 状态：Proposed
+- 状态：Accepted
 - 日期：2026-07-16
+- 接受日期：2026-07-17
 
 ## 背景
 
@@ -9,20 +10,80 @@
 玩法穿透；把同一 Press 同时交给 Frame/Fixed Update 会双重执行。多个追赶步只在帧末提交
 World command，又会让第 N+1 步看不到第 N 步结果。
 
-## 推荐决定
+## 决定
 
-Platform 生成 InputFrame（最终 Snapshot + 有序 transition）。UI 使用上一帧稳定布局逐
-transition 路由并产生 consumption，Gameplay 随后映射；Action 明确属于 Simulation 或 Frame
-domain。Simulation edge 在下一个实际 fixed tick 消费一次，0步保留、4步不重复；Frame edge
-只在当帧 Frame Update 一次。固定60 Hz、最多4步，每个 substep 独立 jobs/barrier、稳定 command
-merge/commit、Transform propagation，Render 使用 previous/current interpolation。
+Platform 每轮 Poll 返回 `ContinueFrame{PlatformFrameView}` 或 `ExitRequested` 的 tagged
+`PlatformPollResult`；failure 只走外层 `Result`。只有 Continue 分支才生成一份不可变
+`PlatformFrameView`：最终 `WindowMetricsSnapshot`/`WindowInputSnapshot`、Engine 级设备 Snapshot、
+`PlatformEventBatch` 与按 Platform sequence 排序的 transition batch。ExitRequested 不创建 frame
+view、不分配 engine frame index，也不泵送 EventQueue 或进入本轮 Input/任何新 frame phase。
+UI 使用上一帧稳定布局逐 transition 路由；UI 输出与当前 `PlatformFrameView` 绑定的
+`InputTransitionConsumption`，按 transition sequence 标记一次性事件是否已被
+消费。Gameplay Action Mapping 只读取未消费 transition，不允许 UI 修改 Platform Snapshot。
+
+仅有逐帧 consumption 仍不足以阻止持续输入穿透，因此同时建立
+`ContinuousControlClaims` 与 Action Mapper 的 `suppressedUntilReleaseOrNeutral` 状态：
+
+- UI 消费数字控制的 Down 后，对应 physical control 在 Action Mapper 中保持 suppressed，直到
+  匹配的真实 Release；该 Release 只解除 suppression，不生成 Gameplay edge；
+- UI 通过 `ContinuousControlClaims` 接管一个已经 held 的 digital control 时同样立即建立
+  suppression，取消该 source 尚未完成的 Gameplay edge/repeat，并以 Action Cancel 而非 normal
+  Released 表达清理；
+- UI claim 连续 axis/pointer delta 后，该 control 保持 suppressed，直到回到配置 dead zone/neutral；
+- Focus loss、设备断开与输入流 reset 使用 `InputCancelTransition`/Reset 语义清理 UI Capture、composition、Action
+  edge 和 repeat；不能伪造普通 Up，因为普通 Up 可能触发 Button click 或 Gameplay release action；
+- `InputTransitionConsumption` 只活到当前 `PlatformFrameView`；`ContinuousControlClaims` 是当前路由结果，
+  `suppressedUntilReleaseOrNeutral` 由 Action Mapper 跨帧持有。三者职责不能合并成修改全局 held
+  状态的一个 bitset。
+
+Action 明确属于 Simulation 或 Frame domain。同一 active Input Context 中，同一 transition 默认
+只能映射到一个 domain；确需两个行为必须配置两条显式 binding。Frame Action transition 只在
+当前 Frame Update 消费一次，帧末丢弃。
+
+Simulation Action 使用有界、保序的 `SimulationActionTransitionBatch`。映射得到的 transition
+绑定到当前 next uncompleted simulation tick：
+
+- 本帧有 fixed step 时，batch 只由第一个实际 substep 消费，后续最多3个追赶步只读取 action 的
+  held/axis snapshot，不重复 edge；
+- 本帧0步时，batch 与最终 action state 跨 Render Frame 保留；后续 Down→Up 等 transition 继续按
+  source sequence 追加到同一目标 tick，不能压缩成单个 pressed/released bool；
+- 第一个实际执行该 tick 的 `FixedUpdateContext` 读取一次完整有序 batch，callback 返回后清空；
+- batch 使用配置固定容量并预留 Reset slot。容量耗尽时不得静默丢弃部分 edge：Runtime 记录
+  overflow metric，丢弃 reset 之前尚未消费的 transient edge，插入显式
+  `SimulationInputStreamReset`，保留最终 action state，并继续记录 reset 之后仍可容纳的 transition；
+  当前 held/non-neutral control 进入 suppressed，直到真实 release/neutral；
+- Replay 只记录归一化 Simulation Action 的目标 tick、最终 action state、有序 transition 与显式
+  reset marker；不记录 GLFW key、UI UINodeId 或消费实现细节。相同记录必须产生相同 tick 输入。
+
+原始 InputTransitionBatch 同样为预分配有界存储。可合并 Move 优先合并；仍满时产生不可丢的
+`InputStreamReset`，取消当前 UI/Action 交互并在下一帧从最终设备状态 resync。Focus loss 使用
+`InputCancelTransition(reason=FocusLost)`；两者都不是普通 Up/Release。
+
+M7-A Action Mapper 由 Runtime 唯一拥有，只实现 EngineConfig 注册的单一 immutable default Input
+Context（priority=0）。UI consumption/claim 优先；未来多 Context 以显式 priority 决胜，同 priority
+竞争同一 physical control 时拒绝激活，同一 Context 内禁止一个 control 重复绑定不同 action/domain。
+默认/硬容量冻结为：raw transition 256/4096、Platform event 64/1024、continuous claim 64/1024、
+pending Simulation transition 128/4096、Frame Action transition 128/4096、digital binding 64/4096；
+raw/event/simulation/frame batch 各有不计入有效项的一个 reset slot。所有容量 Create 时一次性分配，
+运行期不扩容。完整 reset 后续规则见[平台与输入](../platform-input.md)。
+
+主窗口 OS CloseRequested 是不可取消的 `PlatformPollResult::ExitRequested`：Platform Poll 返回后、下一个
+Runtime frame 开始前正常停止并进入统一 shutdown。它不进入可订阅 Runtime EventQueue，也不再
+派生第二个同义 Window event。游戏若需要确认退出，必须使用自己的 UI/State intent，再调用
+Runtime 的显式退出请求，不能劫持 OS CloseRequested。
+
+固定 Simulation 为60 Hz、每个 Render Frame 最多4步；每个 substep 独立 jobs/barrier、稳定
+command merge/commit 与 Transform propagation，Render 使用 previous/current interpolation。
 
 ## 代价
 
-- 需要有界 transition batch、resync、tick latch 和回放格式；
+- 需要有界 raw/action transition batch、control suppression、resync、tick latch 和回放格式；
 - UI 命中使用上一份 committed geometry；State Transition Commit 位于 Frame Update 后，使动态
   root 能在同帧唯一 UI layout 中进入 snapshot、下一帧才交互；
 - 每 substep barrier/commit 有固定成本，需要 benchmark 后再并行。
+- GLFW standard gamepad 只能轮询最终 sampled state，因此只能为相邻 Poll 之间观察到的状态差
+  生成 transition；无法承诺捕获两次 Poll 之间已经完成的物理 Down→Up。该限制必须进入能力说明
+  和 replay 语义，不能为补齐它引入 SDL/SDL3。
 
 ## 被拒绝方案
 
