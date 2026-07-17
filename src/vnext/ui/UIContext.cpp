@@ -1,9 +1,11 @@
 #include <tina/ui/UIContext.hpp>
 
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/ui/UIDirty.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <exception>
 #include <expected>
 #include <limits>
@@ -43,6 +45,8 @@ inline constexpr u32 InvalidNodeIndex = NodeStorageId::InvalidIndex;
 struct NormalizedCapacityConfig final {
     usize nodeCapacity = 0;
     usize rootCapacity = 0;
+    usize dirtyQueueCapacity = 0;
+    usize layoutSnapshotCapacity = 0;
 };
 
 struct NodeRecord final {
@@ -61,6 +65,36 @@ static_assert(std::is_nothrow_destructible_v<NodeRecord>);
 
 using NodePool = Core::GenerationPool<NodeRecord, Detail::UINodeRegistryTag>;
 
+struct LayoutScratchState final {
+    UILogicalSize measuredSize{};
+    UILogicalRect localRect{};
+    UILogicalRect worldRect{};
+    UILogicalRect effectiveClip{};
+    UIVisibility effectiveVisibility = UIVisibility::Visible;
+    bool parentContentWidthDefinite = false;
+    bool parentContentHeightDefinite = false;
+    float parentContentWidth = 0.0F;
+    float parentContentHeight = 0.0F;
+    bool contentWidthDefinite = false;
+    bool contentHeightDefinite = false;
+    float contentWidth = 0.0F;
+    float contentHeight = 0.0F;
+    u32 layoutOrdinal = 0;
+    u32 paintOrdinal = 0;
+};
+
+struct LayoutPassStatistics final {
+    usize passCount = 0;
+    usize measuredNodeCount = 0;
+    usize arrangedNodeCount = 0;
+    usize percentMeasureFallbackCount = 0;
+};
+
+struct ResolvedLength final {
+    bool hasValue = false;
+    float value = 0.0F;
+};
+
 [[nodiscard]] Core::Error makeError(
     Core::ErrorCode code,
     std::string_view message,
@@ -75,6 +109,266 @@ using NodePool = Core::GenerationPool<NodeRecord, Detail::UINodeRegistryTag>;
     Core::SourceLocation location = Core::SourceLocation::current())
 {
     return Core::failure(makeError(code, message, location));
+}
+
+[[nodiscard]] float normalizeFloat(float value) noexcept
+{
+    return value == 0.0F ? 0.0F : value;
+}
+
+[[nodiscard]] bool isFiniteNonNegative(float value) noexcept
+{
+    return std::isfinite(value) && value >= 0.0F;
+}
+
+[[nodiscard]] Core::Status normalizeLayoutLength(
+    UILayoutLength& length,
+    bool allowAuto)
+{
+    switch (length.unit) {
+    case UILayoutLengthUnit::Auto:
+        if (!allowAuto) {
+            return fail(UIErrorCode::InvalidLayout, "UI layout length cannot be Auto here");
+        }
+        length.value = 0.0F;
+        return Core::success();
+    case UILayoutLengthUnit::Px:
+        if (!isFiniteNonNegative(length.value)) {
+            return fail(
+                UIErrorCode::InvalidLayout,
+                "UI layout length must be finite and non-negative");
+        }
+        length.value = normalizeFloat(length.value);
+        return Core::success();
+    case UILayoutLengthUnit::Percent:
+        if (!isFiniteNonNegative(length.value) || length.value > 100.0F) {
+            return fail(
+                UIErrorCode::InvalidLayout,
+                "UI layout percent must be finite and within 0..100");
+        }
+        length.value = normalizeFloat(length.value);
+        return Core::success();
+    }
+
+    return fail(UIErrorCode::InvalidLayout, "UI layout length unit is invalid");
+}
+
+[[nodiscard]] Core::Status normalizeSpacing(float& value)
+{
+    if (!isFiniteNonNegative(value)) {
+        return fail(
+            UIErrorCode::InvalidLayout,
+            "UI layout spacing must be finite and non-negative");
+    }
+    value = normalizeFloat(value);
+    return Core::success();
+}
+
+[[nodiscard]] Core::Status normalizeEdgeSpacing(UIEdgeSpacing& spacing)
+{
+    if (Core::Status status = normalizeSpacing(spacing.left); !status) {
+        return status;
+    }
+    if (Core::Status status = normalizeSpacing(spacing.top); !status) {
+        return status;
+    }
+    if (Core::Status status = normalizeSpacing(spacing.right); !status) {
+        return status;
+    }
+    return normalizeSpacing(spacing.bottom);
+}
+
+[[nodiscard]] bool isValidFlexDirection(UIFlexDirection value) noexcept
+{
+    return value == UIFlexDirection::Row || value == UIFlexDirection::Column;
+}
+
+[[nodiscard]] bool isValidJustifyContent(UIJustifyContent value) noexcept
+{
+    return value == UIJustifyContent::Start
+        || value == UIJustifyContent::Center
+        || value == UIJustifyContent::End
+        || value == UIJustifyContent::SpaceBetween;
+}
+
+[[nodiscard]] bool isValidAlignItems(UIAlignItems value) noexcept
+{
+    return value == UIAlignItems::Start
+        || value == UIAlignItems::Center
+        || value == UIAlignItems::End
+        || value == UIAlignItems::Stretch;
+}
+
+[[nodiscard]] bool isValidPositionMode(UILayoutPositionMode value) noexcept
+{
+    return value == UILayoutPositionMode::InFlow
+        || value == UILayoutPositionMode::AbsoluteOverlay;
+}
+
+[[nodiscard]] bool isValidVisibility(UIVisibility value) noexcept
+{
+    return value == UIVisibility::Visible
+        || value == UIVisibility::Hidden
+        || value == UIVisibility::Collapsed;
+}
+
+[[nodiscard]] Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
+{
+    if (Core::Status status = normalizeLayoutLength(style.size.width, true); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeLayoutLength(style.size.height, true); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeLayoutLength(style.minMax.minWidth, true); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeLayoutLength(style.minMax.minHeight, true); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeLayoutLength(style.minMax.maxWidth, true); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeLayoutLength(style.minMax.maxHeight, true); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeEdgeSpacing(style.margin); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeEdgeSpacing(style.padding); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeLayoutLength(style.absoluteInset.left, true); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeLayoutLength(style.absoluteInset.top, true); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeLayoutLength(style.absoluteInset.right, true); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeLayoutLength(style.absoluteInset.bottom, true); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeSpacing(style.flex.grow); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeSpacing(style.flex.gap.row); !status) {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeSpacing(style.flex.gap.column); !status) {
+        return Core::failure(status.error());
+    }
+    if (!isValidFlexDirection(style.flex.direction)
+        || !isValidJustifyContent(style.flex.justify)
+        || !isValidAlignItems(style.flex.alignItems)
+        || !isValidPositionMode(style.position)
+        || !isValidVisibility(style.visibility)) {
+        return fail(UIErrorCode::InvalidLayout, "UI layout enum value is invalid");
+    }
+
+    return style;
+}
+
+[[nodiscard]] ResolvedLength resolveLength(
+    UILayoutLength length,
+    bool basisDefinite,
+    float basis,
+    LayoutPassStatistics& statistics) noexcept
+{
+    if (length.unit == UILayoutLengthUnit::Px) {
+        return ResolvedLength{.hasValue = true, .value = length.value};
+    }
+    if (length.unit == UILayoutLengthUnit::Percent) {
+        if (basisDefinite && isFiniteNonNegative(basis)) {
+            return ResolvedLength{
+                .hasValue = true,
+                .value = normalizeFloat(basis * (length.value * 0.01F)),
+            };
+        }
+        ++statistics.percentMeasureFallbackCount;
+    }
+    return {};
+}
+
+[[nodiscard]] ResolvedLength resolveLengthNoFallbackCount(
+    UILayoutLength length,
+    bool basisDefinite,
+    float basis) noexcept
+{
+    if (length.unit == UILayoutLengthUnit::Px) {
+        return ResolvedLength{.hasValue = true, .value = length.value};
+    }
+    if (length.unit == UILayoutLengthUnit::Percent
+        && basisDefinite
+        && isFiniteNonNegative(basis)) {
+        return ResolvedLength{
+            .hasValue = true,
+            .value = normalizeFloat(basis * (length.value * 0.01F)),
+        };
+    }
+    return {};
+}
+
+[[nodiscard]] float clampWithMinMax(
+    float value,
+    UILayoutLength minLength,
+    UILayoutLength maxLength,
+    bool basisDefinite,
+    float basis,
+    LayoutPassStatistics& statistics) noexcept
+{
+    const ResolvedLength minValue =
+        resolveLength(minLength, basisDefinite, basis, statistics);
+    ResolvedLength maxValue =
+        resolveLength(maxLength, basisDefinite, basis, statistics);
+    if (minValue.hasValue && maxValue.hasValue && maxValue.value < minValue.value) {
+        maxValue.value = minValue.value;
+    }
+    if (maxValue.hasValue) {
+        value = (std::min)(value, maxValue.value);
+    }
+    if (minValue.hasValue) {
+        value = (std::max)(value, minValue.value);
+    }
+    return normalizeFloat((std::max)(0.0F, value));
+}
+
+[[nodiscard]] float horizontalMargin(const UIEdgeSpacing& margin) noexcept
+{
+    return margin.left + margin.right;
+}
+
+[[nodiscard]] float verticalMargin(const UIEdgeSpacing& margin) noexcept
+{
+    return margin.top + margin.bottom;
+}
+
+[[nodiscard]] UILogicalRect intersectRects(UILogicalRect first, UILogicalRect second) noexcept
+{
+    const float left = (std::max)(first.x, second.x);
+    const float top = (std::max)(first.y, second.y);
+    const float right = (std::min)(first.right(), second.right());
+    const float bottom = (std::min)(first.bottom(), second.bottom());
+    return UILogicalRect{
+        .x = normalizeFloat(left),
+        .y = normalizeFloat(top),
+        .width = normalizeFloat((std::max)(0.0F, right - left)),
+        .height = normalizeFloat((std::max)(0.0F, bottom - top)),
+    };
+}
+
+[[nodiscard]] UIVisibility combineVisibility(
+    UIVisibility parent,
+    UIVisibility local) noexcept
+{
+    if (parent == UIVisibility::Collapsed || local == UIVisibility::Collapsed) {
+        return UIVisibility::Collapsed;
+    }
+    if (parent == UIVisibility::Hidden || local == UIVisibility::Hidden) {
+        return UIVisibility::Hidden;
+    }
+    return UIVisibility::Visible;
 }
 
 [[nodiscard]] Core::Result<NormalizedCapacityConfig> normalizeCapacity(
@@ -101,10 +395,24 @@ using NodePool = Core::GenerationPool<NodeRecord, Detail::UINodeRegistryTag>;
             UIErrorCode::InvalidContextConfig,
             "UI node capacity exceeds the node index range");
     }
+    const usize dirtyQueueCapacity = config.dirtyQueueCapacity == 0
+        ? config.nodeCapacity
+        : config.dirtyQueueCapacity;
+    const usize layoutSnapshotCapacity = config.layoutSnapshotCapacity == 0
+        ? config.nodeCapacity
+        : config.layoutSnapshotCapacity;
+    if (dirtyQueueCapacity > config.nodeCapacity
+        || layoutSnapshotCapacity > config.nodeCapacity) {
+        return fail(
+            UIErrorCode::InvalidContextConfig,
+            "UI derived capacities cannot exceed node capacity");
+    }
 
     return NormalizedCapacityConfig{
         .nodeCapacity = config.nodeCapacity,
         .rootCapacity = config.rootCapacity,
+        .dirtyQueueCapacity = dirtyQueueCapacity,
+        .layoutSnapshotCapacity = layoutSnapshotCapacity,
     };
 }
 
@@ -122,14 +430,29 @@ struct UIContext::Impl final {
     std::shared_ptr<Detail::UIContextLifetimeControl> lifetime;
     NodePool nodes;
     std::pmr::vector<UINodeId> idsByIndex;
+    std::pmr::vector<UILayoutStyle> layoutStylesByIndex;
+    std::pmr::vector<UIDirty> dirtyByIndex;
+    std::pmr::vector<u8> dirtyQueuedByIndex;
+    std::pmr::vector<UINodeId> dirtyQueue;
+    std::pmr::vector<LayoutScratchState> layoutScratchByIndex;
+    std::pmr::vector<u32> layoutOrderScratch;
     std::array<std::pmr::vector<UICommittedNodeEntry>, 2> committedBuffers;
+    std::array<std::pmr::vector<UICommittedLayoutEntry>, 2> committedLayoutBuffers;
     std::vector<UINodeId> deferredRootDestroyBuffer;
     usize publishedBufferIndex = 0;
+    usize publishedLayoutBufferIndex = 0;
     u64 committedRevision = 0;
+    u64 committedLayoutRevision = 0;
+    u64 committedLayoutStructureRevision = 0;
+    UILogicalSize committedViewportSize{};
+    bool hasCommittedViewport = false;
     usize liveRootCount = 0;
     u32 firstRootIndex = InvalidNodeIndex;
     u32 lastRootIndex = InvalidNodeIndex;
-    bool dirty = false;
+    bool structureDirty = false;
+    bool layoutDirty = false;
+    LayoutPassStatistics lastLayoutPass{};
+    usize dirtyQueueHighWater = 0;
 
     Impl(
         Platform::WindowId owner,
@@ -144,9 +467,18 @@ struct UIContext::Impl final {
           lifetime(std::move(lifetimeControl)),
           nodes(std::move(nodePool)),
           idsByIndex(&resource),
+          layoutStylesByIndex(&resource),
+          dirtyByIndex(&resource),
+          dirtyQueuedByIndex(&resource),
+          dirtyQueue(&resource),
+          layoutScratchByIndex(&resource),
+          layoutOrderScratch(&resource),
           committedBuffers{
               std::pmr::vector<UICommittedNodeEntry>(&resource),
-              std::pmr::vector<UICommittedNodeEntry>(&resource)}
+              std::pmr::vector<UICommittedNodeEntry>(&resource)},
+          committedLayoutBuffers{
+              std::pmr::vector<UICommittedLayoutEntry>(&resource),
+              std::pmr::vector<UICommittedLayoutEntry>(&resource)}
     {
     }
 
@@ -170,6 +502,8 @@ struct UIContext::Impl final {
         UIContextCapacityConfig capacities{
             .nodeCapacity = normalized.nodeCapacity,
             .rootCapacity = normalized.rootCapacity,
+            .dirtyQueueCapacity = normalized.dirtyQueueCapacity,
+            .layoutSnapshotCapacity = normalized.layoutSnapshotCapacity,
         };
 
         auto impl = std::unique_ptr<Impl>(new Impl(
@@ -180,8 +514,16 @@ struct UIContext::Impl final {
             std::move(*poolResult),
             resource));
         impl->idsByIndex.resize(normalized.nodeCapacity);
+        impl->layoutStylesByIndex.resize(normalized.nodeCapacity);
+        impl->dirtyByIndex.resize(normalized.nodeCapacity, UIDirty::None);
+        impl->dirtyQueuedByIndex.resize(normalized.nodeCapacity, 0);
+        impl->dirtyQueue.reserve(normalized.dirtyQueueCapacity);
+        impl->layoutScratchByIndex.resize(normalized.nodeCapacity);
+        impl->layoutOrderScratch.reserve(normalized.nodeCapacity);
         impl->committedBuffers[0].reserve(normalized.nodeCapacity);
         impl->committedBuffers[1].reserve(normalized.nodeCapacity);
+        impl->committedLayoutBuffers[0].reserve(normalized.layoutSnapshotCapacity);
+        impl->committedLayoutBuffers[1].reserve(normalized.layoutSnapshotCapacity);
         impl->deferredRootDestroyBuffer.reserve(normalized.rootCapacity);
         return impl;
     }
@@ -196,6 +538,685 @@ struct UIContext::Impl final {
             lifetime->context = nullptr;
             lifetime->deferredRootDestroys.clear();
         }
+    }
+
+    void buildCommittedStructure(std::pmr::vector<UICommittedNodeEntry>& output) const noexcept
+    {
+        output.clear();
+        u32 ordinal = 0;
+        u32 rootIndex = firstRootIndex;
+        while (rootIndex != InvalidNodeIndex) {
+            const NodeRecord* root = recordByIndex(rootIndex);
+            const u32 nextRootIndex = root == nullptr
+                ? InvalidNodeIndex
+                : root->nextSiblingIndex;
+            appendCommittedTree(rootIndex, ordinal, output);
+            rootIndex = nextRootIndex;
+        }
+    }
+
+    void appendLayoutOrderTree(u32 index, std::pmr::vector<u32>& output) const noexcept
+    {
+        const u32 rootIndex = index;
+        u32 currentIndex = rootIndex;
+        while (currentIndex != InvalidNodeIndex) {
+            const NodeRecord* record = recordByIndex(currentIndex);
+            if (record == nullptr) {
+                return;
+            }
+
+            output.push_back(currentIndex);
+
+            if (record->firstChildIndex != InvalidNodeIndex) {
+                currentIndex = record->firstChildIndex;
+                continue;
+            }
+
+            while (currentIndex != rootIndex) {
+                record = recordByIndex(currentIndex);
+                if (record == nullptr) {
+                    return;
+                }
+                if (record->nextSiblingIndex != InvalidNodeIndex) {
+                    currentIndex = record->nextSiblingIndex;
+                    break;
+                }
+                currentIndex = record->parentIndex;
+            }
+            if (currentIndex == rootIndex) {
+                currentIndex = InvalidNodeIndex;
+            }
+        }
+    }
+
+    void buildLayoutOrder(std::pmr::vector<u32>& output) const noexcept
+    {
+        output.clear();
+        u32 rootIndex = firstRootIndex;
+        while (rootIndex != InvalidNodeIndex) {
+            const NodeRecord* root = recordByIndex(rootIndex);
+            const u32 nextRootIndex = root == nullptr
+                ? InvalidNodeIndex
+                : root->nextSiblingIndex;
+            appendLayoutOrderTree(rootIndex, output);
+            rootIndex = nextRootIndex;
+        }
+    }
+
+    void prepareLayoutState(
+        UILogicalSize viewportSize,
+        const std::pmr::vector<u32>& order) noexcept
+    {
+        for (const u32 index : order) {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr) {
+                continue;
+            }
+            const UILayoutStyle& style = layoutStylesByIndex[index];
+            LayoutScratchState& scratch = layoutScratchByIndex[index];
+            scratch = {};
+
+            if (record->parentIndex == InvalidNodeIndex) {
+                scratch.effectiveVisibility = style.visibility;
+                scratch.parentContentWidthDefinite = true;
+                scratch.parentContentHeightDefinite = true;
+                scratch.parentContentWidth = viewportSize.width;
+                scratch.parentContentHeight = viewportSize.height;
+            } else {
+                const LayoutScratchState& parentScratch =
+                    layoutScratchByIndex[record->parentIndex];
+                scratch.effectiveVisibility =
+                    combineVisibility(parentScratch.effectiveVisibility, style.visibility);
+                scratch.parentContentWidthDefinite = parentScratch.contentWidthDefinite;
+                scratch.parentContentHeightDefinite = parentScratch.contentHeightDefinite;
+                scratch.parentContentWidth = parentScratch.contentWidth;
+                scratch.parentContentHeight = parentScratch.contentHeight;
+            }
+
+            const ResolvedLength width = resolveLengthNoFallbackCount(
+                style.size.width,
+                scratch.parentContentWidthDefinite,
+                scratch.parentContentWidth);
+            const ResolvedLength height = resolveLengthNoFallbackCount(
+                style.size.height,
+                scratch.parentContentHeightDefinite,
+                scratch.parentContentHeight);
+            const bool isRoot = record->parentIndex == InvalidNodeIndex;
+            scratch.contentWidthDefinite = width.hasValue || isRoot;
+            scratch.contentHeightDefinite = height.hasValue || isRoot;
+            const float outerWidth = width.hasValue ? width.value : viewportSize.width;
+            const float outerHeight = height.hasValue ? height.value : viewportSize.height;
+            scratch.contentWidth = scratch.contentWidthDefinite
+                ? (std::max)(0.0F, outerWidth - horizontalMargin(style.padding))
+                : 0.0F;
+            scratch.contentHeight = scratch.contentHeightDefinite
+                ? (std::max)(0.0F, outerHeight - verticalMargin(style.padding))
+                : 0.0F;
+        }
+    }
+
+    [[nodiscard]] float resolvedWidth(
+        const UILayoutStyle& style,
+        const LayoutScratchState& scratch,
+        LayoutPassStatistics& statistics) const noexcept
+    {
+        const ResolvedLength value = resolveLength(
+            style.size.width,
+            scratch.parentContentWidthDefinite,
+            scratch.parentContentWidth,
+            statistics);
+        return value.hasValue ? value.value : -1.0F;
+    }
+
+    [[nodiscard]] float resolvedHeight(
+        const UILayoutStyle& style,
+        const LayoutScratchState& scratch,
+        LayoutPassStatistics& statistics) const noexcept
+    {
+        const ResolvedLength value = resolveLength(
+            style.size.height,
+            scratch.parentContentHeightDefinite,
+            scratch.parentContentHeight,
+            statistics);
+        return value.hasValue ? value.value : -1.0F;
+    }
+
+    [[nodiscard]] float clampWidth(
+        float value,
+        const UILayoutStyle& style,
+        const LayoutScratchState& scratch,
+        LayoutPassStatistics& statistics) const noexcept
+    {
+        return clampWithMinMax(
+            value,
+            style.minMax.minWidth,
+            style.minMax.maxWidth,
+            scratch.parentContentWidthDefinite,
+            scratch.parentContentWidth,
+            statistics);
+    }
+
+    [[nodiscard]] float clampHeight(
+        float value,
+        const UILayoutStyle& style,
+        const LayoutScratchState& scratch,
+        LayoutPassStatistics& statistics) const noexcept
+    {
+        return clampWithMinMax(
+            value,
+            style.minMax.minHeight,
+            style.minMax.maxHeight,
+            scratch.parentContentHeightDefinite,
+            scratch.parentContentHeight,
+            statistics);
+    }
+
+    void measureLayout(
+        UILogicalSize viewportSize,
+        const std::pmr::vector<u32>& order,
+        LayoutPassStatistics& statistics) noexcept
+    {
+        for (usize reverseIndex = order.size(); reverseIndex > 0; --reverseIndex) {
+            const u32 index = order[reverseIndex - 1];
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr) {
+                continue;
+            }
+            const UILayoutStyle& style = layoutStylesByIndex[index];
+            LayoutScratchState& scratch = layoutScratchByIndex[index];
+            ++statistics.measuredNodeCount;
+
+            if (scratch.effectiveVisibility == UIVisibility::Collapsed) {
+                scratch.measuredSize = {};
+                continue;
+            }
+
+            float autoContentWidth = 0.0F;
+            float autoContentHeight = 0.0F;
+            usize flowChildCount = 0;
+
+            u32 childIndex = record->firstChildIndex;
+            while (childIndex != InvalidNodeIndex) {
+                const NodeRecord* childRecord = recordByIndex(childIndex);
+                if (childRecord == nullptr) {
+                    break;
+                }
+                const UILayoutStyle& childStyle = layoutStylesByIndex[childIndex];
+                const LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
+                if (childScratch.effectiveVisibility != UIVisibility::Collapsed
+                    && childStyle.position == UILayoutPositionMode::InFlow) {
+                    const float childOuterWidth =
+                        childScratch.measuredSize.width + horizontalMargin(childStyle.margin);
+                    const float childOuterHeight =
+                        childScratch.measuredSize.height + verticalMargin(childStyle.margin);
+                    if (style.flex.direction == UIFlexDirection::Row) {
+                        if (flowChildCount > 0) {
+                            autoContentWidth += style.flex.gap.column;
+                        }
+                        autoContentWidth += childOuterWidth;
+                        autoContentHeight = (std::max)(autoContentHeight, childOuterHeight);
+                    } else {
+                        autoContentWidth = (std::max)(autoContentWidth, childOuterWidth);
+                        if (flowChildCount > 0) {
+                            autoContentHeight += style.flex.gap.row;
+                        }
+                        autoContentHeight += childOuterHeight;
+                    }
+                    ++flowChildCount;
+                }
+                childIndex = childRecord->nextSiblingIndex;
+            }
+
+            float outerWidth = resolvedWidth(style, scratch, statistics);
+            float outerHeight = resolvedHeight(style, scratch, statistics);
+            if (outerWidth < 0.0F) {
+                outerWidth = record->parentIndex == InvalidNodeIndex
+                    ? (std::max)(
+                        autoContentWidth + horizontalMargin(style.padding),
+                        viewportSize.width)
+                    : autoContentWidth + horizontalMargin(style.padding);
+            }
+            if (outerHeight < 0.0F) {
+                outerHeight = record->parentIndex == InvalidNodeIndex
+                    ? (std::max)(
+                        autoContentHeight + verticalMargin(style.padding),
+                        viewportSize.height)
+                    : autoContentHeight + verticalMargin(style.padding);
+            }
+            outerWidth = clampWidth(outerWidth, style, scratch, statistics);
+            outerHeight = clampHeight(outerHeight, style, scratch, statistics);
+
+            scratch.measuredSize = UILogicalSize{
+                .width = normalizeFloat(outerWidth),
+                .height = normalizeFloat(outerHeight),
+            };
+        }
+    }
+
+    [[nodiscard]] bool isCrossAxisAuto(
+        const UILayoutStyle& style,
+        UIFlexDirection direction) const noexcept
+    {
+        return direction == UIFlexDirection::Row
+            ? style.size.height.isAuto()
+            : style.size.width.isAuto();
+    }
+
+    void assignLayoutRect(
+        u32 index,
+        UILogicalRect worldRect,
+        UILogicalRect parentWorldRect,
+        UILogicalRect viewportRect,
+        u32 ordinal) noexcept
+    {
+        LayoutScratchState& scratch = layoutScratchByIndex[index];
+        const UILayoutStyle& style = layoutStylesByIndex[index];
+        if (scratch.effectiveVisibility == UIVisibility::Collapsed) {
+            worldRect.width = 0.0F;
+            worldRect.height = 0.0F;
+        }
+        scratch.worldRect = worldRect;
+        scratch.localRect = UILogicalRect{
+            .x = normalizeFloat(worldRect.x - parentWorldRect.x),
+            .y = normalizeFloat(worldRect.y - parentWorldRect.y),
+            .width = normalizeFloat(worldRect.width),
+            .height = normalizeFloat(worldRect.height),
+        };
+        scratch.effectiveClip = scratch.effectiveVisibility == UIVisibility::Collapsed
+            ? UILogicalRect{}
+            : intersectRects(viewportRect, worldRect);
+        scratch.contentWidthDefinite = true;
+        scratch.contentHeightDefinite = true;
+        scratch.contentWidth = normalizeFloat(
+            (std::max)(0.0F, worldRect.width - horizontalMargin(style.padding)));
+        scratch.contentHeight = normalizeFloat(
+            (std::max)(0.0F, worldRect.height - verticalMargin(style.padding)));
+        scratch.layoutOrdinal = ordinal;
+        scratch.paintOrdinal = ordinal;
+    }
+
+    void refreshMeasuredSizeForParentContent(
+        u32 childIndex,
+        UILogicalRect parentContentRect,
+        LayoutPassStatistics& statistics) noexcept
+    {
+        const UILayoutStyle& childStyle = layoutStylesByIndex[childIndex];
+        LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
+        childScratch.parentContentWidthDefinite = true;
+        childScratch.parentContentHeightDefinite = true;
+        childScratch.parentContentWidth = parentContentRect.width;
+        childScratch.parentContentHeight = parentContentRect.height;
+
+        const float resolvedOuterWidth = resolvedWidth(childStyle, childScratch, statistics);
+        const float resolvedOuterHeight = resolvedHeight(childStyle, childScratch, statistics);
+        const float outerWidth = resolvedOuterWidth >= 0.0F
+            ? resolvedOuterWidth
+            : childScratch.measuredSize.width;
+        const float outerHeight = resolvedOuterHeight >= 0.0F
+            ? resolvedOuterHeight
+            : childScratch.measuredSize.height;
+        childScratch.measuredSize = UILogicalSize{
+            .width = clampWidth(outerWidth, childStyle, childScratch, statistics),
+            .height = clampHeight(outerHeight, childStyle, childScratch, statistics),
+        };
+    }
+
+    [[nodiscard]] float resolveInset(
+        UILayoutLength length,
+        float basis,
+        LayoutPassStatistics& statistics) const noexcept
+    {
+        const ResolvedLength resolved = resolveLength(length, true, basis, statistics);
+        return resolved.hasValue ? resolved.value : -1.0F;
+    }
+
+    void arrangeAbsoluteChild(
+        u32 childIndex,
+        UILogicalRect parentContentRect,
+        UILogicalRect parentWorldRect,
+        UILogicalRect viewportRect,
+        LayoutPassStatistics& statistics) noexcept
+    {
+        const UILayoutStyle& childStyle = layoutStylesByIndex[childIndex];
+        LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
+        refreshMeasuredSizeForParentContent(childIndex, parentContentRect, statistics);
+        const float left = resolveInset(
+            childStyle.absoluteInset.left,
+            parentContentRect.width,
+            statistics);
+        const float right = resolveInset(
+            childStyle.absoluteInset.right,
+            parentContentRect.width,
+            statistics);
+        const float top = resolveInset(
+            childStyle.absoluteInset.top,
+            parentContentRect.height,
+            statistics);
+        const float bottom = resolveInset(
+            childStyle.absoluteInset.bottom,
+            parentContentRect.height,
+            statistics);
+
+        float width = childScratch.measuredSize.width;
+        float height = childScratch.measuredSize.height;
+        if (childStyle.size.width.isAuto() && left >= 0.0F && right >= 0.0F) {
+            width = (std::max)(0.0F, parentContentRect.width - left - right);
+        }
+        if (childStyle.size.height.isAuto() && top >= 0.0F && bottom >= 0.0F) {
+            height = (std::max)(0.0F, parentContentRect.height - top - bottom);
+        }
+        width = clampWidth(width, childStyle, childScratch, statistics);
+        height = clampHeight(height, childStyle, childScratch, statistics);
+
+        const float x = left >= 0.0F
+            ? parentContentRect.x + left
+            : (right >= 0.0F ? parentContentRect.right() - right - width : parentContentRect.x);
+        const float y = top >= 0.0F
+            ? parentContentRect.y + top
+            : (bottom >= 0.0F ? parentContentRect.bottom() - bottom - height : parentContentRect.y);
+
+        assignLayoutRect(
+            childIndex,
+            UILogicalRect{
+                .x = normalizeFloat(x),
+                .y = normalizeFloat(y),
+                .width = normalizeFloat((std::max)(0.0F, width)),
+                .height = normalizeFloat((std::max)(0.0F, height)),
+            },
+            parentWorldRect,
+            viewportRect,
+            0);
+    }
+
+    void arrangeChildren(
+        u32 parentIndex,
+        UILogicalRect viewportRect,
+        LayoutPassStatistics& statistics) noexcept
+    {
+        const NodeRecord* parentRecord = recordByIndex(parentIndex);
+        if (parentRecord == nullptr) {
+            return;
+        }
+        const UILayoutStyle& parentStyle = layoutStylesByIndex[parentIndex];
+        const LayoutScratchState& parentScratch = layoutScratchByIndex[parentIndex];
+        const UILogicalRect parentWorldRect = parentScratch.worldRect;
+        const UILogicalRect parentContentRect{
+            .x = normalizeFloat(parentWorldRect.x + parentStyle.padding.left),
+            .y = normalizeFloat(parentWorldRect.y + parentStyle.padding.top),
+            .width = normalizeFloat(
+                (std::max)(0.0F, parentWorldRect.width - horizontalMargin(parentStyle.padding))),
+            .height = normalizeFloat(
+                (std::max)(0.0F, parentWorldRect.height - verticalMargin(parentStyle.padding))),
+        };
+
+        if (parentScratch.effectiveVisibility == UIVisibility::Collapsed) {
+            u32 collapsedChild = parentRecord->firstChildIndex;
+            while (collapsedChild != InvalidNodeIndex) {
+                const NodeRecord* childRecord = recordByIndex(collapsedChild);
+                if (childRecord == nullptr) {
+                    break;
+                }
+                assignLayoutRect(collapsedChild, parentContentRect, parentWorldRect, viewportRect, 0);
+                collapsedChild = childRecord->nextSiblingIndex;
+            }
+            return;
+        }
+
+        const bool row = parentStyle.flex.direction == UIFlexDirection::Row;
+        const float contentMain = row ? parentContentRect.width : parentContentRect.height;
+        const float contentCross = row ? parentContentRect.height : parentContentRect.width;
+        const float configuredGap = row ? parentStyle.flex.gap.column : parentStyle.flex.gap.row;
+
+        usize flowChildCount = 0;
+        float totalMain = 0.0F;
+        double totalGrow = 0.0;
+        u32 childIndex = parentRecord->firstChildIndex;
+        while (childIndex != InvalidNodeIndex) {
+            const NodeRecord* childRecord = recordByIndex(childIndex);
+            if (childRecord == nullptr) {
+                break;
+            }
+            const UILayoutStyle& childStyle = layoutStylesByIndex[childIndex];
+            LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
+            if (childScratch.effectiveVisibility != UIVisibility::Collapsed
+                && childStyle.position == UILayoutPositionMode::InFlow) {
+                refreshMeasuredSizeForParentContent(
+                    childIndex,
+                    parentContentRect,
+                    statistics);
+                if (flowChildCount > 0) {
+                    totalMain += configuredGap;
+                }
+                totalMain += row
+                    ? childScratch.measuredSize.width + horizontalMargin(childStyle.margin)
+                    : childScratch.measuredSize.height + verticalMargin(childStyle.margin);
+                totalGrow += static_cast<double>(childStyle.flex.grow);
+                ++flowChildCount;
+            }
+            childIndex = childRecord->nextSiblingIndex;
+        }
+
+        const float freeSpace = contentMain - totalMain;
+        const float growSpace = totalGrow > 0.0 ? (std::max)(0.0F, freeSpace) : 0.0F;
+        float mainOffset = 0.0F;
+        float gap = configuredGap;
+        if (totalGrow == 0.0 && freeSpace > 0.0F) {
+            switch (parentStyle.flex.justify) {
+            case UIJustifyContent::Center:
+                mainOffset = freeSpace * 0.5F;
+                break;
+            case UIJustifyContent::End:
+                mainOffset = freeSpace;
+                break;
+            case UIJustifyContent::SpaceBetween:
+                if (flowChildCount > 1) {
+                    gap += freeSpace / static_cast<float>(flowChildCount - 1);
+                }
+                break;
+            case UIJustifyContent::Start:
+                break;
+            }
+        }
+
+        childIndex = parentRecord->firstChildIndex;
+        while (childIndex != InvalidNodeIndex) {
+            const NodeRecord* childRecord = recordByIndex(childIndex);
+            if (childRecord == nullptr) {
+                break;
+            }
+            const u32 currentChild = childIndex;
+            childIndex = childRecord->nextSiblingIndex;
+            const UILayoutStyle& childStyle = layoutStylesByIndex[currentChild];
+            LayoutScratchState& childScratch = layoutScratchByIndex[currentChild];
+
+            if (childScratch.effectiveVisibility == UIVisibility::Collapsed) {
+                assignLayoutRect(currentChild, parentContentRect, parentWorldRect, viewportRect, 0);
+                continue;
+            }
+            if (childStyle.position == UILayoutPositionMode::AbsoluteOverlay) {
+                arrangeAbsoluteChild(
+                    currentChild,
+                    parentContentRect,
+                    parentWorldRect,
+                    viewportRect,
+                    statistics);
+                continue;
+            }
+
+            float width = childScratch.measuredSize.width;
+            float height = childScratch.measuredSize.height;
+            if (totalGrow > 0.0 && childStyle.flex.grow > 0.0F) {
+                const double growRatio =
+                    static_cast<double>(childStyle.flex.grow) / totalGrow;
+                const float share = growSpace * static_cast<float>(growRatio);
+                if (row) {
+                    width += share;
+                } else {
+                    height += share;
+                }
+            }
+
+            const float crossAvailable = (std::max)(
+                0.0F,
+                contentCross - (row ? verticalMargin(childStyle.margin) : horizontalMargin(childStyle.margin)));
+            if (parentStyle.flex.alignItems == UIAlignItems::Stretch
+                && isCrossAxisAuto(childStyle, parentStyle.flex.direction)) {
+                if (row) {
+                    height = crossAvailable;
+                } else {
+                    width = crossAvailable;
+                }
+            }
+            width = clampWidth(width, childStyle, childScratch, statistics);
+            height = clampHeight(height, childStyle, childScratch, statistics);
+
+            const float childMainSize = row ? width : height;
+            const float childCrossSize = row ? height : width;
+            const float mainBefore = row ? childStyle.margin.left : childStyle.margin.top;
+            const float mainAfter = row ? childStyle.margin.right : childStyle.margin.bottom;
+            const float crossBefore = row ? childStyle.margin.top : childStyle.margin.left;
+            const float crossAfter = row ? childStyle.margin.bottom : childStyle.margin.right;
+
+            float crossOffset = crossBefore;
+            const float crossFree =
+                contentCross - childCrossSize - crossBefore - crossAfter;
+            if (crossFree > 0.0F) {
+                switch (parentStyle.flex.alignItems) {
+                case UIAlignItems::Center:
+                    crossOffset = crossBefore + crossFree * 0.5F;
+                    break;
+                case UIAlignItems::End:
+                    crossOffset = crossBefore + crossFree;
+                    break;
+                case UIAlignItems::Stretch:
+                case UIAlignItems::Start:
+                    break;
+                }
+            }
+
+            const float x = row
+                ? parentContentRect.x + mainOffset + mainBefore
+                : parentContentRect.x + crossOffset;
+            const float y = row
+                ? parentContentRect.y + crossOffset
+                : parentContentRect.y + mainOffset + mainBefore;
+            assignLayoutRect(
+                currentChild,
+                UILogicalRect{
+                    .x = normalizeFloat(x),
+                    .y = normalizeFloat(y),
+                    .width = normalizeFloat((std::max)(0.0F, width)),
+                    .height = normalizeFloat((std::max)(0.0F, height)),
+                },
+                parentWorldRect,
+                viewportRect,
+                0);
+
+            mainOffset += childMainSize + mainBefore + mainAfter + gap;
+        }
+    }
+
+    void arrangeLayout(
+        UILogicalSize viewportSize,
+        const std::pmr::vector<u32>& order,
+        LayoutPassStatistics& statistics) noexcept
+    {
+        const UILogicalRect viewportRect{
+            .x = 0.0F,
+            .y = 0.0F,
+            .width = viewportSize.width,
+            .height = viewportSize.height,
+        };
+
+        u32 ordinal = 0;
+        for (const u32 index : order) {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr) {
+                continue;
+            }
+            ++statistics.arrangedNodeCount;
+            LayoutScratchState& scratch = layoutScratchByIndex[index];
+            if (record->parentIndex == InvalidNodeIndex) {
+                assignLayoutRect(
+                    index,
+                    UILogicalRect{
+                        .x = 0.0F,
+                        .y = 0.0F,
+                        .width = scratch.measuredSize.width,
+                        .height = scratch.measuredSize.height,
+                    },
+                    viewportRect,
+                    viewportRect,
+                    ordinal);
+            }
+            scratch.layoutOrdinal = ordinal;
+            scratch.paintOrdinal = ordinal;
+            arrangeChildren(index, viewportRect, statistics);
+            ++ordinal;
+        }
+    }
+
+    void buildCommittedLayout(
+        std::pmr::vector<UICommittedLayoutEntry>& output,
+        const std::pmr::vector<u32>& order) const noexcept
+    {
+        output.clear();
+        u32 ordinal = 0;
+        for (const u32 index : order) {
+            const LayoutScratchState& scratch = layoutScratchByIndex[index];
+            output.push_back(UICommittedLayoutEntry{
+                .node = idForIndex(index),
+                .localRect = scratch.localRect,
+                .worldRect = scratch.worldRect,
+                .effectiveClip = scratch.effectiveClip,
+                .effectiveVisibility = scratch.effectiveVisibility,
+                .layoutOrdinal = ordinal,
+                .paintOrdinal = ordinal,
+            });
+            ++ordinal;
+        }
+    }
+
+    [[nodiscard]] static bool isFiniteLayoutRect(UILogicalRect rect) noexcept
+    {
+        return std::isfinite(rect.x)
+            && std::isfinite(rect.y)
+            && isFiniteNonNegative(rect.width)
+            && isFiniteNonNegative(rect.height)
+            && std::isfinite(rect.right())
+            && std::isfinite(rect.bottom());
+    }
+
+    [[nodiscard]] Core::Status validateLayoutCandidate(
+        const std::pmr::vector<u32>& order) const
+    {
+        for (const u32 index : order) {
+            const LayoutScratchState& scratch = layoutScratchByIndex[index];
+            if (!isFiniteNonNegative(scratch.measuredSize.width)
+                || !isFiniteNonNegative(scratch.measuredSize.height)
+                || !isFiniteLayoutRect(scratch.localRect)
+                || !isFiniteLayoutRect(scratch.worldRect)
+                || !isFiniteLayoutRect(scratch.effectiveClip)) {
+                return fail(
+                    UIErrorCode::InvalidLayout,
+                    "UI layout arithmetic produced non-finite geometry");
+            }
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status publishStructureIfDirty()
+    {
+        if (!structureDirty) {
+            return Core::success();
+        }
+
+        const usize writeBufferIndex = 1 - publishedBufferIndex;
+        buildCommittedStructure(committedBuffers[writeBufferIndex]);
+        publishedBufferIndex = writeBufferIndex;
+        ++committedRevision;
+        structureDirty = false;
+        return Core::success();
     }
 
     [[nodiscard]] bool isOwnerThread() const noexcept
@@ -297,6 +1318,130 @@ struct UIContext::Impl final {
             && nodes.contains(node.storageId());
     }
 
+    void resetNodeSideData(u32 index) noexcept
+    {
+        if (index >= layoutStylesByIndex.size()) {
+            return;
+        }
+        layoutStylesByIndex[index] = {};
+        dirtyByIndex[index] = UIDirty::None;
+        dirtyQueuedByIndex[index] = 0;
+        layoutScratchByIndex[index] = {};
+    }
+
+    void markStructureChanged() noexcept
+    {
+        structureDirty = true;
+        layoutDirty = true;
+    }
+
+    void compactDirtyQueue() noexcept
+    {
+        usize writeIndex = 0;
+        for (const UINodeId queued : dirtyQueue) {
+            if (!queued.hasValue() || queued.index() >= dirtyQueuedByIndex.size()) {
+                continue;
+            }
+            const u32 index = queued.index();
+            if (idForIndex(index) != queued) {
+                // A stale generation may share its slot with a newly queued node.
+                // Never clear the current generation's side-state from the stale entry.
+                continue;
+            }
+            if (!contains(queued)
+                || dirtyQueuedByIndex[index] == 0
+                || !anyDirty(dirtyByIndex[index])) {
+                dirtyQueuedByIndex[index] = 0;
+                continue;
+            }
+            dirtyQueue[writeIndex++] = queued;
+        }
+        dirtyQueue.resize(writeIndex);
+    }
+
+    [[nodiscard]] usize validDirtyQueueCount() const noexcept
+    {
+        usize count = 0;
+        for (const UINodeId queued : dirtyQueue) {
+            if (!queued.hasValue() || queued.index() >= dirtyQueuedByIndex.size()) {
+                continue;
+            }
+            const u32 index = queued.index();
+            if (idForIndex(index) == queued
+                && contains(queued)
+                && dirtyQueuedByIndex[index] != 0
+                && anyDirty(dirtyByIndex[index])) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
+    [[nodiscard]] Core::Status markLayoutStyleDirty(UINodeId node)
+    {
+        if (!contains(node) || node.index() >= dirtyByIndex.size()) {
+            return fail(UIErrorCode::InvalidNode, "UI dirty node is invalid");
+        }
+
+        compactDirtyQueue();
+        layoutOrderScratch.clear();
+        u32 index = node.index();
+        while (index != InvalidNodeIndex) {
+            layoutOrderScratch.push_back(index);
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr) {
+                return fail(UIErrorCode::InvalidNode, "UI dirty ancestry is invalid");
+            }
+            index = record->parentIndex;
+        }
+
+        usize requiredQueueEntries = 0;
+        for (const u32 dirtyIndex : layoutOrderScratch) {
+            if (dirtyQueuedByIndex[dirtyIndex] == 0) {
+                ++requiredQueueEntries;
+            }
+        }
+        if (dirtyQueue.size() > capacityConfig.dirtyQueueCapacity
+            || requiredQueueEntries
+                > capacityConfig.dirtyQueueCapacity - dirtyQueue.size()) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI dirty queue capacity has been exhausted");
+        }
+
+        constexpr UIDirty ChangedNodeDirty =
+            UIDirty::Style
+            | UIDirty::Measure
+            | UIDirty::Arrange
+            | UIDirty::Composite
+            | UIDirty::HitTest
+            | UIDirty::Semantics;
+        constexpr UIDirty AncestorDirty =
+            UIDirty::Measure
+            | UIDirty::Arrange
+            | UIDirty::Composite
+            | UIDirty::HitTest;
+        for (usize pathIndex = 0; pathIndex < layoutOrderScratch.size(); ++pathIndex) {
+            const u32 dirtyIndex = layoutOrderScratch[pathIndex];
+            if (dirtyQueuedByIndex[dirtyIndex] == 0) {
+                dirtyQueue.push_back(idForIndex(dirtyIndex));
+                dirtyQueuedByIndex[dirtyIndex] = 1;
+            }
+            dirtyByIndex[dirtyIndex] |= pathIndex == 0 ? ChangedNodeDirty : AncestorDirty;
+        }
+        dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
+        layoutDirty = true;
+        return Core::success();
+    }
+
+    void clearDirtyState() noexcept
+    {
+        std::fill(dirtyByIndex.begin(), dirtyByIndex.end(), UIDirty::None);
+        std::fill(dirtyQueuedByIndex.begin(), dirtyQueuedByIndex.end(), 0);
+        dirtyQueue.clear();
+        layoutDirty = false;
+    }
+
     [[nodiscard]] bool isNodeWithinRoot(UINodeId root, UINodeId node) const noexcept
     {
         if (!contains(root) || !contains(node)) {
@@ -323,6 +1468,7 @@ struct UIContext::Impl final {
 
         const UINodeId node = UINodeId::create(ownerWindow, *idResult);
         idsByIndex[node.index()] = node;
+        resetNodeSideData(node.index());
         NodeRecord* record = nodes.tryGet(node.storageId());
         record->kind = kind;
         record->rootIndex = node.index();
@@ -358,7 +1504,7 @@ struct UIContext::Impl final {
         }
         lastRootIndex = root.index();
         ++liveRootCount;
-        dirty = true;
+        markStructureChanged();
         return UIRootOwner(context.m_impl->lifetime, root);
     }
 
@@ -400,7 +1546,7 @@ struct UIContext::Impl final {
             parentRecord.firstChildIndex = node.index();
         }
         parentRecord.lastChildIndex = node.index();
-        dirty = true;
+        markStructureChanged();
         return node;
     }
 
@@ -460,6 +1606,7 @@ struct UIContext::Impl final {
 
             const UINodeId node = idForIndex(currentIndex);
             idsByIndex[currentIndex] = {};
+            resetNodeSideData(currentIndex);
             static_cast<void>(nodes.erase(node.storageId()));
 
             if (currentIndex == index) {
@@ -489,7 +1636,7 @@ struct UIContext::Impl final {
         if (wasRoot && liveRootCount > 0) {
             --liveRootCount;
         }
-        dirty = true;
+        markStructureChanged();
         return Core::success();
     }
 
@@ -509,7 +1656,7 @@ struct UIContext::Impl final {
         if (liveRootCount > 0) {
             --liveRootCount;
         }
-        dirty = true;
+        markStructureChanged();
     }
 
     [[nodiscard]] Core::Status destroyFromUpdater(UINodeId updaterRoot, UINodeId node)
@@ -538,6 +1685,45 @@ struct UIContext::Impl final {
                 "Destroying a root node requires UIRootOwner::reset");
         }
         return destroySubtree(node);
+    }
+
+    [[nodiscard]] Core::Status setLayoutStyleFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        const UILayoutStyle& style)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue()) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        if (!contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater root is no longer alive");
+        }
+        auto normalizedStyle = normalizeLayoutStyle(style);
+        if (!normalizedStyle) {
+            return Core::failure(normalizedStyle.error());
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node)) {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+
+        UILayoutStyle& currentStyle = layoutStylesByIndex[node.index()];
+        if (currentStyle == *normalizedStyle) {
+            return Core::success();
+        }
+
+        if (Core::Status dirtyStatus = markLayoutStyleDirty(node); !dirtyStatus) {
+            return dirtyStatus;
+        }
+        currentStyle = *normalizedStyle;
+        return Core::success();
     }
 
     void appendCommittedTree(
@@ -591,29 +1777,78 @@ struct UIContext::Impl final {
             return ownerThread;
         }
         drainDeferredRootDestroys();
-        if (!dirty) {
+        return publishStructureIfDirty();
+    }
+
+    [[nodiscard]] Core::Status validateViewport(UILogicalSize viewportSize) const
+    {
+        if (!isFiniteNonNegative(viewportSize.width)
+            || !isFiniteNonNegative(viewportSize.height)) {
+            return fail(
+                UIErrorCode::InvalidLayout,
+                "UI layout viewport must be finite and non-negative");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status viewportStatus = validateViewport(viewportSize); !viewportStatus) {
+            return viewportStatus;
+        }
+        viewportSize.width = normalizeFloat(viewportSize.width);
+        viewportSize.height = normalizeFloat(viewportSize.height);
+        const bool viewportChanged = !hasCommittedViewport
+            || viewportSize != committedViewportSize;
+
+        if (!structureDirty && !layoutDirty && !viewportChanged) {
+            lastLayoutPass = {};
             return Core::success();
         }
-
-        const usize writeBufferIndex = 1 - publishedBufferIndex;
-        std::pmr::vector<UICommittedNodeEntry>& writeBuffer =
-            committedBuffers[writeBufferIndex];
-        writeBuffer.clear();
-
-        u32 ordinal = 0;
-        u32 rootIndex = firstRootIndex;
-        while (rootIndex != InvalidNodeIndex) {
-            const NodeRecord* root = recordByIndex(rootIndex);
-            const u32 nextRootIndex = root == nullptr
-                ? InvalidNodeIndex
-                : root->nextSiblingIndex;
-            appendCommittedTree(rootIndex, ordinal, writeBuffer);
-            rootIndex = nextRootIndex;
+        if (nodes.activeCount() > capacityConfig.layoutSnapshotCapacity) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI committed layout snapshot capacity has been exhausted");
         }
 
-        publishedBufferIndex = writeBufferIndex;
-        ++committedRevision;
-        dirty = false;
+        const usize writeStructureBufferIndex = 1 - publishedBufferIndex;
+        if (structureDirty) {
+            buildCommittedStructure(committedBuffers[writeStructureBufferIndex]);
+        }
+
+        const usize writeLayoutBufferIndex = 1 - publishedLayoutBufferIndex;
+        std::pmr::vector<UICommittedLayoutEntry>& writeLayout =
+            committedLayoutBuffers[writeLayoutBufferIndex];
+        writeLayout.clear();
+
+        buildLayoutOrder(layoutOrderScratch);
+        LayoutPassStatistics pass{};
+        pass.passCount = layoutOrderScratch.empty() ? 0 : 1;
+        prepareLayoutState(viewportSize, layoutOrderScratch);
+        measureLayout(viewportSize, layoutOrderScratch, pass);
+        arrangeLayout(viewportSize, layoutOrderScratch, pass);
+        if (Core::Status candidateStatus = validateLayoutCandidate(layoutOrderScratch);
+            !candidateStatus) {
+            return candidateStatus;
+        }
+        buildCommittedLayout(writeLayout, layoutOrderScratch);
+
+        if (structureDirty) {
+            publishedBufferIndex = writeStructureBufferIndex;
+            ++committedRevision;
+            structureDirty = false;
+        }
+        publishedLayoutBufferIndex = writeLayoutBufferIndex;
+        ++committedLayoutRevision;
+        committedLayoutStructureRevision = committedRevision;
+        committedViewportSize = viewportSize;
+        hasCommittedViewport = true;
+        lastLayoutPass = pass;
+        clearDirtyState();
         return Core::success();
     }
 
@@ -627,16 +1862,40 @@ struct UIContext::Impl final {
         };
     }
 
+    [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept
+    {
+        const std::pmr::vector<UICommittedLayoutEntry>& entries =
+            committedLayoutBuffers[publishedLayoutBufferIndex];
+        return UICommittedLayoutView{
+            std::span<const UICommittedLayoutEntry>(entries.data(), entries.size()),
+            committedLayoutStructureRevision,
+            committedLayoutRevision,
+        };
+    }
+
     [[nodiscard]] UIContextStatistics statistics() const noexcept
     {
         return UIContextStatistics{
             .nodeCapacity = capacityConfig.nodeCapacity,
             .rootCapacity = capacityConfig.rootCapacity,
+            .dirtyQueueCapacity = capacityConfig.dirtyQueueCapacity,
+            .layoutSnapshotCapacity = capacityConfig.layoutSnapshotCapacity,
             .liveNodeCount = nodes.activeCount(),
             .liveRootCount = liveRootCount,
             .committedNodeCount = committedBuffers[publishedBufferIndex].size(),
             .committedRevision = committedRevision,
-            .dirty = dirty,
+            .committedLayoutNodeCount =
+                committedLayoutBuffers[publishedLayoutBufferIndex].size(),
+            .layoutRevision = committedLayoutRevision,
+            .dirty = structureDirty,
+            .layoutDirty = layoutDirty,
+            .lastLayoutPassCount = lastLayoutPass.passCount,
+            .lastLayoutMeasuredNodeCount = lastLayoutPass.measuredNodeCount,
+            .lastLayoutArrangedNodeCount = lastLayoutPass.arrangedNodeCount,
+            .lastLayoutPercentMeasureFallbackCount =
+                lastLayoutPass.percentMeasureFallbackCount,
+            .dirtyQueuePendingCount = validDirtyQueueCount(),
+            .dirtyQueueHighWater = dirtyQueueHighWater,
         };
     }
 };
@@ -791,6 +2050,14 @@ bool UITreeUpdater::isAlive(UINodeId node) const noexcept
         && m_context->isAliveInRoot(m_root, node);
 }
 
+Core::Status UITreeUpdater::setLayoutStyle(UINodeId node, const UILayoutStyle& style)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setLayoutStyleFromUpdater(m_root, node, style);
+}
+
 Core::Status UITreeUpdater::destroy(UINodeId node)
 {
     if (m_context == nullptr) {
@@ -901,6 +2168,16 @@ UICommittedStructureView UIContext::committedStructure() const noexcept
     return m_impl->committedStructure();
 }
 
+Core::Status UIContext::commitLayout(UILogicalSize viewportSize)
+{
+    return m_impl->commitLayout(viewportSize);
+}
+
+UICommittedLayoutView UIContext::committedLayout() const noexcept
+{
+    return m_impl->committedLayout();
+}
+
 UIContextStatistics UIContext::statistics() const noexcept
 {
     return m_impl->statistics();
@@ -924,6 +2201,14 @@ Core::Result<UIRootOwner> UIContext::createRoot()
 Core::Result<UINodeId> UIContext::createChild(UINodeId parent, UIWidgetKind kind)
 {
     return m_impl->createChild(parent, kind);
+}
+
+Core::Status UIContext::setLayoutStyleFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId node,
+    const UILayoutStyle& style)
+{
+    return m_impl->setLayoutStyleFromUpdater(updaterRoot, node, style);
 }
 
 Core::Status UIContext::destroyNodeFromUpdater(UINodeId updaterRoot, UINodeId node)

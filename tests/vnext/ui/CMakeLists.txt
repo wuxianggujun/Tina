@@ -1,4 +1,5 @@
 add_executable(tina_ui_tests
+    UILayoutTests.cpp
     UITreeCoreTests.cpp
     header_isolation/InputRoutingHeader.cpp
     header_isolation/UIDirtyHeader.cpp

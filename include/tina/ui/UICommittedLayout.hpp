@@ -18,8 +18,9 @@ struct UICommittedLayoutEntry final {
     u32 paintOrdinal = 0;
 };
 
-// Owner-thread borrowed layout view. It is invalidated by the next layout
-// commit or by destruction of its UIContext and is not a cross-thread snapshot.
+// Owner-thread borrowed layout view. It is invalidated by the next successful
+// layout publication through commitLayout(), or by destruction of its
+// UIContext, and is not a cross-thread snapshot.
 class UICommittedLayoutView final {
 public:
     constexpr UICommittedLayoutView() noexcept = default;

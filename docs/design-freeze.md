@@ -119,6 +119,14 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
   dirty 分类包含 `Structure`，用于增删、重排、换父与 root attach/detach，并派生最小
   Measure/Order/HitTest/Semantics 失效集合。
 
+M7-C1b 已实现其中的 layout foundation：`UILayoutLength/UILayoutStyle/UIDirty`、固定容量 PMR
+style/dirty side array 与 dirty queue、非递归 Flex-lite Measure/Arrange、双缓冲 committed
+structure/layout snapshot，以及 `commitLayout()` 的结构+布局原子发布。width/height/min/max 是
+border-box；Percent 使用 `0..100` 且相对 containing content box，默认 Auto root 以 viewport
+content box 为确定基准。当前 changed frame 仍对整棵 live tree执行一次 Measure/Arrange；dirty
+leaf 跳过无关 subtree、hit/paint snapshot、PaintCache/DisplayList 与 Runtime producer 尚未实现，
+不能把最终增量目标误写成当前能力。
+
 ### 实施与验证
 
 - 设计冻结后创建独立 `codex/` 分支和 worktree，不复制/stash/提交主工作区差异；
@@ -144,7 +152,7 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 | Backend 组合 | [Accepted](adr/0003-backend-factories.md) | `Create(config, factories)`；M7-B1 已使用 Independent 或 WindowSurface 的 tagged composition，M7-B2 在该组合上接入私有 bgfx，bootstrap 只选 factory、EngineHost 唯一创建/回滚 owner | 消除 Runtime 对具体 backend 依赖与 lease 接线歧义 |
 | Runtime/State | [Accepted](adr/0014-runtime-phase-and-state.md) | `IGameApplication` lifecycle-only + `IGameState` 唯一帧入口；Frame Update 后提交状态命令 | 消除名称歧义、双帧入口与首帧 UI 时序冲突 |
 | RenderFrame/Surface 所有权 | [Accepted](adr/0020-window-surface-handoff.md) | bgfx backend 在 factory 成功后持有 move-only window surface lease，Runtime 持有 owning RenderFramePacket；Render SPI 只暴露纯 Tina view/pin sink | 消除 native 泄漏、依赖环、backend 越界与在途 UAF |
-| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | M7-C1a 已实现 `tina_ui` 树核心、generation `UINodeId`、`UIContext`、`UIRootOwner` RAII、结构 snapshot 和 UI-owned input route-result view ABI；细粒度 dirty、每帧至多一次 layout、持久 PaintCache、committed hit/paint snapshot、相邻兼容 batching 仍按后续切片完成 | 高性能且保持命中/透明顺序 |
+| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | M7-C1b 已在树核心上实现 layout/dirty 公共类型、固定容量 PMR side array/queue/scratch、node→root 原子 dirty 传播、非递归 Flex-lite、同 viewport 无变化0 pass、viewport 变化重排，以及 structure+layout 双缓冲原子发布；changed frame 全树 Measure/Arrange 仍需收敛为 dirty subtree，PaintCache、committed hit/paint snapshot、DisplayList 与 batching 后置 | 高性能且保持命中/透明顺序 |
 | Frame/Input | [Accepted](adr/0015-input-and-fixed-step.md) | 保序 PlatformFrame、UI transition consumption + continuous claims；Action 分 Simulation/Frame domain；每个 substep 独立 commit | 防输入穿透、0步帧丢边沿、双重执行和追赶步错误 |
 | C++ exception | [Accepted](adr/0004-exceptions-and-errors.md) | 编译开启；公共 API 用 Result/Status，Engine/Frame/Worker/C callback 边界捕获 | pmr/第三方兼容、错误边界 |
 | Generation | [Accepted](adr/0019-generation-handles.md) | 32位 generation，回绕 retire；UINodeId 所有构建编码 owner WindowId，Debug cookie 只诊断 | stale/跨 registry 安全 |
@@ -202,6 +210,7 @@ PlatformFrameBuilder 直接注入和 Runtime test adapter，以及紧随其后�
 NullRender 子切片；可复用 production-like PlatformBackend test double 随 GLFW adapter 测试加入；M7-B1 已实现
 Native Window Surface lease、surface snapshot、WindowSurface-aware composition 与 NullRender suspended 语义；
 M7-B2 已实现私有 bgfx clear-only core、Desktop bootstrap 与真实 GPU 门禁；M7-C1a 已实现
-`tina_ui` 的 generation `UINodeId`、`UIContext`、`UIRootOwner` RAII、结构 snapshot 与 route-result
-view ABI；M7-C 后续继续实现 layout/hit route/Null DisplayList，M7-D 实现 Label/Button/Modal +
+`tina_ui` tree core，M7-C1b 已实现 layout/dirty API、固定容量 PMR 存储、Flex-lite 非递归
+Measure/Arrange 与 committed structure+layout 原子发布；M7-C 后续继续实现 dirty subtree pruning、
+hit route/Null DisplayList，M7-D 实现 Label/Button/Modal +
 FreeType 可见样例与 bgfx UI pass；M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。

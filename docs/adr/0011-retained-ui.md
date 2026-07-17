@@ -2,10 +2,11 @@
 
 - 状态：Accepted
 - 日期：2026-07-16
-- 修订：2026-07-17
-- 实施状态：M7-C1a 已实现 `tina_ui` 树核心、generation `UINodeId`、`UIContext`、
-  `UIRootOwner` RAII、结构 snapshot 和输入 route-result view ABI；layout、hit route、
-  DisplayList、widgets、FreeType、bgfx UI pass 与 Runtime UI producer 仍后置。
+- 修订：2026-07-18
+- 实施状态：M7-C1b 已在 C++23 standalone `tina_ui` 树核心上实现 layout value/dirty API、固定容量 PMR
+  side array/dirty queue/layout scratch、Flex-lite 非递归 Measure/Arrange、双缓冲 committed layout
+  snapshot 和结构+布局原子发布；hit route、PaintCache/DisplayList、文本/Glyph Atlas、widgets、
+  bgfx UI pass 与 Runtime UI producer 仍后置。
 
 ## 背景
 
@@ -22,7 +23,7 @@ Legacy UI 已验证部分产品交互，但它的类型、API 和生命周期不
 `tina_ui` 实现独立的 Retained UI。每个 Runtime WindowRecord 唯一拥有一个 `UIContext`；
 `IGameState` 只持有 move-only root owner，并用包含 owner WindowId 与 generation 的 `UINodeId`
 引用节点。Game SDK 不拥有 `UIContext`，也不能取得 Widget、PaintCache 或 Render backend 指针。
-当前 M7-C1a `tina_ui` 只依赖 `Tina::Core` 与 `Tina::Platform`；Font Asset 与 Render descriptor/
+当前 M7-C1b `tina_ui` 仍只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；Font Asset 与 Render descriptor/
 DisplayList 依赖在后续 asset/render 切片进入。
 
 FreeType 只存在于可选生产适配器 `tina_ui_freetype`。Headless、Null UI 和公共 Widget API 不解析
@@ -48,6 +49,20 @@ FreeType、GLFW 或 bgfx 依赖。vNext 不包含、继承、别名或适配 Leg
 文本 shaping/layout 与 glyph raster 分离。已有 glyph advance 决定 Measure 结果；异步 raster completion
 只标记 `Paint`，不能改变布局。若字体度量或 shaping 结果实际变化，则由文本系统明确标记 `Measure`。
 
+M7-C1b 先落地布局事务所需的最小子集：`UILayoutLength/UILayoutStyle/UIDirty` 与
+`UICommittedLayoutView` 已成为 public Tina 类型；style setter 先做规范化和 same-value 比较，再
+预检 node→root 全路径所需的 dirty queue slot，成功后才一次性合并节点与祖先 dirty。width、height、
+min/max 都是 border-box；Percent 使用 `0..100`，相对父节点最终 arranged content box（包括 min/max、
+grow、stretch 或 absolute inset 的结果），默认 Auto root 把 viewport content box 作为确定基准。
+当前支持 Px/Percent/Auto、margin/padding/gap、Row/Column/
+grow、justify/align/stretch、Absolute Overlay、Visible/Hidden/Collapsed 和 min-wins clamp。
+Auto 轴的 Percent 在 Measure 无确定 basis 时不参与父级 intrinsic size，并记录诊断；Arrange 取得最终
+content box 后只解析一次，不重新 Measure 父级，也不迭代求 fixed point，循环场景允许确定性 overflow。
+
+这是布局基础而非最终细粒度增量实现：changed frame 当前仍对整棵 live tree 执行一次非递归
+Measure/Arrange，尚不能依据 dirty leaf 跳过无关 subtree。后续实现必须在不改变本 ADR 事务、容量
+和 committed snapshot 契约的前提下，把工作量收敛到实际失效区域。
+
 ### 每帧事务与 committed snapshot
 
 一个 `UIContext` 的帧处理固定为：
@@ -64,6 +79,12 @@ layout barrier 后发生的结构、样式和布局 mutation 延迟到下一帧�
 committed hit snapshot 与 committed paint snapshot 使用相同的 tree revision、layout revision 和 paint order
 revision；revision 不一致属于生命周期错误，当前帧不得提交部分 UI。
 
+M7-C1b 的 `commitLayout(viewportSize)` 已作为 structure+layout 的原子发布入口：pending structure
+只在候选 layout 全部验证并构建成功后与 layout snapshot 一起切换；`commitStructure()` 仅保留为
+M7-C1a 结构诊断 seam，Runtime 不得把二者拆开发布。viewport 变化即使没有 mutation 也重排；相同
+viewport 且无 structure/layout dirty 时不增加 revision、不执行 layout pass。非法 viewport、候选
+几何算术溢出、dirty queue 或 layout snapshot 容量不足都保留旧 published snapshot 与 pending dirty。
+
 无变化 UI 必须满足以下硬门禁：
 
 - `0` 次 Style/Measure/Arrange；
@@ -74,6 +95,10 @@ revision；revision 不一致属于生命周期错误，当前帧不得提交部
 
 测试和 Metrics 至少记录 layout pass、style resolve、PaintCache rebuild、display command、dirty high-water、
 capacity failure 与 Tina allocation delta。每窗口 layout pass 每帧只能为 `0` 或 `1`。
+
+当前直接测试已覆盖50,000节点深树的非递归布局，以及首次发布后连续300次同 viewport、无 mutation
+commit 的0 layout pass、revision 不变和 supplied UI PMR allocation count 不增加；它不等价于
+PaintCache/DisplayList/进程 heap 或 GPU 资源门禁已经完成。
 
 ### PaintCache、DisplayList 与批处理
 
@@ -136,11 +161,12 @@ Focus、hover、capture 和 Modal Scope 的变更在当前路由批次结束后�
 `UIContext::Create` 必须显式接收节点/root、mutation、dirty queue、route depth、PaintCache bytes、clip intern、
 DisplayList command、text run/glyph ref 与 frame pin 容量。运行期禁止隐藏扩容、系统 allocator fallback 或
 因容量不足退回全树 heap rebuild。
-当前 M7-C1a 已实现的 `UIContext::Create(ownerWindow, capacities, memory_resource)` 中，
-`memory_resource` 只用于 tree/id/committed structure snapshot storage；small control-plane 对象和
-off-thread `UIRootOwner` release 队列在 Create 期间使用默认 heap 预分配。owner thread 析构
-`UIRootOwner` 立即回收；非 owner thread 只入队 root id，由下一次 owner-thread UI mutation/commit
-drain 并物理回收。
+当前 M7-C1b 的 `UIContext::Create(ownerWindow, capacities, memory_resource)` 已用 supplied PMR
+固定分配 tree/id、style/dirty side array、dirty queue、layout scratch 与 committed structure/layout
+双缓冲；`dirtyQueueCapacity` 和 `layoutSnapshotCapacity` 为0时从 node capacity 派生，非0时不得超过
+node capacity。small control-plane 对象和 off-thread `UIRootOwner` release 队列仍在 Create 期间
+使用默认 heap 预分配。owner thread 析构 `UIRootOwner` 立即回收；非 owner thread 只入队 root id，
+由下一次 owner-thread UI mutation/commit drain 并物理回收。
 
 - 结构/样式 mutation 在应用前预留全部容量；失败时原子拒绝该 mutation，保留上一 committed tree/snapshot；
 - dirty queue 容量不足时返回稳定的 `UIError::CapacityExceeded`，不得静默丢 dirty bit；
@@ -170,6 +196,9 @@ Checkbox、Slider、ScrollView、VirtualList、TextEdit、IME、复杂 shaping �
 - Null UI 可以验证布局、snapshot、路由、容量与 DisplayList，而不链接真实 Renderer 或 bgfx；
 - Render backend 可以批处理 UI，但不能改变透明绘制语义或把 backend 生命周期反向泄漏给 UI；
 - Tina 需要自行承担控件、文本 shaping、可访问性和视觉回归成本，并以垂直切片逐步交付。
+
+M7-C1b 只完成无变化布局零工作和 changed-frame 单 pass 的基础；“CPU 成本由实际变化区域决定”仍需
+后续 dirty subtree pruning 证明，不能从 dirty bit/queue 已存在直接推断。
 
 ## 被拒绝方案
 

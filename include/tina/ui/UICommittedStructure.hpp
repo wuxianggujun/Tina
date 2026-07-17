@@ -17,8 +17,9 @@ struct UICommittedNodeEntry final {
     UIWidgetKind kind = UIWidgetKind::Panel;
 };
 
-// Owner-thread borrowed view. It is invalidated by the next commitStructure()
-// call or by destruction of its UIContext and is not a cross-thread snapshot.
+// Owner-thread borrowed view. It is invalidated by the next successful
+// structure publication through commitStructure() or commitLayout(), or by
+// destruction of its UIContext, and is not a cross-thread snapshot.
 class UICommittedStructureView final {
 public:
     constexpr UICommittedStructureView() noexcept = default;

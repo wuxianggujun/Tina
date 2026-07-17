@@ -20,15 +20,18 @@ Runtime。现有2D/UI/3D路径继续作为验收基线，新架构按可独立�
 当前旧文档已经替换，但旧源码架构仍是正在运行的主实现，并未完全删除。迁移状态和删除门禁见 [架构总览](docs/architecture.md)。物理后端固定为 2D Box2D 3.x 与 3D Jolt，不引入第三套物理引擎。
 
 vNext 已完成 C++23 Headless Runtime 生命周期内核、M7-A Platform/Input 内核、首个桌面适配切片、
-M7-B1 私有 WindowSurface handoff，以及 M7-B2 Desktop bootstrap + 真实 GPU 冒烟：私有
+M7-B1 私有 WindowSurface handoff、M7-B2 Desktop bootstrap + 真实 GPU 冒烟，以及 M7-C1b
+standalone Retained Tree/Flex-lite layout foundation：私有
 `tina_platform_glfw` 已能创建 `GLFW_NO_API` 窗口，
 并把键盘、Pointer、Focus、resize、close 与已提交 UTF-8 文本归一化到同一份有界
 `PlatformFrameView`；Runtime 通过 generation `WindowSurfaceId`、无原生句柄的
 `WindowSurfaceSnapshot` 和 move-only `NativeWindowSurfaceLease` 把窗口 surface 交给 Render
 组合，Game SDK 不暴露 native 或 bgfx 类型。`Tina::Desktop::CreateEngine(config)` 已作为普通桌面入口
 落地，当前私有组合为 `SteadyClock + GLFW WindowSurface + DisabledTaskSystem + bgfx`；
-`tina_sample_desktop` 默认运行300帧，以深蓝色 clear/present 验证真实 Render backend 路径。production Gamepad、
-Windows IMM32 composition、Scene/UI/Pass Scheduler、submission ticket/drain 与可见中文 UI 分别放在后续切片。
+`tina_sample_desktop` 默认运行300帧，以深蓝色 clear/present 验证真实 Render backend 路径。
+`tina_ui` 已有 generation tree、固定容量事务式布局和 committed layout snapshot，但尚未接入 Runtime
+或 Render。production Gamepad、Windows IMM32 composition、Scene、hit route、DisplayList、文本/Widget、
+Pass Scheduler、submission ticket/drain 与可见中文 UI 分别放在后续切片。
 
 ## 当前 Legacy 已完成基线
 
@@ -46,7 +49,7 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 ## 构建
 
-目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 最新门禁已在 Visual Studio 2026 18.4.3、MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过 vNext Null、GLFW 与 bgfx Debug/Release 图：基础183/183、GLFW专项22/22、bgfx专项11/11、Null样例300帧、WindowSurface GLFW样例300帧，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 默认300帧；Debug/Release 构建均通过。`TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。
+目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 最新门禁已在 Visual Studio 2026 18.4.3、MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过 vNext Null、UI、GLFW 与 bgfx Debug/Release 图：基础183/183、UI 39/39、GLFW专项22/22、bgfx专项11/11、Null样例300帧、WindowSurface GLFW样例300帧，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 默认300帧；Debug/Release 构建均通过。`TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。
 
 Linux M7-B1 Platform 门禁覆盖 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer，以及 GCC 13/Clang 22 X11/Wayland 双后端；Wayland 使用带 `wl_seat` 的嵌套 Weston 9。M7-B2 Desktop/bgfx X11 图也已直接运行：GCC 13.4 与 Clang 22.1.8 + ASan/UBSan/LSan 均通过基础183/183、GLFW专项22/22、bgfx专项11/11和 Desktop样例300帧。Clang 基础/bgfx测试不使用 suppression；X11 只对第三方 libX11 `_XimOpenIM` retention 使用精确 suppression，GLFW专项命中12次/4896 B、Desktop样例命中1次/408 B。Clang Desktop 经 bgfx 选择 Vulkan，但当前 WSL2 适配器是 llvmpipe 软件实现，因此该结果证明 Linux Vulkan/backend 生命周期，不代表硬件 GPU 性能。由 vcpkg 提供的 GLFW 本身未被 sanitizer 插桩。详细边界见[测试文档](docs/testing.md)。Clang preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22.04 自带的旧 libstdc++。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
 

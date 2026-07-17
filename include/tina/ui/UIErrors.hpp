@@ -13,5 +13,6 @@ inline constexpr Core::ErrorCode CapacityExceeded{Core::ErrorDomain::UI, 6};
 inline constexpr Core::ErrorCode InvalidParent{Core::ErrorDomain::UI, 7};
 inline constexpr Core::ErrorCode RootRequired{Core::ErrorDomain::UI, 8};
 inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::UI, 9};
+inline constexpr Core::ErrorCode InvalidLayout{Core::ErrorDomain::UI, 10};
 
 } // namespace Tina::UI::UIErrorCode

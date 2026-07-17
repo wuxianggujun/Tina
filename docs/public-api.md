@@ -2,7 +2,7 @@
 
 > 状态：分批实施。Core、M6-A 生命周期、M7-A Platform/Input、私有 GLFW adapter、M7-B1 Native
 > Surface handoff，以及 M7-B2 私有 bgfx clear-only device、Desktop bootstrap 和300帧 backend
-> 冒烟已落地；M7-C1a standalone `tina_ui` 树核心已落地；完整状态栈、worker、Scene/Asset/Audio、
+> 冒烟已落地；M7-C1b C++23 standalone `tina_ui` tree/layout foundation 已落地；完整状态栈、worker、Scene/Asset/Audio、
 > Runtime-integrated UI pipeline、production Gamepad、完整 DPI 与
 > Windows IMM32 仍是后续契约。
 
@@ -32,9 +32,10 @@ Tina 不把所有可链接 header 都称为“用户 API”：
 | Engine Module SPI | Tina 模块、backend adapter 和测试 | EngineCompositionFactories、PlatformFrameView、RenderDevice typed handle/descriptor、RenderFrame、FramePinSink、Pass Scheduler |
 | Backend Private | 具体 adapter | GLFW、bgfx/bx/bimg、FreeType、miniaudio、EnTT 等第三方类型 |
 
-当前 Game SDK 只实现 `EngineHost`、`IGameApplication`、单个 `IGameState`、`GameStatePolicy`、
-Platform 生命周期订阅、Action Snapshot 与最小 Phase Context；表中 World/Asset/UI、`GameStateCommands`、typed render
-handle/descriptor 和 Pass Scheduler 均未实现。
+当前 Runtime Game SDK 只实现 `EngineHost`、`IGameApplication`、单个 `IGameState`、`GameStatePolicy`、
+Platform 生命周期订阅、Action Snapshot 与最小 Phase Context；standalone `Tina::UI` 已实现 tree/layout
+foundation，但尚未通过 Game State/Runtime Context 提供 builder/updater，也没有 Widget 行为。表中
+World/Asset/UI Widget、`GameStateCommands`、typed render handle/descriptor 和 Pass Scheduler 均未实现。
 
 完整 Game SDK 不提供 RenderDevice、GPU resource handle、native window/surface 或第三方 factory。
 已落地的 `tina_bootstrap_desktop` 提供只使用 Tina 类型的 `Desktop::CreateEngine(config)`，让普通
@@ -394,6 +395,56 @@ submit/present，Suspended surface 返回明确 skipped 结果且不伪造 GPU s
 `PlatformEventSubscriptions` 提供 generation-safe RAII 订阅；未来通用 Runtime Event Queue 面向
 Gameplay/Domain/异步模块事件，当前尚未实现，也不复用 dispatcher 的 owner、容量或投递语义。
 
+## M7-C1b UI tree/layout foundation
+
+当前 C++23 standalone `Tina::UI` public surface 只依赖 `Tina::Core` 与 `Tina::Platform`，不出现
+FreeType、bgfx、GLFW、Legacy UI 或 Runtime 类型。M7-C1b 新增的核心值类型和提交入口为：
+
+```cpp
+enum class UILayoutLengthUnit : u8 { Px, Percent, Auto };
+struct UILayoutLength;
+struct UILayoutStyle;
+enum class UIDirty : u16;
+
+class UITreeUpdater {
+public:
+    [[nodiscard]] Core::Status setLayoutStyle(
+        UINodeId node,
+        const UILayoutStyle& style);
+};
+
+class UIContext {
+public:
+    [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize);
+    [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;
+};
+```
+
+- `UILayoutStyle::size` 与 `minMax` 的 width/height 都是 border-box；Percent 使用 `0..100`，
+  相对父节点最终 arranged content box，包括 min/max、grow、stretch 或 absolute inset 后的结果。
+  默认 Auto root 以 viewport content box 作为确定 Percent 基准；Auto 循环在 Measure 阶段不计入
+  父级 intrinsic size，并记录 `lastLayoutPercentMeasureFallbackCount`，Arrange 只解析一次且不求 fixed point；
+- layout 支持 Px/Percent/Auto、margin/padding/gap、Row/Column/grow、justify/align/stretch、
+  Absolute Overlay、Visible/Hidden/Collapsed 与 min-wins clamp；所有 style、viewport 和候选几何
+  必须 finite/non-negative，溢出返回 `UIErrorCode::InvalidLayout`；
+- `UIContextCapacityConfig::dirtyQueueCapacity/layoutSnapshotCapacity` 为0时从 node capacity 派生，
+  非0时是运行期不可扩容的固定容量。supplied PMR 在 Create 阶段分配 tree/id/style/dirty side
+  array、dirty queue、layout scratch 与 committed structure/layout 双缓冲；
+- `setLayoutStyle()` 对 same normalized value 是 no-op；值变化先预检 node→root 全路径容量，再
+  原子合并 dirty。容量不足时 style/dirty 均不改变；
+- `commitLayout()` 原子发布 pending structure 与候选 layout；非法 viewport、计算溢出或容量失败
+  保留旧 published snapshot 和 pending dirty。`commitStructure()` 仅为 M7-C1a 诊断 seam，Runtime
+  发布不得将二者拆开；
+- viewport 变化会重排；相同 viewport 且无 structure/layout dirty 时不执行 layout pass、不增加
+  layout revision。当前 changed frame 仍对整棵 live tree执行一次非递归 Measure/Arrange，dirty
+  leaf 跳过无关 subtree 尚未实现。
+
+`UICommittedLayoutView` 是 owner-thread borrowed view，携带对应 structure/layout revision；在
+下一次成功 layout commit 或 `UIContext` 析构后失效。它只发布 logical local/world rect、effective
+clip、effective visibility 与稳定 ordinal，不是跨线程、跨 commit 的 owning snapshot，也不证明
+hit route、PaintCache/DisplayList、text/glyph、Widget 或 Runtime producer 已实现。
+当前 `effectiveClip` 仅表示 `viewport ∩ worldRect`；祖先 clip policy 与 hit/paint clip chain 尚未实现。
+
 ## EngineConfig
 
 `EngineConfig` 是可复制纯值，Create 前一次性验证：
@@ -470,8 +521,9 @@ bootstrap 仍待把该 factory 封装成产品入口。完整 factory
 | 最小 Phase Context | M6-A 已实现 | Game SDK | Runtime stack，当前 callback | callback `Status` |
 | `WindowId` | M7-A generation 类型、Headless 契约与生产 GLFW registry 已实现 | Game SDK / Module SPI | GLFW backend-owned Window registry；首期一个 primary slot | invalid/stale/wrong owner/identity mismatch |
 | `WindowSurfaceId` | M7-B1 已实现 | Runtime integration SPI | Platform surface registry generation | invalid/stale/wrong owner/revision |
-| `Tina::UI::UINodeId` | M7-C1a 已实现 | UI public / Game SDK 目标 | Window-owned UI registry generation + WindowId owner | invalid/stale/wrong owner |
-| `Tina::UI::UICommittedStructureView` | M7-C1a 已实现 | UI public | owner-thread borrowed structure snapshot，下一次 `commitStructure()` 或 `UIContext` 销毁后失效 | stale borrowed view / owner-thread misuse |
+| `Tina::UI::UINodeId` | M7-C1a 已实现，M7-C1b layout 继续复用 | UI public / Game SDK 目标 | Window-owned UI registry generation + WindowId owner | invalid/stale/wrong owner |
+| `Tina::UI::UICommittedStructureView` | M7-C1a 已实现 | UI public | owner-thread borrowed structure snapshot，下一次结构发布（diagnostic `commitStructure()` 或原子 `commitLayout()`）或 `UIContext` 销毁后失效 | stale borrowed view / owner-thread misuse |
+| `Tina::UI::UICommittedLayoutView` | M7-C1b 已实现 | UI public | owner-thread borrowed 双缓冲 layout snapshot，下一次成功 `commitLayout()` 或 `UIContext` 销毁后失效 | InvalidLayout/CapacityExceeded/owner-thread misuse |
 | `EntityId` | M8 目标 | Game SDK | World registry generation + owner | invalid/stale/wrong owner |
 | `AssetHandle<T>` | M10 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
 | `AssetLease<T>` | M10 目标 | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
@@ -531,4 +583,6 @@ M6-A/M7-A Headless 内核与首个 GLFW adapter 已验证：
 后续验收：`tina_game_api_consumer`/Game SDK umbrella、正式 SDK/install package、完整
 forbidden-token/dependency-closure、production Gamepad、完整 DPI/Windows IMM32，以及只使用
 Game SDK 运行 UI/2D/3D 产品样例。`Desktop::CreateEngine` 和 clear-only bgfx smoke 已实现，但不代表
-正式 SDK、完整 Render pass、Runtime UI producer 或产品样例已完成。
+正式 SDK、完整 Render pass、Runtime UI producer 或产品样例已完成。M7-C1b 已覆盖50,000节点
+非递归 layout 与连续300次无变化 commit 的0 layout pass/0新增 UI PMR allocation，但尚未覆盖
+dirty subtree pruning、hit route、PaintCache/DisplayList、文本/Glyph Atlas 或可见 Widget。

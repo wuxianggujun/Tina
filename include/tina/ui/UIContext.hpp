@@ -3,8 +3,10 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/platform/Window.hpp>
+#include <tina/ui/UICommittedLayout.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
 #include <tina/ui/UIErrors.hpp>
+#include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIWidgetKind.hpp>
 
@@ -27,16 +29,33 @@ struct UIContextCapacityConfig final {
 
     usize nodeCapacity = DefaultNodeCapacity;
     usize rootCapacity = DefaultRootCapacity;
+    // Zero derives from nodeCapacity. Non-zero values are fixed capacities and
+    // do not grow at runtime.
+    usize dirtyQueueCapacity = 0;
+    usize layoutSnapshotCapacity = 0;
 };
 
 struct UIContextStatistics final {
     usize nodeCapacity = 0;
     usize rootCapacity = 0;
+    usize dirtyQueueCapacity = 0;
+    usize layoutSnapshotCapacity = 0;
     usize liveNodeCount = 0;
     usize liveRootCount = 0;
     usize committedNodeCount = 0;
     u64 committedRevision = 0;
-    bool dirty = false;
+    usize committedLayoutNodeCount = 0;
+    u64 layoutRevision = 0;
+    bool dirty = false;       // Structure dirty kept for M7-C1a compatibility.
+    bool layoutDirty = false; // Style/structure changes still requiring layout.
+    usize lastLayoutPassCount = 0;
+    usize lastLayoutMeasuredNodeCount = 0;
+    usize lastLayoutArrangedNodeCount = 0;
+    // Percent values skipped while an Auto axis lacked a definite Measure
+    // basis. Arrange may still resolve them once against the final content box.
+    usize lastLayoutPercentMeasureFallbackCount = 0;
+    usize dirtyQueuePendingCount = 0;
+    usize dirtyQueueHighWater = 0;
 };
 
 class UIContext;
@@ -105,6 +124,7 @@ public:
     UITreeUpdater& operator=(UITreeUpdater&& other) noexcept;
 
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
+    [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
     [[nodiscard]] Core::Status destroy(UINodeId node);
 
 private:
@@ -117,9 +137,10 @@ private:
 };
 
 // Single-owner-thread retained-tree context for one WindowId. The supplied PMR
-// resource backs bounded tree/id/committed-snapshot storage and must outlive the
-// context. Small control-plane objects and cross-thread release queues allocate
-// only during Create() from the process default heap.
+// resource backs bounded tree/id/style/dirty/layout scratch and committed
+// snapshot storage and must outlive the context. Small control-plane objects
+// and cross-thread release queues allocate only during Create() from the process
+// default heap.
 class UIContext final {
 public:
     [[nodiscard]] static Core::Result<std::unique_ptr<UIContext>> Create(
@@ -140,8 +161,12 @@ public:
     [[nodiscard]] UIRootBuilder rootBuilder() noexcept;
     [[nodiscard]] Core::Result<UITreeUpdater> treeUpdater(UIRootOwner& rootOwner);
 
+    // C1a diagnostic seam. Runtime frame publication uses commitLayout() so a
+    // pending structure and its geometry become visible in one transaction.
     [[nodiscard]] Core::Status commitStructure();
     [[nodiscard]] UICommittedStructureView committedStructure() const noexcept;
+    [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize);
+    [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;
     [[nodiscard]] UIContextStatistics statistics() const noexcept;
     [[nodiscard]] usize liveNodeCount() const noexcept;
     [[nodiscard]] usize liveRootCount() const noexcept;
@@ -157,6 +182,10 @@ private:
 
     [[nodiscard]] Core::Result<UIRootOwner> createRoot();
     [[nodiscard]] Core::Result<UINodeId> createChild(UINodeId parent, UIWidgetKind kind);
+    [[nodiscard]] Core::Status setLayoutStyleFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        const UILayoutStyle& style);
     [[nodiscard]] Core::Status destroyNodeFromUpdater(UINodeId updaterRoot, UINodeId node);
     void destroyRootFromOwner(UINodeId root) noexcept;
     [[nodiscard]] bool isAliveInRoot(UINodeId updaterRoot, UINodeId node) const noexcept;

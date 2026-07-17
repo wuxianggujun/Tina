@@ -101,7 +101,7 @@ M6 生命周期之后仍未实现：
 - typed render resource handle、Pass Scheduler、World RenderScene/UIDisplayList、Runtime-private
   RenderFramePacket/pool 与 submission completion 保活；
 - Scene、Asset、Audio 的真实契约和消费者，以及 Runtime-integrated UI producer/layout/render
-  pipeline；M7-C1a standalone `tina_ui` 树核心已实现，不为固定初始化顺序预先制造无消费者空壳；
+  pipeline；M7-C1b C++23 standalone `tina_ui` tree/layout foundation 已实现，但尚未接入 Runtime；
 - `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
 - Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；M7-B2 Desktop bgfx
   X11 图也已完成 GCC 13.4 和 Clang 22.1.8 + ASan/UBSan/LSan 的183/22/11直接测试及300帧门禁。
@@ -110,7 +110,8 @@ M6 生命周期之后仍未实现：
 
 ## M7 Platform、最小 Surface 与高性能 UI 垂直切片
 
-M7 分为五个独立提交，不将 GLFW、bgfx、FreeType、IMM32 和完整 UI 同时并入。
+M7 分为五组可回滚垂直切片，组内继续按 C1a/C1b 等边界拆分提交；不将 GLFW、bgfx、FreeType、
+IMM32 和完整 UI 同时并入。
 
 ### M7-A PlatformFrame 与 Input correctness
 
@@ -199,7 +200,21 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   `Tina::UI::UIRootOwner` RAII、`Tina::UI::UICommittedStructureView` 结构 snapshot，以及
   UI-owned `Tina::UI::InputTransitionConsumptionView` / `Tina::UI::ContinuousControlClaimsView`
   route-result view ABI；
-- **仍后置**：layout、hit route、DisplayList、widgets、FreeType、bgfx UI pass 与 Runtime UI producer；
+- **已完成 M7-C1b**：新增 `UILayoutLength/UILayoutStyle/UIDirty` 与
+  `UICommittedLayoutView`；width/height/min/max 采用 border-box，Percent 使用 `0..100` 且相对
+  containing content box，默认 Auto root 以 viewport content box 为确定基准；
+- **已完成 M7-C1b**：Create 期固定容量 PMR style/dirty side array、dirty queue、layout scratch 与
+  committed structure/layout 双缓冲；style mutation 先预检再 node→root 原子 dirty 传播；
+  `commitLayout()` 原子发布 pending structure+layout，`commitStructure()` 仅作为 C1a 诊断 seam；
+- **已完成 M7-C1b**：非递归 Measure/Arrange 覆盖 Px/Percent/Auto、margin/padding/gap、
+  Row/Column/grow、justify/align/stretch、Absolute Overlay、visibility 与 min-wins；viewport 变化重排，
+  同 viewport 无变化为0 pass；finite/算术溢出/容量失败保留旧 snapshot 与 pending dirty；
+- **已完成 M7-C1b 门禁**：50,000节点深树非递归 layout，以及首次发布后连续300次无变化 commit
+  的0 layout pass、revision 不变与0新增 supplied UI PMR allocation；
+- **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
+  subtree 尚未实现；
+- **仍后置**：dirty subtree pruning、hit route、PaintCache/DisplayList、text/glyph、widgets、
+  FreeType、bgfx UI pass 与 Runtime UI producer；
 - 后续继续实现后端无关 Quad/Text/Clip DisplayList、FramePinSink/capacity rollback 和相邻兼容 batching
   contract；Null UI 直接测试 route/layout/paint order，不链接 FreeType/bgfx；
 - 硬门禁：无变化 UI 每帧0 layout、0 PaintCache rebuild、0 Tina heap allocation。
