@@ -5,7 +5,8 @@
 - 修订：2026-07-18
 - 实施状态：M7-C1b 已实现事务式 Flex-lite layout；M7-C1c-a 已实现固定容量 PMR Pointer policy/
   route-ancestry scratch、`Ignore`/`Targetable`、双缓冲 `UICommittedHitView` 与成功 `commitLayout()` 的
-  structure/layout/hit 原子发布。point hit-test、反向目标选择、Capture→Target→Bubble 路由、
+  structure/layout/hit 原子发布；M7-C1c-b1 已实现无分配 `queryPointerHit()`、反向目标选择与 visited count。
+  listener token、Capture→Target→Bubble 路由、
   Focus/Capture/Modal、Button、paint snapshot/DisplayList、dirty subtree pruning、nested clip、文本/
   Glyph Atlas、bgfx UI pass 与 Runtime UI producer 仍后置。
 
@@ -68,8 +69,9 @@ M7-C1c-a 又加入 `UIPointerHitPolicy::{Ignore, Targetable}` 与双缓冲 `UICo
 保存 effective-visible route-ancestry entry，保留 `Ignore` 祖先并省略 `Hidden`/`Collapsed` 子树；同一
 view 内的 paint ordinal 唯一且严格递增，并携带 structure/layout/paint-order/hit revision。仅 policy
 变化的 hit-only commit 为0次 layout。当前 effective clip 仅为 `viewport ∩ worldRect`，hit rebuild 仍
-线性扫描整份 committed layout。该数据基础尚不执行 point hit-test、逆 paint order 选 target 或事件
-路由，也不实现独立 z-order/stacking 或 nested clip。
+线性扫描整份 committed layout。M7-C1c-b1 的 `queryPointerHit()` 反向扫描 view，只接受同时位于
+world/effective clip 的 `Targetable` entry，使用半开边界并返回 route index、四类 revision 与 visited count；
+它不执行 listener/事件路由，也不实现独立 z-order/stacking 或 nested clip。
 
 ### 每帧事务与 committed snapshot
 
@@ -106,8 +108,10 @@ pending dirty。
 capacity failure 与 Tina allocation delta。每窗口 layout pass 每帧只能为 `0` 或 `1`。
 
 当前直接测试已覆盖50,000节点深树的非递归布局/hit snapshot，以及首次发布后连续300次同 viewport、
-无 mutation commit 的0 layout pass、revision 不变和 supplied UI PMR allocation count 不增加；新增15项
-committed hit snapshot 测试后 `tina_ui_tests` 共54/54。它不等价于 point query/route、PaintCache/
+无 mutation commit 的0 layout pass、revision 不变和 supplied UI PMR allocation count 不增加；15项
+committed hit snapshot 加5项 point query 测试后 `tina_ui_tests` 共59/59。query 测试覆盖反向目标选择、
+Ignore 穿透、world/clip 半开边界、非有限坐标 miss、snapshot binding/visited count 与300次零新增 UI PMR
+allocation；它不等价于 listener/route、PaintCache/
 DisplayList、进程 heap 或 GPU 资源门禁已经完成。
 
 ### PaintCache、DisplayList 与批处理
@@ -139,8 +143,8 @@ pipeline、texture、sampler、blend、effective clip 完全兼容的命令；�
 
 ### 输入 consumption、claim 与路由边界
 
-本节是 Accepted 目标语义。M7-C1c-a 只提供 committed hit/route-ancestry 数据，尚未实现 point query、
-反向目标选择、listener dispatch、Capture → Target → Bubble 执行、Focus/Capture/Modal 或 Runtime producer。
+本节是 Accepted 目标语义。M7-C1c-a/C1c-b1 已提供 committed hit/route-ancestry 数据与纯 point query，
+尚未实现 listener dispatch、Capture → Target → Bubble 执行、Focus/Capture/Modal 或 Runtime producer。
 
 Runtime 将平台输入转为后端无关 `UIInputTransition` 序列，再调用 UI 路由；UI 不读取 GLFW，不修改
 全局 Input Snapshot，也不直接调用 Gameplay 输入接口。每个 Pointer transition 最多使用 committed hit
@@ -211,9 +215,9 @@ Checkbox、Slider、ScrollView、VirtualList、TextEdit、IME、复杂 shaping �
 - Render backend 可以批处理 UI，但不能改变透明绘制语义或把 backend 生命周期反向泄漏给 UI；
 - Tina 需要自行承担控件、文本 shaping、可访问性和视觉回归成本，并以垂直切片逐步交付。
 
-M7-C1b/C1c-a 只完成无变化布局零工作、changed-frame 单 pass 与 committed hit-snapshot 数据基础；
+M7-C1b/C1c-a/C1c-b1 只完成无变化布局零工作、changed-frame 单 pass、committed hit snapshot 与纯 point query；
 “CPU 成本由实际变化区域决定”仍需后续 dirty subtree pruning 证明，不能从 dirty bit/queue 或 hit view
-已存在直接推断。point hit query、事件路由、Widget 和可见 UI 同样不能由 snapshot 推断。
+已存在直接推断。事件路由、Widget 和可见 UI 同样不能由 point query 推断。
 
 ## 被拒绝方案
 

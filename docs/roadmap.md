@@ -216,11 +216,15 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   双缓冲 `UICommittedHitView`；同一 view 内 entry 的 paint ordinal 唯一且严格递增，view 携带 structure/layout/
   paint-order/hit revision；hit-only commit 为0次 layout，成功 `commitLayout()` 事务发布 structure/layout/hit，
   任一候选失败时三份旧 snapshot 均保持不变；
-- **已完成 M7-C1c-a 门禁**：15项 committed hit snapshot 测试，总计 `tina_ui_tests` 54/54；覆盖
+- **已完成 M7-C1c-a 门禁**：15项 committed hit snapshot 测试，当时 `tina_ui_tests` 为54/54；覆盖
   50,000节点非递归快照、stale generation、固定容量失败和 supplied UI PMR 释放；
+- **已完成 M7-C1c-b1**：无分配 `queryPointerHit()` 反向扫描 committed hit view，只命中同时位于
+  world/effective clip 的 `Targetable` entry，使用半开边界并返回 route index、四类 revision 与 visited count；
+- **已完成 M7-C1c-b1 门禁**：新增5项 query 测试后 `tina_ui_tests` 为59/59；Windows Debug/Release、
+  Linux GCC 13.4 与 Clang 22 ASan/UBSan/LSan 均通过，300次查询无新增 supplied UI PMR allocation；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
   subtree 尚未实现；
-- **仍后置**：dirty subtree pruning、point hit-test、反向目标选择、Capture→Target→Bubble 路由、
+- **仍后置**：dirty subtree pruning、listener token、Capture→Target→Bubble 路由、
   Focus/Capture/Modal、Button 交互、paint snapshot/DisplayList、nested clip、text/glyph、FreeType、
   bgfx UI pass 与 Runtime UI producer；
 - 后续继续实现后端无关 Quad/Text/Clip DisplayList、FramePinSink/capacity rollback 和相邻兼容 batching

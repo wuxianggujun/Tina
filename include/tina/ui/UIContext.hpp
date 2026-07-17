@@ -183,6 +183,10 @@ public:
     [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize);
     [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;
     [[nodiscard]] UICommittedHitView committedHit() const noexcept;
+    // Pure query over the last committed hit snapshot. It never commits
+    // layout, rebuilds hit data, dispatches an event, or allocates storage.
+    [[nodiscard]] UIPointerHitQueryResult queryPointerHit(
+        UILogicalPoint point) const noexcept;
     [[nodiscard]] UIContextStatistics statistics() const noexcept;
     [[nodiscard]] usize liveNodeCount() const noexcept;
     [[nodiscard]] usize liveRootCount() const noexcept;

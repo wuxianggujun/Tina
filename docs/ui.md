@@ -2,7 +2,8 @@
 
 > 状态：vNext 目标契约已接受。M7-C1b 已完成 C++23 standalone `tina_ui` 的事务式 Flex-lite
 > layout；M7-C1c-a 已完成固定容量 Pointer policy/route-ancestry scratch 与双缓冲
-> `UICommittedHitView` 数据基础。point hit-test、反向目标选择、Capture→Target→Bubble 路由、
+> `UICommittedHitView` 数据基础；M7-C1c-b1 已完成无分配 `queryPointerHit()`、反向目标选择与
+> visited count。listener token、Capture→Target→Bubble 路由、
 > Focus/Capture/Modal、Button、paint snapshot/DisplayList、nested clip、dirty subtree pruning、
 > 文本/Glyph Atlas、bgfx UI pass 与 Runtime UI producer 尚未实现。Tina UI 是游戏内 Retained UI，
 > 不是 Immediate UI，也不是桌面编辑器工具包。
@@ -62,7 +63,7 @@ UIContext
 Platform/Event 只把 `PlatformFrameView` 的 UI-eligible transitions 交给 UIContext，不拥有节点、Focus、Capture 或 Layout。
 `IGameState` 持有 move-only `UIRootOwner` 和非 owning `UINodeId`，不持有 UIContext、Renderer、
 UINode 裸指针或跨帧 writer。
-当前 M7-C1b/C1c-a `tina_ui` 仍只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；Font Asset、Render
+当前 M7-C1b/C1c-a/C1c-b1 `tina_ui` 仍只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；Font Asset、Render
 descriptor/DisplayList 和 bgfx UI pass 分别在后续 asset/render 切片接入，不能提前把
 Asset/Render 依赖塞回 UI tree/layout core。
 
@@ -87,6 +88,8 @@ class UITreeUpdater;     // 仅 UIUpdate phase，绑定 State 已拥有的 root
 struct UICommittedStructureView; // owner-thread borrowed structure snapshot
 struct UICommittedLayoutView;    // owner-thread borrowed layout snapshot
 struct UICommittedHitView;       // owner-thread borrowed hit/route-ancestry snapshot
+struct UIPointerHitTarget;       // owning target facts + snapshot-local route indices
+struct UIPointerHitQueryResult;  // owning point-query result + revisions/visited count
 struct UISemanticsView;  // 只读 committed snapshot
 
 struct InputTransitionConsumptionView;
@@ -273,8 +276,11 @@ parent/root index、world rect、当前仅为 `viewport ∩ worldRect` 的 effec
 携带 structure/layout/paint-order/hit revision。布局、结构或 policy 改变后，成功的 `commitLayout()`
 原子发布匹配的 structure/layout/hit snapshot。
 
-这只是 point query 与事件路由所需的 committed 数据。目前没有 `hitTest(point)`、逆 paint order 的目标
-选择执行、Capture→Target→Bubble listener dispatch、Focus/Hover/Pointer Capture/Modal，也没有独立
+M7-C1c-b1 的 `queryPointerHit(point)` 对这份 view 做反向扫描，只接受 `Targetable` 且 point 同时位于
+world rect/effective clip 的首个 entry；边界固定为 left/top inclusive、right/bottom exclusive，非有限
+坐标安全返回未命中。结果复制 target/root identity、snapshot-local route index、四类 revision 与
+visited count。查询为 `const noexcept`，不执行 layout/hit rebuild、不分配、不派发事件。目前没有
+Capture→Target→Bubble listener dispatch、Focus/Hover/Pointer Capture/Modal，也没有独立
 z-order/stacking 或 nested clip policy；当前 paint order 来自稳定 tree preorder，hit rebuild 仍线性扫描
 整份 committed layout，尚未按 dirty subtree 剪枝。
 
@@ -302,7 +308,7 @@ Min/Max 冲突固定使用 min-wins。失败不发布半份结构或 layout snap
 
 当前覆盖 Px/Percent/Auto、margin/padding、row/column gap、Row/Column、grow、Start/Center/End/
 SpaceBetween、Start/Center/End/Stretch、Absolute Overlay、Visible/Hidden/Collapsed，以及布局后的
-min/max clamp。它是布局几何基础，不代表 point hit query、事件路由、clip policy、PaintCache、文本测量或 Widget
+min/max clamp。它是布局几何基础，不代表事件路由、clip policy、PaintCache、文本测量或 Widget
 行为已经完成。
 
 Text/Widget measure cache key 覆盖 available constraint、style revision、content revision 和字体
@@ -310,8 +316,8 @@ layout revision。虚拟列表只创建 visible + overscan item；100,000 行不
 
 ## 输入、路由与默认行为
 
-本节描述冻结的后续目标；M7-C1c-a 仅提供 committed hit/route-ancestry snapshot，尚未实现本节的
-point hit query、反向目标选择、事件派发、Focus/Capture/Modal、Button default action 或 Runtime producer。
+本节描述冻结的后续目标；M7-C1c-a/C1c-b1 已提供 committed hit/route-ancestry snapshot 与纯 point query，
+尚未实现本节的 listener/事件派发、Focus/Capture/Modal、Button default action 或 Runtime producer。
 
 Runtime 在每次状态命令提交后，根据 committed `GameStateStack`、`GameStatePolicy` 和 root
 registration 生成每窗口不可变 `UIInputScopeSnapshot`。它按视觉层级列出 eligible roots，并在
@@ -491,13 +497,14 @@ p50/p95/p99 由 `tina_bench` 的预分配 sample buffer 离线计算，不在常
 - 无变化 UI、单 Label 更新、滚动列表、中文文本、Modal 和设置页分别记录 p50/p95/p99；
 - 绝对毫秒预算等固定门禁机建立后再阻断，零分配、容量、顺序和资源归零立即阻断。
 
-M7-C1b/C1c-a 已建立其中第一组可执行证据：50,000 节点深树的非递归 layout 与 committed hit
+M7-C1b/C1c-a/C1c-b1 已建立其中第一组可执行证据：50,000 节点深树的非递归 layout 与 committed hit
 snapshot；首次发布后连续300次
 同 viewport、无 mutation 的 `commitLayout()` 均为0 layout pass、layout revision 不变且 supplied
 UI PMR allocation count 不增加。15项 hit snapshot 测试覆盖固定容量、policy、route ancestry、同一 view
-内严格递增且唯一的 paint ordinal、revision、三快照失败回滚、stale generation 与 PMR 回收；
-`tina_ui_tests` 共54/54。
-它尚未证明 dirty leaf 不扫描无关 subtree，也未覆盖 point hit query、事件路由、PaintCache、
+内严格递增且唯一的 paint ordinal、revision、三快照失败回滚、stale generation 与 PMR 回收；新增5项
+point query 测试覆盖反向目标选择、Ignore 穿透、world/clip 半开边界、非有限坐标 miss、revision/index
+binding、visited count 与300次查询零新增 UI PMR allocation；`tina_ui_tests` 共59/59。
+它尚未证明 dirty leaf 不扫描无关 subtree，也未覆盖 listener/事件路由、PaintCache、
 DisplayList、文本或 GPU 资源归零；这些门禁仍由后续切片补齐。
 
 ## 测试与实施顺序
@@ -521,11 +528,12 @@ DisplayList、文本或 GPU 资源归零；这些门禁仍由后续切片补齐�
    Measure/Arrange、structure+layout 原子发布与 committed layout snapshot；
 3. 已完成 M7-C1c-a：固定容量 Pointer policy/route-ancestry scratch、双缓冲 committed hit snapshot、
    structure/layout/hit 事务发布和 hit-only 0 layout；
-4. 实现 point hit query、反向目标选择、Capture→Target→Bubble route，并接入真实 Runtime UI producer；
-5. 让 dirty leaf 跳过无关 subtree，并输出后端无关 DisplayList；
-6. 完成 PaintCache/text layout + glyph atlas；
-7. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
-8. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
-9. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
+4. 已完成 M7-C1c-b1：无分配 point query、反向目标选择、route index/revision 与 visited count；
+5. 实现 listener token、Capture→Target→Bubble route，并接入真实 Runtime UI producer；
+6. 让 dirty leaf 跳过无关 subtree，并输出后端无关 DisplayList；
+7. 完成 PaintCache/text layout + glyph atlas；
+8. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
+9. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
+10. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
 
 所以“完善 UI”首先是完成正确的数据和 backend 边界，然后才是增加 Widget 数量。

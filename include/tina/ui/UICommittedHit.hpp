@@ -5,13 +5,9 @@
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>
 
-#include <limits>
 #include <span>
 
 namespace Tina::UI {
-
-// Snapshot-local ancestry indices. They are never persistent node identities.
-inline constexpr u32 InvalidUIHitEntryIndex = (std::numeric_limits<u32>::max)();
 
 struct UICommittedHitEntry final {
     UINodeId node{};

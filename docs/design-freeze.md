@@ -128,7 +128,8 @@ content box 为确定基准。M7-C1c-a 又实现固定容量 PMR Pointer policy/
 的 paint ordinal 在同一 view 内唯一且严格递增；hit-only commit 不执行布局，失败的 `commitLayout()` 保留旧
 structure/layout/hit 三份 snapshot。当前 changed frame 仍对整棵 live tree执行一次 Measure/Arrange，hit rebuild
 仍线性扫描整份 committed layout；
-point hit-test、反向目标选择、Capture→Target→Bubble 路由、Focus/Capture/Modal、Button、paint snapshot/
+`queryPointerHit()` 已在 M7-C1c-b1 按反向 paint order 实现无分配的 world/clip point query，并返回
+route index/revision/visited count；Capture→Target→Bubble listener 路由、Focus/Capture/Modal、Button、paint snapshot/
 DisplayList、dirty subtree pruning、nested clip 与 Runtime producer 尚未实现，不能把目标误写成现状。
 
 ### 实施与验证
@@ -156,7 +157,7 @@ DisplayList、dirty subtree pruning、nested clip 与 Runtime producer 尚未实
 | Backend 组合 | [Accepted](adr/0003-backend-factories.md) | `Create(config, factories)`；M7-B1 已使用 Independent 或 WindowSurface 的 tagged composition，M7-B2 在该组合上接入私有 bgfx，bootstrap 只选 factory、EngineHost 唯一创建/回滚 owner | 消除 Runtime 对具体 backend 依赖与 lease 接线歧义 |
 | Runtime/State | [Accepted](adr/0014-runtime-phase-and-state.md) | `IGameApplication` lifecycle-only + `IGameState` 唯一帧入口；Frame Update 后提交状态命令 | 消除名称歧义、双帧入口与首帧 UI 时序冲突 |
 | RenderFrame/Surface 所有权 | [Accepted](adr/0020-window-surface-handoff.md) | bgfx backend 在 factory 成功后持有 move-only window surface lease，Runtime 持有 owning RenderFramePacket；Render SPI 只暴露纯 Tina view/pin sink | 消除 native 泄漏、依赖环、backend 越界与在途 UAF |
-| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | M7-C1b 已实现事务式 Flex-lite layout；M7-C1c-a 已实现固定容量 Pointer policy/ancestry scratch、`Ignore`/`Targetable`、双缓冲 committed hit snapshot 与成功 `commitLayout()` 的 structure/layout/hit 原子发布。changed frame 全树 Measure/Arrange 仍需收敛；point hit-test、反向目标选择、路由、Focus/Capture/Modal、Button、paint snapshot/DisplayList、nested clip 与 batching 后置 | 高性能且保持命中/透明顺序 |
+| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | M7-C1b 已实现事务式 Flex-lite layout；M7-C1c-a 已实现固定容量 Pointer policy/ancestry scratch、`Ignore`/`Targetable`、双缓冲 committed hit snapshot 与成功 `commitLayout()` 的 structure/layout/hit 原子发布；M7-C1c-b1 已实现无分配 `queryPointerHit()`、反向目标选择与 visited count。changed frame 全树 Measure/Arrange 仍需收敛；listener 路由、Focus/Capture/Modal、Button、paint snapshot/DisplayList、nested clip 与 batching 后置 | 高性能且保持命中/透明顺序 |
 | Frame/Input | [Accepted](adr/0015-input-and-fixed-step.md) | 保序 PlatformFrame、UI transition consumption + continuous claims；Action 分 Simulation/Frame domain；每个 substep 独立 commit | 防输入穿透、0步帧丢边沿、双重执行和追赶步错误 |
 | C++ exception | [Accepted](adr/0004-exceptions-and-errors.md) | 编译开启；公共 API 用 Result/Status，Engine/Frame/Worker/C callback 边界捕获 | pmr/第三方兼容、错误边界 |
 | Generation | [Accepted](adr/0019-generation-handles.md) | 32位 generation，回绕 retire；UINodeId 所有构建编码 owner WindowId，Debug cookie 只诊断 | stale/跨 registry 安全 |
@@ -216,6 +217,6 @@ Native Window Surface lease、surface snapshot、WindowSurface-aware composition
 M7-B2 已实现私有 bgfx clear-only core、Desktop bootstrap 与真实 GPU 门禁；M7-C1a 已实现
 `tina_ui` tree core，M7-C1b 已实现 layout/dirty API、固定容量 PMR 存储、Flex-lite 非递归
 Measure/Arrange 与 committed structure+layout 原子发布；M7-C1c-a 已实现 committed hit snapshot 数据基础；
-M7-C 后续继续实现 point hit-test、反向目标选择、Capture→Target→Bubble route、dirty subtree pruning 与
+M7-C1c-b1 已实现 point query 与反向目标选择；M7-C 后续继续实现 Capture→Target→Bubble listener route、dirty subtree pruning 与
 Null DisplayList，M7-D 实现 Label/Button/Modal +
 FreeType 可见样例与 bgfx UI pass；M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。

@@ -4,6 +4,7 @@
 #include <tina/ui/UI.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 
@@ -588,6 +589,157 @@ TEST_F(UIHitSnapshotTest, StaleQueuedGenerationCannotClearReusedSlotPolicy)
     EXPECT_EQ(replacementEntry->policy, UI::UIPointerHitPolicy::Targetable);
     EXPECT_EQ(context->statistics().committedHitTargetCount, 1U);
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 0U);
+}
+
+TEST_F(UIHitSnapshotTest, QueryPointerHitSelectsTheTopmostTargetAndBindsItsSnapshot)
+{
+    auto context = createContext(firstWindow, {.nodeCapacity = 8, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId lower = createButton(*context, root.rootNodeId());
+    const UI::UINodeId upper = createButton(*context, root.rootNodeId());
+    auto updater = createUpdater(*context, root);
+
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
+    UI::UILayoutStyle overlap = fixedSize(60.0F, 40.0F);
+    overlap.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    assertOk(updater.setLayoutStyle(lower, overlap));
+    assertOk(updater.setLayoutStyle(upper, overlap));
+    assertOk(updater.setPointerHitPolicy(lower, UI::UIPointerHitPolicy::Targetable));
+    assertOk(updater.setPointerHitPolicy(upper, UI::UIPointerHitPolicy::Targetable));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    const UI::UIPointerHitQueryResult result = context->queryPointerHit({10.0F, 10.0F});
+    ASSERT_TRUE(result.hasTarget());
+    EXPECT_EQ(result.target.node, upper);
+    EXPECT_EQ(result.target.rootNode, root.rootNodeId());
+    EXPECT_EQ(result.visitedEntryCount, 1U);
+
+    const UI::UICommittedHitView hit = context->committedHit();
+    ASSERT_LT(result.target.hitEntryIndex, hit.size());
+    ASSERT_LT(result.target.rootEntryIndex, hit.size());
+    const UI::UICommittedHitEntry& targetEntry = hit.entries()[result.target.hitEntryIndex];
+    EXPECT_EQ(targetEntry.node, result.target.node);
+    EXPECT_EQ(targetEntry.worldRect, result.target.worldRect);
+    EXPECT_EQ(targetEntry.effectiveClip, result.target.effectiveClip);
+    EXPECT_EQ(targetEntry.paintOrdinal, result.target.paintOrdinal);
+    EXPECT_EQ(hit.entries()[result.target.rootEntryIndex].node, result.target.rootNode);
+    EXPECT_EQ(result.structureRevision, hit.structureRevision());
+    EXPECT_EQ(result.layoutRevision, hit.layoutRevision());
+    EXPECT_EQ(result.paintOrderRevision, hit.paintOrderRevision());
+    EXPECT_EQ(result.hitRevision, hit.hitRevision());
+}
+
+TEST_F(UIHitSnapshotTest, QueryPointerHitSkipsAnIgnoredFrontmostEntry)
+{
+    auto context = createContext(firstWindow, {.nodeCapacity = 8, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId lower = createButton(*context, root.rootNodeId());
+    const UI::UINodeId ignoredUpper = createButton(*context, root.rootNodeId());
+    auto updater = createUpdater(*context, root);
+
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
+    UI::UILayoutStyle overlap = fixedSize(60.0F, 40.0F);
+    overlap.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    assertOk(updater.setLayoutStyle(lower, overlap));
+    assertOk(updater.setLayoutStyle(ignoredUpper, overlap));
+    assertOk(updater.setPointerHitPolicy(lower, UI::UIPointerHitPolicy::Targetable));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    const UI::UIPointerHitQueryResult result = context->queryPointerHit({10.0F, 10.0F});
+    ASSERT_TRUE(result.hasTarget());
+    EXPECT_EQ(result.target.node, lower);
+    EXPECT_EQ(result.visitedEntryCount, 2U);
+}
+
+TEST_F(UIHitSnapshotTest, QueryPointerHitUsesWorldAndClipHalfOpenBounds)
+{
+    auto context = createContext(firstWindow, {.nodeCapacity = 4, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId button = createButton(*context, root.rootNodeId());
+    auto updater = createUpdater(*context, root);
+
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
+    UI::UILayoutStyle clipped = fixedSize(40.0F, 20.0F);
+    clipped.position = UI::UILayoutPositionMode::AbsoluteOverlay;
+    clipped.absoluteInset.left = UI::UILayoutLength::Px(80.0F);
+    clipped.absoluteInset.top = UI::UILayoutLength::Px(10.0F);
+    assertOk(updater.setLayoutStyle(button, clipped));
+    assertOk(updater.setPointerHitPolicy(button, UI::UIPointerHitPolicy::Targetable));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    EXPECT_TRUE(context->queryPointerHit({80.0F, 10.0F}).hasTarget());
+    EXPECT_TRUE(context->queryPointerHit({99.0F, 29.0F}).hasTarget());
+    const UI::UIPointerHitQueryResult clipRightEdge =
+        context->queryPointerHit({100.0F, 10.0F});
+    const UI::UIPointerHitQueryResult worldBottomEdge =
+        context->queryPointerHit({80.0F, 30.0F});
+    EXPECT_FALSE(clipRightEdge.hasTarget());
+    EXPECT_FALSE(worldBottomEdge.hasTarget());
+    EXPECT_EQ(clipRightEdge.visitedEntryCount, context->committedHit().size());
+    EXPECT_EQ(worldBottomEdge.visitedEntryCount, context->committedHit().size());
+}
+
+TEST_F(UIHitSnapshotTest, QueryPointerHitTreatsNonFiniteCoordinatesAsAnUnscannedMiss)
+{
+    auto context = createContext(firstWindow, {.nodeCapacity = 2, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    const UI::UIPointerHitQueryResult nanResult = context->queryPointerHit(
+        {.x = (std::numeric_limits<float>::quiet_NaN)(), .y = 0.0F});
+    const UI::UIPointerHitQueryResult infinityResult = context->queryPointerHit(
+        {.x = 0.0F, .y = (std::numeric_limits<float>::infinity)()});
+    EXPECT_FALSE(nanResult.hasTarget());
+    EXPECT_FALSE(infinityResult.hasTarget());
+    EXPECT_EQ(nanResult.visitedEntryCount, 0U);
+    EXPECT_EQ(infinityResult.visitedEntryCount, 0U);
+    EXPECT_EQ(nanResult.hitRevision, context->committedHit().hitRevision());
+    EXPECT_EQ(infinityResult.hitRevision, context->committedHit().hitRevision());
+}
+
+TEST_F(UIHitSnapshotTest, ThreeHundredPointerQueriesDoNotAllocateOrMutateUiState)
+{
+    ObservingMemoryResource resource;
+    auto context = createContext(
+        firstWindow,
+        {.nodeCapacity = 8, .rootCapacity = 1},
+        resource);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId button = createButton(*context, root.rootNodeId());
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
+    assertOk(updater.setLayoutStyle(button, fixedSize(40.0F, 20.0F)));
+    assertOk(updater.setPointerHitPolicy(button, UI::UIPointerHitPolicy::Targetable));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    const usize allocationCount = resource.allocationCount();
+    const UI::UIContextStatistics before = context->statistics();
+    for (usize queryIndex = 0; queryIndex < 300; ++queryIndex) {
+        const UI::UIPointerHitQueryResult result = context->queryPointerHit({10.0F, 10.0F});
+        ASSERT_TRUE(result.hasTarget());
+        EXPECT_EQ(result.target.node, button);
+    }
+    const UI::UIContextStatistics after = context->statistics();
+    EXPECT_EQ(resource.allocationCount(), allocationCount);
+    EXPECT_EQ(after.committedRevision, before.committedRevision);
+    EXPECT_EQ(after.layoutRevision, before.layoutRevision);
+    EXPECT_EQ(after.hitRevision, before.hitRevision);
+    EXPECT_EQ(after.paintOrderRevision, before.paintOrderRevision);
+    EXPECT_EQ(after.dirty, before.dirty);
+    EXPECT_EQ(after.layoutDirty, before.layoutDirty);
+    EXPECT_EQ(after.hitDirty, before.hitDirty);
+    EXPECT_EQ(after.lastLayoutPassCount, before.lastLayoutPassCount);
+    EXPECT_EQ(after.lastHitRebuildCount, before.lastHitRebuildCount);
 }
 
 TEST_F(UIHitSnapshotTest, BuildsFiftyThousandDeepEntriesWithoutRecursion)

@@ -2,7 +2,7 @@
 
 > 状态：分批实施。Core、M6-A 生命周期、M7-A Platform/Input、私有 GLFW adapter、M7-B1 Native
 > Surface handoff，以及 M7-B2 私有 bgfx clear-only device、Desktop bootstrap 和300帧 backend
-> 冒烟已落地；M7-C1b/C1c-a C++23 standalone `tina_ui` tree/layout/committed-hit foundation 已落地；完整状态栈、worker、Scene/Asset/Audio、
+> 冒烟已落地；M7-C1b/C1c-a/C1c-b1 C++23 standalone `tina_ui` tree/layout/committed-hit/point-query foundation 已落地；完整状态栈、worker、Scene/Asset/Audio、
 > Runtime-integrated UI pipeline、production Gamepad、完整 DPI 与
 > Windows IMM32 仍是后续契约。
 
@@ -395,10 +395,10 @@ submit/present，Suspended surface 返回明确 skipped 结果且不伪造 GPU s
 `PlatformEventSubscriptions` 提供 generation-safe RAII 订阅；未来通用 Runtime Event Queue 面向
 Gameplay/Domain/异步模块事件，当前尚未实现，也不复用 dispatcher 的 owner、容量或投递语义。
 
-## M7-C1b/C1c-a UI tree/layout/committed-hit foundation
+## M7-C1b/C1c-a/C1c-b1 UI tree/layout/committed-hit/point-query foundation
 
 当前 C++23 standalone `Tina::UI` public surface 只依赖 `Tina::Core` 与 `Tina::Platform`，不出现
-FreeType、bgfx、GLFW、Legacy UI 或 Runtime 类型。M7-C1b/C1c-a 的核心值类型和提交入口为：
+FreeType、bgfx、GLFW、Legacy UI 或 Runtime 类型。M7-C1b/C1c-a/C1c-b1 的核心值类型和入口为：
 
 ```cpp
 enum class UILayoutLengthUnit : u8 { Px, Percent, Auto };
@@ -406,6 +406,8 @@ struct UILayoutLength;
 struct UILayoutStyle;
 enum class UIDirty : u16;
 enum class UIPointerHitPolicy : u8 { Ignore, Targetable };
+struct UIPointerHitTarget;
+struct UIPointerHitQueryResult;
 
 class UITreeUpdater {
 public:
@@ -422,6 +424,8 @@ public:
     [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize);
     [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;
     [[nodiscard]] UICommittedHitView committedHit() const noexcept;
+    [[nodiscard]] UIPointerHitQueryResult queryPointerHit(
+        UILogicalPoint point) const noexcept;
 };
 ```
 
@@ -448,14 +452,17 @@ public:
 `UICommittedLayoutView` 是 owner-thread borrowed view，携带对应 structure/layout revision；在
 下一次成功发布新 layout 或 `UIContext` 析构后失效。它只发布 logical local/world rect、effective
 clip、effective visibility 与稳定 ordinal，不是跨线程、跨 commit 的 owning snapshot，也不证明
-point hit query、事件路由、PaintCache/DisplayList、text/glyph、Widget 或 Runtime producer 已实现。
+事件路由、PaintCache/DisplayList、text/glyph、Widget 或 Runtime producer 已实现。
 当前 `effectiveClip` 仅表示 `viewport ∩ worldRect`；祖先 clip policy 与 hit/paint clip chain 尚未实现。
 
 `UICommittedHitView` 同样是 owner-thread borrowed 双缓冲 view。它保存所有 effective-visible
 route-ancestry entry（包括 `Ignore` 祖先），每项包含 snapshot-local parent/root index、world rect、
 effective clip、`Ignore`/`Targetable` 和 paint ordinal；ordinal 在同一 view 内严格递增且唯一。
 view 携带 structure/layout/paint-order/hit revision。仅 policy 变化的 hit-only commit 不执行 layout，
-不增加 layout revision。当前没有 point `hitTest()`、逆 paint order 目标选择、Capture→Target→Bubble
+不增加 layout revision。M7-C1c-b1 的 `queryPointerHit()` 反向扫描 committed entries，只接受
+`Targetable` 且同时位于 world rect/effective clip 的首个目标；边界为 left/top inclusive、right/bottom
+exclusive，非有限坐标安全返回未命中。结果携带 target/root entry index、四类 snapshot revision 与
+visited count；查询不执行 layout/hit rebuild、不分配、不派发事件。当前没有 listener token、Capture→Target→Bubble
 dispatch、Focus/Capture/Modal、Button interaction、paint snapshot/DisplayList、dirty subtree pruning、
 nested clip 或 Runtime route producer。
 
@@ -521,8 +528,9 @@ Game SDK 的 integration SPI 中实现：
 Desktop bootstrap 只构造 tagged factory bundle，不在外部创建或持有 owner；EngineHost 统一执行
 Clock → Platform → Task → lease（仅 WindowSurface）→ Render 的事务和逆序回滚。Null/Headless 与
 M7-A GLFW+Null 组合不构造伪 lease，GLFW/bgfx 失败也不得静默降级 Null。M7-B1 覆盖 lease/
-snapshot/deferred publish/runtime handoff；M7-B2 已建立私有 `tina_render_bgfx` device core，Desktop
-bootstrap 仍待把该 factory 封装成产品入口。完整 factory
+snapshot/deferred publish/runtime handoff；M7-B2 已建立私有 `tina_render_bgfx` device core，并由
+`Tina::Desktop::CreateEngine(config)` 把该 factory 封装成产品组合入口，`tina_sample_desktop` 已通过
+300帧真实 backend 冒烟。完整 factory
 签名与 Surface state machine 见 [ADR 0020](adr/0020-window-surface-handoff.md)。
 
 ## Handle、借用与 API 可见性
@@ -538,7 +546,8 @@ bootstrap 仍待把该 factory 封装成产品入口。完整 factory
 | `Tina::UI::UINodeId` | M7-C1a 已实现，M7-C1b layout 继续复用 | UI public / Game SDK 目标 | Window-owned UI registry generation + WindowId owner | invalid/stale/wrong owner |
 | `Tina::UI::UICommittedStructureView` | M7-C1a 已实现 | UI public | owner-thread borrowed structure snapshot，下一次结构发布（diagnostic `commitStructure()` 或原子 `commitLayout()`）或 `UIContext` 销毁后失效 | stale borrowed view / owner-thread misuse |
 | `Tina::UI::UICommittedLayoutView` | M7-C1b 已实现 | UI public | owner-thread borrowed 双缓冲 layout snapshot，下一次成功发布新 layout 或 `UIContext` 销毁后失效；hit-only/no-op commit 不使其失效 | InvalidLayout/CapacityExceeded/owner-thread misuse |
-| `Tina::UI::UICommittedHitView` | M7-C1c-a 已实现 committed 数据基础 | UI public | owner-thread borrowed 双缓冲 hit snapshot，下一次成功 hit 发布或 `UIContext` 销毁后失效 | CapacityExceeded/owner-thread misuse；尚无 point query/route API |
+| `Tina::UI::UICommittedHitView` | M7-C1c-a 已实现 committed 数据基础 | UI public | owner-thread borrowed 双缓冲 hit snapshot，下一次成功 hit 发布或 `UIContext` 销毁后失效 | CapacityExceeded/owner-thread misuse；尚无 route API |
+| `Tina::UI::UIPointerHitQueryResult` | M7-C1c-b1 已实现 | UI public | owning value；entry index 只对结果 revision 对应的 committed hit view 有效 | 非有限坐标为正常 miss；不执行 listener/route |
 | `EntityId` | M8 目标 | Game SDK | World registry generation + owner | invalid/stale/wrong owner |
 | `AssetHandle<T>` | M10 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
 | `AssetLease<T>` | M10 目标 | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
@@ -598,8 +607,8 @@ M6-A/M7-A Headless 内核与首个 GLFW adapter 已验证：
 后续验收：`tina_game_api_consumer`/Game SDK umbrella、正式 SDK/install package、完整
 forbidden-token/dependency-closure、production Gamepad、完整 DPI/Windows IMM32，以及只使用
 Game SDK 运行 UI/2D/3D 产品样例。`Desktop::CreateEngine` 和 clear-only bgfx smoke 已实现，但不代表
-正式 SDK、完整 Render pass、Runtime UI producer 或产品样例已完成。M7-C1b/C1c-a 已覆盖50,000节点
+正式 SDK、完整 Render pass、Runtime UI producer 或产品样例已完成。M7-C1b/C1c-a/C1c-b1 已覆盖50,000节点
 非递归 layout/hit snapshot、连续300次无变化 commit 的0 layout pass/0新增 UI PMR allocation，以及
-15项 committed hit snapshot 门禁；独立 `tina_ui_tests` 共54/54。它尚未覆盖 dirty subtree pruning、
-point hit query、反向目标选择、事件路由、Focus/Capture/Modal、Button、paint snapshot/DisplayList、
+15项 committed hit snapshot 与5项 point query 门禁；独立 `tina_ui_tests` 共59/59。它尚未覆盖 dirty subtree pruning、
+listener/事件路由、Focus/Capture/Modal、Button、paint snapshot/DisplayList、
 nested clip、文本/Glyph Atlas 或可见 Widget。

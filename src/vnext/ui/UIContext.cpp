@@ -437,6 +437,18 @@ struct ResolvedLength final {
     return false;
 }
 
+[[nodiscard]] bool containsPointHalfOpen(
+    UILogicalRect rect,
+    UILogicalPoint point) noexcept
+{
+    return rect.width > 0.0F
+        && rect.height > 0.0F
+        && point.x >= rect.x
+        && point.y >= rect.y
+        && point.x < rect.right()
+        && point.y < rect.bottom();
+}
+
 } // namespace
 
 struct UIContext::Impl final {
@@ -2124,6 +2136,47 @@ struct UIContext::Impl final {
         };
     }
 
+    [[nodiscard]] UIPointerHitQueryResult queryPointerHit(
+        UILogicalPoint point) const noexcept
+    {
+        const UICommittedHitView hit = committedHit();
+        UIPointerHitQueryResult result{
+            .structureRevision = hit.structureRevision(),
+            .layoutRevision = hit.layoutRevision(),
+            .paintOrderRevision = hit.paintOrderRevision(),
+            .hitRevision = hit.hitRevision(),
+        };
+        if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+            return result;
+        }
+
+        const std::span<const UICommittedHitEntry> entries = hit.entries();
+        for (usize reverseIndex = entries.size(); reverseIndex > 0; --reverseIndex) {
+            ++result.visitedEntryCount;
+            const usize entryIndex = reverseIndex - 1;
+            const UICommittedHitEntry& entry = entries[entryIndex];
+            if (entry.policy != UIPointerHitPolicy::Targetable
+                || !containsPointHalfOpen(entry.worldRect, point)
+                || !containsPointHalfOpen(entry.effectiveClip, point)
+                || entry.rootEntryIndex >= entries.size()) {
+                continue;
+            }
+
+            const UICommittedHitEntry& root = entries[entry.rootEntryIndex];
+            result.target = UIPointerHitTarget{
+                .node = entry.node,
+                .rootNode = root.node,
+                .hitEntryIndex = static_cast<u32>(entryIndex),
+                .rootEntryIndex = entry.rootEntryIndex,
+                .worldRect = entry.worldRect,
+                .effectiveClip = entry.effectiveClip,
+                .paintOrdinal = entry.paintOrdinal,
+            };
+            return result;
+        }
+        return result;
+    }
+
     [[nodiscard]] UIContextStatistics statistics() const noexcept
     {
         return UIContextStatistics{
@@ -2449,6 +2502,11 @@ UICommittedLayoutView UIContext::committedLayout() const noexcept
 UICommittedHitView UIContext::committedHit() const noexcept
 {
     return m_impl->committedHit();
+}
+
+UIPointerHitQueryResult UIContext::queryPointerHit(UILogicalPoint point) const noexcept
+{
+    return m_impl->queryPointerHit(point);
 }
 
 UIContextStatistics UIContext::statistics() const noexcept
