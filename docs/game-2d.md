@@ -231,7 +231,7 @@ PlatformFrameView
 - `2D.TileMap.Scroll.256x256`：Camera 滚动、chunk culling、可见 tile 与 rebuild 数；
 - `2D.TileMap.DirtyChunks`：单点/矩形编辑只更新受影响 chunk；
 - `2D.Collision.TileAABB.Queries`：角色 sweep 和批量 query p50/p95/p99；
-- `2D.UIOverlay.InputTransitionConsumption`：UI 覆盖世界时 Pointer 不穿透。
+- `2D.UIOverlay.InputTransitionConsumptionView`：UI 覆盖世界时 Pointer 不穿透。
 
 记录 `visibleChunks`、`culledChunks`、`visibleSprites`、`batches`、`draws`、`textureSwitches`、
 `tileRebuilds`、`collisionQueries` 和各阶段 p50/p95/p99。Fixed Update、Render Scene Extraction 的

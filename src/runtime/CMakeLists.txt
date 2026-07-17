@@ -12,7 +12,6 @@ add_library(tina_runtime STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/RuntimeErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/spi/EngineCompositionFactories.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/integration/WindowSurface.hpp
-    ${PROJECT_SOURCE_DIR}/include/tina/runtime/spi/InputRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/spi/PlatformEventDispatcher.hpp
     EngineConfig.cpp
     EngineHost.cpp
@@ -41,6 +40,7 @@ target_link_libraries(tina_runtime
         Tina::WindowSurfaceIntegration
     PRIVATE
         Tina::ProjectOptions
+        Tina::UI
 )
 set_target_properties(tina_runtime PROPERTIES
     CXX_EXTENSIONS OFF

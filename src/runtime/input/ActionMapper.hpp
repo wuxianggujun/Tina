@@ -5,12 +5,31 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/runtime/InputActions.hpp>
-#include <tina/runtime/spi/InputRouting.hpp>
+#include <tina/runtime/InputActionMap.hpp>
+#include <tina/ui/InputRouting.hpp>
 
 #include <memory>
 #include <optional>
 #include <span>
 #include <vector>
+
+namespace Tina {
+
+// Runtime-internal storage capacities for the default ActionMapper. UI route
+// result ownership belongs to tina_ui; only the consumer-side capacities live
+// with Runtime.
+struct InputActionMapperCapacityConfig final {
+    static constexpr u32 DefaultContinuousControlClaimCapacity = 64;
+    static constexpr u32 MaximumContinuousControlClaimCapacity = 1024;
+
+    u32 rawInputTransitionCapacity = Platform::PlatformFrameCapacityConfig::DefaultInputTransitionCapacity;
+    u32 continuousControlClaimCapacity = DefaultContinuousControlClaimCapacity;
+    u32 simulationActionTransitionCapacity = InputActionMapCapacityConfig::DefaultSimulationActionTransitionCapacity;
+    u32 frameActionTransitionCapacity = InputActionMapCapacityConfig::DefaultFrameActionTransitionCapacity;
+    u32 digitalActionBindingCapacity = InputActionMapCapacityConfig::DefaultDigitalActionBindingCapacity;
+};
+
+} // namespace Tina
 
 namespace Tina::Runtime::Input {
 
@@ -33,8 +52,8 @@ class ActionMapper final {
     ActionMapper& operator=(ActionMapper&&) = delete;
 
     [[nodiscard]] Core::Status mapFrame(const Platform::PlatformFrameView& platformFrame,
-                                        const InputTransitionConsumption& consumption,
-                                        const ContinuousControlClaims& claims, u64 engineFrameIndex,
+                                        const UI::InputTransitionConsumptionView& consumption,
+                                        const UI::ContinuousControlClaimsView& claims, u64 engineFrameIndex,
                                         u64 nextUncompletedSimulationTick);
 
     [[nodiscard]] FrameActionSnapshot frameActions() const noexcept;
@@ -86,14 +105,14 @@ class ActionMapper final {
                  std::vector<ActionSourceToken> frameTransitionSources, SimulationActionLatch simulationLatch) noexcept;
 
     [[nodiscard]] Core::Status validateFrameInputs(const Platform::PlatformFrameView& platformFrame,
-                                                   const InputTransitionConsumption& consumption,
-                                                   const ContinuousControlClaims& claims, u64 engineFrameIndex,
+                                                   const UI::InputTransitionConsumptionView& consumption,
+                                                   const UI::ContinuousControlClaimsView& claims, u64 engineFrameIndex,
                                                    u64 nextUncompletedSimulationTick) const;
 
     [[nodiscard]] Core::Status synchronizePrimaryWindow(const Platform::PlatformFrameView& platformFrame);
     [[nodiscard]] Core::Status validateRetainedSourceSnapshots(const Platform::PlatformFrameView& platformFrame) const;
     [[nodiscard]] Core::Status applyClaims(const Platform::PlatformFrameView& platformFrame,
-                                           const ContinuousControlClaims& claims, u64 claimSequence,
+                                           const UI::ContinuousControlClaimsView& claims, u64 claimSequence,
                                            u64 nextSimulationTick);
     [[nodiscard]] Core::Status mapTransition(const Platform::PlatformFrameView& platformFrame,
                                              const Platform::InputTransition& transition, bool consumed,

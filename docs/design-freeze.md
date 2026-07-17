@@ -97,7 +97,7 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 - fixed update 中结构变更写 command buffer，每个 substep barrier 后稳定提交；
 - `PlatformFrameView` 保留每窗口最终 `WindowInputSnapshot` 与有序 transition batch；
   UI 使用上一帧稳定布局逐 transition 路由，先于 Gameplay Action Mapping 产生
-  `InputTransitionConsumption` 与 `ContinuousControlClaims`；被 UI 消费的 Down 在匹配
+  `Tina::UI::InputTransitionConsumptionView` 与 `Tina::UI::ContinuousControlClaimsView`；被 UI 消费的 Down 在匹配
   release 前一直抑制 Gameplay held；axis claim 保持到 neutral 是完整 M7 analog 目标，M7-A 只实现
   digital suppression；
 - 0 fixed-step 帧把有序 `SimulationActionTransitionBatch` 保留到下一个未完成
@@ -115,7 +115,9 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
   Completion → GPU Upload 四段路径和三重预算；
 - Runtime 只读取 Cooked Asset，Cooker 先验证产物再原子写；
 - UI tree retained、UIContext 主线程唯一拥有，输出后端无关 DisplayList；细粒度 dirty、持久
-  PaintCache 和稳定 paint/hit snapshot 保证无变化 UI 0布局、0 PaintCache rebuild、0 Tina heap allocation。
+  PaintCache 和稳定 paint/hit snapshot 保证无变化 UI 0布局、0 PaintCache rebuild、0 Tina heap allocation；
+  dirty 分类包含 `Structure`，用于增删、重排、换父与 root attach/detach，并派生最小
+  Measure/Order/HitTest/Semantics 失效集合。
 
 ### 实施与验证
 
@@ -142,7 +144,7 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 | Backend 组合 | [Accepted](adr/0003-backend-factories.md) | `Create(config, factories)`；M7-B1 已使用 Independent 或 WindowSurface 的 tagged composition，M7-B2 在该组合上接入私有 bgfx，bootstrap 只选 factory、EngineHost 唯一创建/回滚 owner | 消除 Runtime 对具体 backend 依赖与 lease 接线歧义 |
 | Runtime/State | [Accepted](adr/0014-runtime-phase-and-state.md) | `IGameApplication` lifecycle-only + `IGameState` 唯一帧入口；Frame Update 后提交状态命令 | 消除名称歧义、双帧入口与首帧 UI 时序冲突 |
 | RenderFrame/Surface 所有权 | [Accepted](adr/0020-window-surface-handoff.md) | bgfx backend 在 factory 成功后持有 move-only window surface lease，Runtime 持有 owning RenderFramePacket；Render SPI 只暴露纯 Tina view/pin sink | 消除 native 泄漏、依赖环、backend 越界与在途 UAF |
-| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | 细粒度 dirty、每帧至多一次 layout、持久 PaintCache、committed hit/paint snapshot、相邻兼容 batching | 高性能且保持命中/透明顺序 |
+| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | M7-C1a 已实现 `tina_ui` 树核心、generation `UINodeId`、`UIContext`、`UIRootOwner` RAII、结构 snapshot 和 UI-owned input route-result view ABI；细粒度 dirty、每帧至多一次 layout、持久 PaintCache、committed hit/paint snapshot、相邻兼容 batching 仍按后续切片完成 | 高性能且保持命中/透明顺序 |
 | Frame/Input | [Accepted](adr/0015-input-and-fixed-step.md) | 保序 PlatformFrame、UI transition consumption + continuous claims；Action 分 Simulation/Frame domain；每个 substep 独立 commit | 防输入穿透、0步帧丢边沿、双重执行和追赶步错误 |
 | C++ exception | [Accepted](adr/0004-exceptions-and-errors.md) | 编译开启；公共 API 用 Result/Status，Engine/Frame/Worker/C callback 边界捕获 | pmr/第三方兼容、错误边界 |
 | Generation | [Accepted](adr/0019-generation-handles.md) | 32位 generation，回绕 retire；UINodeId 所有构建编码 owner WindowId，Debug cookie 只诊断 | stale/跨 registry 安全 |
@@ -199,5 +201,7 @@ M7 不作为一个巨型提交：M7-A 先分为已完成的 PlatformFrame/Input 
 PlatformFrameBuilder 直接注入和 Runtime test adapter，以及紧随其后的私有 GLFW `NO_API` 窗口 +
 NullRender 子切片；可复用 production-like PlatformBackend test double 随 GLFW adapter 测试加入；M7-B1 已实现
 Native Window Surface lease、surface snapshot、WindowSurface-aware composition 与 NullRender suspended 语义；
-M7-B2 已实现私有 bgfx clear-only core，继续接入 Desktop bootstrap 与真实 GPU 门禁；M7-C 实现 UIContext、增量 layout/PaintCache 与 Null DisplayList；M7-D 实现
-Label/Button/Modal + FreeType 可见样例；M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。
+M7-B2 已实现私有 bgfx clear-only core、Desktop bootstrap 与真实 GPU 门禁；M7-C1a 已实现
+`tina_ui` 的 generation `UINodeId`、`UIContext`、`UIRootOwner` RAII、结构 snapshot 与 route-result
+view ABI；M7-C 后续继续实现 layout/hit route/Null DisplayList，M7-D 实现 Label/Button/Modal +
+FreeType 可见样例与 bgfx UI pass；M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。

@@ -50,8 +50,8 @@ struct InputActionMapCapacityConfig final {
     static constexpr u32 DefaultDigitalActionBindingCapacity = 64;
     static constexpr u32 MaximumDigitalActionBindingCapacity = 4096;
 
-    // Raw input and UI routing storage are owned by Platform/InputRouting
-    // configs, not by the game-facing action map.
+    // Raw input and UI route-result storage are owned by Platform and UI
+    // capacities, not by the game-facing action map.
     u32 simulationActionTransitionCapacity = DefaultSimulationActionTransitionCapacity;
     u32 frameActionTransitionCapacity = DefaultFrameActionTransitionCapacity;
     u32 digitalActionBindingCapacity = DefaultDigitalActionBindingCapacity;

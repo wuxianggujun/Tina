@@ -4,7 +4,7 @@
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/runtime/InputActions.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
-#include <tina/runtime/spi/InputRouting.hpp>
+#include <tina/ui/InputRouting.hpp>
 
 #include "../../src/runtime/input/ActionMapper.hpp"
 #include "../../src/runtime/input/SimulationActionLatch.hpp"
@@ -19,6 +19,9 @@ namespace Tina::Tests {
 namespace {
 
 using Runtime::Input::ActionMapper;
+using UI::ContinuousControlClaim;
+using UI::ContinuousControlClaimsView;
+using UI::InputTransitionConsumptionView;
 using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 using GamepadPool = Core::GenerationPool<int, Platform::GamepadRegistryTag>;
 
@@ -122,7 +125,8 @@ struct TestFrameInput final {
     }
 
     std::vector<u64> consumedWords;
-    InputTransitionConsumption consumption = InputTransitionConsumption::None(frameId, input.transitions.size());
+    InputTransitionConsumptionView consumption =
+        InputTransitionConsumptionView::None(frameId, input.transitions.size());
     if (!input.consumedOrdinals.empty())
     {
         constexpr usize BitsPerWord = sizeof(u64) * 8U;
@@ -137,7 +141,7 @@ struct TestFrameInput final {
         }
         consumption.consumedOrdinalWords = consumedWords;
     }
-    const ContinuousControlClaims claims{
+    const ContinuousControlClaimsView claims{
         .platformFrame = frameId,
         .controls = input.claims,
     };
@@ -890,8 +894,8 @@ TEST_F(InputActionMapperTest, UiOutputFromAnotherPlatformFrameIsRejectedBeforeMu
     auto frame = builder.finishFrame();
     ASSERT_TRUE(frame.has_value());
 
-    const auto consumption = InputTransitionConsumption::None(Platform::PlatformFrameId{2}, 0);
-    const auto claims = ContinuousControlClaims::None(Platform::PlatformFrameId{1});
+    const auto consumption = InputTransitionConsumptionView::None(Platform::PlatformFrameId{2}, 0);
+    const auto claims = ContinuousControlClaimsView::None(Platform::PlatformFrameId{1});
     auto status = mapper->mapFrame(*frame, consumption, claims, 0, 0);
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code, RuntimeErrorCode::LifecycleInvariantViolation);

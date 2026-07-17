@@ -100,7 +100,8 @@ M6 生命周期之后仍未实现：
 - 有界 CPU/IO/Main worker、阶段指标与完整 shutdown deadline/fatal-stop；
 - typed render resource handle、Pass Scheduler、World RenderScene/UIDisplayList、Runtime-private
   RenderFramePacket/pool 与 submission completion 保活；
-- Scene、Asset、UI、Audio 的真实契约和消费者；不为固定初始化顺序预先制造无消费者空壳；
+- Scene、Asset、Audio 的真实契约和消费者，以及 Runtime-integrated UI producer/layout/render
+  pipeline；M7-C1a standalone `tina_ui` 树核心已实现，不为固定初始化顺序预先制造无消费者空壳；
 - `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
 - Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；M7-B2 Desktop bgfx
   X11 图也已完成 GCC 13.4 和 Clang 22.1.8 + ASan/UBSan/LSan 的183/22/11直接测试及300帧门禁。
@@ -134,7 +135,8 @@ Debug/Release也均通过183/183、22/22与Null/GLFW样例各300帧。GCC 13 X11
 - **已完成**：`PlatformFrameBuilder` 单测直接注入 Down→Up、Focus Cancel、overflow reset 与
   lifecycle payload；Runtime test adapter 验证 EngineHost wiring。Headless 仍不链接 GLFW；可复用
   production-like deterministic PlatformBackend test double 随 GLFW adapter 测试加入；
-- **已完成**：Runtime 建立空 UI consumption seam、`InputTransitionConsumption`、`ContinuousControlClaims`、
+- **已完成**：Runtime 建立空 UI consumption seam，并作为 ActionMapper consumer 接受
+  `Tina::UI::InputTransitionConsumptionView` 与 `Tina::UI::ContinuousControlClaimsView`、
   digital Action Map 和有序 Simulation Action latch，验证0/1/4 fixed-step 只消费一次；
 - **已完成**：`EngineConfig::inputActions` 注册唯一 Engine default Input Context 的 digital bindings；
   raw/event/text、action/binding 与 subscription 分别由职责明确的配置块一次性分配。UI claim
@@ -192,9 +194,13 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
 
 ### M7-C 增量 UI Core 与 Null DisplayList
 
-- 建立 WindowRecord-owned `UIContext`、Window-owned generation `UINodeId`、move-only RootOwner、
-  committed hit/paint snapshot、Flex-lite、细粒度 dirty 和持久 PaintCache；
-- 实现后端无关 Quad/Text/Clip DisplayList、FramePinSink/capacity rollback 和相邻兼容 batching
+- **已完成 M7-C1a**：建立 `tina_ui` target，当前只依赖 `Tina::Core` 与 `Tina::Platform`；
+  已实现 generation `Tina::UI::UINodeId`、`Tina::UI::UIContext`、move-only
+  `Tina::UI::UIRootOwner` RAII、`Tina::UI::UICommittedStructureView` 结构 snapshot，以及
+  UI-owned `Tina::UI::InputTransitionConsumptionView` / `Tina::UI::ContinuousControlClaimsView`
+  route-result view ABI；
+- **仍后置**：layout、hit route、DisplayList、widgets、FreeType、bgfx UI pass 与 Runtime UI producer；
+- 后续继续实现后端无关 Quad/Text/Clip DisplayList、FramePinSink/capacity rollback 和相邻兼容 batching
   contract；Null UI 直接测试 route/layout/paint order，不链接 FreeType/bgfx；
 - 硬门禁：无变化 UI 每帧0 layout、0 PaintCache rebuild、0 Tina heap allocation。
 

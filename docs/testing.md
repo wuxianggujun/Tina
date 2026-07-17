@@ -3,9 +3,10 @@
 ## 规则
 
 - 测试框架固定为 GoogleTest；
-- CMake 始终生成基础 `tina_tests`；启用 `TINA_BUILD_PLATFORM_GLFW` 时另外生成
-  `tina_platform_glfw_tests`，启用 `TINA_BUILD_RENDER_BGFX` 时另外生成 `tina_render_bgfx_tests`，
-  不注册额外测试调度；
+- `TINA_BUILD_TESTING=ON` 时 CMake 生成基础 `tina_tests`；M7-C1a UI 树核心另有独立
+  `tina_ui_tests`；启用
+  `TINA_BUILD_PLATFORM_GLFW` 时另外生成 `tina_platform_glfw_tests`，启用
+  `TINA_BUILD_RENDER_BGFX` 时另外生成 `tina_render_bgfx_tests`，不注册额外测试调度；
 - 构建完成后直接运行对应 GoogleTest executable，任一返回码非0即失败；
 - Visual Studio 多配置构建把测试运行时隔离到 `bin/<Config>`，禁止 Debug/Release GTest DLL 共用目录；
 - 同一 Visual Studio build tree 的 Debug/Release 构建串行执行，禁止并发启动两个 MSBuild 门禁；
@@ -18,21 +19,21 @@
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2：Core/Platform/Input/Task/Render/Runtime、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Debug C++23 | 183/183 | 通过；GLFW 22/22、bgfx 11/11 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2：Core/Platform/Input/Task/Render/Runtime、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Release C++23 | 183/183 | 通过；GLFW 22/22、bgfx 11/11 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1a：Core/Platform/Input/Task/Render/Runtime/UI、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Debug C++23 | 183/183 | 通过；GLFW 22/22、bgfx 11/11、UI 16/16 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1a：Core/Platform/Input/Task/Render/Runtime/UI、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Release C++23 | 183/183 | 通过；GLFW 22/22、bgfx 11/11、UI 16/16 |
 | Windows 11 / MSVC 19.50 | Legacy ON 与 vNext M6-A 共存构建 | Debug C++23 | 135/135 | 通过 |
-| Ubuntu 22.04 / GCC 13.4 | vNext M6-A/M7-A/M7-B1：X11 WindowSurface handoff，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 183/183 | 通过 |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext M6-A/M7-A/M7-B1：X11 WindowSurface handoff，ASan/UBSan/LSan，基础测试无 suppression | Debug C++23 | 183/183 | 通过 |
+| Ubuntu 22.04 / GCC 13.4 | vNext M6-A/M7-A/M7-B1/M7-C1a：X11 WindowSurface handoff + UI tree core，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 183/183 | 通过；UI 16/16，无诊断 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext M6-A/M7-A/M7-B1/M7-C1a：X11 WindowSurface handoff + UI tree core，ASan/UBSan/LSan，基础测试无 suppression | Debug C++23 | 183/183 | 通过；UI 16/16，无诊断 |
 
 GLFW adapter 和 bgfx adapter 测试是独立 executable，不能把多个进程伪写成单个合并测试数。当前测试拓扑为：
 
 | 构建图 | 基础 GoogleTest | GLFW 专项 GoogleTest | bgfx 专项 GoogleTest | 状态 |
 | --- | ---: | ---: | ---: | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 183/183 | 22/22 | 11/11 | 通过；Null样例300帧、WindowSurface GLFW样例300帧、真实 D3D11 Intel Iris Xe Desktop样例默认300帧返回0 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 183/183 | 22/22 | 11/11 | 通过；Null样例300帧、WindowSurface GLFW样例300帧、真实 D3D11 Intel Iris Xe Desktop样例默认300帧返回0 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 183/183 | 22/22 | 11/11 | 通过；UI 16/16、Null样例300帧、WindowSurface GLFW样例300帧、真实 D3D11 Intel Iris Xe Desktop样例默认300帧返回0 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 183/183 | 22/22 | 11/11 | 通过；UI 16/16、Null样例300帧、WindowSurface GLFW样例300帧、真实 D3D11 Intel Iris Xe Desktop样例默认300帧返回0 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 production-style | 测试 target 关闭 | 不构建 | 不构建 | `TINA_BUILD_TESTING=OFF`，GLFW样例300帧返回0 |
-| Ubuntu 22.04 / GCC 13.4 + GLFW X11 | 183/183 | 22/22 | 未运行 | 通过；Null样例300帧、WindowSurface GLFW样例300帧返回0 |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11 + ASan/UBSan/LSan | 183/183 | 22/22 | 未运行 | 通过；基础测试无 suppression，Null/GLFW样例各300帧；`_XimOpenIM` 精确 suppression 仅专项命中12次/4896 B、GLFW样例命中1次/408 B |
+| Ubuntu 22.04 / GCC 13.4 + GLFW X11 | 183/183 | 22/22 | 未运行 | 通过；UI 16/16，无诊断；Null样例300帧、WindowSurface GLFW样例300帧返回0 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11 + ASan/UBSan/LSan | 183/183 | 22/22 | 未运行 | 通过；UI 16/16，无诊断；基础测试无 suppression，Null/GLFW样例各300帧；`_XimOpenIM` 精确 suppression 仅专项命中12次/4896 B、GLFW样例命中1次/408 B |
 | Ubuntu 22.04 / GCC 13.4 + GLFW X11/Wayland 双后端 | 183/183 | 22/22 | 未运行 | 通过；嵌套 Weston 9 强制 Wayland 与 Xvfb 强制 X11 均通过基础、专项与300帧样例 |
 | Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11/Wayland 双后端 + ASan/UBSan/LSan | 183/183 | 22/22 | 未运行 | 通过；基础测试无 suppression且Null样例300帧；Wayland专项与样例 suppression 命中0，X11专项命中12次/4896 B、样例命中1次/408 B |
 
@@ -40,6 +41,9 @@ Windows 与 Linux 当前都是“183项基础测试 + 22项GLFW专项测试”�
 Windows bgfx 构建另有独立 `tina_render_bgfx_tests` 11/11，Debug/Release 均实际返回0；该结果
 只覆盖当前 clear-only bgfx core、factory/lease 回滚和 Desktop smoke，不覆盖后续
 Scene/UI/Pass Scheduler/submission ticket，也不声明 resize、最小化、恢复的真实自动化通过。
+M7-C1a UI 树核心使用独立 `tina_ui_tests`。当前 Windows 11 / MSVC 19.50 Debug/Release
+均直接 GoogleTest 16/16 通过；Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15.2
+ASan/UBSan/LSan 均基础 `tina_tests` 183/183、`tina_ui_tests` 16/16，且无诊断。
 X11 在隔离 X server 下运行。GCC Wayland 门禁由 Xvfb 托载
 Weston 9 `x11-backend` 并提供 `wl_seat`；移除 `DISPLAY` 后断言
 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND`，再运行专项测试和300帧样例。同一双后端产物
@@ -68,7 +72,8 @@ GLFW 内部实现。
 与 Clang 22 ASan/UBSan/LSan 连续运行300帧；M6-A/M7-A 历史构建还曾在 Linux 连续运行10,000帧，均
 返回0，并验证 `IGameState::onExit` 与 `IGameApplication::onShutdown` 恰好一次。该样例组合
 Headless Platform、Disabled TaskSystem 与 NullRenderDevice，不加入或链接 GLFW、bgfx、EnTT、
-FreeType、miniaudio、SDL/SDL3；它不证明真实窗口、GPU、Scene/Asset/UI/Audio 已经可用。
+FreeType、miniaudio、SDL/SDL3；它不证明真实窗口、GPU、Scene/Asset/Audio 或 Runtime UI pipeline
+已经可用。
 
 以下是 2026-07-16 的迁移前完整平台历史基线（含 Button action 生命周期修复）：
 
@@ -132,6 +137,10 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
 - Platform/Task/Render M6-A：Headless shutdown 后拒绝 poll，Disabled TaskSystem 始终 idle 且
   shutdown 幂等；NullRenderDevice 强制连续 frame index 和 submit/present 配对，300帧始终
   `liveResources == 0`；各模块公共头均有独立编译门禁；
+- UI M7-C1a：`tina_ui_tests` 覆盖 generation `UINodeId`、`UIContext` capacity/create、
+  `UIRootOwner` move/reset/destruction/off-thread release、tree updater owner 校验、结构
+  snapshot、header isolation 和 storage memory 回零；Windows MSVC 19.50 Debug/Release
+  均为16/16；Linux GCC 13.4 与 Clang 22 ASan/UBSan/LSan 均为16/16，基础183/183且无诊断；
 
 以下仍是 Legacy 共存构建的回归覆盖，不能当作 vNext UI/Scene/Asset 已实现：
 
@@ -247,6 +256,19 @@ out\build\windows-msvc-vnext\bin\Release\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_sample_null.exe --frames=300
 ```
 
+Windows M7-C1a UI 树核心的独立直接门禁为：
+
+```powershell
+cmake --preset windows-msvc-vnext
+cmake --build --preset windows-vnext-debug --target tina_ui_tests
+out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe --gtest_color=yes
+
+cmake --build --preset windows-vnext-release --target tina_ui_tests
+out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
+```
+
+当前记录为 Windows MSVC 19.50 Debug/Release 均 16/16。
+
 Windows GLFW Platform 的独立直接门禁为：
 
 ```powershell
@@ -298,11 +320,28 @@ Legacy 的 `Tina.exe`、shaderc 和 app-local DLL 同样按配置隔离。Linux 
 
 ```bash
 cmake --preset linux-gcc13-vnext
-cmake --build --preset linux-gcc13-vnext-debug --target tina_tests
+cmake --build --preset linux-gcc13-vnext-debug --target tina_tests tina_ui_tests
 ./out/build/linux-gcc13-vnext/bin/tina_tests --gtest_color=no
+./out/build/linux-gcc13-vnext/bin/tina_ui_tests --gtest_color=no
 ```
 
-该 preset 已在隔离的 GCC 13.4/CMake 4.2.3 工具链上实际通过。`TINA_BUILD_SHADERS=OFF` 输出
+Clang 22 sanitizer 的基础与 UI 直接门禁为：
+
+```bash
+cmake --preset linux-clang22-vnext-sanitize
+cmake --build --preset linux-clang22-vnext-sanitize-debug --target tina_tests tina_ui_tests
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+LSAN_OPTIONS=exitcode=23 \
+./out/build/linux-clang22-vnext-sanitize/bin/tina_tests --gtest_color=no
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+LSAN_OPTIONS=exitcode=23 \
+./out/build/linux-clang22-vnext-sanitize/bin/tina_ui_tests --gtest_color=no
+```
+
+GCC 13.4/CMake 4.2.3 已通过基础 183/183 与 UI 16/16；Clang 22.1.8 + libstdc++15.2
+ASan/UBSan/LSan 已通过基础 183/183 与 UI 16/16，且无诊断。`TINA_BUILD_SHADERS=OFF` 输出
 不含 Legacy 产品和 cooked shader，只能作为 Headless 验证程序，
 不能作为游戏产品或发布包。
 

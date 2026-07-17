@@ -1,6 +1,10 @@
 # 高性能自研 UI
 
-> 状态：vNext 目标契约已接受，M7-C 尚未实现。Tina UI 是游戏内 Retained UI，不是 Immediate UI，也不是桌面编辑器工具包。
+> 状态：vNext 目标契约已接受，M7-C1a 已实现 `tina_ui` 树核心：generation
+> `Tina::UI::UINodeId`、`Tina::UI::UIContext`、`Tina::UI::UIRootOwner` RAII、
+> `Tina::UI::UICommittedStructureView` 和输入 route-result view ABI。layout、hit route、
+> DisplayList、widgets、FreeType、bgfx UI pass 与 Runtime UI producer 尚未实现。Tina UI 是游戏内
+> Retained UI，不是 Immediate UI，也不是桌面编辑器工具包。
 
 ## 当前 Legacy 基线
 
@@ -25,7 +29,7 @@ Focus/Tab/方向导航、Modal Focus Scope、Theme/DPI、Clip、ScrollView、十
 ```text
 ordered PlatformFrameView transitions
   -> route against previous CommittedUISnapshot
-  -> InputTransitionConsumption + ContinuousControlClaims
+  -> Tina::UI::InputTransitionConsumptionView + Tina::UI::ContinuousControlClaimsView
   -> gameplay Action Mapping
   -> IGameState model/intent update
   -> UI structural command commit
@@ -57,10 +61,15 @@ UIContext
 Platform/Event 只把 `PlatformFrameView` 的 UI-eligible transitions 交给 UIContext，不拥有节点、Focus、Capture 或 Layout。
 `IGameState` 持有 move-only `UIRootOwner` 和非 owning `UINodeId`，不持有 UIContext、Renderer、
 UINode 裸指针或跨帧 writer。
+当前 `tina_ui` 只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；Font Asset、Render descriptor/
+DisplayList 和 bgfx UI pass 分别在后续 asset/render 切片接入，不能提前把 Asset/Render 依赖塞回
+M7-C1a 树核心。
 
 最小游戏侧类型：
 
 ```cpp
+namespace Tina::UI {
+
 class UINodeId {         // 逻辑字段：owner WindowId + slot index + generation
 public:
     [[nodiscard]] bool hasValue() const noexcept;
@@ -74,7 +83,13 @@ private:
 class UIRootOwner;       // move-only，销毁时安全注销整棵 root
 class UIRootBuilder;     // 仅 GameStateEnter phase，可创建 root/tree/action
 class UITreeUpdater;     // 仅 UIUpdate phase，绑定 State 已拥有的 root
+struct UICommittedStructureView; // owner-thread borrowed structure snapshot
 struct UISemanticsView;  // 只读 committed snapshot
+
+struct InputTransitionConsumptionView;
+struct ContinuousControlClaimsView;
+
+} // namespace Tina::UI
 ```
 
 `hasValue()` 只判断句柄是否非空，不声称对应节点仍存活；真正的 owner + generation 校验由绑定
@@ -129,10 +144,10 @@ public:
     }
 
 private:
-    Tina::UIRootOwner root_;
-    Tina::UINodeId panel_{};
-    Tina::UINodeId volume_{};
-    Tina::UINodeId apply_{};
+    Tina::UI::UIRootOwner root_;
+    Tina::UI::UINodeId panel_{};
+    Tina::UI::UINodeId volume_{};
+    Tina::UI::UINodeId apply_{};
     SettingsIntent intent_ = SettingsIntent::None;
     SettingsModel model_;
 };
@@ -156,9 +171,15 @@ UI tree 只允许主线程修改。路由/layout/paint 遍历期间的 create/re
 command queue；destroy 会立即把 slot 标为 `PendingDestroy` 并令 generation lookup 失败，当前
 route 后才物理回收。这样 Capture 阶段删除目标会停止后续 Target/Bubble，但不会 UAF。
 
-新 root/节点完成结构 commit、layout 和 snapshot commit 后，从下一帧才参与命中。节点不能保存
-FrameArena 指针；Action 注册期允许在 UI persistent memory 分配，dispatch/layout/paint 热点不得
-产生稳态 heap allocation。
+新 root/节点完成结构 commit、layout 和 snapshot commit 后，从下一帧才参与命中。M7-C1a 当前只
+提交结构 snapshot：`UICommittedStructureView` 是 owner-thread borrowed view，下一次
+`commitStructure()` 或 `UIContext` 析构后失效，不是跨线程快照。节点不能保存 FrameArena 指针；
+Action 注册期允许在 UI persistent memory 分配，dispatch/layout/paint 热点不得产生稳态 heap allocation。
+
+`UIContext::Create(ownerWindow, capacities, memory_resource)` 的 `memory_resource` 只服务 tree/id/
+committed structure snapshot storage；少量 control-plane 对象和 off-thread root release 队列在 Create
+期间使用进程默认 heap 预分配。`UIRootOwner` 在 owner thread 析构时立即回收；若在其他线程释放，
+只把 root id 写入预分配队列，下一次 owner-thread UI mutation/commit 再物理回收。
 
 ## 坐标、DPI 与可见性
 
@@ -179,20 +200,22 @@ vNext 只保留一套 UI 坐标语义：
 ```cpp
 enum class UIDirty : std::uint16_t {
     None      = 0,
-    Style     = 1u << 0,
-    Measure   = 1u << 1,
-    Arrange   = 1u << 2,
-    Transform = 1u << 3,
-    Clip      = 1u << 4,
-    Paint     = 1u << 5,
-    Composite = 1u << 6,
-    HitTest   = 1u << 7,
-    Order     = 1u << 8,
-    Semantics = 1u << 9,
+    Structure = 1u << 0,
+    Style     = 1u << 1,
+    Measure   = 1u << 2,
+    Arrange   = 1u << 3,
+    Transform = 1u << 4,
+    Clip      = 1u << 5,
+    Paint     = 1u << 6,
+    Composite = 1u << 7,
+    HitTest   = 1u << 8,
+    Order     = 1u << 9,
+    Semantics = 1u << 10,
 };
 ```
 
-`UIDirty` 是固定宽度 bit mask；只通过显式 bitwise helper 组合，不能把枚举 ordinal 当索引，
+`Structure` 表达增删、重排、换父与 root attach/detach；它再按变化范围派生最小的
+Measure/Order/HitTest/Semantics 失效集合。`UIDirty` 是固定宽度 bit mask；只通过显式 bitwise helper 组合，不能把枚举 ordinal 当索引，
 也不能用动态集合保存 dirty 状态。
 
 Mutation 先比较规范化后的旧值；值未变化不置 dirty。传播规则：
@@ -272,8 +295,9 @@ generation 校验且未被新 modal 覆盖时恢复焦点。状态命令在路�
 - Pointer Capture 按 pointerId 保存。首期 Mouse 使用 pointerId=0，不把预留字段宣称为触摸支持；
 - Focus、Modal、Keyboard、Gamepad Accept/BackNavigation 复用同一 default action 生命周期。
 
-UI 返回只属于当前 Platform frame 的 `InputTransitionConsumption`，以及当帧
-`ContinuousControlClaims`。Gameplay Action Mapping 只读取未消费 transition 与未 claim control；
+UI 返回只属于当前 Platform frame 的 `Tina::UI::InputTransitionConsumptionView`，以及当帧
+`Tina::UI::ContinuousControlClaimsView`。这些 view 的 ABI 归 `tina_ui` 拥有，Runtime ActionMapper
+只读取、不拥有、不回写；Gameplay Action Mapping 只读取未消费 transition 与未 claim control；
 被 UI 消费的 digital Down 由 Action Mapper 跨帧抑制到真实 release，axis 抑制到 neutral。
 Focus lost、断连和 `InputStreamReset` 产生 `InputCancelTransition`，不伪造可激活 Button 的普通 Up。UI routed
 listener 不复用 Runtime EventBus；二者的生命周期、顺序和 payload 不同。
@@ -387,6 +411,9 @@ Audio settings command；backend 失败恢复 model 并显示 UTF-8 错误。
   Runtime-private RenderFramePacket 保活，不借用
   Worker scratch/UI FrameArena；
 - retained node/style/text/action/PaintCache 属 UI persistent tag；
+- M7-C1a 的 `std::pmr::memory_resource` 只覆盖 tree/id/committed structure snapshot storage；
+  `UIContext::Create` 的 control-plane allocations 默认 heap，off-thread `UIRootOwner` release 使用
+  Create 期预分配队列并由 owner thread 下一次操作 drain；
 - layout scratch、route scratch、DisplayList 使用彼此独立且有上限的 arena/capacity；
 - Arena 满返回结构化错误，不 heap fallback。
 
@@ -439,11 +466,12 @@ p50/p95/p99 由 `tina_bench` 的预分配 sample buffer 离线计算，不在常
 
 实施顺序固定为：
 
-1. 建立 vNext UIContext/UINodeId/root owner/committed snapshot；
-2. 先输出后端无关 DisplayList，并让 Legacy/new Widget 不再 include bgfx；
-3. 完成 dirty/Flex-lite/PaintCache/text layout + glyph atlas；
-4. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义；
-5. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
-6. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
+1. 已完成 M7-C1a：`UIContext` / generation `UINodeId` / `UIRootOwner` / structure snapshot / input route-result view ABI；
+2. 建立 layout、hit route 和真实 Runtime UI producer；
+3. 先输出后端无关 DisplayList，并让 Legacy/new Widget 不再 include bgfx；
+4. 完成 dirty/Flex-lite/PaintCache/text layout + glyph atlas；
+5. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义；
+6. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
+7. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
 
 所以“完善 UI”首先是完成正确的数据和 backend 边界，然后才是增加 Widget 数量。

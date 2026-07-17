@@ -5,9 +5,9 @@
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
-#include <tina/runtime/spi/InputRouting.hpp>
 #include <tina/runtime/spi/PlatformEventDispatcher.hpp>
 #include <tina/task/TaskSystem.hpp>
+#include <tina/ui/InputRouting.hpp>
 
 #include "input/ActionMapper.hpp"
 
@@ -660,9 +660,11 @@ class EngineHostImplementation final {
 
             // M7-A establishes the routing seam. M7-C will replace these empty
             // values with the retained UI route result before gameplay mapping.
-            const InputTransitionConsumption consumption =
-                InputTransitionConsumption::None(platformFrame->id(), platformFrame->inputTransitions().size());
-            const ContinuousControlClaims claims = ContinuousControlClaims::None(platformFrame->id());
+            const UI::InputTransitionConsumptionView consumption =
+                UI::InputTransitionConsumptionView::None(
+                    platformFrame->id(), platformFrame->inputTransitions().size());
+            const UI::ContinuousControlClaimsView claims =
+                UI::ContinuousControlClaimsView::None(platformFrame->id());
             if (auto mappingStatus =
                     m_actionMapper->mapFrame(*platformFrame, consumption, claims, frameIndex, simulationTick);
                 !mappingStatus)

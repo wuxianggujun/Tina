@@ -49,8 +49,9 @@ out\build\windows-msvc\bin\Debug\tina_tests.exe
 
 ## Windows vNext 最小构建
 
-该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A/M7-B1 的 `tina_core`、
-`tina_platform`、`tina_task`、`tina_render`、`tina_runtime`、直接 GoogleTest 门禁与 Null 样例：
+该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A/M7-B1 与
+M7-C1a 的 `tina_core`、`tina_platform`、`tina_task`、`tina_render`、`tina_runtime`、`tina_ui`、
+直接 GoogleTest 门禁与 Null 样例：
 
 ```powershell
 cmake --preset windows-msvc-vnext
@@ -63,6 +64,21 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 `TINA_BUILD_TESTING=OFF` 且不启用该 feature 时，vcpkg 安装图也不包含 GTest。它不进入或链接 GLFW、bgfx、EASTL、
 EnTT、FreeType、miniaudio、Box2D、xxHash 或 SDL/SDL3。`tina_sample_null` 只组合 Headless Platform、
 Disabled TaskSystem 与 NullRenderDevice。
+
+## Windows vNext UI 树核心
+
+M7-C1a 的 `tina_ui` 当前只依赖 Core/Platform；门禁直接运行独立 GoogleTest executable：
+
+```powershell
+cmake --preset windows-msvc-vnext
+cmake --build --preset windows-vnext-debug --target tina_ui_tests
+out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe --gtest_color=yes
+
+cmake --build --preset windows-vnext-release --target tina_ui_tests
+out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
+```
+
+当前记录为 Windows 11 / MSVC 19.50 Debug/Release 均 16/16。
 
 ## Windows vNext GLFW Platform 与 Desktop bgfx
 
@@ -156,8 +172,9 @@ cmake --build --preset linux-debug --target Tina tina_tests
 
 ```bash
 cmake --preset linux-gcc13-vnext
-cmake --build --preset linux-gcc13-vnext-debug --target tina_tests
- ./out/build/linux-gcc13-vnext/bin/tina_tests --gtest_color=no
+cmake --build --preset linux-gcc13-vnext-debug --target tina_tests tina_ui_tests
+./out/build/linux-gcc13-vnext/bin/tina_tests --gtest_color=no
+./out/build/linux-gcc13-vnext/bin/tina_ui_tests --gtest_color=no
 ```
 
 Clang 22 + libstdc++15 的普通与 Sanitizer 门禁使用独立目录。主机需同时提供 `clang-22`、
@@ -170,15 +187,21 @@ cmake --build --preset linux-clang22-vnext-debug --target tina_tests tina_sample
 ./out/build/linux-clang22-vnext/bin/tina_tests --gtest_color=no
 
 cmake --preset linux-clang22-vnext-sanitize
-cmake --build --preset linux-clang22-vnext-sanitize-debug --target tina_tests tina_sample_null
+cmake --build --preset linux-clang22-vnext-sanitize-debug --target tina_tests tina_ui_tests tina_sample_null
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+LSAN_OPTIONS=exitcode=23 \
 ./out/build/linux-clang22-vnext-sanitize/bin/tina_tests --gtest_color=no
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+LSAN_OPTIONS=exitcode=23 \
+./out/build/linux-clang22-vnext-sanitize/bin/tina_ui_tests --gtest_color=no
 ```
 
 这些输出不包含 Legacy 产品、窗口、真实渲染后端或 cooked shader，只用于 Headless 生命周期验证，
-不能作为游戏产品或发布包。GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 的隔离门禁已经通过，
-但仍不能用 Ubuntu 22.04 的旧工具链降级冒充正式结果。
+不能作为游戏产品或发布包。GCC 13.4 已通过基础 `tina_tests` 183/183 与 `tina_ui_tests`
+16/16；Clang 22.1.8 + libstdc++15.2 在 ASan/UBSan/LSan 下通过相同基础 183/183 与
+UI 16/16，且无诊断。但仍不能用 Ubuntu 22.04 的旧工具链降级冒充正式结果。
 
 ## Linux vNext GLFW Platform
 

@@ -51,7 +51,10 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
   实现层可见；M7-B1 的 WindowSurface 组合已接入 `IWindowSurfacePlatformBackend`、
   `acquirePrimaryWindowSurfaceLease()`、`primaryWindowSurfaceSnapshot()` 与
   `publishPrimaryWindow()`；`tina_sample_platform` 仍显式注入 GLFW + DisabledTask + NullRender，
-  尚未实现面向普通游戏的 Desktop bootstrap；
+  M7-B2 已实现面向普通游戏的 `Desktop::CreateEngine` clear-only Desktop bootstrap；
+- M7-C1a 已建立独立 `tina_ui` 树核心，包含 generation `UINodeId`、`UIContext`、`UIRootOwner`
+  RAII、结构 snapshot 和 UI-owned input route-result view ABI；它尚未接入 Runtime 帧循环成为
+  UI producer；
 - 当前帧循环为 Poll Platform → frame/payload/capacity/sequence 预校验 → Platform lifecycle dispatch
   → Action Mapping → Fixed Update（0..4）→ Frame Update → Render Scene Extraction → UI Update
   → Null submit → present；`requestExitAfterFrame()` 会完成当帧 submit/present 后退出；
@@ -64,10 +67,11 @@ GLFW close 在 Poll 中只返回不可取消的 tagged outcome，并丢弃尚未
 Null submit/present 后退出。M7-B1 已有 backend-neutral Native Surface handoff、初始/逐帧
 `RenderSurfaceState` 和 Suspended 帧 `SkippedSuspendedSurface` 结果；Runtime 固定 source window identity，
 拒绝 metrics revision 回退、surface facts 在旧 metrics revision 上变化，以及 surface revision 跳号/回退。
-当前实现仍没有完整
-GameStateStack/commands、CPU/IO worker、通用 Runtime Event Queue、Pass Scheduler、RenderFramePacket，
-也没有 Scene、Asset、UI、Audio 或真实 bgfx Render backend；这些能力不能从同名 Phase Context 或
-真实 GLFW 窗口的存在推断为已经实现。
+当前实现仍没有完整 GameStateStack/commands、CPU/IO worker、通用 Runtime Event Queue、
+Pass Scheduler/RenderFramePacket，也没有 Scene、Asset 或 Audio。Render 只完成 clear-only bgfx
+Desktop smoke；UI 只完成 standalone `tina_ui` 树核心和 route-result view ABI，layout、hit route、
+DisplayList、widgets、FreeType、bgfx UI pass 与 Runtime UI producer 仍未实现。这些能力不能从同名
+Phase Context、真实 GLFW 窗口或 clear-only Desktop smoke 推断为已经实现。
 
 ## 完整 vNext 所有权目标
 
@@ -193,7 +197,8 @@ Runtime 每帧把单次单调时钟采样差传给
 仍使用未缩放真实时间。
 所有队列必须有预算、统计和唯一所有者。`PlatformFrameView`、同步
 `PlatformEventDispatcher`、未来通用 Runtime Event Queue 与 UI routed event 相互分离；UI 先产生
-transition consumption 与 continuous control claims，避免玩法输入穿透。Pressed/Released Action 只由下一个实际
+`Tina::UI::InputTransitionConsumptionView` 与 `Tina::UI::ContinuousControlClaimsView`，避免玩法输入穿透。
+Pressed/Released Action 只由下一个实际
 fixed tick 消费一次，本帧0步不丢失、4步不重复。`IGameState` 结构变更只在 Frame Update 后提交；
 新状态参与同帧 Render/UI snapshot，下一帧才接收输入；World command 在每个 fixed substep 末提交。
 

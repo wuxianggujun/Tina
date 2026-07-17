@@ -3,7 +3,7 @@
 > 状态：vNext Input 契约已由 ADR 0015 接受；M7-A Headless 的 `PlatformFrameView`、Action Mapper、
 > fixed-step latch 与 `PlatformEventDispatcher` 已实现，首个私有 GLFW desktop adapter 也已完成
 > Window/Keyboard/Pointer/Focus/resize/close/committed text。M7-B1 已完成私有 WindowSurface handoff；
-> 真实 bgfx clear/present 是 M7-B2，production Gamepad、Windows IMM32 composition、OS Pointer
+> M7-B2 已完成私有真实 bgfx clear/present 和 Desktop smoke，production Gamepad、Windows IMM32 composition、OS Pointer
 > Capture 与完整 DPI/UI 门禁仍是后续能力。
 
 ## 结论
@@ -72,7 +72,7 @@ Platform backend poll（Headless 与当前 GLFW adapter 共用同一契约）
             + PlatformEventBatch + ordered InputTransitionBatch)
             -> Runtime PlatformEventDispatcher（仅生命周期通知）
             -> UI routed transitions (上一帧稳定布局)
-            -> InputTransitionConsumption + ContinuousControlClaims
+            -> Tina::UI::InputTransitionConsumptionView + Tina::UI::ContinuousControlClaimsView
             -> game action mapping / fixed input latch
 ```
 
@@ -106,7 +106,8 @@ GLFW C callback 不调用 UI、Gameplay 或销毁系统，只更新 backend-owne
 framebuffer/content-scale/visible/iconified metrics、resize、close 与 GLFW char callback 提供的 committed
 Unicode scalar。Gamepad registry/sampled diff、Windows preedit/composition、OS Pointer Capture、
 UI routed consumption producer 尚未接入。WindowSurface snapshot/lease 已在 M7-B1 接入到
-Platform/Render 组合；真实 bgfx device、clear/present 与 GPU surface lifecycle 仍属于 M7-B2。
+Platform/Render 组合；M7-B2 已完成真实 bgfx clear/present 和基础 GPU surface lifecycle，仍不覆盖
+后续 UI pass、Pass Scheduler 或 resize/最小化/恢复自动化。
 
 `WindowInputSnapshot` 按窗口保存：
 
@@ -159,11 +160,12 @@ UI 使用同一 `PlatformFrameView` 的有序 transition 生成 Pointer/Key/Navi
 transition 最多 hit-test 一次；有 Capture 时直接解析 captured UINodeId，需要判定 click 的真实
 release 再做一次且仅一次 release-position hit-test。
 
-UI route 输出两份彼此分离的数据：
+UI route 输出两份彼此分离的数据，当前公开 ABI 由 `tina_ui` 拥有，Runtime 只作为 ActionMapper
+consumer 读取这些 view：
 
-- `InputTransitionConsumption` 与当前 `PlatformFrameView` identity 绑定，按 transition sequence/ordinal 使用
-  固定 bit storage 标记一次性 transition；重复 consume 幂等，错误 frame/sequence 返回明确错误；
-- `ContinuousControlClaims` 使用归一化 window/device/control identity，声明本帧由 UI 拥有的
+- `Tina::UI::InputTransitionConsumptionView` 与当前 `PlatformFrameView` identity 绑定，按 transition
+  ordinal 使用固定 bit storage 标记一次性 transition；重复 consume 幂等，错误 frame/sequence 返回明确错误；
+- `Tina::UI::ContinuousControlClaimsView` 使用归一化 window/device/control identity，声明本帧由 UI 拥有的
   held/axis/pointer-delta。它不修改 Platform Snapshot，也不是跨帧容器。
 
 M7-A Action Mapper 只实现 digital binding，因此当前真正参与 suppression 的 claim 是 Key、Primary
@@ -175,7 +177,7 @@ Gameplay Action Mapper 只映射未消费 transition 和未 claim control，并�
 `suppressedUntilReleaseOrNeutral`：
 
 - UI 消费 digital Down 后，即使下一帧 consumption 已销毁，Gameplay 仍看不到该 control 的 held；
-- UI 在 control 已经 held 时才通过 `ContinuousControlClaims` 接管它，也必须立即取消该 control
+- UI 在 control 已经 held 时才通过 `Tina::UI::ContinuousControlClaimsView` 接管它，也必须立即取消该 control
   尚未完成的 Gameplay edge/repeat，并保持 suppression 到真实 Up；该清理使用 Action Cancel 语义，
   不能伪造普通 Released；
 - 匹配的真实 Up 仅解除 suppression，不生成 Gameplay Released；
@@ -225,12 +227,12 @@ M7-A 容量在 `EngineConfig::platformFrameCapacities`、`inputActions.capacitie
 | raw `InputTransitionBatch` | 256 | 1 个 `InputStreamReset` slot | 4096 |
 | UTF-8 text/composition byte arena | 16 KiB | 共用 raw reset slot | 1 MiB |
 | `PlatformEventBatch` | 64 | 1 个 `PlatformEventStreamReset` slot | 1024 |
-| `ContinuousControlClaims`（M7-A Runtime SPI 内部上限） | 64 | 0 | 1024 |
+| `Tina::UI::ContinuousControlClaimsView`（M7-A Runtime consumer 内部上限） | 64 | 0 | 1024 |
 | pending `SimulationActionTransitionBatch` | 128 | 1 个 `SimulationInputStreamReset` slot | 4096 |
 | Frame Action transition | 128 | 1 个 reset slot | 4096 |
 | digital binding | 64 | 0 | 4096 |
 
-`InputTransitionConsumption` 是按本帧 raw transition ordinal 建立的固定 bit storage，不另设独立
+`Tina::UI::InputTransitionConsumptionView` 是按本帧 raw transition ordinal 建立的固定 bit storage，不另设独立
 capacity。raw 输入一旦 overflow，builder 写入 reset 后，本次 Poll 后续 callback 只更新最终设备
 snapshot，不再追加 transition；Mapper 根据 reset + 最终 snapshot resync，并把仍 held/non-neutral
 control 保持 suppressed。`PlatformEventBatch` 先合并同窗口最终 resize/scale/focus；仍满时写入 reset，
@@ -339,7 +341,8 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
   PlatformEventDispatcher/Input/UI/Fixed phase 开始前停止，dispatcher 中没有重复关闭事件；
 - fixed step 为 0/1/4 次时，`SimulationActionTransitionBatch` 绑定 next uncompleted tick；跨 0-step
   frame 的 transition 保持顺序，首个实际 substep 只消费一次 edge，后续追赶步只读 held/axis；
-- 注入的 UI consumption/digital claim 使 Gameplay digital control 保持 suppressed，直至真实 Up；
+- 注入的 `Tina::UI::InputTransitionConsumptionView` / `Tina::UI::ContinuousControlClaimsView`
+  使 Gameplay digital control 保持 suppressed，直至真实 Up；
   axis/pointer continuous mapping 尚未实现；
 - keyboard/pointer/text/composition 在同一 Poll 内的 Down→Up 与多事件保持 sequence，Move 合并
   不跨语义边界；Gamepad 只保证相邻 Poll sampled diff，不声称恢复 Poll 间完整 Down→Up；
@@ -349,7 +352,8 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
   且不会永久 stuck；
 - M7-A 只接受 `PrimaryPointerId`；Gamepad snapshot 同 owner、slot 唯一，Engine 级 Gamepad 输入每帧
   只路由一次到 primary window；跨帧 retained active/suppressed source 与最终 held snapshot 一致；
-- Platform 生命周期通知与 Headless/Input Action 映射互不重复投递；UI producer 尚未实现；公共头文件
+- Platform 生命周期通知与 Headless/Input Action 映射互不重复投递；M7-C1a 已实现 UI-owned
+  route-result view ABI，但 Runtime UI producer 尚未实现；公共头文件
   不含 GLFW/SDL 类型，Headless backend 不链接、不加载 GLFW 或 SDL；
 - M7-B1 覆盖 `WindowSurfaceId` generation、`WindowSurfaceSnapshot` identity/revision/suspended、
   move-only `NativeWindowSurfaceLease`、重复 lease 拒绝、Render 创建失败与窗口发布失败逆序回滚、

@@ -249,8 +249,8 @@ ActionMapper::ActionMapper(InputActionMapperCapacityConfig capacities, std::vect
 }
 
 Core::Status ActionMapper::mapFrame(const Platform::PlatformFrameView& platformFrame,
-                                    const InputTransitionConsumption& consumption,
-                                    const ContinuousControlClaims& claims, u64 engineFrameIndex,
+                                    const UI::InputTransitionConsumptionView& consumption,
+                                    const UI::ContinuousControlClaimsView& claims, u64 engineFrameIndex,
                                     u64 nextUncompletedSimulationTick)
 {
     if (auto validation =
@@ -329,8 +329,8 @@ Core::Status ActionMapper::completeSimulationTick(u64 simulationTick)
 }
 
 Core::Status ActionMapper::validateFrameInputs(const Platform::PlatformFrameView& platformFrame,
-                                               const InputTransitionConsumption& consumption,
-                                               const ContinuousControlClaims& claims, u64 engineFrameIndex,
+                                               const UI::InputTransitionConsumptionView& consumption,
+                                               const UI::ContinuousControlClaimsView& claims, u64 engineFrameIndex,
                                                u64 nextUncompletedSimulationTick) const
 {
     if (!platformFrame.id().hasValue())
@@ -460,9 +460,9 @@ Core::Status ActionMapper::validateRetainedSourceSnapshots(const Platform::Platf
 }
 
 Core::Status ActionMapper::applyClaims(const Platform::PlatformFrameView& platformFrame,
-                                       const ContinuousControlClaims& claims, u64 claimSequence, u64 nextSimulationTick)
+                                       const UI::ContinuousControlClaimsView& claims, u64 claimSequence, u64 nextSimulationTick)
 {
-    for (const ContinuousControlClaim& claim : claims.controls)
+    for (const UI::ContinuousControlClaim& claim : claims.controls)
     {
         LocatedSource located =
             std::visit(Overloaded{

@@ -3,6 +3,9 @@
 - 状态：Accepted
 - 日期：2026-07-16
 - 修订：2026-07-17
+- 实施状态：M7-C1a 已实现 `tina_ui` 树核心、generation `UINodeId`、`UIContext`、
+  `UIRootOwner` RAII、结构 snapshot 和输入 route-result view ABI；layout、hit route、
+  DisplayList、widgets、FreeType、bgfx UI pass 与 Runtime UI producer 仍后置。
 
 ## 背景
 
@@ -19,6 +22,8 @@ Legacy UI 已验证部分产品交互，但它的类型、API 和生命周期不
 `tina_ui` 实现独立的 Retained UI。每个 Runtime WindowRecord 唯一拥有一个 `UIContext`；
 `IGameState` 只持有 move-only root owner，并用包含 owner WindowId 与 generation 的 `UINodeId`
 引用节点。Game SDK 不拥有 `UIContext`，也不能取得 Widget、PaintCache 或 Render backend 指针。
+当前 M7-C1a `tina_ui` 只依赖 `Tina::Core` 与 `Tina::Platform`；Font Asset 与 Render descriptor/
+DisplayList 依赖在后续 asset/render 切片进入。
 
 FreeType 只存在于可选生产适配器 `tina_ui_freetype`。Headless、Null UI 和公共 Widget API 不解析
 FreeType、GLFW 或 bgfx 依赖。vNext 不包含、继承、别名或适配 Legacy UI 类型与 API；Legacy 代码
@@ -82,9 +87,12 @@ uniform、encoder、GPU fence 或 bgfx handle。命令引用确定性 intern 的
 packet-local `FrameResourceRef`。`UIContext` 生成 DisplayList 时必须接收 `FramePinSink`：每个本帧使用的
 字体 atlas、纹理页或其他可退役资源先成功 pin，再发布对应命令。
 
-`FramePinSink` 是调用方拥有、不可保存的 frame capability；UI 只能在 DisplayList emission 期间调用
-`tryPin(FrameResourceRef) -> Result<void>`。同一资源的帧内去重由 sink 负责，UI 不依赖重复 pin 次数表达
-所有权，也不能把 sink 捕获进 Widget callback 或 PaintCache。
+`FramePinSink` 是调用方拥有、不可保存的 frame capability；UI 只能在 DisplayList emission 期间把
+模块私有 Atlas/Asset lease 类型擦除为 move-only `FrameLifetimePin`，再调用
+`add(FramePinKind, FrameLifetimePin&&) -> Status` 转移真实所有权。`FrameResourceRef` 只是 packet-local
+资源表索引，本身不能延长生命周期，因此禁止用“pin 一个 ref”冒充 owning pin。资源表 intern 与同一
+资源的帧内去重由 packet builder/sink 协作负责；UI 不依赖重复 add 次数表达所有权，也不能把 sink
+捕获进 Widget callback 或 PaintCache。`add()` 失败时调用方仍持有 pin，整份 frame packet 事务回滚。
 
 DisplayList、clip intern 表和 FramePinSink 记录都由 RenderFramePacket 的 frame storage 拥有，只能存活到
 该 packet 完成提交/放弃；它们不得写回 PaintCache。资源 pin 由 RenderFramePacket 保活，并在 packet 完成
@@ -100,8 +108,11 @@ Runtime 将平台输入转为后端无关 `UIInputTransition` 序列，再调用
 全局 Input Snapshot，也不直接调用 Gameplay 输入接口。每个 Pointer transition 最多使用 committed hit
 snapshot hit-test 一次，随后按 Capture → Target → Bubble 路由。
 
-`UIRouteResult` 必须同时返回两份固定容量输出：与当前 frame/sequence 绑定的
-`InputTransitionConsumption` 标记一次性 transition，`ContinuousControlClaims` 声明本帧由 UI
+`UIRouteResult` 及其只读 consumption/claim view 由 `tina_ui` 拥有，Runtime ActionMapper 只消费这些结果；UI 不得
+include Runtime SPI。Runtime-private ActionMapper 容量仍由 Runtime 自己配置。`UIRouteResult` 必须同时
+返回两份固定容量输出：与当前 frame/sequence 绑定的
+`Tina::UI::InputTransitionConsumptionView` 标记一次性 transition，
+`Tina::UI::ContinuousControlClaimsView` 声明本帧由 UI
 拥有的 held/axis/pointer-delta。Runtime 先应用两者再做 Gameplay Action Mapping；被 UI 消费的
 digital Down 由 Action Mapper 保持 `suppressedUntilReleaseOrNeutral`，真实 Up 只解除抑制而不补发
 Gameplay edge。结果还可携带一个未被控件消费的 `UICancelIntent`，交给状态策略决定。UI 不能通过
@@ -125,6 +136,11 @@ Focus、hover、capture 和 Modal Scope 的变更在当前路由批次结束后�
 `UIContext::Create` 必须显式接收节点/root、mutation、dirty queue、route depth、PaintCache bytes、clip intern、
 DisplayList command、text run/glyph ref 与 frame pin 容量。运行期禁止隐藏扩容、系统 allocator fallback 或
 因容量不足退回全树 heap rebuild。
+当前 M7-C1a 已实现的 `UIContext::Create(ownerWindow, capacities, memory_resource)` 中，
+`memory_resource` 只用于 tree/id/committed structure snapshot storage；small control-plane 对象和
+off-thread `UIRootOwner` release 队列在 Create 期间使用默认 heap 预分配。owner thread 析构
+`UIRootOwner` 立即回收；非 owner thread 只入队 root id，由下一次 owner-thread UI mutation/commit
+drain 并物理回收。
 
 - 结构/样式 mutation 在应用前预留全部容量；失败时原子拒绝该 mutation，保留上一 committed tree/snapshot；
 - dirty queue 容量不足时返回稳定的 `UIError::CapacityExceeded`，不得静默丢 dirty bit；

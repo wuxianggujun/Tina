@@ -5,7 +5,8 @@
 - 接受日期：2026-07-17
 - 实施状态：M7-A Headless Platform/Input、Action Mapper、fixed-step latch、
   `PlatformEventDispatcher` 与私有 GLFW Window/Keyboard/Pointer/committed text producer 已落地；
-  production Gamepad、完整 DPI、Windows IMM32 和 UI producer 仍是目标
+  M7-C1a 已落地 UI-owned route-result view ABI；production Gamepad、完整 DPI、Windows IMM32 和
+  Runtime UI producer 仍是目标
 
 ## 背景
 
@@ -23,21 +24,22 @@ view、不分配 engine frame index，也不泵送当前 `PlatformEventDispatche
 或进入本轮 Input/任何新 frame phase。Continue 分支中的 `PlatformEventBatch` 当前只由 Runtime-owned
 `PlatformEventDispatcher` 同步分发平台生命周期通知；它不是通用 Gameplay/Domain Event Queue。
 UI 使用上一帧稳定布局逐 transition 路由；UI 输出与当前 `PlatformFrameView` 绑定的
-`InputTransitionConsumption`，按 transition sequence 标记一次性事件是否已被
+`Tina::UI::InputTransitionConsumptionView`，按 transition ordinal 标记一次性事件是否已被
 消费。Gameplay Action Mapping 只读取未消费 transition，不允许 UI 修改 Platform Snapshot。
 
 仅有逐帧 consumption 仍不足以阻止持续输入穿透，因此同时建立
-`ContinuousControlClaims` 与 Action Mapper 的 `suppressedUntilReleaseOrNeutral` 状态：
+`Tina::UI::ContinuousControlClaimsView` 与 Action Mapper 的 `suppressedUntilReleaseOrNeutral` 状态：
 
 - UI 消费数字控制的 Down 后，对应 physical control 在 Action Mapper 中保持 suppressed，直到
   匹配的真实 Release；该 Release 只解除 suppression，不生成 Gameplay edge；
-- UI 通过 `ContinuousControlClaims` 接管一个已经 held 的 digital control 时同样立即建立
+- UI 通过 `Tina::UI::ContinuousControlClaimsView` 接管一个已经 held 的 digital control 时同样立即建立
   suppression，取消该 source 尚未完成的 Gameplay edge/repeat，并以 Action Cancel 而非 normal
   Released 表达清理；
 - UI claim 连续 axis/pointer delta 后，该 control 保持 suppressed，直到回到配置 dead zone/neutral；
 - Focus loss、设备断开与输入流 reset 使用 `InputCancelTransition`/Reset 语义清理 UI Capture、composition、Action
   edge 和 repeat；不能伪造普通 Up，因为普通 Up 可能触发 Button click 或 Gameplay release action；
-- `InputTransitionConsumption` 只活到当前 `PlatformFrameView`；`ContinuousControlClaims` 是当前路由结果，
+- `Tina::UI::InputTransitionConsumptionView` 只活到当前 `PlatformFrameView`；
+  `Tina::UI::ContinuousControlClaimsView` 是当前路由结果，
   `suppressedUntilReleaseOrNeutral` 由 Action Mapper 跨帧持有。三者职责不能合并成修改全局 held
   状态的一个 bitset。
 
@@ -81,7 +83,7 @@ Context（priority=0）。UI consumption/claim 优先；未来多 Context 以显
 generation 若在 retained state 未先 cancel/reset/release 时消失或替换，返回
 `LifecycleInvariantViolation`，不能静默清零或迁移到新 generation。
 默认/硬容量冻结为：raw transition 256/4096、UTF-8 text bytes 16 KiB/1 MiB、Platform event
-64/1024、continuous claim 64/1024（M7-A 仅为 Runtime SPI 内部固定上限，不属于 game-facing
+64/1024、continuous claim 64/1024（M7-A 仅为 Runtime ActionMapper consumer 内部固定上限，不属于 game-facing
 `InputActionMapConfig`）、
 pending Simulation transition 128/4096、Frame Action transition 128/4096、digital binding 64/4096；
 raw/event/simulation/frame batch 各有不计入有效项的一个 reset slot。所有容量 Create 时一次性分配，

@@ -1,7 +1,7 @@
 #include "SimulationActionLatch.hpp"
 
+#include <tina/runtime/InputActionMap.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
-#include <tina/runtime/spi/InputRouting.hpp>
 
 #include <algorithm>
 #include <exception>

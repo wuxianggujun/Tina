@@ -40,7 +40,6 @@ set(TINA_RUNTIME_TEST_SOURCES
     runtime/header_isolation/GameApplicationHeader.cpp
     runtime/header_isolation/InputActionsHeader.cpp
     runtime/header_isolation/InputActionMapHeader.cpp
-    runtime/header_isolation/InputRoutingHeader.cpp
     runtime/header_isolation/PlatformEventDispatcherHeader.cpp
     runtime/header_isolation/PlatformEventsHeader.cpp
     runtime/header_isolation/WindowSurfaceIntegrationHeader.cpp
@@ -110,3 +109,5 @@ endif()
 if(TINA_BUILD_RENDER_BGFX)
     add_subdirectory(render_bgfx)
 endif()
+
+add_subdirectory(vnext/ui)

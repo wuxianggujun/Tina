@@ -52,7 +52,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | `tina_asset_format` | Runtime/Cooker 共享的 Cooked header、schema、类型、依赖和 hash 编解码 | core | Asset registry、窗口、GPU、源格式 parser |
 | `tina_render` | typed handle、资源描述、RenderScene/DisplayList view、RenderSurfaceState、FramePinSink、Pass Scheduler | core | bgfx 公开类型、Scene registry、平台窗口细节、Asset/UI/Platform concrete pin |
 | `tina_render_bgfx` | bgfx 设备实现、shader/texture/buffer 上传与 Present | core/platform/render、bgfx | 游戏组件、源资产解析 |
-| `tina_ui` | Retained Tree、布局、路由输入、焦点、Widget、DisplayList、Glyph Atlas 和字体 rasterizer 接口 | core、platform `PlatformFrameView`、asset 公共接口、render 描述 | bgfx/FreeType 类型、全局 UI 状态、隐式布局 |
+| `tina_ui` | Retained Tree、布局、路由输入、焦点、Widget、DisplayList、Glyph Atlas 和字体 rasterizer 接口；当前 M7-C1a 只实现树核心与 route-result view ABI | 当前只依赖 core、platform `PlatformFrameView`；后续 Font Asset 和 render 描述随 asset/render 切片接入 | bgfx/FreeType 类型、全局 UI 状态、隐式布局 |
 | `tina_ui_freetype` | FreeType glyph rasterizer 的具体 adapter | core、ui、FreeType | Widget/Scene、Render backend、全局字体服务 |
 | `tina_audio` | AudioEngine、Bus/voice generation handle、实时命令/完成队列、Disabled backend | core/task、asset lease | miniaudio 类型、World/ECS、callback 内 IO/分配 |
 | `tina_audio_miniaudio` | miniaudio 设备/callback/stream backend | core、audio、miniaudio | Gameplay/World/UI、Asset registry 直接查询 |
@@ -190,10 +190,10 @@ public:
 `WrongOwnerThread` 且不消耗唯一运行机会；错误线程析构在进入任何 native backend shutdown 前
 `terminate`。这是 GLFW 等桌面窗口系统的硬正确性边界，不是可由后台线程调度的普通任务。
 
-普通游戏 executable 调用 `Desktop::CreateEngine(config)`；`tina_bootstrap_desktop` 的单一组合
-translation unit 私有构造 GLFW/bgfx/FreeType/miniaudio factories，public header 只包含 Tina
-类型。Null sample 和失败注入测试使用 `HeadlessPlatformFactory + NullRenderFactory +
-DisabledUI/DisabledAudioFactory`。Factory 只创建实例，成功后所有权立即转交 EngineHost 并登记
+普通游戏 executable 调用 `Desktop::CreateEngine(config)`；当前 `tina_bootstrap_desktop` 的单一组合
+translation unit 已私有构造 GLFW WindowSurface + clear-only bgfx factories，public header 只包含 Tina
+类型。FreeType/miniaudio 生产 factories 随后续 UI/Audio 切片接入。Null sample 和失败注入测试使用
+`HeadlessPlatformFactory + NullRenderFactory`。Factory 只创建实例，成功后所有权立即转交 EngineHost 并登记
 逆操作。`EngineConfig` 是可验证纯值，factory 不能通过全局注册表发现 service。
 
 阶段 Context 是不可复制、只在当前回调有效的 capability view：
@@ -507,7 +507,12 @@ Scope、Theme/DPI、Scroll/List、TextEdit/IME 和手柄导航是应迁移的有
 重构而丢弃。
 
 vNext 中 Runtime WindowRecord 唯一拥有 `UIContext`。`IGameState` 只持有 move-only `UIRootOwner`
-和带 owner WindowId 的 generation UINodeId；Platform/Event 不拥有 UI 状态。UI 树输出后端无关的 Quad、Image、
+和带 owner WindowId 的 generation UINodeId；Platform/Event 不拥有 UI 状态。M7-C1a 已在 standalone
+`tina_ui` 中实现 generation `Tina::UI::UINodeId`、`Tina::UI::UIContext`、`Tina::UI::UIRootOwner`
+RAII、`Tina::UI::UICommittedStructureView` 结构 snapshot，以及 UI-owned
+`Tina::UI::InputTransitionConsumptionView` / `Tina::UI::ContinuousControlClaimsView` route-result
+view ABI。当前 `tina_ui` 只依赖 Core/Platform；layout、hit route、DisplayList、widgets、FreeType、
+bgfx UI pass 与 Runtime UI producer 仍未实现。完整目标中 UI 树输出后端无关的 Quad、Image、
 GlyphRange、Clip DisplayList，由 Render 层保持 paint order 批处理。
 
 布局采用一次 Measure/Arrange 的 Flex-lite；每个有序 Pointer transition 最多 hit-test 一次。
@@ -537,10 +542,12 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
    与 NullRender 样例已落地；加入 M7-B1 覆盖后，基础183项与 GLFW 专项22项保持为两个直接运行的测试 executable；
 3. **M7-B Surface**：M7-B1 已完成 move-only Native Window Surface lease、snapshot/revision、
    deferred publish、Runtime handoff 与 NullRender suspended path；M7-B2 已完成私有 bgfx
-   clear-only core、resize/resume planner 和 suspended skip，继续接入 Desktop bootstrap、真实 GPU
-   冒烟与 submission ticket/drain；
-4. **M7-C–E UI/IME/Gamepad**：增量 UIContext/DisplayList、Label/Button/Modal + FreeType、
-   IMM32/Gamepad/DPI 门禁；
+   clear-only core、resize/resume planner、suspended skip、Desktop bootstrap，以及 Windows 硬件
+   D3D11/Linux backend 300帧冒烟；submission ticket/drain 继续后置；
+4. **M7-C–E UI/IME/Gamepad**：M7-C1a 已完成 `tina_ui` 树核心、generation `UINodeId`、
+   `UIContext`、`UIRootOwner` RAII、结构 snapshot 和 route-result view ABI；后续继续实现
+   layout/hit route/DisplayList、Label/Button/Modal + FreeType、bgfx UI pass、Runtime UI producer
+   与 IMM32/Gamepad/DPI 门禁；
 5. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；
 6. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D
    样例；
@@ -571,6 +578,9 @@ vNext-only preset 设为 OFF；当新2D/UI/3D/Audio 覆盖门禁后先把默认�
 
 - Visual Studio 2026 / MSVC 19.50 Debug/Release configure、build 与直接执行基础 `tina_tests`；启用
   GLFW adapter 时另行直接执行 `tina_platform_glfw_tests`，两者均不使用 CTest；
+- M7-C1a UI 树核心使用独立 `tina_ui_tests` 直接 GoogleTest；当前记录 Windows MSVC 19.50
+  Debug/Release 均 16/16 通过；Linux GCC 13.4 与 Clang 22 ASan/UBSan/LSan 均基础
+  `tina_tests` 183/183、`tina_ui_tests` 16/16，且无诊断；
 - Linux GCC 与 Clang 构建；正式支持前还要运行 GLFW/bgfx 2D/UI/3D，Clang sanitizer 只有真实
   运行通过后才能标记完成；
 - GLFW X11 与 Wayland 使用独立 preset 和真实/隔离 display server 运行；configure/build 成功不等于

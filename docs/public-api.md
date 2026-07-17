@@ -1,8 +1,9 @@
 # vNext 公共接口与生命周期规则
 
-> 状态：分批实施。Core、M6-A 生命周期、M7-A Platform/Input 与首个私有 GLFW Window/Keyboard/
-> Pointer/committed text adapter 已落地；完整状态栈、worker、Scene/Asset/UI/Audio、Desktop bootstrap、
-> M7-B1 Native Surface handoff 已落地；真实 bgfx device、production Gamepad、完整 DPI 与
+> 状态：分批实施。Core、M6-A 生命周期、M7-A Platform/Input、私有 GLFW adapter、M7-B1 Native
+> Surface handoff，以及 M7-B2 私有 bgfx clear-only device、Desktop bootstrap 和300帧 backend
+> 冒烟已落地；M7-C1a standalone `tina_ui` 树核心已落地；完整状态栈、worker、Scene/Asset/Audio、
+> Runtime-integrated UI pipeline、production Gamepad、完整 DPI 与
 > Windows IMM32 仍是后续契约。
 
 ## 公开类型命名规则
@@ -99,8 +100,9 @@ public:
 `EngineCompositionFactories` 是高级集成/测试 SPI。当前 `tina_sample_null` 显式注入 Clock、Headless
 Platform、Disabled TaskSystem 和 NullRenderDevice；`tina_sample_platform` 只把 Platform factory
 换成私有 GLFW adapter，仍使用 NullRender。WindowSurface 组合已通过
-`WindowSurfacePlatformRenderFactories` 支持 lease/snapshot/deferred publish handoff，但真实 bgfx
-device 尚未实现。`EngineHost` 由 main 的 `unique_ptr` 唯一拥有。
+`WindowSurfacePlatformRenderFactories` 支持 lease/snapshot/deferred publish handoff；M7-B2 已实现
+私有 clear-only bgfx backend、Desktop 组合和300帧 backend smoke，但它仍不等于完整 Render/Scene/UI
+pass。`EngineHost` 由 main 的 `unique_ptr` 唯一拥有。
 
 Create、run 与析构属于同一 owner-thread 生命周期：跨线程 `run` 返回 `WrongOwnerThread` 且不
 消耗 run-once；跨线程析构在调用 native backend 前 `terminate`。Game SDK 不提供把 EngineHost
@@ -118,9 +120,10 @@ CreateEngine(EngineConfig config);
 } // namespace Desktop
 ```
 
-`Desktop::CreateEngine` 尚未实现；它会是组合 helper，不是 Singleton，也不能从游戏代码全局查询。
-当前 vNext target 只承诺 build-tree consumer；正式 `Tina::GameSDK`、`install(EXPORT ...)`、版本化
-package config 与外部 SDK consumer 门禁会在 Desktop Bootstrap 切片统一加入，当前不伪装成可安装 SDK。
+`Desktop::CreateEngine` 已在 `tina_bootstrap_desktop` 中实现当前 clear-only 生产组合；它是组合
+helper，不是 Singleton，也不能从游戏代码全局查询。当前 vNext target 只承诺 build-tree consumer；
+正式 `Tina::GameSDK`、`install(EXPORT ...)`、版本化 package config 与外部 SDK consumer 门禁仍后置，
+当前不伪装成可安装 SDK。
 
 ## IGameApplication：游戏程序入口
 
@@ -325,7 +328,8 @@ Simulation Action，frame context 只读取当帧 Frame Action；0步帧保留 e
 
 ## M7 PlatformFrame 与 Action 接口
 
-M7-A 已实现下列职责完整的 Platform/Input 名称；UI consumption/claim 数据结构属于后续 UI 接入点：
+M7-A 已实现下列职责完整的 Platform/Input 名称；M7-C1a 已把 UI consumption/claim 的公开 view ABI
+迁到 `Tina::UI`，Runtime ActionMapper 只消费这些 view：
 
 | 类型 | API 层 | 职责与寿命 |
 | --- | --- | --- |
@@ -339,15 +343,16 @@ M7-A 已实现下列职责完整的 Platform/Input 名称；UI consumption/claim
 | `InputTransitionBatch` | Engine Module SPI | 按 platform sequence 排序的有界 transition；不保存 GLFW key code 之类 backend 值 |
 | `PlatformEventBatch` / `PlatformEventDispatcher` | Engine Module SPI / Runtime integration | Window metrics、Gamepad lifecycle/reset 的有界帧批次与 Runtime-owned 同步分发器；不是通用 Runtime Event Queue |
 | `PlatformEventSubscriptions` / `PlatformEventSubscription` | Game SDK | 只允许注册 callback 的窄门面与 generation-safe RAII token；Game 不能取得 dispatcher owner |
-| `InputTransitionConsumption` | Runtime/UI integration | 只标记本帧哪些 sequence 已由 UI 消费 |
-| `ContinuousControlClaims` | Runtime/UI integration | 描述当前 UI route 的 digital/axis/pointer ownership seam；M7-A mapper 只消费 digital claim，axis/pointer continuous mapping 后续实现 |
+| `Tina::UI::InputTransitionConsumptionView` | UI-owned view ABI / Runtime ActionMapper consumer | 只读 view，借用 UI route-result storage，标记本帧哪些 transition ordinal 已由 UI 消费 |
+| `Tina::UI::ContinuousControlClaimsView` | UI-owned view ABI / Runtime ActionMapper consumer | 只读 view，声明当前 UI route 的 digital/axis/pointer ownership seam；M7-A mapper 只消费 digital claim，axis/pointer continuous mapping 后续实现 |
 | `InputActionId` | Game SDK | 显式的语义 Action 标识，不暴露物理键值为 gameplay contract |
 | `SimulationActionSnapshot` | Game SDK | 当前 simulation tick 的 state/axis + 有序 edge batch |
 | `FrameActionSnapshot` | Game SDK | 仅当前 Render Frame 可用一次的 camera/presentation/UI 外围 Action |
 
 `PlatformFrameView` 及其 span 只在当前 Poll/Input phase 有效，不能保存；backend storage 即使到
 下一次 Poll 才复用，也不延长 API 借用寿命。Runtime 先让 UI 产生
-transition consumption 和 continuous claims，再映射 Gameplay Action。M7-A 被消费/claim 的 digital
+`Tina::UI::InputTransitionConsumptionView` 和 `Tina::UI::ContinuousControlClaimsView`，再由
+Runtime-owned ActionMapper 映射 Gameplay Action。M7-A 被消费/claim 的 digital
 Down 建立 `suppressedUntilRelease`，匹配 Up 只解除 suppression，不补发 Gameplay edge；axis/pointer
 identity 目前只是已冻结 seam schema，等后续 analog binding 才实现 dead-zone/neutral suppression。
 Focus lost、设备断开和 `InputStreamReset` 取消 transient edge、repeat、Capture 与 composition，
@@ -465,13 +470,14 @@ bootstrap 仍待把该 factory 封装成产品入口。完整 factory
 | 最小 Phase Context | M6-A 已实现 | Game SDK | Runtime stack，当前 callback | callback `Status` |
 | `WindowId` | M7-A generation 类型、Headless 契约与生产 GLFW registry 已实现 | Game SDK / Module SPI | GLFW backend-owned Window registry；首期一个 primary slot | invalid/stale/wrong owner/identity mismatch |
 | `WindowSurfaceId` | M7-B1 已实现 | Runtime integration SPI | Platform surface registry generation | invalid/stale/wrong owner/revision |
-| `UINodeId` | M7-C 目标 | Game SDK | Window-owned UI registry generation + WindowId owner | invalid/stale/wrong owner |
+| `Tina::UI::UINodeId` | M7-C1a 已实现 | UI public / Game SDK 目标 | Window-owned UI registry generation + WindowId owner | invalid/stale/wrong owner |
+| `Tina::UI::UICommittedStructureView` | M7-C1a 已实现 | UI public | owner-thread borrowed structure snapshot，下一次 `commitStructure()` 或 `UIContext` 销毁后失效 | stale borrowed view / owner-thread misuse |
 | `EntityId` | M8 目标 | Game SDK | World registry generation + owner | invalid/stale/wrong owner |
 | `AssetHandle<T>` | M10 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
 | `AssetLease<T>` | M10 目标 | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
 | Render typed handle | M7/M9 目标 | Engine Module SPI | RenderDevice registry 到 retire | invalid/stale/wrong device |
 | 最小 `RenderFrame` | M6-A 已实现 | Engine Module SPI | 当前 submit 调用 | submit `Status` |
-| `UIDisplayListView` | M7-C 目标 | Engine Module SPI | 所属 Runtime-private RenderFramePacket 生命周期 | CapacityExceeded/invalid ref |
+| `UIDisplayListView` | M7-C 后续目标 | Engine Module SPI | 所属 Runtime-private RenderFramePacket 生命周期 | CapacityExceeded/invalid ref |
 | `RenderFramePacket` | M7-B/C 目标、Runtime Private | Runtime Private | Runtime 固定容量 pool；backend completion 前 owning | PoolExhausted/submit failure |
 
 M6-A 已实现的通用 `GenerationPool` 使用强类型 Tag，并在所有构建中校验非零 registry owner token、slot index
@@ -522,6 +528,7 @@ M6-A/M7-A Headless 内核与首个 GLFW adapter 已验证：
   Platform lifecycle dispatch/RAII subscription 行为使用直接 GoogleTest 覆盖；最终平台与数量结果只在
   [测试文档](testing.md) 维护。
 
-后续验收：`tina_game_api_consumer`/Game SDK umbrella、完整 forbidden-token/dependency-closure、
-`Desktop::CreateEngine`、真实 bgfx device、production Gamepad、完整 DPI/Windows IMM32，以及只使用
-Game SDK 运行 UI/2D/3D 产品样例。
+后续验收：`tina_game_api_consumer`/Game SDK umbrella、正式 SDK/install package、完整
+forbidden-token/dependency-closure、production Gamepad、完整 DPI/Windows IMM32，以及只使用
+Game SDK 运行 UI/2D/3D 产品样例。`Desktop::CreateEngine` 和 clear-only bgfx smoke 已实现，但不代表
+正式 SDK、完整 Render pass、Runtime UI producer 或产品样例已完成。
