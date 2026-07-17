@@ -2,8 +2,9 @@
 
 > 状态：vNext Input 契约已由 ADR 0015 接受；M7-A Headless 的 `PlatformFrameView`、Action Mapper、
 > fixed-step latch 与 `PlatformEventDispatcher` 已实现，首个私有 GLFW desktop adapter 也已完成
-> Window/Keyboard/Pointer/Focus/resize/close/committed text。Native Surface/bgfx、production Gamepad、
-> Windows IMM32 composition、OS Pointer Capture 与完整 DPI/UI 门禁仍是后续能力。
+> Window/Keyboard/Pointer/Focus/resize/close/committed text。M7-B1 已完成私有 WindowSurface handoff；
+> 真实 bgfx clear/present 是 M7-B2，production Gamepad、Windows IMM32 composition、OS Pointer
+> Capture 与完整 DPI/UI 门禁仍是后续能力。
 
 ## 结论
 
@@ -104,7 +105,8 @@ GLFW C callback 不调用 UI、Gameplay 或销毁系统，只更新 backend-owne
 当前 producer 覆盖 Keyboard press/release/repeat、Primary Pointer move/button/wheel、Focus、logical/
 framebuffer/content-scale/visible/iconified metrics、resize、close 与 GLFW char callback 提供的 committed
 Unicode scalar。Gamepad registry/sampled diff、Windows preedit/composition、OS Pointer Capture、
-UI routed consumption producer和 Native Surface 均尚未接入。
+UI routed consumption producer 尚未接入。WindowSurface snapshot/lease 已在 M7-B1 接入到
+Platform/Render 组合；真实 bgfx device、clear/present 与 GPU surface lifecycle 仍属于 M7-B2。
 
 `WindowInputSnapshot` 按窗口保存：
 
@@ -324,9 +326,10 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
 
 ## 验收
 
-当前 M7-A Headless 与 GLFW Window 子切片已验证：
+当前 M7-A Headless/GLFW Window 与 M7-B1 WindowSurface handoff 子切片已验证：
 
-- Headless backend 不链接、不加载 GLFW，Null Runtime 可连续运行300帧和10,000帧并完成一次性逆序关闭；
+- Headless backend 不链接、不加载 GLFW；最新 Windows 门禁覆盖 Null Runtime 300帧并完成一次性逆序关闭，
+  10,000帧仍作为 M6-A/M7-A 阶段的历史长跑证据保留；
 - WindowId/GamepadId generation identity、跨帧 lifecycle mismatch、Focus/设备断开
   `InputCancelTransition` 有直接测试；生产 Window registry 已由 GLFW adapter 持有，production
   Gamepad registry 仍后置；该
@@ -348,21 +351,25 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
   只路由一次到 primary window；跨帧 retained active/suppressed source 与最终 held snapshot 一致；
 - Platform 生命周期通知与 Headless/Input Action 映射互不重复投递；UI producer 尚未实现；公共头文件
   不含 GLFW/SDL 类型，Headless backend 不链接、不加载 GLFW 或 SDL；
-- GLFW 专项17项直接覆盖 hidden `NO_API` snapshot、process lease、严格配置校验、Keyboard/Pointer/
-  Unicode/repeat/focus filter、close partial-frame、失败 Poll recovery 与 resize revision；基础测试166项
-  继续独立运行，两个 executable 均不使用 CTest；
-- Windows MSVC 2026 Debug/Release 均通过基础166/166、GLFW专项17/17与零延迟样例300帧；可见
-  样例另行验证中文标题、Escape Frame Action与原生关闭路径。Linux GCC 13 X11通过166/166、
-  17/17与样例300帧。Clang X11也通过相同门禁：基础测试不使用 suppression，只有 GLFW/X11
-  进程使用精确 `leak:_XimOpenIM`，对应专项8次3264 B与样例1次408 B的libX11 XIM retention；
-  GCC 13 Wayland 双后端产物在带 `wl_seat` 的嵌套 Weston 9 下通过166/166、17/17与
-  样例300帧，并通过移除 `DISPLAY` 与断言 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND`
-  确认真正使用 Wayland；同一产物强制 X11 后17/17与样例300帧再次通过。纯
+- M7-B1 覆盖 `WindowSurfaceId` generation、`WindowSurfaceSnapshot` identity/revision/suspended、
+  move-only `NativeWindowSurfaceLease`、重复 lease 拒绝、Render 创建失败与窗口发布失败逆序回滚、
+  surface snapshot 只由 committed metrics 派生、resize/content-scale/suspend 改变才递增
+  `surfaceRevision`，以及 NullRender suspended 帧维护调用但不 present、不增加 submission index；
+- Windows 最新门禁在 MSVC 19.50.35717 与 CMake 4.2.3 下通过：Debug/Release 基础
+  `tina_tests` 183/183、GLFW专项22/22、`tina_sample_null` 300帧、`tina_sample_platform`
+  300帧；`TINA_BUILD_TESTING=OFF` 的 production-style GLFW 样例300帧也通过；
+- Linux M7-B1 门禁同样通过基础183/183、GLFW专项22/22与样例300帧。GCC 13.4 X11 的
+  Null/GLFW样例各通过300帧；Clang 22.1.8 X11 sanitizer 图的基础测试不使用 suppression，
+  Null/GLFW样例各通过300帧，只有 GLFW/X11 进程使用精确 `leak:_XimOpenIM`，对应专项
+  12次/4896 B与GLFW样例1次/408 B的libX11 XIM retention；GCC 13 Wayland 双后端产物
+  在带 `wl_seat` 的嵌套 Weston 9 下通过183/183、22/22与样例300帧，并通过移除
+  `DISPLAY` 与断言 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND` 确认真正使用 Wayland；
+  同一产物强制 X11 后也通过183/183、22/22与样例300帧。纯
   Weston headless 无 `wl_seat` 会命中锁定 GLFW 3.4 的已知初始化崩溃，不是 Tina
   回归，也不属于当前支持范围。Clang 22 双后端 sanitizer 产物同样通过：基础
-  166/166无 suppression；强制 Wayland 后17/17与样例300帧通过且 `_XimOpenIM`
-  匹配为0；强制 X11 后17/17与样例300帧通过，仅精确抑制 `_XimOpenIM`
-  （专项8次/3264 B、样例1次/408 B）。第三方 GLFW 本身未被 sanitizer 插桩，门禁不宣称
+  183/183无 suppression且Null样例300帧通过；强制 Wayland 后22/22与样例300帧通过且
+  `_XimOpenIM` 匹配为0；强制 X11 后22/22与样例300帧通过，仅精确抑制 `_XimOpenIM`
+  （专项12次/4896 B、样例1次/408 B）。第三方 GLFW 本身未被 sanitizer 插桩，门禁不宣称
   完整覆盖其内部实现。
 
 完整 M7-E Platform 输入仍需达到：

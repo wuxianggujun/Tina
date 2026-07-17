@@ -176,6 +176,7 @@ if(TINA_BUILD_LEGACY OR TINA_BUILD_RENDER_BGFX OR TINA_BUILD_SHADERS)
 endif()
 
 add_subdirectory(src/core)
+add_subdirectory(src/integration "${CMAKE_CURRENT_BINARY_DIR}/vnext/integration")
 
 # vNext modules are independent from the Legacy product graph. Explicit binary
 # directories keep src/platform and Legacy src/platform/audio from competing

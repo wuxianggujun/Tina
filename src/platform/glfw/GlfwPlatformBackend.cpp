@@ -4,9 +4,13 @@
 #include <tina/platform/PlatformErrors.hpp>
 #include <tina/platform/glfw/GlfwPlatformFactory.hpp>
 
+#include "../../integration/WindowSurfaceLeaseAccess.hpp"
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
 #include "GlfwBackendTestAccess.hpp"
+#endif
 #include "GlfwDigitalFocusFilter.hpp"
 #include "GlfwInputTranslation.hpp"
+#include "GlfwNativeWindowBinding.hpp"
 
 #include <GLFW/glfw3.h>
 
@@ -27,6 +31,7 @@ namespace Tina::Platform {
 namespace {
 
 constexpr usize GlfwErrorDescriptionCapacity = 512;
+constexpr double SuspendedEventWaitTimeoutSeconds = 1.0 / 60.0;
 
 struct GlfwErrorSnapshot final {
     int code = GLFW_NO_ERROR;
@@ -61,6 +66,8 @@ struct GlfwErrorSnapshot final {
         return {description.data(), descriptionSize};
     }
 };
+
+struct GlfwWindowSurfaceRecord final {};
 
 std::atomic_bool g_glfwBackendActive = false;
 
@@ -229,14 +236,20 @@ enum class CallbackAssemblyFailure : u8 {
     InvalidTextCodepoint,
 };
 
-class GlfwPlatformBackend final : public IPlatformBackend {
+class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBackend {
   public:
     using WindowPool = Core::GenerationPool<GlfwWindowRecord, WindowRegistryTag>;
+    using SurfacePool = Core::GenerationPool<GlfwWindowSurfaceRecord, Integration::WindowSurfaceRegistryTag>;
 
-    GlfwPlatformBackend(WindowPool windows, WindowId windowId, GLFWwindow* window, PlatformFrameBuilder frameBuilder,
-                        WindowMetricsSnapshot metrics, WindowInputSnapshot input) noexcept
-        : windows_(std::move(windows)), windowId_(windowId), window_(window), frameBuilder_(std::move(frameBuilder)),
-          metrics_(metrics), input_(input), ownerThread_(std::this_thread::get_id())
+    GlfwPlatformBackend(WindowPool windows, WindowId windowId, SurfacePool surfaces,
+                        Integration::WindowSurfaceId surfaceId,
+                        std::shared_ptr<Integration::Detail::NativeWindowSurfaceLeaseControl> surfaceLeaseControl,
+                        GLFWwindow* window, PlatformFrameBuilder frameBuilder, WindowMetricsSnapshot metrics,
+                        WindowInputSnapshot input, bool initiallyVisible) noexcept
+        : windows_(std::move(windows)), windowId_(windowId), surfaces_(std::move(surfaces)), surfaceId_(surfaceId),
+          surfaceLeaseControl_(std::move(surfaceLeaseControl)), window_(window), frameBuilder_(std::move(frameBuilder)),
+          metrics_(metrics), input_(input), ownerThread_(std::this_thread::get_id()),
+          surfaceSnapshot_(makeSurfaceSnapshot(surfaceId_, metrics_, 1)), initiallyVisible_(initiallyVisible)
     {
     }
 
@@ -306,11 +319,32 @@ class GlfwPlatformBackend final : public IPlatformBackend {
         input_.pointer.accumulatedDeltaX = 0.0;
         input_.pointer.accumulatedDeltaY = 0.0;
         collectingFrame_ = true;
+        bool waitForEvents = surfaceSnapshot_.suspended;
+        double waitTimeoutSeconds = SuspendedEventWaitTimeoutSeconds;
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
+        if (forceSuspendedWaitPathForTest_)
+        {
+            waitForEvents = true;
+            waitTimeoutSeconds = suspendedWaitTimeoutForTest_;
+        }
+#endif
         clearGlfwErrors();
-        glfwPollEvents();
+        if (waitForEvents)
+        {
+            glfwWaitEventsTimeout(waitTimeoutSeconds);
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
+            ++eventPumpStatsForTest_.waitEventsTimeoutCalls;
+#endif
+        } else
+        {
+            glfwPollEvents();
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
+            ++eventPumpStatsForTest_.pollEventsCalls;
+#endif
+        }
         collectingFrame_ = false;
 
-        if (auto status = checkGlfwOperation("glfwPollEvents"); !status)
+        if (auto status = checkGlfwOperation(waitForEvents ? "glfwWaitEventsTimeout" : "glfwPollEvents"); !status)
         {
             return std::unexpected(std::move(status.error()));
         }
@@ -355,14 +389,21 @@ class GlfwPlatformBackend final : public IPlatformBackend {
             return Core::failure(PlatformErrorCode::CallbackFrameAssemblyFailed,
                                  "The window metrics event could not be appended");
         }
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
         if (failNextPollForTest_)
         {
             failNextPollForTest_ = false;
             return Core::failure(PlatformErrorCode::BackendOperationFailed,
                                  "The GLFW test seam injected a recoverable poll failure");
         }
+#endif
 
         input_.sourceMetricsRevision = metrics_.revision;
+        auto nextSurfaceSnapshot = surfaceSnapshotFromCommittedMetrics();
+        if (!nextSurfaceSnapshot)
+        {
+            return std::unexpected(std::move(nextSurfaceSnapshot.error()));
+        }
         if (!frameBuilder_.setPrimaryWindowSnapshot(metrics_, input_) || !frameBuilder_.setGamepadSnapshots({}))
         {
             return Core::failure(PlatformErrorCode::InvalidFrameSnapshot,
@@ -373,6 +414,7 @@ class GlfwPlatformBackend final : public IPlatformBackend {
         {
             return std::unexpected(std::move(frame.error()));
         }
+        surfaceSnapshot_ = *nextSurfaceSnapshot;
         discardPartialFrame.release();
         return PlatformPollResult::Continue(*frame);
     }
@@ -387,8 +429,16 @@ class GlfwPlatformBackend final : public IPlatformBackend {
         {
             std::terminate();
         }
+        if (surfaceLeaseControl_ != nullptr && surfaceLeaseControl_->activeLeaseCount != 0)
+        {
+            std::terminate();
+        }
         stopped_ = true;
         collectingFrame_ = false;
+        if (surfaceLeaseControl_ != nullptr)
+        {
+            surfaceLeaseControl_->surfaceAlive = false;
+        }
         if (window_ != nullptr)
         {
             clearCallbacks();
@@ -400,6 +450,11 @@ class GlfwPlatformBackend final : public IPlatformBackend {
         {
             (void)windows_.erase(windowId_);
             windowId_ = {};
+        }
+        if (surfaceId_.hasValue())
+        {
+            (void)surfaces_.erase(surfaceId_);
+            surfaceId_ = {};
         }
         glfwTerminate();
         g_glfwBackendActive.store(false, std::memory_order_release);
@@ -421,18 +476,94 @@ class GlfwPlatformBackend final : public IPlatformBackend {
         glfwSetWindowCloseCallback(window_, &GlfwPlatformBackend::closeCallback);
     }
 
-    [[nodiscard]] Core::Status finishCreation(bool initiallyVisible)
+    [[nodiscard]] Core::Status finishCreation(bool publishDuringCreation)
     {
-        if (initiallyVisible)
+        if (auto status = refreshInitialState(); !status)
+        {
+            return status;
+        }
+        return publishDuringCreation ? publishPrimaryWindow() : Core::success();
+    }
+
+    [[nodiscard]] Core::Result<Integration::NativeWindowSurfaceLease>
+    acquirePrimaryWindowSurfaceLease() noexcept override
+    {
+        if (stopped_ || !hasLiveWindow() || surfaceLeaseControl_ == nullptr || !surfaceId_.hasValue())
+        {
+            return Core::failure(PlatformErrorCode::WindowSurfaceUnavailable,
+                                 "The GLFW primary WindowSurface is unavailable");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW WindowSurface lease must be acquired on the creating thread");
+        }
+        if (surfaceLeaseAcquired_)
+        {
+            return Core::failure(PlatformErrorCode::WindowSurfaceLeaseAlreadyAcquired,
+                                 "The GLFW primary WindowSurface lease was already acquired");
+        }
+
+        auto binding = Detail::readGlfwNativeWindowBinding(window_);
+        if (!binding)
+        {
+            return std::unexpected(std::move(binding.error()));
+        }
+        auto lease =
+            Integration::Detail::NativeWindowSurfaceLeaseAccess::Create(surfaceLeaseControl_, surfaceId_, *binding);
+        if (!lease)
+        {
+            return std::unexpected(std::move(lease.error()));
+        }
+        surfaceLeaseAcquired_ = true;
+        return std::move(*lease);
+    }
+
+    [[nodiscard]] Core::Result<Integration::WindowSurfaceSnapshot>
+    primaryWindowSurfaceSnapshot() const noexcept override
+    {
+        if (stopped_ || !hasLiveWindow() || !surfaceSnapshot_.surface.hasValue())
+        {
+            return Core::failure(PlatformErrorCode::WindowSurfaceUnavailable,
+                                 "The GLFW primary WindowSurface snapshot is unavailable");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW WindowSurface snapshot must be read on the creating thread");
+        }
+        return surfaceSnapshot_;
+    }
+
+    [[nodiscard]] Core::Status publishPrimaryWindow() noexcept override
+    {
+        if (stopped_ || !hasLiveWindow())
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The GLFW platform backend is stopped");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW primary window must be published on the creating thread");
+        }
+        if (windowPublished_)
+        {
+            return Core::success();
+        }
+        if (initiallyVisible_)
         {
             clearGlfwErrors();
             glfwShowWindow(window_);
             if (auto status = checkGlfwOperation("glfwShowWindow"); !status)
             {
-                return status;
+                Core::Error error = std::move(status.error());
+                error.addContext("IWindowSurfacePlatformBackend::publishPrimaryWindow");
+                return Core::failure(std::move(error));
             }
+            metricsDirty_ = true;
         }
-        return refreshInitialState();
+        windowPublished_ = true;
+        return Core::success();
     }
 
     [[nodiscard]] Core::Status refreshInitialState()
@@ -465,9 +596,46 @@ class GlfwPlatformBackend final : public IPlatformBackend {
         input_.pointer.accumulatedDeltaY = 0.0;
         focusFilter_.reset(metrics_.focused);
         metricsDirty_ = false;
+        surfaceSnapshot_ = makeSurfaceSnapshot(surfaceId_, metrics_, 1);
         return Core::success();
     }
 
+    [[nodiscard]] static Integration::WindowSurfaceSnapshot makeSurfaceSnapshot(Integration::WindowSurfaceId surfaceId,
+                                                                                const WindowMetricsSnapshot& metrics,
+                                                                                u64 surfaceRevision) noexcept
+    {
+        return Integration::WindowSurfaceSnapshot{
+            .surface = surfaceId,
+            .sourceWindow = metrics.window,
+            .framebufferExtent = metrics.framebufferExtent,
+            .contentScale = metrics.contentScale,
+            .sourceMetricsRevision = metrics.revision,
+            .surfaceRevision = surfaceRevision,
+            .suspended =
+                metrics.minimized || metrics.framebufferExtent.width == 0 || metrics.framebufferExtent.height == 0,
+        };
+    }
+
+    [[nodiscard]] Core::Result<Integration::WindowSurfaceSnapshot> surfaceSnapshotFromCommittedMetrics() const noexcept
+    {
+        Integration::WindowSurfaceSnapshot next =
+            makeSurfaceSnapshot(surfaceId_, metrics_, surfaceSnapshot_.surfaceRevision);
+        const bool changed = next.framebufferExtent != surfaceSnapshot_.framebufferExtent ||
+                             next.contentScale != surfaceSnapshot_.contentScale ||
+                             next.suspended != surfaceSnapshot_.suspended;
+        if (changed)
+        {
+            if (surfaceSnapshot_.surfaceRevision == (std::numeric_limits<u64>::max)())
+            {
+                return Core::failure(PlatformErrorCode::WindowSurfaceRevisionExhausted,
+                                     "The GLFW WindowSurface revision is exhausted");
+            }
+            next.surfaceRevision = surfaceSnapshot_.surfaceRevision + 1;
+        }
+        return next;
+    }
+
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
     [[nodiscard]] Core::Status requestCloseForTest() noexcept
     {
         if (stopped_ || !hasLiveWindow())
@@ -482,6 +650,26 @@ class GlfwPlatformBackend final : public IPlatformBackend {
         clearGlfwErrors();
         glfwSetWindowShouldClose(window_, GLFW_TRUE);
         return checkGlfwOperation("glfwSetWindowShouldClose");
+    }
+
+    [[nodiscard]] Core::Result<bool> windowVisibleForTest() noexcept
+    {
+        if (stopped_ || !hasLiveWindow())
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The GLFW test backend is stopped");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW test operation must run on the creating thread");
+        }
+        clearGlfwErrors();
+        const int visible = glfwGetWindowAttrib(window_, GLFW_VISIBLE);
+        if (auto status = checkGlfwOperation("glfwGetWindowAttrib(GLFW_VISIBLE)"); !status)
+        {
+            return std::unexpected(std::move(status.error()));
+        }
+        return visible == GLFW_TRUE;
     }
 
     [[nodiscard]] Core::Status resizeForTest(LogicalExtent extent) noexcept
@@ -521,6 +709,41 @@ class GlfwPlatformBackend final : public IPlatformBackend {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status forceSuspendedWaitPathForTest(double waitTimeoutSeconds) noexcept
+    {
+        if (stopped_ || !hasLiveWindow())
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The GLFW test backend is stopped");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW test operation must run on the creating thread");
+        }
+        if (!std::isfinite(waitTimeoutSeconds) || waitTimeoutSeconds <= 0.0)
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "The GLFW test wait timeout must be finite and positive");
+        }
+        forceSuspendedWaitPathForTest_ = true;
+        suspendedWaitTimeoutForTest_ = waitTimeoutSeconds;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<Detail::GlfwEventPumpStats> eventPumpStatsForTest() const noexcept
+    {
+        if (stopped_ || !hasLiveWindow())
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The GLFW test backend is stopped");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW test operation must run on the creating thread");
+        }
+        return eventPumpStatsForTest_;
+    }
+
     [[nodiscard]] Core::Result<Detail::GlfwRuntimePlatform> runtimePlatformForTest() noexcept
     {
         if (stopped_ || !hasLiveWindow())
@@ -554,6 +777,7 @@ class GlfwPlatformBackend final : public IPlatformBackend {
             return Detail::GlfwRuntimePlatform::Unknown;
         }
     }
+#endif
 
   private:
     [[nodiscard]] bool hasLiveWindow() const noexcept
@@ -841,12 +1065,16 @@ class GlfwPlatformBackend final : public IPlatformBackend {
 
     WindowPool windows_;
     WindowId windowId_{};
+    SurfacePool surfaces_;
+    Integration::WindowSurfaceId surfaceId_{};
+    std::shared_ptr<Integration::Detail::NativeWindowSurfaceLeaseControl> surfaceLeaseControl_;
     GLFWwindow* window_ = nullptr;
     PlatformFrameBuilder frameBuilder_;
     WindowMetricsSnapshot metrics_{};
     WindowInputSnapshot input_{};
     Detail::GlfwDigitalFocusFilter focusFilter_{};
     std::thread::id ownerThread_{};
+    Integration::WindowSurfaceSnapshot surfaceSnapshot_{};
     u64 nextFrameId_ = 1;
     CallbackAssemblyFailure callbackFailure_ = CallbackAssemblyFailure::None;
     bool collectingFrame_ = false;
@@ -854,12 +1082,50 @@ class GlfwPlatformBackend final : public IPlatformBackend {
     bool streamRecoveryPending_ = false;
     bool metricsDirty_ = false;
     bool closeRequested_ = false;
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
     bool failNextPollForTest_ = false;
+    bool forceSuspendedWaitPathForTest_ = false;
+    double suspendedWaitTimeoutForTest_ = SuspendedEventWaitTimeoutSeconds;
+    Detail::GlfwEventPumpStats eventPumpStatsForTest_{};
+#endif
     bool stopped_ = false;
+    bool initiallyVisible_ = true;
+    bool windowPublished_ = false;
+    bool surfaceLeaseAcquired_ = false;
 };
 
-[[nodiscard]] Core::Result<std::unique_ptr<IPlatformBackend>>
-createBackendUnchecked(const PlatformBackendCreateParams& params)
+// The independent GLFW composition must not expose the WindowSurface SPI even
+// though both factories share the same native implementation internally.
+class GlfwIndependentPlatformBackend final : public IPlatformBackend {
+  public:
+    explicit GlfwIndependentPlatformBackend(std::unique_ptr<GlfwPlatformBackend> implementation) noexcept
+        : implementation_(std::move(implementation))
+    {
+    }
+
+    [[nodiscard]] Core::Result<PlatformPollResult> pollFrame() override
+    {
+        return implementation_->pollFrame();
+    }
+
+    void shutdown() noexcept override
+    {
+        implementation_->shutdown();
+    }
+
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
+    [[nodiscard]] GlfwPlatformBackend& implementationForTest() noexcept
+    {
+        return *implementation_;
+    }
+#endif
+
+  private:
+    std::unique_ptr<GlfwPlatformBackend> implementation_;
+};
+
+[[nodiscard]] Core::Result<std::unique_ptr<GlfwPlatformBackend>>
+createBackendUnchecked(const PlatformBackendCreateParams& params, bool publishDuringCreation)
 {
     if (auto status = validatePrimaryWindowConfig(params.primaryWindow); !status)
     {
@@ -875,6 +1141,18 @@ createBackendUnchecked(const PlatformBackendCreateParams& params)
     {
         return std::unexpected(std::move(windowPool.error()));
     }
+    auto surfacePool = GlfwPlatformBackend::SurfacePool::Create(1);
+    if (!surfacePool)
+    {
+        return std::unexpected(std::move(surfacePool.error()));
+    }
+    auto surfaceId = surfacePool->tryEmplace(GlfwWindowSurfaceRecord{});
+    if (!surfaceId)
+    {
+        return std::unexpected(std::move(surfaceId.error()));
+    }
+    auto surfaceLeaseControl = std::make_shared<Integration::Detail::NativeWindowSurfaceLeaseControl>();
+    surfaceLeaseControl->ownerThread = std::this_thread::get_id();
 
     bool expected = false;
     if (!g_glfwBackendActive.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
@@ -954,7 +1232,8 @@ createBackendUnchecked(const PlatformBackendCreateParams& params)
     };
 
     auto* concreteBackend = new (std::nothrow) GlfwPlatformBackend(
-        std::move(*windowPool), *windowId, nativeWindow, std::move(*frameBuilder), *initialMetrics, initialInput);
+        std::move(*windowPool), *windowId, std::move(*surfacePool), *surfaceId, std::move(surfaceLeaseControl),
+        nativeWindow, std::move(*frameBuilder), *initialMetrics, initialInput, params.primaryWindow.initiallyVisible);
     if (concreteBackend == nullptr)
     {
         return Core::failure(Core::CoreErrorCode::OutOfMemory, "The GLFW platform backend allocation failed");
@@ -970,21 +1249,38 @@ createBackendUnchecked(const PlatformBackendCreateParams& params)
     {
         return std::unexpected(std::move(status.error()));
     }
-    if (auto status = backend->finishCreation(params.primaryWindow.initiallyVisible); !status)
+    if (auto status = backend->finishCreation(publishDuringCreation); !status)
     {
         return std::unexpected(std::move(status.error()));
     }
 
-    return std::unique_ptr<IPlatformBackend>{std::move(backend)};
+    return backend;
 }
+
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
+[[nodiscard]] GlfwPlatformBackend* glfwBackendForTest(IPlatformBackend& backend) noexcept
+{
+    if (auto* directBackend = dynamic_cast<GlfwPlatformBackend*>(&backend); directBackend != nullptr)
+    {
+        return directBackend;
+    }
+    if (auto* independentBackend = dynamic_cast<GlfwIndependentPlatformBackend*>(&backend);
+        independentBackend != nullptr)
+    {
+        return &independentBackend->implementationForTest();
+    }
+    return nullptr;
+}
+#endif
 
 } // namespace
 
+#if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
 namespace Detail {
 
 Core::Status requestGlfwCloseForTest(IPlatformBackend& backend) noexcept
 {
-    auto* glfwBackend = dynamic_cast<GlfwPlatformBackend*>(&backend);
+    auto* glfwBackend = glfwBackendForTest(backend);
     if (glfwBackend == nullptr)
     {
         return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
@@ -994,7 +1290,7 @@ Core::Status requestGlfwCloseForTest(IPlatformBackend& backend) noexcept
 
 Core::Status resizeGlfwWindowForTest(IPlatformBackend& backend, LogicalExtent extent) noexcept
 {
-    auto* glfwBackend = dynamic_cast<GlfwPlatformBackend*>(&backend);
+    auto* glfwBackend = glfwBackendForTest(backend);
     if (glfwBackend == nullptr)
     {
         return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
@@ -1004,7 +1300,7 @@ Core::Status resizeGlfwWindowForTest(IPlatformBackend& backend, LogicalExtent ex
 
 Core::Status failNextGlfwPollForTest(IPlatformBackend& backend) noexcept
 {
-    auto* glfwBackend = dynamic_cast<GlfwPlatformBackend*>(&backend);
+    auto* glfwBackend = glfwBackendForTest(backend);
     if (glfwBackend == nullptr)
     {
         return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
@@ -1012,9 +1308,29 @@ Core::Status failNextGlfwPollForTest(IPlatformBackend& backend) noexcept
     return glfwBackend->failNextPollForTest();
 }
 
+Core::Status forceGlfwSuspendedWaitPathForTest(IPlatformBackend& backend, double waitTimeoutSeconds) noexcept
+{
+    auto* glfwBackend = glfwBackendForTest(backend);
+    if (glfwBackend == nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
+    }
+    return glfwBackend->forceSuspendedWaitPathForTest(waitTimeoutSeconds);
+}
+
+Core::Result<GlfwEventPumpStats> glfwEventPumpStatsForTest(IPlatformBackend& backend) noexcept
+{
+    auto* glfwBackend = glfwBackendForTest(backend);
+    if (glfwBackend == nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
+    }
+    return glfwBackend->eventPumpStatsForTest();
+}
+
 Core::Result<GlfwRuntimePlatform> glfwRuntimePlatformForTest(IPlatformBackend& backend) noexcept
 {
-    auto* glfwBackend = dynamic_cast<GlfwPlatformBackend*>(&backend);
+    auto* glfwBackend = glfwBackendForTest(backend);
     if (glfwBackend == nullptr)
     {
         return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
@@ -1022,13 +1338,30 @@ Core::Result<GlfwRuntimePlatform> glfwRuntimePlatformForTest(IPlatformBackend& b
     return glfwBackend->runtimePlatformForTest();
 }
 
+Core::Result<bool> glfwWindowVisibleForTest(IPlatformBackend& backend) noexcept
+{
+    auto* glfwBackend = glfwBackendForTest(backend);
+    if (glfwBackend == nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
+    }
+    return glfwBackend->windowVisibleForTest();
+}
+
 } // namespace Detail
+#endif
 
 Core::Result<std::unique_ptr<IPlatformBackend>> createGlfwPlatformBackend(const PlatformBackendCreateParams& params)
 {
     try
     {
-        return createBackendUnchecked(params);
+        auto backend = createBackendUnchecked(params, true);
+        if (!backend)
+        {
+            return std::unexpected(std::move(backend.error()));
+        }
+        auto independentBackend = std::make_unique<GlfwIndependentPlatformBackend>(std::move(*backend));
+        return std::unique_ptr<IPlatformBackend>{std::move(independentBackend)};
     } catch (const std::bad_alloc&)
     {
         return Core::failure(Core::CoreErrorCode::OutOfMemory, "The GLFW platform backend ran out of memory");
@@ -1042,6 +1375,34 @@ Core::Result<std::unique_ptr<IPlatformBackend>> createGlfwPlatformBackend(const 
     {
         return Core::failure(PlatformErrorCode::BackendInitializationFailed,
                              "The GLFW platform backend threw a non-standard exception during creation");
+    }
+}
+
+Core::Result<std::unique_ptr<Integration::IWindowSurfacePlatformBackend>>
+createGlfwWindowSurfacePlatformBackend(const PlatformBackendCreateParams& params)
+{
+    try
+    {
+        auto backend = createBackendUnchecked(params, false);
+        if (!backend)
+        {
+            return std::unexpected(std::move(backend.error()));
+        }
+        return std::unique_ptr<Integration::IWindowSurfacePlatformBackend>{std::move(*backend)};
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "The GLFW WindowSurface platform backend ran out of memory");
+    } catch (const std::exception& exception)
+    {
+        Core::Error error{PlatformErrorCode::BackendInitializationFailed,
+                          "The GLFW WindowSurface platform backend threw during creation"};
+        error.addContext("createGlfwWindowSurfacePlatformBackend", exception.what());
+        return Core::failure(std::move(error));
+    } catch (...)
+    {
+        return Core::failure(PlatformErrorCode::BackendInitializationFailed,
+                             "The GLFW WindowSurface platform backend threw an unknown exception during creation");
     }
 }
 

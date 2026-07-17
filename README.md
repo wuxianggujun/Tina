@@ -14,11 +14,13 @@ ambiguous `IGame` name is not part of the vNext API.
 Profiling uses Tina-owned trace points with optional Tracy; reproducible performance regression is
 handled separately by `tina_bench`. SDL/SDL3 and CTest are not part of the target architecture.
 
-The C++23 headless lifecycle kernel, M7-A platform/input kernel, and the first desktop adapter slice
-are complete. The private `tina_platform_glfw` backend now creates a `GLFW_NO_API` window and
-normalizes keyboard, pointer, focus, resize, close, and committed UTF-8 text into the same bounded
-`PlatformFrameView`; `tina_sample_platform` combines it with NullRender. Native surface/bgfx remains
-M7-B, while IMM32 composition, production gamepad input, and retained UI remain later slices.
+The C++23 headless lifecycle kernel, M7-A platform/input kernel, the first desktop adapter slice,
+and M7-B1 private WindowSurface handoff are complete. The private `tina_platform_glfw` backend now
+creates a `GLFW_NO_API` window, normalizes keyboard/pointer/focus/resize/close/committed UTF-8 text
+into the same bounded `PlatformFrameView`, and hands a move-only window surface lease to the render
+composition without exposing native or bgfx types. `tina_sample_platform` still uses NullRender; the
+real private bgfx clear/present backend is M7-B2. IMM32 composition, production gamepad input, and
+retained UI remain later slices.
 
 The active design, verified status, and build instructions are maintained in
 the [Chinese documentation](README_CN.md).

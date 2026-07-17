@@ -17,50 +17,51 @@
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
-| Windows 11 / MSVC 19.50 | vNext M6-A/M7-A Headless：Core/Platform/Input/Task/Render/Runtime，Legacy/真实 backend 关闭 | Debug C++23 | 166/166 | 通过 |
-| Windows 11 / MSVC 19.50 | vNext M6-A/M7-A Headless：Core/Platform/Input/Task/Render/Runtime，Legacy/真实 backend 关闭 | Release C++23 | 166/166 | 通过 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1：Core/Platform/Input/Task/Render/Runtime、WindowSurface handoff，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 183/183 | 通过 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1：Core/Platform/Input/Task/Render/Runtime、WindowSurface handoff，Legacy/真实 bgfx backend 关闭 | Release C++23 | 183/183 | 通过 |
 | Windows 11 / MSVC 19.50 | Legacy ON 与 vNext M6-A 共存构建 | Debug C++23 | 135/135 | 通过 |
-| Ubuntu 22.04 / GCC 13.4 | vNext M6-A/M7-A Headless，Legacy/真实 backend 关闭 | Debug C++23 | 166/166 | 通过 |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext M6-A/M7-A Headless，ASan/UBSan | Debug C++23 | 166/166 | 通过 |
+| Ubuntu 22.04 / GCC 13.4 | vNext M6-A/M7-A/M7-B1：X11 WindowSurface handoff，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 183/183 | 通过 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext M6-A/M7-A/M7-B1：X11 WindowSurface handoff，ASan/UBSan/LSan，基础测试无 suppression | Debug C++23 | 183/183 | 通过 |
 
-GLFW adapter 测试是独立 executable，不能把两个进程伪写成单个 `183/183`。当前测试拓扑为：
+GLFW adapter 测试是独立 executable，不能把两个进程伪写成单个合并测试数。当前测试拓扑为：
 
 | 构建图 | 基础 GoogleTest | GLFW 专项 GoogleTest | 状态 |
 | --- | ---: | ---: | --- |
-| Windows 11 / MSVC 19.50 Debug | 166/166 | 17/17 | 通过；样例300帧返回0 |
-| Windows 11 / MSVC 19.50 Release | 166/166 | 17/17 | 通过；样例300帧返回0 |
-| Ubuntu 22.04 / GCC 13.4 + GLFW X11 | 166/166 | 17/17 | 通过；样例300帧返回0 |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11 + ASan/UBSan | 166/166 | 17/17 | 通过；样例300帧返回0；仅 GLFW/X11 进程使用 `_XimOpenIM` 精确 LSan suppression |
-| Ubuntu 22.04 / GCC 13.4 + GLFW X11/Wayland 双后端 | 166/166 | 17/17 | 通过；嵌套 Weston 9 Wayland 样例300帧，同一产物强制 X11 后专项与样例再次通过 |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11/Wayland 双后端 + ASan/UBSan/LSan | 166/166 | 17/17 | 通过；Wayland 下抑制匹配为0，同一产物强制 X11 后用精确 `_XimOpenIM` 抑制通过 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 183/183 | 22/22 | 通过；Null样例300帧、WindowSurface GLFW样例300帧返回0 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 183/183 | 22/22 | 通过；Null样例300帧、WindowSurface GLFW样例300帧返回0 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 production-style | 测试 target 关闭 | 不构建 | `TINA_BUILD_TESTING=OFF`，GLFW样例300帧返回0 |
+| Ubuntu 22.04 / GCC 13.4 + GLFW X11 | 183/183 | 22/22 | 通过；Null样例300帧、WindowSurface GLFW样例300帧返回0 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11 + ASan/UBSan/LSan | 183/183 | 22/22 | 通过；基础测试无 suppression，Null/GLFW样例各300帧；`_XimOpenIM` 精确 suppression 仅专项命中12次/4896 B、GLFW样例命中1次/408 B |
+| Ubuntu 22.04 / GCC 13.4 + GLFW X11/Wayland 双后端 | 183/183 | 22/22 | 通过；嵌套 Weston 9 强制 Wayland 与 Xvfb 强制 X11 均通过基础、专项与300帧样例 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11/Wayland 双后端 + ASan/UBSan/LSan | 183/183 | 22/22 | 通过；基础测试无 suppression且Null样例300帧；Wayland专项与样例 suppression 命中0，X11专项命中12次/4896 B、样例命中1次/408 B |
 
-“166项 + 17项”只表示两个 executable 的固定测试数量；只有实际返回0后才能改写为
-`166/166` 与 `17/17`。X11 在隔离 X server 下运行。GCC Wayland 门禁由 Xvfb 托载
+Windows 与 Linux 当前都是“183项基础测试 + 22项GLFW专项测试”，两个 executable 均已实际返回0。
+X11 在隔离 X server 下运行。GCC Wayland 门禁由 Xvfb 托载
 Weston 9 `x11-backend` 并提供 `wl_seat`；移除 `DISPLAY` 后断言
 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND`，再运行专项测试和300帧样例。同一双后端产物
-还在 Xvfb 下强制 X11 复验17/17与300帧。配置/构建成功不能冒充窗口测试通过。
+还在移除 `WAYLAND_DISPLAY` 后由 Xvfb 强制 X11 复验22/22与300帧。配置/构建成功不能冒充窗口测试通过。
 
 纯 Weston headless 在不提供 `wl_seat` 时会触发项目锁定 GLFW 3.4 的已知初始化崩溃。
 该问题不是 Tina 回归，当前门禁也不声明支持无 seat compositor；Wayland 环境必须是真实
 session 或显式提供 `wl_seat` 的受控 compositor。
 
-Clang X11 的基础 `tina_tests` 在**无 suppression**条件下通过166/166。只有会初始化 GLFW/X11 的
+当前 Clang X11 的基础 `tina_tests` 在**无 suppression**条件下通过183/183。只有会初始化 GLFW/X11 的
 专项测试与样例使用 `cmake/sanitizers/lsan-x11.supp` 中唯一的 `leak:_XimOpenIM`：Ubuntu 22.04
-libX11 在 GLFW 调用 `XCloseIM` 后保留 XIM allocation，专项测试8次共3264 B，样例1次408 B。
+libX11 在 GLFW 调用 `XCloseIM` 后保留 XIM allocation，专项测试12次共4896 B，样例1次408 B。
 抑制按第三方符号精确匹配，Tina allocation 仍由 LSan 阻断；不得增加宽泛的 module/category
 suppression来隐藏 Tina 泄漏。
 
-Clang 22 Wayland 双后端产物的基础测试也在 ASan/UBSan/LSan 下**无 suppression**
-通过166/166。带 `wl_seat` 的嵌套 Weston 强制 Wayland 后，专项17/17和样例300帧
-通过，`_XimOpenIM` 抑制匹配计数为0。同一产物强制 X11 后专项17/17与样例
-300帧再次通过，仅精确匹配 `_XimOpenIM`：专项8次/3264 B、样例1次/408 B。
+当前 Clang 22 Wayland 双后端产物的基础测试也在 ASan/UBSan/LSan 下**无 suppression**
+通过183/183，Null样例通过300帧。带 `wl_seat` 的嵌套 Weston 强制 Wayland 后，专项22/22和样例300帧
+通过，`_XimOpenIM` 抑制匹配计数为0。同一产物强制 X11 后专项22/22与样例
+300帧再次通过，仅精确匹配 `_XimOpenIM`：专项12次/4896 B、样例1次/408 B。
 
 这组 sanitizer 门禁插桩 Tina 自有 target，但 vcpkg 提供的第三方 GLFW 本身未被
 sanitizer 插桩。因此结果能验证 Tina 代码、边界交互与生命周期，不宣称完整覆盖
 GLFW 内部实现。
 
-同一 M6-A/M7-A Headless 构建的 `tina_sample_null` 已在 Windows Debug/Release、Linux GCC 13 与
-Clang 22 ASan/UBSan 分别连续运行300帧和10,000帧，均
+同一 M6-A/M7-A/M7-B1 Headless 构建的 `tina_sample_null` 已在 Windows Debug/Release、Linux GCC 13.4
+与 Clang 22 ASan/UBSan/LSan 连续运行300帧；M6-A/M7-A 历史构建还曾在 Linux 连续运行10,000帧，均
 返回0，并验证 `IGameState::onExit` 与 `IGameApplication::onShutdown` 恰好一次。该样例组合
 Headless Platform、Disabled TaskSystem 与 NullRenderDevice，不加入或链接 GLFW、bgfx、EnTT、
 FreeType、miniaudio、SDL/SDL3；它不证明真实窗口、GPU、Scene/Asset/UI/Audio 已经可用。
@@ -115,6 +116,13 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   覆盖严格 title/mode/extent 校验、键鼠映射、Unicode codepoint、repeat 状态、失焦 synthetic release
   抑制、close 不发布 partial frame、失败 partial Poll 后双 stream reset/recovery，以及 resize 的单一
   metrics revision/lifecycle event；
+- WindowSurface M7-B1：generation `WindowSurfaceId`、backend-neutral `RenderSurfaceState`、
+  `WindowSurfaceSnapshot` identity/revision/suspended、move-only `NativeWindowSurfaceLease`、
+  WindowSurface-aware factory composition、Render 创建失败/窗口发布失败逆序回滚、私有 Win32/X11/Wayland
+  native binding 解码、source window/revision 单调与精确 `surfaceRevision + 1`、NullRender 连续300帧
+  suspended maintenance、独立 `engineFrameIndex`/`submissionIndex` 已有直接测试；
+- GLFW suspended pacing：专项测试连续300次从 suspended 路径调用 `glfwWaitEventsTimeout(1/60s)` 的
+  可缩短测试 seam，不走 busy-loop；seam 在 `TINA_BUILD_TESTING=OFF` 的生成图与产物中不存在；
 - Runtime/Platform 防护：`PlatformFrameBuilder::discardFrame()` 允许错误 Poll 后恢复；EngineHost
   wrong-owner-thread `run` 返回结构化错误且不消耗 run-once；
 - Platform/Task/Render M6-A：Headless shutdown 后拒绝 poll，Disabled TaskSystem 始终 idle 且
@@ -222,19 +230,17 @@ shutdown；空后端与 Tracy 后端必须产生相同业务结果。Bench/Profi
 LTO 语义，只改变插桩和符号；正式 `tina_bench` 默认关闭 Tracy，需要定位回退时才用相同
 workload 启用。Tracy overhead 与常驻 Metrics off/on overhead 分开记录。
 
-Windows M6-A/M7-A Headless 的完整直接门禁为：
+Windows M6-A/M7-A/M7-B1 Headless 的完整直接门禁为：
 
 ```powershell
 cmake --preset windows-msvc-vnext
 cmake --build --preset windows-vnext-debug --target tina_tests tina_sample_null
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
-out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=10000
 
 cmake --build --preset windows-vnext-release --target tina_tests tina_sample_null
 out\build\windows-msvc-vnext\bin\Release\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_sample_null.exe --frames=300
-out\build\windows-msvc-vnext\bin\Release\tina_sample_null.exe --frames=10000
 ```
 
 Windows GLFW Platform 的独立直接门禁为：
@@ -250,6 +256,9 @@ out\build\windows-msvc-vnext-platform\bin\Debug\tina_sample_platform.exe `
 ```
 
 Release 使用对应 `windows-vnext-platform-release` 与 `bin/Release`，并继续与 Debug 串行构建。
+当前 Windows 最新结果是 Debug/Release 均基础183/183、GLFW专项22/22、Null样例300帧与
+WindowSurface GLFW样例300帧返回0；另有 `TINA_BUILD_TESTING=OFF` production-style WindowSurface
+GLFW样例300帧返回0。
 Linux X11、Wayland和 Clang LSan精确 suppression的完整命令见[构建与运行](building.md)。
 
 Visual Studio 多配置输出必须使用对应的 `bin/Debug` 或 `bin/Release`，不能混用 GoogleTest DLL。
@@ -309,15 +318,15 @@ bgfx Debug/D3D11 当前会在关闭 InfoQueue 时输出一次 `RefCount is 4 (ex
 
 | 样例 | 状态 | 主要证明 | 资源策略 |
 | --- | --- | --- | --- |
-| `tina_sample_null` | M6-A/M7-A Headless 已实现 | EngineHost、PlatformFrame/Input/Action、单个 `IGameState`、Headless/Disabled/Null、300/10,000帧生命周期 | 无真实第三方 backend |
-| `tina_sample_platform` | M7-A 已实现 | 私有 GLFW `NO_API` 窗口、键鼠、resize/focus/close、committed text 与 NullRender | 不创建 GPU surface |
+| `tina_sample_null` | M6-A/M7-A/M7-B1 Headless 已实现 | EngineHost、PlatformFrame/Input/Action、单个 `IGameState`、Headless/Disabled/Null、300帧生命周期；Linux 10,000帧仍是上一批历史结果 | 无真实第三方 backend |
+| `tina_sample_platform` | M7-A + M7-B1 已实现 | 私有 GLFW `NO_API` 窗口、键鼠、resize/focus/close、committed text、WindowSurface handoff 与 NullRender | 不创建真实 bgfx GPU device |
 | `tina_sample_ui` | 未实现 | committed snapshot、dirty/Flex/PaintCache、中文、Modal、TextEdit、DisplayList | M7 内置 Cooked Font/Texture fixture |
 | `tina_sample_2d_infrastructure` | 未实现 | Camera2D、Sprite layer/order、world picking、UI overlay | M8 内置 Cooked Sprite fixture |
 | `tina_sample_3d_infrastructure` | 未实现 | Perspective、depth、canonical Mesh、Unlit pipeline | M9 procedural Cube |
 | `tina_sample_2d` | 未实现 | Cooked TileMap/Tileset、chunk、角色/Tile AABB、Box2D dynamic body、正式 UI | M10/M11 Catalog/Manifest |
 | `tina_sample_3d` | 未实现 | Cooked glTF -> Mesh/Material/Prefab、culling/instance | M10 Catalog/Manifest |
 
-M7 后续将建立私有最小 production Surface/UI Pass；M9 只扩展3D。游戏 sample source、Game SDK
+M7-B2 后续将建立私有最小 bgfx clear/present；M7-C/M7-D 建立 UI DisplayList/UI Pass，M9 只扩展3D。游戏 sample source、Game SDK
 header 和 UI public header 不出现 bgfx。结构化验收使用 backend-neutral 字段：
 
 ```text
@@ -333,6 +342,6 @@ ui.resources.current = 0
 Windows GLFW 可见门禁已经分别验证：中文 UTF-8 标题可见；Escape 经过 GLFW callback、归一化
 transition 和 Frame Action，在完成当前 Null submit/present 后退出；Alt+F4/原生 close 走
 `PrimaryWindowRequestedClose`，不重复发布 lifecycle/gameplay event。客户区空白是 NullRender 的预期，
-不能据此宣称 Native Surface、bgfx、2D、UI 或3D已完成。Debug/Release自动样例都以零延迟精确运行
+不能据此宣称真实 bgfx、2D、UI 或3D已完成。Debug/Release自动样例都以零延迟精确运行
 300帧、返回0，`IGameState::onExit` 与 `IGameApplication::onShutdown` 计数各为1，退出后无残留 Tina
 进程。

@@ -33,8 +33,9 @@ set(TINA_RUNTIME_TEST_SOURCES
     platform/header_isolation/WindowHeader.cpp
     platform/PlatformBackendTests.cpp
     render/header_isolation/RenderDeviceHeader.cpp
+    render/header_isolation/RenderSurfaceHeader.cpp
     render/NullRenderDeviceTests.cpp
-    runtime/header_isolation/EngineFactoriesHeader.cpp
+    runtime/header_isolation/EngineCompositionFactoriesHeader.cpp
     runtime/header_isolation/EngineHostHeader.cpp
     runtime/header_isolation/GameApplicationHeader.cpp
     runtime/header_isolation/InputActionsHeader.cpp
@@ -42,9 +43,12 @@ set(TINA_RUNTIME_TEST_SOURCES
     runtime/header_isolation/InputRoutingHeader.cpp
     runtime/header_isolation/PlatformEventDispatcherHeader.cpp
     runtime/header_isolation/PlatformEventsHeader.cpp
+    runtime/header_isolation/WindowSurfaceIntegrationHeader.cpp
     runtime/InputActionTests.cpp
     runtime/PlatformEventDispatcherTests.cpp
     runtime/RuntimeLifecycleTests.cpp
+    runtime/WindowSurfaceLeaseTests.cpp
+    runtime/WindowSurfaceRuntimeTests.cpp
     task/header_isolation/TaskSystemHeader.cpp
     task/TaskSystemTests.cpp
 )
@@ -60,7 +64,10 @@ set_source_files_properties(
 )
 
 target_compile_features(tina_tests PRIVATE cxx_std_23)
-target_include_directories(tina_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+target_include_directories(tina_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}/tests
+    ${PROJECT_SOURCE_DIR}/src/integration
+)
 target_link_libraries(tina_tests PRIVATE
     Tina::ProjectOptions
     Tina::Core
@@ -68,6 +75,7 @@ target_link_libraries(tina_tests PRIVATE
     Tina::Render
     Tina::Runtime
     Tina::Task
+    Tina::WindowSurfaceIntegration
     GTest::gtest_main
 )
 set_target_properties(tina_tests PROPERTIES CXX_EXTENSIONS OFF)

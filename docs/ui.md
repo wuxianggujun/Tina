@@ -1,6 +1,6 @@
 # 高性能自研 UI
 
-> 状态：vNext 目标契约已接受，M7 尚未实现。Tina UI 是游戏内 Retained UI，不是 Immediate UI，也不是桌面编辑器工具包。
+> 状态：vNext 目标契约已接受，M7-C 尚未实现。Tina UI 是游戏内 Retained UI，不是 Immediate UI，也不是桌面编辑器工具包。
 
 ## 当前 Legacy 基线
 

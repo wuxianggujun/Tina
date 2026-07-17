@@ -96,7 +96,7 @@ Poll 统一冻结 final snapshot；任一步失败由 scope rollback 逆序撤�
 
 明确拒绝把 Carbon 的原生 Win32 枚举、消息宏、raw native pointer、Blue/Python入口、全局 callback
 或全局 service 移入 Tina。Carbon 仓库不进入 Tina 构建、链接、提交或发布包；“成熟引擎运行多年”
-只说明这些问题值得研究，不能替代 Tina 的166项基础测试、17项 GLFW专项测试、样例运行和资源
+只说明这些问题值得研究，不能替代 Tina 的183项基础测试、22项 GLFW专项测试、样例运行和资源
 回收证据。
 
 ### Render：采用 Step 契约，缩小为显式 Pass

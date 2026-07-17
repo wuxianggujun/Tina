@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "GlfwBackendTestAccess.hpp"
+#include "WindowSurfaceLeaseAccess.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -45,6 +46,141 @@ TEST(GlfwBackendIntegrationTests, HiddenWindowPublishesCoherentPrimarySnapshot)
     auto stoppedPoll = (*backend)->pollFrame();
     ASSERT_FALSE(stoppedPoll.has_value());
     EXPECT_EQ(stoppedPoll.error().code, PlatformErrorCode::BackendStopped);
+}
+
+TEST(GlfwBackendIntegrationTests, SuspendedPacingWaitsForEventsAcrossThreeHundredFrames)
+{
+    auto backend = createGlfwPlatformBackend(hiddenWindowParams());
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+    ASSERT_TRUE(Detail::forceGlfwSuspendedWaitPathForTest(**backend, 0.000001).has_value());
+
+    constexpr u64 FrameCount = 300;
+    for (u64 frameIndex = 0; frameIndex < FrameCount; ++frameIndex)
+    {
+        auto poll = (*backend)->pollFrame();
+        ASSERT_TRUE(poll.has_value()) << poll.error().message;
+        ASSERT_TRUE(poll->isContinueFrame());
+    }
+
+    auto stats = Detail::glfwEventPumpStatsForTest(**backend);
+    ASSERT_TRUE(stats.has_value()) << stats.error().message;
+    EXPECT_EQ(stats->waitEventsTimeoutCalls, FrameCount);
+    EXPECT_EQ(stats->pollEventsCalls, 0U);
+    (*backend)->shutdown();
+}
+
+TEST(GlfwBackendIntegrationTests, IndependentFactoryDoesNotExposeWindowSurfaceIntegration)
+{
+    auto backend = createGlfwPlatformBackend(hiddenWindowParams());
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+
+    EXPECT_EQ(dynamic_cast<Integration::IWindowSurfacePlatformBackend*>(backend->get()), nullptr);
+    (*backend)->shutdown();
+}
+
+TEST(GlfwBackendIntegrationTests, WindowSurfaceFactoryDefersPublicationAndPinsPrivateNativeBinding)
+{
+    auto params = hiddenWindowParams();
+    params.primaryWindow.initiallyVisible = true;
+    auto backend = createGlfwWindowSurfacePlatformBackend(params);
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+
+    auto visibleBeforePublish = Detail::glfwWindowVisibleForTest(**backend);
+    ASSERT_TRUE(visibleBeforePublish.has_value()) << visibleBeforePublish.error().message;
+    EXPECT_FALSE(*visibleBeforePublish);
+
+    auto initialSurface = (*backend)->primaryWindowSurfaceSnapshot();
+    ASSERT_TRUE(initialSurface.has_value()) << initialSurface.error().message;
+    EXPECT_TRUE(initialSurface->surface.hasValue());
+    EXPECT_TRUE(initialSurface->sourceWindow.hasValue());
+    EXPECT_EQ(initialSurface->surfaceRevision, 1U);
+
+    auto lease = (*backend)->acquirePrimaryWindowSurfaceLease();
+    ASSERT_TRUE(lease.has_value()) << lease.error().message;
+    EXPECT_EQ(lease->surface(), initialSurface->surface);
+    auto duplicate = (*backend)->acquirePrimaryWindowSurfaceLease();
+    ASSERT_FALSE(duplicate.has_value());
+    EXPECT_EQ(duplicate.error().code, PlatformErrorCode::WindowSurfaceLeaseAlreadyAcquired);
+
+    auto binding = Integration::Detail::NativeWindowSurfaceLeaseAccess::decode(*lease);
+    ASSERT_TRUE(binding.has_value()) << binding.error().message;
+    EXPECT_NE(binding->nativeWindow, 0U);
+#if defined(_WIN32)
+    EXPECT_EQ(binding->kind, Integration::Detail::NativeWindowBindingKind::Win32);
+#endif
+
+    ASSERT_TRUE((*backend)->publishPrimaryWindow().has_value());
+    auto visibleAfterPublish = Detail::glfwWindowVisibleForTest(**backend);
+    ASSERT_TRUE(visibleAfterPublish.has_value()) << visibleAfterPublish.error().message;
+    EXPECT_TRUE(*visibleAfterPublish);
+
+    lease = {};
+    (*backend)->shutdown();
+}
+
+TEST(GlfwBackendDeathTest, ShuttingDownWithActiveWindowSurfaceLeaseTerminates)
+{
+    EXPECT_DEATH(
+        {
+            auto backend = createGlfwWindowSurfacePlatformBackend(hiddenWindowParams());
+            if (!backend.has_value())
+            {
+                std::abort();
+            }
+            auto lease = (*backend)->acquirePrimaryWindowSurfaceLease();
+            if (!lease.has_value())
+            {
+                std::abort();
+            }
+            (*backend)->shutdown();
+        },
+        ".*");
+}
+
+TEST(GlfwBackendIntegrationTests, WindowSurfaceSnapshotMatchesCommittedMetricsAndOnlyRevisesOnSurfaceFacts)
+{
+    auto backend = createGlfwWindowSurfacePlatformBackend(hiddenWindowParams());
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+    ASSERT_TRUE((*backend)->publishPrimaryWindow().has_value());
+
+    auto firstPoll = (*backend)->pollFrame();
+    ASSERT_TRUE(firstPoll.has_value()) << firstPoll.error().message;
+    const WindowFrameSnapshot* firstWindow = firstPoll->frame()->primaryWindow();
+    ASSERT_NE(firstWindow, nullptr);
+    auto firstSurface = (*backend)->primaryWindowSurfaceSnapshot();
+    ASSERT_TRUE(firstSurface.has_value()) << firstSurface.error().message;
+    EXPECT_EQ(firstSurface->sourceWindow, firstWindow->metrics.window);
+    EXPECT_EQ(firstSurface->sourceMetricsRevision, firstWindow->metrics.revision);
+    EXPECT_EQ(firstSurface->framebufferExtent, firstWindow->metrics.framebufferExtent);
+    EXPECT_EQ(firstSurface->contentScale, firstWindow->metrics.contentScale);
+
+    auto stablePoll = (*backend)->pollFrame();
+    ASSERT_TRUE(stablePoll.has_value()) << stablePoll.error().message;
+    auto stableSurface = (*backend)->primaryWindowSurfaceSnapshot();
+    ASSERT_TRUE(stableSurface.has_value()) << stableSurface.error().message;
+    EXPECT_EQ(stableSurface->surfaceRevision, firstSurface->surfaceRevision);
+
+    ASSERT_TRUE(Detail::resizeGlfwWindowForTest(**backend, {640, 360}).has_value());
+    bool revised = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while (!revised && std::chrono::steady_clock::now() < deadline)
+    {
+        auto poll = (*backend)->pollFrame();
+        ASSERT_TRUE(poll.has_value()) << poll.error().message;
+        const WindowFrameSnapshot* window = poll->frame()->primaryWindow();
+        ASSERT_NE(window, nullptr);
+        auto surface = (*backend)->primaryWindowSurfaceSnapshot();
+        ASSERT_TRUE(surface.has_value()) << surface.error().message;
+        EXPECT_EQ(surface->sourceMetricsRevision, window->metrics.revision);
+        EXPECT_EQ(surface->framebufferExtent, window->metrics.framebufferExtent);
+        revised = surface->surfaceRevision > firstSurface->surfaceRevision;
+        if (!revised)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
+    }
+    EXPECT_TRUE(revised);
+    (*backend)->shutdown();
 }
 
 TEST(GlfwBackendIntegrationTests, ReportsTheSelectedNativeWindowSystemForTheGate)

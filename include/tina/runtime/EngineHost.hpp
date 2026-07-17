@@ -12,7 +12,7 @@ class EngineHostImplementation;
 
 namespace Tina {
 
-struct EngineFactories;
+struct EngineCompositionFactories;
 class IGameApplication;
 
 class EngineHost final {
@@ -28,8 +28,8 @@ class EngineHost final {
     EngineHost(EngineHost&&) = delete;
     EngineHost& operator=(EngineHost&&) = delete;
 
-    [[nodiscard]] static Core::Result<std::unique_ptr<EngineHost>> Create(const EngineConfig& config,
-                                                                          EngineFactories factories) noexcept;
+    [[nodiscard]] static Core::Result<std::unique_ptr<EngineHost>>
+    Create(const EngineConfig& config, EngineCompositionFactories factories) noexcept;
 
     [[nodiscard]] Core::Result<RunExitReason> run(IGameApplication& gameApplication) noexcept;
 

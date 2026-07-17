@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/integration/WindowSurface.hpp>
 #include <tina/platform/PlatformBackend.hpp>
 
 namespace Tina::Platform {
@@ -12,5 +13,11 @@ namespace Tina::Platform {
 // implementation detail of the returned backend and never crosses this API.
 [[nodiscard]] Core::Result<std::unique_ptr<IPlatformBackend>>
 createGlfwPlatformBackend(const PlatformBackendCreateParams& params);
+
+// Creates the deferred-publication variant used by the desktop
+// WindowSurface+Render composition. The window remains hidden until
+// IWindowSurfacePlatformBackend::publishPrimaryWindow succeeds.
+[[nodiscard]] Core::Result<std::unique_ptr<Integration::IWindowSurfacePlatformBackend>>
+createGlfwWindowSurfacePlatformBackend(const PlatformBackendCreateParams& params);
 
 } // namespace Tina::Platform

@@ -10,7 +10,8 @@ add_library(tina_runtime STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/PlatformEvents.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/RunExitReason.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/RuntimeErrors.hpp
-    ${PROJECT_SOURCE_DIR}/include/tina/runtime/spi/EngineFactories.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/runtime/spi/EngineCompositionFactories.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/integration/WindowSurface.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/spi/InputRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/spi/PlatformEventDispatcher.hpp
     EngineConfig.cpp
@@ -37,6 +38,7 @@ target_link_libraries(tina_runtime
         Tina::Platform
         Tina::Task
         Tina::Render
+        Tina::WindowSurfaceIntegration
     PRIVATE
         Tina::ProjectOptions
 )

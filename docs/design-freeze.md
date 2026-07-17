@@ -139,7 +139,7 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 
 | 决策 | 状态 | 当前决定 | 影响 |
 | --- | --- | --- | --- |
-| Backend 组合 | [Accepted](adr/0003-backend-factories.md) | `Create(config, factories)`；M7-B 使用 Independent 或 WindowSurface 的 tagged composition，bootstrap 只选 factory、EngineHost 唯一创建/回滚 owner | 消除 Runtime 对具体 backend 依赖与 lease 接线歧义 |
+| Backend 组合 | [Accepted](adr/0003-backend-factories.md) | `Create(config, factories)`；M7-B1 已使用 Independent 或 WindowSurface 的 tagged composition，M7-B2 在该组合上接入私有 bgfx，bootstrap 只选 factory、EngineHost 唯一创建/回滚 owner | 消除 Runtime 对具体 backend 依赖与 lease 接线歧义 |
 | Runtime/State | [Accepted](adr/0014-runtime-phase-and-state.md) | `IGameApplication` lifecycle-only + `IGameState` 唯一帧入口；Frame Update 后提交状态命令 | 消除名称歧义、双帧入口与首帧 UI 时序冲突 |
 | RenderFrame/Surface 所有权 | [Accepted](adr/0020-window-surface-handoff.md) | bgfx backend 在 factory 成功后持有 move-only window surface lease，Runtime 持有 owning RenderFramePacket；Render SPI 只暴露纯 Tina view/pin sink | 消除 native 泄漏、依赖环、backend 越界与在途 UAF |
 | UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | 细粒度 dirty、每帧至多一次 layout、持久 PaintCache、committed hit/paint snapshot、相邻兼容 batching | 高性能且保持命中/透明顺序 |
@@ -197,6 +197,7 @@ P0/P1 决定，再加入对应模块和 benchmark；这样每个提交都可独�
 
 M7 不作为一个巨型提交：M7-A 先分为已完成的 PlatformFrame/Input correctness、Headless backend、
 PlatformFrameBuilder 直接注入和 Runtime test adapter，以及紧随其后的私有 GLFW `NO_API` 窗口 +
-NullRender 子切片；可复用 production-like PlatformBackend test double 随 GLFW adapter 测试加入；M7-B 再实现 Native Window Surface lease 与
-bgfx clear/present；M7-C 实现 UIContext、增量 layout/PaintCache 与 Null DisplayList；M7-D 实现
+NullRender 子切片；可复用 production-like PlatformBackend test double 随 GLFW adapter 测试加入；M7-B1 已实现
+Native Window Surface lease、surface snapshot、WindowSurface-aware composition 与 NullRender suspended 语义；
+M7-B2 再实现私有 bgfx clear/present；M7-C 实现 UIContext、增量 layout/PaintCache 与 Null DisplayList；M7-D 实现
 Label/Button/Modal + FreeType 可见样例；M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。

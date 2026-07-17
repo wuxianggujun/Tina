@@ -49,7 +49,7 @@ out\build\windows-msvc\bin\Debug\tina_tests.exe
 
 ## Windows vNext 最小构建
 
-该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A 的 `tina_core`、
+该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A/M7-B1 的 `tina_core`、
 `tina_platform`、`tina_task`、`tina_render`、`tina_runtime`、直接 GoogleTest 门禁与 Null 样例：
 
 ```powershell
@@ -57,7 +57,6 @@ cmake --preset windows-msvc-vnext
 cmake --build --preset windows-vnext-debug --target tina_tests tina_sample_null
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
-out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=10000
 ```
 
 当前最小图的唯一第三方测试依赖是 GoogleTest 1.17.0；它不进入或链接 GLFW、bgfx、EASTL、
@@ -67,7 +66,8 @@ Disabled TaskSystem 与 NullRenderDevice。
 ## Windows vNext GLFW Platform
 
 GLFW adapter 使用独立 build tree 和 vcpkg `platform-glfw` feature，不改变上面的 Null 依赖闭包。
-它只创建 `GLFW_NO_API` 窗口并组合 NullRender；当前不创建 Native Surface 或 bgfx device：
+它创建 `GLFW_NO_API` 窗口、发布 M7-B1 WindowSurface snapshot/lease，并组合 NullRender；当前不创建
+真实 bgfx device，私有 bgfx clear/present 是 M7-B2：
 
 ```powershell
 cmake --preset windows-msvc-vnext-platform
@@ -92,6 +92,9 @@ out\build\windows-msvc-vnext-platform\bin\Release\tina_sample_platform.exe `
 
 Windows 构建会把 GLFW runtime DLL 复制到对应 `bin/<Config>`。样例不带参数时以16 ms 的演示延迟
 显示1800帧；自动门禁必须显式使用 `--frame-delay-ms=0`，这条 sleep 路径不属于 benchmark。
+最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3；Debug 和 Release
+均已通过基础183/183、GLFW专项22/22、Null样例300帧和 WindowSurface GLFW 样例300帧。另有一次
+`TINA_BUILD_TESTING=OFF` 的 production-style GLFW 样例300帧验证，用来证明测试 target 关闭后样例仍能运行。
 
 ## Windows vNext Release
 
@@ -104,7 +107,6 @@ cmake --preset windows-msvc-vnext
 cmake --build --preset windows-vnext-release --target tina_tests tina_sample_null
 out\build\windows-msvc-vnext\bin\Release\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_sample_null.exe --frames=300
-out\build\windows-msvc-vnext\bin\Release\tina_sample_null.exe --frames=10000
 ```
 
 Legacy Release 仍可使用原有多配置构建目录：
@@ -191,16 +193,22 @@ xvfb-run -a ./out/build/linux-clang22-vnext-platform-sanitize/bin/tina_sample_pl
 
 基础 `tina_tests` 故意不设置 `LSAN_OPTIONS`。只有初始化 GLFW/X11 的两个进程使用
 `cmake/sanitizers/lsan-x11.supp` 中唯一的 `_XimOpenIM` 精确规则；它对应 Ubuntu 22.04 libX11
-关闭 XIM 后保留的 allocation（专项测试8次3264 B，样例1次408 B），不能扩展为宽泛 suppression。
+关闭 XIM 后保留的 allocation（专项测试12次4896 B，样例1次408 B），不能扩展为宽泛 suppression。
+
+以下是当前 M7-B1 Linux 运行门禁。GCC 13.4 X11 已通过基础测试183/183、GLFW专项22/22、
+Null样例300帧与GLFW样例300帧。Clang 22.1.8 X11 的 ASan/UBSan/LSan 图已通过基础测试
+183/183（无 suppression）、GLFW专项22/22、Null样例300帧与GLFW样例300帧；其中
+`_XimOpenIM` 精确 suppression 仅在 X11 专项测试命中12次/4896 B、GLFW样例命中1次/408 B。
 
 Wayland 使用单独的 `linux-gcc13-vnext-platform-wayland` 与
 `linux-clang22-vnext-platform-wayland-sanitize` preset，它们同时启用 manifest 的
 `platform-glfw;wayland` feature。GCC 13 双后端产物已在受控环境完成两条运行门禁：
 
 - Xvfb 为 Weston 9 `x11-backend` 提供 `wl_seat`，启动嵌套 Weston 后从子进程环境移除
-  `DISPLAY`，并断言 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND`；基础测试166/166、GLFW专项
-  17/17 与样例300帧通过；
-- 同一双后端产物随后在 Xvfb 下强制选择 X11，GLFW专项17/17与样例300帧再次通过。
+  `DISPLAY`，并断言 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND`；基础测试183/183、GLFW专项
+  22/22 与样例300帧通过；
+- 同一双后端产物随后移除 `WAYLAND_DISPLAY`，在 Xvfb 下强制选择 X11，基础测试183/183、
+  GLFW专项22/22与样例300帧通过。
 
 运行门禁需要真实 Wayland session，或像上述 Weston 一样显式提供 `wl_seat` 的受控
 compositor。纯 Weston headless 在没有 `wl_seat` 时会命中项目锁定 GLFW 3.4 的已知
@@ -208,11 +216,11 @@ compositor。纯 Weston headless 在没有 `wl_seat` 时会命中项目锁定 GL
 
 Clang 22 的同类双后端 sanitizer 产物也已完成门禁：
 
-- 基础 `tina_tests` 在 ASan/UBSan/LSan 下不使用任何 suppression，166/166通过；
-- 带 `wl_seat` 的嵌套 Weston 强制 Wayland 后，GLFW专项17/17与样例300帧通过，
+- 基础 `tina_tests` 在 ASan/UBSan/LSan 下不使用任何 suppression，183/183通过，Null样例300帧通过；
+- 带 `wl_seat` 的嵌套 Weston 强制 Wayland 后，GLFW专项22/22与样例300帧通过，
   `_XimOpenIM` 精确 suppression 匹配计数为0；
-- 同一产物在 Xvfb 下强制 X11 后，专项17/17与样例300帧通过；此路径仅
-  精确抑制 libX11 `_XimOpenIM`，专项8次/3264 B、样例1次/408 B。
+- 同一产物在 Xvfb 下强制 X11 后，GLFW专项22/22与样例300帧通过；此路径仅
+  精确抑制 libX11 `_XimOpenIM`，专项12次/4896 B、样例1次/408 B。
 
 Sanitizer 插桩覆盖 Tina 自有 target；由 vcpkg 提供的第三方 GLFW 本身未被
 sanitizer 插桩。因此该门禁证明 Tina 代码、边界交互和生命周期未被 sanitizer 报错，

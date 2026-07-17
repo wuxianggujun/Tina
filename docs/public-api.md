@@ -2,7 +2,8 @@
 
 > 状态：分批实施。Core、M6-A 生命周期、M7-A Platform/Input 与首个私有 GLFW Window/Keyboard/
 > Pointer/committed text adapter 已落地；完整状态栈、worker、Scene/Asset/UI/Audio、Desktop bootstrap、
-> Native Surface/bgfx、production Gamepad、完整 DPI 与 Windows IMM32 仍是后续契约。
+> M7-B1 Native Surface handoff 已落地；真实 bgfx device、production Gamepad、完整 DPI 与
+> Windows IMM32 仍是后续契约。
 
 ## 公开类型命名规则
 
@@ -27,7 +28,7 @@ Tina 不把所有可链接 header 都称为“用户 API”：
 | 层级 | 面向对象 | 主要类型 |
 | --- | --- | --- |
 | Game SDK | 普通游戏代码 | `IGameApplication`、`IGameState`、`GameStateCommands`、World/Camera/component、AssetHandle、UI Widget |
-| Engine Module SPI | Tina 模块、backend adapter 和测试 | EngineFactories、PlatformFrameView、RenderDevice typed handle/descriptor、RenderFrame、FramePinSink、Pass Scheduler |
+| Engine Module SPI | Tina 模块、backend adapter 和测试 | EngineCompositionFactories、PlatformFrameView、RenderDevice typed handle/descriptor、RenderFrame、FramePinSink、Pass Scheduler |
 | Backend Private | 具体 adapter | GLFW、bgfx/bx/bimg、FreeType、miniaudio、EnTT 等第三方类型 |
 
 当前 Game SDK 只实现 `EngineHost`、`IGameApplication`、单个 `IGameState`、`GameStatePolicy`、
@@ -88,15 +89,17 @@ class EngineHost final {
 public:
     [[nodiscard]] static Core::Result<std::unique_ptr<EngineHost>> Create(
         const EngineConfig& config,
-        EngineFactories factories) noexcept;
+        EngineCompositionFactories factories) noexcept;
 
     [[nodiscard]] Core::Result<RunExitReason> run(IGameApplication& gameApplication) noexcept;
 };
 ```
 
-`EngineFactories` 是高级集成/测试 SPI。当前 `tina_sample_null` 显式注入 Clock、Headless Platform、
-Disabled TaskSystem 和 NullRenderDevice；`tina_sample_platform` 只把 Platform factory 换成私有 GLFW
-adapter，仍使用 NullRender。`EngineHost` 由 main 的 `unique_ptr` 唯一拥有。
+`EngineCompositionFactories` 是高级集成/测试 SPI。当前 `tina_sample_null` 显式注入 Clock、Headless
+Platform、Disabled TaskSystem 和 NullRenderDevice；`tina_sample_platform` 只把 Platform factory
+换成私有 GLFW adapter，仍使用 NullRender。WindowSurface 组合已通过
+`WindowSurfacePlatformRenderFactories` 支持 lease/snapshot/deferred publish handoff，但真实 bgfx
+device 尚未实现。`EngineHost` 由 main 的 `unique_ptr` 唯一拥有。
 
 Create、run 与析构属于同一 owner-thread 生命周期：跨线程 `run` 返回 `WrongOwnerThread` 且不
 消耗 run-once；跨线程析构在调用 native backend 前 `terminate`。Game SDK 不提供把 EngineHost
@@ -403,14 +406,14 @@ Gameplay/Domain/异步模块事件，当前尚未实现，也不复用 dispatche
 TaskSystem 没有等待过程，因此 shutdown deadline 只完成配置校验；有界 Worker 切片必须在它
 真正驱动“请求停止 → 有界等待 → fatal-stop”后才能宣称 deadline 已实施。
 
-## EngineFactories SPI
+## EngineCompositionFactories SPI
 
-`EngineFactories` 只属于组合/测试 SPI，是一次性移动值，不是运行期 registry。M6-A 包含
-MonotonicClock、Platform、TaskSystem、RenderDevice 四个 move-only factory；每个 type-erased
-factory 接受窄 CreateParams 并返回 `Result<unique_ptr<Interface>>`，成功即由 EngineHost 接管并
-登记逆操作。缺少任一 factory 会在调用任何 factory 前失败。它是当前已实现的无 Surface 依赖
-最小接口，M7-B 会由下面的 tagged `EngineCompositionFactories` 取代，而不是再加一个可能同时填写的
-windowed render slot。
+`EngineCompositionFactories` 只属于组合/测试 SPI，是一次性移动值，不是运行期 registry。它包含
+MonotonicClock、TaskSystem 和 tagged `platformRender`。`platformRender` 在
+`IndependentPlatformRenderFactories` 与 `WindowSurfacePlatformRenderFactories` 之间二选一，避免同一
+次创建同时填写无 Surface Render 与 windowed Render slot。每个 type-erased factory 接受窄
+CreateParams 并返回 `Result<unique_ptr<Interface>>`，成功即由 EngineHost 接管并登记逆操作。
+缺少任一必要 factory 会在调用任何 factory 前失败。
 
 - Runtime 不依赖具体 GLFW/bgfx/miniaudio factory；
 - `tina_bootstrap_desktop` 的一个 composition translation unit 选择真实 adapter；
@@ -421,19 +424,22 @@ windowed render slot。
 
 ### M7-B Window Surface integration SPI
 
-Windowed production 组合不能继续使用空 `RenderDeviceCreateParams`。M7-B 将在不安装到
+Windowed production 组合不能继续使用空 `RenderDeviceCreateParams`。M7-B1 已在不安装到
 Game SDK 的 integration SPI 中实现：
 
 - `EngineCompositionFactories::platformRender` 是二选一 tagged union：
   `IndependentPlatformRenderFactories{PlatformBackendFactory, RenderDeviceFactory}` 用于
   Headless+Null/M7-A GLFW+Null；
-  `WindowSurfacePlatformRenderFactories{WindowedPlatformBackendFactory,
-  PlatformAwareRenderFactory}` 用于 GLFW+bgfx；
-- `IWindowedPlatformBackend` 同时实现 `IPlatformBackend` 和下面的 provider，因此 EngineHost 不做
-  RTTI/native escape；
-- `IPrimaryWindowSurfaceProvider::acquirePrimarySurfaceLease()` 返回 move-only
-  `NativeWindowSurfaceLease`；
-- `PlatformAwareRenderFactory` 在创建期接收 lease rvalue，成功后由具体 Render backend
+  `WindowSurfacePlatformRenderFactories{WindowSurfacePlatformBackendFactory,
+  WindowSurfaceRenderDeviceFactory}` 用于 GLFW+surface-aware Render；
+- `IWindowSurfacePlatformBackend` 同时实现 `IPlatformBackend` 和 primary-surface provider 契约，因此
+  EngineHost 不做 RTTI/native escape；
+- `acquirePrimaryWindowSurfaceLease()` 返回 move-only `NativeWindowSurfaceLease`；
+- `primaryWindowSurfaceSnapshot()` 返回最近一次由 committed Platform metrics 派生的 surface snapshot，
+  Runtime 转换为 `RenderSurfaceState` 后放入 `RenderDeviceCreateParams::initialPrimaryWindowSurface`
+  与每帧 `RenderFrame::primaryWindowSurface`；
+- `publishPrimaryWindow()` 只在 surface-aware RenderDevice 创建成功后执行，发布失败会触发逆序回滚；
+- `WindowSurfaceRenderDeviceFactory` 在创建期接收 lease，成功后由具体 Render backend
   持有，失败时在 factory 内完整回滚；
 - lease 只有 `tina_render_bgfx` 私有 decoder 可解析，没有 public native/`void*` getter；
 - `WindowSurfaceId` 与 `WindowSurfaceSnapshot` 是 Platform/Runtime integration 的清晰名称；
@@ -443,7 +449,8 @@ Game SDK 的 integration SPI 中实现：
 
 Desktop bootstrap 只构造 tagged factory bundle，不在外部创建或持有 owner；EngineHost 统一执行
 Clock → Platform → Task → lease（仅 WindowSurface）→ Render 的事务和逆序回滚。Null/Headless 与
-M7-A GLFW+Null 组合不构造伪 lease，GLFW/bgfx 失败也不得静默降级 Null。完整 factory
+M7-A GLFW+Null 组合不构造伪 lease，GLFW/bgfx 失败也不得静默降级 Null。M7-B1 覆盖 lease/
+snapshot/deferred publish/runtime handoff；M7-B2 才实现真实 `tina_render_bgfx` device。完整 factory
 签名与 Surface state machine 见 [ADR 0020](adr/0020-window-surface-handoff.md)。
 
 ## Handle、借用与 API 可见性
@@ -455,7 +462,7 @@ M7-A GLFW+Null 组合不构造伪 lease，GLFW/bgfx 失败也不得静默降级 
 | `EngineHost` | M6-A 已实现 | Game SDK | main `unique_ptr`，直到 shutdown | Create/run `Result` |
 | 最小 Phase Context | M6-A 已实现 | Game SDK | Runtime stack，当前 callback | callback `Status` |
 | `WindowId` | M7-A generation 类型、Headless 契约与生产 GLFW registry 已实现 | Game SDK / Module SPI | GLFW backend-owned Window registry；首期一个 primary slot | invalid/stale/wrong owner/identity mismatch |
-| `WindowSurfaceId` | M7-B 目标 | Runtime integration SPI | Platform surface registry generation | invalid/stale/wrong owner/revision |
+| `WindowSurfaceId` | M7-B1 已实现 | Runtime integration SPI | Platform surface registry generation | invalid/stale/wrong owner/revision |
 | `UINodeId` | M7-C 目标 | Game SDK | Window-owned UI registry generation + WindowId owner | invalid/stale/wrong owner |
 | `EntityId` | M8 目标 | Game SDK | World registry generation + owner | invalid/stale/wrong owner |
 | `AssetHandle<T>` | M10 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
@@ -514,5 +521,5 @@ M6-A/M7-A Headless 内核与首个 GLFW adapter 已验证：
   [测试文档](testing.md) 维护。
 
 后续验收：`tina_game_api_consumer`/Game SDK umbrella、完整 forbidden-token/dependency-closure、
-`Desktop::CreateEngine`、Native Surface/bgfx、production Gamepad、完整 DPI/Windows IMM32，以及只使用
+`Desktop::CreateEngine`、真实 bgfx device、production Gamepad、完整 DPI/Windows IMM32，以及只使用
 Game SDK 运行 UI/2D/3D 产品样例。

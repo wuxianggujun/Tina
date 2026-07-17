@@ -1,6 +1,8 @@
 #include <tina/core/error/Error.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
+#include <tina/integration/WindowSurface.hpp>
 #include <tina/platform/glfw/GlfwPlatformFactory.hpp>
+#include <tina/render/RenderDevice.hpp>
 #include <tina/render/null/NullRenderDeviceFactory.hpp>
 #include <tina/runtime/EngineConfig.hpp>
 #include <tina/runtime/EngineHost.hpp>
@@ -8,7 +10,7 @@
 #include <tina/runtime/GameState.hpp>
 #include <tina/runtime/PlatformEvents.hpp>
 #include <tina/runtime/RunExitReason.hpp>
-#include <tina/runtime/spi/EngineFactories.hpp>
+#include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/task/disabled/DisabledTaskSystemFactory.hpp>
 
 #include <charconv>
@@ -253,15 +255,70 @@ class PlatformSampleApplication final : public Tina::IGameApplication {
     std::optional<Tina::PlatformEventSubscription> platformEvents_;
 };
 
-[[nodiscard]] Tina::EngineFactories createEngineFactories()
+// M7-B1 keeps this decorator sample-local. It exercises the production
+// WindowSurface composition while NullRender remains the active backend. The
+// member order guarantees that the RenderDevice dies before its native lease.
+class SurfacePinnedNullRenderDevice final : public Tina::Render::IRenderDevice {
+  public:
+    SurfacePinnedNullRenderDevice(Tina::Integration::NativeWindowSurfaceLease surfaceLease,
+                                  std::unique_ptr<Tina::Render::IRenderDevice> renderDevice) noexcept
+        : surfaceLease_(std::move(surfaceLease)), renderDevice_(std::move(renderDevice))
+    {
+    }
+
+    [[nodiscard]] Tina::Core::Result<Tina::Render::RenderFrameSubmission>
+    submitFrame(const Tina::Render::RenderFrame& frame) override
+    {
+        return renderDevice_->submitFrame(frame);
+    }
+
+    [[nodiscard]] Tina::Core::Status present() override
+    {
+        return renderDevice_->present();
+    }
+
+    [[nodiscard]] Tina::Render::RenderStatistics statistics() const noexcept override
+    {
+        return renderDevice_->statistics();
+    }
+
+    void shutdown() noexcept override
+    {
+        renderDevice_->shutdown();
+    }
+
+  private:
+    Tina::Integration::NativeWindowSurfaceLease surfaceLease_;
+    std::unique_ptr<Tina::Render::IRenderDevice> renderDevice_;
+};
+
+[[nodiscard]] Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>>
+createSurfacePinnedNullRenderDevice(const Tina::Render::RenderDeviceCreateParams& params,
+                                    Tina::Integration::NativeWindowSurfaceLease surfaceLease)
 {
-    return Tina::EngineFactories{
+    auto renderDevice = Tina::Render::createNullRenderDevice(params);
+    if (!renderDevice)
+    {
+        return std::unexpected(std::move(renderDevice.error()));
+    }
+
+    std::unique_ptr<Tina::Render::IRenderDevice> pinnedRenderDevice =
+        std::make_unique<SurfacePinnedNullRenderDevice>(std::move(surfaceLease), std::move(*renderDevice));
+    return pinnedRenderDevice;
+}
+
+[[nodiscard]] Tina::EngineCompositionFactories createEngineFactories()
+{
+    return Tina::EngineCompositionFactories{
         .createMonotonicClock = []() -> Tina::Core::Result<std::unique_ptr<Tina::Core::IMonotonicClock>> {
             return std::unique_ptr<Tina::Core::IMonotonicClock>{std::make_unique<Tina::Core::SteadyMonotonicClock>()};
         },
-        .createPlatformBackend = Tina::Platform::createGlfwPlatformBackend,
         .createTaskSystem = Tina::Task::createDisabledTaskSystem,
-        .createRenderDevice = Tina::Render::createNullRenderDevice,
+        .platformRender =
+            Tina::WindowSurfacePlatformRenderFactories{
+                .createWindowSurfacePlatformBackend = Tina::Platform::createGlfwWindowSurfacePlatformBackend,
+                .createWindowSurfaceRenderDevice = createSurfacePinnedNullRenderDevice,
+            },
     };
 }
 

@@ -18,5 +18,9 @@ inline constexpr Core::ErrorCode WindowCreationFailed{Core::ErrorDomain::Platfor
 inline constexpr Core::ErrorCode BackendOperationFailed{Core::ErrorDomain::Platform, 12};
 inline constexpr Core::ErrorCode CallbackFrameAssemblyFailed{Core::ErrorDomain::Platform, 13};
 inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::Platform, 14};
+inline constexpr Core::ErrorCode WindowSurfaceUnavailable{Core::ErrorDomain::Platform, 15};
+inline constexpr Core::ErrorCode WindowSurfaceLeaseAlreadyAcquired{Core::ErrorDomain::Platform, 16};
+inline constexpr Core::ErrorCode WindowSurfaceRevisionExhausted{Core::ErrorDomain::Platform, 17};
+inline constexpr Core::ErrorCode WindowPublicationFailed{Core::ErrorDomain::Platform, 18};
 
 } // namespace Tina::Platform::PlatformErrorCode

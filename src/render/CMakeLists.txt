@@ -2,7 +2,10 @@ add_library(tina_render STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderDevice.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderFrame.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/render/RenderSurface.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/null/NullRenderDeviceFactory.hpp
+    RenderSurfaceStateTracker.cpp
+    RenderSurfaceStateTracker.hpp
     null/NullRenderDevice.cpp
 )
 add_library(Tina::Render ALIAS tina_render)

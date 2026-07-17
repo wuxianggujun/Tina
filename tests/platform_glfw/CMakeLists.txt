@@ -7,10 +7,12 @@ add_executable(tina_platform_glfw_tests
 target_compile_features(tina_platform_glfw_tests PRIVATE cxx_std_23)
 target_include_directories(tina_platform_glfw_tests PRIVATE
     ${PROJECT_SOURCE_DIR}/src/platform/glfw
+    ${PROJECT_SOURCE_DIR}/src/integration
 )
 target_link_libraries(tina_platform_glfw_tests PRIVATE
     Tina::ProjectOptions
     Tina::PlatformGlfw
+    Tina::WindowSurfaceIntegration
     GTest::gtest_main
     glfw
 )

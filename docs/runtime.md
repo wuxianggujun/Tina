@@ -27,8 +27,9 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
 - `FixedStepAccumulator` 已明确真实 delta 钳制、gameplay time scale、variable `updateDelta`、
   固定步计划、最多4步、超额整步丢弃与 interpolation；
 - vNext 公共头位于 `include/tina`，Legacy 时间类型只留在 `src/core` 兼容层；
-- `EngineHost::Create(config, factories)` 已按 Clock → Platform → Task → Render 创建模块，任一步
-  失败都逆序回滚；销毁顺序固定为 Render → Task → Platform → Clock；Create/run 均为
+- `EngineHost::Create(config, factories)` 已按 Clock → Platform → Task → Render 创建模块；WindowSurface
+  分支在 Task 后获取 primary window lease/snapshot，Render 成功后才发布窗口。任一步失败都逆序
+  回滚；销毁顺序固定为 Render → Task → Platform → Clock；Create/run 均为
   `noexcept` 边界，普通异常转换为结构化 Error，硬 OOM 若连 Error 都无法构造则 fatal；
 - `EngineHost::Create`、`run` 与销毁组成同一个 owner-thread 生命周期。跨线程 `run` 返回
   `WrongOwnerThread` 且不消耗 run-once；跨线程销毁会在调用任何 native API 前终止进程，不能
@@ -47,8 +48,10 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
 - Headless Platform、Disabled TaskSystem、生命周期级 NullRenderDevice 已分别位于
   `tina_platform`、`tina_task`、`tina_render`，`tina_runtime` 只依赖 Tina SPI；
 - 可选 `tina_platform_glfw` 通过无第三方类型的 factory SPI 接入 Runtime，GLFW 只在 adapter
-  实现层可见；`tina_sample_platform` 仍显式注入 GLFW + DisabledTask + NullRender，尚未实现
-  面向普通游戏的 Desktop bootstrap；
+  实现层可见；M7-B1 的 WindowSurface 组合已接入 `IWindowSurfacePlatformBackend`、
+  `acquirePrimaryWindowSurfaceLease()`、`primaryWindowSurfaceSnapshot()` 与
+  `publishPrimaryWindow()`；`tina_sample_platform` 仍显式注入 GLFW + DisabledTask + NullRender，
+  尚未实现面向普通游戏的 Desktop bootstrap；
 - 当前帧循环为 Poll Platform → frame/payload/capacity/sequence 预校验 → Platform lifecycle dispatch
   → Action Mapping → Fixed Update（0..4）→ Frame Update → Render Scene Extraction → UI Update
   → Null submit → present；`requestExitAfterFrame()` 会完成当帧 submit/present 后退出；
@@ -58,14 +61,17 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
 当前 Null 与 GLFW+Null 两条路径证明生命周期、回滚、固定步、Platform/Input、真实窗口与空提交契约。
 GLFW close 在 Poll 中只返回不可取消的 tagged outcome，并丢弃尚未提交的 partial frame；Runtime 在
 任何 Game callback 前停止。Escape 则经 Frame Action 调用 `requestExitAfterFrame()`，完成当帧
-Null submit/present 后退出。当前实现没有完整
+Null submit/present 后退出。M7-B1 已有 backend-neutral Native Surface handoff、初始/逐帧
+`RenderSurfaceState` 和 Suspended 帧 `SkippedSuspendedSurface` 结果；Runtime 固定 source window identity，
+拒绝 metrics revision 回退、surface facts 在旧 metrics revision 上变化，以及 surface revision 跳号/回退。
+当前实现仍没有完整
 GameStateStack/commands、CPU/IO worker、通用 Runtime Event Queue、Pass Scheduler、RenderFramePacket，
-也没有 Scene、Asset、UI、Audio、Native Surface 或真实 Render backend；这些能力不能从同名 Phase
-Context 或真实 GLFW 窗口的存在推断为已经实现。
+也没有 Scene、Asset、UI、Audio 或真实 bgfx Render backend；这些能力不能从同名 Phase Context 或
+真实 GLFW 窗口的存在推断为已经实现。
 
 ## 完整 vNext 所有权目标
 
-vNext 以 `EngineHost::Create(const EngineConfig&, EngineFactories)` 建立唯一组合根；普通游戏通过
+vNext 以 `EngineHost::Create(const EngineConfig&, EngineCompositionFactories)` 建立唯一组合根；普通游戏通过
 `Desktop::CreateEngine(config)` 使用隐藏具体 backend 的默认组合。成功创建后 EngineHost 接管
 所有权，Runtime 本身不依赖具体 backend。`IGameApplication` 只创建初始 `IGameState` 和接收
 最终 shutdown；逐帧 Fixed Update/Frame Update/Render Scene Extraction/UI Update 只由

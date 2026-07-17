@@ -112,19 +112,19 @@ M7 分为五个独立提交，不将 GLFW、bgfx、FreeType、IMM32 和完整 UI
 ### M7-A PlatformFrame 与 Input correctness
 
 实施状态（2026-07-17）：Headless Platform/Input 内核与私有 GLFW `NO_API` desktop adapter 已按
-两个独立提交落地。基础测试固定166项，GLFW adapter 专项固定17项，必须作为两个 executable
+两个独立提交落地；随着 M7-B1 WindowSurface 覆盖加入，基础测试固定183项，GLFW adapter 专项固定22项，必须作为两个 executable
 分别直接运行；Null sample 继续覆盖300帧和10,000帧，`tina_sample_platform` 覆盖真实窗口300帧。
-Linux GCC 13 X11 已通过166/166、17/17与样例300帧。Clang X11 对libX11 `_XimOpenIM` 的XIM
-retention使用唯一精确 LSan suppression 后，基础166/166（无 suppression）、专项17/17
-（8次3264 B）与样例300帧（1次408 B）均通过。Windows MSVC 2026 Debug/Release也均
-通过166/166、17/17与零延迟样例300帧。GCC 13 X11/Wayland 双后端产物也已通过：带
-`wl_seat` 的嵌套 Weston 9 中基础166/166、专项17/17与样例300帧通过，并在移除
+Linux GCC 13.4 X11 已通过183/183、22/22，Null/GLFW样例各300帧。Clang X11 对libX11
+`_XimOpenIM` 的XIM retention使用唯一精确 LSan suppression 后，基础183/183（无 suppression）、
+专项22/22（12次/4896 B），Null/GLFW样例各300帧且GLFW样例命中1次/408 B。Windows MSVC 2026
+Debug/Release也均通过183/183、22/22与Null/GLFW样例各300帧。GCC 13 X11/Wayland 双后端
+产物也已通过：带 `wl_seat` 的嵌套 Weston 9 中基础183/183、专项22/22与样例300帧通过，并在移除
 `DISPLAY` 后断言 GLFW 实际选择 Wayland；同一产物强制 X11 后专项与样例复验通过。
 纯 Weston headless 无 `wl_seat` 会触发锁定 GLFW 3.4 的已知初始化崩溃，不是 Tina 回归，
 也不在当前支持范围。Clang 22 X11/Wayland 双后端 sanitizer 产物也已通过：基础
-166/166无 suppression；Wayland 下专项17/17与样例300帧通过且 `_XimOpenIM` 匹配为0；
-同一产物强制 X11 后17/17与300帧通过，仅使用精确 `_XimOpenIM` 抑制（专项
-8次/3264 B、样例1次/408 B）。该门禁未对 vcpkg 第三方 GLFW 本身插桩，不宣称完整
+183/183无 suppression且Null样例300帧通过；Wayland 下专项22/22与样例300帧通过且
+`_XimOpenIM` 匹配为0；同一产物强制 X11 后22/22与300帧通过，仅使用精确 `_XimOpenIM`
+抑制（专项12次/4896 B、样例1次/408 B）。该门禁未对 vcpkg 第三方 GLFW 本身插桩，不宣称完整
 覆盖 GLFW 内部实现。
 
 - **已完成**：`tina_platform` 实现 generation `WindowId`、`PrimaryWindowConfig`、`WindowMetricsSnapshot`、
@@ -147,16 +147,33 @@ retention使用唯一精确 LSan suppression 后，基础166/166（无 suppressi
   当前帧后退出，`--frames=N --frame-delay-ms=0` 可自动退出；GLFW失败不静默降级 Headless；
 - **已完成**：公共 factory header 不含 GLFW/native 类型，Null 构建图不加入或链接 GLFW；
   `tina_platform_glfw_tests` 与基础 `tina_tests` 分离，不使用 CTest；
-- 本切片不实现 Native Surface/bgfx、UI tree、FreeType、IMM32、production GLFW Gamepad adapter/
-  registry/navigation、OS Pointer Capture、通用 Gameplay EventBus 或多窗口。下一实现切片为 M7-B。
+- 本切片当时不实现 WindowSurface handoff 或真实 bgfx、UI tree、FreeType、IMM32、production GLFW Gamepad adapter/
+  registry/navigation、OS Pointer Capture、通用 Gameplay EventBus 或多窗口。WindowSurface handoff 已由
+  M7-B1 完成；真实 bgfx clear/present 仍是 M7-B2。
 
 ### M7-B Native Window Surface 与最小 bgfx
 
-- 按 ADR 0020 实现 move-only `NativeWindowSurfaceLease` 与内部
-  `PlatformAwareRenderFactory`；只有 `tina_render_bgfx` 私有 decoder 可解析 native payload；
-- 实现 Creating → Active ↔ Suspended → Closing → Draining → Closed，独立
-  `engineFrameIndex`/`submissionIndex`，覆盖 resize revision、300 suspended frames 与 drain 顺序；
-- 建立 `tina_bootstrap_desktop` 和私有最小 bgfx clear/present；Game SDK/Phase Context 不暴露
+实施状态（2026-07-17）：M7-B1 private WindowSurface handoff 已完成；真实 bgfx clear/present 拆到
+M7-B2。Windows 最新门禁在 MSVC 19.50.35717 与 CMake 4.2.3 下通过 Debug/Release 基础183/183、
+GLFW专项22/22、Null样例300帧、WindowSurface GLFW样例300帧；`TINA_BUILD_TESTING=OFF` 的 production-style
+GLFW样例300帧也已通过。Linux M7-B1 门禁已在 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer、
+GCC 13 与 Clang 22 X11/Wayland 双后端通过基础183/183、GLFW专项22/22和300帧样例；
+Clang 基础测试无 suppression，Wayland匹配0，X11仅精确抑制 `_XimOpenIM` 的第三方 retention。
+
+- **已完成 M7-B1**：按 ADR 0020 实现 move-only `NativeWindowSurfaceLease`、generation
+  `WindowSurfaceId`、backend-neutral `RenderSurfaceState`、`WindowSurfaceSnapshot` 与
+  WindowSurface-aware tagged composition；公共接口不暴露 native、`void*`、GLFW 或 bgfx getter；
+- **已完成 M7-B1**：只有私有 decoder 能解析 native payload；Win32、X11、Wayland native bridge
+  分别位于私有 TU；Platform/Render 通过 `IndependentPlatformRenderFactories` 与
+  `WindowSurfacePlatformRenderFactories` 明确组合；
+- **已完成 M7-B1**：EngineHost 创建顺序为 Clock → Platform → Task → lease → Render → publish
+  window；Render 创建失败和窗口 publish 失败均逆序释放 lease 后再销毁 Platform；
+- **已完成 M7-B1**：surface snapshot 只从 committed Platform metrics 派生，resize/content-scale/
+  suspend 改变才把 `surfaceRevision` 精确增加1；Runtime 与 Render 分别拒绝 source revision 未前进、
+  surface revision 跳号/回退、事实未变却递增，以及本帧 Window metrics、revision、identity 不一致；
+- **已完成 M7-B1**：NullRender 分离 `engineFrameIndex` 与 `submissionIndex`；Suspended 帧继续进入
+  Render maintenance，但不 Present、不增加 submission index；
+- **M7-B2**：建立 `tina_bootstrap_desktop` 和私有最小 bgfx clear/present；Game SDK/Phase Context 不暴露
   RenderDevice/native/bgfx，Engine Module SPI 只暴露纯 Tina Render 类型。
 
 ### M7-C 增量 UI Core 与 Null DisplayList

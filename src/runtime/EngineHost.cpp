@@ -4,7 +4,7 @@
 #include <tina/render/RenderDevice.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
-#include <tina/runtime/spi/EngineFactories.hpp>
+#include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/runtime/spi/InputRouting.hpp>
 #include <tina/runtime/spi/PlatformEventDispatcher.hpp>
 #include <tina/task/TaskSystem.hpp>
@@ -12,6 +12,8 @@
 #include "input/ActionMapper.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <concepts>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -267,11 +269,132 @@ template <typename Transition, typename IsReset>
     return Core::success();
 }
 
+[[nodiscard]] Core::Status validateWindowSurfaceSnapshotStructure(const Integration::WindowSurfaceSnapshot& snapshot)
+{
+    if (!snapshot.surface.hasValue() || !snapshot.sourceWindow.hasValue() || snapshot.sourceMetricsRevision == 0 ||
+        snapshot.surfaceRevision == 0)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "A WindowSurface snapshot contains an invalid identity or revision");
+    }
+    if (!std::isfinite(snapshot.contentScale.x) || !std::isfinite(snapshot.contentScale.y) ||
+        snapshot.contentScale.x <= 0.0F || snapshot.contentScale.y <= 0.0F)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "A WindowSurface snapshot contains an invalid content scale");
+    }
+    const bool zeroExtent = snapshot.framebufferExtent.width == 0 || snapshot.framebufferExtent.height == 0;
+    if (zeroExtent && !snapshot.suspended)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "A zero-sized WindowSurface must be suspended");
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Core::Status
+validateWindowSurfaceSnapshotForFrame(const Integration::WindowSurfaceSnapshot& snapshot,
+                                      const Platform::PlatformFrameView& frame,
+                                      const std::optional<Integration::WindowSurfaceSnapshot>& previous)
+{
+    if (auto status = validateWindowSurfaceSnapshotStructure(snapshot); !status)
+    {
+        return status;
+    }
+
+    const Platform::WindowFrameSnapshot* primaryWindow = frame.primaryWindow();
+    if (primaryWindow == nullptr || frame.windows().size() != 1)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "A WindowSurface composition requires exactly one committed primary window");
+    }
+
+    const Platform::WindowMetricsSnapshot& metrics = primaryWindow->metrics;
+    const bool expectedSuspended =
+        metrics.minimized || metrics.framebufferExtent.width == 0 || metrics.framebufferExtent.height == 0;
+    if (snapshot.sourceWindow != metrics.window || snapshot.sourceMetricsRevision != metrics.revision ||
+        snapshot.framebufferExtent != metrics.framebufferExtent || snapshot.contentScale != metrics.contentScale ||
+        snapshot.suspended != expectedSuspended)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "WindowSurface state does not match the committed Platform metrics");
+    }
+
+    if (!previous.has_value())
+    {
+        return Core::success();
+    }
+    if (snapshot.surface != previous->surface || snapshot.surfaceRevision < previous->surfaceRevision)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "WindowSurface identity changed or its revision moved backward");
+    }
+    if (snapshot.sourceWindow != previous->sourceWindow)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "WindowSurface source window identity changed");
+    }
+    if (snapshot.sourceMetricsRevision < previous->sourceMetricsRevision)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "WindowSurface source metrics revision moved backward");
+    }
+
+    const bool surfaceFactsChanged = snapshot.framebufferExtent != previous->framebufferExtent ||
+                                     snapshot.contentScale != previous->contentScale ||
+                                     snapshot.suspended != previous->suspended;
+    if (surfaceFactsChanged && snapshot.sourceMetricsRevision == previous->sourceMetricsRevision)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "WindowSurface facts changed without a new source metrics revision");
+    }
+
+    const bool canAdvanceSurfaceRevision =
+        previous->surfaceRevision != (std::numeric_limits<u64>::max)();
+    const bool surfaceRevisionAdvancedExactlyOnce =
+        canAdvanceSurfaceRevision && snapshot.surfaceRevision == previous->surfaceRevision + 1;
+    if ((surfaceFactsChanged && !surfaceRevisionAdvancedExactlyOnce) ||
+        (!surfaceFactsChanged && snapshot.surfaceRevision != previous->surfaceRevision))
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "WindowSurface revision must advance exactly once for each committed state change");
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Render::RenderSurfaceState
+toRenderSurfaceState(const Integration::WindowSurfaceSnapshot& snapshot) noexcept
+{
+    return Render::RenderSurfaceState{
+        .surface =
+            {
+                .owner = snapshot.surface.owner().value(),
+                .index = snapshot.surface.index(),
+                .generation = snapshot.surface.generation(),
+            },
+        .framebufferExtent =
+            {
+                .width = snapshot.framebufferExtent.width,
+                .height = snapshot.framebufferExtent.height,
+            },
+        .contentScale =
+            {
+                .x = snapshot.contentScale.x,
+                .y = snapshot.contentScale.y,
+            },
+        .sourceMetricsRevision = snapshot.sourceMetricsRevision,
+        .surfaceRevision = snapshot.surfaceRevision,
+        .availability = snapshot.suspended ? Render::RenderSurfaceAvailability::Suspended
+                                           : Render::RenderSurfaceAvailability::Active,
+    };
+}
+
 struct EngineModules final {
     std::unique_ptr<Core::IMonotonicClock> monotonicClock;
     std::unique_ptr<Platform::IPlatformBackend> platform;
     std::unique_ptr<Task::ITaskSystem> taskSystem;
     std::unique_ptr<Render::IRenderDevice> renderDevice;
+    Integration::IPrimaryWindowSurfaceProvider* windowSurfaceProvider = nullptr;
 
     EngineModules() = default;
     EngineModules(const EngineModules&) = delete;
@@ -298,6 +421,7 @@ struct EngineModules final {
         }
         if (platform != nullptr)
         {
+            windowSurfaceProvider = nullptr;
             platform->shutdown();
             platform.reset();
         }
@@ -322,10 +446,12 @@ class EngineHostImplementation final {
   public:
     EngineHostImplementation(EngineConfig config, Core::FixedStepAccumulator fixedStepAccumulator,
                              PlatformEventDispatcher platformEventDispatcher,
-                             std::unique_ptr<Runtime::Input::ActionMapper> actionMapper, EngineModules modules) noexcept
+                             std::unique_ptr<Runtime::Input::ActionMapper> actionMapper, EngineModules modules,
+                             std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface) noexcept
         : m_config(std::move(config)), m_fixedStepAccumulator(std::move(fixedStepAccumulator)),
           m_platformEventDispatcher(std::move(platformEventDispatcher)), m_actionMapper(std::move(actionMapper)),
-          m_modules(std::move(modules)), m_ownerThread(std::this_thread::get_id())
+          m_modules(std::move(modules)), m_ownerThread(std::this_thread::get_id()),
+          m_lastWindowSurface(std::move(initialWindowSurface))
     {
     }
 
@@ -466,6 +592,31 @@ class EngineHostImplementation final {
                 return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
             }
 
+            std::optional<Render::RenderSurfaceState> primaryWindowSurface;
+            if (m_modules.windowSurfaceProvider != nullptr)
+            {
+                auto surfaceResult =
+                    invokeResultBoundary("IPrimaryWindowSurfaceProvider::primaryWindowSurfaceSnapshot",
+                                         RuntimeErrorCode::LifecycleInvariantViolation, [&] {
+                                             return m_modules.windowSurfaceProvider->primaryWindowSurfaceSnapshot();
+                                         });
+                if (!surfaceResult)
+                {
+                    return failAfterStartupCommit(gameApplication, std::move(surfaceResult.error()), frameIndex,
+                                                  simulationTick);
+                }
+                if (auto surfaceStatus =
+                        validateWindowSurfaceSnapshotForFrame(*surfaceResult, *platformFrame, m_lastWindowSurface);
+                    !surfaceStatus)
+                {
+                    auto error = std::move(surfaceStatus.error());
+                    error.addContext("EngineHost::run", "WindowSurface snapshot validation");
+                    return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
+                }
+                m_lastWindowSurface = *surfaceResult;
+                primaryWindowSurface = toRenderSurfaceState(*surfaceResult);
+            }
+
             const Core::MonotonicTimePoint currentFrameTime = m_modules.monotonicClock->now();
             if (currentFrameTime < previousFrameTime)
             {
@@ -597,9 +748,7 @@ class EngineHostImplementation final {
             const Render::RenderFrame renderFrame{
                 .frameIndex = frameIndex,
                 .interpolation = frameTiming.interpolation,
-                // Window minimized is a Platform metric, not proof that a
-                // Render surface is suspended. M7-B owns that surface state.
-                .surfaceSuspended = false,
+                .primaryWindowSurface = primaryWindowSurface,
             };
             auto submitResult =
                 invokeResultBoundary("IRenderDevice::submitFrame", RuntimeErrorCode::LifecycleInvariantViolation,
@@ -610,13 +759,27 @@ class EngineHostImplementation final {
                                               simulationTick);
             }
 
-            auto presentResult =
-                invokeResultBoundary("IRenderDevice::present", RuntimeErrorCode::LifecycleInvariantViolation,
-                                     [&] { return m_modules.renderDevice->present(); });
-            if (!presentResult)
+            const bool surfaceSuspended =
+                primaryWindowSurface.has_value() &&
+                primaryWindowSurface->availability == Render::RenderSurfaceAvailability::Suspended;
+            if (submitResult->requiresPresent() == surfaceSuspended)
             {
-                return failAfterStartupCommit(gameApplication, std::move(presentResult.error()), frameIndex,
-                                              simulationTick);
+                Core::Error error{RuntimeErrorCode::LifecycleInvariantViolation,
+                                  "Render submission outcome contradicts the current WindowSurface state"};
+                error.addContext("EngineHost::run", framePosition(frameIndex, simulationTick));
+                return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
+            }
+
+            if (submitResult->requiresPresent())
+            {
+                auto presentResult =
+                    invokeResultBoundary("IRenderDevice::present", RuntimeErrorCode::LifecycleInvariantViolation,
+                                         [&] { return m_modules.renderDevice->present(); });
+                if (!presentResult)
+                {
+                    return failAfterStartupCommit(gameApplication, std::move(presentResult.error()), frameIndex,
+                                                  simulationTick);
+                }
             }
 
             if (frameIndex == (std::numeric_limits<u64>::max)())
@@ -700,6 +863,7 @@ class EngineHostImplementation final {
     std::unique_ptr<IGameState> m_gameState;
     [[maybe_unused]] GameStatePolicy m_committedPolicy{};
     LifecycleState m_lifecycleState = LifecycleState::Ready;
+    std::optional<Integration::WindowSurfaceSnapshot> m_lastWindowSurface;
 };
 
 } // namespace Detail
@@ -712,7 +876,7 @@ EngineHost::EngineHost(std::unique_ptr<Detail::EngineHostImplementation> impleme
 EngineHost::~EngineHost() noexcept = default;
 
 Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig& config,
-                                                             EngineFactories factories) noexcept
+                                                             EngineCompositionFactories factories) noexcept
 {
     try
     {
@@ -723,8 +887,21 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
             return Core::failure(std::move(error));
         }
 
-        if (!factories.createMonotonicClock || !factories.createPlatformBackend || !factories.createTaskSystem ||
-            !factories.createRenderDevice)
+        const bool platformRenderComplete = std::visit(
+            [](const auto& platformRender) noexcept {
+                using Composition = std::remove_cvref_t<decltype(platformRender)>;
+                if constexpr (std::same_as<Composition, IndependentPlatformRenderFactories>)
+                {
+                    return static_cast<bool>(platformRender.createPlatformBackend) &&
+                           static_cast<bool>(platformRender.createRenderDevice);
+                } else
+                {
+                    return static_cast<bool>(platformRender.createWindowSurfacePlatformBackend) &&
+                           static_cast<bool>(platformRender.createWindowSurfaceRenderDevice);
+                }
+            },
+            factories.platformRender);
+        if (!factories.createMonotonicClock || !factories.createTaskSystem || !platformRenderComplete)
         {
             return Core::failure(ConfigurationErrorCode::IncompleteEngineFactoryBundle,
                                  "Every required Engine factory must be explicitly provided");
@@ -768,9 +945,9 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         }
 
         EngineModules modules;
-        auto clockResult =
-            invokeResultBoundary("EngineFactories::createMonotonicClock", RuntimeErrorCode::EngineFactoryThrewException,
-                                 [&] { return factories.createMonotonicClock(); });
+        auto clockResult = invokeResultBoundary("EngineCompositionFactories::createMonotonicClock",
+                                                RuntimeErrorCode::EngineFactoryThrewException,
+                                                [&] { return factories.createMonotonicClock(); });
         if (!clockResult)
         {
             return Core::failure(std::move(clockResult.error()));
@@ -785,23 +962,47 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
             .primaryWindow = ownedConfig.primaryWindow,
             .frameCapacities = ownedConfig.platformFrameCapacities,
         };
-        auto platformResult = invokeResultBoundary("EngineFactories::createPlatformBackend",
-                                                   RuntimeErrorCode::EngineFactoryThrewException,
-                                                   [&] { return factories.createPlatformBackend(platformParams); });
-        if (!platformResult)
+        Integration::IWindowSurfacePlatformBackend* windowSurfaceBackend = nullptr;
+        if (auto* independent = std::get_if<IndependentPlatformRenderFactories>(&factories.platformRender);
+            independent != nullptr)
         {
-            return Core::failure(std::move(platformResult.error()));
-        }
-        modules.platform = std::move(*platformResult);
-        if (modules.platform == nullptr)
+            auto platformResult = invokeResultBoundary("IndependentPlatformRenderFactories::createPlatformBackend",
+                                                       RuntimeErrorCode::EngineFactoryThrewException, [&] {
+                                                           return independent->createPlatformBackend(platformParams);
+                                                       });
+            if (!platformResult)
+            {
+                return Core::failure(std::move(platformResult.error()));
+            }
+            modules.platform = std::move(*platformResult);
+            if (modules.platform == nullptr)
+            {
+                return Core::failure(factoryReturnedNull("createPlatformBackend"));
+            }
+        } else
         {
-            return Core::failure(factoryReturnedNull("createPlatformBackend"));
+            auto& windowed = std::get<WindowSurfacePlatformRenderFactories>(factories.platformRender);
+            auto platformResult =
+                invokeResultBoundary("WindowSurfacePlatformRenderFactories::createWindowSurfacePlatformBackend",
+                                     RuntimeErrorCode::EngineFactoryThrewException,
+                                     [&] { return windowed.createWindowSurfacePlatformBackend(platformParams); });
+            if (!platformResult)
+            {
+                return Core::failure(std::move(platformResult.error()));
+            }
+            if (*platformResult == nullptr)
+            {
+                return Core::failure(factoryReturnedNull("createWindowSurfacePlatformBackend"));
+            }
+            windowSurfaceBackend = platformResult->get();
+            modules.windowSurfaceProvider = windowSurfaceBackend;
+            modules.platform = std::move(*platformResult);
         }
 
         const Task::TaskSystemCreateParams taskParams{};
-        auto taskResult =
-            invokeResultBoundary("EngineFactories::createTaskSystem", RuntimeErrorCode::EngineFactoryThrewException,
-                                 [&] { return factories.createTaskSystem(taskParams); });
+        auto taskResult = invokeResultBoundary("EngineCompositionFactories::createTaskSystem",
+                                               RuntimeErrorCode::EngineFactoryThrewException,
+                                               [&] { return factories.createTaskSystem(taskParams); });
         if (!taskResult)
         {
             return Core::failure(std::move(taskResult.error()));
@@ -812,23 +1013,89 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
             return Core::failure(factoryReturnedNull("createTaskSystem"));
         }
 
-        const Render::RenderDeviceCreateParams renderParams{};
-        auto renderResult =
-            invokeResultBoundary("EngineFactories::createRenderDevice", RuntimeErrorCode::EngineFactoryThrewException,
-                                 [&] { return factories.createRenderDevice(renderParams); });
-        if (!renderResult)
+        std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface;
+        if (auto* independent = std::get_if<IndependentPlatformRenderFactories>(&factories.platformRender);
+            independent != nullptr)
         {
-            return Core::failure(std::move(renderResult.error()));
-        }
-        modules.renderDevice = std::move(*renderResult);
-        if (modules.renderDevice == nullptr)
+            const Render::RenderDeviceCreateParams renderParams{};
+            auto renderResult = invokeResultBoundary("IndependentPlatformRenderFactories::createRenderDevice",
+                                                     RuntimeErrorCode::EngineFactoryThrewException,
+                                                     [&] { return independent->createRenderDevice(renderParams); });
+            if (!renderResult)
+            {
+                return Core::failure(std::move(renderResult.error()));
+            }
+            modules.renderDevice = std::move(*renderResult);
+            if (modules.renderDevice == nullptr)
+            {
+                return Core::failure(factoryReturnedNull("createRenderDevice"));
+            }
+        } else
         {
-            return Core::failure(factoryReturnedNull("createRenderDevice"));
+            auto& windowed = std::get<WindowSurfacePlatformRenderFactories>(factories.platformRender);
+            auto leaseResult = invokeResultBoundary("IPrimaryWindowSurfaceProvider::acquirePrimaryWindowSurfaceLease",
+                                                    RuntimeErrorCode::EngineFactoryThrewException, [&] {
+                                                        return windowSurfaceBackend->acquirePrimaryWindowSurfaceLease();
+                                                    });
+            if (!leaseResult)
+            {
+                return Core::failure(std::move(leaseResult.error()));
+            }
+            if (!leaseResult->hasValue())
+            {
+                return Core::failure(factoryReturnedNull("acquirePrimaryWindowSurfaceLease"));
+            }
+
+            auto snapshotResult = invokeResultBoundary("IPrimaryWindowSurfaceProvider::primaryWindowSurfaceSnapshot",
+                                                       RuntimeErrorCode::EngineFactoryThrewException, [&] {
+                                                           return windowSurfaceBackend->primaryWindowSurfaceSnapshot();
+                                                       });
+            if (!snapshotResult)
+            {
+                return Core::failure(std::move(snapshotResult.error()));
+            }
+            if (auto status = validateWindowSurfaceSnapshotStructure(*snapshotResult); !status)
+            {
+                auto error = std::move(status.error());
+                error.addContext("EngineHost::Create", "initial WindowSurface snapshot");
+                return Core::failure(std::move(error));
+            }
+            if (leaseResult->surface() != snapshotResult->surface)
+            {
+                return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                                     "The WindowSurface lease and initial snapshot identify different surfaces");
+            }
+
+            const Render::RenderDeviceCreateParams renderParams{
+                .initialPrimaryWindowSurface = toRenderSurfaceState(*snapshotResult),
+            };
+            auto renderResult = invokeResultBoundary(
+                "WindowSurfacePlatformRenderFactories::createWindowSurfaceRenderDevice",
+                RuntimeErrorCode::EngineFactoryThrewException,
+                [&] { return windowed.createWindowSurfaceRenderDevice(renderParams, std::move(*leaseResult)); });
+            if (!renderResult)
+            {
+                return Core::failure(std::move(renderResult.error()));
+            }
+            modules.renderDevice = std::move(*renderResult);
+            if (modules.renderDevice == nullptr)
+            {
+                return Core::failure(factoryReturnedNull("createWindowSurfaceRenderDevice"));
+            }
+
+            auto publishStatus = invokeResultBoundary("IWindowSurfacePlatformBackend::publishPrimaryWindow",
+                                                      RuntimeErrorCode::EngineFactoryThrewException,
+                                                      [&] { return windowSurfaceBackend->publishPrimaryWindow(); });
+            if (!publishStatus)
+            {
+                return Core::failure(std::move(publishStatus.error()));
+            }
+            initialWindowSurface = *snapshotResult;
         }
 
         auto implementation = std::make_unique<Detail::EngineHostImplementation>(
             std::move(ownedConfig), std::move(*accumulatorResult), std::move(*platformEventDispatcherResult),
-            std::move(*actionMapperResult), std::move(modules));
+            std::move(*actionMapperResult), std::move(modules), std::move(initialWindowSurface));
         return std::unique_ptr<EngineHost>(new EngineHost(std::move(implementation)));
     } catch (const std::bad_alloc&)
     {

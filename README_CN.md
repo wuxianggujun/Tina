@@ -19,11 +19,14 @@ Runtime。现有2D/UI/3D路径继续作为验收基线，新架构按可独立�
 
 当前旧文档已经替换，但旧源码架构仍是正在运行的主实现，并未完全删除。迁移状态和删除门禁见 [架构总览](docs/architecture.md)。物理后端固定为 2D Box2D 3.x 与 3D Jolt，不引入第三套物理引擎。
 
-vNext 已完成 C++23 Headless Runtime 生命周期内核、M7-A Platform/Input 内核和首个桌面适配切片：
-私有 `tina_platform_glfw` 已能创建 `GLFW_NO_API` 窗口，并把键盘、Pointer、Focus、resize、close
-与已提交 UTF-8 文本归一化到同一份有界 `PlatformFrameView`；`tina_sample_platform` 使用
-NullRender 验证真实窗口而不创建 GPU Surface。Native Surface/bgfx 仍属于 M7-B，production
-Gamepad、Windows IMM32 composition、UI Core 与可见中文 UI 分别放在后续切片。
+vNext 已完成 C++23 Headless Runtime 生命周期内核、M7-A Platform/Input 内核、首个桌面适配切片，
+以及 M7-B1 私有 WindowSurface handoff：私有 `tina_platform_glfw` 已能创建 `GLFW_NO_API` 窗口，
+并把键盘、Pointer、Focus、resize、close 与已提交 UTF-8 文本归一化到同一份有界
+`PlatformFrameView`；Runtime 通过 generation `WindowSurfaceId`、无原生句柄的
+`WindowSurfaceSnapshot` 和 move-only `NativeWindowSurfaceLease` 把窗口 surface 交给 Render
+组合，Game SDK 不暴露 native 或 bgfx 类型。`tina_sample_platform` 仍使用 NullRender 验证真实窗口；
+真实私有 bgfx clear/present 后端属于 M7-B2。production Gamepad、Windows IMM32 composition、UI Core
+与可见中文 UI 分别放在后续切片。
 
 ## 当前 Legacy 已完成基线
 
@@ -41,7 +44,7 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 ## 构建
 
-目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、MSVC 19.50 和 CMake 4.2.3 下通过 vNext Null 与 GLFW Debug/Release 图、基础166项、GLFW专项17项及平台样例300帧，也保留 Legacy UI/3D冒烟；Linux vNext 已通过 GCC 13 和 Clang 22 的 X11/Wayland 双后端门禁，Wayland 均使用带 `wl_seat` 的嵌套 Weston 9。Clang 路径已通过 ASan/UBSan/LSan，但由 vcpkg 提供的第三方 GLFW 本身未被 sanitizer 插桩；详细边界见[测试文档](docs/testing.md)。Clang preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22.04 自带的旧 libstdc++。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
+目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 最新门禁已在 Visual Studio 2026 18.4.3、MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过 vNext Null 与 GLFW Debug/Release 图：基础183/183、GLFW专项22/22、Null样例300帧、WindowSurface GLFW样例300帧；`TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Linux M7-B1 门禁也已通过基础183/183、GLFW专项22/22和300帧样例：覆盖 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer，以及 GCC 13/Clang 22 X11/Wayland 双后端；Wayland 使用带 `wl_seat` 的嵌套 Weston 9。Clang 基础测试无 suppression，Wayland 的 `_XimOpenIM` 匹配为0，X11 仅对第三方 libX11 retention 使用精确 suppression；由 vcpkg 提供的 GLFW 本身未被 sanitizer 插桩。详细边界见[测试文档](docs/testing.md)。Clang preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22.04 自带的旧 libstdc++。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
 
 ```powershell
 cmake --version

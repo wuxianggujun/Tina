@@ -2,9 +2,10 @@
 
 - 状态：Accepted
 - 日期：2026-07-17
-- 实施状态：M7-A Headless Platform/Input 与私有 GLFW `NO_API` primary window 已落地，可使用
-  NullRender运行；本ADR的 NativeWindowSurfaceLease、bgfx交接、surface revision/state machine、
-  完整 DPI 与 Windows IMM32仍是 M7后续目标
+- 实施状态：M7-B1 已落地 `NativeWindowSurfaceLease`、`WindowSurfaceId`、surface snapshot/
+  revision、延迟 `publishPrimaryWindow()`、Runtime handoff 与 NullRender suspended path；
+  M7-B2 的真实 `tina_render_bgfx` clear/present/resize/suspend/drain 仍未实现，完整 DPI 与
+  Windows IMM32 仍是后续目标。
 
 ## 背景
 
@@ -38,7 +39,7 @@
 ### 内部 Integration SPI
 
 交接只存在于 Desktop bootstrap、Runtime composition 和两个 adapter 可见的内部 integration
-header。下列签名表达冻结语义，不承诺当前切片已经实现最终 ABI：
+header。当前 M7-B1 已实现的签名为：
 
 ```cpp
 namespace Tina::Integration {
@@ -50,24 +51,29 @@ public:
     virtual ~IPrimaryWindowSurfaceProvider() noexcept = default;
 
     [[nodiscard]] virtual Core::Result<NativeWindowSurfaceLease>
-    acquirePrimarySurfaceLease() noexcept = 0;
+    acquirePrimaryWindowSurfaceLease() noexcept = 0;
+
+    [[nodiscard]] virtual Core::Result<WindowSurfaceSnapshot>
+    primaryWindowSurfaceSnapshot() const noexcept = 0;
 };
 
-class IWindowedPlatformBackend
+class IWindowSurfacePlatformBackend
     : public Platform::IPlatformBackend,
       public IPrimaryWindowSurfaceProvider {
 public:
-    ~IWindowedPlatformBackend() noexcept override = default;
+    ~IWindowSurfacePlatformBackend() noexcept override = default;
+
+    [[nodiscard]] virtual Core::Status publishPrimaryWindow() noexcept = 0;
 };
 
-using WindowedPlatformBackendFactory = std::move_only_function<
-    Core::Result<std::unique_ptr<IWindowedPlatformBackend>>(
+using WindowSurfacePlatformBackendFactory = std::move_only_function<
+    Core::Result<std::unique_ptr<IWindowSurfacePlatformBackend>>(
         const Platform::PlatformBackendCreateParams&)>;
 
-using PlatformAwareRenderFactory = std::move_only_function<
+using WindowSurfaceRenderDeviceFactory = std::move_only_function<
     Core::Result<std::unique_ptr<Render::IRenderDevice>>(
         const Render::RenderDeviceCreateParams&,
-        NativeWindowSurfaceLease&&)>;
+        NativeWindowSurfaceLease)>;
 
 } // namespace Tina::Integration
 ```
@@ -75,19 +81,21 @@ using PlatformAwareRenderFactory = std::move_only_function<
 `EngineCompositionFactories::platformRender` 是
 `IndependentPlatformRenderFactories` 与 `WindowSurfacePlatformRenderFactories` 的 tagged union。
 前者持有普通 Platform/Render factories，供 Headless+Null 或 M7-A GLFW+Null 使用；后者持有上面的
-`WindowedPlatformBackendFactory` 与 `PlatformAwareRenderFactory`。两个分支互斥，EngineHost 访问
+`WindowSurfacePlatformBackendFactory` 与 `WindowSurfaceRenderDeviceFactory`。两个分支互斥，EngineHost 访问
 WindowSurface 分支时已经静态知道 provider 接口，不做 `dynamic_cast`。
 
 `tina_platform_glfw` 是 lease 的唯一构造者。lease 内部保存 `WindowSurfaceId`、window generation、
 native binding revision、释放所需 owner cookie，以及固定大小、带平台 kind 的 Tina-owned opaque
-POD payload；它不公开 payload span、原始地址或任意 backend callback。只有
-`tina_render_bgfx` 的私有 decoder 能把 payload 映射为临时 `bgfx::PlatformData`。bgfx factory
-必须在调用期完成映射，不能在 lease 之外缓存 native handle。
+POD payload；它不公开 payload span、原始地址或任意 backend callback。只有私有 bridge/后续
+`tina_render_bgfx` decoder 能把 payload 映射为临时 native binding 或 `bgfx::PlatformData`。
+surface-aware Render factory 必须在调用期完成映射，不能在 lease 之外缓存 native handle。
 
 Independent/Null 组合继续显式选择 Headless 或 GLFW + NullRenderDevice，不构造伪 lease，也
 不能在 lease 获取或 bgfx 初始化失败后静默降级到 Null。生产 `Desktop::CreateEngine` 由唯一
 bootstrap 只选择 tagged composition factory，不在 EngineHost 外创建 owner；EngineHost 创建 Platform
-后调用 provider 并把 lease 移入 `PlatformAwareRenderFactory`。integration header 不安装到 Game SDK，
+后调用 `acquirePrimaryWindowSurfaceLease()` 与 `primaryWindowSurfaceSnapshot()`，把 lease 移入
+`WindowSurfaceRenderDeviceFactory`，并只在 RenderDevice 完整创建后调用 `publishPrimaryWindow()`。
+integration header 不安装到 Game SDK，
 不进入 Tina module public umbrella，相关 target 只使用 PRIVATE 依赖。
 
 Game SDK 只看到 `WindowId`、logical/framebuffer/content-scale metrics；Render module public API
@@ -104,15 +112,19 @@ validate config
   -> initialize GLFW Platform backend
   -> create/register primary GLFW window
   -> acquire NativeWindowSurfaceLease
-  -> move lease into PlatformAwareRenderFactory
-  -> decode payload and initialize bgfx surface/device
+  -> read primaryWindowSurfaceSnapshot and seed RenderDeviceCreateParams
+  -> move lease into WindowSurfaceRenderDeviceFactory
+  -> decode payload and initialize surface-aware RenderDevice
   -> publish fully initialized RenderDevice
+  -> publish primary window
 ```
 
-主窗口创建失败时回滚 GLFW；lease 获取失败时注销并销毁主窗口；bgfx factory 在部分初始化后
-失败时，先在 factory 内撤销 bgfx 资源，再销毁已移动 lease。随后 `EngineHost::Create` 按
+主窗口创建失败时回滚 GLFW；lease 获取失败时注销并销毁主窗口；WindowSurfaceRenderDeviceFactory
+在部分初始化后失败时，先在 factory 内撤销已创建资源，再销毁已移动 lease。随后
+`EngineHost::Create` 按
 Render（若已发布）→ Platform window → GLFW 的顺序回滚。factory 未完全成功前不能发布可调用的
-RenderDevice，失败也不能留下仍接受提交的 surface。
+RenderDevice；窗口发布失败时先销毁 RenderDevice 并释放 lease，再销毁 Platform window。失败也
+不能留下仍接受提交的 surface。
 
 rollback/shutdown 必须幂等且 `noexcept`，保留最初的结构化错误并把回滚异常降为诊断。任何
 阶段都不能通过销毁仍被 lease 或 submission pin 引用的窗口来“继续回滚”；若硬 deadline 后仍
@@ -127,10 +139,11 @@ surfaceRevision, suspended }`。Surface adapter 禁止再次查询 GLFW 或独�
 
 - `sourceMetricsRevision` 必须等于本次派生所用 `WindowMetricsSnapshot::revision`；Metrics 与 Surface
   snapshot 作为一个 frame-boundary transaction 发布，不能观察到新 Metrics + 旧 Surface 的组合；
-- `surfaceRevision` 是每个 `WindowSurfaceId` 内单调递增的64位值。一次 Poll 中的多次 resize/scale callback
-  先合并为最终快照，再只提交一个新 surfaceRevision；相同快照不重复递增；
+- `surfaceRevision` 是每个 `WindowSurfaceId` 内从1开始的连续64位值。一次 Poll 中的多次 resize/scale callback
+  先合并为最终快照，再只把 surfaceRevision 精确增加1；相同快照不递增，禁止跳号；
 - `surfaceRevision` 在 framebuffer extent、content scale、suspend/resume 或 native binding generation
-  改变时递增。surfaceRevision 回绕属于 fatal contract violation，不能静默复用旧值；
+  改变时递增；这些事实发生变化时 `sourceMetricsRevision` 也必须前进。surfaceRevision 回绕属于 fatal
+  contract violation，不能静默复用旧值；
 - Runtime 每帧只采样一次快照，把它转换为 `RenderSurfaceState`，并让 packet pin 住对应 surface id +
   surfaceRevision。旧 surfaceRevision 的 packet 可以完成，但新 packet 不得混用旧 viewport/attachment；
 - Active resize 在下一次 surface submission 前由 backend 在主线程应用；多次未应用 surfaceRevision
@@ -189,7 +202,7 @@ packet 完成提交；若 snapshot 为 Suspended，则仍完成 Extraction/UI/Re
 - `submissionIndex` 由 RenderDevice 在一个非 Suspended `RenderFrame` 被 backend 实际接受时
   分配，按 device 单调递增，并随 `SubmissionTicket` 记录 `WindowSurfaceId` 与 surfaceRevision；clear-only
   surface frame 也是一次真实 submission；
-- suspended 路径返回显式 `SkippedSurfaceSuspended`/无提交结果，不调用 surface submit/present，
+- suspended 路径返回显式 `SkippedSuspendedSurface`/无提交结果，不调用 surface submit/present，
   不产生伪 `SubmissionTicket`，也不递增 `submissionIndex`。当帧尚未进入 in-flight 的 packet
   直接事务回收其 frame-local pin；先前 in-flight packet 仍按真实 completion 回收；
 - upload/retirement maintenance 使用自己的 ticket/counter，不伪装成 surface submission。
@@ -200,7 +213,9 @@ packet 完成提交；若 snapshot 为 Suspended，则仍完成 Extraction/UI/Re
 
 - 当前 M7-A Headless 与 GLFW Window 子切片已提供可验证的 Platform frame、Primary Pointer、
   Window registry、Keyboard/Pointer/committed text、生命周期 dispatcher 与 close outcome 基线；
-  production Gamepad、完整 DPI/IMM32和本ADR的 surface结果仍需后续验收；
+  M7-B1 已在此基础上实现 surface lease、snapshot、延迟窗口发布、Runtime 转换为
+  `RenderSurfaceState` 以及 `SkippedSuspendedSurface` 路径；production Gamepad、完整 DPI/IMM32
+  和 M7-B2 真实 bgfx device 仍需后续验收；
 - GLFW 保持窗口、输入、DPI、IME 与关闭语义的唯一 owner，bgfx 只负责渲染；
 - opaque lease 在不泄漏 native/bgfx 类型的前提下，强制窗口晚于 RenderDevice 销毁；
 - resize、最小化和关闭使用可测试的 surfaceRevision/state machine，不依赖 callback 偶然顺序；
@@ -210,7 +225,7 @@ packet 完成提交；若 snapshot 为 Suspended，则仍完成 Extraction/UI/Re
 
 ## 验收
 
-- 首先复用 M7-A Headless 与当前 GLFW Window 门禁，证明后续 Surface adapter 仍只接受
+- 首先复用 M7-A Headless 与当前 GLFW Window 门禁，证明 Surface adapter 仍只接受
   `PrimaryPointerId`、Gamepad snapshot
   同 owner/slot 唯一、retained active/suppressed source 与最终 snapshot 一致，且 CloseRequested 不进入
   `PlatformEventDispatcher` 或未来通用 Runtime Event Queue；

@@ -6,7 +6,7 @@
 #include <tina/runtime/EngineHost.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
-#include <tina/runtime/spi/EngineFactories.hpp>
+#include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/task/TaskSystem.hpp>
 
 #include "support/ManualMonotonicClock.hpp"
@@ -139,10 +139,11 @@ class LoggingRenderDevice final : public Render::IRenderDevice {
         events_->emplace_back("render.destroy");
     }
 
-    [[nodiscard]] Core::Status submitFrame(const Render::RenderFrame&) override
+    [[nodiscard]] Core::Result<Render::RenderFrameSubmission> submitFrame(const Render::RenderFrame&) override
     {
+        const u64 submissionIndex = statistics_.submitted;
         ++statistics_.submitted;
-        return Core::success();
+        return Render::RenderFrameSubmission::Submitted(submissionIndex);
     }
 
     [[nodiscard]] Core::Status present() override
@@ -207,9 +208,10 @@ Core::Result<std::unique_ptr<Interface>> injectedFactoryResult(EventLog& events,
     return Core::failure(Core::CoreErrorCode::Internal, "unreachable factory mode");
 }
 
-EngineFactories makeInjectedFactories(EventLog& events, FactoryStage injectedStage, FactoryMode mode)
+EngineCompositionFactories makeInjectedFactories(EventLog& events, FactoryStage injectedStage, FactoryMode mode)
 {
-    EngineFactories factories;
+    EngineCompositionFactories factories;
+    auto& platformRender = std::get<IndependentPlatformRenderFactories>(factories.platformRender);
     factories.createMonotonicClock = [&events, injectedStage,
                                       mode]() -> Core::Result<std::unique_ptr<Core::IMonotonicClock>> {
         return injectedFactoryResult<Core::IMonotonicClock>(
@@ -218,7 +220,7 @@ EngineFactories makeInjectedFactories(EventLog& events, FactoryStage injectedSta
                 return clock;
             });
     };
-    factories.createPlatformBackend =
+    platformRender.createPlatformBackend =
         [&events, injectedStage, mode](
             const Platform::PlatformBackendCreateParams&) -> Core::Result<std::unique_ptr<Platform::IPlatformBackend>> {
         return injectedFactoryResult<Platform::IPlatformBackend>(
@@ -236,7 +238,7 @@ EngineFactories makeInjectedFactories(EventLog& events, FactoryStage injectedSta
                 return taskSystem;
             });
     };
-    factories.createRenderDevice =
+    platformRender.createRenderDevice =
         [&events, injectedStage,
          mode](const Render::RenderDeviceCreateParams&) -> Core::Result<std::unique_ptr<Render::IRenderDevice>> {
         return injectedFactoryResult<Render::IRenderDevice>(
@@ -248,21 +250,22 @@ EngineFactories makeInjectedFactories(EventLog& events, FactoryStage injectedSta
     return factories;
 }
 
-void removeFactory(EngineFactories& factories, FactoryStage stage)
+void removeFactory(EngineCompositionFactories& factories, FactoryStage stage)
 {
+    auto& platformRender = std::get<IndependentPlatformRenderFactories>(factories.platformRender);
     switch (stage)
     {
     case FactoryStage::Clock:
         factories.createMonotonicClock = {};
         break;
     case FactoryStage::Platform:
-        factories.createPlatformBackend = {};
+        platformRender.createPlatformBackend = {};
         break;
     case FactoryStage::Task:
         factories.createTaskSystem = {};
         break;
     case FactoryStage::Render:
-        factories.createRenderDevice = {};
+        platformRender.createRenderDevice = {};
         break;
     }
 }
@@ -394,7 +397,7 @@ struct RuntimeProbe final {
     u64 presentCalls = 0;
     u64 submittedFrames = 0;
     u64 presentedFrames = 0;
-    bool lastSubmittedSurfaceSuspended = false;
+    bool lastSubmittedHadPrimaryWindowSurface = false;
 };
 
 class AdvancingPlatform final : public Platform::IPlatformBackend {
@@ -702,10 +705,10 @@ class ProbeRenderDevice final : public Render::IRenderDevice {
         probe_->events.emplace_back("render.destroy");
     }
 
-    [[nodiscard]] Core::Status submitFrame(const Render::RenderFrame& frame) override
+    [[nodiscard]] Core::Result<Render::RenderFrameSubmission> submitFrame(const Render::RenderFrame& frame) override
     {
         probe_->events.emplace_back("render.submit." + std::to_string(frame.frameIndex));
-        probe_->lastSubmittedSurfaceSuspended = frame.surfaceSuspended;
+        probe_->lastSubmittedHadPrimaryWindowSurface = frame.primaryWindowSurface.has_value();
         ++probe_->submitCalls;
         if (probe_->failurePoint == CommittedFailurePoint::RenderSubmit)
         {
@@ -715,8 +718,9 @@ class ProbeRenderDevice final : public Render::IRenderDevice {
             }
             return Core::failure(Core::CoreErrorCode::Internal, "render submit failure");
         }
+        const u64 submissionIndex = probe_->submittedFrames;
         ++probe_->submittedFrames;
-        return Core::success();
+        return Render::RenderFrameSubmission::Submitted(submissionIndex);
     }
 
     [[nodiscard]] Core::Status present() override
@@ -758,16 +762,17 @@ class ProbeRenderDevice final : public Render::IRenderDevice {
     bool stopped_ = false;
 };
 
-EngineFactories makeRuntimeFactories(RuntimeProbe& probe)
+EngineCompositionFactories makeRuntimeFactories(RuntimeProbe& probe)
 {
-    EngineFactories factories;
+    EngineCompositionFactories factories;
+    auto& platformRender = std::get<IndependentPlatformRenderFactories>(factories.platformRender);
     factories.createMonotonicClock = [&probe]() -> Core::Result<std::unique_ptr<Core::IMonotonicClock>> {
         auto clock = std::make_unique<ManualMonotonicClock>();
         probe.clock = clock.get();
         std::unique_ptr<Core::IMonotonicClock> result = std::move(clock);
         return result;
     };
-    factories.createPlatformBackend = [&probe](const Platform::PlatformBackendCreateParams& params)
+    platformRender.createPlatformBackend = [&probe](const Platform::PlatformBackendCreateParams& params)
         -> Core::Result<std::unique_ptr<Platform::IPlatformBackend>> {
         auto frameBuilder = Platform::PlatformFrameBuilder::Create(params.frameCapacities);
         if (!frameBuilder)
@@ -794,7 +799,7 @@ EngineFactories makeRuntimeFactories(RuntimeProbe& probe)
         std::unique_ptr<Task::ITaskSystem> taskSystem = std::make_unique<ProbeTaskSystem>(probe);
         return taskSystem;
     };
-    factories.createRenderDevice =
+    platformRender.createRenderDevice =
         [&probe](const Render::RenderDeviceCreateParams&) -> Core::Result<std::unique_ptr<Render::IRenderDevice>> {
         std::unique_ptr<Render::IRenderDevice> renderDevice = std::make_unique<ProbeRenderDevice>(probe);
         return renderDevice;
@@ -802,11 +807,13 @@ EngineFactories makeRuntimeFactories(RuntimeProbe& probe)
     return factories;
 }
 
-EngineFactories makeOversizedPlatformFrameFactories(RuntimeProbe& probe, OversizedPlatformFrameKind frameKind,
-                                                    Platform::PlatformFrameCapacityConfig builderCapacities)
+EngineCompositionFactories makeOversizedPlatformFrameFactories(RuntimeProbe& probe,
+                                                               OversizedPlatformFrameKind frameKind,
+                                                               Platform::PlatformFrameCapacityConfig builderCapacities)
 {
-    EngineFactories factories = makeRuntimeFactories(probe);
-    factories.createPlatformBackend =
+    EngineCompositionFactories factories = makeRuntimeFactories(probe);
+    auto& platformRender = std::get<IndependentPlatformRenderFactories>(factories.platformRender);
+    platformRender.createPlatformBackend =
         [&probe, frameKind, builderCapacities](
             const Platform::PlatformBackendCreateParams&) -> Core::Result<std::unique_ptr<Platform::IPlatformBackend>> {
         auto frameBuilder = Platform::PlatformFrameBuilder::Create(builderCapacities);
@@ -1356,13 +1363,14 @@ TEST(EngineHostCreationTest, InvalidConfigIsRejectedBeforeAnyFactoryInvocation)
 TEST(EngineHostCreationTest, DestroyingReadyHostWithoutRunShutsModulesDownInReverseOrder)
 {
     EventLog events;
-    EngineFactories factories;
+    EngineCompositionFactories factories;
+    auto& platformRender = std::get<IndependentPlatformRenderFactories>(factories.platformRender);
     factories.createMonotonicClock = [&events]() -> Core::Result<std::unique_ptr<Core::IMonotonicClock>> {
         events.emplace_back("factory.clock");
         std::unique_ptr<Core::IMonotonicClock> clock = std::make_unique<LoggingClock>(events);
         return clock;
     };
-    factories.createPlatformBackend =
+    platformRender.createPlatformBackend =
         [&events](
             const Platform::PlatformBackendCreateParams&) -> Core::Result<std::unique_ptr<Platform::IPlatformBackend>> {
         events.emplace_back("factory.platform");
@@ -1375,7 +1383,7 @@ TEST(EngineHostCreationTest, DestroyingReadyHostWithoutRunShutsModulesDownInReve
         std::unique_ptr<Task::ITaskSystem> taskSystem = std::make_unique<LoggingTaskSystem>(events);
         return taskSystem;
     };
-    factories.createRenderDevice =
+    platformRender.createRenderDevice =
         [&events](const Render::RenderDeviceCreateParams&) -> Core::Result<std::unique_ptr<Render::IRenderDevice>> {
         events.emplace_back("factory.render");
         std::unique_ptr<Render::IRenderDevice> renderDevice = std::make_unique<LoggingRenderDevice>(events);
@@ -2076,7 +2084,7 @@ TEST(EngineHostRunTest, M7ANullRenderDoesNotFabricateSurfaceSuspension)
     auto runResult = (*hostResult)->run(application);
 
     ASSERT_TRUE(runResult.has_value());
-    EXPECT_FALSE(runtime.lastSubmittedSurfaceSuspended);
+    EXPECT_FALSE(runtime.lastSubmittedHadPrimaryWindowSurface);
     EXPECT_EQ(runtime.submittedFrames, 1U);
     EXPECT_EQ(runtime.presentedFrames, 1U);
 }

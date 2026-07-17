@@ -154,13 +154,13 @@ xxHash 与 EASTL 分开决策。vNext 保留 xxHash 为私有算法后端：`Con
 
 ```cpp
 struct EngineConfig;
-struct EngineFactories;
+struct EngineCompositionFactories;
 
 class EngineHost final {
 public:
     static Core::Result<std::unique_ptr<EngineHost>> Create(
         const EngineConfig& config,
-        EngineFactories factories) noexcept;
+        EngineCompositionFactories factories) noexcept;
 
     Core::Result<RunExitReason> run(IGameApplication& gameApplication) noexcept;
 };
@@ -378,8 +378,9 @@ Scene/Runtime integration 的 `RenderSceneWriter` 从 World 提取 Camera、Mesh
 Material 语义，并用当帧 Asset ready snapshot 解析为 `FrameResourceRef` 与 backend-neutral render
 packet；TileMap 的 tile span 先转为 `TileChunkRenderPacket`，不进入 Render SPI。UI Phase 单独
 冻结 `UIDisplayListView`。Runtime 把 Platform `WindowSurfaceSnapshot` 转换成 render-owned
-`RenderSurfaceState`，与前两者组合成轻量 `RenderFrame` view，并放入 Runtime-private owning
-`RenderFramePacket`；Scene 组件保存 AssetHandle，不保存 GPU/bgfx handle。
+`RenderSurfaceState`，与前两者组合成轻量 `RenderFrame` view。当前 M7-B1 已实现的 `RenderFrame`
+只有 frameIndex、interpolation 和可选 `primaryWindowSurface`；把它放入 Runtime-private owning
+`RenderFramePacket` 是后续目标。Scene 组件保存 AssetHandle，不保存 GPU/bgfx handle。
 
 `tina_runtime` 物理拥有 packet pool；每个 `RenderFramePacket` 组合 Render 的 FrameArena/
 FrameResourceTable/SubmissionTicket 与固定容量的类型擦除 FrameLifetimePin set、Runtime-private
@@ -533,8 +534,10 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
    scene/asset/ui/audio 空壳，已完成300帧和10,000帧、初始化回滚、阶段顺序与析构门禁；
 2. **M7-A Platform/Input（Headless + 首个 GLFW desktop adapter 已完成）**：`PlatformFrameView`/
    Action latch、Headless backend、私有 GLFW `NO_API` Window/Keyboard/Pointer/committed text producer
-   与 NullRender 样例已落地；基础166项与 GLFW 专项17项保持为两个直接运行的测试 executable；
-3. **M7-B Surface**：move-only Native Window Surface lease、bgfx clear/present 与 resize/suspend/drain；
+   与 NullRender 样例已落地；加入 M7-B1 覆盖后，基础183项与 GLFW 专项22项保持为两个直接运行的测试 executable；
+3. **M7-B Surface**：M7-B1 已完成 move-only Native Window Surface lease、snapshot/revision、
+   deferred publish、Runtime handoff 与 NullRender suspended path；M7-B2 继续实现私有 bgfx
+   clear/present 与 resize/suspend/drain；
 4. **M7-C–E UI/IME/Gamepad**：增量 UIContext/DisplayList、Label/Button/Modal + FreeType、
    IMM32/Gamepad/DPI 门禁；
 5. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；

@@ -1,6 +1,7 @@
 # 渲染架构与 bgfx 边界
 
-> 状态：vNext 目标契约已接受，M7 尚未实现。bgfx 是 Tina 的实现依赖，不是游戏开发 API。
+> 状态：vNext 目标契约已接受，M7-B1 WindowSurface handoff 已实现；真实 bgfx device 仍未实现。
+> bgfx 是 Tina 的实现依赖，不是游戏开发 API。
 
 ## 当前 Legacy 事实
 
@@ -46,23 +47,27 @@ UIContext retained tree
   -> immutable UIDisplayListView
 
 RenderSceneView + UIDisplayListView + RenderSurfaceState + FrameTiming
-  -> RenderFrame view inside Runtime-owned RenderFramePacket
+  -> RenderFrame view
+  -> future Runtime-owned RenderFramePacket
   -> Pass Scheduler
 ```
 
+当前 M7-B1 的最小 `RenderFrame` 只表达 Runtime frame 编号、插值和可选 primary window surface：
+
 ```cpp
 struct RenderFrame {
-    RenderSceneView world;
-    UIDisplayListView ui;
-    RenderSurfaceState surface;
-    SurfaceAttachmentOps attachments;
-    FrameTiming timing;
+    u64 frameIndex;
+    double interpolation;
+    std::optional<RenderSurfaceState> primaryWindowSurface;
 };
 ```
 
-`RenderSurfaceState` 是 `tina_render` 自己的纯值类型，只包含 framebuffer extent、format、surfaceRevision
-和 suspended 等调度所需字段。Runtime 在帧边界从 Platform `WindowSurfaceSnapshot` 显式转换并同时取得
-owning `SurfaceLeasePin`；`tina_render` 因此不 include 或依赖 `tina_platform`。
+`RenderSurfaceState` 是 `tina_render` 自己的纯值类型，只包含 surface identity、framebuffer extent、
+content scale、sourceMetricsRevision、surfaceRevision 和 availability 等调度所需字段。Runtime 在
+帧边界从 Platform `WindowSurfaceSnapshot` 显式转换；`tina_render` 因此不 include 或依赖
+`tina_platform`。Runtime 和 Render-private tracker 都要求 surface facts 变化时 source metrics revision
+前进且 surface revision 精确 `+1`，错误输入不会污染上一份 committed state。后续
+`RenderFramePacket` 才会同时持有 owning `SurfaceLeasePin`。
 
 Game-facing `RenderSceneWriter` 位于 Scene/Runtime integration，使用当帧 Asset ready snapshot 把
 AssetHandle 解析为 `FrameResourceRef`，再写 Camera、SpriteRenderItem、TileChunkRenderPacket、
@@ -74,7 +79,8 @@ Runtime 在 Render Pass 前组装一次 `RenderFrame`。Null 与真实 Pass Sche
 RenderFrame；bgfx adapter 只接收 RenderDevice resource/submit 调用，不直接理解 RenderScene、
 TileMap、Widget 或 AssetHandle。
 
-两个 View 只在所属 packet 生命周期内有效，不能脱离 packet 保存裸 span。物理 owning target
+两个 View 只在所属 packet 生命周期内有效，不能脱离 packet 保存裸 span。下列是后续目标，不是
+当前 M7-B1 已实现类型。物理 owning target
 固定为 `tina_runtime`；`RenderFramePacket` 是 Runtime private 类型，不进入 Game SDK 或 Render
 SPI public header：
 
@@ -110,7 +116,8 @@ public:
 };
 ```
 
-Asset/UI adapter 把模块私有 lease/pin 类型擦除后转移给 sink；packet 只保存固定容量
+后续 RenderFramePacket 切片中，Asset/UI adapter 把模块私有 lease/pin 类型擦除后转移给 sink；
+packet 只保存固定容量
 `StaticVector<FrameLifetimePin>`，`kind` 只用于指标和诊断，Runtime 不 downcast 或依赖 concrete
 类型。`FrameLifetimePin` 的最大 size/alignment 是构建期常量，所有 adapter 用 `static_assert`
 验证；move/destroy 必须 `noexcept`。`add()` 仅在成功时接管所有权；容量满时调用方仍持有 pin，
@@ -138,7 +145,7 @@ fallback。
 - `SpriteRenderer2D`、`MeshRenderer3D`；
 - Transform、visibility/layer/order 和材质参数。
 
-Scene component 不保存 Buffer/Texture/Pipeline typed handle。Render Scene Extraction 使用当前帧
+Scene component 不保存 Buffer/Texture/Pipeline typed handle。后续 Render Scene Extraction 使用当前帧
 Asset ready snapshot 将 AssetHandle 解析为 render-internal resource reference，并为本帧持有
 AssetLease 到 RenderFramePacket。未 Ready 资产按类型显式使用占位或跳过，不能让游戏拿 GPU
 handle 自行查询。
@@ -180,16 +187,18 @@ Game SDK 的 Window API 只暴露 `WindowId` 和逻辑/Framebuffer metrics。Pla
 通过不安装到 Game SDK 的 integration SPI 协作：
 
 ```text
-WindowSurfaceId(index, generation)
-WindowSurfaceSnapshot(extent, contentScale, sourceMetricsRevision, surfaceRevision, suspended)
-NativeWindowSurfaceLease(kind, opaque Tina-owned POD payload)
+WindowSurfaceId(owner, index, generation)
+WindowSurfaceSnapshot(surface, sourceWindow, extent, contentScale, sourceMetricsRevision, surfaceRevision, suspended)
+NativeWindowSurfaceLease(move-only PIMPL；public API 只有 surface identity)
 ```
 
-只有 `tina_render_bgfx` 在创建/重置 surface 时把 `NativeWindowSurfaceLease` 映射为 backend
-`PlatformData`。Game、Scene、UI 和公共 Render API 看不到 GLFWwindow、HWND、X11/Wayland、
-`bgfx::PlatformData` 或无类型 window/display 指针。生产 factory 成功后由 bgfx backend
-持有 move-only lease。Window 销毁前必须停止 surface submit、drain 真实 submission、关闭
-RenderDevice/bgfx，再释放 lease，最后由 Platform 销毁 GLFW window。
+只有私有 native bridge/`tina_render_bgfx` 能在创建/重置 surface 时把 `NativeWindowSurfaceLease`
+解码为 backend `PlatformData`。Game、Scene、UI 和公共 Render API 看不到 GLFWwindow、HWND、
+X11/Wayland、`bgfx::PlatformData` 或无类型 window/display 指针。生产 factory 成功后由具体
+Render backend 持有 move-only lease。M7-B1 已实现 lease、snapshot、deferred publish 与 Runtime
+handoff；M7-B2 才实现真实 bgfx clear/present/resize/suspend/drain。Window 销毁前必须停止 surface
+submit、drain 真实 submission、关闭 RenderDevice/bgfx，再释放 lease，最后由 Platform 销毁 GLFW
+window。
 
 Resize/content-scale 只在帧边界更新 surfaceRevision；0×0 或最小化进入 surface
 `Suspended`，跳过 attachment 创建、surface submission 与 Present，并使用平台等待避免 busy loop。
@@ -288,7 +297,7 @@ UI pipeline kind + Texture/Atlas page + Sampler + Blend + ClipId
 - Worker 只能准备 immutable descriptor、bounds/culling 结果和 CPU decode，不调用 RenderDevice；
 - resource create/destroy 和 GPU upload 只在 Render/GPU Upload phase；
 - bgfx 内部可以有线程，但 Tina 不从任意 Worker 并发 submit；
-- upload staging 和 RenderFramePacket resource/atlas lease 在 completion/fence 前保持 owning；
+- 后续 upload staging 和 RenderFramePacket resource/atlas lease 在 completion/fence 前保持 owning；
 - 不能把固定“延迟 N 帧”当通用安全释放规则；
 - 关闭先停止 `IGameState`/Asset producer，再 drain upload/RenderFramePacket/retirement，最后销毁 surface/device。
 
