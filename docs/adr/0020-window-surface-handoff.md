@@ -5,8 +5,8 @@
 - 实施状态：M7-B1 已落地 `NativeWindowSurfaceLease`、`WindowSurfaceId`、surface snapshot/
   revision、延迟 `publishPrimaryWindow()`、Runtime handoff 与 NullRender suspended path；
   M7-B2 已落地私有 `tina_render_bgfx` clear-only core、初始 suspended 的 1×1 device bootstrap、
-  resize/resume planner、content-scale-only no-reset、suspended skip 与逆序 shutdown。Desktop
-  bootstrap、真实 GPU 冒烟、submission ticket/drain、完整 DPI 与 Windows IMM32 仍是后续目标。
+  resize/resume planner、content-scale-only no-reset、suspended skip、逆序 shutdown、Desktop
+  bootstrap 与真实 GPU 冒烟。submission ticket/drain、完整 DPI 与 Windows IMM32 仍是后续目标。
 
 ## 背景
 
@@ -219,7 +219,8 @@ packet 完成提交；若 snapshot 为 Suspended，则仍完成 Extraction/UI/Re
   Window registry、Keyboard/Pointer/committed text、生命周期 dispatcher 与 close outcome 基线；
   M7-B1 已在此基础上实现 surface lease、snapshot、延迟窗口发布、Runtime 转换为
   `RenderSurfaceState` 以及 `SkippedSuspendedSurface` 路径；M7-B2 已建立真实 bgfx device core，
-  Desktop 产品接线、真实 GPU 冒烟、production Gamepad 与完整 DPI/IMM32 仍需后续验收；
+  `Tina::Desktop::CreateEngine`、Desktop 产品接线和真实 D3D11 Intel Iris Xe 300帧 clear-only
+  GPU 冒烟；production Gamepad、完整 DPI/IMM32、submission ticket/drain 仍需后续验收；
 - GLFW 保持窗口、输入、DPI、IME 与关闭语义的唯一 owner，bgfx 只负责渲染；
 - opaque lease 在不泄漏 native/bgfx 类型的前提下，强制窗口晚于 RenderDevice 销毁；
 - resize、最小化和关闭使用可测试的 surfaceRevision/state machine，不依赖 callback 偶然顺序；
@@ -243,6 +244,9 @@ packet 完成提交；若 snapshot 为 Suspended，则仍完成 Extraction/UI/Re
 - close 时拒绝新 packet，drain 已接受 ticket 后才释放 lease/窗口；drain timeout 不释放活跃内存；
 - public-header、外部 Game SDK consumer、forbidden-token 与 dependency-closure 门禁证明普通模块
   不需要 GLFW/bgfx include path，且不存在 native/opaque payload escape hatch。
+- Desktop bootstrap 门禁直接运行 `tina_sample_desktop` 默认300帧，验证 `SteadyClock + GLFW WindowSurface +
+  DisabledTaskSystem + bgfx` 私有组合能完成 deep-blue clear/present 和关闭；这不替代
+  resize、最小化、恢复的真实自动化，也不代表 Scene/UI/Pass Scheduler/submission ticket 已完成。
 
 ## 被拒绝方案
 

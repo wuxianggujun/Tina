@@ -36,8 +36,9 @@ Platform 生命周期订阅、Action Snapshot 与最小 Phase Context；表中 W
 handle/descriptor 和 Pass Scheduler 均未实现。
 
 完整 Game SDK 不提供 RenderDevice、GPU resource handle、native window/surface 或第三方 factory。
-后续 `tina_bootstrap_desktop` 将提供只使用 Tina 类型的 `Desktop::CreateEngine(config)`，让普通
-游戏无需知道生产组合实际使用 GLFW/bgfx/FreeType/miniaudio。
+已落地的 `tina_bootstrap_desktop` 提供只使用 Tina 类型的 `Desktop::CreateEngine(config)`，让普通
+游戏无需知道当前生产组合实际使用 GLFW/bgfx。FreeType、miniaudio 与对应 UI/Audio 模块仍按
+后续垂直切片接入，但不得改变该公开边界。
 
 ## ABI 范围
 

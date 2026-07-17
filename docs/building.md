@@ -64,11 +64,13 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 EnTT、FreeType、miniaudio、Box2D、xxHash 或 SDL/SDL3。`tina_sample_null` 只组合 Headless Platform、
 Disabled TaskSystem 与 NullRenderDevice。
 
-## Windows vNext GLFW Platform
+## Windows vNext GLFW Platform 与 Desktop bgfx
 
 GLFW adapter 使用独立 build tree 和 vcpkg `platform-glfw` feature，不改变上面的 Null 依赖闭包。
 它创建 `GLFW_NO_API` 窗口、发布 M7-B1 WindowSurface snapshot/lease，并组合 NullRender。M7-B2
-私有 bgfx clear-only core 使用单独 preset 构建；Desktop bootstrap 与真实 GPU 样例仍在下一提交接线：
+私有 bgfx clear-only core 使用单独 preset 构建；Desktop bootstrap 通过
+`Tina::Desktop::CreateEngine(config)` 私有组合 `SteadyClock + GLFW WindowSurface + DisabledTaskSystem + bgfx`。
+`tina_sample_desktop` 不带参数时默认运行300帧真实 GPU deep-blue clear/present：
 
 ```powershell
 cmake --preset windows-msvc-vnext-platform
@@ -81,8 +83,11 @@ out\build\windows-msvc-vnext-platform\bin\Debug\tina_sample_platform.exe `
 
 cmake --preset windows-msvc-vnext-bgfx
 cmake --build --preset windows-vnext-bgfx-debug `
-  --target tina_tests tina_platform_glfw_tests tina_render_bgfx_tests
+  --target tina_tests tina_platform_glfw_tests tina_render_bgfx_tests tina_sample_desktop
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_platform_glfw_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_desktop.exe
 ```
 
 Release 必须在 Debug build 结束后串行执行：
@@ -94,13 +99,23 @@ out\build\windows-msvc-vnext-platform\bin\Release\tina_tests.exe --gtest_color=y
 out\build\windows-msvc-vnext-platform\bin\Release\tina_platform_glfw_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-platform\bin\Release\tina_sample_platform.exe `
   --frames=300 --frame-delay-ms=0
+
+cmake --build --preset windows-vnext-bgfx-release `
+  --target tina_tests tina_platform_glfw_tests tina_render_bgfx_tests tina_sample_desktop
+out\build\windows-msvc-vnext-bgfx\bin\Release\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Release\tina_platform_glfw_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Release\tina_render_bgfx_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
 ```
 
 Windows 构建会把 GLFW runtime DLL 复制到对应 `bin/<Config>`。样例不带参数时以16 ms 的演示延迟
 显示1800帧；自动门禁必须显式使用 `--frame-delay-ms=0`，这条 sleep 路径不属于 benchmark。
 最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3；Debug 和 Release
-均已通过基础183/183、GLFW专项22/22、Null样例300帧和 WindowSurface GLFW 样例300帧。另有一次
+均已通过基础183/183、GLFW专项22/22、bgfx专项11/11、Null样例300帧、WindowSurface GLFW 样例300帧，
+以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 默认300帧。另有一次
 `TINA_BUILD_TESTING=OFF` 的 production-style GLFW 样例300帧验证，用来证明测试 target 关闭后样例仍能运行。
+当前 Desktop smoke 只证明 clear-only bgfx surface 创建、提交和关闭链路通过，不代表
+Scene/UI/Pass Scheduler/submission ticket 已完成，也不宣称 resize、最小化、恢复的真实自动化通过。
 
 ## Windows vNext Release
 
@@ -276,7 +291,7 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 | `TINA_BUILD_SHADERS` | `ON` | 构建运行时 shader；关闭后只适合编译/链接门禁 |
 | `TINA_BUILD_LEGACY` | `ON` | 迁移期构建现有游戏与旧模块；vNext preset 固定关闭 |
 | `TINA_BUILD_PLATFORM_GLFW` | `OFF` | 构建私有 vNext GLFW Window/Input adapter；需启用 vcpkg `platform-glfw` feature，不改变 Game SDK 边界 |
-| `TINA_BUILD_RENDER_BGFX` | `OFF` | 后续启用私有 vNext bgfx backend，不改变 Game SDK 边界 |
+| `TINA_BUILD_RENDER_BGFX` | `OFF` | 构建私有 vNext bgfx backend 与 Desktop clear-only smoke，不改变 Game SDK 边界 |
 | `TINA_BUILD_BENCHMARKS` | `OFF` | 后续构建独立 `tina_bench` |
 | `TINA_ENABLE_SANITIZERS` | `OFF` | GCC/Clang Unix target 同时启用 ASan/UBSan；其他工具链配置时报错 |
 | `TINA_BUILD_WAYLAND` | `OFF` | Linux Wayland 构建，需要对应 vcpkg feature |

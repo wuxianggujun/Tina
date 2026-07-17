@@ -4,7 +4,8 @@
 
 - 测试框架固定为 GoogleTest；
 - CMake 始终生成基础 `tina_tests`；启用 `TINA_BUILD_PLATFORM_GLFW` 时另外生成
-  `tina_platform_glfw_tests`，不注册额外测试调度；
+  `tina_platform_glfw_tests`，启用 `TINA_BUILD_RENDER_BGFX` 时另外生成 `tina_render_bgfx_tests`，
+  不注册额外测试调度；
 - 构建完成后直接运行对应 GoogleTest executable，任一返回码非0即失败；
 - Visual Studio 多配置构建把测试运行时隔离到 `bin/<Config>`，禁止 Debug/Release GTest DLL 共用目录；
 - 同一 Visual Studio build tree 的 Debug/Release 构建串行执行，禁止并发启动两个 MSBuild 门禁；
@@ -17,25 +18,28 @@
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1：Core/Platform/Input/Task/Render/Runtime、WindowSurface handoff，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 183/183 | 通过 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1：Core/Platform/Input/Task/Render/Runtime、WindowSurface handoff，Legacy/真实 bgfx backend 关闭 | Release C++23 | 183/183 | 通过 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2：Core/Platform/Input/Task/Render/Runtime、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Debug C++23 | 183/183 | 通过；GLFW 22/22、bgfx 11/11 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2：Core/Platform/Input/Task/Render/Runtime、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Release C++23 | 183/183 | 通过；GLFW 22/22、bgfx 11/11 |
 | Windows 11 / MSVC 19.50 | Legacy ON 与 vNext M6-A 共存构建 | Debug C++23 | 135/135 | 通过 |
 | Ubuntu 22.04 / GCC 13.4 | vNext M6-A/M7-A/M7-B1：X11 WindowSurface handoff，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 183/183 | 通过 |
 | Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext M6-A/M7-A/M7-B1：X11 WindowSurface handoff，ASan/UBSan/LSan，基础测试无 suppression | Debug C++23 | 183/183 | 通过 |
 
-GLFW adapter 测试是独立 executable，不能把两个进程伪写成单个合并测试数。当前测试拓扑为：
+GLFW adapter 和 bgfx adapter 测试是独立 executable，不能把多个进程伪写成单个合并测试数。当前测试拓扑为：
 
-| 构建图 | 基础 GoogleTest | GLFW 专项 GoogleTest | 状态 |
-| --- | ---: | ---: | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 183/183 | 22/22 | 通过；Null样例300帧、WindowSurface GLFW样例300帧返回0 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 183/183 | 22/22 | 通过；Null样例300帧、WindowSurface GLFW样例300帧返回0 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 production-style | 测试 target 关闭 | 不构建 | `TINA_BUILD_TESTING=OFF`，GLFW样例300帧返回0 |
-| Ubuntu 22.04 / GCC 13.4 + GLFW X11 | 183/183 | 22/22 | 通过；Null样例300帧、WindowSurface GLFW样例300帧返回0 |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11 + ASan/UBSan/LSan | 183/183 | 22/22 | 通过；基础测试无 suppression，Null/GLFW样例各300帧；`_XimOpenIM` 精确 suppression 仅专项命中12次/4896 B、GLFW样例命中1次/408 B |
-| Ubuntu 22.04 / GCC 13.4 + GLFW X11/Wayland 双后端 | 183/183 | 22/22 | 通过；嵌套 Weston 9 强制 Wayland 与 Xvfb 强制 X11 均通过基础、专项与300帧样例 |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11/Wayland 双后端 + ASan/UBSan/LSan | 183/183 | 22/22 | 通过；基础测试无 suppression且Null样例300帧；Wayland专项与样例 suppression 命中0，X11专项命中12次/4896 B、样例命中1次/408 B |
+| 构建图 | 基础 GoogleTest | GLFW 专项 GoogleTest | bgfx 专项 GoogleTest | 状态 |
+| --- | ---: | ---: | ---: | --- |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 183/183 | 22/22 | 11/11 | 通过；Null样例300帧、WindowSurface GLFW样例300帧、真实 D3D11 Intel Iris Xe Desktop样例默认300帧返回0 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 183/183 | 22/22 | 11/11 | 通过；Null样例300帧、WindowSurface GLFW样例300帧、真实 D3D11 Intel Iris Xe Desktop样例默认300帧返回0 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 production-style | 测试 target 关闭 | 不构建 | 不构建 | `TINA_BUILD_TESTING=OFF`，GLFW样例300帧返回0 |
+| Ubuntu 22.04 / GCC 13.4 + GLFW X11 | 183/183 | 22/22 | 未运行 | 通过；Null样例300帧、WindowSurface GLFW样例300帧返回0 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11 + ASan/UBSan/LSan | 183/183 | 22/22 | 未运行 | 通过；基础测试无 suppression，Null/GLFW样例各300帧；`_XimOpenIM` 精确 suppression 仅专项命中12次/4896 B、GLFW样例命中1次/408 B |
+| Ubuntu 22.04 / GCC 13.4 + GLFW X11/Wayland 双后端 | 183/183 | 22/22 | 未运行 | 通过；嵌套 Weston 9 强制 Wayland 与 Xvfb 强制 X11 均通过基础、专项与300帧样例 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11/Wayland 双后端 + ASan/UBSan/LSan | 183/183 | 22/22 | 未运行 | 通过；基础测试无 suppression且Null样例300帧；Wayland专项与样例 suppression 命中0，X11专项命中12次/4896 B、样例命中1次/408 B |
 
 Windows 与 Linux 当前都是“183项基础测试 + 22项GLFW专项测试”，两个 executable 均已实际返回0。
+Windows bgfx 构建另有独立 `tina_render_bgfx_tests` 11/11，Debug/Release 均实际返回0；该结果
+只覆盖当前 clear-only bgfx core、factory/lease 回滚和 Desktop smoke，不覆盖后续
+Scene/UI/Pass Scheduler/submission ticket，也不声明 resize、最小化、恢复的真实自动化通过。
 X11 在隔离 X server 下运行。GCC Wayland 门禁由 Xvfb 托载
 Weston 9 `x11-backend` 并提供 `wl_seat`；移除 `DISPLAY` 后断言
 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND`，再运行专项测试和300帧样例。同一双后端产物
@@ -256,9 +260,28 @@ out\build\windows-msvc-vnext-platform\bin\Debug\tina_sample_platform.exe `
 ```
 
 Release 使用对应 `windows-vnext-platform-release` 与 `bin/Release`，并继续与 Debug 串行构建。
-当前 Windows 最新结果是 Debug/Release 均基础183/183、GLFW专项22/22、Null样例300帧与
-WindowSurface GLFW样例300帧返回0；另有 `TINA_BUILD_TESTING=OFF` production-style WindowSurface
-GLFW样例300帧返回0。
+Windows Desktop bgfx 的独立直接门禁为：
+
+```powershell
+cmake --preset windows-msvc-vnext-bgfx
+cmake --build --preset windows-vnext-bgfx-debug `
+  --target tina_tests tina_platform_glfw_tests tina_render_bgfx_tests tina_sample_desktop
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_platform_glfw_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_desktop.exe
+
+cmake --build --preset windows-vnext-bgfx-release `
+  --target tina_tests tina_platform_glfw_tests tina_render_bgfx_tests tina_sample_desktop
+out\build\windows-msvc-vnext-bgfx\bin\Release\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Release\tina_platform_glfw_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Release\tina_render_bgfx_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
+```
+
+当前 Windows 最新结果是 Debug/Release 均基础183/183、GLFW专项22/22、bgfx专项11/11、Null样例300帧、
+WindowSurface GLFW样例300帧与真实 D3D11 Intel Iris Xe Desktop样例默认300帧返回0；另有
+`TINA_BUILD_TESTING=OFF` production-style WindowSurface GLFW样例300帧返回0。
 Linux X11、Wayland和 Clang LSan精确 suppression的完整命令见[构建与运行](building.md)。
 
 Visual Studio 多配置输出必须使用对应的 `bin/Debug` 或 `bin/Release`，不能混用 GoogleTest DLL。
@@ -309,25 +332,29 @@ cmake --build --preset linux-gcc13-vnext-debug --target tina_tests
 
 四个命令都必须返回0，并在日志中出现正常初始化、达到帧数、场景退出、资源管理器释放、bgfx 和窗口关闭记录。UI 路径还必须出现 `UI smoke scene ready`，且不得出现 `无法建立模态焦点范围`；3D 路径必须肉眼或截图确认透视 Cube 可见，并出现 `Smoke3DScene released vertex and index buffers`，且不得出现 `BGFX LEAK` 或 `MEMORY LEAK`。只检查 exit code 和 buffer 生命周期不足以证明画面正确。
 
-bgfx Debug/D3D11 当前会在关闭 InfoQueue 时输出一次 `RefCount is 4 (expected 0)`；同一代码的 MSVC Release 300 帧验证无该提示、无 stderr、无 leak marker，因此将其记录为第三方 Debug layer 诊断噪声，不作为 Tina 资源泄漏结论。
+bgfx Debug/D3D11 当前会在关闭 `ID3D11InfoQueue` 时输出一次 `RefCount is N (expected 0)`；本机
+Legacy 与 vNext 进程观察到的 `N` 会随调试对象组合变化。同一路径的 MSVC Release 300帧验证无该
+提示、无 stderr、无 leak marker；Tina 仍以自身资源账本和严格 shutdown 顺序作为泄漏门禁，不把
+这条第三方 Debug layer 引用计数提示单独当作 Tina 资源泄漏结论。
 
 ## vNext 独立样例门禁
 
-`tina_sample_null` 与 `tina_sample_platform` 已落地，其余 executable 仍是后续里程碑目标；
+`tina_sample_null`、`tina_sample_platform` 与 `tina_sample_desktop` 已落地，其余 executable 仍是后续里程碑目标；
 不得用当前 Legacy `Tina --smoke-*` 的结果冒充 vNext 样例：
 
 | 样例 | 状态 | 主要证明 | 资源策略 |
 | --- | --- | --- | --- |
 | `tina_sample_null` | M6-A/M7-A/M7-B1 Headless 已实现 | EngineHost、PlatformFrame/Input/Action、单个 `IGameState`、Headless/Disabled/Null、300帧生命周期；Linux 10,000帧仍是上一批历史结果 | 无真实第三方 backend |
 | `tina_sample_platform` | M7-A + M7-B1 已实现 | 私有 GLFW `NO_API` 窗口、键鼠、resize/focus/close、committed text、WindowSurface handoff 与 NullRender | 不创建真实 bgfx GPU device |
+| `tina_sample_desktop` | M7-B2 Desktop bootstrap + 真实 GPU smoke 已实现 | `Tina::Desktop::CreateEngine` 私有组合 SteadyClock、GLFW WindowSurface、DisabledTaskSystem 与 bgfx；默认300帧 deep-blue clear/present | Windows D3D11 Intel Iris Xe Debug/Release 已通过；不代表 Scene/UI/Pass Scheduler 完成 |
 | `tina_sample_ui` | 未实现 | committed snapshot、dirty/Flex/PaintCache、中文、Modal、TextEdit、DisplayList | M7 内置 Cooked Font/Texture fixture |
 | `tina_sample_2d_infrastructure` | 未实现 | Camera2D、Sprite layer/order、world picking、UI overlay | M8 内置 Cooked Sprite fixture |
 | `tina_sample_3d_infrastructure` | 未实现 | Perspective、depth、canonical Mesh、Unlit pipeline | M9 procedural Cube |
 | `tina_sample_2d` | 未实现 | Cooked TileMap/Tileset、chunk、角色/Tile AABB、Box2D dynamic body、正式 UI | M10/M11 Catalog/Manifest |
 | `tina_sample_3d` | 未实现 | Cooked glTF -> Mesh/Material/Prefab、culling/instance | M10 Catalog/Manifest |
 
-M7-B2 已建立私有最小 bgfx clear/present core、7项 planner 测试与4项 factory/lease 回滚测试；下一提交补 Desktop bootstrap 和
-真实 GPU 300帧冒烟。M7-C/M7-D 建立 UI DisplayList/UI Pass，M9 只扩展3D。游戏 sample source、Game SDK
+M7-B2 已建立私有最小 bgfx clear/present core、7项 planner 测试、4项 factory/lease 回滚测试、
+Desktop bootstrap 和真实 GPU 300帧冒烟。M7-C/M7-D 建立 UI DisplayList/UI Pass，M9 只扩展3D。游戏 sample source、Game SDK
 header 和 UI public header 不出现 bgfx。结构化验收使用 backend-neutral 字段：
 
 ```text
@@ -346,3 +373,8 @@ transition 和 Frame Action，在完成当前 Null submit/present 后退出；Al
 不能据此宣称真实 bgfx、2D、UI 或3D已完成。Debug/Release自动样例都以零延迟精确运行
 300帧、返回0，`IGameState::onExit` 与 `IGameApplication::onShutdown` 计数各为1，退出后无残留 Tina
 进程。
+
+Windows Desktop bgfx 可见门禁已验证 `tina_sample_desktop` 通过 `Tina::Desktop::CreateEngine`
+创建真实 D3D11 Intel Iris Xe surface，默认300帧 deep-blue clear/present 后返回0；Game SDK/public header
+无 bgfx、GLFW 或 native 泄漏。该门禁不包含 Scene/UI 内容、不包含 Pass Scheduler/submission ticket，
+也不声明 resize、最小化、恢复的真实自动化通过。

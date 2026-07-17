@@ -19,15 +19,16 @@ Runtime。现有2D/UI/3D路径继续作为验收基线，新架构按可独立�
 
 当前旧文档已经替换，但旧源码架构仍是正在运行的主实现，并未完全删除。迁移状态和删除门禁见 [架构总览](docs/architecture.md)。物理后端固定为 2D Box2D 3.x 与 3D Jolt，不引入第三套物理引擎。
 
-vNext 已完成 C++23 Headless Runtime 生命周期内核、M7-A Platform/Input 内核、首个桌面适配切片，
-以及 M7-B1 私有 WindowSurface handoff：私有 `tina_platform_glfw` 已能创建 `GLFW_NO_API` 窗口，
+vNext 已完成 C++23 Headless Runtime 生命周期内核、M7-A Platform/Input 内核、首个桌面适配切片、
+M7-B1 私有 WindowSurface handoff，以及 M7-B2 Desktop bootstrap + 真实 GPU 冒烟：私有
+`tina_platform_glfw` 已能创建 `GLFW_NO_API` 窗口，
 并把键盘、Pointer、Focus、resize、close 与已提交 UTF-8 文本归一化到同一份有界
 `PlatformFrameView`；Runtime 通过 generation `WindowSurfaceId`、无原生句柄的
 `WindowSurfaceSnapshot` 和 move-only `NativeWindowSurfaceLease` 把窗口 surface 交给 Render
-组合，Game SDK 不暴露 native 或 bgfx 类型。M7-B2 已加入私有 bgfx clear-only core、resize/resume
-planner 与 suspended skip；`tina_sample_platform` 仍使用 NullRender，下一提交再接 Desktop bootstrap
-与真实 GPU 300帧冒烟。production Gamepad、Windows IMM32 composition、UI Core
-与可见中文 UI 分别放在后续切片。
+组合，Game SDK 不暴露 native 或 bgfx 类型。`Tina::Desktop::CreateEngine(config)` 已作为普通桌面入口
+落地，当前私有组合为 `SteadyClock + GLFW WindowSurface + DisabledTaskSystem + bgfx`；
+`tina_sample_desktop` 默认运行300帧，以深蓝色 clear/present 验证真实 GPU 路径。production Gamepad、
+Windows IMM32 composition、Scene/UI/Pass Scheduler、submission ticket/drain 与可见中文 UI 分别放在后续切片。
 
 ## 当前 Legacy 已完成基线
 
@@ -45,7 +46,7 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 ## 构建
 
-目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 最新门禁已在 Visual Studio 2026 18.4.3、MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过 vNext Null 与 GLFW Debug/Release 图：基础183/183、GLFW专项22/22、Null样例300帧、WindowSurface GLFW样例300帧；`TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Linux M7-B1 门禁也已通过基础183/183、GLFW专项22/22和300帧样例：覆盖 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer，以及 GCC 13/Clang 22 X11/Wayland 双后端；Wayland 使用带 `wl_seat` 的嵌套 Weston 9。Clang 基础测试无 suppression，Wayland 的 `_XimOpenIM` 匹配为0，X11 仅对第三方 libX11 retention 使用精确 suppression；由 vcpkg 提供的 GLFW 本身未被 sanitizer 插桩。详细边界见[测试文档](docs/testing.md)。Clang preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22.04 自带的旧 libstdc++。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
+目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 最新门禁已在 Visual Studio 2026 18.4.3、MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过 vNext Null、GLFW 与 bgfx Debug/Release 图：基础183/183、GLFW专项22/22、bgfx专项11/11、Null样例300帧、WindowSurface GLFW样例300帧，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 默认300帧；Debug/Release 构建均通过。`TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。Linux M7-B1 门禁也已通过基础183/183、GLFW专项22/22和300帧样例：覆盖 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer，以及 GCC 13/Clang 22 X11/Wayland 双后端；Wayland 使用带 `wl_seat` 的嵌套 Weston 9。Clang 基础测试无 suppression，Wayland 的 `_XimOpenIM` 匹配为0，X11 仅对第三方 libX11 retention 使用精确 suppression；由 vcpkg 提供的 GLFW 本身未被 sanitizer 插桩。详细边界见[测试文档](docs/testing.md)。Clang preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22.04 自带的旧 libstdc++。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
 
 ```powershell
 cmake --version
@@ -59,6 +60,12 @@ cmake --build --preset windows-vnext-platform-debug --target tina_tests tina_pla
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_tests.exe
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_platform_glfw_tests.exe
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_sample_platform.exe --frames=300 --frame-delay-ms=0
+
+# 可选 Desktop bootstrap + 真实 bgfx clear-only GPU 冒烟
+cmake --preset windows-msvc-vnext-bgfx
+cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_platform_glfw_tests tina_render_bgfx_tests tina_sample_desktop
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_desktop.exe
 
 cmake --preset windows-msvc
 cmake --build --preset windows-debug --target Tina tina_tests

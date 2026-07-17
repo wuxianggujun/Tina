@@ -1,8 +1,8 @@
 #include "BgfxRenderDevice.hpp"
 #include "BgfxSurfaceFramePlanner.hpp"
 
-#include "../RenderSurfaceStateTracker.hpp"
 #include "../../integration/WindowSurfaceLeaseAccess.hpp"
+#include "../RenderSurfaceStateTracker.hpp"
 
 #include <tina/core/error/Error.hpp>
 #include <tina/render/RenderErrors.hpp>
@@ -21,7 +21,7 @@ namespace {
 
 constexpr bgfx::ViewId kPrimaryView = 0;
 constexpr u32 kDefaultResetFlags = BGFX_RESET_VSYNC;
-constexpr u32 kClearRgba = 0x000000ff;
+constexpr u32 kClearRgba = 0x102a43ff;
 constexpr u16 kClearFlags = BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH;
 
 struct DecodedNativeWindowBinding final {
@@ -117,14 +117,10 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
 
 class BgfxRenderDevice final : public IRenderDevice {
   public:
-    BgfxRenderDevice(
-        Detail::RenderSurfaceStateTracker surfaceStateTracker,
-        Integration::NativeWindowSurfaceLease lease,
-        RenderSurfaceState initialSurface) noexcept
-        : surfaceStateTracker_(std::move(surfaceStateTracker)),
-          lease_(std::move(lease)),
-          ownerThread_(std::this_thread::get_id()),
-          committedSurfaceState_(initialSurface)
+    BgfxRenderDevice(Detail::RenderSurfaceStateTracker surfaceStateTracker, Integration::NativeWindowSurfaceLease lease,
+                     RenderSurfaceState initialSurface) noexcept
+        : surfaceStateTracker_(std::move(surfaceStateTracker)), lease_(std::move(lease)),
+          ownerThread_(std::this_thread::get_id()), committedSurfaceState_(initialSurface)
     {
     }
 
@@ -182,8 +178,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(std::move(status.error()));
         }
-        auto framePlan = BgfxSurfaceFramePlanner::planFrame(
-            committedSurfaceState_, *frame.primaryWindowSurface, appliedBackbuffer_);
+        auto framePlan =
+            BgfxSurfaceFramePlanner::planFrame(committedSurfaceState_, *frame.primaryWindowSurface, appliedBackbuffer_);
         if (!framePlan)
         {
             stopped_ = true;
@@ -273,8 +269,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::success();
         }
 
-        Core::Error error{RenderErrorCode::WrongOwnerThread,
-                          "The bgfx render device must be used on its owner thread"};
+        Core::Error error{RenderErrorCode::WrongOwnerThread, "The bgfx render device must be used on its owner thread"};
         error.addContext(operation);
         return Core::failure(std::move(error));
     }
@@ -302,10 +297,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
     void submitClearOnlyView(const RenderSurfaceState& surface) noexcept
     {
-        bgfx::setViewRect(kPrimaryView,
-                          0,
-                          0,
-                          static_cast<u16>(surface.framebufferExtent.width),
+        bgfx::setViewRect(kPrimaryView, 0, 0, static_cast<u16>(surface.framebufferExtent.width),
                           static_cast<u16>(surface.framebufferExtent.height));
         bgfx::setViewClear(kPrimaryView, kClearFlags, kClearRgba, 1.0F, 0);
         bgfx::touch(kPrimaryView);
@@ -324,9 +316,8 @@ class BgfxRenderDevice final : public IRenderDevice {
     bool bgfxInitialized_ = false;
 };
 
-[[nodiscard]] Core::Status validateInitialSurfaceForLease(
-    const RenderSurfaceState& initialSurface,
-    const Integration::NativeWindowSurfaceLease& lease)
+[[nodiscard]] Core::Status validateInitialSurfaceForLease(const RenderSurfaceState& initialSurface,
+                                                          const Integration::NativeWindowSurfaceLease& lease)
 {
     if (initialSurface.surface != toRenderSurfaceId(lease.surface()))
     {
@@ -342,9 +333,8 @@ class BgfxRenderDevice final : public IRenderDevice {
 
 } // namespace
 
-Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(
-    const RenderDeviceCreateParams& params,
-    Integration::NativeWindowSurfaceLease lease)
+Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(const RenderDeviceCreateParams& params,
+                                                                    Integration::NativeWindowSurfaceLease lease)
 {
     if (!params.initialPrimaryWindowSurface.has_value())
     {
@@ -377,10 +367,8 @@ Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(
 
     try
     {
-        auto renderDevice = std::unique_ptr<BgfxRenderDevice>(new BgfxRenderDevice(
-            std::move(*surfaceStateTracker),
-            std::move(lease),
-            initialSurface));
+        auto renderDevice = std::unique_ptr<BgfxRenderDevice>(
+            new BgfxRenderDevice(std::move(*surfaceStateTracker), std::move(lease), initialSurface));
 
         if (auto status = renderDevice->initialize(nativeBinding->platformData); !status)
         {
@@ -393,8 +381,7 @@ Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(
         return Core::failure(Core::CoreErrorCode::OutOfMemory, "The bgfx render device allocation failed");
     } catch (...)
     {
-        return Core::failure(Core::CoreErrorCode::Internal,
-                             "The bgfx render device factory threw unexpectedly");
+        return Core::failure(Core::CoreErrorCode::Internal, "The bgfx render device factory threw unexpectedly");
     }
 }
 

@@ -1,6 +1,6 @@
 # 渲染架构与 bgfx 边界
 
-> 状态：vNext 目标契约已接受；M7-B1 WindowSurface handoff 与 M7-B2 私有 bgfx clear-only core 已实现，Desktop 产品接线和真实 GPU 冒烟待完成。
+> 状态：vNext 目标契约已接受；M7-B1 WindowSurface handoff 与 M7-B2 私有 bgfx clear-only core、Desktop 产品接线、真实 GPU 冒烟已实现；Scene/UI/Pass Scheduler 与 submission ticket/drain 仍后置。
 > bgfx 是 Tina 的实现依赖，不是游戏开发 API。
 
 ## 当前 Legacy 事实
@@ -24,8 +24,9 @@ buffer 回收；现有 2D/UI 路径也能运行。但目前 Scene、World、Widg
 | Tina Render SPI | Runtime/Scene/Asset/UI renderer 与模块测试 | Tina typed handle、descriptor、RenderFrame、Pass Scheduler | 第三方 enum/macro/type、公开 native escape hatch |
 | Backend private | `tina_render_bgfx` 与离线 shader 工具 | bgfx/bx/bimg、ViewId、PlatformData、backend stats | Game component、UINode、EnTT registry、源资产玩法语义 |
 
-普通游戏入口调用 `Tina::Desktop::CreateEngine(config)`；`tina_bootstrap_desktop` 私有组合
-GLFW、bgfx、FreeType 和 miniaudio。游戏 target 不 include `BgfxRenderFactory`，不直接链接
+普通游戏入口调用 `Tina::Desktop::CreateEngine(config)`；当前 `tina_bootstrap_desktop` 私有组合
+`SteadyClock`、GLFW WindowSurface、`DisabledTaskSystem` 和 bgfx。FreeType、miniaudio、Scene/UI
+生产接线仍在后续切片。游戏 target 不 include `BgfxRenderFactory`，不直接链接
 `tina_render_bgfx`。失败注入和引擎集成测试才使用低层的
 `EngineHost::Create(config, factories)`，factory 签名也只包含 Tina 类型。
 
@@ -196,8 +197,9 @@ NativeWindowSurfaceLease(move-only PIMPL；public API 只有 surface identity)
 解码为 backend `PlatformData`。Game、Scene、UI 和公共 Render API 看不到 GLFWwindow、HWND、
 X11/Wayland、`bgfx::PlatformData` 或无类型 window/display 指针。生产 factory 成功后由具体
 Render backend 持有 move-only lease。M7-B1 已实现 lease、snapshot、deferred publish 与 Runtime
-handoff；M7-B2 已实现私有 bgfx device core、clear/present、resize/resume planner 与 suspended skip，
-Desktop bootstrap、真实 GPU 门禁和 submission ticket/drain 仍待完成。Window 销毁前必须停止 surface
+handoff；M7-B2 已实现私有 bgfx device core、clear/present、resize/resume planner、suspended skip、
+`Tina::Desktop::CreateEngine` 和真实 D3D11 Intel Iris Xe 300帧 clear-only GPU 门禁；submission
+ticket/drain 仍待完成。Window 销毁前必须停止 surface
 submit、drain 真实 submission、关闭 RenderDevice/bgfx，再释放 lease，最后由 Platform 销毁 GLFW
 window。
 
@@ -344,6 +346,9 @@ Tina category/code、可选 native integer code 和 UTF-8 context，不返回 bg
    完成后 packet/lease/pin/resource count 全部归零；
 10. 纯 UI、2D-only、3D-only、无 content 和 `Suspended` surface 分别验证 initial clear 恰好一次或0次。
 
+当前 M7-B2 已验证 Game SDK/public header 不泄漏 bgfx、GLFW 或 native handle；`tina_sample_desktop`
+经 Desktop bootstrap 间接解析到 bgfx 属于私有实现依赖，不改变公开边界。
+
 ## Roadmap 与验收解释
 
 M7 的可见 UI 需要最小真实 Surface 和 UI Pass，因此 M7 同时建立私有的最小
@@ -356,7 +361,7 @@ procedural geometry。禁止恢复 Runtime 路径加载，也禁止游戏自行�
 验收分开记录：
 
 - 当前 Legacy：`Tina --smoke-*` 只证明旧路径仍可运行；
-- vNext infrastructure：Null/UI/2D/3D 独立 sample 验证接口和生命周期；
+- vNext infrastructure：Null、Platform、Desktop clear-only GPU、UI/2D/3D 独立 sample 分别验证接口和生命周期；
 - vNext product：Cooked TileMap 2D 与 Cooked glTF/Material/Prefab 3D 才计入 Legacy 删除门禁；
 - 进程返回码、结构化资源计数、性能数据和实际截图是四类不同证据。
 

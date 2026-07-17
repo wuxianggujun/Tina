@@ -15,13 +15,15 @@ Profiling uses Tina-owned trace points with optional Tracy; reproducible perform
 handled separately by `tina_bench`. SDL/SDL3 and CTest are not part of the target architecture.
 
 The C++23 headless lifecycle kernel, M7-A platform/input kernel, the first desktop adapter slice,
-and M7-B1 private WindowSurface handoff are complete. The private `tina_platform_glfw` backend now
+M7-B1 private WindowSurface handoff, and M7-B2 Desktop bootstrap plus real-GPU smoke are complete. The private `tina_platform_glfw` backend now
 creates a `GLFW_NO_API` window, normalizes keyboard/pointer/focus/resize/close/committed UTF-8 text
 into the same bounded `PlatformFrameView`, and hands a move-only window surface lease to the render
-composition without exposing native or bgfx types. M7-B2 now provides the private bgfx clear-only
-core with resize/resume and suspended-surface planning; `tina_sample_platform` still uses NullRender
-until the Desktop bootstrap and real-GPU smoke are wired. IMM32 composition, production gamepad input, and
-retained UI remain later slices.
+composition without exposing native or bgfx types. `Tina::Desktop::CreateEngine(config)` now privately
+composes `SteadyClock + GLFW WindowSurface + DisabledTaskSystem + bgfx`, and `tina_sample_desktop`
+defaults to 300 frames of deep-blue clear/present on the real GPU path. Windows VS 2026/MSVC 19.50/
+CMake 4.2.3 Debug and Release builds pass with direct GTest 183/183, GLFW 22/22, bgfx 11/11, and real
+D3D11 Intel Iris Xe 300-frame smoke. IMM32 composition, production gamepad input, Scene/UI, Pass
+Scheduler, submission tickets, and retained UI remain later slices.
 
 The active design, verified status, and build instructions are maintained in
 the [Chinese documentation](README_CN.md).
