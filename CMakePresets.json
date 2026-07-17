@@ -50,7 +50,8 @@
         "TINA_BUILD_LEGACY": "OFF",
         "TINA_BUILD_RENDER_BGFX": "OFF",
         "TINA_BUILD_SHADERS": "OFF",
-        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON"
+        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tests"
       }
     },
     {
@@ -66,7 +67,7 @@
         "TINA_BUILD_RENDER_BGFX": "OFF",
         "TINA_BUILD_SHADERS": "OFF",
         "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON",
-        "VCPKG_MANIFEST_FEATURES": "platform-glfw"
+        "VCPKG_MANIFEST_FEATURES": "tests;platform-glfw"
       }
     },
     {
@@ -114,7 +115,8 @@
         "TINA_BUILD_LEGACY": "OFF",
         "TINA_BUILD_RENDER_BGFX": "OFF",
         "TINA_BUILD_SHADERS": "OFF",
-        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON"
+        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tests"
       }
     },
     {
@@ -124,7 +126,7 @@
       "binaryDir": "${sourceDir}/out/build/linux-gcc13-vnext-platform",
       "cacheVariables": {
         "TINA_BUILD_PLATFORM_GLFW": "ON",
-        "VCPKG_MANIFEST_FEATURES": "platform-glfw"
+        "VCPKG_MANIFEST_FEATURES": "tests;platform-glfw"
       }
     },
     {
@@ -134,7 +136,7 @@
       "binaryDir": "${sourceDir}/out/build/linux-gcc13-vnext-platform-wayland",
       "cacheVariables": {
         "TINA_BUILD_WAYLAND": "ON",
-        "VCPKG_MANIFEST_FEATURES": "platform-glfw;wayland"
+        "VCPKG_MANIFEST_FEATURES": "tests;platform-glfw;wayland"
       }
     },
     {
@@ -149,7 +151,8 @@
         "TINA_BUILD_LEGACY": "OFF",
         "TINA_BUILD_RENDER_BGFX": "OFF",
         "TINA_BUILD_SHADERS": "OFF",
-        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON"
+        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tests"
       }
     },
     {
@@ -159,7 +162,7 @@
       "binaryDir": "${sourceDir}/out/build/linux-clang22-vnext-platform",
       "cacheVariables": {
         "TINA_BUILD_PLATFORM_GLFW": "ON",
-        "VCPKG_MANIFEST_FEATURES": "platform-glfw"
+        "VCPKG_MANIFEST_FEATURES": "tests;platform-glfw"
       }
     },
     {
@@ -187,7 +190,7 @@
       "binaryDir": "${sourceDir}/out/build/linux-clang22-vnext-platform-wayland-sanitize",
       "cacheVariables": {
         "TINA_BUILD_WAYLAND": "ON",
-        "VCPKG_MANIFEST_FEATURES": "platform-glfw;wayland"
+        "VCPKG_MANIFEST_FEATURES": "tests;platform-glfw;wayland"
       }
     }
   ],

@@ -3,11 +3,10 @@
   "name": "tina",
   "version-string": "0.0.1",
   "default-features": [
-    "legacy"
+    "legacy",
+    "tests"
   ],
-  "dependencies": [
-    "gtest"
-  ],
+  "dependencies": [],
   "features": {
     "platform-glfw": {
       "description": "Build the private Tina vNext GLFW platform adapter.",
@@ -30,6 +29,12 @@
         "spdlog",
         "utfcpp",
         "xxhash"
+      ]
+    },
+    "tests": {
+      "description": "Build Tina GoogleTest executables without registering CTest.",
+      "dependencies": [
+        "gtest"
       ]
     },
     "wayland": {
