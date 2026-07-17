@@ -24,13 +24,23 @@ set(TINA_CORE_TEST_SOURCES
 )
 
 set(TINA_RUNTIME_TEST_SOURCES
+    platform/header_isolation/InputHeader.cpp
     platform/header_isolation/PlatformBackendHeader.cpp
+    platform/header_isolation/PlatformFrameHeader.cpp
+    platform/header_isolation/WindowHeader.cpp
     platform/PlatformBackendTests.cpp
     render/header_isolation/RenderDeviceHeader.cpp
     render/NullRenderDeviceTests.cpp
     runtime/header_isolation/EngineFactoriesHeader.cpp
     runtime/header_isolation/EngineHostHeader.cpp
     runtime/header_isolation/GameApplicationHeader.cpp
+    runtime/header_isolation/InputActionsHeader.cpp
+    runtime/header_isolation/InputActionMapHeader.cpp
+    runtime/header_isolation/InputRoutingHeader.cpp
+    runtime/header_isolation/PlatformEventDispatcherHeader.cpp
+    runtime/header_isolation/PlatformEventsHeader.cpp
+    runtime/InputActionTests.cpp
+    runtime/PlatformEventDispatcherTests.cpp
     runtime/RuntimeLifecycleTests.cpp
     task/header_isolation/TaskSystemHeader.cpp
     task/TaskSystemTests.cpp

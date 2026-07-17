@@ -1,7 +1,7 @@
 # vNext 公共接口与生命周期规则
 
-> 状态：分批实施。Core 与 M6-A 生命周期子集已经落地；完整状态栈、worker、Scene/Asset/UI/Audio、
-> Desktop bootstrap 与真实 backend 仍是后续契约。下文会明确标注当前接口与完整目标。
+> 状态：分批实施。Core、M6-A 生命周期与 M7-A Headless Platform/Input 子集已经落地；完整状态栈、worker、Scene/Asset/UI/Audio、
+> Desktop bootstrap、GLFW/DPI/Windows IMM32 与真实渲染 backend 仍是后续契约。下文会明确标注当前接口与完整目标。
 
 ## 公开类型命名规则
 
@@ -29,8 +29,8 @@ Tina 不把所有可链接 header 都称为“用户 API”：
 | Engine Module SPI | Tina 模块、backend adapter 和测试 | EngineFactories、PlatformFrameView、RenderDevice typed handle/descriptor、RenderFrame、FramePinSink、Pass Scheduler |
 | Backend Private | 具体 adapter | GLFW、bgfx/bx/bimg、FreeType、miniaudio、EnTT 等第三方类型 |
 
-M6-A 当前 Game SDK 只实现 `EngineHost`、`IGameApplication`、单个 `IGameState`、
-`GameStatePolicy` 与最小 Phase Context；表中 World/Asset/UI、`GameStateCommands`、typed render
+当前 Game SDK 只实现 `EngineHost`、`IGameApplication`、单个 `IGameState`、`GameStatePolicy`、
+Platform 生命周期订阅、Action Snapshot 与最小 Phase Context；表中 World/Asset/UI、`GameStateCommands`、typed render
 handle/descriptor 和 Pass Scheduler 均未实现。
 
 完整 Game SDK 不提供 RenderDevice、GPU resource handle、native window/surface 或第三方 factory。
@@ -80,7 +80,7 @@ public:
 
 ## 最小启动接口
 
-M6-A 当前可用接口为：
+当前可用启动接口为：
 
 ```cpp
 class EngineHost final {
@@ -109,7 +109,7 @@ CreateEngine(EngineConfig config);
 ```
 
 `Desktop::CreateEngine` 尚未实现；它会是组合 helper，不是 Singleton，也不能从游戏代码全局查询。
-M6-A target 当前只承诺 build-tree consumer；正式 `Tina::GameSDK`、`install(EXPORT ...)`、版本化
+当前 vNext target 只承诺 build-tree consumer；正式 `Tina::GameSDK`、`install(EXPORT ...)`、版本化
 package config 与外部 SDK consumer 门禁会在 Desktop Bootstrap 切片统一加入，当前不伪装成可安装 SDK。
 
 ## IGameApplication：游戏程序入口
@@ -248,18 +248,18 @@ public:
 
 Context 是不可复制/移动、只在当前 callback 有效的 capability view：
 
-| M6-A Context | 当前可访问能力 |
+| 当前 Context | 当前可访问能力 |
 | --- | --- |
-| `GameStartupContext` / `GameStateEnterContext` | 只读 `EngineConfig` |
-| `FixedUpdateContext` | `FrameTiming` 与 `FixedUpdateTiming` |
-| `FrameUpdateContext` | `FrameTiming` 与 `requestExitAfterFrame()` |
+| `GameStartupContext` / `GameStateEnterContext` | 只读 `EngineConfig` 与 callback-scope `PlatformEventSubscriptions` 注册门面 |
+| `FixedUpdateContext` | `FrameTiming`、`FixedUpdateTiming` 与目标 tick 的 `SimulationActionSnapshot` |
+| `FrameUpdateContext` | `FrameTiming`、当帧 `FrameActionSnapshot` 与 `requestExitAfterFrame()` |
 | `RenderSceneExtractionContext` / `UIUpdateContext` | 只读 `FrameTiming` |
 | `GameStateExitContext` / `GameShutdownContext` | `RunStopCause` 与可选 Runtime failure |
 
 `runtimeFailure()` 返回 callback-only 的只读借用，只保证在当前 `onExit`/`onShutdown` 调用期间
 有效；回调可以复制稳定 code/message 供诊断，但不得保存 Error 指针或 Context。
 
-M6-A Context 不提供 World、Input、Asset、Task、UI writer 或 Render writer。完整垂直切片将按能力
+当前 Context 不提供 raw Platform Input、World、Asset、Task、UI writer 或 Render writer。完整垂直切片将按能力
 逐项扩展，下表是目标边界，不是当前 API：
 
 | Context | 可访问能力 | 明确禁止 |
@@ -309,13 +309,13 @@ struct FixedUpdateTiming {
 `discardedSimulationDelta`，只保留小于一步的余量计算 interpolation。time scale 只影响玩法，
 不影响 Platform/UI/Asset/Audio/diagnostics wall timeout。
 
-M6-A 只提供上述时间数据；`SimulationActionSnapshot` 与 `FrameActionSnapshot` 尚未实现。完整
-Input 切片会让 fixed context 只读取目标 tick 的 Simulation Action、frame context 只读取当帧
-Frame Action，并保证0步保留 edge、最多4步也只消费一次。
+M7-A 已实现 `SimulationActionSnapshot` 与 `FrameActionSnapshot`：fixed context 只读取目标 tick 的
+Simulation Action，frame context 只读取当帧 Frame Action；0步帧保留 edge，最多4个追赶步也只在
+第一个目标 tick 消费一次。
 
 ## M7 PlatformFrame 与 Action 接口
 
-M7-A 已冻结下列职责完整的名称；它们是下一切片目标，不是 M6-A 已实现 API：
+M7-A 已实现下列职责完整的 Platform/Input 名称；UI consumption/claim 数据结构属于后续 UI 接入点：
 
 | 类型 | API 层 | 职责与寿命 |
 | --- | --- | --- |
@@ -324,29 +324,43 @@ M7-A 已冻结下列职责完整的名称；它们是下一切片目标，不是
 | `WindowMetricsSnapshot` | Game SDK 只读 / Module SPI | logical/framebuffer extent、content scale、focus/minimized/visible 与唯一 metrics revision；不保存 Render surface suspended |
 | `PlatformPollResult` | Engine Module SPI | `ContinueFrame{PlatformFrameView}` 或 `ExitRequested` 的 tagged union；失败只通过外层 `Result` |
 | `PlatformFrameView` | Engine Module SPI | 只存在于 Continue 分支的 Poll/Input-phase borrowed view，包含 metrics/input/device snapshot、platform event 和 transition batch；Engine 结束该 phase 后失效 |
-| `WindowInputSnapshot` | Engine Module SPI | 该窗口在本次 Poll 结束时的 held/axis/pointer 最终状态，引用同一 metrics revision |
+| `WindowInputSnapshot` | Engine Module SPI | 该窗口在本次 Poll 结束时的 held/pointer 最终状态，引用同一 metrics revision；M7-A 只允许 `PrimaryPointerId` |
+| `GamepadSnapshot` | Engine Module SPI | Engine 级最终 sampled state；同一帧必须来自同一 registry owner，slot index 唯一且最多16个 |
 | `InputTransitionBatch` | Engine Module SPI | 按 platform sequence 排序的有界 transition；不保存 GLFW key code 之类 backend 值 |
-| `PlatformEventBatch` / `PlatformEventQueue` | Engine Module SPI / Runtime | resize/focus/device lifecycle 的有界帧批次与 RAII 订阅队列；OS CloseRequested 不进入该队列 |
+| `PlatformEventBatch` / `PlatformEventDispatcher` | Engine Module SPI / Runtime integration | Window metrics、Gamepad lifecycle/reset 的有界帧批次与 Runtime-owned 同步分发器；不是通用 Runtime Event Queue |
+| `PlatformEventSubscriptions` / `PlatformEventSubscription` | Game SDK | 只允许注册 callback 的窄门面与 generation-safe RAII token；Game 不能取得 dispatcher owner |
 | `InputTransitionConsumption` | Runtime/UI integration | 只标记本帧哪些 sequence 已由 UI 消费 |
-| `ContinuousControlClaims` | Runtime/UI integration | 只描述当前 UI route 的 held/axis/pointer ownership；Action Mapper 据此更新跨帧 suppression |
+| `ContinuousControlClaims` | Runtime/UI integration | 描述当前 UI route 的 digital/axis/pointer ownership seam；M7-A mapper 只消费 digital claim，axis/pointer continuous mapping 后续实现 |
 | `InputActionId` | Game SDK | 显式的语义 Action 标识，不暴露物理键值为 gameplay contract |
 | `SimulationActionSnapshot` | Game SDK | 当前 simulation tick 的 state/axis + 有序 edge batch |
 | `FrameActionSnapshot` | Game SDK | 仅当前 Render Frame 可用一次的 camera/presentation/UI 外围 Action |
 
 `PlatformFrameView` 及其 span 只在当前 Poll/Input phase 有效，不能保存；backend storage 即使到
 下一次 Poll 才复用，也不延长 API 借用寿命。Runtime 先让 UI 产生
-transition consumption 和 continuous claims，再映射 Gameplay Action。被消费的 Down 建立
-`suppressedUntilReleaseOrNeutral`，匹配 Up 只解除 suppression，不补发 Gameplay edge；axis 回到
-neutral 才解除。
+transition consumption 和 continuous claims，再映射 Gameplay Action。M7-A 被消费/claim 的 digital
+Down 建立 `suppressedUntilRelease`，匹配 Up 只解除 suppression，不补发 Gameplay edge；axis/pointer
+identity 目前只是已冻结 seam schema，等后续 analog binding 才实现 dead-zone/neutral suppression。
 Focus lost、设备断开和 `InputStreamReset` 取消 transient edge、repeat、Capture 与 composition，
-但不把跨帧状态粗暴清零：Action Mapper 对 resync 后仍 held/non-neutral 的 control 保留
-`suppressedUntilReleaseOrNeutral`；Simulation latch 插入 reset marker 并保留最终 action state。它们
+但不把跨帧状态粗暴清零：M7-A Action Mapper 对 resync 后仍 held 的 digital control 保留
+`suppressedUntilRelease`；Simulation latch 插入 reset marker 并保留最终 action state。它们
 都不伪造会激活按钮的普通 Up。
 
-M7-A 的 Action Mapper 由 Runtime 拥有；`EngineConfig::input.digitalBindings` 是唯一注册入口，首批
-只有 priority=0 的 Engine default Input Context。`InputConfig` 还固定 raw/platform event/claims/
-Simulation/Frame action/binding 容量；默认分别为256/64/64/128/128/64，硬上限分别为
-4096/1024/1024/4096/4096/4096。批次另有不可被普通项占用的 reset slot，运行期不得扩容。
+M7-A 的 Pointer snapshot、Pointer Button/Move/Wheel transition 与 pointer binding 只接受
+`PrimaryPointerId`（0），多 Pointer 是后续契约。`PlatformFrameBuilder` 还要求同一帧所有
+`GamepadSnapshot` 使用同一 `GamepadId` owner，且一个 slot 只能出现一个 generation；Connect/Disconnect
+必须与最终 snapshot 及同 Poll 的 cancel/reset 证据一致。
+
+Action Mapper 在处理本帧 transition 后，对跨帧保留的 `active`/suppressed physical source 再读取最终
+snapshot：仍保留的 Key、Primary Pointer Button 或 Gamepad Button 必须仍为 held。Primary Window 或
+Gamepad generation 在 retained state 尚未取消时消失/替换属于 `LifecycleInvariantViolation`，不能把旧
+source 静默迁移到新 owner/generation。
+
+M7-A 的 Action Mapper 由 Runtime 拥有；`EngineConfig::inputActions.digitalBindings` 是唯一注册入口，
+首批只有 priority=0 的 Engine default Input Context。raw/text/platform-event 容量由
+`platformFrameCapacities` 唯一配置；Simulation/Frame action/binding 容量由
+`inputActions.capacities` 配置；订阅 slot 由 `platformEventSubscriptions` 配置。M7-A 尚无 UI producer，
+内部 continuous claim 上限固定为64且不属于 game-facing Action Map 配置。批次另有不可被普通项
+占用的 reset slot，运行期不得扩容。
 
 0 fixed-step 帧不把 Down→Up 压成布尔值；Runtime 保存有界、有序
 `SimulationActionTransitionBatch`，并把它绑定到“下一个未完成 simulation tick”。第一个实际
@@ -356,24 +370,29 @@ Action state、ordered edges 和明确 target tick，不记录 GLFW 或 UI node�
 `FixedUpdateContext::simulationActions()` 只暴露目标 tick snapshot；
 `FrameUpdateContext::frameActions()` 只暴露当帧 snapshot。窗口关闭是不可取消的
 `PlatformPollResult::ExitRequested`，该分支不创建 `PlatformFrameView`、不分配 engine frame index；
-Runtime 在 Poll 后、新帧开始前停止，不再向 EventQueue
-重复发布同义 `CloseRequested`。游戏内 Escape/退出按钮继续通过 Frame Action 调用
+Runtime 在 Poll 后、新帧开始前停止，既不向当前 `PlatformEventDispatcher` 发布，也不向未来通用
+Runtime Event Queue 重复发布同义 `CloseRequested`。游戏内 Escape/退出按钮继续通过 Frame Action 调用
 `requestExitAfterFrame()`，保证当帧逻辑阶段与 Deferred Cleanup 完整结束；Active surface 正常
 submit/present，Suspended surface 返回明确 skipped 结果且不伪造 GPU submission。
+
+当前 `PlatformEventDispatcher` 只同步分发 `PlatformEventBatch` 中的平台生命周期通知，并由
+`PlatformEventSubscriptions` 提供 generation-safe RAII 订阅；未来通用 Runtime Event Queue 面向
+Gameplay/Domain/异步模块事件，当前尚未实现，也不复用 dispatcher 的 owner、容量或投递语义。
 
 ## EngineConfig
 
 `EngineConfig` 是可复制纯值，Create 前一次性验证：
 
-- M6-A 当前字段：UTF-8 `applicationName`、fixed delta（默认1/60 s）、max fixed steps（固定上限4，
-  配置默认4）、
+- 当前字段：UTF-8 `applicationName`、`primaryWindow`、`platformFrameCapacities`、`inputActions`、
+  `platformEventSubscriptions`、fixed delta（默认1/60 s）、max fixed steps（固定上限4，配置默认4）、
   max accepted real delta、gameplay time scale 与 shutdown deadline；
-- 后续字段：日志/资源根、primary window、CPU/IO worker、Task/Event/Input queue、FrameArena、
+- 后续字段：日志/资源根、CPU/IO worker、通用 Event queue、FrameArena、
   UI/Asset/Audio/Render 预算、backend policy 与 Metrics/trace capture 策略。
 
-默认值集中在 `EngineConfig::Defaults()`。M6-A 已在创建任何模块前拒绝空/非法 UTF-8 应用名、
-0/非有限时间值、`maximumStepsPerFrame > 4`、非法 time scale 与 shutdown deadline；尺寸、容量
-和 backend 组合验证随对应字段加入。`Create` 通过 `const EngineConfig&` 接收输入，并在自身
+默认值集中在 `EngineConfig::Defaults()`。当前已在创建任何模块前拒绝空/非法 UTF-8 应用名、
+非法窗口配置、非法 Platform/Action/订阅容量、重复 physical binding、0/非有限时间值、
+`maximumStepsPerFrame > 4`、非法 time scale 与 shutdown deadline；backend 组合验证随对应字段加入。
+`Create` 通过 `const EngineConfig&` 接收输入，并在自身
 `noexcept`/`try` 边界内复制所有权，避免调用前的字符串复制逃出异常边界。当前 Disabled
 TaskSystem 没有等待过程，因此 shutdown deadline 只完成配置校验；有界 Worker 切片必须在它
 真正驱动“请求停止 → 有界等待 → fatal-stop”后才能宣称 deadline 已实施。
@@ -429,7 +448,7 @@ M7-A GLFW+Null 组合不构造伪 lease，GLFW/bgfx 失败也不得静默降级 
 | --- | --- | --- | --- | --- |
 | `EngineHost` | M6-A 已实现 | Game SDK | main `unique_ptr`，直到 shutdown | Create/run `Result` |
 | 最小 Phase Context | M6-A 已实现 | Game SDK | Runtime stack，当前 callback | callback `Status` |
-| `WindowId` | M7-A 目标 | Game SDK / Module SPI | Window registry generation | invalid/stale/wrong owner |
+| `WindowId` | M7-A generation 类型与 Headless 契约已实现；生产 registry 为下一 GLFW 子切片 | Game SDK / Module SPI | 当前用于 frame identity/owner 校验；后续由 Platform Window registry 拥有 | invalid/identity mismatch；生产 stale lookup 待 GLFW registry |
 | `WindowSurfaceId` | M7-B 目标 | Runtime integration SPI | Platform surface registry generation | invalid/stale/wrong owner/revision |
 | `UINodeId` | M7-C 目标 | Game SDK | Window-owned UI registry generation + WindowId owner | invalid/stale/wrong owner |
 | `EntityId` | M8 目标 | Game SDK | World registry generation + owner | invalid/stale/wrong owner |
@@ -475,13 +494,16 @@ C++ exception 保持开启以兼容标准库/第三方，但会在 Engine、`IGa
 
 ## 公共接口验收
 
-M6-A 已验证：
+M6-A/M7-A Headless 内核已验证：
 
 - `IGameApplication` 没有逐帧虚函数，`IGameState` 是唯一帧行为接口；
 - Core/Platform/Task/Render/Runtime 的 public header 逐头独立 include 和编译；
 - `tina_sample_null` 只使用 Tina C++23 API 与显式 factory SPI，构建图不加入或链接
   GLFW/bgfx/EnTT/FreeType/miniaudio/SDL/SDL3；
-- Windows Debug/Release 与 Linux GCC/Clang 直接 GoogleTest 均92/92，Null sample 通过300帧和10,000帧。
+- Platform/Input public header 可独立编译，Runtime SPI owner 不通过 Game Context 暴露 dispatch/shutdown；
+- `PrimaryPointerId`、Gamepad snapshot 同 owner/slot 唯一、跨帧 retained source 与最终 snapshot、
+  Platform lifecycle dispatch/RAII subscription 行为使用直接 GoogleTest 覆盖；最终平台与数量结果只在
+  [测试文档](testing.md) 维护。
 
 后续验收：`tina_game_api_consumer`/Game SDK umbrella、完整 forbidden-token/dependency-closure、
-`Desktop::CreateEngine`，以及只使用 Game SDK 运行 UI/2D/3D 产品样例。
+`Desktop::CreateEngine`、完整 GLFW/DPI/Windows IMM32，以及只使用 Game SDK 运行 UI/2D/3D 产品样例。

@@ -2,6 +2,8 @@
 
 - 状态：Accepted
 - 日期：2026-07-17
+- 实施状态：当前仅 M7-A Headless Platform/Input 契约已落地；本 ADR 的 GLFW window/surface lease、
+  DPI、Windows IMM32 与 bgfx 交接均是完整 M7 后续目标，不是当前可运行 backend
 
 ## 背景
 
@@ -23,6 +25,9 @@
 - Platform backend 拥有 window registry、primary `WindowId`、GLFW window、输入、DPI、IMM32
   composition 和 close request。`EngineHost` 拥有 Platform backend 与 RenderDevice，并保证
   RenderDevice 先于 Platform backend 销毁；
+- GLFW adapter 必须保持已落地的 M7-A 输入门禁：只发布 `PrimaryPointerId`，一个 Platform frame 的
+  `GamepadSnapshot` 必须同 registry owner 且 slot 唯一；Runtime Action Mapper 对跨帧 retained
+  active/suppressed source 与最终 held snapshot 的校验不能由 adapter 绕过；
 - `NativeWindowSurfaceLease` 不拥有窗口，而是一个 move-only、不可复制、析构 `noexcept` 的
   生命周期 pin。只要 lease 存活，Platform 就不能销毁或复用对应 window slot；
 - bgfx factory 成功后，具体 `tina_render_bgfx` backend 接管该 lease，直到 bgfx surface/device
@@ -148,15 +153,16 @@ Creating -> Active <-> Suspended -> Closing -> Draining -> Closed
 - framebuffer extent 为0×0或平台明确最小化时进入 `Suspended`。Focus 丢失本身不等于
   suspended；
 - Suspended 保留 window、native lease、RenderDevice 和已有 GPU 资源。Runtime 继续处理
-  Platform/Event/Simulation/Asset completion 与必要的 backend retirement，但不创建 surface
+  Platform polling/lifecycle dispatch、Simulation、Asset completion 与必要的 backend retirement，但不创建 surface
   attachment、不 clear、不提交 surface frame、不 Present；平台等待/限频避免 busy loop；
 - 恢复为非零 extent 时提交新 surfaceRevision，backend 先应用最新 extent/attachment，再接受首个
   Active submission。恢复失败进入 `Failed`，不能假装仍 Suspended 无限重试；
 - GLFW close callback 只写入 sticky、不可取消的 close latch。Platform `pollFrame()` 返回 tagged
   `PlatformPollResult::ExitRequested`，不创建 `PlatformFrameView`；Runtime 在任何新帧
-  Event/Input/Fixed/Render phase 开始前进入 `Closing`，关闭新 packet ingress，取消
-  Pointer Capture/IME composition，并停止新 submission；该 outcome 不进入 EventQueue，callback
-  本身不得销毁窗口、UI、RenderDevice 或 Scene；
+  PlatformEventDispatcher/Input/Fixed/Render phase 开始前进入 `Closing`，关闭新 packet ingress，取消
+  Pointer Capture/IME composition，并停止新 submission；该 outcome 既不进入当前同步生命周期
+  `PlatformEventDispatcher`，也不进入未来通用 Runtime Event Queue，callback 本身不得销毁窗口、UI、
+  RenderDevice 或 Scene；
 - 已在关闭提交点之前被 backend 接受的 packet 进入 `Draining`，等待所有 submission ticket、
   deferred destroy 和 packet Surface pin 归零。resize/scale 事件在 Closing/Draining 不再触发
   backend reset；
@@ -191,6 +197,8 @@ packet 完成提交；若 snapshot 为 Suspended，则仍完成 Extraction/UI/Re
 
 ## 结果
 
+- 当前 M7-A Headless 已提供可验证的 Platform frame、Primary Pointer、Gamepad snapshot、生命周期
+  dispatcher 与 close outcome 基线；下面的 GLFW/DPI/IMM32/surface 结果要在完整 M7 adapter 落地后验收；
 - GLFW 保持窗口、输入、DPI、IME 与关闭语义的唯一 owner，bgfx 只负责渲染；
 - opaque lease 在不泄漏 native/bgfx 类型的前提下，强制窗口晚于 RenderDevice 销毁；
 - resize、最小化和关闭使用可测试的 surfaceRevision/state machine，不依赖 callback 偶然顺序；
@@ -200,6 +208,9 @@ packet 完成提交；若 snapshot 为 Suspended，则仍完成 Extraction/UI/Re
 
 ## 验收
 
+- 首先复用 M7-A Headless 门禁，证明 GLFW adapter 仍只接受 `PrimaryPointerId`、Gamepad snapshot
+  同 owner/slot 唯一、retained active/suppressed source 与最终 snapshot 一致，且 CloseRequested 不进入
+  `PlatformEventDispatcher` 或未来通用 Runtime Event Queue；
 - 注入 window 创建、lease 获取、bgfx init 和 surface reconfigure 每个失败点，验证完整逆序回滚、
   无窗口/lease/submission 残留且不降级 Null；
 - 验证 RenderDevice shutdown、lease release、GLFW window destroy、GLFW terminate 的严格顺序，

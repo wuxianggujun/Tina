@@ -293,7 +293,8 @@ run:    Ready -> Starting -> Running -> Stopping -> Stopped
 ```text
 Platform Poll
   -> PlatformFrameView Finalize (Snapshot + ordered transitions)
-  -> Event Queue
+  -> Platform lifecycle dispatch (PlatformEventDispatcher，M7-A 已实现)
+  -> Runtime Event Queue (Gameplay/Domain/async，后续目标)
   -> Asset CPU Completion
   -> Audio Completion
   -> UI Input Routing (上一帧已提交布局)
@@ -318,8 +319,9 @@ Platform Poll
 
 状态和数据流约束：
 
-- PlatformFrameView、普通 Event Queue、UI routed event 是三条独立通道；PlatformFrameView 同时保留最终设备
-  状态和有序 transition，不能用单个 pressed/released 布尔值代替同帧事件顺序；
+- PlatformFrameView、同步 PlatformEventDispatcher、未来通用 Runtime Event Queue、UI routed event 是
+  四种独立语义；PlatformFrameView 同时保留最终设备状态和有序 transition，不能用单个
+  pressed/released 布尔值代替同帧事件顺序；
 - UI 输入先于玩法 Action Mapping，消费掩码阻止同一 Pointer/Key 同时触发 UI 与玩法；UI
   使用上一帧稳定布局；每个 Pointer transition 最多 hit-test 一次，新 root 首次 layout 前不开放命中；
 - `pressed/released` Action 只由下一个实际 fixed tick 消费一次；本帧0个 tick 时保留，4个
@@ -525,8 +527,9 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
 1. **Null Runtime（已完成 M6-A）**：`tina_core + tina_platform(headless) + tina_task +
    tina_runtime + tina_render/NullRenderDevice + tina_tests + tina_sample_null`；不建立无消费者的
    scene/asset/ui/audio 空壳，已完成300帧和10,000帧、初始化回滚、阶段顺序与析构门禁；
-2. **M7-A Platform/Input**：`PlatformFrameView`/Action latch、Scripted/Headless backend、GLFW `NO_API`
-   窗口 + NullRender 样例；
+2. **M7-A Platform/Input（Headless 内核已完成）**：`PlatformFrameView`/Action latch 与 Headless
+   backend 已落地，Builder 直接注入和 Runtime test adapter 覆盖 wiring；私有 GLFW `NO_API`
+   窗口、可复用 adapter 注入层与 NullRender 样例为下一独立提交；
 3. **M7-B Surface**：move-only Native Window Surface lease、bgfx clear/present 与 resize/suspend/drain；
 4. **M7-C–E UI/IME/Gamepad**：增量 UIContext/DisplayList、Label/Button/Modal + FreeType、
    IMM32/Gamepad/DPI 门禁；

@@ -21,6 +21,9 @@ inline constexpr Core::ErrorCode GameCallbackThrewException{Core::ErrorDomain::R
 inline constexpr Core::ErrorCode MonotonicClockMovedBackward{Core::ErrorDomain::Runtime, 6};
 inline constexpr Core::ErrorCode LifecycleInvariantViolation{Core::ErrorDomain::Runtime, 7};
 inline constexpr Core::ErrorCode ShutdownDeadlineExceeded{Core::ErrorDomain::Runtime, 8};
+inline constexpr Core::ErrorCode PlatformEventDispatcherStopped{Core::ErrorDomain::Runtime, 9};
+inline constexpr Core::ErrorCode RecursivePlatformEventDispatch{Core::ErrorDomain::Runtime, 10};
+inline constexpr Core::ErrorCode PlatformEventCallbackThrewException{Core::ErrorDomain::Runtime, 11};
 
 } // namespace RuntimeErrorCode
 

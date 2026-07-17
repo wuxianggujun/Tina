@@ -6,6 +6,7 @@
 - CMake 只生成 `tina_tests` 可执行文件，不注册额外测试调度；
 - 构建完成后直接运行 `tina_tests`，返回码非0即失败；
 - Visual Studio 多配置构建把测试运行时隔离到 `bin/<Config>`，禁止 Debug/Release GTest DLL 共用目录；
+- 同一 Visual Studio build tree 的 Debug/Release 构建串行执行，禁止并发启动两个 MSBuild 门禁；
 - 测试依赖由固定 vcpkg baseline 提供；
 - 测试日志不得包含路径外的敏感环境变量或凭据。
 
@@ -15,13 +16,14 @@
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
-| Windows 11 / MSVC 19.50 | vNext M6-A：Core/Platform/Task/Render/Runtime，Legacy/真实 backend 关闭 | Debug C++23 | 92/92 | 通过 |
-| Windows 11 / MSVC 19.50 | vNext M6-A：Core/Platform/Task/Render/Runtime，Legacy/真实 backend 关闭 | Release C++23 | 92/92 | 通过 |
+| Windows 11 / MSVC 19.50 | vNext M6-A/M7-A Headless：Core/Platform/Input/Task/Render/Runtime，Legacy/真实 backend 关闭 | Debug C++23 | 162/162 | 通过 |
+| Windows 11 / MSVC 19.50 | vNext M6-A/M7-A Headless：Core/Platform/Input/Task/Render/Runtime，Legacy/真实 backend 关闭 | Release C++23 | 162/162 | 通过 |
 | Windows 11 / MSVC 19.50 | Legacy ON 与 vNext M6-A 共存构建 | Debug C++23 | 135/135 | 通过 |
-| Ubuntu 22.04 / GCC 13.4 | vNext M6-A，Legacy/真实 backend 关闭 | Debug C++23 | 92/92 | 通过 |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext M6-A，ASan/UBSan | Debug C++23 | 92/92 | 通过 |
+| Ubuntu 22.04 / GCC 13.4 | vNext M6-A/M7-A Headless，Legacy/真实 backend 关闭 | Debug C++23 | 162/162 | 通过 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext M6-A/M7-A Headless，ASan/UBSan | Debug C++23 | 162/162 | 通过 |
 
-同一 M6-A 构建的 `tina_sample_null` 已在 Debug/Release 分别连续运行300帧和10,000帧，四次均
+同一 M6-A/M7-A Headless 构建的 `tina_sample_null` 已在 Windows Debug/Release、Linux GCC 13 与
+Clang 22 ASan/UBSan 分别连续运行300帧和10,000帧，均
 返回0，并验证 `IGameState::onExit` 与 `IGameApplication::onShutdown` 恰好一次。该样例组合
 Headless Platform、Disabled TaskSystem 与 NullRenderDevice，不加入或链接 GLFW、bgfx、EnTT、
 FreeType、miniaudio、SDL/SDL3；它不证明真实窗口、GPU、Scene/Asset/UI/Audio 已经可用。
@@ -63,6 +65,13 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   run-once、0/1/4 fixed steps、当帧退出仍完成 extraction/UI/submit/present、失败清理及300帧
   Null Runtime 均有直接 GoogleTest；EngineConfig 还覆盖 `maximumStepsPerFrame > 4` 的硬拒绝，
   EngineHost Create/run 为 `noexcept` 边界；
+- Platform/Input M7-A：有界 `PlatformFrameView`、严格 UTF-8 owning text arena、最终 Window/Input/
+  Gamepad snapshot、保序 raw transition、overflow reset 与 Platform lifecycle batch；只接受
+  `PrimaryPointerId`，Gamepad snapshot 强制同 owner/slot 唯一，connect/disconnect/cancel/reset 时序与
+  最终 registry 一致；Action Mapper 覆盖 UI consumption/claim 注入、Frame/Simulation domain、0/1/4
+  fixed-step、跨帧 active/suppressed source 与最终 held snapshot、窗口/手柄 generation 切换和
+  overflow reset；`PlatformEventDispatcher` 覆盖 RAII generation token、自取消、自销毁、重入与异常；
+  EngineHost 会在任何 Game callback 前拒绝恶意超限 backend frame；
 - Platform/Task/Render M6-A：Headless shutdown 后拒绝 poll，Disabled TaskSystem 始终 idle 且
   shutdown 幂等；NullRenderDevice 强制连续 frame index 和 submit/present 配对，300帧始终
   `liveResources == 0`；各模块公共头均有独立编译门禁；
@@ -88,8 +97,8 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
 - State Transition Commit 后新 State 同帧只 layout 一次、下一帧输入生效；pop/replace 按“关闭
   ingress → cancel → barrier/join → onExit → RAII 析构”清理 roots/focus/capture/TaskGroup，onExit
   恰好一次，Worker 不能观察已释放的 State 成员；
-- Platform 后续：Window/Gamepad stale generation、失焦 `InputCancelTransition`、
-  fixed 0/1/4步的 Action edge 只消费一次、DPI 和 IMM32 窗口销毁顺序；
+- Platform 后续：production GLFW Window/Gamepad registry 与 callback/poll adapter、失焦和关闭的真实
+  `InputCancelTransition` producer、100%/150%/200% DPI、IMM32 composition 与窗口销毁顺序；
 - 2D world picking 在 Action Mapping 使用 last-presented Camera/Surface revision 转换一次；0步后
   Camera 移动/resize 也不得改变已锁存 WorldPointerSample；viewport 外明确 no-hit；
 - Camera2D 覆盖 NaN/Inf/非正投影值、`x + width`/`y + height` 越界、零 Surface suspension 和
@@ -114,16 +123,10 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   和稳定树序；Theme/DPI revision 只使必要 style/layout dirty，敏感 TextEdit 正文不进诊断；
 - Font Asset lease、UTF-8 非法序列替换、中文 fallback、Atlas page 满容量/退役、raster completion
   stale generation；text measure 与 raster 分离，glyph 发布只 Paint dirty，不改变既定 advance；
-- PlatformFrameView 同 Poll 的 Down→Up、多次 Wheel/Text/Composition sequence、Move 不跨边界合并；
-  raw batch 满容量发出不可丢 `InputStreamReset`，Simulation action latch 满容量发出
-  `SimulationInputStreamReset`，不产生 stuck held/capture；
-- UI-consumed Down 建立 `suppressedUntilReleaseOrNeutral`，真实 Up 只解除抑制；Focus lost/断连/
-  reset 发出 `InputCancelTransition` 而不是可点击的普通 Up；GLFW Gamepad 只验证相邻 Poll sampled diff；
-- Simulation/Frame Action domain 不重复投递：多个0步帧的 ordered Simulation batch 绑定 next
-  uncompleted tick，1/4步时只在首个实际 tick 消费一次；Frame edge 当帧一次，replay
-  只记录 target tick、normalized state、ordered edge 和 reset marker；
-- OS CloseRequested 只产生一次 `PlatformPollResult::ExitRequested`，不创建 frame view/engine frame
-  index；Poll 后、新帧 phase 前停止，EventQueue 中不存在同义关闭事件；
+- M7-C UI producer 必须把真实 routed consumption/continuous claim 接入已完成的 M7-A seam，并覆盖
+  capture/focus/modal 取消；M7-E GLFW Gamepad 只验证相邻 Poll sampled diff，实体矩阵和回滞/重复；
+- Replay 后续只记录 target tick、normalized action state、ordered edge 和 reset marker，不记录 GLFW
+  key 或 UI node；CloseRequested 的真实 GLFW callback 路径不得重复发布生命周期或 gameplay 事件；
 - Game SDK umbrella header 在无 bgfx/GLFW/EnTT include path 下独立编译；public source/include、
   module direct/public dependency 通过第三方 forbidden-token/target 检查；外部 Game consumer
   只声明 Game SDK + desktop bootstrap 也能完成生产链接；可选 `Tina::Physics2D` consumer 在无
@@ -173,7 +176,7 @@ shutdown；空后端与 Tracy 后端必须产生相同业务结果。Bench/Profi
 LTO 语义，只改变插桩和符号；正式 `tina_bench` 默认关闭 Tracy，需要定位回退时才用相同
 workload 启用。Tracy overhead 与常驻 Metrics off/on overhead 分开记录。
 
-Windows M6-A 的完整直接门禁为：
+Windows M6-A/M7-A Headless 的完整直接门禁为：
 
 ```powershell
 cmake --preset windows-msvc-vnext
@@ -189,6 +192,7 @@ out\build\windows-msvc-vnext\bin\Release\tina_sample_null.exe --frames=10000
 ```
 
 Visual Studio 多配置输出必须使用对应的 `bin/Debug` 或 `bin/Release`，不能混用 GoogleTest DLL。
+同一 build tree 的两种配置也必须按上面命令顺序构建，不能并发驱动共享生成状态。
 Legacy 的 `Tina.exe`、shaderc 和 app-local DLL 同样按配置隔离。Linux 单配置构建直接运行
 `out/build/<preset>/bin/tina_tests`。
 
@@ -244,7 +248,8 @@ bgfx Debug/D3D11 当前会在关闭 InfoQueue 时输出一次 `RefCount is 4 (ex
 
 | 样例 | 状态 | 主要证明 | 资源策略 |
 | --- | --- | --- | --- |
-| `tina_sample_null` | M6-A 已实现 | EngineHost、单个 `IGameState`、Headless/Disabled/Null、300/10,000帧生命周期 | 无真实第三方 backend |
+| `tina_sample_null` | M6-A/M7-A Headless 已实现 | EngineHost、PlatformFrame/Input/Action、单个 `IGameState`、Headless/Disabled/Null、300/10,000帧生命周期 | 无真实第三方 backend |
+| `tina_sample_platform` | M7-A 下一提交 | 私有 GLFW `NO_API` 窗口、键鼠、resize/focus/close 与 NullRender | 不创建 GPU surface |
 | `tina_sample_ui` | 未实现 | committed snapshot、dirty/Flex/PaintCache、中文、Modal、TextEdit、DisplayList | M7 内置 Cooked Font/Texture fixture |
 | `tina_sample_2d_infrastructure` | 未实现 | Camera2D、Sprite layer/order、world picking、UI overlay | M8 内置 Cooked Sprite fixture |
 | `tina_sample_3d_infrastructure` | 未实现 | Perspective、depth、canonical Mesh、Unlit pipeline | M9 procedural Cube |

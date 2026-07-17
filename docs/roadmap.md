@@ -69,7 +69,7 @@
 
 实施状态（2026-07-17）：M6-A 生命周期内核已完成。Tina 自有 target 已统一 C++23；
 `tina_core`、`tina_platform`、`tina_task`、`tina_render`、`tina_runtime` 五个 target 与
-`tina_sample_null` 已加入 vNext-only 构建图。Windows MSVC 2026 Debug/Release、Linux GCC 13.4
+`tina_sample_null` 已加入 vNext-only 构建图。当时 M6-A 基线在 Windows MSVC 2026 Debug/Release、Linux GCC 13.4
 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 直接 GoogleTest 均为92/92；Null sample 连续运行
 300帧和10,000帧并返回0。M6-A 没有加入或
 链接 GLFW、bgfx、EnTT、FreeType、miniaudio、SDL/SDL3。Legacy ON Debug 共存图已构建并直接
@@ -91,9 +91,11 @@ M6-A 已完成：
 - `windows-vnext-debug`/`windows-vnext-release` build preset、直接 `tina_tests` 与
   `tina_sample_null --frames=N` 门禁。
 
-M6 后续但尚未实现：
+M6 生命周期之后仍未实现：
 
-- 完整 GameStateStack/commands/policy propagation、Event/Input 与 State TaskGroup；
+- 完整 GameStateStack/commands/policy propagation、通用 Runtime Event Queue 与 State TaskGroup；
+- M7-A 已补齐有界 PlatformFrame/Input/Action 与 Platform lifecycle dispatch；私有 GLFW desktop
+  adapter、UI routed consumption producer 和连续 axis mapping 仍在后续子切片；
 - 有界 CPU/IO/Main worker、阶段指标与完整 shutdown deadline/fatal-stop；
 - typed render resource handle、Pass Scheduler、World RenderScene/UIDisplayList、Runtime-private
   RenderFramePacket/pool 与 submission completion 保活；
@@ -108,21 +110,30 @@ M7 分为五个独立提交，不将 GLFW、bgfx、FreeType、IMM32 和完整 UI
 
 ### M7-A PlatformFrame 与 Input correctness
 
-- `tina_platform` 实现 generation `WindowId`、`PrimaryWindowConfig`、`WindowMetricsSnapshot`、
+实施状态（2026-07-17）：Headless Platform/Input 内核已完成；下列 GLFW `NO_API` 窗口与
+`tina_sample_platform` 是本里程碑下一独立提交，不能把 Headless 结果冒充真实窗口验收。
+Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan
+均直接通过162/162项 GoogleTest；Null sample 在各门禁连续运行300帧和10,000帧并正常退出。
+
+- **已完成**：`tina_platform` 实现 generation `WindowId`、`PrimaryWindowConfig`、`WindowMetricsSnapshot`、
   `PlatformFrameView`、`WindowInputSnapshot`、有序 `InputTransitionBatch` 与 `PlatformEventBatch`；
-- tests-only Scripted backend 可精确注入 Down→Up、Focus Cancel、overflow reset、resize/focus/close；
-  Headless 仍不链接 GLFW；
-- Runtime 建立空 UI consumption seam、`InputTransitionConsumption`、`ContinuousControlClaims`、
+- **已完成**：`PlatformFrameBuilder` 单测直接注入 Down→Up、Focus Cancel、overflow reset 与
+  lifecycle payload；Runtime test adapter 验证 EngineHost wiring。Headless 仍不链接 GLFW；可复用
+  production-like deterministic PlatformBackend test double 随 GLFW adapter 测试加入；
+- **已完成**：Runtime 建立空 UI consumption seam、`InputTransitionConsumption`、`ContinuousControlClaims`、
   digital Action Map 和有序 Simulation Action latch，验证0/1/4 fixed-step 只消费一次；
-- `EngineConfig::input` 注册唯一 Engine default Input Context 的 digital bindings，并按已冻结默认/
-  硬上限一次性分配 raw/event/claim/action storage；Escape 不走 backend shortcut；
-- Runtime 建立只承载 resize/focus 等平台生命周期的有界 `PlatformEventQueue` 与 RAII subscription；
+- **已完成**：`EngineConfig::inputActions` 注册唯一 Engine default Input Context 的 digital bindings；
+  raw/event/text、action/binding 与 subscription 分别由职责明确的配置块一次性分配。UI claim
+  在 M7-A 无 producer，内部固定上限64；Escape 不走 backend shortcut；
+- **已完成**：Runtime 建立只承载 resize/focus 等平台生命周期的有界 private `PlatformEventDispatcher`；Game SDK
+  只暴露 `PlatformEventSubscriptions` 与 RAII subscription；
   OS CloseRequested 只走 control outcome，不进入队列；这不是通用 Gameplay EventBus；
-- 实现私有 `tina_platform_glfw`：`GLFW_NO_API` 主窗口、create/destroy/poll、close/focus/
+- **下一提交**：实现私有 `tina_platform_glfw`：`GLFW_NO_API` 主窗口、create/destroy/poll、close/focus/
   resize 与键鼠；不引入 SDL/SDL3，callback 只写预分配 buffer/sticky failure；
-- `tina_sample_platform` 用 GLFW Window + NullRender；Escape 通过 Frame Action 请求完整当帧后退出，
+- **下一提交**：`tina_sample_platform` 用 GLFW Window + NullRender；Escape 通过 Frame Action 请求完整当帧后退出，
   `--frames=N` 可自动退出；GLFW 失败不得静默降级 Headless；
-- 本切片不实现 native surface/bgfx、UI tree、FreeType、IMM32、Gamepad、通用 Gameplay EventBus 或多窗口。
+- 本切片不实现 native surface/bgfx、UI tree、FreeType、IMM32、production GLFW Gamepad
+  adapter/registry/navigation、通用 Gameplay EventBus 或多窗口。
 
 ### M7-B Native Window Surface 与最小 bgfx
 
@@ -155,8 +166,8 @@ M7 分为五个独立提交，不将 GLFW、bgfx、FreeType、IMM32 和完整 UI
 - Windows IME 只使用私有 IMM32 adapter；补 Focus/Capture/composition 取消与窗口销毁顺序；
 - 接入 GLFW standard Gamepad sampled diff、primary-window routing、回滞/重复/Accept/Cancel；不伪造
   两次 Poll 之间不可观测的 Down→Up；
-- 把 Gamepad connect/disconnect 生命周期加入 M7-A 的 `PlatformEventBatch/PlatformEventQueue`，断连先
-  产生 `InputCancelTransition` 再回收 generation；
+- GLFW adapter 向 M7-A 已有的 `PlatformEventBatch`/`PlatformEventDispatcher` 发出 Gamepad
+  connect/disconnect 生命周期；断连先产生 `InputCancelTransition` 再回收 generation；
 - 完成100%/150%/200% DPI、键鼠、composition、实体手柄与资源回收门禁。
 
 ## M8 Scene 与 2D 垂直切片

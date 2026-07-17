@@ -3,6 +3,8 @@
 - 状态：Accepted
 - 日期：2026-07-16
 - 接受日期：2026-07-17
+- 实施状态：M7-A Headless Platform/Input、Action Mapper、fixed-step latch 与
+  `PlatformEventDispatcher` 已落地；完整 M7 GLFW、DPI、Windows IMM32 和 UI producer 仍是目标
 
 ## 背景
 
@@ -16,7 +18,9 @@ Platform 每轮 Poll 返回 `ContinueFrame{PlatformFrameView}` 或 `ExitRequeste
 `PlatformPollResult`；failure 只走外层 `Result`。只有 Continue 分支才生成一份不可变
 `PlatformFrameView`：最终 `WindowMetricsSnapshot`/`WindowInputSnapshot`、Engine 级设备 Snapshot、
 `PlatformEventBatch` 与按 Platform sequence 排序的 transition batch。ExitRequested 不创建 frame
-view、不分配 engine frame index，也不泵送 EventQueue 或进入本轮 Input/任何新 frame phase。
+view、不分配 engine frame index，也不泵送当前 `PlatformEventDispatcher`、未来通用 Runtime Event Queue，
+或进入本轮 Input/任何新 frame phase。Continue 分支中的 `PlatformEventBatch` 当前只由 Runtime-owned
+`PlatformEventDispatcher` 同步分发平台生命周期通知；它不是通用 Gameplay/Domain Event Queue。
 UI 使用上一帧稳定布局逐 transition 路由；UI 输出与当前 `PlatformFrameView` 绑定的
 `InputTransitionConsumption`，按 transition sequence 标记一次性事件是否已被
 消费。Gameplay Action Mapping 只读取未消费 transition，不允许 UI 修改 Platform Snapshot。
@@ -56,20 +60,36 @@ Simulation Action 使用有界、保序的 `SimulationActionTransitionBatch`。�
   reset marker；不记录 GLFW key、UI UINodeId 或消费实现细节。相同记录必须产生相同 tick 输入。
 
 原始 InputTransitionBatch 同样为预分配有界存储。可合并 Move 优先合并；仍满时产生不可丢的
-`InputStreamReset`，取消当前 UI/Action 交互并在下一帧从最终设备状态 resync。Focus loss 使用
+`InputStreamReset`，取消当前 UI/Action 交互，并由本帧 Action Mapper 从最终设备状态 resync、后续帧
+继续验证 retained state。Focus loss 使用
 `InputCancelTransition(reason=FocusLost)`；两者都不是普通 Up/Release。
+Text/Composition 先经过严格 UTF-8 与 cursor 校验，再整段复制到 Create 时预分配的 byte arena；
+默认16 KiB、硬上限1 MiB。byte arena 满时不截断字符串，使用 raw batch 的保留 slot 写入
+`InputStreamReset(reason=TextByteCapacityExceeded)`。
+Key、Pointer Button 与 Gamepad Button 的最后一个未被后续 cancel/raw reset 覆盖的 digital edge
+必须与 final held Snapshot 一致；实现使用固定数组单次扫描，不分配、不做 O(n²) 回看。
+M7-A 仅接受 `PrimaryPointerId`（0）：Pointer snapshot、Button/Move/Wheel transition 与 pointer binding
+使用其他 id 均结构化失败。同一帧所有 `GamepadSnapshot` 必须来自同一个 registry owner，每个 slot
+index 唯一；同 slot 的不同 generation 不能同时作为最终快照。
 
 M7-A Action Mapper 由 Runtime 唯一拥有，只实现 EngineConfig 注册的单一 immutable default Input
 Context（priority=0）。UI consumption/claim 优先；未来多 Context 以显式 priority 决胜，同 priority
 竞争同一 physical control 时拒绝激活，同一 Context 内禁止一个 control 重复绑定不同 action/domain。
-默认/硬容量冻结为：raw transition 256/4096、Platform event 64/1024、continuous claim 64/1024、
+每帧 transition 映射后，Mapper 会用最终 Platform snapshot 验证跨帧 retained source：仍为 `active`
+或 suppressed 的 Key、Primary Pointer Button、Gamepad Button 必须仍为 held；Primary Window/Gamepad
+generation 若在 retained state 未先 cancel/reset/release 时消失或替换，返回
+`LifecycleInvariantViolation`，不能静默清零或迁移到新 generation。
+默认/硬容量冻结为：raw transition 256/4096、UTF-8 text bytes 16 KiB/1 MiB、Platform event
+64/1024、continuous claim 64/1024（M7-A 仅为 Runtime SPI 内部固定上限，不属于 game-facing
+`InputActionMapConfig`）、
 pending Simulation transition 128/4096、Frame Action transition 128/4096、digital binding 64/4096；
 raw/event/simulation/frame batch 各有不计入有效项的一个 reset slot。所有容量 Create 时一次性分配，
 运行期不扩容。完整 reset 后续规则见[平台与输入](../platform-input.md)。
 
 主窗口 OS CloseRequested 是不可取消的 `PlatformPollResult::ExitRequested`：Platform Poll 返回后、下一个
-Runtime frame 开始前正常停止并进入统一 shutdown。它不进入可订阅 Runtime EventQueue，也不再
-派生第二个同义 Window event。游戏若需要确认退出，必须使用自己的 UI/State intent，再调用
+Runtime frame 开始前正常停止并进入统一 shutdown。它既不进入当前可订阅的
+`PlatformEventDispatcher`，也不进入未来通用 Runtime Event Queue，不再派生第二个同义 Window event。
+游戏若需要确认退出，必须使用自己的 UI/State intent，再调用
 Runtime 的显式退出请求，不能劫持 OS CloseRequested。
 
 固定 Simulation 为60 Hz、每个 Render Frame 最多4步；每个 substep 独立 jobs/barrier、稳定
@@ -83,7 +103,8 @@ command merge/commit 与 Transform propagation，Render 使用 previous/current 
 - 每 substep barrier/commit 有固定成本，需要 benchmark 后再并行。
 - GLFW standard gamepad 只能轮询最终 sampled state，因此只能为相邻 Poll 之间观察到的状态差
   生成 transition；无法承诺捕获两次 Poll 之间已经完成的物理 Down→Up。该限制必须进入能力说明
-  和 replay 语义，不能为补齐它引入 SDL/SDL3。
+  和 replay 语义，不能为补齐它引入 SDL/SDL3；对应 GLFW/DPI/IMM32 adapter 仍属于完整 M7 目标，
+  但不得改变已落地的 Headless 契约。
 
 ## 被拒绝方案
 

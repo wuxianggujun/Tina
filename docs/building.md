@@ -15,7 +15,7 @@
 
 Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 继续强制 `/utf-8` 与 `/Zc:__cplusplus`。MSVC 19.50 是当前完整验证基线，CMake 将 `cxx_std_23` 映射为该工具链的 `stdcpplatest`。使用 Preset 时 CMake 至少需要 3.25。
 
-当前 Windows M6-A 实测使用 Visual Studio 2026 18.4.3、MSVC 19.50.35717 与
+当前 Windows vNext 实测使用 Visual Studio 2026 18.4.3、MSVC 19.50.35717 与
 `D:\Programs\CMake\bin\cmake.exe` 4.2.3；该 CMake 目录已在 Machine PATH 中，命令可直接写成
 `cmake`。
 
@@ -49,7 +49,7 @@ out\build\windows-msvc\bin\Debug\tina_tests.exe
 
 ## Windows vNext 最小构建
 
-该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建 M6-A 的 `tina_core`、
+该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A 的 `tina_core`、
 `tina_platform`、`tina_task`、`tina_render`、`tina_runtime`、直接 GoogleTest 门禁与 Null 样例：
 
 ```powershell
@@ -67,6 +67,8 @@ Disabled TaskSystem 与 NullRenderDevice。
 ## Windows vNext Release
 
 vNext 已提供独立 Release build preset，仍复用同一个 Visual Studio 多配置构建目录：
+同一 `windows-msvc-vnext` build tree 的 Debug/Release `cmake --build` 必须串行执行，不能由两个
+MSBuild 进程并发驱动同一生成图；配置输出目录虽然隔离，共享的生成状态仍可能发生争用。
 
 ```powershell
 cmake --preset windows-msvc-vnext

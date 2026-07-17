@@ -2,8 +2,8 @@
 
 namespace Tina {
 
-GameStartupContext::GameStartupContext(const EngineConfig& config) noexcept
-    : m_config(&config)
+GameStartupContext::GameStartupContext(const EngineConfig& config, PlatformEventDispatcher& platformEvents) noexcept
+    : m_config(&config), m_platformEventSubscriptions(platformEvents)
 {
 }
 
@@ -12,9 +12,20 @@ const EngineConfig& GameStartupContext::engineConfig() const noexcept
     return *m_config;
 }
 
-GameStateEnterContext::GameStateEnterContext(const EngineConfig& config) noexcept
-    : m_config(&config)
+PlatformEventSubscriptions& GameStartupContext::platformEventSubscriptions() noexcept
 {
+    return m_platformEventSubscriptions;
+}
+
+GameStateEnterContext::GameStateEnterContext(const EngineConfig& config,
+                                             PlatformEventDispatcher& platformEvents) noexcept
+    : m_config(&config), m_platformEventSubscriptions(platformEvents)
+{
+}
+
+PlatformEventSubscriptions& GameStateEnterContext::platformEventSubscriptions() noexcept
+{
+    return m_platformEventSubscriptions;
 }
 
 const EngineConfig& GameStateEnterContext::engineConfig() const noexcept
@@ -22,10 +33,9 @@ const EngineConfig& GameStateEnterContext::engineConfig() const noexcept
     return *m_config;
 }
 
-FixedUpdateContext::FixedUpdateContext(
-    const FrameTiming& frameTiming,
-    const FixedUpdateTiming& fixedUpdateTiming) noexcept
-    : m_frameTiming(&frameTiming), m_fixedUpdateTiming(&fixedUpdateTiming)
+FixedUpdateContext::FixedUpdateContext(const FrameTiming& frameTiming, const FixedUpdateTiming& fixedUpdateTiming,
+                                       const SimulationActionSnapshot& simulationActions) noexcept
+    : m_frameTiming(&frameTiming), m_fixedUpdateTiming(&fixedUpdateTiming), m_simulationActions(&simulationActions)
 {
 }
 
@@ -39,11 +49,20 @@ const FixedUpdateTiming& FixedUpdateContext::fixedUpdateTiming() const noexcept
     return *m_fixedUpdateTiming;
 }
 
-FrameUpdateContext::FrameUpdateContext(
-    const FrameTiming& frameTiming,
-    bool& exitRequested) noexcept
-    : m_frameTiming(&frameTiming), m_exitRequested(&exitRequested)
+const SimulationActionSnapshot& FixedUpdateContext::simulationActions() const noexcept
 {
+    return *m_simulationActions;
+}
+
+FrameUpdateContext::FrameUpdateContext(const FrameTiming& frameTiming, const FrameActionSnapshot& frameActions,
+                                       bool& exitRequested) noexcept
+    : m_frameTiming(&frameTiming), m_frameActions(&frameActions), m_exitRequested(&exitRequested)
+{
+}
+
+const FrameActionSnapshot& FrameUpdateContext::frameActions() const noexcept
+{
+    return *m_frameActions;
 }
 
 const FrameTiming& FrameUpdateContext::frameTiming() const noexcept
@@ -56,8 +75,7 @@ void FrameUpdateContext::requestExitAfterFrame() noexcept
     *m_exitRequested = true;
 }
 
-RenderSceneExtractionContext::RenderSceneExtractionContext(
-    const FrameTiming& frameTiming) noexcept
+RenderSceneExtractionContext::RenderSceneExtractionContext(const FrameTiming& frameTiming) noexcept
     : m_frameTiming(&frameTiming)
 {
 }
@@ -67,8 +85,7 @@ const FrameTiming& RenderSceneExtractionContext::frameTiming() const noexcept
     return *m_frameTiming;
 }
 
-UIUpdateContext::UIUpdateContext(const FrameTiming& frameTiming) noexcept
-    : m_frameTiming(&frameTiming)
+UIUpdateContext::UIUpdateContext(const FrameTiming& frameTiming) noexcept : m_frameTiming(&frameTiming)
 {
 }
 
@@ -77,9 +94,7 @@ const FrameTiming& UIUpdateContext::frameTiming() const noexcept
     return *m_frameTiming;
 }
 
-GameStateExitContext::GameStateExitContext(
-    RunStopCause stopCause,
-    const Core::Error* runtimeFailure) noexcept
+GameStateExitContext::GameStateExitContext(RunStopCause stopCause, const Core::Error* runtimeFailure) noexcept
     : m_stopCause(stopCause), m_runtimeFailure(runtimeFailure)
 {
 }
@@ -94,9 +109,7 @@ const Core::Error* GameStateExitContext::runtimeFailure() const noexcept
     return m_runtimeFailure;
 }
 
-GameShutdownContext::GameShutdownContext(
-    RunStopCause stopCause,
-    const Core::Error* runtimeFailure) noexcept
+GameShutdownContext::GameShutdownContext(RunStopCause stopCause, const Core::Error* runtimeFailure) noexcept
     : m_stopCause(stopCause), m_runtimeFailure(runtimeFailure)
 {
 }

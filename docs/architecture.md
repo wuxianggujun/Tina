@@ -3,9 +3,10 @@
 ## 当前双轨实现
 
 Tina 当前处于 Legacy 产品与 vNext 垂直切片并存的迁移期。Legacy 仍以单个游戏可执行文件为主，
-源码按 Core、Engine、Renderer、UI、ECS 和 Game 组织；M6-A 已建立独立的 `tina_core`、
+源码按 Core、Engine、Renderer、UI、ECS 和 Game 组织；vNext 已建立独立的 `tina_core`、
 `tina_platform`、`tina_task`、`tina_render`、`tina_runtime` 五个 C++23 target，以及不依赖真实
-窗口和 GPU 的 `tina_sample_null`。
+窗口和 GPU 的 `tina_sample_null`。M7-A 已在这些 target 内加入有界 Platform Frame、输入
+Snapshot/Transition、Platform 生命周期订阅以及 Simulation/Frame Action Mapping。
 现有 Legacy target 的包依赖由 vcpkg manifest 管理，bgfx、EASTL、EABase 仍保持固定源码
 版本；其中 EASTL/EABase 只属于迁移期现状，不是 vNext 目标依赖。
 
@@ -26,8 +27,8 @@ Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Ga
 ## 旧架构删除状态
 
 结论：旧文档已经替换，但旧源码架构没有完全删除。`TINA_BUILD_LEGACY` 与 vNext-only preset
-已落地，能够把旧依赖和产品 target 排除出最小构建图。M6-A 的 `EngineHost` 生命周期内核已经
-可独立运行，但它还没有生产窗口、真实渲染、Scene/Asset/UI/Audio 或完整状态栈，因此 Legacy
+已落地，能够把旧依赖和产品 target 排除出最小构建图。`EngineHost` 生命周期与 M7-A Platform/Input
+内核已经可独立运行，但它还没有生产窗口、真实渲染、Scene/Asset/UI/Audio 或完整状态栈，因此 Legacy
 仍是当前 2D/UI/3D 产品实现，不能直接整目录删除。
 
 | 范围 | 状态 | 证据或影响 |
@@ -42,6 +43,7 @@ Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Ga
 | bgfx 边界 | 尚未收敛 | Renderer、UI 和部分公共结构仍直接暴露 bgfx handle/type |
 | 路径资源系统 | 仍在使用 | Cooked Asset、稳定 AssetId 和独立 GPU upload queue 尚未落地 |
 | vNext M6-A Runtime | 已完成生命周期切片 | `EngineHost`、`IGameApplication`、单个 `IGameState`、最小阶段 Context、Backend SPI、Headless Platform、Disabled TaskSystem 与 NullRenderDevice 已落地 |
+| vNext M7-A Platform/Input | 已完成 Headless 内核切片 | 固定容量 `PlatformFrameBuilder`、final Snapshot、保序 transition、generation-typed `GamepadId` 与帧内生命周期一致性校验、Runtime-private `PlatformEventDispatcher`、RAII 订阅和 Simulation/Frame Action Mapper 已落地；production GLFW registry/polling 仍属下一子提交 |
 | 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene/Asset/UI/Audio、Desktop bootstrap 与真实 backend 仍按后续切片实施 |
 
 因此不能用“删除旧 `src`”作为下一步。正确顺序是：建立新边界和测试 → 迁移调用点 → 确认旧接口零引用 → 通过 2D/UI/3D 验收 → 在独立提交中删除旧实现。

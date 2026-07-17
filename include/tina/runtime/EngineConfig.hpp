@@ -2,6 +2,10 @@
 
 #include <tina/core/error/Result.hpp>
 #include <tina/core/time/FixedStepAccumulator.hpp>
+#include <tina/platform/PlatformFrame.hpp>
+#include <tina/platform/Window.hpp>
+#include <tina/runtime/InputActionMap.hpp>
+#include <tina/runtime/PlatformEvents.hpp>
 
 #include <string>
 
@@ -11,6 +15,10 @@ struct EngineConfig final {
     static constexpr Core::u32 MaximumFixedStepsPerFrame = 4;
 
     std::string applicationName;
+    Platform::PrimaryWindowConfig primaryWindow;
+    Platform::PlatformFrameCapacityConfig platformFrameCapacities{};
+    InputActionMapConfig inputActions;
+    PlatformEventSubscriptionConfig platformEventSubscriptions{};
     Core::FixedStepConfig fixedSimulation;
     double gameplayTimeScale = 1.0;
     Core::Duration shutdownDeadline{5.0};

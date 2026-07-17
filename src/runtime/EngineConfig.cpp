@@ -3,7 +3,9 @@
 #include <tina/runtime/RuntimeErrors.hpp>
 
 #include <cmath>
+#include <ranges>
 #include <string_view>
+#include <type_traits>
 
 namespace Tina {
 namespace {
@@ -16,10 +18,13 @@ namespace {
 [[nodiscard]] bool isValidUtf8(std::string_view text) noexcept
 {
     std::size_t index = 0;
-    while (index < text.size()) {
+    while (index < text.size())
+    {
         const auto first = static_cast<unsigned char>(text[index]);
-        if (first <= 0x7FU) {
-            if (first == 0U) {
+        if (first <= 0x7FU)
+        {
+            if (first == 0U)
+            {
                 return false;
             }
             ++index;
@@ -29,35 +34,42 @@ namespace {
         std::size_t continuationCount = 0;
         char32_t codePoint = 0;
         char32_t minimumCodePoint = 0;
-        if ((first & 0xE0U) == 0xC0U) {
+        if ((first & 0xE0U) == 0xC0U)
+        {
             continuationCount = 1;
             codePoint = first & 0x1FU;
             minimumCodePoint = 0x80U;
-        } else if ((first & 0xF0U) == 0xE0U) {
+        } else if ((first & 0xF0U) == 0xE0U)
+        {
             continuationCount = 2;
             codePoint = first & 0x0FU;
             minimumCodePoint = 0x800U;
-        } else if ((first & 0xF8U) == 0xF0U) {
+        } else if ((first & 0xF8U) == 0xF0U)
+        {
             continuationCount = 3;
             codePoint = first & 0x07U;
             minimumCodePoint = 0x10000U;
-        } else {
+        } else
+        {
             return false;
         }
 
-        if (continuationCount > text.size() - index - 1) {
+        if (continuationCount > text.size() - index - 1)
+        {
             return false;
         }
-        for (std::size_t offset = 1; offset <= continuationCount; ++offset) {
+        for (std::size_t offset = 1; offset <= continuationCount; ++offset)
+        {
             const auto next = static_cast<unsigned char>(text[index + offset]);
-            if (!isContinuationByte(next)) {
+            if (!isContinuationByte(next))
+            {
                 return false;
             }
             codePoint = (codePoint << 6U) | (next & 0x3FU);
         }
 
-        if (codePoint < minimumCodePoint || codePoint > 0x10FFFFU
-            || (codePoint >= 0xD800U && codePoint <= 0xDFFFU)) {
+        if (codePoint < minimumCodePoint || codePoint > 0x10FFFFU || (codePoint >= 0xD800U && codePoint <= 0xDFFFU))
+        {
             return false;
         }
         index += continuationCount + 1;
@@ -70,12 +82,114 @@ namespace {
     return Core::failure(ConfigurationErrorCode::InvalidEngineConfig, message);
 }
 
+[[nodiscard]] bool isValidDigitalBindingPattern(const DigitalActionBindingPattern& pattern) noexcept
+{
+    return std::visit(
+        []<typename Pattern>(const Pattern& value) noexcept {
+            using PatternType = std::remove_cvref_t<Pattern>;
+            if constexpr (std::is_same_v<PatternType, PrimaryWindowKeyBinding>)
+            {
+                return value.key > Platform::Key::Unknown && value.key < Platform::Key::Count;
+            } else if constexpr (std::is_same_v<PatternType, PrimaryPointerButtonBinding>)
+            {
+                return value.pointer == Platform::PrimaryPointerId && value.button < Platform::PointerButton::Count;
+            } else
+            {
+                return value.button < Platform::GamepadButton::Count;
+            }
+        },
+        pattern);
+}
+
+[[nodiscard]] Core::Status validatePlatformFrameCapacities(const Platform::PlatformFrameCapacityConfig& capacities)
+{
+    if (capacities.inputTransitionCapacity == 0 ||
+        capacities.inputTransitionCapacity > Platform::PlatformFrameCapacityConfig::MaximumInputTransitionCapacity)
+    {
+        return invalidConfig("input raw transition capacity is outside the supported range");
+    }
+    if (capacities.inputTextByteCapacity == 0 ||
+        capacities.inputTextByteCapacity > Platform::PlatformFrameCapacityConfig::MaximumInputTextByteCapacity)
+    {
+        return invalidConfig("input text byte capacity is outside the supported range");
+    }
+    if (capacities.platformEventCapacity == 0 ||
+        capacities.platformEventCapacity > Platform::PlatformFrameCapacityConfig::MaximumPlatformEventCapacity)
+    {
+        return invalidConfig("platform event capacity is outside the supported range");
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Core::Status validateInputActionMapConfig(const InputActionMapConfig& input)
+{
+    const InputActionMapCapacityConfig& capacities = input.capacities;
+    if (capacities.simulationActionTransitionCapacity == 0 ||
+        capacities.simulationActionTransitionCapacity >
+            InputActionMapCapacityConfig::MaximumSimulationActionTransitionCapacity)
+    {
+        return invalidConfig("simulation action transition capacity is outside the supported range");
+    }
+    if (capacities.frameActionTransitionCapacity == 0 ||
+        capacities.frameActionTransitionCapacity > InputActionMapCapacityConfig::MaximumFrameActionTransitionCapacity)
+    {
+        return invalidConfig("frame action transition capacity is outside the supported range");
+    }
+    if (capacities.digitalActionBindingCapacity == 0 ||
+        capacities.digitalActionBindingCapacity > InputActionMapCapacityConfig::MaximumDigitalActionBindingCapacity)
+    {
+        return invalidConfig("digital action binding capacity is outside the supported range");
+    }
+    if (input.digitalBindings.size() > capacities.digitalActionBindingCapacity)
+    {
+        return invalidConfig("digital action bindings exceed the configured capacity");
+    }
+
+    for (usize index = 0; index < input.digitalBindings.size(); ++index)
+    {
+        const DigitalActionBinding& binding = input.digitalBindings[index];
+        if (!binding.action.hasValue())
+        {
+            return invalidConfig("digital action binding uses an invalid action id");
+        }
+        if (!isValidDigitalBindingPattern(binding.input))
+        {
+            return invalidConfig("digital action binding uses an invalid physical control");
+        }
+        if (binding.domain != InputActionDomain::Simulation && binding.domain != InputActionDomain::Frame)
+        {
+            return invalidConfig("digital action binding uses an invalid action domain");
+        }
+        const auto duplicate = std::ranges::find(input.digitalBindings.begin(),
+                                                 input.digitalBindings.begin() + static_cast<std::ptrdiff_t>(index),
+                                                 binding.input, &DigitalActionBinding::input);
+        if (duplicate != input.digitalBindings.begin() + static_cast<std::ptrdiff_t>(index))
+        {
+            return invalidConfig("one physical control may have only one binding in the default input context");
+        }
+        const auto conflictingDomain = std::ranges::find_if(
+            input.digitalBindings.begin(), input.digitalBindings.begin() + static_cast<std::ptrdiff_t>(index),
+            [&binding](const DigitalActionBinding& previous) {
+                return previous.action == binding.action && previous.domain != binding.domain;
+            });
+        if (conflictingDomain != input.digitalBindings.begin() + static_cast<std::ptrdiff_t>(index))
+        {
+            return invalidConfig("one action id may belong to only one input domain");
+        }
+    }
+    return Core::success();
+}
+
 } // namespace
 
 EngineConfig EngineConfig::Defaults()
 {
     return EngineConfig{
         .applicationName = "Tina",
+        .primaryWindow = Platform::PrimaryWindowConfig{},
+        .platformFrameCapacities = Platform::PlatformFrameCapacityConfig{},
+        .inputActions = InputActionMapConfig{},
+        .platformEventSubscriptions = PlatformEventSubscriptionConfig{},
         .fixedSimulation = Core::FixedStepConfig{},
         .gameplayTimeScale = 1.0,
         .shutdownDeadline = Core::Duration{5.0},
@@ -84,25 +198,59 @@ EngineConfig EngineConfig::Defaults()
 
 Core::Status EngineConfig::validate() const
 {
-    if (applicationName.empty()) {
+    if (applicationName.empty())
+    {
         return invalidConfig("applicationName must not be empty");
     }
-    if (!isValidUtf8(applicationName)) {
+    if (!isValidUtf8(applicationName))
+    {
         return invalidConfig("applicationName must be valid UTF-8 without embedded NUL bytes");
     }
-    if (!std::isfinite(gameplayTimeScale) || gameplayTimeScale < 0.0) {
+    if (primaryWindow.title.empty())
+    {
+        return invalidConfig("primaryWindow.title must not be empty");
+    }
+    if (!isValidUtf8(primaryWindow.title))
+    {
+        return invalidConfig("primaryWindow.title must be valid UTF-8 without embedded NUL bytes");
+    }
+    if (primaryWindow.initialLogicalExtent.width == 0 || primaryWindow.initialLogicalExtent.height == 0)
+    {
+        return invalidConfig("primaryWindow initial logical extent must be non-zero");
+    }
+    if (primaryWindow.mode != Platform::WindowMode::Windowed &&
+        primaryWindow.mode != Platform::WindowMode::BorderlessFullscreen)
+    {
+        return invalidConfig("primaryWindow.mode is invalid");
+    }
+    if (auto platformCapacityStatus = validatePlatformFrameCapacities(platformFrameCapacities); !platformCapacityStatus)
+    {
+        return platformCapacityStatus;
+    }
+    if (platformEventSubscriptions.subscriberCapacity == 0 ||
+        platformEventSubscriptions.subscriberCapacity > PlatformEventSubscriptionConfig::MaximumSubscriberCapacity)
+    {
+        return invalidConfig("platform event subscriber capacity is outside the supported range");
+    }
+    if (auto inputStatus = validateInputActionMapConfig(inputActions); !inputStatus)
+    {
+        return inputStatus;
+    }
+    if (!std::isfinite(gameplayTimeScale) || gameplayTimeScale < 0.0)
+    {
         return invalidConfig("gameplayTimeScale must be finite and non-negative");
     }
-    if (!std::isfinite(shutdownDeadline.count()) || shutdownDeadline.count() <= 0.0) {
+    if (!std::isfinite(shutdownDeadline.count()) || shutdownDeadline.count() <= 0.0)
+    {
         return invalidConfig("shutdownDeadline must be finite and greater than zero");
     }
-    if (fixedSimulation.maximumStepsPerFrame > MaximumFixedStepsPerFrame) {
+    if (fixedSimulation.maximumStepsPerFrame > MaximumFixedStepsPerFrame)
+    {
         return invalidConfig("fixedSimulation.maximumStepsPerFrame must not exceed four");
     }
-    if (auto accumulator = Core::FixedStepAccumulator::Create(fixedSimulation); !accumulator) {
-        auto error = Core::Error{
-            ConfigurationErrorCode::InvalidEngineConfig,
-            "fixedSimulation is invalid"};
+    if (auto accumulator = Core::FixedStepAccumulator::Create(fixedSimulation); !accumulator)
+    {
+        auto error = Core::Error{ConfigurationErrorCode::InvalidEngineConfig, "fixedSimulation is invalid"};
         error.addContext("EngineConfig::validate", accumulator.error().message);
         return Core::failure(std::move(error));
     }

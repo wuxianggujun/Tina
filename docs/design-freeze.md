@@ -98,12 +98,15 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
 - `PlatformFrameView` 保留每窗口最终 `WindowInputSnapshot` 与有序 transition batch；
   UI 使用上一帧稳定布局逐 transition 路由，先于 Gameplay Action Mapping 产生
   `InputTransitionConsumption` 与 `ContinuousControlClaims`；被 UI 消费的 Down 在匹配
-  release 前一直抑制 Gameplay held，axis claim 保持到 neutral；
+  release 前一直抑制 Gameplay held；axis claim 保持到 neutral 是完整 M7 analog 目标，M7-A 只实现
+  digital suppression；
 - 0 fixed-step 帧把有序 `SimulationActionTransitionBatch` 保留到下一个未完成
   simulation tick；Focus lost、断连与 overflow 生成 `InputCancelTransition`/`InputStreamReset`，不伪造可点击
   的普通 Up；
-- M7-A 的 Action bindings 只由 `EngineConfig::input` 注册到 Runtime-owned default Context；raw/event/
-  claim/Simulation/Frame/binding 默认容量为256/64/64/128/128/64，运行期固定且受文档硬上限约束；
+- M7-A 的 Action bindings 只由 `EngineConfig::inputActions.digitalBindings` 注册到 Runtime-owned
+  default Context；raw/text/event 容量只来自 `platformFrameCapacities`，Simulation/Frame/binding
+  容量只来自 `inputActions.capacities`，订阅 slot 来自 `platformEventSubscriptions`。M7-A 尚无 UI
+  producer，continuous claim 只使用 Runtime SPI 内部固定上限64，不泄漏到 game-facing Action Map；
 - World RenderScene 与 UI DisplayList 分别冻结，统一组合为 RenderFrame view；Runtime-private owning
   RenderFramePacket 持有 FrameArena/资源 lease/Atlas/surface pin/submit ticket 到 backend
   completion；Renderer 不访问 EnTT；
@@ -192,7 +195,8 @@ GameStateStack/Commands、Asset、UI、Audio、Tracy 或 benchmark 协议。它�
 Null 运行，且不链接 GLFW/bgfx/EnTT/FreeType/miniaudio/Tracy/cgltf。后续切片必须先接受自己的
 P0/P1 决定，再加入对应模块和 benchmark；这样每个提交都可独立定位和回滚。
 
-M7 不作为一个巨型提交：M7-A 先实现 PlatformFrame/Input correctness、Scripted/Headless
-backend、GLFW `NO_API` 窗口 + NullRender 样例；M7-B 再实现 Native Window Surface lease 与
+M7 不作为一个巨型提交：M7-A 先分为已完成的 PlatformFrame/Input correctness、Headless backend、
+PlatformFrameBuilder 直接注入和 Runtime test adapter，以及紧随其后的私有 GLFW `NO_API` 窗口 +
+NullRender 子切片；可复用 production-like PlatformBackend test double 随 GLFW adapter 测试加入；M7-B 再实现 Native Window Surface lease 与
 bgfx clear/present；M7-C 实现 UIContext、增量 layout/PaintCache 与 Null DisplayList；M7-D 实现
 Label/Button/Modal + FreeType 可见样例；M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。
