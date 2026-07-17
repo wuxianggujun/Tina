@@ -50,7 +50,7 @@ out\build\windows-msvc\bin\Debug\tina_tests.exe
 ## Windows vNext 最小构建
 
 该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A/M7-B1 与
-M7-C1b/C1c-a 的 `tina_core`、`tina_platform`、`tina_task`、`tina_render`、`tina_runtime`、`tina_ui`、
+M7-C1b/C1c-a/C1c-b1/C1c-b2 的 `tina_core`、`tina_platform`、`tina_task`、`tina_render`、`tina_runtime`、`tina_ui`、
 直接 GoogleTest 门禁与 Null 样例：
 
 ```powershell
@@ -66,9 +66,9 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 EnTT、FreeType、miniaudio、Box2D、xxHash 或 SDL/SDL3。`tina_sample_null` 只组合 Headless Platform、
 Disabled TaskSystem 与 NullRenderDevice。
 
-## Windows vNext UI 树、布局、命中快照与 point query 核心
+## Windows vNext UI 树、布局、命中快照、point query 与 synthetic route 核心
 
-M7-C1b/C1c-a/C1c-b1 的 `tina_ui` 当前只依赖 Core/Platform；门禁直接运行独立 GoogleTest executable：
+M7-C1b/C1c-a/C1c-b1/C1c-b2 的 `tina_ui` 当前只依赖 Core/Platform；门禁直接运行独立 GoogleTest executable：
 
 ```powershell
 cmake --preset windows-msvc-vnext
@@ -79,12 +79,15 @@ cmake --build --preset windows-vnext-release --target tina_ui_tests
 out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
 ```
 
-当前记录为 Windows 11 / MSVC 19.50 Debug/Release 均59/59：16项覆盖 generation tree/ownership，
+当前记录为 Windows 11 / MSVC 19.50 Debug/Release 均75/75：16项覆盖 generation tree/ownership，
 23项覆盖事务式 Flex-lite layout，15项覆盖固定 PMR 容量、`Ignore`/`Targetable`、route ancestry、
 同一 `UICommittedHitView` 内严格递增且唯一的 paint ordinal、双缓冲 view、三快照事务回滚、
 stale generation、50,000节点与 PMR 回收；5项覆盖反向 paint-order 查询、Ignore 穿透、world/clip
-半开边界、非有限坐标 miss、snapshot binding、visited count 与300次查询零新增 UI PMR allocation。
-它们不证明 listener/事件路由、Widget、DisplayList 或 Runtime/Render 集成已完成。
+半开边界、非有限坐标 miss、snapshot binding、visited count 与300次查询零新增 UI PMR allocation；
+16项覆盖 fixed-capacity synthetic listener route、Capture/Target/Bubble 顺序、stop/consume、路由中
+add/reset/destroy 安全失效、off-thread deferred reset、route/commit reentrancy guard、错误 context
+销毁 death test、300次 route 零新增 supplied UI PMR allocation 与递归 route 拒绝。它们不证明 Runtime
+input producer、持久 Pointer Capture、Focus/Modal、Button default action、Widget、DisplayList 或 Runtime/Render 集成已完成。
 
 ## Windows vNext GLFW Platform 与 Desktop bgfx
 
@@ -206,8 +209,9 @@ LSAN_OPTIONS=exitcode=23 \
 
 这些输出不包含 Legacy 产品、窗口、真实渲染后端或 cooked shader，只用于 Headless 生命周期验证，
 不能作为游戏产品或发布包。GCC 13.4 已通过基础 `tina_tests` 183/183 与 `tina_ui_tests`
-59/59；Clang 22.1.8 + libstdc++15.2 在 ASan/UBSan/LSan 下通过相同基础 183/183 与
-UI 59/59，且无诊断。但仍不能用 Ubuntu 22.04 的旧工具链降级冒充正式结果。
+75/75；Clang 22.1.8 + libstdc++15.2 在 ASan/UBSan/LSan 下通过相同基础 183/183 与
+UI 75/75，且无 sanitizer 诊断。初次 GCC 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，
+二次 GCC/Clang 构建无 warning。但仍不能用 Ubuntu 22.04 的旧工具链降级冒充正式结果。
 
 ## Linux vNext GLFW Platform
 

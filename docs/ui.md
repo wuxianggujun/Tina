@@ -3,9 +3,11 @@
 > 状态：vNext 目标契约已接受。M7-C1b 已完成 C++23 standalone `tina_ui` 的事务式 Flex-lite
 > layout；M7-C1c-a 已完成固定容量 Pointer policy/route-ancestry scratch 与双缓冲
 > `UICommittedHitView` 数据基础；M7-C1c-b1 已完成无分配 `queryPointerHit()`、反向目标选择与
-> visited count。listener token、Capture→Target→Bubble 路由、
-> Focus/Capture/Modal、Button、paint snapshot/DisplayList、nested clip、dirty subtree pruning、
-> 文本/Glyph Atlas、bgfx UI pass 与 Runtime UI producer 尚未实现。Tina UI 是游戏内 Retained UI，
+> visited count；M7-C1c-b2 已完成 synthetic routed pointer event：generation-safe RAII listener token、
+> 固定容量 route path/listener storage、48-byte fixed-inline `noexcept` callback、Capture→Target→Bubble、
+> stop/consume、路由中 mutation-safe invalidation 和 route/commit reentrancy guard。Runtime input producer、
+> 持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、
+> dirty subtree pruning、文本/Glyph Atlas 与 bgfx UI pass 尚未实现。Tina UI 是游戏内 Retained UI，
 > 不是 Immediate UI，也不是桌面编辑器工具包。
 
 ## 当前 Legacy 基线
@@ -63,7 +65,7 @@ UIContext
 Platform/Event 只把 `PlatformFrameView` 的 UI-eligible transitions 交给 UIContext，不拥有节点、Focus、Capture 或 Layout。
 `IGameState` 持有 move-only `UIRootOwner` 和非 owning `UINodeId`，不持有 UIContext、Renderer、
 UINode 裸指针或跨帧 writer。
-当前 M7-C1b/C1c-a/C1c-b1 `tina_ui` 仍只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；Font Asset、Render
+当前 M7-C1b/C1c-a/C1c-b1/C1c-b2 `tina_ui` 仍只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；Font Asset、Render
 descriptor/DisplayList 和 bgfx UI pass 分别在后续 asset/render 切片接入，不能提前把
 Asset/Render 依赖塞回 UI tree/layout core。
 
@@ -90,6 +92,11 @@ struct UICommittedLayoutView;    // owner-thread borrowed layout snapshot
 struct UICommittedHitView;       // owner-thread borrowed hit/route-ancestry snapshot
 struct UIPointerHitTarget;       // owning target facts + snapshot-local route indices
 struct UIPointerHitQueryResult;  // owning point-query result + revisions/visited count
+struct UIPointerInputEvent;      // owning normalized pointer input for one synthetic route
+struct UIPointerRouteResult;     // owning route result; not Runtime consumption/claim output yet
+class UIRoutedPointerListenerToken; // move-only RAII listener registration
+class UIRoutedPointerCallback;   // 48-byte fixed-inline noexcept callback
+struct UIRoutedPointerListenerDesc;
 struct UISemanticsView;  // 只读 committed snapshot
 
 struct InputTransitionConsumptionView;
@@ -173,9 +180,12 @@ memory 为基线。`NodeRecord` 使用内部 index 连接 parent/first-child/nex
 每节点一个独立 heap object、`shared_ptr` 或 vtable。Style、Text、Action、Semantics 等可选数据
 进入按职责组织的池，避免所有节点承担最大 Widget 的内存。
 
-UI tree 只允许主线程修改。路由/layout/paint 遍历期间的 create/reparent/order 变化进入结构
-command queue；destroy 会立即把 slot 标为 `PendingDestroy` 并令 generation lookup 失败，当前
-route 后才物理回收。这样 Capture 阶段删除目标会停止后续 Target/Bubble，但不会 UAF。
+UI tree 只允许 owner thread 修改。C1c-b2 的 synthetic route 期间允许 listener reset/add 与节点
+destroy，但当前输入 transition 使用 route 开始时的 committed hit snapshot；`commitStructure()` 与
+`commitLayout()` 在 route 进行中会返回结构化错误，防止 callback 让 borrowed committed view 在派发中失效。
+destroy 会立即令 generation lookup 失败，slot 物理回收延后到 route cleanup，因此 Capture 阶段删除目标会
+停止后续 Target/Bubble，不会向复用 slot 的新节点投递，也不会 UAF。`UIContext` 本身必须在 owner-thread
+phase 边界销毁；从 routed callback 或 callback cleanup 内销毁，或从非 owner thread 销毁，违反生命周期契约。
 
 新 root/节点完成结构、layout 和 snapshot commit 后，才能被后续 hit snapshot 使用。M7-C1c-a 的
 `commitLayout(viewportSize)` 是 Runtime 应使用的发布入口：它按需完整构建所有受影响候选，再在同一
@@ -190,13 +200,19 @@ borrowed view，分别在下一次对应成功发布或 `UIContext` 析构后失
 heap allocation。
 
 `UIContext::Create(ownerWindow, capacities, memory_resource)` 的 `memory_resource` 当前服务固定容量
-tree/id、style/pointer-policy side array、dirty state/queue、layout 与 route-ancestry scratch，以及
-committed structure/layout/hit 双缓冲；
+tree/id、style/pointer-policy side array、dirty state/queue、layout 与 route-ancestry scratch、route path
+scratch、routed pointer listener slots，以及 committed structure/layout/hit 双缓冲；
 少量 control-plane 对象和 off-thread root release 队列在 Create 期间使用进程默认 heap 预分配。
 `dirtyQueueCapacity`、`layoutSnapshotCapacity` 与 `hitSnapshotCapacity` 为0时从 `nodeCapacity` 派生，
-非0时固定且不得超过节点容量。该 supplied PMR 范围不等于整个进程不使用 heap。`UIRootOwner` 在 owner
+非0时固定且不得超过节点容量；`routePathCapacity` 为0时同样从节点容量派生，`routedPointerListenerCapacity`
+为0时从节点容量派生但可单独配置到最大1,048,576，因为一个节点可以注册多个事件监听。该 supplied PMR
+范围不等于整个进程不使用 heap。`UIRootOwner` 在 owner
 thread 析构时立即回收；若在其他线程释放，只把 root id 写入
 预分配队列，下一次 owner-thread UI mutation/commit 再物理回收。
+`UIRoutedPointerListenerToken` 同样是 move-only RAII：owner-thread reset 立即失效，包括 dispatch 中；
+off-thread reset 进入有界队列，并在下一次 owner-thread mutation/route 前 drain。Token 在 `UIContext`
+已经销毁后 reset 仍安全，但不能用来延长 context 生命周期。listener callback 使用48字节 fixed-inline
+`noexcept` callable；超出容量或对齐要求的 callable 在编译期被拒绝，没有 allocator 或 heap fallback。
 
 ## 坐标、DPI 与可见性
 
@@ -279,10 +295,18 @@ parent/root index、world rect、当前仅为 `viewport ∩ worldRect` 的 effec
 M7-C1c-b1 的 `queryPointerHit(point)` 对这份 view 做反向扫描，只接受 `Targetable` 且 point 同时位于
 world rect/effective clip 的首个 entry；边界固定为 left/top inclusive、right/bottom exclusive，非有限
 坐标安全返回未命中。结果复制 target/root identity、snapshot-local route index、四类 revision 与
-visited count。查询为 `const noexcept`，不执行 layout/hit rebuild、不分配、不派发事件。目前没有
-Capture→Target→Bubble listener dispatch、Focus/Hover/Pointer Capture/Modal，也没有独立
-z-order/stacking 或 nested clip policy；当前 paint order 来自稳定 tree preorder，hit rebuild 仍线性扫描
-整份 committed layout，尚未按 dirty subtree 剪枝。
+visited count。查询为 `const noexcept`，不执行 layout/hit rebuild、不分配、不派发事件。
+
+C1c-b2 的 `routePointerInput(input)` 是当前唯一已实现的 route 执行入口。它校验 `PlatformFrameId`、
+source sequence、owner `WindowId`、primary pointer、事件 kind、有限 logical position/delta 和 button，
+然后对上一份 committed hit snapshot 最多执行一次 point query，使用固定容量 route path scratch 构建
+root→target ancestry，并按 Capture→Target→Bubble 调用匹配 kind/phase 的 listener。`stopPropagation()`
+结束后续节点但不回滚当前节点已完成 callback；`stopImmediatePropagation()` 同时跳过当前节点剩余
+listener；`consumeInputTransition()` 只标记结果 consumed，不等于 Widget default action。route 中 reset
+后续 listener、add listener、destroy target/root、callback 持有的 root 自销毁、off-thread token reset
+和递归 route 都有结构化语义或拒绝路径；容量不足时不派发任何 partial callback。当前仍没有持久
+Pointer Capture、Focus/Hover/Modal、Button default behavior、独立 z-order/stacking 或 nested clip policy；
+paint order 来自稳定 tree preorder，hit rebuild 仍线性扫描整份 committed layout，尚未按 dirty subtree 剪枝。
 
 ## Flex-lite v1
 
@@ -316,8 +340,10 @@ layout revision。虚拟列表只创建 visible + overscan item；100,000 行不
 
 ## 输入、路由与默认行为
 
-本节描述冻结的后续目标；M7-C1c-a/C1c-b1 已提供 committed hit/route-ancestry snapshot 与纯 point query，
-尚未实现本节的 listener/事件派发、Focus/Capture/Modal、Button default action 或 Runtime producer。
+本节分为已实现的 C1c-b2 synthetic route 和冻结的后续 Runtime 目标。C1c-b2 已提供 committed
+hit/route-ancestry snapshot、纯 point query、固定容量 listener 注册与单条 synthetic Pointer input
+的 Capture→Target→Bubble 派发；尚未实现 Runtime producer、Focus/Capture/Modal、Button default action
+或 Gameplay Action consumption/claim 输出。
 
 Runtime 在每次状态命令提交后，根据 committed `GameStateStack`、`GameStatePolicy` 和 root
 registration 生成每窗口不可变 `UIInputScopeSnapshot`。它按视觉层级列出 eligible roots，并在
@@ -336,10 +362,10 @@ generation 校验且未被新 modal 覆盖时恢复焦点。状态命令在路�
   先记录 visited count，只有 profiling 证明需要才加分块索引；
 - route path 使用预配置 fixed-capacity scratch，超过最大树深返回 `CapacityExceeded`，不 heap fallback；
 - 每个路由阶段重新解析 UINodeId owner + generation；listener 按稳定注册顺序；
-- Capture -> Target -> Bubble 后执行可被 `preventDefault()` 取消的 Widget default action；
-- route 中新增 listener/child 从下一 transition/snapshot 生效；删除立即 tombstone、route 后回收；
-- Pointer Capture 按 pointerId 保存。首期 Mouse 使用 pointerId=0，不把预留字段宣称为触摸支持；
-- Focus、Modal、Keyboard、Gamepad Accept/BackNavigation 复用同一 default action 生命周期。
+- 当前 C1c-b2 只执行 Capture -> Target -> Bubble listener dispatch，不执行 Widget default action；
+- route 中新增 listener 从下一次 route 生效；删除/重置立即 tombstone，route cleanup 后回收 callback storage；
+- 目标后续才保存 Pointer Capture；当前 synthetic route 只支持 primary pointer，不把预留字段宣称为触摸支持；
+- Focus、Modal、Keyboard、Gamepad Accept/BackNavigation 与 Button default action 后续复用同一生命周期。
 
 UI 返回只属于当前 Platform frame 的 `Tina::UI::InputTransitionConsumptionView`，以及当帧
 `Tina::UI::ContinuousControlClaimsView`。这些 view 的 ABI 归 `tina_ui` 拥有，Runtime ActionMapper
@@ -497,15 +523,22 @@ p50/p95/p99 由 `tina_bench` 的预分配 sample buffer 离线计算，不在常
 - 无变化 UI、单 Label 更新、滚动列表、中文文本、Modal 和设置页分别记录 p50/p95/p99；
 - 绝对毫秒预算等固定门禁机建立后再阻断，零分配、容量、顺序和资源归零立即阻断。
 
-M7-C1b/C1c-a/C1c-b1 已建立其中第一组可执行证据：50,000 节点深树的非递归 layout 与 committed hit
+M7-C1b/C1c-a/C1c-b1/C1c-b2 已建立其中第一组可执行证据：50,000 节点深树的非递归 layout 与 committed hit
 snapshot；首次发布后连续300次
 同 viewport、无 mutation 的 `commitLayout()` 均为0 layout pass、layout revision 不变且 supplied
 UI PMR allocation count 不增加。15项 hit snapshot 测试覆盖固定容量、policy、route ancestry、同一 view
 内严格递增且唯一的 paint ordinal、revision、三快照失败回滚、stale generation 与 PMR 回收；新增5项
 point query 测试覆盖反向目标选择、Ignore 穿透、world/clip 半开边界、非有限坐标 miss、revision/index
-binding、visited count 与300次查询零新增 UI PMR allocation；`tina_ui_tests` 共59/59。
-它尚未证明 dirty leaf 不扫描无关 subtree，也未覆盖 listener/事件路由、PaintCache、
-DisplayList、文本或 GPU 资源归零；这些门禁仍由后续切片补齐。
+binding、visited count 与300次查询零新增 UI PMR allocation；C1c-b2 新增16项 route 测试覆盖稳定
+Capture/Target/Bubble 顺序、stopPropagation、stopImmediatePropagation、dispatch 中 reset/add/destroy、
+generation-safe target invalidation、listener 容量原子失败与复用、route depth 容量失败无 partial
+callback、token move/context-destroyed/off-thread reset、callback root 自销毁、route 中 commit 拒绝、
+错误销毁 context 的 death test、300次 route 零新增 supplied UI PMR allocation/不改变 committed state，
+以及递归 route 拒绝。Windows MSVC 19.50 Debug/Release、Linux GCC 13.4、Linux Clang 22.1.8 +
+libstdc++15.2 ASan/UBSan/LSan 的完整 `tina_ui_tests` 均为75/75；Clang 无 sanitizer 诊断。初次 GCC
+暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
+它尚未证明 dirty leaf 不扫描无关 subtree，也未覆盖 PaintCache、
+DisplayList、文本、Widget default action、Runtime producer 或 GPU 资源归零；这些门禁仍由后续切片补齐。
 
 ## 测试与实施顺序
 
@@ -529,11 +562,13 @@ DisplayList、文本或 GPU 资源归零；这些门禁仍由后续切片补齐�
 3. 已完成 M7-C1c-a：固定容量 Pointer policy/route-ancestry scratch、双缓冲 committed hit snapshot、
    structure/layout/hit 事务发布和 hit-only 0 layout；
 4. 已完成 M7-C1c-b1：无分配 point query、反向目标选择、route index/revision 与 visited count；
-5. 实现 listener token、Capture→Target→Bubble route，并接入真实 Runtime UI producer；
-6. 让 dirty leaf 跳过无关 subtree，并输出后端无关 DisplayList；
-7. 完成 PaintCache/text layout + glyph atlas；
-8. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
-9. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
-10. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
+5. 已完成 M7-C1c-b2：generation-safe RAII listener token、fixed-inline callback、synthetic
+   Capture→Target→Bubble route、stop/consume、mutation-safe invalidation 与 route/commit reentrancy guard；
+6. 接入真实 Runtime UI producer，并输出 consumption/claim 给 ActionMapper；
+7. 让 dirty leaf 跳过无关 subtree，并输出后端无关 DisplayList；
+8. 完成 PaintCache/text layout + glyph atlas；
+9. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
+10. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
+11. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
 
 所以“完善 UI”首先是完成正确的数据和 backend 边界，然后才是增加 Widget 数量。

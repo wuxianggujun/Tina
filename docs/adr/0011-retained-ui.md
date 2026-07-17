@@ -6,9 +6,11 @@
 - 实施状态：M7-C1b 已实现事务式 Flex-lite layout；M7-C1c-a 已实现固定容量 PMR Pointer policy/
   route-ancestry scratch、`Ignore`/`Targetable`、双缓冲 `UICommittedHitView` 与成功 `commitLayout()` 的
   structure/layout/hit 原子发布；M7-C1c-b1 已实现无分配 `queryPointerHit()`、反向目标选择与 visited count。
-  listener token、Capture→Target→Bubble 路由、
-  Focus/Capture/Modal、Button、paint snapshot/DisplayList、dirty subtree pruning、nested clip、文本/
-  Glyph Atlas、bgfx UI pass 与 Runtime UI producer 仍后置。
+  M7-C1c-b2 已实现 fixed-capacity synthetic routed pointer event：generation-safe RAII listener token、
+  48-byte fixed-inline `noexcept` callback、Capture→Target→Bubble、stop/consume、路由中 add/reset/destroy
+  安全失效和 route/commit reentrancy guard。Runtime UI producer、持久 Pointer Capture、Focus/Modal、
+  Button default action、paint snapshot/DisplayList、dirty subtree pruning、nested clip、文本/Glyph Atlas
+  与 bgfx UI pass 仍后置。
 
 ## 背景
 
@@ -71,7 +73,10 @@ view 内的 paint ordinal 唯一且严格递增，并携带 structure/layout/pai
 变化的 hit-only commit 为0次 layout。当前 effective clip 仅为 `viewport ∩ worldRect`，hit rebuild 仍
 线性扫描整份 committed layout。M7-C1c-b1 的 `queryPointerHit()` 反向扫描 view，只接受同时位于
 world/effective clip 的 `Targetable` entry，使用半开边界并返回 route index、四类 revision 与 visited count；
-它不执行 listener/事件路由，也不实现独立 z-order/stacking 或 nested clip。
+这个纯 query 本身不派发 listener，也不实现独立 z-order/stacking 或 nested clip。M7-C1c-b2 在此基础上增加
+synthetic `routePointerInput()`：单条 normalized pointer input 最多执行一次 committed point query，使用固定容量
+route path/listener storage，并按 Capture→Target→Bubble 派发 stable-order listener；它仍不是 Runtime producer，
+也不包含持久 Pointer Capture、Focus/Modal 或 Widget default action。
 
 ### 每帧事务与 committed snapshot
 
@@ -109,10 +114,15 @@ capacity failure 与 Tina allocation delta。每窗口 layout pass 每帧只能�
 
 当前直接测试已覆盖50,000节点深树的非递归布局/hit snapshot，以及首次发布后连续300次同 viewport、
 无 mutation commit 的0 layout pass、revision 不变和 supplied UI PMR allocation count 不增加；15项
-committed hit snapshot 加5项 point query 测试后 `tina_ui_tests` 共59/59。query 测试覆盖反向目标选择、
-Ignore 穿透、world/clip 半开边界、非有限坐标 miss、snapshot binding/visited count 与300次零新增 UI PMR
-allocation；它不等价于 listener/route、PaintCache/
-DisplayList、进程 heap 或 GPU 资源门禁已经完成。
+committed hit snapshot 加5项 point query、16项 synthetic route 测试后 `tina_ui_tests` 共75/75。query
+测试覆盖反向目标选择、Ignore 穿透、world/clip 半开边界、非有限坐标 miss、snapshot binding/visited count
+与300次零新增 UI PMR allocation；route 测试覆盖 Capture/Target/Bubble 顺序、stop/consume、dispatch 中
+reset/add/destroy、generation-safe target invalidation、listener/path 容量失败、off-thread token reset、
+route 中 commit 拒绝、错误销毁 context 的 death test、300次 route 零新增 supplied UI PMR allocation 和
+递归 route 拒绝。Windows MSVC 19.50 Debug/Release、Linux GCC 13.4、Linux Clang 22.1.8 +
+libstdc++15.2 ASan/UBSan/LSan 均为75/75；Clang 无 sanitizer 诊断。初次 GCC 暴露的 routed-pointer
+callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。它不等价于 PaintCache/
+DisplayList、Runtime producer、进程 heap 或 GPU 资源门禁已经完成。
 
 ### PaintCache、DisplayList 与批处理
 
@@ -143,8 +153,9 @@ pipeline、texture、sampler、blend、effective clip 完全兼容的命令；�
 
 ### 输入 consumption、claim 与路由边界
 
-本节是 Accepted 目标语义。M7-C1c-a/C1c-b1 已提供 committed hit/route-ancestry 数据与纯 point query，
-尚未实现 listener dispatch、Capture → Target → Bubble 执行、Focus/Capture/Modal 或 Runtime producer。
+本节是 Accepted 目标语义。M7-C1c-a/C1c-b1 已提供 committed hit/route-ancestry 数据与纯 point query；
+M7-C1c-b2 已提供 synthetic listener dispatch 与 Capture → Target → Bubble 执行。Focus/Capture/Modal、
+Button default action、Runtime producer、consumption/claim 输出和真实 Gameplay Action suppression 仍未实现。
 
 Runtime 将平台输入转为后端无关 `UIInputTransition` 序列，再调用 UI 路由；UI 不读取 GLFW，不修改
 全局 Input Snapshot，也不直接调用 Gameplay 输入接口。每个 Pointer transition 最多使用 committed hit
@@ -178,13 +189,17 @@ Focus、hover、capture 和 Modal Scope 的变更在当前路由批次结束后�
 `UIContext::Create` 必须显式接收节点/root、mutation、dirty queue、route depth、PaintCache bytes、clip intern、
 DisplayList command、text run/glyph ref 与 frame pin 容量。运行期禁止隐藏扩容、系统 allocator fallback 或
 因容量不足退回全树 heap rebuild。
-当前 M7-C1b/C1c-a 的 `UIContext::Create(ownerWindow, capacities, memory_resource)` 已用 supplied PMR
-固定分配 tree/id、style/pointer-policy/dirty side array、dirty queue、layout/route-ancestry scratch 与
-committed structure/layout/hit 双缓冲；`dirtyQueueCapacity`、`layoutSnapshotCapacity` 和
-`hitSnapshotCapacity` 为0时从 node capacity 派生，非0时不得超过
-node capacity。small control-plane 对象和 off-thread `UIRootOwner` release 队列仍在 Create 期间
-使用默认 heap 预分配。owner thread 析构 `UIRootOwner` 立即回收；非 owner thread 只入队 root id，
-由下一次 owner-thread UI mutation/commit drain 并物理回收。
+当前 M7-C1b/C1c-a/C1c-b1/C1c-b2 的 `UIContext::Create(ownerWindow, capacities, memory_resource)` 已用 supplied PMR
+固定分配 tree/id、style/pointer-policy/dirty side array、dirty queue、layout/route-ancestry scratch、route path
+scratch、listener slots 与 committed structure/layout/hit 双缓冲；`dirtyQueueCapacity`、`layoutSnapshotCapacity`、
+`hitSnapshotCapacity` 和 `routePathCapacity` 为0时从 node capacity 派生，非0时不得超过 node capacity。
+`routedPointerListenerCapacity` 为0时也从 node capacity 派生，可单独配置且最大为1,048,576。small
+control-plane 对象、token state、off-thread `UIRootOwner`/listener release 队列仍在 Create 期间使用默认 heap 预分配。
+owner thread 析构 `UIRootOwner` 立即回收；非 owner thread 只入队 root id，由下一次 owner-thread
+UI mutation/commit drain 并物理回收。`UIRoutedPointerListenerToken` owner-thread reset 立即生效；
+off-thread reset 进入 bounded queue 并在下一次 owner-thread mutation/route 前 drain，context 销毁后 reset 仍安全。
+`UIContext` 自身的 mutation、route 与销毁必须发生在 owner thread；从 routed callback/callback cleanup 内销毁，
+或在非 owner thread 销毁，会触发生命周期硬门禁并终止，避免继续执行确定的 UAF。
 
 - 结构/样式 mutation 在应用前预留全部容量；失败时原子拒绝该 mutation，保留上一 committed tree/snapshot；
 - dirty queue 容量不足时返回稳定的 `UIError::CapacityExceeded`，不得静默丢 dirty bit；
@@ -215,9 +230,10 @@ Checkbox、Slider、ScrollView、VirtualList、TextEdit、IME、复杂 shaping �
 - Render backend 可以批处理 UI，但不能改变透明绘制语义或把 backend 生命周期反向泄漏给 UI；
 - Tina 需要自行承担控件、文本 shaping、可访问性和视觉回归成本，并以垂直切片逐步交付。
 
-M7-C1b/C1c-a/C1c-b1 只完成无变化布局零工作、changed-frame 单 pass、committed hit snapshot 与纯 point query；
+M7-C1b/C1c-a/C1c-b1/C1c-b2 只完成无变化布局零工作、changed-frame 单 pass、committed hit snapshot、纯 point query
+与 synthetic listener route；
 “CPU 成本由实际变化区域决定”仍需后续 dirty subtree pruning 证明，不能从 dirty bit/queue 或 hit view
-已存在直接推断。事件路由、Widget 和可见 UI 同样不能由 point query 推断。
+已存在直接推断。Runtime producer、Widget default action、可见 UI 和 DisplayList 也不能由 synthetic route 推断。
 
 ## 被拒绝方案
 

@@ -1,10 +1,12 @@
 #include <tina/ui/UIContext.hpp>
 
+#include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/ui/UIDirty.hpp>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <exception>
 #include <expected>
@@ -19,19 +21,37 @@
 
 namespace Tina::UI::Detail {
 
+struct DeferredRoutedPointerListenerRelease final {
+    u32 slot = 0;
+    u32 generation = 0;
+};
+
+struct RoutedPointerListenerTokenState final {
+    u32 generation = 0;
+    bool active = false;
+};
+
 struct UIContextLifetimeControl final {
     UIContextLifetimeControl(
         std::thread::id threadId,
-        usize rootCapacity)
-        : ownerThreadId(threadId)
+        usize rootCapacity,
+        usize routedPointerListenerCapacity)
+        : ownerThreadId(threadId),
+          routedPointerListenerStates(routedPointerListenerCapacity)
     {
         deferredRootDestroys.reserve(rootCapacity);
+        deferredRoutedPointerListenerReleases.reserve(routedPointerListenerCapacity);
     }
 
     std::mutex mutex;
     UIContext* context = nullptr;
     std::thread::id ownerThreadId{};
     std::vector<UINodeId> deferredRootDestroys;
+    std::atomic_bool hasDeferredRootDestroys = false;
+    std::vector<RoutedPointerListenerTokenState> routedPointerListenerStates;
+    std::vector<DeferredRoutedPointerListenerRelease>
+        deferredRoutedPointerListenerReleases;
+    std::atomic_bool hasDeferredRoutedPointerListenerReleases = false;
 };
 
 } // namespace Tina::UI::Detail
@@ -48,7 +68,27 @@ struct NormalizedCapacityConfig final {
     usize dirtyQueueCapacity = 0;
     usize layoutSnapshotCapacity = 0;
     usize hitSnapshotCapacity = 0;
+    usize routePathCapacity = 0;
+    usize routedPointerListenerCapacity = 0;
 };
+
+inline constexpr u32 InvalidRoutedPointerListenerIndex =
+    (std::numeric_limits<u32>::max)();
+
+struct RoutedPointerListenerRecord final {
+    UINodeId node{};
+    UIRoutedPointerEventKind kind = UIRoutedPointerEventKind::Move;
+    UIEventPhaseMask phases = UIEventPhaseMask::None;
+    UIRoutedPointerCallback callback{};
+    u32 generation = 0;
+    u32 previousNodeListenerIndex = InvalidRoutedPointerListenerIndex;
+    u32 nextNodeListenerIndex = InvalidRoutedPointerListenerIndex;
+    u32 nextFreeIndex = InvalidRoutedPointerListenerIndex;
+    u64 registrationSerial = 0;
+    bool active = false;
+};
+
+static_assert(std::is_nothrow_destructible_v<RoutedPointerListenerRecord>);
 
 struct NodeRecord final {
     u32 parentIndex = InvalidNodeIndex;
@@ -405,12 +445,26 @@ struct ResolvedLength final {
     const usize hitSnapshotCapacity = config.hitSnapshotCapacity == 0
         ? config.nodeCapacity
         : config.hitSnapshotCapacity;
+    const usize routePathCapacity = config.routePathCapacity == 0
+        ? config.nodeCapacity
+        : config.routePathCapacity;
+    const usize routedPointerListenerCapacity =
+        config.routedPointerListenerCapacity == 0
+        ? config.nodeCapacity
+        : config.routedPointerListenerCapacity;
     if (dirtyQueueCapacity > config.nodeCapacity
         || layoutSnapshotCapacity > config.nodeCapacity
-        || hitSnapshotCapacity > config.nodeCapacity) {
+        || hitSnapshotCapacity > config.nodeCapacity
+        || routePathCapacity > config.nodeCapacity) {
         return fail(
             UIErrorCode::InvalidContextConfig,
             "UI derived capacities cannot exceed node capacity");
+    }
+    if (routedPointerListenerCapacity
+        > UIContextCapacityConfig::MaxRoutedPointerListenerCapacity) {
+        return fail(
+            UIErrorCode::InvalidContextConfig,
+            "UI routed pointer listener capacity exceeds the configured maximum");
     }
 
     return NormalizedCapacityConfig{
@@ -419,6 +473,8 @@ struct ResolvedLength final {
         .dirtyQueueCapacity = dirtyQueueCapacity,
         .layoutSnapshotCapacity = layoutSnapshotCapacity,
         .hitSnapshotCapacity = hitSnapshotCapacity,
+        .routePathCapacity = routePathCapacity,
+        .routedPointerListenerCapacity = routedPointerListenerCapacity,
     };
 }
 
@@ -435,6 +491,39 @@ struct ResolvedLength final {
         return true;
     }
     return false;
+}
+
+[[nodiscard]] bool isValidRoutedPointerEventKind(
+    UIRoutedPointerEventKind kind) noexcept
+{
+    switch (kind) {
+    case UIRoutedPointerEventKind::Move:
+    case UIRoutedPointerEventKind::ButtonDown:
+    case UIRoutedPointerEventKind::ButtonUp:
+    case UIRoutedPointerEventKind::Wheel:
+        return true;
+    }
+    return false;
+}
+
+[[nodiscard]] bool isValidEventPhaseMask(UIEventPhaseMask phases) noexcept
+{
+    const auto bits = static_cast<u8>(phases);
+    const auto allBits = static_cast<u8>(UIEventPhaseMask::All);
+    return bits != 0 && (bits & static_cast<u8>(~allBits)) == 0;
+}
+
+[[nodiscard]] UIEventPhaseMask phaseMaskFor(UIEventPhase phase) noexcept
+{
+    switch (phase) {
+    case UIEventPhase::Capture:
+        return UIEventPhaseMask::Capture;
+    case UIEventPhase::Target:
+        return UIEventPhaseMask::Target;
+    case UIEventPhase::Bubble:
+        return UIEventPhaseMask::Bubble;
+    }
+    return UIEventPhaseMask::None;
 }
 
 [[nodiscard]] bool containsPointHalfOpen(
@@ -466,10 +555,17 @@ struct UIContext::Impl final {
     std::pmr::vector<LayoutScratchState> layoutScratchByIndex;
     std::pmr::vector<u32> layoutOrderScratch;
     std::pmr::vector<u32> hitEntryIndexByNodeIndex;
+    std::pmr::vector<u32> routedPointerListenerHeadByNodeIndex;
+    std::pmr::vector<u32> routedPointerListenerTailByNodeIndex;
+    std::pmr::vector<RoutedPointerListenerRecord> routedPointerListeners;
+    std::pmr::vector<u32> routePathScratch;
+    std::pmr::vector<u32> inactiveRoutedPointerListenerIndices;
     std::array<std::pmr::vector<UICommittedNodeEntry>, 2> committedBuffers;
     std::array<std::pmr::vector<UICommittedLayoutEntry>, 2> committedLayoutBuffers;
     std::array<std::pmr::vector<UICommittedHitEntry>, 2> committedHitBuffers;
     std::vector<UINodeId> deferredRootDestroyBuffer;
+    std::vector<Detail::DeferredRoutedPointerListenerRelease>
+        deferredRoutedPointerListenerReleaseBuffer;
     usize publishedBufferIndex = 0;
     usize publishedLayoutBufferIndex = 0;
     usize publishedHitBufferIndex = 0;
@@ -492,6 +588,13 @@ struct UIContext::Impl final {
     usize dirtyQueueHighWater = 0;
     usize committedHitTargetCount = 0;
     usize lastHitRebuildCount = 0;
+    u32 freeRoutedPointerListenerHead = InvalidRoutedPointerListenerIndex;
+    usize activeRoutedPointerListenerCount = 0;
+    usize routedPointerListenerHighWater = 0;
+    u64 routedPointerListenerRegistrationSerial = 0;
+    usize routeDispatchDepth = 0;
+    usize listenerCallbackCleanupDepth = 0;
+    bool reclaimingInactiveRoutedPointerListeners = false;
 
     Impl(
         Platform::WindowId owner,
@@ -514,6 +617,11 @@ struct UIContext::Impl final {
           layoutScratchByIndex(&resource),
           layoutOrderScratch(&resource),
           hitEntryIndexByNodeIndex(&resource),
+          routedPointerListenerHeadByNodeIndex(&resource),
+          routedPointerListenerTailByNodeIndex(&resource),
+          routedPointerListeners(&resource),
+          routePathScratch(&resource),
+          inactiveRoutedPointerListenerIndices(&resource),
           committedBuffers{
               std::pmr::vector<UICommittedNodeEntry>(&resource),
               std::pmr::vector<UICommittedNodeEntry>(&resource)},
@@ -549,6 +657,8 @@ struct UIContext::Impl final {
             .dirtyQueueCapacity = normalized.dirtyQueueCapacity,
             .layoutSnapshotCapacity = normalized.layoutSnapshotCapacity,
             .hitSnapshotCapacity = normalized.hitSnapshotCapacity,
+            .routePathCapacity = normalized.routePathCapacity,
+            .routedPointerListenerCapacity = normalized.routedPointerListenerCapacity,
         };
 
         auto impl = std::unique_ptr<Impl>(new Impl(
@@ -571,6 +681,30 @@ struct UIContext::Impl final {
         impl->hitEntryIndexByNodeIndex.resize(
             normalized.nodeCapacity,
             InvalidUIHitEntryIndex);
+        impl->routedPointerListenerHeadByNodeIndex.resize(
+            normalized.nodeCapacity,
+            InvalidRoutedPointerListenerIndex);
+        impl->routedPointerListenerTailByNodeIndex.resize(
+            normalized.nodeCapacity,
+            InvalidRoutedPointerListenerIndex);
+        impl->routedPointerListeners.resize(normalized.routedPointerListenerCapacity);
+        for (usize listenerIndex = 0;
+             listenerIndex < normalized.routedPointerListenerCapacity;
+             ++listenerIndex) {
+            RoutedPointerListenerRecord& listener =
+                impl->routedPointerListeners[listenerIndex];
+            listener.nextFreeIndex = listenerIndex + 1
+                    < normalized.routedPointerListenerCapacity
+                ? static_cast<u32>(listenerIndex + 1)
+                : InvalidRoutedPointerListenerIndex;
+        }
+        impl->freeRoutedPointerListenerHead =
+            normalized.routedPointerListenerCapacity == 0
+            ? InvalidRoutedPointerListenerIndex
+            : 0;
+        impl->routePathScratch.reserve(normalized.routePathCapacity);
+        impl->inactiveRoutedPointerListenerIndices.reserve(
+            normalized.routedPointerListenerCapacity);
         impl->committedBuffers[0].reserve(normalized.nodeCapacity);
         impl->committedBuffers[1].reserve(normalized.nodeCapacity);
         impl->committedLayoutBuffers[0].reserve(normalized.layoutSnapshotCapacity);
@@ -578,6 +712,8 @@ struct UIContext::Impl final {
         impl->committedHitBuffers[0].reserve(normalized.hitSnapshotCapacity);
         impl->committedHitBuffers[1].reserve(normalized.hitSnapshotCapacity);
         impl->deferredRootDestroyBuffer.reserve(normalized.rootCapacity);
+        impl->deferredRoutedPointerListenerReleaseBuffer.reserve(
+            normalized.routedPointerListenerCapacity);
         return impl;
     }
 
@@ -590,6 +726,15 @@ struct UIContext::Impl final {
         if (lifetime->context == context) {
             lifetime->context = nullptr;
             lifetime->deferredRootDestroys.clear();
+            lifetime->hasDeferredRootDestroys.store(false, std::memory_order_release);
+            lifetime->deferredRoutedPointerListenerReleases.clear();
+            lifetime->hasDeferredRoutedPointerListenerReleases.store(
+                false,
+                std::memory_order_release);
+            for (Detail::RoutedPointerListenerTokenState& state
+                 : lifetime->routedPointerListenerStates) {
+                state.active = false;
+            }
         }
     }
 
@@ -1365,22 +1510,213 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    void publishRoutedPointerListenerTokenState(
+        u32 slot,
+        u32 generation,
+        bool active) noexcept
+    {
+        if (!lifetime) {
+            return;
+        }
+        const std::scoped_lock lock(lifetime->mutex);
+        if (slot >= lifetime->routedPointerListenerStates.size()) {
+            return;
+        }
+        lifetime->routedPointerListenerStates[slot] =
+            Detail::RoutedPointerListenerTokenState{
+                .generation = generation,
+                .active = active,
+            };
+    }
+
+    void unlinkRoutedPointerListener(u32 listenerIndex) noexcept
+    {
+        if (listenerIndex >= routedPointerListeners.size()) {
+            return;
+        }
+        RoutedPointerListenerRecord& listener = routedPointerListeners[listenerIndex];
+        const u32 nodeIndex = listener.node.index();
+        if (nodeIndex >= routedPointerListenerHeadByNodeIndex.size()) {
+            return;
+        }
+
+        if (listener.previousNodeListenerIndex != InvalidRoutedPointerListenerIndex) {
+            routedPointerListeners[listener.previousNodeListenerIndex]
+                .nextNodeListenerIndex = listener.nextNodeListenerIndex;
+        } else if (routedPointerListenerHeadByNodeIndex[nodeIndex] == listenerIndex) {
+            routedPointerListenerHeadByNodeIndex[nodeIndex] =
+                listener.nextNodeListenerIndex;
+        }
+        if (listener.nextNodeListenerIndex != InvalidRoutedPointerListenerIndex) {
+            routedPointerListeners[listener.nextNodeListenerIndex]
+                .previousNodeListenerIndex = listener.previousNodeListenerIndex;
+        } else if (routedPointerListenerTailByNodeIndex[nodeIndex] == listenerIndex) {
+            routedPointerListenerTailByNodeIndex[nodeIndex] =
+                listener.previousNodeListenerIndex;
+        }
+        listener.previousNodeListenerIndex = InvalidRoutedPointerListenerIndex;
+        listener.nextNodeListenerIndex = InvalidRoutedPointerListenerIndex;
+    }
+
+    void recycleRoutedPointerListener(u32 listenerIndex) noexcept
+    {
+        if (listenerIndex >= routedPointerListeners.size()) {
+            return;
+        }
+        RoutedPointerListenerRecord& listener = routedPointerListeners[listenerIndex];
+        unlinkRoutedPointerListener(listenerIndex);
+
+        // Stabilize every intrusive/free-list field before invoking a user
+        // callable's move/destructor. Those operations are noexcept but may
+        // release UI owners or tokens and therefore re-enter the context.
+        listener.node = {};
+        listener.kind = UIRoutedPointerEventKind::Move;
+        listener.phases = UIEventPhaseMask::None;
+        listener.registrationSerial = 0;
+        listener.active = false;
+        listener.previousNodeListenerIndex = InvalidRoutedPointerListenerIndex;
+        listener.nextNodeListenerIndex = InvalidRoutedPointerListenerIndex;
+        listener.nextFreeIndex = InvalidRoutedPointerListenerIndex;
+
+        ++listenerCallbackCleanupDepth;
+        auto cleanupDepth = Core::makeScopeExit([this]() noexcept {
+            --listenerCallbackCleanupDepth;
+        });
+        UIRoutedPointerCallback detachedCallback(std::move(listener.callback));
+
+        listener.nextFreeIndex = freeRoutedPointerListenerHead;
+        freeRoutedPointerListenerHead = listenerIndex;
+        detachedCallback.reset();
+    }
+
+    void reclaimInactiveRoutedPointerListeners() noexcept
+    {
+        if (routeDispatchDepth != 0
+            || reclaimingInactiveRoutedPointerListeners) {
+            return;
+        }
+
+        reclaimingInactiveRoutedPointerListeners = true;
+        auto reclaimGuard = Core::makeScopeExit([this]() noexcept {
+            reclaimingInactiveRoutedPointerListeners = false;
+        });
+        while (!inactiveRoutedPointerListenerIndices.empty()) {
+            const u32 listenerIndex =
+                inactiveRoutedPointerListenerIndices.back();
+            inactiveRoutedPointerListenerIndices.pop_back();
+            if (listenerIndex < routedPointerListeners.size()
+                && !routedPointerListeners[listenerIndex].active
+                && routedPointerListeners[listenerIndex].node.hasValue()) {
+                recycleRoutedPointerListener(listenerIndex);
+            }
+        }
+    }
+
+    void deactivateRoutedPointerListener(
+        u32 listenerIndex,
+        u32 generation,
+        bool publishTokenState) noexcept
+    {
+        if (listenerIndex >= routedPointerListeners.size()) {
+            return;
+        }
+        RoutedPointerListenerRecord& listener = routedPointerListeners[listenerIndex];
+        if (!listener.active || listener.generation != generation) {
+            return;
+        }
+
+        listener.active = false;
+        if (activeRoutedPointerListenerCount > 0) {
+            --activeRoutedPointerListenerCount;
+        }
+        if (publishTokenState) {
+            publishRoutedPointerListenerTokenState(listenerIndex, generation, false);
+        }
+        if (routeDispatchDepth != 0
+            || listenerCallbackCleanupDepth != 0
+            || reclaimingInactiveRoutedPointerListeners) {
+            inactiveRoutedPointerListenerIndices.push_back(listenerIndex);
+            return;
+        }
+        recycleRoutedPointerListener(listenerIndex);
+        reclaimInactiveRoutedPointerListeners();
+    }
+
+    void deactivateAllRoutedPointerListenersForNode(u32 nodeIndex) noexcept
+    {
+        if (nodeIndex >= routedPointerListenerHeadByNodeIndex.size()) {
+            return;
+        }
+        u32 listenerIndex = routedPointerListenerHeadByNodeIndex[nodeIndex];
+        while (listenerIndex != InvalidRoutedPointerListenerIndex) {
+            RoutedPointerListenerRecord& listener = routedPointerListeners[listenerIndex];
+            const u32 nextListenerIndex = listener.nextNodeListenerIndex;
+            deactivateRoutedPointerListener(
+                listenerIndex,
+                listener.generation,
+                true);
+            listenerIndex = nextListenerIndex;
+        }
+        if (routeDispatchDepth == 0) {
+            routedPointerListenerHeadByNodeIndex[nodeIndex] =
+                InvalidRoutedPointerListenerIndex;
+            routedPointerListenerTailByNodeIndex[nodeIndex] =
+                InvalidRoutedPointerListenerIndex;
+        }
+    }
+
+    void drainDeferredRoutedPointerListenerReleases() noexcept
+    {
+        if (!isOwnerThread() || !lifetime) {
+            return;
+        }
+        if (!lifetime->hasDeferredRoutedPointerListenerReleases.load(
+                std::memory_order_acquire)) {
+            reclaimInactiveRoutedPointerListeners();
+            return;
+        }
+        deferredRoutedPointerListenerReleaseBuffer.clear();
+        {
+            const std::scoped_lock lock(lifetime->mutex);
+            deferredRoutedPointerListenerReleaseBuffer.swap(
+                lifetime->deferredRoutedPointerListenerReleases);
+            lifetime->hasDeferredRoutedPointerListenerReleases.store(
+                false,
+                std::memory_order_release);
+        }
+        for (const Detail::DeferredRoutedPointerListenerRelease release
+             : deferredRoutedPointerListenerReleaseBuffer) {
+            deactivateRoutedPointerListener(
+                release.slot,
+                release.generation,
+                false);
+        }
+        deferredRoutedPointerListenerReleaseBuffer.clear();
+        reclaimInactiveRoutedPointerListeners();
+    }
+
     void drainDeferredRootDestroys() noexcept
     {
         if (!isOwnerThread() || !lifetime) {
             return;
         }
 
-        deferredRootDestroyBuffer.clear();
-        {
-            const std::scoped_lock lock(lifetime->mutex);
-            deferredRootDestroyBuffer.swap(lifetime->deferredRootDestroys);
-        }
+        if (lifetime->hasDeferredRootDestroys.load(std::memory_order_acquire)) {
+            deferredRootDestroyBuffer.clear();
+            {
+                const std::scoped_lock lock(lifetime->mutex);
+                deferredRootDestroyBuffer.swap(lifetime->deferredRootDestroys);
+                lifetime->hasDeferredRootDestroys.store(
+                    false,
+                    std::memory_order_release);
+            }
 
-        for (const UINodeId root : deferredRootDestroyBuffer) {
-            destroyRootImmediately(root);
+            for (const UINodeId root : deferredRootDestroyBuffer) {
+                destroyRootImmediately(root);
+            }
+            deferredRootDestroyBuffer.clear();
         }
-        deferredRootDestroyBuffer.clear();
+        drainDeferredRoutedPointerListenerReleases();
     }
 
     [[nodiscard]] UINodeId idForIndex(u32 index) const noexcept
@@ -1459,6 +1795,10 @@ struct UIContext::Impl final {
         dirtyByIndex[index] = UIDirty::None;
         dirtyQueuedByIndex[index] = 0;
         layoutScratchByIndex[index] = {};
+        routedPointerListenerHeadByNodeIndex[index] =
+            InvalidRoutedPointerListenerIndex;
+        routedPointerListenerTailByNodeIndex[index] =
+            InvalidRoutedPointerListenerIndex;
     }
 
     void markStructureChanged() noexcept
@@ -1769,6 +2109,7 @@ struct UIContext::Impl final {
             }
 
             const UINodeId node = idForIndex(currentIndex);
+            deactivateAllRoutedPointerListenersForNode(currentIndex);
             idsByIndex[currentIndex] = {};
             resetNodeSideData(currentIndex);
             static_cast<void>(nodes.erase(node.storageId()));
@@ -1979,6 +2320,11 @@ struct UIContext::Impl final {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
             return ownerThread;
         }
+        if (routeDispatchDepth != 0) {
+            return fail(
+                UIErrorCode::PointerRouteAlreadyInProgress,
+                "UI structure cannot be committed during pointer routing");
+        }
         drainDeferredRootDestroys();
         return publishStructureIfDirty();
     }
@@ -1998,6 +2344,11 @@ struct UIContext::Impl final {
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
             return ownerThread;
+        }
+        if (routeDispatchDepth != 0) {
+            return fail(
+                UIErrorCode::PointerRouteAlreadyInProgress,
+                "UI layout cannot be committed during pointer routing");
         }
         drainDeferredRootDestroys();
         if (Core::Status viewportStatus = validateViewport(viewportSize); !viewportStatus) {
@@ -2177,6 +2528,305 @@ struct UIContext::Impl final {
         return result;
     }
 
+    [[nodiscard]] Core::Result<std::pair<u32, u32>>
+    addRoutedPointerListener(
+        UIRoutedPointerListenerDesc descriptor,
+        UIRoutedPointerCallback callback)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        auto nodeResult = resolveNode(descriptor.node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isValidRoutedPointerEventKind(descriptor.kind)
+            || !isValidEventPhaseMask(descriptor.phases)
+            || !callback.hasValue()) {
+            return fail(
+                UIErrorCode::InvalidRoutedPointerListener,
+                "UI routed pointer listener descriptor or callback is invalid");
+        }
+        if (freeRoutedPointerListenerHead == InvalidRoutedPointerListenerIndex) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI routed pointer listener capacity has been exhausted");
+        }
+        if (routedPointerListenerRegistrationSerial
+            == (std::numeric_limits<u64>::max)()) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI routed pointer listener registration serial is exhausted");
+        }
+
+        const u32 listenerIndex = freeRoutedPointerListenerHead;
+        RoutedPointerListenerRecord& listener =
+            routedPointerListeners[listenerIndex];
+        freeRoutedPointerListenerHead = listener.nextFreeIndex;
+
+        ++listener.generation;
+        if (listener.generation == 0) {
+            ++listener.generation;
+        }
+        listener.node = descriptor.node;
+        listener.kind = descriptor.kind;
+        listener.phases = descriptor.phases;
+        listener.callback = std::move(callback);
+        listener.previousNodeListenerIndex =
+            routedPointerListenerTailByNodeIndex[descriptor.node.index()];
+        listener.nextNodeListenerIndex = InvalidRoutedPointerListenerIndex;
+        listener.nextFreeIndex = InvalidRoutedPointerListenerIndex;
+        listener.registrationSerial = ++routedPointerListenerRegistrationSerial;
+        listener.active = true;
+
+        if (listener.previousNodeListenerIndex != InvalidRoutedPointerListenerIndex) {
+            routedPointerListeners[listener.previousNodeListenerIndex]
+                .nextNodeListenerIndex = listenerIndex;
+        } else {
+            routedPointerListenerHeadByNodeIndex[descriptor.node.index()] =
+                listenerIndex;
+        }
+        routedPointerListenerTailByNodeIndex[descriptor.node.index()] =
+            listenerIndex;
+        ++activeRoutedPointerListenerCount;
+        routedPointerListenerHighWater = (std::max)(
+            routedPointerListenerHighWater,
+            activeRoutedPointerListenerCount);
+        publishRoutedPointerListenerTokenState(
+            listenerIndex,
+            listener.generation,
+            true);
+        return std::pair<u32, u32>{listenerIndex, listener.generation};
+    }
+
+    [[nodiscard]] Core::Status validatePointerInput(
+        const UIPointerInputEvent& input) const
+    {
+        if (!input.platformFrame.hasValue() || input.sourceSequence == 0) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI pointer input requires a platform frame and source sequence");
+        }
+        if (!input.window.hasValue()) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI pointer input owner window is empty");
+        }
+        if (input.window != ownerWindow) {
+            return fail(
+                UIErrorCode::WrongOwnerWindow,
+                "UI pointer input belongs to another owner window");
+        }
+        if (input.pointer != Platform::PrimaryPointerId
+            || !isValidRoutedPointerEventKind(input.kind)
+            || !std::isfinite(input.position.x)
+            || !std::isfinite(input.position.y)
+            || !std::isfinite(input.delta.x)
+            || !std::isfinite(input.delta.y)) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI pointer input kind, identity, position, or delta is invalid");
+        }
+        if ((input.kind == UIRoutedPointerEventKind::ButtonDown
+             || input.kind == UIRoutedPointerEventKind::ButtonUp)
+            && input.button >= Platform::PointerButton::Count) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI pointer button is invalid");
+        }
+        return Core::success();
+    }
+
+    void dispatchRoutedPointerListeners(
+        UINodeId node,
+        UIEventPhase phase,
+        UIRoutedPointerEventKind kind,
+        u64 registrationSerialBoundary,
+        UIRoutedPointerEvent& event,
+        UIPointerRouteResult& result) noexcept
+    {
+        if (!contains(node) || node.index() >= routedPointerListenerHeadByNodeIndex.size()) {
+            return;
+        }
+        Detail::UIRoutedPointerEventAccess::setRouteState(
+            event,
+            phase,
+            node,
+            result.pointQuery.target.node,
+            result.pointQuery.target.rootNode);
+        const UIEventPhaseMask requiredPhase = phaseMaskFor(phase);
+        u32 listenerIndex = routedPointerListenerHeadByNodeIndex[node.index()];
+        while (listenerIndex != InvalidRoutedPointerListenerIndex) {
+            if (listenerIndex >= routedPointerListeners.size()) {
+                return;
+            }
+            RoutedPointerListenerRecord& listener =
+                routedPointerListeners[listenerIndex];
+            const u32 nextListenerIndex = listener.nextNodeListenerIndex;
+            if (listener.active
+                && listener.node == node
+                && listener.kind == kind
+                && listener.registrationSerial <= registrationSerialBoundary
+                && hasEventPhase(listener.phases, requiredPhase)) {
+                ++result.listenerInvocationCount;
+                listener.callback(event);
+                if (event.isImmediatePropagationStopped()) {
+                    return;
+                }
+            }
+            listenerIndex = nextListenerIndex;
+        }
+    }
+
+    [[nodiscard]] Core::Result<UIPointerRouteResult> routePointerInput(
+        const UIPointerInputEvent& input)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        if (routeDispatchDepth != 0) {
+            return fail(
+                UIErrorCode::PointerRouteAlreadyInProgress,
+                "UI pointer routing is already in progress");
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status inputStatus = validatePointerInput(input); !inputStatus) {
+            return Core::failure(inputStatus.error());
+        }
+
+        UIPointerRouteResult result{
+            .pointQuery = queryPointerHit(input.position),
+        };
+        if (!result.pointQuery.hasTarget()) {
+            return result;
+        }
+        if (!contains(result.pointQuery.target.node)) {
+            result.targetInvalidated = true;
+            return result;
+        }
+
+        const UICommittedHitView hit = committedHit();
+        const std::span<const UICommittedHitEntry> entries = hit.entries();
+        routePathScratch.clear();
+        u32 entryIndex = result.pointQuery.target.hitEntryIndex;
+        while (entryIndex != InvalidUIHitEntryIndex) {
+            if (entryIndex >= entries.size()) {
+                return fail(
+                    Core::CoreErrorCode::Internal,
+                    "UI committed pointer route entry index is invalid");
+            }
+            if (routePathScratch.size() >= capacityConfig.routePathCapacity) {
+                routePathScratch.clear();
+                return fail(
+                    UIErrorCode::CapacityExceeded,
+                    "UI pointer route path capacity has been exhausted");
+            }
+            routePathScratch.push_back(entryIndex);
+            if (entryIndex == result.pointQuery.target.rootEntryIndex) {
+                break;
+            }
+            entryIndex = entries[entryIndex].parentEntryIndex;
+            if (routePathScratch.size() > entries.size()) {
+                routePathScratch.clear();
+                return fail(
+                    Core::CoreErrorCode::Internal,
+                    "UI committed pointer route ancestry contains a cycle");
+            }
+        }
+        if (routePathScratch.empty()
+            || routePathScratch.back() != result.pointQuery.target.rootEntryIndex
+            || entries[routePathScratch.back()].node
+                != result.pointQuery.target.rootNode) {
+            routePathScratch.clear();
+            return fail(
+                Core::CoreErrorCode::Internal,
+                "UI committed pointer route root is invalid");
+        }
+
+        result.routeDepth = routePathScratch.size();
+        const u64 registrationSerialBoundary =
+            routedPointerListenerRegistrationSerial;
+        UIRoutedPointerEvent routedEvent =
+            Detail::UIRoutedPointerEventAccess::Create(input);
+        routeDispatchDepth = 1;
+        auto dispatchCleanup = Core::makeScopeExit([this]() noexcept {
+            routeDispatchDepth = 0;
+            drainDeferredRoutedPointerListenerReleases();
+            reclaimInactiveRoutedPointerListeners();
+        });
+
+        const UINodeId targetNode = result.pointQuery.target.node;
+        for (usize reversePathIndex = routePathScratch.size();
+             reversePathIndex > 1;
+             --reversePathIndex) {
+            if (!contains(targetNode)) {
+                result.targetInvalidated = true;
+                break;
+            }
+            const UINodeId currentNode =
+                entries[routePathScratch[reversePathIndex - 1]].node;
+            if (contains(currentNode)) {
+                dispatchRoutedPointerListeners(
+                    currentNode,
+                    UIEventPhase::Capture,
+                    input.kind,
+                    registrationSerialBoundary,
+                    routedEvent,
+                    result);
+            }
+            if (routedEvent.isPropagationStopped()) {
+                break;
+            }
+        }
+
+        if (!routedEvent.isPropagationStopped() && !result.targetInvalidated) {
+            if (!contains(targetNode)) {
+                result.targetInvalidated = true;
+            } else {
+                dispatchRoutedPointerListeners(
+                    targetNode,
+                    UIEventPhase::Target,
+                    input.kind,
+                    registrationSerialBoundary,
+                    routedEvent,
+                    result);
+            }
+        }
+
+        if (!routedEvent.isPropagationStopped() && !result.targetInvalidated) {
+            for (usize pathIndex = 1;
+                 pathIndex < routePathScratch.size();
+                 ++pathIndex) {
+                if (!contains(targetNode)) {
+                    result.targetInvalidated = true;
+                    break;
+                }
+                const UINodeId currentNode =
+                    entries[routePathScratch[pathIndex]].node;
+                if (contains(currentNode)) {
+                    dispatchRoutedPointerListeners(
+                        currentNode,
+                        UIEventPhase::Bubble,
+                        input.kind,
+                        registrationSerialBoundary,
+                        routedEvent,
+                        result);
+                }
+                if (routedEvent.isPropagationStopped()) {
+                    break;
+                }
+            }
+        }
+
+        if (!contains(targetNode)) {
+            result.targetInvalidated = true;
+        }
+        result.consumed = routedEvent.isInputTransitionConsumed();
+        result.stopped = routedEvent.isPropagationStopped();
+        return result;
+    }
+
     [[nodiscard]] UIContextStatistics statistics() const noexcept
     {
         return UIContextStatistics{
@@ -2185,6 +2835,12 @@ struct UIContext::Impl final {
             .dirtyQueueCapacity = capacityConfig.dirtyQueueCapacity,
             .layoutSnapshotCapacity = capacityConfig.layoutSnapshotCapacity,
             .hitSnapshotCapacity = capacityConfig.hitSnapshotCapacity,
+            .routePathCapacity = capacityConfig.routePathCapacity,
+            .routedPointerListenerCapacity =
+                capacityConfig.routedPointerListenerCapacity,
+            .activeRoutedPointerListenerCount =
+                activeRoutedPointerListenerCount,
+            .routedPointerListenerHighWater = routedPointerListenerHighWater,
             .liveNodeCount = nodes.activeCount(),
             .liveRootCount = liveRootCount,
             .committedNodeCount = committedBuffers[publishedBufferIndex].size(),
@@ -2210,6 +2866,118 @@ struct UIContext::Impl final {
         };
     }
 };
+
+UIRoutedPointerListenerToken::UIRoutedPointerListenerToken(
+    std::weak_ptr<Detail::UIContextLifetimeControl> lifetime,
+    u32 slot,
+    u32 generation) noexcept
+    : m_lifetime(std::move(lifetime)),
+      m_slot(slot),
+      m_generation(generation)
+{
+}
+
+UIRoutedPointerListenerToken::~UIRoutedPointerListenerToken() noexcept
+{
+    reset();
+}
+
+UIRoutedPointerListenerToken::UIRoutedPointerListenerToken(
+    UIRoutedPointerListenerToken&& other) noexcept
+    : m_lifetime(std::move(other.m_lifetime)),
+      m_slot(std::exchange(other.m_slot, 0)),
+      m_generation(std::exchange(other.m_generation, 0))
+{
+}
+
+UIRoutedPointerListenerToken& UIRoutedPointerListenerToken::operator=(
+    UIRoutedPointerListenerToken&& other) noexcept
+{
+    if (this == &other) {
+        return *this;
+    }
+    reset();
+    m_lifetime = std::move(other.m_lifetime);
+    m_slot = std::exchange(other.m_slot, 0);
+    m_generation = std::exchange(other.m_generation, 0);
+    return *this;
+}
+
+void UIRoutedPointerListenerToken::reset() noexcept
+{
+    const u32 generation = m_generation;
+    if (generation == 0) {
+        m_lifetime.reset();
+        m_slot = 0;
+        return;
+    }
+
+    const std::shared_ptr<Detail::UIContextLifetimeControl> lifetime =
+        m_lifetime.lock();
+    UIContext* immediateContext = nullptr;
+    if (lifetime) {
+        const std::scoped_lock lock(lifetime->mutex);
+        if (m_slot < lifetime->routedPointerListenerStates.size()) {
+            Detail::RoutedPointerListenerTokenState& state =
+                lifetime->routedPointerListenerStates[m_slot];
+            if (state.active && state.generation == generation) {
+                state.active = false;
+                if (lifetime->context != nullptr) {
+                    if (std::this_thread::get_id() == lifetime->ownerThreadId) {
+                        immediateContext = lifetime->context;
+                    } else {
+                        if (lifetime->deferredRoutedPointerListenerReleases.size()
+                            == lifetime->deferredRoutedPointerListenerReleases.capacity()) {
+                            std::terminate();
+                        }
+                        lifetime->deferredRoutedPointerListenerReleases.push_back(
+                            Detail::DeferredRoutedPointerListenerRelease{
+                                .slot = m_slot,
+                                .generation = generation,
+                            });
+                        lifetime->hasDeferredRoutedPointerListenerReleases.store(
+                            true,
+                            std::memory_order_release);
+                    }
+                }
+            }
+        }
+    }
+
+    if (immediateContext != nullptr) {
+        immediateContext->releaseRoutedPointerListenerFromToken(
+            m_slot,
+            generation);
+    }
+    m_lifetime.reset();
+    m_slot = 0;
+    m_generation = 0;
+}
+
+bool UIRoutedPointerListenerToken::isActive() const noexcept
+{
+    if (m_generation == 0) {
+        return false;
+    }
+    const std::shared_ptr<Detail::UIContextLifetimeControl> lifetime =
+        m_lifetime.lock();
+    if (!lifetime) {
+        return false;
+    }
+    const std::scoped_lock lock(lifetime->mutex);
+    if (lifetime->context == nullptr
+        || m_slot >= lifetime->routedPointerListenerStates.size()) {
+        return false;
+    }
+    const Detail::RoutedPointerListenerTokenState& state =
+        lifetime->routedPointerListenerStates[m_slot];
+    return state.active && state.generation == m_generation;
+}
+
+UIRoutedPointerListenerToken::operator bool() const noexcept
+{
+    return isActive();
+}
 
 UIRootOwner::UIRootOwner(
     std::weak_ptr<Detail::UIContextLifetimeControl> lifetime,
@@ -2270,6 +3038,9 @@ void UIRootOwner::reset() noexcept
                 std::terminate();
             }
             lifetime->deferredRootDestroys.push_back(root);
+            lifetime->hasDeferredRootDestroys.store(
+                true,
+                std::memory_order_release);
             context = nullptr;
         }
     }
@@ -2405,7 +3176,8 @@ Core::Result<std::unique_ptr<UIContext>> UIContext::Create(
         const std::thread::id ownerThreadId = std::this_thread::get_id();
         auto lifetime = std::make_shared<Detail::UIContextLifetimeControl>(
             ownerThreadId,
-            normalizedResult->rootCapacity);
+            normalizedResult->rootCapacity,
+            normalizedResult->routedPointerListenerCapacity);
         auto implResult =
             Impl::Create(ownerWindow, *normalizedResult, lifetime, resource);
         if (!implResult) {
@@ -2432,6 +3204,11 @@ UIContext::UIContext(std::unique_ptr<Impl> impl) noexcept
 UIContext::~UIContext() noexcept
 {
     if (m_impl) {
+        if (!m_impl->isOwnerThread()
+            || m_impl->routeDispatchDepth != 0
+            || m_impl->listenerCallbackCleanupDepth != 0) {
+            std::terminate();
+        }
         m_impl->detachLifetime(this);
     }
 }
@@ -2509,6 +3286,29 @@ UIPointerHitQueryResult UIContext::queryPointerHit(UILogicalPoint point) const n
     return m_impl->queryPointerHit(point);
 }
 
+Core::Result<UIRoutedPointerListenerToken> UIContext::addRoutedPointerListener(
+    UIRoutedPointerListenerDesc descriptor,
+    UIRoutedPointerCallback callback)
+{
+    auto registration = m_impl->addRoutedPointerListener(
+        descriptor,
+        std::move(callback));
+    if (!registration) {
+        return Core::failure(registration.error());
+    }
+    return UIRoutedPointerListenerToken{
+        m_impl->lifetime,
+        registration->first,
+        registration->second,
+    };
+}
+
+Core::Result<UIPointerRouteResult> UIContext::routePointerInput(
+    const UIPointerInputEvent& input)
+{
+    return m_impl->routePointerInput(input);
+}
+
 UIContextStatistics UIContext::statistics() const noexcept
 {
     return m_impl->statistics();
@@ -2570,6 +3370,15 @@ bool UIContext::isAliveInRoot(UINodeId updaterRoot, UINodeId node) const noexcep
         return false;
     }
     return m_impl->isNodeWithinRoot(updaterRoot, node);
+}
+
+void UIContext::releaseRoutedPointerListenerFromToken(
+    u32 slot,
+    u32 generation) noexcept
+{
+    if (m_impl && m_impl->isOwnerThread()) {
+        m_impl->deactivateRoutedPointerListener(slot, generation, false);
+    }
 }
 
 } // namespace Tina::UI

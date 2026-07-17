@@ -7,6 +7,7 @@
 #include <tina/ui/UICommittedStructure.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIErrors.hpp>
+#include <tina/ui/UIEventRouting.hpp>
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>

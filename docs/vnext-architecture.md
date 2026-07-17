@@ -52,7 +52,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | `tina_asset_format` | Runtime/Cooker 共享的 Cooked header、schema、类型、依赖和 hash 编解码 | core | Asset registry、窗口、GPU、源格式 parser |
 | `tina_render` | typed handle、资源描述、RenderScene/DisplayList view、RenderSurfaceState、FramePinSink、Pass Scheduler | core | bgfx 公开类型、Scene registry、平台窗口细节、Asset/UI/Platform concrete pin |
 | `tina_render_bgfx` | bgfx 设备实现、shader/texture/buffer 上传与 Present | core/platform/render、bgfx | 游戏组件、源资产解析 |
-| `tina_ui` | Retained Tree、布局、路由输入、焦点、Widget、DisplayList、Glyph Atlas 和字体 rasterizer 接口；当前 M7-C1b/C1c-a/C1c-b1 已实现树核心、事务式 Flex-lite layout、committed hit snapshot 与无分配 point query foundation | 当前只依赖 core、platform `PlatformFrameView`；后续 Font Asset 和 render 描述随 asset/render 切片接入 | bgfx/FreeType 类型、全局 UI 状态、隐式布局 |
+| `tina_ui` | Retained Tree、布局、路由输入、焦点、Widget、DisplayList、Glyph Atlas 和字体 rasterizer 接口；当前 M7-C1b/C1c-a/C1c-b1/C1c-b2 已实现树核心、事务式 Flex-lite layout、committed hit snapshot、无分配 point query 与 synthetic routed pointer foundation | 当前只依赖 core、platform `PlatformFrameView`；后续 Font Asset 和 render 描述随 asset/render 切片接入 | bgfx/FreeType 类型、全局 UI 状态、隐式布局 |
 | `tina_ui_freetype` | FreeType glyph rasterizer 的具体 adapter | core、ui、FreeType | Widget/Scene、Render backend、全局字体服务 |
 | `tina_audio` | AudioEngine、Bus/voice generation handle、实时命令/完成队列、Disabled backend | core/task、asset lease | miniaudio 类型、World/ECS、callback 内 IO/分配 |
 | `tina_audio_miniaudio` | miniaudio 设备/callback/stream backend | core、audio、miniaudio | Gameplay/World/UI、Asset registry 直接查询 |
@@ -517,9 +517,11 @@ Pointer policy/route-ancestry scratch、`Ignore`/`Targetable` 和双缓冲 `UICo
 ordinal 在同一 view 内唯一且严格递增，view 带 structure/layout/paint-order/hit revision，hit-only commit 为0次
 layout，失败的 `commitLayout()` 不发布任何 structure/layout/hit 候选。M7-C1c-b1 的无分配
 `queryPointerHit()` 已按反向 paint order 实现 world/clip point query，并返回 route index/revision/visited count。
-当前 `tina_ui` 仍只依赖 Core/Platform；listener token、Capture→Target→Bubble 路由、Focus/Capture/Modal、Button、
-paint snapshot/DisplayList、nested clip、dirty subtree pruning、FreeType、bgfx UI pass 与 Runtime UI producer
-仍未实现。完整目标中 UI 树输出后端无关的 Quad、Image、
+M7-C1c-b2 已实现 synthetic routed pointer event：固定容量 route path/listener storage、48-byte fixed-inline
+`noexcept` callback、generation-safe RAII token、Capture→Target→Bubble、stop/consume、route 中 add/reset/destroy
+安全失效与 route/commit reentrancy guard。当前 `tina_ui` 仍只依赖 Core/Platform；Runtime UI producer、
+持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、dirty subtree pruning、
+FreeType 与 bgfx UI pass 仍未实现。完整目标中 UI 树输出后端无关的 Quad、Image、
 GlyphRange、Clip DisplayList，由 Render 层保持 paint order 批处理。
 
 布局采用一次 Measure/Arrange 的 Flex-lite；每个有序 Pointer transition 最多 hit-test 一次。
@@ -554,8 +556,8 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
 4. **M7-C–E UI/IME/Gamepad**：M7-C1a 已完成 `tina_ui` 树核心、generation `UINodeId`、
    `UIContext`、`UIRootOwner` RAII、结构 snapshot 和 route-result view ABI；M7-C1b 已完成事务式
    Flex-lite layout foundation，M7-C1c-a 已完成 committed hit-snapshot 数据基础，M7-C1c-b1 已完成
-   point query 与反向目标选择。后续继续实现 listener token、Capture→Target→Bubble route、dirty subtree pruning 与 DisplayList、
-   Label/Button/Modal + FreeType、bgfx UI pass、Runtime UI producer 与 IMM32/Gamepad/DPI 门禁；
+   point query 与反向目标选择，M7-C1c-b2 已完成 synthetic listener route。后续继续实现 Runtime UI producer、
+   dirty subtree pruning 与 DisplayList、Label/Button/Modal + FreeType、bgfx UI pass、IMM32/Gamepad/DPI 门禁；
 5. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；
 6. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D
    样例；
@@ -586,9 +588,11 @@ vNext-only preset 设为 OFF；当新2D/UI/3D/Audio 覆盖门禁后先把默认�
 
 - Visual Studio 2026 / MSVC 19.50 Debug/Release configure、build 与直接执行基础 `tina_tests`；启用
   GLFW adapter 时另行直接执行 `tina_platform_glfw_tests`，两者均不使用 CTest；
-- M7-C1b/C1c-a/C1c-b1 UI 树、布局、committed hit snapshot 与 point query 使用独立 `tina_ui_tests` 直接 GoogleTest；当前记录
-  Windows MSVC 19.50 Debug/Release 均59/59通过；Linux GCC 13.4 与 Clang 22 ASan/UBSan/LSan 均基础
-  `tina_tests` 183/183、`tina_ui_tests` 59/59，且无诊断；
+- M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、committed hit snapshot、point query 与 synthetic route 使用独立
+  `tina_ui_tests` 直接 GoogleTest；当前记录 Windows MSVC 19.50 Debug/Release 均75/75通过；Linux
+  GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均 `tina_ui_tests` 75/75，且 Clang
+  无 sanitizer 诊断；初次 GCC 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次
+  GCC/Clang 构建无 warning；
 - Linux GCC 与 Clang 构建；正式支持前还要运行 GLFW/bgfx 2D/UI/3D，Clang sanitizer 只有真实
   运行通过后才能标记完成；
 - GLFW X11 与 Wayland 使用独立 preset 和真实/隔离 display server 运行；configure/build 成功不等于

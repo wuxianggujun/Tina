@@ -1,5 +1,6 @@
 add_executable(tina_ui_tests
     UIHitSnapshotTests.cpp
+    UIInputRouteTests.cpp
     UILayoutTests.cpp
     UITreeCoreTests.cpp
     header_isolation/InputRoutingHeader.cpp
@@ -9,6 +10,7 @@ add_executable(tina_ui_tests
     header_isolation/UICommittedStructureHeader.cpp
     header_isolation/UIContextHeader.cpp
     header_isolation/UIErrorsHeader.cpp
+    header_isolation/UIEventRoutingHeader.cpp
     header_isolation/UIHitTestHeader.cpp
     header_isolation/UILayoutHeader.cpp
     header_isolation/UINodeIdHeader.cpp

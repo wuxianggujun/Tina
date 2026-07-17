@@ -101,7 +101,8 @@ M6 生命周期之后仍未实现：
 - typed render resource handle、Pass Scheduler、World RenderScene/UIDisplayList、Runtime-private
   RenderFramePacket/pool 与 submission completion 保活；
 - Scene、Asset、Audio 的真实契约和消费者，以及 Runtime-integrated UI producer/layout/render
-  pipeline；M7-C1b/C1c-a C++23 standalone `tina_ui` tree/layout/committed-hit foundation 已实现，
+  pipeline；M7-C1b/C1c-a/C1c-b1/C1c-b2 C++23 standalone `tina_ui` tree/layout/committed-hit/
+  point-query/synthetic-route foundation 已实现，
   但尚未接入 Runtime；
 - `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
 - Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；M7-B2 Desktop bgfx
@@ -220,13 +221,21 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   50,000节点非递归快照、stale generation、固定容量失败和 supplied UI PMR 释放；
 - **已完成 M7-C1c-b1**：无分配 `queryPointerHit()` 反向扫描 committed hit view，只命中同时位于
   world/effective clip 的 `Targetable` entry，使用半开边界并返回 route index、四类 revision 与 visited count；
-- **已完成 M7-C1c-b1 门禁**：新增5项 query 测试后 `tina_ui_tests` 为59/59；Windows Debug/Release、
-  Linux GCC 13.4 与 Clang 22 ASan/UBSan/LSan 均通过，300次查询无新增 supplied UI PMR allocation；
+- **已完成 M7-C1c-b1 门禁**：新增5项 query 测试后当时 `tina_ui_tests` 总数为59项；Windows Debug/Release、
+  Linux GCC 13.4 与 Clang 22 ASan/UBSan/LSan 均通过，300次查询无新增 supplied UI PMR allocation；当前总数见
+  下一条 C1c-b2 75/75；
+- **已完成 M7-C1c-b2**：fixed-capacity synthetic routed pointer event；使用固定容量 route path/listener
+  storage、48-byte fixed-inline `noexcept` callback、generation-safe RAII token、owner-thread immediate reset、
+  off-thread deferred reset、Capture→Target→Bubble、stop/consume、route 中 add/reset/destroy 安全失效和
+  route/commit reentrancy guard；
+- **已完成 M7-C1c-b2 门禁**：新增16项 route 测试后 `tina_ui_tests` 为75/75；Windows MSVC 19.50
+  Debug/Release、Linux GCC 13.4、Linux Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均通过，Clang
+  无 sanitizer 诊断；初次 GCC 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次
+  GCC/Clang 构建无 warning；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
   subtree 尚未实现；
-- **仍后置**：dirty subtree pruning、listener token、Capture→Target→Bubble 路由、
-  Focus/Capture/Modal、Button 交互、paint snapshot/DisplayList、nested clip、text/glyph、FreeType、
-  bgfx UI pass 与 Runtime UI producer；
+- **仍后置**：Runtime UI producer、dirty subtree pruning、持久 Pointer Capture、Focus/Modal、
+  Button default action、paint snapshot/DisplayList、nested clip、text/glyph、FreeType 与 bgfx UI pass；
 - 后续继续实现后端无关 Quad/Text/Clip DisplayList、FramePinSink/capacity rollback 和相邻兼容 batching
   contract；Null UI 直接测试 route/layout/paint order，不链接 FreeType/bgfx；
 - 硬门禁：无变化 UI 每帧0 layout、0 PaintCache rebuild、0 Tina heap allocation。

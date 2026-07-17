@@ -7,6 +7,7 @@
 #include <tina/ui/UICommittedLayout.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
 #include <tina/ui/UIErrors.hpp>
+#include <tina/ui/UIEventRouting.hpp>
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>
@@ -28,6 +29,7 @@ struct UIContextCapacityConfig final {
     static constexpr usize DefaultRootCapacity = 64;
     static constexpr usize MaxNodeCapacity = 1'048'576;
     static constexpr usize MaxRootCapacity = 4096;
+    static constexpr usize MaxRoutedPointerListenerCapacity = 1'048'576;
 
     usize nodeCapacity = DefaultNodeCapacity;
     usize rootCapacity = DefaultRootCapacity;
@@ -38,6 +40,10 @@ struct UIContextCapacityConfig final {
     // Counts every effectively visible route-ancestry entry, including nodes
     // whose pointer policy is Ignore; it is not a targetable-node capacity.
     usize hitSnapshotCapacity = 0;
+    // Zero derives from nodeCapacity. The listener capacity may be configured
+    // independently because one node can own listeners for several events.
+    usize routePathCapacity = 0;
+    usize routedPointerListenerCapacity = 0;
 };
 
 struct UIContextStatistics final {
@@ -46,6 +52,10 @@ struct UIContextStatistics final {
     usize dirtyQueueCapacity = 0;
     usize layoutSnapshotCapacity = 0;
     usize hitSnapshotCapacity = 0;
+    usize routePathCapacity = 0;
+    usize routedPointerListenerCapacity = 0;
+    usize activeRoutedPointerListenerCount = 0;
+    usize routedPointerListenerHighWater = 0;
     usize liveNodeCount = 0;
     usize liveRootCount = 0;
     usize committedNodeCount = 0;
@@ -71,6 +81,38 @@ struct UIContextStatistics final {
 };
 
 class UIContext;
+
+// Move-only ownership of one routed-pointer listener registration. Owner-thread
+// reset takes effect immediately, including during dispatch. Off-thread reset is
+// queued in bounded storage and takes effect before the next owner-thread UI
+// mutation or route. Reset remains safe after the UIContext is destroyed.
+class UIRoutedPointerListenerToken final {
+public:
+    UIRoutedPointerListenerToken() noexcept = default;
+    ~UIRoutedPointerListenerToken() noexcept;
+
+    UIRoutedPointerListenerToken(const UIRoutedPointerListenerToken&) = delete;
+    UIRoutedPointerListenerToken& operator=(const UIRoutedPointerListenerToken&) = delete;
+
+    UIRoutedPointerListenerToken(UIRoutedPointerListenerToken&& other) noexcept;
+    UIRoutedPointerListenerToken& operator=(UIRoutedPointerListenerToken&& other) noexcept;
+
+    void reset() noexcept;
+    [[nodiscard]] bool isActive() const noexcept;
+    explicit operator bool() const noexcept;
+
+private:
+    friend class UIContext;
+
+    UIRoutedPointerListenerToken(
+        std::weak_ptr<Detail::UIContextLifetimeControl> lifetime,
+        u32 slot,
+        u32 generation) noexcept;
+
+    std::weak_ptr<Detail::UIContextLifetimeControl> m_lifetime{};
+    u32 m_slot = 0;
+    u32 m_generation = 0;
+};
 
 // Move-only ownership of one retained root. Owner-thread destruction reclaims
 // immediately; destruction on another thread enters a bounded preallocated
@@ -163,6 +205,10 @@ public:
         UIContextCapacityConfig capacityConfig = {},
         std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
 
+    // Destruction is an owner-thread, phase-boundary operation. Destroying a
+    // context from one of its routed callbacks/callback destructors, or from a
+    // non-owner thread, violates the lifetime contract and terminates rather
+    // than continuing with a use-after-free.
     ~UIContext() noexcept;
 
     UIContext(const UIContext&) = delete;
@@ -187,6 +233,16 @@ public:
     // layout, rebuilds hit data, dispatches an event, or allocates storage.
     [[nodiscard]] UIPointerHitQueryResult queryPointerHit(
         UILogicalPoint point) const noexcept;
+    // Registers an owning, fixed-inline callback in stable per-node order.
+    // Registration is bounded; dispatch never grows or heap-falls back.
+    [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
+    addRoutedPointerListener(
+        UIRoutedPointerListenerDesc descriptor,
+        UIRoutedPointerCallback callback);
+    // Routes one normalized pointer input over the last committed hit snapshot.
+    // It performs at most one point query and never commits layout or hit data.
+    [[nodiscard]] Core::Result<UIPointerRouteResult> routePointerInput(
+        const UIPointerInputEvent& input);
     [[nodiscard]] UIContextStatistics statistics() const noexcept;
     [[nodiscard]] usize liveNodeCount() const noexcept;
     [[nodiscard]] usize liveRootCount() const noexcept;
@@ -195,6 +251,7 @@ private:
     friend class UIRootOwner;
     friend class UIRootBuilder;
     friend class UITreeUpdater;
+    friend class UIRoutedPointerListenerToken;
 
     struct Impl;
 
@@ -213,6 +270,7 @@ private:
     [[nodiscard]] Core::Status destroyNodeFromUpdater(UINodeId updaterRoot, UINodeId node);
     void destroyRootFromOwner(UINodeId root) noexcept;
     [[nodiscard]] bool isAliveInRoot(UINodeId updaterRoot, UINodeId node) const noexcept;
+    void releaseRoutedPointerListenerFromToken(u32 slot, u32 generation) noexcept;
 
     std::unique_ptr<Impl> m_impl;
 };

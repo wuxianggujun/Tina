@@ -15,5 +15,8 @@ inline constexpr Core::ErrorCode RootRequired{Core::ErrorDomain::UI, 8};
 inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::UI, 9};
 inline constexpr Core::ErrorCode InvalidLayout{Core::ErrorDomain::UI, 10};
 inline constexpr Core::ErrorCode InvalidPointerPolicy{Core::ErrorDomain::UI, 11};
+inline constexpr Core::ErrorCode InvalidRoutedPointerListener{Core::ErrorDomain::UI, 12};
+inline constexpr Core::ErrorCode InvalidPointerInput{Core::ErrorDomain::UI, 13};
+inline constexpr Core::ErrorCode PointerRouteAlreadyInProgress{Core::ErrorDomain::UI, 14};
 
 } // namespace Tina::UI::UIErrorCode

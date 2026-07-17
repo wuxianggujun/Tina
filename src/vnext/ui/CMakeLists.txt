@@ -6,6 +6,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedStructure.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContext.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIErrors.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIEventRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIHitTest.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/InputRouting.hpp
