@@ -32,7 +32,7 @@ Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& confi
         EngineCompositionFactories factories{
             .createMonotonicClock = []() -> Core::Result<std::unique_ptr<Core::IMonotonicClock>> {
                 std::unique_ptr<Core::IMonotonicClock> clock = std::make_unique<Core::SteadyMonotonicClock>();
-                return std::move(clock);
+                return clock;
             },
             .createTaskSystem =
                 [](const Task::TaskSystemCreateParams& params) { return Task::createDisabledTaskSystem(params); },

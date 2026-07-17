@@ -282,6 +282,10 @@ out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
 当前 Windows 最新结果是 Debug/Release 均基础183/183、GLFW专项22/22、bgfx专项11/11、Null样例300帧、
 WindowSurface GLFW样例300帧与真实 D3D11 Intel Iris Xe Desktop样例默认300帧返回0；另有
 `TINA_BUILD_TESTING=OFF` production-style WindowSurface GLFW样例300帧返回0。
+Linux M7-B2 Desktop/bgfx X11 门禁也已通过：GCC 13.4 为183/183、22/22、11/11和 Desktop 300帧；
+Clang 22.1.8 + ASan/UBSan/LSan 为相同的183/22/11和 Desktop 300帧。Clang 基础/bgfx测试无
+suppression；X11精确 suppression 在GLFW专项命中12次/4896 B、Desktop命中1次/408 B。
+Clang Desktop 使用 bgfx Vulkan，但 WSL2 adapter 是 llvmpipe 软件实现，不计作硬件 GPU 门禁。
 Linux X11、Wayland和 Clang LSan精确 suppression的完整命令见[构建与运行](building.md)。
 
 Visual Studio 多配置输出必须使用对应的 `bin/Debug` 或 `bin/Release`，不能混用 GoogleTest DLL。
@@ -346,7 +350,7 @@ Legacy 与 vNext 进程观察到的 `N` 会随调试对象组合变化。同一�
 | --- | --- | --- | --- |
 | `tina_sample_null` | M6-A/M7-A/M7-B1 Headless 已实现 | EngineHost、PlatformFrame/Input/Action、单个 `IGameState`、Headless/Disabled/Null、300帧生命周期；Linux 10,000帧仍是上一批历史结果 | 无真实第三方 backend |
 | `tina_sample_platform` | M7-A + M7-B1 已实现 | 私有 GLFW `NO_API` 窗口、键鼠、resize/focus/close、committed text、WindowSurface handoff 与 NullRender | 不创建真实 bgfx GPU device |
-| `tina_sample_desktop` | M7-B2 Desktop bootstrap + 真实 GPU smoke 已实现 | `Tina::Desktop::CreateEngine` 私有组合 SteadyClock、GLFW WindowSurface、DisabledTaskSystem 与 bgfx；默认300帧 deep-blue clear/present | Windows D3D11 Intel Iris Xe Debug/Release 已通过；不代表 Scene/UI/Pass Scheduler 完成 |
+| `tina_sample_desktop` | M7-B2 Desktop bootstrap + 真实 backend smoke 已实现 | `Tina::Desktop::CreateEngine` 私有组合 SteadyClock、GLFW WindowSurface、DisabledTaskSystem 与 bgfx；默认300帧 deep-blue clear/present | Windows D3D11 Intel Iris Xe Debug/Release、Linux GCC 13.4 与 Clang 22 sanitizer 已通过；Clang WSL2 为 Vulkan/llvmpipe，不代表硬件 GPU 性能，也不代表 Scene/UI/Pass Scheduler 完成 |
 | `tina_sample_ui` | 未实现 | committed snapshot、dirty/Flex/PaintCache、中文、Modal、TextEdit、DisplayList | M7 内置 Cooked Font/Texture fixture |
 | `tina_sample_2d_infrastructure` | 未实现 | Camera2D、Sprite layer/order、world picking、UI overlay | M8 内置 Cooked Sprite fixture |
 | `tina_sample_3d_infrastructure` | 未实现 | Perspective、depth、canonical Mesh、Unlit pipeline | M9 procedural Cube |
@@ -378,3 +382,8 @@ Windows Desktop bgfx 可见门禁已验证 `tina_sample_desktop` 通过 `Tina::D
 创建真实 D3D11 Intel Iris Xe surface，默认300帧 deep-blue clear/present 后返回0；Game SDK/public header
 无 bgfx、GLFW 或 native 泄漏。该门禁不包含 Scene/UI 内容、不包含 Pass Scheduler/submission ticket，
 也不声明 resize、最小化、恢复的真实自动化通过。
+
+Linux Desktop 门禁同样只证明 bgfx backend 初始化、300帧提交与关闭生命周期。Clang 路径的
+`_XimOpenIM` suppression 仅覆盖第三方 libX11 retention（专项12次/4896 B、Desktop 1次/408 B）；
+基础与bgfx专项不使用 suppression。WSL2 的 Vulkan/llvmpipe 结果不扩大为硬件 GPU、Scene/UI、
+Pass Scheduler 或 resize/最小化/恢复自动化结论。

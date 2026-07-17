@@ -102,8 +102,10 @@ M6 生命周期之后仍未实现：
   RenderFramePacket/pool 与 submission completion 保活；
 - Scene、Asset、UI、Audio 的真实契约和消费者；不为固定初始化顺序预先制造无消费者空壳；
 - `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
-- Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；Desktop bgfx
-  clear-only 产品接线已在 M7-B2 验证，Scene/UI/Asset/Audio 等完整产品图仍必须在对应切片重新验证。
+- Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；M7-B2 Desktop bgfx
+  X11 图也已完成 GCC 13.4 和 Clang 22.1.8 + ASan/UBSan/LSan 的183/22/11直接测试及300帧门禁。
+  Clang WSL2 使用 Vulkan/llvmpipe，只证明软件 Vulkan/backend 生命周期；Scene/UI/Asset/Audio 等
+  完整产品图仍必须在对应切片重新验证。
 
 ## M7 Platform、最小 Surface 与高性能 UI 垂直切片
 
@@ -162,6 +164,9 @@ deep-blue clear/present。Windows 最新门禁在 MSVC 19.50 与 CMake 4.2.3 下
 GLFW样例300帧也已通过。Game SDK/public header 无 bgfx、GLFW 或 native 泄漏。Linux M7-B1 门禁已在 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer、
 GCC 13 与 Clang 22 X11/Wayland 双后端通过基础183/183、GLFW专项22/22和300帧样例；
 Clang 基础测试无 suppression，Wayland匹配0，X11仅精确抑制 `_XimOpenIM` 的第三方 retention。
+Linux M7-B2 X11 图又在 GCC 13.4 与 Clang 22.1.8 sanitizer 下通过基础183/183、GLFW专项22/22、
+bgfx专项11/11和 Desktop 300帧；Clang X11 suppression命中专项12次/4896 B、Desktop 1次/408 B，
+Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
 
 - **已完成 M7-B1**：按 ADR 0020 实现 move-only `NativeWindowSurfaceLease`、generation
   `WindowSurfaceId`、backend-neutral `RenderSurfaceState`、`WindowSurfaceSnapshot` 与

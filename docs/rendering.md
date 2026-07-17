@@ -198,8 +198,9 @@ NativeWindowSurfaceLease(move-only PIMPL；public API 只有 surface identity)
 X11/Wayland、`bgfx::PlatformData` 或无类型 window/display 指针。生产 factory 成功后由具体
 Render backend 持有 move-only lease。M7-B1 已实现 lease、snapshot、deferred publish 与 Runtime
 handoff；M7-B2 已实现私有 bgfx device core、clear/present、resize/resume planner、suspended skip、
-`Tina::Desktop::CreateEngine` 和真实 D3D11 Intel Iris Xe 300帧 clear-only GPU 门禁；submission
-ticket/drain 仍待完成。Window 销毁前必须停止 surface
+`Tina::Desktop::CreateEngine`、真实 D3D11 Intel Iris Xe 300帧 GPU 门禁，以及 Linux GCC 13.4/
+Clang 22.1.8 sanitizer 的300帧 backend门禁。Clang WSL2 经 bgfx 选择 Vulkan，但 adapter 是
+llvmpipe 软件实现，不代表硬件 GPU 性能；submission ticket/drain 仍待完成。Window 销毁前必须停止 surface
 submit、drain 真实 submission、关闭 RenderDevice/bgfx，再释放 lease，最后由 Platform 销毁 GLFW
 window。
 
@@ -347,7 +348,9 @@ Tina category/code、可选 native integer code 和 UTF-8 context，不返回 bg
 10. 纯 UI、2D-only、3D-only、无 content 和 `Suspended` surface 分别验证 initial clear 恰好一次或0次。
 
 当前 M7-B2 已验证 Game SDK/public header 不泄漏 bgfx、GLFW 或 native handle；`tina_sample_desktop`
-经 Desktop bootstrap 间接解析到 bgfx 属于私有实现依赖，不改变公开边界。
+经 Desktop bootstrap 间接解析到 bgfx 属于私有实现依赖，不改变公开边界。Windows D3D11 硬件路径
+与 Linux GCC/Clang X11 路径均已运行300帧；Linux Clang 的 Vulkan/llvmpipe 只计作软件
+Vulkan/backend 生命周期与 sanitizer 门禁。
 
 ## Roadmap 与验收解释
 

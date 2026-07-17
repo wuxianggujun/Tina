@@ -20,9 +20,12 @@ creates a `GLFW_NO_API` window, normalizes keyboard/pointer/focus/resize/close/c
 into the same bounded `PlatformFrameView`, and hands a move-only window surface lease to the render
 composition without exposing native or bgfx types. `Tina::Desktop::CreateEngine(config)` now privately
 composes `SteadyClock + GLFW WindowSurface + DisabledTaskSystem + bgfx`, and `tina_sample_desktop`
-defaults to 300 frames of deep-blue clear/present on the real GPU path. Windows VS 2026/MSVC 19.50/
+defaults to 300 frames of deep-blue clear/present on the real render-backend path. Windows VS 2026/MSVC 19.50/
 CMake 4.2.3 Debug and Release builds pass with direct GTest 183/183, GLFW 22/22, bgfx 11/11, and real
-D3D11 Intel Iris Xe 300-frame smoke. IMM32 composition, production gamepad input, Scene/UI, Pass
+D3D11 Intel Iris Xe 300-frame smoke. Linux GCC 13.4 passes the same 183/22/11 direct-test matrix and a
+300-frame Desktop run; Clang 22.1.8 passes it under ASan/UBSan/LSan. The Clang WSL2 run selected bgfx
+Vulkan on llvmpipe, so it proves the Linux Vulkan/backend lifecycle, not hardware-GPU performance.
+IMM32 composition, production gamepad input, Scene/UI, Pass
 Scheduler, submission tickets, and retained UI remain later slices.
 
 The active design, verified status, and build instructions are maintained in

@@ -5,7 +5,7 @@
 | 当前/Legacy 门禁 | 要求 | 当前验证环境 |
 | --- | --- | --- |
 | Windows | Visual Studio 2026 x64、CMake、`VCPKG_ROOT` | VS 18.4.3、MSVC 19.50.35717、CMake 4.2.3 |
-| Linux | GCC 或 Clang、Ninja、CMake、`VCPKG_ROOT` | Ubuntu 22.04 / GCC 13.4 与 Clang 22.1.8 已通过 vNext Null 图 |
+| Linux | GCC 或 Clang、Ninja、CMake、`VCPKG_ROOT` | Ubuntu 22.04 / GCC 13.4 与 Clang 22.1.8 已通过 vNext Null、GLFW 与 Desktop bgfx X11 图 |
 
 | vNext 正式目标 | 最低目标 |
 | --- | --- |
@@ -220,6 +220,14 @@ xvfb-run -a ./out/build/linux-clang22-vnext-platform-sanitize/bin/tina_sample_pl
 Null样例300帧与GLFW样例300帧。Clang 22.1.8 X11 的 ASan/UBSan/LSan 图已通过基础测试
 183/183（无 suppression）、GLFW专项22/22、Null样例300帧与GLFW样例300帧；其中
 `_XimOpenIM` 精确 suppression 仅在 X11 专项测试命中12次/4896 B、GLFW样例命中1次/408 B。
+
+M7-B2 Desktop 使用上述 platform preset 加 `-DTINA_BUILD_RENDER_BGFX=ON`，再直接构建/运行
+`tina_tests`、`tina_platform_glfw_tests`、`tina_render_bgfx_tests` 与 `tina_sample_desktop --frames=300`，
+仍不使用 CTest。GCC 13.4 已通过183/183、22/22、11/11和 Desktop 300帧；Clang 22.1.8 +
+ASan/UBSan/LSan 通过相同门禁。Clang 基础/bgfx测试无 suppression；X11精确规则在GLFW专项命中
+12次/4896 B、Desktop命中1次/408 B。Clang Desktop 经 bgfx 选择 Vulkan，但当前 WSL2 adapter 是
+llvmpipe 软件实现，因此只证明 Linux Vulkan/backend 生命周期，不代表硬件 GPU 性能；resize、最小化、
+恢复的真实自动化仍未覆盖。
 
 Wayland 使用单独的 `linux-gcc13-vnext-platform-wayland` 与
 `linux-clang22-vnext-platform-wayland-sanitize` preset，它们同时启用 manifest 的
