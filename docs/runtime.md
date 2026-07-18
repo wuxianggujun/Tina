@@ -56,7 +56,8 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
   实现层可见；M7-B1 的 WindowSurface 组合已接入 `IWindowSurfacePlatformBackend`、
   `acquirePrimaryWindowSurfaceLease()`、`primaryWindowSurfaceSnapshot()` 与
   `publishPrimaryWindow()`；`tina_sample_platform` 仍显式注入 GLFW + DisabledTask + NullRender，
-  M7-B2 已实现面向普通游戏的 `Desktop::CreateEngine` clear-only Desktop bootstrap；
+  M7-B2 已实现面向普通游戏的 `Desktop::CreateEngine` Desktop bootstrap，D1 后私有 bgfx backend
+  已能消费 Runtime UI DisplayList；
 - M7-C1b/C1c-a/C1c-b1/C1c-b2 已在独立 `tina_ui` 树核心上实现 generation `UINodeId`、`UIContext`、`UIRootOwner`
   RAII、结构/布局 snapshot、UI-owned input route-result view ABI、事务式 Flex-lite layout，以及固定容量
   Pointer policy/route-ancestry scratch、双缓冲 `UICommittedHitView`、无分配 `queryPointerHit()`、固定容量
@@ -83,7 +84,8 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
   ActionMapper 取消已 active 的 Gameplay source，或直接拦截同帧尚未消费的 ButtonDown，并抑制到真实 Up；
 - 当前帧循环为 Poll Platform → frame/payload/capacity/sequence 预校验 → Platform lifecycle dispatch
   → primary UIContext selection + UI Input Routing → Action Mapping → Fixed Update（0..4）→ Frame Update
-  → Render Scene Extraction → UI Update → primary UI Layout Commit → Null submit → present；`requestExitAfterFrame()` 会完成当帧
+  → Render Scene Extraction → UI Update → primary UI Layout/Paint Commit → primary UI DisplayList build
+  → Render submit → present；`requestExitAfterFrame()` 会完成当帧
   submit/present 后退出；
 - `tina_sample_null --frames=N` 已在 MSVC 2026 Debug/Release 连续通过300帧与10,000帧，且
   vNext Null 构建图不加入或链接 GLFW、bgfx、EnTT、FreeType、miniaudio、SDL/SDL3。
@@ -95,16 +97,19 @@ Null submit/present 后退出。M7-B1 已有 backend-neutral Native Surface hand
 `RenderSurfaceState` 和 Suspended 帧 `SkippedSuspendedSurface` 结果；Runtime 固定 source window identity，
 拒绝 metrics revision 回退、surface facts 在旧 metrics revision 上变化，以及 surface revision 跳号/回退。
 当前实现仍没有完整 GameStateStack/commands、CPU/IO worker、通用 Runtime Event Queue、
-Pass Scheduler/RenderFramePacket，也没有 Scene、Asset 或 Audio。Render 只完成 clear-only bgfx
-Desktop smoke；UI 只完成 standalone `tina_ui` 树核心、route-result view ABI、事务式 Flex-lite layout、
+Pass Scheduler/RenderFramePacket，也没有 Scene、Asset 或 Audio。Render 已完成私有 bgfx backend core、
+SolidQuad UI pass 与 Desktop visible smoke；UI 只完成 standalone `tina_ui` 树核心、route-result view ABI、事务式 Flex-lite layout、
 committed hit-snapshot 数据基础、point query/反向目标选择、synthetic Capture→Target→Bubble route，以及
 Runtime-private producer/primary Context 接线、Runtime-private 每帧 layout commit，以及 startup
 primary-window seed + root-scoped phase capability、held primary Pointer Button claim bridge、SolidFill-only
-paint/DisplayList bridge 与 D0 submit-call-local primary-window UIDisplayList handoff。
-Panel/Label/Button 只是在 retained tree 中可创建的节点类型；当前没有可见 UI。Key/Gamepad/axis claim、
+paint/DisplayList bridge、D0 submit-call-local primary-window UIDisplayList handoff、D1 bgfx consumption
+和 D2 `PrimaryWindowUITreeUpdater::setBoxPaint()` facade。
+Panel/Label/Button 只是在 retained tree 中可创建的节点类型；当前只有 SolidFill panel 可见样例，
+还没有 Label 文本或 Button 默认行为。Key/Gamepad/axis claim、
 持久 Pointer Capture、Focus/Modal、Button
-default action、Game SDK paint setter、owning RenderFramePacket/FramePin、nested clip、dirty subtree pruning、text/glyph、FreeType 与 bgfx UI pass 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或 clear-only
-Desktop smoke 推断为已经实现。
+default action、owning RenderFramePacket/FramePin、nested clip、dirty subtree pruning、text/glyph、FreeType、
+Image/Texture 与产品级 Widget UI 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或
+SolidFill 4-panel Desktop smoke 推断为已经实现。
 
 ## 完整 vNext 所有权目标
 
@@ -189,8 +194,9 @@ committed snapshot，不隐式 layout。M7-C1c-b3d1 只在后续 `updateUI` phas
 continuous-control producer：Move/Wheel/Button route 都可请求接管最终仍 held 的 primary Pointer Button，
 且 consumption 与 claim 分开发布。D0 进一步在 layout/paint commit 后、Render submit 前构建
 primary-window UIDisplayList，并通过 `RenderFrame::primaryWindowUIDisplayList` 作为 submit-call-local
-borrow 交给 backend；backend 不得保留该 view、span 或元素指针。Key/Gamepad/axis claim、
-Focus/Capture/Modal 仍后置。Gameplay Action
+borrow 交给 backend；backend 不得保留该 view、span 或元素指针。D1 的私有 bgfx backend 已消费
+SolidQuad DisplayList，D2 的 Game SDK facade 已能 author SolidFill box paint。Key/Gamepad/axis claim、
+Focus/Capture/Modal、Text/Glyph 与 Widget 默认行为仍后置。Gameplay Action
 带目标 simulation tick，由 fixed loop 消费。
 
 ## IGameApplication 与 IGameState 调用顺序

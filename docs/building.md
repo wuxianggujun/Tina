@@ -52,7 +52,8 @@ out\build\windows-msvc\bin\Debug\tina_legacy_tests.exe
 
 该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A/M7-B1 与
 M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2/C1c-b3e 的 `tina_core`、`tina_platform`、
-`tina_task`、`tina_render`、`tina_runtime`、`tina_ui`，以及最新 SolidFill paint、Render DisplayList 与
+`tina_task`、`tina_render`、`tina_runtime`、`tina_ui`，以及最新 SolidFill paint、Render DisplayList、D2 scoped
+`setBoxPaint()` 与
 `tina_ui_render_integration`、
 直接 GoogleTest 门禁与 Null 样例：
 
@@ -108,7 +109,7 @@ sanitizer 的 `tina_ui_tests` 均为92/92。Render builder 的11项测试已随 
 Debug/Release 与两条 Linux 图均通过，覆盖 logical→framebuffer
 outward rounding/clamp、冗余/空 clip、严格 paint order、容量/输入失败与完整 transaction rollback。
 这些结果不证明持久 Pointer Capture、Focus/Modal、Button default action、Image/Text/Glyph、owning
-Runtime packet/FramePin、bgfx UI Pass 或可见 Widget 已完成。
+Runtime packet/FramePin 或可见 Widget 已完成；D1/D2 的可见 SolidFill panel 由 Desktop bgfx 门禁单独覆盖。
 
 ## Windows vNext Runtime→UI producer、primary-window owner、layout coordinator、scoped Game SDK UI access 与 Pointer Button claim bridge
 
@@ -158,17 +159,21 @@ Key/Gamepad/axis claims 仍后置。
 且 D0 已在 layout/paint commit 后、Render submit 前通过 Runtime-private coordinator 构建
 primary-window UIDisplayList，并把它作为 `RenderFrame` 的 submit-call-local borrow 交给 backend。
 Headless、0 framebuffer 与 suspended surface 发布空 list；构建失败不保留旧 publication 或截断 list。
-D0 后 Windows MSVC 19.50 / CMake 4.2.3 Debug/Release 的 `tina_runtime_ui_tests` 均为51/51。
-正式样例仍没有 Game SDK paint setter、Widget 文本、Button 默认行为、Focus/Capture/Modal、bgfx UI pass
-或可见 UI。该 target 直接运行 GoogleTest，不使用 CTest；这项接线不证明可见 UI 已完成。
+D2 又把 `setBoxPaint()` 暴露到 scoped `PrimaryWindowUITreeUpdater`，并覆盖 phase expiry、
+wrong-context/stale-generation sticky failure。D2 后 Windows MSVC 19.50 / CMake 4.2.3 Debug/Release 的
+`tina_runtime_ui_tests` 均为53/53。正式样例仍没有 Widget 文本、Button 默认行为、Focus/Capture/Modal、
+Text/Glyph 或完整产品 UI；最小可见 SolidFill panel 由 Desktop bgfx 样例单独证明。该 target 直接运行
+GoogleTest，不使用 CTest。
 
 ## Windows vNext GLFW Platform 与 Desktop bgfx
 
 GLFW adapter 使用独立 build tree 和 vcpkg `platform-glfw` feature，不改变上面的 Null 依赖闭包。
 它创建 `GLFW_NO_API` 窗口、发布 M7-B1 WindowSurface snapshot/lease，并组合 NullRender。M7-B2
-私有 bgfx clear-only core 使用单独 preset 构建；Desktop bootstrap 通过
+私有 bgfx core 使用单独 preset 构建；D1 在该私有 backend 中加入 build-tree shaderc 生成的
+glsl/spv/dxbc SolidQuad embedded shader、transient 32-bit indexed UI geometry、Sequential view、top-left
+framebuffer ortho、premultiplied blend 和 scissor。Desktop bootstrap 通过
 `Tina::Desktop::CreateEngine(config)` 私有组合 `SteadyClock + GLFW WindowSurface + DisabledTaskSystem + bgfx`。
-`tina_sample_desktop` 不带参数时默认运行300帧真实 GPU deep-blue clear/present：
+`tina_sample_desktop` 不带参数时默认运行300帧真实 GPU，并创建1个 retained root 与4个 painted panel：
 
 ```powershell
 cmake --preset windows-msvc-vnext-platform
@@ -186,7 +191,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_platform_glfw_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_desktop.exe
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_desktop.exe --frames=1200 --frame-delay-ms=0
 ```
 
 Release 必须在 Debug build 结束后串行执行：
@@ -205,21 +210,24 @@ out\build\windows-msvc-vnext-bgfx\bin\Release\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Release\tina_runtime_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Release\tina_platform_glfw_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Release\tina_render_bgfx_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
+out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe --frames=300 --frame-delay-ms=0
 ```
 
-Windows 构建会把 GLFW runtime DLL 复制到对应 `bin/<Config>`。样例不带参数时以16 ms 的演示延迟
-显示1800帧；自动门禁必须显式使用 `--frame-delay-ms=0`，这条 sleep 路径不属于 benchmark。
-最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3。D0 的 Debug/Release
-均直接通过基础207/207、独立 UI92/92、独立 Runtime→UI51/51、UI→Render bridge12/12与Null样例300帧；
-本轮另重跑 bgfx专项11/11，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 300帧。Release 输出
+Windows 构建会把 GLFW runtime DLL 复制到对应 `bin/<Config>`。样例默认零延迟300帧；截图/长跑门禁可显式
+使用 `--frames=1200 --frame-delay-ms=0`，该路径不属于 benchmark。D1 的 shader 通过 build tree 内
+`bgfx::shaderc` 生成，不把 generated/cooked header 提交进源码。
+最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3。D2 的 Debug/Release
+均直接通过基础207/207、独立 UI92/92、独立 Runtime→UI53/53、UI→Render bridge12/12与Null样例300帧；
+本轮另重跑 bgfx专项16/16，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop`：Debug 1200帧截图检查，
+Release 300帧输出
 `clean status ok`；Debug 退出时的 `RefCount is 3 (expected 0)` 是已记录第三方 debug layer 提示，
 不能单独作为 Tina 资源泄漏结论。GLFW专项25/25与 GLFW+Null样例300帧保留前序门禁，上一
 C1c-b3a WindowSurface GLFW样例1800帧仍作为历史证据。
 `TINA_BUILD_TESTING=OFF` 的 production-style GLFW样例300帧
 同样属于早期门禁，用来证明测试 target 关闭后样例仍能运行。
-当前 Desktop smoke 只证明 clear-only bgfx surface 创建、提交和关闭链路通过，不代表
-Scene/UI/Pass Scheduler/submission ticket 已完成，也不宣称 resize、最小化、恢复的真实自动化通过。
+当前 Desktop smoke 证明无纹理 SolidFill UI panel、alpha blend、right-edge scissor、root 回收和 bgfx surface
+创建/提交/关闭链路通过；不代表 Scene、Text/Glyph、完整 Widget、Pass Scheduler/submission ticket 已完成，
+也不宣称 resize、最小化、恢复的真实自动化通过。
 
 ## Windows vNext Release
 
@@ -435,7 +443,7 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 | `TINA_BUILD_SHADERS` | `ON` | 构建运行时 shader；关闭后只适合编译/链接门禁 |
 | `TINA_BUILD_LEGACY` | `ON` | 迁移期构建现有游戏与旧模块；vNext preset 固定关闭 |
 | `TINA_BUILD_PLATFORM_GLFW` | `OFF` | 构建私有 vNext GLFW Window/Input adapter；需启用 vcpkg `platform-glfw` feature，不改变 Game SDK 边界 |
-| `TINA_BUILD_RENDER_BGFX` | `OFF` | 构建私有 vNext bgfx backend 与 Desktop clear-only smoke，不改变 Game SDK 边界 |
+| `TINA_BUILD_RENDER_BGFX` | `OFF` | 构建私有 vNext bgfx backend、build-tree shaderc UI shader 与 Desktop SolidQuad smoke，不改变 Game SDK 边界 |
 | `TINA_BUILD_BENCHMARKS` | `OFF` | 后续构建独立 `tina_bench` |
 | `TINA_ENABLE_SANITIZERS` | `OFF` | GCC/Clang Unix target 同时启用 ASan/UBSan；其他工具链配置时报错 |
 | `TINA_BUILD_WAYLAND` | `OFF` | Linux Wayland 构建，需要对应 vcpkg feature |

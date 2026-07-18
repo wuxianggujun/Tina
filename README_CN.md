@@ -24,14 +24,16 @@ M7-B1 私有 WindowSurface handoff、M7-B2 Desktop bootstrap + 真实 GPU 冒烟
 M7-C1b/M7-C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/b3d2/b3e Retained Tree/Flex-lite layout/
 committed hit/paint snapshot、point query、synthetic routed pointer、private Runtime route、startup UI seed、
 Game SDK scoped capability、后端无关 SolidQuad DisplayList foundation，以及 D0 Runtime-private
-primary-window UIDisplayList submit handoff：私有
+primary-window UIDisplayList submit handoff、D1 私有 bgfx SolidQuad UI pass 和 D2 Game SDK box-paint authoring：
+私有
 `tina_platform_glfw` 已能创建 `GLFW_NO_API` 窗口，
 并把键盘、Pointer、Focus、resize、close 与已提交 UTF-8 文本归一化到同一份有界
 `PlatformFrameView`；Runtime 通过 generation `WindowSurfaceId`、无原生句柄的
 `WindowSurfaceSnapshot` 和 move-only `NativeWindowSurfaceLease` 把窗口 surface 交给 Render
 组合，Game SDK 不暴露 native 或 bgfx 类型。`Tina::Desktop::CreateEngine(config)` 已作为普通桌面入口
 落地，当前私有组合为 `SteadyClock + GLFW WindowSurface + DisabledTaskSystem + bgfx`；
-`tina_sample_desktop` 默认运行300帧，以深蓝色 clear/present 验证真实 Render backend 路径。
+`tina_sample_desktop` 默认运行300帧，并用 retained tree 创建4个 SolidFill panel 验证 UI DisplayList
+被私有 bgfx backend 消费；深蓝色 clear 只作为背景。
 `tina_ui` 已有 generation tree、固定容量事务式布局、固定容量 PMR Pointer policy/route ancestry scratch，
 以及双缓冲 `UICommittedHitView`。同一 view 内 hit entry 的 paint ordinal 唯一且严格递增，并携带 structure/layout/
 paint-order/hit revision；hit-only commit 不执行布局。`UIBoxPaint` 当前支持可选 SolidFill，并以固定
@@ -69,13 +71,14 @@ bridge GoogleTest 均通过。D0 已在 Runtime-private `PrimaryWindowUIDisplayC
 layout/paint commit 后、Render submit 前用固定 PMR builder 构建 primary-window UIDisplayList，并通过
 `RenderFrame::primaryWindowUIDisplayList` 作为 submit-call-local borrowed view 交给 backend；backend 必须同步
 消费/复制/编码，禁止在 `submitFrame()` 返回后保留 view、span 或元素指针。Headless、0 framebuffer 与
-suspended surface 路径发布空 list；构建失败不保留旧 publication，也不提交截断 list。当前仍不是可见 UI：
-Game SDK facade 尚无 paint setter，文本/glyph 渲染尚未接入，
-Panel/Label/Button 只是 retained tree 节点类型，还没有默认 Widget 行为。持久 Pointer Capture、Focus/Modal、
-Button 默认行为、Image/Text/Glyph PaintCache、dirty subtree pruning、nested clip、owning Runtime
-RenderFramePacket、FramePin、bgfx UI Pass、production Gamepad、
-Windows IMM32 composition、Scene、文本/Widget、Pass Scheduler、submission ticket/drain 与可见中文 UI
-分别放在后续切片。
+suspended surface 路径发布空 list；构建失败不保留旧 publication，也不提交截断 list。D1 后
+`tina_render_bgfx` 会把非空 SolidQuad DisplayList 写入 transient VB/IB、按 batch 提交私有 shader 程序；
+D2 又让 `PrimaryWindowUITreeUpdater::setBoxPaint()` 进入 Game SDK facade，Desktop 样例可见4个
+retained SolidFill panel。当前可见路径仍只是 SolidFill quad，不等于完整 Widget/UI：文本/glyph
+渲染尚未接入，Label 仍不绘制文本，Button 还没有默认交互行为。持久 Pointer Capture、Focus/Modal、
+Image/Text/Glyph PaintCache、dirty subtree pruning、nested clip、owning Runtime RenderFramePacket、
+FramePin、production Gamepad、Windows IMM32 composition、Scene、文本/Widget、Pass Scheduler、
+submission ticket/drain 与可见中文 UI 分别放在后续切片。
 
 ## 当前 Legacy 已完成基线
 
@@ -95,11 +98,11 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求
 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、
-MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过最新 Windows Debug
-门禁：基础207/207、独立 UI 92/92、独立 Runtime→UI 51/51，以及 UI→Render bridge 12/12；最新
-Windows Release 也通过同一组 207/92/51/12 和 Null 样例300帧。本轮另重跑 bgfx专项11/11，以及真实
-D3D11 Intel Iris Xe 的
-`tina_sample_desktop` Debug/Release 300帧；Release 输出 clean status ok。Debug D3D11 退出时
+MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过前序 Windows Debug
+门禁：基础207/207、独立 UI 92/92、独立 Runtime→UI 51/51，以及 UI→Render bridge 12/12；前序
+Windows Release 也通过同一组 207/92/51/12 和 Null 样例300帧。D1/D2 又在 Windows Debug/Release
+通过 Runtime→UI 53/53、bgfx专项16/16、UI→Render bridge12/12，以及真实 D3D11 Intel Iris Xe 的
+`tina_sample_desktop` 可见 retained UI 样例 Debug 1200帧与 Release 300帧；Release 输出 clean status ok。Debug D3D11 退出时
 `RefCount is 3 (expected 0)` 是已记录的第三方 debug layer 提示，不作为 Tina 泄漏结论。前序 WindowSurface
 GLFW专项25/25、GLFW样例300/1800帧仍作为历史证据。Legacy ON 图的前序隔离门禁为 vNext 185/185 + Legacy 43/43。
 `TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与
@@ -116,7 +119,9 @@ ASan/UBSan/LSan 均通过基础183/183、GLFW专项22/22、bgfx专项11/11和 De
 基础/bgfx测试不使用 suppression；X11 只对第三方 libX11 `_XimOpenIM` retention 使用精确 suppression，
 GLFW专项命中12次/4896 B、Desktop样例命中1次/408 B。Clang Desktop 经 bgfx 选择 Vulkan，但当前
 WSL2 适配器是 llvmpipe 软件实现，因此该结果证明 Linux Vulkan/backend 生命周期，不代表硬件 GPU
-性能。由 vcpkg 提供的 GLFW 本身未被 sanitizer 插桩。详细边界见[测试文档](docs/testing.md)。Clang
+性能。由 vcpkg 提供的 GLFW 本身未被 sanitizer 插桩。D1/D2 的 bgfx SolidQuad UI pass、
+Game SDK `setBoxPaint()` facade 和可见 Desktop 4-panel 样例尚未在 Linux 图重跑，不能沿用前序
+Linux Null/bridge 结果替代。详细边界见[测试文档](docs/testing.md)。Clang
 preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22.04 自带的旧 libstdc++。先确认
 终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
 
@@ -137,7 +142,7 @@ out\build\windows-msvc-vnext-platform\bin\Debug\tina_tests.exe
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_platform_glfw_tests.exe
 out\build\windows-msvc-vnext-platform\bin\Debug\tina_sample_platform.exe --frames=300 --frame-delay-ms=0
 
-# 可选 Desktop bootstrap + 真实 bgfx clear-only GPU 冒烟
+# 可选 Desktop bootstrap + 真实 bgfx SolidFill UI 冒烟
 cmake --preset windows-msvc-vnext-bgfx
 cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_runtime_ui_tests tina_platform_glfw_tests tina_render_bgfx_tests tina_sample_desktop
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_runtime_ui_tests.exe

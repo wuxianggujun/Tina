@@ -3,7 +3,9 @@
 > 状态：vNext 目标契约已接受；M7-B1 WindowSurface handoff 与 M7-B2 私有 bgfx clear-only core、Desktop
 > 产品接线、真实 GPU 冒烟已实现；后端无关 SolidQuad UI DisplayList builder 与 UI→Render integration
 > bridge 也已实现。D0 已把 primary-window UIDisplayList 作为 `RenderFrame` submit-call-local borrow
-> 接入 Runtime 正式 submit 路径。Scene、Runtime packet、FramePin、bgfx UI Pass、Pass Scheduler 与
+> 接入 Runtime 正式 submit 路径。D1 已在私有 `tina_render_bgfx` 中实现 SolidQuad UI shader/pass，
+> D2 已通过 Game SDK `setBoxPaint()` 和 Desktop 4-panel 样例验证真实 D3D11 可见 UI、alpha blend 与
+> framebuffer scissor。Scene、Runtime packet、FramePin、资源型 UI 命令、Pass Scheduler 与
 > submission ticket/drain 仍后置。
 > bgfx 是 Tina 的实现依赖，不是游戏开发 API。
 
@@ -51,11 +53,12 @@ UIContext retained tree
   -> layout / SolidFill committed paint             [已实现]
   -> tina_ui_render_integration coordinate mapping  [已实现]
   -> Render::UIDisplayListBuilder/View               [SolidQuad 已实现]
+  -> private bgfx SolidQuad UI pass                  [D1 已实现]
 
 RenderSceneView + UIDisplayListView + RenderSurfaceState + FrameTiming
-  -> RenderFrame view                                [D0 UI borrow 已接入]
+  -> RenderFrame view                                [D0 UI borrow + D1 bgfx consume 已接入]
   -> future Runtime-owned RenderFramePacket          [未实现]
-  -> Pass Scheduler / bgfx UI Pass                   [未实现]
+  -> Pass Scheduler / resource-backed UI commands    [未实现]
 ```
 
 当前 `RenderFrame` 表达 Runtime frame 编号、插值、可选 primary window surface，以及 D0 加入的
@@ -83,6 +86,8 @@ MeshRenderItem、Bounds 和 Material instance，不提取 UI。当前 UI 已能�
 独立 integration 已能生成 borrowed `UIDisplayListView`；D0 的 Runtime-private
 `PrimaryWindowUIDisplayCoordinator` 在 layout/paint commit 后、Render submit 前为 primary window 构建
 该 list。
+D1 的私有 bgfx backend 会在同一次 `submitFrame()` 内把 SolidQuad list 展开为 transient 32-bit indexed
+geometry 并提交到专用 UI view；D2 Desktop 样例通过 Game SDK paint facade 实际产生4个 panel 命令。
 后续 `tina_render` 的低层 writer 只接受已解析的 FrameResourceRef/packet，不依赖
 AssetHandle 或玩法 TileMap。
 
@@ -324,9 +329,20 @@ UI pipeline kind + Texture/Atlas page + Sampler + Blend + ClipId
 
 禁止为了减少 texture switch 对整份透明 DisplayList 全局排序；batch 前后 paint-order checksum
 必须一致。当前 clip 只用 axis-aligned scissor，rounded/stencil clip 后置。Runtime-owned
-`RenderFramePacket`、FramePinSink/resource refs 与 bgfx UI Pass 尚未实现。D0 只把无资源
-primary-window DisplayList 作为 submit-call-local borrow 放进 `RenderFrame`；这仍不能形成可见 UI 或
-GPU 资源回收证据。
+`RenderFramePacket`、FramePinSink/resource refs、ImageQuad/GlyphRange 与 Atlas texture pin 尚未实现。
+D1 的 bgfx backend 已消费无资源 primary-window SolidQuad DisplayList：shader 由 build tree 内的
+`bgfx::shaderc` 离线生成 glsl/spv/dxbc embedded headers，源码仓库只提交 `.sc` shader source 和 CMake
+生成规则，不提交 cooked/generated header。提交时使用单个 transient vertex/index buffer、32-bit index、
+Sequential view mode、左上原点 framebuffer orthographic projection、premultiplied alpha blend
+(`ONE`/`INV_SRC_ALPHA`) 与 per-batch scissor；suspended surface、空 list、capacity preflight 失败或
+transient capacity 不足时不提交半帧 UI，也不伪造 present。
+
+D1 的5项私有几何测试覆盖空 list、两个 SolidQuad 的顶点/索引/ABGR、容量失败不写入、非法命令预检和
+连续300次复用 caller-owned storage；Windows `tina_render_bgfx_tests` Debug/Release 已增至16/16。
+D2 Desktop 样例用 Game SDK `setBoxPaint()` 创建4个 retained SolidFill panel，1280×720截图像素验证：
+background RGB(9,24,40)、blue(28,92,148)、cyan-over-blue(29,186,167)、cyan-over-background(26,176,152)，
+右侧 clip 边界 x=1140 为 background、x=1160 与 x=1279 为 pink(239,88,122)。该证据证明最小可见
+SolidFill UI、alpha blend 与 scissor，不证明 Text/Glyph、Widget default action、Scene overlay 或资源型 UI。
 
 高性能 UI 的 dirty、PaintCache、文本和 DisplayList 契约见[自研 UI](ui.md)。
 
@@ -382,16 +398,16 @@ Tina category/code、可选 native integer code 和 UTF-8 context，不返回 bg
    完成后 packet/lease/pin/resource count 全部归零；
 10. 纯 UI、2D-only、3D-only、无 content 和 `Suspended` surface 分别验证 initial clear 恰好一次或0次。
 
-当前 M7-B2 已验证 Game SDK/public header 不泄漏 bgfx、GLFW 或 native handle；`tina_sample_desktop`
+当前 M7-B2/D1/D2 已验证 Game SDK/public header 不泄漏 bgfx、GLFW 或 native handle；`tina_sample_desktop`
 经 Desktop bootstrap 间接解析到 bgfx 属于私有实现依赖，不改变公开边界。Windows D3D11 硬件路径
-与 Linux GCC/Clang X11 路径均已运行300帧；Linux Clang 的 Vulkan/llvmpipe 只计作软件
-Vulkan/backend 生命周期与 sanitizer 门禁。
+已验证 SolidQuad UI pass 和可见 panel；Linux 仍只保留 D1/D2 之前的 bgfx backend 生命周期门禁，
+Clang 的 Vulkan/llvmpipe 只计作软件 Vulkan/backend 生命周期与 sanitizer 门禁。
 
 ## Roadmap 与验收解释
 
-M7 的可见 UI 还需要 Game SDK paint/widget authoring、文本路径，并在最小真实 Surface 上实现 UI Pass；
-私有 clear-only `tina_render_bgfx` consumer 已存在，但尚不消费 UI 命令。owning Runtime packet 与
-FramePin 仍服务于后续含资源 DisplayList 生命周期。
+M7 的最小可见 UI 已覆盖 Game SDK `setBoxPaint()`、SolidFill panel、私有 bgfx SolidQuad pass、alpha 与
+scissor；完整 UI 仍需要 Widget 默认行为、Label/Button 文本路径、Glyph Atlas、Focus/Capture/Modal、
+Semantics 和资源型 DisplayList。owning Runtime packet 与 FramePin 仍服务于后续含资源 DisplayList 生命周期。
 M9 是扩展 Opaque3D、Mesh、depth 和 3D Shader/Material，不是第一次让 UI 直接调用 Legacy renderer。
 
 在完整 Asset/Cooker 于 M10 接入前，M7–M9 只允许使用版本化、确定性的内置 Cooked fixture 或
@@ -400,7 +416,7 @@ procedural geometry。禁止恢复 Runtime 路径加载，也禁止游戏自行�
 验收分开记录：
 
 - 当前 Legacy：`Tina --smoke-*` 只证明旧路径仍可运行；
-- vNext infrastructure：Null、Platform、Desktop clear-only GPU、UI/2D/3D 独立 sample 分别验证接口和生命周期；
+- vNext infrastructure：Null、Platform、Desktop SolidQuad GPU、UI/2D/3D 独立 sample 分别验证接口和生命周期；
 - vNext product：Cooked TileMap 2D 与 Cooked glTF/Material/Prefab 3D 才计入 Legacy 删除门禁；
 - 进程返回码、结构化资源计数、性能数据和实际截图是四类不同证据。
 
