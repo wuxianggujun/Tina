@@ -152,8 +152,8 @@ public:
 - M6-A 在 initial State `onEnter` 成功并采样 `initialPolicy()` 后 commit；创建或 enter 失败自动
   回滚，不调用 candidate `onExit` 或 Application `onShutdown`；M7-C1c-b3c 的 Runtime-private
   primary-window Context 在首个有效 Platform frame 延迟绑定，b3d1 也只在该 frame 的 `updateUI` 后
-  提交 layout。Game State 仍不能创建 root，首份 UI layout/snapshot 尚未纳入启动事务；b3d2 Proposed
-  才会增加 backend-neutral startup metrics seed 与 root-scoped、phase-scoped capability；
+  提交 layout。Game State 仍不能创建 root，首份 UI layout/snapshot 尚未纳入启动事务；ADR 0021 已接受
+  b3d2 的 backend-neutral startup metrics seed 与 root-scoped、phase-epoch-scoped capability，但尚未实现；
 - commit 后无论正常退出还是帧错误，当前 State `onExit` 后调用一次 `onShutdown`；完整状态栈
   加入后扩展为所有 committed State 按规定顺序退出；
 - 它没有 fixed/update/render/UI 回调；
@@ -287,11 +287,11 @@ Context 是不可复制/移动、只在当前 callback 有效的 capability view
 | Context | 可访问能力 | 明确禁止 |
 | --- | --- | --- |
 | `GameStartupContext` | 只读 config/capability、游戏级启动回滚 | World/UI root、RenderDevice、保存 Context |
-| `GameStateEnterContext` | World、`UIRootBuilder`、Input Context、订阅、TaskGroup 的事务创建 | commit 前发布 Task completion、直接激活半成品、修改旧栈、backend 类型 |
+| `GameStateEnterContext` | World、`PrimaryWindowUIRootBuilder`、Input Context、订阅、TaskGroup 的事务创建 | 裸 `UIContext*`、commit 前发布 Task completion、直接激活半成品、修改旧栈、backend 类型 |
 | `FixedUpdateContext` | fixed timing、Simulation Action、World query/command、当前 TaskGroup | Frame/UI Action、Window/RenderDevice、保存 Arena span |
 | `FrameUpdateContext` | 每 Render Frame 一次的 real/update delta、Frame Action、Asset snapshot、GameStateCommands | Simulation edge、直接 commit 状态、阻塞 IO |
 | `RenderSceneExtractionContext` | interpolation、只读 World、`RenderSceneWriter` | 修改 World、创建 GPU 资源、访问 bgfx |
-| `UIUpdateContext` | 绑定已拥有 root 的 `UITreeUpdater`、retained model/style/action/dirty | 创建新 root、每帧重建 UIContext、直接提交 Render/backend |
+| `UIUpdateContext` | 为已拥有 root 创建 phase-epoch-scoped `PrimaryWindowUITreeUpdater`、retained model/style/action/dirty | 创建新 root、跨 phase 保存 updater、每帧重建 UIContext、直接提交 Render/backend |
 | `GameStateExitContext` | TaskGroup 已 join 后读取退出原因；State 释放自己的 RAII owner | 创建新 Task/Asset/State、直接操作 Runtime registry |
 | `GameShutdownContext` | 最终退出原因和诊断、游戏级注销 | 创建新 Engine 工作 |
 
@@ -568,8 +568,64 @@ window identity 不一致或 `commitLayout()` 失败都会阻断 Render，并保
 之前，只读取上一份 committed hit snapshot。
 
 该切片没有增加 root builder/updater、Widget、DisplayList 或可见 UI。M7-C1c-b3d2 的
-startup primary-window metrics seed 与 root-scoped、phase-scoped Game SDK capability 仍是 Proposed；
+startup primary-window metrics seed 与 root-scoped、phase-epoch-scoped Game SDK capability 已由
+[ADR 0021](adr/0021-runtime-ui-startup-capability.md) 接受，但尚未实现；
 普通游戏不会获得裸 `UIContext*`，也不能在任意阶段调用 `createRoot()`。
+
+### M7-C1c-b3d2 已接受的启动与 Game SDK capability 契约
+
+[ADR 0021](adr/0021-runtime-ui-startup-capability.md) 冻结以下 API；本节描述待实现契约，不把它误写成
+当前已可调用能力：
+
+```cpp
+class PrimaryWindowUIRootBuilder final {
+public:
+    [[nodiscard]] Core::Result<UI::UIRootOwner> createRoot();
+    [[nodiscard]] Core::Result<PrimaryWindowUITreeUpdater>
+    treeUpdater(UI::UIRootOwner& rootOwner);
+};
+
+class PrimaryWindowUITreeUpdater final {
+public:
+    [[nodiscard]] Core::Result<bool> isAlive(UI::UINodeId node) const;
+    [[nodiscard]] Core::Result<UI::UINodeId> createPanel(UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createLabel(UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createButton(UI::UINodeId parent);
+    [[nodiscard]] Core::Status setLayoutStyle(
+        UI::UINodeId node,
+        const UI::UILayoutStyle& style);
+    [[nodiscard]] Core::Status setPointerHitPolicy(
+        UI::UINodeId node,
+        UI::UIPointerHitPolicy policy);
+    [[nodiscard]] Core::Status destroy(UI::UINodeId node);
+};
+
+class GameStateEnterContext final {
+public:
+    [[nodiscard]] bool hasPrimaryWindowUI() const noexcept;
+    [[nodiscard]] Core::Result<PrimaryWindowUIRootBuilder>
+    primaryWindowUIRootBuilder();
+};
+
+class UIUpdateContext final {
+public:
+    [[nodiscard]] bool hasPrimaryWindowUI() const noexcept;
+    [[nodiscard]] Core::Result<PrimaryWindowUITreeUpdater>
+    primaryWindowUITreeUpdater(UI::UIRootOwner& rootOwner);
+};
+```
+
+两种 facade 都是 move-only、owner-thread、phase-epoch-scoped。Runtime 在回调进入时生成 epoch，离开时
+无条件失效；跨回调保存后操作返回 `RuntimeErrorCode::UIPhaseCapabilityExpired`。Headless 主动请求返回
+`RuntimeErrorCode::PrimaryWindowUIUnavailable`。State 只持久保存 `UIRootOwner` 与 `UINodeId`；updater
+始终验证 root generation、owner window 与 subtree containment。第一次 capability operation 失败会成为
+该 phase 的 sticky error，后续 mutation 不再执行，Runtime 在 callback 结束统一合并错误。
+
+Platform SPI 同时增加
+`initialPrimaryWindowMetrics() -> Result<optional<WindowMetricsSnapshot>>`。它不能 poll、泵送事件、消费
+frame id/source sequence；首个 frame 的 identity/revision 与 lifecycle event 必须和 seed 收敛。启动事务
+在 `onEnter` 前绑定 Context，并在 State/policy commit 前按 logical extent 原子发布首份
+structure/layout/hit snapshot。
 
 ## EngineConfig
 

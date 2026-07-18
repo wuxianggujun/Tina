@@ -282,8 +282,8 @@ bounded capacity 与每帧 layout commit；
 已存在直接推断。Game SDK root/update、Widget default action、可见 UI 和 DisplayList 也不能由 private
 owner/producer 或 synthetic route 推断。
 
-M7-C1c-b3d2 的 startup primary-window metrics seed 与 root-scoped、phase-scoped Game SDK capability
-仍是 Proposed。普通游戏不获得裸 `UIContext*`，也不能在任意阶段调用 `createRoot()`；该 follow-up
+M7-C1c-b3d2 的 startup primary-window metrics seed 与 root-scoped、phase-epoch-scoped Game SDK capability
+已由 [ADR 0021](0021-runtime-ui-startup-capability.md) 接受但尚未实现。普通游戏不获得裸 `UIContext*`，也不能在任意阶段调用 `createRoot()`；该 follow-up
 完成前，b3d1 对空 Context 的 commit 不构成可见 UI。
 
 ## 被拒绝方案

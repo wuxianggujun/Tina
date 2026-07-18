@@ -201,12 +201,12 @@ translation unit 已私有构造 GLFW WindowSurface + clear-only bgfx factories�
 | Context | 可访问能力 | 明确禁止 |
 | --- | --- | --- |
 | `GameStartupContext` | 只读启动配置与游戏级回滚 | 创建 World/UI root、保存 Context、直接拥有 Engine module |
-| `GameStateEnterContext` | 暂存 World/`UIRootBuilder`/订阅/TaskGroup 与回滚动作，commit 前不可接收输入 | 直接激活 root、修改旧栈、保存 Context |
+| `GameStateEnterContext` | 暂存 World/`PrimaryWindowUIRootBuilder`/订阅/TaskGroup 与回滚动作，commit 前不可接收输入 | 裸 `UIContext*`、直接激活 root、修改旧栈、保存 capability/Context |
 | `GameStateExitContext` | TaskGroup 已 join 后读取退出原因；State 释放自己的 RAII owner | 新建 Task/Asset/Window、重新激活自身、直接改 Runtime registry |
 | `FixedUpdateContext` | fixed timing、Simulation Action、World query/command、当前 TaskGroup | Frame/UI Action、Window/bgfx、保存 FrameArena span |
 | `FrameUpdateContext` | 每 Render Frame 一次的 real/unscaled delta、Frame Action、Asset query、状态切换请求 | Simulation edge、直接 commit 状态、阻塞 IO |
 | `RenderSceneExtractionContext` | interpolation、只读 World view、`RenderSceneWriter` | 修改 World、保存 writer/descriptor |
-| `UIUpdateContext` | 绑定已拥有 root 的 `UITreeUpdater`、model/action/dirty 请求 | 创建新 root、每帧重建 UIContext、直接提交 bgfx |
+| `UIUpdateContext` | 为已拥有 root 创建 phase-epoch-scoped `PrimaryWindowUITreeUpdater`、model/action/dirty 请求 | 创建新 root、跨 phase 保存 updater、每帧重建 UIContext、直接提交 bgfx |
 | `GameShutdownContext` | 只允许撤销游戏级注册和查询关闭诊断 | 创建新 Asset/Task/Window |
 
 所有 frame callback 返回 `Status`。Writer/Updater 同时保存 sticky first-error；Runtime 在回调返回后
@@ -544,8 +544,8 @@ primary 消失或 generation 更换会结构化失败。Context 在 module shutd
 `UIContextCapacityConfig`/shared validator、`EngineConfig::primaryWindowUICapacities` 与 `updateUI` 后、
 Render 前每个严格递增 `PlatformFrameId` 至多一次的 private layout commit；Headless 双缺席成功 no-op，
 失败阻断 Render 且消费该 frame attempt。当前 `tina_ui` 仍只依赖 Core/Platform，claims 仍为 canonical
-`None`；Game SDK 尚不能取得 Context 或创建 root，因此这不是可见 UI。startup metrics seed、Game SDK
-scoped UI access、持久 Pointer Capture、Focus/Modal、Button default action、paint
+`None`；Game SDK 尚不能取得 Context 或创建 root，因此这不是可见 UI。ADR 0021 已接受但尚未实现
+startup metrics seed 与 Game SDK root/phase-epoch-scoped access；持久 Pointer Capture、Focus/Modal、Button default action、paint
 snapshot/DisplayList、nested clip、dirty subtree pruning、FreeType 与 bgfx UI pass 仍未实现。完整目标中 UI 树输出后端无关的 Quad、Image、
 GlyphRange、Clip DisplayList，由 Render 层保持 paint order 批处理。
 
@@ -583,8 +583,8 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
    Flex-lite layout foundation，M7-C1c-a 已完成 committed hit-snapshot 数据基础，M7-C1c-b1 已完成
    point query 与反向目标选择，M7-C1c-b2 已完成 synthetic listener route，M7-C1c-b3b 已完成独立
    Runtime-private producer，M7-C1c-b3c 已完成 primary-window `UIContext` owner/selection 与 EngineHost
-   接线，M7-C1c-b3d1 已完成容量配置与 Runtime-private layout coordinator。M7-C1c-b3d2 Proposed
-   继续实现 startup primary-window metrics seed 与 root-scoped、phase-scoped Game SDK access，再推进真实 claims/focus/capture/widget、
+   接线，M7-C1c-b3d1 已完成容量配置与 Runtime-private layout coordinator。M7-C1c-b3d2 按已接受的
+   ADR 0021 继续实现 startup primary-window metrics seed 与 root-scoped、phase-epoch-scoped Game SDK access，再推进真实 claims/focus/capture/widget、
    dirty subtree pruning 与 DisplayList、Label/Button/Modal + FreeType、bgfx UI pass、IMM32/Gamepad/DPI 门禁；
 5. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；
 6. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D

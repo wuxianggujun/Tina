@@ -88,7 +88,7 @@ Desktop smoke；UI 只完成 standalone `tina_ui` 树核心、route-result view 
 committed hit-snapshot 数据基础、point query/反向目标选择、synthetic Capture→Target→Bubble route，以及
 Runtime-private producer/primary Context 接线，以及 Runtime-private 每帧 layout commit。claims 仍为 canonical
 `None`，Game SDK 也不能取得 Context 或创建 root，因此当前还没有可见 UI。startup primary-window metrics
-seed 和 root-scoped、phase-scoped Game SDK capability 仍是 Proposed。持久 Pointer Capture、Focus/Modal、Button
+seed 和 root-scoped、phase-epoch-scoped Game SDK capability 已由 ADR 0021 接受，但代码尚未实现。持久 Pointer Capture、Focus/Modal、Button
 default action、paint snapshot/DisplayList、nested clip、dirty subtree pruning、FreeType 与 bgfx UI pass 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或 clear-only
 Desktop smoke 推断为已经实现。
 
@@ -110,8 +110,9 @@ candidate `onExit` 或 Application `onShutdown`。Frame 回调返回 Status，
 异常在 `IGameApplication`/`IGameState`/Task/C callback 边界转换。完整接口和迁移切片见
 [vNext 目标架构](vnext-architecture.md)。
 
-完整目标初始化顺序为：Diagnostics → MemorySystem → Headless/GLFW Platform → TaskSystem →
-RenderDevice → AssetSystem → AudioEngine → Window UIContext → `IGameApplication`/initial `IGameState`。
+完整目标的 module 创建顺序为：Diagnostics → MemorySystem → Headless/GLFW Platform → TaskSystem →
+RenderDevice → AssetSystem → AudioEngine。此时只创建 primary-window UI owner，不绑定 `UIContext`；
+`run()` 的 startup transaction 在 `createInitialState()` 后读取 metrics seed，在 `onEnter()` 前绑定 Context。
 统一关闭顺序为：
 
 1. 按栈顶到栈底把 `IGameState` 从 phase/UI eligibility 移除，关闭 ingress，清理 Focus/Capture/
@@ -178,8 +179,8 @@ committed snapshot，不隐式 layout。M7-C1c-b3d1 只在后续 `updateUI` phas
 当前仍只有一个 State，实际顺序为：create initial State → `onEnter` → sample policy → frame
 loop → `onExit` → Application `onShutdown` → module shutdown。M7-C1c-b3d1 的 UIContext 仍在首个有效
 Platform frame 才绑定，所以尚未实现 initial UI snapshot、GameStateStack、TaskGroup barrier 或状态命令提交。
-M7-C1c-b3d2 Proposed 将以 backend-neutral startup primary-window metrics seed 在 `onEnter` 前建立 Context，
-并只向游戏侧提供 root-scoped、phase-scoped capability；该提案尚未实现。
+M7-C1c-b3d2 将按已接受的 ADR 0021 以 backend-neutral startup primary-window metrics seed 在 `onEnter`
+前建立 Context，并只向游戏侧提供 root-scoped、phase-epoch-scoped capability；该实现尚未落地。
 
 完整目标顺序为：
 
@@ -187,7 +188,9 @@ M7-C1c-b3d2 Proposed 将以 backend-neutral startup primary-window metrics seed 
 EngineHost::run(gameApplication)
   -> begin startup transaction
   -> gameApplication.createInitialState()
-  -> initialState.onEnter()
+  -> platform.initialPrimaryWindowMetrics()
+  -> bind primary-window UIContext, or explicitly bind Headless
+  -> initialState.onEnter(primary-window root capability)
   -> sample initialPolicy + initial UI layout/snapshot
   -> commit GameStateStack
   -> frame loop

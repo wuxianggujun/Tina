@@ -227,8 +227,8 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   不合格 Sprite 被去重诊断并跳过；
 - Scene 延迟 push/pop/replace，以及 fixed phase mutation barrier、延迟实体销毁和
   interpolation snapshot；
-- UI 后续：Game-facing root/widget owner、startup primary-window metrics seed、root-scoped/phase-scoped
-  capability、committed paint/DisplayList snapshot、细粒度 dirty subtree pruning 和布局中新增 dirty 不丢；
+- UI 后续：按 ADR 0021 实现 startup primary-window metrics seed 与 root/phase-epoch-scoped Game SDK capability，
+  再补 Widget owner、committed paint/DisplayList snapshot、细粒度 dirty subtree pruning 和布局中新增 dirty 不丢；
 - UIInputScopeSnapshot 对多个 eligible State roots 只做一次全局 hit-test；阻断/恢复时 Pointer Cancel、
   Focus history、Modal root scope 与 generation 失效顺序固定；
 - Transform/scroll/clip 只重建 composite snapshot，不重建 local PaintCache；Visible/Hidden/Collapsed

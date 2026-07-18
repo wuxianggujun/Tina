@@ -189,10 +189,10 @@ Tina 当前 miniaudio 路径只需要先保证 Engine/Resource/Voice 的关闭�
   一次 layout commit；Headless 双缺席成功 no-op，失败阻断 Render 且消费 frame attempt。hit-test 和
   route 继续只读取上一份 committed snapshot，不能隐式触发布局。本批精确测试计数仍以最终直接
   GoogleTest 与运行门禁回写为准。
-- **M7-C1c-b3d2 Proposed**：在 startup transaction 中提供 `initialPrimaryWindowMetrics`，再向游戏侧
-  提供 root-scoped、phase-scoped 的 UI capability。普通 Game SDK 不获得裸 `UIContext*`，也不能在任意
+- **M7-C1c-b3d2 Accepted / Pending implementation**：ADR 0021 接受在 startup transaction 中提供
+  `initialPrimaryWindowMetrics`，再向游戏侧提供 root-scoped、phase-epoch-scoped 的 UI capability。普通 Game SDK 不获得裸 `UIContext*`，也不能在任意
   阶段调用 `createRoot()` 或跨 phase 借用；root ownership、generation 校验和提交点仍由 Runtime/UI owner
-  管理。该提案尚未实现，也没有可见 UI 验收结论。
+  管理。该设计尚未实现，也没有可见 UI 验收结论。
 
 这三步延续了 Carbon 值得学习的事务发布、明确泵送顺序和延迟清理，同时拒绝 `BeOS`/BlueInterface
 式全局或半加载状态。后续只有在 Widget model、paint snapshot/Display List、字体/中文路径与真实

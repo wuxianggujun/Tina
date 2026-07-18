@@ -87,7 +87,7 @@ UINode 裸指针或跨帧 writer。
 descriptor/DisplayList 和 bgfx UI pass 分别在后续 asset/render 切片接入，不能提前把
 Asset/Render 依赖塞回 UI tree/layout core。
 
-最小游戏侧类型：
+UI module 最小基础类型（其中低层 builder/updater 不直接交给普通 Game SDK）：
 
 ```cpp
 namespace Tina::UI {
@@ -103,8 +103,8 @@ private:
 };
 
 class UIRootOwner;       // move-only，销毁时安全注销整棵 root
-class UIRootBuilder;     // 仅 GameStateEnter phase，可创建 root/tree/action
-class UITreeUpdater;     // 仅 UIUpdate phase，绑定 State 已拥有的 root
+class UIRootBuilder;     // UIContext owner-thread 低层 builder；Runtime facade 不直接暴露它
+class UITreeUpdater;     // UIContext owner-thread/root-scoped 低层 updater
 struct UICommittedStructureView; // owner-thread borrowed structure snapshot
 struct UICommittedLayoutView;    // owner-thread borrowed layout snapshot
 struct UICommittedHitView;       // owner-thread borrowed hit/route-ancestry snapshot
@@ -132,35 +132,33 @@ struct UIContextCapacityConfig; // focused public config；由 EngineConfig 持�
 `UINodeId.ownerWindow + generation`，Debug 额外携带 Engine/registry cookie 改善诊断；热点遍历在
 一次校验后只使用 UIContext 内部的紧凑 slot index。generation 回绕的 slot 永久 retire。
 
-目标 Game SDK 伪代码（当前尚不可编译：Game SDK 尚未获得 root builder/updater，Widget 行为也未实现；
-Runtime-private `UIContext` owner/producer 接线不等于这些 public capability 已存在）：
+M7-C1c-b3d2 已接受的 Game SDK 伪代码（当前尚不可编译：facade 代码尚未落地；`TRY(expr)` 仅表示
+失败时立即返回 `Error`。文本内容、listener、Button 默认行为与 `GameStateCommands` 仍属于后续切片）：
 
 ```cpp
-class SettingsState final : public Tina::IGameState {
+class SettingsPanelState final : public Tina::IGameState {
 public:
     Core::Status onEnter(Tina::GameStateEnterContext& context) override {
-        auto& ui = context.primaryWindowUI();
-        root_ = TRY(ui.createRoot());
-        panel_ = TRY(ui.createPanel(root_.id(), PanelDesc::Settings()));
-        volume_ = TRY(ui.createSlider(panel_, SliderDesc{0.0f, 1.0f, 0.01f}));
-        apply_ = TRY(ui.createButton(panel_, u8"应用"));
+        auto rootBuilder = TRY(context.primaryWindowUIRootBuilder());
+        root_ = TRY(rootBuilder.createRoot());
 
-        TRY(ui.setAction(apply_, UIActionKind::Activate, [this] {
-            intent_ = SettingsIntent::Apply;
-        }));
+        auto tree = TRY(rootBuilder.treeUpdater(root_));
+        panel_ = TRY(tree.createPanel(root_.rootNodeId()));
+        label_ = TRY(tree.createLabel(panel_));
+        button_ = TRY(tree.createButton(panel_));
+        TRY(tree.setLayoutStyle(root_.rootNodeId(), settingsRootStyle()));
+        TRY(tree.setLayoutStyle(panel_, settingsPanelStyle()));
+        TRY(tree.setPointerHitPolicy(button_, Tina::UI::UIPointerHitPolicy::Targetable));
         return Core::success();
     }
 
     Core::Status updateUI(Tina::UIUpdateContext& context) override {
-        auto ui = TRY(context.uiTree(root_));
-        TRY(ui.setSliderValue(volume_, model_.masterVolume));
-        return Core::success();
-    }
-
-    Core::Status updateFrame(Tina::FrameUpdateContext& context) override {
-        if (std::exchange(intent_, SettingsIntent::None) == SettingsIntent::Apply) {
-            TRY(context.gameStateCommands().requestPopSelf());
+        auto tree = TRY(context.primaryWindowUITreeUpdater(root_));
+        if (!TRY(tree.isAlive(panel_))) {
+            return Core::failure(Tina::UI::UIErrorCode::InvalidNode,
+                                 "Settings panel no longer exists");
         }
+        TRY(tree.setLayoutStyle(panel_, currentSettingsPanelStyle()));
         return Core::success();
     }
 
@@ -179,15 +177,13 @@ public:
 private:
     Tina::UI::UIRootOwner root_;
     Tina::UI::UINodeId panel_{};
-    Tina::UI::UINodeId volume_{};
-    Tina::UI::UINodeId apply_{};
-    SettingsIntent intent_ = SettingsIntent::None;
-    SettingsModel model_;
+    Tina::UI::UINodeId label_{};
+    Tina::UI::UINodeId button_{};
 };
 ```
 
-UI action 只写 State intent/model；`IGameState::updateFrame()` 再提交 `GameStateCommands`。回调不访问
-全局 Runtime，不直接 push/pop 状态，也不捕获 Phase Context。
+后续 Widget action 只写 State intent/model；`IGameState::updateFrame()` 再提交 `GameStateCommands`。
+回调不访问全局 Runtime，不直接 push/pop 状态，也不捕获 Phase Context 或 UI facade。
 
 Action 是节点拥有的 retained property：`setAction` 原子替换同 kind action，`clearAction`、节点
 删除或 root 注销负责撤销，不返回容易被临时析构的 RAII token。需要观察 Runtime EventBus 的
@@ -391,8 +387,11 @@ framebuffer extent、content scale 与 minimized 标志不替代 logical viewpor
 `PlatformFrameId` 至多尝试一次；窗口与 Context 同时缺席的 Headless 帧成功 no-op，identity 或
 `commitLayout()` 失败会阻断 Render，并保持本帧 attempt 已消费。布局职责没有塞回 owner selection。
 
-M7-C1c-b3d2 仍是 Proposed：Runtime 先从 Platform backend 取得 backend-neutral startup primary-window
-metrics seed，在 `onEnter` 前建立 Context，再只向游戏侧提供 root-scoped、phase-scoped builder/updater。
+M7-C1c-b3d2 已由 ADR 0021 接受但尚未实现：Runtime 先从 Platform backend 取得不 poll、不消费 frame id
+的 backend-neutral startup primary-window metrics seed，在 `onEnter` 前建立 Context，再只向游戏侧提供
+root-scoped、phase-epoch-scoped `PrimaryWindowUIRootBuilder`/`PrimaryWindowUITreeUpdater`。前者只在
+`GameStateEnterContext` 创建 root，后者在 enter/update 中只修改指定 `UIRootOwner` 的 subtree；Runtime
+在回调结束失效 epoch，跨 phase 调用返回 `UIPhaseCapabilityExpired`。
 普通 Game SDK 不获得裸 `UIContext*`，也不能在任意阶段调用 `createRoot()`；当前代码尚未实现该 seed
 或 capability，所以还不能在 `onEnter` 创建 retained root。
 
@@ -628,8 +627,8 @@ commit，不扩大到 Game SDK root、DisplayList、Widget 或可见 UI 门禁�
    生命周期门禁、modules 前销毁，以及 Platform lifecycle dispatch → producer → ActionMapper 接线；
 8. 已完成 M7-C1c-b3d1：focused UI capacity config/validator、EngineConfig pre-factory validation，以及
    `updateUI` 后、Render 前每个 Platform frame 至多一次的 Runtime-private layout commit；
-9. M7-C1c-b3d2 Proposed：补 startup primary-window metrics seed，再向 Game SDK 提供 root-scoped、
-   phase-scoped builder/updater；完成前不开放裸 Context 或任意阶段 root 创建；
+9. M7-C1c-b3d2 按已接受的 ADR 0021 补 startup primary-window metrics seed，再向 Game SDK 提供
+   root-scoped、phase-epoch-scoped builder/updater；完成前不开放裸 Context 或任意阶段 root 创建；
 10. 实现真实 claims，并让 dirty leaf 跳过无关 subtree，输出后端无关 DisplayList；
 11. 完成 PaintCache/text layout + glyph atlas；
 12. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；

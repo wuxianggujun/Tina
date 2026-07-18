@@ -98,7 +98,7 @@ M6 生命周期之后仍未实现：
   Window/Keyboard/Pointer/committed text desktop adapter；M7-C1c-b3b 已补独立 Runtime-private UI routed
   consumption producer，M7-C1c-b3c 已补 primary-window `UIContext` ownership/selection 与 EngineHost
   接线，M7-C1c-b3d1 已补 EngineConfig UI capacities 与 `updateUI` 后、Render 前的 private layout
-  coordinator；startup metrics seed、Game SDK scoped UI access、真实 continuous claims、IMM32、production
+  coordinator；已接受但未实现的 startup metrics seed/Game SDK scoped UI access、真实 continuous claims、IMM32、production
   Gamepad 和连续 axis mapping 仍在后续子切片；
 - 有界 CPU/IO/Main worker、阶段指标与完整 shutdown deadline/fatal-stop；
 - typed render resource handle、Pass Scheduler、World RenderScene/UIDisplayList、Runtime-private
@@ -258,12 +258,12 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   前拒绝。Runtime-private coordinator 在 `updateUI` 成功后、Render submit 前按主窗口 logical extent
   对每个严格递增 `PlatformFrameId` 至多尝试一次 `commitLayout()`；Headless 双缺席成功 no-op，失败阻断
   Render 且消费当前 frame attempt；
-- **M7-C1c-b3d2 Proposed**：为 startup transaction 增加 backend-neutral primary-window metrics seed，
-  再开放 root-scoped、phase-scoped Game SDK builder/updater；不暴露裸 `UIContext*`，也不允许任意阶段
-  `createRoot()`。该提案尚未实现；
+- **M7-C1c-b3d2 Accepted / Pending implementation**：按 ADR 0021 为 startup transaction 增加不 poll、
+  不消费 frame id 的 backend-neutral primary-window metrics seed，再开放 root-scoped、phase-epoch-scoped
+  Game SDK builder/updater；不暴露裸 `UIContext*`，也不允许任意阶段 `createRoot()`；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
   subtree 尚未实现；正式路径虽已接线，但没有 Game SDK root access，无法产生产品 UI；
-- **仍后置**：startup metrics seed、Game SDK scoped UI access、真实 claims、dirty subtree pruning、
+- **仍后置**：b3d2 startup/scoped capability 的代码、真实 claims、dirty subtree pruning、
   持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、text/glyph、
   FreeType 与 bgfx UI pass；
 - 后续继续实现后端无关 Quad/Text/Clip DisplayList、FramePinSink/capacity rollback 和相邻兼容 batching

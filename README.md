@@ -57,7 +57,7 @@ A failed commit blocks render, and the frame attempt remains consumed so the sam
 Input routing still reads the previously committed hit snapshot. This is not a game-facing UI API: the Game SDK
 still cannot create roots or widgets, no DisplayList is built, and the current empty Context therefore produces
 canonical `None` consumption and claims with no visible UI. Startup primary-window metrics and root-scoped,
-phase-scoped Game SDK UI capabilities remain a proposed follow-up, not an implemented contract. Persistent
+phase-epoch-scoped Game SDK UI capabilities are accepted by ADR 0021 but remain pending implementation. Persistent
 Pointer Capture, Focus/Modal, Button default behavior, paint snapshots/DisplayList, dirty-subtree pruning, and nested clipping
 are not implemented yet. IMM32 composition, production gamepad input, Scene, visible Runtime-integrated UI,
 text/widgets, Pass Scheduler, and submission tickets remain later slices.

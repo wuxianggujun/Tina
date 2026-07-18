@@ -126,7 +126,7 @@ owner/identity、严格递增 frame id 和事务失败边界。正式帧在 `upd
 
 当前 Game SDK 尚不能创建 UI root/Widget，Runtime 也不生成 DisplayList，因此正式样例中的空 Context
 仍输出 canonical `None` consumption，producer 的 claims 也仍为 `None`；layout commit 只发布空 snapshot，
-没有可见 UI。startup metrics seed 与 scoped Game SDK access 仍是 Proposed。该 target 直接运行
+没有可见 UI。startup metrics seed 与 scoped Game SDK access 已由 ADR 0021 接受但尚未实现。该 target 直接运行
 GoogleTest，不使用 CTest；这项接线不证明可见 UI 或 UI Render 已完成。
 
 ## Windows vNext GLFW Platform 与 Desktop bgfx

@@ -51,8 +51,8 @@ logical extent 对每个 `PlatformFrameId` 至多尝试一次 `commitLayout()`�
 Context 时是成功 no-op。提交失败会阻断 Render，且本帧 attempt 已消费，不能用同一批 mutation 重放；
 输入路由仍只读取上一份 committed hit snapshot。该切片没有扩大 Game SDK：游戏仍不能创建 UI root/Widget，
 Runtime 不生成 DisplayList，因此当前空 Context 的 consumption 与 claims 都是 canonical `None`，也没有
-可见 UI。startup primary-window metrics seed 与 root-scoped、phase-scoped Game SDK UI capability 仍是
-后续 Proposed 设计，并未实现。
+可见 UI。startup primary-window metrics seed 与 root-scoped、phase-epoch-scoped Game SDK UI capability 已由
+[ADR 0021](docs/adr/0021-runtime-ui-startup-capability.md) 接受，但 M7-C1c-b3d2 代码尚未实现。
 当前仍没有持久 Pointer Capture、Focus/Modal、Button 默认行为、paint snapshot/DisplayList、
 dirty subtree pruning 或 nested clip。production Gamepad、Windows IMM32 composition、Scene、文本/Widget、
 Pass Scheduler、submission ticket/drain 与可见中文 UI 分别放在后续切片。
