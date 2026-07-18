@@ -21,5 +21,6 @@ inline constexpr Core::ErrorCode DisplayListBuildNotOpen{Core::ErrorDomain::Rend
 inline constexpr Core::ErrorCode DisplayListCapacityExceeded{Core::ErrorDomain::Render, 15};
 inline constexpr Core::ErrorCode InvalidPremultipliedColor{Core::ErrorDomain::Render, 16};
 inline constexpr Core::ErrorCode InvalidDrawCommand{Core::ErrorDomain::Render, 17};
+inline constexpr Core::ErrorCode TransientBufferCapacityExceeded{Core::ErrorDomain::Render, 18};
 
 } // namespace Tina::Render::RenderErrorCode

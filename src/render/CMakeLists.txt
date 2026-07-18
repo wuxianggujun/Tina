@@ -24,6 +24,10 @@ if(TINA_BUILD_RENDER_BGFX)
         bgfx/BgfxRenderDevice.hpp
         bgfx/BgfxSurfaceFramePlanner.cpp
         bgfx/BgfxSurfaceFramePlanner.hpp
+        bgfx/BgfxUIDisplayGeometry.cpp
+        bgfx/BgfxUIDisplayGeometry.hpp
+        bgfx/BgfxUISolidQuadShader.cpp
+        bgfx/BgfxUISolidQuadShader.hpp
     )
     add_library(Tina::RenderBgfx ALIAS tina_render_bgfx)
 
@@ -39,9 +43,19 @@ if(TINA_BUILD_RENDER_BGFX)
             Tina::ProjectOptions
             Tina::WindowSurfaceIntegration
             bgfx
+            bx
     )
     set_target_properties(tina_render_bgfx PROPERTIES
         CXX_EXTENSIONS OFF
         EXPORT_NAME RenderBgfx
+    )
+
+    include(TinaBgfxEmbeddedShaders)
+    tina_add_bgfx_embedded_shader(
+        tina_render_bgfx
+        tina_ui_solid_quad
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_ui_solid_quad.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_ui_solid_quad.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_ui_solid_quad.def.sc"
     )
 endif()

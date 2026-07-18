@@ -1,6 +1,7 @@
 add_executable(tina_render_bgfx_tests
     BgfxRenderDeviceFactoryTests.cpp
     BgfxSurfaceFramePlannerTests.cpp
+    BgfxUIDisplayGeometryTests.cpp
 )
 
 target_compile_features(tina_render_bgfx_tests PRIVATE cxx_std_23)
