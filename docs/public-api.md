@@ -20,8 +20,10 @@
 > `PrimaryWindowUITreeUpdater::setBoxPaint()` 进入 Game SDK facade，并让 Desktop 样例显示4个
 > retained SolidFill panel。后续兼容扩展又加入 root-scoped
 > `PrimaryWindowUITreeUpdater::addRoutedPointerListener()`，并由 EngineHost 端到端门禁证明 listener
-> 在 ActionMapper 前执行、claim-only 可抑制同帧 Gameplay Action。Key/Gamepad/axis claim、完整状态栈、worker、
-> Scene/Asset/Audio、文本/Glyph/Widget 完整 UI、
+> 在 ActionMapper 前执行、claim-only 可抑制同帧 Gameplay Action。后续 Button default action 切片已加入
+> `PrimaryPointerId + PointerButton::Primary` 的 pressed/activation、`preventDefaultAction()` 与
+> root-scoped `setButtonAction()`/`clearButtonAction()`/`isButtonPressed()` facade。Key/Gamepad/axis claim、
+> 完整状态栈、worker、Scene/Asset/Audio、文本/Glyph/Widget 完整 UI、
 > production Gamepad、完整 DPI 与
 > Windows IMM32 仍是后续契约。
 
@@ -57,8 +59,9 @@ Platform 生命周期订阅、Action Snapshot、最小 Phase Context，以及受
 hit/route 与 SolidFill committed paint，`Tina::Render` 已实现后端无关 SolidQuad DisplayList，独立
 integration target 已闭合二者的坐标转换；D0 已把 primary-window DisplayList 作为 submit-call-local
 borrow 放入 `RenderFrame`，D1 已由私有 bgfx backend 消费 SolidQuad，D2 已让 Game SDK facade
-暴露 `setBoxPaint()` 并跑通 Desktop 4-panel 可见样例。当前仍没有 owning frame packet、FramePin、
-Text/Glyph、Label 文本或 Button 默认行为。表中
+暴露 `setBoxPaint()` 并跑通 Desktop 4-panel 可见样例；后续 Button default action 切片又暴露
+`setButtonAction()`/`clearButtonAction()`/`isButtonPressed()` 并接入 primary Pointer activation。当前仍没有
+owning frame packet、FramePin、Text/Glyph、Label 文本、Button Keyboard/Gamepad activation 或完整 Widget facade。表中
 World/Asset/UI Widget、`GameStateCommands`、typed render handle/descriptor 和 Pass Scheduler 均未实现。
 
 完整 Game SDK 不提供 RenderDevice、GPU resource handle、native window/surface 或第三方 factory。
@@ -533,10 +536,11 @@ public:
 `UICommittedLayoutView` 是 owner-thread borrowed view，携带对应 structure/layout revision；在
 下一次成功发布新 layout 或 `UIContext` 析构后失效。它只发布 logical local/world rect、effective
 clip、effective visibility 与稳定 ordinal，不是跨线程、跨 commit 的 owning snapshot，也不证明
-Image/Text/Glyph PaintCache、Widget 默认行为或 default action 已实现。phase-driven layout commit
+Image/Text/Glyph PaintCache 或完整 Widget 行为已实现。phase-driven layout commit
 已由 b3d1 Runtime-private coordinator 接入；b3d2 又允许 Game State 通过 scoped facade 创建 root 和基础
 retained node；D0 会从已发布 paint 构建 submit-call-local DisplayList，D1/D2 已跑通 SolidFill panel
-可见路径，但它仍只覆盖 colored quad，不覆盖文本或 Widget 行为。
+可见路径，后续 Button default action 已覆盖 primary Pointer activation，但它仍只覆盖 colored quad 与
+窄按钮交互，不覆盖文本或完整 Widget 行为。
 当前 `effectiveClip` 仅表示 `viewport ∩ worldRect`；祖先 clip policy 与 hit/paint clip chain 尚未实现。
 
 `UICommittedHitView` 同样是 owner-thread borrowed 双缓冲 view。它保存所有 effective-visible
@@ -561,8 +565,8 @@ owner-thread mutation/route 前 drain，context 销毁后 reset 仍安全。低�
 绑定 root subtree 内的节点；跨 root/stale generation 失败不占 listener slot，也不推进 high-water。
 fixed-inline callback 的 move/destructor 可以执行用户代码，因此最终 move 后会重新校验 root、node generation、
 subtree 与 registration serial；若重入释放 root/节点则整次注册回滚。callback operation 期间销毁 Context
-触发生命周期 terminate，不能继续潜在 UAF。当前没有持久 Pointer Capture、Focus/Modal、
-Button interaction、dirty subtree pruning、nested clip 或 Widget default action。
+触发生命周期 terminate，不能继续潜在 UAF。当前没有持久 Pointer Capture、Focus/Modal、dirty subtree pruning、
+nested clip、Button Keyboard/Gamepad activation 或完整 Widget default behavior。
 `UIContext` 的 mutation、route 与销毁只允许 owner thread；route callback/callback cleanup 内销毁或
 非 owner-thread 销毁会触发生命周期硬门禁，而不是继续执行潜在 UAF。
 
@@ -657,8 +661,9 @@ shutdown 幂等且保持 owner-thread 契约。
 owner 只负责 identity/lifetime，不调用 `commitLayout()`，因此 input route 绝不会隐式布局。正式帧顺序为
 Platform lifecycle dispatch → owner selection → producer route(previous committed hit snapshot) →
 ActionMapper。当前 producer 仍只有 Move/Button/Wheel raw ordinal consumption；b3e 后 primary Pointer Button
-claim 已接入，Key/Gamepad/axis claim 仍后置。Game SDK 不获得裸 `UIContext*`，完整 Widget 仍需要后续
-text/glyph/button 行为切片。
+claim 已接入，后续 Button default action 已在同一 producer 阶段合并 consumption/claim；Key/Gamepad/axis
+claim 仍后置。Game SDK 不获得裸 `UIContext*`，完整 Widget 仍需要后续 text/glyph、Keyboard/Gamepad
+activation 与 theme/disabled 行为切片。
 
 ### M7-C1c-b3d1 公开容量配置与 Runtime-private layout coordinator
 
@@ -678,7 +683,7 @@ window identity 不一致或 `commitLayout()` 失败都会阻断 Render，并保
 该 b3d1 切片没有增加 root builder/updater、Widget、DisplayList 或可见 UI；b3d2 后来补了 scoped
 root/updater，后续切片补了低层 SolidFill DisplayList bridge，D0 又补了 Runtime submit-call-local
 DisplayList handoff，D1/D2 又补了私有 bgfx SolidQuad pass、Game SDK box-paint setter 与 Desktop
-4-panel 可见样例；Widget 默认行为、文本/glyph 与 owning packet 仍后置。
+4-panel 可见样例；Button default action 又补了 primary Pointer 窄交互。完整 Widget 行为、文本/glyph 与 owning packet 仍后置。
 普通游戏不会获得裸 `UIContext*`，也不能在任意阶段调用 `createRoot()`。
 
 ### M7-C1c-b3d2 启动与 Game SDK capability
@@ -714,6 +719,11 @@ public:
     addRoutedPointerListener(
         UI::UIRoutedPointerListenerDesc descriptor,
         UI::UIRoutedPointerCallback callback);
+    [[nodiscard]] Core::Status setButtonAction(
+        UI::UINodeId button,
+        UI::UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status clearButtonAction(UI::UINodeId button);
+    [[nodiscard]] Core::Result<bool> isButtonPressed(UI::UINodeId button) const;
     [[nodiscard]] Core::Status destroy(UI::UINodeId node);
 };
 
@@ -732,7 +742,7 @@ public:
 };
 ```
 
-ADR 0011 已冻结但在本设计提交后才实施的 Button Primary Pointer action 扩展如下。命名明确表达
+ADR 0011 已冻结并在后续切片实现的 Button Primary Pointer action 扩展如下。命名明确表达
 Button 语义，不把它伪装成通用 Runtime/Game action，也不让游戏代码处理 backend Pointer 对象：
 
 ```cpp
@@ -803,9 +813,9 @@ structure/layout/hit/paint snapshot。
 listener side effect。ActionMapper 先应用 claim 再映射 transition：已 active 的 Gameplay source 被取消并
 抑制到真实 Up；同帧 ButtonDown 即使没有被 consume，只要被 claim 也不会激活 Gameplay。
 
-该切片只覆盖 primary Pointer Button。Key、Gamepad button/axis、持久 Pointer Capture、Focus/Modal、
-Button default action、文本/Glyph 与 Widget 行为仍未实现；D0 的 Runtime DisplayList handoff
-只消费已有 paint snapshot，D2 的 `setBoxPaint()` 只提供 SolidFill authoring。
+该 b3e 切片只覆盖 primary Pointer Button claim。Key、Gamepad button/axis、持久 Pointer Capture、Focus/Modal
+仍未实现；后续 Button default action 已覆盖 primary Pointer activation，但文本/Glyph 与完整 Widget 行为仍未实现。
+D0 的 Runtime DisplayList handoff 只消费已有 paint snapshot，D2 的 `setBoxPaint()` 只提供 SolidFill authoring。
 
 ## EngineConfig
 
@@ -957,7 +967,7 @@ M6-A/M7-A Headless 内核与首个 GLFW adapter 已验证：
 forbidden-token/dependency-closure、production Gamepad、完整 DPI/Windows IMM32，以及只使用
 Game SDK 运行 UI/2D/3D 产品样例。`Desktop::CreateEngine`、bgfx smoke、root-scoped
 Game SDK UI root/update facade、box-paint setter、私有 SolidQuad UI pass 与 Desktop 4-panel 可见样例已实现，
-但不代表正式 SDK、完整 Render pass、Text/Glyph、Label 文本、Button 默认行为或产品级 UI/2D/3D 样例已完成。
+但不代表正式 SDK、完整 Render pass、Text/Glyph、Label 文本、Button Keyboard/Gamepad activation 或产品级 UI/2D/3D 样例已完成。
 M7-C1b/C1c-a/C1c-b1/C1c-b2 已覆盖50,000节点
 非递归 layout/hit snapshot、连续300次无变化 commit 的0 layout pass/0新增 UI PMR allocation，以及
 15项 committed hit snapshot、5项 point query、19项 synthetic route 与3项 tree-updater 门禁；
@@ -972,11 +982,13 @@ Release 300帧通过。Linux GCC 13.4 与 Linux Clang 22 sanitizer 仍保留
 paint/DisplayList/bridge 门禁：基础205/205、UI92/92、Runtime→UI46/46、bridge12/12与Null样例300帧，
 Clang 无 sanitizer 诊断；D1/D2 的 bgfx SolidQuad pass、Game SDK `setBoxPaint()` facade 与可见
 Desktop 4-panel 样例尚未在 Linux 图重跑。
-现有测试尚未覆盖 dirty subtree pruning、Focus/Capture/Modal、Button 默认行为、Image/Text/Glyph PaintCache、
-Runtime packet、nested clip、Widget 默认行为或文本 Widget。M7-C1c-b3b 的 producer
+现有测试尚未覆盖 dirty subtree pruning、Focus/Capture/Modal、Button Keyboard/Gamepad activation、
+Disabled/theme 视觉、Image/Text/Glyph PaintCache、Runtime packet、nested clip、完整 Widget 默认行为或文本 Widget。M7-C1c-b3b 的 producer
 只补齐 Move/Button/Wheel→consumption 私有桥，M7-C1c-b3c 只补齐 primary-window Context 生命周期与
 EngineHost 顺序接线，M7-C1c-b3d1 只补齐容量配置与 Runtime-private layout commit；b3d2 只补齐
 startup bind 与 root-scoped Game SDK UI facade；b3e 只补齐 held primary Pointer Button claim bridge。
+Button default action 只补齐 primary Pointer 窄 pressed/activation 与 retained action property。
 SolidFill paint、Render builder、integration bridge、D0 Runtime submit-call-local handoff、D1 bgfx pass 与
-D2 visible panels 也不扩大到 Widget、owning packet、Text/Glyph 或产品 UI 结论。Windows Debug/Release 的
-D2 独立 Runtime→UI 门禁均为53/53；Linux GCC 与 Clang sanitizer 的 b3e 独立 Runtime→UI 门禁仍为46/46。
+D2 visible panels 也不扩大到完整 Widget、owning packet、Text/Glyph 或产品 UI 结论。Windows Debug 本轮
+Button default action 已通过基础208/208、UI109/109、Runtime→UI60/60与 Null 300帧；Windows Release 的
+D2 独立 Runtime→UI 门禁为53/53，Linux GCC 与 Clang sanitizer 的 b3e 独立 Runtime→UI 门禁仍为46/46。

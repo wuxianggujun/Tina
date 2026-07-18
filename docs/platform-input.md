@@ -211,9 +211,9 @@ M7-C1c-b3d2 把 primary-window UI owner 绑定提前到 startup transaction：Pl
 绑定后窗口消失、换代或 revision 后退以 `LifecycleInvariantViolation` 终止本次 run。最小化、metrics 或
 content scale 变化不重绑，Context 在 Render → Task → Platform → Clock modules 之前销毁。
 owner selection 不调用 `commitLayout()`，hit-test/route 不会隐式触发布局。Game SDK 已能在受限 phase 内创建/
-更新 retained root，但当前产品帧仍没有 Widget 默认行为、Focus/Capture/Modal 或 paint authoring。D0 已在
-paint/layout commit 后构建并借用提交 primary-window DisplayList；在缺少 Game SDK paint setter 和 bgfx UI
-pass 时，当前产品列表仍为空且不可见。
+更新 retained root、author SolidFill paint，并设置 primary Pointer Button action；当前产品帧仍没有
+完整 Widget 默认行为、Focus/Capture/Modal、Label 文本或资源型 UI。D0 已在 paint/layout commit 后构建并
+借用提交 primary-window DisplayList；D1/D2 已补 Game SDK paint setter 和 bgfx SolidQuad UI pass。
 
 M7-A Action Mapper 的 claim consumer 能识别 Key、Primary Pointer Button 与 Gamepad Button，但当前
 UI producer 只生成 primary Pointer Button claim。`GamepadAxisControlIdentity` 和 Pointer continuous

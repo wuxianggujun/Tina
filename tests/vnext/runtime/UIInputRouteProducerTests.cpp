@@ -13,6 +13,7 @@
 #include <limits>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <utility>
 #include <vector>
@@ -599,7 +600,7 @@ TEST_F(UIInputRouteProducerTest, ConsumedBitsCoverOrdinalsSixtyThreeAndSixtyFour
     EXPECT_TRUE(secondOutput->consumption.consumedOrdinalWords.empty());
 }
 
-TEST_F(UIInputRouteProducerTest, NoHitAndStoppedEventsDoNotConsume)
+TEST_F(UIInputRouteProducerTest, NoHitDoesNotConsumeAndStoppedButtonDefaultStillConsumes)
 {
     auto producer = createProducer();
     RouteTree tree = createRouteTree(window);
@@ -643,7 +644,7 @@ TEST_F(UIInputRouteProducerTest, NoHitAndStoppedEventsDoNotConsume)
     auto stoppedOutput = producer->produce(tree.context.get(), *stoppedFrame);
     ASSERT_TRUE(stoppedOutput.has_value()) << (stoppedOutput ? "" : stoppedOutput.error().message);
     EXPECT_EQ(callbackCount, 1U);
-    EXPECT_FALSE(stoppedOutput->consumption.isConsumed(0));
+    EXPECT_TRUE(stoppedOutput->consumption.isConsumed(0));
 }
 
 TEST_F(UIInputRouteProducerTest, OwnerMismatchFailsBeforeAnyCallback)
@@ -920,7 +921,7 @@ TEST_F(UIInputRouteProducerTest, FloatUnrepresentablePointerValueFailsBeforeAnyC
     EXPECT_EQ(callbackCount, 0U);
 }
 
-TEST_F(UIInputRouteProducerTest, ActionMapperSuppressesConsumedDownUntilTrueUpThenRestoresUnconsumedDown)
+TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpThenRestoresUnconsumedDown)
 {
     auto producer = createProducer();
     auto mapper = createPointerMapper();
@@ -928,11 +929,6 @@ TEST_F(UIInputRouteProducerTest, ActionMapperSuppressesConsumedDownUntilTrueUpTh
     ASSERT_NE(producer, nullptr);
     ASSERT_NE(mapper, nullptr);
     ASSERT_NE(tree.context, nullptr);
-    auto consumeToken = addListener(
-        *tree.context,
-        {.node = tree.target, .kind = UI::UIRoutedPointerEventKind::ButtonDown, .phases = UI::UIEventPhaseMask::Target},
-        UI::UIRoutedPointerCallback{[](UI::UIRoutedPointerEvent& event) noexcept { event.consumeInputTransition(); }});
-    ASSERT_TRUE(consumeToken);
 
     auto consumedDown =
         buildFrame(*builder, window,
@@ -1093,6 +1089,7 @@ TEST_F(UIInputRouteProducerTest, PointerClaimInterceptsInitialDownWithoutTransit
          .kind = UI::UIRoutedPointerEventKind::ButtonDown,
          .phases = UI::UIEventPhaseMask::Target},
         UI::UIRoutedPointerCallback{[](UI::UIRoutedPointerEvent& event) noexcept {
+            event.preventDefaultAction();
             EXPECT_TRUE(event.claimPointerButton(Platform::PointerButton::Primary));
         }});
     ASSERT_TRUE(claimToken);
@@ -1117,6 +1114,138 @@ TEST_F(UIInputRouteProducerTest, PointerClaimInterceptsInitialDownWithoutTransit
     ASSERT_TRUE(suppressed.has_value()) << (suppressed ? "" : suppressed.error().message);
     EXPECT_TRUE(suppressed->transitions.empty());
     EXPECT_FALSE(suppressed->isHeld(PointerAction));
+}
+
+TEST_F(UIInputRouteProducerTest, CancelAndCoveringResetClearButtonStateWithoutActivation)
+{
+    auto producer = createProducer();
+    RouteTree tree = createRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+
+    usize activationCount = 0;
+    expectOk(tree.updater.setButtonAction(
+        tree.target,
+        UI::UIButtonActionCallback{
+            [&activationCount](const UI::UIButtonActionEvent&) noexcept {
+                ++activationCount;
+            }}));
+
+    const auto routeDown = [&](u64 frameValue) {
+        auto down = buildFrame(
+            *builder,
+            window,
+            {
+                .frameId = {frameValue},
+                .transitions = {
+                    pointerButton(
+                        window,
+                        Platform::DigitalTransition::Down,
+                        10.0,
+                        10.0)},
+                .heldPointerButtons = {Platform::PointerButton::Primary},
+                .pointerX = 10.0,
+                .pointerY = 10.0,
+            });
+        EXPECT_TRUE(down.has_value())
+            << (down ? "" : down.error().message);
+        if (!down) {
+            return;
+        }
+        auto output = producer->produce(tree.context.get(), *down);
+        EXPECT_TRUE(output.has_value())
+            << (output ? "" : output.error().message);
+        if (output) {
+            EXPECT_TRUE(output->consumption.isConsumed(0));
+        }
+        auto pressed = tree.updater.isButtonPressed(tree.target);
+        EXPECT_TRUE(pressed.has_value())
+            << (pressed ? "" : pressed.error().message);
+        if (pressed) {
+            EXPECT_TRUE(*pressed);
+        }
+    };
+
+    const auto routeUpWithoutActivation = [&](u64 frameValue) {
+        auto up = buildFrame(
+            *builder,
+            window,
+            {
+                .frameId = {frameValue},
+                .transitions = {
+                    pointerButton(
+                        window,
+                        Platform::DigitalTransition::Up,
+                        10.0,
+                        10.0)},
+                .pointerX = 10.0,
+                .pointerY = 10.0,
+            });
+        EXPECT_TRUE(up.has_value()) << (up ? "" : up.error().message);
+        if (!up) {
+            return;
+        }
+        auto output = producer->produce(tree.context.get(), *up);
+        EXPECT_TRUE(output.has_value())
+            << (output ? "" : output.error().message);
+        if (output) {
+            EXPECT_FALSE(output->consumption.isConsumed(0));
+        }
+        EXPECT_EQ(activationCount, 0U);
+    };
+
+    routeDown(50);
+    auto cancel = buildFrame(
+        *builder,
+        window,
+        {
+            .frameId = {51},
+            .transitions = {
+                Platform::InputCancelTransition{
+                    .routedWindow = window,
+                    .reason = Platform::InputCancelReason::FocusLost,
+                }},
+            .pointerX = 10.0,
+            .pointerY = 10.0,
+        });
+    ASSERT_TRUE(cancel.has_value())
+        << (cancel ? "" : cancel.error().message);
+    auto cancelOutput = producer->produce(tree.context.get(), *cancel);
+    ASSERT_TRUE(cancelOutput.has_value())
+        << (cancelOutput ? "" : cancelOutput.error().message);
+    EXPECT_FALSE(cancelOutput->consumption.isConsumed(0));
+    auto afterCancel = tree.updater.isButtonPressed(tree.target);
+    ASSERT_TRUE(afterCancel.has_value())
+        << (afterCancel ? "" : afterCancel.error().message);
+    EXPECT_FALSE(*afterCancel);
+    EXPECT_EQ(activationCount, 0U);
+    routeUpWithoutActivation(52);
+
+    routeDown(53);
+    auto reset = buildFrame(
+        *builder,
+        window,
+        {
+            .frameId = {54},
+            .transitions = {
+                Platform::InputStreamReset{
+                    .routedWindow = std::nullopt,
+                    .reason = Platform::InputResetReason::BackendRecovery,
+                }},
+            .pointerX = 10.0,
+            .pointerY = 10.0,
+        });
+    ASSERT_TRUE(reset.has_value()) << (reset ? "" : reset.error().message);
+    auto resetOutput = producer->produce(tree.context.get(), *reset);
+    ASSERT_TRUE(resetOutput.has_value())
+        << (resetOutput ? "" : resetOutput.error().message);
+    EXPECT_FALSE(resetOutput->consumption.isConsumed(0));
+    auto afterReset = tree.updater.isButtonPressed(tree.target);
+    ASSERT_TRUE(afterReset.has_value())
+        << (afterReset ? "" : afterReset.error().message);
+    EXPECT_FALSE(*afterReset);
+    EXPECT_EQ(activationCount, 0U);
+    routeUpWithoutActivation(55);
 }
 
 } // namespace

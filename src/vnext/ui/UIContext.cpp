@@ -71,6 +71,7 @@ struct NormalizedCapacityConfig final {
     usize paintSnapshotCapacity = 0;
     usize routePathCapacity = 0;
     usize routedPointerListenerCapacity = 0;
+    usize buttonActionCapacity = 0;
 };
 
 inline constexpr u32 InvalidRoutedPointerListenerIndex =
@@ -90,6 +91,34 @@ struct RoutedPointerListenerRecord final {
 };
 
 static_assert(std::is_nothrow_destructible_v<RoutedPointerListenerRecord>);
+
+inline constexpr u32 InvalidButtonActionIndex =
+    (std::numeric_limits<u32>::max)();
+
+struct ButtonActionRecord final {
+    UINodeId node{};
+    UIButtonActionCallback callback{};
+    u32 generation = 0;
+    u32 nextFreeIndex = InvalidButtonActionIndex;
+    u64 registrationSerial = 0;
+    bool active = false;
+    bool queuedForReclaim = false;
+    bool invoking = false;
+};
+
+static_assert(std::is_nothrow_destructible_v<ButtonActionRecord>);
+
+struct ButtonActionInvocationCandidate final {
+    UINodeId button{};
+    u32 actionIndex = InvalidButtonActionIndex;
+    u32 generation = 0;
+
+    [[nodiscard]] bool hasValue() const noexcept
+    {
+        return button.hasValue() && actionIndex != InvalidButtonActionIndex
+            && generation != 0;
+    }
+};
 
 struct NodeRecord final {
     u32 parentIndex = InvalidNodeIndex;
@@ -447,6 +476,9 @@ struct ResolvedLength final {
         config.routedPointerListenerCapacity == 0
         ? config.nodeCapacity
         : config.routedPointerListenerCapacity;
+    const usize buttonActionCapacity = config.buttonActionCapacity == 0
+        ? config.nodeCapacity
+        : config.buttonActionCapacity;
     return NormalizedCapacityConfig{
         .nodeCapacity = config.nodeCapacity,
         .rootCapacity = config.rootCapacity,
@@ -456,6 +488,7 @@ struct ResolvedLength final {
         .paintSnapshotCapacity = paintSnapshotCapacity,
         .routePathCapacity = routePathCapacity,
         .routedPointerListenerCapacity = routedPointerListenerCapacity,
+        .buttonActionCapacity = buttonActionCapacity,
     };
 }
 
@@ -543,6 +576,10 @@ struct UIContext::Impl final {
     std::pmr::vector<RoutedPointerListenerRecord> routedPointerListeners;
     std::pmr::vector<u32> routePathScratch;
     std::pmr::vector<u32> inactiveRoutedPointerListenerIndices;
+    std::pmr::vector<u32> buttonActionIndexByNodeIndex;
+    std::pmr::vector<u64> buttonActionClearRouteSerialByNodeIndex;
+    std::pmr::vector<ButtonActionRecord> buttonActions;
+    std::pmr::vector<u32> inactiveButtonActionIndices;
     std::array<std::pmr::vector<UICommittedNodeEntry>, 2> committedBuffers;
     std::array<std::pmr::vector<UICommittedLayoutEntry>, 2> committedLayoutBuffers;
     std::array<std::pmr::vector<UICommittedHitEntry>, 2> committedHitBuffers;
@@ -588,6 +625,15 @@ struct UIContext::Impl final {
     usize routeDispatchDepth = 0;
     usize listenerCallbackOperationDepth = 0;
     bool reclaimingInactiveRoutedPointerListeners = false;
+    u32 freeButtonActionHead = InvalidButtonActionIndex;
+    usize activeButtonActionCount = 0;
+    usize buttonActionHighWater = 0;
+    u64 buttonActionRegistrationSerial = 0;
+    u64 buttonRouteSerial = 0;
+    usize buttonActionCallbackOperationDepth = 0;
+    bool reclaimingInactiveButtonActions = false;
+    UINodeId armedPrimaryButton{};
+    bool armedPrimaryButtonPressed = false;
 
     Impl(
         Platform::WindowId owner,
@@ -617,6 +663,10 @@ struct UIContext::Impl final {
           routedPointerListeners(&resource),
           routePathScratch(&resource),
           inactiveRoutedPointerListenerIndices(&resource),
+          buttonActionIndexByNodeIndex(&resource),
+          buttonActionClearRouteSerialByNodeIndex(&resource),
+          buttonActions(&resource),
+          inactiveButtonActionIndices(&resource),
           committedBuffers{
               std::pmr::vector<UICommittedNodeEntry>(&resource),
               std::pmr::vector<UICommittedNodeEntry>(&resource)},
@@ -658,6 +708,7 @@ struct UIContext::Impl final {
             .paintSnapshotCapacity = normalized.paintSnapshotCapacity,
             .routePathCapacity = normalized.routePathCapacity,
             .routedPointerListenerCapacity = normalized.routedPointerListenerCapacity,
+            .buttonActionCapacity = normalized.buttonActionCapacity,
         };
 
         auto impl = std::unique_ptr<Impl>(new Impl(
@@ -706,6 +757,26 @@ struct UIContext::Impl final {
         impl->routePathScratch.reserve(normalized.routePathCapacity);
         impl->inactiveRoutedPointerListenerIndices.reserve(
             normalized.routedPointerListenerCapacity);
+        impl->buttonActionIndexByNodeIndex.resize(
+            normalized.nodeCapacity,
+            InvalidButtonActionIndex);
+        impl->buttonActionClearRouteSerialByNodeIndex.resize(
+            normalized.nodeCapacity,
+            0);
+        const usize buttonActionStorageCapacity = normalized.buttonActionCapacity + 1;
+        impl->buttonActions.resize(buttonActionStorageCapacity);
+        for (usize actionIndex = 0;
+             actionIndex < buttonActionStorageCapacity;
+             ++actionIndex) {
+            ButtonActionRecord& action = impl->buttonActions[actionIndex];
+            action.nextFreeIndex = actionIndex + 1 < buttonActionStorageCapacity
+                ? static_cast<u32>(actionIndex + 1)
+                : InvalidButtonActionIndex;
+        }
+        impl->freeButtonActionHead = buttonActionStorageCapacity == 0
+            ? InvalidButtonActionIndex
+            : 0;
+        impl->inactiveButtonActionIndices.reserve(buttonActionStorageCapacity);
         impl->committedBuffers[0].reserve(normalized.nodeCapacity);
         impl->committedBuffers[1].reserve(normalized.nodeCapacity);
         impl->committedLayoutBuffers[0].reserve(normalized.layoutSnapshotCapacity);
@@ -1870,6 +1941,200 @@ struct UIContext::Impl final {
             && nodes.contains(node.storageId());
     }
 
+    [[nodiscard]] Core::Result<NodeRecord*> resolveButton(UINodeId button)
+    {
+        auto nodeResult = resolveNode(button);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != UIWidgetKind::Button) {
+            return fail(
+                UIErrorCode::InvalidButtonAction,
+                "UI Button action requires a Button node");
+        }
+        return *nodeResult;
+    }
+
+    void clearArmedPrimaryButton() noexcept
+    {
+        armedPrimaryButton = {};
+        armedPrimaryButtonPressed = false;
+    }
+
+    void recycleButtonAction(u32 actionIndex) noexcept
+    {
+        if (actionIndex >= buttonActions.size()) {
+            return;
+        }
+        ButtonActionRecord& action = buttonActions[actionIndex];
+        if (action.node.hasValue()
+            && action.node.index() < buttonActionIndexByNodeIndex.size()
+            && buttonActionIndexByNodeIndex[action.node.index()] == actionIndex) {
+            buttonActionIndexByNodeIndex[action.node.index()] = InvalidButtonActionIndex;
+        }
+
+        action.node = {};
+        action.registrationSerial = 0;
+        action.active = false;
+        action.queuedForReclaim = false;
+        action.invoking = false;
+        action.nextFreeIndex = InvalidButtonActionIndex;
+
+        ++buttonActionCallbackOperationDepth;
+        auto callbackOperation = Core::makeScopeExit([this]() noexcept {
+            --buttonActionCallbackOperationDepth;
+        });
+        UIButtonActionCallback detachedCallback(std::move(action.callback));
+
+        action.nextFreeIndex = freeButtonActionHead;
+        freeButtonActionHead = actionIndex;
+        detachedCallback.reset();
+    }
+
+    void reclaimInactiveButtonActions() noexcept
+    {
+        if (routeDispatchDepth != 0
+            || buttonActionCallbackOperationDepth != 0
+            || reclaimingInactiveButtonActions) {
+            return;
+        }
+
+        reclaimingInactiveButtonActions = true;
+        auto reclaimGuard = Core::makeScopeExit([this]() noexcept {
+            reclaimingInactiveButtonActions = false;
+        });
+        while (!inactiveButtonActionIndices.empty()) {
+            const u32 actionIndex = inactiveButtonActionIndices.back();
+            inactiveButtonActionIndices.pop_back();
+            if (actionIndex >= buttonActions.size()) {
+                continue;
+            }
+            ButtonActionRecord& action = buttonActions[actionIndex];
+            action.queuedForReclaim = false;
+            if (!action.active && !action.invoking && action.node.hasValue()) {
+                recycleButtonAction(actionIndex);
+            }
+        }
+    }
+
+    void deactivateButtonAction(u32 actionIndex) noexcept
+    {
+        if (actionIndex >= buttonActions.size()) {
+            return;
+        }
+        ButtonActionRecord& action = buttonActions[actionIndex];
+        if (!action.node.hasValue()) {
+            return;
+        }
+        if (action.node.index() < buttonActionIndexByNodeIndex.size()
+            && buttonActionIndexByNodeIndex[action.node.index()] == actionIndex) {
+            buttonActionIndexByNodeIndex[action.node.index()] = InvalidButtonActionIndex;
+        }
+        if (action.active) {
+            action.active = false;
+            if (activeButtonActionCount > 0) {
+                --activeButtonActionCount;
+            }
+        }
+        if (routeDispatchDepth != 0
+            || buttonActionCallbackOperationDepth != 0
+            || action.invoking
+            || reclaimingInactiveButtonActions) {
+            if (!action.queuedForReclaim) {
+                action.queuedForReclaim = true;
+                inactiveButtonActionIndices.push_back(actionIndex);
+            }
+            return;
+        }
+        recycleButtonAction(actionIndex);
+        reclaimInactiveButtonActions();
+    }
+
+    void deactivateButtonActionForNode(u32 nodeIndex) noexcept
+    {
+        if (nodeIndex >= buttonActionIndexByNodeIndex.size()) {
+            return;
+        }
+        const UINodeId node = idForIndex(nodeIndex);
+        if (armedPrimaryButton == node) {
+            clearArmedPrimaryButton();
+        }
+        const u32 actionIndex = buttonActionIndexByNodeIndex[nodeIndex];
+        buttonActionIndexByNodeIndex[nodeIndex] = InvalidButtonActionIndex;
+        if (actionIndex != InvalidButtonActionIndex) {
+            deactivateButtonAction(actionIndex);
+        }
+    }
+
+    [[nodiscard]] Core::Status rollbackButtonActionRegistration(
+        u32 actionIndex,
+        Core::Error error)
+    {
+        deactivateButtonAction(actionIndex);
+        reclaimInactiveButtonActions();
+        return Core::failure(std::move(error));
+    }
+
+    [[nodiscard]] ButtonActionInvocationCandidate captureButtonAction(
+        UINodeId button,
+        u64 registrationSerialBoundary) const noexcept
+    {
+        if (!contains(button) || button.index() >= buttonActionIndexByNodeIndex.size()) {
+            return {};
+        }
+        const u32 actionIndex = buttonActionIndexByNodeIndex[button.index()];
+        if (actionIndex >= buttonActions.size()) {
+            return {};
+        }
+        const ButtonActionRecord& action = buttonActions[actionIndex];
+        if (!action.active
+            || action.node != button
+            || action.registrationSerial == 0
+            || action.registrationSerial > registrationSerialBoundary
+            || !action.callback.hasValue()) {
+            return {};
+        }
+        return ButtonActionInvocationCandidate{
+            .button = button,
+            .actionIndex = actionIndex,
+            .generation = action.generation,
+        };
+    }
+
+    void invokeButtonAction(
+        ButtonActionInvocationCandidate candidate,
+        const UIButtonActionEvent& event,
+        u64 routeSerial) noexcept
+    {
+        if (!candidate.hasValue()
+            || !contains(candidate.button)
+            || candidate.button.index() >= buttonActionClearRouteSerialByNodeIndex.size()
+            || buttonActionClearRouteSerialByNodeIndex[candidate.button.index()] == routeSerial
+            || candidate.actionIndex >= buttonActions.size()) {
+            return;
+        }
+        const NodeRecord* buttonRecord = nodes.tryGet(candidate.button.storageId());
+        ButtonActionRecord& action = buttonActions[candidate.actionIndex];
+        if (buttonRecord == nullptr
+            || buttonRecord->kind != UIWidgetKind::Button
+            || action.generation != candidate.generation
+            || action.node != candidate.button
+            || !action.callback.hasValue()) {
+            return;
+        }
+
+        action.invoking = true;
+        ++buttonActionCallbackOperationDepth;
+        action.callback(event);
+        --buttonActionCallbackOperationDepth;
+        if (candidate.actionIndex < buttonActions.size()) {
+            ButtonActionRecord& current = buttonActions[candidate.actionIndex];
+            if (current.generation == candidate.generation) {
+                current.invoking = false;
+            }
+        }
+    }
+
     void resetNodeSideData(u32 index) noexcept
     {
         if (index >= layoutStylesByIndex.size()) {
@@ -1886,6 +2151,8 @@ struct UIContext::Impl final {
             InvalidRoutedPointerListenerIndex;
         routedPointerListenerTailByNodeIndex[index] =
             InvalidRoutedPointerListenerIndex;
+        buttonActionIndexByNodeIndex[index] = InvalidButtonActionIndex;
+        buttonActionClearRouteSerialByNodeIndex[index] = 0;
     }
 
     void markStructureChanged() noexcept
@@ -2089,6 +2356,9 @@ struct UIContext::Impl final {
         NodeRecord* record = nodes.tryGet(node.storageId());
         record->kind = kind;
         record->rootIndex = node.index();
+        pointerHitPoliciesByIndex[node.index()] = kind == UIWidgetKind::Button
+            ? UIPointerHitPolicy::Targetable
+            : UIPointerHitPolicy::Ignore;
         return node;
     }
 
@@ -2252,6 +2522,7 @@ struct UIContext::Impl final {
 
             const UINodeId node = idForIndex(currentIndex);
             deactivateAllRoutedPointerListenersForNode(currentIndex);
+            deactivateButtonActionForNode(currentIndex);
             idsByIndex[currentIndex] = {};
             resetNodeSideData(currentIndex);
             static_cast<void>(nodes.erase(node.storageId()));
@@ -2445,6 +2716,194 @@ struct UIContext::Impl final {
         }
         currentPaint = normalizedPaint;
         return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setButtonActionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId button,
+        UIButtonActionCallback&& callback)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(
+                UIErrorCode::RootRequired,
+                "UI tree updater requires a live root owner");
+        }
+        auto buttonResult = resolveButton(button);
+        if (!buttonResult) {
+            return Core::failure(buttonResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, button)) {
+            return fail(
+                UIErrorCode::InvalidNode,
+                "UI Button is not owned by the updater root");
+        }
+        if (!callback.hasValue()) {
+            return fail(
+                UIErrorCode::InvalidButtonAction,
+                "UI Button action callback is empty");
+        }
+
+        const u32 previousActionIndex =
+            buttonActionIndexByNodeIndex[button.index()];
+        const bool replacing = previousActionIndex < buttonActions.size()
+            && buttonActions[previousActionIndex].active
+            && buttonActions[previousActionIndex].node == button;
+        if (previousActionIndex != InvalidButtonActionIndex && !replacing) {
+            return fail(
+                Core::CoreErrorCode::Internal,
+                "UI Button action mapping is inconsistent");
+        }
+        if (!replacing
+            && activeButtonActionCount >= capacityConfig.buttonActionCapacity) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI Button action capacity has been exhausted");
+        }
+        if (freeButtonActionHead == InvalidButtonActionIndex) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI Button action transaction storage has been exhausted");
+        }
+        if (buttonActionRegistrationSerial
+            == (std::numeric_limits<u64>::max)()) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI Button action registration serial is exhausted");
+        }
+
+        const u32 actionIndex = freeButtonActionHead;
+        ButtonActionRecord& action = buttonActions[actionIndex];
+        freeButtonActionHead = action.nextFreeIndex;
+        ++action.generation;
+        if (action.generation == 0) {
+            ++action.generation;
+        }
+        action.node = button;
+        action.nextFreeIndex = InvalidButtonActionIndex;
+        action.registrationSerial = 0;
+        action.active = false;
+        action.queuedForReclaim = false;
+        action.invoking = false;
+        {
+            ++buttonActionCallbackOperationDepth;
+            auto callbackOperation = Core::makeScopeExit([this]() noexcept {
+                --buttonActionCallbackOperationDepth;
+            });
+            action.callback = std::move(callback);
+        }
+        reclaimInactiveButtonActions();
+
+        if (!contains(updaterRoot)) {
+            return rollbackButtonActionRegistration(
+                actionIndex,
+                makeError(
+                    UIErrorCode::RootRequired,
+                    "UI tree updater root was released while setting a Button action"));
+        }
+        auto liveButtonResult = resolveButton(button);
+        if (!liveButtonResult) {
+            return rollbackButtonActionRegistration(
+                actionIndex,
+                liveButtonResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, button)) {
+            return rollbackButtonActionRegistration(
+                actionIndex,
+                makeError(
+                    UIErrorCode::InvalidNode,
+                    "UI Button left the updater root while setting its action"));
+        }
+        if (buttonActionIndexByNodeIndex[button.index()] != previousActionIndex) {
+            return rollbackButtonActionRegistration(
+                actionIndex,
+                makeError(
+                    UIErrorCode::InvalidButtonAction,
+                    "UI Button action changed during callback transfer"));
+        }
+        if (buttonActionRegistrationSerial
+            == (std::numeric_limits<u64>::max)()) {
+            return rollbackButtonActionRegistration(
+                actionIndex,
+                makeError(
+                    UIErrorCode::CapacityExceeded,
+                    "UI Button action registration serial is exhausted"));
+        }
+
+        action.registrationSerial = ++buttonActionRegistrationSerial;
+        action.active = true;
+        buttonActionIndexByNodeIndex[button.index()] = actionIndex;
+        ++activeButtonActionCount;
+        if (replacing) {
+            deactivateButtonAction(previousActionIndex);
+        }
+        buttonActionHighWater = (std::max)(
+            buttonActionHighWater,
+            activeButtonActionCount);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearButtonActionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId button)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(
+                UIErrorCode::RootRequired,
+                "UI tree updater requires a live root owner");
+        }
+        auto buttonResult = resolveButton(button);
+        if (!buttonResult) {
+            return Core::failure(buttonResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, button)) {
+            return fail(
+                UIErrorCode::InvalidNode,
+                "UI Button is not owned by the updater root");
+        }
+
+        if (routeDispatchDepth != 0) {
+            buttonActionClearRouteSerialByNodeIndex[button.index()] =
+                buttonRouteSerial;
+        }
+        const u32 actionIndex = buttonActionIndexByNodeIndex[button.index()];
+        buttonActionIndexByNodeIndex[button.index()] = InvalidButtonActionIndex;
+        if (actionIndex != InvalidButtonActionIndex) {
+            deactivateButtonAction(actionIndex);
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<bool> isButtonPressedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId button)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(
+                UIErrorCode::RootRequired,
+                "UI tree updater requires a live root owner");
+        }
+        auto buttonResult = resolveButton(button);
+        if (!buttonResult) {
+            return Core::failure(buttonResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, button)) {
+            return fail(
+                UIErrorCode::InvalidNode,
+                "UI Button is not owned by the updater root");
+        }
+        return armedPrimaryButton == button && armedPrimaryButtonPressed;
     }
 
     void appendCommittedTree(
@@ -2990,53 +3449,99 @@ struct UIContext::Impl final {
         UIPointerRouteResult result{
             .pointQuery = queryPointerHit(input.position),
         };
-        if (!result.pointQuery.hasTarget()) {
-            return result;
-        }
-        if (!contains(result.pointQuery.target.node)) {
-            result.targetInvalidated = true;
-            return result;
-        }
-
         const UICommittedHitView hit = committedHit();
         const std::span<const UICommittedHitEntry> entries = hit.entries();
         routePathScratch.clear();
-        u32 entryIndex = result.pointQuery.target.hitEntryIndex;
-        while (entryIndex != InvalidUIHitEntryIndex) {
-            if (entryIndex >= entries.size()) {
-                return fail(
-                    Core::CoreErrorCode::Internal,
-                    "UI committed pointer route entry index is invalid");
+        if (result.pointQuery.hasTarget()) {
+            if (!contains(result.pointQuery.target.node)) {
+                result.targetInvalidated = true;
+            } else {
+                u32 entryIndex = result.pointQuery.target.hitEntryIndex;
+                while (entryIndex != InvalidUIHitEntryIndex) {
+                    if (entryIndex >= entries.size()) {
+                        return fail(
+                            Core::CoreErrorCode::Internal,
+                            "UI committed pointer route entry index is invalid");
+                    }
+                    if (routePathScratch.size() >= capacityConfig.routePathCapacity) {
+                        routePathScratch.clear();
+                        return fail(
+                            UIErrorCode::CapacityExceeded,
+                            "UI pointer route path capacity has been exhausted");
+                    }
+                    routePathScratch.push_back(entryIndex);
+                    if (entryIndex == result.pointQuery.target.rootEntryIndex) {
+                        break;
+                    }
+                    entryIndex = entries[entryIndex].parentEntryIndex;
+                    if (routePathScratch.size() > entries.size()) {
+                        routePathScratch.clear();
+                        return fail(
+                            Core::CoreErrorCode::Internal,
+                            "UI committed pointer route ancestry contains a cycle");
+                    }
+                }
+                if (routePathScratch.empty()
+                    || routePathScratch.back()
+                        != result.pointQuery.target.rootEntryIndex
+                    || entries[routePathScratch.back()].node
+                        != result.pointQuery.target.rootNode) {
+                    routePathScratch.clear();
+                    return fail(
+                        Core::CoreErrorCode::Internal,
+                        "UI committed pointer route root is invalid");
+                }
+                result.routeDepth = routePathScratch.size();
             }
-            if (routePathScratch.size() >= capacityConfig.routePathCapacity) {
-                routePathScratch.clear();
-                return fail(
-                    UIErrorCode::CapacityExceeded,
-                    "UI pointer route path capacity has been exhausted");
-            }
-            routePathScratch.push_back(entryIndex);
-            if (entryIndex == result.pointQuery.target.rootEntryIndex) {
-                break;
-            }
-            entryIndex = entries[entryIndex].parentEntryIndex;
-            if (routePathScratch.size() > entries.size()) {
-                routePathScratch.clear();
-                return fail(
-                    Core::CoreErrorCode::Internal,
-                    "UI committed pointer route ancestry contains a cycle");
-            }
-        }
-        if (routePathScratch.empty()
-            || routePathScratch.back() != result.pointQuery.target.rootEntryIndex
-            || entries[routePathScratch.back()].node
-                != result.pointQuery.target.rootNode) {
-            routePathScratch.clear();
-            return fail(
-                Core::CoreErrorCode::Internal,
-                "UI committed pointer route root is invalid");
         }
 
-        result.routeDepth = routePathScratch.size();
+        if (buttonRouteSerial == (std::numeric_limits<u64>::max)()) {
+            routePathScratch.clear();
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI Button route serial is exhausted");
+        }
+
+        UINodeId nearestButton{};
+        bool pointWithinArmedButton = false;
+        for (const u32 routeEntryIndex : routePathScratch) {
+            if (routeEntryIndex >= entries.size()) {
+                routePathScratch.clear();
+                return fail(
+                    Core::CoreErrorCode::Internal,
+                    "UI committed Button route entry index is invalid");
+            }
+            const UINodeId routeNode = entries[routeEntryIndex].node;
+            if (routeNode == armedPrimaryButton) {
+                pointWithinArmedButton = true;
+            }
+            if (!nearestButton.hasValue() && contains(routeNode)) {
+                const NodeRecord* routeRecord =
+                    nodes.tryGet(routeNode.storageId());
+                if (routeRecord != nullptr
+                    && routeRecord->kind == UIWidgetKind::Button) {
+                    nearestButton = routeNode;
+                }
+            }
+        }
+
+        const UINodeId armedButtonAtRouteStart = armedPrimaryButton;
+        const bool hadArmedInteraction = armedButtonAtRouteStart.hasValue();
+        const bool primaryButtonDown =
+            input.kind == UIRoutedPointerEventKind::ButtonDown
+            && input.button == Platform::PointerButton::Primary;
+        const bool primaryButtonUp =
+            input.kind == UIRoutedPointerEventKind::ButtonUp
+            && input.button == Platform::PointerButton::Primary;
+        const u64 actionRegistrationSerialBoundary =
+            buttonActionRegistrationSerial;
+        const ButtonActionInvocationCandidate actionCandidate =
+            primaryButtonUp && hadArmedInteraction && pointWithinArmedButton
+            ? captureButtonAction(
+                armedButtonAtRouteStart,
+                actionRegistrationSerialBoundary)
+            : ButtonActionInvocationCandidate{};
+        const u64 currentButtonRouteSerial = ++buttonRouteSerial;
         const u64 registrationSerialBoundary =
             routedPointerListenerRegistrationSerial;
         UIRoutedPointerEvent routedEvent =
@@ -3046,60 +3551,24 @@ struct UIContext::Impl final {
             routeDispatchDepth = 0;
             drainDeferredRoutedPointerListenerReleases();
             reclaimInactiveRoutedPointerListeners();
+            reclaimInactiveButtonActions();
         });
 
         const UINodeId targetNode = result.pointQuery.target.node;
-        for (usize reversePathIndex = routePathScratch.size();
-             reversePathIndex > 1;
-             --reversePathIndex) {
-            if (!contains(targetNode)) {
-                result.targetInvalidated = true;
-                break;
-            }
-            const UINodeId currentNode =
-                entries[routePathScratch[reversePathIndex - 1]].node;
-            if (contains(currentNode)) {
-                dispatchRoutedPointerListeners(
-                    currentNode,
-                    UIEventPhase::Capture,
-                    input.kind,
-                    registrationSerialBoundary,
-                    routedEvent,
-                    result);
-            }
-            if (routedEvent.isPropagationStopped()) {
-                break;
-            }
-        }
-
-        if (!routedEvent.isPropagationStopped() && !result.targetInvalidated) {
-            if (!contains(targetNode)) {
-                result.targetInvalidated = true;
-            } else {
-                dispatchRoutedPointerListeners(
-                    targetNode,
-                    UIEventPhase::Target,
-                    input.kind,
-                    registrationSerialBoundary,
-                    routedEvent,
-                    result);
-            }
-        }
-
-        if (!routedEvent.isPropagationStopped() && !result.targetInvalidated) {
-            for (usize pathIndex = 1;
-                 pathIndex < routePathScratch.size();
-                 ++pathIndex) {
+        if (!routePathScratch.empty() && !result.targetInvalidated) {
+            for (usize reversePathIndex = routePathScratch.size();
+                 reversePathIndex > 1;
+                 --reversePathIndex) {
                 if (!contains(targetNode)) {
                     result.targetInvalidated = true;
                     break;
                 }
                 const UINodeId currentNode =
-                    entries[routePathScratch[pathIndex]].node;
+                    entries[routePathScratch[reversePathIndex - 1]].node;
                 if (contains(currentNode)) {
                     dispatchRoutedPointerListeners(
                         currentNode,
-                        UIEventPhase::Bubble,
+                        UIEventPhase::Capture,
                         input.kind,
                         registrationSerialBoundary,
                         routedEvent,
@@ -3109,17 +3578,127 @@ struct UIContext::Impl final {
                     break;
                 }
             }
+
+            if (!routedEvent.isPropagationStopped()
+                && !result.targetInvalidated) {
+                if (!contains(targetNode)) {
+                    result.targetInvalidated = true;
+                } else {
+                    dispatchRoutedPointerListeners(
+                        targetNode,
+                        UIEventPhase::Target,
+                        input.kind,
+                        registrationSerialBoundary,
+                        routedEvent,
+                        result);
+                }
+            }
+
+            if (!routedEvent.isPropagationStopped()
+                && !result.targetInvalidated) {
+                for (usize pathIndex = 1;
+                     pathIndex < routePathScratch.size();
+                     ++pathIndex) {
+                    if (!contains(targetNode)) {
+                        result.targetInvalidated = true;
+                        break;
+                    }
+                    const UINodeId currentNode =
+                        entries[routePathScratch[pathIndex]].node;
+                    if (contains(currentNode)) {
+                        dispatchRoutedPointerListeners(
+                            currentNode,
+                            UIEventPhase::Bubble,
+                            input.kind,
+                            registrationSerialBoundary,
+                            routedEvent,
+                            result);
+                    }
+                    if (routedEvent.isPropagationStopped()) {
+                        break;
+                    }
+                }
+            }
         }
 
-        if (!contains(targetNode)) {
+        if (targetNode.hasValue() && !contains(targetNode)) {
             result.targetInvalidated = true;
         }
+
+        if (primaryButtonDown) {
+            clearArmedPrimaryButton();
+            if (!routedEvent.isDefaultActionPrevented()
+                && nearestButton.hasValue()
+                && contains(nearestButton)) {
+                const NodeRecord* buttonRecord =
+                    nodes.tryGet(nearestButton.storageId());
+                if (buttonRecord != nullptr
+                    && buttonRecord->kind == UIWidgetKind::Button) {
+                    armedPrimaryButton = nearestButton;
+                    armedPrimaryButtonPressed = true;
+                    routedEvent.consumeInputTransition();
+                    static_cast<void>(routedEvent.claimPointerButton(
+                        Platform::PointerButton::Primary));
+                }
+            }
+        } else if (input.kind == UIRoutedPointerEventKind::Move
+                   && hadArmedInteraction
+                   && armedPrimaryButton == armedButtonAtRouteStart) {
+            if (!contains(armedButtonAtRouteStart)) {
+                clearArmedPrimaryButton();
+            } else {
+                armedPrimaryButtonPressed = pointWithinArmedButton;
+                static_cast<void>(routedEvent.claimPointerButton(
+                    Platform::PointerButton::Primary));
+            }
+        } else if (primaryButtonUp && hadArmedInteraction) {
+            const bool interactionStillArmed =
+                armedPrimaryButton == armedButtonAtRouteStart;
+            clearArmedPrimaryButton();
+            routedEvent.consumeInputTransition();
+            if (!routedEvent.isDefaultActionPrevented()
+                && interactionStillArmed
+                && pointWithinArmedButton
+                && contains(armedButtonAtRouteStart)) {
+                invokeButtonAction(
+                    actionCandidate,
+                    UIButtonActionEvent{
+                        .buttonNode = armedButtonAtRouteStart,
+                        .source = UIButtonActivationSource::PrimaryPointer,
+                        .platformFrame = input.platformFrame,
+                        .sourceSequence = input.sourceSequence,
+                    },
+                    currentButtonRouteSerial);
+            }
+        }
+
         result.claimedPointerButtons =
             Detail::UIRoutedPointerEventAccess::claimedPointerButtons(
                 routedEvent);
         result.consumed = routedEvent.isInputTransitionConsumed();
         result.stopped = routedEvent.isPropagationStopped();
         return result;
+    }
+
+    [[nodiscard]] Core::Status cancelPointerInteraction(
+        Platform::WindowId routedWindow)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!routedWindow.hasValue()) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI Pointer interaction cancellation requires a Window");
+        }
+        if (routedWindow != ownerWindow) {
+            return fail(
+                UIErrorCode::WrongOwnerWindow,
+                "UI Pointer interaction cancellation belongs to another Window");
+        }
+        clearArmedPrimaryButton();
+        return Core::success();
     }
 
     [[nodiscard]] UIContextStatistics statistics() const noexcept
@@ -3137,6 +3716,9 @@ struct UIContext::Impl final {
             .activeRoutedPointerListenerCount =
                 activeRoutedPointerListenerCount,
             .routedPointerListenerHighWater = routedPointerListenerHighWater,
+            .buttonActionCapacity = capacityConfig.buttonActionCapacity,
+            .activeButtonActionCount = activeButtonActionCount,
+            .buttonActionHighWater = buttonActionHighWater,
             .liveNodeCount = nodes.activeCount(),
             .liveRootCount = liveRootCount,
             .committedNodeCount = committedBuffers[publishedBufferIndex].size(),
@@ -3484,6 +4066,41 @@ Core::Status UITreeUpdater::setBoxPaint(UINodeId node, const UIBoxPaint& paint)
     return m_context->setBoxPaintFromUpdater(m_root, node, paint);
 }
 
+Core::Status UITreeUpdater::setButtonAction(
+    UINodeId button,
+    UIButtonActionCallback callback)
+{
+    if (m_context == nullptr) {
+        return fail(
+            UIErrorCode::WrongContext,
+            "UI tree updater is not bound to a context");
+    }
+    return m_context->setButtonActionFromUpdater(
+        m_root,
+        button,
+        std::move(callback));
+}
+
+Core::Status UITreeUpdater::clearButtonAction(UINodeId button)
+{
+    if (m_context == nullptr) {
+        return fail(
+            UIErrorCode::WrongContext,
+            "UI tree updater is not bound to a context");
+    }
+    return m_context->clearButtonActionFromUpdater(m_root, button);
+}
+
+Core::Result<bool> UITreeUpdater::isButtonPressed(UINodeId button) const
+{
+    if (m_context == nullptr) {
+        return fail(
+            UIErrorCode::WrongContext,
+            "UI tree updater is not bound to a context");
+    }
+    return m_context->isButtonPressedFromUpdater(m_root, button);
+}
+
 Core::Result<UIRoutedPointerListenerToken> UITreeUpdater::addRoutedPointerListener(
     UIRoutedPointerListenerDesc descriptor,
     UIRoutedPointerCallback callback)
@@ -3553,7 +4170,8 @@ UIContext::~UIContext() noexcept
     if (m_impl) {
         if (!m_impl->isOwnerThread()
             || m_impl->routeDispatchDepth != 0
-            || m_impl->listenerCallbackOperationDepth != 0) {
+            || m_impl->listenerCallbackOperationDepth != 0
+            || m_impl->buttonActionCallbackOperationDepth != 0) {
             std::terminate();
         }
         m_impl->detachLifetime(this);
@@ -3662,6 +4280,12 @@ Core::Result<UIPointerRouteResult> UIContext::routePointerInput(
     return m_impl->routePointerInput(input);
 }
 
+Core::Status UIContext::cancelPointerInteraction(
+    Platform::WindowId routedWindow)
+{
+    return m_impl->cancelPointerInteraction(routedWindow);
+}
+
 UIContextStatistics UIContext::statistics() const noexcept
 {
     return m_impl->statistics();
@@ -3717,6 +4341,31 @@ Core::Status UIContext::setBoxPaintFromUpdater(
     const UIBoxPaint& paint)
 {
     return m_impl->setBoxPaintFromUpdater(updaterRoot, node, paint);
+}
+
+Core::Status UIContext::setButtonActionFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId button,
+    UIButtonActionCallback&& callback)
+{
+    return m_impl->setButtonActionFromUpdater(
+        updaterRoot,
+        button,
+        std::move(callback));
+}
+
+Core::Status UIContext::clearButtonActionFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId button)
+{
+    return m_impl->clearButtonActionFromUpdater(updaterRoot, button);
+}
+
+Core::Result<bool> UIContext::isButtonPressedFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId button)
+{
+    return m_impl->isButtonPressedFromUpdater(updaterRoot, button);
 }
 
 Core::Result<UIRoutedPointerListenerToken> UIContext::addRoutedPointerListenerFromUpdater(

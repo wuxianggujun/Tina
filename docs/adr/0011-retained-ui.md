@@ -17,9 +17,12 @@
   最新切片已加入 SolidFill-only local paint cache、双缓冲 `UICommittedPaintView`、Render-owned 单帧
   SolidQuad `UIDisplayListBuilder`，以及独立 `Tina::UIRenderIntegration` logical→framebuffer bridge；
   bridge 在 Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Linux Clang 22 sanitizer 构建中
-  直接 GoogleTest 均为12/12，Clang 无 sanitizer 诊断。Key/Gamepad/axis claim、
-  持久 Pointer Capture、Focus/Modal、Button default action、Image/Text/Glyph PaintCache、
-  Runtime `RenderFramePacket`、dirty subtree pruning、nested clip 与 bgfx UI pass 仍后置。
+  直接 GoogleTest 均为12/12，Clang 无 sanitizer 诊断。后续 Button default action 切片已实现
+  `PrimaryPointerId + PointerButton::Primary` 的窄 default action、retained action property 与
+  cancel/reset 清理；Windows Debug 通过基础208/208、UI109/109、Runtime→UI60/60与 Null 300帧。
+  Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、Button Keyboard/Gamepad activation、
+  Disabled/theme 视觉、Image/Text/Glyph PaintCache、Runtime `RenderFramePacket`、dirty subtree pruning、
+  nested clip 与含资源 bgfx UI pass 仍后置。
 
 ## 背景
 
@@ -341,8 +344,10 @@ seed 与 root-scoped、phase-epoch-scoped Game SDK capability。普通游戏仍�
 M7-C1c-b3e 已实现第一条 continuous-control claim producer：任意 Move/Wheel/Button route listener 都可
 请求当前 Window/Pointer 的一个 primary Pointer Button，Runtime 只发布最终 snapshot 仍 held 的请求并
 跨 route 去重。transition consumption 与 claim 相互独立；ActionMapper 先应用 claim，因此既能取消已
-active 的 Gameplay source，也能拦截同帧未 consume 的 ButtonDown，并抑制到真实 Up。该实施不改变本
-ADR 对后续 Pointer Capture、Focus/Modal、Widget default action、完整含资源 DisplayList、Runtime packet 与
+active 的 Gameplay source，也能拦截同帧未 consume 的 ButtonDown，并抑制到真实 Up。后续 Button default
+action 切片又复用该 producer 阶段，实现 primary Pointer 的 pressed/activation、`preventDefaultAction()`、
+retained `setButtonAction()`/`clearButtonAction()` 与 cancel/reset 清理。该实施不改变本 ADR 对后续
+Pointer Capture、Focus/Modal、Button Keyboard/Gamepad activation、完整含资源 DisplayList、Runtime packet 与
 文本渲染的边界。
 
 ## 被拒绝方案

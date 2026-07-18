@@ -25,7 +25,7 @@
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2，并含后续 root-scoped Game SDK routed Pointer listener facade | Debug C++23 | 208/208 | 本轮直接重跑 UI95/95、Runtime→UI55/55与Null样例300帧；UI→Render12/12、bgfx16/16、Desktop D3D11 Intel Iris Xe 1200帧截图检查与 GLFW25/25均为前序 D2 门禁，本轮未重跑；D2 Debug `RefCount is 3 (expected 0)` 为第三方 debug layer 提示 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2，并含后续 root-scoped Game SDK routed Pointer listener facade 与 Button default action | Debug C++23 | 208/208 | 本轮直接重跑 UI109/109、Runtime→UI60/60与Null样例300帧；UI→Render12/12、bgfx16/16、Desktop D3D11 Intel Iris Xe 1200帧截图检查与 GLFW25/25均为前序 D2 门禁，本轮未重跑；D2 Debug `RefCount is 3 (expected 0)` 为第三方 debug layer 提示 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2 Game SDK `setBoxPaint()` + 私有 bgfx SolidQuad UI Pass | Release C++23 | 207/207 | 上一轮 D2 独立 UI92/92、Runtime→UI53/53、UI→Render bridge12/12、Null样例300帧、bgfx16/16、Desktop D3D11 Intel Iris Xe 300帧；GLFW25/25为更早门禁；Release clean，本轮 listener extension 未重跑 Release |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug/Release C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过 |
 | Ubuntu 22.04 / GCC 13.4 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过；构建保留旧源码/EASTL 既有 warning |
@@ -36,7 +36,7 @@ GLFW adapter 和 bgfx adapter 测试是独立 executable，不能把多个进程
 
 | 构建图 | 基础 GoogleTest | GLFW 专项 GoogleTest | bgfx 专项 GoogleTest | 状态 |
 | --- | ---: | ---: | ---: | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 208/208 | 25/25（前序） | 16/16（前序） | 本轮直接重跑 UI95/95、Runtime→UI55/55与Null样例300帧；UI→Render12/12、Desktop样例1200帧截图检查与 adapter 样例均为前序 D2 门禁；D2 Debug D3D11 RefCount=3 已归因为第三方 debug layer 提示 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 208/208 | 25/25（前序） | 16/16（前序） | 本轮直接重跑 UI109/109、Runtime→UI60/60与Null样例300帧；UI→Render12/12、Desktop样例1200帧截图检查与 adapter 样例均为前序 D2 门禁；D2 Debug D3D11 RefCount=3 已归因为第三方 debug layer 提示 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 207/207 | 25/25（前序） | 16/16 | 上一轮 D2 UI92/92、Runtime→UI53/53、UI→Render12/12、Null/Desktop样例300帧；GLFW样例300帧为更早门禁；Release clean，本轮 listener extension 未重跑 Release |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 production-style | 测试 target 关闭 | 不构建 | 不构建 | 更早门禁：`TINA_BUILD_TESTING=OFF`，GLFW样例300帧返回0 |
 | Ubuntu 22.04 / GCC 13.4 vNext Null；前序 GLFW X11 | 205/205 | 23/23（历史 C1c-b3a） | 未运行 | 最新 UI92/92、Runtime→UI46/46、UI→Render12/12与Null样例300帧；adapter样例保留历史门禁 |
@@ -44,8 +44,8 @@ GLFW adapter 和 bgfx adapter 测试是独立 executable，不能把多个进程
 | Ubuntu 22.04 / GCC 13.4 + GLFW X11/Wayland 双后端 | 183/183 | 22/22 | 未运行 | 通过；嵌套 Weston 9 强制 Wayland 与 Xvfb 强制 X11 均通过基础、专项与300帧样例 |
 | Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11/Wayland 双后端 + ASan/UBSan/LSan | 183/183 | 22/22 | 未运行 | 通过；基础测试无 suppression且Null样例300帧；Wayland专项与样例 suppression 命中0，X11专项命中12次/4896 B、样例命中1次/408 B |
 
-当前最新 listener 增量门禁在 MSVC 19.50 / CMake 4.2.3 Windows Debug 下直接通过基础208/208、
-UI95/95、Runtime→UI55/55，并运行 Null sample 300帧，State exit/Application shutdown 各1次。
+当前最新 Button default action 增量门禁在 MSVC 19.50 / CMake 4.2.3 Windows Debug 下直接通过基础208/208、
+UI109/109、Runtime→UI60/60，并运行 Null sample 300帧，State exit/Application shutdown 各1次。
 本轮没有运行 Release、UI→Render、GLFW、bgfx 或 Desktop。
 上一轮完整 Windows D2 门禁仍是 Debug/Release 基础207/207、UI92/92、Runtime→UI53/53、
 UI→Render12/12与Null样例300帧；bgfx专项16/16和 D3D11 Intel Iris Xe Desktop样例也均通过，Debug
@@ -63,7 +63,7 @@ Scene/Pass Scheduler/submission ticket、Text/Glyph、Widget 默认行为，也�
 M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、committed hit snapshot、纯 point query、synthetic route 与
 b3d2 root-scoped child 创建、b3e listener claim 请求，以及最新11项 SolidFill paint 使用独立
 `tina_ui_tests`。后续 listener extension 新增 root-scoped/cross-root 原子注册、callback move 释放 root
-回滚和 callback move 销毁 Context death test。当前 Windows 11 / MSVC 19.50 Debug 为95/95；上一轮
+回滚和 callback move 销毁 Context death test。Button default action 切片新增14项后，当前 Windows 11 / MSVC 19.50 Debug 为109/109；上一轮
 Windows Release、Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均为92/92，
 Clang 无 sanitizer 诊断，本轮未重跑。初次 GCC 暴露的 routed-pointer callback `requires`
 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
@@ -95,7 +95,8 @@ metrics revision 回退拒绝、startup 首份 structure/layout/hit commit、Gam
 label/button 并在 `updateUI` 修改 retained style、onEnter 后失败先重置 State owner 再回滚模块；
 独立 capability 测试覆盖 phase expiry、`PrimaryWindowUIUnavailable` sticky、首个 tree 错误 sticky、跨线程拒绝、
 moved-from facade 过期与 `abortPhase()`。这些用例证明 scoped retained tree access，不证明 Label 文本、
-Button 默认 action、Focus/Capture/Modal、Game SDK paint authoring 或可见 UI。
+Button 默认 action、Focus/Capture/Modal、Game SDK paint authoring 或可见 UI。后续切片已补齐
+primary Pointer Button default action、Game SDK paint authoring 与 SolidFill 可见路径，但不改变 b3d2 当时边界。
 
 M7-C1c-b3e 在同一测试拓扑中新增 held primary Pointer Button claim bridge。Move/Button/Wheel listener API 都可请求
 接管 primary window 上 `PrimaryPointerId` 的仍 held `PointerButton`；Runtime 按 final snapshot 过滤 release/cancel/reset 后不再 held、
@@ -114,7 +115,8 @@ Windows Debug/Release 的完整 D2 门禁为53/53。
 后续 Game SDK listener extension 在同一拓扑新增2项 capability 测试：token 跨 registration phase 保持
 有效，以及 cross-root 注册 sticky/no-slot；基础 `tina_tests` 另增1项 EngineHost E2E，验证 listener
 在 ActionMapper 前发布 claim、claim-only 路径不产生 Gameplay transition，并在 `onExit()` 先释放 token。
-最新 Windows Debug 为 Runtime→UI55/55、基础208/208；Release/Linux 未在本轮重跑。
+Button default action 后续在同一拓扑增加 primary Pointer activation、cancel/reset 与 facade 测试。
+最新 Windows Debug 为 Runtime→UI60/60、基础208/208；Release/Linux 未在本轮重跑。
 X11 在隔离 X server 下运行。GCC Wayland 门禁由 Xvfb 托载
 Weston 9 `x11-backend` 并提供 `wl_seat`；移除 `DISPLAY` 后断言
 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND`，再运行专项测试和300帧样例。同一双后端产物
@@ -255,7 +257,8 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
 - Runtime→UI M7-C1c-b3e：同一独立 executable 增加 held primary Pointer Button claim bridge。Move/Button/Wheel
   listener 可请求接管仍 held 的 primary pointer button；Runtime 基于 final snapshot 做 held/primary 过滤、
   去重与 capacity 失败不发布，并让同帧 PointerDown claim 即使未 consume 也拦截 Gameplay。该切片仍不证明
-  Key/Gamepad/axis claims、Widget 默认行为、DisplayList handoff 或可见 UI；
+  Key/Gamepad/axis claims、Widget 默认行为、DisplayList handoff 或可见 UI；后续 Button default action
+  另由当前 Windows Debug UI109/109与 Runtime→UI60/60 覆盖；
 - Runtime→UI D0/D2：同一独立 executable 增加 `PrimaryWindowUIDisplayCoordinator` 与 scoped
   `setBoxPaint()` 用例，覆盖
   layout/paint commit 后、Render submit 前的 primary-window UIDisplayList 构建、submit-call-local borrow、
@@ -298,7 +301,7 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
 - Scene 延迟 push/pop/replace，以及 fixed phase mutation barrier、延迟实体销毁和
   interpolation snapshot；
 - UI 后续：在 b3e startup/root capability、Pointer Button claim bridge、已实现 SolidFill paint/DisplayList
-  bridge、D0 Runtime DisplayList handoff 与 D2 scoped `setBoxPaint()` 基础上补完整 Widget owner、Label 文本、Button default action、Image/Text/Glyph PaintCache、
+  bridge、D0 Runtime DisplayList handoff、D2 scoped `setBoxPaint()` 与已实现 Button default action 基础上补完整 Widget owner、Label 文本、Image/Text/Glyph PaintCache、
   细粒度 dirty subtree pruning 和布局中新增 dirty 不丢；
 - UIInputScopeSnapshot 对多个 eligible State roots 只做一次全局 hit-test；阻断/恢复时 Pointer Cancel、
   Focus history、Modal root scope 与 generation 失效顺序固定；
@@ -577,10 +580,10 @@ Legacy 与 vNext 进程观察到的 `N` 会随调试对象组合变化，本轮 
 
 | 样例 | 状态 | 主要证明 | 资源策略 |
 | --- | --- | --- | --- |
-| `tina_sample_null` | M6-A/M7-A/M7-B1/M7-C1c-b3e/D0 Headless 已实现 | EngineHost、PlatformFrame/Input/Action、单个 `IGameState`、私有 primary-window UI owner/route/layout/claim/display handoff seam、Headless/Disabled/Null、300帧生命周期；无窗口 startup seed 显式选择 Headless，UI capability 请求返回结构化 unavailable，layout coordinator 与 D0 DisplayList handoff 均成功发布空结果；D0 Windows Debug/Release 与前序 Linux paint/bridge 切片均运行300帧且返回0；Linux 10,000帧仍是上一批历史结果 | 无真实第三方 backend，DisplayList 为空，不证明 UI root/Widget/可见 UI |
+| `tina_sample_null` | M6-A/M7-A/M7-B1/M7-C1c-b3e/D0/Button Headless 已实现 | EngineHost、PlatformFrame/Input/Action、单个 `IGameState`、私有 primary-window UI owner/route/layout/claim/display/default-action handoff seam、Headless/Disabled/Null、300帧生命周期；无窗口 startup seed 显式选择 Headless，UI capability 请求返回结构化 unavailable，layout coordinator 与 D0 DisplayList handoff 均成功发布空结果；本轮 Button default action Windows Debug 运行300帧且返回0，Linux 10,000帧仍是上一批历史结果 | 无真实第三方 backend，DisplayList 为空，不证明 UI root/完整 Widget/可见 UI |
 | `tina_sample_platform` | M7-A + M7-B1 已实现 | 私有 GLFW `NO_API` 窗口、键鼠、resize/focus/close、committed text、WindowSurface handoff 与 NullRender | 不创建真实 bgfx GPU device |
-| `tina_sample_desktop` | M7-B2 Desktop bootstrap + C1c-b3e Runtime UI owner/route/layout/claim bridge seam + D0 DisplayList handoff + D1 bgfx SolidQuad UI pass + D2 visible panel smoke 已实现 | `Tina::Desktop::CreateEngine` 私有组合 SteadyClock、GLFW WindowSurface、DisabledTaskSystem 与 bgfx；默认300帧；startup seed 显式绑定 primary-window Context，创建1个 retained root 和4个 painted panel，通过 Render 前 layout/paint snapshot 与 UIDisplayList borrow 进入私有 bgfx SolidQuad pass；claim/display/setBoxPaint handoff 由独立 Runtime→UI 测试覆盖，真实可见性由该样例截图证明 | 当前 D2 Windows D3D11 Intel Iris Xe Debug 1200帧截图检查与 Release 300帧均通过，Release clean；截图验证 background RGB(9,24,40)、blue(28,92,148)、cyan alpha over blue/background、右边界 scissor clip 与 pink panel；Debug RefCount=3 为第三方 debug layer 提示；Linux Desktop 仍保留前序 GCC 13.4 与 Clang 22 sanitizer 门禁；Clang WSL2 为 Vulkan/llvmpipe，不代表硬件 GPU 性能，也不代表 Scene/Pass Scheduler、Text/Glyph 或完整 Widget 完成 |
-| `tina_sample_ui` | 未实现 | 在现有 Desktop SolidFill panel smoke 上补中文、Label/Button 默认行为、Modal、TextEdit、Runtime packet、Glyph Atlas 与资源型 UI Render | M7 内置 Cooked Font/Texture fixture |
+| `tina_sample_desktop` | M7-B2 Desktop bootstrap + C1c-b3e Runtime UI owner/route/layout/claim bridge seam + Button default action + D0 DisplayList handoff + D1 bgfx SolidQuad UI pass + D2 visible panel smoke 已实现 | `Tina::Desktop::CreateEngine` 私有组合 SteadyClock、GLFW WindowSurface、DisabledTaskSystem 与 bgfx；默认300帧；startup seed 显式绑定 primary-window Context，创建1个 retained root和4个 painted panel，通过 Render 前 layout/paint snapshot 与 UIDisplayList borrow 进入私有 bgfx SolidQuad pass；claim/display/setBoxPaint/default-action handoff 由独立 Runtime→UI 测试覆盖，真实可见性由该样例截图证明 | 当前 D2 Windows D3D11 Intel Iris Xe Debug 1200帧截图检查与 Release 300帧均通过，Release clean；截图验证 background RGB(9,24,40)、blue(28,92,148)、cyan alpha over blue/background、右边界 scissor clip 与 pink panel；Debug RefCount=3 为第三方 debug layer 提示；Linux Desktop 仍保留前序 GCC 13.4 与 Clang 22 sanitizer 门禁；Clang WSL2 为 Vulkan/llvmpipe，不代表硬件 GPU 性能，也不代表 Scene/Pass Scheduler、Text/Glyph 或完整 Widget 完成 |
+| `tina_sample_ui` | 未实现 | 在现有 Desktop SolidFill panel smoke 和 primary Pointer Button default action 上补中文、Label 文本、Button Keyboard/Gamepad activation、Modal、TextEdit、Runtime packet、Glyph Atlas 与资源型 UI Render | M7 内置 Cooked Font/Texture fixture |
 | `tina_sample_2d_infrastructure` | 未实现 | Camera2D、Sprite layer/order、world picking、UI overlay | M8 内置 Cooked Sprite fixture |
 | `tina_sample_3d_infrastructure` | 未实现 | Perspective、depth、canonical Mesh、Unlit pipeline | M9 procedural Cube |
 | `tina_sample_2d` | 未实现 | Cooked TileMap/Tileset、chunk、角色/Tile AABB、Box2D dynamic body、正式 UI | M10/M11 Catalog/Manifest |

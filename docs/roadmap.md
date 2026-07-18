@@ -113,8 +113,8 @@ M6 生命周期之后仍未实现：
   M7-C1c-b3d1 layout commit、M7-C1c-b3d2 startup/root scoped capability、M7-C1c-b3e Pointer claim、
   SolidFill committed paint、Render SolidQuad DisplayList builder、UI→Render integration bridge、D0
   Runtime DisplayList handoff、D1 bgfx UI SolidQuad pass 与 D2 可见 panel smoke 已实现，但仍没有 owning
-  Runtime packet/FramePin、文本/glyph、默认 Widget 行为、完整 Widget facade 或产品 UI；当前 listener
-  facade 只是低层 routed callback/claim seam，不等于 Button default action；
+  Runtime packet/FramePin、文本/glyph、完整 Widget facade 或产品 UI；当前 listener
+  facade 只是低层 routed callback/claim seam，后续 Button default action 已另行完成 primary Pointer 窄交互；
 - `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
 - Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；M7-B2 Desktop bgfx
   X11 图也已完成 GCC 13.4 和 Clang 22.1.8 + ASan/UBSan/LSan 的183/22/11直接测试及300帧门禁。
@@ -325,16 +325,16 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   Debug `RefCount is 3 (expected 0)` 为已记录第三方 debug layer 提示；
 - **最新增量门禁**：本轮 Windows MSVC 19.50 / CMake 4.2.3 Debug 直接通过基础208/208、UI95/95、
   Runtime→UI55/55与Null样例300帧；Release/Linux/bgfx/可见样例未在本轮重跑，继续沿用并明确标记前序证据；
-- **下一切片已冻结、尚未实施**：Button 默认 `Targetable`；只实现
+- **已完成 Button default action 切片**：Button 默认 `Targetable`；只实现
   `PrimaryPointerId + PointerButton::Primary` 的 Down armed/pressed、Move inside 更新、Up-inside 一次
   activation、`preventDefaultAction()`、retained `set/clearButtonAction()`、pressed query，以及非
   gamepad-only cancel/覆盖窗口 reset 的无 action 清理。action 使用48字节 fixed-inline callback、固定容量
-  slot pool、一个预分配 transaction slot 与 route registration serial；先直接补 UI/Game SDK/Runtime
-  GoogleTest，再更新本节为已完成事实；
+  slot pool、一个预分配 transaction slot 与 route registration serial；Windows Debug 已通过基础208/208、
+  UI109/109、Runtime→UI60/60与 Null 300帧；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
   subtree 尚未实现；正式路径虽已接线并可创建 retained root/Panel/Label/Button 节点，低层也已有
   SolidFill paint/DisplayList bridge、D0 Runtime handoff、Game SDK paint setter 和私有 bgfx SolidQuad pass，
-  但仍没有文本/glyph、默认 Widget 行为、完整 Widget facade 或产品 UI；
+  但仍没有文本/glyph、Button Keyboard/Gamepad activation、Disabled/theme 视觉、完整 Widget facade 或产品 UI；
 - **仍后置**：Key/Gamepad/axis claim producer、dirty subtree pruning、持久 Pointer Capture、Focus/Modal、
   Button Keyboard/Gamepad activation 与 Disabled/Theme 视觉、完整 Game SDK widget facade、Image/Text/Glyph PaintCache、nested clip、
   Runtime `RenderFramePacket`/FramePin 与 FreeType；

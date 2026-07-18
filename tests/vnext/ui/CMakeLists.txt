@@ -1,10 +1,12 @@
 add_executable(tina_ui_tests
     UIHitSnapshotTests.cpp
+    UIButtonActionTests.cpp
     UIInputRouteTests.cpp
     UILayoutTests.cpp
     UIPaintSnapshotTests.cpp
     UITreeCoreTests.cpp
     header_isolation/InputRoutingHeader.cpp
+    header_isolation/UIButtonHeader.cpp
     header_isolation/UIDirtyHeader.cpp
     header_isolation/UICommittedHitHeader.cpp
     header_isolation/UICommittedLayoutHeader.cpp

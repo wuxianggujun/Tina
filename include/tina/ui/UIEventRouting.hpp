@@ -101,7 +101,8 @@ struct UIPointerInputEvent final {
 };
 
 // Mutable callback-scope event. Input and route identity remain stable for one
-// dispatch; only propagation and transition-consumption decisions may change.
+// dispatch; only propagation, transition-consumption, continuous-control claim,
+// and cancelable default-action decisions may change.
 class UIRoutedPointerEvent final {
 public:
     UIRoutedPointerEvent(const UIRoutedPointerEvent&) = delete;
@@ -150,6 +151,13 @@ public:
         m_inputTransitionConsumed = true;
     }
 
+    // Prevents the cancelable Widget default action for this route. This is
+    // independent from propagation, transition consumption, and control claim.
+    constexpr void preventDefaultAction() noexcept
+    {
+        m_defaultActionPrevented = true;
+    }
+
     // Requests frame-local ownership of one button on this event's Window and
     // Pointer. This is independent from transition consumption: Runtime only
     // publishes the request when the final Platform snapshot still holds the
@@ -182,6 +190,11 @@ public:
         return m_inputTransitionConsumed;
     }
 
+    [[nodiscard]] constexpr bool isDefaultActionPrevented() const noexcept
+    {
+        return m_defaultActionPrevented;
+    }
+
 private:
     friend class UIContext;
     friend class Detail::UIRoutedPointerEventAccess;
@@ -211,6 +224,7 @@ private:
     bool m_propagationStopped = false;
     bool m_immediatePropagationStopped = false;
     bool m_inputTransitionConsumed = false;
+    bool m_defaultActionPrevented = false;
     std::bitset<Platform::PointerButtonCount> m_claimedPointerButtons{};
 };
 

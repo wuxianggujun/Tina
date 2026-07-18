@@ -63,8 +63,10 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
   Pointer policy/route-ancestry scratch、双缓冲 `UICommittedHitView`、无分配 `queryPointerHit()`、固定容量
   listener storage、generation-safe RAII listener token、48-byte fixed-inline `noexcept` callback 与 synthetic
   Capture→Target→Bubble route；M7-C1c-b3b 已实现 Runtime-private `UIInputRouteProducer`，M7-C1c-b3c 已把
-  primary-window `UIContext` owner/selection 与 producer 接入正式帧循环；持久 Pointer Capture、Focus/Modal
-  或 Button default action 仍未实现；
+  primary-window `UIContext` owner/selection 与 producer 接入正式帧循环；后续 Button default action
+  切片已实现 `PrimaryPointerId + PointerButton::Primary` 的 pressed/activation 状态机、retained
+  action setter/query 与 cancel/reset 清理；持久 Pointer Capture、Focus/Modal、Keyboard/Gamepad
+  activation 仍未实现；
 - M7-C1c-b3c 的 owner 在首次看到 primary `WindowId` 时惰性创建唯一 `UIContext`；Headless 绑定前传 null，
   绑定后 primary 消失或 generation 更换返回结构化失败，同一 ID 的 metrics/content scale/minimized 变化不重绑。
   Context 在 Render → Task → Platform → Clock module shutdown 前于 owner thread 销毁；owner 本身不调用
@@ -110,17 +112,17 @@ Runtime-private producer/primary Context 接线、Runtime-private 每帧 layout 
 primary-window seed + root-scoped phase capability、held primary Pointer Button claim bridge、SolidFill-only
 paint/DisplayList bridge、D0 submit-call-local primary-window UIDisplayList handoff、D1 bgfx consumption
 和 D2 `PrimaryWindowUITreeUpdater::setBoxPaint()` facade，以及后续 root-scoped
-`addRoutedPointerListener()` facade。
+`addRoutedPointerListener()` facade 与窄 Button default action。
 Panel/Label/Button 只是在 retained tree 中可创建的节点类型；当前只有 SolidFill panel 可见样例，
-还没有 Label 文本或 Button 默认行为。Key/Gamepad/axis claim、
+还没有 Label 文本或 Button 的 Keyboard/Gamepad activation、Disabled/theme 视觉和完整 facade。Key/Gamepad/axis claim、
 持久 Pointer Capture、Focus/Modal、Button
-default action、owning RenderFramePacket/FramePin、nested clip、dirty subtree pruning、text/glyph、FreeType、
+owning RenderFramePacket/FramePin、nested clip、dirty subtree pruning、text/glyph、FreeType、
 Image/Texture 与产品级 Widget UI 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或
 SolidFill 4-panel Desktop smoke 推断为已经实现。
 
-下一 UI 输入切片已经先冻结、尚待代码落地：producer 继续逐 raw ordinal 处理输入，在普通 Pointer route
+最新 UI 输入切片已落地：producer 继续逐 raw ordinal 处理输入，在普通 Pointer route
 完成后执行 Button 的 `PrimaryPointerId + PointerButton::Primary` default action；非 gamepad-only
-`InputCancelTransition` 与覆盖 primary window 的 `InputStreamReset` 则调用 UI-owned cancel seam 清除
+`InputCancelTransition` 与覆盖 primary window 的 `InputStreamReset` 会调用 UI-owned cancel seam 清除
 armed/pressed，不进入 routed listener、不伪造 Up。Button 产生的 consumption/claim 仍与 listener 结果合并，
 再统一交给 ActionMapper；失败仍推进 attempted frame/sequence watermark，已经发生的 listener/action 状态
 副作用不回滚也不允许同帧重放。
@@ -210,11 +212,12 @@ continuous-control producer：Move/Wheel/Button route 都可请求接管最终�
 primary-window UIDisplayList，并通过 `RenderFrame::primaryWindowUIDisplayList` 作为 submit-call-local
 borrow 交给 backend；backend 不得保留该 view、span 或元素指针。D1 的私有 bgfx backend 已消费
 SolidQuad DisplayList，D2 的 Game SDK facade 已能 author SolidFill box paint。当前 Game SDK listener
-extension 只提供低层 routed callback/claim seam，不等于 Button default action。Key/Gamepad/axis claim、
-Focus/Capture/Modal、Text/Glyph 与 Widget 默认行为仍后置。Gameplay Action
+extension 只提供低层 routed callback/claim seam；Button default action 后续已在同一 producer 阶段落地。
+Key/Gamepad/axis claim、Focus/Capture/Modal、Text/Glyph、Button Keyboard/Gamepad activation 与完整
+Widget 默认行为仍后置。Gameplay Action
 带目标 simulation tick，由 fixed loop 消费。
 
-已冻结的下一实现不会改变这个阶段顺序：Button default action 与 cancel/reset 清理都属于
+已实现的 Button default action 不改变这个阶段顺序：Button default action 与 cancel/reset 清理都属于
 `UIInputRouteProducer` 调用 `UIContext` 的阶段，发生在 ActionMapper 之前。`preventDefaultAction()` 只阻止
 Down arm 或 Up activation；stop、consume 与 claim 均不隐式等于 prevent-default，Up/cancel/reset 清理也
 不可被 listener 阻止。Action callback 只提交 State intent，不能直接执行状态栈命令或访问 Runtime owner。

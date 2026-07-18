@@ -7,6 +7,7 @@
 #include <tina/ui/UICommittedLayout.hpp>
 #include <tina/ui/UICommittedPaint.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
+#include <tina/ui/UIButton.hpp>
 #include <tina/ui/UIContextConfig.hpp>
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UIEventRouting.hpp>
@@ -38,6 +39,9 @@ struct UIContextStatistics final {
     usize routedPointerListenerCapacity = 0;
     usize activeRoutedPointerListenerCount = 0;
     usize routedPointerListenerHighWater = 0;
+    usize buttonActionCapacity = 0;
+    usize activeButtonActionCount = 0;
+    usize buttonActionHighWater = 0;
     usize liveNodeCount = 0;
     usize liveRootCount = 0;
     usize committedNodeCount = 0;
@@ -173,6 +177,11 @@ public:
         UINodeId node,
         UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setBoxPaint(UINodeId node, const UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setButtonAction(
+        UINodeId button,
+        UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status clearButtonAction(UINodeId button);
+    [[nodiscard]] Core::Result<bool> isButtonPressed(UINodeId button) const;
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
     addRoutedPointerListener(
         UIRoutedPointerListenerDesc descriptor,
@@ -239,6 +248,10 @@ public:
     // It performs at most one point query and never commits layout or hit data.
     [[nodiscard]] Core::Result<UIPointerRouteResult> routePointerInput(
         const UIPointerInputEvent& input);
+    // Clears retained Primary Pointer interaction state for the matching
+    // Window without synthesizing an Up event or invoking a Button action.
+    [[nodiscard]] Core::Status cancelPointerInteraction(
+        Platform::WindowId routedWindow);
     [[nodiscard]] UIContextStatistics statistics() const noexcept;
     [[nodiscard]] usize liveNodeCount() const noexcept;
     [[nodiscard]] usize liveRootCount() const noexcept;
@@ -271,6 +284,16 @@ private:
         UINodeId updaterRoot,
         UINodeId node,
         const UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setButtonActionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId button,
+        UIButtonActionCallback&& callback);
+    [[nodiscard]] Core::Status clearButtonActionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId button);
+    [[nodiscard]] Core::Result<bool> isButtonPressedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId button);
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
     addRoutedPointerListenerFromUpdater(
         UINodeId updaterRoot,

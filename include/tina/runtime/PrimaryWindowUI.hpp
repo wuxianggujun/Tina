@@ -2,6 +2,7 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/ui/UIButton.hpp>
 #include <tina/ui/UIContext.hpp>
 
 namespace Tina::Runtime::Detail {
@@ -31,6 +32,9 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setButtonAction(UI::UINodeId button, UI::UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status clearButtonAction(UI::UINodeId button);
+    [[nodiscard]] Core::Result<bool> isButtonPressed(UI::UINodeId button) const;
     [[nodiscard]] Core::Result<UI::UIRoutedPointerListenerToken>
     addRoutedPointerListener(UI::UIRoutedPointerListenerDesc descriptor, UI::UIRoutedPointerCallback callback);
     [[nodiscard]] Core::Status destroy(UI::UINodeId node);

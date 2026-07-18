@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/ui/InputRouting.hpp>
+#include <tina/ui/UIButton.hpp>
 #include <tina/ui/UIDirty.hpp>
 #include <tina/ui/UICommittedHit.hpp>
 #include <tina/ui/UICommittedLayout.hpp>

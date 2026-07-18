@@ -18,9 +18,13 @@
 > integration bridge、Game SDK scoped `setBoxPaint()` facade 与私有 bgfx SolidQuad UI Pass；Windows
 > Desktop 样例已经能在真实 D3D11 surface 上显示4个 retained SolidFill panel，并验证 alpha blend 与
 > framebuffer scissor。
-> Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、Button default action、Image/Text/Glyph
-> PaintCache、owning Runtime `RenderFramePacket`/FramePin、nested clip、dirty subtree pruning、文本 Glyph Atlas、Label 文本与
-> Button 默认行为尚未实现。Tina UI 是游戏内 Retained UI，
+> 后续 Button default action 切片已实现 `PrimaryPointerId + PointerButton::Primary` 的窄默认交互：
+> Button 默认 `Targetable`，Down/Move/Up 维护 pressed 状态，Up-inside 只激活一次；`preventDefaultAction()`
+> 独立于 stop/consume/claim；`setButtonAction()`、`clearButtonAction()` 与 `isButtonPressed()` 已通过
+> root-scoped facade 暴露；cancel/reset 清理状态但不合成 Up、不触发 action。
+> Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、Button Keyboard/Gamepad activation、
+> Disabled/theme 视觉、Image/Text/Glyph PaintCache、owning Runtime `RenderFramePacket`/FramePin、nested clip、
+> dirty subtree pruning、文本 Glyph Atlas、Label 文本与完整 Widget facade 尚未实现。Tina UI 是游戏内 Retained UI，
 > 不是 Immediate UI，也不是桌面编辑器工具包。
 
 ## 当前 Legacy 基线
@@ -144,6 +148,8 @@ struct UIPointerRouteResult;     // owning route result; not Runtime consumption
 class UIRoutedPointerListenerToken; // move-only RAII listener registration
 class UIRoutedPointerCallback;   // 48-byte fixed-inline noexcept callback
 struct UIRoutedPointerListenerDesc;
+struct UIButtonActionEvent;      // Button default action callback payload
+class UIButtonActionCallback;    // move-only 48-byte fixed-inline noexcept callback
 struct UISemanticsView;  // 只读 committed snapshot
 
 struct InputTransitionConsumptionView;
@@ -162,8 +168,9 @@ struct UIContextCapacityConfig; // focused public config；由 EngineConfig 持�
 `UINodeId.ownerWindow + generation`，Debug 额外携带 Engine/registry cookie 改善诊断；热点遍历在
 一次校验后只使用 UIContext 内部的紧凑 slot index。generation 回绕的 slot 永久 retire。
 
-M7-C1c-b3d2/D2 与后续 listener 扩展已落地的 Game SDK 访问形态如下（`TRY(expr)` 仅表示失败时立即返回
-`Error`；Label 文本内容、Button 默认行为与 `GameStateCommands` 仍属于后续切片）：
+M7-C1c-b3d2/D2、后续 listener 扩展与 Button default action 已落地的 Game SDK 访问形态如下
+（`TRY(expr)` 仅表示失败时立即返回 `Error`；Label 文本内容、Button Keyboard/Gamepad activation
+与 `GameStateCommands` 仍属于后续切片）：
 
 ```cpp
 class SettingsPanelState final : public Tina::IGameState {
@@ -183,15 +190,11 @@ public:
                                         .color = {.red = 28, .green = 92, .blue = 148, .alpha = 255},
                                     },
                                 }));
-        TRY(tree.setPointerHitPolicy(button_, Tina::UI::UIPointerHitPolicy::Targetable));
-        buttonPointerListener_ = TRY(tree.addRoutedPointerListener(
-            {.node = button_,
-             .kind = Tina::UI::UIRoutedPointerEventKind::ButtonDown,
-             .phases = Tina::UI::UIEventPhaseMask::Target},
-            Tina::UI::UIRoutedPointerCallback{
-                [this](Tina::UI::UIRoutedPointerEvent& event) noexcept {
+        TRY(tree.setButtonAction(
+            button_,
+            Tina::UI::UIButtonActionCallback{
+                [this](const Tina::UI::UIButtonActionEvent&) noexcept {
                     launchRequested_ = true;
-                    (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
                 }}));
         return Core::success();
     }
@@ -216,7 +219,6 @@ public:
     }
 
     void onExit(Tina::GameStateExitContext&) noexcept override {
-        buttonPointerListener_.reset();
         root_.reset();
     }
 
@@ -225,18 +227,17 @@ private:
     Tina::UI::UINodeId panel_{};
     Tina::UI::UINodeId label_{};
     Tina::UI::UINodeId button_{};
-    Tina::UI::UIRoutedPointerListenerToken buttonPointerListener_{};
     bool launchRequested_ = false;
 };
 ```
 
-当前 routed Pointer callback 只写 State intent/model；`IGameState::updateFrame()` 再提交未来的
+当前 routed Pointer callback 与 Button action callback 只写 State intent/model；`IGameState::updateFrame()` 再提交未来的
 `GameStateCommands`。回调不访问全局 Runtime，不直接 push/pop 状态，也不捕获 Phase Context 或 UI
-facade。State `onExit()` 必须先 reset listener token，再释放 root；token 自身不保活 Context/root。
+facade。State 如保存 listener token，`onExit()` 必须先 reset listener token，再释放 root；token 自身不保活 Context/root。
 
-Action 是节点拥有的 retained property：`setAction` 原子替换同 kind action，`clearAction`、节点
+Button action 是节点拥有的 retained property：`setButtonAction()` 原子替换，`clearButtonAction()`、节点
 删除或 root 注销负责撤销，不返回容易被临时析构的 RAII token。需要观察 Runtime EventBus 的
-非 UI 订阅仍使用独立 RAII token。当前低层 routed Pointer listener 使用
+非 UI 订阅仍使用独立 RAII token。低层 routed Pointer listener 使用
 `UIRoutedPointerListenerToken` 管理 callback registration；它与未来 retained Widget action、Runtime
 EventBus subscription 是三套不同生命周期，不能混用。
 
@@ -438,16 +439,17 @@ layout revision。虚拟列表只创建 visible + overscan item；100,000 行不
 
 本节分为已实现的 C1c-b2 synthetic route、C1c-b3b Runtime-private producer、C1c-b3c EngineHost 接线、
 C1c-b3d1 layout commit、C1c-b3d2 scoped Game SDK UI access、C1c-b3e Pointer-button claim
-和冻结的后续 Runtime 目标。C1c-b2 已提供 committed
+、后续 Game SDK listener facade、D0/D2 paint/display handoff，以及已实现的 Button default action。C1c-b2 已提供 committed
 hit/route-ancestry snapshot、纯 point query、固定容量 listener 注册与单条 synthetic Pointer input
 的 Capture→Target→Bubble 派发；C1c-b3b 已把 Move/Button/Wheel consume 生成 frame-local consumption
 view；该切片的 claims 当时为 `None`。C1c-b3c 已在 Runtime 内部拥有并选择 primary-window `UIContext`，每帧在
 同步 Platform lifecycle dispatch 之后、Gameplay ActionMapper 之前调用 producer。C1c-b3d2 已提供
 `onEnter` root 创建与 `updateUI` root-scoped tree mutation。C1c-b3e 已发布最终快照仍 held 的 primary
-Pointer Button claim 并接通 ActionMapper Cancel/suppression，但尚未实现 Key/Gamepad/axis claim producer、
-Focus/Capture/Modal、Button default action、Label 文本或可见 UI draw。
+Pointer Button claim 并接通 ActionMapper Cancel/suppression；后续 Button 切片已在同一 producer 阶段
+实现 primary Pointer 默认交互。Key/Gamepad/axis claim producer、Focus/Capture/Modal、Button
+Keyboard/Gamepad activation、Label 文本或完整可见 Widget draw 仍后置。
 
-ADR 0011 已冻结下一条 Button default action，当前设计提交仍不把它记为已实现：
+已实现的 Button default action 只覆盖第一条窄路径，不扩大为完整 Widget 系统：
 
 ```text
 Primary Down 命中 committed route 中最近的 Button
@@ -505,8 +507,8 @@ root-scoped、phase-epoch-scoped `PrimaryWindowUIRootBuilder`/`PrimaryWindowUITr
 tree owner 已接入。D2 又证明 scoped `setBoxPaint()`、私有 bgfx SolidQuad pass 与最小可见 retained panel
 链路已接通。后续 extension 又让同一个 root-scoped updater 注册 routed Pointer listener；返回 token 可由
 State 跨 phase 保存，而 facade/updater 仍在回调结束失效。EngineHost 门禁证明 listener 在 ActionMapper
-之前执行，claim-only callback 也可抑制同帧 Gameplay Action。它仍不证明 Widget 文本、默认交互、
-Focus/Capture/Modal、Text/Glyph 或完整产品 UI。
+之前执行，claim-only callback 也可抑制同帧 Gameplay Action。Button default action 后续复用该阶段；
+它仍不证明 Widget 文本、Keyboard/Gamepad activation、Focus/Capture/Modal、Text/Glyph 或完整产品 UI。
 
 Runtime 在每次状态命令提交后，根据 committed `GameStateStack`、`GameStatePolicy` 和 root
 registration 生成每窗口不可变 `UIInputScopeSnapshot`。它按视觉层级列出 eligible roots，并在
@@ -525,8 +527,9 @@ generation 校验且未被新 modal 覆盖时恢复焦点。状态命令在路�
   先记录 visited count，只有 profiling 证明需要才加分块索引；
 - route path 使用预配置 fixed-capacity scratch，超过最大树深返回 `CapacityExceeded`，不 heap fallback；
 - 每个路由阶段重新解析 UINodeId owner + generation；listener 按稳定注册顺序；
-- 当前 C1c-b2 只执行 Capture -> Target -> Bubble listener dispatch，不执行 Widget default action；
-- 下一 Button 切片在完整 listener propagation 之后执行上述窄 default action；没有 hit 的 Move/Up 仍会
+- C1c-b2 当时只执行 Capture -> Target -> Bubble listener dispatch；后续 Button 切片已在完整 listener
+  propagation 之后执行上述窄 default action；
+- 没有 hit 的 Move/Up 仍会
   更新或清理已有 armed state，因此不能从 `queryPointerHit()` miss 提前返回；
 - route 中新增 listener 从下一次 route 生效；删除/重置立即 tombstone，route cleanup 后回收 callback storage；
   root-scoped updater 注册会校验 current root/subtree，跨 root/stale generation 原子失败且不占 slot；
@@ -534,7 +537,7 @@ generation 校验且未被新 modal 覆盖时恢复焦点。状态命令在路�
   subtree 与 registration serial，重入释放 root/节点会回滚整个 registration。callback operation 中销毁
   `UIContext` 触发生命周期 terminate；
 - 目标后续才保存 Pointer Capture；当前 synthetic route 只支持 primary pointer，不把预留字段宣称为触摸支持；
-- Focus、Modal、Keyboard、Gamepad Accept/BackNavigation 与 Button default action 后续复用同一生命周期。
+- Focus、Modal、Keyboard、Gamepad Accept/BackNavigation 与 Button 后续完整 Widget 生命周期复用同一清理模型。
 
 UI 返回只属于当前 Platform frame 的 `Tina::UI::InputTransitionConsumptionView`，以及当帧
 `Tina::UI::ContinuousControlClaimsView`。这些 view 的 ABI 归 `tina_ui` 拥有，Runtime ActionMapper
@@ -547,8 +550,9 @@ ActionMapper；Headless bind 前和当前无 root 的 Context 都自然得到无
 两份 `None`。本帧稍后的 b3d1 layout commit 不改变已经完成的 route 结果。独立
 `tina_runtime_ui_tests` 直接运行 GoogleTest，不通过 CTest；当前 Game SDK 能创建/更新 retained root，
 D0 也已提交借用式 primary-window UIDisplayList，D2 已补 scoped `setBoxPaint()` 并由 Desktop 样例证明
-可见 SolidFill panel；后续 listener extension 只增加低层 routed callback/claim seam。它仍不构成
-可交互 Widget、Label/Button 文本、Focus/Capture/Modal、Text/Glyph 或 Scene UI overlay 的完成证据。
+可见 SolidFill panel；后续 listener extension 只增加低层 routed callback/claim seam，Button default action
+只增加 primary Pointer 的 pressed/activation 状态机。它仍不构成完整可交互 Widget、Label/Button 文本、
+Keyboard/Gamepad activation、Focus/Capture/Modal、Text/Glyph 或 Scene UI overlay 的完成证据。
 
 ## PaintCache、DisplayList 与批处理
 
@@ -727,23 +731,26 @@ generation-safe target invalidation、listener 容量原子失败与复用、rou
 callback、token move/context-destroyed/off-thread reset、callback root 自销毁、route 中 commit 拒绝、
 错误销毁 context 的 death test、300次 route 零新增 supplied UI PMR allocation/不改变 committed state，
 以及递归 route 拒绝。M7-C1c-b3d2 另补3项低层 `UITreeUpdater` 子节点创建/跨 root/失效 root 测试；
-M7-C1c-b3e 再补3项 claim 合并/非法值/无命中测试。SolidFill paint 切片新增11项测试，覆盖确定性
+M7-C1c-b3e 再补3项 claim 合并/非法值/无命中测试。Button default action 切片新增14项，覆盖默认
+`Targetable`、Down/Move/Up pressed 与一次 activation、Up outside、nearest Button ancestor、
+`preventDefaultAction()`、set/replace/clear、容量、route 中 mutation、callback 自毁、cancel/reset 清理和
+300次 repeated click 零新增 supplied PMR。SolidFill paint 切片新增11项测试，覆盖确定性
 premultiplication、visible/transparent 筛选、paint-only/no-op revision、四份 snapshot rollback、固定容量与
 supplied PMR。后续 listener extension 再补 root-scoped/cross-root 原子注册、callback move 释放 root 的
-事务回滚，以及 callback move 销毁 Context 的 death test。最新 Windows MSVC 19.50 / CMake 4.2.3
-Debug `tina_ui_tests` 为95/95；上一轮 Windows Release、Linux GCC 13.4、Linux Clang 22.1.8 +
+事务回滚，以及 callback move 销毁 Context 的 death test。本轮 Button default action 后又有新增
+UI 用例，当前 Windows Debug `tina_ui_tests` 为109/109；上一轮 Windows Release、Linux GCC 13.4、Linux Clang 22.1.8 +
 libstdc++15.2 ASan/UBSan/LSan 仍为92/92，且 Clang 无 sanitizer 诊断，本轮没有重跑这些图。初次 GCC
 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
 Render builder 的11项测试随 Windows Debug、Linux GCC/Clang `tina_tests` 205/205 通过；D0 后
 Windows Debug/Release 基础测试增至207/207，`tina_runtime_ui_tests` 在 D2 增至53/53，并且 Null 样例
-300帧通过。listener extension 的最新 Windows Debug 又增至基础208/208、Runtime→UI55/55，并重跑
+300帧通过。Button default action 切片的 Windows Debug 增至基础208/208、Runtime→UI60/60，并重跑
 Null样例300帧；本轮未重跑 Release 或 Linux。独立 UI→Render bridge 的12项直接 GoogleTest 在前序 Windows Debug/Release 与两条 Linux 图均通过。
 Linux Null 样例各运行300帧，Clang 无 sanitizer 诊断。D1 的私有 bgfx 几何测试覆盖 SolidQuad 展开为
 4顶点/6个32位索引、ABGR 颜色、容量失败不写入、非法命令预检和连续300次复用 caller-owned storage；
 Windows bgfx 专项增至16/16。D2 Desktop 样例在 Windows D3D11 上验证4个 retained SolidFill panel 可见、
 alpha blend、右侧 scissor clip 和 root 回收。Linux 对 D1/D2 的真实 bgfx UI pass 与可见样例尚未复验。
 这些结果尚未证明 dirty leaf 不扫描无关 subtree，也未覆盖 Image/Text/Glyph PaintCache、FramePin、
-owning Runtime packet、Widget default action、Label/Button 文本或完整产品 UI。M7-C1c-b3c 只补上 Runtime 私有
+owning Runtime packet、Label/Button 文本、Button Keyboard/Gamepad activation 或完整产品 UI。M7-C1c-b3c 只补上 Runtime 私有
 primary-window Context 生命周期与 producer 顺序；M7-C1c-b3d1 只补上容量配置与 phase-driven layout
 commit；M7-C1c-b3d2 只扩大到 scoped Game SDK root/updater，D0 只扩大到 submit-call-local DisplayList
 handoff，D2 才扩大到 SolidFill paint authoring 与最小可见 retained panel，但不扩大到完整 Widget 行为。
@@ -791,11 +798,14 @@ handoff，D2 才扩大到 SolidFill paint authoring 与最小可见 retained pan
     SolidFill panel，并验证 alpha/scissor/root 回收；
 15. 已完成 Game SDK root-scoped `addRoutedPointerListener()`、跨 phase token 生命周期、callback move
     重入回滚，以及 claim-before-ActionMapper 端到端门禁；
-16. 实现 Key/Gamepad claim producer、dirty subtree pruning、完整 Widget authoring、owning
+16. 已完成 `PrimaryPointerId + PointerButton::Primary` 窄 Button default action、retained
+    `setButtonAction()`/`clearButtonAction()` 与 `isButtonPressed()` facade、cancel/reset 清理和 Runtime
+    producer 合并；
+17. 实现 Key/Gamepad claim producer、dirty subtree pruning、完整 Widget authoring、owning
     RenderFramePacket 与 FramePin；
-17. 完成 Image/Text/Glyph PaintCache、text layout + glyph atlas；
-18. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
-19. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
-20. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
+18. 完成 Image/Text/Glyph PaintCache、text layout + glyph atlas；
+19. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button Keyboard/Gamepad activation；
+20. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
+21. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
 
 所以“完善 UI”首先是完成正确的数据和 backend 边界，然后才是增加 Widget 数量。

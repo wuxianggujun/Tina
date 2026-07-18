@@ -11,6 +11,7 @@ struct UIContextCapacityConfig final {
     static constexpr usize MaxNodeCapacity = 1'048'576;
     static constexpr usize MaxRootCapacity = 4096;
     static constexpr usize MaxRoutedPointerListenerCapacity = 1'048'576;
+    static constexpr usize MaxButtonActionCapacity = 1'048'576;
 
     usize nodeCapacity = DefaultNodeCapacity;
     usize rootCapacity = DefaultRootCapacity;
@@ -28,6 +29,10 @@ struct UIContextCapacityConfig final {
     // independently because one node can own listeners for several events.
     usize routePathCapacity = 0;
     usize routedPointerListenerCapacity = 0;
+    // Zero derives from nodeCapacity. One additional internal transaction slot
+    // is reserved so an action can be replaced while this published capacity
+    // is full without exposing a partial property update.
+    usize buttonActionCapacity = 0;
 };
 
 [[nodiscard]] Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& config);

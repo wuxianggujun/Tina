@@ -53,6 +53,13 @@ class PrimaryWindowUICapabilityTest : public testing::Test {
     return paint;
 }
 
+[[nodiscard]] UI::UIButtonActionCallback buttonAction(usize& activationCount) noexcept
+{
+    return UI::UIButtonActionCallback{[&activationCount](const UI::UIButtonActionEvent&) noexcept {
+        ++activationCount;
+    }};
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAndExpiresUnconditionally)
 {
     CapabilityState state;
@@ -84,6 +91,130 @@ TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAnd
     auto expiredBuilder = builder->createRoot();
     ASSERT_FALSE(expiredBuilder.has_value());
     EXPECT_EQ(expiredBuilder.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, ButtonActionFacadeSetsReplacesClearsAndQueriesInitialPressedState)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto button = tree->createButton(root->rootNodeId());
+    ASSERT_TRUE(button.has_value()) << button.error().message;
+
+    auto initialPressed = tree->isButtonPressed(*button);
+    ASSERT_TRUE(initialPressed.has_value()) << initialPressed.error().message;
+    EXPECT_FALSE(*initialPressed);
+
+    usize firstActivationCount = 0;
+    usize replacementActivationCount = 0;
+    ASSERT_TRUE(tree->setButtonAction(*button, buttonAction(firstActivationCount)).has_value());
+    ASSERT_TRUE(tree->setButtonAction(*button, buttonAction(replacementActivationCount)).has_value());
+    auto stillNotPressed = tree->isButtonPressed(*button);
+    ASSERT_TRUE(stillNotPressed.has_value()) << stillNotPressed.error().message;
+    EXPECT_FALSE(*stillNotPressed);
+    ASSERT_TRUE(tree->clearButtonAction(*button).has_value());
+    EXPECT_EQ(firstActivationCount, 0U);
+    EXPECT_EQ(replacementActivationCount, 0U);
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, ButtonActionFacadeExpiresWithItsPhase)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto button = tree->createButton(root->rootNodeId());
+    ASSERT_TRUE(button.has_value()) << button.error().message;
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+
+    usize activationCount = 0;
+    Core::Status expiredSet = tree->setButtonAction(*button, buttonAction(activationCount));
+    ASSERT_FALSE(expiredSet.has_value());
+    EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredClear = tree->clearButtonAction(*button);
+    ASSERT_FALSE(expiredClear.has_value());
+    EXPECT_EQ(expiredClear.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredPressed = tree->isButtonPressed(*button);
+    ASSERT_FALSE(expiredPressed.has_value());
+    EXPECT_EQ(expiredPressed.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, ButtonActionWrongRootFailureIsStickyAndPreventsLaterMutation)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto firstRoot = builder->createRoot();
+    auto secondRoot = builder->createRoot();
+    ASSERT_TRUE(firstRoot.has_value()) << firstRoot.error().message;
+    ASSERT_TRUE(secondRoot.has_value()) << secondRoot.error().message;
+    auto firstTree = builder->treeUpdater(*firstRoot);
+    ASSERT_TRUE(firstTree.has_value()) << firstTree.error().message;
+    auto secondTree = builder->treeUpdater(*secondRoot);
+    ASSERT_TRUE(secondTree.has_value()) << secondTree.error().message;
+    auto firstButton = firstTree->createButton(firstRoot->rootNodeId());
+    auto secondButton = secondTree->createButton(secondRoot->rootNodeId());
+    ASSERT_TRUE(firstButton.has_value()) << firstButton.error().message;
+    ASSERT_TRUE(secondButton.has_value()) << secondButton.error().message;
+
+    usize activationCount = 0;
+    Core::Status wrongRoot = firstTree->setButtonAction(*secondButton, buttonAction(activationCount));
+    ASSERT_FALSE(wrongRoot.has_value());
+    EXPECT_EQ(wrongRoot.error().code, UI::UIErrorCode::InvalidNode);
+
+    Core::Status otherwiseValid = firstTree->clearButtonAction(*firstButton);
+    ASSERT_FALSE(otherwiseValid.has_value());
+    EXPECT_EQ(otherwiseValid.error().code, wrongRoot.error().code);
+    EXPECT_EQ(otherwiseValid.error().message, wrongRoot.error().message);
+
+    auto finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish.has_value());
+    EXPECT_EQ(finish.error().code, UI::UIErrorCode::InvalidNode);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, ButtonActionWrongKindFailureIsStickyAndPreventsPressedQuery)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto panel = tree->createPanel(root->rootNodeId());
+    auto button = tree->createButton(root->rootNodeId());
+    ASSERT_TRUE(panel.has_value()) << panel.error().message;
+    ASSERT_TRUE(button.has_value()) << button.error().message;
+
+    usize activationCount = 0;
+    Core::Status wrongKind = tree->setButtonAction(*panel, buttonAction(activationCount));
+    ASSERT_FALSE(wrongKind.has_value());
+    EXPECT_EQ(wrongKind.error().code.domain, Core::ErrorDomain::UI);
+
+    auto otherwiseValid = tree->isButtonPressed(*button);
+    ASSERT_FALSE(otherwiseValid.has_value());
+    EXPECT_EQ(otherwiseValid.error().code, wrongKind.error().code);
+    EXPECT_EQ(otherwiseValid.error().message, wrongKind.error().message);
+
+    auto finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish.has_value());
+    EXPECT_EQ(finish.error().code, wrongKind.error().code);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, RoutedPointerListenerSurvivesItsRegistrationPhase)

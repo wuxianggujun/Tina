@@ -108,8 +108,10 @@ sanitizer 的 `tina_ui_tests` 均为92/92。Render builder 的11项测试已随 
 `tina_tests` 205/205 通过；D0 后 Windows Debug/Release 基础测试增至207/207。独立 bridge 的12项在 Windows
 Debug/Release 与两条 Linux 图均通过，覆盖 logical→framebuffer
 outward rounding/clamp、冗余/空 clip、严格 paint order、容量/输入失败与完整 transaction rollback。
-这些结果不证明持久 Pointer Capture、Focus/Modal、Button default action、Image/Text/Glyph、owning
-Runtime packet/FramePin 或可见 Widget 已完成；D1/D2 的可见 SolidFill panel 由 Desktop bgfx 门禁单独覆盖。
+本轮 Button default action Windows Debug 已把独立 UI 门禁增至109/109，覆盖默认 `Targetable`、
+primary Pointer pressed/activation、`preventDefaultAction()`、set/replace/clear、cancel/reset 与 PMR 复用。
+这些结果不证明持久 Pointer Capture、Focus/Modal、Button Keyboard/Gamepad activation、Image/Text/Glyph、owning
+Runtime packet/FramePin 或完整可见 Widget 已完成；D1/D2 的可见 SolidFill panel 由 Desktop bgfx 门禁单独覆盖。
 
 ## Windows vNext Runtime→UI producer、primary-window owner、layout coordinator、scoped Game SDK UI access 与 Pointer Button claim bridge
 
@@ -161,8 +163,9 @@ primary-window UIDisplayList，并把它作为 `RenderFrame` 的 submit-call-loc
 Headless、0 framebuffer 与 suspended surface 发布空 list；构建失败不保留旧 publication 或截断 list。
 D2 又把 `setBoxPaint()` 暴露到 scoped `PrimaryWindowUITreeUpdater`，并覆盖 phase expiry、
 wrong-context/stale-generation sticky failure。D2 后 Windows MSVC 19.50 / CMake 4.2.3 Debug/Release 的
-`tina_runtime_ui_tests` 均为53/53。正式样例仍没有 Widget 文本、Button 默认行为、Focus/Capture/Modal、
-Text/Glyph 或完整产品 UI；最小可见 SolidFill panel 由 Desktop bgfx 样例单独证明。该 target 直接运行
+`tina_runtime_ui_tests` 均为53/53；本轮 Button default action Windows Debug 增至60/60。正式样例仍没有
+Widget 文本、Button Keyboard/Gamepad activation、Focus/Capture/Modal、Text/Glyph 或完整产品 UI；最小可见
+SolidFill panel 由 Desktop bgfx 样例单独证明。该 target 直接运行
 GoogleTest，不使用 CTest。
 
 ## Windows vNext GLFW Platform 与 Desktop bgfx

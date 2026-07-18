@@ -293,6 +293,39 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
     bool anyConsumed = false;
     for (usize ordinal = 0; ordinal < transitions.size(); ++ordinal)
     {
+        if (const auto* cancel =
+                std::get_if<Platform::InputCancelTransition>(
+                    &transitions[ordinal].payload);
+            cancel != nullptr) {
+            if (!cancel->gamepad.has_value()
+                && cancel->routedWindow == context->ownerWindow()) {
+                Core::Status cancelStatus =
+                    context->cancelPointerInteraction(cancel->routedWindow);
+                if (!cancelStatus) {
+                    Core::Error error = std::move(cancelStatus.error());
+                    error.addContext("UIInputRouteProducer::produce(cancel)");
+                    return Core::failure(std::move(error));
+                }
+            }
+            continue;
+        }
+        if (const auto* reset =
+                std::get_if<Platform::InputStreamReset>(
+                    &transitions[ordinal].payload);
+            reset != nullptr) {
+            if (!reset->routedWindow.has_value()
+                || *reset->routedWindow == context->ownerWindow()) {
+                Core::Status cancelStatus =
+                    context->cancelPointerInteraction(context->ownerWindow());
+                if (!cancelStatus) {
+                    Core::Error error = std::move(cancelStatus.error());
+                    error.addContext("UIInputRouteProducer::produce(reset)");
+                    return Core::failure(std::move(error));
+                }
+            }
+            continue;
+        }
+
         const std::optional<UI::UIPointerInputEvent> input =
             makePointerInput(platformFrame.id(), ordinal, transitions[ordinal]);
         if (!input.has_value())

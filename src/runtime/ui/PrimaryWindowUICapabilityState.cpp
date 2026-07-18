@@ -292,6 +292,56 @@ Core::Status PrimaryWindowUICapabilityState::setBoxPaint(u64 epoch, PrimaryWindo
     return Core::success();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setButtonAction(u64 epoch, PrimaryWindowUIPhase phase,
+                                                             UI::UITreeUpdater& updater, UI::UINodeId button,
+                                                             UI::UIButtonActionCallback callback)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setButtonAction";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setButtonAction(button, std::move(callback));
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearButtonAction(u64 epoch, PrimaryWindowUIPhase phase,
+                                                               UI::UITreeUpdater& updater, UI::UINodeId button)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearButtonAction";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearButtonAction(button);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isButtonPressed(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                   const UI::UITreeUpdater& updater,
+                                                                   UI::UINodeId button)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isButtonPressed";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto pressed = updater.isButtonPressed(button);
+    if (!pressed)
+    {
+        return Core::failure(rememberFirstError(std::move(pressed.error()), Operation));
+    }
+    return *pressed;
+}
+
 Core::Result<UI::UIRoutedPointerListenerToken> PrimaryWindowUICapabilityState::addRoutedPointerListener(
     u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UIRoutedPointerListenerDesc descriptor,
     UI::UIRoutedPointerCallback callback)

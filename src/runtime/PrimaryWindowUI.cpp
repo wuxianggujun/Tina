@@ -109,6 +109,33 @@ Core::Status PrimaryWindowUITreeUpdater::setBoxPaint(UI::UINodeId node, const UI
     return m_state->setBoxPaint(m_epoch, m_phase, m_updater, node, paint);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setButtonAction(UI::UINodeId button, UI::UIButtonActionCallback callback)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setButtonAction");
+    }
+    return m_state->setButtonAction(m_epoch, m_phase, m_updater, button, std::move(callback));
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearButtonAction(UI::UINodeId button)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearButtonAction");
+    }
+    return m_state->clearButtonAction(m_epoch, m_phase, m_updater, button);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isButtonPressed(UI::UINodeId button) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isButtonPressed");
+    }
+    return m_state->isButtonPressed(m_epoch, m_phase, m_updater, button);
+}
+
 Core::Result<UI::UIRoutedPointerListenerToken>
 PrimaryWindowUITreeUpdater::addRoutedPointerListener(UI::UIRoutedPointerListenerDesc descriptor,
                                                      UI::UIRoutedPointerCallback callback)

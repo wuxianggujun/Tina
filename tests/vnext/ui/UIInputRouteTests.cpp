@@ -388,6 +388,7 @@ TEST_F(UIInputRouteTest, PointerButtonClaimRejectsInvalidButton)
          .phases = UI::UIEventPhaseMask::Target},
         UI::UIRoutedPointerCallback{
             [&rejectedInvalidButton](UI::UIRoutedPointerEvent& event) noexcept {
+                event.preventDefaultAction();
                 rejectedInvalidButton = !event.claimPointerButton(
                     static_cast<Platform::PointerButton>(
                         Platform::PointerButtonCount));

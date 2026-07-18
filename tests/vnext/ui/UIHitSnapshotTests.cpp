@@ -647,6 +647,7 @@ TEST_F(UIHitSnapshotTest, QueryPointerHitSkipsAnIgnoredFrontmostEntry)
     assertOk(updater.setLayoutStyle(lower, overlap));
     assertOk(updater.setLayoutStyle(ignoredUpper, overlap));
     assertOk(updater.setPointerHitPolicy(lower, UI::UIPointerHitPolicy::Targetable));
+    assertOk(updater.setPointerHitPolicy(ignoredUpper, UI::UIPointerHitPolicy::Ignore));
     assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
 
     const UI::UIPointerHitQueryResult result = context->queryPointerHit({10.0F, 10.0F});

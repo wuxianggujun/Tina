@@ -598,8 +598,11 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
    Runtime-private producer，M7-C1c-b3c 已完成 primary-window `UIContext` owner/selection 与 EngineHost
    接线，M7-C1c-b3d1 已完成容量配置与 Runtime-private layout coordinator，M7-C1c-b3d2 已完成
    startup primary-window metrics seed 与 root-scoped、phase-epoch-scoped Game SDK access，M7-C1c-b3e 已完成
-   held primary Pointer Button claim bridge。后续继续推进 Key/Gamepad/axis claims、focus/capture/widget、
-   dirty subtree pruning 与 DisplayList、Label/Button/Modal + FreeType、bgfx UI pass、IMM32/Gamepad/DPI 门禁；
+   held primary Pointer Button claim bridge，后续 listener facade 与 Button default action 切片又完成
+   root-scoped listener registration、claim-before-ActionMapper、`PrimaryPointerId + PointerButton::Primary`
+   pressed/activation、retained action property 和 cancel/reset 清理。后续继续推进 Key/Gamepad/axis claims、
+   focus/capture/widget、Button Keyboard/Gamepad activation、dirty subtree pruning、Label/Button/Modal +
+   FreeType、owning Runtime packet/FramePin、IMM32/Gamepad/DPI 门禁；
 5. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；
 6. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D
    样例；

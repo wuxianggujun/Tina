@@ -147,9 +147,10 @@ M7-C1c-b3d2 的 UI 能力是 phase-scoped facade，不是 `UIContext*`：
 - `UIUpdateContext::primaryWindowUITreeUpdater(root_)` 只允许修改该 root 的 subtree；
 - facade 是 move-only、callback-scoped，回调结束、错误回滚或异常边界 `abortPhase()` 后统一失效；
 - phase 内首个 UI tree 错误 sticky，后续 mutation 不继续扩大半失败状态；
-- 当前可创建 Panel/Label/Button 节点并设置 layout/hit policy，但 Label 文本、Button 默认 action、
-  Focus/Capture/Modal、Game SDK paint setter 和 bgfx UI pass 仍未实现。D0 的 DisplayList handoff 是
-  Runtime 内部从已提交 paint snapshot 构建的 submit-call-local borrow，不是游戏侧可见 Widget 能力。
+- 当前可创建 Panel/Label/Button 节点并设置 layout/hit policy、SolidFill box paint 与 primary Pointer
+  Button action，但 Label 文本、Button Keyboard/Gamepad activation、Focus/Capture/Modal 和完整 Widget
+  facade 仍未实现。D0 的 DisplayList handoff 是 Runtime 内部从已提交 paint snapshot 构建的
+  submit-call-local borrow，不是游戏侧完整 Widget 能力。
 
 ## State 结构变化
 

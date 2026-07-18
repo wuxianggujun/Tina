@@ -51,6 +51,12 @@ class PrimaryWindowUICapabilityState final {
                                                    UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setBoxPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                            UI::UINodeId node, const UI::UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setButtonAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                               UI::UINodeId button, UI::UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status clearButtonAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                 UI::UINodeId button);
+    [[nodiscard]] Core::Result<bool> isButtonPressed(u64 epoch, PrimaryWindowUIPhase phase,
+                                                     const UI::UITreeUpdater& updater, UI::UINodeId button);
     [[nodiscard]] Core::Result<UI::UIRoutedPointerListenerToken>
     addRoutedPointerListener(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                              UI::UIRoutedPointerListenerDesc descriptor, UI::UIRoutedPointerCallback callback);

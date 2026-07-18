@@ -43,6 +43,11 @@ Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& conf
     {
         return invalidContextConfig("UI routed pointer listener capacity exceeds the configured maximum");
     }
+    if (config.buttonActionCapacity > UIContextCapacityConfig::MaxButtonActionCapacity
+        || exceedsNodeCapacity(config.buttonActionCapacity))
+    {
+        return invalidContextConfig("UI Button action capacity exceeds the configured maximum");
+    }
 
     return Core::success();
 }

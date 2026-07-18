@@ -176,16 +176,18 @@ structure/layout/hit/paint 四份 snapshot，paint-only commit 不执行 layout 
 axis-aligned clip interning、相邻兼容 batching、paint checksum、剪枝和整帧 rollback。独立
 `Tina::UIRenderIntegration` target 负责 logical→framebuffer outward rounding/clamp 与完整 builder transaction；
 Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Linux Clang 22 sanitizer 的12项直接 GoogleTest
-均通过，Clang 无诊断。持久 Pointer Capture、Focus/Modal、
-Button default action、Image/Text/Glyph PaintCache、Runtime `RenderFramePacket`、
-dirty subtree pruning 与 nested clip 尚未实现，不能把最小 SolidFill 数据管线误写成完整 Widget UI。D0 后续已
+均通过，Clang 无诊断。后续 Button default action 切片已实现
+`PrimaryPointerId + PointerButton::Primary` 的窄 pressed/activation、retained action property 与
+cancel/reset 清理。持久 Pointer Capture、Focus/Modal、Button Keyboard/Gamepad activation、
+Image/Text/Glyph PaintCache、Runtime `RenderFramePacket`、dirty subtree pruning 与 nested clip 尚未实现，
+不能把最小 SolidFill 数据管线误写成完整 Widget UI。D0 后续已
 把 committed paint 经 Runtime-private `PrimaryWindowUIDisplayCoordinator` 构建为 primary-window
 `UIDisplayListView`，并以 `RenderFrame::primaryWindowUIDisplayList` 的 submit-call-local borrow
 提交；Headless、0 framebuffer 与 suspended 发布空 list，失败不保留旧 publication 或截断 list。
 随后 D1 已让私有 bgfx backend 消费 SolidQuad DisplayList，D2 已让
 `PrimaryWindowUITreeUpdater::setBoxPaint()` 进入 Game SDK facade 并跑通 Desktop 4-panel visible sample。
-该结果仍不等价于 owning RenderFramePacket、FramePin、Text/Glyph、Label 文本、Button 默认行为、
-Image/Texture 或完整 Widget UI。
+该结果仍不等价于 owning RenderFramePacket、FramePin、Text/Glyph、Label 文本、Button
+Keyboard/Gamepad activation、Image/Texture 或完整 Widget UI。
 
 ### 实施与验证
 
@@ -212,7 +214,7 @@ Image/Texture 或完整 Widget UI。
 | Backend 组合 | [Accepted](adr/0003-backend-factories.md) | `Create(config, factories)`；M7-B1 已使用 Independent 或 WindowSurface 的 tagged composition，M7-B2 在该组合上接入私有 bgfx，bootstrap 只选 factory、EngineHost 唯一创建/回滚 owner | 消除 Runtime 对具体 backend 依赖与 lease 接线歧义 |
 | Runtime/State | [Accepted](adr/0014-runtime-phase-and-state.md) | `IGameApplication` lifecycle-only + `IGameState` 唯一帧入口；Frame Update 后提交状态命令 | 消除名称歧义、双帧入口与首帧 UI 时序冲突 |
 | RenderFrame/Surface 所有权 | [Accepted](adr/0020-window-surface-handoff.md) | bgfx backend 在 factory 成功后持有 move-only window surface lease；后续 Runtime packet 切片按契约持有 owning RenderFramePacket，Render SPI 只暴露纯 Tina view/pin sink | 消除 native 泄漏、依赖环、backend 越界与在途 UAF |
-| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | M7-C1b 至 C1c-b3e 已完成 Flex-lite layout、committed hit/query/route、Runtime owner/layout/startup capability 与 held primary Pointer Button claim；后续又完成 SolidFill-only committed paint、Render-owned 单帧 SolidQuad DisplayList builder 及独立 UI→Render integration bridge。D0 已把 primary-window DisplayList 作为 `RenderFrame` submit-call-local borrow 接入 Runtime 正式帧，backend 禁止保留；Headless、0 framebuffer 与 suspended 发布空 list，失败不保留旧/截断 publication。D1 已让私有 bgfx SolidQuad pass 消费该 DisplayList；D2 已通过 Game SDK `setBoxPaint()` 和 Desktop 4-panel visible sample 验证 SolidFill 可见路径。下一实现切片已冻结 `PrimaryPointerId + PointerButton::Primary` 的 Button armed/pressed/Up activation、`preventDefaultAction()`、retained action property、固定容量事务 slot 与 cancel/reset 清理，但本设计提交尚未把它写成已实现事实。`commitLayout()` 成功时原子发布 structure/layout/hit/paint 四份 snapshot；bridge 的 Windows MSVC 19.50 Debug/Release、Linux GCC/Clang sanitizer 直接 GoogleTest 均为12/12。D1/D2 Windows Debug/Release 已通过 Runtime→UI53/53、bgfx16/16、bridge12/12和 Desktop visible smoke Debug1200/Release300；Linux D1/D2 尚未重跑。changed frame 全树 Measure/Arrange 仍需收敛；Key/Gamepad/axis claims、Pointer Capture/Focus/Modal、Button Keyboard/Gamepad activation、Image/Text/Glyph PaintCache、owning Runtime packet/FramePin 与 nested clip 后置 | 高性能且保持命中/透明顺序，同时让 UI/Render 双方无反向依赖 |
+| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | M7-C1b 至 C1c-b3e 已完成 Flex-lite layout、committed hit/query/route、Runtime owner/layout/startup capability 与 held primary Pointer Button claim；后续又完成 SolidFill-only committed paint、Render-owned 单帧 SolidQuad DisplayList builder 及独立 UI→Render integration bridge。D0 已把 primary-window DisplayList 作为 `RenderFrame` submit-call-local borrow 接入 Runtime 正式帧，backend 禁止保留；Headless、0 framebuffer 与 suspended 发布空 list，失败不保留旧/截断 publication。D1 已让私有 bgfx SolidQuad pass 消费该 DisplayList；D2 已通过 Game SDK `setBoxPaint()` 和 Desktop 4-panel visible sample 验证 SolidFill 可见路径。后续 Button default action 切片已实现 `PrimaryPointerId + PointerButton::Primary` 的 Button armed/pressed/Up activation、`preventDefaultAction()`、retained action property、固定容量事务 slot 与 cancel/reset 清理；Game SDK 取得 root-scoped set/clear/query facade，producer 在 ActionMapper 前合并 default action 与 listener 的 consumption/claim。`commitLayout()` 成功时原子发布 structure/layout/hit/paint 四份 snapshot；bridge 的 Windows MSVC 19.50 Debug/Release、Linux GCC/Clang sanitizer 直接 GoogleTest 均为12/12。D1/D2 Windows Debug/Release 已通过 Runtime→UI53/53、bgfx16/16、bridge12/12和 Desktop visible smoke Debug1200/Release300；本轮 Button default action Windows Debug 已通过基础208/208、UI109/109、Runtime→UI60/60与 Null 300帧，Linux D1/D2 尚未重跑。changed frame 全树 Measure/Arrange 仍需收敛；Key/Gamepad/axis claims、Pointer Capture/Focus/Modal、Button Keyboard/Gamepad activation、Disabled/theme 视觉、Image/Text/Glyph PaintCache、owning Runtime packet/FramePin 与 nested clip 后置 | 高性能且保持命中/透明顺序，同时让 UI/Render 双方无反向依赖 |
 | UI startup/root capability | [Accepted](adr/0021-runtime-ui-startup-capability.md) | Platform backend 提供不 poll、不消费 frame id 的 `initialPrimaryWindowMetrics` seed；Runtime 在 `onEnter` 前创建 primary Context 并提交首份 structure/layout/hit/paint snapshot。Game SDK 只取得 root-scoped、phase-epoch-scoped 的 `PrimaryWindowUIRootBuilder`/`PrimaryWindowUITreeUpdater`；facade 通过 owner thread、phase epoch、root owner 与 subtree containment 校验，回调结束后无条件失效，第一次 capability error 作为 sticky phase error 合并；不暴露裸 `UIContext*`。D2 后续扩展 `setBoxPaint()`；本轮后续扩展 `addRoutedPointerListener()`，其 token 是唯一可跨 phase 保存的 listener 对象但不保活 Context/root，State 在 `onExit()` 先 reset token 再释放 root | 让 ADR 0014 的 initial UI transaction 可落地，同时避免丢失首帧输入或扩大 Game SDK owner 权限 |
 | Frame/Input | [Accepted](adr/0015-input-and-fixed-step.md) | 保序 PlatformFrame、UI transition consumption + continuous claims；Action 分 Simulation/Frame domain；每个 substep 独立 commit | 防输入穿透、0步帧丢边沿、双重执行和追赶步错误 |
 | C++ exception | [Accepted](adr/0004-exceptions-and-errors.md) | 编译开启；公共 API 用 Result/Status，Engine/Frame/Worker/C callback 边界捕获 | pmr/第三方兼容、错误边界 |
@@ -285,6 +287,6 @@ Game SDK `setBoxPaint()` facade 与 Desktop 4-panel visible sample。
 后续独立切片已补 `PrimaryWindowUITreeUpdater::addRoutedPointerListener()`、root/subtree 原子注册、
 callback move 重入回滚与 EngineHost claim-before-ActionMapper 闭环；Windows Debug 直接通过基础208/208、
 UI95/95、Runtime→UI55/55与Null样例300帧，本轮未重跑 Release/Linux/bgfx/可见样例。
-之后继续实现 Key/Gamepad/axis claims、focus/capture/widget、dirty subtree pruning、
+之后继续实现 Key/Gamepad/axis claims、focus/capture/widget、Button Keyboard/Gamepad activation、dirty subtree pruning、
 owning Runtime RenderFramePacket 与资源 pin，M7-D 实现 Label/Button/Modal + FreeType 文本/中文样例；
 M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。

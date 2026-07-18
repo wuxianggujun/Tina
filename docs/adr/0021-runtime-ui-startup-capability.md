@@ -141,8 +141,9 @@ primary-window、root、phase 三层权限模型：
 - EngineHost 端到端门禁证明 listener 在 ActionMapper 前执行；即使不 consume transition，只 claim 当前
   仍 held 的 primary Pointer Button，也会抑制同帧 Gameplay Action。
 
-这些扩展仍不代表 Button default action、Focus、Pointer Capture、Modal、Text/Glyph、Label 文本或完整
-Widget 已完成。
+这些扩展在当时仍不代表 Button default action、Focus、Pointer Capture、Modal、Text/Glyph、Label 文本或完整
+Widget 已完成；后续 Button default action 切片已另行实现 primary Pointer 窄默认交互，但不扩大本 ADR 的
+startup/root capability 边界。
 
 ### 性能与验收门禁
 
@@ -159,7 +160,8 @@ Widget 已完成。
 
 本切片只闭合 retained root 创建、更新和首帧 snapshot 时序；在 b3d2 切片结束时，真实 continuous claims、Pointer
 Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、文本/中文字体和 bgfx UI pass
-仍属后续切片，不能据此宣称 UI 已经可见或可交互。
+仍属后续切片，不能据此宣称 UI 已经可见或可交互。后续已分别补齐 held primary Pointer Button claim、
+SolidFill paint/DisplayList/bgfx pass、setBoxPaint facade、listener facade 与 primary Pointer Button default action。
 
 ## 结果
 
