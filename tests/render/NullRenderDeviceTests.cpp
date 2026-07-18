@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <tina/render/RenderErrors.hpp>
+#include <tina/render/UIDisplayList.hpp>
 #include <tina/render/null/NullRenderDeviceFactory.hpp>
 
 #include <limits>
@@ -128,15 +129,41 @@ TEST(NullRenderDeviceTest, RunsThreeHundredFramesWithoutGpuResources)
 {
     auto device = createDevice();
     ASSERT_NE(device, nullptr);
+    auto builderResult = Render::UIDisplayListBuilder::Create({
+        .commandCount = 1,
+        .clipCount = 0,
+        .batchCount = 1,
+    });
+    ASSERT_TRUE(builderResult.has_value());
+    auto builder = std::move(*builderResult);
+    const Render::UIDrawCommand* fixedCommandStorage = nullptr;
 
     constexpr u64 frameCount = 300;
     for (u64 frameIndex = 0; frameIndex < frameCount; ++frameIndex)
     {
+        ASSERT_TRUE(builder.beginFrame().has_value());
+        ASSERT_TRUE(builder
+                        .addSolidQuad({
+                            .paintOrdinal = 0,
+                            .bounds = {0, 0, 64, 64},
+                            .color = {.red = 20, .green = 40, .blue = 80, .alpha = 255},
+                        })
+                        .has_value());
+        auto displayList = builder.commit();
+        ASSERT_TRUE(displayList.has_value());
+        ASSERT_EQ(displayList->commands().size(), 1U);
+        if (fixedCommandStorage == nullptr)
+        {
+            fixedCommandStorage = displayList->commands().data();
+        }
+        EXPECT_EQ(displayList->commands().data(), fixedCommandStorage);
+
         ASSERT_TRUE(device
                         ->submitFrame(Render::RenderFrame{
                             .frameIndex = frameIndex,
                             .interpolation = 0.5,
                             .primaryWindowSurface = std::nullopt,
+                            .primaryWindowUIDisplayList = *displayList,
                         })
                         .has_value());
         ASSERT_TRUE(device->present().has_value());
@@ -146,6 +173,7 @@ TEST(NullRenderDeviceTest, RunsThreeHundredFramesWithoutGpuResources)
     EXPECT_EQ(statistics.submitted, frameCount);
     EXPECT_EQ(statistics.presented, frameCount);
     EXPECT_EQ(statistics.liveResources, 0U);
+    EXPECT_EQ(builder.statistics().committedBuildCount, frameCount);
 }
 
 TEST(NullRenderDeviceTest, SuspendedWindowSurfaceSkipsSubmissionButKeepsEngineFrameSequence)

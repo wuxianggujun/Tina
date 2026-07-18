@@ -49,6 +49,9 @@ class IRenderDevice {
   public:
     virtual ~IRenderDevice() = default;
 
+    // Every borrowed view carried by frame is valid only for this call. The
+    // implementation must synchronously consume it and retain no view, span,
+    // or element pointer after returning.
     [[nodiscard]] virtual Core::Result<RenderFrameSubmission> submitFrame(const RenderFrame& frame) = 0;
     [[nodiscard]] virtual Core::Status present() = 0;
     [[nodiscard]] virtual RenderStatistics statistics() const noexcept = 0;

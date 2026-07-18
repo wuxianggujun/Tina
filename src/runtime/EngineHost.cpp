@@ -14,6 +14,7 @@
 #include "input/UIInputRouteProducer.hpp"
 #include "ui/PrimaryWindowUICapabilityState.hpp"
 #include "ui/PrimaryWindowUIContextOwner.hpp"
+#include "ui/PrimaryWindowUIDisplayCoordinator.hpp"
 #include "ui/PrimaryWindowUILayoutCoordinator.hpp"
 
 #include <algorithm>
@@ -452,12 +453,14 @@ class EngineHostImplementation final {
                              PlatformEventDispatcher platformEventDispatcher,
                              std::unique_ptr<Runtime::Input::ActionMapper> actionMapper,
                              std::unique_ptr<Runtime::Input::UIInputRouteProducer> uiInputRouteProducer,
+                             Runtime::Detail::PrimaryWindowUIDisplayCoordinator primaryWindowUIDisplay,
                              EngineModules modules,
                              std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface) noexcept
         : m_config(std::move(config)), m_fixedStepAccumulator(std::move(fixedStepAccumulator)),
           m_platformEventDispatcher(std::move(platformEventDispatcher)), m_actionMapper(std::move(actionMapper)),
           m_uiInputRouteProducer(std::move(uiInputRouteProducer)), m_modules(std::move(modules)),
-          m_primaryWindowUi(m_config.primaryWindowUICapacities), m_ownerThread(std::this_thread::get_id()),
+          m_primaryWindowUi(m_config.primaryWindowUICapacities),
+          m_primaryWindowUIDisplay(std::move(primaryWindowUIDisplay)), m_ownerThread(std::this_thread::get_id()),
           m_lastWindowSurface(std::move(initialWindowSurface))
     {
     }
@@ -835,10 +838,19 @@ class EngineHostImplementation final {
                                               simulationTick);
             }
 
+            auto uiDisplayResult =
+                m_primaryWindowUIDisplay.buildForFrame(*uiContextResult, *platformFrame, primaryWindowSurface);
+            if (!uiDisplayResult)
+            {
+                return failAfterStartupCommit(gameApplication, std::move(uiDisplayResult.error()), frameIndex,
+                                              simulationTick);
+            }
+
             const Render::RenderFrame renderFrame{
                 .frameIndex = frameIndex,
                 .interpolation = frameTiming.interpolation,
                 .primaryWindowSurface = primaryWindowSurface,
+                .primaryWindowUIDisplayList = uiDisplayResult->displayList,
             };
             auto submitResult =
                 invokeResultBoundary("IRenderDevice::submitFrame", RuntimeErrorCode::LifecycleInvariantViolation,
@@ -955,6 +967,7 @@ class EngineHostImplementation final {
     Runtime::Detail::PrimaryWindowUIContextOwner m_primaryWindowUi;
     Runtime::Detail::PrimaryWindowUICapabilityState m_primaryWindowUICapability;
     Runtime::Detail::PrimaryWindowUILayoutCoordinator m_primaryWindowUILayout;
+    Runtime::Detail::PrimaryWindowUIDisplayCoordinator m_primaryWindowUIDisplay;
     std::thread::id m_ownerThread;
     std::unique_ptr<IGameState> m_gameState;
     [[maybe_unused]] GameStatePolicy m_committedPolicy{};
@@ -1048,6 +1061,20 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         {
             auto error = std::move(uiInputRouteProducerResult.error());
             error.addContext("EngineHost::Create", "UIInputRouteProducer construction");
+            return Core::failure(std::move(error));
+        }
+
+        const PrimaryWindowUIDisplayListCapacityConfig& uiDisplayCapacities =
+            ownedConfig.primaryWindowUIDisplayListCapacities;
+        auto primaryWindowUIDisplayResult = Runtime::Detail::PrimaryWindowUIDisplayCoordinator::Create({
+            .commandCount = uiDisplayCapacities.commandCapacity,
+            .clipCount = uiDisplayCapacities.clipCapacity,
+            .batchCount = uiDisplayCapacities.batchCapacity,
+        });
+        if (!primaryWindowUIDisplayResult)
+        {
+            auto error = std::move(primaryWindowUIDisplayResult.error());
+            error.addContext("EngineHost::Create", "PrimaryWindowUIDisplayCoordinator construction");
             return Core::failure(std::move(error));
         }
 
@@ -1202,7 +1229,8 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
 
         auto implementation = std::make_unique<Detail::EngineHostImplementation>(
             std::move(ownedConfig), std::move(*accumulatorResult), std::move(*platformEventDispatcherResult),
-            std::move(*actionMapperResult), std::move(*uiInputRouteProducerResult), std::move(modules),
+            std::move(*actionMapperResult), std::move(*uiInputRouteProducerResult),
+            std::move(*primaryWindowUIDisplayResult), std::move(modules),
             std::move(initialWindowSurface));
         return std::unique_ptr<EngineHost>(new EngineHost(std::move(implementation)));
     } catch (const std::bad_alloc&)

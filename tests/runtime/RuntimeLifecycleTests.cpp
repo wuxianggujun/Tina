@@ -408,6 +408,8 @@ struct RuntimeProbe final {
     u64 submittedFrames = 0;
     u64 presentedFrames = 0;
     bool lastSubmittedHadPrimaryWindowSurface = false;
+    std::vector<usize> submittedUICommandCounts;
+    std::optional<Render::UIDrawCommand> copiedLastSubmittedUICommand;
 };
 
 class AdvancingPlatform final : public Platform::IPlatformBackend {
@@ -789,6 +791,14 @@ class ProbeRenderDevice final : public Render::IRenderDevice {
     {
         probe_->events.emplace_back("render.submit." + std::to_string(frame.frameIndex));
         probe_->lastSubmittedHadPrimaryWindowSurface = frame.primaryWindowSurface.has_value();
+        probe_->submittedUICommandCounts.push_back(frame.primaryWindowUIDisplayList.commands().size());
+        if (!frame.primaryWindowUIDisplayList.commands().empty())
+        {
+            probe_->copiedLastSubmittedUICommand = frame.primaryWindowUIDisplayList.commands().front();
+        } else
+        {
+            probe_->copiedLastSubmittedUICommand.reset();
+        }
         ++probe_->submitCalls;
         if (probe_->failurePoint == CommittedFailurePoint::RenderSubmit)
         {
@@ -1370,6 +1380,12 @@ TEST(EngineConfigTest, DefaultsAreValidAndUseSixtyHertzWithFourCatchUpSteps)
     EXPECT_EQ(config.applicationName, "Tina");
     EXPECT_EQ(config.primaryWindowUICapacities.nodeCapacity, UI::UIContextCapacityConfig::DefaultNodeCapacity);
     EXPECT_EQ(config.primaryWindowUICapacities.rootCapacity, UI::UIContextCapacityConfig::DefaultRootCapacity);
+    EXPECT_EQ(config.primaryWindowUIDisplayListCapacities.commandCapacity,
+              PrimaryWindowUIDisplayListCapacityConfig::DefaultCommandCapacity);
+    EXPECT_EQ(config.primaryWindowUIDisplayListCapacities.clipCapacity,
+              PrimaryWindowUIDisplayListCapacityConfig::DefaultClipCapacity);
+    EXPECT_EQ(config.primaryWindowUIDisplayListCapacities.batchCapacity,
+              PrimaryWindowUIDisplayListCapacityConfig::DefaultBatchCapacity);
     EXPECT_DOUBLE_EQ(config.fixedSimulation.fixedDelta.count(), 1.0 / 60.0);
     EXPECT_EQ(config.fixedSimulation.maximumStepsPerFrame, 4U);
     EXPECT_DOUBLE_EQ(config.gameplayTimeScale, 1.0);
@@ -1398,6 +1414,28 @@ TEST(EngineConfigTest, RejectsEveryInvalidPrimaryWindowUICapacityCombination)
     {
         auto config = EngineConfig::Defaults();
         config.primaryWindowUICapacities = capacities;
+        const Core::Status result = config.validate();
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);
+    }
+}
+
+TEST(EngineConfigTest, RejectsInvalidPrimaryWindowUIDisplayListCapacities)
+{
+    std::vector<PrimaryWindowUIDisplayListCapacityConfig> invalidCapacities = {
+        {.commandCapacity = 0, .clipCapacity = 0, .batchCapacity = 1},
+        {.commandCapacity = PrimaryWindowUIDisplayListCapacityConfig::MaximumEntryCapacity + 1,
+         .clipCapacity = 0,
+         .batchCapacity = 1},
+        {.commandCapacity = 1, .clipCapacity = 2, .batchCapacity = 1},
+        {.commandCapacity = 1, .clipCapacity = 0, .batchCapacity = 0},
+        {.commandCapacity = 1, .clipCapacity = 0, .batchCapacity = 2},
+    };
+
+    for (const PrimaryWindowUIDisplayListCapacityConfig& capacities : invalidCapacities)
+    {
+        auto config = EngineConfig::Defaults();
+        config.primaryWindowUIDisplayListCapacities = capacities;
         const Core::Status result = config.validate();
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);
@@ -1614,6 +1652,19 @@ TEST(EngineHostCreationTest, InvalidPrimaryWindowUICapacityIsRejectedBeforeAnyFa
     EXPECT_TRUE(events.empty());
 }
 
+TEST(EngineHostCreationTest, InvalidPrimaryWindowUIDisplayListCapacityIsRejectedBeforeAnyFactoryInvocation)
+{
+    EventLog events;
+    auto config = EngineConfig::Defaults();
+    config.primaryWindowUIDisplayListCapacities.commandCapacity = 0;
+
+    auto result = EngineHost::Create(config, makeInjectedFactories(events, FactoryStage::Clock, FactoryMode::Failure));
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);
+    EXPECT_TRUE(events.empty());
+}
+
 TEST(EngineHostCreationTest, DestroyingReadyHostWithoutRunShutsModulesDownInReverseOrder)
 {
     EventLog events;
@@ -1812,6 +1863,8 @@ TEST(EngineHostRunTest, GameSdkBuildsAndUpdatesAPrimaryWindowRetainedTree)
     EXPECT_TRUE(game.primaryWindowUIUpdated);
     EXPECT_EQ(runtime.submittedFrames, 1U);
     EXPECT_EQ(runtime.presentedFrames, 1U);
+    ASSERT_EQ(runtime.submittedUICommandCounts, std::vector<usize>{0U});
+    EXPECT_FALSE(runtime.copiedLastSubmittedUICommand.has_value());
     EXPECT_EQ(game.exitCount, 1U);
     EXPECT_EQ(game.shutdownCount, 1U);
 }

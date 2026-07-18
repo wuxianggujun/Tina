@@ -3,4 +3,5 @@
 #include <type_traits>
 
 static_assert(std::is_copy_constructible_v<Tina::EngineConfig>);
+static_assert(std::is_copy_constructible_v<Tina::PrimaryWindowUIDisplayListCapacityConfig>);
 static_assert(std::is_copy_constructible_v<Tina::UI::UIContextCapacityConfig>);

@@ -114,6 +114,26 @@ namespace {
     return Core::success();
 }
 
+[[nodiscard]] Core::Status
+validatePrimaryWindowUIDisplayListCapacities(const PrimaryWindowUIDisplayListCapacityConfig& capacities)
+{
+    if (capacities.commandCapacity == 0 ||
+        capacities.commandCapacity > PrimaryWindowUIDisplayListCapacityConfig::MaximumEntryCapacity)
+    {
+        return invalidConfig("primary-window UI DisplayList command capacity is outside the supported range");
+    }
+    if (capacities.clipCapacity > capacities.commandCapacity)
+    {
+        return invalidConfig("primary-window UI DisplayList clip capacity must not exceed command capacity");
+    }
+    if (capacities.batchCapacity == 0 || capacities.batchCapacity > capacities.commandCapacity)
+    {
+        return invalidConfig(
+            "primary-window UI DisplayList batch capacity must be non-zero and not exceed command capacity");
+    }
+    return Core::success();
+}
+
 } // namespace
 
 EngineConfig EngineConfig::Defaults()
@@ -123,6 +143,7 @@ EngineConfig EngineConfig::Defaults()
         .primaryWindow = Platform::PrimaryWindowConfig{},
         .platformFrameCapacities = Platform::PlatformFrameCapacityConfig{},
         .primaryWindowUICapacities = UI::UIContextCapacityConfig{},
+        .primaryWindowUIDisplayListCapacities = PrimaryWindowUIDisplayListCapacityConfig{},
         .inputActions = InputActionMapConfig{},
         .platformEventSubscriptions = PlatformEventSubscriptionConfig{},
         .fixedSimulation = Core::FixedStepConfig{},
@@ -167,6 +188,12 @@ Core::Status EngineConfig::validate() const
         Core::Error error{ConfigurationErrorCode::InvalidEngineConfig, "primaryWindowUICapacities is invalid"};
         error.addContext("EngineConfig::validate", uiCapacityStatus.error().message);
         return Core::failure(std::move(error));
+    }
+    if (auto uiDisplayCapacityStatus =
+            validatePrimaryWindowUIDisplayListCapacities(primaryWindowUIDisplayListCapacities);
+        !uiDisplayCapacityStatus)
+    {
+        return uiDisplayCapacityStatus;
     }
     if (platformEventSubscriptions.subscriberCapacity == 0 ||
         platformEventSubscriptions.subscriberCapacity > PlatformEventSubscriptionConfig::MaximumSubscriberCapacity)

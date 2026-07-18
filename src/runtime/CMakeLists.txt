@@ -29,6 +29,8 @@ add_library(tina_runtime STATIC
     ui/PrimaryWindowUIContextOwner.hpp
     ui/PrimaryWindowUICapabilityState.cpp
     ui/PrimaryWindowUICapabilityState.hpp
+    ui/PrimaryWindowUIDisplayCoordinator.cpp
+    ui/PrimaryWindowUIDisplayCoordinator.hpp
     ui/PrimaryWindowUILayoutCoordinator.cpp
     ui/PrimaryWindowUILayoutCoordinator.hpp
 )
@@ -51,6 +53,7 @@ target_link_libraries(tina_runtime
         Tina::UI
     PRIVATE
         Tina::ProjectOptions
+        Tina::UIRenderIntegration
 )
 set_target_properties(tina_runtime PROPERTIES
     CXX_EXTENSIONS OFF

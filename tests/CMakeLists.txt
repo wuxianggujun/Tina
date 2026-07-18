@@ -33,6 +33,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     platform/header_isolation/WindowHeader.cpp
     platform/PlatformBackendTests.cpp
     render/header_isolation/RenderDeviceHeader.cpp
+    render/header_isolation/RenderFrameHeader.cpp
     render/header_isolation/RenderSurfaceHeader.cpp
     render/header_isolation/UIDisplayListHeader.cpp
     render/NullRenderDeviceTests.cpp

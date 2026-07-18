@@ -20,8 +20,10 @@ struct UIRenderDisplayListBuildStatistics final {
 };
 
 // The DisplayList view borrows the builder's fixed storage and follows its
-// single-buffer invalidation contract. A subsequent beginFrame(), rollback(),
-// move, or destruction of the builder invalidates it.
+// single-buffer invalidation contract. A subsequent beginFrame() invalidates
+// it immediately, including when that replacement is later rolled back.
+// Moving or destroying the builder also invalidates it; rollback() by itself
+// is a no-op when no build is open.
 struct UIRenderDisplayListBuild final {
     Render::UIDisplayListView displayList{};
     UIRenderDisplayListBuildStatistics statistics{};
