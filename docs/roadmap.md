@@ -102,13 +102,15 @@ M6 生命周期之后仍未实现：
   held primary Pointer Button claim；Key/Gamepad/axis claim producer、IMM32、production Gamepad 和连续
   axis mapping 仍在后续子切片；
 - 有界 CPU/IO/Main worker、阶段指标与完整 shutdown deadline/fatal-stop；
-- typed render resource handle、Pass Scheduler、World RenderScene/UIDisplayList、Runtime-private
-  RenderFramePacket/pool 与 submission completion 保活；
+- typed render resource handle、Pass Scheduler、World RenderScene、Runtime-owned UIDisplayList submission、
+  RenderFramePacket/pool 与 submission completion 保活；后端无关 SolidQuad builder 和 UI→Render bridge
+  已先独立实现；
 - Scene、Asset、Audio 的真实契约和消费者，以及 Runtime-integrated UI root/layout/render
   pipeline；M7-C1b/C1c-a/C1c-b1/C1c-b2 C++23 standalone `tina_ui` tree/layout/committed-hit/
   point-query/synthetic-route foundation、M7-C1c-b3b 私有 producer、M7-C1c-b3c EngineHost 接线与
-  M7-C1c-b3d1 layout commit、M7-C1c-b3d2 startup/root scoped capability 与 M7-C1c-b3e Pointer claim 已实现，
-  但仍没有 DisplayList、文本/glyph、默认 Widget 行为或可见 UI；
+  M7-C1c-b3d1 layout commit、M7-C1c-b3d2 startup/root scoped capability、M7-C1c-b3e Pointer claim、
+  SolidFill committed paint、Render SolidQuad DisplayList builder 与 UI→Render integration bridge 已实现，
+  但仍没有 Runtime packet/bgfx UI Pass、文本/glyph、默认 Widget 行为或可见 UI；
 - `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
 - Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；M7-B2 Desktop bgfx
   X11 图也已完成 GCC 13.4 和 Clang 22.1.8 + ASan/UBSan/LSan 的183/22/11直接测试及300帧门禁。
@@ -228,7 +230,7 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   world/effective clip 的 `Targetable` entry，使用半开边界并返回 route index、四类 revision 与 visited count；
 - **已完成 M7-C1c-b1 门禁**：新增5项 query 测试后当时 `tina_ui_tests` 总数为59项；Windows Debug/Release、
   Linux GCC 13.4 与 Clang 22 ASan/UBSan/LSan 均通过，300次查询无新增 supplied UI PMR allocation；后续
-  C1c-b2 当时增至75/75，b3d2 为78/78；Windows Debug/Release、Linux GCC 与 Clang sanitizer 的 b3e 当前均为81/81；
+  C1c-b2 当时增至75/75，b3d2 为78/78；Windows Debug/Release、Linux GCC 与 Clang sanitizer 的 b3e 历史门禁均为81/81；
 - **已完成 M7-C1c-b2**：fixed-capacity synthetic routed pointer event；使用固定容量 route path/listener
   storage、48-byte fixed-inline `noexcept` callback、generation-safe RAII token、owner-thread immediate reset、
   off-thread deferred reset、Capture→Target→Bubble、stop/consume、route 中 add/reset/destroy 安全失效和
@@ -261,7 +263,7 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   Render 且消费当前 frame attempt；
 - **已完成 M7-C1c-b3d2**：按 ADR 0021 为 startup transaction 增加不 poll、不消费 frame id 的
   backend-neutral primary-window metrics seed；Runtime 在 `onEnter` 前显式绑定 primary `UIContext`，
-  并在 State commit 前发布首份 structure/layout/hit snapshot；Game SDK 只获得 root-scoped、
+  并在 State commit 前发布首份 structure/layout/hit/paint snapshot；Game SDK 只获得 root-scoped、
   phase-epoch-scoped 的 `PrimaryWindowUIRootBuilder`/`PrimaryWindowUITreeUpdater`，不暴露裸
   `UIContext*`，也不允许任意阶段 `createRoot()`；
 - **已完成 M7-C1c-b3d2 失败边界**：facade 为 move-only、owner-thread scoped；跨 phase 保存后返回
@@ -277,14 +279,27 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   Gameplay。Windows MSVC 19.50 Debug/Release 直接通过基础194/194、UI81/81、
   Runtime→UI46/46、GLFW25/25、bgfx11/11及Null/Platform/Desktop各300帧；Linux GCC 13.4 与 Clang 22
   sanitizer 也直接通过基础194/194、UI81/81、Runtime→UI46/46及Null样例300帧，Clang无诊断；
+- **已完成 SolidFill committed paint**：`UIBoxPaint` 当前只含 optional SolidFill，straight sRGBA8 以
+  确定性整数规则转换为 premultiplied RGBA8；Create 期固定 `paintSnapshotCapacity`、local cache 与双缓冲
+  `UICommittedPaintView`，成功 commit 原子发布 structure/layout/hit/paint 四份 snapshot。paint-only commit
+  不重排 layout/hit，no-op 不增加 revision；Windows MSVC 19.50 Debug 新增11项后 UI 为92/92；
+- **已完成 Render SolidQuad DisplayList**：`tina_render` 的单缓冲 `UIDisplayListBuilder` 使用固定 PMR
+  command/clip/batch storage，支持 strict paint order、axis-aligned clip interning、相邻兼容 batching、
+  checksum、剪枝与整帧 rollback；Windows Debug 新增11项后基础测试为205/205；
+- **已完成 UI→Render bridge**：独立 `tina_ui_render_integration` 是唯一同时 PUBLIC 依赖 UI 与 Render
+  的窄桥，按 logical/framebuffer extent 做 outward rounding/clamp 并拥有完整 builder transaction；
+  Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Linux Clang 22 sanitizer 的独立12项 GoogleTest
+  均通过。Linux 两条图也通过基础205/205、UI92/92、Runtime→UI46/46和Null样例300帧，Clang无诊断；
+  Windows Release 的基础/UI 尚未重跑，因此仍保留 b3e 的194/194、81/81历史门禁；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
-  subtree 尚未实现；正式路径虽已接线并可创建 retained root/Panel/Label/Button 节点，但没有 DisplayList、
-  文本/glyph、默认 Widget 行为或 Render UI pass，无法产生产品 UI；
+  subtree 尚未实现；正式路径虽已接线并可创建 retained root/Panel/Label/Button 节点，低层也已有
+  SolidFill paint/DisplayList bridge，但 Game SDK 尚无 paint setter，Runtime 不生成/提交该 DisplayList，
+  也没有文本/glyph、默认 Widget 行为或 Render UI Pass，无法产生产品 UI；
 - **仍后置**：Key/Gamepad/axis claim producer、dirty subtree pruning、持久 Pointer Capture、Focus/Modal、
-  Button default action、paint snapshot/DisplayList、nested clip、text/glyph、
-  FreeType 与 bgfx UI pass；
-- 后续继续实现后端无关 Quad/Text/Clip DisplayList、FramePinSink/capacity rollback 和相邻兼容 batching
-  contract；Null UI 直接测试 route/layout/paint order，不链接 FreeType/bgfx；
+  Button default action、Game SDK paint/widget facade、Image/Text/Glyph PaintCache、nested clip、
+  Runtime `RenderFramePacket`/FramePin、FreeType 与 bgfx UI Pass；
+- 后续把现有 SolidQuad DisplayList 接入 Runtime packet，再扩展 Image/Text/Glyph 与资源 pin；Null UI
+  继续直接测试 route/layout/paint order，不链接 FreeType/bgfx；
 - 硬门禁：无变化 UI 每帧0 layout、0 PaintCache rebuild、0 Tina heap allocation。
 
 ### M7-D 可见 UI 与中文字体

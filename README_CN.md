@@ -22,7 +22,8 @@ Runtime。现有2D/UI/3D路径继续作为验收基线，新架构按可独立�
 vNext 已完成 C++23 Headless Runtime 生命周期内核、M7-A Platform/Input 内核、首个桌面适配切片、
 M7-B1 私有 WindowSurface handoff、M7-B2 Desktop bootstrap + 真实 GPU 冒烟，以及
 M7-C1b/M7-C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/b3d2/b3e Retained Tree/Flex-lite layout/
-committed hit snapshot/point query/synthetic routed pointer/private Runtime route/startup UI seed/Game SDK scoped capability foundation：私有
+committed hit/paint snapshot、point query、synthetic routed pointer、private Runtime route、startup UI seed、
+Game SDK scoped capability，以及后端无关 SolidQuad DisplayList foundation：私有
 `tina_platform_glfw` 已能创建 `GLFW_NO_API` 窗口，
 并把键盘、Pointer、Focus、resize、close 与已提交 UTF-8 文本归一化到同一份有界
 `PlatformFrameView`；Runtime 通过 generation `WindowSurfaceId`、无原生句柄的
@@ -32,8 +33,10 @@ committed hit snapshot/point query/synthetic routed pointer/private Runtime rout
 `tina_sample_desktop` 默认运行300帧，以深蓝色 clear/present 验证真实 Render backend 路径。
 `tina_ui` 已有 generation tree、固定容量事务式布局、固定容量 PMR Pointer policy/route ancestry scratch，
 以及双缓冲 `UICommittedHitView`。同一 view 内 hit entry 的 paint ordinal 唯一且严格递增，并携带 structure/layout/
-paint-order/hit revision；hit-only commit 不执行布局，`commitLayout()` 失败会同时保留旧 structure/layout/hit
-三份 snapshot。`queryPointerHit()` 已按反向 paint order 做无分配的 committed point query，返回稳定
+paint-order/hit revision；hit-only commit 不执行布局。`UIBoxPaint` 当前支持可选 SolidFill，并以固定
+`paintSnapshotCapacity`、local premultiplied RGBA8 cache 与双缓冲 `UICommittedPaintView` 发布
+effective-visible 非透明 entry；paint-only commit 不重排 layout/hit，`commitLayout()` 失败会同时保留旧
+structure/layout/hit/paint 四份 snapshot。`queryPointerHit()` 已按反向 paint order 做无分配的 committed point query，返回稳定
 route index/revision 与 visited count，不触发布局或事件。C1c-b2 新增 synthetic `routePointerInput()`：
 只针对一条已归一化 Pointer input，在上一份 committed hit snapshot 上最多查询一次，并使用固定容量
 route path/listener storage、48-byte fixed-inline `noexcept` callback、generation-safe RAII listener token、
@@ -52,15 +55,20 @@ Context 时是成功 no-op。提交失败会阻断 Render，且本帧 attempt �
 输入路由仍只读取上一份 committed hit snapshot。C1c-b3d2 已按
 [ADR 0021](docs/adr/0021-runtime-ui-startup-capability.md) 实现 backend-neutral
 `initialPrimaryWindowMetrics()` seed、`onEnter` 前显式绑定 primary `UIContext`、State commit 前的 startup
-structure/layout/hit 发布，以及 root-scoped、owner-thread、phase-epoch-scoped 的
+structure/layout/hit/paint 发布，以及 root-scoped、owner-thread、phase-epoch-scoped 的
 `PrimaryWindowUIRootBuilder` / `PrimaryWindowUITreeUpdater`。这些 facade 在回调结束时无条件失效，第一次
 capability operation 失败会成为该 phase 的 sticky error，且不会向 Game SDK 暴露裸 `UIContext*`。
 M7-C1c-b3e 又让 Move/Wheel/Button routed Pointer listener 通过 `claimPointerButton()` 请求当前窗口/Pointer 的按键所有权；
 Runtime 只把帧末快照中 `PrimaryPointerId` 上仍 held 的任意 Pointer Button 去重写入双缓冲
 `ContinuousControlClaimsView`，容量失败不发布半份结果，已有 `ActionMapper` 会立即 Cancel Gameplay source
-或拦截同帧未 consume 的 Down，并抑制到真实 Up。当前仍不是可见 UI：Key/Gamepad/axis claim producer 尚未实现，Runtime 不生成 DisplayList，文本/glyph 渲染尚未接入，
+或拦截同帧未 consume 的 Down，并抑制到真实 Up。`Tina::Render` 已实现固定 PMR、单缓冲的
+SolidQuad `UIDisplayListBuilder`；独立 `Tina::UIRenderIntegration` target 已能把 committed logical paint 以
+outward rounding/clamp 转换为 framebuffer DisplayList，且 Windows MSVC 19.50 Debug/Release 的12项
+bridge GoogleTest 均通过。当前仍不是可见 UI：Game SDK facade 尚无 paint setter，Runtime 不生成或提交
+DisplayList，文本/glyph 渲染尚未接入，
 Panel/Label/Button 只是 retained tree 节点类型，还没有默认 Widget 行为。持久 Pointer Capture、Focus/Modal、
-Button 默认行为、paint snapshot/DisplayList、dirty subtree pruning、nested clip、production Gamepad、
+Button 默认行为、Image/Text/Glyph PaintCache、dirty subtree pruning、nested clip、Runtime RenderFramePacket、
+bgfx UI Pass、production Gamepad、
 Windows IMM32 composition、Scene、文本/Widget、Pass Scheduler、submission ticket/drain 与可见中文 UI
 分别放在后续切片。
 
@@ -82,17 +90,20 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求
 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、
-MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过 b3e vNext Debug/Release
-门禁：基础194/194、独立 UI 81/81、独立 Runtime→UI 46/46、Null样例300帧。独立 adapter 门禁
+MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过最新 Windows Debug
+门禁：基础205/205、独立 UI 92/92、独立 Runtime→UI 46/46，以及 UI→Render bridge 12/12；bridge
+Release 也为12/12。其余 Release 仍保留 b3e 的基础194/194、UI81/81、Runtime→UI46/46与Null样例300帧
+历史门禁，尚未对最新 paint/DisplayList 切片重跑。独立 adapter 门禁
 通过 GLFW专项25/25、bgfx专项11/11、GLFW样例300帧，以及真实 D3D11 Intel Iris Xe 的
 `tina_sample_desktop` 300帧；Release 输出 clean status ok。前序 WindowSurface
 GLFW样例1800帧仍作为历史证据。Legacy ON 图的前序隔离门禁为 vNext 185/185 + Legacy 43/43。
 `TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与
 公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。
 
-当前 b3e Linux Null 门禁中，GCC 13.4 通过基础194/194、`tina_ui_tests` 81/81、
-`tina_runtime_ui_tests` 46/46与Null样例300帧；Clang 22.1.8 + libstdc++15.2 在
-ASan/UBSan/LSan 下通过相同194/81/46与Null样例300帧，且无 sanitizer 诊断。前序 M7-B1 Platform
+Linux 最新 paint/DisplayList/bridge Null 门禁也已完成：GCC 13.4 通过基础205/205、
+`tina_ui_tests` 92/92、`tina_runtime_ui_tests` 46/46、bridge 12/12与Null样例300帧；
+Clang 22.1.8 + libstdc++15.2 在 ASan/UBSan/LSan 下通过相同205/92/46/12与Null样例300帧，
+且无 sanitizer 诊断。前序 M7-B1 Platform
 门禁覆盖 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer，以及 GCC 13/Clang 22 X11/Wayland 双后端；
 Wayland 使用带 `wl_seat` 的嵌套 Weston 9。初次 GCC 暴露的 routed-pointer callback `requires`
 名称可见性问题已修复。前序 M7-B2 Desktop/bgfx X11 图也已直接运行：GCC 13.4 与 Clang 22.1.8 +
@@ -107,10 +118,11 @@ preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22
 ```powershell
 cmake --version
 cmake --preset windows-msvc-vnext
-cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_sample_null
+cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_sample_null
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe
+out\build\windows-msvc-vnext\bin\Debug\tina_ui_render_integration_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 
 # 可选 GLFW + NullRender 平台切片

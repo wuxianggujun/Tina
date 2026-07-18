@@ -5,12 +5,13 @@
 Tina 当前处于 Legacy 产品与 vNext 垂直切片并存的迁移期。Legacy 仍以单个游戏可执行文件为主，
 源码按 Core、Engine、Renderer、UI、ECS 和 Game 组织；vNext 已建立独立的 `tina_core`、
 `tina_platform`、`tina_task`、`tina_render`、`tina_runtime` 五个基础 C++23 target，以及可选的
-`tina_platform_glfw` adapter、私有 `tina_render_bgfx` backend、Desktop bootstrap 和
+`tina_platform_glfw` adapter、私有 `tina_render_bgfx` backend、Desktop bootstrap、
 M7-C1b/M7-C1c-a/C1c-b1/C1c-b2 `tina_ui` tree/layout/committed-hit/point-query/synthetic-route foundation，
 以及 M7-C1c-b3b/b3c Runtime-private UI route-result producer、primary-window `UIContext` owner 与
 `EngineHost` 接线、M7-C1c-b3d1 的公开容量配置和 Runtime-private layout coordinator、
 M7-C1c-b3d2 的 startup UI seed 与 Game SDK scoped capability，以及 M7-C1c-b3e 的 held primary
-Pointer Button claim bridge。
+Pointer Button claim bridge，以及 SolidFill-only committed paint、Render-owned 单帧 DisplayList builder
+和独立的 `tina_ui_render_integration` UI→Render bridge code surface。
 `tina_sample_null` 不依赖真实窗口和 GPU；`tina_sample_platform`
 把私有 GLFW `NO_API` 窗口与 NullRender 组合；`tina_sample_desktop` 通过
 `Tina::Desktop::CreateEngine(config)` 私有组合 `SteadyClock + GLFW WindowSurface + DisabledTaskSystem + bgfx`，
@@ -43,14 +44,22 @@ thread 销毁 Context。M7-C1c-b3d1 又把固定容量契约收敛为 focused pu
 至多尝试一次 `commitLayout()`。Headless 帧在窗口与 Context 同时缺席时成功 no-op；提交失败阻断
 Render 且消费当前 `PlatformFrameId` 的 attempt，不能同帧重放。M7-C1c-b3d2 已新增不 poll、
 不消费 frame id 的 `initialPrimaryWindowMetrics()` seed，在 `IGameState::onEnter()` 前显式绑定 primary
-`UIContext`，并在 State commit 前发布首份 structure/layout/hit snapshot。Game SDK 只取得
+`UIContext`，并在 State commit 前发布首份 structure/layout/hit/paint snapshot。Game SDK 只取得
 `PrimaryWindowUIRootBuilder` 与绑定自己 root 的 `PrimaryWindowUITreeUpdater`；facade 以 owner thread
 和 phase epoch 校验，回调结束后无条件失效，第一次 capability operation 失败作为 sticky phase error
 回传 Runtime。M7-C1c-b3e 已允许 routed Pointer listener 请求接管仍 held 的 primary Pointer Button，
-Runtime 按最终 snapshot 过滤并去重，ActionMapper 取消或拦截 Gameplay source 并抑制到真实 Up；没有
-DisplayList、文本/glyph、Button default action 或真实 Widget 渲染，因此这条接线还不是可见 UI。
-Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、dirty subtree pruning、
-nested clip 和 DisplayList 仍未完成。
+Runtime 按最终 snapshot 过滤并去重，ActionMapper 取消或拦截 Gameplay source 并抑制到真实 Up。
+随后 `tina_ui` 又实现 `UIBoxPaint` 的可选 SolidFill、本地预乘色 cache、`paintSnapshotCapacity` 和
+双缓冲 `UICommittedPaintView`；成功 `commitLayout()` 现在事务发布 structure/layout/hit/paint 四份
+snapshot，paint-only commit 不重排布局或 hit，同值 mutation 与无变化 commit 不发布新 revision。
+`tina_render` 独立实现单缓冲、固定 PMR 容量的 `UIDisplayListBuilder`，当前只发射 SolidQuad，支持
+axis-aligned clip interning、相邻兼容 batching、paint-order checksum、空/透明/clip 剪枝和整帧回滚。
+`Tina::UIRenderIntegration` target 进一步把 committed logical paint 按 logical/framebuffer extent
+比例投影成 pixel DisplayList；其12项直接 GoogleTest 已在 Windows MSVC 19.50 Debug/Release、Linux
+GCC 13.4 与 Linux Clang 22 sanitizer 通过，Clang 无诊断。
+这些层仍未接入 Runtime `RenderFramePacket` 或 bgfx UI Pass；文本/glyph、Button default action、
+真实 Widget 绘制、Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、dirty subtree pruning 与
+nested clip 仍未完成，因此当前仍不是可见 UI。
 现有 Legacy target 的包依赖由 vcpkg manifest 管理，bgfx、EASTL、EABase 仍保持固定源码
 版本；其中 EASTL/EABase 只属于迁移期现状，不是 vNext 目标依赖。
 
@@ -91,14 +100,16 @@ Pass Scheduler/submission ticket 或完整状态栈，因此 Legacy 仍是当前
 | vNext M7-A Platform/Input | 已完成 Headless 内核与首个桌面 adapter 切片 | 固定容量 `PlatformFrameBuilder`、final Snapshot、保序 transition、Runtime-private `PlatformEventDispatcher`、Action Mapper，以及私有 GLFW Window/Keyboard/Pointer/committed text producer 已落地；IMM32、production Gamepad 与完整 DPI 门禁后置 |
 | vNext M7-B1 WindowSurface handoff | 已完成私有 surface 所有权切片 | Platform/Render 通过 tagged composition 接线；`NativeWindowSurfaceLease` move-only 且 PIMPL；Win32/X11/Wayland native binding 只在私有 TU 解码；Render 创建失败和窗口发布失败会逆序释放 lease；NullRender 可验证 suspended/resume、surface revision 与 submission index |
 | vNext M7-B2 Desktop + bgfx | 已完成私有 clear-only backend core、Desktop bootstrap 与真实 GPU smoke | `Tina::RenderBgfx` 只 PUBLIC 依赖 `Tina::Render`，bgfx 与 WindowSurface bridge 均为 PRIVATE；`Tina::Desktop::CreateEngine` 私有组合 SteadyClock、GLFW WindowSurface、DisabledTaskSystem 与 bgfx；planner 覆盖 1×1 bootstrap、resize/resume、content-scale-only 和 suspended skip；Windows Debug/Release 真实 D3D11 Intel Iris Xe 300帧通过 |
-| vNext M7-C1b/C1c-a/C1c-b1/C1c-b2 UI tree/layout/hit query/route foundation | 已完成 standalone `tina_ui` 树、布局、committed hit、point query 与 synthetic route 数据/派发基础 | `Tina::UI` 只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；在 generation `UINodeId`、`UIContext`、move-only `UIRootOwner`、结构 snapshot 与 route-result ABI 上，已实现 layout/dirty 类型、固定容量 PMR side array/queue/scratch、Flex-lite 非递归 Measure/Arrange、双缓冲 `UICommittedHitView`、structure/layout/hit 事务发布、无分配 `queryPointerHit()`、固定容量 route path/listener storage、48-byte fixed-inline `noexcept` listener callback、generation-safe RAII token 和 Capture→Target→Bubble synthetic dispatch；route 支持 stop/consume、路由中 add/reset/destroy 安全失效与 route/commit reentrancy guard。当前 changed frame 与 hit rebuild 仍全树扫描；持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、bgfx UI pass 后置 |
+| vNext M7-C1b/C1c-a/C1c-b1/C1c-b2 UI tree/layout/hit query/route foundation | 已完成 standalone `tina_ui` 树、布局、committed hit、point query 与 synthetic route 数据/派发基础 | `Tina::UI` 只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；在 generation `UINodeId`、`UIContext`、move-only `UIRootOwner`、结构 snapshot 与 route-result ABI 上，已实现 layout/dirty 类型、固定容量 PMR side array/queue/scratch、Flex-lite 非递归 Measure/Arrange、双缓冲 `UICommittedHitView`、structure/layout/hit 事务发布、无分配 `queryPointerHit()`、固定容量 route path/listener storage、48-byte fixed-inline `noexcept` listener callback、generation-safe RAII token 和 Capture→Target→Bubble synthetic dispatch；route 支持 stop/consume、路由中 add/reset/destroy 安全失效与 route/commit reentrancy guard。当前 changed frame 与 hit rebuild 仍全树扫描；持久 Pointer Capture、Focus/Modal、Button default action、nested clip、bgfx UI pass 后置 |
+| vNext SolidFill committed paint | 已实现最小 PaintCache 与双缓冲 snapshot | `UIBoxPaint` 当前只含可选 SolidFill；颜色以确定性整数规则转换为 premultiplied RGBA8，本地 cache 与双缓冲 `UICommittedPaintView` 使用 Create 期固定 PMR 容量。view 只发布 effective-visible、非透明 entry 的 world rect/effective clip/paint ordinal 与 revisions；失败保留旧的 structure/layout/hit/paint 四份 snapshot。它不等于 Image/Text/Glyph PaintCache、Widget 默认绘制或 nested clip |
+| vNext backend-independent UI DisplayList | Render builder 与 UI→Render bridge 已实现 | `Tina::Render` 的单帧 builder 只接受纯 Tina SolidQuad/pixel clip 类型，不依赖 UI；`Tina::UIRenderIntegration` target 是唯一同时 PUBLIC 依赖 UI 与 Render 的窄桥，二者不反向依赖它。bridge 负责 logical→framebuffer outward rounding/clamp 和完整 builder transaction；Windows MSVC 19.50 Debug/Release、Linux GCC/Clang sanitizer 的12项直接 GoogleTest 均通过。Runtime packet、FramePin、bgfx UI Pass 与可见样例后置 |
 | vNext M7-C1c-b3b Runtime→UI route-result producer | 已完成独立 Runtime-private 组件与测试 target | `UIInputRouteProducer` 只转换 raw Move/Button/Wheel，使用事件时 logical position，并把 consume 写入 raw ordinal bit；reset/cancel/非 Pointer 保留 hole；在该切片中 claims 当时恒为 canonical `None`。双预分配 PMR bitset 在300帧共用 PMR 测试中 allocation count 不增长，supplied PMR 必须长于 producer；失败测试先产生1次 listener side effect，后续 route path capacity 失败不发布但推进 attempted watermark，同帧 retry 被拒且 callback 仍为1。独立 `tina_runtime_ui_tests` 直接运行 GoogleTest、不使用 CTest |
 | vNext M7-C1c-b3c EngineHost→UIContext 接线 | 已完成 Runtime-private primary-window owner 与正式帧路径接线 | `EngineHost` 在 Platform lifecycle dispatch 后惰性绑定首个 primary `WindowId`，随后调用 producer 并把结果交给 ActionMapper；Headless 绑定前为 null，同一 ID 的 metrics/content scale/minimized 变化复用 Context，绑定后 primary 消失或 generation 更换结构化失败。Context 在 module shutdown 前于 owner thread 销毁；owner 不调用 `commitLayout()`，route 只读上一帧 committed snapshot；该切片当时的 claims 仍为 canonical `None`。Game SDK 尚无 scoped Context/root 入口，所以此切片只闭合 Runtime 输入时序与所有权，不代表可见 UI |
-| vNext M7-C1c-b3d1 UI 容量与布局提交 | 已完成公开配置与 Runtime-private phase coordinator | `UIContextCapacityConfig` 有独立公共头和共享 validator；`EngineConfig::primaryWindowUICapacities` 在任何 factory 前拒绝非法 node/root/derived/listener 容量。正式帧在 `updateUI` 后、Render submit 前按 primary logical extent 至多尝试一次 `commitLayout()`；Headless 双缺席成功 no-op，identity/容量/layout 失败阻断 Render 且该 frame attempt 不可重试。DisplayList 与可见 UI 仍未实现 |
-| vNext M7-C1c-b3d2 UI 启动与 Game SDK capability | 已完成 startup seed 与 phase-scoped facade | Platform seed 不 poll、不消费 frame id；Runtime 在 `onEnter` 前绑定 primary Context 并提交首份 structure/layout/hit snapshot。游戏只取得 `PrimaryWindowUIRootBuilder` 与绑定自己 root 的 `PrimaryWindowUITreeUpdater`，facade 以 owner thread 与 phase epoch 校验并在回调结束后失效；第一次 capability error 作为 sticky phase error 合并；不暴露裸 `UIContext*`。该切片仍无 DisplayList、文本/glyph、Button 默认行为；真实 claim producer 当时尚未加入 |
+| vNext M7-C1c-b3d1 UI 容量与布局提交 | 已完成公开配置与 Runtime-private phase coordinator | `UIContextCapacityConfig` 有独立公共头和共享 validator；`EngineConfig::primaryWindowUICapacities` 在任何 factory 前拒绝非法 node/root/derived/listener/paint snapshot 容量。正式帧在 `updateUI` 后、Render submit 前按 primary logical extent 至多尝试一次 `commitLayout()`；Headless 双缺席成功 no-op，identity/容量/layout/paint 失败阻断 Render 且该 frame attempt 不可重试。当前 coordinator 仍不构建或提交 Render DisplayList |
+| vNext M7-C1c-b3d2 UI 启动与 Game SDK capability | 已完成 startup seed 与 phase-scoped facade | Platform seed 不 poll、不消费 frame id；Runtime 在 `onEnter` 前绑定 primary Context 并提交首份 structure/layout/hit/paint snapshot。游戏只取得 `PrimaryWindowUIRootBuilder` 与绑定自己 root 的 `PrimaryWindowUITreeUpdater`，facade 以 owner thread 与 phase epoch 校验并在回调结束后失效；第一次 capability error 作为 sticky phase error 合并；不暴露裸 `UIContext*`。当前 facade 尚未暴露 paint setter，文本/glyph、Button 默认行为仍后置；真实 claim producer 当时尚未加入 |
 | vNext M7-C1c-b3e held Pointer Button claim | 已完成 UI request、Runtime filter/publish 与 ActionMapper 门禁 | `claimPointerButton()` 与 transition consumption 分离，Move/Wheel/Button route 都可请求当前 Window/Pointer 的按钮；Runtime 只发布最终 snapshot 仍 held 的 primary Pointer Button，跨 route 去重并使用 Create 期 PMR 双 buffer。capacity 失败不发布 staging 且同帧不可重试；claim 会取消 active Gameplay source或拦截同帧 Down，并抑制到真实 Up。Key/Gamepad/axis claim、Capture/Focus/Modal 后置 |
 | vNext GLFW 边界 | 已形成可运行切片 | `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
-| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene/Asset/Audio、可见 UI pipeline 与 submission drain 仍按后续切片实施；Desktop clear-only GPU 冒烟、standalone `tina_ui` foundation 和 Runtime-private route/layout/startup capability 接线不代表这些路径完成 |
+| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene/Asset/Audio、Runtime-owned DisplayList emission、可见 UI pipeline 与 submission drain 仍按后续切片实施；Desktop clear-only GPU 冒烟、standalone UI/Render/bridge foundation 和 Runtime-private route/layout/startup capability 接线不代表这些路径完成 |
 
 因此不能用“删除旧 `src`”作为下一步。正确顺序是：建立新边界和测试 → 迁移调用点 → 确认旧接口零引用 → 通过 2D/UI/3D 验收 → 在独立提交中删除旧实现。
 

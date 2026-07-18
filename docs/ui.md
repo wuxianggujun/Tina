@@ -11,9 +11,13 @@
 > M7-C1c-b3d1 已加入 focused `UIContextCapacityConfig`、`EngineConfig::primaryWindowUICapacities`
 > 与 `updateUI` 后、Render 前的 Runtime-private layout coordinator；M7-C1c-b3d2 已加入 startup
 > primary-window metrics seed、`onEnter` root builder 与 `updateUI` root-scoped updater；M7-C1c-b3e
-> 已加入 held primary Pointer Button claim bridge。Key/Gamepad/axis claim、持久 Pointer Capture、
-> Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、
-> dirty subtree pruning、文本/Glyph Atlas 与 bgfx UI pass 尚未实现。Tina UI 是游戏内 Retained UI，
+> 已加入 held primary Pointer Button claim bridge。最新切片已实现 SolidFill-only local paint cache、
+> 双缓冲 `UICommittedPaintView`、Render-owned 单帧 SolidQuad `UIDisplayListBuilder` 与独立 UI→Render
+> integration bridge；bridge 在 Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Linux Clang 22
+> sanitizer 构建中直接 GoogleTest 均为12/12，Clang 无 sanitizer 诊断。
+> Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、Button default action、Image/Text/Glyph
+> PaintCache、Runtime `RenderFramePacket`、nested clip、dirty subtree pruning、文本 Glyph Atlas 与 bgfx
+> UI Pass 尚未实现。Tina UI 是游戏内 Retained UI，
 > 不是 Immediate UI，也不是桌面编辑器工具包。
 
 ## 当前 Legacy 基线
@@ -93,9 +97,10 @@ M7-C1c-b3d2 仍不暴露裸 `UIContext*`，而是在 startup transaction 中先�
 Platform/Event 只把 `PlatformFrameView` 的 UI-eligible transitions 交给 UIContext，不拥有节点、Focus、Capture 或 Layout。
 `IGameState` 持有 move-only `UIRootOwner` 和非 owning `UINodeId`，不持有 UIContext、Renderer、
 UINode 裸指针或跨帧 writer。
-当前 M7-C1b/C1c-a/C1c-b1/C1c-b2 `tina_ui` 仍只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；Font Asset、Render
-descriptor/DisplayList 和 bgfx UI pass 分别在后续 asset/render 切片接入，不能提前把
-Asset/Render 依赖塞回 UI tree/layout core。
+`tina_ui` 仍只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`，`tina_render` 也不依赖 UI；只有独立
+`tina_ui_render_integration` PUBLIC 依赖二者，负责 committed paint → DisplayList 转换。Font Asset、
+FrameResourceRef/pin 与 bgfx UI Pass 分别在后续 asset/render 切片接入，不能把 Asset/Render 依赖塞回
+UI tree/layout core。
 
 UI module 最小基础类型（其中低层 builder/updater 不直接交给普通 Game SDK）：
 
@@ -118,6 +123,11 @@ class UITreeUpdater;     // UIContext owner-thread/root-scoped 低层 updater
 struct UICommittedStructureView; // owner-thread borrowed structure snapshot
 struct UICommittedLayoutView;    // owner-thread borrowed layout snapshot
 struct UICommittedHitView;       // owner-thread borrowed hit/route-ancestry snapshot
+class UICommittedPaintView;      // owner-thread borrowed SolidFill paint snapshot
+struct UIStraightSrgba8Color;     // authoring color
+struct UIPremultipliedRgba8Color; // committed/cache color
+struct UISolidFill;
+struct UIBoxPaint;                // 当前只含 optional SolidFill
 struct UIPointerHitTarget;       // owning target facts + snapshot-local route indices
 struct UIPointerHitQueryResult;  // owning point-query result + revisions/visited count
 struct UIPointerInputEvent;      // owning normalized pointer input for one synthetic route
@@ -138,7 +148,8 @@ struct UIContextCapacityConfig; // focused public config；由 EngineConfig 持�
 目标窗口 registry 的 `UIContext::contains(UINodeId)` 或 `UITreeUpdater::isAlive(UINodeId)` 完成。
 公开 API 不提供一个无法访问 registry 却名为 `isValid()` 的误导性成员。
 
-`UIDisplayListView` 只在 Tina UI/Render SPI 之间传递，普通游戏代码拿不到。所有构建都会先校验
+`UIDisplayListView` 由 `Tina::Render` 拥有，并通过独立 Tina UI/Render integration SPI 传递，普通游戏代码
+拿不到。所有构建都会先校验
 `UINodeId.ownerWindow + generation`，Debug 额外携带 Engine/registry cookie 改善诊断；热点遍历在
 一次校验后只使用 UIContext 内部的紧凑 slot index。generation 回绕的 slot 永久 retire。
 
@@ -213,23 +224,24 @@ destroy 会立即令 generation lookup 失败，slot 物理回收延后到 route
 停止后续 Target/Bubble，不会向复用 slot 的新节点投递，也不会 UAF。`UIContext` 本身必须在 owner-thread
 phase 边界销毁；从 routed callback 或 callback cleanup 内销毁，或从非 owner thread 销毁，违反生命周期契约。
 
-新 root/节点完成结构、layout 和 snapshot commit 后，才能被后续 hit snapshot 使用。M7-C1c-a 的
+新 root/节点完成结构、layout 和 snapshot commit 后，才能被后续 hit/paint snapshot 使用。
 `commitLayout(viewportSize)` 是 Runtime 应使用的发布入口：它按需完整构建所有受影响候选，再在同一
-事务内切换对应双缓冲；任何验证、算术溢出或容量失败都保留上一份 structure/layout/hit snapshot 与
+事务内切换对应双缓冲；任何验证、算术溢出或容量失败都保留上一份 structure/layout/hit/paint snapshot 与
 pending dirty。仅 Pointer policy 变化的 hit-only commit 不执行 Measure/Arrange，也不增加 layout
-revision。`commitStructure()` 只保留为 M7-C1a 结构诊断 seam；它可以单独发布结构并保留旧 layout/hit，
+revision；paint-only commit 不执行 layout 或 hit rebuild。`commitStructure()` 只保留为 M7-C1a 结构诊断
+seam；它可以单独发布结构并保留旧 layout/hit/paint，
 Runtime 不得把它与 `commitLayout()` 拆成两个可观察发布阶段。
 
-`UICommittedStructureView`、`UICommittedLayoutView` 与 `UICommittedHitView` 都是 owner-thread
+`UICommittedStructureView`、`UICommittedLayoutView`、`UICommittedHitView` 与 `UICommittedPaintView` 都是 owner-thread
 borrowed view，分别在下一次对应成功发布或 `UIContext` 析构后失效，不是跨线程快照。节点不能保存 FrameArena
 指针；Action 注册期允许在 UI persistent memory 分配，dispatch/layout/paint 热点不得产生稳态
 heap allocation。
 
 `UIContext::Create(ownerWindow, capacities, memory_resource)` 的 `memory_resource` 当前服务固定容量
 tree/id、style/pointer-policy side array、dirty state/queue、layout 与 route-ancestry scratch、route path
-scratch、routed pointer listener slots，以及 committed structure/layout/hit 双缓冲；
+scratch、routed pointer listener slots、local SolidFill cache，以及 committed structure/layout/hit/paint 双缓冲；
 少量 control-plane 对象和 off-thread root release 队列在 Create 期间使用进程默认 heap 预分配。
-`dirtyQueueCapacity`、`layoutSnapshotCapacity` 与 `hitSnapshotCapacity` 为0时从 `nodeCapacity` 派生，
+`dirtyQueueCapacity`、`layoutSnapshotCapacity`、`hitSnapshotCapacity` 与 `paintSnapshotCapacity` 为0时从 `nodeCapacity` 派生，
 非0时固定且不得超过节点容量；`routePathCapacity` 为0时同样从节点容量派生，`routedPointerListenerCapacity`
 为0时从节点容量派生但可单独配置到最大1,048,576，因为一个节点可以注册多个事件监听。该 supplied PMR
 范围不等于整个进程不使用 heap。`UIRootOwner` 在 owner
@@ -241,7 +253,7 @@ off-thread reset 进入有界队列，并在下一次 owner-thread mutation/rout
 `noexcept` callable；超出容量或对齐要求的 callable 在编译期被拒绝，没有 allocator 或 heap fallback。
 
 `UIContextCapacityConfig` 的 shared validator 要求 node/root 容量非0且不超过各自上限，root 不得超过
-node；非0的 dirty/layout/hit/route-path 容量不得超过 node，listener 容量不得超过1,048,576。
+node；非0的 dirty/layout/hit/paint/route-path 容量不得超过 node，listener 容量不得超过1,048,576。
 值为0的派生容量继续由 `UIContext::Create` 规范化为 node capacity。`EngineConfig::validate()` 在任何
 backend factory 前把该领域错误包装为 `InvalidEngineConfig`，避免窗口/GPU 已创建后才发现 UI 预算非法。
 
@@ -252,9 +264,16 @@ vNext 只保留一套 UI 坐标语义：
 - layout、hit-test、Pointer event 全部使用 window-logical coordinate；
 - 左上原点、X 向右、Y 向下；
 - Platform 输出 logical pointer，UI 不先放大到 framebuffer 再命中；
-- content scale 只在 DisplayList extraction 把 logical rect/clip 转 framebuffer pixel，恰好一次；
+- committed logical viewport 与 framebuffer viewport 这对实际 extent 只在 DisplayList extraction
+  把 logical rect/clip 转为 framebuffer pixel，恰好一次；
 - 用户 UI scale 通过 Theme typography/spacing/min-hit-size 影响布局，不等同 framebuffer scale；
-- glyph raster pixel size 和 scissor 根据 content scale 计算，不能在 shader 再隐式翻转/缩放。
+- SolidQuad bounds/scissor 使用同一 extent ratio；glyph raster pixel size 属于后续文字契约，不能让
+  shader 再从平台 content scale 隐式重复缩放。
+
+当前 integration bridge 不读取或保存平台 content-scale 状态，而以 committed paint view 的 logical
+viewport 与调用方提供的 framebuffer viewport 作为唯一权威 extent pair，分别计算 X/Y 比例。rect/clip
+origin 用 `floor`，非零 end 用 `ceil`，再 clamp 到 half-open framebuffer viewport，避免缩放后漏掉覆盖
+像素；零 logical/framebuffer extent 成功提交空 DisplayList。该转换只发生一次，Render backend 不再缩放。
 
 `UIVisibility` 固定为 `Visible`、`Hidden`、`Collapsed`：Hidden 参与布局但不画、不命中；Collapsed
 不参与布局、绘制或语义树。Opacity=0 不自动等于 Hidden，Pointer behavior 必须显式配置。
@@ -316,12 +335,14 @@ range，不把每个后代错误标成 Paint dirty。
 每窗口每帧最多一次 Measure/Arrange。布局中产生的外部新 dirty 留到下一帧，不能在 batch 末
 清空丢失。`hitTest()`、Widget render、PaintCache/DisplayList build 都不能隐式调用 layout。
 
-M7-C1c-a 的双缓冲 `UICommittedHitView` 保存所有 effective-visible route-ancestry entry，包括 policy
+双缓冲 `UICommittedHitView` 保存所有 effective-visible route-ancestry entry，包括 policy
 为 `Ignore` 的祖先；`Hidden`/`Collapsed` 子树不进入 snapshot。每项包含 `UINodeId`、snapshot-local
 parent/root index、world rect、当前仅为 `viewport ∩ worldRect` 的 effective clip、`Ignore`/`Targetable`
 与 paint ordinal。同一 view 内的 entry 按 paint ordinal 严格递增且唯一；view
-携带 structure/layout/paint-order/hit revision。布局、结构或 policy 改变后，成功的 `commitLayout()`
-原子发布匹配的 structure/layout/hit snapshot。
+携带 structure/layout/paint-order/hit revision。双缓冲 `UICommittedPaintView` 只保存 effective-visible、
+非透明 SolidFill entry，每项包含 node、logical world rect/effective clip、同一稳定 paint ordinal 和
+premultiplied RGBA8，并携带 structure/layout/paint-order/paint revision。布局、结构、policy 或 paint
+改变后，成功的 `commitLayout()` 原子发布匹配的 structure/layout/hit/paint 四份 snapshot。
 
 M7-C1c-b1 的 `queryPointerHit(point)` 对这份 view 做反向扫描，只接受 `Targetable` 且 point 同时位于
 world rect/effective clip 的首个 entry；边界固定为 left/top inclusive、right/bottom exclusive，非有限
@@ -410,7 +431,8 @@ root-scoped、phase-epoch-scoped `PrimaryWindowUIRootBuilder`/`PrimaryWindowUITr
 在回调结束失效 epoch，跨 phase 调用返回 `UIPhaseCapabilityExpired`。异常/错误边界通过无分配
 `abortPhase()` 失效 facade，避免半开放 UI 能力跨过启动或帧回滚。
 普通 Game SDK 不获得裸 `UIContext*`，也不能在任意阶段调用 `createRoot()`；root 创建成功只证明 retained
-tree owner 已接入，不证明 Widget 文本、默认交互、DisplayList 或可见 UI。
+tree owner 已接入，不证明 Game SDK paint authoring、Widget 文本、默认交互、Runtime DisplayList submission
+或可见 UI。
 
 Runtime 在每次状态命令提交后，根据 committed `GameStateStack`、`GameStatePolicy` 和 root
 registration 生成每窗口不可变 `UIInputScopeSnapshot`。它按视觉层级列出 eligible roots，并在
@@ -444,42 +466,55 @@ M7-C1c-b3c 的正式 `EngineHost` 路径先选择 Context，再把 producer 的 
 ActionMapper；Headless bind 前和当前无 root 的 Context 都自然得到无消费结果，不能退回由 Host 旁路构造
 两份 `None`。本帧稍后的 b3d1 layout commit 不改变已经完成的 route 结果。独立
 `tina_runtime_ui_tests` 直接运行 GoogleTest，不通过 CTest；当前 Game SDK 能创建/更新 retained root，但
-该接线仍不构成可交互 Widget、DisplayList 或可见 UI 证据。
+该接线仍不构成可交互 Widget、Runtime-consumed DisplayList 或可见 UI 证据。
 
 ## PaintCache、DisplayList 与批处理
 
-每个可绘制节点持久保存 backend-neutral local `PaintCache`。只有 Paint dirty 才重建 Quad/Image/
-TextRun 数据；Order、layout 或 clip 改变更新 committed paint entries。无变化帧仍需遍历 visible
-paint entries 组装当前 `UIDisplayListView`，但不重复 style、layout、text shaping 或 local paint。
+当前最小 local PaintCache 只覆盖 `UIBoxPaint` 的可选 SolidFill。authoring color 是 straight sRGBA8，
+缓存与 snapshot 使用确定性整数 premultiplication 后的 RGBA8；same-value `setBoxPaint()` 是 no-op。
+当前 `UICommittedPaintView` 只发布 effective-visible、非透明 fill，未包含 Image/Text/Glyph、资源引用、
+opacity 合成或 nested clip。无变化 commit 不增加 paint revision，也不使旧 paint view 失效；paint-only
+commit 不执行 layout/hit rebuild。该 API 目前只存在于低层 `UITreeUpdater`，Game SDK scoped facade
+尚未暴露 paint setter。
 
 ```text
-UIDisplayList
-  ClipRect[]        已求交并确定性 intern 的 framebuffer scissor，ClipId 0 表示无 clip
-  DrawCommand[]     Quad / ImageQuad / GlyphRange，保持 paint order
-  GlyphInstance[]   本帧 FrameArena 数据
+当前 Render::UIDisplayListView
+  UIPixelRect[]     first-seen interning 的 framebuffer scissor，ClipId 0 表示无 clip
+  UIDrawCommand[]   SolidQuad，严格保持 paint order
+  UIDrawBatch[]     仅相邻且 kind/ClipId 兼容的 command run
 ```
 
-Draw command 只含 framebuffer geometry、UV、premultiplied color、ClipId 和 packet-local
-`FrameResourceRef`。DisplayList extraction 把所用 Texture/Sampler/Atlas generation pin 登记到
-Render SPI 的 `FramePinSink`，由 Runtime-private owning `RenderFramePacket` 保活；UI 不访问 packet
-类型。禁止 Widget/UINode 指针、AssetHandle、bgfx handle、ViewId、state flag、uniform location
-或 backend vertex declaration。
+`Tina::Render::UIDisplayListBuilder` 不依赖 UI，在 Create 时从 supplied PMR 一次分配固定
+command/clip/batch storage。它校验 strictly increasing paint ordinal、有效 premultiplied color 与 pixel
+rect，剪枝空 bounds、透明色、空 clip 和 clip 外命令；clip 以规范化整数值首次出现顺序 intern，batch
+只合并相邻兼容 SolidQuad，并记录 paint-order checksum。容量或输入失败进入 sticky failed build；
+`commit()` 不发布截断 list。
 
-Renderer 只合并相邻、兼容命令：
+builder 是有意选择的单缓冲 frame-local owner。`beginFrame()` 立即使上一份 borrowed
+`UIDisplayListView` 失效；begin 成功后的失败/rollback 留下空 `publishedView()`，不会回退旧 list；
+对 Published 状态直接调用 `rollback()` 则是 no-op。独立
+`Tina::Integration::buildUIDisplayList()` 拥有完整 begin/add/commit transaction；只有
+`beginFrame()` 自身失败时保留调用方已经打开的事务，一旦 begin 成功，validation、坐标转换或容量失败
+都会 rollback。其 Windows MSVC 19.50 Debug/Release 12项直接 GoogleTest 均已通过。
+
+当前 DisplayList 只有 framebuffer bounds、premultiplied color 与 ClipId，不含 UI node/Widget 指针，
+也不含 bgfx handle、ViewId、state flag、uniform、backend vertex declaration 或 OS native 类型。
+`tina_ui` 与 `tina_render` 不互相依赖；跨模块转换只在 `tina_ui_render_integration`。
+
+完整目标再增加 ImageQuad/GlyphRange、packet-local `FrameResourceRef` 与 `FramePinSink`。DisplayList
+extraction 届时把 Texture/Sampler/Atlas generation pin 转移给 Runtime-private owning
+`RenderFramePacket`；UI 仍不访问 packet 或 backend 类型。Renderer 仍只允许合并相邻、兼容命令：
 
 ```text
 UI pipeline kind + Texture/Atlas page + Sampler + Blend + ClipId
 ```
 
-DisplayList extraction 以规范化整数 framebuffer scissor 值做确定性 interning；相同 effective
-clip 必须得到同一 `ClipId`。因此 batch key 比较 `ClipId` 等价于比较 clip 值，不会因节点来源
-不同而错误拆批。
-
 批处理不能跨透明 paint order 全局排序。batch 前后 paint checksum 必须一致；空 clip 直接剪枝。
-首期只支持 axis-aligned scissor，rounded/stencil clip 后置。Frame capacity 超限返回 sticky
+当前只支持 axis-aligned scissor，rounded/stencil clip 后置。Frame capacity 超限返回 sticky
 `CapacityExceeded`，不提交半份 DisplayList，也不回退 heap。
 
-UI 内建 pipeline 由 Render module 持有；游戏 Widget 不能选择 shader/pipeline。bgfx 只存在于
+未来 UI 内建 pipeline 由 Render module 持有；游戏 Widget 不能选择 shader/pipeline。当前尚无 Runtime
+packet producer 或 bgfx UI Pass，因此以上已实现 CPU 数据路径仍不能形成可见 UI。bgfx 只存在于
 `tina_render_bgfx` 私有实现，详细门禁见[渲染架构](rendering.md)。
 
 ## UTF-8、中文与 Glyph Atlas
@@ -548,15 +583,16 @@ Audio settings command；backend 失败恢复 model 并显示 UTF-8 错误。
 
 ## 线程与内存
 
-- UIContext、Node registry、route、layout、PaintCache、snapshot 和 DisplayList build 都在主线程；
+- UIContext、Node registry、route、layout、PaintCache、snapshot 和 DisplayList build 都在主线程；当前
+  DisplayList build 由独立 integration 调用 Render builder，不由 UIContext 隐式触发；
 - Worker 只执行字体/图片 CPU 工作，不持有 UINode/UIContext/FrameArena 指针；
 - completion 在主线程重新校验 owner + generation 后发布；
 - GPU staging 跨帧使用独立 owner；DisplayList 的资源/Atlas pin 通过 FramePinSink 转移并由
   Runtime-private RenderFramePacket 保活，不借用
   Worker scratch/UI FrameArena；
 - retained node/style/text/action/PaintCache 属 UI persistent tag；
-- M7-C1b/C1c-a 的 `std::pmr::memory_resource` 覆盖 tree/id/style/pointer-policy/dirty、layout 与
-  route-ancestry scratch，以及 committed structure/layout/hit 双缓冲；这只约束 Tina UI 的指定固定容量
+- `UIContext` 的 `std::pmr::memory_resource` 覆盖 tree/id/style/pointer-policy/dirty、layout 与
+  route-ancestry scratch、local SolidFill cache，以及 committed structure/layout/hit/paint 双缓冲；这只约束 Tina UI 的指定固定容量
   storage，不代表整个进程零 heap。`UIContext::Create` 的少量 control-plane allocations 默认 heap，
   off-thread `UIRootOwner` release 使用 Create 期预分配队列并由 owner thread 下一次操作 drain；
 - layout scratch、route scratch、DisplayList 使用彼此独立且有上限的 arena/capacity；
@@ -595,11 +631,11 @@ p50/p95/p99 由 `tina_bench` 的预分配 sample buffer 离线计算，不在常
 - 无变化 UI、单 Label 更新、滚动列表、中文文本、Modal 和设置页分别记录 p50/p95/p99；
 - 绝对毫秒预算等固定门禁机建立后再阻断，零分配、容量、顺序和资源归零立即阻断。
 
-M7-C1b/C1c-a/C1c-b1/C1c-b2 已建立其中第一组可执行证据：50,000 节点深树的非递归 layout 与 committed hit
+M7-C1b/C1c-a/C1c-b1/C1c-b2 已建立第一组可执行证据：50,000 节点深树的非递归 layout 与 committed hit
 snapshot；首次发布后连续300次
 同 viewport、无 mutation 的 `commitLayout()` 均为0 layout pass、layout revision 不变且 supplied
 UI PMR allocation count 不增加。15项 hit snapshot 测试覆盖固定容量、policy、route ancestry、同一 view
-内严格递增且唯一的 paint ordinal、revision、三快照失败回滚、stale generation 与 PMR 回收；新增5项
+内严格递增且唯一的 paint ordinal、revision、snapshot 失败回滚、stale generation 与 PMR 回收；新增5项
 point query 测试覆盖反向目标选择、Ignore 穿透、world/clip 半开边界、非有限坐标 miss、revision/index
 binding、visited count 与300次查询零新增 UI PMR allocation；C1c-b2 新增16项 route 测试覆盖稳定
 Capture/Target/Bubble 顺序、stopPropagation、stopImmediatePropagation、dispatch 中 reset/add/destroy、
@@ -607,14 +643,20 @@ generation-safe target invalidation、listener 容量原子失败与复用、rou
 callback、token move/context-destroyed/off-thread reset、callback root 自销毁、route 中 commit 拒绝、
 错误销毁 context 的 death test、300次 route 零新增 supplied UI PMR allocation/不改变 committed state，
 以及递归 route 拒绝。M7-C1c-b3d2 另补3项低层 `UITreeUpdater` 子节点创建/跨 root/失效 root 测试；
-M7-C1c-b3e 再补3项 claim 合并/非法值/无命中测试。Windows MSVC 19.50 Debug/Release 当前完整
-`tina_ui_tests` 为81/81；Linux GCC 13.4、Linux Clang 22.1.8 + libstdc++15.2
-ASan/UBSan/LSan 的 b3e 记录也为81/81，且 Clang 无 sanitizer 诊断。初次 GCC
+M7-C1c-b3e 再补3项 claim 合并/非法值/无命中测试。SolidFill paint 切片新增11项测试，覆盖确定性
+premultiplication、visible/transparent 筛选、paint-only/no-op revision、四份 snapshot rollback、固定容量与
+supplied PMR。Windows MSVC 19.50 Debug、Linux GCC 13.4、Linux Clang 22.1.8 + libstdc++15.2
+ASan/UBSan/LSan 当前完整 `tina_ui_tests` 均为92/92，且 Clang 无 sanitizer 诊断。Windows Release
+仍保留 b3e 的81/81历史结果，最新 UI 切片尚未重跑。初次 GCC
 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
-它尚未证明 dirty leaf 不扫描无关 subtree，也未覆盖 PaintCache、DisplayList、文本、Widget default
-action、可见 UI 或 GPU 资源归零。M7-C1c-b3c 只补上 Runtime 私有
+Render builder 的11项测试随 Windows Debug、Linux GCC/Clang `tina_tests` 205/205 通过；独立
+UI→Render bridge 的12项直接 GoogleTest 在 Windows Debug/Release 与两条 Linux 图均通过。Linux Null
+样例各运行300帧，Clang 无 sanitizer 诊断。它们覆盖 SolidQuad、clip interning/rounding/clamp、
+相邻 batching、剪枝、容量/输入失败和 transaction rollback，但尚未证明 dirty leaf 不扫描无关 subtree，
+也未覆盖 Image/Text/Glyph PaintCache、FramePin、Runtime packet、bgfx UI Pass、Widget default action、
+可见 UI 或 GPU 资源归零。M7-C1c-b3c 只补上 Runtime 私有
 primary-window Context 生命周期与 producer 顺序；M7-C1c-b3d1 只补上容量配置与 phase-driven layout
-commit；M7-C1c-b3d2 只扩大到 scoped Game SDK root/updater，不扩大到 DisplayList、Widget 行为或可见 UI 门禁。
+commit；M7-C1c-b3d2 只扩大到 scoped Game SDK root/updater，不扩大到 paint authoring、Widget 行为或可见 UI 门禁。
 
 ## 测试与实施顺序
 
@@ -650,10 +692,14 @@ commit；M7-C1c-b3d2 只扩大到 scoped Game SDK root/updater，不扩大到 Di
    root-scoped updater、phase epoch expiry/sticky/abort，不开放裸 Context 或任意阶段 root 创建；
 10. 已完成 M7-C1c-b3e：primary Pointer Button claim 请求、held-filter、去重、双 PMR buffer、
     capacity/rollback 与 ActionMapper Cancel/suppress 闭环；
-11. 实现 Key/Gamepad claim producer，并让 dirty leaf 跳过无关 subtree，输出后端无关 DisplayList；
-12. 完成 PaintCache/text layout + glyph atlas；
-13. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
-14. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
-15. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
+11. 已完成 SolidFill-only local paint cache、双缓冲 committed paint 与四份 snapshot 原子发布；
+12. 已完成 Render-owned 单帧 SolidQuad DisplayList builder，以及独立 UI→Render bridge；Windows bridge
+    Debug/Release、Linux GCC 13.4 与 Linux Clang 22 sanitizer 均为12/12，Clang 无诊断；
+13. 实现 Key/Gamepad claim producer、dirty subtree pruning、Game SDK paint/widget authoring、Runtime-owned
+    RenderFramePacket 与 FramePin；
+14. 完成 Image/Text/Glyph PaintCache、text layout + glyph atlas 和 bgfx UI Pass；
+15. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
+16. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
+17. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
 
 所以“完善 UI”首先是完成正确的数据和 backend 边界，然后才是增加 Widget 数量。

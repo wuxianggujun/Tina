@@ -52,15 +52,17 @@ out\build\windows-msvc\bin\Debug\tina_legacy_tests.exe
 
 该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A/M7-B1 与
 M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2/C1c-b3e 的 `tina_core`、`tina_platform`、
-`tina_task`、`tina_render`、`tina_runtime`、`tina_ui`、
+`tina_task`、`tina_render`、`tina_runtime`、`tina_ui`，以及最新 SolidFill paint、Render DisplayList 与
+`tina_ui_render_integration`、
 直接 GoogleTest 门禁与 Null 样例：
 
 ```powershell
 cmake --preset windows-msvc-vnext
-cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_sample_null
+cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_sample_null
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Debug\tina_ui_render_integration_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 ```
 
@@ -69,9 +71,10 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 EnTT、FreeType、miniaudio、Box2D、xxHash 或 SDL/SDL3。`tina_sample_null` 只组合 Headless Platform、
 Disabled TaskSystem 与 NullRenderDevice。
 
-## Windows vNext UI 树、布局、命中快照、point query 与 synthetic route 核心
+## Windows vNext UI 树、布局、命中、paint 与 DisplayList bridge
 
-M7-C1b/C1c-a/C1c-b1/C1c-b2 与 b3d2/b3e 的 `tina_ui` 当前只依赖 Core/Platform；门禁直接运行独立 GoogleTest executable：
+`tina_ui` 仍只依赖 Core/Platform；`tina_render` 不依赖 UI；只有
+`tina_ui_render_integration` PUBLIC 依赖二者。门禁分别直接运行独立 GoogleTest executable：
 
 ```powershell
 cmake --preset windows-msvc-vnext
@@ -80,21 +83,32 @@ out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe --gtest_color=yes
 
 cmake --build --preset windows-vnext-release --target tina_ui_tests
 out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
+
+cmake --build --preset windows-vnext-debug --target tina_ui_render_integration_tests
+out\build\windows-msvc-vnext\bin\Debug\tina_ui_render_integration_tests.exe --gtest_color=yes
+
+cmake --build --preset windows-vnext-release --target tina_ui_render_integration_tests
+out\build\windows-msvc-vnext\bin\Release\tina_ui_render_integration_tests.exe --gtest_color=yes
 ```
 
-当前记录为 Windows 11 / MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22 sanitizer 均为81/81：
+截至 b3e，Windows 11 / MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22 sanitizer 的 UI
+历史门禁均为81/81：
 16项覆盖 generation tree/ownership，
 23项覆盖事务式 Flex-lite layout，15项覆盖固定 PMR 容量、`Ignore`/`Targetable`、route ancestry、
-同一 `UICommittedHitView` 内严格递增且唯一的 paint ordinal、双缓冲 view、三快照事务回滚、
+同一 `UICommittedHitView` 内严格递增且唯一的 paint ordinal、双缓冲 view、当时的三-snapshot事务回滚、
 stale generation、50,000节点与 PMR 回收；5项覆盖反向 paint-order 查询、Ignore 穿透、world/clip
 半开边界、非有限坐标 miss、snapshot binding、visited count 与300次查询零新增 UI PMR allocation；
 16项覆盖 fixed-capacity synthetic listener route、Capture/Target/Bubble 顺序、stop/consume、路由中
 add/reset/destroy 安全失效、off-thread deferred reset、route/commit reentrancy guard、错误 context
 销毁 death test、300次 route 零新增 supplied UI PMR allocation 与递归 route 拒绝；3项覆盖
 root-scoped `UITreeUpdater` 子节点创建、跨 root 拒绝与失效 root；b3e 新增3项覆盖 claim 合并、非法值
-与无命中。API/producer 支持 Move/Button/Wheel listener 请求接管，Runtime 测试覆盖 Move 与 ButtonDown
-的 claim 行为。它们不证明持久
-Pointer Capture、Focus/Modal、Button default action、Widget、DisplayList 或 Runtime/Render 集成已完成。
+与无命中。最新 SolidFill paint 再新增11项，Windows Debug、Linux GCC 13.4 与 Linux Clang 22 sanitizer
+的 `tina_ui_tests` 均为92/92；Windows Release 尚未重跑，仍保留历史81/81。Render builder 的11项
+测试已随 Windows Debug 与两条 Linux 图的 `tina_tests` 205/205 通过；独立 bridge 的12项在 Windows
+Debug/Release 与两条 Linux 图均通过，覆盖 logical→framebuffer
+outward rounding/clamp、冗余/空 clip、严格 paint order、容量/输入失败与完整 transaction rollback。
+这些结果不证明持久 Pointer Capture、Focus/Modal、Button default action、Image/Text/Glyph、Runtime packet、
+bgfx UI Pass 或可见 Widget 已完成。
 
 ## Windows vNext Runtime→UI producer、primary-window owner、layout coordinator、scoped Game SDK UI access 与 Pointer Button claim bridge
 
@@ -141,7 +155,8 @@ Debug/Release、Linux GCC 13.4 与 Clang 22 sanitizer 均直接通过 `tina_runt
 Key/Gamepad/axis claims 仍后置。
 
 当前 Game SDK 已能在 `onEnter` 创建 retained root、在 `updateUI` 通过绑定 root 的 updater 修改 subtree，
-但 Runtime 仍不生成 DisplayList；b3e 只证明 held primary Pointer Button claim bridge。正式样例没有
+但 Runtime 仍不生成或提交 DisplayList；b3e 只证明 held primary Pointer Button claim bridge。独立
+UI→Render bridge 已验证 CPU 数据转换，不改变 Runtime 现状。正式样例没有
 Widget 文本、Button 默认行为、Focus/Capture/Modal 或可见 UI。该 target 直接运行 GoogleTest，不使用 CTest；这项接线不证明可见 UI 或
 UI Render 已完成。
 
@@ -193,8 +208,9 @@ out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
 
 Windows 构建会把 GLFW runtime DLL 复制到对应 `bin/<Config>`。样例不带参数时以16 ms 的演示延迟
 显示1800帧；自动门禁必须显式使用 `--frame-delay-ms=0`，这条 sleep 路径不属于 benchmark。
-最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3；本次 C1c-b3e
-Debug 和 Release 均直接通过基础194/194、独立 UI 81/81、独立 Runtime→UI 46/46与Null样例300帧。
+最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3。当前 Debug 已直接
+通过基础205/205、独立 UI 92/92、独立 Runtime→UI 46/46与 UI→Render bridge 12/12；Release 最新
+只重跑 bridge 12/12，其余仍保留 b3e 的基础194/194、UI81/81、Runtime→UI46/46与Null样例300帧历史结果。
 独立 adapter 门禁通过 GLFW专项25/25、bgfx专项11/11；GLFW+Null 与真实 D3D11 Intel Iris Xe 的
 `tina_sample_desktop` 均运行300帧，Release 输出 `clean status ok`。上一 C1c-b3a 门禁的
 WindowSurface GLFW样例1800帧仍作为历史证据。
@@ -212,10 +228,11 @@ MSBuild 进程并发驱动同一生成图；配置输出目录虽然隔离，共
 ```powershell
 cmake --preset windows-msvc-vnext
 cmake --build --preset windows-vnext-release `
-  --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_sample_null
+  --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_sample_null
 out\build\windows-msvc-vnext\bin\Release\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_runtime_ui_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Release\tina_ui_render_integration_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_sample_null.exe --frames=300
 ```
 
@@ -248,10 +265,11 @@ cmake --build --preset linux-debug --target Tina tina_tests tina_legacy_tests
 ```bash
 cmake --preset linux-gcc13-vnext
 cmake --build --preset linux-gcc13-vnext-debug \
-  --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_sample_null
+  --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_sample_null
 ./out/build/linux-gcc13-vnext/bin/tina_tests --gtest_color=no
 ./out/build/linux-gcc13-vnext/bin/tina_ui_tests --gtest_color=no
 ./out/build/linux-gcc13-vnext/bin/tina_runtime_ui_tests --gtest_color=no
+./out/build/linux-gcc13-vnext/bin/tina_ui_render_integration_tests --gtest_color=no
 ./out/build/linux-gcc13-vnext/bin/tina_sample_null --frames=300
 ```
 
@@ -266,7 +284,7 @@ cmake --build --preset linux-clang22-vnext-debug --target tina_tests tina_sample
 
 cmake --preset linux-clang22-vnext-sanitize
 cmake --build --preset linux-clang22-vnext-sanitize-debug \
-  --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_sample_null
+  --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_sample_null
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 LSAN_OPTIONS=exitcode=23 \
@@ -282,13 +300,18 @@ LSAN_OPTIONS=exitcode=23 \
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 LSAN_OPTIONS=exitcode=23 \
+./out/build/linux-clang22-vnext-sanitize/bin/tina_ui_render_integration_tests --gtest_color=no
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+LSAN_OPTIONS=exitcode=23 \
 ./out/build/linux-clang22-vnext-sanitize/bin/tina_sample_null --frames=300
 ```
 
 这些输出不包含 Legacy 产品、窗口、真实渲染后端或 cooked shader，只用于 Headless 生命周期验证，
-不能作为游戏产品或发布包。本批 b3e 的 GCC 13.4 直接通过基础 `tina_tests` 194/194、
-`tina_ui_tests` 81/81、`tina_runtime_ui_tests` 46/46与Null样例300帧；Clang 22.1.8 +
-libstdc++15.2 在 ASan/UBSan/LSan 下通过相同门禁且无 sanitizer 诊断。
+不能作为游戏产品或发布包。最新 paint/DisplayList/bridge 切片中，GCC 13.4 直接通过基础
+`tina_tests` 205/205、`tina_ui_tests` 92/92、`tina_runtime_ui_tests` 46/46、
+`tina_ui_render_integration_tests` 12/12与Null样例300帧；Clang 22.1.8 + libstdc++15.2 在
+ASan/UBSan/LSan 下通过相同门禁且无 sanitizer 诊断。
 但仍不能用 Ubuntu 22.04 的旧工具链降级冒充正式结果。
 
 ## Linux vNext GLFW Platform
@@ -406,7 +429,7 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 
 | 选项 | 默认值 | 用途 |
 | --- | --- | --- |
-| `TINA_BUILD_TESTING` | `ON` | 构建 vNext 基础 `tina_tests`；Legacy ON 时另建 `tina_legacy_tests`；UI、Runtime→UI 与 GLFW/bgfx adapter 使用各自独立专项测试 |
+| `TINA_BUILD_TESTING` | `ON` | 构建 vNext 基础 `tina_tests`；Legacy ON 时另建 `tina_legacy_tests`；UI、Runtime→UI、UI→Render integration 与 GLFW/bgfx adapter 使用各自独立专项测试 |
 | `TINA_BUILD_SHADERS` | `ON` | 构建运行时 shader；关闭后只适合编译/链接门禁 |
 | `TINA_BUILD_LEGACY` | `ON` | 迁移期构建现有游戏与旧模块；vNext preset 固定关闭 |
 | `TINA_BUILD_PLATFORM_GLFW` | `OFF` | 构建私有 vNext GLFW Window/Input adapter；需启用 vcpkg `platform-glfw` feature，不改变 Game SDK 边界 |
