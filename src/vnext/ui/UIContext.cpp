@@ -2021,6 +2021,35 @@ struct UIContext::Impl final {
         return node;
     }
 
+    [[nodiscard]] Core::Result<UINodeId> createChildFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId parent,
+        UIWidgetKind kind)
+    {
+        if (kind == UIWidgetKind::Root) {
+            return fail(UIErrorCode::InvalidParent, "Root nodes cannot be created as children");
+        }
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue()) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        if (!contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater root is no longer alive");
+        }
+        auto parentResult = resolveParent(parent);
+        if (!parentResult) {
+            return Core::failure(parentResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, parent)) {
+            return fail(UIErrorCode::InvalidNode, "UI parent is not owned by the updater root");
+        }
+
+        return createChild(parent, kind);
+    }
+
     void unlinkFromTree(u32 index, NodeRecord& record) noexcept
     {
         if (record.parentIndex != InvalidNodeIndex) {
@@ -3093,6 +3122,30 @@ UITreeUpdater& UITreeUpdater::operator=(UITreeUpdater&& other) noexcept
     return *this;
 }
 
+Core::Result<UINodeId> UITreeUpdater::createPanel(UINodeId parent)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Panel);
+}
+
+Core::Result<UINodeId> UITreeUpdater::createLabel(UINodeId parent)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Label);
+}
+
+Core::Result<UINodeId> UITreeUpdater::createButton(UINodeId parent)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Button);
+}
+
 bool UITreeUpdater::isAlive(UINodeId node) const noexcept
 {
     return m_context != nullptr
@@ -3299,6 +3352,14 @@ Core::Result<UIRootOwner> UIContext::createRoot()
 Core::Result<UINodeId> UIContext::createChild(UINodeId parent, UIWidgetKind kind)
 {
     return m_impl->createChild(parent, kind);
+}
+
+Core::Result<UINodeId> UIContext::createChildFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId parent,
+    UIWidgetKind kind)
+{
+    return m_impl->createChildFromUpdater(updaterRoot, parent, kind);
 }
 
 Core::Status UIContext::setLayoutStyleFromUpdater(

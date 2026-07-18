@@ -46,7 +46,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | `tina_platform` | Window/Input/Event 公共描述、Headless backend、线程命名和不透明 Render surface | `tina_core`、OS 最小适配 | GLFW 公共类型、文件/资产 IO、Scene、Renderer、UI Widget |
 | `tina_platform_glfw` | 最终承载 GLFW Window/Input/Gamepad、DPI、Windows IMM32；当前已完成 Window/Keyboard/Pointer/Focus/resize/close/committed text | core/platform、GLFW、OS API | Scene、Asset、UI Widget、bgfx 类型 |
 | `tina_task` | 有界任务队列、协作取消、后台工作与主线程 completion | `tina_core`、`tina_platform` 的线程命名能力 | Asset 类型、渲染命令、强杀线程 |
-| `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、GameStateStack、RenderFramePacket/pool；当前含 M7-C1c-b3b/b3c/b3d1 private UI route-result producer、primary-window Context owner、容量配置与 layout coordinator 接线 | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
+| `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、GameStateStack、RenderFramePacket/pool；当前含 M7-C1c-b3b/b3c/b3d1/b3d2 private UI route producer、primary-window Context owner、容量/layout coordinator、startup seed 与 scoped Game SDK UI facade | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
 | `tina_scene` | World、generation `EntityId`、Transform、Camera、render components 与资产解析 facade | core、asset 公共接口、render descriptors、EnTT 内部实现 | GLFW 输入、TileMap 玩法、bgfx 类型 |
 | `tina_asset` | Asset 状态机、依赖、取消、CPU completion 与 GPU upload 协议 | core/task、render 接口、asset_format | 直接解析源 glTF、具体 bgfx 调用 |
 | `tina_asset_format` | Runtime/Cooker 共享的 Cooked header、schema、类型、依赖和 hash 编解码 | core | Asset registry、窗口、GPU、源格式 parser |
@@ -251,7 +251,12 @@ Context 在 Render → Task → Platform → Clock module shutdown 前于 owner 
 WindowRecord，不把 Context 暴露给 Platform/Event 或普通 Game SDK。
 M7-C1c-b3d1 已让 `EngineConfig::primaryWindowUICapacities` 在任何 factory 前共享校验，并由独立
 Runtime-private coordinator 在 `updateUI` 后、Render 前按 primary logical extent 至多提交一次 layout；
-它没有改变 owner 或开放 Game SDK root capability。
+M7-C1c-b3d2 已让 Platform backend 提供不 poll、不消费 frame id 的
+`initialPrimaryWindowMetrics()` seed，并在 `onEnter` 前显式绑定 primary `UIContext`。State 可在
+`onEnter` 通过 `PrimaryWindowUIRootBuilder` 创建自己的 root，并在 `onEnter` 或后续 `updateUI` 中通过
+绑定该 root 的 `PrimaryWindowUITreeUpdater` 修改 retained tree；facade 只在 owner thread 和当前 phase
+epoch 有效，回调结束后无条件失效，第一次 capability error 作为 sticky phase error 合并。
+该能力不暴露裸 `UIContext*`，也不允许任意阶段创建 root。
 
 Gameplay/UI Input、Fixed Update、Frame Update 从栈顶向下传播直到对应 committed block flag；
 Render 从最底可见层向上构建。
@@ -544,9 +549,12 @@ primary 消失或 generation 更换会结构化失败。Context 在 module shutd
 `UIContextCapacityConfig`/shared validator、`EngineConfig::primaryWindowUICapacities` 与 `updateUI` 后、
 Render 前每个严格递增 `PlatformFrameId` 至多一次的 private layout commit；Headless 双缺席成功 no-op，
 失败阻断 Render 且消费该 frame attempt。当前 `tina_ui` 仍只依赖 Core/Platform，claims 仍为 canonical
-`None`；Game SDK 尚不能取得 Context 或创建 root，因此这不是可见 UI。ADR 0021 已接受但尚未实现
-startup metrics seed 与 Game SDK root/phase-epoch-scoped access；持久 Pointer Capture、Focus/Modal、Button default action、paint
-snapshot/DisplayList、nested clip、dirty subtree pruning、FreeType 与 bgfx UI pass 仍未实现。完整目标中 UI 树输出后端无关的 Quad、Image、
+`None`。M7-C1c-b3d2 已实现 startup primary-window metrics seed 与 Game SDK
+root/phase-epoch-scoped access：Runtime 在 `onEnter` 前显式绑定 primary Context，并在 State commit 前
+发布首份 structure/layout/hit snapshot；`PrimaryWindowUIRootBuilder`/`PrimaryWindowUITreeUpdater`
+只允许 root-scoped retained tree mutation，跨 phase 保存后返回 capability-expired error。它仍不是可见
+UI，因为没有 DisplayList、文本/glyph、Button default action、真实 claims 或 Render pass。持久 Pointer Capture、
+Focus/Modal、paint snapshot/DisplayList、nested clip、dirty subtree pruning、FreeType 与 bgfx UI pass 仍未实现。完整目标中 UI 树输出后端无关的 Quad、Image、
 GlyphRange、Clip DisplayList，由 Render 层保持 paint order 批处理。
 
 布局采用一次 Measure/Arrange 的 Flex-lite；每个有序 Pointer transition 最多 hit-test 一次。
@@ -583,8 +591,8 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
    Flex-lite layout foundation，M7-C1c-a 已完成 committed hit-snapshot 数据基础，M7-C1c-b1 已完成
    point query 与反向目标选择，M7-C1c-b2 已完成 synthetic listener route，M7-C1c-b3b 已完成独立
    Runtime-private producer，M7-C1c-b3c 已完成 primary-window `UIContext` owner/selection 与 EngineHost
-   接线，M7-C1c-b3d1 已完成容量配置与 Runtime-private layout coordinator。M7-C1c-b3d2 按已接受的
-   ADR 0021 继续实现 startup primary-window metrics seed 与 root-scoped、phase-epoch-scoped Game SDK access，再推进真实 claims/focus/capture/widget、
+   接线，M7-C1c-b3d1 已完成容量配置与 Runtime-private layout coordinator，M7-C1c-b3d2 已完成
+   startup primary-window metrics seed 与 root-scoped、phase-epoch-scoped Game SDK access。后续继续推进真实 claims/focus/capture/widget、
    dirty subtree pruning 与 DisplayList、Label/Button/Modal + FreeType、bgfx UI pass、IMM32/Gamepad/DPI 门禁；
 5. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；
 6. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D
@@ -618,13 +626,13 @@ vNext-only preset 设为 OFF；当新2D/UI/3D/Audio 覆盖门禁后先把默认�
   Legacy ON 图还必须直接执行 Legacy-only `tina_legacy_tests`，启用 GLFW adapter 时另行直接执行
   `tina_platform_glfw_tests`，这些 executable 均不使用 CTest；
 - M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、committed hit snapshot、point query 与 synthetic route 使用独立
-  `tina_ui_tests` 直接 GoogleTest；当前记录 Windows MSVC 19.50 Debug/Release 均75/75通过；Linux
-  GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均 `tina_ui_tests` 75/75，且 Clang
+  `tina_ui_tests` 直接 GoogleTest；b3d2 增加 tree-updater 覆盖后，Windows MSVC 19.50 Debug/Release、
+  Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均直接通过78/78，且 Clang
   无 sanitizer 诊断；初次 GCC 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次
   GCC/Clang 构建无 warning；
-- M7-C1c-b3b Runtime→vNext UI producer 使用独立 `tina_runtime_ui_tests`，Windows MSVC 19.50
-  Debug/Release、Linux GCC 13.4 Null 与 Clang 22.1.8 Null sanitizer 均直接 GoogleTest 12/12；
-  GCC 完整重编译无 warning、Clang 无 sanitizer 诊断；测试不使用 CTest，也不与 Legacy UI 的最终二进制混装；
+- M7-C1c-b3b/b3c/b3d1/b3d2 Runtime→vNext UI producer、Context owner、layout coordinator 与 startup capability 使用独立
+  `tina_runtime_ui_tests`；b3d2 在 Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 Null 与
+  Clang 22.1.8 Null sanitizer 均直接通过42/42；测试不使用 CTest，也不与 Legacy UI 的最终二进制混装；
 - Linux GCC 与 Clang 构建；正式支持前还要运行 GLFW/bgfx 2D/UI/3D，Clang sanitizer 只有真实
   运行通过后才能标记完成；
 - GLFW X11 与 Wayland 使用独立 preset 和真实/隔离 display server 运行；configure/build 成功不等于

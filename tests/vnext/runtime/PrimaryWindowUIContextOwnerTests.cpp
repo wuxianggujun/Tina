@@ -31,6 +31,20 @@ struct WindowFrameSpec final {
     bool visible = true;
 };
 
+[[nodiscard]] Platform::WindowMetricsSnapshot windowMetrics(const WindowFrameSpec& window, u64 revision = 1)
+{
+    return {
+        .window = window.window,
+        .logicalExtent = window.logicalExtent,
+        .framebufferExtent = window.framebufferExtent,
+        .contentScale = window.contentScale,
+        .revision = revision,
+        .focused = window.focused,
+        .minimized = window.minimized,
+        .visible = window.visible,
+    };
+}
+
 [[nodiscard]] Core::Result<Platform::PlatformFrameView> buildFrame(Platform::PlatformFrameBuilder& builder, u64 frameId,
                                                                    std::optional<WindowFrameSpec> window = std::nullopt)
 {
@@ -41,16 +55,7 @@ struct WindowFrameSpec final {
 
     if (window.has_value())
     {
-        const Platform::WindowMetricsSnapshot metrics{
-            .window = window->window,
-            .logicalExtent = window->logicalExtent,
-            .framebufferExtent = window->framebufferExtent,
-            .contentScale = window->contentScale,
-            .revision = frameId,
-            .focused = window->focused,
-            .minimized = window->minimized,
-            .visible = window->visible,
-        };
+        const Platform::WindowMetricsSnapshot metrics = windowMetrics(*window, frameId);
         const Platform::WindowInputSnapshot input{
             .window = window->window,
             .sourceMetricsRevision = frameId,
@@ -130,9 +135,55 @@ class PrimaryWindowUIContextOwnerTest : public testing::Test {
     std::unique_ptr<Platform::PlatformFrameBuilder> builder;
 };
 
-TEST_F(PrimaryWindowUIContextOwnerTest, HeadlessFramesRemainUnboundUntilTheFirstPrimaryWindow)
+TEST_F(PrimaryWindowUIContextOwnerTest, FrameSelectionBeforeStartupBindingFails)
 {
     PrimaryWindowUIContextOwner owner;
+    auto frame = buildFrame(*builder, 1);
+    ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
+
+    auto selection = owner.selectForFrame(*frame);
+    ASSERT_FALSE(selection.has_value());
+    EXPECT_EQ(selection.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
+}
+
+TEST_F(PrimaryWindowUIContextOwnerTest, InvalidStartupMetricsDoNotPublishAndValidMetricsCanRetry)
+{
+    PrimaryWindowUIContextOwner owner;
+    Platform::WindowMetricsSnapshot invalidExtent = windowMetrics(WindowFrameSpec{.window = window});
+    invalidExtent.logicalExtent.width = 0;
+
+    auto failedExtentBinding = owner.bindForStartup(invalidExtent);
+    ASSERT_FALSE(failedExtentBinding.has_value());
+    EXPECT_EQ(failedExtentBinding.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
+
+    Platform::WindowMetricsSnapshot invalidScale = windowMetrics(WindowFrameSpec{.window = window});
+    invalidScale.contentScale.x = 0.0F;
+
+    auto failedScaleBinding = owner.bindForStartup(invalidScale);
+    ASSERT_FALSE(failedScaleBinding.has_value());
+    EXPECT_EQ(failedScaleBinding.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
+
+    auto validBinding = owner.bindForStartup(windowMetrics(WindowFrameSpec{.window = window}));
+    ASSERT_TRUE(validBinding.has_value()) << (validBinding ? "" : validBinding.error().message);
+    ASSERT_NE(*validBinding, nullptr);
+}
+
+TEST_F(PrimaryWindowUIContextOwnerTest, StartupBindingIsOneShotAfterPublication)
+{
+    PrimaryWindowUIContextOwner owner;
+    ASSERT_TRUE(owner.bindForStartup(std::nullopt).has_value());
+
+    auto repeatedBinding = owner.bindForStartup(std::nullopt);
+    ASSERT_FALSE(repeatedBinding.has_value());
+    EXPECT_EQ(repeatedBinding.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
+}
+
+TEST_F(PrimaryWindowUIContextOwnerTest, ExplicitHeadlessStartupRejectsALaterPrimaryWindow)
+{
+    PrimaryWindowUIContextOwner owner;
+    auto startup = owner.bindForStartup(std::nullopt);
+    ASSERT_TRUE(startup.has_value()) << (startup ? "" : startup.error().message);
+    EXPECT_EQ(*startup, nullptr);
 
     auto firstHeadless = buildFrame(*builder, 1);
     ASSERT_TRUE(firstHeadless.has_value()) << (firstHeadless ? "" : firstHeadless.error().message);
@@ -149,20 +200,23 @@ TEST_F(PrimaryWindowUIContextOwnerTest, HeadlessFramesRemainUnboundUntilTheFirst
     auto windowFrame = buildFrame(*builder, 3, WindowFrameSpec{.window = window});
     ASSERT_TRUE(windowFrame.has_value()) << (windowFrame ? "" : windowFrame.error().message);
     auto boundSelection = owner.selectForFrame(*windowFrame);
-    ASSERT_TRUE(boundSelection.has_value()) << (boundSelection ? "" : boundSelection.error().message);
-    ASSERT_NE(*boundSelection, nullptr);
-    EXPECT_EQ((*boundSelection)->ownerWindow(), window);
+    ASSERT_FALSE(boundSelection.has_value());
+    EXPECT_EQ(boundSelection.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
 }
 
 TEST_F(PrimaryWindowUIContextOwnerTest, ReusesTheSameContextForTheBoundPrimaryWindow)
 {
     PrimaryWindowUIContextOwner owner;
+    auto startup = owner.bindForStartup(windowMetrics(WindowFrameSpec{.window = window}));
+    ASSERT_TRUE(startup.has_value()) << (startup ? "" : startup.error().message);
+    UI::UIContext* const firstContext = *startup;
+    ASSERT_NE(firstContext, nullptr);
+
     auto firstFrame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(firstFrame.has_value()) << (firstFrame ? "" : firstFrame.error().message);
     auto firstSelection = owner.selectForFrame(*firstFrame);
     ASSERT_TRUE(firstSelection.has_value()) << (firstSelection ? "" : firstSelection.error().message);
-    ASSERT_NE(*firstSelection, nullptr);
-    UI::UIContext* const firstContext = *firstSelection;
+    EXPECT_EQ(*firstSelection, firstContext);
 
     auto secondFrame = buildFrame(*builder, 2, WindowFrameSpec{.window = window});
     ASSERT_TRUE(secondFrame.has_value()) << (secondFrame ? "" : secondFrame.error().message);
@@ -174,6 +228,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, ReusesTheSameContextForTheBoundPrimaryWi
 TEST_F(PrimaryWindowUIContextOwnerTest, RejectsPrimaryWindowDisappearanceAfterBinding)
 {
     PrimaryWindowUIContextOwner owner;
+    ASSERT_TRUE(owner.bindForStartup(windowMetrics(WindowFrameSpec{.window = window})).has_value());
     auto windowFrame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(windowFrame.has_value()) << (windowFrame ? "" : windowFrame.error().message);
     ASSERT_TRUE(owner.selectForFrame(*windowFrame).has_value());
@@ -188,6 +243,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, RejectsPrimaryWindowDisappearanceAfterBi
 TEST_F(PrimaryWindowUIContextOwnerTest, RejectsAReplacementGenerationAfterBinding)
 {
     PrimaryWindowUIContextOwner owner;
+    ASSERT_TRUE(owner.bindForStartup(windowMetrics(WindowFrameSpec{.window = window})).has_value());
     auto firstFrame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(firstFrame.has_value()) << (firstFrame ? "" : firstFrame.error().message);
     ASSERT_TRUE(owner.selectForFrame(*firstFrame).has_value());
@@ -209,12 +265,16 @@ TEST_F(PrimaryWindowUIContextOwnerTest, RejectsAReplacementGenerationAfterBindin
 TEST_F(PrimaryWindowUIContextOwnerTest, MetricsScaleAndMinimizedChangesDoNotRebindTheContext)
 {
     PrimaryWindowUIContextOwner owner;
+    auto startup = owner.bindForStartup(windowMetrics(WindowFrameSpec{.window = window}));
+    ASSERT_TRUE(startup.has_value()) << (startup ? "" : startup.error().message);
+    UI::UIContext* const firstContext = *startup;
+    ASSERT_NE(firstContext, nullptr);
+
     auto firstFrame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(firstFrame.has_value()) << (firstFrame ? "" : firstFrame.error().message);
     auto firstSelection = owner.selectForFrame(*firstFrame);
     ASSERT_TRUE(firstSelection.has_value()) << (firstSelection ? "" : firstSelection.error().message);
-    ASSERT_NE(*firstSelection, nullptr);
-    UI::UIContext* const firstContext = *firstSelection;
+    EXPECT_EQ(*firstSelection, firstContext);
 
     auto minimizedFrame = buildFrame(*builder, 2,
                                      WindowFrameSpec{
@@ -244,9 +304,22 @@ TEST_F(PrimaryWindowUIContextOwnerTest, MetricsScaleAndMinimizedChangesDoNotRebi
     EXPECT_EQ(*restoredSelection, firstContext);
 }
 
+TEST_F(PrimaryWindowUIContextOwnerTest, RejectsMetricsRevisionMovingBackwardFromTheStartupSeed)
+{
+    PrimaryWindowUIContextOwner owner;
+    ASSERT_TRUE(owner.bindForStartup(windowMetrics(WindowFrameSpec{.window = window}, 2)).has_value());
+
+    auto olderFrame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
+    ASSERT_TRUE(olderFrame.has_value()) << (olderFrame ? "" : olderFrame.error().message);
+    auto selection = owner.selectForFrame(*olderFrame);
+    ASSERT_FALSE(selection.has_value());
+    EXPECT_EQ(selection.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
+}
+
 TEST_F(PrimaryWindowUIContextOwnerTest, ShutdownIsIdempotentAndSelectionAfterShutdownFails)
 {
     PrimaryWindowUIContextOwner owner;
+    ASSERT_TRUE(owner.bindForStartup(windowMetrics(WindowFrameSpec{.window = window})).has_value());
     auto frame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
     ASSERT_TRUE(owner.selectForFrame(*frame).has_value());
@@ -262,6 +335,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, ShutdownIsIdempotentAndSelectionAfterShu
 TEST_F(PrimaryWindowUIContextOwnerTest, SelectRejectsCallsFromAnotherThread)
 {
     PrimaryWindowUIContextOwner owner;
+    ASSERT_TRUE(owner.bindForStartup(std::nullopt).has_value());
     auto frame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
 
@@ -291,18 +365,15 @@ TEST_F(PrimaryWindowUIContextOwnerTest, AllocationFailureDoesNotPublishABindingA
         },
         resource);
 
-    auto firstFrame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
-    ASSERT_TRUE(firstFrame.has_value()) << (firstFrame ? "" : firstFrame.error().message);
-    auto failedSelection = owner.selectForFrame(*firstFrame);
-    ASSERT_FALSE(failedSelection.has_value());
-    EXPECT_EQ(failedSelection.error().code, Core::CoreErrorCode::OutOfMemory);
+    const Platform::WindowMetricsSnapshot metrics = windowMetrics(WindowFrameSpec{.window = window});
+    auto failedBinding = owner.bindForStartup(metrics);
+    ASSERT_FALSE(failedBinding.has_value());
+    EXPECT_EQ(failedBinding.error().code, Core::CoreErrorCode::OutOfMemory);
 
-    auto retryFrame = buildFrame(*builder, 2, WindowFrameSpec{.window = window});
-    ASSERT_TRUE(retryFrame.has_value()) << (retryFrame ? "" : retryFrame.error().message);
-    auto retrySelection = owner.selectForFrame(*retryFrame);
-    ASSERT_TRUE(retrySelection.has_value()) << (retrySelection ? "" : retrySelection.error().message);
-    ASSERT_NE(*retrySelection, nullptr);
-    EXPECT_EQ((*retrySelection)->ownerWindow(), window);
+    auto retryBinding = owner.bindForStartup(metrics);
+    ASSERT_TRUE(retryBinding.has_value()) << (retryBinding ? "" : retryBinding.error().message);
+    ASSERT_NE(*retryBinding, nullptr);
+    EXPECT_EQ((*retryBinding)->ownerWindow(), window);
     EXPECT_GT(resource.currentBytes(), 0U);
 
     owner.shutdown();
@@ -321,10 +392,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, PublishesConfiguredCapacitiesThroughCont
         .routedPointerListenerCapacity = 24,
     };
     PrimaryWindowUIContextOwner owner(capacities);
-    auto frame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
-    ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
-
-    auto selection = owner.selectForFrame(*frame);
+    auto selection = owner.bindForStartup(windowMetrics(WindowFrameSpec{.window = window}));
     ASSERT_TRUE(selection.has_value()) << (selection ? "" : selection.error().message);
     ASSERT_NE(*selection, nullptr);
     const UI::UIContextStatistics statistics = (*selection)->statistics();
@@ -340,6 +408,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, PublishesConfiguredCapacitiesThroughCont
 TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorHeadlessNoOpConsumesTheFrameAttempt)
 {
     PrimaryWindowUILayoutCoordinator coordinator;
+    ASSERT_TRUE(coordinator.commitForStartup(nullptr, std::nullopt).has_value());
     auto frame = buildFrame(*builder, 1);
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
 
@@ -349,6 +418,48 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorHeadlessNoOpConsumesThe
     EXPECT_EQ(retry.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
 }
 
+TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorRequiresAndConsumesOneStartupAttempt)
+{
+    PrimaryWindowUILayoutCoordinator coordinator;
+    auto frame = buildFrame(*builder, 1);
+    ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
+
+    const Core::Status beforeStartup = coordinator.commitForFrame(nullptr, *frame);
+    ASSERT_FALSE(beforeStartup.has_value());
+    EXPECT_EQ(beforeStartup.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
+
+    ASSERT_TRUE(coordinator.commitForStartup(nullptr, std::nullopt).has_value());
+    const Core::Status repeatedStartup = coordinator.commitForStartup(nullptr, std::nullopt);
+    ASSERT_FALSE(repeatedStartup.has_value());
+    EXPECT_EQ(repeatedStartup.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
+}
+
+TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorStartupPublishesInitialRootSnapshot)
+{
+    auto contextResult =
+        UI::UIContext::Create(window, UI::UIContextCapacityConfig{.nodeCapacity = 8, .rootCapacity = 1});
+    ASSERT_TRUE(contextResult.has_value()) << (contextResult ? "" : contextResult.error().message);
+    auto context = std::move(*contextResult);
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
+    auto root = std::move(*rootResult);
+    ASSERT_TRUE(context->rootBuilder().createButton(root.rootNodeId()).has_value());
+
+    PrimaryWindowUILayoutCoordinator coordinator;
+    ASSERT_TRUE(coordinator
+                    .commitForStartup(context.get(), windowMetrics(WindowFrameSpec{
+                                                         .window = window,
+                                                         .logicalExtent = {320, 180},
+                                                     }))
+                    .has_value());
+
+    EXPECT_EQ(context->committedStructure().size(), 2U);
+    EXPECT_EQ(context->committedLayout().size(), 2U);
+    EXPECT_EQ(context->committedHit().size(), 2U);
+    EXPECT_EQ(context->statistics().layoutRevision, 1U);
+    EXPECT_EQ(context->statistics().hitRevision, 1U);
+}
+
 TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorPublishesEmptyContextAndSkipsUnchangedFrames)
 {
     auto contextResult =
@@ -356,6 +467,9 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorPublishesEmptyContextAn
     ASSERT_TRUE(contextResult.has_value()) << (contextResult ? "" : contextResult.error().message);
     auto context = std::move(*contextResult);
     PrimaryWindowUILayoutCoordinator coordinator;
+    const Platform::WindowMetricsSnapshot startupMetrics =
+        windowMetrics(WindowFrameSpec{.window = window, .logicalExtent = {320, 180}});
+    ASSERT_TRUE(coordinator.commitForStartup(context.get(), startupMetrics).has_value());
 
     auto firstFrame = buildFrame(*builder, 1, WindowFrameSpec{.window = window, .logicalExtent = {320, 180}});
     ASSERT_TRUE(firstFrame.has_value()) << (firstFrame ? "" : firstFrame.error().message);
@@ -382,6 +496,13 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorUsesLogicalExtentOnly)
     ASSERT_TRUE(contextResult.has_value()) << (contextResult ? "" : contextResult.error().message);
     auto context = std::move(*contextResult);
     PrimaryWindowUILayoutCoordinator coordinator;
+    const Platform::WindowMetricsSnapshot startupMetrics = windowMetrics(WindowFrameSpec{
+        .window = window,
+        .logicalExtent = {640, 360},
+        .framebufferExtent = {1280, 720},
+        .contentScale = {2.0F, 2.0F},
+    });
+    ASSERT_TRUE(coordinator.commitForStartup(context.get(), startupMetrics).has_value());
 
     auto firstFrame = buildFrame(*builder, 1,
                                  WindowFrameSpec{
@@ -423,6 +544,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorUsesLogicalExtentOnly)
 TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorRejectsFrameIdFallback)
 {
     PrimaryWindowUILayoutCoordinator coordinator;
+    ASSERT_TRUE(coordinator.commitForStartup(nullptr, std::nullopt).has_value());
     auto secondFrame = buildFrame(*builder, 2);
     ASSERT_TRUE(secondFrame.has_value()) << (secondFrame ? "" : secondFrame.error().message);
     ASSERT_TRUE(coordinator.commitForFrame(nullptr, *secondFrame).has_value());
@@ -441,6 +563,8 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorRejectsMissingPairAndCo
     ASSERT_TRUE(contextResult.has_value()) << (contextResult ? "" : contextResult.error().message);
     auto context = std::move(*contextResult);
     PrimaryWindowUILayoutCoordinator coordinator;
+    ASSERT_TRUE(
+        coordinator.commitForStartup(context.get(), windowMetrics(WindowFrameSpec{.window = window})).has_value());
 
     auto windowFrame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(windowFrame.has_value()) << (windowFrame ? "" : windowFrame.error().message);
@@ -469,6 +593,8 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorRejectsContextFromAnoth
     ASSERT_TRUE(contextResult.has_value()) << (contextResult ? "" : contextResult.error().message);
     auto context = std::move(*contextResult);
     PrimaryWindowUILayoutCoordinator coordinator;
+    ASSERT_TRUE(coordinator.commitForStartup(context.get(), windowMetrics(WindowFrameSpec{.window = secondWindow}))
+                    .has_value());
 
     auto frame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
@@ -480,6 +606,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorRejectsContextFromAnoth
 TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorRejectsCallsFromAnotherThread)
 {
     PrimaryWindowUILayoutCoordinator coordinator;
+    ASSERT_TRUE(coordinator.commitForStartup(nullptr, std::nullopt).has_value());
     auto frame = buildFrame(*builder, 1);
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
     std::optional<Core::ErrorCode> errorCode;
@@ -512,7 +639,13 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorCapacityFailureIsAtomic
     ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
     auto root = std::move(*rootResult);
     ASSERT_TRUE(context->rootBuilder().createPanel(root.rootNodeId()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 100.0F}).has_value());
+    PrimaryWindowUILayoutCoordinator coordinator;
+    ASSERT_TRUE(coordinator
+                    .commitForStartup(context.get(), windowMetrics(WindowFrameSpec{
+                                                         .window = window,
+                                                         .logicalExtent = {100, 100},
+                                                     }))
+                    .has_value());
     const UI::UICommittedStructureView oldStructure = context->committedStructure();
     const UI::UICommittedLayoutView oldLayout = context->committedLayout();
     const UI::UICommittedHitView oldHit = context->committedHit();
@@ -529,7 +662,6 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorCapacityFailureIsAtomic
     const usize oldHitTargetCount = oldStatistics.committedHitTargetCount;
 
     ASSERT_TRUE(context->rootBuilder().createPanel(root.rootNodeId()).has_value());
-    PrimaryWindowUILayoutCoordinator coordinator;
     auto frame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
 

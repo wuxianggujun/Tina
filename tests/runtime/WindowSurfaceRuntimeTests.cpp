@@ -74,6 +74,16 @@ class ScriptedWindowSurfacePlatform final : public Integration::IWindowSurfacePl
         shutdown();
     }
 
+    [[nodiscard]] Core::Result<std::optional<Platform::WindowMetricsSnapshot>>
+    initialPrimaryWindowMetrics() override
+    {
+        if (stopped_) {
+            return Core::failure(Platform::PlatformErrorCode::BackendStopped, "The scripted backend is stopped");
+        }
+        setScriptState(0);
+        return metrics_;
+    }
+
     [[nodiscard]] Core::Result<Platform::PlatformPollResult> pollFrame() override
     {
         if (stopped_)

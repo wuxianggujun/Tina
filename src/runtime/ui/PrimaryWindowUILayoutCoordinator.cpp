@@ -9,11 +9,28 @@
 namespace Tina::Runtime::Detail {
 namespace {
 
-[[nodiscard]] Core::Status lifecycleFailure(std::string_view message, std::string_view detail = {})
+[[nodiscard]] Core::Status lifecycleFailure(std::string_view operation, std::string_view message,
+                                            std::string_view detail = {})
 {
     Core::Error error{RuntimeErrorCode::LifecycleInvariantViolation, message};
-    error.addContext("PrimaryWindowUILayoutCoordinator::commitForFrame", detail);
+    error.addContext(operation, detail);
     return Core::failure(std::move(error));
+}
+
+[[nodiscard]] Core::Status commitLayout(UI::UIContext& context, Platform::LogicalExtent logicalExtent,
+                                        std::string_view operation)
+{
+    Core::Status commitStatus = context.commitLayout({
+        .width = static_cast<float>(logicalExtent.width),
+        .height = static_cast<float>(logicalExtent.height),
+    });
+    if (!commitStatus)
+    {
+        Core::Error error = std::move(commitStatus.error());
+        error.addContext(operation, "UIContext::commitLayout");
+        return Core::failure(std::move(error));
+    }
+    return Core::success();
 }
 
 } // namespace
@@ -23,23 +40,64 @@ PrimaryWindowUILayoutCoordinator::PrimaryWindowUILayoutCoordinator() noexcept
 {
 }
 
+Core::Status
+PrimaryWindowUILayoutCoordinator::commitForStartup(UI::UIContext* context,
+                                                   const std::optional<Platform::WindowMetricsSnapshot>& initialMetrics)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUILayoutCoordinator::commitForStartup";
+    if (std::this_thread::get_id() != ownerThreadId_)
+    {
+        return Core::failure(RuntimeErrorCode::WrongOwnerThread,
+                             "PrimaryWindowUILayoutCoordinator may commit startup only from its owner thread");
+    }
+    if (startupAttempted_)
+    {
+        return lifecycleFailure(Operation, "The startup UI layout commit may be attempted only once");
+    }
+    startupAttempted_ = true;
+
+    if (context == nullptr && !initialMetrics.has_value())
+    {
+        return Core::success();
+    }
+    if (context == nullptr || !initialMetrics.has_value())
+    {
+        return lifecycleFailure(Operation,
+                                "The startup primary-window metrics and UI context must both exist or both be absent");
+    }
+    if (!initialMetrics->window.hasValue() || initialMetrics->revision == 0)
+    {
+        return lifecycleFailure(Operation, "The startup primary-window metrics have an invalid identity or revision");
+    }
+    if (context->ownerWindow() != initialMetrics->window)
+    {
+        return lifecycleFailure(Operation, "The Runtime UI context does not belong to the startup primary window");
+    }
+    return commitLayout(*context, initialMetrics->logicalExtent, Operation);
+}
+
 Core::Status PrimaryWindowUILayoutCoordinator::commitForFrame(UI::UIContext* context,
                                                               const Platform::PlatformFrameView& platformFrame)
 {
+    constexpr std::string_view Operation = "PrimaryWindowUILayoutCoordinator::commitForFrame";
     if (std::this_thread::get_id() != ownerThreadId_)
     {
         return Core::failure(RuntimeErrorCode::WrongOwnerThread,
                              "PrimaryWindowUILayoutCoordinator may commit only from its owner thread");
     }
+    if (!startupAttempted_)
+    {
+        return lifecycleFailure(Operation, "The startup UI layout commit must precede frame layout commits");
+    }
 
     const Platform::PlatformFrameId frameId = platformFrame.id();
     if (!frameId.hasValue())
     {
-        return lifecycleFailure("A UI layout commit requires a valid PlatformFrameId");
+        return lifecycleFailure(Operation, "A UI layout commit requires a valid PlatformFrameId");
     }
     if (lastAttemptedFrame_.hasValue() && frameId <= lastAttemptedFrame_)
     {
-        return lifecycleFailure("A UI layout commit requires a strictly newer PlatformFrameId");
+        return lifecycleFailure(Operation, "A UI layout commit requires a strictly newer PlatformFrameId");
     }
     lastAttemptedFrame_ = frameId;
 
@@ -50,31 +108,23 @@ Core::Status PrimaryWindowUILayoutCoordinator::commitForFrame(UI::UIContext* con
     }
     if (primaryWindow == nullptr || context == nullptr)
     {
-        return lifecycleFailure("The primary window and Runtime UI context must either both exist or both be absent");
+        return lifecycleFailure(Operation,
+                                "The primary window and Runtime UI context must either both exist or both be absent");
     }
 
     const Platform::WindowId frameWindow = primaryWindow->metrics.window;
-    if (!frameWindow.hasValue() || primaryWindow->input.window != frameWindow)
+    if (!frameWindow.hasValue() || primaryWindow->input.window != frameWindow ||
+        primaryWindow->input.sourceMetricsRevision != primaryWindow->metrics.revision)
     {
-        return lifecycleFailure("The primary Platform snapshot has an invalid or inconsistent window identity");
+        return lifecycleFailure(Operation,
+                                "The primary Platform snapshot has an invalid or inconsistent identity/revision");
     }
     if (context->ownerWindow() != frameWindow)
     {
-        return lifecycleFailure("The Runtime UI context does not belong to the primary window");
+        return lifecycleFailure(Operation, "The Runtime UI context does not belong to the primary window");
     }
 
-    const Platform::LogicalExtent logicalExtent = primaryWindow->metrics.logicalExtent;
-    Core::Status commitStatus = context->commitLayout({
-        .width = static_cast<float>(logicalExtent.width),
-        .height = static_cast<float>(logicalExtent.height),
-    });
-    if (!commitStatus)
-    {
-        Core::Error error = std::move(commitStatus.error());
-        error.addContext("PrimaryWindowUILayoutCoordinator::commitForFrame", "UIContext::commitLayout");
-        return Core::failure(std::move(error));
-    }
-    return Core::success();
+    return commitLayout(*context, primaryWindow->metrics.logicalExtent, Operation);
 }
 
 } // namespace Tina::Runtime::Detail

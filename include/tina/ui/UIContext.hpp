@@ -156,6 +156,9 @@ public:
     UITreeUpdater(UITreeUpdater&& other) noexcept;
     UITreeUpdater& operator=(UITreeUpdater&& other) noexcept;
 
+    [[nodiscard]] Core::Result<UINodeId> createPanel(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createLabel(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createButton(UINodeId parent);
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(
@@ -238,6 +241,10 @@ private:
 
     [[nodiscard]] Core::Result<UIRootOwner> createRoot();
     [[nodiscard]] Core::Result<UINodeId> createChild(UINodeId parent, UIWidgetKind kind);
+    [[nodiscard]] Core::Result<UINodeId> createChildFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId parent,
+        UIWidgetKind kind);
     [[nodiscard]] Core::Status setLayoutStyleFromUpdater(
         UINodeId updaterRoot,
         UINodeId node,

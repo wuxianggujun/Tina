@@ -6,12 +6,13 @@
 
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <thread>
 
 namespace Tina::Runtime::Detail {
 
-// Runtime-private owner that binds one vNext UIContext to the first primary
-// window observed by EngineHost. It owns only identity and lifetime; layout,
+// Runtime-private owner that binds one vNext UIContext from the startup
+// primary-window metrics seed. It owns only identity and lifetime; layout,
 // retained roots, routing, and rendering remain responsibilities of their
 // respective frame phases.
 class PrimaryWindowUIContextOwner final {
@@ -26,8 +27,15 @@ class PrimaryWindowUIContextOwner final {
     PrimaryWindowUIContextOwner(PrimaryWindowUIContextOwner&&) = delete;
     PrimaryWindowUIContextOwner& operator=(PrimaryWindowUIContextOwner&&) = delete;
 
+    // One-shot startup binding. An empty seed explicitly selects Headless;
+    // failures before publication leave the owner awaiting startup so focused
+    // tests can prove atomic rollback.
+    [[nodiscard]] Core::Result<UI::UIContext*>
+    bindForStartup(const std::optional<Platform::WindowMetricsSnapshot>& initialMetrics);
+
     // The returned pointer is owned by this object and remains valid until
-    // shutdown(). Headless frames before the first window bind return nullptr.
+    // shutdown(). Frame selection validates the startup identity/revision and
+    // never creates or migrates a context.
     [[nodiscard]] Core::Result<UI::UIContext*> selectForFrame(const Platform::PlatformFrameView& platformFrame);
 
     // Idempotent owner-thread phase-boundary shutdown. This must run before the
@@ -36,7 +44,8 @@ class PrimaryWindowUIContextOwner final {
 
   private:
     enum class State : u8 {
-        Unbound,
+        AwaitingStartup,
+        Headless,
         Bound,
         Stopped,
     };
@@ -46,7 +55,8 @@ class PrimaryWindowUIContextOwner final {
     std::thread::id ownerThreadId_{};
     std::unique_ptr<UI::UIContext> context_{};
     Platform::WindowId boundWindow_{};
-    State state_ = State::Unbound;
+    u64 lastMetricsRevision_ = 0;
+    State state_ = State::AwaitingStartup;
 };
 
 } // namespace Tina::Runtime::Detail

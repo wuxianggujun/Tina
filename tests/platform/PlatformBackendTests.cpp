@@ -81,6 +81,10 @@ TEST(HeadlessPlatformBackendTest, ReturnsOnlyContinueFramesWithMonotonicIdentity
     ASSERT_TRUE(backendResult.has_value());
     ASSERT_NE(*backendResult, nullptr);
 
+    auto startupMetrics = (*backendResult)->initialPrimaryWindowMetrics();
+    ASSERT_TRUE(startupMetrics.has_value());
+    EXPECT_FALSE(startupMetrics->has_value());
+
     auto firstPoll = (*backendResult)->pollFrame();
     ASSERT_TRUE(firstPoll.has_value());
     ASSERT_TRUE(firstPoll->isContinueFrame());

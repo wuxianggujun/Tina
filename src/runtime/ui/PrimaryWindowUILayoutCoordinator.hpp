@@ -3,6 +3,7 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 
+#include <optional>
 #include <thread>
 
 namespace Tina::UI {
@@ -24,10 +25,17 @@ class PrimaryWindowUILayoutCoordinator final {
     PrimaryWindowUILayoutCoordinator(PrimaryWindowUILayoutCoordinator&&) = delete;
     PrimaryWindowUILayoutCoordinator& operator=(PrimaryWindowUILayoutCoordinator&&) = delete;
 
+    // One-shot startup publication. It establishes the structure/layout/hit
+    // snapshot consumed by the first routed Platform frame without consuming
+    // a PlatformFrameId.
+    [[nodiscard]] Core::Status commitForStartup(UI::UIContext* context,
+                                                const std::optional<Platform::WindowMetricsSnapshot>& initialMetrics);
+
     [[nodiscard]] Core::Status commitForFrame(UI::UIContext* context, const Platform::PlatformFrameView& platformFrame);
 
   private:
     std::thread::id ownerThreadId_{};
+    bool startupAttempted_ = false;
     Platform::PlatformFrameId lastAttemptedFrame_{};
 };
 

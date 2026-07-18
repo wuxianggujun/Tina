@@ -1,5 +1,7 @@
 #include <tina/runtime/PhaseContexts.hpp>
 
+#include "ui/PrimaryWindowUICapabilityState.hpp"
+
 namespace Tina {
 
 GameStartupContext::GameStartupContext(const EngineConfig& config, PlatformEventDispatcher& platformEvents) noexcept
@@ -17,9 +19,11 @@ PlatformEventSubscriptions& GameStartupContext::platformEventSubscriptions() noe
     return m_platformEventSubscriptions;
 }
 
-GameStateEnterContext::GameStateEnterContext(const EngineConfig& config,
-                                             PlatformEventDispatcher& platformEvents) noexcept
-    : m_config(&config), m_platformEventSubscriptions(platformEvents)
+GameStateEnterContext::GameStateEnterContext(const EngineConfig& config, PlatformEventDispatcher& platformEvents,
+                                             Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI,
+                                             u64 uiEpoch) noexcept
+    : m_config(&config), m_platformEventSubscriptions(platformEvents), m_primaryWindowUI(&primaryWindowUI),
+      m_uiEpoch(uiEpoch)
 {
 }
 
@@ -31,6 +35,17 @@ PlatformEventSubscriptions& GameStateEnterContext::platformEventSubscriptions() 
 const EngineConfig& GameStateEnterContext::engineConfig() const noexcept
 {
     return *m_config;
+}
+
+bool GameStateEnterContext::hasPrimaryWindowUI() const noexcept
+{
+    return m_primaryWindowUI != nullptr &&
+           m_primaryWindowUI->hasPrimaryWindowUI(m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::GameStateEnter);
+}
+
+Core::Result<PrimaryWindowUIRootBuilder> GameStateEnterContext::primaryWindowUIRootBuilder()
+{
+    return m_primaryWindowUI->rootBuilder(m_uiEpoch);
 }
 
 FixedUpdateContext::FixedUpdateContext(const FrameTiming& frameTiming, const FixedUpdateTiming& fixedUpdateTiming,
@@ -85,13 +100,26 @@ const FrameTiming& RenderSceneExtractionContext::frameTiming() const noexcept
     return *m_frameTiming;
 }
 
-UIUpdateContext::UIUpdateContext(const FrameTiming& frameTiming) noexcept : m_frameTiming(&frameTiming)
+UIUpdateContext::UIUpdateContext(const FrameTiming& frameTiming,
+                                 Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI, u64 uiEpoch) noexcept
+    : m_frameTiming(&frameTiming), m_primaryWindowUI(&primaryWindowUI), m_uiEpoch(uiEpoch)
 {
 }
 
 const FrameTiming& UIUpdateContext::frameTiming() const noexcept
 {
     return *m_frameTiming;
+}
+
+bool UIUpdateContext::hasPrimaryWindowUI() const noexcept
+{
+    return m_primaryWindowUI != nullptr &&
+           m_primaryWindowUI->hasPrimaryWindowUI(m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
+}
+
+Core::Result<PrimaryWindowUITreeUpdater> UIUpdateContext::primaryWindowUITreeUpdater(UI::UIRootOwner& rootOwner)
+{
+    return m_primaryWindowUI->treeUpdater(m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate, rootOwner);
 }
 
 GameStateExitContext::GameStateExitContext(RunStopCause stopCause, const Core::Error* runtimeFailure) noexcept

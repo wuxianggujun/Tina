@@ -3,6 +3,7 @@
 
 #include <limits>
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace Tina::Platform {
@@ -13,6 +14,15 @@ class HeadlessPlatformBackend final : public IPlatformBackend {
     explicit HeadlessPlatformBackend(PlatformFrameBuilder frameBuilder) noexcept
         : frameBuilder_(std::move(frameBuilder))
     {
+    }
+
+    [[nodiscard]] Core::Result<std::optional<WindowMetricsSnapshot>> initialPrimaryWindowMetrics() override
+    {
+        if (stopped_)
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The headless platform backend is stopped");
+        }
+        return std::optional<WindowMetricsSnapshot>{};
     }
 
     [[nodiscard]] Core::Result<PlatformPollResult> pollFrame() override

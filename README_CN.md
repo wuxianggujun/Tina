@@ -21,8 +21,8 @@ Runtime。现有2D/UI/3D路径继续作为验收基线，新架构按可独立�
 
 vNext 已完成 C++23 Headless Runtime 生命周期内核、M7-A Platform/Input 内核、首个桌面适配切片、
 M7-B1 私有 WindowSurface handoff、M7-B2 Desktop bootstrap + 真实 GPU 冒烟，以及
-M7-C1b/M7-C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1 Retained Tree/Flex-lite layout/
-committed hit snapshot/point query/synthetic routed pointer/private Runtime route foundation：私有
+M7-C1b/M7-C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/b3d2 Retained Tree/Flex-lite layout/
+committed hit snapshot/point query/synthetic routed pointer/private Runtime route/startup UI seed/Game SDK scoped capability foundation：私有
 `tina_platform_glfw` 已能创建 `GLFW_NO_API` 窗口，
 并把键盘、Pointer、Focus、resize、close 与已提交 UTF-8 文本归一化到同一份有界
 `PlatformFrameView`；Runtime 通过 generation `WindowSurfaceId`、无原生句柄的
@@ -49,13 +49,17 @@ C1c-b3d1 把固定容量配置收敛到独立的 `UIContextCapacityConfig`，让
 Runtime-private layout coordinator：`IGameState::updateUI()` 成功后、Render submit 前，使用主窗口
 logical extent 对每个 `PlatformFrameId` 至多尝试一次 `commitLayout()`；Headless 帧同时没有窗口和
 Context 时是成功 no-op。提交失败会阻断 Render，且本帧 attempt 已消费，不能用同一批 mutation 重放；
-输入路由仍只读取上一份 committed hit snapshot。该切片没有扩大 Game SDK：游戏仍不能创建 UI root/Widget，
-Runtime 不生成 DisplayList，因此当前空 Context 的 consumption 与 claims 都是 canonical `None`，也没有
-可见 UI。startup primary-window metrics seed 与 root-scoped、phase-epoch-scoped Game SDK UI capability 已由
-[ADR 0021](docs/adr/0021-runtime-ui-startup-capability.md) 接受，但 M7-C1c-b3d2 代码尚未实现。
-当前仍没有持久 Pointer Capture、Focus/Modal、Button 默认行为、paint snapshot/DisplayList、
-dirty subtree pruning 或 nested clip。production Gamepad、Windows IMM32 composition、Scene、文本/Widget、
-Pass Scheduler、submission ticket/drain 与可见中文 UI 分别放在后续切片。
+输入路由仍只读取上一份 committed hit snapshot。C1c-b3d2 已按
+[ADR 0021](docs/adr/0021-runtime-ui-startup-capability.md) 实现 backend-neutral
+`initialPrimaryWindowMetrics()` seed、`onEnter` 前显式绑定 primary `UIContext`、State commit 前的 startup
+structure/layout/hit 发布，以及 root-scoped、owner-thread、phase-epoch-scoped 的
+`PrimaryWindowUIRootBuilder` / `PrimaryWindowUITreeUpdater`。这些 facade 在回调结束时无条件失效，第一次
+capability operation 失败会成为该 phase 的 sticky error，且不会向 Game SDK 暴露裸 `UIContext*`。
+当前仍不是可见 UI：claims 仍是 canonical `None`，Runtime 不生成 DisplayList，文本/glyph 渲染尚未接入，
+Panel/Label/Button 只是 retained tree 节点类型，还没有默认 Widget 行为。持久 Pointer Capture、Focus/Modal、
+Button 默认行为、paint snapshot/DisplayList、dirty subtree pruning、nested clip、production Gamepad、
+Windows IMM32 composition、Scene、文本/Widget、Pass Scheduler、submission ticket/drain 与可见中文 UI
+分别放在后续切片。
 
 ## 当前 Legacy 已完成基线
 
@@ -75,17 +79,17 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求
 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、
-MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过当前 b3d1 vNext Debug/Release
-Null 门禁：基础189/189、独立 UI 75/75、独立 Runtime→UI 29/29、Null样例300帧。同一 b3d1 bgfx 图的
-Debug/Release 也通过基础189/189、UI 75/75、Runtime→UI 29/29、GLFW专项23/23、bgfx专项11/11，以及真实
-D3D11 Intel Iris Xe 的 `tina_sample_desktop` 300帧；Release 输出 clean status ok。前序 WindowSurface
+MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过 b3d2 vNext Debug/Release
+Null 门禁：基础194/194、独立 UI 78/78、独立 Runtime→UI 42/42、Null样例300帧。独立 adapter 门禁
+通过 GLFW专项25/25、bgfx专项11/11、GLFW样例300帧，以及真实 D3D11 Intel Iris Xe 的
+`tina_sample_desktop` 300帧；Release 输出 clean status ok。前序 WindowSurface
 GLFW样例1800帧仍作为历史证据。Legacy ON 图的前序隔离门禁为 vNext 185/185 + Legacy 43/43。
 `TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与
 公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。
 
-当前 b3d1 Linux Null 门禁中，GCC 13.4 通过基础189/189、`tina_ui_tests` 75/75、
-`tina_runtime_ui_tests` 29/29与Null样例300帧；Clang 22.1.8 + libstdc++15.2 在
-ASan/UBSan/LSan 下通过相同189/75/29与Null样例300帧，且无 sanitizer 诊断。前序 M7-B1 Platform
+当前 b3d2 Linux Null 门禁中，GCC 13.4 通过基础194/194、`tina_ui_tests` 78/78、
+`tina_runtime_ui_tests` 42/42与Null样例300帧；Clang 22.1.8 + libstdc++15.2 在
+ASan/UBSan/LSan 下通过相同194/78/42与Null样例300帧，且无 sanitizer 诊断。前序 M7-B1 Platform
 门禁覆盖 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer，以及 GCC 13/Clang 22 X11/Wayland 双后端；
 Wayland 使用带 `wl_seat` 的嵌套 Weston 9。初次 GCC 暴露的 routed-pointer callback `requires`
 名称可见性问题已修复。前序 M7-B2 Desktop/bgfx X11 图也已直接运行：GCC 13.4 与 Clang 22.1.8 +

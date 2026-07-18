@@ -25,6 +25,8 @@ inline constexpr Core::ErrorCode PlatformEventDispatcherStopped{Core::ErrorDomai
 inline constexpr Core::ErrorCode RecursivePlatformEventDispatch{Core::ErrorDomain::Runtime, 10};
 inline constexpr Core::ErrorCode PlatformEventCallbackThrewException{Core::ErrorDomain::Runtime, 11};
 inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::Runtime, 12};
+inline constexpr Core::ErrorCode PrimaryWindowUIUnavailable{Core::ErrorDomain::Runtime, 13};
+inline constexpr Core::ErrorCode UIPhaseCapabilityExpired{Core::ErrorDomain::Runtime, 14};
 
 } // namespace RuntimeErrorCode
 

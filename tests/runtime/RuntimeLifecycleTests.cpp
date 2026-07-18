@@ -79,6 +79,11 @@ class LoggingPlatform final : public Platform::IPlatformBackend {
         events_->emplace_back("platform.destroy");
     }
 
+    [[nodiscard]] Core::Result<std::optional<Platform::WindowMetricsSnapshot>> initialPrimaryWindowMetrics() override
+    {
+        return std::nullopt;
+    }
+
     [[nodiscard]] Core::Result<Platform::PlatformPollResult> pollFrame() override
     {
         return Platform::PlatformPollResult::Exit();
@@ -386,7 +391,9 @@ struct RuntimeProbe final {
     std::vector<Core::Duration> frameDeltas;
     CommittedFailurePoint failurePoint = CommittedFailurePoint::None;
     InjectedOutcome failureOutcome = InjectedOutcome::ReturnError;
+    std::optional<InjectedOutcome> initialMetricsFailure;
     bool platformExitRequested = false;
+    bool omitInitialPrimaryWindowMetrics = false;
     bool emitPlatformEvent = false;
     bool emitPlatformEventOnEveryFrame = false;
     bool emitUnrepresentableUiPointerMove = false;
@@ -395,6 +402,7 @@ struct RuntimeProbe final {
     std::vector<std::vector<Platform::Key>> heldKeysByFrame;
     std::vector<std::vector<ScriptedKeyTransition>> keyTransitionsByFrame;
     std::size_t pollCount = 0;
+    std::size_t initialMetricsCount = 0;
     u64 submitCalls = 0;
     u64 presentCalls = 0;
     u64 submittedFrames = 0;
@@ -414,6 +422,32 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
     ~AdvancingPlatform() override
     {
         probe_->events.emplace_back("platform.destroy");
+    }
+
+    [[nodiscard]] Core::Result<std::optional<Platform::WindowMetricsSnapshot>> initialPrimaryWindowMetrics() override
+    {
+        ++probe_->initialMetricsCount;
+        if (probe_->initialMetricsFailure.has_value())
+        {
+            if (*probe_->initialMetricsFailure == InjectedOutcome::Throw)
+            {
+                throw std::runtime_error("platform initial metrics exception");
+            }
+            return Core::failure(Core::CoreErrorCode::Internal, "platform initial metrics failure");
+        }
+        if (probe_->omitInitialPrimaryWindowMetrics)
+        {
+            return std::nullopt;
+        }
+        return Platform::WindowMetricsSnapshot{
+            .window = primaryWindow_,
+            .logicalExtent = {1280, 720},
+            .framebufferExtent = {1280, 720},
+            .contentScale = {1.0F, 1.0F},
+            .revision = 1,
+            .focused = true,
+            .visible = true,
+        };
     }
 
     [[nodiscard]] Core::Result<Platform::PlatformPollResult> pollFrame() override
@@ -569,6 +603,20 @@ class OversizedPlatformFrameBackend final : public Platform::IPlatformBackend {
     ~OversizedPlatformFrameBackend() override
     {
         probe_->events.emplace_back("platform.destroy");
+    }
+
+    [[nodiscard]] Core::Result<std::optional<Platform::WindowMetricsSnapshot>> initialPrimaryWindowMetrics() override
+    {
+        ++probe_->initialMetricsCount;
+        return Platform::WindowMetricsSnapshot{
+            .window = primaryWindow_,
+            .logicalExtent = {1280, 720},
+            .framebufferExtent = {1280, 720},
+            .contentScale = {1.0F, 1.0F},
+            .revision = 1,
+            .focused = true,
+            .visible = true,
+        };
     }
 
     [[nodiscard]] Core::Result<Platform::PlatformPollResult> pollFrame() override
@@ -968,6 +1016,15 @@ struct GameProbe final {
     std::optional<Core::ErrorCode> exitFailureCode;
     std::optional<Core::ErrorCode> shutdownFailureCode;
     ActionWiringProbe actionWiring;
+    bool buildPrimaryWindowUI = false;
+    bool requestPrimaryWindowUIRootBuilderOnEnterAndIgnoreFailure = false;
+    bool createSecondaryPrimaryWindowUIRoot = false;
+    bool triggerPrimaryWindowUICrossRootFailureOnUpdateAndIgnore = false;
+    bool primaryWindowUIAvailableOnEnter = false;
+    bool primaryWindowUIAvailableOnUpdate = false;
+    bool primaryWindowUIUpdated = false;
+    std::optional<Core::ErrorCode> ignoredPrimaryWindowUIEnterFailure;
+    std::optional<Core::ErrorCode> ignoredPrimaryWindowUIUpdateFailure;
 };
 
 [[nodiscard]] Core::Status injectedGameFailure(std::string_view phase)
@@ -1004,6 +1061,86 @@ class ScriptedGameState final : public IGameState {
     {
         probe_->runtime->events.emplace_back("state.enter");
         EXPECT_FALSE(context.engineConfig().applicationName.empty());
+        probe_->primaryWindowUIAvailableOnEnter = context.hasPrimaryWindowUI();
+        if (probe_->requestPrimaryWindowUIRootBuilderOnEnterAndIgnoreFailure)
+        {
+            auto builder = context.primaryWindowUIRootBuilder();
+            if (!builder)
+            {
+                probe_->ignoredPrimaryWindowUIEnterFailure = builder.error().code;
+            }
+        }
+        if (probe_->buildPrimaryWindowUI)
+        {
+            if (!context.hasPrimaryWindowUI())
+            {
+                return Core::failure(RuntimeErrorCode::PrimaryWindowUIUnavailable,
+                                     "The scripted game requires primary-window UI");
+            }
+            auto builder = context.primaryWindowUIRootBuilder();
+            if (!builder)
+            {
+                return Core::failure(std::move(builder.error()));
+            }
+            auto root = builder->createRoot();
+            if (!root)
+            {
+                return Core::failure(std::move(root.error()));
+            }
+            root_ = std::move(*root);
+
+            auto tree = builder->treeUpdater(root_);
+            if (!tree)
+            {
+                return Core::failure(std::move(tree.error()));
+            }
+            auto panel = tree->createPanel(root_.rootNodeId());
+            if (!panel)
+            {
+                return Core::failure(std::move(panel.error()));
+            }
+            panel_ = *panel;
+            auto label = tree->createLabel(panel_);
+            if (!label)
+            {
+                return Core::failure(std::move(label.error()));
+            }
+            label_ = *label;
+            auto button = tree->createButton(panel_);
+            if (!button)
+            {
+                return Core::failure(std::move(button.error()));
+            }
+            button_ = *button;
+
+            UI::UILayoutStyle panelStyle{};
+            panelStyle.size.width = UI::UILayoutLength::Percent(100.0F);
+            panelStyle.size.height = UI::UILayoutLength::Percent(100.0F);
+            if (Core::Status status = tree->setLayoutStyle(panel_, panelStyle); !status)
+            {
+                return status;
+            }
+            UI::UILayoutStyle buttonStyle{};
+            buttonStyle.size.width = UI::UILayoutLength::Px(160.0F);
+            buttonStyle.size.height = UI::UILayoutLength::Px(48.0F);
+            if (Core::Status status = tree->setLayoutStyle(button_, buttonStyle); !status)
+            {
+                return status;
+            }
+            if (Core::Status status = tree->setPointerHitPolicy(button_, UI::UIPointerHitPolicy::Targetable); !status)
+            {
+                return status;
+            }
+            if (probe_->createSecondaryPrimaryWindowUIRoot)
+            {
+                auto secondaryRoot = builder->createRoot();
+                if (!secondaryRoot)
+                {
+                    return Core::failure(std::move(secondaryRoot.error()));
+                }
+                secondaryRoot_ = std::move(*secondaryRoot);
+            }
+        }
         if (probe_->subscribeToPlatformEvents)
         {
             auto subscription =
@@ -1129,11 +1266,52 @@ class ScriptedGameState final : public IGameState {
     Core::Status updateUI(UIUpdateContext& context) override
     {
         probe_->runtime->events.emplace_back("state.ui." + std::to_string(context.frameTiming().frameIndex));
+        probe_->primaryWindowUIAvailableOnUpdate = context.hasPrimaryWindowUI();
+        if (probe_->buildPrimaryWindowUI)
+        {
+            auto tree = context.primaryWindowUITreeUpdater(root_);
+            if (!tree)
+            {
+                return Core::failure(std::move(tree.error()));
+            }
+            auto panelAlive = tree->isAlive(panel_);
+            if (!panelAlive)
+            {
+                return Core::failure(std::move(panelAlive.error()));
+            }
+            if (!*panelAlive)
+            {
+                return Core::failure(UI::UIErrorCode::InvalidNode, "The scripted primary-window panel disappeared");
+            }
+            UI::UILayoutStyle labelStyle{};
+            labelStyle.size.width = UI::UILayoutLength::Percent(100.0F);
+            labelStyle.size.height = UI::UILayoutLength::Px(24.0F);
+            if (Core::Status status = tree->setLayoutStyle(label_, labelStyle); !status)
+            {
+                return status;
+            }
+            if (probe_->triggerPrimaryWindowUICrossRootFailureOnUpdateAndIgnore)
+            {
+                auto crossRootPanel = tree->createPanel(secondaryRoot_.rootNodeId());
+                if (crossRootPanel)
+                {
+                    return Core::failure(Core::CoreErrorCode::Internal,
+                                         "The scripted cross-root UI operation unexpectedly succeeded");
+                }
+                probe_->ignoredPrimaryWindowUIUpdateFailure = crossRootPanel.error().code;
+            }
+            probe_->primaryWindowUIUpdated = true;
+        }
         return maybeInjectCommittedGameFailure(*probe_->runtime, CommittedFailurePoint::UpdateUI, "updateUI");
     }
 
   private:
     GameProbe* probe_;
+    UI::UIRootOwner root_{};
+    UI::UIRootOwner secondaryRoot_{};
+    UI::UINodeId panel_{};
+    UI::UINodeId label_{};
+    UI::UINodeId button_{};
 };
 
 class ScriptedGameApplication final : public IGameApplication {
@@ -1575,6 +1753,180 @@ INSTANTIATE_TEST_SUITE_P(TransactionalStartup, RuntimeStartupFailureTest,
                                  EnterMode::Throw,
                                  RuntimeErrorCode::GameCallbackThrewException,
                              }));
+
+TEST(EngineHostRunTest, InitialPrimaryWindowMetricsFailureRollsBackBeforeOnEnterOrPoll)
+{
+    for (const InjectedOutcome outcome : {InjectedOutcome::ReturnError, InjectedOutcome::Throw})
+    {
+        SCOPED_TRACE(outcome == InjectedOutcome::ReturnError ? "return error" : "throw");
+        RuntimeProbe runtime;
+        runtime.initialMetricsFailure = outcome;
+        GameProbe game;
+        game.runtime = &runtime;
+        ScriptedGameApplication application(game);
+        auto hostResult = createRuntimeHost(runtime);
+        ASSERT_TRUE(hostResult.has_value());
+
+        auto runResult = (*hostResult)->run(application);
+
+        ASSERT_FALSE(runResult.has_value());
+        EXPECT_EQ(runResult.error().code, outcome == InjectedOutcome::ReturnError
+                                              ? Core::CoreErrorCode::Internal
+                                              : RuntimeErrorCode::LifecycleInvariantViolation);
+        EXPECT_EQ(runtime.initialMetricsCount, 1U);
+        EXPECT_EQ(runtime.pollCount, 0U);
+        EXPECT_TRUE(containsEvent(runtime.events, "state.destroy"));
+        EXPECT_FALSE(containsEvent(runtime.events, "state.enter"));
+        EXPECT_FALSE(containsEvent(runtime.events, "state.exit"));
+        EXPECT_FALSE(containsEvent(runtime.events, "game.shutdown"));
+        EXPECT_EQ(game.exitCount, 0U);
+        EXPECT_EQ(game.shutdownCount, 0U);
+        EXPECT_EQ(runtime.submitCalls, 0U);
+        EXPECT_EQ(runtime.presentCalls, 0U);
+        EXPECT_TRUE(std::ranges::any_of(runResult.error().context, [](const Core::ErrorContext& context) {
+            return context.operation == "IPlatformBackend::initialPrimaryWindowMetrics";
+        }));
+    }
+}
+
+TEST(EngineHostRunTest, GameSdkBuildsAndUpdatesAPrimaryWindowRetainedTree)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    GameProbe game;
+    game.runtime = &runtime;
+    game.buildPrimaryWindowUI = true;
+    game.exitOnFrame = 0;
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value());
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
+    EXPECT_EQ(*runResult, RunExitReason::GameRequestedExitAfterCurrentFrame);
+    EXPECT_EQ(runtime.initialMetricsCount, 1U);
+    EXPECT_TRUE(game.primaryWindowUIAvailableOnEnter);
+    EXPECT_TRUE(game.primaryWindowUIAvailableOnUpdate);
+    EXPECT_TRUE(game.primaryWindowUIUpdated);
+    EXPECT_EQ(runtime.submittedFrames, 1U);
+    EXPECT_EQ(runtime.presentedFrames, 1U);
+    EXPECT_EQ(game.exitCount, 1U);
+    EXPECT_EQ(game.shutdownCount, 1U);
+}
+
+TEST(EngineHostRunTest, OnEnterFailureAfterCreatingUIRollsBackTheStateBeforeModules)
+{
+    RuntimeProbe runtime;
+    GameProbe game;
+    game.runtime = &runtime;
+    game.buildPrimaryWindowUI = true;
+    game.enterMode = EnterMode::ReturnError;
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value());
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_FALSE(runResult.has_value());
+    EXPECT_EQ(runResult.error().code, Core::CoreErrorCode::Internal);
+    EXPECT_EQ(runtime.initialMetricsCount, 1U);
+    EXPECT_EQ(runtime.pollCount, 0U);
+    EXPECT_TRUE(game.primaryWindowUIAvailableOnEnter);
+    EXPECT_TRUE(containsEvent(runtime.events, "state.destroy"));
+    EXPECT_FALSE(containsEvent(runtime.events, "state.exit"));
+    EXPECT_FALSE(containsEvent(runtime.events, "game.shutdown"));
+    const auto stateDestroyed = std::ranges::find(runtime.events, "state.destroy");
+    const auto renderShutdown = std::ranges::find(runtime.events, "render.shutdown");
+    ASSERT_NE(stateDestroyed, runtime.events.end());
+    ASSERT_NE(renderShutdown, runtime.events.end());
+    EXPECT_LT(stateDestroyed, renderShutdown);
+}
+
+TEST(EngineHostRunTest, HeadlessPrimaryWindowUiRequestSticksUnavailableEvenWhenOnEnterReturnsSuccess)
+{
+    RuntimeProbe runtime;
+    runtime.omitInitialPrimaryWindowMetrics = true;
+    GameProbe game;
+    game.runtime = &runtime;
+    game.requestPrimaryWindowUIRootBuilderOnEnterAndIgnoreFailure = true;
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value());
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_FALSE(runResult.has_value());
+    EXPECT_EQ(runResult.error().code, RuntimeErrorCode::PrimaryWindowUIUnavailable);
+    EXPECT_EQ(game.ignoredPrimaryWindowUIEnterFailure, RuntimeErrorCode::PrimaryWindowUIUnavailable);
+    EXPECT_FALSE(game.primaryWindowUIAvailableOnEnter);
+    EXPECT_EQ(runtime.initialMetricsCount, 1U);
+    EXPECT_EQ(runtime.pollCount, 0U);
+    EXPECT_EQ(game.exitCount, 0U);
+    EXPECT_EQ(game.shutdownCount, 0U);
+    EXPECT_TRUE(containsEvent(runtime.events, "state.enter"));
+    EXPECT_TRUE(containsEvent(runtime.events, "state.destroy"));
+    EXPECT_FALSE(containsEvent(runtime.events, "state.policy"));
+    EXPECT_FALSE(containsEvent(runtime.events, "state.exit"));
+    EXPECT_FALSE(containsEvent(runtime.events, "game.shutdown"));
+    EXPECT_FALSE(containsEventPrefix(runtime.events, "platform.poll."));
+    expectEventSuffix(runtime.events, EventLog({
+                                      "state.destroy",
+                                      "render.shutdown",
+                                      "render.destroy",
+                                      "task.shutdown",
+                                      "task.destroy",
+                                      "platform.shutdown",
+                                      "platform.destroy",
+                                  }));
+}
+
+TEST(EngineHostRunTest, PrimaryWindowUiStickyUpdateFailureStopsFrameEvenWhenUpdateUiReturnsSuccess)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    GameProbe game;
+    game.runtime = &runtime;
+    game.buildPrimaryWindowUI = true;
+    game.createSecondaryPrimaryWindowUIRoot = true;
+    game.triggerPrimaryWindowUICrossRootFailureOnUpdateAndIgnore = true;
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value());
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_FALSE(runResult.has_value());
+    EXPECT_EQ(runResult.error().code, UI::UIErrorCode::InvalidNode);
+    EXPECT_EQ(game.ignoredPrimaryWindowUIUpdateFailure, UI::UIErrorCode::InvalidNode);
+    EXPECT_TRUE(game.primaryWindowUIAvailableOnEnter);
+    EXPECT_TRUE(game.primaryWindowUIAvailableOnUpdate);
+    EXPECT_TRUE(game.primaryWindowUIUpdated);
+    EXPECT_EQ(runtime.initialMetricsCount, 1U);
+    EXPECT_EQ(runtime.pollCount, 1U);
+    EXPECT_EQ(game.exitCount, 1U);
+    EXPECT_EQ(game.shutdownCount, 1U);
+    EXPECT_EQ(game.exitStopCause, RunStopCause::RuntimeFailure);
+    EXPECT_EQ(game.shutdownStopCause, RunStopCause::RuntimeFailure);
+    EXPECT_EQ(game.exitFailureCode, UI::UIErrorCode::InvalidNode);
+    EXPECT_EQ(game.shutdownFailureCode, UI::UIErrorCode::InvalidNode);
+    EXPECT_EQ(runtime.submitCalls, 0U);
+    EXPECT_EQ(runtime.presentCalls, 0U);
+    EXPECT_TRUE(containsEvent(runtime.events, "state.extract.0"));
+    EXPECT_TRUE(containsEvent(runtime.events, "state.ui.0"));
+    EXPECT_FALSE(containsEvent(runtime.events, "render.submit.0"));
+    expectEventSuffix(runtime.events, EventLog({
+                                      "state.exit",
+                                      "state.destroy",
+                                      "game.shutdown",
+                                      "render.shutdown",
+                                      "render.destroy",
+                                      "task.shutdown",
+                                      "task.destroy",
+                                      "platform.shutdown",
+                                      "platform.destroy",
+                                  }));
+}
 
 TEST(EngineHostRunTest, ExitRequestStillCompletesExtractionUiRenderAndPresent)
 {

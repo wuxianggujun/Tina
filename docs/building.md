@@ -51,7 +51,7 @@ out\build\windows-msvc\bin\Debug\tina_legacy_tests.exe
 ## Windows vNext 最小构建
 
 该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A/M7-B1 与
-M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1 的 `tina_core`、`tina_platform`、
+M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2 的 `tina_core`、`tina_platform`、
 `tina_task`、`tina_render`、`tina_runtime`、`tina_ui`、
 直接 GoogleTest 门禁与 Null 样例：
 
@@ -82,19 +82,21 @@ cmake --build --preset windows-vnext-release --target tina_ui_tests
 out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
 ```
 
-当前记录为 Windows 11 / MSVC 19.50 Debug/Release 均75/75：16项覆盖 generation tree/ownership，
+当前记录为 Windows 11 / MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22 sanitizer 均78/78：
+16项覆盖 generation tree/ownership，
 23项覆盖事务式 Flex-lite layout，15项覆盖固定 PMR 容量、`Ignore`/`Targetable`、route ancestry、
 同一 `UICommittedHitView` 内严格递增且唯一的 paint ordinal、双缓冲 view、三快照事务回滚、
 stale generation、50,000节点与 PMR 回收；5项覆盖反向 paint-order 查询、Ignore 穿透、world/clip
 半开边界、非有限坐标 miss、snapshot binding、visited count 与300次查询零新增 UI PMR allocation；
 16项覆盖 fixed-capacity synthetic listener route、Capture/Target/Bubble 顺序、stop/consume、路由中
 add/reset/destroy 安全失效、off-thread deferred reset、route/commit reentrancy guard、错误 context
-销毁 death test、300次 route 零新增 supplied UI PMR allocation 与递归 route 拒绝。它们不证明持久
+销毁 death test、300次 route 零新增 supplied UI PMR allocation 与递归 route 拒绝；3项覆盖
+root-scoped `UITreeUpdater` 子节点创建、跨 root 拒绝与失效 root。它们不证明持久
 Pointer Capture、Focus/Modal、Button default action、Widget、DisplayList 或 Runtime/Render 集成已完成。
 
-## Windows vNext Runtime→UI producer、primary-window owner 与 layout coordinator
+## Windows vNext Runtime→UI producer、primary-window owner、layout coordinator 与 scoped Game SDK UI access
 
-M7-C1c-b3b/b3c/b3d1 使用独立 `tina_runtime_ui_tests`，避免把 vNext `UIContext` 与 Legacy ON 图中的不兼容
+M7-C1c-b3b/b3c/b3d1/b3d2 使用独立 `tina_runtime_ui_tests`，避免把 vNext `UIContext` 与 Legacy ON 图中的不兼容
 `Tina::UI` 定义放进同一最终二进制：
 
 ```powershell
@@ -121,13 +123,18 @@ C1c-b3d1 继续使用同一 target 覆盖 focused UI capacity validator、`Engin
 primary owner 使用配置容量，以及 Runtime-private layout coordinator 的 Headless no-op、logical extent、
 owner/identity、严格递增 frame id 和事务失败边界。正式帧在 `updateUI` 后、Render submit 前至多尝试一次
 `commitLayout()`；失败阻断 Render 且本帧 attempt 已消费。b3d1 在 owner/coordinator 侧新增9项用例，
-当前 Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22 sanitizer 均直接通过29/29；
+该历史切片在 Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22 sanitizer 均直接通过29/29；
 上面的20/20只保留为 b3c 历史基线。
 
-当前 Game SDK 尚不能创建 UI root/Widget，Runtime 也不生成 DisplayList，因此正式样例中的空 Context
-仍输出 canonical `None` consumption，producer 的 claims 也仍为 `None`；layout commit 只发布空 snapshot，
-没有可见 UI。startup metrics seed 与 scoped Game SDK access 已由 ADR 0021 接受但尚未实现。该 target 直接运行
-GoogleTest，不使用 CTest；这项接线不证明可见 UI 或 UI Render 已完成。
+C1c-b3d2 在同一 target 增加 startup primary-window metrics seed、显式 startup bind、`onEnter`
+`PrimaryWindowUIRootBuilder`、`updateUI` `PrimaryWindowUITreeUpdater`、phase epoch expiry、sticky 首错、
+跨线程拒绝与无分配 `abortPhase()` 回滚验证。Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与
+Clang 22 sanitizer 均直接通过 `tina_runtime_ui_tests` 42/42。
+
+当前 Game SDK 已能在 `onEnter` 创建 retained root、在 `updateUI` 通过绑定 root 的 updater 修改 subtree，
+但 Runtime 仍不生成 DisplayList；producer 的 claims 仍为 `None`。正式样例没有 Widget 文本、Button 默认行为、
+Focus/Capture/Modal 或可见 UI。该 target 直接运行 GoogleTest，不使用 CTest；这项接线不证明可见 UI 或
+UI Render 已完成。
 
 ## Windows vNext GLFW Platform 与 Desktop bgfx
 
@@ -177,11 +184,11 @@ out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
 
 Windows 构建会把 GLFW runtime DLL 复制到对应 `bin/<Config>`。样例不带参数时以16 ms 的演示延迟
 显示1800帧；自动门禁必须显式使用 `--frame-delay-ms=0`，这条 sleep 路径不属于 benchmark。
-最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3；本次 C1c-b3d1
-Debug 和 Release 均直接通过基础189/189、独立 UI 75/75、独立 Runtime→UI 29/29与Null样例300帧。
-同一 b3d1 bgfx 图的 Debug/Release 也直接通过基础189/189、独立 UI 75/75、独立 Runtime→UI 29/29、GLFW专项23/23、
-bgfx专项11/11，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 300帧；Release 输出
-`clean status ok`。上一 C1c-b3a 门禁的 WindowSurface GLFW样例1800帧仍作为历史证据。
+最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3；本次 C1c-b3d2
+Debug 和 Release 均直接通过基础194/194、独立 UI 78/78、独立 Runtime→UI 42/42与Null样例300帧。
+独立 adapter 门禁通过 GLFW专项25/25、bgfx专项11/11；GLFW+Null 与真实 D3D11 Intel Iris Xe 的
+`tina_sample_desktop` 均运行300帧，Release 输出 `clean status ok`。上一 C1c-b3a 门禁的
+WindowSurface GLFW样例1800帧仍作为历史证据。
 `TINA_BUILD_TESTING=OFF` 的 production-style GLFW样例300帧
 同样属于早期门禁，用来证明测试 target 关闭后样例仍能运行。
 当前 Desktop smoke 只证明 clear-only bgfx surface 创建、提交和关闭链路通过，不代表
@@ -270,9 +277,9 @@ LSAN_OPTIONS=exitcode=23 \
 ```
 
 这些输出不包含 Legacy 产品、窗口、真实渲染后端或 cooked shader，只用于 Headless 生命周期验证，
-不能作为游戏产品或发布包。GCC 13.4 已通过基础 `tina_tests` 189/189、`tina_ui_tests`
-75/75、`tina_runtime_ui_tests` 29/29与Null样例300帧；Clang 22.1.8 + libstdc++15.2 在
-ASan/UBSan/LSan 下通过相同的189/189、75/75、29/29与Null样例300帧，且无 sanitizer 诊断。
+不能作为游戏产品或发布包。本批 b3d2 的 GCC 13.4 直接通过基础 `tina_tests` 194/194、
+`tina_ui_tests` 78/78、`tina_runtime_ui_tests` 42/42与Null样例300帧；Clang 22.1.8 +
+libstdc++15.2 在 ASan/UBSan/LSan 下通过相同门禁且无 sanitizer 诊断。
 但仍不能用 Ubuntu 22.04 的旧工具链降级冒充正式结果。
 
 ## Linux vNext GLFW Platform

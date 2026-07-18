@@ -8,6 +8,7 @@ add_library(tina_runtime STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/InputActionMap.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/PhaseContexts.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/PlatformEvents.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/runtime/PrimaryWindowUI.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/RunExitReason.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/RuntimeErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/spi/EngineCompositionFactories.hpp
@@ -16,6 +17,7 @@ add_library(tina_runtime STATIC
     EngineConfig.cpp
     EngineHost.cpp
     PhaseContexts.cpp
+    PrimaryWindowUI.cpp
     PlatformEventDispatcher.cpp
     input/ActionMapper.cpp
     input/ActionMapper.hpp
@@ -25,6 +27,8 @@ add_library(tina_runtime STATIC
     input/UIInputRouteProducer.hpp
     ui/PrimaryWindowUIContextOwner.cpp
     ui/PrimaryWindowUIContextOwner.hpp
+    ui/PrimaryWindowUICapabilityState.cpp
+    ui/PrimaryWindowUICapabilityState.hpp
     ui/PrimaryWindowUILayoutCoordinator.cpp
     ui/PrimaryWindowUILayoutCoordinator.hpp
 )

@@ -22,6 +22,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -258,6 +259,32 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         shutdown();
     }
 
+    [[nodiscard]] Core::Result<std::optional<WindowMetricsSnapshot>> initialPrimaryWindowMetrics() override
+    {
+        if (stopped_)
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The GLFW platform backend is stopped");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW initial window metrics must be read on the creating thread");
+        }
+        if (!hasLiveWindow())
+        {
+            return Core::failure(PlatformErrorCode::BackendOperationFailed,
+                                 "The GLFW primary window registry entry is no longer live");
+        }
+
+        auto refreshed = refreshMetricsFromNative(true);
+        if (!refreshed)
+        {
+            return std::unexpected(std::move(refreshed.error()));
+        }
+        startupMetricsEventPending_ = true;
+        return std::optional<WindowMetricsSnapshot>{metrics_};
+    }
+
     [[nodiscard]] Core::Result<PlatformPollResult> pollFrame() override
     {
         if (stopped_)
@@ -364,29 +391,31 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             return PlatformPollResult::Exit();
         }
 
+        bool metricsEventPublishedThisFrame = false;
         if (metricsDirty_)
         {
-            auto latestMetrics = readWindowMetrics(window_, windowId_, metrics_.revision);
-            if (!latestMetrics)
+            auto changed = refreshMetricsFromNative(false);
+            if (!changed)
             {
-                return std::unexpected(std::move(latestMetrics.error()));
+                return std::unexpected(std::move(changed.error()));
             }
-            metricsDirty_ = false;
-            if (!sameMetricsFacts(metrics_, *latestMetrics))
+            if (*changed)
             {
-                if (metrics_.revision == (std::numeric_limits<u64>::max)())
-                {
-                    return Core::failure(PlatformErrorCode::BackendOperationFailed,
-                                         "The primary window metrics revision is exhausted");
-                }
-                latestMetrics->revision = metrics_.revision + 1;
-                metrics_ = *latestMetrics;
                 recordAppend(frameBuilder_.appendPlatformEvent(WindowMetricsChangedEvent{
                     .window = windowId_,
                     .metricsRevision = metrics_.revision,
                 }));
+                metricsEventPublishedThisFrame = true;
             }
         }
+        if (startupMetricsEventPending_ && !metricsEventPublishedThisFrame)
+        {
+            recordAppend(frameBuilder_.appendPlatformEvent(WindowMetricsChangedEvent{
+                .window = windowId_,
+                .metricsRevision = metrics_.revision,
+            }));
+        }
+        startupMetricsEventPending_ = false;
         if (callbackFailure_ != CallbackAssemblyFailure::None)
         {
             return Core::failure(PlatformErrorCode::CallbackFrameAssemblyFailed,
@@ -603,6 +632,48 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         return Core::success();
     }
 
+    [[nodiscard]] Core::Result<bool> refreshMetricsFromNative(bool commitSurfaceSnapshot)
+    {
+        auto latestMetrics = readWindowMetrics(window_, windowId_, metrics_.revision);
+        if (!latestMetrics)
+        {
+            return std::unexpected(std::move(latestMetrics.error()));
+        }
+
+        WindowMetricsSnapshot nextMetrics = metrics_;
+        const bool changed = !sameMetricsFacts(metrics_, *latestMetrics);
+        if (changed)
+        {
+            if (metrics_.revision == (std::numeric_limits<u64>::max)())
+            {
+                return Core::failure(PlatformErrorCode::BackendOperationFailed,
+                                     "The primary window metrics revision is exhausted");
+            }
+            latestMetrics->revision = metrics_.revision + 1;
+            nextMetrics = *latestMetrics;
+        }
+
+        std::optional<Integration::WindowSurfaceSnapshot> nextSurfaceSnapshot;
+        if (commitSurfaceSnapshot)
+        {
+            auto snapshot = surfaceSnapshotFromMetrics(nextMetrics);
+            if (!snapshot)
+            {
+                return std::unexpected(std::move(snapshot.error()));
+            }
+            nextSurfaceSnapshot = *snapshot;
+        }
+
+        metrics_ = nextMetrics;
+        metricsDirty_ = false;
+        input_.sourceMetricsRevision = metrics_.revision;
+        if (nextSurfaceSnapshot.has_value())
+        {
+            surfaceSnapshot_ = *nextSurfaceSnapshot;
+        }
+        return changed;
+    }
+
     [[nodiscard]] static Integration::WindowSurfaceSnapshot makeSurfaceSnapshot(Integration::WindowSurfaceId surfaceId,
                                                                                 const WindowMetricsSnapshot& metrics,
                                                                                 u64 surfaceRevision) noexcept
@@ -619,10 +690,11 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         };
     }
 
-    [[nodiscard]] Core::Result<Integration::WindowSurfaceSnapshot> surfaceSnapshotFromCommittedMetrics() const noexcept
+    [[nodiscard]] Core::Result<Integration::WindowSurfaceSnapshot>
+    surfaceSnapshotFromMetrics(const WindowMetricsSnapshot& metrics) const noexcept
     {
         Integration::WindowSurfaceSnapshot next =
-            makeSurfaceSnapshot(surfaceId_, metrics_, surfaceSnapshot_.surfaceRevision);
+            makeSurfaceSnapshot(surfaceId_, metrics, surfaceSnapshot_.surfaceRevision);
         const bool changed = next.framebufferExtent != surfaceSnapshot_.framebufferExtent ||
                              next.contentScale != surfaceSnapshot_.contentScale ||
                              next.suspended != surfaceSnapshot_.suspended;
@@ -636,6 +708,11 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             next.surfaceRevision = surfaceSnapshot_.surfaceRevision + 1;
         }
         return next;
+    }
+
+    [[nodiscard]] Core::Result<Integration::WindowSurfaceSnapshot> surfaceSnapshotFromCommittedMetrics() const noexcept
+    {
+        return surfaceSnapshotFromMetrics(metrics_);
     }
 
 #if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
@@ -754,8 +831,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         {
             if (!isValidPointerInjectionForTest(event))
             {
-                return Core::failure(Core::CoreErrorCode::InvalidArgument,
-                                     "The GLFW pointer test event is invalid");
+                return Core::failure(Core::CoreErrorCode::InvalidArgument, "The GLFW pointer test event is invalid");
             }
         }
         queuedPointerEventCountForTest_ = events.size();
@@ -1178,6 +1254,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     bool focusCancelPending_ = false;
     bool streamRecoveryPending_ = false;
     bool metricsDirty_ = false;
+    bool startupMetricsEventPending_ = false;
     bool closeRequested_ = false;
 #if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
     static constexpr usize MaximumQueuedPointerEventsForTest = 16;
@@ -1201,6 +1278,11 @@ class GlfwIndependentPlatformBackend final : public IPlatformBackend {
     explicit GlfwIndependentPlatformBackend(std::unique_ptr<GlfwPlatformBackend> implementation) noexcept
         : implementation_(std::move(implementation))
     {
+    }
+
+    [[nodiscard]] Core::Result<std::optional<WindowMetricsSnapshot>> initialPrimaryWindowMetrics() override
+    {
+        return implementation_->initialPrimaryWindowMetrics();
     }
 
     [[nodiscard]] Core::Result<PlatformPollResult> pollFrame() override
@@ -1418,8 +1500,8 @@ Core::Status forceGlfwSuspendedWaitPathForTest(IPlatformBackend& backend, double
     return glfwBackend->forceSuspendedWaitPathForTest(waitTimeoutSeconds);
 }
 
-Core::Status queueGlfwPointerEventsForNextPollForTest(
-    IPlatformBackend& backend, std::span<const GlfwPointerInjection> events) noexcept
+Core::Status queueGlfwPointerEventsForNextPollForTest(IPlatformBackend& backend,
+                                                      std::span<const GlfwPointerInjection> events) noexcept
 {
     auto* glfwBackend = glfwBackendForTest(backend);
     if (glfwBackend == nullptr)

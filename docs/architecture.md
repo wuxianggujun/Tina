@@ -8,7 +8,8 @@ Tina 当前处于 Legacy 产品与 vNext 垂直切片并存的迁移期。Legacy
 `tina_platform_glfw` adapter、私有 `tina_render_bgfx` backend、Desktop bootstrap 和
 M7-C1b/M7-C1c-a/C1c-b1/C1c-b2 `tina_ui` tree/layout/committed-hit/point-query/synthetic-route foundation，
 以及 M7-C1c-b3b/b3c Runtime-private UI route-result producer、primary-window `UIContext` owner 与
-`EngineHost` 接线，以及 M7-C1c-b3d1 的公开容量配置和 Runtime-private layout coordinator。
+`EngineHost` 接线、M7-C1c-b3d1 的公开容量配置和 Runtime-private layout coordinator，以及
+M7-C1c-b3d2 的 startup UI seed 与 Game SDK scoped capability。
 `tina_sample_null` 不依赖真实窗口和 GPU；`tina_sample_platform`
 把私有 GLFW `NO_API` 窗口与 NullRender 组合；`tina_sample_desktop` 通过
 `Tina::Desktop::CreateEngine(config)` 私有组合 `SteadyClock + GLFW WindowSurface + DisabledTaskSystem + bgfx`，
@@ -39,10 +40,14 @@ thread 销毁 Context。M7-C1c-b3d1 又把固定容量契约收敛为 focused pu
 `UIContextCapacityConfig`，通过 `EngineConfig::primaryWindowUICapacities` 在任何 factory 前统一校验，
 并在 `updateUI` 成功后、Render submit 前由 Runtime-private coordinator 使用主窗口 logical extent
 至多尝试一次 `commitLayout()`。Headless 帧在窗口与 Context 同时缺席时成功 no-op；提交失败阻断
-Render 且消费当前 `PlatformFrameId` 的 attempt，不能同帧重放。claims 仍为 canonical `None`；Game SDK
-尚不能取得 Context 或创建 root，因此这条接线还不是可见 UI。ADR 0021 已接受 startup metrics seed 与
-root/phase-epoch-scoped capability，但代码尚未实现；持久 Pointer Capture、
-Focus/Modal、Button default action 和 DisplayList 仍未完成。
+Render 且消费当前 `PlatformFrameId` 的 attempt，不能同帧重放。M7-C1c-b3d2 已新增不 poll、
+不消费 frame id 的 `initialPrimaryWindowMetrics()` seed，在 `IGameState::onEnter()` 前显式绑定 primary
+`UIContext`，并在 State commit 前发布首份 structure/layout/hit snapshot。Game SDK 只取得
+`PrimaryWindowUIRootBuilder` 与绑定自己 root 的 `PrimaryWindowUITreeUpdater`；facade 以 owner thread
+和 phase epoch 校验，回调结束后无条件失效，第一次 capability operation 失败作为 sticky phase error
+回传 Runtime。claims 仍为 canonical `None`；没有 DisplayList、文本/glyph、Button default action 或真实
+Widget 渲染，因此这条接线还不是可见 UI。持久 Pointer Capture、Focus/Modal、dirty subtree pruning、
+nested clip 和 DisplayList 仍未完成。
 现有 Legacy target 的包依赖由 vcpkg manifest 管理，bgfx、EASTL、EABase 仍保持固定源码
 版本；其中 EASTL/EABase 只属于迁移期现状，不是 vNext 目标依赖。
 
@@ -64,8 +69,9 @@ Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Ga
 
 结论：旧文档已经替换，但旧源码架构没有完全删除。`TINA_BUILD_LEGACY` 与 vNext-only preset
 已落地，能够把旧依赖和产品 target 排除出最小构建图。`EngineHost` 生命周期、M7-A Platform/Input
-内核、私有 GLFW 窗口子切片、M7-B1 WindowSurface handoff、M7-B2 bgfx core 和 Desktop 真实 GPU 样例已经可独立构建；它仍没有
-接入 Scene/Asset/Audio、Game SDK UI root/可见 UI pipeline、Pass Scheduler/submission ticket 或完整状态栈，因此 Legacy 仍是当前 2D/UI/3D 产品实现，不能直接整目录删除。
+内核、私有 GLFW 窗口子切片、M7-B1 WindowSurface handoff、M7-B2 bgfx core、Desktop 真实 GPU 样例以及
+startup primary-window UI capability 已经可独立构建；它仍没有接入 Scene/Asset/Audio、可见 UI pipeline、
+Pass Scheduler/submission ticket 或完整状态栈，因此 Legacy 仍是当前 2D/UI/3D 产品实现，不能直接整目录删除。
 
 | 范围 | 状态 | 证据或影响 |
 | --- | --- | --- |
@@ -85,10 +91,10 @@ Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Ga
 | vNext M7-C1b/C1c-a/C1c-b1/C1c-b2 UI tree/layout/hit query/route foundation | 已完成 standalone `tina_ui` 树、布局、committed hit、point query 与 synthetic route 数据/派发基础 | `Tina::UI` 只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；在 generation `UINodeId`、`UIContext`、move-only `UIRootOwner`、结构 snapshot 与 route-result ABI 上，已实现 layout/dirty 类型、固定容量 PMR side array/queue/scratch、Flex-lite 非递归 Measure/Arrange、双缓冲 `UICommittedHitView`、structure/layout/hit 事务发布、无分配 `queryPointerHit()`、固定容量 route path/listener storage、48-byte fixed-inline `noexcept` listener callback、generation-safe RAII token 和 Capture→Target→Bubble synthetic dispatch；route 支持 stop/consume、路由中 add/reset/destroy 安全失效与 route/commit reentrancy guard。当前 changed frame 与 hit rebuild 仍全树扫描；持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、bgfx UI pass 后置 |
 | vNext M7-C1c-b3b Runtime→UI route-result producer | 已完成独立 Runtime-private 组件与测试 target | `UIInputRouteProducer` 只转换 raw Move/Button/Wheel，使用事件时 logical position，并把 consume 写入 raw ordinal bit；reset/cancel/非 Pointer 保留 hole，claims 恒为 canonical `None`。双预分配 PMR bitset 在300帧共用 PMR 测试中 allocation count 不增长，supplied PMR 必须长于 producer；失败测试先产生1次 listener side effect，后续 route path capacity 失败不发布但推进 attempted watermark，同帧 retry 被拒且 callback 仍为1。独立 `tina_runtime_ui_tests` 直接运行 GoogleTest、不使用 CTest |
 | vNext M7-C1c-b3c EngineHost→UIContext 接线 | 已完成 Runtime-private primary-window owner 与正式帧路径接线 | `EngineHost` 在 Platform lifecycle dispatch 后惰性绑定首个 primary `WindowId`，随后调用 producer 并把结果交给 ActionMapper；Headless 绑定前为 null，同一 ID 的 metrics/content scale/minimized 变化复用 Context，绑定后 primary 消失或 generation 更换结构化失败。Context 在 module shutdown 前于 owner thread 销毁；owner 不调用 `commitLayout()`，route 只读上一帧 committed snapshot，claims 仍为 canonical `None`。Game SDK 尚无 scoped Context/root 入口，所以此切片只闭合 Runtime 输入时序与所有权，不代表可见 UI |
-| vNext M7-C1c-b3d1 UI 容量与布局提交 | 已完成公开配置与 Runtime-private phase coordinator | `UIContextCapacityConfig` 有独立公共头和共享 validator；`EngineConfig::primaryWindowUICapacities` 在任何 factory 前拒绝非法 node/root/derived/listener 容量。正式帧在 `updateUI` 后、Render submit 前按 primary logical extent 至多尝试一次 `commitLayout()`；Headless 双缺席成功 no-op，identity/容量/layout 失败阻断 Render 且该 frame attempt 不可重试。Game SDK root/updater、startup metrics seed、DisplayList 与可见 UI 仍未实现 |
-| vNext M7-C1c-b3d2 UI 启动与 Game SDK capability | [设计已接受](adr/0021-runtime-ui-startup-capability.md)，实现待推进 | Platform seed 不 poll、不消费 frame id；Runtime 在 `onEnter` 前绑定 primary Context 并提交首份 layout/hit snapshot。游戏只取得 `PrimaryWindowUIRootBuilder` 与绑定自己 root 的 `PrimaryWindowUITreeUpdater`，facade 以 phase epoch 失效；不暴露裸 `UIContext*` |
+| vNext M7-C1c-b3d1 UI 容量与布局提交 | 已完成公开配置与 Runtime-private phase coordinator | `UIContextCapacityConfig` 有独立公共头和共享 validator；`EngineConfig::primaryWindowUICapacities` 在任何 factory 前拒绝非法 node/root/derived/listener 容量。正式帧在 `updateUI` 后、Render submit 前按 primary logical extent 至多尝试一次 `commitLayout()`；Headless 双缺席成功 no-op，identity/容量/layout 失败阻断 Render 且该 frame attempt 不可重试。DisplayList 与可见 UI 仍未实现 |
+| vNext M7-C1c-b3d2 UI 启动与 Game SDK capability | 已完成 startup seed 与 phase-scoped facade | Platform seed 不 poll、不消费 frame id；Runtime 在 `onEnter` 前绑定 primary Context 并提交首份 structure/layout/hit snapshot。游戏只取得 `PrimaryWindowUIRootBuilder` 与绑定自己 root 的 `PrimaryWindowUITreeUpdater`，facade 以 owner thread 与 phase epoch 校验并在回调结束后失效；第一次 capability error 作为 sticky phase error 合并；不暴露裸 `UIContext*`。该切片仍无 DisplayList、文本/glyph、Button 默认行为或真实 claims |
 | vNext GLFW 边界 | 已形成可运行切片 | `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
-| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene/Asset/Audio、已接受但尚未实现的 UI startup/scoped capability、可见 UI pipeline 与 submission drain 仍按后续切片实施；Desktop clear-only GPU 冒烟、standalone `tina_ui` foundation 和 Runtime-private route/layout 接线不代表这些路径完成 |
+| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene/Asset/Audio、可见 UI pipeline 与 submission drain 仍按后续切片实施；Desktop clear-only GPU 冒烟、standalone `tina_ui` foundation 和 Runtime-private route/layout/startup capability 接线不代表这些路径完成 |
 
 因此不能用“删除旧 `src`”作为下一步。正确顺序是：建立新边界和测试 → 迁移调用点 → 确认旧接口零引用 → 通过 2D/UI/3D 验收 → 在独立提交中删除旧实现。
 

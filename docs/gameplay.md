@@ -1,6 +1,6 @@
 # 游戏程序入口与状态栈
 
-> 状态：vNext 候选冻结。本文是游戏开发者理解 Tina 调用面的首要入口。
+> 状态：vNext 候选冻结。M7-C1c-b3d2 已实现 startup primary-window UI capability；本文是游戏开发者理解 Tina 调用面的首要入口。
 
 ## 一句话结论
 
@@ -25,7 +25,7 @@ class IGameApplication {
 public:
     virtual ~IGameApplication() = default;
 
-    // 只调用一次。State 的 onEnter、initialPolicy 采样和 initial UI snapshot
+    // 只调用一次。State 的 onEnter、initialPolicy 采样和 startup UI snapshot
     // 全部成功后，游戏启动事务才算 commit。
     [[nodiscard]] virtual Core::Result<std::unique_ptr<IGameState>>
     createInitialState(GameStartupContext& context) = 0;
@@ -92,9 +92,11 @@ public:
 EngineHost::run(gameApplication)
   -> begin Game Start transaction
   -> gameApplication.createInitialState(startupContext)
+  -> platform.initialPrimaryWindowMetrics()
+  -> bind primary-window UI context or explicit Headless UI mode
   -> initialState.onEnter(stateEnterContext)
   -> sample initialState.initialPolicy()
-  -> initial UI model/layout/snapshot
+  -> startup UI structure/layout/hit snapshot
   -> commit initial State / UI roots / input context / policy
   -> frame loop
        UI input scope + one route   top -> bottom eligibility
@@ -112,7 +114,7 @@ EngineHost::run(gameApplication)
   -> Engine modules reverse shutdown
 ```
 
-- `createInitialState`、初始 `onEnter` 或 initial UI snapshot 失败：启动事务完整回滚，不调用
+- `createInitialState`、startup UI bind、初始 `onEnter` 或 startup UI snapshot 失败：启动事务完整回滚，不调用
   candidate `onExit`，也不调用 Application `onShutdown`；
 - 启动提交后即使帧回调失败，也先按栈顶到栈底执行 `onExit`，再调用一次 `onShutdown`；
 - pop 最后一个 State 表示正常结束游戏；Headless 样例也使用显式 `EmptyState`；
@@ -134,6 +136,18 @@ EngineHost::run(gameApplication)
 
 Phase Context 不提供通用 `services()` 或 `get<T>()`。需要新增能力时，必须先确定它属于哪个
 阶段，再增加窄 accessor；不能把 Service Locator 换一个名字重新引入。
+
+M7-C1c-b3d2 的 UI 能力是 phase-scoped facade，不是 `UIContext*`：
+
+- `GameStateEnterContext::hasPrimaryWindowUI()` 只表示当前 startup seed 已绑定 primary-window UI；Headless
+  为 false；
+- `GameStateEnterContext::primaryWindowUIRootBuilder()` 只在 `onEnter` 内创建 `UIRootOwner`，并可取得绑定该
+  root 的 `PrimaryWindowUITreeUpdater`；
+- `UIUpdateContext::primaryWindowUITreeUpdater(root_)` 只允许修改该 root 的 subtree；
+- facade 是 move-only、callback-scoped，回调结束、错误回滚或异常边界 `abortPhase()` 后统一失效；
+- phase 内首个 UI tree 错误 sticky，后续 mutation 不继续扩大半失败状态；
+- 当前可创建 Panel/Label/Button 节点并设置 layout/hit policy，但 Label 文本、Button 默认 action、
+  Focus/Capture/Modal、DisplayList 和 bgfx UI pass 仍未实现。
 
 ## State 结构变化
 
@@ -224,8 +238,9 @@ int main() {
 }
 ```
 
-`Tina::Desktop::CreateEngine` 的实现组合 GLFW、bgfx、FreeType 和 miniaudio，但它的 header 只
-包含 Tina 类型。普通游戏入口不 include 或链接具体 backend target；自定义 backend 和失败
+`Tina::Desktop::CreateEngine` 的当前实现组合 GLFW WindowSurface、bgfx、SteadyClock 与
+DisabledTaskSystem，但它的 header 只包含 Tina 类型。FreeType/font、Asset 和 Audio adapter 是后续切片。
+普通游戏入口不 include 或链接具体 backend target；自定义 backend 和失败
 注入测试才使用低一层 `EngineHost::Create(config, factories)`。
 
 ## 2D、3D 与 UI 的落点

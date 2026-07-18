@@ -8,8 +8,11 @@
 #include <tina/runtime/spi/PlatformEventDispatcher.hpp>
 #include <tina/task/TaskSystem.hpp>
 
+#include <tina/core/base/ScopeExit.hpp>
+
 #include "input/ActionMapper.hpp"
 #include "input/UIInputRouteProducer.hpp"
+#include "ui/PrimaryWindowUICapabilityState.hpp"
 #include "ui/PrimaryWindowUIContextOwner.hpp"
 #include "ui/PrimaryWindowUILayoutCoordinator.hpp"
 
@@ -109,8 +112,8 @@ namespace {
 }
 
 template <typename Function>
-[[nodiscard]] auto invokeResultBoundary(std::string_view operation, Core::ErrorCode exceptionCode, Function&& function)
-    -> std::invoke_result_t<Function&>
+[[nodiscard]] auto invokeResultBoundary(std::string_view operation, Core::ErrorCode exceptionCode,
+                                        Function&& function) -> std::invoke_result_t<Function&>
 {
     using ResultType = std::invoke_result_t<Function&>;
     try
@@ -531,9 +534,49 @@ class EngineHostImplementation final {
             return failBeforeStartupCommit(initialStateWasNull());
         }
 
-        GameStateEnterContext enterContext{m_config, m_platformEventDispatcher};
+        auto initialMetricsResult = invokeResultBoundary(
+            "IPlatformBackend::initialPrimaryWindowMetrics", RuntimeErrorCode::LifecycleInvariantViolation,
+            [&] { return m_modules.platform->initialPrimaryWindowMetrics(); });
+        if (!initialMetricsResult)
+        {
+            candidate.reset();
+            return failBeforeStartupCommit(std::move(initialMetricsResult.error()));
+        }
+        const std::optional<Platform::WindowMetricsSnapshot> initialMetrics = std::move(*initialMetricsResult);
+
+        auto uiContextResult = m_primaryWindowUi.bindForStartup(initialMetrics);
+        if (!uiContextResult)
+        {
+            candidate.reset();
+            auto error = std::move(uiContextResult.error());
+            error.addContext("PrimaryWindowUIContextOwner::bindForStartup");
+            return failBeforeStartupCommit(std::move(error));
+        }
+
+        auto enterUIPhase = m_primaryWindowUICapability.beginGameStateEnterPhase(*uiContextResult);
+        if (!enterUIPhase)
+        {
+            candidate.reset();
+            return failBeforeStartupCommit(std::move(enterUIPhase.error()));
+        }
+        auto enterUIPhaseGuard = Core::makeScopeExit([this, epoch = *enterUIPhase]() noexcept {
+            m_primaryWindowUICapability.abortPhase(epoch, Runtime::Detail::PrimaryWindowUIPhase::GameStateEnter);
+        });
+
+        GameStateEnterContext enterContext{m_config, m_platformEventDispatcher, m_primaryWindowUICapability,
+                                           *enterUIPhase};
         auto enterResult = invokeResultBoundary("IGameState::onEnter", RuntimeErrorCode::GameCallbackThrewException,
                                                 [&] { return candidate->onEnter(enterContext); });
+        Core::Status enterUIPhaseStatus = m_primaryWindowUICapability.finishPhase(
+            *enterUIPhase, Runtime::Detail::PrimaryWindowUIPhase::GameStateEnter);
+        if (!enterUIPhaseStatus)
+        {
+            candidate.reset();
+            auto error = std::move(enterUIPhaseStatus.error());
+            error.addContext("IGameState::onEnter", "primary-window UI capability");
+            return failBeforeStartupCommit(std::move(error));
+        }
+        enterUIPhaseGuard.release();
         if (!enterResult)
         {
             candidate.reset();
@@ -541,6 +584,12 @@ class EngineHostImplementation final {
         }
 
         m_committedPolicy = candidate->initialPolicy();
+        if (Core::Status layoutStatus = m_primaryWindowUILayout.commitForStartup(*uiContextResult, initialMetrics);
+            !layoutStatus)
+        {
+            candidate.reset();
+            return failBeforeStartupCommit(std::move(layoutStatus.error()));
+        }
         m_gameState = std::move(candidate);
         m_lifecycleState = LifecycleState::Running;
 
@@ -753,9 +802,27 @@ class EngineHostImplementation final {
                                               simulationTick);
             }
 
-            UIUpdateContext uiContext{frameTiming};
+            auto updateUIPhase = m_primaryWindowUICapability.beginUIUpdatePhase(*uiContextResult);
+            if (!updateUIPhase)
+            {
+                return failAfterStartupCommit(gameApplication, std::move(updateUIPhase.error()), frameIndex,
+                                              simulationTick);
+            }
+            auto updateUIPhaseGuard = Core::makeScopeExit([this, epoch = *updateUIPhase]() noexcept {
+                m_primaryWindowUICapability.abortPhase(epoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
+            });
+            UIUpdateContext uiContext{frameTiming, m_primaryWindowUICapability, *updateUIPhase};
             auto uiResult = invokeResultBoundary("IGameState::updateUI", RuntimeErrorCode::GameCallbackThrewException,
                                                  [&] { return m_gameState->updateUI(uiContext); });
+            Core::Status updateUIPhaseStatus = m_primaryWindowUICapability.finishPhase(
+                *updateUIPhase, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
+            if (!updateUIPhaseStatus)
+            {
+                auto error = std::move(updateUIPhaseStatus.error());
+                error.addContext("IGameState::updateUI", "primary-window UI capability");
+                return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
+            }
+            updateUIPhaseGuard.release();
             if (!uiResult)
             {
                 return failAfterStartupCommit(gameApplication, std::move(uiResult.error()), frameIndex, simulationTick);
@@ -886,6 +953,7 @@ class EngineHostImplementation final {
     std::unique_ptr<Runtime::Input::UIInputRouteProducer> m_uiInputRouteProducer;
     EngineModules m_modules;
     Runtime::Detail::PrimaryWindowUIContextOwner m_primaryWindowUi;
+    Runtime::Detail::PrimaryWindowUICapabilityState m_primaryWindowUICapability;
     Runtime::Detail::PrimaryWindowUILayoutCoordinator m_primaryWindowUILayout;
     std::thread::id m_ownerThread;
     std::unique_ptr<IGameState> m_gameState;

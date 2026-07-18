@@ -24,6 +24,51 @@ namespace {
     return params;
 }
 
+TEST(GlfwBackendIntegrationTests, InitialPrimaryWindowMetricsDoesNotPumpAndPublishesMatchingFirstFrameEvent)
+{
+    auto backend = createGlfwPlatformBackend(hiddenWindowParams());
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+
+    auto statsBeforeSeed = Detail::glfwEventPumpStatsForTest(**backend);
+    ASSERT_TRUE(statsBeforeSeed.has_value()) << statsBeforeSeed.error().message;
+    EXPECT_EQ(statsBeforeSeed->pollEventsCalls, 0U);
+    EXPECT_EQ(statsBeforeSeed->waitEventsTimeoutCalls, 0U);
+
+    auto startupMetrics = (*backend)->initialPrimaryWindowMetrics();
+    ASSERT_TRUE(startupMetrics.has_value()) << startupMetrics.error().message;
+    ASSERT_TRUE(startupMetrics->has_value());
+    EXPECT_TRUE((*startupMetrics)->window.hasValue());
+    EXPECT_GT((*startupMetrics)->logicalExtent.width, 0U);
+    EXPECT_GT((*startupMetrics)->logicalExtent.height, 0U);
+    EXPECT_FALSE((*startupMetrics)->visible);
+
+    auto statsAfterSeed = Detail::glfwEventPumpStatsForTest(**backend);
+    ASSERT_TRUE(statsAfterSeed.has_value()) << statsAfterSeed.error().message;
+    EXPECT_EQ(statsAfterSeed->pollEventsCalls, 0U);
+    EXPECT_EQ(statsAfterSeed->waitEventsTimeoutCalls, 0U);
+
+    auto firstPoll = (*backend)->pollFrame();
+    ASSERT_TRUE(firstPoll.has_value()) << firstPoll.error().message;
+    ASSERT_TRUE(firstPoll->isContinueFrame());
+    ASSERT_NE(firstPoll->frame(), nullptr);
+    EXPECT_EQ(firstPoll->frame()->id(), PlatformFrameId{1});
+
+    const WindowFrameSnapshot* primary = firstPoll->frame()->primaryWindow();
+    ASSERT_NE(primary, nullptr);
+    EXPECT_EQ(primary->metrics.window, (*startupMetrics)->window);
+    EXPECT_EQ(primary->metrics.revision, (*startupMetrics)->revision);
+
+    ASSERT_EQ(firstPoll->frame()->platformEvents().size(), 1U);
+    const auto* metricsEvent =
+        std::get_if<WindowMetricsChangedEvent>(&firstPoll->frame()->platformEvents().front().payload);
+    ASSERT_NE(metricsEvent, nullptr);
+    EXPECT_EQ(firstPoll->frame()->platformEvents().front().sequence, 1U);
+    EXPECT_EQ(metricsEvent->window, primary->metrics.window);
+    EXPECT_EQ(metricsEvent->metricsRevision, primary->metrics.revision);
+
+    (*backend)->shutdown();
+}
+
 TEST(GlfwBackendIntegrationTests, HiddenWindowPublishesCoherentPrimarySnapshot)
 {
     auto backend = createGlfwPlatformBackend(hiddenWindowParams());
@@ -190,6 +235,45 @@ TEST(GlfwBackendIntegrationTests, WindowSurfaceFactoryDefersPublicationAndPinsPr
     EXPECT_TRUE(*visibleAfterPublish);
 
     lease = {};
+    (*backend)->shutdown();
+}
+
+TEST(GlfwBackendIntegrationTests, WindowSurfaceSnapshotTracksInitialMetricsSeedAndFirstFrameBoundary)
+{
+    auto backend = createGlfwWindowSurfacePlatformBackend(hiddenWindowParams());
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+    ASSERT_TRUE((*backend)->publishPrimaryWindow().has_value());
+
+    auto startupMetrics = (*backend)->initialPrimaryWindowMetrics();
+    ASSERT_TRUE(startupMetrics.has_value()) << startupMetrics.error().message;
+    ASSERT_TRUE(startupMetrics->has_value());
+
+    auto startupSurface = (*backend)->primaryWindowSurfaceSnapshot();
+    ASSERT_TRUE(startupSurface.has_value()) << startupSurface.error().message;
+    EXPECT_EQ(startupSurface->sourceWindow, (*startupMetrics)->window);
+    EXPECT_EQ(startupSurface->sourceMetricsRevision, (*startupMetrics)->revision);
+    EXPECT_EQ(startupSurface->framebufferExtent, (*startupMetrics)->framebufferExtent);
+    EXPECT_EQ(startupSurface->contentScale, (*startupMetrics)->contentScale);
+
+    auto firstPoll = (*backend)->pollFrame();
+    ASSERT_TRUE(firstPoll.has_value()) << firstPoll.error().message;
+    ASSERT_TRUE(firstPoll->isContinueFrame());
+    const WindowFrameSnapshot* primary = firstPoll->frame()->primaryWindow();
+    ASSERT_NE(primary, nullptr);
+
+    ASSERT_EQ(firstPoll->frame()->platformEvents().size(), 1U);
+    const auto* metricsEvent =
+        std::get_if<WindowMetricsChangedEvent>(&firstPoll->frame()->platformEvents().front().payload);
+    ASSERT_NE(metricsEvent, nullptr);
+    EXPECT_EQ(metricsEvent->window, primary->metrics.window);
+    EXPECT_EQ(metricsEvent->metricsRevision, primary->metrics.revision);
+
+    auto frameSurface = (*backend)->primaryWindowSurfaceSnapshot();
+    ASSERT_TRUE(frameSurface.has_value()) << frameSurface.error().message;
+    EXPECT_EQ(frameSurface->sourceWindow, primary->metrics.window);
+    EXPECT_EQ(frameSurface->sourceMetricsRevision, primary->metrics.revision);
+    EXPECT_EQ(frameSurface->framebufferExtent, primary->metrics.framebufferExtent);
+    EXPECT_EQ(frameSurface->contentScale, primary->metrics.contentScale);
     (*backend)->shutdown();
 }
 

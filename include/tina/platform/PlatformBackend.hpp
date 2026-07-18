@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace Tina::Platform {
 
@@ -22,6 +23,10 @@ class IPlatformBackend {
     // shutdown, and destruction must occur on the same owner thread. Native
     // adapters may additionally require that owner to be the process platform
     // thread; see the concrete factory contract.
+    // Startup-only snapshot query: it must not pump events, publish a frame, or
+    // consume PlatformFrameId/source sequence. nullopt means this backend is
+    // explicitly Headless for the complete run.
+    [[nodiscard]] virtual Core::Result<std::optional<WindowMetricsSnapshot>> initialPrimaryWindowMetrics() = 0;
     [[nodiscard]] virtual Core::Result<PlatformPollResult> pollFrame() = 0;
     virtual void shutdown() noexcept = 0;
 };

@@ -96,8 +96,9 @@ Headless frame 在首次绑定前选择 `nullptr`；首个有效 primary `Window
 owner/index/generation 复用。绑定后主窗口消失或 replacement generation 以
 `LifecycleInvariantViolation` 终止本次 run；最小化、metrics/content scale 变化不重绑。Context 在
 Render → Task → Platform → Clock modules 前 shutdown。owner 不调用 `commitLayout()`，因此 hit-test/route
-不能隐式布局。Game SDK 尚无 Context/root 访问，当前正式路径的 committed hit snapshot 仍为空；
-claims 仍为 canonical `None`，也没有可见 Widget、Focus/Capture/Modal 或 DisplayList。
+不能隐式布局。该 b3c 切片当时没有 Game SDK Context/root 访问，正式路径的 committed hit snapshot 仍为空；
+b3d2 后续加入 startup bind 与 root-scoped phase capability，但 claims 仍为 canonical `None`，也没有可见
+Widget、Focus/Capture/Modal 或 DisplayList。
 
 M7-A Action Mapper 由 Runtime 唯一拥有，只实现 EngineConfig 注册的单一 immutable default Input
 Context（priority=0）。UI consumption/claim 优先；未来多 Context 以显式 priority 决胜，同 priority

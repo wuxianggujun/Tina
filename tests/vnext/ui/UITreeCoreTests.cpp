@@ -392,6 +392,85 @@ TEST_F(UITreeCoreTest, RejectsInvalidParentAndUpdaterRootOwnership)
     EXPECT_EQ(missingRoot.error().code, UI::UIErrorCode::RootRequired);
 }
 
+TEST_F(UITreeCoreTest, TreeUpdaterCreatesChildrenOnlyInsideItsRoot)
+{
+    auto context = createContext(firstWindow, {.nodeCapacity = 8, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
+    auto panel = updaterResult->createPanel(root.rootNodeId());
+    ASSERT_TRUE(panel.has_value()) << panel.error().message;
+    auto label = updaterResult->createLabel(*panel);
+    ASSERT_TRUE(label.has_value()) << label.error().message;
+    auto button = updaterResult->createButton(root.rootNodeId());
+    ASSERT_TRUE(button.has_value()) << button.error().message;
+
+    EXPECT_TRUE(updaterResult->isAlive(*panel));
+    EXPECT_TRUE(updaterResult->isAlive(*label));
+    EXPECT_TRUE(updaterResult->isAlive(*button));
+    EXPECT_EQ(context->liveNodeCount(), 4U);
+    ASSERT_TRUE(context->commitStructure().has_value());
+
+    const UI::UICommittedStructureView committed = context->committedStructure();
+    ASSERT_EQ(committed.size(), 4U);
+    EXPECT_EQ(committed.entries()[0].node, root.rootNodeId());
+    EXPECT_EQ(committed.entries()[0].kind, UI::UIWidgetKind::Root);
+    EXPECT_EQ(committed.entries()[1].node, *panel);
+    EXPECT_EQ(committed.entries()[1].kind, UI::UIWidgetKind::Panel);
+    EXPECT_EQ(committed.entries()[2].node, *label);
+    EXPECT_EQ(committed.entries()[2].kind, UI::UIWidgetKind::Label);
+    EXPECT_EQ(committed.entries()[3].node, *button);
+    EXPECT_EQ(committed.entries()[3].kind, UI::UIWidgetKind::Button);
+}
+
+TEST_F(UITreeCoreTest, TreeUpdaterRejectsCreatingChildrenUnderAnotherRoot)
+{
+    auto context = createContext(firstWindow, {.nodeCapacity = 8, .rootCapacity = 2});
+    ASSERT_NE(context, nullptr);
+    auto firstRoot = createRoot(*context);
+    auto secondRoot = createRoot(*context);
+    ASSERT_TRUE(firstRoot);
+    ASSERT_TRUE(secondRoot);
+
+    auto firstUpdaterResult = context->treeUpdater(firstRoot);
+    auto secondUpdaterResult = context->treeUpdater(secondRoot);
+    ASSERT_TRUE(firstUpdaterResult.has_value()) << firstUpdaterResult.error().message;
+    ASSERT_TRUE(secondUpdaterResult.has_value()) << secondUpdaterResult.error().message;
+
+    auto secondPanel = secondUpdaterResult->createPanel(secondRoot.rootNodeId());
+    ASSERT_TRUE(secondPanel.has_value()) << secondPanel.error().message;
+    const usize liveNodeCountBeforeRejectedCreate = context->liveNodeCount();
+
+    const auto rejectedLabel = firstUpdaterResult->createLabel(*secondPanel);
+    ASSERT_FALSE(rejectedLabel.has_value());
+    EXPECT_EQ(rejectedLabel.error().code, UI::UIErrorCode::InvalidNode);
+    EXPECT_TRUE(context->contains(*secondPanel));
+    EXPECT_EQ(context->liveNodeCount(), liveNodeCountBeforeRejectedCreate);
+}
+
+TEST_F(UITreeCoreTest, TreeUpdaterRejectsCreationAfterRootOwnerReset)
+{
+    auto context = createContext(firstWindow, {.nodeCapacity = 4, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId rootId = root.rootNodeId();
+
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
+    root.reset();
+
+    const auto rejectedPanel = updaterResult->createPanel(rootId);
+    ASSERT_FALSE(rejectedPanel.has_value());
+    EXPECT_EQ(rejectedPanel.error().code, UI::UIErrorCode::RootRequired);
+    EXPECT_FALSE(updaterResult->isAlive(rootId));
+    EXPECT_EQ(context->liveNodeCount(), 0U);
+    EXPECT_EQ(context->liveRootCount(), 0U);
+}
+
 TEST_F(UITreeCoreTest, CommitPublishesStablePreorderParentDepthKindAndPaintOrdinal)
 {
     auto context = createContext(firstWindow, {.nodeCapacity = 8, .rootCapacity = 2});

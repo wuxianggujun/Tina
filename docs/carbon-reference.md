@@ -131,9 +131,10 @@ Poll 统一冻结 final snapshot；任一步失败由 scope rollback 逆序撤�
 明确拒绝把 Carbon 的原生 Win32 枚举、消息宏、raw native pointer、Blue/Python入口、全局 callback
 或全局 service 移入 Tina。Carbon 仓库不进入 Tina 构建、链接、提交或发布包；“成熟引擎运行多年”
 只说明这些问题值得研究，不能替代 Tina 自己的构建、分进程测试、样例运行和资源回收证据。当前
-M7-C1c-b3d1 的 Windows 事实分别为：Null 图 `tina_tests` 189/189、`tina_ui_tests` 75/75、
-`tina_runtime_ui_tests` 29/29；可选 adapter 另有 `tina_platform_glfw_tests` 23/23 与
-`tina_render_bgfx_tests` 11/11。它们是五个独立 GoogleTest executable，不能相加成一个“总测试数”。
+M7-C1c-b3d2 的 Windows Debug/Release 事实分别为：Null 图 `tina_tests` 194/194、`tina_ui_tests`
+78/78、`tina_runtime_ui_tests` 42/42；可选 adapter 另有 `tina_platform_glfw_tests` 25/25 与
+`tina_render_bgfx_tests` 11/11。Linux GCC 与 Clang sanitizer Null 图也通过194/194、78/78、42/42，
+Clang 无 sanitizer 诊断。它们是五个独立 GoogleTest executable，不能相加成一个“总测试数”。
 
 ### Render：采用 Step 契约，缩小为显式 Pass
 
@@ -187,12 +188,14 @@ Tina 当前 miniaudio 路径只需要先保证 Engine/Resource/Voice 的关闭�
   `EngineConfig::primaryWindowUICapacities`，并增加 Runtime-private 每帧 layout coordinator。它在
   `updateUI` 成功后、Render submit 前按窗口 logical extent 对每个严格递增 `PlatformFrameId` 至多尝试
   一次 layout commit；Headless 双缺席成功 no-op，失败阻断 Render 且消费 frame attempt。hit-test 和
-  route 继续只读取上一份 committed snapshot，不能隐式触发布局。本批精确测试计数仍以最终直接
-  GoogleTest 与运行门禁回写为准。
-- **M7-C1c-b3d2 Accepted / Pending implementation**：ADR 0021 接受在 startup transaction 中提供
-  `initialPrimaryWindowMetrics`，再向游戏侧提供 root-scoped、phase-epoch-scoped 的 UI capability。普通 Game SDK 不获得裸 `UIContext*`，也不能在任意
-  阶段调用 `createRoot()` 或跨 phase 借用；root ownership、generation 校验和提交点仍由 Runtime/UI owner
-  管理。该设计尚未实现，也没有可见 UI 验收结论。
+  route 继续只读取上一份 committed snapshot，不能隐式触发布局。该 b3d1 历史切片的独立
+  Runtime→UI 门禁为29/29；b3d2 当前门禁为42/42。
+- **M7-C1c-b3d2 已实现**：ADR 0021 接受的 startup transaction 已接入
+  `initialPrimaryWindowMetrics`，该 seed 不 poll、不消耗 frame id；Runtime 在 `onEnter` 前显式绑定
+  primary-window `UIContext` 或 Headless 状态，再向游戏侧提供 root-scoped、phase-epoch-scoped
+  `PrimaryWindowUIRootBuilder`/`PrimaryWindowUITreeUpdater`。普通 Game SDK 不获得裸 `UIContext*`，也不能在任意
+  阶段调用 `createRoot()` 或跨 phase 借用；root ownership、generation 校验、sticky 首错、phase expiry
+  和异常/失败边界的 `abortPhase()` 仍由 Runtime/UI owner 管理。该设计不包含可见 UI 验收结论。
 
 这三步延续了 Carbon 值得学习的事务发布、明确泵送顺序和延迟清理，同时拒绝 `BeOS`/BlueInterface
 式全局或半加载状态。后续只有在 Widget model、paint snapshot/Display List、字体/中文路径与真实

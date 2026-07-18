@@ -37,6 +37,9 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
 - `EngineConfig` 在任何 factory 前完成校验，并硬拒绝 `maximumStepsPerFrame > 4`；M7-C1c-b3d1
   新增 `primaryWindowUICapacities`，复用 `Tina::UI::validateUIContextCapacityConfig()` 拒绝非法
   node/root、派生 scratch/snapshot 和 listener 容量；
+- `IPlatformBackend::initialPrimaryWindowMetrics()` 已为 startup transaction 提供 backend-neutral
+  primary-window metrics seed：它不能 poll、泵送事件、消费 frame id/source sequence；Headless 返回
+  `nullopt`，GLFW 在 owner thread 从已创建窗口读取原生 metrics 并保留后续首帧 metrics event；
 - `EngineConfig::platformFrameCapacities`、`inputActions` 与 `platformEventSubscriptions` 已按职责
   分离；Platform raw/event/text storage 在 backend 创建时一次性分配，Poll 期间不扩容；
 - `PlatformFrameBuilder` 校验 UTF-8、final Snapshot、全局单调 sequence、Gamepad lifecycle 以及
@@ -69,6 +72,12 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
   Render submit 前使用主窗口 logical extent 提交本帧下一份 layout/hit snapshot。每个有效且严格递增的
   `PlatformFrameId` 至多尝试一次；Headless 窗口/Context 双缺席成功 no-op，identity 或 commit 失败阻断
   Render，并保持本帧 attempt 已消费，禁止同帧重放；
+- M7-C1c-b3d2 在 `createInitialState()` 后读取 `initialPrimaryWindowMetrics()`，并在 `onEnter` 前显式
+  bind primary `UIContext` 或显式进入 Headless unavailable 状态。`GameStateEnterContext` 提供
+  `PrimaryWindowUIRootBuilder`，`UIUpdateContext` 提供绑定 `UIRootOwner` 的
+  `PrimaryWindowUITreeUpdater`；两者都是 move-only、owner-thread、phase-epoch-scoped facade，回调结束后
+  无条件失效。第一次 capability operation 失败会成为该 phase 的 sticky error，并在 callback 返回后由
+  Runtime 与 callback status 合并；
 - 当前帧循环为 Poll Platform → frame/payload/capacity/sequence 预校验 → Platform lifecycle dispatch
   → primary UIContext selection + UI Input Routing → Action Mapping → Fixed Update（0..4）→ Frame Update
   → Render Scene Extraction → UI Update → primary UI Layout Commit → Null submit → present；`requestExitAfterFrame()` 会完成当帧
@@ -86,10 +95,10 @@ Null submit/present 后退出。M7-B1 已有 backend-neutral Native Surface hand
 Pass Scheduler/RenderFramePacket，也没有 Scene、Asset 或 Audio。Render 只完成 clear-only bgfx
 Desktop smoke；UI 只完成 standalone `tina_ui` 树核心、route-result view ABI、事务式 Flex-lite layout、
 committed hit-snapshot 数据基础、point query/反向目标选择、synthetic Capture→Target→Bubble route，以及
-Runtime-private producer/primary Context 接线，以及 Runtime-private 每帧 layout commit。claims 仍为 canonical
-`None`，Game SDK 也不能取得 Context 或创建 root，因此当前还没有可见 UI。startup primary-window metrics
-seed 和 root-scoped、phase-epoch-scoped Game SDK capability 已由 ADR 0021 接受，但代码尚未实现。持久 Pointer Capture、Focus/Modal、Button
-default action、paint snapshot/DisplayList、nested clip、dirty subtree pruning、FreeType 与 bgfx UI pass 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或 clear-only
+Runtime-private producer/primary Context 接线、Runtime-private 每帧 layout commit，以及 startup
+primary-window seed + root-scoped phase capability。claims 仍为 canonical `None`，Panel/Label/Button 只是在
+retained tree 中可创建的节点类型；当前没有可见 UI。持久 Pointer Capture、Focus/Modal、Button
+default action、paint snapshot/DisplayList、nested clip、dirty subtree pruning、text/glyph、FreeType 与 bgfx UI pass 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或 clear-only
 Desktop smoke 推断为已经实现。
 
 ## 完整 vNext 所有权目标
@@ -176,11 +185,11 @@ committed snapshot，不隐式 layout。M7-C1c-b3d1 只在后续 `updateUI` phas
 
 ## IGameApplication 与 IGameState 调用顺序
 
-当前仍只有一个 State，实际顺序为：create initial State → `onEnter` → sample policy → frame
-loop → `onExit` → Application `onShutdown` → module shutdown。M7-C1c-b3d1 的 UIContext 仍在首个有效
-Platform frame 才绑定，所以尚未实现 initial UI snapshot、GameStateStack、TaskGroup barrier 或状态命令提交。
-M7-C1c-b3d2 将按已接受的 ADR 0021 以 backend-neutral startup primary-window metrics seed 在 `onEnter`
-前建立 Context，并只向游戏侧提供 root-scoped、phase-epoch-scoped capability；该实现尚未落地。
+当前仍只有一个 State，实际顺序为：create initial State → read primary-window metrics seed →
+bind primary UIContext 或 Headless unavailable → `onEnter`（可使用 root capability）→ sample policy →
+startup UI layout/hit snapshot → frame loop → `onExit` → Application `onShutdown` → module shutdown。
+M7-C1c-b3d2 已实现 backend-neutral startup primary-window metrics seed 和 root-scoped、phase-epoch-scoped
+capability；尚未实现的是完整 GameStateStack、TaskGroup barrier 或状态命令提交。
 
 完整目标顺序为：
 

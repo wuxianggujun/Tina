@@ -5,6 +5,7 @@
 #include <tina/runtime/FrameTiming.hpp>
 #include <tina/runtime/InputActions.hpp>
 #include <tina/runtime/PlatformEvents.hpp>
+#include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 
 namespace Tina::Detail {
@@ -43,12 +44,19 @@ class GameStateEnterContext final {
     [[nodiscard]] const EngineConfig& engineConfig() const noexcept;
     // Callback-only facade. Store returned subscription tokens, never this address.
     [[nodiscard]] PlatformEventSubscriptions& platformEventSubscriptions() noexcept;
+    // Queries availability without creating a sticky phase error. The builder
+    // itself expires unconditionally when onEnter returns.
+    [[nodiscard]] bool hasPrimaryWindowUI() const noexcept;
+    [[nodiscard]] Core::Result<PrimaryWindowUIRootBuilder> primaryWindowUIRootBuilder();
 
   private:
-    GameStateEnterContext(const EngineConfig& config, PlatformEventDispatcher& platformEvents) noexcept;
+    GameStateEnterContext(const EngineConfig& config, PlatformEventDispatcher& platformEvents,
+                          Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI, u64 uiEpoch) noexcept;
 
     const EngineConfig* m_config = nullptr;
     PlatformEventSubscriptions m_platformEventSubscriptions;
+    Runtime::Detail::PrimaryWindowUICapabilityState* m_primaryWindowUI = nullptr;
+    u64 m_uiEpoch = 0;
 
     friend class Detail::EngineHostImplementation;
 };
@@ -122,11 +130,18 @@ class UIUpdateContext final {
     UIUpdateContext& operator=(UIUpdateContext&&) = delete;
 
     [[nodiscard]] const FrameTiming& frameTiming() const noexcept;
+    // Queries availability without creating a sticky phase error. The updater
+    // is bound to rootOwner and expires unconditionally when updateUI returns.
+    [[nodiscard]] bool hasPrimaryWindowUI() const noexcept;
+    [[nodiscard]] Core::Result<PrimaryWindowUITreeUpdater> primaryWindowUITreeUpdater(UI::UIRootOwner& rootOwner);
 
   private:
-    explicit UIUpdateContext(const FrameTiming& frameTiming) noexcept;
+    UIUpdateContext(const FrameTiming& frameTiming, Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI,
+                    u64 uiEpoch) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
+    Runtime::Detail::PrimaryWindowUICapabilityState* m_primaryWindowUI = nullptr;
+    u64 m_uiEpoch = 0;
 
     friend class Detail::EngineHostImplementation;
 };

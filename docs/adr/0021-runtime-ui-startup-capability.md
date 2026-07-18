@@ -3,7 +3,8 @@
 - 状态：Accepted
 - 日期：2026-07-18
 - 接受日期：2026-07-18
-- 实施状态：M7-C1c-b3d2 设计已冻结，代码尚未落地；本 ADR 不代表 Widget、DisplayList 或可见 UI 已完成。
+- 实施状态：M7-C1c-b3d2 已落地 startup metrics seed、显式 bind、startup layout/hit snapshot 与
+  root-scoped phase capability；本 ADR 不代表 Widget、DisplayList 或可见 UI 已完成。
 
 ## 背景
 

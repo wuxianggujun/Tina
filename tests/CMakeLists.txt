@@ -43,6 +43,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     runtime/header_isolation/InputActionMapHeader.cpp
     runtime/header_isolation/PlatformEventDispatcherHeader.cpp
     runtime/header_isolation/PlatformEventsHeader.cpp
+    runtime/header_isolation/PrimaryWindowUIHeader.cpp
     runtime/header_isolation/WindowSurfaceIntegrationHeader.cpp
     runtime/InputActionTests.cpp
     runtime/PlatformEventDispatcherTests.cpp

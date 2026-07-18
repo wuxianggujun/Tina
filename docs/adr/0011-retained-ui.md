@@ -279,12 +279,12 @@ M7-C1b/C1c-a/C1c-b1/C1c-b2 只完成无变化布局零工作、changed-frame 单
 M7-C1c-b3c 只完成 primary-window Context lifetime 与 EngineHost 顺序接线，M7-C1c-b3d1 只完成
 bounded capacity 与每帧 layout commit；
 “CPU 成本由实际变化区域决定”仍需后续 dirty subtree pruning 证明，不能从 dirty bit/queue 或 hit view
-已存在直接推断。Game SDK root/update、Widget default action、可见 UI 和 DisplayList 也不能由 private
-owner/producer 或 synthetic route 推断。
+已存在直接推断。Widget default action、可见 UI 和 DisplayList 也不能由 private owner/producer、
+root-scoped facade 或 synthetic route 推断。
 
-M7-C1c-b3d2 的 startup primary-window metrics seed 与 root-scoped、phase-epoch-scoped Game SDK capability
-已由 [ADR 0021](0021-runtime-ui-startup-capability.md) 接受但尚未实现。普通游戏不获得裸 `UIContext*`，也不能在任意阶段调用 `createRoot()`；该 follow-up
-完成前，b3d1 对空 Context 的 commit 不构成可见 UI。
+M7-C1c-b3d2 已按 [ADR 0021](0021-runtime-ui-startup-capability.md) 实现 startup primary-window metrics
+seed 与 root-scoped、phase-epoch-scoped Game SDK capability。普通游戏仍不获得裸 `UIContext*`，也不能在
+任意阶段调用 `createRoot()`；该 facade 与 startup snapshot 本身仍不构成可见 UI。
 
 ## 被拒绝方案
 
