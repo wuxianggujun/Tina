@@ -742,13 +742,13 @@ M7-C1c-b3e 再补3项 claim 合并/非法值/无命中测试。Button default ac
 premultiplication、visible/transparent 筛选、paint-only/no-op revision、四份 snapshot rollback、固定容量与
 supplied PMR。后续 listener extension 再补 root-scoped/cross-root 原子注册、callback move 释放 root 的
 事务回滚，以及 callback move 销毁 Context 的 death test。本轮 Button default action 后又有新增
-UI 用例，当前 Windows Debug `tina_ui_tests` 为115/115（含6项 dirty-subtree reuse/回退测试）；上一轮 Windows Release、Linux GCC 13.4、Linux Clang 22.1.8 +
-libstdc++15.2 ASan/UBSan/LSan 仍为92/92，且 Clang 无 sanitizer 诊断，本轮没有重跑这些图。初次 GCC
+UI 用例，当前 Windows Debug/Release `tina_ui_tests` 均为115/115（含6项 dirty-subtree reuse/回退测试）；Linux GCC 13.4、Linux Clang 22.1.8 +
+libstdc++15.2 ASan/UBSan/LSan 仍为92/92，且 Clang 无 sanitizer 诊断，本轮未重跑 Linux 图。初次 GCC
 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
 Render builder 的11项测试随 Windows Debug、Linux GCC/Clang `tina_tests` 205/205 通过；D0 后
 Windows Debug/Release 基础测试增至207/207，`tina_runtime_ui_tests` 在 D2 增至53/53，并且 Null 样例
-300帧通过。Button default action 切片的 Windows Debug 增至基础208/208、Runtime→UI60/60，并重跑
-Null样例300帧；本轮未重跑 Release 或 Linux。独立 UI→Render bridge 的12项直接 GoogleTest 在前序 Windows Debug/Release 与两条 Linux 图均通过。
+300帧通过。Button default action 切片的 Windows Debug/Release 均为基础208/208、Runtime→UI60/60，并重跑
+Null样例300帧；本轮未重跑 Linux。独立 UI→Render bridge 的12项直接 GoogleTest 在本轮 Windows Debug/Release 与前序两条 Linux 图均通过。
 Linux Null 样例各运行300帧，Clang 无 sanitizer 诊断。D1 的私有 bgfx 几何测试覆盖 SolidQuad 展开为
 4顶点/6个32位索引、ABGR 颜色、容量失败不写入、非法命令预检和连续300次复用 caller-owned storage；
 Windows bgfx 专项增至16/16。D2 Desktop 样例在 Windows D3D11 上验证4个 retained SolidFill panel 可见、

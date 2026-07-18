@@ -1,0 +1,23 @@
+#pragma once
+
+#include <tina/core/error/Error.hpp>
+
+namespace Tina::Scene {
+
+namespace SceneErrorCode {
+
+inline constexpr Core::ErrorCode InvalidEntity{Core::ErrorDomain::Scene, 1};
+inline constexpr Core::ErrorCode WrongWorld{Core::ErrorDomain::Scene, 2};
+inline constexpr Core::ErrorCode StaleEntity{Core::ErrorDomain::Scene, 3};
+inline constexpr Core::ErrorCode HierarchyCycle{Core::ErrorDomain::Scene, 4};
+inline constexpr Core::ErrorCode InvalidTransform{Core::ErrorDomain::Scene, 5};
+inline constexpr Core::ErrorCode CapacityExceeded{Core::ErrorDomain::Scene, 6};
+inline constexpr Core::ErrorCode CorruptHierarchy{Core::ErrorDomain::Scene, 7};
+inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::Scene, 8};
+inline constexpr Core::ErrorCode TransformOverflow{Core::ErrorDomain::Scene, 9};
+inline constexpr Core::ErrorCode UnsupportedTransformComposition{Core::ErrorDomain::Scene, 10};
+inline constexpr Core::ErrorCode ConstructionFailed{Core::ErrorDomain::Scene, 11};
+
+} // namespace SceneErrorCode
+
+} // namespace Tina::Scene

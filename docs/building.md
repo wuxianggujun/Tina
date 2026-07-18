@@ -52,19 +52,36 @@ out\build\windows-msvc\bin\Debug\tina_legacy_tests.exe
 
 该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A/M7-B1 与
 M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2/C1c-b3e 的 `tina_core`、`tina_platform`、
-`tina_task`、`tina_render`、`tina_runtime`、`tina_ui`，以及最新 SolidFill paint、Render DisplayList、D2 scoped
+`tina_task`、`tina_render`、`tina_runtime`、`tina_scene`、`tina_ui`，以及最新 SolidFill paint、Render DisplayList、D2 scoped
 `setBoxPaint()` 与
 `tina_ui_render_integration`、
 直接 GoogleTest 门禁与 Null 样例：
 
 ```powershell
 cmake --preset windows-msvc-vnext
-cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_sample_null
+cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_scene_tests tina_sample_null
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_render_integration_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
+```
+
+### M8-A Scene World/Transform
+
+`tina_scene_tests` 是独立 GoogleTest executable；当前 Windows MSVC Debug/Release 均19/19，覆盖固定容量
+`Scene::World`、generation/owner `EntityId`、Local/World Transform 层级传播、keep-world/keep-local、
+父销毁/显式子树销毁、PMR 回滚、宽/深树、overflow/shear、四元数与 owner-thread 读写。它当前只验证
+standalone Scene foundation；阶段末 command buffer、Camera2D、Sprite extraction、Asset 和 2D
+产品样例仍属于后续 M8/M10/M11 切片：
+
+```powershell
+cmake --build --preset windows-vnext-debug --target tina_scene_tests
+out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
+
+cmake --build --preset windows-vnext-release --target tina_scene_tests
+out\build\windows-msvc-vnext\bin\Release\tina_scene_tests.exe --gtest_color=yes
 ```
 
 当前最小图的唯一第三方测试依赖是 `tests` manifest feature 提供的 GoogleTest 1.17.0；

@@ -13,6 +13,7 @@
   `tina_ui_render_integration_tests`；启用
   `TINA_BUILD_PLATFORM_GLFW` 时另外生成 `tina_platform_glfw_tests`，启用
   `TINA_BUILD_RENDER_BGFX` 时另外生成 `tina_render_bgfx_tests`，不注册额外测试调度；
+  M8-A Scene World/Transform 另有独立 `tina_scene_tests`，不并入基础 `tina_tests`；
 - 构建完成后直接运行对应 GoogleTest executable，任一返回码非0即失败；
 - Visual Studio 多配置构建把测试运行时隔离到 `bin/<Config>`，禁止 Debug/Release GTest DLL 共用目录；
 - 同一 Visual Studio build tree 的 Debug/Release 构建串行执行，禁止并发启动两个 MSBuild 门禁；
@@ -25,8 +26,9 @@
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2，并含后续 root-scoped Game SDK routed Pointer listener、Button default action 与 dirty-subtree b4a | Debug C++23 | 208/208 | 本轮直接重跑 UI115/115、Runtime→UI60/60与Null样例300帧；UI→Render12/12、bgfx16/16、Desktop D3D11 Intel Iris Xe 1200帧截图检查与 GLFW25/25均为前序 D2 门禁，本轮未重跑；D2 Debug `RefCount is 3 (expected 0)` 为第三方 debug layer 提示 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2 Game SDK `setBoxPaint()` + 私有 bgfx SolidQuad UI Pass | Release C++23 | 207/207 | 上一轮 D2 独立 UI92/92、Runtime→UI53/53、UI→Render bridge12/12、Null样例300帧、bgfx16/16、Desktop D3D11 Intel Iris Xe 300帧；GLFW25/25为更早门禁；Release clean，本轮 listener extension 未重跑 Release |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2，并含后续 root-scoped Game SDK routed Pointer listener、Button default action 与 dirty-subtree b4a | Debug C++23 | 208/208 | 本轮直接重跑 UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19 与 Null样例300帧；bgfx16/16、Desktop D3D11 Intel Iris Xe 1200帧截图检查与 GLFW25/25均为前序 D2 门禁；D2 Debug `RefCount is 3 (expected 0)` 为第三方 debug layer 提示 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M8-A `tina_scene` World/Transform | Debug/Release C++23 | 19/19 | `tina_scene_tests` Debug 与 Release 均直接运行通过；覆盖 generation/owner、keep-world/keep-local、父销毁/显式子树销毁、非递归20,000层传播、宽树删除、固定容量/PMR回滚与稳定构造错误、overflow/shear、四元数和错线程读写；Linux Scene 图尚未运行 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext Null 至 dirty-subtree b4a + M8-A Scene | Release C++23 | 208/208 | 本轮直接重跑 UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19 与 Null样例300帧；GLFW/bgfx/Desktop 仍沿用前序 D2 产品证据 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug/Release C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过 |
 | Ubuntu 22.04 / GCC 13.4 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过；构建保留旧源码/EASTL 既有 warning |
 | Ubuntu 22.04 / GCC 13.4 | vNext 至 SolidFill committed paint、Render SolidQuad DisplayList 与 UI→Render bridge，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 205/205 | UI92/92、Runtime→UI46/46、UI→Render12/12、Null样例300帧；X11 GLFW23/23为前序门禁 |
@@ -36,17 +38,17 @@ GLFW adapter 和 bgfx adapter 测试是独立 executable，不能把多个进程
 
 | 构建图 | 基础 GoogleTest | GLFW 专项 GoogleTest | bgfx 专项 GoogleTest | 状态 |
 | --- | ---: | ---: | ---: | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 208/208 | 25/25（前序） | 16/16（前序） | 本轮直接重跑 UI115/115、Runtime→UI60/60与Null样例300帧；UI→Render12/12、Desktop样例1200帧截图检查与 adapter 样例均为前序 D2 门禁；D2 Debug D3D11 RefCount=3 已归因为第三方 debug layer 提示 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 207/207 | 25/25（前序） | 16/16 | 上一轮 D2 UI92/92、Runtime→UI53/53、UI→Render12/12、Null/Desktop样例300帧；GLFW样例300帧为更早门禁；Release clean，本轮 listener extension 未重跑 Release |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 208/208 | 25/25（前序） | 16/16（前序） | 本轮直接重跑 UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19 与 Null样例300帧；Desktop样例1200帧截图检查与 adapter 样例均为前序 D2 门禁；D2 Debug D3D11 RefCount=3 已归因为第三方 debug layer 提示 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 208/208 | 25/25（前序） | 16/16 | 本轮直接重跑 UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19 与 Null样例300帧；GLFW/bgfx/Desktop 仍沿用前序 D2 产品证据 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 production-style | 测试 target 关闭 | 不构建 | 不构建 | 更早门禁：`TINA_BUILD_TESTING=OFF`，GLFW样例300帧返回0 |
 | Ubuntu 22.04 / GCC 13.4 vNext Null；前序 GLFW X11 | 205/205 | 23/23（历史 C1c-b3a） | 未运行 | 最新 UI92/92、Runtime→UI46/46、UI→Render12/12与Null样例300帧；adapter样例保留历史门禁 |
 | Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 vNext Null + ASan/UBSan/LSan；前序 GLFW X11 | 205/205 | 23/23（历史 C1c-b3a） | 未运行 | 最新 UI92/92、Runtime→UI46/46、UI→Render12/12与Null样例300帧，零 sanitizer 诊断；C1c-b3a GLFW仅精确抑制第三方 `_XimOpenIM`，13次/5304 B |
 | Ubuntu 22.04 / GCC 13.4 + GLFW X11/Wayland 双后端 | 183/183 | 22/22 | 未运行 | 通过；嵌套 Weston 9 强制 Wayland 与 Xvfb 强制 X11 均通过基础、专项与300帧样例 |
 | Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11/Wayland 双后端 + ASan/UBSan/LSan | 183/183 | 22/22 | 未运行 | 通过；基础测试无 suppression且Null样例300帧；Wayland专项与样例 suppression 命中0，X11专项命中12次/4896 B、样例命中1次/408 B |
 
-当前最新 dirty-subtree b4a 增量门禁在 MSVC 19.50 / CMake 4.2.3 Windows Debug 下直接通过基础208/208、
-UI115/115、Runtime→UI60/60，并运行 Null sample 300帧，State exit/Application shutdown 各1次。
-本轮没有运行 Release、UI→Render、GLFW、bgfx 或 Desktop。
+当前最新 dirty-subtree b4a + M8-A Scene 门禁在 MSVC 19.50 / CMake 4.2.3 Windows Debug/Release 下直接通过基础208/208、
+UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19，并运行 Null sample 300帧，State exit/Application shutdown 各1次。
+本轮没有运行 GLFW、bgfx 或 Desktop；这些仍引用前序 D2 产品证据。
 上一轮完整 Windows D2 门禁仍是 Debug/Release 基础207/207、UI92/92、Runtime→UI53/53、
 UI→Render12/12与Null样例300帧；bgfx专项16/16和 D3D11 Intel Iris Xe Desktop样例也均通过，Debug
 1200帧含截图检查，Release 300帧 clean，Debug RefCount=3 为已记录第三方 debug layer 提示；
@@ -64,9 +66,8 @@ M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、committed hit snapshot、纯 point 
 b3d2 root-scoped child 创建、b3e listener claim 请求，以及最新11项 SolidFill paint 使用独立
 `tina_ui_tests`。后续 listener extension 新增 root-scoped/cross-root 原子注册、callback move 释放 root
 回滚和 callback move 销毁 Context death test。Button default action 切片新增14项后达到109/109；dirty-subtree
-b4a 再新增6项 reuse/回退测试，当前 Windows 11 / MSVC 19.50 Debug 为115/115；上一轮
-Windows Release、Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均为92/92，
-Clang 无 sanitizer 诊断，本轮未重跑。初次 GCC 暴露的 routed-pointer callback `requires`
+b4a 再新增6项 reuse/回退测试，当前 Windows 11 / MSVC 19.50 Debug/Release 均为115/115；Linux GCC 13.4
+与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 仍为92/92，Clang 无 sanitizer 诊断，本轮未重跑 Linux。初次 GCC 暴露的 routed-pointer callback `requires`
 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
 M7-C1c-b3b/b3c 使用另一个独立 `tina_runtime_ui_tests`。前12项 producer 用例覆盖 null Context canonical `None`、raw ordinal
 hole、63/64 bit 边界、Button/Wheel 事件时位置、reset/cancel/非 Pointer 不路由、不伪造 Up、该历史切片 claims 为
@@ -80,6 +81,12 @@ allocation count 不增长。supplied `memory_resource` 是私有借用依赖，
 C1c-b3c 基线在 Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug/Release、Linux GCC 13.4 Null 与
 Clang 22.1.8 + libstdc++15.2 Null sanitizer 均已直接运行20/20并返回0；Clang 无 sanitizer 诊断。
 该独立 executable 不能用基础 `tina_tests` 或 `tina_ui_tests` 数量代替。
+
+M8-A 使用独立 `tina_scene_tests`，当前 19 项覆盖：World 固定容量与 PMR 错误回滚/稳定构造错误、Entity generation/owner/stale
+校验、keep-world/keep-local reparent、父销毁与显式子树销毁、Local/World Transform 组合、非递归深树与宽树
+删除、非有限/零 quaternion、四元数归一化、overflow/shear 拒绝和 owner-thread 读写。该 target 只链接
+`Tina::Scene`/`Tina::Core`，不依赖 EnTT、GLM、GLFW 或 bgfx；
+它证明 Scene 基础生命周期，不证明 Camera2D、Sprite extraction、RenderScene、Asset 或产品 2D 样例。
 
 M7-C1c-b3d1 在同一测试拓扑中新增三组契约：focused `UIContextCapacityConfig` validator 与
 `EngineConfig` 在任何 factory 前拒绝非法容量；primary owner 确实使用配置容量；layout coordinator
@@ -117,7 +124,7 @@ Windows Debug/Release 的完整 D2 门禁为53/53。
 有效，以及 cross-root 注册 sticky/no-slot；基础 `tina_tests` 另增1项 EngineHost E2E，验证 listener
 在 ActionMapper 前发布 claim、claim-only 路径不产生 Gameplay transition，并在 `onExit()` 先释放 token。
 Button default action 后续在同一拓扑增加 primary Pointer activation、cancel/reset 与 facade 测试。
-最新 Windows Debug 为 Runtime→UI60/60、基础208/208；Release/Linux 未在本轮重跑。
+最新 Windows Debug/Release 均为 Runtime→UI60/60、基础208/208；Linux 未在本轮重跑。
 X11 在隔离 X server 下运行。GCC Wayland 门禁由 Xvfb 托载
 Weston 9 `x11-backend` 并提供 `wl_seat`；移除 `DISPLAY` 后断言
 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND`，再运行专项测试和300帧样例。同一双后端产物
@@ -438,8 +445,8 @@ out\build\windows-msvc-vnext\bin\Release\tina_runtime_ui_tests.exe --gtest_color
 C1c-b3c 历史记录为 Windows MSVC 19.50 Debug/Release 均20/20；b3d1 在 Windows Debug/Release、
 Linux GCC 与 Clang sanitizer 均为29/29；b3d2 在 Windows Debug/Release、Linux GCC 与 Clang
 sanitizer 均为42/42；b3e 在 Windows Debug/Release、Linux GCC 与 Clang sanitizer 均为46/46。
-完整 D2 Windows Debug/Release 为53/53；listener extension 的最新 Windows Debug 为55/55。
-Windows Release 与 Linux 未在本轮重跑；Linux 仍保留 b3e 46/46，Clang 无诊断。这个 executable 必须与 `tina_ui_tests`、基础 `tina_tests`
+完整 D2 Windows Debug/Release 为53/53；listener extension 与 Button default action 的最新 Windows Debug/Release 均为60/60。
+Linux 未在本轮重跑，仍保留 b3e 46/46，Clang 无诊断。这个 executable 必须与 `tina_ui_tests`、基础 `tina_tests`
 分开报告；它不通过 CTest 调度。
 
 Windows GLFW Platform 的独立直接门禁为：
@@ -476,8 +483,8 @@ out\build\windows-msvc-vnext-bgfx\bin\Release\tina_render_bgfx_tests.exe --gtest
 out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
 ```
 
-当前 dirty-subtree b4a 的 Windows Debug 直接结果是基础208/208、UI115/115、Runtime→UI60/60与Null样例
-300帧；本轮未重跑 Release、UI→Render、bgfx 或 Desktop。上一轮完整 Windows D2 Debug/Release 结果是基础207/207、UI92/92、Runtime→UI53/53、UI→Render12/12、
+当前 dirty-subtree b4a + M8-A Scene 的 Windows Debug/Release 直接结果是基础208/208、UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19与Null样例
+300帧；本轮未重跑 bgfx 或 Desktop。上一轮完整 Windows D2 Debug/Release 结果是基础207/207、UI92/92、Runtime→UI53/53、UI→Render12/12、
 Null样例300帧、bgfx专项16/16与真实 D3D11 Intel Iris Xe Desktop样例；Debug 1200帧并做截图像素检查，
 Release 300帧输出 clean status ok。本轮 Debug D3D11 观察到 `RefCount is 3 (expected 0)` 的已记录第三方 debug layer 提示。
 GLFW专项25/25与GLFW样例300帧保留前序门禁；前序 C1c-b3a Debug

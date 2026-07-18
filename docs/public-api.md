@@ -62,7 +62,8 @@ borrow 放入 `RenderFrame`，D1 已由私有 bgfx backend 消费 SolidQuad，D2
 暴露 `setBoxPaint()` 并跑通 Desktop 4-panel 可见样例；后续 Button default action 切片又暴露
 `setButtonAction()`/`clearButtonAction()`/`isButtonPressed()` 并接入 primary Pointer activation。当前仍没有
 owning frame packet、FramePin、Text/Glyph、Label 文本、Button Keyboard/Gamepad activation 或完整 Widget facade。表中
-World/Asset/UI Widget、`GameStateCommands`、typed render handle/descriptor 和 Pass Scheduler 均未实现。
+Asset/UI Widget、`GameStateCommands`、typed render handle/descriptor 和 Pass Scheduler 均未实现；M8-A 的
+`Tina::Scene::World`、`EntityId` 与 Transform standalone 边界见下文，尚未接入 Runtime World capability。
 
 完整 Game SDK 不提供 RenderDevice、GPU resource handle、native window/surface 或第三方 factory。
 已落地的 `tina_bootstrap_desktop` 提供只使用 Tina 类型的 `Desktop::CreateEngine(config)`，让普通
@@ -889,6 +890,33 @@ snapshot/deferred publish/runtime handoff；M7-B2 已建立私有 `tina_render_b
 300帧真实 backend 冒烟。完整 factory
 签名与 Surface state machine 见 [ADR 0020](adr/0020-window-surface-handoff.md)。
 
+## `Scene::World`：M8-A 已实现的最小边界
+
+`Tina::Scene` 是独立 C++23 module，不是 Legacy `src/ecs/World` facade。当前公开入口刻意保持小：
+
+```cpp
+auto world = Scene::World::Create(Scene::WorldConfig{.entityCapacity = 4096});
+Core::Result<Scene::EntityId> createEntity(Scene::LocalTransform local = {});
+Core::Status setParent(
+    Scene::EntityId child,
+    std::optional<Scene::EntityId> parent,
+    Scene::ReparentMode mode = Scene::ReparentMode::KeepWorld);
+Core::Status setLocalTransform(Scene::EntityId entity, Scene::LocalTransform local);
+Core::Status updateWorldTransforms();
+Core::Status destroyEntity(Scene::EntityId entity);
+Core::Status destroySubtree(Scene::EntityId entity);
+```
+
+`World` 是 move-only owner，Create 时一次性为 entity slots、live registry、遍历/销毁 scratch 和 visited
+bits 分配固定容量 PMR storage。所有 mutation、读查询和 transform publication 只能在 owner thread 执行；
+move 构造把 owner 转移到目标线程。`setParent()` 默认 `KeepWorld`，也可显式 `KeepLocal`；父实体的
+`destroyEntity()` 默认把直接子节点提升到 root 并保持 world，递归删除必须调用 `destroySubtree()`。
+跨 World、stale generation、循环 reparent、非有限/溢出 Transform、不可由 TRS 表达的非均匀 scale+rotation
+组合返回 Scene domain 的结构化错误。层级编辑立即改变 owner-thread hierarchy，`updateWorldTransforms()`
+是显式的 phase-end publication barrier；失败不会发布部分 world snapshot。阶段 command buffer、generic
+component query、EnTT storage、Camera/Sprite 与 Runtime Phase Context capability 尚未进入本 API。公共头
+不包含 EnTT、GLM、GLFW 或 bgfx。
+
 ## Handle、借用与 API 可见性
 
 下表同时列出 M6-A 已实现的最小接口和后续已冻结目标，不能把“目标”行理解成当前已有 API：
@@ -909,7 +937,9 @@ snapshot/deferred publish/runtime handoff；M7-B2 已建立私有 `tina_render_b
 | `Tina::UI::UIPointerRouteResult` | M7-C1c-b2 synthetic route；b3e 增加 claim request | UI public | owning value；描述单条 normalized pointer input 的 route/consume 结果与固定大小 Pointer Button claim request | invalid input / route reentrancy / capacity exceeded；不是 Runtime consumption/claim view，Runtime 仍须按最终 held snapshot 过滤 |
 | `Tina::UI::UIContextCapacityConfig` | M7-C1c-b3d1 已实现 focused config/validator | UI public / EngineConfig value | Create 前复制纯值；Runtime Context owner 使用已验证配置 | invalid node/root/derived/listener capacity；factory 前拒绝 |
 | `PrimaryWindowUIDisplayListCapacityConfig` | D0 已实现 | EngineConfig value / Runtime private | Create 前复制纯值；配置 fixed PMR builder 的 command/clip/batch 容量 | command=0、clip>command、batch=0或batch>command、超过最大值；factory 前拒绝 |
-| `EntityId` | M8 目标 | Game SDK | World registry generation + owner | invalid/stale/wrong owner |
+| `Tina::Scene::EntityId` | M8-A 已实现 | Scene public / 后续 Game SDK | `Scene::World` registry generation + owner；slot 复用递增 generation | InvalidEntity/StaleEntity/WrongWorld |
+| `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |
+| `LocalTransform` / `WorldTransform` | M8-A 已实现 | Scene public | World-owned POD；pointer query 只在 owner thread、下一次对应 mutation、entity destroy 或 World 析构前有效；world publication 由 `updateWorldTransforms()` barrier 完成 | non-finite/overflow/zero quaternion/unsupported TRS composition |
 | `AssetHandle<T>` | M10 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
 | `AssetLease<T>` | M10 目标 | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
 | Render typed handle | M7/M9 目标 | Engine Module SPI | RenderDevice registry 到 retire | invalid/stale/wrong device |
@@ -919,7 +949,7 @@ snapshot/deferred publish/runtime handoff；M7-B2 已建立私有 `tina_render_b
 
 M6-A 已实现的通用 `GenerationPool` 使用强类型 Tag，并在所有构建中校验非零 registry owner token、slot index
 和32位 generation；owner token 由当前单一 Core 链接镜像自动单调分配，registry 销毁后也不复用。
-后续 Entity/UI/Render/Asset handle 必须复用该契约，而不是各自重新发明弱校验 ID。
+当前 `Scene::EntityId` 与 `UINodeId` 已复用该契约；后续 Render/Asset handle 也必须复用，而不是各自重新发明弱校验 ID。
 若未来插件各自静态链接 Core，必须改为 EngineHost-owned/单一导出 allocator。`UINodeId` 还在 Game SDK
 语义上显式编码并校验 owner `WindowId`。Debug 可再保存更宽的 Engine/registry cookie 立即诊断
 跨 Host/World/Window/Device 使用，但不承担 Release 正确性。Game component 保存 AssetHandle 和
@@ -991,7 +1021,6 @@ EngineHost 顺序接线，M7-C1c-b3d1 只补齐容量配置与 Runtime-private l
 startup bind 与 root-scoped Game SDK UI facade；b3e 只补齐 held primary Pointer Button claim bridge。
 Button default action 只补齐 primary Pointer 窄 pressed/activation 与 retained action property。
 SolidFill paint、Render builder、integration bridge、D0 Runtime submit-call-local handoff、D1 bgfx pass 与
-D2 visible panels 也不扩大到完整 Widget、owning packet、Text/Glyph 或产品 UI 结论。Windows Debug 本轮
-Button default action 前序切片已通过基础208/208、UI109/109、Runtime→UI60/60与 Null 300帧；dirty-subtree b4a
-又通过 UI115/115（含6项 reuse/回退测试）；Windows Release 的
-D2 独立 Runtime→UI 门禁为53/53，Linux GCC 与 Clang sanitizer 的 b3e 独立 Runtime→UI 门禁仍为46/46。
+D2 visible panels 也不扩大到完整 Widget、owning packet、Text/Glyph 或产品 UI 结论。Windows Debug/Release 本轮
+均通过基础208/208、Runtime→UI60/60与 Null 300帧；dirty-subtree b4a 的 UI 测试均为115/115
+（含6项 reuse/回退测试）。Linux GCC 与 Clang sanitizer 的 b3e 独立 Runtime→UI 门禁仍为46/46。

@@ -131,5 +131,6 @@ if(TINA_BUILD_RENDER_BGFX)
 endif()
 
 add_subdirectory(vnext/ui)
+add_subdirectory(vnext/scene)
 add_subdirectory(vnext/runtime)
 add_subdirectory(ui_render)

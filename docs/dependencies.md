@@ -20,7 +20,7 @@
 | --- | --- | --- | --- | --- |
 | GLFW | Windows/Linux Window、键鼠、标准 Gamepad | vcpkg，`tina_platform_glfw` | 只在 platform backend | 保留；不使用 SDL/SDL3 |
 | bgfx/bx/bimg/shaderc | 唯一真实 Render backend 与离线 shader | 固定 submodule commit | 只在 render_bgfx/tool | 保留 |
-| EnTT | ECS 内部存储 | vcpkg | 只在 `tina_scene` 实现 | 保留 |
+| EnTT | 后续 Scene component storage | vcpkg | 仅允许在未来 `tina_scene` 实现层 PRIVATE 使用 | 保留；M8-A standalone World 当前不接入 |
 | FreeType | 字形 raster；Glyph Atlas 编排仍属于 Tina UI | vcpkg | 只在 `tina_ui_freetype` adapter | 保留 |
 | miniaudio | 唯一真实 Audio backend | vcpkg | 只在 `tina_audio_miniaudio` adapter | 保留；不使用 SDL_mixer |
 | xxHash | ContentHash、Cook cache、可选 StringId | vcpkg/private adapter | `tina_core` 私有实现 | 保留，不承担安全签名 |

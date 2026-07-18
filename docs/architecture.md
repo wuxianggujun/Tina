@@ -4,7 +4,7 @@
 
 Tina 当前处于 Legacy 产品与 vNext 垂直切片并存的迁移期。Legacy 仍以单个游戏可执行文件为主，
 源码按 Core、Engine、Renderer、UI、ECS 和 Game 组织；vNext 已建立独立的 `tina_core`、
-`tina_platform`、`tina_task`、`tina_render`、`tina_runtime` 五个基础 C++23 target，以及可选的
+`tina_platform`、`tina_task`、`tina_render`、`tina_runtime`、`tina_scene` 六个基础 C++23 target，以及可选的
 `tina_platform_glfw` adapter、私有 `tina_render_bgfx` backend、Desktop bootstrap、
 M7-C1b/M7-C1c-a/C1c-b1/C1c-b2 `tina_ui` tree/layout/committed-hit/point-query/synthetic-route foundation，
 以及 M7-C1c-b3b/b3c Runtime-private UI route-result producer、primary-window `UIContext` owner 与
@@ -77,6 +77,13 @@ activation、Disabled/theme 视觉、Image/Texture、Key/Gamepad/axis claim、�
 Focus/Modal、完整 dirty-range pruning 与 nested clip 仍未完成；当前已具备 clean-subtree
 Measure/Arrange reuse，但 hit/paint/layout-order 仍可能线性遍历。
 
+M8-A 已新增可独立构建的 `tina_scene`：`Scene::World` 使用固定容量 owner/generation entity
+registry，提供 `EntityId`、Local/World Transform、非递归层级传播、keep-world/keep-local reparent、
+父销毁提升、显式子树销毁与循环诊断。World 使用 dense live index 和两阶段 scratch publication，
+对 Transform 溢出、四元数异常及当前 TRS 无法表达的 shear 返回结构化错误；读写均限制在 owner thread。
+它当前只依赖 `Tina::Core`，不链接 EnTT/GLM/GLFW/bgfx；EnTT component storage、阶段末 command
+buffer、Camera2D、Sprite extraction 与 2D 产品样例仍未实现。
+
 最新窄 UI 切片已完成实现：Button 默认 `Targetable`，只增加
 `PrimaryPointerId + PointerButton::Primary` 的 armed/pressed/Up activation、retained action callback、
 `preventDefaultAction()` 和 cancel/reset 状态清理。该能力仍留在 `tina_ui` 与 Runtime-private input
@@ -137,8 +144,9 @@ startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 r
 | vNext D1 bgfx SolidQuad UI pass | 已完成私有 backend 消费 Runtime DisplayList | `tina_render_bgfx` 私有创建 SolidQuad shader program，submit 前先预检 commands/batches、transient VB/IB 容量和 index32 能力；提交时使用 top-left ortho、scissor clip、premultiplied alpha 与 batch index range。bgfx/bx 类型不进入 Game SDK、Runtime 或普通 Render public header；Windows Debug/Release bgfx 专项16/16通过 |
 | vNext D2 Game SDK box-paint visible sample | 已完成 root-scoped paint setter 与 Desktop 4-panel smoke | `PrimaryWindowUITreeUpdater::setBoxPaint()` 通过 phase epoch、owner thread、root/subtree 与 sticky error 门禁后委派到 `UI::UITreeUpdater::setBoxPaint()`；`tina_sample_desktop` 在 retained tree 中创建4个 SolidFill panel，并通过真实 D3D11 bgfx backend 可见提交。Windows Debug 1200帧、Release 300帧通过；Linux D1/D2 尚未重跑 |
 | vNext Game SDK routed Pointer listener facade | 已完成 root-scoped 注册与 Runtime 端到端闭环 | `PrimaryWindowUITreeUpdater::addRoutedPointerListener()` 经 phase epoch、owner thread、root/subtree 校验后委派到 `UI::UITreeUpdater`；cross-root 失败 sticky 且不占 slot/high-water，callback move 重入释放 root 会事务回滚。token 可跨 phase 保存但不保活 Context/root，State 在 `onExit()` 先 reset token。EngineHost 证明 claim 在 ActionMapper 前生效；本行只代表低层 listener facade，不等于 Focus/Capture/Modal 或完整 Widget |
+| vNext M8-A Scene World/Transform | 已完成最小基础切片 | `Tina::Scene`/`tina_scene` 提供固定容量 owner/generation `EntityId`、Local/World Transform、非递归层级传播、默认 keep-world/显式 keep-local reparent、父销毁提升、显式子树销毁、dense live index 与两阶段 publication；循环/跨 World/stale/非有限/溢出/shear/构造异常诊断；Windows MSVC Debug/Release `tina_scene_tests` 均19/19。当前不链接 EnTT/GLM，阶段 command buffer、Camera2D、Sprite extraction 与 2D 样例后置 |
 | vNext GLFW 边界 | 已形成可运行切片 | `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
-| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene/Asset/Audio、owning UI packet/pin、Text/Glyph/完整 Widget 与 submission drain 仍按后续切片实施；Desktop SolidFill 可见样例、standalone UI/Render/bridge foundation、Runtime-private route/layout/startup/display borrow 接线、Button primary-pointer default action 和私有 bgfx SolidQuad pass 不代表这些路径完成 |
+| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene→Runtime/extraction、Asset/Audio、owning UI packet/pin、Text/Glyph/完整 Widget 与 submission drain 仍按后续切片实施；M8-A standalone World/Transform、Desktop SolidFill 可见样例、standalone UI/Render/bridge foundation、Runtime-private route/layout/startup/display borrow 接线、Button primary-pointer default action 和私有 bgfx SolidQuad pass 不代表完整产品路径完成 |
 
 因此不能用“删除旧 `src`”作为下一步。正确顺序是：建立新边界和测试 → 迁移调用点 → 确认旧接口零引用 → 通过 2D/UI/3D 验收 → 在独立提交中删除旧实现。
 

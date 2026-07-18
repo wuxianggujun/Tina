@@ -26,7 +26,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | 窗口与基础输入 | GLFW；不使用 SDL/SDL3 |
 | Windows IME | IMM32，只存在于 Windows 平台适配层 |
 | 渲染 | bgfx 是首个且唯一真实后端；公共层不暴露 bgfx 类型 |
-| ECS | EnTT 只作为 `tina_scene` 内部存储 |
+| ECS | EnTT 只允许作为后续 `tina_scene` component storage 的 PRIVATE 实现；M8-A standalone World 当前仅依赖 Core |
 | 容器 | 不依赖 EASTL；默认标准库与 `std::pmr`，只自研少量引擎专用固定容量结构 |
 | Hash | xxHash 作为私有实现保留，不进入公共类型，不承担安全校验 |
 | Profiling | Tina-owned Trace/Metrics 前端；Tracy 是可选 Profile 后端，正式 benchmark 默认关闭 |
@@ -47,7 +47,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | `tina_platform_glfw` | 最终承载 GLFW Window/Input/Gamepad、DPI、Windows IMM32；当前已完成 Window/Keyboard/Pointer/Focus/resize/close/committed text | core/platform、GLFW、OS API | Scene、Asset、UI Widget、bgfx 类型 |
 | `tina_task` | 有界任务队列、协作取消、后台工作与主线程 completion | `tina_core`、`tina_platform` 的线程命名能力 | Asset 类型、渲染命令、强杀线程 |
 | `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、GameStateStack、RenderFramePacket/pool；当前含 M7-C1c-b3b/b3c/b3d1/b3d2/b3e private UI route producer、primary-window Context owner、容量/layout coordinator、startup seed、scoped Game SDK UI facade 与 held Pointer claim bridge | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
-| `tina_scene` | World、generation `EntityId`、Transform、Camera、render components 与资产解析 facade | core、asset 公共接口、render descriptors、EnTT 内部实现 | GLFW 输入、TileMap 玩法、bgfx 类型 |
+| `tina_scene` | 当前 M8-A 的固定容量 World、generation `EntityId`、Local/World Transform、默认 keep-world/显式 keep-local、父销毁提升/显式子树销毁与两阶段 publication；后续扩展 Camera、render components 与资产解析 facade | 当前只依赖 core；后续 asset 公共接口、render descriptors，EnTT 仅 PRIVATE component storage | GLFW 输入、TileMap 玩法、bgfx 类型 |
 | `tina_asset` | Asset 状态机、依赖、取消、CPU completion 与 GPU upload 协议 | core/task、render 接口、asset_format | 直接解析源 glTF、具体 bgfx 调用 |
 | `tina_asset_format` | Runtime/Cooker 共享的 Cooked header、schema、类型、依赖和 hash 编解码 | core | Asset registry、窗口、GPU、源格式 parser |
 | `tina_render` | typed handle、资源描述、RenderScene/DisplayList view、RenderSurfaceState、FramePinSink、Pass Scheduler | core | bgfx 公开类型、Scene registry、平台窗口细节、Asset/UI/Platform concrete pin |
@@ -368,13 +368,15 @@ scale，再按默认250 ms上限得到 `acceptedRealDelta`，缩放为 `updateDe
 Platform、UI、Asset、Audio 和必要 Render 仍推进。最小化窗口跳过无效 surface 的 Render/
 Present 并使用平台等待避免 busy loop，但继续处理关闭和异步完成。
 
-## Scene 与 Render Scene Extraction
+## Scene 与 Render Scene Extraction（完整目标契约；M8-A standalone 例外）
 
-`World` 对外只暴露 Tina 的 `EntityId { owner, index, generation }`、组件命令和查询接口，EnTT
-registry 只存在于实现文件中。
+完整目标中，`World` 对外只暴露 Tina 的 `EntityId { owner, index, generation }`、组件命令和查询接口，EnTT
+registry 只存在于实现文件中。当前 M8-A standalone `World` 还没有阶段末 command buffer 或 component
+storage：层级 mutation 在 owner thread 立即校验/提交，`updateWorldTransforms()` 是两阶段 World snapshot
+publication barrier；Runtime 接线前不得把它描述成完整 Scene/Render extraction。
 
 统一空间约定：右手坐标系、Y-up、-Z forward、单位米，2D 位于 XY 平面。Transform 至少
-包含 `LocalTransform`、`Parent` 和缓存的 `WorldTransform`；层级变更必须检测循环并通过
+包含 `LocalTransform`、`Parent` 和缓存的 `WorldTransform`；完整 Runtime 接入后层级变更必须检测循环并通过
 阶段末 command commit 生效。
 
 Transform 命令采用确定语义：reparent 默认保持 WorldTransform 并重新计算 local，调用方也可
@@ -606,7 +608,7 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
    reuse 与父约束/viewport/Collapsed/候选失败回退。后续继续推进 Key/Gamepad/axis claims、
    focus/capture/widget、Button Keyboard/Gamepad activation、完整 dirty-range pruning、Label/Button/Modal +
    FreeType、owning Runtime packet/FramePin、IMM32/Gamepad/DPI 门禁；
-5. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；
+5. **Scene/2D**：M8-A 已完成 generation Entity、固定容量 World、Local/World Transform、循环诊断与非递归传播；后续补阶段末 command buffer、Camera、Sprite extraction 和 2D 样例；
 6. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D
    样例；
 7. **Asset**：双阶段队列、Cooked Manifest、纹理和静态 glTF 从 cooker 进入 2D/3D；

@@ -366,8 +366,17 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 
 ## M8 Scene 与 2D 垂直切片
 
-- EnTT 只作为内部存储，公共接口只暴露 generation `EntityId`；
-- 建立 Local/Parent/World Transform、层级循环检测和阶段末 command commit；
+**M8-A 已完成 Scene World/Transform 基础（Windows MSVC 2026 Debug/Release `tina_scene_tests` 均19/19）：**
+新增 `Tina::Scene` target、owner/generation `EntityId`、固定容量 `Scene::World`、POD
+`LocalTransform`/`WorldTransform`、owner-thread 读写、非递归层级传播、keep-world/keep-local reparent、
+父销毁提升、显式子树销毁、dense live index 和两阶段 publication；循环/跨 World/stale/非有限/溢出/shear
+诊断。当前 M8-A 的实体 slot 使用 `Core::GenerationPool`，
+不把 EnTT 带入 vNext Null；EnTT 仍只允许作为后续 Scene component storage 的 PRIVATE 实现。
+层级编辑在 owner thread 立即校验/提交，`updateWorldTransforms()` 是显式 world-transform barrier；
+阶段末 command buffer 仍是后续切片，不把本轮 API 误写成完整 State/World command pipeline。
+
+- EnTT 只作为内部 component storage，公共接口只暴露 generation `EntityId`；
+- 完整阶段末 command commit、Camera2D、Sprite extraction 与 chunk culling 仍待后续 M8 切片；
 - 建立 Camera2D、SpriteRenderer2D、稳定 layer/order、只读 Render Scene Extraction 和 chunk culling
   接口；基础样例使用内置 Cooked Sprite fixture；
 - 定义 TileMap 为 gameplay feature、`IGridCollisionProvider` 和 Tile AABB/Box2D 分工；正式

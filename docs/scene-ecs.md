@@ -1,6 +1,6 @@
 # Scene 与 ECS
 
-## 当前 Scene 栈
+## Legacy 当前 Scene 栈
 
 `SceneManager` 持有 Scene 所有权，只有栈顶 Scene 参与 fixed update、variable update 和 render。它同时负责 `onEnter`、`onExit`、`onPause`、`onResume` 生命周期。
 
@@ -27,7 +27,7 @@ vNext 迁移时旧 Scene 转为 `IGameState`，不照搬二值 `onPause/onResume
 Fixed Update/Frame Update/Gameplay Input/UI Input/Render 是否向下传播；push/replace 使用事务 enter，失败保留旧栈，
 pop/replace 的 exit `noexcept` 且恰好一次。旧 pending operation 只有在这些门禁齐全后才删除。
 
-## 当前 World/ECS
+## Legacy 当前 World/ECS
 
 `World` 使用 EnTT 保存角色组件并持有输入、AI、移动、碰撞和渲染系统。当前实现仍存在明显的边界泄漏：
 
@@ -73,6 +73,12 @@ IGameState UI model -> retained UI tree -> DisplayList+
 - Render Scene Extraction 把连续 `RenderItem` 写入当前帧 Render Arena，Renderer 不回查 World；
 - `EntityId` 的 generation 在任务开始和提交两端校验，迟到任务不能修改复用后的 slot；
 - 只有 profiling 证明系统工作量覆盖调度成本时才并行，小集合继续直接 for-loop。
+
+M8-A 已将 identity/transform 基础落为独立 `tina_scene`。当前 standalone `World` 仍在 owner thread
+立即修改层级，使用 `updateWorldTransforms()` 做两阶段 scratch 计算和成功后发布；`setParent()` 默认
+`KeepWorld`，`KeepLocal` 必须显式指定，`destroyEntity()` 默认提升直接子节点，`destroySubtree()` 才递归
+删除。固定容量 dense live index 让子树删除不依赖逐实体线性查找。因为当前 `WorldTransform` 仍是
+position/quaternion/scale 三元组，非均匀父 scale 与旋转子节点造成的 shear 会返回明确诊断，不能静默近似。
 
 内存容量、零稳态分配和基准工作负载见 [性能预算与内存系统](performance-memory.md)；任务
 barrier、取消和确定性合并见 [Task System](task-system.md)。

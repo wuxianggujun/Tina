@@ -24,12 +24,18 @@ creates a `GLFW_NO_API` window, normalizes keyboard/pointer/focus/resize/close/c
 into the same bounded `PlatformFrameView`, and hands a move-only window surface lease to the render
 composition without exposing native or bgfx types. `Tina::Desktop::CreateEngine(config)` now privately
 composes `SteadyClock + GLFW WindowSurface + DisabledTaskSystem + bgfx`, and `tina_sample_desktop`
-defaults to 300 frames on the real render-backend path. The latest listener-only Windows Debug gate on
-VS 2026/MSVC 19.50/CMake 4.2.3 directly passes `tina_tests` 208/208, `tina_ui_tests` 95/95, and
-`tina_runtime_ui_tests` 55/55, plus a 300-frame Null sample with one State exit and one Application shutdown.
-The last full D2 Windows Debug/Release product gate remains the separately
+defaults to 300 frames on the real render-backend path. The latest Windows Debug gate on
+VS 2026/MSVC 19.50/CMake 4.2.3 directly passes `tina_tests` 208/208, `tina_ui_tests` 115/115,
+`tina_runtime_ui_tests` 60/60, and the new M8-A `tina_scene_tests` 19/19, plus a 300-frame Null sample
+with one State exit and one Application shutdown. M8-A covers the fixed-capacity Scene World,
+generation EntityId, transactional Local/World Transform publication, keep-world/keep-local hierarchy edits,
+parent/subtree destruction, overflow/shear diagnostics, and linear wide-tree cleanup; Camera2D, Sprite extraction,
+Asset and product samples remain later slices.
+The latest M8-A Windows MSVC Debug/Release Null gates both pass 208/208, 115/115, 60/60, 12/12 and
+Scene 19/19, plus a 300-frame Null sample; this slice did not re-run Linux, GLFW, bgfx, or visible-product
+gates. The last full D2 Windows Debug/Release product gate remains the separately
 recorded 207/92/53 matrix, UI-to-Render 12/12, bgfx 16/16, Null 300-frame run, and visible D3D11 Desktop
-run; this listener slice did not re-run Release, Linux, GLFW, bgfx, or visible-product gates. The latest
+run. The latest
 Linux Null evidence remains the 205/92/46/12 matrix and a 300-frame Null sample on GCC 13.4 and on
 Clang 22.1.8 with libstdc++ 15.2 under ASan/UBSan/LSan with no diagnostic. The first GCC UI pass
 exposed a `requires` name-visibility issue in the routed-pointer callback constraint; it is fixed.
