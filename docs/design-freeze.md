@@ -112,8 +112,10 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
   Pointer listener 请求当前 window/pointer 的 button claim；producer 只发布帧末仍 held 的 primary
   Pointer Button，并以 Create 期双 PMR buffer 去重。Key/Gamepad/axis claim producer 仍未实现，
   continuous claim 的 Runtime consumer 上限64不泄漏到 game-facing Action Map；
-- World RenderScene 与 UI DisplayList 分别冻结，统一组合为 RenderFrame view；Runtime-private owning
-  RenderFramePacket 持有 FrameArena/资源 lease/Atlas/surface pin/submit ticket 到 backend
+- World RenderScene 与 UI DisplayList 分别冻结，统一组合为 RenderFrame view；D0 已让
+  `RenderFrame` 携带 submit-call-local borrowed `primaryWindowUIDisplayList`，backend 只能在
+  `submitFrame()` 调用内消费/复制/编码并禁止保留；Runtime-private owning RenderFramePacket
+  继续作为后续目标，届时才持有 FrameArena/资源 lease/Atlas/surface pin/submit ticket 到 backend
   completion；Renderer 不访问 EnTT；
 - Pass 固定从 Opaque3D、Sprite2D、UI、Present 起步；
 - Asset 使用弱 Handle、强 Lease、UploadTicket/retirement ledger，以及 IO → CPU Decode → Main
@@ -172,7 +174,11 @@ axis-aligned clip interning、相邻兼容 batching、paint checksum、剪枝和
 Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Linux Clang 22 sanitizer 的12项直接 GoogleTest
 均通过，Clang 无诊断。持久 Pointer Capture、Focus/Modal、
 Button default action、Image/Text/Glyph PaintCache、Runtime `RenderFramePacket`、bgfx UI Pass、
-dirty subtree pruning 与 nested clip 尚未实现，不能把最小 SolidFill 数据管线误写成可见 UI。
+dirty subtree pruning 与 nested clip 尚未实现，不能把最小 SolidFill 数据管线误写成可见 UI。D0 后续已
+把 committed paint 经 Runtime-private `PrimaryWindowUIDisplayCoordinator` 构建为 primary-window
+`UIDisplayListView`，并以 `RenderFrame::primaryWindowUIDisplayList` 的 submit-call-local borrow
+提交；Headless、0 framebuffer 与 suspended 发布空 list，失败不保留旧 publication 或截断 list。
+该结果仍不等价于 owning RenderFramePacket、FramePin、bgfx UI Pass、Game SDK paint setter 或可见 UI。
 
 ### 实施与验证
 
@@ -199,7 +205,7 @@ dirty subtree pruning 与 nested clip 尚未实现，不能把最小 SolidFill �
 | Backend 组合 | [Accepted](adr/0003-backend-factories.md) | `Create(config, factories)`；M7-B1 已使用 Independent 或 WindowSurface 的 tagged composition，M7-B2 在该组合上接入私有 bgfx，bootstrap 只选 factory、EngineHost 唯一创建/回滚 owner | 消除 Runtime 对具体 backend 依赖与 lease 接线歧义 |
 | Runtime/State | [Accepted](adr/0014-runtime-phase-and-state.md) | `IGameApplication` lifecycle-only + `IGameState` 唯一帧入口；Frame Update 后提交状态命令 | 消除名称歧义、双帧入口与首帧 UI 时序冲突 |
 | RenderFrame/Surface 所有权 | [Accepted](adr/0020-window-surface-handoff.md) | bgfx backend 在 factory 成功后持有 move-only window surface lease；后续 Runtime packet 切片按契约持有 owning RenderFramePacket，Render SPI 只暴露纯 Tina view/pin sink | 消除 native 泄漏、依赖环、backend 越界与在途 UAF |
-| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | M7-C1b 至 C1c-b3e 已完成 Flex-lite layout、committed hit/query/route、Runtime owner/layout/startup capability 与 held primary Pointer Button claim；最新切片又完成 SolidFill-only committed paint、Render-owned 单帧 SolidQuad DisplayList builder 及独立 UI→Render integration bridge。`commitLayout()` 成功时原子发布 structure/layout/hit/paint 四份 snapshot；bridge 的 Windows MSVC 19.50 Debug/Release、Linux GCC/Clang sanitizer 直接 GoogleTest 均为12/12。changed frame 全树 Measure/Arrange 仍需收敛；Key/Gamepad/axis claims、Pointer Capture/Focus/Modal、Button default action、Image/Text/Glyph PaintCache、Runtime packet、bgfx UI Pass 与 nested clip 后置 | 高性能且保持命中/透明顺序，同时让 UI/Render 双方无反向依赖 |
+| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | M7-C1b 至 C1c-b3e 已完成 Flex-lite layout、committed hit/query/route、Runtime owner/layout/startup capability 与 held primary Pointer Button claim；后续又完成 SolidFill-only committed paint、Render-owned 单帧 SolidQuad DisplayList builder 及独立 UI→Render integration bridge。D0 已把 primary-window DisplayList 作为 `RenderFrame` submit-call-local borrow 接入 Runtime 正式帧，backend 禁止保留；Headless、0 framebuffer 与 suspended 发布空 list，失败不保留旧/截断 publication。`commitLayout()` 成功时原子发布 structure/layout/hit/paint 四份 snapshot；bridge 的 Windows MSVC 19.50 Debug/Release、Linux GCC/Clang sanitizer 直接 GoogleTest 均为12/12。changed frame 全树 Measure/Arrange 仍需收敛；Key/Gamepad/axis claims、Pointer Capture/Focus/Modal、Button default action、Image/Text/Glyph PaintCache、Game SDK paint setter、owning Runtime packet/FramePin、bgfx UI Pass 与 nested clip 后置 | 高性能且保持命中/透明顺序，同时让 UI/Render 双方无反向依赖 |
 | UI startup/root capability | [Accepted](adr/0021-runtime-ui-startup-capability.md) | Platform backend 提供不 poll、不消费 frame id 的 `initialPrimaryWindowMetrics` seed；Runtime 在 `onEnter` 前创建 primary Context 并提交首份 structure/layout/hit/paint snapshot。Game SDK 只取得 root-scoped、phase-epoch-scoped 的 `PrimaryWindowUIRootBuilder`/`PrimaryWindowUITreeUpdater`；facade 通过 owner thread、phase epoch、root owner 与 subtree containment 校验，回调结束后无条件失效，第一次 capability error 作为 sticky phase error 合并；不暴露裸 `UIContext*`，当前 facade 也尚未暴露 paint setter | 让 ADR 0014 的 initial UI transaction 可落地，同时避免丢失首帧输入或扩大 Game SDK owner 权限 |
 | Frame/Input | [Accepted](adr/0015-input-and-fixed-step.md) | 保序 PlatformFrame、UI transition consumption + continuous claims；Action 分 Simulation/Frame domain；每个 substep 独立 commit | 防输入穿透、0步帧丢边沿、双重执行和追赶步错误 |
 | C++ exception | [Accepted](adr/0004-exceptions-and-errors.md) | 编译开启；公共 API 用 Result/Status，Engine/Frame/Worker/C callback 边界捕获 | pmr/第三方兼容、错误边界 |
@@ -266,7 +272,8 @@ owner/selection 与 producer 接线，M7-C1c-b3d1 已完成 UI capacities 与 Ru
 M7-C1c-b3d2 已按 ADR 0021 补齐 startup metrics seed 与 root-scoped、phase-epoch-scoped Game SDK access；
 M7-C1c-b3e 已补 primary Pointer Button claim。SolidFill committed paint、Render 单帧 SolidQuad DisplayList
 builder 与独立 UI→Render bridge 也已实现并在 Windows MSVC 19.50 Debug/Release、Linux GCC/Clang
-sanitizer 通过 bridge 12/12。
-之后继续实现 Key/Gamepad/axis claims、focus/capture/widget、dirty subtree pruning、Runtime-owned
-RenderFramePacket 与资源 pin，M7-D 实现 Label/Button/Modal + FreeType 可见样例与 bgfx UI pass；
+sanitizer 通过 bridge 12/12。D0 又把 Runtime-private primary-window DisplayList 作为 `RenderFrame`
+submit-call-local borrowed view 接入正式 submit 路径。
+之后继续实现 Key/Gamepad/axis claims、focus/capture/widget、dirty subtree pruning、Game SDK paint setter、
+owning Runtime RenderFramePacket 与资源 pin，M7-D 实现 Label/Button/Modal + FreeType 可见样例与 bgfx UI pass；
 M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。

@@ -99,10 +99,11 @@ Pass Scheduler/RenderFramePacket，也没有 Scene、Asset 或 Audio。Render �
 Desktop smoke；UI 只完成 standalone `tina_ui` 树核心、route-result view ABI、事务式 Flex-lite layout、
 committed hit-snapshot 数据基础、point query/反向目标选择、synthetic Capture→Target→Bubble route，以及
 Runtime-private producer/primary Context 接线、Runtime-private 每帧 layout commit，以及 startup
-primary-window seed + root-scoped phase capability、held primary Pointer Button claim bridge。
+primary-window seed + root-scoped phase capability、held primary Pointer Button claim bridge、SolidFill-only
+paint/DisplayList bridge 与 D0 submit-call-local primary-window UIDisplayList handoff。
 Panel/Label/Button 只是在 retained tree 中可创建的节点类型；当前没有可见 UI。Key/Gamepad/axis claim、
 持久 Pointer Capture、Focus/Modal、Button
-default action、paint snapshot/DisplayList、nested clip、dirty subtree pruning、text/glyph、FreeType 与 bgfx UI pass 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或 clear-only
+default action、Game SDK paint setter、owning RenderFramePacket/FramePin、nested clip、dirty subtree pruning、text/glyph、FreeType 与 bgfx UI pass 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或 clear-only
 Desktop smoke 推断为已经实现。
 
 ## 完整 vNext 所有权目标
@@ -186,7 +187,10 @@ Pointer transition，并把 producer 结果交给 ActionMapper；Headless 绑定
 committed snapshot，不隐式 layout。M7-C1c-b3d1 只在后续 `updateUI` phase 成功后由 coordinator 提交
 本帧下一份 snapshot；因此输入路由与 layout 发布仍是两个明确提交点。M7-C1c-b3e 已实现第一条真实
 continuous-control producer：Move/Wheel/Button route 都可请求接管最终仍 held 的 primary Pointer Button，
-且 consumption 与 claim 分开发布。Key/Gamepad/axis claim、Focus/Capture/Modal 仍后置。Gameplay Action
+且 consumption 与 claim 分开发布。D0 进一步在 layout/paint commit 后、Render submit 前构建
+primary-window UIDisplayList，并通过 `RenderFrame::primaryWindowUIDisplayList` 作为 submit-call-local
+borrow 交给 backend；backend 不得保留该 view、span 或元素指针。Key/Gamepad/axis claim、
+Focus/Capture/Modal 仍后置。Gameplay Action
 带目标 simulation tick，由 fixed loop 消费。
 
 ## IGameApplication 与 IGameState 调用顺序
@@ -206,7 +210,7 @@ EngineHost::run(gameApplication)
   -> platform.initialPrimaryWindowMetrics()
   -> bind primary-window UIContext, or explicitly bind Headless
   -> initialState.onEnter(primary-window root capability)
-  -> sample initialPolicy + initial UI layout/snapshot
+  -> sample initialPolicy + initial UI layout/paint snapshot
   -> commit GameStateStack
   -> frame loop
   -> stop accepting state commands
@@ -228,7 +232,8 @@ Platform lifecycle dispatch（当前 `PlatformEventDispatcher`）→ Runtime Eve
 Domain/async）→ Asset CPU Completion → Audio Completion → UI Input Routing → Gameplay Action Mapping → Fixed Loop（每个 tick 内部 barrier +
 command commit + transform propagation）→ Frame Update（variable delta）→ State Transition Commit →
 Render Scene Extraction → UI Model
-Commit/Layout/Paint Cache/Display List → GPU Upload Budget → Assemble immutable RenderFrame →
+Commit/Layout/Paint Cache/Display List → GPU Upload Budget → Assemble immutable RenderFrame（D0 含
+submit-call-local primary-window UIDisplayList borrow） →
 Render Pass → Present → Deferred Cleanup。
 
 Simulation 默认固定 60 Hz，每帧最多追赶4步；Render 使用可变帧率和 interpolation alpha。

@@ -1,6 +1,7 @@
 # 游戏程序入口与状态栈
 
-> 状态：vNext 候选冻结。M7-C1c-b3d2 已实现 startup primary-window UI capability；本文是游戏开发者理解 Tina 调用面的首要入口。
+> 状态：vNext 候选冻结。M7-C1c-b3d2 已实现 startup primary-window UI capability，D0 已把
+> primary-window UIDisplayList 以 Runtime-private submit-call-local borrow 接入 RenderFrame；本文是游戏开发者理解 Tina 调用面的首要入口。
 
 ## 一句话结论
 
@@ -96,7 +97,7 @@ EngineHost::run(gameApplication)
   -> bind primary-window UI context or explicit Headless UI mode
   -> initialState.onEnter(stateEnterContext)
   -> sample initialState.initialPolicy()
-  -> startup UI structure/layout/hit snapshot
+  -> startup UI structure/layout/hit/paint snapshot
   -> commit initial State / UI roots / input context / policy
   -> frame loop
        UI input scope + one route   top -> bottom eligibility
@@ -104,7 +105,7 @@ EngineHost::run(gameApplication)
        Frame Update (variable dt)   top -> bottom
        State Transition Commit      queued commands only
        Render Scene Extraction      bottom -> top
-       UI model/layout/display      bottom -> top
+       UI model/layout/display      bottom -> top; Runtime-private DisplayList handoff
        Deferred Cleanup             resource retirement only
   -> stop accepting new state commands
   -> remove state eligibility / close ingress
@@ -147,7 +148,8 @@ M7-C1c-b3d2 的 UI 能力是 phase-scoped facade，不是 `UIContext*`：
 - facade 是 move-only、callback-scoped，回调结束、错误回滚或异常边界 `abortPhase()` 后统一失效；
 - phase 内首个 UI tree 错误 sticky，后续 mutation 不继续扩大半失败状态；
 - 当前可创建 Panel/Label/Button 节点并设置 layout/hit policy，但 Label 文本、Button 默认 action、
-  Focus/Capture/Modal、DisplayList 和 bgfx UI pass 仍未实现。
+  Focus/Capture/Modal、Game SDK paint setter 和 bgfx UI pass 仍未实现。D0 的 DisplayList handoff 是
+  Runtime 内部从已提交 paint snapshot 构建的 submit-call-local borrow，不是游戏侧可见 Widget 能力。
 
 ## State 结构变化
 

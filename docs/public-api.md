@@ -13,7 +13,9 @@
 > Runtime 过滤、去重后发布 continuous-control claim。SolidFill-only committed paint、Render-owned
 > 单帧 `UIDisplayListBuilder` 与独立 `Tina::UIRenderIntegration` target 也已落地；bridge 在 Windows
 > MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Linux Clang 22 sanitizer 构建中直接 GoogleTest 均为
-> 12/12，Clang 无 sanitizer 诊断。Key/Gamepad/axis claim、完整状态栈、worker、
+> 12/12，Clang 无 sanitizer 诊断。D0 已通过 Runtime-private `PrimaryWindowUIDisplayCoordinator`
+> 在 layout/paint commit 后、Render submit 前构建 primary-window UIDisplayList，并以
+> `RenderFrame::primaryWindowUIDisplayList` 的 submit-call-local borrow 交给 backend。Key/Gamepad/axis claim、完整状态栈、worker、
 > Scene/Asset/Audio、可见 UI pipeline、
 > production Gamepad、完整 DPI 与
 > Windows IMM32 仍是后续契约。
@@ -48,8 +50,9 @@ Tina 不把所有可链接 header 都称为“用户 API”：
 Platform 生命周期订阅、Action Snapshot、最小 Phase Context，以及受限的 primary-window
 `PrimaryWindowUIRootBuilder`/`PrimaryWindowUITreeUpdater`。standalone `Tina::UI` 已实现 tree/layout/
 hit/route 与 SolidFill committed paint，`Tina::Render` 已实现后端无关 SolidQuad DisplayList，独立
-integration target 已闭合二者的坐标转换；但 Game SDK facade 尚未暴露 paint setter，Runtime 也未把
-DisplayList 装入 frame packet 或交给 bgfx UI Pass，因此仍没有 Widget 默认行为或可见渲染。表中
+integration target 已闭合二者的坐标转换；D0 已把 primary-window DisplayList 作为 submit-call-local
+borrow 放入 `RenderFrame`，但 Game SDK facade 尚未暴露 paint setter，也没有 owning frame packet、
+FramePin 或 bgfx UI Pass，因此仍没有 Widget 默认行为或可见渲染。表中
 World/Asset/UI Widget、`GameStateCommands`、typed render handle/descriptor 和 Pass Scheduler 均未实现。
 
 完整 Game SDK 不提供 RenderDevice、GPU resource handle、native window/surface 或第三方 factory。
@@ -381,7 +384,8 @@ M7-C1c-b3c 已按上述顺序接入正式 run path：同步 `PlatformEventDispat
 owner 选择 primary-window Context，producer 使用上一份 committed hit snapshot 路由，再把 consumption/
 claims 交给 ActionMapper。b3c 阶段或当前 State 尚未创建 root 时，Context 不会消费输入；b3d1 在本帧
 更晚的 `updateUI` 后提交下一份 layout，不改变已发布的 route 结果。这不是
-可见 UI pipeline、Widget 或 Runtime-consumed DisplayList 已完成的证据。
+可见 UI pipeline 或 Widget 已完成的证据；D0 后续只在 Render submit 调用内借用式提交
+primary-window UIDisplayList。
 
 M7-A 的 Pointer snapshot、Pointer Button/Move/Wheel transition 与 pointer binding 只接受
 `PrimaryPointerId`（0），多 Pointer 是后续契约。M7-C1c-b3a 已让 Button/Wheel transition 携带
@@ -519,9 +523,9 @@ public:
 `UICommittedLayoutView` 是 owner-thread borrowed view，携带对应 structure/layout revision；在
 下一次成功发布新 layout 或 `UIContext` 析构后失效。它只发布 logical local/world rect、effective
 clip、effective visibility 与稳定 ordinal，不是跨线程、跨 commit 的 owning snapshot，也不证明
-Image/Text/Glyph PaintCache、Runtime DisplayList submission、Widget 默认行为或 default action 已实现。phase-driven layout commit
+Image/Text/Glyph PaintCache、Widget 默认行为或 default action 已实现。phase-driven layout commit
 已由 b3d1 Runtime-private coordinator 接入；b3d2 又允许 Game State 通过 scoped facade 创建 root 和基础
-retained node，但当前仍不产生可见内容。
+retained node；D0 只能从已发布 paint 构建 submit-call-local DisplayList，当前仍不产生可见内容。
 当前 `effectiveClip` 仅表示 `viewport ∩ worldRect`；祖先 clip policy 与 hit/paint clip chain 尚未实现。
 
 `UICommittedHitView` 同样是 owner-thread borrowed 双缓冲 view。它保存所有 effective-visible
@@ -603,6 +607,14 @@ clip 剪枝。它是单缓冲：`beginFrame()` 立即使旧 borrowed view 失效
 也不发布截断的新 view。该 SPI 不包含 bgfx、GLFW 或 OS native 类型；FrameResourceRef/pin、Image/Text/
 Glyph、Runtime `RenderFramePacket` 与 bgfx UI Pass 尚未实现。
 
+D0 的 Runtime-private `PrimaryWindowUIDisplayCoordinator` 使用这条 SPI，但不把自身暴露给 Game SDK 或
+普通 module public header。它在 layout/paint commit 成功后、`IRenderDevice::submitFrame()` 前，用
+fixed PMR builder 构建 primary-window list，并把 `UIDisplayListView` 作为
+`RenderFrame::primaryWindowUIDisplayList` 的 submit-call-local borrow 交给 backend。backend 必须在
+`submitFrame()` 调用内同步消费、复制或编码；返回后禁止保留 view、span 或元素指针。Headless、0
+framebuffer 与 suspended surface 路径发布空 list；构建或容量失败会清空当次 publication，不保留旧
+list，也不提交截断 list。
+
 ### M7-C1c-b3b/b3c Runtime-private route producer 与 primary-window owner
 
 `UIInputRouteProducer` 是 `tina_runtime` 私有实现，不进入 Game SDK 或普通 Module public header。它只接受
@@ -646,7 +658,8 @@ window identity 不一致或 `commitLayout()` 失败都会阻断 Render，并保
 之前，只读取上一份 committed hit snapshot。
 
 该 b3d1 切片没有增加 root builder/updater、Widget、DisplayList 或可见 UI；b3d2 后来补了 scoped
-root/updater，最新切片补了低层 SolidFill DisplayList bridge，但 Runtime submission 与 Widget 仍后置。
+root/updater，后续切片补了低层 SolidFill DisplayList bridge，D0 又补了 Runtime submit-call-local
+DisplayList handoff，但 Widget、Game SDK paint setter 与可见 UI 仍后置。
 普通游戏不会获得裸 `UIContext*`，也不能在任意阶段调用 `createRoot()`。
 
 ### M7-C1c-b3d2 启动与 Game SDK capability
@@ -720,14 +733,16 @@ listener side effect。ActionMapper 先应用 claim 再映射 transition：已 a
 抑制到真实 Up；同帧 ButtonDown 即使没有被 consume，只要被 claim 也不会激活 Gameplay。
 
 该切片只覆盖 primary Pointer Button。Key、Gamepad button/axis、持久 Pointer Capture、Focus/Modal、
-Button default action、Runtime-consumed DisplayList 与可见 UI 仍未实现。
+Button default action、Game SDK paint authoring 与可见 UI 仍未实现；D0 的 Runtime DisplayList handoff
+只消费已有 paint snapshot。
 
 ## EngineConfig
 
 `EngineConfig` 是可复制纯值，Create 前一次性验证：
 
 - 当前字段：UTF-8 `applicationName`、`primaryWindow`、`platformFrameCapacities`、
-  `primaryWindowUICapacities`、`inputActions`、
+  `primaryWindowUICapacities`、`primaryWindowUIDisplayListCapacities`（`commandCapacity`、
+  `clipCapacity`、`batchCapacity`）、`inputActions`、
   `platformEventSubscriptions`、fixed delta（默认1/60 s）、max fixed steps（固定上限4，配置默认4）、
   max accepted real delta、gameplay time scale 与 shutdown deadline；
 - 后续字段：日志/资源根、CPU/IO worker、通用 Event queue、FrameArena、
@@ -735,7 +750,8 @@ Button default action、Runtime-consumed DisplayList 与可见 UI 仍未实现�
 
 默认值集中在 `EngineConfig::Defaults()`。当前已在创建任何模块前拒绝空/非法 UTF-8 应用名、
 非法窗口配置、非法 Platform/Action/订阅容量、重复 physical binding、0/非有限时间值、
-`maximumStepsPerFrame > 4`、非法 UI Context 容量、非法 time scale 与 shutdown deadline；backend 组合验证随对应字段加入。
+`maximumStepsPerFrame > 4`、非法 UI Context 容量、非法 primary-window UI DisplayList 三项容量、
+非法 time scale 与 shutdown deadline；backend 组合验证随对应字段加入。
 `Create` 通过 `const EngineConfig&` 接收输入，并在自身
 `noexcept`/`try` 边界内复制所有权，避免调用前的字符串复制逃出异常边界。当前 Disabled
 TaskSystem 没有等待过程，因此 shutdown deadline 只完成配置校验；有界 Worker 切片必须在它
@@ -809,11 +825,12 @@ snapshot/deferred publish/runtime handoff；M7-B2 已建立私有 `tina_render_b
 | `Tina::UI::UIRoutedPointerListenerToken` | M7-C1c-b2 已实现 | UI public | generation-safe move-only RAII listener owner；owner-thread reset immediate，off-thread reset deferred，context 销毁后 reset 安全 | capacity exceeded / stale node / wrong owner |
 | `Tina::UI::UIPointerRouteResult` | M7-C1c-b2 synthetic route；b3e 增加 claim request | UI public | owning value；描述单条 normalized pointer input 的 route/consume 结果与固定大小 Pointer Button claim request | invalid input / route reentrancy / capacity exceeded；不是 Runtime consumption/claim view，Runtime 仍须按最终 held snapshot 过滤 |
 | `Tina::UI::UIContextCapacityConfig` | M7-C1c-b3d1 已实现 focused config/validator | UI public / EngineConfig value | Create 前复制纯值；Runtime Context owner 使用已验证配置 | invalid node/root/derived/listener capacity；factory 前拒绝 |
+| `PrimaryWindowUIDisplayListCapacityConfig` | D0 已实现 | EngineConfig value / Runtime private | Create 前复制纯值；配置 fixed PMR builder 的 command/clip/batch 容量 | command=0、clip>command、batch=0或batch>command、超过最大值；factory 前拒绝 |
 | `EntityId` | M8 目标 | Game SDK | World registry generation + owner | invalid/stale/wrong owner |
 | `AssetHandle<T>` | M10 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
 | `AssetLease<T>` | M10 目标 | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
 | Render typed handle | M7/M9 目标 | Engine Module SPI | RenderDevice registry 到 retire | invalid/stale/wrong device |
-| 最小 `RenderFrame` | M6-A 已实现 | Engine Module SPI | 当前 submit 调用 | submit `Status` |
+| 最小 `RenderFrame` | M6-A + D0 已实现 | Engine Module SPI | 当前 submit 调用；包含 submit-call-local borrowed `primaryWindowUIDisplayList` | submit `Status`；backend 不得保留 borrowed UI view |
 | `Render::UIDisplayListView` | SolidQuad DisplayList builder 已实现 | Engine Module SPI / integration output | borrowed 单缓冲 builder storage；下一次成功 `beginFrame()`、builder move 或析构后失效；已开启事务的 rollback 只清空该次候选 | CapacityExceeded/invalid input/transaction misuse |
 | `RenderFramePacket` | M7-B/C 目标、Runtime Private | Runtime Private | Runtime 固定容量 pool；backend completion 前 owning | PoolExhausted/submit failure |
 
@@ -875,15 +892,16 @@ Game SDK UI root/update facade 已实现，但不代表正式 SDK、完整 Rende
 截至 b3e，Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15.2
 ASan/UBSan/LSan 的独立 `tina_ui_tests` 均已通过81/81，且 Clang 无 sanitizer 诊断；初次 GCC
 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
-最新 Windows MSVC 19.50 Debug、Linux GCC 13.4 与 Linux Clang 22 sanitizer 已通过 UI92/92
-（含11项 paint snapshot）、基础205/205（含11项 Render DisplayList）以及独立 UI→Render bridge12/12；
-Linux 还通过 Runtime→UI46/46与Null样例300帧，Clang 无 sanitizer 诊断；bridge Windows Release 也为
-12/12。Windows Release 的 UI/基础尚未重跑，仍保留 b3e 的81/81、194/194历史门禁。
+最新 Windows MSVC 19.50 / CMake 4.2.3 Debug/Release 已通过 UI92/92（含11项 paint snapshot）、
+基础207/207（含 Render DisplayList 与 `RenderFrame::primaryWindowUIDisplayList`）、Runtime→UI51/51、
+独立 UI→Render bridge12/12，以及 Null 样例300帧。Linux GCC 13.4 与 Linux Clang 22 sanitizer 仍保留
+paint/DisplayList/bridge 门禁：基础205/205、UI92/92、Runtime→UI46/46、bridge12/12与Null样例300帧，
+Clang 无 sanitizer 诊断。
 现有测试尚未覆盖 dirty subtree pruning、Focus/Capture/Modal、Button、Image/Text/Glyph PaintCache、
 Runtime packet、bgfx UI Pass、nested clip、Widget 默认行为或可见 Widget。M7-C1c-b3b 的 producer
 只补齐 Move/Button/Wheel→consumption 私有桥，M7-C1c-b3c 只补齐 primary-window Context 生命周期与
 EngineHost 顺序接线，M7-C1c-b3d1 只补齐容量配置与 Runtime-private layout commit；b3d2 只补齐
 startup bind 与 root-scoped Game SDK UI facade；b3e 只补齐 held primary Pointer Button claim bridge。
-SolidFill paint、Render builder 与 integration bridge 也不扩大到 Widget、Runtime submission 或可见 UI 结论。
-Windows Debug/Release、Linux GCC 与 Clang sanitizer
-的 b3e 独立 Runtime→UI 门禁均为46/46。
+SolidFill paint、Render builder、integration bridge 与 D0 Runtime submit-call-local handoff 也不扩大到
+Widget、owning packet、bgfx UI Pass 或可见 UI 结论。Windows Debug/Release 的 D0 独立 Runtime→UI
+门禁均为51/51；Linux GCC 与 Clang sanitizer 的 b3e 独立 Runtime→UI 门禁仍为46/46。

@@ -23,7 +23,8 @@ vNext 已完成 C++23 Headless Runtime 生命周期内核、M7-A Platform/Input 
 M7-B1 私有 WindowSurface handoff、M7-B2 Desktop bootstrap + 真实 GPU 冒烟，以及
 M7-C1b/M7-C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/b3d2/b3e Retained Tree/Flex-lite layout/
 committed hit/paint snapshot、point query、synthetic routed pointer、private Runtime route、startup UI seed、
-Game SDK scoped capability，以及后端无关 SolidQuad DisplayList foundation：私有
+Game SDK scoped capability、后端无关 SolidQuad DisplayList foundation，以及 D0 Runtime-private
+primary-window UIDisplayList submit handoff：私有
 `tina_platform_glfw` 已能创建 `GLFW_NO_API` 窗口，
 并把键盘、Pointer、Focus、resize、close 与已提交 UTF-8 文本归一化到同一份有界
 `PlatformFrameView`；Runtime 通过 generation `WindowSurfaceId`、无原生句柄的
@@ -64,11 +65,15 @@ Runtime 只把帧末快照中 `PrimaryPointerId` 上仍 held 的任意 Pointer B
 或拦截同帧未 consume 的 Down，并抑制到真实 Up。`Tina::Render` 已实现固定 PMR、单缓冲的
 SolidQuad `UIDisplayListBuilder`；独立 `Tina::UIRenderIntegration` target 已能把 committed logical paint 以
 outward rounding/clamp 转换为 framebuffer DisplayList，且 Windows MSVC 19.50 Debug/Release 的12项
-bridge GoogleTest 均通过。当前仍不是可见 UI：Game SDK facade 尚无 paint setter，Runtime 不生成或提交
-DisplayList，文本/glyph 渲染尚未接入，
+bridge GoogleTest 均通过。D0 已在 Runtime-private `PrimaryWindowUIDisplayCoordinator` 中于
+layout/paint commit 后、Render submit 前用固定 PMR builder 构建 primary-window UIDisplayList，并通过
+`RenderFrame::primaryWindowUIDisplayList` 作为 submit-call-local borrowed view 交给 backend；backend 必须同步
+消费/复制/编码，禁止在 `submitFrame()` 返回后保留 view、span 或元素指针。Headless、0 framebuffer 与
+suspended surface 路径发布空 list；构建失败不保留旧 publication，也不提交截断 list。当前仍不是可见 UI：
+Game SDK facade 尚无 paint setter，文本/glyph 渲染尚未接入，
 Panel/Label/Button 只是 retained tree 节点类型，还没有默认 Widget 行为。持久 Pointer Capture、Focus/Modal、
-Button 默认行为、Image/Text/Glyph PaintCache、dirty subtree pruning、nested clip、Runtime RenderFramePacket、
-bgfx UI Pass、production Gamepad、
+Button 默认行为、Image/Text/Glyph PaintCache、dirty subtree pruning、nested clip、owning Runtime
+RenderFramePacket、FramePin、bgfx UI Pass、production Gamepad、
 Windows IMM32 composition、Scene、文本/Widget、Pass Scheduler、submission ticket/drain 与可见中文 UI
 分别放在后续切片。
 
@@ -91,12 +96,12 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求
 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、
 MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过最新 Windows Debug
-门禁：基础205/205、独立 UI 92/92、独立 Runtime→UI 46/46，以及 UI→Render bridge 12/12；bridge
-Release 也为12/12。其余 Release 仍保留 b3e 的基础194/194、UI81/81、Runtime→UI46/46与Null样例300帧
-历史门禁，尚未对最新 paint/DisplayList 切片重跑。独立 adapter 门禁
-通过 GLFW专项25/25、bgfx专项11/11、GLFW样例300帧，以及真实 D3D11 Intel Iris Xe 的
-`tina_sample_desktop` 300帧；Release 输出 clean status ok。前序 WindowSurface
-GLFW样例1800帧仍作为历史证据。Legacy ON 图的前序隔离门禁为 vNext 185/185 + Legacy 43/43。
+门禁：基础207/207、独立 UI 92/92、独立 Runtime→UI 51/51，以及 UI→Render bridge 12/12；最新
+Windows Release 也通过同一组 207/92/51/12 和 Null 样例300帧。本轮另重跑 bgfx专项11/11，以及真实
+D3D11 Intel Iris Xe 的
+`tina_sample_desktop` Debug/Release 300帧；Release 输出 clean status ok。Debug D3D11 退出时
+`RefCount is 3 (expected 0)` 是已记录的第三方 debug layer 提示，不作为 Tina 泄漏结论。前序 WindowSurface
+GLFW专项25/25、GLFW样例300/1800帧仍作为历史证据。Legacy ON 图的前序隔离门禁为 vNext 185/185 + Legacy 43/43。
 `TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与
 公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。
 

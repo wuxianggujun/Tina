@@ -2,7 +2,9 @@
 
 > 状态：vNext 目标契约已接受；M7-B1 WindowSurface handoff 与 M7-B2 私有 bgfx clear-only core、Desktop
 > 产品接线、真实 GPU 冒烟已实现；后端无关 SolidQuad UI DisplayList builder 与 UI→Render integration
-> bridge 也已实现。Scene、Runtime packet、bgfx UI Pass、Pass Scheduler 与 submission ticket/drain 仍后置。
+> bridge 也已实现。D0 已把 primary-window UIDisplayList 作为 `RenderFrame` submit-call-local borrow
+> 接入 Runtime 正式 submit 路径。Scene、Runtime packet、FramePin、bgfx UI Pass、Pass Scheduler 与
+> submission ticket/drain 仍后置。
 > bgfx 是 Tina 的实现依赖，不是游戏开发 API。
 
 ## 当前 Legacy 事实
@@ -51,18 +53,20 @@ UIContext retained tree
   -> Render::UIDisplayListBuilder/View               [SolidQuad 已实现]
 
 RenderSceneView + UIDisplayListView + RenderSurfaceState + FrameTiming
-  -> RenderFrame view                                [UI 字段未接入]
+  -> RenderFrame view                                [D0 UI borrow 已接入]
   -> future Runtime-owned RenderFramePacket          [未实现]
   -> Pass Scheduler / bgfx UI Pass                   [未实现]
 ```
 
-当前 M7-B1 的最小 `RenderFrame` 只表达 Runtime frame 编号、插值和可选 primary window surface：
+当前 `RenderFrame` 表达 Runtime frame 编号、插值、可选 primary window surface，以及 D0 加入的
+primary-window UI DisplayList borrow：
 
 ```cpp
 struct RenderFrame {
     u64 frameIndex;
     double interpolation;
     std::optional<RenderSurfaceState> primaryWindowSurface;
+    UIDisplayListView primaryWindowUIDisplayList;
 };
 ```
 
@@ -76,17 +80,21 @@ content scale、sourceMetricsRevision、surfaceRevision 和 availability 等调�
 未来 Game-facing `RenderSceneWriter` 位于 Scene/Runtime integration，使用当帧 Asset ready snapshot 把
 AssetHandle 解析为 `FrameResourceRef`，再写 Camera、SpriteRenderItem、TileChunkRenderPacket、
 MeshRenderItem、Bounds 和 Material instance，不提取 UI。当前 UI 已能冻结 SolidFill committed paint，
-独立 integration 已能生成 borrowed `UIDisplayListView`，但 Runtime UI Phase 尚未拥有或提交它。
+独立 integration 已能生成 borrowed `UIDisplayListView`；D0 的 Runtime-private
+`PrimaryWindowUIDisplayCoordinator` 在 layout/paint commit 后、Render submit 前为 primary window 构建
+该 list。
 后续 `tina_render` 的低层 writer 只接受已解析的 FrameResourceRef/packet，不依赖
 AssetHandle 或玩法 TileMap。
 
-当前 Runtime 在 Render Pass 前组装并直接提交一次最小 `RenderFrame`；Pass Scheduler 尚未实现。
+当前 Runtime 在 Render Pass 前组装并直接提交一次 `RenderFrame`；Pass Scheduler 尚未实现。
 后续 Null 与真实 Pass Scheduler 必须消费完全相同的 RenderFrame，bgfx adapter 仍只接收 RenderDevice
 resource/submit 调用，不直接理解 RenderScene、TileMap、Widget 或 AssetHandle。
 
-当前 `UIDisplayListView` 借用单缓冲 builder storage，其失效边界是下一次 `beginFrame()`、builder move/
-destruction；它尚不属于 packet。未来 `RenderSceneView` 与 packet-owned UI view 只能在所属 packet 生命周期
-内有效，不能脱离 packet 保存裸 span。下列是后续目标，不是当前 M7-B1 已实现类型。物理 owning target
+当前 `RenderFrame::primaryWindowUIDisplayList` 借用 Runtime-private fixed builder storage，只在
+`submitFrame()` 当前调用内有效；backend 必须同步消费/复制/编码，返回后禁止保留 view、span 或
+元素指针。builder 下一次 build attempt、move 或析构也会使旧 view 失效。未来 `RenderSceneView` 与
+packet-owned UI view 只能在所属 packet 生命周期内有效，不能脱离 packet 保存裸 span。下列是后续目标，
+不是当前已实现类型。物理 owning target
 固定为 `tina_runtime`；`RenderFramePacket` 是 Runtime private 类型，不进入 Game SDK 或 Render
 SPI public header：
 
@@ -295,7 +303,8 @@ builder 是 frame-local 单缓冲：`beginFrame()` 立即使旧 borrowed view �
 input/capacity sticky failure 或 rollback 不保留旧 view，也不发布截断的新 view；对 Published 状态直接
 调用 `rollback()` 是 no-op。Create 时 command/clip/batch storage 已从 supplied
 PMR 固定分配，运行时不扩容或回退 heap。Windows MSVC 19.50 Debug、Linux GCC 13.4 与 Linux Clang
-22 sanitizer 的11项 builder 测试均随 `tina_tests` 205/205 通过；Windows Release 基础门禁尚未重跑。
+22 sanitizer 的11项 builder 测试均随 `tina_tests` 205/205 通过；D0 后 Windows MSVC 19.50 /
+CMake 4.2.3 Debug/Release 基础门禁已增至207/207。
 
 独立 `Tina::Integration::buildUIDisplayList()` 所属的 `Tina::UIRenderIntegration` target 是唯一同时 PUBLIC 依赖 `Tina::UI` 与
 `Tina::Render` 的窄桥；两者都不反向依赖它。bridge 以 committed logical viewport 和调用方 framebuffer
@@ -315,8 +324,9 @@ UI pipeline kind + Texture/Atlas page + Sampler + Blend + ClipId
 
 禁止为了减少 texture switch 对整份透明 DisplayList 全局排序；batch 前后 paint-order checksum
 必须一致。当前 clip 只用 axis-aligned scissor，rounded/stencil clip 后置。Runtime-owned
-`RenderFramePacket`、FramePinSink/resource refs 与 bgfx UI Pass 尚未实现，因此已完成的 CPU bridge
-仍不能形成可见 UI 或 GPU 资源回收证据。
+`RenderFramePacket`、FramePinSink/resource refs 与 bgfx UI Pass 尚未实现。D0 只把无资源
+primary-window DisplayList 作为 submit-call-local borrow 放进 `RenderFrame`；这仍不能形成可见 UI 或
+GPU 资源回收证据。
 
 高性能 UI 的 dirty、PaintCache、文本和 DisplayList 契约见[自研 UI](ui.md)。
 
@@ -379,8 +389,9 @@ Vulkan/backend 生命周期与 sanitizer 门禁。
 
 ## Roadmap 与验收解释
 
-M7 的可见 UI 需要把现有 SolidFill committed paint/DisplayList bridge 接入 Runtime packet，并在最小真实
-Surface 上实现 UI Pass；私有 clear-only `tina_render_bgfx` consumer 已存在，但尚不消费 UI 命令。
+M7 的可见 UI 还需要 Game SDK paint/widget authoring、文本路径，并在最小真实 Surface 上实现 UI Pass；
+私有 clear-only `tina_render_bgfx` consumer 已存在，但尚不消费 UI 命令。owning Runtime packet 与
+FramePin 仍服务于后续含资源 DisplayList 生命周期。
 M9 是扩展 Opaque3D、Mesh、depth 和 3D Shader/Material，不是第一次让 UI 直接调用 Legacy renderer。
 
 在完整 Asset/Cooker 于 M10 接入前，M7–M9 只允许使用版本化、确定性的内置 Cooked fixture 或

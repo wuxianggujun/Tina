@@ -130,11 +130,14 @@ Poll 统一冻结 final snapshot；任一步失败由 scope rollback 逆序撤�
 
 明确拒绝把 Carbon 的原生 Win32 枚举、消息宏、raw native pointer、Blue/Python入口、全局 callback
 或全局 service 移入 Tina。Carbon 仓库不进入 Tina 构建、链接、提交或发布包；“成熟引擎运行多年”
-只说明这些问题值得研究，不能替代 Tina 自己的构建、分进程测试、样例运行和资源回收证据。当前
-M7-C1c-b3e 的 Windows Debug/Release 事实分别为：Null 图 `tina_tests` 194/194、`tina_ui_tests`
-81/81、`tina_runtime_ui_tests` 46/46；可选 adapter 另有 `tina_platform_glfw_tests` 25/25 与
-`tina_render_bgfx_tests` 11/11。Linux b3e 的 GCC 与 Clang sanitizer Null 图也通过194/194、81/81、46/46，
-以及Null样例300帧；Clang 无 sanitizer 诊断。它们是五个独立 GoogleTest
+只说明这些问题值得研究，不能替代 Tina 自己的构建、分进程测试、样例运行和资源回收证据。当前 D0
+Windows MSVC 19.50 / CMake 4.2.3 Debug/Release 事实为：Null 图 `tina_tests` 207/207、`tina_ui_tests`
+92/92、`tina_runtime_ui_tests` 51/51、`tina_ui_render_integration_tests` 12/12，以及Null样例300帧；
+可选 adapter 另有 `tina_platform_glfw_tests` 25/25 与 `tina_render_bgfx_tests` 11/11，并在 D3D11
+Intel Iris Xe 上完成 Desktop 300帧，Release clean。Debug `RefCount is 3 (expected 0)` 是已记录的
+第三方 debug layer 提示，不作为 Tina 泄漏结论。Linux b3e/paint/bridge 的 GCC 与 Clang sanitizer
+Null 图仍记录为基础205/205、UI92/92、Runtime→UI46/46、bridge12/12以及Null样例300帧，Clang 无
+sanitizer 诊断。它们是多个独立 GoogleTest
 executable，不能相加成一个“总测试数”。
 
 ### Render：采用 Step 契约，缩小为显式 Pass
@@ -203,8 +206,9 @@ Tina 当前 miniaudio 路径只需要先保证 Engine/Resource/Voice 的关闭�
   ButtonDown，并抑制到真实 Up。该切片不包含 Key/Gamepad/axis claim、Focus/Capture/Modal 或可见 UI。
 
 这四步延续了 Carbon 值得学习的事务发布、明确泵送顺序和延迟清理，同时拒绝 `BeOS`/BlueInterface
-式全局或半加载状态。后续只有在 Widget model、paint snapshot/Display List、字体/中文路径与真实
-bgfx UI pass 都建立并通过可见 smoke 后，才能宣称 vNext UI 可见可用。
+式全局或半加载状态。D0 又把已有 paint snapshot/DisplayList 通过 Runtime-private coordinator 接入
+`RenderFrame` submit-call-local borrow，但后续仍只有在 Widget model、Game SDK paint authoring、
+字体/中文路径与真实 bgfx UI pass 都建立并通过可见 smoke 后，才能宣称 vNext UI 可见可用。
 
 ## 调整后的推进顺序
 

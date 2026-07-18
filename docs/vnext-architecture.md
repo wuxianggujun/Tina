@@ -553,9 +553,13 @@ root/phase-epoch-scoped access：Runtime 在 `onEnter` 前显式绑定 primary C
 发布首份 structure/layout/hit snapshot；`PrimaryWindowUIRootBuilder`/`PrimaryWindowUITreeUpdater`
 只允许 root-scoped retained tree mutation，跨 phase 保存后返回 capability-expired error。M7-C1c-b3e 又让
 Move/Wheel/Button listener 通过 `claimPointerButton()` 请求接管最终 snapshot 仍 held 的 primary Pointer
-Button；Runtime 去重后发布，ActionMapper 取消或拦截 Gameplay source 并抑制到真实 Up。它仍不是可见 UI，
-因为没有 DisplayList、文本/glyph、Button default action 或 Render pass。Key/Gamepad/axis claim、持久
-Pointer Capture、Focus/Modal、paint snapshot/DisplayList、nested clip、dirty subtree pruning、FreeType 与 bgfx UI pass 仍未实现。完整目标中 UI 树输出后端无关的 Quad、Image、
+Button；Runtime 去重后发布，ActionMapper 取消或拦截 Gameplay source 并抑制到真实 Up。D0 已实现 retained
+paint snapshot、后端无关 SolidQuad DisplayList extraction，以及 Runtime-private primary-window handoff：
+固定容量 builder 在 paint/layout commit 后构建列表，`RenderFrame` 只借用到本次 `submitFrame()` 返回；
+Headless、零 framebuffer 和 suspended frame 发布空列表，失败不复用旧列表或截断列表。它仍不是可见 UI，
+因为 Game SDK 没有 paint setter，当前产品列表只能为空，且尚无 bgfx UI pass、文本/glyph 或 Button default
+action。Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、nested clip、dirty subtree pruning、
+FreeType、owning frame packet 与 bgfx UI pass 仍未实现。完整目标中 UI 树最终输出后端无关的 Quad、Image、
 GlyphRange、Clip DisplayList，由 Render 层保持 paint order 批处理。
 
 布局采用一次 Measure/Arrange 的 Flex-lite；每个有序 Pointer transition 最多 hit-test 一次。

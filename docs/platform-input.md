@@ -10,7 +10,8 @@
 > ActionMapper 接入正式帧路径。M7-C1c-b3d2 已加入 startup primary-window metrics seed 与 Game SDK
 > root-scoped UI facade；M7-C1c-b3e 已让 Pointer listener 请求 button ownership，producer 只发布最终
 > snapshot 仍 held 的 primary Pointer Button claim。Key/Gamepad/axis claim producer、可见 Widget、
-> Focus/Capture/Modal 与 DisplayList/UI pass 仍未实现。
+> Focus/Capture/Modal 与 bgfx UI pass 仍未实现；D0 已把 primary-window UIDisplayList 作为 Runtime-private
+> submit-call-local `RenderFrame` borrow 接入，但不代表可见 Widget。
 
 ## 结论
 
@@ -210,7 +211,9 @@ M7-C1c-b3d2 把 primary-window UI owner 绑定提前到 startup transaction：Pl
 绑定后窗口消失、换代或 revision 后退以 `LifecycleInvariantViolation` 终止本次 run。最小化、metrics 或
 content scale 变化不重绑，Context 在 Render → Task → Platform → Clock modules 之前销毁。
 owner selection 不调用 `commitLayout()`，hit-test/route 不会隐式触发布局。Game SDK 已能在受限 phase 内创建/
-更新 retained root，但当前产品帧仍没有 Widget 默认行为、Focus/Capture/Modal、DisplayList 或 bgfx UI pass。
+更新 retained root，但当前产品帧仍没有 Widget 默认行为、Focus/Capture/Modal 或 paint authoring。D0 已在
+paint/layout commit 后构建并借用提交 primary-window DisplayList；在缺少 Game SDK paint setter 和 bgfx UI
+pass 时，当前产品列表仍为空且不可见。
 
 M7-A Action Mapper 的 claim consumer 能识别 Key、Primary Pointer Button 与 Gamepad Button，但当前
 UI producer 只生成 primary Pointer Button claim。`GamepadAxisControlIdentity` 和 Pointer continuous
@@ -408,8 +411,10 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
   move-only `NativeWindowSurfaceLease`、重复 lease 拒绝、Render 创建失败与窗口发布失败逆序回滚、
   surface snapshot 只由 committed metrics 派生、resize/content-scale/suspend 改变才递增
   `surfaceRevision`，以及 NullRender suspended 帧维护调用但不 present、不增加 submission index；
-- Windows C1c-b3e Debug/Release 均通过基础 `tina_tests` 194/194、独立 UI 81/81、独立
-  Runtime→UI 46/46、GLFW专项25/25、bgfx专项11/11，以及Null/Platform/Desktop样例300帧；
+- Windows 最新 D0 Debug/Release 均通过基础 `tina_tests` 207/207、独立 UI 92/92、独立
+  Runtime→UI 51/51、UI→Render bridge12/12、bgfx专项11/11，以及Null/Desktop样例300帧；
+  GLFW专项25/25与Platform样例300帧保留前序门禁；Release clean，本轮 Debug D3D11
+  `RefCount is 3 (expected 0)` 为已记录第三方 debug layer 提示；
 - Linux C1c-b3e GCC 13.4 与 Clang 22.1.8 sanitizer Null 图均通过基础194/194、独立 UI 81/81、
   独立 Runtime→UI 46/46与Null样例300帧，Clang 无 sanitizer 诊断。上一 C1c-b3a Pointer/Input
   门禁通过基础185/185、GLFW专项23/23；

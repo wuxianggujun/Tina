@@ -14,9 +14,11 @@
 > 已加入 held primary Pointer Button claim bridge。最新切片已实现 SolidFill-only local paint cache、
 > 双缓冲 `UICommittedPaintView`、Render-owned 单帧 SolidQuad `UIDisplayListBuilder` 与独立 UI→Render
 > integration bridge；bridge 在 Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Linux Clang 22
-> sanitizer 构建中直接 GoogleTest 均为12/12，Clang 无 sanitizer 诊断。
+> sanitizer 构建中直接 GoogleTest 均为12/12，Clang 无 sanitizer 诊断。D0 已在 Runtime-private
+> `PrimaryWindowUIDisplayCoordinator` 中把 primary-window UIDisplayList 作为 `RenderFrame`
+> submit-call-local borrow 接入正式 submit 路径。
 > Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、Button default action、Image/Text/Glyph
-> PaintCache、Runtime `RenderFramePacket`、nested clip、dirty subtree pruning、文本 Glyph Atlas 与 bgfx
+> PaintCache、Game SDK paint setter、owning Runtime `RenderFramePacket`/FramePin、nested clip、dirty subtree pruning、文本 Glyph Atlas 与 bgfx
 > UI Pass 尚未实现。Tina UI 是游戏内 Retained UI，
 > 不是 Immediate UI，也不是桌面编辑器工具包。
 
@@ -98,9 +100,10 @@ Platform/Event 只把 `PlatformFrameView` 的 UI-eligible transitions 交给 UIC
 `IGameState` 持有 move-only `UIRootOwner` 和非 owning `UINodeId`，不持有 UIContext、Renderer、
 UINode 裸指针或跨帧 writer。
 `tina_ui` 仍只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`，`tina_render` 也不依赖 UI；只有独立
-`tina_ui_render_integration` PUBLIC 依赖二者，负责 committed paint → DisplayList 转换。Font Asset、
-FrameResourceRef/pin 与 bgfx UI Pass 分别在后续 asset/render 切片接入，不能把 Asset/Render 依赖塞回
-UI tree/layout core。
+`tina_ui_render_integration` PUBLIC 依赖二者，负责 committed paint → DisplayList 转换。D0 的
+Runtime-private coordinator 只消费该桥接结果，并把 borrowed DisplayList 塞入 `RenderFrame` 当前
+submit 调用；Font Asset、FrameResourceRef/pin 与 bgfx UI Pass 分别在后续 asset/render 切片接入，
+不能把 Asset/Render 依赖塞回 UI tree/layout core。
 
 UI module 最小基础类型（其中低层 builder/updater 不直接交给普通 Game SDK）：
 
@@ -423,6 +426,10 @@ hit snapshot；hit-test/route 不得为“方便”隐式触发布局。M7-C1c-b
 framebuffer extent、content scale 与 minimized 标志不替代 logical viewport。每个有效且严格递增的
 `PlatformFrameId` 至多尝试一次；窗口与 Context 同时缺席的 Headless 帧成功 no-op，identity 或
 `commitLayout()` 失败会阻断 Render，并保持本帧 attempt 已消费。布局职责没有塞回 owner selection。
+D0 随后增加 Runtime-private `PrimaryWindowUIDisplayCoordinator`：它只在 layout/paint commit 后、
+Render submit 前构建 primary-window UIDisplayList，使用 fixed PMR builder，并把 list 作为
+`RenderFrame::primaryWindowUIDisplayList` 的 submit-call-local borrow 交给 backend。Headless、0 framebuffer
+与 suspended surface 发布空 list；构建失败不保留旧 publication，也不提交截断 list。
 
 M7-C1c-b3d2 已由 ADR 0021 接受并实现：Runtime 先从 Platform backend 取得不 poll、不消费 frame id
 的 backend-neutral startup primary-window metrics seed，在 `onEnter` 前建立 Context，再只向游戏侧提供
@@ -431,8 +438,7 @@ root-scoped、phase-epoch-scoped `PrimaryWindowUIRootBuilder`/`PrimaryWindowUITr
 在回调结束失效 epoch，跨 phase 调用返回 `UIPhaseCapabilityExpired`。异常/错误边界通过无分配
 `abortPhase()` 失效 facade，避免半开放 UI 能力跨过启动或帧回滚。
 普通 Game SDK 不获得裸 `UIContext*`，也不能在任意阶段调用 `createRoot()`；root 创建成功只证明 retained
-tree owner 已接入，不证明 Game SDK paint authoring、Widget 文本、默认交互、Runtime DisplayList submission
-或可见 UI。
+tree owner 已接入，不证明 Game SDK paint authoring、Widget 文本、默认交互、bgfx UI Pass 或可见 UI。
 
 Runtime 在每次状态命令提交后，根据 committed `GameStateStack`、`GameStatePolicy` 和 root
 registration 生成每窗口不可变 `UIInputScopeSnapshot`。它按视觉层级列出 eligible roots，并在
@@ -465,8 +471,9 @@ listener 不复用 Runtime EventBus；二者的生命周期、顺序和 payload 
 M7-C1c-b3c 的正式 `EngineHost` 路径先选择 Context，再把 producer 的 consumption/claims 直接交给
 ActionMapper；Headless bind 前和当前无 root 的 Context 都自然得到无消费结果，不能退回由 Host 旁路构造
 两份 `None`。本帧稍后的 b3d1 layout commit 不改变已经完成的 route 结果。独立
-`tina_runtime_ui_tests` 直接运行 GoogleTest，不通过 CTest；当前 Game SDK 能创建/更新 retained root，但
-该接线仍不构成可交互 Widget、Runtime-consumed DisplayList 或可见 UI 证据。
+`tina_runtime_ui_tests` 直接运行 GoogleTest，不通过 CTest；当前 Game SDK 能创建/更新 retained root，
+D0 也已提交借用式 primary-window UIDisplayList，但这些接线仍不构成可交互 Widget、Game SDK paint
+authoring、bgfx UI Pass 或可见 UI 证据。
 
 ## PaintCache、DisplayList 与批处理
 
@@ -513,8 +520,9 @@ UI pipeline kind + Texture/Atlas page + Sampler + Blend + ClipId
 当前只支持 axis-aligned scissor，rounded/stencil clip 后置。Frame capacity 超限返回 sticky
 `CapacityExceeded`，不提交半份 DisplayList，也不回退 heap。
 
-未来 UI 内建 pipeline 由 Render module 持有；游戏 Widget 不能选择 shader/pipeline。当前尚无 Runtime
-packet producer 或 bgfx UI Pass，因此以上已实现 CPU 数据路径仍不能形成可见 UI。bgfx 只存在于
+未来 UI 内建 pipeline 由 Render module 持有；游戏 Widget 不能选择 shader/pipeline。D0 已有 Runtime
+submit-call-local DisplayList handoff，但尚无 owning packet/FramePin 或 bgfx UI Pass，因此以上已实现 CPU
+数据路径仍不能形成可见 UI。bgfx 只存在于
 `tina_render_bgfx` 私有实现，详细门禁见[渲染架构](rendering.md)。
 
 ## UTF-8、中文与 Glyph Atlas
@@ -646,17 +654,19 @@ callback、token move/context-destroyed/off-thread reset、callback root 自销�
 M7-C1c-b3e 再补3项 claim 合并/非法值/无命中测试。SolidFill paint 切片新增11项测试，覆盖确定性
 premultiplication、visible/transparent 筛选、paint-only/no-op revision、四份 snapshot rollback、固定容量与
 supplied PMR。Windows MSVC 19.50 Debug、Linux GCC 13.4、Linux Clang 22.1.8 + libstdc++15.2
-ASan/UBSan/LSan 当前完整 `tina_ui_tests` 均为92/92，且 Clang 无 sanitizer 诊断。Windows Release
-仍保留 b3e 的81/81历史结果，最新 UI 切片尚未重跑。初次 GCC
+ASan/UBSan/LSan 当前完整 `tina_ui_tests` 均为92/92，且 Clang 无 sanitizer 诊断。Windows MSVC
+19.50 / CMake 4.2.3 Release 也已通过92/92。初次 GCC
 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
-Render builder 的11项测试随 Windows Debug、Linux GCC/Clang `tina_tests` 205/205 通过；独立
-UI→Render bridge 的12项直接 GoogleTest 在 Windows Debug/Release 与两条 Linux 图均通过。Linux Null
-样例各运行300帧，Clang 无 sanitizer 诊断。它们覆盖 SolidQuad、clip interning/rounding/clamp、
+Render builder 的11项测试随 Windows Debug、Linux GCC/Clang `tina_tests` 205/205 通过；D0 后
+Windows Debug/Release 基础测试增至207/207，`tina_runtime_ui_tests` 增至51/51，并且 Null 样例
+300帧通过。独立 UI→Render bridge 的12项直接 GoogleTest 在 Windows Debug/Release 与两条 Linux 图均通过。
+Linux Null 样例各运行300帧，Clang 无 sanitizer 诊断。它们覆盖 SolidQuad、clip interning/rounding/clamp、
 相邻 batching、剪枝、容量/输入失败和 transaction rollback，但尚未证明 dirty leaf 不扫描无关 subtree，
-也未覆盖 Image/Text/Glyph PaintCache、FramePin、Runtime packet、bgfx UI Pass、Widget default action、
+也未覆盖 Image/Text/Glyph PaintCache、FramePin、owning Runtime packet、bgfx UI Pass、Widget default action、
 可见 UI 或 GPU 资源归零。M7-C1c-b3c 只补上 Runtime 私有
 primary-window Context 生命周期与 producer 顺序；M7-C1c-b3d1 只补上容量配置与 phase-driven layout
-commit；M7-C1c-b3d2 只扩大到 scoped Game SDK root/updater，不扩大到 paint authoring、Widget 行为或可见 UI 门禁。
+commit；M7-C1c-b3d2 只扩大到 scoped Game SDK root/updater，D0 只扩大到 submit-call-local DisplayList
+handoff，不扩大到 paint authoring、Widget 行为或可见 UI 门禁。
 
 ## 测试与实施顺序
 
@@ -695,11 +705,13 @@ commit；M7-C1c-b3d2 只扩大到 scoped Game SDK root/updater，不扩大到 pa
 11. 已完成 SolidFill-only local paint cache、双缓冲 committed paint 与四份 snapshot 原子发布；
 12. 已完成 Render-owned 单帧 SolidQuad DisplayList builder，以及独立 UI→Render bridge；Windows bridge
     Debug/Release、Linux GCC 13.4 与 Linux Clang 22 sanitizer 均为12/12，Clang 无诊断；
-13. 实现 Key/Gamepad claim producer、dirty subtree pruning、Game SDK paint/widget authoring、Runtime-owned
+13. 已完成 D0 Runtime-private primary-window UIDisplayList handoff：layout/paint commit 后、Render submit
+    前构建 submit-call-local borrowed list，Headless/0 framebuffer/suspended 为空 list；
+14. 实现 Key/Gamepad claim producer、dirty subtree pruning、Game SDK paint/widget authoring、owning
     RenderFramePacket 与 FramePin；
-14. 完成 Image/Text/Glyph PaintCache、text layout + glyph atlas 和 bgfx UI Pass；
-15. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
-16. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
-17. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
+15. 完成 Image/Text/Glyph PaintCache、text layout + glyph atlas 和 bgfx UI Pass；
+16. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
+17. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
+18. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
 
 所以“完善 UI”首先是完成正确的数据和 backend 边界，然后才是增加 Widget 数量。

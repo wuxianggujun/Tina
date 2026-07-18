@@ -102,13 +102,13 @@ stale generation、50,000节点与 PMR 回收；5项覆盖反向 paint-order 查
 add/reset/destroy 安全失效、off-thread deferred reset、route/commit reentrancy guard、错误 context
 销毁 death test、300次 route 零新增 supplied UI PMR allocation 与递归 route 拒绝；3项覆盖
 root-scoped `UITreeUpdater` 子节点创建、跨 root 拒绝与失效 root；b3e 新增3项覆盖 claim 合并、非法值
-与无命中。最新 SolidFill paint 再新增11项，Windows Debug、Linux GCC 13.4 与 Linux Clang 22 sanitizer
-的 `tina_ui_tests` 均为92/92；Windows Release 尚未重跑，仍保留历史81/81。Render builder 的11项
-测试已随 Windows Debug 与两条 Linux 图的 `tina_tests` 205/205 通过；独立 bridge 的12项在 Windows
+与无命中。最新 SolidFill paint 再新增11项，Windows Debug/Release、Linux GCC 13.4 与 Linux Clang 22
+sanitizer 的 `tina_ui_tests` 均为92/92。Render builder 的11项测试已随 Windows Debug 与两条 Linux图的
+`tina_tests` 205/205 通过；D0 后 Windows Debug/Release 基础测试增至207/207。独立 bridge 的12项在 Windows
 Debug/Release 与两条 Linux 图均通过，覆盖 logical→framebuffer
 outward rounding/clamp、冗余/空 clip、严格 paint order、容量/输入失败与完整 transaction rollback。
-这些结果不证明持久 Pointer Capture、Focus/Modal、Button default action、Image/Text/Glyph、Runtime packet、
-bgfx UI Pass 或可见 Widget 已完成。
+这些结果不证明持久 Pointer Capture、Focus/Modal、Button default action、Image/Text/Glyph、owning
+Runtime packet/FramePin、bgfx UI Pass 或可见 Widget 已完成。
 
 ## Windows vNext Runtime→UI producer、primary-window owner、layout coordinator、scoped Game SDK UI access 与 Pointer Button claim bridge
 
@@ -155,10 +155,12 @@ Debug/Release、Linux GCC 13.4 与 Clang 22 sanitizer 均直接通过 `tina_runt
 Key/Gamepad/axis claims 仍后置。
 
 当前 Game SDK 已能在 `onEnter` 创建 retained root、在 `updateUI` 通过绑定 root 的 updater 修改 subtree，
-但 Runtime 仍不生成或提交 DisplayList；b3e 只证明 held primary Pointer Button claim bridge。独立
-UI→Render bridge 已验证 CPU 数据转换，不改变 Runtime 现状。正式样例没有
-Widget 文本、Button 默认行为、Focus/Capture/Modal 或可见 UI。该 target 直接运行 GoogleTest，不使用 CTest；这项接线不证明可见 UI 或
-UI Render 已完成。
+且 D0 已在 layout/paint commit 后、Render submit 前通过 Runtime-private coordinator 构建
+primary-window UIDisplayList，并把它作为 `RenderFrame` 的 submit-call-local borrow 交给 backend。
+Headless、0 framebuffer 与 suspended surface 发布空 list；构建失败不保留旧 publication 或截断 list。
+D0 后 Windows MSVC 19.50 / CMake 4.2.3 Debug/Release 的 `tina_runtime_ui_tests` 均为51/51。
+正式样例仍没有 Game SDK paint setter、Widget 文本、Button 默认行为、Focus/Capture/Modal、bgfx UI pass
+或可见 UI。该 target 直接运行 GoogleTest，不使用 CTest；这项接线不证明可见 UI 已完成。
 
 ## Windows vNext GLFW Platform 与 Desktop bgfx
 
@@ -208,12 +210,12 @@ out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
 
 Windows 构建会把 GLFW runtime DLL 复制到对应 `bin/<Config>`。样例不带参数时以16 ms 的演示延迟
 显示1800帧；自动门禁必须显式使用 `--frame-delay-ms=0`，这条 sleep 路径不属于 benchmark。
-最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3。当前 Debug 已直接
-通过基础205/205、独立 UI 92/92、独立 Runtime→UI 46/46与 UI→Render bridge 12/12；Release 最新
-只重跑 bridge 12/12，其余仍保留 b3e 的基础194/194、UI81/81、Runtime→UI46/46与Null样例300帧历史结果。
-独立 adapter 门禁通过 GLFW专项25/25、bgfx专项11/11；GLFW+Null 与真实 D3D11 Intel Iris Xe 的
-`tina_sample_desktop` 均运行300帧，Release 输出 `clean status ok`。上一 C1c-b3a 门禁的
-WindowSurface GLFW样例1800帧仍作为历史证据。
+最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3。D0 的 Debug/Release
+均直接通过基础207/207、独立 UI92/92、独立 Runtime→UI51/51、UI→Render bridge12/12与Null样例300帧；
+本轮另重跑 bgfx专项11/11，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 300帧。Release 输出
+`clean status ok`；Debug 退出时的 `RefCount is 3 (expected 0)` 是已记录第三方 debug layer 提示，
+不能单独作为 Tina 资源泄漏结论。GLFW专项25/25与 GLFW+Null样例300帧保留前序门禁，上一
+C1c-b3a WindowSurface GLFW样例1800帧仍作为历史证据。
 `TINA_BUILD_TESTING=OFF` 的 production-style GLFW样例300帧
 同样属于早期门禁，用来证明测试 target 关闭后样例仍能运行。
 当前 Desktop smoke 只证明 clear-only bgfx surface 创建、提交和关闭链路通过，不代表

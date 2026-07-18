@@ -11,7 +11,8 @@ M7-C1b/M7-C1c-a/C1c-b1/C1c-b2 `tina_ui` tree/layout/committed-hit/point-query/sy
 `EngineHost` 接线、M7-C1c-b3d1 的公开容量配置和 Runtime-private layout coordinator、
 M7-C1c-b3d2 的 startup UI seed 与 Game SDK scoped capability，以及 M7-C1c-b3e 的 held primary
 Pointer Button claim bridge，以及 SolidFill-only committed paint、Render-owned 单帧 DisplayList builder
-和独立的 `tina_ui_render_integration` UI→Render bridge code surface。
+和独立的 `tina_ui_render_integration` UI→Render bridge code surface，以及 D0 Runtime-private
+primary-window UIDisplayList submit handoff。
 `tina_sample_null` 不依赖真实窗口和 GPU；`tina_sample_platform`
 把私有 GLFW `NO_API` 窗口与 NullRender 组合；`tina_sample_desktop` 通过
 `Tina::Desktop::CreateEngine(config)` 私有组合 `SteadyClock + GLFW WindowSurface + DisabledTaskSystem + bgfx`，
@@ -57,9 +58,14 @@ axis-aligned clip interning、相邻兼容 batching、paint-order checksum、空
 `Tina::UIRenderIntegration` target 进一步把 committed logical paint 按 logical/framebuffer extent
 比例投影成 pixel DisplayList；其12项直接 GoogleTest 已在 Windows MSVC 19.50 Debug/Release、Linux
 GCC 13.4 与 Linux Clang 22 sanitizer 通过，Clang 无诊断。
-这些层仍未接入 Runtime `RenderFramePacket` 或 bgfx UI Pass；文本/glyph、Button default action、
-真实 Widget 绘制、Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、dirty subtree pruning 与
-nested clip 仍未完成，因此当前仍不是可见 UI。
+D0 已在 Runtime private 层新增 `PrimaryWindowUIDisplayCoordinator`：正式帧在 layout/paint commit 后、
+Render submit 前用固定 PMR builder 构建 primary-window `UIDisplayListView`，并把它作为
+`RenderFrame::primaryWindowUIDisplayList` 的 submit-call-local borrow 传给 backend。backend 只能在
+`submitFrame()` 调用内消费/复制/编码该 view，禁止保留 view、span 或元素指针。Headless、0 framebuffer
+与 suspended surface 发布空 list；构建失败清空当次 publication，不回退旧 list，也不提交截断 list。
+这些层仍未接入 owning Runtime `RenderFramePacket`、FramePin 或 bgfx UI Pass；文本/glyph、Button
+default action、真实 Widget 绘制、Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、dirty
+subtree pruning 与 nested clip 仍未完成，因此当前仍不是可见 UI。
 现有 Legacy target 的包依赖由 vcpkg manifest 管理，bgfx、EASTL、EABase 仍保持固定源码
 版本；其中 EASTL/EABase 只属于迁移期现状，不是 vNext 目标依赖。
 
@@ -105,11 +111,12 @@ Pass Scheduler/submission ticket 或完整状态栈，因此 Legacy 仍是当前
 | vNext backend-independent UI DisplayList | Render builder 与 UI→Render bridge 已实现 | `Tina::Render` 的单帧 builder 只接受纯 Tina SolidQuad/pixel clip 类型，不依赖 UI；`Tina::UIRenderIntegration` target 是唯一同时 PUBLIC 依赖 UI 与 Render 的窄桥，二者不反向依赖它。bridge 负责 logical→framebuffer outward rounding/clamp 和完整 builder transaction；Windows MSVC 19.50 Debug/Release、Linux GCC/Clang sanitizer 的12项直接 GoogleTest 均通过。Runtime packet、FramePin、bgfx UI Pass 与可见样例后置 |
 | vNext M7-C1c-b3b Runtime→UI route-result producer | 已完成独立 Runtime-private 组件与测试 target | `UIInputRouteProducer` 只转换 raw Move/Button/Wheel，使用事件时 logical position，并把 consume 写入 raw ordinal bit；reset/cancel/非 Pointer 保留 hole；在该切片中 claims 当时恒为 canonical `None`。双预分配 PMR bitset 在300帧共用 PMR 测试中 allocation count 不增长，supplied PMR 必须长于 producer；失败测试先产生1次 listener side effect，后续 route path capacity 失败不发布但推进 attempted watermark，同帧 retry 被拒且 callback 仍为1。独立 `tina_runtime_ui_tests` 直接运行 GoogleTest、不使用 CTest |
 | vNext M7-C1c-b3c EngineHost→UIContext 接线 | 已完成 Runtime-private primary-window owner 与正式帧路径接线 | `EngineHost` 在 Platform lifecycle dispatch 后惰性绑定首个 primary `WindowId`，随后调用 producer 并把结果交给 ActionMapper；Headless 绑定前为 null，同一 ID 的 metrics/content scale/minimized 变化复用 Context，绑定后 primary 消失或 generation 更换结构化失败。Context 在 module shutdown 前于 owner thread 销毁；owner 不调用 `commitLayout()`，route 只读上一帧 committed snapshot；该切片当时的 claims 仍为 canonical `None`。Game SDK 尚无 scoped Context/root 入口，所以此切片只闭合 Runtime 输入时序与所有权，不代表可见 UI |
-| vNext M7-C1c-b3d1 UI 容量与布局提交 | 已完成公开配置与 Runtime-private phase coordinator | `UIContextCapacityConfig` 有独立公共头和共享 validator；`EngineConfig::primaryWindowUICapacities` 在任何 factory 前拒绝非法 node/root/derived/listener/paint snapshot 容量。正式帧在 `updateUI` 后、Render submit 前按 primary logical extent 至多尝试一次 `commitLayout()`；Headless 双缺席成功 no-op，identity/容量/layout/paint 失败阻断 Render 且该 frame attempt 不可重试。当前 coordinator 仍不构建或提交 Render DisplayList |
+| vNext M7-C1c-b3d1 UI 容量与布局提交 | 已完成公开配置与 Runtime-private phase coordinator | `UIContextCapacityConfig` 有独立公共头和共享 validator；`EngineConfig::primaryWindowUICapacities` 在任何 factory 前拒绝非法 node/root/derived/listener/paint snapshot 容量。正式帧在 `updateUI` 后、Render submit 前按 primary logical extent 至多尝试一次 `commitLayout()`；Headless 双缺席成功 no-op，identity/容量/layout/paint 失败阻断 Render 且该 frame attempt 不可重试。b3d1 当时只提交 layout/paint snapshot，D0 后续才构建 Render DisplayList |
 | vNext M7-C1c-b3d2 UI 启动与 Game SDK capability | 已完成 startup seed 与 phase-scoped facade | Platform seed 不 poll、不消费 frame id；Runtime 在 `onEnter` 前绑定 primary Context 并提交首份 structure/layout/hit/paint snapshot。游戏只取得 `PrimaryWindowUIRootBuilder` 与绑定自己 root 的 `PrimaryWindowUITreeUpdater`，facade 以 owner thread 与 phase epoch 校验并在回调结束后失效；第一次 capability error 作为 sticky phase error 合并；不暴露裸 `UIContext*`。当前 facade 尚未暴露 paint setter，文本/glyph、Button 默认行为仍后置；真实 claim producer 当时尚未加入 |
 | vNext M7-C1c-b3e held Pointer Button claim | 已完成 UI request、Runtime filter/publish 与 ActionMapper 门禁 | `claimPointerButton()` 与 transition consumption 分离，Move/Wheel/Button route 都可请求当前 Window/Pointer 的按钮；Runtime 只发布最终 snapshot 仍 held 的 primary Pointer Button，跨 route 去重并使用 Create 期 PMR 双 buffer。capacity 失败不发布 staging 且同帧不可重试；claim 会取消 active Gameplay source或拦截同帧 Down，并抑制到真实 Up。Key/Gamepad/axis claim、Capture/Focus/Modal 后置 |
+| vNext D0 Runtime primary-window UI DisplayList handoff | 已完成 Runtime-private submit-call-local borrow | `PrimaryWindowUIDisplayCoordinator` 在 layout/paint commit 后、Render submit 前从 fixed PMR `UIDisplayListBuilder` 构建 primary-window list，并把 borrowed `primaryWindowUIDisplayList` 放进 `RenderFrame`。backend 不得在 `submitFrame()` 后保留；Headless、0 framebuffer 与 suspended 为空 list；失败不发布旧 list 或截断 list。Game SDK paint setter、owning RenderFramePacket/FramePin、bgfx UI Pass 与可见 UI 后置 |
 | vNext GLFW 边界 | 已形成可运行切片 | `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
-| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene/Asset/Audio、Runtime-owned DisplayList emission、可见 UI pipeline 与 submission drain 仍按后续切片实施；Desktop clear-only GPU 冒烟、standalone UI/Render/bridge foundation 和 Runtime-private route/layout/startup capability 接线不代表这些路径完成 |
+| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene/Asset/Audio、owning UI packet/pin、可见 UI pipeline 与 submission drain 仍按后续切片实施；Desktop clear-only GPU 冒烟、standalone UI/Render/bridge foundation 和 Runtime-private route/layout/startup/display borrow 接线不代表这些路径完成 |
 
 因此不能用“删除旧 `src`”作为下一步。正确顺序是：建立新边界和测试 → 迁移调用点 → 确认旧接口零引用 → 通过 2D/UI/3D 验收 → 在独立提交中删除旧实现。
 
