@@ -2,6 +2,7 @@ add_executable(tina_ui_tests
     UIHitSnapshotTests.cpp
     UIButtonActionTests.cpp
     UIInputRouteTests.cpp
+    UIDirtySubtreeTests.cpp
     UILayoutTests.cpp
     UIPaintSnapshotTests.cpp
     UITreeCoreTests.cpp

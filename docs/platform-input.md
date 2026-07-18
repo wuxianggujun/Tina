@@ -9,9 +9,10 @@
 > `EngineHost` 私有延迟绑定主窗口 `UIContext`，并按 Platform lifecycle dispatch → UI route →
 > ActionMapper 接入正式帧路径。M7-C1c-b3d2 已加入 startup primary-window metrics seed 与 Game SDK
 > root-scoped UI facade；M7-C1c-b3e 已让 Pointer listener 请求 button ownership，producer 只发布最终
-> snapshot 仍 held 的 primary Pointer Button claim。Key/Gamepad/axis claim producer、可见 Widget、
-> Focus/Capture/Modal 与 bgfx UI pass 仍未实现；D0 已把 primary-window UIDisplayList 作为 Runtime-private
-> submit-call-local `RenderFrame` borrow 接入，但不代表可见 Widget。
+> snapshot 仍 held 的 primary Pointer Button claim。D0 已把 primary-window UIDisplayList 作为 Runtime-private
+> submit-call-local `RenderFrame` borrow 接入，D1 已让 `tina_render_bgfx` 私有 SolidQuad pass 消费该列表，
+> D2 已由 Desktop 可见样例验证 SolidFill panel。Key/Gamepad/axis claim producer、可见 Widget、
+> Focus/Capture/Modal 与文本/glyph UI 仍未实现；这些门禁不应与最小 bgfx UI pass 混为一谈。
 
 ## 结论
 

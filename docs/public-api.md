@@ -530,8 +530,10 @@ public:
   诊断 seam，可单独发布结构并保留旧 layout/hit/paint；Runtime
   发布不得将二者拆开；
 - viewport 变化会重排；相同 viewport 且无 structure/layout dirty 时不执行 layout pass、不增加
-  layout revision。当前 changed frame 仍对整棵 live tree执行一次非递归 Measure/Arrange，dirty
-  leaf 跳过无关 subtree 尚未实现。
+  layout revision。当前 dirty-subtree b4a 已复用 clean subtree 的 Measure/Arrange 调度、prepared-input
+  cache 与既有几何结果，并在父约束/viewport/Collapsed/候选失败时回退完整布局；但
+  `buildLayoutOrder`、父级 `arrangeChildren`、committed layout、hit 与 paint snapshot 仍可能线性遍历，
+  因此完整 dirty-range pruning 尚未实现。
 
 `UICommittedLayoutView` 是 owner-thread borrowed view，携带对应 structure/layout revision；在
 下一次成功发布新 layout 或 `UIContext` 析构后失效。它只发布 logical local/world rect、effective
@@ -565,7 +567,7 @@ owner-thread mutation/route 前 drain，context 销毁后 reset 仍安全。低�
 绑定 root subtree 内的节点；跨 root/stale generation 失败不占 listener slot，也不推进 high-water。
 fixed-inline callback 的 move/destructor 可以执行用户代码，因此最终 move 后会重新校验 root、node generation、
 subtree 与 registration serial；若重入释放 root/节点则整次注册回滚。callback operation 期间销毁 Context
-触发生命周期 terminate，不能继续潜在 UAF。当前没有持久 Pointer Capture、Focus/Modal、dirty subtree pruning、
+触发生命周期 terminate，不能继续潜在 UAF。当前没有持久 Pointer Capture、Focus/Modal、完整 dirty-range pruning、
 nested clip、Button Keyboard/Gamepad activation 或完整 Widget default behavior。
 `UIContext` 的 mutation、route 与销毁只允许 owner thread；route callback/callback cleanup 内销毁或
 非 owner-thread 销毁会触发生命周期硬门禁，而不是继续执行潜在 UAF。
@@ -982,7 +984,7 @@ Release 300帧通过。Linux GCC 13.4 与 Linux Clang 22 sanitizer 仍保留
 paint/DisplayList/bridge 门禁：基础205/205、UI92/92、Runtime→UI46/46、bridge12/12与Null样例300帧，
 Clang 无 sanitizer 诊断；D1/D2 的 bgfx SolidQuad pass、Game SDK `setBoxPaint()` facade 与可见
 Desktop 4-panel 样例尚未在 Linux 图重跑。
-现有测试尚未覆盖 dirty subtree pruning、Focus/Capture/Modal、Button Keyboard/Gamepad activation、
+现有测试尚未覆盖完整 dirty-range pruning、Focus/Capture/Modal、Button Keyboard/Gamepad activation、
 Disabled/theme 视觉、Image/Text/Glyph PaintCache、Runtime packet、nested clip、完整 Widget 默认行为或文本 Widget。M7-C1c-b3b 的 producer
 只补齐 Move/Button/Wheel→consumption 私有桥，M7-C1c-b3c 只补齐 primary-window Context 生命周期与
 EngineHost 顺序接线，M7-C1c-b3d1 只补齐容量配置与 Runtime-private layout commit；b3d2 只补齐
@@ -990,5 +992,6 @@ startup bind 与 root-scoped Game SDK UI facade；b3e 只补齐 held primary Poi
 Button default action 只补齐 primary Pointer 窄 pressed/activation 与 retained action property。
 SolidFill paint、Render builder、integration bridge、D0 Runtime submit-call-local handoff、D1 bgfx pass 与
 D2 visible panels 也不扩大到完整 Widget、owning packet、Text/Glyph 或产品 UI 结论。Windows Debug 本轮
-Button default action 已通过基础208/208、UI109/109、Runtime→UI60/60与 Null 300帧；Windows Release 的
+Button default action 前序切片已通过基础208/208、UI109/109、Runtime→UI60/60与 Null 300帧；dirty-subtree b4a
+又通过 UI115/115（含6项 reuse/回退测试）；Windows Release 的
 D2 独立 Runtime→UI 门禁为53/53，Linux GCC 与 Clang sanitizer 的 b3e 独立 Runtime→UI 门禁仍为46/46。

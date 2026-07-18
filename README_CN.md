@@ -89,7 +89,7 @@ D2 又让 `PrimaryWindowUITreeUpdater::setBoxPaint()` 进入 Game SDK facade，D
 retained SolidFill panel。当前可见路径仍只是 SolidFill quad，不等于完整 Widget/UI：文本/glyph
 渲染尚未接入，Label 仍不绘制文本，Button 的 Keyboard/Gamepad activation、Disabled/theme 视觉与完整
 Widget facade 仍后置。持久 Pointer Capture、Focus/Modal、Key/Gamepad/axis claim、
-Image/Text/Glyph PaintCache、dirty subtree pruning、nested clip、owning Runtime RenderFramePacket、
+Image/Text/Glyph PaintCache、完整 dirty-range pruning、nested clip、owning Runtime RenderFramePacket、
 FramePin、production Gamepad、Windows IMM32 composition、Scene、文本/Widget、Pass Scheduler、
 submission ticket/drain 与可见中文 UI 分别放在后续切片。
 
@@ -111,8 +111,8 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求
 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、
-MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过本轮 Button default action 的
-Debug 直接门禁：基础208/208、独立 UI 109/109、独立 Runtime→UI 60/60，以及 Null 样例300帧正常退出
+MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过本轮 dirty-subtree b4a 的
+Debug 直接门禁：基础208/208、独立 UI 115/115、独立 Runtime→UI 60/60，以及 Null 样例300帧正常退出
 （State exit/Application shutdown 各1次）。本轮没有重跑 Release、
 UI→Render、GLFW、bgfx 或可见 Desktop，因此不能用这三个新数字覆盖对应产品门禁。上一轮完整 D2
 Windows Debug/Release 证据仍为基础207/207、UI92/92、Runtime→UI53/53、UI→Render bridge12/12、

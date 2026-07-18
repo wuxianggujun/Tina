@@ -70,9 +70,10 @@ routed Pointer listeners request button ownership; Runtime publishes only dedupl
 still held in the final snapshot through bounded double-buffered claims, and `ActionMapper` cancels an active
 Gameplay source or intercepts an unconsumed same-frame Down until the true Up. An EngineHost end-to-end test now
 proves a Game SDK listener runs before ActionMapper and that a claim-only callback suppresses the same-frame Gameplay
-action. This is still not a complete Widget pipeline: the SolidFill paint/DisplayList/private bgfx panel path exists,
-but Key/Gamepad/axis claim producers, text/glyph rendering, Label text, and Button default behavior remain absent.
-Persistent Pointer Capture, Focus/Modal, dirty-subtree pruning, nested clipping, IMM32 composition, production
+action. The SolidFill paint/DisplayList/private bgfx panel path and primary Pointer Button default action now exist;
+the current b4a slice also reuses clean-subtree Measure/Arrange work. This is still not a complete Widget pipeline:
+Key/Gamepad/axis claim producers, text/glyph rendering, Label text, and Keyboard/Gamepad Button activation remain absent.
+Persistent Pointer Capture, Focus/Modal, complete dirty-range pruning, nested clipping, IMM32 composition, production
 gamepad input, Scene, Pass Scheduler, owning frame packets/pins, and submission tickets remain later slices.
 
 The active design, verified status, and build instructions are maintained in

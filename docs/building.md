@@ -92,7 +92,8 @@ cmake --build --preset windows-vnext-release --target tina_ui_render_integration
 out\build\windows-msvc-vnext\bin\Release\tina_ui_render_integration_tests.exe --gtest_color=yes
 ```
 
-截至 b3e，Windows 11 / MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22 sanitizer 的 UI
+截至 dirty-subtree b4a，Windows 11 / MSVC 19.50 Debug 的 UI
+门禁为115/115；Windows Release、Linux GCC 13.4 与 Clang 22 sanitizer 的 UI
 历史门禁均为81/81：
 16项覆盖 generation tree/ownership，
 23项覆盖事务式 Flex-lite layout，15项覆盖固定 PMR 容量、`Ignore`/`Targetable`、route ancestry、
@@ -108,8 +109,9 @@ sanitizer 的 `tina_ui_tests` 均为92/92。Render builder 的11项测试已随 
 `tina_tests` 205/205 通过；D0 后 Windows Debug/Release 基础测试增至207/207。独立 bridge 的12项在 Windows
 Debug/Release 与两条 Linux 图均通过，覆盖 logical→framebuffer
 outward rounding/clamp、冗余/空 clip、严格 paint order、容量/输入失败与完整 transaction rollback。
-本轮 Button default action Windows Debug 已把独立 UI 门禁增至109/109，覆盖默认 `Targetable`、
-primary Pointer pressed/activation、`preventDefaultAction()`、set/replace/clear、cancel/reset 与 PMR 复用。
+本轮 dirty-subtree b4a 又把独立 UI 门禁增至115/115，新增 clean sibling reuse、parent/viewport full rebuild、
+Auto ancestor、Collapsed subtree 与 candidate failure 回退测试；Button default action 的前序109项覆盖默认
+`Targetable`、primary Pointer pressed/activation、`preventDefaultAction()`、set/replace/clear、cancel/reset 与 PMR 复用。
 这些结果不证明持久 Pointer Capture、Focus/Modal、Button Keyboard/Gamepad activation、Image/Text/Glyph、owning
 Runtime packet/FramePin 或完整可见 Widget 已完成；D1/D2 的可见 SolidFill panel 由 Desktop bgfx 门禁单独覆盖。
 

@@ -2,7 +2,7 @@
 
 - 状态：Accepted
 - 日期：2026-07-16
-- 修订：2026-07-18
+- 修订：2026-07-19
 - 实施状态：M7-C1b 已实现事务式 Flex-lite layout；M7-C1c-a 已实现固定容量 PMR Pointer policy/
   route-ancestry scratch、`Ignore`/`Targetable`、双缓冲 `UICommittedHitView` 与成功 `commitLayout()` 的
   structure/layout/hit 原子发布；M7-C1c-b1 已实现无分配 `queryPointerHit()`、反向目标选择与 visited count。
@@ -19,9 +19,11 @@
   bridge 在 Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Linux Clang 22 sanitizer 构建中
   直接 GoogleTest 均为12/12，Clang 无 sanitizer 诊断。后续 Button default action 切片已实现
   `PrimaryPointerId + PointerButton::Primary` 的窄 default action、retained action property 与
-  cancel/reset 清理；Windows Debug 通过基础208/208、UI109/109、Runtime→UI60/60与 Null 300帧。
+  cancel/reset 清理；dirty-subtree b4a 又加入 prepared-input cache、clean-subtree Measure/Arrange reuse
+  与父约束/viewport/Collapsed/候选失败回退；Windows Debug 通过基础208/208、UI115/115、Runtime→UI60/60
+  与 Null 300帧。
   Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、Button Keyboard/Gamepad activation、
-  Disabled/theme 视觉、Image/Text/Glyph PaintCache、Runtime `RenderFramePacket`、dirty subtree pruning、
+  Disabled/theme 视觉、Image/Text/Glyph PaintCache、Runtime `RenderFramePacket`、完整 dirty-range pruning、
   nested clip 与含资源 bgfx UI pass 仍后置。
 
 ## 背景
@@ -83,9 +85,11 @@ grow、justify/align/stretch、Absolute Overlay、Visible/Hidden/Collapsed 和 m
 Auto 轴的 Percent 在 Measure 无确定 basis 时不参与父级 intrinsic size，并记录诊断；Arrange 取得最终
 content box 后只解析一次，不重新 Measure 父级，也不迭代求 fixed point，循环场景允许确定性 overflow。
 
-这是布局基础而非最终细粒度增量实现：changed frame 当前仍对整棵 live tree 执行一次非递归
-Measure/Arrange，尚不能依据 dirty leaf 跳过无关 subtree。后续实现必须在不改变本 ADR 事务、容量
-和 committed snapshot 契约的前提下，把工作量收敛到实际失效区域。
+这是布局基础而非最终细粒度增量实现：当前已可复用 clean subtree 的 Measure/Arrange 调度与既有几何
+结果，并在 Auto 祖先、父约束/viewport、Collapsed 子树和候选失败时回退完整布局；但
+`buildLayoutOrder`、父级 `arrangeChildren`、committed layout、hit 与 paint snapshot 仍可能线性遍历。
+后续完整 dirty-range pruning 必须在不改变本 ADR 事务、容量和 committed snapshot 契约的前提下，把工作量
+继续收敛到实际失效区域。
 
 M7-C1c-a 又加入 `UIPointerHitPolicy::{Ignore, Targetable}` 与双缓冲 `UICommittedHitView`。每份 view
 保存 effective-visible route-ancestry entry，保留 `Ignore` 祖先并省略 `Hidden`/`Collapsed` 子树；同一
@@ -144,8 +148,8 @@ capacity failure 与 Tina allocation delta。每窗口 layout pass 每帧只能�
 无 mutation commit 的0 layout pass、revision 不变和 supplied UI PMR allocation count 不增加；query/route
 继续覆盖反向目标选择、Ignore 穿透、半开边界、非有限坐标 miss、Capture/Target/Bubble、路由中
 reset/add/destroy、容量失败、off-thread token reset、reentrancy 和300次零新增 supplied UI PMR allocation。
-最新 Windows MSVC 19.50 Debug、Linux GCC 13.4 与 Linux Clang 22 sanitizer 的 `tina_ui_tests` 均为
-92/92，其中新增11项 SolidFill paint snapshot 测试；`tina_tests` 均为205/205，其中含11项 Render
+最新 Windows MSVC 19.50 Debug 的 `tina_ui_tests` 为115/115，其中包含6项 dirty-subtree reuse/回退测试；
+上一轮 Linux GCC 13.4 与 Linux Clang 22 sanitizer 的 `tina_ui_tests` 为92/92；`tina_tests` 均为205/205，其中含11项 Render
 DisplayList builder 测试。独立 bridge 在 Windows Debug/Release 与两条 Linux 图均为12/12；Linux
 Null 样例也各运行300帧，Clang 无 sanitizer 诊断。Windows Release 的完整 UI 与基础测试仍沿用 b3e
 的81/81与194/194历史门禁，尚未针对最新切片重跑。上述结果仍不等价于 Game SDK paint authoring、
@@ -332,7 +336,8 @@ M7-C1b/C1c-a/C1c-b1/C1c-b2 完成无变化布局零工作、changed-frame 单 pa
 与 synthetic listener route；M7-C1c-b3b 只完成 Runtime-private Pointer route-result producer，
 M7-C1c-b3c 只完成 primary-window Context lifetime 与 EngineHost 顺序接线，M7-C1c-b3d1 只完成
 bounded capacity 与每帧 layout commit；
-“CPU 成本由实际变化区域决定”仍需后续 dirty subtree pruning 证明，不能从 dirty bit/queue 或 hit view
+“CPU 成本由实际变化区域决定”目前只由 clean-subtree Measure/Arrange reuse 部分证明；完整 dirty-range pruning
+仍需后续证明，不能从 dirty bit/queue 或 hit view
 已存在直接推断。最新 SolidFill committed paint、Render DisplayList builder 与 integration bridge 只闭合
 后端无关数据转换；Widget default action、Runtime packet、bgfx UI Pass 与可见 UI 不能由这些组件、
 private owner/producer、root-scoped facade 或 synthetic route 推断。

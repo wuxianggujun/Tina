@@ -115,10 +115,13 @@ paint/DisplayList bridge、D0 submit-call-local primary-window UIDisplayList han
 `addRoutedPointerListener()` facade 与窄 Button default action。
 Panel/Label/Button 只是在 retained tree 中可创建的节点类型；当前只有 SolidFill panel 可见样例，
 还没有 Label 文本或 Button 的 Keyboard/Gamepad activation、Disabled/theme 视觉和完整 facade。Key/Gamepad/axis claim、
-持久 Pointer Capture、Focus/Modal、Button
-owning RenderFramePacket/FramePin、nested clip、dirty subtree pruning、text/glyph、FreeType、
+持久 Pointer Capture、Focus/Modal、Button Keyboard/Gamepad activation、
+owning RenderFramePacket/FramePin、nested clip、完整 dirty-range pruning、text/glyph、FreeType、
 Image/Texture 与产品级 Widget UI 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或
 SolidFill 4-panel Desktop smoke 推断为已经实现。
+
+当前 b4a 已完成 clean-subtree Measure/Arrange reuse；这只减少进入布局调度的节点，Runtime 仍不能把它
+当作 hit/paint/layout-order 全链路 dirty pruning 已完成。
 
 最新 UI 输入切片已落地：producer 继续逐 raw ordinal 处理输入，在普通 Pointer route
 完成后执行 Button 的 `PrimaryPointerId + PointerButton::Primary` default action；非 gamepad-only

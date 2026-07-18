@@ -74,7 +74,8 @@ shader program。D2 又把 `PrimaryWindowUITreeUpdater::setBoxPaint()` 暴露给
 `tina_sample_desktop` 现在以4个 retained SolidFill panel 形成可见 UI 垂直切片。它仍不是完整 Widget
 系统：owning Runtime `RenderFramePacket`、FramePin、文本/glyph/Label 文本、Button Keyboard/Gamepad
 activation、Disabled/theme 视觉、Image/Texture、Key/Gamepad/axis claim、持久 Pointer Capture、
-Focus/Modal、dirty subtree pruning 与 nested clip 仍未完成。
+Focus/Modal、完整 dirty-range pruning 与 nested clip 仍未完成；当前已具备 clean-subtree
+Measure/Arrange reuse，但 hit/paint/layout-order 仍可能线性遍历。
 
 最新窄 UI 切片已完成实现：Button 默认 `Targetable`，只增加
 `PrimaryPointerId + PointerButton::Primary` 的 armed/pressed/Up activation、retained action callback、

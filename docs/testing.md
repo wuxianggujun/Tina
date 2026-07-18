@@ -21,11 +21,11 @@
 
 ## 已验证基线
 
-当前迁移结果对应 2026-07-18 的 `codex/tina-vnext-runtime`：
+当前迁移结果对应 2026-07-19 的 `codex/tina-vnext-runtime`：
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2，并含后续 root-scoped Game SDK routed Pointer listener facade 与 Button default action | Debug C++23 | 208/208 | 本轮直接重跑 UI109/109、Runtime→UI60/60与Null样例300帧；UI→Render12/12、bgfx16/16、Desktop D3D11 Intel Iris Xe 1200帧截图检查与 GLFW25/25均为前序 D2 门禁，本轮未重跑；D2 Debug `RefCount is 3 (expected 0)` 为第三方 debug layer 提示 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2，并含后续 root-scoped Game SDK routed Pointer listener、Button default action 与 dirty-subtree b4a | Debug C++23 | 208/208 | 本轮直接重跑 UI115/115、Runtime→UI60/60与Null样例300帧；UI→Render12/12、bgfx16/16、Desktop D3D11 Intel Iris Xe 1200帧截图检查与 GLFW25/25均为前序 D2 门禁，本轮未重跑；D2 Debug `RefCount is 3 (expected 0)` 为第三方 debug layer 提示 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2 Game SDK `setBoxPaint()` + 私有 bgfx SolidQuad UI Pass | Release C++23 | 207/207 | 上一轮 D2 独立 UI92/92、Runtime→UI53/53、UI→Render bridge12/12、Null样例300帧、bgfx16/16、Desktop D3D11 Intel Iris Xe 300帧；GLFW25/25为更早门禁；Release clean，本轮 listener extension 未重跑 Release |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug/Release C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过 |
 | Ubuntu 22.04 / GCC 13.4 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过；构建保留旧源码/EASTL 既有 warning |
@@ -36,7 +36,7 @@ GLFW adapter 和 bgfx adapter 测试是独立 executable，不能把多个进程
 
 | 构建图 | 基础 GoogleTest | GLFW 专项 GoogleTest | bgfx 专项 GoogleTest | 状态 |
 | --- | ---: | ---: | ---: | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 208/208 | 25/25（前序） | 16/16（前序） | 本轮直接重跑 UI109/109、Runtime→UI60/60与Null样例300帧；UI→Render12/12、Desktop样例1200帧截图检查与 adapter 样例均为前序 D2 门禁；D2 Debug D3D11 RefCount=3 已归因为第三方 debug layer 提示 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 208/208 | 25/25（前序） | 16/16（前序） | 本轮直接重跑 UI115/115、Runtime→UI60/60与Null样例300帧；UI→Render12/12、Desktop样例1200帧截图检查与 adapter 样例均为前序 D2 门禁；D2 Debug D3D11 RefCount=3 已归因为第三方 debug layer 提示 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 207/207 | 25/25（前序） | 16/16 | 上一轮 D2 UI92/92、Runtime→UI53/53、UI→Render12/12、Null/Desktop样例300帧；GLFW样例300帧为更早门禁；Release clean，本轮 listener extension 未重跑 Release |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 production-style | 测试 target 关闭 | 不构建 | 不构建 | 更早门禁：`TINA_BUILD_TESTING=OFF`，GLFW样例300帧返回0 |
 | Ubuntu 22.04 / GCC 13.4 vNext Null；前序 GLFW X11 | 205/205 | 23/23（历史 C1c-b3a） | 未运行 | 最新 UI92/92、Runtime→UI46/46、UI→Render12/12与Null样例300帧；adapter样例保留历史门禁 |
@@ -44,8 +44,8 @@ GLFW adapter 和 bgfx adapter 测试是独立 executable，不能把多个进程
 | Ubuntu 22.04 / GCC 13.4 + GLFW X11/Wayland 双后端 | 183/183 | 22/22 | 未运行 | 通过；嵌套 Weston 9 强制 Wayland 与 Xvfb 强制 X11 均通过基础、专项与300帧样例 |
 | Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11/Wayland 双后端 + ASan/UBSan/LSan | 183/183 | 22/22 | 未运行 | 通过；基础测试无 suppression且Null样例300帧；Wayland专项与样例 suppression 命中0，X11专项命中12次/4896 B、样例命中1次/408 B |
 
-当前最新 Button default action 增量门禁在 MSVC 19.50 / CMake 4.2.3 Windows Debug 下直接通过基础208/208、
-UI109/109、Runtime→UI60/60，并运行 Null sample 300帧，State exit/Application shutdown 各1次。
+当前最新 dirty-subtree b4a 增量门禁在 MSVC 19.50 / CMake 4.2.3 Windows Debug 下直接通过基础208/208、
+UI115/115、Runtime→UI60/60，并运行 Null sample 300帧，State exit/Application shutdown 各1次。
 本轮没有运行 Release、UI→Render、GLFW、bgfx 或 Desktop。
 上一轮完整 Windows D2 门禁仍是 Debug/Release 基础207/207、UI92/92、Runtime→UI53/53、
 UI→Render12/12与Null样例300帧；bgfx专项16/16和 D3D11 Intel Iris Xe Desktop样例也均通过，Debug
@@ -63,7 +63,8 @@ Scene/Pass Scheduler/submission ticket、Text/Glyph、Widget 默认行为，也�
 M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、committed hit snapshot、纯 point query、synthetic route 与
 b3d2 root-scoped child 创建、b3e listener claim 请求，以及最新11项 SolidFill paint 使用独立
 `tina_ui_tests`。后续 listener extension 新增 root-scoped/cross-root 原子注册、callback move 释放 root
-回滚和 callback move 销毁 Context death test。Button default action 切片新增14项后，当前 Windows 11 / MSVC 19.50 Debug 为109/109；上一轮
+回滚和 callback move 销毁 Context death test。Button default action 切片新增14项后达到109/109；dirty-subtree
+b4a 再新增6项 reuse/回退测试，当前 Windows 11 / MSVC 19.50 Debug 为115/115；上一轮
 Windows Release、Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均为92/92，
 Clang 无 sanitizer 诊断，本轮未重跑。初次 GCC 暴露的 routed-pointer callback `requires`
 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
@@ -230,6 +231,10 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   rollback、callback move 销毁 Context terminate；Runtime capability 新增 token 跨 phase 与 cross-root
   sticky/no-slot；基础 EngineHost E2E 覆盖 claim-before-actions、claim-only suppression 与 onExit token reset。
   最新 Windows Debug 分别为 UI95/95、Runtime→UI55/55、基础208/208；
+- UI dirty-subtree b4a：6项测试覆盖 clean sibling Measure/Arrange reuse、viewport 与 parent-style constraint
+  full rebuild、Auto 祖先重算与 sibling 位移、Collapsed 子树 oracle，以及 paint candidate 失败后禁用下一次 reuse。
+  `lastLayoutMeasuredNodeCount`/`lastLayoutArrangedNodeCount` 只统计进入对应调度的节点，不代表
+  `buildLayoutOrder`、父级子节点、hit/paint snapshot 已完成完整 dirty-range pruning；Windows Debug 为115/115；
 - UI paint 与 Render DisplayList：11项 `UIPaintSnapshotTest` 覆盖 straight sRGBA8 的确定性预乘、
   effective-visible/transparent 筛选、same-value/no-op、paint-only 0 layout/hit、四份 snapshot 原子回滚、
   `paintSnapshotCapacity` 与 supplied PMR；11项 `UIDisplayListTest` 覆盖单缓冲 view 生命周期、strict paint
@@ -301,8 +306,9 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
 - Scene 延迟 push/pop/replace，以及 fixed phase mutation barrier、延迟实体销毁和
   interpolation snapshot；
 - UI 后续：在 b3e startup/root capability、Pointer Button claim bridge、已实现 SolidFill paint/DisplayList
-  bridge、D0 Runtime DisplayList handoff、D2 scoped `setBoxPaint()` 与已实现 Button default action 基础上补完整 Widget owner、Label 文本、Image/Text/Glyph PaintCache、
-  细粒度 dirty subtree pruning 和布局中新增 dirty 不丢；
+  bridge、D0 Runtime DisplayList handoff、D2 scoped `setBoxPaint()`、Button default action 与 clean-subtree
+  Measure/Arrange reuse 基础上补完整 Widget owner、Label 文本、Image/Text/Glyph PaintCache、完整 dirty-range pruning
+  和布局中新增 dirty 不丢；
 - UIInputScopeSnapshot 对多个 eligible State roots 只做一次全局 hit-test；阻断/恢复时 Pointer Cancel、
   Focus history、Modal root scope 与 generation 失效顺序固定；
 - Transform/scroll/clip 只重建 composite snapshot，不重建 local PaintCache；Visible/Hidden/Collapsed
@@ -398,7 +404,7 @@ cmake --build --preset windows-vnext-release --target tina_ui_tests
 out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
 ```
 
-当前 Windows MSVC 19.50 Debug 为95/95；上一轮 Windows Release、Linux GCC 13.4 与 Linux Clang 22
+当前 Windows MSVC 19.50 Debug 为115/115；上一轮 Windows Release、Linux GCC 13.4 与 Linux Clang 22
 sanitizer 为92/92，Clang 无诊断。本轮没有重跑后三条门禁。
 
 Windows SolidFill committed paint → Render SolidQuad DisplayList bridge 的独立直接门禁为：
@@ -470,7 +476,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Release\tina_render_bgfx_tests.exe --gtest
 out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
 ```
 
-当前 listener extension 的 Windows Debug 直接结果是基础208/208、UI95/95、Runtime→UI55/55与Null样例
+当前 dirty-subtree b4a 的 Windows Debug 直接结果是基础208/208、UI115/115、Runtime→UI60/60与Null样例
 300帧；本轮未重跑 Release、UI→Render、bgfx 或 Desktop。上一轮完整 Windows D2 Debug/Release 结果是基础207/207、UI92/92、Runtime→UI53/53、UI→Render12/12、
 Null样例300帧、bgfx专项16/16与真实 D3D11 Intel Iris Xe Desktop样例；Debug 1200帧并做截图像素检查，
 Release 300帧输出 clean status ok。本轮 Debug D3D11 观察到 `RefCount is 3 (expected 0)` 的已记录第三方 debug layer 提示。

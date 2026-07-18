@@ -556,10 +556,12 @@ Move/Wheel/Button listener 通过 `claimPointerButton()` 请求接管最终 snap
 Button；Runtime 去重后发布，ActionMapper 取消或拦截 Gameplay source 并抑制到真实 Up。D0 已实现 retained
 paint snapshot、后端无关 SolidQuad DisplayList extraction，以及 Runtime-private primary-window handoff：
 固定容量 builder 在 paint/layout commit 后构建列表，`RenderFrame` 只借用到本次 `submitFrame()` 返回；
-Headless、零 framebuffer 和 suspended frame 发布空列表，失败不复用旧列表或截断列表。它仍不是可见 UI，
-因为 Game SDK 没有 paint setter，当前产品列表只能为空，且尚无 bgfx UI pass、文本/glyph 或 Button default
-action。Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、nested clip、dirty subtree pruning、
-FreeType、owning frame packet 与 bgfx UI pass 仍未实现。完整目标中 UI 树最终输出后端无关的 Quad、Image、
+Headless、零 framebuffer 和 suspended frame 发布空列表，失败不复用旧列表或截断列表。D2 已通过
+Game SDK `setBoxPaint()` 和 Desktop 可见样例验证 SolidFill panel；D1 的 bgfx SolidQuad pass 只存在于
+`tina_render_bgfx`，Game SDK 与公共 Render API 仍不暴露 bgfx 类型。Button default action 已支持
+`PrimaryPointerId + PointerButton::Primary` 的 pressed/activation、retained action property 和取消清理。
+这仍不是完整 Widget UI：文本/glyph、Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、
+nested clip、完整 dirty-range pruning、FreeType、owning frame packet 与资源 pin 仍未实现。完整目标中 UI 树最终输出后端无关的 Quad、Image、
 GlyphRange、Clip DisplayList，由 Render 层保持 paint order 批处理。
 
 布局采用一次 Measure/Arrange 的 Flex-lite；每个有序 Pointer transition 最多 hit-test 一次。
@@ -600,8 +602,9 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
    startup primary-window metrics seed 与 root-scoped、phase-epoch-scoped Game SDK access，M7-C1c-b3e 已完成
    held primary Pointer Button claim bridge，后续 listener facade 与 Button default action 切片又完成
    root-scoped listener registration、claim-before-ActionMapper、`PrimaryPointerId + PointerButton::Primary`
-   pressed/activation、retained action property 和 cancel/reset 清理。后续继续推进 Key/Gamepad/axis claims、
-   focus/capture/widget、Button Keyboard/Gamepad activation、dirty subtree pruning、Label/Button/Modal +
+   pressed/activation、retained action property 和 cancel/reset 清理；b4a 又完成 clean-subtree Measure/Arrange
+   reuse 与父约束/viewport/Collapsed/候选失败回退。后续继续推进 Key/Gamepad/axis claims、
+   focus/capture/widget、Button Keyboard/Gamepad activation、完整 dirty-range pruning、Label/Button/Modal +
    FreeType、owning Runtime packet/FramePin、IMM32/Gamepad/DPI 门禁；
 5. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；
 6. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D

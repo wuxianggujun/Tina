@@ -18,13 +18,14 @@
 > integration bridge、Game SDK scoped `setBoxPaint()` facade 与私有 bgfx SolidQuad UI Pass；Windows
 > Desktop 样例已经能在真实 D3D11 surface 上显示4个 retained SolidFill panel，并验证 alpha blend 与
 > framebuffer scissor。
-> 后续 Button default action 切片已实现 `PrimaryPointerId + PointerButton::Primary` 的窄默认交互：
+> 后续 Button default action 切片已实现 `PrimaryPointerId + PointerButton::Primary` 的窄默认交互，当前
+> dirty-subtree 切片又完成了 clean subtree 的 Measure/Arrange reuse：
 > Button 默认 `Targetable`，Down/Move/Up 维护 pressed 状态，Up-inside 只激活一次；`preventDefaultAction()`
 > 独立于 stop/consume/claim；`setButtonAction()`、`clearButtonAction()` 与 `isButtonPressed()` 已通过
 > root-scoped facade 暴露；cancel/reset 清理状态但不合成 Up、不触发 action。
 > Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、Button Keyboard/Gamepad activation、
 > Disabled/theme 视觉、Image/Text/Glyph PaintCache、owning Runtime `RenderFramePacket`/FramePin、nested clip、
-> dirty subtree pruning、文本 Glyph Atlas、Label 文本与完整 Widget facade 尚未实现。Tina UI 是游戏内 Retained UI，
+> 完整 dirty-range pruning、文本 Glyph Atlas、Label 文本与完整 Widget facade 尚未实现。Tina UI 是游戏内 Retained UI，
 > 不是 Immediate UI，也不是桌面编辑器工具包。
 
 ## 当前 Legacy 基线
@@ -334,10 +335,13 @@ Measure/Order/HitTest/Semantics 失效集合。`UIDirty` 是固定宽度 bit mas
 
 M7-C1b 已实现的当前边界是：`setLayoutStyle()` 先规范化并比较旧值，值相同不入队；值变化时先
 预检整条 node→root 路径需要的 dirty queue 容量，再一次性合并节点与祖先 dirty，容量不足时
-style 与 dirty 均不变。dirty queue、style/dirty side array、layout scratch 与两套 committed
-snapshot 全部在 Create 阶段由 UI PMR 固定容量分配。当前任意有效 layout dirty 会在 changed frame
-对整棵 live tree 执行一次非递归 Measure/Arrange；dirty leaf 跳过无关 subtree 尚未实现，因此还
-不能把下面的“最小传播与重建边界”全部宣称为现状。无变化且 viewport 相同的 commit 则是0次
+style 与 dirty 均不变。dirty queue、style/dirty side array、layout scratch、layout work bits 与两套
+committed snapshot 全部在 Create 阶段由 UI PMR 固定容量分配。当前 dirty-subtree 切片已完成
+clean subtree 的 Measure/Arrange reuse：复用稳定的 prepared-input cache 和既有几何结果，Auto
+祖先、Collapsed 子树、viewport/父约束变化以及候选失败都会回退到完整布局。统计中的
+`lastLayoutMeasuredNodeCount`/`lastLayoutArrangedNodeCount` 只表示实际进入对应调度阶段的节点数；
+`buildLayoutOrder`、父级 `arrangeChildren`、committed layout、hit 与 paint snapshot 仍可能线性遍历，
+因此完整 dirty-range pruning、空间索引和并行 layout 尚未实现。无变化且 viewport 相同的 commit 则是0次
 Measure/Arrange；viewport 变化会强制一次重排。M7-C1c-a 的 `setPointerHitPolicy()` 支持
 `Ignore`/`Targetable`，相同值为 no-op，值变化只使 hit snapshot 失效；非法枚举和容量失败不修改
 已发布数据。
@@ -738,7 +742,7 @@ M7-C1c-b3e 再补3项 claim 合并/非法值/无命中测试。Button default ac
 premultiplication、visible/transparent 筛选、paint-only/no-op revision、四份 snapshot rollback、固定容量与
 supplied PMR。后续 listener extension 再补 root-scoped/cross-root 原子注册、callback move 释放 root 的
 事务回滚，以及 callback move 销毁 Context 的 death test。本轮 Button default action 后又有新增
-UI 用例，当前 Windows Debug `tina_ui_tests` 为109/109；上一轮 Windows Release、Linux GCC 13.4、Linux Clang 22.1.8 +
+UI 用例，当前 Windows Debug `tina_ui_tests` 为115/115（含6项 dirty-subtree reuse/回退测试）；上一轮 Windows Release、Linux GCC 13.4、Linux Clang 22.1.8 +
 libstdc++15.2 ASan/UBSan/LSan 仍为92/92，且 Clang 无 sanitizer 诊断，本轮没有重跑这些图。初次 GCC
 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
 Render builder 的11项测试随 Windows Debug、Linux GCC/Clang `tina_tests` 205/205 通过；D0 后
@@ -749,7 +753,8 @@ Linux Null 样例各运行300帧，Clang 无 sanitizer 诊断。D1 的私有 bgf
 4顶点/6个32位索引、ABGR 颜色、容量失败不写入、非法命令预检和连续300次复用 caller-owned storage；
 Windows bgfx 专项增至16/16。D2 Desktop 样例在 Windows D3D11 上验证4个 retained SolidFill panel 可见、
 alpha blend、右侧 scissor clip 和 root 回收。Linux 对 D1/D2 的真实 bgfx UI pass 与可见样例尚未复验。
-这些结果尚未证明 dirty leaf 不扫描无关 subtree，也未覆盖 Image/Text/Glyph PaintCache、FramePin、
+这些结果证明了 clean subtree 的 Measure/Arrange 调度可以复用，但尚未证明完整 dirty range 不被
+layout order、父级子节点扫描、hit 或 paint snapshot 触碰；也未覆盖 Image/Text/Glyph PaintCache、FramePin、
 owning Runtime packet、Label/Button 文本、Button Keyboard/Gamepad activation 或完整产品 UI。M7-C1c-b3c 只补上 Runtime 私有
 primary-window Context 生命周期与 producer 顺序；M7-C1c-b3d1 只补上容量配置与 phase-driven layout
 commit；M7-C1c-b3d2 只扩大到 scoped Game SDK root/updater，D0 只扩大到 submit-call-local DisplayList
@@ -801,8 +806,9 @@ handoff，D2 才扩大到 SolidFill paint authoring 与最小可见 retained pan
 16. 已完成 `PrimaryPointerId + PointerButton::Primary` 窄 Button default action、retained
     `setButtonAction()`/`clearButtonAction()` 与 `isButtonPressed()` facade、cancel/reset 清理和 Runtime
     producer 合并；
-17. 实现 Key/Gamepad claim producer、dirty subtree pruning、完整 Widget authoring、owning
-    RenderFramePacket 与 FramePin；
+17. 已完成 clean-subtree Measure/Arrange reuse、prepared-input cache、父约束/viewport/Collapsed 回退和
+   候选失败后的 full-rebuild 保护；继续实现 Key/Gamepad claim producer、完整 dirty-range pruning、完整
+   Widget authoring、owning RenderFramePacket 与 FramePin；
 18. 完成 Image/Text/Glyph PaintCache、text layout + glyph atlas；
 19. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button Keyboard/Gamepad activation；
 20. 增加 Checkbox/Slider、Semantics、动画与截图门禁；

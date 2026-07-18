@@ -331,11 +331,15 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   gamepad-only cancel/覆盖窗口 reset 的无 action 清理。action 使用48字节 fixed-inline callback、固定容量
   slot pool、一个预分配 transaction slot 与 route registration serial；Windows Debug 已通过基础208/208、
   UI109/109、Runtime→UI60/60与 Null 300帧；
-- **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
-  subtree 尚未实现；正式路径虽已接线并可创建 retained root/Panel/Label/Button 节点，低层也已有
+- **已完成 M7-C1c-b4a**：新增固定容量 layout work bits 与 prepared-input cache，changed frame
+  只对需要 Measure/Arrange 的节点进入对应调度，clean sibling/subtree 复用既有几何结果；Auto 祖先、
+  Collapsed 子树、父约束/viewport 变化和 layout/paint candidate 失败均有 full-rebuild 回退与回归测试。
+  Windows Debug `tina_ui_tests` 当前为115/115；
+- **当前限制**：这不是完整 dirty-range pruning。`buildLayoutOrder`、父级 `arrangeChildren`、committed
+  layout、hit 与 paint snapshot 仍可能线性遍历；正式路径虽已接线并可创建 retained root/Panel/Label/Button 节点，低层也已有
   SolidFill paint/DisplayList bridge、D0 Runtime handoff、Game SDK paint setter 和私有 bgfx SolidQuad pass，
   但仍没有文本/glyph、Button Keyboard/Gamepad activation、Disabled/theme 视觉、完整 Widget facade 或产品 UI；
-- **仍后置**：Key/Gamepad/axis claim producer、dirty subtree pruning、持久 Pointer Capture、Focus/Modal、
+- **仍后置**：Key/Gamepad/axis claim producer、完整 dirty-range pruning、持久 Pointer Capture、Focus/Modal、
   Button Keyboard/Gamepad activation 与 Disabled/Theme 视觉、完整 Game SDK widget facade、Image/Text/Glyph PaintCache、nested clip、
   Runtime `RenderFramePacket`/FramePin 与 FreeType；
 - 后续把当前 borrowed SolidQuad DisplayList 升级为 owning Runtime packet，再扩展 Image/Text/Glyph 与资源 pin；Null UI

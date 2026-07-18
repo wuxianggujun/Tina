@@ -136,6 +136,20 @@ static_assert(std::is_nothrow_destructible_v<NodeRecord>);
 
 using NodePool = Core::GenerationPool<NodeRecord, Detail::UINodeRegistryTag>;
 
+struct LayoutPreparedInputs final {
+    UIVisibility effectiveVisibility = UIVisibility::Visible;
+    bool parentContentWidthDefinite = false;
+    bool parentContentHeightDefinite = false;
+    float parentContentWidth = 0.0F;
+    float parentContentHeight = 0.0F;
+    bool contentWidthDefinite = false;
+    bool contentHeightDefinite = false;
+    float contentWidth = 0.0F;
+    float contentHeight = 0.0F;
+
+    auto operator<=>(const LayoutPreparedInputs&) const = default;
+};
+
 struct LayoutScratchState final {
     UILogicalSize measuredSize{};
     UILogicalRect localRect{};
@@ -152,6 +166,9 @@ struct LayoutScratchState final {
     float contentHeight = 0.0F;
     u32 layoutOrdinal = 0;
     u32 paintOrdinal = 0;
+    // Prepare inputs remain stable after Arrange. The corresponding working
+    // fields above are intentionally updated to final geometry during Arrange.
+    LayoutPreparedInputs preparedInputs{};
 };
 
 struct LayoutPassStatistics final {
@@ -160,6 +177,28 @@ struct LayoutPassStatistics final {
     usize arrangedNodeCount = 0;
     usize percentMeasureFallbackCount = 0;
 };
+
+inline constexpr u8 LayoutWorkMeasure = 1u << 0;
+inline constexpr u8 LayoutWorkArrange = 1u << 1;
+inline constexpr u8 LayoutWorkMeasureComplete = 1u << 2;
+inline constexpr u8 LayoutWorkArrangeComplete = 1u << 3;
+
+[[nodiscard]] constexpr bool hasLayoutWork(u8 work, u8 flag) noexcept
+{
+    return (work & flag) != 0;
+}
+
+[[nodiscard]] constexpr u8 layoutSubtreeCompletionMask(u8 work) noexcept
+{
+    u8 mask = 0;
+    if ((work & LayoutWorkMeasure) != 0) {
+        mask |= LayoutWorkMeasureComplete;
+    }
+    if ((work & LayoutWorkArrange) != 0) {
+        mask |= LayoutWorkArrangeComplete;
+    }
+    return mask;
+}
 
 struct ResolvedLength final {
     bool hasValue = false;
@@ -569,6 +608,7 @@ struct UIContext::Impl final {
     std::pmr::vector<u8> dirtyQueuedByIndex;
     std::pmr::vector<UINodeId> dirtyQueue;
     std::pmr::vector<LayoutScratchState> layoutScratchByIndex;
+    std::pmr::vector<u8> layoutWorkByIndex;
     std::pmr::vector<u32> layoutOrderScratch;
     std::pmr::vector<u32> hitEntryIndexByNodeIndex;
     std::pmr::vector<u32> routedPointerListenerHeadByNodeIndex;
@@ -612,6 +652,10 @@ struct UIContext::Impl final {
     bool layoutDirty = false;
     bool hitDirty = false;
     bool paintDirty = false;
+    // A failed candidate may have partially mutated layout scratch. The next
+    // layout attempt must rebuild from scratch before reuse is enabled again.
+    bool layoutReuseCacheValid = false;
+    bool layoutReuseInProgress = false;
     LayoutPassStatistics lastLayoutPass{};
     usize dirtyQueueHighWater = 0;
     usize committedHitTargetCount = 0;
@@ -656,6 +700,7 @@ struct UIContext::Impl final {
           dirtyQueuedByIndex(&resource),
           dirtyQueue(&resource),
           layoutScratchByIndex(&resource),
+          layoutWorkByIndex(&resource),
           layoutOrderScratch(&resource),
           hitEntryIndexByNodeIndex(&resource),
           routedPointerListenerHeadByNodeIndex(&resource),
@@ -729,6 +774,7 @@ struct UIContext::Impl final {
         impl->dirtyQueuedByIndex.resize(normalized.nodeCapacity, 0);
         impl->dirtyQueue.reserve(normalized.dirtyQueueCapacity);
         impl->layoutScratchByIndex.resize(normalized.nodeCapacity);
+        impl->layoutWorkByIndex.resize(normalized.nodeCapacity, 0);
         impl->layoutOrderScratch.reserve(normalized.nodeCapacity);
         impl->hitEntryIndexByNodeIndex.resize(
             normalized.nodeCapacity,
@@ -875,10 +921,111 @@ struct UIContext::Impl final {
         }
     }
 
+    void markLayoutSubtreeWork(u32 rootIndex, u8 work) noexcept
+    {
+        const u8 completion = layoutSubtreeCompletionMask(work);
+        u32 currentIndex = rootIndex;
+        while (currentIndex != InvalidNodeIndex) {
+            const NodeRecord* record = recordByIndex(currentIndex);
+            if (record == nullptr) {
+                return;
+            }
+            layoutWorkByIndex[currentIndex] |= work | completion;
+
+            if (record->firstChildIndex != InvalidNodeIndex) {
+                currentIndex = record->firstChildIndex;
+                continue;
+            }
+
+            while (currentIndex != rootIndex) {
+                record = recordByIndex(currentIndex);
+                if (record == nullptr) {
+                    return;
+                }
+                if (record->nextSiblingIndex != InvalidNodeIndex) {
+                    currentIndex = record->nextSiblingIndex;
+                    break;
+                }
+                currentIndex = record->parentIndex;
+            }
+            if (currentIndex == rootIndex) {
+                currentIndex = InvalidNodeIndex;
+            }
+        }
+    }
+
+    void ensureLayoutSubtreeWork(u32 rootIndex, u8 work) noexcept
+    {
+        if (rootIndex >= layoutWorkByIndex.size()) {
+            return;
+        }
+        const u8 requiredCompletion = layoutSubtreeCompletionMask(work);
+        if ((layoutWorkByIndex[rootIndex] & requiredCompletion)
+            == requiredCompletion) {
+            return;
+        }
+        markLayoutSubtreeWork(rootIndex, work);
+    }
+
+    void markLayoutAncestorsWork(u32 nodeIndex, u8 work) noexcept
+    {
+        u32 currentIndex = nodeIndex;
+        while (currentIndex != InvalidNodeIndex) {
+            layoutWorkByIndex[currentIndex] |= work;
+            const NodeRecord* record = recordByIndex(currentIndex);
+            if (record == nullptr) {
+                return;
+            }
+            currentIndex = record->parentIndex;
+        }
+    }
+
+    void initializeLayoutWork(
+        const std::pmr::vector<u32>& order,
+        bool allowReuse) noexcept
+    {
+        for (const u32 index : order) {
+            layoutWorkByIndex[index] = 0;
+        }
+
+        if (!allowReuse) {
+            for (const u32 index : order) {
+                layoutWorkByIndex[index] = LayoutWorkMeasure | LayoutWorkArrange;
+            }
+            return;
+        }
+
+        for (const u32 index : order) {
+            const UIDirty dirty = dirtyByIndex[index];
+            if (hasDirty(dirty, UIDirty::Measure)) {
+                layoutWorkByIndex[index] |= LayoutWorkMeasure | LayoutWorkArrange;
+            } else if (hasDirty(dirty, UIDirty::Arrange)) {
+                layoutWorkByIndex[index] |= LayoutWorkArrange;
+            }
+            if (hasDirty(dirty, UIDirty::Style)) {
+                // A direct style change can alter the containing basis or
+                // effective visibility of any descendant.
+                ensureLayoutSubtreeWork(
+                    index,
+                    LayoutWorkMeasure | LayoutWorkArrange);
+                markLayoutAncestorsWork(index, LayoutWorkArrange);
+            }
+        }
+    }
+
+    [[nodiscard]] static bool samePreparedLayoutInputs(
+        const LayoutPreparedInputs& previous,
+        const LayoutPreparedInputs& current) noexcept
+    {
+        return previous == current;
+    }
+
     void prepareLayoutState(
         UILogicalSize viewportSize,
-        const std::pmr::vector<u32>& order) noexcept
+        const std::pmr::vector<u32>& order,
+        bool allowReuse) noexcept
     {
+        initializeLayoutWork(order, allowReuse);
         for (const u32 index : order) {
             const NodeRecord* record = recordByIndex(index);
             if (record == nullptr) {
@@ -886,7 +1033,10 @@ struct UIContext::Impl final {
             }
             const UILayoutStyle& style = layoutStylesByIndex[index];
             LayoutScratchState& scratch = layoutScratchByIndex[index];
-            scratch = {};
+            const LayoutPreparedInputs previous = scratch.preparedInputs;
+            if (!allowReuse) {
+                scratch = {};
+            }
 
             if (record->parentIndex == InvalidNodeIndex) {
                 scratch.effectiveVisibility = style.visibility;
@@ -924,6 +1074,29 @@ struct UIContext::Impl final {
             scratch.contentHeight = scratch.contentHeightDefinite
                 ? (std::max)(0.0F, outerHeight - verticalMargin(style.padding))
                 : 0.0F;
+
+            const LayoutPreparedInputs currentInputs{
+                .effectiveVisibility = scratch.effectiveVisibility,
+                .parentContentWidthDefinite = scratch.parentContentWidthDefinite,
+                .parentContentHeightDefinite = scratch.parentContentHeightDefinite,
+                .parentContentWidth = scratch.parentContentWidth,
+                .parentContentHeight = scratch.parentContentHeight,
+                .contentWidthDefinite = scratch.contentWidthDefinite,
+                .contentHeightDefinite = scratch.contentHeightDefinite,
+                .contentWidth = scratch.contentWidth,
+                .contentHeight = scratch.contentHeight,
+            };
+            scratch.preparedInputs = currentInputs;
+
+            if (allowReuse && !samePreparedLayoutInputs(previous, currentInputs)) {
+                // Parent constraint or effective visibility changes can
+                // invalidate every descendant even when only an ancestor was
+                // explicitly queued dirty.
+                ensureLayoutSubtreeWork(
+                    index,
+                    LayoutWorkMeasure | LayoutWorkArrange);
+                markLayoutAncestorsWork(index, LayoutWorkArrange);
+            }
         }
     }
 
@@ -994,12 +1167,19 @@ struct UIContext::Impl final {
             if (record == nullptr) {
                 continue;
             }
+            if (!hasLayoutWork(layoutWorkByIndex[index], LayoutWorkMeasure)) {
+                continue;
+            }
             const UILayoutStyle& style = layoutStylesByIndex[index];
             LayoutScratchState& scratch = layoutScratchByIndex[index];
+            const UILogicalSize previousMeasuredSize = scratch.measuredSize;
             ++statistics.measuredNodeCount;
 
             if (scratch.effectiveVisibility == UIVisibility::Collapsed) {
                 scratch.measuredSize = {};
+                if (scratch.measuredSize != previousMeasuredSize) {
+                    ensureLayoutSubtreeWork(index, LayoutWorkArrange);
+                }
                 continue;
             }
 
@@ -1062,6 +1242,9 @@ struct UIContext::Impl final {
                 .width = normalizeFloat(outerWidth),
                 .height = normalizeFloat(outerHeight),
             };
+            if (scratch.measuredSize != previousMeasuredSize) {
+                ensureLayoutSubtreeWork(index, LayoutWorkArrange);
+            }
         }
     }
 
@@ -1083,6 +1266,10 @@ struct UIContext::Impl final {
     {
         LayoutScratchState& scratch = layoutScratchByIndex[index];
         const UILayoutStyle& style = layoutStylesByIndex[index];
+        const UILogicalRect previousWorldRect = scratch.worldRect;
+        const UILogicalRect previousLocalRect = scratch.localRect;
+        const UILogicalRect previousEffectiveClip = scratch.effectiveClip;
+        const UIVisibility previousVisibility = scratch.effectiveVisibility;
         if (scratch.effectiveVisibility == UIVisibility::Collapsed) {
             worldRect.width = 0.0F;
             worldRect.height = 0.0F;
@@ -1105,6 +1292,14 @@ struct UIContext::Impl final {
             (std::max)(0.0F, worldRect.height - verticalMargin(style.padding)));
         scratch.layoutOrdinal = ordinal;
         scratch.paintOrdinal = ordinal;
+
+        if (layoutReuseInProgress
+            && (previousWorldRect != scratch.worldRect
+                || previousLocalRect != scratch.localRect
+                || previousEffectiveClip != scratch.effectiveClip
+                || previousVisibility != scratch.effectiveVisibility)) {
+            ensureLayoutSubtreeWork(index, LayoutWorkArrange);
+        }
     }
 
     void refreshMeasuredSizeForParentContent(
@@ -1114,6 +1309,7 @@ struct UIContext::Impl final {
     {
         const UILayoutStyle& childStyle = layoutStylesByIndex[childIndex];
         LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
+        const UILogicalSize previousMeasuredSize = childScratch.measuredSize;
         childScratch.parentContentWidthDefinite = true;
         childScratch.parentContentHeightDefinite = true;
         childScratch.parentContentWidth = parentContentRect.width;
@@ -1131,6 +1327,10 @@ struct UIContext::Impl final {
             .width = clampWidth(outerWidth, childStyle, childScratch, statistics),
             .height = clampHeight(outerHeight, childStyle, childScratch, statistics),
         };
+        if (layoutReuseInProgress
+            && childScratch.measuredSize != previousMeasuredSize) {
+            ensureLayoutSubtreeWork(childIndex, LayoutWorkArrange);
+        }
     }
 
     [[nodiscard]] float resolveInset(
@@ -1404,6 +1604,9 @@ struct UIContext::Impl final {
         for (const u32 index : order) {
             const NodeRecord* record = recordByIndex(index);
             if (record == nullptr) {
+                continue;
+            }
+            if (!hasLayoutWork(layoutWorkByIndex[index], LayoutWorkArrange)) {
                 continue;
             }
             ++statistics.arrangedNodeCount;
@@ -2147,6 +2350,7 @@ struct UIContext::Impl final {
         dirtyByIndex[index] = UIDirty::None;
         dirtyQueuedByIndex[index] = 0;
         layoutScratchByIndex[index] = {};
+        layoutWorkByIndex[index] = 0;
         routedPointerListenerHeadByNodeIndex[index] =
             InvalidRoutedPointerListenerIndex;
         routedPointerListenerTailByNodeIndex[index] =
@@ -2160,6 +2364,7 @@ struct UIContext::Impl final {
         structureDirty = true;
         layoutDirty = true;
         hitDirty = true;
+        layoutReuseCacheValid = false;
     }
 
     void compactDirtyQueue() noexcept
@@ -3022,6 +3227,13 @@ struct UIContext::Impl final {
         LayoutPassStatistics pass{};
         std::span<const UICommittedLayoutEntry> candidateLayoutEntries{};
         if (layoutNeedsCommit) {
+            const bool allowLayoutReuse =
+                !structureDirty && !viewportChanged && layoutReuseCacheValid;
+            layoutReuseCacheValid = false;
+            layoutReuseInProgress = allowLayoutReuse;
+            auto layoutReuseGuard = Core::makeScopeExit([this]() noexcept {
+                layoutReuseInProgress = false;
+            });
             writeLayoutBufferIndex = 1 - publishedLayoutBufferIndex;
             std::pmr::vector<UICommittedLayoutEntry>& writeLayout =
                 committedLayoutBuffers[writeLayoutBufferIndex];
@@ -3029,7 +3241,7 @@ struct UIContext::Impl final {
 
             buildLayoutOrder(layoutOrderScratch);
             pass.passCount = layoutOrderScratch.empty() ? 0 : 1;
-            prepareLayoutState(viewportSize, layoutOrderScratch);
+            prepareLayoutState(viewportSize, layoutOrderScratch, allowLayoutReuse);
             measureLayout(viewportSize, layoutOrderScratch, pass);
             arrangeLayout(viewportSize, layoutOrderScratch, pass);
             if (Core::Status candidateStatus = validateLayoutCandidate(layoutOrderScratch);
@@ -3114,6 +3326,9 @@ struct UIContext::Impl final {
         lastHitRebuildCount = hitNeedsCommit ? 1 : 0;
         lastPaintCacheRebuildCount = candidatePaintCacheRebuildCount;
         lastPaintSnapshotRebuildCount = paintNeedsCommit ? 1 : 0;
+        if (layoutNeedsCommit) {
+            layoutReuseCacheValid = true;
+        }
         clearDirtyState();
         return Core::success();
     }
