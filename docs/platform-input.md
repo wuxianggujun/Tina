@@ -410,8 +410,8 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
   `surfaceRevision`，以及 NullRender suspended 帧维护调用但不 present、不增加 submission index；
 - Windows C1c-b3e Debug/Release 均通过基础 `tina_tests` 194/194、独立 UI 81/81、独立
   Runtime→UI 46/46、GLFW专项25/25、bgfx专项11/11，以及Null/Platform/Desktop样例300帧；
-- Linux C1c-b3d2 GCC 13.4 与 Clang 22.1.8 sanitizer Null 图均通过基础194/194、独立 UI 78/78、
-  独立 Runtime→UI 42/42与Null样例300帧，Clang 无 sanitizer 诊断。上一 C1c-b3a Pointer/Input
+- Linux C1c-b3e GCC 13.4 与 Clang 22.1.8 sanitizer Null 图均通过基础194/194、独立 UI 81/81、
+  独立 Runtime→UI 46/46与Null样例300帧，Clang 无 sanitizer 诊断。上一 C1c-b3a Pointer/Input
   门禁通过基础185/185、GLFW专项23/23；
   其中 Clang X11 的基础测试不使用 suppression，只有 GLFW/X11 专项进程使用精确
   `leak:_XimOpenIM`，对应13次/5304 B的libX11 XIM retention。GCC 13.4 与 Clang X11 的 Null/GLFW样例各300帧均为

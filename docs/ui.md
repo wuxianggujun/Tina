@@ -609,7 +609,7 @@ callback、token move/context-destroyed/off-thread reset、callback root 自销�
 以及递归 route 拒绝。M7-C1c-b3d2 另补3项低层 `UITreeUpdater` 子节点创建/跨 root/失效 root 测试；
 M7-C1c-b3e 再补3项 claim 合并/非法值/无命中测试。Windows MSVC 19.50 Debug/Release 当前完整
 `tina_ui_tests` 为81/81；Linux GCC 13.4、Linux Clang 22.1.8 + libstdc++15.2
-ASan/UBSan/LSan 的最近 b3d2 记录仍为78/78，且 Clang 无 sanitizer 诊断。初次 GCC
+ASan/UBSan/LSan 的 b3e 记录也为81/81，且 Clang 无 sanitizer 诊断。初次 GCC
 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
 它尚未证明 dirty leaf 不扫描无关 subtree，也未覆盖 PaintCache、DisplayList、文本、Widget default
 action、可见 UI 或 GPU 资源归零。M7-C1c-b3c 只补上 Runtime 私有

@@ -628,12 +628,12 @@ vNext-only preset 设为 OFF；当新2D/UI/3D/Audio 覆盖门禁后先把默认�
   Legacy ON 图还必须直接执行 Legacy-only `tina_legacy_tests`，启用 GLFW adapter 时另行直接执行
   `tina_platform_glfw_tests`，这些 executable 均不使用 CTest；
 - M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、committed hit snapshot、point query 与 synthetic route 使用独立
-  `tina_ui_tests` 直接 GoogleTest；Windows b3e 已直接通过81/81。最近 Linux b3d2 基线仍为 GCC 13.4 与
-  Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 的78/78，且 Clang 无 sanitizer 诊断；初次 GCC 暴露的
+  `tina_ui_tests` 直接 GoogleTest；Windows Debug/Release、Linux GCC 13.4 与 Clang 22.1.8 +
+  libstdc++15.2 ASan/UBSan/LSan 的 b3e 均直接通过81/81，且 Clang 无 sanitizer 诊断；初次 GCC 暴露的
   routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning；
 - M7-C1c-b3b/b3c/b3d1/b3d2/b3e Runtime→vNext UI producer、Context owner、layout coordinator、startup
-  capability 与 Pointer claim bridge 使用独立 `tina_runtime_ui_tests`；Windows b3e Debug/Release 已直接
-  通过46/46。最近 Linux b3d2 基线仍为42/42，b3e 待本轮复核；测试不使用 CTest，也不与 Legacy UI 的最终二进制混装；
+  capability 与 Pointer claim bridge 使用独立 `tina_runtime_ui_tests`；Windows b3e Debug/Release、Linux
+  GCC 与 Clang sanitizer 均直接通过46/46；测试不使用 CTest，也不与 Legacy UI 的最终二进制混装；
 - Linux GCC 与 Clang 构建；正式支持前还要运行 GLFW/bgfx 2D/UI/3D，Clang sanitizer 只有真实
   运行通过后才能标记完成；
 - GLFW X11 与 Wayland 使用独立 preset 和真实/隔离 display server 运行；configure/build 成功不等于

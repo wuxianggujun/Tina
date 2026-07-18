@@ -29,9 +29,8 @@ Null graph passes direct Debug and Release gates on Windows VS 2026/MSVC 19.50/C
 `tina_tests` 194/194, `tina_ui_tests` 81/81, `tina_runtime_ui_tests` 46/46, and the Null sample for
 300 frames. The Windows adapter gates also pass GLFW 25/25, bgfx 11/11, a 300-frame GLFW sample,
 and a 300-frame Desktop run on a real D3D11 Intel Iris Xe; the Release Desktop process reports clean
-status. The last recorded b3d2 Linux gate remains the 194/78/42 Null matrix and Null sample on GCC 13.4;
-Clang 22.1.8 with
-libstdc++ 15.2 passes it under ASan/UBSan/LSan with no diagnostic. The first GCC UI pass
+status. The b3e Linux Null gate also passes the 194/81/46 matrix and 300-frame Null sample on GCC 13.4;
+Clang 22.1.8 with libstdc++ 15.2 passes the same matrix under ASan/UBSan/LSan with no diagnostic. The first GCC UI pass
 exposed a `requires` name-visibility issue in the routed-pointer callback constraint; it is fixed.
 The earlier Clang WSL2 Desktop run selected bgfx
 Vulkan on llvmpipe, so it proves the Linux Vulkan/backend lifecycle, not hardware-GPU performance.

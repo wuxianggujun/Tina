@@ -90,9 +90,9 @@ GLFW样例1800帧仍作为历史证据。Legacy ON 图的前序隔离门禁为 v
 `TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与
 公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。
 
-当前已记录的 b3d2 Linux Null 门禁中，GCC 13.4 通过基础194/194、`tina_ui_tests` 78/78、
-`tina_runtime_ui_tests` 42/42与Null样例300帧；Clang 22.1.8 + libstdc++15.2 在
-ASan/UBSan/LSan 下通过相同194/78/42与Null样例300帧，且无 sanitizer 诊断。前序 M7-B1 Platform
+当前 b3e Linux Null 门禁中，GCC 13.4 通过基础194/194、`tina_ui_tests` 81/81、
+`tina_runtime_ui_tests` 46/46与Null样例300帧；Clang 22.1.8 + libstdc++15.2 在
+ASan/UBSan/LSan 下通过相同194/81/46与Null样例300帧，且无 sanitizer 诊断。前序 M7-B1 Platform
 门禁覆盖 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer，以及 GCC 13/Clang 22 X11/Wayland 双后端；
 Wayland 使用带 `wl_seat` 的嵌套 Weston 9。初次 GCC 暴露的 routed-pointer callback `requires`
 名称可见性问题已修复。前序 M7-B2 Desktop/bgfx X11 图也已直接运行：GCC 13.4 与 Clang 22.1.8 +

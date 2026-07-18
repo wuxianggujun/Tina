@@ -133,8 +133,8 @@ Poll 统一冻结 final snapshot；任一步失败由 scope rollback 逆序撤�
 只说明这些问题值得研究，不能替代 Tina 自己的构建、分进程测试、样例运行和资源回收证据。当前
 M7-C1c-b3e 的 Windows Debug/Release 事实分别为：Null 图 `tina_tests` 194/194、`tina_ui_tests`
 81/81、`tina_runtime_ui_tests` 46/46；可选 adapter 另有 `tina_platform_glfw_tests` 25/25 与
-`tina_render_bgfx_tests` 11/11。Linux GCC 与 Clang sanitizer Null 图也通过194/194、78/78、42/42，
-但这仍是最近 b3d2 基线，b3e 待本轮复核；Clang 当时无 sanitizer 诊断。它们是五个独立 GoogleTest
+`tina_render_bgfx_tests` 11/11。Linux b3e 的 GCC 与 Clang sanitizer Null 图也通过194/194、81/81、46/46，
+以及Null样例300帧；Clang 无 sanitizer 诊断。它们是五个独立 GoogleTest
 executable，不能相加成一个“总测试数”。
 
 ### Render：采用 Step 契约，缩小为显式 Pass

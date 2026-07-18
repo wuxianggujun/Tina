@@ -799,12 +799,13 @@ Game SDK UI root/update facade 已实现，但不代表正式 SDK、完整 Rende
 可见 UI 或产品样例已完成。M7-C1b/C1c-a/C1c-b1/C1c-b2 已覆盖50,000节点
 非递归 layout/hit snapshot、连续300次无变化 commit 的0 layout pass/0新增 UI PMR allocation，以及
 15项 committed hit snapshot、5项 point query、19项 synthetic route 与3项 tree-updater 门禁；
-Windows MSVC 19.50 Debug/Release 的独立 `tina_ui_tests` 已通过81/81；最近一轮 Linux b3d2 基线仍是
-GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 的 UI 78/78，且 Clang 无 sanitizer 诊断；初次 GCC
-GCC/Clang 构建无 warning。它尚未覆盖 dirty subtree pruning、Focus/Capture/Modal、Button、paint snapshot/
+Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15.2
+ASan/UBSan/LSan 的独立 `tina_ui_tests` 均已通过81/81，且 Clang 无 sanitizer 诊断；初次 GCC
+暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
+它尚未覆盖 dirty subtree pruning、Focus/Capture/Modal、Button、paint snapshot/
 DisplayList、nested clip、文本/Glyph Atlas、Widget 默认行为或可见 Widget。M7-C1c-b3b 的 producer
 只补齐 Move/Button/Wheel→consumption 私有桥，M7-C1c-b3c 只补齐 primary-window Context 生命周期与
 EngineHost 顺序接线，M7-C1c-b3d1 只补齐容量配置与 Runtime-private layout commit；b3d2 只补齐
 startup bind 与 root-scoped Game SDK UI facade；b3e 只补齐 held primary Pointer Button claim bridge，
-仍不扩大到 Widget、DisplayList 或可见 UI 结论。Windows b3e 独立 Runtime→UI 门禁为46/46，Linux
-b3e 尚待本轮复核。
+仍不扩大到 Widget、DisplayList 或可见 UI 结论。Windows Debug/Release、Linux GCC 与 Clang sanitizer
+的 b3e 独立 Runtime→UI 门禁均为46/46。

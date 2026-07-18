@@ -228,7 +228,7 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   world/effective clip 的 `Targetable` entry，使用半开边界并返回 route index、四类 revision 与 visited count；
 - **已完成 M7-C1c-b1 门禁**：新增5项 query 测试后当时 `tina_ui_tests` 总数为59项；Windows Debug/Release、
   Linux GCC 13.4 与 Clang 22 ASan/UBSan/LSan 均通过，300次查询无新增 supplied UI PMR allocation；后续
-  C1c-b2 当时增至75/75，b3d2 为78/78；Windows b3e 当前为81/81，Linux b3e 尚待复核；
+  C1c-b2 当时增至75/75，b3d2 为78/78；Windows Debug/Release、Linux GCC 与 Clang sanitizer 的 b3e 当前均为81/81；
 - **已完成 M7-C1c-b2**：fixed-capacity synthetic routed pointer event；使用固定容量 route path/listener
   storage、48-byte fixed-inline `noexcept` callback、generation-safe RAII token、owner-thread immediate reset、
   off-thread deferred reset、Capture→Target→Bubble、stop/consume、route 中 add/reset/destroy 安全失效和
@@ -275,7 +275,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   但 attempted frame/sequence watermark 已推进且同帧不能重放。ActionMapper 对已 held Gameplay source
   生成 Cancel 并 suppress 到真实 Up；同帧 ButtonDown 即使没有 consume，只要被 claim 也不会激活
   Gameplay。Windows MSVC 19.50 Debug/Release 直接通过基础194/194、UI81/81、
-  Runtime→UI46/46、GLFW25/25、bgfx11/11及Null/Platform/Desktop各300帧；Linux b3e 尚待复核；
+  Runtime→UI46/46、GLFW25/25、bgfx11/11及Null/Platform/Desktop各300帧；Linux GCC 13.4 与 Clang 22
+  sanitizer 也直接通过基础194/194、UI81/81、Runtime→UI46/46及Null样例300帧，Clang无诊断；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
   subtree 尚未实现；正式路径虽已接线并可创建 retained root/Panel/Label/Button 节点，但没有 DisplayList、
   文本/glyph、默认 Widget 行为或 Render UI pass，无法产生产品 UI；

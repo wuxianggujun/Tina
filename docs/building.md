@@ -82,8 +82,7 @@ cmake --build --preset windows-vnext-release --target tina_ui_tests
 out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
 ```
 
-当前记录为 Windows 11 / MSVC 19.50 Debug/Release 81/81；Linux 最近仍为 b3d2 的 GCC 13.4 与
-Clang 22 sanitizer 78/78，b3e 待本轮复核：
+当前记录为 Windows 11 / MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22 sanitizer 均为81/81：
 16项覆盖 generation tree/ownership，
 23项覆盖事务式 Flex-lite layout，15项覆盖固定 PMR 容量、`Ignore`/`Targetable`、route ancestry、
 同一 `UICommittedHitView` 内严格递增且唯一的 paint ordinal、双缓冲 view、三快照事务回滚、
@@ -138,7 +137,8 @@ C1c-b3e 在同一 target 增加 held primary Pointer Button claim bridge。Move/
 仍 held 的 primary pointer button；Runtime 按 final Platform snapshot 过滤已 release/cancel/reset 或非
 primary 的 claim、对重复 claim 去重，capacity 失败时不发布新 claims。`ActionMapper` 按 final snapshot
 注入这些 claims；同帧 PointerDown 触发的 claim 即使事件未 consume，也会拦截 Gameplay。Windows MSVC 19.50
-Debug/Release 均直接通过 `tina_runtime_ui_tests` 46/46；Linux b3e 待本轮复核。Key/Gamepad/axis claims 仍后置。
+Debug/Release、Linux GCC 13.4 与 Clang 22 sanitizer 均直接通过 `tina_runtime_ui_tests` 46/46。
+Key/Gamepad/axis claims 仍后置。
 
 当前 Game SDK 已能在 `onEnter` 创建 retained root、在 `updateUI` 通过绑定 root 的 updater 修改 subtree，
 但 Runtime 仍不生成 DisplayList；b3e 只证明 held primary Pointer Button claim bridge。正式样例没有
@@ -286,9 +286,9 @@ LSAN_OPTIONS=exitcode=23 \
 ```
 
 这些输出不包含 Legacy 产品、窗口、真实渲染后端或 cooked shader，只用于 Headless 生命周期验证，
-不能作为游戏产品或发布包。Linux 最近仍记录 b3d2：GCC 13.4 直接通过基础 `tina_tests` 194/194、
-`tina_ui_tests` 78/78、`tina_runtime_ui_tests` 42/42与Null样例300帧；Clang 22.1.8 +
-libstdc++15.2 在 ASan/UBSan/LSan 下通过相同门禁且无 sanitizer 诊断。b3e Linux 待本轮复核。
+不能作为游戏产品或发布包。本批 b3e 的 GCC 13.4 直接通过基础 `tina_tests` 194/194、
+`tina_ui_tests` 81/81、`tina_runtime_ui_tests` 46/46与Null样例300帧；Clang 22.1.8 +
+libstdc++15.2 在 ASan/UBSan/LSan 下通过相同门禁且无 sanitizer 诊断。
 但仍不能用 Ubuntu 22.04 的旧工具链降级冒充正式结果。
 
 ## Linux vNext GLFW Platform
