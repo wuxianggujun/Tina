@@ -8,7 +8,8 @@
   M7-C1a 已落地 UI-owned route-result view ABI，M7-C1c-b3a 已让 Pointer Button/Wheel 固化事件时
   logical position，M7-C1c-b3b 已实现 Runtime-private `UIInputRouteProducer`，M7-C1c-b3c 已让
   `EngineHost` 私有延迟绑定 primary-window `UIContext`，并按 Platform lifecycle dispatch → UI route
-  → ActionMapper 接入正式帧。claims 仍为 canonical `None`，Game SDK 仍无 UI root/updater；production
+  → ActionMapper 接入正式帧；M7-C1c-b3d2 已加入 startup/root capability，M7-C1c-b3e 已加入 held primary
+  Pointer Button claim bridge。Key/Gamepad/axis claim 与 production
   Gamepad、完整 DPI、Windows IMM32 与可见 Runtime UI 仍是目标
 
 ## 背景
@@ -97,8 +98,10 @@ owner/index/generation 复用。绑定后主窗口消失或 replacement generati
 `LifecycleInvariantViolation` 终止本次 run；最小化、metrics/content scale 变化不重绑。Context 在
 Render → Task → Platform → Clock modules 前 shutdown。owner 不调用 `commitLayout()`，因此 hit-test/route
 不能隐式布局。该 b3c 切片当时没有 Game SDK Context/root 访问，正式路径的 committed hit snapshot 仍为空；
-b3d2 后续加入 startup bind 与 root-scoped phase capability，但 claims 仍为 canonical `None`，也没有可见
-Widget、Focus/Capture/Modal 或 DisplayList。
+b3d2 后续加入 startup bind 与 root-scoped phase capability；到该切片为止 claims 仍为 canonical `None`，
+也没有可见 Widget、Focus/Capture/Modal 或 DisplayList。b3e 随后加入 held primary Pointer Button claim：
+UI request 只在最终 snapshot 仍 held 时发布，ActionMapper 在 transition mapping 前应用 claim，取消 active
+Gameplay source或拦截同帧 Down，并抑制到真实 Up；Key/Gamepad/axis claim 仍后置。
 
 M7-A Action Mapper 由 Runtime 唯一拥有，只实现 EngineConfig 注册的单一 immutable default Input
 Context（priority=0）。UI consumption/claim 优先；未来多 Context 以显式 priority 决胜，同 priority

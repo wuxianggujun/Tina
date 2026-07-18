@@ -21,7 +21,7 @@ Runtime。现有2D/UI/3D路径继续作为验收基线，新架构按可独立�
 
 vNext 已完成 C++23 Headless Runtime 生命周期内核、M7-A Platform/Input 内核、首个桌面适配切片、
 M7-B1 私有 WindowSurface handoff、M7-B2 Desktop bootstrap + 真实 GPU 冒烟，以及
-M7-C1b/M7-C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/b3d2 Retained Tree/Flex-lite layout/
+M7-C1b/M7-C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/b3d2/b3e Retained Tree/Flex-lite layout/
 committed hit snapshot/point query/synthetic routed pointer/private Runtime route/startup UI seed/Game SDK scoped capability foundation：私有
 `tina_platform_glfw` 已能创建 `GLFW_NO_API` 窗口，
 并把键盘、Pointer、Focus、resize、close 与已提交 UTF-8 文本归一化到同一份有界
@@ -55,7 +55,10 @@ Context 时是成功 no-op。提交失败会阻断 Render，且本帧 attempt �
 structure/layout/hit 发布，以及 root-scoped、owner-thread、phase-epoch-scoped 的
 `PrimaryWindowUIRootBuilder` / `PrimaryWindowUITreeUpdater`。这些 facade 在回调结束时无条件失效，第一次
 capability operation 失败会成为该 phase 的 sticky error，且不会向 Game SDK 暴露裸 `UIContext*`。
-当前仍不是可见 UI：claims 仍是 canonical `None`，Runtime 不生成 DisplayList，文本/glyph 渲染尚未接入，
+M7-C1c-b3e 又让 Move/Wheel/Button routed Pointer listener 通过 `claimPointerButton()` 请求当前窗口/Pointer 的按键所有权；
+Runtime 只把帧末快照中 `PrimaryPointerId` 上仍 held 的任意 Pointer Button 去重写入双缓冲
+`ContinuousControlClaimsView`，容量失败不发布半份结果，已有 `ActionMapper` 会立即 Cancel Gameplay source
+或拦截同帧未 consume 的 Down，并抑制到真实 Up。当前仍不是可见 UI：Key/Gamepad/axis claim producer 尚未实现，Runtime 不生成 DisplayList，文本/glyph 渲染尚未接入，
 Panel/Label/Button 只是 retained tree 节点类型，还没有默认 Widget 行为。持久 Pointer Capture、Focus/Modal、
 Button 默认行为、paint snapshot/DisplayList、dirty subtree pruning、nested clip、production Gamepad、
 Windows IMM32 composition、Scene、文本/Widget、Pass Scheduler、submission ticket/drain 与可见中文 UI
@@ -79,15 +82,15 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求
 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、
-MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过 b3d2 vNext Debug/Release
-Null 门禁：基础194/194、独立 UI 78/78、独立 Runtime→UI 42/42、Null样例300帧。独立 adapter 门禁
+MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过 b3e vNext Debug/Release
+门禁：基础194/194、独立 UI 81/81、独立 Runtime→UI 46/46、Null样例300帧。独立 adapter 门禁
 通过 GLFW专项25/25、bgfx专项11/11、GLFW样例300帧，以及真实 D3D11 Intel Iris Xe 的
 `tina_sample_desktop` 300帧；Release 输出 clean status ok。前序 WindowSurface
 GLFW样例1800帧仍作为历史证据。Legacy ON 图的前序隔离门禁为 vNext 185/185 + Legacy 43/43。
 `TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与
 公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。
 
-当前 b3d2 Linux Null 门禁中，GCC 13.4 通过基础194/194、`tina_ui_tests` 78/78、
+当前已记录的 b3d2 Linux Null 门禁中，GCC 13.4 通过基础194/194、`tina_ui_tests` 78/78、
 `tina_runtime_ui_tests` 42/42与Null样例300帧；Clang 22.1.8 + libstdc++15.2 在
 ASan/UBSan/LSan 下通过相同194/78/42与Null样例300帧，且无 sanitizer 诊断。前序 M7-B1 Platform
 门禁覆盖 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer，以及 GCC 13/Clang 22 X11/Wayland 双后端；

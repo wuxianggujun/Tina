@@ -7,9 +7,10 @@
 > Capture 与完整 DPI/UI 门禁仍是后续能力。M7-C1c-b3a 已补齐 Pointer Button/Wheel 的事件时
 > logical position；M7-C1c-b3b 已实现 Runtime-private `UIInputRouteProducer`，M7-C1c-b3c 已让
 > `EngineHost` 私有延迟绑定主窗口 `UIContext`，并按 Platform lifecycle dispatch → UI route →
-> ActionMapper 接入正式帧路径。producer 当前只输出 Pointer Move/Button/Wheel raw ordinal consumption，
-> claims 仍为 canonical `None`；M7-C1c-b3d2 已加入 startup primary-window metrics seed 与 Game SDK
-> root-scoped UI facade，但没有可见 Widget、Focus/Capture/Modal 或 DisplayList/UI pass。
+> ActionMapper 接入正式帧路径。M7-C1c-b3d2 已加入 startup primary-window metrics seed 与 Game SDK
+> root-scoped UI facade；M7-C1c-b3e 已让 Pointer listener 请求 button ownership，producer 只发布最终
+> snapshot 仍 held 的 primary Pointer Button claim。Key/Gamepad/axis claim producer、可见 Widget、
+> Focus/Capture/Modal 与 DisplayList/UI pass 仍未实现。
 
 ## 结论
 
@@ -111,7 +112,7 @@ GLFW C callback 不调用 UI、Gameplay 或销毁系统，只更新 backend-owne
 当前 producer 覆盖 Keyboard press/release/repeat、Primary Pointer move/button/wheel、Focus、logical/
 framebuffer/content-scale/visible/iconified metrics、resize、close 与 GLFW char callback 提供的 committed
 Unicode scalar。Gamepad registry/sampled diff、Windows preedit/composition、OS Pointer Capture、
-可见 Widget/DisplayList 与持续控制 claims 尚未接入。Runtime-private UI routed consumption producer 已在
+可见 Widget/DisplayList 与 Key/Gamepad/axis 持续控制 claims 尚未接入。Runtime-private UI routed consumption producer 已在
 M7-C1c-b3c 接入 `EngineHost`，startup UI metrics seed 与 Game-facing retained root capability 在
 M7-C1c-b3d2 被 Runtime 消费，但二者都不属于 GLFW
 公共 API。WindowSurface snapshot/lease 已在 M7-B1 接入到
@@ -184,9 +185,19 @@ M7-C1c-b3b 的 Runtime-private `UIInputRouteProducer` 已实现当前最窄转�
 Move/Button/Wheel 按序映射为 `UIPointerInputEvent`，Button/Wheel 必须使用 transition 自带的事件时
 logical position。listener 调用 `consumeInputTransition()` 时，producer 在同一 raw ordinal 的 bit 上标记
 consumed；reset、cancel、Key/Text/Gamepad 等非 Pointer 项不路由，也不伪造 Button Up，而是在 raw ordinal
-空间保留 hole。`ContinuousControlClaimsView` 当前始终为 canonical `None`。
+空间保留 hole；该 b3b 切片的 `ContinuousControlClaimsView` 当时始终为 canonical `None`。
 
-consumption 使用 Create 期双预分配 PMR bitset；成功发布只交换 staging/published storage，supplied
+M7-C1c-b3e 为 Pointer route 增加第一条真实 claim producer。listener 可调用
+`claimPointerButton(button)`，请求与当前 routed input 相同 window/pointer 的 button；固定 bitset 合并
+多 phase/重复请求，非法 enum 返回 false。Runtime 将请求与本帧最终 `PointerSnapshot::heldButtons`
+求交，只发布仍 held 的 primary Pointer Button，并在双 PMR claim buffer 中去重。claim 与 consume
+彼此独立：同帧 Down 只 claim 也会在 ActionMapper 中被拦截，已经 active 的 Gameplay source 则产生
+Cancel 并保持 suppression 到真实 Up。
+
+本文“primary Pointer Button”精确指主窗口 `PrimaryPointerId` 上的任意合法 `PointerButton`，不是只指
+`PointerButton::Primary`；多 Pointer identity 仍属于后续契约。
+
+consumption 与 claims 分别使用 Create 期双预分配 PMR storage；成功发布只交换对应 staging/published storage，supplied
 `memory_resource` 必须比 producer 活得更久，300帧共用时 allocation count 不增长。失败测试先让 root
 Move listener 产生1次 side effect，再让后续深层 Button route 因 route path capacity 失败；本次 staging
 不发布、上一份成功 view 保持，但 attempted watermark 已推进，同一 frame retry 被拒且 callback 仍为1，
@@ -201,10 +212,11 @@ content scale 变化不重绑，Context 在 Render → Task → Platform → Clo
 owner selection 不调用 `commitLayout()`，hit-test/route 不会隐式触发布局。Game SDK 已能在受限 phase 内创建/
 更新 retained root，但当前产品帧仍没有 Widget 默认行为、Focus/Capture/Modal、DisplayList 或 bgfx UI pass。
 
-M7-A Action Mapper 只实现 digital binding，因此当前真正参与 suppression 的 claim 是 Key、Primary
-Pointer Button 与 Gamepad Button。`GamepadAxisControlIdentity` 和 Pointer continuous identity 已冻结为
-UI/Runtime seam schema，但在 analog/pointer action mapping 落地前不会产生 axis/continuous Gameplay
-状态，也不能据此宣称已经实现 neutral/dead-zone suppression。
+M7-A Action Mapper 的 claim consumer 能识别 Key、Primary Pointer Button 与 Gamepad Button，但当前
+UI producer 只生成 primary Pointer Button claim。`GamepadAxisControlIdentity` 和 Pointer continuous
+identity 已冻结为 UI/Runtime seam schema；Key/Gamepad/axis producer 以及 analog/pointer action mapping
+落地前，不会产生对应 ownership 或 axis/continuous Gameplay 状态，也不能据此宣称已经实现
+neutral/dead-zone suppression。
 
 Gameplay Action Mapper 只映射未消费 transition 和未 claim control，并跨帧维护
 `suppressedUntilReleaseOrNeutral`：
@@ -396,8 +408,8 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
   move-only `NativeWindowSurfaceLease`、重复 lease 拒绝、Render 创建失败与窗口发布失败逆序回滚、
   surface snapshot 只由 committed metrics 派生、resize/content-scale/suspend 改变才递增
   `surfaceRevision`，以及 NullRender suspended 帧维护调用但不 present、不增加 submission index；
-- Windows C1c-b3d2 Debug/Release 均通过基础 `tina_tests` 194/194、独立 UI 78/78、独立
-  Runtime→UI 42/42、GLFW专项25/25、bgfx专项11/11，以及Null/GLFW/Desktop样例300帧；
+- Windows C1c-b3e Debug/Release 均通过基础 `tina_tests` 194/194、独立 UI 81/81、独立
+  Runtime→UI 46/46、GLFW专项25/25、bgfx专项11/11，以及Null/Platform/Desktop样例300帧；
 - Linux C1c-b3d2 GCC 13.4 与 Clang 22.1.8 sanitizer Null 图均通过基础194/194、独立 UI 78/78、
   独立 Runtime→UI 42/42与Null样例300帧，Clang 无 sanitizer 诊断。上一 C1c-b3a Pointer/Input
   门禁通过基础185/185、GLFW专项23/23；

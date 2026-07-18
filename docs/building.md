@@ -51,7 +51,7 @@ out\build\windows-msvc\bin\Debug\tina_legacy_tests.exe
 ## Windows vNext 最小构建
 
 该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A/M7-B1 与
-M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2 的 `tina_core`、`tina_platform`、
+M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2/C1c-b3e 的 `tina_core`、`tina_platform`、
 `tina_task`、`tina_render`、`tina_runtime`、`tina_ui`、
 直接 GoogleTest 门禁与 Null 样例：
 
@@ -71,7 +71,7 @@ Disabled TaskSystem 与 NullRenderDevice。
 
 ## Windows vNext UI 树、布局、命中快照、point query 与 synthetic route 核心
 
-M7-C1b/C1c-a/C1c-b1/C1c-b2 的 `tina_ui` 当前只依赖 Core/Platform；门禁直接运行独立 GoogleTest executable：
+M7-C1b/C1c-a/C1c-b1/C1c-b2 与 b3d2/b3e 的 `tina_ui` 当前只依赖 Core/Platform；门禁直接运行独立 GoogleTest executable：
 
 ```powershell
 cmake --preset windows-msvc-vnext
@@ -82,7 +82,8 @@ cmake --build --preset windows-vnext-release --target tina_ui_tests
 out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
 ```
 
-当前记录为 Windows 11 / MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22 sanitizer 均78/78：
+当前记录为 Windows 11 / MSVC 19.50 Debug/Release 81/81；Linux 最近仍为 b3d2 的 GCC 13.4 与
+Clang 22 sanitizer 78/78，b3e 待本轮复核：
 16项覆盖 generation tree/ownership，
 23项覆盖事务式 Flex-lite layout，15项覆盖固定 PMR 容量、`Ignore`/`Targetable`、route ancestry、
 同一 `UICommittedHitView` 内严格递增且唯一的 paint ordinal、双缓冲 view、三快照事务回滚、
@@ -91,12 +92,14 @@ stale generation、50,000节点与 PMR 回收；5项覆盖反向 paint-order 查
 16项覆盖 fixed-capacity synthetic listener route、Capture/Target/Bubble 顺序、stop/consume、路由中
 add/reset/destroy 安全失效、off-thread deferred reset、route/commit reentrancy guard、错误 context
 销毁 death test、300次 route 零新增 supplied UI PMR allocation 与递归 route 拒绝；3项覆盖
-root-scoped `UITreeUpdater` 子节点创建、跨 root 拒绝与失效 root。它们不证明持久
+root-scoped `UITreeUpdater` 子节点创建、跨 root 拒绝与失效 root；b3e 新增3项覆盖 claim 合并、非法值
+与无命中。API/producer 支持 Move/Button/Wheel listener 请求接管，Runtime 测试覆盖 Move 与 ButtonDown
+的 claim 行为。它们不证明持久
 Pointer Capture、Focus/Modal、Button default action、Widget、DisplayList 或 Runtime/Render 集成已完成。
 
-## Windows vNext Runtime→UI producer、primary-window owner、layout coordinator 与 scoped Game SDK UI access
+## Windows vNext Runtime→UI producer、primary-window owner、layout coordinator、scoped Game SDK UI access 与 Pointer Button claim bridge
 
-M7-C1c-b3b/b3c/b3d1/b3d2 使用独立 `tina_runtime_ui_tests`，避免把 vNext `UIContext` 与 Legacy ON 图中的不兼容
+M7-C1c-b3b/b3c/b3d1/b3d2/b3e 使用独立 `tina_runtime_ui_tests`，避免把 vNext `UIContext` 与 Legacy ON 图中的不兼容
 `Tina::UI` 定义放进同一最终二进制：
 
 ```powershell
@@ -109,7 +112,7 @@ out\build\windows-msvc-vnext\bin\Release\tina_runtime_ui_tests.exe --gtest_color
 ```
 
 已验证的 C1c-b3c Windows MSVC 19.50 / CMake 4.2.3 Debug/Release 基线均为20/20。其中12项 producer 用例验证只路由
-Move/Button/Wheel，reset/cancel/非 Pointer 保留 raw ordinal hole、claims 恒为 canonical `None`，以及双预分配
+Move/Button/Wheel，reset/cancel/非 Pointer 保留 raw ordinal hole、该历史切片的 claims 为 canonical `None`，以及双预分配
 PMR bitset 在300帧共用 supplied PMR 时 allocation count 不增长。注入的 `memory_resource` 必须比 producer
 活得更久。失败用例先产生1次 listener side effect，后续 route path capacity 失败；旧 published view 保持，
 attempted watermark 推进，同帧 retry 被拒且 callback 仍为1。
@@ -131,9 +134,15 @@ C1c-b3d2 在同一 target 增加 startup primary-window metrics seed、显式 st
 跨线程拒绝与无分配 `abortPhase()` 回滚验证。Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与
 Clang 22 sanitizer 均直接通过 `tina_runtime_ui_tests` 42/42。
 
+C1c-b3e 在同一 target 增加 held primary Pointer Button claim bridge。Move/Button/Wheel listener 都可请求接管
+仍 held 的 primary pointer button；Runtime 按 final Platform snapshot 过滤已 release/cancel/reset 或非
+primary 的 claim、对重复 claim 去重，capacity 失败时不发布新 claims。`ActionMapper` 按 final snapshot
+注入这些 claims；同帧 PointerDown 触发的 claim 即使事件未 consume，也会拦截 Gameplay。Windows MSVC 19.50
+Debug/Release 均直接通过 `tina_runtime_ui_tests` 46/46；Linux b3e 待本轮复核。Key/Gamepad/axis claims 仍后置。
+
 当前 Game SDK 已能在 `onEnter` 创建 retained root、在 `updateUI` 通过绑定 root 的 updater 修改 subtree，
-但 Runtime 仍不生成 DisplayList；producer 的 claims 仍为 `None`。正式样例没有 Widget 文本、Button 默认行为、
-Focus/Capture/Modal 或可见 UI。该 target 直接运行 GoogleTest，不使用 CTest；这项接线不证明可见 UI 或
+但 Runtime 仍不生成 DisplayList；b3e 只证明 held primary Pointer Button claim bridge。正式样例没有
+Widget 文本、Button 默认行为、Focus/Capture/Modal 或可见 UI。该 target 直接运行 GoogleTest，不使用 CTest；这项接线不证明可见 UI 或
 UI Render 已完成。
 
 ## Windows vNext GLFW Platform 与 Desktop bgfx
@@ -184,8 +193,8 @@ out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
 
 Windows 构建会把 GLFW runtime DLL 复制到对应 `bin/<Config>`。样例不带参数时以16 ms 的演示延迟
 显示1800帧；自动门禁必须显式使用 `--frame-delay-ms=0`，这条 sleep 路径不属于 benchmark。
-最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3；本次 C1c-b3d2
-Debug 和 Release 均直接通过基础194/194、独立 UI 78/78、独立 Runtime→UI 42/42与Null样例300帧。
+最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3；本次 C1c-b3e
+Debug 和 Release 均直接通过基础194/194、独立 UI 81/81、独立 Runtime→UI 46/46与Null样例300帧。
 独立 adapter 门禁通过 GLFW专项25/25、bgfx专项11/11；GLFW+Null 与真实 D3D11 Intel Iris Xe 的
 `tina_sample_desktop` 均运行300帧，Release 输出 `clean status ok`。上一 C1c-b3a 门禁的
 WindowSurface GLFW样例1800帧仍作为历史证据。
@@ -277,9 +286,9 @@ LSAN_OPTIONS=exitcode=23 \
 ```
 
 这些输出不包含 Legacy 产品、窗口、真实渲染后端或 cooked shader，只用于 Headless 生命周期验证，
-不能作为游戏产品或发布包。本批 b3d2 的 GCC 13.4 直接通过基础 `tina_tests` 194/194、
+不能作为游戏产品或发布包。Linux 最近仍记录 b3d2：GCC 13.4 直接通过基础 `tina_tests` 194/194、
 `tina_ui_tests` 78/78、`tina_runtime_ui_tests` 42/42与Null样例300帧；Clang 22.1.8 +
-libstdc++15.2 在 ASan/UBSan/LSan 下通过相同门禁且无 sanitizer 诊断。
+libstdc++15.2 在 ASan/UBSan/LSan 下通过相同门禁且无 sanitizer 诊断。b3e Linux 待本轮复核。
 但仍不能用 Ubuntu 22.04 的旧工具链降级冒充正式结果。
 
 ## Linux vNext GLFW Platform

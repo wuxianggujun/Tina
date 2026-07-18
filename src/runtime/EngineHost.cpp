@@ -1041,7 +1041,9 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         }
 
         auto uiInputRouteProducerResult =
-            Runtime::Input::UIInputRouteProducer::Create(ownedConfig.platformFrameCapacities.inputTransitionCapacity);
+            Runtime::Input::UIInputRouteProducer::Create(
+                ownedConfig.platformFrameCapacities.inputTransitionCapacity,
+                mapperCapacities.continuousControlClaimCapacity);
         if (!uiInputRouteProducerResult)
         {
             auto error = std::move(uiInputRouteProducerResult.error());

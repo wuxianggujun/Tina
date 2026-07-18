@@ -138,7 +138,7 @@ callback 结束合并 callback `Status` 与该错误。这样失败帧不会发�
 - 公共 Runtime/UI header 不出现 bgfx、GLFW、Win32/X11/Wayland、SDL/SDL3 或 native handle；测试继续
   直接运行 GoogleTest，不注册 CTest。
 
-本切片只闭合 retained root 创建、更新和首帧 snapshot 时序。真实 continuous claims、Pointer
+本切片只闭合 retained root 创建、更新和首帧 snapshot 时序；在 b3d2 切片结束时，真实 continuous claims、Pointer
 Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、文本/中文字体和 bgfx UI pass
 仍属后续切片，不能据此宣称 UI 已经可见或可交互。
 

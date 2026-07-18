@@ -9,6 +9,7 @@
 #include <tina/ui/UINodeId.hpp>
 
 #include <array>
+#include <bitset>
 #include <cstddef>
 #include <memory>
 #include <new>
@@ -149,6 +150,23 @@ public:
         m_inputTransitionConsumed = true;
     }
 
+    // Requests frame-local ownership of one button on this event's Window and
+    // Pointer. This is independent from transition consumption: Runtime only
+    // publishes the request when the final Platform snapshot still holds the
+    // button. Repeated valid requests are idempotent; invalid enum values fail.
+    [[nodiscard]] constexpr bool claimPointerButton(
+        Platform::PointerButton button) noexcept
+    {
+        const usize index = static_cast<usize>(button);
+        if (index >= m_claimedPointerButtons.size())
+        {
+            return false;
+        }
+
+        m_claimedPointerButtons[index] = true;
+        return true;
+    }
+
     [[nodiscard]] constexpr bool isPropagationStopped() const noexcept
     {
         return m_propagationStopped;
@@ -193,6 +211,7 @@ private:
     bool m_propagationStopped = false;
     bool m_immediatePropagationStopped = false;
     bool m_inputTransitionConsumed = false;
+    std::bitset<Platform::PointerButtonCount> m_claimedPointerButtons{};
 };
 
 namespace Detail {
@@ -215,6 +234,12 @@ public:
         UINodeId root) noexcept
     {
         event.setRouteState(phase, current, target, root);
+    }
+
+    [[nodiscard]] static constexpr const std::bitset<Platform::PointerButtonCount>&
+    claimedPointerButtons(const UIRoutedPointerEvent& event) noexcept
+    {
+        return event.m_claimedPointerButtons;
     }
 };
 
@@ -386,6 +411,9 @@ struct UIRoutedPointerListenerDesc final {
 
 struct UIPointerRouteResult final {
     UIPointerHitQueryResult pointQuery{};
+    // Requested buttons are interpreted with the routed input's Window and
+    // Pointer identity by the Runtime route-result producer.
+    std::bitset<Platform::PointerButtonCount> claimedPointerButtons{};
     usize routeDepth = 0;
     usize listenerInvocationCount = 0;
     bool consumed = false;

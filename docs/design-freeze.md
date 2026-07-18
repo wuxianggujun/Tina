@@ -108,8 +108,10 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
   容量只来自 `inputActions.capacities`，订阅 slot 来自 `platformEventSubscriptions`。M7-C1c-b3b 已加入
   独立 Runtime-private UI producer，M7-C1c-b3c 已让 `EngineHost` 在 Platform lifecycle dispatch 后惰性
   选择/持有首个 primary `WindowId` 的唯一 `UIContext`，调用 producer 后再进入 ActionMapper；绑定前 Headless
-  帧使用 null Context，绑定后 primary 消失或 generation 更换会结构化失败。producer claims 当前恒为
-  canonical `None`，continuous claim 的 Runtime consumer 上限64不泄漏到 game-facing Action Map；
+  帧使用 null Context，绑定后 primary 消失或 generation 更换会结构化失败。M7-C1c-b3e 已让 routed
+  Pointer listener 请求当前 window/pointer 的 button claim；producer 只发布帧末仍 held 的 primary
+  Pointer Button，并以 Create 期双 PMR buffer 去重。Key/Gamepad/axis claim producer 仍未实现，
+  continuous claim 的 Runtime consumer 上限64不泄漏到 game-facing Action Map；
 - World RenderScene 与 UI DisplayList 分别冻结，统一组合为 RenderFrame view；Runtime-private owning
   RenderFramePacket 持有 FrameArena/资源 lease/Atlas/surface pin/submit ticket 到 backend
   completion；Renderer 不访问 EnTT；
@@ -137,7 +139,7 @@ generation-safe RAII token、48-byte fixed-inline `noexcept` callback、Capture�
 route 中 add/reset/destroy 安全失效与 route/commit reentrancy guard。M7-C1c-b3a 已让 Platform Pointer
 Button/Wheel transition 固化事件时 logical position，禁止 Runtime 用帧末 Pointer snapshot 猜测历史命中。
 M7-C1c-b3b 已实现 Runtime-private `UIInputRouteProducer` 与独立 `tina_runtime_ui_tests`：只路由
-Move/Button/Wheel，reset/cancel/非 Pointer 保留 raw ordinal hole，claims 恒为 canonical `None`；双预分配
+Move/Button/Wheel，reset/cancel/非 Pointer 保留 raw ordinal hole；该 b3b 切片的 claims 当时恒为 canonical `None`。双预分配
 PMR consumption bitset 在300帧共用 PMR 测试中 allocation count 不增长，supplied PMR 必须长于 producer。
 失败测试先产生1次 listener side effect，后续 route path capacity 失败不发布旧 view 的替代结果，但推进
 attempted watermark；同帧 retry 被拒且 callback 仍为1，证明 side effect 不回滚也不重放。
@@ -149,13 +151,18 @@ M7-C1c-b3d1 已把 `UIContextCapacityConfig` 移入 focused public header，并�
 在 `IGameState::updateUI()` 成功后、Render submit 前按主窗口 logical extent 对每个有效且严格递增的
 `PlatformFrameId` 至多尝试一次 `commitLayout()`。Headless 窗口/Context 双缺席是成功 no-op；identity、
 capacity 或 layout 失败会阻断 Render，并消费本帧 attempt，禁止同帧重放。b3d1 结束时 Game SDK
-尚不能取得 Context 或创建 root，因此该阶段生产路径仍不会形成可见 UI；claims 仍为 canonical `None`。
+尚不能取得 Context 或创建 root，因此该阶段生产路径仍不会形成可见 UI；该阶段 claims 仍为 canonical `None`。
 M7-C1c-b3d2 已实现
 startup primary-window metrics seed 与 root-scoped、phase-epoch-scoped Game SDK capability：seed 不 poll、
 不消费 frame id；Runtime 在 `onEnter` 前显式 bind primary `UIContext`，并在 State commit 前发布首份
 structure/layout/hit snapshot；`PrimaryWindowUIRootBuilder` 与 `PrimaryWindowUITreeUpdater` 只在 owner
 thread/current phase epoch 内有效，回调结束后无条件失效，第一次 capability error 作为 sticky phase
 error 合并。
+M7-C1c-b3e 已实现第一条真实 claim producer：`UIRoutedPointerEvent::claimPointerButton()` 以固定 bitset
+合并 callback 请求；Runtime 只把最终 Platform snapshot 中仍 held 的 primary Pointer Button 转为去重
+`ContinuousControlClaimsView`。claim storage 在 Create 期双预分配，容量耗尽或后续 route 失败均不发布
+staging 结果但推进 attempted watermark；Move/Wheel/Button route 都可显式接管仍 held 的按钮，
+ActionMapper 复用既有 Cancel + suppress-until-Up 语义，同帧未 consume 的 Down 也会被 claim 拦截。
 持久 Pointer Capture、Focus/Modal、Button default action、paint
 snapshot/DisplayList、dirty subtree pruning 与 nested clip 尚未实现，不能把目标误写成现状。
 
@@ -184,7 +191,7 @@ snapshot/DisplayList、dirty subtree pruning 与 nested clip 尚未实现，不�
 | Backend 组合 | [Accepted](adr/0003-backend-factories.md) | `Create(config, factories)`；M7-B1 已使用 Independent 或 WindowSurface 的 tagged composition，M7-B2 在该组合上接入私有 bgfx，bootstrap 只选 factory、EngineHost 唯一创建/回滚 owner | 消除 Runtime 对具体 backend 依赖与 lease 接线歧义 |
 | Runtime/State | [Accepted](adr/0014-runtime-phase-and-state.md) | `IGameApplication` lifecycle-only + `IGameState` 唯一帧入口；Frame Update 后提交状态命令 | 消除名称歧义、双帧入口与首帧 UI 时序冲突 |
 | RenderFrame/Surface 所有权 | [Accepted](adr/0020-window-surface-handoff.md) | bgfx backend 在 factory 成功后持有 move-only window surface lease，Runtime 持有 owning RenderFramePacket；Render SPI 只暴露纯 Tina view/pin sink | 消除 native 泄漏、依赖环、backend 越界与在途 UAF |
-| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | M7-C1b 已实现事务式 Flex-lite layout；M7-C1c-a 已实现固定容量 Pointer policy/ancestry scratch、`Ignore`/`Targetable`、双缓冲 committed hit snapshot 与成功 `commitLayout()` 的 structure/layout/hit 原子发布；M7-C1c-b1 已实现无分配 `queryPointerHit()`、反向目标选择与 visited count；M7-C1c-b2 已实现 fixed-capacity synthetic listener route；M7-C1c-b3b 已实现独立 Runtime-private producer 与 direct GoogleTest target；M7-C1c-b3c 已实现 Runtime-private primary-window `UIContext` owner/selection 与 producer 接线；M7-C1c-b3d1 已实现 EngineConfig UI capacities 和 `updateUI` 后、Render 前至多一次的 private layout commit；M7-C1c-b3d2 已实现 startup/root capability。changed frame 全树 Measure/Arrange 仍需收敛；真实 claims/Pointer Capture/Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip 与 batching 后置 | 高性能且保持命中/透明顺序 |
+| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | M7-C1b 已实现事务式 Flex-lite layout；M7-C1c-a 已实现固定容量 Pointer policy/ancestry scratch、`Ignore`/`Targetable`、双缓冲 committed hit snapshot 与成功 `commitLayout()` 的 structure/layout/hit 原子发布；M7-C1c-b1 已实现无分配 `queryPointerHit()`、反向目标选择与 visited count；M7-C1c-b2 已实现 fixed-capacity synthetic listener route；M7-C1c-b3b 已实现独立 Runtime-private producer 与 direct GoogleTest target；M7-C1c-b3c 已实现 Runtime-private primary-window `UIContext` owner/selection 与 producer 接线；M7-C1c-b3d1 已实现 EngineConfig UI capacities 和 `updateUI` 后、Render 前至多一次的 private layout commit；M7-C1c-b3d2 已实现 startup/root capability；M7-C1c-b3e 已实现 held primary Pointer Button claim。changed frame 全树 Measure/Arrange 仍需收敛；Key/Gamepad/axis claims、Pointer Capture/Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip 与 batching 后置 | 高性能且保持命中/透明顺序 |
 | UI startup/root capability | [Accepted](adr/0021-runtime-ui-startup-capability.md) | Platform backend 提供不 poll、不消费 frame id 的 `initialPrimaryWindowMetrics` seed；Runtime 在 `onEnter` 前创建 primary Context 并提交首份 structure/layout/hit snapshot。Game SDK 只取得 root-scoped、phase-epoch-scoped 的 `PrimaryWindowUIRootBuilder`/`PrimaryWindowUITreeUpdater`；facade 通过 owner thread、phase epoch、root owner 与 subtree containment 校验，回调结束后无条件失效，第一次 capability error 作为 sticky phase error 合并；不暴露裸 `UIContext*` | 让 ADR 0014 的 initial UI transaction 可落地，同时避免丢失首帧输入或扩大 Game SDK owner 权限 |
 | Frame/Input | [Accepted](adr/0015-input-and-fixed-step.md) | 保序 PlatformFrame、UI transition consumption + continuous claims；Action 分 Simulation/Frame domain；每个 substep 独立 commit | 防输入穿透、0步帧丢边沿、双重执行和追赶步错误 |
 | C++ exception | [Accepted](adr/0004-exceptions-and-errors.md) | 编译开启；公共 API 用 Result/Status，Engine/Frame/Worker/C callback 边界捕获 | pmr/第三方兼容、错误边界 |
@@ -248,6 +255,7 @@ Measure/Arrange 与 committed structure+layout 原子发布；M7-C1c-a 已实现
 M7-C1c-b1 已实现 point query 与反向目标选择；M7-C1c-b2 已实现 synthetic Capture→Target→Bubble listener route；
 M7-C1c-b3b 已实现独立 Runtime-private producer，M7-C1c-b3c 已完成 EngineHost primary-window `UIContext`
 owner/selection 与 producer 接线，M7-C1c-b3d1 已完成 UI capacities 与 Runtime-private layout coordinator。
-M7-C1c-b3d2 已按 ADR 0021 补齐 startup metrics seed 与 root-scoped、phase-epoch-scoped Game SDK access；之后继续实现
-真实 claims/focus/capture/widget、dirty subtree pruning 与 Null DisplayList，M7-D 实现 Label/Button/Modal +
+M7-C1c-b3d2 已按 ADR 0021 补齐 startup metrics seed 与 root-scoped、phase-epoch-scoped Game SDK access；
+M7-C1c-b3e 已补 primary Pointer Button claim。之后继续实现 Key/Gamepad/axis claims、focus/capture/widget、
+dirty subtree pruning 与 Null DisplayList，M7-D 实现 Label/Button/Modal +
 FreeType 可见样例与 bgfx UI pass；M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。

@@ -5,9 +5,9 @@
 - 测试框架固定为 GoogleTest；
 - `TINA_BUILD_TESTING=ON` 时 CMake 始终生成 vNext 基础 `tina_tests`；Legacy ON 时另行生成
   `tina_legacy_tests`，旧 Core/Engine/UI 测试只进入这个 Legacy-only executable，禁止和 vNext UI/Runtime
-  混入同一最终二进制；M7-C1b/C1c-a/C1c-b1/C1c-b2 与 b3d2 低层 updater UI 树、布局、命中快照、
-  point query 与 synthetic route 核心另有独立 `tina_ui_tests`，M7-C1c-b3b/b3c/b3d1/b3d2
-  Runtime→vNext UI producer、primary-window owner、layout coordinator 与 scoped Game SDK access 另有独立
+  混入同一最终二进制；M7-C1b/C1c-a/C1c-b1/C1c-b2 与 b3d2/b3e 低层 updater UI 树、布局、命中快照、
+  point query 与 synthetic route 核心另有独立 `tina_ui_tests`，M7-C1c-b3b/b3c/b3d1/b3d2/b3e
+  Runtime→vNext UI producer、primary-window owner、layout coordinator、scoped Game SDK access 与 Pointer Button claim bridge 另有独立
   `tina_runtime_ui_tests`；启用
   `TINA_BUILD_PLATFORM_GLFW` 时另外生成 `tina_platform_glfw_tests`，启用
   `TINA_BUILD_RENDER_BGFX` 时另外生成 `tina_render_bgfx_tests`，不注册额外测试调度；
@@ -23,43 +23,43 @@
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2：Core/Platform/Input/Task/Render/Runtime/UI、startup UI seed/scoped Game SDK capability、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Debug C++23 | 194/194 | Null 图另通过独立 UI 78/78、Runtime→UI 42/42与Null样例300帧；独立 adapter 通过GLFW 25/25、bgfx 11/11、GLFW/Desktop样例各300帧 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2：Core/Platform/Input/Task/Render/Runtime/UI、startup UI seed/scoped Game SDK capability、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Release C++23 | 194/194 | Null 图另通过独立 UI 78/78、Runtime→UI 42/42与Null样例300帧；独立 adapter 通过GLFW 25/25、bgfx 11/11、GLFW/Desktop样例各300帧，Desktop输出 clean status ok |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2/C1c-b3e：Core/Platform/Input/Task/Render/Runtime/UI、startup UI seed/scoped Game SDK capability、held primary Pointer Button claim bridge、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Debug C++23 | 194/194 | Null 图另通过独立 UI 81/81、Runtime→UI 46/46与Null样例300帧；独立 adapter 通过GLFW 25/25、bgfx 11/11、GLFW/Desktop样例各300帧 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2/C1c-b3e：Core/Platform/Input/Task/Render/Runtime/UI、startup UI seed/scoped Game SDK capability、held primary Pointer Button claim bridge、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Release C++23 | 194/194 | Null 图另通过独立 UI 81/81、Runtime→UI 46/46与Null样例300帧；独立 adapter 通过GLFW 25/25、bgfx 11/11、GLFW/Desktop样例各300帧，Desktop输出 clean status ok |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug/Release C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过 |
 | Ubuntu 22.04 / GCC 13.4 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过；构建保留旧源码/EASTL 既有 warning |
-| Ubuntu 22.04 / GCC 13.4 | vNext 至 C1c-b3d2：event-time Pointer/UI tree/layout/committed-hit/query/route core、Runtime startup seed/scoped Game SDK UI capability，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 194/194 | 当前 Null 图UI 78/78、Runtime→UI 42/42、Null样例300帧；X11 GLFW 23/23为前序门禁 |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext 至 C1c-b3d2：event-time Pointer/UI tree/layout/committed-hit/query/route core、Runtime startup seed/scoped Game SDK UI capability，ASan/UBSan/LSan | Debug C++23 | 194/194 | 当前 Null sanitizer 图UI 78/78、Runtime→UI 42/42、Null样例300帧且无诊断；X11 GLFW 23/23与精确第三方 XIM suppression为前序门禁 |
+| Ubuntu 22.04 / GCC 13.4 | vNext 至 C1c-b3d2：event-time Pointer/UI tree/layout/committed-hit/query/route core、Runtime startup seed/scoped Game SDK UI capability，Legacy/真实 bgfx backend 关闭；b3e 待本轮复核 | Debug C++23 | 194/194 | 最近 b3d2 Null 图UI 78/78、Runtime→UI 42/42、Null样例300帧；X11 GLFW 23/23为前序门禁 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext 至 C1c-b3d2：event-time Pointer/UI tree/layout/committed-hit/query/route core、Runtime startup seed/scoped Game SDK UI capability，ASan/UBSan/LSan；b3e 待本轮复核 | Debug C++23 | 194/194 | 最近 b3d2 Null sanitizer 图UI 78/78、Runtime→UI 42/42、Null样例300帧且无诊断；X11 GLFW 23/23与精确第三方 XIM suppression为前序门禁 |
 
 GLFW adapter 和 bgfx adapter 测试是独立 executable，不能把多个进程伪写成单个合并测试数。当前测试拓扑为：
 
 | 构建图 | 基础 GoogleTest | GLFW 专项 GoogleTest | bgfx 专项 GoogleTest | 状态 |
 | --- | ---: | ---: | ---: | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 194/194 | 25/25 | 11/11 | C1c-b3d2 Null 图另通过独立 UI 78/78、Runtime→UI 42/42与Null样例300帧；GLFW/Desktop样例各300帧，前序 WindowSurface GLFW样例1800帧仍保留 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 194/194 | 25/25 | 11/11 | C1c-b3d2 Null 图另通过独立 UI 78/78、Runtime→UI 42/42与Null样例300帧；GLFW/Desktop样例各300帧，Desktop输出 clean status ok |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 194/194 | 25/25 | 11/11 | C1c-b3e Null 图另通过独立 UI 81/81、Runtime→UI 46/46与Null样例300帧；GLFW/Desktop样例各300帧，前序 WindowSurface GLFW样例1800帧仍保留 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 194/194 | 25/25 | 11/11 | C1c-b3e Null 图另通过独立 UI 81/81、Runtime→UI 46/46与Null样例300帧；GLFW/Desktop样例各300帧，Desktop输出 clean status ok |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 production-style | 测试 target 关闭 | 不构建 | 不构建 | 更早门禁：`TINA_BUILD_TESTING=OFF`，GLFW样例300帧返回0 |
-| Ubuntu 22.04 / GCC 13.4 vNext Null；前序 GLFW X11 | 194/194 | 23/23（C1c-b3a） | 未运行 | C1c-b3d2 Null 图直接通过独立 UI 78/78、独立 Runtime→UI 42/42与Null样例300帧；adapter样例保留历史门禁 |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 vNext Null + ASan/UBSan/LSan；前序 GLFW X11 | 194/194 | 23/23（C1c-b3a） | 未运行 | C1c-b3d2 Null sanitizer 图直接通过独立 UI 78/78、独立 Runtime→UI 42/42与Null样例300帧且无诊断；C1c-b3a GLFW仅精确抑制第三方 `_XimOpenIM`，13次/5304 B |
+| Ubuntu 22.04 / GCC 13.4 vNext Null；前序 GLFW X11 | 194/194 | 23/23（C1c-b3a） | 未运行 | 最近 b3d2 Null 图直接通过独立 UI 78/78、独立 Runtime→UI 42/42与Null样例300帧；b3e 待本轮复核；adapter样例保留历史门禁 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 vNext Null + ASan/UBSan/LSan；前序 GLFW X11 | 194/194 | 23/23（C1c-b3a） | 未运行 | 最近 b3d2 Null sanitizer 图直接通过独立 UI 78/78、独立 Runtime→UI 42/42与Null样例300帧且无诊断；b3e 待本轮复核；C1c-b3a GLFW仅精确抑制第三方 `_XimOpenIM`，13次/5304 B |
 | Ubuntu 22.04 / GCC 13.4 + GLFW X11/Wayland 双后端 | 183/183 | 22/22 | 未运行 | 通过；嵌套 Weston 9 强制 Wayland 与 Xvfb 强制 X11 均通过基础、专项与300帧样例 |
 | Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11/Wayland 双后端 + ASan/UBSan/LSan | 183/183 | 22/22 | 未运行 | 通过；基础测试无 suppression且Null样例300帧；Wayland专项与样例 suppression 命中0，X11专项命中12次/4896 B、样例命中1次/408 B |
 
-当前 b3d2 Null 门禁在 Windows MSVC Debug/Release、Linux GCC 13.4 与 Linux Clang 22 sanitizer 都是
-194项基础测试；独立 UI 为78项，Runtime→UI为42项，Null样例为300帧。前序 C1c-b3a 的23项 GLFW
+当前 Windows C1c-b3e 门禁在 MSVC 19.50 / CMake 4.2.3 Debug/Release 均通过基础194/194、
+独立 UI 81/81、独立 Runtime→UI 46/46、GLFW专项25/25、bgfx专项11/11，以及 Null/Platform/Desktop
+各300帧。Linux 最近仍明确记录为 b3d2：GCC 13.4 与 Clang sanitizer 均通过基础194/194、
+UI 78/78、Runtime→UI 42/42与Null样例300帧，b3e 待本轮复核。前序 C1c-b3a 的23项 GLFW
 专项覆盖 Button/Wheel 事件时 logical position、非有限坐标拒绝、Move 语义边界和
 GLFW `A → Button/Wheel → B` 的帧末位置隔离。
-M7-C1c-b3d2 新增 startup seed 与 scoped Game SDK UI capability 后，Windows Debug/Release 均通过
-基础 `tina_tests` 194、独立 `tina_ui_tests` 78、独立 `tina_runtime_ui_tests` 42；GLFW专项25、bgfx专项11。
-Linux GCC 13.4 与 Clang sanitizer 均通过相同194/78/42与Null样例300帧，Clang无诊断。
 Windows b3d1 bgfx 构建另有独立 `tina_render_bgfx_tests` 11/11，Debug/Release 均实际返回0，并在
 D3D11 Intel Iris Xe 上完成 Desktop 300帧；Release 输出 clean status ok。该结果只覆盖当前
 clear-only bgfx core、factory/lease 回滚和 Desktop smoke，不覆盖后续
 Scene/UI/Pass Scheduler/submission ticket，也不声明 resize、最小化、恢复的真实自动化通过。
 M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、committed hit snapshot、纯 point query、synthetic route 与
-b3d2 root-scoped child 创建使用独立 `tina_ui_tests`。当前 Windows 11 / MSVC 19.50 Debug/Release、Linux
-GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均直接 GoogleTest 78/78 通过；Clang 无
+b3d2 root-scoped child 创建、b3e listener claim 请求使用独立 `tina_ui_tests`。当前 Windows 11 /
+MSVC 19.50 Debug/Release 直接 GoogleTest 81/81 通过；Linux 最近 b3d2 的 GCC 13.4 与
+Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 为78/78且无
 sanitizer 诊断。初次 GCC 暴露的 routed-pointer callback `requires`
 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
 M7-C1c-b3b/b3c 使用另一个独立 `tina_runtime_ui_tests`。前12项 producer 用例覆盖 null Context canonical `None`、raw ordinal
-hole、63/64 bit 边界、Button/Wheel 事件时位置、reset/cancel/非 Pointer 不路由、不伪造 Up、claims 恒
+hole、63/64 bit 边界、Button/Wheel 事件时位置、reset/cancel/非 Pointer 不路由、不伪造 Up、该历史切片 claims 为
 `None`、ActionMapper suppression、预留 reset slot、float 表示范围预检，以及300帧共用 supplied PMR 时
 allocation count 不增长。supplied `memory_resource` 是私有借用依赖，必须比 producer 活得更久。
 失败门禁先让 root Move listener 产生1次 side effect，再让后续深层 Button route 因 route path capacity
@@ -87,6 +87,12 @@ label/button 并在 `updateUI` 修改 retained style、onEnter 后失败先重�
 独立 capability 测试覆盖 phase expiry、`PrimaryWindowUIUnavailable` sticky、首个 tree 错误 sticky、跨线程拒绝、
 moved-from facade 过期与 `abortPhase()`。这些用例证明 scoped retained tree access，不证明 Label 文本、
 Button 默认 action、Focus/Capture/Modal、DisplayList 或可见 UI。
+
+M7-C1c-b3e 在同一测试拓扑中新增 held primary Pointer Button claim bridge。Move/Button/Wheel listener 都可请求
+接管仍 held 的 primary pointer button；Runtime 按 final snapshot 过滤 release/cancel/reset 后不再 held、
+非 primary 或重复的 claim，capacity 失败时不发布新 claims。同帧 PointerDown 触发的 claim 即使事件未
+consume，也会在 `ActionMapper` 拦截 Gameplay。Windows Debug/Release 已直接通过 Runtime→UI 46/46 与
+UI 81/81；Linux b3e 待本轮复核。Key/Gamepad/axis claims 仍后置。
 X11 在隔离 X server 下运行。GCC Wayland 门禁由 Xvfb 托载
 Weston 9 `x11-backend` 并提供 `wl_seat`；移除 `DISPLAY` 后断言
 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND`，再运行专项测试和300帧样例。同一双后端产物
@@ -112,8 +118,8 @@ suppression来隐藏 Tina 泄漏。
 sanitizer 插桩。因此结果能验证 Tina 代码、边界交互与生命周期，不宣称完整覆盖
 GLFW 内部实现。
 
-当前 C1c-b3d2 Headless 构建的 `tina_sample_null` 已在 Windows Debug/Release、Linux GCC 13.4
-与 Clang 22 ASan/UBSan/LSan 连续运行300帧；M6-A/M7-A 历史构建还曾在 Linux 连续运行10,000帧，均
+当前 C1c-b3e Headless 构建的 `tina_sample_null` 已在 Windows Debug/Release 连续运行300帧；Linux 最近
+C1c-b3d2 的 GCC 13.4 与 Clang 22 ASan/UBSan/LSan 仍为300帧，b3e 待本轮复核。M6-A/M7-A 历史构建还曾在 Linux 连续运行10,000帧，均
 返回0，并验证 `IGameState::onExit` 与 `IGameApplication::onShutdown` 恰好一次。该样例组合
 Headless Platform、Disabled TaskSystem 与 NullRenderDevice，不加入或链接 GLFW、bgfx、EnTT、
 FreeType、miniaudio、SDL/SDL3；它不证明真实窗口、GPU、Scene/Asset/Audio 或 Game-facing/visible UI pipeline
@@ -210,6 +216,10 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   structure/layout/hit commit、Game SDK root builder/updater、phase capability sticky/expiry/abort。该切片证明
   `onEnter`/`updateUI` scoped retained tree mutation，不证明 Label 文本、Button 默认 action、Focus/Capture/Modal、
   DisplayList、bgfx UI pass 或可见 UI；
+- Runtime→UI M7-C1c-b3e：同一独立 executable 增加 held primary Pointer Button claim bridge。Move/Button/Wheel
+  listener 可请求接管仍 held 的 primary pointer button；Runtime 基于 final snapshot 做 held/primary 过滤、
+  去重与 capacity 失败不发布，并让同帧 PointerDown claim 即使未 consume 也拦截 Gameplay。该切片仍不证明
+  Key/Gamepad/axis claims、Widget 默认行为、DisplayList 或可见 UI；
 
 以下仍是 Legacy 共存构建的回归覆盖，不能当作 vNext UI/Scene/Asset 已实现：
 
@@ -243,7 +253,7 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   不合格 Sprite 被去重诊断并跳过；
 - Scene 延迟 push/pop/replace，以及 fixed phase mutation barrier、延迟实体销毁和
   interpolation snapshot；
-- UI 后续：在 b3d2 startup/root capability 基础上补 Widget owner、Label 文本、Button default action、
+- UI 后续：在 b3e startup/root capability 与 Pointer Button claim bridge 基础上补 Widget owner、Label 文本、Button default action、
   committed paint/DisplayList snapshot、细粒度 dirty subtree pruning 和布局中新增 dirty 不丢；
 - UIInputScopeSnapshot 对多个 eligible State roots 只做一次全局 hit-test；阻断/恢复时 Pointer Cancel、
   Focus history、Modal root scope 与 generation 失效顺序固定；
@@ -259,9 +269,9 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   和稳定树序；Theme/DPI revision 只使必要 style/layout dirty，敏感 TextEdit 正文不进诊断；
 - Font Asset lease、UTF-8 非法序列替换、中文 fallback、Atlas page 满容量/退役、raster completion
   stale generation；text measure 与 raster 分离，glyph 发布只 Paint dirty，不改变既定 advance；
-- M7-C1c-b3b/b3c/b3d1/b3d2 已把 Move/Button/Wheel routed consumption、primary-window `UIContext`
-  ownership、bounded capacity、每帧 layout commit、startup seed 与 Game SDK root owner 放进独立/生命周期门禁；
-  后续仍需真实 continuous claim 与 capture/focus/modal 取消；M7-E GLFW Gamepad 只验证相邻 Poll sampled diff，
+- M7-C1c-b3b/b3c/b3d1/b3d2/b3e 已把 Move/Button/Wheel routed consumption、held primary Pointer Button claim bridge、
+  primary-window `UIContext` ownership、bounded capacity、每帧 layout commit、startup seed 与 Game SDK root owner 放进独立/生命周期门禁；
+  Key/Gamepad/axis claims 与 capture/focus/modal 取消仍后置；M7-E GLFW Gamepad 只验证相邻 Poll sampled diff，
   实体矩阵和回滞/重复；
 - Replay 后续只记录 target tick、normalized action state、ordered edge 和 reset marker，不记录 GLFW
   key 或 UI node；CloseRequested 的真实 GLFW callback 路径不得重复发布生命周期或 gameplay 事件；
@@ -338,10 +348,11 @@ cmake --build --preset windows-vnext-release --target tina_ui_tests
 out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
 ```
 
-当前记录为 Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 与 Clang 22 sanitizer 均78/78。
+当前记录为 Windows MSVC 19.50 Debug/Release 81/81；Linux 最近仍为 b3d2 的 GCC 13.4 与
+Clang 22 sanitizer 78/78，b3e 待本轮复核。
 
-Windows M7-C1c-b3b/b3c/b3d1/b3d2 Runtime→vNext UI producer、primary-window owner、layout coordinator 与
-scoped Game SDK UI access 的独立直接门禁为：
+Windows M7-C1c-b3b/b3c/b3d1/b3d2/b3e Runtime→vNext UI producer、primary-window owner、layout coordinator、
+scoped Game SDK UI access 与 Pointer Button claim bridge 的独立直接门禁为：
 
 ```powershell
 cmake --preset windows-msvc-vnext
@@ -353,8 +364,8 @@ out\build\windows-msvc-vnext\bin\Release\tina_runtime_ui_tests.exe --gtest_color
 ```
 
 C1c-b3c 历史记录为 Windows MSVC 19.50 Debug/Release 均20/20；b3d1 在 Windows Debug/Release、
-Linux GCC 与 Clang sanitizer 均为29/29。当前 b3d2 在 Windows Debug/Release、Linux GCC 与 Clang
-sanitizer 均为42/42。这个 executable 必须与 `tina_ui_tests`、基础 `tina_tests`
+Linux GCC 与 Clang sanitizer 均为29/29；b3d2 在 Windows Debug/Release、Linux GCC 与 Clang
+sanitizer 均为42/42。当前 b3e 在 Windows Debug/Release 为46/46，Linux b3e 待本轮复核。这个 executable 必须与 `tina_ui_tests`、基础 `tina_tests`
 分开报告；它不通过 CTest 调度。
 
 Windows GLFW Platform 的独立直接门禁为：
@@ -391,13 +402,13 @@ out\build\windows-msvc-vnext-bgfx\bin\Release\tina_render_bgfx_tests.exe --gtest
 out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
 ```
 
-当前 Windows C1c-b3d2 Null 结果是 Debug/Release 均基础194/194、UI 78/78、Runtime→UI 42/42与
+当前 Windows C1c-b3e Null 结果是 Debug/Release 均基础194/194、UI 81/81、Runtime→UI 46/46与
 Null样例300帧。独立 adapter 的 Debug/Release 均通过GLFW专项25/25、bgfx专项11/11、GLFW样例300帧
 与真实 D3D11 Intel Iris Xe Desktop样例300帧；Release 输出 clean status ok。前序 C1c-b3a Debug
 WindowSurface GLFW样例1800帧仍作为历史证据；上一门禁另有
 `TINA_BUILD_TESTING=OFF` production-style WindowSurface GLFW样例300帧返回0。
-Linux 当前 C1c-b3d2 Null 为 GCC 与 Clang sanitizer 基础194/194、UI78/78、Runtime→UI42/42与
-Null样例300帧；Clang无诊断。前序 Pointer/Input 为基础185/185、GLFW专项23/23。M7-B2 Desktop/bgfx
+Linux 最近 C1c-b3d2 Null 为 GCC 与 Clang sanitizer 基础194/194、UI78/78、Runtime→UI42/42与
+Null样例300帧；Clang无诊断；b3e 待本轮复核。前序 Pointer/Input 为基础185/185、GLFW专项23/23。M7-B2 Desktop/bgfx
 产品门禁仍记录 GCC 183/22/11 与 Clang 183/22/11、Desktop 300帧。Clang 当前基础测试无 suppression；
 X11精确 suppression 在23项GLFW专项命中13次/5304 B，Desktop上一门禁命中1次/408 B。
 Clang Desktop 使用 bgfx Vulkan，但 WSL2 adapter 是 llvmpipe 软件实现，不计作硬件 GPU 门禁。
@@ -445,9 +456,9 @@ LSAN_OPTIONS=exitcode=23 \
 ./out/build/linux-clang22-vnext-sanitize/bin/tina_sample_null --frames=300
 ```
 
-GCC 13.4/CMake 4.2.3 已通过基础194/194、UI 78/78、Runtime→UI 42/42与Null样例300帧；
+Linux 最近 b3d2 的 GCC 13.4/CMake 4.2.3 已通过基础194/194、UI 78/78、Runtime→UI 42/42与Null样例300帧；
 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 已通过相同的194/194、78/78、42/42与
-Null样例300帧，且无 sanitizer 诊断。`TINA_BUILD_SHADERS=OFF` 输出
+Null样例300帧且无 sanitizer 诊断；b3e 待本轮复核。`TINA_BUILD_SHADERS=OFF` 输出
 不含 Legacy 产品和 cooked shader，只能作为 Headless 验证程序，
 不能作为游戏产品或发布包。
 
@@ -493,9 +504,9 @@ Legacy 与 vNext 进程观察到的 `N` 会随调试对象组合变化。同一�
 
 | 样例 | 状态 | 主要证明 | 资源策略 |
 | --- | --- | --- | --- |
-| `tina_sample_null` | M6-A/M7-A/M7-B1/M7-C1c-b3d2 Headless 已实现 | EngineHost、PlatformFrame/Input/Action、单个 `IGameState`、私有 primary-window UI owner/route/layout seam、Headless/Disabled/Null、300帧生命周期；无窗口 startup seed 显式选择 Headless，UI capability 请求返回结构化 unavailable，layout coordinator 成功 no-op，Linux 10,000帧仍是上一批历史结果 | 无真实第三方 backend，也不证明 UI root/Widget/DisplayList/可见 UI |
+| `tina_sample_null` | M6-A/M7-A/M7-B1/M7-C1c-b3e Headless 已实现 | EngineHost、PlatformFrame/Input/Action、单个 `IGameState`、私有 primary-window UI owner/route/layout/claim bridge seam、Headless/Disabled/Null、300帧生命周期；无窗口 startup seed 显式选择 Headless，UI capability 请求返回结构化 unavailable，layout coordinator 成功 no-op，因此该样例本身不触发 Pointer claim；Linux 10,000帧仍是上一批历史结果，Linux b3e 待复核 | 无真实第三方 backend，也不证明 UI root/Widget/DisplayList/可见 UI |
 | `tina_sample_platform` | M7-A + M7-B1 已实现 | 私有 GLFW `NO_API` 窗口、键鼠、resize/focus/close、committed text、WindowSurface handoff 与 NullRender | 不创建真实 bgfx GPU device |
-| `tina_sample_desktop` | M7-B2 Desktop bootstrap + C1c-b3d2 Runtime UI owner/route/layout seam + 真实 backend smoke 已实现 | `Tina::Desktop::CreateEngine` 私有组合 SteadyClock、GLFW WindowSurface、DisabledTaskSystem 与 bgfx；默认300帧 deep-blue clear/present；startup seed 显式绑定 primary-window Context，空 UIContext 产生 `None` consumption/claims，并在 Render 前提交空 layout snapshot | 当前 b3d2 Windows D3D11 Intel Iris Xe Debug/Release 300帧均通过，Release clean；前序 Linux GCC 13.4 与 Clang 22 sanitizer Desktop 门禁也已通过；Clang WSL2 为 Vulkan/llvmpipe，不代表硬件 GPU 性能，也不代表可见 UI、Scene/Pass Scheduler 完成 |
+| `tina_sample_desktop` | M7-B2 Desktop bootstrap + C1c-b3e Runtime UI owner/route/layout/claim bridge seam + 真实 backend smoke 已实现 | `Tina::Desktop::CreateEngine` 私有组合 SteadyClock、GLFW WindowSurface、DisabledTaskSystem 与 bgfx；默认300帧 deep-blue clear/present；startup seed 显式绑定 primary-window Context，空 UIContext 仍产生 `None` consumption/claims，并在 Render 前提交空 layout snapshot；claim bridge 由独立 Runtime→UI 测试覆盖，不由这个空 UI 样例证明 | 当前 b3e Windows D3D11 Intel Iris Xe Debug/Release 300帧均通过，Release clean；前序 Linux GCC 13.4 与 Clang 22 sanitizer Desktop 门禁也已通过，Linux b3e 待复核；Clang WSL2 为 Vulkan/llvmpipe，不代表硬件 GPU 性能，也不代表可见 UI、Scene/Pass Scheduler 完成 |
 | `tina_sample_ui` | 未实现 | 使用已实现的 root-scoped facade 证明 PaintCache、中文、Modal、TextEdit、DisplayList 与可见 UI Render | M7 内置 Cooked Font/Texture fixture |
 | `tina_sample_2d_infrastructure` | 未实现 | Camera2D、Sprite layer/order、world picking、UI overlay | M8 内置 Cooked Sprite fixture |
 | `tina_sample_3d_infrastructure` | 未实现 | Perspective、depth、canonical Mesh、Unlit pipeline | M9 procedural Cube |
@@ -523,7 +534,7 @@ transition 和 Frame Action，在完成当前 Null submit/present 后退出；Al
 300帧、返回0，`IGameState::onExit` 与 `IGameApplication::onShutdown` 计数各为1，退出后无残留 Tina
 进程。
 
-当前 C1c-b3d2 Windows Desktop bgfx 可见门禁已验证 Debug/Release `tina_sample_desktop` 通过
+当前 C1c-b3e Windows Desktop bgfx 可见门禁已验证 Debug/Release `tina_sample_desktop` 通过
 `Tina::Desktop::CreateEngine` 创建真实 D3D11 Intel Iris Xe surface，默认300帧 deep-blue clear/present
 后返回0，Release 输出 clean status ok；Game SDK/public header
 无 bgfx、GLFW 或 native 泄漏。该门禁不包含 Scene/UI 内容、不包含 Pass Scheduler/submission ticket，

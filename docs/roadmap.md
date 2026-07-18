@@ -98,15 +98,16 @@ M6 生命周期之后仍未实现：
   Window/Keyboard/Pointer/committed text desktop adapter；M7-C1c-b3b 已补独立 Runtime-private UI routed
   consumption producer，M7-C1c-b3c 已补 primary-window `UIContext` ownership/selection 与 EngineHost
   接线，M7-C1c-b3d1 已补 EngineConfig UI capacities 与 `updateUI` 后、Render 前的 private layout
-  coordinator，M7-C1c-b3d2 已补 startup metrics seed 与 Game SDK scoped UI access；真实 continuous claims、IMM32、production
-  Gamepad 和连续 axis mapping 仍在后续子切片；
+  coordinator，M7-C1c-b3d2 已补 startup metrics seed 与 Game SDK scoped UI access，M7-C1c-b3e 已补
+  held primary Pointer Button claim；Key/Gamepad/axis claim producer、IMM32、production Gamepad 和连续
+  axis mapping 仍在后续子切片；
 - 有界 CPU/IO/Main worker、阶段指标与完整 shutdown deadline/fatal-stop；
 - typed render resource handle、Pass Scheduler、World RenderScene/UIDisplayList、Runtime-private
   RenderFramePacket/pool 与 submission completion 保活；
 - Scene、Asset、Audio 的真实契约和消费者，以及 Runtime-integrated UI root/layout/render
   pipeline；M7-C1b/C1c-a/C1c-b1/C1c-b2 C++23 standalone `tina_ui` tree/layout/committed-hit/
   point-query/synthetic-route foundation、M7-C1c-b3b 私有 producer、M7-C1c-b3c EngineHost 接线与
-  M7-C1c-b3d1 layout commit、M7-C1c-b3d2 startup/root scoped capability 已实现，
+  M7-C1c-b3d1 layout commit、M7-C1c-b3d2 startup/root scoped capability 与 M7-C1c-b3e Pointer claim 已实现，
   但仍没有 DisplayList、文本/glyph、默认 Widget 行为或可见 UI；
 - `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
 - Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；M7-B2 Desktop bgfx
@@ -227,7 +228,7 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   world/effective clip 的 `Targetable` entry，使用半开边界并返回 route index、四类 revision 与 visited count；
 - **已完成 M7-C1c-b1 门禁**：新增5项 query 测试后当时 `tina_ui_tests` 总数为59项；Windows Debug/Release、
   Linux GCC 13.4 与 Clang 22 ASan/UBSan/LSan 均通过，300次查询无新增 supplied UI PMR allocation；后续
-  C1c-b2 当时增至75/75，当前 b3d2 为78/78；
+  C1c-b2 当时增至75/75，b3d2 为78/78；Windows b3e 当前为81/81，Linux b3e 尚待复核；
 - **已完成 M7-C1c-b2**：fixed-capacity synthetic routed pointer event；使用固定容量 route path/listener
   storage、48-byte fixed-inline `noexcept` callback、generation-safe RAII token、owner-thread immediate reset、
   off-thread deferred reset、Capture→Target→Bubble、stop/consume、route 中 add/reset/destroy 安全失效和
@@ -241,7 +242,7 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   与真实 GLFW 集成门禁证明 `A → Button/Wheel → B` 中事件仍使用 A，帧末 B 不会覆盖历史坐标；
 - **已完成 M7-C1c-b3b**：实现 Runtime-private `UIInputRouteProducer` 与独立
   `tina_runtime_ui_tests`；只把 Move/Button/Wheel 逐 raw ordinal 路由，reset/cancel/非 Pointer 保留 hole，
-  consumed 写入双预分配 PMR bitset，claims 恒为 canonical `None`；300帧共用 supplied PMR 时 allocation
+  consumed 写入双预分配 PMR bitset，该 b3b 切片的 claims 当时恒为 canonical `None`；300帧共用 supplied PMR 时 allocation
   count 不增长，且 supplied PMR 必须长于 producer；
 - **已完成 M7-C1c-b3b 失败边界**：测试先产生1次 root Move listener side effect，再让后续深层
   Button route 因 route path capacity 失败；staging 不发布、旧 published view 保持，但推进 attempted
@@ -250,7 +251,7 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   Runtime-private owner 在首次看到 primary `WindowId` 时惰性创建唯一 `UIContext`，Headless 绑定前为 null，
   绑定后 primary 消失或 generation 更换会结构化失败，同一 ID 的 metrics/content scale/minimized 变化不重绑；
   Context 在 Render → Task → Platform → Clock module shutdown 前于 owner thread 销毁；
-- **M7-C1c-b3c 边界**：owner 不调用 `commitLayout()`，route 只读上一帧 committed snapshot；claims 仍为
+- **M7-C1c-b3c 边界**：owner 不调用 `commitLayout()`，route 只读上一帧 committed snapshot；该切片当时的 claims 仍为
   canonical `None`。Game SDK 在 b3d2 前仍不能取得 Context 或创建 root，所以该切片只完成输入时序/所有权，不能称为
   可见 UI；
 - **已完成 M7-C1c-b3d1**：`UIContextCapacityConfig` 进入 focused public header，并由 standalone
@@ -267,10 +268,18 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
   `UIPhaseCapabilityExpired`，Headless 请求返回 `PrimaryWindowUIUnavailable`。第一次 capability operation
   失败会成为 sticky phase error，后续 mutation 不执行；Runtime 离开 callback 时用 no-throw abort guard
   确保 facade 失效；
+- **已完成 M7-C1c-b3e**：routed Pointer listener 通过 `claimPointerButton()` 在固定 bitset 中幂等请求
+  当前 window/pointer 的 button ownership；Runtime 只发布最终 Platform snapshot 中仍 held 的 primary
+  Pointer Button，并在 Create 期双预分配 PMR claim buffer 中去重，不把 Key/Gamepad/axis 能力伪装成已完成；
+- **已完成 M7-C1c-b3e 失败与消费边界**：claim capacity 或后续 route 失败不交换 published storage，
+  但 attempted frame/sequence watermark 已推进且同帧不能重放。ActionMapper 对已 held Gameplay source
+  生成 Cancel 并 suppress 到真实 Up；同帧 ButtonDown 即使没有 consume，只要被 claim 也不会激活
+  Gameplay。Windows MSVC 19.50 Debug/Release 直接通过基础194/194、UI81/81、
+  Runtime→UI46/46、GLFW25/25、bgfx11/11及Null/Platform/Desktop各300帧；Linux b3e 尚待复核；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
   subtree 尚未实现；正式路径虽已接线并可创建 retained root/Panel/Label/Button 节点，但没有 DisplayList、
   文本/glyph、默认 Widget 行为或 Render UI pass，无法产生产品 UI；
-- **仍后置**：真实 claims、dirty subtree pruning、持久 Pointer Capture、Focus/Modal、
+- **仍后置**：Key/Gamepad/axis claim producer、dirty subtree pruning、持久 Pointer Capture、Focus/Modal、
   Button default action、paint snapshot/DisplayList、nested clip、text/glyph、
   FreeType 与 bgfx UI pass；
 - 后续继续实现后端无关 Quad/Text/Clip DisplayList、FramePinSink/capacity rollback 和相邻兼容 batching

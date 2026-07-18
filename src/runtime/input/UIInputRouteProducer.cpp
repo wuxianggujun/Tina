@@ -1,5 +1,7 @@
 #include "UIInputRouteProducer.hpp"
 
+#include "ActionMapper.hpp"
+
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 
@@ -8,6 +10,7 @@
 #include <exception>
 #include <limits>
 #include <new>
+#include <ranges>
 #include <string_view>
 #include <utility>
 #include <variant>
@@ -119,7 +122,8 @@ makePointerInput(Platform::PlatformFrameId frame, usize ordinal, const Platform:
 } // namespace
 
 Core::Result<std::unique_ptr<UIInputRouteProducer>>
-UIInputRouteProducer::Create(usize rawTransitionCapacity, std::pmr::memory_resource& memoryResource)
+UIInputRouteProducer::Create(usize rawTransitionCapacity, usize continuousControlClaimCapacity,
+                             std::pmr::memory_resource& memoryResource)
 {
     if (rawTransitionCapacity == 0 ||
         rawTransitionCapacity > Platform::PlatformFrameCapacityConfig::MaximumInputTransitionCapacity)
@@ -127,16 +131,27 @@ UIInputRouteProducer::Create(usize rawTransitionCapacity, std::pmr::memory_resou
         return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
                              "UI Input route raw transition capacity is outside the supported range");
     }
+    if (continuousControlClaimCapacity == 0 ||
+        continuousControlClaimCapacity > InputActionMapperCapacityConfig::MaximumContinuousControlClaimCapacity)
+    {
+        return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
+                             "UI Input route continuous claim capacity is outside the supported range");
+    }
 
     try
     {
         const usize maximumWordCount = consumptionWordCount(rawTransitionCapacity + 1U);
         std::pmr::vector<u64> publishedWords(&memoryResource);
         std::pmr::vector<u64> stagingWords(&memoryResource);
+        std::pmr::vector<UI::ContinuousControlClaim> publishedClaims(&memoryResource);
+        std::pmr::vector<UI::ContinuousControlClaim> stagingClaims(&memoryResource);
         publishedWords.resize(maximumWordCount, 0);
         stagingWords.resize(maximumWordCount, 0);
+        publishedClaims.reserve(continuousControlClaimCapacity);
+        stagingClaims.reserve(continuousControlClaimCapacity);
         auto producer = std::unique_ptr<UIInputRouteProducer>(new (std::nothrow) UIInputRouteProducer(
-            rawTransitionCapacity, std::move(publishedWords), std::move(stagingWords)));
+            rawTransitionCapacity, continuousControlClaimCapacity, std::move(publishedWords),
+            std::move(stagingWords), std::move(publishedClaims), std::move(stagingClaims)));
         if (producer == nullptr)
         {
             return Core::failure(Core::CoreErrorCode::OutOfMemory, "UI Input route producer allocation failed");
@@ -155,10 +170,14 @@ UIInputRouteProducer::Create(usize rawTransitionCapacity, std::pmr::memory_resou
     }
 }
 
-UIInputRouteProducer::UIInputRouteProducer(usize rawTransitionCapacity, std::pmr::vector<u64> publishedWords,
-                                           std::pmr::vector<u64> stagingWords) noexcept
-    : rawTransitionCapacity_(rawTransitionCapacity), publishedWords_(std::move(publishedWords)),
-      stagingWords_(std::move(stagingWords)), ownerThreadId_(std::this_thread::get_id())
+UIInputRouteProducer::UIInputRouteProducer(
+    usize rawTransitionCapacity, usize continuousControlClaimCapacity, std::pmr::vector<u64> publishedWords,
+    std::pmr::vector<u64> stagingWords, std::pmr::vector<UI::ContinuousControlClaim> publishedClaims,
+    std::pmr::vector<UI::ContinuousControlClaim> stagingClaims) noexcept
+    : rawTransitionCapacity_(rawTransitionCapacity),
+      continuousControlClaimCapacity_(continuousControlClaimCapacity), publishedWords_(std::move(publishedWords)),
+      stagingWords_(std::move(stagingWords)), publishedClaims_(std::move(publishedClaims)),
+      stagingClaims_(std::move(stagingClaims)), ownerThreadId_(std::this_thread::get_id())
 {
 }
 
@@ -259,17 +278,18 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
         lastAttemptedRawSequence_ = transitions.back().sequence;
     }
 
-    const UI::ContinuousControlClaimsView claims = UI::ContinuousControlClaimsView::None(platformFrame.id());
     if (context == nullptr)
     {
         return UIInputRouteOutputView{
             .consumption = UI::InputTransitionConsumptionView::None(platformFrame.id(), transitions.size()),
-            .claims = claims,
+            .claims = UI::ContinuousControlClaimsView::None(platformFrame.id()),
         };
     }
 
     const usize requiredWordCount = consumptionWordCount(transitions.size());
     std::fill_n(stagingWords_.begin(), requiredWordCount, u64{0});
+    stagingClaims_.clear();
+    const Platform::WindowFrameSnapshot* primaryWindow = platformFrame.primaryWindow();
     bool anyConsumed = false;
     for (usize ordinal = 0; ordinal < transitions.size(); ++ordinal)
     {
@@ -292,25 +312,72 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             stagingWords_[ordinal / BitsPerConsumptionWord] |= u64{1} << (ordinal % BitsPerConsumptionWord);
             anyConsumed = true;
         }
+
+        if (primaryWindow == nullptr)
+        {
+            continue;
+        }
+        for (usize buttonIndex = 0; buttonIndex < Platform::PointerButtonCount; ++buttonIndex)
+        {
+            if (!routeResult->claimedPointerButtons.test(buttonIndex) ||
+                !primaryWindow->input.pointer.heldButtons.test(buttonIndex))
+            {
+                continue;
+            }
+            const Platform::PointerButtonControlIdentity control{
+                .window = input->window,
+                .pointer = input->pointer,
+                .button = static_cast<Platform::PointerButton>(buttonIndex),
+            };
+            const auto existing = std::ranges::find_if(
+                stagingClaims_, [&control](const UI::ContinuousControlClaim& claim) noexcept {
+                    const auto* claimed = std::get_if<Platform::PointerButtonControlIdentity>(&claim.control);
+                    return claimed != nullptr && *claimed == control;
+                });
+            if (existing != stagingClaims_.end())
+            {
+                continue;
+            }
+            if (stagingClaims_.size() >= continuousControlClaimCapacity_)
+            {
+                return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                     "UI continuous control claim capacity has been exhausted");
+            }
+            stagingClaims_.push_back(UI::ContinuousControlClaim{.control = control});
+        }
     }
 
-    if (!anyConsumed)
+    const bool anyClaims = !stagingClaims_.empty();
+    if (!anyConsumed && !anyClaims)
     {
         return UIInputRouteOutputView{
             .consumption = UI::InputTransitionConsumptionView::None(platformFrame.id(), transitions.size()),
-            .claims = claims,
+            .claims = UI::ContinuousControlClaimsView::None(platformFrame.id()),
         };
     }
 
-    publishedWords_.swap(stagingWords_);
+    if (anyConsumed)
+    {
+        publishedWords_.swap(stagingWords_);
+    }
+    if (anyClaims)
+    {
+        publishedClaims_.swap(stagingClaims_);
+    }
     return UIInputRouteOutputView{
-        .consumption =
-            UI::InputTransitionConsumptionView{
-                .platformFrame = platformFrame.id(),
-                .transitionCount = transitions.size(),
-                .consumedOrdinalWords = std::span<const u64>(publishedWords_.data(), requiredWordCount),
-            },
-        .claims = claims,
+        .consumption = anyConsumed
+            ? UI::InputTransitionConsumptionView{
+                  .platformFrame = platformFrame.id(),
+                  .transitionCount = transitions.size(),
+                  .consumedOrdinalWords = std::span<const u64>(publishedWords_.data(), requiredWordCount),
+              }
+            : UI::InputTransitionConsumptionView::None(platformFrame.id(), transitions.size()),
+        .claims = anyClaims
+            ? UI::ContinuousControlClaimsView{
+                  .platformFrame = platformFrame.id(),
+                  .controls = std::span<const UI::ContinuousControlClaim>(publishedClaims_),
+              }
+            : UI::ContinuousControlClaimsView::None(platformFrame.id()),
     };
 }
 

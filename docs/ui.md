@@ -10,8 +10,8 @@
 > `UIContext`，并按 Platform lifecycle dispatch → UI route → ActionMapper 接入正式帧路径；
 > M7-C1c-b3d1 已加入 focused `UIContextCapacityConfig`、`EngineConfig::primaryWindowUICapacities`
 > 与 `updateUI` 后、Render 前的 Runtime-private layout coordinator；M7-C1c-b3d2 已加入 startup
-> primary-window metrics seed、`onEnter` root builder 与 `updateUI` root-scoped updater。
-> producer 的 claims 仍为 canonical `None`。持久 Pointer Capture、
+> primary-window metrics seed、`onEnter` root builder 与 `updateUI` root-scoped updater；M7-C1c-b3e
+> 已加入 held primary Pointer Button claim bridge。Key/Gamepad/axis claim、持久 Pointer Capture、
 > Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、
 > dirty subtree pruning、文本/Glyph Atlas 与 bgfx UI pass 尚未实现。Tina UI 是游戏内 Retained UI，
 > 不是 Immediate UI，也不是桌面编辑器工具包。
@@ -341,10 +341,14 @@ paint order 来自稳定 tree preorder，hit rebuild 仍线性扫描整份 commi
 M7-C1c-b3a 已在 Platform raw transition 层补齐 Button/Wheel 的事件时 logical position；Runtime
 producer 必须原样传入 `UIPointerInputEvent.position`，不得使用帧末 Pointer snapshot 覆盖历史坐标。
 M7-C1c-b3b producer 已遵守该约束，并只转换 Move/Button/Wheel；reset、cancel 与非 Pointer transition
-不路由、不伪造 Up，在 raw ordinal 空间保留 hole。listener consume 写回对应 ordinal bit，claims 当前恒为
-canonical `None`。
+不路由、不伪造 Up，在 raw ordinal 空间保留 hole。listener consume 写回对应 ordinal bit；该 b3b
+切片的 claims 当时恒为 canonical `None`。M7-C1c-b3e 新增
+`UIRoutedPointerEvent::claimPointerButton(button)`：合法 button 在 callback-scope 固定 bitset 中幂等置位，
+非法枚举返回 false；请求只代表当前 routed input 的 window/pointer，且不等同于消费 transition。
+Runtime producer 只把最终 Platform snapshot 中仍 held 的 primary Pointer Button 转为去重 claim，
+所以 Up 后的请求不会伪造跨帧 ownership。
 
-producer 使用 Create 期双预分配 PMR bitset；supplied `memory_resource` 必须长于 producer。300帧复用
+producer 使用 Create 期双预分配 PMR consumption bitset 与 claim vector；supplied `memory_resource` 必须长于 producer。300帧复用
 同一 PMR 的直接测试中 allocation count 不增长。失败用例先让 root Move listener 产生1次 side effect，
 再让后续深层 Button route 因 route path capacity 失败；staging 不发布、旧 published view 保持，attempted
 watermark 已推进，同帧 retry 被拒且 callback 仍为1，明确证明 listener side effect 不回滚也不重放。
@@ -382,14 +386,15 @@ layout revision。虚拟列表只创建 visible + overscan item；100,000 行不
 ## 输入、路由与默认行为
 
 本节分为已实现的 C1c-b2 synthetic route、C1c-b3b Runtime-private producer、C1c-b3c EngineHost 接线、
-C1c-b3d1 layout commit、C1c-b3d2 scoped Game SDK UI access
+C1c-b3d1 layout commit、C1c-b3d2 scoped Game SDK UI access、C1c-b3e Pointer-button claim
 和冻结的后续 Runtime 目标。C1c-b2 已提供 committed
 hit/route-ancestry snapshot、纯 point query、固定容量 listener 注册与单条 synthetic Pointer input
 的 Capture→Target→Bubble 派发；C1c-b3b 已把 Move/Button/Wheel consume 生成 frame-local consumption
-view，claims 恒为 `None`。C1c-b3c 已在 Runtime 内部拥有并选择 primary-window `UIContext`，每帧在
+view；该切片的 claims 当时为 `None`。C1c-b3c 已在 Runtime 内部拥有并选择 primary-window `UIContext`，每帧在
 同步 Platform lifecycle dispatch 之后、Gameplay ActionMapper 之前调用 producer。C1c-b3d2 已提供
-`onEnter` root 创建与 `updateUI` root-scoped tree mutation，但尚未实现 Focus/Capture/Modal、Button default
-action、Label 文本、真实 continuous claim 输出或可见 UI draw。
+`onEnter` root 创建与 `updateUI` root-scoped tree mutation。C1c-b3e 已发布最终快照仍 held 的 primary
+Pointer Button claim 并接通 ActionMapper Cancel/suppression，但尚未实现 Key/Gamepad/axis claim producer、
+Focus/Capture/Modal、Button default action、Label 文本或可见 UI draw。
 
 这个私有 owner 只负责 identity 与 lifetime，不调用 `commitLayout()`。输入始终读取上一份已提交
 hit snapshot；hit-test/route 不得为“方便”隐式触发布局。M7-C1c-b3d1 已由独立 coordinator 在
@@ -602,8 +607,9 @@ generation-safe target invalidation、listener 容量原子失败与复用、rou
 callback、token move/context-destroyed/off-thread reset、callback root 自销毁、route 中 commit 拒绝、
 错误销毁 context 的 death test、300次 route 零新增 supplied UI PMR allocation/不改变 committed state，
 以及递归 route 拒绝。M7-C1c-b3d2 另补3项低层 `UITreeUpdater` 子节点创建/跨 root/失效 root 测试；
-Windows MSVC 19.50 Debug/Release、Linux GCC 13.4、Linux Clang 22.1.8 + libstdc++15.2
-ASan/UBSan/LSan 的完整 `tina_ui_tests` 均为78/78，且 Clang 无 sanitizer 诊断。初次 GCC
+M7-C1c-b3e 再补3项 claim 合并/非法值/无命中测试。Windows MSVC 19.50 Debug/Release 当前完整
+`tina_ui_tests` 为81/81；Linux GCC 13.4、Linux Clang 22.1.8 + libstdc++15.2
+ASan/UBSan/LSan 的最近 b3d2 记录仍为78/78，且 Clang 无 sanitizer 诊断。初次 GCC
 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
 它尚未证明 dirty leaf 不扫描无关 subtree，也未覆盖 PaintCache、DisplayList、文本、Widget default
 action、可见 UI 或 GPU 资源归零。M7-C1c-b3c 只补上 Runtime 私有
@@ -642,10 +648,12 @@ commit；M7-C1c-b3d2 只扩大到 scoped Game SDK root/updater，不扩大到 Di
    `updateUI` 后、Render 前每个 Platform frame 至多一次的 Runtime-private layout commit；
 9. 已完成 M7-C1c-b3d2：startup primary-window metrics seed、`onEnter` root builder、`updateUI`
    root-scoped updater、phase epoch expiry/sticky/abort，不开放裸 Context 或任意阶段 root 创建；
-10. 实现真实 claims，并让 dirty leaf 跳过无关 subtree，输出后端无关 DisplayList；
-11. 完成 PaintCache/text layout + glyph atlas；
-12. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
-13. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
-14. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
+10. 已完成 M7-C1c-b3e：primary Pointer Button claim 请求、held-filter、去重、双 PMR buffer、
+    capacity/rollback 与 ActionMapper Cancel/suppress 闭环；
+11. 实现 Key/Gamepad claim producer，并让 dirty leaf 跳过无关 subtree，输出后端无关 DisplayList；
+12. 完成 PaintCache/text layout + glyph atlas；
+13. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
+14. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
+15. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
 
 所以“完善 UI”首先是完成正确的数据和 backend 边界，然后才是增加 Widget 数量。

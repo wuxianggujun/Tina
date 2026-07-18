@@ -307,6 +307,135 @@ TEST_F(UIInputRouteTest, RoutesCaptureTargetAndBubbleInStableOrder)
     EXPECT_TRUE(routed->hasRoutedTarget());
 }
 
+TEST_F(UIInputRouteTest, PointerButtonClaimsMergeAcrossPhasesAndDuplicates)
+{
+    RouteTree tree = createRouteTree(window);
+    ASSERT_NE(tree.context, nullptr);
+    RouteTrace trace;
+
+    auto rootCaptureToken = addListener(
+        *tree.context,
+        {.node = tree.root.rootNodeId(),
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Capture},
+        UI::UIRoutedPointerCallback{[&trace](UI::UIRoutedPointerEvent& event) noexcept {
+            trace.push(event, 1);
+            EXPECT_TRUE(event.claimPointerButton(Platform::PointerButton::Primary));
+        }});
+    auto targetToken = addListener(
+        *tree.context,
+        {.node = tree.target,
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[&trace](UI::UIRoutedPointerEvent& event) noexcept {
+            trace.push(event, 2);
+            EXPECT_TRUE(event.claimPointerButton(Platform::PointerButton::Primary));
+            EXPECT_TRUE(event.claimPointerButton(Platform::PointerButton::Secondary));
+        }});
+    auto panelBubbleToken = addListener(
+        *tree.context,
+        {.node = tree.panel,
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Bubble},
+        UI::UIRoutedPointerCallback{[&trace](UI::UIRoutedPointerEvent& event) noexcept {
+            trace.push(event, 3);
+            EXPECT_TRUE(event.claimPointerButton(Platform::PointerButton::Middle));
+            event.stopPropagation();
+        }});
+    auto skippedRootBubbleToken = addListener(
+        *tree.context,
+        {.node = tree.root.rootNodeId(),
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Bubble},
+        UI::UIRoutedPointerCallback{[&trace](UI::UIRoutedPointerEvent& event) noexcept {
+            trace.push(event, 4);
+            EXPECT_TRUE(event.claimPointerButton(Platform::PointerButton::Button4));
+        }});
+    ASSERT_TRUE(
+        rootCaptureToken && targetToken && panelBubbleToken
+        && skippedRootBubbleToken);
+
+    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
+
+    ASSERT_EQ(trace.size, 3U);
+    EXPECT_EQ(trace.entries[0].marker, 1);
+    EXPECT_EQ(trace.entries[1].marker, 2);
+    EXPECT_EQ(trace.entries[2].marker, 3);
+    EXPECT_TRUE(routed->claimedPointerButtons.test(
+        static_cast<usize>(Platform::PointerButton::Primary)));
+    EXPECT_TRUE(routed->claimedPointerButtons.test(
+        static_cast<usize>(Platform::PointerButton::Secondary)));
+    EXPECT_TRUE(routed->claimedPointerButtons.test(
+        static_cast<usize>(Platform::PointerButton::Middle)));
+    EXPECT_FALSE(routed->claimedPointerButtons.test(
+        static_cast<usize>(Platform::PointerButton::Button4)));
+    EXPECT_EQ(routed->listenerInvocationCount, 3U);
+    EXPECT_TRUE(routed->stopped);
+    EXPECT_FALSE(routed->targetInvalidated);
+}
+
+TEST_F(UIInputRouteTest, PointerButtonClaimRejectsInvalidButton)
+{
+    RouteTree tree = createRouteTree(window);
+    ASSERT_NE(tree.context, nullptr);
+    bool rejectedInvalidButton = false;
+
+    auto token = addListener(
+        *tree.context,
+        {.node = tree.target,
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{
+            [&rejectedInvalidButton](UI::UIRoutedPointerEvent& event) noexcept {
+                rejectedInvalidButton = !event.claimPointerButton(
+                    static_cast<Platform::PointerButton>(
+                        Platform::PointerButtonCount));
+                EXPECT_TRUE(event.claimPointerButton(
+                    Platform::PointerButton::Secondary));
+            }});
+    ASSERT_TRUE(token);
+
+    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
+    EXPECT_TRUE(rejectedInvalidButton);
+    EXPECT_FALSE(routed->claimedPointerButtons.test(
+        static_cast<usize>(Platform::PointerButton::Primary)));
+    EXPECT_TRUE(routed->claimedPointerButtons.test(
+        static_cast<usize>(Platform::PointerButton::Secondary)));
+    EXPECT_EQ(routed->claimedPointerButtons.count(), 1U);
+}
+
+TEST_F(UIInputRouteTest, PointerButtonClaimResultIsEmptyWhenNoHit)
+{
+    RouteTree tree = createRouteTree(window);
+    ASSERT_NE(tree.context, nullptr);
+    usize callbackCount = 0;
+
+    auto token = addListener(
+        *tree.context,
+        {.node = tree.target,
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[&callbackCount](
+                                        UI::UIRoutedPointerEvent& event) noexcept {
+            ++callbackCount;
+            EXPECT_TRUE(event.claimPointerButton(Platform::PointerButton::Primary));
+        }});
+    ASSERT_TRUE(token);
+
+    UI::UIPointerInputEvent input = makePointerInput(window);
+    input.position = {.x = 90.0F, .y = 90.0F};
+
+    auto routed = tree.context->routePointerInput(input);
+    ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
+    EXPECT_FALSE(routed->pointQuery.hasTarget());
+    EXPECT_EQ(callbackCount, 0U);
+    EXPECT_TRUE(routed->claimedPointerButtons.none());
+    EXPECT_EQ(routed->listenerInvocationCount, 0U);
+    EXPECT_FALSE(routed->hasRoutedTarget());
+}
+
 TEST_F(UIInputRouteTest, StopPropagationFinishesCurrentNodeAndSkipsLaterNodes)
 {
     RouteTree tree = createRouteTree(window);

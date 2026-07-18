@@ -78,6 +78,9 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
   `PrimaryWindowUITreeUpdater`；两者都是 move-only、owner-thread、phase-epoch-scoped facade，回调结束后
   无条件失效。第一次 capability operation 失败会成为该 phase 的 sticky error，并在 callback 返回后由
   Runtime 与 callback status 合并；
+- M7-C1c-b3e 允许 routed Pointer listener 通过 `claimPointerButton()` 请求接管当前 route Window/Pointer
+  上仍 held 的 primary Pointer Button。Runtime 按最终 snapshot 过滤、跨 route 去重并发布 bounded claim；
+  ActionMapper 取消已 active 的 Gameplay source，或直接拦截同帧尚未消费的 ButtonDown，并抑制到真实 Up；
 - 当前帧循环为 Poll Platform → frame/payload/capacity/sequence 预校验 → Platform lifecycle dispatch
   → primary UIContext selection + UI Input Routing → Action Mapping → Fixed Update（0..4）→ Frame Update
   → Render Scene Extraction → UI Update → primary UI Layout Commit → Null submit → present；`requestExitAfterFrame()` 会完成当帧
@@ -96,8 +99,9 @@ Pass Scheduler/RenderFramePacket，也没有 Scene、Asset 或 Audio。Render �
 Desktop smoke；UI 只完成 standalone `tina_ui` 树核心、route-result view ABI、事务式 Flex-lite layout、
 committed hit-snapshot 数据基础、point query/反向目标选择、synthetic Capture→Target→Bubble route，以及
 Runtime-private producer/primary Context 接线、Runtime-private 每帧 layout commit，以及 startup
-primary-window seed + root-scoped phase capability。claims 仍为 canonical `None`，Panel/Label/Button 只是在
-retained tree 中可创建的节点类型；当前没有可见 UI。持久 Pointer Capture、Focus/Modal、Button
+primary-window seed + root-scoped phase capability、held primary Pointer Button claim bridge。
+Panel/Label/Button 只是在 retained tree 中可创建的节点类型；当前没有可见 UI。Key/Gamepad/axis claim、
+持久 Pointer Capture、Focus/Modal、Button
 default action、paint snapshot/DisplayList、nested clip、dirty subtree pruning、text/glyph、FreeType 与 bgfx UI pass 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或 clear-only
 Desktop smoke 推断为已经实现。
 
@@ -180,8 +184,10 @@ dispatch 的具体排队语义必须在该通道自己的 ADR 中冻结，不能
 M7-C1c-b3c 已让首个 primary Window 的 Runtime-private `UIContext` 在 Platform lifecycle dispatch 后路由
 Pointer transition，并把 producer 结果交给 ActionMapper；Headless 绑定前没有 Context。当前 route 读取上一帧
 committed snapshot，不隐式 layout。M7-C1c-b3d1 只在后续 `updateUI` phase 成功后由 coordinator 提交
-本帧下一份 snapshot；因此输入路由与 layout 发布仍是两个明确提交点。Focus 与真实 continuous claims
-仍后置。Gameplay Action 带目标 simulation tick，由 fixed loop 消费。
+本帧下一份 snapshot；因此输入路由与 layout 发布仍是两个明确提交点。M7-C1c-b3e 已实现第一条真实
+continuous-control producer：Move/Wheel/Button route 都可请求接管最终仍 held 的 primary Pointer Button，
+且 consumption 与 claim 分开发布。Key/Gamepad/axis claim、Focus/Capture/Modal 仍后置。Gameplay Action
+带目标 simulation tick，由 fixed loop 消费。
 
 ## IGameApplication 与 IGameState 调用顺序
 

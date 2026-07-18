@@ -12,8 +12,9 @@
   `UIInputRouteProducer` 与独立 `tina_runtime_ui_tests`；M7-C1c-b3c 已让 `EngineHost` 私有延迟绑定
   primary-window `UIContext`，并按 Platform lifecycle dispatch → route → ActionMapper 接入正式帧；
   M7-C1c-b3d1 已加入 focused capacity config/shared validator、EngineConfig pre-factory validation 与
-  `updateUI` 后、Render 前的 Runtime-private layout coordinator。
-  Game SDK 仍无 UI root/updater，claims 仍为 canonical `None`。持久 Pointer Capture、Focus/Modal、
+  `updateUI` 后、Render 前的 Runtime-private layout coordinator；M7-C1c-b3d2 已加入 startup seed 与
+  root-scoped Game SDK UI facade；M7-C1c-b3e 已加入 held primary Pointer Button claim bridge。
+  Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、
   Button default action、
   paint snapshot/DisplayList、dirty subtree pruning、nested clip、文本/Glyph Atlas 与 bgfx UI pass 仍后置。
 
@@ -175,11 +176,11 @@ pipeline、texture、sampler、blend、effective clip 完全兼容的命令；�
 本节是 Accepted 目标语义。M7-C1c-a/C1c-b1 已提供 committed hit/route-ancestry 数据与纯 point query；
 M7-C1c-b2 已提供 synthetic listener dispatch 与 Capture → Target → Bubble 执行。M7-C1c-b3b 已提供
 Runtime-private producer：它只把 raw Pointer Move/Button/Wheel 逐 ordinal 转成 `UIPointerInputEvent`，并把
-listener 的 consume 结果写入 `InputTransitionConsumptionView`；`ContinuousControlClaimsView` 当前恒为
-canonical `None`。reset、cancel 与所有非 Pointer transition 不路由，也不伪造 Button Up，而是在 raw ordinal
+listener 的 consume 结果写入 `InputTransitionConsumptionView`；在 b3b 切片中
+`ContinuousControlClaimsView` 当时恒为 canonical `None`。reset、cancel 与所有非 Pointer transition 不路由，也不伪造 Button Up，而是在 raw ordinal
 空间保留 hole。M7-C1c-b3c 已在 Platform lifecycle dispatch 后选择 Context 并调用 producer，再把结果
 交给 ActionMapper。Focus/Capture/Modal、Button default action、真实 continuous claims 与 Game SDK root
-访问仍未实现。
+访问在该切片仍未实现。
 
 producer 使用两份 Create 期预分配的 PMR consumption bitset，成功时交换 published/staging storage；supplied
 `memory_resource` 必须比 producer 活得更久，连续300帧共用时 allocation count 不增长。失败测试先让 root
@@ -285,6 +286,12 @@ root-scoped facade 或 synthetic route 推断。
 M7-C1c-b3d2 已按 [ADR 0021](0021-runtime-ui-startup-capability.md) 实现 startup primary-window metrics
 seed 与 root-scoped、phase-epoch-scoped Game SDK capability。普通游戏仍不获得裸 `UIContext*`，也不能在
 任意阶段调用 `createRoot()`；该 facade 与 startup snapshot 本身仍不构成可见 UI。
+
+M7-C1c-b3e 已实现第一条 continuous-control claim producer：任意 Move/Wheel/Button route listener 都可
+请求当前 Window/Pointer 的一个 primary Pointer Button，Runtime 只发布最终 snapshot 仍 held 的请求并
+跨 route 去重。transition consumption 与 claim 相互独立；ActionMapper 先应用 claim，因此既能取消已
+active 的 Gameplay source，也能拦截同帧未 consume 的 ButtonDown，并抑制到真实 Up。该实施不改变本
+ADR 对后续 Pointer Capture、Focus/Modal、Widget default action、DisplayList 与文本渲染的边界。
 
 ## 被拒绝方案
 

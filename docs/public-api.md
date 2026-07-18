@@ -9,7 +9,9 @@
 > `UIContextCapacityConfig`、`EngineConfig::primaryWindowUICapacities` 与 Runtime-private layout
 > coordinator；M7-C1c-b3d2 已加入 startup primary-window metrics seed、`onEnter` 前显式 bind、
 > startup layout/hit snapshot 与 root-scoped、phase-epoch-scoped Game SDK UI facade。
-> claims 仍为 canonical `None`。完整状态栈、worker、Scene/Asset/Audio、可见 UI pipeline、
+> M7-C1c-b3e 已让 routed Pointer listener 请求接管仍处于 held 状态的 primary Pointer Button，并由
+> Runtime 过滤、去重后发布 continuous-control claim。Key/Gamepad/axis claim、完整状态栈、worker、
+> Scene/Asset/Audio、可见 UI pipeline、
 > production Gamepad、完整 DPI 与
 > Windows IMM32 仍是后续契约。
 
@@ -393,8 +395,9 @@ M7-A 的 Action Mapper 由 Runtime 拥有；`EngineConfig::inputActions.digitalB
 首批只有 priority=0 的 Engine default Input Context。raw/text/platform-event 容量由
 `platformFrameCapacities` 唯一配置；Simulation/Frame action/binding 容量由
 `inputActions.capacities` 配置；订阅 slot 由 `platformEventSubscriptions` 配置。M7-C1c-b3b private
-producer 已由 M7-C1c-b3c 接入 `EngineHost`，但 claims 仍恒为 `None`；内部 continuous claim 上限
-固定为64且不属于 game-facing Action Map 配置。批次另有不可被普通项
+producer 已由 M7-C1c-b3c 接入 `EngineHost`；M7-C1c-b3e 又发布已去重且在最终 Pointer snapshot 中
+仍 held 的 primary Pointer Button claim。内部 continuous claim 上限默认64且不属于 game-facing Action
+Map 配置；Runtime 以同一容量创建 producer 的两份 PMR claim buffer。批次另有不可被普通项
 占用的 reset slot，运行期不得扩容。
 
 0 fixed-step 帧不把 Down→Up 压成布尔值；Runtime 保存有界、有序
@@ -520,7 +523,8 @@ backend-normalized pointer transition，position/delta 保持 window logical coo
 `PlatformFrameId`、source sequence、owner `WindowId`、primary pointer、kind、finite position/delta 与 button。
 route 对上一份 committed hit snapshot 最多执行一次 point query，使用固定容量 route path scratch，并按
 Capture→Target→Bubble 派发匹配 kind/phase 的 listener。`UIPointerRouteResult` 是 owning value，携带 point
-query、route depth、listener invocation count、consumed/stopped/targetInvalidated；它还不是 Runtime
+query、route depth、listener invocation count、consumed/stopped/targetInvalidated，以及 listener 通过
+`claimPointerButton()` 请求的固定大小 Pointer Button bitset；它仍不是 Runtime
 `InputTransitionConsumptionView` 或 `ContinuousControlClaimsView`。`UIRoutedPointerListenerToken` 是
 generation-safe move-only RAII owner：owner-thread reset 立即生效，off-thread reset 进入 bounded queue 并在下一次
 owner-thread mutation/route 前 drain，context 销毁后 reset 仍安全。当前没有持久 Pointer Capture、Focus/Modal、
@@ -533,7 +537,7 @@ Button interaction、paint snapshot/DisplayList、dirty subtree pruning、nested
 `UIInputRouteProducer` 是 `tina_runtime` 私有实现，不进入 Game SDK 或普通 Module public header。它只接受
 同一 primary Window 的 Pointer Move/Button/Wheel，按 raw transition ordinal 调用 `routePointerInput()`；
 Button/Wheel 使用 transition 自带的事件时 logical position。reset、cancel 与非 Pointer transition 保留
-ordinal hole，不路由、不合成 Up；本切片 claims 恒为 canonical `None`。
+ordinal hole，不路由、不合成 Up；在 b3b 切片中 claims 当时恒为 canonical `None`。
 
 producer 使用两份 Create 期预分配的 PMR consumption bitset，成功发布时交换 buffer；supplied
 `memory_resource` 是借用依赖，必须比 producer 活得更久，300帧共用同一 PMR 的直接测试中 allocation
@@ -630,6 +634,22 @@ frame id/source sequence；首个 frame 的 identity/revision 与 lifecycle even
 在 `onEnter` 前绑定 Context，并在 State/policy commit 前按 logical extent 原子发布首份
 structure/layout/hit snapshot。
 
+### M7-C1c-b3e held Pointer Button claim bridge
+
+`UIRoutedPointerEvent::claimPointerButton(button)` 与 `consumeInputTransition()` 是两条独立权限：前者请求
+当前 route 的 Window/Pointer 在本帧接管一个 continuous button control，后者只消费当前 raw transition。
+合法重复请求幂等，非法 enum 返回 `false`；Move、Wheel 与 Button listener 都可以显式接管已按住的按钮，
+因此 UI 不必等待下一次 ButtonDown 才能夺回正在被 Gameplay 使用的控制。
+
+`UIInputRouteProducer` 只把最终 `PointerSnapshot::heldButtons` 仍为真的请求转换成
+`PointerButtonControlIdentity`，跨 route 去重并写入 Create 期预分配的 published/staging PMR buffer。
+容量失败时不发布 staging consumption/claims，但 attempted watermark 已推进，同一帧不可重试，避免重放
+listener side effect。ActionMapper 先应用 claim 再映射 transition：已 active 的 Gameplay source 被取消并
+抑制到真实 Up；同帧 ButtonDown 即使没有被 consume，只要被 claim 也不会激活 Gameplay。
+
+该切片只覆盖 primary Pointer Button。Key、Gamepad button/axis、持久 Pointer Capture、Focus/Modal、
+Button default action 与可见 DisplayList 仍未实现。
+
 ## EngineConfig
 
 `EngineConfig` 是可复制纯值，Create 前一次性验证：
@@ -714,7 +734,7 @@ snapshot/deferred publish/runtime handoff；M7-B2 已建立私有 `tina_render_b
 | `Tina::UI::UICommittedHitView` | M7-C1c-a 已实现 committed 数据基础 | UI public | owner-thread borrowed 双缓冲 hit snapshot，下一次成功 hit 发布或 `UIContext` 销毁后失效 | CapacityExceeded/owner-thread misuse |
 | `Tina::UI::UIPointerHitQueryResult` | M7-C1c-b1 已实现 | UI public | owning value；entry index 只对结果 revision 对应的 committed hit view 有效 | 非有限坐标为正常 miss；不执行 listener/route |
 | `Tina::UI::UIRoutedPointerListenerToken` | M7-C1c-b2 已实现 | UI public | generation-safe move-only RAII listener owner；owner-thread reset immediate，off-thread reset deferred，context 销毁后 reset 安全 | capacity exceeded / stale node / wrong owner |
-| `Tina::UI::UIPointerRouteResult` | M7-C1c-b2 已实现 synthetic route | UI public | owning value；只描述单条 normalized pointer input 的 route 结果 | invalid input / route reentrancy / capacity exceeded；不是 Runtime consumption/claim view |
+| `Tina::UI::UIPointerRouteResult` | M7-C1c-b2 synthetic route；b3e 增加 claim request | UI public | owning value；描述单条 normalized pointer input 的 route/consume 结果与固定大小 Pointer Button claim request | invalid input / route reentrancy / capacity exceeded；不是 Runtime consumption/claim view，Runtime 仍须按最终 held snapshot 过滤 |
 | `Tina::UI::UIContextCapacityConfig` | M7-C1c-b3d1 已实现 focused config/validator | UI public / EngineConfig value | Create 前复制纯值；Runtime Context owner 使用已验证配置 | invalid node/root/derived/listener capacity；factory 前拒绝 |
 | `EntityId` | M8 目标 | Game SDK | World registry generation + owner | invalid/stale/wrong owner |
 | `AssetHandle<T>` | M10 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
@@ -778,11 +798,13 @@ Game SDK 运行 UI/2D/3D 产品样例。`Desktop::CreateEngine`、clear-only bgf
 Game SDK UI root/update facade 已实现，但不代表正式 SDK、完整 Render pass、Widget 默认行为、
 可见 UI 或产品样例已完成。M7-C1b/C1c-a/C1c-b1/C1c-b2 已覆盖50,000节点
 非递归 layout/hit snapshot、连续300次无变化 commit 的0 layout pass/0新增 UI PMR allocation，以及
-15项 committed hit snapshot、5项 point query、16项 synthetic route 与3项 tree-updater 门禁；
-独立 `tina_ui_tests` 共78/78。Windows MSVC 19.50 Debug/Release、Linux GCC 13.4、Linux Clang
-22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均已通过 UI 78/78，且 Clang 无 sanitizer 诊断；初次 GCC
+15项 committed hit snapshot、5项 point query、19项 synthetic route 与3项 tree-updater 门禁；
+Windows MSVC 19.50 Debug/Release 的独立 `tina_ui_tests` 已通过81/81；最近一轮 Linux b3d2 基线仍是
+GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 的 UI 78/78，且 Clang 无 sanitizer 诊断；初次 GCC
 GCC/Clang 构建无 warning。它尚未覆盖 dirty subtree pruning、Focus/Capture/Modal、Button、paint snapshot/
 DisplayList、nested clip、文本/Glyph Atlas、Widget 默认行为或可见 Widget。M7-C1c-b3b 的 producer
 只补齐 Move/Button/Wheel→consumption 私有桥，M7-C1c-b3c 只补齐 primary-window Context 生命周期与
 EngineHost 顺序接线，M7-C1c-b3d1 只补齐容量配置与 Runtime-private layout commit；b3d2 只补齐
-startup bind 与 root-scoped Game SDK UI facade，仍不扩大到 Widget、DisplayList 或可见 UI 结论。
+startup bind 与 root-scoped Game SDK UI facade；b3e 只补齐 held primary Pointer Button claim bridge，
+仍不扩大到 Widget、DisplayList 或可见 UI 结论。Windows b3e 独立 Runtime→UI 门禁为46/46，Linux
+b3e 尚待本轮复核。

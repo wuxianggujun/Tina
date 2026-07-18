@@ -27,6 +27,10 @@ struct OversizedPointerListener final {
 [[maybe_unused]] void instantiateFixedInlineCallbackOperations()
 {
     auto event = Tina::UI::Detail::UIRoutedPointerEventAccess::Create({});
+    (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
+    (void)event.claimPointerButton(
+        static_cast<Tina::Platform::PointerButton>(
+            Tina::Platform::PointerButtonCount));
     Tina::UI::UIRoutedPointerCallback callback{NoexceptPointerListener{}};
     callback(event);
     Tina::UI::UIRoutedPointerCallback moved{std::move(callback)};

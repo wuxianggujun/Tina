@@ -3,6 +3,7 @@
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/runtime/InputActions.hpp>
+#include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UI.hpp>
 
 #include "../../../src/runtime/input/ActionMapper.hpp"
@@ -263,9 +264,12 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
 
 [[nodiscard]] std::unique_ptr<UIInputRouteProducer>
 createProducer(usize rawTransitionCapacity = 128,
+               usize continuousControlClaimCapacity =
+                   InputActionMapperCapacityConfig::DefaultContinuousControlClaimCapacity,
                std::pmr::memory_resource& resource = *std::pmr::get_default_resource())
 {
-    auto producer = UIInputRouteProducer::Create(rawTransitionCapacity, resource);
+    auto producer =
+        UIInputRouteProducer::Create(rawTransitionCapacity, continuousControlClaimCapacity, resource);
     EXPECT_TRUE(producer.has_value()) << (producer ? "" : producer.error().message);
     return producer ? std::move(*producer) : nullptr;
 }
@@ -340,6 +344,106 @@ TEST_F(UIInputRouteProducerTest, NullContextProducesNoneViews)
     EXPECT_TRUE(output->consumption.consumedOrdinalWords.empty());
     EXPECT_EQ(output->claims.platformFrame, frame->id());
     EXPECT_TRUE(output->claims.controls.empty());
+}
+
+TEST_F(UIInputRouteProducerTest, PublishesDeduplicatedHeldPointerClaimsAndDropsNonHeldRequests)
+{
+    auto producer = createProducer();
+    RouteTree tree = createRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+
+    auto token = addListener(
+        *tree.context,
+        {.node = tree.target, .kind = UI::UIRoutedPointerEventKind::Move, .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[](UI::UIRoutedPointerEvent& event) noexcept {
+            EXPECT_TRUE(event.claimPointerButton(Platform::PointerButton::Primary));
+            EXPECT_TRUE(event.claimPointerButton(Platform::PointerButton::Primary));
+        }});
+    ASSERT_TRUE(token);
+
+    auto heldFrame = buildFrame(*builder, window,
+                                {
+                                    .frameId = {2},
+                                    .transitions = {pointerMove(window, 10.0, 10.0)},
+                                    .heldPointerButtons = {Platform::PointerButton::Primary},
+                                    .pointerX = 10.0,
+                                    .pointerY = 10.0,
+                                });
+    ASSERT_TRUE(heldFrame.has_value()) << (heldFrame ? "" : heldFrame.error().message);
+    auto heldOutput = producer->produce(tree.context.get(), *heldFrame);
+    ASSERT_TRUE(heldOutput.has_value()) << (heldOutput ? "" : heldOutput.error().message);
+    ASSERT_EQ(heldOutput->claims.controls.size(), 1U);
+    const auto* heldClaim = std::get_if<Platform::PointerButtonControlIdentity>(
+        &heldOutput->claims.controls.front().control);
+    ASSERT_NE(heldClaim, nullptr);
+    EXPECT_EQ(heldClaim->window, window);
+    EXPECT_EQ(heldClaim->pointer, Platform::PrimaryPointerId);
+    EXPECT_EQ(heldClaim->button, Platform::PointerButton::Primary);
+    EXPECT_FALSE(heldOutput->consumption.isConsumed(0));
+
+    auto releasedFrame = buildFrame(*builder, window,
+                                    {
+                                        .frameId = {3},
+                                        .transitions = {pointerMove(window, 10.0, 10.0)},
+                                        .pointerX = 10.0,
+                                        .pointerY = 10.0,
+                                    });
+    ASSERT_TRUE(releasedFrame.has_value()) << (releasedFrame ? "" : releasedFrame.error().message);
+    auto releasedOutput = producer->produce(tree.context.get(), *releasedFrame);
+    ASSERT_TRUE(releasedOutput.has_value()) << (releasedOutput ? "" : releasedOutput.error().message);
+    EXPECT_TRUE(releasedOutput->claims.controls.empty());
+}
+
+TEST_F(UIInputRouteProducerTest, ClaimCapacityFailurePreservesPublishedClaimsAndConsumesAttemptWatermark)
+{
+    auto producer = createProducer(128, 1);
+    RouteTree tree = createRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+
+    auto token = addListener(
+        *tree.context,
+        {.node = tree.target, .kind = UI::UIRoutedPointerEventKind::Move, .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[](UI::UIRoutedPointerEvent& event) noexcept {
+            EXPECT_TRUE(event.claimPointerButton(Platform::PointerButton::Primary));
+            EXPECT_TRUE(event.claimPointerButton(Platform::PointerButton::Secondary));
+        }});
+    ASSERT_TRUE(token);
+
+    auto firstFrame = buildFrame(*builder, window,
+                                 {
+                                     .frameId = {4},
+                                     .transitions = {pointerMove(window, 10.0, 10.0)},
+                                     .heldPointerButtons = {Platform::PointerButton::Primary},
+                                     .pointerX = 10.0,
+                                     .pointerY = 10.0,
+                                 });
+    ASSERT_TRUE(firstFrame.has_value()) << (firstFrame ? "" : firstFrame.error().message);
+    auto firstOutput = producer->produce(tree.context.get(), *firstFrame);
+    ASSERT_TRUE(firstOutput.has_value()) << (firstOutput ? "" : firstOutput.error().message);
+    ASSERT_EQ(firstOutput->claims.controls.size(), 1U);
+    EXPECT_EQ(firstOutput->claims.platformFrame, Platform::PlatformFrameId{4});
+
+    auto overflowingFrame = buildFrame(*builder, window,
+                                       {
+                                           .frameId = {5},
+                                           .transitions = {pointerMove(window, 10.0, 10.0)},
+                                           .heldPointerButtons = {Platform::PointerButton::Primary,
+                                                                  Platform::PointerButton::Secondary},
+                                           .pointerX = 10.0,
+                                           .pointerY = 10.0,
+                                       });
+    ASSERT_TRUE(overflowingFrame.has_value()) << (overflowingFrame ? "" : overflowingFrame.error().message);
+    auto failed = producer->produce(tree.context.get(), *overflowingFrame);
+    ASSERT_FALSE(failed.has_value());
+    EXPECT_EQ(failed.error().code, Core::CoreErrorCode::CapacityExceeded);
+    EXPECT_EQ(firstOutput->claims.platformFrame, Platform::PlatformFrameId{4});
+    ASSERT_EQ(firstOutput->claims.controls.size(), 1U);
+
+    auto retry = producer->produce(tree.context.get(), *overflowingFrame);
+    ASSERT_FALSE(retry.has_value());
+    EXPECT_EQ(retry.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
 }
 
 TEST_F(UIInputRouteProducerTest, MapsMixedRawOrdinalsWithHolesToFrameAndSequence)
@@ -697,7 +801,8 @@ TEST_F(UIInputRouteProducerTest, RouteFailureDoesNotPublishOrReplayEarlierListen
 TEST_F(UIInputRouteProducerTest, ThreeHundredFramesPerformNoObservedPmrAllocations)
 {
     ObservingMemoryResource resource;
-    auto producer = createProducer(128, resource);
+    auto producer = createProducer(
+        128, InputActionMapperCapacityConfig::DefaultContinuousControlClaimCapacity, resource);
     RouteTree tree = createRouteTree(window,
                                      {
                                          .nodeCapacity = 8,
@@ -711,7 +816,9 @@ TEST_F(UIInputRouteProducerTest, ThreeHundredFramesPerformNoObservedPmrAllocatio
     auto token = addListener(
         *tree.context,
         {.node = tree.target, .kind = UI::UIRoutedPointerEventKind::Move, .phases = UI::UIEventPhaseMask::Target},
-        UI::UIRoutedPointerCallback{[](UI::UIRoutedPointerEvent&) noexcept {}});
+        UI::UIRoutedPointerCallback{[](UI::UIRoutedPointerEvent& event) noexcept {
+            (void)event.claimPointerButton(Platform::PointerButton::Primary);
+        }});
     ASSERT_TRUE(token);
     const usize allocationCountBeforeFrames = resource.allocationCount();
     ASSERT_GT(allocationCountBeforeFrames, 0U);
@@ -722,6 +829,7 @@ TEST_F(UIInputRouteProducerTest, ThreeHundredFramesPerformNoObservedPmrAllocatio
                                 {
                                     .frameId = {frameIndex},
                                     .transitions = {pointerMove(window, 10.0, 10.0)},
+                                    .heldPointerButtons = {Platform::PointerButton::Primary},
                                     .pointerX = 10.0,
                                     .pointerY = 10.0,
                                 });
@@ -729,16 +837,23 @@ TEST_F(UIInputRouteProducerTest, ThreeHundredFramesPerformNoObservedPmrAllocatio
         auto output = producer->produce(tree.context.get(), *frame);
         ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
         EXPECT_EQ(output->consumption.platformFrame, frame->id());
-        EXPECT_TRUE(output->claims.controls.empty());
+        EXPECT_EQ(output->claims.controls.size(), 1U);
     }
     EXPECT_EQ(resource.allocationCount(), allocationCountBeforeFrames);
 }
 
 TEST_F(UIInputRouteProducerTest, CapacityValidationAllowsOneReservedResetSlot)
 {
-    EXPECT_FALSE(UIInputRouteProducer::Create(0).has_value());
     EXPECT_FALSE(UIInputRouteProducer::Create(
-                     static_cast<usize>(Platform::PlatformFrameCapacityConfig::MaximumInputTransitionCapacity) + 1U)
+                     0, InputActionMapperCapacityConfig::DefaultContinuousControlClaimCapacity)
+                     .has_value());
+    EXPECT_FALSE(UIInputRouteProducer::Create(
+                     static_cast<usize>(Platform::PlatformFrameCapacityConfig::MaximumInputTransitionCapacity) + 1U,
+                     InputActionMapperCapacityConfig::DefaultContinuousControlClaimCapacity)
+                     .has_value());
+    EXPECT_FALSE(UIInputRouteProducer::Create(1, 0).has_value());
+    EXPECT_FALSE(UIInputRouteProducer::Create(
+                     1, InputActionMapperCapacityConfig::MaximumContinuousControlClaimCapacity + 1U)
                      .has_value());
 
     auto smallBuilder = Platform::PlatformFrameBuilder::Create({
@@ -886,6 +1001,122 @@ TEST_F(UIInputRouteProducerTest, ActionMapperSuppressesConsumedDownUntilTrueUpTh
     ASSERT_NE(digital(restored->transitions[0]), nullptr);
     EXPECT_EQ(digital(restored->transitions[0])->kind, DigitalActionTransitionKind::Pressed);
     EXPECT_TRUE(restored->isHeld(PointerAction));
+}
+
+TEST_F(UIInputRouteProducerTest, HeldPointerClaimCancelsObservedGameplayUntilTrueUp)
+{
+    auto producer = createProducer();
+    auto mapper = createPointerMapper();
+    RouteTree tree = createRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(mapper, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+    auto claimToken = addListener(
+        *tree.context,
+        {.node = tree.target, .kind = UI::UIRoutedPointerEventKind::Move, .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[](UI::UIRoutedPointerEvent& event) noexcept {
+            EXPECT_TRUE(event.claimPointerButton(Platform::PointerButton::Primary));
+        }});
+    ASSERT_TRUE(claimToken);
+
+    auto down = buildFrame(*builder, window,
+                           {
+                               .frameId = {31},
+                               .transitions = {
+                                   pointerButton(window, Platform::DigitalTransition::Down, 10.0, 10.0)},
+                               .heldPointerButtons = {Platform::PointerButton::Primary},
+                               .pointerX = 10.0,
+                               .pointerY = 10.0,
+                           });
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    auto downOutput = producer->produce(nullptr, *down);
+    ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
+    ASSERT_TRUE(mapper->mapFrame(*down, downOutput->consumption, downOutput->claims, 0, 0).has_value());
+    auto pressed = mapper->simulationActionsForTick(0);
+    ASSERT_TRUE(pressed.has_value()) << (pressed ? "" : pressed.error().message);
+    ASSERT_EQ(pressed->transitions.size(), 1U);
+    ASSERT_NE(digital(pressed->transitions[0]), nullptr);
+    EXPECT_EQ(digital(pressed->transitions[0])->kind, DigitalActionTransitionKind::Pressed);
+    ASSERT_TRUE(mapper->completeSimulationTick(0).has_value());
+
+    auto claimed = buildFrame(*builder, window,
+                              {
+                                  .frameId = {32},
+                                  .transitions = {pointerMove(window, 10.0, 10.0)},
+                                  .heldPointerButtons = {Platform::PointerButton::Primary},
+                                  .pointerX = 10.0,
+                                  .pointerY = 10.0,
+                              });
+    ASSERT_TRUE(claimed.has_value()) << (claimed ? "" : claimed.error().message);
+    auto claimedOutput = producer->produce(tree.context.get(), *claimed);
+    ASSERT_TRUE(claimedOutput.has_value()) << (claimedOutput ? "" : claimedOutput.error().message);
+    ASSERT_EQ(claimedOutput->claims.controls.size(), 1U);
+    ASSERT_TRUE(mapper->mapFrame(*claimed, claimedOutput->consumption, claimedOutput->claims, 1, 1).has_value());
+    auto cancelled = mapper->simulationActionsForTick(1);
+    ASSERT_TRUE(cancelled.has_value()) << (cancelled ? "" : cancelled.error().message);
+    ASSERT_EQ(cancelled->transitions.size(), 1U);
+    ASSERT_NE(digital(cancelled->transitions[0]), nullptr);
+    EXPECT_EQ(digital(cancelled->transitions[0])->kind, DigitalActionTransitionKind::Cancelled);
+    EXPECT_FALSE(cancelled->isHeld(PointerAction));
+    ASSERT_TRUE(mapper->completeSimulationTick(1).has_value());
+
+    auto up = buildFrame(*builder, window,
+                         {
+                             .frameId = {33},
+                             .transitions = {
+                                 pointerButton(window, Platform::DigitalTransition::Up, 10.0, 10.0)},
+                             .pointerX = 10.0,
+                             .pointerY = 10.0,
+                         });
+    ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
+    auto upOutput = producer->produce(nullptr, *up);
+    ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
+    ASSERT_TRUE(mapper->mapFrame(*up, upOutput->consumption, upOutput->claims, 2, 2).has_value());
+    auto releasedSuppression = mapper->simulationActionsForTick(2);
+    ASSERT_TRUE(releasedSuppression.has_value())
+        << (releasedSuppression ? "" : releasedSuppression.error().message);
+    EXPECT_TRUE(releasedSuppression->transitions.empty());
+    EXPECT_FALSE(releasedSuppression->isHeld(PointerAction));
+}
+
+TEST_F(UIInputRouteProducerTest, PointerClaimInterceptsInitialDownWithoutTransitionConsumption)
+{
+    auto producer = createProducer();
+    auto mapper = createPointerMapper();
+    RouteTree tree = createRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(mapper, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+    auto claimToken = addListener(
+        *tree.context,
+        {.node = tree.target,
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[](UI::UIRoutedPointerEvent& event) noexcept {
+            EXPECT_TRUE(event.claimPointerButton(Platform::PointerButton::Primary));
+        }});
+    ASSERT_TRUE(claimToken);
+
+    auto down = buildFrame(*builder, window,
+                           {
+                               .frameId = {41},
+                               .transitions = {
+                                   pointerButton(window, Platform::DigitalTransition::Down, 10.0, 10.0)},
+                               .heldPointerButtons = {Platform::PointerButton::Primary},
+                               .pointerX = 10.0,
+                               .pointerY = 10.0,
+                           });
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    auto output = producer->produce(tree.context.get(), *down);
+    ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
+    EXPECT_FALSE(output->consumption.isConsumed(0));
+    ASSERT_EQ(output->claims.controls.size(), 1U);
+
+    ASSERT_TRUE(mapper->mapFrame(*down, output->consumption, output->claims, 0, 0).has_value());
+    auto suppressed = mapper->simulationActionsForTick(0);
+    ASSERT_TRUE(suppressed.has_value()) << (suppressed ? "" : suppressed.error().message);
+    EXPECT_TRUE(suppressed->transitions.empty());
+    EXPECT_FALSE(suppressed->isHeld(PointerAction));
 }
 
 } // namespace

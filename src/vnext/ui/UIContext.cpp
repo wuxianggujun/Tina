@@ -2818,6 +2818,9 @@ struct UIContext::Impl final {
         if (!contains(targetNode)) {
             result.targetInvalidated = true;
         }
+        result.claimedPointerButtons =
+            Detail::UIRoutedPointerEventAccess::claimedPointerButtons(
+                routedEvent);
         result.consumed = routedEvent.isInputTransitionConsumed();
         result.stopped = routedEvent.isPropagationStopped();
         return result;

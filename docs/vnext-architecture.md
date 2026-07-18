@@ -46,7 +46,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | `tina_platform` | Window/Input/Event 公共描述、Headless backend、线程命名和不透明 Render surface | `tina_core`、OS 最小适配 | GLFW 公共类型、文件/资产 IO、Scene、Renderer、UI Widget |
 | `tina_platform_glfw` | 最终承载 GLFW Window/Input/Gamepad、DPI、Windows IMM32；当前已完成 Window/Keyboard/Pointer/Focus/resize/close/committed text | core/platform、GLFW、OS API | Scene、Asset、UI Widget、bgfx 类型 |
 | `tina_task` | 有界任务队列、协作取消、后台工作与主线程 completion | `tina_core`、`tina_platform` 的线程命名能力 | Asset 类型、渲染命令、强杀线程 |
-| `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、GameStateStack、RenderFramePacket/pool；当前含 M7-C1c-b3b/b3c/b3d1/b3d2 private UI route producer、primary-window Context owner、容量/layout coordinator、startup seed 与 scoped Game SDK UI facade | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
+| `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、GameStateStack、RenderFramePacket/pool；当前含 M7-C1c-b3b/b3c/b3d1/b3d2/b3e private UI route producer、primary-window Context owner、容量/layout coordinator、startup seed、scoped Game SDK UI facade 与 held Pointer claim bridge | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
 | `tina_scene` | World、generation `EntityId`、Transform、Camera、render components 与资产解析 facade | core、asset 公共接口、render descriptors、EnTT 内部实现 | GLFW 输入、TileMap 玩法、bgfx 类型 |
 | `tina_asset` | Asset 状态机、依赖、取消、CPU completion 与 GPU upload 协议 | core/task、render 接口、asset_format | 直接解析源 glTF、具体 bgfx 调用 |
 | `tina_asset_format` | Runtime/Cooker 共享的 Cooked header、schema、类型、依赖和 hash 编解码 | core | Asset registry、窗口、GPU、源格式 parser |
@@ -538,7 +538,7 @@ M7-C1c-b2 已实现 synthetic routed pointer event：固定容量 route path/lis
 安全失效与 route/commit reentrancy guard。M7-C1c-b3a 已让 Button/Wheel raw transition 固化事件时
 window-logical position，最终 Pointer snapshot 只表示 Poll 结束状态，不能替代 route 输入。M7-C1c-b3b 已实现
 Runtime-private `UIInputRouteProducer`：只路由 Move/Button/Wheel，reset/cancel/非 Pointer 保留 raw ordinal
-hole，consumption 使用双预分配 PMR bitset，claims 恒为 canonical `None`；300帧共用 supplied PMR 时
+hole，consumption 使用双预分配 PMR bitset；该 b3b 切片的 claims 当时恒为 canonical `None`。300帧共用 supplied PMR 时
 allocation count 不增长，且该 PMR 必须长于 producer。通过 preflight 后的 route 失败不发布但推进
 attempted watermark；同帧先发生的1次 listener side effect 不可回滚，retry 被拒且不重放。独立
 `tina_runtime_ui_tests` 直接运行 GoogleTest、不使用 CTest。M7-C1c-b3c 已让 `EngineHost` 在
@@ -548,13 +548,14 @@ primary 消失或 generation 更换会结构化失败。Context 在 module shutd
 不调用 `commitLayout()`，route 使用上一帧 committed snapshot。M7-C1c-b3d1 已加入 focused
 `UIContextCapacityConfig`/shared validator、`EngineConfig::primaryWindowUICapacities` 与 `updateUI` 后、
 Render 前每个严格递增 `PlatformFrameId` 至多一次的 private layout commit；Headless 双缺席成功 no-op，
-失败阻断 Render 且消费该 frame attempt。当前 `tina_ui` 仍只依赖 Core/Platform，claims 仍为 canonical
-`None`。M7-C1c-b3d2 已实现 startup primary-window metrics seed 与 Game SDK
+失败阻断 Render 且消费该 frame attempt。当前 `tina_ui` 仍只依赖 Core/Platform。M7-C1c-b3d2 已实现 startup primary-window metrics seed 与 Game SDK
 root/phase-epoch-scoped access：Runtime 在 `onEnter` 前显式绑定 primary Context，并在 State commit 前
 发布首份 structure/layout/hit snapshot；`PrimaryWindowUIRootBuilder`/`PrimaryWindowUITreeUpdater`
-只允许 root-scoped retained tree mutation，跨 phase 保存后返回 capability-expired error。它仍不是可见
-UI，因为没有 DisplayList、文本/glyph、Button default action、真实 claims 或 Render pass。持久 Pointer Capture、
-Focus/Modal、paint snapshot/DisplayList、nested clip、dirty subtree pruning、FreeType 与 bgfx UI pass 仍未实现。完整目标中 UI 树输出后端无关的 Quad、Image、
+只允许 root-scoped retained tree mutation，跨 phase 保存后返回 capability-expired error。M7-C1c-b3e 又让
+Move/Wheel/Button listener 通过 `claimPointerButton()` 请求接管最终 snapshot 仍 held 的 primary Pointer
+Button；Runtime 去重后发布，ActionMapper 取消或拦截 Gameplay source 并抑制到真实 Up。它仍不是可见 UI，
+因为没有 DisplayList、文本/glyph、Button default action 或 Render pass。Key/Gamepad/axis claim、持久
+Pointer Capture、Focus/Modal、paint snapshot/DisplayList、nested clip、dirty subtree pruning、FreeType 与 bgfx UI pass 仍未实现。完整目标中 UI 树输出后端无关的 Quad、Image、
 GlyphRange、Clip DisplayList，由 Render 层保持 paint order 批处理。
 
 布局采用一次 Measure/Arrange 的 Flex-lite；每个有序 Pointer transition 最多 hit-test 一次。
@@ -592,7 +593,8 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
    point query 与反向目标选择，M7-C1c-b2 已完成 synthetic listener route，M7-C1c-b3b 已完成独立
    Runtime-private producer，M7-C1c-b3c 已完成 primary-window `UIContext` owner/selection 与 EngineHost
    接线，M7-C1c-b3d1 已完成容量配置与 Runtime-private layout coordinator，M7-C1c-b3d2 已完成
-   startup primary-window metrics seed 与 root-scoped、phase-epoch-scoped Game SDK access。后续继续推进真实 claims/focus/capture/widget、
+   startup primary-window metrics seed 与 root-scoped、phase-epoch-scoped Game SDK access，M7-C1c-b3e 已完成
+   held primary Pointer Button claim bridge。后续继续推进 Key/Gamepad/axis claims、focus/capture/widget、
    dirty subtree pruning 与 DisplayList、Label/Button/Modal + FreeType、bgfx UI pass、IMM32/Gamepad/DPI 门禁；
 5. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；
 6. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D
@@ -626,13 +628,12 @@ vNext-only preset 设为 OFF；当新2D/UI/3D/Audio 覆盖门禁后先把默认�
   Legacy ON 图还必须直接执行 Legacy-only `tina_legacy_tests`，启用 GLFW adapter 时另行直接执行
   `tina_platform_glfw_tests`，这些 executable 均不使用 CTest；
 - M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、committed hit snapshot、point query 与 synthetic route 使用独立
-  `tina_ui_tests` 直接 GoogleTest；b3d2 增加 tree-updater 覆盖后，Windows MSVC 19.50 Debug/Release、
-  Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均直接通过78/78，且 Clang
-  无 sanitizer 诊断；初次 GCC 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次
-  GCC/Clang 构建无 warning；
-- M7-C1c-b3b/b3c/b3d1/b3d2 Runtime→vNext UI producer、Context owner、layout coordinator 与 startup capability 使用独立
-  `tina_runtime_ui_tests`；b3d2 在 Windows MSVC 19.50 Debug/Release、Linux GCC 13.4 Null 与
-  Clang 22.1.8 Null sanitizer 均直接通过42/42；测试不使用 CTest，也不与 Legacy UI 的最终二进制混装；
+  `tina_ui_tests` 直接 GoogleTest；Windows b3e 已直接通过81/81。最近 Linux b3d2 基线仍为 GCC 13.4 与
+  Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 的78/78，且 Clang 无 sanitizer 诊断；初次 GCC 暴露的
+  routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning；
+- M7-C1c-b3b/b3c/b3d1/b3d2/b3e Runtime→vNext UI producer、Context owner、layout coordinator、startup
+  capability 与 Pointer claim bridge 使用独立 `tina_runtime_ui_tests`；Windows b3e Debug/Release 已直接
+  通过46/46。最近 Linux b3d2 基线仍为42/42，b3e 待本轮复核；测试不使用 CTest，也不与 Legacy UI 的最终二进制混装；
 - Linux GCC 与 Clang 构建；正式支持前还要运行 GLFW/bgfx 2D/UI/3D，Clang sanitizer 只有真实
   运行通过后才能标记完成；
 - GLFW X11 与 Wayland 使用独立 preset 和真实/隔离 display server 运行；configure/build 成功不等于
