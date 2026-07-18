@@ -131,3 +131,4 @@ endif()
 
 add_subdirectory(vnext/ui)
 add_subdirectory(vnext/runtime)
+add_subdirectory(ui_render)

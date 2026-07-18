@@ -1,0 +1,445 @@
+#include <gtest/gtest.h>
+
+#include <tina/core/id/GenerationPool.hpp>
+#include <tina/integration/UIRenderDisplayList.hpp>
+#include <tina/render/RenderErrors.hpp>
+#include <tina/ui/UI.hpp>
+
+#include <array>
+#include <limits>
+#include <memory>
+#include <memory_resource>
+#include <new>
+#include <optional>
+#include <utility>
+
+namespace Tina::Tests {
+namespace {
+
+using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
+
+class TrackingMemoryResource final : public std::pmr::memory_resource {
+public:
+    [[nodiscard]] usize allocationCount() const noexcept
+    {
+        return m_allocationCount;
+    }
+
+private:
+    void* do_allocate(usize bytes, usize alignment) override
+    {
+        ++m_allocationCount;
+        return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void* pointer, usize bytes, usize alignment) override
+    {
+        std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
+    }
+
+    [[nodiscard]] bool do_is_equal(
+        const std::pmr::memory_resource& other) const noexcept override
+    {
+        return this == &other;
+    }
+
+    usize m_allocationCount = 0;
+};
+
+[[nodiscard]] Render::UIDisplayListBuilder createBuilder(
+    Render::UIDisplayListCapacity capacity,
+    std::pmr::memory_resource& storage = *std::pmr::get_default_resource())
+{
+    auto result = Render::UIDisplayListBuilder::Create(capacity, storage);
+    EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    return std::move(*result);
+}
+
+template <usize Count>
+[[nodiscard]] UI::UICommittedPaintView paintView(
+    const std::array<UI::UICommittedPaintEntry, Count>& entries,
+    UI::UILogicalSize viewport)
+{
+    return UI::UICommittedPaintView{entries, viewport, 1, 1, 1, 1};
+}
+
+[[nodiscard]] UI::UICommittedPaintEntry solidEntry(
+    u32 ordinal,
+    UI::UILogicalRect bounds,
+    UI::UILogicalRect clip,
+    UI::UIPremultipliedRgba8Color color = {20, 40, 60, 255}) noexcept
+{
+    return UI::UICommittedPaintEntry{
+        .worldRect = bounds,
+        .effectiveClip = clip,
+        .paintOrdinal = ordinal,
+        .solidFill = color,
+    };
+}
+
+[[nodiscard]] std::unique_ptr<UI::UIContext> createContext(
+    Platform::WindowId window)
+{
+    auto result = UI::UIContext::Create(
+        window,
+        {.nodeCapacity = 3, .rootCapacity = 1});
+    EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    return result ? std::move(*result) : nullptr;
+}
+
+[[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
+{
+    auto result = context.rootBuilder().createRoot();
+    EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    return result ? std::move(*result) : UI::UIRootOwner{};
+}
+
+class UIRenderDisplayListTest : public testing::Test {
+protected:
+    void SetUp() override
+    {
+        auto poolResult = WindowPool::Create(1);
+        ASSERT_TRUE(poolResult.has_value()) << poolResult.error().message;
+        windows.emplace(std::move(*poolResult));
+        auto windowResult = windows->tryEmplace(0);
+        ASSERT_TRUE(windowResult.has_value()) << windowResult.error().message;
+        window = *windowResult;
+    }
+
+    std::optional<WindowPool> windows;
+    Platform::WindowId window{};
+};
+
+TEST_F(UIRenderDisplayListTest, ConvertsCommittedUISolidFillAndIntegerPremultiplicationEndToEnd)
+{
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    auto panelResult = context->rootBuilder().createPanel(root.rootNodeId());
+    ASSERT_TRUE(panelResult.has_value()) << panelResult.error().message;
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
+
+    UI::UILayoutStyle style;
+    style.size.width = UI::UILayoutLength::Px(10.0F);
+    style.size.height = UI::UILayoutLength::Px(20.0F);
+    ASSERT_TRUE(updaterResult->setLayoutStyle(*panelResult, style).has_value());
+    UI::UIBoxPaint paint;
+    paint.solidFill = UI::UISolidFill{
+        .color = {.red = 200, .green = 100, .blue = 50, .alpha = 128},
+    };
+    ASSERT_TRUE(updaterResult->setBoxPaint(*panelResult, paint).has_value());
+    ASSERT_TRUE(context->commitLayout({100.0F, 50.0F}).has_value());
+
+    auto builder = createBuilder({.commandCount = 4, .clipCount = 4, .batchCount = 4});
+    auto result = Integration::buildUIDisplayList(
+        builder,
+        context->committedPaint(),
+        {.framebufferViewport = {0, 0, 200, 100}});
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    ASSERT_EQ(result->displayList.commands().size(), 1U);
+    const Render::UIDrawCommand& command = result->displayList.commands().front();
+    EXPECT_EQ(command.bounds, (Render::UIPixelRect{0, 0, 20, 40}));
+    EXPECT_EQ(
+        command.color,
+        (Render::UIPremultipliedRgba8{100, 50, 25, 128}));
+    EXPECT_FALSE(command.clip.hasClip());
+    EXPECT_EQ(result->statistics.sourcePaintEntryCount, 1U);
+    EXPECT_EQ(result->statistics.submittedSolidQuadCount, 1U);
+}
+
+TEST_F(UIRenderDisplayListTest, UsesOutwardFractionalRoundingAndClampsToFramebufferViewport)
+{
+    const std::array entries{
+        solidEntry(
+            4,
+            {.x = -0.25F, .y = 0.2F, .width = 1.5F, .height = 0.8F},
+            {.x = -10.0F, .y = -10.0F, .width = 30.0F, .height = 30.0F}),
+    };
+    auto builder = createBuilder({.commandCount = 2, .clipCount = 2, .batchCount = 2});
+    auto result = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {3.0F, 2.0F}),
+        {.framebufferViewport = {10, 20, 7, 5}});
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    ASSERT_EQ(result->displayList.commands().size(), 1U);
+    EXPECT_EQ(
+        result->displayList.commands().front().bounds,
+        (Render::UIPixelRect{10, 20, 3, 3}));
+}
+
+TEST_F(UIRenderDisplayListTest, ElidesAClipThatCoversTheProjectedCommand)
+{
+    const std::array entries{
+        solidEntry(
+            1,
+            {.x = 10.0F, .y = 10.0F, .width = 20.0F, .height = 20.0F},
+            {.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 100.0F}),
+    };
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 0, .batchCount = 1});
+    auto result = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {100.0F, 100.0F}),
+        {.framebufferViewport = {0, 0, 100, 100}});
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    ASSERT_EQ(result->displayList.commands().size(), 1U);
+    EXPECT_FALSE(result->displayList.commands().front().clip.hasClip());
+    EXPECT_TRUE(result->displayList.clips().empty());
+    EXPECT_EQ(result->statistics.redundantClipElisionCount, 1U);
+}
+
+TEST_F(UIRenderDisplayListTest, InternsAndResolvesAPartialProjectedClip)
+{
+    const std::array entries{
+        solidEntry(
+            7,
+            {.x = 10.0F, .y = 10.0F, .width = 50.0F, .height = 50.0F},
+            {.x = 20.0F, .y = 20.0F, .width = 10.0F, .height = 10.0F}),
+    };
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 1, .batchCount = 1});
+    auto result = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {100.0F, 100.0F}),
+        {.framebufferViewport = {0, 0, 200, 100}});
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    ASSERT_EQ(result->displayList.commands().size(), 1U);
+    const Render::UIDrawCommand& command = result->displayList.commands().front();
+    EXPECT_EQ(command.bounds, (Render::UIPixelRect{20, 10, 100, 50}));
+    ASSERT_TRUE(command.clip.hasClip());
+    const Render::UIPixelRect* clip = result->displayList.resolveClip(command.clip);
+    ASSERT_NE(clip, nullptr);
+    EXPECT_EQ(*clip, (Render::UIPixelRect{40, 20, 20, 10}));
+}
+
+TEST_F(UIRenderDisplayListTest, RejectsDuplicateOrDescendingSourcePaintOrdinals)
+{
+    auto builder = createBuilder({.commandCount = 4, .clipCount = 4, .batchCount = 4});
+    const auto verifyRejected = [&builder](u32 secondOrdinal) {
+        const std::array entries{
+            solidEntry(5, {0.0F, 0.0F, 10.0F, 10.0F}, {0.0F, 0.0F, 10.0F, 10.0F}),
+            solidEntry(secondOrdinal, {10.0F, 0.0F, 10.0F, 10.0F}, {10.0F, 0.0F, 10.0F, 10.0F}),
+        };
+        auto result = Integration::buildUIDisplayList(
+            builder,
+            paintView(entries, {20.0F, 10.0F}),
+            {.framebufferViewport = {0, 0, 20, 10}});
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, Core::CoreErrorCode::InvalidArgument);
+        EXPECT_TRUE(builder.publishedView().empty());
+    };
+
+    verifyRejected(5);
+    verifyRejected(4);
+    EXPECT_EQ(builder.statistics().rolledBackBuildCount, 2U);
+}
+
+TEST_F(UIRenderDisplayListTest, EmptyLogicalOrFramebufferViewportCommitsAnEmptyList)
+{
+    const std::array entries{
+        solidEntry(1, {0.0F, 0.0F, 10.0F, 10.0F}, {0.0F, 0.0F, 10.0F, 10.0F}),
+    };
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 1, .batchCount = 1});
+
+    auto noLogicalWidth = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {0.0F, 10.0F}),
+        {.framebufferViewport = {0, 0, 100, 100}});
+    ASSERT_TRUE(noLogicalWidth.has_value()) << noLogicalWidth.error().message;
+    EXPECT_TRUE(noLogicalWidth->displayList.empty());
+    EXPECT_EQ(noLogicalWidth->statistics.sourcePaintEntryCount, 1U);
+    EXPECT_EQ(noLogicalWidth->statistics.submittedSolidQuadCount, 0U);
+
+    auto noFramebufferWidth = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {10.0F, 10.0F}),
+        {.framebufferViewport = {0, 0, 0, 100}});
+    ASSERT_TRUE(noFramebufferWidth.has_value()) << noFramebufferWidth.error().message;
+    EXPECT_TRUE(noFramebufferWidth->displayList.empty());
+}
+
+TEST_F(UIRenderDisplayListTest, RejectsNonFiniteNegativeAndUnrepresentableGeometry)
+{
+    auto builder = createBuilder({.commandCount = 2, .clipCount = 2, .batchCount = 2});
+    const std::array validEntries{
+        solidEntry(1, {0.0F, 0.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F, 1.0F}),
+    };
+
+    auto nonFiniteViewport = Integration::buildUIDisplayList(
+        builder,
+        paintView(
+            validEntries,
+            {(std::numeric_limits<float>::quiet_NaN)(), 1.0F}),
+        {.framebufferViewport = {0, 0, 1, 1}});
+    ASSERT_FALSE(nonFiniteViewport.has_value());
+    EXPECT_EQ(nonFiniteViewport.error().code, Core::CoreErrorCode::InvalidArgument);
+
+    const std::array negativeExtent{
+        solidEntry(1, {0.0F, 0.0F, -1.0F, 1.0F}, {0.0F, 0.0F, 1.0F, 1.0F}),
+    };
+    auto negative = Integration::buildUIDisplayList(
+        builder,
+        paintView(negativeExtent, {1.0F, 1.0F}),
+        {.framebufferViewport = {0, 0, 1, 1}});
+    ASSERT_FALSE(negative.has_value());
+    EXPECT_EQ(negative.error().code, Core::CoreErrorCode::InvalidArgument);
+
+    auto overflow = Integration::buildUIDisplayList(
+        builder,
+        paintView(validEntries, {1.0F, 1.0F}),
+        {.framebufferViewport = {
+             (std::numeric_limits<i32>::max)(), 0, 2, 1}});
+    ASSERT_FALSE(overflow.has_value());
+    EXPECT_EQ(overflow.error().code, Core::CoreErrorCode::InvalidArgument);
+    EXPECT_EQ(builder.statistics().rolledBackBuildCount, 3U);
+}
+
+TEST_F(UIRenderDisplayListTest, RejectsNonPremultipliedSourceColorBeforeEmission)
+{
+    const std::array entries{
+        solidEntry(
+            1,
+            {0.0F, 0.0F, 1.0F, 1.0F},
+            {0.0F, 0.0F, 1.0F, 1.0F},
+            {.red = 200, .green = 10, .blue = 10, .alpha = 128}),
+    };
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 1, .batchCount = 1});
+    auto result = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {1.0F, 1.0F}),
+        {.framebufferViewport = {0, 0, 1, 1}});
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, Core::CoreErrorCode::InvalidArgument);
+    EXPECT_TRUE(builder.publishedView().empty());
+    EXPECT_EQ(builder.statistics().rolledBackBuildCount, 1U);
+    EXPECT_EQ(builder.statistics().invalidInputFailureCount, 0U);
+}
+
+TEST_F(UIRenderDisplayListTest, PrunesTransparentEmptyAndOutsideEntriesWithoutBreakingPaintOrder)
+{
+    const std::array entries{
+        solidEntry(
+            2,
+            {0.0F, 0.0F, 10.0F, 10.0F},
+            {0.0F, 0.0F, 100.0F, 100.0F},
+            {}),
+        solidEntry(
+            4,
+            {20.0F, 20.0F, 0.0F, 10.0F},
+            {0.0F, 0.0F, 100.0F, 100.0F}),
+        solidEntry(
+            8,
+            {200.0F, 20.0F, 10.0F, 10.0F},
+            {0.0F, 0.0F, 100.0F, 100.0F}),
+        solidEntry(
+            9,
+            {30.0F, 30.0F, 10.0F, 10.0F},
+            {0.0F, 0.0F, 100.0F, 100.0F}),
+    };
+    auto builder = createBuilder({.commandCount = 4, .clipCount = 1, .batchCount = 4});
+    auto result = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {100.0F, 100.0F}),
+        {.framebufferViewport = {0, 0, 100, 100}});
+
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    ASSERT_EQ(result->displayList.commands().size(), 1U);
+    EXPECT_EQ(result->displayList.commands().front().paintOrdinal, 9U);
+    EXPECT_EQ(result->statistics.sourcePaintEntryCount, 4U);
+    EXPECT_EQ(result->statistics.submittedSolidQuadCount, 4U);
+    EXPECT_EQ(result->statistics.redundantClipElisionCount, 2U);
+    EXPECT_EQ(result->displayList.statistics().prunedTransparentCount, 1U);
+    EXPECT_EQ(result->displayList.statistics().prunedEmptyBoundsCount, 2U);
+}
+
+TEST_F(UIRenderDisplayListTest, CapacityFailureAfterSuccessLeavesNoOldOrTruncatedPublishedView)
+{
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 0, .batchCount = 1});
+    const std::array firstEntries{
+        solidEntry(1, {0.0F, 0.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F, 1.0F}),
+    };
+    auto first = Integration::buildUIDisplayList(
+        builder,
+        paintView(firstEntries, {2.0F, 1.0F}),
+        {.framebufferViewport = {0, 0, 2, 1}});
+    ASSERT_TRUE(first.has_value()) << first.error().message;
+    ASSERT_EQ(first->displayList.commands().size(), 1U);
+
+    const std::array replacementEntries{
+        solidEntry(2, {0.0F, 0.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F, 1.0F}),
+        solidEntry(3, {1.0F, 0.0F, 1.0F, 1.0F}, {1.0F, 0.0F, 1.0F, 1.0F}),
+    };
+    auto replacement = Integration::buildUIDisplayList(
+        builder,
+        paintView(replacementEntries, {2.0F, 1.0F}),
+        {.framebufferViewport = {0, 0, 2, 1}});
+    ASSERT_FALSE(replacement.has_value());
+    EXPECT_EQ(
+        replacement.error().code,
+        Render::RenderErrorCode::DisplayListCapacityExceeded);
+    EXPECT_TRUE(builder.publishedView().empty());
+    EXPECT_EQ(builder.statistics().committedBuildCount, 1U);
+    EXPECT_EQ(builder.statistics().rolledBackBuildCount, 1U);
+}
+
+TEST_F(UIRenderDisplayListTest, AlreadyOpenBuilderTransactionRemainsOwnedByTheCaller)
+{
+    auto builder = createBuilder({.commandCount = 2, .clipCount = 1, .batchCount = 2});
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    ASSERT_TRUE(builder
+                    .addSolidQuad({
+                        .paintOrdinal = 9,
+                        .bounds = {1, 2, 3, 4},
+                        .color = {1, 2, 3, 255},
+                    })
+                    .has_value());
+    const std::array entries{
+        solidEntry(1, {0.0F, 0.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F, 1.0F}),
+    };
+    auto rejected = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {1.0F, 1.0F}),
+        {.framebufferViewport = {0, 0, 1, 1}});
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(
+        rejected.error().code,
+        Render::RenderErrorCode::DisplayListBuildAlreadyOpen);
+    EXPECT_EQ(builder.statistics().rolledBackBuildCount, 0U);
+
+    auto callerCommit = builder.commit();
+    ASSERT_TRUE(callerCommit.has_value()) << callerCommit.error().message;
+    ASSERT_EQ(callerCommit->commands().size(), 1U);
+    EXPECT_EQ(callerCommit->commands().front().paintOrdinal, 9U);
+}
+
+TEST_F(UIRenderDisplayListTest, ReusesFixedBuilderStorageForThreeHundredBuilds)
+{
+    TrackingMemoryResource storage;
+    auto builder = createBuilder(
+        {.commandCount = 2, .clipCount = 2, .batchCount = 2}, storage);
+    const usize allocationCount = storage.allocationCount();
+    const std::array entries{
+        solidEntry(
+            1,
+            {.x = 0.25F, .y = 0.25F, .width = 1.0F, .height = 1.0F},
+            {.x = 0.0F, .y = 0.0F, .width = 2.0F, .height = 2.0F}),
+    };
+
+    for (usize frame = 0; frame < 300; ++frame)
+    {
+        auto result = Integration::buildUIDisplayList(
+            builder,
+            paintView(entries, {2.0F, 2.0F}),
+            {.framebufferViewport = {0, 0, 200, 100}});
+        ASSERT_TRUE(result.has_value())
+            << "frame=" << frame << " " << result.error().message;
+        ASSERT_EQ(result->displayList.commands().size(), 1U);
+    }
+    EXPECT_EQ(storage.allocationCount(), allocationCount);
+    EXPECT_EQ(builder.statistics().committedBuildCount, 300U);
+    EXPECT_EQ(builder.statistics().rolledBackBuildCount, 0U);
+}
+
+} // namespace
+} // namespace Tina::Tests

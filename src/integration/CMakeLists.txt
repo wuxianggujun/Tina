@@ -23,3 +23,27 @@ set_target_properties(tina_window_surface_integration PROPERTIES
     CXX_EXTENSIONS OFF
     EXPORT_NAME WindowSurfaceIntegration
 )
+
+add_library(tina_ui_render_integration STATIC
+    ${PROJECT_SOURCE_DIR}/include/tina/integration/UIRenderDisplayList.hpp
+    UIRenderDisplayList.cpp
+)
+add_library(Tina::UIRenderIntegration ALIAS tina_ui_render_integration)
+
+target_compile_features(tina_ui_render_integration PUBLIC cxx_std_23)
+target_include_directories(tina_ui_render_integration
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/include
+)
+target_link_libraries(tina_ui_render_integration
+    PUBLIC
+        Tina::Core
+        Tina::UI
+        Tina::Render
+    PRIVATE
+        Tina::ProjectOptions
+)
+set_target_properties(tina_ui_render_integration PROPERTIES
+    CXX_EXTENSIONS OFF
+    EXPORT_NAME UIRenderIntegration
+)
