@@ -325,12 +325,18 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   Debug `RefCount is 3 (expected 0)` 为已记录第三方 debug layer 提示；
 - **最新增量门禁**：本轮 Windows MSVC 19.50 / CMake 4.2.3 Debug 直接通过基础208/208、UI95/95、
   Runtime→UI55/55与Null样例300帧；Release/Linux/bgfx/可见样例未在本轮重跑，继续沿用并明确标记前序证据；
+- **下一切片已冻结、尚未实施**：Button 默认 `Targetable`；只实现
+  `PrimaryPointerId + PointerButton::Primary` 的 Down armed/pressed、Move inside 更新、Up-inside 一次
+  activation、`preventDefaultAction()`、retained `set/clearButtonAction()`、pressed query，以及非
+  gamepad-only cancel/覆盖窗口 reset 的无 action 清理。action 使用48字节 fixed-inline callback、固定容量
+  slot pool、一个预分配 transaction slot 与 route registration serial；先直接补 UI/Game SDK/Runtime
+  GoogleTest，再更新本节为已完成事实；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
   subtree 尚未实现；正式路径虽已接线并可创建 retained root/Panel/Label/Button 节点，低层也已有
   SolidFill paint/DisplayList bridge、D0 Runtime handoff、Game SDK paint setter 和私有 bgfx SolidQuad pass，
   但仍没有文本/glyph、默认 Widget 行为、完整 Widget facade 或产品 UI；
 - **仍后置**：Key/Gamepad/axis claim producer、dirty subtree pruning、持久 Pointer Capture、Focus/Modal、
-  Button default action、完整 Game SDK widget facade、Image/Text/Glyph PaintCache、nested clip、
+  Button Keyboard/Gamepad activation 与 Disabled/Theme 视觉、完整 Game SDK widget facade、Image/Text/Glyph PaintCache、nested clip、
   Runtime `RenderFramePacket`/FramePin 与 FreeType；
 - 后续把当前 borrowed SolidQuad DisplayList 升级为 owning Runtime packet，再扩展 Image/Text/Glyph 与资源 pin；Null UI
   继续直接测试 route/layout/paint order，不链接 FreeType/bgfx；

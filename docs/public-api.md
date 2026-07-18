@@ -732,6 +732,46 @@ public:
 };
 ```
 
+ADR 0011 已冻结但在本设计提交后才实施的 Button Primary Pointer action 扩展如下。命名明确表达
+Button 语义，不把它伪装成通用 Runtime/Game action，也不让游戏代码处理 backend Pointer 对象：
+
+```cpp
+enum class UIButtonActivationSource : u8 {
+    PrimaryPointer,
+};
+
+struct UIButtonActionEvent final {
+    UI::UINodeId buttonNode{};
+    UIButtonActivationSource source = UIButtonActivationSource::PrimaryPointer;
+    Platform::PlatformFrameId platformFrame{};
+    u64 sourceSequence = 0; // 成功 activation 的 Primary Up transition
+};
+
+class UIButtonActionCallback final { // move-only, 48-byte fixed-inline, noexcept
+public:
+    void operator()(const UIButtonActionEvent& event) noexcept;
+};
+
+class PrimaryWindowUITreeUpdater final {
+public:
+    [[nodiscard]] Core::Status setButtonAction(
+        UI::UINodeId button,
+        UI::UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status clearButtonAction(UI::UINodeId button);
+    [[nodiscard]] Core::Result<bool> isButtonPressed(UI::UINodeId button) const;
+};
+```
+
+同名低层操作存在于 root-scoped `UI::UITreeUpdater`。Action 是节点属性，因此 set 原子替换，clear、
+Button/root 销毁负责撤销，不返回会被临时析构的 token。`UIRoutedPointerListenerToken` 仍只管理低层
+routed listener registration；两种生命周期不能混用。Button 默认 `Targetable`，但调用方仍可显式设置
+`Ignore`。本切片只定义 `PrimaryPointerId + PointerButton::Primary` 的 Down/Move/Up 状态机；Keyboard、
+Gamepad、Focus、Capture、文本与完整 Widget facade 不属于这组 API 的完成范围。
+
+同一切片还向 `UIRoutedPointerEvent` 增加互补的
+`preventDefaultAction() noexcept` 与 `isDefaultActionPrevented() const noexcept`。前者只阻止可取消的
+Button arm/activation，不等于 stop、consume 或 claim；后者只观察本条 callback-scope route 的决定。
+
 两种 facade 都是 move-only、owner-thread、phase-epoch-scoped。Runtime 在回调进入时生成 epoch，离开时
 无条件失效；跨回调保存后操作返回 `RuntimeErrorCode::UIPhaseCapabilityExpired`。Headless 主动请求返回
 `RuntimeErrorCode::PrimaryWindowUIUnavailable`。State 只持久保存 `UIRootOwner` 与 `UINodeId`；updater

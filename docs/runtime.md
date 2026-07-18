@@ -118,6 +118,13 @@ default action、owning RenderFramePacket/FramePin、nested clip、dirty subtree
 Image/Texture 与产品级 Widget UI 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或
 SolidFill 4-panel Desktop smoke 推断为已经实现。
 
+下一 UI 输入切片已经先冻结、尚待代码落地：producer 继续逐 raw ordinal 处理输入，在普通 Pointer route
+完成后执行 Button 的 `PrimaryPointerId + PointerButton::Primary` default action；非 gamepad-only
+`InputCancelTransition` 与覆盖 primary window 的 `InputStreamReset` 则调用 UI-owned cancel seam 清除
+armed/pressed，不进入 routed listener、不伪造 Up。Button 产生的 consumption/claim 仍与 listener 结果合并，
+再统一交给 ActionMapper；失败仍推进 attempted frame/sequence watermark，已经发生的 listener/action 状态
+副作用不回滚也不允许同帧重放。
+
 ## 完整 vNext 所有权目标
 
 vNext 以 `EngineHost::Create(const EngineConfig&, EngineCompositionFactories)` 建立唯一组合根；普通游戏通过
@@ -206,6 +213,11 @@ SolidQuad DisplayList，D2 的 Game SDK facade 已能 author SolidFill box paint
 extension 只提供低层 routed callback/claim seam，不等于 Button default action。Key/Gamepad/axis claim、
 Focus/Capture/Modal、Text/Glyph 与 Widget 默认行为仍后置。Gameplay Action
 带目标 simulation tick，由 fixed loop 消费。
+
+已冻结的下一实现不会改变这个阶段顺序：Button default action 与 cancel/reset 清理都属于
+`UIInputRouteProducer` 调用 `UIContext` 的阶段，发生在 ActionMapper 之前。`preventDefaultAction()` 只阻止
+Down arm 或 Up activation；stop、consume 与 claim 均不隐式等于 prevent-default，Up/cancel/reset 清理也
+不可被 listener 阻止。Action callback 只提交 State intent，不能直接执行状态栈命令或访问 Runtime owner。
 
 ## IGameApplication 与 IGameState 调用顺序
 

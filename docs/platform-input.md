@@ -233,7 +233,9 @@ Gameplay Action Mapper 只映射未消费 transition 和未 claim control，并�
   该项不属于 M7-A 已实现 digital mapper；
 - `InputCancelTransition`、断连和 `InputStreamReset` 取消既有 Gameplay edge/repeat；M7-A 把 resync 后
   仍 held 的 digital control 保持 suppressed 到真实 release，后续 analog mapper 再扩展到 neutral；
-- `preventDefault()` 只写 consumption/claim，绝不能回写 Platform held 状态或全局键盘对象。
+- `UIRoutedPointerEvent::preventDefaultAction()` 只阻止 UI Widget 的可取消 default action；它本身不等于
+  consume 或 claim，更绝不能回写 Platform held 状态或全局键盘对象。若 Widget default action 需要
+  consumption/claim，由 UI route result 显式合并这些输出。
 
 ## Simulation 与 Frame Action
 

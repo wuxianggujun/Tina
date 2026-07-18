@@ -447,6 +447,43 @@ view；该切片的 claims 当时为 `None`。C1c-b3c 已在 Runtime 内部拥�
 Pointer Button claim 并接通 ActionMapper Cancel/suppression，但尚未实现 Key/Gamepad/axis claim producer、
 Focus/Capture/Modal、Button default action、Label 文本或可见 UI draw。
 
+ADR 0011 已冻结下一条 Button default action，当前设计提交仍不把它记为已实现：
+
+```text
+Primary Down 命中 committed route 中最近的 Button
+  -> routed listeners: Capture -> Target -> Bubble
+  -> 未 preventDefaultAction: arm + pressed + consume Down + claim Primary
+
+held Primary Move
+  -> pressed = committed hit 是否仍位于 armed Button subtree
+  -> 继续请求 Primary claim；不隐式消费 Move
+
+Primary Up
+  -> 总是先清 armed/pressed，并消费属于该 Button interaction 的 Up
+  -> 未 preventDefaultAction 且仍位于同一 live Button subtree
+  -> 调用 Up route 开始时已经发布的 Button action 一次
+
+non-gamepad-only cancel / covering stream reset / node or root destroy
+  -> clear armed/pressed
+  -> no fabricated Up, no Button action
+```
+
+`stopPropagation()`、`stopImmediatePropagation()`、`consumeInputTransition()`、
+`claimPointerButton()` 与 `preventDefaultAction()` 是不同决定：停止传播不阻止 default action；consume/claim
+不自动阻止 activation；prevent-default 也不撤销 listener 已完成的 side effect。Down prevent-default 不
+建立新 armed state；Up prevent-default 仍执行不可跳过的状态清理但不 activation。Button 创建后默认
+`Targetable`，Root/Panel/Label 保持 `Ignore`；显式把 Button 设置为 `Ignore` 可关闭它自身的 hit target，
+但 targetable descendant 的 route ancestry 仍可包含该 Button。
+
+Action 是 Button 节点拥有的 retained property：`setButtonAction()` 原子替换，`clearButtonAction()`、
+Button/root 销毁撤销；`isButtonPressed()` 只查询当前 live Button 状态。callback 使用48字节 fixed-inline
+`noexcept` storage，无 allocator fallback。`buttonActionCapacity` 限制 published action 数，0从 node
+capacity 派生；实现额外预分配一个 transaction slot，保证 active capacity 已满时替换已有 action 仍可
+先 staging、再按 generation/serial 原子发布。route 开始捕获 action serial boundary，因此 route 中新
+set/replace 从下一条 route 生效，clear 则能阻止本条 route 尚未执行的 action。callback move/destructor
+或 invocation 可以释放 Button/root；记录先 tombstone、route/callback cleanup 后再回收 storage，避免
+slot reuse UAF。
+
 这个私有 owner 只负责 identity 与 lifetime，不调用 `commitLayout()`。输入始终读取上一份已提交
 hit snapshot；hit-test/route 不得为“方便”隐式触发布局。M7-C1c-b3d1 已由独立 coordinator 在
 `IGameState::updateUI()` 成功后、Render submit 前使用主窗口 logical extent 提交本帧下一份 snapshot；
@@ -489,6 +526,8 @@ generation 校验且未被新 modal 覆盖时恢复焦点。状态命令在路�
 - route path 使用预配置 fixed-capacity scratch，超过最大树深返回 `CapacityExceeded`，不 heap fallback；
 - 每个路由阶段重新解析 UINodeId owner + generation；listener 按稳定注册顺序；
 - 当前 C1c-b2 只执行 Capture -> Target -> Bubble listener dispatch，不执行 Widget default action；
+- 下一 Button 切片在完整 listener propagation 之后执行上述窄 default action；没有 hit 的 Move/Up 仍会
+  更新或清理已有 armed state，因此不能从 `queryPointerHit()` miss 提前返回；
 - route 中新增 listener 从下一次 route 生效；删除/重置立即 tombstone，route cleanup 后回收 callback storage；
   root-scoped updater 注册会校验 current root/subtree，跨 root/stale generation 原子失败且不占 slot；
 - fixed-inline callback 的 move/destructor 可以执行用户代码；最终 move 后重新校验 root、node generation、

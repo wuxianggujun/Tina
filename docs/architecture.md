@@ -75,6 +75,13 @@ shader program。D2 又把 `PrimaryWindowUITreeUpdater::setBoxPaint()` 暴露给
 系统：owning Runtime `RenderFramePacket`、FramePin、文本/glyph/Label 文本、Button default action、
 Image/Texture、Key/Gamepad/axis claim、持久 Pointer Capture、Focus/Modal、dirty subtree pruning 与
 nested clip 仍未完成。
+
+下一窄 UI 切片已完成设计冻结但尚未实施：Button 默认 `Targetable`，只增加
+`PrimaryPointerId + PointerButton::Primary` 的 armed/pressed/Up activation、retained action callback、
+`preventDefaultAction()` 和 cancel/reset 状态清理。该能力仍留在 `tina_ui` 与 Runtime-private input
+producer，Game SDK 只取得 root-scoped setter/query；它不引入 SDL、Runtime/Render 依赖或 bgfx 类型，
+也不等于 Focus/Capture、键盘/手柄、文本或完整 Widget 系统已经完成。
+
 现有 Legacy target 的包依赖由 vcpkg manifest 管理，bgfx、EASTL、EABase 仍保持固定源码
 版本；其中 EASTL/EABase 只属于迁移期现状，不是 vNext 目标依赖。
 

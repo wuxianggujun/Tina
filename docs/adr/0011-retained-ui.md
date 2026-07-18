@@ -206,6 +206,31 @@ listener 的 consume 结果写入 `InputTransitionConsumptionView`；在 b3b 切
 交给 ActionMapper。Focus/Capture/Modal、Button default action、真实 continuous claims 与 Game SDK root
 访问在该切片仍未实现。
 
+下一实现切片冻结 Button 的第一条窄 default action，不扩大为完整 Widget 系统：
+
+- 只支持主窗口 `PrimaryPointerId + PointerButton::Primary`；Keyboard Enter/Space、Gamepad Accept、
+  Focus、持久 Pointer Capture、Disabled 与多 Pointer 继续后置；
+- `Button` 创建后默认 `Targetable`，`Root/Panel/Label` 仍默认 `Ignore`；调用方可以显式把 Button 改为
+  `Ignore`，但注册 action 本身不隐式修改 hit policy；
+- Primary Down 的 committed route 中最近 Button 在 listener 完成后进入 armed/pressed，消费该 Down 并
+  claim Primary button；held 期间 Move 只更新 Pointer 是否仍位于该 Button committed subtree，并继续
+  请求 claim；Primary Up 总是清除 armed/pressed，只有 Up 仍位于同一 live Button subtree 时才激活一次；
+- `InputCancelTransition`（非 gamepad-only）与覆盖当前窗口的 `InputStreamReset` 直接清除 retained
+  Pointer interaction，不路由、不合成 Up、不触发 action；节点/root 销毁也立即使对应状态失效；
+- `UIRoutedPointerEvent::preventDefaultAction()` 只阻止本次 Down arm 或 Up activation。它与
+  `stopPropagation()`、`consumeInputTransition()`、`claimPointerButton()` 四者独立；Up/cancel/reset 的
+  必要状态清理不可阻止，也绝不回写 Platform snapshot；
+  `isDefaultActionPrevented()` 只观察本条 callback-scope route 的累计决定；
+- action 是 Button 节点拥有的 retained property，通过 `setButtonAction()` 原子替换、
+  `clearButtonAction()` 或节点销毁撤销，不返回 RAII token。`UIButtonActionCallback` 是48字节
+  fixed-inline、move-only、`noexcept` callback；`UIButtonActionEvent` 只携带 Button identity、
+  `PrimaryPointer` activation source、Platform frame 与触发 Up 的 source sequence，不暴露 Runtime/backend；
+- `buttonActionCapacity` 为0时从 node capacity 派生，非0时不得超过 node capacity。实现使用固定 action
+  slot pool 与一个不计入 published capacity 的预分配事务 slot，使满容量时替换已有 action 仍可原子
+  staging；callback move/destructor 或 invocation 造成节点/root 自毁时依靠 generation、registration serial
+  与延迟回收避免 UAF。route 中新 set/replace 的 action 从下一条 route 生效，clear 可阻止本条 route
+  尚未执行的 default action。
+
 producer 使用两份 Create 期预分配的 PMR consumption bitset，成功时交换 published/staging storage；supplied
 `memory_resource` 必须比 producer 活得更久，连续300帧共用时 allocation count 不增长。失败测试先让 root
 Move listener 产生1次 side effect，再让后续深层 Button route 因 route path capacity 失败；本次结果不发布、
