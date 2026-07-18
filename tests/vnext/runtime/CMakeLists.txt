@@ -1,4 +1,5 @@
 add_executable(tina_runtime_ui_tests
+    PrimaryWindowUIContextOwnerTests.cpp
     UIInputRouteProducerTests.cpp
 )
 

@@ -16,19 +16,23 @@ handled separately by `tina_bench`. SDL/SDL3 and CTest are not part of the targe
 
 The C++23 headless lifecycle kernel, M7-A platform/input kernel, the first desktop adapter slice,
 M7-B1 private WindowSurface handoff, M7-B2 Desktop bootstrap plus real-GPU smoke, and the
-M7-C1b/M7-C1c-a/C1c-b1/C1c-b2 standalone retained tree, Flex-lite layout, committed hit-snapshot,
-point-query, and synthetic routed-pointer foundations are complete. The private `tina_platform_glfw` backend now
+M7-C1b/M7-C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c retained tree, Flex-lite layout,
+committed hit-snapshot, point-query, synthetic routed-pointer, and private Runtime input-route
+foundations are complete. The private `tina_platform_glfw` backend now
 creates a `GLFW_NO_API` window, normalizes keyboard/pointer/focus/resize/close/committed UTF-8 text
 into the same bounded `PlatformFrameView`, and hands a move-only window surface lease to the render
 composition without exposing native or bgfx types. `Tina::Desktop::CreateEngine(config)` now privately
 composes `SteadyClock + GLFW WindowSurface + DisabledTaskSystem + bgfx`, and `tina_sample_desktop`
-defaults to 300 frames of deep-blue clear/present on the real render-backend path. Windows VS 2026/MSVC 19.50/
-CMake 4.2.3 Debug and Release builds pass the direct GTest matrix: 183/183, UI 75/75, GLFW 22/22,
-bgfx 11/11, and real D3D11 Intel Iris Xe 300-frame smoke. Linux GCC 13.4 passes UI 75/75 plus
-the same 183/22/11 direct-test matrix and a 300-frame Desktop run; Clang 22.1.8 passes UI 75/75 and
-that matrix under ASan/UBSan/LSan with no diagnostic. The first GCC pass exposed a `requires` name-visibility
-issue in the routed-pointer callback constraint; it is fixed, and the second GCC/Clang builds are warning-free.
-The Clang WSL2 run selected bgfx
+defaults to 300 frames of deep-blue clear/present on the real render-backend path. The current b3c
+Null graph passes direct Debug and Release gates on Windows VS 2026/MSVC 19.50/CMake 4.2.3:
+`tina_tests` 187/187, `tina_ui_tests` 75/75, `tina_runtime_ui_tests` 20/20, and the Null sample for
+300 frames. The b3c Windows bgfx graph also passes Debug and Release `tina_tests` 187/187,
+`tina_runtime_ui_tests` 20/20, GLFW 23/23, bgfx 11/11, and a 300-frame Desktop run on a real
+D3D11 Intel Iris Xe; the Release process reports clean status. Linux GCC 13.4 passes the same
+187/75/20 Null matrix and Null sample; Clang 22.1.8 with libstdc++ 15.2 passes it under
+ASan/UBSan/LSan with no diagnostic. The first GCC UI pass
+exposed a `requires` name-visibility issue in the routed-pointer callback constraint; it is fixed.
+The earlier Clang WSL2 Desktop run selected bgfx
 Vulkan on llvmpipe, so it proves the Linux Vulkan/backend lifecycle, not hardware-GPU performance.
 
 M7-C1c-a adds fixed-capacity PMR pointer-policy/route-ancestry storage and a double-buffered
@@ -41,11 +45,16 @@ path over the committed hit snapshot with fixed-capacity route path/listener sto
 `noexcept` callbacks, generation-safe RAII listener tokens, owner-thread immediate reset, bounded off-thread
 deferred reset, Capture -> Target -> Bubble dispatch, propagation stop/immediate stop, input-transition consume,
 mutation-safe listener/node invalidation, and route/commit reentrancy guards. `UIContext` remains owner-thread
-only and must not be destroyed from inside a route callback or callback cleanup. Persistent Pointer Capture,
-Focus/Modal, Button default behavior, paint snapshots/DisplayList, the Runtime input producer, dirty-subtree
-pruning, and nested clipping are not implemented yet.
-IMM32 composition, production gamepad input, Scene, Runtime-integrated/rendered UI, text/widgets,
-Pass Scheduler, and submission tickets remain later slices.
+only and must not be destroyed from inside a route callback or callback cleanup. C1c-b3b adds the bounded
+private producer, and C1c-b3c makes `EngineHost` lazily bind one private `UIContext` to the first primary
+`WindowId`, run routing after Platform event dispatch and before `ActionMapper`, reject later window identity
+loss/change, and destroy the Context before module shutdown. The producer's 12 tests and the owner's 8 tests
+run in the independent `tina_runtime_ui_tests` process. This is not a game-facing UI API: the Game SDK still
+cannot create roots or widgets, the Runtime does not commit a UI layout or build a DisplayList, and the current
+empty Context therefore produces canonical `None` consumption and claims. Persistent Pointer Capture,
+Focus/Modal, Button default behavior, paint snapshots/DisplayList, dirty-subtree pruning, and nested clipping
+are not implemented yet. IMM32 composition, production gamepad input, Scene, visible Runtime-integrated UI,
+text/widgets, Pass Scheduler, and submission tickets remain later slices.
 
 The active design, verified status, and build instructions are maintained in
 the [Chinese documentation](README_CN.md).

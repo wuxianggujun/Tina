@@ -5,8 +5,10 @@
 > Window/Keyboard/Pointer/Focus/resize/close/committed text。M7-B1 已完成私有 WindowSurface handoff；
 > M7-B2 已完成私有真实 bgfx clear/present 和 Desktop smoke，production Gamepad、Windows IMM32 composition、OS Pointer
 > Capture 与完整 DPI/UI 门禁仍是后续能力。M7-C1c-b3a 已补齐 Pointer Button/Wheel 的事件时
-> logical position；M7-C1c-b3b 已实现独立 Runtime-private `UIInputRouteProducer`，但 `EngineHost` 仍传
-> canonical `None` 且未拥有/选择 `UIContext`。
+> logical position；M7-C1c-b3b 已实现 Runtime-private `UIInputRouteProducer`，M7-C1c-b3c 已让
+> `EngineHost` 私有延迟绑定主窗口 `UIContext`，并按 Platform lifecycle dispatch → UI route →
+> ActionMapper 接入正式帧路径。producer 当前只输出 Pointer Move/Button/Wheel raw ordinal consumption，
+> claims 仍为 canonical `None`；Game SDK 尚无 UI root/Widget 访问。
 
 ## 结论
 
@@ -107,7 +109,8 @@ GLFW C callback 不调用 UI、Gameplay 或销毁系统，只更新 backend-owne
 当前 producer 覆盖 Keyboard press/release/repeat、Primary Pointer move/button/wheel、Focus、logical/
 framebuffer/content-scale/visible/iconified metrics、resize、close 与 GLFW char callback 提供的 committed
 Unicode scalar。Gamepad registry/sampled diff、Windows preedit/composition、OS Pointer Capture、
-UI routed consumption producer 尚未接入。WindowSurface snapshot/lease 已在 M7-B1 接入到
+可见 UI root/Widget 与持续控制 claims 尚未接入。Runtime-private UI routed consumption producer 已在
+M7-C1c-b3c 接入 `EngineHost`，但不属于 GLFW adapter。WindowSurface snapshot/lease 已在 M7-B1 接入到
 Platform/Render 组合；M7-B2 已完成真实 bgfx clear/present 和基础 GPU surface lifecycle，仍不覆盖
 后续 UI pass、Pass Scheduler 或 resize/最小化/恢复自动化。
 
@@ -184,8 +187,13 @@ consumption 使用 Create 期双预分配 PMR bitset；成功发布只交换 sta
 Move listener 产生1次 side effect，再让后续深层 Button route 因 route path capacity 失败；本次 staging
 不发布、上一份成功 view 保持，但 attempted watermark 已推进，同一 frame retry 被拒且 callback 仍为1，
 证明 listener side effect 不回滚也不重放。独立 `tina_runtime_ui_tests` 直接运行 GoogleTest，不使用 CTest。
-这仍不是正式帧集成：`EngineHost` 没有 WindowRecord→`UIContext` ownership/selection，继续把 canonical
-`None` consumption/claims 传给 ActionMapper。
+M7-C1c-b3c 已把 producer 接入正式帧：同步 `PlatformEventDispatcher` 完成后，Runtime-private owner
+先为本帧选择 Context，再路由上一份 committed hit snapshot，最后把 producer 输出交给 ActionMapper。
+Headless frame 在首次窗口绑定前选择结果为 `nullptr`；首个有效 primary `WindowId` 延迟创建 Context，
+相同 generation 复用，绑定后窗口消失或换代以 `LifecycleInvariantViolation` 终止本次 run。最小化、
+metrics 或 content scale 变化不重绑，Context 在 Render → Task → Platform → Clock modules 之前销毁。
+owner 不调用 `commitLayout()`，hit-test/route 不会隐式触发布局。由于 Game SDK 尚无 UI root 访问，
+当前产品帧的 committed hit snapshot 仍为空；这不是可见 Widget、Focus/Capture/Modal 或 DisplayList 证据。
 
 M7-A Action Mapper 只实现 digital binding，因此当前真正参与 suppression 的 claim 是 Key、Primary
 Pointer Button 与 Gamepad Button。`GamepadAxisControlIdentity` 和 Pointer continuous identity 已冻结为
@@ -374,18 +382,20 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
 - M7-A 只接受 `PrimaryPointerId`；Gamepad snapshot 同 owner、slot 唯一，Engine 级 Gamepad 输入每帧
   只路由一次到 primary window；跨帧 retained active/suppressed source 与最终 held snapshot 一致；
 - Platform 生命周期通知与 Headless/Input Action 映射互不重复投递；M7-C1a 已实现 UI-owned
-  route-result view ABI，M7-C1c-b3b 已实现独立 Runtime-private producer 和 `tina_runtime_ui_tests`；
-  `EngineHost` 尚未拥有/选择 `UIContext`，正式路径仍传 canonical `None`；公共头文件
+  route-result view ABI，M7-C1c-b3b 已实现 Runtime-private producer，M7-C1c-b3c 已实现主窗口
+  Context 延迟绑定、同 generation 复用、换代/消失门禁和正式 EngineHost 顺序接线；公共头文件
   不含 GLFW/SDL 类型，Headless backend 不链接、不加载 GLFW 或 SDL；
 - M7-B1 覆盖 `WindowSurfaceId` generation、`WindowSurfaceSnapshot` identity/revision/suspended、
   move-only `NativeWindowSurfaceLease`、重复 lease 拒绝、Render 创建失败与窗口发布失败逆序回滚、
   surface snapshot 只由 committed metrics 派生、resize/content-scale/suspend 改变才递增
   `surfaceRevision`，以及 NullRender suspended 帧维护调用但不 present、不增加 submission index；
-- Windows 最新 C1c-b3b 门禁在 MSVC 19.50.35717 与 CMake 4.2.3 下通过：Debug/Release 基础
+- Windows C1c-b3b 基线门禁在 MSVC 19.50.35717 与 CMake 4.2.3 下通过：Debug/Release 基础
   `tina_tests` 185/185、独立 UI 75/75、独立 Runtime→UI 12/12。上一 C1c-b3a Pointer/Input
   门禁通过 GLFW专项23/23，并运行 WindowSurface GLFW样例1800帧返回0；`tina_sample_null`
   300帧与 `TINA_BUILD_TESTING=OFF` production-style GLFW样例300帧是更早门禁结果；
-- Linux 最新 C1c-b3b Null 门禁通过基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12，
+- Linux C1c-b3b Null 基线门禁通过基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12；
+  C1c-b3c 新增 owner 与 EngineHost 顺序/换代直接测试；更新后的实际通过计数只在
+  [测试文档](testing.md) 维护，不能拿这组 b3b 数字证明 b3c 门禁。该 C1c-b3b 基线的
   Clang 22.1.8 sanitizer 无诊断。上一 C1c-b3a Pointer/Input 门禁通过基础185/185、GLFW专项23/23；
   其中 Clang X11 的基础测试不使用 suppression，只有 GLFW/X11 专项进程使用精确
   `leak:_XimOpenIM`，对应13次/5304 B的libX11 XIM retention。GCC 13.4 与 Clang X11 的 Null/GLFW样例各300帧均为

@@ -96,14 +96,16 @@ M6 生命周期之后仍未实现：
 - 完整 GameStateStack/commands/policy propagation、通用 Runtime Event Queue 与 State TaskGroup；
 - M7-A 已补齐有界 PlatformFrame/Input/Action、Platform lifecycle dispatch，以及私有 GLFW
   Window/Keyboard/Pointer/committed text desktop adapter；M7-C1c-b3b 已补独立 Runtime-private UI routed
-  consumption producer，但 EngineHost ownership/selection/接线、IMM32、production Gamepad 和连续 axis
-  mapping 仍在后续子切片；
+  consumption producer，M7-C1c-b3c 已补 primary-window `UIContext` ownership/selection 与 EngineHost
+  接线；EngineConfig UI capacities、Game SDK scoped UI access、真实 continuous claims、IMM32、production
+  Gamepad 和连续 axis mapping 仍在后续子切片；
 - 有界 CPU/IO/Main worker、阶段指标与完整 shutdown deadline/fatal-stop；
 - typed render resource handle、Pass Scheduler、World RenderScene/UIDisplayList、Runtime-private
   RenderFramePacket/pool 与 submission completion 保活；
-- Scene、Asset、Audio 的真实契约和消费者，以及 Runtime-integrated UI ownership/layout/render
+- Scene、Asset、Audio 的真实契约和消费者，以及 Runtime-integrated UI root/layout/render
   pipeline；M7-C1b/C1c-a/C1c-b1/C1c-b2 C++23 standalone `tina_ui` tree/layout/committed-hit/
-  point-query/synthetic-route foundation 与 M7-C1c-b3b 私有 producer 已实现，但尚未接入 EngineHost；
+  point-query/synthetic-route foundation、M7-C1c-b3b 私有 producer 与 M7-C1c-b3c EngineHost 接线已实现，
+  但 Game SDK 尚不能创建 root，仍没有可见 UI；
 - `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
 - Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；M7-B2 Desktop bgfx
   X11 图也已完成 GCC 13.4 和 Clang 22.1.8 + ASan/UBSan/LSan 的183/22/11直接测试及300帧门禁。
@@ -138,7 +140,7 @@ Debug/Release也均通过183/183、22/22与Null/GLFW样例各300帧。GCC 13 X11
 - **已完成**：`PlatformFrameBuilder` 单测直接注入 Down→Up、Focus Cancel、overflow reset 与
   lifecycle payload；Runtime test adapter 验证 EngineHost wiring。Headless 仍不链接 GLFW；可复用
   production-like deterministic PlatformBackend test double 随 GLFW adapter 测试加入；
-- **已完成**：Runtime 建立空 UI consumption seam，并作为 ActionMapper consumer 接受
+- **已完成**：Runtime 建立 UI consumption seam，并作为 ActionMapper consumer 接受
   `Tina::UI::InputTransitionConsumptionView` 与 `Tina::UI::ContinuousControlClaimsView`、
   digital Action Map 和有序 Simulation Action latch，验证0/1/4 fixed-step 只消费一次；
 - **已完成**：`EngineConfig::inputActions` 注册唯一 Engine default Input Context 的 digital bindings；
@@ -242,10 +244,18 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
 - **已完成 M7-C1c-b3b 失败边界**：测试先产生1次 root Move listener side effect，再让后续深层
   Button route 因 route path capacity 失败；staging 不发布、旧 published view 保持，但推进 attempted
   watermark，同一 frame retry 被拒且 callback 仍为1。测试 target 直接运行 GoogleTest，不使用 CTest；
+- **已完成 M7-C1c-b3c**：`EngineHost` 在 `PlatformEventDispatcher` 后、`ActionMapper` 前调用 producer；
+  Runtime-private owner 在首次看到 primary `WindowId` 时惰性创建唯一 `UIContext`，Headless 绑定前为 null，
+  绑定后 primary 消失或 generation 更换会结构化失败，同一 ID 的 metrics/content scale/minimized 变化不重绑；
+  Context 在 Render → Task → Platform → Clock module shutdown 前于 owner thread 销毁；
+- **M7-C1c-b3c 边界**：owner 不调用 `commitLayout()`，route 只读上一帧 committed snapshot；claims 仍为
+  canonical `None`。Game SDK 尚不能取得 Context 或创建 root，所以该切片只完成输入时序/所有权，不能称为
+  可见 UI；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
-  subtree 尚未实现；`EngineHost` 仍传 canonical `None`，也未拥有/选择 `UIContext`；
-- **仍后置**：EngineHost→UIContext producer 接线、dirty subtree pruning、持久 Pointer Capture、Focus/Modal、
-  Button default action、paint snapshot/DisplayList、nested clip、text/glyph、FreeType 与 bgfx UI pass；
+  subtree 尚未实现；正式路径虽已接线，但没有 Game SDK root access，无法产生产品 UI；
+- **仍后置**：EngineConfig UI capacities、Game SDK scoped UI access、真实 claims、dirty subtree pruning、
+  持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、text/glyph、
+  FreeType 与 bgfx UI pass；
 - 后续继续实现后端无关 Quad/Text/Clip DisplayList、FramePinSink/capacity rollback 和相邻兼容 batching
   contract；Null UI 直接测试 route/layout/paint order，不链接 FreeType/bgfx；
 - 硬门禁：无变化 UI 每帧0 layout、0 PaintCache rebuild、0 Tina heap allocation。

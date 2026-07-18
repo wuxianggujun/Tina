@@ -389,6 +389,8 @@ struct RuntimeProbe final {
     bool platformExitRequested = false;
     bool emitPlatformEvent = false;
     bool emitPlatformEventOnEveryFrame = false;
+    bool emitUnrepresentableUiPointerMove = false;
+    std::optional<std::size_t> replacePrimaryWindowOnFrame;
     std::vector<u64> platformFrameIds;
     std::vector<std::vector<Platform::Key>> heldKeysByFrame;
     std::vector<std::vector<ScriptedKeyTransition>> keyTransitionsByFrame;
@@ -434,6 +436,20 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
         {
             probe_->clock->advance(probe_->frameDeltas[frameIndex]);
         }
+        if (probe_->replacePrimaryWindowOnFrame == frameIndex)
+        {
+            if (windowPool_->erase(primaryWindow_) != Core::GenerationEraseResult::Erased)
+            {
+                return Core::failure(Core::CoreErrorCode::Internal,
+                                     "scripted primary Window generation could not be retired");
+            }
+            auto replacementWindow = windowPool_->tryEmplace(0);
+            if (!replacementWindow)
+            {
+                return Core::failure(std::move(replacementWindow.error()));
+            }
+            primaryWindow_ = *replacementWindow;
+        }
         const u64 platformFrameId = frameIndex < probe_->platformFrameIds.size() ? probe_->platformFrameIds[frameIndex]
                                                                                  : static_cast<u64>(frameIndex) + 1U;
         auto beginStatus = frameBuilder_.beginFrame(Platform::PlatformFrameId{platformFrameId});
@@ -473,6 +489,22 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
             if (appendResult != Platform::FrameBatchAppendResult::ResetInserted)
             {
                 return Core::failure(Core::CoreErrorCode::Internal, "scripted platform event was not appended");
+            }
+        }
+        if (probe_->emitUnrepresentableUiPointerMove && frameIndex == 0)
+        {
+            const auto appendResult = frameBuilder_.appendInputTransition(Platform::PointerMoveTransition{
+                .window = primaryWindow_,
+                .pointer = Platform::PrimaryPointerId,
+                .logicalX = (std::numeric_limits<double>::max)(),
+                .logicalY = 0.0,
+                .deltaX = 0.0,
+                .deltaY = 0.0,
+            });
+            if (appendResult != Platform::FrameBatchAppendResult::Appended)
+            {
+                return Core::failure(Core::CoreErrorCode::Internal,
+                                     "scripted UI pointer Input transition was not appended");
             }
         }
         if (frameIndex < probe_->keyTransitionsByFrame.size())
@@ -1811,6 +1843,52 @@ TEST(EngineHostRunTest, DispatchesPlatformLifecycleEventsBeforeFrameCallbacks)
     EXPECT_LT(eventPosition, updatePosition);
 }
 
+TEST(EngineHostRunTest, UiInputRouteValidationRunsAfterPlatformDispatchAndBeforeGameFramePhases)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    runtime.emitPlatformEvent = true;
+    runtime.emitUnrepresentableUiPointerMove = true;
+    GameProbe game;
+    game.runtime = &runtime;
+    game.subscribeToPlatformEvents = true;
+    game.exitOnFrame = 0;
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value());
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_FALSE(runResult.has_value());
+    EXPECT_EQ(runResult.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
+    EXPECT_EQ(runResult.error().message, "UI pointer transition identity, state, owner, position, or delta is invalid");
+    EXPECT_EQ(game.platformEventCount, 1U);
+    EXPECT_TRUE(containsEvent(runtime.events, "platform.event"));
+    EXPECT_FALSE(containsEventPrefix(runtime.events, "state.fixed."));
+    EXPECT_FALSE(containsEventPrefix(runtime.events, "state.update."));
+    EXPECT_FALSE(containsEventPrefix(runtime.events, "state.extract."));
+    EXPECT_FALSE(containsEventPrefix(runtime.events, "state.ui."));
+    EXPECT_EQ(runtime.submitCalls, 0U);
+    EXPECT_EQ(runtime.presentCalls, 0U);
+    EXPECT_EQ(game.exitCount, 1U);
+    EXPECT_EQ(game.shutdownCount, 1U);
+    EXPECT_EQ(game.exitFailureCode, RuntimeErrorCode::LifecycleInvariantViolation);
+    EXPECT_EQ(game.shutdownFailureCode, RuntimeErrorCode::LifecycleInvariantViolation);
+    ASSERT_TRUE(game.platformEventSubscription.has_value());
+    EXPECT_FALSE(game.platformEventSubscription->isActive());
+    expectEventSuffix(runtime.events, EventLog({
+                                          "state.exit",
+                                          "state.destroy",
+                                          "game.shutdown",
+                                          "render.shutdown",
+                                          "render.destroy",
+                                          "task.shutdown",
+                                          "task.destroy",
+                                          "platform.shutdown",
+                                          "platform.destroy",
+                                      }));
+}
+
 TEST(EngineHostRunTest, StartupRollbackInvalidatesPlatformEventSubscription)
 {
     RuntimeProbe runtime;
@@ -2022,6 +2100,52 @@ TEST(EngineHostRunTest, RepeatedPlatformFrameIdFailsBeforeDispatchingItsEvents)
     EXPECT_TRUE(containsEvent(runtime.events, "state.update.0"));
     EXPECT_FALSE(containsEvent(runtime.events, "state.update.1"));
     EXPECT_EQ(runtime.submittedFrames, 1U);
+}
+
+TEST(EngineHostRunTest, PrimaryWindowGenerationChangeFailsBeforeSecondGameFramePhases)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero(), Core::Duration::zero()};
+    runtime.replacePrimaryWindowOnFrame = 1U;
+    GameProbe game;
+    game.runtime = &runtime;
+    game.exitOnFrame = 1;
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value());
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_FALSE(runResult.has_value());
+    EXPECT_EQ(runResult.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
+    EXPECT_EQ(runtime.pollCount, 2U);
+    EXPECT_TRUE(containsEvent(runtime.events, "state.update.0"));
+    EXPECT_TRUE(containsEvent(runtime.events, "state.extract.0"));
+    EXPECT_TRUE(containsEvent(runtime.events, "state.ui.0"));
+    EXPECT_TRUE(containsEvent(runtime.events, "render.submit.0"));
+    EXPECT_FALSE(containsEvent(runtime.events, "state.update.1"));
+    EXPECT_FALSE(containsEvent(runtime.events, "state.extract.1"));
+    EXPECT_FALSE(containsEvent(runtime.events, "state.ui.1"));
+    EXPECT_FALSE(containsEvent(runtime.events, "render.submit.1"));
+    EXPECT_EQ(runtime.submittedFrames, 1U);
+    EXPECT_EQ(runtime.presentedFrames, 1U);
+    EXPECT_EQ(game.exitCount, 1U);
+    EXPECT_EQ(game.shutdownCount, 1U);
+    EXPECT_EQ(game.exitStopCause, RunStopCause::RuntimeFailure);
+    EXPECT_EQ(game.shutdownStopCause, RunStopCause::RuntimeFailure);
+    EXPECT_EQ(game.exitFailureCode, RuntimeErrorCode::LifecycleInvariantViolation);
+    EXPECT_EQ(game.shutdownFailureCode, RuntimeErrorCode::LifecycleInvariantViolation);
+    expectEventSuffix(runtime.events, EventLog({
+                                          "state.exit",
+                                          "state.destroy",
+                                          "game.shutdown",
+                                          "render.shutdown",
+                                          "render.destroy",
+                                          "task.shutdown",
+                                          "task.destroy",
+                                          "platform.shutdown",
+                                          "platform.destroy",
+                                      }));
 }
 
 TEST(EngineHostRunTest, StartupElapsedTimeIsExcludedFromTheFirstFrameDelta)

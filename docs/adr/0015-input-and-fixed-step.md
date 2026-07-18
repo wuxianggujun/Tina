@@ -6,9 +6,10 @@
 - 实施状态：M7-A Headless Platform/Input、Action Mapper、fixed-step latch、
   `PlatformEventDispatcher` 与私有 GLFW Window/Keyboard/Pointer/committed text producer 已落地；
   M7-C1a 已落地 UI-owned route-result view ABI，M7-C1c-b3a 已让 Pointer Button/Wheel 固化事件时
-  logical position，M7-C1c-b3b 已实现独立的 Runtime-private `UIInputRouteProducer`；`EngineHost` 仍传
-  canonical `None` 且未拥有/选择 `UIContext`，production Gamepad、完整 DPI、Windows IMM32 与完整
-  Runtime UI 集成仍是目标
+  logical position，M7-C1c-b3b 已实现 Runtime-private `UIInputRouteProducer`，M7-C1c-b3c 已让
+  `EngineHost` 私有延迟绑定 primary-window `UIContext`，并按 Platform lifecycle dispatch → UI route
+  → ActionMapper 接入正式帧。claims 仍为 canonical `None`，Game SDK 仍无 UI root/updater；production
+  Gamepad、完整 DPI、Windows IMM32 与可见 Runtime UI 仍是目标
 
 ## 背景
 
@@ -87,8 +88,16 @@ M7-C1c-b3b 的 Runtime-private producer 只路由 Pointer Move/Button/Wheel，�
 300帧共用时 allocation count 不增长。失败测试先产生1次 root Move listener side effect，再让后续深层
 Button route 因 route path capacity 失败；staging 不发布、旧 published view 保持，但 attempted watermark
 已推进，同一 frame retry 被拒且 callback 仍为1，证明 side effect 不回滚也不重放。该组件由独立
-`tina_runtime_ui_tests` 直接执行 GoogleTest 验证，不使用 CTest；在 `EngineHost` 接线前，正式帧路径仍向
-ActionMapper 传 canonical `None`。
+`tina_runtime_ui_tests` 直接执行 GoogleTest 验证，不使用 CTest。
+
+M7-C1c-b3c 的正式帧路径先同步分发 Platform lifecycle event，再由 Runtime-private owner 选择 Context、
+调用 producer 路由上一份 committed hit snapshot，最后将 consumption/claims 交给 ActionMapper。
+Headless frame 在首次绑定前选择 `nullptr`；首个有效 primary `WindowId` 延迟创建 Context，相同
+owner/index/generation 复用。绑定后主窗口消失或 replacement generation 以
+`LifecycleInvariantViolation` 终止本次 run；最小化、metrics/content scale 变化不重绑。Context 在
+Render → Task → Platform → Clock modules 前 shutdown。owner 不调用 `commitLayout()`，因此 hit-test/route
+不能隐式布局。Game SDK 尚无 Context/root 访问，当前正式路径的 committed hit snapshot 仍为空；
+claims 仍为 canonical `None`，也没有可见 Widget、Focus/Capture/Modal 或 DisplayList。
 
 M7-A Action Mapper 由 Runtime 唯一拥有，只实现 EngineConfig 注册的单一 immutable default Input
 Context（priority=0）。UI consumption/claim 优先；未来多 Context 以显式 priority 决胜，同 priority

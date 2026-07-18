@@ -21,8 +21,8 @@ Runtime。现有2D/UI/3D路径继续作为验收基线，新架构按可独立�
 
 vNext 已完成 C++23 Headless Runtime 生命周期内核、M7-A Platform/Input 内核、首个桌面适配切片、
 M7-B1 私有 WindowSurface handoff、M7-B2 Desktop bootstrap + 真实 GPU 冒烟，以及
-M7-C1b/M7-C1c-a/C1c-b1/C1c-b2 standalone Retained Tree/Flex-lite layout/committed hit snapshot/
-point query/synthetic routed pointer foundation：私有
+M7-C1b/M7-C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c Retained Tree/Flex-lite layout/
+committed hit snapshot/point query/synthetic routed pointer/private Runtime route foundation：私有
 `tina_platform_glfw` 已能创建 `GLFW_NO_API` 窗口，
 并把键盘、Pointer、Focus、resize、close 与已提交 UTF-8 文本归一化到同一份有界
 `PlatformFrameView`；Runtime 通过 generation `WindowSurfaceId`、无原生句柄的
@@ -41,9 +41,14 @@ owner-thread 立即 reset、off-thread 有界 deferred reset、Capture→Target�
 stopImmediatePropagation、consumeInputTransition、路由中 add/reset/destroy 安全失效，以及 route/commit
 reentrancy guard。`UIContext` 的 mutation、route 与销毁仍只允许 owner thread，且不能在 route callback
 或 callback cleanup 内销毁。
-当前仍没有 Runtime input producer、持久 Pointer Capture、Focus/Modal、Button 默认行为、paint snapshot/
-DisplayList、dirty subtree pruning 或 nested clip。
-production Gamepad、Windows IMM32 composition、Scene、DisplayList、文本/Widget、
+C1c-b3b 已实现有界 private producer；C1c-b3c 让 `EngineHost` 在第一次看到 primary `WindowId` 时
+lazy bind 一个私有 `UIContext`，在 Platform event dispatch 之后、`ActionMapper` 之前执行路由，窗口身份
+消失或 generation 更换时结构化失败，并在 Render → Task → Platform → Clock 模块关闭前先销毁 Context。独立
+`tina_runtime_ui_tests` 由 producer 12项与 owner 8项组成。该切片没有扩大 Game SDK：游戏仍不能创建
+UI root/Widget，Runtime 尚不提交 UI layout、不生成 DisplayList，因此当前空 Context 的 consumption 与
+claims 都是 canonical `None`，也没有可见 UI。
+当前仍没有持久 Pointer Capture、Focus/Modal、Button 默认行为、paint snapshot/DisplayList、
+dirty subtree pruning 或 nested clip。production Gamepad、Windows IMM32 composition、Scene、文本/Widget、
 Pass Scheduler、submission ticket/drain 与可见中文 UI 分别放在后续切片。
 
 ## 当前 Legacy 已完成基线
@@ -62,15 +67,38 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 ## 构建
 
-目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过当前 vNext Debug/Release 直接门禁：基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12；前序门禁另通过 GLFW专项23/23、bgfx专项11/11、Null样例300帧、WindowSurface GLFW样例1800帧，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 默认300帧。Legacy ON 图已把旧测试隔离为 `tina_legacy_tests`，Debug/Release 均为 vNext 185/185 + Legacy 43/43。`TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。
+目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求
+`cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、
+MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过当前 b3c vNext Debug/Release
+Null 门禁：基础187/187、独立 UI 75/75、独立 Runtime→UI 20/20、Null样例300帧。同一 b3c bgfx 图的
+Debug/Release 也通过基础187/187、Runtime→UI 20/20、GLFW专项23/23、bgfx专项11/11，以及真实
+D3D11 Intel Iris Xe 的 `tina_sample_desktop` 300帧；Release 输出 clean status ok。前序 WindowSurface
+GLFW样例1800帧仍作为历史证据。Legacy ON 图的前序隔离门禁为 vNext 185/185 + Legacy 43/43。
+`TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与
+公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。
 
-Linux M7-B1 Platform 门禁覆盖 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer，以及 GCC 13/Clang 22 X11/Wayland 双后端；Wayland 使用带 `wl_seat` 的嵌套 Weston 9。独立 `tina_ui_tests` 在 GCC 13.4 为75/75，在 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 下也为75/75且无 sanitizer 诊断；初次 GCC 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。M7-B2 Desktop/bgfx X11 图也已直接运行：GCC 13.4 与 Clang 22.1.8 + ASan/UBSan/LSan 均通过基础183/183、GLFW专项22/22、bgfx专项11/11和 Desktop样例300帧。Clang 基础/bgfx测试不使用 suppression；X11 只对第三方 libX11 `_XimOpenIM` retention 使用精确 suppression，GLFW专项命中12次/4896 B、Desktop样例命中1次/408 B。Clang Desktop 经 bgfx 选择 Vulkan，但当前 WSL2 适配器是 llvmpipe 软件实现，因此该结果证明 Linux Vulkan/backend 生命周期，不代表硬件 GPU 性能。由 vcpkg 提供的 GLFW 本身未被 sanitizer 插桩。详细边界见[测试文档](docs/testing.md)。Clang preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22.04 自带的旧 libstdc++。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
+当前 b3c Linux Null 门禁中，GCC 13.4 通过基础187/187、`tina_ui_tests` 75/75、
+`tina_runtime_ui_tests` 20/20与Null样例300帧；Clang 22.1.8 + libstdc++15.2 在
+ASan/UBSan/LSan 下通过相同187/75/20与Null样例300帧，且无 sanitizer 诊断。前序 M7-B1 Platform
+门禁覆盖 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer，以及 GCC 13/Clang 22 X11/Wayland 双后端；
+Wayland 使用带 `wl_seat` 的嵌套 Weston 9。初次 GCC 暴露的 routed-pointer callback `requires`
+名称可见性问题已修复。前序 M7-B2 Desktop/bgfx X11 图也已直接运行：GCC 13.4 与 Clang 22.1.8 +
+ASan/UBSan/LSan 均通过基础183/183、GLFW专项22/22、bgfx专项11/11和 Desktop样例300帧。Clang
+基础/bgfx测试不使用 suppression；X11 只对第三方 libX11 `_XimOpenIM` retention 使用精确 suppression，
+GLFW专项命中12次/4896 B、Desktop样例命中1次/408 B。Clang Desktop 经 bgfx 选择 Vulkan，但当前
+WSL2 适配器是 llvmpipe 软件实现，因此该结果证明 Linux Vulkan/backend 生命周期，不代表硬件 GPU
+性能。由 vcpkg 提供的 GLFW 本身未被 sanitizer 插桩。详细边界见[测试文档](docs/testing.md)。Clang
+preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22.04 自带的旧 libstdc++。先确认
+终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
 
 ```powershell
 cmake --version
 cmake --preset windows-msvc-vnext
-cmake --build --preset windows-vnext-debug --target tina_tests
+cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_sample_null
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe
+out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe
+out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe
+out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 
 # 可选 GLFW + NullRender 平台切片
 cmake --preset windows-msvc-vnext-platform
@@ -81,7 +109,8 @@ out\build\windows-msvc-vnext-platform\bin\Debug\tina_sample_platform.exe --frame
 
 # 可选 Desktop bootstrap + 真实 bgfx clear-only GPU 冒烟
 cmake --preset windows-msvc-vnext-bgfx
-cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_platform_glfw_tests tina_render_bgfx_tests tina_sample_desktop
+cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_runtime_ui_tests tina_platform_glfw_tests tina_render_bgfx_tests tina_sample_desktop
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_runtime_ui_tests.exe
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_desktop.exe
 

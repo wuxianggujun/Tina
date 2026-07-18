@@ -4,8 +4,10 @@
 > Surface handoff，以及 M7-B2 私有 bgfx clear-only device、Desktop bootstrap 和300帧 backend
 > 冒烟已落地；M7-C1b/C1c-a/C1c-b1/C1c-b2 C++23 standalone `tina_ui` tree/layout/committed-hit/
 > point-query/synthetic routed-pointer foundation 已落地；M7-C1c-b3b Runtime-private
-> `UIInputRouteProducer` 与独立测试 target 已落地，但 `EngineHost` 仍传 canonical `None` 且未拥有/选择
-> `UIContext`。完整状态栈、worker、Scene/Asset/Audio、Runtime-integrated UI pipeline、production Gamepad、完整 DPI 与
+> `UIInputRouteProducer` 与独立测试 target 已落地；M7-C1c-b3c 已让 `EngineHost` 私有延迟绑定
+> primary-window `UIContext`，并将 producer 输出接入 ActionMapper。Game SDK 仍无 UI root/updater，
+> claims 仍为 canonical `None`。完整状态栈、worker、Scene/Asset/Audio、可见 UI pipeline、
+> production Gamepad、完整 DPI 与
 > Windows IMM32 仍是后续契约。
 
 ## 公开类型命名规则
@@ -146,8 +148,9 @@ public:
 
 - `createInitialState` 每次 `run()` 只调用一次；返回恰好一个 initial State；
 - M6-A 在 initial State `onEnter` 成功并采样 `initialPolicy()` 后 commit；创建或 enter 失败自动
-  回滚，不调用 candidate `onExit` 或 Application `onShutdown`；首份 UI layout/snapshot 将在 UI
-  切片加入后纳入同一启动事务；
+  回滚，不调用 candidate `onExit` 或 Application `onShutdown`；M7-C1c-b3c 的 Runtime-private
+  primary-window Context 在首个有效 Platform frame 延迟绑定，但 Game State 仍不能创建 root，首份
+  UI layout/snapshot 尚未纳入启动事务；
 - commit 后无论正常退出还是帧错误，当前 State `onExit` 后调用一次 `onShutdown`；完整状态栈
   加入后扩展为所有 committed State 按规定顺序退出；
 - 它没有 fixed/update/render/UI 回调；
@@ -363,9 +366,10 @@ Focus lost、设备断开和 `InputStreamReset` 取消 transient edge、repeat�
 `suppressedUntilRelease`；Simulation latch 插入 reset marker 并保留最终 action state。它们
 都不伪造会激活按钮的普通 Up。
 
-上述是已接受的数据流。M7-C1c-b3b 已实现可独立调用的 Runtime-private producer，但尚未接入
-`EngineHost`；正式 run path 仍为当前 frame 构造两份 canonical `None` view。`EngineHost` 也尚未拥有或
-选择 `UIContext`，因此不能把 producer target 存在解释成 Runtime-integrated UI pipeline 已完成。
+M7-C1c-b3c 已按上述顺序接入正式 run path：同步 `PlatformEventDispatcher` 完成后，Runtime-private
+owner 选择 primary-window Context，producer 使用上一份 committed hit snapshot 路由，再把 consumption/
+claims 交给 ActionMapper。Headless bind 前选择结果为 `nullptr`，当前无 Game SDK root 的 Context 也不会
+消费输入；这不是可见 UI pipeline、Widget 或 DisplayList 已完成的证据。
 
 M7-A 的 Pointer snapshot、Pointer Button/Move/Wheel transition 与 pointer binding 只接受
 `PrimaryPointerId`（0），多 Pointer 是后续契约。M7-C1c-b3a 已让 Button/Wheel transition 携带
@@ -383,8 +387,8 @@ M7-A 的 Action Mapper 由 Runtime 拥有；`EngineConfig::inputActions.digitalB
 首批只有 priority=0 的 Engine default Input Context。raw/text/platform-event 容量由
 `platformFrameCapacities` 唯一配置；Simulation/Frame action/binding 容量由
 `inputActions.capacities` 配置；订阅 slot 由 `platformEventSubscriptions` 配置。M7-C1c-b3b private
-producer 尚未接入 `EngineHost`，claims 恒为 `None`；内部 continuous claim 上限固定为64且不属于
-game-facing Action Map 配置。批次另有不可被普通项
+producer 已由 M7-C1c-b3c 接入 `EngineHost`，但 claims 仍恒为 `None`；内部 continuous claim 上限
+固定为64且不属于 game-facing Action Map 配置。批次另有不可被普通项
 占用的 reset slot，运行期不得扩容。
 
 0 fixed-step 帧不把 Down→Up 压成布尔值；Runtime 保存有界、有序
@@ -476,7 +480,8 @@ public:
 `UICommittedLayoutView` 是 owner-thread borrowed view，携带对应 structure/layout revision；在
 下一次成功发布新 layout 或 `UIContext` 析构后失效。它只发布 logical local/world rect、effective
 clip、effective visibility 与稳定 ordinal，不是跨线程、跨 commit 的 owning snapshot，也不证明
-EngineHost UIContext/producer 集成、PaintCache/DisplayList、text/glyph、Widget 或 default action 已实现。
+Game SDK root/update capability、phase-driven layout commit、PaintCache/DisplayList、text/glyph、Widget
+或 default action 已实现。
 当前 `effectiveClip` 仅表示 `viewport ∩ worldRect`；祖先 clip policy 与 hit/paint clip chain 尚未实现。
 
 `UICommittedHitView` 同样是 owner-thread borrowed 双缓冲 view。它保存所有 effective-visible
@@ -501,7 +506,7 @@ Button interaction、paint snapshot/DisplayList、dirty subtree pruning、nested
 `UIContext` 的 mutation、route 与销毁只允许 owner thread；route callback/callback cleanup 内销毁或
 非 owner-thread 销毁会触发生命周期硬门禁，而不是继续执行潜在 UAF。
 
-### M7-C1c-b3b Runtime-private route-result producer
+### M7-C1c-b3b/b3c Runtime-private route producer 与 primary-window owner
 
 `UIInputRouteProducer` 是 `tina_runtime` 私有实现，不进入 Game SDK 或普通 Module public header。它只接受
 同一 primary Window 的 Pointer Move/Button/Wheel，按 raw transition ordinal 调用 `routePointerInput()`；
@@ -514,7 +519,19 @@ count 不增长。失败测试先让 root Move listener 产生1次 side effect�
 path capacity 失败：staging view 不发布、旧 published view 保持，但 attempted frame/sequence watermark
 已推进；同一 frame retry 被拒且 callback 仍为1，明确证明 side effect 不回滚也不重放。独立
 `tina_runtime_ui_tests` 直接运行 GoogleTest，不使用 CTest，并与 Legacy UI 所在的
-`tina_legacy_tests` 分离。当前 `EngineHost` 仍传 canonical `None`，未拥有/选择 `UIContext`。
+`tina_legacy_tests` 分离。
+
+M7-C1c-b3c 没有增加 Game SDK public type。`EngineHost` 内部的 primary-window owner 在首次有效
+`WindowId` 出现时创建并绑定一个 `UIContext`，相同 owner/index/generation 持续复用；绑定后的窗口
+消失或 replacement generation 是 `LifecycleInvariantViolation`，终止本次 run 而不迁移 retained state。
+最小化、logical/framebuffer metrics 与 content scale 变化只更新窗口事实，不重绑 Context。Headless
+frame 在首次绑定前返回 `nullptr`。Context 在 Render → Task → Platform → Clock modules 前 shutdown，owner
+shutdown 幂等且保持 owner-thread 契约。
+
+owner 只负责 identity/lifetime，不调用 `commitLayout()`，因此 input route 绝不会隐式布局。正式帧顺序为
+Platform lifecycle dispatch → owner selection → producer route(previous committed hit snapshot) →
+ActionMapper。当前 producer 仍只有 Move/Button/Wheel raw ordinal consumption，claims 为 canonical
+`None`；Game SDK 尚无 `UIContext`/root 访问，因而不能创建可见 Widget。
 
 ## EngineConfig
 
@@ -659,11 +676,12 @@ M6-A/M7-A Headless 内核与首个 GLFW adapter 已验证：
 后续验收：`tina_game_api_consumer`/Game SDK umbrella、正式 SDK/install package、完整
 forbidden-token/dependency-closure、production Gamepad、完整 DPI/Windows IMM32，以及只使用
 Game SDK 运行 UI/2D/3D 产品样例。`Desktop::CreateEngine` 和 clear-only bgfx smoke 已实现，但不代表
-正式 SDK、完整 Render pass、EngineHost UIContext 集成或产品样例已完成。M7-C1b/C1c-a/C1c-b1/C1c-b2 已覆盖50,000节点
+正式 SDK、完整 Render pass、Game SDK UI root/update 接入、可见 UI 或产品样例已完成。M7-C1b/C1c-a/C1c-b1/C1c-b2 已覆盖50,000节点
 非递归 layout/hit snapshot、连续300次无变化 commit 的0 layout pass/0新增 UI PMR allocation，以及
 15项 committed hit snapshot、5项 point query 与16项 synthetic route 门禁；独立 `tina_ui_tests` 共75/75。
 Windows MSVC 19.50 Debug/Release、Linux GCC 13.4、Linux Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均已
 通过 UI 75/75，且 Clang 无 sanitizer 诊断；初次 GCC 暴露的 `requires` 名称可见性问题已修复，二次
 GCC/Clang 构建无 warning。它尚未覆盖 dirty subtree pruning、Focus/Capture/Modal、Button、paint snapshot/
-DisplayList、nested clip、文本/Glyph Atlas、EngineHost 集成或可见 Widget。M7-C1c-b3b 的独立 producer
-target 只补齐 Move/Button/Wheel→consumption 的私有桥，不扩大这些结论。
+DisplayList、nested clip、文本/Glyph Atlas、Game SDK root/update 或可见 Widget。M7-C1c-b3b 的 producer
+只补齐 Move/Button/Wheel→consumption 私有桥，M7-C1c-b3c 只补齐 primary-window Context 生命周期与
+EngineHost 顺序接线，均不扩大这些结论。

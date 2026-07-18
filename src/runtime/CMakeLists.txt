@@ -23,6 +23,8 @@ add_library(tina_runtime STATIC
     input/SimulationActionLatch.hpp
     input/UIInputRouteProducer.cpp
     input/UIInputRouteProducer.hpp
+    ui/PrimaryWindowUIContextOwner.cpp
+    ui/PrimaryWindowUIContextOwner.hpp
 )
 add_library(Tina::Runtime ALIAS tina_runtime)
 

@@ -51,7 +51,8 @@ out\build\windows-msvc\bin\Debug\tina_legacy_tests.exe
 ## Windows vNext 最小构建
 
 该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A/M7-B1 与
-M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b 的 `tina_core`、`tina_platform`、`tina_task`、`tina_render`、`tina_runtime`、`tina_ui`、
+M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c 的 `tina_core`、`tina_platform`、
+`tina_task`、`tina_render`、`tina_runtime`、`tina_ui`、
 直接 GoogleTest 门禁与 Null 样例：
 
 ```powershell
@@ -91,9 +92,9 @@ add/reset/destroy 安全失效、off-thread deferred reset、route/commit reentr
 销毁 death test、300次 route 零新增 supplied UI PMR allocation 与递归 route 拒绝。它们不证明持久
 Pointer Capture、Focus/Modal、Button default action、Widget、DisplayList 或 Runtime/Render 集成已完成。
 
-## Windows vNext Runtime→UI route-result producer
+## Windows vNext Runtime→UI producer 与 primary-window owner
 
-M7-C1c-b3b 使用独立 `tina_runtime_ui_tests`，避免把 vNext `UIContext` 与 Legacy ON 图中的不兼容
+M7-C1c-b3b/b3c 使用独立 `tina_runtime_ui_tests`，避免把 vNext `UIContext` 与 Legacy ON 图中的不兼容
 `Tina::UI` 定义放进同一最终二进制：
 
 ```powershell
@@ -105,12 +106,19 @@ cmake --build --preset windows-vnext-release --target tina_runtime_ui_tests
 out\build\windows-msvc-vnext\bin\Release\tina_runtime_ui_tests.exe --gtest_color=yes
 ```
 
-当前 Windows MSVC 19.50 / CMake 4.2.3 Debug/Release 均12/12。该 target 验证 private producer 只路由
+当前 Windows MSVC 19.50 / CMake 4.2.3 Debug/Release 均20/20。其中12项 producer 用例验证只路由
 Move/Button/Wheel，reset/cancel/非 Pointer 保留 raw ordinal hole、claims 恒为 canonical `None`，以及双预分配
 PMR bitset 在300帧共用 supplied PMR 时 allocation count 不增长。注入的 `memory_resource` 必须比 producer
 活得更久。失败用例先产生1次 listener side effect，后续 route path capacity 失败；旧 published view 保持，
-attempted watermark 推进，同帧 retry 被拒且 callback 仍为1。它不使用 CTest，也不证明 `EngineHost` 已拥有/
-选择 `UIContext` 或已把 producer 接入正式 run path；当前正式路径仍传 canonical `None`。
+attempted watermark 推进，同帧 retry 被拒且 callback 仍为1。
+
+另8项 owner 用例覆盖 headless lazy bind、同一 primary `WindowId` 复用、绑定后窗口消失或 generation
+替换失败、metrics/content scale/minimize 变化不重绑、幂等 shutdown/停止后拒绝、错线程拒绝，以及 PMR allocation
+失败不发布 binding 并可重试。C1c-b3c 的正式 `EngineHost` 已在 Platform event dispatch 之后、
+`ActionMapper` 之前选择该 Context 并调用 producer；Context 在 Render → Task → Platform → Clock 模块关闭前销毁。当前
+Game SDK 尚不能创建 UI root/Widget，Runtime 也不提交 UI layout 或生成 DisplayList，因此正式样例中的
+空 Context 仍输出 canonical `None` consumption，producer 的 claims 也仍为 `None`。该 target 直接运行
+GoogleTest，不使用 CTest；这项接线不证明可见 UI 或 UI Render 已完成。
 
 ## Windows vNext GLFW Platform 与 Desktop bgfx
 
@@ -131,8 +139,9 @@ out\build\windows-msvc-vnext-platform\bin\Debug\tina_sample_platform.exe `
 
 cmake --preset windows-msvc-vnext-bgfx
 cmake --build --preset windows-vnext-bgfx-debug `
-  --target tina_tests tina_platform_glfw_tests tina_render_bgfx_tests tina_sample_desktop
+  --target tina_tests tina_runtime_ui_tests tina_platform_glfw_tests tina_render_bgfx_tests tina_sample_desktop
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_platform_glfw_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_desktop.exe
@@ -149,8 +158,9 @@ out\build\windows-msvc-vnext-platform\bin\Release\tina_sample_platform.exe `
   --frames=300 --frame-delay-ms=0
 
 cmake --build --preset windows-vnext-bgfx-release `
-  --target tina_tests tina_platform_glfw_tests tina_render_bgfx_tests tina_sample_desktop
+  --target tina_tests tina_runtime_ui_tests tina_platform_glfw_tests tina_render_bgfx_tests tina_sample_desktop
 out\build\windows-msvc-vnext-bgfx\bin\Release\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Release\tina_runtime_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Release\tina_platform_glfw_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Release\tina_render_bgfx_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
@@ -158,11 +168,12 @@ out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
 
 Windows 构建会把 GLFW runtime DLL 复制到对应 `bin/<Config>`。样例不带参数时以16 ms 的演示延迟
 显示1800帧；自动门禁必须显式使用 `--frame-delay-ms=0`，这条 sleep 路径不属于 benchmark。
-最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3；本次 C1c-b3b
-Debug 和 Release 均直接通过基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12。上一 C1c-b3a
-门禁通过 GLFW专项23/23和 WindowSurface GLFW样例1800帧；更早门禁通过 bgfx专项11/11、
-Null样例300帧、WindowSurface GLFW样例300帧，以及真实 D3D11 Intel Iris Xe 的
-`tina_sample_desktop` 默认300帧。`TINA_BUILD_TESTING=OFF` 的 production-style GLFW样例300帧
+最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3；本次 C1c-b3c
+Debug 和 Release 均直接通过基础187/187、独立 UI 75/75、独立 Runtime→UI 20/20与Null样例300帧。
+同一 b3c bgfx 图的 Debug/Release 也直接通过基础187/187、独立 Runtime→UI 20/20、GLFW专项23/23、
+bgfx专项11/11，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 300帧；Release 输出
+`clean status ok`。上一 C1c-b3a 门禁的 WindowSurface GLFW样例1800帧仍作为历史证据。
+`TINA_BUILD_TESTING=OFF` 的 production-style GLFW样例300帧
 同样属于早期门禁，用来证明测试 target 关闭后样例仍能运行。
 当前 Desktop smoke 只证明 clear-only bgfx surface 创建、提交和关闭链路通过，不代表
 Scene/UI/Pass Scheduler/submission ticket 已完成，也不宣称 resize、最小化、恢复的真实自动化通过。
@@ -175,8 +186,11 @@ MSBuild 进程并发驱动同一生成图；配置输出目录虽然隔离，共
 
 ```powershell
 cmake --preset windows-msvc-vnext
-cmake --build --preset windows-vnext-release --target tina_tests tina_sample_null
+cmake --build --preset windows-vnext-release `
+  --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_sample_null
 out\build\windows-msvc-vnext\bin\Release\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Release\tina_runtime_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_sample_null.exe --frames=300
 ```
 
@@ -208,10 +222,12 @@ cmake --build --preset linux-debug --target Tina tina_tests tina_legacy_tests
 
 ```bash
 cmake --preset linux-gcc13-vnext
-cmake --build --preset linux-gcc13-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests
+cmake --build --preset linux-gcc13-vnext-debug \
+  --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_sample_null
 ./out/build/linux-gcc13-vnext/bin/tina_tests --gtest_color=no
 ./out/build/linux-gcc13-vnext/bin/tina_ui_tests --gtest_color=no
 ./out/build/linux-gcc13-vnext/bin/tina_runtime_ui_tests --gtest_color=no
+./out/build/linux-gcc13-vnext/bin/tina_sample_null --frames=300
 ```
 
 Clang 22 + libstdc++15 的普通与 Sanitizer 门禁使用独立目录。主机需同时提供 `clang-22`、
@@ -238,13 +254,17 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 LSAN_OPTIONS=exitcode=23 \
 ./out/build/linux-clang22-vnext-sanitize/bin/tina_runtime_ui_tests --gtest_color=no
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+LSAN_OPTIONS=exitcode=23 \
+./out/build/linux-clang22-vnext-sanitize/bin/tina_sample_null --frames=300
 ```
 
 这些输出不包含 Legacy 产品、窗口、真实渲染后端或 cooked shader，只用于 Headless 生命周期验证，
-不能作为游戏产品或发布包。GCC 13.4 已通过基础 `tina_tests` 185/185、`tina_ui_tests`
-75/75 与 `tina_runtime_ui_tests` 12/12；Clang 22.1.8 + libstdc++15.2 在 ASan/UBSan/LSan
-下通过相同的185/185、75/75与12/12，且无 sanitizer 诊断。当前 producer 切片的 GCC 重编译
-也无 warning。但仍不能用 Ubuntu 22.04 的旧工具链降级冒充正式结果。
+不能作为游戏产品或发布包。GCC 13.4 已通过基础 `tina_tests` 187/187、`tina_ui_tests`
+75/75、`tina_runtime_ui_tests` 20/20与Null样例300帧；Clang 22.1.8 + libstdc++15.2 在
+ASan/UBSan/LSan 下通过相同的187/187、75/75、20/20与Null样例300帧，且无 sanitizer 诊断。
+但仍不能用 Ubuntu 22.04 的旧工具链降级冒充正式结果。
 
 ## Linux vNext GLFW Platform
 
@@ -282,7 +302,7 @@ xvfb-run -a ./out/build/linux-clang22-vnext-platform-sanitize/bin/tina_sample_pl
 `cmake/sanitizers/lsan-x11.supp` 中唯一的 `_XimOpenIM` 精确规则；它对应 Ubuntu 22.04 libX11
 关闭 XIM 后保留的 allocation（专项测试12次4896 B，样例1次408 B），不能扩展为宽泛 suppression。
 
-以下是当前 M7-B1 Linux 运行门禁。GCC 13.4 X11 已通过基础测试183/183、GLFW专项22/22、
+以下是前序 M7-B1 Linux 运行门禁。GCC 13.4 X11 已通过基础测试183/183、GLFW专项22/22、
 Null样例300帧与GLFW样例300帧。Clang 22.1.8 X11 的 ASan/UBSan/LSan 图已通过基础测试
 183/183（无 suppression）、GLFW专项22/22、Null样例300帧与GLFW样例300帧；其中
 `_XimOpenIM` 精确 suppression 仅在 X11 专项测试命中12次/4896 B、GLFW样例命中1次/408 B。

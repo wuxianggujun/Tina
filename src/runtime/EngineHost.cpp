@@ -7,9 +7,10 @@
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/runtime/spi/PlatformEventDispatcher.hpp>
 #include <tina/task/TaskSystem.hpp>
-#include <tina/ui/InputRouting.hpp>
 
 #include "input/ActionMapper.hpp"
+#include "input/UIInputRouteProducer.hpp"
+#include "ui/PrimaryWindowUIContextOwner.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -349,8 +350,7 @@ validateWindowSurfaceSnapshotForFrame(const Integration::WindowSurfaceSnapshot& 
                              "WindowSurface facts changed without a new source metrics revision");
     }
 
-    const bool canAdvanceSurfaceRevision =
-        previous->surfaceRevision != (std::numeric_limits<u64>::max)();
+    const bool canAdvanceSurfaceRevision = previous->surfaceRevision != (std::numeric_limits<u64>::max)();
     const bool surfaceRevisionAdvancedExactlyOnce =
         canAdvanceSurfaceRevision && snapshot.surfaceRevision == previous->surfaceRevision + 1;
     if ((surfaceFactsChanged && !surfaceRevisionAdvancedExactlyOnce) ||
@@ -446,12 +446,14 @@ class EngineHostImplementation final {
   public:
     EngineHostImplementation(EngineConfig config, Core::FixedStepAccumulator fixedStepAccumulator,
                              PlatformEventDispatcher platformEventDispatcher,
-                             std::unique_ptr<Runtime::Input::ActionMapper> actionMapper, EngineModules modules,
+                             std::unique_ptr<Runtime::Input::ActionMapper> actionMapper,
+                             std::unique_ptr<Runtime::Input::UIInputRouteProducer> uiInputRouteProducer,
+                             EngineModules modules,
                              std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface) noexcept
         : m_config(std::move(config)), m_fixedStepAccumulator(std::move(fixedStepAccumulator)),
           m_platformEventDispatcher(std::move(platformEventDispatcher)), m_actionMapper(std::move(actionMapper)),
-          m_modules(std::move(modules)), m_ownerThread(std::this_thread::get_id()),
-          m_lastWindowSurface(std::move(initialWindowSurface))
+          m_uiInputRouteProducer(std::move(uiInputRouteProducer)), m_modules(std::move(modules)),
+          m_ownerThread(std::this_thread::get_id()), m_lastWindowSurface(std::move(initialWindowSurface))
     {
     }
 
@@ -464,11 +466,13 @@ class EngineHostImplementation final {
         if (m_lifecycleState == LifecycleState::Ready)
         {
             m_lifecycleState = LifecycleState::Stopping;
+            m_primaryWindowUi.shutdown();
             m_platformEventDispatcher.shutdown();
             m_modules.shutdown();
             m_lifecycleState = LifecycleState::Stopped;
         } else
         {
+            m_primaryWindowUi.shutdown();
             m_modules.shutdown();
         }
     }
@@ -658,15 +662,23 @@ class EngineHostImplementation final {
                 return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
             }
 
-            // M7-A establishes the routing seam. M7-C will replace these empty
-            // values with the retained UI route result before gameplay mapping.
-            const UI::InputTransitionConsumptionView consumption =
-                UI::InputTransitionConsumptionView::None(
-                    platformFrame->id(), platformFrame->inputTransitions().size());
-            const UI::ContinuousControlClaimsView claims =
-                UI::ContinuousControlClaimsView::None(platformFrame->id());
-            if (auto mappingStatus =
-                    m_actionMapper->mapFrame(*platformFrame, consumption, claims, frameIndex, simulationTick);
+            auto uiContextResult = m_primaryWindowUi.selectForFrame(*platformFrame);
+            if (!uiContextResult)
+            {
+                auto error = std::move(uiContextResult.error());
+                error.addContext("PrimaryWindowUIContextOwner::selectForFrame");
+                return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
+            }
+
+            auto uiRouteResult = m_uiInputRouteProducer->produce(*uiContextResult, *platformFrame);
+            if (!uiRouteResult)
+            {
+                auto error = std::move(uiRouteResult.error());
+                error.addContext("UIInputRouteProducer::produce");
+                return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
+            }
+            if (auto mappingStatus = m_actionMapper->mapFrame(*platformFrame, uiRouteResult->consumption,
+                                                              uiRouteResult->claims, frameIndex, simulationTick);
                 !mappingStatus)
             {
                 auto error = std::move(mappingStatus.error());
@@ -816,6 +828,7 @@ class EngineHostImplementation final {
     {
         error.addContext("EngineHost::run", "startup transaction was rolled back");
         m_lifecycleState = LifecycleState::Stopping;
+        m_primaryWindowUi.shutdown();
         m_platformEventDispatcher.shutdown();
         m_modules.shutdown();
         m_lifecycleState = LifecycleState::Failed;
@@ -852,6 +865,7 @@ class EngineHostImplementation final {
 
         GameShutdownContext shutdownContext{stopCause, runtimeFailure};
         gameApplication.onShutdown(shutdownContext);
+        m_primaryWindowUi.shutdown();
         m_platformEventDispatcher.shutdown();
         m_modules.shutdown();
     }
@@ -860,7 +874,9 @@ class EngineHostImplementation final {
     Core::FixedStepAccumulator m_fixedStepAccumulator;
     PlatformEventDispatcher m_platformEventDispatcher;
     std::unique_ptr<Runtime::Input::ActionMapper> m_actionMapper;
+    std::unique_ptr<Runtime::Input::UIInputRouteProducer> m_uiInputRouteProducer;
     EngineModules m_modules;
+    Runtime::Detail::PrimaryWindowUIContextOwner m_primaryWindowUi;
     std::thread::id m_ownerThread;
     std::unique_ptr<IGameState> m_gameState;
     [[maybe_unused]] GameStatePolicy m_committedPolicy{};
@@ -943,6 +959,15 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         {
             auto error = std::move(actionMapperResult.error());
             error.addContext("EngineHost::Create", "ActionMapper construction");
+            return Core::failure(std::move(error));
+        }
+
+        auto uiInputRouteProducerResult =
+            Runtime::Input::UIInputRouteProducer::Create(ownedConfig.platformFrameCapacities.inputTransitionCapacity);
+        if (!uiInputRouteProducerResult)
+        {
+            auto error = std::move(uiInputRouteProducerResult.error());
+            error.addContext("EngineHost::Create", "UIInputRouteProducer construction");
             return Core::failure(std::move(error));
         }
 
@@ -1097,7 +1122,8 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
 
         auto implementation = std::make_unique<Detail::EngineHostImplementation>(
             std::move(ownedConfig), std::move(*accumulatorResult), std::move(*platformEventDispatcherResult),
-            std::move(*actionMapperResult), std::move(modules), std::move(initialWindowSurface));
+            std::move(*actionMapperResult), std::move(*uiInputRouteProducerResult), std::move(modules),
+            std::move(initialWindowSurface));
         return std::unique_ptr<EngineHost>(new EngineHost(std::move(implementation)));
     } catch (const std::bad_alloc&)
     {

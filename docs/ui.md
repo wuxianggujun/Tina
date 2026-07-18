@@ -6,8 +6,10 @@
 > visited count；M7-C1c-b2 已完成 synthetic routed pointer event：generation-safe RAII listener token、
 > 固定容量 route path/listener storage、48-byte fixed-inline `noexcept` callback、Capture→Target→Bubble、
 > stop/consume、路由中 mutation-safe invalidation 和 route/commit reentrancy guard。M7-C1c-b3b 已完成
-> Runtime-private `UIInputRouteProducer` 与独立 `tina_runtime_ui_tests`，但 `EngineHost` 仍传 canonical
-> `None` 且未拥有/选择 `UIContext`。持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、
+> Runtime-private `UIInputRouteProducer`；M7-C1c-b3c 已让 `EngineHost` 私有地延迟创建/选择主窗口
+> `UIContext`，并按 Platform lifecycle dispatch → UI route → ActionMapper 接入正式帧路径。
+> Game SDK 仍不能创建 UI root，producer 的 claims 仍为 canonical `None`。持久 Pointer Capture、
+> Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、
 > dirty subtree pruning、文本/Glyph Atlas 与 bgfx UI pass 尚未实现。Tina UI 是游戏内 Retained UI，
 > 不是 Immediate UI，也不是桌面编辑器工具包。
 
@@ -63,8 +65,12 @@ UIContext
   Committed paint + hit-test + semantics snapshots
 ```
 
-这是冻结的最终 ownership，不是当前 `EngineHost` 已完成的能力。M7-C1c-b3b 只实现可独立调用的
-Runtime-private producer；当前正式 run path 尚无 WindowRecord→`UIContext` owner/selection。
+这是冻结的最终 ownership。M7-C1c-b3c 先实现其中的单主窗口 Runtime-private 子集：首个有效
+primary `WindowId` 延迟绑定一个 `UIContext`，后续相同 owner/index/generation 复用同一 Context；绑定后
+主窗口消失或换 generation 会以 `LifecycleInvariantViolation` 终止本次 run，不能静默迁移 retained UI。
+最小化、logical/framebuffer metrics 或 content scale 变化不会重绑。Headless frame 在首次绑定前的
+选择结果为 `nullptr`，仍可运行 Null 路径；shutdown 在 Render → Task → Platform → Clock modules 之前销毁 Context。
+当前还没有通用多窗口 `WindowRecord` UI owner。
 
 Platform/Event 只把 `PlatformFrameView` 的 UI-eligible transitions 交给 UIContext，不拥有节点、Focus、Capture 或 Layout。
 `IGameState` 持有 move-only `UIRootOwner` 和非 owning `UINodeId`，不持有 UIContext、Renderer、
@@ -117,7 +123,8 @@ struct ContinuousControlClaimsView;
 `UINodeId.ownerWindow + generation`，Debug 额外携带 Engine/registry cookie 改善诊断；热点遍历在
 一次校验后只使用 UIContext 内部的紧凑 slot index。generation 回绕的 slot 永久 retire。
 
-目标 Game SDK 伪代码（当前尚不可编译，Widget 与 EngineHost UIContext/producer 集成尚未实现）：
+目标 Game SDK 伪代码（当前尚不可编译：Game SDK 尚未获得 root builder/updater，Widget 行为也未实现；
+Runtime-private `UIContext` owner/producer 接线不等于这些 public capability 已存在）：
 
 ```cpp
 class SettingsState final : public Tina::IGameState {
@@ -354,11 +361,17 @@ layout revision。虚拟列表只创建 visible + overscan item；100,000 行不
 
 ## 输入、路由与默认行为
 
-本节分为已实现的 C1c-b2 synthetic route、C1c-b3b Runtime-private producer 和冻结的后续 Runtime 目标。C1c-b2 已提供 committed
+本节分为已实现的 C1c-b2 synthetic route、C1c-b3b Runtime-private producer、C1c-b3c EngineHost 接线
+和冻结的后续 Runtime 目标。C1c-b2 已提供 committed
 hit/route-ancestry snapshot、纯 point query、固定容量 listener 注册与单条 synthetic Pointer input
 的 Capture→Target→Bubble 派发；C1c-b3b 已把 Move/Button/Wheel consume 生成 frame-local consumption
-view，但 claims 恒为 `None`。尚未实现 EngineHost UIContext ownership/selection/接线、Focus/Capture/Modal、
-Button default action 或真实 continuous claim 输出。
+view，claims 恒为 `None`。C1c-b3c 已在 Runtime 内部拥有并选择 primary-window `UIContext`，每帧在
+同步 Platform lifecycle dispatch 之后、Gameplay ActionMapper 之前调用 producer。尚未实现 Game SDK
+root 访问、Focus/Capture/Modal、Button default action 或真实 continuous claim 输出。
+
+这个私有 owner 只负责 identity 与 lifetime，不调用 `commitLayout()`。输入始终读取上一份已提交
+hit snapshot；hit-test/route 不得为“方便”隐式触发布局。后续 Game SDK root/update 切片必须在明确的
+UI phase coordinator 中每窗口每帧至多调用一次 `commitLayout()`，不能把布局职责塞回 owner selection。
 
 Runtime 在每次状态命令提交后，根据 committed `GameStateStack`、`GameStatePolicy` 和 root
 registration 生成每窗口不可变 `UIInputScopeSnapshot`。它按视觉层级列出 eligible roots，并在
@@ -388,8 +401,10 @@ UI 返回只属于当前 Platform frame 的 `Tina::UI::InputTransitionConsumptio
 被 UI 消费的 digital Down 由 Action Mapper 跨帧抑制到真实 release，axis 抑制到 neutral。
 Focus lost、断连和 `InputStreamReset` 产生 `InputCancelTransition`，不伪造可激活 Button 的普通 Up。UI routed
 listener 不复用 Runtime EventBus；二者的生命周期、顺序和 payload 不同。
-当前正式 `EngineHost` 还没有调用这一 producer，仍向 ActionMapper 传 canonical `None`；独立
-`tina_runtime_ui_tests` 直接运行 GoogleTest，不通过 CTest，也不构成可交互 Widget/DisplayList 证据。
+M7-C1c-b3c 的正式 `EngineHost` 路径先选择 Context，再把 producer 的 consumption/claims 直接交给
+ActionMapper；Headless bind 前和当前无 root 的 Context 都自然得到无消费结果，不能退回由 Host 旁路构造
+两份 `None`。独立 `tina_runtime_ui_tests` 直接运行 GoogleTest，不通过 CTest；当前 Game SDK 无 root
+访问，因此该接线仍不构成可交互 Widget/DisplayList 证据。
 
 ## PaintCache、DisplayList 与批处理
 
@@ -554,8 +569,9 @@ callback、token move/context-destroyed/off-thread reset、callback root 自销�
 以及递归 route 拒绝。Windows MSVC 19.50 Debug/Release、Linux GCC 13.4、Linux Clang 22.1.8 +
 libstdc++15.2 ASan/UBSan/LSan 的完整 `tina_ui_tests` 均为75/75；Clang 无 sanitizer 诊断。初次 GCC
 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
-它尚未证明 dirty leaf 不扫描无关 subtree，也未覆盖 PaintCache、
-DisplayList、文本、Widget default action、EngineHost UIContext/producer 集成或 GPU 资源归零；这些门禁仍由后续切片补齐。
+它尚未证明 dirty leaf 不扫描无关 subtree，也未覆盖 PaintCache、DisplayList、文本、Widget default
+action、Game SDK root/update 接入、可见 UI 或 GPU 资源归零。M7-C1c-b3c 只补上 Runtime 私有
+primary-window Context 生命周期与 producer 顺序，不扩大这些门禁结论。
 
 ## 测试与实施顺序
 
@@ -583,11 +599,14 @@ DisplayList、文本、Widget default action、EngineHost UIContext/producer 集
    Capture→Target→Bubble route、stop/consume、mutation-safe invalidation 与 route/commit reentrancy guard；
 6. 已完成 M7-C1c-b3b：独立 Runtime-private Move/Button/Wheel producer、raw ordinal consumption、
    canonical `None` claims、双预分配 PMR 与失败不可重放门禁；
-7. 由 EngineHost 拥有/选择 `UIContext`，接入 producer 并实现真实 claims；
-8. 让 dirty leaf 跳过无关 subtree，并输出后端无关 DisplayList；
-9. 完成 PaintCache/text layout + glyph atlas；
-10. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
-11. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
-12. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
+7. 已完成 M7-C1c-b3c：EngineHost 私有 primary-window `UIContext` 延迟绑定/同 generation 复用、
+   生命周期门禁、modules 前销毁，以及 Platform lifecycle dispatch → producer → ActionMapper 接线；
+8. 向 Game SDK 提供 root builder/updater，在独立 UI phase coordinator 每窗口每帧至多一次提交布局，
+   再实现真实 claims；
+9. 让 dirty leaf 跳过无关 subtree，并输出后端无关 DisplayList；
+10. 完成 PaintCache/text layout + glyph atlas；
+11. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
+12. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
+13. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
 
 所以“完善 UI”首先是完成正确的数据和 backend 边界，然后才是增加 Widget 数量。

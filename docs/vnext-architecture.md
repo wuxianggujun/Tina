@@ -46,7 +46,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | `tina_platform` | Window/Input/Event 公共描述、Headless backend、线程命名和不透明 Render surface | `tina_core`、OS 最小适配 | GLFW 公共类型、文件/资产 IO、Scene、Renderer、UI Widget |
 | `tina_platform_glfw` | 最终承载 GLFW Window/Input/Gamepad、DPI、Windows IMM32；当前已完成 Window/Keyboard/Pointer/Focus/resize/close/committed text | core/platform、GLFW、OS API | Scene、Asset、UI Widget、bgfx 类型 |
 | `tina_task` | 有界任务队列、协作取消、后台工作与主线程 completion | `tina_core`、`tina_platform` 的线程命名能力 | Asset 类型、渲染命令、强杀线程 |
-| `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、GameStateStack、RenderFramePacket/pool；当前含 M7-C1c-b3b private UI route-result producer | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
+| `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、GameStateStack、RenderFramePacket/pool；当前含 M7-C1c-b3b/b3c private UI route-result producer、primary-window Context owner 与帧路径接线 | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
 | `tina_scene` | World、generation `EntityId`、Transform、Camera、render components 与资产解析 facade | core、asset 公共接口、render descriptors、EnTT 内部实现 | GLFW 输入、TileMap 玩法、bgfx 类型 |
 | `tina_asset` | Asset 状态机、依赖、取消、CPU completion 与 GPU upload 协议 | core/task、render 接口、asset_format | 直接解析源 glTF、具体 bgfx 调用 |
 | `tina_asset_format` | Runtime/Cooker 共享的 Cooked header、schema、类型、依赖和 hash 编解码 | core | Asset registry、窗口、GPU、源格式 parser |
@@ -244,8 +244,11 @@ flowchart TD
 vNext 不再保留第二套并列的 SceneManager 栈；旧 Scene 在迁移时转换成 IGameState，World
 只是数据世界。`UIContext` 由 Runtime WindowRecord 唯一拥有，Platform/Event 只投递输入。
 首期只有一个 primary Window/UIContext，多窗口保留 `WindowId` 扩展点但不进入验收范围。
-这是冻结的目标所有权；当前 `EngineHost` 尚未建立 WindowRecord→`UIContext` owner/selection，
-M7-C1c-b3b 的 private producer 仍只在独立测试中显式传入 Context。
+M7-C1c-b3c 已先以 Runtime-private owner 落实单窗口所有权：`EngineHost` 遇到首个 primary
+`WindowId` 时惰性创建并绑定唯一 `UIContext`，Headless 绑定前返回 null；绑定后 primary 消失或
+generation 更换会结构化失败，而 metrics/content scale/minimized 改变但 ID 不变时复用原 Context。
+Context 在 Render → Task → Platform → Clock module shutdown 前于 owner thread 销毁。后续多窗口迁移仍把该 owner 收敛为
+WindowRecord，不把 Context 暴露给 Platform/Event 或普通 Game SDK。
 
 Gameplay/UI Input、Fixed Update、Frame Update 从栈顶向下传播直到对应 committed block flag；
 Render 从最底可见层向上构建。
@@ -303,7 +306,7 @@ Platform Poll
   -> Runtime Event Queue (Gameplay/Domain/async，后续目标)
   -> Asset CPU Completion
   -> Audio Completion
-  -> UI Input Routing (上一帧已提交布局)
+  -> UI Input Routing (M7-C1c-b3c 已接入，读取上一帧已提交布局)
   -> Gameplay Action Mapping
   -> Fixed Simulation Loop (60 Hz, max 4 steps)
        for each tick:
@@ -330,6 +333,8 @@ Platform Poll
   pressed/released 布尔值代替同帧事件顺序；
 - UI 输入先于玩法 Action Mapping，消费掩码阻止同一 Pointer/Key 同时触发 UI 与玩法；UI
   使用上一帧稳定布局；每个 Pointer transition 最多 hit-test 一次，新 root 首次 layout 前不开放命中；
+- 当前 Runtime-private owner 只负责 primary identity、Context 生命周期与 producer 接线，不调用
+  `commitLayout()`；布局提交留给后续 UI model/layout phase，避免 hit-test 隐式触发布局；
 - `pressed/released` Action 只由下一个实际 fixed tick 消费一次；本帧0个 tick 时保留，4个
   tick 时也不会重复4次；held state 可供每个 tick 读取；
 - Action Map 将输入显式分为 Simulation/Frame domain：Simulation edge 只进
@@ -527,9 +532,14 @@ Runtime-private `UIInputRouteProducer`：只路由 Move/Button/Wheel，reset/can
 hole，consumption 使用双预分配 PMR bitset，claims 恒为 canonical `None`；300帧共用 supplied PMR 时
 allocation count 不增长，且该 PMR 必须长于 producer。通过 preflight 后的 route 失败不发布但推进
 attempted watermark；同帧先发生的1次 listener side effect 不可回滚，retry 被拒且不重放。独立
-`tina_runtime_ui_tests` 直接运行 GoogleTest、不使用 CTest。当前 `tina_ui` 仍只依赖 Core/Platform；
-`EngineHost` 仍传 canonical `None`，也未拥有/选择 `UIContext`。持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、dirty subtree pruning、
-FreeType 与 bgfx UI pass 仍未实现。完整目标中 UI 树输出后端无关的 Quad、Image、
+`tina_runtime_ui_tests` 直接运行 GoogleTest、不使用 CTest。M7-C1c-b3c 已让 `EngineHost` 在
+`PlatformEventDispatcher` 后惰性选择/持有首个 primary Window 的 Context，调用 producer 后再进入
+ActionMapper；Headless 绑定前为 null，同一 ID 的 metrics/content scale/minimized 变化不重绑，绑定后
+primary 消失或 generation 更换会结构化失败。Context 在 module shutdown 前于 owner thread 销毁；owner
+不调用 `commitLayout()`，route 使用上一帧 committed snapshot。当前 `tina_ui` 仍只依赖 Core/Platform，
+claims 仍为 canonical `None`；Game SDK 尚不能取得 Context 或创建 root，因此这不是可见 UI。EngineConfig
+UI capacities、Game SDK scoped UI access、持久 Pointer Capture、Focus/Modal、Button default action、paint
+snapshot/DisplayList、nested clip、dirty subtree pruning、FreeType 与 bgfx UI pass 仍未实现。完整目标中 UI 树输出后端无关的 Quad、Image、
 GlyphRange、Clip DisplayList，由 Render 层保持 paint order 批处理。
 
 布局采用一次 Measure/Arrange 的 Flex-lite；每个有序 Pointer transition 最多 hit-test 一次。
@@ -565,7 +575,8 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
    `UIContext`、`UIRootOwner` RAII、结构 snapshot 和 route-result view ABI；M7-C1b 已完成事务式
    Flex-lite layout foundation，M7-C1c-a 已完成 committed hit-snapshot 数据基础，M7-C1c-b1 已完成
    point query 与反向目标选择，M7-C1c-b2 已完成 synthetic listener route，M7-C1c-b3b 已完成独立
-   Runtime-private producer。后续继续实现 EngineHost UIContext ownership/selection 与 producer 接线、
+   Runtime-private producer，M7-C1c-b3c 已完成 primary-window `UIContext` owner/selection 与 EngineHost
+   接线。后续继续实现 EngineConfig UI capacities、Game SDK scoped UI access、真实 claims/focus/capture/widget、
    dirty subtree pruning 与 DisplayList、Label/Button/Modal + FreeType、bgfx UI pass、IMM32/Gamepad/DPI 门禁；
 5. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；
 6. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D
