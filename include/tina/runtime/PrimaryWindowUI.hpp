@@ -31,6 +31,8 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIRoutedPointerListenerToken>
+    addRoutedPointerListener(UI::UIRoutedPointerListenerDesc descriptor, UI::UIRoutedPointerCallback callback);
     [[nodiscard]] Core::Status destroy(UI::UINodeId node);
 
   private:

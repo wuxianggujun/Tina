@@ -586,7 +586,7 @@ struct UIContext::Impl final {
     usize routedPointerListenerHighWater = 0;
     u64 routedPointerListenerRegistrationSerial = 0;
     usize routeDispatchDepth = 0;
-    usize listenerCallbackCleanupDepth = 0;
+    usize listenerCallbackOperationDepth = 0;
     bool reclaimingInactiveRoutedPointerListeners = false;
 
     Impl(
@@ -1652,9 +1652,9 @@ struct UIContext::Impl final {
         listener.nextNodeListenerIndex = InvalidRoutedPointerListenerIndex;
         listener.nextFreeIndex = InvalidRoutedPointerListenerIndex;
 
-        ++listenerCallbackCleanupDepth;
-        auto cleanupDepth = Core::makeScopeExit([this]() noexcept {
-            --listenerCallbackCleanupDepth;
+        ++listenerCallbackOperationDepth;
+        auto callbackOperation = Core::makeScopeExit([this]() noexcept {
+            --listenerCallbackOperationDepth;
         });
         UIRoutedPointerCallback detachedCallback(std::move(listener.callback));
 
@@ -1666,6 +1666,7 @@ struct UIContext::Impl final {
     void reclaimInactiveRoutedPointerListeners() noexcept
     {
         if (routeDispatchDepth != 0
+            || listenerCallbackOperationDepth != 0
             || reclaimingInactiveRoutedPointerListeners) {
             return;
         }
@@ -1684,6 +1685,16 @@ struct UIContext::Impl final {
                 recycleRoutedPointerListener(listenerIndex);
             }
         }
+    }
+
+    [[nodiscard]] Core::Result<std::pair<u32, u32>>
+    rollbackRoutedPointerListenerRegistration(
+        u32 listenerIndex,
+        Core::Error error)
+    {
+        recycleRoutedPointerListener(listenerIndex);
+        reclaimInactiveRoutedPointerListeners();
+        return Core::failure(std::move(error));
     }
 
     void deactivateRoutedPointerListener(
@@ -1707,7 +1718,7 @@ struct UIContext::Impl final {
             publishRoutedPointerListenerTokenState(listenerIndex, generation, false);
         }
         if (routeDispatchDepth != 0
-            || listenerCallbackCleanupDepth != 0
+            || listenerCallbackOperationDepth != 0
             || reclaimingInactiveRoutedPointerListeners) {
             inactiveRoutedPointerListenerIndices.push_back(listenerIndex);
             return;
@@ -2740,15 +2751,27 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Result<std::pair<u32, u32>>
     addRoutedPointerListener(
         UIRoutedPointerListenerDesc descriptor,
-        UIRoutedPointerCallback callback)
+        UIRoutedPointerCallback&& callback,
+        UINodeId updaterRoot)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
             return Core::failure(ownerThread.error());
         }
         drainDeferredRootDestroys();
+        if (updaterRoot.hasValue() && !contains(updaterRoot)) {
+            return fail(
+                UIErrorCode::RootRequired,
+                "UI tree updater root is no longer alive");
+        }
         auto nodeResult = resolveNode(descriptor.node);
         if (!nodeResult) {
             return Core::failure(nodeResult.error());
+        }
+        if (updaterRoot.hasValue()
+            && !isNodeWithinRoot(updaterRoot, descriptor.node)) {
+            return fail(
+                UIErrorCode::InvalidNode,
+                "UI routed pointer listener node is not owned by the updater root");
         }
         if (!isValidRoutedPointerEventKind(descriptor.kind)
             || !isValidEventPhaseMask(descriptor.phases)
@@ -2781,11 +2804,54 @@ struct UIContext::Impl final {
         listener.node = descriptor.node;
         listener.kind = descriptor.kind;
         listener.phases = descriptor.phases;
-        listener.callback = std::move(callback);
-        listener.previousNodeListenerIndex =
-            routedPointerListenerTailByNodeIndex[descriptor.node.index()];
+        listener.previousNodeListenerIndex = InvalidRoutedPointerListenerIndex;
         listener.nextNodeListenerIndex = InvalidRoutedPointerListenerIndex;
         listener.nextFreeIndex = InvalidRoutedPointerListenerIndex;
+        listener.registrationSerial = 0;
+        listener.active = false;
+        {
+            ++listenerCallbackOperationDepth;
+            auto callbackOperation = Core::makeScopeExit([this]() noexcept {
+                --listenerCallbackOperationDepth;
+            });
+            listener.callback = std::move(callback);
+        }
+        reclaimInactiveRoutedPointerListeners();
+
+        // Moving a valid fixed-inline callable may execute user move/destructor
+        // code. Revalidate generation ownership before publishing the slot.
+        if (updaterRoot.hasValue() && !contains(updaterRoot)) {
+            return rollbackRoutedPointerListenerRegistration(
+                listenerIndex,
+                makeError(
+                    UIErrorCode::RootRequired,
+                    "UI tree updater root was released while registering a routed pointer listener"));
+        }
+        auto liveNodeResult = resolveNode(descriptor.node);
+        if (!liveNodeResult) {
+            return rollbackRoutedPointerListenerRegistration(
+                listenerIndex,
+                liveNodeResult.error());
+        }
+        if (updaterRoot.hasValue()
+            && !isNodeWithinRoot(updaterRoot, descriptor.node)) {
+            return rollbackRoutedPointerListenerRegistration(
+                listenerIndex,
+                makeError(
+                    UIErrorCode::InvalidNode,
+                    "UI routed pointer listener node left the updater root during registration"));
+        }
+        if (routedPointerListenerRegistrationSerial
+            == (std::numeric_limits<u64>::max)()) {
+            return rollbackRoutedPointerListenerRegistration(
+                listenerIndex,
+                makeError(
+                    UIErrorCode::CapacityExceeded,
+                    "UI routed pointer listener registration serial is exhausted"));
+        }
+
+        listener.previousNodeListenerIndex =
+            routedPointerListenerTailByNodeIndex[descriptor.node.index()];
         listener.registrationSerial = ++routedPointerListenerRegistrationSerial;
         listener.active = true;
 
@@ -2807,6 +2873,23 @@ struct UIContext::Impl final {
             listener.generation,
             true);
         return std::pair<u32, u32>{listenerIndex, listener.generation};
+    }
+
+    [[nodiscard]] Core::Result<std::pair<u32, u32>>
+    addRoutedPointerListenerFromUpdater(
+        UINodeId updaterRoot,
+        UIRoutedPointerListenerDesc descriptor,
+        UIRoutedPointerCallback&& callback)
+    {
+        if (!updaterRoot.hasValue()) {
+            return fail(
+                UIErrorCode::RootRequired,
+                "UI tree updater requires a live root owner");
+        }
+        return addRoutedPointerListener(
+            descriptor,
+            std::move(callback),
+            updaterRoot);
     }
 
     [[nodiscard]] Core::Status validatePointerInput(
@@ -3401,6 +3484,19 @@ Core::Status UITreeUpdater::setBoxPaint(UINodeId node, const UIBoxPaint& paint)
     return m_context->setBoxPaintFromUpdater(m_root, node, paint);
 }
 
+Core::Result<UIRoutedPointerListenerToken> UITreeUpdater::addRoutedPointerListener(
+    UIRoutedPointerListenerDesc descriptor,
+    UIRoutedPointerCallback callback)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->addRoutedPointerListenerFromUpdater(
+        m_root,
+        descriptor,
+        std::move(callback));
+}
+
 Core::Status UITreeUpdater::destroy(UINodeId node)
 {
     if (m_context == nullptr) {
@@ -3457,7 +3553,7 @@ UIContext::~UIContext() noexcept
     if (m_impl) {
         if (!m_impl->isOwnerThread()
             || m_impl->routeDispatchDepth != 0
-            || m_impl->listenerCallbackCleanupDepth != 0) {
+            || m_impl->listenerCallbackOperationDepth != 0) {
             std::terminate();
         }
         m_impl->detachLifetime(this);
@@ -3548,7 +3644,8 @@ Core::Result<UIRoutedPointerListenerToken> UIContext::addRoutedPointerListener(
 {
     auto registration = m_impl->addRoutedPointerListener(
         descriptor,
-        std::move(callback));
+        std::move(callback),
+        {});
     if (!registration) {
         return Core::failure(registration.error());
     }
@@ -3620,6 +3717,25 @@ Core::Status UIContext::setBoxPaintFromUpdater(
     const UIBoxPaint& paint)
 {
     return m_impl->setBoxPaintFromUpdater(updaterRoot, node, paint);
+}
+
+Core::Result<UIRoutedPointerListenerToken> UIContext::addRoutedPointerListenerFromUpdater(
+    UINodeId updaterRoot,
+    UIRoutedPointerListenerDesc descriptor,
+    UIRoutedPointerCallback&& callback)
+{
+    auto registration = m_impl->addRoutedPointerListenerFromUpdater(
+        updaterRoot,
+        descriptor,
+        std::move(callback));
+    if (!registration) {
+        return Core::failure(registration.error());
+    }
+    return UIRoutedPointerListenerToken{
+        m_impl->lifetime,
+        registration->first,
+        registration->second,
+    };
 }
 
 Core::Status UIContext::destroyNodeFromUpdater(UINodeId updaterRoot, UINodeId node)

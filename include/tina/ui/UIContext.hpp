@@ -173,6 +173,10 @@ public:
         UINodeId node,
         UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setBoxPaint(UINodeId node, const UIBoxPaint& paint);
+    [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
+    addRoutedPointerListener(
+        UIRoutedPointerListenerDesc descriptor,
+        UIRoutedPointerCallback callback);
     [[nodiscard]] Core::Status destroy(UINodeId node);
 
 private:
@@ -267,6 +271,11 @@ private:
         UINodeId updaterRoot,
         UINodeId node,
         const UIBoxPaint& paint);
+    [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
+    addRoutedPointerListenerFromUpdater(
+        UINodeId updaterRoot,
+        UIRoutedPointerListenerDesc descriptor,
+        UIRoutedPointerCallback&& callback);
     [[nodiscard]] Core::Status destroyNodeFromUpdater(UINodeId updaterRoot, UINodeId node);
     void destroyRootFromOwner(UINodeId root) noexcept;
     [[nodiscard]] bool isAliveInRoot(UINodeId updaterRoot, UINodeId node) const noexcept;

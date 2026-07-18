@@ -385,6 +385,13 @@ struct ScriptedKeyTransition final {
     bool repeat = false;
 };
 
+struct ScriptedPointerButtonTransition final {
+    Platform::PointerButton button = Platform::PointerButton::Primary;
+    Platform::DigitalTransition state = Platform::DigitalTransition::Down;
+    double logicalX = 0.0;
+    double logicalY = 0.0;
+};
+
 struct RuntimeProbe final {
     EventLog events;
     ManualMonotonicClock* clock = nullptr;
@@ -400,7 +407,9 @@ struct RuntimeProbe final {
     std::optional<std::size_t> replacePrimaryWindowOnFrame;
     std::vector<u64> platformFrameIds;
     std::vector<std::vector<Platform::Key>> heldKeysByFrame;
+    std::vector<std::vector<Platform::PointerButton>> heldPointerButtonsByFrame;
     std::vector<std::vector<ScriptedKeyTransition>> keyTransitionsByFrame;
+    std::vector<std::vector<ScriptedPointerButtonTransition>> pointerButtonTransitionsByFrame;
     std::size_t pollCount = 0;
     std::size_t initialMetricsCount = 0;
     u64 submitCalls = 0;
@@ -513,6 +522,21 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
                 input.heldKeys.set(static_cast<usize>(key));
             }
         }
+        if (frameIndex < probe_->heldPointerButtonsByFrame.size())
+        {
+            for (Platform::PointerButton button : probe_->heldPointerButtonsByFrame[frameIndex])
+            {
+                input.pointer.heldButtons.set(static_cast<usize>(button));
+            }
+        }
+        if (frameIndex < probe_->pointerButtonTransitionsByFrame.size() &&
+            !probe_->pointerButtonTransitionsByFrame[frameIndex].empty())
+        {
+            const ScriptedPointerButtonTransition& finalPointer =
+                probe_->pointerButtonTransitionsByFrame[frameIndex].back();
+            input.pointer.logicalX = finalPointer.logicalX;
+            input.pointer.logicalY = finalPointer.logicalY;
+        }
         if (!frameBuilder_.setPrimaryWindowSnapshot(metrics, input))
         {
             return Core::failure(Core::CoreErrorCode::Internal, "scripted primary Window snapshot was rejected");
@@ -557,6 +581,26 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
                 {
                     return Core::failure(Core::CoreErrorCode::Internal,
                                          "scripted key Input transition was not appended");
+                }
+            }
+        }
+        if (frameIndex < probe_->pointerButtonTransitionsByFrame.size())
+        {
+            for (const ScriptedPointerButtonTransition& transition :
+                 probe_->pointerButtonTransitionsByFrame[frameIndex])
+            {
+                const auto appendResult = frameBuilder_.appendInputTransition(Platform::PointerButtonTransition{
+                    .window = primaryWindow_,
+                    .pointer = Platform::PrimaryPointerId,
+                    .button = transition.button,
+                    .state = transition.state,
+                    .logicalX = transition.logicalX,
+                    .logicalY = transition.logicalY,
+                });
+                if (appendResult != Platform::FrameBatchAppendResult::Appended)
+                {
+                    return Core::failure(Core::CoreErrorCode::Internal,
+                                         "scripted pointer Button Input transition was not appended");
                 }
             }
         }
@@ -1033,6 +1077,21 @@ struct GameProbe final {
     bool primaryWindowUIAvailableOnEnter = false;
     bool primaryWindowUIAvailableOnUpdate = false;
     bool primaryWindowUIUpdated = false;
+    bool registerPrimaryWindowUIPointerListener = false;
+    InputActionId uiPointerGameplayAction{};
+    u32 uiPointerPhaseSequence = 0;
+    u32 uiPointerListenerOrder = 0;
+    u32 uiPointerUpdateOrder = 0;
+    u32 uiPointerListenerCount = 0;
+    Platform::PlatformFrameId uiPointerPlatformFrame{};
+    usize uiPointerTransitionOrdinal = 0;
+    u64 uiPointerSourceSequence = 0;
+    bool uiPointerInputConsumed = false;
+    bool uiPointerClaimAccepted = false;
+    bool uiPointerGameplayActionPresent = false;
+    bool uiPointerGameplayActionHeld = false;
+    usize uiPointerGameplayTransitionCount = 0;
+    bool uiPointerListenerReleasedOnExit = false;
     std::optional<Core::ErrorCode> ignoredPrimaryWindowUIEnterFailure;
     std::optional<Core::ErrorCode> ignoredPrimaryWindowUIUpdateFailure;
 };
@@ -1110,18 +1169,18 @@ class ScriptedGameState final : public IGameState {
                 return Core::failure(std::move(panel.error()));
             }
             panel_ = *panel;
-            auto label = tree->createLabel(panel_);
-            if (!label)
-            {
-                return Core::failure(std::move(label.error()));
-            }
-            label_ = *label;
             auto button = tree->createButton(panel_);
             if (!button)
             {
                 return Core::failure(std::move(button.error()));
             }
             button_ = *button;
+            auto label = tree->createLabel(panel_);
+            if (!label)
+            {
+                return Core::failure(std::move(label.error()));
+            }
+            label_ = *label;
 
             UI::UILayoutStyle panelStyle{};
             panelStyle.size.width = UI::UILayoutLength::Percent(100.0F);
@@ -1140,6 +1199,28 @@ class ScriptedGameState final : public IGameState {
             if (Core::Status status = tree->setPointerHitPolicy(button_, UI::UIPointerHitPolicy::Targetable); !status)
             {
                 return status;
+            }
+            if (probe_->registerPrimaryWindowUIPointerListener)
+            {
+                auto listener = tree->addRoutedPointerListener(
+                    {.node = button_,
+                     .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+                     .phases = UI::UIEventPhaseMask::Target},
+                    UI::UIRoutedPointerCallback{[probe = probe_](UI::UIRoutedPointerEvent& event) noexcept {
+                        ++probe->uiPointerListenerCount;
+                        probe->uiPointerListenerOrder = ++probe->uiPointerPhaseSequence;
+                        probe->uiPointerPlatformFrame = event.input().platformFrame;
+                        probe->uiPointerTransitionOrdinal = event.input().transitionOrdinal;
+                        probe->uiPointerSourceSequence = event.input().sourceSequence;
+                        probe->uiPointerInputConsumed = event.isInputTransitionConsumed();
+                        probe->uiPointerClaimAccepted =
+                            event.claimPointerButton(Platform::PointerButton::Primary);
+                    }});
+                if (!listener)
+                {
+                    return Core::failure(std::move(listener.error()));
+                }
+                pointerListener_ = std::move(*listener);
             }
             if (probe_->createSecondaryPrimaryWindowUIRoot)
             {
@@ -1183,6 +1264,11 @@ class ScriptedGameState final : public IGameState {
 
     void onExit(GameStateExitContext& context) noexcept override
     {
+        if (probe_->registerPrimaryWindowUIPointerListener)
+        {
+            pointerListener_.reset();
+            probe_->uiPointerListenerReleasedOnExit = !pointerListener_;
+        }
         probe_->runtime->events.emplace_back("state.exit");
         ++probe_->exitCount;
         probe_->exitStopCause = context.stopCause();
@@ -1259,6 +1345,15 @@ class ScriptedGameState final : public IGameState {
             }
             probe_->actionWiring.frameObserved = true;
         }
+        if (probe_->registerPrimaryWindowUIPointerListener)
+        {
+            probe_->uiPointerUpdateOrder = ++probe_->uiPointerPhaseSequence;
+            const FrameActionSnapshot& actions = context.frameActions();
+            const InputActionState* action = actions.find(probe_->uiPointerGameplayAction);
+            probe_->uiPointerGameplayActionPresent = action != nullptr;
+            probe_->uiPointerGameplayActionHeld = action != nullptr && action->held;
+            probe_->uiPointerGameplayTransitionCount = actions.transitions.size();
+        }
         if (frameIndex == probe_->exitOnFrame)
         {
             context.requestExitAfterFrame();
@@ -1322,6 +1417,7 @@ class ScriptedGameState final : public IGameState {
     UI::UINodeId panel_{};
     UI::UINodeId label_{};
     UI::UINodeId button_{};
+    UI::UIRoutedPointerListenerToken pointerListener_{};
 };
 
 class ScriptedGameApplication final : public IGameApplication {
@@ -1865,6 +1961,67 @@ TEST(EngineHostRunTest, GameSdkBuildsAndUpdatesAPrimaryWindowRetainedTree)
     EXPECT_EQ(runtime.presentedFrames, 1U);
     ASSERT_EQ(runtime.submittedUICommandCounts, std::vector<usize>{0U});
     EXPECT_FALSE(runtime.copiedLastSubmittedUICommand.has_value());
+    EXPECT_EQ(game.exitCount, 1U);
+    EXPECT_EQ(game.shutdownCount, 1U);
+}
+
+TEST(EngineHostRunTest, GameSdkPointerListenerPublishesClaimBeforeActionsAndReleasesOnExit)
+{
+    constexpr InputActionId PointerGameplayAction{303};
+
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    runtime.heldPointerButtonsByFrame = {{Platform::PointerButton::Primary}};
+    runtime.pointerButtonTransitionsByFrame = {{
+        ScriptedPointerButtonTransition{
+            .button = Platform::PointerButton::Primary,
+            .state = Platform::DigitalTransition::Down,
+            .logicalX = 10.0,
+            .logicalY = 10.0,
+        },
+    }};
+
+    GameProbe game;
+    game.runtime = &runtime;
+    game.buildPrimaryWindowUI = true;
+    game.registerPrimaryWindowUIPointerListener = true;
+    game.uiPointerGameplayAction = PointerGameplayAction;
+    game.exitOnFrame = 0;
+    ScriptedGameApplication application(game);
+
+    auto config = EngineConfig::Defaults();
+    config.inputActions.digitalBindings = {
+        DigitalActionBinding{
+            .input =
+                PrimaryPointerButtonBinding{
+                    .pointer = Platform::PrimaryPointerId,
+                    .button = Platform::PointerButton::Primary,
+                },
+            .action = PointerGameplayAction,
+            .domain = InputActionDomain::Frame,
+        },
+    };
+    auto hostResult = createRuntimeHost(runtime, std::move(config));
+    ASSERT_TRUE(hostResult.has_value()) << hostResult.error().message;
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
+    EXPECT_EQ(*runResult, RunExitReason::GameRequestedExitAfterCurrentFrame);
+    EXPECT_EQ(game.uiPointerListenerCount, 1U);
+    EXPECT_EQ(game.uiPointerPlatformFrame, Platform::PlatformFrameId{1});
+    EXPECT_EQ(game.uiPointerTransitionOrdinal, 0U);
+    EXPECT_EQ(game.uiPointerSourceSequence, 1U);
+    EXPECT_FALSE(game.uiPointerInputConsumed);
+    EXPECT_TRUE(game.uiPointerClaimAccepted);
+    EXPECT_TRUE(game.uiPointerGameplayActionPresent);
+    EXPECT_FALSE(game.uiPointerGameplayActionHeld);
+    EXPECT_EQ(game.uiPointerGameplayTransitionCount, 0U);
+    EXPECT_GT(game.uiPointerListenerOrder, 0U);
+    EXPECT_GT(game.uiPointerUpdateOrder, game.uiPointerListenerOrder);
+    EXPECT_TRUE(game.uiPointerListenerReleasedOnExit);
+    EXPECT_EQ(runtime.submittedFrames, 1U);
+    EXPECT_EQ(runtime.presentedFrames, 1U);
     EXPECT_EQ(game.exitCount, 1U);
     EXPECT_EQ(game.shutdownCount, 1U);
 }

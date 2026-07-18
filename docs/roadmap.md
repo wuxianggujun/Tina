@@ -99,7 +99,8 @@ M6 生命周期之后仍未实现：
   consumption producer，M7-C1c-b3c 已补 primary-window `UIContext` ownership/selection 与 EngineHost
   接线，M7-C1c-b3d1 已补 EngineConfig UI capacities 与 `updateUI` 后、Render 前的 private layout
   coordinator，M7-C1c-b3d2 已补 startup metrics seed 与 Game SDK scoped UI access，M7-C1c-b3e 已补
-  held primary Pointer Button claim；Key/Gamepad/axis claim producer、IMM32、production Gamepad 和连续
+  held primary Pointer Button claim，后续独立切片又补 Game SDK root-scoped routed Pointer listener；
+  Key/Gamepad/axis claim producer、IMM32、production Gamepad 和连续
   axis mapping 仍在后续子切片；
 - 有界 CPU/IO/Main worker、阶段指标与完整 shutdown deadline/fatal-stop；
 - typed render resource handle、Pass Scheduler、World RenderScene、owning RenderFramePacket/pool 与
@@ -112,7 +113,8 @@ M6 生命周期之后仍未实现：
   M7-C1c-b3d1 layout commit、M7-C1c-b3d2 startup/root scoped capability、M7-C1c-b3e Pointer claim、
   SolidFill committed paint、Render SolidQuad DisplayList builder、UI→Render integration bridge、D0
   Runtime DisplayList handoff、D1 bgfx UI SolidQuad pass 与 D2 可见 panel smoke 已实现，但仍没有 owning
-  Runtime packet/FramePin、文本/glyph、默认 Widget 行为、完整 Widget facade 或产品 UI；
+  Runtime packet/FramePin、文本/glyph、默认 Widget 行为、完整 Widget facade 或产品 UI；当前 listener
+  facade 只是低层 routed callback/claim seam，不等于 Button default action；
 - `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
 - Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；M7-B2 Desktop bgfx
   X11 图也已完成 GCC 13.4 和 Clang 22.1.8 + ASan/UBSan/LSan 的183/22/11直接测试及300帧门禁。
@@ -175,7 +177,9 @@ Desktop bootstrap、D1 bgfx SolidQuad UI pass 与 D2 真实 GPU 可见 panel 冒
 并创建4个 retained SolidFill panel。Windows 最新门禁在 MSVC 19.50 与 CMake 4.2.3 下通过 Debug/Release
 构建、基础207/207、UI92/92、Runtime→UI53/53、UI→Render12/12、GLFW专项25/25、bgfx专项16/16、
 Null样例300帧，以及真实 D3D11 Intel Iris Xe Desktop样例 Debug 1200帧截图检查/Release 300帧；`TINA_BUILD_TESTING=OFF` 的 production-style
-GLFW样例300帧也已通过。Game SDK/public header 无 bgfx、GLFW 或 native 泄漏。Linux M7-B1 门禁已在 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer、
+GLFW样例300帧也已通过。后续 listener-only Windows Debug 增量门禁为基础208/208、UI95/95、
+Runtime→UI55/55与Null样例300帧；本轮没有重跑 Release、GLFW、bgfx 或可见 Desktop，因此上一组仍是完整产品证据。
+Game SDK/public header 无 bgfx、GLFW 或 native 泄漏。Linux M7-B1 门禁已在 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer、
 GCC 13 与 Clang 22 X11/Wayland 双后端通过基础183/183、GLFW专项22/22和300帧样例；
 Clang 基础测试无 suppression，Wayland匹配0，X11仅精确抑制 `_XimOpenIM` 的第三方 retention。
 Linux M7-B2 X11 图又在 GCC 13.4 与 Clang 22.1.8 sanitizer 下通过基础183/183、GLFW专项22/22、
@@ -272,6 +276,11 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   `UIPhaseCapabilityExpired`，Headless 请求返回 `PrimaryWindowUIUnavailable`。第一次 capability operation
   失败会成为 sticky phase error，后续 mutation 不执行；Runtime 离开 callback 时用 no-throw abort guard
   确保 facade 失效；
+- **已完成 Game SDK routed Pointer listener facade**：`PrimaryWindowUITreeUpdater::addRoutedPointerListener()`
+  只在 current phase/current root subtree 注册；返回 token 可跨 phase 保存但不保活 Context/root，State
+  在 `onExit()` 先 reset token。跨 root 失败原子且进入 sticky first-error，不占 listener slot/high-water；
+  callback 最终 move/destructor 若重入释放 root 会重新校验并回滚，销毁 Context 触发生命周期 terminate；
+  EngineHost 端到端测试证明 listener 先于 ActionMapper，claim-only 也拦截同帧 Gameplay Action；
 - **已完成 M7-C1c-b3e**：routed Pointer listener 通过 `claimPointerButton()` 在固定 bitset 中幂等请求
   当前 window/pointer 的 button ownership；Runtime 只发布最终 Platform snapshot 中仍 held 的 primary
   Pointer Button，并在 Create 期双预分配 PMR claim buffer 中去重，不把 Key/Gamepad/axis 能力伪装成已完成；
@@ -314,6 +323,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   right-edge scissor，Release 300帧 clean；
   D0/D1/D2 综合门禁中 bgfx专项16/16与 D3D11 Intel Iris Xe Desktop 样例通过，Release clean；
   Debug `RefCount is 3 (expected 0)` 为已记录第三方 debug layer 提示；
+- **最新增量门禁**：本轮 Windows MSVC 19.50 / CMake 4.2.3 Debug 直接通过基础208/208、UI95/95、
+  Runtime→UI55/55与Null样例300帧；Release/Linux/bgfx/可见样例未在本轮重跑，继续沿用并明确标记前序证据；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
   subtree 尚未实现；正式路径虽已接线并可创建 retained root/Panel/Label/Button 节点，低层也已有
   SolidFill paint/DisplayList bridge、D0 Runtime handoff、Game SDK paint setter 和私有 bgfx SolidQuad pass，

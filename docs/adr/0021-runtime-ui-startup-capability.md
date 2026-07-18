@@ -4,7 +4,7 @@
 - 日期：2026-07-18
 - 接受日期：2026-07-18
 - 实施状态：M7-C1c-b3d2 已落地 startup metrics seed、显式 bind、startup layout/hit snapshot 与
-  root-scoped phase capability；本 ADR 不代表 Widget、DisplayList 或可见 UI 已完成。
+  root-scoped phase capability；D2 与后续 listener 兼容扩展另见下文。本 ADR 不代表完整 Widget 已完成。
 
 ## 背景
 
@@ -124,6 +124,25 @@ capability。
 每个 capability phase 保存 sticky first-error：第一次操作失败后，后续 mutation 不再执行；Runtime 在
 callback 结束合并 callback `Status` 与该错误。这样失败帧不会发布半份 layout/hit snapshot。正常路径
 不分配；错误对象允许走冷路径分配诊断字符串。
+
+### 后续兼容扩展记录
+
+本节记录 D2 与后续独立切片，不改写 b3d2 接受本 ADR 时的原始 API/实施事实。两次扩展都保持上述
+primary-window、root、phase 三层权限模型：
+
+- D2 增加 `PrimaryWindowUITreeUpdater::setBoxPaint()`，只 author 当前 SolidFill box paint；
+- 后续切片增加 `PrimaryWindowUITreeUpdater::addRoutedPointerListener()`，并委派到同样 root-scoped 的
+  `UI::UITreeUpdater`；注册动作只能发生在 current phase/current root subtree；
+- 返回的 move-only `UIRoutedPointerListenerToken` 是唯一允许跨 phase 保存的 listener 对象，但不延长
+  `UIContext`、`UIRootOwner` 或节点生命周期。State 在 `onExit()` 先 reset token，再释放 root；
+- callback 最终 move/destructor 可能执行用户代码。若其重入释放 root/节点，注册在重新校验 generation、
+  subtree 与 serial 后原子回滚，不占 listener slot/high-water；callback operation 中销毁 Context 触发
+  生命周期 terminate；
+- EngineHost 端到端门禁证明 listener 在 ActionMapper 前执行；即使不 consume transition，只 claim 当前
+  仍 held 的 primary Pointer Button，也会抑制同帧 Gameplay Action。
+
+这些扩展仍不代表 Button default action、Focus、Pointer Capture、Modal、Text/Glyph、Label 文本或完整
+Widget 已完成。
 
 ### 性能与验收门禁
 

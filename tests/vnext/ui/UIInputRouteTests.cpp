@@ -724,6 +724,123 @@ TEST_F(UIInputRouteTest, DestroyingTargetDuringCaptureDoesNotRouteToReusedGenera
     EXPECT_EQ(state.replacementCount, 1U);
 }
 
+TEST_F(UIInputRouteTest, TreeUpdaterListenerRegistrationIsRootScopedAndAtomic)
+{
+    auto context = createContext(
+        window,
+        {.nodeCapacity = 8,
+         .rootCapacity = 2,
+         .routePathCapacity = 8,
+         .routedPointerListenerCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    UI::UIRootOwner firstRoot = createRoot(*context);
+    UI::UIRootOwner secondRoot = createRoot(*context);
+    ASSERT_TRUE(firstRoot && secondRoot);
+    UI::UITreeUpdater firstTree = createUpdater(*context, firstRoot);
+    const UI::UINodeId firstButton = createButton(*context, firstRoot.rootNodeId());
+    const UI::UINodeId secondButton = createButton(*context, secondRoot.rootNodeId());
+
+    usize rejectedCount = 0;
+    auto rejected = firstTree.addRoutedPointerListener(
+        {.node = secondButton,
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[&rejectedCount](
+                                        UI::UIRoutedPointerEvent&) noexcept {
+            ++rejectedCount;
+        }});
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidNode);
+    UI::UIContextStatistics statistics = context->statistics();
+    EXPECT_EQ(statistics.activeRoutedPointerListenerCount, 0U);
+    EXPECT_EQ(statistics.routedPointerListenerHighWater, 0U);
+
+    usize acceptedCount = 0;
+    auto accepted = firstTree.addRoutedPointerListener(
+        {.node = firstButton,
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[&acceptedCount](
+                                        UI::UIRoutedPointerEvent&) noexcept {
+            ++acceptedCount;
+        }});
+    ASSERT_TRUE(accepted.has_value()) << accepted.error().message;
+    statistics = context->statistics();
+    EXPECT_EQ(statistics.activeRoutedPointerListenerCount, 1U);
+    EXPECT_EQ(statistics.routedPointerListenerHighWater, 1U);
+    EXPECT_EQ(rejectedCount, 0U);
+    EXPECT_EQ(acceptedCount, 0U);
+}
+
+TEST_F(UIInputRouteTest, CallbackMoveRootReleaseRollsBackTreeUpdaterRegistration)
+{
+    auto context = createContext(
+        window,
+        {.nodeCapacity = 8,
+         .rootCapacity = 1,
+         .routePathCapacity = 8,
+         .routedPointerListenerCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    UI::UIRootOwner root = createRoot(*context);
+    ASSERT_TRUE(root);
+    UI::UITreeUpdater tree = createUpdater(*context, root);
+    const UI::UINodeId button = createButton(*context, root.rootNodeId());
+
+    struct ReleaseRootOnMove final {
+        UI::UIRootOwner* root = nullptr;
+
+        explicit ReleaseRootOnMove(UI::UIRootOwner& owner) noexcept
+            : root(&owner)
+        {
+        }
+
+        ReleaseRootOnMove(const ReleaseRootOnMove&) noexcept = default;
+
+        ReleaseRootOnMove(ReleaseRootOnMove&& other) noexcept
+            : root(std::exchange(other.root, nullptr))
+        {
+            if (root != nullptr) {
+                root->reset();
+            }
+        }
+
+        void operator()(UI::UIRoutedPointerEvent&) noexcept
+        {
+        }
+    } releaseRoot(root);
+
+    auto rejected = tree.addRoutedPointerListener(
+        {.node = button,
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{releaseRoot});
+
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::RootRequired);
+    EXPECT_FALSE(root);
+    EXPECT_EQ(context->liveRootCount(), 0U);
+    EXPECT_EQ(context->liveNodeCount(), 0U);
+    UI::UIContextStatistics statistics = context->statistics();
+    EXPECT_EQ(statistics.activeRoutedPointerListenerCount, 0U);
+    EXPECT_EQ(statistics.routedPointerListenerHighWater, 0U);
+
+    UI::UIRootOwner replacementRoot = createRoot(*context);
+    ASSERT_TRUE(replacementRoot);
+    UI::UITreeUpdater replacementTree = createUpdater(*context, replacementRoot);
+    const UI::UINodeId replacementButton =
+        createButton(*context, replacementRoot.rootNodeId());
+    auto accepted = replacementTree.addRoutedPointerListener(
+        {.node = replacementButton,
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[](UI::UIRoutedPointerEvent&) noexcept {}});
+    ASSERT_TRUE(accepted.has_value()) << accepted.error().message;
+    EXPECT_TRUE(*accepted);
+    statistics = context->statistics();
+    EXPECT_EQ(statistics.activeRoutedPointerListenerCount, 1U);
+    EXPECT_EQ(statistics.routedPointerListenerHighWater, 1U);
+}
+
 TEST_F(UIInputRouteTest, ListenerCapacityFailureIsAtomicAndFreedSlotIsReusable)
 {
     RouteTree tree = createRouteTree(
@@ -990,6 +1107,63 @@ TEST_F(UIInputRouteTest, DestroyingContextFromItsCallbackTerminates)
             }
             UI::UIContext* context = tree.context.get();
             (void)context->routePointerInput(makePointerInput(window));
+        },
+        ::testing::ExitedWithCode(86),
+        ".*");
+}
+
+TEST_F(UIInputRouteTest, DestroyingContextFromListenerCallbackMoveTerminates)
+{
+    EXPECT_EXIT(
+        {
+            std::set_terminate([]() noexcept {
+                std::_Exit(86);
+            });
+            auto context = createContext(
+                window,
+                {.nodeCapacity = 8,
+                 .rootCapacity = 1,
+                 .routePathCapacity = 8,
+                 .routedPointerListenerCapacity = 1});
+            if (!context) {
+                std::abort();
+            }
+            UI::UIRootOwner root = createRoot(*context);
+            if (!root) {
+                std::abort();
+            }
+            const UI::UINodeId button = createButton(*context, root.rootNodeId());
+
+            struct ReleaseContextOnMove final {
+                std::unique_ptr<UI::UIContext>* context = nullptr;
+
+                explicit ReleaseContextOnMove(
+                    std::unique_ptr<UI::UIContext>& owner) noexcept
+                    : context(&owner)
+                {
+                }
+
+                ReleaseContextOnMove(const ReleaseContextOnMove&) noexcept = default;
+
+                ReleaseContextOnMove(ReleaseContextOnMove&& other) noexcept
+                    : context(std::exchange(other.context, nullptr))
+                {
+                    if (context != nullptr) {
+                        context->reset();
+                    }
+                }
+
+                void operator()(UI::UIRoutedPointerEvent&) noexcept
+                {
+                }
+            } releaseContext(context);
+
+            (void)context->addRoutedPointerListener(
+                {.node = button,
+                 .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+                 .phases = UI::UIEventPhaseMask::Target},
+                UI::UIRoutedPointerCallback{releaseContext});
+            std::abort();
         },
         ::testing::ExitedWithCode(86),
         ".*");

@@ -18,7 +18,9 @@
 > `RenderFrame::primaryWindowUIDisplayList` 的 submit-call-local borrow 交给 backend。D1 已让私有
 > `tina_render_bgfx` 消费 SolidQuad DisplayList；D2 已让
 > `PrimaryWindowUITreeUpdater::setBoxPaint()` 进入 Game SDK facade，并让 Desktop 样例显示4个
-> retained SolidFill panel。Key/Gamepad/axis claim、完整状态栈、worker、
+> retained SolidFill panel。后续兼容扩展又加入 root-scoped
+> `PrimaryWindowUITreeUpdater::addRoutedPointerListener()`，并由 EngineHost 端到端门禁证明 listener
+> 在 ActionMapper 前执行、claim-only 可抑制同帧 Gameplay Action。Key/Gamepad/axis claim、完整状态栈、worker、
 > Scene/Asset/Audio、文本/Glyph/Widget 完整 UI、
 > production Gamepad、完整 DPI 与
 > Windows IMM32 仍是后续契约。
@@ -478,6 +480,10 @@ public:
     [[nodiscard]] Core::Status setBoxPaint(
         UINodeId node,
         const UIBoxPaint& paint);
+    [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
+    addRoutedPointerListener(
+        UIRoutedPointerListenerDesc descriptor,
+        UIRoutedPointerCallback callback);
 };
 
 class UIContext {
@@ -551,7 +557,11 @@ query、route depth、listener invocation count、consumed/stopped/targetInvalid
 `claimPointerButton()` 请求的固定大小 Pointer Button bitset；它仍不是 Runtime
 `InputTransitionConsumptionView` 或 `ContinuousControlClaimsView`。`UIRoutedPointerListenerToken` 是
 generation-safe move-only RAII owner：owner-thread reset 立即生效，off-thread reset 进入 bounded queue 并在下一次
-owner-thread mutation/route 前 drain，context 销毁后 reset 仍安全。当前没有持久 Pointer Capture、Focus/Modal、
+owner-thread mutation/route 前 drain，context 销毁后 reset 仍安全。低层 `UITreeUpdater` 的注册入口只接受
+绑定 root subtree 内的节点；跨 root/stale generation 失败不占 listener slot，也不推进 high-water。
+fixed-inline callback 的 move/destructor 可以执行用户代码，因此最终 move 后会重新校验 root、node generation、
+subtree 与 registration serial；若重入释放 root/节点则整次注册回滚。callback operation 期间销毁 Context
+触发生命周期 terminate，不能继续潜在 UAF。当前没有持久 Pointer Capture、Focus/Modal、
 Button interaction、dirty subtree pruning、nested clip 或 Widget default action。
 `UIContext` 的 mutation、route 与销毁只允许 owner thread；route callback/callback cleanup 内销毁或
 非 owner-thread 销毁会触发生命周期硬门禁，而不是继续执行潜在 UAF。
@@ -700,6 +710,10 @@ public:
     [[nodiscard]] Core::Status setBoxPaint(
         UI::UINodeId node,
         const UI::UIBoxPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIRoutedPointerListenerToken>
+    addRoutedPointerListener(
+        UI::UIRoutedPointerListenerDesc descriptor,
+        UI::UIRoutedPointerCallback callback);
     [[nodiscard]] Core::Status destroy(UI::UINodeId node);
 };
 
@@ -724,6 +738,11 @@ public:
 始终验证 root generation、owner window 与 subtree containment。第一次 capability operation 失败会成为
 该 phase 的 sticky error，后续 mutation 不再执行，Runtime 在 callback 结束统一合并错误；即使异常或
 错误边界提前离开 phase，Runtime 也会用 no-throw abort guard 使已发出的 facade 失效。
+
+后续 listener 扩展保持同一权限模型：注册动作只能通过 current-phase、root-scoped updater 执行；
+`UIRoutedPointerListenerToken` 是唯一允许由 State 跨 phase 保存的 listener 对象。token 不保活
+`UIContext`、`UIRootOwner` 或目标节点，因此 `onExit()` 固定先 reset listener token，再 reset root。
+cross-root 注册错误进入既有 sticky first-error，且低层事务不消耗 listener slot/high-water。
 
 Platform SPI 同时增加
 `initialPrimaryWindowMetrics() -> Result<optional<WindowMetricsSnapshot>>`。它不能 poll、泵送事件、消费

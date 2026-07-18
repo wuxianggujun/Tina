@@ -292,6 +292,23 @@ Core::Status PrimaryWindowUICapabilityState::setBoxPaint(u64 epoch, PrimaryWindo
     return Core::success();
 }
 
+Core::Result<UI::UIRoutedPointerListenerToken> PrimaryWindowUICapabilityState::addRoutedPointerListener(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UIRoutedPointerListenerDesc descriptor,
+    UI::UIRoutedPointerCallback callback)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::addRoutedPointerListener";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto listener = updater.addRoutedPointerListener(descriptor, std::move(callback));
+    if (!listener)
+    {
+        return Core::failure(rememberFirstError(std::move(listener.error()), Operation));
+    }
+    return std::move(*listener);
+}
+
 Core::Status PrimaryWindowUICapabilityState::destroy(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                      UI::UINodeId node)
 {

@@ -86,6 +86,104 @@ TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAnd
     EXPECT_EQ(expiredBuilder.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, RoutedPointerListenerSurvivesItsRegistrationPhase)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto button = tree->createButton(root->rootNodeId());
+    ASSERT_TRUE(button.has_value()) << button.error().message;
+
+    UI::UILayoutStyle rootStyle{};
+    rootStyle.size.width = UI::UILayoutLength::Px(100.0F);
+    rootStyle.size.height = UI::UILayoutLength::Px(100.0F);
+    ASSERT_TRUE(tree->setLayoutStyle(root->rootNodeId(), rootStyle).has_value());
+    UI::UILayoutStyle buttonStyle{};
+    buttonStyle.size.width = UI::UILayoutLength::Px(50.0F);
+    buttonStyle.size.height = UI::UILayoutLength::Px(40.0F);
+    ASSERT_TRUE(tree->setLayoutStyle(*button, buttonStyle).has_value());
+    ASSERT_TRUE(tree->setPointerHitPolicy(*button, UI::UIPointerHitPolicy::Targetable).has_value());
+
+    usize callbackCount = 0;
+    auto listener = tree->addRoutedPointerListener(
+        {.node = *button, .kind = UI::UIRoutedPointerEventKind::ButtonDown, .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[&callbackCount](UI::UIRoutedPointerEvent& event) noexcept {
+            ++callbackCount;
+            event.consumeInputTransition();
+        }});
+    ASSERT_TRUE(listener.has_value()) << listener.error().message;
+    EXPECT_EQ(context->statistics().activeRoutedPointerListenerCount, 1U);
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+
+    auto expiredRegistration = tree->addRoutedPointerListener(
+        {.node = *button, .kind = UI::UIRoutedPointerEventKind::ButtonUp, .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[](UI::UIRoutedPointerEvent&) noexcept {}});
+    ASSERT_FALSE(expiredRegistration.has_value());
+    EXPECT_EQ(expiredRegistration.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+
+    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 100.0F}).has_value());
+    auto routed = context->routePointerInput(UI::UIPointerInputEvent{
+        .platformFrame = Platform::PlatformFrameId{1},
+        .transitionOrdinal = 0,
+        .sourceSequence = 1,
+        .window = window,
+        .pointer = Platform::PrimaryPointerId,
+        .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+        .position = {.x = 10.0F, .y = 10.0F},
+        .button = Platform::PointerButton::Primary,
+    });
+    ASSERT_TRUE(routed.has_value()) << routed.error().message;
+    EXPECT_EQ(callbackCount, 1U);
+    EXPECT_TRUE(routed->consumed);
+
+    listener->reset();
+    EXPECT_EQ(context->statistics().activeRoutedPointerListenerCount, 0U);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, CrossRootListenerFailureIsStickyAndConsumesNoSlot)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto firstRoot = builder->createRoot();
+    auto secondRoot = builder->createRoot();
+    ASSERT_TRUE(firstRoot.has_value()) << firstRoot.error().message;
+    ASSERT_TRUE(secondRoot.has_value()) << secondRoot.error().message;
+    auto firstTree = builder->treeUpdater(*firstRoot);
+    ASSERT_TRUE(firstTree.has_value()) << firstTree.error().message;
+
+    auto crossRoot =
+        firstTree->addRoutedPointerListener({.node = secondRoot->rootNodeId(),
+                                             .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+                                             .phases = UI::UIEventPhaseMask::Target},
+                                            UI::UIRoutedPointerCallback{[](UI::UIRoutedPointerEvent&) noexcept {}});
+    ASSERT_FALSE(crossRoot.has_value());
+    EXPECT_EQ(crossRoot.error().code, UI::UIErrorCode::InvalidNode);
+    EXPECT_EQ(context->statistics().activeRoutedPointerListenerCount, 0U);
+
+    auto otherwiseValid =
+        firstTree->addRoutedPointerListener({.node = firstRoot->rootNodeId(),
+                                             .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+                                             .phases = UI::UIEventPhaseMask::Target},
+                                            UI::UIRoutedPointerCallback{[](UI::UIRoutedPointerEvent&) noexcept {}});
+    ASSERT_FALSE(otherwiseValid.has_value());
+    EXPECT_EQ(otherwiseValid.error().code, crossRoot.error().code);
+    EXPECT_EQ(otherwiseValid.error().message, crossRoot.error().message);
+    EXPECT_EQ(context->statistics().activeRoutedPointerListenerCount, 0U);
+
+    auto finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish.has_value());
+    EXPECT_EQ(finish.error().code, UI::UIErrorCode::InvalidNode);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, AbortPhaseInvalidatesFacadesAndAllowsTheNextPhase)
 {
     CapabilityState state;

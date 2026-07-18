@@ -9,7 +9,8 @@ Tina 当前处于 Legacy 产品与 vNext 垂直切片并存的迁移期。Legacy
 M7-C1b/M7-C1c-a/C1c-b1/C1c-b2 `tina_ui` tree/layout/committed-hit/point-query/synthetic-route foundation，
 以及 M7-C1c-b3b/b3c Runtime-private UI route-result producer、primary-window `UIContext` owner 与
 `EngineHost` 接线、M7-C1c-b3d1 的公开容量配置和 Runtime-private layout coordinator、
-M7-C1c-b3d2 的 startup UI seed 与 Game SDK scoped capability，以及 M7-C1c-b3e 的 held primary
+M7-C1c-b3d2 的 startup UI seed 与 Game SDK scoped capability、后续 Game SDK root-scoped routed Pointer
+listener extension，以及 M7-C1c-b3e 的 held primary
 Pointer Button claim bridge，以及 SolidFill-only committed paint、Render-owned 单帧 DisplayList builder
 和独立的 `tina_ui_render_integration` UI→Render bridge code surface，以及 D0 Runtime-private
 primary-window UIDisplayList submit handoff、D1 私有 bgfx SolidQuad UI pass、D2 Game SDK box-paint
@@ -49,7 +50,10 @@ Render 且消费当前 `PlatformFrameId` 的 attempt，不能同帧重放。M7-C
 `UIContext`，并在 State commit 前发布首份 structure/layout/hit/paint snapshot。Game SDK 只取得
 `PrimaryWindowUIRootBuilder` 与绑定自己 root 的 `PrimaryWindowUITreeUpdater`；facade 以 owner thread
 和 phase epoch 校验，回调结束后无条件失效，第一次 capability operation 失败作为 sticky phase error
-回传 Runtime。M7-C1c-b3e 已允许 routed Pointer listener 请求接管仍 held 的 primary Pointer Button，
+回传 Runtime。后续兼容扩展又把 root-scoped `addRoutedPointerListener()` 加入低层 updater 与 Game SDK
+facade；只有返回的 move-only token 可跨 phase 保存，且不延长 Context/root 生命周期。注册在 callback
+最终 move 后重校验 root/generation/subtree，重入释放 root 会原子回滚；State 在 `onExit()` 先 reset token、
+再释放 root。M7-C1c-b3e 已允许 routed Pointer listener 请求接管仍 held 的 primary Pointer Button，
 Runtime 按最终 snapshot 过滤并去重，ActionMapper 取消或拦截 Gameplay source 并抑制到真实 Up。
 随后 `tina_ui` 又实现 `UIBoxPaint` 的可选 SolidFill、本地预乘色 cache、`paintSnapshotCapacity` 和
 双缓冲 `UICommittedPaintView`；成功 `commitLayout()` 现在事务发布 structure/layout/hit/paint 四份
@@ -118,11 +122,12 @@ startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 r
 | vNext M7-C1c-b3b Runtime→UI route-result producer | 已完成独立 Runtime-private 组件与测试 target | `UIInputRouteProducer` 只转换 raw Move/Button/Wheel，使用事件时 logical position，并把 consume 写入 raw ordinal bit；reset/cancel/非 Pointer 保留 hole；在该切片中 claims 当时恒为 canonical `None`。双预分配 PMR bitset 在300帧共用 PMR 测试中 allocation count 不增长，supplied PMR 必须长于 producer；失败测试先产生1次 listener side effect，后续 route path capacity 失败不发布但推进 attempted watermark，同帧 retry 被拒且 callback 仍为1。独立 `tina_runtime_ui_tests` 直接运行 GoogleTest、不使用 CTest |
 | vNext M7-C1c-b3c EngineHost→UIContext 接线 | 已完成 Runtime-private primary-window owner 与正式帧路径接线 | `EngineHost` 在 Platform lifecycle dispatch 后惰性绑定首个 primary `WindowId`，随后调用 producer 并把结果交给 ActionMapper；Headless 绑定前为 null，同一 ID 的 metrics/content scale/minimized 变化复用 Context，绑定后 primary 消失或 generation 更换结构化失败。Context 在 module shutdown 前于 owner thread 销毁；owner 不调用 `commitLayout()`，route 只读上一帧 committed snapshot；该切片当时的 claims 仍为 canonical `None`。Game SDK 尚无 scoped Context/root 入口，所以此切片只闭合 Runtime 输入时序与所有权，不代表可见 UI |
 | vNext M7-C1c-b3d1 UI 容量与布局提交 | 已完成公开配置与 Runtime-private phase coordinator | `UIContextCapacityConfig` 有独立公共头和共享 validator；`EngineConfig::primaryWindowUICapacities` 在任何 factory 前拒绝非法 node/root/derived/listener/paint snapshot 容量。正式帧在 `updateUI` 后、Render submit 前按 primary logical extent 至多尝试一次 `commitLayout()`；Headless 双缺席成功 no-op，identity/容量/layout/paint 失败阻断 Render 且该 frame attempt 不可重试。b3d1 当时只提交 layout/paint snapshot，D0 后续才构建 Render DisplayList |
-| vNext M7-C1c-b3d2/D2 UI 启动与 Game SDK capability | 已完成 startup seed、phase-scoped facade 与 box paint authoring | Platform seed 不 poll、不消费 frame id；Runtime 在 `onEnter` 前绑定 primary Context 并提交首份 structure/layout/hit/paint snapshot。游戏只取得 `PrimaryWindowUIRootBuilder` 与绑定自己 root 的 `PrimaryWindowUITreeUpdater`，facade 以 owner thread 与 phase epoch 校验并在回调结束后失效；第一次 capability error 作为 sticky phase error 合并；不暴露裸 `UIContext*`。D2 已让 `PrimaryWindowUITreeUpdater::setBoxPaint()` 进入 Game SDK facade；文本/glyph、Label 文本、Button 默认行为仍后置；真实 claim producer 当时尚未加入 |
+| vNext M7-C1c-b3d2 UI 启动与 Game SDK capability | 已完成 startup seed 与 phase-scoped facade | Platform seed 不 poll、不消费 frame id；Runtime 在 `onEnter` 前绑定 primary Context 并提交首份 structure/layout/hit/paint snapshot。游戏只取得 `PrimaryWindowUIRootBuilder` 与绑定自己 root 的 `PrimaryWindowUITreeUpdater`，facade 以 owner thread 与 phase epoch 校验并在回调结束后失效；第一次 capability error 作为 sticky phase error 合并；不暴露裸 `UIContext*`。本行只记录 b3d2 当时事实，后续 paint/listener 扩展分别列在下方 |
 | vNext M7-C1c-b3e held Pointer Button claim | 已完成 UI request、Runtime filter/publish 与 ActionMapper 门禁 | `claimPointerButton()` 与 transition consumption 分离，Move/Wheel/Button route 都可请求当前 Window/Pointer 的按钮；Runtime 只发布最终 snapshot 仍 held 的 primary Pointer Button，跨 route 去重并使用 Create 期 PMR 双 buffer。capacity 失败不发布 staging 且同帧不可重试；claim 会取消 active Gameplay source或拦截同帧 Down，并抑制到真实 Up。Key/Gamepad/axis claim、Capture/Focus/Modal 后置 |
 | vNext D0 Runtime primary-window UI DisplayList handoff | 已完成 Runtime-private submit-call-local borrow | `PrimaryWindowUIDisplayCoordinator` 在 layout/paint commit 后、Render submit 前从 fixed PMR `UIDisplayListBuilder` 构建 primary-window list，并把 borrowed `primaryWindowUIDisplayList` 放进 `RenderFrame`。backend 不得在 `submitFrame()` 后保留；Headless、0 framebuffer 与 suspended 为空 list；失败不发布旧 list 或截断 list。owning RenderFramePacket/FramePin 后置 |
 | vNext D1 bgfx SolidQuad UI pass | 已完成私有 backend 消费 Runtime DisplayList | `tina_render_bgfx` 私有创建 SolidQuad shader program，submit 前先预检 commands/batches、transient VB/IB 容量和 index32 能力；提交时使用 top-left ortho、scissor clip、premultiplied alpha 与 batch index range。bgfx/bx 类型不进入 Game SDK、Runtime 或普通 Render public header；Windows Debug/Release bgfx 专项16/16通过 |
 | vNext D2 Game SDK box-paint visible sample | 已完成 root-scoped paint setter 与 Desktop 4-panel smoke | `PrimaryWindowUITreeUpdater::setBoxPaint()` 通过 phase epoch、owner thread、root/subtree 与 sticky error 门禁后委派到 `UI::UITreeUpdater::setBoxPaint()`；`tina_sample_desktop` 在 retained tree 中创建4个 SolidFill panel，并通过真实 D3D11 bgfx backend 可见提交。Windows Debug 1200帧、Release 300帧通过；Linux D1/D2 尚未重跑 |
+| vNext Game SDK routed Pointer listener facade | 已完成 root-scoped 注册与 Runtime 端到端闭环 | `PrimaryWindowUITreeUpdater::addRoutedPointerListener()` 经 phase epoch、owner thread、root/subtree 校验后委派到 `UI::UITreeUpdater`；cross-root 失败 sticky 且不占 slot/high-water，callback move 重入释放 root 会事务回滚。token 可跨 phase 保存但不保活 Context/root，State 在 `onExit()` 先 reset token。EngineHost 证明 claim 在 ActionMapper 前生效；这不等于 Button default action、Focus/Capture/Modal 或完整 Widget |
 | vNext GLFW 边界 | 已形成可运行切片 | `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
 | 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene/Asset/Audio、owning UI packet/pin、Text/Glyph/Widget 与 submission drain 仍按后续切片实施；Desktop SolidFill 可见样例、standalone UI/Render/bridge foundation、Runtime-private route/layout/startup/display borrow 接线和私有 bgfx SolidQuad pass 不代表这些路径完成 |
 

@@ -109,6 +109,17 @@ Core::Status PrimaryWindowUITreeUpdater::setBoxPaint(UI::UINodeId node, const UI
     return m_state->setBoxPaint(m_epoch, m_phase, m_updater, node, paint);
 }
 
+Core::Result<UI::UIRoutedPointerListenerToken>
+PrimaryWindowUITreeUpdater::addRoutedPointerListener(UI::UIRoutedPointerListenerDesc descriptor,
+                                                     UI::UIRoutedPointerCallback callback)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIRoutedPointerListenerToken>("PrimaryWindowUITreeUpdater::addRoutedPointerListener");
+    }
+    return m_state->addRoutedPointerListener(m_epoch, m_phase, m_updater, descriptor, std::move(callback));
+}
+
 Core::Status PrimaryWindowUITreeUpdater::destroy(UI::UINodeId node)
 {
     if (m_state == nullptr)

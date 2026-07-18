@@ -61,10 +61,16 @@ Context 时是成功 no-op。提交失败会阻断 Render，且本帧 attempt �
 structure/layout/hit/paint 发布，以及 root-scoped、owner-thread、phase-epoch-scoped 的
 `PrimaryWindowUIRootBuilder` / `PrimaryWindowUITreeUpdater`。这些 facade 在回调结束时无条件失效，第一次
 capability operation 失败会成为该 phase 的 sticky error，且不会向 Game SDK 暴露裸 `UIContext*`。
+后续兼容扩展已把 `addRoutedPointerListener()` 同时加入低层 `UITreeUpdater` 与 Game SDK facade：只有返回的
+move-only `UIRoutedPointerListenerToken` 可以跨 phase 保存，token 不延长 `UIContext` 或 root 生命周期，
+State 必须在 `onExit()` 先 reset listener token、再释放 `UIRootOwner`。注册在 user callback 最终 move 后会
+重新校验 root/generation/subtree；callback move/destructor 若重入释放 root，整次注册原子回滚且不消耗 listener
+slot/high-water。callback move/cleanup 期间销毁 `UIContext` 属生命周期硬错误并终止进程。
 M7-C1c-b3e 又让 Move/Wheel/Button routed Pointer listener 通过 `claimPointerButton()` 请求当前窗口/Pointer 的按键所有权；
 Runtime 只把帧末快照中 `PrimaryPointerId` 上仍 held 的任意 Pointer Button 去重写入双缓冲
 `ContinuousControlClaimsView`，容量失败不发布半份结果，已有 `ActionMapper` 会立即 Cancel Gameplay source
-或拦截同帧未 consume 的 Down，并抑制到真实 Up。`Tina::Render` 已实现固定 PMR、单缓冲的
+或拦截同帧未 consume 的 Down，并抑制到真实 Up。EngineHost 端到端门禁已经证明 Game SDK listener 先于
+ActionMapper 执行，且只 claim、不 consume 的 callback 也会抑制同帧 Gameplay Action。`Tina::Render` 已实现固定 PMR、单缓冲的
 SolidQuad `UIDisplayListBuilder`；独立 `Tina::UIRenderIntegration` target 已能把 committed logical paint 以
 outward rounding/clamp 转换为 framebuffer DisplayList，且 Windows MSVC 19.50 Debug/Release 的12项
 bridge GoogleTest 均通过。D0 已在 Runtime-private `PrimaryWindowUIDisplayCoordinator` 中于
@@ -98,11 +104,13 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求
 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、
-MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过前序 Windows Debug
-门禁：基础207/207、独立 UI 92/92、独立 Runtime→UI 51/51，以及 UI→Render bridge 12/12；前序
-Windows Release 也通过同一组 207/92/51/12 和 Null 样例300帧。D1/D2 又在 Windows Debug/Release
-通过 Runtime→UI 53/53、bgfx专项16/16、UI→Render bridge12/12，以及真实 D3D11 Intel Iris Xe 的
-`tina_sample_desktop` 可见 retained UI 样例 Debug 1200帧与 Release 300帧；Release 输出 clean status ok。Debug D3D11 退出时
+MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过本轮 root-scoped listener 的
+Debug 直接门禁：基础208/208、独立 UI 95/95、独立 Runtime→UI 55/55，以及 Null 样例300帧正常退出
+（State exit/Application shutdown 各1次）。本轮没有重跑 Release、
+UI→Render、GLFW、bgfx 或可见 Desktop，因此不能用这三个新数字覆盖对应产品门禁。上一轮完整 D2
+Windows Debug/Release 证据仍为基础207/207、UI92/92、Runtime→UI53/53、UI→Render bridge12/12、
+bgfx专项16/16、Null样例300帧，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 可见 retained UI
+样例 Debug 1200帧与 Release 300帧；Release 输出 clean status ok。Debug D3D11 退出时
 `RefCount is 3 (expected 0)` 是已记录的第三方 debug layer 提示，不作为 Tina 泄漏结论。前序 WindowSurface
 GLFW专项25/25、GLFW样例300/1800帧仍作为历史证据。Legacy ON 图的前序隔离门禁为 vNext 185/185 + Legacy 43/43。
 `TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与

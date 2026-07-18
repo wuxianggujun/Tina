@@ -51,6 +51,9 @@ class PrimaryWindowUICapabilityState final {
                                                    UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setBoxPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                            UI::UINodeId node, const UI::UIBoxPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIRoutedPointerListenerToken>
+    addRoutedPointerListener(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                             UI::UIRoutedPointerListenerDesc descriptor, UI::UIRoutedPointerCallback callback);
     [[nodiscard]] Core::Status destroy(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                        UI::UINodeId node);
 

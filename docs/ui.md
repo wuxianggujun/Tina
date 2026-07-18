@@ -96,6 +96,9 @@ M7-C1c-b3d2 仍不暴露裸 `UIContext*`，而是在 startup transaction 中先�
 阶段修改 subtree。每个 facade 都带 phase epoch；回调正常返回、失败返回或异常边界回滚都会失效，跨 phase
 调用返回 `UIPhaseCapabilityExpired`。若 Headless 或无 primary window，请求 UI capability 返回
 `PrimaryWindowUIUnavailable`，该 phase 内的首个 UI 错误会 sticky 并阻止后续 mutation。
+后续 listener 扩展仍使用同一 facade：注册动作只能发生在 current phase/current root subtree；返回的
+move-only `UIRoutedPointerListenerToken` 是唯一可跨 phase 保存的 listener 对象，但不延长 Context、root
+或节点生命周期。
 
 Platform/Event 只把 `PlatformFrameView` 的 UI-eligible transitions 交给 UIContext，不拥有节点、Focus、Capture 或 Layout。
 `IGameState` 持有 move-only `UIRootOwner` 和非 owning `UINodeId`，不持有 UIContext、Renderer、
@@ -159,8 +162,8 @@ struct UIContextCapacityConfig; // focused public config；由 EngineConfig 持�
 `UINodeId.ownerWindow + generation`，Debug 额外携带 Engine/registry cookie 改善诊断；热点遍历在
 一次校验后只使用 UIContext 内部的紧凑 slot index。generation 回绕的 slot 永久 retire。
 
-M7-C1c-b3d2/D2 已落地的 Game SDK 访问形态如下（`TRY(expr)` 仅表示失败时立即返回 `Error`；Label 文本内容、
-listener、Button 默认行为与 `GameStateCommands` 仍属于后续切片）：
+M7-C1c-b3d2/D2 与后续 listener 扩展已落地的 Game SDK 访问形态如下（`TRY(expr)` 仅表示失败时立即返回
+`Error`；Label 文本内容、Button 默认行为与 `GameStateCommands` 仍属于后续切片）：
 
 ```cpp
 class SettingsPanelState final : public Tina::IGameState {
@@ -181,6 +184,15 @@ public:
                                     },
                                 }));
         TRY(tree.setPointerHitPolicy(button_, Tina::UI::UIPointerHitPolicy::Targetable));
+        buttonPointerListener_ = TRY(tree.addRoutedPointerListener(
+            {.node = button_,
+             .kind = Tina::UI::UIRoutedPointerEventKind::ButtonDown,
+             .phases = Tina::UI::UIEventPhaseMask::Target},
+            Tina::UI::UIRoutedPointerCallback{
+                [this](Tina::UI::UIRoutedPointerEvent& event) noexcept {
+                    launchRequested_ = true;
+                    (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
+                }}));
         return Core::success();
     }
 
@@ -204,6 +216,7 @@ public:
     }
 
     void onExit(Tina::GameStateExitContext&) noexcept override {
+        buttonPointerListener_.reset();
         root_.reset();
     }
 
@@ -212,15 +225,20 @@ private:
     Tina::UI::UINodeId panel_{};
     Tina::UI::UINodeId label_{};
     Tina::UI::UINodeId button_{};
+    Tina::UI::UIRoutedPointerListenerToken buttonPointerListener_{};
+    bool launchRequested_ = false;
 };
 ```
 
-后续 Widget action 只写 State intent/model；`IGameState::updateFrame()` 再提交 `GameStateCommands`。
-回调不访问全局 Runtime，不直接 push/pop 状态，也不捕获 Phase Context 或 UI facade。
+当前 routed Pointer callback 只写 State intent/model；`IGameState::updateFrame()` 再提交未来的
+`GameStateCommands`。回调不访问全局 Runtime，不直接 push/pop 状态，也不捕获 Phase Context 或 UI
+facade。State `onExit()` 必须先 reset listener token，再释放 root；token 自身不保活 Context/root。
 
 Action 是节点拥有的 retained property：`setAction` 原子替换同 kind action，`clearAction`、节点
 删除或 root 注销负责撤销，不返回容易被临时析构的 RAII token。需要观察 Runtime EventBus 的
-非 UI 订阅仍使用独立 RAII token，二者不能混为一套生命周期。
+非 UI 订阅仍使用独立 RAII token。当前低层 routed Pointer listener 使用
+`UIRoutedPointerListenerToken` 管理 callback registration；它与未来 retained Widget action、Runtime
+EventBus subscription 是三套不同生命周期，不能混用。
 
 ## 节点存储与结构修改
 
@@ -448,7 +466,10 @@ root-scoped、phase-epoch-scoped `PrimaryWindowUIRootBuilder`/`PrimaryWindowUITr
 `abortPhase()` 失效 facade，避免半开放 UI 能力跨过启动或帧回滚。
 普通 Game SDK 不获得裸 `UIContext*`，也不能在任意阶段调用 `createRoot()`；root 创建成功只证明 retained
 tree owner 已接入。D2 又证明 scoped `setBoxPaint()`、私有 bgfx SolidQuad pass 与最小可见 retained panel
-链路已接通；它仍不证明 Widget 文本、默认交互、Focus/Capture/Modal、Text/Glyph 或完整产品 UI。
+链路已接通。后续 extension 又让同一个 root-scoped updater 注册 routed Pointer listener；返回 token 可由
+State 跨 phase 保存，而 facade/updater 仍在回调结束失效。EngineHost 门禁证明 listener 在 ActionMapper
+之前执行，claim-only callback 也可抑制同帧 Gameplay Action。它仍不证明 Widget 文本、默认交互、
+Focus/Capture/Modal、Text/Glyph 或完整产品 UI。
 
 Runtime 在每次状态命令提交后，根据 committed `GameStateStack`、`GameStatePolicy` 和 root
 registration 生成每窗口不可变 `UIInputScopeSnapshot`。它按视觉层级列出 eligible roots，并在
@@ -469,6 +490,10 @@ generation 校验且未被新 modal 覆盖时恢复焦点。状态命令在路�
 - 每个路由阶段重新解析 UINodeId owner + generation；listener 按稳定注册顺序；
 - 当前 C1c-b2 只执行 Capture -> Target -> Bubble listener dispatch，不执行 Widget default action；
 - route 中新增 listener 从下一次 route 生效；删除/重置立即 tombstone，route cleanup 后回收 callback storage；
+  root-scoped updater 注册会校验 current root/subtree，跨 root/stale generation 原子失败且不占 slot；
+- fixed-inline callback 的 move/destructor 可以执行用户代码；最终 move 后重新校验 root、node generation、
+  subtree 与 registration serial，重入释放 root/节点会回滚整个 registration。callback operation 中销毁
+  `UIContext` 触发生命周期 terminate；
 - 目标后续才保存 Pointer Capture；当前 synthetic route 只支持 primary pointer，不把预留字段宣称为触摸支持；
 - Focus、Modal、Keyboard、Gamepad Accept/BackNavigation 与 Button default action 后续复用同一生命周期。
 
@@ -483,8 +508,8 @@ ActionMapper；Headless bind 前和当前无 root 的 Context 都自然得到无
 两份 `None`。本帧稍后的 b3d1 layout commit 不改变已经完成的 route 结果。独立
 `tina_runtime_ui_tests` 直接运行 GoogleTest，不通过 CTest；当前 Game SDK 能创建/更新 retained root，
 D0 也已提交借用式 primary-window UIDisplayList，D2 已补 scoped `setBoxPaint()` 并由 Desktop 样例证明
-可见 SolidFill panel。它仍不构成可交互 Widget、Label/Button 文本、Focus/Capture/Modal、Text/Glyph 或
-Scene UI overlay 的完成证据。
+可见 SolidFill panel；后续 listener extension 只增加低层 routed callback/claim seam。它仍不构成
+可交互 Widget、Label/Button 文本、Focus/Capture/Modal、Text/Glyph 或 Scene UI overlay 的完成证据。
 
 ## PaintCache、DisplayList 与批处理
 
@@ -665,13 +690,15 @@ callback、token move/context-destroyed/off-thread reset、callback root 自销�
 以及递归 route 拒绝。M7-C1c-b3d2 另补3项低层 `UITreeUpdater` 子节点创建/跨 root/失效 root 测试；
 M7-C1c-b3e 再补3项 claim 合并/非法值/无命中测试。SolidFill paint 切片新增11项测试，覆盖确定性
 premultiplication、visible/transparent 筛选、paint-only/no-op revision、四份 snapshot rollback、固定容量与
-supplied PMR。Windows MSVC 19.50 Debug、Linux GCC 13.4、Linux Clang 22.1.8 + libstdc++15.2
-ASan/UBSan/LSan 当前完整 `tina_ui_tests` 均为92/92，且 Clang 无 sanitizer 诊断。Windows MSVC
-19.50 / CMake 4.2.3 Release 也已通过92/92。初次 GCC
+supplied PMR。后续 listener extension 再补 root-scoped/cross-root 原子注册、callback move 释放 root 的
+事务回滚，以及 callback move 销毁 Context 的 death test。最新 Windows MSVC 19.50 / CMake 4.2.3
+Debug `tina_ui_tests` 为95/95；上一轮 Windows Release、Linux GCC 13.4、Linux Clang 22.1.8 +
+libstdc++15.2 ASan/UBSan/LSan 仍为92/92，且 Clang 无 sanitizer 诊断，本轮没有重跑这些图。初次 GCC
 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
 Render builder 的11项测试随 Windows Debug、Linux GCC/Clang `tina_tests` 205/205 通过；D0 后
 Windows Debug/Release 基础测试增至207/207，`tina_runtime_ui_tests` 在 D2 增至53/53，并且 Null 样例
-300帧通过。独立 UI→Render bridge 的12项直接 GoogleTest 在 Windows Debug/Release 与两条 Linux 图均通过。
+300帧通过。listener extension 的最新 Windows Debug 又增至基础208/208、Runtime→UI55/55，并重跑
+Null样例300帧；本轮未重跑 Release 或 Linux。独立 UI→Render bridge 的12项直接 GoogleTest 在前序 Windows Debug/Release 与两条 Linux 图均通过。
 Linux Null 样例各运行300帧，Clang 无 sanitizer 诊断。D1 的私有 bgfx 几何测试覆盖 SolidQuad 展开为
 4顶点/6个32位索引、ABGR 颜色、容量失败不写入、非法命令预检和连续300次复用 caller-owned storage；
 Windows bgfx 专项增至16/16。D2 Desktop 样例在 Windows D3D11 上验证4个 retained SolidFill panel 可见、
@@ -723,11 +750,13 @@ handoff，D2 才扩大到 SolidFill paint authoring 与最小可见 retained pan
     前构建 submit-call-local borrowed list，Headless/0 framebuffer/suspended 为空 list；
 14. 已完成 Game SDK scoped `setBoxPaint()` 与私有 bgfx SolidQuad UI Pass；Desktop 样例显示4个 retained
     SolidFill panel，并验证 alpha/scissor/root 回收；
-15. 实现 Key/Gamepad claim producer、dirty subtree pruning、完整 Widget authoring、owning
+15. 已完成 Game SDK root-scoped `addRoutedPointerListener()`、跨 phase token 生命周期、callback move
+    重入回滚，以及 claim-before-ActionMapper 端到端门禁；
+16. 实现 Key/Gamepad claim producer、dirty subtree pruning、完整 Widget authoring、owning
     RenderFramePacket 与 FramePin；
-16. 完成 Image/Text/Glyph PaintCache、text layout + glyph atlas；
-17. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
-18. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
-19. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
+17. 完成 Image/Text/Glyph PaintCache、text layout + glyph atlas；
+18. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
+19. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
+20. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
 
 所以“完善 UI”首先是完成正确的数据和 backend 边界，然后才是增加 Widget 数量。

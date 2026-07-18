@@ -79,9 +79,15 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
   `PrimaryWindowUITreeUpdater`；两者都是 move-only、owner-thread、phase-epoch-scoped facade，回调结束后
   无条件失效。第一次 capability operation 失败会成为该 phase 的 sticky error，并在 callback 返回后由
   Runtime 与 callback status 合并；
+- 后续 Game SDK listener 扩展允许 State 在 `onEnter()`/`updateUI()` 的 current-phase、root-scoped updater
+  上调用 `addRoutedPointerListener()`。facade/updater 不能跨 phase 保存，只有 move-only listener token 可以；
+  token 不保活 Context/root，State 在 `onExit()` 先 reset token、再 reset root；
 - M7-C1c-b3e 允许 routed Pointer listener 通过 `claimPointerButton()` 请求接管当前 route Window/Pointer
   上仍 held 的 primary Pointer Button。Runtime 按最终 snapshot 过滤、跨 route 去重并发布 bounded claim；
   ActionMapper 取消已 active 的 Gameplay source，或直接拦截同帧尚未消费的 ButtonDown，并抑制到真实 Up；
+- EngineHost 端到端门禁证明 Game SDK listener 在 producer route 阶段执行，早于
+  `FrameUpdateContext::frameActions()`；即使 callback 不调用 `consumeInputTransition()`，只 claim 当前仍 held
+  的 primary Pointer Button，也不会发布同帧 Gameplay transition；
 - 当前帧循环为 Poll Platform → frame/payload/capacity/sequence 预校验 → Platform lifecycle dispatch
   → primary UIContext selection + UI Input Routing → Action Mapping → Fixed Update（0..4）→ Frame Update
   → Render Scene Extraction → UI Update → primary UI Layout/Paint Commit → primary UI DisplayList build
@@ -103,7 +109,8 @@ committed hit-snapshot 数据基础、point query/反向目标选择、synthetic
 Runtime-private producer/primary Context 接线、Runtime-private 每帧 layout commit，以及 startup
 primary-window seed + root-scoped phase capability、held primary Pointer Button claim bridge、SolidFill-only
 paint/DisplayList bridge、D0 submit-call-local primary-window UIDisplayList handoff、D1 bgfx consumption
-和 D2 `PrimaryWindowUITreeUpdater::setBoxPaint()` facade。
+和 D2 `PrimaryWindowUITreeUpdater::setBoxPaint()` facade，以及后续 root-scoped
+`addRoutedPointerListener()` facade。
 Panel/Label/Button 只是在 retained tree 中可创建的节点类型；当前只有 SolidFill panel 可见样例，
 还没有 Label 文本或 Button 默认行为。Key/Gamepad/axis claim、
 持久 Pointer Capture、Focus/Modal、Button
@@ -195,7 +202,8 @@ continuous-control producer：Move/Wheel/Button route 都可请求接管最终�
 且 consumption 与 claim 分开发布。D0 进一步在 layout/paint commit 后、Render submit 前构建
 primary-window UIDisplayList，并通过 `RenderFrame::primaryWindowUIDisplayList` 作为 submit-call-local
 borrow 交给 backend；backend 不得保留该 view、span 或元素指针。D1 的私有 bgfx backend 已消费
-SolidQuad DisplayList，D2 的 Game SDK facade 已能 author SolidFill box paint。Key/Gamepad/axis claim、
+SolidQuad DisplayList，D2 的 Game SDK facade 已能 author SolidFill box paint。当前 Game SDK listener
+extension 只提供低层 routed callback/claim seam，不等于 Button default action。Key/Gamepad/axis claim、
 Focus/Capture/Modal、Text/Glyph 与 Widget 默认行为仍后置。Gameplay Action
 带目标 simulation tick，由 fixed loop 消费。
 
@@ -205,7 +213,8 @@ Focus/Capture/Modal、Text/Glyph 与 Widget 默认行为仍后置。Gameplay Act
 bind primary UIContext 或 Headless unavailable → `onEnter`（可使用 root capability）→ sample policy →
 startup UI layout/hit snapshot → frame loop → `onExit` → Application `onShutdown` → module shutdown。
 M7-C1c-b3d2 已实现 backend-neutral startup primary-window metrics seed 和 root-scoped、phase-epoch-scoped
-capability；尚未实现的是完整 GameStateStack、TaskGroup barrier 或状态命令提交。
+capability；后续 listener extension 允许 State 保存 RAII token，但 `onExit()` 必须先 reset token、再释放
+对应 `UIRootOwner`。尚未实现的是完整 GameStateStack、TaskGroup barrier 或状态命令提交。
 
 完整目标顺序为：
 
