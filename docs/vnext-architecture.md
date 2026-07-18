@@ -46,7 +46,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | `tina_platform` | Window/Input/Event 公共描述、Headless backend、线程命名和不透明 Render surface | `tina_core`、OS 最小适配 | GLFW 公共类型、文件/资产 IO、Scene、Renderer、UI Widget |
 | `tina_platform_glfw` | 最终承载 GLFW Window/Input/Gamepad、DPI、Windows IMM32；当前已完成 Window/Keyboard/Pointer/Focus/resize/close/committed text | core/platform、GLFW、OS API | Scene、Asset、UI Widget、bgfx 类型 |
 | `tina_task` | 有界任务队列、协作取消、后台工作与主线程 completion | `tina_core`、`tina_platform` 的线程命名能力 | Asset 类型、渲染命令、强杀线程 |
-| `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、GameStateStack、RenderFramePacket/pool | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
+| `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、GameStateStack、RenderFramePacket/pool；当前含 M7-C1c-b3b private UI route-result producer | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
 | `tina_scene` | World、generation `EntityId`、Transform、Camera、render components 与资产解析 facade | core、asset 公共接口、render descriptors、EnTT 内部实现 | GLFW 输入、TileMap 玩法、bgfx 类型 |
 | `tina_asset` | Asset 状态机、依赖、取消、CPU completion 与 GPU upload 协议 | core/task、render 接口、asset_format | 直接解析源 glTF、具体 bgfx 调用 |
 | `tina_asset_format` | Runtime/Cooker 共享的 Cooked header、schema、类型、依赖和 hash 编解码 | core | Asset registry、窗口、GPU、源格式 parser |
@@ -244,6 +244,8 @@ flowchart TD
 vNext 不再保留第二套并列的 SceneManager 栈；旧 Scene 在迁移时转换成 IGameState，World
 只是数据世界。`UIContext` 由 Runtime WindowRecord 唯一拥有，Platform/Event 只投递输入。
 首期只有一个 primary Window/UIContext，多窗口保留 `WindowId` 扩展点但不进入验收范围。
+这是冻结的目标所有权；当前 `EngineHost` 尚未建立 WindowRecord→`UIContext` owner/selection，
+M7-C1c-b3b 的 private producer 仍只在独立测试中显式传入 Context。
 
 Gameplay/UI Input、Fixed Update、Frame Update 从栈顶向下传播直到对应 committed block flag；
 Render 从最底可见层向上构建。
@@ -520,9 +522,13 @@ layout，失败的 `commitLayout()` 不发布任何 structure/layout/hit 候选�
 M7-C1c-b2 已实现 synthetic routed pointer event：固定容量 route path/listener storage、48-byte fixed-inline
 `noexcept` callback、generation-safe RAII token、Capture→Target→Bubble、stop/consume、route 中 add/reset/destroy
 安全失效与 route/commit reentrancy guard。M7-C1c-b3a 已让 Button/Wheel raw transition 固化事件时
-window-logical position，最终 Pointer snapshot 只表示 Poll 结束状态，不能替代 route 输入。当前 `tina_ui`
-仍只依赖 Core/Platform；Runtime UI producer、
-持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、dirty subtree pruning、
+window-logical position，最终 Pointer snapshot 只表示 Poll 结束状态，不能替代 route 输入。M7-C1c-b3b 已实现
+Runtime-private `UIInputRouteProducer`：只路由 Move/Button/Wheel，reset/cancel/非 Pointer 保留 raw ordinal
+hole，consumption 使用双预分配 PMR bitset，claims 恒为 canonical `None`；300帧共用 supplied PMR 时
+allocation count 不增长，且该 PMR 必须长于 producer。通过 preflight 后的 route 失败不发布但推进
+attempted watermark；同帧先发生的1次 listener side effect 不可回滚，retry 被拒且不重放。独立
+`tina_runtime_ui_tests` 直接运行 GoogleTest、不使用 CTest。当前 `tina_ui` 仍只依赖 Core/Platform；
+`EngineHost` 仍传 canonical `None`，也未拥有/选择 `UIContext`。持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、dirty subtree pruning、
 FreeType 与 bgfx UI pass 仍未实现。完整目标中 UI 树输出后端无关的 Quad、Image、
 GlyphRange、Clip DisplayList，由 Render 层保持 paint order 批处理。
 
@@ -558,7 +564,8 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
 4. **M7-C–E UI/IME/Gamepad**：M7-C1a 已完成 `tina_ui` 树核心、generation `UINodeId`、
    `UIContext`、`UIRootOwner` RAII、结构 snapshot 和 route-result view ABI；M7-C1b 已完成事务式
    Flex-lite layout foundation，M7-C1c-a 已完成 committed hit-snapshot 数据基础，M7-C1c-b1 已完成
-   point query 与反向目标选择，M7-C1c-b2 已完成 synthetic listener route。后续继续实现 Runtime UI producer、
+   point query 与反向目标选择，M7-C1c-b2 已完成 synthetic listener route，M7-C1c-b3b 已完成独立
+   Runtime-private producer。后续继续实现 EngineHost UIContext ownership/selection 与 producer 接线、
    dirty subtree pruning 与 DisplayList、Label/Button/Modal + FreeType、bgfx UI pass、IMM32/Gamepad/DPI 门禁；
 5. **Scene/2D**：generation Entity、Transform、Camera、Sprite extraction 形成 2D 样例；
 6. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D
@@ -595,6 +602,9 @@ vNext-only preset 设为 OFF；当新2D/UI/3D/Audio 覆盖门禁后先把默认�
   GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均 `tina_ui_tests` 75/75，且 Clang
   无 sanitizer 诊断；初次 GCC 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次
   GCC/Clang 构建无 warning；
+- M7-C1c-b3b Runtime→vNext UI producer 使用独立 `tina_runtime_ui_tests`，Windows MSVC 19.50
+  Debug/Release、Linux GCC 13.4 Null 与 Clang 22.1.8 Null sanitizer 均直接 GoogleTest 12/12；
+  GCC 完整重编译无 warning、Clang 无 sanitizer 诊断；测试不使用 CTest，也不与 Legacy UI 的最终二进制混装；
 - Linux GCC 与 Clang 构建；正式支持前还要运行 GLFW/bgfx 2D/UI/3D，Clang sanitizer 只有真实
   运行通过后才能标记完成；
 - GLFW X11 与 Wayland 使用独立 preset 和真实/隔离 display server 运行；configure/build 成功不等于

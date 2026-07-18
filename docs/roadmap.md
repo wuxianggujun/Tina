@@ -95,15 +95,15 @@ M6 生命周期之后仍未实现：
 
 - 完整 GameStateStack/commands/policy propagation、通用 Runtime Event Queue 与 State TaskGroup；
 - M7-A 已补齐有界 PlatformFrame/Input/Action、Platform lifecycle dispatch，以及私有 GLFW
-  Window/Keyboard/Pointer/committed text desktop adapter；UI routed consumption producer、IMM32、
-  production Gamepad 和连续 axis mapping 仍在后续子切片；
+  Window/Keyboard/Pointer/committed text desktop adapter；M7-C1c-b3b 已补独立 Runtime-private UI routed
+  consumption producer，但 EngineHost ownership/selection/接线、IMM32、production Gamepad 和连续 axis
+  mapping 仍在后续子切片；
 - 有界 CPU/IO/Main worker、阶段指标与完整 shutdown deadline/fatal-stop；
 - typed render resource handle、Pass Scheduler、World RenderScene/UIDisplayList、Runtime-private
   RenderFramePacket/pool 与 submission completion 保活；
-- Scene、Asset、Audio 的真实契约和消费者，以及 Runtime-integrated UI producer/layout/render
+- Scene、Asset、Audio 的真实契约和消费者，以及 Runtime-integrated UI ownership/layout/render
   pipeline；M7-C1b/C1c-a/C1c-b1/C1c-b2 C++23 standalone `tina_ui` tree/layout/committed-hit/
-  point-query/synthetic-route foundation 已实现，
-  但尚未接入 Runtime；
+  point-query/synthetic-route foundation 与 M7-C1c-b3b 私有 producer 已实现，但尚未接入 EngineHost；
 - `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
 - Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；M7-B2 Desktop bgfx
   X11 图也已完成 GCC 13.4 和 Clang 22.1.8 + ASan/UBSan/LSan 的183/22/11直接测试及300帧门禁。
@@ -143,7 +143,7 @@ Debug/Release也均通过183/183、22/22与Null/GLFW样例各300帧。GCC 13 X11
   digital Action Map 和有序 Simulation Action latch，验证0/1/4 fixed-step 只消费一次；
 - **已完成**：`EngineConfig::inputActions` 注册唯一 Engine default Input Context 的 digital bindings；
   raw/event/text、action/binding 与 subscription 分别由职责明确的配置块一次性分配。UI claim
-  在 M7-A 无 producer，内部固定上限64；Escape 不走 backend shortcut；
+  在 M7-C1c-b3b producer 中仍恒为 canonical `None`，内部固定上限64；Escape 不走 backend shortcut；
 - **已完成**：Runtime 建立只承载 resize/focus 等平台生命周期的有界 private `PlatformEventDispatcher`；Game SDK
   只暴露 `PlatformEventSubscriptions` 与 RAII subscription；
   OS CloseRequested 只走 control outcome，不进入队列；这不是通用 Gameplay EventBus；
@@ -235,9 +235,16 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
 - **已完成 M7-C1c-b3a**：Pointer Button/Wheel transition 固化事件时 window-logical position，
   `PlatformFrameBuilder` 拒绝非有限坐标，私有 GLFW producer 按 callback 顺序保存位置；新增 builder
   与真实 GLFW 集成门禁证明 `A → Button/Wheel → B` 中事件仍使用 A，帧末 B 不会覆盖历史坐标；
+- **已完成 M7-C1c-b3b**：实现 Runtime-private `UIInputRouteProducer` 与独立
+  `tina_runtime_ui_tests`；只把 Move/Button/Wheel 逐 raw ordinal 路由，reset/cancel/非 Pointer 保留 hole，
+  consumed 写入双预分配 PMR bitset，claims 恒为 canonical `None`；300帧共用 supplied PMR 时 allocation
+  count 不增长，且 supplied PMR 必须长于 producer；
+- **已完成 M7-C1c-b3b 失败边界**：测试先产生1次 root Move listener side effect，再让后续深层
+  Button route 因 route path capacity 失败；staging 不发布、旧 published view 保持，但推进 attempted
+  watermark，同一 frame retry 被拒且 callback 仍为1。测试 target 直接运行 GoogleTest，不使用 CTest；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
-  subtree 尚未实现；
-- **仍后置**：Runtime UI producer、dirty subtree pruning、持久 Pointer Capture、Focus/Modal、
+  subtree 尚未实现；`EngineHost` 仍传 canonical `None`，也未拥有/选择 `UIContext`；
+- **仍后置**：EngineHost→UIContext producer 接线、dirty subtree pruning、持久 Pointer Capture、Focus/Modal、
   Button default action、paint snapshot/DisplayList、nested clip、text/glyph、FreeType 与 bgfx UI pass；
 - 后续继续实现后端无关 Quad/Text/Clip DisplayList、FramePinSink/capacity rollback 和相邻兼容 batching
   contract；Null UI 直接测试 route/layout/paint order，不链接 FreeType/bgfx；

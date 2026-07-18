@@ -5,7 +5,8 @@
 > Window/Keyboard/Pointer/Focus/resize/close/committed text。M7-B1 已完成私有 WindowSurface handoff；
 > M7-B2 已完成私有真实 bgfx clear/present 和 Desktop smoke，production Gamepad、Windows IMM32 composition、OS Pointer
 > Capture 与完整 DPI/UI 门禁仍是后续能力。M7-C1c-b3a 已补齐 Pointer Button/Wheel 的事件时
-> logical position，Runtime UI producer 不得再用帧末 Pointer snapshot 猜测命中位置。
+> logical position；M7-C1c-b3b 已实现独立 Runtime-private `UIInputRouteProducer`，但 `EngineHost` 仍传
+> canonical `None` 且未拥有/选择 `UIContext`。
 
 ## 结论
 
@@ -172,6 +173,20 @@ consumer 读取这些 view：
 - `Tina::UI::ContinuousControlClaimsView` 使用归一化 window/device/control identity，声明本帧由 UI 拥有的
   held/axis/pointer-delta。它不修改 Platform Snapshot，也不是跨帧容器。
 
+M7-C1c-b3b 的 Runtime-private `UIInputRouteProducer` 已实现当前最窄转换：只把 raw Pointer
+Move/Button/Wheel 按序映射为 `UIPointerInputEvent`，Button/Wheel 必须使用 transition 自带的事件时
+logical position。listener 调用 `consumeInputTransition()` 时，producer 在同一 raw ordinal 的 bit 上标记
+consumed；reset、cancel、Key/Text/Gamepad 等非 Pointer 项不路由，也不伪造 Button Up，而是在 raw ordinal
+空间保留 hole。`ContinuousControlClaimsView` 当前始终为 canonical `None`。
+
+consumption 使用 Create 期双预分配 PMR bitset；成功发布只交换 staging/published storage，supplied
+`memory_resource` 必须比 producer 活得更久，300帧共用时 allocation count 不增长。失败测试先让 root
+Move listener 产生1次 side effect，再让后续深层 Button route 因 route path capacity 失败；本次 staging
+不发布、上一份成功 view 保持，但 attempted watermark 已推进，同一 frame retry 被拒且 callback 仍为1，
+证明 listener side effect 不回滚也不重放。独立 `tina_runtime_ui_tests` 直接运行 GoogleTest，不使用 CTest。
+这仍不是正式帧集成：`EngineHost` 没有 WindowRecord→`UIContext` ownership/selection，继续把 canonical
+`None` consumption/claims 传给 ActionMapper。
+
 M7-A Action Mapper 只实现 digital binding，因此当前真正参与 suppression 的 claim 是 Key、Primary
 Pointer Button 与 Gamepad Button。`GamepadAxisControlIdentity` 和 Pointer continuous identity 已冻结为
 UI/Runtime seam schema，但在 analog/pointer action mapping 落地前不会产生 axis/continuous Gameplay
@@ -237,7 +252,8 @@ M7-A 容量在 `EngineConfig::platformFrameCapacities`、`inputActions.capacitie
 | digital binding | 64 | 0 | 4096 |
 
 `Tina::UI::InputTransitionConsumptionView` 是按本帧 raw transition ordinal 建立的固定 bit storage，不另设独立
-capacity。raw 输入一旦 overflow，builder 写入 reset 后，本次 Poll 后续 callback 只更新最终设备
+capacity。M7-C1c-b3b producer 按 configured raw capacity 加一个 reserved reset slot 预分配两份 bitset，
+因此有效 raw 项与末尾 reset 都能保持原 ordinal。raw 输入一旦 overflow，builder 写入 reset 后，本次 Poll 后续 callback 只更新最终设备
 snapshot，不再追加 transition；Mapper 根据 reset + 最终 snapshot resync，并把仍 held/non-neutral
 control 保持 suppressed。`PlatformEventBatch` 先合并同窗口最终 resize/scale/focus；仍满时写入 reset，
 本 Poll 后续只更新最终 registry/snapshot。Simulation latch overflow 则清除 reset 前未消费 transient
@@ -358,18 +374,21 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
 - M7-A 只接受 `PrimaryPointerId`；Gamepad snapshot 同 owner、slot 唯一，Engine 级 Gamepad 输入每帧
   只路由一次到 primary window；跨帧 retained active/suppressed source 与最终 held snapshot 一致；
 - Platform 生命周期通知与 Headless/Input Action 映射互不重复投递；M7-C1a 已实现 UI-owned
-  route-result view ABI，但 Runtime UI producer 尚未实现；公共头文件
+  route-result view ABI，M7-C1c-b3b 已实现独立 Runtime-private producer 和 `tina_runtime_ui_tests`；
+  `EngineHost` 尚未拥有/选择 `UIContext`，正式路径仍传 canonical `None`；公共头文件
   不含 GLFW/SDL 类型，Headless backend 不链接、不加载 GLFW 或 SDL；
 - M7-B1 覆盖 `WindowSurfaceId` generation、`WindowSurfaceSnapshot` identity/revision/suspended、
   move-only `NativeWindowSurfaceLease`、重复 lease 拒绝、Render 创建失败与窗口发布失败逆序回滚、
   surface snapshot 只由 committed metrics 派生、resize/content-scale/suspend 改变才递增
   `surfaceRevision`，以及 NullRender suspended 帧维护调用但不 present、不增加 submission index；
-- Windows 最新门禁在 MSVC 19.50.35717 与 CMake 4.2.3 下通过：Debug/Release 基础
-  `tina_tests` 185/185、GLFW专项23/23；本次另运行 WindowSurface GLFW样例1800帧返回0。
-  `tina_sample_null` 300帧与 `TINA_BUILD_TESTING=OFF` production-style GLFW样例300帧是上一门禁结果；
-- Linux 当前 Pointer/Input 门禁通过基础185/185、GLFW专项23/23；Clang 22.1.8 X11 sanitizer
-  图的当前基础测试不使用 suppression，只有 GLFW/X11 专项进程使用精确 `leak:_XimOpenIM`，对应
-  13次/5304 B的libX11 XIM retention。GCC 13.4 与 Clang X11 的 Null/GLFW样例各300帧均为
+- Windows 最新 C1c-b3b 门禁在 MSVC 19.50.35717 与 CMake 4.2.3 下通过：Debug/Release 基础
+  `tina_tests` 185/185、独立 UI 75/75、独立 Runtime→UI 12/12。上一 C1c-b3a Pointer/Input
+  门禁通过 GLFW专项23/23，并运行 WindowSurface GLFW样例1800帧返回0；`tina_sample_null`
+  300帧与 `TINA_BUILD_TESTING=OFF` production-style GLFW样例300帧是更早门禁结果；
+- Linux 最新 C1c-b3b Null 门禁通过基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12，
+  Clang 22.1.8 sanitizer 无诊断。上一 C1c-b3a Pointer/Input 门禁通过基础185/185、GLFW专项23/23；
+  其中 Clang X11 的基础测试不使用 suppression，只有 GLFW/X11 专项进程使用精确
+  `leak:_XimOpenIM`，对应13次/5304 B的libX11 XIM retention。GCC 13.4 与 Clang X11 的 Null/GLFW样例各300帧均为
   上一产品门禁，其中 Clang GLFW样例命中1次/408 B。GCC 13 Wayland 双后端产物
   在带 `wl_seat` 的嵌套 Weston 9 下通过183/183、22/22与样例300帧，并通过移除
   `DISPLAY` 与断言 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND` 确认真正使用 Wayland；

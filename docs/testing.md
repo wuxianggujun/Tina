@@ -4,7 +4,8 @@
 
 - 测试框架固定为 GoogleTest；
 - `TINA_BUILD_TESTING=ON` 时 CMake 生成基础 `tina_tests`；M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、命中快照、point query 与 synthetic route 核心另有独立
-  `tina_ui_tests`；启用
+  `tina_ui_tests`，M7-C1c-b3b Runtime→vNext UI producer 另有独立 `tina_runtime_ui_tests`；后者不能并入
+  Legacy ON 时含旧 `Tina::UI` 定义的 `tina_tests` 最终二进制；启用
   `TINA_BUILD_PLATFORM_GLFW` 时另外生成 `tina_platform_glfw_tests`，启用
   `TINA_BUILD_RENDER_BGFX` 时另外生成 `tina_render_bgfx_tests`，不注册额外测试调度；
 - 构建完成后直接运行对应 GoogleTest executable，任一返回码非0即失败；
@@ -19,21 +20,21 @@
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a：Core/Platform/Input/Task/Render/Runtime/UI、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Debug C++23 | 185/185 | 本次基础185/185、GLFW 23/23；bgfx 11/11与独立 UI 75/75为上一门禁 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a：Core/Platform/Input/Task/Render/Runtime/UI、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Release C++23 | 185/185 | 本次基础185/185、GLFW 23/23；bgfx 11/11与独立 UI 75/75为上一门禁 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b：Core/Platform/Input/Task/Render/Runtime/UI、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Debug C++23 | 185/185 | 本次基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12；GLFW 23/23与 bgfx 11/11为前序门禁 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b：Core/Platform/Input/Task/Render/Runtime/UI、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Release C++23 | 185/185 | 本次基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12；GLFW 23/23与 bgfx 11/11为前序门禁 |
 | Windows 11 / MSVC 19.50 | Legacy ON 与 vNext M6-A 共存构建 | Debug C++23 | 135/135 | 通过 |
-| Ubuntu 22.04 / GCC 13.4 | vNext M6-A/M7-A/M7-B1/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a：X11 WindowSurface handoff + event-time Pointer/UI tree/layout/committed-hit/query/route core，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 185/185 | 本次基础与GLFW 23/23通过且无诊断；独立 Null UI 75/75为上一门禁 |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext M6-A/M7-A/M7-B1/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a：X11 WindowSurface handoff + event-time Pointer/UI tree/layout/committed-hit/query/route core，ASan/UBSan/LSan，基础测试无 suppression | Debug C++23 | 185/185 | 通过；GLFW 23/23，仅精确抑制第三方 XIM retention；无 Tina sanitizer 诊断 |
+| Ubuntu 22.04 / GCC 13.4 | vNext M6-A/M7-A/M7-B1/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b：X11 WindowSurface handoff + event-time Pointer/UI tree/layout/committed-hit/query/route core、独立 Runtime→UI producer，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 185/185 | 当前 Null 图基础185/185、UI 75/75、Runtime→UI 12/12；producer 完整重编译无 warning，X11 GLFW 23/23为上一门禁 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext M6-A/M7-A/M7-B1/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b：X11 WindowSurface handoff + event-time Pointer/UI tree/layout/committed-hit/query/route core、独立 Runtime→UI producer，ASan/UBSan/LSan | Debug C++23 | 185/185 | 当前 Null sanitizer 图基础185/185、UI 75/75、Runtime→UI 12/12且无 Tina 诊断；X11 GLFW 23/23与精确第三方 XIM suppression为上一门禁 |
 
 GLFW adapter 和 bgfx adapter 测试是独立 executable，不能把多个进程伪写成单个合并测试数。当前测试拓扑为：
 
 | 构建图 | 基础 GoogleTest | GLFW 专项 GoogleTest | bgfx 专项 GoogleTest | 状态 |
 | --- | ---: | ---: | ---: | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 185/185 | 23/23 | 11/11（上一门禁） | 本次复验基础/GLFW，并将 WindowSurface GLFW样例重新链接后运行1800帧；独立 UI 75/75及其余产品样例为上一门禁 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 185/185 | 23/23 | 11/11（上一门禁） | 本次复验基础/GLFW；独立 UI 75/75与Release产品样例为上一门禁 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 production-style | 测试 target 关闭 | 不构建 | 不构建 | 上一门禁：`TINA_BUILD_TESTING=OFF`，GLFW样例300帧返回0 |
-| Ubuntu 22.04 / GCC 13.4 + GLFW X11 | 185/185 | 23/23 | 未运行 | 通过；本次 event-time Pointer 门禁无 warning；独立 Null UI 历史门禁75/75，Null样例与WindowSurface GLFW样例历史门禁各300帧返回0 |
-| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11 + ASan/UBSan/LSan | 185/185 | 23/23 | 未运行 | 通过；本次基础测试无 suppression且无诊断；GLFW仅精确抑制第三方 `_XimOpenIM`，13次/5304 B；独立 UI 与样例数字保留上一切片门禁 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 185/185 | 23/23（C1c-b3a） | 11/11（更早门禁） | C1c-b3b 直接复验基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12；C1c-b3a 另将 WindowSurface GLFW样例重新链接后运行1800帧 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 185/185 | 23/23（C1c-b3a） | 11/11（更早门禁） | C1c-b3b 直接复验基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12；产品样例保留前序门禁 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 production-style | 测试 target 关闭 | 不构建 | 不构建 | 更早门禁：`TINA_BUILD_TESTING=OFF`，GLFW样例300帧返回0 |
+| Ubuntu 22.04 / GCC 13.4 + GLFW X11 | 185/185 | 23/23（C1c-b3a） | 未运行 | C1c-b3b Null 图直接通过基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12且 producer 完整重编译无 warning；样例保留历史门禁 |
+| Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11 + ASan/UBSan/LSan | 185/185 | 23/23（C1c-b3a） | 未运行 | C1c-b3b Null sanitizer 图直接通过基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12且无诊断；C1c-b3a GLFW仅精确抑制第三方 `_XimOpenIM`，13次/5304 B |
 | Ubuntu 22.04 / GCC 13.4 + GLFW X11/Wayland 双后端 | 183/183 | 22/22 | 未运行 | 通过；嵌套 Weston 9 强制 Wayland 与 Xvfb 强制 X11 均通过基础、专项与300帧样例 |
 | Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11/Wayland 双后端 + ASan/UBSan/LSan | 183/183 | 22/22 | 未运行 | 通过；基础测试无 suppression且Null样例300帧；Wayland专项与样例 suppression 命中0，X11专项命中12次/4896 B、样例命中1次/408 B |
 
@@ -48,6 +49,16 @@ M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、committed hit snapshot、纯 point 
 GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均基础 `tina_tests` 185/185、
 `tina_ui_tests` 75/75；Clang 无 sanitizer 诊断。初次 GCC 暴露的 routed-pointer callback `requires`
 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
+M7-C1c-b3b 使用另一个独立 `tina_runtime_ui_tests`。12项用例覆盖 null Context canonical `None`、raw ordinal
+hole、63/64 bit 边界、Button/Wheel 事件时位置、reset/cancel/非 Pointer 不路由、不伪造 Up、claims 恒
+`None`、ActionMapper suppression、预留 reset slot、float 表示范围预检，以及300帧共用 supplied PMR 时
+allocation count 不增长。supplied `memory_resource` 是私有借用依赖，必须比 producer 活得更久。
+失败门禁先让 root Move listener 产生1次 side effect，再让后续深层 Button route 因 route path capacity
+失败；staging 不发布、上一份成功 view 保持，attempted watermark 已推进，同帧 retry 被拒且 callback 仍为1，
+证明既不回滚也不重放 listener side effect。该 target 直接执行 GoogleTest，不注册 CTest。
+当前 Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug/Release、Linux GCC 13.4 Null 与
+Clang 22.1.8 + libstdc++15.2 Null sanitizer 均已直接运行12/12并返回0；GCC 完整重编译无 warning，
+Clang 无 sanitizer 诊断。该独立 executable 不能用基础 `tina_tests` 或 `tina_ui_tests` 数量代替。
 X11 在隔离 X server 下运行。GCC Wayland 门禁由 Xvfb 托载
 Weston 9 `x11-backend` 并提供 `wl_seat`；移除 `DISPLAY` 后断言
 `glfwGetPlatform() == GLFW_PLATFORM_WAYLAND`，再运行专项测试和300帧样例。同一双后端产物
@@ -154,8 +165,8 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   stopPropagation、stopImmediatePropagation、dispatch 中 reset/add/destroy、generation-safe target invalidation、
   listener 容量原子失败与复用、route depth 容量失败无 partial callback、token move/context-destroyed/
   off-thread reset、callback root 自销毁、route 中 commit 拒绝、错误 context 销毁 death test、300次 route
-  零新增 supplied-PMR 分配/不改变 committed state 和递归 route 拒绝。Windows MSVC 19.50 Debug/Release 与
-  Linux GCC 13.4/Clang 22 sanitizer 均为75/75，Linux 基础183/183，Clang 无 sanitizer 诊断；初次 GCC
+  零新增 supplied-PMR 分配/不改变 committed state 和递归 route 拒绝。该 C1b2 历史门禁中，Windows MSVC 19.50 Debug/Release 与
+  Linux GCC 13.4/Clang 22 sanitizer 均为75/75，当时 Linux 基础为183/183，Clang 无 sanitizer 诊断；初次 GCC
   暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning；
 
 以下仍是 Legacy 共存构建的回归覆盖，不能当作 vNext UI/Scene/Asset 已实现：
@@ -190,7 +201,7 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   不合格 Sprite 被去重诊断并跳过；
 - Scene 延迟 push/pop/replace，以及 fixed phase mutation barrier、延迟实体销毁和
   interpolation snapshot；
-- UI WindowRecord 唯一 ownership、Runtime 输入生产者与 listener/event route、committed paint/DisplayList snapshot、
+- UI 后续：WindowRecord 唯一 ownership、EngineHost 将已实现的 private producer 接线、committed paint/DisplayList snapshot、
   细粒度 dirty subtree pruning 和布局中新增 dirty 不丢；
 - UIInputScopeSnapshot 对多个 eligible State roots 只做一次全局 hit-test；阻断/恢复时 Pointer Cancel、
   Focus history、Modal root scope 与 generation 失效顺序固定；
@@ -206,7 +217,8 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   和稳定树序；Theme/DPI revision 只使必要 style/layout dirty，敏感 TextEdit 正文不进诊断；
 - Font Asset lease、UTF-8 非法序列替换、中文 fallback、Atlas page 满容量/退役、raster completion
   stale generation；text measure 与 raster 分离，glyph 发布只 Paint dirty，不改变既定 advance；
-- M7-C UI producer 必须把真实 routed consumption/continuous claim 接入已完成的 M7-A seam，并覆盖
+- M7-C1c-b3b private producer 已把 Move/Button/Wheel routed consumption 与 ActionMapper suppression 放进
+  独立门禁；后续必须由 EngineHost 选择/拥有 `UIContext` 并接入该 producer，增加真实 continuous claim 与
   capture/focus/modal 取消；M7-E GLFW Gamepad 只验证相邻 Poll sampled diff，实体矩阵和回滞/重复；
 - Replay 后续只记录 target tick、normalized action state、ordered edge 和 reset marker，不记录 GLFW
   key 或 UI node；CloseRequested 的真实 GLFW callback 路径不得重复发布生命周期或 gameplay 事件；
@@ -285,6 +297,20 @@ out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
 
 当前记录为 Windows MSVC 19.50 Debug/Release 均75/75。
 
+Windows M7-C1c-b3b Runtime→vNext UI producer 的独立直接门禁为：
+
+```powershell
+cmake --preset windows-msvc-vnext
+cmake --build --preset windows-vnext-debug --target tina_runtime_ui_tests
+out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
+
+cmake --build --preset windows-vnext-release --target tina_runtime_ui_tests
+out\build\windows-msvc-vnext\bin\Release\tina_runtime_ui_tests.exe --gtest_color=yes
+```
+
+当前记录为 Windows MSVC 19.50 Debug/Release 均12/12。这个 executable 必须与 `tina_ui_tests`、
+基础 `tina_tests` 分开报告；它不通过 CTest 调度。
+
 Windows GLFW Platform 的独立直接门禁为：
 
 ```powershell
@@ -337,16 +363,17 @@ Legacy 的 `Tina.exe`、shaderc 和 app-local DLL 同样按配置隔离。Linux 
 
 ```bash
 cmake --preset linux-gcc13-vnext
-cmake --build --preset linux-gcc13-vnext-debug --target tina_tests tina_ui_tests
+cmake --build --preset linux-gcc13-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests
 ./out/build/linux-gcc13-vnext/bin/tina_tests --gtest_color=no
 ./out/build/linux-gcc13-vnext/bin/tina_ui_tests --gtest_color=no
+./out/build/linux-gcc13-vnext/bin/tina_runtime_ui_tests --gtest_color=no
 ```
 
-Clang 22 sanitizer 的基础与 UI 直接门禁为：
+Clang 22 sanitizer 的基础、UI 与 Runtime→UI producer 直接门禁为：
 
 ```bash
 cmake --preset linux-clang22-vnext-sanitize
-cmake --build --preset linux-clang22-vnext-sanitize-debug --target tina_tests tina_ui_tests
+cmake --build --preset linux-clang22-vnext-sanitize-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 LSAN_OPTIONS=exitcode=23 \
@@ -355,11 +382,15 @@ ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 LSAN_OPTIONS=exitcode=23 \
 ./out/build/linux-clang22-vnext-sanitize/bin/tina_ui_tests --gtest_color=no
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+LSAN_OPTIONS=exitcode=23 \
+./out/build/linux-clang22-vnext-sanitize/bin/tina_runtime_ui_tests --gtest_color=no
 ```
 
-GCC 13.4/CMake 4.2.3 已通过基础 183/183 与 UI 75/75；Clang 22.1.8 + libstdc++15.2
-ASan/UBSan/LSan 已通过基础 183/183 与 UI 75/75，且无 sanitizer 诊断。初次 GCC 暴露的 routed-pointer
-callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。`TINA_BUILD_SHADERS=OFF` 输出
+GCC 13.4/CMake 4.2.3 已通过基础185/185、UI 75/75与 Runtime→UI 12/12；Clang 22.1.8 +
+libstdc++15.2 ASan/UBSan/LSan 已通过相同的185/185、75/75与12/12，且无 sanitizer 诊断。
+当前 producer 切片的 GCC 完整重编译无 warning。`TINA_BUILD_SHADERS=OFF` 输出
 不含 Legacy 产品和 cooked shader，只能作为 Headless 验证程序，
 不能作为游戏产品或发布包。
 

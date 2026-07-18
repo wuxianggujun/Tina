@@ -1,0 +1,56 @@
+#pragma once
+
+#include <tina/core/error/Result.hpp>
+#include <tina/platform/PlatformFrame.hpp>
+#include <tina/ui/InputRouting.hpp>
+#include <tina/ui/UIContext.hpp>
+
+#include <memory>
+#include <memory_resource>
+#include <optional>
+#include <thread>
+#include <vector>
+
+namespace Tina::Runtime::Input {
+
+struct UIInputRouteOutputView final {
+    UI::InputTransitionConsumptionView consumption{};
+    UI::ContinuousControlClaimsView claims{};
+};
+
+// Runtime-private bridge from one validated Platform frame to the vNext UI
+// pointer router. Returned spans borrow producer-owned storage until the next
+// successful produce() call. Failed routing keeps the last successfully
+// published view but consumes the attempted frame/sequence watermark: retrying
+// that same frame is rejected because earlier listener side effects cannot be
+// rolled back safely. A custom memory resource must outlive the producer.
+class UIInputRouteProducer final {
+  public:
+    [[nodiscard]] static Core::Result<std::unique_ptr<UIInputRouteProducer>>
+    Create(usize rawTransitionCapacity, std::pmr::memory_resource& memoryResource = *std::pmr::get_default_resource());
+
+    UIInputRouteProducer(const UIInputRouteProducer&) = delete;
+    UIInputRouteProducer& operator=(const UIInputRouteProducer&) = delete;
+    UIInputRouteProducer(UIInputRouteProducer&&) = delete;
+    UIInputRouteProducer& operator=(UIInputRouteProducer&&) = delete;
+
+    [[nodiscard]] Core::Result<UIInputRouteOutputView> produce(UI::UIContext* context,
+                                                               const Platform::PlatformFrameView& platformFrame);
+
+  private:
+    UIInputRouteProducer(usize rawTransitionCapacity, std::pmr::vector<u64> publishedWords,
+                         std::pmr::vector<u64> stagingWords) noexcept;
+
+    [[nodiscard]] Core::Status preflight(const UI::UIContext* context,
+                                         const Platform::PlatformFrameView& platformFrame) const;
+
+    usize rawTransitionCapacity_ = 0;
+    std::pmr::vector<u64> publishedWords_;
+    std::pmr::vector<u64> stagingWords_;
+    std::thread::id ownerThreadId_{};
+    std::optional<Platform::PlatformFrameId> lastAttemptedPlatformFrame_;
+    std::optional<u64> lastAttemptedRawSequence_;
+    bool producing_ = false;
+};
+
+} // namespace Tina::Runtime::Input

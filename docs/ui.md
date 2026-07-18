@@ -5,8 +5,9 @@
 > `UICommittedHitView` 数据基础；M7-C1c-b1 已完成无分配 `queryPointerHit()`、反向目标选择与
 > visited count；M7-C1c-b2 已完成 synthetic routed pointer event：generation-safe RAII listener token、
 > 固定容量 route path/listener storage、48-byte fixed-inline `noexcept` callback、Capture→Target→Bubble、
-> stop/consume、路由中 mutation-safe invalidation 和 route/commit reentrancy guard。Runtime input producer、
-> 持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、
+> stop/consume、路由中 mutation-safe invalidation 和 route/commit reentrancy guard。M7-C1c-b3b 已完成
+> Runtime-private `UIInputRouteProducer` 与独立 `tina_runtime_ui_tests`，但 `EngineHost` 仍传 canonical
+> `None` 且未拥有/选择 `UIContext`。持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、
 > dirty subtree pruning、文本/Glyph Atlas 与 bgfx UI pass 尚未实现。Tina UI 是游戏内 Retained UI，
 > 不是 Immediate UI，也不是桌面编辑器工具包。
 
@@ -62,6 +63,9 @@ UIContext
   Committed paint + hit-test + semantics snapshots
 ```
 
+这是冻结的最终 ownership，不是当前 `EngineHost` 已完成的能力。M7-C1c-b3b 只实现可独立调用的
+Runtime-private producer；当前正式 run path 尚无 WindowRecord→`UIContext` owner/selection。
+
 Platform/Event 只把 `PlatformFrameView` 的 UI-eligible transitions 交给 UIContext，不拥有节点、Focus、Capture 或 Layout。
 `IGameState` 持有 move-only `UIRootOwner` 和非 owning `UINodeId`，不持有 UIContext、Renderer、
 UINode 裸指针或跨帧 writer。
@@ -113,7 +117,7 @@ struct ContinuousControlClaimsView;
 `UINodeId.ownerWindow + generation`，Debug 额外携带 Engine/registry cookie 改善诊断；热点遍历在
 一次校验后只使用 UIContext 内部的紧凑 slot index。generation 回绕的 slot 永久 retire。
 
-目标 Game SDK 伪代码（当前尚不可编译，Widget/Runtime producer 尚未实现）：
+目标 Game SDK 伪代码（当前尚不可编译，Widget 与 EngineHost UIContext/producer 集成尚未实现）：
 
 ```cpp
 class SettingsState final : public Tina::IGameState {
@@ -307,8 +311,16 @@ listener；`consumeInputTransition()` 只标记结果 consumed，不等于 Widge
 和递归 route 都有结构化语义或拒绝路径；容量不足时不派发任何 partial callback。当前仍没有持久
 Pointer Capture、Focus/Hover/Modal、Button default behavior、独立 z-order/stacking 或 nested clip policy；
 paint order 来自稳定 tree preorder，hit rebuild 仍线性扫描整份 committed layout，尚未按 dirty subtree 剪枝。
-M7-C1c-b3a 已在 Platform raw transition 层补齐 Button/Wheel 的事件时 logical position；未来 Runtime
+M7-C1c-b3a 已在 Platform raw transition 层补齐 Button/Wheel 的事件时 logical position；Runtime
 producer 必须原样传入 `UIPointerInputEvent.position`，不得使用帧末 Pointer snapshot 覆盖历史坐标。
+M7-C1c-b3b producer 已遵守该约束，并只转换 Move/Button/Wheel；reset、cancel 与非 Pointer transition
+不路由、不伪造 Up，在 raw ordinal 空间保留 hole。listener consume 写回对应 ordinal bit，claims 当前恒为
+canonical `None`。
+
+producer 使用 Create 期双预分配 PMR bitset；supplied `memory_resource` 必须长于 producer。300帧复用
+同一 PMR 的直接测试中 allocation count 不增长。失败用例先让 root Move listener 产生1次 side effect，
+再让后续深层 Button route 因 route path capacity 失败；staging 不发布、旧 published view 保持，attempted
+watermark 已推进，同帧 retry 被拒且 callback 仍为1，明确证明 listener side effect 不回滚也不重放。
 
 ## Flex-lite v1
 
@@ -342,10 +354,11 @@ layout revision。虚拟列表只创建 visible + overscan item；100,000 行不
 
 ## 输入、路由与默认行为
 
-本节分为已实现的 C1c-b2 synthetic route 和冻结的后续 Runtime 目标。C1c-b2 已提供 committed
+本节分为已实现的 C1c-b2 synthetic route、C1c-b3b Runtime-private producer 和冻结的后续 Runtime 目标。C1c-b2 已提供 committed
 hit/route-ancestry snapshot、纯 point query、固定容量 listener 注册与单条 synthetic Pointer input
-的 Capture→Target→Bubble 派发；尚未实现 Runtime producer、Focus/Capture/Modal、Button default action
-或 Gameplay Action consumption/claim 输出。
+的 Capture→Target→Bubble 派发；C1c-b3b 已把 Move/Button/Wheel consume 生成 frame-local consumption
+view，但 claims 恒为 `None`。尚未实现 EngineHost UIContext ownership/selection/接线、Focus/Capture/Modal、
+Button default action 或真实 continuous claim 输出。
 
 Runtime 在每次状态命令提交后，根据 committed `GameStateStack`、`GameStatePolicy` 和 root
 registration 生成每窗口不可变 `UIInputScopeSnapshot`。它按视觉层级列出 eligible roots，并在
@@ -375,6 +388,8 @@ UI 返回只属于当前 Platform frame 的 `Tina::UI::InputTransitionConsumptio
 被 UI 消费的 digital Down 由 Action Mapper 跨帧抑制到真实 release，axis 抑制到 neutral。
 Focus lost、断连和 `InputStreamReset` 产生 `InputCancelTransition`，不伪造可激活 Button 的普通 Up。UI routed
 listener 不复用 Runtime EventBus；二者的生命周期、顺序和 payload 不同。
+当前正式 `EngineHost` 还没有调用这一 producer，仍向 ActionMapper 传 canonical `None`；独立
+`tina_runtime_ui_tests` 直接运行 GoogleTest，不通过 CTest，也不构成可交互 Widget/DisplayList 证据。
 
 ## PaintCache、DisplayList 与批处理
 
@@ -540,7 +555,7 @@ callback、token move/context-destroyed/off-thread reset、callback root 自销�
 libstdc++15.2 ASan/UBSan/LSan 的完整 `tina_ui_tests` 均为75/75；Clang 无 sanitizer 诊断。初次 GCC
 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。
 它尚未证明 dirty leaf 不扫描无关 subtree，也未覆盖 PaintCache、
-DisplayList、文本、Widget default action、Runtime producer 或 GPU 资源归零；这些门禁仍由后续切片补齐。
+DisplayList、文本、Widget default action、EngineHost UIContext/producer 集成或 GPU 资源归零；这些门禁仍由后续切片补齐。
 
 ## 测试与实施顺序
 
@@ -566,11 +581,13 @@ DisplayList、文本、Widget default action、Runtime producer 或 GPU 资源�
 4. 已完成 M7-C1c-b1：无分配 point query、反向目标选择、route index/revision 与 visited count；
 5. 已完成 M7-C1c-b2：generation-safe RAII listener token、fixed-inline callback、synthetic
    Capture→Target→Bubble route、stop/consume、mutation-safe invalidation 与 route/commit reentrancy guard；
-6. 接入真实 Runtime UI producer，并输出 consumption/claim 给 ActionMapper；
-7. 让 dirty leaf 跳过无关 subtree，并输出后端无关 DisplayList；
-8. 完成 PaintCache/text layout + glyph atlas；
-9. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
-10. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
-11. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
+6. 已完成 M7-C1c-b3b：独立 Runtime-private Move/Button/Wheel producer、raw ordinal consumption、
+   canonical `None` claims、双预分配 PMR 与失败不可重放门禁；
+7. 由 EngineHost 拥有/选择 `UIContext`，接入 producer 并实现真实 claims；
+8. 让 dirty leaf 跳过无关 subtree，并输出后端无关 DisplayList；
+9. 完成 PaintCache/text layout + glyph atlas；
+10. 迁移 Focus/Capture/Modal/Scroll/List/TextEdit/IME/手柄语义与 Button；
+11. 增加 Checkbox/Slider、Semantics、动画与截图门禁；
+12. 性能基准证明需要后再扩展布局、空间索引、shaping 或并行。
 
 所以“完善 UI”首先是完成正确的数据和 backend 边界，然后才是增加 Widget 数量。

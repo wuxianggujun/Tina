@@ -105,8 +105,10 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
   的普通 Up；
 - M7-A 的 Action bindings 只由 `EngineConfig::inputActions.digitalBindings` 注册到 Runtime-owned
   default Context；raw/text/event 容量只来自 `platformFrameCapacities`，Simulation/Frame/binding
-  容量只来自 `inputActions.capacities`，订阅 slot 来自 `platformEventSubscriptions`。M7-A 尚无 UI
-  producer，continuous claim 只使用 Runtime SPI 内部固定上限64，不泄漏到 game-facing Action Map；
+  容量只来自 `inputActions.capacities`，订阅 slot 来自 `platformEventSubscriptions`。M7-C1c-b3b 已加入
+  独立 Runtime-private UI producer，但 `EngineHost` 尚未拥有/选择 `UIContext`，正式路径仍向 ActionMapper
+  传 canonical `None`；producer claims 当前恒为 `None`，continuous claim 的 Runtime consumer 上限64不泄漏到
+  game-facing Action Map；
 - World RenderScene 与 UI DisplayList 分别冻结，统一组合为 RenderFrame view；Runtime-private owning
   RenderFramePacket 持有 FrameArena/资源 lease/Atlas/surface pin/submit ticket 到 backend
   completion；Renderer 不访问 EnTT；
@@ -133,9 +135,13 @@ route index/revision/visited count；M7-C1c-b2 已实现 fixed-capacity syntheti
 generation-safe RAII token、48-byte fixed-inline `noexcept` callback、Capture→Target→Bubble、stop/consume、
 route 中 add/reset/destroy 安全失效与 route/commit reentrancy guard。M7-C1c-b3a 已让 Platform Pointer
 Button/Wheel transition 固化事件时 logical position，禁止 Runtime 用帧末 Pointer snapshot 猜测历史命中。
-Runtime producer、持久 Pointer Capture、
-Focus/Modal、Button default action、paint snapshot/DisplayList、dirty subtree pruning 与 nested clip 尚未实现，
-不能把目标误写成现状。
+M7-C1c-b3b 已实现 Runtime-private `UIInputRouteProducer` 与独立 `tina_runtime_ui_tests`：只路由
+Move/Button/Wheel，reset/cancel/非 Pointer 保留 raw ordinal hole，claims 恒为 canonical `None`；双预分配
+PMR consumption bitset 在300帧共用 PMR 测试中 allocation count 不增长，supplied PMR 必须长于 producer。
+失败测试先产生1次 listener side effect，后续 route path capacity 失败不发布旧 view 的替代结果，但推进
+attempted watermark；同帧 retry 被拒且 callback 仍为1，证明 side effect 不回滚也不重放。
+`EngineHost` 仍传 canonical `None` 且未拥有/选择 `UIContext`。持久 Pointer Capture、Focus/Modal、Button
+default action、paint snapshot/DisplayList、dirty subtree pruning 与 nested clip 尚未实现，不能把目标误写成现状。
 
 ### 实施与验证
 
@@ -162,7 +168,7 @@ Focus/Modal、Button default action、paint snapshot/DisplayList、dirty subtree
 | Backend 组合 | [Accepted](adr/0003-backend-factories.md) | `Create(config, factories)`；M7-B1 已使用 Independent 或 WindowSurface 的 tagged composition，M7-B2 在该组合上接入私有 bgfx，bootstrap 只选 factory、EngineHost 唯一创建/回滚 owner | 消除 Runtime 对具体 backend 依赖与 lease 接线歧义 |
 | Runtime/State | [Accepted](adr/0014-runtime-phase-and-state.md) | `IGameApplication` lifecycle-only + `IGameState` 唯一帧入口；Frame Update 后提交状态命令 | 消除名称歧义、双帧入口与首帧 UI 时序冲突 |
 | RenderFrame/Surface 所有权 | [Accepted](adr/0020-window-surface-handoff.md) | bgfx backend 在 factory 成功后持有 move-only window surface lease，Runtime 持有 owning RenderFramePacket；Render SPI 只暴露纯 Tina view/pin sink | 消除 native 泄漏、依赖环、backend 越界与在途 UAF |
-| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | M7-C1b 已实现事务式 Flex-lite layout；M7-C1c-a 已实现固定容量 Pointer policy/ancestry scratch、`Ignore`/`Targetable`、双缓冲 committed hit snapshot 与成功 `commitLayout()` 的 structure/layout/hit 原子发布；M7-C1c-b1 已实现无分配 `queryPointerHit()`、反向目标选择与 visited count；M7-C1c-b2 已实现 fixed-capacity synthetic listener route。changed frame 全树 Measure/Arrange 仍需收敛；Runtime producer、持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip 与 batching 后置 | 高性能且保持命中/透明顺序 |
+| UI 增量管线 | [Accepted](adr/0011-retained-ui.md) | M7-C1b 已实现事务式 Flex-lite layout；M7-C1c-a 已实现固定容量 Pointer policy/ancestry scratch、`Ignore`/`Targetable`、双缓冲 committed hit snapshot 与成功 `commitLayout()` 的 structure/layout/hit 原子发布；M7-C1c-b1 已实现无分配 `queryPointerHit()`、反向目标选择与 visited count；M7-C1c-b2 已实现 fixed-capacity synthetic listener route；M7-C1c-b3b 已实现独立 Runtime-private producer 与 direct GoogleTest target。changed frame 全树 Measure/Arrange 仍需收敛；EngineHost UIContext ownership/selection、持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip 与 batching 后置 | 高性能且保持命中/透明顺序 |
 | Frame/Input | [Accepted](adr/0015-input-and-fixed-step.md) | 保序 PlatformFrame、UI transition consumption + continuous claims；Action 分 Simulation/Frame domain；每个 substep 独立 commit | 防输入穿透、0步帧丢边沿、双重执行和追赶步错误 |
 | C++ exception | [Accepted](adr/0004-exceptions-and-errors.md) | 编译开启；公共 API 用 Result/Status，Engine/Frame/Worker/C callback 边界捕获 | pmr/第三方兼容、错误边界 |
 | Generation | [Accepted](adr/0019-generation-handles.md) | 32位 generation，回绕 retire；UINodeId 所有构建编码 owner WindowId，Debug cookie 只诊断 | stale/跨 registry 安全 |
@@ -223,5 +229,6 @@ M7-B2 已实现私有 bgfx clear-only core、Desktop bootstrap 与真实 GPU 门
 `tina_ui` tree core，M7-C1b 已实现 layout/dirty API、固定容量 PMR 存储、Flex-lite 非递归
 Measure/Arrange 与 committed structure+layout 原子发布；M7-C1c-a 已实现 committed hit snapshot 数据基础；
 M7-C1c-b1 已实现 point query 与反向目标选择；M7-C1c-b2 已实现 synthetic Capture→Target→Bubble listener route；
-M7-C 后续继续实现 Runtime UI producer、dirty subtree pruning 与 Null DisplayList，M7-D 实现 Label/Button/Modal +
+M7-C1c-b3b 已实现独立 Runtime-private producer。M7-C 后续继续把 producer 接入 EngineHost 的 UIContext owner/selection，
+并实现 dirty subtree pruning 与 Null DisplayList，M7-D 实现 Label/Button/Modal +
 FreeType 可见样例与 bgfx UI pass；M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。

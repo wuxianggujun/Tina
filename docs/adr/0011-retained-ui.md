@@ -8,9 +8,10 @@
   structure/layout/hit 原子发布；M7-C1c-b1 已实现无分配 `queryPointerHit()`、反向目标选择与 visited count。
   M7-C1c-b2 已实现 fixed-capacity synthetic routed pointer event：generation-safe RAII listener token、
   48-byte fixed-inline `noexcept` callback、Capture→Target→Bubble、stop/consume、路由中 add/reset/destroy
-  安全失效和 route/commit reentrancy guard。Runtime UI producer、持久 Pointer Capture、Focus/Modal、
-  Button default action、paint snapshot/DisplayList、dirty subtree pruning、nested clip、文本/Glyph Atlas
-  与 bgfx UI pass 仍后置。
+  安全失效和 route/commit reentrancy guard。M7-C1c-b3b 已实现 Runtime-private
+  `UIInputRouteProducer` 与独立 `tina_runtime_ui_tests`，但 `EngineHost` 仍向 ActionMapper 传 canonical
+  `None`，也尚未拥有或选择 `UIContext`。持久 Pointer Capture、Focus/Modal、Button default action、
+  paint snapshot/DisplayList、dirty subtree pruning、nested clip、文本/Glyph Atlas 与 bgfx UI pass 仍后置。
 
 ## 背景
 
@@ -27,6 +28,8 @@ Legacy UI 已验证部分产品交互，但它的类型、API 和生命周期不
 `tina_ui` 实现独立的 Retained UI。每个 Runtime WindowRecord 唯一拥有一个 `UIContext`；
 `IGameState` 只持有 move-only root owner，并用包含 owner WindowId 与 generation 的 `UINodeId`
 引用节点。Game SDK 不拥有 `UIContext`，也不能取得 Widget、PaintCache 或 Render backend 指针。
+这是目标所有权；当前 `EngineHost` 尚未建立 WindowRecord→`UIContext` owner/selection。M7-C1c-b3b
+只加入可独立调用的 Runtime-private producer，不把 standalone Context 偷接成全局对象。
 当前 M7-C1b/C1c-a `tina_ui` 仍只 PUBLIC 依赖 `Tina::Core` 与 `Tina::Platform`；Font Asset 与 Render descriptor/
 DisplayList 依赖在后续 asset/render 切片进入。
 
@@ -122,7 +125,7 @@ route 中 commit 拒绝、错误销毁 context 的 death test、300次 route 零
 递归 route 拒绝。Windows MSVC 19.50 Debug/Release、Linux GCC 13.4、Linux Clang 22.1.8 +
 libstdc++15.2 ASan/UBSan/LSan 均为75/75；Clang 无 sanitizer 诊断。初次 GCC 暴露的 routed-pointer
 callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。它不等价于 PaintCache/
-DisplayList、Runtime producer、进程 heap 或 GPU 资源门禁已经完成。
+DisplayList、EngineHost UIContext/producer 集成、进程 heap 或 GPU 资源门禁已经完成。
 
 ### PaintCache、DisplayList 与批处理
 
@@ -154,8 +157,19 @@ pipeline、texture、sampler、blend、effective clip 完全兼容的命令；�
 ### 输入 consumption、claim 与路由边界
 
 本节是 Accepted 目标语义。M7-C1c-a/C1c-b1 已提供 committed hit/route-ancestry 数据与纯 point query；
-M7-C1c-b2 已提供 synthetic listener dispatch 与 Capture → Target → Bubble 执行。Focus/Capture/Modal、
-Button default action、Runtime producer、consumption/claim 输出和真实 Gameplay Action suppression 仍未实现。
+M7-C1c-b2 已提供 synthetic listener dispatch 与 Capture → Target → Bubble 执行。M7-C1c-b3b 已提供
+Runtime-private producer：它只把 raw Pointer Move/Button/Wheel 逐 ordinal 转成 `UIPointerInputEvent`，并把
+listener 的 consume 结果写入 `InputTransitionConsumptionView`；`ContinuousControlClaimsView` 当前恒为
+canonical `None`。reset、cancel 与所有非 Pointer transition 不路由，也不伪造 Button Up，而是在 raw ordinal
+空间保留 hole。Focus/Capture/Modal、Button default action、真实 continuous claims 与 EngineHost 集成仍未实现。
+
+producer 使用两份 Create 期预分配的 PMR consumption bitset，成功时交换 published/staging storage；supplied
+`memory_resource` 必须比 producer 活得更久，连续300帧共用时 allocation count 不增长。失败测试先让 root
+Move listener 产生1次 side effect，再让后续深层 Button route 因 route path capacity 失败；本次结果不发布、
+上一份成功 view 保持，但 attempted frame/sequence watermark 已推进，同一 frame retry 被拒且 callback 仍为1，
+明确证明 listener side effect 不回滚也不重放。独立 `tina_runtime_ui_tests` 直接运行 GoogleTest，覆盖 raw ordinal
+hole、63/64位边界、事件时坐标、失败发布语义、保留 reset slot、数值预检、300帧 PMR 与 ActionMapper
+suppression；它不经 CTest，也不证明 `EngineHost` 已接线。
 
 Runtime 将平台输入转为后端无关 `UIInputTransition` 序列，再调用 UI 路由；UI 不读取 GLFW，不修改
 全局 Input Snapshot，也不直接调用 Gameplay 输入接口。每个 Pointer transition 最多使用 committed hit
@@ -231,9 +245,10 @@ Checkbox、Slider、ScrollView、VirtualList、TextEdit、IME、复杂 shaping �
 - Tina 需要自行承担控件、文本 shaping、可访问性和视觉回归成本，并以垂直切片逐步交付。
 
 M7-C1b/C1c-a/C1c-b1/C1c-b2 只完成无变化布局零工作、changed-frame 单 pass、committed hit snapshot、纯 point query
-与 synthetic listener route；
+与 synthetic listener route；M7-C1c-b3b 只完成独立的 Runtime-private Pointer route-result producer；
 “CPU 成本由实际变化区域决定”仍需后续 dirty subtree pruning 证明，不能从 dirty bit/queue 或 hit view
-已存在直接推断。Runtime producer、Widget default action、可见 UI 和 DisplayList 也不能由 synthetic route 推断。
+已存在直接推断。EngineHost UIContext ownership/selection、Widget default action、可见 UI 和 DisplayList 也不能由
+producer 或 synthetic route 推断。
 
 ## 被拒绝方案
 

@@ -3,8 +3,9 @@
 > 状态：分批实施。Core、M6-A 生命周期、M7-A Platform/Input、私有 GLFW adapter、M7-B1 Native
 > Surface handoff，以及 M7-B2 私有 bgfx clear-only device、Desktop bootstrap 和300帧 backend
 > 冒烟已落地；M7-C1b/C1c-a/C1c-b1/C1c-b2 C++23 standalone `tina_ui` tree/layout/committed-hit/
-> point-query/synthetic routed-pointer foundation 已落地；完整状态栈、worker、Scene/Asset/Audio、
-> Runtime-integrated UI pipeline、production Gamepad、完整 DPI 与
+> point-query/synthetic routed-pointer foundation 已落地；M7-C1c-b3b Runtime-private
+> `UIInputRouteProducer` 与独立测试 target 已落地，但 `EngineHost` 仍传 canonical `None` 且未拥有/选择
+> `UIContext`。完整状态栈、worker、Scene/Asset/Audio、Runtime-integrated UI pipeline、production Gamepad、完整 DPI 与
 > Windows IMM32 仍是后续契约。
 
 ## 公开类型命名规则
@@ -345,7 +346,7 @@ M7-A 已实现下列职责完整的 Platform/Input 名称；M7-C1a 已把 UI con
 | `InputTransitionBatch` | Engine Module SPI | 按 platform sequence 排序的有界 transition；不保存 GLFW key code 之类 backend 值 |
 | `PlatformEventBatch` / `PlatformEventDispatcher` | Engine Module SPI / Runtime integration | Window metrics、Gamepad lifecycle/reset 的有界帧批次与 Runtime-owned 同步分发器；不是通用 Runtime Event Queue |
 | `PlatformEventSubscriptions` / `PlatformEventSubscription` | Game SDK | 只允许注册 callback 的窄门面与 generation-safe RAII token；Game 不能取得 dispatcher owner |
-| `Tina::UI::InputTransitionConsumptionView` | UI-owned view ABI / Runtime ActionMapper consumer | 只读 view，借用 UI route-result storage，标记本帧哪些 transition ordinal 已由 UI 消费 |
+| `Tina::UI::InputTransitionConsumptionView` | UI-owned view ABI / Runtime ActionMapper consumer | 只读 view，借用 route-result producer 的 frame storage，标记本帧哪些 transition ordinal 已由 UI 消费 |
 | `Tina::UI::ContinuousControlClaimsView` | UI-owned view ABI / Runtime ActionMapper consumer | 只读 view，声明当前 UI route 的 digital/axis/pointer ownership seam；M7-A mapper 只消费 digital claim，axis/pointer continuous mapping 后续实现 |
 | `InputActionId` | Game SDK | 显式的语义 Action 标识，不暴露物理键值为 gameplay contract |
 | `SimulationActionSnapshot` | Game SDK | 当前 simulation tick 的 state/axis + 有序 edge batch |
@@ -362,6 +363,10 @@ Focus lost、设备断开和 `InputStreamReset` 取消 transient edge、repeat�
 `suppressedUntilRelease`；Simulation latch 插入 reset marker 并保留最终 action state。它们
 都不伪造会激活按钮的普通 Up。
 
+上述是已接受的数据流。M7-C1c-b3b 已实现可独立调用的 Runtime-private producer，但尚未接入
+`EngineHost`；正式 run path 仍为当前 frame 构造两份 canonical `None` view。`EngineHost` 也尚未拥有或
+选择 `UIContext`，因此不能把 producer target 存在解释成 Runtime-integrated UI pipeline 已完成。
+
 M7-A 的 Pointer snapshot、Pointer Button/Move/Wheel transition 与 pointer binding 只接受
 `PrimaryPointerId`（0），多 Pointer 是后续契约。M7-C1c-b3a 已让 Button/Wheel transition 携带
 事件时 window-logical position；它与帧末 Pointer snapshot 明确分离，Runtime UI route 不得用后者
@@ -377,8 +382,9 @@ source 静默迁移到新 owner/generation。
 M7-A 的 Action Mapper 由 Runtime 拥有；`EngineConfig::inputActions.digitalBindings` 是唯一注册入口，
 首批只有 priority=0 的 Engine default Input Context。raw/text/platform-event 容量由
 `platformFrameCapacities` 唯一配置；Simulation/Frame action/binding 容量由
-`inputActions.capacities` 配置；订阅 slot 由 `platformEventSubscriptions` 配置。M7-A 尚无 UI producer，
-内部 continuous claim 上限固定为64且不属于 game-facing Action Map 配置。批次另有不可被普通项
+`inputActions.capacities` 配置；订阅 slot 由 `platformEventSubscriptions` 配置。M7-C1c-b3b private
+producer 尚未接入 `EngineHost`，claims 恒为 `None`；内部 continuous claim 上限固定为64且不属于
+game-facing Action Map 配置。批次另有不可被普通项
 占用的 reset slot，运行期不得扩容。
 
 0 fixed-step 帧不把 Down→Up 压成布尔值；Runtime 保存有界、有序
@@ -470,7 +476,7 @@ public:
 `UICommittedLayoutView` 是 owner-thread borrowed view，携带对应 structure/layout revision；在
 下一次成功发布新 layout 或 `UIContext` 析构后失效。它只发布 logical local/world rect、effective
 clip、effective visibility 与稳定 ordinal，不是跨线程、跨 commit 的 owning snapshot，也不证明
-Runtime producer、PaintCache/DisplayList、text/glyph、Widget 或 default action 已实现。
+EngineHost UIContext/producer 集成、PaintCache/DisplayList、text/glyph、Widget 或 default action 已实现。
 当前 `effectiveClip` 仅表示 `viewport ∩ worldRect`；祖先 clip policy 与 hit/paint clip chain 尚未实现。
 
 `UICommittedHitView` 同样是 owner-thread borrowed 双缓冲 view。它保存所有 effective-visible
@@ -490,11 +496,25 @@ Capture→Target→Bubble 派发匹配 kind/phase 的 listener。`UIPointerRoute
 query、route depth、listener invocation count、consumed/stopped/targetInvalidated；它还不是 Runtime
 `InputTransitionConsumptionView` 或 `ContinuousControlClaimsView`。`UIRoutedPointerListenerToken` 是
 generation-safe move-only RAII owner：owner-thread reset 立即生效，off-thread reset 进入 bounded queue 并在下一次
-owner-thread mutation/route 前 drain，context 销毁后 reset 仍安全。当前没有 Runtime route producer、持久
-Pointer Capture、Focus/Modal、Button interaction、paint snapshot/DisplayList、dirty subtree pruning、nested clip
-或 Widget default action。
+owner-thread mutation/route 前 drain，context 销毁后 reset 仍安全。当前没有持久 Pointer Capture、Focus/Modal、
+Button interaction、paint snapshot/DisplayList、dirty subtree pruning、nested clip 或 Widget default action。
 `UIContext` 的 mutation、route 与销毁只允许 owner thread；route callback/callback cleanup 内销毁或
 非 owner-thread 销毁会触发生命周期硬门禁，而不是继续执行潜在 UAF。
+
+### M7-C1c-b3b Runtime-private route-result producer
+
+`UIInputRouteProducer` 是 `tina_runtime` 私有实现，不进入 Game SDK 或普通 Module public header。它只接受
+同一 primary Window 的 Pointer Move/Button/Wheel，按 raw transition ordinal 调用 `routePointerInput()`；
+Button/Wheel 使用 transition 自带的事件时 logical position。reset、cancel 与非 Pointer transition 保留
+ordinal hole，不路由、不合成 Up；本切片 claims 恒为 canonical `None`。
+
+producer 使用两份 Create 期预分配的 PMR consumption bitset，成功发布时交换 buffer；supplied
+`memory_resource` 是借用依赖，必须比 producer 活得更久，300帧共用同一 PMR 的直接测试中 allocation
+count 不增长。失败测试先让 root Move listener 产生1次 side effect，再让后续深层 Button route 因 route
+path capacity 失败：staging view 不发布、旧 published view 保持，但 attempted frame/sequence watermark
+已推进；同一 frame retry 被拒且 callback 仍为1，明确证明 side effect 不回滚也不重放。独立
+`tina_runtime_ui_tests` 直接运行 GoogleTest，不使用 CTest，并与 Legacy UI 所在的
+`tina_tests` 分离。当前 `EngineHost` 仍传 canonical `None`，未拥有/选择 `UIContext`。
 
 ## EngineConfig
 
@@ -639,10 +659,11 @@ M6-A/M7-A Headless 内核与首个 GLFW adapter 已验证：
 后续验收：`tina_game_api_consumer`/Game SDK umbrella、正式 SDK/install package、完整
 forbidden-token/dependency-closure、production Gamepad、完整 DPI/Windows IMM32，以及只使用
 Game SDK 运行 UI/2D/3D 产品样例。`Desktop::CreateEngine` 和 clear-only bgfx smoke 已实现，但不代表
-正式 SDK、完整 Render pass、Runtime UI producer 或产品样例已完成。M7-C1b/C1c-a/C1c-b1/C1c-b2 已覆盖50,000节点
+正式 SDK、完整 Render pass、EngineHost UIContext 集成或产品样例已完成。M7-C1b/C1c-a/C1c-b1/C1c-b2 已覆盖50,000节点
 非递归 layout/hit snapshot、连续300次无变化 commit 的0 layout pass/0新增 UI PMR allocation，以及
 15项 committed hit snapshot、5项 point query 与16项 synthetic route 门禁；独立 `tina_ui_tests` 共75/75。
 Windows MSVC 19.50 Debug/Release、Linux GCC 13.4、Linux Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均已
 通过 UI 75/75，且 Clang 无 sanitizer 诊断；初次 GCC 暴露的 `requires` 名称可见性问题已修复，二次
 GCC/Clang 构建无 warning。它尚未覆盖 dirty subtree pruning、Focus/Capture/Modal、Button、paint snapshot/
-DisplayList、nested clip、文本/Glyph Atlas、Runtime producer 或可见 Widget。
+DisplayList、nested clip、文本/Glyph Atlas、EngineHost 集成或可见 Widget。M7-C1c-b3b 的独立 producer
+target 只补齐 Move/Button/Wheel→consumption 的私有桥，不扩大这些结论。

@@ -10,7 +10,8 @@ namespace Tina::UI {
 
 // Frame-local UI route output. Empty words mean no transition was consumed;
 // otherwise the words are indexed by raw PlatformFrame transition ordinal.
-// The view borrows UI-owned frame storage and must not outlive that UI frame.
+// The view borrows its route-result producer's frame storage and must not
+// outlive that routing frame.
 struct InputTransitionConsumptionView final {
     Platform::PlatformFrameId platformFrame{};
     usize transitionCount = 0;

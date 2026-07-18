@@ -21,6 +21,8 @@ add_library(tina_runtime STATIC
     input/ActionMapper.hpp
     input/SimulationActionLatch.cpp
     input/SimulationActionLatch.hpp
+    input/UIInputRouteProducer.cpp
+    input/UIInputRouteProducer.hpp
 )
 add_library(Tina::Runtime ALIAS tina_runtime)
 

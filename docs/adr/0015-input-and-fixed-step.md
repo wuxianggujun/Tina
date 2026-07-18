@@ -6,7 +6,9 @@
 - 实施状态：M7-A Headless Platform/Input、Action Mapper、fixed-step latch、
   `PlatformEventDispatcher` 与私有 GLFW Window/Keyboard/Pointer/committed text producer 已落地；
   M7-C1a 已落地 UI-owned route-result view ABI，M7-C1c-b3a 已让 Pointer Button/Wheel 固化事件时
-  logical position；production Gamepad、完整 DPI、Windows IMM32 和 Runtime UI producer 仍是目标
+  logical position，M7-C1c-b3b 已实现独立的 Runtime-private `UIInputRouteProducer`；`EngineHost` 仍传
+  canonical `None` 且未拥有/选择 `UIContext`，production Gamepad、完整 DPI、Windows IMM32 与完整
+  Runtime UI 集成仍是目标
 
 ## 背景
 
@@ -78,6 +80,15 @@ Pointer Button/Wheel transition 必须保存该事件发生时的 window-logical
 Poll 结束时的最终 Pointer snapshot 替换它；否则 Button/Wheel 后同 Poll 内的 Move 会改变历史事件的
 目标。生产 GLFW adapter 使用按 callback 顺序维护的 backend-owned pointer state 固化该坐标，builder
 同时拒绝非有限位置。
+
+M7-C1c-b3b 的 Runtime-private producer 只路由 Pointer Move/Button/Wheel，并按 raw transition ordinal
+生成 consumption bit；reset、cancel 和非 Pointer 项保留 ordinal hole，不路由、不伪造 Up。claims 当前
+恒为 canonical `None`。producer 使用双预分配 PMR bitset；supplied `memory_resource` 必须长于 producer，
+300帧共用时 allocation count 不增长。失败测试先产生1次 root Move listener side effect，再让后续深层
+Button route 因 route path capacity 失败；staging 不发布、旧 published view 保持，但 attempted watermark
+已推进，同一 frame retry 被拒且 callback 仍为1，证明 side effect 不回滚也不重放。该组件由独立
+`tina_runtime_ui_tests` 直接执行 GoogleTest 验证，不使用 CTest；在 `EngineHost` 接线前，正式帧路径仍向
+ActionMapper 传 canonical `None`。
 
 M7-A Action Mapper 由 Runtime 唯一拥有，只实现 EngineConfig 注册的单一 immutable default Input
 Context（priority=0）。UI consumption/claim 优先；未来多 Context 以显式 priority 决胜，同 priority
