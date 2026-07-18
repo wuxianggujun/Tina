@@ -1387,6 +1387,7 @@ TEST(EngineConfigTest, RejectsEveryInvalidPrimaryWindowUICapacityCombination)
         {.nodeCapacity = 4, .rootCapacity = 1, .dirtyQueueCapacity = 5},
         {.nodeCapacity = 4, .rootCapacity = 1, .layoutSnapshotCapacity = 5},
         {.nodeCapacity = 4, .rootCapacity = 1, .hitSnapshotCapacity = 5},
+        {.nodeCapacity = 4, .rootCapacity = 1, .paintSnapshotCapacity = 5},
         {.nodeCapacity = 4, .rootCapacity = 1, .routePathCapacity = 5},
         {.nodeCapacity = 4,
          .rootCapacity = 1,
