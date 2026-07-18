@@ -112,6 +112,10 @@ TEST_F(UITreeCoreTest, RejectsInvalidWindowAndInvalidCapacityWithoutUsingUiMemor
     EXPECT_EQ(invalidWindow.error().code, UI::UIErrorCode::InvalidOwnerWindow);
 
     const auto expectInvalidCapacity = [&](UI::UIContextCapacityConfig capacities) {
+        const Core::Status validation = UI::validateUIContextCapacityConfig(capacities);
+        ASSERT_FALSE(validation.has_value());
+        EXPECT_EQ(validation.error().code, UI::UIErrorCode::InvalidContextConfig);
+
         const auto result = UI::UIContext::Create(firstWindow, capacities, resource);
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().code, UI::UIErrorCode::InvalidContextConfig);
@@ -127,6 +131,15 @@ TEST_F(UITreeCoreTest, RejectsInvalidWindowAndInvalidCapacityWithoutUsingUiMemor
     expectInvalidCapacity({
         .nodeCapacity = UI::UIContextCapacityConfig::MaxRootCapacity + 1,
         .rootCapacity = UI::UIContextCapacityConfig::MaxRootCapacity + 1,
+    });
+    expectInvalidCapacity({.nodeCapacity = 4, .rootCapacity = 1, .dirtyQueueCapacity = 5});
+    expectInvalidCapacity({.nodeCapacity = 4, .rootCapacity = 1, .layoutSnapshotCapacity = 5});
+    expectInvalidCapacity({.nodeCapacity = 4, .rootCapacity = 1, .hitSnapshotCapacity = 5});
+    expectInvalidCapacity({.nodeCapacity = 4, .rootCapacity = 1, .routePathCapacity = 5});
+    expectInvalidCapacity({
+        .nodeCapacity = 4,
+        .rootCapacity = 1,
+        .routedPointerListenerCapacity = UI::UIContextCapacityConfig::MaxRoutedPointerListenerCapacity + 1,
     });
 
     EXPECT_EQ(resource.allocationCount(), 0U);

@@ -415,26 +415,8 @@ struct ResolvedLength final {
 [[nodiscard]] Core::Result<NormalizedCapacityConfig> normalizeCapacity(
     UIContextCapacityConfig config)
 {
-    if (config.nodeCapacity == 0 || config.rootCapacity == 0) {
-        return fail(
-            UIErrorCode::InvalidContextConfig,
-            "UI context capacities must be greater than zero");
-    }
-    if (config.nodeCapacity > UIContextCapacityConfig::MaxNodeCapacity
-        || config.rootCapacity > UIContextCapacityConfig::MaxRootCapacity) {
-        return fail(
-            UIErrorCode::InvalidContextConfig,
-            "UI context capacity exceeds the configured maximum");
-    }
-    if (config.rootCapacity > config.nodeCapacity) {
-        return fail(
-            UIErrorCode::InvalidContextConfig,
-            "UI root capacity cannot exceed node capacity");
-    }
-    if (config.nodeCapacity > static_cast<usize>(InvalidNodeIndex)) {
-        return fail(
-            UIErrorCode::InvalidContextConfig,
-            "UI node capacity exceeds the node index range");
+    if (Core::Status status = validateUIContextCapacityConfig(config); !status) {
+        return Core::failure(status.error());
     }
     const usize dirtyQueueCapacity = config.dirtyQueueCapacity == 0
         ? config.nodeCapacity
@@ -452,21 +434,6 @@ struct ResolvedLength final {
         config.routedPointerListenerCapacity == 0
         ? config.nodeCapacity
         : config.routedPointerListenerCapacity;
-    if (dirtyQueueCapacity > config.nodeCapacity
-        || layoutSnapshotCapacity > config.nodeCapacity
-        || hitSnapshotCapacity > config.nodeCapacity
-        || routePathCapacity > config.nodeCapacity) {
-        return fail(
-            UIErrorCode::InvalidContextConfig,
-            "UI derived capacities cannot exceed node capacity");
-    }
-    if (routedPointerListenerCapacity
-        > UIContextCapacityConfig::MaxRoutedPointerListenerCapacity) {
-        return fail(
-            UIErrorCode::InvalidContextConfig,
-            "UI routed pointer listener capacity exceeds the configured maximum");
-    }
-
     return NormalizedCapacityConfig{
         .nodeCapacity = config.nodeCapacity,
         .rootCapacity = config.rootCapacity,

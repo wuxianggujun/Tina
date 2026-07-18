@@ -25,8 +25,8 @@ Carbon 最值得 Tina 学习的是长期运行后形成的阶段边界、预算�
 
 | 领域 | Carbon 证据 | Tina 采纳 | Tina 明确拒绝 |
 | --- | --- | --- | --- |
-| Core | `ScopeGuard`、Time、Telemetry/Statistics、命名锁/线程、Memory Tracker、Callstack/Crash 和细粒度测试 | 保留 Tina 现代 Result/ScopeExit/chrono；增加 owned Metrics、TraceZone、MemoryTag、CrashContext、UTF-8 原子 IO | 全局 new/delete、宏式分配、强杀线程、全局 profiler/crash pointer、32位 FNV 资产身份 |
-| 进程与 Runtime | `exefile` 按模块启动，并用退出守卫逆序关闭日志、计时器和运行时 | 把 Application 初始化拆成可注入阶段；每阶段成功后登记回滚；补失败点与析构顺序测试 | Blue 动态函数表、Python/Stackless 启动链、巨型全局组合根 |
+| Core | `ScopeGuard`、Time、Telemetry/Statistics、命名锁/线程、Memory Tracker、Callstack/Crash 和细粒度测试；`CachedAllocator`/`TrackableContainer` 提供命名与用量观测 | 保留 Tina 现代 Result/ScopeExit/chrono；增加 EngineHost-owned Metrics、TraceZone、MemoryTag、CrashContext、UTF-8 原子 IO，并记录 current/peak/high-water | 全局 new/delete、宏式分配、singleton pool、固定 `growBy`、强杀线程、全局 profiler/crash pointer、32位 FNV 资产身份 |
+| 进程与 Runtime | `exefile` 按模块启动；`PumpOSInternal()` 固定时间、ticker、统计与 pending-delete 顺序 | 把初始化拆成可注入事务并逆序回滚；保留清晰 phase、阶段末提交与 deferred cleanup | Blue 动态函数表、`BeOS` 全局、`void*` tick cookie、Python/Stackless 启动链、巨型全局 pump/组合根 |
 | Window/Input | `Tr2MainWindow` 分离 Down/Up/Move/Wheel、Key/Char、Focus、Close；Windows 按下建立 Capture，释放后解除 | 保持 GLFW；独立实现 normalized WindowCreatePlan、hidden create transaction、generation registry、callback collect/final snapshot 与 scope rollback；继续分离输入快照、生命周期通知和 UI routed event | 复制 Carbon 源码/Win32 风格枚举、消息宏、native pointer 或 Carbon 窗口 API；引入 SDL/SDL3 |
 | UI/IME | `IUILib.h` 体现 MouseDown/Up/CaptureChanged 与 Set/KillFocus 分离；`ime` 显式拥有窗口 HIMC 上下文 | 把 Tina Legacy generation `NodeId` 语义迁移为带 owner 的 `UINodeId`，保留 Capture/Target/Bubble、Modal Focus Scope 和 IMM32；只借鉴上下文所有权 | 旧全局 UI 状态、固定 256 wchar 缓冲、全局 IMM32 函数指针；把 ImGui Viewer 当 CarbonUI |
 | Render | `TriRenderJob` 顺序执行命名 Step，统一 GPU marker/CPU-GPU 计时，并在失败或中断时检查、修复 RT/DS 栈；Trinity 有 Stub 后端 | 小型顺序 Pass Scheduler、命名和统计、显式资源状态、失败后清理、NullRenderDevice | 数十种运行时可配置 Step、跨帧 `IN_PROGRESS`、隐式 Push/Pop 状态作为公共 API、完整自研多后端 RHI |
@@ -53,6 +53,26 @@ Tina 当前 `Application::shutdown()` 已按上层对象、资源、音频、事
 RenderDevice、Event、Input、Resource 等任意阶段注入失败并验证逆序回滚，再逐步迁入
 2D/UI/3D。完成迁移前不再增加新的全局访问点。
 
+`BlueInterface::LoadBlue()` 还提供了一个值得避免的半加载反例：它先把动态库句柄写入
+`m_module`，再逐项解析函数；任一符号缺失会直接返回 `false`，但对象已持有模块句柄，后续调用又会因
+`m_module` 非空提前返回 `true`。析构最终能够卸载模块，并不能修复“失败候选已被发布”的状态语义。
+Tina 的 factory/owner 必须先在局部候选中完成全部验证，成功后一次性发布；失败则按已完成阶段逆序
+回滚、保持 owner 未绑定，并保留最初的结构化错误。这个结论来自当前源码行为，不代表 Carbon 项目
+一定以该路径作为正式产品门禁。
+
+### Blue OS pump：学习顺序和延迟清理，不复制通用 Tick
+
+Carbon `IBlueOS` 公开全局 `BeOS`，`RegisterForTicks()` 接收 `IBlueEvents*` 与原始 `void* cookie`，
+`TickTickers()` 再把该 cookie 交给通用 `OnTick(realTime, simTime, cookie)`。公开代码中
+`Tr2MainWindow::OnTick()` 甚至为空，说明“所有对象都挂到 Tick”会留下没有明确阶段职责的订阅面；
+这是 Tina 不应复刻的历史接口，而不是现代 Game SDK 的依据。
+
+另一方面，`PumpOSInternal()` 的执行顺序本身有参考价值：它显式防重入，依次处理等待/网络、时间、
+Python task、time dilation、ticker、帧率统计，最后执行 recycler、`ProcessPendingDeletes()`、内存跟踪
+和统计更新。Tina 采纳的是“顺序可见、变更在阶段末提交、清理延迟到安全边界”这三个契约，继续使用
+Platform/Event/UI route/Fixed Update/Variable Update/Render/Deferred Cleanup 等有名 phase 和窄
+context；不会引入 `BeOS` 式全局对象、巨型 pump 或无类型 cookie。
+
 ### Core：学习可观测契约，不复制历史基础库
 
 Carbon Core 将 Scope Guard、高精度时间、线程/锁命名、Telemetry Zone、每帧/生命周期
@@ -72,6 +92,17 @@ Carbon Core 的 `WITH_TELEMETRY` 实际接入 Tracy 0.13.1，并对 zone、lock�
 可选 Tracy backend，同时保留独立 `tina_bench`。Profiler 负责解释热点，不能取代固定
 workload、固定门禁机和 p50/p95/p99 回归基准。
 
+本轮进一步确认 `CcpTelemetry` 不是一个简单的“开/关宏”：它用
+`StartRequested → Started → StopRequested → Stopped` 管理 session，在 tick 边界发出 `FrameMark`；
+`CcpStatistics` 则把命名统计以 `TracyPlotConfig`/`TracyPlot` 送入 profiler。这些状态、帧标记和
+命名曲线值得借鉴，但 Tina 的 session、事件订阅与统计注册表仍由 `EngineHost` 拥有和关闭，不能变成
+进程全局 profiler。
+
+`CachedAllocator` 与 `TrackableContainer` 同样应拆开评价：命名分配与 used/allocated 统计能为
+Tina 计算 current/peak 和 pool 高水位提供证据；但前者依赖每类型 singleton、预分配后按固定 `growBy` 扩容和宏式
+`new/delete`，后者通过命名 allocator/容器派生绑定全局内存宏。Tina 只采纳可观测指标，继续使用
+标准库/`std::pmr`、显式 owner 和有界专用结构，不复制这些通用容器、singleton 或增长策略。
+
 Carbon Audio 也提供了反例：当前公开 `AudManager` 析构对
 `m_soundPrioritization` 存在重复删除路径，`InitLowLevel()` 或 `InitSound()` 中途失败时也
 没有逐阶段回滚。这进一步说明 Tina 必须依赖自动化失败注入和 RAII，而不能因为代码
@@ -86,7 +117,10 @@ Carbon Audio 也提供了反例：当前公开 `AudManager` 析构对
 Carbon 的公开 `IUILib.h` 是 Win32 风格的历史接口；Tina vNext 的 generation `UINodeId`、
 节点删除后重新解析、RAII 订阅、Modal Focus Scope 和每窗口 `UIContext` 更适合当前
 目标。Carbon 参考不会改变 Tina 的自研 UI 路线，也不能替代 Checkbox、Slider、
-可访问语义和 Display List 的自主设计。
+可访问语义和 Display List 的自主设计。现有公开 Carbon UI 证据能支持 native window、focus/capture
+和输入事件语义，却不足以证明现代 retained tree 的 root ownership、generation-safe mutation、
+事务 layout snapshot 或后端无关 paint/display list；Tina 不能用这些公开接口替代自己的 retained
+ownership 设计。
 
 本批 GLFW adapter 只采纳上述**阶段与所有权思想**，没有复制 Carbon 实现：先把 Tina
 `PrimaryWindowConfig` 规范化为内部 `WindowCreatePlan`，再以 hidden `GLFW_NO_API` window 完成
@@ -96,8 +130,10 @@ Poll 统一冻结 final snapshot；任一步失败由 scope rollback 逆序撤�
 
 明确拒绝把 Carbon 的原生 Win32 枚举、消息宏、raw native pointer、Blue/Python入口、全局 callback
 或全局 service 移入 Tina。Carbon 仓库不进入 Tina 构建、链接、提交或发布包；“成熟引擎运行多年”
-只说明这些问题值得研究，不能替代 Tina 的183项基础测试、22项 GLFW专项测试、样例运行和资源
-回收证据。
+只说明这些问题值得研究，不能替代 Tina 自己的构建、分进程测试、样例运行和资源回收证据。当前
+M7-C1c-b3d1 的 Windows 事实分别为：Null 图 `tina_tests` 189/189、`tina_ui_tests` 75/75、
+`tina_runtime_ui_tests` 29/29；可选 adapter 另有 `tina_platform_glfw_tests` 23/23 与
+`tina_render_bgfx_tests` 11/11。它们是五个独立 GoogleTest executable，不能相加成一个“总测试数”。
 
 ### Render：采用 Step 契约，缩小为显式 Pass
 
@@ -138,6 +174,29 @@ Carbon Audio 的声音裁剪会考虑距离、是否在衰减范围、2D/vital�
 这适合成为 Tina 未来的 voice budget 输入，但首期不引入 Wwise、SoundBank 或产品 JSON。
 Tina 当前 miniaudio 路径只需要先保证 Engine/Resource/Voice 的关闭顺序、异步回调不触碰
 已销毁对象，以及坐标转换只发生在后端适配层。
+
+## 本轮 Tina 设计状态
+
+以下状态描述的是 Tina 当前分批实施边界，不是从 Carbon 直接移植的功能：
+
+- **M7-C1c-b3c 已实现**：`EngineHost` 私有拥有 primary-window `UIContext`，在 Platform lifecycle
+  dispatch 后选择 Context、生产 UI route，再把结果交给 ActionMapper；Context owner 不隐式执行
+  layout。该切片闭合的是 owner 与输入时序，Game SDK 仍不能创建 retained root，也不代表窗口已经
+  显示 Widget、中文文本或 UI draw call。
+- **M7-C1c-b3d1 已实现**：把 focused `UIContextCapacityConfig` 与 shared validator 接入
+  `EngineConfig::primaryWindowUICapacities`，并增加 Runtime-private 每帧 layout coordinator。它在
+  `updateUI` 成功后、Render submit 前按窗口 logical extent 对每个严格递增 `PlatformFrameId` 至多尝试
+  一次 layout commit；Headless 双缺席成功 no-op，失败阻断 Render 且消费 frame attempt。hit-test 和
+  route 继续只读取上一份 committed snapshot，不能隐式触发布局。本批精确测试计数仍以最终直接
+  GoogleTest 与运行门禁回写为准。
+- **M7-C1c-b3d2 Proposed**：在 startup transaction 中提供 `initialPrimaryWindowMetrics`，再向游戏侧
+  提供 root-scoped、phase-scoped 的 UI capability。普通 Game SDK 不获得裸 `UIContext*`，也不能在任意
+  阶段调用 `createRoot()` 或跨 phase 借用；root ownership、generation 校验和提交点仍由 Runtime/UI owner
+  管理。该提案尚未实现，也没有可见 UI 验收结论。
+
+这三步延续了 Carbon 值得学习的事务发布、明确泵送顺序和延迟清理，同时拒绝 `BeOS`/BlueInterface
+式全局或半加载状态。后续只有在 Widget model、paint snapshot/Display List、字体/中文路径与真实
+bgfx UI pass 都建立并通过可见 smoke 后，才能宣称 vNext UI 可见可用。
 
 ## 调整后的推进顺序
 

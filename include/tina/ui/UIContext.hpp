@@ -6,6 +6,7 @@
 #include <tina/ui/UICommittedHit.hpp>
 #include <tina/ui/UICommittedLayout.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
+#include <tina/ui/UIContextConfig.hpp>
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UIEventRouting.hpp>
 #include <tina/ui/UIHitTest.hpp>
@@ -23,28 +24,6 @@ struct UIContextLifetimeControl;
 } // namespace Tina::UI::Detail
 
 namespace Tina::UI {
-
-struct UIContextCapacityConfig final {
-    static constexpr usize DefaultNodeCapacity = 4096;
-    static constexpr usize DefaultRootCapacity = 64;
-    static constexpr usize MaxNodeCapacity = 1'048'576;
-    static constexpr usize MaxRootCapacity = 4096;
-    static constexpr usize MaxRoutedPointerListenerCapacity = 1'048'576;
-
-    usize nodeCapacity = DefaultNodeCapacity;
-    usize rootCapacity = DefaultRootCapacity;
-    // Zero derives from nodeCapacity. Non-zero values are fixed capacities and
-    // do not grow at runtime.
-    usize dirtyQueueCapacity = 0;
-    usize layoutSnapshotCapacity = 0;
-    // Counts every effectively visible route-ancestry entry, including nodes
-    // whose pointer policy is Ignore; it is not a targetable-node capacity.
-    usize hitSnapshotCapacity = 0;
-    // Zero derives from nodeCapacity. The listener capacity may be configured
-    // independently because one node can own listeners for several events.
-    usize routePathCapacity = 0;
-    usize routedPointerListenerCapacity = 0;
-};
 
 struct UIContextStatistics final {
     usize nodeCapacity = 0;

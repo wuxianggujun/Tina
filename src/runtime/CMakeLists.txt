@@ -25,6 +25,8 @@ add_library(tina_runtime STATIC
     input/UIInputRouteProducer.hpp
     ui/PrimaryWindowUIContextOwner.cpp
     ui/PrimaryWindowUIContextOwner.hpp
+    ui/PrimaryWindowUILayoutCoordinator.cpp
+    ui/PrimaryWindowUILayoutCoordinator.hpp
 )
 add_library(Tina::Runtime ALIAS tina_runtime)
 
@@ -42,9 +44,9 @@ target_link_libraries(tina_runtime
         Tina::Task
         Tina::Render
         Tina::WindowSurfaceIntegration
+        Tina::UI
     PRIVATE
         Tina::ProjectOptions
-        Tina::UI
 )
 set_target_properties(tina_runtime PROPERTIES
     CXX_EXTENSIONS OFF

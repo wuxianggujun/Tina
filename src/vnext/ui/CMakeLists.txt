@@ -5,6 +5,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedLayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedStructure.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContext.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContextConfig.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIEventRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIHitTest.hpp
@@ -17,6 +18,7 @@ set(TINA_UI_PUBLIC_HEADERS
 add_library(tina_ui STATIC
     ${TINA_UI_PUBLIC_HEADERS}
     UIContext.cpp
+    UIContextConfig.cpp
 )
 add_library(Tina::UI ALIAS tina_ui)
 

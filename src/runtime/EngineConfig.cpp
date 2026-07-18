@@ -122,6 +122,7 @@ EngineConfig EngineConfig::Defaults()
         .applicationName = "Tina",
         .primaryWindow = Platform::PrimaryWindowConfig{},
         .platformFrameCapacities = Platform::PlatformFrameCapacityConfig{},
+        .primaryWindowUICapacities = UI::UIContextCapacityConfig{},
         .inputActions = InputActionMapConfig{},
         .platformEventSubscriptions = PlatformEventSubscriptionConfig{},
         .fixedSimulation = Core::FixedStepConfig{},
@@ -160,6 +161,12 @@ Core::Status EngineConfig::validate() const
     if (auto platformCapacityStatus = validatePlatformFrameCapacities(platformFrameCapacities); !platformCapacityStatus)
     {
         return platformCapacityStatus;
+    }
+    if (auto uiCapacityStatus = UI::validateUIContextCapacityConfig(primaryWindowUICapacities); !uiCapacityStatus)
+    {
+        Core::Error error{ConfigurationErrorCode::InvalidEngineConfig, "primaryWindowUICapacities is invalid"};
+        error.addContext("EngineConfig::validate", uiCapacityStatus.error().message);
+        return Core::failure(std::move(error));
     }
     if (platformEventSubscriptions.subscriberCapacity == 0 ||
         platformEventSubscriptions.subscriberCapacity > PlatformEventSubscriptionConfig::MaximumSubscriberCapacity)

@@ -1190,9 +1190,39 @@ TEST(EngineConfigTest, DefaultsAreValidAndUseSixtyHertzWithFourCatchUpSteps)
     const EngineConfig config = EngineConfig::Defaults();
     EXPECT_TRUE(config.validate().has_value());
     EXPECT_EQ(config.applicationName, "Tina");
+    EXPECT_EQ(config.primaryWindowUICapacities.nodeCapacity, UI::UIContextCapacityConfig::DefaultNodeCapacity);
+    EXPECT_EQ(config.primaryWindowUICapacities.rootCapacity, UI::UIContextCapacityConfig::DefaultRootCapacity);
     EXPECT_DOUBLE_EQ(config.fixedSimulation.fixedDelta.count(), 1.0 / 60.0);
     EXPECT_EQ(config.fixedSimulation.maximumStepsPerFrame, 4U);
     EXPECT_DOUBLE_EQ(config.gameplayTimeScale, 1.0);
+}
+
+TEST(EngineConfigTest, RejectsEveryInvalidPrimaryWindowUICapacityCombination)
+{
+    std::vector<UI::UIContextCapacityConfig> invalidCapacities = {
+        {.nodeCapacity = 0, .rootCapacity = 1},
+        {.nodeCapacity = 1, .rootCapacity = 0},
+        {.nodeCapacity = 1, .rootCapacity = 2},
+        {.nodeCapacity = UI::UIContextCapacityConfig::MaxNodeCapacity + 1, .rootCapacity = 1},
+        {.nodeCapacity = UI::UIContextCapacityConfig::MaxNodeCapacity,
+         .rootCapacity = UI::UIContextCapacityConfig::MaxRootCapacity + 1},
+        {.nodeCapacity = 4, .rootCapacity = 1, .dirtyQueueCapacity = 5},
+        {.nodeCapacity = 4, .rootCapacity = 1, .layoutSnapshotCapacity = 5},
+        {.nodeCapacity = 4, .rootCapacity = 1, .hitSnapshotCapacity = 5},
+        {.nodeCapacity = 4, .rootCapacity = 1, .routePathCapacity = 5},
+        {.nodeCapacity = 4,
+         .rootCapacity = 1,
+         .routedPointerListenerCapacity = UI::UIContextCapacityConfig::MaxRoutedPointerListenerCapacity + 1},
+    };
+
+    for (const UI::UIContextCapacityConfig& capacities : invalidCapacities)
+    {
+        auto config = EngineConfig::Defaults();
+        config.primaryWindowUICapacities = capacities;
+        const Core::Status result = config.validate();
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);
+    }
 }
 
 TEST(EngineConfigTest, RejectsInvalidTextTimingAndScale)
@@ -1386,6 +1416,19 @@ TEST(EngineHostCreationTest, InvalidConfigIsRejectedBeforeAnyFactoryInvocation)
 
     auto result =
         EngineHost::Create(std::move(config), makeInjectedFactories(events, FactoryStage::Clock, FactoryMode::Failure));
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);
+    EXPECT_TRUE(events.empty());
+}
+
+TEST(EngineHostCreationTest, InvalidPrimaryWindowUICapacityIsRejectedBeforeAnyFactoryInvocation)
+{
+    EventLog events;
+    auto config = EngineConfig::Defaults();
+    config.primaryWindowUICapacities.layoutSnapshotCapacity = config.primaryWindowUICapacities.nodeCapacity + 1;
+
+    auto result = EngineHost::Create(config, makeInjectedFactories(events, FactoryStage::Clock, FactoryMode::Failure));
 
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);

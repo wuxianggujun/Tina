@@ -36,6 +36,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/header_isolation/RenderSurfaceHeader.cpp
     render/NullRenderDeviceTests.cpp
     runtime/header_isolation/EngineCompositionFactoriesHeader.cpp
+    runtime/header_isolation/EngineConfigHeader.cpp
     runtime/header_isolation/EngineHostHeader.cpp
     runtime/header_isolation/GameApplicationHeader.cpp
     runtime/header_isolation/InputActionsHeader.cpp

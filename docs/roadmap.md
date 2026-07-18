@@ -97,14 +97,16 @@ M6 生命周期之后仍未实现：
 - M7-A 已补齐有界 PlatformFrame/Input/Action、Platform lifecycle dispatch，以及私有 GLFW
   Window/Keyboard/Pointer/committed text desktop adapter；M7-C1c-b3b 已补独立 Runtime-private UI routed
   consumption producer，M7-C1c-b3c 已补 primary-window `UIContext` ownership/selection 与 EngineHost
-  接线；EngineConfig UI capacities、Game SDK scoped UI access、真实 continuous claims、IMM32、production
+  接线，M7-C1c-b3d1 已补 EngineConfig UI capacities 与 `updateUI` 后、Render 前的 private layout
+  coordinator；startup metrics seed、Game SDK scoped UI access、真实 continuous claims、IMM32、production
   Gamepad 和连续 axis mapping 仍在后续子切片；
 - 有界 CPU/IO/Main worker、阶段指标与完整 shutdown deadline/fatal-stop；
 - typed render resource handle、Pass Scheduler、World RenderScene/UIDisplayList、Runtime-private
   RenderFramePacket/pool 与 submission completion 保活；
 - Scene、Asset、Audio 的真实契约和消费者，以及 Runtime-integrated UI root/layout/render
   pipeline；M7-C1b/C1c-a/C1c-b1/C1c-b2 C++23 standalone `tina_ui` tree/layout/committed-hit/
-  point-query/synthetic-route foundation、M7-C1c-b3b 私有 producer 与 M7-C1c-b3c EngineHost 接线已实现，
+  point-query/synthetic-route foundation、M7-C1c-b3b 私有 producer、M7-C1c-b3c EngineHost 接线与
+  M7-C1c-b3d1 layout commit 已实现，
   但 Game SDK 尚不能创建 root，仍没有可见 UI；
 - `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
 - Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；M7-B2 Desktop bgfx
@@ -251,9 +253,17 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁。
 - **M7-C1c-b3c 边界**：owner 不调用 `commitLayout()`，route 只读上一帧 committed snapshot；claims 仍为
   canonical `None`。Game SDK 尚不能取得 Context 或创建 root，所以该切片只完成输入时序/所有权，不能称为
   可见 UI；
+- **已完成 M7-C1c-b3d1**：`UIContextCapacityConfig` 进入 focused public header，并由 standalone
+  `UIContext::Create` 与 `EngineConfig::primaryWindowUICapacities` 共享 validator；非法配置在任何 factory
+  前拒绝。Runtime-private coordinator 在 `updateUI` 成功后、Render submit 前按主窗口 logical extent
+  对每个严格递增 `PlatformFrameId` 至多尝试一次 `commitLayout()`；Headless 双缺席成功 no-op，失败阻断
+  Render 且消费当前 frame attempt；
+- **M7-C1c-b3d2 Proposed**：为 startup transaction 增加 backend-neutral primary-window metrics seed，
+  再开放 root-scoped、phase-scoped Game SDK builder/updater；不暴露裸 `UIContext*`，也不允许任意阶段
+  `createRoot()`。该提案尚未实现；
 - **当前限制**：changed frame 仍对整棵 live tree执行一次 Measure/Arrange，dirty leaf 跳过无关
   subtree 尚未实现；正式路径虽已接线，但没有 Game SDK root access，无法产生产品 UI；
-- **仍后置**：EngineConfig UI capacities、Game SDK scoped UI access、真实 claims、dirty subtree pruning、
+- **仍后置**：startup metrics seed、Game SDK scoped UI access、真实 claims、dirty subtree pruning、
   持久 Pointer Capture、Focus/Modal、Button default action、paint snapshot/DisplayList、nested clip、text/glyph、
   FreeType 与 bgfx UI pass；
 - 后续继续实现后端无关 Quad/Text/Clip DisplayList、FramePinSink/capacity rollback 和相邻兼容 batching

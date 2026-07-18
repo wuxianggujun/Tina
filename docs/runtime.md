@@ -34,7 +34,9 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
 - `EngineHost::Create`、`run` 与销毁组成同一个 owner-thread 生命周期。跨线程 `run` 返回
   `WrongOwnerThread` 且不消耗 run-once；跨线程销毁会在调用任何 native API 前终止进程，不能
   通过错误线程冒险释放桌面窗口资源；
-- `EngineConfig` 在任何 factory 前完成校验，并硬拒绝 `maximumStepsPerFrame > 4`；
+- `EngineConfig` 在任何 factory 前完成校验，并硬拒绝 `maximumStepsPerFrame > 4`；M7-C1c-b3d1
+  新增 `primaryWindowUICapacities`，复用 `Tina::UI::validateUIContextCapacityConfig()` 拒绝非法
+  node/root、派生 scratch/snapshot 和 listener 容量；
 - `EngineConfig::platformFrameCapacities`、`inputActions` 与 `platformEventSubscriptions` 已按职责
   分离；Platform raw/event/text storage 在 backend 创建时一次性分配，Poll 期间不扩容；
 - `PlatformFrameBuilder` 校验 UTF-8、final Snapshot、全局单调 sequence、Gamepad lifecycle 以及
@@ -61,11 +63,15 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
   或 Button default action 仍未实现；
 - M7-C1c-b3c 的 owner 在首次看到 primary `WindowId` 时惰性创建唯一 `UIContext`；Headless 绑定前传 null，
   绑定后 primary 消失或 generation 更换返回结构化失败，同一 ID 的 metrics/content scale/minimized 变化不重绑。
-  Context 在 Render → Task → Platform → Clock module shutdown 前于 owner thread 销毁；owner 不调用 `commitLayout()`，route 只读
-  上一帧 committed snapshot；
+  Context 在 Render → Task → Platform → Clock module shutdown 前于 owner thread 销毁；owner 本身不调用
+  `commitLayout()`，route 只读上一帧 committed snapshot；
+- M7-C1c-b3d1 的 Runtime-private `PrimaryWindowUILayoutCoordinator` 在 `IGameState::updateUI()` 成功后、
+  Render submit 前使用主窗口 logical extent 提交本帧下一份 layout/hit snapshot。每个有效且严格递增的
+  `PlatformFrameId` 至多尝试一次；Headless 窗口/Context 双缺席成功 no-op，identity 或 commit 失败阻断
+  Render，并保持本帧 attempt 已消费，禁止同帧重放；
 - 当前帧循环为 Poll Platform → frame/payload/capacity/sequence 预校验 → Platform lifecycle dispatch
   → primary UIContext selection + UI Input Routing → Action Mapping → Fixed Update（0..4）→ Frame Update
-  → Render Scene Extraction → UI Update → Null submit → present；`requestExitAfterFrame()` 会完成当帧
+  → Render Scene Extraction → UI Update → primary UI Layout Commit → Null submit → present；`requestExitAfterFrame()` 会完成当帧
   submit/present 后退出；
 - `tina_sample_null --frames=N` 已在 MSVC 2026 Debug/Release 连续通过300帧与10,000帧，且
   vNext Null 构建图不加入或链接 GLFW、bgfx、EnTT、FreeType、miniaudio、SDL/SDL3。
@@ -80,8 +86,9 @@ Null submit/present 后退出。M7-B1 已有 backend-neutral Native Surface hand
 Pass Scheduler/RenderFramePacket，也没有 Scene、Asset 或 Audio。Render 只完成 clear-only bgfx
 Desktop smoke；UI 只完成 standalone `tina_ui` 树核心、route-result view ABI、事务式 Flex-lite layout、
 committed hit-snapshot 数据基础、point query/反向目标选择、synthetic Capture→Target→Bubble route，以及
-Runtime-private producer/primary Context 接线。claims 仍为 canonical `None`，`EngineConfig` 尚无 UI capacities，
-Game SDK 也不能取得 Context 或创建 root，因此当前还没有可见 UI。持久 Pointer Capture、Focus/Modal、Button
+Runtime-private producer/primary Context 接线，以及 Runtime-private 每帧 layout commit。claims 仍为 canonical
+`None`，Game SDK 也不能取得 Context 或创建 root，因此当前还没有可见 UI。startup primary-window metrics
+seed 和 root-scoped、phase-scoped Game SDK capability 仍是 Proposed。持久 Pointer Capture、Focus/Modal、Button
 default action、paint snapshot/DisplayList、nested clip、dirty subtree pruning、FreeType 与 bgfx UI pass 仍未实现。这些能力不能从同名 Phase Context、真实 GLFW 窗口或 clear-only
 Desktop smoke 推断为已经实现。
 
@@ -162,14 +169,17 @@ dispatch 的具体排队语义必须在该通道自己的 ADR 中冻结，不能
 
 M7-C1c-b3c 已让首个 primary Window 的 Runtime-private `UIContext` 在 Platform lifecycle dispatch 后路由
 Pointer transition，并把 producer 结果交给 ActionMapper；Headless 绑定前没有 Context。当前 route 读取上一帧
-committed snapshot，不隐式 layout，Focus 与真实 continuous claims 仍后置。Gameplay Action 带目标 simulation
-tick，由 fixed loop 消费。
+committed snapshot，不隐式 layout。M7-C1c-b3d1 只在后续 `updateUI` phase 成功后由 coordinator 提交
+本帧下一份 snapshot；因此输入路由与 layout 发布仍是两个明确提交点。Focus 与真实 continuous claims
+仍后置。Gameplay Action 带目标 simulation tick，由 fixed loop 消费。
 
 ## IGameApplication 与 IGameState 调用顺序
 
 当前仍只有一个 State，实际顺序为：create initial State → `onEnter` → sample policy → frame
-loop → `onExit` → Application `onShutdown` → module shutdown。尚未实现 initial UI snapshot、
-GameStateStack、TaskGroup barrier 或状态命令提交。
+loop → `onExit` → Application `onShutdown` → module shutdown。M7-C1c-b3d1 的 UIContext 仍在首个有效
+Platform frame 才绑定，所以尚未实现 initial UI snapshot、GameStateStack、TaskGroup barrier 或状态命令提交。
+M7-C1c-b3d2 Proposed 将以 backend-neutral startup primary-window metrics seed 在 `onEnter` 前建立 Context，
+并只向游戏侧提供 root-scoped、phase-scoped capability；该提案尚未实现。
 
 完整目标顺序为：
 

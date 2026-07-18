@@ -11,6 +11,7 @@
 #include "input/ActionMapper.hpp"
 #include "input/UIInputRouteProducer.hpp"
 #include "ui/PrimaryWindowUIContextOwner.hpp"
+#include "ui/PrimaryWindowUILayoutCoordinator.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -453,7 +454,8 @@ class EngineHostImplementation final {
         : m_config(std::move(config)), m_fixedStepAccumulator(std::move(fixedStepAccumulator)),
           m_platformEventDispatcher(std::move(platformEventDispatcher)), m_actionMapper(std::move(actionMapper)),
           m_uiInputRouteProducer(std::move(uiInputRouteProducer)), m_modules(std::move(modules)),
-          m_ownerThread(std::this_thread::get_id()), m_lastWindowSurface(std::move(initialWindowSurface))
+          m_primaryWindowUi(m_config.primaryWindowUICapacities), m_ownerThread(std::this_thread::get_id()),
+          m_lastWindowSurface(std::move(initialWindowSurface))
     {
     }
 
@@ -759,6 +761,13 @@ class EngineHostImplementation final {
                 return failAfterStartupCommit(gameApplication, std::move(uiResult.error()), frameIndex, simulationTick);
             }
 
+            if (auto layoutStatus = m_primaryWindowUILayout.commitForFrame(*uiContextResult, *platformFrame);
+                !layoutStatus)
+            {
+                return failAfterStartupCommit(gameApplication, std::move(layoutStatus.error()), frameIndex,
+                                              simulationTick);
+            }
+
             const Render::RenderFrame renderFrame{
                 .frameIndex = frameIndex,
                 .interpolation = frameTiming.interpolation,
@@ -877,6 +886,7 @@ class EngineHostImplementation final {
     std::unique_ptr<Runtime::Input::UIInputRouteProducer> m_uiInputRouteProducer;
     EngineModules m_modules;
     Runtime::Detail::PrimaryWindowUIContextOwner m_primaryWindowUi;
+    Runtime::Detail::PrimaryWindowUILayoutCoordinator m_primaryWindowUILayout;
     std::thread::id m_ownerThread;
     std::unique_ptr<IGameState> m_gameState;
     [[maybe_unused]] GameStatePolicy m_committedPolicy{};

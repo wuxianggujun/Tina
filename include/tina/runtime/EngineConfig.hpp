@@ -6,6 +6,7 @@
 #include <tina/platform/Window.hpp>
 #include <tina/runtime/InputActionMap.hpp>
 #include <tina/runtime/PlatformEvents.hpp>
+#include <tina/ui/UIContextConfig.hpp>
 
 #include <string>
 
@@ -17,6 +18,7 @@ struct EngineConfig final {
     std::string applicationName;
     Platform::PrimaryWindowConfig primaryWindow;
     Platform::PlatformFrameCapacityConfig platformFrameCapacities{};
+    UI::UIContextCapacityConfig primaryWindowUICapacities{};
     InputActionMapConfig inputActions;
     PlatformEventSubscriptionConfig platformEventSubscriptions{};
     Core::FixedStepConfig fixedSimulation;
