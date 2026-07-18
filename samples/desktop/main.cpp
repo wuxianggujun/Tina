@@ -2,13 +2,17 @@
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
+#include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
+#include <tina/ui/UILayout.hpp>
+#include <tina/ui/UIPaint.hpp>
 
 #include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -34,7 +38,39 @@ struct LifecycleCounters final {
     u64 stateEnters = 0;
     u64 stateExits = 0;
     u64 applicationShutdowns = 0;
+    u64 uiRootsCreated = 0;
+    u64 uiPaintedPanelsCreated = 0;
+    u64 uiRootsReleased = 0;
 };
+
+[[nodiscard]] Tina::UI::UILayoutStyle absolutePanelStyle(
+    Tina::UI::UILayoutLength left, Tina::UI::UILayoutLength top,
+    Tina::UI::UILayoutLength width, Tina::UI::UILayoutLength height) noexcept
+{
+    Tina::UI::UILayoutStyle style{};
+    style.position = Tina::UI::UILayoutPositionMode::AbsoluteOverlay;
+    style.absoluteInset.left = left;
+    style.absoluteInset.top = top;
+    style.size.width = width;
+    style.size.height = height;
+    return style;
+}
+
+[[nodiscard]] Tina::UI::UIBoxPaint solidFill(
+    Tina::Core::u8 red, Tina::Core::u8 green, Tina::Core::u8 blue,
+    Tina::Core::u8 alpha = 255) noexcept
+{
+    return Tina::UI::UIBoxPaint{
+        .solidFill = Tina::UI::UISolidFill{
+            .color = {
+                .red = red,
+                .green = green,
+                .blue = blue,
+                .alpha = alpha,
+            },
+        },
+    };
+}
 
 void writeJsonString(std::ostream& output, std::string_view value)
 {
@@ -192,14 +228,103 @@ class DesktopSmokeState final : public Tina::IGameState {
     {
     }
 
-    Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
+    Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
         ++counters_.stateEnters;
+
+        auto rootBuilder = context.primaryWindowUIRootBuilder();
+        if (!rootBuilder)
+        {
+            return Tina::Core::failure(std::move(rootBuilder.error()));
+        }
+        auto root = rootBuilder->createRoot();
+        if (!root)
+        {
+            return Tina::Core::failure(std::move(root.error()));
+        }
+        auto tree = rootBuilder->treeUpdater(*root);
+        if (!tree)
+        {
+            return Tina::Core::failure(std::move(tree.error()));
+        }
+
+        Tina::UI::UILayoutStyle rootStyle{};
+        rootStyle.size.width = Tina::UI::UILayoutLength::Percent(100.0F);
+        rootStyle.size.height = Tina::UI::UILayoutLength::Percent(100.0F);
+        if (auto status = tree->setLayoutStyle(root->rootNodeId(), rootStyle); !status)
+        {
+            return status;
+        }
+
+        struct PanelSpec final {
+            Tina::UI::UILayoutStyle layout{};
+            Tina::UI::UIBoxPaint paint{};
+        };
+        const PanelSpec panels[] = {
+            {
+                .layout = absolutePanelStyle(
+                    Tina::UI::UILayoutLength::Px(0.0F),
+                    Tina::UI::UILayoutLength::Px(0.0F),
+                    Tina::UI::UILayoutLength::Percent(100.0F),
+                    Tina::UI::UILayoutLength::Percent(100.0F)),
+                .paint = solidFill(9, 24, 40),
+            },
+            {
+                .layout = absolutePanelStyle(
+                    Tina::UI::UILayoutLength::Px(64.0F),
+                    Tina::UI::UILayoutLength::Px(72.0F),
+                    Tina::UI::UILayoutLength::Px(480.0F),
+                    Tina::UI::UILayoutLength::Px(260.0F)),
+                .paint = solidFill(28, 92, 148),
+            },
+            {
+                .layout = absolutePanelStyle(
+                    Tina::UI::UILayoutLength::Px(128.0F),
+                    Tina::UI::UILayoutLength::Px(144.0F),
+                    Tina::UI::UILayoutLength::Px(560.0F),
+                    Tina::UI::UILayoutLength::Px(92.0F)),
+                .paint = solidFill(29, 200, 170, 220),
+            },
+            {
+                .layout = absolutePanelStyle(
+                    Tina::UI::UILayoutLength::Percent(90.0F),
+                    Tina::UI::UILayoutLength::Px(520.0F),
+                    Tina::UI::UILayoutLength::Percent(20.0F),
+                    Tina::UI::UILayoutLength::Px(104.0F)),
+                .paint = solidFill(239, 88, 122),
+            },
+        };
+
+        for (const PanelSpec& panelSpec : panels)
+        {
+            auto panel = tree->createPanel(root->rootNodeId());
+            if (!panel)
+            {
+                return Tina::Core::failure(std::move(panel.error()));
+            }
+            if (auto status = tree->setLayoutStyle(*panel, panelSpec.layout); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setBoxPaint(*panel, panelSpec.paint); !status)
+            {
+                return status;
+            }
+        }
+
+        uiRoot_ = std::move(*root);
+        ++counters_.uiRootsCreated;
+        counters_.uiPaintedPanelsCreated += std::size(panels);
         return Tina::Core::success();
     }
 
     void onExit(Tina::GameStateExitContext&) noexcept override
     {
+        if (uiRoot_)
+        {
+            uiRoot_.reset();
+            ++counters_.uiRootsReleased;
+        }
         ++counters_.stateExits;
     }
 
@@ -225,6 +350,7 @@ class DesktopSmokeState final : public Tina::IGameState {
   private:
     SampleOptions options_;
     LifecycleCounters& counters_;
+    Tina::UI::UIRootOwner uiRoot_{};
 };
 
 class DesktopSmokeApplication final : public Tina::IGameApplication {
@@ -285,7 +411,8 @@ class DesktopSmokeApplication final : public Tina::IGameApplication {
         return Tina::Core::failure(std::move(error));
     }
     if (counters.frameUpdates != options.targetFrameCount || counters.stateEnters != 1 || counters.stateExits != 1 ||
-        counters.applicationShutdowns != 1)
+        counters.applicationShutdowns != 1 || counters.uiRootsCreated != 1 || counters.uiPaintedPanelsCreated != 4 ||
+        counters.uiRootsReleased != 1)
     {
         Tina::Core::Error error{Tina::Core::CoreErrorCode::Internal,
                                 "The desktop smoke sample lifecycle counters did not match their contract"};
@@ -294,7 +421,10 @@ class DesktopSmokeApplication final : public Tina::IGameApplication {
                              ", targetFrameCount=" + std::to_string(options.targetFrameCount) +
                              ", stateEnters=" + std::to_string(counters.stateEnters) +
                              ", stateExits=" + std::to_string(counters.stateExits) +
-                             ", applicationShutdowns=" + std::to_string(counters.applicationShutdowns));
+                             ", applicationShutdowns=" + std::to_string(counters.applicationShutdowns) +
+                             ", uiRootsCreated=" + std::to_string(counters.uiRootsCreated) +
+                             ", uiPaintedPanelsCreated=" + std::to_string(counters.uiPaintedPanelsCreated) +
+                             ", uiRootsReleased=" + std::to_string(counters.uiRootsReleased));
         return Tina::Core::failure(std::move(error));
     }
     return Tina::Core::success();
@@ -338,7 +468,10 @@ class DesktopSmokeApplication final : public Tina::IGameApplication {
               << ",\"frameDelayMs\":" << options.frameDelayMilliseconds << ",\"exit\":";
     writeJsonString(std::cout, runExitReasonName(*runResult));
     std::cout << ",\"stateEnters\":" << counters.stateEnters << ",\"stateExits\":" << counters.stateExits
-              << ",\"applicationShutdowns\":" << counters.applicationShutdowns << "}\n";
+              << ",\"applicationShutdowns\":" << counters.applicationShutdowns
+              << ",\"uiRootsCreated\":" << counters.uiRootsCreated
+              << ",\"uiPaintedPanelsCreated\":" << counters.uiPaintedPanelsCreated
+              << ",\"uiRootsReleased\":" << counters.uiRootsReleased << "}\n";
     return 0;
 }
 

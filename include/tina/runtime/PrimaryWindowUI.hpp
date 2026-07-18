@@ -30,6 +30,7 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UINodeId> createButton(UI::UINodeId parent);
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
+    [[nodiscard]] Core::Status setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint);
     [[nodiscard]] Core::Status destroy(UI::UINodeId node);
 
   private:

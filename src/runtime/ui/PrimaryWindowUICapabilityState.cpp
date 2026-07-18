@@ -275,6 +275,23 @@ Core::Status PrimaryWindowUICapabilityState::setPointerHitPolicy(u64 epoch, Prim
     return Core::success();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setBoxPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                         UI::UITreeUpdater& updater, UI::UINodeId node,
+                                                         const UI::UIBoxPaint& paint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setBoxPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setBoxPaint(node, paint);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
 Core::Status PrimaryWindowUICapabilityState::destroy(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                      UI::UINodeId node)
 {

@@ -39,6 +39,20 @@ class PrimaryWindowUICapabilityTest : public testing::Test {
     std::unique_ptr<UI::UIContext> context;
 };
 
+[[nodiscard]] UI::UIBoxPaint solidFill(u8 red, u8 green, u8 blue, u8 alpha = 255) noexcept
+{
+    UI::UIBoxPaint paint;
+    paint.solidFill = UI::UISolidFill{
+        .color = {
+            .red = red,
+            .green = green,
+            .blue = blue,
+            .alpha = alpha,
+        },
+    };
+    return paint;
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAndExpiresUnconditionally)
 {
     CapabilityState state;
@@ -161,15 +175,92 @@ TEST_F(PrimaryWindowUICapabilityTest, UpdateCapabilityMutatesOwnedTreeThenExpire
     ASSERT_TRUE(updateTree.has_value()) << updateTree.error().message;
     UI::UILayoutStyle style{};
     style.size.width = UI::UILayoutLength::Px(320.0F);
+    style.size.height = UI::UILayoutLength::Px(180.0F);
     ASSERT_TRUE(updateTree->setLayoutStyle(*panel, style).has_value());
+    ASSERT_TRUE(updateTree->setBoxPaint(*panel, solidFill(40, 80, 120, 200)).has_value());
     auto alive = updateTree->isAlive(*panel);
     ASSERT_TRUE(alive.has_value()) << alive.error().message;
     EXPECT_TRUE(*alive);
     ASSERT_TRUE(state.finishPhase(*updateEpoch, CapabilityPhase::UIUpdate).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 640.0F, .height = 360.0F}).has_value());
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    ASSERT_EQ(paint.size(), 1U);
+    EXPECT_EQ(paint.entries().front().node, *panel);
+    EXPECT_EQ(paint.entries().front().solidFill,
+              (UI::UIPremultipliedRgba8Color{.red = 31, .green = 63, .blue = 94, .alpha = 200}));
 
-    auto expired = updateTree->isAlive(*panel);
+    auto expired = updateTree->setBoxPaint(*panel, solidFill(1, 2, 3));
     ASSERT_FALSE(expired.has_value());
     EXPECT_EQ(expired.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, SetBoxPaintFailureIsStickyAcrossContextAndPreventsLaterMutation)
+{
+    auto foreignContextResult = UI::UIContext::Create(window, {.nodeCapacity = 4, .rootCapacity = 1});
+    ASSERT_TRUE(foreignContextResult.has_value()) << foreignContextResult.error().message;
+    std::unique_ptr<UI::UIContext> foreignContext = std::move(*foreignContextResult);
+    auto foreignRoot = foreignContext->rootBuilder().createRoot();
+    ASSERT_TRUE(foreignRoot.has_value()) << foreignRoot.error().message;
+    auto foreignPanel = foreignContext->rootBuilder().createPanel(foreignRoot->rootNodeId());
+    ASSERT_TRUE(foreignPanel.has_value()) << foreignPanel.error().message;
+
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto panel = tree->createPanel(root->rootNodeId());
+    ASSERT_TRUE(panel.has_value()) << panel.error().message;
+
+    Core::Status wrongContext = tree->setBoxPaint(*foreignPanel, solidFill(255, 0, 0));
+    ASSERT_FALSE(wrongContext.has_value());
+    EXPECT_EQ(wrongContext.error().code, UI::UIErrorCode::WrongContext);
+    const bool wasPaintDirty = context->statistics().paintDirty;
+
+    Core::Status otherwiseValid = tree->setBoxPaint(*panel, solidFill(0, 255, 0));
+    ASSERT_FALSE(otherwiseValid.has_value());
+    EXPECT_EQ(otherwiseValid.error().code, wrongContext.error().code);
+    EXPECT_EQ(otherwiseValid.error().message, wrongContext.error().message);
+    EXPECT_EQ(context->statistics().paintDirty, wasPaintDirty);
+
+    auto finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish.has_value());
+    EXPECT_EQ(finish.error().code, UI::UIErrorCode::WrongContext);
+    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 50.0F}).has_value());
+    EXPECT_TRUE(context->committedPaint().empty());
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, SetBoxPaintRejectsStaleGenerationAndSticksTheError)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto panel = tree->createPanel(root->rootNodeId());
+    ASSERT_TRUE(panel.has_value()) << panel.error().message;
+    ASSERT_TRUE(tree->destroy(*panel).has_value());
+
+    Core::Status staleGeneration = tree->setBoxPaint(*panel, solidFill(10, 20, 30));
+    ASSERT_FALSE(staleGeneration.has_value());
+    EXPECT_EQ(staleGeneration.error().code, UI::UIErrorCode::InvalidNode);
+
+    Core::Status otherwiseValid = tree->setBoxPaint(root->rootNodeId(), solidFill(40, 80, 120));
+    ASSERT_FALSE(otherwiseValid.has_value());
+    EXPECT_EQ(otherwiseValid.error().code, staleGeneration.error().code);
+    EXPECT_EQ(otherwiseValid.error().message, staleGeneration.error().message);
+
+    auto finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish.has_value());
+    EXPECT_EQ(finish.error().code, UI::UIErrorCode::InvalidNode);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, CrossThreadUseFailsWithoutPoisoningTheOwnerPhase)

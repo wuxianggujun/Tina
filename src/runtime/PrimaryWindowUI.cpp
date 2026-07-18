@@ -100,6 +100,15 @@ Core::Status PrimaryWindowUITreeUpdater::setPointerHitPolicy(UI::UINodeId node, 
     return m_state->setPointerHitPolicy(m_epoch, m_phase, m_updater, node, policy);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setBoxPaint");
+    }
+    return m_state->setBoxPaint(m_epoch, m_phase, m_updater, node, paint);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::destroy(UI::UINodeId node)
 {
     if (m_state == nullptr)
