@@ -3,9 +3,11 @@
 ## 规则
 
 - 测试框架固定为 GoogleTest；
-- `TINA_BUILD_TESTING=ON` 时 CMake 生成基础 `tina_tests`；M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、命中快照、point query 与 synthetic route 核心另有独立
-  `tina_ui_tests`，M7-C1c-b3b Runtime→vNext UI producer 另有独立 `tina_runtime_ui_tests`；后者不能并入
-  Legacy ON 时含旧 `Tina::UI` 定义的 `tina_tests` 最终二进制；启用
+- `TINA_BUILD_TESTING=ON` 时 CMake 始终生成 vNext 基础 `tina_tests`；Legacy ON 时另行生成
+  `tina_legacy_tests`，旧 Core/Engine/UI 测试只进入这个 Legacy-only executable，禁止和 vNext UI/Runtime
+  混入同一最终二进制；M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、命中快照、point query 与 synthetic route
+  核心另有独立 `tina_ui_tests`，M7-C1c-b3b Runtime→vNext UI producer 另有独立
+  `tina_runtime_ui_tests`；启用
   `TINA_BUILD_PLATFORM_GLFW` 时另外生成 `tina_platform_glfw_tests`，启用
   `TINA_BUILD_RENDER_BGFX` 时另外生成 `tina_render_bgfx_tests`，不注册额外测试调度；
 - 构建完成后直接运行对应 GoogleTest executable，任一返回码非0即失败；
@@ -22,7 +24,8 @@
 | --- | --- | --- | --- | --- |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b：Core/Platform/Input/Task/Render/Runtime/UI、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Debug C++23 | 185/185 | 本次基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12；GLFW 23/23与 bgfx 11/11为前序门禁 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext M6-A/M7-A/M7-B1/M7-B2/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b：Core/Platform/Input/Task/Render/Runtime/UI、WindowSurface handoff、Desktop bootstrap、真实 bgfx backend | Release C++23 | 185/185 | 本次基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12；GLFW 23/23与 bgfx 11/11为前序门禁 |
-| Windows 11 / MSVC 19.50 | Legacy ON 与 vNext M6-A 共存构建 | Debug C++23 | 135/135 | 通过 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | Legacy ON 与当前 vNext 共存构建，Legacy/vNext 测试进程隔离 | Debug/Release C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过 |
+| Ubuntu 22.04 / GCC 13.4 / CMake 4.2.3 | Legacy ON 与当前 vNext 共存构建，Legacy/vNext 测试进程隔离 | Debug C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过；构建保留旧源码/EASTL 既有 warning |
 | Ubuntu 22.04 / GCC 13.4 | vNext M6-A/M7-A/M7-B1/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b：X11 WindowSurface handoff + event-time Pointer/UI tree/layout/committed-hit/query/route core、独立 Runtime→UI producer，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 185/185 | 当前 Null 图基础185/185、UI 75/75、Runtime→UI 12/12；producer 完整重编译无 warning，X11 GLFW 23/23为上一门禁 |
 | Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | vNext M6-A/M7-A/M7-B1/M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b：X11 WindowSurface handoff + event-time Pointer/UI tree/layout/committed-hit/query/route core、独立 Runtime→UI producer，ASan/UBSan/LSan | Debug C++23 | 185/185 | 当前 Null sanitizer 图基础185/185、UI 75/75、Runtime→UI 12/12且无 Tina 诊断；X11 GLFW 23/23与精确第三方 XIM suppression为上一门禁 |
 

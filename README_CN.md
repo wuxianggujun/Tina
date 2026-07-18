@@ -62,7 +62,7 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 ## 构建
 
-目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过 vNext Null、UI、GLFW 与 bgfx Debug/Release 图的完整门禁：基础183/183、UI 75/75、GLFW专项22/22、bgfx专项11/11、Null样例300帧、WindowSurface GLFW样例300帧，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 默认300帧；Debug/Release 构建均通过。`TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。
+目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过当前 vNext Debug/Release 直接门禁：基础185/185、独立 UI 75/75、独立 Runtime→UI 12/12；前序门禁另通过 GLFW专项23/23、bgfx专项11/11、Null样例300帧、WindowSurface GLFW样例1800帧，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 默认300帧。Legacy ON 图已把旧测试隔离为 `tina_legacy_tests`，Debug/Release 均为 vNext 185/185 + Legacy 43/43。`TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。
 
 Linux M7-B1 Platform 门禁覆盖 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer，以及 GCC 13/Clang 22 X11/Wayland 双后端；Wayland 使用带 `wl_seat` 的嵌套 Weston 9。独立 `tina_ui_tests` 在 GCC 13.4 为75/75，在 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 下也为75/75且无 sanitizer 诊断；初次 GCC 暴露的 routed-pointer callback `requires` 名称可见性问题已修复，二次 GCC/Clang 构建无 warning。M7-B2 Desktop/bgfx X11 图也已直接运行：GCC 13.4 与 Clang 22.1.8 + ASan/UBSan/LSan 均通过基础183/183、GLFW专项22/22、bgfx专项11/11和 Desktop样例300帧。Clang 基础/bgfx测试不使用 suppression；X11 只对第三方 libX11 `_XimOpenIM` retention 使用精确 suppression，GLFW专项命中12次/4896 B、Desktop样例命中1次/408 B。Clang Desktop 经 bgfx 选择 Vulkan，但当前 WSL2 适配器是 llvmpipe 软件实现，因此该结果证明 Linux Vulkan/backend 生命周期，不代表硬件 GPU 性能。由 vcpkg 提供的 GLFW 本身未被 sanitizer 插桩。详细边界见[测试文档](docs/testing.md)。Clang preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22.04 自带的旧 libstdc++。先确认终端没有命中不支持 `Visual Studio 18 2026` 生成器的旧版 CMake：
 
@@ -86,21 +86,24 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_desktop.exe
 
 cmake --preset windows-msvc
-cmake --build --preset windows-debug --target Tina tina_tests
+cmake --build --preset windows-debug --target Tina tina_tests tina_legacy_tests
 ```
 
-测试构建完成后直接运行基础 `tina_tests`；启用 GLFW adapter 时再直接运行独立的
-`tina_platform_glfw_tests`。两者都不通过额外测试调度器：
+测试构建完成后直接运行 vNext 基础 `tina_tests`；`TINA_BUILD_LEGACY=ON` 时还必须直接运行
+Legacy-only `tina_legacy_tests`。启用 GLFW adapter 时再直接运行独立的
+`tina_platform_glfw_tests`。这些 executable 都不通过额外测试调度器：
 
 ```powershell
 out\build\windows-msvc\bin\Debug\tina_tests.exe
+out\build\windows-msvc\bin\Debug\tina_legacy_tests.exe
 ```
 
 Release 使用同一个 Visual Studio 多配置构建目录：
 
 ```powershell
-cmake --build out\build\windows-msvc --config Release --target Tina tina_tests --parallel 2
+cmake --build out\build\windows-msvc --config Release --target Tina tina_tests tina_legacy_tests --parallel 2
 out\build\windows-msvc\bin\Release\tina_tests.exe
+out\build\windows-msvc\bin\Release\tina_legacy_tests.exe
 ```
 
 Visual Studio 的测试程序和 GTest 运行库按配置隔离在 `bin\Debug`、`bin\Release`，避免 Debug/Release CRT 混用；Linux 单配置构建仍输出到 `bin`。
@@ -123,8 +126,9 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-game --smoke-frames=300
 out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 ```
 
-项目不使用 CTest 调度；测试直接运行固定 GoogleTest 1.17.0 生成的基础 `tina_tests` 与按需构建的
-adapter 专项测试。当前精确数量和平台矩阵只在[测试文档](docs/testing.md)维护。
+项目不使用 CTest 调度；测试直接运行固定 GoogleTest 1.17.0 生成的基础 `tina_tests`、Legacy ON
+构建图中的 `tina_legacy_tests`，以及按需构建的 adapter 专项测试。当前精确数量和平台矩阵只在
+[测试文档](docs/testing.md)维护。
 
 当前 Legacy UI 已具备 generation `NodeId`、Pointer Capture、Focus/Tab、KeyDown/KeyUp 的 Capture/Target/Bubble 路由、方向键空间焦点导航、可嵌套 Modal Focus Scope、Button 的 Enter/Space pressed/release 生命周期与单次激活、每窗口 Theme/DPI、嵌套 Clip、通用 `UIScrollView`、十万行范围计算的 ListView 虚拟化，以及 Windows 原生 IME preedit/composition。每个 Button action 具有独立重入保护、异常恢复和回调自销毁安全性；routed click 目标在路由中删除后通过 generation `NodeId` 立即失效。GLFW 标准手柄的 D-pad/左摇杆可驱动空间导航，A/B 映射为 Accept/Cancel；摇杆带回滞并支持方向长按重复，语义导航仍服从最上层 Modal Focus Scope。Dialog 不再订阅全局键盘事件，Escape 仅在焦点控件未消费时沿祖先链处理；Scene 会在 `onEnter`/`onResume` 交互前激活对应 UI roots。窗口与基础输入只使用 GLFW；IME 通过 Win32 IMM32 补充，不引入其他窗口或输入库。测试数量和平台验证结果只在 [测试文档](docs/testing.md) 中维护。
 

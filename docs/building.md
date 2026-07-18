@@ -43,8 +43,9 @@ cmake --list-presets
 
 ```powershell
 cmake --preset windows-msvc
-cmake --build --preset windows-debug --target Tina tina_tests
+cmake --build --preset windows-debug --target Tina tina_tests tina_legacy_tests
 out\build\windows-msvc\bin\Debug\tina_tests.exe
+out\build\windows-msvc\bin\Debug\tina_legacy_tests.exe
 ```
 
 ## Windows vNext 最小构建
@@ -184,9 +185,10 @@ Legacy Release 仍可使用原有多配置构建目录：
 ```powershell
 cmake --build out\build\windows-msvc `
   --config Release `
-  --target Tina tina_tests `
+  --target Tina tina_tests tina_legacy_tests `
   --parallel 2
 out\build\windows-msvc\bin\Release\tina_tests.exe
+out\build\windows-msvc\bin\Release\tina_legacy_tests.exe
 ```
 
 Debug、Release 可执行文件和 app-local DLL 分别位于 `bin/Debug`、`bin/Release`，不能混用 GTest 或其他运行时 DLL。
@@ -197,8 +199,9 @@ Debug、Release 可执行文件和 app-local DLL 分别位于 `bin/Debug`、`bin
 
 ```bash
 cmake --preset linux-ninja
-cmake --build --preset linux-debug --target Tina tina_tests
+cmake --build --preset linux-debug --target Tina tina_tests tina_legacy_tests
 ./out/build/linux-ninja/bin/tina_tests --gtest_color=no
+./out/build/linux-ninja/bin/tina_legacy_tests --gtest_color=no
 ```
 
 只做 vNext 无 GPU 的编译、链接和单元测试门禁时，使用独立 `linux-gcc13-vnext` 目录，避免污染 Legacy 可运行构建：
@@ -358,7 +361,7 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 
 | 选项 | 默认值 | 用途 |
 | --- | --- | --- |
-| `TINA_BUILD_TESTING` | `ON` | 构建基础 `tina_tests`、独立 `tina_ui_tests` 与 `tina_runtime_ui_tests`；启用 GLFW/bgfx adapter 时也构建对应独立专项测试 |
+| `TINA_BUILD_TESTING` | `ON` | 构建 vNext 基础 `tina_tests`；Legacy ON 时另建 `tina_legacy_tests`；UI、Runtime→UI 与 GLFW/bgfx adapter 使用各自独立专项测试 |
 | `TINA_BUILD_SHADERS` | `ON` | 构建运行时 shader；关闭后只适合编译/链接门禁 |
 | `TINA_BUILD_LEGACY` | `ON` | 迁移期构建现有游戏与旧模块；vNext preset 固定关闭 |
 | `TINA_BUILD_PLATFORM_GLFW` | `OFF` | 构建私有 vNext GLFW Window/Input adapter；需启用 vcpkg `platform-glfw` feature，不改变 Game SDK 边界 |

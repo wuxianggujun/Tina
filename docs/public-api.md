@@ -514,7 +514,7 @@ count 不增长。失败测试先让 root Move listener 产生1次 side effect�
 path capacity 失败：staging view 不发布、旧 published view 保持，但 attempted frame/sequence watermark
 已推进；同一 frame retry 被拒且 callback 仍为1，明确证明 side effect 不回滚也不重放。独立
 `tina_runtime_ui_tests` 直接运行 GoogleTest，不使用 CTest，并与 Legacy UI 所在的
-`tina_tests` 分离。当前 `EngineHost` 仍传 canonical `None`，未拥有/选择 `UIContext`。
+`tina_legacy_tests` 分离。当前 `EngineHost` 仍传 canonical `None`，未拥有/选择 `UIContext`。
 
 ## EngineConfig
 

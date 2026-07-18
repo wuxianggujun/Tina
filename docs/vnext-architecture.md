@@ -595,8 +595,9 @@ vNext-only preset 设为 OFF；当新2D/UI/3D/Audio 覆盖门禁后先把默认�
 
 ## 验收门禁
 
-- Visual Studio 2026 / MSVC 19.50 Debug/Release configure、build 与直接执行基础 `tina_tests`；启用
-  GLFW adapter 时另行直接执行 `tina_platform_glfw_tests`，两者均不使用 CTest；
+- Visual Studio 2026 / MSVC 19.50 Debug/Release configure、build 与直接执行 vNext 基础 `tina_tests`；
+  Legacy ON 图还必须直接执行 Legacy-only `tina_legacy_tests`，启用 GLFW adapter 时另行直接执行
+  `tina_platform_glfw_tests`，这些 executable 均不使用 CTest；
 - M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、committed hit snapshot、point query 与 synthetic route 使用独立
   `tina_ui_tests` 直接 GoogleTest；当前记录 Windows MSVC 19.50 Debug/Release 均75/75通过；Linux
   GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 ASan/UBSan/LSan 均 `tina_ui_tests` 75/75，且 Clang
