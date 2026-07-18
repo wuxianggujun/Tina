@@ -2,11 +2,13 @@ add_executable(tina_ui_tests
     UIHitSnapshotTests.cpp
     UIInputRouteTests.cpp
     UILayoutTests.cpp
+    UIPaintSnapshotTests.cpp
     UITreeCoreTests.cpp
     header_isolation/InputRoutingHeader.cpp
     header_isolation/UIDirtyHeader.cpp
     header_isolation/UICommittedHitHeader.cpp
     header_isolation/UICommittedLayoutHeader.cpp
+    header_isolation/UICommittedPaintHeader.cpp
     header_isolation/UICommittedStructureHeader.cpp
     header_isolation/UIContextHeader.cpp
     header_isolation/UIContextConfigHeader.cpp
@@ -14,6 +16,7 @@ add_executable(tina_ui_tests
     header_isolation/UIEventRoutingHeader.cpp
     header_isolation/UIHitTestHeader.cpp
     header_isolation/UILayoutHeader.cpp
+    header_isolation/UIPaintHeader.cpp
     header_isolation/UINodeIdHeader.cpp
     header_isolation/UIUmbrellaHeader.cpp
     header_isolation/UIWidgetKindHeader.cpp

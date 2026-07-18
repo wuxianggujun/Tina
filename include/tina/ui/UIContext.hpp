@@ -5,6 +5,7 @@
 #include <tina/platform/Window.hpp>
 #include <tina/ui/UICommittedHit.hpp>
 #include <tina/ui/UICommittedLayout.hpp>
+#include <tina/ui/UICommittedPaint.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
 #include <tina/ui/UIContextConfig.hpp>
 #include <tina/ui/UIErrors.hpp>
@@ -12,6 +13,7 @@
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>
+#include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIWidgetKind.hpp>
 
 #include <memory>
@@ -31,6 +33,7 @@ struct UIContextStatistics final {
     usize dirtyQueueCapacity = 0;
     usize layoutSnapshotCapacity = 0;
     usize hitSnapshotCapacity = 0;
+    usize paintSnapshotCapacity = 0;
     usize routePathCapacity = 0;
     usize routedPointerListenerCapacity = 0;
     usize activeRoutedPointerListenerCount = 0;
@@ -45,9 +48,12 @@ struct UIContextStatistics final {
     usize committedHitTargetCount = 0;
     u64 hitRevision = 0;
     u64 paintOrderRevision = 0;
+    usize committedPaintNodeCount = 0;
+    u64 paintRevision = 0;
     bool dirty = false;       // Structure dirty kept for M7-C1a compatibility.
     bool layoutDirty = false; // Style/structure changes still requiring layout.
     bool hitDirty = false;
+    bool paintDirty = false;
     usize lastLayoutPassCount = 0;
     usize lastLayoutMeasuredNodeCount = 0;
     usize lastLayoutArrangedNodeCount = 0;
@@ -55,6 +61,8 @@ struct UIContextStatistics final {
     // basis. Arrange may still resolve them once against the final content box.
     usize lastLayoutPercentMeasureFallbackCount = 0;
     usize lastHitRebuildCount = 0;
+    usize lastPaintCacheRebuildCount = 0;
+    usize lastPaintSnapshotRebuildCount = 0;
     usize dirtyQueuePendingCount = 0;
     usize dirtyQueueHighWater = 0;
 };
@@ -164,6 +172,7 @@ public:
     [[nodiscard]] Core::Status setPointerHitPolicy(
         UINodeId node,
         UIPointerHitPolicy policy);
+    [[nodiscard]] Core::Status setBoxPaint(UINodeId node, const UIBoxPaint& paint);
     [[nodiscard]] Core::Status destroy(UINodeId node);
 
 private:
@@ -176,9 +185,9 @@ private:
 };
 
 // Single-owner-thread retained-tree context for one WindowId. The supplied PMR
-// resource backs bounded tree/id/style/dirty/layout/hit scratch and committed
-// snapshot storage and must outlive the context. Small control-plane objects
-// and cross-thread release queues allocate only during Create() from the process
+// resource backs bounded tree/id/style/paint/dirty/layout/hit scratch and
+// committed snapshot storage and must outlive the context. Small control-plane
+// objects and cross-thread release queues allocate only during Create() from the process
 // default heap.
 class UIContext final {
 public:
@@ -211,6 +220,7 @@ public:
     [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize);
     [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;
     [[nodiscard]] UICommittedHitView committedHit() const noexcept;
+    [[nodiscard]] UICommittedPaintView committedPaint() const noexcept;
     // Pure query over the last committed hit snapshot. It never commits
     // layout, rebuilds hit data, dispatches an event, or allocates storage.
     [[nodiscard]] UIPointerHitQueryResult queryPointerHit(
@@ -253,6 +263,10 @@ private:
         UINodeId updaterRoot,
         UINodeId node,
         UIPointerHitPolicy policy);
+    [[nodiscard]] Core::Status setBoxPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        const UIBoxPaint& paint);
     [[nodiscard]] Core::Status destroyNodeFromUpdater(UINodeId updaterRoot, UINodeId node);
     void destroyRootFromOwner(UINodeId root) noexcept;
     [[nodiscard]] bool isAliveInRoot(UINodeId updaterRoot, UINodeId node) const noexcept;

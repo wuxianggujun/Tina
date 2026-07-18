@@ -21,6 +21,9 @@ struct UIContextCapacityConfig final {
     // Counts every effectively visible route-ancestry entry, including nodes
     // whose pointer policy is Ignore; it is not a targetable-node capacity.
     usize hitSnapshotCapacity = 0;
+    // Counts emitted paint entries, not all layout nodes. Zero derives from
+    // nodeCapacity; a non-zero value remains fixed for the context lifetime.
+    usize paintSnapshotCapacity = 0;
     // Zero derives from nodeCapacity. The listener capacity may be configured
     // independently because one node can own listeners for several events.
     usize routePathCapacity = 0;

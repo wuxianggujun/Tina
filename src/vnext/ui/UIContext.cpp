@@ -68,6 +68,7 @@ struct NormalizedCapacityConfig final {
     usize dirtyQueueCapacity = 0;
     usize layoutSnapshotCapacity = 0;
     usize hitSnapshotCapacity = 0;
+    usize paintSnapshotCapacity = 0;
     usize routePathCapacity = 0;
     usize routedPointerListenerCapacity = 0;
 };
@@ -155,6 +156,15 @@ struct ResolvedLength final {
 [[nodiscard]] float normalizeFloat(float value) noexcept
 {
     return value == 0.0F ? 0.0F : value;
+}
+
+[[nodiscard]] UIBoxPaint normalizeBoxPaint(UIBoxPaint paint) noexcept
+{
+    if (paint.solidFill.has_value()
+        && paint.solidFill->color.alpha == 0) {
+        paint.solidFill.reset();
+    }
+    return paint;
 }
 
 [[nodiscard]] bool isFiniteNonNegative(float value) noexcept
@@ -427,6 +437,9 @@ struct ResolvedLength final {
     const usize hitSnapshotCapacity = config.hitSnapshotCapacity == 0
         ? config.nodeCapacity
         : config.hitSnapshotCapacity;
+    const usize paintSnapshotCapacity = config.paintSnapshotCapacity == 0
+        ? config.nodeCapacity
+        : config.paintSnapshotCapacity;
     const usize routePathCapacity = config.routePathCapacity == 0
         ? config.nodeCapacity
         : config.routePathCapacity;
@@ -440,6 +453,7 @@ struct ResolvedLength final {
         .dirtyQueueCapacity = dirtyQueueCapacity,
         .layoutSnapshotCapacity = layoutSnapshotCapacity,
         .hitSnapshotCapacity = hitSnapshotCapacity,
+        .paintSnapshotCapacity = paintSnapshotCapacity,
         .routePathCapacity = routePathCapacity,
         .routedPointerListenerCapacity = routedPointerListenerCapacity,
     };
@@ -516,6 +530,8 @@ struct UIContext::Impl final {
     std::pmr::vector<UINodeId> idsByIndex;
     std::pmr::vector<UILayoutStyle> layoutStylesByIndex;
     std::pmr::vector<UIPointerHitPolicy> pointerHitPoliciesByIndex;
+    std::pmr::vector<UIBoxPaint> boxPaintsByIndex;
+    std::pmr::vector<UIPremultipliedRgba8Color> localSolidFillCacheByIndex;
     std::pmr::vector<UIDirty> dirtyByIndex;
     std::pmr::vector<u8> dirtyQueuedByIndex;
     std::pmr::vector<UINodeId> dirtyQueue;
@@ -530,12 +546,14 @@ struct UIContext::Impl final {
     std::array<std::pmr::vector<UICommittedNodeEntry>, 2> committedBuffers;
     std::array<std::pmr::vector<UICommittedLayoutEntry>, 2> committedLayoutBuffers;
     std::array<std::pmr::vector<UICommittedHitEntry>, 2> committedHitBuffers;
+    std::array<std::pmr::vector<UICommittedPaintEntry>, 2> committedPaintBuffers;
     std::vector<UINodeId> deferredRootDestroyBuffer;
     std::vector<Detail::DeferredRoutedPointerListenerRelease>
         deferredRoutedPointerListenerReleaseBuffer;
     usize publishedBufferIndex = 0;
     usize publishedLayoutBufferIndex = 0;
     usize publishedHitBufferIndex = 0;
+    usize publishedPaintBufferIndex = 0;
     u64 committedRevision = 0;
     u64 committedLayoutRevision = 0;
     u64 committedLayoutStructureRevision = 0;
@@ -543,6 +561,11 @@ struct UIContext::Impl final {
     u64 committedHitStructureRevision = 0;
     u64 committedHitLayoutRevision = 0;
     u64 committedHitPaintOrderRevision = 0;
+    u64 committedPaintRevision = 0;
+    u64 committedPaintStructureRevision = 0;
+    u64 committedPaintLayoutRevision = 0;
+    u64 committedPaintOrderRevision = 0;
+    UILogicalSize committedPaintViewportSize{};
     UILogicalSize committedViewportSize{};
     bool hasCommittedViewport = false;
     usize liveRootCount = 0;
@@ -551,10 +574,13 @@ struct UIContext::Impl final {
     bool structureDirty = false;
     bool layoutDirty = false;
     bool hitDirty = false;
+    bool paintDirty = false;
     LayoutPassStatistics lastLayoutPass{};
     usize dirtyQueueHighWater = 0;
     usize committedHitTargetCount = 0;
     usize lastHitRebuildCount = 0;
+    usize lastPaintCacheRebuildCount = 0;
+    usize lastPaintSnapshotRebuildCount = 0;
     u32 freeRoutedPointerListenerHead = InvalidRoutedPointerListenerIndex;
     usize activeRoutedPointerListenerCount = 0;
     usize routedPointerListenerHighWater = 0;
@@ -578,6 +604,8 @@ struct UIContext::Impl final {
           idsByIndex(&resource),
           layoutStylesByIndex(&resource),
           pointerHitPoliciesByIndex(&resource),
+          boxPaintsByIndex(&resource),
+          localSolidFillCacheByIndex(&resource),
           dirtyByIndex(&resource),
           dirtyQueuedByIndex(&resource),
           dirtyQueue(&resource),
@@ -597,7 +625,10 @@ struct UIContext::Impl final {
               std::pmr::vector<UICommittedLayoutEntry>(&resource)},
           committedHitBuffers{
               std::pmr::vector<UICommittedHitEntry>(&resource),
-              std::pmr::vector<UICommittedHitEntry>(&resource)}
+              std::pmr::vector<UICommittedHitEntry>(&resource)},
+          committedPaintBuffers{
+              std::pmr::vector<UICommittedPaintEntry>(&resource),
+              std::pmr::vector<UICommittedPaintEntry>(&resource)}
     {
     }
 
@@ -624,6 +655,7 @@ struct UIContext::Impl final {
             .dirtyQueueCapacity = normalized.dirtyQueueCapacity,
             .layoutSnapshotCapacity = normalized.layoutSnapshotCapacity,
             .hitSnapshotCapacity = normalized.hitSnapshotCapacity,
+            .paintSnapshotCapacity = normalized.paintSnapshotCapacity,
             .routePathCapacity = normalized.routePathCapacity,
             .routedPointerListenerCapacity = normalized.routedPointerListenerCapacity,
         };
@@ -640,6 +672,8 @@ struct UIContext::Impl final {
         impl->pointerHitPoliciesByIndex.resize(
             normalized.nodeCapacity,
             UIPointerHitPolicy::Ignore);
+        impl->boxPaintsByIndex.resize(normalized.nodeCapacity);
+        impl->localSolidFillCacheByIndex.resize(normalized.nodeCapacity);
         impl->dirtyByIndex.resize(normalized.nodeCapacity, UIDirty::None);
         impl->dirtyQueuedByIndex.resize(normalized.nodeCapacity, 0);
         impl->dirtyQueue.reserve(normalized.dirtyQueueCapacity);
@@ -678,6 +712,8 @@ struct UIContext::Impl final {
         impl->committedLayoutBuffers[1].reserve(normalized.layoutSnapshotCapacity);
         impl->committedHitBuffers[0].reserve(normalized.hitSnapshotCapacity);
         impl->committedHitBuffers[1].reserve(normalized.hitSnapshotCapacity);
+        impl->committedPaintBuffers[0].reserve(normalized.paintSnapshotCapacity);
+        impl->committedPaintBuffers[1].reserve(normalized.paintSnapshotCapacity);
         impl->deferredRootDestroyBuffer.reserve(normalized.rootCapacity);
         impl->deferredRoutedPointerListenerReleaseBuffer.reserve(
             normalized.routedPointerListenerCapacity);
@@ -1420,6 +1456,77 @@ struct UIContext::Impl final {
         return targetCount;
     }
 
+    [[nodiscard]] Core::Result<usize> validatePaintCandidateCapacity(
+        std::span<const UICommittedLayoutEntry> layoutEntries) const
+    {
+        usize paintEntryCount = 0;
+        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries) {
+            if (layoutEntry.effectiveVisibility != UIVisibility::Visible) {
+                continue;
+            }
+            if (!contains(layoutEntry.node)) {
+                return fail(
+                    UIErrorCode::InvalidNode,
+                    "UI paint snapshot layout references a stale node");
+            }
+            const UIBoxPaint& paint = boxPaintsByIndex[layoutEntry.node.index()];
+            if (paint.solidFill.has_value()
+                && paint.solidFill->color.alpha != 0) {
+                ++paintEntryCount;
+            }
+        }
+        if (paintEntryCount > capacityConfig.paintSnapshotCapacity) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI committed paint snapshot capacity has been exhausted");
+        }
+        return paintEntryCount;
+    }
+
+    [[nodiscard]] usize rebuildDirtyPaintCaches(
+        std::span<const UICommittedLayoutEntry> layoutEntries) noexcept
+    {
+        usize rebuildCount = 0;
+        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries) {
+            const u32 nodeIndex = layoutEntry.node.index();
+            if (nodeIndex >= dirtyByIndex.size()
+                || !hasDirty(dirtyByIndex[nodeIndex], UIDirty::Paint)) {
+                continue;
+            }
+
+            const UIBoxPaint& paint = boxPaintsByIndex[nodeIndex];
+            localSolidFillCacheByIndex[nodeIndex] = paint.solidFill.has_value()
+                ? premultiply(paint.solidFill->color)
+                : UIPremultipliedRgba8Color{};
+            ++rebuildCount;
+        }
+        return rebuildCount;
+    }
+
+    void buildCommittedPaint(
+        std::pmr::vector<UICommittedPaintEntry>& output,
+        std::span<const UICommittedLayoutEntry> layoutEntries) const noexcept
+    {
+        output.clear();
+        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries) {
+            if (layoutEntry.effectiveVisibility != UIVisibility::Visible) {
+                continue;
+            }
+            const UIPremultipliedRgba8Color fill =
+                localSolidFillCacheByIndex[layoutEntry.node.index()];
+            if (fill.isTransparent()) {
+                continue;
+            }
+            output.push_back(UICommittedPaintEntry{
+                .node = layoutEntry.node,
+                .worldRect = layoutEntry.worldRect,
+                .effectiveClip = layoutEntry.effectiveClip,
+                .paintOrdinal = layoutEntry.paintOrdinal,
+                .solidFill = fill,
+            });
+        }
+    }
+
     [[nodiscard]] static bool isFiniteLayoutRect(UILogicalRect rect) noexcept
     {
         return std::isfinite(rect.x)
@@ -1759,6 +1866,8 @@ struct UIContext::Impl final {
         }
         layoutStylesByIndex[index] = {};
         pointerHitPoliciesByIndex[index] = UIPointerHitPolicy::Ignore;
+        boxPaintsByIndex[index] = {};
+        localSolidFillCacheByIndex[index] = {};
         dirtyByIndex[index] = UIDirty::None;
         dirtyQueuedByIndex[index] = 0;
         layoutScratchByIndex[index] = {};
@@ -1904,6 +2013,31 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status markPaintDirty(UINodeId node)
+    {
+        if (!contains(node) || node.index() >= dirtyByIndex.size()) {
+            return fail(UIErrorCode::InvalidNode, "UI paint dirty node is invalid");
+        }
+
+        const u32 index = node.index();
+        if (dirtyQueuedByIndex[index] == 0) {
+            if (dirtyQueue.size() >= capacityConfig.dirtyQueueCapacity) {
+                compactDirtyQueue();
+            }
+            if (dirtyQueue.size() >= capacityConfig.dirtyQueueCapacity) {
+                return fail(
+                    UIErrorCode::CapacityExceeded,
+                    "UI dirty queue capacity has been exhausted");
+            }
+            dirtyQueue.push_back(node);
+            dirtyQueuedByIndex[index] = 1;
+        }
+        dirtyByIndex[index] |= UIDirty::Paint;
+        dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
+        paintDirty = true;
+        return Core::success();
+    }
+
     void clearDirtyState() noexcept
     {
         std::fill(dirtyByIndex.begin(), dirtyByIndex.end(), UIDirty::None);
@@ -1911,6 +2045,7 @@ struct UIContext::Impl final {
         dirtyQueue.clear();
         layoutDirty = false;
         hitDirty = false;
+        paintDirty = false;
     }
 
     [[nodiscard]] bool isNodeWithinRoot(UINodeId root, UINodeId node) const noexcept
@@ -2266,6 +2401,41 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status setBoxPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        const UIBoxPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue()) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        if (!contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater root is no longer alive");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node)) {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+
+        const UIBoxPaint normalizedPaint = normalizeBoxPaint(paint);
+        UIBoxPaint& currentPaint = boxPaintsByIndex[node.index()];
+        if (currentPaint == normalizedPaint) {
+            return Core::success();
+        }
+        if (Core::Status dirtyStatus = markPaintDirty(node); !dirtyStatus) {
+            return dirtyStatus;
+        }
+        currentPaint = normalizedPaint;
+        return Core::success();
+    }
+
     void appendCommittedTree(
         u32 index,
         u32& ordinal,
@@ -2356,10 +2526,14 @@ struct UIContext::Impl final {
             || viewportSize != committedViewportSize;
         const bool layoutNeedsCommit = structureDirty || layoutDirty || viewportChanged;
         const bool hitNeedsCommit = hitDirty || layoutNeedsCommit || committedHitRevision == 0;
+        const bool paintNeedsCommit =
+            paintDirty || layoutNeedsCommit || committedPaintRevision == 0;
 
-        if (!layoutNeedsCommit && !hitNeedsCommit) {
+        if (!layoutNeedsCommit && !hitNeedsCommit && !paintNeedsCommit) {
             lastLayoutPass = {};
             lastHitRebuildCount = 0;
+            lastPaintCacheRebuildCount = 0;
+            lastPaintSnapshotRebuildCount = 0;
             return Core::success();
         }
         if (layoutNeedsCommit
@@ -2423,6 +2597,21 @@ struct UIContext::Impl final {
             candidateHitTargetCount = *hitResult;
         }
 
+        usize writePaintBufferIndex = publishedPaintBufferIndex;
+        usize candidatePaintCacheRebuildCount = 0;
+        if (paintNeedsCommit) {
+            auto paintCapacity = validatePaintCandidateCapacity(candidateLayoutEntries);
+            if (!paintCapacity) {
+                return Core::failure(paintCapacity.error());
+            }
+            writePaintBufferIndex = 1 - publishedPaintBufferIndex;
+            candidatePaintCacheRebuildCount =
+                rebuildDirtyPaintCaches(candidateLayoutEntries);
+            buildCommittedPaint(
+                committedPaintBuffers[writePaintBufferIndex],
+                candidateLayoutEntries);
+        }
+
         if (structureDirty) {
             publishedBufferIndex = writeStructureBufferIndex;
             ++committedRevision;
@@ -2443,8 +2632,18 @@ struct UIContext::Impl final {
             committedHitPaintOrderRevision = candidatePaintOrderRevision;
             committedHitTargetCount = candidateHitTargetCount;
         }
+        if (paintNeedsCommit) {
+            publishedPaintBufferIndex = writePaintBufferIndex;
+            ++committedPaintRevision;
+            committedPaintStructureRevision = candidateStructureRevision;
+            committedPaintLayoutRevision = candidateLayoutRevision;
+            committedPaintOrderRevision = candidatePaintOrderRevision;
+            committedPaintViewportSize = viewportSize;
+        }
         lastLayoutPass = layoutNeedsCommit ? pass : LayoutPassStatistics{};
         lastHitRebuildCount = hitNeedsCommit ? 1 : 0;
+        lastPaintCacheRebuildCount = candidatePaintCacheRebuildCount;
+        lastPaintSnapshotRebuildCount = paintNeedsCommit ? 1 : 0;
         clearDirtyState();
         return Core::success();
     }
@@ -2480,6 +2679,20 @@ struct UIContext::Impl final {
             committedHitLayoutRevision,
             committedHitPaintOrderRevision,
             committedHitRevision,
+        };
+    }
+
+    [[nodiscard]] UICommittedPaintView committedPaint() const noexcept
+    {
+        const std::pmr::vector<UICommittedPaintEntry>& entries =
+            committedPaintBuffers[publishedPaintBufferIndex];
+        return UICommittedPaintView{
+            std::span<const UICommittedPaintEntry>(entries.data(), entries.size()),
+            committedPaintViewportSize,
+            committedPaintStructureRevision,
+            committedPaintLayoutRevision,
+            committedPaintOrderRevision,
+            committedPaintRevision,
         };
     }
 
@@ -2834,6 +3047,7 @@ struct UIContext::Impl final {
             .dirtyQueueCapacity = capacityConfig.dirtyQueueCapacity,
             .layoutSnapshotCapacity = capacityConfig.layoutSnapshotCapacity,
             .hitSnapshotCapacity = capacityConfig.hitSnapshotCapacity,
+            .paintSnapshotCapacity = capacityConfig.paintSnapshotCapacity,
             .routePathCapacity = capacityConfig.routePathCapacity,
             .routedPointerListenerCapacity =
                 capacityConfig.routedPointerListenerCapacity,
@@ -2851,15 +3065,21 @@ struct UIContext::Impl final {
             .committedHitTargetCount = committedHitTargetCount,
             .hitRevision = committedHitRevision,
             .paintOrderRevision = committedHitPaintOrderRevision,
+            .committedPaintNodeCount =
+                committedPaintBuffers[publishedPaintBufferIndex].size(),
+            .paintRevision = committedPaintRevision,
             .dirty = structureDirty,
             .layoutDirty = layoutDirty,
             .hitDirty = hitDirty,
+            .paintDirty = paintDirty,
             .lastLayoutPassCount = lastLayoutPass.passCount,
             .lastLayoutMeasuredNodeCount = lastLayoutPass.measuredNodeCount,
             .lastLayoutArrangedNodeCount = lastLayoutPass.arrangedNodeCount,
             .lastLayoutPercentMeasureFallbackCount =
                 lastLayoutPass.percentMeasureFallbackCount,
             .lastHitRebuildCount = lastHitRebuildCount,
+            .lastPaintCacheRebuildCount = lastPaintCacheRebuildCount,
+            .lastPaintSnapshotRebuildCount = lastPaintSnapshotRebuildCount,
             .dirtyQueuePendingCount = validDirtyQueueCount(),
             .dirtyQueueHighWater = dirtyQueueHighWater,
         };
@@ -3173,6 +3393,14 @@ Core::Status UITreeUpdater::setPointerHitPolicy(
     return m_context->setPointerHitPolicyFromUpdater(m_root, node, policy);
 }
 
+Core::Status UITreeUpdater::setBoxPaint(UINodeId node, const UIBoxPaint& paint)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setBoxPaintFromUpdater(m_root, node, paint);
+}
+
 Core::Status UITreeUpdater::destroy(UINodeId node)
 {
     if (m_context == nullptr) {
@@ -3304,6 +3532,11 @@ UICommittedHitView UIContext::committedHit() const noexcept
     return m_impl->committedHit();
 }
 
+UICommittedPaintView UIContext::committedPaint() const noexcept
+{
+    return m_impl->committedPaint();
+}
+
 UIPointerHitQueryResult UIContext::queryPointerHit(UILogicalPoint point) const noexcept
 {
     return m_impl->queryPointerHit(point);
@@ -3379,6 +3612,14 @@ Core::Status UIContext::setPointerHitPolicyFromUpdater(
     UIPointerHitPolicy policy)
 {
     return m_impl->setPointerHitPolicyFromUpdater(updaterRoot, node, policy);
+}
+
+Core::Status UIContext::setBoxPaintFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId node,
+    const UIBoxPaint& paint)
+{
+    return m_impl->setBoxPaintFromUpdater(updaterRoot, node, paint);
 }
 
 Core::Status UIContext::destroyNodeFromUpdater(UINodeId updaterRoot, UINodeId node)
