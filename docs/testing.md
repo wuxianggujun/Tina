@@ -15,7 +15,8 @@
   `TINA_BUILD_RENDER_BGFX` 时另外生成 `tina_render_bgfx_tests`，其中 M9-B 的 Opaque3D fixture 与
   M9-C 的 Sprite2D fixture 几何/预算测试仍留在私有 bgfx adapter 测试进程内，不注册额外测试调度；
   M8-A Scene World/Transform 另有独立 `tina_scene_tests`，M8-B 2D 与 M9-A 3D RenderScene extraction 共用独立
-  `tina_render_scene_tests`，二者均不并入基础 `tina_tests`；
+  `tina_render_scene_tests`；M10-A0 Cooked Header/Manifest wire-format 校验另有独立
+  `tina_asset_format_tests`。这些专项均不并入基础 `tina_tests`；
 - 构建完成后直接运行对应 GoogleTest executable，任一返回码非0即失败；
 - Visual Studio 多配置构建把测试运行时隔离到 `bin/<Config>`，禁止 Debug/Release GTest DLL 共用目录；
 - 同一 Visual Studio build tree 的 Debug/Release 构建串行执行，禁止并发启动两个 MSBuild 门禁；
@@ -24,13 +25,14 @@
 
 ## 已验证基线
 
-当前迁移结果对应 2026-07-19 的 `codex/tina-vnext-runtime`：
+当前迁移结果对应 2026-07-20 的 `codex/tina-vnext-runtime`：
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2 + M8-B 2D + M9-A 3D extraction | Debug C++23 | 213/213 | 本轮直接通过 RenderScene22/22；Null、2D infrastructure、3D extraction样例各300帧，3D记录4 submitted/3 visible/1 culled/2 batches、一次aspect变化与资源归零。UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、GLFW26/26、bgfx16/16和Desktop为前一轮已验证结果；M9-A未重新截图且本身无GPU画面 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M9-C 私有 bgfx Sprite2D fixture + 2D/UI 样例 | Debug C++23 | 43/43 | `tina_render_bgfx_tests` 直接通过；`tina_sample_2d_infrastructure_bgfx --frames=300 --frame-delay-ms=0` 通过，记录5个 Sprite、2个 UI panel、`renderResourceLedgerBalanced=true`。截图确认 Sprite 旋转、透明、flip 与 UI overlay。该结果只证明 fixture/infrastructure，不证明 M10、正式 `tina_sample_2d`、Asset/Texture/Sprite 产品路径、TileMap、Box2D 或中文文本 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M9-C 私有 bgfx Sprite2D fixture + 2D/UI 样例 | Debug C++23 | 43/43 | `tina_render_bgfx_tests` 直接通过；`tina_sample_2d_infrastructure_bgfx --frames=300 --frame-delay-ms=0` 通过，记录5个 Sprite、2个 UI panel、`renderResourceLedgerBalanced=true`。截图确认 Sprite 旋转、透明、flip 与 UI overlay。该结果只证明 fixture/infrastructure，不证明 M10-A1+ 产品资产路径、正式 `tina_sample_2d`、Asset/Texture/Sprite、TileMap、Box2D 或中文文本 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M9-C 私有 bgfx Sprite2D fixture + 2D/UI 样例 | Release C++23 | 43/43 | `tina_render_bgfx_tests` 直接通过；`tina_sample_2d_infrastructure_bgfx --frames=300 --frame-delay-ms=0` 通过并记录相同生命周期与资源账本。Debug 的 D3D11 `RefCount=3` 提示未在 Release 出现；画面证据沿用同代码路径的 Debug 截图，不把退出码冒充截图证据 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A0 `tina_asset_format` Cooked/Manifest wire format | Debug/Release C++23 | 14/14 | `tina_asset_format_tests` 两配置均直接通过；覆盖 identity/hash 强类型、固定 little-endian schema、borrowed view、确定性 object path、limit/overflow/layout/padding/排序/依赖校验和300次重复解析。A0 明确允许跨资产 cycle，完整 DAG、XXH3 计算、文件 IO、AssetSystem、Cooker/cgltf 与产品资产路径后置 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M8-A `tina_scene` World/Transform | Debug/Release C++23 | 19/19 | `tina_scene_tests` Debug 与 Release 均直接运行通过；覆盖 generation/owner、keep-world/keep-local、父销毁/显式子树销毁、非递归20,000层传播、宽树删除、固定容量/PMR回滚与稳定构造错误、overflow/shear、四元数和错线程读写；Linux Scene 图尚未运行 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2 + M8-B 2D + M9-A 3D extraction | Release C++23 | 213/213 | 本轮直接通过 UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、RenderScene22/22；Null、2D infrastructure与3D extraction样例各300帧，3D记录4 submitted/3 visible/1 culled/2 batches、一次aspect变化与资源归零；GLFW/bgfx/Desktop沿用前序D2证据 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug/Release C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过 |
@@ -109,7 +111,7 @@ M9-A 继续使用 `tina_render_scene_tests`，当前22项覆盖：Perspective Ca
 多次 begin/rollback/view 生命周期与 storage allocation rollback。`tina_sample_3d_extraction --frames=300`
 使用 standalone `Scene::World` 和 recording Null device，验证4 submitted、3 visible、1 culled、2 batches、
 resize aspect 更新、退出顺序和 `liveResources=0`；它不创建 bgfx 资源、不显示 GPU 画面，也不能替代
-M9-B 的 procedural Cube/depth 或 M10 的 Cooked glTF 产品门禁。Runtime 生命周期测试另覆盖当前帧
+M9-B 的 procedural Cube/depth 或 M10-A1+ 的 Cooked glTF 产品门禁。Runtime 生命周期测试另覆盖当前帧
 framebuffer aspect 注入及 `0x0` 时回退 logical extent。
 
 M9-B 当前最小实现把最小 Opaque3D fixture 接入私有 `tina_render_bgfx`，使用同一个
@@ -135,7 +137,15 @@ fixture view 编号，不是 Pass Scheduler。Windows Debug/Release `tina_render
 两配置的 `tina_sample_2d_infrastructure_bgfx --frames=300 --frame-delay-ms=0` 均通过 Desktop bootstrap 运行300帧，
 记录5个 Sprite、2个 UI panel、UI root 释放、`EngineHost` 销毁和 `renderResourceLedgerBalanced=true`；
 截图确认 Sprite 旋转、透明、flip 与 UI overlay。该结果只证明 fixture/infrastructure，不证明
-Asset/Texture/Sprite 产品路径、正式 `tina_sample_2d`、TileMap、Box2D、中文文本或 M10。
+Asset/Texture/Sprite 产品路径、正式 `tina_sample_2d`、TileMap、Box2D、中文文本或 M10-A1+。
+
+M10-A0 使用独立 `tina_asset_format_tests`，当前14项覆盖严格小写 `AssetId` canonical text、
+`ContentHash` 与身份类型隔离、112B Cooked Header、64B Manifest Header、56B Manifest Entry、24B
+Dependency Entry、payload borrow、确定性 object path、magic/schema/enum/flags/reserved、truncation、
+overflow、alignment、zero padding、EOF、caller hard limit、entry/dependency 排序、重复/self/missing target、
+kind mismatch 与 dependency range 完整覆盖。300次重复解析验证无内部状态漂移。A0 的 cycle 用例刻意
+证明 parser 不拒绝跨资产环；完整 DAG cycle 检测属于后续 Catalog/AssetSystem validation，不能把14/14
+描述为 Cooker、异步加载或正式2D/3D资产产品门禁。
 
 M7-C1c-b3d1 在同一测试拓扑中新增三组契约：focused `UIContextCapacityConfig` validator 与
 `EngineConfig` 在任何 factory 前拒绝非法容量；primary owner 确实使用配置容量；layout coordinator
@@ -648,7 +658,7 @@ Legacy 与 vNext 进程观察到的 `N` 会随调试对象组合变化，本轮 
 | `tina_sample_desktop` | M7-B2 Desktop bootstrap + C1c-b3e Runtime UI owner/route/layout/claim bridge seam + Button default action + D0 DisplayList handoff + D1 bgfx SolidQuad UI pass + D2 visible panel smoke 已实现 | `Tina::Desktop::CreateEngine` 私有组合 SteadyClock、GLFW WindowSurface、DisabledTaskSystem 与 bgfx；默认300帧；startup seed 显式绑定 primary-window Context，创建1个 retained root和4个 painted panel，通过 Render 前 layout/paint snapshot 与 UIDisplayList borrow 进入私有 bgfx SolidQuad pass；claim/display/setBoxPaint/default-action handoff 由独立 Runtime→UI 测试覆盖，真实可见性由该样例截图证明 | 当前 D2 Windows D3D11 Intel Iris Xe Debug 1200帧截图检查与 Release 300帧均通过，Release clean；截图验证 background RGB(9,24,40)、blue(28,92,148)、cyan alpha over blue/background、右边界 scissor clip 与 pink panel；Debug RefCount=3 为第三方 debug layer 提示；Linux Desktop 仍保留前序 GCC 13.4 与 Clang 22 sanitizer 门禁；Clang WSL2 为 Vulkan/llvmpipe，不代表硬件 GPU 性能，也不代表 Scene/Pass Scheduler、Text/Glyph 或完整 Widget 完成 |
 | `tina_sample_ui` | 未实现 | 在现有 Desktop SolidFill panel smoke 和 primary Pointer Button default action 上补中文、Label 文本、Button Keyboard/Gamepad activation、Modal、TextEdit、Runtime packet、Glyph Atlas 与资源型 UI Render | M7 内置 Cooked Font/Texture fixture |
 | `tina_sample_2d_infrastructure` | M8-B Headless/Null extraction foundation 已实现 | Scene World → resolved Camera2D/Sprite2D、layer/order、cull/snap、Runtime `primaryWorldScene` handoff、300帧资源/生命周期归零 | 当前只用内置纯值 fixture；Asset/Cooker、可见 bgfx fixture、world picking、UI overlay 后置 |
-| `tina_sample_2d_infrastructure_bgfx` | M9-C 最小 bgfx Sprite2D fixture + 2D/UI 样例已实现 Debug/Release 验证 | Desktop bootstrap + bgfx；固定 View 0 clear、View 1 Opaque3D、View 2 Sprite2D、View 3 UI；默认/门禁300帧，当前每帧5个 fixture Sprite 和2个 retained UI panel，资源账本平衡；截图确认旋转、透明、flip 与 UI overlay | 只接受 fixture key `sprite=1`；transient P2/UV2/ABGR geometry + premultiplied alpha shader；View 编号不是 Pass Scheduler；不证明 Asset/Texture/Sprite 产品路径、正式 `tina_sample_2d`、TileMap、Box2D、中文文本或 M10 |
+| `tina_sample_2d_infrastructure_bgfx` | M9-C 最小 bgfx Sprite2D fixture + 2D/UI 样例已实现 Debug/Release 验证 | Desktop bootstrap + bgfx；固定 View 0 clear、View 1 Opaque3D、View 2 Sprite2D、View 3 UI；默认/门禁300帧，当前每帧5个 fixture Sprite 和2个 retained UI panel，资源账本平衡；截图确认旋转、透明、flip 与 UI overlay | 只接受 fixture key `sprite=1`；transient P2/UV2/ABGR geometry + premultiplied alpha shader；View 编号不是 Pass Scheduler；不证明 Asset/Texture/Sprite 产品路径、正式 `tina_sample_2d`、TileMap、Box2D、中文文本或 M10-A1+ |
 | `tina_sample_3d_extraction` | M9-A Headless/Null extraction foundation 已实现 | Scene World → resolved Perspective/Mesh3D、当前帧aspect、sphere culling、稳定sort/batch、Runtime handoff；300帧4 submitted/3 visible/1 culled/2 batches、一次aspect变化与资源归零 | 当前只用 fixture key/纯值和 recording Null device；无depth attachment、GPU buffer/shader/pipeline或可见画面，不计Legacy删除门禁 |
 | `tina_sample_3d_infrastructure` | M9-B 最小 bgfx Opaque3D fixture 已实现 | Desktop bootstrap + bgfx；全 surface clear View 0、depth-tested procedural Cube View 1；默认/门禁300帧，当前每帧3个 Cube 和1个 instance batch | 只接受 fixture key `mesh=1/material=1/submesh=0`；canonical `P3_N3_UV2` 静态 VB/IB + unlit shader + transient instance buffer；不证明 Cooked Mesh/Material/Texture/Prefab、通用 Pipeline/PBR、Pass Scheduler 或正式3D产品 |
 | `tina_sample_2d` | 未实现 | Cooked TileMap/Tileset、chunk、角色/Tile AABB、Box2D dynamic body、正式 UI | M10/M11 Catalog/Manifest |

@@ -8,12 +8,19 @@ FileSystem 提供异步读取和 best-effort 取消，ResourceManagerHub 管理 
 
 异步 completion 由 Application 在固定的 Asset Completion 阶段通过 ResourceManagerHub 每帧泵送一次，默认预算为8个回调。各 ResourceManager 不再重复驱动共享 FileSystem。管理器销毁时会先取消未完成请求，再调用资源的 unload 释放 CPU/GPU 对象。
 
+vNext M10-A0 已独立实现 `Tina::AssetFormat`：`AssetId`/`ContentHash` 是互不兼容的16字节
+Core 强类型，`CookedAssetView`/`CookedManifestView` 对 caller-owned bytes 做成功路径零分配、显式
+little-endian 解析。该 target 只 PUBLIC 依赖 `Tina::Core`，不链接 xxHash、文件系统、Task、Render、
+cgltf 或 Legacy 资源代码。
+
 ## 已知问题
 
 - 当前解析、CPU Ready 和 GPU Upload 仍在同一个受预算约束的主线程 completion 回调内连续完成，还没有独立上传队列；
 - best-effort 取消不能中断已经开始的底层文件读取，只能阻止其结果被提交；
 - 资源监听仍逐项查询文件时间，缺少独立预算和指标；
-- 尚未实现 Cooked Asset、稳定 AssetId、依赖清单、内容 Hash 和增量 Cooker。
+- M10-A0 已实现 Cooked wire schema、稳定 `AssetId` 值类型、版本化 `ContentHash` 字段与只读校验；
+  Asset registry/状态机、Handle/Lease、异步 IO/Decode/Upload、Hash 计算 adapter、增量 Cooker 与产品资产
+  仍未实现。
 
 ## 下一阶段契约
 
@@ -90,6 +97,53 @@ Runtime 与 Cooker 通过独立 `tina_asset_format` 共享 wire schema。Header 
 schema、asset type/version、target platform、endianness、payload size/alignment、dependency
 table 和 ContentHash；不可信 size/count 在分配前检查上限。Cooker 在 staging 目录写入并
 重新读取验证所有产物，最后原子替换 Manifest，保证崩溃后旧 Manifest 不指向半成品。
+
+### M10-A0 wire schema v1
+
+v1 只接受 schema `1.0`、little-endian 与 `XXH3-128 v1` 字段标识。M10-A0 不计算或重新验证
+XXH3；它只保证字段非零、算法 ID 已知和文件结构可信。未来接受更高 minor 前必须先定义新增字段的
+兼容规则，当前 parser 不静默跳过未知 schema、enum、flag 或 reserved 数据。
+
+Cooked Asset Header 固定112字节：
+
+| Offset | 类型 | 字段 |
+| ---: | --- | --- |
+| `0x00` | `byte[8]` | magic `TINAASST` |
+| `0x08` | `u16/u16/u32` | schema major/minor、header bytes=`112` |
+| `0x10` | `u16/u16/u16/u8/u8` | AssetKind、type version、target、endian、hash algorithm |
+| `0x18` | `u32/u32` | flags=`0`、reserved=`0` |
+| `0x20` | `byte[16]` | AssetId |
+| `0x30` | `byte[16]` | ContentHash |
+| `0x40` | `u64/u32/u32` | dependency offset/count/entry bytes=`24` |
+| `0x50` | `u64/u64/u32/u32/u64` | payload offset/bytes/alignment、reserved、file bytes |
+
+Manifest Header 固定64字节，magic 为 `TINAMNFT`，依次保存 schema、target/endian/hash、零 flags、
+entry count/size、dependency count/size、entries offset、dependencies offset 与 file bytes。Manifest
+Entry 固定56字节：`AssetId[16] + ContentHash[16] + kind/typeVersion + zero flags +
+dependencyFirst/dependencyCount + cookedFileBytes`。Cooked 与 Manifest 共用24字节 Dependency Entry：
+`AssetId[16] + expectedKind + flags + zero reserved`；v1 只允许并要求 `Required` bit。
+
+布局是 canonical 的：Cooked 必须为 `112B header -> sorted dependency table -> zero padding -> payload -> EOF`；
+Manifest 必须为 `64B header -> AssetId 严格升序 entries -> flattened dependency table -> EOF`。
+Manifest 每个 dependency range 必须无 gap/overlap 并完整覆盖 dependency table；子范围严格按 AssetId
+排序，目标必须存在且 `expectedKind` 匹配。A0 拒绝 self dependency，但完整 DAG cycle 检测属于后续
+Catalog/AssetSystem validation，不能把 A0 描述成已完成依赖调度。
+
+默认 hard limits 为：单 Cooked 文件与 payload 最大1 GiB、单资产最多4096个直接依赖、Manifest
+最大256 MiB/1,000,000 entries/4,000,000 dependencies、payload alignment 为2次幂且不超过4096。
+所有 count multiplication、offset addition 和 alignment 在访问前 checked；padding 非零、region 越界/
+重叠、尾随垃圾、全零 ID/Hash、重复/乱序 ID 与未知字段均失败。
+
+Manifest 不保存源路径或任意运行时路径。Cooked object 路径由已验证的 kind 与 AssetId 确定派生：
+
+```text
+objects/<4位小写hex kind>/<AssetId前2位>/<32位小写AssetId>.tasset
+```
+
+这让逻辑身份、内容 Hash 和物理位置保持分离，也避免把绝对路径、机器名或源目录写入确定性产物。
+`CookedAssetView`/`CookedManifestView` 借用完整输入 bytes；输入被修改、释放或移动后 view 立即失效。
+M10-A0 不提供文件 IO、owning decoded object、writer、atomic publish、AssetHandle/Lease、worker、GPU
+upload、cgltf 或正式2D/3D资产样例。
 
 Cooker 把源目录视为不可信输入边界。外部 URI 先按 UTF-8 规范化并相对当前 Asset/source root
 解析，拒绝绝对路径、UNC/device path、远程 HTTP(S)、NUL、`..`/symlink 解析后逃出允许根的

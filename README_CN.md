@@ -114,7 +114,13 @@ framebuffer 为 `0x0` 时回退到正的 logical extent。新增 `tina_sample_3d
 fixture View 顺序是 0 clear、1 Opaque3D、2 Sprite2D、3 UI；这只是临时固定 View 编号，不是
 Pass Scheduler。`tina_sample_2d_infrastructure_bgfx` 默认/门禁运行300帧，每帧5个 fixture Sprite
 和2个 retained UI panel；它不等于 Asset/Texture/Sprite 产品路径、正式 `tina_sample_2d`、TileMap、
-Box2D、中文文本或 M10。
+Box2D、中文文本或 M10 的产品资产路径。
+
+M10-A0 已新增独立 `tina_asset_format`：互不兼容的16字节 `AssetId`/`ContentHash`、固定
+little-endian Cooked Header/Manifest/Entry/Dependency schema、确定性 object path，以及不分配的
+caller-owned borrowed view。parser 在发布 view 前校验 hard limit、checked arithmetic、canonical layout、
+zero padding、排序/重复、依赖存在与 kind。该切片只完成 wire-format 基础，不计算 XXH3、不做完整
+DAG cycle、文件 IO、Asset registry/Handle/Lease、worker/upload、cgltf、Cooker writer 或正式资产样例。
 
 ## 当前 Legacy 已完成基线
 
@@ -160,7 +166,11 @@ M9-C 当前 Windows MSVC Debug/Release 均通过完整 bgfx adapter 专项43/43�
 退出时 UI root 恰好释放1次，`EngineHost` 已销毁且 Render 资源账本平衡。Debug 截图确认 Sprite
 旋转、透明、flip 和 UI overlay；既有 D3D11 debug-layer `RefCount=3` 提示只在 Debug 出现，Release
 未出现。该结果只证明 fixture/infrastructure，不证明 Asset/Texture/Sprite 产品路径、正式
-`tina_sample_2d`、TileMap、Box2D、中文文本或 M10。Linux M9-C 尚未复验。
+`tina_sample_2d`、TileMap、Box2D、中文文本或 M10-A1+ 产品资产路径。Linux M9-C 尚未复验。
+
+M10-A0 当前 Windows MSVC Debug/Release 均直接通过独立 `tina_asset_format_tests` 14/14；基础
+`tina_tests` 两配置仍为213/213，`tina_sample_null --frames=300` 均返回0。该结果证明格式边界与
+只读校验，不证明 AssetSystem、异步加载、Cooker、glTF 转换或2D/3D正式资产样例。
 
 Linux 最新 paint/DisplayList/bridge Null 门禁也已完成：GCC 13.4 通过基础205/205、
 `tina_ui_tests` 92/92、`tina_runtime_ui_tests` 46/46、bridge 12/12与Null样例300帧；
@@ -182,13 +192,14 @@ preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22
 ```powershell
 cmake --version
 cmake --preset windows-msvc-vnext
-cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_scene_tests tina_render_scene_tests tina_sample_null tina_sample_2d_infrastructure tina_sample_3d_extraction
+cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_scene_tests tina_render_scene_tests tina_asset_format_tests tina_sample_null tina_sample_2d_infrastructure tina_sample_3d_extraction
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_render_integration_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_render_scene_tests.exe
+out\build\windows-msvc-vnext\bin\Debug\tina_asset_format_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_3d_extraction.exe --frames=300
@@ -218,7 +229,8 @@ cmake --build --preset windows-debug --target Tina tina_tests tina_legacy_tests
 
 测试构建完成后直接运行 vNext 基础 `tina_tests`；`TINA_BUILD_LEGACY=ON` 时还必须直接运行
 Legacy-only `tina_legacy_tests`。启用 GLFW adapter 时再直接运行独立的
-`tina_platform_glfw_tests`。这些 executable 都不通过额外测试调度器：
+`tina_platform_glfw_tests`；Scene、RenderScene、UI、Runtime→UI、UI→Render 与 AssetFormat 也各有
+独立 GoogleTest executable。所有测试都直接运行，不通过额外测试调度器：
 
 ```powershell
 out\build\windows-msvc\bin\Debug\tina_tests.exe

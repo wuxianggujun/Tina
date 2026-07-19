@@ -433,10 +433,16 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 
 ## M10 Asset 与 Cooker 垂直切片
 
+- M10-A0 已完成独立 `tina_asset_format`：16字节强类型 `AssetId`/`ContentHash`、固定 little-endian
+  Cooked Header/Manifest/Entry/Dependency schema、确定性 object path、成功路径零分配的 borrowed view，
+  以及 magic/schema/enum/flag/limit/overflow/layout/padding/排序/依赖存在与 kind 校验；独立
+  `tina_asset_format_tests` 直接运行 GoogleTest；
+- M10-A0 不执行 XXH3、完整 DAG cycle、文件 IO、Asset registry/Handle/Lease、worker/upload、writer、
+  atomic publish、cgltf 或产品资产替换；这些不能由“Manifest 可解析”推断为完成；
 - 后台 CPU Decode 与主线程/GPU Upload 分队列，按任务数、字节数、时间预算；
 - Asset 状态、generation 和取消贯穿两阶段，迟到任务不能复活旧 slot；
-- 实现弱 Handle/强 Lease、UploadTicket/retirement、稳定128位 AssetId、`tina_asset_format`、
-  依赖 DAG、内容 Hash 和事务 Manifest；
+- M10-A1 起实现 Catalog artifact IO、完整依赖 DAG、版本化 XXH3 adapter、弱 Handle/强 Lease、
+  UploadTicket/retirement 和事务 Manifest；
 - `tina_assetc` 执行 Parse → Validate → Build → Validate Cooked → Atomic Write；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；

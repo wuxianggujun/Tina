@@ -2,6 +2,8 @@ set(TINA_CORE_TEST_SOURCES
     core/AssertReleaseCompileTests.cpp
     core/AssertTests.cpp
     core/EnumFlagsTests.cpp
+    core/header_isolation/AssetIdHeader.cpp
+    core/header_isolation/ContentHashHeader.cpp
     core/header_isolation/ErrorHeader.cpp
     core/header_isolation/CountingMemoryResourceHeader.cpp
     core/header_isolation/FixedStepAccumulatorHeader.cpp
@@ -133,6 +135,7 @@ endif()
 
 add_subdirectory(vnext/ui)
 add_subdirectory(vnext/scene)
+add_subdirectory(vnext/asset_format)
 add_subdirectory(vnext/runtime)
 add_subdirectory(ui_render)
 add_subdirectory(render_scene)

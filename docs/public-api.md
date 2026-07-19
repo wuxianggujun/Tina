@@ -935,7 +935,8 @@ writer 当前只接受已经解析的纯 Tina 值；`stableCameraKey`、`stableE
 Camera/Sprite pixel snap，以及 M9-A 的 Perspective sphere culling。3D item 按
 `materialKey -> meshKey -> submeshIndex -> doubleSided -> depthBucket -> stableEntityKey -> insertionOrder`
 稳定排序，并将相邻相同 mesh/material/submesh/double-sided item 合并为 `RenderMesh3DBatch`。
-`meshKey`/`materialKey` 会在 M10 由 `FrameResourceRef` 替换；当前没有 AssetHandle 解析、Mesh component、
+`meshKey`/`materialKey` 会在后续 M10 AssetSystem 切片由 `FrameResourceRef` 替换；M10-A0 只提供
+Cooked wire-format 解析，当前没有 AssetHandle 解析、Mesh component、
 Tile packet、bgfx Sprite pass 或可见 bgfx 3D pass。
 
 `RenderSceneCapacity` 默认固定为 16,384 个 Sprite、16,384 个 Mesh3D item 和4,096个 Mesh3D batch，
@@ -950,6 +951,26 @@ builder 本身只接收正的纯值。
 begin 才使其失效。
 放入 `RenderFrame` 后的 view 只在当前 `IRenderDevice::submitFrame()` 调用内有效，backend 必须同步消费、复制
 或编码，不得保留 view、span 或元素指针。
+
+## M10-A0 AssetFormat 公共边界
+
+`Tina::Core::AssetId` 与 `Tina::Core::ContentHash` 都是16字节强类型值，但用途不同：前者是由显式
+import 分配并跨 cook 保持稳定的逻辑身份，后者是版本化非密码学内容摘要字段。二者默认值均无效，
+从 bytes 构造时拒绝全零；只有 `AssetId` 支持严格小写32 hex canonical text。公共类型不包含 xxHash
+header/type，Hash 计算 adapter 仍未接入。
+
+`Tina::AssetFormat::parseCookedAssetView()` 与 `parseCookedManifestView()` 接受 caller-owned
+`span<const byte>`，成功时零分配返回 `CookedAssetView`/`CookedManifestView`。parser 逐字节按
+little-endian 解码，禁止把输入 reinterpret 为 C++ struct；成功 view 借用完整输入，输入修改、释放或
+移动后立即失效。accessor 按索引返回 owning 小值，不返回指向未对齐 wire data 的指针。parser 与
+path factory 本身不标 `noexcept`：成功热路径不分配，但结构化 `Core::Error` 拥有字符串，分配异常应由
+Cooker/AssetSystem 的上层边界统一转换，不能在低层解析函数中因错误报告分配失败直接 terminate。
+
+M10-A0 支持固定 schema `1.0`，并在成功前校验 magic、fixed field size、known enum/flag、zero reserved、
+hard limit、checked range arithmetic、canonical offset/layout、zero padding、EOF、ID/Hash、严格排序、
+依赖范围、目标存在与 kind。Cooked path 由 `makeCookedArtifactPath(kind, id)` 确定派生，不把路径作为
+AssetId。完整 DAG cycle、文件 IO、owning decoded manifest、Asset registry/Handle/Lease、Task、GPU upload、
+XXH3 计算、cgltf 与 writer 不属于该 API。
 
 ## Handle、借用与 API 可见性
 
@@ -972,12 +993,15 @@ begin 才使其失效。
 | `Tina::UI::UIContextCapacityConfig` | M7-C1c-b3d1 已实现 focused config/validator | UI public / EngineConfig value | Create 前复制纯值；Runtime Context owner 使用已验证配置 | invalid node/root/derived/listener capacity；factory 前拒绝 |
 | `PrimaryWindowUIDisplayListCapacityConfig` | D0 已实现 | EngineConfig value / Runtime private | Create 前复制纯值；配置 fixed PMR builder 的 command/clip/batch 容量 | command=0、clip>command、batch=0或batch>command、超过最大值；factory 前拒绝 |
 | `Tina::Scene::EntityId` | M8-A 已实现 | Scene public / 后续 Game SDK | `Scene::World` registry generation + owner；slot 复用递增 generation | InvalidEntity/StaleEntity/WrongWorld |
+| `Tina::Core::AssetId` | M10-A0 已实现 | Core public / AssetFormat | owning 16-byte stable identity；不是路径、Hash 或 runtime generation handle | zero/invalid canonical text 在构造时拒绝 |
+| `Tina::Core::ContentHash` | M10-A0 已实现字段类型 | Core public / AssetFormat | owning 16-byte versioned digest value；不承担安全签名或唯一身份 | zero bytes 在构造时拒绝；A0 不计算摘要 |
+| `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |
 | `LocalTransform` / `WorldTransform` | M8-A 已实现 | Scene public | World-owned POD；pointer query 只在 owner thread、下一次对应 mutation、entity destroy 或 World 析构前有效；world publication 由 `updateWorldTransforms()` barrier 完成 | non-finite/overflow/zero quaternion/unsupported TRS composition |
 | `RenderSceneWriter` | M8-B 2D + M9-A 3D extraction 已实现 | Game SDK phase capability | 只在当前 `extractRenderScene()` callback 内有效；不可复制、不可保存 | invalid input/capacity/sticky transaction failure |
 | `RenderSceneView` | M8-B 2D + M9-A 3D extraction 已实现 | Render SPI | borrowed fixed builder storage；成功 begin/rollback/replacement/move/destruction 后失效，begin 参数预检失败保留旧 publication；`RenderFrame` 中只到当前 submit 返回 | invalid transaction；backend 不得保留 borrow |
-| `AssetHandle<T>` | M10 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
-| `AssetLease<T>` | M10 目标 | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
+| `AssetHandle<T>` | M10-A1+ 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
+| `AssetLease<T>` | M10-A1+ 目标 | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
 | Render typed handle | M9-B 及后续目标 | Engine Module SPI | RenderDevice registry 到 retire | invalid/stale/wrong device |
 | 最小 `RenderFrame` | M6-A + D0 + M8-B/M9-A 已实现 | Engine Module SPI | 当前 submit 调用；包含 submit-call-local borrowed `primaryWindowUIDisplayList` 与 `primaryWorldScene` | submit `Status`；backend 不得保留 borrowed view |
 | `Render::UIDisplayListView` | SolidQuad DisplayList builder 已实现 | Engine Module SPI / integration output | borrowed 单缓冲 builder storage；下一次成功 `beginFrame()`、builder move 或析构后失效；已开启事务的 rollback 只清空该次候选 | CapacityExceeded/invalid input/transaction misuse |

@@ -4,7 +4,8 @@
 
 Tina 当前处于 Legacy 产品与 vNext 垂直切片并存的迁移期。Legacy 仍以单个游戏可执行文件为主，
 源码按 Core、Engine、Renderer、UI、ECS 和 Game 组织；vNext 已建立独立的 `tina_core`、
-`tina_platform`、`tina_task`、`tina_render`、`tina_runtime`、`tina_scene` 六个基础 C++23 target，以及可选的
+`tina_platform`、`tina_task`、`tina_render`、`tina_runtime`、`tina_scene` 与 `tina_asset_format`
+七个 C++23 target，以及可选的
 `tina_platform_glfw` adapter、私有 `tina_render_bgfx` backend、Desktop bootstrap、
 M7-C1b/M7-C1c-a/C1c-b1/C1c-b2 `tina_ui` tree/layout/committed-hit/point-query/synthetic-route foundation，
 以及 M7-C1c-b3b/b3c Runtime-private UI route-result producer、primary-window `UIContext` owner 与
@@ -127,7 +128,7 @@ startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 r
 | Scene/GameScene 旧职责 | 仍在使用 | GameScene 仍混合玩法、ECS、输入、UI、音频与渲染编排 |
 | EnTT 边界 | 尚未收敛 | `World` 暴露 `entt::registry`，GameScene 直接访问 |
 | bgfx 边界 | 尚未收敛 | Renderer、UI 和部分公共结构仍直接暴露 bgfx handle/type |
-| 路径资源系统 | 仍在使用 | Cooked Asset、稳定 AssetId 和独立 GPU upload queue 尚未落地 |
+| 路径资源系统 | 仍在使用 | M10-A0 已落地 Cooked wire schema、稳定 AssetId/ContentHash 值类型与只读校验；AssetSystem、Catalog 文件 IO、Handle/Lease 和独立 GPU upload queue 尚未落地 |
 | vNext M6-A Runtime | 已完成生命周期切片 | `EngineHost`、`IGameApplication`、单个 `IGameState`、最小阶段 Context、Backend SPI、Headless Platform、Disabled TaskSystem 与 NullRenderDevice 已落地 |
 | vNext M7-A Platform/Input | 已完成 Headless 内核与首个桌面 adapter 切片 | 固定容量 `PlatformFrameBuilder`、final Snapshot、保序 transition、Runtime-private `PlatformEventDispatcher`、Action Mapper，以及私有 GLFW Window/Keyboard/Pointer/committed text producer 已落地；IMM32、production Gamepad 与完整 DPI 门禁后置 |
 | vNext M7-B1 WindowSurface handoff | 已完成私有 surface 所有权切片 | Platform/Render 通过 tagged composition 接线；`NativeWindowSurfaceLease` move-only 且 PIMPL；Win32/X11/Wayland native binding 只在私有 TU 解码；Render 创建失败和窗口发布失败会逆序释放 lease；NullRender 可验证 suspended/resume、surface revision 与 submission index |
@@ -149,9 +150,10 @@ startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 r
 | vNext M8-B RenderScene extraction foundation | 已完成后端无关基础切片 | `Tina::Render` 提供固定容量 `RenderSceneBuilder`/phase-local `RenderSceneWriter`，解析后的 Camera2D/Sprite2D input、稳定 layer/order/entity/insertion 排序、旋转保守裁剪、透明/隐藏剪枝、pixel snap、统计 checksum 与结构化容量/输入错误；Runtime 在 extraction 前后执行 begin/commit/rollback，并以 submit-call-local `RenderFrame::primaryWorldScene` 交给 backend；`tina_sample_2d_infrastructure` 以 Headless/Null 连续提取 300 帧。Scene component command buffer、Asset/Cooker、`FrameResourceRef`、正式可见产品路径、world picking 与正式 2D 产品样例仍后置；M9-C 只补私有 Sprite2D fixture，不改变本行的产品边界 |
 | vNext M9-A RenderScene 3D extraction foundation | 已完成 CPU/Null 基础切片 | 在同一固定容量 builder 中增加 Perspective Camera、Mesh3D input/item/batch、右手 Y-up `-Z` forward、当前 PlatformFrame framebuffer aspect（`0x0` 回退 logical）、正 scale 世界包围球、球体 frustum culling、稳定 material/mesh/submesh/double-sided/depth/entity/insertion 排序与相邻 instance batch finalize；`tina_render_scene_tests` 22/22，`tina_sample_3d_extraction` 300 帧记录4 submitted/3 visible/1 culled/2 batches、aspect变化与资源归零。该样例不显示 GPU 画面；私有 bgfx Cube/depth 属 M9-B，Cooked glTF 属 M10 |
 | vNext M9-B bgfx Opaque3D fixture | 已完成最小可见3D fixture | `tina_render_bgfx` 私有消费 M9-A Mesh3D view 的 fixture 子集，只接受 `meshKey=1/materialKey=1/submeshIndex=0`；canonical `P3_N3_UV2` Cube、Unlit shader、静态 VB/IB 与 transient instance buffer 形成 `tina_sample_3d_infrastructure`。它不证明 Cooked Mesh/Material/Texture/Prefab、glTF、通用 Pipeline/PBR、Pass Scheduler 或正式3D产品 |
-| vNext M9-C bgfx Sprite2D fixture + 2D/UI sample | 已完成 Debug/Release fixture/infrastructure 验证 | `tina_render_bgfx` 私有消费 Sprite2D fixture 子集，只接受 `spriteKey=1`，写入 transient P2/UV2/ABGR vertex 与 u32 index，并与 Opaque3D/UI 做联合 transient budget 预检；当前固定 View 0 clear、1 Opaque3D、2 Sprite2D、3 UI 只是 fixture view 编号，不是 Pass Scheduler。Windows Debug/Release `tina_render_bgfx_tests` 均43/43；两配置的 `tina_sample_2d_infrastructure_bgfx` 均运行300帧，记录5个 Sprite、2个 UI panel、`renderResourceLedgerBalanced=true`，Debug 截图确认旋转、透明、flip 与 UI overlay。它不证明 Asset/Texture/Sprite 产品路径、正式 `tina_sample_2d`、TileMap、Box2D、中文文本或 M10 |
+| vNext M9-C bgfx Sprite2D fixture + 2D/UI sample | 已完成 Debug/Release fixture/infrastructure 验证 | `tina_render_bgfx` 私有消费 Sprite2D fixture 子集，只接受 `spriteKey=1`，写入 transient P2/UV2/ABGR vertex 与 u32 index，并与 Opaque3D/UI 做联合 transient budget 预检；当前固定 View 0 clear、1 Opaque3D、2 Sprite2D、3 UI 只是 fixture view 编号，不是 Pass Scheduler。Windows Debug/Release `tina_render_bgfx_tests` 均43/43；两配置的 `tina_sample_2d_infrastructure_bgfx` 均运行300帧，记录5个 Sprite、2个 UI panel、`renderResourceLedgerBalanced=true`，Debug 截图确认旋转、透明、flip 与 UI overlay。它不证明 Asset/Texture/Sprite 产品路径、正式 `tina_sample_2d`、TileMap、Box2D、中文文本或 M10-A1+ |
+| vNext M10-A0 Cooked wire format | 已完成只读格式基础切片 | `Tina::AssetFormat` 只 PUBLIC 依赖 Core；新增互不兼容的16字节 `AssetId`/`ContentHash`、固定112B Cooked Header、64B Manifest Header、56B Manifest Entry、24B Dependency Entry、确定性 object path，以及成功路径零分配的 little-endian borrowed views。parser 在暴露数据前校验 hard limit、checked arithmetic、canonical layout、zero padding、排序/重复、依赖存在与 kind；A0 不计算 XXH3、不做完整 cycle、文件 IO、AssetHandle/Lease、worker/upload、cgltf/Cooker writer 或正式资产产品样例 |
 | vNext GLFW 边界 | 已形成可运行切片 | `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
-| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene component-integrated extraction、Asset/Audio、owning UI packet/pin、Text/Glyph/完整 Widget 与 submission drain 仍按后续切片实施；M8-A World/Transform、M8-B 2D extraction、M9-A 3D CPU/Null extraction、M9-B Opaque3D fixture、M9-C Sprite2D fixture、Desktop SolidFill 可见样例、standalone UI/Render/bridge foundation、Runtime-private route/layout/startup/display borrow 接线、Button primary-pointer default action 和私有 bgfx SolidQuad pass 不代表完整产品路径完成 |
+| 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene component-integrated extraction、AssetSystem/Audio、owning UI packet/pin、Text/Glyph/完整 Widget 与 submission drain 仍按后续切片实施；M8-A World/Transform、M8-B 2D extraction、M9-A 3D CPU/Null extraction、M9-B Opaque3D fixture、M9-C Sprite2D fixture、M10-A0 wire format、Desktop SolidFill 可见样例、standalone UI/Render/bridge foundation、Runtime-private route/layout/startup/display borrow 接线、Button primary-pointer default action 和私有 bgfx SolidQuad pass 不代表完整产品路径完成 |
 
 因此不能用“删除旧 `src`”作为下一步。正确顺序是：建立新边界和测试 → 迁移调用点 → 确认旧接口零引用 → 通过 2D/UI/3D 验收 → 在独立提交中删除旧实现。
 

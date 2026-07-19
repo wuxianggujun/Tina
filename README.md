@@ -45,7 +45,7 @@ Sprite2D, View 3 UI. That numbering is not a Pass Scheduler. `tina_sample_3d_inf
 3D fixture path for 300 frames with three cubes and one instance batch per frame; `tina_sample_2d_infrastructure_bgfx`
 runs the visible 2D/UI fixture path for 300 frames with five sprites and two retained UI panels. Scene component
 command buffers, Asset/Cooker integration, Texture/Sprite assets, TileMap/Box2D, Chinese text rendering,
-generic Mesh/Material/PBR, M10, `tina_sample_2d`, and product samples remain later slices.
+generic Mesh/Material/PBR, the M10 product asset path, `tina_sample_2d`, and product samples remain later slices.
 The current M8-B Windows MSVC Debug/Release Null gates both pass Core/Runtime 211/211, UI 115/115,
 Runtime-to-UI 60/60, UI-to-Render 12/12, Scene 19/19, RenderScene 11/11, and both 300-frame Null and
 2D-infrastructure samples. The current Windows Debug adapter recheck also passes GLFW 26/26, its 300-frame
@@ -83,7 +83,12 @@ Sprite2D. The known D3D11 debug-layer `RefCount=3` warning remains Debug-only an
 is still fixture infrastructure, not the Asset/Texture/Sprite product path or the formal `tina_sample_2d`.
 Linux M9-C remains unverified.
 
-M10 Cooked glTF is not complete.
+M10-A0 now provides the standalone `Tina::AssetFormat` foundation: distinct 16-byte `AssetId` and
+`ContentHash` value types, fixed little-endian Cooked/Manifest wire schemas, deterministic object paths, and
+borrowed parsers whose successful view publication allocates nothing, with hard-limit, checked-arithmetic, canonical-layout, padding, ordering, and
+dependency validation. `tina_asset_format_tests` passes 14/14 in Windows MSVC Debug and Release. This slice does
+not compute XXH3 or implement full DAG-cycle validation, file IO, the Asset registry/Handle/Lease lifecycle,
+workers/uploads, cgltf, Cooker writes, or the formal 2D/3D asset product path; Cooked glTF remains incomplete.
 
 M7-C1c-a adds fixed-capacity PMR pointer-policy/route-ancestry storage and a double-buffered
 `UICommittedHitView`. Within one view, its effective-visible entries have unique, strictly increasing paint ordinals and

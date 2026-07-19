@@ -379,7 +379,7 @@ Sprite2D/UI transient index budget 覆盖，Windows Debug/Release 完整 `tina_r
 两配置的 `tina_sample_2d_infrastructure_bgfx` 均运行300帧并通过，记录5个 Sprite、2个 UI panel、UI root 释放和
 `renderResourceLedgerBalanced=true`；截图确认 Sprite 旋转、透明、flip 与 UI overlay。该结果只证明
 fixture/infrastructure，不证明 Asset/Texture/Sprite 产品路径、正式 `tina_sample_2d`、TileMap、Box2D、
-中文文本或 M10。
+中文文本或 M10-A1+ 产品资产路径。
 D2 Desktop 样例用 Game SDK `setBoxPaint()` 创建4个 retained SolidFill panel，1280×720截图像素验证：
 background RGB(9,24,40)、blue(28,92,148)、cyan-over-blue(29,186,167)、cyan-over-background(26,176,152)，
 右侧 clip 边界 x=1140 为 background、x=1160 与 x=1279 为 pink(239,88,122)。该证据证明最小可见

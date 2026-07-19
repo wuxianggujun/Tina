@@ -32,4 +32,6 @@
 - [Roadmap](roadmap.md)
 
 主题设计文档会明确区分当前实现、已知问题和目标契约。当前 M9-A 已有 CPU/Null Perspective/Mesh3D
-extraction foundation；可见 bgfx Cube/depth 属 M9-B，Cooked glTF 产品路径属 M10。测试和实际运行结果优先于文档。
+extraction foundation，M9-B/M9-C 已有私有 bgfx 3D/2D fixture；M10-A0 已完成独立 Cooked Header/Manifest
+wire-format 与只读校验基础。AssetSystem、Cooker/cgltf 和正式 Cooked glTF 产品路径仍属后续 M10 切片。
+测试和实际运行结果优先于文档。
