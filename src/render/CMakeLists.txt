@@ -24,8 +24,14 @@ if(TINA_BUILD_RENDER_BGFX)
     add_library(tina_render_bgfx STATIC
         bgfx/BgfxRenderDevice.cpp
         bgfx/BgfxRenderDevice.hpp
+        bgfx/BgfxOpaque3DGeometry.cpp
+        bgfx/BgfxOpaque3DGeometry.hpp
+        bgfx/BgfxOpaque3DShader.cpp
+        bgfx/BgfxOpaque3DShader.hpp
         bgfx/BgfxSurfaceFramePlanner.cpp
         bgfx/BgfxSurfaceFramePlanner.hpp
+        bgfx/BgfxTransientFrameBudget.cpp
+        bgfx/BgfxTransientFrameBudget.hpp
         bgfx/BgfxUIDisplayGeometry.cpp
         bgfx/BgfxUIDisplayGeometry.hpp
         bgfx/BgfxUISolidQuadShader.cpp
@@ -59,5 +65,12 @@ if(TINA_BUILD_RENDER_BGFX)
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_ui_solid_quad.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_ui_solid_quad.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_ui_solid_quad.def.sc"
+    )
+    tina_add_bgfx_embedded_shader(
+        tina_render_bgfx
+        tina_opaque3d_unlit
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_opaque3d_unlit.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_opaque3d_unlit.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_unlit.def.sc"
     )
 endif()

@@ -8,4 +8,5 @@ endif()
 
 if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     add_subdirectory(desktop)
+    add_subdirectory(3d_bgfx)
 endif()

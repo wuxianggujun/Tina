@@ -12,7 +12,8 @@
   `tina_runtime_ui_tests`；SolidFill committed paint → Render SolidQuad DisplayList 的窄桥另有独立
   `tina_ui_render_integration_tests`；启用
   `TINA_BUILD_PLATFORM_GLFW` 时另外生成 `tina_platform_glfw_tests`，启用
-  `TINA_BUILD_RENDER_BGFX` 时另外生成 `tina_render_bgfx_tests`，不注册额外测试调度；
+  `TINA_BUILD_RENDER_BGFX` 时另外生成 `tina_render_bgfx_tests`，其中 M9-B 的 Opaque3D fixture 几何测试
+  仍留在私有 bgfx adapter 测试进程内，不注册额外测试调度；
   M8-A Scene World/Transform 另有独立 `tina_scene_tests`，M8-B 2D 与 M9-A 3D RenderScene extraction 共用独立
   `tina_render_scene_tests`，二者均不并入基础 `tina_tests`；
 - 构建完成后直接运行对应 GoogleTest executable，任一返回码非0即失败；
@@ -108,6 +109,20 @@ M9-A 继续使用 `tina_render_scene_tests`，当前22项覆盖：Perspective Ca
 resize aspect 更新、退出顺序和 `liveResources=0`；它不创建 bgfx 资源、不显示 GPU 画面，也不能替代
 M9-B 的 procedural Cube/depth 或 M10 的 Cooked glTF 产品门禁。Runtime 生命周期测试另覆盖当前帧
 framebuffer aspect 注入及 `0x0` 时回退 logical extent。
+
+M9-B 当前最小实现把最小 Opaque3D fixture 接入私有 `tina_render_bgfx`，使用同一个
+`tina_render_bgfx_tests` executable 增加 `BgfxOpaque3DGeometryTest` 与 transient frame budget 测试：canonical `P3_N3_UV2`
+Cube 顶点/索引和 outward winding、空 Opaque3D frame、fixture world transform/baseColor instance 写入、
+unsupported fixture key 明确失败，以及 instance output 容量不足时不写 partial data。`tina_sample_3d_infrastructure`
+只在 GLFW+bgfx 图构建，通过 Desktop bootstrap 默认/门禁运行300帧，当前每帧提交3个 procedural Cube 和
+1个 instance batch。它运行全 surface clear View 0、depth-tested Opaque3D View 1、UI View 2 与真实
+bgfx transient instance buffer；进程返回码、实际截图和退出日志必须分别验收，不能用结构化样例成功行
+替代画面或资源回收证据。它不证明 Cooked Mesh/Material/Texture/Prefab、glTF、
+通用 Pipeline/PBR、Sprite2D pass、Pass Scheduler 或 3D 产品门禁。
+当前 backend 在 `noexcept` shutdown 中按创建顺序的严格逆序销毁 Tina-owned IB、VB 和两个 program，
+并在调用 `bgfx::shutdown()` 前校验内部 `liveResources == 0`；账本不平衡会终止进程而不是强制清零。
+因此样例只在 `EngineHost` 析构成功后输出 `renderResourceLedgerBalanced=true`。M10 引入资源/retirement
+系统后仍须用下面的完整 backend-neutral 字段替换这一最小 fixture 证据。
 
 M7-C1c-b3d1 在同一测试拓扑中新增三组契约：focused `UIContextCapacityConfig` validator 与
 `EngineConfig` 在任何 factory 前拒绝非法容量；primary owner 确实使用配置容量；layout coordinator
@@ -621,7 +636,7 @@ Legacy 与 vNext 进程观察到的 `N` 会随调试对象组合变化，本轮 
 | `tina_sample_ui` | 未实现 | 在现有 Desktop SolidFill panel smoke 和 primary Pointer Button default action 上补中文、Label 文本、Button Keyboard/Gamepad activation、Modal、TextEdit、Runtime packet、Glyph Atlas 与资源型 UI Render | M7 内置 Cooked Font/Texture fixture |
 | `tina_sample_2d_infrastructure` | M8-B Headless/Null extraction foundation 已实现 | Scene World → resolved Camera2D/Sprite2D、layer/order、cull/snap、Runtime `primaryWorldScene` handoff、300帧资源/生命周期归零 | 当前只用内置纯值 fixture；Asset/Cooker、bgfx Sprite pass、可见 Sprite、world picking、UI overlay 后置 |
 | `tina_sample_3d_extraction` | M9-A Headless/Null extraction foundation 已实现 | Scene World → resolved Perspective/Mesh3D、当前帧aspect、sphere culling、稳定sort/batch、Runtime handoff；300帧4 submitted/3 visible/1 culled/2 batches、一次aspect变化与资源归零 | 当前只用 fixture key/纯值和 recording Null device；无depth attachment、GPU buffer/shader/pipeline或可见画面，不计Legacy删除门禁 |
-| `tina_sample_3d_infrastructure` | 未实现 | Perspective、depth、canonical Mesh、Unlit pipeline | M9 procedural Cube |
+| `tina_sample_3d_infrastructure` | M9-B 最小 bgfx Opaque3D fixture 已实现 | Desktop bootstrap + bgfx；全 surface clear View 0、depth-tested procedural Cube View 1、UI View 2；默认/门禁300帧，当前每帧3个 Cube 和1个 instance batch | 只接受 fixture key `mesh=1/material=1/submesh=0`；canonical `P3_N3_UV2` 静态 VB/IB + unlit shader + transient instance buffer；不证明 Cooked Mesh/Material/Texture/Prefab、通用 Pipeline/PBR、Pass Scheduler 或正式3D产品 |
 | `tina_sample_2d` | 未实现 | Cooked TileMap/Tileset、chunk、角色/Tile AABB、Box2D dynamic body、正式 UI | M10/M11 Catalog/Manifest |
 | `tina_sample_3d` | 未实现 | Cooked glTF -> Mesh/Material/Prefab、culling/instance | M10 Catalog/Manifest |
 
@@ -629,8 +644,19 @@ M7-B2 已建立私有最小 bgfx clear/present core、7项 planner 测试、4项
 Desktop bootstrap 和真实 GPU 300帧冒烟。M7-C 已建立最小 SolidFill DisplayList CPU bridge，D0 已接入
 Runtime submit-call-local DisplayList handoff；D1 已加入私有 bgfx SolidQuad UI pass 和5项几何测试，D2 已加入
 Game SDK `setBoxPaint()` facade 与 Desktop 4-panel 可见 smoke；M7-D 后续继续接入中文、Widget 默认行为与资源型 UI，
-M9-A 只扩展 CPU/Null 3D extraction，M9-B 才扩展可见3D。游戏 sample source、Game SDK
-header 和 UI public header 不出现 bgfx。结构化验收使用 backend-neutral 字段：
+M9-A 只扩展 CPU/Null 3D extraction，M9-B 当前只扩展私有 fixture 级可见3D。游戏 sample source、Game SDK
+header 和 UI public header 不出现 bgfx。M9-B 最小直接门禁命令如下，仍直接运行 GoogleTest executable，
+不使用 CTest：
+
+```powershell
+cmake --preset windows-msvc-vnext-bgfx
+cmake --build --preset windows-vnext-bgfx-debug --target tina_render_bgfx_tests tina_sample_3d_infrastructure
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_filter=BgfxOpaque3DGeometryTest.* --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe --frames=300 --frame-delay-ms=0
+```
+
+完整资源系统的结构化验收目标使用 backend-neutral 字段：
 
 ```text
 RenderDevice stopped

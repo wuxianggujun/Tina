@@ -406,14 +406,20 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   `tina_render_scene_tests` 当前22/22，`tina_sample_3d_extraction --frames=300` 在 Headless/Null
   验证4 submitted/3 visible/1 culled/2 batches、aspect变化和 `liveResources=0`。它不创建 bgfx 资源，
   不提供可见画面，也不计入 Legacy 删除门禁；
-- **M9-B（下一切片）：** Tina Engine Module Render SPI 只使用 typed handle/descriptors；Game SDK/Phase Context 不暴露
-  RenderDevice，bgfx 类型只在 `tina_render_bgfx` 私有层；
-- 固定 Opaque3D、Sprite2D、UI、Present Pass，明确 clear/load/store、失败停止和资源计数；
-- 扩展 M7 backend 支持 Perspective、depth、canonical static Mesh、UnlitBaseColor Material v1、
-  Shader ABI、bounds/culling 和静态 instancing；
-- `tina_sample_3d_infrastructure` 使用私有 procedural indexed Cube、canonical `P3_N3_UV2`、depth、
-  真实 instance buffer 与可见截图验证 resize 及退出时 buffer/texture/pipeline 零泄漏；M9-B 尚未实现；
-- 不引入完整自研多后端 RHI、PBR、阴影、动画或后处理。
+- **M9-B 最小 bgfx Opaque3D fixture 已完成当前最小实现：** `tina_render_bgfx` 私有消费
+  M9-A 的 Perspective/Mesh3D `RenderSceneView`，但只接受 `meshKey=1`、`materialKey=1`、
+  `submeshIndex=0` 的 procedural Cube fixture；Game SDK/Phase Context 仍不暴露 RenderDevice、
+  ViewId、bgfx 类型或 GPU handle；
+- 当前固定全 surface View 0 为唯一 color+depth clear owner，View 1 为 `Opaque3D` 并启用 depth write
+  与 `Less` test，View 2 为 UI 且不重复 clear；Camera 子 viewport 外也会被确定性清理；
+- backend 私有创建 canonical `P3_N3_UV2` indexed Cube、`tina_opaque3d_unlit` shader program、
+  静态 vertex/index buffer，并为每帧 Mesh3D item 写入真实 bgfx transient instance buffer；私有
+  聚焦测试覆盖顶点/索引、fixture 写入与拒绝、容量失败原子性，以及 Opaque3D/UI 共用 transient
+  vertex pool 的联合预算；
+- `tina_sample_3d_infrastructure` 只在 GLFW+bgfx 图构建，通过 `Tina::Desktop::CreateEngine` 默认运行
+  300帧，当前每帧提交3个 procedural Cube 和1个 instance batch；
+- 通用 Render typed handle/descriptors、Pass Scheduler、Sprite2D pass、Runtime-owned packet/FramePin、
+  Cooked Mesh/Material/Texture/Prefab、glTF、PBR、阴影、动画、后处理、自动 resize/restore 产品门禁仍后置。
 
 ## M10 Asset 与 Cooker 垂直切片
 

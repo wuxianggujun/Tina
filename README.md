@@ -36,8 +36,13 @@ pixel snap, Runtime `RenderFrame` handoff, and a headless/Null 2D infrastructure
 builder with a backend-neutral Perspective Camera and Mesh3D extraction: right-handed Y-up `-Z` forward poses,
 positive-scale world bounds, sphere frustum culling, deterministic material/mesh/depth ordering, and adjacent
 instance-batch finalization. `tina_sample_3d_extraction` exercises that CPU/Headless/Null boundary only; it is
-not visible GPU 3D. Scene component command buffers, Asset/Cooker integration, a bgfx Sprite pass, visible Sprite
-rendering, the M9-B procedural bgfx Cube/depth path, and product samples remain later slices.
+not visible GPU 3D. The current minimum M9-B implementation adds the private bgfx Opaque3D fixture path: only
+`meshKey=1/materialKey=1/submeshIndex=0` maps to a canonical `P3_N3_UV2` procedural cube, an unlit embedded
+shader, a full-surface clear View 0, depth-tested Opaque3D View 1, UI View 2, and a real bgfx transient
+instance buffer. The new
+`tina_sample_3d_infrastructure` runs the visible fixture path for 300 frames with three cubes and one instance
+batch per frame. Scene component command buffers, Asset/Cooker integration, a bgfx Sprite pass, visible Sprite
+rendering, generic Mesh/Material/PBR, and product samples remain later slices.
 The current M8-B Windows MSVC Debug/Release Null gates both pass Core/Runtime 211/211, UI 115/115,
 Runtime-to-UI 60/60, UI-to-Render 12/12, Scene 19/19, RenderScene 11/11, and both 300-frame Null and
 2D-infrastructure samples. The current Windows Debug adapter recheck also passes GLFW 26/26, its 300-frame
@@ -58,7 +63,24 @@ The current M9-A Windows MSVC Debug/Release recheck passes `tina_tests` 213/213 
 `tina_sample_3d_extraction` each run 300 frames and return zero; the 3D extraction sample records
 4 submitted meshes, 3 visible meshes, 1 culled mesh, 2 instance batches, one aspect change, and
 `liveResources=0`. Release also passes UI 115/115, Runtime-to-UI 60/60, UI-to-Render 12/12, and
-Scene 19/19. M9-B visible procedural Cube/depth and M10 Cooked glTF are not complete.
+Scene 19/19. The M9-B minimum direct gate is the bgfx graph:
+
+```powershell
+cmake --preset windows-msvc-vnext-bgfx
+cmake --build --preset windows-vnext-bgfx-debug --target tina_render_bgfx_tests tina_sample_3d_infrastructure
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe --frames=300 --frame-delay-ms=0
+```
+
+The current M9-B Windows MSVC Debug/Release recheck passes the complete bgfx adapter suite 30/30.
+Both configurations run `tina_sample_3d_infrastructure` for 300 frames with three cubes, one instance batch,
+two retained UI panels, exactly one UI-root release and a destroyed `EngineHost`; the Release Desktop sample
+also completes 300 frames and releases its UI root. The sample reports a balanced Render resource ledger only
+after host destruction; the backend terminates instead of masking a non-zero ledger during `noexcept` shutdown.
+Two captured Debug frames confirm changing cube poses, depth occlusion, and UI rendering after Opaque3D.
+Linux M9-B remains unverified.
+
+M10 Cooked glTF is not complete.
 
 M7-C1c-a adds fixed-capacity PMR pointer-policy/route-ancestry storage and a double-buffered
 `UICommittedHitView`. Within one view, its effective-visible entries have unique, strictly increasing paint ordinals and

@@ -105,8 +105,13 @@ M9-A 在同一 builder 上新增后端无关的 Perspective Camera 与 Mesh3D ex
 正 scale 的世界包围球、球体 frustum culling、稳定 material/mesh/submesh/double-sided/depth/entity 顺序，
 以及相邻兼容项的 instance batch finalize。Runtime 每帧从当前 primary `PlatformFrame` 注入 framebuffer aspect；
 framebuffer 为 `0x0` 时回退到正的 logical extent。新增 `tina_sample_3d_extraction` 只验证 CPU/Headless/Null
-边界，不显示 GPU Cube，也不能替代正式 3D 产品门禁。M9-B 的私有 bgfx procedural Cube/depth/真实 instance
-buffer 和 M10 的 Cooked glTF 产品样例仍未实现。
+边界，不显示 GPU Cube，也不能替代正式 3D 产品门禁。M9-B 当前最小实现已在私有 `tina_render_bgfx`
+接入 fixture 级 Opaque3D：只接受 `meshKey=1/materialKey=1/submeshIndex=0`，用 canonical
+`P3_N3_UV2` procedural Cube、Unlit shader、全 surface clear View 0、depth-tested Opaque3D View 1、
+UI View 2 与真实 bgfx transient instance buffer 形成最小可见3D样例
+`tina_sample_3d_infrastructure`。该样例默认/门禁运行
+300帧，每帧3个 Cube、1个 instance batch；它不等于通用 Mesh/Asset/Material/PBR，M10 的 Cooked
+glTF 产品样例仍未实现。
 
 ## 当前 Legacy 已完成基线
 
@@ -146,6 +151,13 @@ M9-A 当前 Windows MSVC Debug/Release 直接结果均为基础 `tina_tests` 213
 `tina_sample_3d_extraction` 各300帧返回0。3D extraction 每帧提交4个 Mesh、可见3个、裁剪1个、
 形成2个 instance batch，resize 产生一次 aspect 变化，退出时 `liveResources=0`。Release 还直接通过
 UI115/115、Runtime→UI60/60、UI→Render12/12与Scene19/19。
+
+M9-B 当前 Windows MSVC Debug/Release 均通过完整 bgfx adapter 专项30/30，并各运行
+`tina_sample_3d_infrastructure` 300帧：每帧3个 Cube、1个 instance batch、2个 retained UI panel，
+退出时 UI root 恰好释放1次且 `EngineHost` 已销毁；Release Desktop 样例也完成300帧并释放 UI root。
+样例仅在 host 析构完成后报告 Render 资源账本平衡；backend 的 `noexcept` shutdown 遇到非零账本会
+终止进程，不再用强制清零掩盖失衡。两张 Debug 截图确认 Cube 姿态随帧变化、深度遮挡正确且 UI 在
+Opaque3D 后覆盖。Linux M9-B 尚未复验。
 
 Linux 最新 paint/DisplayList/bridge Null 门禁也已完成：GCC 13.4 通过基础205/205、
 `tina_ui_tests` 92/92、`tina_runtime_ui_tests` 46/46、bridge 12/12与Null样例300帧；
@@ -191,6 +203,11 @@ cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_runtime
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_runtime_ui_tests.exe
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_desktop.exe
+
+# M9-B 私有 bgfx Opaque3D fixture 与 300 帧样例
+cmake --build --preset windows-vnext-bgfx-debug --target tina_render_bgfx_tests tina_sample_3d_infrastructure
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe --frames=300 --frame-delay-ms=0
 
 cmake --preset windows-msvc
 cmake --build --preset windows-debug --target Tina tina_tests tina_legacy_tests

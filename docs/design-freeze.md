@@ -312,5 +312,6 @@ M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。
 
 M9-A 已完成 RenderScene 的 3D CPU/Null extraction foundation：Perspective Camera、Mesh3D item/batch、
 当前帧 aspect、包围球裁剪、稳定排序和 instance batch finalize；该切片不创建 bgfx Buffer/Shader/Pipeline，
-不显示 Cube。下一项 M9-B 才建立私有 canonical `P3_N3_UV2` Cube、Opaque depth pass、真实 instance buffer
-和可见样例；M10 仍负责 Cooked glTF/Manifest 产品路径。
+不显示 Cube。M9-B 当前最小实现已建立私有 canonical `P3_N3_UV2` Cube、Opaque depth pass、真实
+transient instance buffer、Opaque3D 后覆盖的 retained UI 与可见300帧样例；它仍仅接受 fixture key，
+不代表通用 Mesh/Material/Pipeline 或正式3D产品路径。M10 仍负责 Cooked glTF/Manifest 产品路径。

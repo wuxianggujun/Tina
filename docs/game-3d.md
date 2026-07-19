@@ -1,7 +1,9 @@
 # 3D 游戏架构
 
-> 状态：vNext 契约已冻结；M9-A CPU/Null extraction foundation 已实现。可见 Cube 仍只验证
-> M9-B 基础设施；正式 3D 路径必须覆盖 Cooked Mesh、Material、Prefab、Camera、depth 与 culling。
+> 状态：vNext 契约已冻结；M9-A CPU/Null extraction foundation 已实现。M9-B 当前最小实现已新增
+> 私有 bgfx Opaque3D procedural Cube/depth/instancing 基础设施和 `tina_sample_3d_infrastructure`。
+> 该样例只验证 fixture 级可见 3D；正式 3D 路径仍必须覆盖 Cooked Mesh、Material、Prefab、
+> Camera、depth 与 culling。
 
 ## 首期能力边界
 
@@ -24,6 +26,17 @@
 路径。`tina_sample_3d_extraction` 在 Headless/Null 中运行300帧，不创建 depth attachment、bgfx Buffer、Shader
 或 Pipeline，也不产生可见画面。
 
+当前 M9-B 只完成私有 bgfx fixture 子集：`meshKey=1`、`materialKey=1`、`submeshIndex=0`
+被解释为 canonical procedural Cube。backend 私有创建 `P3_N3_UV2` 静态 vertex/index buffer、
+`tina_opaque3d_unlit` shader program，并把每帧 Mesh3D item 的 world transform 与 baseColorFactor
+写入 transient instance buffer。提交顺序固定为全 surface clear View 0、`Opaque3D` View 1 和 UI
+View 2：View 0 唯一拥有 color+depth clear，View 1 使用 depth write 与 `Less` test，View 2 不重复
+clear。clear 与 Camera 子 viewport 分离，因此 viewport 外不会保留上一帧内容。
+`tina_sample_3d_infrastructure` 通过 Desktop bootstrap 创建真实 bgfx 窗口，默认/门禁使用300帧，
+每帧提交3个 procedural Cube，形成1个 instance batch。该切片不解析 AssetHandle、不创建 Cooked
+Mesh/Material/Texture/Prefab，不提供通用 Pipeline cache、PBR、Light、Transparent3D 或 glTF Runtime
+加载。
+
 ## 模块与数据流
 
 ```text
@@ -41,6 +54,10 @@ Game3DState
 
 游戏代码保存 `AssetHandle<MeshAsset>`、`AssetHandle<MaterialAsset>` 和 Scene component，不接触
 RenderDevice、GPU Buffer/Texture/Pipeline handle、view id、shader uniform 或 bgfx 类型。
+
+当前 M9-B 样例尚未走上图中的 Scene component/Asset path，而是在 `IGameState::extractRenderScene()`
+中直接写 resolved Perspective/Mesh3D input 作为 fixture。正式产品路径必须在 M10 之后用 Cooked
+Asset 和 `FrameResourceRef` 替换这些 fixture key。
 
 ## Camera3D
 
@@ -166,9 +183,11 @@ Draco/Meshopt 等未支持扩展返回 `UnsupportedFeature` 和完整源路径�
 7. Pass Scheduler 消费 immutable RenderScene，不能回查 World。
 
 M9-A 已实现步骤3到6的单线程 CPU 基础，但输入仍是游戏回调写入的 resolved 纯值，而不是 Scene component/
-Asset snapshot。当前稳定 key 为
+Asset snapshot。M9-B bgfx backend 仅消费上述排序/批处理结果中的 fixture key `1/1/0`，并用真实
+transient instance buffer 提交相邻 batch；其他 Mesh/Material/Submesh key 会返回明确 `Unsupported`。
+当前稳定 key 为
 `material -> mesh -> submesh -> doubleSided -> depth bucket -> stableEntity -> insertion`，相邻且
-Mesh/Material/Submesh/Double-sided 相同的 item 合并为 batch；Pipeline key 要等 M9-B/M10 资源边界落地后
+Mesh/Material/Submesh/Double-sided 相同的 item 合并为 batch；通用 Pipeline key 要等 M10 资源边界落地后
 进入排序。interpolation、worker chunk merge、FrameResourceRef 和 SubmissionTicket 尚未实现。
 
 Worker 可以对不可变 chunk 做 bounds/culling 并写 worker-local buffer；barrier 后按稳定
@@ -216,10 +235,11 @@ stale handle、资源归零和 checksum 属确定性硬门禁。
 1. `tina_sample_3d_extraction`：Headless/Null Perspective、bounds/culling/sort/batch、aspect resize、
    300帧退出与 CPU 资源归零；当前已实现，但没有 GPU 画面；
 2. `tina_sample_3d_infrastructure`：procedural indexed Cube、Perspective、depth、真实 instance buffer、
-   resize、300帧退出与实际截图；M9-B 尚未实现；
+   300帧退出与实际截图；当前 M9-B 最小实现已覆盖 fixture 级路径，但仍不覆盖 Cooked Asset、
+   通用 Material/Pipeline、自动 resize/restore 门禁或产品 3D；
 3. `tina_sample_3d`：Cooked textured glTF -> Mesh/Material/Prefab、层级 Transform、多个深度遮挡
    对象、frustum culling 和至少一个 instance batch。
 
-两者分别验证进程返回码、结构化日志、Render resource count、实际截图。正式样例还必须覆盖
+这些样例分别验证进程返回码、结构化日志、Render resource count、实际截图。正式样例还必须覆盖
 最小化/恢复、aspect 更新、不支持 glTF 诊断和 shutdown 时 Buffer/Texture/Shader/Pipeline 全部
 退役。只有第三步通过后，3D 产品路径才可计入 Legacy 删除门禁。
