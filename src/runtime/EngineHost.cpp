@@ -2,6 +2,7 @@
 
 #include <tina/platform/PlatformBackend.hpp>
 #include <tina/render/RenderDevice.hpp>
+#include <tina/render/RenderScene.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
@@ -454,13 +455,15 @@ class EngineHostImplementation final {
                              std::unique_ptr<Runtime::Input::ActionMapper> actionMapper,
                              std::unique_ptr<Runtime::Input::UIInputRouteProducer> uiInputRouteProducer,
                              Runtime::Detail::PrimaryWindowUIDisplayCoordinator primaryWindowUIDisplay,
+                             Render::RenderSceneBuilder renderSceneBuilder,
                              EngineModules modules,
                              std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface) noexcept
         : m_config(std::move(config)), m_fixedStepAccumulator(std::move(fixedStepAccumulator)),
           m_platformEventDispatcher(std::move(platformEventDispatcher)), m_actionMapper(std::move(actionMapper)),
           m_uiInputRouteProducer(std::move(uiInputRouteProducer)), m_modules(std::move(modules)),
           m_primaryWindowUi(m_config.primaryWindowUICapacities),
-          m_primaryWindowUIDisplay(std::move(primaryWindowUIDisplay)), m_ownerThread(std::this_thread::get_id()),
+          m_primaryWindowUIDisplay(std::move(primaryWindowUIDisplay)),
+          m_renderSceneBuilder(std::move(renderSceneBuilder)), m_ownerThread(std::this_thread::get_id()),
           m_lastWindowSurface(std::move(initialWindowSurface))
     {
     }
@@ -795,7 +798,15 @@ class EngineHostImplementation final {
                                               simulationTick);
             }
 
-            RenderSceneExtractionContext extractionContext{frameTiming};
+            auto renderSceneBeginStatus = m_renderSceneBuilder.beginFrame();
+            if (!renderSceneBeginStatus)
+            {
+                return failAfterStartupCommit(gameApplication, std::move(renderSceneBeginStatus.error()), frameIndex,
+                                              simulationTick);
+            }
+            auto renderSceneRollback = Core::makeScopeExit([this]() noexcept { m_renderSceneBuilder.rollback(); });
+            Render::RenderSceneWriter renderSceneWriter = m_renderSceneBuilder.writer();
+            RenderSceneExtractionContext extractionContext{frameTiming, renderSceneWriter};
             auto extractionResult =
                 invokeResultBoundary("IGameState::extractRenderScene", RuntimeErrorCode::GameCallbackThrewException,
                                      [&] { return m_gameState->extractRenderScene(extractionContext); });
@@ -804,6 +815,13 @@ class EngineHostImplementation final {
                 return failAfterStartupCommit(gameApplication, std::move(extractionResult.error()), frameIndex,
                                               simulationTick);
             }
+            auto renderSceneResult = m_renderSceneBuilder.commit();
+            if (!renderSceneResult)
+            {
+                return failAfterStartupCommit(gameApplication, std::move(renderSceneResult.error()), frameIndex,
+                                              simulationTick);
+            }
+            renderSceneRollback.release();
 
             auto updateUIPhase = m_primaryWindowUICapability.beginUIUpdatePhase(*uiContextResult);
             if (!updateUIPhase)
@@ -851,6 +869,7 @@ class EngineHostImplementation final {
                 .interpolation = frameTiming.interpolation,
                 .primaryWindowSurface = primaryWindowSurface,
                 .primaryWindowUIDisplayList = uiDisplayResult->displayList,
+                .primaryWorldScene = *renderSceneResult,
             };
             auto submitResult =
                 invokeResultBoundary("IRenderDevice::submitFrame", RuntimeErrorCode::LifecycleInvariantViolation,
@@ -968,6 +987,7 @@ class EngineHostImplementation final {
     Runtime::Detail::PrimaryWindowUICapabilityState m_primaryWindowUICapability;
     Runtime::Detail::PrimaryWindowUILayoutCoordinator m_primaryWindowUILayout;
     Runtime::Detail::PrimaryWindowUIDisplayCoordinator m_primaryWindowUIDisplay;
+    Render::RenderSceneBuilder m_renderSceneBuilder;
     std::thread::id m_ownerThread;
     std::unique_ptr<IGameState> m_gameState;
     [[maybe_unused]] GameStatePolicy m_committedPolicy{};
@@ -1075,6 +1095,15 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         {
             auto error = std::move(primaryWindowUIDisplayResult.error());
             error.addContext("EngineHost::Create", "PrimaryWindowUIDisplayCoordinator construction");
+            return Core::failure(std::move(error));
+        }
+
+        auto renderSceneBuilderResult =
+            Render::RenderSceneBuilder::Create(ownedConfig.renderSceneCapacities);
+        if (!renderSceneBuilderResult)
+        {
+            auto error = std::move(renderSceneBuilderResult.error());
+            error.addContext("EngineHost::Create", "RenderSceneBuilder construction");
             return Core::failure(std::move(error));
         }
 
@@ -1230,7 +1259,7 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         auto implementation = std::make_unique<Detail::EngineHostImplementation>(
             std::move(ownedConfig), std::move(*accumulatorResult), std::move(*platformEventDispatcherResult),
             std::move(*actionMapperResult), std::move(*uiInputRouteProducerResult),
-            std::move(*primaryWindowUIDisplayResult), std::move(modules),
+            std::move(*primaryWindowUIDisplayResult), std::move(*renderSceneBuilderResult), std::move(modules),
             std::move(initialWindowSurface));
         return std::unique_ptr<EngineHost>(new EngineHost(std::move(implementation)));
     } catch (const std::bad_alloc&)

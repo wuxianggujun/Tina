@@ -3,6 +3,8 @@
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformBackend.hpp>
 #include <tina/render/RenderDevice.hpp>
+#include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderScene.hpp>
 #include <tina/runtime/EngineHost.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
@@ -46,6 +48,47 @@ void expectEventSuffix(const EventLog& events, const EventLog& expectedSuffix)
     ASSERT_GE(events.size(), expectedSuffix.size());
     EXPECT_TRUE(std::ranges::equal(events.end() - static_cast<std::ptrdiff_t>(expectedSuffix.size()), events.end(),
                                    expectedSuffix.begin(), expectedSuffix.end()));
+}
+
+[[nodiscard]] Render::RenderCamera2DInput makeRenderSceneCamera2DInput(u64 stableCameraKey = 7, float centerX = 0.0F,
+                                                                       float centerY = 0.0F)
+{
+    return Render::RenderCamera2DInput{
+        .stableCameraKey = stableCameraKey,
+        .centerX = centerX,
+        .centerY = centerY,
+        .rotationRadians = 0.0F,
+        .worldWidth = 10.0F,
+        .worldHeight = 10.0F,
+        .actualPixelsPerMeter = 10.0F,
+        .pixelSnap = Render::RenderPixelSnapPolicy::Disabled,
+    };
+}
+
+[[nodiscard]] Render::RenderSprite2DInput makeRenderSceneSprite2DInput(u32 spriteKey, u64 stableEntityKey,
+                                                                       float centerX, float centerY, i16 layer = 0,
+                                                                       i32 order = 0)
+{
+    return Render::RenderSprite2DInput{
+        .spriteKey = spriteKey,
+        .stableEntityKey = stableEntityKey,
+        .centerX = centerX,
+        .centerY = centerY,
+        .rotationRadians = 0.0F,
+        .widthMeters = 1.0F,
+        .heightMeters = 1.0F,
+        .scaleX = 1.0F,
+        .scaleY = 1.0F,
+        .sortingLayer = layer,
+        .orderInLayer = order,
+        .red = 255,
+        .green = 255,
+        .blue = 255,
+        .alpha = 255,
+        .flipX = false,
+        .flipY = false,
+        .visible = true,
+    };
 }
 
 class LoggingClock final : public Core::IMonotonicClock {
@@ -417,6 +460,9 @@ struct RuntimeProbe final {
     u64 submittedFrames = 0;
     u64 presentedFrames = 0;
     bool lastSubmittedHadPrimaryWindowSurface = false;
+    std::optional<Render::RenderCamera2D> copiedLastSubmittedWorldCamera2D;
+    std::vector<Render::RenderSprite2DItem> copiedLastSubmittedWorldSprites2D;
+    Render::RenderSceneStatistics copiedLastSubmittedWorldSceneStatistics{};
     std::vector<usize> submittedUICommandCounts;
     std::optional<Render::UIDrawCommand> copiedLastSubmittedUICommand;
 };
@@ -835,6 +881,10 @@ class ProbeRenderDevice final : public Render::IRenderDevice {
     {
         probe_->events.emplace_back("render.submit." + std::to_string(frame.frameIndex));
         probe_->lastSubmittedHadPrimaryWindowSurface = frame.primaryWindowSurface.has_value();
+        probe_->copiedLastSubmittedWorldCamera2D = frame.primaryWorldScene.camera2D();
+        const auto sprites = frame.primaryWorldScene.sprites2D();
+        probe_->copiedLastSubmittedWorldSprites2D.assign(sprites.begin(), sprites.end());
+        probe_->copiedLastSubmittedWorldSceneStatistics = frame.primaryWorldScene.statistics();
         probe_->submittedUICommandCounts.push_back(frame.primaryWindowUIDisplayList.commands().size());
         if (!frame.primaryWindowUIDisplayList.commands().empty())
         {
@@ -1094,6 +1144,10 @@ struct GameProbe final {
     bool uiPointerListenerReleasedOnExit = false;
     std::optional<Core::ErrorCode> ignoredPrimaryWindowUIEnterFailure;
     std::optional<Core::ErrorCode> ignoredPrimaryWindowUIUpdateFailure;
+    std::optional<Render::RenderCamera2DInput> scriptedRenderSceneCamera;
+    std::vector<Render::RenderSprite2DInput> scriptedRenderSceneSprites;
+    bool ignoreRenderSceneWriteFailures = false;
+    std::optional<Core::ErrorCode> ignoredRenderSceneWriteFailure;
 };
 
 [[nodiscard]] Core::Status injectedGameFailure(std::string_view phase)
@@ -1364,6 +1418,35 @@ class ScriptedGameState final : public IGameState {
     Core::Status extractRenderScene(RenderSceneExtractionContext& context) const override
     {
         probe_->runtime->events.emplace_back("state.extract." + std::to_string(context.frameTiming().frameIndex));
+        auto& writer = context.renderSceneWriter();
+        const auto handleWriteStatus = [this](Core::Status status) -> Core::Status {
+            if (status)
+            {
+                return Core::success();
+            }
+            if (probe_->ignoreRenderSceneWriteFailures)
+            {
+                probe_->ignoredRenderSceneWriteFailure = status.error().code;
+                return Core::success();
+            }
+            return status;
+        };
+        if (probe_->scriptedRenderSceneCamera.has_value())
+        {
+            auto cameraStatus = handleWriteStatus(writer.setCamera2D(*probe_->scriptedRenderSceneCamera));
+            if (!cameraStatus)
+            {
+                return cameraStatus;
+            }
+        }
+        for (const Render::RenderSprite2DInput& sprite : probe_->scriptedRenderSceneSprites)
+        {
+            auto spriteStatus = handleWriteStatus(writer.addSprite2D(sprite));
+            if (!spriteStatus)
+            {
+                return spriteStatus;
+            }
+        }
         return maybeInjectCommittedGameFailure(*probe_->runtime, CommittedFailurePoint::ExtractRenderScene,
                                                "extractRenderScene");
     }
@@ -1761,6 +1844,19 @@ TEST(EngineHostCreationTest, InvalidPrimaryWindowUIDisplayListCapacityIsRejected
     EXPECT_TRUE(events.empty());
 }
 
+TEST(EngineHostCreationTest, InvalidRenderSceneCapacityIsRejectedBeforeAnyFactoryInvocation)
+{
+    EventLog events;
+    auto config = EngineConfig::Defaults();
+    config.renderSceneCapacities.spriteCapacity = 0;
+
+    auto result = EngineHost::Create(config, makeInjectedFactories(events, FactoryStage::Clock, FactoryMode::Failure));
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);
+    EXPECT_TRUE(events.empty());
+}
+
 TEST(EngineHostCreationTest, DestroyingReadyHostWithoutRunShutsModulesDownInReverseOrder)
 {
     EventLog events;
@@ -1963,6 +2059,83 @@ TEST(EngineHostRunTest, GameSdkBuildsAndUpdatesAPrimaryWindowRetainedTree)
     EXPECT_FALSE(runtime.copiedLastSubmittedUICommand.has_value());
     EXPECT_EQ(game.exitCount, 1U);
     EXPECT_EQ(game.shutdownCount, 1U);
+}
+
+TEST(EngineHostRunTest, ExtractRenderScenePublishesCameraAndSpriteDataToSubmitFrame)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+
+    GameProbe game;
+    game.runtime = &runtime;
+    game.exitOnFrame = 0;
+    game.scriptedRenderSceneCamera = makeRenderSceneCamera2DInput(101U, 3.25F, -1.5F);
+    game.scriptedRenderSceneSprites = {
+        makeRenderSceneSprite2DInput(11U, 201U, 2.5F, -1.0F),
+    };
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value());
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
+    EXPECT_EQ(*runResult, RunExitReason::GameRequestedExitAfterCurrentFrame);
+    ASSERT_TRUE(runtime.copiedLastSubmittedWorldCamera2D.has_value());
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldCamera2D->stableCameraKey, 101U);
+    EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldCamera2D->centerX, 3.25F);
+    EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldCamera2D->centerY, -1.5F);
+    ASSERT_EQ(runtime.copiedLastSubmittedWorldSprites2D.size(), 1U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldSprites2D.front().spriteKey, 11U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldSprites2D.front().stableEntityKey, 201U);
+    EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldSprites2D.front().centerX, 2.5F);
+    EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldSprites2D.front().centerY, -1.0F);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldSceneStatistics.cameraCount, 1U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldSceneStatistics.submittedSpriteCount, 1U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldSceneStatistics.visibleSpriteCount, 1U);
+    EXPECT_EQ(runtime.submittedFrames, 1U);
+    EXPECT_EQ(runtime.presentedFrames, 1U);
+    EXPECT_EQ(game.exitCount, 1U);
+    EXPECT_EQ(game.shutdownCount, 1U);
+}
+
+TEST(EngineHostRunTest, RenderSceneWriterCapacityOverflowStopsBeforeUiAndRenderSubmission)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+
+    GameProbe game;
+    game.runtime = &runtime;
+    game.exitOnFrame = 99;
+    game.scriptedRenderSceneCamera = makeRenderSceneCamera2DInput(202U, 0.0F, 0.0F);
+    game.scriptedRenderSceneSprites = {
+        makeRenderSceneSprite2DInput(31U, 301U, 0.0F, 0.0F),
+        makeRenderSceneSprite2DInput(32U, 302U, 1.0F, 0.0F),
+    };
+    game.ignoreRenderSceneWriteFailures = true;
+    ScriptedGameApplication application(game);
+
+    auto config = EngineConfig::Defaults();
+    config.renderSceneCapacities.spriteCapacity = 1;
+    auto hostResult = createRuntimeHost(runtime, std::move(config));
+    ASSERT_TRUE(hostResult.has_value()) << hostResult.error().message;
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_FALSE(runResult.has_value());
+    EXPECT_EQ(runResult.error().code, Render::RenderErrorCode::RenderSceneCapacityExceeded);
+    ASSERT_TRUE(game.ignoredRenderSceneWriteFailure.has_value());
+    EXPECT_EQ(*game.ignoredRenderSceneWriteFailure, Render::RenderErrorCode::RenderSceneCapacityExceeded);
+    EXPECT_TRUE(containsEvent(runtime.events, "state.extract.0"));
+    EXPECT_FALSE(containsEventPrefix(runtime.events, "state.ui."));
+    EXPECT_FALSE(containsEventPrefix(runtime.events, "render.submit."));
+    EXPECT_FALSE(containsEvent(runtime.events, "render.present"));
+    EXPECT_EQ(runtime.submitCalls, 0U);
+    EXPECT_EQ(runtime.presentCalls, 0U);
+    EXPECT_EQ(game.exitCount, 1U);
+    EXPECT_EQ(game.shutdownCount, 1U);
+    EXPECT_EQ(game.exitStopCause, RunStopCause::RuntimeFailure);
+    EXPECT_EQ(game.shutdownStopCause, RunStopCause::RuntimeFailure);
 }
 
 TEST(EngineHostRunTest, GameSdkPointerListenerPublishesClaimBeforeActionsAndReleasesOnExit)

@@ -144,6 +144,7 @@ EngineConfig EngineConfig::Defaults()
         .platformFrameCapacities = Platform::PlatformFrameCapacityConfig{},
         .primaryWindowUICapacities = UI::UIContextCapacityConfig{},
         .primaryWindowUIDisplayListCapacities = PrimaryWindowUIDisplayListCapacityConfig{},
+        .renderSceneCapacities = Render::RenderSceneCapacity{},
         .inputActions = InputActionMapConfig{},
         .platformEventSubscriptions = PlatformEventSubscriptionConfig{},
         .fixedSimulation = Core::FixedStepConfig{},
@@ -194,6 +195,13 @@ Core::Status EngineConfig::validate() const
         !uiDisplayCapacityStatus)
     {
         return uiDisplayCapacityStatus;
+    }
+    if (auto renderSceneCapacityStatus = Render::validateRenderSceneCapacity(renderSceneCapacities);
+        !renderSceneCapacityStatus)
+    {
+        Core::Error error{ConfigurationErrorCode::InvalidEngineConfig, "renderSceneCapacities is invalid"};
+        error.addContext("EngineConfig::validate", renderSceneCapacityStatus.error().message);
+        return Core::failure(std::move(error));
     }
     if (platformEventSubscriptions.subscriberCapacity == 0 ||
         platformEventSubscriptions.subscriberCapacity > PlatformEventSubscriptionConfig::MaximumSubscriberCapacity)

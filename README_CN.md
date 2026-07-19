@@ -14,7 +14,8 @@ Runtime。现有2D/UI/3D路径继续作为验收基线，新架构按可独立�
 - 以 `IGameApplication` 表示“整个游戏程序入口”，以 `IGameState` 表示“菜单、关卡、暂停等逐帧运行状态”，不再使用含义模糊的 `IGame`；
 - 建立细粒度 dirty、单次布局、持久 Paint Cache 和稳定 Display List 的高性能 Retained UI；
 - 参考 Carbon Engine 的 Frame Step、资源 Load/Prepare/Upload 和 GPU 生命周期，但保持 Tina 架构小而清晰。
-- 采用 Tina-owned Trace/Metrics 和可选 Tracy 定位热点，独立 `tina_bench` 建立可重复性能回归；
+- 采用 Tina-owned Trace/Metrics 和可选 Tracy 定位热点；规划独立 `tina_bench` 建立可重复性能回归，
+  但当前尚未实现该 target；
 - 新 target 不使用 EASTL，也不自研通用 STL；标准库/`std::pmr` 加少量专用固定容量结构。
 
 当前旧文档已经替换，但旧源码架构仍是正在运行的主实现，并未完全删除。迁移状态和删除门禁见 [架构总览](docs/architecture.md)。物理后端固定为 2D Box2D 3.x 与 3D Jolt，不引入第三套物理引擎。
@@ -94,8 +95,11 @@ FramePin、production Gamepad、Windows IMM32 composition、Pass Scheduler、sub
 中文 UI 分别放在后续切片。M8-A 已新增独立 `tina_scene`：固定容量 `Scene::World`、generation/owner
 `EntityId`、Local/World Transform、非递归层级传播、默认 keep-world/显式 keep-local、父销毁提升与显式
 子树销毁；两阶段 publication 保证失败不发布部分 World snapshot，并诊断循环、溢出和当前 TRS 无法表达的
-shear。Windows MSVC 2026 Debug/Release 的独立 `tina_scene_tests` 均为19/19；本切片不链接 EnTT/GLM，Camera2D、
-Sprite extraction、阶段 command buffer 与 2D 样例仍未实现。
+shear。M8-B 在此基础上新增固定容量、后端无关的 `RenderSceneBuilder`、只在
+`extractRenderScene()` 回调内有效的 `RenderSceneWriter`、解析后的 Camera2D/Sprite2D 输入、稳定 layer/order
+排序、保守裁剪、pixel snap、Runtime `RenderFrame` handoff，以及 `tina_sample_2d_infrastructure` Headless/Null
+记录样例。本切片不链接 EnTT/GLM，也不实现 Scene component command buffer、Asset/Cooker、bgfx Sprite pass、
+可见 Sprite、world picking 或正式 2D/UI 产品门禁；这些仍按后续切片推进。
 
 ## 当前 Legacy 已完成基线
 
@@ -115,10 +119,13 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求
 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、
-MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过本轮 dirty-subtree b4a 的
-Debug/Release 直接门禁均通过：基础208/208、独立 UI 115/115、独立 Runtime→UI 60/60、UI→Render
-12/12、Scene 19/19，以及 Null 样例300帧正常退出（State exit/Application shutdown 各1次）。本轮没有重跑
-Linux、GLFW、bgfx 或可见 Desktop 产品门禁；上一轮完整 D2
+MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过本轮 dirty-subtree b4a +
+M8-A/M8-B 的 Debug/Release 直接门禁：基础211/211、独立 UI 115/115、独立 Runtime→UI 60/60、
+UI→Render 12/12、Scene 19/19、RenderScene 11/11，以及 Null 与2D infrastructure 样例各300帧正常
+退出；2D样例同时验证每帧3个 Sprite、Render shutdown 恰好1次和资源归零。本轮还重新通过 Windows
+Debug GLFW专项26/26、Platform样例300帧、bgfx专项16/16，以及 Desktop样例连续3次各300帧。新增
+iconify 回归验证最小化时沿用最后有效 logical extent，同时保留 framebuffer `0x0` 的 suspended 语义。
+本轮没有重新截图，因此画面正确仍引用前序 D2 可见证据；Linux M8-B 与可见 Sprite 仍未复验。上一轮完整 D2
 Windows Debug/Release 证据仍为基础207/207、UI92/92、Runtime→UI53/53、UI→Render bridge12/12、
 bgfx专项16/16、Null样例300帧，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 可见 retained UI
 样例 Debug 1200帧与 Release 300帧；Release 输出 clean status ok。Debug D3D11 退出时
@@ -147,12 +154,15 @@ preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22
 ```powershell
 cmake --version
 cmake --preset windows-msvc-vnext
-cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_sample_null
+cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_scene_tests tina_render_scene_tests tina_sample_null tina_sample_2d_infrastructure
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_render_integration_tests.exe
+out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe
+out\build\windows-msvc-vnext\bin\Debug\tina_render_scene_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
+out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
 
 # 可选 GLFW + NullRender 平台切片
 cmake --preset windows-msvc-vnext-platform

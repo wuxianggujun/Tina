@@ -90,14 +90,20 @@ void FrameUpdateContext::requestExitAfterFrame() noexcept
     *m_exitRequested = true;
 }
 
-RenderSceneExtractionContext::RenderSceneExtractionContext(const FrameTiming& frameTiming) noexcept
-    : m_frameTiming(&frameTiming)
+RenderSceneExtractionContext::RenderSceneExtractionContext(
+    const FrameTiming& frameTiming, Render::RenderSceneWriter& renderSceneWriter) noexcept
+    : m_frameTiming(&frameTiming), m_renderSceneWriter(&renderSceneWriter)
 {
 }
 
 const FrameTiming& RenderSceneExtractionContext::frameTiming() const noexcept
 {
     return *m_frameTiming;
+}
+
+Render::RenderSceneWriter& RenderSceneExtractionContext::renderSceneWriter() noexcept
+{
+    return *m_renderSceneWriter;
 }
 
 UIUpdateContext::UIUpdateContext(const FrameTiming& frameTiming,

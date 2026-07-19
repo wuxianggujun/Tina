@@ -130,7 +130,7 @@ EngineHost::run(gameApplication)
 | `GameStateEnterContext` | 创建 World、`UIRootBuilder`、输入上下文、订阅和 State TaskGroup | commit 前发布 Task completion、激活半构造 State、修改旧 State、取得 RenderDevice |
 | `FixedUpdateContext` | 读取目标 tick 的 Simulation Action，提交 World command | UI/Window 操作、Frame Action、结构立即提交 |
 | `FrameUpdateContext` | 读取 Frame Action/Asset snapshot，提交 State command | 阻塞 IO、直接 push/pop、读取隐式 Simulation edge |
-| `RenderSceneExtractionContext` | 只读 World，向 `RenderSceneWriter` 写 Tina 描述 | 修改 World、创建 GPU 资源、保存 writer/span |
+| `RenderSceneExtractionContext` | 读取当前 extraction 所需的游戏快照（当前实现仅提供 `FrameTiming`）并向 phase-local `RenderSceneWriter` 写 Tina 描述 | 修改 World、创建 GPU 资源、保存 Context、writer 或 span；World/Asset snapshot 在后续 Scene/Asset integration 切片接入 |
 | `UIUpdateContext` | 通过绑定 root 的 `UITreeUpdater` 更新 retained model/style/action/dirty | 创建新 root、每帧重建 UIContext、直接生成 backend draw、访问 bgfx |
 | `GameStateExitContext` | TaskGroup 已 join 后读取退出原因并释放 State 自己的 RAII owner | 发起新 Task/Asset/State 请求、直接清 Runtime registry |
 | `GameShutdownContext` | 读取退出原因和最终诊断、释放游戏级注册 | 创建新 Window/Asset/Task |

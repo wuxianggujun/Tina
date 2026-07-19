@@ -112,11 +112,12 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
   Pointer listener 请求当前 window/pointer 的 button claim；producer 只发布帧末仍 held 的 primary
   Pointer Button，并以 Create 期双 PMR buffer 去重。Key/Gamepad/axis claim producer 仍未实现，
   continuous claim 的 Runtime consumer 上限64不泄漏到 game-facing Action Map；
-- World RenderScene 与 UI DisplayList 分别冻结，统一组合为 RenderFrame view；D0 已让
-  `RenderFrame` 携带 submit-call-local borrowed `primaryWindowUIDisplayList`，backend 只能在
-  `submitFrame()` 调用内消费/复制/编码并禁止保留；Runtime-private owning RenderFramePacket
-  继续作为后续目标，届时才持有 FrameArena/资源 lease/Atlas/surface pin/submit ticket 到 backend
-  completion；Renderer 不访问 EnTT；
+- World RenderScene 与 UI DisplayList 分别冻结，统一组合为 RenderFrame view；M8-B 已落地固定容量
+  `RenderSceneBuilder`、phase-local `RenderSceneWriter`、resolved Camera2D/Sprite2D input、稳定排序/裁剪/
+  pixel snap，以及 Runtime extraction 的 begin/commit/rollback。`RenderFrame` 携带 submit-call-local borrowed
+  `primaryWorldScene` 与 `primaryWindowUIDisplayList`，backend 只能在 `submitFrame()` 调用内消费/复制/编码并禁止
+  保留；Runtime-private owning RenderFramePacket 继续作为后续目标，届时才持有 FrameArena/资源
+  lease/Atlas/surface pin/submit ticket 到 backend completion；Renderer 不访问 EnTT；
 - Pass 固定从 Opaque3D、Sprite2D、UI、Present 起步；
 - Asset 使用弱 Handle、强 Lease、UploadTicket/retirement ledger，以及 IO → CPU Decode → Main
   Completion → GPU Upload 四段路径和三重预算；
@@ -132,8 +133,9 @@ entity slots、live registry、dense live index 与非递归 traversal/world scr
 `updateWorldTransforms()` 以两阶段 scratch 作为显式 publication barrier。`setParent()` 默认 KeepWorld、
 KeepLocal 必须显式指定；`destroyEntity()` 默认提升直接子节点，`destroySubtree()` 才递归删除。溢出、
 四元数异常和当前 TRS 无法表达的 shear 都返回诊断且不发布部分 snapshot。本轮暂不引入 EnTT/GLM，EnTT
-仍只能作为后续 component storage 的 PRIVATE 实现；阶段 command buffer、RenderScene、Camera/Sprite 和
-Runtime World capability 尚未接受为已实现能力。
+仍只能作为后续 component storage 的 PRIVATE 实现；阶段 command buffer、Scene-owned Camera/Sprite
+components、Asset 解析和 Runtime World capability 尚未接受为已实现能力。M8-B 的 RenderScene writer
+只接受 Scene/Asset integration 已解析的值，不向 extraction context 暴露 World。
 
 M7-C1b 已实现其中的 layout foundation：`UILayoutLength/UILayoutStyle/UIDirty`、固定容量 PMR
 style/dirty side array 与 dirty queue、非递归 Flex-lite Measure/Arrange、双缓冲 committed
@@ -298,7 +300,8 @@ Game SDK `setBoxPaint()` facade 与 Desktop 4-panel visible sample。
 后续独立切片已补 `PrimaryWindowUITreeUpdater::addRoutedPointerListener()`、root/subtree 原子注册、
 callback move 重入回滚与 EngineHost claim-before-ActionMapper 闭环；当前 b4a 又补上 clean-subtree
 Measure/Arrange reuse、prepared-input cache 与父约束/viewport/Collapsed/候选失败回退，Windows Debug/Release
-`tina_ui_tests` 均为115/115；本轮已重跑 Windows Release，Linux/bgfx/可见样例仍未重跑。
+`tina_ui_tests` 均为115/115；该 b4a 切片当时已重跑 Windows Release，未重跑 Linux/bgfx/可见样例。
+后续 M8-B 已另行复验 Windows Debug bgfx/desktop 生命周期，但没有新增截图或 Linux 结果。
 之后继续实现 Key/Gamepad/axis claims、focus/capture/widget、Button Keyboard/Gamepad activation、完整 dirty-range pruning、
 owning Runtime RenderFramePacket 与资源 pin，M7-D 实现 Label/Button/Modal + FreeType 文本/中文样例；
 M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。

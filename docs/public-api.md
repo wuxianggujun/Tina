@@ -57,8 +57,10 @@ Tina 不把所有可链接 header 都称为“用户 API”：
 Platform 生命周期订阅、Action Snapshot、最小 Phase Context，以及受限的 primary-window
 `PrimaryWindowUIRootBuilder`/`PrimaryWindowUITreeUpdater`。standalone `Tina::UI` 已实现 tree/layout/
 hit/route 与 SolidFill committed paint，`Tina::Render` 已实现后端无关 SolidQuad DisplayList，独立
-integration target 已闭合二者的坐标转换；D0 已把 primary-window DisplayList 作为 submit-call-local
-borrow 放入 `RenderFrame`，D1 已由私有 bgfx backend 消费 SolidQuad，D2 已让 Game SDK facade
+integration target 已闭合二者的坐标转换；M8-B 已把固定容量、后端无关的 Camera2D/Sprite2D
+`RenderSceneWriter` 接入 extraction callback，并把 committed view 作为 submit-call-local
+`RenderFrame::primaryWorldScene` 交给 backend。D0 已把 primary-window DisplayList 以相同 borrow 规则放入
+`RenderFrame`，D1 已由私有 bgfx backend 消费 SolidQuad，D2 已让 Game SDK facade
 暴露 `setBoxPaint()` 并跑通 Desktop 4-panel 可见样例；后续 Button default action 切片又暴露
 `setButtonAction()`/`clearButtonAction()`/`isButtonPressed()` 并接入 primary Pointer activation。当前仍没有
 owning frame packet、FramePin、Text/Glyph、Label 文本、Button Keyboard/Gamepad activation 或完整 Widget facade。表中
@@ -296,14 +298,15 @@ Context 是不可复制/移动、只在当前 callback 有效的 capability view
 | `GameStartupContext` / `GameStateEnterContext` | 只读 `EngineConfig` 与 callback-scope `PlatformEventSubscriptions` 注册门面 |
 | `FixedUpdateContext` | `FrameTiming`、`FixedUpdateTiming` 与目标 tick 的 `SimulationActionSnapshot` |
 | `FrameUpdateContext` | `FrameTiming`、当帧 `FrameActionSnapshot` 与 `requestExitAfterFrame()` |
-| `RenderSceneExtractionContext` / `UIUpdateContext` | 只读 `FrameTiming` |
+| `RenderSceneExtractionContext` | 只读 `FrameTiming` 与 phase-local `RenderSceneWriter` |
+| `UIUpdateContext` | 只读 `FrameTiming` 与已拥有 root 的 phase-scoped UI facade |
 | `GameStateExitContext` / `GameShutdownContext` | `RunStopCause` 与可选 Runtime failure |
 
 `runtimeFailure()` 返回 callback-only 的只读借用，只保证在当前 `onExit`/`onShutdown` 调用期间
 有效；回调可以复制稳定 code/message 供诊断，但不得保存 Error 指针或 Context。
 
-当前 Context 不提供 raw Platform Input、World、Asset、Task、UI writer 或 Render writer。完整垂直切片将按能力
-逐项扩展，下表是目标边界，不是当前 API：
+当前 Context 不提供 raw Platform Input、World、Asset 或 Task；M8-B 已提供 Render writer，M7 已提供
+root-scoped UI facade。完整垂直切片将继续按能力逐项扩展；下表同时标记当前能力与后续目标：
 
 | Context | 可访问能力 | 明确禁止 |
 | --- | --- | --- |
@@ -311,7 +314,7 @@ Context 是不可复制/移动、只在当前 callback 有效的 capability view
 | `GameStateEnterContext` | World、`PrimaryWindowUIRootBuilder`、Input Context、订阅、TaskGroup 的事务创建 | 裸 `UIContext*`、commit 前发布 Task completion、直接激活半成品、修改旧栈、backend 类型 |
 | `FixedUpdateContext` | fixed timing、Simulation Action、World query/command、当前 TaskGroup | Frame/UI Action、Window/RenderDevice、保存 Arena span |
 | `FrameUpdateContext` | 每 Render Frame 一次的 real/update delta、Frame Action、Asset snapshot、GameStateCommands | Simulation edge、直接 commit 状态、阻塞 IO |
-| `RenderSceneExtractionContext` | interpolation、只读 World、`RenderSceneWriter` | 修改 World、创建 GPU 资源、访问 bgfx |
+| `RenderSceneExtractionContext` | 当前：interpolation、`RenderSceneWriter`；后续：只读 World/Asset ready snapshot | 修改 World、创建 GPU 资源、访问 bgfx、保存 writer |
 | `UIUpdateContext` | 为已拥有 root 创建 phase-epoch-scoped `PrimaryWindowUITreeUpdater`、retained model/style/action/dirty | 创建新 root、跨 phase 保存 updater、每帧重建 UIContext、直接提交 Render/backend |
 | `GameStateExitContext` | TaskGroup 已 join 后读取退出原因；State 释放自己的 RAII owner | 创建新 Task/Asset/State、直接操作 Runtime registry |
 | `GameShutdownContext` | 最终退出原因和诊断、游戏级注销 | 创建新 Engine 工作 |
@@ -914,8 +917,26 @@ move 构造把 owner 转移到目标线程。`setParent()` 默认 `KeepWorld`，
 跨 World、stale generation、循环 reparent、非有限/溢出 Transform、不可由 TRS 表达的非均匀 scale+rotation
 组合返回 Scene domain 的结构化错误。层级编辑立即改变 owner-thread hierarchy，`updateWorldTransforms()`
 是显式的 phase-end publication barrier；失败不会发布部分 world snapshot。阶段 command buffer、generic
-component query、EnTT storage、Camera/Sprite 与 Runtime Phase Context capability 尚未进入本 API。公共头
+component query、EnTT storage、Scene-owned Camera/Sprite component 与 Runtime World capability 尚未进入本 API。公共头
 不包含 EnTT、GLM、GLFW 或 bgfx。
+
+## `RenderScene`：M8-B 已实现的提取边界
+
+`Tina::Render` 现提供 `RenderSceneCapacity`、move-only `RenderSceneBuilder`、phase-local
+`RenderSceneWriter`、`RenderSceneView`、`RenderCamera2DInput` 与 `RenderSprite2DInput`。Runtime 在每次
+`IGameState::extractRenderScene()` 前开启 builder transaction，把 writer 放入 Context；回调失败、异常或
+sticky writer error 会 rollback，只有 commit 成功的 view 才进入 `RenderFrame::primaryWorldScene`。
+
+writer 当前只接受已经解析的纯 Tina 值；`stableCameraKey`、`stableEntityKey` 与临时 M8 `spriteKey` 必须非零。
+Camera/Sprite 几何与 viewport 必须 finite，容量满或单帧多 Camera 返回 Render domain 的结构化错误。commit
+执行透明/隐藏剪枝、旋转 Sprite 的保守 Camera culling、Camera/Sprite pixel snap 与
+`sortingLayer -> orderInLayer -> stableEntityKey -> insertionOrder` 稳定顺序。`spriteKey` 会在 M10 由
+`FrameResourceRef` 替换；当前没有 AssetHandle 解析、Mesh/Tile packet 或 bgfx Sprite pass。
+
+`RenderSceneWriter` 及其引用只能在当前 extraction callback 内使用，禁止保存。`RenderSceneView` 借用 builder
+固定 storage；下一次 `beginFrame()`、rollback、replacement commit、builder move/析构都会使旧 view 失效。
+放入 `RenderFrame` 后的 view 只在当前 `IRenderDevice::submitFrame()` 调用内有效，backend 必须同步消费、复制
+或编码，不得保留 view、span 或元素指针。
 
 ## Handle、借用与 API 可见性
 
@@ -940,10 +961,12 @@ component query、EnTT storage、Camera/Sprite 与 Runtime Phase Context capabil
 | `Tina::Scene::EntityId` | M8-A 已实现 | Scene public / 后续 Game SDK | `Scene::World` registry generation + owner；slot 复用递增 generation | InvalidEntity/StaleEntity/WrongWorld |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |
 | `LocalTransform` / `WorldTransform` | M8-A 已实现 | Scene public | World-owned POD；pointer query 只在 owner thread、下一次对应 mutation、entity destroy 或 World 析构前有效；world publication 由 `updateWorldTransforms()` barrier 完成 | non-finite/overflow/zero quaternion/unsupported TRS composition |
+| `RenderSceneWriter` | M8-B 已实现 | Game SDK phase capability | 只在当前 `extractRenderScene()` callback 内有效；不可复制、不可保存 | invalid input/capacity/sticky transaction failure |
+| `RenderSceneView` | M8-B 已实现 | Render SPI | borrowed fixed builder storage；下一次 build/rollback/replacement/move/destruction 后失效；`RenderFrame` 中只到当前 submit 返回 | invalid transaction；backend 不得保留 borrow |
 | `AssetHandle<T>` | M10 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
 | `AssetLease<T>` | M10 目标 | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
 | Render typed handle | M7/M9 目标 | Engine Module SPI | RenderDevice registry 到 retire | invalid/stale/wrong device |
-| 最小 `RenderFrame` | M6-A + D0 已实现 | Engine Module SPI | 当前 submit 调用；包含 submit-call-local borrowed `primaryWindowUIDisplayList` | submit `Status`；backend 不得保留 borrowed UI view |
+| 最小 `RenderFrame` | M6-A + D0 + M8-B 已实现 | Engine Module SPI | 当前 submit 调用；包含 submit-call-local borrowed `primaryWindowUIDisplayList` 与 `primaryWorldScene` | submit `Status`；backend 不得保留 borrowed view |
 | `Render::UIDisplayListView` | SolidQuad DisplayList builder 已实现 | Engine Module SPI / integration output | borrowed 单缓冲 builder storage；下一次成功 `beginFrame()`、builder move 或析构后失效；已开启事务的 rollback 只清空该次候选 | CapacityExceeded/invalid input/transaction misuse |
 | `RenderFramePacket` | M7-B/C 目标、Runtime Private | Runtime Private | Runtime 固定容量 pool；backend completion 前 owning | PoolExhausted/submit failure |
 
@@ -1021,6 +1044,7 @@ EngineHost 顺序接线，M7-C1c-b3d1 只补齐容量配置与 Runtime-private l
 startup bind 与 root-scoped Game SDK UI facade；b3e 只补齐 held primary Pointer Button claim bridge。
 Button default action 只补齐 primary Pointer 窄 pressed/activation 与 retained action property。
 SolidFill paint、Render builder、integration bridge、D0 Runtime submit-call-local handoff、D1 bgfx pass 与
-D2 visible panels 也不扩大到完整 Widget、owning packet、Text/Glyph 或产品 UI 结论。Windows Debug/Release 本轮
-均通过基础208/208、Runtime→UI60/60与 Null 300帧；dirty-subtree b4a 的 UI 测试均为115/115
-（含6项 reuse/回退测试）。Linux GCC 与 Clang sanitizer 的 b3e 独立 Runtime→UI 门禁仍为46/46。
+D2 visible panels 也不扩大到完整 Widget、owning packet、Text/Glyph 或产品 UI 结论。当前 M8-B Windows
+Debug/Release 均通过基础211/211、Runtime→UI60/60、UI115/115、RenderScene11/11与两个300帧Null样例；
+dirty-subtree b4a 的 UI 数量包含6项 reuse/回退测试。Linux GCC 与 Clang sanitizer 的 b3e 独立
+Runtime→UI门禁仍为46/46。

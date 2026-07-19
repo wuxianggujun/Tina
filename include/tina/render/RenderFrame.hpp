@@ -2,6 +2,7 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/render/RenderSurface.hpp>
+#include <tina/render/RenderScene.hpp>
 #include <tina/render/UIDisplayList.hpp>
 
 #include <optional>
@@ -17,6 +18,9 @@ struct RenderFrame final {
     // retain the view, any span, or an element pointer after submitFrame()
     // returns.
     UIDisplayListView primaryWindowUIDisplayList{};
+    // World RenderScene follows the same submit-call-local borrow contract as
+    // the UI DisplayList. A backend must not retain it after submitFrame().
+    RenderSceneView primaryWorldScene{};
 };
 
 } // namespace Tina::Render

@@ -5,8 +5,9 @@
 > bridge 也已实现。D0 已把 primary-window UIDisplayList 作为 `RenderFrame` submit-call-local borrow
 > 接入 Runtime 正式 submit 路径。D1 已在私有 `tina_render_bgfx` 中实现 SolidQuad UI shader/pass，
 > D2 已通过 Game SDK `setBoxPaint()` 和 Desktop 4-panel 样例验证真实 D3D11 可见 UI、alpha blend 与
-> framebuffer scissor。Scene、Runtime packet、FramePin、资源型 UI 命令、Pass Scheduler 与
-> submission ticket/drain 仍后置。
+> framebuffer scissor。M8-B 又完成 backend-neutral Camera2D/Sprite2D RenderScene builder、Runtime
+> extraction transaction 与 `primaryWorldScene` handoff；bgfx Sprite pass、Scene component integration、
+> Runtime packet、FramePin、资源型 UI 命令、Pass Scheduler 与 submission ticket/drain 仍后置。
 > bgfx 是 Tina 的实现依赖，不是游戏开发 API。
 
 ## 当前 Legacy 事实
@@ -56,13 +57,13 @@ UIContext retained tree
   -> private bgfx SolidQuad UI pass                  [D1 已实现]
 
 RenderSceneView + UIDisplayListView + RenderSurfaceState + FrameTiming
-  -> RenderFrame view                                [D0 UI borrow + D1 bgfx consume 已接入]
+  -> RenderFrame view                                [M8-B world borrow + D0 UI borrow]
   -> future Runtime-owned RenderFramePacket          [未实现]
   -> Pass Scheduler / resource-backed UI commands    [未实现]
 ```
 
-当前 `RenderFrame` 表达 Runtime frame 编号、插值、可选 primary window surface，以及 D0 加入的
-primary-window UI DisplayList borrow：
+当前 `RenderFrame` 表达 Runtime frame 编号、插值、可选 primary window surface，以及 M8-B/D0 加入的
+submit-call-local world/UI borrowed views：
 
 ```cpp
 struct RenderFrame {
@@ -70,6 +71,7 @@ struct RenderFrame {
     double interpolation;
     std::optional<RenderSurfaceState> primaryWindowSurface;
     UIDisplayListView primaryWindowUIDisplayList;
+    RenderSceneView primaryWorldScene;
 };
 ```
 
@@ -80,9 +82,11 @@ content scale、sourceMetricsRevision、surfaceRevision 和 availability 等调�
 前进且 surface revision 精确 `+1`，错误输入不会污染上一份 committed state。后续
 `RenderFramePacket` 才会同时持有 owning `SurfaceLeasePin`。
 
-未来 Game-facing `RenderSceneWriter` 位于 Scene/Runtime integration，使用当帧 Asset ready snapshot 把
-AssetHandle 解析为 `FrameResourceRef`，再写 Camera、SpriteRenderItem、TileChunkRenderPacket、
-MeshRenderItem、Bounds 和 Material instance，不提取 UI。当前 UI 已能冻结 SolidFill committed paint，
+M8-B 已提供 Game-facing、phase-local `RenderSceneWriter`，接受 Scene/Asset integration 已解析的
+Camera2D/Sprite2D 值，执行固定容量写入、稳定 layer/order/entity/insertion 排序、旋转保守裁剪、透明/隐藏剪枝
+与 pixel snap；它不解析 AssetHandle，也不提取 UI。后续 Scene component 与当帧 Asset ready snapshot 才会把
+AssetHandle 解析为 `FrameResourceRef`，再写 SpriteRenderItem、TileChunkRenderPacket、MeshRenderItem、
+Bounds 和 Material instance。当前 UI 已能冻结 SolidFill committed paint，
 独立 integration 已能生成 borrowed `UIDisplayListView`；D0 的 Runtime-private
 `PrimaryWindowUIDisplayCoordinator` 在 layout/paint commit 后、Render submit 前为 primary window 构建
 该 list。
@@ -95,9 +99,9 @@ AssetHandle 或玩法 TileMap。
 后续 Null 与真实 Pass Scheduler 必须消费完全相同的 RenderFrame，bgfx adapter 仍只接收 RenderDevice
 resource/submit 调用，不直接理解 RenderScene、TileMap、Widget 或 AssetHandle。
 
-当前 `RenderFrame::primaryWindowUIDisplayList` 借用 Runtime-private fixed builder storage，只在
-`submitFrame()` 当前调用内有效；backend 必须同步消费/复制/编码，返回后禁止保留 view、span 或
-元素指针。builder 下一次 build attempt、move 或析构也会使旧 view 失效。未来 `RenderSceneView` 与
+当前 `RenderFrame::primaryWorldScene` 与 `primaryWindowUIDisplayList` 都借用 Runtime-private fixed builder
+storage，只在 `submitFrame()` 当前调用内有效；backend 必须同步消费/复制/编码，返回后禁止保留 view、span 或
+元素指针。对应 builder 下一次 build attempt、move 或析构也会使旧 view 失效。未来
 packet-owned UI view 只能在所属 packet 生命周期内有效，不能脱离 packet 保存裸 span。下列是后续目标，
 不是当前已实现类型。物理 owning target
 固定为 `tina_runtime`；`RenderFramePacket` 是 Runtime private 类型，不进入 Game SDK 或 Render

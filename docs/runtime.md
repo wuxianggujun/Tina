@@ -105,7 +105,9 @@ Null submit/present 后退出。M7-B1 已有 backend-neutral Native Surface hand
 `RenderSurfaceState` 和 Suspended 帧 `SkippedSuspendedSurface` 结果；Runtime 固定 source window identity，
 拒绝 metrics revision 回退、surface facts 在旧 metrics revision 上变化，以及 surface revision 跳号/回退。
 当前实现仍没有完整 GameStateStack/commands、CPU/IO worker、通用 Runtime Event Queue、
-Pass Scheduler/RenderFramePacket，也没有 Scene、Asset 或 Audio。Render 已完成私有 bgfx backend core、
+Pass Scheduler/RenderFramePacket、Scene component integration、Asset 或 Audio。M8-B 已完成独立
+RenderScene builder/writer 与 Runtime extraction transaction，但 Context 尚不提供 World/Asset snapshot，
+bgfx 也尚未消费 Sprite。Render 已完成私有 bgfx backend core、
 SolidQuad UI pass 与 Desktop visible smoke；UI 只完成 standalone `tina_ui` 树核心、route-result view ABI、事务式 Flex-lite layout、
 committed hit-snapshot 数据基础、point query/反向目标选择、synthetic Capture→Target→Bubble route，以及
 Runtime-private producer/primary Context 接线、Runtime-private 每帧 layout commit，以及 startup
@@ -213,7 +215,8 @@ committed snapshot，不隐式 layout。M7-C1c-b3d1 只在后续 `updateUI` phas
 continuous-control producer：Move/Wheel/Button route 都可请求接管最终仍 held 的 primary Pointer Button，
 且 consumption 与 claim 分开发布。D0 进一步在 layout/paint commit 后、Render submit 前构建
 primary-window UIDisplayList，并通过 `RenderFrame::primaryWindowUIDisplayList` 作为 submit-call-local
-borrow 交给 backend；backend 不得保留该 view、span 或元素指针。D1 的私有 bgfx backend 已消费
+borrow 交给 backend；M8-B 的 `RenderFrame::primaryWorldScene` 遵守同一 borrow 规则。backend 不得保留
+任一 view、span 或元素指针。D1 的私有 bgfx backend 已消费
 SolidQuad DisplayList，D2 的 Game SDK facade 已能 author SolidFill box paint。当前 Game SDK listener
 extension 只提供低层 routed callback/claim seam；Button default action 后续已在同一 producer 阶段落地。
 Key/Gamepad/axis claim、Focus/Capture/Modal、Text/Glyph、Button Keyboard/Gamepad activation 与完整
@@ -265,8 +268,8 @@ Platform lifecycle dispatch（当前 `PlatformEventDispatcher`）→ Runtime Eve
 Domain/async）→ Asset CPU Completion → Audio Completion → UI Input Routing → Gameplay Action Mapping → Fixed Loop（每个 tick 内部 barrier +
 command commit + transform propagation）→ Frame Update（variable delta）→ State Transition Commit →
 Render Scene Extraction → UI Model
-Commit/Layout/Paint Cache/Display List → GPU Upload Budget → Assemble immutable RenderFrame（D0 含
-submit-call-local primary-window UIDisplayList borrow） →
+Commit/Layout/Paint Cache/Display List → GPU Upload Budget → Assemble immutable RenderFrame（M8-B/D0 含
+submit-call-local World RenderScene 与 primary-window UIDisplayList borrow） →
 Render Pass → Present → Deferred Cleanup。
 
 Simulation 默认固定 60 Hz，每帧最多追赶4步；Render 使用可变帧率和 interpolation alpha。

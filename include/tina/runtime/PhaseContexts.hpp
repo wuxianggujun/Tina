@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/error/Error.hpp>
+#include <tina/render/RenderScene.hpp>
 #include <tina/runtime/EngineConfig.hpp>
 #include <tina/runtime/FrameTiming.hpp>
 #include <tina/runtime/InputActions.hpp>
@@ -113,11 +114,16 @@ class RenderSceneExtractionContext final {
     RenderSceneExtractionContext& operator=(RenderSceneExtractionContext&&) = delete;
 
     [[nodiscard]] const FrameTiming& frameTiming() const noexcept;
+    // The writer is valid only during this callback. It can add resolved
+    // Camera2D/Sprite2D items but cannot publish or resize the frame storage.
+    [[nodiscard]] Render::RenderSceneWriter& renderSceneWriter() noexcept;
 
   private:
-    explicit RenderSceneExtractionContext(const FrameTiming& frameTiming) noexcept;
+    RenderSceneExtractionContext(const FrameTiming& frameTiming,
+                                 Render::RenderSceneWriter& renderSceneWriter) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
+    Render::RenderSceneWriter* m_renderSceneWriter = nullptr;
 
     friend class Detail::EngineHostImplementation;
 };

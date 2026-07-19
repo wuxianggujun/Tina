@@ -2,6 +2,12 @@
 
 > 状态：vNext 候选冻结。本文定义正式 2D 产品路径，不把“显示一张 Sprite”当作完整验收。
 
+当前 M8-B 只完成后端无关 RenderScene extraction foundation：固定容量 writer 接受解析后的 Camera2D/
+Sprite2D 值，执行稳定排序、保守裁剪和 pixel snap，并由 Headless/Null
+`tina_sample_2d_infrastructure` 验证 300 帧 Runtime handoff。`tina_scene` 尚无 Camera/Sprite component
+storage，bgfx 尚无 Sprite pass，Asset/Cooker、world picking、TileMap、中文 UI overlay 与正式
+`tina_sample_2d` 均未完成。
+
 ## 范围与模块边界
 
 Tina 的通用 `tina_scene` 只认识 Entity、Transform、Orthographic Camera 和 Sprite render

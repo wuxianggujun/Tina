@@ -4,6 +4,7 @@
 #include <tina/core/time/FixedStepAccumulator.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/platform/Window.hpp>
+#include <tina/render/RenderScene.hpp>
 #include <tina/runtime/InputActionMap.hpp>
 #include <tina/runtime/PlatformEvents.hpp>
 #include <tina/ui/UIContextConfig.hpp>
@@ -31,6 +32,7 @@ struct EngineConfig final {
     Platform::PlatformFrameCapacityConfig platformFrameCapacities{};
     UI::UIContextCapacityConfig primaryWindowUICapacities{};
     PrimaryWindowUIDisplayListCapacityConfig primaryWindowUIDisplayListCapacities{};
+    Render::RenderSceneCapacity renderSceneCapacities{};
     InputActionMapConfig inputActions;
     PlatformEventSubscriptionConfig platformEventSubscriptions{};
     Core::FixedStepConfig fixedSimulation;

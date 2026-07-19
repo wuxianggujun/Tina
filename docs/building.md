@@ -55,17 +55,19 @@ M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2/C1c-b3e 的
 `tina_task`、`tina_render`、`tina_runtime`、`tina_scene`、`tina_ui`，以及最新 SolidFill paint、Render DisplayList、D2 scoped
 `setBoxPaint()` 与
 `tina_ui_render_integration`、
-直接 GoogleTest 门禁与 Null 样例：
+直接 GoogleTest 门禁与 Null/2D infrastructure 样例：
 
 ```powershell
 cmake --preset windows-msvc-vnext
-cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_scene_tests tina_sample_null
+cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_scene_tests tina_render_scene_tests tina_sample_null tina_sample_2d_infrastructure
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_render_integration_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Debug\tina_render_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
+out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
 ```
 
 ### M8-A Scene World/Transform
@@ -73,8 +75,9 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 `tina_scene_tests` 是独立 GoogleTest executable；当前 Windows MSVC Debug/Release 均19/19，覆盖固定容量
 `Scene::World`、generation/owner `EntityId`、Local/World Transform 层级传播、keep-world/keep-local、
 父销毁/显式子树销毁、PMR 回滚、宽/深树、overflow/shear、四元数与 owner-thread 读写。它当前只验证
-standalone Scene foundation；阶段末 command buffer、Camera2D、Sprite extraction、Asset 和 2D
-产品样例仍属于后续 M8/M10/M11 切片：
+standalone Scene foundation；阶段末 command buffer、Scene component integration、Asset 和正式 2D
+产品样例仍属于后续 M8/M10/M11 切片。M8-B 的 RenderScene builder 使用独立测试与 Headless/Null
+infrastructure sample，不代表可见 Sprite、bgfx Sprite pass 或正式产品门禁：
 
 ```powershell
 cmake --build --preset windows-vnext-debug --target tina_scene_tests
@@ -82,6 +85,10 @@ out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 
 cmake --build --preset windows-vnext-release --target tina_scene_tests
 out\build\windows-msvc-vnext\bin\Release\tina_scene_tests.exe --gtest_color=yes
+
+cmake --build --preset windows-vnext-debug --target tina_render_scene_tests
+out\build\windows-msvc-vnext\bin\Debug\tina_render_scene_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
 ```
 
 当前最小图的唯一第三方测试依赖是 `tests` manifest feature 提供的 GoogleTest 1.17.0；
@@ -240,16 +247,18 @@ Windows 构建会把 GLFW runtime DLL 复制到对应 `bin/<Config>`。样例默
 `bgfx::shaderc` 生成，不把 generated/cooked header 提交进源码。
 最新 Windows 门禁使用 Visual Studio 2026 / MSVC 19.50.35717 与 CMake 4.2.3。D2 的 Debug/Release
 均直接通过基础207/207、独立 UI92/92、独立 Runtime→UI53/53、UI→Render bridge12/12与Null样例300帧；
-本轮另重跑 bgfx专项16/16，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop`：Debug 1200帧截图检查，
-Release 300帧输出
+前序 D2 另通过真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop`：Debug 1200帧截图检查，Release 300帧输出
 `clean status ok`；Debug 退出时的 `RefCount is 3 (expected 0)` 是已记录第三方 debug layer 提示，
-不能单独作为 Tina 资源泄漏结论。GLFW专项25/25与 GLFW+Null样例300帧保留前序门禁，上一
+不能单独作为 Tina 资源泄漏结论。当前 M8-B Debug adapter 复验通过 GLFW专项26/26、
+GLFW+Null样例300帧、bgfx专项16/16与 Desktop样例连续3次各300帧；iconify 自动化验证最小化时
+沿用最后有效 logical extent，并保持 framebuffer `0x0` 让 surface 进入 Suspended。上一
 C1c-b3a WindowSurface GLFW样例1800帧仍作为历史证据。
 `TINA_BUILD_TESTING=OFF` 的 production-style GLFW样例300帧
 同样属于早期门禁，用来证明测试 target 关闭后样例仍能运行。
 当前 Desktop smoke 证明无纹理 SolidFill UI panel、alpha blend、right-edge scissor、root 回收和 bgfx surface
 创建/提交/关闭链路通过；不代表 Scene、Text/Glyph、完整 Widget、Pass Scheduler/submission ticket 已完成，
-也不宣称 resize、最小化、恢复的真实自动化通过。
+也不宣称 resize→render、restore 往返或完整交互自动化通过。本轮没有重新截图，画面正确仍引用前序
+D2 可见证据。
 
 ## Windows vNext Release
 

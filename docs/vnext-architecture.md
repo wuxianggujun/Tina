@@ -47,7 +47,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | `tina_platform_glfw` | 最终承载 GLFW Window/Input/Gamepad、DPI、Windows IMM32；当前已完成 Window/Keyboard/Pointer/Focus/resize/close/committed text | core/platform、GLFW、OS API | Scene、Asset、UI Widget、bgfx 类型 |
 | `tina_task` | 有界任务队列、协作取消、后台工作与主线程 completion | `tina_core`、`tina_platform` 的线程命名能力 | Asset 类型、渲染命令、强杀线程 |
 | `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、GameStateStack、RenderFramePacket/pool；当前含 M7-C1c-b3b/b3c/b3d1/b3d2/b3e private UI route producer、primary-window Context owner、容量/layout coordinator、startup seed、scoped Game SDK UI facade 与 held Pointer claim bridge | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
-| `tina_scene` | 当前 M8-A 的固定容量 World、generation `EntityId`、Local/World Transform、默认 keep-world/显式 keep-local、父销毁提升/显式子树销毁与两阶段 publication；后续扩展 Camera、render components 与资产解析 facade | 当前只依赖 core；后续 asset 公共接口、render descriptors，EnTT 仅 PRIVATE component storage | GLFW 输入、TileMap 玩法、bgfx 类型 |
+| `tina_scene` | 当前 M8-A 的固定容量 World、generation `EntityId`、Local/World Transform、默认 keep-world/显式 keep-local、父销毁提升/显式子树销毁与两阶段 publication；M8-B 的 resolved Camera/Sprite input 由 `tina_render` writer 消费，Scene-owned camera/render components 后置 | 当前只依赖 core；后续 asset 公共接口、render descriptors，EnTT 仅 PRIVATE component storage | GLFW 输入、TileMap 玩法、bgfx 类型 |
 | `tina_asset` | Asset 状态机、依赖、取消、CPU completion 与 GPU upload 协议 | core/task、render 接口、asset_format | 直接解析源 glTF、具体 bgfx 调用 |
 | `tina_asset_format` | Runtime/Cooker 共享的 Cooked header、schema、类型、依赖和 hash 编解码 | core | Asset registry、窗口、GPU、源格式 parser |
 | `tina_render` | typed handle、资源描述、RenderScene/DisplayList view、RenderSurfaceState、FramePinSink、Pass Scheduler | core | bgfx 公开类型、Scene registry、平台窗口细节、Asset/UI/Platform concrete pin |
@@ -205,7 +205,7 @@ translation unit 已私有构造 GLFW WindowSurface + clear-only bgfx factories�
 | `GameStateExitContext` | TaskGroup 已 join 后读取退出原因；State 释放自己的 RAII owner | 新建 Task/Asset/Window、重新激活自身、直接改 Runtime registry |
 | `FixedUpdateContext` | fixed timing、Simulation Action、World query/command、当前 TaskGroup | Frame/UI Action、Window/bgfx、保存 FrameArena span |
 | `FrameUpdateContext` | 每 Render Frame 一次的 real/unscaled delta、Frame Action、Asset query、状态切换请求 | Simulation edge、直接 commit 状态、阻塞 IO |
-| `RenderSceneExtractionContext` | interpolation、只读 World view、`RenderSceneWriter` | 修改 World、保存 writer/descriptor |
+| `RenderSceneExtractionContext` | 当前：interpolation 与 phase-local `RenderSceneWriter`；后续：只读 World/Asset ready snapshot | 修改 World、保存 writer/descriptor、创建 GPU 资源或访问 bgfx |
 | `UIUpdateContext` | 为已拥有 root 创建 phase-epoch-scoped `PrimaryWindowUITreeUpdater`、model/action/dirty 请求 | 创建新 root、跨 phase 保存 updater、每帧重建 UIContext、直接提交 bgfx |
 | `GameShutdownContext` | 只允许撤销游戏级注册和查询关闭诊断 | 创建新 Asset/Task/Window |
 
@@ -368,12 +368,14 @@ scale，再按默认250 ms上限得到 `acceptedRealDelta`，缩放为 `updateDe
 Platform、UI、Asset、Audio 和必要 Render 仍推进。最小化窗口跳过无效 surface 的 Render/
 Present 并使用平台等待避免 busy loop，但继续处理关闭和异步完成。
 
-## Scene 与 Render Scene Extraction（完整目标契约；M8-A standalone 例外）
+## Scene 与 Render Scene Extraction（完整目标契约；M8-A/M8-B foundation 例外）
 
 完整目标中，`World` 对外只暴露 Tina 的 `EntityId { owner, index, generation }`、组件命令和查询接口，EnTT
 registry 只存在于实现文件中。当前 M8-A standalone `World` 还没有阶段末 command buffer 或 component
 storage：层级 mutation 在 owner thread 立即校验/提交，`updateWorldTransforms()` 是两阶段 World snapshot
-publication barrier；Runtime 接线前不得把它描述成完整 Scene/Render extraction。
+publication barrier。M8-B 已把 resolved Camera2D/Sprite2D 写入 RenderScene 的 Runtime transaction 接通，
+但 `RenderSceneExtractionContext` 仍不暴露 World；在 Scene component、Asset ready snapshot、FrameResourceRef
+和可见 backend pass 接入前，不得把它描述成完整 Scene/Render 产品路径。
 
 统一空间约定：右手坐标系、Y-up、-Z forward、单位米，2D 位于 XY 平面。Transform 至少
 包含 `LocalTransform`、`Parent` 和缓存的 `WorldTransform`；完整 Runtime 接入后层级变更必须检测循环并通过
@@ -608,7 +610,7 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
    reuse 与父约束/viewport/Collapsed/候选失败回退。后续继续推进 Key/Gamepad/axis claims、
    focus/capture/widget、Button Keyboard/Gamepad activation、完整 dirty-range pruning、Label/Button/Modal +
    FreeType、owning Runtime packet/FramePin、IMM32/Gamepad/DPI 门禁；
-5. **Scene/2D**：M8-A 已完成 generation Entity、固定容量 World、Local/World Transform、循环诊断与非递归传播；后续补阶段末 command buffer、Camera、Sprite extraction 和 2D 样例；
+5. **Scene/2D**：M8-A 已完成 generation Entity、固定容量 World、Local/World Transform、循环诊断与非递归传播；M8-B 已完成后端无关 RenderScene extraction foundation 与 Headless/Null 2D infrastructure sample；后续补 Scene command buffer、Camera/Sprite component storage、Asset/Cooker、chunk culling、bgfx Sprite pass 和正式 2D 产品样例；
 6. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D
    样例；
 7. **Asset**：双阶段队列、Cooked Manifest、纹理和静态 glTF 从 cooker 进入 2D/3D；
@@ -651,8 +653,9 @@ vNext-only preset 设为 OFF；当新2D/UI/3D/Audio 覆盖门禁后先把默认�
 - GLFW X11 与 Wayland 使用独立 preset 和真实/隔离 display server 运行；configure/build 成功不等于
   窗口门禁通过，第三方 sanitizer 报告也必须完成归因或稳定抑制后才能标记最终通过；
 - NullRenderDevice 300帧 smoke 与10,000帧 lifecycle/benchmark；
-- M8 infrastructure：`tina_sample_2d_infrastructure` 使用内置 fixture 显示 Sprite、中文 Label 和
-  可交互 Button，只证明 Scene/2D/UI 接口；
+- M8 infrastructure：`tina_sample_2d_infrastructure` 使用纯 Tina fixture 在 Headless/Null 中记录 Camera2D、
+  3 个 Sprite、排序/裁剪/snap、Runtime handoff 和 300 帧资源回收；它不显示 Sprite，不包含中文 Label/Button、
+  world picking 或 UI overlay，只证明 RenderScene/Runtime CPU 边界；
 - UI 验证 Modal、Focus、Pointer Capture、TextEdit/IME、Checkbox 与 Slider；
 - M9 infrastructure：`tina_sample_3d_infrastructure` 使用 procedural Mesh 验证 Perspective、depth
   与资源释放；

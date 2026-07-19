@@ -178,7 +178,8 @@ Desktop bootstrap、D1 bgfx SolidQuad UI pass 与 D2 真实 GPU 可见 panel 冒
 构建、基础207/207、UI92/92、Runtime→UI53/53、UI→Render12/12、GLFW专项25/25、bgfx专项16/16、
 Null样例300帧，以及真实 D3D11 Intel Iris Xe Desktop样例 Debug 1200帧截图检查/Release 300帧；`TINA_BUILD_TESTING=OFF` 的 production-style
 GLFW样例300帧也已通过。后续 listener-only Windows Debug 增量门禁为基础208/208、UI95/95、
-Runtime→UI55/55与Null样例300帧；本轮没有重跑 Release、GLFW、bgfx 或可见 Desktop，因此上一组仍是完整产品证据。
+Runtime→UI55/55与Null样例300帧；该 listener-only 切片当时没有重跑 Release、GLFW、bgfx 或可见 Desktop，
+因此上一组仍是其完整产品证据。
 Game SDK/public header 无 bgfx、GLFW 或 native 泄漏。Linux M7-B1 门禁已在 GCC 13.4 X11、Clang 22.1.8 X11 sanitizer、
 GCC 13 与 Clang 22 X11/Wayland 双后端通过基础183/183、GLFW专项22/22和300帧样例；
 Clang 基础测试无 suppression，Wayland匹配0，X11仅精确抑制 `_XimOpenIM` 的第三方 retention。
@@ -323,14 +324,14 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   right-edge scissor，Release 300帧 clean；
   D0/D1/D2 综合门禁中 bgfx专项16/16与 D3D11 Intel Iris Xe Desktop 样例通过，Release clean；
   Debug `RefCount is 3 (expected 0)` 为已记录第三方 debug layer 提示；
-- **最新增量门禁**：本轮 Windows MSVC 19.50 / CMake 4.2.3 Debug 直接通过基础208/208、UI95/95、
-  Runtime→UI55/55与Null样例300帧；Release/Linux/bgfx/可见样例未在本轮重跑，继续沿用并明确标记前序证据；
+- **listener extension 历史增量门禁**：该切片的 Windows MSVC 19.50 / CMake 4.2.3 Debug 直接通过
+  基础208/208、UI95/95、Runtime→UI55/55与Null样例300帧；它不是当前 M8-B 测试数量；
 - **已完成 Button default action 切片**：Button 默认 `Targetable`；只实现
   `PrimaryPointerId + PointerButton::Primary` 的 Down armed/pressed、Move inside 更新、Up-inside 一次
   activation、`preventDefaultAction()`、retained `set/clearButtonAction()`、pressed query，以及非
   gamepad-only cancel/覆盖窗口 reset 的无 action 清理。action 使用48字节 fixed-inline callback、固定容量
-  slot pool、一个预分配 transaction slot 与 route registration serial；Windows Debug 已通过基础208/208、
-  UI109/109、Runtime→UI60/60与 Null 300帧；
+  slot pool、一个预分配 transaction slot 与 route registration serial；该历史切片的 Windows Debug
+  通过基础208/208、UI109/109、Runtime→UI60/60与 Null 300帧；
 - **已完成 M7-C1c-b4a**：新增固定容量 layout work bits 与 prepared-input cache，changed frame
   只对需要 Measure/Arrange 的节点进入对应调度，clean sibling/subtree 复用既有几何结果；Auto 祖先、
   Collapsed 子树、父约束/viewport 变化和 layout/paint candidate 失败均有 full-rebuild 回退与回归测试。
@@ -375,14 +376,25 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 层级编辑在 owner thread 立即校验/提交，`updateWorldTransforms()` 是显式 world-transform barrier；
 阶段末 command buffer 仍是后续切片，不把本轮 API 误写成完整 State/World command pipeline。
 
-- EnTT 只作为内部 component storage，公共接口只暴露 generation `EntityId`；
-- 完整阶段末 command commit、Camera2D、Sprite extraction 与 chunk culling 仍待后续 M8 切片；
-- 建立 Camera2D、SpriteRenderer2D、稳定 layer/order、只读 Render Scene Extraction 和 chunk culling
-  接口；基础样例使用内置 Cooked Sprite fixture；
+- **M8-B RenderScene extraction foundation 已完成：** `tina_render` 提供固定容量
+  `RenderSceneBuilder`/phase-local `RenderSceneWriter`，接受已解析 Camera2D/Sprite2D 值，执行输入校验、透明/
+  隐藏剪枝、旋转保守裁剪、pixel snap、稳定 layer/order/entity/insertion 排序和统计 checksum；Runtime
+  在 extraction 前后执行 begin/commit/rollback，并将 borrowed `primaryWorldScene` 放入 `RenderFrame`。
+  独立 `tina_render_scene_tests` 与 Headless/Null `tina_sample_2d_infrastructure --frames=300` 验证固定容量、
+  Runtime handoff 和退出回收；
+- **M8-B 当前 Windows 门禁：** Debug/Release Null 图通过基础211/211、UI115/115、Runtime→UI60/60、
+  UI→Render12/12、Scene19/19、RenderScene11/11，以及 Null/2D infrastructure样例各300帧；Debug adapter
+  复验通过 GLFW26/26、Platform样例300帧、bgfx16/16与Desktop连续3次各300帧。iconify 回归保持正 logical
+  extent 与 framebuffer `0x0` suspended 语义；本轮没有重新截图或运行 Linux M8-B；
+- EnTT 只作为内部 component storage，公共接口只暴露 generation `EntityId`；Scene component command commit、
+  Camera/Sprite component storage、chunk culling、AssetHandle/FrameResourceRef 解析、bgfx Sprite pass 与可见
+  Sprite 仍待后续切片；
+- 基础样例当前是 CPU/Null recording infrastructure，不显示 Sprite、不包含中文 Label/Button、world picking、
+  TileMap 或 UI overlay；正式 `tina_sample_2d` 继续由最终 Catalog/Manifest 产品门禁承担；
 - 定义 TileMap 为 gameplay feature、`IGridCollisionProvider` 和 Tile AABB/Box2D 分工；正式
   TileMap 产品路径在 M10/M11 接入 Cooked 资产并验收；
-- 2D infrastructure 样例显示 Sprite、中文 Label/Button，验证 fixed-step、插值、world picking、
-  UI 输入不穿透和资源释放；
+- 正式可见2D产品样例后续显示Sprite与中文Label/Button，并验证fixed-step、插值、world picking、
+  UI输入不穿透和资源释放；当前Headless/Null infrastructure样例不承担这些可见产品门禁；
 - World 不依赖 GLFW 输入、具体 TileMap 或 bgfx。
 
 ## M9 Render 与 3D 垂直切片

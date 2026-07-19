@@ -22,5 +22,13 @@ inline constexpr Core::ErrorCode DisplayListCapacityExceeded{Core::ErrorDomain::
 inline constexpr Core::ErrorCode InvalidPremultipliedColor{Core::ErrorDomain::Render, 16};
 inline constexpr Core::ErrorCode InvalidDrawCommand{Core::ErrorDomain::Render, 17};
 inline constexpr Core::ErrorCode TransientBufferCapacityExceeded{Core::ErrorDomain::Render, 18};
+inline constexpr Core::ErrorCode InvalidRenderSceneCapacity{Core::ErrorDomain::Render, 19};
+inline constexpr Core::ErrorCode RenderSceneStorageAllocationFailed{Core::ErrorDomain::Render, 20};
+inline constexpr Core::ErrorCode RenderSceneBuildAlreadyOpen{Core::ErrorDomain::Render, 21};
+inline constexpr Core::ErrorCode RenderSceneBuildNotOpen{Core::ErrorDomain::Render, 22};
+inline constexpr Core::ErrorCode RenderSceneCapacityExceeded{Core::ErrorDomain::Render, 23};
+inline constexpr Core::ErrorCode InvalidRenderSceneInput{Core::ErrorDomain::Render, 24};
+inline constexpr Core::ErrorCode RenderSceneCameraConflict{Core::ErrorDomain::Render, 25};
+inline constexpr Core::ErrorCode RenderSceneMissingCamera{Core::ErrorDomain::Render, 26};
 
 } // namespace Tina::Render::RenderErrorCode
