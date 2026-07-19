@@ -117,11 +117,15 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
   pixel snap，以及 Runtime extraction 的 begin/commit/rollback。M9-A 在同一 builder 上补齐
   Perspective/Mesh3D extraction、当前 PlatformFrame aspect 注入、球体 frustum culling、稳定排序和相邻
   instance batch finalize；`tina_sample_3d_extraction` 只证明 CPU/Null 边界，不证明可见 bgfx 3D。
+  M9-B/M9-C 当前分别只把 Opaque3D 与 Sprite2D 的内置 fixture 子集接入私有 bgfx backend；M9-C 固定
+  View 0 clear、1 Opaque3D、2 Sprite2D、3 UI 只是 fixture view 编号，不是 Pass Scheduler，也不代表
+  Asset/Texture/Sprite 产品路径、正式 `tina_sample_2d`、TileMap、Box2D、中文文本或 M10 已完成。
   `RenderFrame` 携带 submit-call-local borrowed
   `primaryWorldScene` 与 `primaryWindowUIDisplayList`，backend 只能在 `submitFrame()` 调用内消费/复制/编码并禁止
   保留；Runtime-private owning RenderFramePacket 继续作为后续目标，届时才持有 FrameArena/资源
   lease/Atlas/surface pin/submit ticket 到 backend completion；Renderer 不访问 EnTT；
-- Pass 固定从 Opaque3D、Sprite2D、UI、Present 起步；
+- 目标 Pass 从 Opaque3D、Sprite2D、UI、Present 起步；当前 M9-C 的固定 bgfx View 顺序不能写成已完成
+  Pass Scheduler；
 - Asset 使用弱 Handle、强 Lease、UploadTicket/retirement ledger，以及 IO → CPU Decode → Main
   Completion → GPU Upload 四段路径和三重预算；
 - Runtime 只读取 Cooked Asset，Cooker 先验证产物再原子写；
@@ -214,6 +218,7 @@ Keyboard/Gamepad activation、Image/Texture 或完整 Widget UI。
   Product 2D/UI/Audio → Legacy 删除；
 - M7–M9 只使用版本化内置 Cooked fixture/procedural geometry；M7 已分片建立私有最小 bgfx UI Pass
   与 SolidFill 可见样例，M9-A 先完成 backend-neutral 3D extraction，M9-B 再接入私有 procedural Cube/depth，
+  M9-C 再接入私有 Sprite2D fixture pass 与 `tina_sample_2d_infrastructure_bgfx`，
   禁止 UI 临时调用 Legacy renderer；
 - 每批都有代码、直接 GoogleTest、对应可运行样例、资源回收证据、UTF-8 文档和独立提交；
 - `tina_bench` Release 直接运行，普通 CI 不用不稳定的绝对微秒阈值；
@@ -314,4 +319,8 @@ M9-A 已完成 RenderScene 的 3D CPU/Null extraction foundation：Perspective C
 当前帧 aspect、包围球裁剪、稳定排序和 instance batch finalize；该切片不创建 bgfx Buffer/Shader/Pipeline，
 不显示 Cube。M9-B 当前最小实现已建立私有 canonical `P3_N3_UV2` Cube、Opaque depth pass、真实
 transient instance buffer、Opaque3D 后覆盖的 retained UI 与可见300帧样例；它仍仅接受 fixture key，
-不代表通用 Mesh/Material/Pipeline 或正式3D产品路径。M10 仍负责 Cooked glTF/Manifest 产品路径。
+不代表通用 Mesh/Material/Pipeline 或正式3D产品路径。M9-C 又建立私有 Sprite2D fixture pass、固定
+View 0/1/2/3 顺序和 `tina_sample_2d_infrastructure_bgfx` 2D/UI 300帧样例；Debug/Release
+`tina_render_bgfx_tests` 均43/43，两配置样例均为5个 Sprite、2个 UI panel且资源账本平衡，Debug 截图确认旋转、透明、
+flip 与 UI overlay。它仍是 fixture/infrastructure，不代表 Asset/Texture/Sprite 产品路径、正式
+`tina_sample_2d`、TileMap、Box2D、中文文本或 M10。M10 仍负责 Cooked glTF/Manifest 和正式资产产品路径。

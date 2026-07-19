@@ -28,6 +28,10 @@ if(TINA_BUILD_RENDER_BGFX)
         bgfx/BgfxOpaque3DGeometry.hpp
         bgfx/BgfxOpaque3DShader.cpp
         bgfx/BgfxOpaque3DShader.hpp
+        bgfx/BgfxSprite2DGeometry.cpp
+        bgfx/BgfxSprite2DGeometry.hpp
+        bgfx/BgfxSprite2DShader.cpp
+        bgfx/BgfxSprite2DShader.hpp
         bgfx/BgfxSurfaceFramePlanner.cpp
         bgfx/BgfxSurfaceFramePlanner.hpp
         bgfx/BgfxTransientFrameBudget.cpp
@@ -72,5 +76,12 @@ if(TINA_BUILD_RENDER_BGFX)
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_opaque3d_unlit.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_opaque3d_unlit.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_unlit.def.sc"
+    )
+    tina_add_bgfx_embedded_shader(
+        tina_render_bgfx
+        tina_sprite2d_fixture
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_sprite2d_fixture.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_sprite2d_fixture.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_sprite2d_fixture.def.sc"
     )
 endif()

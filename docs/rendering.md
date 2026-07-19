@@ -9,10 +9,13 @@
 > extraction transaction 与 `primaryWorldScene` handoff；M9-A 在同一 builder 上完成 Perspective/Mesh3D
 > CPU/Null extraction、当前帧 aspect、球体裁剪、稳定排序和 instance batch finalize。M9-B 当前最小实现
 > 在私有 `tina_render_bgfx` 中消费该 Mesh3D view 的最小 fixture 子集：canonical `P3_N3_UV2`
-> procedural Cube、Unlit shader、全 surface clear View 0、depth-tested Opaque3D View 1、UI View 2，以及 transient instance
-> buffer。它仍只接受内置 fixture key，不是通用 Mesh/Asset/Material/PBR 路径；bgfx Sprite pass、
-> Scene component integration、Runtime packet、FramePin、资源型 UI 命令、Pass Scheduler 与
-> submission ticket/drain 仍后置。
+> procedural Cube、Unlit shader 与 transient instance buffer。M9-C 又在同一私有 backend 中消费
+> Sprite2D fixture 子集：只接受 `spriteKey=1`，写入 transient P2/UV2/ABGR 四边形，并跑通
+> `tina_sample_2d_infrastructure_bgfx` 300帧。当前固定 View 0 clear、1 Opaque3D、2 Sprite2D、3 UI
+> 只是 fixture view 编号，不是 Pass Scheduler。它仍只接受内置 fixture key，不是通用
+> Mesh/Asset/Material/PBR 或 Asset/Texture/Sprite 产品路径；Scene component integration、正式
+> `tina_sample_2d`、TileMap、Box2D、中文文本、Runtime packet、FramePin、资源型 UI 命令、
+> Pass Scheduler 与 submission ticket/drain 仍后置。
 > bgfx 是 Tina 的实现依赖，不是游戏开发 API。
 
 ## 当前 Legacy 事实
@@ -102,10 +105,11 @@ geometry 并提交到专用 UI view；D2 Desktop 样例通过 Game SDK paint fac
 后续 `tina_render` 的低层 writer 只接受已解析的 FrameResourceRef/packet，不依赖
 AssetHandle 或玩法 TileMap。
 
-当前 Runtime 在 Render Pass 前组装并直接提交一次 `RenderFrame`；M9-B 的私有 bgfx backend 会在
+当前 Runtime 在 Render Pass 前组装并直接提交一次 `RenderFrame`；M9-B/M9-C 的私有 bgfx backend 会在
 同一次 `submitFrame()` 内同步读取 `primaryWorldScene` 的 Perspective/Mesh3D borrowed view，并且只接受
-`meshKey=1`、`materialKey=1`、`submeshIndex=0` 的 procedural Cube fixture。它没有引入通用
-RenderDevice typed handle、AssetHandle 解析、Material/Pipeline cache 或 Pass Scheduler。后续 Null 与真实
+`meshKey=1`、`materialKey=1`、`submeshIndex=0` 的 procedural Cube fixture；M9-C 同时同步读取
+Camera2D/Sprite2D borrowed view，并且只接受 `spriteKey=1` 的 procedural Sprite fixture。它没有引入通用
+RenderDevice typed handle、AssetHandle 解析、Texture/Sprite/Mesh/Material/Pipeline cache 或 Pass Scheduler。后续 Null 与真实
 Pass Scheduler 必须消费完全相同的 RenderFrame，bgfx adapter 仍只接收 RenderDevice resource/submit
 调用，不直接理解 Scene component、TileMap、Widget 或 AssetHandle。
 
@@ -268,10 +272,11 @@ struct SurfaceAttachmentOps {
 ```
 
 UI-only 和不使用 depth 的 Sprite2D view 令 `depth = std::nullopt`，不得创建隐式 depth resource。
-Initial clear 只作用于实际声明的 attachment；M9-B 当前私有 Opaque3D path 用全 surface View 0
+Initial clear 只作用于实际声明的 attachment；M9-C 当前私有 fixture path 用全 surface View 0
 唯一执行 color+depth clear（depth clear 1.0），View 1 固定为 `Opaque3D` 并启用 depth write 与
-`Less` test，View 2 固定为 UI 且不重复 clear。独立 clear view 让 Camera 子 viewport 外也得到确定性
-清理；纯 UI 帧同样先执行一次 View 0 clear。M9-A 的
+`Less` test，View 2 固定为 Sprite2D 且不重复 clear/depth，View 3 固定为 UI 且不重复 clear。独立 clear
+view 让 Camera 子 viewport 外也得到确定性清理；纯 UI 帧同样先执行一次 View 0 clear。该固定编号不是
+Pass Scheduler。M9-A 的
 CPU/Null extraction 不创建 attachment。对应 Null/backend 测试必须证明 UI-only/2D-only packet 的
 depth allocation count 为0。
 
@@ -368,8 +373,13 @@ Opaque3D instance 与 UI vertex 共用 bgfx transient vertex pool，因此 backe
 
 D1 的5项私有几何测试覆盖空 list、两个 SolidQuad 的顶点/索引/ABGR、容量失败不写入、非法命令预检和
 连续300次复用 caller-owned storage；该 D1 里程碑的 Windows `tina_render_bgfx_tests` 为16/16。
-当前 M9-B 另增加8项 Opaque3D geometry/instance 测试和6项联合 transient budget 测试，Windows
-Debug/Release 完整 `tina_render_bgfx_tests` 均为30/30。
+M9-B 另增加8项 Opaque3D geometry/instance 测试和6项联合 transient budget 测试，Windows
+Debug/Release 完整 `tina_render_bgfx_tests` 均为30/30。M9-C 当前再增加 Sprite2D fixture 几何与
+Sprite2D/UI transient index budget 覆盖，Windows Debug/Release 完整 `tina_render_bgfx_tests` 均为43/43。
+两配置的 `tina_sample_2d_infrastructure_bgfx` 均运行300帧并通过，记录5个 Sprite、2个 UI panel、UI root 释放和
+`renderResourceLedgerBalanced=true`；截图确认 Sprite 旋转、透明、flip 与 UI overlay。该结果只证明
+fixture/infrastructure，不证明 Asset/Texture/Sprite 产品路径、正式 `tina_sample_2d`、TileMap、Box2D、
+中文文本或 M10。
 D2 Desktop 样例用 Game SDK `setBoxPaint()` 创建4个 retained SolidFill panel，1280×720截图像素验证：
 background RGB(9,24,40)、blue(28,92,148)、cyan-over-blue(29,186,167)、cyan-over-background(26,176,152)，
 右侧 clip 边界 x=1140 为 background、x=1160 与 x=1279 为 pink(239,88,122)。该证据证明最小可见
@@ -440,8 +450,10 @@ M7 的最小可见 UI 已覆盖 Game SDK `setBoxPaint()`、SolidFill panel、私
 scissor；完整 UI 仍需要 Widget 默认行为、Label/Button 文本路径、Glyph Atlas、Focus/Capture/Modal、
 Semantics 和资源型 DisplayList。owning Runtime packet 与 FramePin 仍服务于后续含资源 DisplayList 生命周期。
 M9-A 已扩展 backend-neutral Perspective/Mesh3D extraction；M9-B 当前只把该 view 的私有 fixture 子集接到
-bgfx Opaque3D/depth/canonical Cube/Unlit shader 和 transient instancing。两者都不能让 UI 或游戏直接调用
-Legacy renderer/bgfx，也不能写成通用 Mesh/Asset/Material/PBR 能力。
+bgfx Opaque3D/depth/canonical Cube/Unlit shader 和 transient instancing。M9-C 只把 Camera2D/Sprite2D
+fixture 子集接到 bgfx Sprite2D/P2UV2ABGR/transient geometry，并用 2D/UI fixture 样例证明可见性。三者都不能让
+UI 或游戏直接调用 Legacy renderer/bgfx，也不能写成通用 Mesh/Asset/Material/PBR、Asset/Texture/Sprite
+产品路径或正式 2D 产品能力。
 
 在完整 Asset/Cooker 于 M10 接入前，M7–M9 只允许使用版本化、确定性的内置 Cooked fixture 或
 procedural geometry。禁止恢复 Runtime 路径加载，也禁止游戏自行创建 bgfx resource。
@@ -449,8 +461,8 @@ procedural geometry。禁止恢复 Runtime 路径加载，也禁止游戏自行�
 验收分开记录：
 
 - 当前 Legacy：`Tina --smoke-*` 只证明旧路径仍可运行；
-- vNext infrastructure：Null、Platform、Desktop SolidQuad GPU、UI/2D、M9-A 3D CPU extraction 与
-  M9-B 3D GPU 独立 sample 分别验证接口和生命周期；
+- vNext infrastructure：Null、Platform、Desktop SolidQuad GPU、UI/2D、M9-A 3D CPU extraction、
+  M9-B 3D GPU fixture sample 与 M9-C 2D/UI GPU fixture sample 分别验证接口和生命周期；
 - vNext product：Cooked TileMap 2D 与 Cooked glTF/Material/Prefab 3D 才计入 Legacy 删除门禁；
 - 进程返回码、结构化资源计数、性能数据和实际截图是四类不同证据。
 

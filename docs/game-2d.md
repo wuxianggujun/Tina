@@ -2,11 +2,13 @@
 
 > 状态：vNext 候选冻结。本文定义正式 2D 产品路径，不把“显示一张 Sprite”当作完整验收。
 
-当前 M8-B 只完成后端无关 RenderScene extraction foundation：固定容量 writer 接受解析后的 Camera2D/
+当前 M8-B 完成后端无关 RenderScene extraction foundation：固定容量 writer 接受解析后的 Camera2D/
 Sprite2D 值，执行稳定排序、保守裁剪和 pixel snap，并由 Headless/Null
-`tina_sample_2d_infrastructure` 验证 300 帧 Runtime handoff。`tina_scene` 尚无 Camera/Sprite component
-storage，bgfx 尚无 Sprite pass，Asset/Cooker、world picking、TileMap、中文 UI overlay 与正式
-`tina_sample_2d` 均未完成。
+`tina_sample_2d_infrastructure` 验证 300 帧 Runtime handoff。M9-C 又完成私有 bgfx Sprite2D fixture
+pass；Windows Debug/Release 的 `tina_sample_2d_infrastructure_bgfx` 均运行300帧：5个 fixture Sprite、2个 retained UI panel、
+资源账本平衡，截图确认旋转、透明、flip 与 UI overlay。它仍是 fixture/infrastructure，不是
+Asset/Texture/Sprite 产品路径，也不代表 `tina_scene` 已有 Camera/Sprite component storage、world picking、
+TileMap、Box2D、中文文本或正式 `tina_sample_2d`。
 
 ## 范围与模块边界
 
@@ -124,6 +126,10 @@ struct SpriteRenderer2D {
 时的 pixels-per-meter。未设置对应 override flag 时，size 由像素 rect / pixels-per-meter 推导，
 pivot 使用资产默认值；设置后才读取 component override。所有值必须 finite，size 必须为正。
 Atlas 是提高批处理效率的资产组织方式，不改变组件 API。
+
+M9-C 当前可见 Sprite 只使用内置 `spriteKey=1` fixture，并由私有 bgfx backend 直接生成 transient
+P2/UV2/ABGR geometry；它不解析 `SpriteAsset`、`Texture2DAsset`、Atlas、Cooked Catalog 或 Manifest。
+因此它只能作为基础设施样例和 adapter 测试证据，不能写入正式 2D 产品验收。
 
 Cook profile 定义唯一 `canonical2DPixelsPerMeter`，记录进 Catalog 和每个未显式指定世界尺寸的
 SpriteAsset。`PixelPerfect2D::referencePixelsPerMeter` 必须与当前 Catalog 的 canonical 值一致；
@@ -245,7 +251,7 @@ Tina-owned 稳态动态分配增量必须为0。
 
 ## 正式 2D 验收
 
-`tina_sample_2d` 不能只显示一张 Sprite。Legacy 删除前必须验证：
+`tina_sample_2d` 不能只显示一张 Sprite，也不能由 M9-C 的 fixture Sprite 样例替代。Legacy 删除前必须验证：
 
 - 通过最终 Cooker/Catalog/Manifest pipeline 加载 Texture、Sprite、Tileset 和 TileMap；固定
   Cooked fixture 只允许 infrastructure sample/module test 使用；

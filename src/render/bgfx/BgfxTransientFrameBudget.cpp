@@ -56,4 +56,22 @@ Core::Result<u32> checkedTransientVertexBudget(std::span<const BgfxTransientVert
     return static_cast<u32>(totalBudget);
 }
 
+Core::Result<u32> checkedTransientIndexBudget(std::span<const u32> indexCounts)
+{
+    constexpr u64 MaxU32 = static_cast<u64>((std::numeric_limits<u32>::max)());
+    u64 totalBudget = 0U;
+
+    for (const u32 indexCount : indexCounts)
+    {
+        totalBudget += static_cast<u64>(indexCount);
+        if (totalBudget > MaxU32)
+        {
+            return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                 "Transient index request budget exceeds the u32 range");
+        }
+    }
+
+    return static_cast<u32>(totalBudget);
+}
+
 } // namespace Tina::Render::Bgfx

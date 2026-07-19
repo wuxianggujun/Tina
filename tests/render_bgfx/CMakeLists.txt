@@ -1,6 +1,7 @@
 add_executable(tina_render_bgfx_tests
     BgfxOpaque3DGeometryTests.cpp
     BgfxRenderDeviceFactoryTests.cpp
+    BgfxSprite2DGeometryTests.cpp
     BgfxSurfaceFramePlannerTests.cpp
     BgfxTransientFrameBudgetTests.cpp
     BgfxUIDisplayGeometryTests.cpp

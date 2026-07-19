@@ -98,20 +98,23 @@ FramePin、production Gamepad、Windows IMM32 composition、Pass Scheduler、sub
 shear。M8-B 在此基础上新增固定容量、后端无关的 `RenderSceneBuilder`、只在
 `extractRenderScene()` 回调内有效的 `RenderSceneWriter`、解析后的 Camera2D/Sprite2D 输入、稳定 layer/order
 排序、保守裁剪、pixel snap、Runtime `RenderFrame` handoff，以及 `tina_sample_2d_infrastructure` Headless/Null
-记录样例。本切片不链接 EnTT/GLM，也不实现 Scene component command buffer、Asset/Cooker、bgfx Sprite pass、
-可见 Sprite、world picking 或正式 2D/UI 产品门禁；这些仍按后续切片推进。
+记录样例。本切片不链接 EnTT/GLM，也不实现 Scene component command buffer、Asset/Cooker、可见 bgfx
+fixture、world picking 或正式 2D/UI 产品门禁；M9-C 只补齐私有 Sprite2D fixture，可见产品路径仍按
+后续切片推进。
 
 M9-A 在同一 builder 上新增后端无关的 Perspective Camera 与 Mesh3D extraction：右手 Y-up、`-Z forward`、
 正 scale 的世界包围球、球体 frustum culling、稳定 material/mesh/submesh/double-sided/depth/entity 顺序，
 以及相邻兼容项的 instance batch finalize。Runtime 每帧从当前 primary `PlatformFrame` 注入 framebuffer aspect；
 framebuffer 为 `0x0` 时回退到正的 logical extent。新增 `tina_sample_3d_extraction` 只验证 CPU/Headless/Null
-边界，不显示 GPU Cube，也不能替代正式 3D 产品门禁。M9-B 当前最小实现已在私有 `tina_render_bgfx`
+边界，不显示 GPU Cube，也不能替代正式 3D 产品门禁。M9-B 已在私有 `tina_render_bgfx`
 接入 fixture 级 Opaque3D：只接受 `meshKey=1/materialKey=1/submeshIndex=0`，用 canonical
-`P3_N3_UV2` procedural Cube、Unlit shader、全 surface clear View 0、depth-tested Opaque3D View 1、
-UI View 2 与真实 bgfx transient instance buffer 形成最小可见3D样例
-`tina_sample_3d_infrastructure`。该样例默认/门禁运行
-300帧，每帧3个 Cube、1个 instance batch；它不等于通用 Mesh/Asset/Material/PBR，M10 的 Cooked
-glTF 产品样例仍未实现。
+`P3_N3_UV2` procedural Cube、Unlit shader 和真实 bgfx transient instance buffer 形成最小可见3D样例
+`tina_sample_3d_infrastructure`。M9-C 当前又在同一私有 fixture 基础设施中接入 Sprite2D：只接受
+`spriteKey=1`，把 Sprite 展开为 transient P2/UV2/ABGR 四边形，支持旋转、透明和 flip。当前固定
+fixture View 顺序是 0 clear、1 Opaque3D、2 Sprite2D、3 UI；这只是临时固定 View 编号，不是
+Pass Scheduler。`tina_sample_2d_infrastructure_bgfx` 默认/门禁运行300帧，每帧5个 fixture Sprite
+和2个 retained UI panel；它不等于 Asset/Texture/Sprite 产品路径、正式 `tina_sample_2d`、TileMap、
+Box2D、中文文本或 M10。
 
 ## 当前 Legacy 已完成基线
 
@@ -152,12 +155,12 @@ M9-A 当前 Windows MSVC Debug/Release 直接结果均为基础 `tina_tests` 213
 形成2个 instance batch，resize 产生一次 aspect 变化，退出时 `liveResources=0`。Release 还直接通过
 UI115/115、Runtime→UI60/60、UI→Render12/12与Scene19/19。
 
-M9-B 当前 Windows MSVC Debug/Release 均通过完整 bgfx adapter 专项30/30，并各运行
-`tina_sample_3d_infrastructure` 300帧：每帧3个 Cube、1个 instance batch、2个 retained UI panel，
-退出时 UI root 恰好释放1次且 `EngineHost` 已销毁；Release Desktop 样例也完成300帧并释放 UI root。
-样例仅在 host 析构完成后报告 Render 资源账本平衡；backend 的 `noexcept` shutdown 遇到非零账本会
-终止进程，不再用强制清零掩盖失衡。两张 Debug 截图确认 Cube 姿态随帧变化、深度遮挡正确且 UI 在
-Opaque3D 后覆盖。Linux M9-B 尚未复验。
+M9-C 当前 Windows MSVC Debug/Release 均通过完整 bgfx adapter 专项43/43，并各运行
+`tina_sample_2d_infrastructure_bgfx` 300帧：每帧5个 fixture Sprite、2个 retained UI panel，
+退出时 UI root 恰好释放1次，`EngineHost` 已销毁且 Render 资源账本平衡。Debug 截图确认 Sprite
+旋转、透明、flip 和 UI overlay；既有 D3D11 debug-layer `RefCount=3` 提示只在 Debug 出现，Release
+未出现。该结果只证明 fixture/infrastructure，不证明 Asset/Texture/Sprite 产品路径、正式
+`tina_sample_2d`、TileMap、Box2D、中文文本或 M10。Linux M9-C 尚未复验。
 
 Linux 最新 paint/DisplayList/bridge Null 门禁也已完成：GCC 13.4 通过基础205/205、
 `tina_ui_tests` 92/92、`tina_runtime_ui_tests` 46/46、bridge 12/12与Null样例300帧；
@@ -204,10 +207,10 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_runtime_ui_tests.exe
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_desktop.exe
 
-# M9-B 私有 bgfx Opaque3D fixture 与 300 帧样例
-cmake --build --preset windows-vnext-bgfx-debug --target tina_render_bgfx_tests tina_sample_3d_infrastructure
+# M9-C 私有 bgfx Sprite2D fixture 与 2D/UI 300 帧样例
+cmake --build --preset windows-vnext-bgfx-debug --target tina_render_bgfx_tests tina_sample_2d_infrastructure_bgfx
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe --frames=300 --frame-delay-ms=0
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d_infrastructure_bgfx.exe --frames=300 --frame-delay-ms=0
 
 cmake --preset windows-msvc
 cmake --build --preset windows-debug --target Tina tina_tests tina_legacy_tests

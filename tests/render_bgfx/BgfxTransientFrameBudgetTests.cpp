@@ -48,6 +48,19 @@ TEST(BgfxTransientFrameBudgetTest, Combined3DAndUIRequestsReturnExpectedBudget)
     EXPECT_EQ(*budget, 522U);
 }
 
+TEST(BgfxTransientFrameBudgetTest, Combined3DSpriteAndUIRequestsReturnExpectedBudget)
+{
+    constexpr std::array<BgfxTransientVertexRequest, 3> requests{{
+        {.count = 3U, .stride = 80U},
+        {.count = 8U, .stride = 20U},
+        {.count = 16U, .stride = 12U},
+    }};
+
+    auto budget = checkedTransientVertexBudget(requests);
+    ASSERT_TRUE(budget.has_value());
+    EXPECT_EQ(*budget, 701U);
+}
+
 TEST(BgfxTransientFrameBudgetTest, NonZeroCountWithZeroStrideIsInvalidArgument)
 {
     constexpr std::array<BgfxTransientVertexRequest, 1> requests{{
@@ -79,6 +92,36 @@ TEST(BgfxTransientFrameBudgetTest, SummedRequestsOverflowIsCapacityExceeded)
     }};
 
     auto budget = checkedTransientVertexBudget(requests);
+    ASSERT_FALSE(budget.has_value());
+    EXPECT_EQ(budget.error().code, Core::CoreErrorCode::CapacityExceeded);
+}
+
+TEST(BgfxTransientFrameBudgetTest, EmptyAndZeroTransientIndexCountsReturnZeroBudget)
+{
+    auto empty = checkedTransientIndexBudget(std::span<const u32>{});
+    ASSERT_TRUE(empty.has_value());
+    EXPECT_EQ(*empty, 0U);
+
+    constexpr std::array<u32, 3> zeroCounts{0U, 0U, 0U};
+    auto zeroBudget = checkedTransientIndexBudget(zeroCounts);
+    ASSERT_TRUE(zeroBudget.has_value());
+    EXPECT_EQ(*zeroBudget, 0U);
+}
+
+TEST(BgfxTransientFrameBudgetTest, CombinedSpriteAndUITransientIndexCountsAreSummed)
+{
+    constexpr std::array<u32, 2> indexCounts{12U, 18U};
+
+    auto budget = checkedTransientIndexBudget(indexCounts);
+    ASSERT_TRUE(budget.has_value());
+    EXPECT_EQ(*budget, 30U);
+}
+
+TEST(BgfxTransientFrameBudgetTest, SummedTransientIndexCountsOverflowIsCapacityExceeded)
+{
+    constexpr std::array<u32, 2> indexCounts{(std::numeric_limits<u32>::max)(), 1U};
+
+    auto budget = checkedTransientIndexBudget(indexCounts);
     ASSERT_FALSE(budget.has_value());
     EXPECT_EQ(budget.error().code, Core::CoreErrorCode::CapacityExceeded);
 }

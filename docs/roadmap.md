@@ -387,10 +387,10 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   复验通过 GLFW26/26、Platform样例300帧、bgfx16/16与Desktop连续3次各300帧。iconify 回归保持正 logical
   extent 与 framebuffer `0x0` suspended 语义；本轮没有重新截图或运行 Linux M8-B；
 - EnTT 只作为内部 component storage，公共接口只暴露 generation `EntityId`；Scene component command commit、
-  Camera/Sprite component storage、chunk culling、AssetHandle/FrameResourceRef 解析、bgfx Sprite pass 与可见
-  Sprite 仍待后续切片；
+  Camera/Sprite component storage、chunk culling、AssetHandle/FrameResourceRef 解析与正式可见 2D 产品路径仍待后续切片；
 - 基础样例当前是 CPU/Null recording infrastructure，不显示 Sprite、不包含中文 Label/Button、world picking、
-  TileMap 或 UI overlay；正式 `tina_sample_2d` 继续由最终 Catalog/Manifest 产品门禁承担；
+  TileMap 或 UI overlay；M9-C 的 `tina_sample_2d_infrastructure_bgfx` 只是另一个 GLFW+bgfx fixture 样例，能显示
+  fixture Sprite 与 UI overlay，但不替代正式 `tina_sample_2d` 的 Catalog/Manifest 产品门禁；
 - 定义 TileMap 为 gameplay feature、`IGridCollisionProvider` 和 Tile AABB/Box2D 分工；正式
   TileMap 产品路径在 M10/M11 接入 Cooked 资产并验收；
 - 正式可见2D产品样例后续显示Sprite与中文Label/Button，并验证fixed-step、插值、world picking、
@@ -410,16 +410,26 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   M9-A 的 Perspective/Mesh3D `RenderSceneView`，但只接受 `meshKey=1`、`materialKey=1`、
   `submeshIndex=0` 的 procedural Cube fixture；Game SDK/Phase Context 仍不暴露 RenderDevice、
   ViewId、bgfx 类型或 GPU handle；
-- 当前固定全 surface View 0 为唯一 color+depth clear owner，View 1 为 `Opaque3D` 并启用 depth write
-  与 `Less` test，View 2 为 UI 且不重复 clear；Camera 子 viewport 外也会被确定性清理；
+- M9-B 当时固定全 surface View 0 为唯一 color+depth clear owner，View 1 为 `Opaque3D` 并启用 depth write
+  与 `Less` test，UI 后续由 M9-C 固定到 View 3 且不重复 clear；Camera 子 viewport 外也会被确定性清理；
 - backend 私有创建 canonical `P3_N3_UV2` indexed Cube、`tina_opaque3d_unlit` shader program、
   静态 vertex/index buffer，并为每帧 Mesh3D item 写入真实 bgfx transient instance buffer；私有
   聚焦测试覆盖顶点/索引、fixture 写入与拒绝、容量失败原子性，以及 Opaque3D/UI 共用 transient
   vertex pool 的联合预算；
 - `tina_sample_3d_infrastructure` 只在 GLFW+bgfx 图构建，通过 `Tina::Desktop::CreateEngine` 默认运行
   300帧，当前每帧提交3个 procedural Cube 和1个 instance batch；
-- 通用 Render typed handle/descriptors、Pass Scheduler、Sprite2D pass、Runtime-owned packet/FramePin、
-  Cooked Mesh/Material/Texture/Prefab、glTF、PBR、阴影、动画、后处理、自动 resize/restore 产品门禁仍后置。
+- **M9-C 私有 bgfx Sprite2D fixture 与 2D/UI 样例已完成 Debug/Release 验证：** `tina_render_bgfx` 私有消费
+  M8-B 的 Camera2D/Sprite2D `RenderSceneView` fixture 子集，只接受 `spriteKey=1`，写入 transient
+  P2/UV2/ABGR vertex 与 u32 index，支持旋转、透明、flip 和稳定 Sprite order；
+- 当前固定 View 顺序改为 0 clear、1 Opaque3D、2 Sprite2D、3 UI；这只是 fixture view 编号和临时提交顺序，
+  不能写成 Pass Scheduler 已完成；
+- M9-C 私有测试新增 Sprite2D geometry 和 Sprite2D+UI transient index budget，当前 Windows Debug/Release
+  `tina_render_bgfx_tests` 均为43/43；两配置的 `tina_sample_2d_infrastructure_bgfx` 均通过 Desktop bootstrap 运行300帧，
+  记录5个 Sprite、2个 UI panel、UI root 释放和 `renderResourceLedgerBalanced=true`，截图确认 Sprite 旋转、
+  透明、flip 与 UI overlay；既有 D3D11 debug-layer `RefCount=3` 提示只在 Debug 出现，Release 未出现；
+- 通用 Render typed handle/descriptors、Pass Scheduler、正式 Sprite2D Asset/product pass、Runtime-owned packet/FramePin、
+  Cooked Mesh/Material/Texture/Prefab、Texture/Sprite Asset 产品路径、正式 `tina_sample_2d`、TileMap、Box2D、
+  中文文本、glTF、PBR、阴影、动画、后处理、自动 resize/restore 产品门禁仍后置。
 
 ## M10 Asset 与 Cooker 垂直切片
 
@@ -431,7 +441,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；
 - 为正式产品路径把 M7–M9 的内置 fixture 替换为 Catalog/Manifest 资产；hermetic、版本锁定的
-  infrastructure/module-test fixture 继续保留；新增 Cooked glTF/Material/Prefab 3D 产品样例。
+  infrastructure/module-test fixture 继续保留；新增 Cooked glTF/Material/Prefab 3D 产品样例，2D 仍要后续
+  接入 Texture/Sprite/Tileset/TileMap 资产后才形成正式 `tina_sample_2d`。
 
 ## M11 产品 2D、UI 与 Audio
 

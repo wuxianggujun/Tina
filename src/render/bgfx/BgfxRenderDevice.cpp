@@ -1,7 +1,9 @@
 #include "BgfxRenderDevice.hpp"
-#include "BgfxSurfaceFramePlanner.hpp"
 #include "BgfxOpaque3DGeometry.hpp"
 #include "BgfxOpaque3DShader.hpp"
+#include "BgfxSprite2DGeometry.hpp"
+#include "BgfxSprite2DShader.hpp"
+#include "BgfxSurfaceFramePlanner.hpp"
 #include "BgfxTransientFrameBudget.hpp"
 #include "BgfxUIDisplayGeometry.hpp"
 #include "BgfxUISolidQuadShader.hpp"
@@ -34,15 +36,18 @@ namespace {
 
 constexpr bgfx::ViewId kSurfaceClearView = 0;
 constexpr bgfx::ViewId kOpaque3DView = 1;
-constexpr bgfx::ViewId kUIView = 2;
+constexpr bgfx::ViewId kSprite2DView = 2;
+constexpr bgfx::ViewId kUIView = 3;
 constexpr u32 kDefaultResetFlags = BGFX_RESET_VSYNC;
 constexpr u32 kClearRgba = 0x102a43ff;
 constexpr usize kIndicesPerSolidQuad = 6;
-constexpr u64 kOpaque3DState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z |
-                               BGFX_STATE_DEPTH_TEST_LESS;
-constexpr u64 kUIPremultipliedAlphaState =
+constexpr u64 kOpaque3DState =
+    BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS;
+constexpr u64 kSprite2DPremultipliedAlphaState =
     BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
     BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
+constexpr u64 kUIPremultipliedAlphaState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |
+                                           BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
 
 static_assert(std::is_standard_layout_v<BgfxUIDisplayVertex>);
 static_assert(sizeof(BgfxUIDisplayVertex) == sizeof(float) * 2U + sizeof(u32));
@@ -51,9 +56,21 @@ static_assert(offsetof(BgfxUIDisplayVertex, y) == sizeof(float));
 static_assert(offsetof(BgfxUIDisplayVertex, abgr) == sizeof(float) * 2U);
 static_assert(sizeof(BgfxUIDisplayVertex) <= (std::numeric_limits<u16>::max)());
 static_assert(sizeof(BgfxOpaque3DInstanceData) <= (std::numeric_limits<u16>::max)());
+static_assert(std::is_standard_layout_v<BgfxSprite2DVertex>);
+static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 4U + sizeof(u32));
+static_assert(offsetof(BgfxSprite2DVertex, positionX) == 0U);
+static_assert(offsetof(BgfxSprite2DVertex, positionY) == sizeof(float));
+static_assert(offsetof(BgfxSprite2DVertex, textureU) == sizeof(float) * 2U);
+static_assert(offsetof(BgfxSprite2DVertex, textureV) == sizeof(float) * 3U);
+static_assert(offsetof(BgfxSprite2DVertex, abgr) == sizeof(float) * 4U);
+static_assert(sizeof(BgfxSprite2DVertex) <= (std::numeric_limits<u16>::max)());
 
 struct PreparedOpaque3D final {
     BgfxOpaque3DFrameRequirements requirements{};
+};
+
+struct PreparedSprite2D final {
+    BgfxSprite2DFrameRequirements requirements{};
 };
 
 struct PreparedUIDisplayList final {
@@ -237,16 +254,15 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
     return Core::success();
 }
 
-[[nodiscard]] Core::Result<PreparedUIDisplayList>
-preflightUIDisplayList(UIDisplayListView displayList)
+[[nodiscard]] Core::Result<PreparedUIDisplayList> preflightUIDisplayList(UIDisplayListView displayList)
 {
     auto requirements = checkedGeometryRequirements(displayList);
     if (!requirements)
     {
         if (requirements.error().code == Core::CoreErrorCode::CapacityExceeded)
         {
-            return Core::failure(transientBufferCapacityError(
-                "UI DisplayList geometry exceeds the bgfx transient buffer count limits"));
+            return Core::failure(
+                transientBufferCapacityError("UI DisplayList geometry exceeds the bgfx transient buffer count limits"));
         }
         return Core::failure(std::move(requirements.error()));
     }
@@ -258,8 +274,8 @@ preflightUIDisplayList(UIDisplayListView displayList)
     constexpr usize MaxBgfxElementCount = static_cast<usize>((std::numeric_limits<u32>::max)());
     if (requirements->vertexCount > MaxBgfxElementCount || requirements->indexCount > MaxBgfxElementCount)
     {
-        return Core::failure(transientBufferCapacityError(
-            "UI DisplayList geometry exceeds bgfx's u32 transient buffer count API"));
+        return Core::failure(
+            transientBufferCapacityError("UI DisplayList geometry exceeds bgfx's u32 transient buffer count API"));
     }
 
     const auto vertexCount = static_cast<u32>(requirements->vertexCount);
@@ -272,23 +288,16 @@ preflightUIDisplayList(UIDisplayListView displayList)
     const bgfx::Caps* const caps = bgfx::getCaps();
     if (caps == nullptr || (caps->supported & BGFX_CAPS_INDEX32) == 0)
     {
-        return Core::failure(transientBufferCapacityError(
-            "The active bgfx renderer does not support 32-bit UI transient indices"));
+        return Core::failure(
+            transientBufferCapacityError("The active bgfx renderer does not support 32-bit UI transient indices"));
     }
-    if (bgfx::getAvailTransientIndexBuffer(indexCount, true) != indexCount)
-    {
-        return Core::failure(transientBufferCapacityError(
-            "The bgfx transient index buffer cannot hold this frame's UI DisplayList"));
-    }
-
     return PreparedUIDisplayList{
         .vertexCount = vertexCount,
         .indexCount = indexCount,
     };
 }
 
-[[nodiscard]] Core::Result<PreparedOpaque3D>
-preflightOpaque3D(RenderSceneView scene)
+[[nodiscard]] Core::Result<PreparedOpaque3D> preflightOpaque3D(RenderSceneView scene)
 {
     auto requirements = checkedOpaque3DFrame(scene);
     if (!requirements)
@@ -309,15 +318,44 @@ preflightOpaque3D(RenderSceneView scene)
     return PreparedOpaque3D{.requirements = *requirements};
 }
 
-[[nodiscard]] Core::Status
-preflightTransientVertexPool(PreparedOpaque3D opaque3D, PreparedUIDisplayList ui,
-                             const bgfx::VertexLayout& byteLayout)
+[[nodiscard]] Core::Result<PreparedSprite2D> preflightSprite2D(RenderSceneView scene)
+{
+    auto requirements = checkedSprite2DFrame(scene);
+    if (!requirements)
+    {
+        if (requirements.error().code == Core::CoreErrorCode::CapacityExceeded)
+        {
+            return Core::failure(
+                transientBufferCapacityError("Sprite2D geometry exceeds the bgfx transient buffer count limits"));
+        }
+        return Core::failure(std::move(requirements.error()));
+    }
+    if (requirements->spriteCount == 0)
+    {
+        return PreparedSprite2D{.requirements = *requirements};
+    }
+
+    const bgfx::Caps* const caps = bgfx::getCaps();
+    if (caps == nullptr || (caps->supported & BGFX_CAPS_INDEX32) == 0)
+    {
+        return Core::failure(transientBufferCapacityError(
+            "The active bgfx renderer does not support 32-bit Sprite2D transient indices"));
+    }
+    return PreparedSprite2D{.requirements = *requirements};
+}
+
+[[nodiscard]] Core::Status preflightTransientVertexPool(PreparedOpaque3D opaque3D, PreparedSprite2D sprite2D,
+                                                        PreparedUIDisplayList ui, const bgfx::VertexLayout& byteLayout)
 {
     constexpr u16 InstanceStride = static_cast<u16>(sizeof(BgfxOpaque3DInstanceData));
     const std::array requests{
         BgfxTransientVertexRequest{
             .count = opaque3D.requirements.instanceCount,
             .stride = InstanceStride,
+        },
+        BgfxTransientVertexRequest{
+            .count = sprite2D.requirements.vertexCount,
+            .stride = static_cast<u16>(sizeof(BgfxSprite2DVertex)),
         },
         BgfxTransientVertexRequest{
             .count = ui.vertexCount,
@@ -330,30 +368,52 @@ preflightTransientVertexPool(PreparedOpaque3D opaque3D, PreparedUIDisplayList ui
         if (budget.error().code == Core::CoreErrorCode::CapacityExceeded)
         {
             return Core::failure(transientBufferCapacityError(
-                "Opaque3D and UI geometry exceed the bgfx transient vertex count limits"));
+                "Opaque3D, Sprite2D and UI geometry exceed the bgfx transient vertex count limits"));
         }
         return Core::failure(std::move(budget.error()));
     }
-    if (*budget != 0 &&
-        bgfx::getAvailTransientVertexBuffer(*budget, byteLayout) != *budget)
+    if (*budget != 0 && bgfx::getAvailTransientVertexBuffer(*budget, byteLayout) != *budget)
     {
         return Core::failure(transientBufferCapacityError(
-            "The shared bgfx transient vertex pool cannot hold this frame's Opaque3D and UI data"));
+            "The shared bgfx transient vertex pool cannot hold this frame's Opaque3D, Sprite2D and UI data"));
     }
     return Core::success();
 }
 
-[[nodiscard]] BgfxViewRect viewportRect(const RenderSurfaceState& surface,
-                                        RenderNormalizedViewport viewport) noexcept
+[[nodiscard]] Core::Status preflightTransientIndexPool(PreparedSprite2D sprite2D, PreparedUIDisplayList ui)
+{
+    const std::array indexCounts{
+        sprite2D.requirements.indexCount,
+        ui.indexCount,
+    };
+    auto budget = checkedTransientIndexBudget(indexCounts);
+    if (!budget)
+    {
+        if (budget.error().code == Core::CoreErrorCode::CapacityExceeded)
+        {
+            return Core::failure(
+                transientBufferCapacityError("Sprite2D and UI geometry exceed the bgfx transient index count limits"));
+        }
+        return Core::failure(std::move(budget.error()));
+    }
+    if (*budget != 0 && bgfx::getAvailTransientIndexBuffer(*budget, true) != *budget)
+    {
+        return Core::failure(transientBufferCapacityError(
+            "The shared bgfx transient index pool cannot hold this frame's Sprite2D and UI data"));
+    }
+    return Core::success();
+}
+
+[[nodiscard]] BgfxViewRect viewportRect(const RenderSurfaceState& surface, RenderNormalizedViewport viewport) noexcept
 {
     const double surfaceWidth = surface.framebufferExtent.width;
     const double surfaceHeight = surface.framebufferExtent.height;
     const u32 left = static_cast<u32>(std::clamp(std::floor(viewport.x * surfaceWidth), 0.0, surfaceWidth));
     const u32 top = static_cast<u32>(std::clamp(std::floor(viewport.y * surfaceHeight), 0.0, surfaceHeight));
-    const u32 right = static_cast<u32>(
-        std::clamp(std::ceil((viewport.x + viewport.width) * surfaceWidth), 0.0, surfaceWidth));
-    const u32 bottom = static_cast<u32>(
-        std::clamp(std::ceil((viewport.y + viewport.height) * surfaceHeight), 0.0, surfaceHeight));
+    const u32 right =
+        static_cast<u32>(std::clamp(std::ceil((viewport.x + viewport.width) * surfaceWidth), 0.0, surfaceWidth));
+    const u32 bottom =
+        static_cast<u32>(std::clamp(std::ceil((viewport.y + viewport.height) * surfaceHeight), 0.0, surfaceHeight));
     return BgfxViewRect{
         .x = static_cast<u16>(left),
         .y = static_cast<u16>(top),
@@ -362,16 +422,14 @@ preflightTransientVertexPool(PreparedOpaque3D opaque3D, PreparedUIDisplayList ui
     };
 }
 
-[[nodiscard]] BgfxScissorRect clampScissorToSurface(const UIPixelRect& clip,
-                                                    RenderSurfaceExtent surfaceExtent) noexcept
+[[nodiscard]] BgfxScissorRect clampScissorToSurface(const UIPixelRect& clip, RenderSurfaceExtent surfaceExtent) noexcept
 {
     const i64 surfaceRight = static_cast<i64>(surfaceExtent.width);
     const i64 surfaceBottom = static_cast<i64>(surfaceExtent.height);
     const i64 clipLeft = std::clamp(static_cast<i64>(clip.x), i64{0}, surfaceRight);
     const i64 clipTop = std::clamp(static_cast<i64>(clip.y), i64{0}, surfaceBottom);
     const i64 clipRight = std::clamp(static_cast<i64>(clip.x) + static_cast<i64>(clip.width), i64{0}, surfaceRight);
-    const i64 clipBottom =
-        std::clamp(static_cast<i64>(clip.y) + static_cast<i64>(clip.height), i64{0}, surfaceBottom);
+    const i64 clipBottom = std::clamp(static_cast<i64>(clip.y) + static_cast<i64>(clip.height), i64{0}, surfaceBottom);
     if (clipRight <= clipLeft || clipBottom <= clipTop)
     {
         return {};
@@ -426,9 +484,12 @@ class BgfxRenderDevice final : public IRenderDevice {
             .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
             .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
             .end();
-        transientByteLayout_.begin()
-            .add(bgfx::Attrib::TexCoord7, 1, bgfx::AttribType::Uint8)
+        sprite2DVertexLayout_.begin()
+            .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
+            .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
             .end();
+        transientByteLayout_.begin().add(bgfx::Attrib::TexCoord7, 1, bgfx::AttribType::Uint8).end();
         if (transientByteLayout_.getStride() != 1U)
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -448,6 +509,14 @@ class BgfxRenderDevice final : public IRenderDevice {
         uiSolidQuadProgram_ = *uiProgram;
         ++statistics_.liveResources;
 
+        auto sprite2DProgram = ShaderDetail::createSprite2DFixtureProgram();
+        if (!sprite2DProgram)
+        {
+            return Core::failure(std::move(sprite2DProgram.error()));
+        }
+        sprite2DProgram_ = *sprite2DProgram;
+        ++statistics_.liveResources;
+
         auto opaque3DProgram = ShaderDetail::createOpaque3DUnlitProgram();
         if (!opaque3DProgram)
         {
@@ -458,8 +527,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         const std::span<const BgfxOpaque3DVertex> vertices = canonicalCubeVertices();
         opaque3DVertexBuffer_ = bgfx::createVertexBuffer(
-            bgfx::copy(vertices.data(), static_cast<u32>(vertices.size_bytes())),
-            opaque3DVertexLayout_);
+            bgfx::copy(vertices.data(), static_cast<u32>(vertices.size_bytes())), opaque3DVertexLayout_);
         if (!bgfx::isValid(opaque3DVertexBuffer_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -468,8 +536,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         ++statistics_.liveResources;
 
         const std::span<const u16> indices = canonicalCubeIndices();
-        opaque3DIndexBuffer_ = bgfx::createIndexBuffer(
-            bgfx::copy(indices.data(), static_cast<u32>(indices.size_bytes())));
+        opaque3DIndexBuffer_ =
+            bgfx::createIndexBuffer(bgfx::copy(indices.data(), static_cast<u32>(indices.size_bytes())));
         if (!bgfx::isValid(opaque3DIndexBuffer_))
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
@@ -512,6 +580,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
 
         PreparedOpaque3D preparedOpaque3D{};
+        PreparedSprite2D preparedSprite2D{};
         PreparedUIDisplayList preparedUI{};
         if (framePlan->shouldSubmit())
         {
@@ -522,6 +591,13 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             preparedOpaque3D = *opaque3DPreflight;
 
+            auto sprite2DPreflight = preflightSprite2D(frame.primaryWorldScene);
+            if (!sprite2DPreflight)
+            {
+                return Core::failure(std::move(sprite2DPreflight.error()));
+            }
+            preparedSprite2D = *sprite2DPreflight;
+
             auto preflight = preflightUIDisplayList(frame.primaryWindowUIDisplayList);
             if (!preflight)
             {
@@ -529,9 +605,13 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             preparedUI = *preflight;
 
-            if (auto status = preflightTransientVertexPool(preparedOpaque3D, preparedUI,
-                                                           transientByteLayout_);
+            if (auto status =
+                    preflightTransientVertexPool(preparedOpaque3D, preparedSprite2D, preparedUI, transientByteLayout_);
                 !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
+            if (auto status = preflightTransientIndexPool(preparedSprite2D, preparedUI); !status)
             {
                 return Core::failure(std::move(status.error()));
             }
@@ -555,7 +635,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             resetBackbuffer(framePlan->targetExtent);
         }
 
-        submitPrimaryFrame(committedSurfaceState_, frame.primaryWorldScene, preparedOpaque3D,
+        submitPrimaryFrame(committedSurfaceState_, frame.primaryWorldScene, preparedOpaque3D, preparedSprite2D,
                            frame.primaryWindowUIDisplayList, preparedUI);
         frameOpen_ = true;
         ++statistics_.submitted;
@@ -623,6 +703,12 @@ class BgfxRenderDevice final : public IRenderDevice {
                 opaque3DProgram_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
+            if (bgfx::isValid(sprite2DProgram_))
+            {
+                bgfx::destroy(sprite2DProgram_);
+                sprite2DProgram_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             if (bgfx::isValid(uiSolidQuadProgram_))
             {
                 bgfx::destroy(uiSolidQuadProgram_);
@@ -676,17 +762,14 @@ class BgfxRenderDevice final : public IRenderDevice {
 
     void configureSurfaceClearView(const RenderSurfaceState& surface) noexcept
     {
-        bgfx::setViewRect(kSurfaceClearView, 0, 0,
-                          static_cast<u16>(surface.framebufferExtent.width),
+        bgfx::setViewRect(kSurfaceClearView, 0, 0, static_cast<u16>(surface.framebufferExtent.width),
                           static_cast<u16>(surface.framebufferExtent.height));
-        bgfx::setViewClear(kSurfaceClearView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-                           kClearRgba, 1.0F, 0);
+        bgfx::setViewClear(kSurfaceClearView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, kClearRgba, 1.0F, 0);
         bgfx::setViewMode(kSurfaceClearView, bgfx::ViewMode::Sequential);
         bgfx::touch(kSurfaceClearView);
     }
 
-    void configureOpaque3DView(const RenderSurfaceState& surface,
-                               const RenderPerspectiveCamera& camera) noexcept
+    void configureOpaque3DView(const RenderSurfaceState& surface, const RenderPerspectiveCamera& camera) noexcept
     {
         const BgfxViewRect rect = viewportRect(surface, camera.normalizedViewport);
         if (rect.width == 0 || rect.height == 0)
@@ -709,11 +792,50 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         float projection[16]{};
         const bgfx::Caps* const caps = bgfx::getCaps();
-        bx::mtxProj(projection, camera.verticalFovDegrees, camera.aspectRatio,
-                    camera.nearPlaneMeters, camera.farPlaneMeters,
-                    caps != nullptr && caps->homogeneousDepth, bx::Handedness::Right);
+        bx::mtxProj(projection, camera.verticalFovDegrees, camera.aspectRatio, camera.nearPlaneMeters,
+                    camera.farPlaneMeters, caps != nullptr && caps->homogeneousDepth, bx::Handedness::Right);
         bgfx::setViewTransform(kOpaque3DView, view, projection);
         bgfx::touch(kOpaque3DView);
+    }
+
+    void configureSprite2DView(const RenderSurfaceState& surface, const RenderCamera2D& camera) noexcept
+    {
+        const BgfxViewRect rect = viewportRect(surface, camera.normalizedViewport);
+        if (rect.width == 0 || rect.height == 0)
+        {
+            std::terminate();
+        }
+        bgfx::setViewRect(kSprite2DView, rect.x, rect.y, rect.width, rect.height);
+        bgfx::setViewClear(kSprite2DView, BGFX_CLEAR_NONE, kClearRgba, 1.0F, 0);
+        bgfx::setViewMode(kSprite2DView, bgfx::ViewMode::Sequential);
+
+        const float cosine = std::cos(camera.rotationRadians);
+        const float sine = std::sin(camera.rotationRadians);
+        const std::array<float, 16> view{
+            cosine,
+            -sine,
+            0.0F,
+            0.0F,
+            sine,
+            cosine,
+            0.0F,
+            0.0F,
+            0.0F,
+            0.0F,
+            1.0F,
+            0.0F,
+            -cosine * camera.centerX - sine * camera.centerY,
+            sine * camera.centerX - cosine * camera.centerY,
+            0.0F,
+            1.0F,
+        };
+
+        float projection[16]{};
+        const bgfx::Caps* const caps = bgfx::getCaps();
+        bx::mtxOrtho(projection, -camera.worldWidth * 0.5F, camera.worldWidth * 0.5F, -camera.worldHeight * 0.5F,
+                     camera.worldHeight * 0.5F, -1.0F, 1.0F, 0.0F, caps != nullptr && caps->homogeneousDepth);
+        bgfx::setViewTransform(kSprite2DView, view.data(), projection);
+        bgfx::touch(kSprite2DView);
     }
 
     void configureUIView(const RenderSurfaceState& surface) noexcept
@@ -741,8 +863,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         constexpr u16 InstanceStride = static_cast<u16>(sizeof(BgfxOpaque3DInstanceData));
         bgfx::InstanceDataBuffer instanceBuffer{};
-        bgfx::allocInstanceDataBuffer(&instanceBuffer, prepared.requirements.instanceCount,
-                                      InstanceStride);
+        bgfx::allocInstanceDataBuffer(&instanceBuffer, prepared.requirements.instanceCount, InstanceStride);
         auto instances = std::span{
             reinterpret_cast<BgfxOpaque3DInstanceData*>(instanceBuffer.data),
             static_cast<usize>(prepared.requirements.instanceCount),
@@ -766,6 +887,38 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
     }
 
+    void submitSprite2D(RenderSceneView scene, PreparedSprite2D prepared) noexcept
+    {
+        if (prepared.requirements.spriteCount == 0)
+        {
+            return;
+        }
+
+        bgfx::TransientVertexBuffer transientVertices{};
+        bgfx::TransientIndexBuffer transientIndices{};
+        bgfx::allocTransientVertexBuffer(&transientVertices, prepared.requirements.vertexCount, sprite2DVertexLayout_);
+        bgfx::allocTransientIndexBuffer(&transientIndices, prepared.requirements.indexCount, true);
+
+        auto vertices = std::span{reinterpret_cast<BgfxSprite2DVertex*>(transientVertices.data),
+                                  static_cast<usize>(prepared.requirements.vertexCount)};
+        auto indices = std::span{reinterpret_cast<u32*>(transientIndices.data),
+                                 static_cast<usize>(prepared.requirements.indexCount)};
+        auto written = writeSprite2DGeometry(scene, vertices, indices);
+        if (!written || written->spriteCount != prepared.requirements.spriteCount ||
+            written->vertexCount != prepared.requirements.vertexCount ||
+            written->indexCount != prepared.requirements.indexCount ||
+            written->batchCount != prepared.requirements.batchCount)
+        {
+            std::terminate();
+        }
+
+        bgfx::setScissor();
+        bgfx::setState(kSprite2DPremultipliedAlphaState);
+        bgfx::setVertexBuffer(0, &transientVertices, 0, prepared.requirements.vertexCount);
+        bgfx::setIndexBuffer(&transientIndices, 0, prepared.requirements.indexCount);
+        bgfx::submit(kSprite2DView, sprite2DProgram_);
+    }
+
     void submitUI(const RenderSurfaceState& surface, UIDisplayListView displayList,
                   PreparedUIDisplayList prepared) noexcept
     {
@@ -781,8 +934,8 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         auto vertices = std::span{reinterpret_cast<BgfxUIDisplayVertex*>(transientVertices.data),
                                   static_cast<usize>(prepared.vertexCount)};
-        auto indices = std::span{reinterpret_cast<u32*>(transientIndices.data),
-                                 static_cast<usize>(prepared.indexCount)};
+        auto indices =
+            std::span{reinterpret_cast<u32*>(transientIndices.data), static_cast<usize>(prepared.indexCount)};
         auto written = writeGeometry(displayList, vertices, indices);
         if (!written || written->vertexCount != prepared.vertexCount || written->indexCount != prepared.indexCount)
         {
@@ -821,8 +974,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
     }
 
-    void submitPrimaryFrame(const RenderSurfaceState& surface, RenderSceneView scene,
-                            PreparedOpaque3D preparedOpaque3D, UIDisplayListView displayList,
+    void submitPrimaryFrame(const RenderSurfaceState& surface, RenderSceneView scene, PreparedOpaque3D preparedOpaque3D,
+                            PreparedSprite2D preparedSprite2D, UIDisplayListView displayList,
                             PreparedUIDisplayList preparedUI) noexcept
     {
         configureSurfaceClearView(surface);
@@ -830,6 +983,11 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             configureOpaque3DView(surface, *scene.perspectiveCamera());
             submitOpaque3D(scene, preparedOpaque3D);
+        }
+        if (scene.camera2D().has_value())
+        {
+            configureSprite2DView(surface, *scene.camera2D());
+            submitSprite2D(scene, preparedSprite2D);
         }
         configureUIView(surface);
         submitUI(surface, displayList, preparedUI);
@@ -845,10 +1003,12 @@ class BgfxRenderDevice final : public IRenderDevice {
     u64 nextSubmissionIndex_ = 0;
     bgfx::VertexLayout transientByteLayout_{};
     bgfx::VertexLayout opaque3DVertexLayout_{};
+    bgfx::VertexLayout sprite2DVertexLayout_{};
     bgfx::VertexLayout uiVertexLayout_{};
     bgfx::ProgramHandle opaque3DProgram_ = BGFX_INVALID_HANDLE;
     bgfx::VertexBufferHandle opaque3DVertexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle opaque3DIndexBuffer_ = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle sprite2DProgram_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle uiSolidQuadProgram_ = BGFX_INVALID_HANDLE;
     bool frameOpen_ = false;
     bool stopped_ = false;
