@@ -455,6 +455,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - M10-A2c 已完成 owning `CookedAssetFile` + `loadCookedAssetFile` /
   `loadCookedAssetFromCatalog`（Catalog 根 + AssetId → 确定性 object path → 读盘 → parse →
   可选 ContentHash 校验 → 与 Catalog entry 身份/kind/size 对齐）；仍无 Handle/Lease；
+- M10-A2d 已完成 `computeCatalogLoadOrder`：对请求 AssetId 做依赖展开与 dependencies-first 加载序
+  （迭代、去重、PMR）；仍无 Handle/Lease 与异步加载；
 - 弱 Handle/强 Lease 需先确认 ADR 0016；UploadTicket/retirement 和事务 Manifest writer 继续后置；
 - `tina_assetc` 执行 Parse → Validate → Build → Validate Cooked → Atomic Write；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/

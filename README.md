@@ -105,8 +105,9 @@ M10-A2b provides bounded Core `readFile` and `loadCatalogSnapshotFromManifestFil
 `tina_tests` pass 223/223 and `tina_asset_tests` pass 19/19. Handle/Lease, async IO, and Cooker remain out of
 scope.
 
-M10-A2c provides owning `CookedAssetFile` load and catalog-root path resolution. Windows MSVC Debug/Release
-`tina_asset_tests` pass 23/23. Handle/Lease, async IO, and Cooker remain out of scope.
+M10-A2c provides owning `CookedAssetFile` load and catalog-root path resolution. M10-A2d adds
+`computeCatalogLoadOrder` for dependency-first load planning. Windows MSVC Debug/Release
+`tina_asset_tests` pass 27/27. Handle/Lease, async IO, and Cooker remain out of scope.
 
 M7-C1c-a adds fixed-capacity PMR pointer-policy/route-ancestry storage and a double-buffered
 `UICommittedHitView`. Within one view, its effective-visible entries have unique, strictly increasing paint ordinals and
