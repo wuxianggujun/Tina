@@ -3,6 +3,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogFile.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogLoadOrder.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogSnapshot.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/CookedAssetBatch.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CookedAssetFile.hpp
 )
 
@@ -11,6 +12,7 @@ add_library(tina_asset STATIC
     CatalogFile.cpp
     CatalogLoadOrder.cpp
     CatalogSnapshot.cpp
+    CookedAssetBatch.cpp
     CookedAssetFile.cpp
 )
 add_library(Tina::Asset ALIAS tina_asset)

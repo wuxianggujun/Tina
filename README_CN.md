@@ -191,8 +191,8 @@ Debug/Release 基础 `tina_tests` 223/223、`tina_asset_tests` 19/19。仍不包
 或 Cooker。
 
 M10-A2c 已实现：owning Cooked object 文件加载与 Catalog 根路径解析。M10-A2d 已实现依赖展开加载序
-`computeCatalogLoadOrder`。Windows Debug/Release `tina_asset_tests` 27/27。仍不包含 Handle/Lease、
-async IO 或 Cooker。
+`computeCatalogLoadOrder`。M10-A2e 已实现批量同步 `loadCookedAssetsFromCatalog`。Windows Debug
+`tina_asset_tests` 见最近门禁。仍不包含 Handle/Lease、async IO 或 Cooker。
 
 Linux 最新 paint/DisplayList/bridge Null 门禁也已完成：GCC 13.4 通过基础205/205、
 `tina_ui_tests` 92/92、`tina_runtime_ui_tests` 46/46、bridge 12/12与Null样例300帧；

@@ -38,7 +38,8 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2a Core ContentHash digest | Debug/Release C++23 | 218/218 | 基础 `tina_tests` 含 ContentHashDigest 5 项；`tina_asset_format_tests` 16/16 含 payload verify 成功/篡改失败。公共头无 `XXH*` token。A2a 不实现文件 IO、Handle/Lease、Catalog 磁盘加载或 Cooker |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2b Catalog file load | Debug/Release C++23 | 223/223 + 19/19 | 基础 `tina_tests` 含 ReadFile 5 项共 223；`tina_asset_tests` 19/19 含 Manifest 文件→Snapshot。不实现 Handle/Lease、async IO 或 Cooker |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2c Cooked object file load | Debug/Release C++23 | 223/223 + 23/23 | 基础 `tina_tests` 223；`tina_asset_tests` 含 CookedAssetFile 4 项。不实现 Handle/Lease |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2d Catalog load order | Debug/Release C++23 | 223/223 + 27/27 | `tina_asset_tests` 27/27 含 load order chain/diamond/missing/empty。不实现 Handle/Lease |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2d Catalog load order | Debug/Release C++23 | 223/223 + 27/27 | `tina_asset_tests` 含 load order chain/diamond/missing/empty。不实现 Handle/Lease |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2e Batch cooked load | Debug/Release C++23 | 223/223 + 29/29 | `tina_asset_tests` 29/29 含批量依赖序加载与失败回滚。不实现 Handle/Lease |
 
 
 
