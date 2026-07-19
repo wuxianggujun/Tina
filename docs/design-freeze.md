@@ -348,3 +348,5 @@ Catalog 磁盘加载、Cooker 或密码学签名。
 
 M10-A2b 已落地有界 Catalog 文件加载：Core `readFile` + Asset `loadCatalogSnapshotFromManifestFile`。
 该切片不实现 Handle/Lease、async IO、Cooker writer 或 GPU upload。
+
+M10-A2c 冻结 owning Cooked object 文件加载与 Catalog 路径解析校验；不实现 Handle/Lease。

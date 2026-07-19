@@ -28,6 +28,7 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A1 已实现 owning `CatalogSnapshot`、稳定 `AssetId` binary search 与完整 DAG cycle 校验；
   M10-A2a 已实现 Core 私有 XXH3-128 v1 `ContentHash` 计算与 Cooked payload 可选校验；
   M10-A2b 已实现有界 Manifest 文件读与 `loadCatalogSnapshotFromManifestFile`；
+  M10-A2c 契约已冻结 owning Cooked object 文件加载与 Catalog 路径解析校验；
   Asset registry/状态机、Handle/Lease、异步 IO/Decode/Upload、增量 Cooker 与产品资产仍未实现。
 
 
@@ -315,6 +316,33 @@ utf8Path
 `verifyCookedAssetContentHash`，A2b 首期只闭合 Manifest→CatalogSnapshot。
 
 非目标：Handle/Lease、registry、Task/IO thread、GPU upload、Cooker writer、目录扫描、热重载。
+
+### M10-A2c Cooked object 文件加载契约
+
+数据流：
+
+```text
+catalogRoot + AssetId
+  -> CatalogSnapshot::find
+  -> makeCookedArtifactPath(kind, id)   // objects/<kind>/<aa>/<id>.tasset
+  -> join root + relative path (no .. escape)
+  -> Core::readFile
+  -> parseCookedAssetView
+  -> optional verifyCookedAssetContentHash
+  -> match Catalog entry (id/kind/typeVersion/contentHash/cookedFileBytes)
+  -> owning CookedAssetFile (bytes + validated header accessors)
+```
+
+| API | 职责 |
+| --- | --- |
+| `CookedAssetFileLoadConfig` | maxFileBytes、CookedAssetLimits、PMR、是否校验 ContentHash |
+| `CookedAssetFile` | move-only owning bytes；accessor 返回 header/payload/dependency 小值 |
+| `loadCookedAssetFile(path, config)` | 单文件加载+校验 |
+| `loadCookedAssetFromCatalog(root, catalog, id, config)` | Catalog 解析路径后加载并对齐 entry |
+
+失败不发布部分对象；临时缓冲回滚。公共头无第三方/文件系统类型泄漏（实现可用 `std::filesystem`）。
+
+非目标：Handle/Lease、状态机、异步 IO、GPU upload、Cooker、目录枚举。
 
 
 默认 hard limits 为：单 Cooked 文件与 payload 最大1 GiB、单资产最多4096个直接依赖、Manifest

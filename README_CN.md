@@ -190,6 +190,8 @@ M10-A2b 已实现：Core 有界 `readFile` 与 Manifest 文件→`CatalogSnapsho
 Debug/Release 基础 `tina_tests` 223/223、`tina_asset_tests` 19/19。仍不包含 Handle/Lease、async IO
 或 Cooker。
 
+M10-A2c 契约已冻结：owning Cooked object 文件加载与 Catalog 根路径解析。实现随后续提交。
+
 Linux 最新 paint/DisplayList/bridge Null 门禁也已完成：GCC 13.4 通过基础205/205、
 `tina_ui_tests` 92/92、`tina_runtime_ui_tests` 46/46、bridge 12/12与Null样例300帧；
 Clang 22.1.8 + libstdc++15.2 在 ASan/UBSan/LSan 下通过相同205/92/46/12与Null样例300帧，
