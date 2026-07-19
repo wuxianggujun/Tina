@@ -23,7 +23,7 @@
 | EnTT | 后续 Scene component storage | vcpkg | 仅允许在未来 `tina_scene` 实现层 PRIVATE 使用 | 保留；M8-A standalone World 当前不接入 |
 | FreeType | 字形 raster；Glyph Atlas 编排仍属于 Tina UI | vcpkg | 只在 `tina_ui_freetype` adapter | 保留 |
 | miniaudio | 唯一真实 Audio backend | vcpkg | 只在 `tina_audio_miniaudio` adapter | 保留；不使用 SDL_mixer |
-| xxHash | ContentHash、Cook cache、可选 StringId | vcpkg/private adapter | `tina_core` 私有实现 | 保留，不承担安全签名 |
+| xxHash | ContentHash、Cook cache、可选 StringId | vcpkg root dependency + private adapter | `tina_core` PRIVATE 链接；公共头零 token | 保留，不承担安全签名；M10-A2a 契约 |
 | [Tracy 0.13.1](https://github.com/wolfpld/tracy) | 开发 Profile capture | vcpkg optional feature | `tina_profile_tracy` | 可选；发布和正式 bench 禁用 |
 | [cgltf v1.15](https://github.com/jkuhlmann/cgltf) | `tina_assetc` 解析 glTF | 固定单文件 + LICENSE/精确提交 | Cooker 源格式 adapter | 待接入 |
 | [GoogleTest 1.17.0](https://github.com/google/googletest/releases) | 单元/集成契约测试 | vcpkg `tests` feature | tests only | 固定；直接运行，不用 CTest；production manifest graph 不启用 |

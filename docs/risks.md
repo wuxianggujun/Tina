@@ -19,6 +19,7 @@
 | Benchmark 不可重复 | P0 | MAD 高、跨 fingerprint 比较、checksum 漂移 | versioned schema、固定机器、独立进程重复、baseline invalidation | 固定门禁机噪声校准通过 |
 | Asset schema/Manifest 非事务 | P0 | crash 后清单指向半文件、旧 Runtime 误读新产物 | asset_format、staging + reread validate + atomic Manifest、schema reject | 损坏/中断/升级测试通过 |
 | Catalog 依赖环/递归栈溢出 | P0 | 不可信 Manifest 含任意长度 cycle 或深链导致 Runtime 递归栈溢出/半发布 Catalog | M10-A1 owning `CatalogSnapshot` 事务式 Create、迭代着色 `O(V + E)`、显式 stack、禁止递归 DFS、失败回滚 PMR | cycle/深链/容量/分配失败测试通过且不发布部分 Snapshot |
+| ContentHash 算法漂移/公共泄漏 | P1 | seed/endian/版本未锁定导致 Cooker 与 Runtime 不一致，或 xxHash 进入公共头 | M10-A2a 固定 XXH3-128 v1 seed=0 LE 布局、Core PRIVATE adapter、header isolation 禁 `XXH*` | digest 金标测试与公共头扫描通过 |
 | Cooker 路径逃逸/资源炸弹 | P0 | glTF URI 读取根外文件、count/size 乘法溢出或超量分配 | canonical root、URI policy、分配前上限/溢出检查、恶意 corpus | traversal/symlink/data URI/oversize 测试通过 |
 | GPU/Audio 异步物理寿命 | P0 | logical cancel 后 staging/PCM UAF、退出挂起 | Lease、UploadTicket、retirement ledger、callback ACK | 取消竞争与300帧退出资源归零 |
 | RenderFrame 在途引用失效 | P0 | Asset unload/Atlas eviction/Surface close 后 submit 仍引用旧内存 | owning RenderFramePacket、统一 lease/pin/ticket、固定 packet pool | 在途失败注入与 completion 后全计数归零 |

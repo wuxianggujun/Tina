@@ -444,10 +444,12 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   失败回滚与独立 `tina_asset_tests`；
 - M10-A1 不实现 Handle/Lease、registry 状态机、文件 IO、Task worker、GPU upload、XXH3 计算、
   Cooker/cgltf 或产品资产替换；ADR 0016 仍为 Proposed，不得由 A1 偷偷冻结；
+- M10-A2a 契约：Core 私有版本化 XXH3-128 v1 adapter 计算 `ContentHash`；公共类型仍无 xxHash
+  token；可选校验 Cooked payload 与 header ContentHash；不引入文件 IO、Handle/Lease 或 Cooker；
 - 后台 CPU Decode 与主线程/GPU Upload 分队列，按任务数、字节数、时间预算；
 - Asset 状态、generation 和取消贯穿两阶段，迟到任务不能复活旧 slot；
-- M10-A2 起实现 Catalog artifact IO、版本化 XXH3 adapter、弱 Handle/强 Lease（需先确认 ADR 0016）、
-  UploadTicket/retirement 和事务 Manifest writer；
+- M10-A2b 起实现 Catalog artifact 文件 IO；弱 Handle/强 Lease 需先确认 ADR 0016；
+  UploadTicket/retirement 和事务 Manifest writer 继续后置；
 - `tina_assetc` 执行 Parse → Validate → Build → Validate Cooked → Atomic Write；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；

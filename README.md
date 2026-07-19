@@ -97,6 +97,10 @@ Failed Create never publishes a partial snapshot. `tina_asset_tests` passes 17/1
 Release. This slice does not implement Handle/Lease, registry state machines, file IO, Task workers, GPU upload,
 XXH3, cgltf, Cooker writes, or the formal product asset path; ADR 0016 remains Proposed.
 
+M10-A2a freezes the Core-private XXH3-128 v1 `ContentHash` digest contract (seed 0, little-endian 16-byte
+layout, optional cooked payload verify, no public xxHash tokens). Implementation follows in a separate commit;
+file IO, Handle/Lease, and Cooker remain out of scope.
+
 M7-C1c-a adds fixed-capacity PMR pointer-policy/route-ancestry storage and a double-buffered
 `UICommittedHitView`. Within one view, its effective-visible entries have unique, strictly increasing paint ordinals and
 carry structure, layout, paint-order, and hit revisions; hit-only commits perform zero layout work, while a failed

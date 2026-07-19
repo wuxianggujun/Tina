@@ -1064,7 +1064,9 @@ public:
 | `PrimaryWindowUIDisplayListCapacityConfig` | D0 已实现 | EngineConfig value / Runtime private | Create 前复制纯值；配置 fixed PMR builder 的 command/clip/batch 容量 | command=0、clip>command、batch=0或batch>command、超过最大值；factory 前拒绝 |
 | `Tina::Scene::EntityId` | M8-A 已实现 | Scene public / 后续 Game SDK | `Scene::World` registry generation + owner；slot 复用递增 generation | InvalidEntity/StaleEntity/WrongWorld |
 | `Tina::Core::AssetId` | M10-A0 已实现 | Core public / AssetFormat | owning 16-byte stable identity；不是路径、Hash 或 runtime generation handle | zero/invalid canonical text 在构造时拒绝 |
-| `Tina::Core::ContentHash` | M10-A0 已实现字段类型 | Core public / AssetFormat | owning 16-byte versioned digest value；不承担安全签名或唯一身份 | zero bytes 在构造时拒绝；A0 不计算摘要 |
+| `Tina::Core::ContentHash` | M10-A0 已实现字段类型；M10-A2a 契约提供 digest API | Core public / AssetFormat | owning 16-byte versioned digest value；不承担安全签名或唯一身份 | zero bytes 在构造时拒绝；A2a 通过私有 XXH3-128 v1 计算 |
+| `digestContentHash` / `digestContentHashV1` | M10-A2a 契约 | Core public | 对 caller-owned bytes 计算 ContentHash；公共头无 xxHash token | InvalidArgument / OutOfMemory / Internal；算法不支持 |
+| `verifyCookedAssetContentHash` | M10-A2a 契约 | AssetFormat module public | 校验 Cooked payload 与 header ContentHash | ContentHashMismatch / UnsupportedValue |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |

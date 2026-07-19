@@ -26,8 +26,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
 - 资源监听仍逐项查询文件时间，缺少独立预算和指标；
 - M10-A0 已实现 Cooked wire schema、稳定 `AssetId` 值类型、版本化 `ContentHash` 字段与只读校验；
   M10-A1 已实现 owning `CatalogSnapshot`、稳定 `AssetId` binary search 与完整 DAG cycle 校验；
-  Asset registry/状态机、Handle/Lease、异步 IO/Decode/Upload、Hash 计算 adapter、增量 Cooker 与产品资产
-  仍未实现。
+  M10-A2a 契约已冻结 Core 私有 XXH3-128 v1 `ContentHash` 计算与 Cooked payload 可选校验；
+  Asset registry/状态机、Handle/Lease、异步 IO/Decode/Upload、增量 Cooker 与产品资产仍未实现。
 
 
 ## 下一阶段契约
@@ -108,9 +108,50 @@ table 和 ContentHash；不可信 size/count 在分配前检查上限。Cooker �
 
 ### M10-A0 wire schema v1
 
-v1 只接受 schema `1.0`、little-endian 与 `XXH3-128 v1` 字段标识。M10-A0 不计算或重新验证
-XXH3；它只保证字段非零、算法 ID 已知和文件结构可信。未来接受更高 minor 前必须先定义新增字段的
-兼容规则，当前 parser 不静默跳过未知 schema、enum、flag 或 reserved 数据。
+v1 只接受 schema `1.0`、little-endian 与 `XXH3-128 v1` 字段标识。M10-A0 的 parser 只保证字段非零、
+算法 ID 已知和文件结构可信，不计算 Hash。M10-A2a 在 Core 私有 adapter 中实现 `XXH3-128 v1`
+摘要计算，并提供 Cooked payload 可选校验；校验失败返回结构化错误，不能静默接受。未来接受更高
+minor 前必须先定义新增字段的兼容规则，当前 parser 不静默跳过未知 schema、enum、flag 或 reserved
+数据。
+
+### M10-A2a ContentHash digest 契约
+
+模块边界：
+
+```text
+xxHash (PRIVATE, vcpkg)
+  -> Tina::Core private adapter  (digest only; no xxHash types in public headers)
+  -> Tina::AssetFormat optional verifyCookedAssetContentHash (uses Core digest)
+```
+
+公共 API（`Tina::Core`，无第三方类型）：
+
+| API | 职责 |
+| --- | --- |
+| `ContentHashAlgorithm::Xxh3_128V1` | 与 wire `HashAlgorithm::Xxh3_128V1` 对齐的算法版本标签 |
+| `digestContentHash(span, algorithm)` | 对 caller-owned bytes 计算版本化 ContentHash |
+| `digestContentHashV1(span)` | 固定 V1 的便捷入口 |
+
+算法契约：
+
+1. V1 使用 XXH3-128、默认 seed=0、无 secret。
+2. 输出 16 字节 little-endian：`low64` 在前、`high64` 在后，与 little-endian wire 一致。
+3. 全零 digest 视为无效并拒绝发布（与 `ContentHash::fromBytes` 一致；若算法返回全零则失败）。
+4. 空 span 合法：对空输入计算确定性摘要（仍须非全零才发布）。
+5. 公共头禁止 include `xxhash.h` 或暴露 `XXH*` 类型/宏。
+6. 成功热路径不分配；失败返回 `Core::Result`/`Status` 结构化错误。
+7. 不承担安全签名；即使 Hash 匹配，Runtime 仍须做 schema/bounds 校验。
+
+Cooked 校验（`Tina::AssetFormat`）：
+
+- `verifyCookedAssetContentHash(CookedAssetView)` 仅在 `hashAlgorithm == Xxh3_128V1` 时，对
+  **payload 字节**（不含 header/dependency table）计算 digest，并与 header `contentHash` 比较。
+- 算法不匹配、digest 失败、或 Hash 不匹配返回专用错误，不修改 view。
+- Manifest entry 的 ContentHash 是产物摘要字段，A2a 不对 Manifest 表本身做整表 re-hash。
+
+非目标：文件 IO、流式文件读、Catalog 磁盘加载、Handle/Lease、Cooker writer、密码学签名、
+StringId、bundle 完整性。
+
 
 Cooked Asset Header 固定112字节：
 

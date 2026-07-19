@@ -123,6 +123,13 @@ cmake --build --preset windows-vnext-release --target tina_asset_format_tests
 out\build\windows-msvc-vnext\bin\Release\tina_asset_format_tests.exe --gtest_color=yes
 ```
 
+### M10-A2a ContentHash digest
+
+`tina_core` PRIVATE 链接 vcpkg `xxHash`，提供 `digestContentHashV1` 与
+`AssetFormat::verifyCookedAssetContentHash`。基础 `tina_tests` 覆盖算法稳定性、endian 布局、
+空输入、与 Cooked payload 校验/篡改失败；公共头 isolation 禁止 `XXH*` token。A2a 不包含文件 IO、
+Handle/Lease 或 Cooker。
+
 ### M10-A1 CatalogSnapshot
 
 `tina_asset_tests` 是独立 GoogleTest executable；当前 Windows MSVC Debug/Release 均17/17。它覆盖
