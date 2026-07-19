@@ -1,8 +1,10 @@
 set(TINA_ASSET_TEST_SOURCES
     CatalogSnapshotTests.cpp
+    CookedAssetFileTests.cpp
     header_isolation/AssetErrorsHeader.cpp
     header_isolation/CatalogFileHeader.cpp
     header_isolation/CatalogSnapshotHeader.cpp
+    header_isolation/CookedAssetFileHeader.cpp
 )
 
 add_executable(tina_asset_tests ${TINA_ASSET_TEST_SOURCES})

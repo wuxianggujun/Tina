@@ -37,7 +37,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A1 `tina_asset` CatalogSnapshot | Debug/Release C++23 | 17/17 | `tina_asset_tests` 两配置均直接通过；覆盖 empty/single/multi entry、Manifest bytes 销毁后仍有效、binary search hit/miss、依赖 target index、chain/diamond DAG、两节点/多节点 cycle、深链不递归、容量/配置/PMR 失败回滚、move、析构归还、300 次创建/销毁与 header isolation。A1 不实现 Handle/Lease、文件 IO、Task、GPU upload、XXH3、cgltf 或产品资产路径 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2a Core ContentHash digest | Debug/Release C++23 | 218/218 | 基础 `tina_tests` 含 ContentHashDigest 5 项；`tina_asset_format_tests` 16/16 含 payload verify 成功/篡改失败。公共头无 `XXH*` token。A2a 不实现文件 IO、Handle/Lease、Catalog 磁盘加载或 Cooker |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2b Catalog file load | Debug/Release C++23 | 223/223 + 19/19 | 基础 `tina_tests` 含 ReadFile 5 项共 223；`tina_asset_tests` 19/19 含 Manifest 文件→Snapshot。不实现 Handle/Lease、async IO 或 Cooker |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2c Cooked object file load | Debug/Release C++23 | 见实现门禁 | owning CookedAssetFile、Catalog 路径解析、ContentHash/entry 对齐、失败不发布。不实现 Handle/Lease |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2c Cooked object file load | Debug/Release C++23 | 223/223 + 23/23 | 基础 `tina_tests` 223；`tina_asset_tests` 23/23 含 CookedAssetFile 4 项。不实现 Handle/Lease |
 
 
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M8-A `tina_scene` World/Transform | Debug/Release C++23 | 19/19 | `tina_scene_tests` Debug 与 Release 均直接运行通过；覆盖 generation/owner、keep-world/keep-local、父销毁/显式子树销毁、非递归20,000层传播、宽树删除、固定容量/PMR回滚与稳定构造错误、overflow/shear、四元数和错线程读写；Linux Scene 图尚未运行 |

@@ -11,5 +11,6 @@ inline constexpr Core::ErrorCode DependencyCycle{Core::ErrorDomain::Asset, 15};
 inline constexpr Core::ErrorCode AllocationFailed{Core::ErrorDomain::Asset, 16};
 // AssetFormat ContentHashMismatch uses 17.
 inline constexpr Core::ErrorCode CatalogFileLoadFailed{Core::ErrorDomain::Asset, 18};
+inline constexpr Core::ErrorCode CatalogEntryMismatch{Core::ErrorDomain::Asset, 19};
 
 } // namespace Tina::Asset::AssetErrorCode
