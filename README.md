@@ -90,12 +90,12 @@ dependency validation. `tina_asset_format_tests` passes 14/14 in Windows MSVC De
 not compute XXH3 or implement full DAG-cycle validation, file IO, the Asset registry/Handle/Lease lifecycle,
 workers/uploads, cgltf, Cooker writes, or the formal 2D/3D asset product path; Cooked glTF remains incomplete.
 
-M10-A1 freezes the standalone `Tina::Asset` `CatalogSnapshot` contract: a move-only immutable owning catalog
-built transactionally from a validated `CookedManifestView` on an injected `std::pmr` resource, AssetId binary
-search, resolved dependency entry indices, and iterative full DAG-cycle validation (`O(V + E)`, no recursive
-DFS). Failed Create never publishes a partial snapshot. Implementation follows in a separate commit. This slice
-does not implement Handle/Lease, registry state machines, file IO, Task workers, GPU upload, XXH3, cgltf,
-Cooker writes, or the formal product asset path; ADR 0016 remains Proposed.
+M10-A1 now provides the standalone `Tina::Asset` `CatalogSnapshot`: a move-only immutable owning catalog built
+transactionally from a validated `CookedManifestView` on an injected `std::pmr` resource, AssetId binary search,
+resolved dependency entry indices, and iterative full DAG-cycle validation (`O(V + E)`, no recursive DFS).
+Failed Create never publishes a partial snapshot. `tina_asset_tests` passes 17/17 in Windows MSVC Debug and
+Release. This slice does not implement Handle/Lease, registry state machines, file IO, Task workers, GPU upload,
+XXH3, cgltf, Cooker writes, or the formal product asset path; ADR 0016 remains Proposed.
 
 M7-C1c-a adds fixed-capacity PMR pointer-policy/route-ancestry storage and a double-buffered
 `UICommittedHitView`. Within one view, its effective-visible entries have unique, strictly increasing paint ordinals and

@@ -439,9 +439,9 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   `tina_asset_format_tests` 直接运行 GoogleTest；
 - M10-A0 不执行 XXH3、完整 DAG cycle、文件 IO、Asset registry/Handle/Lease、worker/upload、writer、
   atomic publish、cgltf 或产品资产替换；这些不能由“Manifest 可解析”推断为完成；
-- M10-A1 契约已冻结独立 `tina_asset`：owning 不可变 `CatalogSnapshot`、注入 PMR、Create 后脱离
-  Manifest bytes、AssetId binary search、依赖 target entry index 解析、完整 DAG cycle（迭代
-  `O(V + E)`）、失败回滚与独立 `tina_asset_tests`；
+- M10-A1 已完成独立 `tina_asset`：owning 不可变 `CatalogSnapshot`、注入 PMR、Create 后脱离 Manifest
+  bytes、AssetId binary search、依赖 target entry index 解析、完整 DAG cycle（迭代 `O(V + E)`）、
+  失败回滚与独立 `tina_asset_tests`；
 - M10-A1 不实现 Handle/Lease、registry 状态机、文件 IO、Task worker、GPU upload、XXH3 计算、
   Cooker/cgltf 或产品资产替换；ADR 0016 仍为 Proposed，不得由 A1 偷偷冻结；
 - 后台 CPU Decode 与主线程/GPU Upload 分队列，按任务数、字节数、时间预算；

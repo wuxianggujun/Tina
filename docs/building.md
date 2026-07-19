@@ -125,11 +125,11 @@ out\build\windows-msvc-vnext\bin\Release\tina_asset_format_tests.exe --gtest_col
 
 ### M10-A1 CatalogSnapshot
 
-`tina_asset_tests` 是独立 GoogleTest executable。它覆盖 owning 不可变 `CatalogSnapshot`、Manifest
-bytes 销毁后仍可查询、AssetId binary search、依赖 target entry index、合法 chain/diamond DAG、
-两节点/多节点 cycle、深链不递归、容量/非法配置/PMR 分配失败回滚、move 语义、析构归还 PMR、
-300 次创建/销毁与 public header isolation。A1 不实现 Handle/Lease、文件 IO、Task、GPU upload、XXH3、
-cgltf、writer 或正式资产样例：
+`tina_asset_tests` 是独立 GoogleTest executable；当前 Windows MSVC Debug/Release 均17/17。它覆盖
+owning 不可变 `CatalogSnapshot`、Manifest bytes 销毁后仍可查询、AssetId binary search、依赖 target
+entry index、合法 chain/diamond DAG、两节点/多节点 cycle、深链不递归、容量/非法配置/PMR 分配失败
+回滚、move 语义、析构归还 PMR、300 次创建/销毁与 public header isolation。A1 不实现 Handle/Lease、
+文件 IO、Task、GPU upload、XXH3、cgltf、writer 或正式资产样例：
 
 ```powershell
 cmake --build --preset windows-vnext-debug --target tina_asset_tests

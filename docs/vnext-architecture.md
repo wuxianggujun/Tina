@@ -48,7 +48,7 @@ Tina vNext 采用完整架构重构，但不采用一次提交替换全部 Runti
 | `tina_task` | 有界任务队列、协作取消、后台工作与主线程 completion | `tina_core`、`tina_platform` 的线程命名能力 | Asset 类型、渲染命令、强杀线程 |
 | `tina_runtime` | 组合根、生命周期、Frame Pipeline、Event Queue、GameStateStack、RenderFramePacket/pool；当前含 M7-C1c-b3b/b3c/b3d1/b3d2/b3e private UI route producer、primary-window Context owner、容量/layout coordinator、startup seed、scoped Game SDK UI facade 与 held Pointer claim bridge | core/platform/task 及 scene/asset/render/ui/audio 公共接口 | 具体 GLFW/bgfx/miniaudio factory、Singleton、Service Locator、玩法 |
 | `tina_scene` | 当前 M8-A 的固定容量 World、generation `EntityId`、Local/World Transform、默认 keep-world/显式 keep-local、父销毁提升/显式子树销毁与两阶段 publication；M8-B 的 resolved Camera/Sprite input 由 `tina_render` writer 消费，Scene-owned camera/render components 后置 | 当前只依赖 core；后续 asset 公共接口、render descriptors，EnTT 仅 PRIVATE component storage | GLFW 输入、TileMap 玩法、bgfx 类型 |
-| `tina_asset` | M10-A1 契约：owning 不可变 `CatalogSnapshot`、AssetId binary search、完整 DAG cycle 校验；后续状态机、依赖调度、取消、CPU completion 与 GPU upload 协议 | 当前 core + asset_format；后续 task、render 接口 | 直接解析源 glTF、具体 bgfx 调用、文件系统、Handle/Lease（A1 不实现） |
+| `tina_asset` | 当前 M10-A1：owning 不可变 `CatalogSnapshot`、AssetId binary search、完整 DAG cycle 校验；后续状态机、依赖调度、取消、CPU completion 与 GPU upload 协议 | 当前 core + asset_format；后续 task、render 接口 | 直接解析源 glTF、具体 bgfx 调用、文件系统、Handle/Lease（A1 不实现） |
 | `tina_asset_format` | Runtime/Cooker 共享的 Cooked header、schema、类型、依赖和 hash 编解码 | core | Asset registry、窗口、GPU、源格式 parser |
 | `tina_render` | typed handle、资源描述、RenderScene/DisplayList view、RenderSurfaceState、FramePinSink、Pass Scheduler | core | bgfx 公开类型、Scene registry、平台窗口细节、Asset/UI/Platform concrete pin |
 | `tina_render_bgfx` | bgfx 设备实现、shader/texture/buffer 上传与 Present | core/platform/render、bgfx | 游戏组件、源资产解析 |
@@ -463,14 +463,14 @@ CPU submit 时间或 bgfx 估算 stats 只能标为 informational。完整测量
 
 ## Asset 与 Cooker
 
-当前实施状态：`Tina::AssetFormat`（M10-A0）已提供固定 v1 little-endian Cooked/Manifest schema、
+当前实施状态到 M10-A1：`Tina::AssetFormat`（A0）已提供固定 v1 little-endian Cooked/Manifest schema、
 `AssetId`/`ContentHash` 强类型、确定性 object path 和成功路径零分配的 borrowed parser，并在暴露 view
-前校验结构、上限与直接依赖一致性。`Tina::Asset`（M10-A1）契约已冻结：在已解析 Manifest 上事务式
-构造 owning、不可变 `CatalogSnapshot`；Create 阶段注入 `std::pmr::memory_resource` 复制
-entry/dependency、把依赖目标解析为稳定 entry index，并用迭代着色算法做完整 DAG cycle 校验
-（`O(V + E)`，禁止递归）；Create 成功后不依赖原始 Manifest bytes。下面的 Asset 状态机、Handle/Lease、
-队列、文件 IO、Cooker/cgltf 和 GPU upload 都仍是目标契约；A0/A1 均不计算 XXH3。ADR 0016 仍为
-Proposed，A1 不实现 Handle/Lease/retirement。
+前校验结构、上限与直接依赖一致性。`Tina::Asset`（A1）在已解析 Manifest 上事务式构造 owning、
+不可变 `CatalogSnapshot`：Create 阶段注入 `std::pmr::memory_resource` 复制 entry/dependency、把依赖
+目标解析为稳定 entry index，并用迭代着色算法做完整 DAG cycle 校验（`O(V + E)`，禁止递归）；
+Create 成功后不依赖原始 Manifest bytes。下面的 Asset 状态机、Handle/Lease、队列、文件 IO、
+Cooker/cgltf 和 GPU upload 都仍是目标契约；A0/A1 均不计算 XXH3。ADR 0016 仍为 Proposed，A1 未实现
+Handle/Lease/retirement。
 
 Runtime 只读取 Cooked Asset，不直接解析源 glTF、图片、字体或 shader。资产状态为：
 
@@ -623,7 +623,7 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
 5. **Scene/2D**：M8-A 已完成 generation Entity、固定容量 World、Local/World Transform、循环诊断与非递归传播；M8-B 已完成后端无关 RenderScene extraction foundation 与 Headless/Null 2D infrastructure sample；后续补 Scene command buffer、Camera/Sprite component storage、Asset/Cooker、chunk culling、bgfx Sprite pass 和正式 2D 产品样例；
 6. **Render/3D**：M9-A 已完成 Perspective/Mesh3D 的 CPU/Null extraction foundation；M9-B/M9-C 已接入
    私有 fixture 级 canonical Cube/depth 与 Sprite2D 可见样例，Pass Scheduler、bgfx typed handle 和正式资产驱动 Render 仍后置；
-7. **Asset**：M10-A0 已完成 Cooked Manifest wire-format 基础，M10-A1 契约已冻结 owning CatalogSnapshot 与
+7. **Asset**：M10-A0 已完成 Cooked Manifest wire-format 基础，M10-A1 已完成 owning CatalogSnapshot 与
   完整 DAG cycle；后续补双阶段队列、文件 IO/Handle/Lease、
    Cooker/cgltf，并让纹理和静态 glTF 进入正式 2D/3D；
 8. **产品 2D/UI/Audio**：正式 Catalog TileMap、Box2D dynamic body、设置页 Checkbox/Slider 接入

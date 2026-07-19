@@ -13,11 +13,10 @@ Core 强类型，`CookedAssetView`/`CookedManifestView` 对 caller-owned bytes �
 little-endian 解析。该 target 只 PUBLIC 依赖 `Tina::Core`，不链接 xxHash、文件系统、Task、Render、
 cgltf 或 Legacy 资源代码。
 
-vNext M10-A1 冻结并即将实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManifestView` 上事务式
-构造不可变、owning 的 `CatalogSnapshot`。Snapshot 只在 Create 阶段通过注入的
-`std::pmr::memory_resource` 分配，成功后完全拥有 entry/dependency 表；原始 Manifest bytes 销毁后仍可
-查询。该切片仍不链接文件系统、Task、Render、xxHash 实现或 Legacy 资源代码，也不实现 Handle/Lease/
-状态机。
+vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManifestView` 上事务式构造
+不可变、owning 的 `CatalogSnapshot`。Snapshot 只在 Create 阶段通过注入的 `std::pmr::memory_resource`
+分配，成功后完全拥有 entry/dependency 表；原始 Manifest bytes 销毁后仍可查询。该切片仍不链接
+文件系统、Task、Render、xxHash 实现或 Legacy 资源代码，也不实现 Handle/Lease/状态机。
 
 
 ## 已知问题
@@ -26,8 +25,7 @@ vNext M10-A1 冻结并即将实现 `Tina::Asset`/`tina_asset`：在已解析的 
 - best-effort 取消不能中断已经开始的底层文件读取，只能阻止其结果被提交；
 - 资源监听仍逐项查询文件时间，缺少独立预算和指标；
 - M10-A0 已实现 Cooked wire schema、稳定 `AssetId` 值类型、版本化 `ContentHash` 字段与只读校验；
-  M10-A1 契约已冻结 owning `CatalogSnapshot`、稳定 `AssetId` binary search 与完整 DAG cycle 校验
-  （实现随后续提交）；
+  M10-A1 已实现 owning `CatalogSnapshot`、稳定 `AssetId` binary search 与完整 DAG cycle 校验；
   Asset registry/状态机、Handle/Lease、异步 IO/Decode/Upload、Hash 计算 adapter、增量 Cooker 与产品资产
   仍未实现。
 

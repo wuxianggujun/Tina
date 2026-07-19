@@ -122,11 +122,10 @@ caller-owned borrowed view。parser 在发布 view 前校验 hard limit、checke
 zero padding、排序/重复、依赖存在与 kind。该切片只完成 wire-format 基础，不计算 XXH3、不做完整
 DAG cycle、文件 IO、Asset registry/Handle/Lease、worker/upload、cgltf、Cooker writer 或正式资产样例。
 
-M10-A1 契约已冻结独立 `tina_asset`：owning 不可变 `CatalogSnapshot` 在注入 `std::pmr` 上事务式复制
+M10-A1 已新增独立 `tina_asset`：owning 不可变 `CatalogSnapshot` 在注入 `std::pmr` 上事务式复制
 已解析 Manifest，Create 后不依赖原始 bytes；`find(AssetId)` 为 binary search；依赖目标解析为稳定
-entry index；完整 DAG cycle 使用迭代着色算法（`O(V + E)`，禁止递归）。实现随后续提交。该切片不实现
-Handle/Lease、registry 状态机、文件 IO、Task、GPU upload、XXH3、cgltf 或正式资产样例；ADR 0016 仍为
-Proposed。
+entry index；完整 DAG cycle 使用迭代着色算法（`O(V + E)`，禁止递归）。该切片不实现 Handle/Lease、
+registry 状态机、文件 IO、Task、GPU upload、XXH3、cgltf 或正式资产样例；ADR 0016 仍为 Proposed。
 
 ## 当前 Legacy 已完成基线
 
@@ -178,8 +177,10 @@ M10-A0 当前 Windows MSVC Debug/Release 均直接通过独立 `tina_asset_forma
 `tina_tests` 两配置仍为213/213，`tina_sample_null --frames=300` 均返回0。该结果证明格式边界与
 只读校验，不证明 AssetSystem、异步加载、Cooker、glTF 转换或2D/3D正式资产样例。
 
-M10-A1 新增独立 `tina_asset_tests`（设计契约已冻结；实现门禁见后续提交）。该结果只证明 owning
-Catalog 与 DAG cycle 边界，不证明 Handle/Lease、异步加载、Cooker 或正式资产样例。
+M10-A1 当前 Windows MSVC Debug/Release 均直接通过独立 `tina_asset_tests` 17/17；基础 `tina_tests`
+仍为213/213，`tina_asset_format_tests` 14/14，`tina_sample_null --frames=300` 返回0；bgfx Release
+回归 `tina_render_bgfx_tests` 43/43，`tina_sample_2d_infrastructure_bgfx` 300帧资源账本平衡。该结果
+只证明 owning Catalog 与 DAG cycle 边界，不证明 Handle/Lease、异步加载、Cooker 或正式资产样例。
 
 Linux 最新 paint/DisplayList/bridge Null 门禁也已完成：GCC 13.4 通过基础205/205、
 `tina_ui_tests` 92/92、`tina_runtime_ui_tests` 46/46、bridge 12/12与Null样例300帧；
