@@ -105,6 +105,12 @@ NUL 的严格 UTF-8，logical extent 必须非零且可表示为 GLFW `int`；�
 BorderlessFullscreen，不承诺 exclusive fullscreen。公共 factory header 只返回 Tina
 `IPlatformBackend`，不暴露 `GLFWwindow*` 或 native handle。
 
+Win32/GLFW 3.4 在窗口最小化期间可能合法返回 logical `0x0` 与 framebuffer `0x0`。Tina 的窗口快照
+要求 logical extent 始终为正，因此 adapter 只在已有历史值、窗口已 iconified 或 framebuffer 已为零时，
+沿用最后一次有效 logical extent；framebuffer 仍提交 `0x0`，继续驱动 WindowSurface `Suspended` 语义。
+初始化阶段没有历史值，或非最小化路径返回非法 logical extent 时仍以结构化 backend failure 拒绝，不能
+用配置默认值掩盖真实错误。
+
 GLFW C callback 不调用 UI、Gameplay 或销毁系统，只更新 backend-owned final state、向当前有界
 `PlatformFrameBuilder` 追加归一化 transition，或记录 first-sticky failure。Poll 的任一操作、callback
 或 finalize 失败都会 `discardFrame()`；后续 Poll 重新从 final physical snapshot 发出两条 stream reset，
@@ -119,7 +125,8 @@ M7-C1c-b3c 接入 `EngineHost`，startup UI metrics seed 与 Game-facing retaine
 M7-C1c-b3d2 被 Runtime 消费，但二者都不属于 GLFW
 公共 API。WindowSurface snapshot/lease 已在 M7-B1 接入到
 Platform/Render 组合；M7-B2 已完成真实 bgfx clear/present 和基础 GPU surface lifecycle，仍不覆盖
-后续 UI pass、Pass Scheduler 或 resize/最小化/恢复自动化。
+后续 UI pass 或 Pass Scheduler。Windows iconify 已有真实 GLFW 自动化；restore 往返、OS Pointer Capture
+与完整 DPI 交互仍未覆盖。
 
 `WindowInputSnapshot` 按窗口保存：
 
@@ -414,10 +421,11 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
   move-only `NativeWindowSurfaceLease`、重复 lease 拒绝、Render 创建失败与窗口发布失败逆序回滚、
   surface snapshot 只由 committed metrics 派生、resize/content-scale/suspend 改变才递增
   `surfaceRevision`，以及 NullRender suspended 帧维护调用但不 present、不增加 submission index；
-- Windows 最新 D0 Debug/Release 均通过基础 `tina_tests` 207/207、独立 UI 92/92、独立
-  Runtime→UI 51/51、UI→Render bridge12/12、bgfx专项11/11，以及Null/Desktop样例300帧；
-  GLFW专项25/25与Platform样例300帧保留前序门禁；Release clean，本轮 Debug D3D11
-  `RefCount is 3 (expected 0)` 为已记录第三方 debug layer 提示；
+- Windows 当前 M8-B Debug 平台复验通过 GLFW专项26/26与Platform样例300帧；新增真实
+  `glfwIconifyWindow()` 回归覆盖最小化时复用最后有效 logical extent，同时保留 framebuffer `0x0`。
+  同一 Debug bgfx 图通过专项16/16，Desktop样例连续3次各300帧返回0并完成 root/Render/Runtime 回收；
+  本轮没有重新截图，画面正确仍引用前序 D2 可见证据。Release平台/bgfx仍保留前序门禁；Debug D3D11
+  `RefCount is 3 (expected 0)` 为已记录第三方 debug layer 提示，不能单独作为 Tina 泄漏结论；
 - Linux C1c-b3e GCC 13.4 与 Clang 22.1.8 sanitizer Null 图均通过基础194/194、独立 UI 81/81、
   独立 Runtime→UI 46/46与Null样例300帧，Clang 无 sanitizer 诊断。上一 C1c-b3a Pointer/Input
   门禁通过基础185/185、GLFW专项23/23；
@@ -436,7 +444,7 @@ GLFW gamepad API 是 sampled polling，而不是可枚举全部边沿的事件�
 
 完整 M7-E Platform 输入仍需达到：
 
-- 最小化、恢复与 OS Pointer Capture 的真实交互门禁；
+- restore、最小化→恢复往返与 OS Pointer Capture 的真实交互门禁；
 - 100%、150%、200% DPI 下 Pointer 命中和 framebuffer viewport 一致；
 - Windows IMM32 composition/commit/cancel 与窗口销毁顺序通过测试；
 - production GLFW Gamepad sampled diff/registry 保持 M7-A 已冻结的 owner/slot、最终快照和生命周期

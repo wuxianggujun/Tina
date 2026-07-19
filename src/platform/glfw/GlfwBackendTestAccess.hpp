@@ -40,6 +40,7 @@ struct GlfwPointerInjection final {
 
 [[nodiscard]] Core::Status requestGlfwCloseForTest(IPlatformBackend& backend) noexcept;
 [[nodiscard]] Core::Status resizeGlfwWindowForTest(IPlatformBackend& backend, LogicalExtent extent) noexcept;
+[[nodiscard]] Core::Status iconifyGlfwWindowForTest(IPlatformBackend& backend) noexcept;
 [[nodiscard]] Core::Status failNextGlfwPollForTest(IPlatformBackend& backend) noexcept;
 [[nodiscard]] Core::Status forceGlfwSuspendedWaitPathForTest(IPlatformBackend& backend,
                                                             double waitTimeoutSeconds) noexcept;

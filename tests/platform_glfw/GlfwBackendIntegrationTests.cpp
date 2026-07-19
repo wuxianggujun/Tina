@@ -479,6 +479,47 @@ TEST(GlfwBackendIntegrationTests, ResizeCommitsOneMetricsRevisionAndMatchingLife
     (*backend)->shutdown();
 }
 
+#if defined(_WIN32)
+TEST(GlfwBackendIntegrationTests, IconifiedWindowKeepsLastPositiveLogicalExtent)
+{
+    auto params = hiddenWindowParams();
+    params.primaryWindow.initiallyVisible = true;
+    auto backend = createGlfwPlatformBackend(params);
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+
+    auto firstPoll = (*backend)->pollFrame();
+    ASSERT_TRUE(firstPoll.has_value()) << firstPoll.error().message;
+    const WindowFrameSnapshot* firstWindow = firstPoll->frame()->primaryWindow();
+    ASSERT_NE(firstWindow, nullptr);
+    const LogicalExtent lastActiveLogicalExtent = firstWindow->metrics.logicalExtent;
+    ASSERT_GT(lastActiveLogicalExtent.width, 0U);
+    ASSERT_GT(lastActiveLogicalExtent.height, 0U);
+
+    ASSERT_TRUE(Detail::iconifyGlfwWindowForTest(**backend).has_value());
+    bool reachedIconifiedState = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while (!reachedIconifiedState && std::chrono::steady_clock::now() < deadline)
+    {
+        auto poll = (*backend)->pollFrame();
+        ASSERT_TRUE(poll.has_value()) << poll.error().message;
+        const WindowFrameSnapshot* window = poll->frame()->primaryWindow();
+        ASSERT_NE(window, nullptr);
+        EXPECT_EQ(window->metrics.logicalExtent, lastActiveLogicalExtent);
+        reachedIconifiedState = window->metrics.minimized;
+        if (reachedIconifiedState)
+        {
+            EXPECT_EQ(window->metrics.framebufferExtent, (FramebufferExtent{0, 0}));
+        }
+        if (!reachedIconifiedState)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
+    }
+    EXPECT_TRUE(reachedIconifiedState);
+    (*backend)->shutdown();
+}
+#endif
+
 TEST(GlfwBackendIntegrationTests, FailedPartialPollRecoversBothStreamsFromFinalSnapshots)
 {
     auto backend = createGlfwPlatformBackend(hiddenWindowParams());

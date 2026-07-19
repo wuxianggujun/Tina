@@ -184,7 +184,8 @@ struct WindowCreatePlan final {
     return Core::success();
 }
 
-[[nodiscard]] Core::Result<WindowMetricsSnapshot> readWindowMetrics(GLFWwindow* window, WindowId id, u64 revision)
+[[nodiscard]] Core::Result<WindowMetricsSnapshot> readWindowMetrics(GLFWwindow* window, WindowId id, u64 revision,
+                                                                    LogicalExtent lastValidLogicalExtent)
 {
     int logicalWidth = 0;
     int logicalHeight = 0;
@@ -204,10 +205,19 @@ struct WindowCreatePlan final {
     {
         return std::unexpected(std::move(status.error()));
     }
-    if (logicalWidth <= 0 || logicalHeight <= 0 || framebufferWidth < 0 || framebufferHeight < 0 ||
-        !std::isfinite(scaleX) || !std::isfinite(scaleY) || scaleX <= 0.0F || scaleY <= 0.0F)
+    const bool nativeLogicalExtentUnavailable = logicalWidth <= 0 || logicalHeight <= 0;
+    const bool canReuseLastLogicalExtent =
+        nativeLogicalExtentUnavailable && lastValidLogicalExtent.width != 0 && lastValidLogicalExtent.height != 0 &&
+        (minimized == GLFW_TRUE || framebufferWidth == 0 || framebufferHeight == 0);
+    if ((nativeLogicalExtentUnavailable && !canReuseLastLogicalExtent) || framebufferWidth < 0 ||
+        framebufferHeight < 0 || !std::isfinite(scaleX) || !std::isfinite(scaleY) || scaleX <= 0.0F || scaleY <= 0.0F)
     {
         return Core::failure(PlatformErrorCode::BackendOperationFailed, "GLFW returned invalid primary window metrics");
+    }
+    if (canReuseLastLogicalExtent)
+    {
+        logicalWidth = static_cast<int>(lastValidLogicalExtent.width);
+        logicalHeight = static_cast<int>(lastValidLogicalExtent.height);
     }
 
     return WindowMetricsSnapshot{
@@ -600,7 +610,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
 
     [[nodiscard]] Core::Status refreshInitialState()
     {
-        auto latestMetrics = readWindowMetrics(window_, windowId_, 1);
+        auto latestMetrics = readWindowMetrics(window_, windowId_, 1, metrics_.logicalExtent);
         if (!latestMetrics)
         {
             return Core::failure(std::move(latestMetrics.error()));
@@ -634,7 +644,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
 
     [[nodiscard]] Core::Result<bool> refreshMetricsFromNative(bool commitSurfaceSnapshot)
     {
-        auto latestMetrics = readWindowMetrics(window_, windowId_, metrics_.revision);
+        auto latestMetrics = readWindowMetrics(window_, windowId_, metrics_.revision, metrics_.logicalExtent);
         if (!latestMetrics)
         {
             return std::unexpected(std::move(latestMetrics.error()));
@@ -772,6 +782,27 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         clearGlfwErrors();
         glfwSetWindowSize(window_, static_cast<int>(extent.width), static_cast<int>(extent.height));
         return checkGlfwOperation("glfwSetWindowSize");
+    }
+
+    [[nodiscard]] Core::Status iconifyForTest() noexcept
+    {
+        if (stopped_ || !hasLiveWindow())
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The GLFW test backend is stopped");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW test operation must run on the creating thread");
+        }
+        clearGlfwErrors();
+        glfwIconifyWindow(window_);
+        if (auto status = checkGlfwOperation("glfwIconifyWindow"); !status)
+        {
+            return status;
+        }
+        metricsDirty_ = true;
+        return Core::success();
     }
 
     [[nodiscard]] Core::Status failNextPollForTest() noexcept
@@ -1403,7 +1434,7 @@ createBackendUnchecked(const PlatformBackendCreateParams& params, bool publishDu
     {
         return std::unexpected(std::move(windowId.error()));
     }
-    auto initialMetrics = readWindowMetrics(nativeWindow, *windowId, 1);
+    auto initialMetrics = readWindowMetrics(nativeWindow, *windowId, 1, {});
     if (!initialMetrics)
     {
         return std::unexpected(std::move(initialMetrics.error()));
@@ -1478,6 +1509,16 @@ Core::Status resizeGlfwWindowForTest(IPlatformBackend& backend, LogicalExtent ex
         return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
     }
     return glfwBackend->resizeForTest(extent);
+}
+
+Core::Status iconifyGlfwWindowForTest(IPlatformBackend& backend) noexcept
+{
+    auto* glfwBackend = glfwBackendForTest(backend);
+    if (glfwBackend == nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
+    }
+    return glfwBackend->iconifyForTest();
 }
 
 Core::Status failNextGlfwPollForTest(IPlatformBackend& backend) noexcept
