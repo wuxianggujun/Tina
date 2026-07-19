@@ -267,6 +267,10 @@ Core IO 首期只提供：
 - 临时文件写入、flush、原子 replace；
 - 包含 OS error code、UTF-8 路径和操作名称的 Result。
 
+M10-A2b 契约先落地其中的有界 `readFile`：`ReadFileConfig{maxBytes, memoryResource*}`，UTF-8
+路径、`std::filesystem` 内部、常规文件、分配前 size 上限、成功返回
+`std::pmr::vector<std::byte>`。原子写/normalize 完整套件仍后置。
+
 Cooker 依赖原子写保证失败时旧产物仍有效。路径测试覆盖空路径、`.`、`..`、重复分隔符、
 不存在路径、Unicode、只读、权限失败、跨卷 replace 和 traversal 边界。
 

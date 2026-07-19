@@ -186,6 +186,9 @@ M10-A2a 已实现：Core 私有 XXH3-128 v1 计算 `ContentHash`，可选校验 
 xxHash 类型。Windows Debug/Release 基础 `tina_tests` 218/218、`tina_asset_format_tests` 16/16。
 不包含文件 IO、Handle/Lease 或 Cooker。
 
+M10-A2b 契约已冻结：Core 有界 `readFile` 与 Manifest 文件→`CatalogSnapshot` 加载闭环。实现随后续
+提交；仍不包含 Handle/Lease、async IO 或 Cooker。
+
 Linux 最新 paint/DisplayList/bridge Null 门禁也已完成：GCC 13.4 通过基础205/205、
 `tina_ui_tests` 92/92、`tina_runtime_ui_tests` 46/46、bridge 12/12与Null样例300帧；
 Clang 22.1.8 + libstdc++15.2 在 ASan/UBSan/LSan 下通过相同205/92/46/12与Null样例300帧，

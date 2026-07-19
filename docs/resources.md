@@ -27,6 +27,7 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
 - M10-A0 已实现 Cooked wire schema、稳定 `AssetId` 值类型、版本化 `ContentHash` 字段与只读校验；
   M10-A1 已实现 owning `CatalogSnapshot`、稳定 `AssetId` binary search 与完整 DAG cycle 校验；
   M10-A2a 已实现 Core 私有 XXH3-128 v1 `ContentHash` 计算与 Cooked payload 可选校验；
+  M10-A2b 契约已冻结有界 Manifest 文件读与 `loadCatalogSnapshotFromManifestFile`；
   Asset registry/状态机、Handle/Lease、异步 IO/Decode/Upload、增量 Cooker 与产品资产仍未实现。
 
 
@@ -274,6 +275,46 @@ DAG cycle 校验（Create 阶段）：
 queue、GPU upload、UploadTicket、retirement ledger、XXH3 计算、cgltf、`tina_assetc`、Cooker writer、
 atomic publish、glTF/纹理/字体/shader 转换、2D/3D 正式产品样例、hot reload、Bundle/Patch、自动 LRU、
 网络 Asset。
+
+### M10-A2b Catalog 文件加载契约
+
+Core 最小读文件 API（`Tina::Core`）：
+
+| API | 职责 |
+| --- | --- |
+| `ReadFileConfig` | `maxBytes` + `memoryResource*`；禁止默认堆 fallback |
+| `readFile(utf8Path, config)` | 同步读取整个文件到 owning `std::pmr::vector<std::byte>` |
+
+`readFile` 契约：
+
+1. 路径为 UTF-8 `string_view`；空路径、内嵌 NUL 失败。
+2. 仅读取常规文件；目录/非文件失败。
+3. 先查大小：`size > maxBytes` 或 `size == 0` 且不允许空文件时失败且不分配大缓冲。
+4. `maxBytes == 0` 或 `memoryResource == nullptr` → `InvalidArgument`。
+5. 默认 `maxBytes` 上限不超过实现 hard cap（建议 256 MiB，与 Manifest wire limit 对齐）。
+6. 读失败保留结构化 `CoreErrorCode::Io`/`NotFound`/`PermissionDenied`，可附 native code。
+7. 成功返回 owning bytes；调用方负责生命周期。
+8. 不实现 async、mmap、目录遍历、write、atomic replace（后续 Cooker）。
+
+Asset Catalog 加载（`Tina::Asset`）：
+
+```text
+utf8Path
+  -> Core::readFile(maxFileBytes, catalog PMR or dedicated file PMR)
+  -> AssetFormat::parseCookedManifestView(bytes, limits)
+  -> CatalogSnapshot::Create(view, catalogConfig)
+  -> destroy temporary file bytes (Snapshot owns catalog data)
+```
+
+| API | 职责 |
+| --- | --- |
+| `CatalogFileLoadConfig` | `CatalogConfig` + `CookedManifestLimits` + `maxFileBytes` |
+| `loadCatalogSnapshotFromManifestFile(path, config)` | 事务式文件→Snapshot |
+
+失败不发布 Snapshot；临时文件缓冲全部释放。可选后续对 Cooked object 再 `readFile` +
+`verifyCookedAssetContentHash`，A2b 首期只闭合 Manifest→CatalogSnapshot。
+
+非目标：Handle/Lease、registry、Task/IO thread、GPU upload、Cooker writer、目录扫描、热重载。
 
 
 默认 hard limits 为：单 Cooked 文件与 payload 最大1 GiB、单资产最多4096个直接依赖、Manifest

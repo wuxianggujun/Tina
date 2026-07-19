@@ -123,6 +123,12 @@ cmake --build --preset windows-vnext-release --target tina_asset_format_tests
 out\build\windows-msvc-vnext\bin\Release\tina_asset_format_tests.exe --gtest_color=yes
 ```
 
+### M10-A2b Catalog file load
+
+`readFile` 与 `loadCatalogSnapshotFromManifestFile` 的测试进入基础 `tina_tests` 与
+`tina_asset_tests`：覆盖空路径、不存在、超限、合法 Manifest 文件→Snapshot、失败不泄漏 PMR。
+A2b 不包含 Handle/Lease、async IO 或 Cooker。
+
 ### M10-A2a ContentHash digest
 
 `tina_core` PRIVATE 链接 vcpkg `xxHash`，提供 `digestContentHashV1` 与
