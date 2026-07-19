@@ -13,14 +13,24 @@ Core 强类型，`CookedAssetView`/`CookedManifestView` 对 caller-owned bytes �
 little-endian 解析。该 target 只 PUBLIC 依赖 `Tina::Core`，不链接 xxHash、文件系统、Task、Render、
 cgltf 或 Legacy 资源代码。
 
+vNext M10-A1 冻结并即将实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManifestView` 上事务式
+构造不可变、owning 的 `CatalogSnapshot`。Snapshot 只在 Create 阶段通过注入的
+`std::pmr::memory_resource` 分配，成功后完全拥有 entry/dependency 表；原始 Manifest bytes 销毁后仍可
+查询。该切片仍不链接文件系统、Task、Render、xxHash 实现或 Legacy 资源代码，也不实现 Handle/Lease/
+状态机。
+
+
 ## 已知问题
 
 - 当前解析、CPU Ready 和 GPU Upload 仍在同一个受预算约束的主线程 completion 回调内连续完成，还没有独立上传队列；
 - best-effort 取消不能中断已经开始的底层文件读取，只能阻止其结果被提交；
 - 资源监听仍逐项查询文件时间，缺少独立预算和指标；
 - M10-A0 已实现 Cooked wire schema、稳定 `AssetId` 值类型、版本化 `ContentHash` 字段与只读校验；
+  M10-A1 契约已冻结 owning `CatalogSnapshot`、稳定 `AssetId` binary search 与完整 DAG cycle 校验
+  （实现随后续提交）；
   Asset registry/状态机、Handle/Lease、异步 IO/Decode/Upload、Hash 计算 adapter、增量 Cooker 与产品资产
   仍未实现。
+
 
 ## 下一阶段契约
 
@@ -126,8 +136,106 @@ dependencyFirst/dependencyCount + cookedFileBytes`。Cooked 与 Manifest 共用2
 布局是 canonical 的：Cooked 必须为 `112B header -> sorted dependency table -> zero padding -> payload -> EOF`；
 Manifest 必须为 `64B header -> AssetId 严格升序 entries -> flattened dependency table -> EOF`。
 Manifest 每个 dependency range 必须无 gap/overlap 并完整覆盖 dependency table；子范围严格按 AssetId
-排序，目标必须存在且 `expectedKind` 匹配。A0 拒绝 self dependency，但完整 DAG cycle 检测属于后续
-Catalog/AssetSystem validation，不能把 A0 描述成已完成依赖调度。
+排序，目标必须存在且 `expectedKind` 匹配。A0 拒绝 self dependency，但不做完整 DAG cycle 检测。
+完整 cycle 校验属于 M10-A1 `CatalogSnapshot::Create`，不能把 A0 描述成已完成依赖调度。
+
+### M10-A1 CatalogSnapshot 契约
+
+模块边界：
+
+```text
+Tina::Core
+  -> Tina::AssetFormat   (borrowed CookedManifestView / wire types)
+  -> Tina::Asset         (owning CatalogSnapshot)
+```
+
+`tina_asset` 只 PUBLIC 依赖 `Tina::Core` 与 `Tina::AssetFormat`，PRIVATE 使用 `Tina::ProjectOptions`。
+禁止依赖 Runtime、Render、Task、UI、GLFW、bgfx、Legacy、EASTL、xxHash 实现或文件系统。
+
+数据流：
+
+```text
+caller-owned Manifest bytes
+  -> AssetFormat::parseCookedManifestView (A0, zero-alloc borrow)
+  -> Asset::CatalogSnapshot::Create(view, CatalogConfig)
+       copy entries/deps into injected PMR
+       resolve dependency targets to stable entry index
+       iterative DAG cycle validation
+  -> immutable CatalogSnapshot (owning)
+  -> later AssetSystem (not in A1) consumes Snapshot for load planning
+```
+
+公共类型：
+
+| 类型 | 职责 |
+| --- | --- |
+| `CatalogConfig` | Create 前复制的容量与 `std::pmr::memory_resource*`；禁止默认堆 fallback |
+| `CatalogSnapshot` | move-only、不可变、owning 的 Catalog 快照 |
+| `CatalogEntry` | 单条资产的 owning 小值（AssetId/ContentHash/kind/typeVersion/cookedFileBytes/dependencyCount） |
+| `CatalogDependency` | 单条依赖的 owning 小值（AssetId、resolved `targetEntryIndex`、expectedKind、flags） |
+
+`CatalogSnapshot::Create` 成功后：
+
+1. 完全拥有需要的 Catalog 数据；不保留 Manifest byte buffer 或 wire offset。
+2. 原始 Manifest bytes 可立即销毁/修改；Snapshot 仍可 `find`/`entry`/`dependency`。
+3. Snapshot 创建完成后不可变；只允许 move 与析构。
+4. 只能在 Create 阶段分配；查询路径零分配。
+5. 使用 `CatalogConfig::memoryResource`；`nullptr` 或非法容量立即失败。
+6. 不使用全局 allocator 或隐藏 heap fallback。
+7. 构造失败不得发布部分 Snapshot；输出对象保持默认空状态。
+8. allocation failure 回滚已构造的 PMR 对象后返回结构化错误。
+9. `find(AssetId)` 对已排序 entry 做 binary search；首期禁止 `unordered_map`。
+10. 内部依赖边在 Create 时解析为稳定 entry index，运行期查询不再二次 AssetId 查找。
+11. 公共接口不暴露内部 PMR container、裸指针或 AssetFormat wire offset。
+12. accessor 返回 owning 小值；若未来提供 borrowed span，失效点为 Snapshot move 或析构。
+13. move 后源对象进入可析构、不可查询的空状态（`operator bool() == false`）。
+14. 禁止复制大型 Snapshot（copy ctor/assign deleted）。
+
+`CatalogConfig` 容量上限：
+
+- `maxEntries`、`maxDependencies`、`maxDependenciesPerAsset` 必须 `> 0` 时才允许对应非空表；
+  空 Manifest（0 entry / 0 dependency）在配置允许且 `memoryResource != nullptr` 时合法。
+- 任一上限不得超过 `AssetFormat::Wire` 对应 hard limit（1,000,000 entries / 4,000,000 deps /
+  4096 per asset）。
+- Create 时若 Manifest 的 entry/dependency 计数超过配置上限，返回 capacity 错误且不发布。
+
+DAG cycle 校验（Create 阶段）：
+
+1. 拒绝 self dependency（A0 已保证；A1 仍作为防御性失败路径）。
+2. 拒绝任意长度依赖环。
+3. 允许 diamond DAG 与任意合法深链。
+4. 禁止递归 DFS；使用显式预分配 color/stack scratch（同注入 PMR）。
+5. 目标复杂度 `O(V + E)`：每个 entry 与每条依赖边访问常数次。
+6. 专用错误码 `DependencyCycle`；失败消息可记录形成环的 AssetId chain（仅失败路径，不进入成功热路径）。
+7. 不重新承担 A0 的 wire bounds/layout/magic/schema 校验；输入必须是已成功解析的
+   `CookedManifestView`。
+
+错误码（`Tina::Asset::AssetErrorCode`，`ErrorDomain::Asset`，与 A0 的 1–12 编号分离）：
+
+| Code | 含义 |
+| --- | --- |
+| `InvalidCatalogConfig` | `memoryResource == nullptr`、上限为0但需要存储、或超过 wire hard limit |
+| `CatalogCapacityExceeded` | Manifest 计数超过 `CatalogConfig` 上限 |
+| `DependencyCycle` | 发现任意长度依赖环 |
+| `AllocationFailed` | 注入 PMR 分配失败（含 `std::bad_alloc`） |
+
+失败回滚：
+
+- Create 内部任何步骤失败时，销毁全部临时 PMR storage 与 scratch，不发布 `CatalogSnapshot`。
+- 调用方已有 Snapshot 不会被 `Create` 原地修改；`Create` 返回新对象或错误。
+- 析构与 move-assign 必须 `noexcept` 归还全部 PMR 字节。
+
+后续 AssetSystem 消费方式（非本切片）：
+
+- 以 `CatalogSnapshot` 为只读 Catalog 真相来源，按 `AssetId`/`entry index` 规划加载顺序；
+- Handle/Lease/registry slot、文件 IO、Task worker、GPU upload 均在后续切片接入；
+- 本切片不把 ADR 0016（仍为 Proposed）的 Handle/Lease/retirement 标为已接受。
+
+本切片非目标：`AssetHandle`/`AssetLease`、registry 状态机、File IO、Task/IO thread、Main completion
+queue、GPU upload、UploadTicket、retirement ledger、XXH3 计算、cgltf、`tina_assetc`、Cooker writer、
+atomic publish、glTF/纹理/字体/shader 转换、2D/3D 正式产品样例、hot reload、Bundle/Patch、自动 LRU、
+网络 Asset。
+
 
 默认 hard limits 为：单 Cooked 文件与 payload 最大1 GiB、单资产最多4096个直接依赖、Manifest
 最大256 MiB/1,000,000 entries/4,000,000 dependencies、payload alignment 为2次幂且不超过4096。

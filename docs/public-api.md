@@ -972,6 +972,76 @@ hard limit、checked range arithmetic、canonical offset/layout、zero padding�
 AssetId。完整 DAG cycle、文件 IO、owning decoded manifest、Asset registry/Handle/Lease、Task、GPU upload、
 XXH3 计算、cgltf 与 writer 不属于该 API。
 
+## M10-A1 CatalogSnapshot 公共边界
+
+`Tina::Asset`（target `tina_asset`，alias `Tina::Asset`）在已解析的
+`AssetFormat::CookedManifestView` 上构造 owning、不可变、move-only 的 `CatalogSnapshot`。
+
+```cpp
+namespace Tina::Asset {
+
+struct CatalogConfig {
+    Core::u32 maxEntries = 0;
+    Core::u32 maxDependencies = 0;
+    Core::u32 maxDependenciesPerAsset = 0;
+    std::pmr::memory_resource* memoryResource = nullptr;
+};
+
+struct CatalogEntry {
+    Core::AssetId assetId;
+    Core::ContentHash contentHash;
+    AssetFormat::AssetKind assetKind = AssetFormat::AssetKind::Invalid;
+    Core::u16 assetTypeVersion = 0;
+    Core::u32 dependencyCount = 0;
+    Core::u64 cookedFileBytes = 0;
+};
+
+struct CatalogDependency {
+    Core::AssetId assetId;
+    Core::u32 targetEntryIndex = 0;
+    AssetFormat::AssetKind expectedKind = AssetFormat::AssetKind::Invalid;
+    AssetFormat::DependencyFlags flags = AssetFormat::DependencyFlags::None;
+};
+
+class CatalogSnapshot {
+public:
+    CatalogSnapshot() noexcept = default;
+    CatalogSnapshot(CatalogSnapshot&&) noexcept;
+    CatalogSnapshot& operator=(CatalogSnapshot&&) noexcept;
+    CatalogSnapshot(const CatalogSnapshot&) = delete;
+    CatalogSnapshot& operator=(const CatalogSnapshot&) = delete;
+    ~CatalogSnapshot();
+
+    [[nodiscard]] static Core::Result<CatalogSnapshot> Create(
+        const AssetFormat::CookedManifestView& manifest,
+        CatalogConfig config);
+
+    [[nodiscard]] explicit operator bool() const noexcept;
+    [[nodiscard]] Core::u32 entryCount() const noexcept;
+    [[nodiscard]] Core::u32 dependencyCount() const noexcept;
+    [[nodiscard]] std::optional<Core::u32> find(Core::AssetId assetId) const noexcept;
+    [[nodiscard]] std::optional<CatalogEntry> entry(Core::u32 index) const noexcept;
+    [[nodiscard]] std::optional<CatalogDependency> dependency(
+        Core::u32 entryIndex,
+        Core::u32 dependencyIndex) const noexcept;
+};
+
+}
+```
+
+契约要点：
+
+- Create 成功后 Snapshot 完全拥有 entry/dependency 表；不复制原始 Manifest 整块 byte buffer，也不
+  保留 wire offset。
+- 输入 `CookedManifestView` 只在 Create 调用期间借用；Create 返回后 Manifest bytes 可销毁。
+- 查询路径零分配；`find` 对严格升序 `AssetId` 做 binary search；依赖目标在 Create 时解析为稳定
+  entry index。
+- 完整依赖 DAG cycle 在 Create 阶段用迭代着色算法校验，复杂度 `O(V + E)`，禁止递归 DFS。
+- 失败（非法配置、容量、环、PMR 分配）不发布部分 Snapshot；已分配 PMR 对象全部回滚。
+- 公共头不暴露 PMR container、裸指针、xxHash、文件系统或第三方类型。
+- 本切片不实现 `AssetHandle`/`AssetLease`、registry 状态机、File IO、Task、GPU upload、XXH3 计算、
+  Cooker 或产品资产路径；也不擅自接受仍为 Proposed 的 ADR 0016。
+
 ## Handle、借用与 API 可见性
 
 下表同时列出 M6-A 已实现的最小接口和后续已冻结目标，不能把“目标”行理解成当前已有 API：
@@ -996,12 +1066,13 @@ XXH3 计算、cgltf 与 writer 不属于该 API。
 | `Tina::Core::AssetId` | M10-A0 已实现 | Core public / AssetFormat | owning 16-byte stable identity；不是路径、Hash 或 runtime generation handle | zero/invalid canonical text 在构造时拒绝 |
 | `Tina::Core::ContentHash` | M10-A0 已实现字段类型 | Core public / AssetFormat | owning 16-byte versioned digest value；不承担安全签名或唯一身份 | zero bytes 在构造时拒绝；A0 不计算摘要 |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
+| `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 契约已冻结 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |
 | `LocalTransform` / `WorldTransform` | M8-A 已实现 | Scene public | World-owned POD；pointer query 只在 owner thread、下一次对应 mutation、entity destroy 或 World 析构前有效；world publication 由 `updateWorldTransforms()` barrier 完成 | non-finite/overflow/zero quaternion/unsupported TRS composition |
 | `RenderSceneWriter` | M8-B 2D + M9-A 3D extraction 已实现 | Game SDK phase capability | 只在当前 `extractRenderScene()` callback 内有效；不可复制、不可保存 | invalid input/capacity/sticky transaction failure |
 | `RenderSceneView` | M8-B 2D + M9-A 3D extraction 已实现 | Render SPI | borrowed fixed builder storage；成功 begin/rollback/replacement/move/destruction 后失效，begin 参数预检失败保留旧 publication；`RenderFrame` 中只到当前 submit 返回 | invalid transaction；backend 不得保留 borrow |
-| `AssetHandle<T>` | M10-A1+ 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
-| `AssetLease<T>` | M10-A1+ 目标 | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
+| `AssetHandle<T>` | M10-A2+ 目标（ADR 0016 仍 Proposed） | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
+| `AssetLease<T>` | M10-A2+ 目标（ADR 0016 仍 Proposed） | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
 | Render typed handle | M9-B 及后续目标 | Engine Module SPI | RenderDevice registry 到 retire | invalid/stale/wrong device |
 | 最小 `RenderFrame` | M6-A + D0 + M8-B/M9-A 已实现 | Engine Module SPI | 当前 submit 调用；包含 submit-call-local borrowed `primaryWindowUIDisplayList` 与 `primaryWorldScene` | submit `Status`；backend 不得保留 borrowed view |
 | `Render::UIDisplayListView` | SolidQuad DisplayList builder 已实现 | Engine Module SPI / integration output | borrowed 单缓冲 builder storage；下一次成功 `beginFrame()`、builder move 或析构后失效；已开启事务的 rollback 只清空该次候选 | CapacityExceeded/invalid input/transaction misuse |

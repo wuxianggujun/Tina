@@ -120,7 +120,7 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
   M9-B/M9-C 当前分别只把 Opaque3D 与 Sprite2D 的内置 fixture 子集接入私有 bgfx backend；M9-C 固定
   View 0 clear、1 Opaque3D、2 Sprite2D、3 UI 只是 fixture view 编号，不是 Pass Scheduler，也不代表
   Asset/Texture/Sprite 产品路径、正式 `tina_sample_2d`、TileMap、Box2D 或中文文本已完成。M10-A0
-  只补 Cooked wire format，未把 fixture 替换为产品资产。
+  只补 Cooked wire format，M10-A1 只补 owning CatalogSnapshot 与 DAG cycle，均未把 fixture 替换为产品资产。
   `RenderFrame` 携带 submit-call-local borrowed
   `primaryWorldScene` 与 `primaryWindowUIDisplayList`，backend 只能在 `submitFrame()` 调用内消费/复制/编码并禁止
   保留；Runtime-private owning RenderFramePacket 继续作为后续目标，届时才持有 FrameArena/资源
@@ -131,7 +131,9 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
   Completion → GPU Upload 四段路径和三重预算；
 - Runtime 只读取 Cooked Asset，Cooker 先验证产物再原子写；M10-A0 已落地只依赖 Core 的
   `tina_asset_format`、16字节 `AssetId`/`ContentHash`、固定 v1 header/entry 与成功路径零分配的
-  little-endian borrowed parser，但尚未接入 Runtime 文件 IO、Asset registry 或 Cooker writer；
+  little-endian borrowed parser；M10-A1 契约已冻结 `tina_asset` 的 owning 不可变 `CatalogSnapshot`、
+  AssetId binary search 与完整 DAG cycle 校验，但尚未接入 Runtime 文件 IO、Asset registry/Handle/Lease
+  或 Cooker writer；
 - UI tree retained、UIContext 主线程唯一拥有，输出后端无关 DisplayList；细粒度 dirty、持久
   PaintCache 和稳定 paint/hit snapshot 保证无变化 UI 0布局、0 PaintCache rebuild、0 Tina heap allocation；
   dirty 分类包含 `Structure`，用于增删、重排、换父与 root attach/detach，并派生最小
@@ -250,7 +252,7 @@ Keyboard/Gamepad activation、Image/Texture 或完整 Widget UI。
 | Trace backend | [Accepted](adr/0002-tracy-and-benchmark.md) | `none|tracy` 编译期 backend，唯一 config/client；Profile 与 Bench 优化语义一致 | 可观测性与依赖边界 |
 | Benchmark 协议 | [Proposed](adr/0018-benchmark-protocol.md) | schema v1、workload version/checksum、5进程/10k正式p99、nearest-rank、median+MAD | 可重复回归结论 |
 | 固定 hard-gate 机器 | [Proposed](adr/0018-benchmark-protocol.md) | 当前开发机只做 provisional baseline；需创建稳定 machine profile 后才阻断绝对耗时 | 绝对 p99 是否可信 |
-| Cooked 布局 | [Accepted](adr/0009-cooked-assets-and-cgltf.md) | M10-A0 已实现每 Asset 独立文件/Manifest 的 v1 wire schema 与只读校验；事务 writer/publish、AssetSystem、cgltf 产品转换与 Bundle/Patch 仍后置 | Cooker/Runtime 一致性 |
+| Cooked 布局 | [Accepted](adr/0009-cooked-assets-and-cgltf.md) | M10-A0 已实现每 Asset 独立文件/Manifest 的 v1 wire schema 与只读校验；M10-A1 契约已冻结 owning CatalogSnapshot 与完整 DAG cycle；事务 writer/publish、AssetSystem 状态机、cgltf 产品转换与 Bundle/Patch 仍后置 | Cooker/Runtime 一致性 |
 
 当前仍需在相应切片开始前确认的是 Asset 强弱所有权、Worker 默认值和
 benchmark/hard-gate 规则；Backend、Runtime/State、C++ 错误边界、GLFW、Input、UI、
@@ -327,9 +329,15 @@ View 0/1/2/3 顺序和 `tina_sample_2d_infrastructure_bgfx` 2D/UI 300帧样例�
 `tina_render_bgfx_tests` 均43/43，两配置样例均为5个 Sprite、2个 UI panel且资源账本平衡，Debug 截图确认旋转、透明、
 flip 与 UI overlay。它仍是 fixture/infrastructure，不代表 Asset/Texture/Sprite 产品路径、正式
 `tina_sample_2d`、TileMap、Box2D或中文文本。M10-A0 已另行完成 Cooked Header/Manifest
-wire-format 基础；后续 M10 切片仍负责 AssetSystem、Cooker/cgltf 和正式资产产品路径。
+wire-format 基础；M10-A1 契约已冻结 owning CatalogSnapshot 与完整 DAG cycle；后续 M10 切片仍负责
+AssetSystem 状态机/Handle/Lease、Cooker/cgltf 和正式资产产品路径。
 
 M10-A0 新增 `Tina::AssetFormat`：Cooked Header 112B、Manifest Header 64B、Manifest Entry 56B、
 Dependency Entry 24B，全部显式 little-endian decode；Manifest entry 与 dependency subrange 使用稳定
 AssetId 排序，依赖目标和 kind 在发布 view 前验证。object 路径由 kind/AssetId 确定派生，不把路径当身份。
 该切片明确不实现完整 DAG cycle、XXH3 计算、AssetHandle/Lease、Task/IO、GPU upload、cgltf 或 writer。
+
+M10-A1 冻结 `Tina::Asset` 契约：`CatalogSnapshot` 在注入 PMR 上 owning 复制 entry/dependency，Create 后
+不依赖 Manifest bytes；`find` 为 binary search；依赖边解析为稳定 entry index；完整 cycle 用迭代着色 +
+显式 stack，`O(V + E)`，禁止递归。失败不发布部分 Snapshot。该切片明确不实现 Handle/Lease、registry
+状态机、文件 IO、Task、GPU upload、XXH3、cgltf 或 writer；ADR 0016 仍为 Proposed。

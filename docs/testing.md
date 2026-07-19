@@ -16,7 +16,8 @@
   M9-C 的 Sprite2D fixture 几何/预算测试仍留在私有 bgfx adapter 测试进程内，不注册额外测试调度；
   M8-A Scene World/Transform 另有独立 `tina_scene_tests`，M8-B 2D 与 M9-A 3D RenderScene extraction 共用独立
   `tina_render_scene_tests`；M10-A0 Cooked Header/Manifest wire-format 校验另有独立
-  `tina_asset_format_tests`。这些专项均不并入基础 `tina_tests`；
+  `tina_asset_format_tests`；M10-A1 owning CatalogSnapshot / DAG cycle 另有独立
+  `tina_asset_tests`。这些专项均不并入基础 `tina_tests`；
 - 构建完成后直接运行对应 GoogleTest executable，任一返回码非0即失败；
 - Visual Studio 多配置构建把测试运行时隔离到 `bin/<Config>`，禁止 Debug/Release GTest DLL 共用目录；
 - 同一 Visual Studio build tree 的 Debug/Release 构建串行执行，禁止并发启动两个 MSBuild 门禁；
@@ -33,6 +34,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M9-C 私有 bgfx Sprite2D fixture + 2D/UI 样例 | Debug C++23 | 43/43 | `tina_render_bgfx_tests` 直接通过；`tina_sample_2d_infrastructure_bgfx --frames=300 --frame-delay-ms=0` 通过，记录5个 Sprite、2个 UI panel、`renderResourceLedgerBalanced=true`。截图确认 Sprite 旋转、透明、flip 与 UI overlay。该结果只证明 fixture/infrastructure，不证明 M10-A1+ 产品资产路径、正式 `tina_sample_2d`、Asset/Texture/Sprite、TileMap、Box2D 或中文文本 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M9-C 私有 bgfx Sprite2D fixture + 2D/UI 样例 | Release C++23 | 43/43 | `tina_render_bgfx_tests` 直接通过；`tina_sample_2d_infrastructure_bgfx --frames=300 --frame-delay-ms=0` 通过并记录相同生命周期与资源账本。Debug 的 D3D11 `RefCount=3` 提示未在 Release 出现；画面证据沿用同代码路径的 Debug 截图，不把退出码冒充截图证据 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A0 `tina_asset_format` Cooked/Manifest wire format | Debug/Release C++23 | 14/14 | `tina_asset_format_tests` 两配置均直接通过；覆盖 identity/hash 强类型、固定 little-endian schema、borrowed view、确定性 object path、limit/overflow/layout/padding/排序/依赖校验和300次重复解析。A0 明确允许跨资产 cycle，完整 DAG、XXH3 计算、文件 IO、AssetSystem、Cooker/cgltf 与产品资产路径后置 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A1 `tina_asset` CatalogSnapshot | Debug/Release C++23 | 见实现门禁 | `tina_asset_tests` 独立覆盖 empty/single/multi entry、Manifest bytes 销毁后仍有效、binary search hit/miss、依赖 target index、chain/diamond DAG、两节点/多节点 cycle、深链不递归、容量/配置/PMR 失败回滚、move、析构归还、300 次创建/销毁与 header isolation。A1 不实现 Handle/Lease、文件 IO、Task、GPU upload、XXH3、cgltf 或产品资产路径 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M8-A `tina_scene` World/Transform | Debug/Release C++23 | 19/19 | `tina_scene_tests` Debug 与 Release 均直接运行通过；覆盖 generation/owner、keep-world/keep-local、父销毁/显式子树销毁、非递归20,000层传播、宽树删除、固定容量/PMR回滚与稳定构造错误、overflow/shear、四元数和错线程读写；Linux Scene 图尚未运行 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2 + M8-B 2D + M9-A 3D extraction | Release C++23 | 213/213 | 本轮直接通过 UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、RenderScene22/22；Null、2D infrastructure与3D extraction样例各300帧，3D记录4 submitted/3 visible/1 culled/2 batches、一次aspect变化与资源归零；GLFW/bgfx/Desktop沿用前序D2证据 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug/Release C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过 |
@@ -144,8 +146,14 @@ M10-A0 使用独立 `tina_asset_format_tests`，当前14项覆盖严格小写 `A
 Dependency Entry、payload borrow、确定性 object path、magic/schema/enum/flags/reserved、truncation、
 overflow、alignment、zero padding、EOF、caller hard limit、entry/dependency 排序、重复/self/missing target、
 kind mismatch 与 dependency range 完整覆盖。300次重复解析验证无内部状态漂移。A0 的 cycle 用例刻意
-证明 parser 不拒绝跨资产环；完整 DAG cycle 检测属于后续 Catalog/AssetSystem validation，不能把14/14
+证明 parser 不拒绝跨资产环；完整 DAG cycle 检测属于 M10-A1 `CatalogSnapshot`，不能把14/14
 描述为 Cooker、异步加载或正式2D/3D资产产品门禁。
+
+M10-A1 使用独立 `tina_asset_tests`，覆盖 owning 不可变 `CatalogSnapshot`、Manifest bytes 销毁后仍可
+查询、AssetId binary search hit/miss、依赖 target entry index、合法 chain/diamond DAG、两节点与多节点
+cycle、深链不递归、容量/非法配置/PMR 分配失败不发布部分 Snapshot、move 语义、析构归还 PMR、
+300 次创建/销毁与 public header isolation。A1 不实现 Handle/Lease、文件 IO、Task、GPU upload、XXH3、
+cgltf 或正式资产产品门禁。
 
 M7-C1c-b3d1 在同一测试拓扑中新增三组契约：focused `UIContextCapacityConfig` validator 与
 `EngineConfig` 在任何 factory 前拒绝非法容量；primary owner 确实使用配置容量；layout coordinator

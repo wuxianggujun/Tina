@@ -51,15 +51,15 @@ out\build\windows-msvc\bin\Debug\tina_legacy_tests.exe
 ## Windows vNext 最小构建
 
 该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A/M7-B1 与
-M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2/C1c-b3e/M8/M9-A/M10-A0 的 `tina_core`、`tina_platform`、
-`tina_task`、`tina_render`、`tina_runtime`、`tina_scene`、`tina_asset_format`、`tina_ui`，以及最新 SolidFill paint、Render DisplayList、D2 scoped
+M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2/C1c-b3e/M8/M9-A/M10-A0/M10-A1 的 `tina_core`、`tina_platform`、
+`tina_task`、`tina_render`、`tina_runtime`、`tina_scene`、`tina_asset_format`、`tina_asset`、`tina_ui`，以及最新 SolidFill paint、Render DisplayList、D2 scoped
 `setBoxPaint()` 与
 `tina_ui_render_integration`、
 直接 GoogleTest 门禁与 Null/2D/3D extraction infrastructure 样例：
 
 ```powershell
 cmake --preset windows-msvc-vnext
-cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_scene_tests tina_render_scene_tests tina_asset_format_tests tina_sample_null tina_sample_2d_infrastructure tina_sample_3d_extraction
+cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_scene_tests tina_render_scene_tests tina_asset_format_tests tina_asset_tests tina_sample_null tina_sample_2d_infrastructure tina_sample_3d_extraction
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
@@ -67,6 +67,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_ui_render_integration_tests.exe --gt
 out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_render_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_asset_format_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_3d_extraction.exe --frames=300
@@ -120,6 +121,22 @@ out\build\windows-msvc-vnext\bin\Debug\tina_asset_format_tests.exe --gtest_color
 
 cmake --build --preset windows-vnext-release --target tina_asset_format_tests
 out\build\windows-msvc-vnext\bin\Release\tina_asset_format_tests.exe --gtest_color=yes
+```
+
+### M10-A1 CatalogSnapshot
+
+`tina_asset_tests` 是独立 GoogleTest executable。它覆盖 owning 不可变 `CatalogSnapshot`、Manifest
+bytes 销毁后仍可查询、AssetId binary search、依赖 target entry index、合法 chain/diamond DAG、
+两节点/多节点 cycle、深链不递归、容量/非法配置/PMR 分配失败回滚、move 语义、析构归还 PMR、
+300 次创建/销毁与 public header isolation。A1 不实现 Handle/Lease、文件 IO、Task、GPU upload、XXH3、
+cgltf、writer 或正式资产样例：
+
+```powershell
+cmake --build --preset windows-vnext-debug --target tina_asset_tests
+out\build\windows-msvc-vnext\bin\Debug\tina_asset_tests.exe --gtest_color=yes
+
+cmake --build --preset windows-vnext-release --target tina_asset_tests
+out\build\windows-msvc-vnext\bin\Release\tina_asset_tests.exe --gtest_color=yes
 ```
 
 当前最小图的唯一第三方测试依赖是 `tests` manifest feature 提供的 GoogleTest 1.17.0；
@@ -300,13 +317,14 @@ MSBuild 进程并发驱动同一生成图；配置输出目录虽然隔离，共
 ```powershell
 cmake --preset windows-msvc-vnext
 cmake --build --preset windows-vnext-release `
-  --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_render_scene_tests tina_asset_format_tests tina_sample_null tina_sample_2d_infrastructure tina_sample_3d_extraction
+  --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_render_scene_tests tina_asset_format_tests tina_asset_tests tina_sample_null tina_sample_2d_infrastructure tina_sample_3d_extraction
 out\build\windows-msvc-vnext\bin\Release\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_runtime_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_ui_render_integration_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_render_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_asset_format_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Release\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_sample_null.exe --frames=300
 out\build\windows-msvc-vnext\bin\Release\tina_sample_2d_infrastructure.exe --frames=300
 out\build\windows-msvc-vnext\bin\Release\tina_sample_3d_extraction.exe --frames=300
