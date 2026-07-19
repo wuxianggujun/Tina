@@ -32,8 +32,12 @@ M8-A covers the fixed-capacity Scene World, generation EntityId, transactional L
 publication, keep-world/keep-local hierarchy edits, parent/subtree destruction, overflow/shear diagnostics,
 and linear wide-tree cleanup. M8-B adds a fixed-capacity backend-neutral `RenderSceneBuilder`, phase-local
 `RenderSceneWriter`, resolved Camera2D/Sprite2D inputs, deterministic layer/order sorting, conservative culling,
-pixel snap, Runtime `RenderFrame` handoff, and a headless/Null 2D infrastructure sample. Scene component command
-buffers, Asset/Cooker integration, a bgfx Sprite pass, visible Sprite rendering, and product samples remain later slices.
+pixel snap, Runtime `RenderFrame` handoff, and a headless/Null 2D infrastructure sample. M9-A extends the same
+builder with a backend-neutral Perspective Camera and Mesh3D extraction: right-handed Y-up `-Z` forward poses,
+positive-scale world bounds, sphere frustum culling, deterministic material/mesh/depth ordering, and adjacent
+instance-batch finalization. `tina_sample_3d_extraction` exercises that CPU/Headless/Null boundary only; it is
+not visible GPU 3D. Scene component command buffers, Asset/Cooker integration, a bgfx Sprite pass, visible Sprite
+rendering, the M9-B procedural bgfx Cube/depth path, and product samples remain later slices.
 The current M8-B Windows MSVC Debug/Release Null gates both pass Core/Runtime 211/211, UI 115/115,
 Runtime-to-UI 60/60, UI-to-Render 12/12, Scene 19/19, RenderScene 11/11, and both 300-frame Null and
 2D-infrastructure samples. The current Windows Debug adapter recheck also passes GLFW 26/26, its 300-frame
@@ -48,6 +52,13 @@ Clang 22.1.8 with libstdc++ 15.2 under ASan/UBSan/LSan with no diagnostic. The f
 exposed a `requires` name-visibility issue in the routed-pointer callback constraint; it is fixed.
 The earlier Clang WSL2 Desktop run selected bgfx
 Vulkan on llvmpipe, so it proves the Linux Vulkan/backend lifecycle, not hardware-GPU performance.
+
+The current M9-A Windows MSVC Debug/Release recheck passes `tina_tests` 213/213 and
+`tina_render_scene_tests` 22/22. `tina_sample_null`, `tina_sample_2d_infrastructure`, and
+`tina_sample_3d_extraction` each run 300 frames and return zero; the 3D extraction sample records
+4 submitted meshes, 3 visible meshes, 1 culled mesh, 2 instance batches, one aspect change, and
+`liveResources=0`. Release also passes UI 115/115, Runtime-to-UI 60/60, UI-to-Render 12/12, and
+Scene 19/19. M9-B visible procedural Cube/depth and M10 Cooked glTF are not complete.
 
 M7-C1c-a adds fixed-capacity PMR pointer-policy/route-ancestry storage and a double-buffered
 `UICommittedHitView`. Within one view, its effective-visible entries have unique, strictly increasing paint ordinals and

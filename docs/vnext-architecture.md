@@ -368,14 +368,15 @@ scale，再按默认250 ms上限得到 `acceptedRealDelta`，缩放为 `updateDe
 Platform、UI、Asset、Audio 和必要 Render 仍推进。最小化窗口跳过无效 surface 的 Render/
 Present 并使用平台等待避免 busy loop，但继续处理关闭和异步完成。
 
-## Scene 与 Render Scene Extraction（完整目标契约；M8-A/M8-B foundation 例外）
+## Scene 与 Render Scene Extraction（完整目标契约；M8-A/M8-B/M9-A foundation 例外）
 
 完整目标中，`World` 对外只暴露 Tina 的 `EntityId { owner, index, generation }`、组件命令和查询接口，EnTT
 registry 只存在于实现文件中。当前 M8-A standalone `World` 还没有阶段末 command buffer 或 component
 storage：层级 mutation 在 owner thread 立即校验/提交，`updateWorldTransforms()` 是两阶段 World snapshot
-publication barrier。M8-B 已把 resolved Camera2D/Sprite2D 写入 RenderScene 的 Runtime transaction 接通，
-但 `RenderSceneExtractionContext` 仍不暴露 World；在 Scene component、Asset ready snapshot、FrameResourceRef
-和可见 backend pass 接入前，不得把它描述成完整 Scene/Render 产品路径。
+publication barrier。M8-B 已把 resolved Camera2D/Sprite2D 写入 RenderScene 的 Runtime transaction 接通；M9-A 又加入
+resolved Perspective Camera/Mesh3D input、当前 PlatformFrame aspect、球体 frustum culling、稳定排序和
+相邻 instance batch finalize，但 `RenderSceneExtractionContext` 仍不暴露 World。在 Scene component、Asset
+ready snapshot、FrameResourceRef 和可见 backend pass 接入前，不得把它描述成完整 Scene/Render 产品路径。
 
 统一空间约定：右手坐标系、Y-up、-Z forward、单位米，2D 位于 XY 平面。Transform 至少
 包含 `LocalTransform`、`Parent` 和缓存的 `WorldTransform`；完整 Runtime 接入后层级变更必须检测循环并通过
@@ -611,8 +612,8 @@ dirty。Atlas page 有固定预算、generation 和 GPU retirement。详细数�
    focus/capture/widget、Button Keyboard/Gamepad activation、完整 dirty-range pruning、Label/Button/Modal +
    FreeType、owning Runtime packet/FramePin、IMM32/Gamepad/DPI 门禁；
 5. **Scene/2D**：M8-A 已完成 generation Entity、固定容量 World、Local/World Transform、循环诊断与非递归传播；M8-B 已完成后端无关 RenderScene extraction foundation 与 Headless/Null 2D infrastructure sample；后续补 Scene command buffer、Camera/Sprite component storage、Asset/Cooker、chunk culling、bgfx Sprite pass 和正式 2D 产品样例；
-6. **Render/3D**：Pass Scheduler、bgfx typed handle、Perspective、depth、静态 Cube 形成 3D
-   样例；
+6. **Render/3D**：M9-A 已完成 Perspective/Mesh3D 的 CPU/Null extraction foundation；M9-B 才接入
+   Pass Scheduler、bgfx typed handle、canonical procedural Cube、depth 和可见 3D 样例；
 7. **Asset**：双阶段队列、Cooked Manifest、纹理和静态 glTF 从 cooker 进入 2D/3D；
 8. **产品 2D/UI/Audio**：正式 Catalog TileMap、Box2D dynamic body、设置页 Checkbox/Slider 接入
    miniaudio 与 fullscreen；
@@ -657,8 +658,10 @@ vNext-only preset 设为 OFF；当新2D/UI/3D/Audio 覆盖门禁后先把默认�
   3 个 Sprite、排序/裁剪/snap、Runtime handoff 和 300 帧资源回收；它不显示 Sprite，不包含中文 Label/Button、
   world picking 或 UI overlay，只证明 RenderScene/Runtime CPU 边界；
 - UI 验证 Modal、Focus、Pointer Capture、TextEdit/IME、Checkbox 与 Slider；
-- M9 infrastructure：`tina_sample_3d_infrastructure` 使用 procedural Mesh 验证 Perspective、depth
-  与资源释放；
+- M9-A infrastructure：`tina_sample_3d_extraction` 使用纯 Tina fixture 在 Headless/Null 中验证
+  Perspective、aspect resize、Mesh3D culling/sort/batch 和资源释放；它不显示 GPU 画面；
+- M9-B infrastructure：`tina_sample_3d_infrastructure` 使用 procedural Mesh 验证 Perspective、depth、
+  canonical vertex/index buffer、真实 instance submission、resize 和资源释放；
 - M12 删除 Legacy 前：正式 `tina_sample_2d` 必须通过最终 Catalog/Manifest 加载 TileMap/Tileset、
   角色碰撞、Box2D dynamic body 和 UI overlay；正式 `tina_sample_3d` 必须通过最终 Cooker 加载
   glTF/Material/Prefab。Infrastructure fixture 不能替代这两个 product gate；

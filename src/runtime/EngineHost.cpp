@@ -395,6 +395,29 @@ toRenderSurfaceState(const Integration::WindowSurfaceSnapshot& snapshot) noexcep
     };
 }
 
+[[nodiscard]] Render::RenderSceneFrameParameters
+renderSceneFrameParameters(const Platform::PlatformFrameView& frame) noexcept
+{
+    const Platform::WindowFrameSnapshot* const primaryWindow = frame.primaryWindow();
+    if (primaryWindow == nullptr)
+    {
+        return {};
+    }
+
+    const Platform::WindowMetricsSnapshot& metrics = primaryWindow->metrics;
+    const bool hasFramebufferExtent =
+        metrics.framebufferExtent.width != 0 && metrics.framebufferExtent.height != 0;
+    const u32 width = hasFramebufferExtent ? metrics.framebufferExtent.width : metrics.logicalExtent.width;
+    const u32 height = hasFramebufferExtent ? metrics.framebufferExtent.height : metrics.logicalExtent.height;
+    if (width == 0 || height == 0)
+    {
+        return {};
+    }
+    return Render::RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = static_cast<float>(static_cast<double>(width) / height),
+    };
+}
+
 struct EngineModules final {
     std::unique_ptr<Core::IMonotonicClock> monotonicClock;
     std::unique_ptr<Platform::IPlatformBackend> platform;
@@ -798,7 +821,8 @@ class EngineHostImplementation final {
                                               simulationTick);
             }
 
-            auto renderSceneBeginStatus = m_renderSceneBuilder.beginFrame();
+            auto renderSceneBeginStatus =
+                m_renderSceneBuilder.beginFrame(renderSceneFrameParameters(*platformFrame));
             if (!renderSceneBeginStatus)
             {
                 return failAfterStartupCommit(gameApplication, std::move(renderSceneBeginStatus.error()), frameIndex,

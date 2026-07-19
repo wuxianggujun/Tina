@@ -3,6 +3,7 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 
+#include <array>
 #include <compare>
 #include <memory_resource>
 #include <optional>
@@ -14,11 +15,23 @@ namespace Tina::Render {
 struct RenderSceneCapacity final {
     static constexpr u32 DefaultSpriteCapacity = 16'384;
     static constexpr u32 MaximumSpriteCapacity = 1'048'576;
+    static constexpr u32 DefaultMesh3DItemCapacity = 16'384;
+    static constexpr u32 MaximumMesh3DItemCapacity = 1'048'576;
+    static constexpr u32 DefaultMesh3DBatchCapacity = 4'096;
+    static constexpr u32 MaximumMesh3DBatchCapacity = 262'144;
 
     u32 spriteCapacity = DefaultSpriteCapacity;
+    u32 mesh3DItemCapacity = DefaultMesh3DItemCapacity;
+    u32 mesh3DBatchCapacity = DefaultMesh3DBatchCapacity;
 };
 
 [[nodiscard]] Core::Status validateRenderSceneCapacity(const RenderSceneCapacity& capacity) noexcept;
+
+// Runtime resolves the primary surface aspect once per frame. Camera
+// components never retain Window/Surface state themselves.
+struct RenderSceneFrameParameters final {
+    std::optional<float> primarySurfaceAspectRatio;
+};
 
 struct RenderNormalizedViewport final {
     float x = 0.0F;
@@ -72,6 +85,62 @@ struct RenderSprite2DInput final {
     bool visible = true;
 };
 
+struct RenderPose3DInput final {
+    float positionX = 0.0F;
+    float positionY = 0.0F;
+    float positionZ = 0.0F;
+    float rotationX = 0.0F;
+    float rotationY = 0.0F;
+    float rotationZ = 0.0F;
+    float rotationW = 1.0F;
+};
+
+struct RenderTransform3DInput final {
+    RenderPose3DInput pose{};
+    float scaleX = 1.0F;
+    float scaleY = 1.0F;
+    float scaleZ = 1.0F;
+};
+
+struct RenderBoundingSphereInput final {
+    float centerX = 0.0F;
+    float centerY = 0.0F;
+    float centerZ = 0.0F;
+    float radius = 1.0F;
+};
+
+struct RenderLinearColor final {
+    float red = 1.0F;
+    float green = 1.0F;
+    float blue = 1.0F;
+    float alpha = 1.0F;
+};
+
+// The camera pose is resolved from Scene WorldTransform. Local -Z is forward
+// and local +Y is up. Runtime supplies the current surface aspect separately.
+struct RenderPerspectiveCameraInput final {
+    u64 stableCameraKey = 0;
+    RenderPose3DInput worldPose{};
+    float verticalFovDegrees = 60.0F;
+    float nearPlaneMeters = 0.1F;
+    float farPlaneMeters = 1000.0F;
+    RenderNormalizedViewport normalizedViewport{};
+};
+
+// meshKey/materialKey are deterministic M9 fixture resource keys. M10 replaces
+// them with resolved FrameResourceRef values without exposing backend handles.
+struct RenderMesh3DInput final {
+    u32 meshKey = 0;
+    u32 materialKey = 0;
+    u32 submeshIndex = 0;
+    u64 stableEntityKey = 0;
+    RenderTransform3DInput worldTransform{};
+    RenderBoundingSphereInput localBounds{};
+    RenderLinearColor baseColorFactor{};
+    bool doubleSided = false;
+    bool visible = true;
+};
+
 struct RenderCamera2D final {
     u64 stableCameraKey = 0;
     float centerX = 0.0F;
@@ -105,14 +174,66 @@ struct RenderSprite2DItem final {
     bool flipY = false;
 };
 
+struct RenderPerspectiveCamera final {
+    u64 stableCameraKey = 0;
+    float positionX = 0.0F;
+    float positionY = 0.0F;
+    float positionZ = 0.0F;
+    float forwardX = 0.0F;
+    float forwardY = 0.0F;
+    float forwardZ = -1.0F;
+    float upX = 0.0F;
+    float upY = 1.0F;
+    float upZ = 0.0F;
+    float verticalFovDegrees = 60.0F;
+    float nearPlaneMeters = 0.1F;
+    float farPlaneMeters = 1000.0F;
+    float aspectRatio = 1.0F;
+    RenderNormalizedViewport normalizedViewport{};
+};
+
+struct RenderMesh3DItem final {
+    u32 meshKey = 0;
+    u32 materialKey = 0;
+    u32 submeshIndex = 0;
+    u64 stableEntityKey = 0;
+    u32 insertionOrder = 0;
+    u32 depthBucket = 0;
+    float cameraDepth = 0.0F;
+    float worldBoundsCenterX = 0.0F;
+    float worldBoundsCenterY = 0.0F;
+    float worldBoundsCenterZ = 0.0F;
+    float worldBoundsRadius = 1.0F;
+    std::array<float, 16> columnMajorWorldTransform{};
+    RenderLinearColor baseColorFactor{};
+    bool doubleSided = false;
+};
+
+struct RenderMesh3DBatch final {
+    u32 firstItem = 0;
+    u32 itemCount = 0;
+    u32 meshKey = 0;
+    u32 materialKey = 0;
+    u32 submeshIndex = 0;
+    bool doubleSided = false;
+};
+
 struct RenderSceneStatistics final {
     u32 cameraCount = 0;
+    u32 camera2DCount = 0;
+    u32 perspectiveCameraCount = 0;
     u32 submittedSpriteCount = 0;
     u32 visibleSpriteCount = 0;
     u32 culledSpriteCount = 0;
     u32 prunedInvisibleCount = 0;
     u32 prunedTransparentCount = 0;
     u64 sortOrderChecksum = 0;
+    u32 submittedMesh3DCount = 0;
+    u32 visibleMesh3DCount = 0;
+    u32 culledMesh3DCount = 0;
+    u32 prunedInvisibleMesh3DCount = 0;
+    u32 mesh3DBatchCount = 0;
+    u64 mesh3DSortOrderChecksum = 0;
 };
 
 struct RenderSceneBuilderStatistics final {
@@ -123,8 +244,9 @@ struct RenderSceneBuilderStatistics final {
     u64 invalidInputFailureCount = 0;
 };
 
-// Borrowed view. beginFrame(), rollback(), a successful replacement commit,
-// move, or destruction invalidates the previous view.
+// Borrowed view. A successful beginFrame(), rollback(), a successful
+// replacement commit, move, or destruction invalidates the previous view.
+// A beginFrame() preflight failure preserves the last published view.
 class RenderSceneView final {
   public:
     constexpr RenderSceneView() noexcept = default;
@@ -139,6 +261,21 @@ class RenderSceneView final {
         return m_sprites;
     }
 
+    [[nodiscard]] constexpr const std::optional<RenderPerspectiveCamera>& perspectiveCamera() const noexcept
+    {
+        return m_perspectiveCamera;
+    }
+
+    [[nodiscard]] constexpr std::span<const RenderMesh3DItem> meshes3D() const noexcept
+    {
+        return m_meshes3D;
+    }
+
+    [[nodiscard]] constexpr std::span<const RenderMesh3DBatch> mesh3DBatches() const noexcept
+    {
+        return m_mesh3DBatches;
+    }
+
     [[nodiscard]] constexpr const RenderSceneStatistics& statistics() const noexcept
     {
         return m_statistics;
@@ -146,7 +283,8 @@ class RenderSceneView final {
 
     [[nodiscard]] constexpr bool empty() const noexcept
     {
-        return !m_camera.has_value() && m_sprites.empty();
+        return !m_camera.has_value() && m_sprites.empty() && !m_perspectiveCamera.has_value() &&
+               m_meshes3D.empty();
     }
 
   private:
@@ -154,13 +292,21 @@ class RenderSceneView final {
 
     constexpr RenderSceneView(std::optional<RenderCamera2D> camera,
                               std::span<const RenderSprite2DItem> sprites,
+                              std::optional<RenderPerspectiveCamera> perspectiveCamera,
+                              std::span<const RenderMesh3DItem> meshes3D,
+                              std::span<const RenderMesh3DBatch> mesh3DBatches,
                               RenderSceneStatistics statistics) noexcept
-        : m_camera(std::move(camera)), m_sprites(sprites), m_statistics(statistics)
+        : m_camera(std::move(camera)), m_sprites(sprites),
+          m_perspectiveCamera(std::move(perspectiveCamera)), m_meshes3D(meshes3D),
+          m_mesh3DBatches(mesh3DBatches), m_statistics(statistics)
     {
     }
 
     std::optional<RenderCamera2D> m_camera{};
     std::span<const RenderSprite2DItem> m_sprites{};
+    std::optional<RenderPerspectiveCamera> m_perspectiveCamera{};
+    std::span<const RenderMesh3DItem> m_meshes3D{};
+    std::span<const RenderMesh3DBatch> m_mesh3DBatches{};
     RenderSceneStatistics m_statistics{};
 };
 
@@ -174,6 +320,8 @@ class RenderSceneWriter final {
 
     [[nodiscard]] Core::Status setCamera2D(const RenderCamera2DInput& camera);
     [[nodiscard]] Core::Status addSprite2D(const RenderSprite2DInput& sprite);
+    [[nodiscard]] Core::Status setPerspectiveCamera(const RenderPerspectiveCameraInput& camera);
+    [[nodiscard]] Core::Status addMesh3D(const RenderMesh3DInput& mesh);
 
   private:
     friend class RenderSceneBuilder;
@@ -197,7 +345,7 @@ class RenderSceneBuilder final {
     RenderSceneBuilder& operator=(RenderSceneBuilder&&) = delete;
     ~RenderSceneBuilder();
 
-    [[nodiscard]] Core::Status beginFrame();
+    [[nodiscard]] Core::Status beginFrame(RenderSceneFrameParameters parameters = {});
     [[nodiscard]] RenderSceneWriter writer() noexcept;
     [[nodiscard]] Core::Result<RenderSceneView> commit();
     void rollback() noexcept;
@@ -216,15 +364,24 @@ class RenderSceneBuilder final {
     };
 
     RenderSceneBuilder(RenderSceneCapacity capacity, std::pmr::memory_resource& storage,
-                       RenderSprite2DItem* sprites) noexcept;
+                       RenderSprite2DItem* sprites, RenderMesh3DItem* meshes3D,
+                       RenderMesh3DBatch* mesh3DBatches) noexcept;
 
     [[nodiscard]] Core::Status setCamera2D(const RenderCamera2DInput& camera);
     [[nodiscard]] Core::Status addSprite2D(const RenderSprite2DInput& sprite);
+    [[nodiscard]] Core::Status setPerspectiveCamera(const RenderPerspectiveCameraInput& camera);
+    [[nodiscard]] Core::Status addMesh3D(const RenderMesh3DInput& mesh);
     [[nodiscard]] Core::Status failBuild(Core::ErrorCode code, const char* message);
     [[nodiscard]] Core::Status validateCamera(const RenderCamera2DInput& camera) const noexcept;
     [[nodiscard]] Core::Status validateSprite(const RenderSprite2DInput& sprite) const noexcept;
+    [[nodiscard]] Core::Status validatePerspectiveCamera(const RenderPerspectiveCameraInput& camera) const noexcept;
+    [[nodiscard]] Core::Status validateMesh3D(const RenderMesh3DInput& mesh) const noexcept;
     [[nodiscard]] bool intersectsCamera(const RenderSprite2DItem& sprite,
                                          const RenderCamera2D& camera) const noexcept;
+    [[nodiscard]] bool intersectsPerspectiveCamera(const RenderMesh3DItem& mesh,
+                                                   const RenderPerspectiveCamera& camera,
+                                                   float& cameraDepth) const noexcept;
+    [[nodiscard]] Core::Status finalizeMesh3DBatches();
     void clearCandidate() noexcept;
     void releaseStorage() noexcept;
     void rollbackBuilding() noexcept;
@@ -233,8 +390,14 @@ class RenderSceneBuilder final {
     RenderSceneCapacity m_capacity{};
     std::pmr::memory_resource* m_storage = nullptr;
     RenderSprite2DItem* m_sprites = nullptr;
+    RenderMesh3DItem* m_meshes3D = nullptr;
+    RenderMesh3DBatch* m_mesh3DBatches = nullptr;
     u32 m_spriteCount = 0;
+    u32 m_mesh3DCount = 0;
+    u32 m_mesh3DBatchCount = 0;
     std::optional<RenderCamera2D> m_camera{};
+    std::optional<RenderPerspectiveCamera> m_perspectiveCamera{};
+    RenderSceneFrameParameters m_frameParameters{};
     RenderSceneStatistics m_candidateStatistics{};
     RenderSceneStatistics m_publishedStatistics{};
     RenderSceneBuilderStatistics m_statistics{};

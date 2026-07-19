@@ -31,4 +31,5 @@
 - [Architecture Decision Records](adr/README.md)
 - [Roadmap](roadmap.md)
 
-主题设计文档会明确区分当前实现、已知问题和目标契约。测试和实际运行结果优先于文档。
+主题设计文档会明确区分当前实现、已知问题和目标契约。当前 M9-A 已有 CPU/Null Perspective/Mesh3D
+extraction foundation；可见 bgfx Cube/depth 属 M9-B，Cooked glTF 产品路径属 M10。测试和实际运行结果优先于文档。

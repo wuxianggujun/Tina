@@ -382,7 +382,7 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   在 extraction 前后执行 begin/commit/rollback，并将 borrowed `primaryWorldScene` 放入 `RenderFrame`。
   独立 `tina_render_scene_tests` 与 Headless/Null `tina_sample_2d_infrastructure --frames=300` 验证固定容量、
   Runtime handoff 和退出回收；
-- **M8-B 当前 Windows 门禁：** Debug/Release Null 图通过基础211/211、UI115/115、Runtime→UI60/60、
+- **M8-B 已记录 Windows 门禁：** Debug/Release Null 图通过基础211/211、UI115/115、Runtime→UI60/60、
   UI→Render12/12、Scene19/19、RenderScene11/11，以及 Null/2D infrastructure样例各300帧；Debug adapter
   复验通过 GLFW26/26、Platform样例300帧、bgfx16/16与Desktop连续3次各300帧。iconify 回归保持正 logical
   extent 与 framebuffer `0x0` suspended 语义；本轮没有重新截图或运行 Linux M8-B；
@@ -399,13 +399,20 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 
 ## M9 Render 与 3D 垂直切片
 
-- Tina Engine Module Render SPI 只使用 typed handle/descriptors；Game SDK/Phase Context 不暴露
+- **M9-A RenderScene 3D extraction foundation 已完成：** 在固定容量 `RenderSceneBuilder` 中加入
+  `RenderPerspectiveCameraInput`、`RenderMesh3DInput`、resolved Perspective/Mesh3D view、当前帧
+  framebuffer aspect（`0x0` 回退 logical）、正 scale 世界包围球、球体 frustum culling、稳定
+  material/mesh/submesh/double-sided/depth/entity/insertion 排序和相邻 instance batch finalize；
+  `tina_render_scene_tests` 当前22/22，`tina_sample_3d_extraction --frames=300` 在 Headless/Null
+  验证4 submitted/3 visible/1 culled/2 batches、aspect变化和 `liveResources=0`。它不创建 bgfx 资源，
+  不提供可见画面，也不计入 Legacy 删除门禁；
+- **M9-B（下一切片）：** Tina Engine Module Render SPI 只使用 typed handle/descriptors；Game SDK/Phase Context 不暴露
   RenderDevice，bgfx 类型只在 `tina_render_bgfx` 私有层；
 - 固定 Opaque3D、Sprite2D、UI、Present Pass，明确 clear/load/store、失败停止和资源计数；
 - 扩展 M7 backend 支持 Perspective、depth、canonical static Mesh、UnlitBaseColor Material v1、
   Shader ABI、bounds/culling 和静态 instancing；
-- procedural 3D infrastructure 样例持续显示非空 Mesh，并验证 resize、depth 和退出时
-  buffer/texture/pipeline 零泄漏；
+- `tina_sample_3d_infrastructure` 使用私有 procedural indexed Cube、canonical `P3_N3_UV2`、depth、
+  真实 instance buffer 与可见截图验证 resize 及退出时 buffer/texture/pipeline 零泄漏；M9-B 尚未实现；
 - 不引入完整自研多后端 RHI、PBR、阴影、动画或后处理。
 
 ## M10 Asset 与 Cooker 垂直切片

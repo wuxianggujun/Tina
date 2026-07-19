@@ -101,6 +101,13 @@ shear。M8-B 在此基础上新增固定容量、后端无关的 `RenderSceneBui
 记录样例。本切片不链接 EnTT/GLM，也不实现 Scene component command buffer、Asset/Cooker、bgfx Sprite pass、
 可见 Sprite、world picking 或正式 2D/UI 产品门禁；这些仍按后续切片推进。
 
+M9-A 在同一 builder 上新增后端无关的 Perspective Camera 与 Mesh3D extraction：右手 Y-up、`-Z forward`、
+正 scale 的世界包围球、球体 frustum culling、稳定 material/mesh/submesh/double-sided/depth/entity 顺序，
+以及相邻兼容项的 instance batch finalize。Runtime 每帧从当前 primary `PlatformFrame` 注入 framebuffer aspect；
+framebuffer 为 `0x0` 时回退到正的 logical extent。新增 `tina_sample_3d_extraction` 只验证 CPU/Headless/Null
+边界，不显示 GPU Cube，也不能替代正式 3D 产品门禁。M9-B 的私有 bgfx procedural Cube/depth/真实 instance
+buffer 和 M10 的 Cooked glTF 产品样例仍未实现。
+
 ## 当前 Legacy 已完成基线
 
 - 现有 Legacy target 的包依赖已迁移到 vcpkg manifest；bgfx 与 EASTL/EABase 仍是源码依赖；
@@ -119,13 +126,13 @@ vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EAB
 
 目标构建需要 CMake 3.25 以上、支持 C++23 的编译器和 `VCPKG_ROOT`。Tina 自有 target 已统一请求
 `cxx_std_23`，MSVC 保持 `/utf-8` 与 `/Zc:__cplusplus`。Windows 已在 Visual Studio 2026 18.4.3、
-MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过本轮 dirty-subtree b4a +
+MSVC 19.50.35717 和 `D:\Programs\CMake\bin\cmake.exe` 4.2.3 下通过前一轮 dirty-subtree b4a +
 M8-A/M8-B 的 Debug/Release 直接门禁：基础211/211、独立 UI 115/115、独立 Runtime→UI 60/60、
 UI→Render 12/12、Scene 19/19、RenderScene 11/11，以及 Null 与2D infrastructure 样例各300帧正常
-退出；2D样例同时验证每帧3个 Sprite、Render shutdown 恰好1次和资源归零。本轮还重新通过 Windows
+退出；2D样例同时验证每帧3个 Sprite、Render shutdown 恰好1次和资源归零。该轮还重新通过 Windows
 Debug GLFW专项26/26、Platform样例300帧、bgfx专项16/16，以及 Desktop样例连续3次各300帧。新增
 iconify 回归验证最小化时沿用最后有效 logical extent，同时保留 framebuffer `0x0` 的 suspended 语义。
-本轮没有重新截图，因此画面正确仍引用前序 D2 可见证据；Linux M8-B 与可见 Sprite 仍未复验。上一轮完整 D2
+该轮没有重新截图，因此画面正确仍引用前序 D2 可见证据；Linux M8-B 与可见 Sprite 仍未复验。上一轮完整 D2
 Windows Debug/Release 证据仍为基础207/207、UI92/92、Runtime→UI53/53、UI→Render bridge12/12、
 bgfx专项16/16、Null样例300帧，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 可见 retained UI
 样例 Debug 1200帧与 Release 300帧；Release 输出 clean status ok。Debug D3D11 退出时
@@ -133,6 +140,12 @@ bgfx专项16/16、Null样例300帧，以及真实 D3D11 Intel Iris Xe 的 `tina_
 GLFW专项25/25、GLFW样例300/1800帧仍作为历史证据。Legacy ON 图的前序隔离门禁为 vNext 185/185 + Legacy 43/43。
 `TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与
 公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。
+
+M9-A 当前 Windows MSVC Debug/Release 直接结果均为基础 `tina_tests` 213/213、独立
+`tina_render_scene_tests` 22/22，以及 `tina_sample_null`、`tina_sample_2d_infrastructure`、
+`tina_sample_3d_extraction` 各300帧返回0。3D extraction 每帧提交4个 Mesh、可见3个、裁剪1个、
+形成2个 instance batch，resize 产生一次 aspect 变化，退出时 `liveResources=0`。Release 还直接通过
+UI115/115、Runtime→UI60/60、UI→Render12/12与Scene19/19。
 
 Linux 最新 paint/DisplayList/bridge Null 门禁也已完成：GCC 13.4 通过基础205/205、
 `tina_ui_tests` 92/92、`tina_runtime_ui_tests` 46/46、bridge 12/12与Null样例300帧；
@@ -154,7 +167,7 @@ preset 使用项目 chainload toolchain 固定标准库，不能退回 Ubuntu 22
 ```powershell
 cmake --version
 cmake --preset windows-msvc-vnext
-cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_scene_tests tina_render_scene_tests tina_sample_null tina_sample_2d_infrastructure
+cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_scene_tests tina_render_scene_tests tina_sample_null tina_sample_2d_infrastructure tina_sample_3d_extraction
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe
@@ -163,6 +176,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_render_scene_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
+out\build\windows-msvc-vnext\bin\Debug\tina_sample_3d_extraction.exe --frames=300
 
 # 可选 GLFW + NullRender 平台切片
 cmake --preset windows-msvc-vnext-platform

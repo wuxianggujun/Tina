@@ -16,11 +16,12 @@ class CountingResource final : public std::pmr::memory_resource {
     usize allocations = 0;
     usize deallocations = 0;
     bool rejectAllocations = false;
+    usize successfulAllocationLimit = (std::numeric_limits<usize>::max)();
 
   private:
     void* do_allocate(usize bytes, usize alignment) override
     {
-        if (rejectAllocations)
+        if (rejectAllocations || allocations >= successfulAllocationLimit)
         {
             throw std::bad_alloc{};
         }
@@ -73,6 +74,40 @@ class CountingResource final : public std::pmr::memory_resource {
     };
 }
 
+[[nodiscard]] RenderSceneFrameParameters perspectiveFrame(float aspectRatio = 16.0F / 9.0F)
+{
+    return RenderSceneFrameParameters{.primarySurfaceAspectRatio = aspectRatio};
+}
+
+[[nodiscard]] RenderPerspectiveCameraInput perspectiveCamera(float positionZ = 6.0F)
+{
+    return RenderPerspectiveCameraInput{
+        .stableCameraKey = 17,
+        .worldPose = RenderPose3DInput{.positionZ = positionZ},
+        .verticalFovDegrees = 60.0F,
+        .nearPlaneMeters = 0.1F,
+        .farPlaneMeters = 100.0F,
+    };
+}
+
+[[nodiscard]] RenderMesh3DInput mesh3D(u32 meshKey, u32 materialKey, u64 stableEntityKey,
+                                       float x, float y, float z)
+{
+    return RenderMesh3DInput{
+        .meshKey = meshKey,
+        .materialKey = materialKey,
+        .stableEntityKey = stableEntityKey,
+        .worldTransform = RenderTransform3DInput{
+            .pose = RenderPose3DInput{
+                .positionX = x,
+                .positionY = y,
+                .positionZ = z,
+            },
+        },
+        .localBounds = RenderBoundingSphereInput{.radius = 0.5F},
+    };
+}
+
 TEST(RenderSceneBuilderTest, RejectsInvalidCapacityBeforeAllocating)
 {
     CountingResource resource;
@@ -89,6 +124,44 @@ TEST(RenderSceneBuilderTest, MapsFixedStorageAllocationFailure)
     const auto result = RenderSceneBuilder::Create(RenderSceneCapacity{4}, resource);
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, RenderErrorCode::RenderSceneStorageAllocationFailed);
+}
+
+TEST(RenderSceneBuilderTest, ReleasesPartialFixedStorageWhenLaterAllocationFails)
+{
+    CountingResource resource;
+    resource.successfulAllocationLimit = 1;
+    auto secondAllocationFailure = RenderSceneBuilder::Create(RenderSceneCapacity{}, resource);
+    ASSERT_FALSE(secondAllocationFailure);
+    EXPECT_EQ(secondAllocationFailure.error().code, RenderErrorCode::RenderSceneStorageAllocationFailed);
+    EXPECT_EQ(resource.allocations, 1U);
+    EXPECT_EQ(resource.deallocations, 1U);
+
+    resource.allocations = 0;
+    resource.deallocations = 0;
+    resource.successfulAllocationLimit = 2;
+    auto thirdAllocationFailure = RenderSceneBuilder::Create(RenderSceneCapacity{}, resource);
+    ASSERT_FALSE(thirdAllocationFailure);
+    EXPECT_EQ(thirdAllocationFailure.error().code, RenderErrorCode::RenderSceneStorageAllocationFailed);
+    EXPECT_EQ(resource.allocations, 2U);
+    EXPECT_EQ(resource.deallocations, 2U);
+}
+
+TEST(RenderSceneBuilderTest, RejectsInvalidMeshAndBatchCapacitiesBeforeAllocating)
+{
+    CountingResource resource;
+    RenderSceneCapacity capacity{};
+    capacity.mesh3DItemCapacity = 0;
+    auto invalidItems = RenderSceneBuilder::Create(capacity, resource);
+    ASSERT_FALSE(invalidItems);
+    EXPECT_EQ(invalidItems.error().code, RenderErrorCode::InvalidRenderSceneCapacity);
+    EXPECT_EQ(resource.allocations, 0U);
+
+    capacity = {};
+    capacity.mesh3DBatchCapacity = RenderSceneCapacity::MaximumMesh3DBatchCapacity + 1U;
+    auto invalidBatches = RenderSceneBuilder::Create(capacity, resource);
+    ASSERT_FALSE(invalidBatches);
+    EXPECT_EQ(invalidBatches.error().code, RenderErrorCode::InvalidRenderSceneCapacity);
+    EXPECT_EQ(resource.allocations, 0U);
 }
 
 TEST(RenderSceneBuilderTest, SortsCullsAndSnapsWithoutChangingInput)
@@ -255,6 +328,225 @@ TEST(RenderSceneBuilderTest, ReplacementBuildInvalidatesOldPublicationAndFailure
     EXPECT_TRUE(builder.publishedView().empty());
 }
 
+TEST(RenderSceneBuilderTest, PerspectiveCameraRequiresCurrentSurfaceAspectAndValidProjection)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    auto missingAspect = builder.writer().setPerspectiveCamera(perspectiveCamera());
+    ASSERT_FALSE(missingAspect);
+    EXPECT_EQ(missingAspect.error().code, RenderErrorCode::InvalidRenderSceneInput);
+    ASSERT_FALSE(builder.commit());
+
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    auto invalidProjection = perspectiveCamera();
+    invalidProjection.nearPlaneMeters = invalidProjection.farPlaneMeters;
+    auto projectionFailure = builder.writer().setPerspectiveCamera(invalidProjection);
+    ASSERT_FALSE(projectionFailure);
+    EXPECT_EQ(projectionFailure.error().code, RenderErrorCode::InvalidRenderSceneInput);
+    ASSERT_FALSE(builder.commit());
+
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    auto invalidRotation = perspectiveCamera();
+    invalidRotation.worldPose.rotationW = 0.0F;
+    auto rotationFailure = builder.writer().setPerspectiveCamera(invalidRotation);
+    ASSERT_FALSE(rotationFailure);
+    EXPECT_EQ(rotationFailure.error().code, RenderErrorCode::InvalidRenderSceneInput);
+    ASSERT_FALSE(builder.commit());
+}
+
+TEST(RenderSceneBuilderTest, InvalidFrameAspectPreservesThePreviousPublicationWithoutOpeningABuild)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    ASSERT_TRUE(builder.writer().setCamera2D(camera()));
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(1, 1, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.commit());
+
+    auto invalidFrame = builder.beginFrame(RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = std::numeric_limits<float>::quiet_NaN(),
+    });
+    ASSERT_FALSE(invalidFrame);
+    EXPECT_EQ(invalidFrame.error().code, RenderErrorCode::InvalidRenderSceneInput);
+    EXPECT_EQ(builder.publishedView().sprites2D().size(), 1U);
+
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    EXPECT_TRUE(builder.publishedView().empty());
+    builder.rollback();
+}
+
+TEST(RenderSceneBuilderTest, PerspectiveCameraUsesSurfaceAndNormalizedViewportAspect)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame(2.0F)));
+    auto cameraInput = perspectiveCamera();
+    cameraInput.normalizedViewport.width = 0.5F;
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(cameraInput));
+
+    auto committed = builder.commit();
+    ASSERT_TRUE(committed.has_value()) << committed.error().message;
+    ASSERT_TRUE(committed->perspectiveCamera().has_value());
+    EXPECT_FLOAT_EQ(committed->perspectiveCamera()->aspectRatio, 1.0F);
+    EXPECT_FLOAT_EQ(committed->perspectiveCamera()->forwardX, 0.0F);
+    EXPECT_FLOAT_EQ(committed->perspectiveCamera()->forwardY, 0.0F);
+    EXPECT_FLOAT_EQ(committed->perspectiveCamera()->forwardZ, -1.0F);
+    EXPECT_FLOAT_EQ(committed->perspectiveCamera()->upY, 1.0F);
+    EXPECT_EQ(committed->statistics().cameraCount, 1U);
+    EXPECT_EQ(committed->statistics().perspectiveCameraCount, 1U);
+}
+
+TEST(RenderSceneBuilderTest, CullsSortsAndFinalizesStableMeshInstanceBatches)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(2, 1, 30, 0.0F, 0.0F, -2.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(2, 1, 20, 0.0F, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 2, 10, 1.0F, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(9, 9, 40, 100.0F, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(9, 9, 50, 0.0F, 0.0F, 10.0F)));
+
+    auto committed = builder.commit();
+    ASSERT_TRUE(committed.has_value()) << committed.error().message;
+    ASSERT_EQ(committed->meshes3D().size(), 3U);
+    ASSERT_EQ(committed->mesh3DBatches().size(), 2U);
+
+    EXPECT_EQ(committed->meshes3D()[0].materialKey, 1U);
+    EXPECT_EQ(committed->meshes3D()[0].stableEntityKey, 20U);
+    EXPECT_EQ(committed->meshes3D()[1].stableEntityKey, 30U);
+    EXPECT_LT(committed->meshes3D()[0].depthBucket, committed->meshes3D()[1].depthBucket);
+    EXPECT_FLOAT_EQ(committed->meshes3D()[0].columnMajorWorldTransform[12], 0.0F);
+    EXPECT_FLOAT_EQ(committed->meshes3D()[0].columnMajorWorldTransform[14], 0.0F);
+
+    EXPECT_EQ(committed->mesh3DBatches()[0].firstItem, 0U);
+    EXPECT_EQ(committed->mesh3DBatches()[0].itemCount, 2U);
+    EXPECT_EQ(committed->mesh3DBatches()[0].meshKey, 2U);
+    EXPECT_EQ(committed->mesh3DBatches()[1].firstItem, 2U);
+    EXPECT_EQ(committed->mesh3DBatches()[1].itemCount, 1U);
+
+    const RenderSceneStatistics statistics = committed->statistics();
+    EXPECT_EQ(statistics.submittedMesh3DCount, 5U);
+    EXPECT_EQ(statistics.visibleMesh3DCount, 3U);
+    EXPECT_EQ(statistics.culledMesh3DCount, 2U);
+    EXPECT_EQ(statistics.mesh3DBatchCount, 2U);
+    EXPECT_NE(statistics.mesh3DSortOrderChecksum, 0U);
+}
+
+TEST(RenderSceneBuilderTest, PerspectiveSphereCullingKeepsBoundaryIntersections)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame(1.0F)));
+    auto cameraInput = perspectiveCamera(0.0F);
+    cameraInput.nearPlaneMeters = 1.0F;
+    cameraInput.farPlaneMeters = 10.0F;
+    cameraInput.verticalFovDegrees = 90.0F;
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(cameraInput));
+
+    auto nearIntersection = mesh3D(1, 1, 1, 0.0F, 0.0F, -0.6F);
+    nearIntersection.localBounds.radius = 0.5F;
+    ASSERT_TRUE(builder.writer().addMesh3D(nearIntersection));
+
+    auto sideIntersection = mesh3D(1, 1, 2, 2.4F, 0.0F, -2.0F);
+    sideIntersection.localBounds.radius = 0.5F;
+    ASSERT_TRUE(builder.writer().addMesh3D(sideIntersection));
+
+    auto sideOutside = mesh3D(1, 1, 3, 3.0F, 0.0F, -2.0F);
+    sideOutside.localBounds.radius = 0.25F;
+    ASSERT_TRUE(builder.writer().addMesh3D(sideOutside));
+
+    auto committed = builder.commit();
+    ASSERT_TRUE(committed.has_value()) << committed.error().message;
+    ASSERT_EQ(committed->meshes3D().size(), 2U);
+    EXPECT_EQ(committed->statistics().culledMesh3DCount, 1U);
+}
+
+TEST(RenderSceneBuilderTest, MeshInputValidationIsStickyAndRejectsNonOpaqueOrDegenerateTransforms)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+
+    auto invalidMesh = mesh3D(1, 1, 1, 0.0F, 0.0F, 0.0F);
+    invalidMesh.worldTransform.scaleX = 0.0F;
+    invalidMesh.baseColorFactor.alpha = 0.5F;
+    auto invalid = builder.writer().addMesh3D(invalidMesh);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, RenderErrorCode::InvalidRenderSceneInput);
+
+    auto sticky = builder.writer().addMesh3D(mesh3D(1, 1, 2, 0.0F, 0.0F, 0.0F));
+    ASSERT_FALSE(sticky);
+    EXPECT_EQ(sticky.error().code, RenderErrorCode::InvalidRenderSceneInput);
+    auto commit = builder.commit();
+    ASSERT_FALSE(commit);
+    EXPECT_EQ(commit.error().code, RenderErrorCode::InvalidRenderSceneInput);
+}
+
+TEST(RenderSceneBuilderTest, MeshesRequirePerspectiveCameraAndBatchCapacityIsTransactional)
+{
+    RenderSceneCapacity capacity{};
+    capacity.mesh3DItemCapacity = 4;
+    capacity.mesh3DBatchCapacity = 1;
+    auto builderResult = RenderSceneBuilder::Create(capacity);
+    ASSERT_TRUE(builderResult.has_value());
+    RenderSceneBuilder builder = std::move(*builderResult);
+
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 1, 1, 0.0F, 0.0F, 0.0F)));
+    auto missingCamera = builder.commit();
+    ASSERT_FALSE(missingCamera);
+    EXPECT_EQ(missingCamera.error().code, RenderErrorCode::RenderSceneMissingCamera);
+
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 1, 1, 0.0F, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(2, 2, 2, 1.0F, 0.0F, 0.0F)));
+    auto batchOverflow = builder.commit();
+    ASSERT_FALSE(batchOverflow);
+    EXPECT_EQ(batchOverflow.error().code, RenderErrorCode::RenderSceneCapacityExceeded);
+    EXPECT_TRUE(builder.publishedView().empty());
+}
+
+TEST(RenderSceneBuilderTest, MeshItemCapacityFailureIsStickyAndTransactional)
+{
+    RenderSceneCapacity capacity{};
+    capacity.mesh3DItemCapacity = 1;
+    auto builderResult = RenderSceneBuilder::Create(capacity);
+    ASSERT_TRUE(builderResult.has_value());
+    RenderSceneBuilder builder = std::move(*builderResult);
+
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 1, 1, 0.0F, 0.0F, 0.0F)));
+    auto overflow = builder.writer().addMesh3D(mesh3D(1, 1, 2, 1.0F, 0.0F, 0.0F));
+    ASSERT_FALSE(overflow);
+    EXPECT_EQ(overflow.error().code, RenderErrorCode::RenderSceneCapacityExceeded);
+
+    auto commit = builder.commit();
+    ASSERT_FALSE(commit);
+    EXPECT_EQ(commit.error().code, RenderErrorCode::RenderSceneCapacityExceeded);
+    EXPECT_TRUE(builder.publishedView().empty());
+}
+
+TEST(RenderSceneBuilderTest, TwoDimensionalAndPerspectiveCamerasCanShareOneWorldScene)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setCamera2D(camera()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+    ASSERT_TRUE(builder.writer().addSprite2D(sprite(1, 1, 0.0F, 0.0F)));
+    ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 1, 2, 0.0F, 0.0F, 0.0F)));
+
+    auto committed = builder.commit();
+    ASSERT_TRUE(committed.has_value()) << committed.error().message;
+    EXPECT_TRUE(committed->camera2D().has_value());
+    EXPECT_TRUE(committed->perspectiveCamera().has_value());
+    EXPECT_EQ(committed->sprites2D().size(), 1U);
+    EXPECT_EQ(committed->meshes3D().size(), 1U);
+    EXPECT_EQ(committed->statistics().cameraCount, 2U);
+    EXPECT_EQ(committed->statistics().camera2DCount, 1U);
+    EXPECT_EQ(committed->statistics().perspectiveCameraCount, 1U);
+}
+
 TEST(RenderSceneBuilderTest, ReusesFixedStorageAcrossThreeHundredFrames)
 {
     CountingResource resource;
@@ -266,12 +558,16 @@ TEST(RenderSceneBuilderTest, ReusesFixedStorageAcrossThreeHundredFrames)
 
         for (u32 frame = 0; frame < 300; ++frame)
         {
-            ASSERT_TRUE(builder.beginFrame());
+            ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
             ASSERT_TRUE(builder.writer().setCamera2D(camera()));
+            ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
             ASSERT_TRUE(builder.writer().addSprite2D(sprite(1, frame + 1U, 0.0F, 0.0F)));
+            ASSERT_TRUE(builder.writer().addMesh3D(mesh3D(1, 1, frame + 10'000U, 0.0F, 0.0F, 0.0F)));
             auto committed = builder.commit();
             ASSERT_TRUE(committed.has_value());
             ASSERT_EQ(committed->sprites2D().size(), 1U);
+            ASSERT_EQ(committed->meshes3D().size(), 1U);
+            ASSERT_EQ(committed->mesh3DBatches().size(), 1U);
         }
 
         EXPECT_EQ(resource.allocations, allocationsAfterCreate);

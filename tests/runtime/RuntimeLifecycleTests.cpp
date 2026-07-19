@@ -91,6 +91,36 @@ void expectEventSuffix(const EventLog& events, const EventLog& expectedSuffix)
     };
 }
 
+[[nodiscard]] Render::RenderPerspectiveCameraInput makeRenderScenePerspectiveCameraInput(
+    u64 stableCameraKey = 17, float positionZ = 6.0F)
+{
+    return Render::RenderPerspectiveCameraInput{
+        .stableCameraKey = stableCameraKey,
+        .worldPose = Render::RenderPose3DInput{.positionZ = positionZ},
+        .verticalFovDegrees = 60.0F,
+        .nearPlaneMeters = 0.1F,
+        .farPlaneMeters = 100.0F,
+    };
+}
+
+[[nodiscard]] Render::RenderMesh3DInput makeRenderSceneMesh3DInput(
+    u32 meshKey, u32 materialKey, u64 stableEntityKey, float centerX, float centerY, float centerZ)
+{
+    return Render::RenderMesh3DInput{
+        .meshKey = meshKey,
+        .materialKey = materialKey,
+        .stableEntityKey = stableEntityKey,
+        .worldTransform = Render::RenderTransform3DInput{
+            .pose = Render::RenderPose3DInput{
+                .positionX = centerX,
+                .positionY = centerY,
+                .positionZ = centerZ,
+            },
+        },
+        .localBounds = Render::RenderBoundingSphereInput{.radius = 0.5F},
+    };
+}
+
 class LoggingClock final : public Core::IMonotonicClock {
   public:
     explicit LoggingClock(EventLog& events) noexcept : events_(&events)
@@ -439,6 +469,10 @@ struct RuntimeProbe final {
     EventLog events;
     ManualMonotonicClock* clock = nullptr;
     std::vector<Core::Duration> frameDeltas;
+    Platform::LogicalExtent initialPrimaryWindowLogicalExtent{1280, 720};
+    Platform::FramebufferExtent initialPrimaryWindowFramebufferExtent{1280, 720};
+    Platform::LogicalExtent framePrimaryWindowLogicalExtent{1280, 720};
+    Platform::FramebufferExtent framePrimaryWindowFramebufferExtent{1280, 720};
     CommittedFailurePoint failurePoint = CommittedFailurePoint::None;
     InjectedOutcome failureOutcome = InjectedOutcome::ReturnError;
     std::optional<InjectedOutcome> initialMetricsFailure;
@@ -462,6 +496,9 @@ struct RuntimeProbe final {
     bool lastSubmittedHadPrimaryWindowSurface = false;
     std::optional<Render::RenderCamera2D> copiedLastSubmittedWorldCamera2D;
     std::vector<Render::RenderSprite2DItem> copiedLastSubmittedWorldSprites2D;
+    std::optional<Render::RenderPerspectiveCamera> copiedLastSubmittedPerspectiveCamera;
+    std::vector<Render::RenderMesh3DItem> copiedLastSubmittedWorldMeshes3D;
+    std::vector<Render::RenderMesh3DBatch> copiedLastSubmittedWorldMesh3DBatches;
     Render::RenderSceneStatistics copiedLastSubmittedWorldSceneStatistics{};
     std::vector<usize> submittedUICommandCounts;
     std::optional<Render::UIDrawCommand> copiedLastSubmittedUICommand;
@@ -498,8 +535,8 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
         }
         return Platform::WindowMetricsSnapshot{
             .window = primaryWindow_,
-            .logicalExtent = {1280, 720},
-            .framebufferExtent = {1280, 720},
+            .logicalExtent = probe_->initialPrimaryWindowLogicalExtent,
+            .framebufferExtent = probe_->initialPrimaryWindowFramebufferExtent,
             .contentScale = {1.0F, 1.0F},
             .revision = 1,
             .focused = true,
@@ -550,8 +587,8 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
         }
         Platform::WindowMetricsSnapshot metrics{
             .window = primaryWindow_,
-            .logicalExtent = {1280, 720},
-            .framebufferExtent = {1280, 720},
+            .logicalExtent = probe_->framePrimaryWindowLogicalExtent,
+            .framebufferExtent = probe_->framePrimaryWindowFramebufferExtent,
             .contentScale = {1.0F, 1.0F},
             .revision = platformFrameId,
             .focused = true,
@@ -884,6 +921,11 @@ class ProbeRenderDevice final : public Render::IRenderDevice {
         probe_->copiedLastSubmittedWorldCamera2D = frame.primaryWorldScene.camera2D();
         const auto sprites = frame.primaryWorldScene.sprites2D();
         probe_->copiedLastSubmittedWorldSprites2D.assign(sprites.begin(), sprites.end());
+        probe_->copiedLastSubmittedPerspectiveCamera = frame.primaryWorldScene.perspectiveCamera();
+        const auto meshes3D = frame.primaryWorldScene.meshes3D();
+        probe_->copiedLastSubmittedWorldMeshes3D.assign(meshes3D.begin(), meshes3D.end());
+        const auto mesh3DBatches = frame.primaryWorldScene.mesh3DBatches();
+        probe_->copiedLastSubmittedWorldMesh3DBatches.assign(mesh3DBatches.begin(), mesh3DBatches.end());
         probe_->copiedLastSubmittedWorldSceneStatistics = frame.primaryWorldScene.statistics();
         probe_->submittedUICommandCounts.push_back(frame.primaryWindowUIDisplayList.commands().size());
         if (!frame.primaryWindowUIDisplayList.commands().empty())
@@ -1146,6 +1188,8 @@ struct GameProbe final {
     std::optional<Core::ErrorCode> ignoredPrimaryWindowUIUpdateFailure;
     std::optional<Render::RenderCamera2DInput> scriptedRenderSceneCamera;
     std::vector<Render::RenderSprite2DInput> scriptedRenderSceneSprites;
+    std::optional<Render::RenderPerspectiveCameraInput> scriptedRenderScenePerspectiveCamera;
+    std::vector<Render::RenderMesh3DInput> scriptedRenderSceneMeshes3D;
     bool ignoreRenderSceneWriteFailures = false;
     std::optional<Core::ErrorCode> ignoredRenderSceneWriteFailure;
 };
@@ -1445,6 +1489,23 @@ class ScriptedGameState final : public IGameState {
             if (!spriteStatus)
             {
                 return spriteStatus;
+            }
+        }
+        if (probe_->scriptedRenderScenePerspectiveCamera.has_value())
+        {
+            auto cameraStatus =
+                handleWriteStatus(writer.setPerspectiveCamera(*probe_->scriptedRenderScenePerspectiveCamera));
+            if (!cameraStatus)
+            {
+                return cameraStatus;
+            }
+        }
+        for (const Render::RenderMesh3DInput& mesh : probe_->scriptedRenderSceneMeshes3D)
+        {
+            auto meshStatus = handleWriteStatus(writer.addMesh3D(mesh));
+            if (!meshStatus)
+            {
+                return meshStatus;
             }
         }
         return maybeInjectCommittedGameFailure(*probe_->runtime, CommittedFailurePoint::ExtractRenderScene,
@@ -2097,6 +2158,82 @@ TEST(EngineHostRunTest, ExtractRenderScenePublishesCameraAndSpriteDataToSubmitFr
     EXPECT_EQ(runtime.presentedFrames, 1U);
     EXPECT_EQ(game.exitCount, 1U);
     EXPECT_EQ(game.shutdownCount, 1U);
+}
+
+TEST(EngineHostRunTest, PerspectiveExtractionUsesCurrentPrimaryWindowAspectAndPublishesMeshBatches)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    runtime.initialPrimaryWindowLogicalExtent = {800U, 600U};
+    runtime.initialPrimaryWindowFramebufferExtent = {800U, 600U};
+    runtime.framePrimaryWindowLogicalExtent = {1'000U, 500U};
+    runtime.framePrimaryWindowFramebufferExtent = {1'600U, 800U};
+
+    GameProbe game;
+    game.runtime = &runtime;
+    game.exitOnFrame = 0;
+    game.scriptedRenderScenePerspectiveCamera = makeRenderScenePerspectiveCameraInput(303U, 6.0F);
+    game.scriptedRenderSceneMeshes3D = {
+        makeRenderSceneMesh3DInput(41U, 51U, 401U, 0.0F, 0.0F, 0.0F),
+        makeRenderSceneMesh3DInput(41U, 51U, 402U, 1.0F, 0.0F, -1.0F),
+    };
+    ScriptedGameApplication application(game);
+
+    auto config = EngineConfig::Defaults();
+    config.primaryWindow.initialLogicalExtent = {640U, 480U};
+    auto hostResult = createRuntimeHost(runtime, std::move(config));
+    ASSERT_TRUE(hostResult.has_value()) << hostResult.error().message;
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
+    EXPECT_EQ(*runResult, RunExitReason::GameRequestedExitAfterCurrentFrame);
+    ASSERT_TRUE(runtime.copiedLastSubmittedPerspectiveCamera.has_value());
+    EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedPerspectiveCamera->aspectRatio, 2.0F);
+    EXPECT_EQ(runtime.copiedLastSubmittedPerspectiveCamera->stableCameraKey, 303U);
+    ASSERT_EQ(runtime.copiedLastSubmittedWorldMeshes3D.size(), 2U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldMeshes3D[0].meshKey, 41U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldMeshes3D[0].materialKey, 51U);
+    ASSERT_EQ(runtime.copiedLastSubmittedWorldMesh3DBatches.size(), 1U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldMesh3DBatches.front().firstItem, 0U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldMesh3DBatches.front().itemCount, 2U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldSceneStatistics.perspectiveCameraCount, 1U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldSceneStatistics.visibleMesh3DCount, 2U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldSceneStatistics.mesh3DBatchCount, 1U);
+    EXPECT_EQ(runtime.submittedFrames, 1U);
+    EXPECT_EQ(runtime.presentedFrames, 1U);
+    EXPECT_EQ(game.exitCount, 1U);
+    EXPECT_EQ(game.shutdownCount, 1U);
+}
+
+TEST(EngineHostRunTest, PerspectiveExtractionFallsBackToLogicalAspectWhileFramebufferIsSuspended)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    runtime.framePrimaryWindowLogicalExtent = {900U, 600U};
+    runtime.framePrimaryWindowFramebufferExtent = {0U, 0U};
+
+    GameProbe game;
+    game.runtime = &runtime;
+    game.exitOnFrame = 0;
+    game.scriptedRenderScenePerspectiveCamera = makeRenderScenePerspectiveCameraInput(304U, 6.0F);
+    game.scriptedRenderSceneMeshes3D = {
+        makeRenderSceneMesh3DInput(42U, 52U, 403U, 0.0F, 0.0F, 0.0F),
+    };
+    ScriptedGameApplication application(game);
+
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value()) << hostResult.error().message;
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
+    ASSERT_TRUE(runtime.copiedLastSubmittedPerspectiveCamera.has_value());
+    EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedPerspectiveCamera->aspectRatio, 1.5F);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldMeshes3D.size(), 1U);
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldSceneStatistics.visibleMesh3DCount, 1U);
+    EXPECT_EQ(runtime.submittedFrames, 1U);
+    EXPECT_EQ(runtime.presentedFrames, 1U);
 }
 
 TEST(EngineHostRunTest, RenderSceneWriterCapacityOverflowStopsBeforeUiAndRenderSubmission)

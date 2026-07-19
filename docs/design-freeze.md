@@ -114,7 +114,10 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
   continuous claim 的 Runtime consumer 上限64不泄漏到 game-facing Action Map；
 - World RenderScene 与 UI DisplayList 分别冻结，统一组合为 RenderFrame view；M8-B 已落地固定容量
   `RenderSceneBuilder`、phase-local `RenderSceneWriter`、resolved Camera2D/Sprite2D input、稳定排序/裁剪/
-  pixel snap，以及 Runtime extraction 的 begin/commit/rollback。`RenderFrame` 携带 submit-call-local borrowed
+  pixel snap，以及 Runtime extraction 的 begin/commit/rollback。M9-A 在同一 builder 上补齐
+  Perspective/Mesh3D extraction、当前 PlatformFrame aspect 注入、球体 frustum culling、稳定排序和相邻
+  instance batch finalize；`tina_sample_3d_extraction` 只证明 CPU/Null 边界，不证明可见 bgfx 3D。
+  `RenderFrame` 携带 submit-call-local borrowed
   `primaryWorldScene` 与 `primaryWindowUIDisplayList`，backend 只能在 `submitFrame()` 调用内消费/复制/编码并禁止
   保留；Runtime-private owning RenderFramePacket 继续作为后续目标，届时才持有 FrameArena/资源
   lease/Atlas/surface pin/submit ticket 到 backend completion；Renderer 不访问 EnTT；
@@ -210,7 +213,8 @@ Keyboard/Gamepad activation、Image/Texture 或完整 Widget UI。
 - 垂直切片顺序为 Null Runtime → Platform/最小 Surface/UI → Scene/2D → Render/3D → Asset/Cooker →
   Product 2D/UI/Audio → Legacy 删除；
 - M7–M9 只使用版本化内置 Cooked fixture/procedural geometry；M7 已分片建立私有最小 bgfx UI Pass
-  与 SolidFill 可见样例，M9 只扩展3D，禁止 UI 临时调用 Legacy renderer；
+  与 SolidFill 可见样例，M9-A 先完成 backend-neutral 3D extraction，M9-B 再接入私有 procedural Cube/depth，
+  禁止 UI 临时调用 Legacy renderer；
 - 每批都有代码、直接 GoogleTest、对应可运行样例、资源回收证据、UTF-8 文档和独立提交；
 - `tina_bench` Release 直接运行，普通 CI 不用不稳定的绝对微秒阈值；
 - Exit code、资源计数、性能数据和实际画面分别验收。
@@ -305,3 +309,8 @@ Measure/Arrange reuse、prepared-input cache 与父约束/viewport/Collapsed/候
 之后继续实现 Key/Gamepad/axis claims、focus/capture/widget、Button Keyboard/Gamepad activation、完整 dirty-range pruning、
 owning Runtime RenderFramePacket 与资源 pin，M7-D 实现 Label/Button/Modal + FreeType 文本/中文样例；
 M7-E 最后接入 IMM32、Gamepad 和完整 DPI/输入门禁。
+
+M9-A 已完成 RenderScene 的 3D CPU/Null extraction foundation：Perspective Camera、Mesh3D item/batch、
+当前帧 aspect、包围球裁剪、稳定排序和 instance batch finalize；该切片不创建 bgfx Buffer/Shader/Pipeline，
+不显示 Cube。下一项 M9-B 才建立私有 canonical `P3_N3_UV2` Cube、Opaque depth pass、真实 instance buffer
+和可见样例；M10 仍负责 Cooked glTF/Manifest 产品路径。

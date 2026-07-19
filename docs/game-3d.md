@@ -1,6 +1,7 @@
 # 3D 游戏架构
 
-> 状态：vNext 候选冻结。Cube 只验证基础设施；正式 3D 路径必须覆盖 Cooked Mesh、Material、Prefab、Camera、depth 与 culling。
+> 状态：vNext 契约已冻结；M9-A CPU/Null extraction foundation 已实现。可见 Cube 仍只验证
+> M9-B 基础设施；正式 3D 路径必须覆盖 Cooked Mesh、Material、Prefab、Camera、depth 与 culling。
 
 ## 首期能力边界
 
@@ -16,6 +17,12 @@
 
 不支持特性由 Cooker 返回带 node/mesh/material 路径的明确诊断，不能静默忽略后继续生成看似
 成功的资产。
+
+当前 M9-A 只完成其中的 backend-neutral extraction 子集：`RenderPerspectiveCameraInput`、
+`RenderMesh3DInput`、固定容量 item/batch storage、世界包围球、frustum culling、稳定排序与 batch finalize。
+`meshKey/materialKey` 是 M9 fixture key，不是公开 Asset/GPU handle；M10 必须用 `FrameResourceRef` 替换解析
+路径。`tina_sample_3d_extraction` 在 Headless/Null 中运行300帧，不创建 depth attachment、bgfx Buffer、Shader
+或 Pipeline，也不产生可见画面。
 
 ## 模块与数据流
 
@@ -50,7 +57,9 @@ struct PerspectiveCamera {
 - 世界为右手坐标、Y-up、-Z forward、单位米；
 - FOV 公共 API 明确使用 degrees，不接受含糊裸 radians；
 - `0 < near < far`，所有数值必须 finite，越界在组件写入时返回错误；
-- aspect 来自当前有效 `WindowSurfaceSnapshot` viewport，不存储在 Camera component；
+- aspect 不存储在 Camera component。当前 M9-A Runtime 从本帧 primary `PlatformFrame` 的正 framebuffer
+  extent 计算，framebuffer 为 `0x0` 时回退正 logical extent；后续 surface-backed pass 还必须与
+  `WindowSurfaceSnapshot` revision/viewport 保持一致；
 - 每个启用 World view 首期恰好一个 active Camera，零个或多个都返回稳定诊断；
 - upper layer 只表达 Tina Camera descriptor。D3D/OpenGL 的 clip depth、origin 和 projection
   差异只在 Render backend 生成矩阵时处理，不能泄漏成玩法条件分支。
@@ -156,6 +165,12 @@ Draco/Meshopt 等未支持扩展返回 `UnsupportedFeature` 和完整源路径�
 6. 相同 Mesh、Submesh、Material、Pipeline 的相邻 item 合并为 instance batch；
 7. Pass Scheduler 消费 immutable RenderScene，不能回查 World。
 
+M9-A 已实现步骤3到6的单线程 CPU 基础，但输入仍是游戏回调写入的 resolved 纯值，而不是 Scene component/
+Asset snapshot。当前稳定 key 为
+`material -> mesh -> submesh -> doubleSided -> depth bucket -> stableEntity -> insertion`，相邻且
+Mesh/Material/Submesh/Double-sided 相同的 item 合并为 batch；Pipeline key 要等 M9-B/M10 资源边界落地后
+进入排序。interpolation、worker chunk merge、FrameResourceRef 和 SubmissionTicket 尚未实现。
+
 Worker 可以对不可变 chunk 做 bounds/culling 并写 worker-local buffer；barrier 后按稳定
 chunk/index 合并。结构变化、Asset Ready 发布和 GPU resource create 不在 Worker 中发生。
 
@@ -196,12 +211,15 @@ stale handle、资源归零和 checksum 属确定性硬门禁。
 
 ## 正式 3D 验收
 
-分两步，避免用 Cube 冒充完整能力：
+分三步，避免用 CPU extraction 或 Cube 冒充完整能力：
 
-1. `tina_sample_3d_infrastructure`：procedural indexed Cube、Perspective、depth、resize、300帧退出；
-2. `tina_sample_3d`：Cooked textured glTF -> Mesh/Material/Prefab、层级 Transform、多个深度遮挡
+1. `tina_sample_3d_extraction`：Headless/Null Perspective、bounds/culling/sort/batch、aspect resize、
+   300帧退出与 CPU 资源归零；当前已实现，但没有 GPU 画面；
+2. `tina_sample_3d_infrastructure`：procedural indexed Cube、Perspective、depth、真实 instance buffer、
+   resize、300帧退出与实际截图；M9-B 尚未实现；
+3. `tina_sample_3d`：Cooked textured glTF -> Mesh/Material/Prefab、层级 Transform、多个深度遮挡
    对象、frustum culling 和至少一个 instance batch。
 
 两者分别验证进程返回码、结构化日志、Render resource count、实际截图。正式样例还必须覆盖
 最小化/恢复、aspect 更新、不支持 glTF 诊断和 shutdown 时 Buffer/Texture/Shader/Pipeline 全部
-退役。只有第二步通过后，3D 产品路径才可计入 Legacy 删除门禁。
+退役。只有第三步通过后，3D 产品路径才可计入 Legacy 删除门禁。

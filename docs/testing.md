@@ -13,7 +13,7 @@
   `tina_ui_render_integration_tests`；启用
   `TINA_BUILD_PLATFORM_GLFW` 时另外生成 `tina_platform_glfw_tests`，启用
   `TINA_BUILD_RENDER_BGFX` 时另外生成 `tina_render_bgfx_tests`，不注册额外测试调度；
-  M8-A Scene World/Transform 另有独立 `tina_scene_tests`，M8-B RenderScene extraction 另有独立
+  M8-A Scene World/Transform 另有独立 `tina_scene_tests`，M8-B 2D 与 M9-A 3D RenderScene extraction 共用独立
   `tina_render_scene_tests`，二者均不并入基础 `tina_tests`；
 - 构建完成后直接运行对应 GoogleTest executable，任一返回码非0即失败；
 - Visual Studio 多配置构建把测试运行时隔离到 `bin/<Config>`，禁止 Debug/Release GTest DLL 共用目录；
@@ -27,9 +27,9 @@
 
 | 平台 | 构建图 | 配置 | GoogleTest | 状态 |
 | --- | --- | --- | --- | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2 + M8-B RenderScene extraction | Debug C++23 | 211/211 | UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、RenderScene11/11；Null与2D infrastructure样例各300帧；GLFW专项26/26与Platform样例300帧；bgfx16/16；Desktop连续3次各300帧。未重新截图，画面正确仍引用前序D2证据 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2 + M8-B 2D + M9-A 3D extraction | Debug C++23 | 213/213 | 本轮直接通过 RenderScene22/22；Null、2D infrastructure、3D extraction样例各300帧，3D记录4 submitted/3 visible/1 culled/2 batches、一次aspect变化与资源归零。UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、GLFW26/26、bgfx16/16和Desktop为前一轮已验证结果；M9-A未重新截图且本身无GPU画面 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M8-A `tina_scene` World/Transform | Debug/Release C++23 | 19/19 | `tina_scene_tests` Debug 与 Release 均直接运行通过；覆盖 generation/owner、keep-world/keep-local、父销毁/显式子树销毁、非递归20,000层传播、宽树删除、固定容量/PMR回滚与稳定构造错误、overflow/shear、四元数和错线程读写；Linux Scene 图尚未运行 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext Null 至 dirty-subtree b4a + M8-A/M8-B | Release C++23 | 211/211 | UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、RenderScene11/11；Null与2D infrastructure样例各300帧；GLFW/bgfx/Desktop独立记录 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2 + M8-B 2D + M9-A 3D extraction | Release C++23 | 213/213 | 本轮直接通过 UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、RenderScene22/22；Null、2D infrastructure与3D extraction样例各300帧，3D记录4 submitted/3 visible/1 culled/2 batches、一次aspect变化与资源归零；GLFW/bgfx/Desktop沿用前序D2证据 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug/Release C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过 |
 | Ubuntu 22.04 / GCC 13.4 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过；构建保留旧源码/EASTL 既有 warning |
 | Ubuntu 22.04 / GCC 13.4 | vNext 至 SolidFill committed paint、Render SolidQuad DisplayList 与 UI→Render bridge，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 205/205 | UI92/92、Runtime→UI46/46、UI→Render12/12、Null样例300帧；X11 GLFW23/23为前序门禁 |
@@ -39,18 +39,19 @@ GLFW adapter 和 bgfx adapter 测试是独立 executable，不能把多个进程
 
 | 构建图 | 基础 GoogleTest | GLFW 专项 GoogleTest | bgfx 专项 GoogleTest | 状态 |
 | --- | ---: | ---: | ---: | --- |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 211/211 | 26/26 | 16/16 | 本轮直接通过 UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、RenderScene11/11、两个300帧Null样例、Platform样例300帧，以及Desktop连续3次各300帧；本轮未重新截图，Desktop可见画面仍引用前序D2证据 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 211/211 | 25/25（前序） | 16/16（前序） | 本轮直接通过 UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、RenderScene11/11与两个300帧Null样例；GLFW/bgfx/Desktop沿用前序D2证据 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Debug | 213/213 | 26/26（前序） | 16/16（前序） | M9-A 本轮直接通过 RenderScene22/22与Null/2D/3D extraction三个300帧样例；UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、Platform/Desktop和可见画面均保留前序证据 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 Release | 213/213 | 25/25（前序） | 16/16（前序） | 本轮直接通过 UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、RenderScene22/22与Null/2D/3D extraction三个300帧样例；GLFW/bgfx/Desktop沿用前序D2证据 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 production-style | 测试 target 关闭 | 不构建 | 不构建 | 更早门禁：`TINA_BUILD_TESTING=OFF`，GLFW样例300帧返回0 |
 | Ubuntu 22.04 / GCC 13.4 vNext Null；前序 GLFW X11 | 205/205 | 23/23（历史 C1c-b3a） | 未运行 | 最新 UI92/92、Runtime→UI46/46、UI→Render12/12与Null样例300帧；adapter样例保留历史门禁 |
 | Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 vNext Null + ASan/UBSan/LSan；前序 GLFW X11 | 205/205 | 23/23（历史 C1c-b3a） | 未运行 | 最新 UI92/92、Runtime→UI46/46、UI→Render12/12与Null样例300帧，零 sanitizer 诊断；C1c-b3a GLFW仅精确抑制第三方 `_XimOpenIM`，13次/5304 B |
 | Ubuntu 22.04 / GCC 13.4 + GLFW X11/Wayland 双后端 | 183/183 | 22/22 | 未运行 | 通过；嵌套 Weston 9 强制 Wayland 与 Xvfb 强制 X11 均通过基础、专项与300帧样例 |
 | Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 + GLFW X11/Wayland 双后端 + ASan/UBSan/LSan | 183/183 | 22/22 | 未运行 | 通过；基础测试无 suppression且Null样例300帧；Wayland专项与样例 suppression 命中0，X11专项命中12次/4896 B、样例命中1次/408 B |
 
-当前最新 dirty-subtree b4a + M8-A/M8-B 门禁在 MSVC 19.50 / CMake 4.2.3 Windows Debug/Release 下分别通过
-基础211/211、UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19与RenderScene11/11，并运行
-Null/2D infrastructure样例各300帧；2D样例验证每帧3个Sprite、Render shutdown恰好1次和资源归零。
-Windows Debug 另通过 GLFW专项26/26、Platform样例300帧、bgfx专项16/16与Desktop样例连续3次各300帧。
+当前 M9-A 在 MSVC 19.50 / CMake 4.2.3 Windows Debug/Release 下均直接通过基础213/213、
+UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19与RenderScene22/22，并运行
+Null/2D/3D extraction样例各300帧；2D样例验证每帧3个Sprite，3D样例验证每帧4 submitted/
+3 visible/1 culled/2 batches、一次aspect变化，三者退出资源归零。Windows Debug 另沿用前序
+GLFW专项26/26、Platform样例300帧、bgfx专项16/16与Desktop样例连续3次各300帧。
 新增 iconify 回归证明最小化时 logical extent 保持正值、framebuffer 仍为 `0x0`；本轮没有重新截图，
 Desktop画面正确仍引用前序D2产品证据。
 上一轮完整 Windows D2 门禁仍是 Debug/Release 基础207/207、UI92/92、Runtime→UI53/53、
@@ -98,6 +99,15 @@ M8-B 使用独立 `tina_render_scene_tests`，覆盖 RenderScene 固定容量分
 recording Null device 从 standalone World 提取 Camera2D 和3个 Sprite，并记录每帧提交/呈现、统计和退出回收；
 它是 CPU/Null infrastructure 闭环，不证明 bgfx Sprite pass、可见 Sprite、中文 Label/Button、world picking、
 TileMap、Asset/Cooker 或正式 2D 产品门禁。
+
+M9-A 继续使用 `tina_render_scene_tests`，当前22项覆盖：Perspective Camera pose/quaternion/FOV/near-far/aspect
+校验、正 scale Mesh3D transform 与 local sphere bounds、近远/侧面 frustum culling、
+透明/隐藏/容量失败、material/mesh/submesh/double-sided/depth/entity/insertion 稳定排序、相邻 batch finalize、
+多次 begin/rollback/view 生命周期与 storage allocation rollback。`tina_sample_3d_extraction --frames=300`
+使用 standalone `Scene::World` 和 recording Null device，验证4 submitted、3 visible、1 culled、2 batches、
+resize aspect 更新、退出顺序和 `liveResources=0`；它不创建 bgfx 资源、不显示 GPU 画面，也不能替代
+M9-B 的 procedural Cube/depth 或 M10 的 Cooked glTF 产品门禁。Runtime 生命周期测试另覆盖当前帧
+framebuffer aspect 注入及 `0x0` 时回退 logical extent。
 
 M7-C1c-b3d1 在同一测试拓扑中新增三组契约：focused `UIContextCapacityConfig` validator 与
 `EngineConfig` 在任何 factory 前拒绝非法容量；primary owner 确实使用配置容量；layout coordinator
@@ -495,7 +505,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Release\tina_render_bgfx_tests.exe --gtest
 out\build\windows-msvc-vnext-bgfx\bin\Release\tina_sample_desktop.exe
 ```
 
-当前 dirty-subtree b4a + M8-A/M8-B 的 Windows Debug/Release 直接结果为基础211/211、UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、RenderScene11/11，以及Null/2D infrastructure样例各300帧。Windows Debug adapter另通过GLFW26/26、Platform样例300帧、bgfx16/16与Desktop连续3次各300帧；本轮没有重新截图。上一轮完整Windows D2 Debug/Release结果是基础207/207、UI92/92、Runtime→UI53/53、UI→Render12/12、
+前一轮 dirty-subtree b4a + M8-A/M8-B 的 Windows Debug/Release 直接结果为基础211/211、UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、RenderScene11/11，以及Null/2D infrastructure样例各300帧。Windows Debug adapter另通过GLFW26/26、Platform样例300帧、bgfx16/16与Desktop连续3次各300帧；本轮没有重新截图。上一轮完整Windows D2 Debug/Release结果是基础207/207、UI92/92、Runtime→UI53/53、UI→Render12/12、
 Null样例300帧、bgfx专项16/16与真实 D3D11 Intel Iris Xe Desktop样例；Debug 1200帧并做截图像素检查，
 Release 300帧输出 clean status ok。本轮 Debug D3D11 观察到 `RefCount is 3 (expected 0)` 的已记录第三方 debug layer 提示。
 GLFW专项26/26与GLFW样例300帧已在本轮Debug图复验；前序 C1c-b3a Debug
@@ -599,7 +609,8 @@ Legacy 与 vNext 进程观察到的 `N` 会随调试对象组合变化，本轮 
 
 ## vNext 独立样例门禁
 
-`tina_sample_null`、`tina_sample_platform` 与 `tina_sample_desktop` 已落地，其余 executable 仍是后续里程碑目标；
+`tina_sample_null`、`tina_sample_platform`、`tina_sample_desktop`、`tina_sample_2d_infrastructure` 与
+`tina_sample_3d_extraction` 已落地，其余 executable 仍是后续里程碑目标；
 不得用当前 Legacy `Tina --smoke-*` 的结果冒充 vNext 样例：
 
 | 样例 | 状态 | 主要证明 | 资源策略 |
@@ -609,6 +620,7 @@ Legacy 与 vNext 进程观察到的 `N` 会随调试对象组合变化，本轮 
 | `tina_sample_desktop` | M7-B2 Desktop bootstrap + C1c-b3e Runtime UI owner/route/layout/claim bridge seam + Button default action + D0 DisplayList handoff + D1 bgfx SolidQuad UI pass + D2 visible panel smoke 已实现 | `Tina::Desktop::CreateEngine` 私有组合 SteadyClock、GLFW WindowSurface、DisabledTaskSystem 与 bgfx；默认300帧；startup seed 显式绑定 primary-window Context，创建1个 retained root和4个 painted panel，通过 Render 前 layout/paint snapshot 与 UIDisplayList borrow 进入私有 bgfx SolidQuad pass；claim/display/setBoxPaint/default-action handoff 由独立 Runtime→UI 测试覆盖，真实可见性由该样例截图证明 | 当前 D2 Windows D3D11 Intel Iris Xe Debug 1200帧截图检查与 Release 300帧均通过，Release clean；截图验证 background RGB(9,24,40)、blue(28,92,148)、cyan alpha over blue/background、右边界 scissor clip 与 pink panel；Debug RefCount=3 为第三方 debug layer 提示；Linux Desktop 仍保留前序 GCC 13.4 与 Clang 22 sanitizer 门禁；Clang WSL2 为 Vulkan/llvmpipe，不代表硬件 GPU 性能，也不代表 Scene/Pass Scheduler、Text/Glyph 或完整 Widget 完成 |
 | `tina_sample_ui` | 未实现 | 在现有 Desktop SolidFill panel smoke 和 primary Pointer Button default action 上补中文、Label 文本、Button Keyboard/Gamepad activation、Modal、TextEdit、Runtime packet、Glyph Atlas 与资源型 UI Render | M7 内置 Cooked Font/Texture fixture |
 | `tina_sample_2d_infrastructure` | M8-B Headless/Null extraction foundation 已实现 | Scene World → resolved Camera2D/Sprite2D、layer/order、cull/snap、Runtime `primaryWorldScene` handoff、300帧资源/生命周期归零 | 当前只用内置纯值 fixture；Asset/Cooker、bgfx Sprite pass、可见 Sprite、world picking、UI overlay 后置 |
+| `tina_sample_3d_extraction` | M9-A Headless/Null extraction foundation 已实现 | Scene World → resolved Perspective/Mesh3D、当前帧aspect、sphere culling、稳定sort/batch、Runtime handoff；300帧4 submitted/3 visible/1 culled/2 batches、一次aspect变化与资源归零 | 当前只用 fixture key/纯值和 recording Null device；无depth attachment、GPU buffer/shader/pipeline或可见画面，不计Legacy删除门禁 |
 | `tina_sample_3d_infrastructure` | 未实现 | Perspective、depth、canonical Mesh、Unlit pipeline | M9 procedural Cube |
 | `tina_sample_2d` | 未实现 | Cooked TileMap/Tileset、chunk、角色/Tile AABB、Box2D dynamic body、正式 UI | M10/M11 Catalog/Manifest |
 | `tina_sample_3d` | 未实现 | Cooked glTF -> Mesh/Material/Prefab、culling/instance | M10 Catalog/Manifest |
@@ -617,7 +629,7 @@ M7-B2 已建立私有最小 bgfx clear/present core、7项 planner 测试、4项
 Desktop bootstrap 和真实 GPU 300帧冒烟。M7-C 已建立最小 SolidFill DisplayList CPU bridge，D0 已接入
 Runtime submit-call-local DisplayList handoff；D1 已加入私有 bgfx SolidQuad UI pass 和5项几何测试，D2 已加入
 Game SDK `setBoxPaint()` facade 与 Desktop 4-panel 可见 smoke；M7-D 后续继续接入中文、Widget 默认行为与资源型 UI，
-M9 只扩展3D。游戏 sample source、Game SDK
+M9-A 只扩展 CPU/Null 3D extraction，M9-B 才扩展可见3D。游戏 sample source、Game SDK
 header 和 UI public header 不出现 bgfx。结构化验收使用 backend-neutral 字段：
 
 ```text

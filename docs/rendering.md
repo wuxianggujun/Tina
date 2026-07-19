@@ -6,8 +6,10 @@
 > 接入 Runtime 正式 submit 路径。D1 已在私有 `tina_render_bgfx` 中实现 SolidQuad UI shader/pass，
 > D2 已通过 Game SDK `setBoxPaint()` 和 Desktop 4-panel 样例验证真实 D3D11 可见 UI、alpha blend 与
 > framebuffer scissor。M8-B 又完成 backend-neutral Camera2D/Sprite2D RenderScene builder、Runtime
-> extraction transaction 与 `primaryWorldScene` handoff；bgfx Sprite pass、Scene component integration、
-> Runtime packet、FramePin、资源型 UI 命令、Pass Scheduler 与 submission ticket/drain 仍后置。
+> extraction transaction 与 `primaryWorldScene` handoff；M9-A 在同一 builder 上完成 Perspective/Mesh3D
+> CPU/Null extraction、当前帧 aspect、球体裁剪、稳定排序和 instance batch finalize。它不创建 bgfx 资源，
+> 不显示 GPU Cube；bgfx Sprite pass、M9-B procedural Cube/depth、Scene component integration、Runtime
+> packet、FramePin、资源型 UI 命令、Pass Scheduler 与 submission ticket/drain 仍后置。
 > bgfx 是 Tina 的实现依赖，不是游戏开发 API。
 
 ## 当前 Legacy 事实
@@ -84,7 +86,9 @@ content scale、sourceMetricsRevision、surfaceRevision 和 availability 等调�
 
 M8-B 已提供 Game-facing、phase-local `RenderSceneWriter`，接受 Scene/Asset integration 已解析的
 Camera2D/Sprite2D 值，执行固定容量写入、稳定 layer/order/entity/insertion 排序、旋转保守裁剪、透明/隐藏剪枝
-与 pixel snap；它不解析 AssetHandle，也不提取 UI。后续 Scene component 与当帧 Asset ready snapshot 才会把
+与 pixel snap；M9-A 又提供 Perspective/Mesh3D writer 输入，执行当前帧 aspect 注入、正 scale 世界 bounds、
+球体 frustum culling、material/mesh/submesh/double-sided/depth/entity/insertion 稳定排序和相邻 batch finalize；
+这两条 extraction 路径都不解析 AssetHandle，也不提取 UI。后续 Scene component 与当帧 Asset ready snapshot 才会把
 AssetHandle 解析为 `FrameResourceRef`，再写 SpriteRenderItem、TileChunkRenderPacket、MeshRenderItem、
 Bounds 和 Material instance。当前 UI 已能冻结 SolidFill committed paint，
 独立 integration 已能生成 borrowed `UIDisplayListView`；D0 的 Runtime-private
@@ -95,7 +99,8 @@ geometry 并提交到专用 UI view；D2 Desktop 样例通过 Game SDK paint fac
 后续 `tina_render` 的低层 writer 只接受已解析的 FrameResourceRef/packet，不依赖
 AssetHandle 或玩法 TileMap。
 
-当前 Runtime 在 Render Pass 前组装并直接提交一次 `RenderFrame`；Pass Scheduler 尚未实现。
+当前 Runtime 在 Render Pass 前组装并直接提交一次 `RenderFrame`；M9-A 的 Mesh3D view 仍是 CPU/Null
+borrowed extraction，Pass Scheduler 与真实 Opaque3D backend 消费尚未实现。
 后续 Null 与真实 Pass Scheduler 必须消费完全相同的 RenderFrame，bgfx adapter 仍只接收 RenderDevice
 resource/submit 调用，不直接理解 RenderScene、TileMap、Widget 或 AssetHandle。
 
@@ -258,7 +263,8 @@ struct SurfaceAttachmentOps {
 ```
 
 UI-only 和不使用 depth 的 Sprite2D view 令 `depth = std::nullopt`，不得创建隐式 depth resource。
-Initial clear 只作用于实际声明的 attachment；M9 的3D view 才显式请求 depth。对应 Null/backend
+Initial clear 只作用于实际声明的 attachment；M9-B 的可见3D view 才显式请求 depth。M9-A 的
+CPU/Null extraction 不创建 attachment。对应 Null/backend
 测试必须证明 UI-only/2D-only packet 的 depth allocation count 为0。
 
 Camera/viewport/attachment 是 Tina 描述。Surface attachment 的 initial load/clear 由
@@ -412,7 +418,8 @@ Clang 的 Vulkan/llvmpipe 只计作软件 Vulkan/backend 生命周期与 sanitiz
 M7 的最小可见 UI 已覆盖 Game SDK `setBoxPaint()`、SolidFill panel、私有 bgfx SolidQuad pass、alpha 与
 scissor；完整 UI 仍需要 Widget 默认行为、Label/Button 文本路径、Glyph Atlas、Focus/Capture/Modal、
 Semantics 和资源型 DisplayList。owning Runtime packet 与 FramePin 仍服务于后续含资源 DisplayList 生命周期。
-M9 是扩展 Opaque3D、Mesh、depth 和 3D Shader/Material，不是第一次让 UI 直接调用 Legacy renderer。
+M9-A 已扩展 backend-neutral Perspective/Mesh3D extraction；M9-B 才扩展私有 Opaque3D、depth、
+canonical Mesh 和3D Shader/Material。两者都不能让 UI 或游戏直接调用 Legacy renderer/bgfx。
 
 在完整 Asset/Cooker 于 M10 接入前，M7–M9 只允许使用版本化、确定性的内置 Cooked fixture 或
 procedural geometry。禁止恢复 Runtime 路径加载，也禁止游戏自行创建 bgfx resource。
@@ -420,7 +427,8 @@ procedural geometry。禁止恢复 Runtime 路径加载，也禁止游戏自行�
 验收分开记录：
 
 - 当前 Legacy：`Tina --smoke-*` 只证明旧路径仍可运行；
-- vNext infrastructure：Null、Platform、Desktop SolidQuad GPU、UI/2D/3D 独立 sample 分别验证接口和生命周期；
+- vNext infrastructure：Null、Platform、Desktop SolidQuad GPU、UI/2D、M9-A 3D CPU extraction 与
+  M9-B 3D GPU 独立 sample 分别验证接口和生命周期；
 - vNext product：Cooked TileMap 2D 与 Cooked glTF/Material/Prefab 3D 才计入 Legacy 删除门禁；
 - 进程返回码、结构化资源计数、性能数据和实际截图是四类不同证据。
 

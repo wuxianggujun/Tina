@@ -70,6 +70,11 @@ handle count 分账报告。
 场景规模必须可配置，默认值只用于同版本回归。实际游戏样例继续承担画面正确性和交互验收，
 不能用合成基准替代。
 
+M9-A 当前只建立正确性基线，不是 `3D.StaticInstances.5000` 性能结论：`RenderSceneCapacity` 默认在
+Create 期固定分配 16,384 个 Mesh3D item 和4,096个 batch，300帧 CPU/Null extraction 样例每帧只提交
+4个 Mesh，并验证3可见/1裁剪/2 batch、稳定 checksum、aspect resize 和资源归零。绝对耗时、5,000实例、
+GPU draw/instance 与稳态分配指标必须由后续 `tina_bench` 和 M9-B 可见 backend 门禁分别证明。
+
 UI workload 还记录 nodes visible/interactive、dirty measure/arrange/paint/order、layout pass/node、
 hit-test count/visited、PaintCache rebuild、DisplayList command/bytes、batch/draw/texture/clip switch、
 glyph cache/raster/upload/atlas page，以及 route/layout/paint/display/submit ns。无变化帧允许遍历
@@ -416,7 +421,8 @@ runtime handle 不序列化，异步任务在执行和 completion 两端重新 r
 | Engine/模块对象 | 对应 `MemoryTag` resource | `EngineHost` | 逆序 shutdown |
 | Scene 组件 | EnTT 内部池，使用 Scene resource adapter | `World` | entity destroy/World shutdown |
 | Scene commands | `FrameArena::SceneCommands` | Runtime phase | command commit 后 |
-| RenderScene/RenderItem/FrameResourceTable | packet FrameArena | `RenderFramePacket` | SubmissionTicket completion 后 |
+| 当前 M8-B/M9-A RenderScene/RenderItem/Batch | Create 期固定 PMR builder storage | Runtime `RenderSceneBuilder` | 下一次成功 begin 覆盖；builder 析构归还 storage |
+| 后续 FrameResourceTable/资源型 RenderItem | packet FrameArena | `RenderFramePacket` | SubmissionTicket completion 后 |
 | UI retained nodes | UI tagged resource | `UIContext` | node/context 销毁 |
 | UI PaintCache/committed snapshot | UI tagged resource | `UIContext` | revision retire/node/context 销毁 |
 | UI DisplayList/Atlas generation pin | packet FrameArena + pin set | `RenderFramePacket` | SubmissionTicket completion 后 |

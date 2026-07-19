@@ -920,21 +920,34 @@ move 构造把 owner 转移到目标线程。`setParent()` 默认 `KeepWorld`，
 component query、EnTT storage、Scene-owned Camera/Sprite component 与 Runtime World capability 尚未进入本 API。公共头
 不包含 EnTT、GLM、GLFW 或 bgfx。
 
-## `RenderScene`：M8-B 已实现的提取边界
+## `RenderScene`：M8-B/M9-A 已实现的提取边界
 
 `Tina::Render` 现提供 `RenderSceneCapacity`、move-only `RenderSceneBuilder`、phase-local
-`RenderSceneWriter`、`RenderSceneView`、`RenderCamera2DInput` 与 `RenderSprite2DInput`。Runtime 在每次
-`IGameState::extractRenderScene()` 前开启 builder transaction，把 writer 放入 Context；回调失败、异常或
-sticky writer error 会 rollback，只有 commit 成功的 view 才进入 `RenderFrame::primaryWorldScene`。
+`RenderSceneWriter`、`RenderSceneView`、`RenderCamera2DInput`、`RenderSprite2DInput`、
+`RenderPerspectiveCameraInput`、`RenderMesh3DInput`、`RenderPerspectiveCamera`、`RenderMesh3DItem` 与
+`RenderMesh3DBatch`。Runtime 在每次 `IGameState::extractRenderScene()` 前开启 builder transaction，把
+writer 放入 Context；回调失败、异常或 sticky writer error 会 rollback，只有 commit 成功的 view 才进入
+`RenderFrame::primaryWorldScene`。
 
-writer 当前只接受已经解析的纯 Tina 值；`stableCameraKey`、`stableEntityKey` 与临时 M8 `spriteKey` 必须非零。
-Camera/Sprite 几何与 viewport 必须 finite，容量满或单帧多 Camera 返回 Render domain 的结构化错误。commit
-执行透明/隐藏剪枝、旋转 Sprite 的保守 Camera culling、Camera/Sprite pixel snap 与
-`sortingLayer -> orderInLayer -> stableEntityKey -> insertionOrder` 稳定顺序。`spriteKey` 会在 M10 由
-`FrameResourceRef` 替换；当前没有 AssetHandle 解析、Mesh/Tile packet 或 bgfx Sprite pass。
+writer 当前只接受已经解析的纯 Tina 值；`stableCameraKey`、`stableEntityKey` 与临时 M8 `spriteKey`/M9
+`meshKey`/`materialKey` 必须非零。Camera/Sprite/Mesh 几何与 viewport 必须 finite，容量满或单帧多 Camera
+返回 Render domain 的结构化错误。commit 执行透明/隐藏剪枝、旋转 Sprite 的保守 Camera culling、
+Camera/Sprite pixel snap，以及 M9-A 的 Perspective sphere culling。3D item 按
+`materialKey -> meshKey -> submeshIndex -> doubleSided -> depthBucket -> stableEntityKey -> insertionOrder`
+稳定排序，并将相邻相同 mesh/material/submesh/double-sided item 合并为 `RenderMesh3DBatch`。
+`meshKey`/`materialKey` 会在 M10 由 `FrameResourceRef` 替换；当前没有 AssetHandle 解析、Mesh component、
+Tile packet、bgfx Sprite pass 或可见 bgfx 3D pass。
+
+`RenderSceneCapacity` 默认固定为 16,384 个 Sprite、16,384 个 Mesh3D item 和4,096个 Mesh3D batch，
+并在 Create 期一次性从 supplied PMR 分配；任一块 storage 分配失败都会逆序释放已分配块。M9-A 的
+`beginFrame(RenderSceneFrameParameters)` 接受当前 primary surface aspect；无 aspect 时 2D 仍可构建，
+Perspective Camera 会返回结构化输入错误。`0x0` framebuffer 的 aspect fallback 在 Runtime 注入层完成，
+builder 本身只接收正的纯值。
 
 `RenderSceneWriter` 及其引用只能在当前 extraction callback 内使用，禁止保存。`RenderSceneView` 借用 builder
-固定 storage；下一次 `beginFrame()`、rollback、replacement commit、builder move/析构都会使旧 view 失效。
+固定 storage；成功 `beginFrame()`、rollback、replacement commit、builder move/析构都会使旧 view 失效。
+`beginFrame()` 的参数预检失败不会清空上一份 publication，因此旧 view 在该失败返回后仍有效；下一次成功
+begin 才使其失效。
 放入 `RenderFrame` 后的 view 只在当前 `IRenderDevice::submitFrame()` 调用内有效，backend 必须同步消费、复制
 或编码，不得保留 view、span 或元素指针。
 
@@ -961,12 +974,12 @@ Camera/Sprite 几何与 viewport 必须 finite，容量满或单帧多 Camera �
 | `Tina::Scene::EntityId` | M8-A 已实现 | Scene public / 后续 Game SDK | `Scene::World` registry generation + owner；slot 复用递增 generation | InvalidEntity/StaleEntity/WrongWorld |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |
 | `LocalTransform` / `WorldTransform` | M8-A 已实现 | Scene public | World-owned POD；pointer query 只在 owner thread、下一次对应 mutation、entity destroy 或 World 析构前有效；world publication 由 `updateWorldTransforms()` barrier 完成 | non-finite/overflow/zero quaternion/unsupported TRS composition |
-| `RenderSceneWriter` | M8-B 已实现 | Game SDK phase capability | 只在当前 `extractRenderScene()` callback 内有效；不可复制、不可保存 | invalid input/capacity/sticky transaction failure |
-| `RenderSceneView` | M8-B 已实现 | Render SPI | borrowed fixed builder storage；下一次 build/rollback/replacement/move/destruction 后失效；`RenderFrame` 中只到当前 submit 返回 | invalid transaction；backend 不得保留 borrow |
+| `RenderSceneWriter` | M8-B 2D + M9-A 3D extraction 已实现 | Game SDK phase capability | 只在当前 `extractRenderScene()` callback 内有效；不可复制、不可保存 | invalid input/capacity/sticky transaction failure |
+| `RenderSceneView` | M8-B 2D + M9-A 3D extraction 已实现 | Render SPI | borrowed fixed builder storage；成功 begin/rollback/replacement/move/destruction 后失效，begin 参数预检失败保留旧 publication；`RenderFrame` 中只到当前 submit 返回 | invalid transaction；backend 不得保留 borrow |
 | `AssetHandle<T>` | M10 目标 | Game SDK | 弱 slot lookup，不延长 payload | NotReady/stale/type mismatch |
 | `AssetLease<T>` | M10 目标 | Game SDK 窄场景/Module SPI | 强引用，跨任务/帧显式持有 | acquire Result |
-| Render typed handle | M7/M9 目标 | Engine Module SPI | RenderDevice registry 到 retire | invalid/stale/wrong device |
-| 最小 `RenderFrame` | M6-A + D0 + M8-B 已实现 | Engine Module SPI | 当前 submit 调用；包含 submit-call-local borrowed `primaryWindowUIDisplayList` 与 `primaryWorldScene` | submit `Status`；backend 不得保留 borrowed view |
+| Render typed handle | M9-B 及后续目标 | Engine Module SPI | RenderDevice registry 到 retire | invalid/stale/wrong device |
+| 最小 `RenderFrame` | M6-A + D0 + M8-B/M9-A 已实现 | Engine Module SPI | 当前 submit 调用；包含 submit-call-local borrowed `primaryWindowUIDisplayList` 与 `primaryWorldScene` | submit `Status`；backend 不得保留 borrowed view |
 | `Render::UIDisplayListView` | SolidQuad DisplayList builder 已实现 | Engine Module SPI / integration output | borrowed 单缓冲 builder storage；下一次成功 `beginFrame()`、builder move 或析构后失效；已开启事务的 rollback 只清空该次候选 | CapacityExceeded/invalid input/transaction misuse |
 | `RenderFramePacket` | M7-B/C 目标、Runtime Private | Runtime Private | Runtime 固定容量 pool；backend completion 前 owning | PoolExhausted/submit failure |
 
@@ -1044,7 +1057,9 @@ EngineHost 顺序接线，M7-C1c-b3d1 只补齐容量配置与 Runtime-private l
 startup bind 与 root-scoped Game SDK UI facade；b3e 只补齐 held primary Pointer Button claim bridge。
 Button default action 只补齐 primary Pointer 窄 pressed/activation 与 retained action property。
 SolidFill paint、Render builder、integration bridge、D0 Runtime submit-call-local handoff、D1 bgfx pass 与
-D2 visible panels 也不扩大到完整 Widget、owning packet、Text/Glyph 或产品 UI 结论。当前 M8-B Windows
+D2 visible panels 也不扩大到完整 Widget、owning packet、Text/Glyph 或产品 UI 结论。前一轮 M8-B Windows
 Debug/Release 均通过基础211/211、Runtime→UI60/60、UI115/115、RenderScene11/11与两个300帧Null样例；
+当前 M9-A Windows Debug/Release 均通过基础213/213、RenderScene22/22及 Null/2D/3D extraction
+三个300帧样例；Release 另通过 UI115/115、Runtime→UI60/60、UI→Render12/12与Scene19/19。
 dirty-subtree b4a 的 UI 数量包含6项 reuse/回退测试。Linux GCC 与 Clang sanitizer 的 b3e 独立
 Runtime→UI门禁仍为46/46。
