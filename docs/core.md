@@ -81,7 +81,7 @@ xxHash 不随 EASTL 删除。它只通过窄 adapter 服务 `ContentHash`、Cook
 `StringId`，算法/seed/version 写入格式契约。禁止把64位 Hash 当作 AssetId，禁止只凭 Hash
 判断路径相等，也禁止用非密码学 xxHash 证明不可信包未被篡改。
 
-M10-A2a 契约：`digestContentHashV1(std::span<const std::byte>)` 在 Core 实现侧 PRIVATE 调用
+M10-A2a 已落地：`digestContentHashV1(std::span<const std::byte>)` 在 Core 实现侧 PRIVATE 调用
 XXH3-128（seed=0），把 `low64`/`high64` 按 little-endian 写入 16 字节 `ContentHash`；公共头与
 Game SDK 不得出现 `xxhash.h` 或 `XXH*` 符号。空输入合法且结果确定；全零 digest 拒绝发布。
 

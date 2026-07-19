@@ -1,5 +1,6 @@
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
+#include <tina/core/hash/ContentHashDigest.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -584,6 +585,29 @@ Core::Result<CookedArtifactPath> makeCookedArtifactPath(AssetKind assetKind, Cor
     std::copy(Extension.begin(), Extension.end(), path.storage.begin() + 48);
     path.storage[CookedArtifactPath::CharacterCount] = '\0';
     return path;
+}
+
+Core::Status verifyCookedAssetContentHash(const CookedAssetView& asset)
+{
+    if (!asset)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidHeader, "cooked asset view is empty");
+    }
+    if (asset.header().hashAlgorithm != HashAlgorithm::Xxh3_128V1)
+    {
+        return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported cooked content hash algorithm");
+    }
+
+    const auto digest = Core::digestContentHashV1(asset.payload());
+    if (!digest)
+    {
+        return Core::failure(std::move(digest.error()));
+    }
+    if (*digest != asset.header().contentHash)
+    {
+        return Core::failure(AssetFormatErrorCode::ContentHashMismatch, "cooked payload content hash mismatch");
+    }
+    return Core::success();
 }
 
 } // namespace Tina::AssetFormat

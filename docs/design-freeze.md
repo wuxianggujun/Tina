@@ -342,6 +342,6 @@ M10-A1 新增 `Tina::Asset`：`CatalogSnapshot` 在注入 PMR 上 owning 复制 
 显式 stack，`O(V + E)`，禁止递归。失败不发布部分 Snapshot。该切片明确不实现 Handle/Lease、registry
 状态机、文件 IO、Task、GPU upload、XXH3、cgltf 或 writer；ADR 0016 仍为 Proposed。
 
-M10-A2a 冻结 Core 私有 XXH3-128 v1 ContentHash digest：seed=0、16 字节 little-endian 输出、公共头
+M10-A2a 已落地 Core 私有 XXH3-128 v1 ContentHash digest：seed=0、16 字节 little-endian 输出、公共头
 无 xxHash 类型；`verifyCookedAssetContentHash` 只校验 payload。该切片不实现文件 IO、Handle/Lease、
 Catalog 磁盘加载、Cooker 或密码学签名。

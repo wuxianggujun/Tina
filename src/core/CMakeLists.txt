@@ -9,7 +9,9 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/error/Error.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/error/Result.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/hash/ContentHash.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/hash/ContentHashDigest.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/id/AssetId.hpp
+
     ${PROJECT_SOURCE_DIR}/include/tina/core/id/GenerationId.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/id/GenerationPool.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/memory/CountingMemoryResource.hpp
@@ -24,7 +26,9 @@ add_library(tina_core STATIC
     diagnostics/Assert.hpp
     error/Error.hpp
     error/Result.hpp
+    hash/ContentHashDigest.cpp
     id/GenerationId.cpp
+
     id/GenerationId.hpp
     id/GenerationPool.hpp
     memory/CountingMemoryResource.cpp
@@ -50,9 +54,14 @@ target_include_directories(tina_core
     PRIVATE
         ${PROJECT_SOURCE_DIR}/src
 )
-target_link_libraries(tina_core PRIVATE Tina::ProjectOptions)
+target_link_libraries(tina_core
+    PRIVATE
+        Tina::ProjectOptions
+        xxHash::xxhash
+)
 target_compile_definitions(tina_core PRIVATE TINA_CORE_BUILDING)
 set_target_properties(tina_core PROPERTIES CXX_EXTENSIONS OFF)
+
 
 if(TINA_BUILD_LEGACY)
     # Compatibility code that still depends on EASTL and xxHash is intentionally separate from the

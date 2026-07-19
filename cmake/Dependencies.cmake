@@ -2,6 +2,9 @@ include_guard(GLOBAL)
 
 # All package names and imported targets in this file come from the pinned vcpkg registry in
 # vcpkg.json. A vNext-only Null configure deliberately discovers none of the Legacy packages.
+# xxHash is a root dependency: Core PRIVATE ContentHash digest needs it even when Legacy is OFF.
+find_package(xxHash CONFIG REQUIRED)
+
 if(TINA_BUILD_LEGACY)
     find_package(box2d CONFIG REQUIRED)
     find_package(EnTT CONFIG REQUIRED)
@@ -10,12 +13,12 @@ if(TINA_BUILD_LEGACY)
     find_package(glm CONFIG REQUIRED)
     find_package(spdlog CONFIG REQUIRED)
     find_package(utf8cpp CONFIG REQUIRED)
-    find_package(xxHash CONFIG REQUIRED)
 
     # The miniaudio vcpkg port intentionally installs only miniaudio.h. Tina owns the single
     # MINIAUDIO_IMPLEMENTATION translation unit in src/platform/audio.
     find_path(TINA_MINIAUDIO_INCLUDE_DIR NAMES miniaudio.h REQUIRED)
 endif()
+
 
 if(TINA_BUILD_PLATFORM_GLFW AND NOT TINA_BUILD_LEGACY)
     find_package(glfw3 3.4 CONFIG REQUIRED)

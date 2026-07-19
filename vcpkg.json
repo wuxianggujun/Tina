@@ -6,7 +6,9 @@
     "legacy",
     "tests"
   ],
-  "dependencies": [],
+  "dependencies": [
+    "xxhash"
+  ],
   "features": {
     "platform-glfw": {
       "description": "Build the private Tina vNext GLFW platform adapter.",
@@ -27,10 +29,10 @@
         "glm",
         "miniaudio",
         "spdlog",
-        "utfcpp",
-        "xxhash"
+        "utfcpp"
       ]
     },
+
     "tests": {
       "description": "Build Tina GoogleTest executables without registering CTest.",
       "dependencies": [

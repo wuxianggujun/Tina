@@ -1,3 +1,4 @@
+#include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogSnapshot.hpp>
 
 #include <algorithm>

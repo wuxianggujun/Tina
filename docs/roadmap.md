@@ -444,8 +444,9 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   失败回滚与独立 `tina_asset_tests`；
 - M10-A1 不实现 Handle/Lease、registry 状态机、文件 IO、Task worker、GPU upload、XXH3 计算、
   Cooker/cgltf 或产品资产替换；ADR 0016 仍为 Proposed，不得由 A1 偷偷冻结；
-- M10-A2a 契约：Core 私有版本化 XXH3-128 v1 adapter 计算 `ContentHash`；公共类型仍无 xxHash
-  token；可选校验 Cooked payload 与 header ContentHash；不引入文件 IO、Handle/Lease 或 Cooker；
+- M10-A2a 已完成 Core 私有版本化 XXH3-128 v1 adapter：`digestContentHashV1` 计算 `ContentHash`；
+  公共类型仍无 xxHash token；`verifyCookedAssetContentHash` 校验 Cooked payload；不引入文件 IO、
+  Handle/Lease 或 Cooker；
 - 后台 CPU Decode 与主线程/GPU Upload 分队列，按任务数、字节数、时间预算；
 - Asset 状态、generation 和取消贯穿两阶段，迟到任务不能复活旧 slot；
 - M10-A2b 起实现 Catalog artifact 文件 IO；弱 Handle/强 Lease 需先确认 ADR 0016；

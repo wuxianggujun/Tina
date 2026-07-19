@@ -182,8 +182,9 @@ M10-A1 当前 Windows MSVC Debug/Release 均直接通过独立 `tina_asset_tests
 回归 `tina_render_bgfx_tests` 43/43，`tina_sample_2d_infrastructure_bgfx` 300帧资源账本平衡。该结果
 只证明 owning Catalog 与 DAG cycle 边界，不证明 Handle/Lease、异步加载、Cooker 或正式资产样例。
 
-M10-A2a 契约已冻结：Core 私有 XXH3-128 v1 计算 `ContentHash`，可选校验 Cooked payload；公共头无
-xxHash 类型。实现随后续提交；不包含文件 IO、Handle/Lease 或 Cooker。
+M10-A2a 已实现：Core 私有 XXH3-128 v1 计算 `ContentHash`，可选校验 Cooked payload；公共头无
+xxHash 类型。Windows Debug/Release 基础 `tina_tests` 218/218、`tina_asset_format_tests` 16/16。
+不包含文件 IO、Handle/Lease 或 Cooker。
 
 Linux 最新 paint/DisplayList/bridge Null 门禁也已完成：GCC 13.4 通过基础205/205、
 `tina_ui_tests` 92/92、`tina_runtime_ui_tests` 46/46、bridge 12/12与Null样例300帧；

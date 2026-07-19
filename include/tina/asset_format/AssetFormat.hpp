@@ -211,4 +211,8 @@ class CookedManifestView final {
 
 [[nodiscard]] Core::Result<CookedArtifactPath> makeCookedArtifactPath(AssetKind assetKind, Core::AssetId assetId);
 
+// Verifies that the cooked payload matches header.contentHash for Xxh3_128V1. Does not re-parse
+// wire layout; the view must already come from parseCookedAssetView.
+[[nodiscard]] Core::Status verifyCookedAssetContentHash(const CookedAssetView& asset);
+
 } // namespace Tina::AssetFormat

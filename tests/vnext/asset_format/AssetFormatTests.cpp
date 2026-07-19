@@ -1,5 +1,6 @@
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
+#include <tina/core/hash/ContentHashDigest.hpp>
 
 #include <gtest/gtest.h>
 
@@ -240,6 +241,33 @@ TEST(CookedAssetFormatTests, ParsesCanonicalAssetAndBorrowsPayload)
     EXPECT_FALSE(result->dependency(2U));
     ASSERT_EQ(result->payload().size(), 4U);
     EXPECT_EQ(result->payload()[0], std::byte{0x10});
+}
+
+TEST(CookedAssetFormatTests, VerifiesMatchingPayloadContentHash)
+{
+    auto bytes = makeCookedAsset();
+    auto parsed = parseCookedAssetView(bytes);
+    ASSERT_TRUE(parsed.has_value());
+
+    const auto digest = Core::digestContentHashV1(parsed->payload());
+    ASSERT_TRUE(digest.has_value()) << digest.error().message;
+    putFixed(bytes, 48U, digest->bytes());
+
+    parsed = parseCookedAssetView(bytes);
+    ASSERT_TRUE(parsed.has_value());
+    const auto status = verifyCookedAssetContentHash(*parsed);
+    ASSERT_TRUE(status.has_value()) << status.error().message;
+}
+
+TEST(CookedAssetFormatTests, RejectsMismatchedPayloadContentHash)
+{
+    auto bytes = makeCookedAsset();
+    // keep non-zero but wrong content hash already present from fixture
+    const auto parsed = parseCookedAssetView(bytes);
+    ASSERT_TRUE(parsed.has_value());
+    const auto status = verifyCookedAssetContentHash(*parsed);
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code, AssetFormatErrorCode::ContentHashMismatch);
 }
 
 TEST(CookedAssetFormatTests, DerivesCanonicalArtifactPathFromKindAndIdentity)

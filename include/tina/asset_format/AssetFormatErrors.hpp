@@ -16,5 +16,6 @@ inline constexpr Core::ErrorCode InvalidIdentity{Core::ErrorDomain::Asset, 9};
 inline constexpr Core::ErrorCode InvalidDependency{Core::ErrorDomain::Asset, 10};
 inline constexpr Core::ErrorCode MissingDependency{Core::ErrorDomain::Asset, 11};
 inline constexpr Core::ErrorCode DependencyTypeMismatch{Core::ErrorDomain::Asset, 12};
+inline constexpr Core::ErrorCode ContentHashMismatch{Core::ErrorDomain::Asset, 17};
 
 } // namespace Tina::AssetFormat::AssetFormatErrorCode

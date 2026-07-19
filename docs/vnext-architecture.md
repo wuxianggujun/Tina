@@ -142,7 +142,7 @@ xxHash 与 EASTL 分开决策。vNext 保留 xxHash 为私有算法后端：`Con
 检测碰撞。`AssetId` 是独立稳定128位身份，generation handle 是 owner token + index + generation。路径
 相等不能只比较 Hash，安全签名或不可信包完整性也不能使用非密码学 xxHash。
 
-M10-A2a 契约：`Tina::Core` PRIVATE 链接 vcpkg `xxHash`，公共 `digestContentHashV1` 对
+M10-A2a 已落地：`Tina::Core` PRIVATE 链接 vcpkg `xxHash`，公共 `digestContentHashV1` 对
 caller-owned bytes 计算 XXH3-128（seed=0），输出 16 字节 little-endian（low64 在前）；
 `AssetFormat::verifyCookedAssetContentHash` 只对 Cooked **payload** 校验 header ContentHash。
 公共头零 `XXH*` token。文件 IO、Handle/Lease、Catalog 磁盘路径与密码学签名不在 A2a。
