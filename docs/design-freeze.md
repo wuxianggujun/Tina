@@ -346,5 +346,5 @@ M10-A2a 已落地 Core 私有 XXH3-128 v1 ContentHash digest：seed=0、16 字�
 无 xxHash 类型；`verifyCookedAssetContentHash` 只校验 payload。该切片不实现文件 IO、Handle/Lease、
 Catalog 磁盘加载、Cooker 或密码学签名。
 
-M10-A2b 冻结有界 Catalog 文件加载：Core `readFile` + Asset `loadCatalogSnapshotFromManifestFile`。
+M10-A2b 已落地有界 Catalog 文件加载：Core `readFile` + Asset `loadCatalogSnapshotFromManifestFile`。
 该切片不实现 Handle/Lease、async IO、Cooker writer 或 GPU upload。

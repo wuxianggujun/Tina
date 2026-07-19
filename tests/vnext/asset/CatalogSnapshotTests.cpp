@@ -1,4 +1,5 @@
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/asset/CatalogFile.hpp>
 #include <tina/asset/CatalogSnapshot.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 
@@ -7,6 +8,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <memory_resource>
 #include <new>
 #include <optional>
@@ -587,6 +590,55 @@ TEST(CatalogSnapshotTests, FailedCreateLeavesNoOutstandingAllocations)
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(resource.outstandingAllocations(), 0U);
     EXPECT_EQ(resource.outstandingBytes(), 0U);
+}
+
+TEST(CatalogFileLoadTests, LoadsManifestFileIntoOwningSnapshot)
+{
+    TrackingMemoryResource resource;
+    const std::vector<ManifestEntrySpec> entries{
+        ManifestEntrySpec{.idSeed = 1U, .kind = AssetFormat::AssetKind::Texture2D},
+        ManifestEntrySpec{.idSeed = 2U,
+                          .kind = AssetFormat::AssetKind::Material,
+                          .dependencies = {{.idSeed = 1U, .expectedKind = AssetFormat::AssetKind::Texture2D}}},
+    };
+    const auto bytes = makeManifest(entries);
+
+    const auto directory = std::filesystem::temp_directory_path() / "tina_catalog_file_tests";
+    std::filesystem::create_directories(directory);
+    const auto path = directory / "manifest.tmnft";
+    {
+        std::ofstream output(path, std::ios::binary);
+        output.write(static_cast<const char*>(static_cast<const void*>(bytes.data())),
+                     static_cast<std::streamsize>(bytes.size()));
+    }
+    const auto u8Path = path.u8string();
+    const std::string utf8Path(u8Path.begin(), u8Path.end());
+
+    CatalogFileLoadConfig config{
+        .catalog = defaultConfig(resource),
+        .maxFileBytes = AssetFormat::Wire::MaxManifestFileBytes,
+    };
+    auto snapshot = loadCatalogSnapshotFromManifestFile(utf8Path, config);
+    ASSERT_TRUE(snapshot.has_value()) << snapshot.error().message;
+    EXPECT_EQ(snapshot->entryCount(), 2U);
+    EXPECT_EQ(snapshot->dependencyCount(), 1U);
+    ASSERT_TRUE(snapshot->find(*Core::AssetId::fromBytes(idBytes(2U))));
+
+    snapshot = CatalogSnapshot{};
+    std::error_code errorCode;
+    std::filesystem::remove(path, errorCode);
+    EXPECT_EQ(resource.outstandingAllocations(), 0U);
+}
+
+TEST(CatalogFileLoadTests, MissingManifestFileDoesNotPublishSnapshot)
+{
+    TrackingMemoryResource resource;
+    CatalogFileLoadConfig config{.catalog = defaultConfig(resource)};
+    const auto result =
+        loadCatalogSnapshotFromManifestFile("C:/tina_missing_manifest_file_does_not_exist.tmnft", config);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, Core::CoreErrorCode::NotFound);
+    EXPECT_EQ(resource.outstandingAllocations(), 0U);
 }
 
 } // namespace

@@ -9,5 +9,7 @@ inline constexpr Core::ErrorCode InvalidCatalogConfig{Core::ErrorDomain::Asset, 
 inline constexpr Core::ErrorCode CatalogCapacityExceeded{Core::ErrorDomain::Asset, 14};
 inline constexpr Core::ErrorCode DependencyCycle{Core::ErrorDomain::Asset, 15};
 inline constexpr Core::ErrorCode AllocationFailed{Core::ErrorDomain::Asset, 16};
+// AssetFormat ContentHashMismatch uses 17.
+inline constexpr Core::ErrorCode CatalogFileLoadFailed{Core::ErrorDomain::Asset, 18};
 
 } // namespace Tina::Asset::AssetErrorCode

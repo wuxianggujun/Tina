@@ -1,6 +1,7 @@
 set(TINA_ASSET_TEST_SOURCES
     CatalogSnapshotTests.cpp
     header_isolation/AssetErrorsHeader.cpp
+    header_isolation/CatalogFileHeader.cpp
     header_isolation/CatalogSnapshotHeader.cpp
 )
 

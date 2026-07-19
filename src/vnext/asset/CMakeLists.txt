@@ -1,10 +1,12 @@
 set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetErrors.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogFile.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogSnapshot.hpp
 )
 
 add_library(tina_asset STATIC
     ${TINA_ASSET_PUBLIC_HEADERS}
+    CatalogFile.cpp
     CatalogSnapshot.cpp
 )
 add_library(Tina::Asset ALIAS tina_asset)

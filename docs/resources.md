@@ -27,7 +27,7 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
 - M10-A0 已实现 Cooked wire schema、稳定 `AssetId` 值类型、版本化 `ContentHash` 字段与只读校验；
   M10-A1 已实现 owning `CatalogSnapshot`、稳定 `AssetId` binary search 与完整 DAG cycle 校验；
   M10-A2a 已实现 Core 私有 XXH3-128 v1 `ContentHash` 计算与 Cooked payload 可选校验；
-  M10-A2b 契约已冻结有界 Manifest 文件读与 `loadCatalogSnapshotFromManifestFile`；
+  M10-A2b 已实现有界 Manifest 文件读与 `loadCatalogSnapshotFromManifestFile`；
   Asset registry/状态机、Handle/Lease、异步 IO/Decode/Upload、增量 Cooker 与产品资产仍未实现。
 
 

@@ -449,7 +449,7 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   Handle/Lease 或 Cooker；
 - 后台 CPU Decode 与主线程/GPU Upload 分队列，按任务数、字节数、时间预算；
 - Asset 状态、generation 和取消贯穿两阶段，迟到任务不能复活旧 slot；
-- M10-A2b 契约：Core 有界 `readFile`（UTF-8 路径、maxBytes、注入 PMR）与
+- M10-A2b 已完成 Core 有界 `readFile`（UTF-8 路径、maxBytes、注入 PMR）与
   `loadCatalogSnapshotFromManifestFile`（读盘 → parse → CatalogSnapshot::Create）；仍无
   Handle/Lease、Task worker、GPU upload 或 Cooker writer；
 - 弱 Handle/强 Lease 需先确认 ADR 0016；UploadTicket/retirement 和事务 Manifest writer 继续后置；
