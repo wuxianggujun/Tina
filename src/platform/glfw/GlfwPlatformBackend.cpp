@@ -12,8 +12,15 @@
 #include "GlfwGamepadTranslation.hpp"
 #include "GlfwInputTranslation.hpp"
 #include "GlfwNativeWindowBinding.hpp"
+#if defined(_WIN32)
+#include "Imm32CompositionHostWin32.hpp"
+#endif
 
 #include <GLFW/glfw3.h>
+#if defined(_WIN32)
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#endif
 
 #include <array>
 #include <atomic>
@@ -407,6 +414,13 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             return std::unexpected(std::move(gamepadStatus.error()));
         }
 
+#if defined(_WIN32)
+        if (auto imeStatus = drainImeCompositionEvents(); !imeStatus)
+        {
+            return std::unexpected(std::move(imeStatus.error()));
+        }
+#endif
+
         bool metricsEventPublishedThisFrame = false;
         if (metricsDirty_)
         {
@@ -532,6 +546,12 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         {
             return status;
         }
+#if defined(_WIN32)
+        if (auto status = attachImeHost(); !status)
+        {
+            return status;
+        }
+#endif
         return publishDuringCreation ? publishPrimaryWindow() : Core::success();
     }
 
@@ -1004,6 +1024,19 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         {
             return;
         }
+#if defined(_WIN32)
+        // IMM32 result path already published TextInput; skip the follow-up
+        // WM_CHAR/glfw char that would double-commit the same text.
+        if (imeSuppressNextCharacter_)
+        {
+            imeSuppressNextCharacter_ = false;
+            return;
+        }
+        if (imeHost_.session().active())
+        {
+            return;
+        }
+#endif
         const auto encoded = Detail::encodeUtf8Codepoint(codepoint);
         if (!encoded)
         {
@@ -1316,6 +1349,17 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         focusFilter_.onFocusLost(input_);
         input_.heldKeys.reset();
         input_.pointer.heldButtons.reset();
+#if defined(_WIN32)
+        if (auto cancelled = imeHost_.onFocusLost(); cancelled.has_value() && collectingFrame_)
+        {
+            recordAppend(frameBuilder_.appendInputTransition(TextCompositionTransition{
+                .window = windowId_,
+                .preeditUtf8 = {},
+                .cursorCodepoint = 0,
+                .stage = TextCompositionStage::Cancelled,
+            }));
+        }
+#endif
         if (!collectingFrame_)
         {
             focusCancelPending_ = true;
@@ -1327,8 +1371,56 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }));
     }
 
+#if defined(_WIN32)
+    [[nodiscard]] Core::Status drainImeCompositionEvents()
+    {
+        auto pending = imeHost_.takePending();
+        if (!pending.has_value())
+        {
+            return Core::success();
+        }
+        recordAppend(frameBuilder_.appendInputTransition(TextCompositionTransition{
+            .window = windowId_,
+            .preeditUtf8 = pending->composition.preeditUtf8,
+            .cursorCodepoint = pending->composition.cursorCodepoint,
+            .stage = pending->composition.stage,
+        }));
+        if (pending->composition.stage == TextCompositionStage::Ended
+            && !pending->composition.committedUtf8.empty())
+        {
+            recordAppend(frameBuilder_.appendInputTransition(TextInputTransition{
+                .window = windowId_,
+                .committedUtf8 = pending->composition.committedUtf8,
+            }));
+            imeSuppressNextCharacter_ = true;
+        }
+        if (callbackFailure_ != CallbackAssemblyFailure::None)
+        {
+            return Core::failure(
+                PlatformErrorCode::CallbackFrameAssemblyFailed,
+                "An IMM32 composition event could not be appended");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status attachImeHost()
+    {
+        const HWND hwnd = glfwGetWin32Window(window_);
+        if (hwnd == nullptr)
+        {
+            return Core::failure(
+                PlatformErrorCode::WindowSurfaceUnavailable,
+                "GLFW did not provide a Win32 HWND for IMM32");
+        }
+        return imeHost_.attach(hwnd);
+    }
+#endif
+
     void clearCallbacks() noexcept
     {
+#if defined(_WIN32)
+        imeHost_.detach();
+#endif
         glfwSetKeyCallback(window_, nullptr);
         glfwSetCharCallback(window_, nullptr);
         glfwSetCursorPosCallback(window_, nullptr);
@@ -1464,6 +1556,10 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     bool metricsDirty_ = false;
     bool startupMetricsEventPending_ = false;
     bool closeRequested_ = false;
+#if defined(_WIN32)
+    Detail::Imm32CompositionHostWin32 imeHost_{};
+    bool imeSuppressNextCharacter_ = false;
+#endif
 #if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
     static constexpr usize MaximumQueuedPointerEventsForTest = 16;
     bool failNextPollForTest_ = false;

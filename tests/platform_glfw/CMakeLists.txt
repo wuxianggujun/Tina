@@ -2,6 +2,7 @@ add_executable(tina_platform_glfw_tests
     GlfwDigitalFocusFilterTests.cpp
     GlfwGamepadTranslationTests.cpp
     GlfwInputTranslationTests.cpp
+    Imm32CompositionSessionTests.cpp
     GlfwBackendIntegrationTests.cpp
 )
 

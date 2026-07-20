@@ -413,8 +413,13 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - **已完成 M7-E4（Gamepad stick 死区 + 轴变化回滞）**：`filterGamepadAxisValue` 对 Left/Right
   stick 默认 deadzone 0.18 并 rescale；`gamepadAxisChanged` 默认 hysteresis 0.02 抑制噪声，
   进出 0 始终发布。Trigger 不做 stick deadzone。无方向键导航重复、无完整 Accept/Cancel UI。
-- **仍后置**：Windows IME 私有 IMM32 adapter；完整 Focus Scope/Capture/composition 与窗口销毁顺序；
-  Gamepad 方向长按重复与完整 Accept/Cancel 导航；100%/150%/200% DPI 产品门禁与资源回收专项。
+- **已完成 M7-E5（IMM32 composition 骨架）**：backend-neutral `Imm32CompositionSession`（Started/
+  Updated/Ended/Cancelled、固定 preedit 缓冲、UTF-16→UTF-8）；Win32 私有
+  `Imm32CompositionHostWin32` subclass HWND 并 drain `TextCompositionTransition` + commit
+  `TextInputTransition`；focus lost 取消 composition；active IME 时抑制重复 char。尚无 UI
+  TextEdit 消费、候选窗、跨平台 IME。
+- **仍后置**：UI TextEdit/IME 路由消费；完整 Focus Scope/Capture/Modal；Gamepad 方向长按重复与
+  完整 Accept/Cancel 导航；100%/150%/200% DPI 产品门禁与资源回收专项。
 
 ## M8 Scene 与 2D 垂直切片
 
