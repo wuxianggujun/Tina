@@ -7,6 +7,10 @@
 #include <tina/asset/GridCollision.hpp>
 #include <tina/asset/TileChunkRender.hpp>
 #include <tina/asset/TileMapInstance.hpp>
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+#include <tina/asset/TileMapPhysicsSync.hpp>
+#include <tina/physics2d/PhysicsWorld2D.hpp>
+#endif
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
@@ -76,9 +80,22 @@ struct LifecycleCounters final {
     u64 uiRootsCreated = 0;
     u64 uiPanelsCreated = 0;
     u64 uiRootsReleased = 0;
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+    u64 physicsSteps = 0;
+    u64 physicsStaticBodies = 0;
+    u64 physicsDynamicContacts = 0;
+    float lastDynamicY = 0.0f;
+    bool physicsReady = false;
+#endif
 };
 
 inline constexpr u32 ExpectedUIPanelCount = 2;
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+inline constexpr u32 ExpectedPhysicsStaticBodies = ExpectedNonEmptyTiles;
+inline constexpr u32 ExpectedSpritesWithPhysics = ExpectedNonEmptyTiles + 2; // tiles + character + crate
+#else
+inline constexpr u32 ExpectedSpritesWithPhysics = ExpectedNonEmptyTiles + 1;
+#endif
 
 [[nodiscard]] Tina::UI::UILayoutStyle absolutePanelStyle(Tina::UI::UILayoutLength left, Tina::UI::UILayoutLength top,
                                                          Tina::UI::UILayoutLength width,
@@ -244,6 +261,15 @@ struct TileMapResources final {
     std::optional<Tina::Asset::CharacterController2D> controller{};
     std::pmr::vector<Tina::Asset::TileMapSolidHit> solidScratch{&memory};
     std::filesystem::path catalogRoot{};
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+    std::optional<Tina::Physics2D::PhysicsWorld2D> physicsWorld{};
+    Tina::Physics2D::PhysicsBodyId dynamicBody{};
+    Tina::Physics2D::PhysicsBodyId staticBodies[32]{};
+    Tina::Physics2D::PhysicsGridSolidCell2D solidCellScratch[32]{};
+    float dynamicHalfExtent = 0.25f;
+    float lastDynamicX = 3.0f;
+    float lastDynamicY = 3.5f;
+#endif
 };
 
 [[nodiscard]] Tina::Core::Status prepareCatalog(TileMapResources& resources)
@@ -448,6 +474,55 @@ struct TileMapResources final {
         .skin = 0.01f,
     });
     resources.controller->teleport(1.0f, 3.0f, true);
+
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+    Tina::Physics2D::PhysicsWorld2DConfig worldConfig;
+    worldConfig.bodyCapacity = 64;
+    worldConfig.shapeCapacity = 64;
+    worldConfig.contactBeginCapacity = 32;
+    worldConfig.contactEndCapacity = 32;
+    worldConfig.contactHitCapacity = 8;
+    worldConfig.commandCapacity = 16;
+    worldConfig.solverSubStepCount = 1;
+    worldConfig.gravityMetersPerSecondSquared = {0.0F, -20.0F};
+    auto worldResult = Tina::Physics2D::PhysicsWorld2D::Create(worldConfig, resources.memory);
+    if (!worldResult)
+    {
+        return Tina::Core::failure(std::move(worldResult.error()));
+    }
+    resources.physicsWorld.emplace(std::move(*worldResult));
+
+    Tina::Physics2D::PhysicsGridBodySyncConfig2D syncConfig;
+    syncConfig.cellSizeMeters = 0.0F;
+    syncConfig.enableContactEvents = true;
+    auto synced = Tina::Asset::syncTileMapSolidsToStaticBodies(
+        *resources.grid, *resources.physicsWorld, syncConfig, resources.staticBodies, resources.solidCellScratch);
+    if (!synced)
+    {
+        return Tina::Core::failure(std::move(synced.error()));
+    }
+    if (synced->written != ExpectedPhysicsStaticBodies)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "unexpected static tile body count");
+    }
+
+    Tina::Physics2D::PhysicsBody2DDesc dynamicDesc;
+    dynamicDesc.type = Tina::Physics2D::PhysicsBodyType2D::Dynamic;
+    dynamicDesc.positionMeters = {3.0F, 3.5F};
+    Tina::Physics2D::PhysicsBoxShape2DDesc box;
+    box.halfExtentsMeters = {resources.dynamicHalfExtent, resources.dynamicHalfExtent};
+    box.density = 1.0F;
+    box.enableContactEvents = true;
+    auto dynamic = resources.physicsWorld->createBoxBody(dynamicDesc, box);
+    if (!dynamic)
+    {
+        return Tina::Core::failure(std::move(dynamic.error()));
+    }
+    resources.dynamicBody = dynamic->body;
+    resources.lastDynamicX = dynamicDesc.positionMeters.x;
+    resources.lastDynamicY = dynamicDesc.positionMeters.y;
+#endif
+
     resources.system = std::make_unique<Tina::Asset::AssetSystem>(std::move(*system));
     return Tina::Core::success();
 }
@@ -485,6 +560,13 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
         resources_->gpuTexture = *texture;
         ++counters_->texturesUploaded;
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+        if (resources_->physicsWorld)
+        {
+            counters_->physicsStaticBodies = ExpectedPhysicsStaticBodies;
+            counters_->physicsReady = true;
+        }
+#endif
 
         auto rootBuilder = context.primaryWindowUIRootBuilder();
         if (!rootBuilder)
@@ -583,6 +665,34 @@ class TileMapBgfxState final : public Tina::IGameState {
                 ++counters_->controllerGroundedFrames;
             }
         }
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+        if (resources_->physicsWorld)
+        {
+            if (auto status = resources_->physicsWorld->step(); !status)
+            {
+                return status;
+            }
+            ++counters_->physicsSteps;
+            auto contacts = resources_->physicsWorld->contactEvents();
+            if (!contacts)
+            {
+                return Tina::Core::failure(std::move(contacts.error()));
+            }
+            for (const auto& begin : contacts->beginEvents)
+            {
+                if (begin.bodyA == resources_->dynamicBody || begin.bodyB == resources_->dynamicBody)
+                {
+                    ++counters_->physicsDynamicContacts;
+                }
+            }
+            if (auto state = resources_->physicsWorld->bodyState(resources_->dynamicBody); state)
+            {
+                resources_->lastDynamicX = state->positionMeters.x;
+                resources_->lastDynamicY = state->positionMeters.y;
+                counters_->lastDynamicY = state->positionMeters.y;
+            }
+        }
+#endif
         if (options_.frameDelayMilliseconds != 0)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds{options_.frameDelayMilliseconds});
@@ -662,7 +772,34 @@ class TileMapBgfxState final : public Tina::IGameState {
         {
             return status;
         }
-        counters_->lastTotalSprites = *emitted + 1U;
+        u64 totalSprites = *emitted + 1U;
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+        // Product crate sprite follows the dynamic Box2D body (same atlas key as tiles).
+        const Tina::Render::RenderSprite2DInput crate{
+            .spriteKey = ProductSpriteKey,
+            .stableEntityKey = 900002,
+            .centerX = resources_->lastDynamicX,
+            .centerY = resources_->lastDynamicY,
+            .widthMeters = resources_->dynamicHalfExtent * 2.0f,
+            .heightMeters = resources_->dynamicHalfExtent * 2.0f,
+            .u0 = 0.5f,
+            .v0 = 0.0f,
+            .u1 = 1.0f,
+            .v1 = 1.0f,
+            .sortingLayer = 1,
+            .orderInLayer = 1,
+            .red = 120,
+            .green = 220,
+            .blue = 255,
+            .alpha = 255,
+        };
+        if (auto status = writer.addSprite2D(crate); !status)
+        {
+            return status;
+        }
+        ++totalSprites;
+#endif
+        counters_->lastTotalSprites = totalSprites;
         ++counters_->renderExtractions;
         return Tina::Core::success();
     }
@@ -790,12 +927,17 @@ int main(int argc, char** argv)
     std::error_code ec;
     std::filesystem::remove_all(resources.catalogRoot, ec);
 
-    const bool ok = counters.texturesUploaded == 1 && counters.lastTileSprites == ExpectedNonEmptyTiles &&
-                    counters.lastTotalSprites == ExpectedNonEmptyTiles + 1 && counters.controllerGroundedFrames > 0 &&
-                    counters.renderExtractions == counters.frameUpdates && counters.stateExits == 1 &&
-                    counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
-                    counters.uiPanelsCreated == ExpectedUIPanelCount && counters.uiRootsReleased == 1 &&
-                    *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
+    bool ok = counters.texturesUploaded == 1 && counters.lastTileSprites == ExpectedNonEmptyTiles &&
+              counters.lastTotalSprites == ExpectedSpritesWithPhysics && counters.controllerGroundedFrames > 0 &&
+              counters.renderExtractions == counters.frameUpdates && counters.stateExits == 1 &&
+              counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
+              counters.uiPanelsCreated == ExpectedUIPanelCount && counters.uiRootsReleased == 1 &&
+              *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+    ok = ok && counters.physicsReady && counters.physicsStaticBodies == ExpectedPhysicsStaticBodies &&
+         counters.physicsSteps == counters.frameUpdates && counters.physicsDynamicContacts > 0 &&
+         counters.lastDynamicY < 3.5f && counters.lastDynamicY > 0.5f;
+#endif
     if (!ok)
     {
         std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d_tilemap_bgfx\","
@@ -805,7 +947,14 @@ int main(int argc, char** argv)
                   << ",\"totalSprites\":" << counters.lastTotalSprites
                   << ",\"grounded\":" << counters.controllerGroundedFrames
                   << ",\"uiRoots\":" << counters.uiRootsCreated << ",\"uiPanels\":" << counters.uiPanelsCreated
-                  << ",\"uiReleased\":" << counters.uiRootsReleased << "}\n";
+                  << ",\"uiReleased\":" << counters.uiRootsReleased
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+                  << ",\"physicsSteps\":" << counters.physicsSteps
+                  << ",\"physicsStatics\":" << counters.physicsStaticBodies
+                  << ",\"physicsContacts\":" << counters.physicsDynamicContacts
+                  << ",\"dynamicY\":" << counters.lastDynamicY
+#endif
+                  << "}\n";
         return 1;
     }
 
@@ -813,11 +962,21 @@ int main(int argc, char** argv)
               << ",\"frames\":" << counters.frameUpdates << ",\"renderExtractions\":" << counters.renderExtractions
               << ",\"texturesUploaded\":" << counters.texturesUploaded
               << ",\"tileSpritesPerFrame\":" << ExpectedNonEmptyTiles
-              << ",\"spritesPerFrame\":" << (ExpectedNonEmptyTiles + 1)
+              << ",\"spritesPerFrame\":" << ExpectedSpritesWithPhysics
               << ",\"controllerGroundedFrames\":" << counters.controllerGroundedFrames
               << ",\"uiRootsCreated\":" << counters.uiRootsCreated
               << ",\"uiPanelsCreated\":" << counters.uiPanelsCreated
-              << ",\"uiRootsReleased\":" << counters.uiRootsReleased << ",\"stateExits\":" << counters.stateExits
+              << ",\"uiRootsReleased\":" << counters.uiRootsReleased
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+              << ",\"physicsEnabled\":true"
+              << ",\"physicsSteps\":" << counters.physicsSteps
+              << ",\"physicsStaticBodies\":" << counters.physicsStaticBodies
+              << ",\"physicsDynamicContacts\":" << counters.physicsDynamicContacts
+              << ",\"lastDynamicY\":" << counters.lastDynamicY
+#else
+              << ",\"physicsEnabled\":false"
+#endif
+              << ",\"stateExits\":" << counters.stateExits
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns << ",\"exit\":\""
               << "GameRequestedExitAfterCurrentFrame\"}\n";
     return 0;

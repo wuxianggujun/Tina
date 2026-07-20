@@ -13,6 +13,10 @@ target_link_libraries(tina_sample_2d_tilemap_bgfx PRIVATE
     Tina::Asset
     Tina::RenderBgfx
 )
+if (TINA_BUILD_PHYSICS2D)
+    target_compile_definitions(tina_sample_2d_tilemap_bgfx PRIVATE TINA_SAMPLE_TILEMAP_PHYSICS2D=1)
+    target_link_libraries(tina_sample_2d_tilemap_bgfx PRIVATE Tina::Physics2D)
+endif ()
 set_target_properties(tina_sample_2d_tilemap_bgfx PROPERTIES CXX_EXTENSIONS OFF)
 
 if(WIN32)

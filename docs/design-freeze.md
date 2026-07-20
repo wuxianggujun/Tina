@@ -494,8 +494,12 @@ M10-A32：`tina_sample_2d_tilemap_bgfx` 在 GLFW+bgfx 上 cook/load Catalog Text
 GPU 上传 atlas 并绑定 `spriteKey=1`，每帧 emit 可见 tile + CharacterController 角色 sprite。
 
 M10-A33：同一样例增加 PrimaryWindowUI 2 个 SolidQuad HUD panel（顶栏 + 底 accent），
-并在 JSON 中校验 root create/release 与 panel 计数。不包含 Box2D dynamic product body、
-中文 FreeType Label 或 pointer consumption 产品门禁。
+并在 JSON 中校验 root create/release 与 panel 计数。
+
+M10-A34：新增 configure/build preset `windows-msvc-vnext-bgfx-physics2d`；
+`tina_sample_2d_tilemap_bgfx` 在 `TINA_BUILD_PHYSICS2D` 时同步 Tile solid 为 static body、
+创建 1 个 dynamic crate、逐步 step 并渲染 crate sprite，JSON 校验 static 数/contact/y。
+纯 bgfx 图仍可无 Physics 构建该样例。中文 FreeType Label 与完整 pointer 产品门禁后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation
