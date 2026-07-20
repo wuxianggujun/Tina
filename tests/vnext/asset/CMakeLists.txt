@@ -11,6 +11,7 @@ set(TINA_ASSET_TEST_SOURCES
     Typed2dCatalogPipelineTests.cpp
     AssetSystemCatalogApiTests.cpp
     AssetSpriteRenderTests.cpp
+    AssetToRenderScenePipelineTests.cpp
     TypedPayloadValidationTests.cpp
     CatalogLoadOrderTests.cpp
     CatalogLoadPlanTests.cpp

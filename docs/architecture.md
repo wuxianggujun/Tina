@@ -189,6 +189,7 @@ startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 r
 | vNext M10-A18 typed payload validation | 已完成校验门禁切片 | verifyTypedPayload / requireTyped2dPayloads / catalog_validate 标志。无 bgfx 绘制 |
 | vNext M10-A19 inline typed recipe | 已完成内联 recipe 切片 | recipe `texture2d`/`sprite` 直接生成 typed payload。无 bgfx 绘制 |
 | vNext M10-A20 sprite UV render bridge | 已完成绘制输入桥接切片 | RenderSprite UV + makeSpriteRenderInput + bgfx geometry UV。无纹理采样 |
+| vNext M10-A21 asset→render CPU pipeline | 已完成全链路 CPU 产品门禁 | cook→load→typed→RenderScene commit。无 bgfx 纹理采样 |
 | vNext GLFW 边界 | 已形成可运行切片 |
  `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
 | 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene component-integrated extraction、AssetSystem/Audio、owning UI packet/pin、Text/Glyph/完整 Widget 与 submission drain 仍按后续切片实施；M8-A World/Transform、M8-B 2D extraction、M9-A 3D CPU/Null extraction、M9-B Opaque3D fixture、M9-C Sprite2D fixture、M10-A0 wire format、M10-A1 CatalogSnapshot、Desktop SolidFill 可见样例、standalone UI/Render/bridge foundation、Runtime-private route/layout/startup/display borrow 接线、Button primary-pointer default action 和私有 bgfx SolidQuad pass 不代表完整产品路径完成 |

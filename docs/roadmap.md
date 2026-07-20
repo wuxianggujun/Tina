@@ -512,6 +512,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   仍无 bgfx 绘制；
 - M10-A20 已完成 RenderSprite2D UV 矩形字段、`makeSpriteRenderInput`（typed Sprite→绘制输入）、
   bgfx geometry 使用 item UV；仍无 bgfx 纹理采样绑定；
+- M10-A21 已完成 cook→load→typed parse→makeSpriteRenderInput→RenderScene commit 全 CPU 产品闭环测试；
+  仍无 bgfx 纹理采样/GPU 可见绘制；
 - 完整 Cooker/cgltf、CPU TaskGroup、bgfx 真实纹理采样/UploadTicket 接线继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
