@@ -350,3 +350,11 @@ M10-A2b 已落地有界 Catalog 文件加载：Core `readFile` + Asset `loadCata
 该切片不实现 Handle/Lease、async IO、Cooker writer 或 GPU upload。
 
 M10-A2c 已落地 owning Cooked object 文件加载与 Catalog 路径解析校验；不实现 Handle/Lease。
+
+M10-A2d 已落地 Catalog 依赖展开与 dependencies-first 确定性加载序；M10-A2e 已落地按该顺序的
+批量同步 Cooked 文件加载，任一失败销毁已加载对象且不发布部分批。两者都不实现 Handle/Lease、
+异步 IO 或 Task worker。
+
+M10-A2f 已落地 `validateCatalogPackageOnDisk`：严格 UTF-8 Catalog root、确定性 object path、
+metadata-only 常规文件/精确大小校验，以及逐文件 full parse + 强制 ContentHash + Catalog entry 对齐。
+校验不枚举目录、不保留对象且同时最多持有一个 Cooked 文件；不实现 Handle/Lease、CLI 或 Cooker。

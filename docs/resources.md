@@ -29,6 +29,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A2a 已实现 Core 私有 XXH3-128 v1 `ContentHash` 计算与 Cooked payload 可选校验；
   M10-A2b 已实现有界 Manifest 文件读与 `loadCatalogSnapshotFromManifestFile`；
   M10-A2c 已实现 owning Cooked object 文件加载与 Catalog 路径解析校验；
+  M10-A2d 已实现依赖展开加载序，M10-A2e 已实现失败不发布部分批的同步批量加载；
+  M10-A2f 已实现磁盘 Catalog package 的 metadata-only/full 校验；
   Asset registry/状态机、Handle/Lease、异步 IO/Decode/Upload、增量 Cooker 与产品资产仍未实现。
 
 
@@ -343,6 +345,35 @@ catalogRoot + AssetId
 失败不发布部分对象；临时缓冲回滚。公共头无第三方/文件系统类型泄漏（实现可用 `std::filesystem`）。
 
 非目标：Handle/Lease、状态机、异步 IO、GPU upload、Cooker、目录枚举。
+
+### M10-A2d/A2e 依赖序与批量同步加载契约
+
+`computeCatalogLoadOrder` 对请求 `AssetId` 做迭代式传递依赖展开，返回 dependencies-first、去重的
+Catalog entry index 序；scratch 与返回 vector 都使用调用方注入 PMR。`loadCookedAssetsFromCatalog`
+随后按该顺序逐个调用 `loadCookedAssetFromCatalog`，任一失败先销毁已加载对象再返回首个结构化错误，
+不发布部分批。两者都不引入 registry、Handle/Lease、Task worker 或异步 IO。
+
+### M10-A2f Catalog package 磁盘校验契约
+
+```text
+strict UTF-8 catalogRoot + immutable CatalogSnapshot
+  -> for each Catalog entry, derive deterministic object path
+  -> metadata-only: regular-file + exact cookedFileBytes
+  -> full: bounded read + parse + forced ContentHash + Catalog entry alignment
+  -> destroy the loaded object before validating the next entry
+```
+
+`CatalogPackageValidationConfig::verifyContent=false` 只查询常规文件与精确大小，不读取或解析内容，也不
+要求文件 PMR；`true` 要求 `file.memoryResource`，忽略嵌套的 `file.verifyContentHash=false` 并强制完整
+ContentHash 校验，其余 Cooked file limit 继续生效。校验按 Catalog 顺序遇到首个错误即停止，同时最多
+持有一个 owning `CookedAssetFile`，成功后不保留资产；entry 相关失败附带 canonical `AssetId` 上下文。
+
+该 API 不扫描目录，因此不把无关额外文件视为错误；路径只来自已验证 kind/AssetId 的确定性相对路径，
+Catalog root 必须是非空、无 NUL 的严格 UTF-8。metadata-only 只能发现缺文件、非普通文件和大小不一致，
+不能替代 full parse/ContentHash；XXH3 仍不是对抗性安全签名。
+
+非目标：`AssetHandle`/`AssetLease`、registry 状态机、异步 IO、Task worker、GPU upload、目录清理、
+`tina_catalog_validate` CLI、Cooker writer、atomic publish、Bundle/Patch 或产品资产样例。
 
 
 默认 hard limits 为：单 Cooked 文件与 payload 最大1 GiB、单资产最多4096个直接依赖、Manifest

@@ -152,6 +152,13 @@ cmake --build --preset windows-vnext-release --target tina_asset_tests
 out\build\windows-msvc-vnext\bin\Release\tina_asset_tests.exe --gtest_color=yes
 ```
 
+### M10-A2c～A2f Cooked load and package validation
+
+同一 `tina_asset_tests` 还覆盖 owning Cooked object、Catalog 依赖序、失败回滚的批量同步加载，以及
+`validateCatalogPackageOnDisk`。A2f 的 metadata-only 模式只检查常规文件与精确大小；full 模式强制
+ContentHash 和 Catalog entry 对齐，同时最多持有一个对象。当前 Windows MSVC Debug/Release 均34/34。
+该路径不包含 Handle/Lease、async IO、catalog 校验 CLI、Cooker 或 GPU upload；直接运行命令沿用上节。
+
 当前最小图的唯一第三方测试依赖是 `tests` manifest feature 提供的 GoogleTest 1.17.0；
 `TINA_BUILD_TESTING=OFF` 且不启用该 feature 时，vcpkg 安装图也不包含 GTest。它不进入或链接 GLFW、bgfx、EASTL、
 EnTT、FreeType、miniaudio、Box2D、xxHash 或 SDL/SDL3。`tina_sample_null` 只组合 Headless Platform、

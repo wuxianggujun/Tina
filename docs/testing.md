@@ -39,9 +39,8 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2b Catalog file load | Debug/Release C++23 | 223/223 + 19/19 | 基础 `tina_tests` 含 ReadFile 5 项共 223；`tina_asset_tests` 19/19 含 Manifest 文件→Snapshot。不实现 Handle/Lease、async IO 或 Cooker |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2c Cooked object file load | Debug/Release C++23 | 223/223 + 23/23 | 基础 `tina_tests` 223；`tina_asset_tests` 含 CookedAssetFile 4 项。不实现 Handle/Lease |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2d Catalog load order | Debug/Release C++23 | 223/223 + 27/27 | `tina_asset_tests` 含 load order chain/diamond/missing/empty。不实现 Handle/Lease |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2e Batch cooked load | Debug/Release C++23 | 223/223 + 29/29 | `tina_asset_tests` 29/29 含批量依赖序加载与失败回滚。不实现 Handle/Lease |
-
-
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2e Batch cooked load | Debug/Release C++23 | 223/223 + 29/29 | `tina_asset_tests` 含批量依赖序加载与失败回滚。不实现 Handle/Lease |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2f Catalog package validate | Debug/Release C++23 | 223/223 + 34/34 | 基础 `tina_tests` 223；`tina_asset_tests` 含 package validate 5 项：完整包、缺文件、大小不匹配、同尺寸内容篡改的 metadata/full 差异、非法 UTF-8 root；full 模式强制 ContentHash。不实现 Handle/Lease 或 CLI |
 
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M8-A `tina_scene` World/Transform | Debug/Release C++23 | 19/19 | `tina_scene_tests` Debug 与 Release 均直接运行通过；覆盖 generation/owner、keep-world/keep-local、父销毁/显式子树销毁、非递归20,000层传播、宽树删除、固定容量/PMR回滚与稳定构造错误、overflow/shear、四元数和错线程读写；Linux Scene 图尚未运行 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2 + M8-B 2D + M9-A 3D extraction | Release C++23 | 213/213 | 本轮直接通过 UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、RenderScene22/22；Null、2D infrastructure与3D extraction样例各300帧，3D记录4 submitted/3 visible/1 culled/2 batches、一次aspect变化与资源归零；GLFW/bgfx/Desktop沿用前序D2证据 |

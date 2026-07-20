@@ -1072,6 +1072,7 @@ public:
 | `CookedAssetFile` / `loadCookedAssetFile` / `loadCookedAssetFromCatalog` | M10-A2c 已实现 | Asset module public | owning Cooked object bytes + 校验；Catalog 根路径解析 | NotFound / Io / ContentHashMismatch / CatalogEntryMismatch；失败不发布 |
 | `computeCatalogLoadOrder` | M10-A2d 已实现 | Asset module public | 请求 AssetId 的依赖展开 + dependencies-first entry index 序 | NotFound / DependencyCycle / AllocationFailed |
 | `loadCookedAssetsFromCatalog` | M10-A2e 已实现 | Asset module public | 批量同步加载 owning CookedAssetFile（依赖序）；失败不发布部分批 | NotFound / Io / ContentHashMismatch / CatalogEntryMismatch / AllocationFailed |
+| `validateCatalogPackageOnDisk` | M10-A2f 已实现 | Asset module public | 严格 UTF-8 root；逐 entry 校验确定性 object path 的常规文件/大小，可选强制 ContentHash+entry 对齐；同时最多持有一个对象 | InvalidCatalogConfig / Core IO、容量与内存错误 / AssetFormat 校验错误 / CatalogEntryMismatch；失败含 AssetId 上下文 |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |

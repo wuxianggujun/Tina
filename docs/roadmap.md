@@ -459,7 +459,11 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   （迭代、去重、PMR）；仍无 Handle/Lease 与异步加载；
 - M10-A2e 已完成 `loadCookedAssetsFromCatalog` 批量同步加载：load-order 展开后按序读盘，失败回滚
   已加载项；仍无 Handle/Lease 与异步 IO；
+- M10-A2f 已完成 `validateCatalogPackageOnDisk`：严格 UTF-8 root，按 Catalog entry 校验磁盘 object
+  常规文件/大小，可选强制 ContentHash+entry 对齐；不枚举目录、不保留加载结果；仍无 Handle/Lease；
 - 弱 Handle/强 Lease 需先确认 ADR 0016；UploadTicket/retirement 和事务 Manifest writer 继续后置；
+- 不接受 ADR 0016 时，可继续独立 `tina_catalog_validate` CLI、包诊断摘要与文档样例；这些工具不得
+  偷偷引入 registry、异步任务或生命周期所有权；
 - `tina_assetc` 执行 Parse → Validate → Build → Validate Cooked → Atomic Write；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；
