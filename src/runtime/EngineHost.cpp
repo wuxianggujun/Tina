@@ -888,11 +888,28 @@ class EngineHostImplementation final {
                                               simulationTick);
             }
 
+            std::optional<Render::UIGlyphAtlasPageView> glyphAtlasPage;
+            if (*uiContextResult != nullptr)
+            {
+                UI::UIContext& uiContext = **uiContextResult;
+                const auto pixels = uiContext.glyphAtlasPixels();
+                if (!pixels.empty() && uiContext.glyphAtlasWidth() > 0
+                    && uiContext.glyphAtlasHeight() > 0)
+                {
+                    glyphAtlasPage = Render::UIGlyphAtlasPageView{
+                        .width = uiContext.glyphAtlasWidth(),
+                        .height = uiContext.glyphAtlasHeight(),
+                        .pixels = pixels,
+                    };
+                }
+            }
+
             const Render::RenderFrame renderFrame{
                 .frameIndex = frameIndex,
                 .interpolation = frameTiming.interpolation,
                 .primaryWindowSurface = primaryWindowSurface,
                 .primaryWindowUIDisplayList = uiDisplayResult->displayList,
+                .primaryWindowUIGlyphAtlas = glyphAtlasPage,
                 .primaryWorldScene = *renderSceneResult,
             };
             auto submitResult =

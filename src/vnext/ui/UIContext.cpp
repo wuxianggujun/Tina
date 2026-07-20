@@ -5,6 +5,7 @@
 #include <tina/core/text/Utf8.hpp>
 #include <tina/ui/UIDirty.hpp>
 #include <tina/ui/UIText.hpp>
+#include <tina/ui/text/UIGlyphAtlas.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 
 #include <algorithm>
@@ -634,6 +635,7 @@ struct UIContext::Impl final {
     usize textByteHighWater = 0;
     std::unique_ptr<IUITextRasterizer> textRasterizer;
     UIFontFaceId textFace{};
+    std::unique_ptr<UIGlyphAtlas> glyphAtlas;
     // Paint-local scratch: copies glyph advances out of a borrow-local raster
     // batch so paint can walk UTF-8 (including newlines) without use-after-free.
     std::pmr::vector<float> textPaintAdvanceScratch;
@@ -1897,24 +1899,126 @@ struct UIContext::Impl final {
         }
 
         const std::string_view utf8 = textViewFor(nodeIndex);
+        const u32 pixelSize = static_cast<u32>(
+            (std::max)(1.0F, std::floor(state.style.logicalSize)));
 
-        // Optional per-drawable-codepoint advances from the context rasterizer.
-        // Copy out of the borrow-local raster batch before the next call. Coverage
-        // bitmaps are not uploaded yet; paint remains SolidQuad cells.
-        textPaintAdvanceScratch.clear();
-        if (textRasterizer && textFace.hasValue()) {
+        // Prefer full raster+atlas path. On any failure, drop partial appends
+        // for this node and fall back to monospaced SolidQuad bars.
+        if (textRasterizer && textFace.hasValue() && glyphAtlas) {
             auto batch = textRasterizer->raster(textFace, utf8, state.style);
             if (batch) {
-                textPaintAdvanceScratch.reserve(batch->glyphs.size());
-                for (const UITextGlyphRaster& glyph : batch->glyphs) {
-                    textPaintAdvanceScratch.push_back(glyph.advance);
+                const usize outputBase = output.size();
+                const u32 ordinalBase = nextPaintOrdinal;
+                float cursorX = layoutEntry.worldRect.x;
+                float cursorY = layoutEntry.worldRect.y;
+                usize glyphIndex = 0;
+                usize index = 0;
+                bool usedAtlasPath = true;
+                while (index < utf8.size()) {
+                    const auto first = static_cast<unsigned char>(utf8[index]);
+                    usize unitLength = 1;
+                    if (first <= 0x7FU) {
+                        unitLength = 1;
+                    } else if ((first & 0xE0U) == 0xC0U) {
+                        unitLength = 2;
+                    } else if ((first & 0xF0U) == 0xE0U) {
+                        unitLength = 3;
+                    } else {
+                        unitLength = 4;
+                    }
+                    if (unitLength > utf8.size() - index) {
+                        usedAtlasPath = false;
+                        break;
+                    }
+                    if (unitLength == 1 && first == '\n') {
+                        cursorX = layoutEntry.worldRect.x;
+                        cursorY = normalizeFloat(cursorY + lineHeight);
+                        index += unitLength;
+                        continue;
+                    }
+                    if (glyphIndex >= batch->glyphs.size()) {
+                        usedAtlasPath = false;
+                        break;
+                    }
+                    const UITextGlyphRaster& glyph = batch->glyphs[glyphIndex];
+                    ++glyphIndex;
+                    float advance = glyph.advance;
+                    if (!(std::isfinite(advance) && advance > 0.0F)) {
+                        advance = fallbackAdvance;
+                    }
+
+                    std::span<const u8> coverage{};
+                    if (glyph.width > 0 && glyph.height > 0) {
+                        const usize coverageBytes =
+                            static_cast<usize>(glyph.width) * glyph.height;
+                        if (glyph.coverageOffset + coverageBytes
+                            > batch->coverage.size()) {
+                            usedAtlasPath = false;
+                            break;
+                        }
+                        coverage = std::span<const u8>(
+                            batch->coverage.data() + glyph.coverageOffset,
+                            coverageBytes);
+                    }
+                    auto placed = glyphAtlas->insert(
+                        UIGlyphKey{
+                            .face = textFace,
+                            .codepoint = glyph.codepoint,
+                            .pixelSize = pixelSize,
+                        },
+                        glyph,
+                        coverage);
+                    if (!placed) {
+                        usedAtlasPath = false;
+                        break;
+                    }
+
+                    const float drawX = normalizeFloat(cursorX + glyph.bearingX);
+                    const float drawY = normalizeFloat(
+                        cursorY + (lineHeight - glyph.bearingY));
+                    const float drawW = placed->width > 0
+                        ? static_cast<float>(placed->width)
+                        : advance;
+                    const float drawH = placed->height > 0
+                        ? static_cast<float>(placed->height)
+                        : lineHeight;
+
+                    output.push_back(UICommittedPaintEntry{
+                        .node = layoutEntry.node,
+                        .worldRect =
+                            UILogicalRect{
+                                .x = drawX,
+                                .y = drawY,
+                                .width = normalizeFloat((std::max)(0.0F, drawW)),
+                                .height = normalizeFloat((std::max)(0.0F, drawH)),
+                            },
+                        .effectiveClip = layoutEntry.effectiveClip,
+                        .paintOrdinal = nextPaintOrdinal,
+                        .solidFill = color,
+                        .isGlyph = placed->width > 0 && placed->height > 0,
+                        .atlasX = placed->atlasX,
+                        .atlasY = placed->atlasY,
+                        .atlasWidth = placed->width,
+                        .atlasHeight = placed->height,
+                        .atlasPage = 0,
+                    });
+                    ++nextPaintOrdinal;
+                    cursorX = normalizeFloat(cursorX + advance);
+                    index += unitLength;
                 }
+                if (usedAtlasPath) {
+                    return;
+                }
+                while (output.size() > outputBase) {
+                    output.pop_back();
+                }
+                nextPaintOrdinal = ordinalBase;
             }
         }
 
+        // SolidQuad monospaced fallback (no atlas / raster / coverage).
         float cursorX = layoutEntry.worldRect.x;
         float cursorY = layoutEntry.worldRect.y;
-        usize glyphIndex = 0;
         usize index = 0;
         while (index < utf8.size()) {
             const auto first = static_cast<unsigned char>(utf8[index]);
@@ -1939,30 +2043,22 @@ struct UIContext::Impl final {
                 continue;
             }
 
-            float advance = fallbackAdvance;
-            if (glyphIndex < textPaintAdvanceScratch.size()) {
-                const float glyphAdvance = textPaintAdvanceScratch[glyphIndex];
-                if (std::isfinite(glyphAdvance) && glyphAdvance > 0.0F) {
-                    advance = glyphAdvance;
-                }
-                ++glyphIndex;
-            }
-
             output.push_back(UICommittedPaintEntry{
                 .node = layoutEntry.node,
                 .worldRect =
                     UILogicalRect{
                         .x = normalizeFloat(cursorX),
                         .y = normalizeFloat(cursorY),
-                        .width = normalizeFloat(advance),
+                        .width = normalizeFloat(fallbackAdvance),
                         .height = normalizeFloat(lineHeight),
                     },
                 .effectiveClip = layoutEntry.effectiveClip,
                 .paintOrdinal = nextPaintOrdinal,
                 .solidFill = color,
+                .isGlyph = false,
             });
             ++nextPaintOrdinal;
-            cursorX = normalizeFloat(cursorX + advance);
+            cursorX = normalizeFloat(cursorX + fallbackAdvance);
             index += unitLength;
         }
     }
@@ -3871,6 +3967,24 @@ struct UIContext::Impl final {
         };
     }
 
+    [[nodiscard]] std::span<const u8> glyphAtlasPixels() const noexcept
+    {
+        if (!glyphAtlas) {
+            return {};
+        }
+        return glyphAtlas->pagePixels();
+    }
+
+    [[nodiscard]] u32 glyphAtlasWidth() const noexcept
+    {
+        return glyphAtlas ? glyphAtlas->capacity().width : 0U;
+    }
+
+    [[nodiscard]] u32 glyphAtlasHeight() const noexcept
+    {
+        return glyphAtlas ? glyphAtlas->capacity().height : 0U;
+    }
+
     [[nodiscard]] UIPointerHitQueryResult queryPointerHit(
         UILogicalPoint point) const noexcept
     {
@@ -4922,6 +5036,17 @@ Core::Result<std::unique_ptr<UIContext>> UIContext::Create(
         }
         (*implResult)->textRasterizer = std::move(textRasterizer);
 
+        auto atlasResult = UIGlyphAtlas::Create(
+            UIGlyphAtlasCapacity{
+                .width = 512,
+                .height = 512,
+                .maxGlyphs = 1024,
+            },
+            resource);
+        if (atlasResult) {
+            (*implResult)->glyphAtlas = std::move(*atlasResult);
+        }
+
         auto context = std::unique_ptr<UIContext>(new UIContext(std::move(*implResult)));
         lifetime->context = context.get();
         return context;
@@ -5023,6 +5148,21 @@ UICommittedHitView UIContext::committedHit() const noexcept
 UICommittedPaintView UIContext::committedPaint() const noexcept
 {
     return m_impl->committedPaint();
+}
+
+std::span<const u8> UIContext::glyphAtlasPixels() const noexcept
+{
+    return m_impl->glyphAtlasPixels();
+}
+
+u32 UIContext::glyphAtlasWidth() const noexcept
+{
+    return m_impl->glyphAtlasWidth();
+}
+
+u32 UIContext::glyphAtlasHeight() const noexcept
+{
+    return m_impl->glyphAtlasHeight();
 }
 
 UIPointerHitQueryResult UIContext::queryPointerHit(UILogicalPoint point) const noexcept

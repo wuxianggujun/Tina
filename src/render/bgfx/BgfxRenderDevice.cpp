@@ -647,6 +647,10 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 return Core::failure(std::move(status.error()));
             }
+            if (auto status = syncUIGlyphAtlas(frame.primaryWindowUIGlyphAtlas); !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
         }
         if (auto status = surfaceStateTracker_.validateAndCommit(frame.primaryWindowSurface); !status)
         {
@@ -970,6 +974,40 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::submit(kSprite2DView, sprite2DProgram_);
     }
 
+    [[nodiscard]] Core::Status syncUIGlyphAtlas(
+        const std::optional<UIGlyphAtlasPageView>& atlas) noexcept
+    {
+        if (!atlas.has_value() || atlas->pixels.empty() || atlas->width == 0 || atlas->height == 0)
+        {
+            return Core::success();
+        }
+        if (bgfx::isValid(uiGlyphAtlasTexture_)
+            && (uiGlyphAtlasPageSize_.width != atlas->width
+                || uiGlyphAtlasPageSize_.height != atlas->height))
+        {
+            bgfx::destroy(uiGlyphAtlasTexture_);
+            uiGlyphAtlasTexture_ = BGFX_INVALID_HANDLE;
+            uiGlyphAtlasPageSize_ = {};
+            --statistics_.liveResources;
+        }
+        if (!bgfx::isValid(uiGlyphAtlasTexture_))
+        {
+            auto created =
+                createUIGlyphAtlasTexture(atlas->width, atlas->height, atlas->pixels);
+            if (!created)
+            {
+                return Core::failure(std::move(created.error()));
+            }
+            uiGlyphAtlasTexture_ = *created;
+            uiGlyphAtlasPageSize_ =
+                UIAtlasPageSize{.width = atlas->width, .height = atlas->height};
+            ++statistics_.liveResources;
+            return Core::success();
+        }
+        return updateUIGlyphAtlasTexture(
+            uiGlyphAtlasTexture_, atlas->width, atlas->height, atlas->pixels);
+    }
+
     void submitUI(const RenderSurfaceState& surface, UIDisplayListView displayList,
                   PreparedUIDisplayList prepared) noexcept
     {
@@ -978,17 +1016,20 @@ class BgfxRenderDevice final : public IRenderDevice {
             return;
         }
 
+        // DisplayList Glyph commands use atlasPage 0 for the context-owned R8
+        // page. Solid quads sample the 1x1 white texture regardless of page.
         BgfxUIAtlasPageTable atlasPages{};
-        // Page 0 is reserved for the solid white texture size (1x1) when only
-        // SolidQuad is present. Glyph pages must be registered before submit
-        // via a future FramePin; for now Glyph batches without registered sizes
-        // fail geometry write (terminating after preflight should not happen).
-        atlasPages.pages[0] = UIAtlasPageSize{.width = 1, .height = 1};
-        atlasPages.pageCount = 1;
         if (bgfx::isValid(uiGlyphAtlasTexture_))
         {
-            atlasPages.pages[1] = uiGlyphAtlasPageSize_;
-            atlasPages.pageCount = 2;
+            atlasPages.pages[0] = uiGlyphAtlasPageSize_;
+            atlasPages.pageCount = 1;
+        }
+        else
+        {
+            // Solid-only frames: still provide a 1x1 page so accidental Glyph
+            // commands fail cleanly rather than divide by zero.
+            atlasPages.pages[0] = UIAtlasPageSize{.width = 1, .height = 1};
+            atlasPages.pageCount = 1;
         }
 
         bgfx::TransientVertexBuffer transientVertices{};
@@ -1032,13 +1073,12 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::TextureHandle texture = uiSolidWhiteTexture_;
             if (batch.kind == UIDrawCommandKind::Glyph)
             {
-                // Atlas page 0 still uses white if no glyph atlas is bound.
-                if (batch.atlasPage == 1 && bgfx::isValid(uiGlyphAtlasTexture_))
+                if (batch.atlasPage == 0 && bgfx::isValid(uiGlyphAtlasTexture_))
                 {
                     texture = uiGlyphAtlasTexture_;
-                } else if (batch.atlasPage != 0 || !bgfx::isValid(uiSolidWhiteTexture_))
+                }
+                else if (!bgfx::isValid(uiSolidWhiteTexture_))
                 {
-                    // Missing page binding: skip batch rather than sample garbage.
                     continue;
                 }
             }

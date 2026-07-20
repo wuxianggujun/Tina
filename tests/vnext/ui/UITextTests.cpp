@@ -223,11 +223,14 @@ TEST(UITextTests, TextPlaceholderPaintEmitsPerCodepointSolidQuads)
     EXPECT_EQ(paint.entries()[0].node, label);
     EXPECT_EQ(paint.entries()[1].node, label);
     EXPECT_LT(paint.entries()[0].paintOrdinal, paint.entries()[1].paintOrdinal);
-    // D5: paint advances come from the context rasterizer (placeholder).
-    EXPECT_FLOAT_EQ(paint.entries()[0].worldRect.width, 16.0F * 0.6F);
-    EXPECT_FLOAT_EQ(
-        paint.entries()[1].worldRect.x,
-        paint.entries()[0].worldRect.x + paint.entries()[0].worldRect.width);
+    // D10: placeholder raster packs monospaced cells into the glyph atlas.
+    EXPECT_TRUE(paint.entries()[0].isGlyph);
+    EXPECT_TRUE(paint.entries()[1].isGlyph);
+    EXPECT_GT(paint.entries()[0].atlasWidth, 0U);
+    EXPECT_GT(paint.entries()[0].atlasHeight, 0U);
+    // Cursor advances by raster advance (9.6); draw width is atlas cell pixels.
+    EXPECT_FLOAT_EQ(paint.entries()[0].worldRect.width, 9.0F);
+    EXPECT_FLOAT_EQ(paint.entries()[1].worldRect.x, 9.6F);
     EXPECT_EQ(
         paint.entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{
@@ -236,6 +239,8 @@ TEST(UITextTests, TextPlaceholderPaintEmitsPerCodepointSolidQuads)
             .blue = 0,
             .alpha = 128,
         }));
+    EXPECT_FALSE(context->glyphAtlasPixels().empty());
+    EXPECT_EQ(context->glyphAtlasWidth(), 512U);
 
     style.color.alpha = 0;
     assertOk(updater.setTextStyle(label, style));
@@ -279,14 +284,16 @@ TEST(UITextTests, TextPaintUsesRasterizerAdvancesForMultiLine)
     EXPECT_EQ(paint.entries()[0].node, label);
     EXPECT_EQ(paint.entries()[1].node, label);
     EXPECT_EQ(paint.entries()[2].node, label);
-    // Second line starts at lineHeight below the first glyph.
+    // "A\nBC": A on line 0; B then C on line 1. Placeholder drawY tracks cursorY.
     EXPECT_FLOAT_EQ(
         paint.entries()[1].worldRect.y,
         paint.entries()[0].worldRect.y + 16.0F * 1.2F);
     EXPECT_FLOAT_EQ(paint.entries()[1].worldRect.x, paint.entries()[0].worldRect.x);
-    EXPECT_FLOAT_EQ(
-        paint.entries()[2].worldRect.x,
-        paint.entries()[1].worldRect.x + paint.entries()[1].worldRect.width);
+    EXPECT_FLOAT_EQ(paint.entries()[2].worldRect.x, 9.6F);
+    EXPECT_FLOAT_EQ(paint.entries()[2].worldRect.y, paint.entries()[1].worldRect.y);
+    EXPECT_TRUE(paint.entries()[0].isGlyph);
+    EXPECT_TRUE(paint.entries()[1].isGlyph);
+    EXPECT_TRUE(paint.entries()[2].isGlyph);
 }
 
 TEST(UITextTests, SameTextIsNoOpAndClearingTextShrinksAutoSize)

@@ -217,9 +217,9 @@ private:
 // default heap.
 class UIContext final {
 public:
-    // Default Create wires createPlaceholderTextRasterizer and opens its
-    // built-in empty face. FreeType/Atlas paint still deferred; text paint
-    // remains monospaced SolidQuad fallback.
+    // Default Create wires createPlaceholderTextRasterizer, opens its built-in
+    // empty face, and owns a fixed-capacity UIGlyphAtlas for paint-time
+    // placements. Glyph DisplayList emission depends on successful atlas insert.
     [[nodiscard]] static Core::Result<std::unique_ptr<UIContext>> Create(
         Platform::WindowId ownerWindow,
         UIContextCapacityConfig capacityConfig = {},
@@ -259,6 +259,12 @@ public:
     [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;
     [[nodiscard]] UICommittedHitView committedHit() const noexcept;
     [[nodiscard]] UICommittedPaintView committedPaint() const noexcept;
+    // Borrow of the context-owned R8 glyph atlas page after paint publication.
+    // Valid until the next paint that inserts/clears the atlas, or Context
+    // destruction. Empty when no atlas is allocated.
+    [[nodiscard]] std::span<const u8> glyphAtlasPixels() const noexcept;
+    [[nodiscard]] u32 glyphAtlasWidth() const noexcept;
+    [[nodiscard]] u32 glyphAtlasHeight() const noexcept;
     // Pure query over the last committed hit snapshot. It never commits
     // layout, rebuilds hit data, dispatches an event, or allocates storage.
     [[nodiscard]] UIPointerHitQueryResult queryPointerHit(
