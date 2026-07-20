@@ -370,7 +370,12 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - **已完成 M7-D5（paint 消费 rasterizer advances）**：committed paint 在有 face 时从
   `IUITextRasterizer::raster` 拷贝 per-glyph advance，再按 UTF-8（含 `\n`）发 SolidQuad；无 face 时
   回退 monospaced `logicalSize*advanceScale`。仍不上传 coverage、不建 Atlas、不发 Glyph DisplayList。
-- **仍后置**：Atlas generation/预算/retirement、cooked font fixture、中文可见字形门禁与 Glyph 命令；
+- **已完成 M7-D6（FreeType + SourceHan 中文 fixture 门禁）**：`tina_ui_freetype_tests` 从
+  `resources/fonts/SourceHanSansSC-Regular.otf` 读入 face bytes，`measure`/`raster` 验证「中文」
+  codepoint/advance/非空 R8 coverage。这是测试期 fixture 路径，不是 Runtime 产品加载源字体；
+  仍无 Atlas/GPU Glyph 命令/中文可见 Desktop 字形门禁。
+- **仍后置**：Atlas generation/预算/retirement、Image/Glyph DisplayList、cooked FontAsset（M10 协作）、
+  中文可见 Desktop 字形样例与 Modal/完整 Widget facade；
 - 在已完成私有 `tina_render_bgfx` SolidQuad UI Pass 的基础上扩展 Image/Glyph 命令、Atlas texture upload
   与资源 pin；`tina_ui` 不链接 bgfx，也不暴露 view id/handle；
 - 使用版本化内置 Cooked Font/Texture fixture 形成中文 Label、Button、Modal 可运行样例；
@@ -378,12 +383,13 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 
 ### M7-E Platform 完整输入
 
-- Windows IME 只使用私有 IMM32 adapter；补 Focus/Capture/composition 取消与窗口销毁顺序；
-- 接入 GLFW standard Gamepad sampled diff、primary-window routing、回滞/重复/Accept/Cancel；不伪造
-  两次 Poll 之间不可观测的 Down→Up；
-- GLFW adapter 向 M7-A 已有的 `PlatformEventBatch`/`PlatformEventDispatcher` 发出 Gamepad
-  connect/disconnect 生命周期；断连先产生 `InputCancelTransition` 再回收 generation；
-- 完成100%/150%/200% DPI、键鼠、composition、实体手柄与资源回收门禁。
+- **已完成 M7-E1（GLFW standard Gamepad sample/diff）**：`tina_platform_glfw` 每帧
+  `glfwGetGamepadState` 采样 standard mapping；connect 发 `GamepadConnectedEvent`，disconnect 先
+  `InputCancelTransition(DeviceDisconnected)` 再 `GamepadDisconnectedEvent` 并 `erase` generation；
+  button/axis 仅在采样差时发 transition；dense `setGamepadSnapshots` 替代原先恒空。回滞/重复/
+  Accept/Cancel UI 导航与 UI claim producer 仍后置。
+- **仍后置**：Windows IME 私有 IMM32 adapter；Focus/Capture/composition 取消与窗口销毁顺序；
+  Gamepad 回滞/重复/Accept/Cancel；100%/150%/200% DPI 产品门禁与资源回收专项。
 
 ## M8 Scene 与 2D 垂直切片
 

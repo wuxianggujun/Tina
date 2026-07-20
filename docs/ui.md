@@ -631,6 +631,9 @@ rasterizer。Label/Button 的 `setText`/`setTextStyle` 通过 rasterizer `measur
 M7-D5 在 paint 阶段调用 `raster`，把 per-glyph advance 拷入 scratch 后按 UTF-8（含换行）发出
 SolidQuad 色块；coverage R8 仍不上传，无 Glyph DisplayList / Atlas。
 
+M7-D6：`tina_ui_freetype_tests` 使用仓库 `resources/fonts/SourceHanSansSC-Regular.otf` 作为测试
+fixture 验证中文 measure/raster；Runtime 产品路径仍不得按路径打开源字体。
+
 Runtime 不按路径打开字体。Cooked `FontAsset` 提供 owning bytes、face metadata 和确定 fallback
 chain；UI 持有 `AssetLease<FontData>`。FreeType 类型只存在于 `tina_ui_freetype`。
 
