@@ -36,6 +36,7 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A2j 已实现 `planCatalogLoads` 依赖序加载计划（含确定性相对路径，不触盘）；
   M10-A2k 已实现 `planCatalogLoadsAll` 与 CLI `--plan-loads`/`--asset-id`；
   M10-A2l 已实现 `loadCookedAssetsFromPlan`（按计划同步加载，失败全回滚）；
+  M10-A2m 已实现 `loadCookedAssetsFromPackage`（open+plan+load 一站式）；
   Asset registry/状态机、Handle/Lease、异步 IO/Decode/Upload、增量 Cooker 与产品资产仍未实现。
 
 

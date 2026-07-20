@@ -470,6 +470,7 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - M10-A2j 已完成 `planCatalogLoads`：依赖序 + entry 元数据 + 确定性相对 object 路径（不触盘）；
 - M10-A2k 已完成 `planCatalogLoadsAll` 与 CLI `--plan-loads`/`--asset-id`；仍无 Handle/Lease；
 - M10-A2l 已完成 `loadCookedAssetsFromPlan`：按既有计划同步加载，失败全回滚；仍无 Handle/Lease；
+- M10-A2m 已完成 `loadCookedAssetsFromPackage`：open+plan+load 一站式事务；仍无 Handle/Lease；
 - `tina_assetc` 执行 Parse → Validate → Build → Validate Cooked → Atomic Write；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；

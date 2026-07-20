@@ -375,3 +375,6 @@ M10-A2k 已落地 `planCatalogLoadsAll` 与 CLI `--plan-loads`/`--asset-id` 输�
 
 M10-A2l 已落地 `loadCookedAssetsFromPlan`：按既有计划同步加载，plan 与 Catalog 对齐校验，失败全回滚；
 `loadCookedAssetsFromCatalog` 内部改为先 plan 再加载。不实现 Handle/Lease。
+
+M10-A2m 已落地 `loadCookedAssetsFromPackage`：open+plan+load 一站式事务，返回 owning Catalog 与
+CookedAssetFile 批；任一步失败不发布。不实现 Handle/Lease。
