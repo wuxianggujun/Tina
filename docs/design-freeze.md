@@ -476,3 +476,6 @@ M10-A26：Tileset payload v1（header + TileEntry UV/materialFlags，依赖 Text
 
 M10-A27：recipe 增加多行 `tileset`+`tile` 与 `tilemap`+`row` 内联语法；`tina_assetc --recipe` 可直接
 发布 Texture2D→Tileset→TileMap 包并通过 typed validate。无 runtime TileMapInstance。
+
+M10-A28：`TileMapInstance` 从 cooked TileMap+Tileset 复制 cells/material/UV；`setTile` 提升受影响
+chunk revision；`querySolidAabb` 查询 MaterialSolid cells。无 chunk extraction/Render packet。

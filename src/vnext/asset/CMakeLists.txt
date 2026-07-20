@@ -7,6 +7,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetTypedViews.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetSpriteRender.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetGpuTexture.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapInstance.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogCook.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogFile.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogLoadOrder.hpp
@@ -30,6 +31,7 @@ add_library(tina_asset STATIC
     AssetTypedViews.cpp
     AssetSpriteRender.cpp
     AssetGpuTexture.cpp
+    TileMapInstance.cpp
     CatalogCook.cpp
     CatalogFile.cpp
     CatalogLoadOrder.cpp
