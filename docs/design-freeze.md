@@ -450,3 +450,7 @@ typed payload v1，无需预编码 payload 文件。
 
 M10-A20：`RenderSprite2DInput/Item` 增加 UV 矩形；`makeSpriteRenderInput` 从 typed Sprite/Texture
 生成绘制输入（尺寸/UV/pivot）；bgfx Sprite2D geometry 使用 item UV（仍无纹理采样，fixture shader 用 UV 渐变）。
+
+
+M10-A21：测试门禁覆盖 cook→AssetSystem load/ReadyGpu→makeSpriteRenderInput→RenderSceneBuilder commit，
+验证 UV/尺寸进入 published RenderSceneView。bgfx 纹理采样仍后置。
