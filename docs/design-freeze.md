@@ -378,3 +378,6 @@ M10-A2l 已落地 `loadCookedAssetsFromPlan`：按既有计划同步加载，pla
 
 M10-A2m 已落地 `loadCookedAssetsFromPackage`：open+plan+load 一站式事务，返回 owning Catalog 与
 CookedAssetFile 批；任一步失败不发布。不实现 Handle/Lease。
+
+M10-A2n 补空请求=加载全部测试，并扩展 CLI `--load-assets`（可与 `--asset-id` 组合）输出
+`loadedAssets`/`loaded` JSON。不实现 Handle/Lease。

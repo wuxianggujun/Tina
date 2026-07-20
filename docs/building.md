@@ -172,6 +172,8 @@ out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalog
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --list-entries
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --plan-loads
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --plan-loads --asset-id <32hex>
+out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --load-assets
+out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --load-assets --asset-id <32hex>
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --help
 ```
 

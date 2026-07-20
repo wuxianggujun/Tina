@@ -190,8 +190,8 @@ M10-A2b 已实现：Core 有界 `readFile` 与 Manifest 文件→`CatalogSnapsho
 Debug/Release 基础 `tina_tests` 223/223、`tina_asset_tests` 19/19。仍不包含 Handle/Lease、async IO
 或 Cooker。
 
-M10-A2c～A2m 已实现：Cooked 加载、依赖序、批量同步加载、磁盘包校验、`openCatalogPackage`、
-校验 CLI、诊断摘要、加载计划、`loadCookedAssetsFromPlan`，以及一站式
+M10-A2c～A2n 已实现：Cooked 加载、依赖序、批量同步加载、磁盘包校验、`openCatalogPackage`、
+校验 CLI（含 `--load-assets`）、诊断摘要、加载计划、`loadCookedAssetsFromPlan`，以及一站式
 `loadCookedAssetsFromPackage`。Windows `tina_asset_tests` 见最近门禁。
 仍不包含 Handle/Lease、async IO 或 Cooker。
 

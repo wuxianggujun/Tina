@@ -48,6 +48,8 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2k plan all + CLI plan | Debug/Release C++23 | 223/223 + 43/43 | `planCatalogLoadsAll`；`tina_asset_tests` 43/43；CLI `--plan-loads`/`--asset-id`。不实现 Handle/Lease |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2l load from plan | Debug/Release C++23 | 223/223 + 45/45 | `loadCookedAssetsFromPlan` 成功序加载与 plan 不匹配拒绝；`tina_asset_tests` 45/45。不实现 Handle/Lease |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2m package one-shot load | Debug/Release C++23 | 223/223 + 47/47 | `loadCookedAssetsFromPackage` 成功链与失败不发布；`tina_asset_tests` 47/47。不实现 Handle/Lease |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2n empty-request + CLI load | Debug/Release C++23 | 223/223 + 48/48 | 空请求加载全部；CLI `--load-assets`；`tina_asset_tests` 48/48。不实现 Handle/Lease |
+
 
 
 

@@ -292,5 +292,64 @@ TEST(CatalogPackageLoadTests, FailureDoesNotPublishCatalogOrAssets)
     std::filesystem::remove_all(catalogRoot, errorCode);
 }
 
+TEST(CatalogPackageLoadTests, EmptyRequestLoadsAllEntries)
+{
+    TrackingMemoryResource resource;
+    constexpr std::array<std::byte, 4> Payload{std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0x40}};
+    const auto digest = Core::digestContentHashV1(Payload);
+    ASSERT_TRUE(digest.has_value());
+
+    const auto textureBytes = makeCookedAsset(1U, AssetFormat::AssetKind::Texture2D);
+    const auto materialBytes = makeCookedAsset(2U, AssetFormat::AssetKind::Material);
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(2U));
+
+    const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_package_load_all";
+    writeBytes(catalogRoot / "manifest.tmnft",
+               makeTwoEntryManifest(textureBytes.size(), *digest, materialBytes.size(), *digest));
+    writeBytes(catalogRoot / std::filesystem::u8path(
+                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D, textureId)->view()),
+               textureBytes);
+    writeBytes(catalogRoot / std::filesystem::u8path(
+                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Material, materialId)->view()),
+               materialBytes);
+
+    CatalogPackageOpenConfig openConfig{
+        .manifest =
+            CatalogFileLoadConfig{
+                .catalog =
+                    CatalogConfig{
+                        .maxEntries = 8,
+                        .maxDependencies = 8,
+                        .maxDependenciesPerAsset = 4,
+                        .memoryResource = &resource,
+                    },
+            },
+        .validateOnOpen = true,
+        .validation =
+            CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
+                .verifyContent = true,
+            },
+    };
+    CookedAssetBatchLoadConfig batchConfig{
+        .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
+        .memoryResource = &resource,
+    };
+
+    {
+        auto loaded = loadCookedAssetsFromPackage(toUtf8(catalogRoot), {}, openConfig, batchConfig);
+        ASSERT_TRUE(loaded.has_value()) << loaded.error().message;
+        EXPECT_EQ(loaded->catalog.entryCount(), 2U);
+        ASSERT_EQ(loaded->assets.size(), 2U);
+        EXPECT_EQ(loaded->assets[0].header().assetId, textureId);
+        EXPECT_EQ(loaded->assets[1].header().assetId, materialId);
+    }
+
+    std::error_code errorCode;
+    std::filesystem::remove_all(catalogRoot, errorCode);
+    EXPECT_EQ(resource.outstandingAllocations(), 0U);
+}
+
 } // namespace
 } // namespace Tina::Asset

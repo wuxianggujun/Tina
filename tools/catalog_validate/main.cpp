@@ -1,6 +1,7 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogLoadPlan.hpp>
 #include <tina/asset/CatalogPackage.hpp>
+#include <tina/asset/CatalogPackageLoad.hpp>
 #include <tina/asset/CatalogPackageSummary.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/core/id/AssetId.hpp>
@@ -23,6 +24,7 @@ struct Options final {
     bool skipValidate = false;
     bool listEntries = false;
     bool planLoads = false;
+    bool loadAssets = false;
     std::vector<std::string> assetIdTexts;
     Tina::Core::u32 maxEntries = 100000;
     Tina::Core::u32 maxDependencies = 400000;
@@ -38,7 +40,8 @@ void printUsage()
         << "  --no-validate               open Snapshot only; skip package validation\n"
         << "  --list-entries              include entry rows in JSON summary\n"
         << "  --plan-loads                include dependency-first load plan rows\n"
-        << "  --asset-id <32hex>          plan only these ids (repeatable; default: all)\n"
+        << "  --load-assets               one-shot open+plan+load cooked assets\n"
+        << "  --asset-id <32hex>          plan/load only these ids (repeatable; default: all)\n"
         << "  --max-entries <n>\n"
         << "  --max-dependencies <n>\n"
         << "  --max-dependencies-per-asset <n>\n"
@@ -96,6 +99,11 @@ void printUsage()
         if (arg == "--plan-loads")
         {
             options.planLoads = true;
+            continue;
+        }
+        if (arg == "--load-assets")
+        {
+            options.loadAssets = true;
             continue;
         }
         auto requireValue = [&](std::string_view name) -> std::string_view {
@@ -177,9 +185,9 @@ void printUsage()
         printUsage();
         return 2;
     }
-    if (!options.assetIdTexts.empty() && !options.planLoads)
+    if (!options.assetIdTexts.empty() && !options.planLoads && !options.loadAssets)
     {
-        std::cerr << "--asset-id requires --plan-loads\n";
+        std::cerr << "--asset-id requires --plan-loads or --load-assets\n";
         return 2;
     }
     return 0;
@@ -218,6 +226,28 @@ void printErrorMessage(std::string_view message)
     std::cout << "\"}\n";
 }
 
+[[nodiscard]] Tina::Core::Result<std::pmr::vector<Tina::Core::AssetId>>
+parseRequestedIds(const Options& options, std::pmr::memory_resource& memoryResource)
+{
+    std::pmr::vector<Tina::Core::AssetId> requested{&memoryResource};
+    if (options.assetIdTexts.empty())
+    {
+        return requested;
+    }
+    requested.reserve(options.assetIdTexts.size());
+    for (const auto& text : options.assetIdTexts)
+    {
+        const auto id = Tina::Core::AssetId::parseCanonical(text);
+        if (!id)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                       "invalid --asset-id (expect 32 lowercase hex)");
+        }
+        requested.push_back(*id);
+    }
+    return requested;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -229,7 +259,7 @@ int main(int argc, char** argv)
     }
 
     std::pmr::unsynchronized_pool_resource memoryResource;
-    Tina::Asset::CatalogPackageOpenConfig config{
+    Tina::Asset::CatalogPackageOpenConfig openConfig{
         .manifest =
             Tina::Asset::CatalogFileLoadConfig{
                 .catalog =
@@ -249,17 +279,43 @@ int main(int argc, char** argv)
         .manifestRelativePath = options.manifestRelative,
     };
 
-    auto snapshot = Tina::Asset::openCatalogPackage(options.root, config);
-    if (!snapshot)
+    auto requested = parseRequestedIds(options, memoryResource);
+    if (!requested)
     {
-        printErrorJson(snapshot.error());
+        printErrorJson(requested.error());
         return 1;
     }
 
+    Tina::Asset::CatalogSnapshot snapshot;
+    std::optional<std::pmr::vector<Tina::Asset::CookedAssetFile>> loadedAssets;
+    if (options.loadAssets)
+    {
+        Tina::Asset::CookedAssetBatchLoadConfig batchConfig{
+            .file = Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &memoryResource},
+            .memoryResource = &memoryResource,
+        };
+        auto loaded = Tina::Asset::loadCookedAssetsFromPackage(options.root, *requested, openConfig, batchConfig);
+        if (!loaded)
+        {
+            printErrorJson(loaded.error());
+            return 1;
+        }
+        snapshot = std::move(loaded->catalog);
+        loadedAssets = std::move(loaded->assets);
+    } else
+    {
+        auto opened = Tina::Asset::openCatalogPackage(options.root, openConfig);
+        if (!opened)
+        {
+            printErrorJson(opened.error());
+            return 1;
+        }
+        snapshot = std::move(*opened);
+    }
+
     auto summary = Tina::Asset::buildCatalogPackageSummary(
-        *snapshot,
-        Tina::Asset::CatalogPackageSummaryConfig{.memoryResource = &memoryResource,
-                                                 .includeEntries = options.listEntries});
+        snapshot, Tina::Asset::CatalogPackageSummaryConfig{.memoryResource = &memoryResource,
+                                                           .includeEntries = options.listEntries});
     if (!summary)
     {
         printErrorJson(summary.error());
@@ -272,24 +328,12 @@ int main(int argc, char** argv)
         Tina::Asset::CatalogLoadPlanConfig planConfig{.memoryResource = &memoryResource};
         Tina::Core::Result<std::pmr::vector<Tina::Asset::CatalogLoadPlanEntry>> plan =
             Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig, "plan not computed");
-        if (options.assetIdTexts.empty())
+        if (requested->empty())
         {
-            plan = Tina::Asset::planCatalogLoadsAll(*snapshot, planConfig);
+            plan = Tina::Asset::planCatalogLoadsAll(snapshot, planConfig);
         } else
         {
-            std::pmr::vector<Tina::Core::AssetId> requested{&memoryResource};
-            requested.reserve(options.assetIdTexts.size());
-            for (const auto& text : options.assetIdTexts)
-            {
-                const auto id = Tina::Core::AssetId::parseCanonical(text);
-                if (!id)
-                {
-                    printErrorMessage("invalid --asset-id (expect 32 lowercase hex)");
-                    return 1;
-                }
-                requested.push_back(*id);
-            }
-            plan = Tina::Asset::planCatalogLoads(*snapshot, requested, planConfig);
+            plan = Tina::Asset::planCatalogLoads(snapshot, *requested, planConfig);
         }
         if (!plan)
         {
@@ -302,7 +346,8 @@ int main(int argc, char** argv)
     std::cout << "{\"status\":\"ok\",\"entries\":" << summary->entryCount
               << ",\"dependencies\":" << summary->dependencyCount
               << ",\"validated\":" << (options.skipValidate ? "false" : "true")
-              << ",\"contentHash\":" << ((!options.skipValidate && !options.metadataOnly) ? "true" : "false");
+              << ",\"contentHash\":" << ((!options.skipValidate && !options.metadataOnly) ? "true" : "false")
+              << ",\"loadedAssets\":" << (loadedAssets ? loadedAssets->size() : 0U);
     if (options.listEntries)
     {
         std::cout << ",\"items\":[";
@@ -338,6 +383,24 @@ int main(int argc, char** argv)
                       << ",\"dependencyCount\":" << row.dependencyCount
                       << ",\"cookedFileBytes\":" << row.cookedFileBytes << ",\"path\":\"" << row.relativePath.view()
                       << "\"}";
+        }
+        std::cout << ']';
+    }
+    if (loadedAssets)
+    {
+        std::cout << ",\"loaded\":[";
+        for (std::size_t index = 0; index < loadedAssets->size(); ++index)
+        {
+            const auto& asset = (*loadedAssets)[index];
+            if (index != 0U)
+            {
+                std::cout << ',';
+            }
+            const auto idText = asset.header().assetId.canonicalText();
+            std::cout << "{\"order\":" << index << ",\"id\":\""
+                      << std::string_view(idText.data(), idText.size())
+                      << "\",\"kind\":" << static_cast<unsigned>(asset.header().assetKind)
+                      << ",\"payloadBytes\":" << asset.header().payloadBytes << '}';
         }
         std::cout << ']';
     }
