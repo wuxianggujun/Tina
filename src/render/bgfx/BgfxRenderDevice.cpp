@@ -213,10 +213,20 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
     usize nextCommand = 0;
     for (const UIDrawBatch& batch : displayList.batches())
     {
-        if (batch.kind != UIDrawCommandKind::SolidQuad || batch.commandCount == 0)
+        if (batch.commandCount == 0)
         {
             return Core::failure(RenderErrorCode::InvalidDrawCommand,
-                                 "A bgfx UI draw batch is empty or has an unsupported command kind");
+                                 "A bgfx UI draw batch is empty");
+        }
+        if (batch.kind == UIDrawCommandKind::Glyph)
+        {
+            return Core::failure(RenderErrorCode::InvalidDrawCommand,
+                                 "bgfx UI pass does not submit Glyph batches yet");
+        }
+        if (batch.kind != UIDrawCommandKind::SolidQuad)
+        {
+            return Core::failure(RenderErrorCode::InvalidDrawCommand,
+                                 "A bgfx UI draw batch has an unsupported command kind");
         }
         if (static_cast<usize>(batch.firstCommand) != nextCommand)
         {

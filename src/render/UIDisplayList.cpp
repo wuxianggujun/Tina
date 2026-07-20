@@ -260,6 +260,118 @@ Core::Status UIDisplayListBuilder::addSolidQuad(const UISolidQuadInput& input)
     return Core::success();
 }
 
+Core::Status UIDisplayListBuilder::addGlyphQuad(const UIGlyphQuadInput& input)
+{
+    if (m_state != State::Building)
+    {
+        return displayListFailure(RenderErrorCode::DisplayListBuildNotOpen,
+                                  "A UI DisplayList build must be open before adding commands");
+    }
+    if (m_stickyBuildError.has_value())
+    {
+        return displayListFailure(*m_stickyBuildError, "The UI DisplayList build has already failed");
+    }
+    if (m_lastPaintOrdinal.has_value() && input.paintOrdinal <= *m_lastPaintOrdinal)
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidDrawCommand,
+                         "UI draw command paint ordinals must be strictly increasing");
+    }
+    m_lastPaintOrdinal = input.paintOrdinal;
+    if (!input.color.isValid())
+    {
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidPremultipliedColor, "UI colors must use premultiplied RGBA8 channels");
+    }
+    if (input.atlasUv.empty() && (input.bounds.width != 0 || input.bounds.height != 0))
+    {
+        // Zero-sized atlas UV is only valid for advance-only / empty glyphs that
+        // also have empty screen bounds.
+        ++m_statistics.invalidInputFailureCount;
+        return failBuild(RenderErrorCode::InvalidDrawCommand,
+                         "UI glyph commands with non-empty bounds require non-empty atlas UV");
+    }
+    if (input.bounds.empty())
+    {
+        ++m_candidateStatistics.prunedEmptyBoundsCount;
+        return Core::success();
+    }
+    if (input.color.transparent())
+    {
+        ++m_candidateStatistics.prunedTransparentCount;
+        return Core::success();
+    }
+    if (input.effectiveClip.has_value() && input.effectiveClip->empty())
+    {
+        ++m_candidateStatistics.prunedEmptyClipCount;
+        return Core::success();
+    }
+    if (input.effectiveClip.has_value() && !intersects(input.bounds, *input.effectiveClip))
+    {
+        ++m_candidateStatistics.prunedOutsideClipCount;
+        return Core::success();
+    }
+
+    UIClipId clip{};
+    bool needsClip = false;
+    if (input.effectiveClip.has_value())
+    {
+        clip = findClip(*input.effectiveClip);
+        needsClip = !clip.hasClip();
+        if (needsClip)
+        {
+            clip = UIClipId{m_clipCount + 1U};
+        }
+    }
+
+    const bool needsBatch =
+        m_batchCount == 0 || m_batches[m_batchCount - 1U].kind != UIDrawCommandKind::Glyph
+        || m_batches[m_batchCount - 1U].clip != clip
+        || m_batches[m_batchCount - 1U].atlasPage != input.atlasPage;
+    if (!hasCapacityFor(needsClip, needsBatch))
+    {
+        ++m_statistics.capacityFailureCount;
+        return failBuild(RenderErrorCode::DisplayListCapacityExceeded,
+                         "UI DisplayList fixed command, clip, or batch capacity was exceeded");
+    }
+
+    if (needsClip)
+    {
+        std::construct_at(&m_clips[m_clipCount], *input.effectiveClip);
+        ++m_clipCount;
+    }
+
+    const u32 commandIndex = m_commandCount;
+    std::construct_at(&m_commands[m_commandCount], UIDrawCommand{
+                                                       .kind = UIDrawCommandKind::Glyph,
+                                                       .paintOrdinal = input.paintOrdinal,
+                                                       .bounds = input.bounds,
+                                                       .color = input.color,
+                                                       .clip = clip,
+                                                       .atlasUv = input.atlasUv,
+                                                       .atlasPage = input.atlasPage,
+                                                   });
+    ++m_commandCount;
+
+    if (needsBatch)
+    {
+        std::construct_at(&m_batches[m_batchCount], UIDrawBatch{
+                                                        .kind = UIDrawCommandKind::Glyph,
+                                                        .clip = clip,
+                                                        .atlasPage = input.atlasPage,
+                                                        .firstCommand = commandIndex,
+                                                        .commandCount = 1,
+                                                    });
+        ++m_batchCount;
+    } else
+    {
+        ++m_batches[m_batchCount - 1U].commandCount;
+    }
+
+    ++m_candidateStatistics.glyphCommandCount;
+    return Core::success();
+}
+
 Core::Result<UIDisplayListView> UIDisplayListBuilder::commit()
 {
     if (m_state != State::Building)
@@ -347,6 +459,14 @@ u64 UIDisplayListBuilder::calculatePaintOrderChecksum(std::span<const UIDrawComm
             hashU32(checksum, static_cast<u32>(clip.y));
             hashU32(checksum, clip.width);
             hashU32(checksum, clip.height);
+        }
+        if (command.kind == UIDrawCommandKind::Glyph)
+        {
+            hashU32(checksum, static_cast<u32>(command.atlasUv.x));
+            hashU32(checksum, static_cast<u32>(command.atlasUv.y));
+            hashU32(checksum, command.atlasUv.width);
+            hashU32(checksum, command.atlasUv.height);
+            hashU32(checksum, command.atlasPage);
         }
     }
     return checksum;

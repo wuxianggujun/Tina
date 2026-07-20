@@ -53,6 +53,13 @@ checkedGeometryRequirements(UIDisplayListView displayList)
 
     for (const UIDrawCommand& command : displayList.commands())
     {
+        // M7-D8 records Glyph in the DisplayList ABI; the private bgfx solid
+        // pass only expands SolidQuad geometry until textured UI upload lands.
+        if (command.kind == UIDrawCommandKind::Glyph)
+        {
+            return Core::failure(Core::CoreErrorCode::Unsupported,
+                                 "bgfx UI geometry does not expand Glyph commands yet");
+        }
         if (command.kind != UIDrawCommandKind::SolidQuad)
         {
             return Core::failure(Core::CoreErrorCode::Unsupported,

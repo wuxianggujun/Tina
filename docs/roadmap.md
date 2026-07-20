@@ -375,8 +375,10 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   codepoint/advance/非空 R8 coverage。这是测试期 fixture 路径，不是 Runtime 产品加载源字体。
 - **已完成 M7-D7（CPU Glyph Atlas）**：`UIGlyphAtlas` 固定容量 R8 shelf pack、`UIGlyphId`
   generation、insert/find/clear、0 尺寸 advance-only glyph、与 placeholder rasterizer coverage 联调。
-  无 GPU texture upload、无 Glyph DisplayList、未接 UIContext paint。
-- **仍后置**：Atlas→GPU upload、Image/Glyph DisplayList、UIContext 消费 placement、
+- **已完成 M7-D8（DisplayList Glyph 命令 ABI）**：`UIDrawCommandKind::Glyph`、`addGlyphQuad`、
+  atlas UV/page、按 clip+atlasPage 分 batch、checksum 纳入 UV/page；统计 `glyphCommandCount`。
+  私有 bgfx SolidQuad pass 对 Glyph 显式 `Unsupported`（不静默跳过）。未做 GPU upload、未接 UIContext。
+- **仍后置**：Atlas→GPU texture upload + textured UI pass、UIContext 消费 placement 发 Glyph、
   cooked FontAsset（M10 协作）、中文可见 Desktop 字形样例与 Modal/完整 Widget facade；
 - 在已完成私有 `tina_render_bgfx` SolidQuad UI Pass 的基础上扩展 Image/Glyph 命令、Atlas texture upload
   与资源 pin；`tina_ui` 不链接 bgfx，也不暴露 view id/handle；
