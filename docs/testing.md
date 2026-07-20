@@ -53,6 +53,8 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2p plan byte total | Debug/Release C++23 | 223/223 + 52/52 | `totalCookedFileBytes` 空/正常/溢出；`tina_asset_tests` 52/52；CLI `plannedCookedFileBytes`。不实现 Handle/Lease |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2q batch byte budget | Debug/Release C++23 | 223/223 + 54/54 | `maxTotalCookedFileBytes` 超预算拒绝、等预算通过；`tina_asset_tests` 54/54。不实现 Handle/Lease |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A3 AssetStore Handle/Lease | Debug/Release C++23 | 223/223 + 58/58 | publish/acquire/tryGet/unload 延迟/stale/capacity；`tina_asset_tests` 58/58。无 GPU retirement |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A4 AssetSystem sync | Debug/Release C++23 | 223/223 + 61/61 | bind/load/dedupe/budget/partial-fail rollback；`tina_asset_tests` 61/61。无 async |
+
 
 
 

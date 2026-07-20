@@ -106,8 +106,8 @@ M10-A2b provides bounded Core `readFile` and `loadCatalogSnapshotFromManifestFil
 scope.
 
 M10-A2c–A2q provide the sync catalog/cooked pipeline. M10-A3 adds CPU-side `AssetStore`, weak
-`AssetHandle`, and strong `AssetLease` (ADR 0016 Accepted first slice). Loading state machines,
-async IO, GPU UploadTicket/retirement, and Cooker remain out of scope.
+`AssetHandle`, and strong `AssetLease`. M10-A4 adds catalog-bound `AssetSystem` sync load/dedupe.
+Async Queued/Loading, GPU UploadTicket/retirement, and Cooker remain out of scope.
 
 M7-C1c-a adds fixed-capacity PMR pointer-policy/route-ancestry storage and a double-buffered
 `UICommittedHitView`. Within one view, its effective-visible entries have unique, strictly increasing paint ordinals and

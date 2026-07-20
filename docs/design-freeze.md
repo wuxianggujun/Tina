@@ -394,3 +394,6 @@ M10-A3 已落地 ADR 0016 的 CPU 首切片：`AssetStore` 持有 Ready `CookedA
 弱 generation lookup；`AssetLease` 为 move-only 强引用并延后 unload 物理释放；无 lease 时 unload
 立即 erase slot 使旧 Handle stale。明确后置：Loading/Queued 状态机、Task/IO、GPU UploadTicket、
 FramePinSink、physical retirement ledger、自动 LRU。
+
+M10-A4 已落地 `AssetSystem`：绑定 Catalog+root，同步依赖序 load/publish，AssetId 去重索引，失败只
+回滚本次 call 新 publish 的 Handle；`maxTotalCookedFileBytes` 在读盘前生效。仍无异步队列与 GPU。

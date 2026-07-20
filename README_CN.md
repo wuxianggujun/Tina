@@ -190,9 +190,9 @@ M10-A2b 已实现：Core 有界 `readFile` 与 Manifest 文件→`CatalogSnapsho
 Debug/Release 基础 `tina_tests` 223/223、`tina_asset_tests` 19/19。仍不包含 Handle/Lease、async IO
 或 Cooker。
 
-M10-A2c～A2q 已实现同步 Catalog/Cooked 闭环；M10-A3 已实现 CPU 侧 `AssetStore`/`AssetHandle`/
-`AssetLease`（ADR 0016 Accepted 首切片）。Windows `tina_asset_tests` 见最近门禁。
-仍不包含 Loading 状态机、async IO、GPU UploadTicket/retirement 或 Cooker。
+M10-A2c～A2q 已实现同步 Catalog/Cooked 闭环；M10-A3 已实现 CPU `AssetStore`/Handle/Lease；
+M10-A4 已实现 Catalog 绑定 `AssetSystem` 同步 load/去重。Windows `tina_asset_tests` 见最近门禁。
+仍不包含异步 Queued/Loading、GPU UploadTicket/retirement 或 Cooker。
 
 Linux 最新 paint/DisplayList/bridge Null 门禁也已完成：GCC 13.4 通过基础205/205、
 `tina_ui_tests` 92/92、`tina_runtime_ui_tests` 46/46、bridge 12/12与Null样例300帧；

@@ -478,6 +478,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - M10-A3 已完成 CPU 侧 `AssetStore`/`AssetHandle`/`AssetLease`（ADR 0016 Accepted）：弱 Handle 查询、
   强 Lease 保活、unload 延迟到末 lease 释放、generation stale；仍无 Loading 状态机、Task/IO、
   GPU UploadTicket/FramePin/physical retirement ledger；
+- M10-A4 已完成 Catalog 绑定 `AssetSystem`：同步 plan→load→publish、AssetId 去重索引、失败仅回滚
+  本次 publish、预算门禁；仍无异步 Queued/Loading、Task worker、GPU UploadTicket/retirement；
 - UploadTicket/retirement、事务 Manifest writer 继续后置；
 - `tina_assetc` 执行 Parse → Validate → Build → Validate Cooked → Atomic Write；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
