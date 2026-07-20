@@ -20,9 +20,14 @@ namespace {
 
 } // namespace
 
-PrimaryWindowUIContextOwner::PrimaryWindowUIContextOwner(UI::UIContextCapacityConfig capacities,
-                                                         std::pmr::memory_resource& memoryResource) noexcept
-    : capacities_(capacities), memoryResource_(&memoryResource), ownerThreadId_(std::this_thread::get_id())
+PrimaryWindowUIContextOwner::PrimaryWindowUIContextOwner(
+    UI::UIContextCapacityConfig capacities,
+    std::pmr::memory_resource& memoryResource,
+    PrimaryWindowUIContextFactory createContext) noexcept
+    : capacities_(capacities),
+      memoryResource_(&memoryResource),
+      createContext_(std::move(createContext)),
+      ownerThreadId_(std::this_thread::get_id())
 {
 }
 
@@ -73,11 +78,14 @@ PrimaryWindowUIContextOwner::bindForStartup(const std::optional<Platform::Window
             lifecycleError(Operation, "The startup primary-window metrics have an invalid content scale"));
     }
 
-    auto contextResult = UI::UIContext::Create(metrics.window, capacities_, *memoryResource_);
+    Core::Result<std::unique_ptr<UI::UIContext>> contextResult =
+        createContext_
+            ? createContext_(metrics.window, capacities_, *memoryResource_)
+            : UI::UIContext::Create(metrics.window, capacities_, *memoryResource_);
     if (!contextResult)
     {
         Core::Error error = std::move(contextResult.error());
-        error.addContext(Operation, "UIContext::Create");
+        error.addContext(Operation, createContext_ ? "PrimaryWindowUIContextFactory" : "UIContext::Create");
         return Core::failure(std::move(error));
     }
     if (*contextResult == nullptr)

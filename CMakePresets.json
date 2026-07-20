@@ -80,6 +80,16 @@
       }
     },
     {
+      "name": "windows-msvc-vnext-bgfx-ui-freetype",
+      "displayName": "Windows x64 vNext bgfx + FreeType UI (MSVC 2026 + GLFW + C++23)",
+      "inherits": "windows-msvc-vnext-bgfx",
+      "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-bgfx-ui-freetype",
+      "cacheVariables": {
+        "TINA_BUILD_UI_FREETYPE": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tests;platform-glfw;ui-freetype"
+      }
+    },
+    {
       "name": "windows-msvc-vnext-ui-freetype",
       "displayName": "Windows x64 vNext UI FreeType adapter (MSVC 2026 + C++23)",
       "inherits": "windows-msvc-vnext",
@@ -251,6 +261,12 @@
       "name": "windows-vnext-bgfx-release",
       "configurePreset": "windows-msvc-vnext-bgfx",
       "configuration": "Release",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vnext-bgfx-ui-freetype-debug",
+      "configurePreset": "windows-msvc-vnext-bgfx-ui-freetype",
+      "configuration": "Debug",
       "jobs": 2
     },
     {

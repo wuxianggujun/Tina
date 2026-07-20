@@ -3985,6 +3985,57 @@ struct UIContext::Impl final {
         return glyphAtlas ? glyphAtlas->capacity().height : 0U;
     }
 
+    [[nodiscard]] Core::Status openTextFont(
+        std::span<const std::byte> fontBytes,
+        i32 faceIndex)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!textRasterizer) {
+            return fail(UIErrorCode::InvalidFont, "UI context has no text rasterizer");
+        }
+
+        auto newFace = textRasterizer->openFace(fontBytes, faceIndex);
+        if (!newFace) {
+            return Core::failure(newFace.error());
+        }
+
+        if (textFace.hasValue()) {
+            static_cast<void>(textRasterizer->closeFace(textFace));
+            textFace = {};
+        }
+        textFace = *newFace;
+        if (glyphAtlas) {
+            glyphAtlas->clear();
+        }
+
+        // Remeasure retained text and dirty layout/paint for all text nodes.
+        for (u32 index = 0; index < static_cast<u32>(textStatesByIndex.size()); ++index) {
+            WidgetTextState& state = textStatesByIndex[index];
+            if (!state.hasContent) {
+                continue;
+            }
+            const UINodeId node = idForIndex(index);
+            if (!node.hasValue() || !contains(node)) {
+                continue;
+            }
+            auto metrics = measureWidgetText(textViewFor(index), state.style);
+            if (!metrics) {
+                return Core::failure(metrics.error());
+            }
+            state.metrics = *metrics;
+            if (Core::Status dirtyStatus = markLayoutStyleDirty(node); !dirtyStatus) {
+                return dirtyStatus;
+            }
+            if (Core::Status paintStatus = markPaintDirty(node); !paintStatus) {
+                return paintStatus;
+            }
+        }
+        return Core::success();
+    }
+
     [[nodiscard]] UIPointerHitQueryResult queryPointerHit(
         UILogicalPoint point) const noexcept
     {
@@ -5085,6 +5136,13 @@ Platform::WindowId UIContext::ownerWindow() const noexcept
 bool UIContext::contains(UINodeId node) const noexcept
 {
     return m_impl->isOwnerThread() && m_impl->contains(node);
+}
+
+Core::Status UIContext::openTextFont(
+    std::span<const std::byte> fontBytes,
+    i32 faceIndex)
+{
+    return m_impl->openTextFont(fontBytes, faceIndex);
 }
 
 UIRootBuilder UIContext::rootBuilder() noexcept

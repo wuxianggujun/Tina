@@ -21,6 +21,7 @@
 
 #include <memory>
 #include <memory_resource>
+#include <span>
 #include <string_view>
 
 namespace Tina::UI::Detail {
@@ -247,6 +248,13 @@ public:
 
     [[nodiscard]] Platform::WindowId ownerWindow() const noexcept;
     [[nodiscard]] bool contains(UINodeId node) const noexcept;
+
+    // Opens (or replaces) the text face used by measure/paint. Closes the previous
+    // face, clears the glyph atlas, and dirties layout/paint for nodes with text.
+    // FreeType requires non-empty font bytes; placeholder rejects non-empty bytes.
+    [[nodiscard]] Core::Status openTextFont(
+        std::span<const std::byte> fontBytes,
+        i32 faceIndex = 0);
 
     [[nodiscard]] UIRootBuilder rootBuilder() noexcept;
     [[nodiscard]] Core::Result<UITreeUpdater> treeUpdater(UIRootOwner& rootOwner);

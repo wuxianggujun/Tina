@@ -385,11 +385,13 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - **已完成 M7-D10（UIContext→Atlas→Glyph DisplayList→bgfx 上传）**：Create 默认拥有
   `UIGlyphAtlas`；paint 时 `raster`+`insert` 写 `UICommittedPaintEntry.isGlyph` 与 atlas UV；
   `buildUIDisplayList` 发 `addGlyphQuad`；`RenderFrame.primaryWindowUIGlyphAtlas` 提交 R8 page；
-  bgfx `syncUIGlyphAtlas` 创建/更新 GPU texture。默认 placeholder raster 的 coverage 仍是满白
-  cell（看起来像色块），FreeType face 注入后才有真字形。多 page / FramePin / cooked FontAsset
-  与 Desktop 中文产品字形门禁仍后置。
-- **仍后置**：FramePin/多 page 绑定契约、cooked FontAsset（M10 协作）、Desktop 中文真字形样例
-  （需 FreeType + fixture 注入）、Modal/完整 Widget facade；
+  bgfx `syncUIGlyphAtlas` 创建/更新 GPU texture。
+- **已完成 M7-D11（Desktop FreeType fixture 注入）**：`UIContext::openTextFont`；
+  `EngineCompositionFactories::createPrimaryWindowUIContext` 可覆盖 Context 创建；
+  `Desktop::CreateEngine` 在 `TINA_BUILD_UI_FREETYPE` 时用 FreeType rasterizer + 仓库
+  `SourceHanSansSC-Regular.otf` 打开 face（开发 fixture，非 Runtime 产品按路径加载源字体）。
+  preset：`windows-msvc-vnext-bgfx-ui-freetype`。这是样例可见字形路径，不是 cooked FontAsset/M10。
+- **仍后置**：FramePin/多 page 绑定契约、cooked FontAsset（M10 协作）、Modal/完整 Widget facade；
 - 在已完成私有 `tina_render_bgfx` SolidQuad UI Pass 的基础上扩展 Image/Glyph 命令、Atlas texture upload
   与资源 pin；`tina_ui` 不链接 bgfx，也不暴露 view id/handle；
 - 使用版本化内置 Cooked Font/Texture fixture 形成中文 Label、Button、Modal 可运行样例；

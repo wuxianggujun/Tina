@@ -642,8 +642,11 @@ M7-D8：`Tina::Render` DisplayList 支持 `Glyph` 命令与 `addGlyphQuad`（atl
 M7-D9：bgfx UI 使用 textured 程序 + R8 atlas 上传 API；Solid 绑 1×1 白贴图，Glyph 绑 atlas page。
 
 M7-D10：UIContext paint 经 `UIGlyphAtlas` 发 Glyph paint entry；integration 转 `addGlyphQuad`；
-Runtime 把 R8 page 借给 `RenderFrame`；bgfx 每帧 sync 上传。默认 placeholder raster 的 coverage 是
-满白 cell，画面上仍接近色块；注入 FreeType + 真实 face 后才是可读字形。
+Runtime 把 R8 page 借给 `RenderFrame`；bgfx 每帧 sync 上传。
+
+M7-D11：`openTextFont` 可替换 face；Desktop 在 FreeType ON 时注入 FreeType rasterizer 并打开
+`resources/fonts/SourceHanSansSC-Regular.otf` fixture。默认 Null 图仍用 placeholder（色块）。
+产品路径仍不得按路径打开源字体；后续应迁到 cooked FontAsset（M10）。
 
 Runtime 不按路径打开字体。Cooked `FontAsset` 提供 owning bytes、face metadata 和确定 fallback
 chain；UI 持有 `AssetLease<FontData>`。FreeType 类型只存在于 `tina_ui_freetype`。
