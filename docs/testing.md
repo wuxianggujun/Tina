@@ -51,6 +51,8 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2n empty-request + CLI load | Debug/Release C++23 | 223/223 + 48/48 | 空请求加载全部；CLI `--load-assets`；`tina_asset_tests` 48/48。不实现 Handle/Lease |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2o pipeline e2e + fixture | Debug/Release C++23 | 223/223 + 50/50 | 共享夹具 + open/plan/load/validate/summary 端到端；`tina_asset_tests` 50/50。不实现 Handle/Lease |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2p plan byte total | Debug/Release C++23 | 223/223 + 52/52 | `totalCookedFileBytes` 空/正常/溢出；`tina_asset_tests` 52/52；CLI `plannedCookedFileBytes`。不实现 Handle/Lease |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2q batch byte budget | Debug/Release C++23 | 223/223 + 54/54 | `maxTotalCookedFileBytes` 超预算拒绝、等预算通过；`tina_asset_tests` 54/54。不实现 Handle/Lease |
+
 
 
 

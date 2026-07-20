@@ -34,6 +34,20 @@ loadCookedAssetsFromPlan(std::string_view catalogRootUtf8, const CatalogSnapshot
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog snapshot is empty");
     }
 
+    if (config.maxTotalCookedFileBytes != 0U)
+    {
+        auto total = totalCookedFileBytes(plan);
+        if (!total)
+        {
+            return Core::failure(std::move(total.error()).withContext("loadCookedAssetsFromPlan", "budget"));
+        }
+        if (*total > config.maxTotalCookedFileBytes)
+        {
+            return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                 "catalog load plan exceeds maxTotalCookedFileBytes budget");
+        }
+    }
+
     std::pmr::vector<CookedAssetFile> loaded{memoryResource};
     try
     {

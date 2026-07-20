@@ -385,5 +385,112 @@ TEST(CookedAssetBatchTests, RejectsPlanRowMismatchWithoutPublish)
     EXPECT_EQ(resource.outstandingAllocations(), 0U);
 }
 
+TEST(CookedAssetBatchTests, RejectsPlanExceedingTotalCookedFileBytesBudget)
+{
+    TrackingMemoryResource resource;
+    constexpr std::array<std::byte, 4> Payload{std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0x40}};
+    const auto digest = Core::digestContentHashV1(Payload);
+    ASSERT_TRUE(digest.has_value());
+
+    const auto textureBytes = makeCookedAsset(1U, AssetFormat::AssetKind::Texture2D);
+    const auto materialBytes = makeCookedAsset(2U, AssetFormat::AssetKind::Material);
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(2U));
+
+    const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_batch_budget";
+    std::filesystem::create_directories(catalogRoot);
+    writeBytes(catalogRoot / std::filesystem::u8path(
+                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D, textureId)->view()),
+               textureBytes);
+    writeBytes(catalogRoot / std::filesystem::u8path(
+                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Material, materialId)->view()),
+               materialBytes);
+
+    const auto manifestBytes = makeTwoEntryManifest(textureBytes.size(), *digest, materialBytes.size(), *digest);
+    auto manifest = AssetFormat::parseCookedManifestView(manifestBytes);
+    ASSERT_TRUE(manifest.has_value());
+    auto catalog = CatalogSnapshot::Create(*manifest, CatalogConfig{.maxEntries = 8,
+                                                                    .maxDependencies = 8,
+                                                                    .maxDependenciesPerAsset = 4,
+                                                                    .memoryResource = &resource});
+    ASSERT_TRUE(catalog.has_value());
+
+    {
+        auto plan =
+            planCatalogLoads(*catalog, std::array{materialId}, CatalogLoadPlanConfig{.memoryResource = &resource});
+        ASSERT_TRUE(plan.has_value());
+        auto total = totalCookedFileBytes(*plan);
+        ASSERT_TRUE(total.has_value());
+        ASSERT_GT(*total, 0U);
+
+        CookedAssetBatchLoadConfig config{
+            .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
+            .memoryResource = &resource,
+            .maxTotalCookedFileBytes = *total - 1U,
+        };
+        const auto batch = loadCookedAssetsFromPlan(toUtf8(catalogRoot), *catalog, *plan, config);
+        ASSERT_FALSE(batch.has_value());
+        EXPECT_EQ(batch.error().code, Core::CoreErrorCode::CapacityExceeded);
+    }
+
+    catalog = CatalogSnapshot{};
+    std::error_code errorCode;
+    std::filesystem::remove_all(catalogRoot, errorCode);
+    EXPECT_EQ(resource.outstandingAllocations(), 0U);
+}
+
+TEST(CookedAssetBatchTests, AcceptsPlanWithinTotalCookedFileBytesBudget)
+{
+    TrackingMemoryResource resource;
+    constexpr std::array<std::byte, 4> Payload{std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0x40}};
+    const auto digest = Core::digestContentHashV1(Payload);
+    ASSERT_TRUE(digest.has_value());
+
+    const auto textureBytes = makeCookedAsset(1U, AssetFormat::AssetKind::Texture2D);
+    const auto materialBytes = makeCookedAsset(2U, AssetFormat::AssetKind::Material);
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(2U));
+
+    const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_batch_budget_ok";
+    std::filesystem::create_directories(catalogRoot);
+    writeBytes(catalogRoot / std::filesystem::u8path(
+                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D, textureId)->view()),
+               textureBytes);
+    writeBytes(catalogRoot / std::filesystem::u8path(
+                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Material, materialId)->view()),
+               materialBytes);
+
+    const auto manifestBytes = makeTwoEntryManifest(textureBytes.size(), *digest, materialBytes.size(), *digest);
+    auto manifest = AssetFormat::parseCookedManifestView(manifestBytes);
+    ASSERT_TRUE(manifest.has_value());
+    auto catalog = CatalogSnapshot::Create(*manifest, CatalogConfig{.maxEntries = 8,
+                                                                    .maxDependencies = 8,
+                                                                    .maxDependenciesPerAsset = 4,
+                                                                    .memoryResource = &resource});
+    ASSERT_TRUE(catalog.has_value());
+
+    {
+        auto plan =
+            planCatalogLoads(*catalog, std::array{materialId}, CatalogLoadPlanConfig{.memoryResource = &resource});
+        ASSERT_TRUE(plan.has_value());
+        auto total = totalCookedFileBytes(*plan);
+        ASSERT_TRUE(total.has_value());
+
+        CookedAssetBatchLoadConfig config{
+            .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
+            .memoryResource = &resource,
+            .maxTotalCookedFileBytes = *total,
+        };
+        auto batch = loadCookedAssetsFromPlan(toUtf8(catalogRoot), *catalog, *plan, config);
+        ASSERT_TRUE(batch.has_value()) << batch.error().message;
+        EXPECT_EQ(batch->size(), 2U);
+    }
+
+    catalog = CatalogSnapshot{};
+    std::error_code errorCode;
+    std::filesystem::remove_all(catalogRoot, errorCode);
+    EXPECT_EQ(resource.outstandingAllocations(), 0U);
+}
+
 } // namespace
 } // namespace Tina::Asset

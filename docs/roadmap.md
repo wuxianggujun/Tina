@@ -474,6 +474,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - M10-A2n 已完成空请求=加载全部覆盖、CLI `--load-assets` 整包/选 id 加载冒烟；仍无 Handle/Lease；
 - M10-A2o 已完成共享 Catalog 包测试夹具与 open→plan→load→validate→summary 端到端测试；仍无 Handle/Lease；
 - M10-A2p 已完成 `totalCookedFileBytes` 计划字节汇总（溢出检查）与 CLI `plannedCookedFileBytes`；仍无 Handle/Lease；
+- M10-A2q 已完成批量加载 `maxTotalCookedFileBytes` 预算门禁（读盘前拒绝超预算）；仍无 Handle/Lease；
+- 弱 Handle/强 Lease（ADR 0016 仍 Proposed）与 UploadTicket/retirement、事务 Manifest writer 继续后置；
 - `tina_assetc` 执行 Parse → Validate → Build → Validate Cooked → Atomic Write；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；

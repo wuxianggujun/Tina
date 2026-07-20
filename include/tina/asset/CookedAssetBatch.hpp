@@ -20,6 +20,9 @@ struct CookedAssetBatchLoadConfig final {
     // Used for load-order/plan scratch and the returned vector allocator.
     // When null, file.memoryResource is used.
     std::pmr::memory_resource* memoryResource = nullptr;
+    // 0 means unlimited. When non-zero, load fails before any file read if the plan's
+    // totalCookedFileBytes exceeds this budget.
+    Core::u64 maxTotalCookedFileBytes = 0;
 };
 
 // Expands requested AssetIds through computeCatalogLoadOrder, then loads each cooked object
