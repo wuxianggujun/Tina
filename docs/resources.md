@@ -71,7 +71,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A30 已实现 TileChunk → RenderSprite2D 发射桥接；
   M10-A31 已实现 Headless/Null `tina_sample_2d_tilemap`（TileMap emit + CharacterController）；
   M10-A32 已实现 `tina_sample_2d_tilemap_bgfx` Catalog→GPU 可见 TileMap + 角色；
-  完整正式 tina_sample_2d（UI+Box2D 产品门禁）、cgltf 仍未实现。
+  M10-A33 已实现同一样例 UI SolidQuad overlay 门禁；
+  完整正式 tina_sample_2d（Box2D product body + 中文 FreeType Label）、cgltf 仍未实现。
 
 
 ## 下一阶段契约

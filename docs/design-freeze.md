@@ -492,7 +492,10 @@ sprite，300 帧 JSON 门禁。不冒充 Catalog/bgfx/UI/Box2D 正式 `tina_samp
 
 M10-A32：`tina_sample_2d_tilemap_bgfx` 在 GLFW+bgfx 上 cook/load Catalog Texture2D+Tileset+TileMap，
 GPU 上传 atlas 并绑定 `spriteKey=1`，每帧 emit 可见 tile + CharacterController 角色 sprite。
-不包含 UI overlay、Box2D dynamic product body 或正式中文 Label 门禁。
+
+M10-A33：同一样例增加 PrimaryWindowUI 2 个 SolidQuad HUD panel（顶栏 + 底 accent），
+并在 JSON 中校验 root create/release 与 panel 计数。不包含 Box2D dynamic product body、
+中文 FreeType Label 或 pointer consumption 产品门禁。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

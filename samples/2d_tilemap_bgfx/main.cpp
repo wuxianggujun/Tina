@@ -19,9 +19,12 @@
 #include <tina/runtime/EngineHost.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
+#include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
+#include <tina/ui/UILayout.hpp>
+#include <tina/ui/UIPaint.hpp>
 
 #include "render/bgfx/BgfxRenderDevice.hpp"
 
@@ -70,7 +73,41 @@ struct LifecycleCounters final {
     u64 lastTileSprites = 0;
     u64 lastTotalSprites = 0;
     u64 controllerGroundedFrames = 0;
+    u64 uiRootsCreated = 0;
+    u64 uiPanelsCreated = 0;
+    u64 uiRootsReleased = 0;
 };
+
+inline constexpr u32 ExpectedUIPanelCount = 2;
+
+[[nodiscard]] Tina::UI::UILayoutStyle absolutePanelStyle(Tina::UI::UILayoutLength left, Tina::UI::UILayoutLength top,
+                                                         Tina::UI::UILayoutLength width,
+                                                         Tina::UI::UILayoutLength height) noexcept
+{
+    Tina::UI::UILayoutStyle style{};
+    style.position = Tina::UI::UILayoutPositionMode::AbsoluteOverlay;
+    style.absoluteInset.left = left;
+    style.absoluteInset.top = top;
+    style.size.width = width;
+    style.size.height = height;
+    return style;
+}
+
+[[nodiscard]] Tina::UI::UIBoxPaint solidFill(u8 red, u8 green, u8 blue, u8 alpha = 255) noexcept
+{
+    return Tina::UI::UIBoxPaint{
+        .solidFill =
+            Tina::UI::UISolidFill{
+                .color =
+                    {
+                        .red = red,
+                        .green = green,
+                        .blue = blue,
+                        .alpha = alpha,
+                    },
+            },
+    };
+}
 
 void writeJsonString(std::ostream& output, std::string_view value)
 {
@@ -423,7 +460,7 @@ class TileMapBgfxState final : public Tina::IGameState {
     {
     }
 
-    Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
+    Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
         ++counters_->stateEnters;
         auto* device = capture_->get();
@@ -448,11 +485,76 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
         resources_->gpuTexture = *texture;
         ++counters_->texturesUploaded;
+
+        auto rootBuilder = context.primaryWindowUIRootBuilder();
+        if (!rootBuilder)
+        {
+            return Tina::Core::failure(std::move(rootBuilder.error()));
+        }
+        auto root = rootBuilder->createRoot();
+        if (!root)
+        {
+            return Tina::Core::failure(std::move(root.error()));
+        }
+        auto tree = rootBuilder->treeUpdater(*root);
+        if (!tree)
+        {
+            return Tina::Core::failure(std::move(tree.error()));
+        }
+        Tina::UI::UILayoutStyle rootStyle{};
+        rootStyle.size.width = Tina::UI::UILayoutLength::Percent(100.0F);
+        rootStyle.size.height = Tina::UI::UILayoutLength::Percent(100.0F);
+        if (auto status = tree->setLayoutStyle(root->rootNodeId(), rootStyle); !status)
+        {
+            return status;
+        }
+
+        struct PanelSpec final {
+            Tina::UI::UILayoutStyle layout{};
+            Tina::UI::UIBoxPaint paint{};
+        };
+        // HUD-style overlays: top-left status bar + bottom accent strip (SolidQuad only, no FreeType).
+        const std::array panels{
+            PanelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(16.0F), Tina::UI::UILayoutLength::Px(12.0F),
+                                             Tina::UI::UILayoutLength::Px(280.0F), Tina::UI::UILayoutLength::Px(48.0F)),
+                .paint = solidFill(8, 16, 28, 220),
+            },
+            PanelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(16.0F), Tina::UI::UILayoutLength::Px(480.0F),
+                                             Tina::UI::UILayoutLength::Px(320.0F), Tina::UI::UILayoutLength::Px(10.0F)),
+                .paint = solidFill(255, 196, 64, 230),
+            },
+        };
+        for (const PanelSpec& panelSpec : panels)
+        {
+            auto panel = tree->createPanel(root->rootNodeId());
+            if (!panel)
+            {
+                return Tina::Core::failure(std::move(panel.error()));
+            }
+            if (auto status = tree->setLayoutStyle(*panel, panelSpec.layout); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setBoxPaint(*panel, panelSpec.paint); !status)
+            {
+                return status;
+            }
+        }
+        uiRoot_ = std::move(*root);
+        ++counters_->uiRootsCreated;
+        counters_->uiPanelsCreated += panels.size();
         return Tina::Core::success();
     }
 
     void onExit(Tina::GameStateExitContext&) noexcept override
     {
+        if (uiRoot_)
+        {
+            uiRoot_.reset();
+            ++counters_->uiRootsReleased;
+        }
         if (auto* device = capture_->get(); device != nullptr && resources_->gpuTexture)
         {
             (void)device->setSprite2DTextureBinding(ProductSpriteKey, {});
@@ -570,6 +672,7 @@ class TileMapBgfxState final : public Tina::IGameState {
     LifecycleCounters* counters_ = nullptr;
     TileMapResources* resources_ = nullptr;
     DeviceCapture* capture_ = nullptr;
+    Tina::UI::UIRootOwner uiRoot_{};
 };
 
 class TileMapBgfxApplication final : public Tina::IGameApplication {
@@ -642,7 +745,7 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
 {
     Tina::EngineConfig config = Tina::EngineConfig::Defaults();
     config.applicationName = "Tina TileMap Catalog 2D Sample";
-    config.primaryWindow.title = "Tina Catalog TileMap + Character";
+    config.primaryWindow.title = "Tina Catalog TileMap + Character + UI";
     config.primaryWindow.initialLogicalExtent = {960, 540};
     config.primaryWindow.initiallyVisible = true;
     config.renderSceneCapacities.spriteCapacity = 64;
@@ -690,7 +793,8 @@ int main(int argc, char** argv)
     const bool ok = counters.texturesUploaded == 1 && counters.lastTileSprites == ExpectedNonEmptyTiles &&
                     counters.lastTotalSprites == ExpectedNonEmptyTiles + 1 && counters.controllerGroundedFrames > 0 &&
                     counters.renderExtractions == counters.frameUpdates && counters.stateExits == 1 &&
-                    counters.applicationShutdowns == 1 &&
+                    counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
+                    counters.uiPanelsCreated == ExpectedUIPanelCount && counters.uiRootsReleased == 1 &&
                     *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
     if (!ok)
     {
@@ -699,7 +803,9 @@ int main(int argc, char** argv)
                      "\"frames\":"
                   << counters.frameUpdates << ",\"tileSprites\":" << counters.lastTileSprites
                   << ",\"totalSprites\":" << counters.lastTotalSprites
-                  << ",\"grounded\":" << counters.controllerGroundedFrames << "}\n";
+                  << ",\"grounded\":" << counters.controllerGroundedFrames
+                  << ",\"uiRoots\":" << counters.uiRootsCreated << ",\"uiPanels\":" << counters.uiPanelsCreated
+                  << ",\"uiReleased\":" << counters.uiRootsReleased << "}\n";
         return 1;
     }
 
@@ -709,7 +815,9 @@ int main(int argc, char** argv)
               << ",\"tileSpritesPerFrame\":" << ExpectedNonEmptyTiles
               << ",\"spritesPerFrame\":" << (ExpectedNonEmptyTiles + 1)
               << ",\"controllerGroundedFrames\":" << counters.controllerGroundedFrames
-              << ",\"stateExits\":" << counters.stateExits
+              << ",\"uiRootsCreated\":" << counters.uiRootsCreated
+              << ",\"uiPanelsCreated\":" << counters.uiPanelsCreated
+              << ",\"uiRootsReleased\":" << counters.uiRootsReleased << ",\"stateExits\":" << counters.stateExits
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns << ",\"exit\":\""
               << "GameRequestedExitAfterCurrentFrame\"}\n";
     return 0;
