@@ -30,4 +30,30 @@ Core::Result<AssetFormat::SpritePayloadView> parseSpriteFromCooked(const CookedA
     return AssetFormat::parseSpritePayload(file.payload());
 }
 
+Core::Result<AssetFormat::TilesetPayloadView> parseTilesetFromCooked(const CookedAssetFile& file)
+{
+    if (!file)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::Tileset)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset is not Tileset");
+    }
+    return AssetFormat::parseTilesetPayload(file.payload());
+}
+
+Core::Result<AssetFormat::TileMapPayloadView> parseTileMapFromCooked(const CookedAssetFile& file)
+{
+    if (!file)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::TileMap)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset is not TileMap");
+    }
+    return AssetFormat::parseTileMapPayload(file.payload());
+}
+
 } // namespace Tina::Asset

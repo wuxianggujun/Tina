@@ -1125,6 +1125,9 @@ public:
 | `tina_sample_2d_catalog` | M10-A24 已实现 | sample (GLFW+bgfx) | Catalog cook/load/upload/bind/draw | sample JSON |
 | `ITaskSystem::scheduleCpu` / `TaskSystemCreateParams::cpuWorkerCount` | M10-A25 已实现 | Task module public | 有界 CPU worker 域 | NotSupported / QueueFull |
 | `TaskGroup` | M10-A25 已实现 | Task module public | CPU 域结构化 add/waitIdle | WaitTimeout / TaskSystemStopped |
+| `writeTilesetPayloadBytes` / `parseTilesetPayload` / `writeCookedTilesetAsset` | M10-A26 已实现 | AssetFormat module public | Tileset UV/material + Texture2D 依赖 | InvalidLayout / Unsupported* |
+| `writeTileMapPayloadBytes` / `parseTileMapPayload` / `writeCookedTileMapAsset` | M10-A26 已实现 | AssetFormat module public | 单层 TileMap cells + Tileset 依赖 | InvalidLayout / Unsupported* |
+| `parseTilesetFromCooked` / `parseTileMapFromCooked` | M10-A26 已实现 | Asset module public | 类型化 Tileset/TileMap 视图 | CatalogEntryMismatch / payload 错误 |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |

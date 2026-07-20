@@ -194,6 +194,7 @@ startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 r
 | vNext M10-A23 GPU Texture2D upload API | 已完成上传/绑定 SPI | createTexture2DRgba8 / setSprite2DTextureBinding / uploadTexture2DFromCooked |
 | vNext M10-A24 catalog 2D visible sample | 已完成 Catalog→GPU 可见样例 | `tina_sample_2d_catalog` cook/load/upload/bind/draw Texture2D+Sprite |
 | vNext M10-A25 CPU TaskGroup slice | 已完成 CPU worker + TaskGroup | `scheduleCpu`、`TaskGroup::add/waitIdle`；默认 cpuWorkerCount=0 |
+| vNext M10-A26 Tileset/TileMap payload | 已完成 2D map wire schema | Tileset/TileMap payload v1 + typed parse/validation。无 runtime TileMapInstance |
 | vNext GLFW 边界 | 已形成可运行切片 |
  `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
 | 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene component-integrated extraction、AssetSystem/Audio、owning UI packet/pin、Text/Glyph/完整 Widget 与 submission drain 仍按后续切片实施；M8-A World/Transform、M8-B 2D extraction、M9-A 3D CPU/Null extraction、M9-B Opaque3D fixture、M9-C Sprite2D fixture、M10-A0 wire format、M10-A1 CatalogSnapshot、Desktop SolidFill 可见样例、standalone UI/Render/bridge foundation、Runtime-private route/layout/startup/display borrow 接线、Button primary-pointer default action 和私有 bgfx SolidQuad pass 不代表完整产品路径完成 |

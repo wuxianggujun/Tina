@@ -3,6 +3,8 @@ set(TINA_ASSET_FORMAT_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AssetFormatErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/SpritePayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/Texture2DPayload.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset_format/TilesetPayload.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset_format/TileMapPayload.hpp
 )
 
 add_library(tina_asset_format STATIC
@@ -10,6 +12,8 @@ add_library(tina_asset_format STATIC
     AssetFormat.cpp
     SpritePayload.cpp
     Texture2DPayload.cpp
+    TilesetPayload.cpp
+    TileMapPayload.cpp
 )
 add_library(Tina::AssetFormat ALIAS tina_asset_format)
 

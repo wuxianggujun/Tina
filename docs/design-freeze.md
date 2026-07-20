@@ -469,3 +469,7 @@ M10-A24：`tina_sample_2d_catalog`（GLFW+bgfx）cook 8x8 checker Texture2D + Sp
 M10-A25：BoundedTaskSystem 增加可选 CPU worker 队列与 `ITaskSystem::scheduleCpu`；`TaskGroup`
 在 CPU 域上计数 pending 并 waitIdle。默认 `cpuWorkerCount=0` 时 scheduleCpu→NotSupported，不破坏
 现有 IO-only Desktop 默认路径。无 priority/fiber/work stealing。
+
+M10-A26：Tileset payload v1（header + TileEntry UV/materialFlags，依赖 Texture2D）；TileMap payload v1
+（单 layer 行列 cells + cellSizeMeters，依赖 Tileset）。`parseTilesetFromCooked`/`parseTileMapFromCooked`
+与 verifyTypedPayload 扩展。无 runtime TileMapInstance/chunk culling。

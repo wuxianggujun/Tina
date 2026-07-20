@@ -75,6 +75,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A23 GPU texture upload API | Debug C++23 | 232/232 + 83/83 | Null create/bind/destroy；uploadTexture2DFromCooked；bgfx 43 + sample ok |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A24 catalog 2D sample | Debug C++23 bgfx | sample smoke | `tina_sample_2d_catalog --frames=60` texturesUploaded=1；bgfx 创建 8x8 RGBA8 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A25 CPU TaskGroup | Debug C++23 | 234/234 + 83/83 | scheduleCpu + TaskGroup waitIdle；cpuWorkerCount=0→NotSupported |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A26 Tileset/TileMap payload | Debug C++23 | 26/26 format | write/parse/cooked round-trip；`tina_asset_format_tests` 26；asset 83 |
 
 
 
