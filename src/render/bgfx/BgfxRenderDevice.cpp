@@ -517,6 +517,27 @@ class BgfxRenderDevice final : public IRenderDevice {
         sprite2DProgram_ = *sprite2DProgram;
         ++statistics_.liveResources;
 
+        sprite2DSampler_ = bgfx::createUniform("s_tex", bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(sprite2DSampler_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Sprite2D texture sampler uniform");
+        }
+        ++statistics_.liveResources;
+
+        // Default 1x1 white RGBA8 so vertex color remains visible until product textures bind.
+        constexpr std::array<u8, 4> WhitePixel{255, 255, 255, 255};
+        const bgfx::Memory* whiteMemory = bgfx::copy(WhitePixel.data(), static_cast<u32>(WhitePixel.size()));
+        sprite2DDefaultTexture_ =
+            bgfx::createTexture2D(1, 1, false, 1, bgfx::TextureFormat::RGBA8, BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE,
+                                  whiteMemory);
+        if (!bgfx::isValid(sprite2DDefaultTexture_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Sprite2D default white texture");
+        }
+        ++statistics_.liveResources;
+
         auto opaque3DProgram = ShaderDetail::createOpaque3DUnlitProgram();
         if (!opaque3DProgram)
         {
@@ -707,6 +728,18 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(sprite2DProgram_);
                 sprite2DProgram_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(sprite2DDefaultTexture_))
+            {
+                bgfx::destroy(sprite2DDefaultTexture_);
+                sprite2DDefaultTexture_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(sprite2DSampler_))
+            {
+                bgfx::destroy(sprite2DSampler_);
+                sprite2DSampler_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             if (bgfx::isValid(uiSolidQuadProgram_))
@@ -914,6 +947,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         bgfx::setScissor();
         bgfx::setState(kSprite2DPremultipliedAlphaState);
+        bgfx::setTexture(0, sprite2DSampler_, sprite2DDefaultTexture_);
         bgfx::setVertexBuffer(0, &transientVertices, 0, prepared.requirements.vertexCount);
         bgfx::setIndexBuffer(&transientIndices, 0, prepared.requirements.indexCount);
         bgfx::submit(kSprite2DView, sprite2DProgram_);
@@ -1009,6 +1043,8 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::VertexBufferHandle opaque3DVertexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle opaque3DIndexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle sprite2DProgram_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle sprite2DSampler_ = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle sprite2DDefaultTexture_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle uiSolidQuadProgram_ = BGFX_INVALID_HANDLE;
     bool frameOpen_ = false;
     bool stopped_ = false;

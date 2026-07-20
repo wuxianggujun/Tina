@@ -60,7 +60,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A19 已实现 recipe 内联 texture2d/sprite 语法；
   M10-A20 已实现 Sprite→RenderSprite UV/尺寸桥接；
   M10-A21 已实现 cook→load→RenderScene CPU 全闭环门禁；
-  CPU TaskGroup、bgfx 真实纹理采样绘制、完整 Cooker/cgltf 仍未实现。
+  M10-A22 已实现 bgfx Sprite2D 纹理采样管线（默认白纹理）；
+  Catalog→GPU 纹理上传、CPU TaskGroup、完整 Cooker/cgltf 仍未实现。
 
 
 ## 下一阶段契约

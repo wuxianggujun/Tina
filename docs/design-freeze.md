@@ -454,3 +454,6 @@ M10-A20：`RenderSprite2DInput/Item` 增加 UV 矩形；`makeSpriteRenderInput` 
 
 M10-A21：测试门禁覆盖 cook→AssetSystem load/ReadyGpu→makeSpriteRenderInput→RenderSceneBuilder commit，
 验证 UV/尺寸进入 published RenderSceneView。bgfx 纹理采样仍后置。
+
+M10-A22：bgfx Sprite2D fragment 改为 `SAMPLER2D(s_tex)` 采样；设备持有默认 1x1 白纹理与 sampler
+uniform，submit 时 `setTexture(0, s_tex, white)`。Catalog Texture2D 上传/按 spriteKey 绑定后置。

@@ -71,6 +71,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A19 inline typed recipe | Debug/Release C++23 | 见实现门禁 | texture2d/sprite 内联 recipe→publish→typed validate→sample；`tina_asset_tests` 80 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A20 sprite UV render bridge | Debug/Release C++23 | 见实现门禁 | makeSpriteRenderInput UV/size；render scene 22；`tina_asset_tests` 81 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A21 asset→render CPU pipeline | Debug/Release C++23 | 见实现门禁 | cook→load→RenderScene UV commit；`tina_asset_tests` 82 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A22 bgfx sprite texture sample | Debug C++23 bgfx | 43/43 | Sprite2D s_tex + default white；`tina_render_bgfx_tests` 43；2d sample 60帧 ok |
 
 
 
