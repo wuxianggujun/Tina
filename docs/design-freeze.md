@@ -364,3 +364,6 @@ M10-A2g 已落地 `openCatalogPackage`：默认 `catalogRoot/manifest.tmnft` →
 
 M10-A2h 已落地 `tina_catalog_validate` CLI：调用 `openCatalogPackage`，输出 JSON，支持
 `--metadata-only` / `--no-validate`；不引入 registry、Handle/Lease 或异步。
+
+M10-A2i 已落地 `buildCatalogPackageSummary`：从 CatalogSnapshot 生成 totals/entry 诊断行（不触盘）；
+CLI 增加 `--list-entries`。不实现 Handle/Lease。

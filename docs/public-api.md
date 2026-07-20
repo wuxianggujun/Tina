@@ -1075,6 +1075,7 @@ public:
 | `validateCatalogPackageOnDisk` | M10-A2f 已实现 | Asset module public | 严格 UTF-8 root；逐 entry 校验确定性 object path 的常规文件/大小，可选强制 ContentHash+entry 对齐；同时最多持有一个对象 | InvalidCatalogConfig / Core IO、容量与内存错误 / AssetFormat 校验错误 / CatalogEntryMismatch；失败含 AssetId 上下文 |
 | `openCatalogPackage` | M10-A2g 已实现 | Asset module public | catalogRoot + 安全相对 manifest 路径 → CatalogSnapshot，可选打开时整包校验 | NotFound / Io / InvalidCatalogConfig / Catalog 校验错误；失败不发布 |
 | `tina_catalog_validate` | M10-A2h 已实现 | host tool executable | 同步打开/校验磁盘 Catalog 包；JSON 摘要；exit 0/1/2 | 同 open/validate 错误；参数错误 exit 2 |
+| `buildCatalogPackageSummary` | M10-A2i 已实现 | Asset module public | 从 CatalogSnapshot 生成诊断 totals/entry 行（不触盘） | InvalidCatalogConfig / AllocationFailed |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |

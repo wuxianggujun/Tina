@@ -169,6 +169,7 @@ out\build\windows-msvc-vnext\bin\Release\tina_asset_tests.exe --gtest_color=yes
 cmake --build --preset windows-vnext-debug --target tina_catalog_validate
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --metadata-only
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot>
+out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --list-entries
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --help
 ```
 

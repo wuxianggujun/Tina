@@ -1,4 +1,5 @@
 #include <tina/asset/CatalogPackage.hpp>
+#include <tina/asset/CatalogPackageSummary.hpp>
 #include <tina/core/error/Error.hpp>
 
 #include <cstdint>
@@ -15,6 +16,7 @@ struct Options final {
     std::string manifestRelative = "manifest.tmnft";
     bool metadataOnly = false;
     bool skipValidate = false;
+    bool listEntries = false;
     Tina::Core::u32 maxEntries = 100000;
     Tina::Core::u32 maxDependencies = 400000;
     Tina::Core::u32 maxDependenciesPerAsset = 4096;
@@ -27,6 +29,7 @@ void printUsage()
         << "  --manifest <relativePath>   default: manifest.tmnft\n"
         << "  --metadata-only             size/presence only (no ContentHash)\n"
         << "  --no-validate               open Snapshot only; skip package validation\n"
+        << "  --list-entries              include entry rows in JSON summary\n"
         << "  --max-entries <n>\n"
         << "  --max-dependencies <n>\n"
         << "  --max-dependencies-per-asset <n>\n"
@@ -74,6 +77,11 @@ void printUsage()
         if (arg == "--no-validate")
         {
             options.skipValidate = true;
+            continue;
+        }
+        if (arg == "--list-entries")
+        {
+            options.listEntries = true;
             continue;
         }
         auto requireValue = [&](std::string_view name) -> std::string_view {
@@ -205,10 +213,38 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"entries\":" << snapshot->entryCount()
-              << ",\"dependencies\":" << snapshot->dependencyCount()
+    auto summary = Tina::Asset::buildCatalogPackageSummary(
+        *snapshot,
+        Tina::Asset::CatalogPackageSummaryConfig{.memoryResource = &memoryResource,
+                                                 .includeEntries = options.listEntries});
+    if (!summary)
+    {
+        printErrorJson(summary.error());
+        return 1;
+    }
+
+    std::cout << "{\"status\":\"ok\",\"entries\":" << summary->entryCount
+              << ",\"dependencies\":" << summary->dependencyCount
               << ",\"validated\":" << (options.skipValidate ? "false" : "true")
-              << ",\"contentHash\":" << ((!options.skipValidate && !options.metadataOnly) ? "true" : "false")
-              << "}\n";
+              << ",\"contentHash\":" << ((!options.skipValidate && !options.metadataOnly) ? "true" : "false");
+    if (options.listEntries)
+    {
+        std::cout << ",\"items\":[";
+        for (std::size_t index = 0; index < summary->entries.size(); ++index)
+        {
+            const auto& row = summary->entries[index];
+            if (index != 0U)
+            {
+                std::cout << ',';
+            }
+            std::cout << "{\"id\":\"" << std::string_view(row.assetIdText.data(), row.assetIdText.size())
+                      << "\",\"kind\":" << static_cast<unsigned>(row.assetKind)
+                      << ",\"typeVersion\":" << row.assetTypeVersion
+                      << ",\"dependencyCount\":" << row.dependencyCount
+                      << ",\"cookedFileBytes\":" << row.cookedFileBytes << '}';
+        }
+        std::cout << ']';
+    }
+    std::cout << "}\n";
     return 0;
 }

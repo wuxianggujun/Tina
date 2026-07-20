@@ -466,6 +466,7 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - 弱 Handle/强 Lease 需先确认 ADR 0016；UploadTicket/retirement 和事务 Manifest writer 继续后置；
 - M10-A2h 已完成独立 `tina_catalog_validate` CLI：`openCatalogPackage` + 退出码与 JSON 摘要
   （`--metadata-only` / `--no-validate`）；不引入 registry、异步任务或生命周期所有权；
+- M10-A2i 已完成 `buildCatalogPackageSummary` 与 CLI `--list-entries` 诊断行；仍无 Handle/Lease；
 - `tina_assetc` 执行 Parse → Validate → Build → Validate Cooked → Atomic Write；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；

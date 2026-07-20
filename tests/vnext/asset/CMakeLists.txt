@@ -2,6 +2,7 @@ set(TINA_ASSET_TEST_SOURCES
     CatalogSnapshotTests.cpp
     CatalogLoadOrderTests.cpp
     CatalogPackageTests.cpp
+    CatalogPackageSummaryTests.cpp
     CatalogPackageValidationTests.cpp
     CookedAssetBatchTests.cpp
     CookedAssetFileTests.cpp
@@ -9,6 +10,7 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/CatalogFileHeader.cpp
     header_isolation/CatalogLoadOrderHeader.cpp
     header_isolation/CatalogPackageHeader.cpp
+    header_isolation/CatalogPackageSummaryHeader.cpp
     header_isolation/CatalogPackageValidationHeader.cpp
     header_isolation/CatalogSnapshotHeader.cpp
     header_isolation/CookedAssetBatchHeader.cpp

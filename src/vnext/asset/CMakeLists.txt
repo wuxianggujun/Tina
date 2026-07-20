@@ -3,6 +3,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogFile.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogLoadOrder.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackage.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageSummary.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageValidation.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogSnapshot.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CookedAssetBatch.hpp
@@ -14,6 +15,7 @@ add_library(tina_asset STATIC
     CatalogFile.cpp
     CatalogLoadOrder.cpp
     CatalogPackage.cpp
+    CatalogPackageSummary.cpp
     CatalogPackageValidation.cpp
     CatalogSnapshot.cpp
     CookedAssetBatch.cpp
