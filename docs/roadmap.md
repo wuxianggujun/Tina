@@ -616,9 +616,10 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - M11-A5 已完成：`createStaticBodiesForSolidCells`/`destroyBodies` 网格静态体同步（physics2d 不依赖 Asset）；
 - M11-A6 已完成：Asset 侧 `TileMapPhysicsSync`（`IGridCollisionProvider` → solid cells → static bodies）；
   `tina_physics2d_tests` 25/25（Debug/Release）；
-- CharacterController2D axis-separated grid mover 已在集成支落地；后续仍待：接到 Physics2D/Tile solid、
-  正式 `tina_sample_2d` 产品接线（Catalog+TileMap+角色+Box2D+UI）；只有 bench p99 超预算才接入
-  Box2D worker callbacks；
+- CharacterController2D axis-separated grid mover 已在集成支落地；
+  `CharacterControllerPhysicsCoexistenceTest` 证明同一 Tile solid 可同时喂 grid controller 与
+  Physics2D static sync + dynamic body contact；后续仍待：正式 `tina_sample_2d` 产品接线
+  （Catalog+TileMap+角色+Box2D+UI）；只有 bench p99 超预算才接入 Box2D worker callbacks；
 - 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
 - 以当前游戏为正式 2D 产品门禁：Cooked TileMap/Tileset、Camera2D、chunk culling/dirty rebuild、
