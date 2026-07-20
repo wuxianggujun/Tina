@@ -37,7 +37,11 @@ void printUsage()
         << "  asset Texture2D <32hex> <payloadPath>\n"
         << "  asset Sprite <32hex> <payloadPath> <dep32hex:Texture2D>\n"
         << "  texture2d <32hex> <w> <h> <RRGGBBAA>...\n"
-        << "  sprite <32hex> <texture32hex> [u0 v0 u1 v1 pivotX pivotY ppu]\n";
+        << "  sprite <32hex> <texture32hex> [u0 v0 u1 v1 pivotX pivotY ppu]\n"
+        << "  tileset <32hex> <texture32hex> <tilePxW> <tilePxH>\n"
+        << "  tile <localId> <flags> <u0> <v0> <u1> <v1>\n"
+        << "  tilemap <32hex> <tileset32hex> <w> <h> <cellSize>\n"
+        << "  row <localId>...\n";
 }
 
 [[nodiscard]] int parseArgs(int argc, char** argv, Options& options)

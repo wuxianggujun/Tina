@@ -75,6 +75,10 @@ out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> --rec
 # pack.recipe may use inline typed lines, e.g.:
 #   texture2d <32hex> 1 1 FF0000FF
 #   sprite <32hex> <tex32hex> 0 0 1 1 0.5 0.5 16
+#   tileset <32hex> <tex32hex> 16 16
+#   tile 1 1 0 0 0.5 0.5
+#   tilemap <32hex> <tileset32hex> 2 2 1.0
+#   row 1 2
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot>
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --typed-payloads
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catalog=<catalogRoot>

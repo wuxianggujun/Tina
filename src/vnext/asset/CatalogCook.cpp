@@ -5,6 +5,8 @@
 #include <tina/asset/CatalogPackagePublish.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
+#include <tina/asset_format/TileMapPayload.hpp>
+#include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/io/ReadFile.hpp>
 
@@ -415,6 +417,109 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
 {
     CatalogCookRequest request{};
     std::pmr::unsynchronized_pool_resource memory;
+
+    // Multi-line builders for tileset/tilemap.
+    enum class MultiState : Core::u8 { None, Tileset, TileMap };
+    MultiState multi = MultiState::None;
+    Core::AssetId pendingTilesetId{};
+    Core::AssetId pendingTilesetTextureId{};
+    Core::u16 pendingTilePxW = 0;
+    Core::u16 pendingTilePxH = 0;
+    std::vector<AssetFormat::TilesetTileDesc> pendingTiles{};
+    Core::AssetId pendingMapId{};
+    Core::AssetId pendingMapTilesetId{};
+    Core::u32 pendingMapW = 0;
+    Core::u32 pendingMapH = 0;
+    float pendingCellSize = 1.0f;
+    std::vector<Core::u16> pendingMapTiles{};
+    Core::u32 pendingMapRows = 0;
+
+    auto flushTileset = [&]() -> Core::Status {
+        if (multi != MultiState::Tileset)
+        {
+            return Core::success();
+        }
+        if (pendingTiles.empty())
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tileset requires at least one tile line");
+        }
+        auto payload = AssetFormat::writeTilesetPayloadBytes(AssetFormat::TilesetPayloadDesc{
+            .tilePixelWidth = pendingTilePxW,
+            .tilePixelHeight = pendingTilePxH,
+            .tiles = pendingTiles,
+            .textureId = pendingTilesetTextureId,
+        });
+        if (!payload)
+        {
+            return Core::failure(std::move(payload.error()));
+        }
+        CatalogCookAssetSpec asset{
+            .assetKind = AssetFormat::AssetKind::Tileset,
+            .assetId = pendingTilesetId,
+            .assetTypeVersion = AssetFormat::TilesetWire::SchemaVersion,
+            .payload = std::move(*payload),
+        };
+        asset.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
+            .assetId = pendingTilesetTextureId,
+            .expectedKind = AssetFormat::AssetKind::Texture2D,
+            .flags = AssetFormat::DependencyFlags::Required,
+        });
+        request.assets.push_back(std::move(asset));
+        multi = MultiState::None;
+        pendingTiles.clear();
+        return Core::success();
+    };
+
+    auto flushTileMap = [&]() -> Core::Status {
+        if (multi != MultiState::TileMap)
+        {
+            return Core::success();
+        }
+        if (pendingMapRows != pendingMapH)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tilemap row count does not match height");
+        }
+        auto payload = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
+            .widthCells = pendingMapW,
+            .heightCells = pendingMapH,
+            .cellSizeMeters = pendingCellSize,
+            .tiles = pendingMapTiles,
+            .tilesetId = pendingMapTilesetId,
+        });
+        if (!payload)
+        {
+            return Core::failure(std::move(payload.error()));
+        }
+        CatalogCookAssetSpec asset{
+            .assetKind = AssetFormat::AssetKind::TileMap,
+            .assetId = pendingMapId,
+            .assetTypeVersion = AssetFormat::TileMapWire::SchemaVersion,
+            .payload = std::move(*payload),
+        };
+        asset.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
+            .assetId = pendingMapTilesetId,
+            .expectedKind = AssetFormat::AssetKind::Tileset,
+            .flags = AssetFormat::DependencyFlags::Required,
+        });
+        request.assets.push_back(std::move(asset));
+        multi = MultiState::None;
+        pendingMapTiles.clear();
+        pendingMapRows = 0;
+        return Core::success();
+    };
+
+    auto flushMulti = [&]() -> Core::Status {
+        if (multi == MultiState::Tileset)
+        {
+            return flushTileset();
+        }
+        if (multi == MultiState::TileMap)
+        {
+            return flushTileMap();
+        }
+        return Core::success();
+    };
+
     std::size_t cursor = 0;
     while (cursor <= recipeText.size())
     {
@@ -436,6 +541,59 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         {
             continue;
         }
+
+        // Continue multi-line blocks first.
+        if (multi == MultiState::Tileset && tokens[0] == "tile")
+        {
+            if (tokens.size() != 7)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "tile needs localId flags u0 v0 u1 v1");
+            }
+            Core::u32 localId = 0;
+            Core::u32 flags = 0;
+            AssetFormat::TilesetTileDesc tile{};
+            if (!parseU32Token(tokens[1], localId) || !parseU32Token(tokens[2], flags) ||
+                !parseFloatToken(tokens[3], tile.u0) || !parseFloatToken(tokens[4], tile.v0) ||
+                !parseFloatToken(tokens[5], tile.u1) || !parseFloatToken(tokens[6], tile.v1) || localId > 0xFFFFU ||
+                flags > 0xFFFFU)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid tile fields");
+            }
+            tile.localId = static_cast<Core::u16>(localId);
+            tile.materialFlags = static_cast<Core::u16>(flags);
+            pendingTiles.push_back(tile);
+            continue;
+        }
+        if (multi == MultiState::TileMap && tokens[0] == "row")
+        {
+            if (tokens.size() != 1U + pendingMapW)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "row width does not match tilemap width");
+            }
+            if (pendingMapRows >= pendingMapH)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "too many tilemap rows");
+            }
+            for (Core::u32 index = 0; index < pendingMapW; ++index)
+            {
+                Core::u32 cell = 0;
+                if (!parseU32Token(tokens[1U + index], cell) || cell > 0xFFFFU)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid tilemap cell id");
+                }
+                pendingMapTiles.push_back(static_cast<Core::u16>(cell));
+            }
+            ++pendingMapRows;
+            continue;
+        }
+
+        // Starting a new top-level directive flushes any open multi-line block.
+        if (const auto flushStatus = flushMulti(); !flushStatus)
+        {
+            return Core::failure(std::move(flushStatus.error()));
+        }
+
         if (tokens[0] == "platform")
         {
             if (tokens.size() != 2 || !isKnownPlatformName(tokens[1], request.targetPlatform))
@@ -462,6 +620,60 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
                 return Core::failure(std::move(asset.error()));
             }
             request.assets.push_back(std::move(*asset));
+            continue;
+        }
+        if (tokens[0] == "tileset")
+        {
+            // tileset <id> <textureId> <tilePxW> <tilePxH>
+            if (tokens.size() != 5)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "tileset needs id textureId tilePxW tilePxH");
+            }
+            auto tilesetId = Core::AssetId::parseCanonical(tokens[1]);
+            auto textureId = Core::AssetId::parseCanonical(tokens[2]);
+            Core::u32 tw = 0;
+            Core::u32 th = 0;
+            if (!tilesetId || !textureId || !parseU32Token(tokens[3], tw) || !parseU32Token(tokens[4], th) || tw == 0 ||
+                th == 0 || tw > 0xFFFFU || th > 0xFFFFU)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid tileset header fields");
+            }
+            multi = MultiState::Tileset;
+            pendingTilesetId = *tilesetId;
+            pendingTilesetTextureId = *textureId;
+            pendingTilePxW = static_cast<Core::u16>(tw);
+            pendingTilePxH = static_cast<Core::u16>(th);
+            pendingTiles.clear();
+            continue;
+        }
+        if (tokens[0] == "tilemap")
+        {
+            // tilemap <id> <tilesetId> <w> <h> <cellSize>
+            if (tokens.size() != 6)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "tilemap needs id tilesetId width height cellSize");
+            }
+            auto mapId = Core::AssetId::parseCanonical(tokens[1]);
+            auto tilesetId = Core::AssetId::parseCanonical(tokens[2]);
+            Core::u32 width = 0;
+            Core::u32 height = 0;
+            float cellSize = 0.0f;
+            if (!mapId || !tilesetId || !parseU32Token(tokens[3], width) || !parseU32Token(tokens[4], height) ||
+                !parseFloatToken(tokens[5], cellSize) || width == 0 || height == 0)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid tilemap header fields");
+            }
+            multi = MultiState::TileMap;
+            pendingMapId = *mapId;
+            pendingMapTilesetId = *tilesetId;
+            pendingMapW = width;
+            pendingMapH = height;
+            pendingCellSize = cellSize;
+            pendingMapTiles.clear();
+            pendingMapTiles.reserve(static_cast<std::size_t>(width) * height);
+            pendingMapRows = 0;
             continue;
         }
         if (tokens[0] != "asset" || tokens.size() < 4)
@@ -515,6 +727,10 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
             });
         }
         request.assets.push_back(std::move(asset));
+    }
+    if (const auto flushStatus = flushMulti(); !flushStatus)
+    {
+        return Core::failure(std::move(flushStatus.error()));
     }
     if (request.assets.empty())
     {

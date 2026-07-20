@@ -46,8 +46,12 @@ struct CatalogCookResult final {
 //   asset Material <32hexId> <payloadPath> <dep32hex:Kind> ...
 //   texture2d <32hexId> <width> <height> <hexRRGGBBAA> ...   // inline Rgba8Unorm pixels
 //   sprite <32hexId> <texture32hexId> [u0 v0 u1 v1 pivotX pivotY ppu]
+//   tileset <32hexId> <texture32hexId> <tilePxW> <tilePxH>
+//   tile <localId> <materialFlags> <u0> <v0> <u1> <v1>   // after tileset; ends at next non-tile
+//   tilemap <32hexId> <tileset32hexId> <widthCells> <heightCells> <cellSizeMeters>
+//   row <localId>...                                      // after tilemap; heightCells rows
 // Paths are relative to the recipe file directory unless absolute.
-// `texture2d`/`sprite` build typed payload v1 without pre-encoded files.
+// Inline typed lines build payload v1 without pre-encoded files.
 [[nodiscard]] Core::Result<CatalogCookRequest> loadCatalogCookRecipeFile(std::string_view recipeUtf8Path);
 
 // Parse recipe text with an explicit base directory for relative payload paths.

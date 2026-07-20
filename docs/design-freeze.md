@@ -473,3 +473,6 @@ M10-A25：BoundedTaskSystem 增加可选 CPU worker 队列与 `ITaskSystem::sche
 M10-A26：Tileset payload v1（header + TileEntry UV/materialFlags，依赖 Texture2D）；TileMap payload v1
 （单 layer 行列 cells + cellSizeMeters，依赖 Tileset）。`parseTilesetFromCooked`/`parseTileMapFromCooked`
 与 verifyTypedPayload 扩展。无 runtime TileMapInstance/chunk culling。
+
+M10-A27：recipe 增加多行 `tileset`+`tile` 与 `tilemap`+`row` 内联语法；`tina_assetc --recipe` 可直接
+发布 Texture2D→Tileset→TileMap 包并通过 typed validate。无 runtime TileMapInstance。
