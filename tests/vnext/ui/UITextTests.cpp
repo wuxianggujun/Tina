@@ -186,6 +186,62 @@ TEST(UITextTests, RejectsPanelTextInvalidUtf8AndTextByteCapacity)
     EXPECT_EQ(context->statistics().textByteUsed, 0U);
 }
 
+TEST(UITextTests, TextPlaceholderPaintEmitsPerCodepointSolidQuads)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+    const Platform::WindowId window = *windowResult;
+
+    auto context = createContext(
+        window,
+        UI::UIContextCapacityConfig{
+            .nodeCapacity = 8,
+            .rootCapacity = 1,
+            .paintSnapshotCapacity = 8,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle rootStyle{};
+    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
+
+    auto labelResult = updater.createLabel(root.rootNodeId());
+    ASSERT_TRUE(labelResult.has_value());
+    const UI::UINodeId label = *labelResult;
+    UI::UITextStyle style{};
+    style.color = {.red = 255, .green = 0, .blue = 0, .alpha = 128};
+    assertOk(updater.setTextStyle(label, style));
+    assertOk(updater.setText(label, "AB"));
+    assertOk(context->commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
+
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    ASSERT_EQ(paint.size(), 2U);
+    EXPECT_EQ(paint.entries()[0].node, label);
+    EXPECT_EQ(paint.entries()[1].node, label);
+    EXPECT_LT(paint.entries()[0].paintOrdinal, paint.entries()[1].paintOrdinal);
+    EXPECT_FLOAT_EQ(paint.entries()[0].worldRect.width, 16.0F * 0.6F);
+    EXPECT_FLOAT_EQ(
+        paint.entries()[1].worldRect.x,
+        paint.entries()[0].worldRect.x + paint.entries()[0].worldRect.width);
+    EXPECT_EQ(
+        paint.entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{
+            .red = 128,
+            .green = 0,
+            .blue = 0,
+            .alpha = 128,
+        }));
+
+    style.color.alpha = 0;
+    assertOk(updater.setTextStyle(label, style));
+    assertOk(context->commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
+    EXPECT_TRUE(context->committedPaint().empty());
+}
+
 TEST(UITextTests, SameTextIsNoOpAndClearingTextShrinksAutoSize)
 {
     auto windowsResult = WindowPool::Create(1);

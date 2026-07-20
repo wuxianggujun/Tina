@@ -625,6 +625,7 @@ struct UIContext::Impl final {
     std::pmr::vector<UIPointerHitPolicy> pointerHitPoliciesByIndex;
     std::pmr::vector<UIBoxPaint> boxPaintsByIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localSolidFillCacheByIndex;
+    std::pmr::vector<UIPremultipliedRgba8Color> localTextColorCacheByIndex;
     std::pmr::vector<WidgetTextState> textStatesByIndex;
     std::pmr::vector<char> textBytes;
     std::pmr::vector<TextByteAllocation> freeTextAllocations;
@@ -722,6 +723,7 @@ struct UIContext::Impl final {
           pointerHitPoliciesByIndex(&resource),
           boxPaintsByIndex(&resource),
           localSolidFillCacheByIndex(&resource),
+          localTextColorCacheByIndex(&resource),
           textStatesByIndex(&resource),
           textBytes(&resource),
           freeTextAllocations(&resource),
@@ -800,6 +802,7 @@ struct UIContext::Impl final {
             UIPointerHitPolicy::Ignore);
         impl->boxPaintsByIndex.resize(normalized.nodeCapacity);
         impl->localSolidFillCacheByIndex.resize(normalized.nodeCapacity);
+        impl->localTextColorCacheByIndex.resize(normalized.nodeCapacity);
         impl->textStatesByIndex.resize(normalized.nodeCapacity);
         impl->textBytes.resize(normalized.textByteCapacity, '\0');
         impl->freeTextAllocations.reserve(normalized.nodeCapacity);
@@ -1774,6 +1777,34 @@ struct UIContext::Impl final {
         return targetCount;
     }
 
+    [[nodiscard]] static usize countDrawableTextCodepoints(
+        std::string_view utf8) noexcept
+    {
+        usize count = 0;
+        usize index = 0;
+        while (index < utf8.size()) {
+            const auto first = static_cast<unsigned char>(utf8[index]);
+            usize unitLength = 1;
+            if (first <= 0x7FU) {
+                unitLength = 1;
+            } else if ((first & 0xE0U) == 0xC0U) {
+                unitLength = 2;
+            } else if ((first & 0xF0U) == 0xE0U) {
+                unitLength = 3;
+            } else {
+                unitLength = 4;
+            }
+            if (unitLength > utf8.size() - index) {
+                break;
+            }
+            if (!(unitLength == 1 && first == '\n')) {
+                ++count;
+            }
+            index += unitLength;
+        }
+        return count;
+    }
+
     [[nodiscard]] Core::Result<usize> validatePaintCandidateCapacity(
         std::span<const UICommittedLayoutEntry> layoutEntries) const
     {
@@ -1787,10 +1818,17 @@ struct UIContext::Impl final {
                     UIErrorCode::InvalidNode,
                     "UI paint snapshot layout references a stale node");
             }
-            const UIBoxPaint& paint = boxPaintsByIndex[layoutEntry.node.index()];
+            const u32 nodeIndex = layoutEntry.node.index();
+            const UIBoxPaint& paint = boxPaintsByIndex[nodeIndex];
             if (paint.solidFill.has_value()
                 && paint.solidFill->color.alpha != 0) {
                 ++paintEntryCount;
+            }
+            if (nodeIndex < textStatesByIndex.size()
+                && textStatesByIndex[nodeIndex].hasContent
+                && textStatesByIndex[nodeIndex].style.color.alpha != 0) {
+                paintEntryCount += countDrawableTextCodepoints(
+                    textViewFor(nodeIndex));
             }
         }
         if (paintEntryCount > capacityConfig.paintSnapshotCapacity) {
@@ -1816,9 +1854,85 @@ struct UIContext::Impl final {
             localSolidFillCacheByIndex[nodeIndex] = paint.solidFill.has_value()
                 ? premultiply(paint.solidFill->color)
                 : UIPremultipliedRgba8Color{};
+            localTextColorCacheByIndex[nodeIndex] =
+                nodeIndex < textStatesByIndex.size()
+                    && textStatesByIndex[nodeIndex].hasContent
+                ? premultiply(textStatesByIndex[nodeIndex].style.color)
+                : UIPremultipliedRgba8Color{};
             ++rebuildCount;
         }
         return rebuildCount;
+    }
+
+    void appendTextPlaceholderPaints(
+        std::pmr::vector<UICommittedPaintEntry>& output,
+        const UICommittedLayoutEntry& layoutEntry,
+        u32& nextPaintOrdinal) const noexcept
+    {
+        const u32 nodeIndex = layoutEntry.node.index();
+        if (nodeIndex >= textStatesByIndex.size()
+            || !textStatesByIndex[nodeIndex].hasContent) {
+            return;
+        }
+        const UIPremultipliedRgba8Color color = localTextColorCacheByIndex[nodeIndex];
+        if (color.isTransparent()) {
+            return;
+        }
+
+        const WidgetTextState& state = textStatesByIndex[nodeIndex];
+        const float advance =
+            state.style.logicalSize * state.style.advanceScale;
+        const float lineHeight =
+            state.style.logicalSize * state.style.lineHeightScale;
+        if (!(std::isfinite(advance) && advance > 0.0F
+              && std::isfinite(lineHeight) && lineHeight > 0.0F)) {
+            return;
+        }
+
+        const std::string_view utf8 = textViewFor(nodeIndex);
+        float cursorX = layoutEntry.worldRect.x;
+        float cursorY = layoutEntry.worldRect.y;
+        usize index = 0;
+        while (index < utf8.size()) {
+            const auto first = static_cast<unsigned char>(utf8[index]);
+            usize unitLength = 1;
+            if (first <= 0x7FU) {
+                unitLength = 1;
+            } else if ((first & 0xE0U) == 0xC0U) {
+                unitLength = 2;
+            } else if ((first & 0xF0U) == 0xE0U) {
+                unitLength = 3;
+            } else {
+                unitLength = 4;
+            }
+            if (unitLength > utf8.size() - index) {
+                break;
+            }
+
+            if (unitLength == 1 && first == '\n') {
+                cursorX = layoutEntry.worldRect.x;
+                cursorY = normalizeFloat(cursorY + lineHeight);
+                index += unitLength;
+                continue;
+            }
+
+            const UILogicalRect glyphRect{
+                .x = normalizeFloat(cursorX),
+                .y = normalizeFloat(cursorY),
+                .width = normalizeFloat(advance),
+                .height = normalizeFloat(lineHeight),
+            };
+            output.push_back(UICommittedPaintEntry{
+                .node = layoutEntry.node,
+                .worldRect = glyphRect,
+                .effectiveClip = layoutEntry.effectiveClip,
+                .paintOrdinal = nextPaintOrdinal,
+                .solidFill = color,
+            });
+            ++nextPaintOrdinal;
+            cursorX = normalizeFloat(cursorX + advance);
+            index += unitLength;
+        }
     }
 
     void buildCommittedPaint(
@@ -1826,22 +1940,25 @@ struct UIContext::Impl final {
         std::span<const UICommittedLayoutEntry> layoutEntries) const noexcept
     {
         output.clear();
+        u32 nextPaintOrdinal = 1;
         for (const UICommittedLayoutEntry& layoutEntry : layoutEntries) {
             if (layoutEntry.effectiveVisibility != UIVisibility::Visible) {
                 continue;
             }
+            const u32 nodeIndex = layoutEntry.node.index();
             const UIPremultipliedRgba8Color fill =
-                localSolidFillCacheByIndex[layoutEntry.node.index()];
-            if (fill.isTransparent()) {
-                continue;
+                localSolidFillCacheByIndex[nodeIndex];
+            if (!fill.isTransparent()) {
+                output.push_back(UICommittedPaintEntry{
+                    .node = layoutEntry.node,
+                    .worldRect = layoutEntry.worldRect,
+                    .effectiveClip = layoutEntry.effectiveClip,
+                    .paintOrdinal = nextPaintOrdinal,
+                    .solidFill = fill,
+                });
+                ++nextPaintOrdinal;
             }
-            output.push_back(UICommittedPaintEntry{
-                .node = layoutEntry.node,
-                .worldRect = layoutEntry.worldRect,
-                .effectiveClip = layoutEntry.effectiveClip,
-                .paintOrdinal = layoutEntry.paintOrdinal,
-                .solidFill = fill,
-            });
+            appendTextPlaceholderPaints(output, layoutEntry, nextPaintOrdinal);
         }
     }
 
@@ -2466,6 +2583,7 @@ struct UIContext::Impl final {
         pointerHitPoliciesByIndex[index] = UIPointerHitPolicy::Ignore;
         boxPaintsByIndex[index] = {};
         localSolidFillCacheByIndex[index] = {};
+        localTextColorCacheByIndex[index] = {};
         clearTextState(index);
         dirtyByIndex[index] = UIDirty::None;
         dirtyQueuedByIndex[index] = 0;

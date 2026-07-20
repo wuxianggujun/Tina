@@ -221,7 +221,10 @@ TEST_F(UIPaintSnapshotTest, PublishesOnlyVisibleNonTransparentSolidFillsInPaintO
     EXPECT_EQ(entry.node, painted);
     EXPECT_EQ(entry.worldRect, context->committedLayout().entries()[1].worldRect);
     EXPECT_EQ(entry.effectiveClip, context->committedLayout().entries()[1].effectiveClip);
-    EXPECT_EQ(entry.paintOrdinal, context->committedLayout().entries()[1].paintOrdinal);
+    // Paint ordinals are unique within the paint snapshot. They track paint
+    // emission order (box fill then optional text fallback quads) and no longer
+    // need to equal layout paint ordinals once a node can emit multiple quads.
+    EXPECT_EQ(entry.paintOrdinal, 1U);
     EXPECT_EQ(
         entry.solidFill,
         (UI::UIPremultipliedRgba8Color{
@@ -283,7 +286,7 @@ TEST_F(UIPaintSnapshotTest, MultipleRootsAndSiblingsPublishUniqueStrictPaintOrdi
         const UI::UICommittedLayoutEntry* const layoutEntry =
             findLayoutEntry(layout, entry.node);
         ASSERT_NE(layoutEntry, nullptr);
-        EXPECT_EQ(entry.paintOrdinal, layoutEntry->paintOrdinal);
+        EXPECT_EQ(entry.worldRect, layoutEntry->worldRect);
         if (index != 0) {
             EXPECT_LT(
                 paint.entries()[index - 1].paintOrdinal,
