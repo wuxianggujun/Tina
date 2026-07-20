@@ -314,8 +314,32 @@ class DesktopSmokeState final : public Tina::IGameState {
             }
         }
 
-        // M7-D2: monospaced SolidQuad text fallback (not FreeType glyphs). Each
-        // drawable codepoint becomes one UI SolidQuad through the existing pass.
+        // Monospaced SolidQuad text fallback (not FreeType glyphs). Each drawable
+        // codepoint is a solid bar; real glyphs remain a later M7 slice. Place
+        // labels on a dark rail with high-contrast colors so the bars are obvious.
+        {
+            auto textRail = tree->createPanel(root->rootNodeId());
+            if (!textRail)
+            {
+                return Tina::Core::failure(std::move(textRail.error()));
+            }
+            if (auto status = tree->setLayoutStyle(
+                    *textRail,
+                    absolutePanelStyle(
+                        Tina::UI::UILayoutLength::Px(48.0F),
+                        Tina::UI::UILayoutLength::Px(360.0F),
+                        Tina::UI::UILayoutLength::Px(720.0F),
+                        Tina::UI::UILayoutLength::Px(140.0F)));
+                !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setBoxPaint(*textRail, solidFill(8, 10, 18)); !status)
+            {
+                return status;
+            }
+        }
+
         struct LabelSpec final {
             Tina::UI::UILayoutStyle layout{};
             std::string_view text{};
@@ -324,32 +348,34 @@ class DesktopSmokeState final : public Tina::IGameState {
         const LabelSpec labels[] = {
             {
                 .layout = absolutePanelStyle(
-                    Tina::UI::UILayoutLength::Px(80.0F),
-                    Tina::UI::UILayoutLength::Px(88.0F),
-                    Tina::UI::UILayoutLength::Px(400.0F),
-                    Tina::UI::UILayoutLength::Px(40.0F)),
+                    Tina::UI::UILayoutLength::Px(64.0F),
+                    Tina::UI::UILayoutLength::Px(376.0F),
+                    Tina::UI::UILayoutLength::Px(680.0F),
+                    Tina::UI::UILayoutLength::Px(48.0F)),
                 .text = "Tina UI",
                 .style =
                     Tina::UI::UITextStyle{
-                        .logicalSize = 28.0F,
-                        .advanceScale = 0.55F,
-                        .lineHeightScale = 1.1F,
-                        .color = {.red = 236, .green = 244, .blue = 255, .alpha = 255},
+                        .logicalSize = 36.0F,
+                        .advanceScale = 0.7F,
+                        .lineHeightScale = 1.2F,
+                        // High-contrast cyan bars on the dark rail.
+                        .color = {.red = 0, .green = 255, .blue = 255, .alpha = 255},
                     },
             },
             {
                 .layout = absolutePanelStyle(
-                    Tina::UI::UILayoutLength::Px(80.0F),
-                    Tina::UI::UILayoutLength::Px(132.0F),
-                    Tina::UI::UILayoutLength::Px(400.0F),
-                    Tina::UI::UILayoutLength::Px(40.0F)),
+                    Tina::UI::UILayoutLength::Px(64.0F),
+                    Tina::UI::UILayoutLength::Px(432.0F),
+                    Tina::UI::UILayoutLength::Px(680.0F),
+                    Tina::UI::UILayoutLength::Px(48.0F)),
                 .text = "中文占位",
                 .style =
                     Tina::UI::UITextStyle{
-                        .logicalSize = 28.0F,
-                        .advanceScale = 0.55F,
-                        .lineHeightScale = 1.1F,
-                        .color = {.red = 255, .green = 214, .blue = 102, .alpha = 255},
+                        .logicalSize = 36.0F,
+                        .advanceScale = 0.7F,
+                        .lineHeightScale = 1.2F,
+                        // High-contrast amber bars (still not FreeType glyphs).
+                        .color = {.red = 255, .green = 200, .blue = 0, .alpha = 255},
                     },
             },
         };

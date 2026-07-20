@@ -640,7 +640,8 @@ generation `UIGlyphId`；clear 使旧 id 失效）。当前仅库级 API + `UIGl
 M7-D8：`Tina::Render` DisplayList 支持 `Glyph` 命令与 `addGlyphQuad`（atlas UV/page、batch 切分）。
 
 M7-D9：bgfx UI 使用 textured 程序 + R8 atlas 上传 API；Solid 绑 1×1 白贴图，Glyph 绑 atlas page。
-UIContext paint 仍默认 SolidQuad 色块，尚未把 `UIGlyphAtlas` placement 接到 DisplayList。
+UIContext paint 仍默认 SolidQuad **色块占位**，尚未把 `UIGlyphAtlas` placement 接到 DisplayList。
+因此 Desktop 样例“有字”时看起来是一排高对比色条，而不是可读中英文字形；这是当前设计边界。
 
 Runtime 不按路径打开字体。Cooked `FontAsset` 提供 owning bytes、face metadata 和确定 fallback
 chain；UI 持有 `AssetLease<FontData>`。FreeType 类型只存在于 `tina_ui_freetype`。

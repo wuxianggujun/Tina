@@ -357,8 +357,9 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   committed paint 中发一个 monospaced SolidQuad（`\n` 换行、不绘制），paint ordinal 在 snapshot 内严格
   递增；计入 `paintSnapshotCapacity`。仍不链接 FreeType，也不新增 Glyph DisplayList 命令。
 - **已完成 M7-D2（Desktop 文本占位 smoke）**：`tina_sample_desktop` 在既有 4-panel SolidFill 上增加
-  2 个 Label（Latin + 中文 UTF-8），经现有 SolidQuad UI pass 显示 monospaced 色块占位；计数
-  `uiTextLabelsCreated`。这不是字形/FreeType 产品门禁。
+  2 个 Label（Latin + 中文 UTF-8），经现有 SolidQuad UI pass 显示 monospaced **色块占位**（不是真字形）；
+  计数 `uiTextLabelsCreated`。后续把色块放到深色 rail + 高对比 cyan/amber，便于肉眼确认；
+  这不是 FreeType/Glyph 产品门禁。
 - **已完成 M7-D3（文本 raster SPI + FreeType adapter 骨架）**：公共 `IUITextRasterizer` /
   `createPlaceholderTextRasterizer`（始终在 `tina_ui`，无 FreeType）；可选
   `TINA_BUILD_UI_FREETYPE` + vcpkg feature `ui-freetype` 构建 `Tina::UIFreetype` 与
