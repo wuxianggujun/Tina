@@ -129,10 +129,10 @@ void writeSprite(const RenderSprite2DItem& sprite, std::span<BgfxSprite2DVertex>
     const float axisYx = -sine * halfHeight;
     const float axisYy = cosine * halfHeight;
 
-    const float leftU = sprite.flipX ? 1.0F : 0.0F;
-    const float rightU = sprite.flipX ? 0.0F : 1.0F;
-    const float topV = sprite.flipY ? 1.0F : 0.0F;
-    const float bottomV = sprite.flipY ? 0.0F : 1.0F;
+    const float leftU = sprite.flipX ? sprite.u1 : sprite.u0;
+    const float rightU = sprite.flipX ? sprite.u0 : sprite.u1;
+    const float topV = sprite.flipY ? sprite.v0 : sprite.v1;
+    const float bottomV = sprite.flipY ? sprite.v1 : sprite.v0;
     const u32 color = packAbgr(sprite);
 
     vertices[0] = BgfxSprite2DVertex{

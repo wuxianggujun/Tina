@@ -447,3 +447,6 @@ M10-A18：`verifyTypedPayload` 在 content 校验后解析 Texture2D/Sprite v1�
 
 M10-A19：recipe 增加 `texture2d id w h RRGGBBAA...` 与 `sprite id texId [uv/pivot/ppu]`，直接生成
 typed payload v1，无需预编码 payload 文件。
+
+M10-A20：`RenderSprite2DInput/Item` 增加 UV 矩形；`makeSpriteRenderInput` 从 typed Sprite/Texture
+生成绘制输入（尺寸/UV/pivot）；bgfx Sprite2D geometry 使用 item UV（仍无纹理采样，fixture shader 用 UV 渐变）。

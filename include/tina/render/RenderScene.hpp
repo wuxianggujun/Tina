@@ -60,10 +60,10 @@ struct RenderCamera2DInput final {
     RenderPixelSnapPolicy pixelSnap = RenderPixelSnapPolicy::Disabled;
 };
 
-// spriteKey is an M8 fixture resource key. M10 replaces it with a resolved
-// FrameResourceRef without changing the render item ownership boundary. The
-// position is the resolved geometric center; Scene/Asset extraction applies
-// any authored pivot before writing this render-facing value.
+// spriteKey is an M8 fixture resource key / product resource id seed for now.
+// UV rect defaults to full texture [0,1]; typed Sprite payload extraction may
+// override it. The position is the resolved geometric center; Scene/Asset
+// extraction applies any authored pivot before writing this render-facing value.
 struct RenderSprite2DInput final {
     u32 spriteKey = 0;
     u64 stableEntityKey = 0;
@@ -74,6 +74,10 @@ struct RenderSprite2DInput final {
     float heightMeters = 1.0F;
     float scaleX = 1.0F;
     float scaleY = 1.0F;
+    float u0 = 0.0F;
+    float v0 = 0.0F;
+    float u1 = 1.0F;
+    float v1 = 1.0F;
     i16 sortingLayer = 0;
     i32 orderInLayer = 0;
     u8 red = 255;
@@ -164,6 +168,10 @@ struct RenderSprite2DItem final {
     float heightMeters = 1.0F;
     float scaleX = 1.0F;
     float scaleY = 1.0F;
+    float u0 = 0.0F;
+    float v0 = 0.0F;
+    float u1 = 1.0F;
+    float v1 = 1.0F;
     i16 sortingLayer = 0;
     i32 orderInLayer = 0;
     u8 red = 255;

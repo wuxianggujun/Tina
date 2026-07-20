@@ -1,3 +1,4 @@
+#include <tina/asset/AssetSpriteRender.hpp>
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
 #include <tina/asset/CatalogCook.hpp>
@@ -5,6 +6,7 @@
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/render/RenderScene.hpp>
 #include <tina/render/UploadTicket.hpp>
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 
@@ -293,7 +295,12 @@ int main(int argc, char** argv)
     Tina::Core::u16 texW = 0;
     Tina::Core::u16 texH = 0;
     float ppu = 0.0f;
+    float renderW = 0.0f;
+    float renderH = 0.0f;
+    float renderU0 = 0.0f;
+    float renderU1 = 0.0f;
     bool parsedTyped = false;
+    bool renderInputOk = false;
     if (const auto* file = lease->get())
     {
         if (file->header().assetKind == Tina::AssetFormat::AssetKind::Sprite)
@@ -303,9 +310,11 @@ int main(int argc, char** argv)
                 ppu = sprite->pixelsPerUnit;
                 parsedTyped = true;
             }
+            const Tina::Asset::CookedAssetFile* texFile = nullptr;
             if (auto texHandle = system->findFirstLoadedOfKind(Tina::AssetFormat::AssetKind::Texture2D))
             {
-                if (const auto* texFile = system->tryGet(*texHandle))
+                texFile = system->tryGet(*texHandle);
+                if (texFile != nullptr)
                 {
                     if (auto tex = Tina::Asset::parseTexture2DFromCooked(*texFile))
                     {
@@ -314,6 +323,19 @@ int main(int argc, char** argv)
                         parsedTyped = true;
                     }
                 }
+            }
+            if (auto render = Tina::Asset::makeSpriteRenderInput(*file, texFile,
+                                                                 Tina::Asset::SpriteRenderParams{
+                                                                     .stableEntityKey = 1,
+                                                                     .centerX = 0.0f,
+                                                                     .centerY = 0.0f,
+                                                                 }))
+            {
+                renderInputOk = true;
+                renderW = render->widthMeters;
+                renderH = render->heightMeters;
+                renderU0 = render->u0;
+                renderU1 = render->u1;
             }
         } else if (file->header().assetKind == Tina::AssetFormat::AssetKind::Texture2D)
         {
@@ -346,6 +368,9 @@ int main(int argc, char** argv)
               << ",\"typedPayload\":" << (parsedTyped ? "true" : "false")
               << ",\"textureWidth\":" << texW << ",\"textureHeight\":" << texH
               << ",\"spritePpu\":" << ppu
+              << ",\"renderInputOk\":" << (renderInputOk ? "true" : "false")
+              << ",\"renderWidth\":" << renderW << ",\"renderHeight\":" << renderH
+              << ",\"renderU0\":" << renderU0 << ",\"renderU1\":" << renderU1
               << ",\"task\":\"bounded_io\""
               << ",\"upload\":\"null_ledger\""
               << ",\"catalog\":\"" << (options.catalogRoot.empty() ? "synthetic" : "external") << "\"}\n";

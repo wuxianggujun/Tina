@@ -413,7 +413,9 @@ Core::Status RenderSceneBuilder::validateSprite(const RenderSprite2DInput& sprit
         !finite(sprite.heightMeters) || !finite(sprite.scaleX) || !finite(sprite.scaleY) ||
         sprite.widthMeters <= 0.0F || sprite.heightMeters <= 0.0F || sprite.scaleX == 0.0F ||
         sprite.scaleY == 0.0F || !finite(scaledWidth) || !finite(scaledHeight) || scaledWidth <= 0.0F ||
-        scaledHeight <= 0.0F)
+        scaledHeight <= 0.0F || !finite(sprite.u0) || !finite(sprite.v0) || !finite(sprite.u1) ||
+        !finite(sprite.v1) || sprite.u0 < 0.0F || sprite.v0 < 0.0F || sprite.u1 > 1.0F || sprite.v1 > 1.0F ||
+        !(sprite.u0 < sprite.u1) || !(sprite.v0 < sprite.v1))
     {
         return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
                              "RenderScene Sprite2D contains invalid geometry or resource values");
@@ -580,6 +582,10 @@ Core::Status RenderSceneBuilder::addSprite2D(const RenderSprite2DInput& sprite)
         .heightMeters = sprite.heightMeters,
         .scaleX = sprite.scaleX,
         .scaleY = sprite.scaleY,
+        .u0 = sprite.u0,
+        .v0 = sprite.v0,
+        .u1 = sprite.u1,
+        .v1 = sprite.v1,
         .sortingLayer = sprite.sortingLayer,
         .orderInLayer = sprite.orderInLayer,
         .red = sprite.red,

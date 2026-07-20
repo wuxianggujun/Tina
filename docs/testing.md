@@ -69,6 +69,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A17 catalog helpers | Debug/Release C++23 | 见实现门禁 | openAndBindCatalog + kind find + typed views；`tina_asset_tests` 77 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A18 typed payload validation | Debug/Release C++23 | 见实现门禁 | verifyTypedPayload 接受/拒绝；CLI --typed-payloads；`tina_asset_tests` 79 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A19 inline typed recipe | Debug/Release C++23 | 见实现门禁 | texture2d/sprite 内联 recipe→publish→typed validate→sample；`tina_asset_tests` 80 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A20 sprite UV render bridge | Debug/Release C++23 | 见实现门禁 | makeSpriteRenderInput UV/size；render scene 22；`tina_asset_tests` 81 |
 
 
 
