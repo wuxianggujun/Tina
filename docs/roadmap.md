@@ -356,6 +356,9 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - **已完成 M7-D1（文本 SolidQuad fallback paint）**：有文本且颜色非透明时，每个 drawable codepoint 在
   committed paint 中发一个 monospaced SolidQuad（`\n` 换行、不绘制），paint ordinal 在 snapshot 内严格
   递增；计入 `paintSnapshotCapacity`。仍不链接 FreeType，也不新增 Glyph DisplayList 命令。
+- **已完成 M7-D2（Desktop 文本占位 smoke）**：`tina_sample_desktop` 在既有 4-panel SolidFill 上增加
+  2 个 Label（Latin + 中文 UTF-8），经现有 SolidQuad UI pass 显示 monospaced 色块占位；计数
+  `uiTextLabelsCreated`。这不是字形/FreeType 产品门禁。
 - **仍后置**：`tina_ui_freetype` 只在生产 adapter 中使用 FreeType，text layout 与 glyph raster 分离，
   Atlas 带 generation/预算/retirement；
 - 在已完成私有 `tina_render_bgfx` SolidQuad UI Pass 的基础上扩展 Image/Glyph 命令、Atlas texture upload

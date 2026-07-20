@@ -6,6 +6,7 @@
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPaint.hpp>
+#include <tina/ui/UIText.hpp>
 
 #include <charconv>
 #include <chrono>
@@ -40,6 +41,7 @@ struct LifecycleCounters final {
     u64 applicationShutdowns = 0;
     u64 uiRootsCreated = 0;
     u64 uiPaintedPanelsCreated = 0;
+    u64 uiTextLabelsCreated = 0;
     u64 uiRootsReleased = 0;
 };
 
@@ -312,9 +314,71 @@ class DesktopSmokeState final : public Tina::IGameState {
             }
         }
 
+        // M7-D2: monospaced SolidQuad text fallback (not FreeType glyphs). Each
+        // drawable codepoint becomes one UI SolidQuad through the existing pass.
+        struct LabelSpec final {
+            Tina::UI::UILayoutStyle layout{};
+            std::string_view text{};
+            Tina::UI::UITextStyle style{};
+        };
+        const LabelSpec labels[] = {
+            {
+                .layout = absolutePanelStyle(
+                    Tina::UI::UILayoutLength::Px(80.0F),
+                    Tina::UI::UILayoutLength::Px(88.0F),
+                    Tina::UI::UILayoutLength::Px(400.0F),
+                    Tina::UI::UILayoutLength::Px(40.0F)),
+                .text = "Tina UI",
+                .style =
+                    Tina::UI::UITextStyle{
+                        .logicalSize = 28.0F,
+                        .advanceScale = 0.55F,
+                        .lineHeightScale = 1.1F,
+                        .color = {.red = 236, .green = 244, .blue = 255, .alpha = 255},
+                    },
+            },
+            {
+                .layout = absolutePanelStyle(
+                    Tina::UI::UILayoutLength::Px(80.0F),
+                    Tina::UI::UILayoutLength::Px(132.0F),
+                    Tina::UI::UILayoutLength::Px(400.0F),
+                    Tina::UI::UILayoutLength::Px(40.0F)),
+                .text = "中文占位",
+                .style =
+                    Tina::UI::UITextStyle{
+                        .logicalSize = 28.0F,
+                        .advanceScale = 0.55F,
+                        .lineHeightScale = 1.1F,
+                        .color = {.red = 255, .green = 214, .blue = 102, .alpha = 255},
+                    },
+            },
+        };
+
+        for (const LabelSpec& labelSpec : labels)
+        {
+            auto label = tree->createLabel(root->rootNodeId());
+            if (!label)
+            {
+                return Tina::Core::failure(std::move(label.error()));
+            }
+            if (auto status = tree->setLayoutStyle(*label, labelSpec.layout); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setTextStyle(*label, labelSpec.style); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setText(*label, labelSpec.text); !status)
+            {
+                return status;
+            }
+        }
+
         uiRoot_ = std::move(*root);
         ++counters_.uiRootsCreated;
         counters_.uiPaintedPanelsCreated += std::size(panels);
+        counters_.uiTextLabelsCreated += std::size(labels);
         return Tina::Core::success();
     }
 
@@ -412,7 +476,7 @@ class DesktopSmokeApplication final : public Tina::IGameApplication {
     }
     if (counters.frameUpdates != options.targetFrameCount || counters.stateEnters != 1 || counters.stateExits != 1 ||
         counters.applicationShutdowns != 1 || counters.uiRootsCreated != 1 || counters.uiPaintedPanelsCreated != 4 ||
-        counters.uiRootsReleased != 1)
+        counters.uiTextLabelsCreated != 2 || counters.uiRootsReleased != 1)
     {
         Tina::Core::Error error{Tina::Core::CoreErrorCode::Internal,
                                 "The desktop smoke sample lifecycle counters did not match their contract"};
@@ -424,6 +488,7 @@ class DesktopSmokeApplication final : public Tina::IGameApplication {
                              ", applicationShutdowns=" + std::to_string(counters.applicationShutdowns) +
                              ", uiRootsCreated=" + std::to_string(counters.uiRootsCreated) +
                              ", uiPaintedPanelsCreated=" + std::to_string(counters.uiPaintedPanelsCreated) +
+                             ", uiTextLabelsCreated=" + std::to_string(counters.uiTextLabelsCreated) +
                              ", uiRootsReleased=" + std::to_string(counters.uiRootsReleased));
         return Tina::Core::failure(std::move(error));
     }
@@ -471,6 +536,7 @@ class DesktopSmokeApplication final : public Tina::IGameApplication {
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
               << ",\"uiRootsCreated\":" << counters.uiRootsCreated
               << ",\"uiPaintedPanelsCreated\":" << counters.uiPaintedPanelsCreated
+              << ",\"uiTextLabelsCreated\":" << counters.uiTextLabelsCreated
               << ",\"uiRootsReleased\":" << counters.uiRootsReleased << "}\n";
     return 0;
 }
