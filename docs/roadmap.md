@@ -461,6 +461,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   已加载项；仍无 Handle/Lease 与异步 IO；
 - M10-A2f 已完成 `validateCatalogPackageOnDisk`：严格 UTF-8 root，按 Catalog entry 校验磁盘 object
   常规文件/大小，可选强制 ContentHash+entry 对齐；不枚举目录、不保留加载结果；仍无 Handle/Lease；
+- M10-A2g 已完成 `openCatalogPackage`：catalogRoot/manifest.tmnft → CatalogSnapshot，可选打开时
+  校验整包；失败不发布；仍无 Handle/Lease；
 - 弱 Handle/强 Lease 需先确认 ADR 0016；UploadTicket/retirement 和事务 Manifest writer 继续后置；
 - 不接受 ADR 0016 时，可继续独立 `tina_catalog_validate` CLI、包诊断摘要与文档样例；这些工具不得
   偷偷引入 registry、异步任务或生命周期所有权；

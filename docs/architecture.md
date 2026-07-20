@@ -160,6 +160,7 @@ startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 r
 | vNext M10-A2d Catalog load order | 已完成依赖加载序切片 | `computeCatalogLoadOrder` 对请求 AssetId 做依赖展开与 dependencies-first entry index 序（迭代、去重、PMR）。不实现 Handle/Lease 或异步调度 |
 | vNext M10-A2e Batch cooked load | 已完成批量同步加载切片 | `loadCookedAssetsFromCatalog` 按 load-order 同步加载 owning `CookedAssetFile`，失败回滚已加载项。不实现 Handle/Lease 或异步 IO |
 | vNext M10-A2f Catalog package validate | 已完成磁盘包校验切片 | `validateCatalogPackageOnDisk` 以严格 UTF-8 Catalog root 校验每个 entry 的确定性 object path；metadata-only 校验常规文件与精确大小，full 模式强制 ContentHash+entry 对齐且同时最多持有一个对象。不枚举目录、不保留加载结果。不实现 Handle/Lease 或 CLI |
+| vNext M10-A2g Catalog package open | 已完成打开入口切片 | `openCatalogPackage` 读 `manifest.tmnft`（或安全相对路径）建 Snapshot，可选打开时整包校验；失败不发布。不实现 Handle/Lease |
 | vNext GLFW 边界 | 已形成可运行切片 |
  `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
 | 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene component-integrated extraction、AssetSystem/Audio、owning UI packet/pin、Text/Glyph/完整 Widget 与 submission drain 仍按后续切片实施；M8-A World/Transform、M8-B 2D extraction、M9-A 3D CPU/Null extraction、M9-B Opaque3D fixture、M9-C Sprite2D fixture、M10-A0 wire format、M10-A1 CatalogSnapshot、Desktop SolidFill 可见样例、standalone UI/Render/bridge foundation、Runtime-private route/layout/startup/display borrow 接线、Button primary-pointer default action 和私有 bgfx SolidQuad pass 不代表完整产品路径完成 |
