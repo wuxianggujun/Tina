@@ -46,7 +46,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A5 已实现主线程 `request`/`pump` 与 Queued/Loading/Failed；
   M10-A6 已实现有界 IO Task + Asset pump 异步读盘（Main completion 提交）；
   M10-A7 已实现 Desktop 默认 BoundedTask + Null UploadTicket 账本；
-  CPU TaskGroup、bgfx UploadTicket/ReadyGpu、增量 Cooker 与产品资产仍未实现。
+  M10-A8 已实现 ReadyCpu→UploadQueued→ReadyGpu 与 AssetGpuUploadCoordinator；
+  CPU TaskGroup、bgfx 真实 upload、增量 Cooker 与产品资产仍未实现。
 
 
 ## 下一阶段契约

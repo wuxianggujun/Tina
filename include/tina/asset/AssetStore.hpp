@@ -32,14 +32,20 @@ struct AssetHandle final {
     [[nodiscard]] friend constexpr bool operator==(const AssetHandle&, const AssetHandle&) = default;
 };
 
+// Ready is kept as an alias name for CPU-ready in docs/tests; enum value is ReadyCpu.
 enum class AssetLogicalState : Core::u8 {
     Queued = 1,
     Loading = 2,
-    Ready = 3,
-    Failed = 4,
-    UnloadPending = 5,
-    Unloaded = 6,
+    ReadyCpu = 3,
+    UploadQueued = 4,
+    ReadyGpu = 5,
+    Failed = 6,
+    UnloadPending = 7,
+    Unloaded = 8,
 };
+
+// Backward-compatible alias used by existing call sites that mean "CPU payload is available".
+inline constexpr AssetLogicalState Ready = AssetLogicalState::ReadyCpu;
 
 struct AssetStoreConfig final {
     Core::usize capacity = 0;
@@ -82,9 +88,9 @@ class AssetLease final {
     AssetHandle m_handle{};
 };
 
-// Owner-thread CPU asset registry (ADR 0016).
-// Supports Queued/Loading/Ready/Failed plus weak Handle and strong Lease.
-// No GPU UploadTicket, FramePin, or physical retirement ledger in this slice.
+// Owner-thread asset registry (ADR 0016).
+// Queued→Loading→ReadyCpu→UploadQueued→ReadyGpu (+ Failed/UnloadPending).
+// GPU fence is external (NullUploadLedger poll); this store only tracks logical state.
 class AssetStore final {
   public:
     AssetStore() = delete;
@@ -101,32 +107,34 @@ class AssetStore final {
     [[nodiscard]] Core::usize activeCount() const noexcept;
     [[nodiscard]] Core::usize availableCount() const noexcept;
 
-    // Immediate Ready publish (sync path). Empty files are rejected.
+    // Immediate ReadyCpu publish (sync path). Empty files are rejected.
     [[nodiscard]] Core::Result<AssetHandle> publish(CookedAssetFile asset);
 
-    // Deferred path: create a Queued slot without payload.
     [[nodiscard]] Core::Result<AssetHandle> beginQueued(Core::AssetId assetId, AssetFormat::AssetKind assetKind);
-
-    // Queued → Loading. Rejects other states.
     [[nodiscard]] Core::Status markLoading(AssetHandle handle) noexcept;
-
-    // Loading/Queued → Ready with owning payload. assetId must match the slot.
+    // Loading/Queued → ReadyCpu
     [[nodiscard]] Core::Status complete(AssetHandle handle, CookedAssetFile asset) noexcept;
-
-    // Queued/Loading → Failed (payload empty). Handle remains until unload.
     [[nodiscard]] Core::Status fail(AssetHandle handle) noexcept;
 
-    // Weak lookup. Payload only for Ready/UnloadPending.
+    // ReadyCpu → UploadQueued (CPU payload still queryable).
+    [[nodiscard]] Core::Status beginUpload(AssetHandle handle) noexcept;
+    // UploadQueued → ReadyGpu (after external UploadTicket becomes Ready).
+    [[nodiscard]] Core::Status completeGpu(AssetHandle handle) noexcept;
+    // UploadQueued → Failed (upload failed; CPU payload retained until unload).
+    [[nodiscard]] Core::Status failGpu(AssetHandle handle) noexcept;
+
+    // Weak lookup. Payload for ReadyCpu/UploadQueued/ReadyGpu/UnloadPending.
     [[nodiscard]] const CookedAssetFile* tryGet(AssetHandle handle) const noexcept;
     [[nodiscard]] AssetLogicalState state(AssetHandle handle) const noexcept;
     [[nodiscard]] Core::u32 leaseCount(AssetHandle handle) const noexcept;
     [[nodiscard]] Core::AssetId assetId(AssetHandle handle) const noexcept;
     [[nodiscard]] AssetFormat::AssetKind assetKind(AssetHandle handle) const noexcept;
+    [[nodiscard]] bool hasCpuPayload(AssetHandle handle) const noexcept;
+    [[nodiscard]] bool isGpuReady(AssetHandle handle) const noexcept;
 
-    // Strong acquire. Ready only.
+    // Strong acquire: ReadyCpu or ReadyGpu (CPU payload must exist).
     [[nodiscard]] Core::Result<AssetLease> acquire(AssetHandle handle);
 
-    // Logical unload. Immediate erase when leaseCount==0; otherwise UnloadPending.
     [[nodiscard]] Core::Status unload(AssetHandle handle) noexcept;
 
   private:
@@ -147,6 +155,7 @@ class AssetStore final {
     void releaseLease(AssetHandle handle) noexcept;
     [[nodiscard]] Record* findRecord(AssetHandle handle) noexcept;
     [[nodiscard]] const Record* findRecord(AssetHandle handle) const noexcept;
+    [[nodiscard]] static bool stateHasCpuPayload(AssetLogicalState state) noexcept;
 
     Pool m_pool;
 };

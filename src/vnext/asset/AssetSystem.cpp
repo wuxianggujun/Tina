@@ -229,7 +229,8 @@ AssetSystem::load(std::span<const Core::AssetId> requestedAssetIds)
             if (const auto existing = find(row.assetId))
             {
                 const auto st = m_store.state(*existing);
-                if (st == AssetLogicalState::Ready || st == AssetLogicalState::UnloadPending)
+                if (st == AssetLogicalState::ReadyCpu || st == AssetLogicalState::UploadQueued ||
+                    st == AssetLogicalState::ReadyGpu || st == AssetLogicalState::UnloadPending)
                 {
                     continue;
                 }
@@ -315,7 +316,8 @@ Core::Result<AssetHandle> AssetSystem::ensureQueued(const CatalogLoadPlanEntry& 
     if (const auto existing = find(row.assetId))
     {
         const auto st = m_store.state(*existing);
-        if (st == AssetLogicalState::Ready || st == AssetLogicalState::UnloadPending ||
+        if (st == AssetLogicalState::ReadyCpu || st == AssetLogicalState::UploadQueued ||
+            st == AssetLogicalState::ReadyGpu || st == AssetLogicalState::UnloadPending ||
             st == AssetLogicalState::Queued || st == AssetLogicalState::Loading || st == AssetLogicalState::Failed)
         {
             return *existing;

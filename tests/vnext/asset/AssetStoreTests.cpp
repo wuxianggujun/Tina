@@ -147,7 +147,7 @@ TEST(AssetStoreTests, QueuedLoadingCompleteAndFail)
     EXPECT_EQ(store->state(*handle), AssetLogicalState::Loading);
 
     ASSERT_TRUE(store->complete(*handle, loadOneCooked(resource, 7U, AssetFormat::AssetKind::Texture2D)).has_value());
-    EXPECT_EQ(store->state(*handle), AssetLogicalState::Ready);
+    EXPECT_EQ(store->state(*handle), AssetLogicalState::ReadyCpu);
     EXPECT_NE(store->tryGet(*handle), nullptr);
 
     auto failed = store->beginQueued(assetId(8U), AssetFormat::AssetKind::Material);

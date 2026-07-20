@@ -76,7 +76,7 @@ TEST(AssetSystemAsyncPumpTests, RequestIoPumpMakesReady)
     {
         auto stats = system->pump(4);
         ASSERT_TRUE(stats.has_value()) << stats.error().message;
-        if (system->state((*requested)[0]) == AssetLogicalState::Ready)
+        if (system->state((*requested)[0]) == AssetLogicalState::ReadyCpu)
         {
             ready = true;
             break;
@@ -87,7 +87,7 @@ TEST(AssetSystemAsyncPumpTests, RequestIoPumpMakesReady)
         }
     }
     EXPECT_TRUE(ready);
-    EXPECT_EQ(system->state((*requested)[0]), AssetLogicalState::Ready);
+    EXPECT_EQ(system->state((*requested)[0]), AssetLogicalState::ReadyCpu);
     auto lease = system->acquire((*requested)[0]);
     ASSERT_TRUE(lease.has_value());
     EXPECT_EQ(lease->assetId(), package.materialId);

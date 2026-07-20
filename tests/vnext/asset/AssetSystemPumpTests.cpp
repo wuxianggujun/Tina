@@ -76,7 +76,7 @@ TEST(AssetSystemPumpTests, RequestThenPumpMakesAssetsReady)
     EXPECT_EQ(pump2->becameReady, 1U);
     EXPECT_EQ(pump2->remaining, 0U);
 
-    EXPECT_EQ(system->state((*requested)[0]), AssetLogicalState::Ready);
+    EXPECT_EQ(system->state((*requested)[0]), AssetLogicalState::ReadyCpu);
     auto lease = system->acquire((*requested)[0]);
     ASSERT_TRUE(lease.has_value());
     EXPECT_EQ(lease->assetId(), package.materialId);

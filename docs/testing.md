@@ -57,6 +57,8 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A5 request/pump | Debug/Release C++23 | 223/223 + 65/65 | Queued/Loading/Ready/Failed；request+pump 预算；缺文件 Failed；队列满；`tina_asset_tests` 65/65。无 Task worker/GPU |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A6 bounded Task + async asset pump | Debug/Release C++23 | 225/225 + 66/66 | BoundedTaskSystem scheduleIo/postMain/pumpMain；AssetSystem+taskSystem IO 读盘 Ready；`tina_tests` 225；`tina_asset_tests` 66。无 CPU pool/GPU |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A7 Desktop Task + Null UploadTicket | Debug/Release C++23 | 227/227 + 66/66 | Desktop BoundedTask 默认；NullUploadLedger submit/poll/retire；`tina_tests` 227。无 bgfx fence |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A8 ReadyGpu coordinator | Debug/Release C++23 | 227/227 + 68/68 | ReadyCpu→ReadyGpu；UploadQueued 期间 CPU lease；`tina_tests` 227；`tina_asset_tests` 68。无 bgfx 资源 |
+
 
 
 

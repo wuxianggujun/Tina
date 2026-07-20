@@ -5,6 +5,12 @@
 
 namespace Tina::Asset {
 
+bool AssetStore::stateHasCpuPayload(AssetLogicalState state) noexcept
+{
+    return state == AssetLogicalState::ReadyCpu || state == AssetLogicalState::UploadQueued ||
+           state == AssetLogicalState::ReadyGpu || state == AssetLogicalState::UnloadPending;
+}
+
 AssetLease::AssetLease(AssetStore* store, AssetHandle handle) noexcept : m_store(store), m_handle(handle) {}
 
 AssetLease::~AssetLease() noexcept
@@ -112,7 +118,7 @@ Core::Result<AssetHandle> AssetStore::publish(CookedAssetFile asset)
     Record record{
         .assetId = asset.header().assetId,
         .assetKind = asset.header().assetKind,
-        .state = AssetLogicalState::Ready,
+        .state = AssetLogicalState::ReadyCpu,
         .leaseCount = 0,
         .payload = std::move(asset),
     };
@@ -189,7 +195,7 @@ Core::Status AssetStore::complete(AssetHandle handle, CookedAssetFile asset) noe
     }
     record->assetKind = asset.header().assetKind;
     record->payload = std::move(asset);
-    record->state = AssetLogicalState::Ready;
+    record->state = AssetLogicalState::ReadyCpu;
     return Core::success();
 }
 
@@ -213,15 +219,56 @@ Core::Status AssetStore::fail(AssetHandle handle) noexcept
     return Core::success();
 }
 
+Core::Status AssetStore::beginUpload(AssetHandle handle) noexcept
+{
+    auto* record = findRecord(handle);
+    if (record == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle, "asset handle is invalid or stale");
+    }
+    if (record->state != AssetLogicalState::ReadyCpu || !record->payload)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady, "only ReadyCpu assets can begin upload");
+    }
+    record->state = AssetLogicalState::UploadQueued;
+    return Core::success();
+}
+
+Core::Status AssetStore::completeGpu(AssetHandle handle) noexcept
+{
+    auto* record = findRecord(handle);
+    if (record == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle, "asset handle is invalid or stale");
+    }
+    if (record->state != AssetLogicalState::UploadQueued || !record->payload)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady, "only UploadQueued assets can complete GPU");
+    }
+    record->state = AssetLogicalState::ReadyGpu;
+    return Core::success();
+}
+
+Core::Status AssetStore::failGpu(AssetHandle handle) noexcept
+{
+    auto* record = findRecord(handle);
+    if (record == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle, "asset handle is invalid or stale");
+    }
+    if (record->state != AssetLogicalState::UploadQueued)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady, "only UploadQueued assets can fail GPU");
+    }
+    // Keep CPU payload for diagnosis/retry; mark Failed.
+    record->state = AssetLogicalState::Failed;
+    return Core::success();
+}
+
 const CookedAssetFile* AssetStore::tryGet(AssetHandle handle) const noexcept
 {
     const auto* record = findRecord(handle);
-    if (record == nullptr)
-    {
-        return nullptr;
-    }
-    if ((record->state != AssetLogicalState::Ready && record->state != AssetLogicalState::UnloadPending) ||
-        !record->payload)
+    if (record == nullptr || !stateHasCpuPayload(record->state) || !record->payload)
     {
         return nullptr;
     }
@@ -268,6 +315,16 @@ AssetFormat::AssetKind AssetStore::assetKind(AssetHandle handle) const noexcept
     return record->assetKind;
 }
 
+bool AssetStore::hasCpuPayload(AssetHandle handle) const noexcept
+{
+    return tryGet(handle) != nullptr;
+}
+
+bool AssetStore::isGpuReady(AssetHandle handle) const noexcept
+{
+    return state(handle) == AssetLogicalState::ReadyGpu;
+}
+
 Core::Result<AssetLease> AssetStore::acquire(AssetHandle handle)
 {
     auto* record = findRecord(handle);
@@ -288,7 +345,8 @@ Core::Result<AssetLease> AssetStore::acquire(AssetHandle handle)
     {
         return Core::failure(AssetErrorCode::AssetUnloaded, "asset payload is unloaded");
     }
-    if (record->state != AssetLogicalState::Ready)
+    // ReadyCpu / UploadQueued / ReadyGpu all expose CPU payload for leases.
+    if (!stateHasCpuPayload(record->state))
     {
         return Core::failure(AssetErrorCode::AssetNotReady, "asset is not ready");
     }
@@ -320,6 +378,15 @@ Core::Status AssetStore::unload(AssetHandle handle) noexcept
         }
         (void)m_pool.erase(handle.id);
         return Core::success();
+    }
+    if (record->state == AssetLogicalState::UploadQueued)
+    {
+        // Logical unload while GPU ticket may still be outstanding; caller must retire ticket.
+        if (record->leaseCount == 0U)
+        {
+            (void)m_pool.erase(handle.id);
+            return Core::success();
+        }
     }
     if (record->leaseCount == 0U)
     {

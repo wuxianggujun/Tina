@@ -408,4 +408,8 @@ M10-A6 已落地 ADR 0017 首切片与 Asset 接线：`createBoundedTaskSystem`�
 
 M10-A7：Desktop::CreateEngine 默认 `createBoundedTaskSystem`（ioWorker=1, queues=64）；Null
 `UploadTicket`/`NullUploadLedger` 提供 submit→poll(Ready)→retire 的 staging 所有权账本（无真实 GPU
-fence）。后置：bgfx upload 接线、Asset ReadyGpu、physical retirement 与 FramePinSink。
+fence）。后置：bgfx upload 接线、physical retirement 与 FramePinSink。
+
+M10-A8：`AssetStore` 状态扩展 ReadyCpu/UploadQueued/ReadyGpu；`beginUpload`/`completeGpu`/`failGpu`；
+`AssetGpuUploadCoordinator` 将 ReadyCpu 资产提交到 Null ledger 并在 poll Ready 后 completeGpu+retire。
+CPU payload 在 UploadQueued/ReadyGpu 仍可 tryGet/acquire。后置：bgfx 真实 GPU 资源与 fence。

@@ -486,7 +486,9 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   Main completion；`AssetSystem` 可注入 `taskSystem` 使 `pump` 走 scheduleIo→postMain→complete；
   仍无 CPU worker pool、TaskGroup、GPU UploadTicket；
 - M10-A7 已完成 Desktop 默认 BoundedTaskSystem，以及 Null `UploadTicket`/`NullUploadLedger`
-  （submit/poll/retire staging 账本；无 bgfx fence）；bgfx 真实 upload 与 Asset ReadyGpu 后置；
+  （submit/poll/retire staging 账本；无 bgfx fence）；bgfx 真实 upload 后置；
+- M10-A8 已完成 ReadyCpu→UploadQueued→ReadyGpu 状态与 `AssetGpuUploadCoordinator`
+  （Null ledger submit/poll/completeGpu/retire）；bgfx fence/真实 GPU 资源仍后置；
 - 事务 Manifest writer、CPU TaskGroup、bgfx UploadTicket 接线继续后置；
 - `tina_assetc` 执行 Parse → Validate → Build → Validate Cooked → Atomic Write；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
