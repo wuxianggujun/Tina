@@ -61,6 +61,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A9 AssetSystem GPU pipeline | Debug/Release C++23 | 227/227 + 70/70 | sync load→ReadyGpu；request/pump+IO+GPU→ReadyGpu；`tina_asset_tests` 70。无 bgfx 资源 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A10 tina_sample_asset | Debug/Release C++23 | sample smoke | Catalog 包 request/pump 至 ReadyGpu；JSON ok。无画面绘制 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A11 wire writers | Debug/Release C++23 | 见实现门禁 | write→parse round-trip；unsorted reject；`tina_asset_format_tests` |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A12 writeFile + assetc | Debug/Release C++23 | 230/230 + 71/71 | `writeFile` 原子写；publish→open；`tina_assetc`+validate；`tina_tests` 230；`tina_asset_tests` 71 |
 
 
 

@@ -422,3 +422,6 @@ ReadyGpu + Lease；输出 JSON。不绘制画面、不依赖 bgfx。
 
 M10-A11：AssetFormat wire writer——`writeCookedAssetBytes`/`writeCookedManifestBytes`；自动 XXH3 ContentHash、
 AssetId 排序校验、与 parse 对称。完整 Cooker/cgltf/atomic publish 仍后置。
+
+M10-A12：`Core::writeFile`（atomic temp+rename）、`publishCatalogPackage`（objects 先写、manifest 后写）、
+最小 `tina_assetc` fixture cooker。完整 glTF/cgltf import 仍后置。

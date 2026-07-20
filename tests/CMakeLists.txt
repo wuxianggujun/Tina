@@ -3,11 +3,13 @@ set(TINA_CORE_TEST_SOURCES
     core/AssertTests.cpp
     core/ContentHashDigestTests.cpp
     core/ReadFileTests.cpp
+    core/WriteFileTests.cpp
     core/EnumFlagsTests.cpp
     core/header_isolation/AssetIdHeader.cpp
     core/header_isolation/ContentHashHeader.cpp
     core/header_isolation/ContentHashDigestHeader.cpp
     core/header_isolation/ReadFileHeader.cpp
+    core/header_isolation/WriteFileHeader.cpp
     core/header_isolation/ErrorHeader.cpp
     core/header_isolation/CountingMemoryResourceHeader.cpp
     core/header_isolation/FixedStepAccumulatorHeader.cpp

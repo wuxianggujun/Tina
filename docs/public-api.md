@@ -1096,6 +1096,9 @@ public:
 | `AssetGpuUploadCoordinator` | M10-A8 已实现 | Asset module public | track + pumpUploads 驱动 Null ledger 与状态推进 | ledger/store 错误 |
 | `AssetSystemConfig::uploadLedger` / `autoGpuUpload` | M10-A9 已实现 | Asset module public | load/pump 自动 ReadyCpu→ReadyGpu（Null） | 同 GPU upload / store |
 | `writeCookedAssetBytes` / `writeCookedManifestBytes` | M10-A11 已实现 | AssetFormat module public | 确定性 LE wire 写入（ContentHash 可计算） | InvalidIdentity / InvalidLayout / SizeLimit / Overflow |
+| `writeFile` / `createParentDirectories` | M10-A12 已实现 | Core public | UTF-8 路径原子写文件（temp+rename） | InvalidArgument / Io |
+| `publishCatalogPackage` | M10-A12 已实现 | Asset module public | 写 objects + 最后写 manifest | Invalid / Io |
+| `tina_assetc` | M10-A12 已实现 | host tool | 最小 fixture cooker（2-entry 包） | 同 write/publish/open |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |

@@ -1,1 +1,2 @@
 add_subdirectory(catalog_validate)
+add_subdirectory(assetc)

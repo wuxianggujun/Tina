@@ -8,6 +8,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogLoadPlan.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackage.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageLoad.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackagePublish.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageSummary.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogPackageValidation.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogSnapshot.hpp
@@ -25,6 +26,7 @@ add_library(tina_asset STATIC
     CatalogLoadPlan.cpp
     CatalogPackage.cpp
     CatalogPackageLoad.cpp
+    CatalogPackagePublish.cpp
     CatalogPackageSummary.cpp
     CatalogPackageValidation.cpp
     CatalogSnapshot.cpp

@@ -180,6 +180,7 @@ startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 r
 | vNext M10-A9 AssetSystem auto GPU upload | 已完成系统集成切片 | AssetSystem 注入 uploadLedger 后 load/pump 自动推进 ReadyGpu。无 bgfx fence |
 | vNext M10-A10 asset product sample | 已完成产品 smoke 样例 | `tina_sample_asset`：Catalog→BoundedTask IO→ReadyGpu+Lease。无 bgfx 纹理绘制 |
 | vNext M10-A11 wire writers | 已完成最小 Cooked writer | `writeCookedAssetBytes`/`writeCookedManifestBytes` 与 parse round-trip。无 cgltf/Cooker CLI |
+| vNext M10-A12 atomic publish + assetc | 已完成原子写与 fixture cooker | `writeFile`、`publishCatalogPackage`、`tina_assetc`。无 cgltf |
 | vNext GLFW 边界 | 已形成可运行切片 |
  `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
 | 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene component-integrated extraction、AssetSystem/Audio、owning UI packet/pin、Text/Glyph/完整 Widget 与 submission drain 仍按后续切片实施；M8-A World/Transform、M8-B 2D extraction、M9-A 3D CPU/Null extraction、M9-B Opaque3D fixture、M9-C Sprite2D fixture、M10-A0 wire format、M10-A1 CatalogSnapshot、Desktop SolidFill 可见样例、standalone UI/Render/bridge foundation、Runtime-private route/layout/startup/display borrow 接线、Button primary-pointer default action 和私有 bgfx SolidQuad pass 不代表完整产品路径完成 |
