@@ -10,6 +10,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapInstance.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/GridCollision.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileChunkView.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/TileChunkRender.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogCook.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogFile.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogLoadOrder.hpp
@@ -36,6 +37,7 @@ add_library(tina_asset STATIC
     TileMapInstance.cpp
     GridCollision.cpp
     TileChunkView.cpp
+    TileChunkRender.cpp
     CatalogCook.cpp
     CatalogFile.cpp
     CatalogLoadOrder.cpp

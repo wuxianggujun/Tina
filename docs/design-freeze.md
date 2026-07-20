@@ -482,3 +482,6 @@ chunk revision；`querySolidAabb` 查询 MaterialSolid cells。无 chunk extract
 
 M10-A29：`IGridCollisionProvider` + `TileMapGridCollision` 适配器；`extractVisibleTileChunks` 相机
 AABB 裁剪并跳过空 chunk；`collectChunkNonEmptyCells` 枚举非空 cell。无 TileChunkRenderPacket/bgfx。
+
+M10-A30：`emitTileChunkSprites` 将 chunk 非空 cell 转为 `RenderSprite2DInput`（UV/cell 中心/spriteKey）；
+`emitVisibleTileMapSprites` 组合可见提取 + emit。首期复用 Sprite2D 路径，不引入独立 Render packet 类型。

@@ -1,0 +1,43 @@
+#pragma once
+
+#include <tina/asset/TileChunkView.hpp>
+#include <tina/asset/TileMapInstance.hpp>
+#include <tina/core/base/Types.hpp>
+#include <tina/core/error/Result.hpp>
+#include <tina/render/RenderScene.hpp>
+
+#include <memory_resource>
+#include <vector>
+
+namespace Tina::Asset {
+
+struct TileChunkSpriteEmitParams final {
+    // Bound GPU/product texture key for the tileset atlas (RenderSprite2D.spriteKey).
+    Core::u32 spriteKey = 1;
+    // Base for stableEntityKey generation: base + (cellY * mapWidth + cellX) + 1.
+    Core::u64 stableEntityKeyBase = 1;
+    Core::i16 sortingLayer = 0;
+    Core::i32 orderInLayerBase = 0;
+    Core::u8 red = 255;
+    Core::u8 green = 255;
+    Core::u8 blue = 255;
+    Core::u8 alpha = 255;
+    // Optional world offset applied to all tile centers (map local → world).
+    float originX = 0.0f;
+    float originY = 0.0f;
+};
+
+// Emits one RenderSprite2DInput per non-empty cell in the chunk.
+// Center is cell center in map-local meters (+ optional origin). UV from tileset material table.
+// Clears `out` first. Returns number of sprites written.
+[[nodiscard]] Core::Result<Core::u32>
+emitTileChunkSprites(const TileMapInstance& map, const TileChunkView& chunk, const TileChunkSpriteEmitParams& params,
+                     std::pmr::vector<Render::RenderSprite2DInput>& out);
+
+// Convenience: extract visible chunks then emit sprites for each (order: chunk row-major, then cells).
+// Clears `out` first. Returns total sprites written.
+[[nodiscard]] Core::Result<Core::u32>
+emitVisibleTileMapSprites(const TileMapInstance& map, const TileChunkCameraQuery& camera,
+                          const TileChunkSpriteEmitParams& params, std::pmr::vector<Render::RenderSprite2DInput>& out);
+
+} // namespace Tina::Asset

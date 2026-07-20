@@ -1,0 +1,122 @@
+#include <tina/asset/TileChunkRender.hpp>
+
+#include <tina/asset/AssetErrors.hpp>
+
+#include <new>
+
+namespace Tina::Asset {
+namespace {
+
+[[nodiscard]] Core::u64 makeStableEntityKey(Core::u64 base, Core::u32 cellX, Core::u32 cellY,
+                                            Core::u32 mapWidth) noexcept
+{
+    const Core::u64 linear = static_cast<Core::u64>(cellY) * mapWidth + cellX;
+    return base + linear + 1U;
+}
+
+} // namespace
+
+Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const TileChunkView& chunk,
+                                             const TileChunkSpriteEmitParams& params,
+                                             std::pmr::vector<Render::RenderSprite2DInput>& out)
+{
+    if (!map)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tile map instance is empty");
+    }
+    if (params.spriteKey == 0)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "spriteKey must be non-zero");
+    }
+    if (chunk.empty || chunk.widthCells == 0 || chunk.heightCells == 0)
+    {
+        out.clear();
+        return Core::u32{0};
+    }
+
+    out.clear();
+    const float cell = map.cellSizeMeters();
+    try
+    {
+        out.reserve(chunk.nonEmptyTileCount);
+        Core::i32 order = params.orderInLayerBase;
+        for (Core::u32 y = 0; y < chunk.heightCells; ++y)
+        {
+            for (Core::u32 x = 0; x < chunk.widthCells; ++x)
+            {
+                const Core::u32 cellX = chunk.originCellX + x;
+                const Core::u32 cellY = chunk.originCellY + y;
+                auto info = map.tileInfoAt(cellX, cellY);
+                if (!info || info->empty)
+                {
+                    continue;
+                }
+                const float centerX = params.originX + (static_cast<float>(cellX) + 0.5f) * cell;
+                const float centerY = params.originY + (static_cast<float>(cellY) + 0.5f) * cell;
+                out.push_back(Render::RenderSprite2DInput{
+                    .spriteKey = params.spriteKey,
+                    .stableEntityKey = makeStableEntityKey(params.stableEntityKeyBase, cellX, cellY, map.widthCells()),
+                    .centerX = centerX,
+                    .centerY = centerY,
+                    .rotationRadians = 0.0f,
+                    .widthMeters = cell,
+                    .heightMeters = cell,
+                    .scaleX = 1.0f,
+                    .scaleY = 1.0f,
+                    .u0 = info->u0,
+                    .v0 = info->v0,
+                    .u1 = info->u1,
+                    .v1 = info->v1,
+                    .sortingLayer = params.sortingLayer,
+                    .orderInLayer = order++,
+                    .red = params.red,
+                    .green = params.green,
+                    .blue = params.blue,
+                    .alpha = params.alpha,
+                    .flipX = false,
+                    .flipY = false,
+                    .visible = true,
+                });
+            }
+        }
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed, "tile chunk sprite emit allocation failed");
+    }
+    return static_cast<Core::u32>(out.size());
+}
+
+Core::Result<Core::u32> emitVisibleTileMapSprites(const TileMapInstance& map, const TileChunkCameraQuery& camera,
+                                                  const TileChunkSpriteEmitParams& params,
+                                                  std::pmr::vector<Render::RenderSprite2DInput>& out)
+{
+    out.clear();
+    std::pmr::vector<TileChunkView> chunks{out.get_allocator()};
+    auto extracted = extractVisibleTileChunks(map, camera, chunks);
+    if (!extracted)
+    {
+        return Core::failure(std::move(extracted.error()));
+    }
+
+    std::pmr::vector<Render::RenderSprite2DInput> chunkSprites{out.get_allocator()};
+    Core::u32 total = 0;
+    try
+    {
+        for (const auto& chunk : chunks)
+        {
+            auto n = emitTileChunkSprites(map, chunk, params, chunkSprites);
+            if (!n)
+            {
+                return Core::failure(std::move(n.error()));
+            }
+            out.insert(out.end(), chunkSprites.begin(), chunkSprites.end());
+            total += *n;
+        }
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed, "visible tile map sprite emit allocation failed");
+    }
+    return total;
+}
+
+} // namespace Tina::Asset

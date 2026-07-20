@@ -198,6 +198,7 @@ startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 r
 | vNext M10-A27 inline tileset/tilemap recipe | 已完成 recipe cooker 扩展 | `tileset`/`tile`/`tilemap`/`row` 内联语法。无 runtime TileMapInstance |
 | vNext M10-A28 TileMapInstance runtime | 已完成可变地图实例切片 | Create/setTile/chunk revision/solid AABB。无 chunk extraction/draw |
 | vNext M10-A29 grid collision + chunk extract | 已完成提取边界切片 | IGridCollisionProvider、extractVisibleTileChunks。无 Render packet |
+| vNext M10-A30 tile chunk → sprite emit | 已完成 CPU 绘制桥接 | emitTileChunkSprites → RenderSprite2DInput/RenderScene。无独立 packet 类型 |
 | vNext GLFW 边界 | 已形成可运行切片 |
  `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
 | 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene component-integrated extraction、AssetSystem/Audio、owning UI packet/pin、Text/Glyph/完整 Widget 与 submission drain 仍按后续切片实施；M8-A World/Transform、M8-B 2D extraction、M9-A 3D CPU/Null extraction、M9-B Opaque3D fixture、M9-C Sprite2D fixture、M10-A0 wire format、M10-A1 CatalogSnapshot、Desktop SolidFill 可见样例、standalone UI/Render/bridge foundation、Runtime-private route/layout/startup/display borrow 接线、Button primary-pointer default action 和私有 bgfx SolidQuad pass 不代表完整产品路径完成 |
