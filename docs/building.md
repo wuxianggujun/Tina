@@ -78,6 +78,9 @@ out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> --rec
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot>
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --typed-payloads
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catalog=<catalogRoot>
+# Catalog→GPU visible sample (requires windows-msvc-vnext-bgfx preset):
+# cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d_catalog
+# out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d_catalog.exe --frames=60 --frame-delay-ms=0
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_3d_extraction.exe --frames=300
 ```

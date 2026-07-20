@@ -105,14 +105,14 @@ M10-A2b provides bounded Core `readFile` and `loadCatalogSnapshotFromManifestFil
 `tina_tests` pass 223/223 and `tina_asset_tests` pass 19/19. Handle/Lease, async IO, and Cooker remain out of
 scope.
 
-M10-A2c–A2q provide the sync catalog/cooked pipeline. M10-A3–A23 add CPU Handle/Lease, AssetSystem
+M10-A2c–A2q provide the sync catalog/cooked pipeline. M10-A3–A24 add CPU Handle/Lease, AssetSystem
 load/request/pump with optional auto Null GPU upload to ReadyGpu, openAndBindCatalog, kind lookup,
 typed cooked views, typed payload validation, Sprite→RenderSprite UV bridge into RenderScene, bgfx
-Sprite2D `s_tex` sampling, GPU Texture2D upload/bind SPI (`createTexture2DRgba8`,
-`setSprite2DTextureBinding`, `uploadTexture2DFromCooked`), retirement ledger, bounded IO Task + Main
-completion, Desktop default BoundedTaskSystem, Null UploadTicket ledger, `tina_sample_asset`, cooked
-writers, atomic publish, and `tina_assetc` typed2d/recipe cooker. Formal Catalog 2D visible sample
-default upload, CPU TaskGroup pools, and full cgltf Cooker remain out of scope.
+Sprite2D `s_tex` sampling, GPU Texture2D upload/bind SPI, `tina_sample_2d_catalog` (cook/load/upload
+and draw Catalog Texture2D+Sprite), retirement ledger, bounded IO Task + Main completion, Desktop
+default BoundedTaskSystem, Null UploadTicket ledger, `tina_sample_asset`, cooked writers, atomic
+publish, and `tina_assetc` typed2d/recipe cooker. Full formal `tina_sample_2d` (TileMap/Box2D/UI),
+CPU TaskGroup pools, and full cgltf Cooker remain out of scope.
 
 M7-C1c-a adds fixed-capacity PMR pointer-policy/route-ancestry storage and a double-buffered
 `UICommittedHitView`. Within one view, its effective-visible entries have unique, strictly increasing paint ordinals and

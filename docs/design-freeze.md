@@ -461,3 +461,7 @@ uniform，submit 时 `setTexture(0, s_tex, white)`。Catalog Texture2D 上传/�
 M10-A23：`IRenderDevice::createTexture2DRgba8` / `destroyTexture2D` / `setSprite2DTextureBinding`；
 Null 设备记账；bgfx 创真纹理并按 spriteKey 分批绑定；Asset `uploadTexture2DFromCooked` 从 typed
 Texture2D payload 上传。正式产品样例默认上传与 FramePin 后置。
+
+M10-A24：`tina_sample_2d_catalog`（GLFW+bgfx）cook 8x8 checker Texture2D + Sprite，load 后
+`uploadTexture2DFromCooked` 并 `setSprite2DTextureBinding(1)`，extract 用 `makeSpriteRenderInput`
+绘制。仍非完整正式 `tina_sample_2d`（无 TileMap/Box2D/中文 UI）。

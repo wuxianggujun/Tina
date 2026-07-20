@@ -73,6 +73,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A21 asset→render CPU pipeline | Debug/Release C++23 | 见实现门禁 | cook→load→RenderScene UV commit；`tina_asset_tests` 82 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A22 bgfx sprite texture sample | Debug C++23 bgfx | 43/43 | Sprite2D s_tex + default white；`tina_render_bgfx_tests` 43；2d sample 60帧 ok |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A23 GPU texture upload API | Debug C++23 | 232/232 + 83/83 | Null create/bind/destroy；uploadTexture2DFromCooked；bgfx 43 + sample ok |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A24 catalog 2D sample | Debug C++23 bgfx | sample smoke | `tina_sample_2d_catalog --frames=60` texturesUploaded=1；bgfx 创建 8x8 RGBA8 |
 
 
 

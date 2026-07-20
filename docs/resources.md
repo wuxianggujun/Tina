@@ -62,7 +62,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A21 已实现 cook→load→RenderScene CPU 全闭环门禁；
   M10-A22 已实现 bgfx Sprite2D 纹理采样管线（默认白纹理）；
   M10-A23 已实现 GPU Texture2D 上传 API 与按 spriteKey 绑定；
-  正式 Catalog 2D 可见样例、CPU TaskGroup、完整 Cooker/cgltf 仍未实现。
+  M10-A24 已实现 `tina_sample_2d_catalog` Catalog→GPU 可见 Sprite 样例；
+  完整正式 tina_sample_2d、CPU TaskGroup、cgltf 仍未实现。
 
 
 ## 下一阶段契约
