@@ -490,6 +490,10 @@ M10-A31：Headless/Null `tina_sample_2d_tilemap` 用内建 Tileset/TileMap 构�
 每帧 `emitVisibleTileMapSprites` + `CharacterController2D` 落地，经 RenderScene 提交 11 tile + 1 角色
 sprite，300 帧 JSON 门禁。不冒充 Catalog/bgfx/UI/Box2D 正式 `tina_sample_2d`。
 
+M10-A32：`tina_sample_2d_tilemap_bgfx` 在 GLFW+bgfx 上 cook/load Catalog Texture2D+Tileset+TileMap，
+GPU 上传 atlas 并绑定 `spriteKey=1`，每帧 emit 可见 tile + CharacterController 角色 sprite。
+不包含 UI overlay、Box2D dynamic product body 或正式中文 Label 门禁。
+
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation
 ID，原子创建 Body+Box Shape，并提供 pose/velocity snapshot、销毁与幂等 shutdown。
