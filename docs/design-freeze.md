@@ -503,4 +503,8 @@ M11-A3：Create 时固定 deferred command 容量；owner-thread `enqueue*`，`s
 时跳过计数；`createBoxBody` 仍为立即原子创建。
 
 M11-A4：独立 `tina_physics2d_bench` 单线程 stack_dynamic 基线（`--bodies/--warmup/--steps/--rays`），
-输出 step ns p50/p95/p99 精简 JSON；不实现 Box2D worker callbacks。Tile adapter 与正式 2D 产品接线后置。
+输出 step ns p50/p95/p99 精简 JSON；不实现 Box2D worker callbacks。
+
+M11-A5：`PhysicsGridBodies` 将 solid grid cell 同步为 static box body（cell 中心与半边长由
+cellSize 决定）；单次调用失败全回滚；调用方负责从 TileMap/`IGridCollisionProvider` 收集 cell。
+Game2D CharacterController 与正式 2D 产品接线后置。

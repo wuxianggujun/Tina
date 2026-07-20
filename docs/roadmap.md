@@ -550,7 +550,10 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - M11-A3 已完成：固定容量 deferred command 队列、`step()` 前 FIFO flush、stale skip 与满队列拒绝；
   `tina_physics2d_tests` 20/20（Debug/Release）；
 - M11-A4 已完成：独立 `tina_physics2d_bench` 单线程 stack_dynamic step 基线（p50/p95/p99 JSON）；
-- 后续仍待：Tile adapter 与正式 2D 产品接线；只有 bench p99 超预算才接入 Box2D worker callbacks；
+- M11-A5 已完成：`createStaticBodiesForSolidCells`/`destroyBodies` 网格静态体同步（physics2d 不依赖 Asset）；
+  `tina_physics2d_tests` 23/23（Debug/Release）；
+- 后续仍待：Game2D 层把 `IGridCollisionProvider` solid 列表接到 A5、CharacterController2D 与正式 2D 产品接线；
+  只有 bench p99 超预算才接入 Box2D worker callbacks；
 - 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
 - 以当前游戏为正式 2D 产品门禁：Cooked TileMap/Tileset、Camera2D、chunk culling/dirty rebuild、

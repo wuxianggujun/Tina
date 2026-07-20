@@ -171,9 +171,10 @@ Body/Shape generation owner/stale、跨 World 拒绝、Box body 原子创建与�
 排序/overflow、`castRay`/`castRayClosest` 与无效 query 拒绝。A3 追加 deferred command FIFO 应用、
 满队列拒绝、stale skip 与 deferred destroy。该 target 只通过 `Tina::Physics2D` 消费 Box2D 的
 PRIVATE link dependency，不把 Box2D include 暴露给公共头。Windows `windows-msvc-vnext-physics2d`
-上 Debug/Release 均为 **20/20**。M11-A4 另提供 `tina_physics2d_bench`（Release 推荐）：默认
-`stack_dynamic` 64 body、warm-up 后测量 step ns 分位数；可选 `--rays`。它不是 GoogleTest，也不等于
-ADR 0018 完整 `tina_bench` schema。backend byte baseline 与正式 2D 产品门禁不在本切片证明范围内。
+上 Debug/Release 均为 **23/23**（含 A5 grid body 3 项）。M11-A4 另提供 `tina_physics2d_bench`
+（Release 推荐）：默认 `stack_dynamic` 64 body、warm-up 后测量 step ns 分位数；可选 `--rays`。
+它不是 GoogleTest，也不等于 ADR 0018 完整 `tina_bench` schema。backend byte baseline 与正式 2D
+产品门禁不在本切片证明范围内。
 
 M8-B 使用独立 `tina_render_scene_tests`，覆盖 RenderScene 固定容量分配失败、事务 rollback、Camera/Sprite
 输入校验、透明/隐藏剪枝、旋转保守裁剪、pixel snap、稳定 layer/order/entity/insertion 排序、300 帧零新增

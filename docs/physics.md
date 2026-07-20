@@ -141,6 +141,20 @@ cmake --build --preset windows-vnext-physics2d-release --target tina_physics2d_b
 out\build\windows-msvc-vnext-physics2d\bin\Release\tina_physics2d_bench.exe --bodies=64 --warmup=60 --steps=300 --rays=4
 ```
 
+## M11-A5 Grid Static Body Sync 契约
+
+A5 在 `Tina::Physics2D` 内提供 **不依赖 Asset/TileMap** 的网格静态体同步：
+
+- `createStaticBodiesForSolidCells()`：每个 solid cell 一个 static box；中心
+  `((x+0.5)*cellSize, (y+0.5)*cellSize)`，半边长 `cellSize/2`；
+- 单次调用全有或全无：任一步失败逆序销毁本批已创建 body，不留半同步几何；
+- 调用方从 `IGridCollisionProvider`/`TileMapInstance::querySolidAabb` 收集 cell 列表后传入；
+  physics2d 模块 PUBLIC 仍只依赖 Core；
+- `destroyBodies()` 批量销毁，stale/invalid 跳过；
+- 不合并共线 cell、不做 chunk dirty rebuild（后续产品接线切片再做）。
+
+A0–A5 直接门禁：Windows Debug/Release `tina_physics2d_tests` **23/23**。
+
 ## Tina 性能门禁
 
 M11 已有单线程 `tina_physics2d_bench` 基线；只有实测证明单线程 step 超预算，才启用 Box2D worker

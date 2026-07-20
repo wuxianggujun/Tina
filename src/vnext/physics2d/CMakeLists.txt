@@ -1,5 +1,6 @@
 set(TINA_PHYSICS2D_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/physics2d/PhysicsErrors.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/physics2d/PhysicsGridBodies.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/physics2d/PhysicsIds.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/physics2d/PhysicsTypes.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/physics2d/PhysicsWorld2D.hpp
@@ -8,6 +9,7 @@ set(TINA_PHYSICS2D_PUBLIC_HEADERS
 add_library(tina_physics2d STATIC
     ${TINA_PHYSICS2D_PUBLIC_HEADERS}
     PhysicsWorld2D.cpp
+    PhysicsGridBodies.cpp
 )
 add_library(Tina::Physics2D ALIAS tina_physics2d)
 
