@@ -2,8 +2,8 @@
 
 - 状态：Accepted
 - 日期：2026-07-16
-- Accepted：2026-07-20（首切片：有界 IO worker + Main completion queue + scheduleIo/postMain/pumpMain；
-  CPU worker pool、TaskGroup、priority、fiber/work stealing 仍后置）
+- Accepted：2026-07-20（首切片：有界 IO worker + Main completion；M10-A25：可选 CPU worker +
+  scheduleCpu + 最小 TaskGroup；priority、fiber/work stealing 仍后置）
 
 ## 背景
 

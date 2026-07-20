@@ -204,6 +204,12 @@ class LoggingTaskSystem final : public Task::ITaskSystem {
         return Core::failure(Task::TaskErrorCode::NotSupported, "LoggingTaskSystem has no IO workers");
     }
 
+    [[nodiscard]] Core::Status scheduleCpu(Task::TaskCallable work) override
+    {
+        static_cast<void>(work);
+        return Core::failure(Task::TaskErrorCode::NotSupported, "LoggingTaskSystem has no CPU workers");
+    }
+
     [[nodiscard]] Core::Status postMain(Task::TaskCallable work) override
     {
         static_cast<void>(work);
@@ -927,6 +933,12 @@ class ProbeTaskSystem final : public Task::ITaskSystem {
     {
         static_cast<void>(work);
         return Core::failure(Task::TaskErrorCode::NotSupported, "ProbeTaskSystem has no IO workers");
+    }
+
+    [[nodiscard]] Core::Status scheduleCpu(Task::TaskCallable work) override
+    {
+        static_cast<void>(work);
+        return Core::failure(Task::TaskErrorCode::NotSupported, "ProbeTaskSystem has no CPU workers");
     }
 
     [[nodiscard]] Core::Status postMain(Task::TaskCallable work) override

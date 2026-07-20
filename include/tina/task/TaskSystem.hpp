@@ -10,7 +10,11 @@ namespace Tina::Task {
 
 struct TaskSystemCreateParams final {
     Core::u32 ioWorkerCount = 1;
+    // 0 disables the CPU worker pool (scheduleCpu → NotSupported). Interactive hosts may set
+    // max(1, hardware_concurrency-1); leave 0 for IO-only slices.
+    Core::u32 cpuWorkerCount = 0;
     Core::usize ioQueueCapacity = 64;
+    Core::usize cpuQueueCapacity = 64;
     Core::usize mainQueueCapacity = 64;
 };
 
@@ -26,6 +30,10 @@ class ITaskSystem {
 
     // Blocking IO domain. Runs on IO worker thread(s). Must not touch World/UI/RenderDevice.
     [[nodiscard]] virtual Core::Status scheduleIo(TaskCallable work) = 0;
+
+    // CPU domain. Runs on CPU worker thread(s). Must not block on disk or touch World/UI/RenderDevice.
+    // When the system was created with cpuWorkerCount==0, returns NotSupported.
+    [[nodiscard]] virtual Core::Status scheduleCpu(TaskCallable work) = 0;
 
     // Main-thread completion domain. Only drained by pumpMain() on the owner thread.
     [[nodiscard]] virtual Core::Status postMain(TaskCallable work) = 0;

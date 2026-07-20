@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <tina/task/TaskErrors.hpp>
+#include <tina/task/TaskGroup.hpp>
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 
 #include <atomic>
@@ -81,6 +82,47 @@ TEST(BoundedTaskSystemTest, IoQueueFull)
         EXPECT_EQ(third.error().code, Task::TaskErrorCode::QueueFull);
     }
     block.store(false, std::memory_order_release);
+    (*system)->shutdownAndJoin();
+}
+
+TEST(BoundedTaskSystemTest, ScheduleCpuAndTaskGroupWaitIdle)
+{
+    auto system = Task::createBoundedTaskSystem(Task::TaskSystemCreateParams{
+        .ioWorkerCount = 1,
+        .cpuWorkerCount = 2,
+        .ioQueueCapacity = 8,
+        .cpuQueueCapacity = 16,
+        .mainQueueCapacity = 8,
+    });
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+
+    std::atomic<int> sum{0};
+    {
+        Task::TaskGroup group(**system);
+        for (int index = 0; index < 8; ++index)
+        {
+            ASSERT_TRUE(group.add([&sum] { sum.fetch_add(1, std::memory_order_relaxed); }).has_value());
+        }
+        ASSERT_TRUE(group.waitIdle().has_value());
+        EXPECT_TRUE(group.isIdle());
+    }
+    EXPECT_EQ(sum.load(std::memory_order_relaxed), 8);
+    (*system)->shutdownAndJoin();
+}
+
+TEST(BoundedTaskSystemTest, ScheduleCpuWithoutWorkersIsNotSupported)
+{
+    auto system = Task::createBoundedTaskSystem(Task::TaskSystemCreateParams{
+        .ioWorkerCount = 1,
+        .cpuWorkerCount = 0,
+        .ioQueueCapacity = 4,
+        .cpuQueueCapacity = 4,
+        .mainQueueCapacity = 4,
+    });
+    ASSERT_TRUE(system.has_value());
+    auto status = (*system)->scheduleCpu([] {});
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code, Task::TaskErrorCode::NotSupported);
     (*system)->shutdownAndJoin();
 }
 

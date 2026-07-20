@@ -520,7 +520,9 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   按 spriteKey 批次 `setTexture`、`uploadTexture2DFromCooked` helper；
 - M10-A24 已完成 `tina_sample_2d_catalog`：cook Catalog Texture2D+Sprite → load → GPU 上传绑定 →
   typed Sprite 绘制；正式完整 2D 产品门禁/cgltf 仍后置；
-- 完整 Cooker/cgltf、CPU TaskGroup 继续后置；
+- M10-A25 已完成有界 CPU worker（`scheduleCpu`）与最小 `TaskGroup`（add/waitIdle）；默认
+  `cpuWorkerCount=0` 保持 IO-only 兼容；priority/fiber/work stealing 仍后置；
+- 完整 Cooker/cgltf 继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；

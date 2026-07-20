@@ -25,6 +25,12 @@ class DisabledTaskSystem final : public ITaskSystem {
         return Core::failure(TaskErrorCode::NotSupported, "DisabledTaskSystem has no IO workers");
     }
 
+    [[nodiscard]] Core::Status scheduleCpu(TaskCallable work) override
+    {
+        static_cast<void>(work);
+        return Core::failure(TaskErrorCode::NotSupported, "DisabledTaskSystem has no CPU workers");
+    }
+
     [[nodiscard]] Core::Status postMain(TaskCallable work) override
     {
         static_cast<void>(work);

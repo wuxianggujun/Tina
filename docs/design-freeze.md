@@ -465,3 +465,7 @@ Texture2D payload 上传。正式产品样例默认上传与 FramePin 后置。
 M10-A24：`tina_sample_2d_catalog`（GLFW+bgfx）cook 8x8 checker Texture2D + Sprite，load 后
 `uploadTexture2DFromCooked` 并 `setSprite2DTextureBinding(1)`，extract 用 `makeSpriteRenderInput`
 绘制。仍非完整正式 `tina_sample_2d`（无 TileMap/Box2D/中文 UI）。
+
+M10-A25：BoundedTaskSystem 增加可选 CPU worker 队列与 `ITaskSystem::scheduleCpu`；`TaskGroup`
+在 CPU 域上计数 pending 并 waitIdle。默认 `cpuWorkerCount=0` 时 scheduleCpu→NotSupported，不破坏
+现有 IO-only Desktop 默认路径。无 priority/fiber/work stealing。

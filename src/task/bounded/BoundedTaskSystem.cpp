@@ -17,13 +17,20 @@ namespace {
 
 class BoundedTaskSystem final : public ITaskSystem {
   public:
-    BoundedTaskSystem(Core::u32 ioWorkerCount, Core::usize ioQueueCapacity, Core::usize mainQueueCapacity)
-        : m_ioQueueCapacity(ioQueueCapacity), m_mainQueueCapacity(mainQueueCapacity)
+    BoundedTaskSystem(Core::u32 ioWorkerCount, Core::u32 cpuWorkerCount, Core::usize ioQueueCapacity,
+                      Core::usize cpuQueueCapacity, Core::usize mainQueueCapacity)
+        : m_ioQueueCapacity(ioQueueCapacity), m_cpuQueueCapacity(cpuQueueCapacity),
+          m_mainQueueCapacity(mainQueueCapacity)
     {
-        m_workers.reserve(ioWorkerCount);
+        m_ioWorkers.reserve(ioWorkerCount);
         for (Core::u32 index = 0; index < ioWorkerCount; ++index)
         {
-            m_workers.emplace_back([this] { workerLoop(); });
+            m_ioWorkers.emplace_back([this] { ioWorkerLoop(); });
+        }
+        m_cpuWorkers.reserve(cpuWorkerCount);
+        for (Core::u32 index = 0; index < cpuWorkerCount; ++index)
+        {
+            m_cpuWorkers.emplace_back([this] { cpuWorkerLoop(); });
         }
     }
 
@@ -35,7 +42,7 @@ class BoundedTaskSystem final : public ITaskSystem {
     [[nodiscard]] bool isIdle() const noexcept override
     {
         std::scoped_lock lock(m_mutex);
-        return m_ioQueue.empty() && m_mainQueue.empty() && m_activeIo == 0U;
+        return m_ioQueue.empty() && m_cpuQueue.empty() && m_mainQueue.empty() && m_activeIo == 0U && m_activeCpu == 0U;
     }
 
     [[nodiscard]] bool isStopping() const noexcept override
@@ -55,6 +62,10 @@ class BoundedTaskSystem final : public ITaskSystem {
             {
                 return Core::failure(TaskErrorCode::TaskSystemStopped, "task system is stopping");
             }
+            if (m_ioWorkers.empty())
+            {
+                return Core::failure(TaskErrorCode::NotSupported, "no IO workers configured");
+            }
             if (m_ioQueue.size() >= m_ioQueueCapacity)
             {
                 return Core::failure(TaskErrorCode::QueueFull, "IO task queue is full");
@@ -62,6 +73,32 @@ class BoundedTaskSystem final : public ITaskSystem {
             m_ioQueue.push_back(std::move(work));
         }
         m_ioCv.notify_one();
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status scheduleCpu(TaskCallable work) override
+    {
+        if (!work)
+        {
+            return Core::failure(TaskErrorCode::InvalidArgument, "scheduleCpu requires non-empty work");
+        }
+        {
+            std::scoped_lock lock(m_mutex);
+            if (m_stopping.load(std::memory_order_relaxed))
+            {
+                return Core::failure(TaskErrorCode::TaskSystemStopped, "task system is stopping");
+            }
+            if (m_cpuWorkers.empty())
+            {
+                return Core::failure(TaskErrorCode::NotSupported, "no CPU workers configured");
+            }
+            if (m_cpuQueue.size() >= m_cpuQueueCapacity)
+            {
+                return Core::failure(TaskErrorCode::QueueFull, "CPU task queue is full");
+            }
+            m_cpuQueue.push_back(std::move(work));
+        }
+        m_cpuCv.notify_one();
         return Core::success();
     }
 
@@ -119,41 +156,62 @@ class BoundedTaskSystem final : public ITaskSystem {
             m_stopping.store(true, std::memory_order_release);
         }
         m_ioCv.notify_all();
+        m_cpuCv.notify_all();
     }
 
     void shutdownAndJoin() noexcept override
     {
         requestStop();
-        for (auto& worker : m_workers)
+        for (auto& worker : m_ioWorkers)
         {
             if (worker.joinable())
             {
                 worker.join();
             }
         }
-        m_workers.clear();
+        m_ioWorkers.clear();
+        for (auto& worker : m_cpuWorkers)
+        {
+            if (worker.joinable())
+            {
+                worker.join();
+            }
+        }
+        m_cpuWorkers.clear();
         std::scoped_lock lock(m_mutex);
         m_ioQueue.clear();
+        m_cpuQueue.clear();
         m_mainQueue.clear();
         m_activeIo = 0;
+        m_activeCpu = 0;
     }
 
   private:
-    void workerLoop()
+    void ioWorkerLoop()
+    {
+        workerLoop(m_ioQueue, m_ioCv, m_activeIo);
+    }
+
+    void cpuWorkerLoop()
+    {
+        workerLoop(m_cpuQueue, m_cpuCv, m_activeCpu);
+    }
+
+    void workerLoop(std::deque<TaskCallable>& queue, std::condition_variable& cv, Core::u32& activeCounter)
     {
         while (true)
         {
             TaskCallable work;
             {
                 std::unique_lock lock(m_mutex);
-                m_ioCv.wait(lock, [&] { return m_stopping.load(std::memory_order_relaxed) || !m_ioQueue.empty(); });
-                if (m_stopping.load(std::memory_order_relaxed) && m_ioQueue.empty())
+                cv.wait(lock, [&] { return m_stopping.load(std::memory_order_relaxed) || !queue.empty(); });
+                if (m_stopping.load(std::memory_order_relaxed) && queue.empty())
                 {
                     return;
                 }
-                work = std::move(m_ioQueue.front());
-                m_ioQueue.pop_front();
-                ++m_activeIo;
+                work = std::move(queue.front());
+                queue.pop_front();
+                ++activeCounter;
             }
             try
             {
@@ -167,22 +225,27 @@ class BoundedTaskSystem final : public ITaskSystem {
             }
             {
                 std::scoped_lock lock(m_mutex);
-                if (m_activeIo > 0U)
+                if (activeCounter > 0U)
                 {
-                    --m_activeIo;
+                    --activeCounter;
                 }
             }
         }
     }
 
     const Core::usize m_ioQueueCapacity;
+    const Core::usize m_cpuQueueCapacity;
     const Core::usize m_mainQueueCapacity;
     mutable std::mutex m_mutex;
     std::condition_variable m_ioCv;
+    std::condition_variable m_cpuCv;
     std::deque<TaskCallable> m_ioQueue;
+    std::deque<TaskCallable> m_cpuQueue;
     std::deque<TaskCallable> m_mainQueue;
-    std::vector<std::thread> m_workers;
+    std::vector<std::thread> m_ioWorkers;
+    std::vector<std::thread> m_cpuWorkers;
     Core::u32 m_activeIo = 0;
+    Core::u32 m_activeCpu = 0;
     std::atomic<bool> m_stopping{false};
 };
 
@@ -193,16 +256,21 @@ Core::Result<std::unique_ptr<ITaskSystem>> createBoundedTaskSystem(const TaskSys
     if (params.ioWorkerCount == 0 || params.ioQueueCapacity == 0 || params.mainQueueCapacity == 0)
     {
         return Core::failure(TaskErrorCode::InvalidArgument,
-                             "bounded task system requires non-zero workers and queue capacities");
+                             "bounded task system requires non-zero IO workers and queue capacities");
     }
-    if (params.ioWorkerCount > 16U)
+    if (params.cpuWorkerCount > 0 && params.cpuQueueCapacity == 0)
     {
-        return Core::failure(TaskErrorCode::InvalidArgument, "ioWorkerCount exceeds first-slice limit of 16");
+        return Core::failure(TaskErrorCode::InvalidArgument, "cpuQueueCapacity must be non-zero when CPU workers > 0");
+    }
+    if (params.ioWorkerCount > 16U || params.cpuWorkerCount > 32U)
+    {
+        return Core::failure(TaskErrorCode::InvalidArgument, "worker count exceeds first-slice limits");
     }
     try
     {
         std::unique_ptr<ITaskSystem> system = std::make_unique<BoundedTaskSystem>(
-            params.ioWorkerCount, params.ioQueueCapacity, params.mainQueueCapacity);
+            params.ioWorkerCount, params.cpuWorkerCount, params.ioQueueCapacity, params.cpuQueueCapacity,
+            params.mainQueueCapacity);
         return system;
     } catch (const std::bad_alloc&)
     {
