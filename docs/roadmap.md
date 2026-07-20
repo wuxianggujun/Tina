@@ -421,9 +421,11 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   `imeFocus`；`routeTextComposition` 保留 preedit；`routeTextInput` 追加 commit 到 Label 文本；
   Runtime `UIInputRouteProducer` 转发 composition/commit。
 - **已完成 M7-E7（IME preedit paint）**：composition 更新/取消标脏 paint；焦点 Label 在已提交
-  文本后追加 preedit 字形（青色 tint）；计入 paint 容量。尚无 caret、selection、候选窗、完整
-  TextEdit 控件。
-- **仍后置**：完整 TextEdit/caret/selection；Focus Scope/Capture/Modal；Gamepad 方向长按重复与
+  文本后追加 preedit 字形（青色 tint）；计入 paint 容量。
+- **已完成 M7-E8（IME 焦点 caret paint）**：焦点 Label 在 committed 文本（+ preedit）后绘制 2px
+  白色 caret solid；设/失焦点与 composition 变化标脏 paint。尚无 selection、完整 TextEdit 控件、
+  候选窗。
+- **仍后置**：完整 TextEdit/selection/候选窗；Focus Scope/Capture/Modal；Gamepad 方向长按重复与
   完整 Accept/Cancel 导航；100%/150%/200% DPI 产品门禁与资源回收专项。
 
 ## M8 Scene 与 2D 垂直切片

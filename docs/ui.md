@@ -657,8 +657,10 @@ M7-E3：Tab / Shift+Tab 经 `routeDefaultActionFocusStep` 在可见 Targetable B
 M7-E6：Label 默认可命中；指针 Down 设 IME 焦点；composition preedit 保留在 Context；commit 追加
 到 Label 文本。
 
-M7-E7：焦点 Label 在 committed 文本之后绘制 IME preedit（青色 tint 字形/色块）。尚无 caret、
-selection、候选窗与完整 TextEdit。
+M7-E7：焦点 Label 在 committed 文本之后绘制 IME preedit（青色 tint 字形/色块）。
+
+M7-E8：焦点 Label 在 committed 文本（及 preedit）之后绘制 2px 白色 caret。尚无 selection、
+候选窗与完整 TextEdit。
 
 Runtime 不按路径打开字体。Cooked `FontAsset` 提供 owning bytes、face metadata 和确定 fallback
 chain；UI 持有 `AssetLease<FontData>`。FreeType 类型只存在于 `tina_ui_freetype`。

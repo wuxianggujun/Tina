@@ -528,8 +528,73 @@ TEST(UITextTests, ImePreeditPaintsAfterCommittedLabelText)
         0,
         Platform::TextCompositionStage::Cancelled));
     assertOk(context->commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
-    // Only committed "A" remains.
+    // Committed "A" + caret remain after preedit cancel.
+    ASSERT_EQ(context->committedPaint().size(), 2U);
+    EXPECT_EQ(context->committedPaint().entries()[1].solidFill.red, 255);
+    EXPECT_EQ(context->committedPaint().entries()[1].solidFill.green, 255);
+    EXPECT_FLOAT_EQ(context->committedPaint().entries()[1].worldRect.width, 2.0F);
+}
+
+TEST(UITextTests, ImeFocusLabelPaintsCaretAfterCommittedText)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+    const Platform::WindowId window = *windowResult;
+
+    auto context = createContext(
+        window,
+        UI::UIContextCapacityConfig{
+            .nodeCapacity = 32,
+            .rootCapacity = 1,
+            .paintSnapshotCapacity = 16,
+            .textByteCapacity = 64,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle rootStyle{};
+    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
+
+    auto labelResult = updater.createLabel(root.rootNodeId());
+    ASSERT_TRUE(labelResult.has_value());
+    const UI::UINodeId label = *labelResult;
+    UI::UILayoutStyle labelStyle{};
+    labelStyle.size.width = UI::UILayoutLength::Px(200.0F);
+    labelStyle.size.height = UI::UILayoutLength::Px(40.0F);
+    assertOk(updater.setLayoutStyle(label, labelStyle));
+    assertOk(updater.setText(label, "A"));
+    assertOk(context->commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
+
+    // Before focus: only committed text glyph(s).
     ASSERT_EQ(context->committedPaint().size(), 1U);
+
+    auto down = context->routePointerInput(UI::UIPointerInputEvent{
+        .platformFrame = Platform::PlatformFrameId{1},
+        .transitionOrdinal = 0,
+        .sourceSequence = 1,
+        .window = window,
+        .pointer = Platform::PrimaryPointerId,
+        .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+        .position = {.x = 10.0F, .y = 10.0F},
+        .button = Platform::PointerButton::Primary,
+    });
+    ASSERT_TRUE(down.has_value());
+    assertOk(context->commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
+
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    ASSERT_EQ(paint.size(), 2U);
+    EXPECT_EQ(paint.entries()[0].node, label);
+    EXPECT_EQ(paint.entries()[1].node, label);
+    EXPECT_FLOAT_EQ(paint.entries()[1].worldRect.width, 2.0F);
+    EXPECT_GT(paint.entries()[1].worldRect.height, 0.0F);
+    EXPECT_GT(paint.entries()[1].worldRect.x, paint.entries()[0].worldRect.x);
+    EXPECT_EQ(paint.entries()[1].solidFill.red, 255);
+    EXPECT_EQ(paint.entries()[1].solidFill.green, 255);
+    EXPECT_EQ(paint.entries()[1].solidFill.blue, 255);
 }
 
 } // namespace Tina::Tests

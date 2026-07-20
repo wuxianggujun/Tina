@@ -1857,6 +1857,12 @@ struct UIContext::Impl final {
                 paintEntryCount += countDrawableTextCodepoints(
                     std::string_view(imePreeditBytes_.data(), imePreeditSize_));
             }
+            // M7-E8: one caret solid for the IME-focused Label.
+            if (imeFocusLabel.hasValue()
+                && layoutEntry.node == imeFocusLabel
+                && isLiveLabel(imeFocusLabel)) {
+                ++paintEntryCount;
+            }
         }
         if (paintEntryCount > capacityConfig.paintSnapshotCapacity) {
             return fail(
@@ -2165,7 +2171,48 @@ struct UIContext::Impl final {
                 preeditColor,
                 startX,
                 startY,
-                nullptr);
+                &cursor);
+        }
+
+        // M7-E8: caret after committed text (+ preedit when composing).
+        if (imeFocusLabel.hasValue()
+            && layoutEntry.node == imeFocusLabel
+            && isLiveLabel(imeFocusLabel)) {
+            float lineHeight = cursor.lineHeight;
+            if (!(std::isfinite(lineHeight) && lineHeight > 0.0F)) {
+                if (nodeIndex < textStatesByIndex.size()) {
+                    const UITextStyle& style = textStatesByIndex[nodeIndex].style;
+                    lineHeight = style.logicalSize * style.lineHeightScale;
+                } else {
+                    lineHeight = 16.0F * 1.2F;
+                }
+            }
+            if (!(std::isfinite(lineHeight) && lineHeight > 0.0F)) {
+                lineHeight = 19.2F;
+            }
+            constexpr float CaretWidth = 2.0F;
+            const UIPremultipliedRgba8Color caretColor =
+                premultiply(UIStraightSrgba8Color{
+                    .red = 255,
+                    .green = 255,
+                    .blue = 255,
+                    .alpha = 255,
+                });
+            output.push_back(UICommittedPaintEntry{
+                .node = layoutEntry.node,
+                .worldRect =
+                    UILogicalRect{
+                        .x = normalizeFloat(cursor.x),
+                        .y = normalizeFloat(cursor.y),
+                        .width = CaretWidth,
+                        .height = normalizeFloat(lineHeight),
+                    },
+                .effectiveClip = layoutEntry.effectiveClip,
+                .paintOrdinal = nextPaintOrdinal,
+                .solidFill = caretColor,
+                .isGlyph = false,
+            });
+            ++nextPaintOrdinal;
         }
     }
 
@@ -4666,8 +4713,15 @@ struct UIContext::Impl final {
                     nodes.tryGet(result.pointQuery.target.node.storageId());
                 if (targetRecord != nullptr
                     && targetRecord->kind == UIWidgetKind::Label) {
+                    const UINodeId previousFocus = imeFocusLabel;
                     imeFocusLabel = result.pointQuery.target.node;
                     clearImeComposition();
+                    if (previousFocus.hasValue()
+                        && previousFocus != imeFocusLabel
+                        && contains(previousFocus)) {
+                        static_cast<void>(markPaintDirty(previousFocus));
+                    }
+                    static_cast<void>(markPaintDirty(imeFocusLabel));
                 }
             }
         } else if (input.kind == UIRoutedPointerEventKind::Move
