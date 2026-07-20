@@ -1849,6 +1849,14 @@ struct UIContext::Impl final {
                 paintEntryCount += countDrawableTextCodepoints(
                     textViewFor(nodeIndex));
             }
+            // Active IME preedit is painted after the committed Label text.
+            if (imeCompositionActive_
+                && imeFocusLabel.hasValue()
+                && layoutEntry.node == imeFocusLabel
+                && imePreeditSize_ > 0) {
+                paintEntryCount += countDrawableTextCodepoints(
+                    std::string_view(imePreeditBytes_.data(), imePreeditSize_));
+            }
         }
         if (paintEntryCount > capacityConfig.paintSnapshotCapacity) {
             return fail(
@@ -1883,44 +1891,53 @@ struct UIContext::Impl final {
         return rebuildCount;
     }
 
-    void appendTextGlyphPaints(
+    // Shared UTF-8 → glyph/solid paint emitter. Returns final cursor after the
+    // last drawable codepoint (for chaining IME preedit after committed text).
+    struct TextPaintCursor final {
+        float x = 0.0F;
+        float y = 0.0F;
+        float lineHeight = 0.0F;
+        float baseX = 0.0F;
+    };
+
+    void appendUtf8TextPaints(
         std::pmr::vector<UICommittedPaintEntry>& output,
         const UICommittedLayoutEntry& layoutEntry,
-        u32& nextPaintOrdinal) noexcept
+        u32& nextPaintOrdinal,
+        std::string_view utf8,
+        const UITextStyle& style,
+        UIPremultipliedRgba8Color color,
+        float startX,
+        float startY,
+        TextPaintCursor* outCursor) noexcept
     {
-        const u32 nodeIndex = layoutEntry.node.index();
-        if (nodeIndex >= textStatesByIndex.size()
-            || !textStatesByIndex[nodeIndex].hasContent) {
+        if (outCursor != nullptr) {
+            *outCursor = TextPaintCursor{
+                .x = startX,
+                .y = startY,
+                .lineHeight = style.logicalSize * style.lineHeightScale,
+                .baseX = layoutEntry.worldRect.x,
+            };
+        }
+        if (utf8.empty() || color.isTransparent()) {
             return;
         }
-        const UIPremultipliedRgba8Color color = localTextColorCacheByIndex[nodeIndex];
-        if (color.isTransparent()) {
-            return;
-        }
-
-        const WidgetTextState& state = textStatesByIndex[nodeIndex];
-        const float fallbackAdvance =
-            state.style.logicalSize * state.style.advanceScale;
-        const float lineHeight =
-            state.style.logicalSize * state.style.lineHeightScale;
+        const float fallbackAdvance = style.logicalSize * style.advanceScale;
+        const float lineHeight = style.logicalSize * style.lineHeightScale;
         if (!(std::isfinite(fallbackAdvance) && fallbackAdvance > 0.0F
               && std::isfinite(lineHeight) && lineHeight > 0.0F)) {
             return;
         }
-
-        const std::string_view utf8 = textViewFor(nodeIndex);
         const u32 pixelSize = static_cast<u32>(
-            (std::max)(1.0F, std::floor(state.style.logicalSize)));
+            (std::max)(1.0F, std::floor(style.logicalSize)));
 
-        // Prefer full raster+atlas path. On any failure, drop partial appends
-        // for this node and fall back to monospaced SolidQuad bars.
         if (textRasterizer && textFace.hasValue() && glyphAtlas) {
-            auto batch = textRasterizer->raster(textFace, utf8, state.style);
+            auto batch = textRasterizer->raster(textFace, utf8, style);
             if (batch) {
                 const usize outputBase = output.size();
                 const u32 ordinalBase = nextPaintOrdinal;
-                float cursorX = layoutEntry.worldRect.x;
-                float cursorY = layoutEntry.worldRect.y;
+                float cursorX = startX;
+                float cursorY = startY;
                 usize glyphIndex = 0;
                 usize index = 0;
                 bool usedAtlasPath = true;
@@ -2017,6 +2034,12 @@ struct UIContext::Impl final {
                     index += unitLength;
                 }
                 if (usedAtlasPath) {
+                    if (outCursor != nullptr) {
+                        outCursor->x = cursorX;
+                        outCursor->y = cursorY;
+                        outCursor->lineHeight = lineHeight;
+                        outCursor->baseX = layoutEntry.worldRect.x;
+                    }
                     return;
                 }
                 while (output.size() > outputBase) {
@@ -2026,9 +2049,8 @@ struct UIContext::Impl final {
             }
         }
 
-        // SolidQuad monospaced fallback (no atlas / raster / coverage).
-        float cursorX = layoutEntry.worldRect.x;
-        float cursorY = layoutEntry.worldRect.y;
+        float cursorX = startX;
+        float cursorY = startY;
         usize index = 0;
         while (index < utf8.size()) {
             const auto first = static_cast<unsigned char>(utf8[index]);
@@ -2045,14 +2067,12 @@ struct UIContext::Impl final {
             if (unitLength > utf8.size() - index) {
                 break;
             }
-
             if (unitLength == 1 && first == '\n') {
                 cursorX = layoutEntry.worldRect.x;
                 cursorY = normalizeFloat(cursorY + lineHeight);
                 index += unitLength;
                 continue;
             }
-
             output.push_back(UICommittedPaintEntry{
                 .node = layoutEntry.node,
                 .worldRect =
@@ -2070,6 +2090,82 @@ struct UIContext::Impl final {
             ++nextPaintOrdinal;
             cursorX = normalizeFloat(cursorX + fallbackAdvance);
             index += unitLength;
+        }
+        if (outCursor != nullptr) {
+            outCursor->x = cursorX;
+            outCursor->y = cursorY;
+            outCursor->lineHeight = lineHeight;
+            outCursor->baseX = layoutEntry.worldRect.x;
+        }
+    }
+
+    void appendTextGlyphPaints(
+        std::pmr::vector<UICommittedPaintEntry>& output,
+        const UICommittedLayoutEntry& layoutEntry,
+        u32& nextPaintOrdinal) noexcept
+    {
+        const u32 nodeIndex = layoutEntry.node.index();
+        TextPaintCursor cursor{
+            .x = layoutEntry.worldRect.x,
+            .y = layoutEntry.worldRect.y,
+            .lineHeight = 0.0F,
+            .baseX = layoutEntry.worldRect.x,
+        };
+
+        if (nodeIndex < textStatesByIndex.size()
+            && textStatesByIndex[nodeIndex].hasContent) {
+            const UIPremultipliedRgba8Color color =
+                localTextColorCacheByIndex[nodeIndex];
+            if (!color.isTransparent()) {
+                const WidgetTextState& state = textStatesByIndex[nodeIndex];
+                appendUtf8TextPaints(
+                    output,
+                    layoutEntry,
+                    nextPaintOrdinal,
+                    textViewFor(nodeIndex),
+                    state.style,
+                    color,
+                    layoutEntry.worldRect.x,
+                    layoutEntry.worldRect.y,
+                    &cursor);
+            }
+        }
+
+        // M7-E7: paint active IME preedit after committed text on the focus Label.
+        if (imeCompositionActive_
+            && imeFocusLabel.hasValue()
+            && layoutEntry.node == imeFocusLabel
+            && imePreeditSize_ > 0) {
+            UITextStyle style{};
+            if (nodeIndex < textStatesByIndex.size()) {
+                style = textStatesByIndex[nodeIndex].style;
+            }
+            // Distinct cyan-ish preedit tint (premultiplied).
+            const UIPremultipliedRgba8Color preeditColor =
+                premultiply(UIStraightSrgba8Color{
+                    .red = 0,
+                    .green = 180,
+                    .blue = 255,
+                    .alpha = 255,
+                });
+            const float startX = (nodeIndex < textStatesByIndex.size()
+                                  && textStatesByIndex[nodeIndex].hasContent)
+                ? cursor.x
+                : layoutEntry.worldRect.x;
+            const float startY = (nodeIndex < textStatesByIndex.size()
+                                  && textStatesByIndex[nodeIndex].hasContent)
+                ? cursor.y
+                : layoutEntry.worldRect.y;
+            appendUtf8TextPaints(
+                output,
+                layoutEntry,
+                nextPaintOrdinal,
+                std::string_view(imePreeditBytes_.data(), imePreeditSize_),
+                style,
+                preeditColor,
+                startX,
+                startY,
+                nullptr);
         }
     }
 
@@ -2470,9 +2566,14 @@ struct UIContext::Impl final {
 
     void clearImeComposition() noexcept
     {
+        const bool wasActive = imeCompositionActive_;
+        const UINodeId focus = imeFocusLabel;
         imeCompositionActive_ = false;
         imePreeditSize_ = 0;
         imePreeditCursor_ = 0;
+        if (wasActive && focus.hasValue() && contains(focus)) {
+            static_cast<void>(markPaintDirty(focus));
+        }
     }
 
     void clearImeFocus() noexcept
@@ -4840,6 +4941,7 @@ struct UIContext::Impl final {
 
         using Stage = Platform::TextCompositionStage;
         if (stage == Stage::Cancelled || stage == Stage::Ended) {
+            // clearImeComposition marks paint dirty when preedit was active.
             clearImeComposition();
             return UITextInputRouteResult{.consumed = true, .applied = true};
         }
@@ -4866,6 +4968,9 @@ struct UIContext::Impl final {
         imePreeditSize_ = preeditUtf8.size();
         imePreeditCursor_ = (std::min)(cursorCodepoint, *codepoints);
         imeCompositionActive_ = true;
+        if (Core::Status paintStatus = markPaintDirty(imeFocusLabel); !paintStatus) {
+            return Core::failure(paintStatus.error());
+        }
         return UITextInputRouteResult{.consumed = true, .applied = true};
     }
 
