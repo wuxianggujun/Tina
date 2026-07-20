@@ -71,7 +71,11 @@ class UIClipId final {
 };
 
 enum class UIDrawCommandKind : u8 {
-    SolidQuad,
+    SolidQuad = 0,
+    // Glyph draws a textured quad from a CPU atlas page. Backend upload and
+    // textured UI pass remain a later slice; builder/batch/checksum support
+    // Glyph now so UI can emit placements without forcing GPU support.
+    Glyph,
 };
 
 struct UISolidQuadInput final {
@@ -81,17 +85,31 @@ struct UISolidQuadInput final {
     std::optional<UIPixelRect> effectiveClip{};
 };
 
+// atlasUv is in atlas-page texel space (top-left origin). atlasPage indexes the
+// owning atlas page (0 for the single-page CPU atlas of M7-D7).
+struct UIGlyphQuadInput final {
+    u32 paintOrdinal = 0;
+    UIPixelRect bounds{};
+    UIPremultipliedRgba8 color{};
+    UIPixelRect atlasUv{};
+    u32 atlasPage = 0;
+    std::optional<UIPixelRect> effectiveClip{};
+};
+
 struct UIDrawCommand final {
     UIDrawCommandKind kind = UIDrawCommandKind::SolidQuad;
     u32 paintOrdinal = 0;
     UIPixelRect bounds{};
     UIPremultipliedRgba8 color{};
     UIClipId clip{};
+    UIPixelRect atlasUv{};
+    u32 atlasPage = 0;
 };
 
 struct UIDrawBatch final {
     UIDrawCommandKind kind = UIDrawCommandKind::SolidQuad;
     UIClipId clip{};
+    u32 atlasPage = 0;
     u32 firstCommand = 0;
     u32 commandCount = 0;
 };
@@ -104,6 +122,7 @@ struct UIDisplayListCapacity final {
 
 struct UIDisplayListStatistics final {
     u32 solidQuadCommandCount = 0;
+    u32 glyphCommandCount = 0;
     u32 clipCount = 0;
     u32 batchCount = 0;
     u32 prunedEmptyBoundsCount = 0;
@@ -191,6 +210,8 @@ class UIDisplayListBuilder final {
 
     [[nodiscard]] Core::Status beginFrame();
     [[nodiscard]] Core::Status addSolidQuad(const UISolidQuadInput& input);
+    // Emits a Glyph command with atlas UV placement. Does not upload textures.
+    [[nodiscard]] Core::Status addGlyphQuad(const UIGlyphQuadInput& input);
     [[nodiscard]] Core::Result<UIDisplayListView> commit();
     void rollback() noexcept;
 

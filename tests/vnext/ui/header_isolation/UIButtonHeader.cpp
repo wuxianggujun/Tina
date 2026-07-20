@@ -35,7 +35,7 @@ struct OversizedButtonAction final {
 [[maybe_unused]] void instantiateFixedInlineCallbackOperations()
 {
     Tina::UI::UIButtonActionEvent event{
-        .source = Tina::UI::UIButtonActivationSource::PrimaryPointer,
+        .source = Tina::UI::UIButtonActivationSource::Keyboard,
         .platformFrame = Tina::Platform::PlatformFrameId{1},
         .sourceSequence = 7,
     };

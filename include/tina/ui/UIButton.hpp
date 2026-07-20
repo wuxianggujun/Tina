@@ -16,6 +16,10 @@ namespace Tina::UI {
 
 enum class UIButtonActivationSource : u8 {
     PrimaryPointer,
+    // Keyboard Accept (Enter/Space) and Gamepad Accept (South) activate the
+    // Button that currently owns default-action focus (set by pointer arm).
+    Keyboard,
+    Gamepad,
 };
 
 struct UIButtonActionEvent final {

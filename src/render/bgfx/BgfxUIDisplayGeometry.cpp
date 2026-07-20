@@ -6,8 +6,8 @@
 namespace Tina::Render::Bgfx {
 namespace {
 
-inline constexpr usize VerticesPerSolidQuad = 4;
-inline constexpr usize IndicesPerSolidQuad = 6;
+inline constexpr usize VerticesPerQuad = 4;
+inline constexpr usize IndicesPerQuad = 6;
 
 [[nodiscard]] Core::Result<BgfxUIDisplayGeometryRequirements>
 geometryCapacityFailure(const char* message)
@@ -23,6 +23,29 @@ geometryCapacityFailure(const char* message)
            static_cast<u32>(color.red);
 }
 
+[[nodiscard]] Core::Result<UIAtlasPageSize> resolvePage(
+    const BgfxUIAtlasPageTable& pages,
+    u32 atlasPage) noexcept
+{
+    if (atlasPage >= pages.pageCount || atlasPage >= BgfxUIAtlasPageTable::MaxPages)
+    {
+        return Core::failure(Core::CoreErrorCode::Unsupported,
+                             "UI Glyph command references an unknown atlas page");
+    }
+    const UIAtlasPageSize size = pages.pages[atlasPage];
+    if (size.width == 0 || size.height == 0)
+    {
+        return Core::failure(Core::CoreErrorCode::Unsupported,
+                             "UI Glyph atlas page size is zero");
+    }
+    return size;
+}
+
+[[nodiscard]] bool isSupportedCommandKind(UIDrawCommandKind kind) noexcept
+{
+    return kind == UIDrawCommandKind::SolidQuad || kind == UIDrawCommandKind::Glyph;
+}
+
 } // namespace
 
 Core::Result<BgfxUIDisplayGeometryRequirements>
@@ -30,15 +53,15 @@ checkedGeometryRequirements(UIDisplayListView displayList)
 {
     const usize commandCount = displayList.commands().size();
     constexpr usize MaxUsize = (std::numeric_limits<usize>::max)();
-    if (commandCount > MaxUsize / VerticesPerSolidQuad ||
-        commandCount > MaxUsize / IndicesPerSolidQuad)
+    if (commandCount > MaxUsize / VerticesPerQuad ||
+        commandCount > MaxUsize / IndicesPerQuad)
     {
         return geometryCapacityFailure(
             "UI DisplayList geometry requirements exceed addressable output counts");
     }
 
-    const usize vertexCount = commandCount * VerticesPerSolidQuad;
-    const usize indexCount = commandCount * IndicesPerSolidQuad;
+    const usize vertexCount = commandCount * VerticesPerQuad;
+    const usize indexCount = commandCount * IndicesPerQuad;
     if constexpr ((std::numeric_limits<usize>::max)() >
                   static_cast<usize>((std::numeric_limits<u32>::max)()))
     {
@@ -53,7 +76,7 @@ checkedGeometryRequirements(UIDisplayListView displayList)
 
     for (const UIDrawCommand& command : displayList.commands())
     {
-        if (command.kind != UIDrawCommandKind::SolidQuad)
+        if (!isSupportedCommandKind(command.kind))
         {
             return Core::failure(Core::CoreErrorCode::Unsupported,
                                  "The UI DisplayList contains an unsupported draw command kind");
@@ -68,7 +91,7 @@ checkedGeometryRequirements(UIDisplayListView displayList)
 
 Core::Result<BgfxUIDisplayGeometryRequirements>
 writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vertices,
-              std::span<u32> indices)
+              std::span<u32> indices, BgfxUIAtlasPageTable atlasPages)
 {
     auto requirements = checkedGeometryRequirements(displayList);
     if (!requirements)
@@ -82,6 +105,26 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             "UI DisplayList geometry output spans do not have enough capacity");
     }
 
+    // Preflight Glyph page lookups before writing so failures leave outputs
+    // unmodified (callers may pass sentinel-filled buffers).
+    for (const UIDrawCommand& command : displayList.commands())
+    {
+        if (command.kind != UIDrawCommandKind::Glyph)
+        {
+            continue;
+        }
+        auto page = resolvePage(atlasPages, command.atlasPage);
+        if (!page)
+        {
+            return Core::failure(std::move(page.error()));
+        }
+        if (command.atlasUv.width == 0 || command.atlasUv.height == 0)
+        {
+            return Core::failure(Core::CoreErrorCode::Unsupported,
+                                 "UI Glyph command has empty atlas UV");
+        }
+    }
+
     for (usize commandIndex = 0; commandIndex < displayList.commands().size(); ++commandIndex)
     {
         const UIDrawCommand& command = displayList.commands()[commandIndex];
@@ -91,30 +134,56 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
         const i64 bottom = top + static_cast<i64>(command.bounds.height);
         const u32 color = packAbgr(command.color);
 
-        const usize vertexOffset = commandIndex * VerticesPerSolidQuad;
+        float u0 = 0.0F;
+        float v0 = 0.0F;
+        float u1 = 1.0F;
+        float v1 = 1.0F;
+        if (command.kind == UIDrawCommandKind::Glyph)
+        {
+            auto page = resolvePage(atlasPages, command.atlasPage);
+            // Preflighted above.
+            const float pageW = static_cast<float>(page->width);
+            const float pageH = static_cast<float>(page->height);
+            u0 = static_cast<float>(command.atlasUv.x) / pageW;
+            v0 = static_cast<float>(command.atlasUv.y) / pageH;
+            u1 = static_cast<float>(command.atlasUv.x + static_cast<i32>(command.atlasUv.width))
+                / pageW;
+            v1 = static_cast<float>(command.atlasUv.y + static_cast<i32>(command.atlasUv.height))
+                / pageH;
+        }
+
+        const usize vertexOffset = commandIndex * VerticesPerQuad;
         vertices[vertexOffset + 0U] = {
             .x = static_cast<float>(left),
             .y = static_cast<float>(top),
             .abgr = color,
+            .u = u0,
+            .v = v0,
         };
         vertices[vertexOffset + 1U] = {
             .x = static_cast<float>(right),
             .y = static_cast<float>(top),
             .abgr = color,
+            .u = u1,
+            .v = v0,
         };
         vertices[vertexOffset + 2U] = {
             .x = static_cast<float>(right),
             .y = static_cast<float>(bottom),
             .abgr = color,
+            .u = u1,
+            .v = v1,
         };
         vertices[vertexOffset + 3U] = {
             .x = static_cast<float>(left),
             .y = static_cast<float>(bottom),
             .abgr = color,
+            .u = u0,
+            .v = v1,
         };
 
         const u32 absoluteVertex = static_cast<u32>(vertexOffset);
-        const usize indexOffset = commandIndex * IndicesPerSolidQuad;
+        const usize indexOffset = commandIndex * IndicesPerQuad;
         indices[indexOffset + 0U] = absoluteVertex + 0U;
         indices[indexOffset + 1U] = absoluteVertex + 1U;
         indices[indexOffset + 2U] = absoluteVertex + 2U;

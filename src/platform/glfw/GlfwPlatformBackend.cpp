@@ -9,10 +9,18 @@
 #include "GlfwBackendTestAccess.hpp"
 #endif
 #include "GlfwDigitalFocusFilter.hpp"
+#include "GlfwGamepadTranslation.hpp"
 #include "GlfwInputTranslation.hpp"
 #include "GlfwNativeWindowBinding.hpp"
+#if defined(_WIN32)
+#include "Imm32CompositionHostWin32.hpp"
+#endif
 
 #include <GLFW/glfw3.h>
+#if defined(_WIN32)
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#endif
 
 #include <array>
 #include <atomic>
@@ -401,6 +409,18 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             return PlatformPollResult::Exit();
         }
 
+        if (auto gamepadStatus = sampleGamepads(); !gamepadStatus)
+        {
+            return std::unexpected(std::move(gamepadStatus.error()));
+        }
+
+#if defined(_WIN32)
+        if (auto imeStatus = drainImeCompositionEvents(); !imeStatus)
+        {
+            return std::unexpected(std::move(imeStatus.error()));
+        }
+#endif
+
         bool metricsEventPublishedThisFrame = false;
         if (metricsDirty_)
         {
@@ -446,7 +466,9 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         {
             return std::unexpected(std::move(nextSurfaceSnapshot.error()));
         }
-        if (!frameBuilder_.setPrimaryWindowSnapshot(metrics_, input_) || !frameBuilder_.setGamepadSnapshots({}))
+        if (!frameBuilder_.setPrimaryWindowSnapshot(metrics_, input_)
+            || !frameBuilder_.setGamepadSnapshots(
+                std::span<const GamepadSnapshot>(gamepadSnapshots_.data(), gamepadSnapshotCount_)))
         {
             return Core::failure(PlatformErrorCode::InvalidFrameSnapshot,
                                  "The GLFW final platform snapshots could not be committed");
@@ -524,6 +546,12 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         {
             return status;
         }
+#if defined(_WIN32)
+        if (auto status = attachImeHost(); !status)
+        {
+            return status;
+        }
+#endif
         return publishDuringCreation ? publishPrimaryWindow() : Core::success();
     }
 
@@ -996,6 +1024,19 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         {
             return;
         }
+#if defined(_WIN32)
+        // IMM32 result path already published TextInput; skip the follow-up
+        // WM_CHAR/glfw char that would double-commit the same text.
+        if (imeSuppressNextCharacter_)
+        {
+            imeSuppressNextCharacter_ = false;
+            return;
+        }
+        if (imeHost_.session().active())
+        {
+            return;
+        }
+#endif
         const auto encoded = Detail::encodeUtf8Codepoint(codepoint);
         if (!encoded)
         {
@@ -1142,6 +1183,161 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     }
 #endif
 
+    [[nodiscard]] Core::Status sampleGamepads()
+    {
+        // Sample GLFW standard gamepads into fixed jid slots. Connect/disconnect
+        // lifecycle and button/axis diffs route to the primary window. No
+        // synthetic Down→Up is invented between polls.
+        std::array<bool, GLFW_JOYSTICK_LAST + 1> present{};
+        std::array<GLFWgamepadstate, GLFW_JOYSTICK_LAST + 1> states{};
+        for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid)
+        {
+            if (glfwJoystickPresent(jid) != GLFW_TRUE
+                || glfwJoystickIsGamepad(jid) != GLFW_TRUE)
+            {
+                continue;
+            }
+            if (glfwGetGamepadState(jid, &states[static_cast<usize>(jid)]) != GLFW_TRUE)
+            {
+                continue;
+            }
+            present[static_cast<usize>(jid)] = true;
+        }
+
+        for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid)
+        {
+            const usize slot = static_cast<usize>(jid);
+            if (!gamepadSlots_[slot].active || present[slot])
+            {
+                continue;
+            }
+            const GamepadId id = gamepadSlots_[slot].id;
+            recordAppend(frameBuilder_.appendInputTransition(InputCancelTransition{
+                .routedWindow = windowId_,
+                .reason = InputCancelReason::DeviceDisconnected,
+                .gamepad = id,
+            }));
+            recordAppend(frameBuilder_.appendPlatformEvent(GamepadDisconnectedEvent{
+                .gamepad = id,
+            }));
+            static_cast<void>(gamepadPool_.erase(id));
+            gamepadSlots_[slot] = {};
+        }
+
+        for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid)
+        {
+            const usize slot = static_cast<usize>(jid);
+            if (!present[slot])
+            {
+                continue;
+            }
+
+            GamepadSlotState& slotState = gamepadSlots_[slot];
+            if (!slotState.active)
+            {
+                auto emplaced = gamepadPool_.tryEmplace(1);
+                if (!emplaced)
+                {
+                    return Core::failure(
+                        PlatformErrorCode::BackendOperationFailed,
+                        "The GLFW gamepad id pool is exhausted");
+                }
+                slotState.active = true;
+                slotState.id = *emplaced;
+                slotState.revision = 1;
+                slotState.heldButtons.reset();
+                slotState.axes.fill(0.0F);
+                recordAppend(frameBuilder_.appendPlatformEvent(GamepadConnectedEvent{
+                    .gamepad = slotState.id,
+                }));
+            }
+
+            GamepadSnapshot sampled{
+                .gamepad = slotState.id,
+                .revision = slotState.revision,
+            };
+            Detail::applyGlfwGamepadState(sampled, states[slot]);
+
+            bool changed = false;
+            for (usize button = 0; button < GamepadButtonCount; ++button)
+            {
+                const bool wasHeld = slotState.heldButtons.test(button);
+                const bool isHeld = sampled.heldButtons.test(button);
+                if (wasHeld == isHeld)
+                {
+                    continue;
+                }
+                changed = true;
+                recordAppend(frameBuilder_.appendInputTransition(GamepadButtonTransition{
+                    .routedWindow = windowId_,
+                    .gamepad = slotState.id,
+                    .button = static_cast<GamepadButton>(button),
+                    .state = isHeld ? DigitalTransition::Down : DigitalTransition::Up,
+                }));
+            }
+            for (usize axis = 0; axis < GamepadAxisCount; ++axis)
+            {
+                // Stick deadzone is applied in applyGlfwGamepadState. Emission
+                // uses hysteresis so tiny residual noise does not spam axes.
+                if (!Detail::gamepadAxisChanged(
+                        slotState.axes[axis],
+                        sampled.axes[axis],
+                        Detail::DefaultGamepadAxisChangeHysteresis))
+                {
+                    // Keep the last published value so repeated tiny noise does
+                    // not accumulate into a later spurious transition.
+                    sampled.axes[axis] = slotState.axes[axis];
+                    continue;
+                }
+                changed = true;
+                recordAppend(frameBuilder_.appendInputTransition(GamepadAxisTransition{
+                    .routedWindow = windowId_,
+                    .gamepad = slotState.id,
+                    .axis = static_cast<GamepadAxis>(axis),
+                    .value = sampled.axes[axis],
+                }));
+            }
+            if (changed)
+            {
+                if (slotState.revision == (std::numeric_limits<u64>::max)())
+                {
+                    return Core::failure(
+                        PlatformErrorCode::BackendOperationFailed,
+                        "The GLFW gamepad snapshot revision space is exhausted");
+                }
+                ++slotState.revision;
+                sampled.revision = slotState.revision;
+            }
+            slotState.heldButtons = sampled.heldButtons;
+            slotState.axes = sampled.axes;
+        }
+
+        gamepadSnapshotCount_ = 0;
+        for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid)
+        {
+            const usize slot = static_cast<usize>(jid);
+            if (!gamepadSlots_[slot].active)
+            {
+                continue;
+            }
+            if (gamepadSnapshotCount_ >= PlatformFrameBuilder::MaximumGamepadSlots)
+            {
+                return Core::failure(
+                    PlatformErrorCode::InvalidFrameSnapshot,
+                    "The GLFW gamepad snapshot capacity has been exhausted");
+            }
+            const GamepadSlotState& slotState = gamepadSlots_[slot];
+            gamepadSnapshots_[gamepadSnapshotCount_] = GamepadSnapshot{
+                .gamepad = slotState.id,
+                .revision = slotState.revision,
+                .heldButtons = slotState.heldButtons,
+                .axes = slotState.axes,
+            };
+            ++gamepadSnapshotCount_;
+        }
+        return Core::success();
+    }
+
     void onFocus(int focused) noexcept
     {
         metricsDirty_ = true;
@@ -1153,6 +1349,17 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         focusFilter_.onFocusLost(input_);
         input_.heldKeys.reset();
         input_.pointer.heldButtons.reset();
+#if defined(_WIN32)
+        if (auto cancelled = imeHost_.onFocusLost(); cancelled.has_value() && collectingFrame_)
+        {
+            recordAppend(frameBuilder_.appendInputTransition(TextCompositionTransition{
+                .window = windowId_,
+                .preeditUtf8 = {},
+                .cursorCodepoint = 0,
+                .stage = TextCompositionStage::Cancelled,
+            }));
+        }
+#endif
         if (!collectingFrame_)
         {
             focusCancelPending_ = true;
@@ -1164,8 +1371,56 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }));
     }
 
+#if defined(_WIN32)
+    [[nodiscard]] Core::Status drainImeCompositionEvents()
+    {
+        auto pending = imeHost_.takePending();
+        if (!pending.has_value())
+        {
+            return Core::success();
+        }
+        recordAppend(frameBuilder_.appendInputTransition(TextCompositionTransition{
+            .window = windowId_,
+            .preeditUtf8 = pending->composition.preeditUtf8,
+            .cursorCodepoint = pending->composition.cursorCodepoint,
+            .stage = pending->composition.stage,
+        }));
+        if (pending->composition.stage == TextCompositionStage::Ended
+            && !pending->composition.committedUtf8.empty())
+        {
+            recordAppend(frameBuilder_.appendInputTransition(TextInputTransition{
+                .window = windowId_,
+                .committedUtf8 = pending->composition.committedUtf8,
+            }));
+            imeSuppressNextCharacter_ = true;
+        }
+        if (callbackFailure_ != CallbackAssemblyFailure::None)
+        {
+            return Core::failure(
+                PlatformErrorCode::CallbackFrameAssemblyFailed,
+                "An IMM32 composition event could not be appended");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status attachImeHost()
+    {
+        const HWND hwnd = glfwGetWin32Window(window_);
+        if (hwnd == nullptr)
+        {
+            return Core::failure(
+                PlatformErrorCode::WindowSurfaceUnavailable,
+                "GLFW did not provide a Win32 HWND for IMM32");
+        }
+        return imeHost_.attach(hwnd);
+    }
+#endif
+
     void clearCallbacks() noexcept
     {
+#if defined(_WIN32)
+        imeHost_.detach();
+#endif
         glfwSetKeyCallback(window_, nullptr);
         glfwSetCharCallback(window_, nullptr);
         glfwSetCursorPosCallback(window_, nullptr);
@@ -1267,6 +1522,14 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }
     }
 
+    struct GamepadSlotState final {
+        GamepadId id{};
+        u64 revision = 0;
+        std::bitset<GamepadButtonCount> heldButtons{};
+        std::array<float, GamepadAxisCount> axes{};
+        bool active = false;
+    };
+
     WindowPool windows_;
     WindowId windowId_{};
     SurfacePool surfaces_;
@@ -1277,6 +1540,12 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     WindowMetricsSnapshot metrics_{};
     WindowInputSnapshot input_{};
     Detail::GlfwDigitalFocusFilter focusFilter_{};
+    Core::GenerationPool<int, GamepadRegistryTag> gamepadPool_ =
+        *Core::GenerationPool<int, GamepadRegistryTag>::Create(
+            PlatformFrameBuilder::MaximumGamepadSlots);
+    std::array<GamepadSlotState, GLFW_JOYSTICK_LAST + 1> gamepadSlots_{};
+    std::array<GamepadSnapshot, PlatformFrameBuilder::MaximumGamepadSlots> gamepadSnapshots_{};
+    usize gamepadSnapshotCount_ = 0;
     std::thread::id ownerThread_{};
     Integration::WindowSurfaceSnapshot surfaceSnapshot_{};
     u64 nextFrameId_ = 1;
@@ -1287,6 +1556,10 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     bool metricsDirty_ = false;
     bool startupMetricsEventPending_ = false;
     bool closeRequested_ = false;
+#if defined(_WIN32)
+    Detail::Imm32CompositionHostWin32 imeHost_{};
+    bool imeSuppressNextCharacter_ = false;
+#endif
 #if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
     static constexpr usize MaximumQueuedPointerEventsForTest = 16;
     bool failNextPollForTest_ = false;

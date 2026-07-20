@@ -16,6 +16,7 @@ struct UIRenderViewportMapping final {
 struct UIRenderDisplayListBuildStatistics final {
     usize sourcePaintEntryCount = 0;
     usize submittedSolidQuadCount = 0;
+    usize submittedGlyphCount = 0;
     usize redundantClipElisionCount = 0;
 };
 

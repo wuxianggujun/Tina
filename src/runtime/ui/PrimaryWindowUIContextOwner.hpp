@@ -2,12 +2,14 @@
 
 #include <tina/core/error/Result.hpp>
 #include <tina/platform/PlatformFrame.hpp>
+#include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/ui/UIContext.hpp>
 
 #include <memory>
 #include <memory_resource>
 #include <optional>
 #include <thread>
+#include <utility>
 
 namespace Tina::Runtime::Detail {
 
@@ -19,7 +21,8 @@ class PrimaryWindowUIContextOwner final {
   public:
     explicit PrimaryWindowUIContextOwner(
         UI::UIContextCapacityConfig capacities = {},
-        std::pmr::memory_resource& memoryResource = *std::pmr::get_default_resource()) noexcept;
+        std::pmr::memory_resource& memoryResource = *std::pmr::get_default_resource(),
+        PrimaryWindowUIContextFactory createContext = {}) noexcept;
     ~PrimaryWindowUIContextOwner() noexcept;
 
     PrimaryWindowUIContextOwner(const PrimaryWindowUIContextOwner&) = delete;
@@ -52,6 +55,7 @@ class PrimaryWindowUIContextOwner final {
 
     UI::UIContextCapacityConfig capacities_{};
     std::pmr::memory_resource* memoryResource_ = nullptr;
+    PrimaryWindowUIContextFactory createContext_{};
     std::thread::id ownerThreadId_{};
     std::unique_ptr<UI::UIContext> context_{};
     Platform::WindowId boundWindow_{};

@@ -292,6 +292,72 @@ Core::Status PrimaryWindowUICapabilityState::setBoxPaint(u64 epoch, PrimaryWindo
     return Core::success();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setText(u64 epoch, PrimaryWindowUIPhase phase,
+                                                     UI::UITreeUpdater& updater, UI::UINodeId node,
+                                                     std::string_view utf8)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setText";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setText(node, utf8);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::setTextStyle(u64 epoch, PrimaryWindowUIPhase phase,
+                                                          UI::UITreeUpdater& updater, UI::UINodeId node,
+                                                          const UI::UITextStyle& style)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setTextStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTextStyle(node, style);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<std::string_view> PrimaryWindowUICapabilityState::text(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                    UI::UITreeUpdater& updater, UI::UINodeId node)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::text";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(status.error());
+    }
+    auto result = updater.text(node);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
+Core::Result<UI::UITextStyle> PrimaryWindowUICapabilityState::textStyle(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                        UI::UITreeUpdater& updater, UI::UINodeId node)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::textStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(status.error());
+    }
+    auto result = updater.textStyle(node);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setButtonAction(u64 epoch, PrimaryWindowUIPhase phase,
                                                              UI::UITreeUpdater& updater, UI::UINodeId button,
                                                              UI::UIButtonActionCallback callback)

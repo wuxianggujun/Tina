@@ -5,6 +5,9 @@ add_executable(tina_ui_tests
     UIDirtySubtreeTests.cpp
     UILayoutTests.cpp
     UIPaintSnapshotTests.cpp
+    UITextTests.cpp
+    UITextRasterizerTests.cpp
+    UIGlyphAtlasTests.cpp
     UITreeCoreTests.cpp
     header_isolation/InputRoutingHeader.cpp
     header_isolation/UIButtonHeader.cpp
@@ -20,6 +23,9 @@ add_executable(tina_ui_tests
     header_isolation/UIHitTestHeader.cpp
     header_isolation/UILayoutHeader.cpp
     header_isolation/UIPaintHeader.cpp
+    header_isolation/UITextHeader.cpp
+    header_isolation/UITextRasterizerHeader.cpp
+    header_isolation/UIGlyphAtlasHeader.cpp
     header_isolation/UINodeIdHeader.cpp
     header_isolation/UIUmbrellaHeader.cpp
     header_isolation/UIWidgetKindHeader.cpp

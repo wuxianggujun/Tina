@@ -326,6 +326,146 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             continue;
         }
 
+        // IME composition / commit targeting the Label under ime focus.
+        if (const auto* composition =
+                std::get_if<Platform::TextCompositionTransition>(
+                    &transitions[ordinal].payload);
+            composition != nullptr
+            && composition->window == context->ownerWindow())
+        {
+            auto routed = context->routeTextComposition(
+                composition->window,
+                platformFrame.id(),
+                transitions[ordinal].sequence,
+                composition->preeditUtf8,
+                composition->cursorCodepoint,
+                composition->stage);
+            if (!routed)
+            {
+                Core::Error error = std::move(routed.error());
+                error.addContext("UIInputRouteProducer::produce(text-composition)");
+                return Core::failure(std::move(error));
+            }
+            if (routed->consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+            }
+            continue;
+        }
+        if (const auto* text =
+                std::get_if<Platform::TextInputTransition>(
+                    &transitions[ordinal].payload);
+            text != nullptr
+            && text->window == context->ownerWindow())
+        {
+            auto routed = context->routeTextInput(
+                text->window,
+                platformFrame.id(),
+                transitions[ordinal].sequence,
+                text->committedUtf8);
+            if (!routed)
+            {
+                Core::Error error = std::move(routed.error());
+                error.addContext("UIInputRouteProducer::produce(text-input)");
+                return Core::failure(std::move(error));
+            }
+            if (routed->consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+            }
+            continue;
+        }
+
+        // Tab cycles default-action focus among Buttons. Shift is read from the
+        // primary-window held key snapshot (KeyTransition carries no modifiers).
+        if (const auto* key =
+                std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
+            key != nullptr
+            && key->window == context->ownerWindow()
+            && key->state == Platform::DigitalTransition::Down
+            && key->key == Platform::Key::Tab)
+        {
+            bool reverse = false;
+            if (primaryWindow != nullptr)
+            {
+                reverse = primaryWindow->input.isHeld(Platform::Key::LeftShift)
+                    || primaryWindow->input.isHeld(Platform::Key::RightShift);
+            }
+            auto step = context->routeDefaultActionFocusStep(reverse);
+            if (!step)
+            {
+                Core::Error error = std::move(step.error());
+                error.addContext("UIInputRouteProducer::produce(tab-focus)");
+                return Core::failure(std::move(error));
+            }
+            if (step->consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+            }
+            continue;
+        }
+
+        // Keyboard Accept (Enter/Space) and Gamepad South Accept activate the
+        // Button that owns default-action focus (pointer-arm or Tab sets it).
+        if (const auto* key =
+                std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
+            key != nullptr
+            && key->window == context->ownerWindow()
+            && key->state == Platform::DigitalTransition::Down
+            && (key->key == Platform::Key::Enter
+                || key->key == Platform::Key::Space
+                || key->key == Platform::Key::KeypadEnter))
+        {
+            auto activate = context->routeDefaultActionActivate(
+                platformFrame.id(),
+                transitions[ordinal].sequence,
+                UI::UIButtonActivationSource::Keyboard);
+            if (!activate)
+            {
+                Core::Error error = std::move(activate.error());
+                error.addContext("UIInputRouteProducer::produce(keyboard-accept)");
+                return Core::failure(std::move(error));
+            }
+            if (activate->consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+            }
+            continue;
+        }
+        if (const auto* gamepad =
+                std::get_if<Platform::GamepadButtonTransition>(&transitions[ordinal].payload);
+            gamepad != nullptr
+            && gamepad->routedWindow == context->ownerWindow()
+            && gamepad->state == Platform::DigitalTransition::Down
+            && gamepad->button == Platform::GamepadButton::South)
+        {
+            auto activate = context->routeDefaultActionActivate(
+                platformFrame.id(),
+                transitions[ordinal].sequence,
+                UI::UIButtonActivationSource::Gamepad);
+            if (!activate)
+            {
+                Core::Error error = std::move(activate.error());
+                error.addContext("UIInputRouteProducer::produce(gamepad-accept)");
+                return Core::failure(std::move(error));
+            }
+            if (activate->consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+            }
+            continue;
+        }
+
         const std::optional<UI::UIPointerInputEvent> input =
             makePointerInput(platformFrame.id(), ordinal, transitions[ordinal]);
         if (!input.has_value())

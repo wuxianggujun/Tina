@@ -305,22 +305,48 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
             submittedClip = *clip;
         }
 
-        Core::Status addStatus = builder.addSolidQuad({
-            .paintOrdinal = entry.paintOrdinal,
-            .bounds = *bounds,
-            .color = {
-                .red = entry.solidFill.red,
-                .green = entry.solidFill.green,
-                .blue = entry.solidFill.blue,
-                .alpha = entry.solidFill.alpha,
-            },
-            .effectiveClip = submittedClip,
-        });
-        if (!addStatus)
+        const Render::UIPremultipliedRgba8 color{
+            .red = entry.solidFill.red,
+            .green = entry.solidFill.green,
+            .blue = entry.solidFill.blue,
+            .alpha = entry.solidFill.alpha,
+        };
+        if (entry.isGlyph && entry.atlasWidth > 0 && entry.atlasHeight > 0)
         {
-            return Core::failure(std::move(addStatus.error()));
+            Core::Status addStatus = builder.addGlyphQuad({
+                .paintOrdinal = entry.paintOrdinal,
+                .bounds = *bounds,
+                .color = color,
+                .atlasUv =
+                    Render::UIPixelRect{
+                        .x = static_cast<i32>(entry.atlasX),
+                        .y = static_cast<i32>(entry.atlasY),
+                        .width = entry.atlasWidth,
+                        .height = entry.atlasHeight,
+                    },
+                .atlasPage = entry.atlasPage,
+                .effectiveClip = submittedClip,
+            });
+            if (!addStatus)
+            {
+                return Core::failure(std::move(addStatus.error()));
+            }
+            ++statistics.submittedGlyphCount;
         }
-        ++statistics.submittedSolidQuadCount;
+        else
+        {
+            Core::Status addStatus = builder.addSolidQuad({
+                .paintOrdinal = entry.paintOrdinal,
+                .bounds = *bounds,
+                .color = color,
+                .effectiveClip = submittedClip,
+            });
+            if (!addStatus)
+            {
+                return Core::failure(std::move(addStatus.error()));
+            }
+            ++statistics.submittedSolidQuadCount;
+        }
     }
 
     auto committed = builder.commit();

@@ -86,7 +86,11 @@ TEST(GlfwBackendIntegrationTests, HiddenWindowPublishesCoherentPrimarySnapshot)
     EXPECT_GT(primary->metrics.logicalExtent.width, 0U);
     EXPECT_GT(primary->metrics.logicalExtent.height, 0U);
     EXPECT_FALSE(primary->metrics.visible);
-    EXPECT_TRUE(poll->frame()->gamepads().empty());
+    // Without a connected standard gamepad the dense snapshot is empty. When a
+    // pad is present, sampleGamepads publishes it; this smoke only requires a
+    // coherent empty-or-nonempty publish path without assembly failure.
+    EXPECT_LE(poll->frame()->gamepads().size(),
+              Platform::PlatformFrameBuilder::MaximumGamepadSlots);
 
     (*backend)->shutdown();
     auto stoppedPoll = (*backend)->pollFrame();

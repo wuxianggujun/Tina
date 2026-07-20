@@ -19,5 +19,10 @@ inline constexpr Core::ErrorCode InvalidRoutedPointerListener{Core::ErrorDomain:
 inline constexpr Core::ErrorCode InvalidPointerInput{Core::ErrorDomain::UI, 13};
 inline constexpr Core::ErrorCode PointerRouteAlreadyInProgress{Core::ErrorDomain::UI, 14};
 inline constexpr Core::ErrorCode InvalidButtonAction{Core::ErrorDomain::UI, 15};
+inline constexpr Core::ErrorCode InvalidText{Core::ErrorDomain::UI, 16};
+inline constexpr Core::ErrorCode InvalidFont{Core::ErrorDomain::UI, 17};
+// Reserved for atlas miss/stale glyph identity (find failures use InvalidNode
+// when a glyph placement is absent; keep a dedicated code for future eviction).
+inline constexpr Core::ErrorCode InvalidGlyph{Core::ErrorDomain::UI, 18};
 
 } // namespace Tina::UI::UIErrorCode

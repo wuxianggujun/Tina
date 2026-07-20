@@ -14,7 +14,17 @@ struct UICommittedPaintEntry final {
     UILogicalRect worldRect{};
     UILogicalRect effectiveClip{};
     u32 paintOrdinal = 0;
+    // Premultiplied vertex/tint color for both SolidFill and Glyph.
     UIPremultipliedRgba8Color solidFill{};
+    // When true, solidFill is the glyph tint and atlas* describe an R8 glyph
+    // placement in the context-owned CPU atlas (page 0). Integration emits a
+    // DisplayList Glyph command; when false, emits SolidQuad.
+    bool isGlyph = false;
+    u32 atlasX = 0;
+    u32 atlasY = 0;
+    u32 atlasWidth = 0;
+    u32 atlasHeight = 0;
+    u32 atlasPage = 0;
 };
 
 // Owner-thread borrowed paint/composite snapshot. It is invalidated by the

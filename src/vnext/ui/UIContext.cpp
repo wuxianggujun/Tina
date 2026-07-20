@@ -2,12 +2,17 @@
 
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/core/text/Utf8.hpp>
 #include <tina/ui/UIDirty.hpp>
+#include <tina/ui/UIText.hpp>
+#include <tina/ui/text/UIGlyphAtlas.hpp>
+#include <tina/ui/text/UITextRasterizer.hpp>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <exception>
 #include <expected>
 #include <limits>
@@ -72,6 +77,20 @@ struct NormalizedCapacityConfig final {
     usize routePathCapacity = 0;
     usize routedPointerListenerCapacity = 0;
     usize buttonActionCapacity = 0;
+    usize textByteCapacity = 0;
+};
+
+struct TextByteAllocation final {
+    u32 offset = 0;
+    u32 capacity = 0;
+};
+
+struct WidgetTextState final {
+    TextByteAllocation allocation{};
+    u32 length = 0;
+    UITextStyle style{};
+    UITextMetrics metrics{};
+    bool hasContent = false;
 };
 
 inline constexpr u32 InvalidRoutedPointerListenerIndex =
@@ -518,6 +537,9 @@ struct ResolvedLength final {
     const usize buttonActionCapacity = config.buttonActionCapacity == 0
         ? config.nodeCapacity
         : config.buttonActionCapacity;
+    const usize textByteCapacity = config.textByteCapacity == 0
+        ? UIContextCapacityConfig::DefaultTextByteCapacity
+        : config.textByteCapacity;
     return NormalizedCapacityConfig{
         .nodeCapacity = config.nodeCapacity,
         .rootCapacity = config.rootCapacity,
@@ -528,6 +550,7 @@ struct ResolvedLength final {
         .routePathCapacity = routePathCapacity,
         .routedPointerListenerCapacity = routedPointerListenerCapacity,
         .buttonActionCapacity = buttonActionCapacity,
+        .textByteCapacity = textByteCapacity,
     };
 }
 
@@ -604,6 +627,18 @@ struct UIContext::Impl final {
     std::pmr::vector<UIPointerHitPolicy> pointerHitPoliciesByIndex;
     std::pmr::vector<UIBoxPaint> boxPaintsByIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localSolidFillCacheByIndex;
+    std::pmr::vector<UIPremultipliedRgba8Color> localTextColorCacheByIndex;
+    std::pmr::vector<WidgetTextState> textStatesByIndex;
+    std::pmr::vector<char> textBytes;
+    std::pmr::vector<TextByteAllocation> freeTextAllocations;
+    usize textByteUsed = 0;
+    usize textByteHighWater = 0;
+    std::unique_ptr<IUITextRasterizer> textRasterizer;
+    UIFontFaceId textFace{};
+    std::unique_ptr<UIGlyphAtlas> glyphAtlas;
+    // Paint-local scratch: copies glyph advances out of a borrow-local raster
+    // batch so paint can walk UTF-8 (including newlines) without use-after-free.
+    std::pmr::vector<float> textPaintAdvanceScratch;
     std::pmr::vector<UIDirty> dirtyByIndex;
     std::pmr::vector<u8> dirtyQueuedByIndex;
     std::pmr::vector<UINodeId> dirtyQueue;
@@ -678,6 +713,16 @@ struct UIContext::Impl final {
     bool reclaimingInactiveButtonActions = false;
     UINodeId armedPrimaryButton{};
     bool armedPrimaryButtonPressed = false;
+    // Last Button that received Primary Pointer arm. Keyboard/Gamepad Accept
+    // activates this node without requiring a live pointer press.
+    UINodeId defaultActionFocusButton{};
+    // Last Label that received Primary Pointer Down (IME/text target).
+    UINodeId imeFocusLabel{};
+    static constexpr usize MaxImePreeditBytes = 512;
+    std::array<char, MaxImePreeditBytes> imePreeditBytes_{};
+    usize imePreeditSize_ = 0;
+    u32 imePreeditCursor_ = 0;
+    bool imeCompositionActive_ = false;
 
     Impl(
         Platform::WindowId owner,
@@ -696,6 +741,11 @@ struct UIContext::Impl final {
           pointerHitPoliciesByIndex(&resource),
           boxPaintsByIndex(&resource),
           localSolidFillCacheByIndex(&resource),
+          localTextColorCacheByIndex(&resource),
+          textStatesByIndex(&resource),
+          textBytes(&resource),
+          freeTextAllocations(&resource),
+          textPaintAdvanceScratch(&resource),
           dirtyByIndex(&resource),
           dirtyQueuedByIndex(&resource),
           dirtyQueue(&resource),
@@ -754,6 +804,7 @@ struct UIContext::Impl final {
             .routePathCapacity = normalized.routePathCapacity,
             .routedPointerListenerCapacity = normalized.routedPointerListenerCapacity,
             .buttonActionCapacity = normalized.buttonActionCapacity,
+            .textByteCapacity = normalized.textByteCapacity,
         };
 
         auto impl = std::unique_ptr<Impl>(new Impl(
@@ -770,6 +821,10 @@ struct UIContext::Impl final {
             UIPointerHitPolicy::Ignore);
         impl->boxPaintsByIndex.resize(normalized.nodeCapacity);
         impl->localSolidFillCacheByIndex.resize(normalized.nodeCapacity);
+        impl->localTextColorCacheByIndex.resize(normalized.nodeCapacity);
+        impl->textStatesByIndex.resize(normalized.nodeCapacity);
+        impl->textBytes.resize(normalized.textByteCapacity, '\0');
+        impl->freeTextAllocations.reserve(normalized.nodeCapacity);
         impl->dirtyByIndex.resize(normalized.nodeCapacity, UIDirty::None);
         impl->dirtyQueuedByIndex.resize(normalized.nodeCapacity, 0);
         impl->dirtyQueue.reserve(normalized.dirtyQueueCapacity);
@@ -1217,6 +1272,17 @@ struct UIContext::Impl final {
                     ++flowChildCount;
                 }
                 childIndex = childRecord->nextSiblingIndex;
+            }
+
+            if (flowChildCount == 0
+                && (record->kind == UIWidgetKind::Label
+                    || record->kind == UIWidgetKind::Button)
+                && index < textStatesByIndex.size()
+                && textStatesByIndex[index].hasContent) {
+                const UILogicalSize textSize =
+                    textStatesByIndex[index].metrics.measuredSize;
+                autoContentWidth = textSize.width;
+                autoContentHeight = textSize.height;
             }
 
             float outerWidth = resolvedWidth(style, scratch, statistics);
@@ -1730,6 +1796,34 @@ struct UIContext::Impl final {
         return targetCount;
     }
 
+    [[nodiscard]] static usize countDrawableTextCodepoints(
+        std::string_view utf8) noexcept
+    {
+        usize count = 0;
+        usize index = 0;
+        while (index < utf8.size()) {
+            const auto first = static_cast<unsigned char>(utf8[index]);
+            usize unitLength = 1;
+            if (first <= 0x7FU) {
+                unitLength = 1;
+            } else if ((first & 0xE0U) == 0xC0U) {
+                unitLength = 2;
+            } else if ((first & 0xF0U) == 0xE0U) {
+                unitLength = 3;
+            } else {
+                unitLength = 4;
+            }
+            if (unitLength > utf8.size() - index) {
+                break;
+            }
+            if (!(unitLength == 1 && first == '\n')) {
+                ++count;
+            }
+            index += unitLength;
+        }
+        return count;
+    }
+
     [[nodiscard]] Core::Result<usize> validatePaintCandidateCapacity(
         std::span<const UICommittedLayoutEntry> layoutEntries) const
     {
@@ -1743,9 +1837,30 @@ struct UIContext::Impl final {
                     UIErrorCode::InvalidNode,
                     "UI paint snapshot layout references a stale node");
             }
-            const UIBoxPaint& paint = boxPaintsByIndex[layoutEntry.node.index()];
+            const u32 nodeIndex = layoutEntry.node.index();
+            const UIBoxPaint& paint = boxPaintsByIndex[nodeIndex];
             if (paint.solidFill.has_value()
                 && paint.solidFill->color.alpha != 0) {
+                ++paintEntryCount;
+            }
+            if (nodeIndex < textStatesByIndex.size()
+                && textStatesByIndex[nodeIndex].hasContent
+                && textStatesByIndex[nodeIndex].style.color.alpha != 0) {
+                paintEntryCount += countDrawableTextCodepoints(
+                    textViewFor(nodeIndex));
+            }
+            // Active IME preedit is painted after the committed Label text.
+            if (imeCompositionActive_
+                && imeFocusLabel.hasValue()
+                && layoutEntry.node == imeFocusLabel
+                && imePreeditSize_ > 0) {
+                paintEntryCount += countDrawableTextCodepoints(
+                    std::string_view(imePreeditBytes_.data(), imePreeditSize_));
+            }
+            // M7-E8: one caret solid for the IME-focused Label.
+            if (imeFocusLabel.hasValue()
+                && layoutEntry.node == imeFocusLabel
+                && isLiveLabel(imeFocusLabel)) {
                 ++paintEntryCount;
             }
         }
@@ -1772,32 +1887,359 @@ struct UIContext::Impl final {
             localSolidFillCacheByIndex[nodeIndex] = paint.solidFill.has_value()
                 ? premultiply(paint.solidFill->color)
                 : UIPremultipliedRgba8Color{};
+            localTextColorCacheByIndex[nodeIndex] =
+                nodeIndex < textStatesByIndex.size()
+                    && textStatesByIndex[nodeIndex].hasContent
+                ? premultiply(textStatesByIndex[nodeIndex].style.color)
+                : UIPremultipliedRgba8Color{};
             ++rebuildCount;
         }
         return rebuildCount;
     }
 
-    void buildCommittedPaint(
+    // Shared UTF-8 → glyph/solid paint emitter. Returns final cursor after the
+    // last drawable codepoint (for chaining IME preedit after committed text).
+    struct TextPaintCursor final {
+        float x = 0.0F;
+        float y = 0.0F;
+        float lineHeight = 0.0F;
+        float baseX = 0.0F;
+    };
+
+    void appendUtf8TextPaints(
         std::pmr::vector<UICommittedPaintEntry>& output,
-        std::span<const UICommittedLayoutEntry> layoutEntries) const noexcept
+        const UICommittedLayoutEntry& layoutEntry,
+        u32& nextPaintOrdinal,
+        std::string_view utf8,
+        const UITextStyle& style,
+        UIPremultipliedRgba8Color color,
+        float startX,
+        float startY,
+        TextPaintCursor* outCursor) noexcept
     {
-        output.clear();
-        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries) {
-            if (layoutEntry.effectiveVisibility != UIVisibility::Visible) {
-                continue;
+        if (outCursor != nullptr) {
+            *outCursor = TextPaintCursor{
+                .x = startX,
+                .y = startY,
+                .lineHeight = style.logicalSize * style.lineHeightScale,
+                .baseX = layoutEntry.worldRect.x,
+            };
+        }
+        if (utf8.empty() || color.isTransparent()) {
+            return;
+        }
+        const float fallbackAdvance = style.logicalSize * style.advanceScale;
+        const float lineHeight = style.logicalSize * style.lineHeightScale;
+        if (!(std::isfinite(fallbackAdvance) && fallbackAdvance > 0.0F
+              && std::isfinite(lineHeight) && lineHeight > 0.0F)) {
+            return;
+        }
+        const u32 pixelSize = static_cast<u32>(
+            (std::max)(1.0F, std::floor(style.logicalSize)));
+
+        if (textRasterizer && textFace.hasValue() && glyphAtlas) {
+            auto batch = textRasterizer->raster(textFace, utf8, style);
+            if (batch) {
+                const usize outputBase = output.size();
+                const u32 ordinalBase = nextPaintOrdinal;
+                float cursorX = startX;
+                float cursorY = startY;
+                usize glyphIndex = 0;
+                usize index = 0;
+                bool usedAtlasPath = true;
+                while (index < utf8.size()) {
+                    const auto first = static_cast<unsigned char>(utf8[index]);
+                    usize unitLength = 1;
+                    if (first <= 0x7FU) {
+                        unitLength = 1;
+                    } else if ((first & 0xE0U) == 0xC0U) {
+                        unitLength = 2;
+                    } else if ((first & 0xF0U) == 0xE0U) {
+                        unitLength = 3;
+                    } else {
+                        unitLength = 4;
+                    }
+                    if (unitLength > utf8.size() - index) {
+                        usedAtlasPath = false;
+                        break;
+                    }
+                    if (unitLength == 1 && first == '\n') {
+                        cursorX = layoutEntry.worldRect.x;
+                        cursorY = normalizeFloat(cursorY + lineHeight);
+                        index += unitLength;
+                        continue;
+                    }
+                    if (glyphIndex >= batch->glyphs.size()) {
+                        usedAtlasPath = false;
+                        break;
+                    }
+                    const UITextGlyphRaster& glyph = batch->glyphs[glyphIndex];
+                    ++glyphIndex;
+                    float advance = glyph.advance;
+                    if (!(std::isfinite(advance) && advance > 0.0F)) {
+                        advance = fallbackAdvance;
+                    }
+
+                    std::span<const u8> coverage{};
+                    if (glyph.width > 0 && glyph.height > 0) {
+                        const usize coverageBytes =
+                            static_cast<usize>(glyph.width) * glyph.height;
+                        if (glyph.coverageOffset + coverageBytes
+                            > batch->coverage.size()) {
+                            usedAtlasPath = false;
+                            break;
+                        }
+                        coverage = std::span<const u8>(
+                            batch->coverage.data() + glyph.coverageOffset,
+                            coverageBytes);
+                    }
+                    auto placed = glyphAtlas->insert(
+                        UIGlyphKey{
+                            .face = textFace,
+                            .codepoint = glyph.codepoint,
+                            .pixelSize = pixelSize,
+                        },
+                        glyph,
+                        coverage);
+                    if (!placed) {
+                        usedAtlasPath = false;
+                        break;
+                    }
+
+                    const float drawX = normalizeFloat(cursorX + glyph.bearingX);
+                    const float drawY = normalizeFloat(
+                        cursorY + (lineHeight - glyph.bearingY));
+                    const float drawW = placed->width > 0
+                        ? static_cast<float>(placed->width)
+                        : advance;
+                    const float drawH = placed->height > 0
+                        ? static_cast<float>(placed->height)
+                        : lineHeight;
+
+                    output.push_back(UICommittedPaintEntry{
+                        .node = layoutEntry.node,
+                        .worldRect =
+                            UILogicalRect{
+                                .x = drawX,
+                                .y = drawY,
+                                .width = normalizeFloat((std::max)(0.0F, drawW)),
+                                .height = normalizeFloat((std::max)(0.0F, drawH)),
+                            },
+                        .effectiveClip = layoutEntry.effectiveClip,
+                        .paintOrdinal = nextPaintOrdinal,
+                        .solidFill = color,
+                        .isGlyph = placed->width > 0 && placed->height > 0,
+                        .atlasX = placed->atlasX,
+                        .atlasY = placed->atlasY,
+                        .atlasWidth = placed->width,
+                        .atlasHeight = placed->height,
+                        .atlasPage = 0,
+                    });
+                    ++nextPaintOrdinal;
+                    cursorX = normalizeFloat(cursorX + advance);
+                    index += unitLength;
+                }
+                if (usedAtlasPath) {
+                    if (outCursor != nullptr) {
+                        outCursor->x = cursorX;
+                        outCursor->y = cursorY;
+                        outCursor->lineHeight = lineHeight;
+                        outCursor->baseX = layoutEntry.worldRect.x;
+                    }
+                    return;
+                }
+                while (output.size() > outputBase) {
+                    output.pop_back();
+                }
+                nextPaintOrdinal = ordinalBase;
             }
-            const UIPremultipliedRgba8Color fill =
-                localSolidFillCacheByIndex[layoutEntry.node.index()];
-            if (fill.isTransparent()) {
+        }
+
+        float cursorX = startX;
+        float cursorY = startY;
+        usize index = 0;
+        while (index < utf8.size()) {
+            const auto first = static_cast<unsigned char>(utf8[index]);
+            usize unitLength = 1;
+            if (first <= 0x7FU) {
+                unitLength = 1;
+            } else if ((first & 0xE0U) == 0xC0U) {
+                unitLength = 2;
+            } else if ((first & 0xF0U) == 0xE0U) {
+                unitLength = 3;
+            } else {
+                unitLength = 4;
+            }
+            if (unitLength > utf8.size() - index) {
+                break;
+            }
+            if (unitLength == 1 && first == '\n') {
+                cursorX = layoutEntry.worldRect.x;
+                cursorY = normalizeFloat(cursorY + lineHeight);
+                index += unitLength;
                 continue;
             }
             output.push_back(UICommittedPaintEntry{
                 .node = layoutEntry.node,
-                .worldRect = layoutEntry.worldRect,
+                .worldRect =
+                    UILogicalRect{
+                        .x = normalizeFloat(cursorX),
+                        .y = normalizeFloat(cursorY),
+                        .width = normalizeFloat(fallbackAdvance),
+                        .height = normalizeFloat(lineHeight),
+                    },
                 .effectiveClip = layoutEntry.effectiveClip,
-                .paintOrdinal = layoutEntry.paintOrdinal,
-                .solidFill = fill,
+                .paintOrdinal = nextPaintOrdinal,
+                .solidFill = color,
+                .isGlyph = false,
             });
+            ++nextPaintOrdinal;
+            cursorX = normalizeFloat(cursorX + fallbackAdvance);
+            index += unitLength;
+        }
+        if (outCursor != nullptr) {
+            outCursor->x = cursorX;
+            outCursor->y = cursorY;
+            outCursor->lineHeight = lineHeight;
+            outCursor->baseX = layoutEntry.worldRect.x;
+        }
+    }
+
+    void appendTextGlyphPaints(
+        std::pmr::vector<UICommittedPaintEntry>& output,
+        const UICommittedLayoutEntry& layoutEntry,
+        u32& nextPaintOrdinal) noexcept
+    {
+        const u32 nodeIndex = layoutEntry.node.index();
+        TextPaintCursor cursor{
+            .x = layoutEntry.worldRect.x,
+            .y = layoutEntry.worldRect.y,
+            .lineHeight = 0.0F,
+            .baseX = layoutEntry.worldRect.x,
+        };
+
+        if (nodeIndex < textStatesByIndex.size()
+            && textStatesByIndex[nodeIndex].hasContent) {
+            const UIPremultipliedRgba8Color color =
+                localTextColorCacheByIndex[nodeIndex];
+            if (!color.isTransparent()) {
+                const WidgetTextState& state = textStatesByIndex[nodeIndex];
+                appendUtf8TextPaints(
+                    output,
+                    layoutEntry,
+                    nextPaintOrdinal,
+                    textViewFor(nodeIndex),
+                    state.style,
+                    color,
+                    layoutEntry.worldRect.x,
+                    layoutEntry.worldRect.y,
+                    &cursor);
+            }
+        }
+
+        // M7-E7: paint active IME preedit after committed text on the focus Label.
+        if (imeCompositionActive_
+            && imeFocusLabel.hasValue()
+            && layoutEntry.node == imeFocusLabel
+            && imePreeditSize_ > 0) {
+            UITextStyle style{};
+            if (nodeIndex < textStatesByIndex.size()) {
+                style = textStatesByIndex[nodeIndex].style;
+            }
+            // Distinct cyan-ish preedit tint (premultiplied).
+            const UIPremultipliedRgba8Color preeditColor =
+                premultiply(UIStraightSrgba8Color{
+                    .red = 0,
+                    .green = 180,
+                    .blue = 255,
+                    .alpha = 255,
+                });
+            const float startX = (nodeIndex < textStatesByIndex.size()
+                                  && textStatesByIndex[nodeIndex].hasContent)
+                ? cursor.x
+                : layoutEntry.worldRect.x;
+            const float startY = (nodeIndex < textStatesByIndex.size()
+                                  && textStatesByIndex[nodeIndex].hasContent)
+                ? cursor.y
+                : layoutEntry.worldRect.y;
+            appendUtf8TextPaints(
+                output,
+                layoutEntry,
+                nextPaintOrdinal,
+                std::string_view(imePreeditBytes_.data(), imePreeditSize_),
+                style,
+                preeditColor,
+                startX,
+                startY,
+                &cursor);
+        }
+
+        // M7-E8: caret after committed text (+ preedit when composing).
+        if (imeFocusLabel.hasValue()
+            && layoutEntry.node == imeFocusLabel
+            && isLiveLabel(imeFocusLabel)) {
+            float lineHeight = cursor.lineHeight;
+            if (!(std::isfinite(lineHeight) && lineHeight > 0.0F)) {
+                if (nodeIndex < textStatesByIndex.size()) {
+                    const UITextStyle& style = textStatesByIndex[nodeIndex].style;
+                    lineHeight = style.logicalSize * style.lineHeightScale;
+                } else {
+                    lineHeight = 16.0F * 1.2F;
+                }
+            }
+            if (!(std::isfinite(lineHeight) && lineHeight > 0.0F)) {
+                lineHeight = 19.2F;
+            }
+            constexpr float CaretWidth = 2.0F;
+            const UIPremultipliedRgba8Color caretColor =
+                premultiply(UIStraightSrgba8Color{
+                    .red = 255,
+                    .green = 255,
+                    .blue = 255,
+                    .alpha = 255,
+                });
+            output.push_back(UICommittedPaintEntry{
+                .node = layoutEntry.node,
+                .worldRect =
+                    UILogicalRect{
+                        .x = normalizeFloat(cursor.x),
+                        .y = normalizeFloat(cursor.y),
+                        .width = CaretWidth,
+                        .height = normalizeFloat(lineHeight),
+                    },
+                .effectiveClip = layoutEntry.effectiveClip,
+                .paintOrdinal = nextPaintOrdinal,
+                .solidFill = caretColor,
+                .isGlyph = false,
+            });
+            ++nextPaintOrdinal;
+        }
+    }
+
+    void buildCommittedPaint(
+        std::pmr::vector<UICommittedPaintEntry>& output,
+        std::span<const UICommittedLayoutEntry> layoutEntries) noexcept
+    {
+        output.clear();
+        u32 nextPaintOrdinal = 1;
+        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries) {
+            if (layoutEntry.effectiveVisibility != UIVisibility::Visible) {
+                continue;
+            }
+            const u32 nodeIndex = layoutEntry.node.index();
+            const UIPremultipliedRgba8Color fill =
+                localSolidFillCacheByIndex[nodeIndex];
+            if (!fill.isTransparent()) {
+                output.push_back(UICommittedPaintEntry{
+                    .node = layoutEntry.node,
+                    .worldRect = layoutEntry.worldRect,
+                    .effectiveClip = layoutEntry.effectiveClip,
+                    .paintOrdinal = nextPaintOrdinal,
+                    .solidFill = fill,
+                });
+                ++nextPaintOrdinal;
+            }
+            appendTextGlyphPaints(output, layoutEntry, nextPaintOrdinal);
         }
     }
 
@@ -2164,6 +2606,38 @@ struct UIContext::Impl final {
         armedPrimaryButtonPressed = false;
     }
 
+    void clearDefaultActionFocus() noexcept
+    {
+        defaultActionFocusButton = {};
+    }
+
+    void clearImeComposition() noexcept
+    {
+        const bool wasActive = imeCompositionActive_;
+        const UINodeId focus = imeFocusLabel;
+        imeCompositionActive_ = false;
+        imePreeditSize_ = 0;
+        imePreeditCursor_ = 0;
+        if (wasActive && focus.hasValue() && contains(focus)) {
+            static_cast<void>(markPaintDirty(focus));
+        }
+    }
+
+    void clearImeFocus() noexcept
+    {
+        clearImeComposition();
+        imeFocusLabel = {};
+    }
+
+    [[nodiscard]] bool isLiveLabel(UINodeId node) const noexcept
+    {
+        if (!node.hasValue() || !contains(node)) {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        return record != nullptr && record->kind == UIWidgetKind::Label;
+    }
+
     void recycleButtonAction(u32 actionIndex) noexcept
     {
         if (actionIndex >= buttonActions.size()) {
@@ -2262,6 +2736,12 @@ struct UIContext::Impl final {
         if (armedPrimaryButton == node) {
             clearArmedPrimaryButton();
         }
+        if (defaultActionFocusButton == node) {
+            clearDefaultActionFocus();
+        }
+        if (imeFocusLabel == node) {
+            clearImeFocus();
+        }
         const u32 actionIndex = buttonActionIndexByNodeIndex[nodeIndex];
         buttonActionIndexByNodeIndex[nodeIndex] = InvalidButtonActionIndex;
         if (actionIndex != InvalidButtonActionIndex) {
@@ -2338,6 +2818,93 @@ struct UIContext::Impl final {
         }
     }
 
+    void releaseTextAllocation(TextByteAllocation allocation) noexcept
+    {
+        if (allocation.capacity == 0) {
+            return;
+        }
+        freeTextAllocations.push_back(allocation);
+        if (textByteUsed >= allocation.capacity) {
+            textByteUsed -= allocation.capacity;
+        } else {
+            textByteUsed = 0;
+        }
+    }
+
+    [[nodiscard]] Core::Result<TextByteAllocation> allocateTextBytes(u32 byteCount)
+    {
+        if (byteCount == 0) {
+            return TextByteAllocation{};
+        }
+        for (usize freeIndex = 0; freeIndex < freeTextAllocations.size(); ++freeIndex) {
+            TextByteAllocation& candidate = freeTextAllocations[freeIndex];
+            if (candidate.capacity < byteCount) {
+                continue;
+            }
+            const TextByteAllocation allocated = candidate;
+            freeTextAllocations[freeIndex] = freeTextAllocations.back();
+            freeTextAllocations.pop_back();
+            textByteUsed += allocated.capacity;
+            textByteHighWater = (std::max)(textByteHighWater, textByteUsed);
+            return allocated;
+        }
+        if (textByteUsed > capacityConfig.textByteCapacity
+            || static_cast<usize>(byteCount)
+                > capacityConfig.textByteCapacity - textByteUsed) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI text byte capacity has been exhausted");
+        }
+        const TextByteAllocation allocated{
+            .offset = static_cast<u32>(textByteUsed),
+            .capacity = byteCount,
+        };
+        textByteUsed += byteCount;
+        textByteHighWater = (std::max)(textByteHighWater, textByteUsed);
+        return allocated;
+    }
+
+    void clearTextState(u32 index) noexcept
+    {
+        if (index >= textStatesByIndex.size()) {
+            return;
+        }
+        WidgetTextState& state = textStatesByIndex[index];
+        releaseTextAllocation(state.allocation);
+        state = {};
+    }
+
+    [[nodiscard]] std::string_view textViewFor(u32 index) const noexcept
+    {
+        if (index >= textStatesByIndex.size()) {
+            return {};
+        }
+        const WidgetTextState& state = textStatesByIndex[index];
+        if (!state.hasContent || state.length == 0 || state.allocation.capacity == 0) {
+            return {};
+        }
+        return std::string_view(
+            textBytes.data() + state.allocation.offset,
+            state.length);
+    }
+
+    [[nodiscard]] Core::Result<UITextMetrics> measureWidgetText(
+        std::string_view utf8,
+        const UITextStyle& style)
+    {
+        if (textRasterizer && textFace.hasValue()) {
+            return textRasterizer->measure(textFace, utf8, style);
+        }
+        // Fallback keeps measure available when a custom FreeType rasterizer is
+        // injected before any face is opened.
+        return measurePlaceholderText(utf8, style);
+    }
+
+    [[nodiscard]] static bool supportsWidgetText(UIWidgetKind kind) noexcept
+    {
+        return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button;
+    }
+
     void resetNodeSideData(u32 index) noexcept
     {
         if (index >= layoutStylesByIndex.size()) {
@@ -2347,6 +2914,8 @@ struct UIContext::Impl final {
         pointerHitPoliciesByIndex[index] = UIPointerHitPolicy::Ignore;
         boxPaintsByIndex[index] = {};
         localSolidFillCacheByIndex[index] = {};
+        localTextColorCacheByIndex[index] = {};
+        clearTextState(index);
         dirtyByIndex[index] = UIDirty::None;
         dirtyQueuedByIndex[index] = 0;
         layoutScratchByIndex[index] = {};
@@ -2561,7 +3130,10 @@ struct UIContext::Impl final {
         NodeRecord* record = nodes.tryGet(node.storageId());
         record->kind = kind;
         record->rootIndex = node.index();
-        pointerHitPoliciesByIndex[node.index()] = kind == UIWidgetKind::Button
+        // Button and Label are Targetable: Label is the IME/text target surface
+        // (M7-E6). Root/Panel remain Ignore.
+        pointerHitPoliciesByIndex[node.index()] =
+            (kind == UIWidgetKind::Button || kind == UIWidgetKind::Label)
             ? UIPointerHitPolicy::Targetable
             : UIPointerHitPolicy::Ignore;
         return node;
@@ -2921,6 +3493,214 @@ struct UIContext::Impl final {
         }
         currentPaint = normalizedPaint;
         return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setTextFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        std::string_view utf8)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue()) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        if (!contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater root is no longer alive");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node)) {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !supportsWidgetText(record->kind)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI text is only supported on Label and Button nodes");
+        }
+        if (utf8.size() > (std::numeric_limits<u32>::max)()) {
+            return fail(UIErrorCode::CapacityExceeded, "UI text payload is too large");
+        }
+
+        auto metrics = measureWidgetText(
+            utf8,
+            textStatesByIndex[node.index()].style);
+        if (!metrics) {
+            return Core::failure(metrics.error());
+        }
+
+        WidgetTextState& state = textStatesByIndex[node.index()];
+        const std::string_view current = textViewFor(node.index());
+        if (state.hasContent == !utf8.empty()
+            && current == utf8
+            && state.metrics == *metrics) {
+            return Core::success();
+        }
+
+        TextByteAllocation reservedAllocation{};
+        bool reservedNewAllocation = false;
+        if (!utf8.empty() && state.allocation.capacity < utf8.size()) {
+            auto allocation = allocateTextBytes(static_cast<u32>(utf8.size()));
+            if (!allocation) {
+                return Core::failure(allocation.error());
+            }
+            reservedAllocation = *allocation;
+            reservedNewAllocation = true;
+        }
+
+        if (Core::Status dirtyStatus = markLayoutStyleDirty(node); !dirtyStatus) {
+            if (reservedNewAllocation) {
+                releaseTextAllocation(reservedAllocation);
+            }
+            return dirtyStatus;
+        }
+        if (Core::Status paintStatus = markPaintDirty(node); !paintStatus) {
+            if (reservedNewAllocation) {
+                releaseTextAllocation(reservedAllocation);
+            }
+            return paintStatus;
+        }
+
+        if (utf8.empty()) {
+            releaseTextAllocation(state.allocation);
+            state.allocation = {};
+            state.length = 0;
+            state.metrics = {};
+            state.hasContent = false;
+            return Core::success();
+        }
+
+        if (reservedNewAllocation) {
+            releaseTextAllocation(state.allocation);
+            state.allocation = reservedAllocation;
+        }
+        std::memcpy(
+            textBytes.data() + state.allocation.offset,
+            utf8.data(),
+            utf8.size());
+        state.length = static_cast<u32>(utf8.size());
+        state.metrics = *metrics;
+        state.hasContent = true;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setTextStyleFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        const UITextStyle& style)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue()) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        if (!contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater root is no longer alive");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node)) {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !supportsWidgetText(record->kind)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI text style is only supported on Label and Button nodes");
+        }
+
+        WidgetTextState& state = textStatesByIndex[node.index()];
+        if (state.style == style) {
+            return Core::success();
+        }
+
+        UITextMetrics metrics{};
+        if (state.hasContent) {
+            auto measured = measureWidgetText(textViewFor(node.index()), style);
+            if (!measured) {
+                return Core::failure(measured.error());
+            }
+            metrics = *measured;
+        }
+
+        if (Core::Status dirtyStatus = markLayoutStyleDirty(node); !dirtyStatus) {
+            return dirtyStatus;
+        }
+        if (Core::Status paintStatus = markPaintDirty(node); !paintStatus) {
+            return paintStatus;
+        }
+        state.style = style;
+        state.metrics = metrics;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<std::string_view> textFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue()) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        if (!contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater root is no longer alive");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node)) {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !supportsWidgetText(record->kind)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI text is only supported on Label and Button nodes");
+        }
+        return textViewFor(node.index());
+    }
+
+    [[nodiscard]] Core::Result<UITextStyle> textStyleFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue()) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        if (!contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater root is no longer alive");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node)) {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !supportsWidgetText(record->kind)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI text style is only supported on Label and Button nodes");
+        }
+        return textStatesByIndex[node.index()].style;
     }
 
     [[nodiscard]] Core::Status setButtonActionFromUpdater(
@@ -3379,6 +4159,75 @@ struct UIContext::Impl final {
             committedPaintOrderRevision,
             committedPaintRevision,
         };
+    }
+
+    [[nodiscard]] std::span<const u8> glyphAtlasPixels() const noexcept
+    {
+        if (!glyphAtlas) {
+            return {};
+        }
+        return glyphAtlas->pagePixels();
+    }
+
+    [[nodiscard]] u32 glyphAtlasWidth() const noexcept
+    {
+        return glyphAtlas ? glyphAtlas->capacity().width : 0U;
+    }
+
+    [[nodiscard]] u32 glyphAtlasHeight() const noexcept
+    {
+        return glyphAtlas ? glyphAtlas->capacity().height : 0U;
+    }
+
+    [[nodiscard]] Core::Status openTextFont(
+        std::span<const std::byte> fontBytes,
+        i32 faceIndex)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!textRasterizer) {
+            return fail(UIErrorCode::InvalidFont, "UI context has no text rasterizer");
+        }
+
+        auto newFace = textRasterizer->openFace(fontBytes, faceIndex);
+        if (!newFace) {
+            return Core::failure(newFace.error());
+        }
+
+        if (textFace.hasValue()) {
+            static_cast<void>(textRasterizer->closeFace(textFace));
+            textFace = {};
+        }
+        textFace = *newFace;
+        if (glyphAtlas) {
+            glyphAtlas->clear();
+        }
+
+        // Remeasure retained text and dirty layout/paint for all text nodes.
+        for (u32 index = 0; index < static_cast<u32>(textStatesByIndex.size()); ++index) {
+            WidgetTextState& state = textStatesByIndex[index];
+            if (!state.hasContent) {
+                continue;
+            }
+            const UINodeId node = idForIndex(index);
+            if (!node.hasValue() || !contains(node)) {
+                continue;
+            }
+            auto metrics = measureWidgetText(textViewFor(index), state.style);
+            if (!metrics) {
+                return Core::failure(metrics.error());
+            }
+            state.metrics = *metrics;
+            if (Core::Status dirtyStatus = markLayoutStyleDirty(node); !dirtyStatus) {
+                return dirtyStatus;
+            }
+            if (Core::Status paintStatus = markPaintDirty(node); !paintStatus) {
+                return paintStatus;
+            }
+        }
+        return Core::success();
     }
 
     [[nodiscard]] UIPointerHitQueryResult queryPointerHit(
@@ -3851,9 +4700,28 @@ struct UIContext::Impl final {
                     && buttonRecord->kind == UIWidgetKind::Button) {
                     armedPrimaryButton = nearestButton;
                     armedPrimaryButtonPressed = true;
+                    defaultActionFocusButton = nearestButton;
                     routedEvent.consumeInputTransition();
                     static_cast<void>(routedEvent.claimPointerButton(
                         Platform::PointerButton::Primary));
+                }
+            }
+            // Label becomes the IME/text target on primary Down.
+            if (result.pointQuery.target.node.hasValue()
+                && contains(result.pointQuery.target.node)) {
+                const NodeRecord* targetRecord =
+                    nodes.tryGet(result.pointQuery.target.node.storageId());
+                if (targetRecord != nullptr
+                    && targetRecord->kind == UIWidgetKind::Label) {
+                    const UINodeId previousFocus = imeFocusLabel;
+                    imeFocusLabel = result.pointQuery.target.node;
+                    clearImeComposition();
+                    if (previousFocus.hasValue()
+                        && previousFocus != imeFocusLabel
+                        && contains(previousFocus)) {
+                        static_cast<void>(markPaintDirty(previousFocus));
+                    }
+                    static_cast<void>(markPaintDirty(imeFocusLabel));
                 }
             }
         } else if (input.kind == UIRoutedPointerEventKind::Move
@@ -3916,6 +4784,315 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Result<UIDefaultActionResult> routeDefaultActionActivate(
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        UIButtonActivationSource source)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!platformFrame.hasValue() || sourceSequence == 0) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI default-action activation requires a platform frame and sequence");
+        }
+        if (source != UIButtonActivationSource::Keyboard
+            && source != UIButtonActivationSource::Gamepad) {
+            return fail(
+                UIErrorCode::InvalidButtonAction,
+                "UI default-action activation source must be Keyboard or Gamepad");
+        }
+        if (!defaultActionFocusButton.hasValue()
+            || !contains(defaultActionFocusButton)) {
+            clearDefaultActionFocus();
+            return UIDefaultActionResult{};
+        }
+        const NodeRecord* record =
+            nodes.tryGet(defaultActionFocusButton.storageId());
+        if (record == nullptr || record->kind != UIWidgetKind::Button) {
+            clearDefaultActionFocus();
+            return UIDefaultActionResult{};
+        }
+
+        if (buttonRouteSerial == (std::numeric_limits<u64>::max)()) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI Button route serial is exhausted");
+        }
+        const u64 actionRegistrationSerialBoundary =
+            buttonActionRegistrationSerial;
+        const ButtonActionInvocationCandidate actionCandidate =
+            captureButtonAction(
+                defaultActionFocusButton,
+                actionRegistrationSerialBoundary);
+        if (!actionCandidate.hasValue()) {
+            // Focused button without an action still consumes Accept so
+            // gameplay does not also fire.
+            return UIDefaultActionResult{.consumed = true, .activated = false};
+        }
+        const u64 currentButtonRouteSerial = ++buttonRouteSerial;
+        routeDispatchDepth = 1;
+        auto dispatchCleanup = Core::makeScopeExit([this]() noexcept {
+            routeDispatchDepth = 0;
+            drainDeferredRoutedPointerListenerReleases();
+            reclaimInactiveRoutedPointerListeners();
+            reclaimInactiveButtonActions();
+        });
+        invokeButtonAction(
+            actionCandidate,
+            UIButtonActionEvent{
+                .buttonNode = defaultActionFocusButton,
+                .source = source,
+                .platformFrame = platformFrame,
+                .sourceSequence = sourceSequence,
+            },
+            currentButtonRouteSerial);
+        return UIDefaultActionResult{.consumed = true, .activated = true};
+    }
+
+    [[nodiscard]] Core::Result<UIDefaultFocusStepResult> routeDefaultActionFocusStep(
+        bool reverse)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+
+        // Collect visible Targetable Buttons in last committed layout paint order.
+        // Fixed stack table keeps this path allocation-free (M7-E3 scope).
+        constexpr usize MaxTabCandidates = 256;
+        std::array<UINodeId, MaxTabCandidates> candidates{};
+        usize candidateCount = 0;
+        const std::pmr::vector<UICommittedLayoutEntry>& layout =
+            committedLayoutBuffers[publishedLayoutBufferIndex];
+        for (const UICommittedLayoutEntry& entry : layout) {
+            if (entry.effectiveVisibility != UIVisibility::Visible) {
+                continue;
+            }
+            if (!contains(entry.node)) {
+                continue;
+            }
+            const NodeRecord* record = nodes.tryGet(entry.node.storageId());
+            if (record == nullptr || record->kind != UIWidgetKind::Button) {
+                continue;
+            }
+            if (entry.node.index() >= pointerHitPoliciesByIndex.size()) {
+                continue;
+            }
+            if (pointerHitPoliciesByIndex[entry.node.index()]
+                != UIPointerHitPolicy::Targetable) {
+                continue;
+            }
+            if (candidateCount >= MaxTabCandidates) {
+                return fail(
+                    UIErrorCode::CapacityExceeded,
+                    "UI default-action Tab candidate capacity has been exhausted");
+            }
+            candidates[candidateCount] = entry.node;
+            ++candidateCount;
+        }
+        if (candidateCount == 0) {
+            clearDefaultActionFocus();
+            return UIDefaultFocusStepResult{};
+        }
+
+        usize currentIndex = candidateCount;
+        if (defaultActionFocusButton.hasValue()) {
+            for (usize i = 0; i < candidateCount; ++i) {
+                if (candidates[i] == defaultActionFocusButton) {
+                    currentIndex = i;
+                    break;
+                }
+            }
+        }
+
+        usize nextIndex = 0;
+        if (currentIndex >= candidateCount) {
+            nextIndex = reverse ? candidateCount - 1U : 0U;
+        } else if (reverse) {
+            nextIndex = currentIndex == 0 ? candidateCount - 1U : currentIndex - 1U;
+        } else {
+            nextIndex = (currentIndex + 1U) % candidateCount;
+        }
+
+        const UINodeId nextFocus = candidates[nextIndex];
+        const bool moved =
+            !defaultActionFocusButton.hasValue()
+            || defaultActionFocusButton != nextFocus;
+        defaultActionFocusButton = nextFocus;
+        // Tab navigation does not keep a live pointer arm.
+        clearArmedPrimaryButton();
+        return UIDefaultFocusStepResult{
+            .consumed = true,
+            .moved = moved,
+            .focus = nextFocus,
+        };
+    }
+
+    [[nodiscard]] UINodeId defaultActionFocus() const noexcept
+    {
+        if (!defaultActionFocusButton.hasValue()
+            || !contains(defaultActionFocusButton)) {
+            return {};
+        }
+        return defaultActionFocusButton;
+    }
+
+    [[nodiscard]] UINodeId imeFocus() const noexcept
+    {
+        if (!isLiveLabel(imeFocusLabel)) {
+            return {};
+        }
+        return imeFocusLabel;
+    }
+
+    [[nodiscard]] bool imeCompositionActive() const noexcept
+    {
+        return imeCompositionActive_ && isLiveLabel(imeFocusLabel);
+    }
+
+    [[nodiscard]] std::string_view imePreeditUtf8() const noexcept
+    {
+        if (!imeCompositionActive_) {
+            return {};
+        }
+        return std::string_view(imePreeditBytes_.data(), imePreeditSize_);
+    }
+
+    [[nodiscard]] u32 imePreeditCursorCodepoint() const noexcept
+    {
+        return imeCompositionActive_ ? imePreeditCursor_ : 0U;
+    }
+
+    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextComposition(
+        Platform::WindowId window,
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        std::string_view preeditUtf8,
+        u32 cursorCodepoint,
+        Platform::TextCompositionStage stage)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!window.hasValue() || window != ownerWindow) {
+            return fail(
+                UIErrorCode::WrongOwnerWindow,
+                "UI text composition belongs to another owner window");
+        }
+        if (!platformFrame.hasValue() || sourceSequence == 0) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI text composition requires a platform frame and sequence");
+        }
+        if (!isLiveLabel(imeFocusLabel)) {
+            clearImeFocus();
+            return UITextInputRouteResult{};
+        }
+
+        using Stage = Platform::TextCompositionStage;
+        if (stage == Stage::Cancelled || stage == Stage::Ended) {
+            // clearImeComposition marks paint dirty when preedit was active.
+            clearImeComposition();
+            return UITextInputRouteResult{.consumed = true, .applied = true};
+        }
+        if (!Core::isStrictUtf8WithoutNul(preeditUtf8)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI IME preedit must be strict UTF-8 without embedded NUL");
+        }
+        if (preeditUtf8.size() > MaxImePreeditBytes) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI IME preedit exceeds the fixed context buffer");
+        }
+        const auto codepoints =
+            Core::countStrictUtf8CodepointsWithoutNul(preeditUtf8);
+        if (!codepoints.has_value()) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI IME preedit must be strict UTF-8 without embedded NUL");
+        }
+        if (!preeditUtf8.empty()) {
+            std::memcpy(imePreeditBytes_.data(), preeditUtf8.data(), preeditUtf8.size());
+        }
+        imePreeditSize_ = preeditUtf8.size();
+        imePreeditCursor_ = (std::min)(cursorCodepoint, *codepoints);
+        imeCompositionActive_ = true;
+        if (Core::Status paintStatus = markPaintDirty(imeFocusLabel); !paintStatus) {
+            return Core::failure(paintStatus.error());
+        }
+        return UITextInputRouteResult{.consumed = true, .applied = true};
+    }
+
+    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextInput(
+        Platform::WindowId window,
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        std::string_view committedUtf8)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!window.hasValue() || window != ownerWindow) {
+            return fail(
+                UIErrorCode::WrongOwnerWindow,
+                "UI text input belongs to another owner window");
+        }
+        if (!platformFrame.hasValue() || sourceSequence == 0) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI text input requires a platform frame and sequence");
+        }
+        if (!isLiveLabel(imeFocusLabel)) {
+            clearImeFocus();
+            return UITextInputRouteResult{};
+        }
+        if (!Core::isStrictUtf8WithoutNul(committedUtf8)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI text input must be strict UTF-8 without embedded NUL");
+        }
+        // Commit ends any active preedit.
+        clearImeComposition();
+        if (committedUtf8.empty()) {
+            return UITextInputRouteResult{.consumed = true, .applied = true};
+        }
+
+        const NodeRecord* record = nodes.tryGet(imeFocusLabel.storageId());
+        if (record == nullptr) {
+            clearImeFocus();
+            return UITextInputRouteResult{};
+        }
+        const UINodeId rootNode = idForIndex(record->rootIndex);
+        if (!rootNode.hasValue()) {
+            clearImeFocus();
+            return UITextInputRouteResult{};
+        }
+
+        const std::string_view current = textViewFor(imeFocusLabel.index());
+        if (current.size() > (std::numeric_limits<usize>::max)() - committedUtf8.size()) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI text input would overflow the text byte capacity");
+        }
+        // One-shot commit allocation; not a per-frame hot path.
+        std::string combined;
+        combined.reserve(current.size() + committedUtf8.size());
+        combined.append(current);
+        combined.append(committedUtf8);
+        if (Core::Status status =
+                setTextFromUpdater(rootNode, imeFocusLabel, combined);
+            !status) {
+            return Core::failure(status.error());
+        }
+        return UITextInputRouteResult{.consumed = true, .applied = true};
+    }
+
     [[nodiscard]] UIContextStatistics statistics() const noexcept
     {
         return UIContextStatistics{
@@ -3934,6 +5111,9 @@ struct UIContext::Impl final {
             .buttonActionCapacity = capacityConfig.buttonActionCapacity,
             .activeButtonActionCount = activeButtonActionCount,
             .buttonActionHighWater = buttonActionHighWater,
+            .textByteCapacity = capacityConfig.textByteCapacity,
+            .textByteUsed = textByteUsed,
+            .textByteHighWater = textByteHighWater,
             .liveNodeCount = nodes.activeCount(),
             .liveRootCount = liveRootCount,
             .committedNodeCount = committedBuffers[publishedBufferIndex].size(),
@@ -4281,6 +5461,38 @@ Core::Status UITreeUpdater::setBoxPaint(UINodeId node, const UIBoxPaint& paint)
     return m_context->setBoxPaintFromUpdater(m_root, node, paint);
 }
 
+Core::Status UITreeUpdater::setText(UINodeId node, std::string_view utf8)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setTextFromUpdater(m_root, node, utf8);
+}
+
+Core::Status UITreeUpdater::setTextStyle(UINodeId node, const UITextStyle& style)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setTextStyleFromUpdater(m_root, node, style);
+}
+
+Core::Result<std::string_view> UITreeUpdater::text(UINodeId node)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->textFromUpdater(m_root, node);
+}
+
+Core::Result<UITextStyle> UITreeUpdater::textStyle(UINodeId node)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->textStyleFromUpdater(m_root, node);
+}
+
 Core::Status UITreeUpdater::setButtonAction(
     UINodeId button,
     UIButtonActionCallback callback)
@@ -4342,8 +5554,33 @@ Core::Result<std::unique_ptr<UIContext>> UIContext::Create(
     UIContextCapacityConfig capacityConfig,
     std::pmr::memory_resource& resource)
 {
+    // Validate before any allocation against the caller's resource so failed
+    // Create remains allocation-free for invalid window/capacity probes.
     if (!ownerWindow.hasValue()) {
         return fail(UIErrorCode::InvalidOwnerWindow, "UI context owner window id is empty");
+    }
+    if (Core::Status status = validateUIContextCapacityConfig(capacityConfig); !status) {
+        return Core::failure(status.error());
+    }
+
+    auto rasterizer = createPlaceholderTextRasterizer({}, resource);
+    if (!rasterizer) {
+        return Core::failure(rasterizer.error());
+    }
+    return Create(ownerWindow, capacityConfig, std::move(*rasterizer), resource);
+}
+
+Core::Result<std::unique_ptr<UIContext>> UIContext::Create(
+    Platform::WindowId ownerWindow,
+    UIContextCapacityConfig capacityConfig,
+    std::unique_ptr<IUITextRasterizer> textRasterizer,
+    std::pmr::memory_resource& resource)
+{
+    if (!ownerWindow.hasValue()) {
+        return fail(UIErrorCode::InvalidOwnerWindow, "UI context owner window id is empty");
+    }
+    if (!textRasterizer) {
+        return fail(UIErrorCode::InvalidFont, "UI context text rasterizer is null");
     }
 
     auto normalizedResult = normalizeCapacity(capacityConfig);
@@ -4361,6 +5598,26 @@ Core::Result<std::unique_ptr<UIContext>> UIContext::Create(
             Impl::Create(ownerWindow, *normalizedResult, lifetime, resource);
         if (!implResult) {
             return Core::failure(implResult.error());
+        }
+
+        // Best-effort open of the built-in/empty face. Placeholder accepts {}.
+        // FreeType adapters reject empty bytes; they remain without a face until
+        // a later font-binding slice opens real bytes.
+        auto faceResult = textRasterizer->openFace({});
+        if (faceResult) {
+            (*implResult)->textFace = *faceResult;
+        }
+        (*implResult)->textRasterizer = std::move(textRasterizer);
+
+        auto atlasResult = UIGlyphAtlas::Create(
+            UIGlyphAtlasCapacity{
+                .width = 512,
+                .height = 512,
+                .maxGlyphs = 1024,
+            },
+            resource);
+        if (atlasResult) {
+            (*implResult)->glyphAtlas = std::move(*atlasResult);
         }
 
         auto context = std::unique_ptr<UIContext>(new UIContext(std::move(*implResult)));
@@ -4401,6 +5658,13 @@ Platform::WindowId UIContext::ownerWindow() const noexcept
 bool UIContext::contains(UINodeId node) const noexcept
 {
     return m_impl->isOwnerThread() && m_impl->contains(node);
+}
+
+Core::Status UIContext::openTextFont(
+    std::span<const std::byte> fontBytes,
+    i32 faceIndex)
+{
+    return m_impl->openTextFont(fontBytes, faceIndex);
 }
 
 UIRootBuilder UIContext::rootBuilder() noexcept
@@ -4466,6 +5730,21 @@ UICommittedPaintView UIContext::committedPaint() const noexcept
     return m_impl->committedPaint();
 }
 
+std::span<const u8> UIContext::glyphAtlasPixels() const noexcept
+{
+    return m_impl->glyphAtlasPixels();
+}
+
+u32 UIContext::glyphAtlasWidth() const noexcept
+{
+    return m_impl->glyphAtlasWidth();
+}
+
+u32 UIContext::glyphAtlasHeight() const noexcept
+{
+    return m_impl->glyphAtlasHeight();
+}
+
 UIPointerHitQueryResult UIContext::queryPointerHit(UILogicalPoint point) const noexcept
 {
     return m_impl->queryPointerHit(point);
@@ -4499,6 +5778,81 @@ Core::Status UIContext::cancelPointerInteraction(
     Platform::WindowId routedWindow)
 {
     return m_impl->cancelPointerInteraction(routedWindow);
+}
+
+Core::Result<UIContext::UIDefaultActionResult>
+UIContext::routeDefaultActionActivate(
+    Platform::PlatformFrameId platformFrame,
+    u64 sourceSequence,
+    UIButtonActivationSource source)
+{
+    return m_impl->routeDefaultActionActivate(
+        platformFrame, sourceSequence, source);
+}
+
+Core::Result<UIContext::UIDefaultFocusStepResult>
+UIContext::routeDefaultActionFocusStep(bool reverse)
+{
+    return m_impl->routeDefaultActionFocusStep(reverse);
+}
+
+UINodeId UIContext::defaultActionFocus() const noexcept
+{
+    if (!m_impl->isOwnerThread()) {
+        return {};
+    }
+    return m_impl->defaultActionFocus();
+}
+
+UINodeId UIContext::imeFocus() const noexcept
+{
+    if (!m_impl->isOwnerThread()) {
+        return {};
+    }
+    return m_impl->imeFocus();
+}
+
+bool UIContext::imeCompositionActive() const noexcept
+{
+    return m_impl->isOwnerThread() && m_impl->imeCompositionActive();
+}
+
+std::string_view UIContext::imePreeditUtf8() const noexcept
+{
+    if (!m_impl->isOwnerThread()) {
+        return {};
+    }
+    return m_impl->imePreeditUtf8();
+}
+
+u32 UIContext::imePreeditCursorCodepoint() const noexcept
+{
+    if (!m_impl->isOwnerThread()) {
+        return 0;
+    }
+    return m_impl->imePreeditCursorCodepoint();
+}
+
+Core::Result<UIContext::UITextInputRouteResult> UIContext::routeTextComposition(
+    Platform::WindowId window,
+    Platform::PlatformFrameId platformFrame,
+    u64 sourceSequence,
+    std::string_view preeditUtf8,
+    u32 cursorCodepoint,
+    Platform::TextCompositionStage stage)
+{
+    return m_impl->routeTextComposition(
+        window, platformFrame, sourceSequence, preeditUtf8, cursorCodepoint, stage);
+}
+
+Core::Result<UIContext::UITextInputRouteResult> UIContext::routeTextInput(
+    Platform::WindowId window,
+    Platform::PlatformFrameId platformFrame,
+    u64 sourceSequence,
+    std::string_view committedUtf8)
+{
+    return m_impl->routeTextInput(
+        window, platformFrame, sourceSequence, committedUtf8);
 }
 
 UIContextStatistics UIContext::statistics() const noexcept
@@ -4556,6 +5910,36 @@ Core::Status UIContext::setBoxPaintFromUpdater(
     const UIBoxPaint& paint)
 {
     return m_impl->setBoxPaintFromUpdater(updaterRoot, node, paint);
+}
+
+Core::Status UIContext::setTextFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId node,
+    std::string_view utf8)
+{
+    return m_impl->setTextFromUpdater(updaterRoot, node, utf8);
+}
+
+Core::Status UIContext::setTextStyleFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId node,
+    const UITextStyle& style)
+{
+    return m_impl->setTextStyleFromUpdater(updaterRoot, node, style);
+}
+
+Core::Result<std::string_view> UIContext::textFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId node)
+{
+    return m_impl->textFromUpdater(updaterRoot, node);
+}
+
+Core::Result<UITextStyle> UIContext::textStyleFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId node)
+{
+    return m_impl->textStyleFromUpdater(updaterRoot, node);
 }
 
 Core::Status UIContext::setButtonActionFromUpdater(

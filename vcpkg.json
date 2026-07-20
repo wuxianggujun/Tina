@@ -16,6 +16,15 @@
         "glfw3"
       ]
     },
+    "ui-freetype": {
+      "description": "Build the private Tina vNext FreeType UI text adapter.",
+      "dependencies": [
+        {
+          "name": "freetype",
+          "default-features": false
+        }
+      ]
+    },
     "legacy": {
       "description": "Dependencies used only by the existing Tina runtime during vNext migration.",
       "dependencies": [

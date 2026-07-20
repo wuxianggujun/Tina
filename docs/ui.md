@@ -611,6 +611,57 @@ retained panel。当前仍无 owning packet/FramePin、Image/Text/Glyph、Atlas 
 
 ## UTF-8、中文与 Glyph Atlas
 
+M7-D0 已在 `tina_ui` 落地 Label/Button 的 retained UTF-8 文本属性：`setText`/`setTextStyle` 写入 Create
+期固定 `textByteCapacity` 预算，严格 UTF-8（无嵌入 NUL）失败返回 `InvalidText`，容量不足返回
+`CapacityExceeded`。Auto 尺寸节点使用确定性 monospaced placeholder metrics
+（`measurePlaceholderText`，默认 logicalSize 16、advanceScale 0.6、lineHeightScale 1.2）。Game SDK
+`PrimaryWindowUITreeUpdater` 已透出同一 API。
+
+M7-D1 又让有文本且 `UITextStyle.color.alpha != 0` 的节点在 committed paint 中为每个 drawable
+codepoint 发布 monospaced SolidQuad fallback（`\n` 只换行），paint ordinal 在 snapshot 内严格递增，并
+计入 `paintSnapshotCapacity`。DisplayList/bgfx 仍只消费 SolidQuad。
+
+M7-D3 增加后端无关 `IUITextRasterizer`：`createPlaceholderTextRasterizer` 始终可用；可选
+`tina_ui_freetype` 提供 `createFreeTypeTextRasterizer`（仅 `TINA_BUILD_UI_FREETYPE` + feature
+`ui-freetype`）。公共 SPI 不暴露 FreeType 类型。
+
+M7-D4 让 `UIContext::Create` 默认拥有 placeholder rasterizer 并打开内置 face；可选注入自定义
+rasterizer。Label/Button 的 `setText`/`setTextStyle` 通过 rasterizer `measure` 更新 metrics。
+
+M7-D5 在 paint 阶段调用 `raster`，把 per-glyph advance 拷入 scratch 后按 UTF-8（含换行）发出
+SolidQuad 色块；coverage R8 仍不上传，无 Glyph DisplayList / Atlas。
+
+M7-D6：`tina_ui_freetype_tests` 使用仓库 `resources/fonts/SourceHanSansSC-Regular.otf` 作为测试
+fixture 验证中文 measure/raster；Runtime 产品路径仍不得按路径打开源字体。
+
+M7-D7：`UIGlyphAtlas` 是固定容量 CPU R8 shelf atlas（Create 预留 page/slot，insert 不隐式扩容；
+generation `UIGlyphId`；clear 使旧 id 失效）。当前仅库级 API + `UIGlyphAtlasTests`。
+
+M7-D8：`Tina::Render` DisplayList 支持 `Glyph` 命令与 `addGlyphQuad`（atlas UV/page、batch 切分）。
+
+M7-D9：bgfx UI 使用 textured 程序 + R8 atlas 上传 API；Solid 绑 1×1 白贴图，Glyph 绑 atlas page。
+
+M7-D10：UIContext paint 经 `UIGlyphAtlas` 发 Glyph paint entry；integration 转 `addGlyphQuad`；
+Runtime 把 R8 page 借给 `RenderFrame`；bgfx 每帧 sync 上传。
+
+M7-D11：`openTextFont` 可替换 face；Desktop 在 FreeType ON 时注入 FreeType rasterizer 并打开
+`resources/fonts/SourceHanSansSC-Regular.otf` fixture。默认 Null 图仍用 placeholder（色块）。
+产品路径仍不得按路径打开源字体；后续应迁到 cooked FontAsset（M10）。
+
+M7-E2：Button 默认激活焦点由 Primary Pointer arm 设置；Keyboard Enter/Space/KeypadEnter 与
+Gamepad South Down 经 `routeDefaultActionActivate` 触发 action 并消费输入。
+
+M7-E3：Tab / Shift+Tab 经 `routeDefaultActionFocusStep` 在可见 Targetable Button 间循环默认
+焦点。
+
+M7-E6：Label 默认可命中；指针 Down 设 IME 焦点；composition preedit 保留在 Context；commit 追加
+到 Label 文本。
+
+M7-E7：焦点 Label 在 committed 文本之后绘制 IME preedit（青色 tint 字形/色块）。
+
+M7-E8：焦点 Label 在 committed 文本（及 preedit）之后绘制 2px 白色 caret。尚无 selection、
+候选窗与完整 TextEdit。
+
 Runtime 不按路径打开字体。Cooked `FontAsset` 提供 owning bytes、face metadata 和确定 fallback
 chain；UI 持有 `AssetLease<FontData>`。FreeType 类型只存在于 `tina_ui_freetype`。
 

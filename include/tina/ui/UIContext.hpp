@@ -15,10 +15,17 @@
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
+#include <tina/ui/UIText.hpp>
+#include <tina/ui/text/UITextRasterizer.hpp>
 #include <tina/ui/UIWidgetKind.hpp>
 
 #include <memory>
 #include <memory_resource>
+#include <span>
+#include <string_view>
+
+// Platform text composition stage lives in platform Input.hpp (already included
+// transitively via UIEventRouting / PlatformFrame).
 
 namespace Tina::UI::Detail {
 
@@ -42,6 +49,9 @@ struct UIContextStatistics final {
     usize buttonActionCapacity = 0;
     usize activeButtonActionCount = 0;
     usize buttonActionHighWater = 0;
+    usize textByteCapacity = 0;
+    usize textByteUsed = 0;
+    usize textByteHighWater = 0;
     usize liveNodeCount = 0;
     usize liveRootCount = 0;
     usize committedNodeCount = 0;
@@ -177,6 +187,13 @@ public:
         UINodeId node,
         UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setBoxPaint(UINodeId node, const UIBoxPaint& paint);
+    // Label/Button only. Stores strict UTF-8 without NUL into the fixed text
+    // byte budget and dirties Measure for Auto-sized intrinsic placeholders.
+    // Glyph raster and FreeType remain out of this API.
+    [[nodiscard]] Core::Status setText(UINodeId node, std::string_view utf8);
+    [[nodiscard]] Core::Status setTextStyle(UINodeId node, const UITextStyle& style);
+    [[nodiscard]] Core::Result<std::string_view> text(UINodeId node);
+    [[nodiscard]] Core::Result<UITextStyle> textStyle(UINodeId node);
     [[nodiscard]] Core::Status setButtonAction(
         UINodeId button,
         UIButtonActionCallback callback);
@@ -204,9 +221,21 @@ private:
 // default heap.
 class UIContext final {
 public:
+    // Default Create wires createPlaceholderTextRasterizer, opens its built-in
+    // empty face, and owns a fixed-capacity UIGlyphAtlas for paint-time
+    // placements. Glyph DisplayList emission depends on successful atlas insert.
     [[nodiscard]] static Core::Result<std::unique_ptr<UIContext>> Create(
         Platform::WindowId ownerWindow,
         UIContextCapacityConfig capacityConfig = {},
+        std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
+
+    // Takes ownership of textRasterizer. For the placeholder rasterizer, empty
+    // font bytes open the built-in face. FreeType adapters must open a real face
+    // before setText can measure (or measure fails with InvalidFont).
+    [[nodiscard]] static Core::Result<std::unique_ptr<UIContext>> Create(
+        Platform::WindowId ownerWindow,
+        UIContextCapacityConfig capacityConfig,
+        std::unique_ptr<IUITextRasterizer> textRasterizer,
         std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
 
     // Destruction is an owner-thread, phase-boundary operation. Destroying a
@@ -223,6 +252,13 @@ public:
     [[nodiscard]] Platform::WindowId ownerWindow() const noexcept;
     [[nodiscard]] bool contains(UINodeId node) const noexcept;
 
+    // Opens (or replaces) the text face used by measure/paint. Closes the previous
+    // face, clears the glyph atlas, and dirties layout/paint for nodes with text.
+    // FreeType requires non-empty font bytes; placeholder rejects non-empty bytes.
+    [[nodiscard]] Core::Status openTextFont(
+        std::span<const std::byte> fontBytes,
+        i32 faceIndex = 0);
+
     [[nodiscard]] UIRootBuilder rootBuilder() noexcept;
     [[nodiscard]] Core::Result<UITreeUpdater> treeUpdater(UIRootOwner& rootOwner);
 
@@ -234,6 +270,12 @@ public:
     [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;
     [[nodiscard]] UICommittedHitView committedHit() const noexcept;
     [[nodiscard]] UICommittedPaintView committedPaint() const noexcept;
+    // Borrow of the context-owned R8 glyph atlas page after paint publication.
+    // Valid until the next paint that inserts/clears the atlas, or Context
+    // destruction. Empty when no atlas is allocated.
+    [[nodiscard]] std::span<const u8> glyphAtlasPixels() const noexcept;
+    [[nodiscard]] u32 glyphAtlasWidth() const noexcept;
+    [[nodiscard]] u32 glyphAtlasHeight() const noexcept;
     // Pure query over the last committed hit snapshot. It never commits
     // layout, rebuilds hit data, dispatches an event, or allocates storage.
     [[nodiscard]] UIPointerHitQueryResult queryPointerHit(
@@ -252,6 +294,53 @@ public:
     // Window without synthesizing an Up event or invoking a Button action.
     [[nodiscard]] Core::Status cancelPointerInteraction(
         Platform::WindowId routedWindow);
+    // Activates the default-focused Button (set when Primary Pointer arms a
+    // Button). Used for keyboard Enter/Space and Gamepad South Accept.
+    // Returns consumed=true when an action was invoked or the key was claimed.
+    struct UIDefaultActionResult final {
+        bool consumed = false;
+        bool activated = false;
+    };
+    [[nodiscard]] Core::Result<UIDefaultActionResult> routeDefaultActionActivate(
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        UIButtonActivationSource source);
+    // Cycles default-action focus among visible Targetable Buttons in paint
+    // order. reverse=true moves backward (Shift+Tab). Consumes when any
+    // candidate exists. Not a full Focus Scope / Modal system.
+    struct UIDefaultFocusStepResult final {
+        bool consumed = false;
+        bool moved = false;
+        UINodeId focus{};
+    };
+    [[nodiscard]] Core::Result<UIDefaultFocusStepResult> routeDefaultActionFocusStep(
+        bool reverse);
+    [[nodiscard]] UINodeId defaultActionFocus() const noexcept;
+
+    // IME/text target (M7-E6). Pointer-down on a Label sets ime focus. Composition
+    // preedit is retained on the context; commit appends UTF-8 to the Label text.
+    // Not a full TextEdit widget / caret / selection model.
+    struct UITextInputRouteResult final {
+        bool consumed = false;
+        bool applied = false;
+    };
+    [[nodiscard]] UINodeId imeFocus() const noexcept;
+    [[nodiscard]] bool imeCompositionActive() const noexcept;
+    [[nodiscard]] std::string_view imePreeditUtf8() const noexcept;
+    [[nodiscard]] u32 imePreeditCursorCodepoint() const noexcept;
+    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextComposition(
+        Platform::WindowId window,
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        std::string_view preeditUtf8,
+        u32 cursorCodepoint,
+        Platform::TextCompositionStage stage);
+    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextInput(
+        Platform::WindowId window,
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        std::string_view committedUtf8);
+
     [[nodiscard]] UIContextStatistics statistics() const noexcept;
     [[nodiscard]] usize liveNodeCount() const noexcept;
     [[nodiscard]] usize liveRootCount() const noexcept;
@@ -284,6 +373,20 @@ private:
         UINodeId updaterRoot,
         UINodeId node,
         const UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setTextFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        std::string_view utf8);
+    [[nodiscard]] Core::Status setTextStyleFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        const UITextStyle& style);
+    [[nodiscard]] Core::Result<std::string_view> textFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node);
+    [[nodiscard]] Core::Result<UITextStyle> textStyleFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node);
     [[nodiscard]] Core::Status setButtonActionFromUpdater(
         UINodeId updaterRoot,
         UINodeId button,

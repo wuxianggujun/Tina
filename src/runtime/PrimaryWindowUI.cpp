@@ -109,6 +109,42 @@ Core::Status PrimaryWindowUITreeUpdater::setBoxPaint(UI::UINodeId node, const UI
     return m_state->setBoxPaint(m_epoch, m_phase, m_updater, node, paint);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setText(UI::UINodeId node, std::string_view utf8)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setText");
+    }
+    return m_state->setText(m_epoch, m_phase, m_updater, node, utf8);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setTextStyle(UI::UINodeId node, const UI::UITextStyle& style)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTextStyle");
+    }
+    return m_state->setTextStyle(m_epoch, m_phase, m_updater, node, style);
+}
+
+Core::Result<std::string_view> PrimaryWindowUITreeUpdater::text(UI::UINodeId node)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<std::string_view>("PrimaryWindowUITreeUpdater::text");
+    }
+    return m_state->text(m_epoch, m_phase, m_updater, node);
+}
+
+Core::Result<UI::UITextStyle> PrimaryWindowUITreeUpdater::textStyle(UI::UINodeId node)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITextStyle>("PrimaryWindowUITreeUpdater::textStyle");
+    }
+    return m_state->textStyle(m_epoch, m_phase, m_updater, node);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setButtonAction(UI::UINodeId button, UI::UIButtonActionCallback callback)
 {
     if (m_state == nullptr)

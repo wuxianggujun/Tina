@@ -349,8 +349,49 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 
 ### M7-D 可见 UI 与中文字体
 
-- `tina_ui_freetype` 只在生产 adapter 中使用 FreeType，text layout 与 glyph raster 分离，
-  Atlas 带 generation/预算/retirement；
+- **已完成 M7-D0（文本属性与占位度量）**：Label/Button 支持固定预算 UTF-8 `setText`/`setTextStyle`、
+  严格 UTF-8 校验、Create 期预留 `textByteCapacity` 存储与 free-list 复用；Auto 尺寸节点使用确定性
+  monospaced placeholder metrics（不链接 FreeType、不发 Glyph DisplayList）。Game SDK
+  `PrimaryWindowUITreeUpdater` 已透出同一 API。`tina_ui_tests` 新增 `UITextTests`。
+- **已完成 M7-D1（文本 SolidQuad fallback paint）**：有文本且颜色非透明时，每个 drawable codepoint 在
+  committed paint 中发一个 monospaced SolidQuad（`\n` 换行、不绘制），paint ordinal 在 snapshot 内严格
+  递增；计入 `paintSnapshotCapacity`。仍不链接 FreeType，也不新增 Glyph DisplayList 命令。
+- **已完成 M7-D2（Desktop 文本占位 smoke）**：`tina_sample_desktop` 在既有 4-panel SolidFill 上增加
+  2 个 Label（Latin + 中文 UTF-8），经现有 SolidQuad UI pass 显示 monospaced **色块占位**（不是真字形）；
+  计数 `uiTextLabelsCreated`。后续把色块放到深色 rail + 高对比 cyan/amber，便于肉眼确认；
+  这不是 FreeType/Glyph 产品门禁。
+- **已完成 M7-D3（文本 raster SPI + FreeType adapter 骨架）**：公共 `IUITextRasterizer` /
+  `createPlaceholderTextRasterizer`（始终在 `tina_ui`，无 FreeType）；可选
+  `TINA_BUILD_UI_FREETYPE` + vcpkg feature `ui-freetype` 构建 `Tina::UIFreetype` 与
+  `createFreeTypeTextRasterizer`（public factory 头零 FreeType token）。独立
+  `tina_ui_freetype_tests` 覆盖 factory/错误边界。
+- **已完成 M7-D4（UIContext 接入 rasterizer measure）**：`UIContext::Create` 默认创建 placeholder
+  rasterizer 并 `openFace({})`；另提供注入 `std::unique_ptr<IUITextRasterizer>` 的 Create 重载。
+  `setText`/`setTextStyle` 经 rasterizer `measure` 更新 Auto 尺寸。
+- **已完成 M7-D5（paint 消费 rasterizer advances）**：committed paint 在有 face 时从
+  `IUITextRasterizer::raster` 拷贝 per-glyph advance，再按 UTF-8（含 `\n`）发 SolidQuad；无 face 时
+  回退 monospaced `logicalSize*advanceScale`。仍不上传 coverage、不建 Atlas、不发 Glyph DisplayList。
+- **已完成 M7-D6（FreeType + SourceHan 中文 fixture 门禁）**：`tina_ui_freetype_tests` 从
+  `resources/fonts/SourceHanSansSC-Regular.otf` 读入 face bytes，`measure`/`raster` 验证「中文」
+  codepoint/advance/非空 R8 coverage。这是测试期 fixture 路径，不是 Runtime 产品加载源字体。
+- **已完成 M7-D7（CPU Glyph Atlas）**：`UIGlyphAtlas` 固定容量 R8 shelf pack、`UIGlyphId`
+  generation、insert/find/clear、0 尺寸 advance-only glyph、与 placeholder rasterizer coverage 联调。
+- **已完成 M7-D8（DisplayList Glyph 命令 ABI）**：`UIDrawCommandKind::Glyph`、`addGlyphQuad`、
+  atlas UV/page、按 clip+atlasPage 分 batch、checksum 纳入 UV/page；统计 `glyphCommandCount`。
+- **已完成 M7-D9（bgfx textured UI 几何 + R8 atlas 上传）**：统一 UI 顶点 pos+color+uv；
+  `createUITexturedQuadProgram`（R8 coverage * 顶点色）；1×1 白贴图画 Solid；
+  `createUIGlyphAtlasTexture`/`updateUIGlyphAtlasTexture` 上传 R8 page；geometry 将 atlas 纹素 UV
+  归一化。
+- **已完成 M7-D10（UIContext→Atlas→Glyph DisplayList→bgfx 上传）**：Create 默认拥有
+  `UIGlyphAtlas`；paint 时 `raster`+`insert` 写 `UICommittedPaintEntry.isGlyph` 与 atlas UV；
+  `buildUIDisplayList` 发 `addGlyphQuad`；`RenderFrame.primaryWindowUIGlyphAtlas` 提交 R8 page；
+  bgfx `syncUIGlyphAtlas` 创建/更新 GPU texture。
+- **已完成 M7-D11（Desktop FreeType fixture 注入）**：`UIContext::openTextFont`；
+  `EngineCompositionFactories::createPrimaryWindowUIContext` 可覆盖 Context 创建；
+  `Desktop::CreateEngine` 在 `TINA_BUILD_UI_FREETYPE` 时用 FreeType rasterizer + 仓库
+  `SourceHanSansSC-Regular.otf` 打开 face（开发 fixture，非 Runtime 产品按路径加载源字体）。
+  preset：`windows-msvc-vnext-bgfx-ui-freetype`。这是样例可见字形路径，不是 cooked FontAsset/M10。
+- **仍后置**：FramePin/多 page 绑定契约、cooked FontAsset（M10 协作）、Modal/完整 Widget facade；
 - 在已完成私有 `tina_render_bgfx` SolidQuad UI Pass 的基础上扩展 Image/Glyph 命令、Atlas texture upload
   与资源 pin；`tina_ui` 不链接 bgfx，也不暴露 view id/handle；
 - 使用版本化内置 Cooked Font/Texture fixture 形成中文 Label、Button、Modal 可运行样例；
@@ -358,12 +399,34 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 
 ### M7-E Platform 完整输入
 
-- Windows IME 只使用私有 IMM32 adapter；补 Focus/Capture/composition 取消与窗口销毁顺序；
-- 接入 GLFW standard Gamepad sampled diff、primary-window routing、回滞/重复/Accept/Cancel；不伪造
-  两次 Poll 之间不可观测的 Down→Up；
-- GLFW adapter 向 M7-A 已有的 `PlatformEventBatch`/`PlatformEventDispatcher` 发出 Gamepad
-  connect/disconnect 生命周期；断连先产生 `InputCancelTransition` 再回收 generation；
-- 完成100%/150%/200% DPI、键鼠、composition、实体手柄与资源回收门禁。
+- **已完成 M7-E1（GLFW standard Gamepad sample/diff）**：`tina_platform_glfw` 每帧
+  `glfwGetGamepadState` 采样 standard mapping；connect 发 `GamepadConnectedEvent`，disconnect 先
+  `InputCancelTransition(DeviceDisconnected)` 再 `GamepadDisconnectedEvent` 并 `erase` generation；
+  button/axis 仅在采样差时发 transition；dense `setGamepadSnapshots` 替代原先恒空。
+- **已完成 M7-E2（Button Keyboard/Gamepad Accept 默认激活）**：Primary Pointer arm 同时写入
+  `defaultActionFocusButton`；`UIContext::routeDefaultActionActivate` 支持 Keyboard/Gamepad source；
+  Runtime `UIInputRouteProducer` 对 Enter/Space/KeypadEnter 与 Gamepad South Down 调用并消费
+  transition。
+- **已完成 M7-E3（Tab 默认焦点循环）**：`routeDefaultActionFocusStep` 在 committed layout 的
+  可见 Targetable Button 间按 paint order 循环；Runtime 对 Tab Down 调用（Shift 从 heldKeys
+  读 Left/RightShift 反向）。固定 256 候选上限、无堆分配。无完整 Focus Scope/Modal/方向导航。
+- **已完成 M7-E4（Gamepad stick 死区 + 轴变化回滞）**：`filterGamepadAxisValue` 对 Left/Right
+  stick 默认 deadzone 0.18 并 rescale；`gamepadAxisChanged` 默认 hysteresis 0.02 抑制噪声，
+  进出 0 始终发布。Trigger 不做 stick deadzone。无方向键导航重复、无完整 Accept/Cancel UI。
+- **已完成 M7-E5（IMM32 composition 骨架）**：backend-neutral `Imm32CompositionSession`（Started/
+  Updated/Ended/Cancelled、固定 preedit 缓冲、UTF-16→UTF-8）；Win32 私有
+  `Imm32CompositionHostWin32` subclass HWND 并 drain `TextCompositionTransition` + commit
+  `TextInputTransition`；focus lost 取消 composition；active IME 时抑制重复 char。
+- **已完成 M7-E6（UI IME 路由消费到 Label）**：Label 默认 `Targetable`；Primary Down 设
+  `imeFocus`；`routeTextComposition` 保留 preedit；`routeTextInput` 追加 commit 到 Label 文本；
+  Runtime `UIInputRouteProducer` 转发 composition/commit。
+- **已完成 M7-E7（IME preedit paint）**：composition 更新/取消标脏 paint；焦点 Label 在已提交
+  文本后追加 preedit 字形（青色 tint）；计入 paint 容量。
+- **已完成 M7-E8（IME 焦点 caret paint）**：焦点 Label 在 committed 文本（+ preedit）后绘制 2px
+  白色 caret solid；设/失焦点与 composition 变化标脏 paint。尚无 selection、完整 TextEdit 控件、
+  候选窗。
+- **仍后置**：完整 TextEdit/selection/候选窗；Focus Scope/Capture/Modal；Gamepad 方向长按重复与
+  完整 Accept/Cancel 导航；100%/150%/200% DPI 产品门禁与资源回收专项。
 
 ## M8 Scene 与 2D 垂直切片
 

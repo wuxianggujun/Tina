@@ -310,10 +310,11 @@ TEST_F(UIButtonActionTest, WidgetKindsPublishExpectedDefaultHitPolicies)
     EXPECT_EQ(hit.entries()[1].node, panel);
     EXPECT_EQ(hit.entries()[1].policy, UI::UIPointerHitPolicy::Ignore);
     EXPECT_EQ(hit.entries()[2].node, label);
-    EXPECT_EQ(hit.entries()[2].policy, UI::UIPointerHitPolicy::Ignore);
+    // Label is Targetable so it can become the IME/text focus target (M7-E6).
+    EXPECT_EQ(hit.entries()[2].policy, UI::UIPointerHitPolicy::Targetable);
     EXPECT_EQ(hit.entries()[3].node, button);
     EXPECT_EQ(hit.entries()[3].policy, UI::UIPointerHitPolicy::Targetable);
-    EXPECT_EQ(context->statistics().committedHitTargetCount, 1U);
+    EXPECT_EQ(context->statistics().committedHitTargetCount, 2U);
 }
 
 TEST_F(UIButtonActionTest, PrimaryPointerDownMoveUpPressedAndActivatesOnce)
@@ -911,6 +912,117 @@ TEST_F(UIButtonActionTest, ThreeHundredRepeatedClicksDoNotGrowSuppliedPmr)
     }
     EXPECT_EQ(resource.currentBytes(), 0U);
     EXPECT_EQ(resource.allocationCount(), resource.deallocationCount());
+}
+
+TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptActivateDefaultFocusedButton)
+{
+    ButtonTree tree = createButtonTree(firstWindow);
+    ASSERT_NE(tree.context, nullptr);
+    ActionRecorder recorder;
+    assertOk(tree.updater.setButtonAction(tree.button, makeAction(recorder, 7)));
+
+    // Without pointer arm, Accept does nothing and is not consumed.
+    auto idle = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{1},
+        10,
+        UI::UIButtonActivationSource::Keyboard);
+    ASSERT_TRUE(idle.has_value()) << (idle ? "" : idle.error().message);
+    EXPECT_FALSE(idle->consumed);
+    EXPECT_FALSE(idle->activated);
+    EXPECT_EQ(recorder.size, 0U);
+
+    // Pointer down sets default-action focus (and arms).
+    const UI::UIPointerRouteResult down = route(
+        *tree.context,
+        makePointerInput(firstWindow, UI::UIRoutedPointerEventKind::ButtonDown, 1));
+    ASSERT_TRUE(down.consumed);
+    expectButtonPressed(tree.updater, tree.button, true);
+
+    // Keyboard Accept activates once and does not require pointer Up.
+    auto keyboard = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{2},
+        20,
+        UI::UIButtonActivationSource::Keyboard);
+    ASSERT_TRUE(keyboard.has_value()) << (keyboard ? "" : keyboard.error().message);
+    EXPECT_TRUE(keyboard->consumed);
+    EXPECT_TRUE(keyboard->activated);
+    ASSERT_EQ(recorder.size, 1U);
+    EXPECT_EQ(recorder.entries[0].source, UI::UIButtonActivationSource::Keyboard);
+    EXPECT_EQ(recorder.entries[0].sourceSequence, 20U);
+    EXPECT_EQ(recorder.entries[0].marker, 7);
+
+    auto gamepad = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{3},
+        30,
+        UI::UIButtonActivationSource::Gamepad);
+    ASSERT_TRUE(gamepad.has_value()) << (gamepad ? "" : gamepad.error().message);
+    EXPECT_TRUE(gamepad->consumed);
+    EXPECT_TRUE(gamepad->activated);
+    ASSERT_EQ(recorder.size, 2U);
+    EXPECT_EQ(recorder.entries[1].source, UI::UIButtonActivationSource::Gamepad);
+    EXPECT_EQ(recorder.entries[1].sourceSequence, 30U);
+}
+
+TEST_F(UIButtonActionTest, DefaultActionWithoutRegisteredCallbackConsumesButDoesNotActivate)
+{
+    ButtonTree tree = createButtonTree(firstWindow);
+    ASSERT_NE(tree.context, nullptr);
+
+    const UI::UIPointerRouteResult down = route(
+        *tree.context,
+        makePointerInput(firstWindow, UI::UIRoutedPointerEventKind::ButtonDown, 1));
+    ASSERT_TRUE(down.consumed);
+
+    auto result = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{4},
+        40,
+        UI::UIButtonActivationSource::Keyboard);
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    EXPECT_TRUE(result->consumed);
+    EXPECT_FALSE(result->activated);
+}
+
+TEST_F(UIButtonActionTest, TabCyclesDefaultActionFocusAmongButtons)
+{
+    auto context = createContext(firstWindow);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 40.0F)));
+
+    const UI::UINodeId first = createButton(*context, root.rootNodeId());
+    const UI::UINodeId second = createButton(*context, root.rootNodeId());
+    const UI::UINodeId third = createButton(*context, root.rootNodeId());
+    assertOk(updater.setLayoutStyle(first, fixedSize(40.0F, 20.0F)));
+    assertOk(updater.setLayoutStyle(second, fixedSize(40.0F, 20.0F)));
+    assertOk(updater.setLayoutStyle(third, fixedSize(40.0F, 20.0F)));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 40.0F}));
+
+    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+
+    auto step1 = context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(step1.has_value()) << (step1 ? "" : step1.error().message);
+    EXPECT_TRUE(step1->consumed);
+    EXPECT_TRUE(step1->moved);
+    EXPECT_EQ(step1->focus, first);
+    EXPECT_EQ(context->defaultActionFocus(), first);
+
+    auto step2 = context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(step2.has_value());
+    EXPECT_TRUE(step2->consumed);
+    EXPECT_EQ(step2->focus, second);
+
+    auto step3 = context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(step3.has_value());
+    EXPECT_EQ(step3->focus, third);
+
+    auto wrap = context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(wrap.has_value());
+    EXPECT_EQ(wrap->focus, first);
+
+    auto reverse = context->routeDefaultActionFocusStep(true);
+    ASSERT_TRUE(reverse.has_value());
+    EXPECT_EQ(reverse->focus, third);
 }
 
 } // namespace

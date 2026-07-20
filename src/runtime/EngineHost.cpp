@@ -480,11 +480,13 @@ class EngineHostImplementation final {
                              Runtime::Detail::PrimaryWindowUIDisplayCoordinator primaryWindowUIDisplay,
                              Render::RenderSceneBuilder renderSceneBuilder,
                              EngineModules modules,
-                             std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface) noexcept
+                             std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface,
+                             PrimaryWindowUIContextFactory createPrimaryWindowUIContext = {}) noexcept
         : m_config(std::move(config)), m_fixedStepAccumulator(std::move(fixedStepAccumulator)),
           m_platformEventDispatcher(std::move(platformEventDispatcher)), m_actionMapper(std::move(actionMapper)),
           m_uiInputRouteProducer(std::move(uiInputRouteProducer)), m_modules(std::move(modules)),
-          m_primaryWindowUi(m_config.primaryWindowUICapacities),
+          m_primaryWindowUi(m_config.primaryWindowUICapacities, *std::pmr::get_default_resource(),
+                            std::move(createPrimaryWindowUIContext)),
           m_primaryWindowUIDisplay(std::move(primaryWindowUIDisplay)),
           m_renderSceneBuilder(std::move(renderSceneBuilder)), m_ownerThread(std::this_thread::get_id()),
           m_lastWindowSurface(std::move(initialWindowSurface))
@@ -888,11 +890,28 @@ class EngineHostImplementation final {
                                               simulationTick);
             }
 
+            std::optional<Render::UIGlyphAtlasPageView> glyphAtlasPage;
+            if (*uiContextResult != nullptr)
+            {
+                UI::UIContext& uiContext = **uiContextResult;
+                const auto pixels = uiContext.glyphAtlasPixels();
+                if (!pixels.empty() && uiContext.glyphAtlasWidth() > 0
+                    && uiContext.glyphAtlasHeight() > 0)
+                {
+                    glyphAtlasPage = Render::UIGlyphAtlasPageView{
+                        .width = uiContext.glyphAtlasWidth(),
+                        .height = uiContext.glyphAtlasHeight(),
+                        .pixels = pixels,
+                    };
+                }
+            }
+
             const Render::RenderFrame renderFrame{
                 .frameIndex = frameIndex,
                 .interpolation = frameTiming.interpolation,
                 .primaryWindowSurface = primaryWindowSurface,
                 .primaryWindowUIDisplayList = uiDisplayResult->displayList,
+                .primaryWindowUIGlyphAtlas = glyphAtlasPage,
                 .primaryWorldScene = *renderSceneResult,
             };
             auto submitResult =
@@ -1284,7 +1303,7 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
             std::move(ownedConfig), std::move(*accumulatorResult), std::move(*platformEventDispatcherResult),
             std::move(*actionMapperResult), std::move(*uiInputRouteProducerResult),
             std::move(*primaryWindowUIDisplayResult), std::move(*renderSceneBuilderResult), std::move(modules),
-            std::move(initialWindowSurface));
+            std::move(initialWindowSurface), std::move(factories.createPrimaryWindowUIContext));
         return std::unique_ptr<EngineHost>(new EngineHost(std::move(implementation)));
     } catch (const std::bad_alloc&)
     {

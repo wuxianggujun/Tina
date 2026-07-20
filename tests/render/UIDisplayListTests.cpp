@@ -460,4 +460,104 @@ TEST(UIDisplayListTest, BeginningAReplacementBuildInvalidatesThePreviousSingleBu
     EXPECT_TRUE(builder.publishedView().empty());
 }
 
+TEST(UIDisplayListTest, AcceptsGlyphCommandsAndBatchesByClipAndAtlasPage)
+{
+    auto builder = createBuilder({.commandCount = 4, .clipCount = 2, .batchCount = 4});
+    ASSERT_TRUE(builder.beginFrame().has_value());
+
+    constexpr Render::UIPixelRect clip{0, 0, 100, 100};
+    ASSERT_TRUE(builder
+                    .addSolidQuad({
+                        .paintOrdinal = 1,
+                        .bounds = {0, 0, 8, 8},
+                        .color = opaque(10, 20, 30),
+                    })
+                    .has_value());
+    ASSERT_TRUE(builder
+                    .addGlyphQuad({
+                        .paintOrdinal = 2,
+                        .bounds = {8, 0, 8, 8},
+                        .color = opaque(255, 255, 255),
+                        .atlasUv = {0, 0, 4, 4},
+                        .atlasPage = 0,
+                        .effectiveClip = clip,
+                    })
+                    .has_value());
+    ASSERT_TRUE(builder
+                    .addGlyphQuad({
+                        .paintOrdinal = 3,
+                        .bounds = {16, 0, 8, 8},
+                        .color = opaque(255, 255, 255),
+                        .atlasUv = {4, 0, 4, 4},
+                        .atlasPage = 0,
+                        .effectiveClip = clip,
+                    })
+                    .has_value());
+    ASSERT_TRUE(builder
+                    .addGlyphQuad({
+                        .paintOrdinal = 4,
+                        .bounds = {24, 0, 8, 8},
+                        .color = opaque(255, 255, 255),
+                        .atlasUv = {0, 4, 4, 4},
+                        .atlasPage = 1,
+                        .effectiveClip = clip,
+                    })
+                    .has_value());
+
+    auto committed = builder.commit();
+    ASSERT_TRUE(committed.has_value());
+    ASSERT_EQ(committed->commands().size(), 4U);
+    EXPECT_EQ(committed->commands()[0].kind, Render::UIDrawCommandKind::SolidQuad);
+    EXPECT_EQ(committed->commands()[1].kind, Render::UIDrawCommandKind::Glyph);
+    EXPECT_EQ(committed->commands()[1].atlasUv, (Render::UIPixelRect{0, 0, 4, 4}));
+    EXPECT_EQ(committed->commands()[1].atlasPage, 0U);
+    EXPECT_EQ(committed->commands()[3].atlasPage, 1U);
+    EXPECT_EQ(committed->statistics().solidQuadCommandCount, 1U);
+    EXPECT_EQ(committed->statistics().glyphCommandCount, 3U);
+
+    // Solid | Glyph page0 (2 cmds, same clip) | Glyph page1
+    ASSERT_EQ(committed->batches().size(), 3U);
+    EXPECT_EQ(committed->batches()[0].kind, Render::UIDrawCommandKind::SolidQuad);
+    EXPECT_EQ(committed->batches()[0].commandCount, 1U);
+    EXPECT_EQ(committed->batches()[1].kind, Render::UIDrawCommandKind::Glyph);
+    EXPECT_EQ(committed->batches()[1].commandCount, 2U);
+    EXPECT_EQ(committed->batches()[1].atlasPage, 0U);
+    EXPECT_EQ(committed->batches()[2].kind, Render::UIDrawCommandKind::Glyph);
+    EXPECT_EQ(committed->batches()[2].commandCount, 1U);
+    EXPECT_EQ(committed->batches()[2].atlasPage, 1U);
+}
+
+TEST(UIDisplayListTest, GlyphRequiresAtlasUvForNonEmptyBoundsAndSharesOrdinalStream)
+{
+    auto builder = createBuilder({.commandCount = 2, .clipCount = 0, .batchCount = 2});
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    auto missingUv = builder.addGlyphQuad({
+        .paintOrdinal = 1,
+        .bounds = {0, 0, 4, 4},
+        .color = opaque(1, 1, 1),
+        .atlasUv = {},
+        .atlasPage = 0,
+    });
+    ASSERT_FALSE(missingUv.has_value());
+    EXPECT_EQ(missingUv.error().code, Render::RenderErrorCode::InvalidDrawCommand);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    ASSERT_TRUE(builder
+                    .addSolidQuad({
+                        .paintOrdinal = 5,
+                        .bounds = {0, 0, 1, 1},
+                        .color = opaque(1, 1, 1),
+                    })
+                    .has_value());
+    auto nonIncreasing = builder.addGlyphQuad({
+        .paintOrdinal = 5,
+        .bounds = {1, 0, 1, 1},
+        .color = opaque(1, 1, 1),
+        .atlasUv = {0, 0, 1, 1},
+    });
+    ASSERT_FALSE(nonIncreasing.has_value());
+    EXPECT_EQ(nonIncreasing.error().code, Render::RenderErrorCode::InvalidDrawCommand);
+}
+
 } // namespace Tina::Tests

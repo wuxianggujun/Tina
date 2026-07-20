@@ -4,6 +4,9 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIText.hpp>
+
+#include <string_view>
 
 namespace Tina::Runtime::Detail {
 
@@ -32,6 +35,10 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setText(UI::UINodeId node, std::string_view utf8);
+    [[nodiscard]] Core::Status setTextStyle(UI::UINodeId node, const UI::UITextStyle& style);
+    [[nodiscard]] Core::Result<std::string_view> text(UI::UINodeId node);
+    [[nodiscard]] Core::Result<UI::UITextStyle> textStyle(UI::UINodeId node);
     [[nodiscard]] Core::Status setButtonAction(UI::UINodeId button, UI::UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(UI::UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(UI::UINodeId button) const;

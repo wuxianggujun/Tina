@@ -54,11 +54,13 @@ buildDisplayList(UIDisplayListBuilder& builder, std::span<const UISolidQuadInput
     };
 }
 
-void expectVertex(const BgfxUIDisplayVertex& vertex, float x, float y, u32 abgr)
+void expectVertex(const BgfxUIDisplayVertex& vertex, float x, float y, u32 abgr, float u = 0.0F, float v = 0.0F)
 {
     EXPECT_FLOAT_EQ(vertex.x, x);
     EXPECT_FLOAT_EQ(vertex.y, y);
     EXPECT_EQ(vertex.abgr, abgr);
+    EXPECT_FLOAT_EQ(vertex.u, u);
+    EXPECT_FLOAT_EQ(vertex.v, v);
 }
 
 TEST(BgfxUIDisplayGeometryTest, EmptyDisplayListHasZeroRequirementsAndWritesNothing)
@@ -106,17 +108,18 @@ TEST(BgfxUIDisplayGeometryTest, ExpandsTwoSolidQuadsInPaintOrderWithAbsoluteIndi
     EXPECT_EQ(written->indexCount, 12U);
 
     constexpr u32 FirstAbgr = 0x80014080U;
-    expectVertex(vertices[0], 10.0F, 20.0F, FirstAbgr);
-    expectVertex(vertices[1], 40.0F, 20.0F, FirstAbgr);
-    expectVertex(vertices[2], 40.0F, 60.0F, FirstAbgr);
-    expectVertex(vertices[3], 10.0F, 60.0F, FirstAbgr);
+    expectVertex(vertices[0], 10.0F, 20.0F, FirstAbgr, 0.0F, 0.0F);
+    expectVertex(vertices[1], 40.0F, 20.0F, FirstAbgr, 1.0F, 0.0F);
+    expectVertex(vertices[2], 40.0F, 60.0F, FirstAbgr, 1.0F, 1.0F);
+    expectVertex(vertices[3], 10.0F, 60.0F, FirstAbgr, 0.0F, 1.0F);
 
     constexpr u32 SecondAbgr = 0xFF1E140AU;
-    expectVertex(vertices[4], -5.0F, -7.0F, SecondAbgr);
-    expectVertex(vertices[5], -3.0F, -7.0F, SecondAbgr);
-    expectVertex(vertices[6], -3.0F, -4.0F, SecondAbgr);
-    expectVertex(vertices[7], -5.0F, -4.0F, SecondAbgr);
-    expectVertex(vertices[8], VertexSentinel.x, VertexSentinel.y, VertexSentinel.abgr);
+    expectVertex(vertices[4], -5.0F, -7.0F, SecondAbgr, 0.0F, 0.0F);
+    expectVertex(vertices[5], -3.0F, -7.0F, SecondAbgr, 1.0F, 0.0F);
+    expectVertex(vertices[6], -3.0F, -4.0F, SecondAbgr, 1.0F, 1.0F);
+    expectVertex(vertices[7], -5.0F, -4.0F, SecondAbgr, 0.0F, 1.0F);
+    expectVertex(vertices[8], VertexSentinel.x, VertexSentinel.y, VertexSentinel.abgr,
+                 VertexSentinel.u, VertexSentinel.v);
 
     constexpr std::array<u32, 12> ExpectedIndices{0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7};
     EXPECT_TRUE(std::ranges::equal(std::span<const u32>{indices}.first(ExpectedIndices.size()), ExpectedIndices));
@@ -141,7 +144,8 @@ TEST(BgfxUIDisplayGeometryTest, InsufficientOutputCapacityLeavesBothBuffersUntou
     ASSERT_FALSE(shortVertices.has_value());
     EXPECT_EQ(shortVertices.error().code, Core::CoreErrorCode::CapacityExceeded);
     EXPECT_TRUE(std::ranges::all_of(vertices, [&](const BgfxUIDisplayVertex& vertex) {
-        return vertex.x == VertexSentinel.x && vertex.y == VertexSentinel.y && vertex.abgr == VertexSentinel.abgr;
+        return vertex.x == VertexSentinel.x && vertex.y == VertexSentinel.y && vertex.abgr == VertexSentinel.abgr
+            && vertex.u == VertexSentinel.u && vertex.v == VertexSentinel.v;
     }));
     EXPECT_TRUE(std::ranges::all_of(indices, [](u32 index) { return index == IndexSentinel; }));
 
@@ -149,7 +153,8 @@ TEST(BgfxUIDisplayGeometryTest, InsufficientOutputCapacityLeavesBothBuffersUntou
     ASSERT_FALSE(shortIndices.has_value());
     EXPECT_EQ(shortIndices.error().code, Core::CoreErrorCode::CapacityExceeded);
     EXPECT_TRUE(std::ranges::all_of(vertices, [&](const BgfxUIDisplayVertex& vertex) {
-        return vertex.x == VertexSentinel.x && vertex.y == VertexSentinel.y && vertex.abgr == VertexSentinel.abgr;
+        return vertex.x == VertexSentinel.x && vertex.y == VertexSentinel.y && vertex.abgr == VertexSentinel.abgr
+            && vertex.u == VertexSentinel.u && vertex.v == VertexSentinel.v;
     }));
     EXPECT_TRUE(std::ranges::all_of(indices, [](u32 index) { return index == IndexSentinel; }));
 }
@@ -163,7 +168,7 @@ TEST(BgfxUIDisplayGeometryTest, UnsupportedCommandKindFailsBeforeWritingAnyGeome
     auto* mutableCommands = const_cast<UIDrawCommand*>(displayList->commands().data());
     mutableCommands[1].kind = static_cast<UIDrawCommandKind>(0xFFU);
 
-    constexpr BgfxUIDisplayVertex VertexSentinel{33.0F, 44.0F, 0x0BADF00DU};
+    constexpr BgfxUIDisplayVertex VertexSentinel{33.0F, 44.0F, 0x0BADF00DU, 9.0F, 8.0F};
     constexpr u32 IndexSentinel = 0xF00DBAADU;
     std::array<BgfxUIDisplayVertex, 8> vertices;
     std::array<u32, 12> indices;
@@ -177,9 +182,76 @@ TEST(BgfxUIDisplayGeometryTest, UnsupportedCommandKindFailsBeforeWritingAnyGeome
     ASSERT_FALSE(written.has_value());
     EXPECT_EQ(written.error().code, Core::CoreErrorCode::Unsupported);
     EXPECT_TRUE(std::ranges::all_of(vertices, [&](const BgfxUIDisplayVertex& vertex) {
-        return vertex.x == VertexSentinel.x && vertex.y == VertexSentinel.y && vertex.abgr == VertexSentinel.abgr;
+        return vertex.x == VertexSentinel.x && vertex.y == VertexSentinel.y && vertex.abgr == VertexSentinel.abgr
+            && vertex.u == VertexSentinel.u && vertex.v == VertexSentinel.v;
     }));
     EXPECT_TRUE(std::ranges::all_of(indices, [](u32 index) { return index == IndexSentinel; }));
+}
+
+TEST(BgfxUIDisplayGeometryTest, ExpandsGlyphCommandsWithNormalizedAtlasUv)
+{
+    auto builder = createBuilder(1);
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    ASSERT_TRUE(builder
+                    .addGlyphQuad({
+                        .paintOrdinal = 1,
+                        .bounds = {10, 20, 8, 16},
+                        .color = {.red = 255, .green = 255, .blue = 255, .alpha = 255},
+                        .atlasUv = {4, 8, 4, 8},
+                        .atlasPage = 0,
+                    })
+                    .has_value());
+    auto displayList = builder.commit();
+    ASSERT_TRUE(displayList.has_value());
+
+    BgfxUIAtlasPageTable pages{};
+    pages.pages[0] = UIAtlasPageSize{.width = 16, .height = 32};
+    pages.pageCount = 1;
+
+    auto requirements = checkedGeometryRequirements(*displayList);
+    ASSERT_TRUE(requirements.has_value());
+    EXPECT_EQ(requirements->vertexCount, 4U);
+    EXPECT_EQ(requirements->indexCount, 6U);
+
+    std::array<BgfxUIDisplayVertex, 4> vertices{};
+    std::array<u32, 6> indices{};
+    auto written = writeGeometry(*displayList, vertices, indices, pages);
+    ASSERT_TRUE(written.has_value());
+    EXPECT_FLOAT_EQ(vertices[0].u, 4.0F / 16.0F);
+    EXPECT_FLOAT_EQ(vertices[0].v, 8.0F / 32.0F);
+    EXPECT_FLOAT_EQ(vertices[2].u, 8.0F / 16.0F);
+    EXPECT_FLOAT_EQ(vertices[2].v, 16.0F / 32.0F);
+    EXPECT_EQ(indices[5], 3U);
+}
+
+TEST(BgfxUIDisplayGeometryTest, GlyphWithoutAtlasPageFailsWithoutWriting)
+{
+    auto builder = createBuilder(1);
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    ASSERT_TRUE(builder
+                    .addGlyphQuad({
+                        .paintOrdinal = 1,
+                        .bounds = {0, 0, 4, 4},
+                        .color = {.red = 1, .green = 1, .blue = 1, .alpha = 1},
+                        .atlasUv = {0, 0, 4, 4},
+                        .atlasPage = 0,
+                    })
+                    .has_value());
+    auto displayList = builder.commit();
+    ASSERT_TRUE(displayList.has_value());
+
+    constexpr BgfxUIDisplayVertex VertexSentinel{1.0F, 2.0F, 3U, 4.0F, 5.0F};
+    std::array<BgfxUIDisplayVertex, 4> vertices;
+    std::array<u32, 6> indices;
+    vertices.fill(VertexSentinel);
+    indices.fill(99U);
+
+    auto written = writeGeometry(*displayList, vertices, indices, {});
+    ASSERT_FALSE(written.has_value());
+    EXPECT_EQ(written.error().code, Core::CoreErrorCode::Unsupported);
+    EXPECT_TRUE(std::ranges::all_of(vertices, [&](const BgfxUIDisplayVertex& vertex) {
+        return vertex.x == VertexSentinel.x && vertex.y == VertexSentinel.y;
+    }));
 }
 
 TEST(BgfxUIDisplayGeometryTest, ReusesCallerOwnedStorageForThreeHundredWrites)
