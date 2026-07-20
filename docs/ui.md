@@ -638,7 +638,9 @@ M7-D7：`UIGlyphAtlas` 是固定容量 CPU R8 shelf atlas（Create 预留 page/s
 generation `UIGlyphId`；clear 使旧 id 失效）。当前仅库级 API + `UIGlyphAtlasTests`。
 
 M7-D8：`Tina::Render` DisplayList 支持 `Glyph` 命令与 `addGlyphQuad`（atlas UV/page、batch 切分）。
-bgfx 私有 UI pass 仍只画 SolidQuad，遇到 Glyph 返回明确错误。UI paint 路径尚未发出 Glyph。
+
+M7-D9：bgfx UI 使用 textured 程序 + R8 atlas 上传 API；Solid 绑 1×1 白贴图，Glyph 绑 atlas page。
+UIContext paint 仍默认 SolidQuad 色块，尚未把 `UIGlyphAtlas` placement 接到 DisplayList。
 
 Runtime 不按路径打开字体。Cooked `FontAsset` 提供 owning bytes、face metadata 和确定 fallback
 chain；UI 持有 `AssetLease<FontData>`。FreeType 类型只存在于 `tina_ui_freetype`。

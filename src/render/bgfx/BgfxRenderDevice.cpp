@@ -6,7 +6,9 @@
 #include "BgfxSurfaceFramePlanner.hpp"
 #include "BgfxTransientFrameBudget.hpp"
 #include "BgfxUIDisplayGeometry.hpp"
+#include "BgfxUIAtlasTexture.hpp"
 #include "BgfxUISolidQuadShader.hpp"
+#include "BgfxUITexturedShader.hpp"
 
 #include "../../integration/WindowSurfaceLeaseAccess.hpp"
 #include "../RenderSurfaceStateTracker.hpp"
@@ -50,10 +52,12 @@ constexpr u64 kUIPremultipliedAlphaState = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRI
                                            BGFX_STATE_BLEND_FUNC(BGFX_STATE_BLEND_ONE, BGFX_STATE_BLEND_INV_SRC_ALPHA);
 
 static_assert(std::is_standard_layout_v<BgfxUIDisplayVertex>);
-static_assert(sizeof(BgfxUIDisplayVertex) == sizeof(float) * 2U + sizeof(u32));
+static_assert(sizeof(BgfxUIDisplayVertex) == sizeof(float) * 4U + sizeof(u32));
 static_assert(offsetof(BgfxUIDisplayVertex, x) == 0U);
 static_assert(offsetof(BgfxUIDisplayVertex, y) == sizeof(float));
 static_assert(offsetof(BgfxUIDisplayVertex, abgr) == sizeof(float) * 2U);
+static_assert(offsetof(BgfxUIDisplayVertex, u) == sizeof(float) * 2U + sizeof(u32));
+static_assert(offsetof(BgfxUIDisplayVertex, v) == sizeof(float) * 3U + sizeof(u32));
 static_assert(sizeof(BgfxUIDisplayVertex) <= (std::numeric_limits<u16>::max)());
 static_assert(sizeof(BgfxOpaque3DInstanceData) <= (std::numeric_limits<u16>::max)());
 static_assert(std::is_standard_layout_v<BgfxSprite2DVertex>);
@@ -218,15 +222,17 @@ decodeNativeWindowBinding(const Integration::NativeWindowSurfaceLease& lease)
             return Core::failure(RenderErrorCode::InvalidDrawCommand,
                                  "A bgfx UI draw batch is empty");
         }
-        if (batch.kind == UIDrawCommandKind::Glyph)
-        {
-            return Core::failure(RenderErrorCode::InvalidDrawCommand,
-                                 "bgfx UI pass does not submit Glyph batches yet");
-        }
-        if (batch.kind != UIDrawCommandKind::SolidQuad)
+        if (batch.kind != UIDrawCommandKind::SolidQuad
+            && batch.kind != UIDrawCommandKind::Glyph)
         {
             return Core::failure(RenderErrorCode::InvalidDrawCommand,
                                  "A bgfx UI draw batch has an unsupported command kind");
+        }
+        if (batch.kind == UIDrawCommandKind::Glyph
+            && batch.atlasPage >= BgfxUIAtlasPageTable::MaxPages)
+        {
+            return Core::failure(RenderErrorCode::InvalidDrawCommand,
+                                 "A bgfx UI Glyph batch references an out-of-range atlas page");
         }
         if (static_cast<usize>(batch.firstCommand) != nextCommand)
         {
@@ -493,6 +499,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         uiVertexLayout_.begin()
             .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
             .add(bgfx::Attrib::Color0, 4, bgfx::AttribType::Uint8, true)
+            .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
             .end();
         sprite2DVertexLayout_.begin()
             .add(bgfx::Attrib::Position, 2, bgfx::AttribType::Float)
@@ -511,12 +518,27 @@ class BgfxRenderDevice final : public IRenderDevice {
             .add(bgfx::Attrib::TexCoord0, 2, bgfx::AttribType::Float)
             .end();
 
-        auto uiProgram = ShaderDetail::createUISolidQuadProgram();
+        auto uiProgram = ShaderDetail::createUITexturedQuadProgram();
         if (!uiProgram)
         {
             return Core::failure(std::move(uiProgram.error()));
         }
         uiSolidQuadProgram_ = *uiProgram;
+        ++statistics_.liveResources;
+
+        auto white = createUISolidWhiteTexture();
+        if (!white)
+        {
+            return Core::failure(std::move(white.error()));
+        }
+        uiSolidWhiteTexture_ = *white;
+        ++statistics_.liveResources;
+        uiTexColorUniform_ = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(uiTexColorUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the UI texture sampler uniform");
+        }
         ++statistics_.liveResources;
 
         auto sprite2DProgram = ShaderDetail::createSprite2DFixtureProgram();
@@ -723,6 +745,25 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(uiSolidQuadProgram_);
                 uiSolidQuadProgram_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(uiSolidWhiteTexture_))
+            {
+                bgfx::destroy(uiSolidWhiteTexture_);
+                uiSolidWhiteTexture_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(uiGlyphAtlasTexture_))
+            {
+                bgfx::destroy(uiGlyphAtlasTexture_);
+                uiGlyphAtlasTexture_ = BGFX_INVALID_HANDLE;
+                uiGlyphAtlasPageSize_ = {};
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(uiTexColorUniform_))
+            {
+                bgfx::destroy(uiTexColorUniform_);
+                uiTexColorUniform_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             if (statistics_.liveResources != 0)
@@ -937,6 +978,19 @@ class BgfxRenderDevice final : public IRenderDevice {
             return;
         }
 
+        BgfxUIAtlasPageTable atlasPages{};
+        // Page 0 is reserved for the solid white texture size (1x1) when only
+        // SolidQuad is present. Glyph pages must be registered before submit
+        // via a future FramePin; for now Glyph batches without registered sizes
+        // fail geometry write (terminating after preflight should not happen).
+        atlasPages.pages[0] = UIAtlasPageSize{.width = 1, .height = 1};
+        atlasPages.pageCount = 1;
+        if (bgfx::isValid(uiGlyphAtlasTexture_))
+        {
+            atlasPages.pages[1] = uiGlyphAtlasPageSize_;
+            atlasPages.pageCount = 2;
+        }
+
         bgfx::TransientVertexBuffer transientVertices{};
         bgfx::TransientIndexBuffer transientIndices{};
         bgfx::allocTransientVertexBuffer(&transientVertices, prepared.vertexCount, uiVertexLayout_);
@@ -946,7 +1000,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                                   static_cast<usize>(prepared.vertexCount)};
         auto indices =
             std::span{reinterpret_cast<u32*>(transientIndices.data), static_cast<usize>(prepared.indexCount)};
-        auto written = writeGeometry(displayList, vertices, indices);
+        auto written = writeGeometry(displayList, vertices, indices, atlasPages);
         if (!written || written->vertexCount != prepared.vertexCount || written->indexCount != prepared.indexCount)
         {
             // Preflight validated the same immutable submit-call borrow and exact
@@ -975,9 +1029,24 @@ class BgfxRenderDevice final : public IRenderDevice {
                 bgfx::setScissor();
             }
 
+            bgfx::TextureHandle texture = uiSolidWhiteTexture_;
+            if (batch.kind == UIDrawCommandKind::Glyph)
+            {
+                // Atlas page 0 still uses white if no glyph atlas is bound.
+                if (batch.atlasPage == 1 && bgfx::isValid(uiGlyphAtlasTexture_))
+                {
+                    texture = uiGlyphAtlasTexture_;
+                } else if (batch.atlasPage != 0 || !bgfx::isValid(uiSolidWhiteTexture_))
+                {
+                    // Missing page binding: skip batch rather than sample garbage.
+                    continue;
+                }
+            }
+
             const u32 firstIndex = batch.firstCommand * static_cast<u32>(kIndicesPerSolidQuad);
             const u32 indexCount = batch.commandCount * static_cast<u32>(kIndicesPerSolidQuad);
             bgfx::setState(kUIPremultipliedAlphaState);
+            bgfx::setTexture(0, uiTexColorUniform_, texture);
             bgfx::setVertexBuffer(0, &transientVertices, 0, prepared.vertexCount);
             bgfx::setIndexBuffer(&transientIndices, firstIndex, indexCount);
             bgfx::submit(kUIView, uiSolidQuadProgram_);
@@ -1020,6 +1089,10 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::IndexBufferHandle opaque3DIndexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle sprite2DProgram_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle uiSolidQuadProgram_ = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle uiSolidWhiteTexture_ = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle uiGlyphAtlasTexture_ = BGFX_INVALID_HANDLE;
+    UIAtlasPageSize uiGlyphAtlasPageSize_{};
+    bgfx::UniformHandle uiTexColorUniform_ = BGFX_INVALID_HANDLE;
     bool frameOpen_ = false;
     bool stopped_ = false;
     bool bgfxInitialized_ = false;
