@@ -25,8 +25,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CookedAssetFile.hpp
 )
 
-add_library(tina_asset STATIC
-    ${TINA_ASSET_PUBLIC_HEADERS}
+set(TINA_ASSET_SOURCES
     AssetStore.cpp
     AssetSystem.cpp
     AssetGpuUpload.cpp
@@ -51,6 +50,17 @@ add_library(tina_asset STATIC
     CookedAssetBatch.cpp
     CookedAssetFile.cpp
 )
+
+if (TINA_BUILD_PHYSICS2D)
+    list(APPEND TINA_ASSET_PUBLIC_HEADERS
+        ${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapPhysicsSync.hpp)
+    list(APPEND TINA_ASSET_SOURCES TileMapPhysicsSync.cpp)
+endif ()
+
+add_library(tina_asset STATIC
+    ${TINA_ASSET_PUBLIC_HEADERS}
+    ${TINA_ASSET_SOURCES}
+)
 add_library(Tina::Asset ALIAS tina_asset)
 
 target_compile_features(tina_asset PUBLIC cxx_std_23)
@@ -59,4 +69,7 @@ target_link_libraries(tina_asset
     PUBLIC Tina::Core Tina::AssetFormat Tina::Task Tina::Render
     PRIVATE Tina::ProjectOptions
 )
+if (TINA_BUILD_PHYSICS2D)
+    target_link_libraries(tina_asset PUBLIC Tina::Physics2D)
+endif ()
 set_target_properties(tina_asset PROPERTIES CXX_EXTENSIONS OFF)

@@ -21,6 +21,7 @@ set_target_properties(tina_physics2d_header_isolation PROPERTIES CXX_EXTENSIONS 
 add_executable(tina_physics2d_tests
     PhysicsWorld2DTests.cpp
     PhysicsGridBodiesTests.cpp
+    TileMapPhysicsSyncTests.cpp
     $<TARGET_OBJECTS:tina_physics2d_header_isolation>
 )
 target_compile_features(tina_physics2d_tests PRIVATE cxx_std_23)
@@ -30,6 +31,7 @@ target_include_directories(tina_physics2d_tests PRIVATE
 target_link_libraries(tina_physics2d_tests PRIVATE
     Tina::ProjectOptions
     Tina::Physics2D
+    Tina::Asset
     GTest::gtest_main
 )
 set_target_properties(tina_physics2d_tests PROPERTIES CXX_EXTENSIONS OFF)

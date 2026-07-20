@@ -507,4 +507,7 @@ M11-A4：独立 `tina_physics2d_bench` 单线程 stack_dynamic 基线（`--bodie
 
 M11-A5：`PhysicsGridBodies` 将 solid grid cell 同步为 static box body（cell 中心与半边长由
 cellSize 决定）；单次调用失败全回滚；调用方负责从 TileMap/`IGridCollisionProvider` 收集 cell。
-Game2D CharacterController 与正式 2D 产品接线后置。
+
+M11-A6：`include/tina/asset/TileMapPhysicsSync.hpp` 在 `TINA_BUILD_PHYSICS2D` 时编入 `Tina::Asset`，
+从 `IGridCollisionProvider` 扫描 MaterialSolid 并 `syncTileMapSolidsToStaticBodies`。CharacterController2D
+与正式 `tina_sample_2d` 后置。

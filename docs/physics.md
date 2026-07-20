@@ -153,7 +153,21 @@ A5 在 `Tina::Physics2D` 内提供 **不依赖 Asset/TileMap** 的网格静态�
 - `destroyBodies()` 批量销毁，stale/invalid 跳过；
 - 不合并共线 cell、不做 chunk dirty rebuild（后续产品接线切片再做）。
 
-A0–A5 直接门禁：Windows Debug/Release `tina_physics2d_tests` **23/23**。
+A0–A5 直接门禁：Windows Debug/Release `tina_physics2d_tests` 已通过；与 A6 合计 **25/25**。
+
+## M11-A6 TileMap → Physics2D Bridge 契约
+
+A6 在 **Asset 模块**（`TINA_BUILD_PHYSICS2D` 时）提供 Game2D 桥接，physics2d 仍不 include TileMap：
+
+- `collectSolidCellsForPhysics` / `collectAllSolidCellsForPhysics`：从 `IGridCollisionProvider`
+  按 MaterialSolid 扫描 cell → `PhysicsGridSolidCell2D`；
+- `syncTileMapSolidsToStaticBodies`：收集后调用 A5 `createStaticBodiesForSolidCells`；
+  solid scratch 不足返回 CapacityExceeded，不半创建 body；
+- `cellSizeMeters<=0` 时从 grid 取尺寸；
+- 覆盖：solid 地板同步后 dynamic 下落产生 contact；scratch overflow 拒绝。
+
+A0–A6 直接门禁：Windows Debug/Release `tina_physics2d_tests` **25/25**。
+正式 `tina_sample_2d`（画面+Tile+Box2D）仍后置；当前视觉门禁沿用已有 Desktop/2D bgfx sample。
 
 ## Tina 性能门禁
 
