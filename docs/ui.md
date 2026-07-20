@@ -623,8 +623,11 @@ codepoint 发布 monospaced SolidQuad fallback（`\n` 只换行），paint ordin
 
 M7-D3 增加后端无关 `IUITextRasterizer`：`createPlaceholderTextRasterizer` 始终可用；可选
 `tina_ui_freetype` 提供 `createFreeTypeTextRasterizer`（仅 `TINA_BUILD_UI_FREETYPE` + feature
-`ui-freetype`）。公共 SPI 不暴露 FreeType 类型；当前未接入 UIContext 布局/绘制，也未建立 Atlas
-upload。
+`ui-freetype`）。公共 SPI 不暴露 FreeType 类型。
+
+M7-D4 让 `UIContext::Create` 默认拥有 placeholder rasterizer 并打开内置 face；可选注入自定义
+rasterizer。Label/Button 的 `setText`/`setTextStyle` 通过 rasterizer `measure` 更新 metrics；
+committed paint 仍发 monospaced SolidQuad，尚未消费 R8 coverage 或建立 Atlas upload。
 
 Runtime 不按路径打开字体。Cooked `FontAsset` 提供 owning bytes、face metadata 和确定 fallback
 chain；UI 持有 `AssetLease<FontData>`。FreeType 类型只存在于 `tina_ui_freetype`。

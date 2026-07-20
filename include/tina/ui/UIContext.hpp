@@ -16,6 +16,7 @@
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIText.hpp>
+#include <tina/ui/text/UITextRasterizer.hpp>
 #include <tina/ui/UIWidgetKind.hpp>
 
 #include <memory>
@@ -216,9 +217,21 @@ private:
 // default heap.
 class UIContext final {
 public:
+    // Default Create wires createPlaceholderTextRasterizer and opens its
+    // built-in empty face. FreeType/Atlas paint still deferred; text paint
+    // remains monospaced SolidQuad fallback.
     [[nodiscard]] static Core::Result<std::unique_ptr<UIContext>> Create(
         Platform::WindowId ownerWindow,
         UIContextCapacityConfig capacityConfig = {},
+        std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
+
+    // Takes ownership of textRasterizer. For the placeholder rasterizer, empty
+    // font bytes open the built-in face. FreeType adapters must open a real face
+    // before setText can measure (or measure fails with InvalidFont).
+    [[nodiscard]] static Core::Result<std::unique_ptr<UIContext>> Create(
+        Platform::WindowId ownerWindow,
+        UIContextCapacityConfig capacityConfig,
+        std::unique_ptr<IUITextRasterizer> textRasterizer,
         std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
 
     // Destruction is an owner-thread, phase-boundary operation. Destroying a

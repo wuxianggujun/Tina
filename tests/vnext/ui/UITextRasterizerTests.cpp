@@ -1,14 +1,19 @@
 #include <gtest/gtest.h>
 
+#include <tina/core/id/GenerationPool.hpp>
+#include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 
+#include <memory>
 #include <memory_resource>
 #include <span>
 #include <string_view>
 
 namespace Tina::Tests {
 namespace {
+
+using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
 void assertOk(Core::Status status)
 {
@@ -96,6 +101,46 @@ TEST(UITextRasterizerTests, PlaceholderNewlinesDoNotEmitGlyphs)
     ASSERT_TRUE(batch.has_value());
     ASSERT_EQ(batch->glyphs.size(), 2U);
     EXPECT_EQ(batch->metrics.lineCount, 2U);
+}
+
+TEST(UITextRasterizerTests, ContextCreateWiresPlaceholderRasterizerForTextMeasure)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+
+    auto contextResult = UI::UIContext::Create(*windowResult);
+    ASSERT_TRUE(contextResult.has_value())
+        << (contextResult ? "" : contextResult.error().message);
+    auto& context = **contextResult;
+    auto root = *context.rootBuilder().createRoot();
+    auto updater = *context.treeUpdater(root);
+    auto label = *updater.createLabel(root.rootNodeId());
+
+    assertOk(updater.setText(label, "Hi"));
+    auto text = updater.text(label);
+    ASSERT_TRUE(text.has_value());
+    EXPECT_EQ(*text, "Hi");
+    assertOk(context.commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
+    EXPECT_FALSE(context.committedLayout().empty());
+}
+
+TEST(UITextRasterizerTests, ContextCreateRejectsNullRasterizer)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+
+    auto result = UI::UIContext::Create(
+        *windowResult,
+        {},
+        std::unique_ptr<UI::IUITextRasterizer>{});
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, UI::UIErrorCode::InvalidFont);
 }
 
 } // namespace Tina::Tests

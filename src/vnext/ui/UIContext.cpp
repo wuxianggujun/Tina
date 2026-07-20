@@ -5,6 +5,7 @@
 #include <tina/core/text/Utf8.hpp>
 #include <tina/ui/UIDirty.hpp>
 #include <tina/ui/UIText.hpp>
+#include <tina/ui/text/UITextRasterizer.hpp>
 
 #include <algorithm>
 #include <array>
@@ -631,6 +632,8 @@ struct UIContext::Impl final {
     std::pmr::vector<TextByteAllocation> freeTextAllocations;
     usize textByteUsed = 0;
     usize textByteHighWater = 0;
+    std::unique_ptr<IUITextRasterizer> textRasterizer;
+    UIFontFaceId textFace{};
     std::pmr::vector<UIDirty> dirtyByIndex;
     std::pmr::vector<u8> dirtyQueuedByIndex;
     std::pmr::vector<UINodeId> dirtyQueue;
@@ -2569,6 +2572,18 @@ struct UIContext::Impl final {
             state.length);
     }
 
+    [[nodiscard]] Core::Result<UITextMetrics> measureWidgetText(
+        std::string_view utf8,
+        const UITextStyle& style)
+    {
+        if (textRasterizer && textFace.hasValue()) {
+            return textRasterizer->measure(textFace, utf8, style);
+        }
+        // Fallback keeps measure available when a custom FreeType rasterizer is
+        // injected before any face is opened.
+        return measurePlaceholderText(utf8, style);
+    }
+
     [[nodiscard]] static bool supportsWidgetText(UIWidgetKind kind) noexcept
     {
         return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button;
@@ -3193,7 +3208,7 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::CapacityExceeded, "UI text payload is too large");
         }
 
-        auto metrics = measurePlaceholderText(
+        auto metrics = measureWidgetText(
             utf8,
             textStatesByIndex[node.index()].style);
         if (!metrics) {
@@ -3291,7 +3306,7 @@ struct UIContext::Impl final {
 
         UITextMetrics metrics{};
         if (state.hasContent) {
-            auto measured = measurePlaceholderText(textViewFor(node.index()), style);
+            auto measured = measureWidgetText(textViewFor(node.index()), style);
             if (!measured) {
                 return Core::failure(measured.error());
             }
@@ -4823,8 +4838,33 @@ Core::Result<std::unique_ptr<UIContext>> UIContext::Create(
     UIContextCapacityConfig capacityConfig,
     std::pmr::memory_resource& resource)
 {
+    // Validate before any allocation against the caller's resource so failed
+    // Create remains allocation-free for invalid window/capacity probes.
     if (!ownerWindow.hasValue()) {
         return fail(UIErrorCode::InvalidOwnerWindow, "UI context owner window id is empty");
+    }
+    if (Core::Status status = validateUIContextCapacityConfig(capacityConfig); !status) {
+        return Core::failure(status.error());
+    }
+
+    auto rasterizer = createPlaceholderTextRasterizer({}, resource);
+    if (!rasterizer) {
+        return Core::failure(rasterizer.error());
+    }
+    return Create(ownerWindow, capacityConfig, std::move(*rasterizer), resource);
+}
+
+Core::Result<std::unique_ptr<UIContext>> UIContext::Create(
+    Platform::WindowId ownerWindow,
+    UIContextCapacityConfig capacityConfig,
+    std::unique_ptr<IUITextRasterizer> textRasterizer,
+    std::pmr::memory_resource& resource)
+{
+    if (!ownerWindow.hasValue()) {
+        return fail(UIErrorCode::InvalidOwnerWindow, "UI context owner window id is empty");
+    }
+    if (!textRasterizer) {
+        return fail(UIErrorCode::InvalidFont, "UI context text rasterizer is null");
     }
 
     auto normalizedResult = normalizeCapacity(capacityConfig);
@@ -4843,6 +4883,15 @@ Core::Result<std::unique_ptr<UIContext>> UIContext::Create(
         if (!implResult) {
             return Core::failure(implResult.error());
         }
+
+        // Best-effort open of the built-in/empty face. Placeholder accepts {}.
+        // FreeType adapters reject empty bytes; they remain without a face until
+        // a later font-binding slice opens real bytes.
+        auto faceResult = textRasterizer->openFace({});
+        if (faceResult) {
+            (*implResult)->textFace = *faceResult;
+        }
+        (*implResult)->textRasterizer = std::move(textRasterizer);
 
         auto context = std::unique_ptr<UIContext>(new UIContext(std::move(*implResult)));
         lifetime->context = context.get();
