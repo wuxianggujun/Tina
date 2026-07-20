@@ -404,5 +404,8 @@ M10-A5 已落地 deferred 产品桥：`AssetStore` 增加 Queued/Loading/Failed�
 
 M10-A6 已落地 ADR 0017 首切片与 Asset 接线：`createBoundedTaskSystem`（有界 IO + Main completion）；
 `AssetSystemConfig::taskSystem` 注入后，`pump` 在 IO 线程 `readFile`，经 `postMain` 在主线程
-`makeCookedAssetFileFromBytes`+`complete`/`fail`。Desktop 默认仍为 DisabledTaskSystem。后置：
-CPU worker pool、TaskGroup/priority、GPU UploadTicket。
+`makeCookedAssetFileFromBytes`+`complete`/`fail`。后置：CPU worker pool、TaskGroup/priority。
+
+M10-A7：Desktop::CreateEngine 默认 `createBoundedTaskSystem`（ioWorker=1, queues=64）；Null
+`UploadTicket`/`NullUploadLedger` 提供 submit→poll(Ready)→retire 的 staging 所有权账本（无真实 GPU
+fence）。后置：bgfx upload 接线、Asset ReadyGpu、physical retirement 与 FramePinSink。

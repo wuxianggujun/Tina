@@ -30,5 +30,8 @@ inline constexpr Core::ErrorCode RenderSceneCapacityExceeded{Core::ErrorDomain::
 inline constexpr Core::ErrorCode InvalidRenderSceneInput{Core::ErrorDomain::Render, 24};
 inline constexpr Core::ErrorCode RenderSceneCameraConflict{Core::ErrorDomain::Render, 25};
 inline constexpr Core::ErrorCode RenderSceneMissingCamera{Core::ErrorDomain::Render, 26};
+inline constexpr Core::ErrorCode UploadTicketInvalid{Core::ErrorDomain::Render, 27};
+inline constexpr Core::ErrorCode UploadTicketNotRetirable{Core::ErrorDomain::Render, 28};
+inline constexpr Core::ErrorCode UploadLedgerFull{Core::ErrorDomain::Render, 29};
 
 } // namespace Tina::Render::RenderErrorCode

@@ -5,11 +5,13 @@ add_library(tina_render STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderScene.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderSurface.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/UIDisplayList.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/render/UploadTicket.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/null/NullRenderDeviceFactory.hpp
     RenderSurfaceStateTracker.cpp
     RenderSurfaceStateTracker.hpp
     RenderScene.cpp
     UIDisplayList.cpp
+    UploadTicket.cpp
     null/NullRenderDevice.cpp
 )
 add_library(Tina::Render ALIAS tina_render)

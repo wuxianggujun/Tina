@@ -43,7 +43,9 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/header_isolation/RenderSceneHeader.cpp
     render/header_isolation/RenderSurfaceHeader.cpp
     render/header_isolation/UIDisplayListHeader.cpp
+    render/header_isolation/UploadTicketHeader.cpp
     render/NullRenderDeviceTests.cpp
+    render/UploadTicketTests.cpp
     render/UIDisplayListTests.cpp
     runtime/header_isolation/EngineCompositionFactoriesHeader.cpp
     runtime/header_isolation/EngineConfigHeader.cpp

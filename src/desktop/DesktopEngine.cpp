@@ -4,7 +4,7 @@
 #include <tina/platform/glfw/GlfwPlatformFactory.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
-#include <tina/task/disabled/DisabledTaskSystemFactory.hpp>
+#include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 
 #include "render/bgfx/BgfxRenderDevice.hpp"
 
@@ -35,7 +35,24 @@ Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& confi
                 return clock;
             },
             .createTaskSystem =
-                [](const Task::TaskSystemCreateParams& params) { return Task::createDisabledTaskSystem(params); },
+                [](const Task::TaskSystemCreateParams& params) {
+                    // Production desktop uses bounded IO + Main completion (ADR 0017 first slice).
+                    // Samples/tests may still inject DisabledTaskSystem explicitly.
+                    Task::TaskSystemCreateParams effective = params;
+                    if (effective.ioWorkerCount == 0)
+                    {
+                        effective.ioWorkerCount = 1;
+                    }
+                    if (effective.ioQueueCapacity == 0)
+                    {
+                        effective.ioQueueCapacity = 64;
+                    }
+                    if (effective.mainQueueCapacity == 0)
+                    {
+                        effective.mainQueueCapacity = 64;
+                    }
+                    return Task::createBoundedTaskSystem(effective);
+                },
             .platformRender =
                 WindowSurfacePlatformRenderFactories{
                     .createWindowSurfacePlatformBackend =
