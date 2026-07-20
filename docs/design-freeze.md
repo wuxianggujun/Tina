@@ -438,3 +438,6 @@ Texture2D 依赖表）。提供 write/parse 与 full cooked asset helpers。运�
 
 M10-A16：`tina_assetc` 默认 fixture 与 `tina_sample_asset` 合成包改为 Texture2D+Sprite；sample 在
 ReadyGpu 后 parse 类型化 payload（width/height/ppu）。`--legacy-text` 保留旧 Material 文本 fixture。
+
+M10-A17：`AssetSystem::openAndBindCatalog` 一站式打开绑定；`catalogFirstIdOfKind`/
+`findFirstLoadedOfKind`；`parseTexture2DFromCooked`/`parseSpriteFromCooked` 类型化视图。

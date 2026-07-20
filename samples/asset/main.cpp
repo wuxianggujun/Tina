@@ -1,6 +1,6 @@
 #include <tina/asset/AssetSystem.hpp>
+#include <tina/asset/AssetTypedViews.hpp>
 #include <tina/asset/CatalogCook.hpp>
-#include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
@@ -208,63 +208,33 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    Tina::Asset::CatalogPackageOpenConfig openConfig{
-        .manifest =
-            Tina::Asset::CatalogFileLoadConfig{
-                .catalog =
-                    Tina::Asset::CatalogConfig{
-                        .maxEntries = 16,
-                        .maxDependencies = 16,
-                        .maxDependenciesPerAsset = 8,
-                        .memoryResource = &memory,
-                    },
-            },
-        .validateOnOpen = true,
-        .validation =
-            Tina::Asset::CatalogPackageValidationConfig{
-                .file = Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &memory},
-                .verifyContent = true,
-            },
-    };
-    auto catalog = Tina::Asset::openCatalogPackage(toUtf8(root), openConfig);
-    if (!catalog)
+    if (const auto status = system->openAndBindCatalog(toUtf8(root)); !status)
     {
-        writeError(catalog.error());
+        writeError(status.error());
         return 1;
     }
 
-    // Prefer Sprite seed 3; else first Sprite; else first entry.
+    // Prefer Sprite seed 3; else first Sprite; else first Texture2D; else first catalog entry id.
     Tina::Core::AssetId requestId = spriteId;
-    if (!catalog->find(requestId))
+    if (!system->catalog() || !system->catalog()->find(requestId))
     {
-        requestId = {};
-        for (Tina::Core::u32 index = 0; index < catalog->entryCount(); ++index)
+        if (auto sprite = system->catalogFirstIdOfKind(Tina::AssetFormat::AssetKind::Sprite))
         {
-            const auto entry = catalog->entry(index);
-            if (!entry)
-            {
-                continue;
-            }
-            if (entry->assetKind == Tina::AssetFormat::AssetKind::Sprite)
-            {
-                requestId = entry->assetId;
-                break;
-            }
-            if (!requestId)
-            {
-                requestId = entry->assetId;
-            }
+            requestId = *sprite;
+        } else if (auto tex = system->catalogFirstIdOfKind(Tina::AssetFormat::AssetKind::Texture2D))
+        {
+            requestId = *tex;
+        } else if (system->catalog() && system->catalog()->entryCount() > 0)
+        {
+            requestId = system->catalog()->entry(0)->assetId;
+        } else
+        {
+            requestId = {};
         }
     }
     if (!requestId)
     {
         std::cerr << "{\"status\":\"error\",\"message\":\"catalog has no entries\"}\n";
-        return 1;
-    }
-
-    if (const auto status = system->bindCatalog(toUtf8(root), std::move(*catalog)); !status)
-    {
-        writeError(status.error());
         return 1;
     }
 
@@ -327,18 +297,16 @@ int main(int argc, char** argv)
     {
         if (file->header().assetKind == Tina::AssetFormat::AssetKind::Sprite)
         {
-            auto sprite = Tina::AssetFormat::parseSpritePayload(file->payload());
-            if (sprite)
+            if (auto sprite = Tina::Asset::parseSpriteFromCooked(*file))
             {
                 ppu = sprite->pixelsPerUnit;
                 parsedTyped = true;
             }
-            if (const auto texHandle = system->find(textureId))
+            if (auto texHandle = system->findFirstLoadedOfKind(Tina::AssetFormat::AssetKind::Texture2D))
             {
                 if (const auto* texFile = system->tryGet(*texHandle))
                 {
-                    auto tex = Tina::AssetFormat::parseTexture2DPayload(texFile->payload());
-                    if (tex)
+                    if (auto tex = Tina::Asset::parseTexture2DFromCooked(*texFile))
                     {
                         texW = tex->width;
                         texH = tex->height;
@@ -348,8 +316,7 @@ int main(int argc, char** argv)
             }
         } else if (file->header().assetKind == Tina::AssetFormat::AssetKind::Texture2D)
         {
-            auto tex = Tina::AssetFormat::parseTexture2DPayload(file->payload());
-            if (tex)
+            if (auto tex = Tina::Asset::parseTexture2DFromCooked(*file))
             {
                 texW = tex->width;
                 texH = tex->height;

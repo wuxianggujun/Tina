@@ -132,6 +132,41 @@ Core::Status AssetSystem::bindCatalog(std::string_view catalogRootUtf8, CatalogS
     return Core::success();
 }
 
+Core::Status AssetSystem::openAndBindCatalog(std::string_view catalogRootUtf8, CatalogPackageOpenConfig openConfig)
+{
+    if (m_memoryResource == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "asset system has no memory resource");
+    }
+    if (openConfig.manifest.catalog.memoryResource == nullptr)
+    {
+        openConfig.manifest.catalog.memoryResource = m_memoryResource;
+    }
+    // Provide sane defaults when caller left zeros (common for {} openConfig).
+    if (openConfig.manifest.catalog.maxEntries == 0)
+    {
+        openConfig.manifest.catalog.maxEntries = 1024;
+    }
+    if (openConfig.manifest.catalog.maxDependencies == 0)
+    {
+        openConfig.manifest.catalog.maxDependencies = 4096;
+    }
+    if (openConfig.manifest.catalog.maxDependenciesPerAsset == 0)
+    {
+        openConfig.manifest.catalog.maxDependenciesPerAsset = 64;
+    }
+    if (openConfig.validation.file.memoryResource == nullptr)
+    {
+        openConfig.validation.file.memoryResource = m_memoryResource;
+    }
+    auto catalog = openCatalogPackage(catalogRootUtf8, openConfig);
+    if (!catalog)
+    {
+        return Core::failure(std::move(catalog.error()).withContext("AssetSystem::openAndBindCatalog", "open"));
+    }
+    return bindCatalog(catalogRootUtf8, std::move(*catalog));
+}
+
 bool AssetSystem::hasCatalog() const noexcept
 {
     return static_cast<bool>(m_catalog);
@@ -195,6 +230,44 @@ std::optional<AssetHandle> AssetSystem::find(Core::AssetId assetId) const noexce
         return std::nullopt;
     }
     return handle;
+}
+
+std::optional<Core::AssetId> AssetSystem::catalogFirstIdOfKind(AssetFormat::AssetKind kind) const noexcept
+{
+    if (!m_catalog)
+    {
+        return std::nullopt;
+    }
+    for (Core::u32 index = 0; index < m_catalog.entryCount(); ++index)
+    {
+        const auto entry = m_catalog.entry(index);
+        if (entry && entry->assetKind == kind)
+        {
+            return entry->assetId;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<AssetHandle> AssetSystem::findFirstLoadedOfKind(AssetFormat::AssetKind kind) const noexcept
+{
+    if (!m_catalog)
+    {
+        return std::nullopt;
+    }
+    for (Core::u32 index = 0; index < m_catalog.entryCount(); ++index)
+    {
+        const auto entry = m_catalog.entry(index);
+        if (!entry || entry->assetKind != kind)
+        {
+            continue;
+        }
+        if (auto handle = find(entry->assetId))
+        {
+            return handle;
+        }
+    }
+    return std::nullopt;
 }
 
 Core::Result<std::pmr::vector<CatalogLoadPlanEntry>>

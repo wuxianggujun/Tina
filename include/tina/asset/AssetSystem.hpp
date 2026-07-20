@@ -4,6 +4,7 @@
 #include <tina/asset/AssetRetirement.hpp>
 #include <tina/asset/AssetStore.hpp>
 #include <tina/asset/CatalogLoadPlan.hpp>
+#include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogSnapshot.hpp>
 #include <tina/asset/CookedAssetBatch.hpp>
 #include <tina/core/base/Types.hpp>
@@ -72,6 +73,10 @@ class AssetSystem final {
 
     [[nodiscard]] Core::Status bindCatalog(std::string_view catalogRootUtf8, CatalogSnapshot catalog);
 
+    // openCatalogPackage(root, openConfig) then bindCatalog. Uses config.memoryResource for open.
+    [[nodiscard]] Core::Status openAndBindCatalog(std::string_view catalogRootUtf8,
+                                                  CatalogPackageOpenConfig openConfig = {});
+
     [[nodiscard]] bool hasCatalog() const noexcept;
     [[nodiscard]] const CatalogSnapshot* catalog() const noexcept;
     [[nodiscard]] std::string_view catalogRoot() const noexcept;
@@ -84,6 +89,10 @@ class AssetSystem final {
     [[nodiscard]] AssetRetirementStats retirementStats() const noexcept;
 
     [[nodiscard]] std::optional<AssetHandle> find(Core::AssetId assetId) const noexcept;
+    // First catalog entry with the given kind (stable index order). Does not load.
+    [[nodiscard]] std::optional<Core::AssetId> catalogFirstIdOfKind(AssetFormat::AssetKind kind) const noexcept;
+    // First currently published handle with the given kind.
+    [[nodiscard]] std::optional<AssetHandle> findFirstLoadedOfKind(AssetFormat::AssetKind kind) const noexcept;
 
     [[nodiscard]] Core::Result<std::pmr::vector<AssetHandle>>
     load(std::span<const Core::AssetId> requestedAssetIds);

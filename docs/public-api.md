@@ -1109,6 +1109,9 @@ public:
 | `writeSpritePayloadBytes` / `parseSpritePayload` / `writeCookedSpriteAsset` | M10-A15 已实现 | AssetFormat module public | Sprite UV/pivot/PPU + Texture2D 依赖 | InvalidLayout / InvalidIdentity |
 | `tina_assetc` default typed2d fixture | M10-A16 已实现 | host tool | 默认输出 Texture2D 2x2 + Sprite；`--legacy-text` 兼容旧文本包 | 同 cook/publish |
 | `tina_sample_asset` typed parse | M10-A16 已实现 | sample | 加载后 parse Texture2D/Sprite payload 并输出尺寸/PPU | sample JSON |
+| `AssetSystem::openAndBindCatalog` | M10-A17 已实现 | Asset module public | 打开磁盘 Catalog 并绑定 | open/bind 错误 |
+| `catalogFirstIdOfKind` / `findFirstLoadedOfKind` | M10-A17 已实现 | Asset module public | 按 AssetKind 查找 id/handle | 无 |
+| `parseTexture2DFromCooked` / `parseSpriteFromCooked` | M10-A17 已实现 | Asset module public | 类型化 payload 视图 | CatalogEntryMismatch / payload 错误 |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |

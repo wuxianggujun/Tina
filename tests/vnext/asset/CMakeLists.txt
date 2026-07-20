@@ -9,6 +9,7 @@ set(TINA_ASSET_TEST_SOURCES
     CatalogSnapshotTests.cpp
     CatalogCookTests.cpp
     Typed2dCatalogPipelineTests.cpp
+    AssetSystemCatalogApiTests.cpp
     CatalogLoadOrderTests.cpp
     CatalogLoadPlanTests.cpp
     CatalogPackageTests.cpp
@@ -24,6 +25,7 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/AssetSystemHeader.cpp
     header_isolation/AssetGpuUploadHeader.cpp
     header_isolation/AssetRetirementHeader.cpp
+    header_isolation/AssetTypedViewsHeader.cpp
     header_isolation/CatalogCookHeader.cpp
     header_isolation/CatalogFileHeader.cpp
     header_isolation/CatalogLoadOrderHeader.cpp
