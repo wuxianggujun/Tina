@@ -498,8 +498,10 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   （Texture2D+Material 包 → validate）；仍无 cgltf/完整 glTF import；
 - M10-A13 已完成 `AssetRetirementLedger`（DestroyQueued/Retiring/Released）与 unload 时
   UploadTicket cancel/retire；`tina_sample_asset --catalog=` 消费 `tina_assetc` 产物；
+- M10-A14 已完成 recipe 驱动 Catalog cook：`CatalogCook` API、`tina_assetc --recipe`、payload 文件依赖；
+  仍无 cgltf/glTF import；
 - 完整 Cooker/cgltf、CPU TaskGroup、bgfx 真实 UploadTicket 接线继续后置；
-- 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture 子集）；
+- 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；
 - 为正式产品路径把 M7–M9 的内置 fixture 替换为 Catalog/Manifest 资产；hermetic、版本锁定的

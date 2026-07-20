@@ -429,3 +429,6 @@ M10-A12：`Core::writeFile`（atomic temp+rename）、`publishCatalogPackage`（
 M10-A13：`AssetRetirementLedger` 记录 DestroyQueued/Retiring/Released；`AssetSystem::unload` 经
 `cancelUpload` 释放 outstanding UploadTicket staging；`retireOnGpuReady=false` 时 ticket 可显式
 cancel。`tina_sample_asset --catalog=` 加载外部包并验证 unload/retirement。bgfx fence 仍后置。
+
+M10-A14：`CatalogCook` 将多 asset recipe 排序、写 cooked/manifest 并 publish；recipe 行格式
+`platform`/`asset Kind id path [depId:Kind...]`；`tina_assetc --recipe` 调用该路径。cgltf 仍后置。

@@ -1,0 +1,152 @@
+#include <tina/asset/CatalogCook.hpp>
+#include <tina/asset/CatalogPackage.hpp>
+#include <tina/core/id/AssetId.hpp>
+#include <tina/core/io/WriteFile.hpp>
+
+#include <gtest/gtest.h>
+
+#include <filesystem>
+#include <memory_resource>
+#include <span>
+#include <string>
+#include <vector>
+
+namespace Tina::Asset {
+namespace {
+
+[[nodiscard]] Core::AssetId::Bytes idBytes(Core::u8 seed)
+{
+    Core::AssetId::Bytes bytes{};
+    bytes[0] = static_cast<std::byte>(seed);
+    bytes[15] = static_cast<std::byte>(seed ^ 0x5AU);
+    return bytes;
+}
+
+[[nodiscard]] std::string toUtf8(const std::filesystem::path& path)
+{
+    const auto u8 = path.u8string();
+    return std::string(u8.begin(), u8.end());
+}
+
+TEST(CatalogCookTests, CookAndPublishFromRequest)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(2U));
+    CatalogCookRequest request{.targetPlatform = AssetFormat::TargetPlatform::WindowsX64};
+    request.assets.push_back(CatalogCookAssetSpec{
+        .assetKind = AssetFormat::AssetKind::Texture2D,
+        .assetId = textureId,
+        .payload = {std::byte{'t'}, std::byte{'e'}, std::byte{'x'}},
+    });
+    request.assets.push_back(CatalogCookAssetSpec{
+        .assetKind = AssetFormat::AssetKind::Material,
+        .assetId = materialId,
+        .payload = {std::byte{'m'}, std::byte{'a'}, std::byte{'t'}},
+        .dependencies =
+            {
+                AssetFormat::CookedAssetWriteDependency{
+                    .assetId = textureId,
+                    .expectedKind = AssetFormat::AssetKind::Texture2D,
+                    .flags = AssetFormat::DependencyFlags::Required,
+                },
+            },
+    });
+
+    const auto root = std::filesystem::temp_directory_path() / "tina_catalog_cook_req";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(root), request).has_value());
+
+    CatalogPackageOpenConfig openConfig{
+        .manifest =
+            CatalogFileLoadConfig{
+                .catalog =
+                    CatalogConfig{
+                        .maxEntries = 8,
+                        .maxDependencies = 8,
+                        .maxDependenciesPerAsset = 4,
+                        .memoryResource = &memory,
+                    },
+            },
+        .validateOnOpen = true,
+        .validation =
+            CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .verifyContent = true,
+            },
+    };
+    auto catalog = openCatalogPackage(toUtf8(root), openConfig);
+    ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
+    EXPECT_EQ(catalog->entryCount(), 2U);
+    EXPECT_EQ(catalog->dependencyCount(), 1U);
+    std::filesystem::remove_all(root, ec);
+}
+
+TEST(CatalogCookTests, RecipeFileRoundTrip)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto dir = std::filesystem::temp_directory_path() / "tina_catalog_cook_recipe";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+
+    const auto texPayload = dir / "tex.bin";
+    const auto matPayload = dir / "mat.bin";
+    const auto recipePath = dir / "pack.recipe";
+    ASSERT_TRUE(Core::writeFile(toUtf8(texPayload), std::as_bytes(std::span("TEX", 3))).has_value());
+    ASSERT_TRUE(Core::writeFile(toUtf8(matPayload), std::as_bytes(std::span("MAT", 3))).has_value());
+
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto texHex = textureId.canonicalText();
+    const auto matHex = materialId.canonicalText();
+    std::string recipe;
+    recipe += "platform WindowsX64\n";
+    recipe += "asset Texture2D ";
+    recipe.append(texHex.data(), texHex.size());
+    recipe += " tex.bin\n";
+    recipe += "asset Material ";
+    recipe.append(matHex.data(), matHex.size());
+    recipe += " mat.bin ";
+    recipe.append(texHex.data(), texHex.size());
+    recipe += ":Texture2D\n";
+    ASSERT_TRUE(Core::writeFile(toUtf8(recipePath),
+                                std::as_bytes(std::span(recipe.data(), recipe.size())))
+                    .has_value());
+
+    auto request = loadCatalogCookRecipeFile(toUtf8(recipePath));
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    EXPECT_EQ(request->assets.size(), 2U);
+
+    const auto outRoot = dir / "out";
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(outRoot), *request).has_value());
+
+    CatalogPackageOpenConfig openConfig{
+        .manifest =
+            CatalogFileLoadConfig{
+                .catalog =
+                    CatalogConfig{
+                        .maxEntries = 8,
+                        .maxDependencies = 8,
+                        .maxDependenciesPerAsset = 4,
+                        .memoryResource = &memory,
+                    },
+            },
+        .validateOnOpen = true,
+        .validation =
+            CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .verifyContent = true,
+            },
+    };
+    auto catalog = openCatalogPackage(toUtf8(outRoot), openConfig);
+    ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
+    EXPECT_EQ(catalog->entryCount(), 2U);
+    EXPECT_EQ(catalog->dependencyCount(), 1U);
+
+    std::filesystem::remove_all(dir, ec);
+}
+
+} // namespace
+} // namespace Tina::Asset

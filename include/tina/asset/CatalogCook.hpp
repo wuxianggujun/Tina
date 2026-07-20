@@ -1,0 +1,54 @@
+#pragma once
+
+#include <tina/asset_format/AssetFormat.hpp>
+#include <tina/core/base/Types.hpp>
+#include <tina/core/error/Result.hpp>
+#include <tina/core/id/AssetId.hpp>
+
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace Tina::Asset {
+
+struct CatalogCookAssetSpec final {
+    AssetFormat::AssetKind assetKind = AssetFormat::AssetKind::Invalid;
+    Core::AssetId assetId{};
+    Core::u16 assetTypeVersion = 1;
+    std::vector<std::byte> payload{};
+    std::vector<AssetFormat::CookedAssetWriteDependency> dependencies{};
+};
+
+struct CatalogCookRequest final {
+    AssetFormat::TargetPlatform targetPlatform = AssetFormat::TargetPlatform::WindowsX64;
+    // Unsorted inputs are sorted by AssetId before writing; duplicate ids fail.
+    std::vector<CatalogCookAssetSpec> assets{};
+};
+
+struct CatalogCookResult final {
+    Core::u32 entryCount = 0;
+    Core::u32 dependencyCount = 0;
+    std::vector<std::byte> manifestBytes{};
+};
+
+// Builds cooked object bytes + manifest in memory (no disk IO).
+[[nodiscard]] Core::Result<CatalogCookResult> cookCatalogPackage(const CatalogCookRequest& request);
+
+// cookCatalogPackage + publishCatalogPackage under catalogRoot (manifest.tmnft + objects/).
+[[nodiscard]] Core::Status cookAndPublishCatalogPackage(std::string_view catalogRootUtf8,
+                                                        const CatalogCookRequest& request);
+
+// Minimal line recipe format (UTF-8):
+//   # comment
+//   platform WindowsX64
+//   asset Texture2D <32hexId> <payloadPath>
+//   asset Material <32hexId> <payloadPath> <dep32hex:Kind> ...
+// Paths are relative to the recipe file directory unless absolute.
+[[nodiscard]] Core::Result<CatalogCookRequest> loadCatalogCookRecipeFile(std::string_view recipeUtf8Path);
+
+// Parse recipe text with an explicit base directory for relative payload paths.
+[[nodiscard]] Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeText,
+                                                                      std::string_view baseDirectoryUtf8);
+
+} // namespace Tina::Asset

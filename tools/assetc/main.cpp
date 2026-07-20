@@ -1,9 +1,9 @@
+#include <tina/asset/AssetErrors.hpp>
+#include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
-#include <tina/asset/CatalogPackagePublish.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
-#include <tina/core/io/WriteFile.hpp>
 
 #include <array>
 #include <cstdint>
@@ -16,6 +16,7 @@ namespace {
 
 struct Options final {
     std::string outRoot;
+    std::string recipePath;
     std::string materialPayload = "mat-payload";
     std::string texturePayload = "tex-payload";
 };
@@ -24,10 +25,16 @@ void printUsage()
 {
     std::cerr
         << "tina_assetc --out <catalogRoot> [options]\n"
-        << "  Minimal fixture cooker: writes a 2-entry Texture2D+Material catalog package.\n"
-        << "  --texture-payload <text>   default: tex-payload\n"
-        << "  --material-payload <text>  default: mat-payload\n"
-        << "  --help\n";
+        << "  Fixture/recipe cooker for Catalog packages.\n"
+        << "  --recipe <path>            cook from line recipe (preferred)\n"
+        << "  --texture-payload <text>   default fixture: tex-payload\n"
+        << "  --material-payload <text>  default fixture: mat-payload\n"
+        << "  --help\n"
+        << "\n"
+        << "Recipe lines:\n"
+        << "  platform WindowsX64\n"
+        << "  asset Texture2D <32hex> <payloadPath>\n"
+        << "  asset Material <32hex> <payloadPath> <dep32hex:Texture2D>\n";
 }
 
 [[nodiscard]] int parseArgs(int argc, char** argv, Options& options)
@@ -57,6 +64,16 @@ void printUsage()
                 return 2;
             }
             options.outRoot.assign(value);
+            continue;
+        }
+        if (arg == "--recipe")
+        {
+            const auto value = requireValue(arg);
+            if (value.empty())
+            {
+                return 2;
+            }
+            options.recipePath.assign(value);
             continue;
         }
         if (arg == "--texture-payload")
@@ -100,15 +117,48 @@ void printUsage()
     return bytes;
 }
 
-[[nodiscard]] std::span<const std::byte> asBytes(std::string_view text)
+[[nodiscard]] std::vector<std::byte> asByteVector(std::string_view text)
 {
-    return std::as_bytes(std::span<const char>(text.data(), text.size()));
+    std::vector<std::byte> bytes(text.size());
+    for (std::size_t index = 0; index < text.size(); ++index)
+    {
+        bytes[index] = static_cast<std::byte>(static_cast<unsigned char>(text[index]));
+    }
+    return bytes;
 }
 
 void printError(const Tina::Core::Error& error)
 {
     std::cout << "{\"status\":\"error\",\"domain\":" << static_cast<unsigned>(error.code.domain)
               << ",\"code\":" << error.code.value << ",\"message\":\"" << error.message << "\"}\n";
+}
+
+[[nodiscard]] Tina::Core::Result<Tina::Asset::CatalogCookRequest> buildDefaultRequest(const Options& options)
+{
+    const auto textureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
+    const auto materialId = *Tina::Core::AssetId::fromBytes(idBytes(2U));
+    Tina::Asset::CatalogCookRequest request{
+        .targetPlatform = Tina::AssetFormat::TargetPlatform::WindowsX64,
+    };
+    request.assets.push_back(Tina::Asset::CatalogCookAssetSpec{
+        .assetKind = Tina::AssetFormat::AssetKind::Texture2D,
+        .assetId = textureId,
+        .payload = asByteVector(options.texturePayload),
+    });
+    request.assets.push_back(Tina::Asset::CatalogCookAssetSpec{
+        .assetKind = Tina::AssetFormat::AssetKind::Material,
+        .assetId = materialId,
+        .payload = asByteVector(options.materialPayload),
+        .dependencies =
+            {
+                Tina::AssetFormat::CookedAssetWriteDependency{
+                    .assetId = textureId,
+                    .expectedKind = Tina::AssetFormat::AssetKind::Texture2D,
+                    .flags = Tina::AssetFormat::DependencyFlags::Required,
+                },
+            },
+    });
+    return request;
 }
 
 } // namespace
@@ -121,91 +171,36 @@ int main(int argc, char** argv)
         return parseResult == 2 ? 2 : 1;
     }
 
-    const auto textureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
-    const auto materialId = *Tina::Core::AssetId::fromBytes(idBytes(2U));
-    const std::array materialDeps{Tina::AssetFormat::CookedAssetWriteDependency{
-        .assetId = textureId,
-        .expectedKind = Tina::AssetFormat::AssetKind::Texture2D,
-        .flags = Tina::AssetFormat::DependencyFlags::Required,
-    }};
-
-    auto textureBytes = Tina::AssetFormat::writeCookedAssetBytes(Tina::AssetFormat::CookedAssetWriteDesc{
-        .assetKind = Tina::AssetFormat::AssetKind::Texture2D,
-        .assetId = textureId,
-        .payload = asBytes(options.texturePayload),
-        .computeContentHash = true,
-    });
-    auto materialBytes = Tina::AssetFormat::writeCookedAssetBytes(Tina::AssetFormat::CookedAssetWriteDesc{
-        .assetKind = Tina::AssetFormat::AssetKind::Material,
-        .assetId = materialId,
-        .dependencies = materialDeps,
-        .payload = asBytes(options.materialPayload),
-        .computeContentHash = true,
-    });
-    if (!textureBytes || !materialBytes)
+    Tina::Core::Result<Tina::Asset::CatalogCookRequest> request =
+        Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig, "no request");
+    if (!options.recipePath.empty())
     {
-        printError(textureBytes ? materialBytes.error() : textureBytes.error());
+        request = Tina::Asset::loadCatalogCookRecipeFile(options.recipePath);
+    } else
+    {
+        request = buildDefaultRequest(options);
+    }
+    if (!request)
+    {
+        printError(request.error());
         return 1;
     }
 
-    const auto textureHash = *Tina::Core::digestContentHashV1(asBytes(options.texturePayload));
-    const auto materialHash = *Tina::Core::digestContentHashV1(asBytes(options.materialPayload));
-    const std::array entries{
-        Tina::AssetFormat::CookedManifestWriteEntry{
-            .assetId = textureId,
-            .contentHash = textureHash,
-            .assetKind = Tina::AssetFormat::AssetKind::Texture2D,
-            .cookedFileBytes = textureBytes->size(),
-        },
-        Tina::AssetFormat::CookedManifestWriteEntry{
-            .assetId = materialId,
-            .contentHash = materialHash,
-            .assetKind = Tina::AssetFormat::AssetKind::Material,
-            .cookedFileBytes = materialBytes->size(),
-            .dependencies = materialDeps,
-        },
-    };
-    auto manifestBytes = Tina::AssetFormat::writeCookedManifestBytes(Tina::AssetFormat::CookedManifestWriteDesc{
-        .targetPlatform = Tina::AssetFormat::TargetPlatform::WindowsX64,
-        .entries = entries,
-    });
-    if (!manifestBytes)
-    {
-        printError(manifestBytes.error());
-        return 1;
-    }
-
-    const std::array objects{
-        Tina::Asset::CatalogPackageObjectBlob{
-            .assetKind = Tina::AssetFormat::AssetKind::Texture2D,
-            .assetId = textureId,
-            .bytes = *textureBytes,
-        },
-        Tina::Asset::CatalogPackageObjectBlob{
-            .assetKind = Tina::AssetFormat::AssetKind::Material,
-            .assetId = materialId,
-            .bytes = *materialBytes,
-        },
-    };
-
-    if (const auto status = Tina::Asset::publishCatalogPackage(options.outRoot, "manifest.tmnft", *manifestBytes,
-                                                               objects);
-        !status)
+    if (const auto status = Tina::Asset::cookAndPublishCatalogPackage(options.outRoot, *request); !status)
     {
         printError(status.error());
         return 1;
     }
 
-    // Validate by reopening.
     std::pmr::unsynchronized_pool_resource memory;
     Tina::Asset::CatalogPackageOpenConfig openConfig{
         .manifest =
             Tina::Asset::CatalogFileLoadConfig{
                 .catalog =
                     Tina::Asset::CatalogConfig{
-                        .maxEntries = 16,
-                        .maxDependencies = 16,
-                        .maxDependenciesPerAsset = 8,
+                        .maxEntries = 1024,
+                        .maxDependencies = 4096,
+                        .maxDependenciesPerAsset = 64,
                         .memoryResource = &memory,
                     },
             },
@@ -225,6 +220,7 @@ int main(int argc, char** argv)
 
     std::cout << "{\"status\":\"ok\",\"tool\":\"tina_assetc\",\"entries\":" << catalog->entryCount()
               << ",\"dependencies\":" << catalog->dependencyCount()
+              << ",\"mode\":\"" << (options.recipePath.empty() ? "fixture" : "recipe") << "\""
               << ",\"out\":\"" << options.outRoot << "\"}\n";
     return 0;
 }
