@@ -349,7 +349,11 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 
 ### M7-D 可见 UI 与中文字体
 
-- `tina_ui_freetype` 只在生产 adapter 中使用 FreeType，text layout 与 glyph raster 分离，
+- **已完成 M7-D0（文本属性与占位度量）**：Label/Button 支持固定预算 UTF-8 `setText`/`setTextStyle`、
+  严格 UTF-8 校验、Create 期预留 `textByteCapacity` 存储与 free-list 复用；Auto 尺寸节点使用确定性
+  monospaced placeholder metrics（不链接 FreeType、不发 Glyph DisplayList）。Game SDK
+  `PrimaryWindowUITreeUpdater` 已透出同一 API。`tina_ui_tests` 新增 `UITextTests`。
+- **仍后置**：`tina_ui_freetype` 只在生产 adapter 中使用 FreeType，text layout 与 glyph raster 分离，
   Atlas 带 generation/预算/retirement；
 - 在已完成私有 `tina_render_bgfx` SolidQuad UI Pass 的基础上扩展 Image/Glyph 命令、Atlas texture upload
   与资源 pin；`tina_ui` 不链接 bgfx，也不暴露 view id/handle；

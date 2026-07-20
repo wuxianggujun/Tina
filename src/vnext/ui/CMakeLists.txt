@@ -13,6 +13,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIHitTest.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPaint.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIText.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/InputRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UINodeId.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIWidgetKind.hpp
@@ -22,6 +23,7 @@ add_library(tina_ui STATIC
     ${TINA_UI_PUBLIC_HEADERS}
     UIContext.cpp
     UIContextConfig.cpp
+    UIText.cpp
 )
 add_library(Tina::UI ALIAS tina_ui)
 

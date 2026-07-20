@@ -15,10 +15,12 @@
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
+#include <tina/ui/UIText.hpp>
 #include <tina/ui/UIWidgetKind.hpp>
 
 #include <memory>
 #include <memory_resource>
+#include <string_view>
 
 namespace Tina::UI::Detail {
 
@@ -42,6 +44,9 @@ struct UIContextStatistics final {
     usize buttonActionCapacity = 0;
     usize activeButtonActionCount = 0;
     usize buttonActionHighWater = 0;
+    usize textByteCapacity = 0;
+    usize textByteUsed = 0;
+    usize textByteHighWater = 0;
     usize liveNodeCount = 0;
     usize liveRootCount = 0;
     usize committedNodeCount = 0;
@@ -177,6 +182,13 @@ public:
         UINodeId node,
         UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setBoxPaint(UINodeId node, const UIBoxPaint& paint);
+    // Label/Button only. Stores strict UTF-8 without NUL into the fixed text
+    // byte budget and dirties Measure for Auto-sized intrinsic placeholders.
+    // Glyph raster and FreeType remain out of this API.
+    [[nodiscard]] Core::Status setText(UINodeId node, std::string_view utf8);
+    [[nodiscard]] Core::Status setTextStyle(UINodeId node, const UITextStyle& style);
+    [[nodiscard]] Core::Result<std::string_view> text(UINodeId node);
+    [[nodiscard]] Core::Result<UITextStyle> textStyle(UINodeId node);
     [[nodiscard]] Core::Status setButtonAction(
         UINodeId button,
         UIButtonActionCallback callback);
@@ -284,6 +296,20 @@ private:
         UINodeId updaterRoot,
         UINodeId node,
         const UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setTextFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        std::string_view utf8);
+    [[nodiscard]] Core::Status setTextStyleFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        const UITextStyle& style);
+    [[nodiscard]] Core::Result<std::string_view> textFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node);
+    [[nodiscard]] Core::Result<UITextStyle> textStyleFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node);
     [[nodiscard]] Core::Status setButtonActionFromUpdater(
         UINodeId updaterRoot,
         UINodeId button,

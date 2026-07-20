@@ -51,6 +51,14 @@ class PrimaryWindowUICapabilityState final {
                                                    UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setBoxPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                            UI::UINodeId node, const UI::UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setText(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                       UI::UINodeId node, std::string_view utf8);
+    [[nodiscard]] Core::Status setTextStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                            UI::UINodeId node, const UI::UITextStyle& style);
+    [[nodiscard]] Core::Result<std::string_view> text(u64 epoch, PrimaryWindowUIPhase phase,
+                                                      UI::UITreeUpdater& updater, UI::UINodeId node);
+    [[nodiscard]] Core::Result<UI::UITextStyle> textStyle(u64 epoch, PrimaryWindowUIPhase phase,
+                                                          UI::UITreeUpdater& updater, UI::UINodeId node);
     [[nodiscard]] Core::Status setButtonAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                UI::UINodeId button, UI::UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,

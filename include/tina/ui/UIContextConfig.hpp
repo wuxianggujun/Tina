@@ -12,6 +12,8 @@ struct UIContextCapacityConfig final {
     static constexpr usize MaxRootCapacity = 4096;
     static constexpr usize MaxRoutedPointerListenerCapacity = 1'048'576;
     static constexpr usize MaxButtonActionCapacity = 1'048'576;
+    static constexpr usize MaxTextByteCapacity = 64U * 1024U * 1024U;
+    static constexpr usize DefaultTextByteCapacity = 64U * 1024U;
 
     usize nodeCapacity = DefaultNodeCapacity;
     usize rootCapacity = DefaultRootCapacity;
@@ -33,6 +35,9 @@ struct UIContextCapacityConfig final {
     // is reserved so an action can be replaced while this published capacity
     // is full without exposing a partial property update.
     usize buttonActionCapacity = 0;
+    // Total retained UTF-8 bytes for Label/Button text across the context.
+    // Zero uses DefaultTextByteCapacity. Storage is pre-reserved at Create.
+    usize textByteCapacity = 0;
 };
 
 [[nodiscard]] Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& config);

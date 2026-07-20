@@ -15,4 +15,5 @@
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
+#include <tina/ui/UIText.hpp>
 #include <tina/ui/UIWidgetKind.hpp>

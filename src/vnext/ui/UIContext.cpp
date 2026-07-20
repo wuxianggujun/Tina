@@ -2,12 +2,15 @@
 
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/core/text/Utf8.hpp>
 #include <tina/ui/UIDirty.hpp>
+#include <tina/ui/UIText.hpp>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <exception>
 #include <expected>
 #include <limits>
@@ -72,6 +75,20 @@ struct NormalizedCapacityConfig final {
     usize routePathCapacity = 0;
     usize routedPointerListenerCapacity = 0;
     usize buttonActionCapacity = 0;
+    usize textByteCapacity = 0;
+};
+
+struct TextByteAllocation final {
+    u32 offset = 0;
+    u32 capacity = 0;
+};
+
+struct WidgetTextState final {
+    TextByteAllocation allocation{};
+    u32 length = 0;
+    UITextStyle style{};
+    UITextMetrics metrics{};
+    bool hasContent = false;
 };
 
 inline constexpr u32 InvalidRoutedPointerListenerIndex =
@@ -518,6 +535,9 @@ struct ResolvedLength final {
     const usize buttonActionCapacity = config.buttonActionCapacity == 0
         ? config.nodeCapacity
         : config.buttonActionCapacity;
+    const usize textByteCapacity = config.textByteCapacity == 0
+        ? UIContextCapacityConfig::DefaultTextByteCapacity
+        : config.textByteCapacity;
     return NormalizedCapacityConfig{
         .nodeCapacity = config.nodeCapacity,
         .rootCapacity = config.rootCapacity,
@@ -528,6 +548,7 @@ struct ResolvedLength final {
         .routePathCapacity = routePathCapacity,
         .routedPointerListenerCapacity = routedPointerListenerCapacity,
         .buttonActionCapacity = buttonActionCapacity,
+        .textByteCapacity = textByteCapacity,
     };
 }
 
@@ -604,6 +625,11 @@ struct UIContext::Impl final {
     std::pmr::vector<UIPointerHitPolicy> pointerHitPoliciesByIndex;
     std::pmr::vector<UIBoxPaint> boxPaintsByIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localSolidFillCacheByIndex;
+    std::pmr::vector<WidgetTextState> textStatesByIndex;
+    std::pmr::vector<char> textBytes;
+    std::pmr::vector<TextByteAllocation> freeTextAllocations;
+    usize textByteUsed = 0;
+    usize textByteHighWater = 0;
     std::pmr::vector<UIDirty> dirtyByIndex;
     std::pmr::vector<u8> dirtyQueuedByIndex;
     std::pmr::vector<UINodeId> dirtyQueue;
@@ -696,6 +722,9 @@ struct UIContext::Impl final {
           pointerHitPoliciesByIndex(&resource),
           boxPaintsByIndex(&resource),
           localSolidFillCacheByIndex(&resource),
+          textStatesByIndex(&resource),
+          textBytes(&resource),
+          freeTextAllocations(&resource),
           dirtyByIndex(&resource),
           dirtyQueuedByIndex(&resource),
           dirtyQueue(&resource),
@@ -754,6 +783,7 @@ struct UIContext::Impl final {
             .routePathCapacity = normalized.routePathCapacity,
             .routedPointerListenerCapacity = normalized.routedPointerListenerCapacity,
             .buttonActionCapacity = normalized.buttonActionCapacity,
+            .textByteCapacity = normalized.textByteCapacity,
         };
 
         auto impl = std::unique_ptr<Impl>(new Impl(
@@ -770,6 +800,9 @@ struct UIContext::Impl final {
             UIPointerHitPolicy::Ignore);
         impl->boxPaintsByIndex.resize(normalized.nodeCapacity);
         impl->localSolidFillCacheByIndex.resize(normalized.nodeCapacity);
+        impl->textStatesByIndex.resize(normalized.nodeCapacity);
+        impl->textBytes.resize(normalized.textByteCapacity, '\0');
+        impl->freeTextAllocations.reserve(normalized.nodeCapacity);
         impl->dirtyByIndex.resize(normalized.nodeCapacity, UIDirty::None);
         impl->dirtyQueuedByIndex.resize(normalized.nodeCapacity, 0);
         impl->dirtyQueue.reserve(normalized.dirtyQueueCapacity);
@@ -1217,6 +1250,17 @@ struct UIContext::Impl final {
                     ++flowChildCount;
                 }
                 childIndex = childRecord->nextSiblingIndex;
+            }
+
+            if (flowChildCount == 0
+                && (record->kind == UIWidgetKind::Label
+                    || record->kind == UIWidgetKind::Button)
+                && index < textStatesByIndex.size()
+                && textStatesByIndex[index].hasContent) {
+                const UILogicalSize textSize =
+                    textStatesByIndex[index].metrics.measuredSize;
+                autoContentWidth = textSize.width;
+                autoContentHeight = textSize.height;
             }
 
             float outerWidth = resolvedWidth(style, scratch, statistics);
@@ -2338,6 +2382,81 @@ struct UIContext::Impl final {
         }
     }
 
+    void releaseTextAllocation(TextByteAllocation allocation) noexcept
+    {
+        if (allocation.capacity == 0) {
+            return;
+        }
+        freeTextAllocations.push_back(allocation);
+        if (textByteUsed >= allocation.capacity) {
+            textByteUsed -= allocation.capacity;
+        } else {
+            textByteUsed = 0;
+        }
+    }
+
+    [[nodiscard]] Core::Result<TextByteAllocation> allocateTextBytes(u32 byteCount)
+    {
+        if (byteCount == 0) {
+            return TextByteAllocation{};
+        }
+        for (usize freeIndex = 0; freeIndex < freeTextAllocations.size(); ++freeIndex) {
+            TextByteAllocation& candidate = freeTextAllocations[freeIndex];
+            if (candidate.capacity < byteCount) {
+                continue;
+            }
+            const TextByteAllocation allocated = candidate;
+            freeTextAllocations[freeIndex] = freeTextAllocations.back();
+            freeTextAllocations.pop_back();
+            textByteUsed += allocated.capacity;
+            textByteHighWater = (std::max)(textByteHighWater, textByteUsed);
+            return allocated;
+        }
+        if (textByteUsed > capacityConfig.textByteCapacity
+            || static_cast<usize>(byteCount)
+                > capacityConfig.textByteCapacity - textByteUsed) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI text byte capacity has been exhausted");
+        }
+        const TextByteAllocation allocated{
+            .offset = static_cast<u32>(textByteUsed),
+            .capacity = byteCount,
+        };
+        textByteUsed += byteCount;
+        textByteHighWater = (std::max)(textByteHighWater, textByteUsed);
+        return allocated;
+    }
+
+    void clearTextState(u32 index) noexcept
+    {
+        if (index >= textStatesByIndex.size()) {
+            return;
+        }
+        WidgetTextState& state = textStatesByIndex[index];
+        releaseTextAllocation(state.allocation);
+        state = {};
+    }
+
+    [[nodiscard]] std::string_view textViewFor(u32 index) const noexcept
+    {
+        if (index >= textStatesByIndex.size()) {
+            return {};
+        }
+        const WidgetTextState& state = textStatesByIndex[index];
+        if (!state.hasContent || state.length == 0 || state.allocation.capacity == 0) {
+            return {};
+        }
+        return std::string_view(
+            textBytes.data() + state.allocation.offset,
+            state.length);
+    }
+
+    [[nodiscard]] static bool supportsWidgetText(UIWidgetKind kind) noexcept
+    {
+        return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button;
+    }
+
     void resetNodeSideData(u32 index) noexcept
     {
         if (index >= layoutStylesByIndex.size()) {
@@ -2347,6 +2466,7 @@ struct UIContext::Impl final {
         pointerHitPoliciesByIndex[index] = UIPointerHitPolicy::Ignore;
         boxPaintsByIndex[index] = {};
         localSolidFillCacheByIndex[index] = {};
+        clearTextState(index);
         dirtyByIndex[index] = UIDirty::None;
         dirtyQueuedByIndex[index] = 0;
         layoutScratchByIndex[index] = {};
@@ -2921,6 +3041,214 @@ struct UIContext::Impl final {
         }
         currentPaint = normalizedPaint;
         return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setTextFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        std::string_view utf8)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue()) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        if (!contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater root is no longer alive");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node)) {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !supportsWidgetText(record->kind)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI text is only supported on Label and Button nodes");
+        }
+        if (utf8.size() > (std::numeric_limits<u32>::max)()) {
+            return fail(UIErrorCode::CapacityExceeded, "UI text payload is too large");
+        }
+
+        auto metrics = measurePlaceholderText(
+            utf8,
+            textStatesByIndex[node.index()].style);
+        if (!metrics) {
+            return Core::failure(metrics.error());
+        }
+
+        WidgetTextState& state = textStatesByIndex[node.index()];
+        const std::string_view current = textViewFor(node.index());
+        if (state.hasContent == !utf8.empty()
+            && current == utf8
+            && state.metrics == *metrics) {
+            return Core::success();
+        }
+
+        TextByteAllocation reservedAllocation{};
+        bool reservedNewAllocation = false;
+        if (!utf8.empty() && state.allocation.capacity < utf8.size()) {
+            auto allocation = allocateTextBytes(static_cast<u32>(utf8.size()));
+            if (!allocation) {
+                return Core::failure(allocation.error());
+            }
+            reservedAllocation = *allocation;
+            reservedNewAllocation = true;
+        }
+
+        if (Core::Status dirtyStatus = markLayoutStyleDirty(node); !dirtyStatus) {
+            if (reservedNewAllocation) {
+                releaseTextAllocation(reservedAllocation);
+            }
+            return dirtyStatus;
+        }
+        if (Core::Status paintStatus = markPaintDirty(node); !paintStatus) {
+            if (reservedNewAllocation) {
+                releaseTextAllocation(reservedAllocation);
+            }
+            return paintStatus;
+        }
+
+        if (utf8.empty()) {
+            releaseTextAllocation(state.allocation);
+            state.allocation = {};
+            state.length = 0;
+            state.metrics = {};
+            state.hasContent = false;
+            return Core::success();
+        }
+
+        if (reservedNewAllocation) {
+            releaseTextAllocation(state.allocation);
+            state.allocation = reservedAllocation;
+        }
+        std::memcpy(
+            textBytes.data() + state.allocation.offset,
+            utf8.data(),
+            utf8.size());
+        state.length = static_cast<u32>(utf8.size());
+        state.metrics = *metrics;
+        state.hasContent = true;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setTextStyleFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        const UITextStyle& style)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue()) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        if (!contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater root is no longer alive");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node)) {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !supportsWidgetText(record->kind)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI text style is only supported on Label and Button nodes");
+        }
+
+        WidgetTextState& state = textStatesByIndex[node.index()];
+        if (state.style == style) {
+            return Core::success();
+        }
+
+        UITextMetrics metrics{};
+        if (state.hasContent) {
+            auto measured = measurePlaceholderText(textViewFor(node.index()), style);
+            if (!measured) {
+                return Core::failure(measured.error());
+            }
+            metrics = *measured;
+        }
+
+        if (Core::Status dirtyStatus = markLayoutStyleDirty(node); !dirtyStatus) {
+            return dirtyStatus;
+        }
+        if (Core::Status paintStatus = markPaintDirty(node); !paintStatus) {
+            return paintStatus;
+        }
+        state.style = style;
+        state.metrics = metrics;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<std::string_view> textFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue()) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        if (!contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater root is no longer alive");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node)) {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !supportsWidgetText(record->kind)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI text is only supported on Label and Button nodes");
+        }
+        return textViewFor(node.index());
+    }
+
+    [[nodiscard]] Core::Result<UITextStyle> textStyleFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue()) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        if (!contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater root is no longer alive");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node)) {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !supportsWidgetText(record->kind)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI text style is only supported on Label and Button nodes");
+        }
+        return textStatesByIndex[node.index()].style;
     }
 
     [[nodiscard]] Core::Status setButtonActionFromUpdater(
@@ -3934,6 +4262,9 @@ struct UIContext::Impl final {
             .buttonActionCapacity = capacityConfig.buttonActionCapacity,
             .activeButtonActionCount = activeButtonActionCount,
             .buttonActionHighWater = buttonActionHighWater,
+            .textByteCapacity = capacityConfig.textByteCapacity,
+            .textByteUsed = textByteUsed,
+            .textByteHighWater = textByteHighWater,
             .liveNodeCount = nodes.activeCount(),
             .liveRootCount = liveRootCount,
             .committedNodeCount = committedBuffers[publishedBufferIndex].size(),
@@ -4281,6 +4612,38 @@ Core::Status UITreeUpdater::setBoxPaint(UINodeId node, const UIBoxPaint& paint)
     return m_context->setBoxPaintFromUpdater(m_root, node, paint);
 }
 
+Core::Status UITreeUpdater::setText(UINodeId node, std::string_view utf8)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setTextFromUpdater(m_root, node, utf8);
+}
+
+Core::Status UITreeUpdater::setTextStyle(UINodeId node, const UITextStyle& style)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setTextStyleFromUpdater(m_root, node, style);
+}
+
+Core::Result<std::string_view> UITreeUpdater::text(UINodeId node)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->textFromUpdater(m_root, node);
+}
+
+Core::Result<UITextStyle> UITreeUpdater::textStyle(UINodeId node)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->textStyleFromUpdater(m_root, node);
+}
+
 Core::Status UITreeUpdater::setButtonAction(
     UINodeId button,
     UIButtonActionCallback callback)
@@ -4556,6 +4919,36 @@ Core::Status UIContext::setBoxPaintFromUpdater(
     const UIBoxPaint& paint)
 {
     return m_impl->setBoxPaintFromUpdater(updaterRoot, node, paint);
+}
+
+Core::Status UIContext::setTextFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId node,
+    std::string_view utf8)
+{
+    return m_impl->setTextFromUpdater(updaterRoot, node, utf8);
+}
+
+Core::Status UIContext::setTextStyleFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId node,
+    const UITextStyle& style)
+{
+    return m_impl->setTextStyleFromUpdater(updaterRoot, node, style);
+}
+
+Core::Result<std::string_view> UIContext::textFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId node)
+{
+    return m_impl->textFromUpdater(updaterRoot, node);
+}
+
+Core::Result<UITextStyle> UIContext::textStyleFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId node)
+{
+    return m_impl->textStyleFromUpdater(updaterRoot, node);
 }
 
 Core::Status UIContext::setButtonActionFromUpdater(

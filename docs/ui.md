@@ -611,6 +611,13 @@ retained panel。当前仍无 owning packet/FramePin、Image/Text/Glyph、Atlas 
 
 ## UTF-8、中文与 Glyph Atlas
 
+M7-D0 已在 `tina_ui` 落地 Label/Button 的 retained UTF-8 文本属性：`setText`/`setTextStyle` 写入 Create
+期固定 `textByteCapacity` 预算，严格 UTF-8（无嵌入 NUL）失败返回 `InvalidText`，容量不足返回
+`CapacityExceeded`。Auto 尺寸节点使用确定性 monospaced placeholder metrics
+（`measurePlaceholderText`，默认 logicalSize 16、advanceScale 0.6、lineHeightScale 1.2），只影响 Measure，
+不发出 Glyph DisplayList，也不链接 FreeType。Game SDK `PrimaryWindowUITreeUpdater` 已透出同一 API。
+后续 FreeType/Atlas/Image 切片之前，文本仍不可见绘制。
+
 Runtime 不按路径打开字体。Cooked `FontAsset` 提供 owning bytes、face metadata 和确定 fallback
 chain；UI 持有 `AssetLease<FontData>`。FreeType 类型只存在于 `tina_ui_freetype`。
 
