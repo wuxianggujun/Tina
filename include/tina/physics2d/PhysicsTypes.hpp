@@ -136,6 +136,54 @@ struct PhysicsContactEvents2DView final {
     bool hitOverflow = false;
 };
 
+// Spatial query inputs/results. Hits are owning small values written into a
+// caller-provided buffer; overflow reports totalFound without expanding storage.
+struct PhysicsQueryFilter2D final {
+    Core::u64 categoryBits = 1;
+    Core::u64 maskBits = ~Core::u64{0};
+
+    friend constexpr bool operator==(
+        const PhysicsQueryFilter2D&,
+        const PhysicsQueryFilter2D&) noexcept = default;
+};
+
+struct PhysicsAabb2D final {
+    PhysicsVec2 lowerMeters{};
+    PhysicsVec2 upperMeters{};
+
+    friend constexpr bool operator==(const PhysicsAabb2D&, const PhysicsAabb2D&) noexcept = default;
+};
+
+struct PhysicsRayCast2D final {
+    PhysicsVec2 originMeters{};
+    PhysicsVec2 translationMeters{};
+
+    friend constexpr bool operator==(const PhysicsRayCast2D&, const PhysicsRayCast2D&) noexcept = default;
+};
+
+struct PhysicsOverlapHit2D final {
+    PhysicsBodyId body{};
+    PhysicsShapeId shape{};
+
+    friend constexpr bool operator==(const PhysicsOverlapHit2D&, const PhysicsOverlapHit2D&) noexcept = default;
+};
+
+struct PhysicsCastHit2D final {
+    PhysicsBodyId body{};
+    PhysicsShapeId shape{};
+    PhysicsVec2 pointMeters{};
+    PhysicsVec2 normalMeters{};
+    float fraction = 0.0F;
+
+    friend constexpr bool operator==(const PhysicsCastHit2D&, const PhysicsCastHit2D&) noexcept = default;
+};
+
+struct PhysicsQueryWriteResult2D final {
+    Core::usize written = 0;
+    Core::usize totalFound = 0;
+    bool overflow = false;
+};
+
 struct PhysicsWorld2DStats final {
     Core::usize bodyCount = 0;
     Core::usize shapeCount = 0;

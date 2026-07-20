@@ -492,5 +492,8 @@ ID，原子创建 Body+Box Shape，并提供 pose/velocity snapshot、销毁与�
 
 M11-A1：`step()` 返回前复制 Box2D begin/end/hit contact 到 Create 时固定的 Tina storage；end 事件支持
 destroy tombstone；各通道独立 overflow 与 dropped 计数；`contactEvents()` 发布 owner-thread borrowed
-view（有效到下一次 step/shutdown/move/destroy）。Query、deferred command、benchmark、Tile adapter
-与正式 2D 产品接线后置。
+view（有效到下一次 step/shutdown/move/destroy）。
+
+M11-A2：owner-thread 同步空间查询。`overlapAabb` 用 AABB 等大 box proxy 做精确 overlap；`castRay`
+多命中稳定排序；`castRayClosest` 映射 Tina Body/Shape；结果写入调用方 buffer，`written`/`totalFound`/
+`overflow` 不扩容。deferred command、benchmark、Tile adapter 与正式 2D 产品接线后置。

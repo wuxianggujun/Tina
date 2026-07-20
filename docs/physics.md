@@ -78,8 +78,8 @@ M11 的第一刀只建立可独立装配的 `Tina::Physics2D` 生命周期基础
 - Tina-owned registry/Pimpl 走调用者注入的 PMR；不调用进程全局 `b2SetAllocator()`；后续资源门禁将在
   独立 Physics2D 测试进程中用 backend byte baseline 验收，A0 当前测试源码尚未覆盖该项。
 
-A0 直接门禁已在 Windows `windows-msvc-vnext-physics2d` Debug/Release 上通过
-`tina_physics2d_tests` 16/16（含 A1 contact 项）。
+A0 直接门禁已在 Windows `windows-msvc-vnext-physics2d` Debug/Release 上通过；与 A1/A2 合计
+`tina_physics2d_tests` 18/18。
 
 ## M11-A1 Contact Event 契约
 
@@ -93,6 +93,21 @@ A1 在 `step()` 返回前把 Box2D transient contact 复制到 Create 时固定�
   `shape*Destroyed` 标记至少一侧已销毁，仍尽量保留 last-known Tina Body/Shape ID；
 - 各通道独立 overflow 标志与累计 dropped 计数；overflow 时只保留前缀，不扩容、不 heap fallback；
 - 不提供 solver callback 内重入入口；空间 Query 与 deferred command 仍后置。
+
+## M11-A2 Spatial Query 契约
+
+A2 提供 owner-thread 同步空间查询，结果写入调用方 buffer，不扩容、不 heap fallback：
+
+- `overlapAabb()` 用与 AABB 等大的 box proxy 做 **精确** overlap（不是 broadphase-only），命中按
+  body index → shape index → generation 稳定排序；
+- `castRay()` 收集全部 hit 后按 fraction → body/shape index 排序；`castRayClosest()` 走 Box2D
+  closest 路径并映射 Tina Body/Shape ID；
+- `PhysicsQueryWriteResult2D` 报告 `written`/`totalFound`/`overflow`；空 buffer 仍可报告 totalFound；
+- 输入预校验：AABB lower≤upper 且有限；ray translation 非零且有限；query filter categoryBits≠0；
+- Query 期间禁止重入 step/mutation（与 `ensureUsable` 同一 owner-thread 门闩）；
+- deferred command 仍后置。
+
+A0–A2 直接门禁：Windows `windows-msvc-vnext-physics2d` Debug/Release `tina_physics2d_tests` **18/18**。
 
 ## Tina 性能门禁
 

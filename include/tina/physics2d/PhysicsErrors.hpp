@@ -20,6 +20,7 @@ inline constexpr Core::ErrorCode InvalidShapeDescription{Core::ErrorDomain::Phys
 inline constexpr Core::ErrorCode BackendFailure{Core::ErrorDomain::Physics2D, 12};
 inline constexpr Core::ErrorCode ReentrantMutation{Core::ErrorDomain::Physics2D, 13};
 inline constexpr Core::ErrorCode ConstructionFailed{Core::ErrorDomain::Physics2D, 14};
+inline constexpr Core::ErrorCode InvalidQuery{Core::ErrorDomain::Physics2D, 15};
 
 } // namespace Physics2DErrorCode
 

@@ -697,5 +697,109 @@ TEST(PhysicsWorld2DTest, ContactEventsViewClearsOnNextStepWithoutNewContacts)
     EXPECT_FALSE(second->hitOverflow);
 }
 
+TEST(PhysicsWorld2DTest, OverlapAabbReturnsSortedHitsAndReportsOverflow)
+{
+    PhysicsWorld2DConfig config = smallConfig(4, 4);
+    config.gravityMetersPerSecondSquared = {0.0F, 0.0F};
+
+    auto worldResult = PhysicsWorld2D::Create(config);
+    ASSERT_TRUE(worldResult) << worldResult.error().message;
+    PhysicsWorld2D world = std::move(*worldResult);
+
+    PhysicsBody2DDesc staticBody;
+    staticBody.type = PhysicsBodyType2D::Static;
+
+    staticBody.positionMeters = {-1.0F, 0.0F};
+    auto left = world.createBoxBody(staticBody, unitBox());
+    staticBody.positionMeters = {1.0F, 0.0F};
+    auto right = world.createBoxBody(staticBody, unitBox());
+    staticBody.positionMeters = {10.0F, 10.0F};
+    auto farAway = world.createBoxBody(staticBody, unitBox());
+    ASSERT_TRUE(left) << left.error().message;
+    ASSERT_TRUE(right) << right.error().message;
+    ASSERT_TRUE(farAway) << farAway.error().message;
+
+    PhysicsAabb2D aabb{{-2.0F, -1.0F}, {2.0F, 1.0F}};
+    PhysicsOverlapHit2D hits[2]{};
+    auto query = world.overlapAabb(aabb, {}, hits);
+    ASSERT_TRUE(query) << query.error().message;
+    EXPECT_EQ(query->totalFound, 2U);
+    EXPECT_EQ(query->written, 2U);
+    EXPECT_FALSE(query->overflow);
+    EXPECT_TRUE(
+        (hits[0].body == left->body && hits[1].body == right->body)
+        || (hits[0].body == right->body && hits[1].body == left->body));
+    if (hits[0].body.index() > hits[1].body.index()) {
+        FAIL() << "overlap hits must be sorted by body index";
+    }
+
+    PhysicsOverlapHit2D oneSlot[1]{};
+    auto overflowQuery = world.overlapAabb(aabb, {}, oneSlot);
+    ASSERT_TRUE(overflowQuery) << overflowQuery.error().message;
+    EXPECT_EQ(overflowQuery->totalFound, 2U);
+    EXPECT_EQ(overflowQuery->written, 1U);
+    EXPECT_TRUE(overflowQuery->overflow);
+
+    PhysicsOverlapHit2D empty[1]{};
+    auto miss = world.overlapAabb(PhysicsAabb2D{{20.0F, 20.0F}, {21.0F, 21.0F}}, {}, empty);
+    ASSERT_TRUE(miss) << miss.error().message;
+    EXPECT_EQ(miss->totalFound, 0U);
+    EXPECT_EQ(miss->written, 0U);
+    EXPECT_FALSE(miss->overflow);
+
+    PhysicsAabb2D invalid{{2.0F, 0.0F}, {1.0F, 1.0F}};
+    expectFailureCode(world.overlapAabb(invalid, {}, hits), Physics2DErrorCode::InvalidQuery);
+}
+
+TEST(PhysicsWorld2DTest, CastRayFindsHitsAndClosestIsStable)
+{
+    PhysicsWorld2DConfig config = smallConfig(4, 4);
+    config.gravityMetersPerSecondSquared = {0.0F, 0.0F};
+
+    auto worldResult = PhysicsWorld2D::Create(config);
+    ASSERT_TRUE(worldResult) << worldResult.error().message;
+    PhysicsWorld2D world = std::move(*worldResult);
+
+    PhysicsBody2DDesc staticBody;
+    staticBody.type = PhysicsBodyType2D::Static;
+    staticBody.positionMeters = {2.0F, 0.0F};
+    auto nearBody = world.createBoxBody(staticBody, unitBox());
+    staticBody.positionMeters = {5.0F, 0.0F};
+    auto farBody = world.createBoxBody(staticBody, unitBox());
+    ASSERT_TRUE(nearBody) << nearBody.error().message;
+    ASSERT_TRUE(farBody) << farBody.error().message;
+
+    PhysicsRayCast2D ray{{0.0F, 0.0F}, {10.0F, 0.0F}};
+    PhysicsCastHit2D hits[4]{};
+    auto multi = world.castRay(ray, {}, hits);
+    ASSERT_TRUE(multi) << multi.error().message;
+    EXPECT_GE(multi->totalFound, 2U);
+    EXPECT_GE(multi->written, 2U);
+    EXPECT_FALSE(multi->overflow);
+    EXPECT_LE(hits[0].fraction, hits[1].fraction);
+    EXPECT_EQ(hits[0].body, nearBody->body);
+
+    auto closest = world.castRayClosest(ray, {});
+    ASSERT_TRUE(closest) << closest.error().message;
+    EXPECT_EQ(closest->body, nearBody->body);
+    EXPECT_EQ(closest->shape, nearBody->shape);
+    EXPECT_GT(closest->fraction, 0.0F);
+    EXPECT_LT(closest->fraction, 1.0F);
+
+    auto miss = world.castRayClosest(PhysicsRayCast2D{{0.0F, 5.0F}, {1.0F, 0.0F}}, {});
+    expectFailureCode(miss, Physics2DErrorCode::InvalidQuery);
+
+    expectFailureCode(
+        world.castRay(PhysicsRayCast2D{{0.0F, 0.0F}, {0.0F, 0.0F}}, {}, hits),
+        Physics2DErrorCode::InvalidQuery);
+
+    PhysicsCastHit2D one[1]{};
+    auto overflow = world.castRay(ray, {}, one);
+    ASSERT_TRUE(overflow) << overflow.error().message;
+    EXPECT_GE(overflow->totalFound, 2U);
+    EXPECT_EQ(overflow->written, 1U);
+    EXPECT_TRUE(overflow->overflow);
+}
+
 } // namespace
 } // namespace Tina::Physics2D

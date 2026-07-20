@@ -5,6 +5,7 @@
 #include <tina/physics2d/PhysicsTypes.hpp>
 
 #include <memory_resource>
+#include <span>
 
 namespace Tina::Physics2D {
 
@@ -14,11 +15,15 @@ namespace Tina::Physics2D {
     const PhysicsBody2DDesc& desc) noexcept;
 [[nodiscard]] Core::Status validatePhysicsBoxShape2DDesc(
     const PhysicsBoxShape2DDesc& desc) noexcept;
+[[nodiscard]] Core::Status validatePhysicsQueryFilter2D(
+    const PhysicsQueryFilter2D& filter) noexcept;
+[[nodiscard]] Core::Status validatePhysicsAabb2D(const PhysicsAabb2D& aabb) noexcept;
+[[nodiscard]] Core::Status validatePhysicsRayCast2D(const PhysicsRayCast2D& ray) noexcept;
 
 // Single-owner, fixed-step 2D physics world. M11-A0 owns one Box shape per body
 // and fixed-step lifecycle; M11-A1 copies contact begin/end/hit into fixed
-// Tina storage before step() returns. Spatial queries and deferred commands
-// remain separate follow-up contracts.
+// Tina storage before step() returns; M11-A2 adds caller-buffer spatial queries.
+// Deferred commands remain a separate follow-up contract.
 class PhysicsWorld2D final {
 public:
     [[nodiscard]] static Core::Result<PhysicsWorld2D> Create(
@@ -44,6 +49,23 @@ public:
 
     // Borrowed until the next successful step(), shutdown(), move, or destroy.
     [[nodiscard]] Core::Result<PhysicsContactEvents2DView> contactEvents() const noexcept;
+
+    // Precise box-proxy overlap. Hits are sorted by body index then shape index.
+    // out may be empty; overflow is reported without heap growth.
+    [[nodiscard]] Core::Result<PhysicsQueryWriteResult2D> overlapAabb(
+        const PhysicsAabb2D& aabb,
+        const PhysicsQueryFilter2D& filter,
+        std::span<PhysicsOverlapHit2D> out) const noexcept;
+
+    // Multi-hit ray cast sorted by fraction, then body/shape index. Closest-only
+    // convenience returns the first hit after the same ordering rules.
+    [[nodiscard]] Core::Result<PhysicsQueryWriteResult2D> castRay(
+        const PhysicsRayCast2D& ray,
+        const PhysicsQueryFilter2D& filter,
+        std::span<PhysicsCastHit2D> out) const noexcept;
+    [[nodiscard]] Core::Result<PhysicsCastHit2D> castRayClosest(
+        const PhysicsRayCast2D& ray,
+        const PhysicsQueryFilter2D& filter) const noexcept;
 
     [[nodiscard]] Core::Result<PhysicsBodyState2D> bodyState(
         PhysicsBodyId body) const noexcept;

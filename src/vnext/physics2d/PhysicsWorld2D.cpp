@@ -300,6 +300,90 @@ struct PhysicsWorld2D::Impl final {
             hitOverflow};
     }
 
+    struct OverlapCollectContext final {
+        Impl* world = nullptr;
+        PhysicsOverlapHit2D* out = nullptr;
+        Core::usize capacity = 0;
+        Core::usize written = 0;
+        Core::usize totalFound = 0;
+    };
+
+    struct CastCollectContext final {
+        Impl* world = nullptr;
+        PhysicsCastHit2D* out = nullptr;
+        Core::usize capacity = 0;
+        Core::usize written = 0;
+        Core::usize totalFound = 0;
+    };
+
+    static bool collectOverlapHit(b2ShapeId shapeId, void* userContext)
+    {
+        auto* context = static_cast<OverlapCollectContext*>(userContext);
+        if (context == nullptr || context->world == nullptr) {
+            return false;
+        }
+        if (B2_IS_NULL(shapeId) || !b2Shape_IsValid(shapeId)) {
+            return true;
+        }
+        void* userData = b2Shape_GetUserData(shapeId);
+        if (userData == nullptr) {
+            return true;
+        }
+        auto* shapeRecord = static_cast<ShapeRecord*>(userData);
+        if (shapeRecord == nullptr
+            || !shapeRecord->id.hasValue()
+            || !context->world->shapes.contains(shapeRecord->id)
+            || !context->world->bodies.contains(shapeRecord->body)) {
+            return true;
+        }
+
+        ++context->totalFound;
+        if (context->written < context->capacity && context->out != nullptr) {
+            context->out[context->written++] = PhysicsOverlapHit2D{
+                shapeRecord->body,
+                shapeRecord->id};
+        }
+        return true;
+    }
+
+    static float collectCastHit(
+        b2ShapeId shapeId,
+        b2Vec2 point,
+        b2Vec2 normal,
+        float fraction,
+        void* userContext)
+    {
+        auto* context = static_cast<CastCollectContext*>(userContext);
+        if (context == nullptr || context->world == nullptr) {
+            return 0.0F;
+        }
+        if (B2_IS_NULL(shapeId) || !b2Shape_IsValid(shapeId)) {
+            return -1.0F;
+        }
+        void* userData = b2Shape_GetUserData(shapeId);
+        if (userData == nullptr) {
+            return -1.0F;
+        }
+        auto* shapeRecord = static_cast<ShapeRecord*>(userData);
+        if (shapeRecord == nullptr
+            || !shapeRecord->id.hasValue()
+            || !context->world->shapes.contains(shapeRecord->id)
+            || !context->world->bodies.contains(shapeRecord->body)) {
+            return -1.0F;
+        }
+
+        ++context->totalFound;
+        if (context->written < context->capacity && context->out != nullptr) {
+            context->out[context->written++] = PhysicsCastHit2D{
+                shapeRecord->body,
+                shapeRecord->id,
+                {point.x, point.y},
+                {normal.x, normal.y},
+                fraction};
+        }
+        return 1.0F;
+    }
+
     PhysicsWorld2DConfig config{};
     std::thread::id ownerThread = std::this_thread::get_id();
     std::pmr::memory_resource* resource = nullptr;
@@ -496,6 +580,89 @@ Core::Status validatePhysicsBoxShape2DDesc(const PhysicsBoxShape2DDesc& desc) no
     }
     return Core::success();
 }
+
+Core::Status validatePhysicsQueryFilter2D(const PhysicsQueryFilter2D& filter) noexcept
+{
+    if (filter.categoryBits == 0) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidQuery,
+            "Physics2D query filter categoryBits must be non-zero");
+    }
+    return Core::success();
+}
+
+Core::Status validatePhysicsAabb2D(const PhysicsAabb2D& aabb) noexcept
+{
+    if (!isFinite(aabb.lowerMeters)
+        || !isFinite(aabb.upperMeters)
+        || aabb.lowerMeters.x > aabb.upperMeters.x
+        || aabb.lowerMeters.y > aabb.upperMeters.y) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidQuery,
+            "Physics2D AABB must be finite with lower corner not above upper corner");
+    }
+    return Core::success();
+}
+
+Core::Status validatePhysicsRayCast2D(const PhysicsRayCast2D& ray) noexcept
+{
+    if (!isFinite(ray.originMeters) || !isFinite(ray.translationMeters)) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidQuery,
+            "Physics2D ray cast origin and translation must be finite");
+    }
+    if (ray.translationMeters.x == 0.0F && ray.translationMeters.y == 0.0F) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidQuery,
+            "Physics2D ray cast translation must be non-zero");
+    }
+    return Core::success();
+}
+
+namespace {
+
+[[nodiscard]] b2QueryFilter toBackendQueryFilter(const PhysicsQueryFilter2D& filter) noexcept
+{
+    b2QueryFilter backend = b2DefaultQueryFilter();
+    backend.categoryBits = filter.categoryBits;
+    backend.maskBits = filter.maskBits;
+    return backend;
+}
+
+[[nodiscard]] bool overlapHitLess(
+    const PhysicsOverlapHit2D& left,
+    const PhysicsOverlapHit2D& right) noexcept
+{
+    if (left.body.index() != right.body.index()) {
+        return left.body.index() < right.body.index();
+    }
+    if (left.shape.index() != right.shape.index()) {
+        return left.shape.index() < right.shape.index();
+    }
+    if (left.body.generation() != right.body.generation()) {
+        return left.body.generation() < right.body.generation();
+    }
+    return left.shape.generation() < right.shape.generation();
+}
+
+[[nodiscard]] bool castHitLess(const PhysicsCastHit2D& left, const PhysicsCastHit2D& right) noexcept
+{
+    if (left.fraction != right.fraction) {
+        return left.fraction < right.fraction;
+    }
+    if (left.body.index() != right.body.index()) {
+        return left.body.index() < right.body.index();
+    }
+    if (left.shape.index() != right.shape.index()) {
+        return left.shape.index() < right.shape.index();
+    }
+    if (left.body.generation() != right.body.generation()) {
+        return left.body.generation() < right.body.generation();
+    }
+    return left.shape.generation() < right.shape.generation();
+}
+
+} // namespace
 
 Core::Result<PhysicsWorld2D> PhysicsWorld2D::Create(
     PhysicsWorld2DConfig config,
@@ -1024,6 +1191,163 @@ Core::Result<PhysicsContactEvents2DView> PhysicsWorld2D::contactEvents() const n
         return Core::failure(status.error());
     }
     return m_impl->contactView();
+}
+
+Core::Result<PhysicsQueryWriteResult2D> PhysicsWorld2D::overlapAabb(
+    const PhysicsAabb2D& aabb,
+    const PhysicsQueryFilter2D& filter,
+    std::span<PhysicsOverlapHit2D> out) const noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = validatePhysicsAabb2D(aabb); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = validatePhysicsQueryFilter2D(filter); !status) {
+        return Core::failure(status.error());
+    }
+    if (!b2World_IsValid(m_impl->world)) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D backend world is invalid");
+    }
+
+    // Precise overlap uses a shape proxy matching the AABB extents, not broadphase-only.
+    const float halfX = 0.5F * (aabb.upperMeters.x - aabb.lowerMeters.x);
+    const float halfY = 0.5F * (aabb.upperMeters.y - aabb.lowerMeters.y);
+    const float centerX = 0.5F * (aabb.lowerMeters.x + aabb.upperMeters.x);
+    const float centerY = 0.5F * (aabb.lowerMeters.y + aabb.upperMeters.y);
+    b2ShapeProxy proxy{};
+    if (halfX <= 0.0F && halfY <= 0.0F) {
+        const b2Vec2 point{centerX, centerY};
+        proxy = b2MakeProxy(&point, 1, 0.0F);
+    } else {
+        const b2Polygon polygon = b2MakeOffsetBox(
+            (std::max)(halfX, 0.0F),
+            (std::max)(halfY, 0.0F),
+            {centerX, centerY},
+            b2Rot_identity);
+        proxy = b2MakeProxy(polygon.vertices, polygon.count, polygon.radius);
+    }
+
+    Impl::OverlapCollectContext context{
+        m_impl,
+        out.data(),
+        out.size(),
+        0,
+        0};
+    (void)b2World_OverlapShape(
+        m_impl->world,
+        &proxy,
+        toBackendQueryFilter(filter),
+        &Impl::collectOverlapHit,
+        &context);
+
+    if (context.written > 1) {
+        std::sort(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(context.written), overlapHitLess);
+    }
+
+    return PhysicsQueryWriteResult2D{
+        context.written,
+        context.totalFound,
+        context.totalFound > context.written};
+}
+
+Core::Result<PhysicsQueryWriteResult2D> PhysicsWorld2D::castRay(
+    const PhysicsRayCast2D& ray,
+    const PhysicsQueryFilter2D& filter,
+    std::span<PhysicsCastHit2D> out) const noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = validatePhysicsRayCast2D(ray); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = validatePhysicsQueryFilter2D(filter); !status) {
+        return Core::failure(status.error());
+    }
+    if (!b2World_IsValid(m_impl->world)) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D backend world is invalid");
+    }
+
+    Impl::CastCollectContext context{
+        m_impl,
+        out.data(),
+        out.size(),
+        0,
+        0};
+    (void)b2World_CastRay(
+        m_impl->world,
+        {ray.originMeters.x, ray.originMeters.y},
+        {ray.translationMeters.x, ray.translationMeters.y},
+        toBackendQueryFilter(filter),
+        &Impl::collectCastHit,
+        &context);
+
+    if (context.written > 1) {
+        std::sort(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(context.written), castHitLess);
+    }
+
+    return PhysicsQueryWriteResult2D{
+        context.written,
+        context.totalFound,
+        context.totalFound > context.written};
+}
+
+Core::Result<PhysicsCastHit2D> PhysicsWorld2D::castRayClosest(
+    const PhysicsRayCast2D& ray,
+    const PhysicsQueryFilter2D& filter) const noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = validatePhysicsRayCast2D(ray); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = validatePhysicsQueryFilter2D(filter); !status) {
+        return Core::failure(status.error());
+    }
+    if (!b2World_IsValid(m_impl->world)) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D backend world is invalid");
+    }
+
+    const b2RayResult closest = b2World_CastRayClosest(
+        m_impl->world,
+        {ray.originMeters.x, ray.originMeters.y},
+        {ray.translationMeters.x, ray.translationMeters.y},
+        toBackendQueryFilter(filter));
+    if (!closest.hit || B2_IS_NULL(closest.shapeId) || !b2Shape_IsValid(closest.shapeId)) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidQuery,
+            "Physics2D ray cast closest found no hit");
+    }
+    void* userData = b2Shape_GetUserData(closest.shapeId);
+    if (userData == nullptr) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D ray cast closest hit shape has no Tina user data");
+    }
+    auto* shapeRecord = static_cast<Impl::ShapeRecord*>(userData);
+    if (shapeRecord == nullptr
+        || !shapeRecord->id.hasValue()
+        || !m_impl->shapes.contains(shapeRecord->id)
+        || !m_impl->bodies.contains(shapeRecord->body)) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D ray cast closest hit shape is not registered");
+    }
+    return PhysicsCastHit2D{
+        shapeRecord->body,
+        shapeRecord->id,
+        {closest.point.x, closest.point.y},
+        {closest.normal.x, closest.normal.y},
+        closest.fraction};
 }
 
 Core::Result<PhysicsBodyState2D> PhysicsWorld2D::bodyState(
