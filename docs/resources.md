@@ -63,6 +63,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A22 已实现 bgfx Sprite2D 纹理采样管线（默认白纹理）；
   M10-A23 已实现 GPU Texture2D 上传 API 与按 spriteKey 绑定；
   M10-A24 已实现 `tina_sample_2d_catalog` Catalog→GPU 可见 Sprite 样例；
+  M10-A25 已实现有界 CPU Task/TaskGroup（可选 cpuWorkerCount）；
+  M10-A26 已实现 Tileset/TileMap cooked payload v1；
   完整正式 tina_sample_2d、CPU TaskGroup、cgltf 仍未实现。
 
 
