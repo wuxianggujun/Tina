@@ -1134,7 +1134,7 @@ public:
 | `extractVisibleTileChunks` / `collectChunkNonEmptyCells` | M10-A29 已实现 | Asset module public | 相机 AABB 可见 chunk + cell 枚举 | InvalidCatalogConfig / AllocationFailed |
 | `emitTileChunkSprites` / `emitVisibleTileMapSprites` | M10-A30 已实现 | Asset module public | TileChunk → RenderSprite2DInput 列表 | InvalidCatalogConfig / AllocationFailed |
 | `tina_sample_2d_tilemap` | M10-A31 已实现 | sample (Headless/Null) | TileMap emit + CharacterController smoke | sample JSON |
-| `tina_sample_2d_tilemap_bgfx` | M10-A32–A34 已实现 | sample (GLFW+bgfx[+Physics2D]) | Catalog TileMap + atlas + character + UI + optional crate | sample JSON |
+| `tina_sample_2d_tilemap_bgfx` | M10-A32–A35 已实现 | sample (GLFW+bgfx[+Physics2D][+FreeType]) | Catalog TileMap + atlas + character + UI/Text + optional crate | sample JSON |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |

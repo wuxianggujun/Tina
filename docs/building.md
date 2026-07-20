@@ -90,6 +90,10 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 # cmake --preset windows-msvc-vnext-bgfx-physics2d
 # cmake --build --preset windows-vnext-bgfx-physics2d-debug --target tina_sample_2d_tilemap_bgfx
 # out\build\windows-msvc-vnext-bgfx-physics2d\bin\Debug\tina_sample_2d_tilemap_bgfx.exe --frames=60 --frame-delay-ms=0
+# Combined product-2d (Physics2D + FreeType labels):
+# cmake --preset windows-msvc-vnext-bgfx-product-2d
+# cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d_tilemap_bgfx
+# out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d_tilemap_bgfx.exe --frames=60 --frame-delay-ms=0
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_tilemap.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_3d_extraction.exe --frames=300

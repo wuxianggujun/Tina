@@ -73,7 +73,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A32 已实现 `tina_sample_2d_tilemap_bgfx` Catalog→GPU 可见 TileMap + 角色；
   M10-A33 已实现同一样例 UI SolidQuad overlay 门禁；
   M10-A34 已实现 bgfx+Physics2D preset 与样例内 Tile static + dynamic crate；
-  完整正式 tina_sample_2d（中文 FreeType Label 等）、cgltf 仍未实现。
+  M10-A35 已实现样例中英 HUD Label 与可选 FreeType/`product-2d` preset；
+  完整正式 tina_sample_2d 命名门禁、input consumption、cgltf 仍未实现。
 
 
 ## 下一阶段契约

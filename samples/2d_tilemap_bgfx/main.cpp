@@ -29,6 +29,11 @@
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPaint.hpp>
+#include <tina/ui/UIText.hpp>
+#if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
+#include <tina/ui/UIContext.hpp>
+#include <tina/ui/text/FreeTypeTextRasterizerFactory.hpp>
+#endif
 
 #include "render/bgfx/BgfxRenderDevice.hpp"
 
@@ -37,6 +42,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <memory_resource>
@@ -80,6 +86,7 @@ struct LifecycleCounters final {
     u64 uiRootsCreated = 0;
     u64 uiPanelsCreated = 0;
     u64 uiRootsReleased = 0;
+    u64 uiTextLabelsCreated = 0;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     u64 physicsSteps = 0;
     u64 physicsStaticBodies = 0;
@@ -90,6 +97,7 @@ struct LifecycleCounters final {
 };
 
 inline constexpr u32 ExpectedUIPanelCount = 2;
+inline constexpr u32 ExpectedUITextLabelCount = 2;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
 inline constexpr u32 ExpectedPhysicsStaticBodies = ExpectedNonEmptyTiles;
 inline constexpr u32 ExpectedSpritesWithPhysics = ExpectedNonEmptyTiles + 2; // tiles + character + crate
@@ -624,9 +632,66 @@ class TileMapBgfxState final : public Tina::IGameState {
                 return status;
             }
         }
+
+        // HUD labels: English + Chinese. Without FreeType these paint as SolidQuad
+        // placeholder bars; with FreeType (TINA_SAMPLE_TILEMAP_FREETYPE) Desktop-style
+        // SourceHan injection yields real CJK glyphs.
+        struct LabelSpec final {
+            Tina::UI::UILayoutStyle layout{};
+            std::string_view text{};
+            Tina::UI::UITextStyle style{};
+        };
+        const std::array labels{
+            LabelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(28.0F), Tina::UI::UILayoutLength::Px(20.0F),
+                                             Tina::UI::UILayoutLength::Px(240.0F), Tina::UI::UILayoutLength::Px(28.0F)),
+                .text = "TileMap 2D",
+                .style =
+                    Tina::UI::UITextStyle{
+                        .logicalSize = 22.0F,
+                        .advanceScale = 0.65F,
+                        .lineHeightScale = 1.15F,
+                        .color = {.red = 120, .green = 240, .blue = 255, .alpha = 255},
+                    },
+            },
+            LabelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(28.0F), Tina::UI::UILayoutLength::Px(44.0F),
+                                             Tina::UI::UILayoutLength::Px(240.0F), Tina::UI::UILayoutLength::Px(28.0F)),
+                .text = "中文地图",
+                .style =
+                    Tina::UI::UITextStyle{
+                        .logicalSize = 22.0F,
+                        .advanceScale = 0.65F,
+                        .lineHeightScale = 1.15F,
+                        .color = {.red = 255, .green = 210, .blue = 80, .alpha = 255},
+                    },
+            },
+        };
+        for (const LabelSpec& labelSpec : labels)
+        {
+            auto label = tree->createLabel(root->rootNodeId());
+            if (!label)
+            {
+                return Tina::Core::failure(std::move(label.error()));
+            }
+            if (auto status = tree->setLayoutStyle(*label, labelSpec.layout); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setTextStyle(*label, labelSpec.style); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setText(*label, labelSpec.text); !status)
+            {
+                return status;
+            }
+        }
+
         uiRoot_ = std::move(*root);
         ++counters_->uiRootsCreated;
         counters_->uiPanelsCreated += panels.size();
+        counters_->uiTextLabelsCreated += labels.size();
         return Tina::Core::success();
     }
 
@@ -835,9 +900,37 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
     DeviceCapture* capture_ = nullptr;
 };
 
+#if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
+[[nodiscard]] std::shared_ptr<std::vector<std::byte>> loadFontFixtureBytes(const char* path)
+{
+    if (path == nullptr || path[0] == '\0')
+    {
+        return {};
+    }
+    std::ifstream input(path, std::ios::binary);
+    if (!input)
+    {
+        return {};
+    }
+    input.seekg(0, std::ios::end);
+    const auto size = static_cast<std::size_t>(input.tellg());
+    input.seekg(0, std::ios::beg);
+    auto bytes = std::make_shared<std::vector<std::byte>>(size);
+    if (size > 0)
+    {
+        input.read(reinterpret_cast<char*>(bytes->data()), static_cast<std::streamsize>(size));
+    }
+    if (!input)
+    {
+        return {};
+    }
+    return bytes;
+}
+#endif
+
 [[nodiscard]] Tina::EngineCompositionFactories createFactories(DeviceCapture& capture)
 {
-    return Tina::EngineCompositionFactories{
+    Tina::EngineCompositionFactories factories{
         .createMonotonicClock = []() -> Tina::Core::Result<std::unique_ptr<Tina::Core::IMonotonicClock>> {
             return std::unique_ptr<Tina::Core::IMonotonicClock>{std::make_unique<Tina::Core::SteadyMonotonicClock>()};
         },
@@ -876,13 +969,48 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
                     },
             },
     };
+
+#if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
+#if defined(TINA_SAMPLE_TILEMAP_FONT_PATH)
+    auto fontBytes = loadFontFixtureBytes(TINA_SAMPLE_TILEMAP_FONT_PATH);
+#else
+    std::shared_ptr<std::vector<std::byte>> fontBytes{};
+#endif
+    if (fontBytes && !fontBytes->empty())
+    {
+        factories.createPrimaryWindowUIContext =
+            [fontBytes](Tina::Platform::WindowId ownerWindow, const Tina::UI::UIContextCapacityConfig& capacities,
+                        std::pmr::memory_resource& resource) -> Tina::Core::Result<std::unique_ptr<Tina::UI::UIContext>> {
+                auto rasterizer = Tina::UI::createFreeTypeTextRasterizer({}, resource);
+                if (!rasterizer)
+                {
+                    return Tina::Core::failure(std::move(rasterizer.error()));
+                }
+                auto context =
+                    Tina::UI::UIContext::Create(ownerWindow, capacities, std::move(*rasterizer), resource);
+                if (!context)
+                {
+                    return Tina::Core::failure(std::move(context.error()));
+                }
+                const auto open =
+                    (*context)->openTextFont(std::span<const std::byte>(fontBytes->data(), fontBytes->size()));
+                if (!open)
+                {
+                    return Tina::Core::failure(std::move(open.error()));
+                }
+                return std::move(*context);
+            };
+    }
+#endif
+
+    return factories;
 }
 
 [[nodiscard]] Tina::EngineConfig createEngineConfig()
 {
     Tina::EngineConfig config = Tina::EngineConfig::Defaults();
     config.applicationName = "Tina TileMap Catalog 2D Sample";
-    config.primaryWindow.title = "Tina Catalog TileMap + Character + UI";
+    config.primaryWindow.title = "Tina Catalog TileMap + Character + UI + Text";
     config.primaryWindow.initialLogicalExtent = {960, 540};
     config.primaryWindow.initiallyVisible = true;
     config.renderSceneCapacities.spriteCapacity = 64;
@@ -931,7 +1059,8 @@ int main(int argc, char** argv)
               counters.lastTotalSprites == ExpectedSpritesWithPhysics && counters.controllerGroundedFrames > 0 &&
               counters.renderExtractions == counters.frameUpdates && counters.stateExits == 1 &&
               counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
-              counters.uiPanelsCreated == ExpectedUIPanelCount && counters.uiRootsReleased == 1 &&
+              counters.uiPanelsCreated == ExpectedUIPanelCount &&
+              counters.uiTextLabelsCreated == ExpectedUITextLabelCount && counters.uiRootsReleased == 1 &&
               *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     ok = ok && counters.physicsReady && counters.physicsStaticBodies == ExpectedPhysicsStaticBodies &&
@@ -947,6 +1076,7 @@ int main(int argc, char** argv)
                   << ",\"totalSprites\":" << counters.lastTotalSprites
                   << ",\"grounded\":" << counters.controllerGroundedFrames
                   << ",\"uiRoots\":" << counters.uiRootsCreated << ",\"uiPanels\":" << counters.uiPanelsCreated
+                  << ",\"uiLabels\":" << counters.uiTextLabelsCreated
                   << ",\"uiReleased\":" << counters.uiRootsReleased
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
                   << ",\"physicsSteps\":" << counters.physicsSteps
@@ -966,6 +1096,7 @@ int main(int argc, char** argv)
               << ",\"controllerGroundedFrames\":" << counters.controllerGroundedFrames
               << ",\"uiRootsCreated\":" << counters.uiRootsCreated
               << ",\"uiPanelsCreated\":" << counters.uiPanelsCreated
+              << ",\"uiTextLabelsCreated\":" << counters.uiTextLabelsCreated
               << ",\"uiRootsReleased\":" << counters.uiRootsReleased
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
               << ",\"physicsEnabled\":true"
@@ -975,6 +1106,11 @@ int main(int argc, char** argv)
               << ",\"lastDynamicY\":" << counters.lastDynamicY
 #else
               << ",\"physicsEnabled\":false"
+#endif
+#if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
+              << ",\"freetypeEnabled\":true"
+#else
+              << ",\"freetypeEnabled\":false"
 #endif
               << ",\"stateExits\":" << counters.stateExits
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns << ",\"exit\":\""

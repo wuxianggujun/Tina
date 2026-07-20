@@ -604,8 +604,10 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   JSON 门禁 `uiRootsCreated/uiPanelsCreated/uiRootsReleased`；
 - M10-A34 已完成 `windows-msvc-vnext-bgfx-physics2d` preset 与同一样例可选 Physics2D：
   TileMap static solid sync + 1 dynamic crate body/contact + crate sprite；
-  无 Physics 时样例仍可在纯 bgfx 图构建。仍非正式完整 `tina_sample_2d`
-  （无中文 FreeType Label / input consumption 完整产品门禁）；
+  无 Physics 时样例仍可在纯 bgfx 图构建；
+- M10-A35 已完成同一样例 HUD Label（`TileMap 2D` + `中文地图`）与可选 FreeType 注入；
+  新增 `windows-msvc-vnext-bgfx-product-2d`（bgfx+Physics2D+FreeType）组合 preset；
+  无 FreeType 时 Label 仍走 SolidQuad 占位。input consumption 完整产品门禁后置；
 - 完整 Cooker/cgltf 继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/

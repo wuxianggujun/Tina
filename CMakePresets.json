@@ -110,6 +110,17 @@
       }
     },
     {
+      "name": "windows-msvc-vnext-bgfx-product-2d",
+      "displayName": "Windows x64 vNext bgfx + Physics2D + FreeType UI product 2D",
+      "inherits": "windows-msvc-vnext-bgfx",
+      "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-bgfx-product-2d",
+      "cacheVariables": {
+        "TINA_BUILD_PHYSICS2D": "ON",
+        "TINA_BUILD_UI_FREETYPE": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tests;platform-glfw;physics2d;ui-freetype"
+      }
+    },
+    {
       "name": "windows-msvc-vnext-ui-freetype",
       "displayName": "Windows x64 vNext UI FreeType adapter (MSVC 2026 + C++23)",
       "inherits": "windows-msvc-vnext",
@@ -324,6 +335,12 @@
     {
       "name": "windows-vnext-bgfx-ui-freetype-debug",
       "configurePreset": "windows-msvc-vnext-bgfx-ui-freetype",
+      "configuration": "Debug",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vnext-bgfx-product-2d-debug",
+      "configurePreset": "windows-msvc-vnext-bgfx-product-2d",
       "configuration": "Debug",
       "jobs": 2
     },
