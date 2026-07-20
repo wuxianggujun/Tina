@@ -129,10 +129,11 @@ void writeSprite(const RenderSprite2DItem& sprite, std::span<BgfxSprite2DVertex>
     const float axisYx = -sine * halfHeight;
     const float axisYy = cosine * halfHeight;
 
+    // UV V is top=low / bottom=high to match the existing fixture convention (and flip tests).
     const float leftU = sprite.flipX ? sprite.u1 : sprite.u0;
     const float rightU = sprite.flipX ? sprite.u0 : sprite.u1;
-    const float topV = sprite.flipY ? sprite.v0 : sprite.v1;
-    const float bottomV = sprite.flipY ? sprite.v1 : sprite.v0;
+    const float topV = sprite.flipY ? sprite.v1 : sprite.v0;
+    const float bottomV = sprite.flipY ? sprite.v0 : sprite.v1;
     const u32 color = packAbgr(sprite);
 
     vertices[0] = BgfxSprite2DVertex{
