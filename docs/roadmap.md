@@ -528,6 +528,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   运行时 TileMapInstance 与 cgltf 仍后置；
 - M10-A28 已完成运行时 `TileMapInstance`：从 cooked Tileset/TileMap 构建、setTile/chunk revision、
   solid AABB 查询；chunk extraction/Render 与 cgltf 仍后置；
+- M10-A29 已完成 `IGridCollisionProvider`/`TileMapGridCollision`、`TileChunkView` 可见 chunk 提取与
+  非空 cell 枚举；Render packet/cgltf 仍后置；
 - 完整 Cooker/cgltf 继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/

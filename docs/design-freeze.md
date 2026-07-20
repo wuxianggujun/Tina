@@ -479,3 +479,6 @@ M10-A27：recipe 增加多行 `tileset`+`tile` 与 `tilemap`+`row` 内联语法�
 
 M10-A28：`TileMapInstance` 从 cooked TileMap+Tileset 复制 cells/material/UV；`setTile` 提升受影响
 chunk revision；`querySolidAabb` 查询 MaterialSolid cells。无 chunk extraction/Render packet。
+
+M10-A29：`IGridCollisionProvider` + `TileMapGridCollision` 适配器；`extractVisibleTileChunks` 相机
+AABB 裁剪并跳过空 chunk；`collectChunkNonEmptyCells` 枚举非空 cell。无 TileChunkRenderPacket/bgfx。

@@ -1130,6 +1130,8 @@ public:
 | `parseTilesetFromCooked` / `parseTileMapFromCooked` | M10-A26 已实现 | Asset module public | 类型化 Tileset/TileMap 视图 | CatalogEntryMismatch / payload 错误 |
 | recipe `tileset`/`tile`/`tilemap`/`row` | M10-A27 已实现 | CatalogCook / assetc | 内联 Tileset/TileMap 烹饪 | Invalid / payload 错误 |
 | `TileMapInstance` | M10-A28 已实现 | Asset module public | 可变地图 cells/chunk revision/solid 查询 | InvalidCatalogConfig / AllocationFailed |
+| `IGridCollisionProvider` / `TileMapGridCollision` | M10-A29 已实现 | Asset module public | 只读格子 solid/material 查询 | 同 TileMapInstance |
+| `extractVisibleTileChunks` / `collectChunkNonEmptyCells` | M10-A29 已实现 | Asset module public | 相机 AABB 可见 chunk + cell 枚举 | InvalidCatalogConfig / AllocationFailed |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |

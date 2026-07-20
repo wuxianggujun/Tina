@@ -78,6 +78,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A26 Tileset/TileMap payload | Debug C++23 | 26/26 format | write/parse/cooked round-trip；`tina_asset_format_tests` 26；asset 83 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A27 inline tileset/tilemap recipe | Debug C++23 | 84/84 asset | recipe tileset/tilemap→publish→typed validate→load parse；`tina_asset_tests` 84 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A28 TileMapInstance | Debug C++23 | 86/86 asset | Create/setTile/chunk revision/solid AABB；`tina_asset_tests` 86 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A29 chunk extract + grid collision | Debug C++23 | 88/88 asset | visible chunk cull/empty skip；grid solid query；`tina_asset_tests` 88 |
 
 
 
