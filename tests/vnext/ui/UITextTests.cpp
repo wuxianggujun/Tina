@@ -223,6 +223,7 @@ TEST(UITextTests, TextPlaceholderPaintEmitsPerCodepointSolidQuads)
     EXPECT_EQ(paint.entries()[0].node, label);
     EXPECT_EQ(paint.entries()[1].node, label);
     EXPECT_LT(paint.entries()[0].paintOrdinal, paint.entries()[1].paintOrdinal);
+    // D5: paint advances come from the context rasterizer (placeholder).
     EXPECT_FLOAT_EQ(paint.entries()[0].worldRect.width, 16.0F * 0.6F);
     EXPECT_FLOAT_EQ(
         paint.entries()[1].worldRect.x,
@@ -240,6 +241,52 @@ TEST(UITextTests, TextPlaceholderPaintEmitsPerCodepointSolidQuads)
     assertOk(updater.setTextStyle(label, style));
     assertOk(context->commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
     EXPECT_TRUE(context->committedPaint().empty());
+}
+
+TEST(UITextTests, TextPaintUsesRasterizerAdvancesForMultiLine)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+
+    auto context = createContext(
+        *windowResult,
+        UI::UIContextCapacityConfig{
+            .nodeCapacity = 16,
+            .rootCapacity = 1,
+            .paintSnapshotCapacity = 16,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle rootStyle{};
+    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
+
+    auto labelResult = updater.createLabel(root.rootNodeId());
+    ASSERT_TRUE(labelResult.has_value());
+    const UI::UINodeId label = *labelResult;
+    UI::UITextStyle style{};
+    style.color = {.red = 0, .green = 255, .blue = 0, .alpha = 255};
+    assertOk(updater.setTextStyle(label, style));
+    assertOk(updater.setText(label, "A\nBC"));
+    assertOk(context->commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
+
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    ASSERT_EQ(paint.size(), 3U);
+    EXPECT_EQ(paint.entries()[0].node, label);
+    EXPECT_EQ(paint.entries()[1].node, label);
+    EXPECT_EQ(paint.entries()[2].node, label);
+    // Second line starts at lineHeight below the first glyph.
+    EXPECT_FLOAT_EQ(
+        paint.entries()[1].worldRect.y,
+        paint.entries()[0].worldRect.y + 16.0F * 1.2F);
+    EXPECT_FLOAT_EQ(paint.entries()[1].worldRect.x, paint.entries()[0].worldRect.x);
+    EXPECT_FLOAT_EQ(
+        paint.entries()[2].worldRect.x,
+        paint.entries()[1].worldRect.x + paint.entries()[1].worldRect.width);
 }
 
 TEST(UITextTests, SameTextIsNoOpAndClearingTextShrinksAutoSize)

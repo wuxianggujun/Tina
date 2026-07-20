@@ -366,9 +366,11 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   `tina_ui_freetype_tests` 覆盖 factory/错误边界。
 - **已完成 M7-D4（UIContext 接入 rasterizer measure）**：`UIContext::Create` 默认创建 placeholder
   rasterizer 并 `openFace({})`；另提供注入 `std::unique_ptr<IUITextRasterizer>` 的 Create 重载。
-  `setText`/`setTextStyle` 经 rasterizer `measure` 更新 Auto 尺寸；paint 仍是 monospaced SolidQuad
-  fallback（未消费 coverage bitmap）。Glyph Atlas/GPU upload 后置。
-- **仍后置**：raster 结果驱动 paint/Atlas、cooked font fixture 与中文可见字形门禁；
+  `setText`/`setTextStyle` 经 rasterizer `measure` 更新 Auto 尺寸。
+- **已完成 M7-D5（paint 消费 rasterizer advances）**：committed paint 在有 face 时从
+  `IUITextRasterizer::raster` 拷贝 per-glyph advance，再按 UTF-8（含 `\n`）发 SolidQuad；无 face 时
+  回退 monospaced `logicalSize*advanceScale`。仍不上传 coverage、不建 Atlas、不发 Glyph DisplayList。
+- **仍后置**：Atlas generation/预算/retirement、cooked font fixture、中文可见字形门禁与 Glyph 命令；
 - 在已完成私有 `tina_render_bgfx` SolidQuad UI Pass 的基础上扩展 Image/Glyph 命令、Atlas texture upload
   与资源 pin；`tina_ui` 不链接 bgfx，也不暴露 view id/handle；
 - 使用版本化内置 Cooked Font/Texture fixture 形成中文 Label、Button、Modal 可运行样例；

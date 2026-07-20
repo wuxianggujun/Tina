@@ -634,6 +634,9 @@ struct UIContext::Impl final {
     usize textByteHighWater = 0;
     std::unique_ptr<IUITextRasterizer> textRasterizer;
     UIFontFaceId textFace{};
+    // Paint-local scratch: copies glyph advances out of a borrow-local raster
+    // batch so paint can walk UTF-8 (including newlines) without use-after-free.
+    std::pmr::vector<float> textPaintAdvanceScratch;
     std::pmr::vector<UIDirty> dirtyByIndex;
     std::pmr::vector<u8> dirtyQueuedByIndex;
     std::pmr::vector<UINodeId> dirtyQueue;
@@ -730,6 +733,7 @@ struct UIContext::Impl final {
           textStatesByIndex(&resource),
           textBytes(&resource),
           freeTextAllocations(&resource),
+          textPaintAdvanceScratch(&resource),
           dirtyByIndex(&resource),
           dirtyQueuedByIndex(&resource),
           dirtyQueue(&resource),
@@ -1867,10 +1871,10 @@ struct UIContext::Impl final {
         return rebuildCount;
     }
 
-    void appendTextPlaceholderPaints(
+    void appendTextGlyphPaints(
         std::pmr::vector<UICommittedPaintEntry>& output,
         const UICommittedLayoutEntry& layoutEntry,
-        u32& nextPaintOrdinal) const noexcept
+        u32& nextPaintOrdinal) noexcept
     {
         const u32 nodeIndex = layoutEntry.node.index();
         if (nodeIndex >= textStatesByIndex.size()
@@ -1883,18 +1887,34 @@ struct UIContext::Impl final {
         }
 
         const WidgetTextState& state = textStatesByIndex[nodeIndex];
-        const float advance =
+        const float fallbackAdvance =
             state.style.logicalSize * state.style.advanceScale;
         const float lineHeight =
             state.style.logicalSize * state.style.lineHeightScale;
-        if (!(std::isfinite(advance) && advance > 0.0F
+        if (!(std::isfinite(fallbackAdvance) && fallbackAdvance > 0.0F
               && std::isfinite(lineHeight) && lineHeight > 0.0F)) {
             return;
         }
 
         const std::string_view utf8 = textViewFor(nodeIndex);
+
+        // Optional per-drawable-codepoint advances from the context rasterizer.
+        // Copy out of the borrow-local raster batch before the next call. Coverage
+        // bitmaps are not uploaded yet; paint remains SolidQuad cells.
+        textPaintAdvanceScratch.clear();
+        if (textRasterizer && textFace.hasValue()) {
+            auto batch = textRasterizer->raster(textFace, utf8, state.style);
+            if (batch) {
+                textPaintAdvanceScratch.reserve(batch->glyphs.size());
+                for (const UITextGlyphRaster& glyph : batch->glyphs) {
+                    textPaintAdvanceScratch.push_back(glyph.advance);
+                }
+            }
+        }
+
         float cursorX = layoutEntry.worldRect.x;
         float cursorY = layoutEntry.worldRect.y;
+        usize glyphIndex = 0;
         usize index = 0;
         while (index < utf8.size()) {
             const auto first = static_cast<unsigned char>(utf8[index]);
@@ -1919,15 +1939,24 @@ struct UIContext::Impl final {
                 continue;
             }
 
-            const UILogicalRect glyphRect{
-                .x = normalizeFloat(cursorX),
-                .y = normalizeFloat(cursorY),
-                .width = normalizeFloat(advance),
-                .height = normalizeFloat(lineHeight),
-            };
+            float advance = fallbackAdvance;
+            if (glyphIndex < textPaintAdvanceScratch.size()) {
+                const float glyphAdvance = textPaintAdvanceScratch[glyphIndex];
+                if (std::isfinite(glyphAdvance) && glyphAdvance > 0.0F) {
+                    advance = glyphAdvance;
+                }
+                ++glyphIndex;
+            }
+
             output.push_back(UICommittedPaintEntry{
                 .node = layoutEntry.node,
-                .worldRect = glyphRect,
+                .worldRect =
+                    UILogicalRect{
+                        .x = normalizeFloat(cursorX),
+                        .y = normalizeFloat(cursorY),
+                        .width = normalizeFloat(advance),
+                        .height = normalizeFloat(lineHeight),
+                    },
                 .effectiveClip = layoutEntry.effectiveClip,
                 .paintOrdinal = nextPaintOrdinal,
                 .solidFill = color,
@@ -1940,7 +1969,7 @@ struct UIContext::Impl final {
 
     void buildCommittedPaint(
         std::pmr::vector<UICommittedPaintEntry>& output,
-        std::span<const UICommittedLayoutEntry> layoutEntries) const noexcept
+        std::span<const UICommittedLayoutEntry> layoutEntries) noexcept
     {
         output.clear();
         u32 nextPaintOrdinal = 1;
@@ -1961,7 +1990,7 @@ struct UIContext::Impl final {
                 });
                 ++nextPaintOrdinal;
             }
-            appendTextPlaceholderPaints(output, layoutEntry, nextPaintOrdinal);
+            appendTextGlyphPaints(output, layoutEntry, nextPaintOrdinal);
         }
     }
 
