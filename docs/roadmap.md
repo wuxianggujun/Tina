@@ -372,10 +372,12 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   回退 monospaced `logicalSize*advanceScale`。仍不上传 coverage、不建 Atlas、不发 Glyph DisplayList。
 - **已完成 M7-D6（FreeType + SourceHan 中文 fixture 门禁）**：`tina_ui_freetype_tests` 从
   `resources/fonts/SourceHanSansSC-Regular.otf` 读入 face bytes，`measure`/`raster` 验证「中文」
-  codepoint/advance/非空 R8 coverage。这是测试期 fixture 路径，不是 Runtime 产品加载源字体；
-  仍无 Atlas/GPU Glyph 命令/中文可见 Desktop 字形门禁。
-- **仍后置**：Atlas generation/预算/retirement、Image/Glyph DisplayList、cooked FontAsset（M10 协作）、
-  中文可见 Desktop 字形样例与 Modal/完整 Widget facade；
+  codepoint/advance/非空 R8 coverage。这是测试期 fixture 路径，不是 Runtime 产品加载源字体。
+- **已完成 M7-D7（CPU Glyph Atlas）**：`UIGlyphAtlas` 固定容量 R8 shelf pack、`UIGlyphId`
+  generation、insert/find/clear、0 尺寸 advance-only glyph、与 placeholder rasterizer coverage 联调。
+  无 GPU texture upload、无 Glyph DisplayList、未接 UIContext paint。
+- **仍后置**：Atlas→GPU upload、Image/Glyph DisplayList、UIContext 消费 placement、
+  cooked FontAsset（M10 协作）、中文可见 Desktop 字形样例与 Modal/完整 Widget facade；
 - 在已完成私有 `tina_render_bgfx` SolidQuad UI Pass 的基础上扩展 Image/Glyph 命令、Atlas texture upload
   与资源 pin；`tina_ui` 不链接 bgfx，也不暴露 view id/handle；
 - 使用版本化内置 Cooked Font/Texture fixture 形成中文 Label、Button、Modal 可运行样例；

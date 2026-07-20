@@ -14,6 +14,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPaint.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIText.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UIGlyphAtlas.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UITextRasterizer.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/InputRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UINodeId.hpp
@@ -25,6 +26,7 @@ add_library(tina_ui STATIC
     UIContext.cpp
     UIContextConfig.cpp
     UIText.cpp
+    UIGlyphAtlas.cpp
     UITextRasterizer.cpp
 )
 add_library(Tina::UI ALIAS tina_ui)
