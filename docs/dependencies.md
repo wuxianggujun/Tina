@@ -27,7 +27,7 @@
 | [Tracy 0.13.1](https://github.com/wolfpld/tracy) | 开发 Profile capture | vcpkg optional feature | `tina_profile_tracy` | 可选；发布和正式 bench 禁用 |
 | [cgltf v1.15](https://github.com/jkuhlmann/cgltf) | `tina_assetc` 解析 glTF | 固定单文件 + LICENSE/精确提交 | Cooker 源格式 adapter | 待接入 |
 | [GoogleTest 1.17.0](https://github.com/google/googletest/releases) | 单元/集成契约测试 | vcpkg `tests` feature | tests only | 固定；直接运行，不用 CTest；production manifest graph 不启用 |
-| Box2D 3.x | 唯一 2D Physics backend | vcpkg | `tina_physics2d` PRIVATE | 当前 Legacy 已依赖；vNext 产品接入 M11 |
+| Box2D 3.x | 唯一 2D Physics backend | vcpkg `physics2d` feature；Legacy 另由 `legacy` feature 持有 | `tina_physics2d` PRIVATE | M11-A0/A1 直接门禁已过（lifecycle + contact）；Query/产品接入后置 |
 | Jolt | 唯一 3D Physics backend | ADR 0010 + 接入时固定版本 | `tina_physics3d` | 未接入，真实3D玩法后置 |
 | EASTL/EABase | Legacy 容器 | 当前 submodule | Legacy only | vNext 禁止，零引用后删除 |
 
@@ -45,6 +45,8 @@
   Carbon 的副本；
 - Tracy 通过目标 vcpkg manifest feature `profile-tracy` 按需解析，由 Profile preset 启用；普通
   Debug/Release 和发行包不能因为未安装 Tracy 而 configure 失败；
+- Box2D 通过独立 `physics2d` feature 进入 vNext Physics 图；基础 `tests` Null 图不解析 Box2D，
+  Legacy 迁移期继续由自己的 `legacy` feature 持有同一固定包；
 - 生成包记录 Tina commit、vcpkg baseline、submodule commit、Cooked schema 和 shader ABI。
 
 ## CMake 可见性
@@ -57,6 +59,7 @@ TINA_PROFILE_TRACY_LOCKS=OFF|ON
 TINA_PROFILE_TRACY_MEMORY=OFF|ON
 TINA_BUILD_LEGACY=ON|OFF    # 迁移期默认 ON，覆盖门禁后翻为 OFF
 TINA_BUILD_TESTING=ON|OFF
+TINA_BUILD_PHYSICS2D=ON|OFF
 TINA_BUILD_BENCHMARKS=ON|OFF
 TINA_BUILD_SHADERS=ON|OFF
 ```

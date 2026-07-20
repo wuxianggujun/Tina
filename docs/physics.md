@@ -56,6 +56,44 @@ Box2D 的 `b2BodyId` 和 Jolt 类型只存在于各自实现层。创建、销�
   Adapter，退出时先停止调度再销毁 World，不能让 Box2D 隐式创建未知线程；
 - determinism 只在同后端、同版本、同架构和固定线程配置内承诺，不能默认宣称跨平台 bitwise deterministic。
 
+## M11-A0 Physics2D 首刀契约
+
+M11 的第一刀只建立可独立装配的 `Tina::Physics2D` 生命周期基础，不把尚未冻结的空间 Query
+和 deferred command ABI 混入同一提交：
+
+- `PhysicsWorld2D` 由 `Game2DState` 或 2D feature 持有，不进入 `EngineHost`，不依赖 Scene/ECS、Runtime、
+  Task、Asset 或 Render；
+- `tina_physics2d` PUBLIC 只依赖 Core，Box2D 3.x 始终为 PRIVATE 实现；基础 vNext Null 构建不解析、
+  不链接 Box2D；
+- World、Body 与 Shape 只允许 owner thread 访问；World move 后 owner 转移到执行 move 的线程，
+  `shutdown()` 在 owner thread 幂等，析构前必须已回到 owner thread；
+- `PhysicsBodyId` 与 `PhysicsShapeId` 分别复用 Core owner-aware `GenerationPool`，拒绝 invalid、stale 和
+  cross-world handle；它们是 runtime identity，不得持久化为 gameplay ID；
+- `PhysicsWorld2DConfig` 默认 body/shape 容量为1024/2048，硬上限为1,048,576/2,097,152；默认固定步长
+  为1/60秒，Box2D solver sub-step 默认为4、有效范围为1至64；所有容量在 Create 时固定；
+- `createBoxBody()` 原子创建一个 Body 与一个 Box Shape，任一步失败都逆序回滚且不发布半成品；首刀的
+  Body 只拥有这一 Shape，销毁 Body 同时使两个 generation handle 失效；
+- `step()` 不接收 render delta，只推进配置中的固定步长；Runtime 继续负责 accumulator 与单帧最多4个
+  fixed tick 的 catch-up policy；
+- Tina-owned registry/Pimpl 走调用者注入的 PMR；不调用进程全局 `b2SetAllocator()`；后续资源门禁将在
+  独立 Physics2D 测试进程中用 backend byte baseline 验收，A0 当前测试源码尚未覆盖该项。
+
+A0 直接门禁已在 Windows `windows-msvc-vnext-physics2d` Debug/Release 上通过
+`tina_physics2d_tests` 16/16（含 A1 contact 项）。
+
+## M11-A1 Contact Event 契约
+
+A1 在 `step()` 返回前把 Box2D transient contact 复制到 Create 时固定的 Tina storage：
+
+- 默认 begin/end/hit 容量为256/256/64，硬上限各 1,048,576；容量为0表示该通道永不发布；
+- `PhysicsBoxShape2DDesc::enableContactEvents` 默认 true，`enableHitEvents` 默认 false；
+- `contactEvents()` 返回 owner-thread borrowed view：有效期从成功 `step()` 到下一次 `step()`、
+  `shutdown()`、move 或销毁；不得越界保存 span；
+- begin/hit 只发布两侧 shape 仍可解析且未销毁的事件；end 允许 destroy tombstone，
+  `shape*Destroyed` 标记至少一侧已销毁，仍尽量保留 last-known Tina Body/Shape ID；
+- 各通道独立 overflow 标志与累计 dropped 计数；overflow 时只保留前缀，不扩容、不 heap fallback；
+- 不提供 solver callback 内重入入口；空间 Query 与 deferred command 仍后置。
+
 ## Tina 性能门禁
 
 M11 建立独立 `tina_physics2d_bench` 基线；只有实测证明单线程 step 超预算，才启用 Box2D worker

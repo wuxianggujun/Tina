@@ -17,7 +17,8 @@
   M8-A Scene World/Transform 另有独立 `tina_scene_tests`，M8-B 2D 与 M9-A 3D RenderScene extraction 共用独立
   `tina_render_scene_tests`；M10-A0 Cooked Header/Manifest wire-format 校验另有独立
   `tina_asset_format_tests`；M10-A1 owning CatalogSnapshot / DAG cycle 另有独立
-  `tina_asset_tests`。这些专项均不并入基础 `tina_tests`；
+  `tina_asset_tests`；启用 `TINA_BUILD_PHYSICS2D` 时 M11-A0 另生成 `tina_physics2d_tests`。这些专项均不并入
+  基础 `tina_tests`；
 - 构建完成后直接运行对应 GoogleTest executable，任一返回码非0即失败；
 - Visual Studio 多配置构建把测试运行时隔离到 `bin/<Config>`，禁止 Debug/Release GTest DLL 共用目录；
 - 同一 Visual Studio build tree 的 Debug/Release 构建串行执行，禁止并发启动两个 MSBuild 门禁；
@@ -162,6 +163,14 @@ M8-A 使用独立 `tina_scene_tests`，当前 19 项覆盖：World 固定容量�
 删除、非有限/零 quaternion、四元数归一化、overflow/shear 拒绝和 owner-thread 读写。该 target 只链接
 `Tina::Scene`/`Tina::Core`，不依赖 EnTT、GLM、GLFW 或 bgfx；
 它证明 Scene 基础生命周期，不证明 Scene component integration、Asset 或产品 2D 样例。
+
+M11-A0/A1 使用独立 `tina_physics2d_tests`。A0 覆盖 World/desc 输入预校验、单线程固定 step、
+Body/Shape generation owner/stale、跨 World 拒绝、Box body 原子创建与容量回滚、pose snapshot、
+幂等 shutdown、move、错线程拒绝、PMR 归零和 public header isolation。A1 追加 begin/end contact
+发布、destroy 后 end tombstone、begin overflow 标志与空 step 清空 view。该 target 只通过
+`Tina::Physics2D` 消费 Box2D 的 PRIVATE link dependency，不把 Box2D include 暴露给公共头。
+Windows `windows-msvc-vnext-physics2d` 上 Debug/Release 均为 **16/16**。Query、deferred command、
+backend byte baseline、benchmark 和正式 2D 产品门禁不在本切片证明范围内。
 
 M8-B 使用独立 `tina_render_scene_tests`，覆盖 RenderScene 固定容量分配失败、事务 rollback、Camera/Sprite
 输入校验、透明/隐藏剪枝、旋转保守裁剪、pixel snap、稳定 layer/order/entity/insertion 排序、300 帧零新增

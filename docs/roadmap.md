@@ -542,9 +542,13 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 
 ## M11 产品 2D、UI 与 Audio
 
+- M11-A0 已完成：独立 `tina_physics2d` 生命周期（World/owner thread、generation Body/Shape、原子 Box body、
+  固定 step、pose snapshot、shutdown）与 Windows Debug/Release `tina_physics2d_tests` 门禁；
+- M11-A1 已完成：固定容量 contact begin/end/hit 复制、destroy tombstone、通道 overflow 与
+  `contactEvents()` borrowed view；`tina_physics2d_tests` 16/16（Debug/Release）；
+- 后续仍待：空间 Query、deferred command、`tina_physics2d_bench`、Tile adapter 与正式 2D 产品接线；
 - 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
-- 建立 `tina_physics2d`，公共 header 只暴露 Tina PhysicsBodyId/PhysicsWorld2D/command/contact，Box2D 3.x 作为
-  PRIVATE 实现；完成创建/step/contact/query/关闭和资源归零门禁；
+- 继续扩展 `tina_physics2d` 公共 surface（Query/command），保持 Box2D 3.x 为 PRIVATE 实现；
 - 建立单线程 `tina_physics2d_bench` 基线；只有 step p99 超预算才在后续独立提交接入 Box2D
   worker callbacks，不把未验证并行作为 M11 正确性的前置条件；
 - 以当前游戏为正式 2D 产品门禁：Cooked TileMap/Tileset、Camera2D、chunk culling/dirty rebuild、

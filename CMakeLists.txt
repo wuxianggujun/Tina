@@ -58,6 +58,7 @@ option(TINA_BUILD_SHADERS "Build cooked runtime shaders with the bundled shader 
 option(TINA_BUILD_LEGACY "Build the existing Tina game/runtime during vNext migration" ON)
 option(TINA_BUILD_PLATFORM_GLFW "Build the private vNext GLFW platform backend" OFF)
 option(TINA_BUILD_RENDER_BGFX "Build the private vNext bgfx render backend" OFF)
+option(TINA_BUILD_PHYSICS2D "Build the optional vNext Box2D physics module" OFF)
 option(TINA_BUILD_BENCHMARKS "Build Tina benchmark executables" OFF)
 option(TINA_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
@@ -68,6 +69,14 @@ if (TINA_BUILD_PLATFORM_GLFW AND NOT TINA_BUILD_LEGACY)
         NOT "platform-glfw" IN_LIST VCPKG_MANIFEST_FEATURES)
         message(FATAL_ERROR
             "TINA_BUILD_PLATFORM_GLFW requires the vcpkg manifest feature 'platform-glfw'.")
+    endif ()
+endif ()
+
+if (TINA_BUILD_PHYSICS2D)
+    if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
+        NOT "physics2d" IN_LIST VCPKG_MANIFEST_FEATURES)
+        message(FATAL_ERROR
+            "TINA_BUILD_PHYSICS2D requires the vcpkg manifest feature 'physics2d'.")
     endif ()
 endif ()
 
@@ -186,6 +195,9 @@ add_subdirectory(src/platform "${TINA_VNEXT_BINARY_DIR}/platform")
 add_subdirectory(src/task "${TINA_VNEXT_BINARY_DIR}/task")
 add_subdirectory(src/render "${TINA_VNEXT_BINARY_DIR}/render")
 add_subdirectory(src/vnext/scene "${TINA_VNEXT_BINARY_DIR}/scene")
+if (TINA_BUILD_PHYSICS2D)
+    add_subdirectory(src/vnext/physics2d "${TINA_VNEXT_BINARY_DIR}/physics2d")
+endif ()
 add_subdirectory(src/vnext/asset_format "${TINA_VNEXT_BINARY_DIR}/asset_format")
 add_subdirectory(src/vnext/asset "${TINA_VNEXT_BINARY_DIR}/asset")
 add_subdirectory(src/vnext/ui "${TINA_VNEXT_BINARY_DIR}/ui")

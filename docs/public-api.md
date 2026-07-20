@@ -1136,6 +1136,7 @@ public:
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |
+| `Tina::Physics2D::PhysicsWorld2D` / `PhysicsBodyId` / `PhysicsShapeId` | M11-A0/A1 已实现直接门禁 | 可选 Physics2D module public；由 2D State/feature 持有 | move-only owner-thread World；固定容量 generation registry；`createBoxBody()` 原子发布 Body+BoxShape；固定步 `step()`；`contactEvents()` borrowed view；幂等 shutdown | InvalidConfiguration/WrongOwnerThread/Invalid*/Stale*/WrongWorld/CapacityExceeded/BackendFailure |
 | `LocalTransform` / `WorldTransform` | M8-A 已实现 | Scene public | World-owned POD；pointer query 只在 owner thread、下一次对应 mutation、entity destroy 或 World 析构前有效；world publication 由 `updateWorldTransforms()` barrier 完成 | non-finite/overflow/zero quaternion/unsupported TRS composition |
 | `RenderSceneWriter` | M8-B 2D + M9-A 3D extraction 已实现 | Game SDK phase capability | 只在当前 `extractRenderScene()` callback 内有效；不可复制、不可保存 | invalid input/capacity/sticky transaction failure |
 | `RenderSceneView` | M8-B 2D + M9-A 3D extraction 已实现 | Render SPI | borrowed fixed builder storage；成功 begin/rollback/replacement/move/destruction 后失效，begin 参数预检失败保留旧 publication；`RenderFrame` 中只到当前 submit 返回 | invalid transaction；backend 不得保留 borrow |
@@ -1155,9 +1156,23 @@ M6-A 已实现的通用 `GenerationPool` 使用强类型 Tag，并在所有构�
 语义属性，不保存 Render typed handle。普通 Game SDK 不提供 raw parts factory；handle 只能由所属
 registry 创建并返回。
 
+### M11-A0/A1 Physics2D Public Surface
+
+`include/tina/physics2d/` 公开 Tina 值类型、generation ID、错误码、Pimpl World 与 contact event 值类型/
+borrowed view。Box2D header、`b2WorldId`/`b2BodyId`/`b2ShapeId`、allocator 和 callback 均不可见。
+`PhysicsWorld2D::Create()` 在调用者提供的 PMR 上一次性建立固定 Body/Shape registry 与 begin/end/hit
+contact buffer；`createBoxBody()` 是当前唯一创建入口，返回同时拥有 Body/Shape ID 的小值。
+`bodyState()` 返回 owning snapshot，不发布 Box2D pointer 或 borrowed transform。
+
+`step()` 使用 Create 时冻结的 `fixedDeltaSeconds` 与 `solverSubStepCount`，因此调用者不能把 variable render
+delta 直接注入 solver。A1 在 `step()` 返回前复制 contact begin/end/hit；`contactEvents()` 在 owner
+thread 上返回 borrowed view，有效到下一次成功 `step()`、`shutdown()`、move 或销毁。end 事件可携带
+destroy tombstone（`shape*Destroyed`）。各通道独立 overflow 与 dropped 计数，不扩容。Query callback
+与 deferred command 在对应容量、排序、overflow 与失效规则写入本文件前不得加入公共头。
+
 ## 第三方与 native 零泄漏
 
-- Game SDK 与 Tina module public header 禁止 GLFW/bgfx/bx/bimg/FreeType/miniaudio/EnTT 类型；
+- Game SDK 与 Tina module public header 禁止 GLFW/bgfx/bx/bimg/FreeType/miniaudio/EnTT/Box2D 类型；
   Engine Module SPI 可公开纯 Tina `RenderDevice`/descriptor，但 Game SDK/Phase Context 不可见；
 - 游戏代码不获得 RenderDevice、native Window、GPU handle、ViewId 或 shader uniform；
 - Platform/Render 的 `NativeWindowSurfaceLease` 位于内部 integration SPI，不安装到 Game SDK；
