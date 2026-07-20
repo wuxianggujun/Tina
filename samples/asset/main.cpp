@@ -26,6 +26,12 @@ namespace {
 using Tina::Core::u32;
 using Tina::Core::u8;
 
+struct Options final {
+    u32 maxFrames = 60;
+    std::string catalogRoot;
+    bool deleteCatalogOnExit = true;
+};
+
 [[nodiscard]] Tina::Core::AssetId::Bytes idBytes(u8 seed)
 {
     Tina::Core::AssetId::Bytes bytes{};
@@ -54,56 +60,45 @@ void writeError(const Tina::Core::Error& error)
               << ",\"code\":" << error.code.value << ",\"message\":\"" << error.message << "\"}\n";
 }
 
-[[nodiscard]] Tina::Core::Result<u32> parseMaxFrames(int argc, char** argv)
+[[nodiscard]] Tina::Core::Result<Options> parseOptions(int argc, char** argv)
 {
-    constexpr std::string_view optionPrefix = "--frames=";
-    u32 frames = 60;
-    if (argc == 1)
+    Options options{};
+    for (int index = 1; index < argc; ++index)
     {
-        return frames;
-    }
-    if (argc != 2)
-    {
+        const std::string_view argument{argv[index]};
+        if (argument.starts_with("--frames="))
+        {
+            const auto valueText = argument.substr(std::string_view{"--frames="}.size());
+            u32 value = 0;
+            const auto [end, err] = std::from_chars(valueText.data(), valueText.data() + valueText.size(), value);
+            if (err != std::errc{} || end != valueText.data() + valueText.size() || value == 0)
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "--frames must be > 0");
+            }
+            options.maxFrames = value;
+            continue;
+        }
+        if (argument.starts_with("--catalog="))
+        {
+            options.catalogRoot.assign(argument.substr(std::string_view{"--catalog="}.size()));
+            options.deleteCatalogOnExit = false;
+            continue;
+        }
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
-                                   "usage: tina_sample_asset [--frames=N]");
+                                   "usage: tina_sample_asset [--frames=N] [--catalog=path]");
     }
-    const std::string_view argument{argv[1]};
-    if (!argument.starts_with(optionPrefix))
-    {
-        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "unsupported argument");
-    }
-    const auto valueText = argument.substr(optionPrefix.size());
-    u32 value = 0;
-    const auto [end, err] = std::from_chars(valueText.data(), valueText.data() + valueText.size(), value);
-    if (err != std::errc{} || end != valueText.data() + valueText.size() || value == 0)
-    {
-        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "--frames must be > 0");
-    }
-    return value;
+    return options;
 }
 
-} // namespace
-
-int main(int argc, char** argv)
+[[nodiscard]] Tina::Core::Status synthesizeCatalog(const std::filesystem::path& root, Tina::Core::AssetId textureId,
+                                                   Tina::Core::AssetId materialId)
 {
-    auto framesResult = parseMaxFrames(argc, argv);
-    if (!framesResult)
-    {
-        writeError(framesResult.error());
-        return 2;
-    }
-    const u32 maxFrames = *framesResult;
-
-    std::pmr::unsynchronized_pool_resource memory;
     constexpr std::array<std::byte, 4> Payload{std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0x40}};
-    const auto textureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
-    const auto materialId = *Tina::Core::AssetId::fromBytes(idBytes(2U));
     const std::array materialDeps{Tina::AssetFormat::CookedAssetWriteDependency{
         .assetId = textureId,
         .expectedKind = Tina::AssetFormat::AssetKind::Texture2D,
         .flags = Tina::AssetFormat::DependencyFlags::Required,
     }};
-
     auto textureBytes = Tina::AssetFormat::writeCookedAssetBytes(Tina::AssetFormat::CookedAssetWriteDesc{
         .assetKind = Tina::AssetFormat::AssetKind::Texture2D,
         .assetId = textureId,
@@ -119,8 +114,7 @@ int main(int argc, char** argv)
     });
     if (!textureBytes || !materialBytes)
     {
-        writeError(textureBytes ? materialBytes.error() : textureBytes.error());
-        return 1;
+        return Tina::Core::failure(textureBytes ? materialBytes.error() : textureBytes.error());
     }
     const auto payloadHash = *Tina::Core::digestContentHashV1(Payload);
     const std::array entries{
@@ -144,13 +138,8 @@ int main(int argc, char** argv)
     });
     if (!manifestBytes)
     {
-        writeError(manifestBytes.error());
-        return 1;
+        return Tina::Core::failure(std::move(manifestBytes.error()));
     }
-
-    const auto root = std::filesystem::temp_directory_path() / "tina_sample_asset_catalog";
-    std::error_code ec;
-    std::filesystem::remove_all(root, ec);
     writeBytes(root / "manifest.tmnft", *manifestBytes);
     writeBytes(root / std::filesystem::u8path(
                    Tina::AssetFormat::makeCookedArtifactPath(Tina::AssetFormat::AssetKind::Texture2D, textureId)
@@ -160,6 +149,40 @@ int main(int argc, char** argv)
                    Tina::AssetFormat::makeCookedArtifactPath(Tina::AssetFormat::AssetKind::Material, materialId)
                        ->view()),
                *materialBytes);
+    return Tina::Core::success();
+}
+
+} // namespace
+
+int main(int argc, char** argv)
+{
+    auto optionsResult = parseOptions(argc, argv);
+    if (!optionsResult)
+    {
+        writeError(optionsResult.error());
+        return 2;
+    }
+    const Options options = *optionsResult;
+
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto textureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
+    const auto materialId = *Tina::Core::AssetId::fromBytes(idBytes(2U));
+
+    std::filesystem::path root;
+    std::error_code ec;
+    if (options.catalogRoot.empty())
+    {
+        root = std::filesystem::temp_directory_path() / "tina_sample_asset_catalog";
+        std::filesystem::remove_all(root, ec);
+        if (const auto status = synthesizeCatalog(root, textureId, materialId); !status)
+        {
+            writeError(status.error());
+            return 1;
+        }
+    } else
+    {
+        root = std::filesystem::u8path(options.catalogRoot);
+    }
 
     auto taskSystem = Tina::Task::createBoundedTaskSystem(Tina::Task::TaskSystemCreateParams{
         .ioWorkerCount = 1,
@@ -224,13 +247,43 @@ int main(int argc, char** argv)
         writeError(catalog.error());
         return 1;
     }
+
+    // Prefer material id seed 2 when present; else first Material entry; else first entry.
+    Tina::Core::AssetId requestId = materialId;
+    if (!catalog->find(requestId))
+    {
+        requestId = {};
+        for (Tina::Core::u32 index = 0; index < catalog->entryCount(); ++index)
+        {
+            const auto entry = catalog->entry(index);
+            if (!entry)
+            {
+                continue;
+            }
+            if (entry->assetKind == Tina::AssetFormat::AssetKind::Material)
+            {
+                requestId = entry->assetId;
+                break;
+            }
+            if (!requestId)
+            {
+                requestId = entry->assetId;
+            }
+        }
+    }
+    if (!requestId)
+    {
+        std::cerr << "{\"status\":\"error\",\"message\":\"catalog has no entries\"}\n";
+        return 1;
+    }
+
     if (const auto status = system->bindCatalog(toUtf8(root), std::move(*catalog)); !status)
     {
         writeError(status.error());
         return 1;
     }
 
-    auto requested = system->request(std::array{materialId});
+    auto requested = system->request(std::array{requestId});
     if (!requested)
     {
         writeError(requested.error());
@@ -240,7 +293,7 @@ int main(int argc, char** argv)
     u32 frames = 0;
     u32 pumps = 0;
     bool gpuReady = false;
-    for (; frames < maxFrames; ++frames)
+    for (; frames < options.maxFrames; ++frames)
     {
         auto stats = system->pump(4);
         if (!stats)
@@ -259,10 +312,13 @@ int main(int argc, char** argv)
 
     if (!gpuReady)
     {
-        std::cerr << "{\"status\":\"error\",\"message\":\"material did not reach ReadyGpu within frame budget\","
+        std::cerr << "{\"status\":\"error\",\"message\":\"asset did not reach ReadyGpu within frame budget\","
                   << "\"frames\":" << frames << "}\n";
         (*taskSystem)->shutdownAndJoin();
-        std::filesystem::remove_all(root, ec);
+        if (options.deleteCatalogOnExit)
+        {
+            std::filesystem::remove_all(root, ec);
+        }
         return 1;
     }
 
@@ -271,24 +327,33 @@ int main(int argc, char** argv)
     {
         writeError(lease.error());
         (*taskSystem)->shutdownAndJoin();
-        std::filesystem::remove_all(root, ec);
+        if (options.deleteCatalogOnExit)
+        {
+            std::filesystem::remove_all(root, ec);
+        }
         return 1;
     }
 
-    const auto texture = system->find(textureId);
-    const bool textureGpu = texture && system->isGpuReady(*texture);
+    // Unload to exercise retirement ledger; lease still holds until scope end, so release first.
+    lease = Tina::Asset::AssetLease{};
+    const auto unloaded = system->unload((*requested)[0]);
+    const auto retirement = system->retirementStats();
 
     (*taskSystem)->shutdownAndJoin();
-    std::filesystem::remove_all(root, ec);
+    if (options.deleteCatalogOnExit)
+    {
+        std::filesystem::remove_all(root, ec);
+    }
 
     std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_asset\""
               << ",\"frames\":" << frames << ",\"pumps\":" << pumps
-              << ",\"materialGpuReady\":true"
-              << ",\"textureGpuReady\":" << (textureGpu ? "true" : "false")
+              << ",\"requestGpuReady\":true"
               << ",\"storeActive\":" << system->store().activeCount()
-              << ",\"leaseHeld\":true"
+              << ",\"unloadOk\":" << (unloaded ? "true" : "false")
+              << ",\"retirementReleased\":" << retirement.released
+              << ",\"retirementLive\":" << retirement.live
               << ",\"task\":\"bounded_io\""
               << ",\"upload\":\"null_ledger\""
-              << ",\"writer\":\"asset_format_write\"}\n";
+              << ",\"catalog\":\"" << (options.catalogRoot.empty() ? "synthetic" : "external") << "\"}\n";
     return 0;
 }

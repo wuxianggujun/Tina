@@ -8,8 +8,9 @@
 namespace Tina::Asset {
 
 AssetGpuUploadCoordinator::AssetGpuUploadCoordinator(AssetStore& store, Render::NullUploadLedger& ledger,
-                                                     AssetGpuUploadConfig config) noexcept
-    : m_store(&store), m_ledger(&ledger), m_config(config)
+                                                     AssetGpuUploadConfig config,
+                                                     AssetRetirementLedger* retirement) noexcept
+    : m_store(&store), m_ledger(&ledger), m_retirement(retirement), m_config(config)
 {
 }
 
@@ -51,7 +52,6 @@ Core::Result<AssetGpuUploadStats> AssetGpuUploadCoordinator::pumpUploads()
         submitBudget = static_cast<Core::u32>(m_readyCpuQueue.size());
     }
 
-    // Submit ReadyCpu → UploadQueued + ledger ticket.
     while (stats.submitted < submitBudget && !m_readyCpuQueue.empty())
     {
         const auto handle = m_readyCpuQueue.front();
@@ -73,23 +73,16 @@ Core::Result<AssetGpuUploadStats> AssetGpuUploadCoordinator::pumpUploads()
             return Core::failure(std::move(beginStatus.error()).withContext("AssetGpuUpload", "beginUpload"));
         }
 
-        // Stage cooked payload bytes (header+payload file). Null ledger owns the copy.
         auto ticket = m_ledger->submit(Render::UploadSubmitParams{
             .bytes = file->bytes(),
             .userTag = handle.id.index(),
         });
         if (!ticket)
         {
-            // Roll back to ReadyCpu so caller can retry later.
-            // beginUpload already moved to UploadQueued; failGpu marks Failed — prefer ReadyCpu retry:
-            // Use failGpu then we lose ReadyCpu. Better: complete is not reversible without API.
-            // For budget/full ledger: leave UploadQueued is wrong without ticket.
-            // Mark Failed so state is consistent; caller can unload/retry.
             (void)m_store->failGpu(handle);
             ++stats.failed;
             if (ticket.error().code == Render::RenderErrorCode::UploadLedgerFull)
             {
-                // Put remaining ReadyCpu back — this one failed.
                 break;
             }
             continue;
@@ -122,28 +115,50 @@ Core::Result<AssetGpuUploadStats> AssetGpuUploadCoordinator::pumpUploads()
         }
         if (ticketState == Render::UploadTicketState::Ready)
         {
-            auto gpuStatus = m_store->completeGpu(it->handle);
-            if (!gpuStatus)
+            // completeGpu is idempotent-friendly: only transition UploadQueued → ReadyGpu once.
+            if (m_store->state(it->handle) == AssetLogicalState::UploadQueued)
             {
-                return Core::failure(std::move(gpuStatus.error()).withContext("AssetGpuUpload", "completeGpu"));
+                auto gpuStatus = m_store->completeGpu(it->handle);
+                if (!gpuStatus)
+                {
+                    return Core::failure(std::move(gpuStatus.error()).withContext("AssetGpuUpload", "completeGpu"));
+                }
+                ++stats.becameGpuReady;
             }
-            ++stats.becameGpuReady;
             if (m_config.retireOnGpuReady)
             {
                 (void)m_ledger->retire(it->ticket);
+                if (m_retirement != nullptr)
+                {
+                    m_retirement->markReleased(it->handle);
+                }
+                it = m_pending.erase(it);
+            } else
+            {
+                // Keep ticket until cancelUpload/explicit retire (real fence backends).
+                ++it;
             }
-            it = m_pending.erase(it);
             continue;
         }
         if (ticketState == Render::UploadTicketState::Failed)
         {
-            (void)m_store->failGpu(it->handle);
-            ++stats.failed;
+            if (m_store->state(it->handle) == AssetLogicalState::UploadQueued)
+            {
+                (void)m_store->failGpu(it->handle);
+                ++stats.failed;
+            }
             if (m_config.retireOnGpuReady)
             {
                 (void)m_ledger->retire(it->ticket);
+                if (m_retirement != nullptr)
+                {
+                    m_retirement->markReleased(it->handle);
+                }
+                it = m_pending.erase(it);
+            } else
+            {
+                ++it;
             }
-            it = m_pending.erase(it);
             continue;
         }
         ++it;
@@ -152,6 +167,62 @@ Core::Result<AssetGpuUploadStats> AssetGpuUploadCoordinator::pumpUploads()
     stats.pendingTickets = static_cast<Core::u32>(m_pending.size());
     stats.readyCpuRemaining = static_cast<Core::u32>(m_readyCpuQueue.size());
     return stats;
+}
+
+Core::Status AssetGpuUploadCoordinator::cancelUpload(AssetHandle handle) noexcept
+{
+    m_readyCpuQueue.erase(std::remove(m_readyCpuQueue.begin(), m_readyCpuQueue.end(), handle), m_readyCpuQueue.end());
+
+    for (auto it = m_pending.begin(); it != m_pending.end(); ++it)
+    {
+        if (it->handle != handle)
+        {
+            continue;
+        }
+        const auto assetId = m_store->assetId(handle);
+        if (m_retirement != nullptr)
+        {
+            m_retirement->enqueueDestroy(handle, assetId, it->ticket);
+            m_retirement->markRetiring(handle);
+        }
+        // Free staging for Pending/Ready/Failed tickets.
+        const auto ticketState = m_ledger->state(it->ticket);
+        if (ticketState == Render::UploadTicketState::Pending)
+        {
+            (void)m_ledger->poll(it->ticket);
+        }
+        if (m_ledger->state(it->ticket) == Render::UploadTicketState::Ready ||
+            m_ledger->state(it->ticket) == Render::UploadTicketState::Failed)
+        {
+            (void)m_ledger->retire(it->ticket);
+        }
+        if (m_retirement != nullptr)
+        {
+            m_retirement->markReleased(handle);
+        }
+        m_pending.erase(it);
+        return Core::success();
+    }
+
+    if (m_retirement != nullptr)
+    {
+        // No outstanding ticket: logical unload only.
+        m_retirement->enqueueDestroy(handle, m_store->assetId(handle), {});
+        m_retirement->markReleased(handle);
+    }
+    return Core::success();
+}
+
+std::optional<Render::UploadTicketId> AssetGpuUploadCoordinator::pendingTicket(AssetHandle handle) const noexcept
+{
+    for (const auto& pending : m_pending)
+    {
+        if (pending.handle == handle)
+        {
+            return pending.ticket;
+        }
+    }
+    return std::nullopt;
 }
 
 Core::u32 AssetGpuUploadCoordinator::trackedCount() const noexcept

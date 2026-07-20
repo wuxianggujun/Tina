@@ -3,6 +3,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetStore.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetSystem.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetGpuUpload.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetRetirement.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogFile.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogLoadOrder.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogLoadPlan.hpp
@@ -21,6 +22,7 @@ add_library(tina_asset STATIC
     AssetStore.cpp
     AssetSystem.cpp
     AssetGpuUpload.cpp
+    AssetRetirement.cpp
     CatalogFile.cpp
     CatalogLoadOrder.cpp
     CatalogLoadPlan.cpp

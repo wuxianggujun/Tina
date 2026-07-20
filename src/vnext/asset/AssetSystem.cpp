@@ -40,7 +40,8 @@ AssetSystem::AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std
 {
     if (m_uploadLedger != nullptr)
     {
-        m_gpuUpload = std::make_unique<AssetGpuUploadCoordinator>(m_store, *m_uploadLedger, m_gpuUploadConfig);
+        m_gpuUpload =
+            std::make_unique<AssetGpuUploadCoordinator>(m_store, *m_uploadLedger, m_gpuUploadConfig, &m_retirement);
     }
 }
 
@@ -54,11 +55,12 @@ AssetSystem::AssetSystem(AssetSystem&& other) noexcept
       m_catalogRoot(std::move(other.m_catalogRoot)), m_index(std::move(other.m_index)),
       m_queue(std::move(other.m_queue)), m_inFlight(other.m_inFlight.load(std::memory_order_relaxed))
 {
-    // Rebuild coordinator against this->m_store (moved-from coordinator still pointed at old store).
+    // Rebuild coordinator against this->m_store and this->m_retirement.
     other.m_gpuUpload.reset();
     if (m_uploadLedger != nullptr)
     {
-        m_gpuUpload = std::make_unique<AssetGpuUploadCoordinator>(m_store, *m_uploadLedger, m_gpuUploadConfig);
+        m_gpuUpload =
+            std::make_unique<AssetGpuUploadCoordinator>(m_store, *m_uploadLedger, m_gpuUploadConfig, &m_retirement);
     }
     other.m_memoryResource = nullptr;
     other.m_taskSystem = nullptr;
@@ -168,6 +170,16 @@ Core::u32 AssetSystem::inFlightCount() const noexcept
 bool AssetSystem::hasGpuUpload() const noexcept
 {
     return m_gpuUpload != nullptr;
+}
+
+const AssetRetirementLedger& AssetSystem::retirement() const noexcept
+{
+    return m_retirement;
+}
+
+AssetRetirementStats AssetSystem::retirementStats() const noexcept
+{
+    return m_retirement.stats();
 }
 
 std::optional<AssetHandle> AssetSystem::find(Core::AssetId assetId) const noexcept
@@ -808,6 +820,17 @@ Core::Status AssetSystem::unload(AssetHandle handle) noexcept
             ++it;
         }
     }
+
+    // Retire outstanding upload staging before/while logical unload.
+    if (m_gpuUpload != nullptr)
+    {
+        (void)m_gpuUpload->cancelUpload(handle);
+    } else
+    {
+        m_retirement.enqueueDestroy(handle, m_store.assetId(handle), {});
+        m_retirement.markReleased(handle);
+    }
+
     const auto status = m_store.unload(handle);
     if (status && m_store.state(handle) == AssetLogicalState::Unloaded)
     {

@@ -4,6 +4,7 @@ set(TINA_ASSET_TEST_SOURCES
     AssetSystemPumpTests.cpp
     AssetSystemAsyncPumpTests.cpp
     AssetGpuUploadTests.cpp
+    AssetRetirementTests.cpp
     AssetSystemGpuPipelineTests.cpp
     CatalogSnapshotTests.cpp
     CatalogLoadOrderTests.cpp
@@ -20,6 +21,7 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/AssetStoreHeader.cpp
     header_isolation/AssetSystemHeader.cpp
     header_isolation/AssetGpuUploadHeader.cpp
+    header_isolation/AssetRetirementHeader.cpp
     header_isolation/CatalogFileHeader.cpp
     header_isolation/CatalogLoadOrderHeader.cpp
     header_isolation/CatalogLoadPlanHeader.cpp

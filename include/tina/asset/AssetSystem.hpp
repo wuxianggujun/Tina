@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/asset/AssetGpuUpload.hpp>
+#include <tina/asset/AssetRetirement.hpp>
 #include <tina/asset/AssetStore.hpp>
 #include <tina/asset/CatalogLoadPlan.hpp>
 #include <tina/asset/CatalogSnapshot.hpp>
@@ -79,6 +80,8 @@ class AssetSystem final {
     [[nodiscard]] Core::u32 pendingCount() const noexcept;
     [[nodiscard]] Core::u32 inFlightCount() const noexcept;
     [[nodiscard]] bool hasGpuUpload() const noexcept;
+    [[nodiscard]] const AssetRetirementLedger& retirement() const noexcept;
+    [[nodiscard]] AssetRetirementStats retirementStats() const noexcept;
 
     [[nodiscard]] std::optional<AssetHandle> find(Core::AssetId assetId) const noexcept;
 
@@ -145,6 +148,7 @@ class AssetSystem final {
     Render::NullUploadLedger* m_uploadLedger = nullptr;
     AssetGpuUploadConfig m_gpuUploadConfig{};
     std::unique_ptr<AssetGpuUploadCoordinator> m_gpuUpload;
+    AssetRetirementLedger m_retirement{};
     bool m_autoGpuUpload = true;
     CatalogSnapshot m_catalog{};
     std::pmr::string m_catalogRoot;

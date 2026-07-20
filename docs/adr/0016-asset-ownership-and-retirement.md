@@ -2,8 +2,8 @@
 
 - 状态：Accepted
 - 日期：2026-07-16
-- Accepted：2026-07-20（M10-A3 CPU 侧弱 Handle/强 Lease 首切片落地；GPU UploadTicket/FramePin/
-  physical retirement ledger 仍按后续切片实施）
+- Accepted：2026-07-20（M10-A3 CPU 侧弱 Handle/强 Lease 首切片落地；M10-A7/A8 Null UploadTicket；
+  M10-A13 AssetRetirementLedger + unload cancelUpload/retire。bgfx fence/FramePin 仍后置）
 
 ## 背景
 

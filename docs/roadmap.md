@@ -496,7 +496,9 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - M10-A11 已完成 `writeCookedAssetBytes`/`writeCookedManifestBytes` 最小 wire writer 与 round-trip；
 - M10-A12 已完成 `Core::writeFile` 原子写、`publishCatalogPackage`、最小 `tina_assetc` fixture cooker
   （Texture2D+Material 包 → validate）；仍无 cgltf/完整 glTF import；
-- 完整 Cooker/cgltf、CPU TaskGroup、bgfx UploadTicket 接线继续后置；
+- M10-A13 已完成 `AssetRetirementLedger`（DestroyQueued/Retiring/Released）与 unload 时
+  UploadTicket cancel/retire；`tina_sample_asset --catalog=` 消费 `tina_assetc` 产物；
+- 完整 Cooker/cgltf、CPU TaskGroup、bgfx 真实 UploadTicket 接线继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；

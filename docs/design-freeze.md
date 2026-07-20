@@ -425,3 +425,7 @@ AssetId 排序校验、与 parse 对称。完整 Cooker/cgltf/atomic publish 仍
 
 M10-A12：`Core::writeFile`（atomic temp+rename）、`publishCatalogPackage`（objects 先写、manifest 后写）、
 最小 `tina_assetc` fixture cooker。完整 glTF/cgltf import 仍后置。
+
+M10-A13：`AssetRetirementLedger` 记录 DestroyQueued/Retiring/Released；`AssetSystem::unload` 经
+`cancelUpload` 释放 outstanding UploadTicket staging；`retireOnGpuReady=false` 时 ticket 可显式
+cancel。`tina_sample_asset --catalog=` 加载外部包并验证 unload/retirement。bgfx fence 仍后置。
