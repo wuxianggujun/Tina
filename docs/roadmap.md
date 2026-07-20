@@ -402,10 +402,13 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - **已完成 M7-E1（GLFW standard Gamepad sample/diff）**：`tina_platform_glfw` 每帧
   `glfwGetGamepadState` 采样 standard mapping；connect 发 `GamepadConnectedEvent`，disconnect 先
   `InputCancelTransition(DeviceDisconnected)` 再 `GamepadDisconnectedEvent` 并 `erase` generation；
-  button/axis 仅在采样差时发 transition；dense `setGamepadSnapshots` 替代原先恒空。回滞/重复/
-  Accept/Cancel UI 导航与 UI claim producer 仍后置。
+  button/axis 仅在采样差时发 transition；dense `setGamepadSnapshots` 替代原先恒空。
+- **已完成 M7-E2（Button Keyboard/Gamepad Accept 默认激活）**：Primary Pointer arm 同时写入
+  `defaultActionFocusButton`；`UIContext::routeDefaultActionActivate` 支持 Keyboard/Gamepad source；
+  Runtime `UIInputRouteProducer` 对 Enter/Space/KeypadEnter 与 Gamepad South Down 调用并消费
+  transition。无完整 Focus Scope/Tab 导航、无方向键、无 IME、无摇杆回滞/长按重复。
 - **仍后置**：Windows IME 私有 IMM32 adapter；Focus/Capture/composition 取消与窗口销毁顺序；
-  Gamepad 回滞/重复/Accept/Cancel；100%/150%/200% DPI 产品门禁与资源回收专项。
+  Gamepad 回滞/重复与完整 Accept/Cancel 导航；100%/150%/200% DPI 产品门禁与资源回收专项。
 
 ## M8 Scene 与 2D 垂直切片
 

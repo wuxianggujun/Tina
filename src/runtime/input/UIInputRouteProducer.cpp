@@ -326,6 +326,61 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             continue;
         }
 
+        // Keyboard Accept (Enter/Space) and Gamepad South Accept activate the
+        // Button that owns default-action focus (pointer-arm sets it).
+        if (const auto* key =
+                std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
+            key != nullptr
+            && key->window == context->ownerWindow()
+            && key->state == Platform::DigitalTransition::Down
+            && (key->key == Platform::Key::Enter
+                || key->key == Platform::Key::Space
+                || key->key == Platform::Key::KeypadEnter))
+        {
+            auto activate = context->routeDefaultActionActivate(
+                platformFrame.id(),
+                transitions[ordinal].sequence,
+                UI::UIButtonActivationSource::Keyboard);
+            if (!activate)
+            {
+                Core::Error error = std::move(activate.error());
+                error.addContext("UIInputRouteProducer::produce(keyboard-accept)");
+                return Core::failure(std::move(error));
+            }
+            if (activate->consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+            }
+            continue;
+        }
+        if (const auto* gamepad =
+                std::get_if<Platform::GamepadButtonTransition>(&transitions[ordinal].payload);
+            gamepad != nullptr
+            && gamepad->routedWindow == context->ownerWindow()
+            && gamepad->state == Platform::DigitalTransition::Down
+            && gamepad->button == Platform::GamepadButton::South)
+        {
+            auto activate = context->routeDefaultActionActivate(
+                platformFrame.id(),
+                transitions[ordinal].sequence,
+                UI::UIButtonActivationSource::Gamepad);
+            if (!activate)
+            {
+                Core::Error error = std::move(activate.error());
+                error.addContext("UIInputRouteProducer::produce(gamepad-accept)");
+                return Core::failure(std::move(error));
+            }
+            if (activate->consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+            }
+            continue;
+        }
+
         const std::optional<UI::UIPointerInputEvent> input =
             makePointerInput(platformFrame.id(), ordinal, transitions[ordinal]);
         if (!input.has_value())

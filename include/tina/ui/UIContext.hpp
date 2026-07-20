@@ -291,6 +291,17 @@ public:
     // Window without synthesizing an Up event or invoking a Button action.
     [[nodiscard]] Core::Status cancelPointerInteraction(
         Platform::WindowId routedWindow);
+    // Activates the default-focused Button (set when Primary Pointer arms a
+    // Button). Used for keyboard Enter/Space and Gamepad South Accept.
+    // Returns consumed=true when an action was invoked or the key was claimed.
+    struct UIDefaultActionResult final {
+        bool consumed = false;
+        bool activated = false;
+    };
+    [[nodiscard]] Core::Result<UIDefaultActionResult> routeDefaultActionActivate(
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        UIButtonActivationSource source);
     [[nodiscard]] UIContextStatistics statistics() const noexcept;
     [[nodiscard]] usize liveNodeCount() const noexcept;
     [[nodiscard]] usize liveRootCount() const noexcept;

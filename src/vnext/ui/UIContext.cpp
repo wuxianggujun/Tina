@@ -713,6 +713,9 @@ struct UIContext::Impl final {
     bool reclaimingInactiveButtonActions = false;
     UINodeId armedPrimaryButton{};
     bool armedPrimaryButtonPressed = false;
+    // Last Button that received Primary Pointer arm. Keyboard/Gamepad Accept
+    // activates this node without requiring a live pointer press.
+    UINodeId defaultActionFocusButton{};
 
     Impl(
         Platform::WindowId owner,
@@ -2453,6 +2456,11 @@ struct UIContext::Impl final {
         armedPrimaryButtonPressed = false;
     }
 
+    void clearDefaultActionFocus() noexcept
+    {
+        defaultActionFocusButton = {};
+    }
+
     void recycleButtonAction(u32 actionIndex) noexcept
     {
         if (actionIndex >= buttonActions.size()) {
@@ -2550,6 +2558,9 @@ struct UIContext::Impl final {
         const UINodeId node = idForIndex(nodeIndex);
         if (armedPrimaryButton == node) {
             clearArmedPrimaryButton();
+        }
+        if (defaultActionFocusButton == node) {
+            clearDefaultActionFocus();
         }
         const u32 actionIndex = buttonActionIndexByNodeIndex[nodeIndex];
         buttonActionIndexByNodeIndex[nodeIndex] = InvalidButtonActionIndex;
@@ -4506,6 +4517,7 @@ struct UIContext::Impl final {
                     && buttonRecord->kind == UIWidgetKind::Button) {
                     armedPrimaryButton = nearestButton;
                     armedPrimaryButtonPressed = true;
+                    defaultActionFocusButton = nearestButton;
                     routedEvent.consumeInputTransition();
                     static_cast<void>(routedEvent.claimPointerButton(
                         Platform::PointerButton::Primary));
@@ -4569,6 +4581,74 @@ struct UIContext::Impl final {
         }
         clearArmedPrimaryButton();
         return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIDefaultActionResult> routeDefaultActionActivate(
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        UIButtonActivationSource source)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!platformFrame.hasValue() || sourceSequence == 0) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI default-action activation requires a platform frame and sequence");
+        }
+        if (source != UIButtonActivationSource::Keyboard
+            && source != UIButtonActivationSource::Gamepad) {
+            return fail(
+                UIErrorCode::InvalidButtonAction,
+                "UI default-action activation source must be Keyboard or Gamepad");
+        }
+        if (!defaultActionFocusButton.hasValue()
+            || !contains(defaultActionFocusButton)) {
+            clearDefaultActionFocus();
+            return UIDefaultActionResult{};
+        }
+        const NodeRecord* record =
+            nodes.tryGet(defaultActionFocusButton.storageId());
+        if (record == nullptr || record->kind != UIWidgetKind::Button) {
+            clearDefaultActionFocus();
+            return UIDefaultActionResult{};
+        }
+
+        if (buttonRouteSerial == (std::numeric_limits<u64>::max)()) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI Button route serial is exhausted");
+        }
+        const u64 actionRegistrationSerialBoundary =
+            buttonActionRegistrationSerial;
+        const ButtonActionInvocationCandidate actionCandidate =
+            captureButtonAction(
+                defaultActionFocusButton,
+                actionRegistrationSerialBoundary);
+        if (!actionCandidate.hasValue()) {
+            // Focused button without an action still consumes Accept so
+            // gameplay does not also fire.
+            return UIDefaultActionResult{.consumed = true, .activated = false};
+        }
+        const u64 currentButtonRouteSerial = ++buttonRouteSerial;
+        routeDispatchDepth = 1;
+        auto dispatchCleanup = Core::makeScopeExit([this]() noexcept {
+            routeDispatchDepth = 0;
+            drainDeferredRoutedPointerListenerReleases();
+            reclaimInactiveRoutedPointerListeners();
+            reclaimInactiveButtonActions();
+        });
+        invokeButtonAction(
+            actionCandidate,
+            UIButtonActionEvent{
+                .buttonNode = defaultActionFocusButton,
+                .source = source,
+                .platformFrame = platformFrame,
+                .sourceSequence = sourceSequence,
+            },
+            currentButtonRouteSerial);
+        return UIDefaultActionResult{.consumed = true, .activated = true};
     }
 
     [[nodiscard]] UIContextStatistics statistics() const noexcept
@@ -5256,6 +5336,16 @@ Core::Status UIContext::cancelPointerInteraction(
     Platform::WindowId routedWindow)
 {
     return m_impl->cancelPointerInteraction(routedWindow);
+}
+
+Core::Result<UIContext::UIDefaultActionResult>
+UIContext::routeDefaultActionActivate(
+    Platform::PlatformFrameId platformFrame,
+    u64 sourceSequence,
+    UIButtonActivationSource source)
+{
+    return m_impl->routeDefaultActionActivate(
+        platformFrame, sourceSequence, source);
 }
 
 UIContextStatistics UIContext::statistics() const noexcept

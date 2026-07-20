@@ -913,5 +913,73 @@ TEST_F(UIButtonActionTest, ThreeHundredRepeatedClicksDoNotGrowSuppliedPmr)
     EXPECT_EQ(resource.allocationCount(), resource.deallocationCount());
 }
 
+TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptActivateDefaultFocusedButton)
+{
+    ButtonTree tree = createButtonTree(firstWindow);
+    ASSERT_NE(tree.context, nullptr);
+    ActionRecorder recorder;
+    assertOk(tree.updater.setButtonAction(tree.button, makeAction(recorder, 7)));
+
+    // Without pointer arm, Accept does nothing and is not consumed.
+    auto idle = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{1},
+        10,
+        UI::UIButtonActivationSource::Keyboard);
+    ASSERT_TRUE(idle.has_value()) << (idle ? "" : idle.error().message);
+    EXPECT_FALSE(idle->consumed);
+    EXPECT_FALSE(idle->activated);
+    EXPECT_EQ(recorder.size, 0U);
+
+    // Pointer down sets default-action focus (and arms).
+    const UI::UIPointerRouteResult down = route(
+        *tree.context,
+        makePointerInput(firstWindow, UI::UIRoutedPointerEventKind::ButtonDown, 1));
+    ASSERT_TRUE(down.consumed);
+    expectButtonPressed(tree.updater, tree.button, true);
+
+    // Keyboard Accept activates once and does not require pointer Up.
+    auto keyboard = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{2},
+        20,
+        UI::UIButtonActivationSource::Keyboard);
+    ASSERT_TRUE(keyboard.has_value()) << (keyboard ? "" : keyboard.error().message);
+    EXPECT_TRUE(keyboard->consumed);
+    EXPECT_TRUE(keyboard->activated);
+    ASSERT_EQ(recorder.size, 1U);
+    EXPECT_EQ(recorder.entries[0].source, UI::UIButtonActivationSource::Keyboard);
+    EXPECT_EQ(recorder.entries[0].sourceSequence, 20U);
+    EXPECT_EQ(recorder.entries[0].marker, 7);
+
+    auto gamepad = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{3},
+        30,
+        UI::UIButtonActivationSource::Gamepad);
+    ASSERT_TRUE(gamepad.has_value()) << (gamepad ? "" : gamepad.error().message);
+    EXPECT_TRUE(gamepad->consumed);
+    EXPECT_TRUE(gamepad->activated);
+    ASSERT_EQ(recorder.size, 2U);
+    EXPECT_EQ(recorder.entries[1].source, UI::UIButtonActivationSource::Gamepad);
+    EXPECT_EQ(recorder.entries[1].sourceSequence, 30U);
+}
+
+TEST_F(UIButtonActionTest, DefaultActionWithoutRegisteredCallbackConsumesButDoesNotActivate)
+{
+    ButtonTree tree = createButtonTree(firstWindow);
+    ASSERT_NE(tree.context, nullptr);
+
+    const UI::UIPointerRouteResult down = route(
+        *tree.context,
+        makePointerInput(firstWindow, UI::UIRoutedPointerEventKind::ButtonDown, 1));
+    ASSERT_TRUE(down.consumed);
+
+    auto result = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{4},
+        40,
+        UI::UIButtonActivationSource::Keyboard);
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    EXPECT_TRUE(result->consumed);
+    EXPECT_FALSE(result->activated);
+}
+
 } // namespace
 } // namespace Tina::Tests
