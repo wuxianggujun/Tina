@@ -15,6 +15,7 @@ set(TINA_ASSET_TEST_SOURCES
     TileMapInstanceTests.cpp
     TileChunkExtractionTests.cpp
     TileChunkRenderTests.cpp
+    CharacterController2DTests.cpp
     AssetToRenderScenePipelineTests.cpp
     TypedPayloadValidationTests.cpp
     CatalogLoadOrderTests.cpp
@@ -39,6 +40,7 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/GridCollisionHeader.cpp
     header_isolation/TileChunkViewHeader.cpp
     header_isolation/TileChunkRenderHeader.cpp
+    header_isolation/CharacterController2DHeader.cpp
     header_isolation/CatalogCookHeader.cpp
     header_isolation/CatalogFileHeader.cpp
     header_isolation/CatalogLoadOrderHeader.cpp
