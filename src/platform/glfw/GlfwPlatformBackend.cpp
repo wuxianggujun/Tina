@@ -1244,8 +1244,16 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             }
             for (usize axis = 0; axis < GamepadAxisCount; ++axis)
             {
-                if (slotState.axes[axis] == sampled.axes[axis])
+                // Stick deadzone is applied in applyGlfwGamepadState. Emission
+                // uses hysteresis so tiny residual noise does not spam axes.
+                if (!Detail::gamepadAxisChanged(
+                        slotState.axes[axis],
+                        sampled.axes[axis],
+                        Detail::DefaultGamepadAxisChangeHysteresis))
                 {
+                    // Keep the last published value so repeated tiny noise does
+                    // not accumulate into a later spurious transition.
+                    sampled.axes[axis] = slotState.axes[axis];
                     continue;
                 }
                 changed = true;
