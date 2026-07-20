@@ -500,6 +500,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   UploadTicket cancel/retire；`tina_sample_asset --catalog=` 消费 `tina_assetc` 产物；
 - M10-A14 已完成 recipe 驱动 Catalog cook：`CatalogCook` API、`tina_assetc --recipe`、payload 文件依赖；
   仍无 cgltf/glTF import；
+- M10-A15 已完成 Texture2D/Sprite cooked payload v1 编解码与 cooked asset 便捷写入；
+  仍无运行时 GPU 纹理采样/正式 2D 画面；
 - 完整 Cooker/cgltf、CPU TaskGroup、bgfx 真实 UploadTicket 接线继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/

@@ -1105,6 +1105,8 @@ public:
 | `cookCatalogPackage` / `cookAndPublishCatalogPackage` | M10-A14 已实现 | Asset module public | 内存 cook + 磁盘 publish | Invalid / wire writer 错误 |
 | `loadCatalogCookRecipeFile` / `parseCatalogCookRecipe` | M10-A14 已实现 | Asset module public | 行式 recipe → CatalogCookRequest | Invalid / Io |
 | `tina_assetc --recipe` | M10-A14 已实现 | host tool | recipe 驱动 fixture/cook 包 | 同 cook/publish/open |
+| `writeTexture2DPayloadBytes` / `parseTexture2DPayload` / `writeCookedTexture2DAsset` | M10-A15 已实现 | AssetFormat module public | Texture2D payload v1 (Rgba8Unorm) | InvalidLayout / Unsupported* |
+| `writeSpritePayloadBytes` / `parseSpritePayload` / `writeCookedSpriteAsset` | M10-A15 已实现 | AssetFormat module public | Sprite UV/pivot/PPU + Texture2D 依赖 | InvalidLayout / InvalidIdentity |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |

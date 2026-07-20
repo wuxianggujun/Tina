@@ -1,7 +1,10 @@
 set(TINA_ASSET_FORMAT_TEST_SOURCES
     AssetFormatTests.cpp
+    TextureSpritePayloadTests.cpp
     header_isolation/AssetFormatErrorsHeader.cpp
     header_isolation/AssetFormatHeader.cpp
+    header_isolation/SpritePayloadHeader.cpp
+    header_isolation/Texture2DPayloadHeader.cpp
 )
 
 add_executable(tina_asset_format_tests ${TINA_ASSET_FORMAT_TEST_SOURCES})

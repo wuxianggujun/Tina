@@ -432,3 +432,6 @@ cancel。`tina_sample_asset --catalog=` 加载外部包并验证 unload/retireme
 
 M10-A14：`CatalogCook` 将多 asset recipe 排序、写 cooked/manifest 并 publish；recipe 行格式
 `platform`/`asset Kind id path [depId:Kind...]`；`tina_assetc --recipe` 调用该路径。cgltf 仍后置。
+
+M10-A15：Texture2D payload v1（16B header + Rgba8Unorm pixels）与 Sprite payload v1（40B UV/pivot/PPU，
+Texture2D 依赖表）。提供 write/parse 与 full cooked asset helpers。运行时 GPU 采样后置。
