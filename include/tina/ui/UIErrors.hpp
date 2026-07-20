@@ -20,5 +20,6 @@ inline constexpr Core::ErrorCode InvalidPointerInput{Core::ErrorDomain::UI, 13};
 inline constexpr Core::ErrorCode PointerRouteAlreadyInProgress{Core::ErrorDomain::UI, 14};
 inline constexpr Core::ErrorCode InvalidButtonAction{Core::ErrorDomain::UI, 15};
 inline constexpr Core::ErrorCode InvalidText{Core::ErrorDomain::UI, 16};
+inline constexpr Core::ErrorCode InvalidFont{Core::ErrorDomain::UI, 17};
 
 } // namespace Tina::UI::UIErrorCode

@@ -24,6 +24,10 @@ if(TINA_BUILD_PLATFORM_GLFW AND NOT TINA_BUILD_LEGACY)
     find_package(glfw3 3.4 CONFIG REQUIRED)
 endif()
 
+if(TINA_BUILD_UI_FREETYPE AND NOT TINA_BUILD_LEGACY)
+    find_package(Freetype REQUIRED)
+endif()
+
 if(TINA_BUILD_TESTING)
     find_package(GTest 1.17.0 EXACT CONFIG REQUIRED)
 endif()

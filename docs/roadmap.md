@@ -359,8 +359,13 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - **已完成 M7-D2（Desktop 文本占位 smoke）**：`tina_sample_desktop` 在既有 4-panel SolidFill 上增加
   2 个 Label（Latin + 中文 UTF-8），经现有 SolidQuad UI pass 显示 monospaced 色块占位；计数
   `uiTextLabelsCreated`。这不是字形/FreeType 产品门禁。
-- **仍后置**：`tina_ui_freetype` 只在生产 adapter 中使用 FreeType，text layout 与 glyph raster 分离，
-  Atlas 带 generation/预算/retirement；
+- **已完成 M7-D3（文本 raster SPI + FreeType adapter 骨架）**：公共 `IUITextRasterizer` /
+  `createPlaceholderTextRasterizer`（始终在 `tina_ui`，无 FreeType）；可选
+  `TINA_BUILD_UI_FREETYPE` + vcpkg feature `ui-freetype` 构建 `Tina::UIFreetype` 与
+  `createFreeTypeTextRasterizer`（public factory 头零 FreeType token）。当前未接 UIContext、
+  Glyph Atlas 或 GPU upload；独立 `tina_ui_freetype_tests` 仅覆盖 factory/错误边界。
+- **仍后置**：把 rasterizer 接到 Label measure/paint、Atlas generation/预算/retirement、cooked
+  font fixture 与中文可见字形门禁；
 - 在已完成私有 `tina_render_bgfx` SolidQuad UI Pass 的基础上扩展 Image/Glyph 命令、Atlas texture upload
   与资源 pin；`tina_ui` 不链接 bgfx，也不暴露 view id/handle；
 - 使用版本化内置 Cooked Font/Texture fixture 形成中文 Label、Button、Modal 可运行样例；

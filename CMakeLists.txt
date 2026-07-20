@@ -58,6 +58,7 @@ option(TINA_BUILD_SHADERS "Build cooked runtime shaders with the bundled shader 
 option(TINA_BUILD_LEGACY "Build the existing Tina game/runtime during vNext migration" ON)
 option(TINA_BUILD_PLATFORM_GLFW "Build the private vNext GLFW platform backend" OFF)
 option(TINA_BUILD_RENDER_BGFX "Build the private vNext bgfx render backend" OFF)
+option(TINA_BUILD_UI_FREETYPE "Build the private vNext FreeType UI text adapter" OFF)
 option(TINA_BUILD_BENCHMARKS "Build Tina benchmark executables" OFF)
 option(TINA_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
@@ -68,6 +69,14 @@ if (TINA_BUILD_PLATFORM_GLFW AND NOT TINA_BUILD_LEGACY)
         NOT "platform-glfw" IN_LIST VCPKG_MANIFEST_FEATURES)
         message(FATAL_ERROR
             "TINA_BUILD_PLATFORM_GLFW requires the vcpkg manifest feature 'platform-glfw'.")
+    endif ()
+endif ()
+
+if (TINA_BUILD_UI_FREETYPE AND NOT TINA_BUILD_LEGACY)
+    if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
+        NOT "ui-freetype" IN_LIST VCPKG_MANIFEST_FEATURES)
+        message(FATAL_ERROR
+            "TINA_BUILD_UI_FREETYPE requires the vcpkg manifest feature 'ui-freetype'.")
     endif ()
 endif ()
 

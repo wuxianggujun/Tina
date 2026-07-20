@@ -14,6 +14,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPaint.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIText.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UITextRasterizer.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/InputRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UINodeId.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIWidgetKind.hpp
@@ -24,6 +25,7 @@ add_library(tina_ui STATIC
     UIContext.cpp
     UIContextConfig.cpp
     UIText.cpp
+    UITextRasterizer.cpp
 )
 add_library(Tina::UI ALIAS tina_ui)
 
@@ -37,3 +39,24 @@ target_link_libraries(tina_ui
         Tina::ProjectOptions
 )
 set_target_properties(tina_ui PROPERTIES CXX_EXTENSIONS OFF)
+
+if(TINA_BUILD_UI_FREETYPE)
+    add_library(tina_ui_freetype STATIC
+        ${PROJECT_SOURCE_DIR}/include/tina/ui/text/FreeTypeTextRasterizerFactory.hpp
+        freetype/FreeTypeTextRasterizer.cpp
+    )
+    add_library(Tina::UIFreetype ALIAS tina_ui_freetype)
+    target_compile_features(tina_ui_freetype PUBLIC cxx_std_23)
+    target_include_directories(tina_ui_freetype PUBLIC ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(tina_ui_freetype
+        PUBLIC
+            Tina::UI
+        PRIVATE
+            Tina::ProjectOptions
+            Freetype::Freetype
+    )
+    set_target_properties(tina_ui_freetype PROPERTIES
+        CXX_EXTENSIONS OFF
+        EXPORT_NAME UIFreetype
+    )
+endif()

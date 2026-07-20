@@ -619,7 +619,12 @@ M7-D0 已在 `tina_ui` 落地 Label/Button 的 retained UTF-8 文本属性：`se
 
 M7-D1 又让有文本且 `UITextStyle.color.alpha != 0` 的节点在 committed paint 中为每个 drawable
 codepoint 发布 monospaced SolidQuad fallback（`\n` 只换行），paint ordinal 在 snapshot 内严格递增，并
-计入 `paintSnapshotCapacity`。DisplayList/bgfx 仍只消费 SolidQuad。真正 Glyph Atlas/FreeType 后置。
+计入 `paintSnapshotCapacity`。DisplayList/bgfx 仍只消费 SolidQuad。
+
+M7-D3 增加后端无关 `IUITextRasterizer`：`createPlaceholderTextRasterizer` 始终可用；可选
+`tina_ui_freetype` 提供 `createFreeTypeTextRasterizer`（仅 `TINA_BUILD_UI_FREETYPE` + feature
+`ui-freetype`）。公共 SPI 不暴露 FreeType 类型；当前未接入 UIContext 布局/绘制，也未建立 Atlas
+upload。
 
 Runtime 不按路径打开字体。Cooked `FontAsset` 提供 owning bytes、face metadata 和确定 fallback
 chain；UI 持有 `AssetLease<FontData>`。FreeType 类型只存在于 `tina_ui_freetype`。
