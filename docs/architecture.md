@@ -168,6 +168,7 @@ startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 r
 | vNext M10-A2l load from plan | 已完成按计划加载切片 | `loadCookedAssetsFromPlan` 按 plan 同步加载并失败全回滚；`loadCookedAssetsFromCatalog` 走 plan 路径。不引入 Handle/Lease |
 | vNext M10-A2m package one-shot load | 已完成一站式加载切片 | `loadCookedAssetsFromPackage`：openCatalogPackage → plan → load；失败不发布 Catalog/assets。不引入 Handle/Lease |
 | vNext M10-A2n package load polish | 已完成覆盖与 CLI 加载切片 | 空请求加载全部 + CLI `--load-assets`/`--asset-id`；不引入 Handle/Lease |
+| vNext M10-A2o pipeline e2e fixture | 已完成端到端测试夹具切片 | 共享 `CatalogPackageTestSupport` + open→plan→load→validate→summary 流水线测试。不引入 Handle/Lease |
 | vNext GLFW 边界 | 已形成可运行切片 |
  `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
 | 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene component-integrated extraction、AssetSystem/Audio、owning UI packet/pin、Text/Glyph/完整 Widget 与 submission drain 仍按后续切片实施；M8-A World/Transform、M8-B 2D extraction、M9-A 3D CPU/Null extraction、M9-B Opaque3D fixture、M9-C Sprite2D fixture、M10-A0 wire format、M10-A1 CatalogSnapshot、Desktop SolidFill 可见样例、standalone UI/Render/bridge foundation、Runtime-private route/layout/startup/display borrow 接线、Button primary-pointer default action 和私有 bgfx SolidQuad pass 不代表完整产品路径完成 |

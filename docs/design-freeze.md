@@ -381,3 +381,5 @@ CookedAssetFile 批；任一步失败不发布。不实现 Handle/Lease。
 
 M10-A2n 补空请求=加载全部测试，并扩展 CLI `--load-assets`（可与 `--asset-id` 组合）输出
 `loadedAssets`/`loaded` JSON。不实现 Handle/Lease。
+
+M10-A2o 增加共享 Catalog 包测试夹具与 open→plan→load→validate→summary 端到端测试。不实现 Handle/Lease。

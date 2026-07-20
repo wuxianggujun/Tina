@@ -38,6 +38,7 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A2l 已实现 `loadCookedAssetsFromPlan`（按计划同步加载，失败全回滚）；
   M10-A2m 已实现 `loadCookedAssetsFromPackage`（open+plan+load 一站式）；
   M10-A2n 已补空请求加载全部与 CLI `--load-assets`；
+  M10-A2o 已补共享测试夹具与同步流水线端到端测试；
   Asset registry/状态机、Handle/Lease、异步 IO/Decode/Upload、增量 Cooker 与产品资产仍未实现。
 
 

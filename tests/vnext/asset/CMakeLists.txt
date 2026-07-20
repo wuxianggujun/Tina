@@ -4,6 +4,7 @@ set(TINA_ASSET_TEST_SOURCES
     CatalogLoadPlanTests.cpp
     CatalogPackageTests.cpp
     CatalogPackageLoadTests.cpp
+    CatalogPackagePipelineTests.cpp
     CatalogPackageSummaryTests.cpp
     CatalogPackageValidationTests.cpp
     CookedAssetBatchTests.cpp
