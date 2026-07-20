@@ -8,6 +8,7 @@ set(TINA_ASSET_TEST_SOURCES
     AssetSystemGpuPipelineTests.cpp
     CatalogSnapshotTests.cpp
     CatalogCookTests.cpp
+    Typed2dCatalogPipelineTests.cpp
     CatalogLoadOrderTests.cpp
     CatalogLoadPlanTests.cpp
     CatalogPackageTests.cpp

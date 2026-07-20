@@ -65,6 +65,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A13 retirement + e2e | Debug/Release C++23 | 见实现门禁 | unload/cancelUpload retire ticket；`tina_assetc`→`tina_sample_asset --catalog=`；`tina_asset_tests` 73 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A14 recipe cook | Debug/Release C++23 | 见实现门禁 | recipe→publish→open；`tina_assetc --recipe`→sample；`tina_asset_tests` 75 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A15 Texture/Sprite payload | Debug/Release C++23 | 23/23 format | Texture2D/Sprite write/parse/cooked round-trip；`tina_asset_format_tests` 23 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A16 typed 2D product path | Debug/Release C++23 | 见实现门禁 | cook→load→parse Texture/Sprite；assetc/sample typed2d；`tina_asset_tests` 76 |
 
 
 

@@ -1,7 +1,9 @@
 #include <tina/asset/AssetSystem.hpp>
+#include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
-#include <tina/core/hash/ContentHashDigest.hpp>
+#include <tina/asset_format/SpritePayload.hpp>
+#include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
 #include <tina/render/UploadTicket.hpp>
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
@@ -11,7 +13,6 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <memory_resource>
 #include <string>
@@ -38,14 +39,6 @@ struct Options final {
     bytes[0] = static_cast<std::byte>(seed);
     bytes[15] = static_cast<std::byte>(seed ^ 0x5AU);
     return bytes;
-}
-
-void writeBytes(const std::filesystem::path& path, const std::vector<std::byte>& bytes)
-{
-    std::filesystem::create_directories(path.parent_path());
-    std::ofstream output(path, std::ios::binary);
-    output.write(static_cast<const char*>(static_cast<const void*>(bytes.data())),
-                 static_cast<std::streamsize>(bytes.size()));
 }
 
 [[nodiscard]] std::string toUtf8(const std::filesystem::path& path)
@@ -91,65 +84,57 @@ void writeError(const Tina::Core::Error& error)
 }
 
 [[nodiscard]] Tina::Core::Status synthesizeCatalog(const std::filesystem::path& root, Tina::Core::AssetId textureId,
-                                                   Tina::Core::AssetId materialId)
+                                                   Tina::Core::AssetId spriteId)
 {
-    constexpr std::array<std::byte, 4> Payload{std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0x40}};
-    const std::array materialDeps{Tina::AssetFormat::CookedAssetWriteDependency{
-        .assetId = textureId,
-        .expectedKind = Tina::AssetFormat::AssetKind::Texture2D,
-        .flags = Tina::AssetFormat::DependencyFlags::Required,
-    }};
-    auto textureBytes = Tina::AssetFormat::writeCookedAssetBytes(Tina::AssetFormat::CookedAssetWriteDesc{
+    std::vector<std::byte> pixels{
+        std::byte{255}, std::byte{0},   std::byte{0},   std::byte{255},
+        std::byte{0},   std::byte{255}, std::byte{0},   std::byte{255},
+        std::byte{0},   std::byte{0},   std::byte{255}, std::byte{255},
+        std::byte{255}, std::byte{255}, std::byte{0},   std::byte{255},
+    };
+    auto texPayload = Tina::AssetFormat::writeTexture2DPayloadBytes(Tina::AssetFormat::Texture2DPayloadDesc{
+        .width = 2,
+        .height = 2,
+        .pixelFormat = Tina::AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
+        .pixels = pixels,
+    });
+    auto spritePayload = Tina::AssetFormat::writeSpritePayloadBytes(Tina::AssetFormat::SpritePayloadDesc{
+        .u0 = 0.0f,
+        .v0 = 0.0f,
+        .u1 = 1.0f,
+        .v1 = 1.0f,
+        .pivotX = 0.5f,
+        .pivotY = 0.5f,
+        .pixelsPerUnit = 32.0f,
+        .textureId = textureId,
+    });
+    if (!texPayload || !spritePayload)
+    {
+        return Tina::Core::failure(texPayload ? spritePayload.error() : texPayload.error());
+    }
+
+    Tina::Asset::CatalogCookRequest request{.targetPlatform = Tina::AssetFormat::TargetPlatform::WindowsX64};
+    request.assets.push_back(Tina::Asset::CatalogCookAssetSpec{
         .assetKind = Tina::AssetFormat::AssetKind::Texture2D,
         .assetId = textureId,
-        .payload = Payload,
-        .computeContentHash = true,
+        .assetTypeVersion = Tina::AssetFormat::Texture2DWire::SchemaVersion,
+        .payload = std::move(*texPayload),
     });
-    auto materialBytes = Tina::AssetFormat::writeCookedAssetBytes(Tina::AssetFormat::CookedAssetWriteDesc{
-        .assetKind = Tina::AssetFormat::AssetKind::Material,
-        .assetId = materialId,
-        .dependencies = materialDeps,
-        .payload = Payload,
-        .computeContentHash = true,
+    request.assets.push_back(Tina::Asset::CatalogCookAssetSpec{
+        .assetKind = Tina::AssetFormat::AssetKind::Sprite,
+        .assetId = spriteId,
+        .assetTypeVersion = Tina::AssetFormat::SpriteWire::SchemaVersion,
+        .payload = std::move(*spritePayload),
+        .dependencies =
+            {
+                Tina::AssetFormat::CookedAssetWriteDependency{
+                    .assetId = textureId,
+                    .expectedKind = Tina::AssetFormat::AssetKind::Texture2D,
+                    .flags = Tina::AssetFormat::DependencyFlags::Required,
+                },
+            },
     });
-    if (!textureBytes || !materialBytes)
-    {
-        return Tina::Core::failure(textureBytes ? materialBytes.error() : textureBytes.error());
-    }
-    const auto payloadHash = *Tina::Core::digestContentHashV1(Payload);
-    const std::array entries{
-        Tina::AssetFormat::CookedManifestWriteEntry{
-            .assetId = textureId,
-            .contentHash = payloadHash,
-            .assetKind = Tina::AssetFormat::AssetKind::Texture2D,
-            .cookedFileBytes = textureBytes->size(),
-        },
-        Tina::AssetFormat::CookedManifestWriteEntry{
-            .assetId = materialId,
-            .contentHash = payloadHash,
-            .assetKind = Tina::AssetFormat::AssetKind::Material,
-            .cookedFileBytes = materialBytes->size(),
-            .dependencies = materialDeps,
-        },
-    };
-    auto manifestBytes = Tina::AssetFormat::writeCookedManifestBytes(Tina::AssetFormat::CookedManifestWriteDesc{
-        .targetPlatform = Tina::AssetFormat::TargetPlatform::WindowsX64,
-        .entries = entries,
-    });
-    if (!manifestBytes)
-    {
-        return Tina::Core::failure(std::move(manifestBytes.error()));
-    }
-    writeBytes(root / "manifest.tmnft", *manifestBytes);
-    writeBytes(root / std::filesystem::u8path(
-                   Tina::AssetFormat::makeCookedArtifactPath(Tina::AssetFormat::AssetKind::Texture2D, textureId)
-                       ->view()),
-               *textureBytes);
-    writeBytes(root / std::filesystem::u8path(
-                   Tina::AssetFormat::makeCookedArtifactPath(Tina::AssetFormat::AssetKind::Material, materialId)
-                       ->view()),
-               *materialBytes);
-    return Tina::Core::success();
+    return Tina::Asset::cookAndPublishCatalogPackage(toUtf8(root), request);
 }
 
 } // namespace
@@ -166,7 +151,7 @@ int main(int argc, char** argv)
 
     std::pmr::unsynchronized_pool_resource memory;
     const auto textureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
-    const auto materialId = *Tina::Core::AssetId::fromBytes(idBytes(2U));
+    const auto spriteId = *Tina::Core::AssetId::fromBytes(idBytes(3U));
 
     std::filesystem::path root;
     std::error_code ec;
@@ -174,7 +159,7 @@ int main(int argc, char** argv)
     {
         root = std::filesystem::temp_directory_path() / "tina_sample_asset_catalog";
         std::filesystem::remove_all(root, ec);
-        if (const auto status = synthesizeCatalog(root, textureId, materialId); !status)
+        if (const auto status = synthesizeCatalog(root, textureId, spriteId); !status)
         {
             writeError(status.error());
             return 1;
@@ -248,8 +233,8 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Prefer material id seed 2 when present; else first Material entry; else first entry.
-    Tina::Core::AssetId requestId = materialId;
+    // Prefer Sprite seed 3; else first Sprite; else first entry.
+    Tina::Core::AssetId requestId = spriteId;
     if (!catalog->find(requestId))
     {
         requestId = {};
@@ -260,7 +245,7 @@ int main(int argc, char** argv)
             {
                 continue;
             }
-            if (entry->assetKind == Tina::AssetFormat::AssetKind::Material)
+            if (entry->assetKind == Tina::AssetFormat::AssetKind::Sprite)
             {
                 requestId = entry->assetId;
                 break;
@@ -334,7 +319,45 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Unload to exercise retirement ledger; lease still holds until scope end, so release first.
+    Tina::Core::u16 texW = 0;
+    Tina::Core::u16 texH = 0;
+    float ppu = 0.0f;
+    bool parsedTyped = false;
+    if (const auto* file = lease->get())
+    {
+        if (file->header().assetKind == Tina::AssetFormat::AssetKind::Sprite)
+        {
+            auto sprite = Tina::AssetFormat::parseSpritePayload(file->payload());
+            if (sprite)
+            {
+                ppu = sprite->pixelsPerUnit;
+                parsedTyped = true;
+            }
+            if (const auto texHandle = system->find(textureId))
+            {
+                if (const auto* texFile = system->tryGet(*texHandle))
+                {
+                    auto tex = Tina::AssetFormat::parseTexture2DPayload(texFile->payload());
+                    if (tex)
+                    {
+                        texW = tex->width;
+                        texH = tex->height;
+                        parsedTyped = true;
+                    }
+                }
+            }
+        } else if (file->header().assetKind == Tina::AssetFormat::AssetKind::Texture2D)
+        {
+            auto tex = Tina::AssetFormat::parseTexture2DPayload(file->payload());
+            if (tex)
+            {
+                texW = tex->width;
+                texH = tex->height;
+                parsedTyped = true;
+            }
+        }
+    }
+
     lease = Tina::Asset::AssetLease{};
     const auto unloaded = system->unload((*requested)[0]);
     const auto retirement = system->retirementStats();
@@ -352,6 +375,9 @@ int main(int argc, char** argv)
               << ",\"unloadOk\":" << (unloaded ? "true" : "false")
               << ",\"retirementReleased\":" << retirement.released
               << ",\"retirementLive\":" << retirement.live
+              << ",\"typedPayload\":" << (parsedTyped ? "true" : "false")
+              << ",\"textureWidth\":" << texW << ",\"textureHeight\":" << texH
+              << ",\"spritePpu\":" << ppu
               << ",\"task\":\"bounded_io\""
               << ",\"upload\":\"null_ledger\""
               << ",\"catalog\":\"" << (options.catalogRoot.empty() ? "synthetic" : "external") << "\"}\n";

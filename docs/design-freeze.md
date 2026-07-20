@@ -435,3 +435,6 @@ M10-A14：`CatalogCook` 将多 asset recipe 排序、写 cooked/manifest 并 pub
 
 M10-A15：Texture2D payload v1（16B header + Rgba8Unorm pixels）与 Sprite payload v1（40B UV/pivot/PPU，
 Texture2D 依赖表）。提供 write/parse 与 full cooked asset helpers。运行时 GPU 采样后置。
+
+M10-A16：`tina_assetc` 默认 fixture 与 `tina_sample_asset` 合成包改为 Texture2D+Sprite；sample 在
+ReadyGpu 后 parse 类型化 payload（width/height/ppu）。`--legacy-text` 保留旧 Material 文本 fixture。

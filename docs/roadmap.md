@@ -502,6 +502,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   仍无 cgltf/glTF import；
 - M10-A15 已完成 Texture2D/Sprite cooked payload v1 编解码与 cooked asset 便捷写入；
   仍无运行时 GPU 纹理采样/正式 2D 画面；
+- M10-A16 已完成默认 fixture/sample 切换为 Texture2D+Sprite，加载后解析类型化 payload；
+  仍无 bgfx 纹理绑定/绘制；
 - 完整 Cooker/cgltf、CPU TaskGroup、bgfx 真实 UploadTicket 接线继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/

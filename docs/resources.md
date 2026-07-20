@@ -54,7 +54,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A13 已实现 retirement ledger 与 unload/ticket 对齐，sample 支持外部 catalog；
   M10-A14 已实现 recipe 驱动 Catalog cook 与 `tina_assetc --recipe`；
   M10-A15 已实现 Texture2D/Sprite cooked payload v1；
-  CPU TaskGroup、bgfx 真实 upload、完整 Cooker/cgltf 与产品资产仍未实现。
+  M10-A16 已实现默认 Texture2D+Sprite 产品路径与类型化 payload 解析；
+  CPU TaskGroup、bgfx 真实纹理采样绘制、完整 Cooker/cgltf 仍未实现。
 
 
 ## 下一阶段契约
