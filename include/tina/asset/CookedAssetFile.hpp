@@ -64,6 +64,10 @@ class CookedAssetFile final {
 [[nodiscard]] Core::Result<CookedAssetFile> loadCookedAssetFile(std::string_view utf8Path,
                                                                 CookedAssetFileLoadConfig config);
 
+// Builds an owning CookedAssetFile from already-read bytes (parse + optional content-hash verify).
+[[nodiscard]] Core::Result<CookedAssetFile> makeCookedAssetFileFromBytes(std::pmr::vector<std::byte> bytes,
+                                                                         CookedAssetFileLoadConfig config);
+
 // Resolves objects/<kind>/<aa>/<id>.tasset under catalogRoot, loads the file, and requires the
 // cooked header to match the Catalog entry identity/kind/typeVersion/contentHash/cookedFileBytes.
 [[nodiscard]] Core::Result<CookedAssetFile> loadCookedAssetFromCatalog(std::string_view catalogRootUtf8,

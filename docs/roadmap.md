@@ -482,7 +482,10 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   本次 publish、预算门禁；仍无异步 Queued/Loading、Task worker、GPU UploadTicket/retirement；
 - M10-A5 已完成主线程 deferred 路径：`request`/`pump`、Queued→Loading→Ready/Failed、有界 completion
   队列与 per-pump 预算；仍在 owner thread 同步读盘（无 Task worker 线程）、无 GPU UploadTicket；
-- UploadTicket/retirement、事务 Manifest writer、Task worker 线程池继续后置；
+- M10-A6 已完成有界 Task 首切片（ADR 0017 Accepted）：`createBoundedTaskSystem` 提供 IO worker +
+  Main completion；`AssetSystem` 可注入 `taskSystem` 使 `pump` 走 scheduleIo→postMain→complete；
+  仍无 CPU worker pool、TaskGroup、GPU UploadTicket；
+- UploadTicket/retirement、事务 Manifest writer、CPU TaskGroup 继续后置；
 - `tina_assetc` 执行 Parse → Validate → Build → Validate Cooked → Atomic Write；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；

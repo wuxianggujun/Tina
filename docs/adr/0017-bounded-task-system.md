@@ -1,7 +1,9 @@
 # ADR 0017：有界结构化 Task System，不 detach/强杀
 
-- 状态：Proposed
+- 状态：Accepted
 - 日期：2026-07-16
+- Accepted：2026-07-20（首切片：有界 IO worker + Main completion queue + scheduleIo/postMain/pumpMain；
+  CPU worker pool、TaskGroup、priority、fiber/work stealing 仍后置）
 
 ## 背景
 

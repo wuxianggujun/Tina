@@ -55,6 +55,8 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A3 AssetStore Handle/Lease | Debug/Release C++23 | 223/223 + 58/58 | publish/acquire/tryGet/unload 延迟/stale/capacity；`tina_asset_tests` 58/58。无 GPU retirement |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A4 AssetSystem sync | Debug/Release C++23 | 223/223 + 61/61 | bind/load/dedupe/budget/partial-fail rollback；`tina_asset_tests` 61/61。无 async |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A5 request/pump | Debug/Release C++23 | 223/223 + 65/65 | Queued/Loading/Ready/Failed；request+pump 预算；缺文件 Failed；队列满；`tina_asset_tests` 65/65。无 Task worker/GPU |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A6 bounded Task + async asset pump | Debug/Release C++23 | 225/225 + 66/66 | BoundedTaskSystem scheduleIo/postMain/pumpMain；AssetSystem+taskSystem IO 读盘 Ready；`tina_tests` 225；`tina_asset_tests` 66。无 CPU pool/GPU |
+
 
 
 

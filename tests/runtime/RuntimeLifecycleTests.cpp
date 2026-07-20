@@ -9,6 +9,7 @@
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
+#include <tina/task/TaskErrors.hpp>
 #include <tina/task/TaskSystem.hpp>
 
 #include "support/ManualMonotonicClock.hpp"
@@ -190,6 +191,34 @@ class LoggingTaskSystem final : public Task::ITaskSystem {
     [[nodiscard]] bool isIdle() const noexcept override
     {
         return true;
+    }
+
+    [[nodiscard]] bool isStopping() const noexcept override
+    {
+        return stopped_;
+    }
+
+    [[nodiscard]] Core::Status scheduleIo(Task::TaskCallable work) override
+    {
+        static_cast<void>(work);
+        return Core::failure(Task::TaskErrorCode::NotSupported, "LoggingTaskSystem has no IO workers");
+    }
+
+    [[nodiscard]] Core::Status postMain(Task::TaskCallable work) override
+    {
+        static_cast<void>(work);
+        return Core::failure(Task::TaskErrorCode::NotSupported, "LoggingTaskSystem has no main queue");
+    }
+
+    [[nodiscard]] Core::Result<Core::u32> pumpMain(Core::u32 budget) override
+    {
+        static_cast<void>(budget);
+        return Core::u32{0};
+    }
+
+    void requestStop() noexcept override
+    {
+        stopped_ = true;
     }
 
     void shutdownAndJoin() noexcept override
@@ -887,6 +916,34 @@ class ProbeTaskSystem final : public Task::ITaskSystem {
     [[nodiscard]] bool isIdle() const noexcept override
     {
         return true;
+    }
+
+    [[nodiscard]] bool isStopping() const noexcept override
+    {
+        return stopped_;
+    }
+
+    [[nodiscard]] Core::Status scheduleIo(Task::TaskCallable work) override
+    {
+        static_cast<void>(work);
+        return Core::failure(Task::TaskErrorCode::NotSupported, "ProbeTaskSystem has no IO workers");
+    }
+
+    [[nodiscard]] Core::Status postMain(Task::TaskCallable work) override
+    {
+        static_cast<void>(work);
+        return Core::failure(Task::TaskErrorCode::NotSupported, "ProbeTaskSystem has no main queue");
+    }
+
+    [[nodiscard]] Core::Result<Core::u32> pumpMain(Core::u32 budget) override
+    {
+        static_cast<void>(budget);
+        return Core::u32{0};
+    }
+
+    void requestStop() noexcept override
+    {
+        stopped_ = true;
     }
 
     void shutdownAndJoin() noexcept override

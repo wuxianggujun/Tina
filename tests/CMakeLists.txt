@@ -61,6 +61,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     runtime/WindowSurfaceLeaseTests.cpp
     runtime/WindowSurfaceRuntimeTests.cpp
     task/header_isolation/TaskSystemHeader.cpp
+    task/BoundedTaskSystemTests.cpp
     task/TaskSystemTests.cpp
 )
 

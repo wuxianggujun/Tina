@@ -401,3 +401,8 @@ M10-A4 已落地 `AssetSystem`：绑定 Catalog+root，同步依赖序 load/publ
 M10-A5 已落地 deferred 产品桥：`AssetStore` 增加 Queued/Loading/Failed；`AssetSystem::request` 将
 缺失资产入有界队列，`pump(budget)` 在 owner thread 逐步 complete/fail（本切片仍同步读盘）。
 明确后置：真实 Task/IO worker、GPU UploadTicket、FramePin、physical retirement。
+
+M10-A6 已落地 ADR 0017 首切片与 Asset 接线：`createBoundedTaskSystem`（有界 IO + Main completion）；
+`AssetSystemConfig::taskSystem` 注入后，`pump` 在 IO 线程 `readFile`，经 `postMain` 在主线程
+`makeCookedAssetFileFromBytes`+`complete`/`fail`。Desktop 默认仍为 DisabledTaskSystem。后置：
+CPU worker pool、TaskGroup/priority、GPU UploadTicket。

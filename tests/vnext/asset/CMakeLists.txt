@@ -2,6 +2,7 @@ set(TINA_ASSET_TEST_SOURCES
     AssetStoreTests.cpp
     AssetSystemTests.cpp
     AssetSystemPumpTests.cpp
+    AssetSystemAsyncPumpTests.cpp
     CatalogSnapshotTests.cpp
     CatalogLoadOrderTests.cpp
     CatalogLoadPlanTests.cpp
@@ -33,6 +34,7 @@ target_include_directories(tina_asset_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 target_link_libraries(tina_asset_tests PRIVATE
     Tina::ProjectOptions
     Tina::Asset
+    Tina::Task
     GTest::gtest_main
 )
 set_target_properties(tina_asset_tests PROPERTIES CXX_EXTENSIONS OFF)
