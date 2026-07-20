@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/asset/CatalogLoadOrder.hpp>
+#include <tina/asset/CatalogLoadPlan.hpp>
 #include <tina/asset/CatalogSnapshot.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/core/base/Types.hpp>
@@ -16,7 +17,7 @@ namespace Tina::Asset {
 
 struct CookedAssetBatchLoadConfig final {
     CookedAssetFileLoadConfig file{};
-    // Used for load-order scratch and the returned vector allocator.
+    // Used for load-order/plan scratch and the returned vector allocator.
     // When null, file.memoryResource is used.
     std::pmr::memory_resource* memoryResource = nullptr;
 };
@@ -27,5 +28,11 @@ struct CookedAssetBatchLoadConfig final {
 [[nodiscard]] Core::Result<std::pmr::vector<CookedAssetFile>>
 loadCookedAssetsFromCatalog(std::string_view catalogRootUtf8, const CatalogSnapshot& catalog,
                             std::span<const Core::AssetId> requestedAssetIds, CookedAssetBatchLoadConfig config);
+
+// Loads cooked objects for a precomputed plan in plan order. Plan rows must refer to the same
+// catalog. Failure rolls back already-loaded files and does not publish a partial batch.
+[[nodiscard]] Core::Result<std::pmr::vector<CookedAssetFile>>
+loadCookedAssetsFromPlan(std::string_view catalogRootUtf8, const CatalogSnapshot& catalog,
+                         std::span<const CatalogLoadPlanEntry> plan, CookedAssetBatchLoadConfig config);
 
 } // namespace Tina::Asset

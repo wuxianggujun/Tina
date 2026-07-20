@@ -105,9 +105,9 @@ M10-A2b provides bounded Core `readFile` and `loadCatalogSnapshotFromManifestFil
 `tina_tests` pass 223/223 and `tina_asset_tests` pass 19/19. Handle/Lease, async IO, and Cooker remain out of
 scope.
 
-M10-A2c–A2k provide cooked load, dependency order, batch load, package validate,
+M10-A2c–A2l provide cooked load, dependency order, batch load, package validate,
 `openCatalogPackage`, the `tina_catalog_validate` CLI (including `--plan-loads`), package
-summary diagnostics, and `planCatalogLoads`/`planCatalogLoadsAll`. Handle/Lease, async IO, and
+summary diagnostics, load plans, and `loadCookedAssetsFromPlan`. Handle/Lease, async IO, and
 Cooker remain out of scope.
 
 M7-C1c-a adds fixed-capacity PMR pointer-policy/route-ancestry storage and a double-buffered

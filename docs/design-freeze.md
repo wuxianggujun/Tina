@@ -372,3 +372,6 @@ M10-A2j 已落地 `planCatalogLoads`：在 load-order 上附带 entry 元数据�
 不读盘、不加载 payload。不实现 Handle/Lease。
 
 M10-A2k 已落地 `planCatalogLoadsAll` 与 CLI `--plan-loads`/`--asset-id` 输出 `loadPlan` JSON。
+
+M10-A2l 已落地 `loadCookedAssetsFromPlan`：按既有计划同步加载，plan 与 Catalog 对齐校验，失败全回滚；
+`loadCookedAssetsFromCatalog` 内部改为先 plan 再加载。不实现 Handle/Lease。
