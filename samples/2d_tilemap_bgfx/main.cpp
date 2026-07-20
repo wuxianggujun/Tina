@@ -153,7 +153,7 @@ void writeJsonString(std::ostream& output, std::string_view value)
 
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d_tilemap_bgfx\",\"message\":";
+    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d\",\"message\":";
     writeJsonString(std::cerr, error.message);
     std::cerr << "}\n";
 }
@@ -407,7 +407,7 @@ struct TileMapResources final {
             },
     });
 
-    resources.catalogRoot = std::filesystem::temp_directory_path() / "tina_sample_2d_tilemap_bgfx_pkg";
+    resources.catalogRoot = std::filesystem::temp_directory_path() / "tina_sample_2d_pkg";
     std::error_code ec;
     std::filesystem::remove_all(resources.catalogRoot, ec);
     const auto rootUtf8 = [&] {
@@ -1069,7 +1069,7 @@ int main(int argc, char** argv)
 #endif
     if (!ok)
     {
-        std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d_tilemap_bgfx\","
+        std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d\","
                      "\"message\":\"verification failed\","
                      "\"frames\":"
                   << counters.frameUpdates << ",\"tileSprites\":" << counters.lastTileSprites
@@ -1088,7 +1088,10 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_2d_tilemap_bgfx\""
+    // Formal product sample name is tina_sample_2d; feature flags report which product
+    // slices were compiled (Physics2D / FreeType). Full pointer non-penetration and
+    // production cooker/manifest still tracked separately in docs.
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_2d\""
               << ",\"frames\":" << counters.frameUpdates << ",\"renderExtractions\":" << counters.renderExtractions
               << ",\"texturesUploaded\":" << counters.texturesUploaded
               << ",\"tileSpritesPerFrame\":" << ExpectedNonEmptyTiles
@@ -1111,6 +1114,15 @@ int main(int argc, char** argv)
               << ",\"freetypeEnabled\":true"
 #else
               << ",\"freetypeEnabled\":false"
+#endif
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D) && defined(TINA_SAMPLE_TILEMAP_FREETYPE)
+              << ",\"productGate\":\"bgfx-physics-freetype\""
+#elif defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+              << ",\"productGate\":\"bgfx-physics\""
+#elif defined(TINA_SAMPLE_TILEMAP_FREETYPE)
+              << ",\"productGate\":\"bgfx-freetype\""
+#else
+              << ",\"productGate\":\"bgfx\""
 #endif
               << ",\"stateExits\":" << counters.stateExits
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns << ",\"exit\":\""

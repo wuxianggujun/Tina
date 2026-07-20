@@ -251,15 +251,21 @@ Tina-owned 稳态动态分配增量必须为0。
 
 ## 正式 2D 验收
 
-`tina_sample_2d` 不能只显示一张 Sprite，也不能由 M9-C 的 fixture Sprite 样例替代。Legacy 删除前必须验证：
+`tina_sample_2d` 不能只显示一张 Sprite，也不能由 M9-C 的 fixture Sprite 样例替代。
+M10-A36 已在 `windows-msvc-vnext-bgfx-product-2d` 上落地首版产品门禁：Catalog cook/load
+Texture2D+Tileset+TileMap、CharacterController、UI HUD panel/Label（可选 FreeType 中文）、
+至少一个 Physics2D dynamic crate 与 Tile static 交互；JSON `sample=tina_sample_2d`。
 
-- 通过最终 Cooker/Catalog/Manifest pipeline 加载 Texture、Sprite、Tileset 和 TileMap；固定
-  Cooked fixture 只允许 infrastructure sample/module test 使用；
-- Orthographic Camera resize、world picking、interpolation 和 pixel snap；
-- 多 layer Sprite、透明混合、Tile chunk culling 与 dirty rebuild；
-- 中文 Label、Button 和 HUD 覆盖，点击 UI 不触发世界选择；
-- 角色经过 Tile swept AABB，至少一个动态 Box2D body 与静态 Tile fixture 交互；
-- 连续300帧正常退出，World、chunk cache、Texture、Buffer、Pipeline 和 UI 资源计数归零；
+Legacy 删除前仍须补齐/加强：
+
+- 通过最终生产 Cooker/Catalog/Manifest pipeline 加载 Texture、Sprite、Tileset 和 TileMap；
+  当前样例使用进程内 cook + temp catalog（fixture 级），不是独立 cooker 工具链全量；
+- Orthographic Camera resize、world picking、interpolation 和 pixel snap 产品行为；
+- 多 layer Sprite、透明混合、Tile chunk culling 与 dirty rebuild 压力门禁；
+- 中文 FreeType Label（product-2d 已有）+ Button 与 HUD 覆盖，**点击 UI 不触发世界选择**
+  （pointer non-penetration 仍后置）；
+- 角色 Tile swept AABB（已有）与至少一个动态 Box2D body（已有 crate）；
+- 连续300帧正常退出与资源归零证据；
 - 画面截图、输入行为、日志/计数和进程返回码分别留证据。
 
 首期明确不实现无限地图 streaming、复杂 Tile 编辑器、Sprite skeletal animation、GPU particle、

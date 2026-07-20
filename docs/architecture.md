@@ -204,13 +204,14 @@ startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 r
 | vNext M10-A33 TileMap sample UI overlay | 已完成 | 同一样例 PrimaryWindowUI 2 SolidQuad HUD panel 生命周期门禁 |
 | vNext M10-A34 TileMap sample Physics2D | 已完成可选门禁 | `windows-msvc-vnext-bgfx-physics2d`：Tile static sync + dynamic crate contact/sprite |
 | vNext M10-A35 TileMap sample FreeType HUD | 已完成可选门禁 | HUD 中英 Label + 可选 FreeType；`windows-msvc-vnext-bgfx-product-2d` 组合 Physics+FreeType |
+| vNext M10-A36 formal tina_sample_2d name | 已完成命名门禁 | executable `tina_sample_2d`（ALIAS 保留旧名）；product-2d JSON `productGate=bgfx-physics-freetype`。pointer non-penetration 后置 |
 | vNext M11-A0 Physics2D lifecycle foundation | 已完成直接门禁 | 可选 `Tina::Physics2D` 只 PUBLIC 依赖 Core，Box2D 3.x PRIVATE；State/feature-owned 单线程 World、固定步长、owner/generation Body/Shape、原子 Box body、pose snapshot、幂等 shutdown |
 | vNext M11-A1 Physics2D contact events | 已完成直接门禁 | step 前复制 begin/end/hit 到固定 Tina storage；destroy tombstone；通道 overflow；`contactEvents()` borrowed view |
 | vNext M11-A2 Physics2D spatial query | 已完成直接门禁 | `overlapAabb` 精确 overlap、`castRay`/`castRayClosest`、caller buffer overflow、稳定排序 |
 | vNext M11-A3 Physics2D deferred commands | 已完成直接门禁 | 固定容量 FIFO `enqueue*`，`step()` 前 flush；stale skip；满队列 CapacityExceeded |
 | vNext M11-A4 Physics2D single-thread bench | 已完成 Release 基线工具 | `tina_physics2d_bench` stack_dynamic step p50/p95/p99 JSON；非 ADR-0018 完整 schema |
 | vNext M11-A5 Physics2D grid static sync | 已完成直接门禁 | solid cell → static box；全有或全无；不依赖 Asset |
-| vNext M11-A6 TileMap→Physics2D bridge | 已完成直接门禁 | Asset `TileMapPhysicsSync` 收集 MaterialSolid 并调用 A5；`Tina::Asset` 在 PHYSICS2D 图 PUBLIC 链接 Physics2D。CharacterController 与正式 `tina_sample_2d` 后置 |
+| vNext M11-A6 TileMap→Physics2D bridge | 已完成直接门禁 | Asset `TileMapPhysicsSync` 收集 MaterialSolid 并调用 A5；`Tina::Asset` 在 PHYSICS2D 图 PUBLIC 链接 Physics2D。`tina_sample_2d` product-2d 图已消费 |
 | vNext GLFW 边界 | 已形成可运行切片 |
  `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
 | 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene component-integrated extraction、AssetSystem/Audio、owning UI packet/pin、Text/Glyph/完整 Widget 与 submission drain 仍按后续切片实施；M8-A World/Transform、M8-B 2D extraction、M9-A 3D CPU/Null extraction、M9-B Opaque3D fixture、M9-C Sprite2D fixture、M10-A0 wire format、M10-A1 CatalogSnapshot、Desktop SolidFill 可见样例、standalone UI/Render/bridge foundation、Runtime-private route/layout/startup/display borrow 接线、Button primary-pointer default action 和私有 bgfx SolidQuad pass 不代表完整产品路径完成 |

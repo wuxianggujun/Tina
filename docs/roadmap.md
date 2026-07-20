@@ -607,14 +607,16 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   无 Physics 时样例仍可在纯 bgfx 图构建；
 - M10-A35 已完成同一样例 HUD Label（`TileMap 2D` + `中文地图`）与可选 FreeType 注入；
   新增 `windows-msvc-vnext-bgfx-product-2d`（bgfx+Physics2D+FreeType）组合 preset；
-  无 FreeType 时 Label 仍走 SolidQuad 占位。input consumption 完整产品门禁后置；
+  无 FreeType 时 Label 仍走 SolidQuad 占位；
+- M10-A36 已将产品 executable 正式命名为 `tina_sample_2d`（目录仍为 `samples/2d_tilemap_bgfx`，
+  保留 `tina_sample_2d_tilemap_bgfx` ALIAS）；product-2d 图 JSON `sample=tina_sample_2d` 且
+  `productGate=bgfx-physics-freetype`。pointer non-penetration / 生产 cooker 全量后置；
 - 完整 Cooker/cgltf 继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；
 - 为正式产品路径把 M7–M9 的内置 fixture 替换为 Catalog/Manifest 资产；hermetic、版本锁定的
-  infrastructure/module-test fixture 继续保留；新增 Cooked glTF/Material/Prefab 3D 产品样例，2D 仍要后续
-  接入 Texture/Sprite/Tileset/TileMap 资产后才形成正式 `tina_sample_2d`。
+  infrastructure/module-test fixture 继续保留；新增 Cooked glTF/Material/Prefab 3D 产品样例。
 
 ## M11 产品 2D、UI 与 Audio
 
@@ -631,8 +633,9 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   `tina_physics2d_tests` 25/25（Debug/Release）；
 - CharacterController2D axis-separated grid mover 已在集成支落地；
   `CharacterControllerPhysicsCoexistenceTest` 证明同一 Tile solid 可同时喂 grid controller 与
-  Physics2D static sync + dynamic body contact；后续仍待：正式 `tina_sample_2d` 产品接线
-  （Catalog+TileMap+角色+Box2D+UI）；只有 bench p99 超预算才接入 Box2D worker callbacks；
+  Physics2D static sync + dynamic body contact；`tina_sample_2d`（M10-A36）已在 product-2d 图接线
+  Catalog+TileMap+角色+Box2D crate+UI/Text；pointer non-penetration 与生产 cooker 后置；
+  只有 bench p99 超预算才接入 Box2D worker callbacks；
 - 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
 - 以当前游戏为正式 2D 产品门禁：Cooked TileMap/Tileset、Camera2D、chunk culling/dirty rebuild、

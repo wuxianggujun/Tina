@@ -74,7 +74,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A33 已实现同一样例 UI SolidQuad overlay 门禁；
   M10-A34 已实现 bgfx+Physics2D preset 与样例内 Tile static + dynamic crate；
   M10-A35 已实现样例中英 HUD Label 与可选 FreeType/`product-2d` preset；
-  完整正式 tina_sample_2d 命名门禁、input consumption、cgltf 仍未实现。
+  M10-A36 已将产品 executable 正式命名为 `tina_sample_2d`（product-2d 组合门禁）；
+  pointer non-penetration、生产 cooker 全量、cgltf 仍后置。
 
 
 ## 下一阶段契约

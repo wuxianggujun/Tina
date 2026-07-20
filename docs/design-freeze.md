@@ -503,7 +503,12 @@ M10-A34：新增 configure/build preset `windows-msvc-vnext-bgfx-physics2d`；
 
 M10-A35：同一样例增加 2 个 HUD Label（`TileMap 2D` / `中文地图`）；`TINA_BUILD_UI_FREETYPE`
 时注入 SourceHan FreeType rasterizer；新增 `windows-msvc-vnext-bgfx-product-2d` 组合
-Physics2D+FreeType。无 FreeType 时 Label 使用 SolidQuad 占位。完整 pointer consumption 后置。
+Physics2D+FreeType。无 FreeType 时 Label 使用 SolidQuad 占位。
+
+M10-A36：产品 executable 正式命名 `tina_sample_2d`（源目录 `samples/2d_tilemap_bgfx`，
+`tina_sample_2d_tilemap_bgfx` 为 ALIAS）。product-2d 图要求 Catalog TileMap + Character +
+UI/Text + Physics crate + FreeType 同进程门禁，JSON `sample=tina_sample_2d`。
+pointer non-penetration 与生产 cooker 全量后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation
