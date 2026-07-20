@@ -416,3 +416,6 @@ CPU payload 在 UploadQueued/ReadyGpu 仍可 tryGet/acquire。后置：bgfx 真�
 
 M10-A9：`AssetSystemConfig::uploadLedger` + `autoGpuUpload`；sync `load` 与 deferred `pump` 在
 ReadyCpu 后自动 track 并 `pumpUploads`，产品路径可一次走到 ReadyGpu（Null）。后置：bgfx 接线。
+
+M10-A10：`tina_sample_asset` 产品 smoke——临时 Catalog 包、BoundedTask IO、request/pump、Null upload、
+ReadyGpu + Lease；输出 JSON。不绘制画面、不依赖 bgfx。

@@ -491,6 +491,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   （Null ledger submit/poll/completeGpu/retire）；bgfx fence/真实 GPU 资源仍后置；
 - M10-A9 已完成 AssetSystem 集成 auto GPU upload：`uploadLedger` 注入后 load/pump 自动
   track+pumpUploads 至 ReadyGpu；仍无 bgfx 真实资源与 FramePin；
+- M10-A10 已完成 `tina_sample_asset` 产品 smoke：Catalog 包 → BoundedTask IO → request/pump →
+  Null upload → ReadyGpu + Lease；仍无 bgfx 真实纹理与 Cooker；
 - 事务 Manifest writer、CPU TaskGroup、bgfx UploadTicket 接线继续后置；
 - `tina_assetc` 执行 Parse → Validate → Build → Validate Cooked → Atomic Write；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
