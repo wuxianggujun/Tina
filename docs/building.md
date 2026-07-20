@@ -73,6 +73,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60
 out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot>
 out\build\windows-msvc-vnext\bin\Debug\tina_assetc.exe --out <catalogRoot> --recipe <pack.recipe>
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot>
+out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --typed-payloads
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catalog=<catalogRoot>
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_3d_extraction.exe --frames=300

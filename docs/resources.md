@@ -56,6 +56,7 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A15 已实现 Texture2D/Sprite cooked payload v1；
   M10-A16 已实现默认 Texture2D+Sprite 产品路径与类型化 payload 解析；
   M10-A17 已实现 openAndBindCatalog / 按类型查找 / typed cooked views；
+  M10-A18 已实现 typed payload 校验门禁（validate/open/CLI）；
   CPU TaskGroup、bgfx 真实纹理采样绘制、完整 Cooker/cgltf 仍未实现。
 
 

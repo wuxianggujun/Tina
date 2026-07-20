@@ -40,6 +40,8 @@ struct AssetSystemConfig final {
     AssetGpuUploadConfig gpuUpload{};
     // When true and uploadLedger is set, newly ReadyCpu handles are auto-tracked for upload.
     bool autoGpuUpload = true;
+    // When true, openAndBindCatalog defaults verifyTypedPayload for Texture2D/Sprite.
+    bool requireTyped2dPayloads = false;
 };
 
 struct AssetPumpStats final {
@@ -131,7 +133,8 @@ class AssetSystem final {
 
     AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std::pmr::memory_resource* memoryResource,
                 Core::usize queueCapacity, Core::u32 defaultPumpBudget, Task::ITaskSystem* taskSystem,
-                Render::NullUploadLedger* uploadLedger, AssetGpuUploadConfig gpuUploadConfig, bool autoGpuUpload);
+                Render::NullUploadLedger* uploadLedger, AssetGpuUploadConfig gpuUploadConfig, bool autoGpuUpload,
+                bool requireTyped2dPayloads);
 
     void forgetHandle(AssetHandle handle) noexcept;
     [[nodiscard]] std::optional<Core::u32> findIndex(Core::AssetId assetId) const noexcept;
@@ -159,6 +162,7 @@ class AssetSystem final {
     std::unique_ptr<AssetGpuUploadCoordinator> m_gpuUpload;
     AssetRetirementLedger m_retirement{};
     bool m_autoGpuUpload = true;
+    bool m_requireTyped2dPayloads = false;
     CatalogSnapshot m_catalog{};
     std::pmr::string m_catalogRoot;
     std::pmr::vector<IndexEntry> m_index;

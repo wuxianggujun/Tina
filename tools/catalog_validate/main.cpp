@@ -25,6 +25,7 @@ struct Options final {
     bool listEntries = false;
     bool planLoads = false;
     bool loadAssets = false;
+    bool typedPayloads = false;
     std::vector<std::string> assetIdTexts;
     Tina::Core::u32 maxEntries = 100000;
     Tina::Core::u32 maxDependencies = 400000;
@@ -41,6 +42,7 @@ void printUsage()
         << "  --list-entries              include entry rows in JSON summary\n"
         << "  --plan-loads                include dependency-first load plan rows\n"
         << "  --load-assets               one-shot open+plan+load cooked assets\n"
+        << "  --typed-payloads            require Texture2D/Sprite payload v1 parse\n"
         << "  --asset-id <32hex>          plan/load only these ids (repeatable; default: all)\n"
         << "  --max-entries <n>\n"
         << "  --max-dependencies <n>\n"
@@ -104,6 +106,11 @@ void printUsage()
         if (arg == "--load-assets")
         {
             options.loadAssets = true;
+            continue;
+        }
+        if (arg == "--typed-payloads")
+        {
+            options.typedPayloads = true;
             continue;
         }
         auto requireValue = [&](std::string_view name) -> std::string_view {
@@ -275,6 +282,7 @@ int main(int argc, char** argv)
             Tina::Asset::CatalogPackageValidationConfig{
                 .file = Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &memoryResource},
                 .verifyContent = !options.metadataOnly,
+                .verifyTypedPayload = options.typedPayloads && !options.metadataOnly,
             },
         .manifestRelativePath = options.manifestRelative,
     };

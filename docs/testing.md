@@ -67,6 +67,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A15 Texture/Sprite payload | Debug/Release C++23 | 23/23 format | Texture2D/Sprite write/parse/cooked round-trip；`tina_asset_format_tests` 23 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A16 typed 2D product path | Debug/Release C++23 | 见实现门禁 | cook→load→parse Texture/Sprite；assetc/sample typed2d；`tina_asset_tests` 76 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A17 catalog helpers | Debug/Release C++23 | 见实现门禁 | openAndBindCatalog + kind find + typed views；`tina_asset_tests` 77 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A18 typed payload validation | Debug/Release C++23 | 见实现门禁 | verifyTypedPayload 接受/拒绝；CLI --typed-payloads；`tina_asset_tests` 79 |
 
 
 

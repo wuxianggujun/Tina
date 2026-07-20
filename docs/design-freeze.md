@@ -441,3 +441,6 @@ ReadyGpu 后 parse 类型化 payload（width/height/ppu）。`--legacy-text` 保
 
 M10-A17：`AssetSystem::openAndBindCatalog` 一站式打开绑定；`catalogFirstIdOfKind`/
 `findFirstLoadedOfKind`；`parseTexture2DFromCooked`/`parseSpriteFromCooked` 类型化视图。
+
+M10-A18：`verifyTypedPayload` 在 content 校验后解析 Texture2D/Sprite v1；`requireTyped2dPayloads`
+让 openAndBind 默认开启；`tina_catalog_validate --typed-payloads`；默认 false 保持旧 raw fixture 兼容。

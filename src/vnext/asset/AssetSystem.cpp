@@ -32,11 +32,12 @@ namespace {
 AssetSystem::AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std::pmr::memory_resource* memoryResource,
                          Core::usize queueCapacity, Core::u32 defaultPumpBudget, Task::ITaskSystem* taskSystem,
                          Render::NullUploadLedger* uploadLedger, AssetGpuUploadConfig gpuUploadConfig,
-                         bool autoGpuUpload)
+                         bool autoGpuUpload, bool requireTyped2dPayloads)
     : m_store(std::move(store)), m_batch(batch), m_memoryResource(memoryResource), m_queueCapacity(queueCapacity),
       m_defaultPumpBudget(defaultPumpBudget), m_taskSystem(taskSystem), m_uploadLedger(uploadLedger),
-      m_gpuUploadConfig(gpuUploadConfig), m_autoGpuUpload(autoGpuUpload), m_catalogRoot(memoryResource),
-      m_index(memoryResource), m_queue(memoryResource)
+      m_gpuUploadConfig(gpuUploadConfig), m_autoGpuUpload(autoGpuUpload),
+      m_requireTyped2dPayloads(requireTyped2dPayloads), m_catalogRoot(memoryResource), m_index(memoryResource),
+      m_queue(memoryResource)
 {
     if (m_uploadLedger != nullptr)
     {
@@ -51,9 +52,10 @@ AssetSystem::AssetSystem(AssetSystem&& other) noexcept
     : m_store(std::move(other.m_store)), m_batch(other.m_batch), m_memoryResource(other.m_memoryResource),
       m_queueCapacity(other.m_queueCapacity), m_defaultPumpBudget(other.m_defaultPumpBudget),
       m_taskSystem(other.m_taskSystem), m_uploadLedger(other.m_uploadLedger), m_gpuUploadConfig(other.m_gpuUploadConfig),
-      m_autoGpuUpload(other.m_autoGpuUpload), m_catalog(std::move(other.m_catalog)),
-      m_catalogRoot(std::move(other.m_catalogRoot)), m_index(std::move(other.m_index)),
-      m_queue(std::move(other.m_queue)), m_inFlight(other.m_inFlight.load(std::memory_order_relaxed))
+      m_autoGpuUpload(other.m_autoGpuUpload), m_requireTyped2dPayloads(other.m_requireTyped2dPayloads),
+      m_catalog(std::move(other.m_catalog)), m_catalogRoot(std::move(other.m_catalogRoot)),
+      m_index(std::move(other.m_index)), m_queue(std::move(other.m_queue)),
+      m_inFlight(other.m_inFlight.load(std::memory_order_relaxed))
 {
     // Rebuild coordinator against this->m_store and this->m_retirement.
     other.m_gpuUpload.reset();
@@ -68,6 +70,7 @@ AssetSystem::AssetSystem(AssetSystem&& other) noexcept
     other.m_queueCapacity = 0;
     other.m_defaultPumpBudget = 0;
     other.m_autoGpuUpload = true;
+    other.m_requireTyped2dPayloads = false;
     other.m_inFlight.store(0, std::memory_order_relaxed);
 }
 
@@ -104,7 +107,7 @@ Core::Result<AssetSystem> AssetSystem::Create(AssetSystemConfig config)
     {
         return AssetSystem(std::move(*store), config.batch, config.memoryResource, config.queueCapacity,
                            config.defaultPumpBudget, config.taskSystem, config.uploadLedger, config.gpuUpload,
-                           config.autoGpuUpload);
+                           config.autoGpuUpload, config.requireTyped2dPayloads);
     } catch (const std::bad_alloc&)
     {
         return Core::failure(AssetErrorCode::AllocationFailed, "asset system construction failed");
@@ -158,6 +161,11 @@ Core::Status AssetSystem::openAndBindCatalog(std::string_view catalogRootUtf8, C
     if (openConfig.validation.file.memoryResource == nullptr)
     {
         openConfig.validation.file.memoryResource = m_memoryResource;
+    }
+    if (m_requireTyped2dPayloads)
+    {
+        openConfig.validation.verifyContent = true;
+        openConfig.validation.verifyTypedPayload = true;
     }
     auto catalog = openCatalogPackage(catalogRootUtf8, openConfig);
     if (!catalog)

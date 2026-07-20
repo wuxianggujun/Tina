@@ -264,6 +264,7 @@ int main(int argc, char** argv)
             Tina::Asset::CatalogPackageValidationConfig{
                 .file = Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &memory},
                 .verifyContent = true,
+                .verifyTypedPayload = options.useTyped2dFixture && options.recipePath.empty(),
             },
     };
     auto catalog = Tina::Asset::openCatalogPackage(options.outRoot, openConfig);

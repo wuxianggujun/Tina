@@ -10,6 +10,7 @@ set(TINA_ASSET_TEST_SOURCES
     CatalogCookTests.cpp
     Typed2dCatalogPipelineTests.cpp
     AssetSystemCatalogApiTests.cpp
+    TypedPayloadValidationTests.cpp
     CatalogLoadOrderTests.cpp
     CatalogLoadPlanTests.cpp
     CatalogPackageTests.cpp

@@ -201,6 +201,7 @@ int main(int argc, char** argv)
         .taskSystem = taskSystem->get(),
         .uploadLedger = &(*ledger),
         .autoGpuUpload = true,
+        .requireTyped2dPayloads = true,
     });
     if (!system)
     {

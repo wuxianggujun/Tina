@@ -1,6 +1,7 @@
 #include <tina/asset/CatalogPackageValidation.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/asset/AssetTypedViews.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/io/ReadFile.hpp>
 #include <tina/core/text/Utf8.hpp>
@@ -179,6 +180,25 @@ Core::Status validateCatalogPackageOnDisk(std::string_view catalogRootUtf8, cons
             if (!asset)
             {
                 return Core::failure(withEntryContext(std::move(asset.error()), *entry, "content"));
+            }
+            if (config.verifyTypedPayload)
+            {
+                if (entry->assetKind == AssetFormat::AssetKind::Texture2D)
+                {
+                    auto typed = parseTexture2DFromCooked(*asset);
+                    if (!typed)
+                    {
+                        return Core::failure(
+                            withEntryContext(std::move(typed.error()), *entry, "typedTexture2D"));
+                    }
+                } else if (entry->assetKind == AssetFormat::AssetKind::Sprite)
+                {
+                    auto typed = parseSpriteFromCooked(*asset);
+                    if (!typed)
+                    {
+                        return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedSprite"));
+                    }
+                }
             }
         }
     } catch (const std::bad_alloc&)
