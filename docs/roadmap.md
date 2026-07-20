@@ -416,9 +416,12 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - **已完成 M7-E5（IMM32 composition 骨架）**：backend-neutral `Imm32CompositionSession`（Started/
   Updated/Ended/Cancelled、固定 preedit 缓冲、UTF-16→UTF-8）；Win32 私有
   `Imm32CompositionHostWin32` subclass HWND 并 drain `TextCompositionTransition` + commit
-  `TextInputTransition`；focus lost 取消 composition；active IME 时抑制重复 char。尚无 UI
-  TextEdit 消费、候选窗、跨平台 IME。
-- **仍后置**：UI TextEdit/IME 路由消费；完整 Focus Scope/Capture/Modal；Gamepad 方向长按重复与
+  `TextInputTransition`；focus lost 取消 composition；active IME 时抑制重复 char。
+- **已完成 M7-E6（UI IME 路由消费到 Label）**：Label 默认 `Targetable`；Primary Down 设
+  `imeFocus`；`routeTextComposition` 保留 preedit；`routeTextInput` 追加 commit 到 Label 文本；
+  Runtime `UIInputRouteProducer` 转发 composition/commit。尚无完整 TextEdit/caret/selection、
+  preedit 绘制、候选窗。
+- **仍后置**：完整 TextEdit/caret/preedit paint；Focus Scope/Capture/Modal；Gamepad 方向长按重复与
   完整 Accept/Cancel 导航；100%/150%/200% DPI 产品门禁与资源回收专项。
 
 ## M8 Scene 与 2D 垂直切片

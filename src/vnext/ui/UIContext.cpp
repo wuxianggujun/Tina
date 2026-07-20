@@ -716,6 +716,13 @@ struct UIContext::Impl final {
     // Last Button that received Primary Pointer arm. Keyboard/Gamepad Accept
     // activates this node without requiring a live pointer press.
     UINodeId defaultActionFocusButton{};
+    // Last Label that received Primary Pointer Down (IME/text target).
+    UINodeId imeFocusLabel{};
+    static constexpr usize MaxImePreeditBytes = 512;
+    std::array<char, MaxImePreeditBytes> imePreeditBytes_{};
+    usize imePreeditSize_ = 0;
+    u32 imePreeditCursor_ = 0;
+    bool imeCompositionActive_ = false;
 
     Impl(
         Platform::WindowId owner,
@@ -2461,6 +2468,28 @@ struct UIContext::Impl final {
         defaultActionFocusButton = {};
     }
 
+    void clearImeComposition() noexcept
+    {
+        imeCompositionActive_ = false;
+        imePreeditSize_ = 0;
+        imePreeditCursor_ = 0;
+    }
+
+    void clearImeFocus() noexcept
+    {
+        clearImeComposition();
+        imeFocusLabel = {};
+    }
+
+    [[nodiscard]] bool isLiveLabel(UINodeId node) const noexcept
+    {
+        if (!node.hasValue() || !contains(node)) {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        return record != nullptr && record->kind == UIWidgetKind::Label;
+    }
+
     void recycleButtonAction(u32 actionIndex) noexcept
     {
         if (actionIndex >= buttonActions.size()) {
@@ -2561,6 +2590,9 @@ struct UIContext::Impl final {
         }
         if (defaultActionFocusButton == node) {
             clearDefaultActionFocus();
+        }
+        if (imeFocusLabel == node) {
+            clearImeFocus();
         }
         const u32 actionIndex = buttonActionIndexByNodeIndex[nodeIndex];
         buttonActionIndexByNodeIndex[nodeIndex] = InvalidButtonActionIndex;
@@ -2950,7 +2982,10 @@ struct UIContext::Impl final {
         NodeRecord* record = nodes.tryGet(node.storageId());
         record->kind = kind;
         record->rootIndex = node.index();
-        pointerHitPoliciesByIndex[node.index()] = kind == UIWidgetKind::Button
+        // Button and Label are Targetable: Label is the IME/text target surface
+        // (M7-E6). Root/Panel remain Ignore.
+        pointerHitPoliciesByIndex[node.index()] =
+            (kind == UIWidgetKind::Button || kind == UIWidgetKind::Label)
             ? UIPointerHitPolicy::Targetable
             : UIPointerHitPolicy::Ignore;
         return node;
@@ -4523,6 +4558,17 @@ struct UIContext::Impl final {
                         Platform::PointerButton::Primary));
                 }
             }
+            // Label becomes the IME/text target on primary Down.
+            if (result.pointQuery.target.node.hasValue()
+                && contains(result.pointQuery.target.node)) {
+                const NodeRecord* targetRecord =
+                    nodes.tryGet(result.pointQuery.target.node.storageId());
+                if (targetRecord != nullptr
+                    && targetRecord->kind == UIWidgetKind::Label) {
+                    imeFocusLabel = result.pointQuery.target.node;
+                    clearImeComposition();
+                }
+            }
         } else if (input.kind == UIRoutedPointerEventKind::Move
                    && hadArmedInteraction
                    && armedPrimaryButton == armedButtonAtRouteStart) {
@@ -4737,6 +4783,155 @@ struct UIContext::Impl final {
             return {};
         }
         return defaultActionFocusButton;
+    }
+
+    [[nodiscard]] UINodeId imeFocus() const noexcept
+    {
+        if (!isLiveLabel(imeFocusLabel)) {
+            return {};
+        }
+        return imeFocusLabel;
+    }
+
+    [[nodiscard]] bool imeCompositionActive() const noexcept
+    {
+        return imeCompositionActive_ && isLiveLabel(imeFocusLabel);
+    }
+
+    [[nodiscard]] std::string_view imePreeditUtf8() const noexcept
+    {
+        if (!imeCompositionActive_) {
+            return {};
+        }
+        return std::string_view(imePreeditBytes_.data(), imePreeditSize_);
+    }
+
+    [[nodiscard]] u32 imePreeditCursorCodepoint() const noexcept
+    {
+        return imeCompositionActive_ ? imePreeditCursor_ : 0U;
+    }
+
+    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextComposition(
+        Platform::WindowId window,
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        std::string_view preeditUtf8,
+        u32 cursorCodepoint,
+        Platform::TextCompositionStage stage)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!window.hasValue() || window != ownerWindow) {
+            return fail(
+                UIErrorCode::WrongOwnerWindow,
+                "UI text composition belongs to another owner window");
+        }
+        if (!platformFrame.hasValue() || sourceSequence == 0) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI text composition requires a platform frame and sequence");
+        }
+        if (!isLiveLabel(imeFocusLabel)) {
+            clearImeFocus();
+            return UITextInputRouteResult{};
+        }
+
+        using Stage = Platform::TextCompositionStage;
+        if (stage == Stage::Cancelled || stage == Stage::Ended) {
+            clearImeComposition();
+            return UITextInputRouteResult{.consumed = true, .applied = true};
+        }
+        if (!Core::isStrictUtf8WithoutNul(preeditUtf8)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI IME preedit must be strict UTF-8 without embedded NUL");
+        }
+        if (preeditUtf8.size() > MaxImePreeditBytes) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI IME preedit exceeds the fixed context buffer");
+        }
+        const auto codepoints =
+            Core::countStrictUtf8CodepointsWithoutNul(preeditUtf8);
+        if (!codepoints.has_value()) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI IME preedit must be strict UTF-8 without embedded NUL");
+        }
+        if (!preeditUtf8.empty()) {
+            std::memcpy(imePreeditBytes_.data(), preeditUtf8.data(), preeditUtf8.size());
+        }
+        imePreeditSize_ = preeditUtf8.size();
+        imePreeditCursor_ = (std::min)(cursorCodepoint, *codepoints);
+        imeCompositionActive_ = true;
+        return UITextInputRouteResult{.consumed = true, .applied = true};
+    }
+
+    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextInput(
+        Platform::WindowId window,
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        std::string_view committedUtf8)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!window.hasValue() || window != ownerWindow) {
+            return fail(
+                UIErrorCode::WrongOwnerWindow,
+                "UI text input belongs to another owner window");
+        }
+        if (!platformFrame.hasValue() || sourceSequence == 0) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI text input requires a platform frame and sequence");
+        }
+        if (!isLiveLabel(imeFocusLabel)) {
+            clearImeFocus();
+            return UITextInputRouteResult{};
+        }
+        if (!Core::isStrictUtf8WithoutNul(committedUtf8)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI text input must be strict UTF-8 without embedded NUL");
+        }
+        // Commit ends any active preedit.
+        clearImeComposition();
+        if (committedUtf8.empty()) {
+            return UITextInputRouteResult{.consumed = true, .applied = true};
+        }
+
+        const NodeRecord* record = nodes.tryGet(imeFocusLabel.storageId());
+        if (record == nullptr) {
+            clearImeFocus();
+            return UITextInputRouteResult{};
+        }
+        const UINodeId rootNode = idForIndex(record->rootIndex);
+        if (!rootNode.hasValue()) {
+            clearImeFocus();
+            return UITextInputRouteResult{};
+        }
+
+        const std::string_view current = textViewFor(imeFocusLabel.index());
+        if (current.size() > (std::numeric_limits<usize>::max)() - committedUtf8.size()) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI text input would overflow the text byte capacity");
+        }
+        // One-shot commit allocation; not a per-frame hot path.
+        std::string combined;
+        combined.reserve(current.size() + committedUtf8.size());
+        combined.append(current);
+        combined.append(committedUtf8);
+        if (Core::Status status =
+                setTextFromUpdater(rootNode, imeFocusLabel, combined);
+            !status) {
+            return Core::failure(status.error());
+        }
+        return UITextInputRouteResult{.consumed = true, .applied = true};
     }
 
     [[nodiscard]] UIContextStatistics statistics() const noexcept
@@ -5448,6 +5643,57 @@ UINodeId UIContext::defaultActionFocus() const noexcept
         return {};
     }
     return m_impl->defaultActionFocus();
+}
+
+UINodeId UIContext::imeFocus() const noexcept
+{
+    if (!m_impl->isOwnerThread()) {
+        return {};
+    }
+    return m_impl->imeFocus();
+}
+
+bool UIContext::imeCompositionActive() const noexcept
+{
+    return m_impl->isOwnerThread() && m_impl->imeCompositionActive();
+}
+
+std::string_view UIContext::imePreeditUtf8() const noexcept
+{
+    if (!m_impl->isOwnerThread()) {
+        return {};
+    }
+    return m_impl->imePreeditUtf8();
+}
+
+u32 UIContext::imePreeditCursorCodepoint() const noexcept
+{
+    if (!m_impl->isOwnerThread()) {
+        return 0;
+    }
+    return m_impl->imePreeditCursorCodepoint();
+}
+
+Core::Result<UIContext::UITextInputRouteResult> UIContext::routeTextComposition(
+    Platform::WindowId window,
+    Platform::PlatformFrameId platformFrame,
+    u64 sourceSequence,
+    std::string_view preeditUtf8,
+    u32 cursorCodepoint,
+    Platform::TextCompositionStage stage)
+{
+    return m_impl->routeTextComposition(
+        window, platformFrame, sourceSequence, preeditUtf8, cursorCodepoint, stage);
+}
+
+Core::Result<UIContext::UITextInputRouteResult> UIContext::routeTextInput(
+    Platform::WindowId window,
+    Platform::PlatformFrameId platformFrame,
+    u64 sourceSequence,
+    std::string_view committedUtf8)
+{
+    return m_impl->routeTextInput(
+        window, platformFrame, sourceSequence, committedUtf8);
 }
 
 UIContextStatistics UIContext::statistics() const noexcept

@@ -652,7 +652,10 @@ M7-E2：Button 默认激活焦点由 Primary Pointer arm 设置；Keyboard Enter
 Gamepad South Down 经 `routeDefaultActionActivate` 触发 action 并消费输入。
 
 M7-E3：Tab / Shift+Tab 经 `routeDefaultActionFocusStep` 在可见 Targetable Button 间循环默认
-焦点。尚无完整 Focus Scope、Modal、方向键导航、IME composition。
+焦点。
+
+M7-E6：Label 默认可命中；指针 Down 设 IME 焦点；composition preedit 保留在 Context；commit 追加
+到 Label 文本。尚无 TextEdit 控件、caret、preedit 绘制与候选窗。
 
 Runtime 不按路径打开字体。Cooked `FontAsset` 提供 owning bytes、face metadata 和确定 fallback
 chain；UI 持有 `AssetLease<FontData>`。FreeType 类型只存在于 `tina_ui_freetype`。

@@ -310,10 +310,11 @@ TEST_F(UIButtonActionTest, WidgetKindsPublishExpectedDefaultHitPolicies)
     EXPECT_EQ(hit.entries()[1].node, panel);
     EXPECT_EQ(hit.entries()[1].policy, UI::UIPointerHitPolicy::Ignore);
     EXPECT_EQ(hit.entries()[2].node, label);
-    EXPECT_EQ(hit.entries()[2].policy, UI::UIPointerHitPolicy::Ignore);
+    // Label is Targetable so it can become the IME/text focus target (M7-E6).
+    EXPECT_EQ(hit.entries()[2].policy, UI::UIPointerHitPolicy::Targetable);
     EXPECT_EQ(hit.entries()[3].node, button);
     EXPECT_EQ(hit.entries()[3].policy, UI::UIPointerHitPolicy::Targetable);
-    EXPECT_EQ(context->statistics().committedHitTargetCount, 1U);
+    EXPECT_EQ(context->statistics().committedHitTargetCount, 2U);
 }
 
 TEST_F(UIButtonActionTest, PrimaryPointerDownMoveUpPressedAndActivatesOnce)

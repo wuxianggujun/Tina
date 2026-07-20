@@ -24,6 +24,9 @@
 #include <span>
 #include <string_view>
 
+// Platform text composition stage lives in platform Input.hpp (already included
+// transitively via UIEventRouting / PlatformFrame).
+
 namespace Tina::UI::Detail {
 
 struct UIContextLifetimeControl;
@@ -313,6 +316,31 @@ public:
     [[nodiscard]] Core::Result<UIDefaultFocusStepResult> routeDefaultActionFocusStep(
         bool reverse);
     [[nodiscard]] UINodeId defaultActionFocus() const noexcept;
+
+    // IME/text target (M7-E6). Pointer-down on a Label sets ime focus. Composition
+    // preedit is retained on the context; commit appends UTF-8 to the Label text.
+    // Not a full TextEdit widget / caret / selection model.
+    struct UITextInputRouteResult final {
+        bool consumed = false;
+        bool applied = false;
+    };
+    [[nodiscard]] UINodeId imeFocus() const noexcept;
+    [[nodiscard]] bool imeCompositionActive() const noexcept;
+    [[nodiscard]] std::string_view imePreeditUtf8() const noexcept;
+    [[nodiscard]] u32 imePreeditCursorCodepoint() const noexcept;
+    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextComposition(
+        Platform::WindowId window,
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        std::string_view preeditUtf8,
+        u32 cursorCodepoint,
+        Platform::TextCompositionStage stage);
+    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextInput(
+        Platform::WindowId window,
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        std::string_view committedUtf8);
+
     [[nodiscard]] UIContextStatistics statistics() const noexcept;
     [[nodiscard]] usize liveNodeCount() const noexcept;
     [[nodiscard]] usize liveRootCount() const noexcept;

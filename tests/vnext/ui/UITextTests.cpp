@@ -344,4 +344,115 @@ TEST(UITextTests, SameTextIsNoOpAndClearingTextShrinksAutoSize)
     EXPECT_TRUE(found);
 }
 
+TEST(UITextTests, ImeFocusCompositionAndCommitAppendToLabel)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+    const Platform::WindowId window = *windowResult;
+
+    auto context = createContext(
+        window,
+        UI::UIContextCapacityConfig{
+            .nodeCapacity = 8,
+            .rootCapacity = 1,
+            .textByteCapacity = 256,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle rootStyle{};
+    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
+
+    auto labelResult = updater.createLabel(root.rootNodeId());
+    ASSERT_TRUE(labelResult.has_value());
+    const UI::UINodeId label = *labelResult;
+    UI::UILayoutStyle labelStyle{};
+    labelStyle.size.width = UI::UILayoutLength::Px(100.0F);
+    labelStyle.size.height = UI::UILayoutLength::Px(40.0F);
+    assertOk(updater.setLayoutStyle(label, labelStyle));
+    assertOk(updater.setText(label, "Hi"));
+    assertOk(context->commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
+
+    EXPECT_FALSE(context->imeFocus().hasValue());
+
+    // Primary Down on the Label sets IME focus.
+    auto down = context->routePointerInput(UI::UIPointerInputEvent{
+        .platformFrame = Platform::PlatformFrameId{1},
+        .transitionOrdinal = 0,
+        .sourceSequence = 1,
+        .window = window,
+        .pointer = Platform::PrimaryPointerId,
+        .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+        .position = {.x = 10.0F, .y = 10.0F},
+        .button = Platform::PointerButton::Primary,
+    });
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    EXPECT_EQ(context->imeFocus(), label);
+
+    auto composition = context->routeTextComposition(
+        window,
+        Platform::PlatformFrameId{2},
+        2,
+        "ni",
+        2,
+        Platform::TextCompositionStage::Started);
+    ASSERT_TRUE(composition.has_value()) << (composition ? "" : composition.error().message);
+    EXPECT_TRUE(composition->consumed);
+    EXPECT_TRUE(composition->applied);
+    EXPECT_TRUE(context->imeCompositionActive());
+    EXPECT_EQ(context->imePreeditUtf8(), "ni");
+    EXPECT_EQ(context->imePreeditCursorCodepoint(), 2U);
+
+    auto updated = context->routeTextComposition(
+        window,
+        Platform::PlatformFrameId{3},
+        3,
+        "你",
+        1,
+        Platform::TextCompositionStage::Updated);
+    ASSERT_TRUE(updated.has_value());
+    EXPECT_EQ(context->imePreeditUtf8(), "你");
+
+    auto commit = context->routeTextInput(
+        window,
+        Platform::PlatformFrameId{4},
+        4,
+        "好");
+    ASSERT_TRUE(commit.has_value()) << (commit ? "" : commit.error().message);
+    EXPECT_TRUE(commit->consumed);
+    EXPECT_TRUE(commit->applied);
+    EXPECT_FALSE(context->imeCompositionActive());
+    EXPECT_TRUE(context->imePreeditUtf8().empty());
+
+    auto text = updater.text(label);
+    ASSERT_TRUE(text.has_value());
+    EXPECT_EQ(*text, "Hi好");
+}
+
+TEST(UITextTests, TextInputWithoutImeFocusIsNotConsumed)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+    const Platform::WindowId window = *windowResult;
+
+    auto context = createContext(window, {.nodeCapacity = 4, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+
+    auto idle = context->routeTextInput(
+        window,
+        Platform::PlatformFrameId{1},
+        1,
+        "x");
+    ASSERT_TRUE(idle.has_value());
+    EXPECT_FALSE(idle->consumed);
+    EXPECT_FALSE(idle->applied);
+}
+
 } // namespace Tina::Tests

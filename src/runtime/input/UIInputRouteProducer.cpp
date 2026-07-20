@@ -326,6 +326,60 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             continue;
         }
 
+        // IME composition / commit targeting the Label under ime focus.
+        if (const auto* composition =
+                std::get_if<Platform::TextCompositionTransition>(
+                    &transitions[ordinal].payload);
+            composition != nullptr
+            && composition->window == context->ownerWindow())
+        {
+            auto routed = context->routeTextComposition(
+                composition->window,
+                platformFrame.id(),
+                transitions[ordinal].sequence,
+                composition->preeditUtf8,
+                composition->cursorCodepoint,
+                composition->stage);
+            if (!routed)
+            {
+                Core::Error error = std::move(routed.error());
+                error.addContext("UIInputRouteProducer::produce(text-composition)");
+                return Core::failure(std::move(error));
+            }
+            if (routed->consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+            }
+            continue;
+        }
+        if (const auto* text =
+                std::get_if<Platform::TextInputTransition>(
+                    &transitions[ordinal].payload);
+            text != nullptr
+            && text->window == context->ownerWindow())
+        {
+            auto routed = context->routeTextInput(
+                text->window,
+                platformFrame.id(),
+                transitions[ordinal].sequence,
+                text->committedUtf8);
+            if (!routed)
+            {
+                Core::Error error = std::move(routed.error());
+                error.addContext("UIInputRouteProducer::produce(text-input)");
+                return Core::failure(std::move(error));
+            }
+            if (routed->consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+            }
+            continue;
+        }
+
         // Tab cycles default-action focus among Buttons. Shift is read from the
         // primary-window held key snapshot (KeyTransition carries no modifiers).
         if (const auto* key =
