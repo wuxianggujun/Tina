@@ -406,8 +406,11 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - **已完成 M7-E2（Button Keyboard/Gamepad Accept 默认激活）**：Primary Pointer arm 同时写入
   `defaultActionFocusButton`；`UIContext::routeDefaultActionActivate` 支持 Keyboard/Gamepad source；
   Runtime `UIInputRouteProducer` 对 Enter/Space/KeypadEnter 与 Gamepad South Down 调用并消费
-  transition。无完整 Focus Scope/Tab 导航、无方向键、无 IME、无摇杆回滞/长按重复。
-- **仍后置**：Windows IME 私有 IMM32 adapter；Focus/Capture/composition 取消与窗口销毁顺序；
+  transition。
+- **已完成 M7-E3（Tab 默认焦点循环）**：`routeDefaultActionFocusStep` 在 committed layout 的
+  可见 Targetable Button 间按 paint order 循环；Runtime 对 Tab Down 调用（Shift 从 heldKeys
+  读 Left/RightShift 反向）。固定 256 候选上限、无堆分配。无完整 Focus Scope/Modal/方向导航。
+- **仍后置**：Windows IME 私有 IMM32 adapter；完整 Focus Scope/Capture/composition 与窗口销毁顺序；
   Gamepad 回滞/重复与完整 Accept/Cancel 导航；100%/150%/200% DPI 产品门禁与资源回收专项。
 
 ## M8 Scene 与 2D 垂直切片

@@ -302,6 +302,17 @@ public:
         Platform::PlatformFrameId platformFrame,
         u64 sourceSequence,
         UIButtonActivationSource source);
+    // Cycles default-action focus among visible Targetable Buttons in paint
+    // order. reverse=true moves backward (Shift+Tab). Consumes when any
+    // candidate exists. Not a full Focus Scope / Modal system.
+    struct UIDefaultFocusStepResult final {
+        bool consumed = false;
+        bool moved = false;
+        UINodeId focus{};
+    };
+    [[nodiscard]] Core::Result<UIDefaultFocusStepResult> routeDefaultActionFocusStep(
+        bool reverse);
+    [[nodiscard]] UINodeId defaultActionFocus() const noexcept;
     [[nodiscard]] UIContextStatistics statistics() const noexcept;
     [[nodiscard]] usize liveNodeCount() const noexcept;
     [[nodiscard]] usize liveRootCount() const noexcept;

@@ -4651,6 +4651,94 @@ struct UIContext::Impl final {
         return UIDefaultActionResult{.consumed = true, .activated = true};
     }
 
+    [[nodiscard]] Core::Result<UIDefaultFocusStepResult> routeDefaultActionFocusStep(
+        bool reverse)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+
+        // Collect visible Targetable Buttons in last committed layout paint order.
+        // Fixed stack table keeps this path allocation-free (M7-E3 scope).
+        constexpr usize MaxTabCandidates = 256;
+        std::array<UINodeId, MaxTabCandidates> candidates{};
+        usize candidateCount = 0;
+        const std::pmr::vector<UICommittedLayoutEntry>& layout =
+            committedLayoutBuffers[publishedLayoutBufferIndex];
+        for (const UICommittedLayoutEntry& entry : layout) {
+            if (entry.effectiveVisibility != UIVisibility::Visible) {
+                continue;
+            }
+            if (!contains(entry.node)) {
+                continue;
+            }
+            const NodeRecord* record = nodes.tryGet(entry.node.storageId());
+            if (record == nullptr || record->kind != UIWidgetKind::Button) {
+                continue;
+            }
+            if (entry.node.index() >= pointerHitPoliciesByIndex.size()) {
+                continue;
+            }
+            if (pointerHitPoliciesByIndex[entry.node.index()]
+                != UIPointerHitPolicy::Targetable) {
+                continue;
+            }
+            if (candidateCount >= MaxTabCandidates) {
+                return fail(
+                    UIErrorCode::CapacityExceeded,
+                    "UI default-action Tab candidate capacity has been exhausted");
+            }
+            candidates[candidateCount] = entry.node;
+            ++candidateCount;
+        }
+        if (candidateCount == 0) {
+            clearDefaultActionFocus();
+            return UIDefaultFocusStepResult{};
+        }
+
+        usize currentIndex = candidateCount;
+        if (defaultActionFocusButton.hasValue()) {
+            for (usize i = 0; i < candidateCount; ++i) {
+                if (candidates[i] == defaultActionFocusButton) {
+                    currentIndex = i;
+                    break;
+                }
+            }
+        }
+
+        usize nextIndex = 0;
+        if (currentIndex >= candidateCount) {
+            nextIndex = reverse ? candidateCount - 1U : 0U;
+        } else if (reverse) {
+            nextIndex = currentIndex == 0 ? candidateCount - 1U : currentIndex - 1U;
+        } else {
+            nextIndex = (currentIndex + 1U) % candidateCount;
+        }
+
+        const UINodeId nextFocus = candidates[nextIndex];
+        const bool moved =
+            !defaultActionFocusButton.hasValue()
+            || defaultActionFocusButton != nextFocus;
+        defaultActionFocusButton = nextFocus;
+        // Tab navigation does not keep a live pointer arm.
+        clearArmedPrimaryButton();
+        return UIDefaultFocusStepResult{
+            .consumed = true,
+            .moved = moved,
+            .focus = nextFocus,
+        };
+    }
+
+    [[nodiscard]] UINodeId defaultActionFocus() const noexcept
+    {
+        if (!defaultActionFocusButton.hasValue()
+            || !contains(defaultActionFocusButton)) {
+            return {};
+        }
+        return defaultActionFocusButton;
+    }
+
     [[nodiscard]] UIContextStatistics statistics() const noexcept
     {
         return UIContextStatistics{
@@ -5346,6 +5434,20 @@ UIContext::routeDefaultActionActivate(
 {
     return m_impl->routeDefaultActionActivate(
         platformFrame, sourceSequence, source);
+}
+
+Core::Result<UIContext::UIDefaultFocusStepResult>
+UIContext::routeDefaultActionFocusStep(bool reverse)
+{
+    return m_impl->routeDefaultActionFocusStep(reverse);
+}
+
+UINodeId UIContext::defaultActionFocus() const noexcept
+{
+    if (!m_impl->isOwnerThread()) {
+        return {};
+    }
+    return m_impl->defaultActionFocus();
 }
 
 UIContextStatistics UIContext::statistics() const noexcept

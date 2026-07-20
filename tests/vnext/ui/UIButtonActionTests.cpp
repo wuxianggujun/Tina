@@ -981,5 +981,48 @@ TEST_F(UIButtonActionTest, DefaultActionWithoutRegisteredCallbackConsumesButDoes
     EXPECT_FALSE(result->activated);
 }
 
+TEST_F(UIButtonActionTest, TabCyclesDefaultActionFocusAmongButtons)
+{
+    auto context = createContext(firstWindow);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 40.0F)));
+
+    const UI::UINodeId first = createButton(*context, root.rootNodeId());
+    const UI::UINodeId second = createButton(*context, root.rootNodeId());
+    const UI::UINodeId third = createButton(*context, root.rootNodeId());
+    assertOk(updater.setLayoutStyle(first, fixedSize(40.0F, 20.0F)));
+    assertOk(updater.setLayoutStyle(second, fixedSize(40.0F, 20.0F)));
+    assertOk(updater.setLayoutStyle(third, fixedSize(40.0F, 20.0F)));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 40.0F}));
+
+    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+
+    auto step1 = context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(step1.has_value()) << (step1 ? "" : step1.error().message);
+    EXPECT_TRUE(step1->consumed);
+    EXPECT_TRUE(step1->moved);
+    EXPECT_EQ(step1->focus, first);
+    EXPECT_EQ(context->defaultActionFocus(), first);
+
+    auto step2 = context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(step2.has_value());
+    EXPECT_TRUE(step2->consumed);
+    EXPECT_EQ(step2->focus, second);
+
+    auto step3 = context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(step3.has_value());
+    EXPECT_EQ(step3->focus, third);
+
+    auto wrap = context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(wrap.has_value());
+    EXPECT_EQ(wrap->focus, first);
+
+    auto reverse = context->routeDefaultActionFocusStep(true);
+    ASSERT_TRUE(reverse.has_value());
+    EXPECT_EQ(reverse->focus, third);
+}
+
 } // namespace
 } // namespace Tina::Tests

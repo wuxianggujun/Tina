@@ -326,8 +326,39 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             continue;
         }
 
+        // Tab cycles default-action focus among Buttons. Shift is read from the
+        // primary-window held key snapshot (KeyTransition carries no modifiers).
+        if (const auto* key =
+                std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
+            key != nullptr
+            && key->window == context->ownerWindow()
+            && key->state == Platform::DigitalTransition::Down
+            && key->key == Platform::Key::Tab)
+        {
+            bool reverse = false;
+            if (primaryWindow != nullptr)
+            {
+                reverse = primaryWindow->input.isHeld(Platform::Key::LeftShift)
+                    || primaryWindow->input.isHeld(Platform::Key::RightShift);
+            }
+            auto step = context->routeDefaultActionFocusStep(reverse);
+            if (!step)
+            {
+                Core::Error error = std::move(step.error());
+                error.addContext("UIInputRouteProducer::produce(tab-focus)");
+                return Core::failure(std::move(error));
+            }
+            if (step->consumed)
+            {
+                stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                    u64{1} << (ordinal % BitsPerConsumptionWord);
+                anyConsumed = true;
+            }
+            continue;
+        }
+
         // Keyboard Accept (Enter/Space) and Gamepad South Accept activate the
-        // Button that owns default-action focus (pointer-arm sets it).
+        // Button that owns default-action focus (pointer-arm or Tab sets it).
         if (const auto* key =
                 std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
             key != nullptr

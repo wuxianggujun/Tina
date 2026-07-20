@@ -649,8 +649,10 @@ M7-D11：`openTextFont` 可替换 face；Desktop 在 FreeType ON 时注入 FreeT
 产品路径仍不得按路径打开源字体；后续应迁到 cooked FontAsset（M10）。
 
 M7-E2：Button 默认激活焦点由 Primary Pointer arm 设置；Keyboard Enter/Space/KeypadEnter 与
-Gamepad South Down 经 `routeDefaultActionActivate` 触发 action 并消费输入。尚无 Tab/方向焦点
-Scope、无 Modal、无 IME composition。
+Gamepad South Down 经 `routeDefaultActionActivate` 触发 action 并消费输入。
+
+M7-E3：Tab / Shift+Tab 经 `routeDefaultActionFocusStep` 在可见 Targetable Button 间循环默认
+焦点。尚无完整 Focus Scope、Modal、方向键导航、IME composition。
 
 Runtime 不按路径打开字体。Cooked `FontAsset` 提供 owning bytes、face metadata 和确定 fallback
 chain；UI 持有 `AssetLease<FontData>`。FreeType 类型只存在于 `tina_ui_freetype`。
