@@ -2,7 +2,6 @@
 #include <tina/asset/AssetStore.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
-#include <tina/core/hash/ContentHashDigest.hpp>
 
 #include "support/CatalogPackageTestSupport.hpp"
 
@@ -86,9 +85,7 @@ TEST(AssetStoreTests, UnloadDefersUntilLastLeaseReleased)
 
     ASSERT_TRUE(store->unload(*handle).has_value());
     EXPECT_EQ(store->state(*handle), AssetLogicalState::UnloadPending);
-    // Existing weak observers still see payload while leases hold.
     EXPECT_NE(store->tryGet(*handle), nullptr);
-    // New leases rejected.
     auto rejected = store->acquire(*handle);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, AssetErrorCode::AssetNotReady);
@@ -130,6 +127,37 @@ TEST(AssetStoreTests, CapacityExceededOnPublish)
     auto overflow = store->publish(loadOneCooked(resource, 6U, AssetFormat::AssetKind::Material));
     ASSERT_FALSE(overflow.has_value());
     EXPECT_EQ(overflow.error().code, AssetErrorCode::CatalogCapacityExceeded);
+}
+
+TEST(AssetStoreTests, QueuedLoadingCompleteAndFail)
+{
+    TrackingMemoryResource resource;
+    auto store = AssetStore::Create(AssetStoreConfig{.capacity = 2, .memoryResource = &resource});
+    ASSERT_TRUE(store.has_value());
+
+    auto handle = store->beginQueued(assetId(7U), AssetFormat::AssetKind::Texture2D);
+    ASSERT_TRUE(handle.has_value());
+    EXPECT_EQ(store->state(*handle), AssetLogicalState::Queued);
+    EXPECT_EQ(store->tryGet(*handle), nullptr);
+    auto notReady = store->acquire(*handle);
+    ASSERT_FALSE(notReady.has_value());
+    EXPECT_EQ(notReady.error().code, AssetErrorCode::AssetNotReady);
+
+    ASSERT_TRUE(store->markLoading(*handle).has_value());
+    EXPECT_EQ(store->state(*handle), AssetLogicalState::Loading);
+
+    ASSERT_TRUE(store->complete(*handle, loadOneCooked(resource, 7U, AssetFormat::AssetKind::Texture2D)).has_value());
+    EXPECT_EQ(store->state(*handle), AssetLogicalState::Ready);
+    EXPECT_NE(store->tryGet(*handle), nullptr);
+
+    auto failed = store->beginQueued(assetId(8U), AssetFormat::AssetKind::Material);
+    ASSERT_TRUE(failed.has_value());
+    ASSERT_TRUE(store->markLoading(*failed).has_value());
+    ASSERT_TRUE(store->fail(*failed).has_value());
+    EXPECT_EQ(store->state(*failed), AssetLogicalState::Failed);
+    auto acquireFailed = store->acquire(*failed);
+    ASSERT_FALSE(acquireFailed.has_value());
+    EXPECT_EQ(acquireFailed.error().code, AssetErrorCode::AssetFailed);
 }
 
 } // namespace

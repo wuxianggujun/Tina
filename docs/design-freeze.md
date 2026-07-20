@@ -397,3 +397,7 @@ FramePinSink、physical retirement ledger、自动 LRU。
 
 M10-A4 已落地 `AssetSystem`：绑定 Catalog+root，同步依赖序 load/publish，AssetId 去重索引，失败只
 回滚本次 call 新 publish 的 Handle；`maxTotalCookedFileBytes` 在读盘前生效。仍无异步队列与 GPU。
+
+M10-A5 已落地 deferred 产品桥：`AssetStore` 增加 Queued/Loading/Failed；`AssetSystem::request` 将
+缺失资产入有界队列，`pump(budget)` 在 owner thread 逐步 complete/fail（本切片仍同步读盘）。
+明确后置：真实 Task/IO worker、GPU UploadTicket、FramePin、physical retirement。

@@ -33,9 +33,12 @@ struct AssetHandle final {
 };
 
 enum class AssetLogicalState : Core::u8 {
-    Ready = 1,
-    UnloadPending = 2,
-    Unloaded = 3,
+    Queued = 1,
+    Loading = 2,
+    Ready = 3,
+    Failed = 4,
+    UnloadPending = 5,
+    Unloaded = 6,
 };
 
 struct AssetStoreConfig final {
@@ -79,9 +82,9 @@ class AssetLease final {
     AssetHandle m_handle{};
 };
 
-// Owner-thread CPU asset registry for Ready cooked payloads.
-// First slice of ADR 0016: weak Handle + strong Lease. No async Loading states, GPU UploadTicket,
-// FramePin, or physical retirement ledger (those remain later slices).
+// Owner-thread CPU asset registry (ADR 0016).
+// Supports Queued/Loading/Ready/Failed plus weak Handle and strong Lease.
+// No GPU UploadTicket, FramePin, or physical retirement ledger in this slice.
 class AssetStore final {
   public:
     AssetStore() = delete;
@@ -98,21 +101,32 @@ class AssetStore final {
     [[nodiscard]] Core::usize activeCount() const noexcept;
     [[nodiscard]] Core::usize availableCount() const noexcept;
 
-    // Moves a Ready cooked asset into the store. Empty files are rejected.
+    // Immediate Ready publish (sync path). Empty files are rejected.
     [[nodiscard]] Core::Result<AssetHandle> publish(CookedAssetFile asset);
 
-    // Weak lookup. Returns nullptr for invalid/stale/unloaded handles.
-    // UnloadPending still returns payload while leases remain.
+    // Deferred path: create a Queued slot without payload.
+    [[nodiscard]] Core::Result<AssetHandle> beginQueued(Core::AssetId assetId, AssetFormat::AssetKind assetKind);
+
+    // Queued → Loading. Rejects other states.
+    [[nodiscard]] Core::Status markLoading(AssetHandle handle) noexcept;
+
+    // Loading/Queued → Ready with owning payload. assetId must match the slot.
+    [[nodiscard]] Core::Status complete(AssetHandle handle, CookedAssetFile asset) noexcept;
+
+    // Queued/Loading → Failed (payload empty). Handle remains until unload.
+    [[nodiscard]] Core::Status fail(AssetHandle handle) noexcept;
+
+    // Weak lookup. Payload only for Ready/UnloadPending.
     [[nodiscard]] const CookedAssetFile* tryGet(AssetHandle handle) const noexcept;
     [[nodiscard]] AssetLogicalState state(AssetHandle handle) const noexcept;
     [[nodiscard]] Core::u32 leaseCount(AssetHandle handle) const noexcept;
     [[nodiscard]] Core::AssetId assetId(AssetHandle handle) const noexcept;
+    [[nodiscard]] AssetFormat::AssetKind assetKind(AssetHandle handle) const noexcept;
 
-    // Strong acquire. Fails if handle is invalid, unloaded, or unload-pending.
+    // Strong acquire. Ready only.
     [[nodiscard]] Core::Result<AssetLease> acquire(AssetHandle handle);
 
-    // Logical unload: new acquire/tryGet for Ready fail after this returns success for unload-pending
-    // path; payload is destroyed immediately when leaseCount==0, otherwise after last lease release.
+    // Logical unload. Immediate erase when leaseCount==0; otherwise UnloadPending.
     [[nodiscard]] Core::Status unload(AssetHandle handle) noexcept;
 
   private:

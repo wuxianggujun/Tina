@@ -1,6 +1,7 @@
 set(TINA_ASSET_TEST_SOURCES
     AssetStoreTests.cpp
     AssetSystemTests.cpp
+    AssetSystemPumpTests.cpp
     CatalogSnapshotTests.cpp
     CatalogLoadOrderTests.cpp
     CatalogLoadPlanTests.cpp

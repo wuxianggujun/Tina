@@ -43,7 +43,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A2q 已实现批量加载 `maxTotalCookedFileBytes` 读盘前预算门禁；
   M10-A3 已实现 CPU 侧 `AssetStore`/`AssetHandle`/`AssetLease`（ADR 0016 Accepted 首切片）；
   M10-A4 已实现 Catalog 绑定 `AssetSystem` 同步 load/find/去重/预算；
-  异步 Queued/Loading 状态机、Task/IO、GPU UploadTicket/retirement、增量 Cooker 与产品资产仍未实现。
+  M10-A5 已实现主线程 `request`/`pump` 与 Queued/Loading/Failed；
+  Task worker 线程池、GPU UploadTicket/retirement、增量 Cooker 与产品资产仍未实现。
 
 
 ## 下一阶段契约

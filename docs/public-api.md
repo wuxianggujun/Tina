@@ -1085,6 +1085,8 @@ public:
 | `CookedAssetBatchLoadConfig::maxTotalCookedFileBytes` | M10-A2q 已实现 | Asset module public | 批量/按 plan 加载前的总字节预算；0=不限 | CapacityExceeded（读盘前） |
 | `AssetStore` / `AssetHandle` / `AssetLease` | M10-A3 已实现 | Asset module public | CPU Ready 槽位：弱 Handle、强 Lease、unload 延迟析构 | InvalidHandle / AssetNotReady / AssetUnloaded / CapacityExceeded |
 | `AssetSystem` | M10-A4 已实现 | Asset module public | bindCatalog + 同步 load/find/acquire/unload；AssetId 去重 | 同 Store + Catalog/IO/budget 错误 |
+| `AssetSystem::request` / `pump` | M10-A5 已实现 | Asset module public | Queued 入队 + 有界主线程 pump 完成；预算/队列满 | AssetQueueFull / AssetFailed / Catalog/IO |
+| `AssetStore` Queued/Loading/Failed | M10-A5 已实现 | Asset module public | beginQueued/markLoading/complete/fail | AssetNotReady / AssetFailed / CatalogEntryMismatch |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |

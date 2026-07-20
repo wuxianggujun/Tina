@@ -17,5 +17,7 @@ inline constexpr Core::ErrorCode InvalidHandle{Core::ErrorDomain::Asset, 20};
 inline constexpr Core::ErrorCode AssetNotReady{Core::ErrorDomain::Asset, 21};
 inline constexpr Core::ErrorCode AssetUnloaded{Core::ErrorDomain::Asset, 22};
 inline constexpr Core::ErrorCode LeaseCountOverflow{Core::ErrorDomain::Asset, 23};
+inline constexpr Core::ErrorCode AssetFailed{Core::ErrorDomain::Asset, 24};
+inline constexpr Core::ErrorCode AssetQueueFull{Core::ErrorDomain::Asset, 25};
 
 } // namespace Tina::Asset::AssetErrorCode

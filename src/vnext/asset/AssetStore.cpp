@@ -49,12 +49,11 @@ Core::AssetId AssetLease::assetId() const noexcept
 
 AssetFormat::AssetKind AssetLease::assetKind() const noexcept
 {
-    const auto* file = get();
-    if (file == nullptr || !*file)
+    if (m_store == nullptr)
     {
         return AssetFormat::AssetKind::Invalid;
     }
-    return file->header().assetKind;
+    return m_store->assetKind(m_handle);
 }
 
 void AssetLease::release() noexcept
@@ -129,6 +128,91 @@ Core::Result<AssetHandle> AssetStore::publish(CookedAssetFile asset)
     return AssetHandle{.id = *id};
 }
 
+Core::Result<AssetHandle> AssetStore::beginQueued(Core::AssetId assetId, AssetFormat::AssetKind assetKind)
+{
+    if (!assetId || assetKind == AssetFormat::AssetKind::Invalid)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "queued asset requires valid id and kind");
+    }
+    Record record{
+        .assetId = assetId,
+        .assetKind = assetKind,
+        .state = AssetLogicalState::Queued,
+        .leaseCount = 0,
+        .payload = {},
+    };
+    auto id = m_pool.tryEmplace(std::move(record));
+    if (!id)
+    {
+        if (id.error().code == Core::CoreErrorCode::CapacityExceeded)
+        {
+            return Core::failure(AssetErrorCode::CatalogCapacityExceeded, "asset store capacity exceeded");
+        }
+        return Core::failure(std::move(id.error()).withContext("AssetStore::beginQueued", "emplace"));
+    }
+    return AssetHandle{.id = *id};
+}
+
+Core::Status AssetStore::markLoading(AssetHandle handle) noexcept
+{
+    auto* record = findRecord(handle);
+    if (record == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle, "asset handle is invalid or stale");
+    }
+    if (record->state != AssetLogicalState::Queued)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady, "only Queued assets can enter Loading");
+    }
+    record->state = AssetLogicalState::Loading;
+    return Core::success();
+}
+
+Core::Status AssetStore::complete(AssetHandle handle, CookedAssetFile asset) noexcept
+{
+    auto* record = findRecord(handle);
+    if (record == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle, "asset handle is invalid or stale");
+    }
+    if (record->state != AssetLogicalState::Queued && record->state != AssetLogicalState::Loading)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady, "only Queued/Loading assets can complete");
+    }
+    if (!asset)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cannot complete with empty cooked asset");
+    }
+    if (asset.header().assetId != record->assetId)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "completed asset id does not match slot");
+    }
+    record->assetKind = asset.header().assetKind;
+    record->payload = std::move(asset);
+    record->state = AssetLogicalState::Ready;
+    return Core::success();
+}
+
+Core::Status AssetStore::fail(AssetHandle handle) noexcept
+{
+    auto* record = findRecord(handle);
+    if (record == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle, "asset handle is invalid or stale");
+    }
+    if (record->state != AssetLogicalState::Queued && record->state != AssetLogicalState::Loading)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady, "only Queued/Loading assets can fail");
+    }
+    if (record->leaseCount != 0U)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady, "cannot fail asset while leases are held");
+    }
+    record->payload = CookedAssetFile{};
+    record->state = AssetLogicalState::Failed;
+    return Core::success();
+}
+
 const CookedAssetFile* AssetStore::tryGet(AssetHandle handle) const noexcept
 {
     const auto* record = findRecord(handle);
@@ -136,7 +220,8 @@ const CookedAssetFile* AssetStore::tryGet(AssetHandle handle) const noexcept
     {
         return nullptr;
     }
-    if (record->state == AssetLogicalState::Unloaded || !record->payload)
+    if ((record->state != AssetLogicalState::Ready && record->state != AssetLogicalState::UnloadPending) ||
+        !record->payload)
     {
         return nullptr;
     }
@@ -173,6 +258,16 @@ Core::AssetId AssetStore::assetId(AssetHandle handle) const noexcept
     return record->assetId;
 }
 
+AssetFormat::AssetKind AssetStore::assetKind(AssetHandle handle) const noexcept
+{
+    const auto* record = findRecord(handle);
+    if (record == nullptr)
+    {
+        return AssetFormat::AssetKind::Invalid;
+    }
+    return record->assetKind;
+}
+
 Core::Result<AssetLease> AssetStore::acquire(AssetHandle handle)
 {
     auto* record = findRecord(handle);
@@ -180,13 +275,18 @@ Core::Result<AssetLease> AssetStore::acquire(AssetHandle handle)
     {
         return Core::failure(AssetErrorCode::InvalidHandle, "asset handle is invalid or stale");
     }
+    if (record->state == AssetLogicalState::Failed)
+    {
+        return Core::failure(AssetErrorCode::AssetFailed, "asset load failed");
+    }
+    if (record->state == AssetLogicalState::Queued || record->state == AssetLogicalState::Loading ||
+        record->state == AssetLogicalState::UnloadPending)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady, "asset is not ready for lease acquire");
+    }
     if (record->state == AssetLogicalState::Unloaded || !record->payload)
     {
         return Core::failure(AssetErrorCode::AssetUnloaded, "asset payload is unloaded");
-    }
-    if (record->state == AssetLogicalState::UnloadPending)
-    {
-        return Core::failure(AssetErrorCode::AssetNotReady, "asset is unloading; new leases are rejected");
     }
     if (record->state != AssetLogicalState::Ready)
     {
@@ -211,9 +311,18 @@ Core::Status AssetStore::unload(AssetHandle handle) noexcept
     {
         return Core::success();
     }
+    if (record->state == AssetLogicalState::Queued || record->state == AssetLogicalState::Loading ||
+        record->state == AssetLogicalState::Failed)
+    {
+        if (record->leaseCount != 0U)
+        {
+            return Core::failure(AssetErrorCode::AssetNotReady, "cannot unload in-flight asset with leases");
+        }
+        (void)m_pool.erase(handle.id);
+        return Core::success();
+    }
     if (record->leaseCount == 0U)
     {
-        // Immediate logical+physical release for CPU payload; handle becomes stale.
         (void)m_pool.erase(handle.id);
         return Core::success();
     }
