@@ -383,3 +383,6 @@ M10-A2n 补空请求=加载全部测试，并扩展 CLI `--load-assets`（可与
 `loadedAssets`/`loaded` JSON。不实现 Handle/Lease。
 
 M10-A2o 增加共享 Catalog 包测试夹具与 open→plan→load→validate→summary 端到端测试。不实现 Handle/Lease。
+
+M10-A2p 已落地 `totalCookedFileBytes`：对 load plan 的 cookedFileBytes 做 checked 求和；CLI
+`--plan-loads` 输出 `plannedCookedFileBytes`。不实现 Handle/Lease。

@@ -1,7 +1,9 @@
 #include <tina/asset/CatalogLoadPlan.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/error/Error.hpp>
 
+#include <limits>
 #include <new>
 #include <utility>
 
@@ -87,6 +89,20 @@ Core::Result<std::pmr::vector<CatalogLoadPlanEntry>> planCatalogLoadsAll(const C
     }
 
     return planCatalogLoads(catalog, requested, config);
+}
+
+Core::Result<Core::u64> totalCookedFileBytes(std::span<const CatalogLoadPlanEntry> plan)
+{
+    Core::u64 total = 0;
+    for (const auto& row : plan)
+    {
+        if (row.cookedFileBytes > (std::numeric_limits<Core::u64>::max)() - total)
+        {
+            return Core::failure(Core::CoreErrorCode::CapacityExceeded, "catalog load plan cookedFileBytes overflow");
+        }
+        total += row.cookedFileBytes;
+    }
+    return total;
 }
 
 } // namespace Tina::Asset

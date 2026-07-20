@@ -190,9 +190,10 @@ M10-A2b 已实现：Core 有界 `readFile` 与 Manifest 文件→`CatalogSnapsho
 Debug/Release 基础 `tina_tests` 223/223、`tina_asset_tests` 19/19。仍不包含 Handle/Lease、async IO
 或 Cooker。
 
-M10-A2c～A2o 已实现：Cooked 加载、依赖序、批量同步加载、磁盘包校验、`openCatalogPackage`、
-校验 CLI（含 `--load-assets`）、诊断摘要、加载计划、一站式 package load，以及共享夹具/端到端测试。
-Windows `tina_asset_tests` 见最近门禁。仍不包含 Handle/Lease、async IO 或 Cooker。
+M10-A2c～A2p 已实现：Cooked 加载、依赖序、批量同步加载、磁盘包校验、`openCatalogPackage`、
+校验 CLI（含 `--load-assets`/`plannedCookedFileBytes`）、诊断摘要、加载计划、一站式 package load、
+共享夹具/端到端测试，以及计划字节汇总。Windows `tina_asset_tests` 见最近门禁。
+仍不包含 Handle/Lease、async IO 或 Cooker。
 
 Linux 最新 paint/DisplayList/bridge Null 门禁也已完成：GCC 13.4 通过基础205/205、
 `tina_ui_tests` 92/92、`tina_runtime_ui_tests` 46/46、bridge 12/12与Null样例300帧；

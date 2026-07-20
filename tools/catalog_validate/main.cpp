@@ -343,11 +343,27 @@ int main(int argc, char** argv)
         planRows = std::move(*plan);
     }
 
+    std::optional<Tina::Core::u64> plannedBytes;
+    if (planRows)
+    {
+        auto total = Tina::Asset::totalCookedFileBytes(*planRows);
+        if (!total)
+        {
+            printErrorJson(total.error());
+            return 1;
+        }
+        plannedBytes = *total;
+    }
+
     std::cout << "{\"status\":\"ok\",\"entries\":" << summary->entryCount
               << ",\"dependencies\":" << summary->dependencyCount
               << ",\"validated\":" << (options.skipValidate ? "false" : "true")
               << ",\"contentHash\":" << ((!options.skipValidate && !options.metadataOnly) ? "true" : "false")
               << ",\"loadedAssets\":" << (loadedAssets ? loadedAssets->size() : 0U);
+    if (plannedBytes)
+    {
+        std::cout << ",\"plannedCookedFileBytes\":" << *plannedBytes;
+    }
     if (options.listEntries)
     {
         std::cout << ",\"items\":[";

@@ -37,4 +37,7 @@ planCatalogLoads(const CatalogSnapshot& catalog, std::span<const Core::AssetId> 
 [[nodiscard]] Core::Result<std::pmr::vector<CatalogLoadPlanEntry>>
 planCatalogLoadsAll(const CatalogSnapshot& catalog, CatalogLoadPlanConfig config);
 
+// Sums CatalogLoadPlanEntry::cookedFileBytes with checked overflow. Empty plan returns 0.
+[[nodiscard]] Core::Result<Core::u64> totalCookedFileBytes(std::span<const CatalogLoadPlanEntry> plan);
+
 } // namespace Tina::Asset

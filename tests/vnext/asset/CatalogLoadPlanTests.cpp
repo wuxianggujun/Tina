@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <limits>
 #include <memory_resource>
 #include <string_view>
 #include <vector>
@@ -228,6 +229,40 @@ TEST(CatalogLoadPlanTests, PlansAllEntriesDependenciesFirst)
     EXPECT_EQ((*plan)[1].assetKind, AssetFormat::AssetKind::Material);
     EXPECT_EQ((*plan)[0].entryIndex, 0U);
     EXPECT_EQ((*plan)[1].entryIndex, 1U);
+}
+
+TEST(CatalogLoadPlanTests, TotalsCookedFileBytesWithoutOverflow)
+{
+    TrackingMemoryResource resource;
+    const auto bytes = makeChainManifest();
+    auto view = AssetFormat::parseCookedManifestView(bytes);
+    ASSERT_TRUE(view.has_value());
+    auto catalog = CatalogSnapshot::Create(*view, CatalogConfig{.maxEntries = 8,
+                                                                .maxDependencies = 8,
+                                                                .maxDependenciesPerAsset = 4,
+                                                                .memoryResource = &resource});
+    ASSERT_TRUE(catalog.has_value());
+
+    auto plan = planCatalogLoadsAll(*catalog, CatalogLoadPlanConfig{.memoryResource = &resource});
+    ASSERT_TRUE(plan.has_value());
+    // makeChainManifest uses 128 + 256 cookedFileBytes.
+    auto total = totalCookedFileBytes(*plan);
+    ASSERT_TRUE(total.has_value()) << total.error().message;
+    EXPECT_EQ(*total, 384U);
+
+    auto emptyTotal = totalCookedFileBytes({});
+    ASSERT_TRUE(emptyTotal.has_value());
+    EXPECT_EQ(*emptyTotal, 0U);
+}
+
+TEST(CatalogLoadPlanTests, RejectsCookedFileBytesOverflow)
+{
+    std::array<CatalogLoadPlanEntry, 2> rows{};
+    rows[0].cookedFileBytes = (std::numeric_limits<Core::u64>::max)() - 10U;
+    rows[1].cookedFileBytes = 20U;
+    const auto total = totalCookedFileBytes(rows);
+    ASSERT_FALSE(total.has_value());
+    EXPECT_EQ(total.error().code, Core::CoreErrorCode::CapacityExceeded);
 }
 
 } // namespace
