@@ -252,14 +252,15 @@ Tina-owned 稳态动态分配增量必须为0。
 ## 正式 2D 验收
 
 `tina_sample_2d` 不能只显示一张 Sprite，也不能由 M9-C 的 fixture Sprite 样例替代。
-M10-A36 已在 `windows-msvc-vnext-bgfx-product-2d` 上落地首版产品门禁：Catalog cook/load
-Texture2D+Tileset+TileMap、CharacterController、UI HUD panel/Label（可选 FreeType 中文）、
-至少一个 Physics2D dynamic crate 与 Tile static 交互；JSON `sample=tina_sample_2d`。
+M10-A36–A38 已在 `windows-msvc-vnext-bgfx-product-2d` 上落地产品门禁：磁盘
+`sample_2d.recipe` → cook/load Texture2D+Tileset+TileMap、CharacterController 脚本行走、
+UI HUD panel/Label/Button（可选 FreeType 中文）、至少一个 Physics2D dynamic crate 与 Tile
+static 交互；JSON `sample=tina_sample_2d` + `catalogFromRecipeFile=true`。
 
 Legacy 删除前仍须补齐/加强：
 
 - 通过最终生产 Cooker/Catalog/Manifest pipeline 加载 Texture、Sprite、Tileset 和 TileMap；
-  当前样例使用进程内 cook + temp catalog（fixture 级），不是独立 cooker 工具链全量；
+  当前样例使用磁盘 fixture recipe + temp catalog，不是独立 cooker CLI 全量；
 - Orthographic Camera resize、world picking、interpolation 和 pixel snap 产品行为；
 - 多 layer Sprite、透明混合、Tile chunk culling 与 dirty rebuild 压力门禁；
 - 中文 FreeType Label（product-2d 已有）+ HUD Button 接线（A37 已有 create/action 计数）；

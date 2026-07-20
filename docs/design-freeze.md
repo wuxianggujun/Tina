@@ -510,8 +510,12 @@ M10-A36：产品 executable 正式命名 `tina_sample_2d`（源目录 `samples/2
 UI/Text + Physics crate + FreeType 同进程门禁，JSON `sample=tina_sample_2d`。
 
 M10-A37：`tina_sample_2d` 增加 MoveLeft/MoveRight Frame 键位绑定、落地后脚本化右走并撞墙
-（walk/hitRight/maxX JSON），以及 HUD Button + `setButtonAction` 接线计数。不合成 pointer 点击；
-完整 pointer non-penetration 与生产 cooker 全量后置。
+（walk/hitRight/maxX JSON），以及 HUD Button + `setButtonAction` 接线计数。不合成 pointer 点击。
+
+M10-A38：产品样例改为 `loadCatalogCookRecipeFile(sample_2d.recipe)` 磁盘 recipe → cook/publish →
+AssetSystem load；不再在进程内手写 Texture/Tileset/TileMap payload。JSON 要求
+`catalogFromRecipeFile=true` 且 `catalogRecipeAssets=3`。仍是 hermetic fixture recipe，
+完整外部 cooker CLI 与 pointer non-penetration 合成点击后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

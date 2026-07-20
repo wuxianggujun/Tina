@@ -28,6 +28,10 @@ if (TINA_BUILD_UI_FREETYPE)
     )
     target_link_libraries(tina_sample_2d PRIVATE Tina::UIFreetype)
 endif ()
+# Product catalog recipe (disk file cook path; not in-process payload assembly).
+target_compile_definitions(tina_sample_2d PRIVATE
+    TINA_SAMPLE_2D_RECIPE_PATH="${PROJECT_SOURCE_DIR}/samples/2d_tilemap_bgfx/catalog/sample_2d.recipe"
+)
 set_target_properties(tina_sample_2d PROPERTIES CXX_EXTENSIONS OFF)
 
 if(WIN32)

@@ -99,6 +99,8 @@ struct LifecycleCounters final {
     u64 uiTextLabelsCreated = 0;
     u64 uiButtonsCreated = 0;
     u64 uiButtonActionsWired = 0;
+    u64 catalogRecipeAssets = 0;
+    bool catalogFromRecipeFile = false;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     u64 physicsSteps = 0;
     u64 physicsStaticBodies = 0;
@@ -293,132 +295,31 @@ struct TileMapResources final {
 #endif
 };
 
-[[nodiscard]] Tina::Core::Status prepareCatalog(TileMapResources& resources)
+[[nodiscard]] Tina::Core::Status prepareCatalog(TileMapResources& resources, LifecycleCounters& counters)
 {
+    // Stable product ids must match samples/2d_tilemap_bgfx/catalog/sample_2d.recipe.
     const auto textureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
     const auto tilesetId = *Tina::Core::AssetId::fromBytes(idBytes(2U));
     const auto tileMapId = *Tina::Core::AssetId::fromBytes(idBytes(3U));
 
-    // 16x16 atlas: left half floor (orange), right half wall (cyan).
-    constexpr u16 Size = 16;
-    std::vector<std::byte> pixels(static_cast<std::size_t>(Size) * Size * 4U);
-    for (u16 y = 0; y < Size; ++y)
+#if !defined(TINA_SAMPLE_2D_RECIPE_PATH)
+#error "TINA_SAMPLE_2D_RECIPE_PATH must be defined for tina_sample_2d catalog recipe load"
+#endif
+    // M10-A38: cook from an on-disk catalog recipe file (product asset path),
+    // not in-process payload assembly. Still a hermetic fixture recipe, not
+    // the full external cooker CLI pipeline.
+    auto request = Tina::Asset::loadCatalogCookRecipeFile(TINA_SAMPLE_2D_RECIPE_PATH);
+    if (!request)
     {
-        for (u16 x = 0; x < Size; ++x)
-        {
-            const std::size_t offset = (static_cast<std::size_t>(y) * Size + x) * 4U;
-            const bool wall = x >= 8;
-            const bool stripe = ((x + y) % 4) < 2;
-            if (wall)
-            {
-                pixels[offset + 0] = stripe ? std::byte{40} : std::byte{20};
-                pixels[offset + 1] = stripe ? std::byte{200} : std::byte{140};
-                pixels[offset + 2] = stripe ? std::byte{220} : std::byte{180};
-            } else
-            {
-                pixels[offset + 0] = stripe ? std::byte{240} : std::byte{180};
-                pixels[offset + 1] = stripe ? std::byte{140} : std::byte{90};
-                pixels[offset + 2] = stripe ? std::byte{40} : std::byte{20};
-            }
-            pixels[offset + 3] = std::byte{255};
-        }
+        return Tina::Core::failure(std::move(request.error()));
     }
-
-    auto texPayload = Tina::AssetFormat::writeTexture2DPayloadBytes(Tina::AssetFormat::Texture2DPayloadDesc{
-        .width = Size,
-        .height = Size,
-        .pixels = pixels,
-    });
-    if (!texPayload)
+    if (request->assets.size() != 3U)
     {
-        return Tina::Core::failure(std::move(texPayload.error()));
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   "sample_2d.recipe must declare Texture2D+Tileset+TileMap");
     }
-
-    const std::array tiles{
-        Tina::AssetFormat::TilesetTileDesc{
-            .localId = 1,
-            .materialFlags = Tina::AssetFormat::TilesetWire::MaterialSolid,
-            .u0 = 0.0f,
-            .v0 = 0.0f,
-            .u1 = 0.5f,
-            .v1 = 1.0f,
-        },
-        Tina::AssetFormat::TilesetTileDesc{
-            .localId = 2,
-            .materialFlags = Tina::AssetFormat::TilesetWire::MaterialSolid,
-            .u0 = 0.5f,
-            .v0 = 0.0f,
-            .u1 = 1.0f,
-            .v1 = 1.0f,
-        },
-    };
-    auto tilesetPayload = Tina::AssetFormat::writeTilesetPayloadBytes(Tina::AssetFormat::TilesetPayloadDesc{
-        .tilePixelWidth = 8,
-        .tilePixelHeight = 16,
-        .tiles = tiles,
-        .textureId = textureId,
-    });
-    if (!tilesetPayload)
-    {
-        return Tina::Core::failure(std::move(tilesetPayload.error()));
-    }
-
-    std::array<u16, 32> cells{};
-    for (u32 x = 0; x < 8; ++x)
-    {
-        cells[x] = 1;
-    }
-    for (u32 y = 1; y < 4; ++y)
-    {
-        cells[y * 8 + 6] = 2;
-    }
-    auto mapPayload = Tina::AssetFormat::writeTileMapPayloadBytes(Tina::AssetFormat::TileMapPayloadDesc{
-        .widthCells = 8,
-        .heightCells = 4,
-        .cellSizeMeters = 1.0f,
-        .tiles = cells,
-        .tilesetId = tilesetId,
-    });
-    if (!mapPayload)
-    {
-        return Tina::Core::failure(std::move(mapPayload.error()));
-    }
-
-    Tina::Asset::CatalogCookRequest request{.targetPlatform = Tina::AssetFormat::TargetPlatform::WindowsX64};
-    request.assets.push_back(Tina::Asset::CatalogCookAssetSpec{
-        .assetKind = Tina::AssetFormat::AssetKind::Texture2D,
-        .assetId = textureId,
-        .assetTypeVersion = Tina::AssetFormat::Texture2DWire::SchemaVersion,
-        .payload = std::move(*texPayload),
-    });
-    request.assets.push_back(Tina::Asset::CatalogCookAssetSpec{
-        .assetKind = Tina::AssetFormat::AssetKind::Tileset,
-        .assetId = tilesetId,
-        .assetTypeVersion = Tina::AssetFormat::TilesetWire::SchemaVersion,
-        .payload = std::move(*tilesetPayload),
-        .dependencies =
-            {
-                Tina::AssetFormat::CookedAssetWriteDependency{
-                    .assetId = textureId,
-                    .expectedKind = Tina::AssetFormat::AssetKind::Texture2D,
-                    .flags = Tina::AssetFormat::DependencyFlags::Required,
-                },
-            },
-    });
-    request.assets.push_back(Tina::Asset::CatalogCookAssetSpec{
-        .assetKind = Tina::AssetFormat::AssetKind::TileMap,
-        .assetId = tileMapId,
-        .assetTypeVersion = Tina::AssetFormat::TileMapWire::SchemaVersion,
-        .payload = std::move(*mapPayload),
-        .dependencies =
-            {
-                Tina::AssetFormat::CookedAssetWriteDependency{
-                    .assetId = tilesetId,
-                    .expectedKind = Tina::AssetFormat::AssetKind::Tileset,
-                    .flags = Tina::AssetFormat::DependencyFlags::Required,
-                },
-            },
-    });
+    counters.catalogRecipeAssets = request->assets.size();
+    counters.catalogFromRecipeFile = true;
 
     resources.catalogRoot = std::filesystem::temp_directory_path() / "tina_sample_2d_pkg";
     std::error_code ec;
@@ -427,7 +328,7 @@ struct TileMapResources final {
         const auto u8 = resources.catalogRoot.u8string();
         return std::string(u8.begin(), u8.end());
     }();
-    if (auto cookStatus = Tina::Asset::cookAndPublishCatalogPackage(rootUtf8, request); !cookStatus)
+    if (auto cookStatus = Tina::Asset::cookAndPublishCatalogPackage(rootUtf8, *request); !cookStatus)
     {
         return cookStatus;
     }
@@ -1126,8 +1027,9 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    LifecycleCounters counters{};
     TileMapResources resources{};
-    if (const auto status = prepareCatalog(resources); !status)
+    if (const auto status = prepareCatalog(resources, counters); !status)
     {
         writeError(status.error());
         return 1;
@@ -1141,7 +1043,6 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    LifecycleCounters counters{};
     TileMapBgfxApplication application{*options, counters, resources, capture};
     auto run = (*host)->run(application);
     if (!run)
@@ -1153,7 +1054,8 @@ int main(int argc, char** argv)
     std::error_code ec;
     std::filesystem::remove_all(resources.catalogRoot, ec);
 
-    bool ok = counters.texturesUploaded == 1 && counters.lastTileSprites == ExpectedNonEmptyTiles &&
+    bool ok = counters.catalogFromRecipeFile && counters.catalogRecipeAssets == 3 && counters.texturesUploaded == 1 &&
+              counters.lastTileSprites == ExpectedNonEmptyTiles &&
               counters.lastTotalSprites == ExpectedSpritesWithPhysics && counters.controllerGroundedFrames > 0 &&
               counters.controllerWalkFrames > 0 && counters.controllerHitRightFrames > 0 &&
               counters.maxControllerX > 1.5f && counters.renderExtractions == counters.frameUpdates &&
@@ -1195,6 +1097,8 @@ int main(int argc, char** argv)
     // production cooker/manifest still tracked separately in docs.
     std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_2d\""
               << ",\"frames\":" << counters.frameUpdates << ",\"renderExtractions\":" << counters.renderExtractions
+              << ",\"catalogFromRecipeFile\":" << (counters.catalogFromRecipeFile ? "true" : "false")
+              << ",\"catalogRecipeAssets\":" << counters.catalogRecipeAssets
               << ",\"texturesUploaded\":" << counters.texturesUploaded
               << ",\"tileSpritesPerFrame\":" << ExpectedNonEmptyTiles
               << ",\"spritesPerFrame\":" << ExpectedSpritesWithPhysics

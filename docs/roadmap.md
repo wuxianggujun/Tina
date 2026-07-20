@@ -613,7 +613,10 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   `productGate=bgfx-physics-freetype`；
 - M10-A37 已完成 `tina_sample_2d` 输入/演示扩展：A/D 与方向键 MoveLeft/MoveRight Frame 绑定、
   落地后自动右走撞墙（`controllerWalkFrames`/`controllerHitRightFrames`/`maxControllerX` JSON 门禁）、
-  HUD Button + `setButtonAction` 接线计数。pointer non-penetration 合成点击与生产 cooker 全量后置；
+  HUD Button + `setButtonAction` 接线计数；
+- M10-A38 已完成磁盘 catalog recipe 路径：`samples/2d_tilemap_bgfx/catalog/sample_2d.recipe` →
+  `loadCatalogCookRecipeFile` → cook/publish → AssetSystem load；JSON `catalogFromRecipeFile=true`。
+  仍为 hermetic fixture recipe，不是完整外部 cooker CLI；pointer non-penetration 合成点击后置；
 - 完整 Cooker/cgltf 继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
@@ -636,9 +639,9 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   `tina_physics2d_tests` 25/25（Debug/Release）；
 - CharacterController2D axis-separated grid mover 已在集成支落地；
   `CharacterControllerPhysicsCoexistenceTest` 证明同一 Tile solid 可同时喂 grid controller 与
-  Physics2D static sync + dynamic body contact；`tina_sample_2d`（M10-A36/A37）已在 product-2d 图接线
-  Catalog+TileMap+角色+Box2D crate+UI/Text+脚本化行走/Button 接线；pointer non-penetration 合成点击
-  与生产 cooker 后置；只有 bench p99 超预算才接入 Box2D worker callbacks；
+  Physics2D static sync + dynamic body contact；`tina_sample_2d`（M10-A36–A38）已在 product-2d 图接线
+  磁盘 recipe Catalog+TileMap+角色+Box2D crate+UI/Text+脚本化行走/Button；pointer non-penetration
+  合成点击与完整外部 cooker CLI 后置；只有 bench p99 超预算才接入 Box2D worker callbacks；
 - 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
 - 以当前游戏为正式 2D 产品门禁：Cooked TileMap/Tileset、Camera2D、chunk culling/dirty rebuild、
