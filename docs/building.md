@@ -546,22 +546,22 @@ sanitizer 插桩。因此该门禁证明 Tina 代码、边界交互和生命周�
 `linux-clang22-vnext-sanitize`、`linux-clang22-vnext-physics2d-sanitize`、
 `linux-clang22-vnext-platform-sanitize` 与 `linux-clang22-vnext-platform-wayland-sanitize` 已落地。
 
-M11-A0 的可选 Physics2D 图使用独立 preset，不改变基础 Null 图。以下命令是该切片的直接门禁；
-源码落地时尚未执行，结果必须在实际运行后回写 `testing.md`：
+M11 可选 Physics2D 图使用独立 preset，不改变基础 Null 图。模块 GoogleTest 与单线程 bench 门禁：
 
 ```powershell
 cmake --preset windows-msvc-vnext-physics2d
 cmake --build --preset windows-vnext-physics2d-debug --target tina_physics2d_tests
 out\build\windows-msvc-vnext-physics2d\bin\Debug\tina_physics2d_tests.exe --gtest_color=yes
 
-cmake --build --preset windows-vnext-physics2d-release --target tina_physics2d_tests
+cmake --build --preset windows-vnext-physics2d-release --target tina_physics2d_tests tina_physics2d_bench
 out\build\windows-msvc-vnext-physics2d\bin\Release\tina_physics2d_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-physics2d\bin\Release\tina_physics2d_bench.exe --bodies=64 --warmup=60 --steps=300 --rays=4
 ```
 
 Linux 分别使用 `linux-gcc13-vnext-physics2d` 与
 `linux-clang22-vnext-physics2d-sanitize`；两者只启用 `tests;physics2d` manifest feature，不解析
-Legacy、GLFW、bgfx 或 shader 图。`tina_physics2d_bench` 尚未实现，不能把模块 GoogleTest 耗时写成
-正式 benchmark。
+Legacy、GLFW、bgfx 或 shader 图。`tina_physics2d_bench` 是模块单线程基线，不是 ADR 0018
+完整 `tina_bench` schema，不能与 GoogleTest 耗时混写。
 
 下列性能名称仍是后续设计契约：
 

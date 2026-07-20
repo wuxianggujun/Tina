@@ -500,4 +500,7 @@ M11-A2：owner-thread 同步空间查询。`overlapAabb` 用 AABB 等大 box pro
 
 M11-A3：Create 时固定 deferred command 容量；owner-thread `enqueue*`，`step()` 进入 solver 前 FIFO
 应用 Destroy/SetTransform/SetVelocity/Force/Impulse/Enabled/Awake；满队列拒绝；stale body 在 flush
-时跳过计数；`createBoxBody` 仍为立即原子创建。benchmark、Tile adapter 与正式 2D 产品接线后置。
+时跳过计数；`createBoxBody` 仍为立即原子创建。
+
+M11-A4：独立 `tina_physics2d_bench` 单线程 stack_dynamic 基线（`--bodies/--warmup/--steps/--rays`），
+输出 step ns p50/p95/p99 精简 JSON；不实现 Box2D worker callbacks。Tile adapter 与正式 2D 产品接线后置。

@@ -123,9 +123,27 @@ A3 在 Create 时固定 command 容量（默认 256，硬上限 1,048,576；0 �
 
 A0–A3 直接门禁：Windows `windows-msvc-vnext-physics2d` Debug/Release `tina_physics2d_tests` **20/20**。
 
+## M11-A4 Single-thread Bench 契约
+
+A4 提供独立可执行 `tina_physics2d_bench`（`samples/physics2d_bench`，`TINA_BUILD_PHYSICS2D` 图）：
+
+- 固定 `stack_dynamic` 场景：1 个 static ground + N dynamic box（默认 64）；
+- 参数：`--bodies=N`、`--warmup=N`、`--steps=N`、`--rays=N`；
+- warm-up 后测量单线程 `step()` 的 p50/p95/p99/max/mean（ns，nearest-rank）；
+- 可选每步 `castRay` 查询累计时间与 hit 总数；退出前 `shutdown()`；
+- 输出精简 JSON（`status/sample/workload/step_ns/...`），**不是** ADR 0018 完整 `tina_bench` schema；
+- 不启用 Box2D worker callbacks；仅当本基线 p99 超产品预算时，才另开提交做 Job Adapter。
+
+Windows Release 样例命令：
+
+```powershell
+cmake --build --preset windows-vnext-physics2d-release --target tina_physics2d_bench
+out\build\windows-msvc-vnext-physics2d\bin\Release\tina_physics2d_bench.exe --bodies=64 --warmup=60 --steps=300 --rays=4
+```
+
 ## Tina 性能门禁
 
-M11 建立独立 `tina_physics2d_bench` 基线；只有实测证明单线程 step 超预算，才启用 Box2D worker
+M11 已有单线程 `tina_physics2d_bench` 基线；只有实测证明单线程 step 超预算，才启用 Box2D worker
 callbacks。至少测量：
 
 1. 静态场景上的大量动态刚体堆叠；
