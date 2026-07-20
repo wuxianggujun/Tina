@@ -204,7 +204,8 @@ startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 r
 | vNext M10-A33 TileMap sample UI overlay | 已完成 | 同一样例 PrimaryWindowUI 2 SolidQuad HUD panel 生命周期门禁 |
 | vNext M10-A34 TileMap sample Physics2D | 已完成可选门禁 | `windows-msvc-vnext-bgfx-physics2d`：Tile static sync + dynamic crate contact/sprite |
 | vNext M10-A35 TileMap sample FreeType HUD | 已完成可选门禁 | HUD 中英 Label + 可选 FreeType；`windows-msvc-vnext-bgfx-product-2d` 组合 Physics+FreeType |
-| vNext M10-A36 formal tina_sample_2d name | 已完成命名门禁 | executable `tina_sample_2d`（ALIAS 保留旧名）；product-2d JSON `productGate=bgfx-physics-freetype`。pointer non-penetration 后置 |
+| vNext M10-A36 formal tina_sample_2d name | 已完成命名门禁 | executable `tina_sample_2d`（ALIAS 保留旧名）；product-2d JSON `productGate=bgfx-physics-freetype` |
+| vNext M10-A37 sample walk + HUD Button | 已完成 | 键位绑定 + 落地后右走撞墙 JSON 门禁 + HUD Button action 接线。合成 pointer 点击后置 |
 | vNext M11-A0 Physics2D lifecycle foundation | 已完成直接门禁 | 可选 `Tina::Physics2D` 只 PUBLIC 依赖 Core，Box2D 3.x PRIVATE；State/feature-owned 单线程 World、固定步长、owner/generation Body/Shape、原子 Box body、pose snapshot、幂等 shutdown |
 | vNext M11-A1 Physics2D contact events | 已完成直接门禁 | step 前复制 begin/end/hit 到固定 Tina storage；destroy tombstone；通道 overflow；`contactEvents()` borrowed view |
 | vNext M11-A2 Physics2D spatial query | 已完成直接门禁 | `overlapAabb` 精确 overlap、`castRay`/`castRayClosest`、caller buffer overflow、稳定排序 |

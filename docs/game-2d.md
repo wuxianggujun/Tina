@@ -262,9 +262,9 @@ Legacy 删除前仍须补齐/加强：
   当前样例使用进程内 cook + temp catalog（fixture 级），不是独立 cooker 工具链全量；
 - Orthographic Camera resize、world picking、interpolation 和 pixel snap 产品行为；
 - 多 layer Sprite、透明混合、Tile chunk culling 与 dirty rebuild 压力门禁；
-- 中文 FreeType Label（product-2d 已有）+ Button 与 HUD 覆盖，**点击 UI 不触发世界选择**
-  （pointer non-penetration 仍后置）；
-- 角色 Tile swept AABB（已有）与至少一个动态 Box2D body（已有 crate）；
+- 中文 FreeType Label（product-2d 已有）+ HUD Button 接线（A37 已有 create/action 计数）；
+  **点击 UI 不触发世界选择**（合成 pointer non-penetration 仍后置）；
+- 角色 Tile swept AABB 与脚本化右走撞墙（A37 已有）；至少一个动态 Box2D body（已有 crate）；
 - 连续300帧正常退出与资源归零证据；
 - 画面截图、输入行为、日志/计数和进程返回码分别留证据。
 

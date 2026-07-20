@@ -20,13 +20,17 @@
 #include <tina/platform/glfw/GlfwPlatformFactory.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderScene.hpp>
+#include <tina/platform/Input.hpp>
 #include <tina/runtime/EngineHost.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
+#include <tina/runtime/InputActionMap.hpp>
+#include <tina/runtime/InputActions.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
+#include <tina/ui/UIButton.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIText.hpp>
@@ -67,6 +71,9 @@ inline constexpr u32 DefaultFrameDelayMilliseconds = 0;
 // historically only accepted key 1. Tile + character share the cooked atlas key.
 inline constexpr u32 ProductSpriteKey = 1;
 inline constexpr u32 ExpectedNonEmptyTiles = 11; // 8 floor + 3 wall
+inline constexpr Tina::InputActionId MoveLeftAction{1};
+inline constexpr Tina::InputActionId MoveRightAction{2};
+inline constexpr float DemoWalkSpeedMetersPerSecond = 4.0f;
 
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
@@ -83,10 +90,15 @@ struct LifecycleCounters final {
     u64 lastTileSprites = 0;
     u64 lastTotalSprites = 0;
     u64 controllerGroundedFrames = 0;
+    u64 controllerWalkFrames = 0;
+    u64 controllerHitRightFrames = 0;
+    float maxControllerX = 0.0f;
     u64 uiRootsCreated = 0;
     u64 uiPanelsCreated = 0;
     u64 uiRootsReleased = 0;
     u64 uiTextLabelsCreated = 0;
+    u64 uiButtonsCreated = 0;
+    u64 uiButtonActionsWired = 0;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     u64 physicsSteps = 0;
     u64 physicsStaticBodies = 0;
@@ -98,6 +110,7 @@ struct LifecycleCounters final {
 
 inline constexpr u32 ExpectedUIPanelCount = 2;
 inline constexpr u32 ExpectedUITextLabelCount = 2;
+inline constexpr u32 ExpectedUIButtonCount = 1;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
 inline constexpr u32 ExpectedPhysicsStaticBodies = ExpectedNonEmptyTiles;
 inline constexpr u32 ExpectedSpritesWithPhysics = ExpectedNonEmptyTiles + 2; // tiles + character + crate
@@ -688,6 +701,40 @@ class TileMapBgfxState final : public Tina::IGameState {
             }
         }
 
+        // HUD Button is product UI surface for pointer/default-action path. Automated
+        // smoke does not synthesize clicks; wiring + create counts are gated. Interactive
+        // runs can click "Demo" (no world side-effect required for the JSON gate).
+        {
+            auto button = tree->createButton(root->rootNodeId());
+            if (!button)
+            {
+                return Tina::Core::failure(std::move(button.error()));
+            }
+            if (auto status = tree->setLayoutStyle(
+                    *button, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
+                                                Tina::UI::UILayoutLength::Px(12.0F),
+                                                Tina::UI::UILayoutLength::Px(120.0F),
+                                                Tina::UI::UILayoutLength::Px(40.0F)));
+                !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setBoxPaint(*button, solidFill(40, 120, 80, 230)); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setButtonAction(
+                    *button, Tina::UI::UIButtonActionCallback{[](const Tina::UI::UIButtonActionEvent&) noexcept {
+                        // Intentionally empty: proves action slot wiring without side effects.
+                    }});
+                !status)
+            {
+                return status;
+            }
+            ++counters_->uiButtonsCreated;
+            ++counters_->uiButtonActionsWired;
+        }
+
         uiRoot_ = std::move(*root);
         ++counters_->uiRootsCreated;
         counters_->uiPanelsCreated += panels.size();
@@ -718,16 +765,46 @@ class TileMapBgfxState final : public Tina::IGameState {
         ++counters_->frameUpdates;
         if (resources_->controller && resources_->grid)
         {
+            // Hermetic product demo: after first ground contact, walk right until wall.
+            // Keyboard MoveLeft/MoveRight bindings remain available for interactive runs
+            // and override the scripted walk when held.
+            float wishX = 0.0f;
+            if (context.frameActions().isHeld(MoveLeftAction))
+            {
+                wishX -= DemoWalkSpeedMetersPerSecond;
+            }
+            if (context.frameActions().isHeld(MoveRightAction))
+            {
+                wishX += DemoWalkSpeedMetersPerSecond;
+            }
+            if (wishX == 0.0f && counters_->controllerGroundedFrames > 0)
+            {
+                wishX = DemoWalkSpeedMetersPerSecond;
+            }
+
             if (auto status = resources_->controller->move(
                     *resources_->grid, 1.0f / 60.0f,
-                    Tina::Asset::CharacterController2DMoveInput{.wishVelocityX = 0.0f}, resources_->solidScratch);
+                    Tina::Asset::CharacterController2DMoveInput{.wishVelocityX = wishX}, resources_->solidScratch);
                 !status)
             {
                 return status;
             }
-            if (resources_->controller->state().grounded)
+            const auto& st = resources_->controller->state();
+            if (st.grounded)
             {
                 ++counters_->controllerGroundedFrames;
+            }
+            if (wishX > 0.0f)
+            {
+                ++counters_->controllerWalkFrames;
+            }
+            if (st.hitRight)
+            {
+                ++counters_->controllerHitRightFrames;
+            }
+            if (st.positionX > counters_->maxControllerX)
+            {
+                counters_->maxControllerX = st.positionX;
             }
         }
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
@@ -1009,11 +1086,32 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
 [[nodiscard]] Tina::EngineConfig createEngineConfig()
 {
     Tina::EngineConfig config = Tina::EngineConfig::Defaults();
-    config.applicationName = "Tina TileMap Catalog 2D Sample";
-    config.primaryWindow.title = "Tina Catalog TileMap + Character + UI + Text";
+    config.applicationName = "Tina Sample 2D";
+    config.primaryWindow.title = "Tina Sample 2D — TileMap + Character + UI";
     config.primaryWindow.initialLogicalExtent = {960, 540};
     config.primaryWindow.initiallyVisible = true;
     config.renderSceneCapacities.spriteCapacity = 64;
+    // A/D + arrows for interactive walk; automated smoke uses scripted walk after land.
+    config.inputActions.digitalBindings.push_back(Tina::DigitalActionBinding{
+        .input = Tina::PrimaryWindowKeyBinding{.key = Tina::Platform::Key::A},
+        .action = MoveLeftAction,
+        .domain = Tina::InputActionDomain::Frame,
+    });
+    config.inputActions.digitalBindings.push_back(Tina::DigitalActionBinding{
+        .input = Tina::PrimaryWindowKeyBinding{.key = Tina::Platform::Key::Left},
+        .action = MoveLeftAction,
+        .domain = Tina::InputActionDomain::Frame,
+    });
+    config.inputActions.digitalBindings.push_back(Tina::DigitalActionBinding{
+        .input = Tina::PrimaryWindowKeyBinding{.key = Tina::Platform::Key::D},
+        .action = MoveRightAction,
+        .domain = Tina::InputActionDomain::Frame,
+    });
+    config.inputActions.digitalBindings.push_back(Tina::DigitalActionBinding{
+        .input = Tina::PrimaryWindowKeyBinding{.key = Tina::Platform::Key::Right},
+        .action = MoveRightAction,
+        .domain = Tina::InputActionDomain::Frame,
+    });
     return config;
 }
 
@@ -1057,11 +1155,13 @@ int main(int argc, char** argv)
 
     bool ok = counters.texturesUploaded == 1 && counters.lastTileSprites == ExpectedNonEmptyTiles &&
               counters.lastTotalSprites == ExpectedSpritesWithPhysics && counters.controllerGroundedFrames > 0 &&
-              counters.renderExtractions == counters.frameUpdates && counters.stateExits == 1 &&
-              counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
+              counters.controllerWalkFrames > 0 && counters.controllerHitRightFrames > 0 &&
+              counters.maxControllerX > 1.5f && counters.renderExtractions == counters.frameUpdates &&
+              counters.stateExits == 1 && counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
               counters.uiPanelsCreated == ExpectedUIPanelCount &&
-              counters.uiTextLabelsCreated == ExpectedUITextLabelCount && counters.uiRootsReleased == 1 &&
-              *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
+              counters.uiTextLabelsCreated == ExpectedUITextLabelCount &&
+              counters.uiButtonsCreated == ExpectedUIButtonCount && counters.uiButtonActionsWired == 1 &&
+              counters.uiRootsReleased == 1 && *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     ok = ok && counters.physicsReady && counters.physicsStaticBodies == ExpectedPhysicsStaticBodies &&
          counters.physicsSteps == counters.frameUpdates && counters.physicsDynamicContacts > 0 &&
@@ -1075,9 +1175,11 @@ int main(int argc, char** argv)
                   << counters.frameUpdates << ",\"tileSprites\":" << counters.lastTileSprites
                   << ",\"totalSprites\":" << counters.lastTotalSprites
                   << ",\"grounded\":" << counters.controllerGroundedFrames
-                  << ",\"uiRoots\":" << counters.uiRootsCreated << ",\"uiPanels\":" << counters.uiPanelsCreated
-                  << ",\"uiLabels\":" << counters.uiTextLabelsCreated
-                  << ",\"uiReleased\":" << counters.uiRootsReleased
+                  << ",\"walkFrames\":" << counters.controllerWalkFrames
+                  << ",\"hitRight\":" << counters.controllerHitRightFrames
+                  << ",\"maxX\":" << counters.maxControllerX << ",\"uiRoots\":" << counters.uiRootsCreated
+                  << ",\"uiPanels\":" << counters.uiPanelsCreated << ",\"uiLabels\":" << counters.uiTextLabelsCreated
+                  << ",\"uiButtons\":" << counters.uiButtonsCreated << ",\"uiReleased\":" << counters.uiRootsReleased
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
                   << ",\"physicsSteps\":" << counters.physicsSteps
                   << ",\"physicsStatics\":" << counters.physicsStaticBodies
@@ -1097,9 +1199,14 @@ int main(int argc, char** argv)
               << ",\"tileSpritesPerFrame\":" << ExpectedNonEmptyTiles
               << ",\"spritesPerFrame\":" << ExpectedSpritesWithPhysics
               << ",\"controllerGroundedFrames\":" << counters.controllerGroundedFrames
+              << ",\"controllerWalkFrames\":" << counters.controllerWalkFrames
+              << ",\"controllerHitRightFrames\":" << counters.controllerHitRightFrames
+              << ",\"maxControllerX\":" << counters.maxControllerX
               << ",\"uiRootsCreated\":" << counters.uiRootsCreated
               << ",\"uiPanelsCreated\":" << counters.uiPanelsCreated
               << ",\"uiTextLabelsCreated\":" << counters.uiTextLabelsCreated
+              << ",\"uiButtonsCreated\":" << counters.uiButtonsCreated
+              << ",\"uiButtonActionsWired\":" << counters.uiButtonActionsWired
               << ",\"uiRootsReleased\":" << counters.uiRootsReleased
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
               << ",\"physicsEnabled\":true"

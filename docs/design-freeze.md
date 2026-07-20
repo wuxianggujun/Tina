@@ -508,7 +508,10 @@ Physics2D+FreeType。无 FreeType 时 Label 使用 SolidQuad 占位。
 M10-A36：产品 executable 正式命名 `tina_sample_2d`（源目录 `samples/2d_tilemap_bgfx`，
 `tina_sample_2d_tilemap_bgfx` 为 ALIAS）。product-2d 图要求 Catalog TileMap + Character +
 UI/Text + Physics crate + FreeType 同进程门禁，JSON `sample=tina_sample_2d`。
-pointer non-penetration 与生产 cooker 全量后置。
+
+M10-A37：`tina_sample_2d` 增加 MoveLeft/MoveRight Frame 键位绑定、落地后脚本化右走并撞墙
+（walk/hitRight/maxX JSON），以及 HUD Button + `setButtonAction` 接线计数。不合成 pointer 点击；
+完整 pointer non-penetration 与生产 cooker 全量后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation
