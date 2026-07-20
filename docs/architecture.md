@@ -199,6 +199,7 @@ startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 r
 | vNext M10-A28 TileMapInstance runtime | 已完成可变地图实例切片 | Create/setTile/chunk revision/solid AABB。无 chunk extraction/draw |
 | vNext M10-A29 grid collision + chunk extract | 已完成提取边界切片 | IGridCollisionProvider、extractVisibleTileChunks。无 Render packet |
 | vNext M10-A30 tile chunk → sprite emit | 已完成 CPU 绘制桥接 | emitTileChunkSprites → RenderSprite2DInput/RenderScene。无独立 packet 类型 |
+| vNext M10-A31 Headless TileMap sample | 已完成 Null 产品烟测 | `tina_sample_2d_tilemap`：TileMapInstance + emit + CharacterController → RenderScene 300帧。非正式 Catalog/bgfx 门禁 |
 | vNext M11-A0 Physics2D lifecycle foundation | 已完成直接门禁 | 可选 `Tina::Physics2D` 只 PUBLIC 依赖 Core，Box2D 3.x PRIVATE；State/feature-owned 单线程 World、固定步长、owner/generation Body/Shape、原子 Box body、pose snapshot、幂等 shutdown |
 | vNext M11-A1 Physics2D contact events | 已完成直接门禁 | step 前复制 begin/end/hit 到固定 Tina storage；destroy tombstone；通道 overflow；`contactEvents()` borrowed view |
 | vNext M11-A2 Physics2D spatial query | 已完成直接门禁 | `overlapAabb` 精确 overlap、`castRay`/`castRayClosest`、caller buffer overflow、稳定排序 |

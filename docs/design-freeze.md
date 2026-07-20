@@ -486,6 +486,10 @@ AABB 裁剪并跳过空 chunk；`collectChunkNonEmptyCells` 枚举非空 cell。
 M10-A30：`emitTileChunkSprites` 将 chunk 非空 cell 转为 `RenderSprite2DInput`（UV/cell 中心/spriteKey）；
 `emitVisibleTileMapSprites` 组合可见提取 + emit。首期复用 Sprite2D 路径，不引入独立 Render packet 类型。
 
+M10-A31：Headless/Null `tina_sample_2d_tilemap` 用内建 Tileset/TileMap 构建 `TileMapInstance`，
+每帧 `emitVisibleTileMapSprites` + `CharacterController2D` 落地，经 RenderScene 提交 11 tile + 1 角色
+sprite，300 帧 JSON 门禁。不冒充 Catalog/bgfx/UI/Box2D 正式 `tina_sample_2d`。
+
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation
 ID，原子创建 Body+Box Shape，并提供 pose/velocity snapshot、销毁与幂等 shutdown。

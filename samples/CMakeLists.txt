@@ -1,6 +1,7 @@
 add_subdirectory(null)
 add_subdirectory(asset)
 add_subdirectory(2d)
+add_subdirectory(2d_tilemap)
 add_subdirectory(3d)
 
 if (TINA_BUILD_PHYSICS2D)

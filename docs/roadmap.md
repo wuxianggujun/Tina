@@ -595,6 +595,9 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   非空 cell 枚举；Render packet/cgltf 仍后置；
 - M10-A30 已完成 `emitTileChunkSprites`/`emitVisibleTileMapSprites`：可见 chunk → `RenderSprite2DInput`
   列表并可 commit 进 RenderScene；独立 TileChunkRenderPacket/cgltf 仍后置；
+- M10-A31 已完成 Headless/Null `tina_sample_2d_tilemap`：内建 Tileset/TileMap → TileMapInstance →
+  emitVisibleTileMapSprites + CharacterController2D 落地步进 → RenderScene 每帧 11 tile + 1 角色 sprite；
+  300 帧 JSON 门禁（非正式 Catalog/bgfx/UI/Box2D 产品样例）；
 - 完整 Cooker/cgltf 继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/

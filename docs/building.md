@@ -59,7 +59,7 @@ M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2/C1c-b3e/M8/
 
 ```powershell
 cmake --preset windows-msvc-vnext
-cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_scene_tests tina_render_scene_tests tina_asset_format_tests tina_asset_tests tina_sample_null tina_sample_asset tina_sample_2d_infrastructure tina_sample_3d_extraction
+cmake --build --preset windows-vnext-debug --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_scene_tests tina_render_scene_tests tina_asset_format_tests tina_asset_tests tina_sample_null tina_sample_asset tina_sample_2d_infrastructure tina_sample_2d_tilemap tina_sample_3d_extraction
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
@@ -86,6 +86,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 # cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d_catalog
 # out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d_catalog.exe --frames=60 --frame-delay-ms=0
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
+out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_tilemap.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_3d_extraction.exe --frames=300
 ```
 
@@ -371,7 +372,7 @@ MSBuild 进程并发驱动同一生成图；配置输出目录虽然隔离，共
 ```powershell
 cmake --preset windows-msvc-vnext
 cmake --build --preset windows-vnext-release `
-  --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_render_scene_tests tina_asset_format_tests tina_asset_tests tina_sample_null tina_sample_2d_infrastructure tina_sample_3d_extraction
+  --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_render_scene_tests tina_asset_format_tests tina_asset_tests tina_sample_null tina_sample_2d_infrastructure tina_sample_2d_tilemap tina_sample_3d_extraction
 out\build\windows-msvc-vnext\bin\Release\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_runtime_ui_tests.exe --gtest_color=yes
@@ -381,6 +382,7 @@ out\build\windows-msvc-vnext\bin\Release\tina_asset_format_tests.exe --gtest_col
 out\build\windows-msvc-vnext\bin\Release\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Release\tina_sample_null.exe --frames=300
 out\build\windows-msvc-vnext\bin\Release\tina_sample_2d_infrastructure.exe --frames=300
+out\build\windows-msvc-vnext\bin\Release\tina_sample_2d_tilemap.exe --frames=300
 out\build\windows-msvc-vnext\bin\Release\tina_sample_3d_extraction.exe --frames=300
 ```
 

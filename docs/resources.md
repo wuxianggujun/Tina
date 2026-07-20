@@ -69,7 +69,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A28 已实现运行时 TileMapInstance（edit/chunk revision/solid query）；
   M10-A29 已实现 IGridCollisionProvider 与可见 TileChunk 提取；
   M10-A30 已实现 TileChunk → RenderSprite2D 发射桥接；
-  完整正式 tina_sample_2d、CPU TaskGroup、cgltf 仍未实现。
+  M10-A31 已实现 Headless/Null `tina_sample_2d_tilemap`（TileMap emit + CharacterController）；
+  完整正式 tina_sample_2d（Catalog+bgfx+UI+Box2D）、cgltf 仍未实现。
 
 
 ## 下一阶段契约
