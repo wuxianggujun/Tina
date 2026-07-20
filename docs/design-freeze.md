@@ -367,3 +367,6 @@ M10-A2h 已落地 `tina_catalog_validate` CLI：调用 `openCatalogPackage`，�
 
 M10-A2i 已落地 `buildCatalogPackageSummary`：从 CatalogSnapshot 生成 totals/entry 诊断行（不触盘）；
 CLI 增加 `--list-entries`。不实现 Handle/Lease。
+
+M10-A2j 已落地 `planCatalogLoads`：在 load-order 上附带 entry 元数据与确定性 object 相对路径；
+不读盘、不加载 payload。不实现 Handle/Lease。

@@ -44,6 +44,8 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2g Catalog package open | Debug/Release C++23 | 223/223 + 37/37 | `openCatalogPackage` 覆盖完整包打开、校验失败不发布、不安全相对路径拒绝；`tina_asset_tests` 37/37。不实现 Handle/Lease |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2h catalog validate CLI | Debug/Release C++23 | CLI smoke | `tina_catalog_validate --help` 与缺失 root 失败 JSON；与 `tina_asset_tests` 同图。不实现 Handle/Lease |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2i package summary | Debug/Release C++23 | 223/223 + 39/39 | `buildCatalogPackageSummary` totals/entry 行；`tina_asset_tests` 39/39；CLI `--list-entries`。不实现 Handle/Lease |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A2j catalog load plan | Debug/Release C++23 | 223/223 + 42/42 | `planCatalogLoads` 依赖先序、相对路径、缺 id/空请求；`tina_asset_tests` 42/42。不实现 Handle/Lease |
+
 
 
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M8-A `tina_scene` World/Transform | Debug/Release C++23 | 19/19 | `tina_scene_tests` Debug 与 Release 均直接运行通过；覆盖 generation/owner、keep-world/keep-local、父销毁/显式子树销毁、非递归20,000层传播、宽树删除、固定容量/PMR回滚与稳定构造错误、overflow/shear、四元数和错线程读写；Linux Scene 图尚未运行 |

@@ -33,6 +33,7 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A2f 已实现磁盘 Catalog package 的 metadata-only/full 校验；
   M10-A2g 已实现 `openCatalogPackage`（catalogRoot/manifest → Snapshot，可选打开时校验）；
   M10-A2i 已实现 `buildCatalogPackageSummary` 诊断摘要与 CLI `--list-entries`；
+  M10-A2j 已实现 `planCatalogLoads` 依赖序加载计划（含确定性相对路径，不触盘）；
   Asset registry/状态机、Handle/Lease、异步 IO/Decode/Upload、增量 Cooker 与产品资产仍未实现。
 
 
