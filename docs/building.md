@@ -152,12 +152,25 @@ cmake --build --preset windows-vnext-release --target tina_asset_tests
 out\build\windows-msvc-vnext\bin\Release\tina_asset_tests.exe --gtest_color=yes
 ```
 
-### M10-A2c～A2f Cooked load and package validation
+### M10-A2c～A2g Cooked load, package validation, and open
 
-同一 `tina_asset_tests` 还覆盖 owning Cooked object、Catalog 依赖序、失败回滚的批量同步加载，以及
-`validateCatalogPackageOnDisk`。A2f 的 metadata-only 模式只检查常规文件与精确大小；full 模式强制
-ContentHash 和 Catalog entry 对齐，同时最多持有一个对象。当前 Windows MSVC Debug/Release 均34/34。
-该路径不包含 Handle/Lease、async IO、catalog 校验 CLI、Cooker 或 GPU upload；直接运行命令沿用上节。
+同一 `tina_asset_tests` 还覆盖 owning Cooked object、Catalog 依赖序、失败回滚的批量同步加载、
+`validateCatalogPackageOnDisk`，以及 `openCatalogPackage`。A2f metadata-only 只检查常规文件与精确
+大小；full 模式强制 ContentHash 和 Catalog entry 对齐。A2g 默认打开 `manifest.tmnft` 并可在打开时
+整包校验。当前 Windows MSVC Debug/Release `tina_asset_tests` 均37/37。
+该路径不包含 Handle/Lease、async IO、Cooker 或 GPU upload；直接运行命令沿用上节。
+
+### M10-A2h `tina_catalog_validate` CLI
+
+随 `TINA_BUILD_EXAMPLES=ON`（默认 top-level）构建的同步工具。成功 exit 0 并打印 JSON 摘要；
+失败 exit 1 并打印 `{"status":"error",...}`；参数错误 exit 2。
+
+```powershell
+cmake --build --preset windows-vnext-debug --target tina_catalog_validate
+out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --metadata-only
+out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot>
+out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --help
+```
 
 当前最小图的唯一第三方测试依赖是 `tests` manifest feature 提供的 GoogleTest 1.17.0；
 `TINA_BUILD_TESTING=OFF` 且不启用该 feature 时，vcpkg 安装图也不包含 GTest。它不进入或链接 GLFW、bgfx、EASTL、

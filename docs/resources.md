@@ -31,6 +31,7 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A2c 已实现 owning Cooked object 文件加载与 Catalog 路径解析校验；
   M10-A2d 已实现依赖展开加载序，M10-A2e 已实现失败不发布部分批的同步批量加载；
   M10-A2f 已实现磁盘 Catalog package 的 metadata-only/full 校验；
+  M10-A2g 已实现 `openCatalogPackage`（catalogRoot/manifest → Snapshot，可选打开时校验）；
   Asset registry/状态机、Handle/Lease、异步 IO/Decode/Upload、增量 Cooker 与产品资产仍未实现。
 
 
@@ -373,7 +374,32 @@ Catalog root 必须是非空、无 NUL 的严格 UTF-8。metadata-only 只能发
 不能替代 full parse/ContentHash；XXH3 仍不是对抗性安全签名。
 
 非目标：`AssetHandle`/`AssetLease`、registry 状态机、异步 IO、Task worker、GPU upload、目录清理、
-`tina_catalog_validate` CLI、Cooker writer、atomic publish、Bundle/Patch 或产品资产样例。
+Cooker writer、atomic publish、Bundle/Patch 或产品资产样例。
+
+### M10-A2g Catalog package 打开入口
+
+```text
+catalogRoot + safe relative manifest path (default manifest.tmnft)
+  -> loadCatalogSnapshotFromManifestFile
+  -> optional validateCatalogPackageOnDisk
+  -> publish CatalogSnapshot  (or destroy on any failure)
+```
+
+`openCatalogPackage` 是同步工具/宿主入口：不引入 registry、Handle/Lease、异步 IO 或全局包缓存。
+manifest 相对路径禁止绝对路径与 `..` 逃逸。打开失败不发布 Snapshot。
+
+### M10-A2h `tina_catalog_validate` CLI
+
+可执行文件 `tina_catalog_validate` 调用 `openCatalogPackage`：
+
+- `--root <path>` 必填
+- `--manifest <relative>` 默认 `manifest.tmnft`
+- `--metadata-only`：仅存在性/大小
+- `--no-validate`：只打开 Snapshot
+- 成功 stdout JSON：`status/entries/dependencies/validated/contentHash`
+- 失败 stdout JSON error + exit 1；用法错误 exit 2
+
+非目标：Handle/Lease、registry、async IO、Cooker、目录扫描清理。
 
 
 默认 hard limits 为：单 Cooked 文件与 payload 最大1 GiB、单资产最多4096个直接依赖、Manifest

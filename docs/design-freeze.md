@@ -357,4 +357,10 @@ M10-A2d 已落地 Catalog 依赖展开与 dependencies-first 确定性加载序�
 
 M10-A2f 已落地 `validateCatalogPackageOnDisk`：严格 UTF-8 Catalog root、确定性 object path、
 metadata-only 常规文件/精确大小校验，以及逐文件 full parse + 强制 ContentHash + Catalog entry 对齐。
-校验不枚举目录、不保留对象且同时最多持有一个 Cooked 文件；不实现 Handle/Lease、CLI 或 Cooker。
+校验不枚举目录、不保留对象且同时最多持有一个 Cooked 文件；不实现 Handle/Lease 或 Cooker。
+
+M10-A2g 已落地 `openCatalogPackage`：默认 `catalogRoot/manifest.tmnft` → owning CatalogSnapshot，
+可选打开时整包校验；路径逃逸拒绝；失败不发布。不实现 Handle/Lease 或异步加载。
+
+M10-A2h 已落地 `tina_catalog_validate` CLI：调用 `openCatalogPackage`，输出 JSON，支持
+`--metadata-only` / `--no-validate`；不引入 registry、Handle/Lease 或异步。

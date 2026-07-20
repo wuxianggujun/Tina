@@ -199,9 +199,11 @@ if(TINA_BUILD_LEGACY)
     add_subdirectory(src)
 endif()
 
-# Examples
+# Examples and small host tools (catalog validate CLI, samples).
 if (TINA_BUILD_EXAMPLES)
     add_subdirectory(samples)
+    add_subdirectory(tools)
+
 endif ()
 
 # Tests
