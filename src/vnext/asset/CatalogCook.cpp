@@ -3,11 +3,14 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackagePublish.hpp>
+#include <tina/asset_format/SpritePayload.hpp>
+#include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/io/ReadFile.hpp>
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <filesystem>
 #include <string>
 #include <utility>
@@ -145,6 +148,153 @@ struct CookedPackage final {
     const auto full = std::filesystem::u8path(baseUtf8) / path;
     const auto generic = full.generic_u8string();
     return std::string(generic.begin(), generic.end());
+}
+
+[[nodiscard]] bool parseU32Token(std::string_view text, Core::u32& out) noexcept
+{
+    const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), out);
+    return err == std::errc{} && end == text.data() + text.size();
+}
+
+[[nodiscard]] bool parseFloatToken(std::string_view text, float& out) noexcept
+{
+    const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), out);
+    return err == std::errc{} && end == text.data() + text.size();
+}
+
+[[nodiscard]] std::optional<std::byte> parseHexByte(std::string_view text) noexcept
+{
+    if (text.size() != 2)
+    {
+        return std::nullopt;
+    }
+    auto nibble = [](char ch) -> int {
+        if (ch >= '0' && ch <= '9')
+        {
+            return ch - '0';
+        }
+        if (ch >= 'a' && ch <= 'f')
+        {
+            return ch - 'a' + 10;
+        }
+        if (ch >= 'A' && ch <= 'F')
+        {
+            return ch - 'A' + 10;
+        }
+        return -1;
+    };
+    const int high = nibble(text[0]);
+    const int low = nibble(text[1]);
+    if (high < 0 || low < 0)
+    {
+        return std::nullopt;
+    }
+    return static_cast<std::byte>((high << 4) | low);
+}
+
+[[nodiscard]] Core::Result<CatalogCookAssetSpec> parseTexture2dInline(const std::vector<std::string>& tokens)
+{
+    // texture2d <id> <w> <h> <hexRRGGBBAA>...
+    if (tokens.size() < 5)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "texture2d needs id width height pixels...");
+    }
+    auto assetId = Core::AssetId::parseCanonical(tokens[1]);
+    if (!assetId)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid texture2d asset id");
+    }
+    Core::u32 width = 0;
+    Core::u32 height = 0;
+    if (!parseU32Token(tokens[2], width) || !parseU32Token(tokens[3], height) || width == 0 || height == 0 ||
+        width > AssetFormat::Texture2DWire::MaxDimension || height > AssetFormat::Texture2DWire::MaxDimension)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid texture2d dimensions");
+    }
+    const auto expectedPixels = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    if (tokens.size() != 4U + expectedPixels)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "texture2d pixel count mismatch");
+    }
+    std::vector<std::byte> pixels;
+    pixels.reserve(expectedPixels * 4U);
+    for (std::size_t index = 0; index < expectedPixels; ++index)
+    {
+        const auto& token = tokens[4U + index];
+        if (token.size() != 8)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "pixel must be 8 hex chars RRGGBBAA");
+        }
+        for (std::size_t byteIndex = 0; byteIndex < 4U; ++byteIndex)
+        {
+            auto byte = parseHexByte(std::string_view(token).substr(byteIndex * 2U, 2U));
+            if (!byte)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid pixel hex");
+            }
+            pixels.push_back(*byte);
+        }
+    }
+    auto payload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
+        .width = static_cast<Core::u16>(width),
+        .height = static_cast<Core::u16>(height),
+        .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
+        .pixels = pixels,
+    });
+    if (!payload)
+    {
+        return Core::failure(std::move(payload.error()));
+    }
+    return CatalogCookAssetSpec{
+        .assetKind = AssetFormat::AssetKind::Texture2D,
+        .assetId = *assetId,
+        .assetTypeVersion = AssetFormat::Texture2DWire::SchemaVersion,
+        .payload = std::move(*payload),
+    };
+}
+
+[[nodiscard]] Core::Result<CatalogCookAssetSpec> parseSpriteInline(const std::vector<std::string>& tokens)
+{
+    // sprite <id> <textureId> [u0 v0 u1 v1 pivotX pivotY ppu]
+    if (tokens.size() != 3 && tokens.size() != 10)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "sprite needs id textureId [u0 v0 u1 v1 pivotX pivotY ppu]");
+    }
+    auto spriteId = Core::AssetId::parseCanonical(tokens[1]);
+    auto textureId = Core::AssetId::parseCanonical(tokens[2]);
+    if (!spriteId || !textureId)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid sprite/texture asset id");
+    }
+    AssetFormat::SpritePayloadDesc desc{.textureId = *textureId};
+    if (tokens.size() == 10)
+    {
+        if (!parseFloatToken(tokens[3], desc.u0) || !parseFloatToken(tokens[4], desc.v0) ||
+            !parseFloatToken(tokens[5], desc.u1) || !parseFloatToken(tokens[6], desc.v1) ||
+            !parseFloatToken(tokens[7], desc.pivotX) || !parseFloatToken(tokens[8], desc.pivotY) ||
+            !parseFloatToken(tokens[9], desc.pixelsPerUnit))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid sprite numeric fields");
+        }
+    }
+    auto payload = AssetFormat::writeSpritePayloadBytes(desc);
+    if (!payload)
+    {
+        return Core::failure(std::move(payload.error()));
+    }
+    CatalogCookAssetSpec asset{
+        .assetKind = AssetFormat::AssetKind::Sprite,
+        .assetId = *spriteId,
+        .assetTypeVersion = AssetFormat::SpriteWire::SchemaVersion,
+        .payload = std::move(*payload),
+    };
+    asset.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
+        .assetId = *textureId,
+        .expectedKind = AssetFormat::AssetKind::Texture2D,
+        .flags = AssetFormat::DependencyFlags::Required,
+    });
+    return asset;
 }
 
 [[nodiscard]] Core::Result<CookedPackage> cookPackageInternal(const CatalogCookRequest& request)
@@ -292,6 +442,26 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid platform line in recipe");
             }
+            continue;
+        }
+        if (tokens[0] == "texture2d")
+        {
+            auto asset = parseTexture2dInline(tokens);
+            if (!asset)
+            {
+                return Core::failure(std::move(asset.error()));
+            }
+            request.assets.push_back(std::move(*asset));
+            continue;
+        }
+        if (tokens[0] == "sprite")
+        {
+            auto asset = parseSpriteInline(tokens);
+            if (!asset)
+            {
+                return Core::failure(std::move(asset.error()));
+            }
+            request.assets.push_back(std::move(*asset));
             continue;
         }
         if (tokens[0] != "asset" || tokens.size() < 4)

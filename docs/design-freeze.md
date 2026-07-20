@@ -444,3 +444,6 @@ M10-A17：`AssetSystem::openAndBindCatalog` 一站式打开绑定；`catalogFirs
 
 M10-A18：`verifyTypedPayload` 在 content 校验后解析 Texture2D/Sprite v1；`requireTyped2dPayloads`
 让 openAndBind 默认开启；`tina_catalog_validate --typed-payloads`；默认 false 保持旧 raw fixture 兼容。
+
+M10-A19：recipe 增加 `texture2d id w h RRGGBBAA...` 与 `sprite id texId [uv/pivot/ppu]`，直接生成
+typed payload v1，无需预编码 payload 文件。

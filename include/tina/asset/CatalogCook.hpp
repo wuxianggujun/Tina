@@ -44,7 +44,10 @@ struct CatalogCookResult final {
 //   platform WindowsX64
 //   asset Texture2D <32hexId> <payloadPath>
 //   asset Material <32hexId> <payloadPath> <dep32hex:Kind> ...
+//   texture2d <32hexId> <width> <height> <hexRRGGBBAA> ...   // inline Rgba8Unorm pixels
+//   sprite <32hexId> <texture32hexId> [u0 v0 u1 v1 pivotX pivotY ppu]
 // Paths are relative to the recipe file directory unless absolute.
+// `texture2d`/`sprite` build typed payload v1 without pre-encoded files.
 [[nodiscard]] Core::Result<CatalogCookRequest> loadCatalogCookRecipeFile(std::string_view recipeUtf8Path);
 
 // Parse recipe text with an explicit base directory for relative payload paths.

@@ -35,7 +35,9 @@ void printUsage()
         << "Recipe lines:\n"
         << "  platform WindowsX64\n"
         << "  asset Texture2D <32hex> <payloadPath>\n"
-        << "  asset Sprite <32hex> <payloadPath> <dep32hex:Texture2D>\n";
+        << "  asset Sprite <32hex> <payloadPath> <dep32hex:Texture2D>\n"
+        << "  texture2d <32hex> <w> <h> <RRGGBBAA>...\n"
+        << "  sprite <32hex> <texture32hex> [u0 v0 u1 v1 pivotX pivotY ppu]\n";
 }
 
 [[nodiscard]] int parseArgs(int argc, char** argv, Options& options)

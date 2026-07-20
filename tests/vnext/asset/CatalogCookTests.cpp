@@ -83,6 +83,60 @@ TEST(CatalogCookTests, CookAndPublishFromRequest)
     std::filesystem::remove_all(root, ec);
 }
 
+TEST(CatalogCookTests, InlineTexture2dAndSpriteRecipe)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto spriteId = *Core::AssetId::fromBytes(idBytes(3U));
+    const auto texHex = textureId.canonicalText();
+    const auto spriteHex = spriteId.canonicalText();
+
+    std::string recipe;
+    recipe += "platform WindowsX64\n";
+    recipe += "texture2d ";
+    recipe.append(texHex.data(), texHex.size());
+    recipe += " 1 1 FF0000FF\n";
+    recipe += "sprite ";
+    recipe.append(spriteHex.data(), spriteHex.size());
+    recipe += " ";
+    recipe.append(texHex.data(), texHex.size());
+    recipe += " 0 0 1 1 0.5 0.5 16\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    EXPECT_EQ(request->assets.size(), 2U);
+
+    const auto root = std::filesystem::temp_directory_path() / "tina_inline_recipe";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(root), *request).has_value());
+
+    CatalogPackageOpenConfig openConfig{
+        .manifest =
+            CatalogFileLoadConfig{
+                .catalog =
+                    CatalogConfig{
+                        .maxEntries = 8,
+                        .maxDependencies = 8,
+                        .maxDependenciesPerAsset = 4,
+                        .memoryResource = &memory,
+                    },
+            },
+        .validateOnOpen = true,
+        .validation =
+            CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .verifyContent = true,
+                .verifyTypedPayload = true,
+            },
+    };
+    auto catalog = openCatalogPackage(toUtf8(root), openConfig);
+    ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
+    EXPECT_EQ(catalog->entryCount(), 2U);
+    EXPECT_EQ(catalog->dependencyCount(), 1U);
+    std::filesystem::remove_all(root, ec);
+}
+
 TEST(CatalogCookTests, RecipeFileRoundTrip)
 {
     std::pmr::unsynchronized_pool_resource memory;
