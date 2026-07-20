@@ -11,6 +11,7 @@ set(TINA_ASSET_TEST_SOURCES
     Typed2dCatalogPipelineTests.cpp
     AssetSystemCatalogApiTests.cpp
     AssetSpriteRenderTests.cpp
+    AssetGpuTextureTests.cpp
     AssetToRenderScenePipelineTests.cpp
     TypedPayloadValidationTests.cpp
     CatalogLoadOrderTests.cpp
@@ -30,6 +31,7 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/AssetRetirementHeader.cpp
     header_isolation/AssetTypedViewsHeader.cpp
     header_isolation/AssetSpriteRenderHeader.cpp
+    header_isolation/AssetGpuTextureHeader.cpp
     header_isolation/CatalogCookHeader.cpp
     header_isolation/CatalogFileHeader.cpp
     header_isolation/CatalogLoadOrderHeader.cpp

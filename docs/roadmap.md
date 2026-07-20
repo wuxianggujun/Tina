@@ -516,7 +516,9 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   仍无 bgfx 纹理采样/GPU 可见绘制；
 - M10-A22 已完成 bgfx Sprite2D `s_tex` 采样路径 + 默认 1x1 白纹理绑定（fixture shader 可采样）；
   仍未把 Catalog Texture2D 像素上传到 GPU；
-- 完整 Cooker/cgltf、CPU TaskGroup、Catalog→GPU 纹理上传接线继续后置；
+- M10-A23 已完成 `IRenderDevice` Texture2D 上传/销毁/Sprite2D key 绑定、Null 账本、bgfx 真纹理与
+  按 spriteKey 批次 `setTexture`、`uploadTexture2DFromCooked` helper；产品样例仍未默认上传；
+- 完整 Cooker/cgltf、CPU TaskGroup、正式可见 Catalog 2D 样例继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；

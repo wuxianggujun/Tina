@@ -457,3 +457,7 @@ M10-A21：测试门禁覆盖 cook→AssetSystem load/ReadyGpu→makeSpriteRender
 
 M10-A22：bgfx Sprite2D fragment 改为 `SAMPLER2D(s_tex)` 采样；设备持有默认 1x1 白纹理与 sampler
 uniform，submit 时 `setTexture(0, s_tex, white)`。Catalog Texture2D 上传/按 spriteKey 绑定后置。
+
+M10-A23：`IRenderDevice::createTexture2DRgba8` / `destroyTexture2D` / `setSprite2DTextureBinding`；
+Null 设备记账；bgfx 创真纹理并按 spriteKey 分批绑定；Asset `uploadTexture2DFromCooked` 从 typed
+Texture2D payload 上传。正式产品样例默认上传与 FramePin 后置。

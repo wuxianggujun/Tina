@@ -29,7 +29,9 @@
 #include <string_view>
 #include <thread>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace Tina::Render::Bgfx {
 namespace {
@@ -742,6 +744,18 @@ class BgfxRenderDevice final : public IRenderDevice {
                 sprite2DSampler_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
+            for (TextureSlot& slot : textures_)
+            {
+                if (slot.live && bgfx::isValid(slot.handle))
+                {
+                    bgfx::destroy(slot.handle);
+                    slot.handle = BGFX_INVALID_HANDLE;
+                    slot.live = false;
+                    --statistics_.liveResources;
+                }
+            }
+            textures_.clear();
+            spriteTextureBindings_.clear();
             if (bgfx::isValid(uiSolidQuadProgram_))
             {
                 bgfx::destroy(uiSolidQuadProgram_);
@@ -947,10 +961,162 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         bgfx::setScissor();
         bgfx::setState(kSprite2DPremultipliedAlphaState);
-        bgfx::setTexture(0, sprite2DSampler_, sprite2DDefaultTexture_);
         bgfx::setVertexBuffer(0, &transientVertices, 0, prepared.requirements.vertexCount);
-        bgfx::setIndexBuffer(&transientIndices, 0, prepared.requirements.indexCount);
-        bgfx::submit(kSprite2DView, sprite2DProgram_);
+
+        // One submit per contiguous spriteKey batch so product textures can bind per key.
+        const auto sprites = scene.sprites2D();
+        u32 batchBegin = 0;
+        while (batchBegin < prepared.requirements.spriteCount)
+        {
+            const u32 batchKey = sprites[batchBegin].spriteKey;
+            u32 batchEnd = batchBegin + 1U;
+            while (batchEnd < prepared.requirements.spriteCount && sprites[batchEnd].spriteKey == batchKey)
+            {
+                ++batchEnd;
+            }
+
+            bgfx::TextureHandle texture = sprite2DDefaultTexture_;
+            if (const auto binding = spriteTextureBindings_.find(batchKey); binding != spriteTextureBindings_.end())
+            {
+                const GpuTextureId id = binding->second;
+                if (id.index < textures_.size())
+                {
+                    const TextureSlot& slot = textures_[id.index];
+                    if (slot.live && slot.generation == id.generation && bgfx::isValid(slot.handle))
+                    {
+                        texture = slot.handle;
+                    }
+                }
+            }
+            bgfx::setTexture(0, sprite2DSampler_, texture);
+            const u32 firstIndex = batchBegin * 6U;
+            const u32 indexCount = (batchEnd - batchBegin) * 6U;
+            bgfx::setIndexBuffer(&transientIndices, firstIndex, indexCount);
+            bgfx::submit(kSprite2DView, sprite2DProgram_);
+            batchBegin = batchEnd;
+        }
+    }
+
+    [[nodiscard]] Core::Result<GpuTextureId> createTexture2DRgba8(const Texture2DUploadDesc& desc) override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::createTexture2DRgba8"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        const usize expectedBytes =
+            static_cast<usize>(desc.width) * static_cast<usize>(desc.height) * 4U;
+        if (desc.width == 0 || desc.height == 0 || desc.rgba8Pixels.size() != expectedBytes)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload, "invalid Texture2D RGBA8 upload descriptor");
+        }
+
+        const bgfx::Memory* memory =
+            bgfx::copy(desc.rgba8Pixels.data(), static_cast<u32>(desc.rgba8Pixels.size()));
+        const bgfx::TextureHandle handle =
+            bgfx::createTexture2D(desc.width, desc.height, false, 1, bgfx::TextureFormat::RGBA8,
+                                  BGFX_TEXTURE_NONE | BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP, memory);
+        if (!bgfx::isValid(handle))
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload, "bgfx rejected Texture2D create");
+        }
+
+        u32 index = (std::numeric_limits<u32>::max)();
+        for (u32 slotIndex = 0; slotIndex < static_cast<u32>(textures_.size()); ++slotIndex)
+        {
+            if (!textures_[slotIndex].live)
+            {
+                index = slotIndex;
+                break;
+            }
+        }
+        if (index == (std::numeric_limits<u32>::max)())
+        {
+            index = static_cast<u32>(textures_.size());
+            textures_.push_back(TextureSlot{});
+        }
+        TextureSlot& slot = textures_[index];
+        if (slot.generation == 0)
+        {
+            slot.generation = 1;
+        }
+        slot.handle = handle;
+        slot.width = desc.width;
+        slot.height = desc.height;
+        slot.live = true;
+        ++statistics_.liveResources;
+        return GpuTextureId{.index = index, .generation = slot.generation};
+    }
+
+    [[nodiscard]] Core::Status destroyTexture2D(GpuTextureId texture) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (!texture || texture.index >= textures_.size())
+        {
+            return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
+        }
+        TextureSlot& slot = textures_[texture.index];
+        if (!slot.live || slot.generation != texture.generation)
+        {
+            return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is stale or destroyed");
+        }
+        if (bgfx::isValid(slot.handle))
+        {
+            bgfx::destroy(slot.handle);
+            slot.handle = BGFX_INVALID_HANDLE;
+            --statistics_.liveResources;
+        }
+        slot.live = false;
+        ++slot.generation;
+        for (auto it = spriteTextureBindings_.begin(); it != spriteTextureBindings_.end();)
+        {
+            if (it->second == texture)
+            {
+                it = spriteTextureBindings_.erase(it);
+            } else
+            {
+                ++it;
+            }
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setSprite2DTextureBinding(u32 spriteKey, GpuTextureId texture) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (spriteKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload, "spriteKey must be non-zero");
+        }
+        if (!texture)
+        {
+            spriteTextureBindings_.erase(spriteKey);
+            return Core::success();
+        }
+        if (texture.index >= textures_.size() || !textures_[texture.index].live ||
+            textures_[texture.index].generation != texture.generation)
+        {
+            return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
+        }
+        spriteTextureBindings_[spriteKey] = texture;
+        return Core::success();
     }
 
     void submitUI(const RenderSurfaceState& surface, UIDisplayListView displayList,
@@ -1046,6 +1212,17 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::UniformHandle sprite2DSampler_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle sprite2DDefaultTexture_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle uiSolidQuadProgram_ = BGFX_INVALID_HANDLE;
+
+    struct TextureSlot final {
+        bgfx::TextureHandle handle = BGFX_INVALID_HANDLE;
+        u32 generation = 1;
+        u16 width = 0;
+        u16 height = 0;
+        bool live = false;
+    };
+    std::vector<TextureSlot> textures_{};
+    std::unordered_map<u32, GpuTextureId> spriteTextureBindings_{};
+
     bool frameOpen_ = false;
     bool stopped_ = false;
     bool bgfxInitialized_ = false;

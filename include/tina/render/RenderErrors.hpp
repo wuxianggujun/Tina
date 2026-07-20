@@ -33,5 +33,8 @@ inline constexpr Core::ErrorCode RenderSceneMissingCamera{Core::ErrorDomain::Ren
 inline constexpr Core::ErrorCode UploadTicketInvalid{Core::ErrorDomain::Render, 27};
 inline constexpr Core::ErrorCode UploadTicketNotRetirable{Core::ErrorDomain::Render, 28};
 inline constexpr Core::ErrorCode UploadLedgerFull{Core::ErrorDomain::Render, 29};
+inline constexpr Core::ErrorCode TextureUploadUnsupported{Core::ErrorDomain::Render, 30};
+inline constexpr Core::ErrorCode InvalidTextureUpload{Core::ErrorDomain::Render, 31};
+inline constexpr Core::ErrorCode TextureNotFound{Core::ErrorDomain::Render, 32};
 
 } // namespace Tina::Render::RenderErrorCode
