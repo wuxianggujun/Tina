@@ -49,7 +49,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A8 已实现 ReadyCpu→UploadQueued→ReadyGpu 与 AssetGpuUploadCoordinator；
   M10-A9 已实现 AssetSystem 自动 GPU upload（Null ledger）至 ReadyGpu；
   M10-A10 已实现 `tina_sample_asset` 产品 smoke（Catalog→ReadyGpu）；
-  CPU TaskGroup、bgfx 真实 upload、增量 Cooker 与产品资产仍未实现。
+  M10-A11 已实现 cooked/manifest wire writer；
+  CPU TaskGroup、bgfx 真实 upload、完整 Cooker/cgltf 与产品资产仍未实现。
 
 
 ## 下一阶段契约

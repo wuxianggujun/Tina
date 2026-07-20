@@ -10,6 +10,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace Tina::AssetFormat {
 
@@ -214,5 +215,48 @@ class CookedManifestView final {
 // Verifies that the cooked payload matches header.contentHash for Xxh3_128V1. Does not re-parse
 // wire layout; the view must already come from parseCookedAssetView.
 [[nodiscard]] Core::Status verifyCookedAssetContentHash(const CookedAssetView& asset);
+
+// ---- Writer inputs (M10-A11 minimal Cooker-facing wire builders) ----
+
+struct CookedAssetWriteDependency final {
+    Core::AssetId assetId{};
+    AssetKind expectedKind = AssetKind::Invalid;
+    DependencyFlags flags = DependencyFlags::Required;
+};
+
+struct CookedAssetWriteDesc final {
+    AssetKind assetKind = AssetKind::Invalid;
+    Core::u16 assetTypeVersion = 1;
+    TargetPlatform targetPlatform = TargetPlatform::WindowsX64;
+    Core::AssetId assetId{};
+    std::span<const CookedAssetWriteDependency> dependencies{};
+    std::span<const std::byte> payload{};
+    Core::u32 payloadAlignment = 16;
+    // When true, contentHash is computed via Core XXH3-128 v1 over payload.
+    bool computeContentHash = true;
+    // Used only when computeContentHash == false.
+    Core::ContentHash contentHash{};
+};
+
+struct CookedManifestWriteEntry final {
+    Core::AssetId assetId{};
+    Core::ContentHash contentHash{};
+    AssetKind assetKind = AssetKind::Invalid;
+    Core::u16 assetTypeVersion = 1;
+    Core::u64 cookedFileBytes = 0;
+    std::span<const CookedAssetWriteDependency> dependencies{};
+};
+
+struct CookedManifestWriteDesc final {
+    TargetPlatform targetPlatform = TargetPlatform::WindowsX64;
+    // Entries must already be sorted by ascending AssetId.
+    std::span<const CookedManifestWriteEntry> entries{};
+};
+
+// Builds a complete little-endian cooked asset file. Uses new[]/delete[] owning buffer via vector.
+[[nodiscard]] Core::Result<std::vector<std::byte>> writeCookedAssetBytes(const CookedAssetWriteDesc& desc);
+
+// Builds a complete little-endian cooked manifest file. Entries must be AssetId-sorted.
+[[nodiscard]] Core::Result<std::vector<std::byte>> writeCookedManifestBytes(const CookedManifestWriteDesc& desc);
 
 } // namespace Tina::AssetFormat

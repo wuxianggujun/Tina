@@ -519,5 +519,119 @@ TEST(AssetFormatStabilityTests, RepeatedBorrowedParsingHasNoStateDrift)
     }
 }
 
+TEST(CookedAssetWriterTests, WriteThenParseRoundTripWithComputedHash)
+{
+    constexpr std::array<std::byte, 4> Payload{std::byte{0xAA}, std::byte{0xBB}, std::byte{0xCC}, std::byte{0xDD}};
+    const auto assetId = *Core::AssetId::fromBytes(idBytes(0x11U));
+    const auto depId = *Core::AssetId::fromBytes(idBytes(0x22U));
+    const std::array deps{CookedAssetWriteDependency{
+        .assetId = depId,
+        .expectedKind = AssetKind::Texture2D,
+        .flags = DependencyFlags::Required,
+    }};
+
+    auto written = writeCookedAssetBytes(CookedAssetWriteDesc{
+        .assetKind = AssetKind::Material,
+        .assetTypeVersion = 1,
+        .targetPlatform = TargetPlatform::WindowsX64,
+        .assetId = assetId,
+        .dependencies = deps,
+        .payload = Payload,
+        .payloadAlignment = 16,
+        .computeContentHash = true,
+    });
+    ASSERT_TRUE(written.has_value()) << written.error().message;
+
+    auto view = parseCookedAssetView(*written);
+    ASSERT_TRUE(view.has_value()) << view.error().message;
+    EXPECT_EQ(view->header().assetKind, AssetKind::Material);
+    EXPECT_EQ(view->header().assetId, assetId);
+    EXPECT_EQ(view->header().dependencyCount, 1U);
+    ASSERT_EQ(view->payload().size(), Payload.size());
+    EXPECT_EQ(view->payload()[0], Payload[0]);
+    ASSERT_TRUE(verifyCookedAssetContentHash(*view).has_value());
+
+    auto dependency = view->dependency(0);
+    ASSERT_TRUE(dependency.has_value());
+    EXPECT_EQ(dependency->assetId, depId);
+    EXPECT_EQ(dependency->expectedKind, AssetKind::Texture2D);
+}
+
+TEST(CookedManifestWriterTests, WriteThenParseRoundTripSortedEntries)
+{
+    constexpr std::array<std::byte, 4> Payload{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto textureHash = *Core::digestContentHashV1(Payload);
+    auto textureBytes = writeCookedAssetBytes(CookedAssetWriteDesc{
+        .assetKind = AssetKind::Texture2D,
+        .assetId = textureId,
+        .payload = Payload,
+        .computeContentHash = true,
+    });
+    ASSERT_TRUE(textureBytes.has_value());
+    const std::array materialDeps{CookedAssetWriteDependency{
+        .assetId = textureId,
+        .expectedKind = AssetKind::Texture2D,
+        .flags = DependencyFlags::Required,
+    }};
+    auto materialBytes = writeCookedAssetBytes(CookedAssetWriteDesc{
+        .assetKind = AssetKind::Material,
+        .assetId = materialId,
+        .dependencies = materialDeps,
+        .payload = Payload,
+        .computeContentHash = true,
+    });
+    ASSERT_TRUE(materialBytes.has_value());
+    const auto materialHash = *Core::digestContentHashV1(Payload);
+
+    // AssetId sort: seed1 < seed2 by first differing byte.
+    const std::array entries{
+        CookedManifestWriteEntry{
+            .assetId = textureId,
+            .contentHash = textureHash,
+            .assetKind = AssetKind::Texture2D,
+            .cookedFileBytes = textureBytes->size(),
+        },
+        CookedManifestWriteEntry{
+            .assetId = materialId,
+            .contentHash = materialHash,
+            .assetKind = AssetKind::Material,
+            .cookedFileBytes = materialBytes->size(),
+            .dependencies = materialDeps,
+        },
+    };
+    auto manifest = writeCookedManifestBytes(CookedManifestWriteDesc{
+        .targetPlatform = TargetPlatform::WindowsX64,
+        .entries = entries,
+    });
+    ASSERT_TRUE(manifest.has_value()) << manifest.error().message;
+    auto view = parseCookedManifestView(*manifest);
+    ASSERT_TRUE(view.has_value()) << view.error().message;
+    EXPECT_EQ(view->header().entryCount, 2U);
+    EXPECT_EQ(view->header().dependencyCount, 1U);
+    auto entry0 = view->entry(0);
+    auto entry1 = view->entry(1);
+    ASSERT_TRUE(entry0.has_value());
+    ASSERT_TRUE(entry1.has_value());
+    EXPECT_EQ(entry0->assetId, textureId);
+    EXPECT_EQ(entry1->assetId, materialId);
+    EXPECT_EQ(entry1->dependencyCount, 1U);
+}
+
+TEST(CookedManifestWriterTests, RejectsUnsortedEntries)
+{
+    const auto a = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto b = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto hash = *Core::ContentHash::fromBytes(hashBytes(1U));
+    const std::array entries{
+        CookedManifestWriteEntry{.assetId = a, .contentHash = hash, .assetKind = AssetKind::Texture2D, .cookedFileBytes = 128},
+        CookedManifestWriteEntry{.assetId = b, .contentHash = hash, .assetKind = AssetKind::Material, .cookedFileBytes = 128},
+    };
+    auto manifest = writeCookedManifestBytes(CookedManifestWriteDesc{.entries = entries});
+    ASSERT_FALSE(manifest.has_value());
+    EXPECT_EQ(manifest.error().code, AssetFormatErrorCode::InvalidLayout);
+}
+
 } // namespace
 } // namespace Tina::AssetFormat

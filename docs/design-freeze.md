@@ -419,3 +419,6 @@ ReadyCpu 后自动 track 并 `pumpUploads`，产品路径可一次走到 ReadyGp
 
 M10-A10：`tina_sample_asset` 产品 smoke——临时 Catalog 包、BoundedTask IO、request/pump、Null upload、
 ReadyGpu + Lease；输出 JSON。不绘制画面、不依赖 bgfx。
+
+M10-A11：AssetFormat wire writer——`writeCookedAssetBytes`/`writeCookedManifestBytes`；自动 XXH3 ContentHash、
+AssetId 排序校验、与 parse 对称。完整 Cooker/cgltf/atomic publish 仍后置。

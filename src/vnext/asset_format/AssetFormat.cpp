@@ -610,4 +610,243 @@ Core::Status verifyCookedAssetContentHash(const CookedAssetView& asset)
     return Core::success();
 }
 
+namespace {
+
+void writeU8(std::vector<std::byte>& bytes, usize offset, u8 value)
+{
+    bytes.at(offset) = static_cast<std::byte>(value);
+}
+
+void writeU16(std::vector<std::byte>& bytes, usize offset, u16 value)
+{
+    writeU8(bytes, offset, static_cast<u8>(value & 0xFFU));
+    writeU8(bytes, offset + 1U, static_cast<u8>((value >> 8U) & 0xFFU));
+}
+
+void writeU32(std::vector<std::byte>& bytes, usize offset, u32 value)
+{
+    for (usize index = 0; index < 4U; ++index)
+    {
+        writeU8(bytes, offset + index, static_cast<u8>((value >> (index * 8U)) & 0xFFU));
+    }
+}
+
+void writeU64(std::vector<std::byte>& bytes, usize offset, u64 value)
+{
+    for (usize index = 0; index < 8U; ++index)
+    {
+        writeU8(bytes, offset + index, static_cast<u8>((value >> (index * 8U)) & 0xFFU));
+    }
+}
+
+template <usize Size>
+void writeFixed(std::vector<std::byte>& bytes, usize offset, const std::array<std::byte, Size>& value)
+{
+    std::copy(value.begin(), value.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+}
+
+} // namespace
+
+Core::Result<std::vector<std::byte>> writeCookedAssetBytes(const CookedAssetWriteDesc& desc)
+{
+    if (!isKnownAssetKind(desc.assetKind) || !desc.assetId || desc.assetTypeVersion == 0 ||
+        desc.targetPlatform == TargetPlatform::Invalid)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidIdentity, "cooked asset write requires valid identity fields");
+    }
+    if (desc.payloadAlignment == 0 || desc.payloadAlignment > Wire::MaxPayloadAlignment ||
+        !isPowerOfTwo(desc.payloadAlignment))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "payloadAlignment must be a power of two within limit");
+    }
+    if (desc.dependencies.size() > Wire::MaxDependenciesPerAsset)
+    {
+        return Core::failure(AssetFormatErrorCode::SizeLimitExceeded, "dependency count exceeds max");
+    }
+    if (desc.payload.size() > Wire::MaxPayloadBytes)
+    {
+        return Core::failure(AssetFormatErrorCode::SizeLimitExceeded, "payload exceeds max");
+    }
+
+    Core::ContentHash contentHash = desc.contentHash;
+    if (desc.computeContentHash)
+    {
+        auto digest = Core::digestContentHashV1(desc.payload);
+        if (!digest)
+        {
+            return Core::failure(std::move(digest.error()));
+        }
+        contentHash = *digest;
+    }
+    if (!contentHash)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidIdentity, "content hash must be non-zero");
+    }
+
+    const u64 dependencyEnd =
+        Wire::CookedAssetHeaderBytes + static_cast<u64>(desc.dependencies.size()) * Wire::DependencyEntryBytes;
+    u64 payloadOffset = 0;
+    if (!checkedAlignUp(dependencyEnd, desc.payloadAlignment, payloadOffset))
+    {
+        return Core::failure(AssetFormatErrorCode::ArithmeticOverflow, "payload offset alignment overflow");
+    }
+    u64 fileBytes = 0;
+    if (!checkedAdd(payloadOffset, static_cast<u64>(desc.payload.size()), fileBytes))
+    {
+        return Core::failure(AssetFormatErrorCode::ArithmeticOverflow, "file size overflow");
+    }
+    if (fileBytes > Wire::MaxCookedFileBytes)
+    {
+        return Core::failure(AssetFormatErrorCode::SizeLimitExceeded, "cooked file exceeds max");
+    }
+
+    try
+    {
+        std::vector<std::byte> bytes(static_cast<usize>(fileBytes), std::byte{0});
+        writeFixed(bytes, 0U, Wire::CookedAssetMagic);
+        writeU16(bytes, 8U, Wire::SchemaMajor);
+        writeU16(bytes, 10U, Wire::SchemaMinor);
+        writeU32(bytes, 12U, Wire::CookedAssetHeaderBytes);
+        writeU16(bytes, 16U, static_cast<u16>(desc.assetKind));
+        writeU16(bytes, 18U, desc.assetTypeVersion);
+        writeU16(bytes, 20U, static_cast<u16>(desc.targetPlatform));
+        writeU8(bytes, 22U, static_cast<u8>(EndianTag::Little));
+        writeU8(bytes, 23U, static_cast<u8>(HashAlgorithm::Xxh3_128V1));
+        writeFixed(bytes, 32U, desc.assetId.bytes());
+        writeFixed(bytes, 48U, contentHash.bytes());
+        writeU64(bytes, 64U, Wire::CookedAssetHeaderBytes);
+        writeU32(bytes, 72U, static_cast<u32>(desc.dependencies.size()));
+        writeU32(bytes, 76U, Wire::DependencyEntryBytes);
+        writeU64(bytes, 80U, payloadOffset);
+        writeU64(bytes, 88U, static_cast<u64>(desc.payload.size()));
+        writeU32(bytes, 96U, desc.payloadAlignment);
+        writeU64(bytes, 104U, fileBytes);
+
+        for (usize index = 0; index < desc.dependencies.size(); ++index)
+        {
+            const auto& dependency = desc.dependencies[index];
+            if (!dependency.assetId || !isKnownAssetKind(dependency.expectedKind))
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidIdentity, "dependency requires valid id and kind");
+            }
+            const auto offset = Wire::CookedAssetHeaderBytes + index * Wire::DependencyEntryBytes;
+            writeFixed(bytes, offset, dependency.assetId.bytes());
+            writeU16(bytes, offset + 16U, static_cast<u16>(dependency.expectedKind));
+            writeU16(bytes, offset + 18U, static_cast<u16>(dependency.flags));
+        }
+
+        if (!desc.payload.empty())
+        {
+            std::copy(desc.payload.begin(), desc.payload.end(),
+                      bytes.begin() + static_cast<std::ptrdiff_t>(payloadOffset));
+        }
+        return bytes;
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory, "cooked asset write allocation failed");
+    }
+}
+
+Core::Result<std::vector<std::byte>> writeCookedManifestBytes(const CookedManifestWriteDesc& desc)
+{
+    if (desc.targetPlatform == TargetPlatform::Invalid)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidIdentity, "manifest requires target platform");
+    }
+    if (desc.entries.size() > Wire::MaxManifestEntries)
+    {
+        return Core::failure(AssetFormatErrorCode::SizeLimitExceeded, "manifest entry count exceeds max");
+    }
+
+    u32 dependencyCount = 0;
+    for (usize index = 0; index < desc.entries.size(); ++index)
+    {
+        const auto& entry = desc.entries[index];
+        if (!entry.assetId || !isKnownAssetKind(entry.assetKind) || !entry.contentHash || entry.assetTypeVersion == 0 ||
+            entry.cookedFileBytes == 0)
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidIdentity, "manifest entry identity is invalid");
+        }
+        if (index > 0 && !(desc.entries[index - 1U].assetId < entry.assetId))
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout, "manifest entries must be strictly AssetId-sorted");
+        }
+        if (entry.dependencies.size() > Wire::MaxDependenciesPerAsset)
+        {
+            return Core::failure(AssetFormatErrorCode::SizeLimitExceeded, "per-entry dependency count exceeds max");
+        }
+        dependencyCount += static_cast<u32>(entry.dependencies.size());
+    }
+    if (dependencyCount > Wire::MaxManifestDependencies)
+    {
+        return Core::failure(AssetFormatErrorCode::SizeLimitExceeded, "manifest dependency count exceeds max");
+    }
+
+    const u64 dependencyOffset =
+        Wire::CookedManifestHeaderBytes + static_cast<u64>(desc.entries.size()) * Wire::ManifestEntryBytes;
+    u64 fileBytes = 0;
+    if (!checkedAdd(dependencyOffset, static_cast<u64>(dependencyCount) * Wire::DependencyEntryBytes, fileBytes))
+    {
+        return Core::failure(AssetFormatErrorCode::ArithmeticOverflow, "manifest size overflow");
+    }
+    if (fileBytes > Wire::MaxManifestFileBytes)
+    {
+        return Core::failure(AssetFormatErrorCode::SizeLimitExceeded, "manifest file exceeds max");
+    }
+
+    try
+    {
+        std::vector<std::byte> bytes(static_cast<usize>(fileBytes), std::byte{0});
+        writeFixed(bytes, 0U, Wire::CookedManifestMagic);
+        writeU16(bytes, 8U, Wire::SchemaMajor);
+        writeU16(bytes, 10U, Wire::SchemaMinor);
+        writeU32(bytes, 12U, Wire::CookedManifestHeaderBytes);
+        writeU16(bytes, 16U, static_cast<u16>(desc.targetPlatform));
+        writeU8(bytes, 18U, static_cast<u8>(EndianTag::Little));
+        writeU8(bytes, 19U, static_cast<u8>(HashAlgorithm::Xxh3_128V1));
+        writeU32(bytes, 24U, static_cast<u32>(desc.entries.size()));
+        writeU32(bytes, 28U, Wire::ManifestEntryBytes);
+        writeU32(bytes, 32U, dependencyCount);
+        writeU32(bytes, 36U, Wire::DependencyEntryBytes);
+        writeU64(bytes, 40U, Wire::CookedManifestHeaderBytes);
+        writeU64(bytes, 48U, dependencyOffset);
+        writeU64(bytes, 56U, fileBytes);
+
+        u32 dependencyFirst = 0;
+        for (usize entryIndex = 0; entryIndex < desc.entries.size(); ++entryIndex)
+        {
+            const auto& entry = desc.entries[entryIndex];
+            const auto offset = Wire::CookedManifestHeaderBytes + entryIndex * Wire::ManifestEntryBytes;
+            writeFixed(bytes, offset, entry.assetId.bytes());
+            writeFixed(bytes, offset + 16U, entry.contentHash.bytes());
+            writeU16(bytes, offset + 32U, static_cast<u16>(entry.assetKind));
+            writeU16(bytes, offset + 34U, entry.assetTypeVersion);
+            writeU32(bytes, offset + 40U, dependencyFirst);
+            writeU32(bytes, offset + 44U, static_cast<u32>(entry.dependencies.size()));
+            writeU64(bytes, offset + 48U, entry.cookedFileBytes);
+
+            for (usize localIndex = 0; localIndex < entry.dependencies.size(); ++localIndex)
+            {
+                const auto& dependency = entry.dependencies[localIndex];
+                if (!dependency.assetId || !isKnownAssetKind(dependency.expectedKind))
+                {
+                    return Core::failure(AssetFormatErrorCode::InvalidIdentity, "manifest dependency identity invalid");
+                }
+                const auto dependencyIndex = dependencyFirst + static_cast<u32>(localIndex);
+                const auto dependencyEntryOffset =
+                    dependencyOffset + static_cast<u64>(dependencyIndex) * Wire::DependencyEntryBytes;
+                writeFixed(bytes, static_cast<usize>(dependencyEntryOffset), dependency.assetId.bytes());
+                writeU16(bytes, static_cast<usize>(dependencyEntryOffset + 16U),
+                         static_cast<u16>(dependency.expectedKind));
+                writeU16(bytes, static_cast<usize>(dependencyEntryOffset + 18U), static_cast<u16>(dependency.flags));
+            }
+            dependencyFirst += static_cast<u32>(entry.dependencies.size());
+        }
+        return bytes;
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory, "manifest write allocation failed");
+    }
+}
+
 } // namespace Tina::AssetFormat
