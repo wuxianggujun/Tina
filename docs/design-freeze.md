@@ -485,3 +485,29 @@ AABB 裁剪并跳过空 chunk；`collectChunkNonEmptyCells` 枚举非空 cell。
 
 M10-A30：`emitTileChunkSprites` 将 chunk 非空 cell 转为 `RenderSprite2DInput`（UV/cell 中心/spriteKey）；
 `emitVisibleTileMapSprites` 组合可见提取 + emit。首期复用 Sprite2D 路径，不引入独立 Render packet 类型。
+
+M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
+Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation
+ID，原子创建 Body+Box Shape，并提供 pose/velocity snapshot、销毁与幂等 shutdown。
+
+M11-A1：`step()` 返回前复制 Box2D begin/end/hit contact 到 Create 时固定的 Tina storage；end 事件支持
+destroy tombstone；各通道独立 overflow 与 dropped 计数；`contactEvents()` 发布 owner-thread borrowed
+view（有效到下一次 step/shutdown/move/destroy）。
+
+M11-A2：owner-thread 同步空间查询。`overlapAabb` 用 AABB 等大 box proxy 做精确 overlap；`castRay`
+多命中稳定排序；`castRayClosest` 映射 Tina Body/Shape；结果写入调用方 buffer，`written`/`totalFound`/
+`overflow` 不扩容。
+
+M11-A3：Create 时固定 deferred command 容量；owner-thread `enqueue*`，`step()` 进入 solver 前 FIFO
+应用 Destroy/SetTransform/SetVelocity/Force/Impulse/Enabled/Awake；满队列拒绝；stale body 在 flush
+时跳过计数；`createBoxBody` 仍为立即原子创建。
+
+M11-A4：独立 `tina_physics2d_bench` 单线程 stack_dynamic 基线（`--bodies/--warmup/--steps/--rays`），
+输出 step ns p50/p95/p99 精简 JSON；不实现 Box2D worker callbacks。
+
+M11-A5：`PhysicsGridBodies` 将 solid grid cell 同步为 static box body（cell 中心与半边长由
+cellSize 决定）；单次调用失败全回滚；调用方负责从 TileMap/`IGridCollisionProvider` 收集 cell。
+
+M11-A6：`include/tina/asset/TileMapPhysicsSync.hpp` 在 `TINA_BUILD_PHYSICS2D` 时编入 `Tina::Asset`，
+从 `IGridCollisionProvider` 扫描 MaterialSolid 并 `syncTileMapSolidsToStaticBodies`。CharacterController2D
+与正式 `tina_sample_2d` 后置。

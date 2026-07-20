@@ -55,6 +55,16 @@
       }
     },
     {
+      "name": "windows-msvc-vnext-physics2d",
+      "displayName": "Windows x64 vNext Physics2D (MSVC 2026 + Box2D 3.x)",
+      "inherits": "windows-msvc-vnext",
+      "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-physics2d",
+      "cacheVariables": {
+        "TINA_BUILD_PHYSICS2D": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tests;physics2d"
+      }
+    },
+    {
       "name": "windows-msvc-vnext-platform",
       "displayName": "Windows x64 vNext Platform (MSVC 2026 + GLFW + C++23)",
       "inherits": "windows-msvc",
@@ -140,6 +150,16 @@
       }
     },
     {
+      "name": "linux-gcc13-vnext-physics2d",
+      "displayName": "Linux vNext Physics2D (GCC 13 + Box2D 3.x)",
+      "inherits": "linux-gcc13-vnext",
+      "binaryDir": "${sourceDir}/out/build/linux-gcc13-vnext-physics2d",
+      "cacheVariables": {
+        "TINA_BUILD_PHYSICS2D": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tests;physics2d"
+      }
+    },
+    {
       "name": "linux-gcc13-vnext-platform",
       "displayName": "Linux vNext Platform (GCC 13 + GLFW + C++23)",
       "inherits": "linux-gcc13-vnext",
@@ -195,6 +215,16 @@
       }
     },
     {
+      "name": "linux-clang22-vnext-physics2d-sanitize",
+      "displayName": "Linux vNext Physics2D (Clang 22 + Box2D 3.x + ASan/UBSan)",
+      "inherits": "linux-clang22-vnext-sanitize",
+      "binaryDir": "${sourceDir}/out/build/linux-clang22-vnext-physics2d-sanitize",
+      "cacheVariables": {
+        "TINA_BUILD_PHYSICS2D": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tests;physics2d"
+      }
+    },
+    {
       "name": "linux-clang22-vnext-platform-sanitize",
       "displayName": "Linux vNext Platform (Clang 22 + GLFW + ASan/UBSan)",
       "inherits": "linux-clang22-vnext-platform",
@@ -236,6 +266,18 @@
     {
       "name": "windows-vnext-release",
       "configurePreset": "windows-msvc-vnext",
+      "configuration": "Release",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vnext-physics2d-debug",
+      "configurePreset": "windows-msvc-vnext-physics2d",
+      "configuration": "Debug",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vnext-physics2d-release",
+      "configurePreset": "windows-msvc-vnext-physics2d",
       "configuration": "Release",
       "jobs": 2
     },
@@ -291,6 +333,11 @@
       "jobs": 2
     },
     {
+      "name": "linux-gcc13-vnext-physics2d-debug",
+      "configurePreset": "linux-gcc13-vnext-physics2d",
+      "jobs": 2
+    },
+    {
       "name": "linux-gcc13-vnext-platform-debug",
       "configurePreset": "linux-gcc13-vnext-platform",
       "jobs": 2
@@ -313,6 +360,11 @@
     {
       "name": "linux-clang22-vnext-sanitize-debug",
       "configurePreset": "linux-clang22-vnext-sanitize",
+      "jobs": 2
+    },
+    {
+      "name": "linux-clang22-vnext-physics2d-sanitize-debug",
+      "configurePreset": "linux-clang22-vnext-physics2d-sanitize",
       "jobs": 2
     },
     {

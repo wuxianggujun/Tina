@@ -5,8 +5,11 @@ include_guard(GLOBAL)
 # xxHash is a root dependency: Core PRIVATE ContentHash digest needs it even when Legacy is OFF.
 find_package(xxHash CONFIG REQUIRED)
 
-if(TINA_BUILD_LEGACY)
+if (TINA_BUILD_LEGACY OR TINA_BUILD_PHYSICS2D)
     find_package(box2d CONFIG REQUIRED)
+endif ()
+
+if (TINA_BUILD_LEGACY)
     find_package(EnTT CONFIG REQUIRED)
     find_package(Freetype REQUIRED)
     find_package(glfw3 3.4 CONFIG REQUIRED)

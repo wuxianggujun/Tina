@@ -3,6 +3,10 @@ add_subdirectory(asset)
 add_subdirectory(2d)
 add_subdirectory(3d)
 
+if (TINA_BUILD_PHYSICS2D)
+    add_subdirectory(physics2d_bench)
+endif ()
+
 if(TINA_BUILD_PLATFORM_GLFW)
     add_subdirectory(platform)
 endif()

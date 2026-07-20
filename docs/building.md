@@ -540,10 +540,29 @@ sanitizer 插桩。因此该门禁证明 Tina 代码、边界交互和生命周�
 
 ## vNext 目标 Preset
 
-`windows-msvc-vnext`、`windows-msvc-vnext-platform`、`linux-gcc13-vnext`、
-`linux-gcc13-vnext-platform`、`linux-gcc13-vnext-platform-wayland`、`linux-clang22-vnext`、
-`linux-clang22-vnext-platform`、`linux-clang22-vnext-sanitize`、
+`windows-msvc-vnext`、`windows-msvc-vnext-platform`、`windows-msvc-vnext-physics2d`、
+`linux-gcc13-vnext`、`linux-gcc13-vnext-physics2d`、`linux-gcc13-vnext-platform`、
+`linux-gcc13-vnext-platform-wayland`、`linux-clang22-vnext`、`linux-clang22-vnext-platform`、
+`linux-clang22-vnext-sanitize`、`linux-clang22-vnext-physics2d-sanitize`、
 `linux-clang22-vnext-platform-sanitize` 与 `linux-clang22-vnext-platform-wayland-sanitize` 已落地。
+
+M11 可选 Physics2D 图使用独立 preset，不改变基础 Null 图。模块 GoogleTest 与单线程 bench 门禁：
+
+```powershell
+cmake --preset windows-msvc-vnext-physics2d
+cmake --build --preset windows-vnext-physics2d-debug --target tina_physics2d_tests
+out\build\windows-msvc-vnext-physics2d\bin\Debug\tina_physics2d_tests.exe --gtest_color=yes
+
+cmake --build --preset windows-vnext-physics2d-release --target tina_physics2d_tests tina_physics2d_bench
+out\build\windows-msvc-vnext-physics2d\bin\Release\tina_physics2d_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-physics2d\bin\Release\tina_physics2d_bench.exe --bodies=64 --warmup=60 --steps=300 --rays=4
+```
+
+Linux 分别使用 `linux-gcc13-vnext-physics2d` 与
+`linux-clang22-vnext-physics2d-sanitize`；两者只启用 `tests;physics2d` manifest feature，不解析
+Legacy、GLFW、bgfx 或 shader 图。`tina_physics2d_bench` 是模块单线程基线，不是 ADR 0018
+完整 `tina_bench` schema，不能与 GoogleTest 耗时混写。
+
 下列性能名称仍是后续设计契约：
 
 | Preset | 优化/插桩 | 用途 |
@@ -582,6 +601,7 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 | `TINA_BUILD_LEGACY` | `ON` | 迁移期构建现有游戏与旧模块；vNext preset 固定关闭 |
 | `TINA_BUILD_PLATFORM_GLFW` | `OFF` | 构建私有 vNext GLFW Window/Input adapter；需启用 vcpkg `platform-glfw` feature，不改变 Game SDK 边界 |
 | `TINA_BUILD_RENDER_BGFX` | `OFF` | 构建私有 vNext bgfx backend、build-tree shaderc UI shader 与 Desktop SolidQuad smoke，不改变 Game SDK 边界 |
+| `TINA_BUILD_PHYSICS2D` | `OFF` | 构建可选 `Tina::Physics2D` 与独立测试；需显式启用 vcpkg `physics2d` feature，Box2D 保持 PRIVATE |
 | `TINA_BUILD_BENCHMARKS` | `OFF` | 后续构建独立 `tina_bench` |
 | `TINA_ENABLE_SANITIZERS` | `OFF` | GCC/Clang Unix target 同时启用 ASan/UBSan；其他工具链配置时报错 |
 | `TINA_BUILD_WAYLAND` | `OFF` | Linux Wayland 构建，需要对应 vcpkg feature |

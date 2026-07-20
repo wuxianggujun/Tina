@@ -10,6 +10,12 @@
     "xxhash"
   ],
   "features": {
+    "physics2d": {
+      "description": "Build the optional Tina vNext Box2D physics module.",
+      "dependencies": [
+        "box2d"
+      ]
+    },
     "platform-glfw": {
       "description": "Build the private Tina vNext GLFW platform adapter.",
       "dependencies": [
