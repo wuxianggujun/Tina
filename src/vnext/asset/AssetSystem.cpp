@@ -30,11 +30,18 @@ namespace {
 } // namespace
 
 AssetSystem::AssetSystem(AssetStore store, CookedAssetBatchLoadConfig batch, std::pmr::memory_resource* memoryResource,
-                         Core::usize queueCapacity, Core::u32 defaultPumpBudget, Task::ITaskSystem* taskSystem) noexcept
+                         Core::usize queueCapacity, Core::u32 defaultPumpBudget, Task::ITaskSystem* taskSystem,
+                         Render::NullUploadLedger* uploadLedger, AssetGpuUploadConfig gpuUploadConfig,
+                         bool autoGpuUpload)
     : m_store(std::move(store)), m_batch(batch), m_memoryResource(memoryResource), m_queueCapacity(queueCapacity),
-      m_defaultPumpBudget(defaultPumpBudget), m_taskSystem(taskSystem), m_catalogRoot(memoryResource),
+      m_defaultPumpBudget(defaultPumpBudget), m_taskSystem(taskSystem), m_uploadLedger(uploadLedger),
+      m_gpuUploadConfig(gpuUploadConfig), m_autoGpuUpload(autoGpuUpload), m_catalogRoot(memoryResource),
       m_index(memoryResource), m_queue(memoryResource)
 {
+    if (m_uploadLedger != nullptr)
+    {
+        m_gpuUpload = std::make_unique<AssetGpuUploadCoordinator>(m_store, *m_uploadLedger, m_gpuUploadConfig);
+    }
 }
 
 AssetSystem::~AssetSystem() noexcept = default;
@@ -42,14 +49,23 @@ AssetSystem::~AssetSystem() noexcept = default;
 AssetSystem::AssetSystem(AssetSystem&& other) noexcept
     : m_store(std::move(other.m_store)), m_batch(other.m_batch), m_memoryResource(other.m_memoryResource),
       m_queueCapacity(other.m_queueCapacity), m_defaultPumpBudget(other.m_defaultPumpBudget),
-      m_taskSystem(other.m_taskSystem), m_catalog(std::move(other.m_catalog)),
+      m_taskSystem(other.m_taskSystem), m_uploadLedger(other.m_uploadLedger), m_gpuUploadConfig(other.m_gpuUploadConfig),
+      m_autoGpuUpload(other.m_autoGpuUpload), m_catalog(std::move(other.m_catalog)),
       m_catalogRoot(std::move(other.m_catalogRoot)), m_index(std::move(other.m_index)),
       m_queue(std::move(other.m_queue)), m_inFlight(other.m_inFlight.load(std::memory_order_relaxed))
 {
+    // Rebuild coordinator against this->m_store (moved-from coordinator still pointed at old store).
+    other.m_gpuUpload.reset();
+    if (m_uploadLedger != nullptr)
+    {
+        m_gpuUpload = std::make_unique<AssetGpuUploadCoordinator>(m_store, *m_uploadLedger, m_gpuUploadConfig);
+    }
     other.m_memoryResource = nullptr;
     other.m_taskSystem = nullptr;
+    other.m_uploadLedger = nullptr;
     other.m_queueCapacity = 0;
     other.m_defaultPumpBudget = 0;
+    other.m_autoGpuUpload = true;
     other.m_inFlight.store(0, std::memory_order_relaxed);
 }
 
@@ -81,8 +97,16 @@ Core::Result<AssetSystem> AssetSystem::Create(AssetSystemConfig config)
     {
         return Core::failure(std::move(store.error()).withContext("AssetSystem::Create", "store"));
     }
-    return AssetSystem(std::move(*store), config.batch, config.memoryResource, config.queueCapacity,
-                       config.defaultPumpBudget, config.taskSystem);
+
+    try
+    {
+        return AssetSystem(std::move(*store), config.batch, config.memoryResource, config.queueCapacity,
+                           config.defaultPumpBudget, config.taskSystem, config.uploadLedger, config.gpuUpload,
+                           config.autoGpuUpload);
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed, "asset system construction failed");
+    }
 }
 
 Core::Status AssetSystem::bindCatalog(std::string_view catalogRootUtf8, CatalogSnapshot catalog)
@@ -139,6 +163,11 @@ Core::u32 AssetSystem::pendingCount() const noexcept
 Core::u32 AssetSystem::inFlightCount() const noexcept
 {
     return m_inFlight.load(std::memory_order_acquire);
+}
+
+bool AssetSystem::hasGpuUpload() const noexcept
+{
+    return m_gpuUpload != nullptr;
 }
 
 std::optional<AssetHandle> AssetSystem::find(Core::AssetId assetId) const noexcept
@@ -255,6 +284,7 @@ AssetSystem::load(std::span<const Core::AssetId> requestedAssetIds)
                 return Core::failure(std::move(status.error()));
             }
             publishedThisCall.push_back(*handle);
+            noteReadyCpu(*handle);
         }
 
         std::pmr::vector<AssetHandle> result{m_memoryResource};
@@ -283,6 +313,17 @@ AssetSystem::load(std::span<const Core::AssetId> requestedAssetIds)
                     return Core::failure(AssetErrorCode::InvalidHandle, "requested asset missing after load");
                 }
                 result.push_back(*handle);
+            }
+        }
+
+        // Advance Null GPU path immediately for sync load when configured.
+        if (m_gpuUpload != nullptr)
+        {
+            auto gpu = m_gpuUpload->pumpUploads();
+            if (!gpu)
+            {
+                rollback();
+                return Core::failure(std::move(gpu.error()).withContext("AssetSystem::load", "pumpUploads"));
             }
         }
         return result;
@@ -500,7 +541,12 @@ Core::Result<AssetPumpStats> AssetSystem::pumpSync(Core::u32 limit)
         {
             return Core::failure(std::move(completeStatus.error()).withContext("AssetSystem::pump", "complete"));
         }
+        noteReadyCpu(item.handle);
         ++stats.becameReady;
+    }
+    if (const auto status = mergeGpuStats(stats); !status)
+    {
+        return Core::failure(std::move(status.error()));
     }
     stats.remaining = static_cast<Core::u32>(m_queue.size());
     stats.inFlight = m_inFlight.load(std::memory_order_acquire);
@@ -611,8 +657,10 @@ Core::Result<AssetPumpStats> AssetSystem::pumpAsync(Core::u32 limit)
     }
     stats.mainCompletions += *mainResult2;
 
-    // Count Ready/Failed transitions from drained completions is approximate without callbacks;
-    // expose remaining/inFlight for callers.
+    if (const auto status = mergeGpuStats(stats); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
     stats.remaining = static_cast<Core::u32>(m_queue.size());
     stats.inFlight = m_inFlight.load(std::memory_order_acquire);
     return stats;
@@ -659,7 +707,11 @@ void AssetSystem::completeOnMain(AssetHandle handle, Core::AssetId assetId, std:
             return;
         }
     }
-    (void)m_store.complete(handle, std::move(*cookedResult));
+    if (!m_store.complete(handle, std::move(*cookedResult)))
+    {
+        return;
+    }
+    noteReadyCpu(handle);
 }
 
 Core::Result<AssetPumpStats> AssetSystem::pump(Core::u32 budget)
@@ -680,6 +732,50 @@ Core::Result<AssetPumpStats> AssetSystem::pump(Core::u32 budget)
     return pumpAsync(limit);
 }
 
+Core::Status AssetSystem::trackForGpuUpload(AssetHandle handle)
+{
+    if (m_gpuUpload == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "asset system has no upload ledger configured");
+    }
+    return m_gpuUpload->track(handle);
+}
+
+Core::Result<AssetGpuUploadStats> AssetSystem::pumpGpuUploads()
+{
+    if (m_gpuUpload == nullptr)
+    {
+        return AssetGpuUploadStats{};
+    }
+    return m_gpuUpload->pumpUploads();
+}
+
+void AssetSystem::noteReadyCpu(AssetHandle handle) noexcept
+{
+    if (!m_autoGpuUpload || m_gpuUpload == nullptr || !handle)
+    {
+        return;
+    }
+    (void)m_gpuUpload->track(handle);
+}
+
+Core::Status AssetSystem::mergeGpuStats(AssetPumpStats& stats) noexcept
+{
+    if (m_gpuUpload == nullptr)
+    {
+        return Core::success();
+    }
+    auto gpu = m_gpuUpload->pumpUploads();
+    if (!gpu)
+    {
+        return Core::failure(std::move(gpu.error()).withContext("AssetSystem::pump", "pumpUploads"));
+    }
+    stats.gpuSubmitted += gpu->submitted;
+    stats.becameGpuReady += gpu->becameGpuReady;
+    stats.gpuFailed += gpu->failed;
+    return Core::success();
+}
+
 const CookedAssetFile* AssetSystem::tryGet(AssetHandle handle) const noexcept
 {
     return m_store.tryGet(handle);
@@ -688,6 +784,11 @@ const CookedAssetFile* AssetSystem::tryGet(AssetHandle handle) const noexcept
 AssetLogicalState AssetSystem::state(AssetHandle handle) const noexcept
 {
     return m_store.state(handle);
+}
+
+bool AssetSystem::isGpuReady(AssetHandle handle) const noexcept
+{
+    return m_store.isGpuReady(handle);
 }
 
 Core::Result<AssetLease> AssetSystem::acquire(AssetHandle handle)

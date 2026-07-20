@@ -4,6 +4,7 @@ set(TINA_ASSET_TEST_SOURCES
     AssetSystemPumpTests.cpp
     AssetSystemAsyncPumpTests.cpp
     AssetGpuUploadTests.cpp
+    AssetSystemGpuPipelineTests.cpp
     CatalogSnapshotTests.cpp
     CatalogLoadOrderTests.cpp
     CatalogLoadPlanTests.cpp

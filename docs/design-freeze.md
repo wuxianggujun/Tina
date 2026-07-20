@@ -413,3 +413,6 @@ fence）。后置：bgfx upload 接线、physical retirement 与 FramePinSink。
 M10-A8：`AssetStore` 状态扩展 ReadyCpu/UploadQueued/ReadyGpu；`beginUpload`/`completeGpu`/`failGpu`；
 `AssetGpuUploadCoordinator` 将 ReadyCpu 资产提交到 Null ledger 并在 poll Ready 后 completeGpu+retire。
 CPU payload 在 UploadQueued/ReadyGpu 仍可 tryGet/acquire。后置：bgfx 真实 GPU 资源与 fence。
+
+M10-A9：`AssetSystemConfig::uploadLedger` + `autoGpuUpload`；sync `load` 与 deferred `pump` 在
+ReadyCpu 后自动 track 并 `pumpUploads`，产品路径可一次走到 ReadyGpu（Null）。后置：bgfx 接线。
