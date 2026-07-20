@@ -246,7 +246,7 @@ Keyboard/Gamepad activation、Image/Texture 或完整 Widget UI。
 | Frame/Input | [Accepted](adr/0015-input-and-fixed-step.md) | 保序 PlatformFrame、UI transition consumption + continuous claims；Action 分 Simulation/Frame domain；每个 substep 独立 commit | 防输入穿透、0步帧丢边沿、双重执行和追赶步错误 |
 | C++ exception | [Accepted](adr/0004-exceptions-and-errors.md) | 编译开启；公共 API 用 Result/Status，Engine/Frame/Worker/C callback 边界捕获 | pmr/第三方兼容、错误边界 |
 | Generation | [Accepted](adr/0019-generation-handles.md) | 32位 generation，回绕 retire；UINodeId 所有构建编码 owner WindowId，Debug cookie 只诊断 | stale/跨 registry 安全 |
-| Asset 生命周期 | [Proposed](adr/0016-asset-ownership-and-retirement.md) | 弱 Handle、强 Lease、UploadTicket 和 retirement ledger | GPU/Audio 异步 UAF 防护 |
+| Asset 生命周期 | [Accepted](adr/0016-asset-ownership-and-retirement.md) | 弱 Handle、强 Lease、UploadTicket 和 retirement ledger；M10-A3 已落地 CPU 侧 Handle/Lease/AssetStore，GPU UploadTicket/FramePin/physical retirement 后置 | GPU/Audio 异步 UAF 防护 |
 | ContentHash | [Accepted](adr/0007-standard-containers-and-hash.md) | 版本化 XXH3-128；M10-A2a 契约落地 Core 私有 adapter 与 Cooked payload 可选校验；安全校验未来另选密码学 Hash | Cooker cache 与格式稳定性 |
 | Worker 默认 | [Proposed](adr/0017-bounded-task-system.md) | 交互运行默认 `max(1, hardware_threads-1)`；IO 默认1；benchmark 必须显式 worker 数 | 可复现性与扩展性 |
 | Trace backend | [Accepted](adr/0002-tracy-and-benchmark.md) | `none|tracy` 编译期 backend，唯一 config/client；Profile 与 Bench 优化语义一致 | 可观测性与依赖边界 |
@@ -340,7 +340,7 @@ AssetId 排序，依赖目标和 kind 在发布 view 前验证。object 路径�
 M10-A1 新增 `Tina::Asset`：`CatalogSnapshot` 在注入 PMR 上 owning 复制 entry/dependency，Create 后
 不依赖 Manifest bytes；`find` 为 binary search；依赖边解析为稳定 entry index；完整 cycle 用迭代着色 +
 显式 stack，`O(V + E)`，禁止递归。失败不发布部分 Snapshot。该切片明确不实现 Handle/Lease、registry
-状态机、文件 IO、Task、GPU upload、XXH3、cgltf 或 writer；ADR 0016 仍为 Proposed。
+状态机、文件 IO、Task、GPU upload、XXH3、cgltf 或 writer；Handle/Lease 见 M10-A3。
 
 M10-A2a 已落地 Core 私有 XXH3-128 v1 ContentHash digest：seed=0、16 字节 little-endian 输出、公共头
 无 xxHash 类型；`verifyCookedAssetContentHash` 只校验 payload。该切片不实现文件 IO、Handle/Lease、
@@ -389,3 +389,8 @@ M10-A2p 已落地 `totalCookedFileBytes`：对 load plan 的 cookedFileBytes 做
 
 M10-A2q 已落地批量加载 `maxTotalCookedFileBytes` 预算：0 表示不限；非 0 时在读任何文件前用
 `totalCookedFileBytes(plan)` 校验，超预算返回 CapacityExceeded。不实现 Handle/Lease。
+
+M10-A3 已落地 ADR 0016 的 CPU 首切片：`AssetStore` 持有 Ready `CookedAssetFile`；`AssetHandle` 为
+弱 generation lookup；`AssetLease` 为 move-only 强引用并延后 unload 物理释放；无 lease 时 unload
+立即 erase slot 使旧 Handle stale。明确后置：Loading/Queued 状态机、Task/IO、GPU UploadTicket、
+FramePinSink、physical retirement ledger、自动 LRU。

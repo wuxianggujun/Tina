@@ -12,5 +12,10 @@ inline constexpr Core::ErrorCode AllocationFailed{Core::ErrorDomain::Asset, 16};
 // AssetFormat ContentHashMismatch uses 17.
 inline constexpr Core::ErrorCode CatalogFileLoadFailed{Core::ErrorDomain::Asset, 18};
 inline constexpr Core::ErrorCode CatalogEntryMismatch{Core::ErrorDomain::Asset, 19};
+// M10-A3 CPU Handle/Lease registry (ADR 0016 first slice).
+inline constexpr Core::ErrorCode InvalidHandle{Core::ErrorDomain::Asset, 20};
+inline constexpr Core::ErrorCode AssetNotReady{Core::ErrorDomain::Asset, 21};
+inline constexpr Core::ErrorCode AssetUnloaded{Core::ErrorDomain::Asset, 22};
+inline constexpr Core::ErrorCode LeaseCountOverflow{Core::ErrorDomain::Asset, 23};
 
 } // namespace Tina::Asset::AssetErrorCode

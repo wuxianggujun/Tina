@@ -105,11 +105,9 @@ M10-A2b provides bounded Core `readFile` and `loadCatalogSnapshotFromManifestFil
 `tina_tests` pass 223/223 and `tina_asset_tests` pass 19/19. Handle/Lease, async IO, and Cooker remain out of
 scope.
 
-M10-A2c–A2q provide cooked load, dependency order, batch load, package validate,
-`openCatalogPackage`, the `tina_catalog_validate` CLI (including `--plan-loads`/`--load-assets`),
-package summary diagnostics, load plans, one-shot package load, shared pipeline e2e fixtures,
-`totalCookedFileBytes`, and `maxTotalCookedFileBytes` load budgets. Handle/Lease, async IO, and
-Cooker remain out of scope.
+M10-A2c–A2q provide the sync catalog/cooked pipeline. M10-A3 adds CPU-side `AssetStore`, weak
+`AssetHandle`, and strong `AssetLease` (ADR 0016 Accepted first slice). Loading state machines,
+async IO, GPU UploadTicket/retirement, and Cooker remain out of scope.
 
 M7-C1c-a adds fixed-capacity PMR pointer-policy/route-ancestry storage and a double-buffered
 `UICommittedHitView`. Within one view, its effective-visible entries have unique, strictly increasing paint ordinals and
