@@ -1077,6 +1077,7 @@ public:
 | `tina_catalog_validate` | M10-A2h 已实现 | host tool executable | 同步打开/校验磁盘 Catalog 包；JSON 摘要；exit 0/1/2 | 同 open/validate 错误；参数错误 exit 2 |
 | `buildCatalogPackageSummary` | M10-A2i 已实现 | Asset module public | 从 CatalogSnapshot 生成诊断 totals/entry 行（不触盘） | InvalidCatalogConfig / AllocationFailed |
 | `planCatalogLoads` | M10-A2j 已实现 | Asset module public | 请求 AssetId → 依赖序计划行（含确定性相对路径） | NotFound / InvalidCatalogConfig / AllocationFailed |
+| `planCatalogLoadsAll` | M10-A2k 已实现 | Asset module public | 对 Catalog 全部 entry 生成依赖序加载计划 | InvalidCatalogConfig / AllocationFailed |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |

@@ -1,13 +1,18 @@
+#include <tina/asset/AssetErrors.hpp>
+#include <tina/asset/CatalogLoadPlan.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackageSummary.hpp>
 #include <tina/core/error/Error.hpp>
+#include <tina/core/id/AssetId.hpp>
 
 #include <cstdint>
-#include <cstring>
 #include <iostream>
 #include <memory_resource>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -17,6 +22,8 @@ struct Options final {
     bool metadataOnly = false;
     bool skipValidate = false;
     bool listEntries = false;
+    bool planLoads = false;
+    std::vector<std::string> assetIdTexts;
     Tina::Core::u32 maxEntries = 100000;
     Tina::Core::u32 maxDependencies = 400000;
     Tina::Core::u32 maxDependenciesPerAsset = 4096;
@@ -30,6 +37,8 @@ void printUsage()
         << "  --metadata-only             size/presence only (no ContentHash)\n"
         << "  --no-validate               open Snapshot only; skip package validation\n"
         << "  --list-entries              include entry rows in JSON summary\n"
+        << "  --plan-loads                include dependency-first load plan rows\n"
+        << "  --asset-id <32hex>          plan only these ids (repeatable; default: all)\n"
         << "  --max-entries <n>\n"
         << "  --max-dependencies <n>\n"
         << "  --max-dependencies-per-asset <n>\n"
@@ -84,6 +93,11 @@ void printUsage()
             options.listEntries = true;
             continue;
         }
+        if (arg == "--plan-loads")
+        {
+            options.planLoads = true;
+            continue;
+        }
         auto requireValue = [&](std::string_view name) -> std::string_view {
             if (index + 1 >= argc)
             {
@@ -111,6 +125,16 @@ void printUsage()
                 return 2;
             }
             options.manifestRelative.assign(value);
+            continue;
+        }
+        if (arg == "--asset-id")
+        {
+            const auto value = requireValue(arg);
+            if (value.empty())
+            {
+                return 2;
+            }
+            options.assetIdTexts.emplace_back(value);
             continue;
         }
         if (arg == "--max-entries")
@@ -153,6 +177,11 @@ void printUsage()
         printUsage();
         return 2;
     }
+    if (!options.assetIdTexts.empty() && !options.planLoads)
+    {
+        std::cerr << "--asset-id requires --plan-loads\n";
+        return 2;
+    }
     return 0;
 }
 
@@ -169,6 +198,20 @@ void printErrorJson(const Tina::Core::Error& error)
         if (static_cast<unsigned char>(ch) < 0x20U)
         {
             continue;
+        }
+        std::cout << ch;
+    }
+    std::cout << "\"}\n";
+}
+
+void printErrorMessage(std::string_view message)
+{
+    std::cout << "{\"status\":\"error\",\"domain\":1,\"code\":1,\"message\":\"";
+    for (const char ch : message)
+    {
+        if (ch == '"' || ch == '\\')
+        {
+            std::cout << '\\';
         }
         std::cout << ch;
     }
@@ -223,6 +266,39 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    std::optional<std::pmr::vector<Tina::Asset::CatalogLoadPlanEntry>> planRows;
+    if (options.planLoads)
+    {
+        Tina::Asset::CatalogLoadPlanConfig planConfig{.memoryResource = &memoryResource};
+        Tina::Core::Result<std::pmr::vector<Tina::Asset::CatalogLoadPlanEntry>> plan =
+            Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig, "plan not computed");
+        if (options.assetIdTexts.empty())
+        {
+            plan = Tina::Asset::planCatalogLoadsAll(*snapshot, planConfig);
+        } else
+        {
+            std::pmr::vector<Tina::Core::AssetId> requested{&memoryResource};
+            requested.reserve(options.assetIdTexts.size());
+            for (const auto& text : options.assetIdTexts)
+            {
+                const auto id = Tina::Core::AssetId::parseCanonical(text);
+                if (!id)
+                {
+                    printErrorMessage("invalid --asset-id (expect 32 lowercase hex)");
+                    return 1;
+                }
+                requested.push_back(*id);
+            }
+            plan = Tina::Asset::planCatalogLoads(*snapshot, requested, planConfig);
+        }
+        if (!plan)
+        {
+            printErrorJson(plan.error());
+            return 1;
+        }
+        planRows = std::move(*plan);
+    }
+
     std::cout << "{\"status\":\"ok\",\"entries\":" << summary->entryCount
               << ",\"dependencies\":" << summary->dependencyCount
               << ",\"validated\":" << (options.skipValidate ? "false" : "true")
@@ -242,6 +318,26 @@ int main(int argc, char** argv)
                       << ",\"typeVersion\":" << row.assetTypeVersion
                       << ",\"dependencyCount\":" << row.dependencyCount
                       << ",\"cookedFileBytes\":" << row.cookedFileBytes << '}';
+        }
+        std::cout << ']';
+    }
+    if (planRows)
+    {
+        std::cout << ",\"loadPlan\":[";
+        for (std::size_t index = 0; index < planRows->size(); ++index)
+        {
+            const auto& row = (*planRows)[index];
+            if (index != 0U)
+            {
+                std::cout << ',';
+            }
+            const auto idText = row.assetId.canonicalText();
+            std::cout << "{\"order\":" << index << ",\"entryIndex\":" << row.entryIndex << ",\"id\":\""
+                      << std::string_view(idText.data(), idText.size())
+                      << "\",\"kind\":" << static_cast<unsigned>(row.assetKind)
+                      << ",\"dependencyCount\":" << row.dependencyCount
+                      << ",\"cookedFileBytes\":" << row.cookedFileBytes << ",\"path\":\"" << row.relativePath.view()
+                      << "\"}";
         }
         std::cout << ']';
     }

@@ -370,3 +370,5 @@ CLI 增加 `--list-entries`。不实现 Handle/Lease。
 
 M10-A2j 已落地 `planCatalogLoads`：在 load-order 上附带 entry 元数据与确定性 object 相对路径；
 不读盘、不加载 payload。不实现 Handle/Lease。
+
+M10-A2k 已落地 `planCatalogLoadsAll` 与 CLI `--plan-loads`/`--asset-id` 输出 `loadPlan` JSON。

@@ -32,4 +32,9 @@ struct CatalogLoadPlanConfig final {
 planCatalogLoads(const CatalogSnapshot& catalog, std::span<const Core::AssetId> requestedAssetIds,
                  CatalogLoadPlanConfig config);
 
+// Plans loads for every Catalog entry (each entry id is requested once, in index order).
+// Result remains dependencies-first and de-duplicated.
+[[nodiscard]] Core::Result<std::pmr::vector<CatalogLoadPlanEntry>>
+planCatalogLoadsAll(const CatalogSnapshot& catalog, CatalogLoadPlanConfig config);
+
 } // namespace Tina::Asset

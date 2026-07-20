@@ -209,5 +209,26 @@ TEST(CatalogLoadPlanTests, EmptyRequestYieldsEmptyPlan)
     EXPECT_TRUE(plan->empty());
 }
 
+TEST(CatalogLoadPlanTests, PlansAllEntriesDependenciesFirst)
+{
+    TrackingMemoryResource resource;
+    const auto bytes = makeChainManifest();
+    auto view = AssetFormat::parseCookedManifestView(bytes);
+    ASSERT_TRUE(view.has_value());
+    auto catalog = CatalogSnapshot::Create(*view, CatalogConfig{.maxEntries = 8,
+                                                                .maxDependencies = 8,
+                                                                .maxDependenciesPerAsset = 4,
+                                                                .memoryResource = &resource});
+    ASSERT_TRUE(catalog.has_value());
+
+    auto plan = planCatalogLoadsAll(*catalog, CatalogLoadPlanConfig{.memoryResource = &resource});
+    ASSERT_TRUE(plan.has_value()) << plan.error().message;
+    ASSERT_EQ(plan->size(), 2U);
+    EXPECT_EQ((*plan)[0].assetKind, AssetFormat::AssetKind::Texture2D);
+    EXPECT_EQ((*plan)[1].assetKind, AssetFormat::AssetKind::Material);
+    EXPECT_EQ((*plan)[0].entryIndex, 0U);
+    EXPECT_EQ((*plan)[1].entryIndex, 1U);
+}
+
 } // namespace
 } // namespace Tina::Asset

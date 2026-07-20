@@ -170,6 +170,8 @@ cmake --build --preset windows-vnext-debug --target tina_catalog_validate
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --metadata-only
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot>
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --list-entries
+out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --plan-loads
+out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalogRoot> --plan-loads --asset-id <32hex>
 out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --help
 ```
 

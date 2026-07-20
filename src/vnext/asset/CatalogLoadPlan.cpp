@@ -56,4 +56,37 @@ planCatalogLoads(const CatalogSnapshot& catalog, std::span<const Core::AssetId> 
     return plan;
 }
 
+Core::Result<std::pmr::vector<CatalogLoadPlanEntry>> planCatalogLoadsAll(const CatalogSnapshot& catalog,
+                                                                         CatalogLoadPlanConfig config)
+{
+    if (!catalog)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog snapshot is empty");
+    }
+    if (config.memoryResource == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog load plan requires memory resource");
+    }
+
+    std::pmr::vector<Core::AssetId> requested{config.memoryResource};
+    try
+    {
+        requested.reserve(catalog.entryCount());
+        for (Core::u32 index = 0; index < catalog.entryCount(); ++index)
+        {
+            const auto entry = catalog.entry(index);
+            if (!entry)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog entry missing during load plan all");
+            }
+            requested.push_back(entry->assetId);
+        }
+    } catch (const std::bad_alloc&)
+    {
+        return Core::failure(AssetErrorCode::AllocationFailed, "catalog load plan all allocation failed");
+    }
+
+    return planCatalogLoads(catalog, requested, config);
+}
+
 } // namespace Tina::Asset
