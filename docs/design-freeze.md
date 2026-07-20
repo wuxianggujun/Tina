@@ -496,4 +496,8 @@ view（有效到下一次 step/shutdown/move/destroy）。
 
 M11-A2：owner-thread 同步空间查询。`overlapAabb` 用 AABB 等大 box proxy 做精确 overlap；`castRay`
 多命中稳定排序；`castRayClosest` 映射 Tina Body/Shape；结果写入调用方 buffer，`written`/`totalFound`/
-`overflow` 不扩容。deferred command、benchmark、Tile adapter 与正式 2D 产品接线后置。
+`overflow` 不扩容。
+
+M11-A3：Create 时固定 deferred command 容量；owner-thread `enqueue*`，`step()` 进入 solver 前 FIFO
+应用 Destroy/SetTransform/SetVelocity/Force/Impulse/Enabled/Awake；满队列拒绝；stale body 在 flush
+时跳过计数；`createBoxBody` 仍为立即原子创建。benchmark、Tile adapter 与正式 2D 产品接线后置。

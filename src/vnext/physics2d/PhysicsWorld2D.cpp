@@ -49,6 +49,7 @@ struct PhysicsWorld2D::Impl final {
         PhysicsContactEndEvent2D* endStorage,
         PhysicsContactHitEvent2D* hitStorage,
         ShapeTombstone* tombstoneStorage,
+        PhysicsCommand2D* commandStorage,
         b2WorldId backendWorld,
         std::pmr::memory_resource& memoryResource) noexcept
         : config(worldConfig),
@@ -59,6 +60,7 @@ struct PhysicsWorld2D::Impl final {
           endContacts(endStorage),
           hitContacts(hitStorage),
           shapeTombstones(tombstoneStorage),
+          commands(commandStorage),
           world(backendWorld)
     {
     }
@@ -105,6 +107,15 @@ struct PhysicsWorld2D::Impl final {
                 alignof(ShapeTombstone));
             shapeTombstones = nullptr;
         }
+        if (commands != nullptr && config.commandCapacity > 0) {
+            std::destroy_n(commands, config.commandCapacity);
+            resource->deallocate(
+                commands,
+                sizeof(PhysicsCommand2D) * config.commandCapacity,
+                alignof(PhysicsCommand2D));
+            commands = nullptr;
+        }
+        commandCount = 0;
     }
 
     void clearPublishedContacts() noexcept
@@ -384,6 +395,101 @@ struct PhysicsWorld2D::Impl final {
         return 1.0F;
     }
 
+    [[nodiscard]] Core::Status enqueueCommand(const PhysicsCommand2D& command) noexcept
+    {
+        if (commands == nullptr || commandCount >= config.commandCapacity) {
+            return Core::failure(
+                Physics2DErrorCode::CapacityExceeded,
+                "Physics2D deferred command queue is full");
+        }
+        commands[commandCount++] = command;
+        return Core::success();
+    }
+
+    void clearCommands() noexcept
+    {
+        commandCount = 0;
+    }
+
+    // Applies FIFO deferred commands immediately before the fixed Box2D step.
+    // Stale body targets are skipped and counted; destroy uses the same path as
+    // immediate destroyBody so generation handles retire consistently.
+    void flushCommands(PhysicsWorld2D& owner) noexcept
+    {
+        if (commands == nullptr || commandCount == 0) {
+            return;
+        }
+        const Core::usize total = commandCount;
+        commandCount = 0;
+        for (Core::usize index = 0; index < total; ++index) {
+            const PhysicsCommand2D command = commands[index];
+            if (!bodies.contains(command.body)) {
+                ++skippedStaleCommandCount;
+                continue;
+            }
+            BodyRecord* bodyRecord = bodies.tryGet(command.body);
+            if (bodyRecord == nullptr || !b2Body_IsValid(bodyRecord->backend)) {
+                ++skippedStaleCommandCount;
+                continue;
+            }
+
+            switch (command.kind) {
+            case PhysicsCommandKind2D::DestroyBody: {
+                const Core::Status status = owner.destroyBody(command.body);
+                if (status) {
+                    ++appliedCommandCount;
+                } else {
+                    ++skippedStaleCommandCount;
+                }
+                break;
+            }
+            case PhysicsCommandKind2D::SetTransform:
+                b2Body_SetTransform(
+                    bodyRecord->backend,
+                    {command.vectorMeters.x, command.vectorMeters.y},
+                    b2MakeRot(command.scalar));
+                ++appliedCommandCount;
+                break;
+            case PhysicsCommandKind2D::SetLinearVelocity:
+                b2Body_SetLinearVelocity(
+                    bodyRecord->backend,
+                    {command.vectorMeters.x, command.vectorMeters.y});
+                ++appliedCommandCount;
+                break;
+            case PhysicsCommandKind2D::SetAngularVelocity:
+                b2Body_SetAngularVelocity(bodyRecord->backend, command.scalar);
+                ++appliedCommandCount;
+                break;
+            case PhysicsCommandKind2D::ApplyForceToCenter:
+                b2Body_ApplyForceToCenter(
+                    bodyRecord->backend,
+                    {command.vectorMeters.x, command.vectorMeters.y},
+                    command.flag);
+                ++appliedCommandCount;
+                break;
+            case PhysicsCommandKind2D::ApplyLinearImpulseToCenter:
+                b2Body_ApplyLinearImpulseToCenter(
+                    bodyRecord->backend,
+                    {command.vectorMeters.x, command.vectorMeters.y},
+                    command.flag);
+                ++appliedCommandCount;
+                break;
+            case PhysicsCommandKind2D::SetEnabled:
+                if (command.flag) {
+                    b2Body_Enable(bodyRecord->backend);
+                } else {
+                    b2Body_Disable(bodyRecord->backend);
+                }
+                ++appliedCommandCount;
+                break;
+            case PhysicsCommandKind2D::SetAwake:
+                b2Body_SetAwake(bodyRecord->backend, command.flag);
+                ++appliedCommandCount;
+                break;
+            }
+        }
+    }
+
     PhysicsWorld2DConfig config{};
     std::thread::id ownerThread = std::this_thread::get_id();
     std::pmr::memory_resource* resource = nullptr;
@@ -393,9 +499,11 @@ struct PhysicsWorld2D::Impl final {
     PhysicsContactEndEvent2D* endContacts = nullptr;
     PhysicsContactHitEvent2D* hitContacts = nullptr;
     ShapeTombstone* shapeTombstones = nullptr;
+    PhysicsCommand2D* commands = nullptr;
     Core::usize beginCount = 0;
     Core::usize endCount = 0;
     Core::usize hitCount = 0;
+    Core::usize commandCount = 0;
     Core::usize tombstoneWriteIndex = 0;
     bool beginOverflow = false;
     bool endOverflow = false;
@@ -403,6 +511,8 @@ struct PhysicsWorld2D::Impl final {
     Core::u64 droppedBeginContactCount = 0;
     Core::u64 droppedEndContactCount = 0;
     Core::u64 droppedHitContactCount = 0;
+    Core::u64 appliedCommandCount = 0;
+    Core::u64 skippedStaleCommandCount = 0;
     b2WorldId world = b2_nullWorldId;
     Core::u64 completedStepCount = 0;
     bool open = true;
@@ -514,10 +624,11 @@ Core::Status validatePhysicsWorld2DConfig(const PhysicsWorld2DConfig& config) no
     }
     if (config.contactBeginCapacity > PhysicsWorld2DConfig::MaxContactEventCapacity
         || config.contactEndCapacity > PhysicsWorld2DConfig::MaxContactEventCapacity
-        || config.contactHitCapacity > PhysicsWorld2DConfig::MaxContactEventCapacity) {
+        || config.contactHitCapacity > PhysicsWorld2DConfig::MaxContactEventCapacity
+        || config.commandCapacity > PhysicsWorld2DConfig::MaxCommandCapacity) {
         return Core::failure(
             Physics2DErrorCode::InvalidConfiguration,
-            "Physics2D contact event capacity exceeds the supported range");
+            "Physics2D contact or command capacity exceeds the supported range");
     }
     if (!isFinite(config.gravityMetersPerSecondSquared)
         || !std::isfinite(config.fixedDeltaSeconds)
@@ -757,6 +868,41 @@ Core::Result<PhysicsWorld2D> PhysicsWorld2D::Create(
         }
         return Core::failure(tombstoneStorageResult.error());
     }
+    auto commandStorageResult = allocateContactBuffer<PhysicsCommand2D>(
+        resource,
+        config.commandCapacity,
+        "Physics2D deferred command buffer allocation failed");
+    if (!commandStorageResult) {
+        if (*tombstoneStorageResult != nullptr && config.shapeCapacity > 0) {
+            std::destroy_n(*tombstoneStorageResult, config.shapeCapacity);
+            resource.deallocate(
+                *tombstoneStorageResult,
+                sizeof(Impl::ShapeTombstone) * config.shapeCapacity,
+                alignof(Impl::ShapeTombstone));
+        }
+        if (*hitStorageResult != nullptr && config.contactHitCapacity > 0) {
+            std::destroy_n(*hitStorageResult, config.contactHitCapacity);
+            resource.deallocate(
+                *hitStorageResult,
+                sizeof(PhysicsContactHitEvent2D) * config.contactHitCapacity,
+                alignof(PhysicsContactHitEvent2D));
+        }
+        if (*endStorageResult != nullptr && config.contactEndCapacity > 0) {
+            std::destroy_n(*endStorageResult, config.contactEndCapacity);
+            resource.deallocate(
+                *endStorageResult,
+                sizeof(PhysicsContactEndEvent2D) * config.contactEndCapacity,
+                alignof(PhysicsContactEndEvent2D));
+        }
+        if (*beginStorageResult != nullptr && config.contactBeginCapacity > 0) {
+            std::destroy_n(*beginStorageResult, config.contactBeginCapacity);
+            resource.deallocate(
+                *beginStorageResult,
+                sizeof(PhysicsContactBeginEvent2D) * config.contactBeginCapacity,
+                alignof(PhysicsContactBeginEvent2D));
+        }
+        return Core::failure(commandStorageResult.error());
+    }
 
     b2WorldDef worldDefinition = b2DefaultWorldDef();
     worldDefinition.gravity = {
@@ -768,6 +914,13 @@ Core::Result<PhysicsWorld2D> PhysicsWorld2D::Create(
     worldDefinition.userTaskContext = nullptr;
     const b2WorldId backendWorld = b2CreateWorld(&worldDefinition);
     if (B2_IS_NULL(backendWorld) || !b2World_IsValid(backendWorld)) {
+        if (*commandStorageResult != nullptr && config.commandCapacity > 0) {
+            std::destroy_n(*commandStorageResult, config.commandCapacity);
+            resource.deallocate(
+                *commandStorageResult,
+                sizeof(PhysicsCommand2D) * config.commandCapacity,
+                alignof(PhysicsCommand2D));
+        }
         if (*tombstoneStorageResult != nullptr && config.shapeCapacity > 0) {
             std::destroy_n(*tombstoneStorageResult, config.shapeCapacity);
             resource.deallocate(
@@ -813,6 +966,7 @@ Core::Result<PhysicsWorld2D> PhysicsWorld2D::Create(
             *endStorageResult,
             *hitStorageResult,
             *tombstoneStorageResult,
+            *commandStorageResult,
             backendWorld,
             resource);
         b2World_SetUserData(backendWorld, impl);
@@ -820,6 +974,13 @@ Core::Result<PhysicsWorld2D> PhysicsWorld2D::Create(
     } catch (const std::bad_alloc&) {
         if (storage != nullptr) {
             resource.deallocate(storage, sizeof(Impl), alignof(Impl));
+        }
+        if (*commandStorageResult != nullptr && config.commandCapacity > 0) {
+            std::destroy_n(*commandStorageResult, config.commandCapacity);
+            resource.deallocate(
+                *commandStorageResult,
+                sizeof(PhysicsCommand2D) * config.commandCapacity,
+                alignof(PhysicsCommand2D));
         }
         if (*tombstoneStorageResult != nullptr && config.shapeCapacity > 0) {
             std::destroy_n(*tombstoneStorageResult, config.shapeCapacity);
@@ -857,6 +1018,13 @@ Core::Result<PhysicsWorld2D> PhysicsWorld2D::Create(
         if (storage != nullptr) {
             resource.deallocate(storage, sizeof(Impl), alignof(Impl));
         }
+        if (*commandStorageResult != nullptr && config.commandCapacity > 0) {
+            std::destroy_n(*commandStorageResult, config.commandCapacity);
+            resource.deallocate(
+                *commandStorageResult,
+                sizeof(PhysicsCommand2D) * config.commandCapacity,
+                alignof(PhysicsCommand2D));
+        }
         if (*tombstoneStorageResult != nullptr && config.shapeCapacity > 0) {
             std::destroy_n(*tombstoneStorageResult, config.shapeCapacity);
             resource.deallocate(
@@ -892,6 +1060,13 @@ Core::Result<PhysicsWorld2D> PhysicsWorld2D::Create(
     } catch (...) {
         if (storage != nullptr) {
             resource.deallocate(storage, sizeof(Impl), alignof(Impl));
+        }
+        if (*commandStorageResult != nullptr && config.commandCapacity > 0) {
+            std::destroy_n(*commandStorageResult, config.commandCapacity);
+            resource.deallocate(
+                *commandStorageResult,
+                sizeof(PhysicsCommand2D) * config.commandCapacity,
+                alignof(PhysicsCommand2D));
         }
         if (*tombstoneStorageResult != nullptr && config.shapeCapacity > 0) {
             std::destroy_n(*tombstoneStorageResult, config.shapeCapacity);
@@ -1163,6 +1338,189 @@ Core::Status PhysicsWorld2D::destroyBody(PhysicsBodyId body) noexcept
     return Core::success();
 }
 
+Core::Status PhysicsWorld2D::enqueueDestroyBody(PhysicsBodyId body) noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return status;
+    }
+    if (const Core::Status status = validateBody(body); !status) {
+        return status;
+    }
+    return m_impl->enqueueCommand(PhysicsCommand2D{
+        PhysicsCommandKind2D::DestroyBody,
+        body,
+        {},
+        0.0F,
+        false});
+}
+
+Core::Status PhysicsWorld2D::enqueueSetTransform(
+    PhysicsBodyId body,
+    PhysicsVec2 positionMeters,
+    float angleRadians) noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return status;
+    }
+    if (const Core::Status status = validateBody(body); !status) {
+        return status;
+    }
+    if (!isFinite(positionMeters) || !std::isfinite(angleRadians)) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidBodyDescription,
+            "Physics2D set-transform command requires finite position and angle");
+    }
+    return m_impl->enqueueCommand(PhysicsCommand2D{
+        PhysicsCommandKind2D::SetTransform,
+        body,
+        positionMeters,
+        angleRadians,
+        false});
+}
+
+Core::Status PhysicsWorld2D::enqueueSetLinearVelocity(
+    PhysicsBodyId body,
+    PhysicsVec2 linearVelocityMetersPerSecond) noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return status;
+    }
+    if (const Core::Status status = validateBody(body); !status) {
+        return status;
+    }
+    if (!isFinite(linearVelocityMetersPerSecond)) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidBodyDescription,
+            "Physics2D set-linear-velocity command requires a finite velocity");
+    }
+    return m_impl->enqueueCommand(PhysicsCommand2D{
+        PhysicsCommandKind2D::SetLinearVelocity,
+        body,
+        linearVelocityMetersPerSecond,
+        0.0F,
+        false});
+}
+
+Core::Status PhysicsWorld2D::enqueueSetAngularVelocity(
+    PhysicsBodyId body,
+    float angularVelocityRadiansPerSecond) noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return status;
+    }
+    if (const Core::Status status = validateBody(body); !status) {
+        return status;
+    }
+    if (!std::isfinite(angularVelocityRadiansPerSecond)) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidBodyDescription,
+            "Physics2D set-angular-velocity command requires a finite velocity");
+    }
+    return m_impl->enqueueCommand(PhysicsCommand2D{
+        PhysicsCommandKind2D::SetAngularVelocity,
+        body,
+        {},
+        angularVelocityRadiansPerSecond,
+        false});
+}
+
+Core::Status PhysicsWorld2D::enqueueApplyForceToCenter(
+    PhysicsBodyId body,
+    PhysicsVec2 forceNewtons,
+    bool wake) noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return status;
+    }
+    if (const Core::Status status = validateBody(body); !status) {
+        return status;
+    }
+    if (!isFinite(forceNewtons)) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidBodyDescription,
+            "Physics2D apply-force command requires a finite force");
+    }
+    return m_impl->enqueueCommand(PhysicsCommand2D{
+        PhysicsCommandKind2D::ApplyForceToCenter,
+        body,
+        forceNewtons,
+        0.0F,
+        wake});
+}
+
+Core::Status PhysicsWorld2D::enqueueApplyLinearImpulseToCenter(
+    PhysicsBodyId body,
+    PhysicsVec2 impulseNewtonSeconds,
+    bool wake) noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return status;
+    }
+    if (const Core::Status status = validateBody(body); !status) {
+        return status;
+    }
+    if (!isFinite(impulseNewtonSeconds)) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidBodyDescription,
+            "Physics2D apply-impulse command requires a finite impulse");
+    }
+    return m_impl->enqueueCommand(PhysicsCommand2D{
+        PhysicsCommandKind2D::ApplyLinearImpulseToCenter,
+        body,
+        impulseNewtonSeconds,
+        0.0F,
+        wake});
+}
+
+Core::Status PhysicsWorld2D::enqueueSetEnabled(PhysicsBodyId body, bool enabled) noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return status;
+    }
+    if (const Core::Status status = validateBody(body); !status) {
+        return status;
+    }
+    return m_impl->enqueueCommand(PhysicsCommand2D{
+        PhysicsCommandKind2D::SetEnabled,
+        body,
+        {},
+        0.0F,
+        enabled});
+}
+
+Core::Status PhysicsWorld2D::enqueueSetAwake(PhysicsBodyId body, bool awake) noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return status;
+    }
+    if (const Core::Status status = validateBody(body); !status) {
+        return status;
+    }
+    return m_impl->enqueueCommand(PhysicsCommand2D{
+        PhysicsCommandKind2D::SetAwake,
+        body,
+        {},
+        0.0F,
+        awake});
+}
+
+Core::Status PhysicsWorld2D::clearCommands() noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return status;
+    }
+    m_impl->clearCommands();
+    return Core::success();
+}
+
+Core::usize PhysicsWorld2D::pendingCommandCount() const noexcept
+{
+    if (m_impl == nullptr || !m_impl->open) {
+        return 0;
+    }
+    return m_impl->commandCount;
+}
+
 Core::Status PhysicsWorld2D::step() noexcept
 {
     if (const Core::Status status = ensureUsable(); !status) {
@@ -1174,6 +1532,7 @@ Core::Status PhysicsWorld2D::step() noexcept
             "Physics2D backend world is invalid");
     }
 
+    m_impl->flushCommands(*this);
     m_impl->inStep = true;
     b2World_Step(
         m_impl->world,
@@ -1418,7 +1777,11 @@ PhysicsWorld2DStats PhysicsWorld2D::stats() const noexcept
         m_impl->config.contactBeginCapacity,
         m_impl->config.contactEndCapacity,
         m_impl->config.contactHitCapacity,
+        m_impl->config.commandCapacity,
+        m_impl->commandCount,
         m_impl->completedStepCount,
+        m_impl->appliedCommandCount,
+        m_impl->skippedStaleCommandCount,
         m_impl->droppedBeginContactCount,
         m_impl->droppedEndContactCount,
         m_impl->droppedHitContactCount,
@@ -1457,6 +1820,7 @@ Core::Status PhysicsWorld2D::shutdown() noexcept
     m_impl->shapes.clear();
     m_impl->bodies.clear();
     m_impl->clearPublishedContacts();
+    m_impl->clearCommands();
     if (m_impl->shapeTombstones != nullptr) {
         for (Core::usize index = 0; index < m_impl->config.shapeCapacity; ++index) {
             m_impl->shapeTombstones[index] = {};

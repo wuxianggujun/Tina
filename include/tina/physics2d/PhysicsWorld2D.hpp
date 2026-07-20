@@ -22,8 +22,8 @@ namespace Tina::Physics2D {
 
 // Single-owner, fixed-step 2D physics world. M11-A0 owns one Box shape per body
 // and fixed-step lifecycle; M11-A1 copies contact begin/end/hit into fixed
-// Tina storage before step() returns; M11-A2 adds caller-buffer spatial queries.
-// Deferred commands remain a separate follow-up contract.
+// Tina storage before step() returns; M11-A2 adds caller-buffer spatial queries;
+// M11-A3 applies a fixed-capacity deferred command queue immediately before step.
 class PhysicsWorld2D final {
 public:
     [[nodiscard]] static Core::Result<PhysicsWorld2D> Create(
@@ -42,9 +42,36 @@ public:
         const PhysicsBoxShape2DDesc& shape);
     [[nodiscard]] Core::Status destroyBody(PhysicsBodyId body) noexcept;
 
+    // FIFO deferred mutations. Capacity is fixed at Create; full queue returns
+    // CapacityExceeded without dropping earlier commands. Stale body targets are
+    // skipped at apply time and counted in stats.
+    [[nodiscard]] Core::Status enqueueDestroyBody(PhysicsBodyId body) noexcept;
+    [[nodiscard]] Core::Status enqueueSetTransform(
+        PhysicsBodyId body,
+        PhysicsVec2 positionMeters,
+        float angleRadians) noexcept;
+    [[nodiscard]] Core::Status enqueueSetLinearVelocity(
+        PhysicsBodyId body,
+        PhysicsVec2 linearVelocityMetersPerSecond) noexcept;
+    [[nodiscard]] Core::Status enqueueSetAngularVelocity(
+        PhysicsBodyId body,
+        float angularVelocityRadiansPerSecond) noexcept;
+    [[nodiscard]] Core::Status enqueueApplyForceToCenter(
+        PhysicsBodyId body,
+        PhysicsVec2 forceNewtons,
+        bool wake = true) noexcept;
+    [[nodiscard]] Core::Status enqueueApplyLinearImpulseToCenter(
+        PhysicsBodyId body,
+        PhysicsVec2 impulseNewtonSeconds,
+        bool wake = true) noexcept;
+    [[nodiscard]] Core::Status enqueueSetEnabled(PhysicsBodyId body, bool enabled) noexcept;
+    [[nodiscard]] Core::Status enqueueSetAwake(PhysicsBodyId body, bool awake) noexcept;
+    [[nodiscard]] Core::Status clearCommands() noexcept;
+    [[nodiscard]] Core::usize pendingCommandCount() const noexcept;
+
     // Advances exactly config.fixedDeltaSeconds. Runtime owns accumulator and
     // catch-up policy; this world never accepts a variable frame delta.
-    // Before returning, Box2D contact events are copied into fixed Tina storage.
+    // Flushes deferred commands first, then steps, then copies contact events.
     [[nodiscard]] Core::Status step() noexcept;
 
     // Borrowed until the next successful step(), shutdown(), move, or destroy.

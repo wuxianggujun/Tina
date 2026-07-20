@@ -164,14 +164,15 @@ M8-A 使用独立 `tina_scene_tests`，当前 19 项覆盖：World 固定容量�
 `Tina::Scene`/`Tina::Core`，不依赖 EnTT、GLM、GLFW 或 bgfx；
 它证明 Scene 基础生命周期，不证明 Scene component integration、Asset 或产品 2D 样例。
 
-M11-A0/A1/A2 使用独立 `tina_physics2d_tests`。A0 覆盖 World/desc 输入预校验、单线程固定 step、
+M11-A0/A1/A2/A3 使用独立 `tina_physics2d_tests`。A0 覆盖 World/desc 输入预校验、单线程固定 step、
 Body/Shape generation owner/stale、跨 World 拒绝、Box body 原子创建与容量回滚、pose snapshot、
 幂等 shutdown、move、错线程拒绝、PMR 归零和 public header isolation。A1 追加 begin/end contact
 发布、destroy 后 end tombstone、begin overflow 标志与空 step 清空 view。A2 追加 `overlapAabb`
-排序/overflow、`castRay`/`castRayClosest` 与无效 query 拒绝。该 target 只通过 `Tina::Physics2D`
-消费 Box2D 的 PRIVATE link dependency，不把 Box2D include 暴露给公共头。Windows
-`windows-msvc-vnext-physics2d` 上 Debug/Release 均为 **18/18**。deferred command、backend byte
-baseline、benchmark 和正式 2D 产品门禁不在本切片证明范围内。
+排序/overflow、`castRay`/`castRayClosest` 与无效 query 拒绝。A3 追加 deferred command FIFO 应用、
+满队列拒绝、stale skip 与 deferred destroy。该 target 只通过 `Tina::Physics2D` 消费 Box2D 的
+PRIVATE link dependency，不把 Box2D include 暴露给公共头。Windows `windows-msvc-vnext-physics2d`
+上 Debug/Release 均为 **20/20**。backend byte baseline、benchmark 和正式 2D 产品门禁不在本切片
+证明范围内。
 
 M8-B 使用独立 `tina_render_scene_tests`，覆盖 RenderScene 固定容量分配失败、事务 rollback、Camera/Sprite
 输入校验、透明/隐藏剪枝、旋转保守裁剪、pixel snap、稳定 layer/order/entity/insertion 排序、300 帧零新增

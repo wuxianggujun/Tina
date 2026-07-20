@@ -81,7 +81,8 @@ void expectFailureCode(const Result& result, Core::ErrorCode expectedCode)
     Core::usize shapeCapacity = 4,
     Core::usize contactBeginCapacity = 8,
     Core::usize contactEndCapacity = 8,
-    Core::usize contactHitCapacity = 4) noexcept
+    Core::usize contactHitCapacity = 4,
+    Core::usize commandCapacity = 8) noexcept
 {
     PhysicsWorld2DConfig config;
     config.bodyCapacity = bodyCapacity;
@@ -89,6 +90,7 @@ void expectFailureCode(const Result& result, Core::ErrorCode expectedCode)
     config.contactBeginCapacity = contactBeginCapacity;
     config.contactEndCapacity = contactEndCapacity;
     config.contactHitCapacity = contactHitCapacity;
+    config.commandCapacity = commandCapacity;
     config.solverSubStepCount = 1;
     return config;
 }
@@ -229,7 +231,7 @@ TEST(PhysicsWorld2DTest, InvalidDescriptionsDoNotConsumeCapacity)
 TEST(PhysicsWorld2DTest, RollsBackPmrStorageWhenWorldConstructionFails)
 {
     // Create allocates: body pool, shape pool, begin/end/hit contact buffers,
-    // shape tombstones, then Impl storage.
+    // shape tombstones, deferred command buffer, then Impl storage.
     const PhysicsWorld2DConfig config = smallConfig(2, 2);
 
     FailAfterSuccessfulAllocationsResource bodyPoolFailure(0);
@@ -250,7 +252,7 @@ TEST(PhysicsWorld2DTest, RollsBackPmrStorageWhenWorldConstructionFails)
     EXPECT_EQ(contactBufferFailure.outstandingAllocations(), 0U);
     EXPECT_EQ(contactBufferFailure.outstandingBytes(), 0U);
 
-    FailAfterSuccessfulAllocationsResource implFailure(6);
+    FailAfterSuccessfulAllocationsResource implFailure(7);
     const auto implResult = PhysicsWorld2D::Create(config, implFailure);
     expectFailureCode(implResult, Physics2DErrorCode::CapacityExceeded);
     EXPECT_EQ(implFailure.outstandingAllocations(), 0U);
@@ -799,6 +801,70 @@ TEST(PhysicsWorld2DTest, CastRayFindsHitsAndClosestIsStable)
     EXPECT_GE(overflow->totalFound, 2U);
     EXPECT_EQ(overflow->written, 1U);
     EXPECT_TRUE(overflow->overflow);
+}
+
+TEST(PhysicsWorld2DTest, DeferredCommandsApplyBeforeStepInFifoOrder)
+{
+    PhysicsWorld2DConfig config = smallConfig(2, 2, 8, 8, 4, 4);
+    config.gravityMetersPerSecondSquared = {0.0F, 0.0F};
+    config.fixedDeltaSeconds = 1.0F / 60.0F;
+
+    auto worldResult = PhysicsWorld2D::Create(config);
+    ASSERT_TRUE(worldResult) << worldResult.error().message;
+    PhysicsWorld2D world = std::move(*worldResult);
+
+    auto created = world.createBoxBody(dynamicBody({0.0F, 0.0F}), unitBox());
+    ASSERT_TRUE(created) << created.error().message;
+
+    ASSERT_TRUE(world.enqueueSetLinearVelocity(created->body, {6.0F, 0.0F}));
+    ASSERT_TRUE(world.enqueueSetTransform(created->body, {1.0F, 2.0F}, 0.0F));
+    EXPECT_EQ(world.pendingCommandCount(), 2U);
+
+    ASSERT_TRUE(world.step());
+    EXPECT_EQ(world.pendingCommandCount(), 0U);
+    EXPECT_GE(world.stats().appliedCommandCount, 2U);
+
+    auto state = world.bodyState(created->body);
+    ASSERT_TRUE(state) << state.error().message;
+    EXPECT_NEAR(state->positionMeters.x, 1.0F + 6.0F * config.fixedDeltaSeconds, 1.0e-3F);
+    EXPECT_NEAR(state->positionMeters.y, 2.0F, 1.0e-3F);
+    EXPECT_FLOAT_EQ(state->linearVelocityMetersPerSecond.x, 6.0F);
+}
+
+TEST(PhysicsWorld2DTest, DeferredDestroyAndCapacityAndStaleSkip)
+{
+    PhysicsWorld2DConfig config = smallConfig(2, 2, 8, 8, 4, 1);
+    config.gravityMetersPerSecondSquared = {0.0F, 0.0F};
+
+    auto worldResult = PhysicsWorld2D::Create(config);
+    ASSERT_TRUE(worldResult) << worldResult.error().message;
+    PhysicsWorld2D world = std::move(*worldResult);
+
+    auto first = world.createBoxBody(dynamicBody({0.0F, 0.0F}), unitBox());
+    ASSERT_TRUE(first) << first.error().message;
+
+    ASSERT_TRUE(world.enqueueDestroyBody(first->body));
+    expectFailureCode(
+        world.enqueueSetLinearVelocity(first->body, {1.0F, 0.0F}),
+        Physics2DErrorCode::CapacityExceeded);
+    EXPECT_EQ(world.pendingCommandCount(), 1U);
+
+    ASSERT_TRUE(world.step());
+    EXPECT_FALSE(world.contains(first->body));
+    EXPECT_EQ(world.pendingCommandCount(), 0U);
+
+    auto second = world.createBoxBody(dynamicBody({3.0F, 0.0F}), unitBox());
+    ASSERT_TRUE(second) << second.error().message;
+    ASSERT_TRUE(world.enqueueSetLinearVelocity(second->body, {2.0F, 0.0F}));
+    ASSERT_TRUE(world.destroyBody(second->body));
+    // Enqueued command targeting a body destroyed before step is skipped at flush.
+    ASSERT_TRUE(world.step());
+    EXPECT_GE(world.stats().skippedStaleCommandCount, 1U);
+
+    // Stale enqueue rejects at enqueue time via validateBody.
+    expectFailureCode(world.enqueueDestroyBody(second->body), Physics2DErrorCode::StaleBody);
+    ASSERT_TRUE(world.clearCommands());
+    EXPECT_EQ(world.pendingCommandCount(), 0U);
 }
 
 } // namespace

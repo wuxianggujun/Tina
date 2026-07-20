@@ -78,8 +78,8 @@ M11 的第一刀只建立可独立装配的 `Tina::Physics2D` 生命周期基础
 - Tina-owned registry/Pimpl 走调用者注入的 PMR；不调用进程全局 `b2SetAllocator()`；后续资源门禁将在
   独立 Physics2D 测试进程中用 backend byte baseline 验收，A0 当前测试源码尚未覆盖该项。
 
-A0 直接门禁已在 Windows `windows-msvc-vnext-physics2d` Debug/Release 上通过；与 A1/A2 合计
-`tina_physics2d_tests` 18/18。
+A0 直接门禁已在 Windows `windows-msvc-vnext-physics2d` Debug/Release 上通过；与 A1–A3 合计
+`tina_physics2d_tests` 20/20。
 
 ## M11-A1 Contact Event 契约
 
@@ -92,7 +92,7 @@ A1 在 `step()` 返回前把 Box2D transient contact 复制到 Create 时固定�
 - begin/hit 只发布两侧 shape 仍可解析且未销毁的事件；end 允许 destroy tombstone，
   `shape*Destroyed` 标记至少一侧已销毁，仍尽量保留 last-known Tina Body/Shape ID；
 - 各通道独立 overflow 标志与累计 dropped 计数；overflow 时只保留前缀，不扩容、不 heap fallback；
-- 不提供 solver callback 内重入入口；空间 Query 与 deferred command 仍后置。
+- 不提供 solver callback 内重入入口。
 
 ## M11-A2 Spatial Query 契约
 
@@ -104,10 +104,24 @@ A2 提供 owner-thread 同步空间查询，结果写入调用方 buffer，不�
   closest 路径并映射 Tina Body/Shape ID；
 - `PhysicsQueryWriteResult2D` 报告 `written`/`totalFound`/`overflow`；空 buffer 仍可报告 totalFound；
 - 输入预校验：AABB lower≤upper 且有限；ray translation 非零且有限；query filter categoryBits≠0；
-- Query 期间禁止重入 step/mutation（与 `ensureUsable` 同一 owner-thread 门闩）；
-- deferred command 仍后置。
+- Query 期间禁止重入 step/mutation（与 `ensureUsable` 同一 owner-thread 门闩）。
 
-A0–A2 直接门禁：Windows `windows-msvc-vnext-physics2d` Debug/Release `tina_physics2d_tests` **18/18**。
+A0–A2 直接门禁：Windows `windows-msvc-vnext-physics2d` Debug/Release `tina_physics2d_tests` 已通过；
+与 A3 合计 **20/20**。
+
+## M11-A3 Deferred Command 契约
+
+A3 在 Create 时固定 command 容量（默认 256，硬上限 1,048,576；0 表示禁止 enqueue）：
+
+- gameplay 在 owner thread 上 `enqueue*`，`step()` 进入 solver 前按 FIFO 应用整队；
+- 支持：`DestroyBody`、`SetTransform`、`SetLinearVelocity`、`SetAngularVelocity`、
+  `ApplyForceToCenter`、`ApplyLinearImpulseToCenter`、`SetEnabled`、`SetAwake`；
+- 满队列返回 `CapacityExceeded`，不丢弃已排队命令；`clearCommands()` 可整队丢弃；
+- enqueue 时校验 body 仍有效；flush 时 stale body 跳过并计入 `skippedStaleCommandCount`；
+- 立即 `destroyBody` 与 deferred destroy 共用同一退役路径；不提供 solver 回调内重入 enqueue；
+- `createBoxBody` 保持立即原子创建，不进入 deferred 队列。
+
+A0–A3 直接门禁：Windows `windows-msvc-vnext-physics2d` Debug/Release `tina_physics2d_tests` **20/20**。
 
 ## Tina 性能门禁
 

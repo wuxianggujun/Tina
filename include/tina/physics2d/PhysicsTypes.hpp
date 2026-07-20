@@ -36,9 +36,11 @@ struct PhysicsWorld2DConfig final {
     static constexpr Core::usize DefaultContactBeginCapacity = 256;
     static constexpr Core::usize DefaultContactEndCapacity = 256;
     static constexpr Core::usize DefaultContactHitCapacity = 64;
+    static constexpr Core::usize DefaultCommandCapacity = 256;
     static constexpr Core::usize MaxBodyCapacity = 1'048'576;
     static constexpr Core::usize MaxShapeCapacity = 2'097'152;
     static constexpr Core::usize MaxContactEventCapacity = 1'048'576;
+    static constexpr Core::usize MaxCommandCapacity = 1'048'576;
     static constexpr Core::u32 DefaultSolverSubStepCount = 4;
     static constexpr Core::u32 MaxSolverSubStepCount = 64;
 
@@ -47,6 +49,7 @@ struct PhysicsWorld2DConfig final {
     Core::usize contactBeginCapacity = DefaultContactBeginCapacity;
     Core::usize contactEndCapacity = DefaultContactEndCapacity;
     Core::usize contactHitCapacity = DefaultContactHitCapacity;
+    Core::usize commandCapacity = DefaultCommandCapacity;
     PhysicsVec2 gravityMetersPerSecondSquared{0.0F, -9.8F};
     float fixedDeltaSeconds = 1.0F / 60.0F;
     Core::u32 solverSubStepCount = DefaultSolverSubStepCount;
@@ -184,6 +187,28 @@ struct PhysicsQueryWriteResult2D final {
     bool overflow = false;
 };
 
+// Deferred gameplay mutations. Enqueue on the owner thread before step(); the
+// world applies them in FIFO order immediately before the fixed Box2D step.
+// CreateBody is not deferred (atomic createBoxBody remains immediate).
+enum class PhysicsCommandKind2D : Core::u8 {
+    DestroyBody,
+    SetTransform,
+    SetLinearVelocity,
+    SetAngularVelocity,
+    ApplyForceToCenter,
+    ApplyLinearImpulseToCenter,
+    SetEnabled,
+    SetAwake,
+};
+
+struct PhysicsCommand2D final {
+    PhysicsCommandKind2D kind = PhysicsCommandKind2D::DestroyBody;
+    PhysicsBodyId body{};
+    PhysicsVec2 vectorMeters{};
+    float scalar = 0.0F;
+    bool flag = false;
+};
+
 struct PhysicsWorld2DStats final {
     Core::usize bodyCount = 0;
     Core::usize shapeCount = 0;
@@ -192,7 +217,11 @@ struct PhysicsWorld2DStats final {
     Core::usize contactBeginCapacity = 0;
     Core::usize contactEndCapacity = 0;
     Core::usize contactHitCapacity = 0;
+    Core::usize commandCapacity = 0;
+    Core::usize pendingCommandCount = 0;
     Core::u64 completedStepCount = 0;
+    Core::u64 appliedCommandCount = 0;
+    Core::u64 skippedStaleCommandCount = 0;
     Core::u64 droppedBeginContactCount = 0;
     Core::u64 droppedEndContactCount = 0;
     Core::u64 droppedHitContactCount = 0;

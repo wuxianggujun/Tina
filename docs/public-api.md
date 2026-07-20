@@ -1136,7 +1136,7 @@ public:
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |
-| `Tina::Physics2D::PhysicsWorld2D` / `PhysicsBodyId` / `PhysicsShapeId` | M11-A0/A1/A2 已实现直接门禁 | 可选 Physics2D module public；由 2D State/feature 持有 | move-only owner-thread World；固定容量 generation registry；`createBoxBody()`；固定步 `step()`；`contactEvents()`；`overlapAabb`/`castRay`/`castRayClosest`；幂等 shutdown | InvalidConfiguration/WrongOwnerThread/Invalid*/Stale*/WrongWorld/CapacityExceeded/BackendFailure/InvalidQuery |
+| `Tina::Physics2D::PhysicsWorld2D` / `PhysicsBodyId` / `PhysicsShapeId` | M11-A0–A3 已实现直接门禁 | 可选 Physics2D module public；由 2D State/feature 持有 | move-only owner-thread World；generation Body/Shape；`createBoxBody()`；deferred `enqueue*`；固定步 `step()`；`contactEvents()`；`overlapAabb`/`castRay`/`castRayClosest`；幂等 shutdown | InvalidConfiguration/WrongOwnerThread/Invalid*/Stale*/WrongWorld/CapacityExceeded/BackendFailure/InvalidQuery |
 | `LocalTransform` / `WorldTransform` | M8-A 已实现 | Scene public | World-owned POD；pointer query 只在 owner thread、下一次对应 mutation、entity destroy 或 World 析构前有效；world publication 由 `updateWorldTransforms()` barrier 完成 | non-finite/overflow/zero quaternion/unsupported TRS composition |
 | `RenderSceneWriter` | M8-B 2D + M9-A 3D extraction 已实现 | Game SDK phase capability | 只在当前 `extractRenderScene()` callback 内有效；不可复制、不可保存 | invalid input/capacity/sticky transaction failure |
 | `RenderSceneView` | M8-B 2D + M9-A 3D extraction 已实现 | Render SPI | borrowed fixed builder storage；成功 begin/rollback/replacement/move/destruction 后失效，begin 参数预检失败保留旧 publication；`RenderFrame` 中只到当前 submit 返回 | invalid transaction；backend 不得保留 borrow |
@@ -1156,19 +1156,18 @@ M6-A 已实现的通用 `GenerationPool` 使用强类型 Tag，并在所有构�
 语义属性，不保存 Render typed handle。普通 Game SDK 不提供 raw parts factory；handle 只能由所属
 registry 创建并返回。
 
-### M11-A0/A1/A2 Physics2D Public Surface
+### M11-A0–A3 Physics2D Public Surface
 
 `include/tina/physics2d/` 公开 Tina 值类型、generation ID、错误码、Pimpl World、contact event 值类型/
-borrowed view，以及 query filter/AABB/ray/hit 值类型。Box2D header、`b2WorldId`/`b2BodyId`/`b2ShapeId`、
-allocator 和 callback 均不可见。`PhysicsWorld2D::Create()` 在调用者提供的 PMR 上一次性建立固定
-Body/Shape registry 与 begin/end/hit contact buffer；`createBoxBody()` 是当前唯一创建入口。
-`bodyState()` 返回 owning snapshot，不发布 Box2D pointer 或 borrowed transform。
+borrowed view、query filter/AABB/ray/hit 值类型，以及 deferred `PhysicsCommandKind2D`。Box2D header、
+`b2WorldId`/`b2BodyId`/`b2ShapeId`、allocator 和 callback 均不可见。`PhysicsWorld2D::Create()` 在调用者
+提供的 PMR 上一次性建立固定 Body/Shape registry、contact buffer 与 command 队列；`createBoxBody()` 是
+唯一立即创建入口。`bodyState()` 返回 owning snapshot，不发布 Box2D pointer 或 borrowed transform。
 
-`step()` 使用 Create 时冻结的 `fixedDeltaSeconds` 与 `solverSubStepCount`。A1 在 `step()` 返回前复制
-contact begin/end/hit；`contactEvents()` 在 owner thread 上返回 borrowed view，有效到下一次成功
-`step()`、`shutdown()`、move 或销毁。A2 的 `overlapAabb`/`castRay` 将 hit 写入调用方 `span` 并稳定排序，
-`castRayClosest` 返回 owning hit；均报告 `PhysicsQueryWriteResult2D` overflow，不扩容。deferred command
-在容量、排序、overflow 与失效规则写入本文件前不得加入公共头。
+`step()` 先 FIFO flush deferred commands，再推进固定步长，再复制 contact。A1 的 `contactEvents()` 在
+owner thread 上返回 borrowed view，有效到下一次成功 `step()`/`shutdown()`/move/销毁。A2 的
+`overlapAabb`/`castRay` 写入调用方 `span` 并稳定排序。A3 的 `enqueue*` 满队列返回 CapacityExceeded；
+stale body 在 flush 时跳过计数。
 
 ## 第三方与 native 零泄漏
 
