@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/audio/AudioEngine.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/integration/WindowSurface.hpp>
@@ -48,6 +49,11 @@ using PrimaryWindowUIContextFactory = std::move_only_function<Core::Result<std::
     const UI::UIContextCapacityConfig& capacities,
     std::pmr::memory_resource& resource)>;
 
+// Optional AudioEngine construction (M11-A14). Empty → no Audio module.
+// Prefer AudioEngine::Create (Disabled) for Null graphs; miniaudio device stays
+// sample/adapter private and is not required by Runtime.
+using AudioEngineFactory = std::move_only_function<Core::Result<Audio::AudioEngine>()>;
+
 // One-shot composition input. The tagged Platform/Render branch prevents an
 // invalid mixture of independent and native-window-aware factories.
 struct EngineCompositionFactories final {
@@ -55,6 +61,7 @@ struct EngineCompositionFactories final {
     Task::TaskSystemFactory createTaskSystem;
     PlatformRenderComposition platformRender;
     PrimaryWindowUIContextFactory createPrimaryWindowUIContext{};
+    AudioEngineFactory createAudioEngine{};
 };
 
 } // namespace Tina

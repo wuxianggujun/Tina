@@ -92,6 +92,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A8 command/completion + bus | Debug C++23 | `tina_audio_tests` | Play/Stop → pump Started/Stopped；destroy 后 pending → RejectedStale；满队列 CapacityExceeded；Master/Music/SFX volume/mute/effectiveGain |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A9 miniaudio null device | Debug C++23 | `tina_audio_miniaudio_tests` | null backend start/stop、callback 计数>0、bundle engine+device |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A10–A13 audio product path | Debug C++23 | audio 15 + miniaudio 9 | 可选编解码；clip bind；mixRealtime；playOneShot；WAV decode→mix e2e |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A14 EngineHost optional Audio | Debug C++23 | `EngineHostRunTest.OptionalAudio*` | factory 注入 Disabled Audio；phase 可见；host pump 后 Started；默认无 factory 时 audioEngine()==null |
 
 
 

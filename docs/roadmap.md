@@ -691,7 +691,11 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   `queryAudioDecodeCapabilities` + `decodeAudioMemory`/`freeDecodedPcm`；
 - M11-A11 已完成：`bindVoiceClip` 非拥有 PCM；Play 无 clip→`RejectedNoClip`；
 - M11-A12 已完成：`mixRealtime` RT 混音 + `attachMixer`；播完 natural `Stopped`；
-- M11-A13 已完成：`playOneShotPcm` + decode→play→mix e2e 测试；**仍非 AssetLease/EngineHost/sample SFX**；
+- M11-A13 已完成：`playOneShotPcm` + decode→play→mix e2e 测试；
+- M11-A14 已完成：可选 `EngineCompositionFactories::createAudioEngine`；`EngineHost` 拥有
+  `AudioEngine` 并在 `updateFrame` 后 `pumpCompletions`；`FixedUpdateContext`/`FrameUpdateContext`
+  暴露 phase-local `audioEngine()`（无工厂则为 null）。Null 图不强制 miniaudio；
+  **仍非 sample SFX / AssetLease / 设备混音接线**；
 - M11-B0 已完成：`Tina::Render` `Camera2DProjection` 纯函数（`FixedWorldHeight2D` /
   `PixelPerfect2D` + framebuffer viewport → worldWidth/Height + `actualPixelsPerMeter`；
   PixelPerfect 强制 `CameraAndSprites`；0×0 surface 结构化失败）。`tina_render_scene_tests` 8 项；

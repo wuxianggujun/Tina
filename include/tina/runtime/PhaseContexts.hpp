@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/audio/AudioEngine.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/EngineConfig.hpp>
@@ -72,14 +73,19 @@ class FixedUpdateContext final {
     [[nodiscard]] const FrameTiming& frameTiming() const noexcept;
     [[nodiscard]] const FixedUpdateTiming& fixedUpdateTiming() const noexcept;
     [[nodiscard]] const SimulationActionSnapshot& simulationActions() const noexcept;
+    // Non-null only when EngineCompositionFactories::createAudioEngine was set.
+    // Phase-local borrow; do not store across callbacks.
+    [[nodiscard]] Audio::AudioEngine* audioEngine() const noexcept;
 
   private:
     FixedUpdateContext(const FrameTiming& frameTiming, const FixedUpdateTiming& fixedUpdateTiming,
-                       const SimulationActionSnapshot& simulationActions) noexcept;
+                       const SimulationActionSnapshot& simulationActions,
+                       Audio::AudioEngine* audioEngine) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
     const FixedUpdateTiming* m_fixedUpdateTiming = nullptr;
     const SimulationActionSnapshot* m_simulationActions = nullptr;
+    Audio::AudioEngine* m_audioEngine = nullptr;
 
     friend class Detail::EngineHostImplementation;
 };
@@ -93,15 +99,18 @@ class FrameUpdateContext final {
 
     [[nodiscard]] const FrameTiming& frameTiming() const noexcept;
     [[nodiscard]] const FrameActionSnapshot& frameActions() const noexcept;
+    // Phase-local borrow; null when Audio factory was omitted.
+    [[nodiscard]] Audio::AudioEngine* audioEngine() const noexcept;
     void requestExitAfterFrame() noexcept;
 
   private:
     FrameUpdateContext(const FrameTiming& frameTiming, const FrameActionSnapshot& frameActions,
-                       bool& exitRequested) noexcept;
+                       bool& exitRequested, Audio::AudioEngine* audioEngine) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
     const FrameActionSnapshot* m_frameActions = nullptr;
     bool* m_exitRequested = nullptr;
+    Audio::AudioEngine* m_audioEngine = nullptr;
 
     friend class Detail::EngineHostImplementation;
 };

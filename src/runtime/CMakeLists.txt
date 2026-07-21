@@ -53,6 +53,7 @@ target_link_libraries(tina_runtime
         Tina::Render
         Tina::WindowSurfaceIntegration
         Tina::UI
+        Tina::Audio
     PRIVATE
         Tina::ProjectOptions
         Tina::UIRenderIntegration

@@ -5,6 +5,7 @@
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
+#include <tina/audio/AudioEngine.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/runtime/spi/PlatformEventDispatcher.hpp>
 #include <tina/task/TaskSystem.hpp>
@@ -424,6 +425,8 @@ struct EngineModules final {
     std::unique_ptr<Platform::IPlatformBackend> platform;
     std::unique_ptr<Task::ITaskSystem> taskSystem;
     std::unique_ptr<Render::IRenderDevice> renderDevice;
+    // Optional (M11-A14). Null when createAudioEngine factory was empty.
+    std::optional<Audio::AudioEngine> audioEngine;
     Integration::IPrimaryWindowSurfaceProvider* windowSurfaceProvider = nullptr;
 
     EngineModules() = default;
@@ -439,6 +442,11 @@ struct EngineModules final {
 
     void shutdown() noexcept
     {
+        if (audioEngine.has_value())
+        {
+            audioEngine->shutdown();
+            audioEngine.reset();
+        }
         if (renderDevice != nullptr)
         {
             renderDevice->shutdown();
@@ -456,6 +464,11 @@ struct EngineModules final {
             platform.reset();
         }
         monotonicClock.reset();
+    }
+
+    [[nodiscard]] Audio::AudioEngine* audioEnginePtr() noexcept
+    {
+        return audioEngine.has_value() ? &(*audioEngine) : nullptr;
     }
 };
 
@@ -794,7 +807,8 @@ class EngineHostImplementation final {
                     return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
                 }
                 const SimulationActionSnapshot& simulationActions = *simulationActionsResult;
-                FixedUpdateContext fixedContext{frameTiming, fixedTiming, simulationActions};
+                FixedUpdateContext fixedContext{frameTiming, fixedTiming, simulationActions,
+                                                m_modules.audioEnginePtr()};
                 auto fixedResult =
                     invokeResultBoundary("IGameState::fixedUpdate", RuntimeErrorCode::GameCallbackThrewException,
                                          [&] { return m_gameState->fixedUpdate(fixedContext); });
@@ -815,7 +829,7 @@ class EngineHostImplementation final {
 
             bool exitAfterFrame = false;
             const FrameActionSnapshot frameActions = m_actionMapper->frameActions();
-            FrameUpdateContext frameContext{frameTiming, frameActions, exitAfterFrame};
+            FrameUpdateContext frameContext{frameTiming, frameActions, exitAfterFrame, m_modules.audioEnginePtr()};
             auto updateResult =
                 invokeResultBoundary("IGameState::updateFrame", RuntimeErrorCode::GameCallbackThrewException,
                                      [&] { return m_gameState->updateFrame(frameContext); });
@@ -823,6 +837,19 @@ class EngineHostImplementation final {
             {
                 return failAfterStartupCommit(gameApplication, std::move(updateResult.error()), frameIndex,
                                               simulationTick);
+            }
+
+            // Drain audio completions after gameplay may have enqueued Play/Stop.
+            if (Audio::AudioEngine* audio = m_modules.audioEnginePtr(); audio != nullptr)
+            {
+                auto audioPump =
+                    invokeResultBoundary("AudioEngine::pumpCompletions", RuntimeErrorCode::LifecycleInvariantViolation,
+                                         [&] { return audio->pumpCompletions(/*budget=*/0); });
+                if (!audioPump)
+                {
+                    return failAfterStartupCommit(gameApplication, std::move(audioPump.error()), frameIndex,
+                                                  simulationTick);
+                }
             }
 
             auto renderSceneBeginStatus =
@@ -1225,6 +1252,19 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         if (modules.taskSystem == nullptr)
         {
             return Core::failure(factoryReturnedNull("createTaskSystem"));
+        }
+
+        // Optional Audio (M11-A14). Empty factory keeps Runtime Null graphs free of audio.
+        if (factories.createAudioEngine)
+        {
+            auto audioResult = invokeResultBoundary("EngineCompositionFactories::createAudioEngine",
+                                                    RuntimeErrorCode::EngineFactoryThrewException,
+                                                    [&] { return factories.createAudioEngine(); });
+            if (!audioResult)
+            {
+                return Core::failure(std::move(audioResult.error()));
+            }
+            modules.audioEngine = std::move(*audioResult);
         }
 
         std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface;

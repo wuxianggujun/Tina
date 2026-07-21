@@ -588,7 +588,12 @@ M11-A11：`bindVoiceClip`/`clearVoiceClip`；Play 无 clip→`RejectedNoClip`。
 
 M11-A12：`mixRealtime`（atomic mix slots，Master×SFX）；`attachMixer`；natural `Stopped`。
 
-M11-A13：`playOneShotPcm`；decode→oneShot→mix e2e。AssetLease/EngineHost/sample SFX 后置。
+M11-A13：`playOneShotPcm`；decode→oneShot→mix e2e。
+
+M11-A14：可选 `createAudioEngine` factory（默认 empty）。成功时 `EngineModules` 持有
+`AudioEngine`（Disabled 即可），逆序 shutdown 先 audio；每帧 gameplay `updateFrame` 之后
+`pumpCompletions(0)`。Phase context 提供非拥有 `audioEngine()` borrow。不链接 miniaudio 设备；
+sample SFX、AssetLease、Desktop 默认 factory 注入后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

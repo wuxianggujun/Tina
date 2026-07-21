@@ -5,6 +5,7 @@
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderErrors.hpp>
 #include <tina/render/RenderScene.hpp>
+#include <tina/audio/AudioEngine.hpp>
 #include <tina/runtime/EngineHost.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
@@ -1240,6 +1241,13 @@ struct GameProbe final {
     bool primaryWindowUIAvailableOnUpdate = false;
     bool primaryWindowUIUpdated = false;
     bool registerPrimaryWindowUIPointerListener = false;
+    // M11-A14: optional AudioEngine phase borrow + host pump.
+    bool expectAudioEngine = false;
+    bool audioEngineSeenOnFixed = false;
+    bool audioEngineSeenOnFrame = false;
+    bool audioOneShotQueued = false;
+    bool audioStartedObserved = false;
+    float audioOneShotPcm[4] = {0.25F, 0.25F, 0.25F, 0.25F};
     InputActionId uiPointerGameplayAction{};
     u32 uiPointerPhaseSequence = 0;
     u32 uiPointerListenerOrder = 0;
@@ -1465,6 +1473,15 @@ class ScriptedGameState final : public IGameState {
             .fixedStepIndexInFrame = fixedTiming.fixedStepIndexInFrame,
             .fixedStepCountInFrame = fixedTiming.fixedStepCountInFrame,
         });
+        if (probe_->expectAudioEngine)
+        {
+            EXPECT_NE(context.audioEngine(), nullptr);
+            probe_->audioEngineSeenOnFixed = context.audioEngine() != nullptr;
+        }
+        else
+        {
+            EXPECT_EQ(context.audioEngine(), nullptr);
+        }
         if (probe_->actionWiring.enabled)
         {
             const SimulationActionSnapshot& actions = context.simulationActions();
@@ -1498,6 +1515,36 @@ class ScriptedGameState final : public IGameState {
         const u64 frameIndex = context.frameTiming().frameIndex;
         probe_->runtime->events.emplace_back("state.update." + std::to_string(frameIndex));
         probe_->fixedCountsByFrame.push_back(context.frameTiming().fixedStepCount);
+        if (probe_->expectAudioEngine)
+        {
+            Audio::AudioEngine* audio = context.audioEngine();
+            EXPECT_NE(audio, nullptr);
+            probe_->audioEngineSeenOnFrame = audio != nullptr;
+            if (audio != nullptr && !probe_->audioOneShotQueued)
+            {
+                auto voice = audio->playOneShotPcm(Audio::AudioPcmClipView{
+                    .frames = probe_->audioOneShotPcm,
+                    .frameCount = 4,
+                    .channels = 1,
+                    .sampleRate = 48000,
+                });
+                EXPECT_TRUE(voice.has_value()) << (voice ? "" : voice.error().message);
+                probe_->audioOneShotQueued = voice.has_value();
+            }
+            if (audio != nullptr && probe_->audioOneShotQueued && !probe_->audioStartedObserved)
+            {
+                // Host pumps after updateFrame; Started appears on a later observation via stats.
+                auto stats = audio->stats();
+                if (stats.has_value() && stats->completedStarted > 0)
+                {
+                    probe_->audioStartedObserved = true;
+                }
+            }
+        }
+        else
+        {
+            EXPECT_EQ(context.audioEngine(), nullptr);
+        }
         if (probe_->actionWiring.enabled)
         {
             const FrameActionSnapshot& actions = context.frameActions();
@@ -3423,6 +3470,40 @@ TEST(EngineHostRunTest, NullRuntimeRunsThreeHundredFramesAndShutsDownExactlyOnce
     EXPECT_EQ(runtime.submittedFrames, 300U);
     EXPECT_EQ(runtime.presentedFrames, 300U);
     EXPECT_TRUE(std::ranges::all_of(game.fixedCountsByFrame, [](u32 fixedStepCount) { return fixedStepCount <= 4U; }));
+    EXPECT_EQ(game.exitCount, 1U);
+    EXPECT_EQ(game.shutdownCount, 1U);
+}
+
+// M11-A14: optional createAudioEngine injects Disabled AudioEngine; phases see it;
+// host pumps completions after updateFrame so Started is observed on later frames.
+TEST(EngineHostRunTest, OptionalAudioEngineFactoryIsPumpedAndVisibleInPhases)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas.assign(4, Core::Duration{1.0 / 60.0});
+    GameProbe game;
+    game.runtime = &runtime;
+    game.exitOnFrame = 3;
+    game.expectAudioEngine = true;
+
+    EngineCompositionFactories factories = makeRuntimeFactories(runtime);
+    factories.createAudioEngine = []() -> Core::Result<Audio::AudioEngine> {
+        return Audio::AudioEngine::Create(Audio::AudioEngineConfig{
+            .voiceCapacity = 4,
+            .commandCapacity = 16,
+            .completionCapacity = 16,
+        });
+    };
+
+    auto hostResult = EngineHost::Create(EngineConfig::Defaults(), std::move(factories));
+    ASSERT_TRUE(hostResult.has_value()) << (hostResult ? "" : hostResult.error().message);
+    ScriptedGameApplication application(game);
+    auto runResult = (*hostResult)->run(application);
+    ASSERT_TRUE(runResult.has_value()) << (runResult ? "" : runResult.error().message);
+    EXPECT_EQ(*runResult, RunExitReason::GameRequestedExitAfterCurrentFrame);
+    EXPECT_TRUE(game.audioEngineSeenOnFixed);
+    EXPECT_TRUE(game.audioEngineSeenOnFrame);
+    EXPECT_TRUE(game.audioOneShotQueued);
+    EXPECT_TRUE(game.audioStartedObserved);
     EXPECT_EQ(game.exitCount, 1U);
     EXPECT_EQ(game.shutdownCount, 1U);
 }

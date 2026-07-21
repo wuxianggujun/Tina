@@ -49,8 +49,12 @@ Core::Result<PrimaryWindowUIRootBuilder> GameStateEnterContext::primaryWindowUIR
 }
 
 FixedUpdateContext::FixedUpdateContext(const FrameTiming& frameTiming, const FixedUpdateTiming& fixedUpdateTiming,
-                                       const SimulationActionSnapshot& simulationActions) noexcept
-    : m_frameTiming(&frameTiming), m_fixedUpdateTiming(&fixedUpdateTiming), m_simulationActions(&simulationActions)
+                                       const SimulationActionSnapshot& simulationActions,
+                                       Audio::AudioEngine* audioEngine) noexcept
+    : m_frameTiming(&frameTiming),
+      m_fixedUpdateTiming(&fixedUpdateTiming),
+      m_simulationActions(&simulationActions),
+      m_audioEngine(audioEngine)
 {
 }
 
@@ -69,9 +73,17 @@ const SimulationActionSnapshot& FixedUpdateContext::simulationActions() const no
     return *m_simulationActions;
 }
 
+Audio::AudioEngine* FixedUpdateContext::audioEngine() const noexcept
+{
+    return m_audioEngine;
+}
+
 FrameUpdateContext::FrameUpdateContext(const FrameTiming& frameTiming, const FrameActionSnapshot& frameActions,
-                                       bool& exitRequested) noexcept
-    : m_frameTiming(&frameTiming), m_frameActions(&frameActions), m_exitRequested(&exitRequested)
+                                       bool& exitRequested, Audio::AudioEngine* audioEngine) noexcept
+    : m_frameTiming(&frameTiming),
+      m_frameActions(&frameActions),
+      m_exitRequested(&exitRequested),
+      m_audioEngine(audioEngine)
 {
 }
 
@@ -83,6 +95,11 @@ const FrameActionSnapshot& FrameUpdateContext::frameActions() const noexcept
 const FrameTiming& FrameUpdateContext::frameTiming() const noexcept
 {
     return *m_frameTiming;
+}
+
+Audio::AudioEngine* FrameUpdateContext::audioEngine() const noexcept
+{
+    return m_audioEngine;
 }
 
 void FrameUpdateContext::requestExitAfterFrame() noexcept
