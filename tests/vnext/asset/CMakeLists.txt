@@ -12,6 +12,7 @@ set(TINA_ASSET_TEST_SOURCES
     AssetSystemCatalogApiTests.cpp
     AssetSpriteRenderTests.cpp
     AssetGpuTextureTests.cpp
+    AudioClipCookedPlaybackTests.cpp
     TileMapInstanceTests.cpp
     TileChunkExtractionTests.cpp
     TileChunkRenderTests.cpp
@@ -63,6 +64,7 @@ target_include_directories(tina_asset_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 target_link_libraries(tina_asset_tests PRIVATE
     Tina::ProjectOptions
     Tina::Asset
+    Tina::Audio
     Tina::Task
     GTest::gtest_main
 )

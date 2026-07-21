@@ -610,7 +610,11 @@ product-2d preset 带 `audio-miniaudio` feature。
 M11-A17：`AudioClipPayload` schema v1——16B header（schema/channels/sampleRate/frameCount）+
 interleaved float32 PCM；`writeAudioClipPayloadBytes`/`parseAudioClipPayload`/
 `writeCookedAudioClipAsset`；`Tina::Audio::pcmClipViewFromAudioClipPayload` 产出非拥有
-`AudioPcmClipView`。AssetSystem typed load/lease、cooker recipe 与磁盘 SFX 后置。
+`AudioPcmClipView`。
+
+M11-A18：`Asset::parseAudioClipFromCooked`；`CatalogPackageValidation` 在 `verifyTypedPayload`
+时校验 AudioClip；测试覆盖 cooked file → parse → playOneShot → mix。AssetLease 播放保活、
+catalog recipe 磁盘 SFX 与 OS 默认设备门禁后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

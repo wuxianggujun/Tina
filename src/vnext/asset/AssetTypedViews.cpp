@@ -56,4 +56,17 @@ Core::Result<AssetFormat::TileMapPayloadView> parseTileMapFromCooked(const Cooke
     return AssetFormat::parseTileMapPayload(file.payload());
 }
 
+Core::Result<AssetFormat::AudioClipPayloadView> parseAudioClipFromCooked(const CookedAssetFile& file)
+{
+    if (!file)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::AudioClip)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset is not AudioClip");
+    }
+    return AssetFormat::parseAudioClipPayload(file.payload());
+}
+
 } // namespace Tina::Asset

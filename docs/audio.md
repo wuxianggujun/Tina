@@ -1,9 +1,9 @@
 # Audio 生命周期与实时线程契约
 
-> 状态：vNext 契约文档。M11-A7–A17：Disabled 生命周期、命令/完成环、bus、miniaudio null 设备、
+> 状态：vNext 契约文档。M11-A7–A18：Disabled 生命周期、命令/完成环、bus、miniaudio null 设备、
 > 可扩展解码、PCM clip、`mixRealtime`、`playOneShotPcm`、EngineHost/Desktop 注入、
-> sample null-device SFX、`AudioClip` cooked payload wire。真实设备固定为 miniaudio（ADR 0012），
-> 不引入 SDL_mixer 或第二套音频库。
+> sample null-device SFX、`AudioClip` cooked payload + `parseAudioClipFromCooked`。
+> 真实设备固定为 miniaudio（ADR 0012），不引入 SDL_mixer 或第二套音频库。
 
 ## 模块边界
 

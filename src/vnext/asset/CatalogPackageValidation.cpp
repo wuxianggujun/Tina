@@ -212,6 +212,13 @@ Core::Status validateCatalogPackageOnDisk(std::string_view catalogRootUtf8, cons
                     {
                         return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedTileMap"));
                     }
+                } else if (entry->assetKind == AssetFormat::AssetKind::AudioClip)
+                {
+                    auto typed = parseAudioClipFromCooked(*asset);
+                    if (!typed)
+                    {
+                        return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedAudioClip"));
+                    }
                 }
             }
         }
