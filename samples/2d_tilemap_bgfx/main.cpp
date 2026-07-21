@@ -168,11 +168,15 @@ struct LifecycleCounters final {
     bool masterVolumeFromSlider = false;
     bool musicVolumeFromSlider = false;
     bool sfxVolumeFromSlider = false;
-    // M11-C3: Master mute Checkbox -> AudioEngine setBusMuted(Master).
+    // M11-C3/C5: Master/Music/SFX mute Checkboxes -> AudioEngine setBusMuted.
     u64 uiCheckboxesCreated = 0;
     u64 uiCheckboxActions = 0;
     bool lastMasterMuted = false;
+    bool lastMusicMuted = false;
+    bool lastSfxMuted = false;
     bool masterMutedFromCheckbox = false;
+    bool musicMutedFromCheckbox = false;
+    bool sfxMutedFromCheckbox = false;
     Tina::Sample2D::TileSelectionCounters tileSelection{};
     u16 lastSelectedTileId = 0;
     u64 selectionHighlightSprites = 0;
@@ -948,45 +952,76 @@ class TileMapBgfxState final : public Tina::IGameState {
             return status;
         }
 
-        // M11-C3: Master mute Checkbox (product settings surface).
+        // M11-C3/C5: Master/Music/SFX mute Checkboxes (product settings surface).
+        // UI toggles checked before the action; sample flips pending from last known bus state.
+        // Capture bus id by value so the action callback does not dangle on stack refs.
+        enum class MuteBus : u8 { Master = 0, Music = 1, Sfx = 2 };
+        const auto wireMuteCheckbox =
+            [&](float y, std::uint8_t r, std::uint8_t g, std::uint8_t b, MuteBus bus) -> Tina::Core::Status {
+                auto checkbox = tree->createCheckbox(root->rootNodeId());
+                if (!checkbox)
+                {
+                    return Tina::Core::failure(std::move(checkbox.error()));
+                }
+                if (auto status = tree->setLayoutStyle(
+                        *checkbox, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
+                                                      Tina::UI::UILayoutLength::Px(y),
+                                                      Tina::UI::UILayoutLength::Px(28.0F),
+                                                      Tina::UI::UILayoutLength::Px(28.0F)));
+                    !status)
+                {
+                    return status;
+                }
+                if (auto status = tree->setBoxPaint(*checkbox, solidFill(r, g, b, 230)); !status)
+                {
+                    return status;
+                }
+                if (auto status = tree->setChecked(*checkbox, false); !status)
+                {
+                    return status;
+                }
+                if (auto status = tree->setCheckboxAction(
+                        *checkbox,
+                        Tina::UI::UIButtonActionCallback{[this, bus](const Tina::UI::UIButtonActionEvent&) noexcept {
+                            ++counters_->uiCheckboxActions;
+                            switch (bus)
+                            {
+                            case MuteBus::Master:
+                                pendingMasterMuted_ = !counters_->lastMasterMuted;
+                                hasPendingMasterMuted_ = true;
+                                counters_->masterMutedFromCheckbox = true;
+                                break;
+                            case MuteBus::Music:
+                                pendingMusicMuted_ = !counters_->lastMusicMuted;
+                                hasPendingMusicMuted_ = true;
+                                counters_->musicMutedFromCheckbox = true;
+                                break;
+                            case MuteBus::Sfx:
+                                pendingSfxMuted_ = !counters_->lastSfxMuted;
+                                hasPendingSfxMuted_ = true;
+                                counters_->sfxMutedFromCheckbox = true;
+                                break;
+                            }
+                        }});
+                    !status)
+                {
+                    return status;
+                }
+                ++counters_->uiCheckboxesCreated;
+                return Tina::Core::success();
+            };
+
+        if (auto status = wireMuteCheckbox(140.0F, 120, 50, 50, MuteBus::Master); !status)
         {
-            auto checkbox = tree->createCheckbox(root->rootNodeId());
-            if (!checkbox)
-            {
-                return Tina::Core::failure(std::move(checkbox.error()));
-            }
-            if (auto status = tree->setLayoutStyle(
-                    *checkbox, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
-                                                  Tina::UI::UILayoutLength::Px(140.0F),
-                                                  Tina::UI::UILayoutLength::Px(28.0F),
-                                                  Tina::UI::UILayoutLength::Px(28.0F)));
-                !status)
-            {
-                return status;
-            }
-            if (auto status = tree->setBoxPaint(*checkbox, solidFill(120, 50, 50, 230)); !status)
-            {
-                return status;
-            }
-            if (auto status = tree->setChecked(*checkbox, false); !status)
-            {
-                return status;
-            }
-            if (auto status = tree->setCheckboxAction(
-                    *checkbox,
-                    Tina::UI::UIButtonActionCallback{[this](const Tina::UI::UIButtonActionEvent&) noexcept {
-                        ++counters_->uiCheckboxActions;
-                        // Toggle is applied by UI before the action; sample reads isChecked on
-                        // next frame is not available here — flip pending mute from last known.
-                        pendingMasterMuted_ = !counters_->lastMasterMuted;
-                        hasPendingMasterMuted_ = true;
-                        counters_->masterMutedFromCheckbox = true;
-                    }});
-                !status)
-            {
-                return status;
-            }
-            ++counters_->uiCheckboxesCreated;
+            return status;
+        }
+        if (auto status = wireMuteCheckbox(174.0F, 50, 100, 70, MuteBus::Music); !status)
+        {
+            return status;
+        }
+        if (auto status = wireMuteCheckbox(208.0F, 110, 80, 40, MuteBus::Sfx); !status)
+        {
+            return status;
         }
 
         uiRoot_ = std::move(*root);
@@ -1116,6 +1151,22 @@ class TileMapBgfxState final : public Tina::IGameState {
                 }
                 hasPendingMasterMuted_ = false;
             }
+            if (hasPendingMusicMuted_)
+            {
+                if (auto status = audio->setBusMuted(Tina::Audio::AudioBusId::Music, pendingMusicMuted_); !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                hasPendingMusicMuted_ = false;
+            }
+            if (hasPendingSfxMuted_)
+            {
+                if (auto status = audio->setBusMuted(Tina::Audio::AudioBusId::Sfx, pendingSfxMuted_); !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                hasPendingSfxMuted_ = false;
+            }
             if (auto bus = audio->busState(Tina::Audio::AudioBusId::Master); bus.has_value())
             {
                 counters_->lastMasterVolume = bus->volume;
@@ -1124,10 +1175,12 @@ class TileMapBgfxState final : public Tina::IGameState {
             if (auto bus = audio->busState(Tina::Audio::AudioBusId::Music); bus.has_value())
             {
                 counters_->lastMusicVolume = bus->volume;
+                counters_->lastMusicMuted = bus->muted;
             }
             if (auto bus = audio->busState(Tina::Audio::AudioBusId::Sfx); bus.has_value())
             {
                 counters_->lastSfxVolume = bus->volume;
+                counters_->lastSfxMuted = bus->muted;
             }
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
             // First frame with Audio: create null device, attach mixer, start.
@@ -1515,10 +1568,14 @@ class TileMapBgfxState final : public Tina::IGameState {
     float pendingMusicVolume_ = 1.0F;
     float pendingSfxVolume_ = 1.0F;
     bool pendingMasterMuted_ = false;
+    bool pendingMusicMuted_ = false;
+    bool pendingSfxMuted_ = false;
     bool hasPendingMasterVolume_ = false;
     bool hasPendingMusicVolume_ = false;
     bool hasPendingSfxVolume_ = false;
     bool hasPendingMasterMuted_ = false;
+    bool hasPendingMusicMuted_ = false;
+    bool hasPendingSfxMuted_ = false;
 };
 
 class TileMapBgfxApplication final : public Tina::IGameApplication {
@@ -1839,7 +1896,7 @@ int main(int argc, char** argv)
               counters.uiPanelsCreated == ExpectedUIPanelCount &&
               counters.uiTextLabelsCreated == ExpectedUITextLabelCount &&
               counters.uiButtonsCreated == ExpectedUIButtonCount && counters.uiButtonActionsWired == 1 &&
-              counters.uiSlidersCreated == 3 && counters.uiCheckboxesCreated == 1 &&
+              counters.uiSlidersCreated == 3 && counters.uiCheckboxesCreated == 3 &&
               counters.uiRootsReleased == 1 && *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     ok = ok && counters.physicsReady && counters.physicsStaticBodies == ExpectedPhysicsStaticBodies &&
@@ -1860,7 +1917,7 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, ExpectedUITextLabelCount);
     appendLeU64(evidenceBytes, ExpectedUIButtonCount);
     appendLeU64(evidenceBytes, counters.uiSlidersCreated);
-    appendLeU64(evidenceBytes, counters.uiCheckboxesCreated);
+    appendLeU64(evidenceBytes, counters.uiCheckboxesCreated); // expected 3 after M11-C5
     appendLeU64(evidenceBytes, counters.audioClipFrameCount);
     appendLeU32(evidenceBytes, counters.audioClipSampleRate);
     appendLeU32(evidenceBytes, counters.audioEnginePresent ? 1U : 0U);
@@ -1979,10 +2036,14 @@ int main(int argc, char** argv)
               << ",\"lastMusicVolume\":" << counters.lastMusicVolume
               << ",\"lastSfxVolume\":" << counters.lastSfxVolume
               << ",\"lastMasterMuted\":" << (counters.lastMasterMuted ? "true" : "false")
+              << ",\"lastMusicMuted\":" << (counters.lastMusicMuted ? "true" : "false")
+              << ",\"lastSfxMuted\":" << (counters.lastSfxMuted ? "true" : "false")
               << ",\"masterVolumeFromSlider\":" << (counters.masterVolumeFromSlider ? "true" : "false")
               << ",\"musicVolumeFromSlider\":" << (counters.musicVolumeFromSlider ? "true" : "false")
               << ",\"sfxVolumeFromSlider\":" << (counters.sfxVolumeFromSlider ? "true" : "false")
               << ",\"masterMutedFromCheckbox\":" << (counters.masterMutedFromCheckbox ? "true" : "false")
+              << ",\"musicMutedFromCheckbox\":" << (counters.musicMutedFromCheckbox ? "true" : "false")
+              << ",\"sfxMutedFromCheckbox\":" << (counters.sfxMutedFromCheckbox ? "true" : "false")
               << ",\"uiRootsReleased\":" << counters.uiRootsReleased
               << ",\"worldPointerPresses\":" << counters.tileSelection.pointerPresses
               << ",\"worldPointerMissingSamples\":" << counters.tileSelection.missingWorldPointerSamples

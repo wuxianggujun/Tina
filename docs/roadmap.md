@@ -769,7 +769,9 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   进入语义树（Root/Panel 省略）；Checkbox checked 与 Slider range/value；随 `commitLayout` 发布；
 - M11-D0 已完成：`tina_sample_2d` **product evidence fingerprint**（XXH3-128 v1，schema=1）——
   对结构门禁字段做帧数无关摘要，JSON `evidenceFingerprint`；作为稳定截图回归前身；
-  **仍非 GPU 像素截图、UIA/AT-SPI、全屏设置、Music/SFX 静音分轨**；
+- M11-C5 已完成：`tina_sample_2d` HUD Music/SFX 分轨静音 Checkbox（共 3 个 mute 控件）→
+  下帧 `setBusMuted(Master|Music|Sfx)`；门禁 `uiCheckboxesCreated==3`；
+  **仍非 GPU 像素截图、UIA/AT-SPI、全屏设置**；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
 - 在 M10 已落地的 `tina_sample_2d` 主线上继续 2D 打磨：像素级截图回归（D0 为结构指纹前身；
   follow/插值见 M11-B2；dirty cache 见 M11-B1；投影 resolve 见 M11-B0）；
