@@ -45,6 +45,8 @@ class PrimaryWindowUICapabilityState final {
                                                          UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createButton(u64 epoch, PrimaryWindowUIPhase phase,
                                                           UI::UITreeUpdater& updater, UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createCheckbox(u64 epoch, PrimaryWindowUIPhase phase,
+                                                            UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createSlider(u64 epoch, PrimaryWindowUIPhase phase,
                                                           UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Status setLayoutStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
@@ -67,6 +69,16 @@ class PrimaryWindowUICapabilityState final {
                                                  UI::UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(u64 epoch, PrimaryWindowUIPhase phase,
                                                      const UI::UITreeUpdater& updater, UI::UINodeId button);
+    [[nodiscard]] Core::Status setCheckboxAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                 UI::UINodeId checkbox, UI::UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status clearCheckboxAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                   UI::UINodeId checkbox);
+    [[nodiscard]] Core::Status setChecked(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                          UI::UINodeId checkbox, bool checked);
+    [[nodiscard]] Core::Result<bool> isChecked(u64 epoch, PrimaryWindowUIPhase phase,
+                                               const UI::UITreeUpdater& updater, UI::UINodeId checkbox);
+    [[nodiscard]] Core::Result<bool> isCheckboxPressed(u64 epoch, PrimaryWindowUIPhase phase,
+                                                       const UI::UITreeUpdater& updater, UI::UINodeId checkbox);
     [[nodiscard]] Core::Status setSliderRange(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                               UI::UINodeId slider, float minValue, float maxValue, float step);
     [[nodiscard]] Core::Status setSliderValue(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,

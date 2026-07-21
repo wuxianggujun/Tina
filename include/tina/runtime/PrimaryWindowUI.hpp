@@ -33,6 +33,7 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UINodeId> createPanel(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createLabel(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createButton(UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createCheckbox(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createSlider(UI::UINodeId parent);
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
@@ -44,6 +45,11 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setButtonAction(UI::UINodeId button, UI::UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(UI::UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(UI::UINodeId button) const;
+    [[nodiscard]] Core::Status setCheckboxAction(UI::UINodeId checkbox, UI::UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status clearCheckboxAction(UI::UINodeId checkbox);
+    [[nodiscard]] Core::Status setChecked(UI::UINodeId checkbox, bool checked);
+    [[nodiscard]] Core::Result<bool> isChecked(UI::UINodeId checkbox) const;
+    [[nodiscard]] Core::Result<bool> isCheckboxPressed(UI::UINodeId checkbox) const;
     [[nodiscard]] Core::Status setSliderRange(UI::UINodeId slider, float minValue, float maxValue, float step = 0.0F);
     [[nodiscard]] Core::Status setSliderValue(UI::UINodeId slider, float value);
     [[nodiscard]] Core::Result<float> sliderValue(UI::UINodeId slider) const;

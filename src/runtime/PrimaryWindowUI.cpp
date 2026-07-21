@@ -82,6 +82,15 @@ Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createButton(UI::UINodeId
     return m_state->createButton(m_epoch, m_phase, m_updater, parent);
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createCheckbox(UI::UINodeId parent)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createCheckbox");
+    }
+    return m_state->createCheckbox(m_epoch, m_phase, m_updater, parent);
+}
+
 Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createSlider(UI::UINodeId parent)
 {
     if (m_state == nullptr)
@@ -179,6 +188,51 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isButtonPressed(UI::UINodeId butt
         return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isButtonPressed");
     }
     return m_state->isButtonPressed(m_epoch, m_phase, m_updater, button);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setCheckboxAction(UI::UINodeId checkbox, UI::UIButtonActionCallback callback)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setCheckboxAction");
+    }
+    return m_state->setCheckboxAction(m_epoch, m_phase, m_updater, checkbox, std::move(callback));
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearCheckboxAction(UI::UINodeId checkbox)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearCheckboxAction");
+    }
+    return m_state->clearCheckboxAction(m_epoch, m_phase, m_updater, checkbox);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setChecked(UI::UINodeId checkbox, bool checked)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setChecked");
+    }
+    return m_state->setChecked(m_epoch, m_phase, m_updater, checkbox, checked);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isChecked(UI::UINodeId checkbox) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isChecked");
+    }
+    return m_state->isChecked(m_epoch, m_phase, m_updater, checkbox);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isCheckboxPressed(UI::UINodeId checkbox) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isCheckboxPressed");
+    }
+    return m_state->isCheckboxPressed(m_epoch, m_phase, m_updater, checkbox);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setSliderRange(UI::UINodeId slider, float minValue, float maxValue,

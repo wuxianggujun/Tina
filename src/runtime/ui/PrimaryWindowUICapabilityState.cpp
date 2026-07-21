@@ -241,6 +241,23 @@ Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createButton(u64 epoc
     return *child;
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createCheckbox(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                          UI::UITreeUpdater& updater,
+                                                                          UI::UINodeId parent)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createCheckbox";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto child = updater.createCheckbox(parent);
+    if (!child)
+    {
+        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
+    }
+    return *child;
+}
+
 Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createSlider(u64 epoch, PrimaryWindowUIPhase phase,
                                                                         UI::UITreeUpdater& updater, UI::UINodeId parent)
 {
@@ -417,6 +434,88 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isButtonPressed(u64 epoch, Pr
         return Core::failure(std::move(status.error()));
     }
     auto pressed = updater.isButtonPressed(button);
+    if (!pressed)
+    {
+        return Core::failure(rememberFirstError(std::move(pressed.error()), Operation));
+    }
+    return *pressed;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setCheckboxAction(u64 epoch, PrimaryWindowUIPhase phase,
+                                                               UI::UITreeUpdater& updater, UI::UINodeId checkbox,
+                                                               UI::UIButtonActionCallback callback)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setCheckboxAction";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setCheckboxAction(checkbox, std::move(callback));
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearCheckboxAction(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                 UI::UITreeUpdater& updater, UI::UINodeId checkbox)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearCheckboxAction";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearCheckboxAction(checkbox);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::setChecked(u64 epoch, PrimaryWindowUIPhase phase,
+                                                        UI::UITreeUpdater& updater, UI::UINodeId checkbox, bool checked)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setChecked";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setChecked(checkbox, checked);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isChecked(u64 epoch, PrimaryWindowUIPhase phase,
+                                                             const UI::UITreeUpdater& updater, UI::UINodeId checkbox)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isChecked";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto checked = updater.isChecked(checkbox);
+    if (!checked)
+    {
+        return Core::failure(rememberFirstError(std::move(checked.error()), Operation));
+    }
+    return *checked;
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isCheckboxPressed(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                     const UI::UITreeUpdater& updater,
+                                                                     UI::UINodeId checkbox)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isCheckboxPressed";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto pressed = updater.isCheckboxPressed(checkbox);
     if (!pressed)
     {
         return Core::failure(rememberFirstError(std::move(pressed.error()), Operation));

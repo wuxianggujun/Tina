@@ -763,7 +763,9 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   Master 音量 Slider → `AudioEngine::setBusVolume(Master)`（JSON `uiSlidersCreated`）；
 - M11-C2 已完成：`tina_sample_2d` HUD 增加 Music/SFX 分轨音量 Slider（共 3 条）；
   change → 下帧 `setBusVolume(Music|Sfx)`；门禁 `uiSlidersCreated==3`；
-  **仍非静音 Checkbox HUD、全屏设置、Semantics**；
+- M11-C3 已完成：`PrimaryWindowUI` 暴露 Checkbox API；`tina_sample_2d` HUD Master 静音
+  Checkbox → 下帧 `setBusMuted(Master)`；门禁 `uiCheckboxesCreated==1`；
+  **仍非全屏设置、Semantics、Music/SFX 静音分轨**；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
 - 在 M10 已落地的 `tina_sample_2d` 主线上继续 2D 打磨：稳定截图回归（follow/插值见 M11-B2；
   dirty cache 见 M11-B1；投影 resolve 见 M11-B0）；Audio 与更完整 UI 控件见本里程碑其它条；
