@@ -138,6 +138,9 @@ struct SampleOptions final {
     bool seedTileSelection = false;
     u32 seedTileCellX = 0;
     u32 seedTileCellY = 0;
+    // M11-D2: optional golden pixel fingerprint (32 lowercase hex chars).
+    // Empty = capture-only (must succeed); non-empty = must match exactly.
+    std::string expectPixelFingerprint{};
 };
 
 struct LifecycleCounters final {
@@ -406,6 +409,28 @@ void writeError(const Tina::Core::Error& error)
             options.seedTileSelection = true;
             options.seedTileCellX = cellX;
             options.seedTileCellY = cellY;
+            continue;
+        }
+        if (argument.starts_with("--expect-pixel-fingerprint="))
+        {
+            const auto text = argument.substr(std::string_view{"--expect-pixel-fingerprint="}.size());
+            if (text.size() != 32)
+            {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "invalid --expect-pixel-fingerprint (expected 32 lowercase hex chars)");
+            }
+            for (const char ch : text)
+            {
+                const bool isHex = (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
+                if (!isHex)
+                {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::InvalidArgument,
+                        "invalid --expect-pixel-fingerprint (expected 32 lowercase hex chars)");
+                }
+            }
+            options.expectPixelFingerprint.assign(text.data(), text.size());
             continue;
         }
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "unsupported argument");
@@ -1999,6 +2024,11 @@ int main(int argc, char** argv)
     // M11-D1: require a successful primary-frame RGBA8 capture when the device supports it.
     ok = ok && counters.pixelCaptureAttempted && counters.pixelCaptureOk && !counters.pixelFingerprint.empty() &&
          counters.pixelCaptureWidth > 0 && counters.pixelCaptureHeight > 0 && counters.pixelCaptureBytes > 0;
+    // M11-D2: optional golden pixel fingerprint comparison (exact match, machine-local).
+    const bool pixelGoldenChecked = !options->expectPixelFingerprint.empty();
+    const bool pixelGoldenMatched =
+        !pixelGoldenChecked || counters.pixelFingerprint == options->expectPixelFingerprint;
+    ok = ok && pixelGoldenMatched;
 
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
@@ -2106,6 +2136,9 @@ int main(int argc, char** argv)
                   << ",\"pixelCaptureHeight\":" << counters.pixelCaptureHeight
                   << ",\"pixelCaptureBytes\":" << counters.pixelCaptureBytes
                   << ",\"pixelFingerprint\":\"" << counters.pixelFingerprint << "\""
+                  << ",\"pixelGoldenChecked\":" << (pixelGoldenChecked ? "true" : "false")
+                  << ",\"pixelGoldenMatched\":" << (pixelGoldenMatched ? "true" : "false")
+                  << ",\"expectPixelFingerprint\":\"" << options->expectPixelFingerprint << "\""
                   << "}\n";
         return 1;
     }
@@ -2244,6 +2277,9 @@ int main(int argc, char** argv)
               << ",\"pixelCaptureHeight\":" << counters.pixelCaptureHeight
               << ",\"pixelCaptureBytes\":" << counters.pixelCaptureBytes
               << ",\"pixelFingerprint\":\"" << counters.pixelFingerprint << "\""
+              << ",\"pixelGoldenChecked\":" << (pixelGoldenChecked ? "true" : "false")
+              << ",\"pixelGoldenMatched\":" << (pixelGoldenMatched ? "true" : "false")
+              << ",\"expectPixelFingerprint\":\"" << options->expectPixelFingerprint << "\""
               << ",\"exit\":\""
               << "GameRequestedExitAfterCurrentFrame\"}\n";
     return 0;

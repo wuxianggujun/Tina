@@ -110,6 +110,9 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 # cmake --preset windows-msvc-vnext-bgfx-product-2d
 # cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d
 # out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
+# Optional pixel golden (M11-D2; machine-local fingerprint from a known-good run):
+# out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=120 --frame-delay-ms=0 `
+#   --expect-pixel-fingerprint=<32hex from prior pixelFingerprint JSON field>
 
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_tilemap.exe --frames=300

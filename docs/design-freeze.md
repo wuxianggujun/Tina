@@ -657,8 +657,11 @@ UIA/AT-SPI、运行时全屏设置、更复杂 SettingsState 仍 Deferred；默�
 
 M11-D1：`Rgba8FrameCapture` + `IRenderDevice::capturePrimaryFrameRgba8`（默认 Unsupported）。
 bgfx 通过 `CallbackI::screenShot` + `requestScreenShot` 实现；BGRA→RGBA8、yflip 纠正为 top-left。
-`tina_sample_2d` 在 `run()` 返回后、销毁 device 前捕获，JSON 输出 `pixelFingerprint`（XXH3-128）。
-不强制 golden 文件入库；跨 GPU 像素归一化后置。
+`tina_sample_2d` 在最终 present 后捕获，JSON 输出 `pixelFingerprint`（XXH3-128）。
+
+M11-D2：可选 CLI `--expect-pixel-fingerprint=<32 lowercase hex>`。提供时与 `pixelFingerprint`
+精确相等才通过；默认不提供则只要求 capture 成功。指纹随 GPU/驱动/窗口尺寸变化，不作为跨机硬门禁。
+跨 GPU 容差与 PNG golden 文件后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

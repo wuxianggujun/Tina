@@ -109,6 +109,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-C5 Music/SFX mute checkboxes | Debug C++23 | product-2d sample | `uiCheckboxesCreated=3`；JSON lastMaster/Music/SfxMuted |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11 设置/UI 竖切收口（C0–C5+D0） | Docs + tip `bbbe1b5b` | product-2d | 三轨音量+静音 HUD；Semantics 快照；evidenceFingerprint |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-D1 primary frame pixel capture | Debug C++23 | product-2d sample | `pixelCaptureOk`；`pixelFingerprint` 非空；width/height/bytes>0 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-D2 optional pixel golden CLI | Debug C++23 | product-2d sample | `--expect-pixel-fingerprint=` 匹配 actual；错指纹 verification fail |
 
 
 

@@ -772,8 +772,10 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
 - M11-C5 已完成：`tina_sample_2d` HUD Music/SFX 分轨静音 Checkbox（共 3 个 mute 控件）→
   下帧 `setBusMuted(Master|Music|Sfx)`；门禁 `uiCheckboxesCreated==3`；
 - M11-D1 已完成：后端无关 `IRenderDevice::capturePrimaryFrameRgba8` + bgfx
-  `requestScreenShot`（BGRA→RGBA8 top-left）；`tina_sample_2d` 在 run 结束后捕获并输出
-  `pixelFingerprint`；门禁要求 capture 成功；**仍非 golden 图文件对比 / 跨 GPU 归一化**；
+  `requestScreenShot`（BGRA→RGBA8 top-left）；`tina_sample_2d` 在最终 present 后捕获并输出
+  `pixelFingerprint`；门禁要求 capture 成功；
+- M11-D2 已完成：可选 golden 对比 CLI `--expect-pixel-fingerprint=<32hex>`；匹配失败 verification
+  fail 并回显 actual/expect；默认不强制（本机/驱动相关）；**仍非跨 GPU 容差 / PNG golden 文件**；
 
 ### M11 设置 / UI 产品竖切收口（tip `bbbe1b5b`，C0–C5 + D0）
 
