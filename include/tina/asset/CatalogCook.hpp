@@ -48,6 +48,7 @@ struct CatalogCookResult final {
 //   sprite <32hexId> <texture32hexId> [u0 v0 u1 v1 pivotX pivotY ppu]
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> <f0...>
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> sine <freqHz>
+//   audioclip <32hexId> file <relativeOrAbsolute.wav>  // PCM16 WAV only (M11-A20)
 //   tileset <32hexId> <texture32hexId> <tilePxW> <tilePxH>
 //   tile <localId> <materialFlags> <u0> <v0> <u1> <v1>   // after tileset; ends at next non-tile
 //   tilemap <32hexId> <tileset32hexId> <widthCells> <heightCells> <cellSizeMeters>

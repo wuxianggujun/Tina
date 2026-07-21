@@ -707,7 +707,9 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   cooked→parse→`playOneShotPcm`→`mixRealtime` 端到端测试；
 - M11-A19 已完成：recipe `audioclip` 内联（samples 或 `sine <freqHz>`）；`sample_2d.recipe`
   增加 AudioClip；sample `AssetLease` 保活 + `playOneShotPcm` 产品 SFX；
-  **仍非 OS 真实扬声器门禁 / 完整 cooker CLI 音频源文件导入**；
+- M11-A20 已完成：recipe `audioclip <id> file <path.wav>` 磁盘 PCM16 WAV → cooked AudioClip
+  （cook 期纯 C++ 解码，不强制 miniaudio 进 Asset）；**仍非 OS 真实扬声器门禁 / 完整 cooker CLI
+  多格式源导入（MP3/Ogg 走 adapter decode 后 cook）**；
 - M11-B0 已完成：`Tina::Render` `Camera2DProjection` 纯函数（`FixedWorldHeight2D` /
   `PixelPerfect2D` + framebuffer viewport → worldWidth/Height + `actualPixelsPerMeter`；
   PixelPerfect 强制 `CameraAndSprites`；0×0 surface 结构化失败）。`tina_render_scene_tests` 8 项；

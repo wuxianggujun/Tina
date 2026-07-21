@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <memory_resource>
 #include <span>
@@ -352,6 +353,113 @@ TEST(CatalogCookTests, InlineAudioClipSineRecipe)
     EXPECT_EQ(clip->channels, 1U);
 
     std::filesystem::remove_all(root, ec);
+}
+
+// M11-A20: cook PCM16 WAV file into AudioClip payload via recipe `file` form.
+TEST(CatalogCookTests, AudioClipFileWavRecipe)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto clipId = *Core::AssetId::fromBytes(idBytes(7U));
+    const auto clipHex = clipId.canonicalText();
+
+    const auto dir = std::filesystem::temp_directory_path() / "tina_audioclip_wav_src";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto wavPath = dir / "click.wav";
+
+    // Minimal mono 16-bit PCM WAV: 8 samples @ 8000 Hz.
+    constexpr std::uint32_t sampleRate = 8000;
+    constexpr std::uint16_t channels = 1;
+    constexpr std::uint16_t bitsPerSample = 16;
+    constexpr std::uint32_t dataBytes = 16;
+    constexpr std::uint32_t fmtChunkSize = 16;
+    constexpr std::uint32_t riffSize = 4 + (8 + fmtChunkSize) + (8 + dataBytes);
+    std::vector<std::byte> wav;
+    wav.reserve(44 + dataBytes);
+    const auto append = [&](const void* data, std::size_t size) {
+        const auto* begin = static_cast<const std::byte*>(data);
+        wav.insert(wav.end(), begin, begin + size);
+    };
+    const auto appendU16 = [&](std::uint16_t value) {
+        const std::uint8_t le[2] = {static_cast<std::uint8_t>(value & 0xFF),
+                                    static_cast<std::uint8_t>((value >> 8) & 0xFF)};
+        append(le, 2);
+    };
+    const auto appendU32 = [&](std::uint32_t value) {
+        const std::uint8_t le[4] = {static_cast<std::uint8_t>(value & 0xFF),
+                                    static_cast<std::uint8_t>((value >> 8) & 0xFF),
+                                    static_cast<std::uint8_t>((value >> 16) & 0xFF),
+                                    static_cast<std::uint8_t>((value >> 24) & 0xFF)};
+        append(le, 4);
+    };
+    append("RIFF", 4);
+    appendU32(riffSize);
+    append("WAVE", 4);
+    append("fmt ", 4);
+    appendU32(fmtChunkSize);
+    appendU16(1);
+    appendU16(channels);
+    appendU32(sampleRate);
+    appendU32(sampleRate * channels * (bitsPerSample / 8));
+    appendU16(static_cast<std::uint16_t>(channels * (bitsPerSample / 8)));
+    appendU16(bitsPerSample);
+    append("data", 4);
+    appendU32(dataBytes);
+    const std::int16_t samples[8] = {0, 8000, 16000, 8000, 0, -8000, -16000, -8000};
+    for (const std::int16_t sample : samples)
+    {
+        appendU16(static_cast<std::uint16_t>(sample));
+    }
+    ASSERT_TRUE(Core::writeFile(toUtf8(wavPath), wav).has_value());
+
+    std::string recipe;
+    recipe += "platform WindowsX64\n";
+    recipe += "audioclip ";
+    recipe.append(clipHex.data(), clipHex.size());
+    recipe += " file click.wav\n";
+
+    auto request = parseCatalogCookRecipe(recipe, toUtf8(dir));
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    ASSERT_EQ(request->assets.size(), 1U);
+    EXPECT_EQ(request->assets[0].assetKind, AssetFormat::AssetKind::AudioClip);
+
+    const auto outRoot = dir / "pkg";
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(outRoot), *request).has_value());
+
+    CatalogPackageOpenConfig openConfig{
+        .manifest =
+            CatalogFileLoadConfig{
+                .catalog =
+                    CatalogConfig{
+                        .maxEntries = 8,
+                        .maxDependencies = 8,
+                        .maxDependenciesPerAsset = 4,
+                        .memoryResource = &memory,
+                    },
+            },
+        .validateOnOpen = true,
+        .validation =
+            CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .verifyContent = true,
+                .verifyTypedPayload = true,
+            },
+    };
+    auto catalog = openCatalogPackage(toUtf8(outRoot), openConfig);
+    ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
+
+    auto asset = loadCookedAssetFromCatalog(toUtf8(outRoot), *catalog, clipId,
+                                            CookedAssetFileLoadConfig{.memoryResource = &memory});
+    ASSERT_TRUE(asset.has_value()) << asset.error().message;
+    auto clip = parseAudioClipFromCooked(*asset);
+    ASSERT_TRUE(clip.has_value()) << clip.error().message;
+    EXPECT_EQ(clip->sampleRate, 8000U);
+    EXPECT_EQ(clip->frameCount, 8U);
+    EXPECT_EQ(clip->channels, 1U);
+    EXPECT_NEAR(clip->interleavedPcm[1], 8000.0F / 32768.0F, 1.0e-4F);
+
+    std::filesystem::remove_all(dir, ec);
 }
 
 } // namespace

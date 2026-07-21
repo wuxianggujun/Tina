@@ -15,7 +15,10 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
+#include <memory_resource>
 #include <string>
 #include <utility>
 
@@ -257,86 +260,241 @@ struct CookedPackage final {
     };
 }
 
-[[nodiscard]] Core::Result<CatalogCookAssetSpec> parseAudioClipInline(const std::vector<std::string>& tokens)
+[[nodiscard]] Core::u16 readLeU16(std::span<const std::byte> bytes, std::size_t offset) noexcept
+{
+    return static_cast<Core::u16>(std::to_integer<Core::u8>(bytes[offset])) |
+           static_cast<Core::u16>(static_cast<Core::u16>(std::to_integer<Core::u8>(bytes[offset + 1U])) << 8U);
+}
+
+[[nodiscard]] Core::u32 readLeU32(std::span<const std::byte> bytes, std::size_t offset) noexcept
+{
+    Core::u32 value = 0;
+    for (std::size_t index = 0; index < 4U; ++index)
+    {
+        value |= static_cast<Core::u32>(std::to_integer<Core::u8>(bytes[offset + index])) << (index * 8U);
+    }
+    return value;
+}
+
+// Cook-time PCM WAV decode only (RIFF/WAVE, PCM 16-bit). Keeps Asset free of miniaudio.
+// MP3/Ogg still go through Audio adapter decode + offline cook paths.
+[[nodiscard]] Core::Result<AssetFormat::AudioClipPayloadDesc>
+decodePcm16WavToClipDesc(std::span<const std::byte> bytes, std::vector<float>& pcmOut)
+{
+    if (bytes.size() < 44U)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "wav file too short");
+    }
+    if (std::memcmp(bytes.data(), "RIFF", 4) != 0 || std::memcmp(bytes.data() + 8, "WAVE", 4) != 0)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "wav missing RIFF/WAVE header");
+    }
+
+    Core::u16 audioFormat = 0;
+    Core::u16 channels = 0;
+    Core::u32 sampleRate = 0;
+    Core::u16 bitsPerSample = 0;
+    std::span<const std::byte> dataChunk{};
+    std::size_t offset = 12;
+    while (offset + 8U <= bytes.size())
+    {
+        const char* tag = reinterpret_cast<const char*>(bytes.data() + offset);
+        const Core::u32 chunkSize = readLeU32(bytes, offset + 4U);
+        const std::size_t dataOffset = offset + 8U;
+        if (dataOffset + chunkSize > bytes.size())
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "wav chunk overruns file");
+        }
+        if (std::memcmp(tag, "fmt ", 4) == 0)
+        {
+            if (chunkSize < 16U)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "wav fmt chunk too small");
+            }
+            audioFormat = readLeU16(bytes, dataOffset);
+            channels = readLeU16(bytes, dataOffset + 2U);
+            sampleRate = readLeU32(bytes, dataOffset + 4U);
+            bitsPerSample = readLeU16(bytes, dataOffset + 14U);
+        }
+        else if (std::memcmp(tag, "data", 4) == 0)
+        {
+            dataChunk = bytes.subspan(dataOffset, chunkSize);
+        }
+        offset = dataOffset + chunkSize + (chunkSize & 1U); // word-align
+    }
+
+    if (audioFormat != 1U)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "wav cook supports only PCM format=1 (use sine/samples or offline decode for compressed)");
+    }
+    if (bitsPerSample != 16U)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "wav cook supports only 16-bit PCM");
+    }
+    if (channels == 0 || channels > AssetFormat::AudioClipWire::MaxChannels ||
+        sampleRate < AssetFormat::AudioClipWire::MinSampleRate ||
+        sampleRate > AssetFormat::AudioClipWire::MaxSampleRate)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "wav geometry out of AudioClip range");
+    }
+    if (dataChunk.empty() || (dataChunk.size() % (channels * 2U)) != 0U)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "wav data chunk size invalid");
+    }
+
+    const Core::u32 frameCount =
+        static_cast<Core::u32>(dataChunk.size() / (static_cast<std::size_t>(channels) * 2U));
+    if (frameCount == 0 || frameCount > AssetFormat::AudioClipWire::MaxFrameCount)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "wav frameCount out of range");
+    }
+
+    pcmOut.resize(static_cast<std::size_t>(frameCount) * channels);
+    for (Core::u32 frame = 0; frame < frameCount; ++frame)
+    {
+        for (Core::u16 channel = 0; channel < channels; ++channel)
+        {
+            const std::size_t sampleIndex =
+                static_cast<std::size_t>(frame) * channels + channel;
+            const std::size_t byteIndex = sampleIndex * 2U;
+            const auto lo = std::to_integer<Core::u8>(dataChunk[byteIndex]);
+            const auto hi = std::to_integer<Core::u8>(dataChunk[byteIndex + 1U]);
+            const auto sample = static_cast<std::int16_t>(static_cast<Core::u16>(lo) |
+                                                          static_cast<Core::u16>(static_cast<Core::u16>(hi) << 8U));
+            pcmOut[sampleIndex] = static_cast<float>(sample) / 32768.0F;
+        }
+    }
+
+    return AssetFormat::AudioClipPayloadDesc{
+        .channels = channels,
+        .sampleRate = sampleRate,
+        .frameCount = frameCount,
+        .interleavedPcm = pcmOut,
+    };
+}
+
+[[nodiscard]] Core::Result<CatalogCookAssetSpec>
+parseAudioClipInline(const std::vector<std::string>& tokens, std::string_view baseDirectoryUtf8)
 {
     // audioclip <id> <sampleRate> <channels> <frameCount> <f0 f1 ...>
     // audioclip <id> <sampleRate> <channels> <frameCount> sine <freqHz>
-    if (tokens.size() < 5)
+    // audioclip <id> file <relativeOrAbsolutePath.wav>   // PCM16 WAV only (M11-A20)
+    if (tokens.size() < 3)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                             "audioclip needs id sampleRate channels frameCount samples|sine freq");
+                             "audioclip needs id + (geometry samples|sine) or file path");
     }
     auto assetId = Core::AssetId::parseCanonical(tokens[1]);
     if (!assetId)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid audioclip asset id");
     }
-    Core::u32 sampleRate = 0;
-    Core::u32 channels = 0;
-    Core::u32 frameCount = 0;
-    if (!parseU32Token(tokens[2], sampleRate) || !parseU32Token(tokens[3], channels) ||
-        !parseU32Token(tokens[4], frameCount))
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid audioclip geometry fields");
-    }
-    if (channels == 0 || channels > AssetFormat::AudioClipWire::MaxChannels || frameCount == 0 ||
-        frameCount > AssetFormat::AudioClipWire::MaxFrameCount ||
-        sampleRate < AssetFormat::AudioClipWire::MinSampleRate ||
-        sampleRate > AssetFormat::AudioClipWire::MaxSampleRate)
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "audioclip geometry out of range");
-    }
 
-    const std::size_t sampleCount =
-        static_cast<std::size_t>(frameCount) * static_cast<std::size_t>(channels);
     std::vector<float> pcm;
-    pcm.resize(sampleCount, 0.0F);
+    AssetFormat::AudioClipPayloadDesc desc{};
 
-    if (tokens.size() >= 6 && tokens[5] == "sine")
+    if (tokens[2] == "file")
     {
-        if (tokens.size() != 7)
+        if (tokens.size() != 4)
         {
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "audioclip sine needs freqHz");
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "audioclip file needs exactly one path");
         }
-        float frequency = 0.0F;
-        if (!parseFloatToken(tokens[6], frequency) || !(frequency > 0.0F) || !std::isfinite(frequency))
+        auto path = joinPath(baseDirectoryUtf8, tokens[3]);
+        if (!path)
         {
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid audioclip sine frequency");
+            return Core::failure(std::move(path.error()));
         }
-        constexpr float kPi = 3.14159265358979323846F;
-        for (Core::u32 frame = 0; frame < frameCount; ++frame)
+        std::pmr::unsynchronized_pool_resource wavMemory;
+        auto bytes = Core::readFile(
+            *path, Core::ReadFileConfig{.maxBytes = 32ULL * 1024ULL * 1024ULL, .memoryResource = &wavMemory});
+        if (!bytes)
         {
-            const float t = static_cast<float>(frame) / static_cast<float>(sampleRate);
-            const float sample = 0.25F * std::sin(2.0F * kPi * frequency * t);
-            for (Core::u32 channel = 0; channel < channels; ++channel)
-            {
-                pcm[static_cast<std::size_t>(frame) * channels + channel] = sample;
-            }
+            return Core::failure(std::move(bytes.error()).withContext("parseAudioClipInline", "readWav"));
         }
+        auto decoded = decodePcm16WavToClipDesc(*bytes, pcm);
+        if (!decoded)
+        {
+            return Core::failure(std::move(decoded.error()));
+        }
+        desc = *decoded;
+        desc.interleavedPcm = pcm;
     }
     else
     {
-        if (tokens.size() != 5U + sampleCount)
+        if (tokens.size() < 5)
         {
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "audioclip sample count mismatch");
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "audioclip needs id sampleRate channels frameCount samples|sine freq");
         }
-        for (std::size_t index = 0; index < sampleCount; ++index)
+        Core::u32 sampleRate = 0;
+        Core::u32 channels = 0;
+        Core::u32 frameCount = 0;
+        if (!parseU32Token(tokens[2], sampleRate) || !parseU32Token(tokens[3], channels) ||
+            !parseU32Token(tokens[4], frameCount))
         {
-            float value = 0.0F;
-            if (!parseFloatToken(tokens[5U + index], value) || !std::isfinite(value))
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid audioclip geometry fields");
+        }
+        if (channels == 0 || channels > AssetFormat::AudioClipWire::MaxChannels || frameCount == 0 ||
+            frameCount > AssetFormat::AudioClipWire::MaxFrameCount ||
+            sampleRate < AssetFormat::AudioClipWire::MinSampleRate ||
+            sampleRate > AssetFormat::AudioClipWire::MaxSampleRate)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "audioclip geometry out of range");
+        }
+
+        const std::size_t sampleCount =
+            static_cast<std::size_t>(frameCount) * static_cast<std::size_t>(channels);
+        pcm.resize(sampleCount, 0.0F);
+
+        if (tokens.size() >= 6 && tokens[5] == "sine")
+        {
+            if (tokens.size() != 7)
             {
-                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid audioclip sample value");
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "audioclip sine needs freqHz");
             }
-            pcm[index] = value;
+            float frequency = 0.0F;
+            if (!parseFloatToken(tokens[6], frequency) || !(frequency > 0.0F) || !std::isfinite(frequency))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid audioclip sine frequency");
+            }
+            constexpr float kPi = 3.14159265358979323846F;
+            for (Core::u32 frame = 0; frame < frameCount; ++frame)
+            {
+                const float t = static_cast<float>(frame) / static_cast<float>(sampleRate);
+                const float sample = 0.25F * std::sin(2.0F * kPi * frequency * t);
+                for (Core::u32 channel = 0; channel < channels; ++channel)
+                {
+                    pcm[static_cast<std::size_t>(frame) * channels + channel] = sample;
+                }
+            }
         }
+        else
+        {
+            if (tokens.size() != 5U + sampleCount)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "audioclip sample count mismatch");
+            }
+            for (std::size_t index = 0; index < sampleCount; ++index)
+            {
+                float value = 0.0F;
+                if (!parseFloatToken(tokens[5U + index], value) || !std::isfinite(value))
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid audioclip sample value");
+                }
+                pcm[index] = value;
+            }
+        }
+
+        desc = AssetFormat::AudioClipPayloadDesc{
+            .channels = static_cast<Core::u16>(channels),
+            .sampleRate = sampleRate,
+            .frameCount = frameCount,
+            .interleavedPcm = pcm,
+        };
     }
 
-    auto payload = AssetFormat::writeAudioClipPayloadBytes(AssetFormat::AudioClipPayloadDesc{
-        .channels = static_cast<Core::u16>(channels),
-        .sampleRate = sampleRate,
-        .frameCount = frameCount,
-        .interleavedPcm = pcm,
-    });
+    auto payload = AssetFormat::writeAudioClipPayloadBytes(desc);
     if (!payload)
     {
         return Core::failure(std::move(payload.error()));
@@ -718,7 +876,7 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         }
         if (tokens[0] == "audioclip")
         {
-            auto asset = parseAudioClipInline(tokens);
+            auto asset = parseAudioClipInline(tokens, baseDirectoryUtf8);
             if (!asset)
             {
                 return Core::failure(std::move(asset.error()));

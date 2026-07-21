@@ -617,7 +617,10 @@ M11-A18：`Asset::parseAudioClipFromCooked`；`CatalogPackageValidation` 在 `ve
 
 M11-A19：catalog recipe `audioclip <id> <rate> <ch> <frames> <samples|sine freq>`；
 `sample_2d.recipe` 增加 idBytes(4) AudioClip；`tina_sample_2d` 通过 `AssetLease` 保活并播放。
-OS 默认设备与完整 cooker 源文件导入后置。
+
+M11-A20：recipe `audioclip <id> file <path>` 读取磁盘 WAV（RIFF/PCM 16-bit only）并 cook 为
+float32 `AudioClip` payload。Asset 模块不链接 miniaudio；压缩格式需离线/adapter 解码后再 cook。
+OS 默认扬声器产品门禁后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

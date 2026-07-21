@@ -99,6 +99,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A17 AudioClip cooked payload | Debug C++23 | `tina_asset_format_tests` | write/parse round-trip、stereo、非法 geometry、cooked asset + content hash |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A18 AudioClip cooked playback | Debug C++23 | `tina_asset_tests` AudioClipCooked* | parseAudioClipFromCooked + playOneShot + mix；wrong kind 拒绝 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A19 recipe AudioClip + sample lease | Debug C++23 | CatalogCookTests + product-2d sample | recipe `audioclip sine`；JSON `audioFromCatalogLease`/`audioClipFrameCount` |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A20 recipe WAV file cook | Debug C++23 | CatalogCookTests.AudioClipFileWav* | `audioclip … file click.wav` → cooked 8kHz/8 frames PCM |
 
 
 
