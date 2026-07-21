@@ -570,6 +570,11 @@ revision bump 语义不变。300 帧 pan+稀疏 edit 压力测试要求 `rebuild
 `chunkDirtyRebuilds`/`chunkDirtyCacheHits`/`lastChunkDirtyRebuilds`。不实现 GPU VB/IB cache；
 不接入 Audio。
 
+M11-B2：`tina_sample_2d` 产品 Camera follow + 插值。角色步进后更新 camera previous/current
+（map clamp）；extract 用 `FrameTiming.interpolation` 插值中心再走 `resolveCamera2DProjection`；
+顺序符合 game-2d：interpolation → view → pixel snap。不扩公共 Camera follow API；不碰 Audio/Runtime
+factory 接线。
+
 M11-A7：后端无关 `Tina::Audio` 生命周期基础。`AudioEngine::Create` 固定 voice/command/completion
 容量并始终进入 Disabled（无设备）；generation `AudioVoiceId` 证明 slot 复用/stale；owner-thread
 API 与幂等 shutdown。独立 `tina_audio` + `tina_audio_tests`（含 header isolation）。

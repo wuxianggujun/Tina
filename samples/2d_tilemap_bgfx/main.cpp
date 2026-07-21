@@ -45,9 +45,11 @@
 #include "render/bgfx/BgfxRenderDevice.hpp"
 #include "TileSelection.hpp"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -132,6 +134,15 @@ struct LifecycleCounters final {
     u64 lastChunkDirtyRebuilds = 0;
     u64 lastChunkDirtyCacheHits = 0;
     u64 lastChunkDirtyVisible = 0;
+    // M11-B2: Camera2D follow + presentation interpolation evidence.
+    u64 cameraFollowUpdates = 0;
+    u64 cameraInterpolatedExtracts = 0;
+    float lastCameraCenterX = 0.0f;
+    float lastCameraCenterY = 0.0f;
+    float lastCameraInterpolation = 0.0f;
+    float maxCameraCenterX = 0.0f;
+    float minCameraCenterX = 0.0f;
+    bool cameraFollowPrimed = false;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     u64 physicsSteps = 0;
     u64 physicsStaticBodies = 0;
@@ -145,7 +156,45 @@ inline constexpr u32 ExpectedUIPanelCount = 2;
 inline constexpr u32 ExpectedUITextLabelCount = 2;
 inline constexpr u32 ExpectedUIButtonCount = 1;
 // Authored FixedWorldHeight for product sample; world width/ppm come from surface.
-inline constexpr float ProductCameraHeightMeters = 6.0f;
+// Keep height small enough that half-width fits the 8m-wide sample map so follow
+// can pan (height 6m → halfW≈5.3m > map half → clamp freezes at center).
+inline constexpr float ProductCameraHeightMeters = 4.0f;
+
+// Clamp camera center so the orthographic view stays over the map (map-local meters).
+// Uses authored height + surface aspect for half-extents; does not write Simulation.
+[[nodiscard]] inline void clampCameraCenterToMap(const Tina::Asset::TileMapInstance& map, float worldHeightMeters,
+                                                 float surfaceAspect, float& centerX, float& centerY) noexcept
+{
+    if (!map || worldHeightMeters <= 0.0f || !std::isfinite(worldHeightMeters) || !std::isfinite(surfaceAspect) ||
+        surfaceAspect <= 0.0f)
+    {
+        return;
+    }
+    const float mapW = static_cast<float>(map.widthCells()) * map.cellSizeMeters();
+    const float mapH = static_cast<float>(map.heightCells()) * map.cellSizeMeters();
+    const float halfH = worldHeightMeters * 0.5f;
+    const float halfW = halfH * surfaceAspect;
+    const float minX = halfW;
+    const float maxX = mapW - halfW;
+    const float minY = halfH;
+    const float maxY = mapH - halfH;
+    if (minX <= maxX)
+    {
+        centerX = (std::min)(maxX, (std::max)(minX, centerX));
+    }
+    else
+    {
+        centerX = mapW * 0.5f;
+    }
+    if (minY <= maxY)
+    {
+        centerY = (std::min)(maxY, (std::max)(minY, centerY));
+    }
+    else
+    {
+        centerY = mapH * 0.5f;
+    }
+}
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
 inline constexpr u32 ExpectedPhysicsStaticBodies = ExpectedNonEmptyTiles;
 inline constexpr u32 ExpectedSpritesWithPhysics = ExpectedNonEmptyTiles + 2; // tiles + character + crate
@@ -344,6 +393,11 @@ struct TileMapResources final {
     std::optional<Tina::Asset::TileChunkDirtyCache> chunkDirtyCache{};
     std::pmr::vector<Tina::Asset::TileChunkView> chunkDirtyRebuilt{&memory};
     std::pmr::vector<Tina::Asset::TileMapSolidHit> solidScratch{&memory};
+    // Presentation camera: previous/current sim targets; extract lerps with FrameTiming.interpolation.
+    float cameraPreviousX = 4.0f;
+    float cameraPreviousY = 2.0f;
+    float cameraCurrentX = 4.0f;
+    float cameraCurrentY = 2.0f;
     std::filesystem::path catalogRoot{};
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     std::optional<Tina::Physics2D::PhysicsWorld2D> physicsWorld{};
@@ -831,6 +885,36 @@ class TileMapBgfxState final : public Tina::IGameState {
             {
                 counters_->maxControllerX = st.positionX;
             }
+
+            // M11-B2: direct follow target after character step. previous = last
+            // current; extract lerps with FrameTiming.interpolation (snap later).
+            resources_->cameraPreviousX = resources_->cameraCurrentX;
+            resources_->cameraPreviousY = resources_->cameraCurrentY;
+            float followX = st.positionX;
+            float followY = st.positionY;
+            const float aspect =
+                (counters_->surfacePixelHeight != 0)
+                    ? static_cast<float>(static_cast<double>(counters_->surfacePixelWidth) /
+                                         static_cast<double>(counters_->surfacePixelHeight))
+                    : (10.0f / 6.0f);
+            if (resources_->map)
+            {
+                clampCameraCenterToMap(*resources_->map, ProductCameraHeightMeters, aspect, followX, followY);
+            }
+            resources_->cameraCurrentX = followX;
+            resources_->cameraCurrentY = followY;
+            ++counters_->cameraFollowUpdates;
+            if (!counters_->cameraFollowPrimed)
+            {
+                counters_->minCameraCenterX = followX;
+                counters_->maxCameraCenterX = followX;
+                counters_->cameraFollowPrimed = true;
+            }
+            else
+            {
+                counters_->minCameraCenterX = (std::min)(counters_->minCameraCenterX, followX);
+                counters_->maxCameraCenterX = (std::max)(counters_->maxCameraCenterX, followX);
+            }
         }
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
         if (resources_->physicsWorld)
@@ -885,10 +969,18 @@ class TileMapBgfxState final : public Tina::IGameState {
             ++counters_->renderExtractions;
             return Tina::Core::success();
         }
+        // previous/current interpolation -> camera view -> RenderScene pixel snap.
+        const double alpha = context.frameTiming().interpolation;
+        const float alphaF =
+            static_cast<float>(std::clamp(alpha, 0.0, 1.0));
+        const float centerX =
+            resources_->cameraPreviousX + (resources_->cameraCurrentX - resources_->cameraPreviousX) * alphaF;
+        const float centerY =
+            resources_->cameraPreviousY + (resources_->cameraCurrentY - resources_->cameraPreviousY) * alphaF;
         const Tina::Render::Camera2DProjectionQuery projectionQuery{
             .stableCameraKey = 1,
-            .centerX = 4.0f,
-            .centerY = 2.0f,
+            .centerX = centerX,
+            .centerY = centerY,
             .projection = Tina::Render::FixedWorldHeight2D{.heightMeters = ProductCameraHeightMeters},
             .pixelSnap = Tina::Render::RenderPixelSnapPolicy::CameraTranslation,
             .surfaceViewport =
@@ -906,6 +998,13 @@ class TileMapBgfxState final : public Tina::IGameState {
         counters_->lastCameraWorldWidth = camera->worldWidth;
         counters_->lastCameraWorldHeight = camera->worldHeight;
         counters_->lastCameraActualPpm = camera->actualPixelsPerMeter;
+        counters_->lastCameraCenterX = camera->centerX;
+        counters_->lastCameraCenterY = camera->centerY;
+        counters_->lastCameraInterpolation = alphaF;
+        if (alphaF > 0.0f && alphaF < 1.0f)
+        {
+            ++counters_->cameraInterpolatedExtracts;
+        }
         if (auto status = writer.setCamera2D(*camera); !status)
         {
             return status;
@@ -1303,10 +1402,16 @@ int main(int argc, char** argv)
     const bool selectionStateValid = selectionCountersValid && selectionLatchValid;
     const u64 expectedHighlightSprites = lastSelection != nullptr ? 1U : 0U;
     const u64 expectedTotalSprites = ExpectedSpritesWithPhysics + expectedHighlightSprites;
+    // Seed path: selection from frame 0 → highlight every extract. Accidental OS
+    // clicks during interactive/smoke only require last-frame highlight match.
     const bool highlightValid =
         counters.lastHighlightSprites == expectedHighlightSprites &&
-        ((expectedHighlightSprites == 0 && counters.selectionHighlightSprites == 0) ||
-         (expectedHighlightSprites == 1 && counters.selectionHighlightSprites == counters.renderExtractions));
+        ((expectedHighlightSprites == 0 &&
+          (options->seedTileSelection ? counters.selectionHighlightSprites == 0
+                                      : counters.selectionHighlightSprites <= counters.renderExtractions)) ||
+         (expectedHighlightSprites == 1 && counters.selectionHighlightSprites >= 1 &&
+          (!options->seedTileSelection ||
+           counters.selectionHighlightSprites == counters.renderExtractions)));
     const bool seededSelectionValid =
         !options->seedTileSelection ||
         (counters.seedTileSelectionApplied && counters.tileSelection.selectionHits >= 1 && lastSelection != nullptr &&
@@ -1316,6 +1421,11 @@ int main(int argc, char** argv)
         counters.cameraProjectionResolves == counters.renderExtractions && counters.lastCameraWorldHeight > 0.0f &&
         counters.lastCameraWorldWidth > 0.0f && counters.lastCameraActualPpm > 0.0f &&
         counters.surfacePixelWidth > 0 && counters.surfacePixelHeight > 0;
+    // Follow the walking character: camera X must pan (clamp allows motion on 8m map).
+    const bool cameraFollowValid =
+        counters.cameraFollowUpdates > 0 && counters.cameraFollowPrimed &&
+        counters.maxCameraCenterX > counters.minCameraCenterX + 0.25f &&
+        counters.lastCameraCenterX > 0.0f && counters.lastCameraCenterY > 0.0f;
     // Static sample map: first extract rebuilds all visible chunks; subsequent
     // frames are pure cache hits (no setTile). rebuilds << visibleObservations.
     const bool chunkDirtyValid =
@@ -1325,12 +1435,13 @@ int main(int argc, char** argv)
         counters.lastChunkDirtyRebuilds == 0 && counters.lastChunkDirtyCacheHits > 0;
 
     bool ok = selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
-              chunkDirtyValid && counters.catalogFromRecipeFile && counters.catalogRecipeAssets == 3 &&
-              counters.texturesUploaded == 1 && counters.lastTileSprites == ExpectedNonEmptyTiles &&
-              counters.lastTotalSprites == expectedTotalSprites && counters.controllerGroundedFrames > 0 &&
-              counters.controllerWalkFrames > 0 && counters.controllerHitRightFrames > 0 &&
-              counters.maxControllerX > 1.5f && counters.renderExtractions == counters.frameUpdates &&
-              counters.stateExits == 1 && counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
+              cameraFollowValid && chunkDirtyValid && counters.catalogFromRecipeFile &&
+              counters.catalogRecipeAssets == 3 && counters.texturesUploaded == 1 &&
+              counters.lastTileSprites == ExpectedNonEmptyTiles && counters.lastTotalSprites == expectedTotalSprites &&
+              counters.controllerGroundedFrames > 0 && counters.controllerWalkFrames > 0 &&
+              counters.controllerHitRightFrames > 0 && counters.maxControllerX > 1.5f &&
+              counters.renderExtractions == counters.frameUpdates && counters.stateExits == 1 &&
+              counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
               counters.uiPanelsCreated == ExpectedUIPanelCount &&
               counters.uiTextLabelsCreated == ExpectedUITextLabelCount &&
               counters.uiButtonsCreated == ExpectedUIButtonCount && counters.uiButtonActionsWired == 1 &&
@@ -1362,6 +1473,18 @@ int main(int argc, char** argv)
                   << ",\"selectionHighlightSprites\":" << counters.selectionHighlightSprites
                   << ",\"lastHighlightSprites\":" << counters.lastHighlightSprites
                   << ",\"seedTileSelection\":" << (options->seedTileSelection ? "true" : "false")
+                  << ",\"cameraFollowUpdates\":" << counters.cameraFollowUpdates
+                  << ",\"minCameraCenterX\":" << counters.minCameraCenterX
+                  << ",\"maxCameraCenterX\":" << counters.maxCameraCenterX
+                  << ",\"lastCameraCenterX\":" << counters.lastCameraCenterX
+                  << ",\"lastCameraCenterY\":" << counters.lastCameraCenterY
+                  << ",\"chunkDirtyFrames\":" << counters.chunkDirtyFramesSynced
+                  << ",\"chunkDirtyRebuilds\":" << counters.chunkDirtyRebuilds
+                  << ",\"chunkDirtyHits\":" << counters.chunkDirtyCacheHits
+                  << ",\"lastChunkDirtyRebuilds\":" << counters.lastChunkDirtyRebuilds
+                  << ",\"lastChunkDirtyHits\":" << counters.lastChunkDirtyCacheHits
+                  << ",\"cameraProjectionResolves\":" << counters.cameraProjectionResolves
+                  << ",\"renderExtractions\":" << counters.renderExtractions
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
                   << ",\"physicsSteps\":" << counters.physicsSteps
                   << ",\"physicsStatics\":" << counters.physicsStaticBodies
@@ -1424,6 +1547,13 @@ int main(int argc, char** argv)
               << ",\"lastCameraWorldHeight\":" << counters.lastCameraWorldHeight
               << ",\"lastCameraActualPpm\":" << counters.lastCameraActualPpm
               << ",\"cameraProjection\":\"FixedWorldHeight2D\""
+              << ",\"cameraFollowUpdates\":" << counters.cameraFollowUpdates
+              << ",\"cameraInterpolatedExtracts\":" << counters.cameraInterpolatedExtracts
+              << ",\"lastCameraCenterX\":" << counters.lastCameraCenterX
+              << ",\"lastCameraCenterY\":" << counters.lastCameraCenterY
+              << ",\"lastCameraInterpolation\":" << counters.lastCameraInterpolation
+              << ",\"minCameraCenterX\":" << counters.minCameraCenterX
+              << ",\"maxCameraCenterX\":" << counters.maxCameraCenterX
               << ",\"chunkDirtyFramesSynced\":" << counters.chunkDirtyFramesSynced
               << ",\"chunkDirtyVisibleObservations\":" << counters.chunkDirtyVisibleObservations
               << ",\"chunkDirtyRebuilds\":" << counters.chunkDirtyRebuilds
