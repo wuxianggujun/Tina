@@ -131,5 +131,128 @@ TEST(AudioEngineTest, CountingResourceBytesReturnToZero)
     EXPECT_EQ(statistics.allocationCount, statistics.deallocationCount);
 }
 
+TEST(AudioEngineTest, PlayStopProduceCompletionsOnPump)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{
+        .voiceCapacity = 2,
+        .commandCapacity = 8,
+        .completionCapacity = 8,
+    });
+    ASSERT_TRUE(engine.has_value()) << (engine ? "" : engine.error().message);
+    auto voice = engine->createVoice();
+    ASSERT_TRUE(voice.has_value()) << (voice ? "" : voice.error().message);
+
+    ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
+    auto playingBefore = engine->isVoicePlaying(*voice);
+    ASSERT_TRUE(playingBefore.has_value());
+    EXPECT_FALSE(*playingBefore);
+
+    AudioCompletionEvent events[4]{};
+    auto pumped = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(pumped.has_value()) << (pumped ? "" : pumped.error().message);
+    ASSERT_EQ(*pumped, 1U);
+    EXPECT_EQ(events[0].kind, AudioCompletionKind::Started);
+    EXPECT_EQ(events[0].voice, *voice);
+    EXPECT_GE(events[0].commandSequence, 1U);
+
+    auto playingAfter = engine->isVoicePlaying(*voice);
+    ASSERT_TRUE(playingAfter.has_value());
+    EXPECT_TRUE(*playingAfter);
+
+    ASSERT_TRUE(engine->enqueueStop(*voice).has_value());
+    auto stopPump = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(stopPump.has_value()) << (stopPump ? "" : stopPump.error().message);
+    ASSERT_EQ(*stopPump, 1U);
+    EXPECT_EQ(events[0].kind, AudioCompletionKind::Stopped);
+
+    auto stats = engine->stats();
+    ASSERT_TRUE(stats.has_value());
+    EXPECT_EQ(stats->completedStarted, 1U);
+    EXPECT_EQ(stats->completedStopped, 1U);
+    EXPECT_EQ(stats->pendingCommands, 0U);
+    EXPECT_EQ(stats->pendingCompletions, 0U);
+}
+
+TEST(AudioEngineTest, StaleVoiceEnqueueFailsAndAppliedCommandRejects)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{
+        .voiceCapacity = 2,
+        .commandCapacity = 4,
+        .completionCapacity = 4,
+    });
+    ASSERT_TRUE(engine.has_value()) << (engine ? "" : engine.error().message);
+    auto voice = engine->createVoice();
+    ASSERT_TRUE(voice.has_value()) << (voice ? "" : voice.error().message);
+
+    expectFailureCode(engine->enqueuePlay(AudioVoiceId{}), AudioErrorCode::InvalidVoice);
+
+    ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
+    ASSERT_TRUE(engine->destroyVoice(*voice).has_value());
+    // Command still pending against destroyed generation -> RejectedStale on pump.
+    AudioCompletionEvent events[2]{};
+    auto pumped = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(pumped.has_value()) << (pumped ? "" : pumped.error().message);
+    ASSERT_EQ(*pumped, 1U);
+    EXPECT_EQ(events[0].kind, AudioCompletionKind::RejectedStale);
+    EXPECT_EQ(events[0].voice, *voice);
+
+    expectFailureCode(engine->enqueueStop(*voice), AudioErrorCode::StaleVoice);
+}
+
+TEST(AudioEngineTest, FullCommandQueueReturnsCapacityExceeded)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{
+        .voiceCapacity = 1,
+        .commandCapacity = 2,
+        .completionCapacity = 8,
+    });
+    ASSERT_TRUE(engine.has_value()) << (engine ? "" : engine.error().message);
+    auto voice = engine->createVoice();
+    ASSERT_TRUE(voice.has_value()) << (voice ? "" : voice.error().message);
+
+    ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
+    ASSERT_TRUE(engine->enqueueStop(*voice).has_value());
+    expectFailureCode(engine->enqueuePlay(*voice), AudioErrorCode::CapacityExceeded);
+
+    auto stats = engine->stats();
+    ASSERT_TRUE(stats.has_value());
+    EXPECT_EQ(stats->pendingCommands, 2U);
+    EXPECT_EQ(stats->rejectedCommands, 1U);
+
+    auto drained = engine->pumpCompletions(8);
+    ASSERT_TRUE(drained.has_value()) << (drained ? "" : drained.error().message);
+    EXPECT_EQ(*drained, 2U);
+}
+
+TEST(AudioEngineTest, BusVolumeMuteAndEffectiveGain)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 1});
+    ASSERT_TRUE(engine.has_value()) << (engine ? "" : engine.error().message);
+
+    auto defaultMaster = engine->busState(AudioBusId::Master);
+    ASSERT_TRUE(defaultMaster.has_value());
+    EXPECT_FLOAT_EQ(defaultMaster->volume, 1.0F);
+    EXPECT_FALSE(defaultMaster->muted);
+
+    ASSERT_TRUE(engine->setBusVolume(AudioBusId::Master, 0.5F).has_value());
+    ASSERT_TRUE(engine->setBusVolume(AudioBusId::Sfx, 0.8F).has_value());
+    auto sfxGain = engine->effectiveBusGain(AudioBusId::Sfx);
+    ASSERT_TRUE(sfxGain.has_value());
+    EXPECT_FLOAT_EQ(*sfxGain, 0.4F);
+
+    ASSERT_TRUE(engine->setBusMuted(AudioBusId::Master, true).has_value());
+    auto mutedGain = engine->effectiveBusGain(AudioBusId::Sfx);
+    ASSERT_TRUE(mutedGain.has_value());
+    EXPECT_FLOAT_EQ(*mutedGain, 0.0F);
+
+    auto sfxState = engine->busState(AudioBusId::Sfx);
+    ASSERT_TRUE(sfxState.has_value());
+    EXPECT_FLOAT_EQ(sfxState->volume, 0.8F);
+    EXPECT_FALSE(sfxState->muted);
+
+    expectFailureCode(engine->setBusVolume(AudioBusId::Music, -0.1F), AudioErrorCode::InvalidConfiguration);
+    expectFailureCode(engine->setBusVolume(AudioBusId::Music, 1.5F), AudioErrorCode::InvalidConfiguration);
+}
+
 } // namespace
 } // namespace Tina::Audio

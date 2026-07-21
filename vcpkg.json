@@ -16,6 +16,12 @@
         "box2d"
       ]
     },
+    "audio-miniaudio": {
+      "description": "Build the private Tina vNext miniaudio audio adapter.",
+      "dependencies": [
+        "miniaudio"
+      ]
+    },
     "platform-glfw": {
       "description": "Build the private Tina vNext GLFW platform adapter.",
       "dependencies": [

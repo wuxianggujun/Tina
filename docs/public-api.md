@@ -964,6 +964,13 @@ M10-A40 另提供 `Camera2DPick.hpp` 的 `pickWorldFromLogicalPointer()`；锁�
 pointer 坐标投影到 Y-up 2D world；viewport 外返回 `hit=false`，非法相机、extent 或坐标返回 Render
 domain 的结构化错误。
 
+M11-B0 另提供 `Camera2DProjection.hpp`：`resolveCamera2DProjection` /
+`makeResolvedCamera2DInput` 将 authored `FixedWorldHeight2D` 或 `PixelPerfect2D` 与当前
+framebuffer viewport（含 normalized viewport 缩放）解析为 `worldWidth`/`worldHeight`/
+`actualPixelsPerMeter`。PixelPerfect 强制 `CameraAndSprites`；0×0 surface 为 Suspended 结构化
+失败，不是静默 clamp。pixel snap 量化仍由 `RenderSceneBuilder` commit 路径执行；本 helper 不碰
+miniaudio / Audio。
+
 ## M10-A0 AssetFormat 公共边界
 
 `Tina::Core::AssetId` 与 `Tina::Core::ContentHash` 都是16字节强类型值，但用途不同：前者是由显式
@@ -1149,6 +1156,7 @@ public:
 | `tina_sample_2d` | M10-A32–A38 已实现 | sample (GLFW+bgfx[+Physics2D][+FreeType]) | 正式 2D 产品 executable；磁盘 recipe Catalog + walk demo + UI/Text/Button + optional crate | sample JSON `sample=tina_sample_2d` |
 | `tina_sample_2d_tilemap_bgfx` | ALIAS | CMake alias | 兼容旧 target 名 | same binary |
 | `pickWorldFromLogicalPointer` / `Render::WorldPointerSample` | M10-A40 已实现 | Render module public | logical pointer → 2D world sample；包含 worldX/Y、camera/surface/input sequence 与 hit | Render domain invalid input |
+| `resolveCamera2DProjection` / `makeResolvedCamera2DInput` | M11-B0 已实现 | Render module public | FixedWorldHeight/PixelPerfect + framebuffer viewport → world size + actualPPM | InvalidRenderSceneInput（含 0×0 Suspended） |
 | `DigitalActionTransition::worldPointerSample` | M10-A42 已实现 | Game SDK Simulation Action payload | 未被 UI consume/claim 的 primary pointer edge 的 last-presented Camera2D 锁存 sample；0 fixed-step 不重算 | Runtime `LifecycleInvariantViolation` / Render pick error |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |

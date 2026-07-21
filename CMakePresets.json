@@ -65,6 +65,16 @@
       }
     },
     {
+      "name": "windows-msvc-vnext-audio-miniaudio",
+      "displayName": "Windows x64 vNext Audio miniaudio adapter (MSVC 2026 + C++23)",
+      "inherits": "windows-msvc-vnext",
+      "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-audio-miniaudio",
+      "cacheVariables": {
+        "TINA_BUILD_AUDIO_MINIAUDIO": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tests;audio-miniaudio"
+      }
+    },
+    {
       "name": "windows-msvc-vnext-platform",
       "displayName": "Windows x64 vNext Platform (MSVC 2026 + GLFW + C++23)",
       "inherits": "windows-msvc",
@@ -299,6 +309,18 @@
     {
       "name": "windows-vnext-physics2d-release",
       "configurePreset": "windows-msvc-vnext-physics2d",
+      "configuration": "Release",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vnext-audio-miniaudio-debug",
+      "configurePreset": "windows-msvc-vnext-audio-miniaudio",
+      "configuration": "Debug",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vnext-audio-miniaudio-release",
+      "configurePreset": "windows-msvc-vnext-audio-miniaudio",
       "configuration": "Release",
       "jobs": 2
     },

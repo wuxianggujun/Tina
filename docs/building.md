@@ -98,6 +98,11 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 # Controlled selection gate (M10-A44; sample-private seed, not OS/GLFW click):
 # out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0 --seed-tile-selection=1,1
 # Recipe source: samples/2d_tilemap_bgfx/catalog/sample_2d.recipe
+# Optional vNext miniaudio adapter (null backend hermetic tests; M11-A9):
+# cmake --preset windows-msvc-vnext-audio-miniaudio
+# cmake --build --preset windows-vnext-audio-miniaudio-debug --target tina_audio_tests tina_audio_miniaudio_tests
+# out\build\windows-msvc-vnext-audio-miniaudio\bin\Debug\tina_audio_tests.exe
+# out\build\windows-msvc-vnext-audio-miniaudio\bin\Debug\tina_audio_miniaudio_tests.exe
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_tilemap.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_3d_extraction.exe --frames=300

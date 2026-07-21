@@ -60,6 +60,7 @@ option(TINA_BUILD_PLATFORM_GLFW "Build the private vNext GLFW platform backend" 
 option(TINA_BUILD_RENDER_BGFX "Build the private vNext bgfx render backend" OFF)
 option(TINA_BUILD_UI_FREETYPE "Build the private vNext FreeType UI text adapter" OFF)
 option(TINA_BUILD_PHYSICS2D "Build the optional vNext Box2D physics module" OFF)
+option(TINA_BUILD_AUDIO_MINIAUDIO "Build the private vNext miniaudio audio adapter" OFF)
 option(TINA_BUILD_BENCHMARKS "Build Tina benchmark executables" OFF)
 option(TINA_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
@@ -86,6 +87,14 @@ if (TINA_BUILD_PHYSICS2D)
         NOT "physics2d" IN_LIST VCPKG_MANIFEST_FEATURES)
         message(FATAL_ERROR
             "TINA_BUILD_PHYSICS2D requires the vcpkg manifest feature 'physics2d'.")
+    endif ()
+endif ()
+
+if (TINA_BUILD_AUDIO_MINIAUDIO AND NOT TINA_BUILD_LEGACY)
+    if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
+        NOT "audio-miniaudio" IN_LIST VCPKG_MANIFEST_FEATURES)
+        message(FATAL_ERROR
+            "TINA_BUILD_AUDIO_MINIAUDIO requires the vcpkg manifest feature 'audio-miniaudio'.")
     endif ()
 endif ()
 
@@ -211,6 +220,9 @@ add_subdirectory(src/vnext/asset_format "${TINA_VNEXT_BINARY_DIR}/asset_format")
 add_subdirectory(src/vnext/asset "${TINA_VNEXT_BINARY_DIR}/asset")
 add_subdirectory(src/vnext/ui "${TINA_VNEXT_BINARY_DIR}/ui")
 add_subdirectory(src/vnext/audio "${TINA_VNEXT_BINARY_DIR}/audio")
+if (TINA_BUILD_AUDIO_MINIAUDIO)
+    add_subdirectory(src/vnext/audio/miniaudio "${TINA_VNEXT_BINARY_DIR}/audio_miniaudio")
+endif ()
 
 add_subdirectory(src/runtime "${TINA_VNEXT_BINARY_DIR}/runtime")
 if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)

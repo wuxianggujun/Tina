@@ -278,7 +278,9 @@ static 交互；JSON `sample=tina_sample_2d` + `catalogFromRecipeFile=true`。
 Legacy 删除前仍须补齐/加强（**非** A39–A44 阻断）：
 
 - 最终生产 Cooker/Catalog/Manifest 全量（当前磁盘 fixture recipe + temp catalog）；
-- Orthographic Camera resize、interpolation 和 pixel snap 产品打磨；
+- Orthographic Camera 插值与 follow 打磨；M11-B0 已落地 surface 驱动投影 resolve
+  （`resolveCamera2DProjection` / FixedWorldHeight + PixelPerfect + actualPPM；样例接 metrics）；
+  RenderScene 端 pixel snap 量化仍由 builder 在 commit 时应用；
 - 多 layer Sprite、透明混合、Tile chunk culling 与 dirty rebuild 压力门禁；
 - 稳定截图回归；输入 / 日志 / 返回码分别留证据（pointer 路径证据见上表）。
 

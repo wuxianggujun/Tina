@@ -663,7 +663,7 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
 | **Deferred** | 完整外部 cooker CLI / 全量 `tina_assetc` | 当前 recipe 子集；可另开切片 |
 | **Deferred** | cgltf v1.15 → StaticMesh/Material/Prefab + `tina_sample_3d` | 固定版本规划；不阻塞 2D 收口 |
 | **Deferred** | 扩大 Game SDK world-pick 公共 API | sample-private helper 已够 |
-| **Deferred（可进 M11）** | Camera resize/pixel snap、chunk dirty 压力、截图回归 | 非 pointer 阻断 |
+| **Deferred（可进 M11）** | chunk dirty 压力、截图回归 | Camera 投影 resolve 见 M11-B0；非 pointer 阻断 |
 | **Deferred（M12）** | 删 Legacy | 需 2D/UI/3D/Asset/Audio 等价验收 |
 
 默认 smoke：`tina_sample_2d --frames=300` → hits=0 / 无高亮合法。
@@ -679,7 +679,20 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
 
 - M11-A7 已完成：后端无关 `Tina::Audio` / `AudioEngine` 生命周期基础（Disabled、固定 voice
   capacity、generation `AudioVoiceId`、owner-thread 校验、幂等 shutdown、header isolation）；
-  独立 `tina_audio_tests`；**无 miniaudio 设备、无 command/completion 队列、未接入 EngineHost**；
+  独立 `tina_audio_tests`；**无 miniaudio 设备、未接入 EngineHost**；
+- M11-A8 已完成：固定容量 command/completion 环、`enqueuePlay`/`enqueueStop`、
+  `pumpCompletions` 先应用命令再排空完成事件（Disabled 路径立即 Started/Stopped/RejectedStale，
+  无 PCM）；满队列 `CapacityExceeded`、stale voice 拒绝；stats 含 pending/rejected/completed 计数；
+  Master/Music/SFX bus volume+mute 与 effective gain（设置 UI 状态面，仍无设备混音）；
+- M11-A9 已完成：可选 `Tina::AudioMiniaudio` / `MiniaudioDevice`（vcpkg feature `audio-miniaudio`、
+  preset `windows-msvc-vnext-audio-miniaudio`）；`ma_backend_null` hermetic 设备 start/stop/shutdown、
+  实时 callback 仅写静音 + atomic 计数；`createMiniaudioAudioBundle` 组合 AudioEngine+device；
+  独立 `tina_audio_miniaudio_tests`。真实 OS 设备、混音读 voice、EngineHost 接线仍后置；
+- M11-B0 已完成：`Tina::Render` `Camera2DProjection` 纯函数（`FixedWorldHeight2D` /
+  `PixelPerfect2D` + framebuffer viewport → worldWidth/Height + `actualPixelsPerMeter`；
+  PixelPerfect 强制 `CameraAndSprites`；0×0 surface 结构化失败）。`tina_render_scene_tests` 8 项；
+  `tina_sample_2d` 订阅 metrics + FixedWorldHeight 每帧 resolve，JSON 输出 surface/ppm/world；
+  **与 Audio 切片并行、路径互不重叠**；
 - M11-A0 已完成：独立 `tina_physics2d` 生命周期（World/owner thread、generation Body/Shape、原子 Box body、
   固定 step、pose snapshot、shutdown）与 Windows Debug/Release `tina_physics2d_tests` 门禁；
 - M11-A1 已完成：固定容量 contact begin/end/hit 复制、destroy tombstone、通道 overflow 与
@@ -700,8 +713,8 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   不默认开 M10-A45；只有 bench p99 超预算才接入 Box2D worker callbacks；
 - 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
-- 在 M10 已落地的 `tina_sample_2d` 主线上继续 2D 打磨：chunk dirty rebuild 压力、Camera resize/
-  pixel snap、稳定截图回归；Audio 与更完整 UI 控件见本里程碑其它条；
+- 在 M10 已落地的 `tina_sample_2d` 主线上继续 2D 打磨：chunk dirty rebuild 压力、Camera follow/
+  插值、稳定截图回归（投影 resolve 见 M11-B0）；Audio 与更完整 UI 控件见本里程碑其它条；
 - `tina_audio_miniaudio` 作为唯一真实 backend，通过 generation voice handle、命令队列和
   主线程 completion 保证关闭安全；
 - 覆盖 callback 0分配/0阻塞、command/completion 满容量、设备 Disabled、Music underrun、

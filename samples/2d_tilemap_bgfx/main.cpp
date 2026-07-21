@@ -18,6 +18,7 @@
 #include <tina/core/id/AssetId.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/glfw/GlfwPlatformFactory.hpp>
+#include <tina/render/Camera2DProjection.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/platform/Input.hpp>
@@ -26,6 +27,7 @@
 #include <tina/runtime/GameState.hpp>
 #include <tina/runtime/InputActionMap.hpp>
 #include <tina/runtime/InputActions.hpp>
+#include <tina/runtime/PlatformEvents.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
@@ -113,6 +115,14 @@ struct LifecycleCounters final {
     u64 catalogRecipeAssets = 0;
     bool catalogFromRecipeFile = false;
     bool seedTileSelectionApplied = false;
+    // M11-B0: surface-driven Camera2D projection (FixedWorldHeight).
+    u32 surfacePixelWidth = 960;
+    u32 surfacePixelHeight = 540;
+    u64 windowMetricsEvents = 0;
+    u64 cameraProjectionResolves = 0;
+    float lastCameraWorldWidth = 0.0f;
+    float lastCameraWorldHeight = 0.0f;
+    float lastCameraActualPpm = 0.0f;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     u64 physicsSteps = 0;
     u64 physicsStaticBodies = 0;
@@ -125,6 +135,8 @@ struct LifecycleCounters final {
 inline constexpr u32 ExpectedUIPanelCount = 2;
 inline constexpr u32 ExpectedUITextLabelCount = 2;
 inline constexpr u32 ExpectedUIButtonCount = 1;
+// Authored FixedWorldHeight for product sample; world width/ppm come from surface.
+inline constexpr float ProductCameraHeightMeters = 6.0f;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
 inline constexpr u32 ExpectedPhysicsStaticBodies = ExpectedNonEmptyTiles;
 inline constexpr u32 ExpectedSpritesWithPhysics = ExpectedNonEmptyTiles + 2; // tiles + character + crate
@@ -846,26 +858,44 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
 
         auto& writer = context.renderSceneWriter();
-        const Tina::Render::RenderCamera2DInput camera{
+        // Suspended surface (0×0): skip world extract; not a Camera config error.
+        if (counters_->surfacePixelWidth == 0 || counters_->surfacePixelHeight == 0)
+        {
+            ++counters_->renderExtractions;
+            return Tina::Core::success();
+        }
+        const Tina::Render::Camera2DProjectionQuery projectionQuery{
             .stableCameraKey = 1,
             .centerX = 4.0f,
             .centerY = 2.0f,
-            .worldWidth = 10.0f,
-            .worldHeight = 6.0f,
-            .actualPixelsPerMeter = 64.0f,
+            .projection = Tina::Render::FixedWorldHeight2D{.heightMeters = ProductCameraHeightMeters},
             .pixelSnap = Tina::Render::RenderPixelSnapPolicy::CameraTranslation,
+            .surfaceViewport =
+                Tina::Render::Camera2DSurfaceViewport{
+                    .pixelWidth = counters_->surfacePixelWidth,
+                    .pixelHeight = counters_->surfacePixelHeight,
+                },
         };
-        if (auto status = writer.setCamera2D(camera); !status)
+        auto camera = Tina::Render::makeResolvedCamera2DInput(projectionQuery);
+        if (!camera)
+        {
+            return Tina::Core::failure(std::move(camera.error()));
+        }
+        ++counters_->cameraProjectionResolves;
+        counters_->lastCameraWorldWidth = camera->worldWidth;
+        counters_->lastCameraWorldHeight = camera->worldHeight;
+        counters_->lastCameraActualPpm = camera->actualPixelsPerMeter;
+        if (auto status = writer.setCamera2D(*camera); !status)
         {
             return status;
         }
 
         std::pmr::vector<Tina::Render::RenderSprite2DInput> tileSprites{&resources_->memory};
         const Tina::Asset::TileChunkCameraQuery query{
-            .centerX = camera.centerX,
-            .centerY = camera.centerY,
-            .halfWidth = camera.worldWidth * 0.5f,
-            .halfHeight = camera.worldHeight * 0.5f,
+            .centerX = camera->centerX,
+            .centerY = camera->centerY,
+            .halfWidth = camera->worldWidth * 0.5f,
+            .halfHeight = camera->worldHeight * 0.5f,
         };
         auto emitted = Tina::Asset::emitVisibleTileMapSprites(
             *resources_->map, query, Tina::Asset::TileChunkSpriteEmitParams{.spriteKey = ProductSpriteKey},
@@ -985,19 +1015,52 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
     {
     }
 
-    Tina::Core::Result<std::unique_ptr<Tina::IGameState>> createInitialState(Tina::GameStartupContext&) override
+    Tina::Core::Result<std::unique_ptr<Tina::IGameState>> createInitialState(Tina::GameStartupContext& context) override
     {
+        // Seed surface from engine primary-window config; metrics events refine
+        // framebuffer size after DPI/resize (M11-B0).
+        const auto& window = context.engineConfig().primaryWindow;
+        counters_->surfacePixelWidth = window.initialLogicalExtent.width;
+        counters_->surfacePixelHeight = window.initialLogicalExtent.height;
+        auto subscription = context.platformEventSubscriptions().subscribe(
+            [this](const Tina::PlatformEventNotification& notification) {
+                if (!std::holds_alternative<Tina::Platform::WindowMetricsChangedEvent>(
+                        notification.event().payload))
+                {
+                    return;
+                }
+                ++counters_->windowMetricsEvents;
+                if (const auto* metrics = notification.primaryWindowMetrics(); metrics != nullptr)
+                {
+                    const bool hasFb =
+                        metrics->framebufferExtent.width != 0 && metrics->framebufferExtent.height != 0;
+                    counters_->surfacePixelWidth =
+                        hasFb ? metrics->framebufferExtent.width : metrics->logicalExtent.width;
+                    counters_->surfacePixelHeight =
+                        hasFb ? metrics->framebufferExtent.height : metrics->logicalExtent.height;
+                }
+            });
+        if (!subscription)
+        {
+            return Tina::Core::failure(std::move(subscription.error()));
+        }
+        platformEvents_.emplace(std::move(*subscription));
         return std::unique_ptr<Tina::IGameState>{
             std::make_unique<TileMapBgfxState>(options_, *counters_, *resources_, *capture_)};
     }
 
-    void onShutdown(Tina::GameShutdownContext&) noexcept override { ++counters_->applicationShutdowns; }
+    void onShutdown(Tina::GameShutdownContext&) noexcept override
+    {
+        platformEvents_.reset();
+        ++counters_->applicationShutdowns;
+    }
 
   private:
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
     TileMapResources* resources_ = nullptr;
     DeviceCapture* capture_ = nullptr;
+    std::optional<Tina::PlatformEventSubscription> platformEvents_{};
 };
 
 #if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
@@ -1206,8 +1269,13 @@ int main(int argc, char** argv)
         (counters.seedTileSelectionApplied && counters.tileSelection.selectionHits >= 1 && lastSelection != nullptr &&
          lastSelection->cellX == options->seedTileCellX && lastSelection->cellY == options->seedTileCellY);
 
-    bool ok = selectionStateValid && highlightValid && seededSelectionValid && counters.catalogFromRecipeFile &&
-              counters.catalogRecipeAssets == 3 && counters.texturesUploaded == 1 &&
+    const bool cameraProjectionValid =
+        counters.cameraProjectionResolves == counters.renderExtractions && counters.lastCameraWorldHeight > 0.0f &&
+        counters.lastCameraWorldWidth > 0.0f && counters.lastCameraActualPpm > 0.0f &&
+        counters.surfacePixelWidth > 0 && counters.surfacePixelHeight > 0;
+
+    bool ok = selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
+              counters.catalogFromRecipeFile && counters.catalogRecipeAssets == 3 && counters.texturesUploaded == 1 &&
               counters.lastTileSprites == ExpectedNonEmptyTiles && counters.lastTotalSprites == expectedTotalSprites &&
               counters.controllerGroundedFrames > 0 && counters.controllerWalkFrames > 0 &&
               counters.controllerHitRightFrames > 0 && counters.maxControllerX > 1.5f &&
@@ -1298,6 +1366,14 @@ int main(int argc, char** argv)
               << ",\"lastHighlightSprites\":" << counters.lastHighlightSprites
               << ",\"seedTileSelection\":" << (options->seedTileSelection ? "true" : "false")
               << ",\"seedTileSelectionApplied\":" << (counters.seedTileSelectionApplied ? "true" : "false")
+              << ",\"surfacePixelWidth\":" << counters.surfacePixelWidth
+              << ",\"surfacePixelHeight\":" << counters.surfacePixelHeight
+              << ",\"windowMetricsEvents\":" << counters.windowMetricsEvents
+              << ",\"cameraProjectionResolves\":" << counters.cameraProjectionResolves
+              << ",\"lastCameraWorldWidth\":" << counters.lastCameraWorldWidth
+              << ",\"lastCameraWorldHeight\":" << counters.lastCameraWorldHeight
+              << ",\"lastCameraActualPpm\":" << counters.lastCameraActualPpm
+              << ",\"cameraProjection\":\"FixedWorldHeight2D\""
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
               << ",\"physicsEnabled\":true"
               << ",\"physicsSteps\":" << counters.physicsSteps

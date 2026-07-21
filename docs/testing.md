@@ -86,7 +86,10 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A43 `tina_sample_2d` Tile selection consumer | Debug C++23 | 240/240 + 10/10 + product smoke | `tina_tests` 新增 3 个 sample-private consumer 用例；A39/A42 组合聚焦 10/10；`tina_sample_2d --frames=300` 返回0，默认无合成点击时 selection JSON 计数为0，product-2d 资源/lifecycle 门禁保持通过 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A44 selection highlight + seed gate | Debug C++23 | 6/6 Sample2D + 10/10 A39/A42 + product smoke | `Sample2DTileSelectionTest` 6 项（含 highlight/seed/scripted Pressed）；默认 300 帧 hits=0/无高亮；`--seed-tile-selection=1,1 --frames=300` hits≥1、`lastHighlightSprites=1`、`selectionHighlightSprites==renderExtractions`；A39 仍由 `tina_runtime_ui_tests` |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10 收口 product-2d pointer/selection | Docs + tip `70618808` | A39–A44 闭环 | 默认 smoke 不点；seed CLI 为受控门禁；完整 cooker/cgltf Deferred；默认不开 A45 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-B0 Camera2D projection resolve | Debug C++23 | 8/8 + product smoke | `Camera2DProjectionTest`：FixedWorldHeight ppm/aspect、resize、PixelPerfect integerScale、snap 强制、0×0/非法拒绝、normalized viewport；`tina_sample_2d` JSON `cameraProjectionResolves`/`lastCameraActualPpm` |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A7 `tina_audio` Disabled lifecycle | Debug C++23 | `tina_audio_tests` | Create Disabled、voice generation/capacity/stale、幂等 shutdown、错线程拒绝、PMR 归零；header isolation 编入同 target |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A8 command/completion + bus | Debug C++23 | `tina_audio_tests` | Play/Stop → pump Started/Stopped；destroy 后 pending → RejectedStale；满队列 CapacityExceeded；Master/Music/SFX volume/mute/effectiveGain |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A9 miniaudio null device | Debug C++23 | `tina_audio_miniaudio_tests` | null backend start/stop、callback 计数>0、bundle engine+device、错线程拒绝、PMR 归零 |
 
 
 

@@ -555,12 +555,28 @@ selection 产品闭环**视为可验收。行为：默认 `--frames=300` 不合�
 无高亮合法）；`--seed-tile-selection=cellX,cellY` 为受控可脚本门禁（sample-private locked sample，
 非 OS 真点击）；UI Button 不穿透仍由 `tina_runtime_ui_tests` 证明。完整外部 cooker CLI、
 cgltf/`tina_sample_3d`、厚 world-pick Game SDK 仍 **Deferred**，**默认不再开 M10-A45**；
-Camera resize/chunk dirty/截图与 Audio 归 M11；Legacy 删除归 M12。
+chunk dirty/截图与 Audio 归 M11；Legacy 删除归 M12。
+
+M11-B0：`include/tina/render/Camera2DProjection.hpp` 提供与 game-2d 契约对齐的投影解析：
+`FixedWorldHeight2D` / `PixelPerfect2D` + 当前 framebuffer viewport（含 normalized viewport 缩放）→
+`worldWidth`/`worldHeight`/`actualPixelsPerMeter`。PixelPerfect 强制 `CameraAndSprites`；0×0 为
+Suspended 结构化失败。`tina_sample_2d` 订阅 `WindowMetricsChanged` 并每帧 resolve；不改 Audio 切片。
 
 M11-A7：后端无关 `Tina::Audio` 生命周期基础。`AudioEngine::Create` 固定 voice/command/completion
 容量并始终进入 Disabled（无设备）；generation `AudioVoiceId` 证明 slot 复用/stale；owner-thread
-API 与幂等 shutdown；`pumpCompletions` A7 恒为 0。独立 `tina_audio` + `tina_audio_tests`（含
-header isolation）。miniaudio adapter、命令/完成 SPSC、AssetLease、EngineHost 接线后置。
+API 与幂等 shutdown。独立 `tina_audio` + `tina_audio_tests`（含 header isolation）。
+
+M11-A8：固定 command/completion 环（Create 时分配，无增长）。主线程 `enqueuePlay`/`enqueueStop`
+对 live voice 入队；`pumpCompletions` 先 FIFO 应用命令（Disabled：更新 playing 并推
+Started/Stopped；stale 推 RejectedStale），再按 budget 排空到调用方 buffer。满命令队列返回
+`CapacityExceeded`；完成环满计 rejected（不增长）。Master/Music/SFX `setBusVolume`/`setBusMuted`
+为 owner-thread 状态（线性增益 [0,1]；`effectiveBusGain` = Master×bus，任一 mute 则为 0）。
+M11-A9：可选 `TINA_BUILD_AUDIO_MINIAUDIO` + vcpkg feature `audio-miniaudio`。`MiniaudioDevice`
+封装 ma_context/ma_device（默认 `useNullBackend=true` 走 `ma_backend_null` 可 hermetic 测）；
+dataCallback 禁止分配/锁/日志，仅静音输出与 atomic invocation 计数。`createMiniaudioAudioBundle`
+先 Create AudioEngine 再 Create device，设备失败则 engine shutdown。miniaudio 类型仅在
+`src/vnext/audio/miniaudio` 与 Legacy `Tina::Miniaudio` IMPLEMENTATION TU；public header 无
+miniaudio 符号。真实 OS 设备、PCM 混音、AssetLease、EngineHost 接线后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

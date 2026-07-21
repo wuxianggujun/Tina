@@ -47,6 +47,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/header_isolation/UIDisplayListHeader.cpp
     render/header_isolation/UploadTicketHeader.cpp
     render/header_isolation/WorldPointerSampleHeader.cpp
+    render/header_isolation/Camera2DProjectionHeader.cpp
     render/NullRenderDeviceTests.cpp
     render/UploadTicketTests.cpp
     render/GpuTextureUploadTests.cpp
@@ -159,5 +160,8 @@ add_subdirectory(vnext/asset_format)
 add_subdirectory(vnext/asset)
 add_subdirectory(vnext/runtime)
 add_subdirectory(vnext/audio)
+if (TINA_BUILD_AUDIO_MINIAUDIO)
+    add_subdirectory(vnext/audio_miniaudio)
+endif ()
 add_subdirectory(ui_render)
 add_subdirectory(render_scene)

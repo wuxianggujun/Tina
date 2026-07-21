@@ -1,5 +1,6 @@
 add_library(tina_render STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/render/Camera2DPick.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/render/Camera2DProjection.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderDevice.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderFrame.hpp
@@ -10,6 +11,7 @@ add_library(tina_render STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/render/WorldPointerSample.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/null/NullRenderDeviceFactory.hpp
     Camera2DPick.cpp
+    Camera2DProjection.cpp
     RenderSurfaceStateTracker.cpp
     RenderSurfaceStateTracker.hpp
     RenderScene.cpp

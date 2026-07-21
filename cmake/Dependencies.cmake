@@ -18,7 +18,13 @@ if (TINA_BUILD_LEGACY)
     find_package(utf8cpp CONFIG REQUIRED)
 
     # The miniaudio vcpkg port intentionally installs only miniaudio.h. Tina owns the single
-    # MINIAUDIO_IMPLEMENTATION translation unit in src/platform/audio.
+    # MINIAUDIO_IMPLEMENTATION translation unit in src/platform/audio (Legacy) or
+    # src/vnext/audio/miniaudio (vNext-only audio adapter when Legacy is OFF).
+    find_path(TINA_MINIAUDIO_INCLUDE_DIR NAMES miniaudio.h REQUIRED)
+endif()
+
+if (TINA_BUILD_AUDIO_MINIAUDIO AND NOT TINA_BUILD_LEGACY)
+    # vNext-only audio adapter graph: header-only miniaudio via vcpkg feature audio-miniaudio.
     find_path(TINA_MINIAUDIO_INCLUDE_DIR NAMES miniaudio.h REQUIRED)
 endif()
 
