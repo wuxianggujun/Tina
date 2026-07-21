@@ -7,6 +7,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedLayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedPaint.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedStructure.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UISemantics.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContext.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContextConfig.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIErrors.hpp

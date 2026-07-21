@@ -709,6 +709,10 @@ Enabled、Focused、Actions 和可选 `labelledBy UINodeId`。装饰节点过滤
 语义树，Disabled 保留语义但 Action 不可执行。平台 UIA/AT-SPI adapter 只读 immutable snapshot，
 不能跨线程访问 UINode。密码和 composition 正文不进入诊断。
 
+**M11-C4 已落地首切片**：`UISemantics.hpp` + `UIContext::committedSemantics()` 在 `commitLayout`
+中发布 Label/Button/Checkbox/Slider 条目（Root/Panel 默认省略）；Checkbox 带 `checked`，Slider 带
+min/max/value；Name 暂取 Label/Button 文本。尚未实现 Actions/`labelledBy`、UIA/AT-SPI adapter。
+
 首批 Role：Group、Label、Button、Checkbox、Slider、TextEdit、Dialog、List、ListItem。
 
 ## Widget 范围

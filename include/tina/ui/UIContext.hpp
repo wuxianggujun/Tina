@@ -9,6 +9,7 @@
 #include <tina/ui/UICommittedStructure.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UISlider.hpp>
+#include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UIContextConfig.hpp>
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UIEventRouting.hpp>
@@ -65,10 +66,13 @@ struct UIContextStatistics final {
     u64 paintOrderRevision = 0;
     usize committedPaintNodeCount = 0;
     u64 paintRevision = 0;
+    usize committedSemanticsNodeCount = 0;
+    u64 semanticsRevision = 0;
     bool dirty = false;       // Structure dirty kept for M7-C1a compatibility.
     bool layoutDirty = false; // Style/structure changes still requiring layout.
     bool hitDirty = false;
     bool paintDirty = false;
+    bool semanticsDirty = false;
     usize lastLayoutPassCount = 0;
     usize lastLayoutMeasuredNodeCount = 0;
     usize lastLayoutArrangedNodeCount = 0;
@@ -296,6 +300,8 @@ public:
     [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;
     [[nodiscard]] UICommittedHitView committedHit() const noexcept;
     [[nodiscard]] UICommittedPaintView committedPaint() const noexcept;
+    // M11-C4: owner-thread accessible semantics snapshot (interactive kinds).
+    [[nodiscard]] UICommittedSemanticsView committedSemantics() const noexcept;
     // Borrow of the context-owned R8 glyph atlas page after paint publication.
     // Valid until the next paint that inserts/clears the atlas, or Context
     // destruction. Empty when no atlas is allocated.

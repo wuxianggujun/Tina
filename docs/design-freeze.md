@@ -637,7 +637,12 @@ bus；JSON 输出 `lastMusicVolume`/`lastSfxVolume`；自动 smoke 只要求 `ui
 
 M11-C3：`PrimaryWindowUITreeUpdater` 暴露 `createCheckbox`/`setChecked`/`isChecked`/
 `setCheckboxAction`；样例 HUD Master 静音 Checkbox，action 置 pending，`updateFrame` 调
-`setBusMuted(Master)`；smoke 要求 `uiCheckboxesCreated==1`（不强制点击）。全屏设置与 Semantics 后置。
+`setBusMuted(Master)`；smoke 要求 `uiCheckboxesCreated==1`（不强制点击）。
+
+M11-C4：`UISemantics.hpp` 定义 Role/Entry/`UICommittedSemanticsView`；`UIContext::committedSemantics`
+在 `commitLayout` 中发布交互 kind（Label/Button/Checkbox/Slider）快照；Root/Panel 默认省略；
+Checkbox 带 checked，Slider 带 min/max/value；paint dirty 同步 semantics dirty。平台 UIA/AT-SPI
+adapter 与截图回归后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

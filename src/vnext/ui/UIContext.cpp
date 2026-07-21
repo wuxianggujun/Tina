@@ -670,6 +670,7 @@ struct UIContext::Impl final {
     std::array<std::pmr::vector<UICommittedLayoutEntry>, 2> committedLayoutBuffers;
     std::array<std::pmr::vector<UICommittedHitEntry>, 2> committedHitBuffers;
     std::array<std::pmr::vector<UICommittedPaintEntry>, 2> committedPaintBuffers;
+    std::array<std::pmr::vector<UISemanticsEntry>, 2> committedSemanticsBuffers;
     std::vector<UINodeId> deferredRootDestroyBuffer;
     std::vector<Detail::DeferredRoutedPointerListenerRelease>
         deferredRoutedPointerListenerReleaseBuffer;
@@ -689,6 +690,11 @@ struct UIContext::Impl final {
     u64 committedPaintLayoutRevision = 0;
     u64 committedPaintOrderRevision = 0;
     UILogicalSize committedPaintViewportSize{};
+    u64 committedSemanticsRevision = 0;
+    u64 committedSemanticsStructureRevision = 0;
+    u64 committedSemanticsLayoutRevision = 0;
+    UILogicalSize committedSemanticsViewportSize{};
+    usize publishedSemanticsBufferIndex = 0;
     UILogicalSize committedViewportSize{};
     bool hasCommittedViewport = false;
     usize liveRootCount = 0;
@@ -698,6 +704,7 @@ struct UIContext::Impl final {
     bool layoutDirty = false;
     bool hitDirty = false;
     bool paintDirty = false;
+    bool semanticsDirty = false;
     // A failed candidate may have partially mutated layout scratch. The next
     // layout attempt must rebuild from scratch before reuse is enabled again.
     bool layoutReuseCacheValid = false;
@@ -788,7 +795,10 @@ struct UIContext::Impl final {
               std::pmr::vector<UICommittedHitEntry>(&resource)},
           committedPaintBuffers{
               std::pmr::vector<UICommittedPaintEntry>(&resource),
-              std::pmr::vector<UICommittedPaintEntry>(&resource)}
+              std::pmr::vector<UICommittedPaintEntry>(&resource)},
+          committedSemanticsBuffers{
+              std::pmr::vector<UISemanticsEntry>(&resource),
+              std::pmr::vector<UISemanticsEntry>(&resource)}
     {
     }
 
@@ -903,6 +913,9 @@ struct UIContext::Impl final {
         impl->committedHitBuffers[1].reserve(normalized.hitSnapshotCapacity);
         impl->committedPaintBuffers[0].reserve(normalized.paintSnapshotCapacity);
         impl->committedPaintBuffers[1].reserve(normalized.paintSnapshotCapacity);
+        // Semantics publishes interactive kinds only; reuse paint snapshot capacity bound.
+        impl->committedSemanticsBuffers[0].reserve(normalized.paintSnapshotCapacity);
+        impl->committedSemanticsBuffers[1].reserve(normalized.paintSnapshotCapacity);
         impl->deferredRootDestroyBuffer.reserve(normalized.rootCapacity);
         impl->deferredRoutedPointerListenerReleaseBuffer.reserve(
             normalized.routedPointerListenerCapacity);
@@ -2260,6 +2273,60 @@ struct UIContext::Impl final {
         }
     }
 
+    // M11-C4: publish interactive Label/Button/Checkbox/Slider into a stable
+    // owner-thread semantics snapshot. Decorative Root/Panel are omitted.
+    [[nodiscard]] Core::Status buildCommittedSemantics(
+        std::pmr::vector<UISemanticsEntry>& output,
+        std::span<const UICommittedLayoutEntry> layoutEntries) const
+    {
+        output.clear();
+        if (layoutEntries.size() > capacityConfig.paintSnapshotCapacity) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI committed semantics snapshot capacity has been exhausted");
+        }
+        for (const UICommittedLayoutEntry& layoutEntry : layoutEntries) {
+            if (layoutEntry.effectiveVisibility != UIVisibility::Visible) {
+                continue;
+            }
+            const u32 nodeIndex = layoutEntry.node.index();
+            const NodeRecord* record = recordByIndex(nodeIndex);
+            if (record == nullptr || !isSemanticsPublishedKind(record->kind)) {
+                continue;
+            }
+            UISemanticsEntry entry{
+                .node = layoutEntry.node,
+                .parent = idForIndex(record->parentIndex),
+                .role = semanticsRoleForWidgetKind(record->kind),
+                .kind = record->kind,
+                .worldRect = layoutEntry.worldRect,
+                .enabled = true,
+                .focused = false,
+            };
+            if (record->kind == UIWidgetKind::Label || record->kind == UIWidgetKind::Button) {
+                entry.name = textViewFor(nodeIndex);
+            }
+            if (record->kind == UIWidgetKind::Checkbox
+                && nodeIndex < checkboxCheckedByNodeIndex.size()) {
+                entry.checked = checkboxCheckedByNodeIndex[nodeIndex] != 0;
+                entry.focused = defaultActionFocusButton == layoutEntry.node;
+            }
+            if (record->kind == UIWidgetKind::Button) {
+                entry.focused = defaultActionFocusButton == layoutEntry.node;
+            }
+            if (record->kind == UIWidgetKind::Slider && nodeIndex < sliderStatesByNodeIndex.size()) {
+                const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
+                entry.hasRange = true;
+                entry.minValue = slider.minValue;
+                entry.maxValue = slider.maxValue;
+                entry.value = slider.value;
+                entry.focused = armedSlider == layoutEntry.node;
+            }
+            output.push_back(entry);
+        }
+        return Core::success();
+    }
+
     [[nodiscard]] static bool isFiniteLayoutRect(UILogicalRect rect) noexcept
     {
         return std::isfinite(rect.x)
@@ -3121,9 +3188,10 @@ struct UIContext::Impl final {
             dirtyQueue.push_back(node);
             dirtyQueuedByIndex[index] = 1;
         }
-        dirtyByIndex[index] |= UIDirty::Paint;
+        dirtyByIndex[index] |= UIDirty::Paint | UIDirty::Semantics;
         dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
         paintDirty = true;
+        semanticsDirty = true;
         return Core::success();
     }
 
@@ -3135,6 +3203,7 @@ struct UIContext::Impl final {
         layoutDirty = false;
         hitDirty = false;
         paintDirty = false;
+        semanticsDirty = false;
     }
 
     [[nodiscard]] bool isNodeWithinRoot(UINodeId root, UINodeId node) const noexcept
@@ -4396,8 +4465,10 @@ struct UIContext::Impl final {
         const bool hitNeedsCommit = hitDirty || layoutNeedsCommit || committedHitRevision == 0;
         const bool paintNeedsCommit =
             paintDirty || layoutNeedsCommit || committedPaintRevision == 0;
+        const bool semanticsNeedsCommit =
+            semanticsDirty || layoutNeedsCommit || committedSemanticsRevision == 0;
 
-        if (!layoutNeedsCommit && !hitNeedsCommit && !paintNeedsCommit) {
+        if (!layoutNeedsCommit && !hitNeedsCommit && !paintNeedsCommit && !semanticsNeedsCommit) {
             lastLayoutPass = {};
             lastHitRebuildCount = 0;
             lastPaintCacheRebuildCount = 0;
@@ -4487,6 +4558,17 @@ struct UIContext::Impl final {
                 candidateLayoutEntries);
         }
 
+        usize writeSemanticsBufferIndex = publishedSemanticsBufferIndex;
+        if (semanticsNeedsCommit) {
+            writeSemanticsBufferIndex = 1 - publishedSemanticsBufferIndex;
+            if (Core::Status status = buildCommittedSemantics(
+                    committedSemanticsBuffers[writeSemanticsBufferIndex],
+                    candidateLayoutEntries);
+                !status) {
+                return status;
+            }
+        }
+
         if (structureDirty) {
             publishedBufferIndex = writeStructureBufferIndex;
             ++committedRevision;
@@ -4514,6 +4596,13 @@ struct UIContext::Impl final {
             committedPaintLayoutRevision = candidateLayoutRevision;
             committedPaintOrderRevision = candidatePaintOrderRevision;
             committedPaintViewportSize = viewportSize;
+        }
+        if (semanticsNeedsCommit) {
+            publishedSemanticsBufferIndex = writeSemanticsBufferIndex;
+            ++committedSemanticsRevision;
+            committedSemanticsStructureRevision = candidateStructureRevision;
+            committedSemanticsLayoutRevision = candidateLayoutRevision;
+            committedSemanticsViewportSize = viewportSize;
         }
         lastLayoutPass = layoutNeedsCommit ? pass : LayoutPassStatistics{};
         lastHitRebuildCount = hitNeedsCommit ? 1 : 0;
@@ -4571,6 +4660,19 @@ struct UIContext::Impl final {
             committedPaintLayoutRevision,
             committedPaintOrderRevision,
             committedPaintRevision,
+        };
+    }
+
+    [[nodiscard]] UICommittedSemanticsView committedSemantics() const noexcept
+    {
+        const std::pmr::vector<UISemanticsEntry>& entries =
+            committedSemanticsBuffers[publishedSemanticsBufferIndex];
+        return UICommittedSemanticsView{
+            std::span<const UISemanticsEntry>(entries.data(), entries.size()),
+            committedSemanticsViewportSize,
+            committedSemanticsStructureRevision,
+            committedSemanticsLayoutRevision,
+            committedSemanticsRevision,
         };
     }
 
@@ -5615,10 +5717,14 @@ struct UIContext::Impl final {
             .committedPaintNodeCount =
                 committedPaintBuffers[publishedPaintBufferIndex].size(),
             .paintRevision = committedPaintRevision,
+            .committedSemanticsNodeCount =
+                committedSemanticsBuffers[publishedSemanticsBufferIndex].size(),
+            .semanticsRevision = committedSemanticsRevision,
             .dirty = structureDirty,
             .layoutDirty = layoutDirty,
             .hitDirty = hitDirty,
             .paintDirty = paintDirty,
+            .semanticsDirty = semanticsDirty,
             .lastLayoutPassCount = lastLayoutPass.passCount,
             .lastLayoutMeasuredNodeCount = lastLayoutPass.measuredNodeCount,
             .lastLayoutArrangedNodeCount = lastLayoutPass.arrangedNodeCount,
@@ -6366,6 +6472,11 @@ UICommittedHitView UIContext::committedHit() const noexcept
 UICommittedPaintView UIContext::committedPaint() const noexcept
 {
     return m_impl->committedPaint();
+}
+
+UICommittedSemanticsView UIContext::committedSemantics() const noexcept
+{
+    return m_impl->committedSemantics();
 }
 
 std::span<const u8> UIContext::glyphAtlasPixels() const noexcept
