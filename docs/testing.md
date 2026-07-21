@@ -107,7 +107,8 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-C4 UI Semantics snapshot | Debug C++23 | `tina_ui_tests` UISemantics* | interactive kinds 发布；Panel 省略；Checkbox/Slider 状态；revision 前进 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-D0 product evidence fingerprint | Debug C++23 | product-2d sample | JSON `evidenceFingerprint` 非空；90/300 帧结构摘要可对比（非像素截图） |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-C5 Music/SFX mute checkboxes | Debug C++23 | product-2d sample | `uiCheckboxesCreated=3`；JSON lastMaster/Music/SfxMuted |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11 设置/UI 竖切收口（C0–C5+D0） | Docs + tip `bbbe1b5b` | product-2d | 三轨音量+静音 HUD；Semantics 快照；evidenceFingerprint；像素截图/UIA Deferred |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11 设置/UI 竖切收口（C0–C5+D0） | Docs + tip `bbbe1b5b` | product-2d | 三轨音量+静音 HUD；Semantics 快照；evidenceFingerprint |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-D1 primary frame pixel capture | Debug C++23 | product-2d sample | `pixelCaptureOk`；`pixelFingerprint` 非空；width/height/bytes>0 |
 
 
 

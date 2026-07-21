@@ -4,6 +4,7 @@ add_library(tina_render STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderDevice.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderFrame.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/render/RenderFrameCapture.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderScene.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderSurface.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/UIDisplayList.hpp

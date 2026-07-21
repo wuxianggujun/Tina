@@ -3,6 +3,7 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/render/RenderErrors.hpp>
 #include <tina/render/RenderFrame.hpp>
+#include <tina/render/RenderFrameCapture.hpp>
 
 #include <cstddef>
 #include <functional>
@@ -105,6 +106,15 @@ class IRenderDevice {
         static_cast<void>(texture);
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Sprite2D texture binding");
+    }
+
+    // M11-D1: capture primary backbuffer as RGBA8 (top-left origin) after present.
+    // Default Unsupported; Null returns Unsupported; bgfx implements via requestScreenShot.
+    // Must not be called while a frame is open (between submit and present).
+    [[nodiscard]] virtual Core::Result<Rgba8FrameCapture> capturePrimaryFrameRgba8()
+    {
+        return Core::failure(RenderErrorCode::FrameCaptureUnsupported,
+                             "This render device does not support primary frame capture");
     }
 };
 

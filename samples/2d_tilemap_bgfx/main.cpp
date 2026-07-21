@@ -177,6 +177,13 @@ struct LifecycleCounters final {
     bool masterMutedFromCheckbox = false;
     bool musicMutedFromCheckbox = false;
     bool sfxMutedFromCheckbox = false;
+    // M11-D1: optional GPU pixel evidence (primary backbuffer RGBA8 hash).
+    bool pixelCaptureAttempted = false;
+    bool pixelCaptureOk = false;
+    u32 pixelCaptureWidth = 0;
+    u32 pixelCaptureHeight = 0;
+    u64 pixelCaptureBytes = 0;
+    std::string pixelFingerprint{};
     Tina::Sample2D::TileSelectionCounters tileSelection{};
     u16 lastSelectedTileId = 0;
     u64 selectionHighlightSprites = 0;
@@ -410,9 +417,30 @@ class DeviceCapture final {
   public:
     void set(Tina::Render::IRenderDevice* device) noexcept { device_ = device; }
     [[nodiscard]] Tina::Render::IRenderDevice* get() const noexcept { return device_; }
+    // M11-D1: capture on next successful present (after the frame is closed).
+    void requestCaptureNextPresent() noexcept { captureNextPresent_ = true; }
+    [[nodiscard]] bool consumeCaptureNextPresent() noexcept
+    {
+        const bool requested = captureNextPresent_;
+        captureNextPresent_ = false;
+        return requested;
+    }
+    void setLastCapture(Tina::Render::Rgba8FrameCapture capture) noexcept
+    {
+        lastCapture_ = std::move(capture);
+        hasLastCapture_ = true;
+    }
+    [[nodiscard]] bool hasLastCapture() const noexcept { return hasLastCapture_; }
+    [[nodiscard]] const Tina::Render::Rgba8FrameCapture* lastCapture() const noexcept
+    {
+        return hasLastCapture_ ? &lastCapture_ : nullptr;
+    }
 
   private:
     Tina::Render::IRenderDevice* device_ = nullptr;
+    bool captureNextPresent_ = false;
+    bool hasLastCapture_ = false;
+    Tina::Render::Rgba8FrameCapture lastCapture_{};
 };
 
 class CapturingRenderDevice final : public Tina::Render::IRenderDevice {
@@ -436,7 +464,21 @@ class CapturingRenderDevice final : public Tina::Render::IRenderDevice {
     {
         return inner_->submitFrame(frame);
     }
-    [[nodiscard]] Tina::Core::Status present() override { return inner_->present(); }
+    [[nodiscard]] Tina::Core::Status present() override
+    {
+        auto status = inner_->present();
+        if (status && capture_ != nullptr && capture_->consumeCaptureNextPresent())
+        {
+            // Capture immediately after present while the backbuffer still holds
+            // the last submitted frame content.
+            auto captured = inner_->capturePrimaryFrameRgba8();
+            if (captured.has_value() && !captured->empty())
+            {
+                capture_->setLastCapture(std::move(*captured));
+            }
+        }
+        return status;
+    }
     [[nodiscard]] Tina::Render::RenderStatistics statistics() const noexcept override
     {
         return inner_->statistics();
@@ -455,6 +497,10 @@ class CapturingRenderDevice final : public Tina::Render::IRenderDevice {
                                                                Tina::Render::GpuTextureId texture) noexcept override
     {
         return inner_->setSprite2DTextureBinding(spriteKey, texture);
+    }
+    [[nodiscard]] Tina::Core::Result<Tina::Render::Rgba8FrameCapture> capturePrimaryFrameRgba8() override
+    {
+        return inner_->capturePrimaryFrameRgba8();
     }
 
   private:
@@ -1366,6 +1412,11 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
         if (counters_->frameUpdates >= options_.targetFrameCount)
         {
+            // Request pixel capture on this frame's upcoming present (M11-D1).
+            if (capture_ != nullptr)
+            {
+                capture_->requestCaptureNextPresent();
+            }
             context.requestExitAfterFrame();
         }
         return Tina::Core::success();
@@ -1823,6 +1874,48 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // M11-D1: prefer capture taken on the final present; fall back to post-run capture.
+    counters.pixelCaptureAttempted = true;
+    if (capture.hasLastCapture() && capture.lastCapture() != nullptr && !capture.lastCapture()->empty())
+    {
+        const auto& captured = *capture.lastCapture();
+        counters.pixelCaptureOk = true;
+        counters.pixelCaptureWidth = captured.width;
+        counters.pixelCaptureHeight = captured.height;
+        counters.pixelCaptureBytes = static_cast<u64>(captured.byteCount());
+        auto pixelHash = Tina::Core::digestContentHashV1(captured.rgba8Pixels);
+        if (pixelHash.has_value() && pixelHash->hasValue())
+        {
+            counters.pixelFingerprint = contentHashToHex(*pixelHash);
+        }
+        else
+        {
+            counters.pixelCaptureOk = false;
+        }
+    }
+    else if (Tina::Render::IRenderDevice* device = capture.get(); device != nullptr)
+    {
+        auto captured = device->capturePrimaryFrameRgba8();
+        if (captured.has_value() && !captured->empty())
+        {
+            counters.pixelCaptureOk = true;
+            counters.pixelCaptureWidth = captured->width;
+            counters.pixelCaptureHeight = captured->height;
+            counters.pixelCaptureBytes = static_cast<u64>(captured->byteCount());
+            auto pixelHash = Tina::Core::digestContentHashV1(captured->rgba8Pixels);
+            if (pixelHash.has_value() && pixelHash->hasValue())
+            {
+                counters.pixelFingerprint = contentHashToHex(*pixelHash);
+            }
+            else
+            {
+                counters.pixelCaptureOk = false;
+            }
+        }
+    }
+
+    (*host).reset();
+
     std::error_code ec;
     std::filesystem::remove_all(resources.catalogRoot, ec);
 
@@ -1903,6 +1996,9 @@ int main(int argc, char** argv)
          counters.physicsSteps == counters.frameUpdates && counters.physicsDynamicContacts > 0 &&
          counters.lastDynamicY < 3.5f && counters.lastDynamicY > 0.5f;
 #endif
+    // M11-D1: require a successful primary-frame RGBA8 capture when the device supports it.
+    ok = ok && counters.pixelCaptureAttempted && counters.pixelCaptureOk && !counters.pixelFingerprint.empty() &&
+         counters.pixelCaptureWidth > 0 && counters.pixelCaptureHeight > 0 && counters.pixelCaptureBytes > 0;
 
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
@@ -2004,6 +2100,12 @@ int main(int argc, char** argv)
                   << ",\"physicsDynamicContacts\":" << counters.physicsDynamicContacts
                   << ",\"dynamicY\":" << counters.lastDynamicY
 #endif
+                  << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
+                  << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")
+                  << ",\"pixelCaptureWidth\":" << counters.pixelCaptureWidth
+                  << ",\"pixelCaptureHeight\":" << counters.pixelCaptureHeight
+                  << ",\"pixelCaptureBytes\":" << counters.pixelCaptureBytes
+                  << ",\"pixelFingerprint\":\"" << counters.pixelFingerprint << "\""
                   << "}\n";
         return 1;
     }
@@ -2136,6 +2238,12 @@ int main(int argc, char** argv)
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
               << ",\"evidenceSchema\":1"
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
+              << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
+              << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")
+              << ",\"pixelCaptureWidth\":" << counters.pixelCaptureWidth
+              << ",\"pixelCaptureHeight\":" << counters.pixelCaptureHeight
+              << ",\"pixelCaptureBytes\":" << counters.pixelCaptureBytes
+              << ",\"pixelFingerprint\":\"" << counters.pixelFingerprint << "\""
               << ",\"exit\":\""
               << "GameRequestedExitAfterCurrentFrame\"}\n";
     return 0;

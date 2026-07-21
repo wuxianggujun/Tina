@@ -653,7 +653,12 @@ JSON 输出 `lastMusicMuted`/`lastSfxMuted`；smoke 要求 `uiCheckboxesCreated=
 
 M11 设置 / UI 产品竖切收口（C0–C5 + D0 / tip `bbbe1b5b`）：Checkbox/Slider 控件、PrimaryWindowUI
 门面、三轨音量/静音 HUD 接线、基础 Semantics snapshot、product-2d 结构证据指纹视为可验收闭环。
-GPU 像素截图、UIA/AT-SPI、运行时全屏设置、更复杂 SettingsState 仍 Deferred；默认不强制 C6+。
+UIA/AT-SPI、运行时全屏设置、更复杂 SettingsState 仍 Deferred；默认不强制 C6+。
+
+M11-D1：`Rgba8FrameCapture` + `IRenderDevice::capturePrimaryFrameRgba8`（默认 Unsupported）。
+bgfx 通过 `CallbackI::screenShot` + `requestScreenShot` 实现；BGRA→RGBA8、yflip 纠正为 top-left。
+`tina_sample_2d` 在 `run()` 返回后、销毁 device 前捕获，JSON 输出 `pixelFingerprint`（XXH3-128）。
+不强制 golden 文件入库；跨 GPU 像素归一化后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

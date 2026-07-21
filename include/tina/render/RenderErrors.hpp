@@ -36,5 +36,8 @@ inline constexpr Core::ErrorCode UploadLedgerFull{Core::ErrorDomain::Render, 29}
 inline constexpr Core::ErrorCode TextureUploadUnsupported{Core::ErrorDomain::Render, 30};
 inline constexpr Core::ErrorCode InvalidTextureUpload{Core::ErrorDomain::Render, 31};
 inline constexpr Core::ErrorCode TextureNotFound{Core::ErrorDomain::Render, 32};
+inline constexpr Core::ErrorCode FrameCaptureUnsupported{Core::ErrorDomain::Render, 33};
+inline constexpr Core::ErrorCode FrameCaptureFailed{Core::ErrorDomain::Render, 34};
+inline constexpr Core::ErrorCode FrameCaptureBusy{Core::ErrorDomain::Render, 35};
 
 } // namespace Tina::Render::RenderErrorCode

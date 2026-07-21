@@ -21,11 +21,15 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <cstdarg>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <limits>
+#include <mutex>
 #include <new>
 #include <span>
 #include <string_view>
@@ -37,6 +41,121 @@
 
 namespace Tina::Render::Bgfx {
 namespace {
+
+// M11-D1: bgfx CallbackI for requestScreenShot. screenShot may run on render thread.
+class BgfxCaptureCallback final : public bgfx::CallbackI {
+  public:
+    void fatal(const char* /*filePath*/, uint16_t /*line*/, bgfx::Fatal::Enum /*code*/,
+               const char* /*str*/) override
+    {
+    }
+
+    void traceVargs(const char* /*filePath*/, uint16_t /*line*/, const char* /*format*/,
+                    va_list /*argList*/) override
+    {
+    }
+
+    void profilerBegin(const char* /*name*/, uint32_t /*abgr*/, const char* /*filePath*/,
+                       uint16_t /*line*/) override
+    {
+    }
+
+    void profilerBeginLiteral(const char* /*name*/, uint32_t /*abgr*/, const char* /*filePath*/,
+                              uint16_t /*line*/) override
+    {
+    }
+
+    void profilerEnd() override {}
+
+    uint32_t cacheReadSize(uint64_t /*id*/) override { return 0; }
+
+    bool cacheRead(uint64_t /*id*/, void* /*data*/, uint32_t /*size*/) override { return false; }
+
+    void cacheWrite(uint64_t /*id*/, const void* /*data*/, uint32_t /*size*/) override {}
+
+    void screenShot(const char* /*filePath*/, uint32_t width, uint32_t height, uint32_t pitch,
+                    bgfx::TextureFormat::Enum /*format*/, const void* data, uint32_t size,
+                    bool yflip) override
+    {
+        std::lock_guard lock(mutex_);
+        if (!pending_ || data == nullptr || width == 0 || height == 0 || pitch < width * 4U ||
+            size < pitch * height)
+        {
+            ready_ = true;
+            return;
+        }
+
+        capture_.width = width;
+        capture_.height = height;
+        capture_.rgba8Pixels.assign(static_cast<std::size_t>(width) * height * 4U, std::byte{0});
+        const auto* srcBase = static_cast<const std::uint8_t*>(data);
+        for (uint32_t y = 0; y < height; ++y)
+        {
+            const uint32_t srcY = yflip ? (height - 1U - y) : y;
+            const auto* srcRow = srcBase + static_cast<std::size_t>(srcY) * pitch;
+            auto* dstRow = reinterpret_cast<std::uint8_t*>(
+                capture_.rgba8Pixels.data() + static_cast<std::size_t>(y) * width * 4U);
+            for (uint32_t x = 0; x < width; ++x)
+            {
+                // bgfx screenshot is BGRA; convert to RGBA8 top-left.
+                const auto* px = srcRow + static_cast<std::size_t>(x) * 4U;
+                dstRow[x * 4U + 0U] = px[2];
+                dstRow[x * 4U + 1U] = px[1];
+                dstRow[x * 4U + 2U] = px[0];
+                dstRow[x * 4U + 3U] = px[3];
+            }
+        }
+        ok_ = true;
+        ready_ = true;
+    }
+
+    void captureBegin(uint32_t /*width*/, uint32_t /*height*/, uint32_t /*pitch*/,
+                      bgfx::TextureFormat::Enum /*format*/, bool /*yflip*/) override
+    {
+    }
+
+    void captureEnd() override {}
+
+    void captureFrame(const void* /*data*/, uint32_t /*size*/) override {}
+
+    void beginCapture()
+    {
+        std::lock_guard lock(mutex_);
+        pending_ = true;
+        ready_ = false;
+        ok_ = false;
+        capture_ = {};
+    }
+
+    [[nodiscard]] bool isReady() const
+    {
+        std::lock_guard lock(mutex_);
+        return ready_;
+    }
+
+    [[nodiscard]] Core::Result<Rgba8FrameCapture> take()
+    {
+        std::lock_guard lock(mutex_);
+        pending_ = false;
+        if (!ready_ || !ok_ || capture_.empty())
+        {
+            return Core::failure(RenderErrorCode::FrameCaptureFailed,
+                                 "bgfx screenshot callback did not produce a valid RGBA8 frame");
+        }
+        Rgba8FrameCapture out = std::move(capture_);
+        capture_ = {};
+        ready_ = false;
+        ok_ = false;
+        return out;
+    }
+
+  private:
+    mutable std::mutex mutex_{};
+    bool pending_ = false;
+    bool ready_ = false;
+    bool ok_ = false;
+    Rgba8FrameCapture capture_{};
+};
 
 constexpr bgfx::ViewId kSurfaceClearView = 0;
 constexpr bgfx::ViewId kOpaque3DView = 1;
@@ -489,6 +608,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         init.resolution.width = initialBackbuffer.width;
         init.resolution.height = initialBackbuffer.height;
         init.resolution.reset = kDefaultResetFlags;
+        // M11-D1: required for requestScreenShot / product pixel evidence.
+        init.callback = &captureCallback_;
 
         if (!bgfx::init(init))
         {
@@ -1174,6 +1295,44 @@ class BgfxRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    // M11-D1: capture primary backbuffer after present (frame must not be open).
+    [[nodiscard]] Core::Result<Rgba8FrameCapture> capturePrimaryFrameRgba8() override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::capturePrimaryFrameRgba8"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (frameOpen_)
+        {
+            return Core::failure(RenderErrorCode::FrameAlreadyOpen,
+                                 "Cannot capture while a bgfx frame is open; present first");
+        }
+        if (captureInFlight_)
+        {
+            return Core::failure(RenderErrorCode::FrameCaptureBusy, "A bgfx frame capture is already in progress");
+        }
+
+        captureInFlight_ = true;
+        captureCallback_.beginCapture();
+        bgfx::requestScreenShot(BGFX_INVALID_HANDLE, "tina-primary-frame");
+        constexpr int kMaxFrames = 8;
+        for (int i = 0; i < kMaxFrames && !captureCallback_.isReady(); ++i)
+        {
+            bgfx::frame();
+        }
+        captureInFlight_ = false;
+        if (!captureCallback_.isReady())
+        {
+            return Core::failure(RenderErrorCode::FrameCaptureFailed,
+                                 "bgfx did not deliver a screenshot within the capture budget");
+        }
+        return captureCallback_.take();
+    }
+
     [[nodiscard]] Core::Status syncUIGlyphAtlas(
         const std::optional<UIGlyphAtlasPageView>& atlas) noexcept
     {
@@ -1349,6 +1508,8 @@ class BgfxRenderDevice final : public IRenderDevice {
     bool frameOpen_ = false;
     bool stopped_ = false;
     bool bgfxInitialized_ = false;
+    bool captureInFlight_ = false;
+    BgfxCaptureCallback captureCallback_{};
 };
 
 [[nodiscard]] Core::Status validateInitialSurfaceForLease(const RenderSurfaceState& initialSurface,
