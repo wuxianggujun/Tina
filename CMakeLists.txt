@@ -61,6 +61,8 @@ option(TINA_BUILD_RENDER_BGFX "Build the private vNext bgfx render backend" OFF)
 option(TINA_BUILD_UI_FREETYPE "Build the private vNext FreeType UI text adapter" OFF)
 option(TINA_BUILD_PHYSICS2D "Build the optional vNext Box2D physics module" OFF)
 option(TINA_BUILD_AUDIO_MINIAUDIO "Build the private vNext miniaudio audio adapter" OFF)
+option(TINA_AUDIO_ENABLE_LIBVORBIS "Enable Ogg Vorbis decoding via libvorbis (optional)" OFF)
+option(TINA_AUDIO_ENABLE_LIBOPUS "Enable Opus decoding via libopus (optional)" OFF)
 option(TINA_BUILD_BENCHMARKS "Build Tina benchmark executables" OFF)
 option(TINA_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
@@ -95,6 +97,32 @@ if (TINA_BUILD_AUDIO_MINIAUDIO AND NOT TINA_BUILD_LEGACY)
         NOT "audio-miniaudio" IN_LIST VCPKG_MANIFEST_FEATURES)
         message(FATAL_ERROR
             "TINA_BUILD_AUDIO_MINIAUDIO requires the vcpkg manifest feature 'audio-miniaudio'.")
+    endif ()
+endif ()
+
+if (TINA_AUDIO_ENABLE_LIBVORBIS)
+    if (NOT TINA_BUILD_AUDIO_MINIAUDIO AND NOT TINA_BUILD_LEGACY)
+        message(FATAL_ERROR
+            "TINA_AUDIO_ENABLE_LIBVORBIS requires TINA_BUILD_AUDIO_MINIAUDIO (or Legacy miniaudio).")
+    endif ()
+    if (NOT TINA_BUILD_LEGACY AND
+        (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
+         NOT "audio-miniaudio-vorbis" IN_LIST VCPKG_MANIFEST_FEATURES))
+        message(FATAL_ERROR
+            "TINA_AUDIO_ENABLE_LIBVORBIS requires vcpkg feature 'audio-miniaudio-vorbis'.")
+    endif ()
+endif ()
+
+if (TINA_AUDIO_ENABLE_LIBOPUS)
+    if (NOT TINA_BUILD_AUDIO_MINIAUDIO AND NOT TINA_BUILD_LEGACY)
+        message(FATAL_ERROR
+            "TINA_AUDIO_ENABLE_LIBOPUS requires TINA_BUILD_AUDIO_MINIAUDIO (or Legacy miniaudio).")
+    endif ()
+    if (NOT TINA_BUILD_LEGACY AND
+        (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
+         NOT "audio-miniaudio-opus" IN_LIST VCPKG_MANIFEST_FEATURES))
+        message(FATAL_ERROR
+            "TINA_AUDIO_ENABLE_LIBOPUS requires vcpkg feature 'audio-miniaudio-opus'.")
     endif ()
 endif ()
 

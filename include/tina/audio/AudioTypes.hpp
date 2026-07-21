@@ -22,6 +22,22 @@ enum class AudioCompletionKind : Core::u8 {
     Started = 1,
     Stopped = 2,
     RejectedStale = 3,
+    RejectedNoClip = 4,
+};
+
+// Non-owning interleaved float32 PCM. Caller keeps memory valid until the
+// voice is stopped (or clearVoiceClip) and any Stop completion is pumped.
+// Not an AssetLease; Asset clip binding is a later slice.
+struct AudioPcmClipView final {
+    const float* frames = nullptr;
+    Core::u64 frameCount = 0;
+    Core::u32 channels = 0;
+    Core::u32 sampleRate = 0;
+
+    [[nodiscard]] bool empty() const noexcept
+    {
+        return frames == nullptr || frameCount == 0 || channels == 0 || sampleRate == 0;
+    }
 };
 
 // Product settings surface (M11 bus slice). Values are linear gain in [0, 1].
@@ -57,6 +73,10 @@ struct AudioEngineStats final {
     Core::usize completedStarted = 0;
     Core::usize completedStopped = 0;
     Core::usize completedRejectedStale = 0;
+    Core::usize completedRejectedNoClip = 0;
+    Core::usize boundClipVoices = 0;
+    Core::usize activeMixVoices = 0;
+    Core::u64 mixFramesRendered = 0;
 };
 
 // One drained completion event (owner-thread local; not a frame-arena borrow).

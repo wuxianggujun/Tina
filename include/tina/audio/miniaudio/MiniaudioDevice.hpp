@@ -6,6 +6,7 @@
 #include <tina/core/error/Result.hpp>
 
 #include <memory_resource>
+#include <utility>
 
 namespace Tina::Audio {
 
@@ -30,7 +31,11 @@ class MiniaudioDevice final {
     MiniaudioDevice(const MiniaudioDevice&) = delete;
     MiniaudioDevice& operator=(const MiniaudioDevice&) = delete;
     MiniaudioDevice(MiniaudioDevice&& other) noexcept;
-    MiniaudioDevice& operator=(MiniaudioDevice&&) = delete;
+    MiniaudioDevice& operator=(MiniaudioDevice&& other) noexcept;
+
+    // Optional mixer source for dataCallback (non-owning). Safe to set before start.
+    // nullptr → silence only. Engine must outlive the device while attached.
+    void attachMixer(AudioEngine* engine) noexcept;
 
     [[nodiscard]] Core::Status start() noexcept;
     void stop() noexcept;
@@ -51,9 +56,36 @@ class MiniaudioDevice final {
 
 // Convenience: AudioEngine (commands/bus) + miniaudio device.
 // Device failure returns structured error without leaking a half-started engine.
+// Move re-attaches the mixer pointer to the relocated engine address.
 struct MiniaudioAudioBundle final {
     AudioEngine engine;
     MiniaudioDevice device;
+
+    MiniaudioAudioBundle(AudioEngine eng, MiniaudioDevice dev) noexcept
+        : engine(std::move(eng)), device(std::move(dev))
+    {
+        device.attachMixer(&engine);
+    }
+
+    MiniaudioAudioBundle(MiniaudioAudioBundle&& other) noexcept
+        : engine(std::move(other.engine)), device(std::move(other.device))
+    {
+        device.attachMixer(&engine);
+    }
+
+    MiniaudioAudioBundle& operator=(MiniaudioAudioBundle&& other) noexcept
+    {
+        if (this != &other)
+        {
+            engine = std::move(other.engine);
+            device = std::move(other.device);
+            device.attachMixer(&engine);
+        }
+        return *this;
+    }
+
+    MiniaudioAudioBundle(const MiniaudioAudioBundle&) = delete;
+    MiniaudioAudioBundle& operator=(const MiniaudioAudioBundle&) = delete;
 };
 
 [[nodiscard]] Core::Result<MiniaudioAudioBundle> createMiniaudioAudioBundle(

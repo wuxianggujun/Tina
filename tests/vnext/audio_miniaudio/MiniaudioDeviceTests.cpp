@@ -75,6 +75,11 @@ TEST(MiniaudioDeviceTest, BundleCreatesEngineAndNullDevice)
 
         auto voice = bundle->engine.createVoice();
         ASSERT_TRUE(voice.has_value());
+        const float pcm[4] = {0.0F, 0.5F, 0.0F, -0.5F};
+        ASSERT_TRUE(bundle->engine
+                        .bindVoiceClip(*voice, AudioPcmClipView{.frames = pcm, .frameCount = 4, .channels = 1,
+                                                                .sampleRate = 8000})
+                        .has_value());
         ASSERT_TRUE(bundle->engine.enqueuePlay(*voice).has_value());
         ASSERT_TRUE(bundle->device.start().has_value());
 

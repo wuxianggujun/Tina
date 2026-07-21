@@ -17,9 +17,24 @@
       ]
     },
     "audio-miniaudio": {
-      "description": "Build the private Tina vNext miniaudio audio adapter.",
+      "description": "Build the private Tina vNext miniaudio audio adapter (WAV/FLAC/MP3 built-in).",
       "dependencies": [
         "miniaudio"
+      ]
+    },
+    "audio-miniaudio-vorbis": {
+      "description": "Optional Ogg Vorbis decoding for Tina::AudioMiniaudio (libvorbis).",
+      "dependencies": [
+        "miniaudio",
+        "libvorbis"
+      ]
+    },
+    "audio-miniaudio-opus": {
+      "description": "Optional Opus decoding for Tina::AudioMiniaudio (libopus + opusfile).",
+      "dependencies": [
+        "miniaudio",
+        "opus",
+        "opusfile"
       ]
     },
     "platform-glfw": {

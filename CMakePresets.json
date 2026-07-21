@@ -75,6 +75,18 @@
       }
     },
     {
+      "name": "windows-msvc-vnext-audio-miniaudio-codecs",
+      "displayName": "Windows x64 vNext Audio miniaudio + optional Vorbis/Opus codecs",
+      "inherits": "windows-msvc-vnext-audio-miniaudio",
+      "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-audio-miniaudio-codecs",
+      "cacheVariables": {
+        "TINA_BUILD_AUDIO_MINIAUDIO": "ON",
+        "TINA_AUDIO_ENABLE_LIBVORBIS": "ON",
+        "TINA_AUDIO_ENABLE_LIBOPUS": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tests;audio-miniaudio;audio-miniaudio-vorbis;audio-miniaudio-opus"
+      }
+    },
+    {
       "name": "windows-msvc-vnext-platform",
       "displayName": "Windows x64 vNext Platform (MSVC 2026 + GLFW + C++23)",
       "inherits": "windows-msvc",
@@ -322,6 +334,12 @@
       "name": "windows-vnext-audio-miniaudio-release",
       "configurePreset": "windows-msvc-vnext-audio-miniaudio",
       "configuration": "Release",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vnext-audio-miniaudio-codecs-debug",
+      "configurePreset": "windows-msvc-vnext-audio-miniaudio-codecs",
+      "configuration": "Debug",
       "jobs": 2
     },
     {

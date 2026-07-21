@@ -12,11 +12,12 @@ namespace Tina::Audio {
 
 // Backend-agnostic AudioEngine.
 // M11-A7: Disabled lifecycle + generation voices.
-// M11-A8: fixed command/completion rings; enqueuePlay/Stop; pumpCompletions
-// flushes commands (Disabled applies immediately, no device/PCM) then drains
-// completions into the caller's buffer.
+// M11-A8: fixed command/completion rings; enqueuePlay/Stop; pumpCompletions.
 // Bus Master/Music/SFX volume+mute are owner-thread state for settings UI.
-// miniaudio adapter / EngineHost later.
+// M11-A11: non-owning PCM clip bind per voice; Play without clip -> RejectedNoClip.
+// M11-A12: realtime mixRealtime (atomic mix slots) for miniaudio dataCallback.
+// M11-A13: playOneShotPcm convenience (create+bind+enqueuePlay).
+// AssetLease / EngineHost later.
 class AudioEngine final {
   public:
     [[nodiscard]] static Core::Result<AudioEngine> Create(
@@ -28,7 +29,7 @@ class AudioEngine final {
     AudioEngine(const AudioEngine&) = delete;
     AudioEngine& operator=(const AudioEngine&) = delete;
     AudioEngine(AudioEngine&& other) noexcept;
-    AudioEngine& operator=(AudioEngine&&) = delete;
+    AudioEngine& operator=(AudioEngine&& other) noexcept;
 
     [[nodiscard]] AudioEngineState state() const noexcept;
     [[nodiscard]] Core::Result<AudioEngineStats> stats() const noexcept;
@@ -38,6 +39,12 @@ class AudioEngine final {
     [[nodiscard]] Core::Result<bool> isVoiceLive(AudioVoiceId voice) const noexcept;
     [[nodiscard]] Core::Result<bool> isVoicePlaying(AudioVoiceId voice) const noexcept;
 
+    // Bind/clear non-owning PCM for a live voice. Invalid/empty clip rejected.
+    // Caller keeps frames valid until Stop completion (or clear while not playing).
+    [[nodiscard]] Core::Status bindVoiceClip(AudioVoiceId voice, AudioPcmClipView clip) noexcept;
+    [[nodiscard]] Core::Status clearVoiceClip(AudioVoiceId voice) noexcept;
+    [[nodiscard]] Core::Result<AudioPcmClipView> voiceClip(AudioVoiceId voice) const noexcept;
+
     // Linear gain [0,1]; non-finite / out-of-range rejected. Mute does not clear volume.
     [[nodiscard]] Core::Status setBusVolume(AudioBusId bus, float volume) noexcept;
     [[nodiscard]] Core::Status setBusMuted(AudioBusId bus, bool muted) noexcept;
@@ -46,14 +53,22 @@ class AudioEngine final {
     [[nodiscard]] Core::Result<float> effectiveBusGain(AudioBusId bus) const noexcept;
 
     // Queue Play/Stop for a live voice. Stale/empty voice fails without enqueue.
+    // Play with no bound clip still enqueues; apply yields RejectedNoClip (not Started).
     // Full command ring returns CapacityExceeded (Play may be retried next frame).
     [[nodiscard]] Core::Status enqueuePlay(AudioVoiceId voice) noexcept;
     [[nodiscard]] Core::Status enqueueStop(AudioVoiceId voice) noexcept;
 
-    // 1) Apply all pending commands (Disabled path: update voice state + push
-    //    completions; no PCM). 2) Drain up to budget completions into out
-    //    (budget==0 means all available, capped by out.size()). Returns the
-    //    number of completion events written.
+    // createVoice + bindVoiceClip + enqueuePlay. Does not pump; call pumpCompletions
+    // next to apply and receive Started. Frames must outlive Stop completion.
+    [[nodiscard]] Core::Result<AudioVoiceId> playOneShotPcm(AudioPcmClipView clip) noexcept;
+
+    // Real-time safe mixer: zeros out, sums active voice clips (float32), advances
+    // cursors. Natural end deactivates the mix slot; pumpCompletions emits Stopped.
+    // No allocation / no owner-thread requirement. outChannels must be 1 or 2.
+    void mixRealtime(float* interleavedOut, Core::u32 outFrames, Core::u32 outChannels,
+                     Core::u32 outSampleRate) noexcept;
+
+    // 1) Apply pending commands. 2) Convert natural-end flags to Stopped. 3) Drain.
     [[nodiscard]] Core::Result<Core::u32> pumpCompletions(
         std::span<AudioCompletionEvent> out, Core::u32 budget = 0) noexcept;
 

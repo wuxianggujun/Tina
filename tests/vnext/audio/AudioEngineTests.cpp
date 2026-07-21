@@ -142,6 +142,12 @@ TEST(AudioEngineTest, PlayStopProduceCompletionsOnPump)
     auto voice = engine->createVoice();
     ASSERT_TRUE(voice.has_value()) << (voice ? "" : voice.error().message);
 
+    const float pcm[4] = {0.0F, 0.25F, 0.0F, -0.25F};
+    ASSERT_TRUE(engine
+                    ->bindVoiceClip(*voice, AudioPcmClipView{.frames = pcm, .frameCount = 4, .channels = 1,
+                                                             .sampleRate = 8000})
+                    .has_value());
+
     ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
     auto playingBefore = engine->isVoicePlaying(*voice);
     ASSERT_TRUE(playingBefore.has_value());
@@ -252,6 +258,201 @@ TEST(AudioEngineTest, BusVolumeMuteAndEffectiveGain)
 
     expectFailureCode(engine->setBusVolume(AudioBusId::Music, -0.1F), AudioErrorCode::InvalidConfiguration);
     expectFailureCode(engine->setBusVolume(AudioBusId::Music, 1.5F), AudioErrorCode::InvalidConfiguration);
+}
+
+TEST(AudioEngineTest, PlayWithoutClipYieldsRejectedNoClip)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 2, .commandCapacity = 4, .completionCapacity = 4});
+    ASSERT_TRUE(engine.has_value()) << (engine ? "" : engine.error().message);
+    auto voice = engine->createVoice();
+    ASSERT_TRUE(voice.has_value());
+
+    ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
+    AudioCompletionEvent events[2]{};
+    auto pumped = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(pumped.has_value());
+    ASSERT_EQ(*pumped, 1U);
+    EXPECT_EQ(events[0].kind, AudioCompletionKind::RejectedNoClip);
+    auto playing = engine->isVoicePlaying(*voice);
+    ASSERT_TRUE(playing.has_value());
+    EXPECT_FALSE(*playing);
+
+    auto stats = engine->stats();
+    ASSERT_TRUE(stats.has_value());
+    EXPECT_EQ(stats->completedRejectedNoClip, 1U);
+}
+
+TEST(AudioEngineTest, BindClipThenPlayStop)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 2, .commandCapacity = 8, .completionCapacity = 8});
+    ASSERT_TRUE(engine.has_value()) << (engine ? "" : engine.error().message);
+    auto voice = engine->createVoice();
+    ASSERT_TRUE(voice.has_value());
+
+    const float pcm[8] = {0.0F, 0.1F, 0.2F, 0.1F, 0.0F, -0.1F, -0.2F, -0.1F};
+    const AudioPcmClipView clip{
+        .frames = pcm,
+        .frameCount = 8,
+        .channels = 1,
+        .sampleRate = 8000,
+    };
+    ASSERT_TRUE(engine->bindVoiceClip(*voice, clip).has_value());
+    auto bound = engine->voiceClip(*voice);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(bound->frameCount, 8U);
+    EXPECT_EQ(bound->frames, pcm);
+
+    auto statsBound = engine->stats();
+    ASSERT_TRUE(statsBound.has_value());
+    EXPECT_EQ(statsBound->boundClipVoices, 1U);
+
+    ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
+    AudioCompletionEvent events[2]{};
+    auto startPump = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(startPump.has_value());
+    ASSERT_EQ(*startPump, 1U);
+    EXPECT_EQ(events[0].kind, AudioCompletionKind::Started);
+    auto playing = engine->isVoicePlaying(*voice);
+    ASSERT_TRUE(playing.has_value());
+    EXPECT_TRUE(*playing);
+
+    expectFailureCode(engine->bindVoiceClip(*voice, clip), AudioErrorCode::InvalidConfiguration);
+    expectFailureCode(engine->clearVoiceClip(*voice), AudioErrorCode::InvalidConfiguration);
+
+    ASSERT_TRUE(engine->enqueueStop(*voice).has_value());
+    auto stopPump = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(stopPump.has_value());
+    ASSERT_EQ(*stopPump, 1U);
+    EXPECT_EQ(events[0].kind, AudioCompletionKind::Stopped);
+
+    ASSERT_TRUE(engine->clearVoiceClip(*voice).has_value());
+    auto cleared = engine->voiceClip(*voice);
+    ASSERT_TRUE(cleared.has_value());
+    EXPECT_TRUE(cleared->empty());
+    auto statsClear = engine->stats();
+    ASSERT_TRUE(statsClear.has_value());
+    EXPECT_EQ(statsClear->boundClipVoices, 0U);
+}
+
+TEST(AudioEngineTest, RejectsInvalidClipView)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 1});
+    ASSERT_TRUE(engine.has_value());
+    auto voice = engine->createVoice();
+    ASSERT_TRUE(voice.has_value());
+
+    const float sample = 0.0F;
+    expectFailureCode(engine->bindVoiceClip(*voice, AudioPcmClipView{}), AudioErrorCode::InvalidConfiguration);
+    expectFailureCode(engine->bindVoiceClip(*voice,
+                                            AudioPcmClipView{.frames = &sample, .frameCount = 1, .channels = 0,
+                                                             .sampleRate = 8000}),
+                      AudioErrorCode::InvalidConfiguration);
+    expectFailureCode(engine->bindVoiceClip(*voice,
+                                            AudioPcmClipView{.frames = &sample, .frameCount = 1, .channels = 1,
+                                                             .sampleRate = 10}),
+                      AudioErrorCode::InvalidConfiguration);
+}
+
+TEST(AudioEngineTest, MixRealtimeSumsClipAndNaturalEndStops)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 2, .commandCapacity = 8, .completionCapacity = 8});
+    ASSERT_TRUE(engine.has_value()) << (engine ? "" : engine.error().message);
+    auto voice = engine->createVoice();
+    ASSERT_TRUE(voice.has_value());
+
+    // 4 mono frames @ 48000, constant 0.5 — same rate as mix out.
+    const float pcm[4] = {0.5F, 0.5F, 0.5F, 0.5F};
+    ASSERT_TRUE(engine
+                    ->bindVoiceClip(*voice, AudioPcmClipView{.frames = pcm, .frameCount = 4, .channels = 1,
+                                                             .sampleRate = 48000})
+                    .has_value());
+    ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
+    ASSERT_TRUE(engine->pumpCompletions(4).has_value());
+
+    float out[8]{};
+    engine->mixRealtime(out, /*outFrames=*/2, /*outChannels=*/2, /*outSampleRate=*/48000);
+    EXPECT_NEAR(out[0], 0.5F, 1.0e-4F);
+    EXPECT_NEAR(out[1], 0.5F, 1.0e-4F);
+    EXPECT_NEAR(out[2], 0.5F, 1.0e-4F);
+    EXPECT_NEAR(out[3], 0.5F, 1.0e-4F);
+
+    float out2[8]{};
+    engine->mixRealtime(out2, 2, 2, 48000);
+    EXPECT_NEAR(out2[0], 0.5F, 1.0e-4F);
+
+    // Clip exhausted → natural end → Stopped on pump.
+    float silence[8]{};
+    engine->mixRealtime(silence, 2, 2, 48000);
+    for (float sample : silence)
+    {
+        EXPECT_FLOAT_EQ(sample, 0.0F);
+    }
+
+    AudioCompletionEvent events[4]{};
+    auto pumped = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(pumped.has_value());
+    ASSERT_GE(*pumped, 1U);
+    bool sawStop = false;
+    for (Core::u32 i = 0; i < *pumped; ++i)
+    {
+        if (events[i].kind == AudioCompletionKind::Stopped)
+        {
+            sawStop = true;
+        }
+    }
+    EXPECT_TRUE(sawStop);
+    auto playing = engine->isVoicePlaying(*voice);
+    ASSERT_TRUE(playing.has_value());
+    EXPECT_FALSE(*playing);
+
+    auto stats = engine->stats();
+    ASSERT_TRUE(stats.has_value());
+    EXPECT_GE(stats->mixFramesRendered, 4U);
+}
+
+TEST(AudioEngineTest, MixRealtimeMuteWhenMasterMuted)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 1, .commandCapacity = 4, .completionCapacity = 4});
+    ASSERT_TRUE(engine.has_value());
+    auto voice = engine->createVoice();
+    ASSERT_TRUE(voice.has_value());
+    const float pcm[2] = {1.0F, 1.0F};
+    ASSERT_TRUE(engine
+                    ->bindVoiceClip(*voice, AudioPcmClipView{.frames = pcm, .frameCount = 2, .channels = 1,
+                                                             .sampleRate = 48000})
+                    .has_value());
+    ASSERT_TRUE(engine->setBusMuted(AudioBusId::Master, true).has_value());
+    ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
+    ASSERT_TRUE(engine->pumpCompletions(2).has_value());
+
+    float out[4]{};
+    engine->mixRealtime(out, 2, 2, 48000);
+    EXPECT_FLOAT_EQ(out[0], 0.0F);
+    EXPECT_FLOAT_EQ(out[1], 0.0F);
+}
+
+TEST(AudioEngineTest, PlayOneShotPcmBindsAndStarts)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 2, .commandCapacity = 4, .completionCapacity = 4});
+    ASSERT_TRUE(engine.has_value()) << (engine ? "" : engine.error().message);
+    const float pcm[4] = {0.25F, 0.25F, 0.25F, 0.25F};
+    auto voice = engine->playOneShotPcm(
+        AudioPcmClipView{.frames = pcm, .frameCount = 4, .channels = 1, .sampleRate = 48000});
+    ASSERT_TRUE(voice.has_value()) << (voice ? "" : voice.error().message);
+
+    AudioCompletionEvent events[2]{};
+    auto pumped = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(pumped.has_value());
+    ASSERT_EQ(*pumped, 1U);
+    EXPECT_EQ(events[0].kind, AudioCompletionKind::Started);
+    EXPECT_EQ(events[0].voice, *voice);
+
+    float out[4]{};
+    engine->mixRealtime(out, 2, 1, 48000);
+    EXPECT_NEAR(out[0], 0.25F, 1.0e-4F);
+    EXPECT_NEAR(out[1], 0.25F, 1.0e-4F);
+
+    expectFailureCode(engine->playOneShotPcm(AudioPcmClipView{}), AudioErrorCode::InvalidConfiguration);
 }
 
 } // namespace

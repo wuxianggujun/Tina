@@ -1,14 +1,26 @@
 # Audio 生命周期与实时线程契约
 
-> 状态：vNext 契约文档。M11-A7 Disabled 生命周期；M11-A8 命令/完成环 + bus；M11-A9
-> `tina_audio_miniaudio` 设备适配（null backend 可测）。真实设备固定为 miniaudio（ADR 0012），
+> 状态：vNext 契约文档。M11-A7–A13：Disabled 生命周期、命令/完成环、bus、miniaudio null 设备、
+> 可扩展解码、PCM clip 绑定、`mixRealtime`、`playOneShotPcm`。真实设备固定为 miniaudio（ADR 0012），
 > 不引入 SDL_mixer 或第二套音频库。
 
 ## 模块边界
 
 `tina_audio` 提供后端无关的 AudioEngine、Bus、Voice、Listener、实时队列与 Disabled backend；
-`tina_audio_miniaudio` 才包含具体设备/callback/stream 实现，miniaudio 类型只存在于该 adapter。
+`tina_audio_miniaudio` 才包含具体设备/callback/stream/decode 实现，miniaudio 类型只存在于该 adapter。
 Scene/World 不直接依赖音频后端；Gameplay 把播放、停止和参数修改提交给 AudioEngine。
+
+## 解码格式与可扩展性（M11-A10）
+
+| 格式 | 默认（`audio-miniaudio`） | 可选开启 |
+| --- | --- | --- |
+| WAV / FLAC / MP3 | 始终可用（miniaudio 内置） | — |
+| Ogg Vorbis | 关闭（`MA_NO_LIBVORBIS`） | `TINA_AUDIO_ENABLE_LIBVORBIS=ON` + vcpkg `audio-miniaudio-vorbis` |
+| Opus | 关闭（`MA_NO_LIBOPUS`） | `TINA_AUDIO_ENABLE_LIBOPUS=ON` + vcpkg `audio-miniaudio-opus` |
+
+运行时用 `queryAudioDecodeCapabilities()` 查询；`decodeAudioMemory` 在关闭可选编解码时对
+Ogg 魔数返回 `CodecNotEnabled`，其它损坏/未知负载返回 `DecodeFailed`。产品默认图保持小依赖；
+需要更多格式的集成方可按 feature 打开，无需改 Tina 公共 API。
 
 首期范围：
 
@@ -16,7 +28,10 @@ Scene/World 不直接依赖音频后端；Gameplay 把播放、停止和参数�
 - 短音效播放、停止、音量、pitch、loop 和基础3D位置；
 - 一条可取消的流式 Music 路径；
 - generation `AudioVoiceId`、主线程命令队列和 callback → main completion；
-- 设备不可用时显式 Disabled 状态，使无声运行仍可测试。
+- 设备不可用时显式 Disabled 状态，使无声运行仍可测试；
+- 内存解码 → float32 PCM（callback 外）；
+- voice 绑定非拥有 PCM + `mixRealtime`（同采样率；Master×SFX gain；播完 natural Stopped）；
+- AssetLease/Cooked clip、重采样、EngineHost 接线后置。
 
 混响、DSP Graph、空间遮挡、HRTF、编辑器预览和复杂 voice virtualization 后置。
 

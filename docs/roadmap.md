@@ -685,9 +685,13 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   无 PCM）；满队列 `CapacityExceeded`、stale voice 拒绝；stats 含 pending/rejected/completed 计数；
   Master/Music/SFX bus volume+mute 与 effective gain（设置 UI 状态面，仍无设备混音）；
 - M11-A9 已完成：可选 `Tina::AudioMiniaudio` / `MiniaudioDevice`（vcpkg feature `audio-miniaudio`、
-  preset `windows-msvc-vnext-audio-miniaudio`）；`ma_backend_null` hermetic 设备 start/stop/shutdown、
-  实时 callback 仅写静音 + atomic 计数；`createMiniaudioAudioBundle` 组合 AudioEngine+device；
-  独立 `tina_audio_miniaudio_tests`。真实 OS 设备、混音读 voice、EngineHost 接线仍后置；
+  preset `windows-msvc-vnext-audio-miniaudio`）；`ma_backend_null` hermetic 设备；
+  `createMiniaudioAudioBundle`；独立 `tina_audio_miniaudio_tests`；
+- M11-A10 已完成：可扩展解码（默认 WAV/FLAC/MP3；可选 Vorbis/Opus feature）；
+  `queryAudioDecodeCapabilities` + `decodeAudioMemory`/`freeDecodedPcm`；
+- M11-A11 已完成：`bindVoiceClip` 非拥有 PCM；Play 无 clip→`RejectedNoClip`；
+- M11-A12 已完成：`mixRealtime` RT 混音 + `attachMixer`；播完 natural `Stopped`；
+- M11-A13 已完成：`playOneShotPcm` + decode→play→mix e2e 测试；**仍非 AssetLease/EngineHost/sample SFX**；
 - M11-B0 已完成：`Tina::Render` `Camera2DProjection` 纯函数（`FixedWorldHeight2D` /
   `PixelPerfect2D` + framebuffer viewport → worldWidth/Height + `actualPixelsPerMeter`；
   PixelPerfect 强制 `CameraAndSprites`；0×0 surface 结构化失败）。`tina_render_scene_tests` 8 项；

@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -156,12 +158,30 @@ Core::Status validateAudioEngineConfig(const AudioEngineConfig& config) noexcept
 }
 
 struct AudioEngine::Impl final {
+    // Realtime-readable mix slot. Main thread publishes; mixRealtime advances cursor.
+    struct MixSlot final {
+        std::atomic<const float*> frames{nullptr};
+        std::atomic<Core::u64> frameCount{0};
+        std::atomic<Core::u32> channels{0};
+        std::atomic<Core::u32> sampleRate{0};
+        std::atomic<Core::u64> cursor{0};
+        std::atomic<float> gain{1.0F};
+        std::atomic<bool> active{false};
+        std::atomic<bool> finished{false};
+        AudioVoiceId voice{};
+    };
+
     struct VoiceRecord final {
         AudioVoiceId id{};
         bool playing = false;
+        bool hasClip = false;
+        AudioPcmClipView clip{};
+        Core::u32 mixSlot = InvalidMixSlot;
     };
 
     using VoicePool = Core::GenerationPool<VoiceRecord, Detail::AudioVoiceRegistryTag>;
+    static constexpr Core::u32 InvalidMixSlot = (std::numeric_limits<Core::u32>::max)();
+    static constexpr Core::usize MaxMixSlots = 32;
 
     Impl(AudioEngineConfig engineConfig, VoicePool voicePool, FixedRing<AudioCommand> commandRing,
          FixedRing<AudioCompletion> completionRing, std::thread::id ownerThread) noexcept
@@ -172,6 +192,18 @@ struct AudioEngine::Impl final {
           owner(ownerThread),
           state(AudioEngineState::Disabled)
     {
+        for (auto& slot : mixSlots)
+        {
+            slot.active.store(false, std::memory_order_relaxed);
+            slot.finished.store(false, std::memory_order_relaxed);
+            slot.frames.store(nullptr, std::memory_order_relaxed);
+            slot.frameCount.store(0, std::memory_order_relaxed);
+            slot.channels.store(0, std::memory_order_relaxed);
+            slot.sampleRate.store(0, std::memory_order_relaxed);
+            slot.cursor.store(0, std::memory_order_relaxed);
+            slot.gain.store(1.0F, std::memory_order_relaxed);
+            slot.voice = {};
+        }
     }
 
     ~Impl() noexcept
@@ -262,15 +294,212 @@ struct AudioEngine::Impl final {
             switch (command.kind)
             {
             case AudioCommandKind::Play:
+                if (!record->hasClip || record->clip.empty())
+                {
+                    record->playing = false;
+                    deactivateMixSlot(*record);
+                    pushCompletion(AudioCompletionKind::RejectedNoClip, command.voice, command.sequence);
+                    break;
+                }
+                if (!activateMixSlot(*record, computeSfxGain()))
+                {
+                    record->playing = false;
+                    pushCompletion(AudioCompletionKind::RejectedNoClip, command.voice, command.sequence);
+                    break;
+                }
                 record->playing = true;
                 pushCompletion(AudioCompletionKind::Started, command.voice, command.sequence);
                 break;
             case AudioCommandKind::Stop:
                 record->playing = false;
+                deactivateMixSlot(*record);
                 pushCompletion(AudioCompletionKind::Stopped, command.voice, command.sequence);
                 break;
             }
         }
+    }
+
+    [[nodiscard]] float computeSfxGain() const noexcept
+    {
+        const AudioBusState& master = buses[static_cast<Core::usize>(AudioBusId::Master)];
+        const AudioBusState& sfx = buses[static_cast<Core::usize>(AudioBusId::Sfx)];
+        if (master.muted || sfx.muted)
+        {
+            return 0.0F;
+        }
+        return master.volume * sfx.volume;
+    }
+
+    void publishBusGainToActiveSlots() noexcept
+    {
+        const float gain = computeSfxGain();
+        for (auto& slot : mixSlots)
+        {
+            if (slot.active.load(std::memory_order_relaxed))
+            {
+                slot.gain.store(gain, std::memory_order_relaxed);
+            }
+        }
+    }
+
+    [[nodiscard]] bool activateMixSlot(VoiceRecord& record, float gain) noexcept
+    {
+        deactivateMixSlot(record);
+        for (Core::u32 index = 0; index < MaxMixSlots; ++index)
+        {
+            MixSlot& slot = mixSlots[index];
+            if (slot.active.load(std::memory_order_relaxed))
+            {
+                continue;
+            }
+            slot.voice = record.id;
+            slot.frames.store(record.clip.frames, std::memory_order_relaxed);
+            slot.frameCount.store(record.clip.frameCount, std::memory_order_relaxed);
+            slot.channels.store(record.clip.channels, std::memory_order_relaxed);
+            slot.sampleRate.store(record.clip.sampleRate, std::memory_order_relaxed);
+            slot.cursor.store(0, std::memory_order_relaxed);
+            slot.gain.store(gain, std::memory_order_relaxed);
+            slot.finished.store(false, std::memory_order_relaxed);
+            slot.active.store(true, std::memory_order_release);
+            record.mixSlot = index;
+            return true;
+        }
+        return false;
+    }
+
+    void deactivateMixSlot(VoiceRecord& record) noexcept
+    {
+        if (record.mixSlot == InvalidMixSlot || record.mixSlot >= MaxMixSlots)
+        {
+            record.mixSlot = InvalidMixSlot;
+            return;
+        }
+        MixSlot& slot = mixSlots[record.mixSlot];
+        slot.active.store(false, std::memory_order_release);
+        slot.finished.store(false, std::memory_order_relaxed);
+        slot.frames.store(nullptr, std::memory_order_relaxed);
+        slot.cursor.store(0, std::memory_order_relaxed);
+        slot.voice = {};
+        record.mixSlot = InvalidMixSlot;
+    }
+
+    void harvestNaturalEnds() noexcept
+    {
+        for (Core::u32 index = 0; index < MaxMixSlots; ++index)
+        {
+            MixSlot& slot = mixSlots[index];
+            if (!slot.finished.load(std::memory_order_acquire))
+            {
+                continue;
+            }
+            slot.finished.store(false, std::memory_order_relaxed);
+            slot.active.store(false, std::memory_order_release);
+            const AudioVoiceId voice = slot.voice;
+            slot.voice = {};
+            slot.frames.store(nullptr, std::memory_order_relaxed);
+            if (!voice.hasValue())
+            {
+                continue;
+            }
+            if (auto* record = voices.tryGet(voice); record != nullptr)
+            {
+                record->playing = false;
+                record->mixSlot = InvalidMixSlot;
+            }
+            pushCompletion(AudioCompletionKind::Stopped, voice, 0);
+        }
+    }
+
+    void mixRealtime(float* interleavedOut, Core::u32 outFrames, Core::u32 outChannels,
+                     Core::u32 outSampleRate) noexcept
+    {
+        if (interleavedOut == nullptr || outFrames == 0 || (outChannels != 1 && outChannels != 2) ||
+            outSampleRate == 0)
+        {
+            return;
+        }
+        const Core::usize sampleCount = static_cast<Core::usize>(outFrames) * outChannels;
+        std::memset(interleavedOut, 0, sampleCount * sizeof(float));
+        if (closed || state == AudioEngineState::Stopped)
+        {
+            return;
+        }
+
+        for (auto& slot : mixSlots)
+        {
+            if (!slot.active.load(std::memory_order_acquire))
+            {
+                continue;
+            }
+            const float* frames = slot.frames.load(std::memory_order_relaxed);
+            const Core::u64 frameCount = slot.frameCount.load(std::memory_order_relaxed);
+            const Core::u32 channels = slot.channels.load(std::memory_order_relaxed);
+            const Core::u32 sampleRate = slot.sampleRate.load(std::memory_order_relaxed);
+            if (frames == nullptr || frameCount == 0 || channels == 0 || sampleRate == 0)
+            {
+                continue;
+            }
+            Core::u64 cursor = slot.cursor.load(std::memory_order_relaxed);
+            if (cursor >= frameCount)
+            {
+                slot.active.store(false, std::memory_order_release);
+                slot.finished.store(true, std::memory_order_release);
+                continue;
+            }
+            const float gain = slot.gain.load(std::memory_order_relaxed);
+            // A12: same-rate mix only; mismatched rates are muted (no allocation resampler).
+            if (sampleRate != outSampleRate)
+            {
+                continue;
+            }
+            for (Core::u32 f = 0; f < outFrames; ++f)
+            {
+                if (cursor >= frameCount)
+                {
+                    slot.active.store(false, std::memory_order_release);
+                    slot.finished.store(true, std::memory_order_release);
+                    break;
+                }
+                const Core::u64 base = cursor * channels;
+                if (outChannels == 1)
+                {
+                    float sample = frames[base] * gain;
+                    if (channels >= 2)
+                    {
+                        sample = 0.5F * (frames[base] + frames[base + 1]) * gain;
+                    }
+                    interleavedOut[f] += sample;
+                }
+                else
+                {
+                    const float left = frames[base] * gain;
+                    const float right = channels >= 2 ? frames[base + 1] * gain : left;
+                    interleavedOut[static_cast<Core::usize>(f) * 2U] += left;
+                    interleavedOut[static_cast<Core::usize>(f) * 2U + 1U] += right;
+                }
+                ++cursor;
+            }
+            slot.cursor.store(cursor, std::memory_order_relaxed);
+            if (cursor >= frameCount)
+            {
+                slot.active.store(false, std::memory_order_release);
+                slot.finished.store(true, std::memory_order_release);
+            }
+        }
+        mixFramesRendered += outFrames;
+    }
+
+    [[nodiscard]] Core::usize countActiveMixSlots() const noexcept
+    {
+        Core::usize count = 0;
+        for (const auto& slot : mixSlots)
+        {
+            if (slot.active.load(std::memory_order_relaxed))
+            {
+                ++count;
+            }
+        }
+        return count;
     }
 
     [[nodiscard]] Core::u32 drainCompletions(std::span<AudioCompletionEvent> out, Core::u32 budget) noexcept
@@ -297,6 +526,9 @@ struct AudioEngine::Impl final {
             case AudioCompletionKind::RejectedStale:
                 ++completedRejectedStale;
                 break;
+            case AudioCompletionKind::RejectedNoClip:
+                ++completedRejectedNoClip;
+                break;
             }
             ++written;
         }
@@ -308,11 +540,35 @@ struct AudioEngine::Impl final {
         return static_cast<Core::u8>(bus) < static_cast<Core::u8>(AudioBusCount);
     }
 
+    [[nodiscard]] static Core::Status validateClipView(const AudioPcmClipView& clip) noexcept
+    {
+        if (clip.empty())
+        {
+            return fail(AudioErrorCode::InvalidConfiguration, "AudioPcmClipView is empty");
+        }
+        if (clip.channels == 0 || clip.channels > 8)
+        {
+            return fail(AudioErrorCode::InvalidConfiguration, "AudioPcmClipView channels must be in [1, 8]");
+        }
+        if (clip.sampleRate < 1000 || clip.sampleRate > 192000)
+        {
+            return fail(AudioErrorCode::InvalidConfiguration, "AudioPcmClipView sampleRate out of range");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::usize countBoundClips() const noexcept
+    {
+        // GenerationPool has no full scan iterator; track on bind/clear instead.
+        return boundClipVoices;
+    }
+
     AudioEngineConfig config{};
     VoicePool voices;
     FixedRing<AudioCommand> commands{};
     FixedRing<AudioCompletion> completions{};
     std::array<AudioBusState, AudioBusCount> buses{};
+    std::array<MixSlot, MaxMixSlots> mixSlots{};
     std::thread::id owner{};
     AudioEngineState state = AudioEngineState::Uninitialized;
     bool closed = false;
@@ -321,6 +577,9 @@ struct AudioEngine::Impl final {
     Core::usize completedStarted = 0;
     Core::usize completedStopped = 0;
     Core::usize completedRejectedStale = 0;
+    Core::usize completedRejectedNoClip = 0;
+    Core::usize boundClipVoices = 0;
+    Core::u64 mixFramesRendered = 0;
 };
 
 namespace {
@@ -448,6 +707,17 @@ AudioEngine::~AudioEngine() noexcept
 
 AudioEngine::AudioEngine(AudioEngine&& other) noexcept : m_impl(std::exchange(other.m_impl, nullptr)) {}
 
+AudioEngine& AudioEngine::operator=(AudioEngine&& other) noexcept
+{
+    if (this != &other)
+    {
+        shutdown();
+        delete m_impl;
+        m_impl = std::exchange(other.m_impl, nullptr);
+    }
+    return *this;
+}
+
 AudioEngineState AudioEngine::state() const noexcept
 {
     if (m_impl == nullptr)
@@ -478,6 +748,10 @@ Core::Result<AudioEngineStats> AudioEngine::stats() const noexcept
         .completedStarted = m_impl->completedStarted,
         .completedStopped = m_impl->completedStopped,
         .completedRejectedStale = m_impl->completedRejectedStale,
+        .completedRejectedNoClip = m_impl->completedRejectedNoClip,
+        .boundClipVoices = m_impl->boundClipVoices,
+        .activeMixVoices = m_impl->countActiveMixSlots(),
+        .mixFramesRendered = m_impl->mixFramesRendered,
     };
 }
 
@@ -506,6 +780,9 @@ Core::Result<AudioVoiceId> AudioEngine::createVoice() noexcept
     {
         record->id = *voice;
         record->playing = false;
+        record->hasClip = false;
+        record->clip = {};
+        record->mixSlot = Impl::InvalidMixSlot;
     }
     return *voice;
 }
@@ -523,6 +800,16 @@ Core::Status AudioEngine::destroyVoice(AudioVoiceId voice) noexcept
     if (!voice.hasValue())
     {
         return fail(AudioErrorCode::InvalidVoice, "AudioVoiceId is empty");
+    }
+
+    if (auto* record = m_impl->voices.tryGet(voice); record != nullptr)
+    {
+        if (record->hasClip && m_impl->boundClipVoices > 0)
+        {
+            --m_impl->boundClipVoices;
+        }
+        m_impl->deactivateMixSlot(*record);
+        record->playing = false;
     }
 
     switch (m_impl->voices.erase(voice))
@@ -583,6 +870,104 @@ Core::Result<bool> AudioEngine::isVoicePlaying(AudioVoiceId voice) const noexcep
     return record->playing;
 }
 
+Core::Status AudioEngine::bindVoiceClip(AudioVoiceId voice, AudioPcmClipView clip) noexcept
+{
+    if (m_impl == nullptr)
+    {
+        return fail(AudioErrorCode::EngineClosed, "AudioEngine is closed");
+    }
+    if (Core::Status status = m_impl->requireOpenOwner(); !status)
+    {
+        return status;
+    }
+    if (!voice.hasValue())
+    {
+        return fail(AudioErrorCode::InvalidVoice, "AudioVoiceId is empty");
+    }
+    if (Core::Status status = Impl::validateClipView(clip); !status)
+    {
+        return status;
+    }
+    auto* record = m_impl->voices.tryGet(voice);
+    if (record == nullptr)
+    {
+        return fail(AudioErrorCode::StaleVoice, "AudioVoiceId is not live");
+    }
+    if (record->playing)
+    {
+        return fail(AudioErrorCode::InvalidConfiguration, "Cannot rebind clip while voice is playing");
+    }
+    const bool hadClip = record->hasClip;
+    record->clip = clip;
+    record->hasClip = true;
+    if (!hadClip)
+    {
+        ++m_impl->boundClipVoices;
+    }
+    return Core::success();
+}
+
+Core::Status AudioEngine::clearVoiceClip(AudioVoiceId voice) noexcept
+{
+    if (m_impl == nullptr)
+    {
+        return fail(AudioErrorCode::EngineClosed, "AudioEngine is closed");
+    }
+    if (Core::Status status = m_impl->requireOpenOwner(); !status)
+    {
+        return status;
+    }
+    if (!voice.hasValue())
+    {
+        return fail(AudioErrorCode::InvalidVoice, "AudioVoiceId is empty");
+    }
+    auto* record = m_impl->voices.tryGet(voice);
+    if (record == nullptr)
+    {
+        return fail(AudioErrorCode::StaleVoice, "AudioVoiceId is not live");
+    }
+    if (record->playing)
+    {
+        return fail(AudioErrorCode::InvalidConfiguration, "Cannot clear clip while voice is playing");
+    }
+    if (record->hasClip)
+    {
+        record->hasClip = false;
+        record->clip = {};
+        if (m_impl->boundClipVoices > 0)
+        {
+            --m_impl->boundClipVoices;
+        }
+    }
+    return Core::success();
+}
+
+Core::Result<AudioPcmClipView> AudioEngine::voiceClip(AudioVoiceId voice) const noexcept
+{
+    if (m_impl == nullptr)
+    {
+        return Core::failure(AudioErrorCode::EngineClosed, "AudioEngine is closed");
+    }
+    if (!m_impl->isOwnerThread())
+    {
+        return Core::failure(AudioErrorCode::WrongOwnerThread, "AudioEngine API must run on the owner thread");
+    }
+    if (!voice.hasValue())
+    {
+        return Core::failure(AudioErrorCode::InvalidVoice, "AudioVoiceId is empty");
+    }
+    const auto* record = m_impl->voices.tryGet(voice);
+    if (record == nullptr)
+    {
+        return Core::failure(AudioErrorCode::StaleVoice, "AudioVoiceId is not live");
+    }
+    if (!record->hasClip)
+    {
+        return AudioPcmClipView{};
+    }
+    return record->clip;
+}
+
 Core::Status AudioEngine::setBusVolume(AudioBusId bus, float volume) noexcept
 {
     if (m_impl == nullptr)
@@ -602,6 +987,7 @@ Core::Status AudioEngine::setBusVolume(AudioBusId bus, float volume) noexcept
         return fail(AudioErrorCode::InvalidConfiguration, "Audio bus volume must be finite in [0, 1]");
     }
     m_impl->buses[static_cast<Core::usize>(bus)].volume = volume;
+    m_impl->publishBusGainToActiveSlots();
     return Core::success();
 }
 
@@ -620,6 +1006,7 @@ Core::Status AudioEngine::setBusMuted(AudioBusId bus, bool muted) noexcept
         return fail(AudioErrorCode::InvalidConfiguration, "AudioBusId is out of range");
     }
     m_impl->buses[static_cast<Core::usize>(bus)].muted = muted;
+    m_impl->publishBusGainToActiveSlots();
     return Core::success();
 }
 
@@ -685,6 +1072,51 @@ Core::Status AudioEngine::enqueueStop(AudioVoiceId voice) noexcept
     return m_impl->enqueueCommand(AudioCommandKind::Stop, voice);
 }
 
+Core::Result<AudioVoiceId> AudioEngine::playOneShotPcm(AudioPcmClipView clip) noexcept
+{
+    if (m_impl == nullptr)
+    {
+        return Core::failure(AudioErrorCode::EngineClosed, "AudioEngine is closed");
+    }
+    if (Core::Status status = m_impl->requireOpenOwner(); !status)
+    {
+        return Core::failure(status.error());
+    }
+    auto voice = createVoice();
+    if (!voice)
+    {
+        return Core::failure(voice.error());
+    }
+    if (Core::Status status = bindVoiceClip(*voice, clip); !status)
+    {
+        (void)destroyVoice(*voice);
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = enqueuePlay(*voice); !status)
+    {
+        (void)clearVoiceClip(*voice);
+        (void)destroyVoice(*voice);
+        return Core::failure(status.error());
+    }
+    return *voice;
+}
+
+void AudioEngine::mixRealtime(float* interleavedOut, Core::u32 outFrames, Core::u32 outChannels,
+                              Core::u32 outSampleRate) noexcept
+{
+    if (m_impl == nullptr)
+    {
+        if (interleavedOut != nullptr && outFrames > 0 && outChannels > 0)
+        {
+            std::memset(interleavedOut,
+                        0,
+                        static_cast<Core::usize>(outFrames) * outChannels * sizeof(float));
+        }
+        return;
+    }
+    m_impl->mixRealtime(interleavedOut, outFrames, outChannels, outSampleRate);
+}
+
 Core::Result<Core::u32> AudioEngine::pumpCompletions(std::span<AudioCompletionEvent> out, Core::u32 budget) noexcept
 {
     if (m_impl == nullptr)
@@ -696,6 +1128,7 @@ Core::Result<Core::u32> AudioEngine::pumpCompletions(std::span<AudioCompletionEv
         return Core::failure(status.error());
     }
     m_impl->applyCommands();
+    m_impl->harvestNaturalEnds();
     return m_impl->drainCompletions(out, budget);
 }
 
@@ -710,6 +1143,7 @@ Core::Result<Core::u32> AudioEngine::pumpCompletions(Core::u32 budget) noexcept
         return Core::failure(status.error());
     }
     m_impl->applyCommands();
+    m_impl->harvestNaturalEnds();
     // Drain without delivering events (tests that only care about stats/counters).
     AudioCompletionEvent scratch[16]{};
     Core::u32 total = 0;
@@ -745,7 +1179,15 @@ void AudioEngine::shutdown() noexcept
     m_impl->state = AudioEngineState::Stopping;
     m_impl->commands.clear();
     m_impl->completions.clear();
+    for (auto& slot : m_impl->mixSlots)
+    {
+        slot.active.store(false, std::memory_order_relaxed);
+        slot.finished.store(false, std::memory_order_relaxed);
+        slot.frames.store(nullptr, std::memory_order_relaxed);
+        slot.voice = {};
+    }
     m_impl->voices.clear();
+    m_impl->boundClipVoices = 0;
     m_impl->state = AudioEngineState::Stopped;
     m_impl->closed = true;
 }

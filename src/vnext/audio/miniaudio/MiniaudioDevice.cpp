@@ -21,20 +21,34 @@ namespace {
     return Core::failure(code, message);
 }
 
+struct DeviceCallbackUserData final {
+    std::atomic<Core::u64>* callbacks = nullptr;
+    std::atomic<AudioEngine*>* mixer = nullptr;
+    Core::u32 channels = 0;
+    Core::u32 sampleRate = 0;
+};
+
 void dataCallback(ma_device* device, void* output, const void* input, ma_uint32 frameCount)
 {
     static_cast<void>(input);
-    static_cast<void>(frameCount);
     if (device == nullptr || device->pUserData == nullptr || output == nullptr)
     {
         return;
     }
-    // Real-time: no allocation, no lock, no logging. Zero output + atomic count.
-    auto* counter = static_cast<std::atomic<Core::u64>*>(device->pUserData);
-    counter->fetch_add(1, std::memory_order_relaxed);
-    // Silence: miniaudio expects the callback to fill output; we leave zeros.
-    // Caller allocated output; do not free.
-    const auto channels = device->playback.channels;
+    auto* user = static_cast<DeviceCallbackUserData*>(device->pUserData);
+    if (user->callbacks != nullptr)
+    {
+        user->callbacks->fetch_add(1, std::memory_order_relaxed);
+    }
+    const auto channels = user->channels != 0 ? user->channels : device->playback.channels;
+    const auto sampleRate = user->sampleRate != 0 ? user->sampleRate : device->sampleRate;
+    auto* out = static_cast<float*>(output);
+    AudioEngine* engine = user->mixer != nullptr ? user->mixer->load(std::memory_order_acquire) : nullptr;
+    if (engine != nullptr)
+    {
+        engine->mixRealtime(out, frameCount, channels, sampleRate);
+        return;
+    }
     const auto bytes = static_cast<size_t>(frameCount) * channels * sizeof(float);
     if (bytes > 0)
     {
@@ -48,6 +62,10 @@ struct MiniaudioDevice::Impl final {
     Impl(MiniaudioDeviceConfig cfg, std::thread::id ownerThread) noexcept
         : config(cfg), owner(ownerThread)
     {
+        callbackUser.callbacks = &callbacks;
+        callbackUser.mixer = &mixerEngine;
+        callbackUser.channels = cfg.channels;
+        callbackUser.sampleRate = cfg.sampleRate;
     }
 
     ~Impl() noexcept
@@ -72,6 +90,7 @@ struct MiniaudioDevice::Impl final {
             ma_context_uninit(&context);
             contextInitialized = false;
         }
+        mixerEngine.store(nullptr, std::memory_order_release);
     }
 
     [[nodiscard]] bool isOwnerThread() const noexcept
@@ -84,6 +103,8 @@ struct MiniaudioDevice::Impl final {
     ma_context context{};
     ma_device device{};
     std::atomic<Core::u64> callbacks{0};
+    std::atomic<AudioEngine*> mixerEngine{nullptr};
+    DeviceCallbackUserData callbackUser{};
     bool contextInitialized = false;
     bool deviceInitialized = false;
     bool running = false;
@@ -137,7 +158,7 @@ Core::Result<MiniaudioDevice> MiniaudioDevice::Create(MiniaudioDeviceConfig conf
     deviceConfig.sampleRate = config.sampleRate;
     deviceConfig.periodSizeInFrames = config.periodFrames;
     deviceConfig.dataCallback = dataCallback;
-    deviceConfig.pUserData = &impl->callbacks;
+    deviceConfig.pUserData = &impl->callbackUser;
 
     const ma_result deviceResult = ma_device_init(&impl->context, &deviceConfig, &impl->device);
     if (deviceResult != MA_SUCCESS)
@@ -160,6 +181,26 @@ MiniaudioDevice::~MiniaudioDevice() noexcept
 }
 
 MiniaudioDevice::MiniaudioDevice(MiniaudioDevice&& other) noexcept : m_impl(std::exchange(other.m_impl, nullptr)) {}
+
+MiniaudioDevice& MiniaudioDevice::operator=(MiniaudioDevice&& other) noexcept
+{
+    if (this != &other)
+    {
+        shutdown();
+        delete m_impl;
+        m_impl = std::exchange(other.m_impl, nullptr);
+    }
+    return *this;
+}
+
+void MiniaudioDevice::attachMixer(AudioEngine* engine) noexcept
+{
+    if (m_impl == nullptr)
+    {
+        return;
+    }
+    m_impl->mixerEngine.store(engine, std::memory_order_release);
+}
 
 Core::Status MiniaudioDevice::start() noexcept
 {
@@ -251,10 +292,7 @@ Core::Result<MiniaudioAudioBundle> createMiniaudioAudioBundle(AudioEngineConfig 
         engine->shutdown();
         return Core::failure(device.error());
     }
-    return MiniaudioAudioBundle{
-        .engine = std::move(*engine),
-        .device = std::move(*device),
-    };
+    return MiniaudioAudioBundle{std::move(*engine), std::move(*device)};
 }
 
 } // namespace Tina::Audio

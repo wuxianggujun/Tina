@@ -28,6 +28,14 @@ if (TINA_BUILD_AUDIO_MINIAUDIO AND NOT TINA_BUILD_LEGACY)
     find_path(TINA_MINIAUDIO_INCLUDE_DIR NAMES miniaudio.h REQUIRED)
 endif()
 
+if (TINA_AUDIO_ENABLE_LIBVORBIS)
+    find_package(Vorbis CONFIG REQUIRED)
+endif ()
+if (TINA_AUDIO_ENABLE_LIBOPUS)
+    find_package(Opus CONFIG REQUIRED)
+    find_package(Opusfile CONFIG REQUIRED)
+endif ()
+
 
 if(TINA_BUILD_PLATFORM_GLFW AND NOT TINA_BUILD_LEGACY)
     find_package(glfw3 3.4 CONFIG REQUIRED)

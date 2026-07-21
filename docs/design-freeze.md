@@ -579,12 +579,16 @@ M11-A8：固定 command/completion 环（Create 时分配，无增长）。主�
 Started/Stopped；stale 推 RejectedStale），再按 budget 排空到调用方 buffer。满命令队列返回
 `CapacityExceeded`；完成环满计 rejected（不增长）。Master/Music/SFX `setBusVolume`/`setBusMuted`
 为 owner-thread 状态（线性增益 [0,1]；`effectiveBusGain` = Master×bus，任一 mute 则为 0）。
-M11-A9：可选 `TINA_BUILD_AUDIO_MINIAUDIO` + vcpkg feature `audio-miniaudio`。`MiniaudioDevice`
-封装 ma_context/ma_device（默认 `useNullBackend=true` 走 `ma_backend_null` 可 hermetic 测）；
-dataCallback 禁止分配/锁/日志，仅静音输出与 atomic invocation 计数。`createMiniaudioAudioBundle`
-先 Create AudioEngine 再 Create device，设备失败则 engine shutdown。miniaudio 类型仅在
-`src/vnext/audio/miniaudio` 与 Legacy `Tina::Miniaudio` IMPLEMENTATION TU；public header 无
-miniaudio 符号。真实 OS 设备、PCM 混音、AssetLease、EngineHost 接线后置。
+M11-A9：可选 `TINA_BUILD_AUDIO_MINIAUDIO` + vcpkg `audio-miniaudio`。`MiniaudioDevice` 默认
+`ma_backend_null`；`createMiniaudioAudioBundle`；miniaudio 仅 adapter TU。
+
+M11-A10：`AudioDecode.hpp` + 可选 `audio-miniaudio-vorbis`/`opus`；关闭时 Ogg→`CodecNotEnabled`。
+
+M11-A11：`bindVoiceClip`/`clearVoiceClip`；Play 无 clip→`RejectedNoClip`。
+
+M11-A12：`mixRealtime`（atomic mix slots，Master×SFX）；`attachMixer`；natural `Stopped`。
+
+M11-A13：`playOneShotPcm`；decode→oneShot→mix e2e。AssetLease/EngineHost/sample SFX 后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

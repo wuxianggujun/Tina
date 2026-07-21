@@ -90,7 +90,8 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-B1 TileChunk dirty cache | Debug C++23 | 6/6 asset + product smoke | `TileChunkDirtyCacheTests`：首帧 rebuild→次帧 hit；`setTile` 只脏一 chunk；300 帧 pan+edit；`tina_sample_2d` JSON `chunkDirtyRebuilds<<visible`、末帧 `lastChunkDirtyRebuilds=0` |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A7 `tina_audio` Disabled lifecycle | Debug C++23 | `tina_audio_tests` | Create Disabled、voice generation/capacity/stale、幂等 shutdown、错线程拒绝、PMR 归零；header isolation 编入同 target |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A8 command/completion + bus | Debug C++23 | `tina_audio_tests` | Play/Stop → pump Started/Stopped；destroy 后 pending → RejectedStale；满队列 CapacityExceeded；Master/Music/SFX volume/mute/effectiveGain |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A9 miniaudio null device | Debug C++23 | `tina_audio_miniaudio_tests` | null backend start/stop、callback 计数>0、bundle engine+device、错线程拒绝、PMR 归零 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A9 miniaudio null device | Debug C++23 | `tina_audio_miniaudio_tests` | null backend start/stop、callback 计数>0、bundle engine+device |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A10–A13 audio product path | Debug C++23 | audio 15 + miniaudio 9 | 可选编解码；clip bind；mixRealtime；playOneShot；WAV decode→mix e2e |
 
 
 
