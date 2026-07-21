@@ -696,7 +696,9 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
 - M11-A14 已完成：可选 `EngineCompositionFactories::createAudioEngine`；`EngineHost` 拥有
   `AudioEngine` 并在 `updateFrame` 后 `pumpCompletions`；`FixedUpdateContext`/`FrameUpdateContext`
   暴露 phase-local `audioEngine()`（无工厂则为 null）。Null 图不强制 miniaudio；
-  **仍非 sample SFX / AssetLease / 设备混音接线**；
+- M11-A15 已完成：`Desktop::CreateEngine` 与 `tina_sample_2d` factory 注入 Disabled `AudioEngine`；
+  样例首帧 `playOneShotPcm` + host pump 证据（JSON `audioEnginePresent`/`audioStartedObserved`）；
+  **仍非 miniaudio 设备混音 / AssetLease / 磁盘 SFX 资产**；
 - M11-B0 已完成：`Tina::Render` `Camera2DProjection` 纯函数（`FixedWorldHeight2D` /
   `PixelPerfect2D` + framebuffer viewport → worldWidth/Height + `actualPixelsPerMeter`；
   PixelPerfect 强制 `CameraAndSprites`；0×0 surface 结构化失败）。`tina_render_scene_tests` 8 项；

@@ -1,5 +1,6 @@
 #include <tina/desktop/DesktopEngine.hpp>
 
+#include <tina/audio/AudioEngine.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/glfw/GlfwPlatformFactory.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
@@ -99,6 +100,17 @@ Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& confi
                            Integration::NativeWindowSurfaceLease lease) {
                             return Render::Bgfx::createBgfxRenderDevice(params, std::move(lease));
                         },
+                },
+            // M11-A15: production Desktop always owns a Disabled AudioEngine so
+            // Gameplay phases can playOneShotPcm without a separate factory.
+            // miniaudio device attach remains optional product wiring.
+            .createAudioEngine =
+                []() -> Core::Result<Audio::AudioEngine> {
+                    return Audio::AudioEngine::Create(Audio::AudioEngineConfig{
+                        .voiceCapacity = 32,
+                        .commandCapacity = 64,
+                        .completionCapacity = 64,
+                    });
                 },
         };
 

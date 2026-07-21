@@ -31,6 +31,7 @@
 #include <tina/runtime/PlatformEvents.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
+#include <tina/audio/AudioEngine.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 #include <tina/ui/UIButton.hpp>
@@ -143,6 +144,12 @@ struct LifecycleCounters final {
     float maxCameraCenterX = 0.0f;
     float minCameraCenterX = 0.0f;
     bool cameraFollowPrimed = false;
+    // M11-A15: optional EngineHost AudioEngine product evidence (Disabled path).
+    bool audioEnginePresent = false;
+    bool audioOneShotQueued = false;
+    bool audioStartedObserved = false;
+    u64 audioStartedCount = 0;
+    float audioOneShotPcm[8] = {0.2F, 0.2F, 0.15F, 0.1F, 0.05F, 0.0F, -0.05F, -0.1F};
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     u64 physicsSteps = 0;
     u64 physicsStaticBodies = 0;
@@ -842,6 +849,33 @@ class TileMapBgfxState final : public Tina::IGameState {
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
     {
         ++counters_->frameUpdates;
+        if (Tina::Audio::AudioEngine* audio = context.audioEngine(); audio != nullptr)
+        {
+            counters_->audioEnginePresent = true;
+            if (!counters_->audioOneShotQueued)
+            {
+                auto voice = audio->playOneShotPcm(Tina::Audio::AudioPcmClipView{
+                    .frames = counters_->audioOneShotPcm,
+                    .frameCount = 8,
+                    .channels = 1,
+                    .sampleRate = 48000,
+                });
+                if (!voice)
+                {
+                    return Tina::Core::failure(std::move(voice.error()));
+                }
+                counters_->audioOneShotQueued = true;
+            }
+            // Host pumps completions after updateFrame; Started is visible next frame.
+            if (auto stats = audio->stats(); stats.has_value())
+            {
+                counters_->audioStartedCount = stats->completedStarted;
+                if (stats->completedStarted > 0)
+                {
+                    counters_->audioStartedObserved = true;
+                }
+            }
+        }
         if (resources_->controller && resources_->grid)
         {
             // Hermetic product demo: after first ground contact, walk right until wall.
@@ -1273,6 +1307,14 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
                         return capturing;
                     },
             },
+        .createAudioEngine =
+            []() -> Tina::Core::Result<Tina::Audio::AudioEngine> {
+                return Tina::Audio::AudioEngine::Create(Tina::Audio::AudioEngineConfig{
+                    .voiceCapacity = 16,
+                    .commandCapacity = 32,
+                    .completionCapacity = 32,
+                });
+            },
     };
 
 #if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
@@ -1434,8 +1476,12 @@ int main(int argc, char** argv)
         counters.chunkDirtyRebuilds < counters.chunkDirtyVisibleObservations &&
         counters.lastChunkDirtyRebuilds == 0 && counters.lastChunkDirtyCacheHits > 0;
 
+    const bool audioValid =
+        counters.audioEnginePresent && counters.audioOneShotQueued && counters.audioStartedObserved &&
+        counters.audioStartedCount >= 1;
+
     bool ok = selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
-              cameraFollowValid && chunkDirtyValid && counters.catalogFromRecipeFile &&
+              cameraFollowValid && chunkDirtyValid && audioValid && counters.catalogFromRecipeFile &&
               counters.catalogRecipeAssets == 3 && counters.texturesUploaded == 1 &&
               counters.lastTileSprites == ExpectedNonEmptyTiles && counters.lastTotalSprites == expectedTotalSprites &&
               counters.controllerGroundedFrames > 0 && counters.controllerWalkFrames > 0 &&
@@ -1485,6 +1531,10 @@ int main(int argc, char** argv)
                   << ",\"lastChunkDirtyHits\":" << counters.lastChunkDirtyCacheHits
                   << ",\"cameraProjectionResolves\":" << counters.cameraProjectionResolves
                   << ",\"renderExtractions\":" << counters.renderExtractions
+                  << ",\"audioEnginePresent\":" << (counters.audioEnginePresent ? "true" : "false")
+                  << ",\"audioOneShotQueued\":" << (counters.audioOneShotQueued ? "true" : "false")
+                  << ",\"audioStartedObserved\":" << (counters.audioStartedObserved ? "true" : "false")
+                  << ",\"audioStartedCount\":" << counters.audioStartedCount
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
                   << ",\"physicsSteps\":" << counters.physicsSteps
                   << ",\"physicsStatics\":" << counters.physicsStaticBodies
@@ -1561,6 +1611,10 @@ int main(int argc, char** argv)
               << ",\"lastChunkDirtyRebuilds\":" << counters.lastChunkDirtyRebuilds
               << ",\"lastChunkDirtyCacheHits\":" << counters.lastChunkDirtyCacheHits
               << ",\"lastChunkDirtyVisible\":" << counters.lastChunkDirtyVisible
+              << ",\"audioEnginePresent\":" << (counters.audioEnginePresent ? "true" : "false")
+              << ",\"audioOneShotQueued\":" << (counters.audioOneShotQueued ? "true" : "false")
+              << ",\"audioStartedObserved\":" << (counters.audioStartedObserved ? "true" : "false")
+              << ",\"audioStartedCount\":" << counters.audioStartedCount
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
               << ",\"physicsEnabled\":true"
               << ",\"physicsSteps\":" << counters.physicsSteps

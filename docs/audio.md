@@ -1,8 +1,9 @@
 # Audio 生命周期与实时线程契约
 
-> 状态：vNext 契约文档。M11-A7–A14：Disabled 生命周期、命令/完成环、bus、miniaudio null 设备、
-> 可扩展解码、PCM clip、`mixRealtime`、`playOneShotPcm`、可选 EngineHost 拥有与每帧 pump。
-> 真实设备固定为 miniaudio（ADR 0012），不引入 SDL_mixer 或第二套音频库。
+> 状态：vNext 契约文档。M11-A7–A15：Disabled 生命周期、命令/完成环、bus、miniaudio null 设备、
+> 可扩展解码、PCM clip、`mixRealtime`、`playOneShotPcm`、EngineHost 可选拥有与每帧 pump、
+> Desktop/sample 默认注入 Disabled Audio。真实设备固定为 miniaudio（ADR 0012），
+> 不引入 SDL_mixer 或第二套音频库。
 
 ## 模块边界
 
