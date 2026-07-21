@@ -555,12 +555,18 @@ selection 产品闭环**视为可验收。行为：默认 `--frames=300` 不合�
 无高亮合法）；`--seed-tile-selection=cellX,cellY` 为受控可脚本门禁（sample-private locked sample，
 非 OS 真点击）；UI Button 不穿透仍由 `tina_runtime_ui_tests` 证明。完整外部 cooker CLI、
 cgltf/`tina_sample_3d`、厚 world-pick Game SDK 仍 **Deferred**，**默认不再开 M10-A45**；
-chunk dirty/截图与 Audio 归 M11；Legacy 删除归 M12。
+截图与 Audio 归 M11；Legacy 删除归 M12。
 
 M11-B0：`include/tina/render/Camera2DProjection.hpp` 提供与 game-2d 契约对齐的投影解析：
 `FixedWorldHeight2D` / `PixelPerfect2D` + 当前 framebuffer viewport（含 normalized viewport 缩放）→
 `worldWidth`/`worldHeight`/`actualPixelsPerMeter`。PixelPerfect 强制 `CameraAndSprites`；0×0 为
 Suspended 结构化失败。`tina_sample_2d` 订阅 `WindowMetricsChanged` 并每帧 resolve；不改 Audio 切片。
+
+M11-B1：`include/tina/asset/TileChunkDirtyCache.hpp` 在 extraction 边界按 chunk coord 锁存
+`TileChunkView.revision`；`syncVisible`/`classifyVisible` 只把 revision 变化的 chunk 写入 rebuilt
+列表（cache hit 不 re-emit）。Create 时固定 capacity；满则 LRU 驱逐并计数。`setTile` 既有
+revision bump 语义不变。300 帧 pan+稀疏 edit 压力测试要求 `rebuilds < visibleObservations`。
+不实现 GPU VB/IB cache；不接入 Audio。
 
 M11-A7：后端无关 `Tina::Audio` 生命周期基础。`AudioEngine::Create` 固定 voice/command/completion
 容量并始终进入 Disabled（无设备）；generation `AudioVoiceId` 证明 slot 复用/stale；owner-thread

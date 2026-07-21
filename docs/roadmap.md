@@ -663,7 +663,7 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
 | **Deferred** | 完整外部 cooker CLI / 全量 `tina_assetc` | 当前 recipe 子集；可另开切片 |
 | **Deferred** | cgltf v1.15 → StaticMesh/Material/Prefab + `tina_sample_3d` | 固定版本规划；不阻塞 2D 收口 |
 | **Deferred** | 扩大 Game SDK world-pick 公共 API | sample-private helper 已够 |
-| **Deferred（可进 M11）** | chunk dirty 压力、截图回归 | Camera 投影 resolve 见 M11-B0；非 pointer 阻断 |
+| **Deferred（可进 M11）** | 截图回归、Camera follow/插值 | Camera 投影见 M11-B0；chunk dirty 见 M11-B1 |
 | **Deferred（M12）** | 删 Legacy | 需 2D/UI/3D/Asset/Audio 等价验收 |
 
 默认 smoke：`tina_sample_2d --frames=300` → hits=0 / 无高亮合法。
@@ -693,6 +693,10 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   PixelPerfect 强制 `CameraAndSprites`；0×0 surface 结构化失败）。`tina_render_scene_tests` 8 项；
   `tina_sample_2d` 订阅 metrics + FixedWorldHeight 每帧 resolve，JSON 输出 surface/ppm/world；
   **与 Audio 切片并行、路径互不重叠**；
+- M11-B1 已完成：`Tina::Asset` `TileChunkDirtyCache`——按 `TileChunkView.revision` 跟踪可见 chunk，
+  仅 revision 变化时计入 rebuild；`setTile` 只脏化受影响 chunk；300 帧压力门禁
+  `rebuilds << visibleObservations`（`tina_asset_tests` 6 项）。无 GPU chunk mesh cache、不接 sample；
+  **不碰 Audio**；
 - M11-A0 已完成：独立 `tina_physics2d` 生命周期（World/owner thread、generation Body/Shape、原子 Box body、
   固定 step、pose snapshot、shutdown）与 Windows Debug/Release `tina_physics2d_tests` 门禁；
 - M11-A1 已完成：固定容量 contact begin/end/hit 复制、destroy tombstone、通道 overflow 与
@@ -713,8 +717,8 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   不默认开 M10-A45；只有 bench p99 超预算才接入 Box2D worker callbacks；
 - 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
-- 在 M10 已落地的 `tina_sample_2d` 主线上继续 2D 打磨：chunk dirty rebuild 压力、Camera follow/
-  插值、稳定截图回归（投影 resolve 见 M11-B0）；Audio 与更完整 UI 控件见本里程碑其它条；
+- 在 M10 已落地的 `tina_sample_2d` 主线上继续 2D 打磨：Camera follow/插值、稳定截图回归、
+  sample 接线 dirty cache（CPU 门禁见 M11-B1；投影 resolve 见 M11-B0）；Audio 与更完整 UI 控件见本里程碑其它条；
 - `tina_audio_miniaudio` 作为唯一真实 backend，通过 generation voice handle、命令队列和
   主线程 completion 保证关闭安全；
 - 覆盖 callback 0分配/0阻塞、command/completion 满容量、设备 Disabled、Music underrun、

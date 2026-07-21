@@ -11,6 +11,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/GridCollision.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileChunkView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileChunkRender.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/TileChunkDirtyCache.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CharacterController2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogCook.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogFile.hpp
@@ -38,6 +39,7 @@ set(TINA_ASSET_SOURCES
     GridCollision.cpp
     TileChunkView.cpp
     TileChunkRender.cpp
+    TileChunkDirtyCache.cpp
     CharacterController2D.cpp
     CatalogCook.cpp
     CatalogFile.cpp

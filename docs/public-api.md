@@ -1152,6 +1152,7 @@ public:
 | `IGridCollisionProvider` / `TileMapGridCollision` | M10-A29 已实现 | Asset module public | 只读格子 solid/material 查询 | 同 TileMapInstance |
 | `extractVisibleTileChunks` / `collectChunkNonEmptyCells` | M10-A29 已实现 | Asset module public | 相机 AABB 可见 chunk + cell 枚举 | InvalidCatalogConfig / AllocationFailed |
 | `emitTileChunkSprites` / `emitVisibleTileMapSprites` | M10-A30 已实现 | Asset module public | TileChunk → RenderSprite2DInput 列表 | InvalidCatalogConfig / AllocationFailed |
+| `TileChunkDirtyCache` / `syncVisible` / `classifyVisible` | M11-B1 已实现 | Asset module public | 按 chunk revision 分类可见集；只返回需 rebuild 的 views | InvalidCatalogConfig / CatalogCapacityExceeded / AllocationFailed |
 | `tina_sample_2d_tilemap` | M10-A31 已实现 | sample (Headless/Null) | TileMap emit + CharacterController smoke | sample JSON |
 | `tina_sample_2d` | M10-A32–A38 已实现 | sample (GLFW+bgfx[+Physics2D][+FreeType]) | 正式 2D 产品 executable；磁盘 recipe Catalog + walk demo + UI/Text/Button + optional crate | sample JSON `sample=tina_sample_2d` |
 | `tina_sample_2d_tilemap_bgfx` | ALIAS | CMake alias | 兼容旧 target 名 | same binary |
