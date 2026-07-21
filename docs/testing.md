@@ -96,6 +96,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A14 EngineHost optional Audio | Debug C++23 | `EngineHostRunTest.OptionalAudio*` | factory 注入 Disabled Audio；phase 可见；host pump 后 Started；默认无 factory 时 audioEngine()==null |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A15 Desktop/sample Audio inject | Debug C++23 | product-2d sample smoke | Desktop+sample factory 注入；JSON `audioEnginePresent`/`audioStartedObserved` |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A16 sample miniaudio null SFX | Debug C++23 | product-2d + audio-miniaudio | null device callbacks>0、mixFramesRendered>0、productGate 含 audio；hermetic 不要求扬声器 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A17 AudioClip cooked payload | Debug C++23 | `tina_asset_format_tests` | write/parse round-trip、stereo、非法 geometry、cooked asset + content hash |
 
 
 

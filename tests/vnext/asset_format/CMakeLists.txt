@@ -1,9 +1,11 @@
 set(TINA_ASSET_FORMAT_TEST_SOURCES
     AssetFormatTests.cpp
+    AudioClipPayloadTests.cpp
     TextureSpritePayloadTests.cpp
     TileMapTilesetPayloadTests.cpp
     header_isolation/AssetFormatErrorsHeader.cpp
     header_isolation/AssetFormatHeader.cpp
+    header_isolation/AudioClipPayloadHeader.cpp
     header_isolation/SpritePayloadHeader.cpp
     header_isolation/Texture2DPayloadHeader.cpp
     header_isolation/TilesetPayloadHeader.cpp

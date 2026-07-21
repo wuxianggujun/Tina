@@ -700,7 +700,10 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   样例首帧 `playOneShotPcm` + host pump 证据（JSON `audioEnginePresent`/`audioStartedObserved`）；
 - M11-A16 已完成：`tina_sample_2d` 可选 miniaudio null-device SFX——`attachMixer` + `start`，
   callback 调 `mixRealtime`；product-2d preset 启用 `audio-miniaudio`；JSON 要求
-  `audioDeviceCallbacks>0` 与 `audioMixFramesRendered>0`；**仍非 AssetLease / 磁盘 SFX / OS 真实扬声器门禁**；
+  `audioDeviceCallbacks>0` 与 `audioMixFramesRendered>0`；
+- M11-A17 已完成：`AssetFormat::AudioClip` cooked payload v1（float32 interleaved PCM wire +
+  write/parse/cooked round-trip）；`pcmClipViewFromAudioClipPayload` 桥到 `AudioPcmClipView`；
+  **仍非 AssetSystem load/lease / recipe 磁盘 SFX / OS 真实扬声器门禁**；
 - M11-B0 已完成：`Tina::Render` `Camera2DProjection` 纯函数（`FixedWorldHeight2D` /
   `PixelPerfect2D` + framebuffer viewport → worldWidth/Height + `actualPixelsPerMeter`；
   PixelPerfect 强制 `CameraAndSprites`；0×0 surface 结构化失败）。`tina_render_scene_tests` 8 项；

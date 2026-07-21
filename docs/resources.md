@@ -110,7 +110,7 @@ generation 都必须归还 payload/staging 并更新 current/peak/failed 指标�
 | UI | `FontAsset` | owning bytes、face metadata、确定 fallback chain；Runtime 不按路径开字体 |
 | 2D | `SpriteAsset`、`TilesetAsset`、`TileMapAsset` | UV/pivot/PPU、tile flags/layer/chunk/collision metadata |
 | 3D | `StaticMeshAsset`、`MaterialAsset`、`PrefabAsset` | Mesh/Submesh/bounds、UnlitBaseColor、节点层级与资产引用 |
-| Audio | `AudioClipAsset`/stream metadata | PCM/压缩 payload 与 miniaudio backend 类型分离 |
+| Audio | `AudioClip` cooked payload v1（M11-A17 float32 PCM wire）/ stream metadata | 压缩源在 cook/IO 阶段解码；Runtime 只读 PCM；miniaudio 类型仅 adapter |
 
 Scene/Game component 保存上述 `AssetHandle<T>`，不保存 Render Buffer/Texture/Pipeline handle。
 World/UI extraction 在当前 ready snapshot 中解析资源，并把 lease、FrameResourceRef 和 Atlas pin
