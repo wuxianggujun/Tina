@@ -256,26 +256,31 @@ Tina-owned 稳态动态分配增量必须为0。
 M10-A36–A44 已在 `windows-msvc-vnext-bgfx-product-2d` 上落地产品门禁：磁盘
 `sample_2d.recipe` → cook/load Texture2D+Tileset+TileMap、CharacterController 脚本行走、
 UI HUD panel/Label/Button（可选 FreeType 中文）、至少一个 Physics2D dynamic crate 与 Tile
-static 交互；A39–A44 闭合 UI 不穿透、world pointer、选格与高亮/seed 门禁；JSON
-`sample=tina_sample_2d` + `catalogFromRecipeFile=true`。完整 cooker CLI / cgltf 仍 Deferred。
+static 交互；JSON `sample=tina_sample_2d` + `catalogFromRecipeFile=true`。
 
-Legacy 删除前仍须补齐/加强：
+**M10 收口（A39–A44 pointer / selection 产品闭环，tip `70618808`）：** 默认不再开 M10-A45。
 
-- 通过最终生产 Cooker/Catalog/Manifest pipeline 加载 Texture、Sprite、Tileset 和 TileMap；
-  当前样例使用磁盘 fixture recipe + temp catalog，不是独立 cooker CLI 全量；
-- Orthographic Camera resize、interpolation 和 pixel snap 产品行为；
-  world picking 转换基础（M10-A40 `pickWorldFromLogicalPointer`）和 Action Mapping
-  last-presented payload（M10-A42）已落地；M10-A43 在正式样例 `fixedUpdate()` 消费该 payload，按
-  map-local bottom-left 原点、`cellSizeMeters` 和半开地图边界选择 Tile cell；M10-A44 增加选中格
-  高亮 sprite 与 `--seed-tile-selection=cellX,cellY` 受控门禁（默认 smoke 仍可不点）；
+| 切片 | 行为 |
+| --- | --- |
+| A39 | 点击 HUD Button 不穿透世界 pointer（`tina_runtime_ui_tests` 合成；smoke 不点） |
+| A40–A42 | logical→world pick + last-presented latch + `worldPointerSample` |
+| A43 | `fixedUpdate` 只消费未 UI 消费的 `Pressed + hit`；map-local bottom-left + 半开 cell |
+| A44 | 选中格可见高亮；CLI `--seed-tile-selection=cellX,cellY` 受控门禁 |
+
+- **默认 smoke：** `--frames=300` 可不点；`tileSelectionHits=0` / 无高亮合法。
+- **受控门禁：** `--seed-tile-selection=1,1`（建议 300 帧）要求 hits≥1、`lastHighlightSprites=1`、
+  `selectionHighlightSprites==renderExtractions`；sample-private，**不是** OS/GLFW 真点击。
+- 完整 cooker CLI / cgltf / 厚 world-pick Game SDK 仍 **Deferred**。
+
+已有基线：中文 FreeType Label + HUD Button 接线、角色脚本化右走撞墙、Physics2D crate、
+连续 300 帧退出与资源/lifecycle JSON。
+
+Legacy 删除前仍须补齐/加强（**非** A39–A44 阻断）：
+
+- 最终生产 Cooker/Catalog/Manifest 全量（当前磁盘 fixture recipe + temp catalog）；
+- Orthographic Camera resize、interpolation 和 pixel snap 产品打磨；
 - 多 layer Sprite、透明混合、Tile chunk culling 与 dirty rebuild 压力门禁；
-- 中文 FreeType Label（product-2d 已有）+ HUD Button 接线（A37 已有 create/action 计数）；
-  **点击 UI 不触发世界选择**（M10-A39：`tina_runtime_ui_tests` 合成 pointer non-penetration 门禁已闭合；
-  M10-A42：world pointer payload 已进 Simulation Action；M10-A43：样例只接受未消费的 `Pressed + hit`
-  edge，UI consume/claim、viewport miss、地图外和非 Pressed 均不选格；M10-A44：选中可见高亮 + seed 门禁）；
-- 角色 Tile swept AABB 与脚本化右走撞墙（A37 已有）；至少一个动态 Box2D body（已有 crate）；
-- 连续300帧正常退出与资源归零证据；
-- 画面截图、输入行为、日志/计数和进程返回码分别留证据。
+- 稳定截图回归；输入 / 日志 / 返回码分别留证据（pointer 路径证据见上表）。
 
 首期明确不实现无限地图 streaming、复杂 Tile 编辑器、Sprite skeletal animation、GPU particle、
 2D lighting 或网络 rollback；它们不能通过把 backend handle 暴露给玩法代码临时绕过架构。

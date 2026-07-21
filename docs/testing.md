@@ -84,7 +84,8 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A30 tile chunk sprite emit | Debug C++23 | 90/90 asset | emit UV/center；RenderScene commit；off-camera skip；`tina_asset_tests` 90 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A42 ActionMapper last-presented Camera2D world pointer payload | Debug C++23 | 237/237 + 74/74 + 30/30 | `tina_tests`、`tina_runtime_ui_tests`、`tina_render_scene_tests` 均直接通过；覆盖 UI consume/claim non-penetration、Pressed/Released sample、无 Camera 结构化失败、viewport no-hit、0 fixed-step 锁存及 EngineHost last-presented E2E |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A43 `tina_sample_2d` Tile selection consumer | Debug C++23 | 240/240 + 10/10 + product smoke | `tina_tests` 新增 3 个 sample-private consumer 用例；A39/A42 组合聚焦 10/10；`tina_sample_2d --frames=300` 返回0，默认无合成点击时 selection JSON 计数为0，product-2d 资源/lifecycle 门禁保持通过 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A44 selection highlight + seed gate | Debug C++23 | Sample2DTileSelection + sample smoke | helper 覆盖 highlight 几何、seed、scripted Pressed edge 同构消费；默认 300 帧无选中/无高亮；`--seed-tile-selection=1,1` 要求 hits≥1、每帧 highlight=1；A39 UI non-penetration 仍由 `tina_runtime_ui_tests` |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A44 selection highlight + seed gate | Debug C++23 | 6/6 Sample2D + 10/10 A39/A42 + product smoke | `Sample2DTileSelectionTest` 6 项（含 highlight/seed/scripted Pressed）；默认 300 帧 hits=0/无高亮；`--seed-tile-selection=1,1 --frames=300` hits≥1、`lastHighlightSprites=1`、`selectionHighlightSprites==renderExtractions`；A39 仍由 `tina_runtime_ui_tests` |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10 收口 product-2d pointer/selection | Docs + tip `70618808` | A39–A44 闭环 | 默认 smoke 不点；seed CLI 为受控门禁；完整 cooker/cgltf Deferred；默认不开 A45 |
 
 
 
@@ -184,6 +185,11 @@ world sample，经同一 `consumeTileSelectionTransitions` 消费）。`tina_sam
 edge，要求 `tileSelectionHits>=1`、`lastHighlightSprites=1` 且
 `selectionHighlightSprites==renderExtractions`。不注入 OS/GLFW pointer；A39 Button non-penetration
 继续由 `tina_runtime_ui_tests` 证明。
+
+M10 收口：A39–A44 为 product-2d **pointer / selection 产品闭环**（见 `docs/roadmap.md` 收口清单）。
+两道样例门禁语义分离——默认 300 帧证明生命周期/资源/行走/Physics/UI 接线且 selection 可为空；
+`--seed-tile-selection` 证明「选中 → JSON → 高亮 emit」。完整 cooker CLI、cgltf、厚 world-pick
+Game SDK 与删 Legacy 不在本闭环内，**默认不开 M10-A45**。
 
 M8-A 使用独立 `tina_scene_tests`，当前 19 项覆盖：World 固定容量与 PMR 错误回滚/稳定构造错误、Entity generation/owner/stale
 校验、keep-world/keep-local reparent、父销毁与显式子树销毁、Local/World Transform 组合、非递归深树与宽树
@@ -775,7 +781,7 @@ Legacy 与 vNext 进程观察到的 `N` 会随调试对象组合变化，本轮 
 | `tina_sample_ui` | 未实现 | 在现有 Desktop SolidFill panel smoke 和 primary Pointer Button default action 上补中文、Label 文本、Button Keyboard/Gamepad activation、Modal、TextEdit、Runtime packet、Glyph Atlas 与资源型 UI Render | M7 内置 Cooked Font/Texture fixture |
 | `tina_sample_2d_infrastructure` | M8-B Headless/Null extraction foundation 已实现 | Scene World → resolved Camera2D/Sprite2D、layer/order、cull/snap、Runtime `primaryWorldScene` handoff、300帧资源/生命周期归零 | 当前只用内置纯值 fixture；Asset/Cooker、可见 bgfx fixture、world picking、UI overlay 后置 |
 | `tina_sample_2d_tilemap` | M10-A31 Headless/Null TileMap 产品烟测已实现 | 内建 Tileset/TileMap → TileMapInstance → emitVisibleTileMapSprites + CharacterController2D → 每帧 11 tile + 1 角色 sprite；300 帧 JSON | 非正式 Catalog/bgfx/UI/Box2D `tina_sample_2d` |
-| `tina_sample_2d` | M10-A32–A44 正式 2D 产品样例（输入/选格收口） | 磁盘 recipe Catalog + Character + UI/Text/Button；可选 Physics crate / FreeType；脚本化行走撞墙；A43 选格 + A44 高亮；`--seed-tile-selection=cellX,cellY` 受控门禁；JSON selection/highlight；`catalogFromRecipeFile`；product-2d `productGate=bgfx-physics-freetype` | 完整 cooker CLI / cgltf **Deferred**；A39 non-penetration 与 A42 mapping 由 `tina_runtime_ui_tests`/`tina_tests`；默认 300 帧可不点，seed 路径 hits≥1 且每帧 highlight=1 |
+| `tina_sample_2d` | M10-A32–A44 正式 2D 产品样例（A39–A44 pointer/selection 闭环收口） | 磁盘 recipe Catalog + Character + UI/Text/Button；可选 Physics crate / FreeType；脚本化行走撞墙；A43 消费 last-presented sample → cell；A44 高亮 + `--seed-tile-selection`；JSON selection/highlight/seed；`catalogFromRecipeFile`；product-2d `productGate=bgfx-physics-freetype` | 默认 300 帧不点（hits=0 合法）；seed CLI 为受控门禁（非 OS 点击）；A39 由 `tina_runtime_ui_tests`；完整 cooker CLI / cgltf **Deferred**；默认不开 A45 |
 | `tina_sample_2d_tilemap_bgfx` | ALIAS → `tina_sample_2d` | 兼容旧脚本 target 名 | 请迁移到 `tina_sample_2d` |
 | `tina_sample_2d_infrastructure_bgfx` | M9-C 最小 bgfx Sprite2D fixture + 2D/UI 样例已实现 Debug/Release 验证 | Desktop bootstrap + bgfx；固定 View 0 clear、View 1 Opaque3D、View 2 Sprite2D、View 3 UI；默认/门禁300帧，当前每帧5个 fixture Sprite 和2个 retained UI panel，资源账本平衡；截图确认旋转、透明、flip 与 UI overlay | 只接受 fixture key `sprite=1`；不替代正式 `tina_sample_2d` |
 | `tina_sample_3d_extraction` | M9-A Headless/Null extraction foundation 已实现 | Scene World → resolved Perspective/Mesh3D、当前帧aspect、sphere culling、稳定sort/batch、Runtime handoff；300帧4 submitted/3 visible/1 culled/2 batches、一次aspect变化与资源归零 | 当前只用 fixture key/纯值和 recording Null device；无depth attachment、GPU buffer/shader/pipeline或可见画面，不计Legacy删除门禁 |

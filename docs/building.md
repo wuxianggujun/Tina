@@ -93,8 +93,9 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 # Combined product-2d gate (Physics2D + FreeType; formal tina_sample_2d; disk recipe catalog):
 # cmake --preset windows-msvc-vnext-bgfx-product-2d
 # cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d
+# Default smoke (M10 closed pointer path: no click; tileSelectionHits=0 / no highlight is valid):
 # out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
-# Optional controlled selection gate (no OS pointer injection; seeds cell after map ready):
+# Controlled selection gate (M10-A44; sample-private seed, not OS/GLFW click):
 # out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0 --seed-tile-selection=1,1
 # Recipe source: samples/2d_tilemap_bgfx/catalog/sample_2d.recipe
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300

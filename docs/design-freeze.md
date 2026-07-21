@@ -550,9 +550,12 @@ cell 生成 sortingLayer=2 半透明 inset overlay；`extractRenderScene` 在有
 JSON 增加 `selectionHighlightSprites` / `lastHighlightSprites` / `seedTileSelection*`。A39 UI
 non-penetration 仍由 `tina_runtime_ui_tests` 承担。
 
-M10 产品 2D 收口（A32–A44 / tip `70618808`）：正式样例 + Asset recipe 子集 + pointer/selection
-门禁视为可验收闭环。完整外部 cooker CLI 与 cgltf/`tina_sample_3d` 仍 **Deferred**，不强制续开
-A45+；Camera resize/chunk dirty/插值打磨与 Audio 归 M11；Legacy 删除归 M12。
+M10 产品 2D 收口（A32–A44 / tip `70618808`）：正式样例 + Asset recipe 子集 + **A39–A44 pointer/
+selection 产品闭环**视为可验收。行为：默认 `--frames=300` 不合成点击（`tileSelectionHits=0` /
+无高亮合法）；`--seed-tile-selection=cellX,cellY` 为受控可脚本门禁（sample-private locked sample，
+非 OS 真点击）；UI Button 不穿透仍由 `tina_runtime_ui_tests` 证明。完整外部 cooker CLI、
+cgltf/`tina_sample_3d`、厚 world-pick Game SDK 仍 **Deferred**，**默认不再开 M10-A45**；
+Camera resize/chunk dirty/截图与 Audio 归 M11；Legacy 删除归 M12。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

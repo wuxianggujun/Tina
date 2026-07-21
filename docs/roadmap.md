@@ -644,27 +644,36 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   A42 同构的 `consumeTileSelectionTransitions`（不注入 OS pointer、不重算 Camera）。默认 300 帧
   仍可不点；seed 路径要求 `tileSelectionHits>=1`、`lastHighlightSprites=1` 与
   `selectionHighlightSprites==renderExtractions`。sample-private helper 测试覆盖高亮几何、seed
-  与 scripted Pressed 消费；A39 UI non-penetration 仍由 `tina_runtime_ui_tests`；
+  与 scripted Pressed 消费；A39 UI non-penetration 仍由 `tina_runtime_ui_tests`。
 
-### M10 收口（tip `70618808`，A44）
+### M10 收口清单（tip `70618808`；pointer / selection 产品闭环 = A39–A44）
 
-**产品 2D 主线（`tina_sample_2d` + 输入/选格）到 A44 视为可验收收口**，不必再为编号焦虑开 A45，
-除非出现真实产品缺口。已完成 vs Deferred：
+**产品 2D 主线（`tina_sample_2d` + pointer→选格→高亮）以 A39–A44 为可验收收口。**
+**默认不再开 M10-A45**，除非出现真实产品缺口（门禁失败、Accepted 契约回归）。完整 cooker CLI、
+cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A45 自动续号。
 
-| 已完成（A0–A44 主体） | Deferred（不阻塞本收口） |
-| --- | --- |
-| Asset/Catalog/Handle/Lease/Task/Null GPU upload 子集 | 完整外部 cooker CLI（Parse→Validate→Build→Atomic Write 全量） |
-| recipe → cook/publish → load（hermetic fixture） | cgltf / 最小 glTF 3D 产品样例 `tina_sample_3d` |
-| `tina_sample_2d` Catalog TileMap + Character + UI/Button + 可选 Physics/FreeType | Camera resize / 插值 / pixel snap 产品打磨 |
-| A39 non-penetration；A40–A42 world pointer；A43 选格；A44 高亮 + seed 门禁 | 更大 Game SDK world-pick API；chunk dirty 压力门禁 |
-| product-2d 300 帧 JSON 生命周期门禁 | 删 Legacy（M12，需 Audio+3D 等价验收） |
+| 状态 | 范围 | 备注 |
+| --- | --- | --- |
+| **已完成（闭环）** | A39 UI pointer non-penetration | `tina_runtime_ui_tests` 合成 Button；smoke 不点 |
+| **已完成（闭环）** | A40–A42 pick + latch + `worldPointerSample` | render_scene / runtime_ui / ActionMapper |
+| **已完成（闭环）** | A43 sample TileSelection consumer | 默认 `tileSelectionHits=0` 合法 |
+| **已完成（闭环）** | A44 可见高亮 + `--seed-tile-selection` | 受控门禁；非 OS/GLFW 真点击 |
+| **已完成（样例主线）** | A32–A38 Catalog/TileMap/角色/UI/Physics/recipe | product-2d preset |
+| **已完成（Asset 子集）** | A0–A31 Catalog/Handle/Task/upload/recipe 等 | hermetic fixture 足够 2D 主路径 |
+| **Deferred** | 完整外部 cooker CLI / 全量 `tina_assetc` | 当前 recipe 子集；可另开切片 |
+| **Deferred** | cgltf v1.15 → StaticMesh/Material/Prefab + `tina_sample_3d` | 固定版本规划；不阻塞 2D 收口 |
+| **Deferred** | 扩大 Game SDK world-pick 公共 API | sample-private helper 已够 |
+| **Deferred（可进 M11）** | Camera resize/pixel snap、chunk dirty 压力、截图回归 | 非 pointer 阻断 |
+| **Deferred（M12）** | 删 Legacy | 需 2D/UI/3D/Asset/Audio 等价验收 |
 
-- 完整 Cooker/cgltf **明确 Deferred**（可在 M10 尾或 M11 另开切片，不自动续号 A45+）；
+默认 smoke：`tina_sample_2d --frames=300` → hits=0 / 无高亮合法。
+受控门禁：`--seed-tile-selection=cellX,cellY`（建议 300 帧）→ hits≥1 且高亮字段一致。
+
+- 完整 Cooker/cgltf **明确 Deferred**（不自动续号 A45+）；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；
-- 为正式产品路径把 M7–M9 的内置 fixture 替换为 Catalog/Manifest 资产；hermetic、版本锁定的
-  infrastructure/module-test fixture 继续保留；新增 Cooked glTF/Material/Prefab 3D 产品样例。
+- hermetic fixture 继续保留；新增 Cooked glTF 3D 产品样例属 Deferred，不阻塞本收口。
 
 ## M11 产品 2D、UI 与 Audio
 
