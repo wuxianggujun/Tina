@@ -677,6 +677,9 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
 
 ## M11 产品 2D、UI 与 Audio
 
+- M11-A7 已完成：后端无关 `Tina::Audio` / `AudioEngine` 生命周期基础（Disabled、固定 voice
+  capacity、generation `AudioVoiceId`、owner-thread 校验、幂等 shutdown、header isolation）；
+  独立 `tina_audio_tests`；**无 miniaudio 设备、无 command/completion 队列、未接入 EngineHost**；
 - M11-A0 已完成：独立 `tina_physics2d` 生命周期（World/owner thread、generation Body/Shape、原子 Box body、
   固定 step、pose snapshot、shutdown）与 Windows Debug/Release `tina_physics2d_tests` 门禁；
 - M11-A1 已完成：固定容量 contact begin/end/hit 复制、destroy tombstone、通道 overflow 与

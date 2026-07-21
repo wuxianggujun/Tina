@@ -557,6 +557,11 @@ selection 产品闭环**视为可验收。行为：默认 `--frames=300` 不合�
 cgltf/`tina_sample_3d`、厚 world-pick Game SDK 仍 **Deferred**，**默认不再开 M10-A45**；
 Camera resize/chunk dirty/截图与 Audio 归 M11；Legacy 删除归 M12。
 
+M11-A7：后端无关 `Tina::Audio` 生命周期基础。`AudioEngine::Create` 固定 voice/command/completion
+容量并始终进入 Disabled（无设备）；generation `AudioVoiceId` 证明 slot 复用/stale；owner-thread
+API 与幂等 shutdown；`pumpCompletions` A7 恒为 0。独立 `tina_audio` + `tina_audio_tests`（含
+header isolation）。miniaudio adapter、命令/完成 SPSC、AssetLease、EngineHost 接线后置。
+
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation
 ID，原子创建 Body+Box Shape，并提供 pose/velocity snapshot、销毁与幂等 shutdown。

@@ -210,6 +210,7 @@ endif ()
 add_subdirectory(src/vnext/asset_format "${TINA_VNEXT_BINARY_DIR}/asset_format")
 add_subdirectory(src/vnext/asset "${TINA_VNEXT_BINARY_DIR}/asset")
 add_subdirectory(src/vnext/ui "${TINA_VNEXT_BINARY_DIR}/ui")
+add_subdirectory(src/vnext/audio "${TINA_VNEXT_BINARY_DIR}/audio")
 
 add_subdirectory(src/runtime "${TINA_VNEXT_BINARY_DIR}/runtime")
 if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
