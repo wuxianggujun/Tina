@@ -282,7 +282,7 @@ Legacy 删除前仍须补齐/加强（**非** A39–A44 阻断）：
   （`resolveCamera2DProjection` / FixedWorldHeight + PixelPerfect + actualPPM；样例接 metrics）；
   RenderScene 端 pixel snap 量化仍由 builder 在 commit 时应用；
 - 多 layer Sprite、透明混合；Tile chunk culling 已有；M11-B1 已加 CPU `TileChunkDirtyCache`
-  revision 门禁（300 帧压力）；sample/GPU chunk mesh cache 仍可后置；
+  revision 门禁（asset 300 帧压力 + `tina_sample_2d` 产品 JSON）；GPU chunk mesh cache 仍可后置；
 - 稳定截图回归；输入 / 日志 / 返回码分别留证据（pointer 路径证据见上表）。
 
 首期明确不实现无限地图 streaming、复杂 Tile 编辑器、Sprite skeletal animation、GPU particle、

@@ -695,8 +695,9 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   **与 Audio 切片并行、路径互不重叠**；
 - M11-B1 已完成：`Tina::Asset` `TileChunkDirtyCache`——按 `TileChunkView.revision` 跟踪可见 chunk，
   仅 revision 变化时计入 rebuild；`setTile` 只脏化受影响 chunk；300 帧压力门禁
-  `rebuilds << visibleObservations`（`tina_asset_tests` 6 项）。无 GPU chunk mesh cache、不接 sample；
-  **不碰 Audio**；
+  `rebuilds << visibleObservations`（`tina_asset_tests` 6 项）。`tina_sample_2d` 已接线：每帧
+  `syncVisible` 与全量 emit 并行，JSON 输出 `chunkDirtyRebuilds`/`chunkDirtyCacheHits` 等；
+  静态图末帧 `lastChunkDirtyRebuilds=0`。无 GPU chunk mesh cache；**不碰 Audio**；
 - M11-A0 已完成：独立 `tina_physics2d` 生命周期（World/owner thread、generation Body/Shape、原子 Box body、
   固定 step、pose snapshot、shutdown）与 Windows Debug/Release `tina_physics2d_tests` 门禁；
 - M11-A1 已完成：固定容量 contact begin/end/hit 复制、destroy tombstone、通道 overflow 与

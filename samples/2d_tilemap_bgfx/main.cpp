@@ -5,6 +5,7 @@
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CharacterController2D.hpp>
 #include <tina/asset/GridCollision.hpp>
+#include <tina/asset/TileChunkDirtyCache.hpp>
 #include <tina/asset/TileChunkRender.hpp>
 #include <tina/asset/TileMapInstance.hpp>
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
@@ -123,6 +124,14 @@ struct LifecycleCounters final {
     float lastCameraWorldWidth = 0.0f;
     float lastCameraWorldHeight = 0.0f;
     float lastCameraActualPpm = 0.0f;
+    // M11-B1: TileChunkDirtyCache product evidence (CPU revision gate).
+    u64 chunkDirtyFramesSynced = 0;
+    u64 chunkDirtyVisibleObservations = 0;
+    u64 chunkDirtyRebuilds = 0;
+    u64 chunkDirtyCacheHits = 0;
+    u64 lastChunkDirtyRebuilds = 0;
+    u64 lastChunkDirtyCacheHits = 0;
+    u64 lastChunkDirtyVisible = 0;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     u64 physicsSteps = 0;
     u64 physicsStaticBodies = 0;
@@ -332,6 +341,8 @@ struct TileMapResources final {
     std::optional<Tina::Asset::TileMapInstance> map{};
     std::optional<Tina::Asset::TileMapGridCollision> grid{};
     std::optional<Tina::Asset::CharacterController2D> controller{};
+    std::optional<Tina::Asset::TileChunkDirtyCache> chunkDirtyCache{};
+    std::pmr::vector<Tina::Asset::TileChunkView> chunkDirtyRebuilt{&memory};
     std::pmr::vector<Tina::Asset::TileMapSolidHit> solidScratch{&memory};
     std::filesystem::path catalogRoot{};
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
@@ -438,6 +449,16 @@ struct TileMapResources final {
     }
     resources.map.emplace(std::move(*map));
     resources.grid.emplace(*resources.map);
+    {
+        // M11-B1 product path: fixed-capacity revision cache for visible chunks.
+        auto dirty = Tina::Asset::TileChunkDirtyCache::Create(
+            Tina::Asset::TileChunkDirtyCacheConfig{.capacity = 64, .memoryResource = &resources.memory});
+        if (!dirty)
+        {
+            return Tina::Core::failure(std::move(dirty.error()));
+        }
+        resources.chunkDirtyCache.emplace(std::move(*dirty));
+    }
     resources.controller.emplace(Tina::Asset::CharacterController2DConfig{
         .halfWidth = 0.3f,
         .halfHeight = 0.5f,
@@ -897,6 +918,8 @@ class TileMapBgfxState final : public Tina::IGameState {
             .halfWidth = camera->worldWidth * 0.5f,
             .halfHeight = camera->worldHeight * 0.5f,
         };
+        // Still emit all visible sprites for the visual product path. Dirty cache
+        // runs in parallel as the CPU revision gate (M11-B1 evidence).
         auto emitted = Tina::Asset::emitVisibleTileMapSprites(
             *resources_->map, query, Tina::Asset::TileChunkSpriteEmitParams{.spriteKey = ProductSpriteKey},
             tileSprites);
@@ -911,6 +934,26 @@ class TileMapBgfxState final : public Tina::IGameState {
             {
                 return status;
             }
+        }
+        if (resources_->chunkDirtyCache)
+        {
+            const auto statsBefore = resources_->chunkDirtyCache->stats();
+            resources_->chunkDirtyRebuilt.clear();
+            auto rebuilds =
+                resources_->chunkDirtyCache->syncVisible(*resources_->map, query, resources_->chunkDirtyRebuilt);
+            if (!rebuilds)
+            {
+                return Tina::Core::failure(std::move(rebuilds.error()));
+            }
+            const auto statsAfter = resources_->chunkDirtyCache->stats();
+            counters_->lastChunkDirtyRebuilds = *rebuilds;
+            counters_->lastChunkDirtyCacheHits = statsAfter.cacheHits - statsBefore.cacheHits;
+            counters_->lastChunkDirtyVisible =
+                statsAfter.visibleChunkObservations - statsBefore.visibleChunkObservations;
+            counters_->chunkDirtyFramesSynced = statsAfter.framesSynced;
+            counters_->chunkDirtyVisibleObservations = statsAfter.visibleChunkObservations;
+            counters_->chunkDirtyRebuilds = statsAfter.rebuilds;
+            counters_->chunkDirtyCacheHits = statsAfter.cacheHits;
         }
 
         const auto& st = resources_->controller->state();
@@ -1273,14 +1316,21 @@ int main(int argc, char** argv)
         counters.cameraProjectionResolves == counters.renderExtractions && counters.lastCameraWorldHeight > 0.0f &&
         counters.lastCameraWorldWidth > 0.0f && counters.lastCameraActualPpm > 0.0f &&
         counters.surfacePixelWidth > 0 && counters.surfacePixelHeight > 0;
+    // Static sample map: first extract rebuilds all visible chunks; subsequent
+    // frames are pure cache hits (no setTile). rebuilds << visibleObservations.
+    const bool chunkDirtyValid =
+        counters.chunkDirtyFramesSynced == counters.renderExtractions && counters.chunkDirtyVisibleObservations > 0 &&
+        counters.chunkDirtyRebuilds > 0 && counters.chunkDirtyCacheHits > 0 &&
+        counters.chunkDirtyRebuilds < counters.chunkDirtyVisibleObservations &&
+        counters.lastChunkDirtyRebuilds == 0 && counters.lastChunkDirtyCacheHits > 0;
 
     bool ok = selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
-              counters.catalogFromRecipeFile && counters.catalogRecipeAssets == 3 && counters.texturesUploaded == 1 &&
-              counters.lastTileSprites == ExpectedNonEmptyTiles && counters.lastTotalSprites == expectedTotalSprites &&
-              counters.controllerGroundedFrames > 0 && counters.controllerWalkFrames > 0 &&
-              counters.controllerHitRightFrames > 0 && counters.maxControllerX > 1.5f &&
-              counters.renderExtractions == counters.frameUpdates && counters.stateExits == 1 &&
-              counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
+              chunkDirtyValid && counters.catalogFromRecipeFile && counters.catalogRecipeAssets == 3 &&
+              counters.texturesUploaded == 1 && counters.lastTileSprites == ExpectedNonEmptyTiles &&
+              counters.lastTotalSprites == expectedTotalSprites && counters.controllerGroundedFrames > 0 &&
+              counters.controllerWalkFrames > 0 && counters.controllerHitRightFrames > 0 &&
+              counters.maxControllerX > 1.5f && counters.renderExtractions == counters.frameUpdates &&
+              counters.stateExits == 1 && counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
               counters.uiPanelsCreated == ExpectedUIPanelCount &&
               counters.uiTextLabelsCreated == ExpectedUITextLabelCount &&
               counters.uiButtonsCreated == ExpectedUIButtonCount && counters.uiButtonActionsWired == 1 &&
@@ -1374,6 +1424,13 @@ int main(int argc, char** argv)
               << ",\"lastCameraWorldHeight\":" << counters.lastCameraWorldHeight
               << ",\"lastCameraActualPpm\":" << counters.lastCameraActualPpm
               << ",\"cameraProjection\":\"FixedWorldHeight2D\""
+              << ",\"chunkDirtyFramesSynced\":" << counters.chunkDirtyFramesSynced
+              << ",\"chunkDirtyVisibleObservations\":" << counters.chunkDirtyVisibleObservations
+              << ",\"chunkDirtyRebuilds\":" << counters.chunkDirtyRebuilds
+              << ",\"chunkDirtyCacheHits\":" << counters.chunkDirtyCacheHits
+              << ",\"lastChunkDirtyRebuilds\":" << counters.lastChunkDirtyRebuilds
+              << ",\"lastChunkDirtyCacheHits\":" << counters.lastChunkDirtyCacheHits
+              << ",\"lastChunkDirtyVisible\":" << counters.lastChunkDirtyVisible
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
               << ",\"physicsEnabled\":true"
               << ",\"physicsSteps\":" << counters.physicsSteps

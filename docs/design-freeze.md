@@ -566,7 +566,9 @@ M11-B1：`include/tina/asset/TileChunkDirtyCache.hpp` 在 extraction 边界按 c
 `TileChunkView.revision`；`syncVisible`/`classifyVisible` 只把 revision 变化的 chunk 写入 rebuilt
 列表（cache hit 不 re-emit）。Create 时固定 capacity；满则 LRU 驱逐并计数。`setTile` 既有
 revision bump 语义不变。300 帧 pan+稀疏 edit 压力测试要求 `rebuilds < visibleObservations`。
-不实现 GPU VB/IB cache；不接入 Audio。
+`tina_sample_2d` 在 extract 中并行 `syncVisible`（视觉仍全量 emit），JSON 门禁
+`chunkDirtyRebuilds`/`chunkDirtyCacheHits`/`lastChunkDirtyRebuilds`。不实现 GPU VB/IB cache；
+不接入 Audio。
 
 M11-A7：后端无关 `Tina::Audio` 生命周期基础。`AudioEngine::Create` 固定 voice/command/completion
 容量并始终进入 Disabled（无设备）；generation `AudioVoiceId` 证明 slot 复用/stale；owner-thread
