@@ -542,6 +542,14 @@ viewport miss、地图外、缺 payload、`Released`/`Cancelled` 不产生选择
 input/camera/surface revision 由样例私有状态和 JSON 计数保存；确定性消费者测试并入 `tina_tests`。
 此切片不新增 Game SDK world-pick API；完整外部 cooker CLI 仍 Deferred。
 
+M10-A44：选中格可见高亮 + 受控 pointer 产品门禁。`makeSelectionHighlightSprite` 按 lastSelection
+cell 生成 sortingLayer=2 半透明 inset overlay；`extractRenderScene` 在有选中时 +1 sprite，构建/
+容量失败结构化返回（禁止 silent half-state）。CLI `--seed-tile-selection=cellX,cellY` 经
+`makeScriptedWorldCellPress` 注入与 A42 同构的 locked Pressed+hit sample，再走
+`consumeTileSelectionTransitions`（不合成 OS/GLFW pointer，不重算 Camera）。默认 smoke 仍可不点。
+JSON 增加 `selectionHighlightSprites` / `lastHighlightSprites` / `seedTileSelection*`。A39 UI
+non-penetration 仍由 `tina_runtime_ui_tests` 承担。
+
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation
 ID，原子创建 Body+Box Shape，并提供 pose/velocity snapshot、销毁与幂等 shutdown。

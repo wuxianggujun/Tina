@@ -84,6 +84,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A30 tile chunk sprite emit | Debug C++23 | 90/90 asset | emit UV/center；RenderScene commit；off-camera skip；`tina_asset_tests` 90 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A42 ActionMapper last-presented Camera2D world pointer payload | Debug C++23 | 237/237 + 74/74 + 30/30 | `tina_tests`、`tina_runtime_ui_tests`、`tina_render_scene_tests` 均直接通过；覆盖 UI consume/claim non-penetration、Pressed/Released sample、无 Camera 结构化失败、viewport no-hit、0 fixed-step 锁存及 EngineHost last-presented E2E |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A43 `tina_sample_2d` Tile selection consumer | Debug C++23 | 240/240 + 10/10 + product smoke | `tina_tests` 新增 3 个 sample-private consumer 用例；A39/A42 组合聚焦 10/10；`tina_sample_2d --frames=300` 返回0，默认无合成点击时 selection JSON 计数为0，product-2d 资源/lifecycle 门禁保持通过 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A44 selection highlight + seed gate | Debug C++23 | Sample2DTileSelection + sample smoke | helper 覆盖 highlight 几何、seed、scripted Pressed edge 同构消费；默认 300 帧无选中/无高亮；`--seed-tile-selection=1,1` 要求 hits≥1、每帧 highlight=1；A39 UI non-penetration 仍由 `tina_runtime_ui_tests` |
 
 
 
@@ -175,6 +176,14 @@ M10-A43 的样例消费者测试与生产代码共用 `samples/2d_tilemap_bgfx/T
 `Pressed + hit` 的 cell 映射和锁存 provenance、viewport miss、负数/地图外/半开上边界、NaN、缺 payload、
 `Released/Cancelled`、错误 action，以及空 catch-up transition batch。GLFW product smoke 不注入真实点击，
 因此默认 `worldPointerPresses`/`tileSelectionHits` 为0；真实 UI non-penetration 仍由 A39 合成测试证明。
+
+M10-A44 在同一 helper 上追加 `makeSelectionHighlightSprite`（cell 中心、inset、sortingLayer=2、非法
+grid/cell/spriteKey 结构化失败）与 `makeScriptedWorldCellPress`/`seedTileSelection`（锁存 cell 中心
+world sample，经同一 `consumeTileSelectionTransitions` 消费）。`tina_sample_2d` 默认 `--frames=300`
+仍无选中/无高亮；`--seed-tile-selection=cellX,cellY` 在 first fixedUpdate 注入一次 scripted Pressed
+edge，要求 `tileSelectionHits>=1`、`lastHighlightSprites=1` 且
+`selectionHighlightSprites==renderExtractions`。不注入 OS/GLFW pointer；A39 Button non-penetration
+继续由 `tina_runtime_ui_tests` 证明。
 
 M8-A 使用独立 `tina_scene_tests`，当前 19 项覆盖：World 固定容量与 PMR 错误回滚/稳定构造错误、Entity generation/owner/stale
 校验、keep-world/keep-local reparent、父销毁与显式子树销毁、Local/World Transform 组合、非递归深树与宽树

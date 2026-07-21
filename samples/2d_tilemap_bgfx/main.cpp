@@ -80,6 +80,11 @@ inline constexpr float DemoWalkSpeedMetersPerSecond = 4.0f;
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
+    // Optional controlled product gate: seed one map cell selection after enter
+    // without synthesizing OS pointer events (GLFW smoke stays hermetic).
+    bool seedTileSelection = false;
+    u32 seedTileCellX = 0;
+    u32 seedTileCellY = 0;
 };
 
 struct LifecycleCounters final {
@@ -103,8 +108,11 @@ struct LifecycleCounters final {
     u64 uiButtonActionsWired = 0;
     Tina::Sample2D::TileSelectionCounters tileSelection{};
     u16 lastSelectedTileId = 0;
+    u64 selectionHighlightSprites = 0;
+    u64 lastHighlightSprites = 0;
     u64 catalogRecipeAssets = 0;
     bool catalogFromRecipeFile = false;
+    bool seedTileSelectionApplied = false;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     u64 physicsSteps = 0;
     u64 physicsStaticBodies = 0;
@@ -213,6 +221,32 @@ void writeError(const Tina::Core::Error& error)
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "invalid --frame-delay-ms");
             }
             options.frameDelayMilliseconds = value;
+            continue;
+        }
+        if (argument.starts_with("--seed-tile-selection="))
+        {
+            const auto text = argument.substr(std::string_view{"--seed-tile-selection="}.size());
+            const auto comma = text.find(',');
+            if (comma == std::string_view::npos)
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "invalid --seed-tile-selection (expected cellX,cellY)");
+            }
+            u32 cellX = 0;
+            u32 cellY = 0;
+            const auto [endX, errX] =
+                std::from_chars(text.data(), text.data() + comma, cellX);
+            const auto [endY, errY] =
+                std::from_chars(text.data() + comma + 1, text.data() + text.size(), cellY);
+            if (errX != std::errc{} || errY != std::errc{} || endX != text.data() + comma ||
+                endY != text.data() + text.size())
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "invalid --seed-tile-selection (expected cellX,cellY)");
+            }
+            options.seedTileSelection = true;
+            options.seedTileCellX = cellX;
+            options.seedTileCellY = cellY;
             continue;
         }
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "unsupported argument");
@@ -673,15 +707,41 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
 
         const Tina::Asset::TileMapInstance& map = *resources_->map;
+        const Tina::Sample2D::TileSelectionGrid grid{
+            .widthCells = map.widthCells(),
+            .heightCells = map.heightCells(),
+            .cellSizeMeters = map.cellSizeMeters(),
+        };
+
+        // Controlled product gate (M10-A44): once per run, inject a locked
+        // Pressed+hit WorldPointerSample edge into the same consumer as A42
+        // edges. This is sample-private (not OS/GLFW injection) and does not
+        // re-project with live Camera/Platform.
+        if (options_.seedTileSelection && !counters_->seedTileSelectionApplied)
+        {
+            auto scripted = Tina::Sample2D::makeScriptedWorldCellPress(
+                SelectTileAction, grid, options_.seedTileCellX, options_.seedTileCellY, /*sourceSequence=*/9001);
+            if (!scripted)
+            {
+                return Tina::Core::failure(std::move(scripted.error()));
+            }
+            const Tina::SimulationActionTransition seededTransition = *scripted;
+            Tina::Sample2D::consumeTileSelectionTransitions(std::span{&seededTransition, 1}, SelectTileAction, grid,
+                                                            counters_->tileSelection);
+            if (!counters_->tileSelection.lastSelection.has_value() ||
+                counters_->tileSelection.lastSelection->cellX != options_.seedTileCellX ||
+                counters_->tileSelection.lastSelection->cellY != options_.seedTileCellY)
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "seed tile selection did not lock the requested cell");
+            }
+            counters_->seedTileSelectionApplied = true;
+            counters_->lastSelectedTileId = map.tileIdAt(options_.seedTileCellX, options_.seedTileCellY);
+        }
+
         const u64 previousSelectionHits = counters_->tileSelection.selectionHits;
-        Tina::Sample2D::consumeTileSelectionTransitions(
-            context.simulationActions().transitions, SelectTileAction,
-            Tina::Sample2D::TileSelectionGrid{
-                .widthCells = map.widthCells(),
-                .heightCells = map.heightCells(),
-                .cellSizeMeters = map.cellSizeMeters(),
-            },
-            counters_->tileSelection);
+        Tina::Sample2D::consumeTileSelectionTransitions(context.simulationActions().transitions, SelectTileAction,
+                                                        grid, counters_->tileSelection);
 
         if (counters_->tileSelection.selectionHits != previousSelectionHits &&
             counters_->tileSelection.lastSelection.has_value())
@@ -873,6 +933,37 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
         ++totalSprites;
 #endif
+        // M10-A44: when lastSelection is set, emit exactly one highlight sprite
+        // (layer 2, above tiles/character/crate). Fail closed on build/capacity
+        // errors — no silent half-state with selection but missing overlay.
+        u64 highlightSprites = 0;
+        if (counters_->tileSelection.lastSelection.has_value())
+        {
+            const Tina::Sample2D::SelectedTile& selection = *counters_->tileSelection.lastSelection;
+            auto highlight = Tina::Sample2D::makeSelectionHighlightSprite(
+                selection,
+                Tina::Sample2D::TileSelectionGrid{
+                    .widthCells = resources_->map->widthCells(),
+                    .heightCells = resources_->map->heightCells(),
+                    .cellSizeMeters = resources_->map->cellSizeMeters(),
+                },
+                ProductSpriteKey);
+            if (!highlight)
+            {
+                return Tina::Core::failure(std::move(highlight.error()));
+            }
+            if (auto status = writer.addSprite2D(*highlight); !status)
+            {
+                return status;
+            }
+            highlightSprites = 1;
+            ++totalSprites;
+        }
+        counters_->lastHighlightSprites = highlightSprites;
+        if (highlightSprites != 0)
+        {
+            ++counters_->selectionHighlightSprites;
+        }
         counters_->lastTotalSprites = totalSprites;
         ++counters_->renderExtractions;
         return Tina::Core::success();
@@ -1104,14 +1195,24 @@ int main(int argc, char** argv)
         (counters.tileSelection.selectionHits > 0 && lastSelection != nullptr && resources.map.has_value() &&
          lastSelection->cellX < resources.map->widthCells() && lastSelection->cellY < resources.map->heightCells());
     const bool selectionStateValid = selectionCountersValid && selectionLatchValid;
+    const u64 expectedHighlightSprites = lastSelection != nullptr ? 1U : 0U;
+    const u64 expectedTotalSprites = ExpectedSpritesWithPhysics + expectedHighlightSprites;
+    const bool highlightValid =
+        counters.lastHighlightSprites == expectedHighlightSprites &&
+        ((expectedHighlightSprites == 0 && counters.selectionHighlightSprites == 0) ||
+         (expectedHighlightSprites == 1 && counters.selectionHighlightSprites == counters.renderExtractions));
+    const bool seededSelectionValid =
+        !options->seedTileSelection ||
+        (counters.seedTileSelectionApplied && counters.tileSelection.selectionHits >= 1 && lastSelection != nullptr &&
+         lastSelection->cellX == options->seedTileCellX && lastSelection->cellY == options->seedTileCellY);
 
-    bool ok = selectionStateValid && counters.catalogFromRecipeFile && counters.catalogRecipeAssets == 3 &&
-              counters.texturesUploaded == 1 &&
-              counters.lastTileSprites == ExpectedNonEmptyTiles &&
-              counters.lastTotalSprites == ExpectedSpritesWithPhysics && counters.controllerGroundedFrames > 0 &&
-              counters.controllerWalkFrames > 0 && counters.controllerHitRightFrames > 0 &&
-              counters.maxControllerX > 1.5f && counters.renderExtractions == counters.frameUpdates &&
-              counters.stateExits == 1 && counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
+    bool ok = selectionStateValid && highlightValid && seededSelectionValid && counters.catalogFromRecipeFile &&
+              counters.catalogRecipeAssets == 3 && counters.texturesUploaded == 1 &&
+              counters.lastTileSprites == ExpectedNonEmptyTiles && counters.lastTotalSprites == expectedTotalSprites &&
+              counters.controllerGroundedFrames > 0 && counters.controllerWalkFrames > 0 &&
+              counters.controllerHitRightFrames > 0 && counters.maxControllerX > 1.5f &&
+              counters.renderExtractions == counters.frameUpdates && counters.stateExits == 1 &&
+              counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
               counters.uiPanelsCreated == ExpectedUIPanelCount &&
               counters.uiTextLabelsCreated == ExpectedUITextLabelCount &&
               counters.uiButtonsCreated == ExpectedUIButtonCount && counters.uiButtonActionsWired == 1 &&
@@ -1140,6 +1241,9 @@ int main(int argc, char** argv)
                   << ",\"worldPointerMapMisses\":" << counters.tileSelection.mapMisses
                   << ",\"tileSelectionHits\":" << counters.tileSelection.selectionHits
                   << ",\"hasTileSelection\":" << (lastSelection != nullptr ? "true" : "false")
+                  << ",\"selectionHighlightSprites\":" << counters.selectionHighlightSprites
+                  << ",\"lastHighlightSprites\":" << counters.lastHighlightSprites
+                  << ",\"seedTileSelection\":" << (options->seedTileSelection ? "true" : "false")
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
                   << ",\"physicsSteps\":" << counters.physicsSteps
                   << ",\"physicsStatics\":" << counters.physicsStaticBodies
@@ -1151,16 +1255,16 @@ int main(int argc, char** argv)
     }
 
     // Formal product sample name is tina_sample_2d; feature flags report which product
-    // slices were compiled (Physics2D / FreeType). M10-A43 consumes the A42
-    // locked world-pointer payload in fixedUpdate; A39 non-penetration remains
-    // gated by the synthetic Runtime/UI test.
+    // slices were compiled (Physics2D / FreeType). M10-A43/A44 consume A42 locked
+    // world-pointer payload, draw selection highlight, and optionally seed selection
+    // via --seed-tile-selection=cellX,cellY for automated product evidence.
     std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_2d\""
               << ",\"frames\":" << counters.frameUpdates << ",\"renderExtractions\":" << counters.renderExtractions
               << ",\"catalogFromRecipeFile\":" << (counters.catalogFromRecipeFile ? "true" : "false")
               << ",\"catalogRecipeAssets\":" << counters.catalogRecipeAssets
               << ",\"texturesUploaded\":" << counters.texturesUploaded
               << ",\"tileSpritesPerFrame\":" << ExpectedNonEmptyTiles
-              << ",\"spritesPerFrame\":" << ExpectedSpritesWithPhysics
+              << ",\"spritesPerFrame\":" << expectedTotalSprites
               << ",\"controllerGroundedFrames\":" << counters.controllerGroundedFrames
               << ",\"controllerWalkFrames\":" << counters.controllerWalkFrames
               << ",\"controllerHitRightFrames\":" << counters.controllerHitRightFrames
@@ -1190,6 +1294,10 @@ int main(int argc, char** argv)
               << (lastSelection != nullptr ? lastSelection->worldPointer.cameraRevision : 0U)
               << ",\"lastSelectionSurfaceRevision\":"
               << (lastSelection != nullptr ? lastSelection->worldPointer.surfaceRevision : 0U)
+              << ",\"selectionHighlightSprites\":" << counters.selectionHighlightSprites
+              << ",\"lastHighlightSprites\":" << counters.lastHighlightSprites
+              << ",\"seedTileSelection\":" << (options->seedTileSelection ? "true" : "false")
+              << ",\"seedTileSelectionApplied\":" << (counters.seedTileSelectionApplied ? "true" : "false")
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
               << ",\"physicsEnabled\":true"
               << ",\"physicsSteps\":" << counters.physicsSteps

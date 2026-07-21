@@ -94,6 +94,8 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 # cmake --preset windows-msvc-vnext-bgfx-product-2d
 # cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d
 # out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
+# Optional controlled selection gate (no OS pointer injection; seeds cell after map ready):
+# out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0 --seed-tile-selection=1,1
 # Recipe source: samples/2d_tilemap_bgfx/catalog/sample_2d.recipe
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_tilemap.exe --frames=300

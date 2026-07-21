@@ -5,6 +5,7 @@
 #include <array>
 #include <limits>
 #include <optional>
+#include <span>
 #include <utility>
 
 namespace {
@@ -114,4 +115,61 @@ TEST(Sample2DTileSelectionTest, IgnoresNonPressedOtherActionsMissingPayloadAndCa
     EXPECT_EQ(counters.missingWorldPointerSamples, 1U);
     EXPECT_EQ(counters.selectionHits, 0U);
     EXPECT_FALSE(counters.lastSelection.has_value());
+}
+
+TEST(Sample2DTileSelectionTest, SelectionHighlightSpriteCentersOnCellAndRejectsInvalid)
+{
+    const auto sprite =
+        Tina::Sample2D::makeSelectionHighlightSprite({.cellX = 2, .cellY = 1}, SampleGrid, /*spriteKey=*/1);
+    ASSERT_TRUE(sprite.has_value());
+    EXPECT_EQ(sprite->spriteKey, 1U);
+    EXPECT_FLOAT_EQ(sprite->centerX, 2.5F);
+    EXPECT_FLOAT_EQ(sprite->centerY, 1.5F);
+    EXPECT_FLOAT_EQ(sprite->widthMeters, 0.92F);
+    EXPECT_FLOAT_EQ(sprite->heightMeters, 0.92F);
+    EXPECT_EQ(sprite->sortingLayer, 2);
+    EXPECT_EQ(sprite->alpha, 160);
+
+    EXPECT_FALSE(Tina::Sample2D::makeSelectionHighlightSprite({.cellX = 8, .cellY = 0}, SampleGrid, 1).has_value());
+    EXPECT_FALSE(Tina::Sample2D::makeSelectionHighlightSprite({.cellX = 0, .cellY = 0}, SampleGrid, 0).has_value());
+    EXPECT_FALSE(
+        Tina::Sample2D::makeSelectionHighlightSprite({.cellX = 0, .cellY = 0}, TileSelectionGrid{8, 4, 0.0F}, 1)
+            .has_value());
+}
+
+TEST(Sample2DTileSelectionTest, SeedTileSelectionLocksCellCenterPayload)
+{
+    TileSelectionCounters counters{};
+    ASSERT_TRUE(Tina::Sample2D::seedTileSelection(3, 1, SampleGrid, counters, /*inputSequence=*/77));
+    EXPECT_EQ(counters.selectionHits, 1U);
+    EXPECT_EQ(counters.pointerPresses, 1U);
+    ASSERT_TRUE(counters.lastSelection.has_value());
+    EXPECT_EQ(counters.lastSelection->cellX, 3U);
+    EXPECT_EQ(counters.lastSelection->cellY, 1U);
+    EXPECT_TRUE(counters.lastSelection->worldPointer.hit);
+    EXPECT_FLOAT_EQ(counters.lastSelection->worldPointer.worldX, 3.5F);
+    EXPECT_FLOAT_EQ(counters.lastSelection->worldPointer.worldY, 1.5F);
+    EXPECT_EQ(counters.lastSelection->worldPointer.inputSequence, 77U);
+
+    EXPECT_FALSE(Tina::Sample2D::seedTileSelection(8, 0, SampleGrid, counters));
+    EXPECT_EQ(counters.selectionHits, 1U);
+}
+
+TEST(Sample2DTileSelectionTest, ScriptedWorldCellPressFeedsSameConsumerAsA42Edge)
+{
+    TileSelectionCounters counters{};
+    auto press = Tina::Sample2D::makeScriptedWorldCellPress(SelectTileAction, SampleGrid, 2, 0, 55);
+    ASSERT_TRUE(press.has_value());
+    const SimulationActionTransition transition = *press;
+    consumeTileSelectionTransitions(std::span{&transition, 1}, SelectTileAction, SampleGrid, counters);
+
+    EXPECT_EQ(counters.selectionHits, 1U);
+    ASSERT_TRUE(counters.lastSelection.has_value());
+    EXPECT_EQ(counters.lastSelection->cellX, 2U);
+    EXPECT_EQ(counters.lastSelection->cellY, 0U);
+    EXPECT_FLOAT_EQ(counters.lastSelection->worldPointer.worldX, 2.5F);
+    EXPECT_FLOAT_EQ(counters.lastSelection->worldPointer.worldY, 0.5F);
+    EXPECT_EQ(counters.lastSelection->worldPointer.inputSequence, 55U);
+
+    EXPECT_FALSE(Tina::Sample2D::makeScriptedWorldCellPress(SelectTileAction, SampleGrid, 99, 0).has_value());
 }

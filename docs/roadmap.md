@@ -638,6 +638,13 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   缺 payload 和 `Released/Cancelled` 均不选格。样例 JSON 锁存 selection cell/tile 与 input/camera/surface
   revision；sample-private helper 的命中、miss、越界、非 Pressed 和空 catch-up batch 由 `tina_tests`
   确定性覆盖。smoke 不合成点击，默认 selection 计数为0；不新增 Game SDK world-pick API；
+- M10-A44 已完成选中格可见高亮与受控产品门禁：`makeSelectionHighlightSprite` 在 extract 中
+  以 sortingLayer=2 半透明 inset overlay 绘制 lastSelection（仅最新一格；无选中不 emit）；CLI
+  `--seed-tile-selection=cellX,cellY` 在首个 fixedUpdate 经 scripted locked Pressed edge 走与
+  A42 同构的 `consumeTileSelectionTransitions`（不注入 OS pointer、不重算 Camera）。默认 300 帧
+  仍可不点；seed 路径要求 `tileSelectionHits>=1`、`lastHighlightSprites=1` 与
+  `selectionHighlightSprites==renderExtractions`。sample-private helper 测试覆盖高亮几何、seed
+  与 scripted Pressed 消费；A39 UI non-penetration 仍由 `tina_runtime_ui_tests`；
 - 完整 Cooker/cgltf 继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
@@ -662,8 +669,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   `CharacterControllerPhysicsCoexistenceTest` 证明同一 Tile solid 可同时喂 grid controller 与
   Physics2D static sync + dynamic body contact；`tina_sample_2d`（M10-A36–A38）已在 product-2d 图接线
   磁盘 recipe Catalog+TileMap+角色+Box2D crate+UI/Text+脚本化行走/Button；
-  M10-A39 pointer non-penetration、M10-A40 Camera2D pick 纯函数与 M10-A42 ActionMapper
-  last-presented world pointer payload 已门禁，M10-A43 已接入样例选格消费者；完整外部 cooker CLI 后置；
+  M10-A39–A44 pointer non-penetration、Camera2D pick、ActionMapper payload、样例选格/高亮与
+  `--seed-tile-selection` 受控门禁已闭合；完整外部 cooker CLI 后置；
   只有 bench p99 超预算才接入 Box2D worker callbacks；
 - 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
