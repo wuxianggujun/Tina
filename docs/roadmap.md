@@ -771,7 +771,20 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   对结构门禁字段做帧数无关摘要，JSON `evidenceFingerprint`；作为稳定截图回归前身；
 - M11-C5 已完成：`tina_sample_2d` HUD Music/SFX 分轨静音 Checkbox（共 3 个 mute 控件）→
   下帧 `setBusMuted(Master|Music|Sfx)`；门禁 `uiCheckboxesCreated==3`；
-  **仍非 GPU 像素截图、UIA/AT-SPI、全屏设置**；
+
+### M11 设置 / UI 产品竖切收口（tip `bbbe1b5b`，C0–C5 + D0）
+
+**设置页最小控件 + 三轨音量/静音接线 + 基础 Semantics + 结构证据指纹视为可验收收口**，
+默认不再为编号续开 C6+，除非出现真实产品缺口。
+
+| 已完成 | Deferred（不阻塞本收口） |
+| --- | --- |
+| Checkbox / Slider 控件 + PrimaryWindowUI 门面 | GPU 像素截图回归（D0 为结构指纹前身） |
+| Master/Music/SFX 音量 Slider → `setBusVolume` | UIA / AT-SPI 平台 adapter |
+| Master/Music/SFX 静音 Checkbox → `setBusMuted` | 运行时全屏 / WindowMode 切换设置 |
+| `committedSemantics()` 交互 kind 快照 | Dropdown / TreeView / 多行 TextEdit / IME 候选 |
+| product-2d `evidenceFingerprint`（帧数无关） | 完整 SettingsState / 错误恢复 UI 框架 |
+
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
 - 在 M10 已落地的 `tina_sample_2d` 主线上继续 2D 打磨：像素级截图回归（D0 为结构指纹前身；
   follow/插值见 M11-B2；dirty cache 见 M11-B1；投影 resolve 见 M11-B0）；
@@ -779,7 +792,7 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   主线程 completion 保证关闭安全；
 - 覆盖 callback 0分配/0阻塞、command/completion 满容量、设备 Disabled、Music underrun、
   Asset lease ACK 和300帧资源归零；
-- 稳定截图回归与平台可访问 adapter 仍后置；
+- 稳定像素截图回归与平台可访问 adapter 仍后置；
 - Dropdown、TreeView、多行文本、复杂 shaping 和 IME 候选窗只按真实需求增加。
 
 ## M12 Legacy 删除

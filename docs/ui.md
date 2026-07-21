@@ -718,15 +718,17 @@ min/max/value；Name 暂取 Label/Button 文本。尚未实现 Actions/`labelled
 ## Widget 范围
 
 迁移保留 Panel、Label、Button、Image、ProgressBar、Dialog、ScrollView、虚拟 ListView 和单行
-TextEdit。完成后增加设置页真实需要的 Checkbox、Slider；Dropdown、TreeView、多行 TextEdit、
-复杂 shaping 和触摸手势按真实产品需求增加。
+TextEdit。**M11-C0–C5 已落地设置页最小控件**：Checkbox、Slider，并在 `tina_sample_2d` 接
+Master/Music/SFX 音量与静音；Dropdown、TreeView、多行 TextEdit、复杂 shaping 和触摸手势按真实
+产品需求增加。
 
-Checkbox：Pointer/Space/Enter/Gamepad Accept 走同一 default action，值实际变化才通知；disabled、
-preventDefault 或 Modal 拦截时不改变。Slider：finite min/max/value/step、clamp、以 min 为原点的
-稳定量化；Pointer capture、方向键、Home/End 和 Gamepad 共用语义，单帧只提交最终 change。
+Checkbox：Pointer/Space/Enter/Gamepad Accept 走同一 default action；当前切片在激活时 toggle
+（含无 action 仍 consume）；disabled、preventDefault 或 Modal 拦截时不改变。Slider：finite
+min/max/value/step、clamp、以 min 为原点的稳定量化；Primary drag 独占 `armedSlider`，值未变不
+通知。方向键/Home/End/Gamepad 步进仍后置。
 
-不建设反射式 Data Binding。`SettingsState` 持有明确 `SettingsModel`，Action 调用窄 Window/
-Audio settings command；backend 失败恢复 model 并显示 UTF-8 错误。
+不建设反射式 Data Binding。当前样例用 phase-local pending 写 `AudioEngine` bus；完整
+`SettingsState`/`SettingsModel`、backend 失败恢复与 UTF-8 错误条仍 Deferred。
 
 ## 线程与内存
 

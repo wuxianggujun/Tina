@@ -651,6 +651,10 @@ M11-D0：`tina_sample_2d` 成功路径输出 `evidenceSchema=1` + `evidenceFinge
 M11-C5：`tina_sample_2d` 在 Master 静音之外增加 Music/SFX 静音 Checkbox；pending 写对应 bus mute；
 JSON 输出 `lastMusicMuted`/`lastSfxMuted`；smoke 要求 `uiCheckboxesCreated==3`（不强制点击）。
 
+M11 设置 / UI 产品竖切收口（C0–C5 + D0 / tip `bbbe1b5b`）：Checkbox/Slider 控件、PrimaryWindowUI
+门面、三轨音量/静音 HUD 接线、基础 Semantics snapshot、product-2d 结构证据指纹视为可验收闭环。
+GPU 像素截图、UIA/AT-SPI、运行时全屏设置、更复杂 SettingsState 仍 Deferred；默认不强制 C6+。
+
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation
 ID，原子创建 Body+Box Shape，并提供 pose/velocity snapshot、销毁与幂等 shutdown。
