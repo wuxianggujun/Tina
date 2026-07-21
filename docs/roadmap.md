@@ -100,8 +100,8 @@ M6 生命周期之后仍未实现：
   接线，M7-C1c-b3d1 已补 EngineConfig UI capacities 与 `updateUI` 后、Render 前的 private layout
   coordinator，M7-C1c-b3d2 已补 startup metrics seed 与 Game SDK scoped UI access，M7-C1c-b3e 已补
   held primary Pointer Button claim，后续独立切片又补 Game SDK root-scoped routed Pointer listener；
-  Key/Gamepad/axis claim producer、IMM32、production Gamepad 和连续
-  axis mapping 仍在后续子切片；
+  Key/Gamepad/axis 完整 claim producer、TextEdit/IME 候选窗、方向导航重复和连续 axis mapping
+  仍在后续子切片；
 - 有界 CPU/IO/Main worker、阶段指标与完整 shutdown deadline/fatal-stop；
 - typed render resource handle、Pass Scheduler、World RenderScene、owning RenderFramePacket/pool 与
   submission completion 保活；后端无关 SolidQuad builder、UI→Render bridge、D0 Runtime
@@ -112,9 +112,9 @@ M6 生命周期之后仍未实现：
   point-query/synthetic-route foundation、M7-C1c-b3b 私有 producer、M7-C1c-b3c EngineHost 接线与
   M7-C1c-b3d1 layout commit、M7-C1c-b3d2 startup/root scoped capability、M7-C1c-b3e Pointer claim、
   SolidFill committed paint、Render SolidQuad DisplayList builder、UI→Render integration bridge、D0
-  Runtime DisplayList handoff、D1 bgfx UI SolidQuad pass 与 D2 可见 panel smoke 已实现，但仍没有 owning
-  Runtime packet/FramePin、文本/glyph、完整 Widget facade 或产品 UI；当前 listener
-  facade 只是低层 routed callback/claim seam，后续 Button default action 已另行完成 primary Pointer 窄交互；
+  Runtime DisplayList handoff、D1 bgfx UI SolidQuad pass 与 D2 可见 panel smoke 已实现；后续 M7-D/E
+  又补齐 fixture 文本/glyph 与窄 Keyboard/Gamepad Accept，但仍没有 owning Runtime packet/FramePin、
+  完整 Widget facade 或产品 UI；当前 listener facade 仍只是低层 routed callback/claim seam；
 - `tina_bench` schema v1、Bench/Profile preset、`tina_profile_tracy` 和 Tracy/Metrics A/B；
 - Linux Null 图已完成 GCC 13.4 与 Clang 22.1.8 + libstdc++15 ASan/UBSan 门禁；M7-B2 Desktop bgfx
   X11 图也已完成 GCC 13.4 和 Clang 22.1.8 + ASan/UBSan/LSan 的183/22/11直接测试及300帧门禁。
@@ -206,8 +206,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   不向 public header 暴露 native/bgfx 类型；
 - **已完成 M7-B2 Desktop**：建立 `tina_bootstrap_desktop`、`Tina::Desktop::CreateEngine` 和300帧真实 GPU 样例；
   Game SDK/Phase Context 不暴露 RenderDevice/native/bgfx，Engine Module SPI 只暴露纯 Tina Render 类型；
-- **仍后置**：Scene/UI/Pass Scheduler、submission ticket/drain、production Gamepad、完整 DPI/IMM32，以及
-  resize、最小化、恢复的真实自动化验收。
+- **仍后置**：Scene/Pass Scheduler、submission ticket/drain、完整 DPI/IME 产品门禁、Gamepad 方向导航，
+  以及 resize、最小化、恢复的真实自动化验收。
 
 ### M7-C 增量 UI Core 与 Null DisplayList
 
@@ -337,13 +337,13 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   Collapsed 子树、父约束/viewport 变化和 layout/paint candidate 失败均有 full-rebuild 回退与回归测试。
   Windows Debug `tina_ui_tests` 当前为115/115；
 - **当前限制**：这不是完整 dirty-range pruning。`buildLayoutOrder`、父级 `arrangeChildren`、committed
-  layout、hit 与 paint snapshot 仍可能线性遍历；正式路径虽已接线并可创建 retained root/Panel/Label/Button 节点，低层也已有
-  SolidFill paint/DisplayList bridge、D0 Runtime handoff、Game SDK paint setter 和私有 bgfx SolidQuad pass，
-  但仍没有文本/glyph、Button Keyboard/Gamepad activation、Disabled/theme 视觉、完整 Widget facade 或产品 UI；
-- **仍后置**：Key/Gamepad/axis claim producer、完整 dirty-range pruning、持久 Pointer Capture、Focus/Modal、
-  Button Keyboard/Gamepad activation 与 Disabled/Theme 视觉、完整 Game SDK widget facade、Image/Text/Glyph PaintCache、nested clip、
-  Runtime `RenderFramePacket`/FramePin 与 FreeType；
-- 后续把当前 borrowed SolidQuad DisplayList 升级为 owning Runtime packet，再扩展 Image/Text/Glyph 与资源 pin；Null UI
+  layout、hit 与 paint snapshot 仍可能线性遍历；正式路径虽已接线并已有 retained root/Panel/Label/Button、
+  文本/glyph、窄 Keyboard/Gamepad Accept 与私有 bgfx UI pass，但仍没有 Disabled/theme 视觉、完整 Widget
+  facade 或产品 UI；
+- **仍后置**：Key/Gamepad/axis 完整 claim producer、完整 dirty-range pruning、持久 Pointer Capture、
+  Focus/Modal、方向导航重复与完整 Accept/Cancel、Disabled/Theme 视觉、完整 Game SDK widget facade、
+  Image PaintCache、nested clip、Runtime `RenderFramePacket`/FramePin、多 page 绑定与 cooked FontAsset；
+- 后续把当前 borrowed UI DisplayList 升级为 owning Runtime packet，再扩展 Image、资源 pin 与多 page；Null UI
   继续直接测试 route/layout/paint order，不链接 FreeType/bgfx；
 - 硬门禁：无变化 UI 每帧0 layout、0 PaintCache rebuild、0 Tina heap allocation。
 
@@ -391,9 +391,10 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   `Desktop::CreateEngine` 在 `TINA_BUILD_UI_FREETYPE` 时用 FreeType rasterizer + 仓库
   `SourceHanSansSC-Regular.otf` 打开 face（开发 fixture，非 Runtime 产品按路径加载源字体）。
   preset：`windows-msvc-vnext-bgfx-ui-freetype`。这是样例可见字形路径，不是 cooked FontAsset/M10。
-- **仍后置**：FramePin/多 page 绑定契约、cooked FontAsset（M10 协作）、Modal/完整 Widget facade；
-- 在已完成私有 `tina_render_bgfx` SolidQuad UI Pass 的基础上扩展 Image/Glyph 命令、Atlas texture upload
-  与资源 pin；`tina_ui` 不链接 bgfx，也不暴露 view id/handle；
+- **仍后置**：FramePin/资源 pin、多 page 绑定契约、Image 命令、cooked FontAsset（M10 协作）、
+  Modal/完整 Widget facade；`tina_ui` 不链接 bgfx，也不暴露 view id/handle；
+- 在已完成私有 `tina_render_bgfx` SolidQuad UI Pass 的基础上继续扩展 Atlas texture upload
+  与资源 pin；
 - 使用版本化内置 Cooked Font/Texture fixture 形成中文 Label、Button、Modal 可运行样例；
   禁止 Runtime 路径加载源字体、直接调用 bgfx 或复用 Legacy UIRenderer/API。
 
@@ -492,7 +493,7 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   透明、flip 与 UI overlay；既有 D3D11 debug-layer `RefCount=3` 提示只在 Debug 出现，Release 未出现；
 - 通用 Render typed handle/descriptors、Pass Scheduler、正式 Sprite2D Asset/product pass、Runtime-owned packet/FramePin、
   Cooked Mesh/Material/Texture/Prefab、Texture/Sprite Asset 产品路径、正式 `tina_sample_2d`、TileMap、Box2D、
-  中文文本、glTF、PBR、阴影、动画、后处理、自动 resize/restore 产品门禁仍后置。
+  cooked FontAsset 驱动的正式中文 UI、glTF、PBR、阴影、动画、后处理、自动 resize/restore 产品门禁仍后置。
 
 ## M10 Asset 与 Cooker 垂直切片
 

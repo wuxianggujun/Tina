@@ -95,5 +95,6 @@ CMakeUserPresets.json
 .arts
 CMakeSettings.json
 /.claude/
+.kilo/
 /隔离一下/
 /temp/
