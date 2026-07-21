@@ -40,6 +40,7 @@
 #endif
 
 #include "render/bgfx/BgfxRenderDevice.hpp"
+#include "TileSelection.hpp"
 
 #include <array>
 #include <charconv>
@@ -73,6 +74,7 @@ inline constexpr u32 ProductSpriteKey = 1;
 inline constexpr u32 ExpectedNonEmptyTiles = 11; // 8 floor + 3 wall
 inline constexpr Tina::InputActionId MoveLeftAction{1};
 inline constexpr Tina::InputActionId MoveRightAction{2};
+inline constexpr Tina::InputActionId SelectTileAction{3};
 inline constexpr float DemoWalkSpeedMetersPerSecond = 4.0f;
 
 struct SampleOptions final {
@@ -99,6 +101,8 @@ struct LifecycleCounters final {
     u64 uiTextLabelsCreated = 0;
     u64 uiButtonsCreated = 0;
     u64 uiButtonActionsWired = 0;
+    Tina::Sample2D::TileSelectionCounters tileSelection{};
+    u16 lastSelectedTileId = 0;
     u64 catalogRecipeAssets = 0;
     bool catalogFromRecipeFile = false;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
@@ -661,6 +665,33 @@ class TileMapBgfxState final : public Tina::IGameState {
 
     [[nodiscard]] Tina::GameStatePolicy initialPolicy() const noexcept override { return {}; }
 
+    Tina::Core::Status fixedUpdate(Tina::FixedUpdateContext& context) override
+    {
+        if (!resources_->map)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "tilemap selection map missing");
+        }
+
+        const Tina::Asset::TileMapInstance& map = *resources_->map;
+        const u64 previousSelectionHits = counters_->tileSelection.selectionHits;
+        Tina::Sample2D::consumeTileSelectionTransitions(
+            context.simulationActions().transitions, SelectTileAction,
+            Tina::Sample2D::TileSelectionGrid{
+                .widthCells = map.widthCells(),
+                .heightCells = map.heightCells(),
+                .cellSizeMeters = map.cellSizeMeters(),
+            },
+            counters_->tileSelection);
+
+        if (counters_->tileSelection.selectionHits != previousSelectionHits &&
+            counters_->tileSelection.lastSelection.has_value())
+        {
+            const Tina::Sample2D::SelectedTile& selection = *counters_->tileSelection.lastSelection;
+            counters_->lastSelectedTileId = map.tileIdAt(selection.cellX, selection.cellY);
+        }
+        return Tina::Core::success();
+    }
+
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
     {
         ++counters_->frameUpdates;
@@ -1013,6 +1044,14 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
         .action = MoveRightAction,
         .domain = Tina::InputActionDomain::Frame,
     });
+    config.inputActions.digitalBindings.push_back(Tina::DigitalActionBinding{
+        .input = Tina::PrimaryPointerButtonBinding{
+            .pointer = Tina::Platform::PrimaryPointerId,
+            .button = Tina::Platform::PointerButton::Primary,
+        },
+        .action = SelectTileAction,
+        .domain = Tina::InputActionDomain::Simulation,
+    });
     return config;
 }
 
@@ -1054,7 +1093,20 @@ int main(int argc, char** argv)
     std::error_code ec;
     std::filesystem::remove_all(resources.catalogRoot, ec);
 
-    bool ok = counters.catalogFromRecipeFile && counters.catalogRecipeAssets == 3 && counters.texturesUploaded == 1 &&
+    const Tina::Sample2D::SelectedTile* lastSelection =
+        counters.tileSelection.lastSelection.has_value() ? &*counters.tileSelection.lastSelection : nullptr;
+    const u64 classifiedPointerPresses = counters.tileSelection.missingWorldPointerSamples +
+                                         counters.tileSelection.viewportMisses + counters.tileSelection.mapMisses +
+                                         counters.tileSelection.selectionHits;
+    const bool selectionCountersValid = counters.tileSelection.pointerPresses == classifiedPointerPresses;
+    const bool selectionLatchValid =
+        (counters.tileSelection.selectionHits == 0 && lastSelection == nullptr) ||
+        (counters.tileSelection.selectionHits > 0 && lastSelection != nullptr && resources.map.has_value() &&
+         lastSelection->cellX < resources.map->widthCells() && lastSelection->cellY < resources.map->heightCells());
+    const bool selectionStateValid = selectionCountersValid && selectionLatchValid;
+
+    bool ok = selectionStateValid && counters.catalogFromRecipeFile && counters.catalogRecipeAssets == 3 &&
+              counters.texturesUploaded == 1 &&
               counters.lastTileSprites == ExpectedNonEmptyTiles &&
               counters.lastTotalSprites == ExpectedSpritesWithPhysics && counters.controllerGroundedFrames > 0 &&
               counters.controllerWalkFrames > 0 && counters.controllerHitRightFrames > 0 &&
@@ -1082,6 +1134,12 @@ int main(int argc, char** argv)
                   << ",\"maxX\":" << counters.maxControllerX << ",\"uiRoots\":" << counters.uiRootsCreated
                   << ",\"uiPanels\":" << counters.uiPanelsCreated << ",\"uiLabels\":" << counters.uiTextLabelsCreated
                   << ",\"uiButtons\":" << counters.uiButtonsCreated << ",\"uiReleased\":" << counters.uiRootsReleased
+                  << ",\"worldPointerPresses\":" << counters.tileSelection.pointerPresses
+                  << ",\"worldPointerMissingSamples\":" << counters.tileSelection.missingWorldPointerSamples
+                  << ",\"worldPointerViewportMisses\":" << counters.tileSelection.viewportMisses
+                  << ",\"worldPointerMapMisses\":" << counters.tileSelection.mapMisses
+                  << ",\"tileSelectionHits\":" << counters.tileSelection.selectionHits
+                  << ",\"hasTileSelection\":" << (lastSelection != nullptr ? "true" : "false")
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
                   << ",\"physicsSteps\":" << counters.physicsSteps
                   << ",\"physicsStatics\":" << counters.physicsStaticBodies
@@ -1093,9 +1151,9 @@ int main(int argc, char** argv)
     }
 
     // Formal product sample name is tina_sample_2d; feature flags report which product
-    // slices were compiled (Physics2D / FreeType). M10-A39 pointer non-penetration is
-    // gated in tina_runtime_ui_tests (synthetic click); production cooker/manifest still
-    // tracked separately in docs.
+    // slices were compiled (Physics2D / FreeType). M10-A43 consumes the A42
+    // locked world-pointer payload in fixedUpdate; A39 non-penetration remains
+    // gated by the synthetic Runtime/UI test.
     std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_2d\""
               << ",\"frames\":" << counters.frameUpdates << ",\"renderExtractions\":" << counters.renderExtractions
               << ",\"catalogFromRecipeFile\":" << (counters.catalogFromRecipeFile ? "true" : "false")
@@ -1113,6 +1171,25 @@ int main(int argc, char** argv)
               << ",\"uiButtonsCreated\":" << counters.uiButtonsCreated
               << ",\"uiButtonActionsWired\":" << counters.uiButtonActionsWired
               << ",\"uiRootsReleased\":" << counters.uiRootsReleased
+              << ",\"worldPointerPresses\":" << counters.tileSelection.pointerPresses
+              << ",\"worldPointerMissingSamples\":" << counters.tileSelection.missingWorldPointerSamples
+              << ",\"worldPointerViewportMisses\":" << counters.tileSelection.viewportMisses
+              << ",\"worldPointerMapMisses\":" << counters.tileSelection.mapMisses
+              << ",\"tileSelectionHits\":" << counters.tileSelection.selectionHits
+              << ",\"hasTileSelection\":" << (lastSelection != nullptr ? "true" : "false")
+              << ",\"lastSelectedCellX\":" << (lastSelection != nullptr ? lastSelection->cellX : 0U)
+              << ",\"lastSelectedCellY\":" << (lastSelection != nullptr ? lastSelection->cellY : 0U)
+              << ",\"lastSelectedTileId\":" << counters.lastSelectedTileId
+              << ",\"lastSelectionWorldX\":"
+              << (lastSelection != nullptr ? lastSelection->worldPointer.worldX : 0.0F)
+              << ",\"lastSelectionWorldY\":"
+              << (lastSelection != nullptr ? lastSelection->worldPointer.worldY : 0.0F)
+              << ",\"lastSelectionInputSequence\":"
+              << (lastSelection != nullptr ? lastSelection->worldPointer.inputSequence : 0U)
+              << ",\"lastSelectionCameraRevision\":"
+              << (lastSelection != nullptr ? lastSelection->worldPointer.cameraRevision : 0U)
+              << ",\"lastSelectionSurfaceRevision\":"
+              << (lastSelection != nullptr ? lastSelection->worldPointer.surfaceRevision : 0U)
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
               << ",\"physicsEnabled\":true"
               << ",\"physicsSteps\":" << counters.physicsSteps

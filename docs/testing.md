@@ -83,6 +83,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A29 chunk extract + grid collision | Debug C++23 | 88/88 asset | visible chunk cull/empty skip；grid solid query；`tina_asset_tests` 88 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A30 tile chunk sprite emit | Debug C++23 | 90/90 asset | emit UV/center；RenderScene commit；off-camera skip；`tina_asset_tests` 90 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A42 ActionMapper last-presented Camera2D world pointer payload | Debug C++23 | 237/237 + 74/74 + 30/30 | `tina_tests`、`tina_runtime_ui_tests`、`tina_render_scene_tests` 均直接通过；覆盖 UI consume/claim non-penetration、Pressed/Released sample、无 Camera 结构化失败、viewport no-hit、0 fixed-step 锁存及 EngineHost last-presented E2E |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M10-A43 `tina_sample_2d` Tile selection consumer | Debug C++23 | 240/240 + 10/10 + product smoke | `tina_tests` 新增 3 个 sample-private consumer 用例；A39/A42 组合聚焦 10/10；`tina_sample_2d --frames=300` 返回0，默认无合成点击时 selection JSON 计数为0，product-2d 资源/lifecycle 门禁保持通过 |
 
 
 
@@ -162,13 +163,18 @@ Clang 22.1.8 + libstdc++15.2 Null sanitizer 均已直接运行20/20并返回0；
 M10-A39 在同一 `tina_runtime_ui_tests` 追加产品级 pointer non-penetration 门禁：
 `ProductButtonClickDoesNotPenetrateWorldPointerAction` 走 Button default action + `ActionMapper`
 合成 Primary Down/Up：命中 Button 时 UI 激活且世界 pointer Simulation Action 无 Pressed；
-未命中时世界 Action 正常 Pressed。`tina_sample_2d` smoke 仍不合成点击，只保留接线计数。
+未命中时世界 Action 正常 Pressed。`tina_sample_2d` smoke 仍不合成点击，selection 计数保持显式空语义。
 M10-A42 在同一 target 追加 `WorldPointerActionMappingTest`：覆盖 consumed/claimed pointer 不要求
 last-presented camera、未消费 pointer 缺 camera 以 `LifecycleInvariantViolation` 失败且 Press/Release
 状态可重试、按事件坐标锁存 Pressed/Released `worldPointerSample`、viewport miss 产生 `hit=false`
 no-hit，以及0 fixed-step 帧跨后续 camera/resize 保持已锁存 sample。基础 `tina_tests` 另以
 `EngineHostRunTest.WorldPointerActionPayloadUsesLastPresentedCamera2D` 证明 Runtime 正式路径使用上一份
 成功 present 的 Camera，而不是同帧 extraction 的新 Camera。
+
+M10-A43 的样例消费者测试与生产代码共用 `samples/2d_tilemap_bgfx/TileSelection.hpp`：覆盖
+`Pressed + hit` 的 cell 映射和锁存 provenance、viewport miss、负数/地图外/半开上边界、NaN、缺 payload、
+`Released/Cancelled`、错误 action，以及空 catch-up transition batch。GLFW product smoke 不注入真实点击，
+因此默认 `worldPointerPresses`/`tileSelectionHits` 为0；真实 UI non-penetration 仍由 A39 合成测试证明。
 
 M8-A 使用独立 `tina_scene_tests`，当前 19 项覆盖：World 固定容量与 PMR 错误回滚/稳定构造错误、Entity generation/owner/stale
 校验、keep-world/keep-local reparent、父销毁与显式子树销毁、Local/World Transform 组合、非递归深树与宽树
@@ -760,12 +766,11 @@ Legacy 与 vNext 进程观察到的 `N` 会随调试对象组合变化，本轮 
 | `tina_sample_ui` | 未实现 | 在现有 Desktop SolidFill panel smoke 和 primary Pointer Button default action 上补中文、Label 文本、Button Keyboard/Gamepad activation、Modal、TextEdit、Runtime packet、Glyph Atlas 与资源型 UI Render | M7 内置 Cooked Font/Texture fixture |
 | `tina_sample_2d_infrastructure` | M8-B Headless/Null extraction foundation 已实现 | Scene World → resolved Camera2D/Sprite2D、layer/order、cull/snap、Runtime `primaryWorldScene` handoff、300帧资源/生命周期归零 | 当前只用内置纯值 fixture；Asset/Cooker、可见 bgfx fixture、world picking、UI overlay 后置 |
 | `tina_sample_2d_tilemap` | M10-A31 Headless/Null TileMap 产品烟测已实现 | 内建 Tileset/TileMap → TileMapInstance → emitVisibleTileMapSprites + CharacterController2D → 每帧 11 tile + 1 角色 sprite；300 帧 JSON | 非正式 Catalog/bgfx/UI/Box2D `tina_sample_2d` |
-| `tina_sample_2d` | M10-A32–A38 正式 2D 产品样例 | 磁盘 recipe Catalog + Character + UI/Text/Button；可选 Physics crate / FreeType；脚本化行走撞墙；`catalogFromRecipeFile`；product-2d `productGate=bgfx-physics-freetype` | 完整 cooker CLI 与样例选格后置；M10-A39 pointer non-penetration、M10-A42 world pointer payload 由 `tina_runtime_ui_tests` 合成门禁 |
+| `tina_sample_2d` | M10-A32–A43 正式 2D 产品样例 | 磁盘 recipe Catalog + Character + UI/Text/Button；可选 Physics crate / FreeType；脚本化行走撞墙；A43 Primary Pointer Simulation → last-presented world sample → TileMap cell consumer；JSON selection provenance；`catalogFromRecipeFile`；product-2d `productGate=bgfx-physics-freetype` | 完整 cooker CLI 后置；A39 pointer non-penetration、A42 world pointer mapping 与 A43 consumer 分别由 `tina_runtime_ui_tests`/`tina_tests` 和 300 帧 product smoke 覆盖 |
 | `tina_sample_2d_tilemap_bgfx` | ALIAS → `tina_sample_2d` | 兼容旧脚本 target 名 | 请迁移到 `tina_sample_2d` |
 | `tina_sample_2d_infrastructure_bgfx` | M9-C 最小 bgfx Sprite2D fixture + 2D/UI 样例已实现 Debug/Release 验证 | Desktop bootstrap + bgfx；固定 View 0 clear、View 1 Opaque3D、View 2 Sprite2D、View 3 UI；默认/门禁300帧，当前每帧5个 fixture Sprite 和2个 retained UI panel，资源账本平衡；截图确认旋转、透明、flip 与 UI overlay | 只接受 fixture key `sprite=1`；不替代正式 `tina_sample_2d` |
 | `tina_sample_3d_extraction` | M9-A Headless/Null extraction foundation 已实现 | Scene World → resolved Perspective/Mesh3D、当前帧aspect、sphere culling、稳定sort/batch、Runtime handoff；300帧4 submitted/3 visible/1 culled/2 batches、一次aspect变化与资源归零 | 当前只用 fixture key/纯值和 recording Null device；无depth attachment、GPU buffer/shader/pipeline或可见画面，不计Legacy删除门禁 |
 | `tina_sample_3d_infrastructure` | M9-B 最小 bgfx Opaque3D fixture 已实现 | Desktop bootstrap + bgfx；全 surface clear View 0、depth-tested procedural Cube View 1；默认/门禁300帧，当前每帧3个 Cube 和1个 instance batch | 只接受 fixture key `mesh=1/material=1/submesh=0`；canonical `P3_N3_UV2` 静态 VB/IB + unlit shader + transient instance buffer；不证明 Cooked Mesh/Material/Texture/Prefab、通用 Pipeline/PBR、Pass Scheduler 或正式3D产品 |
-| `tina_sample_2d` | M10-A36 已实现命名产品门禁 | Catalog TileMap/Tileset、Character、UI/Text、可选 Box2D crate/FreeType；product-2d 组合图 | 生产 cooker 全量与样例选格后置；M10-A39 non-penetration、M10-A42 world pointer payload 见 `tina_runtime_ui_tests` |
 | `tina_sample_3d` | 未实现 | Cooked glTF -> Mesh/Material/Prefab、culling/instance | M10 Catalog/Manifest |
 
 M7-B2 已建立私有最小 bgfx clear/present core、7项 planner 测试、4项 factory/lease 回滚测试、

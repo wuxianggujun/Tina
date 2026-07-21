@@ -264,11 +264,13 @@ Legacy 删除前仍须补齐/加强：
   当前样例使用磁盘 fixture recipe + temp catalog，不是独立 cooker CLI 全量；
 - Orthographic Camera resize、interpolation 和 pixel snap 产品行为；
   world picking 转换基础（M10-A40 `pickWorldFromLogicalPointer`）和 Action Mapping
-  last-presented payload（M10-A42）已落地，样例选格仍后置；
+  last-presented payload（M10-A42）已落地；M10-A43 在正式样例 `fixedUpdate()` 消费该 payload，按
+  map-local bottom-left 原点、`cellSizeMeters` 和半开地图边界选择 Tile cell；
 - 多 layer Sprite、透明混合、Tile chunk culling 与 dirty rebuild 压力门禁；
 - 中文 FreeType Label（product-2d 已有）+ HUD Button 接线（A37 已有 create/action 计数）；
   **点击 UI 不触发世界选择**（M10-A39：`tina_runtime_ui_tests` 合成 pointer non-penetration 门禁已闭合；
-  M10-A42：world pointer payload 已进 Simulation Action；正式样例选格仍后置）；
+  M10-A42：world pointer payload 已进 Simulation Action；M10-A43：样例只接受未消费的 `Pressed + hit`
+  edge，UI consume/claim、viewport miss、地图外和非 Pressed 均不选格）；
 - 角色 Tile swept AABB 与脚本化右走撞墙（A37 已有）；至少一个动态 Box2D body（已有 crate）；
 - 连续300帧正常退出与资源归零证据；
 - 画面截图、输入行为、日志/计数和进程返回码分别留证据。

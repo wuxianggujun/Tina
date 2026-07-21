@@ -533,7 +533,14 @@ primary pointer transition 实际形成的 edge 生成 `DigitalActionTransition:
 worldX/worldY、cameraRevision、surfaceRevision、inputSequence 与 hit。被 UI consume/claim 的
 transition 不要求 camera；无 latch 或无 last-presented Camera2D 使用 Runtime 现有
 `LifecycleInvariantViolation` 结构化失败。viewport 外是明确 `hit=false` no-hit；0 fixed-step 帧保留已锁存 sample，后续
-present、Camera 移动或 resize 不改写。更大范围 world-pick Game SDK API 与样例选格仍后置。
+present、Camera 移动或 resize 不改写。更大范围 world-pick Game SDK API 仍后置。
+
+M10-A43：正式 `tina_sample_2d` 以 `PrimaryPointerButtonBinding{Primary}` 绑定 Simulation Action，
+在 `fixedUpdate()` 消费 A42 已锁存的 `WorldPointerSample`。只处理 `Pressed` 且 `hit=true` 的 edge，
+使用 TileMap map-local bottom-left 原点、`cellSizeMeters` 和半开 `[0,width) × [0,height)` 边界映射 cell；
+viewport miss、地图外、缺 payload、`Released`/`Cancelled` 不产生选择。selection cell、tile id 与
+input/camera/surface revision 由样例私有状态和 JSON 计数保存；确定性消费者测试并入 `tina_tests`。
+此切片不新增 Game SDK world-pick API；完整外部 cooker CLI 仍 Deferred。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

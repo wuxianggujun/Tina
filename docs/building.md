@@ -85,15 +85,15 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 # Catalog→GPU / formal 2D product sample (require windows-msvc-vnext-bgfx or product-2d preset):
 # cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d_catalog tina_sample_2d
 # out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d_catalog.exe --frames=60 --frame-delay-ms=0
-# out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=60 --frame-delay-ms=0
+# out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 # TileMap + Physics2D (requires windows-msvc-vnext-bgfx-physics2d):
 # cmake --preset windows-msvc-vnext-bgfx-physics2d
 # cmake --build --preset windows-vnext-bgfx-physics2d-debug --target tina_sample_2d
-# out\build\windows-msvc-vnext-bgfx-physics2d\bin\Debug\tina_sample_2d.exe --frames=60 --frame-delay-ms=0
+# out\build\windows-msvc-vnext-bgfx-physics2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 # Combined product-2d gate (Physics2D + FreeType; formal tina_sample_2d; disk recipe catalog):
 # cmake --preset windows-msvc-vnext-bgfx-product-2d
 # cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d
-# out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=60 --frame-delay-ms=0
+# out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 # Recipe source: samples/2d_tilemap_bgfx/catalog/sample_2d.recipe
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_tilemap.exe --frames=300

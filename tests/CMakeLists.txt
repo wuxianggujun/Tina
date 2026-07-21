@@ -62,6 +62,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     runtime/header_isolation/PrimaryWindowUIHeader.cpp
     runtime/header_isolation/WindowSurfaceIntegrationHeader.cpp
     runtime/InputActionTests.cpp
+    runtime/Sample2DTileSelectionTests.cpp
     runtime/PlatformEventDispatcherTests.cpp
     runtime/RuntimeLifecycleTests.cpp
     runtime/WindowSurfaceLeaseTests.cpp
@@ -104,6 +105,7 @@ set_source_files_properties(
 target_compile_features(tina_tests PRIVATE cxx_std_23)
 target_include_directories(tina_tests PRIVATE
     ${PROJECT_SOURCE_DIR}/tests
+    ${PROJECT_SOURCE_DIR}/samples/2d_tilemap_bgfx
     ${PROJECT_SOURCE_DIR}/src/integration
 )
 target_link_libraries(tina_tests PRIVATE
