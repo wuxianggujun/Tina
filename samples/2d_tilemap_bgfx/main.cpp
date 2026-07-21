@@ -33,6 +33,9 @@
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
+#if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
+#include <tina/audio/miniaudio/MiniaudioDevice.hpp>
+#endif
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UILayout.hpp>
@@ -144,12 +147,22 @@ struct LifecycleCounters final {
     float maxCameraCenterX = 0.0f;
     float minCameraCenterX = 0.0f;
     bool cameraFollowPrimed = false;
-    // M11-A15: optional EngineHost AudioEngine product evidence (Disabled path).
+    // M11-A15: EngineHost AudioEngine product evidence (Disabled command path).
     bool audioEnginePresent = false;
     bool audioOneShotQueued = false;
     bool audioStartedObserved = false;
     u64 audioStartedCount = 0;
-    float audioOneShotPcm[8] = {0.2F, 0.2F, 0.15F, 0.1F, 0.05F, 0.0F, -0.05F, -0.1F};
+    // Longer PCM so miniaudio callback has time to mix while voice is playing.
+    float audioOneShotPcm[480]{};
+    bool audioPcmInitialized = false;
+#if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
+    // M11-A16: optional null-backend device + attachMixer SFX evidence.
+    bool audioDeviceCreated = false;
+    bool audioDeviceStarted = false;
+    bool audioDeviceNullBackend = false;
+    u64 audioDeviceCallbacks = 0;
+    u64 audioMixFramesRendered = 0;
+#endif
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     u64 physicsSteps = 0;
     u64 physicsStaticBodies = 0;
@@ -414,6 +427,9 @@ struct TileMapResources final {
     float dynamicHalfExtent = 0.25f;
     float lastDynamicX = 3.0f;
     float lastDynamicY = 3.5f;
+#endif
+#if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
+    std::optional<Tina::Audio::MiniaudioDevice> audioDevice{};
 #endif
 };
 
@@ -777,6 +793,16 @@ class TileMapBgfxState final : public Tina::IGameState {
 
     void onExit(Tina::GameStateExitContext&) noexcept override
     {
+#if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
+        if (resources_->audioDevice.has_value())
+        {
+            counters_->audioDeviceCallbacks = resources_->audioDevice->callbackInvocations();
+            resources_->audioDevice->stop();
+            resources_->audioDevice->shutdown();
+            resources_->audioDevice.reset();
+            counters_->audioDeviceStarted = false;
+        }
+#endif
         if (uiRoot_)
         {
             uiRoot_.reset();
@@ -852,11 +878,51 @@ class TileMapBgfxState final : public Tina::IGameState {
         if (Tina::Audio::AudioEngine* audio = context.audioEngine(); audio != nullptr)
         {
             counters_->audioEnginePresent = true;
+            if (!counters_->audioPcmInitialized)
+            {
+                // ~10 ms mono 48 kHz soft click (sample-private, not a disk asset).
+                for (u32 i = 0; i < static_cast<u32>(std::size(counters_->audioOneShotPcm)); ++i)
+                {
+                    const float t = static_cast<float>(i) / 48000.0F;
+                    counters_->audioOneShotPcm[i] =
+                        0.25F * std::sin(2.0F * 3.14159265F * 880.0F * t) * (1.0F - t * 100.0F);
+                }
+                counters_->audioPcmInitialized = true;
+            }
+#if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
+            // First frame with Audio: create null device, attach mixer, start.
+            if (!resources_->audioDevice.has_value())
+            {
+                auto device = Tina::Audio::MiniaudioDevice::Create(Tina::Audio::MiniaudioDeviceConfig{
+                    .useNullBackend = true,
+                    .sampleRate = 48000,
+                    .channels = 2,
+                    .periodFrames = 256,
+                });
+                if (!device)
+                {
+                    return Tina::Core::failure(std::move(device.error()));
+                }
+                device->attachMixer(audio);
+                if (auto status = device->start(); !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                counters_->audioDeviceCreated = true;
+                counters_->audioDeviceStarted = device->isRunning();
+                counters_->audioDeviceNullBackend = device->isNullBackend();
+                resources_->audioDevice = std::move(*device);
+            }
+            else if (resources_->audioDevice->isRunning())
+            {
+                counters_->audioDeviceCallbacks = resources_->audioDevice->callbackInvocations();
+            }
+#endif
             if (!counters_->audioOneShotQueued)
             {
                 auto voice = audio->playOneShotPcm(Tina::Audio::AudioPcmClipView{
                     .frames = counters_->audioOneShotPcm,
-                    .frameCount = 8,
+                    .frameCount = static_cast<Tina::Core::u64>(std::size(counters_->audioOneShotPcm)),
                     .channels = 1,
                     .sampleRate = 48000,
                 });
@@ -874,6 +940,9 @@ class TileMapBgfxState final : public Tina::IGameState {
                 {
                     counters_->audioStartedObserved = true;
                 }
+#if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
+                counters_->audioMixFramesRendered = stats->mixFramesRendered;
+#endif
             }
         }
         if (resources_->controller && resources_->grid)
@@ -1479,9 +1548,18 @@ int main(int argc, char** argv)
     const bool audioValid =
         counters.audioEnginePresent && counters.audioOneShotQueued && counters.audioStartedObserved &&
         counters.audioStartedCount >= 1;
+#if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
+    // M11-A16: null-backend device must start, run callbacks, and advance mixRealtime.
+    const bool audioDeviceValid =
+        counters.audioDeviceCreated && counters.audioDeviceNullBackend && counters.audioDeviceCallbacks > 0 &&
+        counters.audioMixFramesRendered > 0;
+#else
+    const bool audioDeviceValid = true;
+#endif
 
     bool ok = selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
-              cameraFollowValid && chunkDirtyValid && audioValid && counters.catalogFromRecipeFile &&
+              cameraFollowValid && chunkDirtyValid && audioValid && audioDeviceValid &&
+              counters.catalogFromRecipeFile &&
               counters.catalogRecipeAssets == 3 && counters.texturesUploaded == 1 &&
               counters.lastTileSprites == ExpectedNonEmptyTiles && counters.lastTotalSprites == expectedTotalSprites &&
               counters.controllerGroundedFrames > 0 && counters.controllerWalkFrames > 0 &&
@@ -1535,10 +1613,16 @@ int main(int argc, char** argv)
                   << ",\"audioOneShotQueued\":" << (counters.audioOneShotQueued ? "true" : "false")
                   << ",\"audioStartedObserved\":" << (counters.audioStartedObserved ? "true" : "false")
                   << ",\"audioStartedCount\":" << counters.audioStartedCount
+#if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
+                  << ",\"audioDeviceCreated\":" << (counters.audioDeviceCreated ? "true" : "false")
+                  << ",\"audioDeviceNullBackend\":" << (counters.audioDeviceNullBackend ? "true" : "false")
+                  << ",\"audioDeviceCallbacks\":" << counters.audioDeviceCallbacks
+                  << ",\"audioMixFramesRendered\":" << counters.audioMixFramesRendered
+#endif
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
                   << ",\"physicsSteps\":" << counters.physicsSteps
                   << ",\"physicsStatics\":" << counters.physicsStaticBodies
-                  << ",\"physicsContacts\":" << counters.physicsDynamicContacts
+                  << ",\"physicsDynamicContacts\":" << counters.physicsDynamicContacts
                   << ",\"dynamicY\":" << counters.lastDynamicY
 #endif
                   << "}\n";
@@ -1615,6 +1699,15 @@ int main(int argc, char** argv)
               << ",\"audioOneShotQueued\":" << (counters.audioOneShotQueued ? "true" : "false")
               << ",\"audioStartedObserved\":" << (counters.audioStartedObserved ? "true" : "false")
               << ",\"audioStartedCount\":" << counters.audioStartedCount
+#if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
+              << ",\"audioMiniaudioEnabled\":true"
+              << ",\"audioDeviceCreated\":" << (counters.audioDeviceCreated ? "true" : "false")
+              << ",\"audioDeviceNullBackend\":" << (counters.audioDeviceNullBackend ? "true" : "false")
+              << ",\"audioDeviceCallbacks\":" << counters.audioDeviceCallbacks
+              << ",\"audioMixFramesRendered\":" << counters.audioMixFramesRendered
+#else
+              << ",\"audioMiniaudioEnabled\":false"
+#endif
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
               << ",\"physicsEnabled\":true"
               << ",\"physicsSteps\":" << counters.physicsSteps
@@ -1629,7 +1722,10 @@ int main(int argc, char** argv)
 #else
               << ",\"freetypeEnabled\":false"
 #endif
-#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D) && defined(TINA_SAMPLE_TILEMAP_FREETYPE)
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D) && defined(TINA_SAMPLE_TILEMAP_FREETYPE) && \
+    defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
+              << ",\"productGate\":\"bgfx-physics-freetype-audio\""
+#elif defined(TINA_SAMPLE_TILEMAP_PHYSICS2D) && defined(TINA_SAMPLE_TILEMAP_FREETYPE)
               << ",\"productGate\":\"bgfx-physics-freetype\""
 #elif defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
               << ",\"productGate\":\"bgfx-physics\""

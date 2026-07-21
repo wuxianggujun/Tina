@@ -133,13 +133,14 @@
     },
     {
       "name": "windows-msvc-vnext-bgfx-product-2d",
-      "displayName": "Windows x64 vNext bgfx + Physics2D + FreeType UI product 2D",
+      "displayName": "Windows x64 vNext bgfx + Physics2D + FreeType UI + Audio product 2D",
       "inherits": "windows-msvc-vnext-bgfx",
       "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-bgfx-product-2d",
       "cacheVariables": {
         "TINA_BUILD_PHYSICS2D": "ON",
         "TINA_BUILD_UI_FREETYPE": "ON",
-        "VCPKG_MANIFEST_FEATURES": "tests;platform-glfw;physics2d;ui-freetype"
+        "TINA_BUILD_AUDIO_MINIAUDIO": "ON",
+        "VCPKG_MANIFEST_FEATURES": "tests;platform-glfw;physics2d;ui-freetype;audio-miniaudio"
       }
     },
     {

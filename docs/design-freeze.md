@@ -601,7 +601,11 @@ M11-A14：可选 `createAudioEngine` factory（默认 empty）。成功时 `Engi
 
 M11-A15：`Desktop::CreateEngine` 默认注入 Disabled `AudioEngine`；`tina_sample_2d` 同步注入并在
 `updateFrame` 调用 `playOneShotPcm`（内联 float PCM，非磁盘资产）；host pump 后 JSON 要求
-`audioStartedObserved`。miniaudio 设备 attach、AssetLease、磁盘 SFX 后置。
+`audioStartedObserved`。
+
+M11-A16：当 `TINA_BUILD_AUDIO_MINIAUDIO` 时 sample 创建 `MiniaudioDevice`（`useNullBackend=true`）、
+`attachMixer(audioEngine)`、`start()`；device callback 走 `mixRealtime`；exit 时 stop/shutdown。
+product-2d preset 带 `audio-miniaudio` feature。AssetLease/磁盘 SFX/OS 默认后端产品门禁后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

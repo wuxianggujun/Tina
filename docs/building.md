@@ -106,6 +106,10 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 # Optional Ogg Vorbis + Opus codecs (extra vcpkg features; default product graph keeps them OFF):
 # cmake --preset windows-msvc-vnext-audio-miniaudio-codecs
 # cmake --build --preset windows-vnext-audio-miniaudio-codecs-debug --target tina_audio_miniaudio_tests
+# Product 2D sample now includes audio-miniaudio (M11-A16 null-device SFX evidence):
+# cmake --preset windows-msvc-vnext-bgfx-product-2d
+# cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d
+# out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_tilemap.exe --frames=300
