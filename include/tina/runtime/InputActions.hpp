@@ -1,10 +1,12 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/render/WorldPointerSample.hpp>
 
 #include <algorithm>
 #include <compare>
 #include <memory>
+#include <optional>
 #include <span>
 #include <variant>
 
@@ -70,6 +72,12 @@ struct DigitalActionTransition final {
     // the frame has no raw transition), so a batch is non-decreasing rather
     // than guaranteed unique or strictly increasing.
     u64 sourceSequence = 0;
+    // Present only when an unconsumed primary-pointer transition produces a
+    // Simulation edge. The value is projected once during Action Mapping with
+    // the last-presented Camera2D and remains unchanged while a zero-step frame
+    // delays consumption. hit=false is an explicit viewport miss; nullopt means
+    // this edge has no world-pointer payload.
+    std::optional<Render::WorldPointerSample> worldPointerSample{};
 
     auto operator<=>(const DigitalActionTransition&) const = default;
 };

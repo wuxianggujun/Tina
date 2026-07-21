@@ -102,7 +102,8 @@ Accepted 决定的理由与代价记录在 [ADR 索引](adr/README.md)，尚未�
   digital suppression；
 - 0 fixed-step 帧把有序 `SimulationActionTransitionBatch` 保留到下一个未完成
   simulation tick；Focus lost、断连与 overflow 生成 `InputCancelTransition`/`InputStreamReset`，不伪造可点击
-  的普通 Up；
+  的普通 Up；未被 UI consume/claim 且实际形成的 primary pointer Simulation edge 在 Action Mapping
+  阶段一次性锁存 `WorldPointerSample`，0 fixed-step 延迟消费时不得用后续 Camera 或 resize 重算；
 - M7-A 的 Action bindings 只由 `EngineConfig::inputActions.digitalBindings` 注册到 Runtime-owned
   default Context；raw/text/event 容量只来自 `platformFrameCapacities`，Simulation/Frame/binding
   容量只来自 `inputActions.capacities`，订阅 slot 来自 `platformEventSubscriptions`。M7-C1c-b3b 已加入
@@ -525,7 +526,14 @@ camera/surface/inputSequence 锁存字段）。viewport 半开、Y-up 与 Sprite
 
 M10-A41：Runtime-private `LastPresentedCamera2DLatch` 在 `EngineHost` 成功 present 后锁存
 `primaryWorldScene` 的 Camera2D 与 `surfaceRevision`；无相机 present 清空锁存。`pickLogical`
-复用 A40 纯函数。尚未把 sample 写入 Simulation Action / Game SDK 暴露 / 样例选格。
+复用 A40 纯函数。
+
+M10-A42：`ActionMapper` 已把 A41 latch 接入 Simulation Action：只对未被 UI consume/claim 的
+primary pointer transition 实际形成的 edge 生成 `DigitalActionTransition::worldPointerSample`，包含
+worldX/worldY、cameraRevision、surfaceRevision、inputSequence 与 hit。被 UI consume/claim 的
+transition 不要求 camera；无 latch 或无 last-presented Camera2D 使用 Runtime 现有
+`LifecycleInvariantViolation` 结构化失败。viewport 外是明确 `hit=false` no-hit；0 fixed-step 帧保留已锁存 sample，后续
+present、Camera 移动或 resize 不改写。更大范围 world-pick Game SDK API 与样例选格仍后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

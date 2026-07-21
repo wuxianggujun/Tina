@@ -90,11 +90,12 @@ previous/current interpolation -> camera view transform -> optional pixel snap -
 首期支持 Stretch-free 的 aspect extend 策略；固定逻辑分辨率 letterbox 和多 Camera 后置，但
 接口预留 normalized viewport，不把策略硬编码进 shader。
 
-World picking 在 Gameplay Action Mapping 阶段完成一次：只有 UI 未消费 Pointer transition，才用
-该 `PlatformFrameView` 对应的 last-presented `Camera2DSnapshot + WindowSurfaceSnapshot` 将 logical coordinate
-转换为 `WorldPointerSample { positionMeters, cameraRevision, surfaceRevision, inputSequence }`。
-Simulation edge 即使跨0 fixed-step 帧保留，也保存这份 world point，不在消费 tick 用新 Camera
-重新换算；viewport 外输入返回明确的 no-hit。
+World picking 在 Gameplay Action Mapping 阶段完成一次：只有未被 UI consume/claim 的 Pointer
+transition 实际形成 Simulation edge，才用该 `PlatformFrameView` 对应的 last-presented Camera2D latch
+与 primary-window logical extent 将 logical coordinate 转换为
+`WorldPointerSample { worldX, worldY, cameraRevision, surfaceRevision, inputSequence, hit }`。
+Simulation edge 即使跨0 fixed-step 帧保留，也保存这份 sample，不在消费 tick 用新 Camera 或 resize
+重新换算；viewport 外输入返回明确的 `hit=false` no-hit，缺 last-presented camera 是结构化失败。
 
 ## Sprite 数据契约
 
@@ -262,12 +263,12 @@ Legacy 删除前仍须补齐/加强：
 - 通过最终生产 Cooker/Catalog/Manifest pipeline 加载 Texture、Sprite、Tileset 和 TileMap；
   当前样例使用磁盘 fixture recipe + temp catalog，不是独立 cooker CLI 全量；
 - Orthographic Camera resize、interpolation 和 pixel snap 产品行为；
-  world picking 转换基础（M10-A40 `pickWorldFromLogicalPointer`）已落地，Action Mapping
-  last-presented latch 与样例选格仍后置；
+  world picking 转换基础（M10-A40 `pickWorldFromLogicalPointer`）和 Action Mapping
+  last-presented payload（M10-A42）已落地，样例选格仍后置；
 - 多 layer Sprite、透明混合、Tile chunk culling 与 dirty rebuild 压力门禁；
 - 中文 FreeType Label（product-2d 已有）+ HUD Button 接线（A37 已有 create/action 计数）；
   **点击 UI 不触发世界选择**（M10-A39：`tina_runtime_ui_tests` 合成 pointer non-penetration 门禁已闭合；
-  正式 world picking 产品路径仍后置）；
+  M10-A42：world pointer payload 已进 Simulation Action；正式样例选格仍后置）；
 - 角色 Tile swept AABB 与脚本化右走撞墙（A37 已有）；至少一个动态 Box2D body（已有 crate）；
 - 连续300帧正常退出与资源归零证据；
 - 画面截图、输入行为、日志/计数和进程返回码分别留证据。

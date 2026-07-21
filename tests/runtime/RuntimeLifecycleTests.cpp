@@ -1210,6 +1210,7 @@ struct ActionWiringProbe final {
     bool enabled = false;
     bool fixedObserved = false;
     bool frameObserved = false;
+    std::optional<Render::WorldPointerSample> capturedSimulationWorldPointerSample;
 };
 
 struct GameProbe final {
@@ -1256,6 +1257,7 @@ struct GameProbe final {
     std::optional<Core::ErrorCode> ignoredPrimaryWindowUIEnterFailure;
     std::optional<Core::ErrorCode> ignoredPrimaryWindowUIUpdateFailure;
     std::optional<Render::RenderCamera2DInput> scriptedRenderSceneCamera;
+    std::vector<Render::RenderCamera2DInput> scriptedRenderSceneCamerasByFrame;
     std::vector<Render::RenderSprite2DInput> scriptedRenderSceneSprites;
     std::optional<Render::RenderPerspectiveCameraInput> scriptedRenderScenePerspectiveCamera;
     std::vector<Render::RenderMesh3DInput> scriptedRenderSceneMeshes3D;
@@ -1480,6 +1482,10 @@ class ScriptedGameState final : public IGameState {
                     EXPECT_EQ(digital->action, probe_->actionWiring.simulationAction);
                     EXPECT_EQ(digital->kind, DigitalActionTransitionKind::Pressed);
                     EXPECT_EQ(digital->sourceSequence, 1U);
+                    if (digital->worldPointerSample.has_value())
+                    {
+                        probe_->actionWiring.capturedSimulationWorldPointerSample = *digital->worldPointerSample;
+                    }
                 }
             }
             probe_->actionWiring.fixedObserved = true;
@@ -1496,21 +1502,24 @@ class ScriptedGameState final : public IGameState {
         {
             const FrameActionSnapshot& actions = context.frameActions();
             EXPECT_EQ(actions.engineFrameIndex, frameIndex);
-            EXPECT_TRUE(actions.isHeld(probe_->actionWiring.frameAction));
-            EXPECT_EQ(actions.find(probe_->actionWiring.simulationAction), nullptr);
-            EXPECT_EQ(actions.transitions.size(), 1U);
-            if (actions.transitions.size() == 1U)
+            if (probe_->actionWiring.frameAction.hasValue())
             {
-                const auto* digital = std::get_if<DigitalActionTransition>(&actions.transitions.front());
-                EXPECT_NE(digital, nullptr);
-                if (digital != nullptr)
+                EXPECT_TRUE(actions.isHeld(probe_->actionWiring.frameAction));
+                EXPECT_EQ(actions.find(probe_->actionWiring.simulationAction), nullptr);
+                EXPECT_EQ(actions.transitions.size(), 1U);
+                if (actions.transitions.size() == 1U)
                 {
-                    EXPECT_EQ(digital->action, probe_->actionWiring.frameAction);
-                    EXPECT_EQ(digital->kind, DigitalActionTransitionKind::Pressed);
-                    EXPECT_EQ(digital->sourceSequence, 2U);
+                    const auto* digital = std::get_if<DigitalActionTransition>(&actions.transitions.front());
+                    EXPECT_NE(digital, nullptr);
+                    if (digital != nullptr)
+                    {
+                        EXPECT_EQ(digital->action, probe_->actionWiring.frameAction);
+                        EXPECT_EQ(digital->kind, DigitalActionTransitionKind::Pressed);
+                        EXPECT_EQ(digital->sourceSequence, 2U);
+                    }
                 }
+                probe_->actionWiring.frameObserved = true;
             }
-            probe_->actionWiring.frameObserved = true;
         }
         if (probe_->registerPrimaryWindowUIPointerListener)
         {
@@ -1530,7 +1539,8 @@ class ScriptedGameState final : public IGameState {
 
     Core::Status extractRenderScene(RenderSceneExtractionContext& context) const override
     {
-        probe_->runtime->events.emplace_back("state.extract." + std::to_string(context.frameTiming().frameIndex));
+        const u64 frameIndex = context.frameTiming().frameIndex;
+        probe_->runtime->events.emplace_back("state.extract." + std::to_string(frameIndex));
         auto& writer = context.renderSceneWriter();
         const auto handleWriteStatus = [this](Core::Status status) -> Core::Status {
             if (status)
@@ -1544,9 +1554,18 @@ class ScriptedGameState final : public IGameState {
             }
             return status;
         };
-        if (probe_->scriptedRenderSceneCamera.has_value())
+        const Render::RenderCamera2DInput* scriptedCamera = nullptr;
+        const auto scriptedCameraFrameIndex = static_cast<usize>(frameIndex);
+        if (scriptedCameraFrameIndex < probe_->scriptedRenderSceneCamerasByFrame.size())
         {
-            auto cameraStatus = handleWriteStatus(writer.setCamera2D(*probe_->scriptedRenderSceneCamera));
+            scriptedCamera = &probe_->scriptedRenderSceneCamerasByFrame[scriptedCameraFrameIndex];
+        } else if (probe_->scriptedRenderSceneCamera.has_value())
+        {
+            scriptedCamera = &*probe_->scriptedRenderSceneCamera;
+        }
+        if (scriptedCamera != nullptr)
+        {
+            auto cameraStatus = handleWriteStatus(writer.setCamera2D(*scriptedCamera));
             if (!cameraStatus)
             {
                 return cameraStatus;
@@ -3060,6 +3079,91 @@ TEST(EngineHostRunTest, RoutesConfiguredInputActionsIntoTheirRuntimePhaseContext
     ASSERT_GE(game.fixedObservations.size(), 1U);
     EXPECT_EQ(game.fixedObservations.front().frameIndex, 0U);
     EXPECT_EQ(game.fixedObservations.front().simulationTickIndex, 0U);
+}
+
+TEST(EngineHostRunTest, WorldPointerActionPayloadUsesLastPresentedCamera2D)
+{
+    constexpr InputActionId SelectAction{404};
+    const auto cameraA = makeRenderSceneCamera2DInput(501U, 12.5F, -6.25F);
+    const auto cameraB = makeRenderSceneCamera2DInput(902U, -40.0F, 30.0F);
+
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {
+        Core::Duration::zero(),
+        Core::Duration{0.011},
+    };
+    runtime.heldPointerButtonsByFrame = {
+        {},
+        {Platform::PointerButton::Primary},
+    };
+    runtime.pointerButtonTransitionsByFrame = {
+        {},
+        {ScriptedPointerButtonTransition{
+            .button = Platform::PointerButton::Primary,
+            .state = Platform::DigitalTransition::Down,
+            .logicalX = 640.0,
+            .logicalY = 360.0,
+        }},
+    };
+
+    GameProbe game;
+    game.runtime = &runtime;
+    game.exitOnFrame = 1;
+    game.actionWiring = ActionWiringProbe{
+        .simulationAction = SelectAction,
+        .enabled = true,
+    };
+    game.scriptedRenderSceneCamerasByFrame = {
+        cameraA,
+        cameraB,
+    };
+    ScriptedGameApplication application(game);
+
+    auto config = EngineConfig::Defaults();
+    config.fixedSimulation = Core::FixedStepConfig{
+        .fixedDelta = Core::Duration{0.01},
+        .maximumAcceptedRealDelta = Core::Duration{0.20},
+        .maximumStepsPerFrame = 4,
+    };
+    config.inputActions.digitalBindings = {
+        DigitalActionBinding{
+            .input =
+                PrimaryPointerButtonBinding{
+                    .pointer = Platform::PrimaryPointerId,
+                    .button = Platform::PointerButton::Primary,
+                },
+            .action = SelectAction,
+            .domain = InputActionDomain::Simulation,
+        },
+    };
+    auto hostResult = createRuntimeHost(runtime, std::move(config));
+    ASSERT_TRUE(hostResult.has_value()) << hostResult.error().message;
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
+    EXPECT_EQ(*runResult, RunExitReason::GameRequestedExitAfterCurrentFrame);
+    EXPECT_EQ(game.fixedCountsByFrame, std::vector<u32>({0U, 1U}));
+    ASSERT_EQ(game.fixedObservations.size(), 1U);
+    EXPECT_EQ(game.fixedObservations.front().frameIndex, 1U);
+    EXPECT_TRUE(game.actionWiring.fixedObserved);
+    ASSERT_TRUE(game.actionWiring.capturedSimulationWorldPointerSample.has_value());
+
+    const Render::WorldPointerSample& sample = *game.actionWiring.capturedSimulationWorldPointerSample;
+    EXPECT_TRUE(sample.hit);
+    EXPECT_FLOAT_EQ(sample.worldX, cameraA.centerX);
+    EXPECT_FLOAT_EQ(sample.worldY, cameraA.centerY);
+    EXPECT_EQ(sample.stableCameraKey, cameraA.stableCameraKey);
+    EXPECT_EQ(sample.cameraRevision, 1U);
+    EXPECT_EQ(sample.surfaceRevision, 0U);
+    EXPECT_EQ(sample.inputSequence, 1U);
+
+    ASSERT_TRUE(runtime.copiedLastSubmittedWorldCamera2D.has_value());
+    EXPECT_EQ(runtime.copiedLastSubmittedWorldCamera2D->stableCameraKey, cameraB.stableCameraKey);
+    EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldCamera2D->centerX, cameraB.centerX);
+    EXPECT_FLOAT_EQ(runtime.copiedLastSubmittedWorldCamera2D->centerY, cameraB.centerY);
+    EXPECT_EQ(runtime.submittedFrames, 2U);
+    EXPECT_EQ(runtime.presentedFrames, 2U);
 }
 
 TEST(EngineHostRunTest, RepeatedPlatformFrameIdFailsBeforeDispatchingItsEvents)

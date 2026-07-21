@@ -761,7 +761,8 @@ class EngineHostImplementation final {
                 return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
             }
             if (auto mappingStatus = m_actionMapper->mapFrame(*platformFrame, uiRouteResult->consumption,
-                                                              uiRouteResult->claims, frameIndex, simulationTick);
+                                                              uiRouteResult->claims, frameIndex, simulationTick,
+                                                              &m_lastPresentedCamera2D);
                 !mappingStatus)
             {
                 auto error = std::move(mappingStatus.error());

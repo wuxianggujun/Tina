@@ -4,6 +4,7 @@ add_executable(tina_runtime_ui_tests
     PrimaryWindowUIContextOwnerTests.cpp
     PrimaryWindowUIDisplayCoordinatorTests.cpp
     UIInputRouteProducerTests.cpp
+    WorldPointerActionMappingTests.cpp
 )
 
 target_compile_features(tina_runtime_ui_tests PRIVATE cxx_std_23)

@@ -379,6 +379,7 @@ M7-A 已实现下列职责完整的 Platform/Input 名称；M7-C1a 已把 UI con
 | `Tina::UI::InputTransitionConsumptionView` | UI-owned view ABI / Runtime ActionMapper consumer | 只读 view，借用 route-result producer 的 frame storage，标记本帧哪些 transition ordinal 已由 UI 消费 |
 | `Tina::UI::ContinuousControlClaimsView` | UI-owned view ABI / Runtime ActionMapper consumer | 只读 view，声明当前 UI route 的 digital/axis/pointer ownership seam；M7-A mapper 只消费 digital claim，axis/pointer continuous mapping 后续实现 |
 | `InputActionId` | Game SDK | 显式的语义 Action 标识，不暴露物理键值为 gameplay contract |
+| `DigitalActionTransition` | Game SDK | Pressed/Released/Cancelled edge；Simulation pointer edge 可携带一次性锁存的 `Render::WorldPointerSample` |
 | `SimulationActionSnapshot` | Game SDK | 当前 simulation tick 的 state/axis + 有序 edge batch |
 | `FrameActionSnapshot` | Game SDK | 仅当前 Render Frame 可用一次的 camera/presentation/UI 外围 Action |
 
@@ -425,6 +426,11 @@ Map 配置；Runtime 以同一容量创建 producer 的两份 PMR claim buffer�
 `SimulationActionTransitionBatch`，并把它绑定到“下一个未完成 simulation tick”。第一个实际
 fixed step 消费 batch 一次，同帧后续3个追赶步只读最终 held/axis。回放记录最终
 Action state、ordered edges 和明确 target tick，不记录 GLFW 或 UI node。
+
+M10-A42 后，未被 UI consume/claim 的 primary pointer Simulation edge 会在 Action Mapping 阶段附带
+`DigitalActionTransition::worldPointerSample`。该 sample 使用 last-presented Camera2D latch 锁存
+worldX/worldY、cameraRevision、surfaceRevision、inputSequence 与 hit；0 fixed-step 延迟消费时不重投影，
+viewport miss 以 `hit=false` 表示，无 last-presented camera 以 `LifecycleInvariantViolation` 失败。
 
 `FixedUpdateContext::simulationActions()` 只暴露目标 tick snapshot；
 `FrameUpdateContext::frameActions()` 只暴露当帧 snapshot。窗口关闭是不可取消的
@@ -952,6 +958,12 @@ begin 才使其失效。
 放入 `RenderFrame` 后的 view 只在当前 `IRenderDevice::submitFrame()` 调用内有效，backend 必须同步消费、复制
 或编码，不得保留 view、span 或元素指针。
 
+M10-A40 另提供 `Camera2DPick.hpp` 的 `pickWorldFromLogicalPointer()`；锁存值类型
+`Render::WorldPointerSample` 单独位于 value-only `WorldPointerSample.hpp`，避免 Runtime Action payload
+依赖完整 pick helper surface。该 helper 只依赖纯 Tina Render/Camera 值，把 primary-window logical
+pointer 坐标投影到 Y-up 2D world；viewport 外返回 `hit=false`，非法相机、extent 或坐标返回 Render
+domain 的结构化错误。
+
 ## M10-A0 AssetFormat 公共边界
 
 `Tina::Core::AssetId` 与 `Tina::Core::ContentHash` 都是16字节强类型值，但用途不同：前者是由显式
@@ -1136,6 +1148,8 @@ public:
 | `tina_sample_2d_tilemap` | M10-A31 已实现 | sample (Headless/Null) | TileMap emit + CharacterController smoke | sample JSON |
 | `tina_sample_2d` | M10-A32–A38 已实现 | sample (GLFW+bgfx[+Physics2D][+FreeType]) | 正式 2D 产品 executable；磁盘 recipe Catalog + walk demo + UI/Text/Button + optional crate | sample JSON `sample=tina_sample_2d` |
 | `tina_sample_2d_tilemap_bgfx` | ALIAS | CMake alias | 兼容旧 target 名 | same binary |
+| `pickWorldFromLogicalPointer` / `Render::WorldPointerSample` | M10-A40 已实现 | Render module public | logical pointer → 2D world sample；包含 worldX/Y、camera/surface/input sequence 与 hit | Render domain invalid input |
+| `DigitalActionTransition::worldPointerSample` | M10-A42 已实现 | Game SDK Simulation Action payload | 未被 UI consume/claim 的 primary pointer edge 的 last-presented Camera2D 锁存 sample；0 fixed-step 不重算 | Runtime `LifecycleInvariantViolation` / Render pick error |
 | `CookedAssetView` / `CookedManifestView` | M10-A0 已实现 | AssetFormat module public | borrowed caller bytes；输入改变/释放后失效，accessor 返回 decoded value | Asset domain Result：schema/limit/overflow/layout/identity/dependency |
 | `CatalogSnapshot` / `CatalogEntry` / `CatalogDependency` | M10-A1 已实现 | Asset module public | move-only owning immutable Catalog；Create 后不依赖 Manifest bytes；accessor 返回 owning 小值 | InvalidCatalogConfig / CatalogCapacityExceeded / DependencyCycle / AllocationFailed；失败不发布 |
 | `Tina::Scene::World` | M8-A 已实现 standalone owner | Scene public；尚未接入 Phase Context | move-only、owner-thread 读写、Create 时固定 entity/遍历/scratch storage；析构归还 supplied PMR | invalid capacity/owner thread/corrupt hierarchy |

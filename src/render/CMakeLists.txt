@@ -7,6 +7,7 @@ add_library(tina_render STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderSurface.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/UIDisplayList.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/UploadTicket.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/render/WorldPointerSample.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/null/NullRenderDeviceFactory.hpp
     Camera2DPick.cpp
     RenderSurfaceStateTracker.cpp

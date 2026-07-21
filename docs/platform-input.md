@@ -11,7 +11,8 @@
 > root-scoped UI facade；M7-C1c-b3e 已让 Pointer listener 请求 button ownership，producer 只发布最终
 > snapshot 仍 held 的 primary Pointer Button claim。D0 已把 primary-window UIDisplayList 作为 Runtime-private
 > submit-call-local `RenderFrame` borrow 接入，D1 已让 `tina_render_bgfx` 私有 SolidQuad pass 消费该列表，
-> D2 已由 Desktop 可见样例验证 SolidFill panel。Key/Gamepad/axis claim producer、可见 Widget、
+> D2 已由 Desktop 可见样例验证 SolidFill panel。M10-A39–A42 已闭合 UI pointer non-penetration、
+> Camera2D pick latch 与 Simulation Action world pointer payload。Key/Gamepad/axis claim producer、可见 Widget、
 > Focus/Capture/Modal 与文本/glyph UI 仍未实现；这些门禁不应与最小 bgfx UI pass 混为一谈。
 
 ## 结论
@@ -300,10 +301,13 @@ edge、插入 reset、保留最终 state，并允许 reset 后的新 normalized 
 UI claims 满容量属于配置/运行错误：本次 `UIRouteResult` 原子失败，Runtime 在 Gameplay Mapping 前
 停止该帧并返回结构化错误，绝不能提交一半 claims 后让输入穿透。
 
-World pointer action 不能等到未来 fixed tick 再用“最新 Camera”换算。Action Mapping 对未被 UI
-消费的 transition，使用与该 `PlatformFrameView` 对应的 last-presented Camera/Surface snapshot 转换
-一次，并把 world point、camera revision、surface revision 和 input sequence 一起写入
-Simulation Action。0 fixed-step 帧只延迟消费这份结果，不重新计算；viewport 外输入显式 no-hit。
+World pointer action 不能等到未来 fixed tick 再用“最新 Camera”换算。Action Mapping 只对未被 UI
+consume/claim 的 primary pointer transition 实际形成的 Simulation edge，使用与该
+`PlatformFrameView` 对应的 `LastPresentedCamera2DLatch` 转换一次，并把
+`WorldPointerSample { worldX, worldY, cameraRevision, surfaceRevision, inputSequence, hit }`
+写入 `DigitalActionTransition::worldPointerSample`。被 UI consume/claim 的 transition 不要求 latch；
+无 latch 或无 last-presented Camera2D 返回结构化 `LifecycleInvariantViolation`。
+0 fixed-step 帧只延迟消费这份 sample，不重新计算；viewport 外输入显式 `hit=false` no-hit。
 
 ## 当前三条通道与未来通用事件队列
 

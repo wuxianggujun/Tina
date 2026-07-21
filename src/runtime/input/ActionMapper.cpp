@@ -1,4 +1,5 @@
 #include "ActionMapper.hpp"
+#include "LastPresentedCamera2DLatch.hpp"
 
 #include <tina/runtime/RuntimeErrors.hpp>
 
@@ -80,6 +81,38 @@ template <typename Record>
 [[nodiscard]] const Platform::WindowFrameSnapshot* primaryWindow(const Platform::PlatformFrameView& frame) noexcept
 {
     return frame.primaryWindow();
+}
+
+[[nodiscard]] Core::Result<std::optional<Render::WorldPointerSample>>
+pickWorldPointerSample(const Platform::PlatformFrameView& platformFrame, InputActionDomain domain, bool emitsEdge,
+                       const Platform::PointerButtonTransition* pointerTransition,
+                       const LastPresentedCamera2DLatch* lastPresentedCamera2D, u64 sequence)
+{
+    if (!emitsEdge || domain != InputActionDomain::Simulation || pointerTransition == nullptr)
+    {
+        return std::optional<Render::WorldPointerSample>{};
+    }
+    if (lastPresentedCamera2D == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "World pointer Simulation Action requires the last-presented Camera2D latch");
+    }
+
+    const Platform::WindowFrameSnapshot* primary = primaryWindow(platformFrame);
+    if (primary == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "World pointer Simulation Action requires a primary Window");
+    }
+
+    auto pick = lastPresentedCamera2D->pickLogical(
+        pointerTransition->logicalX, pointerTransition->logicalY, primary->metrics.logicalExtent.width,
+        primary->metrics.logicalExtent.height, sequence);
+    if (!pick)
+    {
+        return Core::failure(std::move(pick.error()));
+    }
+    return std::optional<Render::WorldPointerSample>{std::move(*pick)};
 }
 
 } // namespace
@@ -251,7 +284,8 @@ ActionMapper::ActionMapper(InputActionMapperCapacityConfig capacities, std::vect
 Core::Status ActionMapper::mapFrame(const Platform::PlatformFrameView& platformFrame,
                                     const UI::InputTransitionConsumptionView& consumption,
                                     const UI::ContinuousControlClaimsView& claims, u64 engineFrameIndex,
-                                    u64 nextUncompletedSimulationTick)
+                                    u64 nextUncompletedSimulationTick,
+                                    const LastPresentedCamera2DLatch* lastPresentedCamera2D)
 {
     if (auto validation =
             validateFrameInputs(platformFrame, consumption, claims, engineFrameIndex, nextUncompletedSimulationTick);
@@ -289,7 +323,7 @@ Core::Status ActionMapper::mapFrame(const Platform::PlatformFrameView& platformF
     for (usize ordinal = 0; ordinal < transitions.size(); ++ordinal)
     {
         if (auto transitionStatus = mapTransition(platformFrame, transitions[ordinal], consumption.isConsumed(ordinal),
-                                                  nextUncompletedSimulationTick);
+                                                  nextUncompletedSimulationTick, lastPresentedCamera2D);
             !transitionStatus)
         {
             return transitionStatus;
@@ -497,11 +531,13 @@ Core::Status ActionMapper::applyClaims(const Platform::PlatformFrameView& platfo
 
 Core::Status ActionMapper::mapTransition(const Platform::PlatformFrameView& platformFrame,
                                          const Platform::InputTransition& transition, bool consumed,
-                                         u64 nextSimulationTick)
+                                         u64 nextSimulationTick,
+                                         const LastPresentedCamera2DLatch* lastPresentedCamera2D)
 {
     const auto applyDigital = [this, &platformFrame, sequence = transition.sequence, consumed,
-                               nextSimulationTick](LocatedSource located, Platform::DigitalTransition state,
-                                                   bool repeat) -> Core::Status {
+                               nextSimulationTick, lastPresentedCamera2D](
+                                  LocatedSource located, Platform::DigitalTransition state, bool repeat,
+                                  const Platform::PointerButtonTransition* pointerTransition) -> Core::Status {
         if (located.binding == nullptr || located.source == nullptr || repeat)
         {
             return Core::success();
@@ -526,7 +562,8 @@ Core::Status ActionMapper::mapTransition(const Platform::PlatformFrameView& plat
             {
                 return Core::success();
             }
-            return activateSource(platformFrame, binding, source, sequence, nextSimulationTick);
+            return activateSource(platformFrame, binding, source, sequence, nextSimulationTick, pointerTransition,
+                                  lastPresentedCamera2D);
         }
 
         if (source.suppressedUntilRelease)
@@ -539,14 +576,15 @@ Core::Status ActionMapper::mapTransition(const Platform::PlatformFrameView& plat
         {
             return cancelSource(platformFrame, binding, source, sequence, nextSimulationTick, false);
         }
-        return releaseSource(platformFrame, binding, source, sequence, nextSimulationTick);
+        return releaseSource(platformFrame, binding, source, sequence, nextSimulationTick, pointerTransition,
+                             lastPresentedCamera2D);
     };
 
     return std::visit(
         Overloaded{
             [this, &platformFrame, &applyDigital](const Platform::KeyTransition& key) {
                 return applyDigital(locate(platformFrame, Platform::KeyControlIdentity{key.window, key.key}), key.state,
-                                    key.repeat);
+                                    key.repeat, nullptr);
             },
             [this, &platformFrame, &applyDigital](const Platform::PointerButtonTransition& pointer) {
                 return applyDigital(locate(platformFrame,
@@ -555,7 +593,7 @@ Core::Status ActionMapper::mapTransition(const Platform::PlatformFrameView& plat
                                                pointer.pointer,
                                                pointer.button,
                                            }),
-                                    pointer.state, false);
+                                    pointer.state, false, &pointer);
             },
             [this, &platformFrame, &applyDigital](const Platform::GamepadButtonTransition& gamepad) {
                 return applyDigital(locate(platformFrame,
@@ -564,7 +602,7 @@ Core::Status ActionMapper::mapTransition(const Platform::PlatformFrameView& plat
                                                gamepad.gamepad,
                                                gamepad.button,
                                            }),
-                                    gamepad.state, false);
+                                    gamepad.state, false, nullptr);
             },
             [this, &platformFrame, &transition, nextSimulationTick](const Platform::InputCancelTransition& cancel) {
                 return applyCancelTransition(platformFrame, cancel, transition.sequence, nextSimulationTick);
@@ -670,16 +708,25 @@ bool ActionMapper::physicalHeld(const Platform::PlatformFrameView& platformFrame
 }
 
 Core::Status ActionMapper::activateSource(const Platform::PlatformFrameView& platformFrame, BindingRecord& binding,
-                                          SourceState& source, u64 sequence, u64 nextSimulationTick)
+                                          SourceState& source, u64 sequence, u64 nextSimulationTick,
+                                          const Platform::PointerButtonTransition* pointerTransition,
+                                          const LastPresentedCamera2DLatch* lastPresentedCamera2D)
 {
     if (source.active)
     {
         return Core::success();
     }
-    source.active = true;
     ActionRecord& action = binding.domain == InputActionDomain::Simulation ? simulationActions_[binding.actionIndex]
                                                                            : frameActionRecords_[binding.actionIndex];
     const bool firstSource = action.activeSourceCount == 0;
+    auto worldPointerSample = pickWorldPointerSample(platformFrame, binding.domain, firstSource, pointerTransition,
+                                                     lastPresentedCamera2D, sequence);
+    if (!worldPointerSample)
+    {
+        return Core::failure(std::move(worldPointerSample.error()));
+    }
+
+    source.active = true;
     ++action.activeSourceCount;
     if (!firstSource)
     {
@@ -699,23 +746,35 @@ Core::Status ActionMapper::activateSource(const Platform::PlatformFrameView& pla
     }
     return appendNormalTransition(platformFrame, binding,
                                   static_cast<ActionSourceToken>(std::addressof(source) - sources_.data()),
-                                  DigitalActionTransitionKind::Pressed, sequence, nextSimulationTick);
+                                  DigitalActionTransitionKind::Pressed, sequence, nextSimulationTick,
+                                  std::move(*worldPointerSample));
 }
 
 Core::Status ActionMapper::releaseSource(const Platform::PlatformFrameView& platformFrame, BindingRecord& binding,
-                                         SourceState& source, u64 sequence, u64 nextSimulationTick)
+                                         SourceState& source, u64 sequence, u64 nextSimulationTick,
+                                         const Platform::PointerButtonTransition* pointerTransition,
+                                         const LastPresentedCamera2DLatch* lastPresentedCamera2D)
 {
     if (!source.active)
     {
         return Core::success();
     }
-    source.active = false;
     ActionRecord& action = binding.domain == InputActionDomain::Simulation ? simulationActions_[binding.actionIndex]
                                                                            : frameActionRecords_[binding.actionIndex];
     if (action.activeSourceCount == 0)
     {
         return invariantFailure("Digital Action active source count underflowed");
     }
+
+    const bool lastSource = action.activeSourceCount == 1;
+    auto worldPointerSample = pickWorldPointerSample(platformFrame, binding.domain, lastSource, pointerTransition,
+                                                     lastPresentedCamera2D, sequence);
+    if (!worldPointerSample)
+    {
+        return Core::failure(std::move(worldPointerSample.error()));
+    }
+
+    source.active = false;
     --action.activeSourceCount;
     if (action.activeSourceCount != 0)
     {
@@ -735,7 +794,8 @@ Core::Status ActionMapper::releaseSource(const Platform::PlatformFrameView& plat
     }
     return appendNormalTransition(platformFrame, binding,
                                   static_cast<ActionSourceToken>(std::addressof(source) - sources_.data()),
-                                  DigitalActionTransitionKind::Released, sequence, nextSimulationTick);
+                                  DigitalActionTransitionKind::Released, sequence, nextSimulationTick,
+                                  std::move(*worldPointerSample));
 }
 
 Core::Status ActionMapper::cancelSource(const Platform::PlatformFrameView& platformFrame, BindingRecord& binding,
@@ -781,12 +841,14 @@ Core::Status ActionMapper::cancelSource(const Platform::PlatformFrameView& platf
 Core::Status ActionMapper::appendNormalTransition(const Platform::PlatformFrameView& platformFrame,
                                                   BindingRecord& binding, ActionSourceToken source,
                                                   DigitalActionTransitionKind kind, u64 sequence,
-                                                  u64 nextSimulationTick)
+                                                  u64 nextSimulationTick,
+                                                  std::optional<Render::WorldPointerSample> worldPointerSample)
 {
     const DigitalActionTransition transition{
         .action = binding.action,
         .kind = kind,
         .sourceSequence = sequence,
+        .worldPointerSample = std::move(worldPointerSample),
     };
     if (binding.domain == InputActionDomain::Simulation)
     {

@@ -90,6 +90,10 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
 - EngineHost 端到端门禁证明 Game SDK listener 在 producer route 阶段执行，早于
   `FrameUpdateContext::frameActions()`；即使 callback 不调用 `consumeInputTransition()`，只 claim 当前仍 held
   的 primary Pointer Button，也不会发布同帧 Gameplay transition；
+- M10-A42 让 `ActionMapper` 在未被 UI consume/claim 的 primary pointer transition 实际形成的
+  Simulation edge 上附带 last-presented `WorldPointerSample`。sample 在 Action Mapping 阶段锁存，
+  0 fixed-step 帧延迟消费时不用后续 Camera/resize 重算；viewport miss 是 `hit=false`，缺
+  last-presented Camera2D 是结构化失败；
 - 当前帧循环为 Poll Platform → frame/payload/capacity/sequence 预校验 → Platform lifecycle dispatch
   → primary UIContext selection + UI Input Routing → Action Mapping → Fixed Update（0..4）→ Frame Update
   → Render Scene Extraction → UI Update → primary UI Layout/Paint Commit → primary UI DisplayList build
@@ -282,7 +286,9 @@ Runtime 每帧把单次单调时钟采样差传给
 所有队列必须有预算、统计和唯一所有者。`PlatformFrameView`、同步
 `PlatformEventDispatcher`、未来通用 Runtime Event Queue 与 UI routed event 相互分离；UI 先产生
 `Tina::UI::InputTransitionConsumptionView` 与 `Tina::UI::ContinuousControlClaimsView`，避免玩法输入穿透。
-Pressed/Released Action 只由下一个实际
+Gameplay Action Mapping 对未被 UI consume/claim 的 primary pointer transition 实际形成的 Simulation
+edge 使用 last-presented Camera2D latch 生成 `DigitalActionTransition::worldPointerSample`；被 UI
+consume/claim 的 transition 不要求 latch，也不会穿透到 world Action。Pressed/Released Action 只由下一个实际
 fixed tick 消费一次，本帧0步不丢失、4步不重复。`IGameState` 结构变更只在 Frame Update 后提交；
 新状态参与同帧 Render/UI snapshot，下一帧才接收输入；World command 在每个 fixed substep 末提交。
 

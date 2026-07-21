@@ -2,11 +2,13 @@
 
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformFrame.hpp>
+#include <tina/render/RenderScene.hpp>
 #include <tina/runtime/InputActions.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UI.hpp>
 
 #include "../../../src/runtime/input/ActionMapper.hpp"
+#include "../../../src/runtime/input/LastPresentedCamera2DLatch.hpp"
 #include "../../../src/runtime/input/UIInputRouteProducer.hpp"
 
 #include <array>
@@ -22,6 +24,7 @@ namespace Tina::Tests {
 namespace {
 
 using Runtime::Input::ActionMapper;
+using Runtime::Input::LastPresentedCamera2DLatch;
 using Runtime::Input::UIInputRouteProducer;
 using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
@@ -317,10 +320,28 @@ class UIInputRouteProducerTest : public testing::Test {
         });
         ASSERT_TRUE(builderResult.has_value()) << (builderResult ? "" : builderResult.error().message);
         builder = std::make_unique<Platform::PlatformFrameBuilder>(std::move(*builderResult));
+
+        auto cameraBuilderResult = Render::RenderSceneBuilder::Create();
+        ASSERT_TRUE(cameraBuilderResult.has_value())
+            << (cameraBuilderResult ? "" : cameraBuilderResult.error().message);
+        auto cameraBuilder = std::move(*cameraBuilderResult);
+        ASSERT_TRUE(cameraBuilder.beginFrame().has_value());
+        ASSERT_TRUE(cameraBuilder.writer()
+                        .setCamera2D(Render::RenderCamera2DInput{
+                            .stableCameraKey = 1,
+                            .worldWidth = 100.0F,
+                            .worldHeight = 100.0F,
+                            .actualPixelsPerMeter = 1.0F,
+                        })
+                        .has_value());
+        auto cameraScene = cameraBuilder.commit();
+        ASSERT_TRUE(cameraScene.has_value()) << (cameraScene ? "" : cameraScene.error().message);
+        lastPresentedCamera2D.notePresented(*cameraScene, 1);
     }
 
     std::unique_ptr<WindowPool> windows;
     std::unique_ptr<Platform::PlatformFrameBuilder> builder;
+    LastPresentedCamera2DLatch lastPresentedCamera2D;
     Platform::WindowId window{};
     Platform::WindowId otherWindow{};
 };
@@ -942,7 +963,10 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
     ASSERT_TRUE(consumedDown.has_value()) << (consumedDown ? "" : consumedDown.error().message);
     auto consumedOutput = producer->produce(tree.context.get(), *consumedDown);
     ASSERT_TRUE(consumedOutput.has_value()) << (consumedOutput ? "" : consumedOutput.error().message);
-    ASSERT_TRUE(mapper->mapFrame(*consumedDown, consumedOutput->consumption, consumedOutput->claims, 0, 0).has_value());
+    ASSERT_TRUE(mapper
+                    ->mapFrame(*consumedDown, consumedOutput->consumption, consumedOutput->claims, 0, 0,
+                               &lastPresentedCamera2D)
+                    .has_value());
     auto suppressed = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(suppressed.has_value()) << (suppressed ? "" : suppressed.error().message);
     EXPECT_TRUE(suppressed->transitions.empty());
@@ -958,7 +982,10 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
     ASSERT_TRUE(stillHeld.has_value()) << (stillHeld ? "" : stillHeld.error().message);
     auto stillHeldOutput = producer->produce(nullptr, *stillHeld);
     ASSERT_TRUE(stillHeldOutput.has_value()) << (stillHeldOutput ? "" : stillHeldOutput.error().message);
-    ASSERT_TRUE(mapper->mapFrame(*stillHeld, stillHeldOutput->consumption, stillHeldOutput->claims, 1, 0).has_value());
+    ASSERT_TRUE(mapper
+                    ->mapFrame(*stillHeld, stillHeldOutput->consumption, stillHeldOutput->claims, 1, 0,
+                               &lastPresentedCamera2D)
+                    .has_value());
     auto stillSuppressed = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(stillSuppressed.has_value()) << (stillSuppressed ? "" : stillSuppressed.error().message);
     EXPECT_TRUE(stillSuppressed->transitions.empty());
@@ -973,7 +1000,9 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
     ASSERT_TRUE(trueUp.has_value()) << (trueUp ? "" : trueUp.error().message);
     auto upOutput = producer->produce(nullptr, *trueUp);
     ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
-    ASSERT_TRUE(mapper->mapFrame(*trueUp, upOutput->consumption, upOutput->claims, 2, 0).has_value());
+    ASSERT_TRUE(mapper
+                    ->mapFrame(*trueUp, upOutput->consumption, upOutput->claims, 2, 0, &lastPresentedCamera2D)
+                    .has_value());
     auto afterUp = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(afterUp.has_value()) << (afterUp ? "" : afterUp.error().message);
     EXPECT_TRUE(afterUp->transitions.empty());
@@ -990,7 +1019,10 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
     ASSERT_TRUE(downAgain.has_value()) << (downAgain ? "" : downAgain.error().message);
     auto downAgainOutput = producer->produce(nullptr, *downAgain);
     ASSERT_TRUE(downAgainOutput.has_value()) << (downAgainOutput ? "" : downAgainOutput.error().message);
-    ASSERT_TRUE(mapper->mapFrame(*downAgain, downAgainOutput->consumption, downAgainOutput->claims, 3, 0).has_value());
+    ASSERT_TRUE(mapper
+                    ->mapFrame(*downAgain, downAgainOutput->consumption, downAgainOutput->claims, 3, 0,
+                               &lastPresentedCamera2D)
+                    .has_value());
     auto restored = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(restored.has_value()) << (restored ? "" : restored.error().message);
     ASSERT_EQ(restored->transitions.size(), 1U);
@@ -1027,7 +1059,9 @@ TEST_F(UIInputRouteProducerTest, HeldPointerClaimCancelsObservedGameplayUntilTru
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     auto downOutput = producer->produce(nullptr, *down);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
-    ASSERT_TRUE(mapper->mapFrame(*down, downOutput->consumption, downOutput->claims, 0, 0).has_value());
+    ASSERT_TRUE(mapper
+                    ->mapFrame(*down, downOutput->consumption, downOutput->claims, 0, 0, &lastPresentedCamera2D)
+                    .has_value());
     auto pressed = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(pressed.has_value()) << (pressed ? "" : pressed.error().message);
     ASSERT_EQ(pressed->transitions.size(), 1U);
@@ -1047,12 +1081,16 @@ TEST_F(UIInputRouteProducerTest, HeldPointerClaimCancelsObservedGameplayUntilTru
     auto claimedOutput = producer->produce(tree.context.get(), *claimed);
     ASSERT_TRUE(claimedOutput.has_value()) << (claimedOutput ? "" : claimedOutput.error().message);
     ASSERT_EQ(claimedOutput->claims.controls.size(), 1U);
-    ASSERT_TRUE(mapper->mapFrame(*claimed, claimedOutput->consumption, claimedOutput->claims, 1, 1).has_value());
+    ASSERT_TRUE(mapper
+                    ->mapFrame(*claimed, claimedOutput->consumption, claimedOutput->claims, 1, 1,
+                               &lastPresentedCamera2D)
+                    .has_value());
     auto cancelled = mapper->simulationActionsForTick(1);
     ASSERT_TRUE(cancelled.has_value()) << (cancelled ? "" : cancelled.error().message);
     ASSERT_EQ(cancelled->transitions.size(), 1U);
     ASSERT_NE(digital(cancelled->transitions[0]), nullptr);
     EXPECT_EQ(digital(cancelled->transitions[0])->kind, DigitalActionTransitionKind::Cancelled);
+    EXPECT_FALSE(digital(cancelled->transitions[0])->worldPointerSample.has_value());
     EXPECT_FALSE(cancelled->isHeld(PointerAction));
     ASSERT_TRUE(mapper->completeSimulationTick(1).has_value());
 
@@ -1067,7 +1105,9 @@ TEST_F(UIInputRouteProducerTest, HeldPointerClaimCancelsObservedGameplayUntilTru
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     auto upOutput = producer->produce(nullptr, *up);
     ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
-    ASSERT_TRUE(mapper->mapFrame(*up, upOutput->consumption, upOutput->claims, 2, 2).has_value());
+    ASSERT_TRUE(mapper
+                    ->mapFrame(*up, upOutput->consumption, upOutput->claims, 2, 2, &lastPresentedCamera2D)
+                    .has_value());
     auto releasedSuppression = mapper->simulationActionsForTick(2);
     ASSERT_TRUE(releasedSuppression.has_value())
         << (releasedSuppression ? "" : releasedSuppression.error().message);
@@ -1109,7 +1149,9 @@ TEST_F(UIInputRouteProducerTest, PointerClaimInterceptsInitialDownWithoutTransit
     EXPECT_FALSE(output->consumption.isConsumed(0));
     ASSERT_EQ(output->claims.controls.size(), 1U);
 
-    ASSERT_TRUE(mapper->mapFrame(*down, output->consumption, output->claims, 0, 0).has_value());
+    ASSERT_TRUE(mapper
+                    ->mapFrame(*down, output->consumption, output->claims, 0, 0, &lastPresentedCamera2D)
+                    .has_value());
     auto suppressed = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(suppressed.has_value()) << (suppressed ? "" : suppressed.error().message);
     EXPECT_TRUE(suppressed->transitions.empty());
@@ -1159,8 +1201,10 @@ TEST_F(UIInputRouteProducerTest, ProductButtonClickDoesNotPenetrateWorldPointerA
     auto pressed = tree.updater.isButtonPressed(tree.target);
     ASSERT_TRUE(pressed.has_value()) << (pressed ? "" : pressed.error().message);
     EXPECT_TRUE(*pressed);
-    ASSERT_TRUE(
-        mapper->mapFrame(*hitDown, hitDownOutput->consumption, hitDownOutput->claims, 0, 0).has_value());
+    ASSERT_TRUE(mapper
+                    ->mapFrame(*hitDown, hitDownOutput->consumption, hitDownOutput->claims, 0, 0,
+                               &lastPresentedCamera2D)
+                    .has_value());
     auto suppressedDown = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(suppressedDown.has_value()) << (suppressedDown ? "" : suppressedDown.error().message);
     EXPECT_TRUE(suppressedDown->transitions.empty());
@@ -1179,7 +1223,10 @@ TEST_F(UIInputRouteProducerTest, ProductButtonClickDoesNotPenetrateWorldPointerA
     ASSERT_TRUE(hitUp.has_value()) << (hitUp ? "" : hitUp.error().message);
     auto hitUpOutput = producer->produce(tree.context.get(), *hitUp);
     ASSERT_TRUE(hitUpOutput.has_value()) << (hitUpOutput ? "" : hitUpOutput.error().message);
-    ASSERT_TRUE(mapper->mapFrame(*hitUp, hitUpOutput->consumption, hitUpOutput->claims, 1, 1).has_value());
+    ASSERT_TRUE(mapper
+                    ->mapFrame(*hitUp, hitUpOutput->consumption, hitUpOutput->claims, 1, 1,
+                               &lastPresentedCamera2D)
+                    .has_value());
     auto afterUp = mapper->simulationActionsForTick(1);
     ASSERT_TRUE(afterUp.has_value()) << (afterUp ? "" : afterUp.error().message);
     EXPECT_TRUE(afterUp->transitions.empty());
@@ -1208,9 +1255,10 @@ TEST_F(UIInputRouteProducerTest, ProductButtonClickDoesNotPenetrateWorldPointerA
     auto missDownOutput = producer->produce(tree.context.get(), *missDown);
     ASSERT_TRUE(missDownOutput.has_value()) << (missDownOutput ? "" : missDownOutput.error().message);
     EXPECT_FALSE(missDownOutput->consumption.isConsumed(0));
-    ASSERT_TRUE(
-        mapper->mapFrame(*missDown, missDownOutput->consumption, missDownOutput->claims, 2, 2)
-            .has_value());
+    ASSERT_TRUE(mapper
+                    ->mapFrame(*missDown, missDownOutput->consumption, missDownOutput->claims, 2, 2,
+                               &lastPresentedCamera2D)
+                    .has_value());
     auto worldPressed = mapper->simulationActionsForTick(2);
     ASSERT_TRUE(worldPressed.has_value()) << (worldPressed ? "" : worldPressed.error().message);
     ASSERT_EQ(worldPressed->transitions.size(), 1U);

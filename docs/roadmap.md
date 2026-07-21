@@ -625,7 +625,13 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   orthographic 一致、旋转/平移、非法输入结构化失败；`tina_render_scene_tests` 8 项门禁。
 - M10-A41 已完成 Runtime-private `LastPresentedCamera2DLatch`：成功 present 后锁存 Camera2D +
   surfaceRevision；`pickLogical` 用锁存相机转换；extraction-only 相机移动不更新锁存；
-  `tina_runtime_ui_tests` 4 项 + EngineHost present 接线。Simulation Action 载荷 / 样例选格仍后置；
+  `tina_runtime_ui_tests` 4 项 + EngineHost present 接线；
+- M10-A42 已完成 ActionMapper world pointer payload：只对未被 UI consume/claim 的 primary pointer
+  transition 实际形成的 Simulation edge 使用 last-presented Camera2D latch 生成锁存 `WorldPointerSample`，写入
+  `DigitalActionTransition::worldPointerSample`；0 fixed-step 帧保留 sample，后续 camera/resize 不重算；
+  viewport miss 为 `hit=false`，缺 last-presented camera 返回结构化 `LifecycleInvariantViolation`；
+  `WorldPointerActionMappingTest` 覆盖 consumed/claimed、no-camera、Press/Release、失败重试、no-hit 与
+  0-step。更大范围 world-pick Game SDK API 与样例选格仍后置；
 - 完整 Cooker/cgltf 继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
@@ -650,8 +656,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   `CharacterControllerPhysicsCoexistenceTest` 证明同一 Tile solid 可同时喂 grid controller 与
   Physics2D static sync + dynamic body contact；`tina_sample_2d`（M10-A36–A38）已在 product-2d 图接线
   磁盘 recipe Catalog+TileMap+角色+Box2D crate+UI/Text+脚本化行走/Button；
-  M10-A39 pointer non-penetration 与 M10-A40 Camera2D pick 纯函数已门禁；
-  ActionMapper last-presented latch / 样例选格与完整外部 cooker CLI 后置；
+  M10-A39 pointer non-penetration、M10-A40 Camera2D pick 纯函数与 M10-A42 ActionMapper
+  last-presented world pointer payload 已门禁；样例选格与完整外部 cooker CLI 后置；
   只有 bench p99 超预算才接入 Box2D worker callbacks；
 - 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；

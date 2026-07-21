@@ -33,6 +33,8 @@ struct InputActionMapperCapacityConfig final {
 
 namespace Tina::Runtime::Input {
 
+class LastPresentedCamera2DLatch;
+
 struct ActionMapperStatistics final {
     u64 frameActionCapacityResetCount = 0;
     u64 rawInputResetCount = 0;
@@ -54,7 +56,8 @@ class ActionMapper final {
     [[nodiscard]] Core::Status mapFrame(const Platform::PlatformFrameView& platformFrame,
                                         const UI::InputTransitionConsumptionView& consumption,
                                         const UI::ContinuousControlClaimsView& claims, u64 engineFrameIndex,
-                                        u64 nextUncompletedSimulationTick);
+                                        u64 nextUncompletedSimulationTick,
+                                        const LastPresentedCamera2DLatch* lastPresentedCamera2D = nullptr);
 
     [[nodiscard]] FrameActionSnapshot frameActions() const noexcept;
     [[nodiscard]] Core::Result<SimulationActionSnapshot> simulationActionsForTick(u64 simulationTick) const;
@@ -116,7 +119,8 @@ class ActionMapper final {
                                            u64 nextSimulationTick);
     [[nodiscard]] Core::Status mapTransition(const Platform::PlatformFrameView& platformFrame,
                                              const Platform::InputTransition& transition, bool consumed,
-                                             u64 nextSimulationTick);
+                                             u64 nextSimulationTick,
+                                             const LastPresentedCamera2DLatch* lastPresentedCamera2D);
 
     [[nodiscard]] LocatedSource locate(const Platform::PlatformFrameView& platformFrame,
                                        const Platform::KeyControlIdentity& control);
@@ -130,9 +134,13 @@ class ActionMapper final {
                                     const SourceState& source) const noexcept;
 
     [[nodiscard]] Core::Status activateSource(const Platform::PlatformFrameView& platformFrame, BindingRecord& binding,
-                                              SourceState& source, u64 sequence, u64 nextSimulationTick);
+                                              SourceState& source, u64 sequence, u64 nextSimulationTick,
+                                              const Platform::PointerButtonTransition* pointerTransition,
+                                              const LastPresentedCamera2DLatch* lastPresentedCamera2D);
     [[nodiscard]] Core::Status releaseSource(const Platform::PlatformFrameView& platformFrame, BindingRecord& binding,
-                                             SourceState& source, u64 sequence, u64 nextSimulationTick);
+                                             SourceState& source, u64 sequence, u64 nextSimulationTick,
+                                             const Platform::PointerButtonTransition* pointerTransition,
+                                             const LastPresentedCamera2DLatch* lastPresentedCamera2D);
     [[nodiscard]] Core::Status cancelSource(const Platform::PlatformFrameView& platformFrame, BindingRecord& binding,
                                             SourceState& source, u64 sequence, u64 nextSimulationTick,
                                             bool suppressWhilePhysicallyHeld);
@@ -140,7 +148,8 @@ class ActionMapper final {
     [[nodiscard]] Core::Status appendNormalTransition(const Platform::PlatformFrameView& platformFrame,
                                                       BindingRecord& binding, ActionSourceToken source,
                                                       DigitalActionTransitionKind kind, u64 sequence,
-                                                      u64 nextSimulationTick);
+                                                      u64 nextSimulationTick,
+                                                      std::optional<Render::WorldPointerSample> worldPointerSample);
     [[nodiscard]] Core::Status reconcileCancelledAction(const Platform::PlatformFrameView& platformFrame,
                                                         BindingRecord& binding, ActionSourceToken source, u64 sequence,
                                                         u64 nextSimulationTick, bool forceStateReconciliation);
