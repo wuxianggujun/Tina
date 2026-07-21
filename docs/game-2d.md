@@ -253,10 +253,11 @@ Tina-owned 稳态动态分配增量必须为0。
 ## 正式 2D 验收
 
 `tina_sample_2d` 不能只显示一张 Sprite，也不能由 M9-C 的 fixture Sprite 样例替代。
-M10-A36–A38 已在 `windows-msvc-vnext-bgfx-product-2d` 上落地产品门禁：磁盘
+M10-A36–A44 已在 `windows-msvc-vnext-bgfx-product-2d` 上落地产品门禁：磁盘
 `sample_2d.recipe` → cook/load Texture2D+Tileset+TileMap、CharacterController 脚本行走、
 UI HUD panel/Label/Button（可选 FreeType 中文）、至少一个 Physics2D dynamic crate 与 Tile
-static 交互；JSON `sample=tina_sample_2d` + `catalogFromRecipeFile=true`。
+static 交互；A39–A44 闭合 UI 不穿透、world pointer、选格与高亮/seed 门禁；JSON
+`sample=tina_sample_2d` + `catalogFromRecipeFile=true`。完整 cooker CLI / cgltf 仍 Deferred。
 
 Legacy 删除前仍须补齐/加强：
 

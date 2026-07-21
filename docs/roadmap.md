@@ -645,7 +645,21 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   仍可不点；seed 路径要求 `tileSelectionHits>=1`、`lastHighlightSprites=1` 与
   `selectionHighlightSprites==renderExtractions`。sample-private helper 测试覆盖高亮几何、seed
   与 scripted Pressed 消费；A39 UI non-penetration 仍由 `tina_runtime_ui_tests`；
-- 完整 Cooker/cgltf 继续后置；
+
+### M10 收口（tip `70618808`，A44）
+
+**产品 2D 主线（`tina_sample_2d` + 输入/选格）到 A44 视为可验收收口**，不必再为编号焦虑开 A45，
+除非出现真实产品缺口。已完成 vs Deferred：
+
+| 已完成（A0–A44 主体） | Deferred（不阻塞本收口） |
+| --- | --- |
+| Asset/Catalog/Handle/Lease/Task/Null GPU upload 子集 | 完整外部 cooker CLI（Parse→Validate→Build→Atomic Write 全量） |
+| recipe → cook/publish → load（hermetic fixture） | cgltf / 最小 glTF 3D 产品样例 `tina_sample_3d` |
+| `tina_sample_2d` Catalog TileMap + Character + UI/Button + 可选 Physics/FreeType | Camera resize / 插值 / pixel snap 产品打磨 |
+| A39 non-penetration；A40–A42 world pointer；A43 选格；A44 高亮 + seed 门禁 | 更大 Game SDK world-pick API；chunk dirty 压力门禁 |
+| product-2d 300 帧 JSON 生命周期门禁 | 删 Legacy（M12，需 Audio+3D 等价验收） |
+
+- 完整 Cooker/cgltf **明确 Deferred**（可在 M10 尾或 M11 另开切片，不自动续号 A45+）；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
   Sprite/Tileset/TileMap；不支持特性返回明确诊断；
@@ -669,13 +683,13 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   `CharacterControllerPhysicsCoexistenceTest` 证明同一 Tile solid 可同时喂 grid controller 与
   Physics2D static sync + dynamic body contact；`tina_sample_2d`（M10-A36–A38）已在 product-2d 图接线
   磁盘 recipe Catalog+TileMap+角色+Box2D crate+UI/Text+脚本化行走/Button；
-  M10-A39–A44 pointer non-penetration、Camera2D pick、ActionMapper payload、样例选格/高亮与
-  `--seed-tile-selection` 受控门禁已闭合；完整外部 cooker CLI 后置；
-  只有 bench p99 超预算才接入 Box2D worker callbacks；
+  M10 收口：A39–A44 已闭合 product-2d pointer/selection 产品闭环（默认 smoke 不点；
+  `--seed-tile-selection` 为受控门禁）；完整 cooker CLI / cgltf / 厚 world-pick Game SDK 仍 Deferred，
+  不默认开 M10-A45；只有 bench p99 超预算才接入 Box2D worker callbacks；
 - 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
-- 以当前游戏为正式 2D 产品门禁：Cooked TileMap/Tileset、Camera2D、chunk culling/dirty rebuild、
-  CharacterController2D/Tile AABB、至少一个 Box2D dynamic body 和 UI overlay；
+- 在 M10 已落地的 `tina_sample_2d` 主线上继续 2D 打磨：chunk dirty rebuild 压力、Camera resize/
+  pixel snap、稳定截图回归；Audio 与更完整 UI 控件见本里程碑其它条；
 - `tina_audio_miniaudio` 作为唯一真实 backend，通过 generation voice handle、命令队列和
   主线程 completion 保证关闭安全；
 - 覆盖 callback 0分配/0阻塞、command/completion 满容量、设备 Disabled、Music underrun、
