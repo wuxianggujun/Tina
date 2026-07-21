@@ -2,6 +2,7 @@
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackageLoad.hpp>
+#include <tina/asset/CookedAssetFile.hpp>
 #include <tina/core/id/AssetId.hpp>
 #include <tina/core/io/WriteFile.hpp>
 
@@ -293,6 +294,64 @@ TEST(CatalogCookTests, RecipeFileRoundTrip)
     EXPECT_EQ(catalog->dependencyCount(), 1U);
 
     std::filesystem::remove_all(dir, ec);
+}
+
+TEST(CatalogCookTests, InlineAudioClipSineRecipe)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto clipId = *Core::AssetId::fromBytes(idBytes(4U));
+    const auto clipHex = clipId.canonicalText();
+
+    std::string recipe;
+    recipe += "platform WindowsX64\n";
+    recipe += "audioclip ";
+    recipe.append(clipHex.data(), clipHex.size());
+    recipe += " 48000 1 64 sine 880\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    ASSERT_EQ(request->assets.size(), 1U);
+    EXPECT_EQ(request->assets[0].assetKind, AssetFormat::AssetKind::AudioClip);
+    EXPECT_EQ(request->assets[0].assetId, clipId);
+
+    const auto root = std::filesystem::temp_directory_path() / "tina_inline_audioclip";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(root), *request).has_value());
+
+    CatalogPackageOpenConfig openConfig{
+        .manifest =
+            CatalogFileLoadConfig{
+                .catalog =
+                    CatalogConfig{
+                        .maxEntries = 8,
+                        .maxDependencies = 8,
+                        .maxDependenciesPerAsset = 4,
+                        .memoryResource = &memory,
+                    },
+            },
+        .validateOnOpen = true,
+        .validation =
+            CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .verifyContent = true,
+                .verifyTypedPayload = true,
+            },
+    };
+    auto catalog = openCatalogPackage(toUtf8(root), openConfig);
+    ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
+    EXPECT_EQ(catalog->entryCount(), 1U);
+
+    auto asset = loadCookedAssetFromCatalog(toUtf8(root), *catalog, clipId,
+                                            CookedAssetFileLoadConfig{.memoryResource = &memory});
+    ASSERT_TRUE(asset.has_value()) << asset.error().message;
+    auto clip = parseAudioClipFromCooked(*asset);
+    ASSERT_TRUE(clip.has_value()) << clip.error().message;
+    EXPECT_EQ(clip->sampleRate, 48000U);
+    EXPECT_EQ(clip->frameCount, 64U);
+    EXPECT_EQ(clip->channels, 1U);
+
+    std::filesystem::remove_all(root, ec);
 }
 
 } // namespace

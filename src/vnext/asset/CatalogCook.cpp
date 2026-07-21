@@ -3,6 +3,7 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackagePublish.hpp>
+#include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/asset_format/TileMapPayload.hpp>
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cmath>
 #include <filesystem>
 #include <string>
 #include <utility>
@@ -251,6 +253,98 @@ struct CookedPackage final {
         .assetKind = AssetFormat::AssetKind::Texture2D,
         .assetId = *assetId,
         .assetTypeVersion = AssetFormat::Texture2DWire::SchemaVersion,
+        .payload = std::move(*payload),
+    };
+}
+
+[[nodiscard]] Core::Result<CatalogCookAssetSpec> parseAudioClipInline(const std::vector<std::string>& tokens)
+{
+    // audioclip <id> <sampleRate> <channels> <frameCount> <f0 f1 ...>
+    // audioclip <id> <sampleRate> <channels> <frameCount> sine <freqHz>
+    if (tokens.size() < 5)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "audioclip needs id sampleRate channels frameCount samples|sine freq");
+    }
+    auto assetId = Core::AssetId::parseCanonical(tokens[1]);
+    if (!assetId)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid audioclip asset id");
+    }
+    Core::u32 sampleRate = 0;
+    Core::u32 channels = 0;
+    Core::u32 frameCount = 0;
+    if (!parseU32Token(tokens[2], sampleRate) || !parseU32Token(tokens[3], channels) ||
+        !parseU32Token(tokens[4], frameCount))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid audioclip geometry fields");
+    }
+    if (channels == 0 || channels > AssetFormat::AudioClipWire::MaxChannels || frameCount == 0 ||
+        frameCount > AssetFormat::AudioClipWire::MaxFrameCount ||
+        sampleRate < AssetFormat::AudioClipWire::MinSampleRate ||
+        sampleRate > AssetFormat::AudioClipWire::MaxSampleRate)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "audioclip geometry out of range");
+    }
+
+    const std::size_t sampleCount =
+        static_cast<std::size_t>(frameCount) * static_cast<std::size_t>(channels);
+    std::vector<float> pcm;
+    pcm.resize(sampleCount, 0.0F);
+
+    if (tokens.size() >= 6 && tokens[5] == "sine")
+    {
+        if (tokens.size() != 7)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "audioclip sine needs freqHz");
+        }
+        float frequency = 0.0F;
+        if (!parseFloatToken(tokens[6], frequency) || !(frequency > 0.0F) || !std::isfinite(frequency))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid audioclip sine frequency");
+        }
+        constexpr float kPi = 3.14159265358979323846F;
+        for (Core::u32 frame = 0; frame < frameCount; ++frame)
+        {
+            const float t = static_cast<float>(frame) / static_cast<float>(sampleRate);
+            const float sample = 0.25F * std::sin(2.0F * kPi * frequency * t);
+            for (Core::u32 channel = 0; channel < channels; ++channel)
+            {
+                pcm[static_cast<std::size_t>(frame) * channels + channel] = sample;
+            }
+        }
+    }
+    else
+    {
+        if (tokens.size() != 5U + sampleCount)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "audioclip sample count mismatch");
+        }
+        for (std::size_t index = 0; index < sampleCount; ++index)
+        {
+            float value = 0.0F;
+            if (!parseFloatToken(tokens[5U + index], value) || !std::isfinite(value))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid audioclip sample value");
+            }
+            pcm[index] = value;
+        }
+    }
+
+    auto payload = AssetFormat::writeAudioClipPayloadBytes(AssetFormat::AudioClipPayloadDesc{
+        .channels = static_cast<Core::u16>(channels),
+        .sampleRate = sampleRate,
+        .frameCount = frameCount,
+        .interleavedPcm = pcm,
+    });
+    if (!payload)
+    {
+        return Core::failure(std::move(payload.error()));
+    }
+    return CatalogCookAssetSpec{
+        .assetKind = AssetFormat::AssetKind::AudioClip,
+        .assetId = *assetId,
+        .assetTypeVersion = AssetFormat::AudioClipWire::SchemaVersion,
         .payload = std::move(*payload),
     };
 }
@@ -615,6 +709,16 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         if (tokens[0] == "sprite")
         {
             auto asset = parseSpriteInline(tokens);
+            if (!asset)
+            {
+                return Core::failure(std::move(asset.error()));
+            }
+            request.assets.push_back(std::move(*asset));
+            continue;
+        }
+        if (tokens[0] == "audioclip")
+        {
+            auto asset = parseAudioClipInline(tokens);
             if (!asset)
             {
                 return Core::failure(std::move(asset.error()));

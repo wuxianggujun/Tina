@@ -46,6 +46,8 @@ struct CatalogCookResult final {
 //   asset Material <32hexId> <payloadPath> <dep32hex:Kind> ...
 //   texture2d <32hexId> <width> <height> <hexRRGGBBAA> ...   // inline Rgba8Unorm pixels
 //   sprite <32hexId> <texture32hexId> [u0 v0 u1 v1 pivotX pivotY ppu]
+//   audioclip <32hexId> <sampleRate> <channels> <frameCount> <f0...>
+//   audioclip <32hexId> <sampleRate> <channels> <frameCount> sine <freqHz>
 //   tileset <32hexId> <texture32hexId> <tilePxW> <tilePxH>
 //   tile <localId> <materialFlags> <u0> <v0> <u1> <v1>   // after tileset; ends at next non-tile
 //   tilemap <32hexId> <tileset32hexId> <widthCells> <heightCells> <cellSizeMeters>

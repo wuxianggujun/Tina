@@ -613,8 +613,11 @@ interleaved float32 PCM；`writeAudioClipPayloadBytes`/`parseAudioClipPayload`/
 `AudioPcmClipView`。
 
 M11-A18：`Asset::parseAudioClipFromCooked`；`CatalogPackageValidation` 在 `verifyTypedPayload`
-时校验 AudioClip；测试覆盖 cooked file → parse → playOneShot → mix。AssetLease 播放保活、
-catalog recipe 磁盘 SFX 与 OS 默认设备门禁后置。
+时校验 AudioClip；测试覆盖 cooked file → parse → playOneShot → mix。
+
+M11-A19：catalog recipe `audioclip <id> <rate> <ch> <frames> <samples|sine freq>`；
+`sample_2d.recipe` 增加 idBytes(4) AudioClip；`tina_sample_2d` 通过 `AssetLease` 保活并播放。
+OS 默认设备与完整 cooker 源文件导入后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

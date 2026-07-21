@@ -31,6 +31,7 @@
 #include <tina/runtime/PlatformEvents.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
+#include <tina/audio/AudioClipView.hpp>
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
@@ -147,14 +148,14 @@ struct LifecycleCounters final {
     float maxCameraCenterX = 0.0f;
     float minCameraCenterX = 0.0f;
     bool cameraFollowPrimed = false;
-    // M11-A15: EngineHost AudioEngine product evidence (Disabled command path).
+    // M11-A15/A19: EngineHost AudioEngine + catalog AudioClip lease product evidence.
     bool audioEnginePresent = false;
     bool audioOneShotQueued = false;
     bool audioStartedObserved = false;
+    bool audioFromCatalogLease = false;
     u64 audioStartedCount = 0;
-    // Longer PCM so miniaudio callback has time to mix while voice is playing.
-    float audioOneShotPcm[480]{};
-    bool audioPcmInitialized = false;
+    u64 audioClipFrameCount = 0;
+    u32 audioClipSampleRate = 0;
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
     // M11-A16: optional null-backend device + attachMixer SFX evidence.
     bool audioDeviceCreated = false;
@@ -406,6 +407,9 @@ struct TileMapResources final {
     Tina::Asset::AssetHandle textureHandle{};
     Tina::Asset::AssetHandle tilesetHandle{};
     Tina::Asset::AssetHandle tileMapHandle{};
+    Tina::Asset::AssetHandle audioClipHandle{};
+    // Keeps cooked AudioClip CPU payload alive across playOneShot/mix (M11-A19).
+    Tina::Asset::AssetLease audioClipLease{};
     Tina::Render::GpuTextureId gpuTexture{};
     std::optional<Tina::Asset::TileMapInstance> map{};
     std::optional<Tina::Asset::TileMapGridCollision> grid{};
@@ -439,11 +443,12 @@ struct TileMapResources final {
     const auto textureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
     const auto tilesetId = *Tina::Core::AssetId::fromBytes(idBytes(2U));
     const auto tileMapId = *Tina::Core::AssetId::fromBytes(idBytes(3U));
+    const auto audioClipId = *Tina::Core::AssetId::fromBytes(idBytes(4U));
 
 #if !defined(TINA_SAMPLE_2D_RECIPE_PATH)
 #error "TINA_SAMPLE_2D_RECIPE_PATH must be defined for tina_sample_2d catalog recipe load"
 #endif
-    // M10-A38: cook from an on-disk catalog recipe file (product asset path),
+    // M10-A38/M11-A19: cook from an on-disk catalog recipe file (product asset path),
     // not in-process payload assembly. Still a hermetic fixture recipe, not
     // the full external cooker CLI pipeline.
     auto request = Tina::Asset::loadCatalogCookRecipeFile(TINA_SAMPLE_2D_RECIPE_PATH);
@@ -451,10 +456,10 @@ struct TileMapResources final {
     {
         return Tina::Core::failure(std::move(request.error()));
     }
-    if (request->assets.size() != 3U)
+    if (request->assets.size() != 4U)
     {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
-                                   "sample_2d.recipe must declare Texture2D+Tileset+TileMap");
+                                   "sample_2d.recipe must declare Texture2D+Tileset+TileMap+AudioClip");
     }
     counters.catalogRecipeAssets = request->assets.size();
     counters.catalogFromRecipeFile = true;
@@ -489,12 +494,17 @@ struct TileMapResources final {
     {
         return bindStatus;
     }
-    auto loaded = system->load(std::array{tileMapId});
+    auto loaded = system->load(std::array{tileMapId, audioClipId});
     if (!loaded)
     {
         return Tina::Core::failure(std::move(loaded.error()));
     }
+    if (loaded->size() < 2U)
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidHandle, "tilemap/audioclip load incomplete");
+    }
     resources.tileMapHandle = (*loaded)[0];
+    resources.audioClipHandle = (*loaded)[1];
 
     auto tilesetHandle = system->find(tilesetId);
     auto textureHandle = system->find(textureId);
@@ -504,6 +514,14 @@ struct TileMapResources final {
     }
     resources.tilesetHandle = *tilesetHandle;
     resources.textureHandle = *textureHandle;
+
+    // Resolve AudioClip by id (load() return order is plan order, not request order).
+    auto audioHandle = system->find(audioClipId);
+    if (!audioHandle)
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidHandle, "audioclip not loaded");
+    }
+    resources.audioClipHandle = *audioHandle;
 
     const auto* tileMapFile = system->tryGet(resources.tileMapHandle);
     const auto* tilesetFile = system->tryGet(resources.tilesetHandle);
@@ -593,7 +611,27 @@ struct TileMapResources final {
     resources.lastDynamicY = dynamicDesc.positionMeters.y;
 #endif
 
+    // AssetLease holds AssetStore*; acquire only after the system owns its final address.
     resources.system = std::make_unique<Tina::Asset::AssetSystem>(std::move(*system));
+    auto audioLease = resources.system->acquire(resources.audioClipHandle);
+    if (!audioLease)
+    {
+        return Tina::Core::failure(std::move(audioLease.error()));
+    }
+    resources.audioClipLease = std::move(*audioLease);
+    const auto* audioFile = resources.audioClipLease.get();
+    if (audioFile == nullptr)
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady, "audioclip CPU missing after lease");
+    }
+    auto audioClip = Tina::Asset::parseAudioClipFromCooked(*audioFile);
+    if (!audioClip)
+    {
+        return Tina::Core::failure(std::move(audioClip.error()));
+    }
+    counters.audioClipFrameCount = audioClip->frameCount;
+    counters.audioClipSampleRate = audioClip->sampleRate;
+    counters.audioFromCatalogLease = true;
     return Tina::Core::success();
 }
 
@@ -878,17 +916,6 @@ class TileMapBgfxState final : public Tina::IGameState {
         if (Tina::Audio::AudioEngine* audio = context.audioEngine(); audio != nullptr)
         {
             counters_->audioEnginePresent = true;
-            if (!counters_->audioPcmInitialized)
-            {
-                // ~10 ms mono 48 kHz soft click (sample-private, not a disk asset).
-                for (u32 i = 0; i < static_cast<u32>(std::size(counters_->audioOneShotPcm)); ++i)
-                {
-                    const float t = static_cast<float>(i) / 48000.0F;
-                    counters_->audioOneShotPcm[i] =
-                        0.25F * std::sin(2.0F * 3.14159265F * 880.0F * t) * (1.0F - t * 100.0F);
-                }
-                counters_->audioPcmInitialized = true;
-            }
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
             // First frame with Audio: create null device, attach mixer, start.
             if (!resources_->audioDevice.has_value())
@@ -920,17 +947,37 @@ class TileMapBgfxState final : public Tina::IGameState {
 #endif
             if (!counters_->audioOneShotQueued)
             {
-                auto voice = audio->playOneShotPcm(Tina::Audio::AudioPcmClipView{
-                    .frames = counters_->audioOneShotPcm,
-                    .frameCount = static_cast<Tina::Core::u64>(std::size(counters_->audioOneShotPcm)),
-                    .channels = 1,
-                    .sampleRate = 48000,
-                });
+                // M11-A19: play cooked AudioClip held by AssetLease (recipe audioclip line).
+                if (!resources_->audioClipLease)
+                {
+                    return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady,
+                                               "audioclip lease missing for product SFX");
+                }
+                const auto* audioFile = resources_->audioClipLease.get();
+                if (audioFile == nullptr)
+                {
+                    return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady,
+                                               "audioclip payload missing under lease");
+                }
+                auto clip = Tina::Asset::parseAudioClipFromCooked(*audioFile);
+                if (!clip)
+                {
+                    return Tina::Core::failure(std::move(clip.error()));
+                }
+                auto pcmView = Tina::Audio::pcmClipViewFromAudioClipPayload(*clip);
+                if (!pcmView)
+                {
+                    return Tina::Core::failure(std::move(pcmView.error()));
+                }
+                auto voice = audio->playOneShotPcm(*pcmView);
                 if (!voice)
                 {
                     return Tina::Core::failure(std::move(voice.error()));
                 }
                 counters_->audioOneShotQueued = true;
+                counters_->audioFromCatalogLease = true;
+                counters_->audioClipFrameCount = clip->frameCount;
+                counters_->audioClipSampleRate = clip->sampleRate;
             }
             // Host pumps completions after updateFrame; Started is visible next frame.
             if (auto stats = audio->stats(); stats.has_value())
@@ -1547,7 +1594,8 @@ int main(int argc, char** argv)
 
     const bool audioValid =
         counters.audioEnginePresent && counters.audioOneShotQueued && counters.audioStartedObserved &&
-        counters.audioStartedCount >= 1;
+        counters.audioStartedCount >= 1 && counters.audioFromCatalogLease && counters.audioClipFrameCount > 0 &&
+        counters.audioClipSampleRate == 48000;
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
     // M11-A16: null-backend device must start, run callbacks, and advance mixRealtime.
     const bool audioDeviceValid =
@@ -1560,7 +1608,7 @@ int main(int argc, char** argv)
     bool ok = selectionStateValid && highlightValid && seededSelectionValid && cameraProjectionValid &&
               cameraFollowValid && chunkDirtyValid && audioValid && audioDeviceValid &&
               counters.catalogFromRecipeFile &&
-              counters.catalogRecipeAssets == 3 && counters.texturesUploaded == 1 &&
+              counters.catalogRecipeAssets == 4 && counters.texturesUploaded == 1 &&
               counters.lastTileSprites == ExpectedNonEmptyTiles && counters.lastTotalSprites == expectedTotalSprites &&
               counters.controllerGroundedFrames > 0 && counters.controllerWalkFrames > 0 &&
               counters.controllerHitRightFrames > 0 && counters.maxControllerX > 1.5f &&
@@ -1613,6 +1661,9 @@ int main(int argc, char** argv)
                   << ",\"audioOneShotQueued\":" << (counters.audioOneShotQueued ? "true" : "false")
                   << ",\"audioStartedObserved\":" << (counters.audioStartedObserved ? "true" : "false")
                   << ",\"audioStartedCount\":" << counters.audioStartedCount
+                  << ",\"audioFromCatalogLease\":" << (counters.audioFromCatalogLease ? "true" : "false")
+                  << ",\"audioClipFrameCount\":" << counters.audioClipFrameCount
+                  << ",\"audioClipSampleRate\":" << counters.audioClipSampleRate
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
                   << ",\"audioDeviceCreated\":" << (counters.audioDeviceCreated ? "true" : "false")
                   << ",\"audioDeviceNullBackend\":" << (counters.audioDeviceNullBackend ? "true" : "false")
@@ -1699,6 +1750,9 @@ int main(int argc, char** argv)
               << ",\"audioOneShotQueued\":" << (counters.audioOneShotQueued ? "true" : "false")
               << ",\"audioStartedObserved\":" << (counters.audioStartedObserved ? "true" : "false")
               << ",\"audioStartedCount\":" << counters.audioStartedCount
+              << ",\"audioFromCatalogLease\":" << (counters.audioFromCatalogLease ? "true" : "false")
+              << ",\"audioClipFrameCount\":" << counters.audioClipFrameCount
+              << ",\"audioClipSampleRate\":" << counters.audioClipSampleRate
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
               << ",\"audioMiniaudioEnabled\":true"
               << ",\"audioDeviceCreated\":" << (counters.audioDeviceCreated ? "true" : "false")

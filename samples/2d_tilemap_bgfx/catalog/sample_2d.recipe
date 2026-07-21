@@ -1,6 +1,7 @@
-# Tina sample_2d product catalog recipe (M10-A38).
-# AssetIds match samples/2d_tilemap_bgfx idBytes(1/2/3) with trailing seed^0xA5.
+# Tina sample_2d product catalog recipe (M10-A38 + M11-A19 AudioClip).
+# AssetIds match samples/2d_tilemap_bgfx idBytes(1/2/3/4) with trailing seed^0xA5.
 # Texture is a 2x1 atlas: left floor (orange), right wall (cyan).
+# AudioClip idBytes(4): 880 Hz sine, 480 frames @ 48 kHz mono (~10 ms product SFX).
 platform WindowsX64
 texture2d 010000000000000000000000000000a4 2 1 F08C28FF 28C8DCFF
 tileset 020000000000000000000000000000a7 010000000000000000000000000000a4 1 1
@@ -11,3 +12,4 @@ row 1 1 1 1 1 1 1 1
 row 0 0 0 0 0 0 2 0
 row 0 0 0 0 0 0 2 0
 row 0 0 0 0 0 0 2 0
+audioclip 040000000000000000000000000000a1 48000 1 480 sine 880
