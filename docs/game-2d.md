@@ -261,10 +261,13 @@ Legacy 删除前仍须补齐/加强：
 
 - 通过最终生产 Cooker/Catalog/Manifest pipeline 加载 Texture、Sprite、Tileset 和 TileMap；
   当前样例使用磁盘 fixture recipe + temp catalog，不是独立 cooker CLI 全量；
-- Orthographic Camera resize、world picking、interpolation 和 pixel snap 产品行为；
+- Orthographic Camera resize、interpolation 和 pixel snap 产品行为；
+  world picking 转换基础（M10-A40 `pickWorldFromLogicalPointer`）已落地，Action Mapping
+  last-presented latch 与样例选格仍后置；
 - 多 layer Sprite、透明混合、Tile chunk culling 与 dirty rebuild 压力门禁；
 - 中文 FreeType Label（product-2d 已有）+ HUD Button 接线（A37 已有 create/action 计数）；
-  **点击 UI 不触发世界选择**（合成 pointer non-penetration 仍后置）；
+  **点击 UI 不触发世界选择**（M10-A39：`tina_runtime_ui_tests` 合成 pointer non-penetration 门禁已闭合；
+  正式 world picking 产品路径仍后置）；
 - 角色 Tile swept AABB 与脚本化右走撞墙（A37 已有）；至少一个动态 Box2D body（已有 crate）；
 - 连续300帧正常退出与资源归零证据；
 - 画面截图、输入行为、日志/计数和进程返回码分别留证据。

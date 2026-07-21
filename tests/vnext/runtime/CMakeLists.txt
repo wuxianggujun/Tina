@@ -1,4 +1,5 @@
 add_executable(tina_runtime_ui_tests
+    LastPresentedCamera2DLatchTests.cpp
     PrimaryWindowUICapabilityTests.cpp
     PrimaryWindowUIContextOwnerTests.cpp
     PrimaryWindowUIDisplayCoordinatorTests.cpp

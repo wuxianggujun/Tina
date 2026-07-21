@@ -1093,8 +1093,9 @@ int main(int argc, char** argv)
     }
 
     // Formal product sample name is tina_sample_2d; feature flags report which product
-    // slices were compiled (Physics2D / FreeType). Full pointer non-penetration and
-    // production cooker/manifest still tracked separately in docs.
+    // slices were compiled (Physics2D / FreeType). M10-A39 pointer non-penetration is
+    // gated in tina_runtime_ui_tests (synthetic click); production cooker/manifest still
+    // tracked separately in docs.
     std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_2d\""
               << ",\"frames\":" << counters.frameUpdates << ",\"renderExtractions\":" << counters.renderExtractions
               << ",\"catalogFromRecipeFile\":" << (counters.catalogFromRecipeFile ? "true" : "false")

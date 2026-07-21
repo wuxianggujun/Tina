@@ -258,8 +258,27 @@ Core::Result<std::unique_ptr<IUITextRasterizer>> createPlaceholderTextRasterizer
     if (Core::Status status = validateUITextRasterizerCapacity(capacity); !status) {
         return Core::failure(status.error());
     }
-    return std::unique_ptr<IUITextRasterizer>(
-        new PlaceholderTextRasterizer(capacity, resource));
+    try {
+        auto* raw = new (std::nothrow) PlaceholderTextRasterizer(capacity, resource);
+        if (raw == nullptr) {
+            return Core::failure(
+                Core::CoreErrorCode::OutOfMemory,
+                "UI placeholder text rasterizer allocation failed");
+        }
+        return std::unique_ptr<IUITextRasterizer>(raw);
+    } catch (const std::bad_alloc&) {
+        return Core::failure(
+            Core::CoreErrorCode::OutOfMemory,
+            "UI placeholder text rasterizer allocation failed");
+    } catch (const std::exception&) {
+        return Core::failure(
+            Core::CoreErrorCode::Internal,
+            "UI placeholder text rasterizer construction failed");
+    } catch (...) {
+        return Core::failure(
+            Core::CoreErrorCode::Internal,
+            "UI placeholder text rasterizer construction failed");
+    }
 }
 
 } // namespace Tina::UI

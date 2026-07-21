@@ -616,7 +616,16 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   HUD Button + `setButtonAction` 接线计数；
 - M10-A38 已完成磁盘 catalog recipe 路径：`samples/2d_tilemap_bgfx/catalog/sample_2d.recipe` →
   `loadCatalogCookRecipeFile` → cook/publish → AssetSystem load；JSON `catalogFromRecipeFile=true`。
-  仍为 hermetic fixture recipe，不是完整外部 cooker CLI；pointer non-penetration 合成点击后置；
+  仍为 hermetic fixture recipe，不是完整外部 cooker CLI；
+- M10-A39 已完成产品级 pointer non-penetration 门禁：`tina_runtime_ui_tests` 合成 Primary 点击
+  HUD Button，证明 Button 激活且世界 pointer Action 不穿透；未命中路径仍映射世界 Action；
+  样例交互路径沿用同一 producer/default-action 接线，smoke 仍不合成点击；
+- M10-A40 已完成 Camera2D logical→world pick 纯函数基础：`pickWorldFromLogicalPointer` +
+  `WorldPointerSample`（`Tina::Render`，不依赖 Platform）；半开 viewport、Y-up 与 Sprite2D
+  orthographic 一致、旋转/平移、非法输入结构化失败；`tina_render_scene_tests` 8 项门禁。
+- M10-A41 已完成 Runtime-private `LastPresentedCamera2DLatch`：成功 present 后锁存 Camera2D +
+  surfaceRevision；`pickLogical` 用锁存相机转换；extraction-only 相机移动不更新锁存；
+  `tina_runtime_ui_tests` 4 项 + EngineHost present 接线。Simulation Action 载荷 / 样例选格仍后置；
 - 完整 Cooker/cgltf 继续后置；
 - 完整 `tina_assetc` 仍规划 Parse → Validate → Build → Validate Cooked → Atomic Write（当前为 fixture/recipe 子集）；
 - 固定 cgltf v1.15；最小 glTF 输出 StaticMesh/Texture2D/Material/Prefab；2D 输出 Texture2D/
@@ -640,8 +649,10 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - CharacterController2D axis-separated grid mover 已在集成支落地；
   `CharacterControllerPhysicsCoexistenceTest` 证明同一 Tile solid 可同时喂 grid controller 与
   Physics2D static sync + dynamic body contact；`tina_sample_2d`（M10-A36–A38）已在 product-2d 图接线
-  磁盘 recipe Catalog+TileMap+角色+Box2D crate+UI/Text+脚本化行走/Button；pointer non-penetration
-  合成点击与完整外部 cooker CLI 后置；只有 bench p99 超预算才接入 Box2D worker callbacks；
+  磁盘 recipe Catalog+TileMap+角色+Box2D crate+UI/Text+脚本化行走/Button；
+  M10-A39 pointer non-penetration 与 M10-A40 Camera2D pick 纯函数已门禁；
+  ActionMapper last-presented latch / 样例选格与完整外部 cooker CLI 后置；
+  只有 bench p99 超预算才接入 Box2D worker callbacks；
 - 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
 - 以当前游戏为正式 2D 产品门禁：Cooked TileMap/Tileset、Camera2D、chunk culling/dirty rebuild、

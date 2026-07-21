@@ -21,6 +21,8 @@ add_library(tina_runtime STATIC
     PlatformEventDispatcher.cpp
     input/ActionMapper.cpp
     input/ActionMapper.hpp
+    input/LastPresentedCamera2DLatch.cpp
+    input/LastPresentedCamera2DLatch.hpp
     input/SimulationActionLatch.cpp
     input/SimulationActionLatch.hpp
     input/UIInputRouteProducer.cpp

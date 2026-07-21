@@ -1116,6 +1116,110 @@ TEST_F(UIInputRouteProducerTest, PointerClaimInterceptsInitialDownWithoutTransit
     EXPECT_FALSE(suppressed->isHeld(PointerAction));
 }
 
+// Product-level M10-A39 gate: HUD Button default action (same surface as
+// tina_sample_2d) must consume primary-pointer click so a world/gameplay Action
+// bound to Primary does not fire; a miss must still map the world Action.
+TEST_F(UIInputRouteProducerTest, ProductButtonClickDoesNotPenetrateWorldPointerAction)
+{
+    auto producer = createProducer();
+    auto mapper = createPointerMapper();
+    RouteTree tree = createRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(mapper, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+
+    usize activationCount = 0;
+    UI::UIButtonActivationSource lastSource = UI::UIButtonActivationSource::PrimaryPointer;
+    u64 lastSourceSequence = 0;
+    expectOk(tree.updater.setButtonAction(
+        tree.target,
+        UI::UIButtonActionCallback{
+            [&activationCount, &lastSource, &lastSourceSequence](
+                const UI::UIButtonActionEvent& event) noexcept {
+                ++activationCount;
+                lastSource = event.source;
+                lastSourceSequence = event.sourceSequence;
+            }}));
+
+    // --- Hit path: Down + Up inside Button activates UI and never presses world Action ---
+    auto hitDown =
+        buildFrame(*builder, window,
+                   {
+                       .frameId = {60},
+                       .transitions =
+                           {pointerButton(window, Platform::DigitalTransition::Down, 10.0, 10.0)},
+                       .heldPointerButtons = {Platform::PointerButton::Primary},
+                       .pointerX = 10.0,
+                       .pointerY = 10.0,
+                   });
+    ASSERT_TRUE(hitDown.has_value()) << (hitDown ? "" : hitDown.error().message);
+    auto hitDownOutput = producer->produce(tree.context.get(), *hitDown);
+    ASSERT_TRUE(hitDownOutput.has_value()) << (hitDownOutput ? "" : hitDownOutput.error().message);
+    EXPECT_TRUE(hitDownOutput->consumption.isConsumed(0));
+    auto pressed = tree.updater.isButtonPressed(tree.target);
+    ASSERT_TRUE(pressed.has_value()) << (pressed ? "" : pressed.error().message);
+    EXPECT_TRUE(*pressed);
+    ASSERT_TRUE(
+        mapper->mapFrame(*hitDown, hitDownOutput->consumption, hitDownOutput->claims, 0, 0).has_value());
+    auto suppressedDown = mapper->simulationActionsForTick(0);
+    ASSERT_TRUE(suppressedDown.has_value()) << (suppressedDown ? "" : suppressedDown.error().message);
+    EXPECT_TRUE(suppressedDown->transitions.empty());
+    EXPECT_FALSE(suppressedDown->isHeld(PointerAction));
+    ASSERT_TRUE(mapper->completeSimulationTick(0).has_value());
+
+    auto hitUp =
+        buildFrame(*builder, window,
+                   {
+                       .frameId = {61},
+                       .transitions =
+                           {pointerButton(window, Platform::DigitalTransition::Up, 10.0, 10.0)},
+                       .pointerX = 10.0,
+                       .pointerY = 10.0,
+                   });
+    ASSERT_TRUE(hitUp.has_value()) << (hitUp ? "" : hitUp.error().message);
+    auto hitUpOutput = producer->produce(tree.context.get(), *hitUp);
+    ASSERT_TRUE(hitUpOutput.has_value()) << (hitUpOutput ? "" : hitUpOutput.error().message);
+    ASSERT_TRUE(mapper->mapFrame(*hitUp, hitUpOutput->consumption, hitUpOutput->claims, 1, 1).has_value());
+    auto afterUp = mapper->simulationActionsForTick(1);
+    ASSERT_TRUE(afterUp.has_value()) << (afterUp ? "" : afterUp.error().message);
+    EXPECT_TRUE(afterUp->transitions.empty());
+    EXPECT_FALSE(afterUp->isHeld(PointerAction));
+    ASSERT_TRUE(mapper->completeSimulationTick(1).has_value());
+
+    EXPECT_EQ(activationCount, 1U);
+    EXPECT_EQ(lastSource, UI::UIButtonActivationSource::PrimaryPointer);
+    EXPECT_EQ(lastSourceSequence, hitUp->inputTransitions()[0].sequence);
+    auto released = tree.updater.isButtonPressed(tree.target);
+    ASSERT_TRUE(released.has_value()) << (released ? "" : released.error().message);
+    EXPECT_FALSE(*released);
+
+    // --- Miss path: Down outside Button must map world Pointer Action once ---
+    auto missDown =
+        buildFrame(*builder, window,
+                   {
+                       .frameId = {62},
+                       .transitions =
+                           {pointerButton(window, Platform::DigitalTransition::Down, 90.0, 90.0)},
+                       .heldPointerButtons = {Platform::PointerButton::Primary},
+                       .pointerX = 90.0,
+                       .pointerY = 90.0,
+                   });
+    ASSERT_TRUE(missDown.has_value()) << (missDown ? "" : missDown.error().message);
+    auto missDownOutput = producer->produce(tree.context.get(), *missDown);
+    ASSERT_TRUE(missDownOutput.has_value()) << (missDownOutput ? "" : missDownOutput.error().message);
+    EXPECT_FALSE(missDownOutput->consumption.isConsumed(0));
+    ASSERT_TRUE(
+        mapper->mapFrame(*missDown, missDownOutput->consumption, missDownOutput->claims, 2, 2)
+            .has_value());
+    auto worldPressed = mapper->simulationActionsForTick(2);
+    ASSERT_TRUE(worldPressed.has_value()) << (worldPressed ? "" : worldPressed.error().message);
+    ASSERT_EQ(worldPressed->transitions.size(), 1U);
+    ASSERT_NE(digital(worldPressed->transitions[0]), nullptr);
+    EXPECT_EQ(digital(worldPressed->transitions[0])->kind, DigitalActionTransitionKind::Pressed);
+    EXPECT_TRUE(worldPressed->isHeld(PointerAction));
+    EXPECT_EQ(activationCount, 1U);
+}
+
 TEST_F(UIInputRouteProducerTest, CancelAndCoveringResetClearButtonStateWithoutActivation)
 {
     auto producer = createProducer();

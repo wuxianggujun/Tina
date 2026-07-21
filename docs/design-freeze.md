@@ -515,7 +515,17 @@ M10-A37：`tina_sample_2d` 增加 MoveLeft/MoveRight Frame 键位绑定、落地
 M10-A38：产品样例改为 `loadCatalogCookRecipeFile(sample_2d.recipe)` 磁盘 recipe → cook/publish →
 AssetSystem load；不再在进程内手写 Texture/Tileset/TileMap payload。JSON 要求
 `catalogFromRecipeFile=true` 且 `catalogRecipeAssets=3`。仍是 hermetic fixture recipe，
-完整外部 cooker CLI 与 pointer non-penetration 合成点击后置。
+  完整外部 cooker CLI 后置；M10-A39 已在 `tina_runtime_ui_tests` 闭合合成 pointer non-penetration
+  （Button 消费 Primary 点击、世界 pointer Action 不穿透）。
+
+M10-A40：`Tina::Render` 增加 `Camera2DPick.hpp`/`pickWorldFromLogicalPointer`：将 primary-window
+logical 坐标按 `RenderCamera2D` + 逻辑窗口 extent 转为 `WorldPointerSample`（含
+camera/surface/inputSequence 锁存字段）。viewport 半开、Y-up 与 Sprite2D backend orthographic
+一致；viewport 外 `hit=false`；非法相机/extent/坐标结构化失败。
+
+M10-A41：Runtime-private `LastPresentedCamera2DLatch` 在 `EngineHost` 成功 present 后锁存
+`primaryWorldScene` 的 Camera2D 与 `surfaceRevision`；无相机 present 清空锁存。`pickLogical`
+复用 A40 纯函数。尚未把 sample 写入 Simulation Action / Game SDK 暴露 / 样例选格。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

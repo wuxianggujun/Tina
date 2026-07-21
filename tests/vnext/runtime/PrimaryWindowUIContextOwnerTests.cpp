@@ -3,6 +3,7 @@
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
+#include <tina/ui/UIContext.hpp>
 
 #include "../../../src/runtime/ui/PrimaryWindowUIContextOwner.hpp"
 #include "../../../src/runtime/ui/PrimaryWindowUILayoutCoordinator.hpp"
@@ -73,7 +74,7 @@ struct WindowFrameSpec final {
     return builder.finishFrame();
 }
 
-class FailFirstAllocationMemoryResource final : public std::pmr::memory_resource {
+class CountingMemoryResource final : public std::pmr::memory_resource {
   public:
     [[nodiscard]] usize currentBytes() const noexcept
     {
@@ -83,11 +84,6 @@ class FailFirstAllocationMemoryResource final : public std::pmr::memory_resource
   private:
     void* do_allocate(usize bytes, usize alignment) override
     {
-        if (failNextAllocation_)
-        {
-            failNextAllocation_ = false;
-            throw std::bad_alloc{};
-        }
         void* allocation = upstream_->allocate(bytes, alignment);
         currentBytes_ += bytes;
         return allocation;
@@ -106,7 +102,6 @@ class FailFirstAllocationMemoryResource final : public std::pmr::memory_resource
 
     std::pmr::memory_resource* upstream_ = std::pmr::new_delete_resource();
     usize currentBytes_ = 0;
-    bool failNextAllocation_ = true;
 };
 
 class PrimaryWindowUIContextOwnerTest : public testing::Test {
@@ -355,25 +350,48 @@ TEST_F(PrimaryWindowUIContextOwnerTest, SelectRejectsCallsFromAnotherThread)
 
 TEST_F(PrimaryWindowUIContextOwnerTest, AllocationFailureDoesNotPublishABindingAndCanRetry)
 {
-    FailFirstAllocationMemoryResource resource;
-    PrimaryWindowUIContextOwner owner(
-        UI::UIContextCapacityConfig{
-            .nodeCapacity = 8,
-            .rootCapacity = 1,
-            .routePathCapacity = 8,
-            .routedPointerListenerCapacity = 8,
-        },
-        resource);
+    // Inject OOM as a structured Result rather than throwing from a PMR resource:
+    // MSVC Debug CRT can abort/WER on bad_alloc thrown mid-construction of UI
+    // storage, which is not the owner contract under test. The owner must leave
+    // AwaitingStartup on factory failure and allow a successful retry.
+    CountingMemoryResource resource;
+    bool failNextCreate = true;
+    usize factoryCalls = 0;
+    const UI::UIContextCapacityConfig capacities{
+        .nodeCapacity = 8,
+        .rootCapacity = 1,
+        .routePathCapacity = 8,
+        .routedPointerListenerCapacity = 8,
+    };
+    PrimaryWindowUIContextFactory factory =
+        [&](Platform::WindowId ownerWindow, const UI::UIContextCapacityConfig& requested,
+            std::pmr::memory_resource& memoryResource) -> Core::Result<std::unique_ptr<UI::UIContext>> {
+        ++factoryCalls;
+        EXPECT_EQ(ownerWindow, window);
+        EXPECT_EQ(requested.nodeCapacity, capacities.nodeCapacity);
+        EXPECT_EQ(&memoryResource, static_cast<std::pmr::memory_resource*>(&resource));
+        if (failNextCreate)
+        {
+            failNextCreate = false;
+            return Core::failure(Core::CoreErrorCode::OutOfMemory, "injected UIContext allocation failure");
+        }
+        return UI::UIContext::Create(ownerWindow, requested, memoryResource);
+    };
+
+    PrimaryWindowUIContextOwner owner(capacities, resource, std::move(factory));
 
     const Platform::WindowMetricsSnapshot metrics = windowMetrics(WindowFrameSpec{.window = window});
     auto failedBinding = owner.bindForStartup(metrics);
     ASSERT_FALSE(failedBinding.has_value());
     EXPECT_EQ(failedBinding.error().code, Core::CoreErrorCode::OutOfMemory);
+    EXPECT_EQ(factoryCalls, 1U);
+    EXPECT_EQ(resource.currentBytes(), 0U);
 
     auto retryBinding = owner.bindForStartup(metrics);
     ASSERT_TRUE(retryBinding.has_value()) << (retryBinding ? "" : retryBinding.error().message);
     ASSERT_NE(*retryBinding, nullptr);
     EXPECT_EQ((*retryBinding)->ownerWindow(), window);
+    EXPECT_EQ(factoryCalls, 2U);
     EXPECT_GT(resource.currentBytes(), 0U);
 
     owner.shutdown();

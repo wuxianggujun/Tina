@@ -12,6 +12,7 @@
 #include <tina/core/base/ScopeExit.hpp>
 
 #include "input/ActionMapper.hpp"
+#include "input/LastPresentedCamera2DLatch.hpp"
 #include "input/UIInputRouteProducer.hpp"
 #include "ui/PrimaryWindowUICapabilityState.hpp"
 #include "ui/PrimaryWindowUIContextOwner.hpp"
@@ -944,6 +945,11 @@ class EngineHostImplementation final {
                     return failAfterStartupCommit(gameApplication, std::move(presentResult.error()), frameIndex,
                                                   simulationTick);
                 }
+                // Latch the presented Camera2D for next-frame world pointer picks.
+                // Extraction-only camera moves do not update the latch until present.
+                const u64 surfaceRevision =
+                    primaryWindowSurface.has_value() ? primaryWindowSurface->surfaceRevision : 0;
+                m_lastPresentedCamera2D.notePresented(*renderSceneResult, surfaceRevision);
             }
 
             if (frameIndex == (std::numeric_limits<u64>::max)())
@@ -1030,6 +1036,7 @@ class EngineHostImplementation final {
     Runtime::Detail::PrimaryWindowUICapabilityState m_primaryWindowUICapability;
     Runtime::Detail::PrimaryWindowUILayoutCoordinator m_primaryWindowUILayout;
     Runtime::Detail::PrimaryWindowUIDisplayCoordinator m_primaryWindowUIDisplay;
+    Runtime::Input::LastPresentedCamera2DLatch m_lastPresentedCamera2D{};
     Render::RenderSceneBuilder m_renderSceneBuilder;
     std::thread::id m_ownerThread;
     std::unique_ptr<IGameState> m_gameState;

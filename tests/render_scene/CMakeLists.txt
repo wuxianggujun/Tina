@@ -1,4 +1,5 @@
 add_executable(tina_render_scene_tests
+    Camera2DPickTests.cpp
     RenderSceneTests.cpp
 )
 

@@ -77,7 +77,8 @@ vNext M10-A1 已实现 `Tina::Asset`/`tina_asset`：在已解析的 `CookedManif
   M10-A36 已将产品 executable 正式命名为 `tina_sample_2d`（product-2d 组合门禁）；
   M10-A37 已加脚本化行走、键位绑定与 HUD Button 接线门禁；
   M10-A38 已改磁盘 `sample_2d.recipe` cook 路径（hermetic fixture，非完整 cooker CLI）；
-  pointer non-penetration 合成点击、完整外部 cooker CLI、cgltf 仍后置。
+  完整外部 cooker CLI、cgltf 仍后置；M10-A39 合成 pointer non-penetration 已由
+  `tina_runtime_ui_tests` 门禁（非 cooker/sample 点击合成）。
 
 
 ## 下一阶段契约

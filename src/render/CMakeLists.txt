@@ -1,4 +1,5 @@
 add_library(tina_render STATIC
+    ${PROJECT_SOURCE_DIR}/include/tina/render/Camera2DPick.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderDevice.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderFrame.hpp
@@ -7,6 +8,7 @@ add_library(tina_render STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/render/UIDisplayList.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/UploadTicket.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/null/NullRenderDeviceFactory.hpp
+    Camera2DPick.cpp
     RenderSurfaceStateTracker.cpp
     RenderSurfaceStateTracker.hpp
     RenderScene.cpp

@@ -5563,11 +5563,21 @@ Core::Result<std::unique_ptr<UIContext>> UIContext::Create(
         return Core::failure(status.error());
     }
 
-    auto rasterizer = createPlaceholderTextRasterizer({}, resource);
-    if (!rasterizer) {
-        return Core::failure(rasterizer.error());
+    // Placeholder rasterizer construction allocates against the caller's PMR and
+    // must surface OOM as Result, not an uncaught bad_alloc (M10-A39 gate).
+    try {
+        auto rasterizer = createPlaceholderTextRasterizer({}, resource);
+        if (!rasterizer) {
+            return Core::failure(rasterizer.error());
+        }
+        return Create(ownerWindow, capacityConfig, std::move(*rasterizer), resource);
+    } catch (const std::bad_alloc&) {
+        return fail(Core::CoreErrorCode::OutOfMemory, "UI context allocation failed");
+    } catch (const std::exception& exception) {
+        return fail(Core::CoreErrorCode::Internal, std::string_view(exception.what()));
+    } catch (...) {
+        return fail(Core::CoreErrorCode::Internal, "UI context allocation failed");
     }
-    return Create(ownerWindow, capacityConfig, std::move(*rasterizer), resource);
 }
 
 Core::Result<std::unique_ptr<UIContext>> UIContext::Create(
