@@ -642,7 +642,11 @@ M11-C3：`PrimaryWindowUITreeUpdater` 暴露 `createCheckbox`/`setChecked`/`isCh
 M11-C4：`UISemantics.hpp` 定义 Role/Entry/`UICommittedSemanticsView`；`UIContext::committedSemantics`
 在 `commitLayout` 中发布交互 kind（Label/Button/Checkbox/Slider）快照；Root/Panel 默认省略；
 Checkbox 带 checked，Slider 带 min/max/value；paint dirty 同步 semantics dirty。平台 UIA/AT-SPI
-adapter 与截图回归后置。
+adapter 后置。
+
+M11-D0：`tina_sample_2d` 成功路径输出 `evidenceSchema=1` + `evidenceFingerprint`（Core XXH3-128 v1）。
+摘要只含结构门禁（catalog 资产数、UI 控件数、surface、相机 world extent、feature flags 等），
+不含帧数/角色瞬时坐标/混音回调计数，便于跨 `--frames` 对比。GPU 像素截图回归后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

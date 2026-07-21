@@ -105,6 +105,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-C2 Music/SFX volume sliders | Debug C++23 | product-2d sample | `uiSlidersCreated=3`；JSON lastMaster/Music/SfxVolume |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-C3 Master mute Checkbox HUD | Debug C++23 | product-2d sample | `uiCheckboxesCreated=1`；JSON lastMasterMuted |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-C4 UI Semantics snapshot | Debug C++23 | `tina_ui_tests` UISemantics* | interactive kinds 发布；Panel 省略；Checkbox/Slider 状态；revision 前进 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-D0 product evidence fingerprint | Debug C++23 | product-2d sample | JSON `evidenceFingerprint` 非空；90/300 帧结构摘要可对比（非像素截图） |
 
 
 

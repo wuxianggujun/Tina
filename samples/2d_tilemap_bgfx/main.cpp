@@ -16,6 +16,8 @@
 #include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/error/Error.hpp>
+#include <tina/core/hash/ContentHash.hpp>
+#include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/glfw/GlfwPlatformFactory.hpp>
@@ -86,6 +88,47 @@ inline constexpr Tina::InputActionId MoveLeftAction{1};
 inline constexpr Tina::InputActionId MoveRightAction{2};
 inline constexpr Tina::InputActionId SelectTileAction{3};
 inline constexpr float DemoWalkSpeedMetersPerSecond = 4.0f;
+
+// M11-D0: frame-count-independent product evidence fingerprint (screenshot precursor).
+// Only stable structural counters/flags are hashed — not per-frame animation values.
+[[nodiscard]] std::string contentHashToHex(const Tina::Core::ContentHash& hash)
+{
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string out;
+    out.resize(32);
+    const auto& bytes = hash.bytes();
+    for (std::size_t i = 0; i < bytes.size(); ++i)
+    {
+        const auto value = static_cast<unsigned>(std::to_integer<unsigned char>(bytes[i]));
+        out[i * 2] = kHex[(value >> 4U) & 0x0FU];
+        out[i * 2 + 1] = kHex[value & 0x0FU];
+    }
+    return out;
+}
+
+void appendLeU32(std::vector<std::byte>& out, u32 value)
+{
+    for (int i = 0; i < 4; ++i)
+    {
+        out.push_back(static_cast<std::byte>((value >> (i * 8)) & 0xFFU));
+    }
+}
+
+void appendLeU64(std::vector<std::byte>& out, u64 value)
+{
+    for (int i = 0; i < 8; ++i)
+    {
+        out.push_back(static_cast<std::byte>((value >> (i * 8)) & 0xFFU));
+    }
+}
+
+void appendF32Bits(std::vector<std::byte>& out, float value)
+{
+    static_assert(sizeof(float) == 4);
+    u32 bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    appendLeU32(out, bits);
+}
 
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
@@ -1803,6 +1846,52 @@ int main(int argc, char** argv)
          counters.physicsSteps == counters.frameUpdates && counters.physicsDynamicContacts > 0 &&
          counters.lastDynamicY < 3.5f && counters.lastDynamicY > 0.5f;
 #endif
+
+    // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
+    std::vector<std::byte> evidenceBytes;
+    evidenceBytes.reserve(128);
+    appendLeU32(evidenceBytes, 1U); // schema
+    appendLeU32(evidenceBytes, counters.catalogFromRecipeFile ? 1U : 0U);
+    appendLeU64(evidenceBytes, counters.catalogRecipeAssets);
+    appendLeU64(evidenceBytes, counters.texturesUploaded);
+    appendLeU64(evidenceBytes, ExpectedNonEmptyTiles);
+    appendLeU64(evidenceBytes, expectedTotalSprites);
+    appendLeU64(evidenceBytes, ExpectedUIPanelCount);
+    appendLeU64(evidenceBytes, ExpectedUITextLabelCount);
+    appendLeU64(evidenceBytes, ExpectedUIButtonCount);
+    appendLeU64(evidenceBytes, counters.uiSlidersCreated);
+    appendLeU64(evidenceBytes, counters.uiCheckboxesCreated);
+    appendLeU64(evidenceBytes, counters.audioClipFrameCount);
+    appendLeU32(evidenceBytes, counters.audioClipSampleRate);
+    appendLeU32(evidenceBytes, counters.audioEnginePresent ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.audioFromCatalogLease ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.surfacePixelWidth);
+    appendLeU32(evidenceBytes, counters.surfacePixelHeight);
+    appendF32Bits(evidenceBytes, counters.lastCameraWorldWidth);
+    appendF32Bits(evidenceBytes, counters.lastCameraWorldHeight);
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+    appendLeU64(evidenceBytes, counters.physicsStaticBodies);
+    appendLeU32(evidenceBytes, 1U);
+#else
+    appendLeU64(evidenceBytes, 0U);
+    appendLeU32(evidenceBytes, 0U);
+#endif
+#if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
+    appendLeU32(evidenceBytes, 1U);
+#else
+    appendLeU32(evidenceBytes, 0U);
+#endif
+#if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
+    appendLeU32(evidenceBytes, 1U);
+#else
+    appendLeU32(evidenceBytes, 0U);
+#endif
+    auto evidenceHash = Tina::Core::digestContentHashV1(evidenceBytes);
+    const bool evidenceValid = evidenceHash.has_value() && evidenceHash->hasValue();
+    ok = ok && evidenceValid;
+    const std::string evidenceFingerprint =
+        evidenceValid ? contentHashToHex(*evidenceHash) : std::string{};
+
     if (!ok)
     {
         std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d\","
@@ -1983,7 +2072,10 @@ int main(int argc, char** argv)
               << ",\"productGate\":\"bgfx\""
 #endif
               << ",\"stateExits\":" << counters.stateExits
-              << ",\"applicationShutdowns\":" << counters.applicationShutdowns << ",\"exit\":\""
+              << ",\"applicationShutdowns\":" << counters.applicationShutdowns
+              << ",\"evidenceSchema\":1"
+              << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
+              << ",\"exit\":\""
               << "GameRequestedExitAfterCurrentFrame\"}\n";
     return 0;
 }
