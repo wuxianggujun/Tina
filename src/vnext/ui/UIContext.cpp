@@ -655,6 +655,15 @@ struct UIContext::Impl final {
     std::pmr::vector<u64> buttonActionClearRouteSerialByNodeIndex;
     // M11-C0: Checkbox checked bit (index-aligned with nodes; false for non-Checkbox).
     std::pmr::vector<u8> checkboxCheckedByNodeIndex;
+    // M11-C1: Slider range/value/callback (index-aligned; default 0..1).
+    struct SliderState final {
+        float minValue = 0.0F;
+        float maxValue = 1.0F;
+        float step = 0.0F;
+        float value = 0.0F;
+        UISliderChangeCallback changeCallback{};
+    };
+    std::pmr::vector<SliderState> sliderStatesByNodeIndex;
     std::pmr::vector<ButtonActionRecord> buttonActions;
     std::pmr::vector<u32> inactiveButtonActionIndices;
     std::array<std::pmr::vector<UICommittedNodeEntry>, 2> committedBuffers;
@@ -715,6 +724,8 @@ struct UIContext::Impl final {
     bool reclaimingInactiveButtonActions = false;
     UINodeId armedPrimaryButton{};
     bool armedPrimaryButtonPressed = false;
+    // M11-C1: exclusive Primary drag capture for Slider (clears Button arm).
+    UINodeId armedSlider{};
     // Last Button that received Primary Pointer arm. Keyboard/Gamepad Accept
     // activates this node without requiring a live pointer press.
     UINodeId defaultActionFocusButton{};
@@ -762,6 +773,7 @@ struct UIContext::Impl final {
           inactiveRoutedPointerListenerIndices(&resource),
           buttonActionIndexByNodeIndex(&resource),
           checkboxCheckedByNodeIndex(&resource),
+          sliderStatesByNodeIndex(&resource),
           buttonActionClearRouteSerialByNodeIndex(&resource),
           buttonActions(&resource),
           inactiveButtonActionIndices(&resource),
@@ -868,6 +880,7 @@ struct UIContext::Impl final {
             normalized.nodeCapacity,
             0);
         impl->checkboxCheckedByNodeIndex.resize(normalized.nodeCapacity, 0);
+        impl->sliderStatesByNodeIndex.resize(normalized.nodeCapacity);
         const usize buttonActionStorageCapacity = normalized.buttonActionCapacity + 1;
         impl->buttonActions.resize(buttonActionStorageCapacity);
         for (usize actionIndex = 0;
@@ -2616,6 +2629,11 @@ struct UIContext::Impl final {
         armedPrimaryButtonPressed = false;
     }
 
+    void clearArmedSlider() noexcept
+    {
+        armedSlider = {};
+    }
+
     void clearDefaultActionFocus() noexcept
     {
         defaultActionFocusButton = {};
@@ -2745,6 +2763,9 @@ struct UIContext::Impl final {
         const UINodeId node = idForIndex(nodeIndex);
         if (armedPrimaryButton == node) {
             clearArmedPrimaryButton();
+        }
+        if (armedSlider == node) {
+            clearArmedSlider();
         }
         if (defaultActionFocusButton == node) {
             clearDefaultActionFocus();
@@ -2938,6 +2959,9 @@ struct UIContext::Impl final {
         buttonActionClearRouteSerialByNodeIndex[index] = 0;
         if (index < checkboxCheckedByNodeIndex.size()) {
             checkboxCheckedByNodeIndex[index] = 0;
+        }
+        if (index < sliderStatesByNodeIndex.size()) {
+            sliderStatesByNodeIndex[index] = {};
         }
     }
 
@@ -3143,11 +3167,11 @@ struct UIContext::Impl final {
         NodeRecord* record = nodes.tryGet(node.storageId());
         record->kind = kind;
         record->rootIndex = node.index();
-        // Button/Checkbox and Label are Targetable: Label is the IME/text target
-        // surface (M7-E6). Root/Panel remain Ignore.
+        // Button/Checkbox/Slider and Label are Targetable: Label is the IME/text
+        // target surface (M7-E6). Root/Panel remain Ignore.
         pointerHitPoliciesByIndex[node.index()] =
             (kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox
-             || kind == UIWidgetKind::Label)
+             || kind == UIWidgetKind::Slider || kind == UIWidgetKind::Label)
             ? UIPointerHitPolicy::Targetable
             : UIPointerHitPolicy::Ignore;
         return node;
@@ -4015,6 +4039,271 @@ struct UIContext::Impl final {
         return isButtonPressedFromUpdater(updaterRoot, checkbox);
     }
 
+    [[nodiscard]] Core::Result<NodeRecord*> resolveSlider(UINodeId slider)
+    {
+        auto nodeResult = resolveNode(slider);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != UIWidgetKind::Slider) {
+            return fail(
+                UIErrorCode::InvalidButtonAction,
+                "UI Slider API requires a Slider node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] static float quantizeSliderValue(float value, float minValue, float maxValue, float step) noexcept
+    {
+        float clamped = value;
+        if (clamped < minValue) {
+            clamped = minValue;
+        }
+        if (clamped > maxValue) {
+            clamped = maxValue;
+        }
+        if (!(step > 0.0F) || !std::isfinite(step)) {
+            return clamped;
+        }
+        const float span = maxValue - minValue;
+        if (!(span > 0.0F)) {
+            return minValue;
+        }
+        const float steps = std::round((clamped - minValue) / step);
+        float quantized = minValue + steps * step;
+        if (quantized < minValue) {
+            quantized = minValue;
+        }
+        if (quantized > maxValue) {
+            quantized = maxValue;
+        }
+        return quantized;
+    }
+
+    // Map pointer X into [min,max] using last committed hit worldRect for the slider.
+    [[nodiscard]] bool applySliderValueFromPointer(
+        UINodeId slider,
+        UILogicalPoint position,
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence) noexcept
+    {
+        if (!slider.hasValue() || slider.index() >= sliderStatesByNodeIndex.size()) {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(slider.storageId());
+        if (record == nullptr || record->kind != UIWidgetKind::Slider) {
+            return false;
+        }
+        SliderState& state = sliderStatesByNodeIndex[slider.index()];
+        if (!(state.maxValue > state.minValue) || !std::isfinite(state.minValue)
+            || !std::isfinite(state.maxValue)) {
+            return false;
+        }
+
+        UILogicalRect worldRect{};
+        bool foundRect = false;
+        const UICommittedHitView hit = committedHit();
+        for (const UICommittedHitEntry& entry : hit.entries()) {
+            if (entry.node == slider) {
+                worldRect = entry.worldRect;
+                foundRect = true;
+                break;
+            }
+        }
+        if (!foundRect || !(worldRect.width > 0.0F)) {
+            return false;
+        }
+
+        float t = (position.x - worldRect.x) / worldRect.width;
+        if (t < 0.0F) {
+            t = 0.0F;
+        }
+        if (t > 1.0F) {
+            t = 1.0F;
+        }
+        const float raw = state.minValue + t * (state.maxValue - state.minValue);
+        const float next = quantizeSliderValue(raw, state.minValue, state.maxValue, state.step);
+        if (next == state.value) {
+            return false;
+        }
+        state.value = next;
+        static_cast<void>(markPaintDirty(slider));
+        if (state.changeCallback.hasValue()) {
+            state.changeCallback(UISliderChangeEvent{
+                .sliderNode = slider,
+                .value = state.value,
+                .platformFrame = platformFrame,
+                .sourceSequence = sourceSequence,
+            });
+        }
+        return true;
+    }
+
+    [[nodiscard]] Core::Status setSliderRangeFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider,
+        float minValue,
+        float maxValue,
+        float step)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto sliderResult = resolveSlider(slider);
+        if (!sliderResult) {
+            return Core::failure(sliderResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, slider)) {
+            return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
+        }
+        if (!std::isfinite(minValue) || !std::isfinite(maxValue) || !(maxValue > minValue)
+            || (step < 0.0F) || !std::isfinite(step)) {
+            return fail(UIErrorCode::InvalidButtonAction, "UI Slider range/step is invalid");
+        }
+        SliderState& state = sliderStatesByNodeIndex[slider.index()];
+        state.minValue = minValue;
+        state.maxValue = maxValue;
+        state.step = step;
+        const float previous = state.value;
+        state.value = quantizeSliderValue(state.value, minValue, maxValue, step);
+        if (state.value != previous) {
+            static_cast<void>(markPaintDirty(slider));
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setSliderValueFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider,
+        float value)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto sliderResult = resolveSlider(slider);
+        if (!sliderResult) {
+            return Core::failure(sliderResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, slider)) {
+            return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
+        }
+        if (!std::isfinite(value)) {
+            return fail(UIErrorCode::InvalidButtonAction, "UI Slider value must be finite");
+        }
+        SliderState& state = sliderStatesByNodeIndex[slider.index()];
+        const float next = quantizeSliderValue(value, state.minValue, state.maxValue, state.step);
+        if (next == state.value) {
+            return Core::success();
+        }
+        state.value = next;
+        static_cast<void>(markPaintDirty(slider));
+        if (state.changeCallback.hasValue()) {
+            state.changeCallback(UISliderChangeEvent{
+                .sliderNode = slider,
+                .value = state.value,
+                .platformFrame = {},
+                .sourceSequence = 0,
+            });
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<float> sliderValueFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto sliderResult = const_cast<Impl*>(this)->resolveSlider(slider);
+        if (!sliderResult) {
+            return Core::failure(sliderResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, slider)) {
+            return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
+        }
+        return sliderStatesByNodeIndex[slider.index()].value;
+    }
+
+    [[nodiscard]] Core::Status setSliderChangeCallbackFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider,
+        UISliderChangeCallback&& callback)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto sliderResult = resolveSlider(slider);
+        if (!sliderResult) {
+            return Core::failure(sliderResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, slider)) {
+            return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
+        }
+        if (!callback.hasValue()) {
+            return fail(UIErrorCode::InvalidButtonAction, "UI Slider change callback is empty");
+        }
+        sliderStatesByNodeIndex[slider.index()].changeCallback = std::move(callback);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearSliderChangeCallbackFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto sliderResult = resolveSlider(slider);
+        if (!sliderResult) {
+            return Core::failure(sliderResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, slider)) {
+            return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
+        }
+        sliderStatesByNodeIndex[slider.index()].changeCallback.reset();
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<bool> isSliderDraggingFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto sliderResult = const_cast<Impl*>(this)->resolveSlider(slider);
+        if (!sliderResult) {
+            return Core::failure(sliderResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, slider)) {
+            return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
+        }
+        return armedSlider == slider;
+    }
+
     void appendCommittedTree(
         u32 index,
         u32& ordinal,
@@ -4691,7 +4980,9 @@ struct UIContext::Impl final {
         }
 
         UINodeId nearestButton{};
+        UINodeId nearestSlider{};
         bool pointWithinArmedButton = false;
+        bool pointWithinArmedSlider = false;
         for (const u32 routeEntryIndex : routePathScratch) {
             if (routeEntryIndex >= entries.size()) {
                 routePathScratch.clear();
@@ -4703,6 +4994,9 @@ struct UIContext::Impl final {
             if (routeNode == armedPrimaryButton) {
                 pointWithinArmedButton = true;
             }
+            if (routeNode == armedSlider) {
+                pointWithinArmedSlider = true;
+            }
             if (!nearestButton.hasValue() && contains(routeNode)) {
                 const NodeRecord* routeRecord =
                     nodes.tryGet(routeNode.storageId());
@@ -4711,10 +5005,20 @@ struct UIContext::Impl final {
                     nearestButton = routeNode;
                 }
             }
+            if (!nearestSlider.hasValue() && contains(routeNode)) {
+                const NodeRecord* routeRecord =
+                    nodes.tryGet(routeNode.storageId());
+                if (routeRecord != nullptr
+                    && routeRecord->kind == UIWidgetKind::Slider) {
+                    nearestSlider = routeNode;
+                }
+            }
         }
 
         const UINodeId armedButtonAtRouteStart = armedPrimaryButton;
+        const UINodeId armedSliderAtRouteStart = armedSlider;
         const bool hadArmedInteraction = armedButtonAtRouteStart.hasValue();
+        const bool hadArmedSlider = armedSliderAtRouteStart.hasValue();
         const bool primaryButtonDown =
             input.kind == UIRoutedPointerEventKind::ButtonDown
             && input.button == Platform::PointerButton::Primary;
@@ -4815,7 +5119,21 @@ struct UIContext::Impl final {
 
         if (primaryButtonDown) {
             clearArmedPrimaryButton();
+            clearArmedSlider();
+            // Slider drag takes priority over Button/Checkbox when both are under hit.
             if (!routedEvent.isDefaultActionPrevented()
+                && nearestSlider.hasValue()
+                && contains(nearestSlider)) {
+                armedSlider = nearestSlider;
+                routedEvent.consumeInputTransition();
+                static_cast<void>(routedEvent.claimPointerButton(
+                    Platform::PointerButton::Primary));
+                static_cast<void>(applySliderValueFromPointer(
+                    nearestSlider,
+                    input.position,
+                    input.platformFrame,
+                    input.sourceSequence));
+            } else if (!routedEvent.isDefaultActionPrevented()
                 && nearestButton.hasValue()
                 && contains(nearestButton)) {
                 const NodeRecord* buttonRecord =
@@ -4849,6 +5167,20 @@ struct UIContext::Impl final {
                 }
             }
         } else if (input.kind == UIRoutedPointerEventKind::Move
+                   && hadArmedSlider
+                   && armedSlider == armedSliderAtRouteStart) {
+            if (!contains(armedSliderAtRouteStart)) {
+                clearArmedSlider();
+            } else {
+                static_cast<void>(routedEvent.claimPointerButton(
+                    Platform::PointerButton::Primary));
+                static_cast<void>(applySliderValueFromPointer(
+                    armedSliderAtRouteStart,
+                    input.position,
+                    input.platformFrame,
+                    input.sourceSequence));
+            }
+        } else if (input.kind == UIRoutedPointerEventKind::Move
                    && hadArmedInteraction
                    && armedPrimaryButton == armedButtonAtRouteStart) {
             if (!contains(armedButtonAtRouteStart)) {
@@ -4857,6 +5189,18 @@ struct UIContext::Impl final {
                 armedPrimaryButtonPressed = pointWithinArmedButton;
                 static_cast<void>(routedEvent.claimPointerButton(
                     Platform::PointerButton::Primary));
+            }
+        } else if (primaryButtonUp && hadArmedSlider) {
+            const bool sliderStillArmed = armedSlider == armedSliderAtRouteStart;
+            clearArmedSlider();
+            routedEvent.consumeInputTransition();
+            if (sliderStillArmed && contains(armedSliderAtRouteStart)
+                && !routedEvent.isDefaultActionPrevented()) {
+                static_cast<void>(applySliderValueFromPointer(
+                    armedSliderAtRouteStart,
+                    input.position,
+                    input.platformFrame,
+                    input.sourceSequence));
             }
         } else if (primaryButtonUp && hadArmedInteraction) {
             const bool interactionStillArmed =
@@ -4917,6 +5261,7 @@ struct UIContext::Impl final {
                 "UI Pointer interaction cancellation belongs to another Window");
         }
         clearArmedPrimaryButton();
+        clearArmedSlider();
         return Core::success();
     }
 
@@ -5533,6 +5878,14 @@ Core::Result<UINodeId> UIRootBuilder::createCheckbox(UINodeId parent)
     return m_context->createChild(parent, UIWidgetKind::Checkbox);
 }
 
+Core::Result<UINodeId> UIRootBuilder::createSlider(UINodeId parent)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+    }
+    return m_context->createChild(parent, UIWidgetKind::Slider);
+}
+
 UITreeUpdater::UITreeUpdater(UIContext& context, UINodeId root) noexcept
     : m_context(&context), m_root(root)
 {
@@ -5585,6 +5938,14 @@ Core::Result<UINodeId> UITreeUpdater::createCheckbox(UINodeId parent)
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Checkbox);
+}
+
+Core::Result<UINodeId> UITreeUpdater::createSlider(UINodeId parent)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Slider);
 }
 
 bool UITreeUpdater::isAlive(UINodeId node) const noexcept
@@ -5739,6 +6100,60 @@ Core::Result<bool> UITreeUpdater::isCheckboxPressed(UINodeId checkbox) const
             "UI tree updater is not bound to a context");
     }
     return m_context->isCheckboxPressedFromUpdater(m_root, checkbox);
+}
+
+Core::Status UITreeUpdater::setSliderRange(
+    UINodeId slider,
+    float minValue,
+    float maxValue,
+    float step)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setSliderRangeFromUpdater(m_root, slider, minValue, maxValue, step);
+}
+
+Core::Status UITreeUpdater::setSliderValue(UINodeId slider, float value)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setSliderValueFromUpdater(m_root, slider, value);
+}
+
+Core::Result<float> UITreeUpdater::sliderValue(UINodeId slider) const
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->sliderValueFromUpdater(m_root, slider);
+}
+
+Core::Status UITreeUpdater::setSliderChangeCallback(
+    UINodeId slider,
+    UISliderChangeCallback callback)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setSliderChangeCallbackFromUpdater(m_root, slider, std::move(callback));
+}
+
+Core::Status UITreeUpdater::clearSliderChangeCallback(UINodeId slider)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->clearSliderChangeCallbackFromUpdater(m_root, slider);
+}
+
+Core::Result<bool> UITreeUpdater::isSliderDragging(UINodeId slider) const
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->isSliderDraggingFromUpdater(m_root, slider);
 }
 
 Core::Result<UIRoutedPointerListenerToken> UITreeUpdater::addRoutedPointerListener(
@@ -6228,6 +6643,53 @@ Core::Result<bool> UIContext::isCheckboxPressedFromUpdater(
     UINodeId checkbox)
 {
     return m_impl->isCheckboxPressedFromUpdater(updaterRoot, checkbox);
+}
+
+Core::Status UIContext::setSliderRangeFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId slider,
+    float minValue,
+    float maxValue,
+    float step)
+{
+    return m_impl->setSliderRangeFromUpdater(updaterRoot, slider, minValue, maxValue, step);
+}
+
+Core::Status UIContext::setSliderValueFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId slider,
+    float value)
+{
+    return m_impl->setSliderValueFromUpdater(updaterRoot, slider, value);
+}
+
+Core::Result<float> UIContext::sliderValueFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId slider) const
+{
+    return m_impl->sliderValueFromUpdater(updaterRoot, slider);
+}
+
+Core::Status UIContext::setSliderChangeCallbackFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId slider,
+    UISliderChangeCallback&& callback)
+{
+    return m_impl->setSliderChangeCallbackFromUpdater(updaterRoot, slider, std::move(callback));
+}
+
+Core::Status UIContext::clearSliderChangeCallbackFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId slider)
+{
+    return m_impl->clearSliderChangeCallbackFromUpdater(updaterRoot, slider);
+}
+
+Core::Result<bool> UIContext::isSliderDraggingFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId slider) const
+{
+    return m_impl->isSliderDraggingFromUpdater(updaterRoot, slider);
 }
 
 Core::Result<UIRoutedPointerListenerToken> UIContext::addRoutedPointerListenerFromUpdater(

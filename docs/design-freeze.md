@@ -626,7 +626,12 @@ miniaudio null device、Host/Desktop 注入、cooked AudioClip、recipe/lease �
 可验收闭环。OS 真扬声器、MP3/Ogg 源 cook、完整 cooker 音频 CLI 仍 Deferred；默认不强制 A21+。
 
 M11-C0：`UIWidgetKind::Checkbox` 与 Button 共享 primary arm/default-action/Tab；checked 位；
-激活时 toggle（无 action 仍 consume/toggle）；`setChecked` 静默写状态。Slider/Settings 后置。
+激活时 toggle（无 action 仍 consume/toggle）；`setChecked` 静默写状态。
+
+M11-C1：`UIWidgetKind::Slider` 水平值控件；finite min/max/value/step；Primary Down/Move/Up 独占
+`armedSlider` 拖动，按 committed hit `worldRect` 映射 X→value 并 fire change（值未变不通知）。
+`tina_sample_2d` 创建 Master 音量 Slider，change 延迟到 `updateFrame` 写 `setBusVolume(Master)`。
+Music/SFX 分轨 Slider 与全屏设置后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

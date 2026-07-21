@@ -45,6 +45,8 @@ class PrimaryWindowUICapabilityState final {
                                                          UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createButton(u64 epoch, PrimaryWindowUIPhase phase,
                                                           UI::UITreeUpdater& updater, UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createSlider(u64 epoch, PrimaryWindowUIPhase phase,
+                                                          UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Status setLayoutStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                               UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
@@ -65,6 +67,19 @@ class PrimaryWindowUICapabilityState final {
                                                  UI::UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(u64 epoch, PrimaryWindowUIPhase phase,
                                                      const UI::UITreeUpdater& updater, UI::UINodeId button);
+    [[nodiscard]] Core::Status setSliderRange(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                              UI::UINodeId slider, float minValue, float maxValue, float step);
+    [[nodiscard]] Core::Status setSliderValue(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                              UI::UINodeId slider, float value);
+    [[nodiscard]] Core::Result<float> sliderValue(u64 epoch, PrimaryWindowUIPhase phase,
+                                                  const UI::UITreeUpdater& updater, UI::UINodeId slider);
+    [[nodiscard]] Core::Status setSliderChangeCallback(u64 epoch, PrimaryWindowUIPhase phase,
+                                                       UI::UITreeUpdater& updater, UI::UINodeId slider,
+                                                       UI::UISliderChangeCallback callback);
+    [[nodiscard]] Core::Status clearSliderChangeCallback(u64 epoch, PrimaryWindowUIPhase phase,
+                                                         UI::UITreeUpdater& updater, UI::UINodeId slider);
+    [[nodiscard]] Core::Result<bool> isSliderDragging(u64 epoch, PrimaryWindowUIPhase phase,
+                                                      const UI::UITreeUpdater& updater, UI::UINodeId slider);
     [[nodiscard]] Core::Result<UI::UIRoutedPointerListenerToken>
     addRoutedPointerListener(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                              UI::UIRoutedPointerListenerDesc descriptor, UI::UIRoutedPointerCallback callback);

@@ -82,6 +82,15 @@ Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createButton(UI::UINodeId
     return m_state->createButton(m_epoch, m_phase, m_updater, parent);
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::createSlider(UI::UINodeId parent)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::createSlider");
+    }
+    return m_state->createSlider(m_epoch, m_phase, m_updater, parent);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style)
 {
     if (m_state == nullptr)
@@ -170,6 +179,62 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isButtonPressed(UI::UINodeId butt
         return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isButtonPressed");
     }
     return m_state->isButtonPressed(m_epoch, m_phase, m_updater, button);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setSliderRange(UI::UINodeId slider, float minValue, float maxValue,
+                                                        float step)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setSliderRange");
+    }
+    return m_state->setSliderRange(m_epoch, m_phase, m_updater, slider, minValue, maxValue, step);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setSliderValue(UI::UINodeId slider, float value)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setSliderValue");
+    }
+    return m_state->setSliderValue(m_epoch, m_phase, m_updater, slider, value);
+}
+
+Core::Result<float> PrimaryWindowUITreeUpdater::sliderValue(UI::UINodeId slider) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<float>("PrimaryWindowUITreeUpdater::sliderValue");
+    }
+    return m_state->sliderValue(m_epoch, m_phase, m_updater, slider);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setSliderChangeCallback(UI::UINodeId slider,
+                                                                 UI::UISliderChangeCallback callback)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setSliderChangeCallback");
+    }
+    return m_state->setSliderChangeCallback(m_epoch, m_phase, m_updater, slider, std::move(callback));
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearSliderChangeCallback(UI::UINodeId slider)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearSliderChangeCallback");
+    }
+    return m_state->clearSliderChangeCallback(m_epoch, m_phase, m_updater, slider);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isSliderDragging(UI::UINodeId slider) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isSliderDragging");
+    }
+    return m_state->isSliderDragging(m_epoch, m_phase, m_updater, slider);
 }
 
 Core::Result<UI::UIRoutedPointerListenerToken>

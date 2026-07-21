@@ -757,8 +757,11 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   不默认开 M10-A45；只有 bench p99 超预算才接入 Box2D worker callbacks；
 - M11-C0 已完成：vNext `UIWidgetKind::Checkbox`——复用 Button default-action arm/activate/Tab；
   `createCheckbox` / `setChecked` / `isChecked` / `setCheckboxAction`；点击与 Keyboard Accept 切换；
-  `tina_ui_tests` 覆盖；**仍非 Settings 音量 Slider / Semantics / 样例 HUD 接线**；
-- 增加 Slider，将主音量、音乐、音效和全屏接入真实后端；
+  `tina_ui_tests` 覆盖；
+- M11-C1 已完成：vNext `UIWidgetKind::Slider`——`createSlider` / `setSliderRange` / `setSliderValue` /
+  change callback；Primary 拖动按 worldRect.X 映射 [min,max]（step 量化）；`tina_sample_2d` HUD
+  Master 音量 Slider → `AudioEngine::setBusVolume(Master)`（JSON `uiSlidersCreated`）；
+  **仍非 Music/SFX 分轨 Slider、全屏设置、Semantics**；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
 - 在 M10 已落地的 `tina_sample_2d` 主线上继续 2D 打磨：稳定截图回归（follow/插值见 M11-B2；
   dirty cache 见 M11-B1；投影 resolve 见 M11-B0）；Audio 与更完整 UI 控件见本里程碑其它条；

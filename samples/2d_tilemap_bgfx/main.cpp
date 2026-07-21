@@ -116,6 +116,11 @@ struct LifecycleCounters final {
     u64 uiTextLabelsCreated = 0;
     u64 uiButtonsCreated = 0;
     u64 uiButtonActionsWired = 0;
+    // M11-C1: Master volume Slider wired to AudioEngine bus.
+    u64 uiSlidersCreated = 0;
+    u64 uiSliderChanges = 0;
+    float lastMasterVolume = 1.0F;
+    bool masterVolumeFromSlider = false;
     Tina::Sample2D::TileSelectionCounters tileSelection{};
     u16 lastSelectedTileId = 0;
     u64 selectionHighlightSprites = 0;
@@ -822,6 +827,51 @@ class TileMapBgfxState final : public Tina::IGameState {
             ++counters_->uiButtonActionsWired;
         }
 
+        // M11-C1: Master volume Slider -> AudioEngine Master bus (product settings surface).
+        {
+            auto slider = tree->createSlider(root->rootNodeId());
+            if (!slider)
+            {
+                return Tina::Core::failure(std::move(slider.error()));
+            }
+            if (auto status = tree->setLayoutStyle(
+                    *slider, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
+                                                Tina::UI::UILayoutLength::Px(60.0F),
+                                                Tina::UI::UILayoutLength::Px(200.0F),
+                                                Tina::UI::UILayoutLength::Px(24.0F)));
+                !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setBoxPaint(*slider, solidFill(60, 60, 90, 220)); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setSliderRange(*slider, 0.0F, 1.0F, 0.05F); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setSliderValue(*slider, 1.0F); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setSliderChangeCallback(
+                    *slider,
+                    Tina::UI::UISliderChangeCallback{[this](const Tina::UI::UISliderChangeEvent& event) noexcept {
+                        ++counters_->uiSliderChanges;
+                        counters_->lastMasterVolume = event.value;
+                        counters_->masterVolumeFromSlider = true;
+                        // AudioEngine is phase-local; apply on next updateFrame via pending flag.
+                        pendingMasterVolume_ = event.value;
+                        hasPendingMasterVolume_ = true;
+                    }});
+                !status)
+            {
+                return status;
+            }
+            ++counters_->uiSlidersCreated;
+        }
+
         uiRoot_ = std::move(*root);
         ++counters_->uiRootsCreated;
         counters_->uiPanelsCreated += panels.size();
@@ -916,6 +966,19 @@ class TileMapBgfxState final : public Tina::IGameState {
         if (Tina::Audio::AudioEngine* audio = context.audioEngine(); audio != nullptr)
         {
             counters_->audioEnginePresent = true;
+            if (hasPendingMasterVolume_)
+            {
+                if (auto status = audio->setBusVolume(Tina::Audio::AudioBusId::Master, pendingMasterVolume_);
+                    !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                hasPendingMasterVolume_ = false;
+            }
+            if (auto bus = audio->busState(Tina::Audio::AudioBusId::Master); bus.has_value())
+            {
+                counters_->lastMasterVolume = bus->volume;
+            }
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
             // First frame with Audio: create null device, attach mixer, start.
             if (!resources_->audioDevice.has_value())
@@ -1297,6 +1360,9 @@ class TileMapBgfxState final : public Tina::IGameState {
     TileMapResources* resources_ = nullptr;
     DeviceCapture* capture_ = nullptr;
     Tina::UI::UIRootOwner uiRoot_{};
+    // Applied on next updateFrame when audioEngine is available (phase-local).
+    float pendingMasterVolume_ = 1.0F;
+    bool hasPendingMasterVolume_ = false;
 };
 
 class TileMapBgfxApplication final : public Tina::IGameApplication {
@@ -1617,6 +1683,7 @@ int main(int argc, char** argv)
               counters.uiPanelsCreated == ExpectedUIPanelCount &&
               counters.uiTextLabelsCreated == ExpectedUITextLabelCount &&
               counters.uiButtonsCreated == ExpectedUIButtonCount && counters.uiButtonActionsWired == 1 &&
+              counters.uiSlidersCreated == 1 &&
               counters.uiRootsReleased == 1 && *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     ok = ok && counters.physicsReady && counters.physicsStaticBodies == ExpectedPhysicsStaticBodies &&
@@ -1635,7 +1702,9 @@ int main(int argc, char** argv)
                   << ",\"hitRight\":" << counters.controllerHitRightFrames
                   << ",\"maxX\":" << counters.maxControllerX << ",\"uiRoots\":" << counters.uiRootsCreated
                   << ",\"uiPanels\":" << counters.uiPanelsCreated << ",\"uiLabels\":" << counters.uiTextLabelsCreated
-                  << ",\"uiButtons\":" << counters.uiButtonsCreated << ",\"uiReleased\":" << counters.uiRootsReleased
+                  << ",\"uiButtons\":" << counters.uiButtonsCreated << ",\"uiSliders\":" << counters.uiSlidersCreated
+                  << ",\"uiReleased\":" << counters.uiRootsReleased
+                  << ",\"lastMasterVolume\":" << counters.lastMasterVolume
                   << ",\"worldPointerPresses\":" << counters.tileSelection.pointerPresses
                   << ",\"worldPointerMissingSamples\":" << counters.tileSelection.missingWorldPointerSamples
                   << ",\"worldPointerViewportMisses\":" << counters.tileSelection.viewportMisses
@@ -1700,6 +1769,10 @@ int main(int argc, char** argv)
               << ",\"uiTextLabelsCreated\":" << counters.uiTextLabelsCreated
               << ",\"uiButtonsCreated\":" << counters.uiButtonsCreated
               << ",\"uiButtonActionsWired\":" << counters.uiButtonActionsWired
+              << ",\"uiSlidersCreated\":" << counters.uiSlidersCreated
+              << ",\"uiSliderChanges\":" << counters.uiSliderChanges
+              << ",\"lastMasterVolume\":" << counters.lastMasterVolume
+              << ",\"masterVolumeFromSlider\":" << (counters.masterVolumeFromSlider ? "true" : "false")
               << ",\"uiRootsReleased\":" << counters.uiRootsReleased
               << ",\"worldPointerPresses\":" << counters.tileSelection.pointerPresses
               << ",\"worldPointerMissingSamples\":" << counters.tileSelection.missingWorldPointerSamples

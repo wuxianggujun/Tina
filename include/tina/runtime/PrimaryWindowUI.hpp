@@ -4,6 +4,7 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIText.hpp>
 
 #include <string_view>
@@ -32,6 +33,7 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UINodeId> createPanel(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createLabel(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createButton(UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createSlider(UI::UINodeId parent);
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint);
@@ -42,6 +44,12 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setButtonAction(UI::UINodeId button, UI::UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(UI::UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(UI::UINodeId button) const;
+    [[nodiscard]] Core::Status setSliderRange(UI::UINodeId slider, float minValue, float maxValue, float step = 0.0F);
+    [[nodiscard]] Core::Status setSliderValue(UI::UINodeId slider, float value);
+    [[nodiscard]] Core::Result<float> sliderValue(UI::UINodeId slider) const;
+    [[nodiscard]] Core::Status setSliderChangeCallback(UI::UINodeId slider, UI::UISliderChangeCallback callback);
+    [[nodiscard]] Core::Status clearSliderChangeCallback(UI::UINodeId slider);
+    [[nodiscard]] Core::Result<bool> isSliderDragging(UI::UINodeId slider) const;
     [[nodiscard]] Core::Result<UI::UIRoutedPointerListenerToken>
     addRoutedPointerListener(UI::UIRoutedPointerListenerDesc descriptor, UI::UIRoutedPointerCallback callback);
     [[nodiscard]] Core::Status destroy(UI::UINodeId node);

@@ -8,6 +8,7 @@
 #include <tina/ui/UICommittedPaint.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
 #include <tina/ui/UIButton.hpp>
+#include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIContextConfig.hpp>
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UIEventRouting.hpp>
@@ -158,6 +159,7 @@ public:
     [[nodiscard]] Core::Result<UINodeId> createLabel(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createButton(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createCheckbox(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createSlider(UINodeId parent);
 
   private:
     friend class UIContext;
@@ -183,6 +185,7 @@ public:
     [[nodiscard]] Core::Result<UINodeId> createLabel(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createButton(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createCheckbox(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createSlider(UINodeId parent);
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(
@@ -209,6 +212,19 @@ public:
     [[nodiscard]] Core::Status setChecked(UINodeId checkbox, bool checked);
     [[nodiscard]] Core::Result<bool> isChecked(UINodeId checkbox) const;
     [[nodiscard]] Core::Result<bool> isCheckboxPressed(UINodeId checkbox) const;
+    // M11-C1 Slider: finite min/max/value/step; drag maps pointer X into range.
+    [[nodiscard]] Core::Status setSliderRange(
+        UINodeId slider,
+        float minValue,
+        float maxValue,
+        float step = 0.0F);
+    [[nodiscard]] Core::Status setSliderValue(UINodeId slider, float value);
+    [[nodiscard]] Core::Result<float> sliderValue(UINodeId slider) const;
+    [[nodiscard]] Core::Status setSliderChangeCallback(
+        UINodeId slider,
+        UISliderChangeCallback callback);
+    [[nodiscard]] Core::Status clearSliderChangeCallback(UINodeId slider);
+    [[nodiscard]] Core::Result<bool> isSliderDragging(UINodeId slider) const;
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
     addRoutedPointerListener(
         UIRoutedPointerListenerDesc descriptor,
@@ -424,6 +440,29 @@ private:
     [[nodiscard]] Core::Result<bool> isCheckboxPressedFromUpdater(
         UINodeId updaterRoot,
         UINodeId checkbox);
+    [[nodiscard]] Core::Status setSliderRangeFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider,
+        float minValue,
+        float maxValue,
+        float step);
+    [[nodiscard]] Core::Status setSliderValueFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider,
+        float value);
+    [[nodiscard]] Core::Result<float> sliderValueFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider) const;
+    [[nodiscard]] Core::Status setSliderChangeCallbackFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider,
+        UISliderChangeCallback&& callback);
+    [[nodiscard]] Core::Status clearSliderChangeCallbackFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider);
+    [[nodiscard]] Core::Result<bool> isSliderDraggingFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider) const;
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
     addRoutedPointerListenerFromUpdater(
         UINodeId updaterRoot,

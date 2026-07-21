@@ -241,6 +241,22 @@ Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createButton(u64 epoc
     return *child;
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createSlider(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                        UI::UITreeUpdater& updater, UI::UINodeId parent)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createSlider";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto child = updater.createSlider(parent);
+    if (!child)
+    {
+        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
+    }
+    return *child;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setLayoutStyle(u64 epoch, PrimaryWindowUIPhase phase,
                                                             UI::UITreeUpdater& updater, UI::UINodeId node,
                                                             const UI::UILayoutStyle& style)
@@ -406,6 +422,106 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isButtonPressed(u64 epoch, Pr
         return Core::failure(rememberFirstError(std::move(pressed.error()), Operation));
     }
     return *pressed;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setSliderRange(u64 epoch, PrimaryWindowUIPhase phase,
+                                                            UI::UITreeUpdater& updater, UI::UINodeId slider,
+                                                            float minValue, float maxValue, float step)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setSliderRange";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setSliderRange(slider, minValue, maxValue, step);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::setSliderValue(u64 epoch, PrimaryWindowUIPhase phase,
+                                                            UI::UITreeUpdater& updater, UI::UINodeId slider,
+                                                            float value)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setSliderValue";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setSliderValue(slider, value);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<float> PrimaryWindowUICapabilityState::sliderValue(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                const UI::UITreeUpdater& updater, UI::UINodeId slider)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::sliderValue";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto value = updater.sliderValue(slider);
+    if (!value)
+    {
+        return Core::failure(rememberFirstError(std::move(value.error()), Operation));
+    }
+    return *value;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setSliderChangeCallback(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                     UI::UITreeUpdater& updater, UI::UINodeId slider,
+                                                                     UI::UISliderChangeCallback callback)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setSliderChangeCallback";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setSliderChangeCallback(slider, std::move(callback));
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearSliderChangeCallback(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                       UI::UITreeUpdater& updater, UI::UINodeId slider)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearSliderChangeCallback";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearSliderChangeCallback(slider);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isSliderDragging(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                    const UI::UITreeUpdater& updater,
+                                                                    UI::UINodeId slider)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isSliderDragging";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto dragging = updater.isSliderDragging(slider);
+    if (!dragging)
+    {
+        return Core::failure(rememberFirstError(std::move(dragging.error()), Operation));
+    }
+    return *dragging;
 }
 
 Core::Result<UI::UIRoutedPointerListenerToken> PrimaryWindowUICapabilityState::addRoutedPointerListener(

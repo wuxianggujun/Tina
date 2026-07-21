@@ -1,6 +1,7 @@
 set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UI.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIButton.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UISlider.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDirty.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedHit.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedLayout.hpp
