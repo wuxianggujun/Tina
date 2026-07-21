@@ -653,6 +653,8 @@ struct UIContext::Impl final {
     std::pmr::vector<u32> inactiveRoutedPointerListenerIndices;
     std::pmr::vector<u32> buttonActionIndexByNodeIndex;
     std::pmr::vector<u64> buttonActionClearRouteSerialByNodeIndex;
+    // M11-C0: Checkbox checked bit (index-aligned with nodes; false for non-Checkbox).
+    std::pmr::vector<u8> checkboxCheckedByNodeIndex;
     std::pmr::vector<ButtonActionRecord> buttonActions;
     std::pmr::vector<u32> inactiveButtonActionIndices;
     std::array<std::pmr::vector<UICommittedNodeEntry>, 2> committedBuffers;
@@ -759,6 +761,7 @@ struct UIContext::Impl final {
           routePathScratch(&resource),
           inactiveRoutedPointerListenerIndices(&resource),
           buttonActionIndexByNodeIndex(&resource),
+          checkboxCheckedByNodeIndex(&resource),
           buttonActionClearRouteSerialByNodeIndex(&resource),
           buttonActions(&resource),
           inactiveButtonActionIndices(&resource),
@@ -864,6 +867,7 @@ struct UIContext::Impl final {
         impl->buttonActionClearRouteSerialByNodeIndex.resize(
             normalized.nodeCapacity,
             0);
+        impl->checkboxCheckedByNodeIndex.resize(normalized.nodeCapacity, 0);
         const usize buttonActionStorageCapacity = normalized.buttonActionCapacity + 1;
         impl->buttonActions.resize(buttonActionStorageCapacity);
         for (usize actionIndex = 0;
@@ -2592,12 +2596,18 @@ struct UIContext::Impl final {
         if (!nodeResult) {
             return Core::failure(nodeResult.error());
         }
-        if ((*nodeResult)->kind != UIWidgetKind::Button) {
+        if ((*nodeResult)->kind != UIWidgetKind::Button
+            && (*nodeResult)->kind != UIWidgetKind::Checkbox) {
             return fail(
                 UIErrorCode::InvalidButtonAction,
-                "UI Button action requires a Button node");
+                "UI Button action requires a Button or Checkbox node");
         }
         return *nodeResult;
+    }
+
+    [[nodiscard]] static bool isDefaultActivatableKind(UIWidgetKind kind) noexcept
+    {
+        return kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox;
     }
 
     void clearArmedPrimaryButton() noexcept
@@ -2799,7 +2809,7 @@ struct UIContext::Impl final {
         const NodeRecord* buttonRecord = nodes.tryGet(candidate.button.storageId());
         ButtonActionRecord& action = buttonActions[candidate.actionIndex];
         if (buttonRecord == nullptr
-            || buttonRecord->kind != UIWidgetKind::Button
+            || !isDefaultActivatableKind(buttonRecord->kind)
             || action.generation != candidate.generation
             || action.node != candidate.button
             || !action.callback.hasValue()) {
@@ -2926,6 +2936,9 @@ struct UIContext::Impl final {
             InvalidRoutedPointerListenerIndex;
         buttonActionIndexByNodeIndex[index] = InvalidButtonActionIndex;
         buttonActionClearRouteSerialByNodeIndex[index] = 0;
+        if (index < checkboxCheckedByNodeIndex.size()) {
+            checkboxCheckedByNodeIndex[index] = 0;
+        }
     }
 
     void markStructureChanged() noexcept
@@ -3130,10 +3143,11 @@ struct UIContext::Impl final {
         NodeRecord* record = nodes.tryGet(node.storageId());
         record->kind = kind;
         record->rootIndex = node.index();
-        // Button and Label are Targetable: Label is the IME/text target surface
-        // (M7-E6). Root/Panel remain Ignore.
+        // Button/Checkbox and Label are Targetable: Label is the IME/text target
+        // surface (M7-E6). Root/Panel remain Ignore.
         pointerHitPoliciesByIndex[node.index()] =
-            (kind == UIWidgetKind::Button || kind == UIWidgetKind::Label)
+            (kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox
+             || kind == UIWidgetKind::Label)
             ? UIPointerHitPolicy::Targetable
             : UIPointerHitPolicy::Ignore;
         return node;
@@ -3891,6 +3905,116 @@ struct UIContext::Impl final {
         return armedPrimaryButton == button && armedPrimaryButtonPressed;
     }
 
+    [[nodiscard]] Core::Result<NodeRecord*> resolveCheckbox(UINodeId checkbox)
+    {
+        auto nodeResult = resolveNode(checkbox);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != UIWidgetKind::Checkbox) {
+            return fail(
+                UIErrorCode::InvalidButtonAction,
+                "UI Checkbox API requires a Checkbox node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Status setCheckboxActionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox,
+        UIButtonActionCallback&& callback)
+    {
+        auto checkboxResult = resolveCheckbox(checkbox);
+        if (!checkboxResult) {
+            return Core::failure(checkboxResult.error());
+        }
+        return setButtonActionFromUpdater(updaterRoot, checkbox, std::move(callback));
+    }
+
+    [[nodiscard]] Core::Status clearCheckboxActionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox)
+    {
+        auto checkboxResult = resolveCheckbox(checkbox);
+        if (!checkboxResult) {
+            return Core::failure(checkboxResult.error());
+        }
+        return clearButtonActionFromUpdater(updaterRoot, checkbox);
+    }
+
+    [[nodiscard]] Core::Status setCheckedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox,
+        bool checked)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(
+                UIErrorCode::RootRequired,
+                "UI tree updater requires a live root owner");
+        }
+        auto checkboxResult = resolveCheckbox(checkbox);
+        if (!checkboxResult) {
+            return Core::failure(checkboxResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, checkbox)) {
+            return fail(
+                UIErrorCode::InvalidNode,
+                "UI Checkbox is not owned by the updater root");
+        }
+        if (checkbox.index() >= checkboxCheckedByNodeIndex.size()) {
+            return fail(Core::CoreErrorCode::Internal, "UI Checkbox index out of range");
+        }
+        const u8 next = checked ? 1 : 0;
+        if (checkboxCheckedByNodeIndex[checkbox.index()] != next) {
+            checkboxCheckedByNodeIndex[checkbox.index()] = next;
+            static_cast<void>(markPaintDirty(checkbox));
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<bool> isCheckedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(
+                UIErrorCode::RootRequired,
+                "UI tree updater requires a live root owner");
+        }
+        // const_cast: resolveCheckbox is non-const only for API reuse of resolveNode.
+        auto checkboxResult = const_cast<Impl*>(this)->resolveCheckbox(checkbox);
+        if (!checkboxResult) {
+            return Core::failure(checkboxResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, checkbox)) {
+            return fail(
+                UIErrorCode::InvalidNode,
+                "UI Checkbox is not owned by the updater root");
+        }
+        if (checkbox.index() >= checkboxCheckedByNodeIndex.size()) {
+            return fail(Core::CoreErrorCode::Internal, "UI Checkbox index out of range");
+        }
+        return checkboxCheckedByNodeIndex[checkbox.index()] != 0;
+    }
+
+    [[nodiscard]] Core::Result<bool> isCheckboxPressedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox)
+    {
+        auto checkboxResult = resolveCheckbox(checkbox);
+        if (!checkboxResult) {
+            return Core::failure(checkboxResult.error());
+        }
+        return isButtonPressedFromUpdater(updaterRoot, checkbox);
+    }
+
     void appendCommittedTree(
         u32 index,
         u32& ordinal,
@@ -4583,7 +4707,7 @@ struct UIContext::Impl final {
                 const NodeRecord* routeRecord =
                     nodes.tryGet(routeNode.storageId());
                 if (routeRecord != nullptr
-                    && routeRecord->kind == UIWidgetKind::Button) {
+                    && isDefaultActivatableKind(routeRecord->kind)) {
                     nearestButton = routeNode;
                 }
             }
@@ -4697,7 +4821,7 @@ struct UIContext::Impl final {
                 const NodeRecord* buttonRecord =
                     nodes.tryGet(nearestButton.storageId());
                 if (buttonRecord != nullptr
-                    && buttonRecord->kind == UIWidgetKind::Button) {
+                    && isDefaultActivatableKind(buttonRecord->kind)) {
                     armedPrimaryButton = nearestButton;
                     armedPrimaryButtonPressed = true;
                     defaultActionFocusButton = nearestButton;
@@ -4743,6 +4867,18 @@ struct UIContext::Impl final {
                 && interactionStillArmed
                 && pointWithinArmedButton
                 && contains(armedButtonAtRouteStart)) {
+                if (const NodeRecord* armedRecord =
+                        nodes.tryGet(armedButtonAtRouteStart.storageId());
+                    armedRecord != nullptr
+                    && armedRecord->kind == UIWidgetKind::Checkbox
+                    && armedButtonAtRouteStart.index()
+                        < checkboxCheckedByNodeIndex.size()) {
+                    checkboxCheckedByNodeIndex[armedButtonAtRouteStart.index()] =
+                        checkboxCheckedByNodeIndex[armedButtonAtRouteStart.index()] == 0
+                        ? 1
+                        : 0;
+                    static_cast<void>(markPaintDirty(armedButtonAtRouteStart));
+                }
                 invokeButtonAction(
                     actionCandidate,
                     UIButtonActionEvent{
@@ -4811,7 +4947,7 @@ struct UIContext::Impl final {
         }
         const NodeRecord* record =
             nodes.tryGet(defaultActionFocusButton.storageId());
-        if (record == nullptr || record->kind != UIWidgetKind::Button) {
+        if (record == nullptr || !isDefaultActivatableKind(record->kind)) {
             clearDefaultActionFocus();
             return UIDefaultActionResult{};
         }
@@ -4821,6 +4957,12 @@ struct UIContext::Impl final {
                 UIErrorCode::CapacityExceeded,
                 "UI Button route serial is exhausted");
         }
+        if (record->kind == UIWidgetKind::Checkbox
+            && defaultActionFocusButton.index() < checkboxCheckedByNodeIndex.size()) {
+            checkboxCheckedByNodeIndex[defaultActionFocusButton.index()] =
+                checkboxCheckedByNodeIndex[defaultActionFocusButton.index()] == 0 ? 1 : 0;
+            static_cast<void>(markPaintDirty(defaultActionFocusButton));
+        }
         const u64 actionRegistrationSerialBoundary =
             buttonActionRegistrationSerial;
         const ButtonActionInvocationCandidate actionCandidate =
@@ -4828,9 +4970,9 @@ struct UIContext::Impl final {
                 defaultActionFocusButton,
                 actionRegistrationSerialBoundary);
         if (!actionCandidate.hasValue()) {
-            // Focused button without an action still consumes Accept so
-            // gameplay does not also fire.
-            return UIDefaultActionResult{.consumed = true, .activated = false};
+            // Focused control without an action still consumes Accept so
+            // gameplay does not also fire. Checkbox state already toggled above.
+            return UIDefaultActionResult{.consumed = true, .activated = true};
         }
         const u64 currentButtonRouteSerial = ++buttonRouteSerial;
         routeDispatchDepth = 1;
@@ -4875,7 +5017,7 @@ struct UIContext::Impl final {
                 continue;
             }
             const NodeRecord* record = nodes.tryGet(entry.node.storageId());
-            if (record == nullptr || record->kind != UIWidgetKind::Button) {
+            if (record == nullptr || !isDefaultActivatableKind(record->kind)) {
                 continue;
             }
             if (entry.node.index() >= pointerHitPoliciesByIndex.size()) {
@@ -5383,6 +5525,14 @@ Core::Result<UINodeId> UIRootBuilder::createButton(UINodeId parent)
     return m_context->createChild(parent, UIWidgetKind::Button);
 }
 
+Core::Result<UINodeId> UIRootBuilder::createCheckbox(UINodeId parent)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+    }
+    return m_context->createChild(parent, UIWidgetKind::Checkbox);
+}
+
 UITreeUpdater::UITreeUpdater(UIContext& context, UINodeId root) noexcept
     : m_context(&context), m_root(root)
 {
@@ -5427,6 +5577,14 @@ Core::Result<UINodeId> UITreeUpdater::createButton(UINodeId parent)
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Button);
+}
+
+Core::Result<UINodeId> UITreeUpdater::createCheckbox(UINodeId parent)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Checkbox);
 }
 
 bool UITreeUpdater::isAlive(UINodeId node) const noexcept
@@ -5526,6 +5684,61 @@ Core::Result<bool> UITreeUpdater::isButtonPressed(UINodeId button) const
             "UI tree updater is not bound to a context");
     }
     return m_context->isButtonPressedFromUpdater(m_root, button);
+}
+
+Core::Status UITreeUpdater::setCheckboxAction(
+    UINodeId checkbox,
+    UIButtonActionCallback callback)
+{
+    if (m_context == nullptr) {
+        return fail(
+            UIErrorCode::WrongContext,
+            "UI tree updater is not bound to a context");
+    }
+    return m_context->setCheckboxActionFromUpdater(
+        m_root,
+        checkbox,
+        std::move(callback));
+}
+
+Core::Status UITreeUpdater::clearCheckboxAction(UINodeId checkbox)
+{
+    if (m_context == nullptr) {
+        return fail(
+            UIErrorCode::WrongContext,
+            "UI tree updater is not bound to a context");
+    }
+    return m_context->clearCheckboxActionFromUpdater(m_root, checkbox);
+}
+
+Core::Status UITreeUpdater::setChecked(UINodeId checkbox, bool checked)
+{
+    if (m_context == nullptr) {
+        return fail(
+            UIErrorCode::WrongContext,
+            "UI tree updater is not bound to a context");
+    }
+    return m_context->setCheckedFromUpdater(m_root, checkbox, checked);
+}
+
+Core::Result<bool> UITreeUpdater::isChecked(UINodeId checkbox) const
+{
+    if (m_context == nullptr) {
+        return fail(
+            UIErrorCode::WrongContext,
+            "UI tree updater is not bound to a context");
+    }
+    return m_context->isCheckedFromUpdater(m_root, checkbox);
+}
+
+Core::Result<bool> UITreeUpdater::isCheckboxPressed(UINodeId checkbox) const
+{
+    if (m_context == nullptr) {
+        return fail(
+            UIErrorCode::WrongContext,
+            "UI tree updater is not bound to a context");
+    }
+    return m_context->isCheckboxPressedFromUpdater(m_root, checkbox);
 }
 
 Core::Result<UIRoutedPointerListenerToken> UITreeUpdater::addRoutedPointerListener(
@@ -5975,6 +6188,46 @@ Core::Result<bool> UIContext::isButtonPressedFromUpdater(
     UINodeId button)
 {
     return m_impl->isButtonPressedFromUpdater(updaterRoot, button);
+}
+
+Core::Status UIContext::setCheckboxActionFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId checkbox,
+    UIButtonActionCallback&& callback)
+{
+    return m_impl->setCheckboxActionFromUpdater(
+        updaterRoot,
+        checkbox,
+        std::move(callback));
+}
+
+Core::Status UIContext::clearCheckboxActionFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId checkbox)
+{
+    return m_impl->clearCheckboxActionFromUpdater(updaterRoot, checkbox);
+}
+
+Core::Status UIContext::setCheckedFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId checkbox,
+    bool checked)
+{
+    return m_impl->setCheckedFromUpdater(updaterRoot, checkbox, checked);
+}
+
+Core::Result<bool> UIContext::isCheckedFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId checkbox) const
+{
+    return m_impl->isCheckedFromUpdater(updaterRoot, checkbox);
+}
+
+Core::Result<bool> UIContext::isCheckboxPressedFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId checkbox)
+{
+    return m_impl->isCheckboxPressedFromUpdater(updaterRoot, checkbox);
 }
 
 Core::Result<UIRoutedPointerListenerToken> UIContext::addRoutedPointerListenerFromUpdater(

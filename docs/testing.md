@@ -100,6 +100,7 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A18 AudioClip cooked playback | Debug C++23 | `tina_asset_tests` AudioClipCooked* | parseAudioClipFromCooked + playOneShot + mix；wrong kind 拒绝 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A19 recipe AudioClip + sample lease | Debug C++23 | CatalogCookTests + product-2d sample | recipe `audioclip sine`；JSON `audioFromCatalogLease`/`audioClipFrameCount` |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-A20 recipe WAV file cook | Debug C++23 | CatalogCookTests.AudioClipFileWav* | `audioclip … file click.wav` → cooked 8kHz/8 frames PCM |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-C0 UI Checkbox | Debug C++23 | `tina_ui_tests` UICheckbox* | create/toggle click/keyboard、setChecked 静默、wrong kind 拒绝 |
 
 
 

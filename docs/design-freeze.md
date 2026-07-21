@@ -620,7 +620,13 @@ M11-A19：catalog recipe `audioclip <id> <rate> <ch> <frames> <samples|sine freq
 
 M11-A20：recipe `audioclip <id> file <path>` 读取磁盘 WAV（RIFF/PCM 16-bit only）并 cook 为
 float32 `AudioClip` payload。Asset 模块不链接 miniaudio；压缩格式需离线/adapter 解码后再 cook。
-OS 默认扬声器产品门禁后置。
+
+M11 Audio 产品竖切收口（A7–A20 / tip `e122b955`）：Disabled 引擎、命令/完成、bus、mixRealtime、
+miniaudio null device、Host/Desktop 注入、cooked AudioClip、recipe/lease 与 PCM16 WAV cook 视为
+可验收闭环。OS 真扬声器、MP3/Ogg 源 cook、完整 cooker 音频 CLI 仍 Deferred；默认不强制 A21+。
+
+M11-C0：`UIWidgetKind::Checkbox` 与 Button 共享 primary arm/default-action/Tab；checked 位；
+激活时 toggle（无 action 仍 consume/toggle）；`setChecked` 静默写状态。Slider/Settings 后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

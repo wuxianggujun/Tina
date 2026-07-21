@@ -708,8 +708,21 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
 - M11-A19 已完成：recipe `audioclip` 内联（samples 或 `sine <freqHz>`）；`sample_2d.recipe`
   增加 AudioClip；sample `AssetLease` 保活 + `playOneShotPcm` 产品 SFX；
 - M11-A20 已完成：recipe `audioclip <id> file <path.wav>` 磁盘 PCM16 WAV → cooked AudioClip
-  （cook 期纯 C++ 解码，不强制 miniaudio 进 Asset）；**仍非 OS 真实扬声器门禁 / 完整 cooker CLI
-  多格式源导入（MP3/Ogg 走 adapter decode 后 cook）**；
+  （cook 期纯 C++ 解码，不强制 miniaudio 进 Asset）；
+
+### M11 Audio 产品竖切收口（tip `e122b955`，A7–A20）
+
+**后端无关引擎 + miniaudio adapter + cooked AudioClip + recipe/lease 产品 SFX 视为可验收收口**，
+默认不再为编号续开 A21+，除非出现真实产品缺口。
+
+| 已完成 | Deferred（不阻塞本收口） |
+| --- | --- |
+| Disabled `AudioEngine`、命令/完成环、Master/Music/SFX bus | OS 默认扬声器产品门禁（非 null backend） |
+| `mixRealtime` + null-device attachMixer | MP3/Ogg 源文件 cook（adapter decode 后再写 AudioClip） |
+| EngineHost/Desktop 可选/默认注入 + 每帧 pump | 完整 `tina_assetc` 音频 CLI 与流式 Music 产品路径 |
+| cooked AudioClip wire + `parseAudioClipFromCooked` | AssetLease 跨 State 复杂生命周期策略 |
+| recipe sine/samples/`file` WAV + sample lease SFX | |
+
 - M11-B0 已完成：`Tina::Render` `Camera2DProjection` 纯函数（`FixedWorldHeight2D` /
   `PixelPerfect2D` + framebuffer viewport → worldWidth/Height + `actualPixelsPerMeter`；
   PixelPerfect 强制 `CameraAndSprites`；0×0 surface 结构化失败）。`tina_render_scene_tests` 8 项；
@@ -742,7 +755,10 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   M10 收口：A39–A44 已闭合 product-2d pointer/selection 产品闭环（默认 smoke 不点；
   `--seed-tile-selection` 为受控门禁）；完整 cooker CLI / cgltf / 厚 world-pick Game SDK 仍 Deferred，
   不默认开 M10-A45；只有 bench p99 超预算才接入 Box2D worker callbacks；
-- 增加 Checkbox、Slider，将主音量、音乐、音效和全屏接入真实后端；
+- M11-C0 已完成：vNext `UIWidgetKind::Checkbox`——复用 Button default-action arm/activate/Tab；
+  `createCheckbox` / `setChecked` / `isChecked` / `setCheckboxAction`；点击与 Keyboard Accept 切换；
+  `tina_ui_tests` 覆盖；**仍非 Settings 音量 Slider / Semantics / 样例 HUD 接线**；
+- 增加 Slider，将主音量、音乐、音效和全屏接入真实后端；
 - 保持 `tina_physics2d` 公共 surface 只暴露 Tina 类型，Box2D 3.x 为 PRIVATE 实现；
 - 在 M10 已落地的 `tina_sample_2d` 主线上继续 2D 打磨：稳定截图回归（follow/插值见 M11-B2；
   dirty cache 见 M11-B1；投影 resolve 见 M11-B0）；Audio 与更完整 UI 控件见本里程碑其它条；

@@ -157,8 +157,9 @@ public:
     [[nodiscard]] Core::Result<UINodeId> createPanel(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createLabel(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createButton(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createCheckbox(UINodeId parent);
 
-private:
+  private:
     friend class UIContext;
 
     explicit UIRootBuilder(UIContext& context) noexcept;
@@ -181,6 +182,7 @@ public:
     [[nodiscard]] Core::Result<UINodeId> createPanel(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createLabel(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createButton(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createCheckbox(UINodeId parent);
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(
@@ -199,6 +201,14 @@ public:
         UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(UINodeId button) const;
+    // Checkbox reuses Button action slots/arm path; callback fires after toggle.
+    [[nodiscard]] Core::Status setCheckboxAction(
+        UINodeId checkbox,
+        UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status clearCheckboxAction(UINodeId checkbox);
+    [[nodiscard]] Core::Status setChecked(UINodeId checkbox, bool checked);
+    [[nodiscard]] Core::Result<bool> isChecked(UINodeId checkbox) const;
+    [[nodiscard]] Core::Result<bool> isCheckboxPressed(UINodeId checkbox) const;
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
     addRoutedPointerListener(
         UIRoutedPointerListenerDesc descriptor,
@@ -397,6 +407,23 @@ private:
     [[nodiscard]] Core::Result<bool> isButtonPressedFromUpdater(
         UINodeId updaterRoot,
         UINodeId button);
+    [[nodiscard]] Core::Status setCheckboxActionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox,
+        UIButtonActionCallback&& callback);
+    [[nodiscard]] Core::Status clearCheckboxActionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox);
+    [[nodiscard]] Core::Status setCheckedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox,
+        bool checked);
+    [[nodiscard]] Core::Result<bool> isCheckedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox) const;
+    [[nodiscard]] Core::Result<bool> isCheckboxPressedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox);
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
     addRoutedPointerListenerFromUpdater(
         UINodeId updaterRoot,
