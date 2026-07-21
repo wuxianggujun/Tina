@@ -116,11 +116,15 @@ struct LifecycleCounters final {
     u64 uiTextLabelsCreated = 0;
     u64 uiButtonsCreated = 0;
     u64 uiButtonActionsWired = 0;
-    // M11-C1: Master volume Slider wired to AudioEngine bus.
+    // M11-C1/C2: Master/Music/SFX volume Sliders wired to AudioEngine buses.
     u64 uiSlidersCreated = 0;
     u64 uiSliderChanges = 0;
     float lastMasterVolume = 1.0F;
+    float lastMusicVolume = 1.0F;
+    float lastSfxVolume = 1.0F;
     bool masterVolumeFromSlider = false;
+    bool musicVolumeFromSlider = false;
+    bool sfxVolumeFromSlider = false;
     Tina::Sample2D::TileSelectionCounters tileSelection{};
     u16 lastSelectedTileId = 0;
     u64 selectionHighlightSprites = 0;
@@ -827,49 +831,73 @@ class TileMapBgfxState final : public Tina::IGameState {
             ++counters_->uiButtonActionsWired;
         }
 
-        // M11-C1: Master volume Slider -> AudioEngine Master bus (product settings surface).
+        // M11-C1/C2: Master/Music/SFX volume Sliders -> AudioEngine buses.
+        // Layout stacked under the Demo button (700,12). Smoke only requires create counts;
+        // interactive drag applies via pending flags on next updateFrame.
+        const auto wireVolumeSlider =
+            [&](float y, std::uint8_t r, std::uint8_t g, std::uint8_t b,
+                float& pendingVolume, bool& hasPending, float& lastVolume, bool& fromSlider)
+            -> Tina::Core::Status {
+                auto slider = tree->createSlider(root->rootNodeId());
+                if (!slider)
+                {
+                    return Tina::Core::failure(std::move(slider.error()));
+                }
+                if (auto status = tree->setLayoutStyle(
+                        *slider, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
+                                                    Tina::UI::UILayoutLength::Px(y),
+                                                    Tina::UI::UILayoutLength::Px(200.0F),
+                                                    Tina::UI::UILayoutLength::Px(20.0F)));
+                    !status)
+                {
+                    return status;
+                }
+                if (auto status = tree->setBoxPaint(*slider, solidFill(r, g, b, 220)); !status)
+                {
+                    return status;
+                }
+                if (auto status = tree->setSliderRange(*slider, 0.0F, 1.0F, 0.05F); !status)
+                {
+                    return status;
+                }
+                if (auto status = tree->setSliderValue(*slider, 1.0F); !status)
+                {
+                    return status;
+                }
+                if (auto status = tree->setSliderChangeCallback(
+                        *slider,
+                        Tina::UI::UISliderChangeCallback{[&, this](const Tina::UI::UISliderChangeEvent& event) noexcept {
+                            ++counters_->uiSliderChanges;
+                            lastVolume = event.value;
+                            fromSlider = true;
+                            pendingVolume = event.value;
+                            hasPending = true;
+                        }});
+                    !status)
+                {
+                    return status;
+                }
+                ++counters_->uiSlidersCreated;
+                return Tina::Core::success();
+            };
+
+        if (auto status = wireVolumeSlider(60.0F, 60, 60, 90, pendingMasterVolume_, hasPendingMasterVolume_,
+                                           counters_->lastMasterVolume, counters_->masterVolumeFromSlider);
+            !status)
         {
-            auto slider = tree->createSlider(root->rootNodeId());
-            if (!slider)
-            {
-                return Tina::Core::failure(std::move(slider.error()));
-            }
-            if (auto status = tree->setLayoutStyle(
-                    *slider, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
-                                                Tina::UI::UILayoutLength::Px(60.0F),
-                                                Tina::UI::UILayoutLength::Px(200.0F),
-                                                Tina::UI::UILayoutLength::Px(24.0F)));
-                !status)
-            {
-                return status;
-            }
-            if (auto status = tree->setBoxPaint(*slider, solidFill(60, 60, 90, 220)); !status)
-            {
-                return status;
-            }
-            if (auto status = tree->setSliderRange(*slider, 0.0F, 1.0F, 0.05F); !status)
-            {
-                return status;
-            }
-            if (auto status = tree->setSliderValue(*slider, 1.0F); !status)
-            {
-                return status;
-            }
-            if (auto status = tree->setSliderChangeCallback(
-                    *slider,
-                    Tina::UI::UISliderChangeCallback{[this](const Tina::UI::UISliderChangeEvent& event) noexcept {
-                        ++counters_->uiSliderChanges;
-                        counters_->lastMasterVolume = event.value;
-                        counters_->masterVolumeFromSlider = true;
-                        // AudioEngine is phase-local; apply on next updateFrame via pending flag.
-                        pendingMasterVolume_ = event.value;
-                        hasPendingMasterVolume_ = true;
-                    }});
-                !status)
-            {
-                return status;
-            }
-            ++counters_->uiSlidersCreated;
+            return status;
+        }
+        if (auto status = wireVolumeSlider(86.0F, 50, 80, 70, pendingMusicVolume_, hasPendingMusicVolume_,
+                                           counters_->lastMusicVolume, counters_->musicVolumeFromSlider);
+            !status)
+        {
+            return status;
+        }
+        if (auto status = wireVolumeSlider(112.0F, 90, 70, 50, pendingSfxVolume_, hasPendingSfxVolume_,
+                                           counters_->lastSfxVolume, counters_->sfxVolumeFromSlider);
+            !status)
+        {
+            return status;
         }
 
         uiRoot_ = std::move(*root);
@@ -975,9 +1003,33 @@ class TileMapBgfxState final : public Tina::IGameState {
                 }
                 hasPendingMasterVolume_ = false;
             }
+            if (hasPendingMusicVolume_)
+            {
+                if (auto status = audio->setBusVolume(Tina::Audio::AudioBusId::Music, pendingMusicVolume_); !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                hasPendingMusicVolume_ = false;
+            }
+            if (hasPendingSfxVolume_)
+            {
+                if (auto status = audio->setBusVolume(Tina::Audio::AudioBusId::Sfx, pendingSfxVolume_); !status)
+                {
+                    return Tina::Core::failure(std::move(status.error()));
+                }
+                hasPendingSfxVolume_ = false;
+            }
             if (auto bus = audio->busState(Tina::Audio::AudioBusId::Master); bus.has_value())
             {
                 counters_->lastMasterVolume = bus->volume;
+            }
+            if (auto bus = audio->busState(Tina::Audio::AudioBusId::Music); bus.has_value())
+            {
+                counters_->lastMusicVolume = bus->volume;
+            }
+            if (auto bus = audio->busState(Tina::Audio::AudioBusId::Sfx); bus.has_value())
+            {
+                counters_->lastSfxVolume = bus->volume;
             }
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
             // First frame with Audio: create null device, attach mixer, start.
@@ -1362,7 +1414,11 @@ class TileMapBgfxState final : public Tina::IGameState {
     Tina::UI::UIRootOwner uiRoot_{};
     // Applied on next updateFrame when audioEngine is available (phase-local).
     float pendingMasterVolume_ = 1.0F;
+    float pendingMusicVolume_ = 1.0F;
+    float pendingSfxVolume_ = 1.0F;
     bool hasPendingMasterVolume_ = false;
+    bool hasPendingMusicVolume_ = false;
+    bool hasPendingSfxVolume_ = false;
 };
 
 class TileMapBgfxApplication final : public Tina::IGameApplication {
@@ -1683,7 +1739,7 @@ int main(int argc, char** argv)
               counters.uiPanelsCreated == ExpectedUIPanelCount &&
               counters.uiTextLabelsCreated == ExpectedUITextLabelCount &&
               counters.uiButtonsCreated == ExpectedUIButtonCount && counters.uiButtonActionsWired == 1 &&
-              counters.uiSlidersCreated == 1 &&
+              counters.uiSlidersCreated == 3 &&
               counters.uiRootsReleased == 1 && *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     ok = ok && counters.physicsReady && counters.physicsStaticBodies == ExpectedPhysicsStaticBodies &&
@@ -1772,7 +1828,11 @@ int main(int argc, char** argv)
               << ",\"uiSlidersCreated\":" << counters.uiSlidersCreated
               << ",\"uiSliderChanges\":" << counters.uiSliderChanges
               << ",\"lastMasterVolume\":" << counters.lastMasterVolume
+              << ",\"lastMusicVolume\":" << counters.lastMusicVolume
+              << ",\"lastSfxVolume\":" << counters.lastSfxVolume
               << ",\"masterVolumeFromSlider\":" << (counters.masterVolumeFromSlider ? "true" : "false")
+              << ",\"musicVolumeFromSlider\":" << (counters.musicVolumeFromSlider ? "true" : "false")
+              << ",\"sfxVolumeFromSlider\":" << (counters.sfxVolumeFromSlider ? "true" : "false")
               << ",\"uiRootsReleased\":" << counters.uiRootsReleased
               << ",\"worldPointerPresses\":" << counters.tileSelection.pointerPresses
               << ",\"worldPointerMissingSamples\":" << counters.tileSelection.missingWorldPointerSamples

@@ -631,7 +631,10 @@ M11-C0：`UIWidgetKind::Checkbox` 与 Button 共享 primary arm/default-action/T
 M11-C1：`UIWidgetKind::Slider` 水平值控件；finite min/max/value/step；Primary Down/Move/Up 独占
 `armedSlider` 拖动，按 committed hit `worldRect` 映射 X→value 并 fire change（值未变不通知）。
 `tina_sample_2d` 创建 Master 音量 Slider，change 延迟到 `updateFrame` 写 `setBusVolume(Master)`。
-Music/SFX 分轨 Slider 与全屏设置后置。
+
+M11-C2：`tina_sample_2d` 再创建 Music/SFX 音量 Slider（与 Master 同 range/step）；pending 写对应
+bus；JSON 输出 `lastMusicVolume`/`lastSfxVolume`；自动 smoke 只要求 `uiSlidersCreated==3`。
+静音 Checkbox HUD 与全屏设置后置。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation
