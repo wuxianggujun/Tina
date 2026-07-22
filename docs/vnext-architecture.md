@@ -678,9 +678,11 @@ vNext-only preset 设为 OFF；当新2D/UI/3D/Audio 覆盖门禁后先把默认�
   Perspective、aspect resize、Mesh3D culling/sort/batch 和资源释放；它不显示 GPU 画面；
 - M9-B infrastructure：`tina_sample_3d_infrastructure` 使用 procedural Mesh 验证 Perspective、depth、
   canonical vertex/index buffer、真实 instance submission、resize 和资源释放；
+- M11-E0–E5 product 3D 最小门禁：`tina_sample_3d` 经 Catalog recipe 加载 Cooked StaticMesh +
+  Unlit Material（可选 Texture2D）、GPU upload/bind、300 帧 JSON 与资源账本；**不**替代 glTF/Prefab；
 - M12 删除 Legacy 前：正式 `tina_sample_2d` 必须通过最终 Catalog/Manifest 加载 TileMap/Tileset、
-  角色碰撞、Box2D dynamic body 和 UI overlay；正式 `tina_sample_3d` 必须通过最终 Cooker 加载
-  glTF/Material/Prefab。Infrastructure fixture 不能替代这两个 product gate；
+  角色碰撞、Box2D dynamic body 和 UI overlay；正式 `tina_sample_3d` 还必须覆盖最终 Cooker 的
+  glTF/Material/Prefab。Infrastructure fixture 与 E0–E5 cube 竖切不能单独替代完整 product gate；
 - 初始化失败点、Frame accumulator、Scene command、Asset cancel、Pass 顺序、UI layout/routing
   都有直接 GoogleTest；
 - 进程退出码、日志、资源计数和实际画面分别记录，不能用退出码 0 代替视觉结论。

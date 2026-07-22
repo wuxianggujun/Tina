@@ -251,7 +251,7 @@ M9-A 继续使用 `tina_render_scene_tests`，当前22项覆盖：Perspective Ca
 多次 begin/rollback/view 生命周期与 storage allocation rollback。`tina_sample_3d_extraction --frames=300`
 使用 standalone `Scene::World` 和 recording Null device，验证4 submitted、3 visible、1 culled、2 batches、
 resize aspect 更新、退出顺序和 `liveResources=0`；它不创建 bgfx 资源、不显示 GPU 画面，也不能替代
-M9-B 的 procedural Cube/depth 或 M10-A1+ 的 Cooked glTF 产品门禁。Runtime 生命周期测试另覆盖当前帧
+M9-B 的 procedural Cube/depth 或 M11 之后的 Cooked glTF/Prefab 产品门禁。Runtime 生命周期测试另覆盖当前帧
 framebuffer aspect 注入及 `0x0` 时回退 logical extent。
 
 M9-B 当前最小实现把最小 Opaque3D fixture 接入私有 `tina_render_bgfx`，使用同一个

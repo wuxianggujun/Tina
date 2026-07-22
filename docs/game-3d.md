@@ -1,8 +1,8 @@
 # 3D 游戏架构
 
-> 状态：vNext 契约已冻结；M9-A/B fixture 与 M11-E0–E3 product StaticMesh 竖切已落地。
-> `tina_sample_3d` 走 Catalog recipe `staticmesh … cube` → GPU upload/bind → Opaque3D instance
-> batch；**仍非** glTF/Material/Prefab/textured 完整产品门禁（cgltf 后置）。
+> 状态：vNext 契约已冻结；M9-A/B fixture 与 M11-E0–E5 最小产品 3D 竖切已落地。
+> `tina_sample_3d`：Catalog recipe `staticmesh … cube` + UnlitBaseColor（solid / optional Texture2D）
+> → GPU mesh/texture bind → Opaque3D instance batch + UI；**仍非** glTF/Prefab/PBR（cgltf 后置）。
 
 ## 首期能力边界
 
@@ -54,9 +54,11 @@ Game3DState
 游戏代码保存 `AssetHandle<MeshAsset>`、`AssetHandle<MaterialAsset>` 和 Scene component，不接触
 RenderDevice、GPU Buffer/Texture/Pipeline handle、view id、shader uniform 或 bgfx 类型。
 
-当前 M9-B 样例尚未走上图中的 Scene component/Asset path，而是在 `IGameState::extractRenderScene()`
-中直接写 resolved Perspective/Mesh3D input 作为 fixture。正式产品路径必须在 M10 之后用 Cooked
-Asset 和 `FrameResourceRef` 替换这些 fixture key。
+当前 M9-B 样例尚未走上图中的 Scene component path，而是在 `IGameState::extractRenderScene()`
+中直接写 resolved Perspective/Mesh3D input 作为 fixture。M11-E0–E5 的 `tina_sample_3d` 已用
+Catalog recipe Cooked StaticMesh/Material/Texture2D + GPU bind 替换 fixture mesh 几何；
+`meshKey`/`materialKey` 仍是后端绑定表键，完整 Scene `MeshRenderer3D`/`FrameResourceRef` 与
+glTF/Prefab 仍后置。
 
 ## Camera3D
 

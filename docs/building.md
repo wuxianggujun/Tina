@@ -144,13 +144,30 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_2d_infrastructure.exe --frame
 
 `tina_sample_3d_extraction` 与 `tina_render_scene_tests` 属于 vNext Null 图，不需要 GLFW、bgfx、shader
 或 GPU。当前 Debug 直接结果为 RenderScene 22/22 和样例300帧；样例每帧记录4 submitted、3 visible、
-1 culled、2 batches，并在1280x720切到800x800时验证一次 aspect 更新与退出资源归零。它不显示 Cube；
-M9-B 可见 `tina_sample_3d_infrastructure` 已实现，M10-A1+ Cooked glTF `tina_sample_3d` 尚未实现。
+1 culled、2 batches，并在1280x720切到800x800时验证一次 aspect 更新与退出资源归零。它不显示 Cube。
+
+M9-B 可见 fixture 与 M11-E0–E5 最小产品 3D 在 **bgfx** 图：
+
+| 样例 | 证明 | 未证明 |
+| --- | --- | --- |
+| `tina_sample_3d_infrastructure` | procedural Cube / depth / instance | Cooked Asset |
+| `tina_sample_3d` | Catalog recipe StaticMesh + Unlit solid/textured | glTF / Prefab / PBR |
+
+Cooked glTF → Mesh/Material/Prefab 仍 Deferred，不阻塞 E0–E5 收口。
 
 ```powershell
 cmake --build --preset windows-vnext-debug --target tina_render_scene_tests tina_sample_3d_extraction
 out\build\windows-msvc-vnext\bin\Debug\tina_render_scene_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_3d_extraction.exe --frames=300
+
+# Product / fixture 3D (GLFW + bgfx; no --clean-first)
+cmake --build --preset windows-vnext-bgfx-debug `
+  --target tina_render_bgfx_tests tina_sample_3d_infrastructure tina_sample_3d
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe `
+  --frames=300 --frame-delay-ms=0
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe `
+  --frames=300 --frame-delay-ms=0
 ```
 
 ### M10-A0 Cooked wire format

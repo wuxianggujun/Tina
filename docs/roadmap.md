@@ -660,7 +660,8 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 
 **产品 2D 主线（`tina_sample_2d` + pointer→选格→高亮）以 A39–A44 为可验收收口。**
 **默认不再开 M10-A45**，除非出现真实产品缺口（门禁失败、Accepted 契约回归）。完整 cooker CLI、
-cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A45 自动续号。
+cgltf（glTF 产品 3D）、厚 world-pick Game SDK、删 Legacy **不**用 M10-A45 自动续号。
+最小 `tina_sample_3d` cube/Unlit 产品竖切见 **M11-E0–E5**（已完成，非 glTF）。
 
 | 状态 | 范围 | 备注 |
 | --- | --- | --- |
@@ -671,7 +672,7 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
 | **已完成（样例主线）** | A32–A38 Catalog/TileMap/角色/UI/Physics/recipe | product-2d preset |
 | **已完成（Asset 子集）** | A0–A31 Catalog/Handle/Task/upload/recipe 等 | hermetic fixture 足够 2D 主路径 |
 | **Deferred** | 完整外部 cooker CLI / 全量 `tina_assetc` | 当前 recipe 子集；可另开切片 |
-| **Deferred** | cgltf v1.15 → Material/Prefab + textured `tina_sample_3d` | StaticMesh cube 产品竖切见 M11-E0–E3；glTF 不阻塞 2D 收口 |
+| **Deferred** | cgltf v1.15 → glTF/Material/Prefab 正式 3D 产品门禁 | 最小 StaticMesh cube + Unlit textured 见 **M11-E0–E5**；glTF 不阻塞 2D/E0–E5 收口 |
 | **Deferred** | 扩大 Game SDK world-pick 公共 API | sample-private helper 已够 |
 | **Deferred（可进 M11）** | 稳定截图回归 | Camera 投影/follow 见 M11-B0/B2；chunk dirty 见 M11-B1 |
 | **Deferred（M12）** | 删 Legacy | 需 2D/UI/3D/Asset/Audio 等价验收 |
