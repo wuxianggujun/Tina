@@ -92,8 +92,8 @@ buffer 仍未实现。
 producer，Game SDK 只取得 root-scoped setter/query；它不引入 SDL、Runtime/Render 依赖或 bgfx 类型，
 也不等于 Focus/Capture、键盘/手柄、文本或完整 Widget 系统已经完成。
 
-现有 Legacy target 的包依赖由 vcpkg manifest 管理，bgfx、EASTL、EABase 仍保持固定源码
-版本；其中 EASTL/EABase 只属于迁移期现状，不是 vNext 目标依赖。
+包依赖由 vcpkg manifest 管理；bgfx 以 `thirdparty/bgfx.cmake` 源码 submodule 锁定。
+EASTL/EABase 已随 Legacy 产品移除。
 
 Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Game；它不是 vNext 目标图。
 新 target 的权威依赖关系见 [vNext 目标架构](vnext-architecture.md)，第三方类型不得继续向

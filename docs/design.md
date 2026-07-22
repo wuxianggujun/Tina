@@ -4,9 +4,8 @@
 
 ## 一句话定位
 
-Tina 当前是一套以现有游戏为验证载体的小型 2D/3D Runtime；vNext 的目标是形成模块边界
-清晰、生命周期可验证、可持续扩展的游戏 Runtime。我们支持完整目标架构重构，但通过
-可运行的垂直切片迁移，而不是围绕旧接口无限修补或一次替换后长期无法运行。
+Tina 是模块边界清晰、生命周期可验证的 2D/3D 游戏 Runtime（vNext）。产品验收以
+`tina_sample_*` 与直接 GoogleTest 为准；Legacy 单体游戏路径已退役。
 
 完整模块、接口、数据流和迁移门禁见 [Tina vNext 目标架构](vnext-architecture.md)；
 Core 专项设计及 Carbon Core 取证见 [tina_core 设计](core.md)；性能/内存与线程模型分别见
@@ -20,7 +19,7 @@ Core 专项设计及 Carbon Core 取证见 [tina_core 设计](core.md)；性能/
 
 | 领域 | 当前决定 | 原因 |
 | --- | --- | --- |
-| 语言与编码 | Tina target 已统一为 C++23、UTF-8，MSVC 使用 `/utf-8`；Windows MSVC 19.50、Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 已通过门禁 | 语言升级必须同时保留 Legacy 回归与独立 vNext 构建，不能只改文档 |
+| 语言与编码 | Tina target 已统一为 C++23、UTF-8，MSVC 使用 `/utf-8`；Windows MSVC 19.50、Linux GCC 13.4 与 Clang 22.1.8 + libstdc++15.2 已通过门禁 | 独立 vNext 构建与直接 GoogleTest 门禁 |
 | 窗口与基础输入 | GLFW，不引入 SDL/SDL3 | 保持平台层单一；Windows IME 仅用 IMM32 补充 |
 | 渲染 | bgfx | 先复用成熟后端，不在当前阶段自研 RHI |
 | UI | Tina 自研 Retained UI | 服务游戏内 UI；vNext 用带 owner 的 generation `UINodeId` 管理交互生命周期 |

@@ -45,4 +45,4 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 - Linux 全门禁复验
 - EASTL/EABase submodule 物理移除
 - `resources/` 中仅服务已删产品的资产清理
-- 主题文档中仍写 “Legacy 仍可运行” 的句子需持续扫尾
+- 主题文档扫尾：building/testing/README 等已去掉 `Tina.exe`/`--smoke-*` 产品命令

@@ -22,7 +22,7 @@
 | bgfx/bx/bimg/shaderc | 唯一真实 Render backend 与离线 shader | 固定 submodule commit | 只在 render_bgfx/tool | 保留 |
 | EnTT | 后续 Scene component storage | vcpkg | 仅允许在未来 `tina_scene` 实现层 PRIVATE 使用 | 保留；M8-A standalone World 当前不接入 |
 | FreeType | 字形 raster；Glyph Atlas 编排仍属于 Tina UI | vcpkg | 只在 `tina_ui_freetype` adapter | 保留 |
-| miniaudio | 唯一真实 Audio backend | vcpkg feature `audio-miniaudio` / legacy | 只在 `tina_audio_miniaudio` / Legacy `Tina::Miniaudio` | 内置 WAV/FLAC/MP3；不使用 SDL_mixer |
+| miniaudio | 唯一真实 Audio backend | vcpkg feature `audio-miniaudio` | 只在 `tina_audio_miniaudio` / Legacy `Tina::Miniaudio` | 内置 WAV/FLAC/MP3；不使用 SDL_mixer |
 | libvorbis | 可选 Ogg Vorbis 解码 | vcpkg feature `audio-miniaudio-vorbis` | 仅当 `TINA_AUDIO_ENABLE_LIBVORBIS=ON` | 默认 OFF |
 | libopus / opusfile | 可选 Opus 解码 | vcpkg feature `audio-miniaudio-opus` | 仅当 `TINA_AUDIO_ENABLE_LIBOPUS=ON` | 默认 OFF |
 | xxHash | ContentHash、Cook cache、可选 StringId | vcpkg root dependency + private adapter | `tina_core` PRIVATE 链接；公共头零 token | 保留，不承担安全签名；M10-A2a 契约 |
@@ -47,8 +47,7 @@
   Carbon 的副本；
 - Tracy 通过目标 vcpkg manifest feature `profile-tracy` 按需解析，由 Profile preset 启用；普通
   Debug/Release 和发行包不能因为未安装 Tracy 而 configure 失败；
-- Box2D 通过独立 `physics2d` feature 进入 vNext Physics 图；基础 `tests` Null 图不解析 Box2D，
-  Legacy 迁移期继续由自己的 `legacy` feature 持有同一固定包；
+- Box2D 通过独立 `physics2d` feature 进入 vNext Physics 图；基础 `tests` Null 图不解析 Box2D；
 - 生成包记录 Tina commit、vcpkg baseline、submodule commit、Cooked schema 和 shader ABI。
 
 ## CMake 可见性

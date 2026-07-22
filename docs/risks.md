@@ -5,7 +5,7 @@
 
 | 风险 | 等级 | 触发信号 | 缓解 | 关闭条件 |
 | --- | --- | --- | --- | --- |
-| Legacy 与 vNext 长期双架构 | P0 | 新功能同时改两套 Runtime、桥接层增长 | 垂直切片、Legacy 只修 blocker、零引用清单；迁移期默认 ON，vNext preset 固定 OFF，覆盖门禁后再翻默认值 | vNext-only 全门禁后删除 Legacy |
+| 文档/资源残留误导“Legacy 仍可运行” | P1 | 开发者误用已删 Tina.exe/smoke | 主题文档扫尾、m12-* 清单；产品仅 vNext samplesreset 固定 OFF，覆盖门禁后再翻默认值 | vNext-only 全门禁后删除 Legacy |
 | Factory/模块依赖形成环 | P0 | Runtime include 具体 GLFW/bgfx/miniaudio 或 Scene/Render 互相 include | backend factories、依赖图自动检查、public header compile test | 所有目标只按冻结图链接 |
 | `IGameApplication`/`IGameState` 再次形成双帧入口 | P0 | 程序入口出现 fixed/update/render，World/UI 可放两个位置 | `IGameApplication` lifecycle-only、`IGameState` 唯一帧接口、API consumer test | 公共入口无 IFrameClient/双回调且状态顺序测试通过 |
 | State transition/exit 出现双重清理、Worker UAF 或首帧延迟 | P0 | onExit 前 owner 已失效、barrier 前释放 Worker 所读成员、同帧2次布局、新 root 到N+2才交互 | Frame Update 后唯一 transition commit；关闭 ingress→cancel→barrier/join→onExit→RAII | 失败注入、单布局、下一帧输入和残留归零测试通过 |

@@ -660,8 +660,7 @@ producer 使用两份 Create 期预分配的 PMR consumption bitset，成功发�
 count 不增长。失败测试先让 root Move listener 产生1次 side effect，再让后续深层 Button route 因 route
 path capacity 失败：staging view 不发布、旧 published view 保持，但 attempted frame/sequence watermark
 已推进；同一 frame retry 被拒且 callback 仍为1，明确证明 side effect 不回滚也不重放。独立
-`tina_runtime_ui_tests` 直接运行 GoogleTest，不使用 CTest，并与 Legacy UI 所在的
-`tina_legacy_tests` 分离。
+`tina_runtime_ui_tests` 直接运行 GoogleTest，不使用 CTest，且不与其他 UI 专项进程混链。
 
 M7-C1c-b3c 没有增加 Game SDK public type。`EngineHost` 内部的 primary-window owner 在首次有效
 `WindowId` 出现时创建并绑定一个 `UIContext`，相同 owner/index/generation 持续复用；绑定后的窗口

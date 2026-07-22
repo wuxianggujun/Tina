@@ -36,26 +36,14 @@ cmake --list-presets
 ```
 
 依赖由固定 vcpkg baseline 解析。项目窗口与基础输入只使用 GLFW，不需要 SDL/SDL3。
-当前旧 target 仍需要源码形式的 EASTL/EABase；vNext target 不再依赖它们，只有 Legacy
-零引用并通过完整门禁后才从仓库与构建中删除。xxHash 继续作为窄 Hash adapter 的私有后端。
-
-## Windows Debug
-
-```powershell
-cmake --preset windows-msvc
-cmake --build --preset windows-debug --target Tina tina_tests tina_legacy_tests
-out\build\windows-msvc\bin\Debug\tina_tests.exe
-out\build\windows-msvc\bin\Debug\tina_legacy_tests.exe
-```
+**EASTL/EABase 与 Legacy 产品图已退役。** xxHash 继续作为窄 Hash adapter 的私有后端。
+默认 vcpkg feature 为 `tests`（不再默认 `legacy`）。
 
 ## Windows vNext 最小构建
 
-该 preset 关闭 Legacy、bgfx/shader 和 vcpkg 默认 feature，构建当前 vNext M6-A/M7-A/M7-B1 与
-M7-C1b/C1c-a/C1c-b1/C1c-b2/C1c-b3a/C1c-b3b/C1c-b3c/C1c-b3d1/C1c-b3d2/C1c-b3e/M8/M9-A/M10-A0/M10-A1 的 `tina_core`、`tina_platform`、
-`tina_task`、`tina_render`、`tina_runtime`、`tina_scene`、`tina_asset_format`、`tina_asset`、`tina_ui`，以及最新 SolidFill paint、Render DisplayList、D2 scoped
-`setBoxPaint()` 与
-`tina_ui_render_integration`、
-直接 GoogleTest 门禁与 Null/2D/3D extraction infrastructure 样例：
+该 preset 关闭 bgfx/shader 与无关 manifest feature，构建 vNext `tina_core`、`tina_platform`、
+`tina_task`、`tina_render`、`tina_runtime`、`tina_scene`、`tina_asset_format`、`tina_asset`、`tina_ui`、
+`tina_ui_render_integration` 等，以及 Null/2D/3D extraction infrastructure 样例：
 
 ```powershell
 cmake --preset windows-msvc-vnext
@@ -290,7 +278,7 @@ Runtime packet/FramePin 或完整可见 Widget 已完成；D1/D2 的可见 Solid
 
 ## Windows vNext Runtime→UI producer、primary-window owner、layout coordinator、scoped Game SDK UI access 与 Pointer Button claim bridge
 
-M7-C1c-b3b/b3c/b3d1/b3d2/b3e 使用独立 `tina_runtime_ui_tests`，避免把 vNext `UIContext` 与 Legacy ON 图中的不兼容
+M7-C1c-b3b/b3c/b3d1/b3d2/b3e 使用独立 `tina_runtime_ui_tests`，避免与其它 UI 专项进程中的不兼容
 `Tina::UI` 定义放进同一最终二进制：
 
 ```powershell
@@ -432,31 +420,11 @@ out\build\windows-msvc-vnext\bin\Release\tina_sample_2d_tilemap.exe --frames=300
 out\build\windows-msvc-vnext\bin\Release\tina_sample_3d_extraction.exe --frames=300
 ```
 
-Legacy Release 仍可使用原有多配置构建目录：
-
-```powershell
-cmake --build out\build\windows-msvc `
-  --config Release `
-  --target Tina tina_tests tina_legacy_tests `
-  --parallel 2
-out\build\windows-msvc\bin\Release\tina_tests.exe
-out\build\windows-msvc\bin\Release\tina_legacy_tests.exe
-```
-
 Debug、Release 可执行文件和 app-local DLL 分别位于 `bin/Debug`、`bin/Release`，不能混用 GTest 或其他运行时 DLL。
 
-## Linux Debug
+## Linux Debug（vNext）
 
-在 Linux 或 WSL 的仓库目录中执行：
-
-```bash
-cmake --preset linux-ninja
-cmake --build --preset linux-debug --target Tina tina_tests tina_legacy_tests
-./out/build/linux-ninja/bin/tina_tests --gtest_color=no
-./out/build/linux-ninja/bin/tina_legacy_tests --gtest_color=no
-```
-
-只做 vNext 无 GPU 的编译、链接和单元测试门禁时，使用独立 `linux-gcc13-vnext` 目录，避免污染 Legacy 可运行构建：
+只做 vNext 无 GPU 的编译、链接和单元测试门禁时，使用独立 `linux-gcc13-vnext` 目录：
 
 ```bash
 cmake --preset linux-gcc13-vnext

@@ -1,18 +1,16 @@
 # Tina 游戏引擎
 
-Tina 是以 C++23 为目标语言基线的 2D/3D 游戏引擎项目。平台与输入层使用 GLFW，私有渲染后端使用 bgfx，音频使用 miniaudio，ECS 使用 EnTT，UI 为完全自研的 Retained UI。vNext 游戏侧契约不暴露 bgfx、GLFW 或其他第三方类型；仍在运行的 Legacy 实现尚未完成这项边界迁移。
+Tina 是以 C++23 为目标语言基线的 2D/3D 游戏 Runtime。平台与输入层使用 GLFW，私有渲染后端使用 bgfx，可选 miniaudio/Box2D，UI 为自研 vNext Retained UI（`Tina::UI`）。游戏侧契约不暴露 bgfx、GLFW 或其他第三方类型。**Legacy `Tina.exe` / `src/ui` 产品图已退役。**
 
 ## 当前目标
 
-当前阶段允许不兼容旧 API 的完整 vNext 重构，但不会用一个长期不可运行的大提交替换全部
-Runtime。现有2D/UI/3D路径继续作为验收基线，新架构按可独立构建和运行的垂直切片迁移：
+产品以 vNext 垂直切片为基线（`tina_sample_2d` / `tina_sample_3d` 等）：
 
-- 保证现有 2D 场景和自研 UI 能启动、交互和正确释放资源；
-- 修复 Application、Event、Resource、Scene 和 UI 的生命周期与每帧驱动顺序；
-- 使用直接运行的 GoogleTest 可执行文件覆盖核心行为；
-- 增加最小 3D 冒烟场景，验证透视相机、深度测试和静态 Mesh；
-- 以 `IGameApplication` 表示“整个游戏程序入口”，以 `IGameState` 表示“菜单、关卡、暂停等逐帧运行状态”，不再使用含义模糊的 `IGame`；
-- 建立细粒度 dirty、单次布局、持久 Paint Cache 和稳定 Display List 的高性能 Retained UI；
+- 保证 2D Catalog/TileMap 与 vNext UI 能启动、交互和正确释放资源；
+- 使用直接运行的 GoogleTest 覆盖 Core/Runtime/UI/Scene/Asset 等行为；
+- 3D 最小产品路径：glTF cook + Prefab + Scene extract（见 `tina_sample_3d`）；
+- 以 `IGameApplication` 表示程序入口，以 `IGameState` 表示菜单/关卡等逐帧状态；
+- 持续完善 Retained UI（dirty/layout/paint/DisplayList）与资源账本；
 - 参考 Carbon Engine 的 Frame Step、资源 Load/Prepare/Upload 和 GPU 生命周期，但保持 Tina 架构小而清晰。
 - 采用 Tina-owned Trace/Metrics 和可选 Tracy 定位热点；规划独立 `tina_bench` 建立可重复性能回归，
   但当前尚未实现该 target；
@@ -128,19 +126,15 @@ M10-A1 已新增独立 `tina_asset`：owning 不可变 `CatalogSnapshot` 在注�
 entry index；完整 DAG cycle 使用迭代着色算法（`O(V + E)`，禁止递归）。该切片不实现 Handle/Lease、
 registry 状态机、文件 IO、Task、GPU upload、XXH3、cgltf 或正式资产样例；ADR 0016 仍为 Proposed。
 
-## 当前 Legacy 已完成基线
+## 当前产品基线（vNext）
 
-- 现有 Legacy target 的包依赖已迁移到 vcpkg manifest；bgfx 与 EASTL/EABase 仍是源码依赖；
-  这是当前实现事实，不是 vNext 的最终依赖方案；
-- Window/Input 已迁移到 GLFW；
-- 音频已迁移到 miniaudio；
-- Core 已增加强类型、Result、Assert、ScopeExit、Clock 和 FrameTimer；
-- Windows/Linux CMake Preset 已建立。
-- `GameScene` 已通过真实 2D TileMap、ECS、中文 UI 和音频冒烟；
-- `Smoke3DScene` 已通过右手透视相机、深度测试和静态索引 Mesh 冒烟。
+- 依赖：vcpkg manifest（默认 feature `tests`）；bgfx 以 `thirdparty/bgfx.cmake` 锁定；**无 EASTL/EABase**；
+- Platform/Input：GLFW（`platform-glfw`）；Audio：可选 miniaudio；Physics2D：可选 Box2D；
+- Core：focused `include/tina/core`、Result/Status、Assert、FixedStep、GenerationId 等；
+- 产品样例：`tina_sample_2d`（Catalog TileMap + vNext UI）、`tina_sample_3d`（glTF/Prefab 最小路径）；
+- **Legacy `Tina.exe` / `src/ui` 产品图已退役**（见 [m12-legacy-ui-retirement.md](docs/m12-legacy-ui-retirement.md)）。
 
-vNext 将继续使用锁定源码版本的 bgfx，但新 target 禁止 EASTL/EABase；具体版本、可见性与
-删除门禁见[第三方依赖与版本治理](docs/dependencies.md)。
+版本、可见性与门禁见 [第三方依赖与版本治理](docs/dependencies.md)。
 
 ## 构建
 
@@ -157,7 +151,7 @@ Windows Debug/Release 证据仍为基础207/207、UI92/92、Runtime→UI53/53、
 bgfx专项16/16、Null样例300帧，以及真实 D3D11 Intel Iris Xe 的 `tina_sample_desktop` 可见 retained UI
 样例 Debug 1200帧与 Release 300帧；Release 输出 clean status ok。Debug D3D11 退出时
 `RefCount is 3 (expected 0)` 是已记录的第三方 debug layer 提示，不作为 Tina 泄漏结论。前序 WindowSurface
-GLFW专项25/25、GLFW样例300/1800帧仍作为历史证据。Legacy ON 图的前序隔离门禁为 vNext 185/185 + Legacy 43/43。
+GLFW专项25/25、GLFW样例300/1800帧仍作为历史证据。
 `TINA_BUILD_TESTING=OFF` 的 production-style WindowSurface GLFW样例300帧也已通过。Game SDK 与
 公开头检查未发现 bgfx、GLFW 或 native handle 泄漏。
 

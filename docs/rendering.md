@@ -18,16 +18,11 @@
 > Pass Scheduler 与 submission ticket/drain 仍后置。
 > bgfx 是 Tina 的实现依赖，不是游戏开发 API。
 
-## 当前 Legacy 事实
+## 当前产品事实
 
-当前单体 `Tina` executable 直接链接 bgfx/bx/bimg，Tile、Sprite、Primitive、Particle、Text、UI
-和 3D Cube 都有 header 或调用点接触 bgfx handle、ViewId、clear/state flag。至少 Engine、ECS、
-Renderer 和 UI 的多份 Legacy header 存在第三方类型泄漏；Core 的 PUBLIC include root 还会传播
-整个 `src`。这些是迁移输入，不是 vNext 边界已经完成的证据。
-
-现有 `--smoke-3d` 已证明右手 Perspective、depth-tested indexed Cube 和退出时 vertex/index
-buffer 回收；现有 2D/UI 路径也能运行。但目前 Scene、World、Widget 仍可能直接提交 backend，
-因此不能在旧接口上继续扩张新的 Material、UI Widget 或 3D 功能。
+Legacy 单体 `Tina` executable 已退役。产品渲染经 `Tina::Render` SPI + 私有 `Tina::RenderBgfx`：
+Game SDK / `IGameState` 不暴露 bgfx handle。可见证据以 `tina_sample_desktop`、
+`tina_sample_2d`、`tina_sample_3d` / infrastructure 为准。
 
 ## 不可变规则：游戏用户看不到 bgfx
 
@@ -460,10 +455,8 @@ procedural geometry。禁止恢复 Runtime 路径加载，也禁止游戏自行�
 
 验收分开记录：
 
-- 当前 Legacy：`Tina --smoke-*` 只证明旧路径仍可运行；
-- vNext infrastructure：Null、Platform、Desktop SolidQuad GPU、UI/2D、M9-A 3D CPU extraction、
-  M9-B 3D GPU fixture sample 与 M9-C 2D/UI GPU fixture sample 分别验证接口和生命周期；
-- vNext product：Cooked TileMap 2D 与 Cooked glTF/Material/Prefab 3D 才计入 Legacy 删除门禁；
+- infrastructure：Null、Platform、Desktop SolidQuad、M9 extraction/fixture 等生命周期；
+- product：`tina_sample_2d`（Catalog TileMap + UI）与 `tina_sample_3d`（glTF/Prefab 最小路径）；
 - 进程返回码、结构化资源计数、性能数据和实际截图是四类不同证据。
 
 `tina_bench` 记录 extraction、culling、sort、batch、submit、resource/retirement 和有效 GPU timer

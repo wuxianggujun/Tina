@@ -1,25 +1,25 @@
 # Runtime 与 Frame Pipeline
 
-## 当前实现：Legacy 产品路径
+## 当前实现：vNext 产品路径
 
-Application 已集成 GLFW Window/Input、EventSystem、资源管理器、miniaudio、SceneManager 和 bgfx。Core 提供 Clock 与 FrameTimer。
+产品组合根为 `EngineHost` + `IGameApplication` / `IGameState`（`Tina::Desktop::CreateEngine`）。
+Legacy `Application` / `SceneManager` 产品路径已删除。
 
-当前每帧的实际主线程顺序为：Poll Platform/Input → Event Queue → Asset Completion → App Event → Fixed Simulation → Variable/Scene Update → UI Node Update → UI Batch Layout → UI Hit-test/Routed Event → Scene Render → App Render → Input End Frame → Deferred Task → Present。Event Queue、Asset Completion 和 UI Pointer Routing 都只有一个明确泵送点；资源 completion 默认每帧最多提交8个。
+每帧主线程顺序（摘要）：Platform poll → lifecycle dispatch → UI route/claims → ActionMapper →
+0..N fixedUpdate → updateFrame → extractRenderScene → updateUI → submitFrame → present（非 suspended）。
+Fixed step 默认 60 Hz、每帧最多 4 步（`FixedStepAccumulator`）。
 
-Fixed Simulation 默认 60 Hz、每个 Render Frame 最多追赶4步；超出保护阈值的积压会被丢弃，Render 可通过 `interpolationAlpha()` 读取 accumulator 插值比例。GameScene 的 ECS、碰撞、水模拟、粒子与昼夜推进已进入 fixed phase，相机和 UI 保持可变帧率。
-
-Application 初始化现在保留明确的成功状态；任一必需子系统失败会按逆序回滚，`run()` 会拒绝半初始化实例。`--smoke-frames=N` 可在提交 N 帧后沿正常生命周期退出，用于验证析构和资源回收。
+样例用 `--frames=N` 在提交 N 帧后请求退出，验证析构与资源账本。
 
 ## 已知问题
 
-- Scene 操作和资源上传/销毁还没有完全归入独立 Frame Phase；
-- Legacy Application 仍承担过多系统所有权，尚未迁移到 vNext EngineHost/factory/阶段 Context。
+- 完整 State 栈 / GameStatePolicy 驱动尚未落地；
+- Pass Scheduler / submission ticket 仍后置。
 
 ## vNext Runtime 内核与首个 GLFW Platform 切片
 
 M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A 又接入 Platform/Input，并以
-独立提交加入私有 GLFW Window/Keyboard/Pointer/committed text producer；它们与 Legacy Application
-并存，不改变现有产品路径：
+独立提交加入私有 GLFW Window/Keyboard/Pointer/committed text producer：
 
 - `Result<T>/Status` 使用 `std::expected`，Error 已包含稳定 domain/code、origin、native code
   和 UTF-8 context chain；

@@ -24,21 +24,17 @@ Tina 不应复制 Carbon 的历史包袱。vNext 保留现有现代 C++ 基础�
 - `diagnostics`：可替换 handler 的 `TINA_ASSERT`；
 - `include/tina/core/...`：不借用 `src` include root、无第三方 header 的正式公共面。
 
-旧 `Clock/FrameTimer/FixedStepTicker` 只保留在 `src/core` forwarding/compatibility 路径，供
-Legacy Application 迁移期间继续使用；它们不是 vNext Game SDK。
-
-EASTL、xxHash、旧 `Memory.hpp/Path.hpp/Time.hpp` 已隔离在 `tina_core_legacy`。vNext 的新决定
-是：EASTL 只随 Legacy 存续，迁移结束后删除；xxHash 从 Legacy 中解耦，作为窄接口后的
-私有 Hash 后端保留。`Result` 已用 C++23 `std::expected` 收敛，ScopeExit/Clock 则保留语义并
-建立更窄、更清晰的新接口；我们不把旧 `Container.hpp` 复制到新 Core。
+vNext Game SDK 使用 `include/tina/core/...` focused API 与 `FixedStepAccumulator` /
+`IMonotonicClock`；旧 `Clock/FrameTimer/FixedStepTicker` 与 `tina_core_legacy`/EASTL 已随
+Legacy 产品删除。xxHash 作为 ContentHash 的私有后端保留。`Result` 使用 C++23
+`std::expected`。
 
 当前缺口主要是：
 
 - 指标、Trace Zone、线程/锁/队列命名尚未形成统一接口；
 - 只有 programmer assertion，尚未区分 ensure、recoverable error 与 crash context；
-- 缺少内存 tag、当前值/峰值和资源预算快照；
-- UTF-8 路径、原子文件写入与平台错误尚未形成新 Core 契约；
-- `Hash`、路径和内存的有效能力仍在 Legacy compatibility 中。
+- 部分内存预算/峰值报表仍可加深；
+- 平台错误码统一映射可继续扩展。
 
 ## vNext Core 边界
 

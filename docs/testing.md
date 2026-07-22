@@ -3,23 +3,14 @@
 ## 规则
 
 - 测试框架固定为 GoogleTest；
-- `TINA_BUILD_TESTING=ON` 时 CMake 始终生成 vNext 基础 `tina_tests`；Legacy ON 时另行生成
-  `tina_legacy_tests`，旧 Core/Engine/UI 测试只进入这个 Legacy-only executable，禁止和 vNext UI/Runtime
-  混入同一最终二进制；M7-C1b/C1c-a/C1c-b1/C1c-b2 与 b3d2/b3e 低层 updater UI 树、布局、命中快照、
-  point query 与 synthetic route 核心另有独立 `tina_ui_tests`，M7-C1c-b3b/b3c/b3d1/b3d2/b3e
-  Runtime→vNext UI producer、primary-window owner、layout coordinator、scoped Game SDK access、Pointer Button claim bridge
-  与 D0 primary-window UIDisplayList handoff、后续 root-scoped Game SDK listener facade、M10-A42
-  world pointer Action Mapping payload 另有独立
-  `tina_runtime_ui_tests`；SolidFill committed paint → Render SolidQuad DisplayList 的窄桥另有独立
-  `tina_ui_render_integration_tests`；启用
-  `TINA_BUILD_PLATFORM_GLFW` 时另外生成 `tina_platform_glfw_tests`，启用
-  `TINA_BUILD_RENDER_BGFX` 时另外生成 `tina_render_bgfx_tests`，其中 M9-B 的 Opaque3D fixture 与
-  M9-C 的 Sprite2D fixture 几何/预算测试仍留在私有 bgfx adapter 测试进程内，不注册额外测试调度；
-  M8-A Scene World/Transform 另有独立 `tina_scene_tests`，M8-B 2D 与 M9-A 3D RenderScene extraction 共用独立
-  `tina_render_scene_tests`；M10-A0 Cooked Header/Manifest wire-format 校验另有独立
-  `tina_asset_format_tests`；M10-A1 owning CatalogSnapshot / DAG cycle 另有独立
-  `tina_asset_tests`；启用 `TINA_BUILD_PHYSICS2D` 时 M11-A0 另生成 `tina_physics2d_tests`。这些专项均不并入
-  基础 `tina_tests`；
+- `TINA_BUILD_TESTING=ON` 时 CMake 生成 vNext 基础 `tina_tests`（**无** `tina_legacy_tests`；
+  Legacy 产品图已退役）。M7 UI 树/layout/hit/route 另有独立 `tina_ui_tests`；Runtime→UI /
+  DisplayList handoff 另有独立 `tina_runtime_ui_tests`；UI→Render bridge 另有独立
+  `tina_ui_render_integration_tests`；启用 `TINA_BUILD_PLATFORM_GLFW` 时另有
+  `tina_platform_glfw_tests`；启用 `TINA_BUILD_RENDER_BGFX` 时另有 `tina_render_bgfx_tests`；
+  Scene 有 `tina_scene_tests`；RenderScene 有 `tina_render_scene_tests`；AssetFormat 有
+  `tina_asset_format_tests`；Asset 有 `tina_asset_tests`；Physics2D 有 `tina_physics2d_tests`。
+  专项均不并入基础 `tina_tests`；
 - 构建完成后直接运行对应 GoogleTest executable，任一返回码非0即失败；
 - Visual Studio 多配置构建把测试运行时隔离到 `bin/<Config>`，禁止 Debug/Release GTest DLL 共用目录；
 - 同一 Visual Studio build tree 的 Debug/Release 构建串行执行，禁止并发启动两个 MSBuild 门禁；
@@ -136,9 +127,9 @@
 
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M8-A `tina_scene` World/Transform | Debug/Release C++23 | 19/19 | `tina_scene_tests` Debug 与 Release 均直接运行通过；覆盖 generation/owner、keep-world/keep-local、父销毁/显式子树销毁、非递归20,000层传播、宽树删除、固定容量/PMR回滚与稳定构造错误、overflow/shear、四元数和错线程读写；Linux Scene 图尚未运行 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | vNext 至 D2 + M8-B 2D + M9-A 3D extraction | Release C++23 | 213/213 | 本轮直接通过 UI115/115、Runtime→UI60/60、UI→Render12/12、Scene19/19、RenderScene22/22；Null、2D infrastructure与3D extraction样例各300帧，3D记录4 submitted/3 visible/1 culled/2 batches、一次aspect变化与资源归零；GLFW/bgfx/Desktop沿用前序D2证据 |
-| Windows 11 / MSVC 19.50 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug/Release C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过 |
-| Ubuntu 22.04 / GCC 13.4 / CMake 4.2.3 | Legacy ON 与 C1c-b3b vNext 共存构建，Legacy/vNext 测试进程隔离（前序门禁） | Debug C++23 | 185/185 + 43/43 | `tina_tests` 185/185、`tina_legacy_tests` 43/43，均直接运行通过；构建保留旧源码/EASTL 既有 warning |
-| Ubuntu 22.04 / GCC 13.4 | vNext 至 SolidFill committed paint、Render SolidQuad DisplayList 与 UI→Render bridge，Legacy/真实 bgfx backend 关闭 | Debug C++23 | 205/205 | UI92/92、Runtime→UI46/46、UI→Render12/12、Null样例300帧；X11 GLFW23/23为前序门禁 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | （历史）Legacy ON 共存图 | Debug/Release C++23 | 185+43 | 仅历史；`tina_legacy_tests` 与 Legacy 图已删除 |
+| Ubuntu 22.04 / GCC 13.4 / CMake 4.2.3 | （历史）Legacy ON 共存图 | Debug C++23 | 185+43 | 仅历史；产品图已退役 |
+| Ubuntu 22.04 / GCC 13.4 | vNext SolidFill/DisplayList/UI→Render，无真实 bgfx backend | Debug C++23 | 205/205 | UI92/92、Runtime→UI46/46、UI→Render12/12、Null样例300帧；X11 GLFW23/23为前序门禁 |
 | Ubuntu 22.04 / Clang 22.1.8 + libstdc++15.2 | 同上，ASan/UBSan/LSan（detect_leaks=1、halt_on_error=1） | Debug C++23 | 205/205 | UI92/92、Runtime→UI46/46、UI→Render12/12、Null样例300帧且零 sanitizer 诊断；X11 GLFW23/23与精确第三方 XIM suppression为前序门禁 |
 
 GLFW adapter 和 bgfx adapter 测试是独立 executable，不能把多个进程伪写成单个合并测试数。当前测试拓扑为：
@@ -381,9 +372,9 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
 
 - Core 当前：C++23 `std::expected` Result/Status、稳定 Error domain/code、origin/native code/context
   chain、ScopeExit noexcept invoke/move、EnumFlags `std::to_underlying`、Assert、强类型 Duration、
-  可注入 Monotonic Clock、固定步钳制/time scale/最多4步/丢弃与余量、基础类型和 Legacy
-  Compatibility，以及 MemoryTag、并发 MemoryTracker、Counting PMR、无回退 FrameArena；公共
-  memory/error/time/id 头另有逐头独立编译门禁；
+  可注入 Monotonic Clock、固定步钳制/time scale/最多4步/丢弃与余量、基础类型，以及 MemoryTag、
+  并发 MemoryTracker、Counting PMR、无回退 FrameArena；公共 memory/error/time/id 头另有逐头
+  独立编译门禁；
 - Core vNext 待补：完整 Metric frame/lifetime reset、Trace 开关、Unicode 路径与原子 IO、
   原子写失败恢复、Ensure/CrashContext；严格 UTF-8 scalar/NUL 校验和 owner-aware generation
   ID/Pool 已完成；
@@ -392,9 +383,8 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
   尚未实现，只在出现真实消费者时加入；
 - Task 后续：有界队列、QueueFull/停止后拒绝、TaskGroup 取消与 barrier、owner/generation 迟到任务、
   异常不逃出线程、IO/CPU executor 隔离和确定性合并；
-- Runtime 时间：新 FixedStepAccumulator 已覆盖固定步长、真实 delta 钳制、time scale、插值、
-  最大追赶步、超额整步丢弃、非零余量、reset 和非法输入不改状态；Legacy FixedStepTicker
-  继续覆盖旧 Application 的异常步消费；
+- Runtime 时间：FixedStepAccumulator 已覆盖固定步长、真实 delta 钳制、time scale、插值、
+  最大追赶步、超额整步丢弃、非零余量、reset 和非法输入不改状态；
 - Runtime M6-A：完整 factory bundle/config 在产生副作用前校验；Clock/Platform/Task/Render 的
   failure、success-null 与 throw 覆盖逆序回滚；Ready Host 直接析构、startup transaction、
   run-once、0/1/4 fixed steps、当帧退出仍完成 extraction/UI/submit/present、失败清理及300帧
@@ -487,16 +477,12 @@ GCC 11.4 与旧 Clang 的 Linux 数据仍是历史证据。
 
 以下仍是 Legacy 共存构建的回归覆盖，不能当作 vNext UI/Scene/Asset 已实现：
 
-- Legacy 3D Camera：60° 垂直 FOV 必须按 bx 要求以 degrees 进入投影矩阵，防止误转 radians 后 Cube 近距离铺满屏幕；
-- Legacy Event：优先级队列、RAII Token、dispatcher 先销毁、立即取消订阅，以及 IME composition 与已提交文本分离；
-- Legacy Resource：共享 FileSystem 唯一 completion pump、主线程预算、取消和过期 generation 隔离；
-- Legacy Windows 栈预算：EventSystem 实例不得重新引入超过默认线程栈预算的大块 inline queue；
-- Legacy UI：hit-test 不隐式布局、重叠节点唯一命中、Capture/Target/Bubble 顺序、动态子节点上下文继承、stale NodeId 失效、上下文先析构、节点移除/自移除生命周期、Pointer Capture 外部释放、Tab/Shift+Tab 焦点遍历、焦点 KeyDown 路由/默认取消/重复键抑制/路由中删除目标、KeyUp 完整路由/停止传播后的局部清理/路由中删除目标、方向键 beam 优先与隐藏/禁用节点过滤、Modal Focus Scope 限制/嵌套恢复/自动失效、设备无关语义导航的 scope/Accept/Cancel 生命周期、未处理按键向祖先回退、每窗口 Theme/DPI 隔离、200% DPI 逻辑坐标命中、裁剪边界、ScrollView 滚轮/钳制和十万行虚拟范围；Button action 还覆盖实例级重入隔离、异常后恢复、不同 action 嵌套、回调销毁自身，以及 Capture 阶段删除 routed click 目标后的 generation 失效。
+- （历史）Legacy 3D/Event/Resource/UI 专项测试已随产品图删除；行为意图由 vNext UI/Scene/Asset
+  测试与 sample smoke 承接。
 
 ## 待补自动化门禁
 
-- Legacy Application 现有失败点继续回归；M6-A 尚未覆盖的 initial UI layout、GameStateStack
-  与后续模块初始化失败点要随对应消费者加入；
+- M6-A 尚未覆盖的 initial UI layout、GameStateStack 与后续模块初始化失败点随消费者加入；
 - `IGameState` top-only、structural 与 policy-change 合计每 State 每帧最多一个 command，验证
   replace 后再请求 policy-change 返回 `AlreadyQueued`；覆盖 queue/completion capacity、sequence、
   completion slot 的 Reserved/Delivered/Diagnostics 回收，以及 `initialPolicy` 单次采样；
@@ -760,47 +746,16 @@ ASan/UBSan/LSan 已通过相同门禁且无 sanitizer 诊断。`TINA_BUILD_SHADE
 不含 Legacy 产品和 cooked shader，只能作为 Headless 验证程序，
 不能作为游戏产品或发布包。
 
-## 当前 Legacy 运行冒烟
+## Legacy 运行冒烟（已退役）
 
-构建命令和环境前提见 [构建与运行](building.md)。以下命令描述验收入口，不替代构建步骤。
+`Tina.exe` 与 `--smoke-*` 产品路径已删除。请使用下方 **vNext 独立样例门禁**。
 
-菜单 2D + 中文 UI，正常提交300帧后退出：
-
-```bash
-./Tina --smoke-frames=300
-```
-
-直接进入完整 2D TileMap、ECS、Toolbar 和 CharacterPanel：
-
-```bash
-./Tina --smoke-game --smoke-frames=300
-```
-
-直接显示虚拟化世界列表、新建世界对话框、中文标签和已聚焦 TextEdit：
-
-```bash
-./Tina --smoke-ui --smoke-frames=300
-```
-
-运行右手透视相机、深度测试和静态索引 Cube：
-
-```bash
-./Tina --smoke-3d --smoke-frames=300
-```
-
-四个命令都必须返回0，并在日志中出现正常初始化、达到帧数、场景退出、资源管理器释放、bgfx 和窗口关闭记录。UI 路径还必须出现 `UI smoke scene ready`，且不得出现 `无法建立模态焦点范围`；3D 路径必须肉眼或截图确认透视 Cube 可见，并出现 `Smoke3DScene released vertex and index buffers`，且不得出现 `BGFX LEAK` 或 `MEMORY LEAK`。只检查 exit code 和 buffer 生命周期不足以证明画面正确。
-
-bgfx Debug/D3D11 当前会在关闭 `ID3D11InfoQueue` 时输出一次 `RefCount is N (expected 0)`；本机
-Legacy 与 vNext 进程观察到的 `N` 会随调试对象组合变化，本轮 D2 为3。同一路径的 MSVC Release
-300帧验证无该提示、无 stderr、无 leak marker；Tina 仍以自身资源账本和严格 shutdown 顺序作为
-泄漏门禁，不把这条第三方提示单独当作 Tina 资源泄漏结论。
+bgfx Debug/D3D11 退出时偶发 `RefCount is N (expected 0)` 为第三方 debug layer 提示；以 Tina
+自身资源账本与严格 shutdown 为准，不单独当作泄漏结论。
 
 ## vNext 独立样例门禁
 
-`tina_sample_null`、`tina_sample_platform`、`tina_sample_desktop`、`tina_sample_2d_infrastructure`、
-`tina_sample_2d_tilemap`、`tina_sample_2d_infrastructure_bgfx` 与 `tina_sample_3d_extraction` 已落地，
-其余 executable 仍是后续里程碑目标；
-不得用当前 Legacy `Tina --smoke-*` 的结果冒充 vNext 样例：
+产品与 infrastructure 样例均在 vNext 图：
 
 | 样例 | 状态 | 主要证明 | 资源策略 |
 | --- | --- | --- | --- |
