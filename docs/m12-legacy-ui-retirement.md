@@ -23,7 +23,7 @@
 
 - `TINA_BUILD_LEGACY` **默认 OFF**；若显式 `ON` → **FATAL_ERROR**（源码已不存在）。
 - 产品入口：`Tina::Desktop` + `tina_sample_*`（尤其 `tina_sample_2d` / `tina_sample_3d`）。
-- UI：**仅** `include/tina/ui` + `src/vnext/ui`（vNext Retained UI）。
+- UI：**仅** `include/tina/ui` + `src/ui`（Retained UI 实现；公开头仍在 `include/tina/ui`）。
 
 ## 保留 / 扫尾
 

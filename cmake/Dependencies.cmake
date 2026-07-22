@@ -11,7 +11,7 @@ endif ()
 
 if (TINA_BUILD_AUDIO_MINIAUDIO)
     # vNext audio adapter: header-only miniaudio via vcpkg feature audio-miniaudio.
-    # Single MINIAUDIO_IMPLEMENTATION TU lives in src/vnext/audio/miniaudio.
+    # Single MINIAUDIO_IMPLEMENTATION TU lives in src/audio/miniaudio.
     find_path(TINA_MINIAUDIO_INCLUDE_DIR NAMES miniaudio.h REQUIRED)
 endif()
 

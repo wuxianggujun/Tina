@@ -1,10 +1,10 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include <tina/core/error/Result.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 
-#include "../../../src/runtime/input/LastPresentedCamera2DLatch.hpp"
+#include "../../src/runtime/input/LastPresentedCamera2DLatch.hpp"
 
 #include <memory>
 #include <utility>

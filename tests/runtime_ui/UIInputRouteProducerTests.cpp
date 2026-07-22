@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformFrame.hpp>
@@ -7,9 +7,9 @@
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UI.hpp>
 
-#include "../../../src/runtime/input/ActionMapper.hpp"
-#include "../../../src/runtime/input/LastPresentedCamera2DLatch.hpp"
-#include "../../../src/runtime/input/UIInputRouteProducer.hpp"
+#include "../../src/runtime/input/ActionMapper.hpp"
+#include "../../src/runtime/input/LastPresentedCamera2DLatch.hpp"
+#include "../../src/runtime/input/UIInputRouteProducer.hpp"
 
 #include <array>
 #include <limits>

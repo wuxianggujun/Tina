@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformFrame.hpp>
@@ -6,7 +6,7 @@
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIContext.hpp>
 
-#include "../../../src/runtime/ui/PrimaryWindowUIDisplayCoordinator.hpp"
+#include "../../src/runtime/ui/PrimaryWindowUIDisplayCoordinator.hpp"
 
 #include <memory>
 #include <memory_resource>

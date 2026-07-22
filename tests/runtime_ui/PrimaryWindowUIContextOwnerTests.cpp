@@ -1,12 +1,12 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIContext.hpp>
 
-#include "../../../src/runtime/ui/PrimaryWindowUIContextOwner.hpp"
-#include "../../../src/runtime/ui/PrimaryWindowUILayoutCoordinator.hpp"
+#include "../../src/runtime/ui/PrimaryWindowUIContextOwner.hpp"
+#include "../../src/runtime/ui/PrimaryWindowUILayoutCoordinator.hpp"
 
 #include <algorithm>
 #include <memory>

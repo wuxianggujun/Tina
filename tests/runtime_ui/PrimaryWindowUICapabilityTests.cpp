@@ -1,10 +1,10 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIContext.hpp>
 
-#include "../../../src/runtime/ui/PrimaryWindowUICapabilityState.hpp"
+#include "../../src/runtime/ui/PrimaryWindowUICapabilityState.hpp"
 
 #include <memory>
 #include <optional>
