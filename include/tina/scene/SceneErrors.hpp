@@ -17,6 +17,9 @@ inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::Scene, 8};
 inline constexpr Core::ErrorCode TransformOverflow{Core::ErrorDomain::Scene, 9};
 inline constexpr Core::ErrorCode UnsupportedTransformComposition{Core::ErrorDomain::Scene, 10};
 inline constexpr Core::ErrorCode ConstructionFailed{Core::ErrorDomain::Scene, 11};
+inline constexpr Core::ErrorCode InvalidComponent{Core::ErrorDomain::Scene, 12};
+inline constexpr Core::ErrorCode MultipleActiveCameras{Core::ErrorDomain::Scene, 13};
+inline constexpr Core::ErrorCode UnresolvedSprite{Core::ErrorDomain::Scene, 14};
 
 } // namespace SceneErrorCode
 

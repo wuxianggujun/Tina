@@ -5,10 +5,10 @@
 当前 M8-B 完成后端无关 RenderScene extraction foundation：固定容量 writer 接受解析后的 Camera2D/
 Sprite2D 值，执行稳定排序、保守裁剪和 pixel snap，并由 Headless/Null
 `tina_sample_2d_infrastructure` 验证 300 帧 Runtime handoff。M9-C 又完成私有 bgfx Sprite2D fixture
-pass；Windows Debug/Release 的 `tina_sample_2d_infrastructure_bgfx` 均运行300帧：5个 fixture Sprite、2个 retained UI panel、
-资源账本平衡，截图确认旋转、透明、flip 与 UI overlay。它仍是 fixture/infrastructure，不是
-Asset/Texture/Sprite 产品路径，也不代表 `tina_scene` 已有 Camera/Sprite component storage、world picking、
-TileMap、Box2D、中文文本或正式 `tina_sample_2d`。
+pass。**M8-C0** 又在 `tina_scene` 落地 `Camera2D` / `SpriteRenderer2D` 组件存储与
+`extractRenderSceneFromWorld`（读 World 组件 → 写现有 `RenderSceneWriter`）；Sprite 首切片使用
+`fixtureSpriteKey`（非 AssetHandle 解析）。正式 Asset 解析、Runtime Phase Context World 能力、Prefab、
+MeshRenderer3D、以及 `tina_sample_2d` 厚 State 改写仍为 Deferred。
 
 ## 范围与模块边界
 
@@ -58,10 +58,15 @@ enum class PixelSnapPolicy : std::uint8_t {
 
 struct Camera2D {
     std::variant<FixedWorldHeight2D, PixelPerfect2D> projection;
-    RectF normalizedViewport{0.0f, 0.0f, 1.0f, 1.0f};
+    RenderNormalizedViewport normalizedViewport{0.0f, 0.0f, 1.0f, 1.0f};
     PixelSnapPolicy pixelSnap = PixelSnapPolicy::Disabled;
+    bool active = true; // M8-C0: multi-camera selection uses active flag; >1 active fails extract
 };
 ```
+
+M8-C0 已实现：`include/tina/scene/Camera2D.hpp`（POD + `isValid`）、`World::setCamera2D` /
+`camera2D` / `clearCamera2D`，以及 extract 时调用 `Render::makeResolvedCamera2DInput`（表面 viewport
+由 `ExtractRenderSceneParams` 传入；0×0 跳过 setCamera2D）。
 
 Aspect 只来自当前 `WindowSurfaceSnapshot` 的有效 viewport，不能由游戏缓存旧窗口宽高。Resize、DPI
 和最小化在帧边界生效。`FixedWorldHeight2D` 的实际 framebuffer PPM 为
@@ -108,25 +113,31 @@ enum class SpriteOverrideFlags : std::uint8_t {
     Pivot = 1 << 1,
 };
 
+// M8-C0 已落地的 Scene 组件（fixture 路径；AssetHandle 解析 Deferred）
 struct SpriteRenderer2D {
-    AssetHandle<SpriteAsset> sprite;
+    std::uint32_t fixtureSpriteKey = 0; // non-zero product/fixture resource seed
     SpriteOverrideFlags overrides = SpriteOverrideFlags::None;
     Vec2 sizeOverrideMeters{1.0f, 1.0f};
     Vec2 pivotOverride{0.5f, 0.5f};
-    Color4 color = Color4::White();
+    ColorRgba8 color{}; // default white
     std::int16_t sortingLayer = 0;
     std::int32_t orderInLayer = 0;
-    SpriteBlendMode blend = SpriteBlendMode::Alpha;
     bool flipX = false;
     bool flipY = false;
     bool visible = true;
 };
+
+// 目标产品形态（Deferred）：AssetHandle<SpriteAsset> + blend + typed UV/PPU resolve
 ```
 
-`SpriteAsset` 是 Cooked Asset，引用 `Texture2DAsset`、像素 rect、规范化 UV、默认 pivot 和导入
-时的 pixels-per-meter。未设置对应 override flag 时，size 由像素 rect / pixels-per-meter 推导，
-pivot 使用资产默认值；设置后才读取 component override。所有值必须 finite，size 必须为正。
-Atlas 是提高批处理效率的资产组织方式，不改变组件 API。
+M8-C0 已实现：`include/tina/scene/SpriteRenderer2D.hpp`、`World::setSpriteRenderer2D` /
+`spriteRenderer2D` / `clearSpriteRenderer2D`，`extractRenderSceneFromWorld` 将可见 sprite 写为
+`RenderSprite2DInput`（pivot 调整几何中心、Z 轴四元数 → `rotationRadians`、size override 或默认 1m）。
+`fixtureSpriteKey == 0` 在 set 与 extract 两侧均拒绝。
+
+`SpriteAsset` 目标仍是 Cooked Asset（引用 `Texture2DAsset`、像素 rect、规范化 UV、默认 pivot 与
+PPU）。未设置对应 override flag 时，产品路径 size 由像素 rect / PPU 推导；本切片未接 AssetSystem，
+无 Size flag 时使用 1×1 m 默认。Atlas 是批处理组织方式，不改变组件 API。
 
 M9-C 当前可见 Sprite 只使用内置 `spriteKey=1` fixture，并由私有 bgfx backend 直接生成 transient
 P2/UV2/ABGR geometry；它不解析 `SpriteAsset`、`Texture2DAsset`、Atlas、Cooked Catalog 或 Manifest。

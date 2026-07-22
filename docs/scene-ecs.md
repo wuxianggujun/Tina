@@ -81,9 +81,13 @@ M8-A 已将 identity/transform 基础落为独立 `tina_scene`。当前 standalo
 position/quaternion/scale 三元组，非均匀父 scale 与旋转子节点造成的 shear 会返回明确诊断，不能静默近似。
 
 M8-B 只在 `tina_render`/Runtime integration 层提供已解析的 Camera2D/Sprite2D writer 和
-`RenderFrame::primaryWorldScene` handoff；`Scene::World` 当前没有 Camera/Sprite component storage、阶段末
-command buffer 或 Asset capability，`RenderSceneExtractionContext` 也不暴露 World view。Headless/Null
-infrastructure sample 因此验证 CPU extraction/lifetime，不等同于可见 Sprite、bgfx pass 或正式 2D 产品。
+`RenderFrame::primaryWorldScene` handoff。**M8-C0** 在 `Scene::World` 上增加可选 POD 组件
+`Camera2D` / `SpriteRenderer2D` 与 free function `extractRenderSceneFromWorld(World&,
+RenderSceneWriter&, ExtractRenderSceneParams)`：先 `updateWorldTransforms()`，至多一个
+`active` Camera2D → `makeResolvedCamera2DInput` + `setCamera2D`，可见 Sprite → `addSprite2D`
+（`fixtureSpriteKey`）。无 EnTT、无阶段末 command buffer、无 Runtime Phase Context World 视图、无
+AssetHandle 解析；`tina_sample_2d` 仍可手写 writer。Headless/Null infrastructure sample 仍验证
+CPU extraction/lifetime，不等同于正式 2D 产品验收。
 
 内存容量、零稳态分配和基准工作负载见 [性能预算与内存系统](performance-memory.md)；任务
 barrier、取消和确定性合并见 [Task System](task-system.md)。
