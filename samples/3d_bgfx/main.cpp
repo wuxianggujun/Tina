@@ -4,6 +4,10 @@
 #include <tina/runtime/GameState.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
+#include <tina/scene/ExtractRenderScene.hpp>
+#include <tina/scene/MeshRenderer3D.hpp>
+#include <tina/scene/PerspectiveCamera3D.hpp>
+#include <tina/scene/World.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPaint.hpp>
 
@@ -15,6 +19,7 @@
 #include <exception>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -171,6 +176,73 @@ class Visible3DState final : public Tina::IGameState {
     {
         ++counters_->stateEnters;
 
+        auto worldResult = Tina::Scene::World::Create(Tina::Scene::WorldConfig{16});
+        if (!worldResult)
+        {
+            return Tina::Core::failure(std::move(worldResult.error()));
+        }
+        world_.emplace(std::move(*worldResult));
+
+        Tina::Scene::LocalTransform cameraLocal{};
+        cameraLocal.position = {0.0F, 0.35F, 8.0F};
+        auto cameraEntity = world_->createEntity(cameraLocal);
+        if (!cameraEntity)
+        {
+            return Tina::Core::failure(std::move(cameraEntity.error()));
+        }
+        cameraEntity_ = *cameraEntity;
+        if (auto status = world_->setPerspectiveCamera3D(
+                cameraEntity_,
+                Tina::Scene::PerspectiveCamera3D{
+                    .verticalFovDegrees = 55.0F,
+                    .nearPlaneMeters = 0.1F,
+                    .farPlaneMeters = 100.0F,
+                    .active = true,
+                });
+            !status)
+        {
+            return status;
+        }
+
+        constexpr std::array<float, ProceduralCubeCount> PositionsX{-2.3F, 0.0F, 2.3F};
+        constexpr std::array<float, ProceduralCubeCount> PositionsZ{-0.4F, -1.0F, -1.6F};
+        constexpr std::array<float, ProceduralCubeCount> Scales{0.9F, 1.15F, 0.8F};
+        constexpr std::array<Tina::Render::RenderLinearColor, ProceduralCubeCount> Colors{{
+            {.red = 0.95F, .green = 0.24F, .blue = 0.30F},
+            {.red = 0.12F, .green = 0.72F, .blue = 0.92F},
+            {.red = 0.20F, .green = 0.84F, .blue = 0.48F},
+        }};
+        for (u32 index = 0; index < ProceduralCubeCount; ++index)
+        {
+            Tina::Scene::LocalTransform cubeLocal{};
+            cubeLocal.position = {PositionsX[index], 0.0F, PositionsZ[index]};
+            cubeLocal.scale = {Scales[index], Scales[index], Scales[index]};
+            auto cubeEntity = world_->createEntity(cubeLocal);
+            if (!cubeEntity)
+            {
+                return Tina::Core::failure(std::move(cubeEntity.error()));
+            }
+            cubeEntities_[index] = *cubeEntity;
+            if (auto status = world_->setMeshRenderer3D(
+                    cubeEntities_[index],
+                    Tina::Scene::MeshRenderer3D{
+                        .fixtureMeshKey = 1,
+                        .fixtureMaterialKey = 1,
+                        .submeshIndex = 0,
+                        .localBounds = {.radius = 1.75F},
+                        .baseColorFactor = Colors[index],
+                        .visible = true,
+                    });
+                !status)
+            {
+                return status;
+            }
+        }
+        if (auto status = world_->updateWorldTransforms(); !status)
+        {
+            return status;
+        }
+
         auto rootBuilder = context.primaryWindowUIRootBuilder();
         if (!rootBuilder)
         {
@@ -247,6 +319,7 @@ class Visible3DState final : public Tina::IGameState {
             uiRoot_.reset();
             ++counters_->uiRootsReleased;
         }
+        world_.reset();
         ++counters_->stateExits;
     }
 
@@ -271,55 +344,45 @@ class Visible3DState final : public Tina::IGameState {
 
     Tina::Core::Status extractRenderScene(Tina::RenderSceneExtractionContext& context) const override
     {
-        auto& writer = context.renderSceneWriter();
-        const Tina::Render::RenderPerspectiveCameraInput camera{
-            .stableCameraKey = 1,
-            .worldPose = {.positionY = 0.35F, .positionZ = 8.0F},
-            .verticalFovDegrees = 55.0F,
-            .nearPlaneMeters = 0.1F,
-            .farPlaneMeters = 100.0F,
-        };
-        if (auto status = writer.setPerspectiveCamera(camera); !status)
+        if (!world_.has_value())
         {
-            return status;
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "3D infrastructure World was not initialized");
         }
 
         constexpr std::array<float, ProceduralCubeCount> PositionsX{-2.3F, 0.0F, 2.3F};
         constexpr std::array<float, ProceduralCubeCount> PositionsZ{-0.4F, -1.0F, -1.6F};
         constexpr std::array<float, ProceduralCubeCount> Scales{0.9F, 1.15F, 0.8F};
-        constexpr std::array<Tina::Render::RenderLinearColor, ProceduralCubeCount> Colors{{
-            {.red = 0.95F, .green = 0.24F, .blue = 0.30F},
-            {.red = 0.12F, .green = 0.72F, .blue = 0.92F},
-            {.red = 0.20F, .green = 0.84F, .blue = 0.48F},
-        }};
 
         const float halfAngle = static_cast<float>(context.frameTiming().frameIndex) * 0.0125F;
         for (u32 index = 0; index < ProceduralCubeCount; ++index)
         {
             const float phase = halfAngle + static_cast<float>(index) * 0.45F;
-            const Tina::Render::RenderMesh3DInput cube{
-                .meshKey = 1,
-                .materialKey = 1,
-                .submeshIndex = 0,
-                .stableEntityKey = static_cast<u64>(index) + 1U,
-                .worldTransform = {
-                    .pose = {
-                        .positionX = PositionsX[index],
-                        .positionZ = PositionsZ[index],
-                        .rotationY = std::sin(phase),
-                        .rotationW = std::cos(phase),
-                    },
-                    .scaleX = Scales[index],
-                    .scaleY = Scales[index],
-                    .scaleZ = Scales[index],
-                },
-                .localBounds = {.radius = 1.75F},
-                .baseColorFactor = Colors[index],
-            };
-            if (auto status = writer.addMesh3D(cube); !status)
+            Tina::Scene::LocalTransform cubeLocal{};
+            cubeLocal.position = {PositionsX[index], 0.0F, PositionsZ[index]};
+            cubeLocal.rotation = {0.0F, std::sin(phase), 0.0F, std::cos(phase)};
+            cubeLocal.scale = {Scales[index], Scales[index], Scales[index]};
+            if (auto status = world_->setLocalTransform(cubeEntities_[index], cubeLocal); !status)
             {
                 return status;
             }
+        }
+
+        auto& writer = context.renderSceneWriter();
+        // Matches EngineConfig primary window initial logical extent for this sample.
+        if (auto status = Tina::Scene::extractRenderSceneFromWorld(
+                *world_,
+                writer,
+                Tina::Scene::ExtractRenderSceneParams{
+                    .surfaceViewport =
+                        Tina::Render::Camera2DSurfaceViewport{
+                            .pixelWidth = 1280,
+                            .pixelHeight = 720,
+                        },
+                });
+            !status)
+        {
+            return status;
         }
         ++counters_->renderExtractions;
         return Tina::Core::success();
@@ -329,6 +392,9 @@ class Visible3DState final : public Tina::IGameState {
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
     Tina::UI::UIRootOwner uiRoot_{};
+    mutable std::optional<Tina::Scene::World> world_{};
+    Tina::Scene::EntityId cameraEntity_{};
+    std::array<Tina::Scene::EntityId, ProceduralCubeCount> cubeEntities_{};
 };
 
 class Visible3DApplication final : public Tina::IGameApplication {
@@ -407,9 +473,10 @@ class Visible3DApplication final : public Tina::IGameApplication {
 
     std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d_infrastructure\",\"frames\":"
               << counters.frameUpdates << ",\"proceduralCubesPerFrame\":" << ProceduralCubeCount
-              << ",\"instanceBatchesPerFrame\":1,\"stateExits\":" << counters.stateExits
-              << ",\"uiPanelsPerFrame\":2,\"uiRootsReleased\":" << counters.uiRootsReleased
-              << ",\"applicationShutdowns\":" << counters.applicationShutdowns
+              << ",\"instanceBatchesPerFrame\":1,\"sceneExtract\":true,\"stateExits\":"
+              << counters.stateExits << ",\"uiPanelsPerFrame\":2,\"uiRootsReleased\":"
+              << counters.uiRootsReleased << ",\"applicationShutdowns\":"
+              << counters.applicationShutdowns
               << ",\"engineHostDestroyed\":true,\"renderResourceLedgerBalanced\":true}\n";
     return 0;
 }
