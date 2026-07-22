@@ -20,6 +20,10 @@
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
+#include <tina/scene/ExtractRenderScene.hpp>
+#include <tina/scene/MeshRenderer3D.hpp>
+#include <tina/scene/PerspectiveCamera3D.hpp>
+#include <tina/scene/World.hpp>
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPaint.hpp>
@@ -36,6 +40,7 @@
 #include <iostream>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -497,6 +502,69 @@ class Product3DState final : public Tina::IGameState {
         ++counters_->texturesUploaded;
         counters_->materialTextureBound = true;
 
+        auto worldResult = Tina::Scene::World::Create(Tina::Scene::WorldConfig{16});
+        if (!worldResult)
+        {
+            return Tina::Core::failure(std::move(worldResult.error()));
+        }
+        world_.emplace(std::move(*worldResult));
+
+        Tina::Scene::LocalTransform cameraLocal{};
+        cameraLocal.position = {0.0F, 0.35F, 8.0F};
+        auto cameraEntity = world_->createEntity(cameraLocal);
+        if (!cameraEntity)
+        {
+            return Tina::Core::failure(std::move(cameraEntity.error()));
+        }
+        cameraEntity_ = *cameraEntity;
+        if (auto status = world_->setPerspectiveCamera3D(
+                cameraEntity_,
+                Tina::Scene::PerspectiveCamera3D{
+                    .verticalFovDegrees = 55.0F,
+                    .nearPlaneMeters = 0.1F,
+                    .farPlaneMeters = 100.0F,
+                    .active = true,
+                });
+            !status)
+        {
+            return status;
+        }
+
+        constexpr std::array<float, ProductMeshCount> PositionsX{-2.3F, 0.0F, 2.3F};
+        constexpr std::array<float, ProductMeshCount> PositionsZ{-0.4F, -1.0F, -1.6F};
+        constexpr std::array<float, ProductMeshCount> Scales{0.9F, 1.15F, 0.8F};
+        for (u32 index = 0; index < ProductMeshCount; ++index)
+        {
+            Tina::Scene::LocalTransform cubeLocal{};
+            cubeLocal.position = {PositionsX[index], 0.0F, PositionsZ[index]};
+            cubeLocal.scale = {Scales[index], Scales[index], Scales[index]};
+            auto cubeEntity = world_->createEntity(cubeLocal);
+            if (!cubeEntity)
+            {
+                return Tina::Core::failure(std::move(cubeEntity.error()));
+            }
+            cubeEntities_[index] = *cubeEntity;
+            if (auto status = world_->setMeshRenderer3D(
+                    cubeEntities_[index],
+                    Tina::Scene::MeshRenderer3D{
+                        .fixtureMeshKey = ProductMeshKey,
+                        .fixtureMaterialKey = ProductMaterialKey,
+                        .submeshIndex = 0,
+                        .localBounds = {.radius = 1.75F},
+                        // M11-E4: baseColor from cooked Unlit Material assets.
+                        .baseColorFactor = resources_->materialColors[index],
+                        .visible = true,
+                    });
+                !status)
+            {
+                return status;
+            }
+        }
+        if (auto status = world_->updateWorldTransforms(); !status)
+        {
+            return status;
+        }
+
         auto rootBuilder = context.primaryWindowUIRootBuilder();
         if (!rootBuilder)
         {
@@ -562,6 +630,7 @@ class Product3DState final : public Tina::IGameState {
 
     void onExit(Tina::GameStateExitContext&) noexcept override
     {
+        world_.reset();
         if (auto* device = capture_->get(); device != nullptr)
         {
             if (resources_->textureUploaded)
@@ -605,17 +674,10 @@ class Product3DState final : public Tina::IGameState {
 
     Tina::Core::Status extractRenderScene(Tina::RenderSceneExtractionContext& context) const override
     {
-        auto& writer = context.renderSceneWriter();
-        const Tina::Render::RenderPerspectiveCameraInput camera{
-            .stableCameraKey = 1,
-            .worldPose = {.positionY = 0.35F, .positionZ = 8.0F},
-            .verticalFovDegrees = 55.0F,
-            .nearPlaneMeters = 0.1F,
-            .farPlaneMeters = 100.0F,
-        };
-        if (auto status = writer.setPerspectiveCamera(camera); !status)
+        if (!world_.has_value())
         {
-            return status;
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "3D product World was not initialized");
         }
 
         constexpr std::array<float, ProductMeshCount> PositionsX{-2.3F, 0.0F, 2.3F};
@@ -626,32 +688,30 @@ class Product3DState final : public Tina::IGameState {
         for (u32 index = 0; index < ProductMeshCount; ++index)
         {
             const float phase = halfAngle + static_cast<float>(index) * 0.45F;
-            const Tina::Render::RenderMesh3DInput cube{
-                .meshKey = ProductMeshKey,
-                .materialKey = ProductMaterialKey,
-                .submeshIndex = 0,
-                .stableEntityKey = static_cast<u64>(index) + 1U,
-                .worldTransform =
-                    {
-                        .pose =
-                            {
-                                .positionX = PositionsX[index],
-                                .positionZ = PositionsZ[index],
-                                .rotationY = std::sin(phase),
-                                .rotationW = std::cos(phase),
-                            },
-                        .scaleX = Scales[index],
-                        .scaleY = Scales[index],
-                        .scaleZ = Scales[index],
-                    },
-                .localBounds = {.radius = 1.75F},
-                // M11-E4: baseColor comes from cooked Unlit Material assets (not hard-coded).
-                .baseColorFactor = resources_->materialColors[index],
-            };
-            if (auto status = writer.addMesh3D(cube); !status)
+            Tina::Scene::LocalTransform cubeLocal{};
+            cubeLocal.position = {PositionsX[index], 0.0F, PositionsZ[index]};
+            cubeLocal.rotation = {0.0F, std::sin(phase), 0.0F, std::cos(phase)};
+            cubeLocal.scale = {Scales[index], Scales[index], Scales[index]};
+            if (auto status = world_->setLocalTransform(cubeEntities_[index], cubeLocal); !status)
             {
                 return status;
             }
+        }
+
+        auto& writer = context.renderSceneWriter();
+        if (auto status = Tina::Scene::extractRenderSceneFromWorld(
+                *world_,
+                writer,
+                Tina::Scene::ExtractRenderSceneParams{
+                    .surfaceViewport =
+                        Tina::Render::Camera2DSurfaceViewport{
+                            .pixelWidth = 1280,
+                            .pixelHeight = 720,
+                        },
+                });
+            !status)
+        {
+            return status;
         }
         ++counters_->renderExtractions;
         return Tina::Core::success();
@@ -663,6 +723,9 @@ class Product3DState final : public Tina::IGameState {
     Product3DResources* resources_ = nullptr;
     DeviceCapture* capture_ = nullptr;
     Tina::UI::UIRootOwner uiRoot_{};
+    mutable std::optional<Tina::Scene::World> world_{};
+    Tina::Scene::EntityId cameraEntity_{};
+    std::array<Tina::Scene::EntityId, ProductMeshCount> cubeEntities_{};
 };
 
 class Product3DApplication final : public Tina::IGameApplication {
@@ -807,7 +870,8 @@ class Product3DApplication final : public Tina::IGameApplication {
     }
 
     std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"frames\":" << counters.frameUpdates
-              << ",\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"texturedUnlit\":true,\"meshesUploaded\":"
+              << ",\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"texturedUnlit\":true,\"sceneExtract\":true,"
+                 "\"meshesUploaded\":"
               << counters.meshesUploaded << ",\"materialsLoaded\":" << counters.materialsLoaded
               << ",\"texturesUploaded\":" << counters.texturesUploaded << ",\"meshKey\":" << ProductMeshKey
               << ",\"materialKey\":" << ProductMaterialKey << ",\"productCubesPerFrame\":" << ProductMeshCount
