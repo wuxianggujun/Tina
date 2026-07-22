@@ -49,13 +49,33 @@ class BgfxCaptureCallback final : public bgfx::CallbackI {
   public:
     void fatal(const char* filePath, uint16_t line, bgfx::Fatal::Enum code, const char* str) override
     {
-        // Log then abort so hangs are not stuck behind a modal debug dialog.
+        // Log then hard-exit. Prefer file over stderr: redirected pipes + render thread can lose
+        // the line; std::abort() on MSVC Debug pops a modal dialog and freezes automation.
         // Do not write from traceVargs: multi-threaded bgfx + redirected stderr deadlocks.
+        char path[512]{};
+        const char* temp = std::getenv("TEMP");
+        if (temp == nullptr || temp[0] == '\0')
+        {
+            temp = std::getenv("TMP");
+        }
+        if (temp == nullptr || temp[0] == '\0')
+        {
+            temp = ".";
+        }
+        std::snprintf(path, sizeof(path), "%s\\tina_bgfx_fatal.txt", temp);
+        if (std::FILE* file = std::fopen(path, "wb"))
+        {
+            std::fprintf(file, "bgfx FATAL code=%d %s:%u %s\n", static_cast<int>(code),
+                         filePath != nullptr ? filePath : "?", static_cast<unsigned>(line),
+                         str != nullptr ? str : "");
+            std::fflush(file);
+            std::fclose(file);
+        }
         std::fprintf(stderr, "bgfx FATAL code=%d %s:%u %s\n", static_cast<int>(code),
                      filePath != nullptr ? filePath : "?", static_cast<unsigned>(line),
                      str != nullptr ? str : "");
         std::fflush(stderr);
-        std::abort();
+        std::_Exit(3);
     }
 
     void traceVargs(const char* /*filePath*/, uint16_t /*line*/, const char* /*format*/,
@@ -912,6 +932,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(opaque3DProgram_);
                 opaque3DProgram_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
             }
             mesh3DMaterialTextureBindings_.clear();
             if (bgfx::isValid(sprite2DProgram_))
