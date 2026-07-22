@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tina 构建与测试"
+  short_description: "配置、构建并验证 Tina 的直接 GoogleTest 与样例门禁"
+  default_prompt: "使用 $build-and-test-tina 为当前改动选择最小且完整的构建与验证路径。"

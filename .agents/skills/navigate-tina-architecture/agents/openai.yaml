@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tina 架构导航"
+  short_description: "梳理 Tina 双轨架构、迁移退役与公开 API 决策"
+  default_prompt: "使用 $navigate-tina-architecture 根据当前代码与 ADR 规划跨模块迁移、替换或 Legacy 退役。"
