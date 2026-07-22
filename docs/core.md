@@ -318,3 +318,11 @@ Render 出现真实需求和 profiling 证据。
 已落地：ID 编码非零 owner token/index/32位 generation，Create 只分配一次 slot block，构造失败
 不消费 slot，erase 立即使 stale ID 失效，回绕策略为永久 retire。owner token 由 Core 自动单调分配，
 pool 销毁后也不复用，跨 pool ID 在 Release 确定拒绝。
+
+实施状态（2026-07-22，M-Diag-A0）：`include/tina/core/diagnostics/` 增加最小日志面
+`LogLevel`、`LogRecord`、`DiagnosticChannel`、`Diagnostics`。`Diagnostics` 由 `EngineHost`
+在 factory 接线前创建、在 module shutdown 最后销毁；模块可取不可拥有的 `DiagnosticChannel`。
+默认私有 console sink（Info→stdout，Warn+→stderr），级别短路不写 sink；sink 失败计数且
+不递归；shutdown 后 channel 写为 no-op。公开头不暴露 spdlog/fmt。Deferred：file sink、
+有界异步队列与 QueueFull、MetricsRegistry、TraceZone/Tracy adapter、CrashContext、
+Worker completion 聚合、敏感字段过滤、IGameApplication/IGameState Phase Context 注入。

@@ -792,6 +792,9 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
 - M11-E5 已完成：Material 可选 Texture2D 依赖（payload flag + cooked dep）+ recipe 尾部 texId；
   Opaque3D unlit 采样 `s_tex`；`setMesh3DMaterialTextureBinding(materialKey, tex)`；
   `tina_sample_3d` 2×2 checker + textured unlit（**仍非** glTF/Prefab/PBR）。
+- M-Diag-A0 已完成：vNext `Diagnostics` owner + `DiagnosticChannel` + `LogLevel`/`LogRecord`；
+  `EngineHost` 接线（先于 Clock 创建、最后 shutdown）；默认 console sink；级别短路与
+  sink 失败不递归门禁。**仍非** file sink / 异步队列 / Metrics / Tracy / CrashContext。
 
 ### M11 产品 3D StaticMesh + Unlit Material 竖切（E0–E5）
 

@@ -6,6 +6,10 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/base/SourceLocation.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/base/Types.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/Assert.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/DiagnosticChannel.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/Diagnostics.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/LogLevel.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/LogRecord.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/error/Error.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/error/Result.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/hash/ContentHash.hpp
@@ -26,6 +30,7 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/text/Utf8.hpp
     diagnostics/Assert.cpp
     diagnostics/Assert.hpp
+    diagnostics/Diagnostics.cpp
     error/Error.hpp
     error/Result.hpp
     hash/ContentHashDigest.cpp
