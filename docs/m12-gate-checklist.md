@@ -3,7 +3,9 @@
 > 状态：跟踪文档，不授权删除。删除前必须取 `docs/architecture.md`、`docs/design-freeze.md`、
 > `docs/roadmap.md` 适用门禁的**严格并集**。本文件只记录事实与缺口。
 >
-> 更新 tip：跟踪 `codex/tina-vnext-runtime`。证据摘录见 [m12-evidence-windows.md](m12-evidence-windows.md)。
+> 更新 tip：跟踪 `codex/tina-vnext-runtime`。  
+> 证据摘录：[m12-evidence-windows.md](m12-evidence-windows.md)。  
+> **删 Legacy UI 专项盘点**：[m12-legacy-ui-retirement.md](m12-legacy-ui-retirement.md)（当前 **Blocked**）。
 
 ## 总原则
 
@@ -31,6 +33,7 @@
 1. G1 全 feature 图（physics+freetype+真实 miniaudio device）若要求更严 `productGate`，需 product-2d preset 复验。
 2. G6 Linux、G7 Legacy 四条最终 smoke、G8 零引用、G9 独立删除提交未做。
 3. cgltf 仍薄（无 multi-mesh/外部纹理）；instantiate 仍 fixture meshKey。
+4. **Legacy UI（`src/ui`）零引用未达成**——`Application`/`Scene`/`MenuScene`/`GameScene`/`SettingsScene`/`PauseScene`/`WorldSelectScene` 等仍依赖；见 [m12-legacy-ui-retirement.md](m12-legacy-ui-retirement.md)。**禁止**在替代完成前删除 Legacy UI。
 
 ## 本机快速复验（禁止 clean）
 
