@@ -36,6 +36,10 @@
 #include <tina/audio/AudioClipView.hpp>
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
+#include <tina/scene/Camera2D.hpp>
+#include <tina/scene/ExtractRenderScene.hpp>
+#include <tina/scene/SpriteRenderer2D.hpp>
+#include <tina/scene/World.hpp>
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
 #include <tina/audio/miniaudio/MiniaudioDevice.hpp>
 #endif
@@ -554,6 +558,14 @@ struct TileMapResources final {
     float cameraPreviousY = 2.0f;
     float cameraCurrentX = 4.0f;
     float cameraCurrentY = 2.0f;
+    // M8-C1: Scene World owns Camera2D + character (+ optional crate) for extract.
+    // TileMap tiles and selection highlight remain feature-side emit.
+    std::optional<Tina::Scene::World> sceneWorld{};
+    Tina::Scene::EntityId cameraEntity{};
+    Tina::Scene::EntityId characterEntity{};
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+    Tina::Scene::EntityId crateEntity{};
+#endif
     std::filesystem::path catalogRoot{};
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     std::optional<Tina::Physics2D::PhysicsWorld2D> physicsWorld{};
@@ -568,6 +580,93 @@ struct TileMapResources final {
     std::optional<Tina::Audio::MiniaudioDevice> audioDevice{};
 #endif
 };
+
+[[nodiscard]] Tina::Scene::LocalTransform sceneTranslation(float x, float y) noexcept
+{
+    Tina::Scene::LocalTransform local{};
+    local.position = {x, y, 0.0f};
+    return local;
+}
+
+// Bootstrap Scene World for product extract (camera + character [+ crate]).
+// Called once after controller (and optional physics) are ready in prepareCatalog.
+[[nodiscard]] Tina::Core::Status prepareSceneWorld(TileMapResources& resources)
+{
+    if (!resources.controller)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "controller required for Scene World");
+    }
+
+    auto world = Tina::Scene::World::Create(Tina::Scene::WorldConfig{.entityCapacity = 16});
+    if (!world)
+    {
+        return Tina::Core::failure(std::move(world.error()));
+    }
+
+    auto cameraEntity = world->createEntity(sceneTranslation(resources.cameraCurrentX, resources.cameraCurrentY));
+    if (!cameraEntity)
+    {
+        return Tina::Core::failure(std::move(cameraEntity.error()));
+    }
+    const Tina::Scene::Camera2D camera{
+        .projection = Tina::Render::FixedWorldHeight2D{.heightMeters = ProductCameraHeightMeters},
+        .pixelSnap = Tina::Render::RenderPixelSnapPolicy::CameraTranslation,
+        .active = true,
+    };
+    if (const auto status = world->setCamera2D(*cameraEntity, camera); !status)
+    {
+        return status;
+    }
+
+    const auto& controllerConfig = resources.controller->config();
+    auto characterEntity =
+        world->createEntity(sceneTranslation(resources.controller->state().positionX, resources.controller->state().positionY));
+    if (!characterEntity)
+    {
+        return Tina::Core::failure(std::move(characterEntity.error()));
+    }
+    const Tina::Scene::SpriteRenderer2D characterSprite{
+        .fixtureSpriteKey = ProductSpriteKey,
+        .overrides = Tina::Scene::SpriteOverrideFlags::Size,
+        .sizeOverrideMeters = {controllerConfig.halfWidth * 2.0f, controllerConfig.halfHeight * 2.0f},
+        .color = {.red = 255, .green = 220, .blue = 80, .alpha = 255},
+        .sortingLayer = 1,
+        .orderInLayer = 0,
+        .visible = true,
+    };
+    if (const auto status = world->setSpriteRenderer2D(*characterEntity, characterSprite); !status)
+    {
+        return status;
+    }
+
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+    auto crateEntity = world->createEntity(sceneTranslation(resources.lastDynamicX, resources.lastDynamicY));
+    if (!crateEntity)
+    {
+        return Tina::Core::failure(std::move(crateEntity.error()));
+    }
+    const float crateSize = resources.dynamicHalfExtent * 2.0f;
+    const Tina::Scene::SpriteRenderer2D crateSprite{
+        .fixtureSpriteKey = ProductSpriteKey,
+        .overrides = Tina::Scene::SpriteOverrideFlags::Size,
+        .sizeOverrideMeters = {crateSize, crateSize},
+        .color = {.red = 120, .green = 220, .blue = 255, .alpha = 255},
+        .sortingLayer = 1,
+        .orderInLayer = 1,
+        .visible = true,
+    };
+    if (const auto status = world->setSpriteRenderer2D(*crateEntity, crateSprite); !status)
+    {
+        return status;
+    }
+    resources.crateEntity = *crateEntity;
+#endif
+
+    resources.cameraEntity = *cameraEntity;
+    resources.characterEntity = *characterEntity;
+    resources.sceneWorld.emplace(std::move(*world));
+    return Tina::Core::success();
+}
 
 [[nodiscard]] Tina::Core::Status prepareCatalog(TileMapResources& resources, LifecycleCounters& counters)
 {
@@ -764,6 +863,12 @@ struct TileMapResources final {
     counters.audioClipFrameCount = audioClip->frameCount;
     counters.audioClipSampleRate = audioClip->sampleRate;
     counters.audioFromCatalogLease = true;
+
+    // M8-C1: Scene World for camera/character/(crate) extract path.
+    if (const auto status = prepareSceneWorld(resources); !status)
+    {
+        return status;
+    }
     return Tina::Core::success();
 }
 
@@ -1449,7 +1554,7 @@ class TileMapBgfxState final : public Tina::IGameState {
 
     Tina::Core::Status extractRenderScene(Tina::RenderSceneExtractionContext& context) const override
     {
-        if (!resources_->map || !resources_->controller)
+        if (!resources_->map || !resources_->controller || !resources_->sceneWorld)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "tilemap state not ready");
         }
@@ -1461,7 +1566,11 @@ class TileMapBgfxState final : public Tina::IGameState {
             ++counters_->renderExtractions;
             return Tina::Core::success();
         }
-        // previous/current interpolation -> camera view -> RenderScene pixel snap.
+
+        // previous/current interpolation -> presentation camera pose.
+        // M8-C1: sample mutates Scene World camera transform immediately before
+        // extract so extractRenderSceneFromWorld sees the interpolated center.
+        // Character/crate use current sim pose (same as pre-C1 direct emit).
         const double alpha = context.frameTiming().interpolation;
         const float alphaF =
             static_cast<float>(std::clamp(alpha, 0.0, 1.0));
@@ -1469,6 +1578,48 @@ class TileMapBgfxState final : public Tina::IGameState {
             resources_->cameraPreviousX + (resources_->cameraCurrentX - resources_->cameraPreviousX) * alphaF;
         const float centerY =
             resources_->cameraPreviousY + (resources_->cameraCurrentY - resources_->cameraPreviousY) * alphaF;
+
+        Tina::Scene::World& sceneWorld = *resources_->sceneWorld;
+        if (const auto status =
+                sceneWorld.setLocalTransform(resources_->cameraEntity, sceneTranslation(centerX, centerY));
+            !status)
+        {
+            return status;
+        }
+        const auto& st = resources_->controller->state();
+        if (const auto status = sceneWorld.setLocalTransform(
+                resources_->characterEntity, sceneTranslation(st.positionX, st.positionY));
+            !status)
+        {
+            return status;
+        }
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+        if (const auto status = sceneWorld.setLocalTransform(
+                resources_->crateEntity, sceneTranslation(resources_->lastDynamicX, resources_->lastDynamicY));
+            !status)
+        {
+            return status;
+        }
+#endif
+
+        // Scene extract: Camera2D + SpriteRenderer2D (character [+ crate]).
+        // TileMap tiles stay feature-side; selection highlight stays sample-side.
+        if (const auto status = Tina::Scene::extractRenderSceneFromWorld(
+                sceneWorld,
+                writer,
+                Tina::Scene::ExtractRenderSceneParams{
+                    .surfaceViewport =
+                        Tina::Render::Camera2DSurfaceViewport{
+                            .pixelWidth = counters_->surfacePixelWidth,
+                            .pixelHeight = counters_->surfacePixelHeight,
+                        },
+                });
+            !status)
+        {
+            return status;
+        }
+
+        // Gate counters from resolved camera fields after Scene extract.
         const Tina::Render::Camera2DProjectionQuery projectionQuery{
             .stableCameraKey = 1,
             .centerX = centerX,
@@ -1496,10 +1647,6 @@ class TileMapBgfxState final : public Tina::IGameState {
         if (alphaF > 0.0f && alphaF < 1.0f)
         {
             ++counters_->cameraInterpolatedExtracts;
-        }
-        if (auto status = writer.setCamera2D(*camera); !status)
-        {
-            return status;
         }
 
         std::pmr::vector<Tina::Render::RenderSprite2DInput> tileSprites{&resources_->memory};
@@ -1547,54 +1694,9 @@ class TileMapBgfxState final : public Tina::IGameState {
             counters_->chunkDirtyCacheHits = statsAfter.cacheHits;
         }
 
-        const auto& st = resources_->controller->state();
-        const Tina::Render::RenderSprite2DInput character{
-            .spriteKey = ProductSpriteKey,
-            .stableEntityKey = 900001,
-            .centerX = st.positionX,
-            .centerY = st.positionY,
-            .widthMeters = resources_->controller->config().halfWidth * 2.0f,
-            .heightMeters = resources_->controller->config().halfHeight * 2.0f,
-            .u0 = 0.0f,
-            .v0 = 0.0f,
-            .u1 = 0.5f,
-            .v1 = 1.0f,
-            .sortingLayer = 1,
-            .orderInLayer = 0,
-            .red = 255,
-            .green = 220,
-            .blue = 80,
-            .alpha = 255,
-        };
-        if (auto status = writer.addSprite2D(character); !status)
-        {
-            return status;
-        }
+        // Scene contributed character [+ crate]; tiles from feature emit above.
         u64 totalSprites = *emitted + 1U;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
-        // Product crate sprite follows the dynamic Box2D body (same atlas key as tiles).
-        const Tina::Render::RenderSprite2DInput crate{
-            .spriteKey = ProductSpriteKey,
-            .stableEntityKey = 900002,
-            .centerX = resources_->lastDynamicX,
-            .centerY = resources_->lastDynamicY,
-            .widthMeters = resources_->dynamicHalfExtent * 2.0f,
-            .heightMeters = resources_->dynamicHalfExtent * 2.0f,
-            .u0 = 0.5f,
-            .v0 = 0.0f,
-            .u1 = 1.0f,
-            .v1 = 1.0f,
-            .sortingLayer = 1,
-            .orderInLayer = 1,
-            .red = 120,
-            .green = 220,
-            .blue = 255,
-            .alpha = 255,
-        };
-        if (auto status = writer.addSprite2D(crate); !status)
-        {
-            return status;
-        }
         ++totalSprites;
 #endif
         // M10-A44: when lastSelection is set, emit exactly one highlight sprite

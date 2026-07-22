@@ -15,6 +15,7 @@ target_link_libraries(tina_sample_2d PRIVATE
     Tina::DesktopBootstrap
     Tina::Runtime
     Tina::Asset
+    Tina::Scene
     Tina::RenderBgfx
 )
 if (TINA_BUILD_PHYSICS2D)
