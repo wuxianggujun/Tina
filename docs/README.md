@@ -35,4 +35,4 @@
 extraction foundation，M9-B/M9-C 已有私有 bgfx 3D/2D fixture；M10-A0 已完成独立 Cooked Header/Manifest
 wire-format 与只读校验基础。**M11-E0–E5 最小产品 3D 已落地**：Catalog recipe StaticMesh cube +
 Unlit solid/textured + `tina_sample_3d`（非 glTF）。Cooker **cgltf → glTF/Prefab/PBR** 仍 Deferred。
-测试和实际运行结果优先于文档。
+M12 删除门槛跟踪见 [m12-gate-checklist.md](m12-gate-checklist.md)。测试和实际运行结果优先于文档。

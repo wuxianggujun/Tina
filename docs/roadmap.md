@@ -852,6 +852,8 @@ cgltf（glTF 产品 3D）、厚 world-pick Game SDK、删 Legacy **不**用 M10-
 - Windows/Linux 构建、直接 GoogleTest、所有 smoke 与资源计数通过；
 - 删除旧 target、旧源码和无用依赖形成独立可回滚提交；
 - vNext 分支合入最新已提交的 `dev` 并复验后，才合并回干净主工作区。
+- **跟踪清单：** [m12-gate-checklist.md](m12-gate-checklist.md)（当前 tip 上 G3 仍缺 glTF/Prefab
+  实例化；**不得**因 cube/Unlit 或 Scene extract 完成而开删 Legacy）。
 
 ## 后续能力
 
