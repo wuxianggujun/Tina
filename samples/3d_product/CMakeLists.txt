@@ -11,6 +11,7 @@ target_link_libraries(tina_sample_3d PRIVATE
     Tina::DesktopBootstrap
     Tina::Runtime
     Tina::Asset
+    Tina::Scene
     Tina::RenderBgfx
 )
 set_target_properties(tina_sample_3d PROPERTIES CXX_EXTENSIONS OFF)
