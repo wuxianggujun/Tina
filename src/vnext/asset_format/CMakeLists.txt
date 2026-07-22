@@ -2,7 +2,9 @@ set(TINA_ASSET_FORMAT_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AssetFormat.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AssetFormatErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AudioClipPayload.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset_format/MaterialPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/SpritePayload.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset_format/StaticMeshPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/Texture2DPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/TilesetPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/TileMapPayload.hpp
@@ -12,7 +14,9 @@ add_library(tina_asset_format STATIC
     ${TINA_ASSET_FORMAT_PUBLIC_HEADERS}
     AssetFormat.cpp
     AudioClipPayload.cpp
+    MaterialPayload.cpp
     SpritePayload.cpp
+    StaticMeshPayload.cpp
     Texture2DPayload.cpp
     TilesetPayload.cpp
     TileMapPayload.cpp

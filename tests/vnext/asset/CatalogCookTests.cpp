@@ -462,5 +462,125 @@ TEST(CatalogCookTests, AudioClipFileWavRecipe)
     std::filesystem::remove_all(dir, ec);
 }
 
+// M11-E1: cook canonical unit cube StaticMesh via recipe `staticmesh <id> cube`.
+TEST(CatalogCookTests, StaticMeshCubeRecipe)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto meshId = *Core::AssetId::fromBytes(idBytes(9U));
+    const auto meshHex = meshId.canonicalText();
+
+    std::string recipe;
+    recipe += "platform WindowsX64\n";
+    recipe += "staticmesh ";
+    recipe.append(meshHex.data(), meshHex.size());
+    recipe += " cube\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    ASSERT_EQ(request->assets.size(), 1U);
+    EXPECT_EQ(request->assets[0].assetKind, AssetFormat::AssetKind::StaticMesh);
+    EXPECT_EQ(request->assets[0].assetId, meshId);
+
+    const auto root = std::filesystem::temp_directory_path() / "tina_staticmesh_cube";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(root), *request).has_value());
+
+    CatalogPackageOpenConfig openConfig{
+        .manifest =
+            CatalogFileLoadConfig{
+                .catalog =
+                    CatalogConfig{
+                        .maxEntries = 8,
+                        .maxDependencies = 8,
+                        .maxDependenciesPerAsset = 4,
+                        .memoryResource = &memory,
+                    },
+            },
+        .validateOnOpen = true,
+        .validation =
+            CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .verifyContent = true,
+                .verifyTypedPayload = true,
+            },
+    };
+    auto catalog = openCatalogPackage(toUtf8(root), openConfig);
+    ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
+    EXPECT_EQ(catalog->entryCount(), 1U);
+
+    auto asset = loadCookedAssetFromCatalog(toUtf8(root), *catalog, meshId,
+                                            CookedAssetFileLoadConfig{.memoryResource = &memory});
+    ASSERT_TRUE(asset.has_value()) << asset.error().message;
+    auto mesh = parseStaticMeshFromCooked(*asset);
+    ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
+    EXPECT_EQ(mesh->vertexCount, 24U);
+    EXPECT_EQ(mesh->indexCount, 36U);
+    EXPECT_EQ(mesh->submeshCount, 1U);
+
+    std::filesystem::remove_all(root, ec);
+}
+
+// M11-E4: cook UnlitBaseColor Material via recipe `material <id> unlit r g b [a]`.
+TEST(CatalogCookTests, MaterialUnlitRecipe)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(10U));
+    const auto materialHex = materialId.canonicalText();
+
+    std::string recipe;
+    recipe += "platform WindowsX64\n";
+    recipe += "material ";
+    recipe.append(materialHex.data(), materialHex.size());
+    recipe += " unlit 0.95 0.24 0.30 1.0\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    ASSERT_EQ(request->assets.size(), 1U);
+    EXPECT_EQ(request->assets[0].assetKind, AssetFormat::AssetKind::Material);
+    EXPECT_EQ(request->assets[0].assetId, materialId);
+
+    const auto root = std::filesystem::temp_directory_path() / "tina_material_unlit";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(root), *request).has_value());
+
+    CatalogPackageOpenConfig openConfig{
+        .manifest =
+            CatalogFileLoadConfig{
+                .catalog =
+                    CatalogConfig{
+                        .maxEntries = 8,
+                        .maxDependencies = 8,
+                        .maxDependenciesPerAsset = 4,
+                        .memoryResource = &memory,
+                    },
+            },
+        .validateOnOpen = true,
+        .validation =
+            CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .verifyContent = true,
+                .verifyTypedPayload = true,
+            },
+    };
+    auto catalog = openCatalogPackage(toUtf8(root), openConfig);
+    ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
+    EXPECT_EQ(catalog->entryCount(), 1U);
+
+    auto asset = loadCookedAssetFromCatalog(toUtf8(root), *catalog, materialId,
+                                            CookedAssetFileLoadConfig{.memoryResource = &memory});
+    ASSERT_TRUE(asset.has_value()) << asset.error().message;
+    auto material = parseMaterialFromCooked(*asset);
+    ASSERT_TRUE(material.has_value()) << material.error().message;
+    EXPECT_EQ(material->model, AssetFormat::MaterialModel::UnlitBaseColor);
+    EXPECT_FLOAT_EQ(material->baseColorR, 0.95F);
+    EXPECT_FLOAT_EQ(material->baseColorG, 0.24F);
+    EXPECT_FLOAT_EQ(material->baseColorB, 0.30F);
+    EXPECT_FLOAT_EQ(material->baseColorA, 1.0F);
+
+    std::filesystem::remove_all(root, ec);
+}
+
 } // namespace
 } // namespace Tina::Asset

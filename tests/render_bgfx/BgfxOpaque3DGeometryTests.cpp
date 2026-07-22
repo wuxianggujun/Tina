@@ -168,15 +168,18 @@ TEST(BgfxOpaque3DGeometryTest, ValidFixtureWritesWorldTransformsAndColors)
               (std::array<float, 4>{0.8F, 0.2F, 0.1F, 1.0F}));
 }
 
-TEST(BgfxOpaque3DGeometryTest, RejectsUnsupportedMeshKeyExplicitly)
+// Product path: non-fixture meshKey is valid at geometry validation; submit binds GPU mesh.
+// (meshKey=0 is rejected earlier by RenderSceneBuilder, not only here.)
+TEST(BgfxOpaque3DGeometryTest, AcceptsNonFixtureMeshKeyAtGeometryStage)
 {
     RenderSceneBuilder builder = makeBuilder();
     auto sceneResult = committedScene(builder, Opaque3DFixtureMeshKey + 1U);
     ASSERT_TRUE(sceneResult.has_value());
     const RenderSceneView scene = *sceneResult;
     auto requirements = checkedOpaque3DFrame(scene);
-    ASSERT_FALSE(requirements.has_value());
-    EXPECT_EQ(requirements.error().code, Core::CoreErrorCode::Unsupported);
+    ASSERT_TRUE(requirements.has_value()) << (requirements ? "" : requirements.error().message);
+    EXPECT_EQ(requirements->instanceCount, 2U);
+    EXPECT_EQ(requirements->batchCount, 1U);
 }
 
 TEST(BgfxOpaque3DGeometryTest, RejectsUnsupportedMaterialKeyExplicitly)

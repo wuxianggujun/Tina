@@ -662,7 +662,7 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
 | **已完成（样例主线）** | A32–A38 Catalog/TileMap/角色/UI/Physics/recipe | product-2d preset |
 | **已完成（Asset 子集）** | A0–A31 Catalog/Handle/Task/upload/recipe 等 | hermetic fixture 足够 2D 主路径 |
 | **Deferred** | 完整外部 cooker CLI / 全量 `tina_assetc` | 当前 recipe 子集；可另开切片 |
-| **Deferred** | cgltf v1.15 → StaticMesh/Material/Prefab + `tina_sample_3d` | 固定版本规划；不阻塞 2D 收口 |
+| **Deferred** | cgltf v1.15 → Material/Prefab + textured `tina_sample_3d` | StaticMesh cube 产品竖切见 M11-E0–E3；glTF 不阻塞 2D 收口 |
 | **Deferred** | 扩大 Game SDK world-pick 公共 API | sample-private helper 已够 |
 | **Deferred（可进 M11）** | 稳定截图回归 | Camera 投影/follow 见 M11-B0/B2；chunk dirty 见 M11-B1 |
 | **Deferred（M12）** | 删 Legacy | 需 2D/UI/3D/Asset/Audio 等价验收 |
@@ -776,6 +776,30 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   `pixelFingerprint`；门禁要求 capture 成功；
 - M11-D2 已完成：可选 golden 对比 CLI `--expect-pixel-fingerprint=<32hex>`；匹配失败 verification
   fail 并回显 actual/expect；默认不强制（本机/驱动相关）；**仍非跨 GPU 容差 / PNG golden 文件**；
+- M11-E0 已完成：`AssetFormat::StaticMeshPayload` v1（P3_N3_UV2 + U16、submesh、bounds、
+  canonical unit cube helper、`writeCookedStaticMeshAsset`）；`tina_asset_format` 测试 round-trip；
+- M11-E1 已完成：Catalog recipe `staticmesh <id> cube`、`parseStaticMeshFromCooked`、
+  package typed validation；`CatalogCookTests.StaticMeshCubeRecipe`；
+- M11-E2 已完成：`GpuMeshId` + `IRenderDevice::createStaticMeshP3N3UV2` /
+  `destroyStaticMesh` / `setMesh3DBinding`（Null + bgfx VB/IB）；
+  `Asset::uploadStaticMeshFromCooked` / `uploadAndBindStaticMeshForMeshKey`；
+  Opaque3D 提交时优先 bound mesh，meshKey=1 未绑定时仍回落 procedural cube；
+- M11-E3 已完成：产品样例 `tina_sample_3d`（recipe cook → Catalog → GPU upload/bind →
+  3 个 instance batch Cube + UI overlay，300 帧资源归零）。
+- M11-E4 已完成：`AssetFormat::MaterialPayload` UnlitBaseColor v1（24B solid factor）+
+  recipe `material <id> unlit r g b [a]` + `parseMaterialFromCooked` + typed validation；
+  `tina_sample_3d` 从 cooked Material 读 baseColor 填 `RenderMesh3DInput`（**仍非** Texture 绑定 /
+  MaterialKey GPU 表 / glTF）。**仍非** Prefab/textured Mesh；cgltf 后置。
+
+### M11 产品 3D StaticMesh + Unlit Material 竖切（E0–E4）
+
+| 已完成 | Deferred（不阻塞本收口） |
+| --- | --- |
+| StaticMesh cooked payload v1 + cube recipe | cgltf v1.15 → multi-mesh glTF cook |
+| GPU mesh upload/bind (Null/bgfx) | Material GPU binding / textured Unlit |
+| UnlitBaseColor Material payload + recipe | Prefab / Material slot override |
+| `tina_sample_3d` cube + cooked material colors | PBR / Light / Transparent3D / Pass Scheduler |
+| meshKey binding + fixture fallback | 正式 textured Prefab 场景验收 |
 
 ### M11 设置 / UI 产品竖切收口（tip `bbbe1b5b`，C0–C5 + D0）
 

@@ -865,6 +865,28 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         if (bgfxInitialized_)
         {
+            mesh3DBindings_.clear();
+            for (MeshSlot& slot : meshes_)
+            {
+                if (slot.live)
+                {
+                    if (bgfx::isValid(slot.vertexBuffer))
+                    {
+                        bgfx::destroy(slot.vertexBuffer);
+                        slot.vertexBuffer = BGFX_INVALID_HANDLE;
+                        --statistics_.liveResources;
+                    }
+                    if (bgfx::isValid(slot.indexBuffer))
+                    {
+                        bgfx::destroy(slot.indexBuffer);
+                        slot.indexBuffer = BGFX_INVALID_HANDLE;
+                        --statistics_.liveResources;
+                    }
+                    slot.live = false;
+                    ++slot.generation;
+                }
+            }
+            meshes_.clear();
             if (bgfx::isValid(opaque3DIndexBuffer_))
             {
                 bgfx::destroy(opaque3DIndexBuffer_);
@@ -1103,8 +1125,32 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             const u64 renderState = kOpaque3DState | (batch.doubleSided ? 0 : BGFX_STATE_CULL_CW);
             bgfx::setState(renderState);
-            bgfx::setVertexBuffer(0, opaque3DVertexBuffer_);
-            bgfx::setIndexBuffer(opaque3DIndexBuffer_);
+
+            bgfx::VertexBufferHandle vb = opaque3DVertexBuffer_;
+            bgfx::IndexBufferHandle ib = opaque3DIndexBuffer_;
+            // meshKey=1 defaults to built-in cube; other keys require setMesh3DBinding.
+            if (const auto binding = mesh3DBindings_.find(batch.meshKey); binding != mesh3DBindings_.end())
+            {
+                const GpuMeshId id = binding->second;
+                if (id.index < meshes_.size())
+                {
+                    const MeshSlot& slot = meshes_[id.index];
+                    if (slot.live && slot.generation == id.generation && bgfx::isValid(slot.vertexBuffer) &&
+                        bgfx::isValid(slot.indexBuffer))
+                    {
+                        vb = slot.vertexBuffer;
+                        ib = slot.indexBuffer;
+                    }
+                }
+            }
+            else if (batch.meshKey != Opaque3DFixtureMeshKey)
+            {
+                // Unbound non-fixture meshKey: skip submit rather than draw wrong geometry.
+                continue;
+            }
+
+            bgfx::setVertexBuffer(0, vb);
+            bgfx::setIndexBuffer(ib);
             bgfx::setInstanceDataBuffer(&instanceBuffer, batch.firstItem, batch.itemCount);
             bgfx::submit(kOpaque3DView, opaque3DProgram_);
         }
@@ -1292,6 +1338,159 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
         }
         spriteTextureBindings_[spriteKey] = texture;
+        return Core::success();
+    }
+
+    // M11-E2: upload cooked/product StaticMesh (P3_N3_UV2 + U16) into private VB/IB.
+    [[nodiscard]] Core::Result<GpuMeshId> createStaticMeshP3N3UV2(const StaticMeshUploadDesc& desc) override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::createStaticMeshP3N3UV2"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (desc.vertexCount == 0 || desc.indexCount == 0 || (desc.indexCount % 3U) != 0U ||
+            desc.vertices.size() != static_cast<usize>(desc.vertexCount) * 8U ||
+            desc.indices.size() != desc.indexCount)
+        {
+            return Core::failure(RenderErrorCode::InvalidMeshUpload, "invalid StaticMesh upload descriptor");
+        }
+        for (const float value : desc.vertices)
+        {
+            if (!std::isfinite(value))
+            {
+                return Core::failure(RenderErrorCode::InvalidMeshUpload, "StaticMesh vertices must be finite");
+            }
+        }
+        for (const u16 index : desc.indices)
+        {
+            if (static_cast<u32>(index) >= desc.vertexCount)
+            {
+                return Core::failure(RenderErrorCode::InvalidMeshUpload, "StaticMesh index out of range");
+            }
+        }
+
+        const u32 vertexBytes = desc.vertexCount * static_cast<u32>(sizeof(float) * 8U);
+        const u32 indexBytes = desc.indexCount * static_cast<u32>(sizeof(u16));
+        const bgfx::Memory* vertexMemory = bgfx::copy(desc.vertices.data(), vertexBytes);
+        const bgfx::VertexBufferHandle vb =
+            bgfx::createVertexBuffer(vertexMemory, opaque3DVertexLayout_);
+        if (!bgfx::isValid(vb))
+        {
+            return Core::failure(RenderErrorCode::InvalidMeshUpload, "bgfx rejected StaticMesh vertex buffer");
+        }
+        const bgfx::Memory* indexMemory = bgfx::copy(desc.indices.data(), indexBytes);
+        const bgfx::IndexBufferHandle ib = bgfx::createIndexBuffer(indexMemory);
+        if (!bgfx::isValid(ib))
+        {
+            bgfx::destroy(vb);
+            return Core::failure(RenderErrorCode::InvalidMeshUpload, "bgfx rejected StaticMesh index buffer");
+        }
+
+        u32 slotIndex = (std::numeric_limits<u32>::max)();
+        for (u32 i = 0; i < static_cast<u32>(meshes_.size()); ++i)
+        {
+            if (!meshes_[i].live)
+            {
+                slotIndex = i;
+                break;
+            }
+        }
+        if (slotIndex == (std::numeric_limits<u32>::max)())
+        {
+            slotIndex = static_cast<u32>(meshes_.size());
+            meshes_.push_back(MeshSlot{});
+        }
+        MeshSlot& slot = meshes_[slotIndex];
+        slot.vertexBuffer = vb;
+        slot.indexBuffer = ib;
+        slot.vertexCount = desc.vertexCount;
+        slot.indexCount = desc.indexCount;
+        slot.live = true;
+        if (slot.generation == 0)
+        {
+            slot.generation = 1;
+        }
+        ++statistics_.liveResources;
+        ++statistics_.liveResources;
+        return GpuMeshId{.index = slotIndex, .generation = slot.generation};
+    }
+
+    [[nodiscard]] Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (!mesh || mesh.index >= meshes_.size())
+        {
+            return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is invalid");
+        }
+        MeshSlot& slot = meshes_[mesh.index];
+        if (!slot.live || slot.generation != mesh.generation)
+        {
+            return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is stale or destroyed");
+        }
+        if (bgfx::isValid(slot.vertexBuffer))
+        {
+            bgfx::destroy(slot.vertexBuffer);
+            slot.vertexBuffer = BGFX_INVALID_HANDLE;
+            --statistics_.liveResources;
+        }
+        if (bgfx::isValid(slot.indexBuffer))
+        {
+            bgfx::destroy(slot.indexBuffer);
+            slot.indexBuffer = BGFX_INVALID_HANDLE;
+            --statistics_.liveResources;
+        }
+        slot.live = false;
+        ++slot.generation;
+        for (auto it = mesh3DBindings_.begin(); it != mesh3DBindings_.end();)
+        {
+            if (it->second == mesh)
+            {
+                it = mesh3DBindings_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setMesh3DBinding(u32 meshKey, GpuMeshId mesh) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (meshKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidMeshUpload, "meshKey must be non-zero");
+        }
+        if (!mesh)
+        {
+            mesh3DBindings_.erase(meshKey);
+            return Core::success();
+        }
+        if (mesh.index >= meshes_.size() || !meshes_[mesh.index].live ||
+            meshes_[mesh.index].generation != mesh.generation)
+        {
+            return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is invalid");
+        }
+        mesh3DBindings_[meshKey] = mesh;
         return Core::success();
     }
 
@@ -1504,6 +1703,17 @@ class BgfxRenderDevice final : public IRenderDevice {
     };
     std::vector<TextureSlot> textures_{};
     std::unordered_map<u32, GpuTextureId> spriteTextureBindings_{};
+
+    struct MeshSlot final {
+        bgfx::VertexBufferHandle vertexBuffer = BGFX_INVALID_HANDLE;
+        bgfx::IndexBufferHandle indexBuffer = BGFX_INVALID_HANDLE;
+        u32 generation = 1;
+        u32 vertexCount = 0;
+        u32 indexCount = 0;
+        bool live = false;
+    };
+    std::vector<MeshSlot> meshes_{};
+    std::unordered_map<u32, GpuMeshId> mesh3DBindings_{};
 
     bool frameOpen_ = false;
     bool stopped_ = false;

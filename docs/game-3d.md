@@ -1,9 +1,8 @@
 # 3D 游戏架构
 
-> 状态：vNext 契约已冻结；M9-A CPU/Null extraction foundation 已实现。M9-B 当前最小实现已新增
-> 私有 bgfx Opaque3D procedural Cube/depth/instancing 基础设施和 `tina_sample_3d_infrastructure`。
-> 该样例只验证 fixture 级可见 3D；正式 3D 路径仍必须覆盖 Cooked Mesh、Material、Prefab、
-> Camera、depth 与 culling。
+> 状态：vNext 契约已冻结；M9-A/B fixture 与 M11-E0–E3 product StaticMesh 竖切已落地。
+> `tina_sample_3d` 走 Catalog recipe `staticmesh … cube` → GPU upload/bind → Opaque3D instance
+> batch；**仍非** glTF/Material/Prefab/textured 完整产品门禁（cgltf 后置）。
 
 ## 首期能力边界
 
@@ -237,9 +236,12 @@ stale handle、资源归零和 checksum 属确定性硬门禁。
 2. `tina_sample_3d_infrastructure`：procedural indexed Cube、Perspective、depth、真实 instance buffer、
    300帧退出与实际截图；当前 M9-B 最小实现已覆盖 fixture 级路径，但仍不覆盖 Cooked Asset、
    通用 Material/Pipeline、自动 resize/restore 门禁或产品 3D；
-3. `tina_sample_3d`：Cooked textured glTF -> Mesh/Material/Prefab、层级 Transform、多个深度遮挡
-   对象、frustum culling 和至少一个 instance batch。
+  3. `tina_sample_3d`（M11-E3/E4 最小产品竖切）：Catalog recipe 产出 Cooked StaticMesh（canonical cube）
+    + UnlitBaseColor Material solid factors、`uploadStaticMeshFromCooked` + `setMesh3DBinding`、
+    Perspective + depth + 3 instance Cube（颜色来自 cooked Material）+ UI、300 帧与 GPU mesh 资源归零。
+    **尚未**覆盖 textured Material、glTF、Prefab 层级、resize 门禁。
+  4. 完整产品 3D（后置）：Cooked textured glTF → Mesh/Material/Prefab、层级 Transform、多个深度遮挡
+    对象、frustum culling 与 instance batch；含不支持 glTF 诊断与 shutdown 退役。
 
-这些样例分别验证进程返回码、结构化日志、Render resource count、实际截图。正式样例还必须覆盖
-最小化/恢复、aspect 更新、不支持 glTF 诊断和 shutdown 时 Buffer/Texture/Shader/Pipeline 全部
-退役。只有第三步通过后，3D 产品路径才可计入 Legacy 删除门禁。
+  步骤 1–3 验证进程返回码、结构化 JSON、Render resource count。步骤 4 通过后，3D 产品路径才可
+  计入 Legacy 删除门禁。

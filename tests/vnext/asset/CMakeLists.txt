@@ -12,6 +12,7 @@ set(TINA_ASSET_TEST_SOURCES
     AssetSystemCatalogApiTests.cpp
     AssetSpriteRenderTests.cpp
     AssetGpuTextureTests.cpp
+    AssetGpuMeshTests.cpp
     AudioClipCookedPlaybackTests.cpp
     TileMapInstanceTests.cpp
     TileChunkExtractionTests.cpp
@@ -38,6 +39,7 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/AssetTypedViewsHeader.cpp
     header_isolation/AssetSpriteRenderHeader.cpp
     header_isolation/AssetGpuTextureHeader.cpp
+    header_isolation/AssetGpuMeshHeader.cpp
     header_isolation/TileMapInstanceHeader.cpp
     header_isolation/GridCollisionHeader.cpp
     header_isolation/TileChunkViewHeader.cpp

@@ -49,6 +49,8 @@ struct CatalogCookResult final {
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> <f0...>
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> sine <freqHz>
 //   audioclip <32hexId> file <relativeOrAbsolute.wav>  // PCM16 WAV only (M11-A20)
+//   staticmesh <32hexId> cube                          // canonical unit cube (M11-E1)
+//   material <32hexId> unlit <r> <g> <b> [a]           // UnlitBaseColor linear RGBA (M11-E4)
 //   tileset <32hexId> <texture32hexId> <tilePxW> <tilePxH>
 //   tile <localId> <materialFlags> <u0> <v0> <u1> <v1>   // after tileset; ends at next non-tile
 //   tilemap <32hexId> <tileset32hexId> <widthCells> <heightCells> <cellSizeMeters>

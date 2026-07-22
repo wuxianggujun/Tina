@@ -146,12 +146,97 @@ class NullRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Result<GpuMeshId> createStaticMeshP3N3UV2(const StaticMeshUploadDesc& desc) override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (desc.vertexCount == 0 || desc.indexCount == 0 || (desc.indexCount % 3U) != 0U ||
+            desc.vertices.size() != static_cast<std::size_t>(desc.vertexCount) * 8U ||
+            desc.indices.size() != desc.indexCount)
+        {
+            return Core::failure(RenderErrorCode::InvalidMeshUpload, "invalid StaticMesh upload descriptor");
+        }
+        for (const u16 index : desc.indices)
+        {
+            if (static_cast<u32>(index) >= desc.vertexCount)
+            {
+                return Core::failure(RenderErrorCode::InvalidMeshUpload, "StaticMesh index out of range");
+            }
+        }
+        const u32 slotIndex = static_cast<u32>(meshes_.size());
+        meshes_.push_back(MeshSlot{.generation = 1,
+                                   .vertexCount = desc.vertexCount,
+                                   .indexCount = desc.indexCount,
+                                   .live = true});
+        ++statistics_.liveResources;
+        return GpuMeshId{.index = slotIndex, .generation = 1};
+    }
+
+    [[nodiscard]] Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (!mesh || mesh.index >= meshes_.size() || !meshes_[mesh.index].live ||
+            meshes_[mesh.index].generation != mesh.generation)
+        {
+            return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is invalid or already destroyed");
+        }
+        meshes_[mesh.index].live = false;
+        ++meshes_[mesh.index].generation;
+        if (statistics_.liveResources > 0)
+        {
+            --statistics_.liveResources;
+        }
+        for (auto it = meshBindings_.begin(); it != meshBindings_.end();)
+        {
+            if (it->second == mesh)
+            {
+                it = meshBindings_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setMesh3DBinding(u32 meshKey, GpuMeshId mesh) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (meshKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidMeshUpload, "meshKey must be non-zero");
+        }
+        if (!mesh)
+        {
+            meshBindings_.erase(meshKey);
+            return Core::success();
+        }
+        if (mesh.index >= meshes_.size() || !meshes_[mesh.index].live ||
+            meshes_[mesh.index].generation != mesh.generation)
+        {
+            return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is invalid");
+        }
+        meshBindings_[meshKey] = mesh;
+        return Core::success();
+    }
+
     void shutdown() noexcept override
     {
         stopped_ = true;
         frameOpen_ = false;
         spriteBindings_.clear();
         textures_.clear();
+        meshBindings_.clear();
+        meshes_.clear();
         statistics_.liveResources = 0;
     }
 
@@ -162,11 +247,19 @@ class NullRenderDevice final : public IRenderDevice {
         u16 height = 0;
         bool live = false;
     };
+    struct MeshSlot final {
+        u32 generation = 1;
+        u32 vertexCount = 0;
+        u32 indexCount = 0;
+        bool live = false;
+    };
 
     Detail::RenderSurfaceStateTracker surfaceStateTracker_;
     RenderStatistics statistics_{};
     std::vector<TextureSlot> textures_{};
     std::unordered_map<u32, GpuTextureId> spriteBindings_{};
+    std::vector<MeshSlot> meshes_{};
+    std::unordered_map<u32, GpuMeshId> meshBindings_{};
     u64 nextFrameIndex_ = 0;
     u64 nextSubmissionIndex_ = 0;
     bool frameOpen_ = false;

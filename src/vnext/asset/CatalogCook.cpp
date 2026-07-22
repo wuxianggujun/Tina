@@ -4,7 +4,9 @@
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackagePublish.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
+#include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
+#include <tina/asset_format/StaticMeshPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
@@ -12,6 +14,7 @@
 #include <tina/core/io/ReadFile.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <cmath>
@@ -882,6 +885,92 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
                 return Core::failure(std::move(asset.error()));
             }
             request.assets.push_back(std::move(*asset));
+            continue;
+        }
+        if (tokens[0] == "staticmesh")
+        {
+            // staticmesh <id> cube  — canonical unit cube (product-3D before glTF).
+            if (tokens.size() != 3 || tokens[2] != "cube")
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "staticmesh currently supports: staticmesh <id> cube");
+            }
+            auto meshId = Core::AssetId::parseCanonical(tokens[1]);
+            if (!meshId)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid staticmesh asset id");
+            }
+            std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{};
+            std::array<float, 24 * 8> vertices{};
+            std::array<Core::u16, 36> indices{};
+            const AssetFormat::StaticMeshPayloadDesc desc =
+                AssetFormat::makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
+            if (desc.vertices.empty() || desc.indices.empty())
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "failed to build canonical cube mesh");
+            }
+            auto payload = AssetFormat::writeStaticMeshPayloadBytes(desc);
+            if (!payload)
+            {
+                return Core::failure(std::move(payload.error()));
+            }
+            request.assets.push_back(CatalogCookAssetSpec{
+                .assetKind = AssetFormat::AssetKind::StaticMesh,
+                .assetId = *meshId,
+                .assetTypeVersion = AssetFormat::StaticMeshWire::SchemaVersion,
+                .payload = std::move(*payload),
+            });
+            continue;
+        }
+        if (tokens[0] == "material")
+        {
+            // material <id> unlit <r> <g> <b> [a]  — UnlitBaseColor solid factor (M11-E4).
+            if (tokens.size() != 6 && tokens.size() != 7)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "material currently supports: material <id> unlit <r> <g> <b> [a]");
+            }
+            if (tokens[2] != "unlit")
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "material model must be unlit");
+            }
+            auto materialId = Core::AssetId::parseCanonical(tokens[1]);
+            if (!materialId)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid material asset id");
+            }
+            float r = 0.0F;
+            float g = 0.0F;
+            float b = 0.0F;
+            float a = 1.0F;
+            if (!parseFloatToken(tokens[3], r) || !parseFloatToken(tokens[4], g) || !parseFloatToken(tokens[5], b))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid material baseColor RGB");
+            }
+            if (tokens.size() == 7 && !parseFloatToken(tokens[6], a))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid material baseColor alpha");
+            }
+            AssetFormat::MaterialPayloadDesc desc{
+                .model = AssetFormat::MaterialModel::UnlitBaseColor,
+                .baseColorR = r,
+                .baseColorG = g,
+                .baseColorB = b,
+                .baseColorA = a,
+                .doubleSided = false,
+                .alphaMode = AssetFormat::MaterialAlphaMode::Opaque,
+            };
+            auto payload = AssetFormat::writeMaterialPayloadBytes(desc);
+            if (!payload)
+            {
+                return Core::failure(std::move(payload.error()));
+            }
+            request.assets.push_back(CatalogCookAssetSpec{
+                .assetKind = AssetFormat::AssetKind::Material,
+                .assetId = *materialId,
+                .assetTypeVersion = AssetFormat::MaterialWire::SchemaVersion,
+                .payload = std::move(*payload),
+            });
             continue;
         }
         if (tokens[0] == "tileset")

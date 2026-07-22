@@ -41,11 +41,36 @@ struct GpuTextureId final {
     [[nodiscard]] friend constexpr bool operator==(const GpuTextureId&, const GpuTextureId&) = default;
 };
 
+// Backend-owned GPU static mesh handle (generation-aware). Product-3D path (M11-E2).
+struct GpuMeshId final {
+    u32 index = (std::numeric_limits<u32>::max)();
+    u32 generation = 0;
+
+    [[nodiscard]] constexpr bool hasValue() const noexcept
+    {
+        return index != (std::numeric_limits<u32>::max)() && generation != 0;
+    }
+    [[nodiscard]] constexpr explicit operator bool() const noexcept
+    {
+        return hasValue();
+    }
+    [[nodiscard]] friend constexpr bool operator==(const GpuMeshId&, const GpuMeshId&) = default;
+};
+
 struct Texture2DUploadDesc final {
     u16 width = 0;
     u16 height = 0;
     // Row-major RGBA8 bytes; size must be width*height*4.
     std::span<const std::byte> rgba8Pixels{};
+};
+
+// Interleaved P3_N3_UV2 floats (8 per vertex) + U16 triangle indices.
+// Matches AssetFormat::StaticMeshVertexLayout::P3N3UV2 / Opaque3D fixture layout.
+struct StaticMeshUploadDesc final {
+    u32 vertexCount = 0;
+    u32 indexCount = 0;
+    std::span<const float> vertices{}; // size == vertexCount * 8
+    std::span<const u16> indices{};    // size == indexCount, multiple of 3
 };
 
 enum class RenderFrameSubmissionKind : u8 {
@@ -115,6 +140,30 @@ class IRenderDevice {
     {
         return Core::failure(RenderErrorCode::FrameCaptureUnsupported,
                              "This render device does not support primary frame capture");
+    }
+
+    // Optional StaticMesh GPU path (M11-E2). Default Unsupported.
+    // Null records logical meshes; bgfx creates real VB/IB (P3_N3_UV2 + U16).
+    [[nodiscard]] virtual Core::Result<GpuMeshId> createStaticMeshP3N3UV2(const StaticMeshUploadDesc& desc)
+    {
+        static_cast<void>(desc);
+        return Core::failure(RenderErrorCode::MeshUploadUnsupported,
+                             "This render device does not support StaticMesh upload");
+    }
+    [[nodiscard]] virtual Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept
+    {
+        static_cast<void>(mesh);
+        return Core::failure(RenderErrorCode::MeshUploadUnsupported,
+                             "This render device does not support StaticMesh destroy");
+    }
+    // Bind a GPU mesh for Mesh3D batches with matching meshKey (0 clears binding).
+    // meshKey=1 remains the built-in procedural cube fixture when unbound.
+    [[nodiscard]] virtual Core::Status setMesh3DBinding(u32 meshKey, GpuMeshId mesh) noexcept
+    {
+        static_cast<void>(meshKey);
+        static_cast<void>(mesh);
+        return Core::failure(RenderErrorCode::MeshUploadUnsupported,
+                             "This render device does not support Mesh3D mesh binding");
     }
 };
 

@@ -7,6 +7,7 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetTypedViews.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetSpriteRender.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetGpuTexture.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset/AssetGpuMesh.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapInstance.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/GridCollision.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/TileChunkView.hpp
@@ -35,6 +36,7 @@ set(TINA_ASSET_SOURCES
     AssetTypedViews.cpp
     AssetSpriteRender.cpp
     AssetGpuTexture.cpp
+    AssetGpuMesh.cpp
     TileMapInstance.cpp
     GridCollision.cpp
     TileChunkView.cpp

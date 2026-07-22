@@ -219,6 +219,20 @@ Core::Status validateCatalogPackageOnDisk(std::string_view catalogRootUtf8, cons
                     {
                         return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedAudioClip"));
                     }
+                } else if (entry->assetKind == AssetFormat::AssetKind::StaticMesh)
+                {
+                    auto typed = parseStaticMeshFromCooked(*asset);
+                    if (!typed)
+                    {
+                        return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedStaticMesh"));
+                    }
+                } else if (entry->assetKind == AssetFormat::AssetKind::Material)
+                {
+                    auto typed = parseMaterialFromCooked(*asset);
+                    if (!typed)
+                    {
+                        return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedMaterial"));
+                    }
                 }
             }
         }

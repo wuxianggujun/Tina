@@ -69,4 +69,30 @@ Core::Result<AssetFormat::AudioClipPayloadView> parseAudioClipFromCooked(const C
     return AssetFormat::parseAudioClipPayload(file.payload());
 }
 
+Core::Result<AssetFormat::StaticMeshPayloadView> parseStaticMeshFromCooked(const CookedAssetFile& file)
+{
+    if (!file)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::StaticMesh)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset is not StaticMesh");
+    }
+    return AssetFormat::parseStaticMeshPayload(file.payload());
+}
+
+Core::Result<AssetFormat::MaterialPayloadView> parseMaterialFromCooked(const CookedAssetFile& file)
+{
+    if (!file)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::Material)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset is not Material");
+    }
+    return AssetFormat::parseMaterialPayload(file.payload());
+}
+
 } // namespace Tina::Asset

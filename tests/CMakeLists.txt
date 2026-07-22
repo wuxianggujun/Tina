@@ -51,6 +51,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/NullRenderDeviceTests.cpp
     render/UploadTicketTests.cpp
     render/GpuTextureUploadTests.cpp
+    render/GpuMeshUploadTests.cpp
     render/UIDisplayListTests.cpp
     runtime/header_isolation/EngineCompositionFactoriesHeader.cpp
     runtime/header_isolation/EngineConfigHeader.cpp

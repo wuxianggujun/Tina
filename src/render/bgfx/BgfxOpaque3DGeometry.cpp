@@ -116,12 +116,13 @@ checkedOpaque3DFrame(RenderSceneView scene)
         {
             return invalidFrame("Opaque3D batches must cover mesh items contiguously");
         }
-        if (batch.meshKey != Opaque3DFixtureMeshKey ||
-            batch.materialKey != Opaque3DFixtureMaterialKey ||
+        // meshKey: 1 = built-in cube fixture; other non-zero keys require GPU mesh binding.
+        // materialKey/submeshIndex remain fixture-restricted until Material product path lands.
+        if (batch.meshKey == 0 || batch.materialKey != Opaque3DFixtureMaterialKey ||
             batch.submeshIndex != Opaque3DFixtureSubmeshIndex)
         {
             return Core::failure(Core::CoreErrorCode::Unsupported,
-                                 "Opaque3D received an unsupported procedural fixture key");
+                                 "Opaque3D received an unsupported material/submesh fixture key");
         }
 
         const usize batchEnd = nextItem + static_cast<usize>(batch.itemCount);

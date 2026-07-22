@@ -110,6 +110,11 @@
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11 设置/UI 竖切收口（C0–C5+D0） | Docs + tip `bbbe1b5b` | product-2d | 三轨音量+静音 HUD；Semantics 快照；evidenceFingerprint |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-D1 primary frame pixel capture | Debug C++23 | product-2d sample | `pixelCaptureOk`；`pixelFingerprint` 非空；width/height/bytes>0 |
 | Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-D2 optional pixel golden CLI | Debug C++23 | product-2d sample | `--expect-pixel-fingerprint=` 匹配 actual；错指纹 verification fail |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-E0 StaticMesh payload | Debug C++23 | `tina_asset_format_tests` StaticMesh* | cube/cooked round-trip；坏 index/空 mesh 拒绝 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-E1 staticmesh recipe | Debug C++23 | `tina_asset_tests` CatalogCookTests.StaticMeshCubeRecipe | recipe cook + typed parse |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-E2 GPU mesh upload | Debug C++23 | Null Mesh* + AssetGpuMesh* | create/bind/destroy；uploadAndBind；meshKey=0 拒绝 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-E3 tina_sample_3d | Debug C++23 | `tina_sample_3d --frames=300` | `cookedStaticMesh`；`meshesUploaded=1`；ledger 平衡；exit 0 |
+| Windows 11 / MSVC 19.50 / CMake 4.2.3 | M11-E4 Unlit Material | Debug C++23 | MaterialPayload* + CatalogCookTests.MaterialUnlit* + sample | round-trip；recipe unlit；`materialsLoaded=3`；`cookedMaterial` |
 
 
 
@@ -810,7 +815,7 @@ Legacy 与 vNext 进程观察到的 `N` 会随调试对象组合变化，本轮 
 | `tina_sample_2d_infrastructure_bgfx` | M9-C 最小 bgfx Sprite2D fixture + 2D/UI 样例已实现 Debug/Release 验证 | Desktop bootstrap + bgfx；固定 View 0 clear、View 1 Opaque3D、View 2 Sprite2D、View 3 UI；默认/门禁300帧，当前每帧5个 fixture Sprite 和2个 retained UI panel，资源账本平衡；截图确认旋转、透明、flip 与 UI overlay | 只接受 fixture key `sprite=1`；不替代正式 `tina_sample_2d` |
 | `tina_sample_3d_extraction` | M9-A Headless/Null extraction foundation 已实现 | Scene World → resolved Perspective/Mesh3D、当前帧aspect、sphere culling、稳定sort/batch、Runtime handoff；300帧4 submitted/3 visible/1 culled/2 batches、一次aspect变化与资源归零 | 当前只用 fixture key/纯值和 recording Null device；无depth attachment、GPU buffer/shader/pipeline或可见画面，不计Legacy删除门禁 |
 | `tina_sample_3d_infrastructure` | M9-B 最小 bgfx Opaque3D fixture 已实现 | Desktop bootstrap + bgfx；全 surface clear View 0、depth-tested procedural Cube View 1；默认/门禁300帧，当前每帧3个 Cube 和1个 instance batch | 只接受 fixture key `mesh=1/material=1/submesh=0`；canonical `P3_N3_UV2` 静态 VB/IB + unlit shader + transient instance buffer；不证明 Cooked Mesh/Material/Texture/Prefab、通用 Pipeline/PBR、Pass Scheduler 或正式3D产品 |
-| `tina_sample_3d` | 未实现 | Cooked glTF -> Mesh/Material/Prefab、culling/instance | M10 Catalog/Manifest |
+| `tina_sample_3d` | M11-E3/E4 最小产品竖切已实现 | Catalog recipe → Cooked StaticMesh + Unlit Material → GPU mesh upload/bind → 3 instance（cooked baseColor）+ UI；300 帧 JSON 与资源账本 | **尚未** textured Material/glTF/Prefab；不单独满足 M12 Legacy 删除 |
 
 M7-B2 已建立私有最小 bgfx clear/present core、7项 planner 测试、4项 factory/lease 回滚测试、
 Desktop bootstrap 和真实 GPU 300帧冒烟。M7-C 已建立最小 SolidFill DisplayList CPU bridge，D0 已接入

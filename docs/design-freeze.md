@@ -663,6 +663,28 @@ M11-D2：可选 CLI `--expect-pixel-fingerprint=<32 lowercase hex>`。提供时�
 精确相等才通过；默认不提供则只要求 capture 成功。指纹随 GPU/驱动/窗口尺寸变化，不作为跨机硬门禁。
 跨 GPU 容差与 PNG golden 文件后置。
 
+M11-E0：`AssetFormat::StaticMeshPayload` v1（P3_N3_UV2 + U16、submesh、bounds、canonical unit cube
+helper、`writeCookedStaticMeshAsset`）；独立 `tina_asset_format` round-trip 测试。
+
+M11-E1：Catalog recipe `staticmesh <id> cube`、`parseStaticMeshFromCooked`、package typed validation；
+`CatalogCookTests.StaticMeshCubeRecipe`。
+
+M11-E2：`GpuMeshId` + `createStaticMeshP3N3UV2` / `destroyStaticMesh` / `setMesh3DBinding`（Null + bgfx）；
+`Asset::uploadStaticMeshFromCooked` / `uploadAndBindStaticMeshForMeshKey`。Opaque3D 提交优先 bound mesh；
+meshKey=1 未绑定时回落 procedural cube；未绑定的非 fixture meshKey 跳过 submit。
+
+M11-E3：产品样例 `tina_sample_3d`（`samples/3d_product`）：recipe cook → Catalog load → GPU upload/bind
+meshKey=1 → 3 instance Cube + UI overlay，300 帧 JSON（`cookedStaticMesh`/`meshesUploaded`/
+`renderResourceLedgerBalanced`）。
+
+M11-E4：`AssetFormat::MaterialPayload` UnlitBaseColor v1（schema/model + linear RGBA + doubleSided +
+Opaque alpha）；recipe `material <id> unlit r g b [a]`；`parseMaterialFromCooked` + package typed
+validation。`tina_sample_3d` 加载 3 个 cooked Material，extract 使用其 baseColor（尚无 Texture 依赖、
+无 materialKey→GPU 表）。
+
+M11 产品 3D 竖切（E0–E4）：StaticMesh + Unlit Material solid + `tina_sample_3d` 视为可验收最小产品 3D
+门禁；glTF/textured Material/Prefab/PBR 仍 Deferred，不阻塞本收口，也不单独满足 M12 Legacy 删除。
+
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation
 ID，原子创建 Body+Box Shape，并提供 pose/velocity snapshot、销毁与幂等 shutdown。

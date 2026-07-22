@@ -39,5 +39,8 @@ inline constexpr Core::ErrorCode TextureNotFound{Core::ErrorDomain::Render, 32};
 inline constexpr Core::ErrorCode FrameCaptureUnsupported{Core::ErrorDomain::Render, 33};
 inline constexpr Core::ErrorCode FrameCaptureFailed{Core::ErrorDomain::Render, 34};
 inline constexpr Core::ErrorCode FrameCaptureBusy{Core::ErrorDomain::Render, 35};
+inline constexpr Core::ErrorCode MeshUploadUnsupported{Core::ErrorDomain::Render, 36};
+inline constexpr Core::ErrorCode InvalidMeshUpload{Core::ErrorDomain::Render, 37};
+inline constexpr Core::ErrorCode MeshNotFound{Core::ErrorDomain::Render, 38};
 
 } // namespace Tina::Render::RenderErrorCode
