@@ -95,7 +95,7 @@ inline constexpr Tina::InputActionId SelectTileAction{3};
 inline constexpr float DemoWalkSpeedMetersPerSecond = 4.0f;
 
 // M11-D0: frame-count-independent product evidence fingerprint (screenshot precursor).
-// Only stable structural counters/flags are hashed 鈥?not per-frame animation values.
+// Only stable structural counters/flags are hashed —not per-frame animation values.
 [[nodiscard]] std::string contentHashToHex(const Tina::Core::ContentHash& hash)
 {
     static constexpr char kHex[] = "0123456789abcdef";
@@ -254,7 +254,7 @@ inline constexpr u32 ExpectedUITextLabelCount = 2;
 inline constexpr u32 ExpectedUIButtonCount = 1;
 // Authored FixedWorldHeight for product sample; world width/ppm come from surface.
 // Keep height small enough that half-width fits the 8m-wide sample map so follow
-// can pan (height 6m 鈫?halfW鈮?.3m > map half 鈫?clamp freezes at center).
+// can pan (height 6m →halfW≥.3m > map half →clamp freezes at center).
 inline constexpr float ProductCameraHeightMeters = 4.0f;
 
 // Clamp camera center so the orthographic view stays over the map (map-local meters).
@@ -999,7 +999,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(28.0F), Tina::UI::UILayoutLength::Px(44.0F),
                                              Tina::UI::UILayoutLength::Px(240.0F), Tina::UI::UILayoutLength::Px(28.0F)),
-                .text = "涓枃鍦板浘",
+                .text = "中文地图",
                 .style =
                     Tina::UI::UITextStyle{
                         .logicalSize = 22.0F,
@@ -1565,7 +1565,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
 
         auto& writer = context.renderSceneWriter();
-        // Suspended surface (0脳0): skip world extract; not a Camera config error.
+        // Suspended surface (0×0): skip world extract; not a Camera config error.
         if (counters_->surfacePixelWidth == 0 || counters_->surfacePixelHeight == 0)
         {
             ++counters_->renderExtractions;
@@ -1706,7 +1706,7 @@ class TileMapBgfxState final : public Tina::IGameState {
 #endif
         // M10-A44: when lastSelection is set, emit exactly one highlight sprite
         // (layer 2, above tiles/character/crate). Fail closed on build/capacity
-        // errors 鈥?no silent half-state with selection but missing overlay.
+        // errors —no silent half-state with selection but missing overlay.
         u64 highlightSprites = 0;
         if (counters_->tileSelection.lastSelection.has_value())
         {
@@ -1941,7 +1941,7 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
 {
     Tina::EngineConfig config = Tina::EngineConfig::Defaults();
     config.applicationName = "Tina Sample 2D";
-    config.primaryWindow.title = "Tina Sample 2D 鈥?TileMap + Character + UI";
+    config.primaryWindow.title = "Tina Sample 2D — TileMap + Character + UI";
     config.primaryWindow.initialLogicalExtent = {960, 540};
     config.primaryWindow.initiallyVisible = true;
     config.renderSceneCapacities.spriteCapacity = 64;
@@ -2070,7 +2070,7 @@ int main(int argc, char** argv)
     const bool selectionStateValid = selectionCountersValid && selectionLatchValid;
     const u64 expectedHighlightSprites = lastSelection != nullptr ? 1U : 0U;
     const u64 expectedTotalSprites = ExpectedSpritesWithPhysics + expectedHighlightSprites;
-    // Seed path: selection from frame 0 鈫?highlight every extract. Accidental OS
+    // Seed path: selection from frame 0 →highlight every extract. Accidental OS
     // clicks during interactive/smoke only require last-frame highlight match.
     const bool highlightValid =
         counters.lastHighlightSprites == expectedHighlightSprites &&
