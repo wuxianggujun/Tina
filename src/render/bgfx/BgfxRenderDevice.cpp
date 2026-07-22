@@ -990,9 +990,34 @@ class BgfxRenderDevice final : public IRenderDevice {
                 uiTexColorUniform_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
+            // Device-owned init resources (must match ++ in initialize):
+            // uiSolidQuadProgram, uiSolidWhiteTexture, uiTexColorUniform,
+            // sprite2DProgram, sprite2DSampler, sprite2DDefaultTexture,
+            // opaque3DProgram, opaque3DVertexBuffer, opaque3DIndexBuffer (+ dynamic mesh/texture slots).
             if (statistics_.liveResources != 0)
             {
-                std::terminate();
+                char path[512]{};
+                const char* temp = std::getenv("TEMP");
+                if (temp == nullptr || temp[0] == '\0')
+                {
+                    temp = std::getenv("TMP");
+                }
+                if (temp == nullptr || temp[0] == '\0')
+                {
+                    temp = ".";
+                }
+                std::snprintf(path, sizeof(path), "%s\\tina_bgfx_ledger_imbalance.txt", temp);
+                if (std::FILE* file = std::fopen(path, "wb"))
+                {
+                    std::fprintf(file, "BgfxRenderDevice liveResources imbalance at shutdown: %u\n",
+                                 statistics_.liveResources);
+                    std::fflush(file);
+                    std::fclose(file);
+                }
+                std::fprintf(stderr, "BgfxRenderDevice liveResources imbalance at shutdown: %u\n",
+                             statistics_.liveResources);
+                std::fflush(stderr);
+                std::_Exit(3);
             }
             bgfx::shutdown();
             bgfxInitialized_ = false;
