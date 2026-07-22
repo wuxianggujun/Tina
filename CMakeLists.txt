@@ -55,7 +55,7 @@ option(TINA_BUILD_EXAMPLES "Whether or not to build examples with this stack" "$
 option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_TESTING "Build Tina tests" ON)
 option(TINA_BUILD_SHADERS "Build cooked runtime shaders with the bundled shader compiler" ON)
-option(TINA_BUILD_LEGACY "Build the existing Tina game/runtime during vNext migration" ON)
+option(TINA_BUILD_LEGACY "Build Legacy product (retired; must stay OFF)" OFF)
 option(TINA_BUILD_PLATFORM_GLFW "Build the private vNext GLFW platform backend" OFF)
 option(TINA_BUILD_RENDER_BGFX "Build the private vNext bgfx render backend" OFF)
 option(TINA_BUILD_UI_FREETYPE "Build the private vNext FreeType UI text adapter" OFF)
@@ -68,7 +68,7 @@ option(TINA_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSani
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
 option(TINA_BUILD_WAYLAND "Build Wayland" OFF)
 
-if (TINA_BUILD_PLATFORM_GLFW AND NOT TINA_BUILD_LEGACY)
+if (TINA_BUILD_PLATFORM_GLFW)
     if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
         NOT "platform-glfw" IN_LIST VCPKG_MANIFEST_FEATURES)
         message(FATAL_ERROR
@@ -76,7 +76,7 @@ if (TINA_BUILD_PLATFORM_GLFW AND NOT TINA_BUILD_LEGACY)
     endif ()
 endif ()
 
-if (TINA_BUILD_UI_FREETYPE AND NOT TINA_BUILD_LEGACY)
+if (TINA_BUILD_UI_FREETYPE)
     if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
         NOT "ui-freetype" IN_LIST VCPKG_MANIFEST_FEATURES)
         message(FATAL_ERROR
@@ -92,7 +92,7 @@ if (TINA_BUILD_PHYSICS2D)
     endif ()
 endif ()
 
-if (TINA_BUILD_AUDIO_MINIAUDIO AND NOT TINA_BUILD_LEGACY)
+if (TINA_BUILD_AUDIO_MINIAUDIO)
     if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
         NOT "audio-miniaudio" IN_LIST VCPKG_MANIFEST_FEATURES)
         message(FATAL_ERROR
@@ -101,31 +101,28 @@ if (TINA_BUILD_AUDIO_MINIAUDIO AND NOT TINA_BUILD_LEGACY)
 endif ()
 
 if (TINA_AUDIO_ENABLE_LIBVORBIS)
-    if (NOT TINA_BUILD_AUDIO_MINIAUDIO AND NOT TINA_BUILD_LEGACY)
+    if (NOT TINA_BUILD_AUDIO_MINIAUDIO)
         message(FATAL_ERROR
-            "TINA_AUDIO_ENABLE_LIBVORBIS requires TINA_BUILD_AUDIO_MINIAUDIO (or Legacy miniaudio).")
+            "TINA_AUDIO_ENABLE_LIBVORBIS requires TINA_BUILD_AUDIO_MINIAUDIO.")
     endif ()
-    if (NOT TINA_BUILD_LEGACY AND
-        (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
-         NOT "audio-miniaudio-vorbis" IN_LIST VCPKG_MANIFEST_FEATURES))
+    if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
+        NOT "audio-miniaudio-vorbis" IN_LIST VCPKG_MANIFEST_FEATURES)
         message(FATAL_ERROR
             "TINA_AUDIO_ENABLE_LIBVORBIS requires vcpkg feature 'audio-miniaudio-vorbis'.")
     endif ()
 endif ()
 
 if (TINA_AUDIO_ENABLE_LIBOPUS)
-    if (NOT TINA_BUILD_AUDIO_MINIAUDIO AND NOT TINA_BUILD_LEGACY)
+    if (NOT TINA_BUILD_AUDIO_MINIAUDIO)
         message(FATAL_ERROR
-            "TINA_AUDIO_ENABLE_LIBOPUS requires TINA_BUILD_AUDIO_MINIAUDIO (or Legacy miniaudio).")
+            "TINA_AUDIO_ENABLE_LIBOPUS requires TINA_BUILD_AUDIO_MINIAUDIO.")
     endif ()
-    if (NOT TINA_BUILD_LEGACY AND
-        (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
-         NOT "audio-miniaudio-opus" IN_LIST VCPKG_MANIFEST_FEATURES))
+    if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
+        NOT "audio-miniaudio-opus" IN_LIST VCPKG_MANIFEST_FEATURES)
         message(FATAL_ERROR
             "TINA_AUDIO_ENABLE_LIBOPUS requires vcpkg feature 'audio-miniaudio-opus'.")
     endif ()
 endif ()
-
 if (TINA_BUILD_WAYLAND)
     if (NOT DEFINED VCPKG_MANIFEST_FEATURES OR
         NOT "wayland" IN_LIST VCPKG_MANIFEST_FEATURES)
@@ -194,19 +191,12 @@ if (TINA_AUTOUPDATE_SUBMODULE)
     include(UpdateSubmodules)
 endif ()
 
-# Legacy still consumes the source resource tree directly. Null/vNext-only configure must not scan
-# or copy it; Cooked asset staging will be owned by the later Asset vertical slice.
+# Legacy product resource tree copy retired with TINA_BUILD_LEGACY. vNext samples stage
+# cooked assets themselves; do not scan/copy source resources/ into vNext-only graphs.
 if(TINA_BUILD_LEGACY)
-    file(GLOB_RECURSE RESOURCE_FILES "${RESOURCE_DIR}/*")
-
-    foreach (FILE ${RESOURCE_FILES})
-        if (NOT FILE MATCHES "/shaders/")
-            file(RELATIVE_PATH REL_PATH "${RESOURCE_DIR}" "${FILE}")
-            get_filename_component(REAL_PATH "${REL_PATH}" DIRECTORY)
-            file(MAKE_DIRECTORY "${RESOURCE_DEST_DIR}/${REAL_PATH}")
-            file(COPY "${FILE}" DESTINATION "${RESOURCE_DEST_DIR}/${REAL_PATH}")
-        endif ()
-    endforeach ()
+    message(FATAL_ERROR
+        "TINA_BUILD_LEGACY is retired. The Legacy Tina.exe / src/ui / Scene product graph "
+        "was removed; build vNext presets (windows-msvc-vnext*) only.")
 endif()
 
 if(TINA_ENABLE_SANITIZERS)
@@ -226,16 +216,13 @@ endif()
 
 include(Dependencies)
 
-if(TINA_BUILD_LEGACY OR TINA_BUILD_RENDER_BGFX OR TINA_BUILD_SHADERS)
+if(TINA_BUILD_RENDER_BGFX OR TINA_BUILD_SHADERS)
     add_subdirectory(thirdparty)
 endif()
 
 add_subdirectory(src/core)
 add_subdirectory(src/integration "${CMAKE_CURRENT_BINARY_DIR}/vnext/integration")
 
-# vNext modules are independent from the Legacy product graph. Explicit binary
-# directories keep src/platform and Legacy src/platform/audio from competing
-# for the same nested build directory while both architectures coexist.
 set(TINA_VNEXT_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/vnext")
 add_subdirectory(src/platform "${TINA_VNEXT_BINARY_DIR}/platform")
 add_subdirectory(src/task "${TINA_VNEXT_BINARY_DIR}/task")
@@ -255,10 +242,6 @@ endif ()
 add_subdirectory(src/runtime "${TINA_VNEXT_BINARY_DIR}/runtime")
 if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     add_subdirectory(src/desktop "${TINA_VNEXT_BINARY_DIR}/desktop")
-endif()
-
-if(TINA_BUILD_LEGACY)
-    add_subdirectory(src)
 endif()
 
 # Examples and small host tools (catalog validate CLI, samples).

@@ -3,7 +3,6 @@
   "name": "tina",
   "version-string": "0.0.1",
   "default-features": [
-    "legacy",
     "tests"
   ],
   "dependencies": [

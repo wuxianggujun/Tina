@@ -646,7 +646,7 @@ out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
 | --- | --- | --- |
 | `TINA_BUILD_TESTING` | `ON` | 构建 vNext 基础 `tina_tests`；Legacy ON 时另建 `tina_legacy_tests`；UI、Runtime→UI、UI→Render integration 与 GLFW/bgfx adapter 使用各自独立专项测试 |
 | `TINA_BUILD_SHADERS` | `ON` | 构建运行时 shader；关闭后只适合编译/链接门禁 |
-| `TINA_BUILD_LEGACY` | `ON` | 迁移期构建现有游戏与旧模块；vNext preset 固定关闭 |
+| `TINA_BUILD_LEGACY` | `OFF`（强制） | **已退役**；显式 ON 会 FATAL；仅 vNext 产品图 |
 | `TINA_BUILD_PLATFORM_GLFW` | `OFF` | 构建私有 vNext GLFW Window/Input adapter；需启用 vcpkg `platform-glfw` feature，不改变 Game SDK 边界 |
 | `TINA_BUILD_RENDER_BGFX` | `OFF` | 构建私有 vNext bgfx backend、build-tree shaderc UI shader 与 Desktop SolidQuad smoke，不改变 Game SDK 边界 |
 | `TINA_BUILD_PHYSICS2D` | `OFF` | 构建可选 `Tina::Physics2D` 与独立测试；需显式启用 vcpkg `physics2d` feature，Box2D 保持 PRIVATE |

@@ -5,26 +5,13 @@ include_guard(GLOBAL)
 # xxHash is a root dependency: Core PRIVATE ContentHash digest needs it even when Legacy is OFF.
 find_package(xxHash CONFIG REQUIRED)
 
-if (TINA_BUILD_LEGACY OR TINA_BUILD_PHYSICS2D)
+if (TINA_BUILD_PHYSICS2D)
     find_package(box2d CONFIG REQUIRED)
 endif ()
 
-if (TINA_BUILD_LEGACY)
-    find_package(EnTT CONFIG REQUIRED)
-    find_package(Freetype REQUIRED)
-    find_package(glfw3 3.4 CONFIG REQUIRED)
-    find_package(glm CONFIG REQUIRED)
-    find_package(spdlog CONFIG REQUIRED)
-    find_package(utf8cpp CONFIG REQUIRED)
-
-    # The miniaudio vcpkg port intentionally installs only miniaudio.h. Tina owns the single
-    # MINIAUDIO_IMPLEMENTATION translation unit in src/platform/audio (Legacy) or
-    # src/vnext/audio/miniaudio (vNext-only audio adapter when Legacy is OFF).
-    find_path(TINA_MINIAUDIO_INCLUDE_DIR NAMES miniaudio.h REQUIRED)
-endif()
-
-if (TINA_BUILD_AUDIO_MINIAUDIO AND NOT TINA_BUILD_LEGACY)
-    # vNext-only audio adapter graph: header-only miniaudio via vcpkg feature audio-miniaudio.
+if (TINA_BUILD_AUDIO_MINIAUDIO)
+    # vNext audio adapter: header-only miniaudio via vcpkg feature audio-miniaudio.
+    # Single MINIAUDIO_IMPLEMENTATION TU lives in src/vnext/audio/miniaudio.
     find_path(TINA_MINIAUDIO_INCLUDE_DIR NAMES miniaudio.h REQUIRED)
 endif()
 
@@ -37,11 +24,11 @@ if (TINA_AUDIO_ENABLE_LIBOPUS)
 endif ()
 
 
-if(TINA_BUILD_PLATFORM_GLFW AND NOT TINA_BUILD_LEGACY)
+if(TINA_BUILD_PLATFORM_GLFW)
     find_package(glfw3 3.4 CONFIG REQUIRED)
 endif()
 
-if(TINA_BUILD_UI_FREETYPE AND NOT TINA_BUILD_LEGACY)
+if(TINA_BUILD_UI_FREETYPE)
     find_package(Freetype REQUIRED)
 endif()
 

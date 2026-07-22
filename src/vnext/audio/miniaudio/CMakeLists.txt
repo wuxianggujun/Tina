@@ -11,11 +11,8 @@ set(TINA_AUDIO_MINIAUDIO_SOURCES
     MiniaudioDevice.cpp
 )
 
-# Exactly one MINIAUDIO_IMPLEMENTATION TU per process image.
-# Legacy already owns it via Tina::Miniaudio when TINA_BUILD_LEGACY=ON.
-if (NOT TINA_BUILD_LEGACY)
-    list(APPEND TINA_AUDIO_MINIAUDIO_SOURCES MiniaudioImplementation.cpp)
-endif ()
+# Exactly one MINIAUDIO_IMPLEMENTATION TU per process image (vNext-only).
+list(APPEND TINA_AUDIO_MINIAUDIO_SOURCES MiniaudioImplementation.cpp)
 
 add_library(tina_audio_miniaudio STATIC ${TINA_AUDIO_MINIAUDIO_SOURCES})
 add_library(Tina::AudioMiniaudio ALIAS tina_audio_miniaudio)
@@ -42,10 +39,6 @@ target_link_libraries(tina_audio_miniaudio
     PUBLIC Tina::Audio
     PRIVATE Tina::ProjectOptions
 )
-if (TINA_BUILD_LEGACY)
-    target_link_libraries(tina_audio_miniaudio PRIVATE Tina::Miniaudio)
-endif ()
-
 if (TINA_AUDIO_ENABLE_LIBVORBIS)
     target_link_libraries(tina_audio_miniaudio PRIVATE Vorbis::vorbis Vorbis::vorbisfile)
 endif ()

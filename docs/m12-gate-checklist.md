@@ -18,9 +18,9 @@
 | G4 | Asset/Cooker：最终 Cooker 产物路径 | Partial | recipe + cgltf 最小 cook；multi-mesh/纹理仍薄 |
 | G5 | Audio 产品门禁：miniaudio + 关闭安全 | **Partial→Evidence** | `tina_audio_tests` 15/15；sample_2d 300 帧 AudioClip lease + one-shot 观测 |
 | G6 | Windows/Linux 构建 + 直接 GoogleTest 全绿 | Open | 本机 Windows 为主；Linux 未跑 |
-| G7 | Legacy smoke 四条最后一次基线 + 画面/资源证据 | Open | 删除前最后一次 |
-| G8 | 旧接口零 include/link/call + 无僵尸 shim | Open | 删除阶段扫描 |
-| G9 | 独立可回滚删除提交；合入 `dev` 复验 | Open | 最后一步 |
+| G7 | Legacy smoke 四条最后一次基线 | **N/A** | 用户授权退役产品；源码已删，不再跑 Legacy smoke |
+| G8 | 旧接口零 include/link/call | **In progress** | 产品源码已删；构建图默认 OFF + FATAL；扫尾 docs/submodule |
+| G9 | 独立可回滚删除提交 | **In progress** | 本批删除提交 |
 
 ## 3D 产品门禁拆分（G3）
 
@@ -33,7 +33,7 @@
 1. G1 全 feature 图（physics+freetype+真实 miniaudio device）若要求更严 `productGate`，需 product-2d preset 复验。
 2. G6 Linux、G7 Legacy 四条最终 smoke、G8 零引用、G9 独立删除提交未做。
 3. cgltf 仍薄（无 multi-mesh/外部纹理）；instantiate 仍 fixture meshKey。
-4. **Legacy UI（`src/ui`）零引用未达成**——`Application`/`Scene`/`MenuScene`/`GameScene`/`SettingsScene`/`PauseScene`/`WorldSelectScene` 等仍依赖；见 [m12-legacy-ui-retirement.md](m12-legacy-ui-retirement.md)。**禁止**在替代完成前删除 Legacy UI。
+4. ~~Legacy UI 零引用~~ **产品源码已删**（见 [m12-legacy-ui-retirement.md](m12-legacy-ui-retirement.md)）。剩余：docs/submodule/`resources` 扫尾与 vNext 门禁复验。
 
 ## 本机快速复验（禁止 clean）
 

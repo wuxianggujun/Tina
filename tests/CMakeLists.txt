@@ -80,25 +80,6 @@ set(TINA_RUNTIME_TEST_SOURCES
     task/TaskSystemTests.cpp
 )
 
-set(TINA_LEGACY_TEST_SOURCES
-    core/LegacyCompatibilityTests.cpp
-    core/LegacyTimeTests.cpp
-    engine/Camera3DTests.cpp
-    engine/EventSystemTests.cpp
-    engine/ResourceTests.cpp
-    ui/UIActionTests.cpp
-    ui/UIRuntimeTests.cpp
-)
-
-set(TINA_LEGACY_TEST_SUPPORT_SOURCES
-    ${PROJECT_SOURCE_DIR}/src/engine/EventSystem.cpp
-    ${PROJECT_SOURCE_DIR}/src/engine/SubscriptionToken.cpp
-    ${PROJECT_SOURCE_DIR}/src/ui/UINode.cpp
-    ${PROJECT_SOURCE_DIR}/src/ui/UILayoutManager.cpp
-    ${PROJECT_SOURCE_DIR}/src/ui/UIStyle.cpp
-    ${PROJECT_SOURCE_DIR}/src/ui/UIScrollView.cpp
-)
-
 add_executable(tina_tests
     ${TINA_CORE_TEST_SOURCES}
     ${TINA_RUNTIME_TEST_SOURCES}
@@ -126,25 +107,6 @@ target_link_libraries(tina_tests PRIVATE
     GTest::gtest_main
 )
 set_target_properties(tina_tests PROPERTIES CXX_EXTENSIONS OFF)
-
-if(TINA_BUILD_LEGACY)
-    add_executable(tina_legacy_tests
-        ${TINA_LEGACY_TEST_SOURCES}
-        ${TINA_LEGACY_TEST_SUPPORT_SOURCES}
-    )
-    target_compile_features(tina_legacy_tests PRIVATE cxx_std_23)
-    target_include_directories(tina_legacy_tests PRIVATE
-        ${PROJECT_SOURCE_DIR}/tests
-    )
-    target_link_libraries(tina_legacy_tests PRIVATE
-        Tina::ProjectOptions
-        Tina::CoreLegacy
-        spdlog::spdlog
-        bx
-        GTest::gtest_main
-    )
-    set_target_properties(tina_legacy_tests PROPERTIES CXX_EXTENSIONS OFF)
-endif()
 
 if(TINA_BUILD_PLATFORM_GLFW)
     add_subdirectory(platform_glfw)
