@@ -31,12 +31,12 @@
 - EASTL/EABase submodule — **已从 `.gitmodules` 与工作树移除**
 - `src/vnext/`、`tests/vnext/` 目录前缀 — **已扁平化**（`02e13d7a`）：实现在 `src/<module>`，
   测试在 `tests/<module>`（Runtime→UI 专项为 `tests/runtime_ui`）；公开头仍为 `include/tina/`
-- `resources/` — **保留有消费者的资产**：
+- `resources/` — **仅保留有消费者的资产**：
   - `resources/fonts/SourceHanSansSC-Regular.otf`：`tina_sample_2d`（FreeType 图）、Desktop UI 字体、
     FreeType 测试宏路径
-  - 其余 `audio/`、`textures/`、`shaders/` 等：当前 CMake/产品样例**无**硬编码路径；可后续单独审计删除
-  - 产品 **不**再 `file(COPY)` 整棵 `resources/` 进 vNext-only 构建图
-
+  - 已删除无引用的 Legacy 资产：`audio/`、`textures/`、`shaders/`（旧 runtime `.sc`）、`config/`、
+    多余 SourceHan 字重、`Tina.jpg`；以及无调用方的 `cmake/CopyResources.cmake`
+  - 产品 **不**再 `file(COPY)` 整棵 `resources/` 进构建图；vNext bgfx shader 由 build-tree cook 产出
 ## 验证（禁止 clean-first 全量 wipe）
 
 ```powershell
