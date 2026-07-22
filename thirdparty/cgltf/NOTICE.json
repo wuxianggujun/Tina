@@ -1,0 +1,8 @@
+﻿{
+  "name": "cgltf",
+  "version": "1.15",
+  "url": "https://github.com/jkuhlmann/cgltf",
+  "commit_or_tag": "v1.15",
+  "files": ["cgltf.h"],
+  "usage": "Tina tools/assetc PRIVATE only; CGLTF_IMPLEMENTATION in one .cpp"
+}
