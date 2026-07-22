@@ -10,7 +10,7 @@
 | # | 门槛 | 状态 | 证据 / 备注 |
 | --- | --- | --- | --- |
 | G0 | 非 clean 构建图可复现；无 wipe `out/build` | Working | 用户硬性禁 clean |
-| G1 | 2D 产品：`tina_sample_2d` Catalog/TileMap/UI | **Evidence** | Windows Debug 300 帧 exit 0；全 feature 图可另验 |
+| G1 | 2D 产品：`tina_sample_2d` Catalog/TileMap/UI | **Strong** | base bgfx 300 帧 + **product-2d** 300 帧 exit 0（`productGate=bgfx-physics-freetype-audio`） |
 | G2 | UI 产品：HUD/控件 + 输入消费 | Partial | 随 sample_2d；UIA/截图后置 |
 | G3 | 3D 产品：Cooked + 可见 + 账本 | **Strong** | E0–E9 Done；cgltf 仍首 primitive |
 | G4 | Asset/Cooker | Partial | recipe + 最小 glTF；multi-mesh/纹理仍薄 |
@@ -29,18 +29,19 @@
 ## 剩余缺口（非整库“完成”的理由）
 
 1. **G6 Linux** 全门禁尚未在本跟踪表关闭。  
-2. **G1 全 feature**（physics + freetype + miniaudio device）若要更严 `productGate`，需 product-2d preset 复验。  
-3. cgltf 仍薄；instantiate 仍 fixture meshKey。  
-4. 文档/本地 skill 叙述扫尾（进行中）。
+2. cgltf 仍薄；instantiate 仍 fixture meshKey。  
+3. 文档/本地 skill 扫尾（进行中；agent skills 已按产品删除改写）。
 
-**不是**：G7/G8/G9「还没做」——产品删除与 submodule 移除**已完成**。
+**已关闭：** G1 全 feature（product-2d 300 帧）、G7 N/A、G8/G9 产品删除。
 
 ## 本机快速复验（禁止 clean）
 
 ```powershell
+# base bgfx
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
+# full feature 2D (physics + freetype + miniaudio)
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_audio_tests.exe
 ```
 
 ## FreeType 字体（可选）

@@ -49,9 +49,18 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_audio_tests.exe
 
 结果：**15/15 PASS**（backend-neutral engine 路径）。
 
+## G1 全 feature（product-2d，2026-07-22）
+
+```powershell
+cmake --preset windows-msvc-vnext-bgfx-product-2d
+cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
+```
+
+结果：**exit 0**，`productGate=bgfx-physics-freetype-audio`，`physicsEnabled=true`，`freetypeEnabled=true`，
+`audioMiniaudioEnabled=true`，`audioDeviceNullBackend=true`，`pixelCaptureOk=true`。
+
 ## 仍未关闭
 
 - Linux 全门禁
-- Legacy 四条 product smoke 最终基线包
-- 零引用扫描 + `TINA_BUILD_LEGACY` 默认 OFF → 删除
-- product-2d 全 feature 图（physics+freetype+miniaudio device）若与当前 `productGate=bgfx` 不同，需另树复验
+- cgltf multi-mesh / 外部纹理 / AssetHandle mesh 绑定
