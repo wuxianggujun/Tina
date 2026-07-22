@@ -692,6 +692,10 @@ M11 产品 3D 竖切（E0–E5）：StaticMesh + Unlit solid/textured + `tina_sa
 `std::terminate`/CRT abort 弹窗）。glTF/Prefab/PBR 仍 Deferred，不阻塞本收口，也不单独满足 M12
 Legacy 删除。
 
+M8-D0：`Scene::PerspectiveCamera3D` / `MeshRenderer3D` 与 `extractRenderSceneFromWorld` 3D 路径；
+fixture mesh/material key；`tina_scene_tests` 覆盖 0/1/>1 perspective 与 mesh extract。无
+AssetHandle/FrameResourceRef/Prefab。
+
 M-Diag-A0：vNext Diagnostics 最小竖切。`LogLevel`/`LogRecord`/`DiagnosticChannel`/`Diagnostics`
 进入 `include/tina/core/diagnostics`；`EngineHost` 拥有 Diagnostics（创建于 Clock/Platform 之前，
 module shutdown 最后关闭）；默认同步 console sink；级别短路、shutdown 后 no-op、sink 失败不递归。

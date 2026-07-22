@@ -1,8 +1,9 @@
 # 3D 游戏架构
 
-> 状态：vNext 契约已冻结；M9-A/B fixture 与 M11-E0–E5 最小产品 3D 竖切已落地。
+> 状态：vNext 契约已冻结；M9-A/B fixture、M8-D0 Scene 3D 组件 extract、与 M11-E0–E5 最小产品 3D 竖切已落地。
 > `tina_sample_3d`：Catalog recipe `staticmesh … cube` + UnlitBaseColor（solid / optional Texture2D）
 > → GPU mesh/texture bind → Opaque3D instance batch + UI；**仍非** glTF/Prefab/PBR（cgltf 后置）。
+> Scene：`PerspectiveCamera3D` / `MeshRenderer3D` + `extractRenderSceneFromWorld`（fixture key 路径）。
 
 ## 首期能力边界
 
@@ -54,11 +55,10 @@ Game3DState
 游戏代码保存 `AssetHandle<MeshAsset>`、`AssetHandle<MaterialAsset>` 和 Scene component，不接触
 RenderDevice、GPU Buffer/Texture/Pipeline handle、view id、shader uniform 或 bgfx 类型。
 
-当前 M9-B 样例尚未走上图中的 Scene component path，而是在 `IGameState::extractRenderScene()`
-中直接写 resolved Perspective/Mesh3D input 作为 fixture。M11-E0–E5 的 `tina_sample_3d` 已用
-Catalog recipe Cooked StaticMesh/Material/Texture2D + GPU bind 替换 fixture mesh 几何；
-`meshKey`/`materialKey` 仍是后端绑定表键，完整 Scene `MeshRenderer3D`/`FrameResourceRef` 与
-glTF/Prefab 仍后置。
+M8-D0 已在 `Scene::World` 提供 `PerspectiveCamera3D` / `MeshRenderer3D` 与 extract；M9-B fixture
+样例可经 Scene 组件写 `RenderSceneWriter`（仍用 fixture meshKey/materialKey=1）。M11-E0–E5 的
+`tina_sample_3d` 已用 Catalog recipe Cooked StaticMesh/Material/Texture2D + GPU bind 替换 fixture
+mesh 几何；`meshKey`/`materialKey` 仍是后端绑定表键，完整 `FrameResourceRef` 与 glTF/Prefab 仍后置。
 
 ## Camera3D
 

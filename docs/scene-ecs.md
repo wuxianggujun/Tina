@@ -86,10 +86,12 @@ M8-B 只在 `tina_render`/Runtime integration 层提供已解析的 Camera2D/Spr
 RenderSceneWriter&, ExtractRenderSceneParams)`：先 `updateWorldTransforms()`，至多一个
 `active` Camera2D → `makeResolvedCamera2DInput` + `setCamera2D`，可见 Sprite → `addSprite2D`
 （`fixtureSpriteKey`）。**M8-C2** 为 fixture 路径增加可选 UV rect override（与
-`RenderSprite2DInput` 同一校验）。无 EnTT、无阶段末 command buffer、无 Runtime Phase Context World
-视图、无 AssetHandle 解析；`tina_sample_2d` 相机/角色/crate 已走 Scene extract，TileMap/selection
-仍可手写 writer。Headless/Null infrastructure sample 仍验证 CPU extraction/lifetime，不等同于正式
-2D 产品验收。
+`RenderSprite2DInput` 同一校验）。**M8-D0** 对称增加 `PerspectiveCamera3D` / `MeshRenderer3D`：
+至多一个 active Perspective → `setPerspectiveCamera`，可见 mesh → `addMesh3D`（fixture
+meshKey/materialKey）。2D 与 3D 相机轨道独立（可同帧各 0/1 个 active）。无 EnTT、无阶段末
+command buffer、无 Runtime Phase Context World 视图、无 AssetHandle 解析；`tina_sample_2d`
+相机/角色/crate 已走 Scene extract，TileMap/selection 仍可手写 writer。Headless/Null
+infrastructure sample 仍验证 CPU extraction/lifetime，不等同于正式 2D/3D 产品验收。
 
 内存容量、零稳态分配和基准工作负载见 [性能预算与内存系统](performance-memory.md)；任务
 barrier、取消和确定性合并见 [Task System](task-system.md)。

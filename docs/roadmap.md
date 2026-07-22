@@ -459,8 +459,11 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
 - **M8-C2 Sprite UV fidelity 已完成：** `SpriteOverrideFlags::UvRect` + `SpriteUvRect`；extract 写入
   `RenderSprite2DInput` UV；`tina_sample_2d` 角色/crate 恢复半张 atlas；`tina_scene_tests` 覆盖默认全图与
   override；Cooked Sprite/AssetHandle UV 解析仍 Deferred；
+- **M8-D0 Scene PerspectiveCamera3D/MeshRenderer3D storage + extract 已完成：** 与 2D 对称的 POD 组件、
+  `World::set/clear/get`、`extractRenderSceneFromWorld` 扩展（0/1 active PerspectiveCamera3D、fixture
+  mesh/material key、`addMesh3D`）；`tina_scene_tests` 34/34。无 EnTT、无 AssetHandle/FrameResourceRef；
 - EnTT 若作 PRIVATE storage 仍后置；Scene component command commit、AssetHandle/FrameResourceRef 解析、
-  Runtime Phase Context World 能力、MeshRenderer3D/Prefab 与正式可见 2D 产品路径仍待后续切片；
+  Runtime Phase Context World 能力、Prefab 与正式 glTF 产品 3D 仍待后续切片；
 - 基础样例当前是 CPU/Null recording infrastructure，不显示 Sprite、不包含中文 Label/Button、world picking、
   TileMap 或 UI overlay；M9-C 的 `tina_sample_2d_infrastructure_bgfx` 只是另一个 GLFW+bgfx fixture 样例，能显示
   fixture Sprite 与 UI overlay，但不替代正式 `tina_sample_2d` 的 Catalog/Manifest 产品门禁；
