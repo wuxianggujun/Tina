@@ -34,8 +34,9 @@
 - `resources/` — **仅保留有消费者的资产**：
   - `resources/fonts/SourceHanSansSC-Regular.otf`：`tina_sample_2d`（FreeType 图）、Desktop UI 字体、
     FreeType 测试宏路径
-  - 已删除无引用的 Legacy 资产：`audio/`、`textures/`、`shaders/`（旧 runtime `.sc`）、`config/`、
-    多余 SourceHan 字重、`Tina.jpg`；以及无调用方的 `cmake/CopyResources.cmake`
+  - 已删除无引用的 Legacy **玩法**资产：`audio/`、`textures/`、`shaders/`（旧 runtime `.sc`）、
+    `config/`、多余 SourceHan 字重；以及无调用方的 `cmake/CopyResources.cmake`
+  - 引擎吉祥物/标识图：`branding/Tina.jpg`（从 `resources/Tina.jpg` 迁出，**非** Catalog 玩法资源）
   - 产品 **不**再 `file(COPY)` 整棵 `resources/` 进构建图；vNext bgfx shader 由 build-tree cook 产出
 ## 验证（禁止 clean-first 全量 wipe）
 
