@@ -675,7 +675,8 @@ cgltf（glTF 产品 3D）、厚 world-pick Game SDK、删 Legacy **不**用 M10-
 | **已完成（样例主线）** | A32–A38 Catalog/TileMap/角色/UI/Physics/recipe | product-2d preset |
 | **已完成（Asset 子集）** | A0–A31 Catalog/Handle/Task/upload/recipe 等 | hermetic fixture 足够 2D 主路径 |
 | **Deferred** | 完整外部 cooker CLI / 全量 `tina_assetc` | 当前 recipe 子集；可另开切片 |
-| **Deferred** | cgltf v1.15 → glTF/Material/Prefab 正式 3D 产品门禁 | 最小 StaticMesh cube + Unlit textured 见 **M11-E0–E5**；glTF 不阻塞 2D/E0–E5 收口 |
+| **Done（最小）** | cgltf v1.15 + Prefab + `tina_sample_3d` E9 smoke | 首 primitive/solid Unlit；multi-mesh/纹理/AssetHandle 仍后置 |
+| **Deferred** | cgltf multi-mesh / 外部纹理 / PBR 产品门禁 | 不阻塞 E9 最小路径 |
 | **Deferred** | 扩大 Game SDK world-pick 公共 API | sample-private helper 已够 |
 | **Deferred（可进 M11）** | 稳定截图回归 | Camera 投影/follow 见 M11-B0/B2；chunk dirty 见 M11-B1 |
 | **Deferred（M12）** | 删 Legacy | 需 2D/UI/3D/Asset/Audio 等价验收 |
@@ -852,8 +853,8 @@ cgltf（glTF 产品 3D）、厚 world-pick Game SDK、删 Legacy **不**用 M10-
 - Windows/Linux 构建、直接 GoogleTest、所有 smoke 与资源计数通过；
 - 删除旧 target、旧源码和无用依赖形成独立可回滚提交；
 - vNext 分支合入最新已提交的 `dev` 并复验后，才合并回干净主工作区。
-- **跟踪清单：** [m12-gate-checklist.md](m12-gate-checklist.md)（当前 tip 上 G3 仍缺 glTF/Prefab
-  实例化；**不得**因 cube/Unlit 或 Scene extract 完成而开删 Legacy）。
+- **跟踪清单：** [m12-gate-checklist.md](m12-gate-checklist.md)（G3 的 E0–E9 竖切已齐；**仍不得**仅因
+  3D 完成而开删 Legacy——需 G1/G2/G5 复验、Linux、Legacy smoke 基线、零引用与独立删除提交）。
 
 ## 后续能力
 

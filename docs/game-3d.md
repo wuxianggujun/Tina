@@ -1,9 +1,9 @@
 # 3D 游戏架构
 
-> 状态：vNext 契约已冻结；M9-A/B fixture、M8-D0 Scene 3D 组件 extract、与 M11-E0–E5 最小产品 3D 竖切已落地。
-> `tina_sample_3d`：Catalog recipe `staticmesh … cube` + UnlitBaseColor（solid / optional Texture2D）
-> → GPU mesh/texture bind → Opaque3D instance batch + UI；**仍非** glTF/Prefab/PBR（cgltf 后置）。
-> Scene：`PerspectiveCamera3D` / `MeshRenderer3D` + `extractRenderSceneFromWorld`（fixture key 路径）。
+> 状态：vNext 契约已冻结；M9-A/B fixture、M8-D0 Scene 3D 组件、M11-E0–E9 产品 3D 竖切已落地。
+> `tina_sample_3d`（E9）：临时 glTF 三角 → cgltf cook → Catalog StaticMesh/Material/Prefab →
+> GPU mesh bind → `instantiatePrefab` → Scene extract + UI；JSON 含 `gltfCooked`/`prefabInstantiated`。
+> 历史 E0–E5 cube recipe 路径仍可参考；**PBR / multi-mesh / 外部纹理 / AssetHandle mesh 解析** 仍薄或后置。
 
 ## 首期能力边界
 
@@ -56,9 +56,9 @@ Game3DState
 RenderDevice、GPU Buffer/Texture/Pipeline handle、view id、shader uniform 或 bgfx 类型。
 
 M8-D0 已在 `Scene::World` 提供 `PerspectiveCamera3D` / `MeshRenderer3D` 与 extract；M9-B fixture
-样例可经 Scene 组件写 `RenderSceneWriter`（仍用 fixture meshKey/materialKey=1）。M11-E0–E5 的
-`tina_sample_3d` 已用 Catalog recipe Cooked StaticMesh/Material/Texture2D + GPU bind 替换 fixture
-mesh 几何；`meshKey`/`materialKey` 仍是后端绑定表键，完整 `FrameResourceRef` 与 glTF/Prefab 仍后置。
+样例可经 Scene 组件写 `RenderSceneWriter`（仍用 fixture meshKey/materialKey=1）。M11-E0–E5 曾用
+Catalog recipe cube + Texture2D；**M11-E7–E9** 改为 cgltf 最小 glTF cook + Prefab instantiate。
+`meshKey`/`materialKey` 仍是后端绑定表键；完整 `FrameResourceRef` / multi-mesh / 纹理 cook 仍后置。
 
 ## Camera3D
 
@@ -238,12 +238,10 @@ stale handle、资源归零和 checksum 属确定性硬门禁。
 2. `tina_sample_3d_infrastructure`：procedural indexed Cube、Perspective、depth、真实 instance buffer、
    300帧退出与实际截图；当前 M9-B 最小实现已覆盖 fixture 级路径，但仍不覆盖 Cooked Asset、
    通用 Material/Pipeline、自动 resize/restore 门禁或产品 3D；
-  3. `tina_sample_3d`（M11-E3–E5 最小产品竖切）：Catalog recipe 产出 Cooked StaticMesh（canonical cube）
-    + UnlitBaseColor Material（solid + optional Texture2D）、`uploadStaticMeshFromCooked` +
-    `setMesh3DBinding` + `setMesh3DMaterialTextureBinding`、Perspective + depth + 3 instance + UI、
-    300 帧与 GPU 资源归零。**尚未**覆盖 glTF、Prefab 层级、PBR、resize 门禁。
-  4. 完整产品 3D（后置）：Cooked textured glTF → Mesh/Material/Prefab、层级 Transform、多个深度遮挡
-    对象、frustum culling 与 instance batch；含不支持 glTF 诊断与 shutdown 退役。
+  3. `tina_sample_3d`（M11-E9）：cgltf 最小 glTF → Cooked StaticMesh/Material/Prefab → GPU mesh bind →
+    Prefab instantiate + Scene extract + UI；JSON `gltfCooked`/`prefabInstantiated`/`sceneExtract` 与
+    资源账本。仍限首 primitive / solid Unlit / fixture meshKey；**非** PBR 或多 mesh 场景验收。
+  4. 完整产品 3D（后置）：textured multi-mesh glTF、AssetHandle 解析、resize 门禁与更丰富层级验收。
 
-  步骤 1–3 验证进程返回码、结构化 JSON、Render resource count。步骤 4 通过后，3D 产品路径才可
-  计入 Legacy 删除门禁。
+  步骤 1–3 验证进程返回码、结构化 JSON、Render resource count。步骤 3（E9）已满足最小 3D 产品
+  smoke；步骤 4 与 2D/UI/Audio/Linux 等并集通过后，才可计入 M12 Legacy 删除门禁。

@@ -554,9 +554,10 @@ M10 产品 2D 收口（A32–A44 / tip `70618808`）：正式样例 + Asset reci
 selection 产品闭环**视为可验收。行为：默认 `--frames=300` 不合成点击（`tileSelectionHits=0` /
 无高亮合法）；`--seed-tile-selection=cellX,cellY` 为受控可脚本门禁（sample-private locked sample，
 非 OS 真点击）；UI Button 不穿透仍由 `tina_runtime_ui_tests` 证明。完整外部 cooker CLI、
-cgltf → glTF/Material/Prefab 与厚 world-pick Game SDK 仍 **Deferred**，**默认不再开 M10-A45**；
-最小产品 `tina_sample_3d`（StaticMesh cube + Unlit，M11-E0–E5）已在 M11 落地，不替代 glTF 门禁。
-截图与 Audio 归 M11；Legacy 删除归 M12。
+厚 world-pick Game SDK 仍 **Deferred**，**默认不再开 M10-A45**。M11-E7–E9：cgltf v1.15 最小 glTF cook、
+Prefab parse/instantiate、`tina_sample_3d` glTF/Prefab smoke 已落地（首 primitive / solid Unlit /
+fixture meshKey）。multi-mesh、外部纹理、PBR、AssetHandle mesh 解析仍后置。截图与 Audio 归 M11；
+Legacy 删除归 M12（见 m12-gate-checklist）。
 
 M11-B0：`include/tina/render/Camera2DProjection.hpp` 提供与 game-2d 契约对齐的投影解析：
 `FixedWorldHeight2D` / `PixelPerfect2D` + 当前 framebuffer viewport（含 normalized viewport 缩放）→

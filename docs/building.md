@@ -151,9 +151,9 @@ M9-B 可见 fixture 与 M11-E0–E5 最小产品 3D 在 **bgfx** 图：
 | 样例 | 证明 | 未证明 |
 | --- | --- | --- |
 | `tina_sample_3d_infrastructure` | procedural Cube / depth / instance | Cooked Asset |
-| `tina_sample_3d` | Catalog recipe StaticMesh + Unlit solid/textured | glTF / Prefab / PBR |
+| `tina_sample_3d` | cgltf 最小 glTF → Prefab instantiate → Scene extract（E9） | multi-mesh / 外部纹理 / PBR |
 
-Cooked glTF → Mesh/Material/Prefab 仍 Deferred，不阻塞 E0–E5 收口。
+E9 最小 glTF/Prefab 产品 smoke 已落地；multi-mesh 与外部纹理仍后置，不阻塞本收口。
 
 ```powershell
 cmake --build --preset windows-vnext-debug --target tina_render_scene_tests tina_sample_3d_extraction
