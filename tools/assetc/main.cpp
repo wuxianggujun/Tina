@@ -1,6 +1,7 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
+#include <tina/asset/GltfCook.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
@@ -18,6 +19,7 @@ namespace {
 struct Options final {
     std::string outRoot;
     std::string recipePath;
+    std::string gltfPath;
     // When no recipe: emit Texture2D(2x2 checker) + Sprite depending on it.
     bool useTyped2dFixture = true;
 };
@@ -28,6 +30,7 @@ void printUsage()
         << "tina_assetc --out <catalogRoot> [options]\n"
         << "  Fixture/recipe cooker for Catalog packages.\n"
         << "  --recipe <path>   cook from line recipe\n"
+        << "  --gltf <path>     cook minimal glTF/GLB (cgltf) -> StaticMesh+Material+Prefab\n"
         << "  --legacy-text     default fixture uses raw text Material payloads (compat)\n"
         << "  --help\n"
         << "\n"
@@ -81,6 +84,16 @@ void printUsage()
                 return 2;
             }
             options.recipePath.assign(value);
+            continue;
+        }
+        if (arg == "--gltf")
+        {
+            const auto value = requireValue(arg);
+            if (value.empty())
+            {
+                return 2;
+            }
+            options.gltfPath.assign(value);
             continue;
         }
         if (arg == "--legacy-text")
@@ -229,7 +242,11 @@ int main(int argc, char** argv)
     Tina::Core::Result<Tina::Asset::CatalogCookRequest> request =
         Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig, "no request");
     std::string mode = "typed2d";
-    if (!options.recipePath.empty())
+    if (!options.gltfPath.empty())
+    {
+        request = Tina::Asset::cookGltfFileToCatalogRequest(options.gltfPath);
+        mode = "gltf";
+    } else if (!options.recipePath.empty())
     {
         request = Tina::Asset::loadCatalogCookRecipeFile(options.recipePath);
         mode = "recipe";
