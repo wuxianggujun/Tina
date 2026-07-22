@@ -569,5 +569,75 @@ TEST(ScenePrefabInstantiateTest, RollsBackOnInvalidParentIndex)
     EXPECT_EQ(world.entityCount(), 0U);
 }
 
+TEST(ScenePrefabInstantiateTest, ResolvesPerNodeMeshKeysFromAssetIds)
+{
+    World world = makeWorld();
+    const auto meshA = *Core::AssetId::fromBytes(Core::AssetId::Bytes{std::byte{1}});
+    const auto meshB = *Core::AssetId::fromBytes(Core::AssetId::Bytes{std::byte{2}});
+    const auto matA = *Core::AssetId::fromBytes(Core::AssetId::Bytes{std::byte{3}});
+    const auto matB = *Core::AssetId::fromBytes(Core::AssetId::Bytes{std::byte{4}});
+    const std::array nodes{
+        AssetFormat::PrefabNodeView{
+            .stableNodeId = 1,
+            .parentIndex = -1,
+            .hasMesh = true,
+            .hasMaterial = true,
+            .visible = true,
+            .meshId = meshA,
+            .materialId = matA,
+        },
+        AssetFormat::PrefabNodeView{
+            .stableNodeId = 2,
+            .parentIndex = -1,
+            .positionX = 1.0F,
+            .hasMesh = true,
+            .hasMaterial = true,
+            .visible = true,
+            .meshId = meshB,
+            .materialId = matB,
+        },
+    };
+    AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
+    PrefabMeshBinding binding{
+        .fixtureMeshKey = 1,
+        .fixtureMaterialKey = 1,
+        .resolveMeshKey =
+            [meshA, meshB](Core::AssetId id) -> u32 {
+                if (id == meshA)
+                {
+                    return 10;
+                }
+                if (id == meshB)
+                {
+                    return 20;
+                }
+                return 0;
+            },
+        .resolveMaterialKey =
+            [matA, matB](Core::AssetId id) -> u32 {
+                if (id == matA)
+                {
+                    return 11;
+                }
+                if (id == matB)
+                {
+                    return 21;
+                }
+                return 0;
+            },
+    };
+    auto created = instantiatePrefab(world, prefab, binding);
+    ASSERT_TRUE(created.has_value()) << (created ? "" : created.error().message);
+    ASSERT_EQ(created->size(), 2U);
+    const MeshRenderer3D* a = world.meshRenderer3D((*created)[0]);
+    const MeshRenderer3D* b = world.meshRenderer3D((*created)[1]);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(a->fixtureMeshKey, 10U);
+    EXPECT_EQ(a->fixtureMaterialKey, 11U);
+    EXPECT_EQ(b->fixtureMeshKey, 20U);
+    EXPECT_EQ(b->fixtureMaterialKey, 21U);
+}
+
 } // namespace
 } // namespace Tina::Scene

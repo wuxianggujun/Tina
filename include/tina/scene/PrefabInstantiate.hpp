@@ -2,22 +2,32 @@
 
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/core/id/AssetId.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/scene/Entity.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/World.hpp>
 
+#include <functional>
 #include <vector>
 
 namespace Tina::Scene {
 
-// Fixture-path mesh binding applied to every Prefab node with hasMesh.
-// Full AssetHandle/FrameResourceRef resolve remains Deferred (M11-E8 first slice).
+// Maps cooked Prefab node AssetIds to backend meshKey/materialKey tables.
+// When resolve* is empty, fixtureMeshKey/fixtureMaterialKey apply to every
+// meshed node (E8 fixture path). Games typically bind GPU meshes once then
+// resolve AssetId → key (E10).
 struct PrefabMeshBinding final {
     u32 fixtureMeshKey = 1;
     u32 fixtureMaterialKey = 1;
     Render::RenderBoundingSphereInput localBounds{.radius = 0.5F};
     Render::RenderLinearColor baseColorFactor{};
+    // Optional: return 0 to fail instantiate for that node.
+    std::function<u32(Core::AssetId meshId)> resolveMeshKey{};
+    std::function<u32(Core::AssetId materialId)> resolveMaterialKey{};
+    // Optional: override bounds/color per mesh AssetId (empty = use defaults above).
+    std::function<Render::RenderBoundingSphereInput(Core::AssetId meshId)> resolveLocalBounds{};
+    std::function<Render::RenderLinearColor(Core::AssetId materialId)> resolveBaseColor{};
 };
 
 // Instantiates Prefab nodes into World in stable order:

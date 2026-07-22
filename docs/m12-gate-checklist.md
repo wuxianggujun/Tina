@@ -12,8 +12,8 @@
 | G0 | 非 clean 构建图可复现；无 wipe `out/build` | Working | 用户硬性禁 clean |
 | G1 | 2D 产品：`tina_sample_2d` Catalog/TileMap/UI | **Strong** | base bgfx 300 帧 + **product-2d** 300 帧 exit 0（`productGate=bgfx-physics-freetype-audio`） |
 | G2 | UI 产品：HUD/控件 + 输入消费 | Partial | 随 sample_2d；UIA/截图后置 |
-| G3 | 3D 产品：Cooked + 可见 + 账本 | **Strong** | E0–E9 Done；cgltf 仍首 primitive |
-| G4 | Asset/Cooker | Partial | recipe + 最小 glTF；multi-mesh/纹理仍薄 |
+| G3 | 3D 产品：Cooked + 可见 + 账本 | **Strong** | E0–E10：multi-mesh cook + AssetId→meshKey resolve |
+| G4 | Asset/Cooker | **Stronger** | multi-mesh glTF cook Done；外部纹理/PBR 仍后置 |
 | G5 | Audio | **Evidence** | audio tests + sample_2d 300 帧观测 |
 | G6 | Windows/Linux + GoogleTest | Open | Windows 为主；**Linux 未跑** |
 | G7 | Legacy smoke 基线 | **N/A** | 产品源码已删，不再跑 |
@@ -29,11 +29,10 @@
 ## 剩余缺口（非整库“完成”的理由）
 
 1. **G6 Linux** 全门禁尚未在本跟踪表关闭。  
-2. cgltf 仍薄；instantiate 仍 fixture meshKey。  
-3. 文档/本地 skill 扫尾（进行中；agent skills 已按产品删除改写）。
+2. cgltf **外部纹理 / multi-primitive 合并 / PBR** 仍后置。  
+3. 文档/本地 skill 扫尾（agent skills 本地已改，未默认提交）。
 
-**已关闭：** G1 全 feature（product-2d 300 帧）、G7 N/A、G8/G9 产品删除。
-
+**已关闭：** G1 全 feature、G3 multi-mesh+resolve、G7 N/A、G8/G9 产品删除。
 ## 本机快速复验（禁止 clean）
 
 ```powershell

@@ -125,7 +125,33 @@ Core::Result<OwnedPrefabPayload> parsePrefabFromCooked(const CookedAssetFile& fi
         return Core::failure(AssetErrorCode::CatalogEntryMismatch,
                              "prefab dependency count does not match mesh/material flags");
     }
+    // Bind AssetIds from the dependency stream in node order (mesh, material) × N.
+    Core::u32 depIndex = 0;
+    for (auto& node : owned.nodes)
+    {
+        if (!node.hasMesh)
+        {
+            continue;
+        }
+        auto meshDep = file.dependency(depIndex++);
+        auto materialDep = file.dependency(depIndex++);
+        if (!meshDep || !materialDep)
+        {
+            return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                 "prefab dependency stream shorter than meshed nodes");
+        }
+        if (meshDep->expectedKind != AssetFormat::AssetKind::StaticMesh ||
+            materialDep->expectedKind != AssetFormat::AssetKind::Material)
+        {
+            return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                 "prefab dependency kinds must be StaticMesh then Material");
+        }
+        node.meshId = meshDep->assetId;
+        node.materialId = materialDep->assetId;
+    }
     owned.view = *view;
+    // view.nodes aliases owned.nodes — re-bind after mutation.
+    owned.view.nodes = owned.nodes;
     return owned;
 }
 

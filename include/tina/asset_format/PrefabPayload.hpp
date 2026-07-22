@@ -73,6 +73,10 @@ struct PrefabNodeView final {
     bool hasMesh = false;
     bool hasMaterial = false;
     bool visible = true;
+    // Filled by Asset::parsePrefabFromCooked from cooked dependency stream
+    // (mesh then material per hasMesh node). Empty when only payload-parsed.
+    Core::AssetId meshId{};
+    Core::AssetId materialId{};
 };
 
 struct PrefabPayloadDesc final {

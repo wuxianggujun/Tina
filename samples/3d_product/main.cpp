@@ -565,6 +565,10 @@ class Product3DState final : public Tina::IGameState {
         {
             return Tina::Core::failure(std::move(prefab.error()));
         }
+        // Resolve cooked Prefab node AssetIds → backend keys (single mesh product path
+        // still maps everything to ProductMeshKey; multi-mesh cook fills distinct ids).
+        const Tina::Core::AssetId productMeshId = resources_->meshId;
+        const Tina::Core::AssetId productMaterialId = resources_->materialId;
         auto instances = Tina::Scene::instantiatePrefab(
             *world_,
             prefab->view,
@@ -573,6 +577,14 @@ class Product3DState final : public Tina::IGameState {
                 .fixtureMaterialKey = ProductMaterialKey,
                 .localBounds = {.radius = resources_->meshBoundsRadius},
                 .baseColorFactor = resources_->materialColor,
+                .resolveMeshKey =
+                    [productMeshId](Tina::Core::AssetId id) -> Tina::u32 {
+                        return id == productMeshId ? ProductMeshKey : 0U;
+                    },
+                .resolveMaterialKey =
+                    [productMaterialId](Tina::Core::AssetId id) -> Tina::u32 {
+                        return id == productMaterialId ? ProductMaterialKey : 0U;
+                    },
             });
         if (!instances)
         {

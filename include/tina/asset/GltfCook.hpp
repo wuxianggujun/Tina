@@ -8,19 +8,20 @@
 
 namespace Tina::Asset {
 
-// M11-E7 minimal glTF cook (cgltf PRIVATE to the cook TU / assetc).
-// Supported first slice:
+// M11-E7/E10 glTF cook (cgltf PRIVATE to the cook TU / assetc).
+// Supported:
 // - glTF 2.0 JSON or GLB via cgltf_parse_file
-// - first mesh, first primitive: TRIANGLES + POSITION(float3) + optional NORMAL/TEXCOORD_0
-// - indices UNSIGNED_SHORT or converted from UNSIGNED_INT if all < 65536
-// - materials: baseColorFactor → UnlitBaseColor Material; textures deferred (solid only)
-// - scene nodes → Prefab with mesh/material deps for nodes that reference the first mesh
+// - every mesh: single TRIANGLES primitive with POSITION(float3) + optional NORMAL/TEXCOORD_0
+// - multi-mesh files produce one StaticMesh + one Material per mesh index
+// - scene nodes → Prefab deps bind each node's mesh/material AssetIds
 // Output is a CatalogCookRequest ready for cookCatalogPackage / publish.
 //
-// Not supported (structured failure): Draco, morph, skin, multi-mesh pack, external image
-// textures, non-triangle primitives, sparse accessors.
+// Not supported (structured failure): Draco, morph, skin, multi-primitive mesh merge,
+// external image textures, non-triangle primitives, sparse accessors.
 
 struct GltfCookIds final {
+    // Optional fixed ids for single-mesh files (or mesh index 0 / its material / prefab).
+    // Multi-mesh files always derive additional mesh/material ids from path + index.
     Core::AssetId meshId{};
     Core::AssetId materialId{};
     Core::AssetId prefabId{};

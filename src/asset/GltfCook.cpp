@@ -9,10 +9,10 @@
 #include <tina/asset_format/StaticMeshPayload.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace Tina::Asset {
@@ -27,6 +27,16 @@ namespace {
             static_cast<Core::u8>(bytes[i % 16]) ^ static_cast<Core::u8>(seed[i]) ^ tag);
     }
     bytes[0] = static_cast<std::byte>(tag);
+    return *Core::AssetId::fromBytes(bytes);
+}
+
+[[nodiscard]] Core::AssetId deriveIndexedId(std::string_view seed, Core::u8 tag, Core::u32 index)
+{
+    Core::AssetId id = deriveId(seed, tag);
+    Core::AssetId::Bytes bytes = id.bytes();
+    bytes[1] = static_cast<std::byte>(static_cast<Core::u8>(bytes[1]) ^ static_cast<Core::u8>(index & 0xFFU));
+    bytes[2] = static_cast<std::byte>(static_cast<Core::u8>(bytes[2]) ^ static_cast<Core::u8>((index >> 8) & 0xFFU));
+    bytes[3] = static_cast<std::byte>(static_cast<Core::u8>(bytes[3]) ^ static_cast<Core::u8>((index >> 16) & 0xFFU));
     return *Core::AssetId::fromBytes(bytes);
 }
 
@@ -61,6 +71,143 @@ namespace {
     return nullptr;
 }
 
+struct CookedMeshPieces final {
+    std::vector<float> vertices{};
+    std::vector<Core::u16> indices{};
+    AssetFormat::StaticMeshSubmeshDesc submesh{};
+    float boundsCenterX = 0.0F;
+    float boundsCenterY = 0.0F;
+    float boundsCenterZ = 0.0F;
+    float boundsRadius = 1.0F;
+    float baseR = 1.0F;
+    float baseG = 1.0F;
+    float baseB = 1.0F;
+    float baseA = 1.0F;
+    bool doubleSided = false;
+};
+
+[[nodiscard]] Core::Result<CookedMeshPieces> extractTriangleMesh(const cgltf_primitive& prim)
+{
+    if (prim.type != cgltf_primitive_type_triangles)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "only TRIANGLES primitives are supported");
+    }
+    const cgltf_accessor* positions = findAttribute(prim, cgltf_attribute_type_position);
+    if (positions == nullptr || positions->type != cgltf_type_vec3 ||
+        positions->component_type != cgltf_component_type_r_32f || positions->count == 0)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "POSITION float3 accessor required");
+    }
+    if (positions->count > 65535U)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "vertex count exceeds u16 index range");
+    }
+
+    const cgltf_accessor* normals = findAttribute(prim, cgltf_attribute_type_normal);
+    const cgltf_accessor* texcoords = findAttribute(prim, cgltf_attribute_type_texcoord);
+
+    CookedMeshPieces out{};
+    out.vertices.resize(static_cast<std::size_t>(positions->count) * 8U);
+    for (cgltf_size i = 0; i < positions->count; ++i)
+    {
+        float p[3]{};
+        float n[3]{0.0F, 1.0F, 0.0F};
+        float uv[2]{0.0F, 0.0F};
+        if (!cgltf_accessor_read_float(positions, i, p, 3))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "failed to read POSITION");
+        }
+        if (normals != nullptr && normals->type == cgltf_type_vec3)
+        {
+            (void)cgltf_accessor_read_float(normals, i, n, 3);
+        }
+        if (texcoords != nullptr && texcoords->type == cgltf_type_vec2)
+        {
+            (void)cgltf_accessor_read_float(texcoords, i, uv, 2);
+        }
+        const std::size_t base = static_cast<std::size_t>(i) * 8U;
+        out.vertices[base + 0] = p[0];
+        out.vertices[base + 1] = p[1];
+        out.vertices[base + 2] = p[2];
+        out.vertices[base + 3] = n[0];
+        out.vertices[base + 4] = n[1];
+        out.vertices[base + 5] = n[2];
+        out.vertices[base + 6] = uv[0];
+        out.vertices[base + 7] = uv[1];
+    }
+
+    if (prim.indices != nullptr)
+    {
+        if (prim.indices->count % 3 != 0)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "index count must be multiple of 3");
+        }
+        out.indices.resize(prim.indices->count);
+        for (cgltf_size i = 0; i < prim.indices->count; ++i)
+        {
+            const cgltf_size idx = cgltf_accessor_read_index(prim.indices, i);
+            if (idx >= positions->count || idx > 65535U)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "index out of range for u16 mesh");
+            }
+            out.indices[i] = static_cast<Core::u16>(idx);
+        }
+    }
+    else
+    {
+        if (positions->count % 3 != 0)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "non-indexed mesh vertex count invalid");
+        }
+        out.indices.resize(positions->count);
+        for (cgltf_size i = 0; i < positions->count; ++i)
+        {
+            out.indices[i] = static_cast<Core::u16>(i);
+        }
+    }
+
+    float minX = out.vertices[0], minY = out.vertices[1], minZ = out.vertices[2];
+    float maxX = minX, maxY = minY, maxZ = minZ;
+    for (cgltf_size i = 0; i < positions->count; ++i)
+    {
+        const std::size_t base = static_cast<std::size_t>(i) * 8U;
+        minX = (std::min)(minX, out.vertices[base + 0]);
+        minY = (std::min)(minY, out.vertices[base + 1]);
+        minZ = (std::min)(minZ, out.vertices[base + 2]);
+        maxX = (std::max)(maxX, out.vertices[base + 0]);
+        maxY = (std::max)(maxY, out.vertices[base + 1]);
+        maxZ = (std::max)(maxZ, out.vertices[base + 2]);
+    }
+    out.boundsCenterX = 0.5F * (minX + maxX);
+    out.boundsCenterY = 0.5F * (minY + maxY);
+    out.boundsCenterZ = 0.5F * (minZ + maxZ);
+    float radius = 0.0F;
+    for (cgltf_size i = 0; i < positions->count; ++i)
+    {
+        const std::size_t base = static_cast<std::size_t>(i) * 8U;
+        const float dx = out.vertices[base + 0] - out.boundsCenterX;
+        const float dy = out.vertices[base + 1] - out.boundsCenterY;
+        const float dz = out.vertices[base + 2] - out.boundsCenterZ;
+        radius = (std::max)(radius, std::sqrt(dx * dx + dy * dy + dz * dz));
+    }
+    out.boundsRadius = radius > 0.0F ? radius : 1.0F;
+    out.submesh = AssetFormat::StaticMeshSubmeshDesc{
+        .firstIndex = 0,
+        .indexCount = static_cast<Core::u32>(out.indices.size()),
+        .materialSlot = 0,
+    };
+
+    if (prim.material != nullptr && prim.material->has_pbr_metallic_roughness)
+    {
+        out.baseR = prim.material->pbr_metallic_roughness.base_color_factor[0];
+        out.baseG = prim.material->pbr_metallic_roughness.base_color_factor[1];
+        out.baseB = prim.material->pbr_metallic_roughness.base_color_factor[2];
+        out.baseA = prim.material->pbr_metallic_roughness.base_color_factor[3];
+        out.doubleSided = prim.material->double_sided != 0;
+    }
+    return out;
+}
+
 } // namespace
 
 Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view gltfUtf8Path,
@@ -89,187 +236,109 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
         return Core::failure(status.error());
     }
 
-    if (data->meshes_count == 0 || data->meshes[0].primitives_count == 0)
+    if (data->meshes_count == 0)
     {
         cgltf_free(data);
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF has no mesh primitives");
-    }
-    const cgltf_primitive& prim = data->meshes[0].primitives[0];
-    if (prim.type != cgltf_primitive_type_triangles)
-    {
-        cgltf_free(data);
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "only TRIANGLES primitives are supported");
-    }
-    const cgltf_accessor* positions = findAttribute(prim, cgltf_attribute_type_position);
-    if (positions == nullptr || positions->type != cgltf_type_vec3 ||
-        positions->component_type != cgltf_component_type_r_32f || positions->count == 0)
-    {
-        cgltf_free(data);
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "POSITION float3 accessor required");
-    }
-    if (positions->count > 65535U)
-    {
-        cgltf_free(data);
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "vertex count exceeds u16 index range");
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF has no meshes");
     }
 
-    const cgltf_accessor* normals = findAttribute(prim, cgltf_attribute_type_normal);
-    const cgltf_accessor* texcoords = findAttribute(prim, cgltf_attribute_type_texcoord);
-
-    std::vector<float> vertices(static_cast<std::size_t>(positions->count) * 8U);
-    for (cgltf_size i = 0; i < positions->count; ++i)
-    {
-        float p[3]{};
-        float n[3]{0.0F, 1.0F, 0.0F};
-        float uv[2]{0.0F, 0.0F};
-        if (!cgltf_accessor_read_float(positions, i, p, 3))
-        {
-            cgltf_free(data);
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "failed to read POSITION");
-        }
-        if (normals != nullptr && normals->type == cgltf_type_vec3)
-        {
-            (void)cgltf_accessor_read_float(normals, i, n, 3);
-        }
-        if (texcoords != nullptr && texcoords->type == cgltf_type_vec2)
-        {
-            (void)cgltf_accessor_read_float(texcoords, i, uv, 2);
-        }
-        const std::size_t base = static_cast<std::size_t>(i) * 8U;
-        vertices[base + 0] = p[0];
-        vertices[base + 1] = p[1];
-        vertices[base + 2] = p[2];
-        vertices[base + 3] = n[0];
-        vertices[base + 4] = n[1];
-        vertices[base + 5] = n[2];
-        vertices[base + 6] = uv[0];
-        vertices[base + 7] = uv[1];
-    }
-
-    std::vector<Core::u16> indices;
-    if (prim.indices != nullptr)
-    {
-        if (prim.indices->count % 3 != 0)
-        {
-            cgltf_free(data);
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "index count must be multiple of 3");
-        }
-        indices.resize(prim.indices->count);
-        for (cgltf_size i = 0; i < prim.indices->count; ++i)
-        {
-            const cgltf_size idx = cgltf_accessor_read_index(prim.indices, i);
-            if (idx >= positions->count || idx > 65535U)
-            {
-                cgltf_free(data);
-                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "index out of range for u16 mesh");
-            }
-            indices[i] = static_cast<Core::u16>(idx);
-        }
-    }
-    else
-    {
-        if (positions->count % 3 != 0)
-        {
-            cgltf_free(data);
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "non-indexed mesh vertex count invalid");
-        }
-        indices.resize(positions->count);
-        for (cgltf_size i = 0; i < positions->count; ++i)
-        {
-            indices[i] = static_cast<Core::u16>(i);
-        }
-    }
-
-    float minX = vertices[0], minY = vertices[1], minZ = vertices[2];
-    float maxX = minX, maxY = minY, maxZ = minZ;
-    for (cgltf_size i = 0; i < positions->count; ++i)
-    {
-        const std::size_t base = static_cast<std::size_t>(i) * 8U;
-        minX = (std::min)(minX, vertices[base + 0]);
-        minY = (std::min)(minY, vertices[base + 1]);
-        minZ = (std::min)(minZ, vertices[base + 2]);
-        maxX = (std::max)(maxX, vertices[base + 0]);
-        maxY = (std::max)(maxY, vertices[base + 1]);
-        maxZ = (std::max)(maxZ, vertices[base + 2]);
-    }
-    const float cx = 0.5F * (minX + maxX);
-    const float cy = 0.5F * (minY + maxY);
-    const float cz = 0.5F * (minZ + maxZ);
-    float radius = 0.0F;
-    for (cgltf_size i = 0; i < positions->count; ++i)
-    {
-        const std::size_t base = static_cast<std::size_t>(i) * 8U;
-        const float dx = vertices[base + 0] - cx;
-        const float dy = vertices[base + 1] - cy;
-        const float dz = vertices[base + 2] - cz;
-        radius = (std::max)(radius, std::sqrt(dx * dx + dy * dy + dz * dz));
-    }
-    if (!(radius > 0.0F))
-    {
-        radius = 1.0F;
-    }
-
-    AssetFormat::StaticMeshSubmeshDesc submesh{
-        .firstIndex = 0,
-        .indexCount = static_cast<Core::u32>(indices.size()),
-        .materialSlot = 0,
-    };
-    AssetFormat::StaticMeshPayloadDesc meshDesc{
-        .vertexLayout = AssetFormat::StaticMeshVertexLayout::P3N3UV2,
-        .indexType = AssetFormat::StaticMeshIndexType::U16,
-        .boundsCenterX = cx,
-        .boundsCenterY = cy,
-        .boundsCenterZ = cz,
-        .boundsRadius = radius,
-        .submeshes = std::span<const AssetFormat::StaticMeshSubmeshDesc>(&submesh, 1),
-        .vertices = vertices,
-        .indices = indices,
-    };
-
-    float baseR = 1.0F, baseG = 1.0F, baseB = 1.0F, baseA = 1.0F;
-    bool doubleSided = false;
-    if (prim.material != nullptr && prim.material->has_pbr_metallic_roughness)
-    {
-        baseR = prim.material->pbr_metallic_roughness.base_color_factor[0];
-        baseG = prim.material->pbr_metallic_roughness.base_color_factor[1];
-        baseB = prim.material->pbr_metallic_roughness.base_color_factor[2];
-        baseA = prim.material->pbr_metallic_roughness.base_color_factor[3];
-        doubleSided = prim.material->double_sided != 0;
-    }
-    AssetFormat::MaterialPayloadDesc materialDesc{
-        .model = AssetFormat::MaterialModel::UnlitBaseColor,
-        .baseColorR = baseR,
-        .baseColorG = baseG,
-        .baseColorB = baseB,
-        .baseColorA = baseA,
-        .doubleSided = doubleSided,
-        .alphaMode = AssetFormat::MaterialAlphaMode::Opaque,
-    };
-
-    if (!static_cast<bool>(ids.meshId))
-    {
-        ids.meshId = deriveId(gltfUtf8Path, 0x71);
-    }
-    if (!static_cast<bool>(ids.materialId))
-    {
-        ids.materialId = deriveId(gltfUtf8Path, 0x72);
-    }
     if (!static_cast<bool>(ids.prefabId))
     {
         ids.prefabId = deriveId(gltfUtf8Path, 0x73);
     }
 
-    auto meshPayload = AssetFormat::writeStaticMeshPayloadBytes(meshDesc);
-    if (!meshPayload)
+    struct MeshEntry final {
+        Core::AssetId meshId{};
+        Core::AssetId materialId{};
+        std::vector<std::byte> meshPayload{};
+        std::vector<std::byte> materialPayload{};
+    };
+    std::vector<MeshEntry> meshes;
+    meshes.reserve(data->meshes_count);
+    // pointer equality for cgltf_mesh* → entry index
+    std::unordered_map<const cgltf_mesh*, std::size_t> meshIndexByPtr;
+
+    for (cgltf_size meshIndex = 0; meshIndex < data->meshes_count; ++meshIndex)
     {
-        cgltf_free(data);
-        return Core::failure(std::move(meshPayload.error()));
-    }
-    auto materialPayload = AssetFormat::writeMaterialPayloadBytes(materialDesc);
-    if (!materialPayload)
-    {
-        cgltf_free(data);
-        return Core::failure(std::move(materialPayload.error()));
+        const cgltf_mesh& mesh = data->meshes[meshIndex];
+        if (mesh.primitives_count == 0)
+        {
+            cgltf_free(data);
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF mesh has no primitives");
+        }
+        if (mesh.primitives_count > 1)
+        {
+            cgltf_free(data);
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "multi-primitive meshes are not supported (use one TRIANGLES prim per mesh)");
+        }
+        auto pieces = extractTriangleMesh(mesh.primitives[0]);
+        if (!pieces)
+        {
+            cgltf_free(data);
+            return Core::failure(std::move(pieces.error()));
+        }
+
+        Core::AssetId meshId{};
+        Core::AssetId materialId{};
+        if (meshIndex == 0 && static_cast<bool>(ids.meshId))
+        {
+            meshId = ids.meshId;
+        }
+        else
+        {
+            meshId = deriveIndexedId(gltfUtf8Path, 0x71, static_cast<Core::u32>(meshIndex));
+        }
+        if (meshIndex == 0 && static_cast<bool>(ids.materialId))
+        {
+            materialId = ids.materialId;
+        }
+        else
+        {
+            materialId = deriveIndexedId(gltfUtf8Path, 0x72, static_cast<Core::u32>(meshIndex));
+        }
+
+        AssetFormat::StaticMeshPayloadDesc meshDesc{
+            .vertexLayout = AssetFormat::StaticMeshVertexLayout::P3N3UV2,
+            .indexType = AssetFormat::StaticMeshIndexType::U16,
+            .boundsCenterX = pieces->boundsCenterX,
+            .boundsCenterY = pieces->boundsCenterY,
+            .boundsCenterZ = pieces->boundsCenterZ,
+            .boundsRadius = pieces->boundsRadius,
+            .submeshes = std::span<const AssetFormat::StaticMeshSubmeshDesc>(&pieces->submesh, 1),
+            .vertices = pieces->vertices,
+            .indices = pieces->indices,
+        };
+        AssetFormat::MaterialPayloadDesc materialDesc{
+            .model = AssetFormat::MaterialModel::UnlitBaseColor,
+            .baseColorR = pieces->baseR,
+            .baseColorG = pieces->baseG,
+            .baseColorB = pieces->baseB,
+            .baseColorA = pieces->baseA,
+            .doubleSided = pieces->doubleSided,
+            .alphaMode = AssetFormat::MaterialAlphaMode::Opaque,
+        };
+
+        auto meshPayload = AssetFormat::writeStaticMeshPayloadBytes(meshDesc);
+        if (!meshPayload)
+        {
+            cgltf_free(data);
+            return Core::failure(std::move(meshPayload.error()));
+        }
+        auto materialPayload = AssetFormat::writeMaterialPayloadBytes(materialDesc);
+        if (!materialPayload)
+        {
+            cgltf_free(data);
+            return Core::failure(std::move(materialPayload.error()));
+        }
+
+        meshIndexByPtr.emplace(&mesh, meshes.size());
+        meshes.push_back(MeshEntry{
+            .meshId = meshId,
+            .materialId = materialId,
+            .meshPayload = std::move(*meshPayload),
+            .materialPayload = std::move(*materialPayload),
+        });
     }
 
     std::vector<AssetFormat::PrefabNodeDesc> prefabNodes;
@@ -301,10 +370,15 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             desc.scaleY = node->scale[1];
             desc.scaleZ = node->scale[2];
         }
-        if (node->mesh == &data->meshes[0])
+        if (node->mesh != nullptr)
         {
-            desc.meshId = ids.meshId;
-            desc.materialId = ids.materialId;
+            const auto found = meshIndexByPtr.find(node->mesh);
+            if (found != meshIndexByPtr.end())
+            {
+                const MeshEntry& entry = meshes[found->second];
+                desc.meshId = entry.meshId;
+                desc.materialId = entry.materialId;
+            }
         }
         prefabNodes.push_back(desc);
         for (cgltf_size c = 0; c < node->children_count; ++c)
@@ -329,13 +403,13 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             }
         }
     }
-    if (prefabNodes.empty())
+    if (prefabNodes.empty() && !meshes.empty())
     {
         prefabNodes.push_back(AssetFormat::PrefabNodeDesc{
             .stableNodeId = 1,
             .parentIndex = -1,
-            .meshId = ids.meshId,
-            .materialId = ids.materialId,
+            .meshId = meshes[0].meshId,
+            .materialId = meshes[0].materialId,
         });
     }
 
@@ -349,18 +423,21 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
 
     CatalogCookRequest request{};
     request.targetPlatform = AssetFormat::TargetPlatform::WindowsX64;
-    request.assets.push_back(CatalogCookAssetSpec{
-        .assetKind = AssetFormat::AssetKind::StaticMesh,
-        .assetId = ids.meshId,
-        .assetTypeVersion = AssetFormat::StaticMeshWire::SchemaVersion,
-        .payload = std::move(*meshPayload),
-    });
-    request.assets.push_back(CatalogCookAssetSpec{
-        .assetKind = AssetFormat::AssetKind::Material,
-        .assetId = ids.materialId,
-        .assetTypeVersion = AssetFormat::MaterialWire::SchemaVersion,
-        .payload = std::move(*materialPayload),
-    });
+    for (auto& entry : meshes)
+    {
+        request.assets.push_back(CatalogCookAssetSpec{
+            .assetKind = AssetFormat::AssetKind::StaticMesh,
+            .assetId = entry.meshId,
+            .assetTypeVersion = AssetFormat::StaticMeshWire::SchemaVersion,
+            .payload = std::move(entry.meshPayload),
+        });
+        request.assets.push_back(CatalogCookAssetSpec{
+            .assetKind = AssetFormat::AssetKind::Material,
+            .assetId = entry.materialId,
+            .assetTypeVersion = AssetFormat::MaterialWire::SchemaVersion,
+            .payload = std::move(entry.materialPayload),
+        });
+    }
     CatalogCookAssetSpec prefabSpec{
         .assetKind = AssetFormat::AssetKind::Prefab,
         .assetId = ids.prefabId,

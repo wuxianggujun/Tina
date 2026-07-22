@@ -16,16 +16,6 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
     {
         return Core::failure(SceneErrorCode::InvalidComponent, "prefab has no nodes to instantiate");
     }
-    if (!isValid(MeshRenderer3D{
-            .fixtureMeshKey = meshBinding.fixtureMeshKey,
-            .fixtureMaterialKey = meshBinding.fixtureMaterialKey,
-            .localBounds = meshBinding.localBounds,
-            .baseColorFactor = meshBinding.baseColorFactor,
-            .visible = true,
-        }))
-    {
-        return Core::failure(SceneErrorCode::InvalidComponent, "prefab mesh binding is invalid");
-    }
 
     std::vector<EntityId> created;
     created.reserve(prefab.nodes.size());
@@ -69,20 +59,67 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
             }
         }
 
-        if (node.hasMesh)
+        if (!node.hasMesh)
         {
-            MeshRenderer3D mesh{
-                .fixtureMeshKey = meshBinding.fixtureMeshKey,
-                .fixtureMaterialKey = meshBinding.fixtureMaterialKey,
-                .localBounds = meshBinding.localBounds,
-                .baseColorFactor = meshBinding.baseColorFactor,
-                .visible = node.visible,
-            };
-            if (auto status = world.setMeshRenderer3D(*entity, mesh); !status)
+            continue;
+        }
+
+        u32 meshKey = meshBinding.fixtureMeshKey;
+        u32 materialKey = meshBinding.fixtureMaterialKey;
+        if (meshBinding.resolveMeshKey)
+        {
+            if (!static_cast<bool>(node.meshId))
             {
                 rollback();
-                return Core::failure(std::move(status.error()));
+                return Core::failure(SceneErrorCode::UnresolvedMesh,
+                                     "prefab meshed node missing mesh AssetId for resolve");
             }
+            meshKey = meshBinding.resolveMeshKey(node.meshId);
+        }
+        if (meshBinding.resolveMaterialKey)
+        {
+            if (!static_cast<bool>(node.materialId))
+            {
+                rollback();
+                return Core::failure(SceneErrorCode::UnresolvedMesh,
+                                     "prefab meshed node missing material AssetId for resolve");
+            }
+            materialKey = meshBinding.resolveMaterialKey(node.materialId);
+        }
+        if (meshKey == 0 || materialKey == 0)
+        {
+            rollback();
+            return Core::failure(SceneErrorCode::UnresolvedMesh,
+                                 "prefab mesh/material key resolve returned zero");
+        }
+
+        Render::RenderBoundingSphereInput bounds = meshBinding.localBounds;
+        if (meshBinding.resolveLocalBounds && static_cast<bool>(node.meshId))
+        {
+            bounds = meshBinding.resolveLocalBounds(node.meshId);
+        }
+        Render::RenderLinearColor color = meshBinding.baseColorFactor;
+        if (meshBinding.resolveBaseColor && static_cast<bool>(node.materialId))
+        {
+            color = meshBinding.resolveBaseColor(node.materialId);
+        }
+
+        MeshRenderer3D mesh{
+            .fixtureMeshKey = meshKey,
+            .fixtureMaterialKey = materialKey,
+            .localBounds = bounds,
+            .baseColorFactor = color,
+            .visible = node.visible,
+        };
+        if (!isValid(mesh))
+        {
+            rollback();
+            return Core::failure(SceneErrorCode::InvalidComponent, "prefab mesh binding is invalid");
+        }
+        if (auto status = world.setMeshRenderer3D(*entity, mesh); !status)
+        {
+            rollback();
+            return Core::failure(std::move(status.error()));
         }
     }
 
