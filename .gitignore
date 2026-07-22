@@ -84,6 +84,7 @@ fabric.properties
 /vcpkg_installed/
 /.cache/
 /.tmp/
+.tmp_*
 /logs/
 /log/
 /tmp/
