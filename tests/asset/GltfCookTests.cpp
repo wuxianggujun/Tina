@@ -1,15 +1,19 @@
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/GltfCook.hpp>
+#include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
+#include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace Tina::Asset {
 namespace {
@@ -206,6 +210,118 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
     EXPECT_EQ(meshCount, 2U);
     EXPECT_EQ(materialCount, 2U);
     EXPECT_EQ(prefabDeps, 4U);
+
+    const auto catalogRoot = dir / "catalog";
+    ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
+}
+
+// 1x1 red PNG (public domain fixture).
+[[nodiscard]] std::vector<unsigned char> tinyRedPngBytes()
+{
+    // iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+    static constexpr unsigned char kPng[] = {
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+        0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xFC, 0xCF, 0xC0, 0x50,
+        0x0F, 0x00, 0x04, 0x85, 0x01, 0x80, 0x84, 0xA9, 0x8C, 0x21, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
+        0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82};
+    return std::vector<unsigned char>(std::begin(kPng), std::end(kPng));
+}
+
+[[nodiscard]] std::string texturedTriangleGltfJson()
+{
+    // Same triangle as minimal, material uses baseColorTexture index 0 → image "tex.png".
+    return R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{
+    "primitives": [{
+      "attributes": {"POSITION": 0, "TEXCOORD_0": 1},
+      "indices": 2,
+      "mode": 4,
+      "material": 0
+    }]
+  }],
+  "materials": [{
+    "pbrMetallicRoughness": {
+      "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+      "baseColorTexture": {"index": 0}
+    }
+  }],
+  "textures": [{"source": 0}],
+  "images": [{"uri": "tex.png"}],
+  "accessors": [
+    {
+      "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+      "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]
+    },
+    {
+      "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC2"
+    },
+    {
+      "bufferView": 2, "componentType": 5123, "count": 3, "type": "SCALAR"
+    }
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 60, "byteLength": 6}
+  ],
+  "buffers": [{
+    "byteLength": 68,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAAAgD8AAIA/AACAPwAAgD8AAAAAAAAAAAAAgD8BAAAAAgAAAA=="
+  }]
+})json";
+}
+
+TEST(GltfCookTests, CooksBaseColorTextureToTexture2DDependency)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_tex_cook";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    {
+        const auto png = tinyRedPngBytes();
+        std::ofstream out(dir / "tex.png", std::ios::binary);
+        ASSERT_TRUE(out.good());
+        out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+    }
+    const auto gltfPath = dir / "textured.gltf";
+    {
+        std::ofstream out(gltfPath, std::ios::binary);
+        ASSERT_TRUE(out.good());
+        out << texturedTriangleGltfJson();
+    }
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+
+    bool sawTexture = false;
+    bool materialHasTexDep = false;
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind == AssetFormat::AssetKind::Texture2D)
+        {
+            sawTexture = true;
+            auto view = AssetFormat::parseTexture2DPayload(asset.payload);
+            ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+            EXPECT_EQ(view->width, 1U);
+            EXPECT_EQ(view->height, 1U);
+            EXPECT_EQ(view->pixelFormat, AssetFormat::Texture2DPixelFormat::Rgba8Unorm);
+        }
+        else if (asset.assetKind == AssetFormat::AssetKind::Material)
+        {
+            auto mat = AssetFormat::parseMaterialPayload(asset.payload);
+            ASSERT_TRUE(mat.has_value()) << (mat ? "" : mat.error().message);
+            EXPECT_TRUE(mat->hasBaseColorTexture);
+            ASSERT_EQ(asset.dependencies.size(), 1U);
+            EXPECT_EQ(asset.dependencies[0].expectedKind, AssetFormat::AssetKind::Texture2D);
+            materialHasTexDep = true;
+        }
+    }
+    EXPECT_TRUE(sawTexture);
+    EXPECT_TRUE(materialHasTexDep);
 
     const auto catalogRoot = dir / "catalog";
     ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());

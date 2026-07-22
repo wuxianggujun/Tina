@@ -1,18 +1,26 @@
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_NO_THREAD_LOCALS
+#include "stb_image.h"
+
 #include <tina/asset/GltfCook.hpp>
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
+#include <tina/asset_format/Texture2DPayload.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace Tina::Asset {
@@ -208,6 +216,107 @@ struct CookedMeshPieces final {
     return out;
 }
 
+// Decode PNG/JPEG (or other stb_image formats) to RGBA8 for Texture2D cook.
+// Supports buffer-view embedded images and relative file URIs next to the glTF.
+[[nodiscard]] Core::Result<std::pair<int, int>> decodeImageRgba8(
+    const cgltf_data* data,
+    const cgltf_image* image,
+    const std::filesystem::path& gltfFilePath,
+    std::vector<std::byte>& outRgba)
+{
+    if (image == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF image is null");
+    }
+    const stbi_uc* encoded = nullptr;
+    int encodedSize = 0;
+    std::vector<unsigned char> fileBytes;
+
+    if (image->buffer_view != nullptr)
+    {
+        const cgltf_buffer_view* view = image->buffer_view;
+        if (view->buffer == nullptr || view->buffer->data == nullptr)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF image buffer_view has no data");
+        }
+        encoded = static_cast<const stbi_uc*>(view->buffer->data) + view->offset;
+        encodedSize = static_cast<int>(view->size);
+    }
+    else if (image->uri != nullptr && image->uri[0] != '\0')
+    {
+        // data: URI
+        if (std::strncmp(image->uri, "data:", 5) == 0)
+        {
+            // cgltf may not expand data URIs into buffer views for all images; fail clearly.
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF data-URI images must be bufferView-backed for cook (use GLB or buffer views)");
+        }
+        const auto imagePath = gltfFilePath.parent_path() / image->uri;
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(imagePath, ec))
+        {
+            return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "glTF image file not found");
+        }
+        const auto fileSize = std::filesystem::file_size(imagePath, ec);
+        if (ec || fileSize == 0 || fileSize > 64ULL * 1024ULL * 1024ULL)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF image file size invalid");
+        }
+        fileBytes.resize(static_cast<std::size_t>(fileSize));
+        std::FILE* file = std::fopen(imagePath.string().c_str(), "rb");
+        if (file == nullptr)
+        {
+            return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "failed to open glTF image file");
+        }
+        const auto read = std::fread(fileBytes.data(), 1, fileBytes.size(), file);
+        std::fclose(file);
+        if (read != fileBytes.size())
+        {
+            return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "failed to read glTF image file");
+        }
+        encoded = fileBytes.data();
+        encodedSize = static_cast<int>(fileBytes.size());
+    }
+    else
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF image has neither bufferView nor uri");
+    }
+
+    int width = 0;
+    int height = 0;
+    int components = 0;
+    stbi_uc* pixels = stbi_load_from_memory(encoded, encodedSize, &width, &height, &components, 4);
+    if (pixels == nullptr || width <= 0 || height <= 0)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "stb_image failed to decode glTF image");
+    }
+    if (static_cast<Core::u32>(width) > AssetFormat::Texture2DWire::MaxDimension ||
+        static_cast<Core::u32>(height) > AssetFormat::Texture2DWire::MaxDimension)
+    {
+        stbi_image_free(pixels);
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF image exceeds max dimension");
+    }
+    const std::size_t byteCount = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
+    outRgba.resize(byteCount);
+    std::memcpy(outRgba.data(), pixels, byteCount);
+    stbi_image_free(pixels);
+    return std::pair<int, int>{width, height};
+}
+
+[[nodiscard]] const cgltf_image* baseColorImage(const cgltf_material* material) noexcept
+{
+    if (material == nullptr || !material->has_pbr_metallic_roughness)
+    {
+        return nullptr;
+    }
+    const cgltf_texture* texture = material->pbr_metallic_roughness.base_color_texture.texture;
+    if (texture == nullptr)
+    {
+        return nullptr;
+    }
+    return texture->image;
+}
+
 } // namespace
 
 Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view gltfUtf8Path,
@@ -250,13 +359,22 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
     struct MeshEntry final {
         Core::AssetId meshId{};
         Core::AssetId materialId{};
+        Core::AssetId baseColorTextureId{};
         std::vector<std::byte> meshPayload{};
         std::vector<std::byte> materialPayload{};
     };
+    struct TextureEntry final {
+        Core::AssetId textureId{};
+        std::vector<std::byte> payload{};
+    };
     std::vector<MeshEntry> meshes;
     meshes.reserve(data->meshes_count);
+    std::vector<TextureEntry> textures;
     // pointer equality for cgltf_mesh* → entry index
     std::unordered_map<const cgltf_mesh*, std::size_t> meshIndexByPtr;
+    std::unordered_map<const cgltf_image*, Core::AssetId> imageToTextureId;
+    const std::filesystem::path gltfFilePath{path};
+    Core::u32 nextTextureIndex = 0;
 
     for (cgltf_size meshIndex = 0; meshIndex < data->meshes_count; ++meshIndex)
     {
@@ -309,6 +427,44 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             .vertices = pieces->vertices,
             .indices = pieces->indices,
         };
+        Core::AssetId baseColorTextureId{};
+        if (const cgltf_image* image = baseColorImage(mesh.primitives[0].material); image != nullptr)
+        {
+            const auto existing = imageToTextureId.find(image);
+            if (existing != imageToTextureId.end())
+            {
+                baseColorTextureId = existing->second;
+            }
+            else
+            {
+                std::vector<std::byte> rgba;
+                auto dims = decodeImageRgba8(data, image, gltfFilePath, rgba);
+                if (!dims)
+                {
+                    cgltf_free(data);
+                    return Core::failure(std::move(dims.error()));
+                }
+                baseColorTextureId =
+                    deriveIndexedId(gltfUtf8Path, 0x74, nextTextureIndex++);
+                auto texPayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
+                    .width = static_cast<Core::u16>(dims->first),
+                    .height = static_cast<Core::u16>(dims->second),
+                    .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
+                    .pixels = rgba,
+                });
+                if (!texPayload)
+                {
+                    cgltf_free(data);
+                    return Core::failure(std::move(texPayload.error()));
+                }
+                imageToTextureId.emplace(image, baseColorTextureId);
+                textures.push_back(TextureEntry{
+                    .textureId = baseColorTextureId,
+                    .payload = std::move(*texPayload),
+                });
+            }
+        }
+
         AssetFormat::MaterialPayloadDesc materialDesc{
             .model = AssetFormat::MaterialModel::UnlitBaseColor,
             .baseColorR = pieces->baseR,
@@ -317,6 +473,7 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             .baseColorA = pieces->baseA,
             .doubleSided = pieces->doubleSided,
             .alphaMode = AssetFormat::MaterialAlphaMode::Opaque,
+            .baseColorTextureId = baseColorTextureId,
         };
 
         auto meshPayload = AssetFormat::writeStaticMeshPayloadBytes(meshDesc);
@@ -336,6 +493,7 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
         meshes.push_back(MeshEntry{
             .meshId = meshId,
             .materialId = materialId,
+            .baseColorTextureId = baseColorTextureId,
             .meshPayload = std::move(*meshPayload),
             .materialPayload = std::move(*materialPayload),
         });
@@ -423,6 +581,16 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
 
     CatalogCookRequest request{};
     request.targetPlatform = AssetFormat::TargetPlatform::WindowsX64;
+    // Dependencies-first: textures before materials that reference them.
+    for (auto& tex : textures)
+    {
+        request.assets.push_back(CatalogCookAssetSpec{
+            .assetKind = AssetFormat::AssetKind::Texture2D,
+            .assetId = tex.textureId,
+            .assetTypeVersion = AssetFormat::Texture2DWire::SchemaVersion,
+            .payload = std::move(tex.payload),
+        });
+    }
     for (auto& entry : meshes)
     {
         request.assets.push_back(CatalogCookAssetSpec{
@@ -431,12 +599,21 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             .assetTypeVersion = AssetFormat::StaticMeshWire::SchemaVersion,
             .payload = std::move(entry.meshPayload),
         });
-        request.assets.push_back(CatalogCookAssetSpec{
+        CatalogCookAssetSpec materialSpec{
             .assetKind = AssetFormat::AssetKind::Material,
             .assetId = entry.materialId,
             .assetTypeVersion = AssetFormat::MaterialWire::SchemaVersion,
             .payload = std::move(entry.materialPayload),
-        });
+        };
+        if (static_cast<bool>(entry.baseColorTextureId))
+        {
+            materialSpec.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
+                .assetId = entry.baseColorTextureId,
+                .expectedKind = AssetFormat::AssetKind::Texture2D,
+                .flags = AssetFormat::DependencyFlags::Required,
+            });
+        }
+        request.assets.push_back(std::move(materialSpec));
     }
     CatalogCookAssetSpec prefabSpec{
         .assetKind = AssetFormat::AssetKind::Prefab,

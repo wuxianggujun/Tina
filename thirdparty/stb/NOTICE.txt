@@ -1,0 +1,3 @@
+﻿stb_image.h - public domain / MIT-like dual license (see header).
+https://github.com/nothings/stb
+Used PRIVATE by Tina GltfCook for PNG/JPEG baseColor textures only.

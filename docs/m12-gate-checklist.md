@@ -1,4 +1,4 @@
-﻿# M12 Legacy 删除门禁清单（跟踪）
+# M12 Legacy 删除门禁清单（跟踪）
 
 > 状态：**产品级 Legacy 源码与构建图已删除**（`e2ef3d5e` 起）。本文件跟踪**剩余扫尾与复验**，
 > 不再写「禁止删除 UI」——删除已执行。  
@@ -13,7 +13,7 @@
 | G1 | 2D 产品：`tina_sample_2d` Catalog/TileMap/UI | **Strong** | base bgfx 300 帧 + **product-2d** 300 帧 exit 0（`productGate=bgfx-physics-freetype-audio`） |
 | G2 | UI 产品：HUD/控件 + 输入消费 | Partial | 随 sample_2d；UIA/截图后置 |
 | G3 | 3D 产品：Cooked + 可见 + 账本 | **Strong** | E0–E10：multi-mesh cook + AssetId→meshKey resolve |
-| G4 | Asset/Cooker | **Stronger** | multi-mesh glTF cook Done；外部纹理/PBR 仍后置 |
+| G4 | Asset/Cooker | **Stronger** | multi-mesh + baseColorTexture PNG/JPEG cook Done；PBR/multi-prim 仍后置 |
 | G5 | Audio | **Evidence** | audio tests + sample_2d 300 帧观测 |
 | G6 | Windows/Linux + GoogleTest | Open | Windows 为主；**Linux 未跑** |
 | G7 | Legacy smoke 基线 | **N/A** | 产品源码已删，不再跑 |
@@ -29,7 +29,7 @@
 ## 剩余缺口（非整库“完成”的理由）
 
 1. **G6 Linux** 全门禁尚未在本跟踪表关闭。  
-2. cgltf **外部纹理 / multi-primitive 合并 / PBR** 仍后置。  
+2. cgltf **multi-primitive / PBR 合并 / PBR** 仍后置。  
 3. 文档/本地 skill 扫尾（agent skills 本地已改，未默认提交）。
 
 **已关闭：** G1 全 feature、G3 multi-mesh+resolve、G7 N/A、G8/G9 产品删除。
