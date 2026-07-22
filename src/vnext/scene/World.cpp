@@ -20,6 +20,10 @@ struct World::EntityRecord final {
     EntityId parent{};
     EntityId firstChild{};
     EntityId nextSibling{};
+    bool hasCamera2D = false;
+    Camera2D camera2D{};
+    bool hasSpriteRenderer2D = false;
+    SpriteRenderer2D spriteRenderer2D{};
 };
 
 struct World::Impl final {
@@ -904,6 +908,155 @@ const WorldTransform* World::worldTransform(EntityId entity) const noexcept
     }
     const EntityRecord* entityRecord = record(entity);
     return entityRecord == nullptr ? nullptr : &entityRecord->world;
+}
+
+Core::Status World::setCamera2D(EntityId entity, Camera2D camera) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    if (!isValid(camera)) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene Camera2D contains invalid projection or viewport values");
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for Camera2D");
+    }
+    entityRecord->camera2D = camera;
+    entityRecord->hasCamera2D = true;
+    return Core::success();
+}
+
+Core::Status World::clearCamera2D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for Camera2D clear");
+    }
+    entityRecord->hasCamera2D = false;
+    entityRecord->camera2D = {};
+    return Core::success();
+}
+
+Core::Status World::setSpriteRenderer2D(
+    EntityId entity,
+    SpriteRenderer2D sprite) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    if (!isValid(sprite)) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene SpriteRenderer2D is missing fixtureSpriteKey or has invalid size");
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for SpriteRenderer2D");
+    }
+    entityRecord->spriteRenderer2D = sprite;
+    entityRecord->hasSpriteRenderer2D = true;
+    return Core::success();
+}
+
+Core::Status World::clearSpriteRenderer2D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for SpriteRenderer2D clear");
+    }
+    entityRecord->hasSpriteRenderer2D = false;
+    entityRecord->spriteRenderer2D = {};
+    return Core::success();
+}
+
+const Camera2D* World::camera2D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasCamera2D) {
+        return nullptr;
+    }
+    return &entityRecord->camera2D;
+}
+
+const SpriteRenderer2D* World::spriteRenderer2D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasSpriteRenderer2D) {
+        return nullptr;
+    }
+    return &entityRecord->spriteRenderer2D;
+}
+
+std::span<const EntityId> World::liveEntities() const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return {};
+    }
+    return std::span<const EntityId>{
+        m_impl->liveEntities.data(), m_impl->liveEntities.size()};
 }
 
 } // namespace Tina::Scene

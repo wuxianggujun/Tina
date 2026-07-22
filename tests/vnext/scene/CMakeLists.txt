@@ -1,8 +1,12 @@
 set(TINA_SCENE_TEST_SOURCES
     SceneWorldTests.cpp
+    SceneComponentExtractTests.cpp
+    header_isolation/Camera2DHeader.cpp
     header_isolation/EntityHeader.cpp
+    header_isolation/ExtractRenderSceneHeader.cpp
     header_isolation/SceneErrorsHeader.cpp
     header_isolation/SceneHeader.cpp
+    header_isolation/SpriteRenderer2DHeader.cpp
     header_isolation/TransformHeader.cpp
     header_isolation/WorldHeader.cpp
 )
@@ -13,6 +17,7 @@ target_include_directories(tina_scene_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
 target_link_libraries(tina_scene_tests PRIVATE
     Tina::ProjectOptions
     Tina::Scene
+    Tina::Render
     GTest::gtest_main
 )
 set_target_properties(tina_scene_tests PROPERTIES CXX_EXTENSIONS OFF)

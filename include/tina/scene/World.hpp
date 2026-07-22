@@ -2,12 +2,15 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/scene/Camera2D.hpp>
 #include <tina/scene/Entity.hpp>
 #include <tina/scene/SceneErrors.hpp>
+#include <tina/scene/SpriteRenderer2D.hpp>
 #include <tina/scene/Transform.hpp>
 
 #include <memory_resource>
 #include <optional>
+#include <span>
 
 namespace Tina::Scene {
 
@@ -61,12 +64,27 @@ public:
 
     [[nodiscard]] Core::Status updateWorldTransforms() noexcept;
 
+    // Optional POD component storage shares the entity slot capacity. Setting
+    // replaces any previous value on that entity; clear removes the component.
+    [[nodiscard]] Core::Status setCamera2D(EntityId entity, Camera2D camera) noexcept;
+    [[nodiscard]] Core::Status clearCamera2D(EntityId entity) noexcept;
+    [[nodiscard]] Core::Status setSpriteRenderer2D(
+        EntityId entity,
+        SpriteRenderer2D sprite) noexcept;
+    [[nodiscard]] Core::Status clearSpriteRenderer2D(EntityId entity) noexcept;
+
     [[nodiscard]] bool contains(EntityId entity) const noexcept;
     [[nodiscard]] usize entityCount() const noexcept;
     [[nodiscard]] usize entityCapacity() const noexcept;
     [[nodiscard]] EntityId parent(EntityId entity) const noexcept;
     [[nodiscard]] const LocalTransform* localTransform(EntityId entity) const noexcept;
     [[nodiscard]] const WorldTransform* worldTransform(EntityId entity) const noexcept;
+    [[nodiscard]] const Camera2D* camera2D(EntityId entity) const noexcept;
+    [[nodiscard]] const SpriteRenderer2D* spriteRenderer2D(EntityId entity) const noexcept;
+
+    // Live entity ids in create-order-independent dense storage. Valid only on
+    // the owner thread until the next structural mutation (create/destroy).
+    [[nodiscard]] std::span<const EntityId> liveEntities() const noexcept;
 
 private:
     struct EntityRecord;

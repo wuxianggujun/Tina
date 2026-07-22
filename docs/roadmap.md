@@ -450,8 +450,12 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   UI→Render12/12、Scene19/19、RenderScene11/11，以及 Null/2D infrastructure样例各300帧；Debug adapter
   复验通过 GLFW26/26、Platform样例300帧、bgfx16/16与Desktop连续3次各300帧。iconify 回归保持正 logical
   extent 与 framebuffer `0x0` suspended 语义；本轮没有重新截图或运行 Linux M8-B；
-- EnTT 只作为内部 component storage，公共接口只暴露 generation `EntityId`；Scene component command commit、
-  Camera/Sprite component storage、chunk culling、AssetHandle/FrameResourceRef 解析与正式可见 2D 产品路径仍待后续切片；
+- **M8-C0 Scene Camera2D/SpriteRenderer2D storage + extract 已完成：** `tina_scene` 可选 POD 组件、
+  `World::set/clear/get`、`extractRenderSceneFromWorld`（至多一 active Camera2D、fixtureSpriteKey 路径、
+  surface viewport 0×0 跳过 camera）；`tina_scene_tests` 覆盖存储/错误/extract/header isolation。无 EnTT、
+  无 sample 强制改写；
+- EnTT 若作 PRIVATE storage 仍后置；Scene component command commit、AssetHandle/FrameResourceRef 解析、
+  Runtime Phase Context World 能力、MeshRenderer3D/Prefab 与正式可见 2D 产品路径仍待后续切片；
 - 基础样例当前是 CPU/Null recording infrastructure，不显示 Sprite、不包含中文 Label/Button、world picking、
   TileMap 或 UI overlay；M9-C 的 `tina_sample_2d_infrastructure_bgfx` 只是另一个 GLFW+bgfx fixture 样例，能显示
   fixture Sprite 与 UI overlay，但不替代正式 `tina_sample_2d` 的 Catalog/Manifest 产品门禁；
