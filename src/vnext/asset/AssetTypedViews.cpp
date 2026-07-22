@@ -95,4 +95,38 @@ Core::Result<AssetFormat::MaterialPayloadView> parseMaterialFromCooked(const Coo
     return AssetFormat::parseMaterialPayload(file.payload());
 }
 
+Core::Result<OwnedPrefabPayload> parsePrefabFromCooked(const CookedAssetFile& file)
+{
+    if (!file)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::Prefab)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset is not Prefab");
+    }
+    OwnedPrefabPayload owned{};
+    auto view = AssetFormat::parsePrefabPayload(file.payload(), owned.nodes);
+    if (!view)
+    {
+        return Core::failure(std::move(view.error()));
+    }
+    // Count mesh/material flags must match dependency count (2 per meshed node).
+    Core::u32 expectedDeps = 0;
+    for (const auto& node : owned.nodes)
+    {
+        if (node.hasMesh)
+        {
+            expectedDeps += 2;
+        }
+    }
+    if (file.header().dependencyCount != expectedDeps)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "prefab dependency count does not match mesh/material flags");
+    }
+    owned.view = *view;
+    return owned;
+}
+
 } // namespace Tina::Asset

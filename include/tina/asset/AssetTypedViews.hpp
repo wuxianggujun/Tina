@@ -3,12 +3,15 @@
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
+#include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/error/Result.hpp>
+
+#include <vector>
 
 namespace Tina::Asset {
 
@@ -40,5 +43,14 @@ parseStaticMeshFromCooked(const CookedAssetFile& file);
 // M11-E4: Material cooked payload accessor (UnlitBaseColor factor).
 [[nodiscard]] Core::Result<AssetFormat::MaterialPayloadView>
 parseMaterialFromCooked(const CookedAssetFile& file);
+
+// M11-E6b: Prefab cooked payload. Node storage is owned by the returned object;
+// the PrefabPayloadView.nodes span aliases into `nodes`.
+struct OwnedPrefabPayload final {
+    std::vector<AssetFormat::PrefabNodeView> nodes{};
+    AssetFormat::PrefabPayloadView view{};
+};
+
+[[nodiscard]] Core::Result<OwnedPrefabPayload> parsePrefabFromCooked(const CookedAssetFile& file);
 
 } // namespace Tina::Asset

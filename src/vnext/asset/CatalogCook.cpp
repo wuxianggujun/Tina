@@ -5,6 +5,7 @@
 #include <tina/asset/CatalogPackagePublish.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
+#include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
@@ -1010,6 +1011,69 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
                 asset.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
                     .assetId = textureId,
                     .expectedKind = AssetFormat::AssetKind::Texture2D,
+                    .flags = AssetFormat::DependencyFlags::Required,
+                });
+            }
+            request.assets.push_back(std::move(asset));
+            continue;
+        }
+        if (tokens[0] == "prefab")
+        {
+            // prefab <id> root [meshId] [materialId]
+            if (tokens.size() != 3 && tokens.size() != 5)
+            {
+                return Core::failure(
+                    AssetErrorCode::InvalidCatalogConfig,
+                    "prefab currently supports: prefab <id> root [meshId materialId]");
+            }
+            if (tokens[2] != "root")
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "prefab layout must be root");
+            }
+            auto prefabId = Core::AssetId::parseCanonical(tokens[1]);
+            if (!prefabId)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid prefab asset id");
+            }
+            AssetFormat::PrefabNodeDesc node{
+                .stableNodeId = 1,
+                .parentIndex = -1,
+            };
+            if (tokens.size() == 5)
+            {
+                auto meshId = Core::AssetId::parseCanonical(tokens[3]);
+                auto materialId = Core::AssetId::parseCanonical(tokens[4]);
+                if (!meshId || !materialId)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "invalid prefab mesh/material asset id");
+                }
+                node.meshId = *meshId;
+                node.materialId = *materialId;
+            }
+            const std::array nodes{node};
+            auto payload =
+                AssetFormat::writePrefabPayloadBytes(AssetFormat::PrefabPayloadDesc{.nodes = nodes});
+            if (!payload)
+            {
+                return Core::failure(std::move(payload.error()));
+            }
+            CatalogCookAssetSpec asset{
+                .assetKind = AssetFormat::AssetKind::Prefab,
+                .assetId = *prefabId,
+                .assetTypeVersion = AssetFormat::PrefabWire::SchemaVersion,
+                .payload = std::move(*payload),
+            };
+            if (static_cast<bool>(node.meshId))
+            {
+                asset.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
+                    .assetId = node.meshId,
+                    .expectedKind = AssetFormat::AssetKind::StaticMesh,
+                    .flags = AssetFormat::DependencyFlags::Required,
+                });
+                asset.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
+                    .assetId = node.materialId,
+                    .expectedKind = AssetFormat::AssetKind::Material,
                     .flags = AssetFormat::DependencyFlags::Required,
                 });
             }
