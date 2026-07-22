@@ -1,4 +1,6 @@
+#include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
+#include <tina/scene/PrefabInstantiate.hpp>
 #include <tina/scene/World.hpp>
 
 #include <gtest/gtest.h>
@@ -491,6 +493,80 @@ TEST(SceneExtractTest, ZeroActivePerspectiveCamerasIsValid)
     ASSERT_TRUE(view);
     EXPECT_FALSE(view->perspectiveCamera().has_value());
     EXPECT_TRUE(view->meshes3D().empty());
+}
+
+TEST(ScenePrefabInstantiateTest, InstantiatesHierarchyAndMeshes)
+{
+    World world = makeWorld();
+    const std::array nodes{
+        AssetFormat::PrefabNodeView{
+            .stableNodeId = 1,
+            .parentIndex = -1,
+            .positionY = 0.25F,
+            .hasMesh = true,
+            .hasMaterial = true,
+            .visible = true,
+        },
+        AssetFormat::PrefabNodeView{
+            .stableNodeId = 2,
+            .parentIndex = 0,
+            .positionX = 1.0F,
+            .hasMesh = true,
+            .hasMaterial = true,
+            .visible = true,
+        },
+    };
+    AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
+    auto created = instantiatePrefab(world, prefab, PrefabMeshBinding{.fixtureMeshKey = 1, .fixtureMaterialKey = 1});
+    ASSERT_TRUE(created.has_value()) << (created ? "" : created.error().message);
+    ASSERT_EQ(created->size(), 2U);
+    EXPECT_EQ(world.entityCount(), 2U);
+    ASSERT_NE(world.meshRenderer3D((*created)[0]), nullptr);
+    ASSERT_NE(world.meshRenderer3D((*created)[1]), nullptr);
+    EXPECT_EQ(world.parent((*created)[1]), (*created)[0]);
+
+    const EntityId cameraEntity = world.createEntity(translated(0.0F, 0.0F, 6.0F)).value();
+    ASSERT_TRUE(world.setPerspectiveCamera3D(cameraEntity, fixturePerspectiveCamera()));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder);
+    ASSERT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = 16.0F / 9.0F,
+    }));
+    Render::RenderSceneWriter writer = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 1280, .pixelHeight = 720},
+        }));
+    auto view = builder->commit();
+    ASSERT_TRUE(view);
+    EXPECT_TRUE(view->perspectiveCamera().has_value());
+    EXPECT_EQ(view->meshes3D().size(), 2U);
+}
+
+TEST(ScenePrefabInstantiateTest, RollsBackOnInvalidParentIndex)
+{
+    World world = makeWorld();
+    const std::array nodes{
+        AssetFormat::PrefabNodeView{
+            .stableNodeId = 1,
+            .parentIndex = -1,
+            .hasMesh = false,
+            .hasMaterial = false,
+        },
+        AssetFormat::PrefabNodeView{
+            .stableNodeId = 2,
+            .parentIndex = 5, // invalid: not a prior node
+            .hasMesh = false,
+            .hasMaterial = false,
+        },
+    };
+    AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
+    auto created = instantiatePrefab(world, prefab);
+    ASSERT_FALSE(created.has_value());
+    EXPECT_EQ(world.entityCount(), 0U);
 }
 
 } // namespace
