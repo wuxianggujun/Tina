@@ -21,12 +21,6 @@ struct PerspectiveCamera3D final {
                                      const PerspectiveCamera3D&) noexcept = default;
 };
 
-[[nodiscard]] inline bool isFiniteViewport(const Render::RenderNormalizedViewport& viewport) noexcept
-{
-    return std::isfinite(viewport.x) && std::isfinite(viewport.y) && std::isfinite(viewport.width)
-        && std::isfinite(viewport.height);
-}
-
 [[nodiscard]] inline bool isValid(const PerspectiveCamera3D& camera) noexcept
 {
     if (!std::isfinite(camera.verticalFovDegrees) || camera.verticalFovDegrees <= 0.0F
@@ -39,17 +33,18 @@ struct PerspectiveCamera3D final {
     {
         return false;
     }
-    if (!isFiniteViewport(camera.normalizedViewport))
+    const auto& viewport = camera.normalizedViewport;
+    if (!std::isfinite(viewport.x) || !std::isfinite(viewport.y) || !std::isfinite(viewport.width)
+        || !std::isfinite(viewport.height))
     {
         return false;
     }
-    if (camera.normalizedViewport.x < 0.0F || camera.normalizedViewport.y < 0.0F
-        || camera.normalizedViewport.width <= 0.0F || camera.normalizedViewport.height <= 0.0F)
+    if (viewport.x < 0.0F || viewport.y < 0.0F || viewport.width <= 0.0F || viewport.height <= 0.0F)
     {
         return false;
     }
-    if (camera.normalizedViewport.x + camera.normalizedViewport.width > 1.0F + 1.0e-6F
-        || camera.normalizedViewport.y + camera.normalizedViewport.height > 1.0F + 1.0e-6F)
+    if (viewport.x + viewport.width > 1.0F + 1.0e-6F
+        || viewport.y + viewport.height > 1.0F + 1.0e-6F)
     {
         return false;
     }
