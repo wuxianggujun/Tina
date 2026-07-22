@@ -4,6 +4,8 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/scene/Camera2D.hpp>
 #include <tina/scene/Entity.hpp>
+#include <tina/scene/MeshRenderer3D.hpp>
+#include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 #include <tina/scene/Transform.hpp>
@@ -72,6 +74,12 @@ public:
         EntityId entity,
         SpriteRenderer2D sprite) noexcept;
     [[nodiscard]] Core::Status clearSpriteRenderer2D(EntityId entity) noexcept;
+    [[nodiscard]] Core::Status setPerspectiveCamera3D(
+        EntityId entity,
+        PerspectiveCamera3D camera) noexcept;
+    [[nodiscard]] Core::Status clearPerspectiveCamera3D(EntityId entity) noexcept;
+    [[nodiscard]] Core::Status setMeshRenderer3D(EntityId entity, MeshRenderer3D mesh) noexcept;
+    [[nodiscard]] Core::Status clearMeshRenderer3D(EntityId entity) noexcept;
 
     [[nodiscard]] bool contains(EntityId entity) const noexcept;
     [[nodiscard]] usize entityCount() const noexcept;
@@ -81,6 +89,8 @@ public:
     [[nodiscard]] const WorldTransform* worldTransform(EntityId entity) const noexcept;
     [[nodiscard]] const Camera2D* camera2D(EntityId entity) const noexcept;
     [[nodiscard]] const SpriteRenderer2D* spriteRenderer2D(EntityId entity) const noexcept;
+    [[nodiscard]] const PerspectiveCamera3D* perspectiveCamera3D(EntityId entity) const noexcept;
+    [[nodiscard]] const MeshRenderer3D* meshRenderer3D(EntityId entity) const noexcept;
 
     // Live entity ids in create-order-independent dense storage. Valid only on
     // the owner thread until the next structural mutation (create/destroy).

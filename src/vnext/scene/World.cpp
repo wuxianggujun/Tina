@@ -24,6 +24,10 @@ struct World::EntityRecord final {
     Camera2D camera2D{};
     bool hasSpriteRenderer2D = false;
     SpriteRenderer2D spriteRenderer2D{};
+    bool hasPerspectiveCamera3D = false;
+    PerspectiveCamera3D perspectiveCamera3D{};
+    bool hasMeshRenderer3D = false;
+    MeshRenderer3D meshRenderer3D{};
 };
 
 struct World::Impl final {
@@ -1048,6 +1052,144 @@ const SpriteRenderer2D* World::spriteRenderer2D(EntityId entity) const noexcept
         return nullptr;
     }
     return &entityRecord->spriteRenderer2D;
+}
+
+Core::Status World::setPerspectiveCamera3D(EntityId entity, PerspectiveCamera3D camera) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    if (!isValid(camera)) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene PerspectiveCamera3D contains invalid projection or viewport values");
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for PerspectiveCamera3D");
+    }
+    entityRecord->perspectiveCamera3D = camera;
+    entityRecord->hasPerspectiveCamera3D = true;
+    return Core::success();
+}
+
+Core::Status World::clearPerspectiveCamera3D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for PerspectiveCamera3D clear");
+    }
+    entityRecord->hasPerspectiveCamera3D = false;
+    entityRecord->perspectiveCamera3D = {};
+    return Core::success();
+}
+
+Core::Status World::setMeshRenderer3D(EntityId entity, MeshRenderer3D mesh) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    if (!isValid(mesh)) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene MeshRenderer3D is missing fixture keys or has invalid bounds");
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for MeshRenderer3D");
+    }
+    entityRecord->meshRenderer3D = mesh;
+    entityRecord->hasMeshRenderer3D = true;
+    return Core::success();
+}
+
+Core::Status World::clearMeshRenderer3D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for MeshRenderer3D clear");
+    }
+    entityRecord->hasMeshRenderer3D = false;
+    entityRecord->meshRenderer3D = {};
+    return Core::success();
+}
+
+const PerspectiveCamera3D* World::perspectiveCamera3D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasPerspectiveCamera3D) {
+        return nullptr;
+    }
+    return &entityRecord->perspectiveCamera3D;
+}
+
+const MeshRenderer3D* World::meshRenderer3D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasMeshRenderer3D) {
+        return nullptr;
+    }
+    return &entityRecord->meshRenderer3D;
 }
 
 std::span<const EntityId> World::liveEntities() const noexcept

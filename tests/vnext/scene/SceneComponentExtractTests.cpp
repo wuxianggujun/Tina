@@ -345,5 +345,153 @@ TEST(SceneExtractTest, InactiveCameraIsIgnored)
     EXPECT_FLOAT_EQ(view->camera2D()->worldHeight, 10.0F);
 }
 
+[[nodiscard]] PerspectiveCamera3D fixturePerspectiveCamera()
+{
+    return PerspectiveCamera3D{
+        .verticalFovDegrees = 60.0F,
+        .nearPlaneMeters = 0.1F,
+        .farPlaneMeters = 100.0F,
+        .active = true,
+    };
+}
+
+[[nodiscard]] MeshRenderer3D fixtureMesh(u32 meshKey = 1, u32 materialKey = 1)
+{
+    return MeshRenderer3D{
+        .fixtureMeshKey = meshKey,
+        .fixtureMaterialKey = materialKey,
+        .localBounds = Render::RenderBoundingSphereInput{.radius = 0.5F},
+        .visible = true,
+    };
+}
+
+TEST(SceneComponentStorageTest, SetsClearsAndQueriesPerspectiveCameraAndMesh)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+
+    ASSERT_TRUE(world.setPerspectiveCamera3D(entity, fixturePerspectiveCamera()));
+    ASSERT_NE(world.perspectiveCamera3D(entity), nullptr);
+    EXPECT_FLOAT_EQ(world.perspectiveCamera3D(entity)->verticalFovDegrees, 60.0F);
+
+    ASSERT_TRUE(world.setMeshRenderer3D(entity, fixtureMesh(2, 3)));
+    ASSERT_NE(world.meshRenderer3D(entity), nullptr);
+    EXPECT_EQ(world.meshRenderer3D(entity)->fixtureMeshKey, 2U);
+    EXPECT_EQ(world.meshRenderer3D(entity)->fixtureMaterialKey, 3U);
+
+    ASSERT_TRUE(world.clearPerspectiveCamera3D(entity));
+    EXPECT_EQ(world.perspectiveCamera3D(entity), nullptr);
+    ASSERT_TRUE(world.clearMeshRenderer3D(entity));
+    EXPECT_EQ(world.meshRenderer3D(entity), nullptr);
+}
+
+TEST(SceneComponentStorageTest, RejectsInvalidPerspectiveAndMesh)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+
+    PerspectiveCamera3D badCamera = fixturePerspectiveCamera();
+    badCamera.nearPlaneMeters = 10.0F;
+    badCamera.farPlaneMeters = 1.0F;
+    EXPECT_EQ(
+        world.setPerspectiveCamera3D(entity, badCamera).error().code,
+        SceneErrorCode::InvalidComponent);
+
+    MeshRenderer3D missingKeys = fixtureMesh(0, 1);
+    EXPECT_EQ(
+        world.setMeshRenderer3D(entity, missingKeys).error().code,
+        SceneErrorCode::InvalidComponent);
+}
+
+TEST(SceneExtractTest, ExtractsPerspectiveCameraAndMeshIntoRenderScene)
+{
+    World world = makeWorld();
+    const EntityId cameraEntity = world.createEntity(translated(0.0F, 0.35F, 8.0F)).value();
+    ASSERT_TRUE(world.setPerspectiveCamera3D(cameraEntity, fixturePerspectiveCamera()));
+
+    const EntityId meshEntity = world.createEntity(translated(0.0F, 0.0F, 0.0F)).value();
+    ASSERT_TRUE(world.setMeshRenderer3D(meshEntity, fixtureMesh(1, 1)));
+
+    const EntityId hidden = world.createEntity(translated(1.0F, 0.0F, 0.0F)).value();
+    MeshRenderer3D invisible = fixtureMesh(1, 1);
+    invisible.visible = false;
+    ASSERT_TRUE(world.setMeshRenderer3D(hidden, invisible));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder);
+    ASSERT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = 16.0F / 9.0F,
+    }));
+    Render::RenderSceneWriter writer = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 1280, .pixelHeight = 720},
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view);
+    ASSERT_TRUE(view->perspectiveCamera().has_value());
+    EXPECT_FLOAT_EQ(view->perspectiveCamera()->positionX, 0.0F);
+    EXPECT_FLOAT_EQ(view->perspectiveCamera()->positionY, 0.35F);
+    EXPECT_FLOAT_EQ(view->perspectiveCamera()->positionZ, 8.0F);
+    EXPECT_FLOAT_EQ(view->perspectiveCamera()->verticalFovDegrees, 60.0F);
+
+    ASSERT_EQ(view->meshes3D().size(), 1U);
+    EXPECT_EQ(view->meshes3D()[0].meshKey, 1U);
+    EXPECT_EQ(view->meshes3D()[0].materialKey, 1U);
+}
+
+TEST(SceneExtractTest, RejectsMultipleActivePerspectiveCameras)
+{
+    World world = makeWorld();
+    const EntityId first = world.createEntity().value();
+    const EntityId second = world.createEntity().value();
+    ASSERT_TRUE(world.setPerspectiveCamera3D(first, fixturePerspectiveCamera()));
+    ASSERT_TRUE(world.setPerspectiveCamera3D(second, fixturePerspectiveCamera()));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder);
+    ASSERT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = 1.0F,
+    }));
+    Render::RenderSceneWriter writer = builder->writer();
+
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 800, .pixelHeight = 600},
+        });
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::MultipleActiveCameras);
+}
+
+TEST(SceneExtractTest, ZeroActivePerspectiveCamerasIsValid)
+{
+    World world = makeWorld();
+    const EntityId inactive = world.createEntity().value();
+    PerspectiveCamera3D camera = fixturePerspectiveCamera();
+    camera.active = false;
+    ASSERT_TRUE(world.setPerspectiveCamera3D(inactive, camera));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder);
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 640, .pixelHeight = 360},
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view);
+    EXPECT_FALSE(view->perspectiveCamera().has_value());
+    EXPECT_TRUE(view->meshes3D().empty());
+}
+
 } // namespace
 } // namespace Tina::Scene

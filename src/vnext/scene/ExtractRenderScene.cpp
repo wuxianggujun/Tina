@@ -1,6 +1,8 @@
 #include <tina/scene/ExtractRenderScene.hpp>
 
 #include <tina/scene/Camera2D.hpp>
+#include <tina/scene/MeshRenderer3D.hpp>
+#include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 #include <tina/scene/Transform.hpp>
@@ -205,6 +207,116 @@ Core::Status extractRenderSceneFromWorld(
             .visible = true,
         };
         if (const Core::Status status = writer.addSprite2D(input); !status) {
+            return status;
+        }
+    }
+
+    EntityId activePerspectiveEntity{};
+    usize activePerspectiveCount = 0;
+    for (const EntityId entity : world.liveEntities()) {
+        const PerspectiveCamera3D* camera = world.perspectiveCamera3D(entity);
+        if (camera == nullptr || !camera->active) {
+            continue;
+        }
+        ++activePerspectiveCount;
+        if (activePerspectiveCount == 1) {
+            activePerspectiveEntity = entity;
+        }
+    }
+
+    if (activePerspectiveCount > 1) {
+        return Core::failure(
+            SceneErrorCode::MultipleActiveCameras,
+            "Scene extract requires at most one active PerspectiveCamera3D");
+    }
+
+    if (activePerspectiveCount == 1) {
+        const PerspectiveCamera3D* camera = world.perspectiveCamera3D(activePerspectiveEntity);
+        const WorldTransform* transform = world.worldTransform(activePerspectiveEntity);
+        if (camera == nullptr || transform == nullptr) {
+            return Core::failure(
+                SceneErrorCode::CorruptHierarchy,
+                "Scene active PerspectiveCamera3D lost its entity during extract");
+        }
+        if (!isValid(*camera) || !isValid(*transform)) {
+            return Core::failure(
+                SceneErrorCode::InvalidComponent,
+                "Scene active PerspectiveCamera3D or its WorldTransform is invalid");
+        }
+
+        // Suspended surface: skip 3D camera without failing (aspect is injected by
+        // RenderScene frame parameters; 0×0 is still a no-op set for this slice).
+        if (params.surfaceViewport.pixelWidth != 0 && params.surfaceViewport.pixelHeight != 0) {
+            const Render::RenderPerspectiveCameraInput input{
+                .stableCameraKey = stableEntityKey(activePerspectiveEntity),
+                .worldPose =
+                    Render::RenderPose3DInput{
+                        .positionX = transform->position.x,
+                        .positionY = transform->position.y,
+                        .positionZ = transform->position.z,
+                        .rotationX = transform->rotation.x,
+                        .rotationY = transform->rotation.y,
+                        .rotationZ = transform->rotation.z,
+                        .rotationW = transform->rotation.w,
+                    },
+                .verticalFovDegrees = camera->verticalFovDegrees,
+                .nearPlaneMeters = camera->nearPlaneMeters,
+                .farPlaneMeters = camera->farPlaneMeters,
+                .normalizedViewport = camera->normalizedViewport,
+            };
+            if (const Core::Status status = writer.setPerspectiveCamera(input); !status) {
+                return status;
+            }
+        }
+    }
+
+    for (const EntityId entity : world.liveEntities()) {
+        const MeshRenderer3D* mesh = world.meshRenderer3D(entity);
+        if (mesh == nullptr) {
+            continue;
+        }
+        if (!mesh->visible) {
+            continue;
+        }
+        if (!isValid(*mesh)) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedMesh,
+                "Scene MeshRenderer3D is missing fixture keys or has invalid bounds");
+        }
+        const WorldTransform* transform = world.worldTransform(entity);
+        if (transform == nullptr || !isValid(*transform)) {
+            return Core::failure(
+                SceneErrorCode::InvalidTransform,
+                "Scene MeshRenderer3D WorldTransform is unavailable or invalid");
+        }
+
+        const Render::RenderMesh3DInput input{
+            .meshKey = mesh->fixtureMeshKey,
+            .materialKey = mesh->fixtureMaterialKey,
+            .submeshIndex = mesh->submeshIndex,
+            .stableEntityKey = stableEntityKey(entity),
+            .worldTransform =
+                Render::RenderTransform3DInput{
+                    .pose =
+                        Render::RenderPose3DInput{
+                            .positionX = transform->position.x,
+                            .positionY = transform->position.y,
+                            .positionZ = transform->position.z,
+                            .rotationX = transform->rotation.x,
+                            .rotationY = transform->rotation.y,
+                            .rotationZ = transform->rotation.z,
+                            .rotationW = transform->rotation.w,
+                        },
+                    .scaleX = transform->scale.x,
+                    .scaleY = transform->scale.y,
+                    .scaleZ = transform->scale.z,
+                },
+            .localBounds = mesh->localBounds,
+            .baseColorFactor = mesh->baseColorFactor,
+            .doubleSided = mesh->doubleSided,
+            .visible = true,
+        };
+        if (const Core::Status status = writer.addMesh3D(input); !status) {
             return status;
         }
     }
