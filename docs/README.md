@@ -33,5 +33,6 @@
 
 主题设计文档会明确区分当前实现、已知问题和目标契约。当前 M9-A 已有 CPU/Null Perspective/Mesh3D
 extraction foundation，M9-B/M9-C 已有私有 bgfx 3D/2D fixture；M10-A0 已完成独立 Cooked Header/Manifest
-wire-format 与只读校验基础。AssetSystem、Cooker/cgltf 和正式 Cooked glTF 产品路径仍属后续 M10 切片。
+wire-format 与只读校验基础。**M11-E0–E5 最小产品 3D 已落地**：Catalog recipe StaticMesh cube +
+Unlit solid/textured + `tina_sample_3d`（非 glTF）。Cooker **cgltf → glTF/Prefab/PBR** 仍 Deferred。
 测试和实际运行结果优先于文档。
