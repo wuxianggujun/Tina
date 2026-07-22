@@ -790,6 +790,9 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   recipe `material <id> unlit r g b [a]` + `parseMaterialFromCooked` + typed validation；
   `tina_sample_3d` 从 cooked Material 读 baseColor 填 `RenderMesh3DInput`（**仍非** Texture 绑定 /
   MaterialKey GPU 表 / glTF）。**仍非** Prefab/textured Mesh；cgltf 后置。
+- M-Diag-A0 已完成：vNext `Diagnostics` owner + `DiagnosticChannel` + `LogLevel`/`LogRecord`；
+  `EngineHost` 接线（先于 Clock 创建、最后 shutdown）；默认 console sink；级别短路与
+  sink 失败不递归门禁。**仍非** file sink / 异步队列 / Metrics / Tracy / CrashContext。
 
 ### M11 产品 3D StaticMesh + Unlit Material 竖切（E0–E4）
 

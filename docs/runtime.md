@@ -27,7 +27,8 @@ M6-A 已把 C++23 Core 基础接入可独立运行的 Headless Runtime，M7-A �
 - `FixedStepAccumulator` 已明确真实 delta 钳制、gameplay time scale、variable `updateDelta`、
   固定步计划、最多4步、超额整步丢弃与 interpolation；
 - vNext 公共头位于 `include/tina`，Legacy 时间类型只留在 `src/core` 兼容层；
-- `EngineHost::Create(config, factories)` 已按 Clock → Platform → Task → Render 创建模块；WindowSurface
+- `EngineHost::Create(config, factories)` 已按 Diagnostics → Clock → Platform → Task → Render 创建模块；
+  Diagnostics 在 module shutdown 最后关闭；WindowSurface
   分支在 Task 后获取 primary window lease/snapshot，Render 成功后才发布窗口。任一步失败都逆序
   回滚；M7-C1c-b3c 绑定 Context 后的销毁顺序为 UIContext → Render → Task → Platform → Clock；Create/run 均为
   `noexcept` 边界，普通异常转换为结构化 Error，硬 OOM 若连 Error 都无法构造则 fatal；

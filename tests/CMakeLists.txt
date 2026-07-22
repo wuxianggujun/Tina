@@ -2,12 +2,17 @@ set(TINA_CORE_TEST_SOURCES
     core/AssertReleaseCompileTests.cpp
     core/AssertTests.cpp
     core/ContentHashDigestTests.cpp
+    core/DiagnosticsTests.cpp
     core/ReadFileTests.cpp
     core/WriteFileTests.cpp
     core/EnumFlagsTests.cpp
     core/header_isolation/AssetIdHeader.cpp
     core/header_isolation/ContentHashHeader.cpp
     core/header_isolation/ContentHashDigestHeader.cpp
+    core/header_isolation/DiagnosticChannelHeader.cpp
+    core/header_isolation/DiagnosticsHeader.cpp
+    core/header_isolation/LogLevelHeader.cpp
+    core/header_isolation/LogRecordHeader.cpp
     core/header_isolation/ReadFileHeader.cpp
     core/header_isolation/WriteFileHeader.cpp
     core/header_isolation/ErrorHeader.cpp

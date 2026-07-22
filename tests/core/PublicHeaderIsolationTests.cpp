@@ -7,6 +7,10 @@
 #include <tina/core/base/SourceLocation.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/diagnostics/Assert.hpp>
+#include <tina/core/diagnostics/DiagnosticChannel.hpp>
+#include <tina/core/diagnostics/Diagnostics.hpp>
+#include <tina/core/diagnostics/LogLevel.hpp>
+#include <tina/core/diagnostics/LogRecord.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/GenerationId.hpp>

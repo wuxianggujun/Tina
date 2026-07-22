@@ -685,6 +685,11 @@ validation。`tina_sample_3d` 加载 3 个 cooked Material，extract 使用其 b
 M11 产品 3D 竖切（E0–E4）：StaticMesh + Unlit Material solid + `tina_sample_3d` 视为可验收最小产品 3D
 门禁；glTF/textured Material/Prefab/PBR 仍 Deferred，不阻塞本收口，也不单独满足 M12 Legacy 删除。
 
+M-Diag-A0：vNext Diagnostics 最小竖切。`LogLevel`/`LogRecord`/`DiagnosticChannel`/`Diagnostics`
+进入 `include/tina/core/diagnostics`；`EngineHost` 拥有 Diagnostics（创建于 Clock/Platform 之前，
+module shutdown 最后关闭）；默认同步 console sink；级别短路、shutdown 后 no-op、sink 失败不递归。
+公开面零 spdlog。file/async/metrics/trace/crash 与 Phase Context 注入仍 Deferred。
+
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation
 ID，原子创建 Body+Box Shape，并提供 pose/velocity snapshot、销毁与幂等 shutdown。

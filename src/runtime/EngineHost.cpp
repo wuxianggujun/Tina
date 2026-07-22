@@ -11,6 +11,7 @@
 #include <tina/task/TaskSystem.hpp>
 
 #include <tina/core/base/ScopeExit.hpp>
+#include <tina/core/diagnostics/Diagnostics.hpp>
 
 #include "input/ActionMapper.hpp"
 #include "input/LastPresentedCamera2DLatch.hpp"
@@ -421,6 +422,8 @@ renderSceneFrameParameters(const Platform::PlatformFrameView& frame) noexcept
 }
 
 struct EngineModules final {
+    // Created first, destroyed last (docs/runtime.md module order).
+    std::unique_ptr<Core::Diagnostics::Diagnostics> diagnostics;
     std::unique_ptr<Core::IMonotonicClock> monotonicClock;
     std::unique_ptr<Platform::IPlatformBackend> platform;
     std::unique_ptr<Task::ITaskSystem> taskSystem;
@@ -464,6 +467,11 @@ struct EngineModules final {
             platform.reset();
         }
         monotonicClock.reset();
+        if (diagnostics != nullptr)
+        {
+            diagnostics->shutdown();
+            diagnostics.reset();
+        }
     }
 
     [[nodiscard]] Audio::AudioEngine* audioEnginePtr() noexcept
@@ -1186,6 +1194,17 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         }
 
         EngineModules modules;
+        {
+            auto diagnosticsResult = Core::Diagnostics::Diagnostics::Create({});
+            if (!diagnosticsResult)
+            {
+                auto error = std::move(diagnosticsResult.error());
+                error.addContext("EngineHost::Create", "Diagnostics construction");
+                return Core::failure(std::move(error));
+            }
+            modules.diagnostics = std::move(*diagnosticsResult);
+        }
+
         auto clockResult = invokeResultBoundary("EngineCompositionFactories::createMonotonicClock",
                                                 RuntimeErrorCode::EngineFactoryThrewException,
                                                 [&] { return factories.createMonotonicClock(); });
