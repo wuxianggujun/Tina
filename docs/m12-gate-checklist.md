@@ -1,4 +1,4 @@
-# M12 Legacy 删除门禁清单（跟踪）
+﻿# M12 Legacy 删除门禁清单（跟踪）
 
 > 状态：跟踪文档，不授权删除。删除前必须取 `docs/architecture.md`、`docs/design-freeze.md`、
 > `docs/roadmap.md` 适用门禁的**严格并集**。本文件只记录事实与缺口。
@@ -12,8 +12,8 @@
 | G0 | 非 clean 构建图可复现；无 wipe `out/build` 依赖 | Working | 用户硬性禁 clean |
 | G1 | vNext 2D 产品门禁：`tina_sample_2d` Catalog/TileMap/角色/Box2D/UI | Partial | product-2d 主线 A32–A44 已收口；持续复验 300 帧 |
 | G2 | vNext UI 产品门禁：HUD/设置控件 + 输入消费 | Partial | C0–C5 + Semantics；UIA/截图回归后置 |
-| G3 | vNext 3D 产品门禁：Cooked + 可见 + 资源账本 | Partial | E0–E5 cube/Unlit + Scene extract；**缺 glTF/Prefab** |
-| G4 | Asset/Cooker：最终 Cooker 产物路径 | Partial | recipe/assetc 子集；**cgltf Deferred** |
+| G3 | vNext 3D 产品门禁：Cooked + 可见 + 资源账本 | Partial | E0–E5 cube/Unlit + Scene extract；**缺 glTF/Prefab 实例化** |
+| G4 | Asset/Cooker：最终 Cooker 产物路径 | Partial | recipe/assetc 子集；Prefab wire Done；**cgltf Deferred** |
 | G5 | Audio 产品门禁：miniaudio + 关闭安全 | Partial | A7–A20 竖切；需持续 300 帧证据 |
 | G6 | Windows/Linux 构建 + 直接 GoogleTest 全绿 | Open | 本机 Windows 为主；Linux 需另机 |
 | G7 | Legacy smoke 四条最后一次基线 + 画面/资源证据 | Open | 删除前最后一次 |
@@ -26,9 +26,9 @@
 | --- | --- | --- |
 | M9-A/B/C | extraction + fixture Opaque3D/Sprite2D | **Done** |
 | M11-E0–E5 | StaticMesh/Material/Texture + `tina_sample_3d` | **Done** |
-| M8-D0/D1/D2 | Scene 3D 组件 + infrastructure/product Scene extract | **In progress**（D0/D1 Done；D2 product 接线本批） |
-| M11-E6 | Prefab payload 最小 hierarchy stub | **In progress**（本批 wire format） |
-| M11-E7+ | cgltf → StaticMesh/Texture/Material/Prefab cook | **Open / Deferred until E6 stable** |
+| M8-D0/D1/D2 | Scene 3D 组件 + infrastructure/product Scene extract | **Done** |
+| M11-E6 | Prefab payload 最小 hierarchy stub | **Done**（wire + tests；无 instantiate/cgltf） |
+| M11-E7+ | cgltf → StaticMesh/Texture/Material/Prefab cook | **Open / next** |
 | M11-E8 | Prefab instantiate → Scene entities | **Open** |
 | M11-E9 | `tina_sample_3d` glTF/Prefab 产品门禁 | **Open**（M12 硬门槛） |
 
@@ -42,8 +42,8 @@
 
 ## 推荐推进顺序（继续多 worktree）
 
-1. 关闭 M8-D2：`tina_sample_3d` Scene extract（不改资产语义）。
-2. 完成 M11-E6 Prefab wire + tests；可选 recipe `prefab`。
+1. ~~关闭 M8-D2：`tina_sample_3d` Scene extract~~ **Done**
+2. ~~完成 M11-E6 Prefab wire + tests~~ **Done**
 3. 引入 cgltf v1.15（仅 `tina_assetc` PRIVATE）最小 glTF→mesh/material/texture/prefab。
 4. Prefab instantiate API + sample。
 5. 冻结 M12 删除 checklist 证据包；**再**独立删除提交。
@@ -51,8 +51,8 @@
 ## 本机快速复验（禁止 clean）
 
 ```powershell
-# 3D product / fixture
-cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_3d tina_sample_3d_infrastructure tina_scene_tests tina_asset_format_tests
+cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_3d tina_sample_3d_infrastructure
+cmake --build --preset windows-vnext-debug --target tina_scene_tests tina_asset_format_tests
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe --frames=30 --frame-delay-ms=0
 out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe

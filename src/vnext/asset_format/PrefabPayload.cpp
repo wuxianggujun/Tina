@@ -94,7 +94,7 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     }
     if (desc.nodes.size() > PrefabWire::MaxNodes)
     {
-        return Core::failure(AssetFormatErrorCode::LimitExceeded, "prefab nodeCount exceeds MaxNodes");
+        return Core::failure(AssetFormatErrorCode::SizeLimitExceeded, "prefab nodeCount exceeds MaxNodes");
     }
     for (usize index = 0; index < desc.nodes.size(); ++index)
     {
