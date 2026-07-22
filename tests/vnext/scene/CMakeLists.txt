@@ -4,6 +4,8 @@ set(TINA_SCENE_TEST_SOURCES
     header_isolation/Camera2DHeader.cpp
     header_isolation/EntityHeader.cpp
     header_isolation/ExtractRenderSceneHeader.cpp
+    header_isolation/MeshRenderer3DHeader.cpp
+    header_isolation/PerspectiveCamera3DHeader.cpp
     header_isolation/SceneErrorsHeader.cpp
     header_isolation/SceneHeader.cpp
     header_isolation/SpriteRenderer2DHeader.cpp

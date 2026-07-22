@@ -2,6 +2,8 @@ set(TINA_SCENE_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Camera2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Entity.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/ExtractRenderScene.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/scene/MeshRenderer3D.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/scene/PerspectiveCamera3D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Scene.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/SceneErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/SpriteRenderer2D.hpp

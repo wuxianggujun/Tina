@@ -20,12 +20,19 @@ struct ExtractRenderSceneParams final {
 // - Active Camera2D count 0: does not call setCamera2D (UI-only / no world view).
 // - Active Camera2D count 1: resolves projection and setCamera2D once.
 // - Active Camera2D count >1: structured MultipleActiveCameras failure.
+// - Active PerspectiveCamera3D count 0: does not call setPerspectiveCamera.
+// - Active PerspectiveCamera3D count 1: setPerspectiveCamera from WorldTransform pose.
+// - Active PerspectiveCamera3D count >1: structured MultipleActiveCameras failure.
+// - Camera2D and PerspectiveCamera3D are independent tracks (2D ortho vs 3D
+//   perspective); both may be active in the same frame when the writer allows.
 // - Each visible SpriteRenderer2D with valid fixtureSpriteKey becomes addSprite2D
 //   using published world position/scale and Z-axis rotation.
+// - Each visible MeshRenderer3D with valid fixture mesh/material keys becomes
+//   addMesh3D from WorldTransform pose/scale.
 // - Optional SpriteOverrideFlags::UvRect copies uvRectOverride into
 //   RenderSprite2DInput; otherwise UV defaults to full texture [0,1].
 // - Does not require Runtime Phase Context World capability.
-// - Does not resolve AssetSystem / Cooked Sprite (fixture key path only).
+// - Does not resolve AssetSystem / Cooked Sprite or Mesh (fixture key path only).
 [[nodiscard]] Core::Status extractRenderSceneFromWorld(
     World& world,
     Render::RenderSceneWriter& writer,
