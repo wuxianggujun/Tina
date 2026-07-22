@@ -4,10 +4,7 @@ add_executable(tina_ui_freetype_tests
 )
 
 target_compile_features(tina_ui_freetype_tests PRIVATE cxx_std_23)
-target_compile_definitions(tina_ui_freetype_tests
-    PRIVATE
-        TINA_UI_FREETYPE_TEST_FONT_PATH="${PROJECT_SOURCE_DIR}/resources/fonts/SourceHanSansSC-Regular.otf"
-)
+tina_target_optional_ui_font(tina_ui_freetype_tests TINA_UI_FREETYPE_TEST_FONT_PATH)
 target_link_libraries(tina_ui_freetype_tests
     PRIVATE
         Tina::ProjectOptions

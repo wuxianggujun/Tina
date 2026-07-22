@@ -1,55 +1,46 @@
 # M12：Legacy 产品 / Legacy UI 退役状态
 
-> 用户授权：废弃旧横版 2D 小游戏与 Legacy UI，产品以 vNext 为准。
+> 用户授权：废弃旧横版 2D 小游戏与 Legacy UI，产品以 vNext 为准。  
+> **状态：产品源码与构建图删除已完成**；下文为事实清单，不是「Blocked 待删」。
 
 ## 已删除（源码与构建图）
 
 | 路径 / 目标 | 说明 |
 | --- | --- |
-| `src/ui/**` | Legacy UI 实现 |
-| `src/game/**` | Menu/Game/Settings/Pause/WorldSelect/TileMap 等产品场景 |
-| `src/engine/**` | Legacy Application / Scene / Event / Resource |
-| `src/ecs/**`、`src/renderer/**`、`src/particles/**`、`src/physics/**` | Legacy 玩法/渲染/物理 |
-| `src/main.cpp`、`src/CMakeLists.txt` | Legacy `Tina.exe` 入口 |
-| `src/platform/audio/**` | Legacy miniaudio 实现 TU |
-| `src/core` 中 CoreLegacy/EASTL/Procedural 兼容面 | `Core.hpp`、`EASTLAlloc`、`Path`、`Noise` 等 |
-| `tests/ui/**`、`tests/engine/**`、Legacy core 测试 | 旧实现专属测试 |
-| 根 `add_subdirectory(src)`（Legacy 图） | 已移除 |
-| `Tina::CoreLegacy` / `Tina::Procedural` / `Tina::Miniaudio` | 目标已删 |
-| EASTL submodule 构建 | `thirdparty` 不再 `add_subdirectory(EASTL)` |
-| `vcpkg` 默认 feature `legacy` | 默认仅 `tests` |
+| 旧产品 `src/ui`（Legacy）、`src/game`、`src/engine`、`src/ecs`、`src/renderer`、`src/particles`、`src/physics` | 横版 2D + Legacy UI |
+| `src/main.cpp`、Legacy `Tina.exe` 图 | 产品入口已废 |
+| CoreLegacy / EASTL 兼容面、Procedural | 已删 |
+| Legacy 专属测试 | 已删 |
+| vcpkg 默认 feature `legacy` | 默认仅 `tests` |
+| EASTL/EABase **submodule** | 已从 `.gitmodules` 与工作树移除 |
+| 无引用玩法 `resources` | audio/textures/旧 shaders/config/多余字重等已删 |
+| `src/vnext/` 目录前缀 | 已扁平为 `src/<module>` |
 
 ## 构建策略
 
-- `TINA_BUILD_LEGACY` **默认 OFF**；若显式 `ON` → **FATAL_ERROR**（源码已不存在）。
-- 产品入口：`Tina::Desktop` + `tina_sample_*`（尤其 `tina_sample_2d` / `tina_sample_3d`）。
-- UI：**仅** `include/tina/ui` + `src/ui`（Retained UI 实现；公开头仍在 `include/tina/ui`）。
+- `TINA_BUILD_LEGACY` **OFF**；显式 **ON → FATAL_ERROR**。  
+- 产品：`Tina::Desktop` + `tina_sample_*`。  
+- UI：`include/tina/ui` + `src/ui`（Retained 实现）。
 
-## 保留 / 扫尾
+## 保留
 
-- `thirdparty/bgfx.cmake`（RenderBgfx）— **保留**
-- EASTL/EABase submodule — **已从 `.gitmodules` 与工作树移除**
-- `src/vnext/`、`tests/vnext/` 目录前缀 — **已扁平化**（`02e13d7a`）：实现在 `src/<module>`，
-  测试在 `tests/<module>`（Runtime→UI 专项为 `tests/runtime_ui`）；公开头仍为 `include/tina/`
-- `resources/` — **仅保留有消费者的资产**：
-  - `resources/fonts/SourceHanSansSC-Regular.otf`：`tina_sample_2d`（FreeType 图）、Desktop UI 字体、
-    FreeType 测试宏路径
-  - 已删除无引用的 Legacy **玩法**资产：`audio/`、`textures/`、`shaders/`（旧 runtime `.sc`）、
-    `config/`、多余 SourceHan 字重；以及无调用方的 `cmake/CopyResources.cmake`
-  - 引擎吉祥物/标识图：`branding/Tina.jpg`（从 `resources/Tina.jpg` 迁出，**非** Catalog 玩法资源）
-  - 产品 **不**再 `file(COPY)` 整棵 `resources/` 进构建图；vNext bgfx shader 由 build-tree cook 产出
-## 验证（禁止 clean-first 全量 wipe）
+| 项 | 说明 |
+| --- | --- |
+| `thirdparty/bgfx.cmake` | 唯一真实渲染后端依赖 |
+| `branding/Tina.jpg` | 引擎吉祥物/标识（非玩法资源） |
+| `resources/fonts/SourceHanSansSC-Regular.otf` | **可选** FreeType fixture；可用 `TINA_UI_FONT_PATH` 完全外置 |
+
+## 验证（禁止 clean-first）
 
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx
-cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d tina_ui_tests -- /m:2 /v:m
+cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d -- /m:2 /v:m
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
 ```
 
-## 仍非“整包 M12 完成”的项
+## 仍非“整库扫尾完毕”的项
 
-- Linux 全门禁复验
-- EASTL/EABase submodule 物理移除
-- `resources/` 中仅服务已删产品的资产清理
-- 主题文档扫尾：building/testing/README 等已去掉 `Tina.exe`/`--smoke-*` 产品命令
+- Linux 全门禁复验  
+- 主题文档 / 本地 agent skill 中过时句子  
+- FreeType 字体可完全移出仓库（设 `TINA_UI_FONT_PATH` 后可删 Regular fixture）

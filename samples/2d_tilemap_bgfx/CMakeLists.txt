@@ -23,10 +23,8 @@ if (TINA_BUILD_PHYSICS2D)
     target_link_libraries(tina_sample_2d PRIVATE Tina::Physics2D)
 endif ()
 if (TINA_BUILD_UI_FREETYPE)
-    target_compile_definitions(tina_sample_2d PRIVATE
-        TINA_SAMPLE_TILEMAP_FREETYPE=1
-        TINA_SAMPLE_TILEMAP_FONT_PATH="${PROJECT_SOURCE_DIR}/resources/fonts/SourceHanSansSC-Regular.otf"
-    )
+    target_compile_definitions(tina_sample_2d PRIVATE TINA_SAMPLE_TILEMAP_FREETYPE=1)
+    tina_target_optional_ui_font(tina_sample_2d TINA_SAMPLE_TILEMAP_FONT_PATH)
     target_link_libraries(tina_sample_2d PRIVATE Tina::UIFreetype)
 endif ()
 # Optional miniaudio null-device SFX path (M11-A16): attachMixer + start so mixRealtime

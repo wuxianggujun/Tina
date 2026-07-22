@@ -54,28 +54,17 @@ Legacy 产品删除。xxHash 作为 ContentHash 的私有后端保留。`Result`
 这些只是逻辑子域。没有真实构建收益前不拆成多个静态库，也不提供 `Core.hpp` 巨型聚合头；
 调用方 include 自己实际需要的窄头文件。
 
-## EASTL、专用容器与 xxHash
+## 容器策略与 xxHash
 
-当前 EASTL 通过旧 `Container.hpp`、`Memory.hpp` 和 `Core.hpp` 扩散到 UI、Scene、ECS、
-Renderer、Event、Audio、Physics 与测试。它不能立即删除，否则只会产生一次没有架构收益的
-机械改写；但新 vNext target 从第一天起不链接 EASTL，旧路径只作为迁移桥。
+**EASTL/EABase 已随 Legacy 产品移除**（无 submodule、无 CoreLegacy 链接）。产品代码使用
+标准库 / `std::pmr` 与少量引擎专用结构：
 
-Tina 不会因为只需要 EASTL 的一部分就复制其实现。自研范围按“引擎专用契约”而不是
-“EASTL API 子集”确定：
-
-- `StaticVector<T, N>`：对象内存储、无 heap fallback、满容量返回失败；
-- `InlineFunction<Signature, Bytes>`：小对象内联、禁止动态分配；
 - `FrameArena`：按帧线性分配、统一 reset、对齐与高水位统计；
 - `GenerationPool<T, Tag>`：owner/slot/generation 生命周期与 stale/wrong-owner 检测；
-- `SpscRingQueue<T, N>`：仅在 Audio/Upload 单生产者单消费者路径测得需要后实现。
+- 有界队列/固定容量结构：仅在真实消费者路径按需加入。
 
-其余使用 `std::vector/string/optional/variant/unique_ptr` 等标准类型；需要生命周期 allocator
-时使用 `std::pmr`。不实现 DynamicVector、通用 HashMap、SharedPtr、String、Sort 或完整
-Allocator framework。这样既去掉 EASTL 依赖，又避免维护一套未经多年验证的 Tina STL。
-
-xxHash 不随 EASTL 删除。它只通过窄 adapter 服务 `ContentHash`、Cook cache 和可选
-`StringId`，算法/seed/version 写入格式契约。禁止把64位 Hash 当作 AssetId，禁止只凭 Hash
-判断路径相等，也禁止用非密码学 xxHash 证明不可信包未被篡改。
+不实现通用 Tina STL 替代品。xxHash 只通过窄 adapter 服务 `ContentHash`、Cook cache 和
+可选 `StringId`；禁止把 64 位 Hash 当作 AssetId 或安全签名。
 
 M10-A2a 已落地：`digestContentHashV1(std::span<const std::byte>)` 在 Core 实现侧 PRIVATE 调用
 XXH3-128（seed=0），把 `low64`/`high64` 按 little-endian 写入 16 字节 `ContentHash`；公共头与
@@ -115,7 +104,7 @@ Game SDK 不得出现 `xxhash.h` 或 `XXH*` 符号。空输入合法且结果确
 1/60 秒、真实 delta 上限250 ms、每帧最多4步；超额整步债务被丢弃并单独计数，但小于一步的
 余量保留用于 interpolation。`realDelta`、`acceptedRealDelta`、`rejectedRealDelta`、
 `updateDelta` 和 `discardedSimulationDelta` 不混成一个模糊数值。测试使用 Manual Clock，
-不依赖真实 sleep。旧 `FixedStepTicker` 只作为 Legacy 行为回归保留。
+不依赖真实 sleep。
 
 ## 并发与任务边界
 

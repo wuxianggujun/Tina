@@ -215,6 +215,7 @@ if(TINA_ENABLE_SANITIZERS)
 endif()
 
 include(Dependencies)
+include(TinaUiFont)
 
 if(TINA_BUILD_RENDER_BGFX OR TINA_BUILD_SHADERS)
     add_subdirectory(thirdparty)

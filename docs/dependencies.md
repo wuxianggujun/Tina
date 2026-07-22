@@ -22,21 +22,19 @@
 | bgfx/bx/bimg/shaderc | 唯一真实 Render backend 与离线 shader | 固定 submodule commit | 只在 render_bgfx/tool | 保留 |
 | EnTT | 后续 Scene component storage | vcpkg | 仅允许在未来 `tina_scene` 实现层 PRIVATE 使用 | 保留；M8-A standalone World 当前不接入 |
 | FreeType | 字形 raster；Glyph Atlas 编排仍属于 Tina UI | vcpkg | 只在 `tina_ui_freetype` adapter | 保留 |
-| miniaudio | 唯一真实 Audio backend | vcpkg feature `audio-miniaudio` | 只在 `tina_audio_miniaudio` / Legacy `Tina::Miniaudio` | 内置 WAV/FLAC/MP3；不使用 SDL_mixer |
+| miniaudio | 唯一真实 Audio backend | vcpkg feature `audio-miniaudio` | 只在 `tina_audio_miniaudio` | 内置 WAV/FLAC/MP3；不使用 SDL_mixer |
 | libvorbis | 可选 Ogg Vorbis 解码 | vcpkg feature `audio-miniaudio-vorbis` | 仅当 `TINA_AUDIO_ENABLE_LIBVORBIS=ON` | 默认 OFF |
 | libopus / opusfile | 可选 Opus 解码 | vcpkg feature `audio-miniaudio-opus` | 仅当 `TINA_AUDIO_ENABLE_LIBOPUS=ON` | 默认 OFF |
 | xxHash | ContentHash、Cook cache、可选 StringId | vcpkg root dependency + private adapter | `tina_core` PRIVATE 链接；公共头零 token | 保留，不承担安全签名；M10-A2a 契约 |
 | [Tracy 0.13.1](https://github.com/wolfpld/tracy) | 开发 Profile capture | vcpkg optional feature | `tina_profile_tracy` | 可选；发布和正式 bench 禁用 |
-| [cgltf v1.15](https://github.com/jkuhlmann/cgltf) | `tina_assetc` 解析 glTF | 固定单文件 + LICENSE/精确提交 | Cooker 源格式 adapter | 待接入 |
-| [GoogleTest 1.17.0](https://github.com/google/googletest/releases) | 单元/集成契约测试 | vcpkg `tests` feature | tests only | 固定；直接运行，不用 CTest；production manifest graph 不启用 |
-| Box2D 3.x | 唯一 2D Physics backend | vcpkg `physics2d` feature；Legacy 另由 `legacy` feature 持有 | `tina_physics2d` PRIVATE；`Tina::Asset` 在 PHYSICS2D 图 PUBLIC 链接 Physics2D 仅用于 TileMap bridge | M11-A0–A6 已过；正式 `tina_sample_2d` 后置 |
-| Jolt | 唯一 3D Physics backend | ADR 0010 + 接入时固定版本 | `tina_physics3d` | 未接入，真实3D玩法后置 |
-| EASTL/EABase | Legacy 容器 | 当前 submodule | Legacy only | vNext 禁止，零引用后删除 |
+| [cgltf v1.15](https://github.com/jkuhlmann/cgltf) | glTF cook | `thirdparty/cgltf` 单文件 | Asset cook / assetc | **已接入**最小路径 |
+| [GoogleTest 1.17.0](https://github.com/google/googletest/releases) | 单元/集成契约测试 | vcpkg `tests` feature | tests only | 固定；直接运行，不用 CTest |
+| Box2D 3.x | 唯一 2D Physics backend | vcpkg `physics2d` feature | `tina_physics2d` PRIVATE | M11-A0–A6；sample 可选 |
+| Jolt | 唯一 3D Physics backend | ADR 0010 + 接入时固定版本 | `tina_physics3d` | 未接入 |
+| EASTL/EABase | （已退役） | — | — | **已从仓库移除** |
 
-`glm/spdlog/utfcpp` 当前仍由 Legacy/现有实现使用。vNext 的数学/UTF-8 API 不暴露它们；spdlog
-若用于首个 Diagnostics sink，也只能作为私有 adapter，不能决定 LogRecord/Error 公共类型。
-每项只有出现明确调用点和门禁后才决定继续保留或迁走，不能因为 manifest 已存在就让它们
-进入新的公共接口。
+`glm/spdlog/utfcpp` 若仍出现在 manifest，不得进入 Game SDK 公共类型；Diagnostics 若用 spdlog
+只能是私有 adapter。
 
 ## 获取与锁定
 

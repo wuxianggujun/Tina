@@ -14,6 +14,7 @@
 
 #include "render/bgfx/BgfxRenderDevice.hpp"
 
+#include <cstdlib>
 #include <exception>
 #include <fstream>
 #include <memory>
@@ -115,10 +116,18 @@ Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& confi
         };
 
 #if defined(TINA_HAS_UI_FREETYPE)
-#if defined(TINA_DESKTOP_UI_FONT_PATH)
-        auto fontBytes = loadFontFixtureBytes(TINA_DESKTOP_UI_FONT_PATH);
-#else
+        // Optional fixture only: TINA_DESKTOP_UI_FONT_PATH / TINA_UI_FONT_PATH / env / repo file.
+        // Games should inject their own font bytes; empty path keeps placeholder UI text path.
         std::shared_ptr<std::vector<std::byte>> fontBytes{};
+#if defined(TINA_DESKTOP_UI_FONT_PATH)
+        fontBytes = loadFontFixtureBytes(TINA_DESKTOP_UI_FONT_PATH);
+#elif defined(TINA_UI_FONT_PATH)
+        fontBytes = loadFontFixtureBytes(TINA_UI_FONT_PATH);
+#else
+        if (const char* envPath = std::getenv("TINA_UI_FONT_PATH"); envPath != nullptr && envPath[0] != '\0')
+        {
+            fontBytes = loadFontFixtureBytes(envPath);
+        }
 #endif
         if (fontBytes && !fontBytes->empty())
         {
