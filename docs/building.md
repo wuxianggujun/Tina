@@ -622,29 +622,25 @@ Bench/Profile 不能只用两个默认 CMake build type 猜测“优化差不多
 fingerprint 写入 benchmark JSON。Tracy 只由 Profile preset 的 optional vcpkg feature解析，
 普通构建和发行包不查找或打包 Tracy。
 
-## Release 冒烟
+## 产品冒烟（vNext；Legacy `Tina.exe` 已退役）
 
 ```powershell
-# 主菜单 + 中文 UI
-out\build\windows-msvc\bin\Release\Tina.exe --smoke-frames=300
+# 2D 产品（Catalog TileMap + vNext UI）
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 
-# 独立 UI 场景
-out\build\windows-msvc\bin\Release\Tina.exe --smoke-ui --smoke-frames=300
+# 3D 产品（glTF cook + Prefab + Scene extract）
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --frame-delay-ms=0
 
-# 完整 2D 场景
-out\build\windows-msvc\bin\Release\Tina.exe --smoke-game --smoke-frames=300
-
-# 透视相机 + 深度测试 + 静态索引 Cube
-out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
+# 3D fixture（可选）
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe --frames=300 --frame-delay-ms=0
 ```
 
-四条命令返回 0 代表主循环与退出链路完成，不自动代表画面验收通过。3D 和 UI 仍应通过人工观察或稳定截图门禁确认。
-
+返回 0 与结构化 JSON 代表主循环/资源账本完成；画面与像素指纹仍应单独记录。
 ## 常用选项
 
 | 选项 | 默认值 | 用途 |
 | --- | --- | --- |
-| `TINA_BUILD_TESTING` | `ON` | 构建 vNext 基础 `tina_tests`；Legacy ON 时另建 `tina_legacy_tests`；UI、Runtime→UI、UI→Render integration 与 GLFW/bgfx adapter 使用各自独立专项测试 |
+| `TINA_BUILD_TESTING` | `ON` | 构建 vNext 基础 `tina_tests`；UI、Runtime→UI、UI→Render integration 与 GLFW/bgfx adapter 使用各自独立专项测试 |
 | `TINA_BUILD_SHADERS` | `ON` | 构建运行时 shader；关闭后只适合编译/链接门禁 |
 | `TINA_BUILD_LEGACY` | `OFF`（强制） | **已退役**；显式 ON 会 FATAL；仅 vNext 产品图 |
 | `TINA_BUILD_PLATFORM_GLFW` | `OFF` | 构建私有 vNext GLFW Window/Input adapter；需启用 vcpkg `platform-glfw` feature，不改变 Game SDK 边界 |

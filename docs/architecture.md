@@ -1,12 +1,11 @@
 # 架构总览
 
-## 当前双轨实现
+## 当前实现（vNext 产品）
 
-Tina 当前处于 Legacy 产品与 vNext 垂直切片并存的迁移期。Legacy 仍以单个游戏可执行文件为主，
-源码按 Core、Engine、Renderer、UI、ECS 和 Game 组织；vNext 已建立独立的 `tina_core`、
-`tina_platform`、`tina_task`、`tina_render`、`tina_runtime`、`tina_scene`、`tina_asset_format` 与
-`tina_asset`
-八个 C++23 target，以及可选的
+Tina **产品路径已切换到 vNext**。Legacy 横版 2D/`Tina.exe`/`src/ui` 产品图已退役（见
+[m12-legacy-ui-retirement.md](m12-legacy-ui-retirement.md)）。当前源码以独立 C++23 target 为主：
+`tina_core`、`tina_platform`、`tina_task`、`tina_render`、`tina_runtime`、`tina_scene`、
+`tina_asset_format` 与 `tina_asset`，以及可选的
 `tina_platform_glfw` adapter、私有 `tina_render_bgfx` backend、Desktop bootstrap、
 M7-C1b/M7-C1c-a/C1c-b1/C1c-b2 `tina_ui` tree/layout/committed-hit/point-query/synthetic-route foundation，
 以及 M7-C1c-b3b/b3c Runtime-private UI route-result producer、primary-window `UIContext` owner 与
@@ -112,24 +111,21 @@ Legacy 当前大致依赖为 Core → Platform/Engine → ECS/Renderer/UI → Ga
 
 ## 旧架构删除状态
 
-结论：旧文档已经替换，但旧源码架构没有完全删除。`TINA_BUILD_LEGACY` 与 vNext-only preset
-已落地，能够把旧依赖和产品 target 排除出最小构建图。`EngineHost` 生命周期、M7-A Platform/Input
-内核、私有 GLFW 窗口子切片、M7-B1 WindowSurface handoff、M7-B2 bgfx core、Desktop 真实 GPU 样例以及
-startup primary-window UI capability、私有 bgfx SolidQuad UI pass 与最小 retained SolidFill 可见样例
-已经可独立构建；它仍没有接入 Scene/Asset/Audio、完整文本/Widget UI、Pass Scheduler/submission ticket
-或完整状态栈，因此 Legacy 仍是当前 2D/UI/3D 产品实现，不能直接整目录删除。
+结论：**Legacy 产品源码与构建图已删除**（`e2ef3d5e` 起）。`TINA_BUILD_LEGACY` 默认 OFF，显式 ON
+FATAL。产品入口为 `Tina::Desktop` + `tina_sample_*`；UI 仅 vNext `Tina::UI`。仍未声称“整库无历史
+痕迹”：`resources/` 扫尾、Linux 全门禁、文档历史表述可能残留。
 
 | 范围 | 状态 | 证据或影响 |
 | --- | --- | --- |
-| 旧阶段文档 | 已删除/替换 | `docs` 只保留当前架构、契约、验证和 Roadmap |
-| Legacy 构建隔离 | 首批完成 | Null vNext preset 关闭 Legacy、GLFW、vNext bgfx backend 与 shader；platform preset 只额外启用私有 GLFW feature，仍不进入 bgfx/EASTL、不复制旧资源，也不建立 `Tina` target |
-| 单体游戏 target | 仍在使用 | 主程序仍由一个 `Tina` executable 汇集 Engine、Game、Renderer、UI 和 ECS |
-| Core compatibility | 仍在使用 | 主程序和测试仍链接 `Tina::CoreLegacy` |
-| `Application` 组合根 | 仍在使用 | 继续持有 Window、Input、Event、Scene、Resource、Audio 和渲染服务 |
-| Scene/GameScene 旧职责 | 仍在使用 | GameScene 仍混合玩法、ECS、输入、UI、音频与渲染编排 |
-| EnTT 边界 | 尚未收敛 | `World` 暴露 `entt::registry`，GameScene 直接访问 |
-| bgfx 边界 | 尚未收敛 | Renderer、UI 和部分公共结构仍直接暴露 bgfx handle/type |
-| 路径资源系统 | 仍在使用 | M10-A0 已落地 Cooked wire schema、稳定 AssetId/ContentHash 值类型与只读校验；M10-A1 已落地 owning `CatalogSnapshot`、AssetId binary search 与完整 DAG cycle 校验；AssetSystem、Catalog 文件 IO、Handle/Lease 和独立 GPU upload queue 尚未落地 |
+| 旧阶段文档 | 持续扫尾 | 权威以 architecture/building/m12-* 为准 |
+| Legacy 构建图 | **已退役** | 无 `Tina.exe` / `src/ui` / CoreLegacy target |
+| 单体游戏 target | **已删除** | 产品样例为 vNext samples |
+| Core compatibility | **已删除** | 无 `Tina::CoreLegacy` / EASTL 消费者 |
+| `Application` 组合根 | **已删除** | `EngineHost` 为 vNext 组合根 |
+| Scene/GameScene 旧职责 | **已删除** | vNext `Tina::Scene` + samples |
+| EnTT 边界 | **已随 Legacy 删除** | vNext 不链 EnTT |
+| bgfx 边界 | vNext 收敛中 | 仅 `Tina::RenderBgfx` PRIVATE；Game SDK 不暴露 bgfx |
+| 路径资源系统 | vNext Catalog/Cooked | AssetSystem/Handle 等仍按切片演进 |
 | vNext M6-A Runtime | 已完成生命周期切片 | `EngineHost`、`IGameApplication`、单个 `IGameState`、最小阶段 Context、Backend SPI、Headless Platform、Disabled TaskSystem 与 NullRenderDevice 已落地 |
 | vNext M7-A Platform/Input | 已完成 Headless 内核与首个桌面 adapter 切片 | 固定容量 `PlatformFrameBuilder`、final Snapshot、保序 transition、Runtime-private `PlatformEventDispatcher`、Action Mapper，以及私有 GLFW Window/Keyboard/Pointer/committed text producer 已落地；IMM32、production Gamepad 与完整 DPI 门禁后置 |
 | vNext M7-B1 WindowSurface handoff | 已完成私有 surface 所有权切片 | Platform/Render 通过 tagged composition 接线；`NativeWindowSurfaceLease` move-only 且 PIMPL；Win32/X11/Wayland native binding 只在私有 TU 解码；Render 创建失败和窗口发布失败会逆序释放 lease；NullRender 可验证 suspended/resume、surface revision 与 submission index |

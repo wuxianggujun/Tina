@@ -19,8 +19,8 @@
 | G5 | Audio 产品门禁：miniaudio + 关闭安全 | **Partial→Evidence** | `tina_audio_tests` 15/15；sample_2d 300 帧 AudioClip lease + one-shot 观测 |
 | G6 | Windows/Linux 构建 + 直接 GoogleTest 全绿 | Open | 本机 Windows 为主；Linux 未跑 |
 | G7 | Legacy smoke 四条最后一次基线 | **N/A** | 用户授权退役产品；源码已删，不再跑 Legacy smoke |
-| G8 | 旧接口零 include/link/call | **In progress** | 产品源码已删；构建图默认 OFF + FATAL；扫尾 docs/submodule |
-| G9 | 独立可回滚删除提交 | **In progress** | 本批删除提交 |
+| G8 | 旧接口零 include/link/call | **Strong** | 产品源码已删；EASTL/EABase submodule 已移除；docs 扫尾中 |
+| G9 | 独立可回滚删除提交 | **Done（产品）** | `e2ef3d5e` 退役提交；扫尾提交续 |
 
 ## 3D 产品门禁拆分（G3）
 

@@ -218,14 +218,12 @@ Keyboard/Gamepad activation、Image/Texture 或完整 Widget UI。
 ### 实施与验证
 
 - 设计冻结后创建独立 `codex/` 分支和 worktree，不复制/stash/提交主工作区差异；
-- 双架构迁移期 `TINA_BUILD_LEGACY=ON` 保留当前游戏，并有 vNext-only OFF preset；覆盖完整
-  2D/UI/3D/Audio 门禁后翻为 OFF，最终删除选项和旧实现；
+- Legacy 产品已退役；`TINA_BUILD_LEGACY` 仅 OFF/FATAL 哨兵；vNext-only preset 为产品图；
 - 垂直切片顺序为 Null Runtime → Platform/最小 Surface/UI → Scene/2D → Render/3D → Asset/Cooker →
-  Product 2D/UI/Audio → Legacy 删除；
+  Product 2D/UI/Audio（Legacy 产品图已删除）；
 - M7–M9 只使用版本化内置 Cooked fixture/procedural geometry；M7 已分片建立私有最小 bgfx UI Pass
   与 SolidFill 可见样例，M9-A 先完成 backend-neutral 3D extraction，M9-B 再接入私有 procedural Cube/depth，
-  M9-C 再接入私有 Sprite2D fixture pass 与 `tina_sample_2d_infrastructure_bgfx`，
-  禁止 UI 临时调用 Legacy renderer；
+  M9-C 再接入私有 Sprite2D fixture pass 与 `tina_sample_2d_infrastructure_bgfx`；
 - 每批都有代码、直接 GoogleTest、对应可运行样例、资源回收证据、UTF-8 文档和独立提交；
 - `tina_bench` Release 直接运行，普通 CI 不用不稳定的绝对微秒阈值；
 - Exit code、资源计数、性能数据和实际画面分别验收。

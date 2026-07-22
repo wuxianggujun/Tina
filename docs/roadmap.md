@@ -845,16 +845,11 @@ cgltf（glTF 产品 3D）、厚 world-pick Game SDK、删 Legacy **不**用 M10-
 
 ## M12 Legacy 删除
 
-- 新切片覆盖 2D、UI、3D、Asset 与 Audio 的必要路径；
-- 正式 `tina_sample_2d` 只使用最终 Catalog/Manifest，并覆盖 Cooked TileMap、角色/Box2D/UI；
-  正式 `tina_sample_3d` 只使用最终 Cooker 产物并覆盖 glTF/Material/Prefab；M8/M9 fixture 样例
-  不能替代产品门禁；
-- 旧 Application、CoreLegacy、EASTL/EABase、公开 EnTT/bgfx 边界和路径资源接口确认零引用；
-- Windows/Linux 构建、直接 GoogleTest、所有 smoke 与资源计数通过；
-- 删除旧 target、旧源码和无用依赖形成独立可回滚提交；
-- vNext 分支合入最新已提交的 `dev` 并复验后，才合并回干净主工作区。
-- **跟踪清单：** [m12-gate-checklist.md](m12-gate-checklist.md)（G3 的 E0–E9 竖切已齐；**仍不得**仅因
-  3D 完成而开删 Legacy——需 G1/G2/G5 复验、Linux、Legacy smoke 基线、零引用与独立删除提交）。
+- **产品源码删除已执行**（`feat!: retire Legacy product graph`）：`src/ui`/`game`/`engine`/ECS/renderer
+  等与 `Tina.exe` 构建图、CoreLegacy、默认 vcpkg `legacy` feature 已移除。
+- 正式产品门禁改为 vNext：`tina_sample_2d`（Catalog/TileMap/UI）、`tina_sample_3d`（glTF/Prefab 最小路径）；
+- 扫尾：EASTL/EABase submodule 物理移除、`resources/` 无消费者清理、Linux 全门禁、主题文档过时句；
+- **跟踪清单：** [m12-gate-checklist.md](m12-gate-checklist.md)、[m12-legacy-ui-retirement.md](m12-legacy-ui-retirement.md)。
 
 ## 后续能力
 

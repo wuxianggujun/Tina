@@ -249,56 +249,28 @@ cmake --build --preset windows-vnext-bgfx-debug --target tina_render_bgfx_tests 
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d_infrastructure_bgfx.exe --frames=300 --frame-delay-ms=0
 
-cmake --preset windows-msvc
-cmake --build --preset windows-debug --target Tina tina_tests tina_legacy_tests
 ```
 
-测试构建完成后直接运行 vNext 基础 `tina_tests`；`TINA_BUILD_LEGACY=ON` 时还必须直接运行
-Legacy-only `tina_legacy_tests`。启用 GLFW adapter 时再直接运行独立的
+测试构建完成后直接运行 vNext 基础 `tina_tests`。启用 GLFW adapter 时再直接运行独立的
 `tina_platform_glfw_tests`；Scene、RenderScene、UI、Runtime→UI、UI→Render 与 AssetFormat 也各有
 独立 GoogleTest executable。所有测试都直接运行，不通过额外测试调度器：
 
 ```powershell
-out\build\windows-msvc\bin\Debug\tina_tests.exe
-out\build\windows-msvc\bin\Debug\tina_legacy_tests.exe
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_ui_tests.exe
 ```
-
-Release 使用同一个 Visual Studio 多配置构建目录：
-
-```powershell
-cmake --build out\build\windows-msvc --config Release --target Tina tina_tests tina_legacy_tests --parallel 2
-out\build\windows-msvc\bin\Release\tina_tests.exe
-out\build\windows-msvc\bin\Release\tina_legacy_tests.exe
-```
-
-Visual Studio 的测试程序和 GTest 运行库按配置隔离在 `bin\Debug`、`bin\Release`，避免 Debug/Release CRT 混用；Linux 单配置构建仍输出到 `bin`。
 
 完整 Windows/Linux 构建说明、选项和门禁限制见 [构建与运行](docs/building.md)。
 
-运行时验收入口：
+**Legacy `Tina.exe` 产品与 `src/ui` 已退役。** 产品冒烟：
 
 ```powershell
-# 主菜单 + 中文 UI
-out\build\windows-msvc\bin\Release\Tina.exe --smoke-frames=300
-
-# 专用 UI：虚拟化列表 + 对话框 + 中文 TextEdit（启动即聚焦）
-out\build\windows-msvc\bin\Release\Tina.exe --smoke-ui --smoke-frames=300
-
-# 完整 2D + 自研 UI
-out\build\windows-msvc\bin\Release\Tina.exe --smoke-game --smoke-frames=300
-
-# 最小 3D：Perspective Camera + Depth Test + Indexed Cube
-out\build\windows-msvc\bin\Release\Tina.exe --smoke-3d --smoke-frames=300
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --frame-delay-ms=0
 ```
 
-项目不使用 CTest 调度；测试直接运行固定 GoogleTest 1.17.0 生成的基础 `tina_tests`、Legacy ON
-构建图中的 `tina_legacy_tests`，以及按需构建的 adapter 专项测试。当前精确数量和平台矩阵只在
-[测试文档](docs/testing.md)维护。
-
-当前 Legacy UI 已具备 generation `NodeId`、Pointer Capture、Focus/Tab、KeyDown/KeyUp 的 Capture/Target/Bubble 路由、方向键空间焦点导航、可嵌套 Modal Focus Scope、Button 的 Enter/Space pressed/release 生命周期与单次激活、每窗口 Theme/DPI、嵌套 Clip、通用 `UIScrollView`、十万行范围计算的 ListView 虚拟化，以及 Windows 原生 IME preedit/composition。每个 Button action 具有独立重入保护、异常恢复和回调自销毁安全性；routed click 目标在路由中删除后通过 generation `NodeId` 立即失效。GLFW 标准手柄的 D-pad/左摇杆可驱动空间导航，A/B 映射为 Accept/Cancel；摇杆带回滞并支持方向长按重复，语义导航仍服从最上层 Modal Focus Scope。Dialog 不再订阅全局键盘事件，Escape 仅在焦点控件未消费时沿祖先链处理；Scene 会在 `onEnter`/`onResume` 交互前激活对应 UI roots。窗口与基础输入只使用 GLFW；IME 通过 Win32 IMM32 补充，不引入其他窗口或输入库。测试数量和平台验证结果只在 [测试文档](docs/testing.md) 中维护。
-
-上段的 `NodeId` 是当前 Legacy 类型名；vNext Game SDK 使用职责更明确、并在所有构建校验
-owner `WindowId` 的 `UINodeId`，两者不能被文档混称为已完成迁移。
+UI 为 vNext Retained UI（`include/tina/ui`，`UINodeId`）。测试数量和平台矩阵见
+[测试文档](docs/testing.md)。
 
 不了解整体设计时，先阅读 [设计导读](docs/design.md)，再阅读[游戏程序与状态接口](docs/gameplay.md)、[高性能 UI](docs/ui.md)和[后端无关渲染](docs/rendering.md)，或从 [文档索引](docs/README.md) 进入各模块；
 候选/已接受/后置状态以 [设计冻结清单](docs/design-freeze.md)与

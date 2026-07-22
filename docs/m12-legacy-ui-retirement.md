@@ -25,11 +25,11 @@
 - 产品入口：`Tina::Desktop` + `tina_sample_*`（尤其 `tina_sample_2d` / `tina_sample_3d`）。
 - UI：**仅** `include/tina/ui` + `src/vnext/ui`（vNext Retained UI）。
 
-## 保留（非产品路径 / 工具）
+## 保留 / 扫尾
 
-- `thirdparty/bgfx.cmake`（vNext RenderBgfx）
-- `thirdparty/EASTL` / `EABase` **目录**可能仍在 submodule（未 `add_subdirectory`）；后续可从 `.gitmodules` 移除
-- `resources/` 源资源树（Legacy smoke 用过）；vNext 不强制复制；可后续按无消费者再删
+- `thirdparty/bgfx.cmake`（vNext RenderBgfx）— **保留**
+- EASTL/EABase submodule — **已从 `.gitmodules` 与工作树移除**
+- `resources/` — 仍在仓库；vNext 不复制进 Null 图；可按无消费者再删
 
 ## 验证（禁止 clean-first 全量 wipe）
 

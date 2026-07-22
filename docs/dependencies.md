@@ -59,13 +59,14 @@
 TINA_PROFILE_BACKEND=none|tracy
 TINA_PROFILE_TRACY_LOCKS=OFF|ON
 TINA_PROFILE_TRACY_MEMORY=OFF|ON
-TINA_BUILD_LEGACY=ON|OFF    # 迁移期默认 ON，覆盖门禁后翻为 OFF
+TINA_BUILD_LEGACY=OFF only  # 已退役；ON → FATAL_ERROR
 TINA_BUILD_TESTING=ON|OFF
 TINA_BUILD_PHYSICS2D=ON|OFF
 TINA_BUILD_BENCHMARKS=ON|OFF
 TINA_BUILD_SHADERS=ON|OFF
 ```
 
+- `TINA_BUILD_LEGACY` 与 vcpkg feature `legacy` 已退役；默认 feature 仅为 `tests`；
 - `none` 不查找/链接 Tracy；`tracy` 才允许 `find_package(Tracy CONFIG REQUIRED)`；
 - `tina_profile_config` 是唯一传播 Tina backend selection 的 INTERFACE target；Tracy 自身
   definitions 只在 adapter target；

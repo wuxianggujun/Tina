@@ -644,19 +644,14 @@ Profile preset、`tina_profile_tracy`、capture/shutdown test 和 A/B 证据，�
 迁移混合。这样 Trace 前端先由空 backend 验证语义，再验证 Tracy，不让 profiler 成为启动
 Runtime 的前置条件。
 
-迁移期间旧 `Tina` executable 与新 `tina_sample_*` 并存：旧 target 只允许修阻断迁移的 bug，
-新 target 禁止链接 `Tina::CoreLegacy`、EASTL/EABase 或 include 旧聚合头。第一条新可运行切片
-建立后加入 `TINA_BUILD_LEGACY`：双架构迁移期默认 ON 以保留当前游戏基线，同时提供明确的
-vNext-only preset 设为 OFF；当新2D/UI/3D/Audio 覆盖门禁后先把默认翻为 OFF，M12 再删除选项
-和旧源码。CI 分别构建 Legacy ON 和 vNext-only OFF。每个旧模块用“旧符号/target → 新替代 →
-`rg` 零引用 → Windows/Linux/test/smoke 证据 →
-独立删除提交”清单退役。旧 API、原始资源路径、场景、存档和玩法行为不承诺二进制或数据
-兼容；需要保留的数据必须通过显式 converter，而不是长期桥接两套 Runtime。
+Legacy `Tina` executable / CoreLegacy / EASTL 产品图已删除；产品仅 `tina_sample_*` + vNext
+modules。`TINA_BUILD_LEGACY` 仅保留为 OFF/FATAL 哨兵。扫尾：`resources/` 无消费者清理、Linux
+全门禁、文档历史句。旧 API/存档/玩法不承诺兼容。
 
 ## 验收门禁
 
 - Visual Studio 2026 / MSVC 19.50 Debug/Release configure、build 与直接执行 vNext 基础 `tina_tests`；
-  Legacy ON 图还必须直接执行 Legacy-only `tina_legacy_tests`，启用 GLFW adapter 时另行直接执行
+  启用 GLFW adapter 时另行直接执行
   `tina_platform_glfw_tests`，这些 executable 均不使用 CTest；
 - M7-C1b/C1c-a/C1c-b1/C1c-b2 UI 树、布局、committed hit snapshot、point query 与 synthetic route 使用独立
   `tina_ui_tests` 直接 GoogleTest；Windows Debug/Release、Linux GCC 13.4 与 Clang 22.1.8 +

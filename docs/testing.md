@@ -710,11 +710,10 @@ Linux X11、Wayland和 Clang LSan精确 suppression的完整命令见[构建与�
 
 Visual Studio 多配置输出必须使用对应的 `bin/Debug` 或 `bin/Release`，不能混用 GoogleTest DLL。
 同一 build tree 的两种配置也必须按上面命令顺序构建，不能并发驱动共享生成状态。
-Legacy 的 `Tina.exe`、shaderc 和 app-local DLL 同样按配置隔离。Linux 单配置构建直接运行
-`out/build/<preset>/bin/` 下对应测试 executable。
+vNext 的 shaderc 与 app-local DLL 按配置隔离。Linux 单配置构建直接运行
+`out/build/<preset>/bin/` 下对应测试 executable。Legacy `Tina.exe` 已退役。
 
-只验证 vNext Core/Runtime 和测试源码的 Linux 编译/链接时，使用独立 GCC 13 preset，避免
-污染可运行的 Legacy `linux-ninja` cache：
+只验证 vNext Core/Runtime 和测试源码的 Linux 编译/链接时，使用独立 GCC 13 preset：
 
 ```bash
 cmake --preset linux-gcc13-vnext
