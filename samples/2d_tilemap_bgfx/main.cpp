@@ -627,8 +627,10 @@ struct TileMapResources final {
     }
     const Tina::Scene::SpriteRenderer2D characterSprite{
         .fixtureSpriteKey = ProductSpriteKey,
-        .overrides = Tina::Scene::SpriteOverrideFlags::Size,
+        .overrides = Tina::Scene::SpriteOverrideFlags::Size | Tina::Scene::SpriteOverrideFlags::UvRect,
         .sizeOverrideMeters = {controllerConfig.halfWidth * 2.0f, controllerConfig.halfHeight * 2.0f},
+        // Left half of the product atlas (pre-M8-C1 direct emit fidelity).
+        .uvRectOverride = {.u0 = 0.0f, .v0 = 0.0f, .u1 = 0.5f, .v1 = 1.0f},
         .color = {.red = 255, .green = 220, .blue = 80, .alpha = 255},
         .sortingLayer = 1,
         .orderInLayer = 0,
@@ -648,8 +650,10 @@ struct TileMapResources final {
     const float crateSize = resources.dynamicHalfExtent * 2.0f;
     const Tina::Scene::SpriteRenderer2D crateSprite{
         .fixtureSpriteKey = ProductSpriteKey,
-        .overrides = Tina::Scene::SpriteOverrideFlags::Size,
+        .overrides = Tina::Scene::SpriteOverrideFlags::Size | Tina::Scene::SpriteOverrideFlags::UvRect,
         .sizeOverrideMeters = {crateSize, crateSize},
+        // Right half of the product atlas (pre-M8-C1 direct emit fidelity).
+        .uvRectOverride = {.u0 = 0.5f, .v0 = 0.0f, .u1 = 1.0f, .v1 = 1.0f},
         .color = {.red = 120, .green = 220, .blue = 255, .alpha = 255},
         .sortingLayer = 1,
         .orderInLayer = 1,

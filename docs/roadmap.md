@@ -454,6 +454,11 @@ Desktop 使用 bgfx Vulkan/llvmpipe，因此不计作硬件 GPU 性能门禁；L
   `World::set/clear/get`、`extractRenderSceneFromWorld`（至多一 active Camera2D、fixtureSpriteKey 路径、
   surface viewport 0×0 跳过 camera）；`tina_scene_tests` 覆盖存储/错误/extract/header isolation。无 EnTT、
   无 sample 强制改写；
+- **M8-C1 sample wiring 已完成：** `tina_sample_2d` 的 Camera2D + character（+ optional physics crate）经
+  Scene World + `extractRenderSceneFromWorld`；TileMap / selection highlight 仍 feature-side；
+- **M8-C2 Sprite UV fidelity 已完成：** `SpriteOverrideFlags::UvRect` + `SpriteUvRect`；extract 写入
+  `RenderSprite2DInput` UV；`tina_sample_2d` 角色/crate 恢复半张 atlas；`tina_scene_tests` 覆盖默认全图与
+  override；Cooked Sprite/AssetHandle UV 解析仍 Deferred；
 - EnTT 若作 PRIVATE storage 仍后置；Scene component command commit、AssetHandle/FrameResourceRef 解析、
   Runtime Phase Context World 能力、MeshRenderer3D/Prefab 与正式可见 2D 产品路径仍待后续切片；
 - 基础样例当前是 CPU/Null recording infrastructure，不显示 Sprite、不包含中文 Label/Button、world picking、

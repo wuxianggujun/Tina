@@ -91,6 +91,13 @@ TEST(SceneComponentStorageTest, RejectsInvalidComponents)
     EXPECT_EQ(
         world.setSpriteRenderer2D(entity, badSize).error().code,
         SceneErrorCode::InvalidComponent);
+
+    SpriteRenderer2D badUv = fixtureSprite(1);
+    badUv.overrides = SpriteOverrideFlags::Size | SpriteOverrideFlags::UvRect;
+    badUv.uvRectOverride = {.u0 = 0.8F, .v0 = 0.0F, .u1 = 0.2F, .v1 = 1.0F};
+    EXPECT_EQ(
+        world.setSpriteRenderer2D(entity, badUv).error().code,
+        SceneErrorCode::InvalidComponent);
 }
 
 TEST(SceneComponentStorageTest, DestroyedEntityDropsComponents)
@@ -269,6 +276,43 @@ TEST(SceneExtractTest, AppliesPivotAndZRotationToSpriteCenter)
         view->sprites2D()[0].rotationRadians,
         std::numbers::pi_v<float> * 0.5F,
         1.0e-4F);
+    // Without UvRect override, extract keeps full-texture defaults.
+    EXPECT_FLOAT_EQ(view->sprites2D()[0].u0, 0.0F);
+    EXPECT_FLOAT_EQ(view->sprites2D()[0].v0, 0.0F);
+    EXPECT_FLOAT_EQ(view->sprites2D()[0].u1, 1.0F);
+    EXPECT_FLOAT_EQ(view->sprites2D()[0].v1, 1.0F);
+}
+
+TEST(SceneExtractTest, ForwardsOptionalUvRectOverride)
+{
+    World world = makeWorld();
+    const EntityId cameraEntity = world.createEntity().value();
+    ASSERT_TRUE(world.setCamera2D(cameraEntity, fixedCamera(20.0F)));
+
+    const EntityId spriteEntity = world.createEntity(translated(0.0F, 0.0F)).value();
+    SpriteRenderer2D sprite = fixtureSprite(1, 1.0F, 1.0F);
+    sprite.overrides = SpriteOverrideFlags::Size | SpriteOverrideFlags::UvRect;
+    sprite.uvRectOverride = {.u0 = 0.5F, .v0 = 0.0F, .u1 = 1.0F, .v1 = 1.0F};
+    ASSERT_TRUE(world.setSpriteRenderer2D(spriteEntity, sprite));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder);
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 800, .pixelHeight = 600},
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view);
+    ASSERT_EQ(view->sprites2D().size(), 1U);
+    EXPECT_FLOAT_EQ(view->sprites2D()[0].u0, 0.5F);
+    EXPECT_FLOAT_EQ(view->sprites2D()[0].v0, 0.0F);
+    EXPECT_FLOAT_EQ(view->sprites2D()[0].u1, 1.0F);
+    EXPECT_FLOAT_EQ(view->sprites2D()[0].v1, 1.0F);
 }
 
 TEST(SceneExtractTest, InactiveCameraIsIgnored)

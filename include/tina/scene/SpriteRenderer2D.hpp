@@ -26,6 +26,9 @@ enum class SpriteOverrideFlags : u8 {
     None = 0,
     Size = 1 << 0,
     Pivot = 1 << 1,
+    // Optional normalized UV rect on the bound texture/atlas (fixture path).
+    // Without UvRect, extract writes full texture [0,1] like RenderSprite2DInput defaults.
+    UvRect = 1 << 2,
 };
 
 [[nodiscard]] constexpr SpriteOverrideFlags operator|(
@@ -51,6 +54,17 @@ enum class SpriteOverrideFlags : u8 {
     return (static_cast<u8>(flags) & static_cast<u8>(mask)) != 0;
 }
 
+// Normalized texture-space UV rectangle [u0,v0]→[u1,v1], same contract as
+// RenderSprite2DInput (finite, 0..1 inclusive, strict u0<u1 and v0<v1).
+struct SpriteUvRect final {
+    float u0 = 0.0F;
+    float v0 = 0.0F;
+    float u1 = 1.0F;
+    float v1 = 1.0F;
+
+    friend constexpr bool operator==(const SpriteUvRect&, const SpriteUvRect&) noexcept = default;
+};
+
 // Scene-owned 2D sprite draw component. Stores semantic fields only — no GPU
 // handles. This slice extracts via fixtureSpriteKey (M8/M9 product seed /
 // fixture resource id). Full AssetHandle + Cooked Sprite resolve is Deferred.
@@ -62,6 +76,8 @@ struct SpriteRenderer2D final {
     // Pivot in [0,1] relative to sprite extents; geometric center is adjusted
     // from the entity WorldTransform position before writing RenderSprite2DInput.
     Vec2 pivotOverride{0.5F, 0.5F};
+    // Used only when overrides includes UvRect; otherwise extract uses full [0,1].
+    SpriteUvRect uvRectOverride{};
     ColorRgba8 color{};
     i16 sortingLayer = 0;
     i32 orderInLayer = 0;
@@ -71,6 +87,17 @@ struct SpriteRenderer2D final {
 
     friend constexpr bool operator==(const SpriteRenderer2D&, const SpriteRenderer2D&) noexcept = default;
 };
+
+[[nodiscard]] inline bool isValidUvRect(const SpriteUvRect& uv) noexcept
+{
+    if (!std::isfinite(uv.u0) || !std::isfinite(uv.v0) || !std::isfinite(uv.u1) || !std::isfinite(uv.v1)) {
+        return false;
+    }
+    if (uv.u0 < 0.0F || uv.v0 < 0.0F || uv.u1 > 1.0F || uv.v1 > 1.0F) {
+        return false;
+    }
+    return (uv.u0 < uv.u1) && (uv.v0 < uv.v1);
+}
 
 [[nodiscard]] inline bool isValid(const SpriteRenderer2D& sprite) noexcept
 {
@@ -85,6 +112,11 @@ struct SpriteRenderer2D final {
     }
     if (hasFlag(sprite.overrides, SpriteOverrideFlags::Size)) {
         if (sprite.sizeOverrideMeters.x <= 0.0F || sprite.sizeOverrideMeters.y <= 0.0F) {
+            return false;
+        }
+    }
+    if (hasFlag(sprite.overrides, SpriteOverrideFlags::UvRect)) {
+        if (!isValidUvRect(sprite.uvRectOverride)) {
             return false;
         }
     }

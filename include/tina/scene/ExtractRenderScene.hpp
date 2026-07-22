@@ -22,6 +22,8 @@ struct ExtractRenderSceneParams final {
 // - Active Camera2D count >1: structured MultipleActiveCameras failure.
 // - Each visible SpriteRenderer2D with valid fixtureSpriteKey becomes addSprite2D
 //   using published world position/scale and Z-axis rotation.
+// - Optional SpriteOverrideFlags::UvRect copies uvRectOverride into
+//   RenderSprite2DInput; otherwise UV defaults to full texture [0,1].
 // - Does not require Runtime Phase Context World capability.
 // - Does not resolve AssetSystem / Cooked Sprite (fixture key path only).
 [[nodiscard]] Core::Status extractRenderSceneFromWorld(

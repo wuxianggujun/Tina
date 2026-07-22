@@ -113,12 +113,13 @@ enum class SpriteOverrideFlags : std::uint8_t {
     Pivot = 1 << 1,
 };
 
-// M8-C0 已落地的 Scene 组件（fixture 路径；AssetHandle 解析 Deferred）
+// M8-C0/C2 已落地的 Scene 组件（fixture 路径；AssetHandle 解析 Deferred）
 struct SpriteRenderer2D {
     std::uint32_t fixtureSpriteKey = 0; // non-zero product/fixture resource seed
-    SpriteOverrideFlags overrides = SpriteOverrideFlags::None;
+    SpriteOverrideFlags overrides = SpriteOverrideFlags::None; // Size | Pivot | UvRect
     Vec2 sizeOverrideMeters{1.0f, 1.0f};
     Vec2 pivotOverride{0.5f, 0.5f};
+    SpriteUvRect uvRectOverride{}; // only when UvRect flag; else extract uses [0,1]
     ColorRgba8 color{}; // default white
     std::int16_t sortingLayer = 0;
     std::int32_t orderInLayer = 0;
@@ -133,7 +134,10 @@ struct SpriteRenderer2D {
 M8-C0 已实现：`include/tina/scene/SpriteRenderer2D.hpp`、`World::setSpriteRenderer2D` /
 `spriteRenderer2D` / `clearSpriteRenderer2D`，`extractRenderSceneFromWorld` 将可见 sprite 写为
 `RenderSprite2DInput`（pivot 调整几何中心、Z 轴四元数 → `rotationRadians`、size override 或默认 1m）。
-`fixtureSpriteKey == 0` 在 set 与 extract 两侧均拒绝。
+`fixtureSpriteKey == 0` 在 set 与 extract 两侧均拒绝。**M8-C2** 增加可选 `SpriteOverrideFlags::UvRect`
++ `SpriteUvRect`，extract 转发到 `RenderSprite2DInput::{u0,v0,u1,v1}`（与 RenderScene 校验一致：
+finite、[0,1]、严格 `u0<u1`/`v0<v1`）；无 flag 时仍写全图 `[0,1]`。`tina_sample_2d` 角色/crate 用
+半张 atlas UV 恢复 C1 前外观；Cooked Sprite UV 解析仍 Deferred。
 
 `SpriteAsset` 目标仍是 Cooked Asset（引用 `Texture2DAsset`、像素 rect、规范化 UV、默认 pivot 与
 PPU）。未设置对应 override flag 时，产品路径 size 由像素 rect / PPU 推导；本切片未接 AssetSystem，

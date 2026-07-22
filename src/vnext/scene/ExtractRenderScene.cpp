@@ -169,6 +169,17 @@ Core::Status extractRenderSceneFromWorld(
                 "Scene sprite extract produced non-finite render values");
         }
 
+        float u0 = 0.0F;
+        float v0 = 0.0F;
+        float u1 = 1.0F;
+        float v1 = 1.0F;
+        if (hasFlag(sprite->overrides, SpriteOverrideFlags::UvRect)) {
+            u0 = sprite->uvRectOverride.u0;
+            v0 = sprite->uvRectOverride.v0;
+            u1 = sprite->uvRectOverride.u1;
+            v1 = sprite->uvRectOverride.v1;
+        }
+
         const Render::RenderSprite2DInput input{
             .spriteKey = sprite->fixtureSpriteKey,
             .stableEntityKey = stableEntityKey(entity),
@@ -179,6 +190,10 @@ Core::Status extractRenderSceneFromWorld(
             .heightMeters = heightMeters,
             .scaleX = transform->scale.x,
             .scaleY = transform->scale.y,
+            .u0 = u0,
+            .v0 = v0,
+            .u1 = u1,
+            .v1 = v1,
             .sortingLayer = sprite->sortingLayer,
             .orderInLayer = sprite->orderInLayer,
             .red = sprite->color.red,
