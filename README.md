@@ -43,9 +43,11 @@ private fixture infrastructure with Sprite2D: only `spriteKey=1` is accepted, qu
 P2/UV2/ABGR geometry, and the current fixed fixture view order is View 0 clear, View 1 Opaque3D, View 2
 Sprite2D, View 3 UI. That numbering is not a Pass Scheduler. `tina_sample_3d_infrastructure` runs the visible
 3D fixture path for 300 frames with three cubes and one instance batch per frame; `tina_sample_2d_infrastructure_bgfx`
-runs the visible 2D/UI fixture path for 300 frames with five sprites and two retained UI panels. Scene component
-command buffers, Asset/Cooker integration, Texture/Sprite assets, TileMap/Box2D, Chinese text rendering,
-generic Mesh/Material/PBR, the M10 product asset path, `tina_sample_2d`, and product samples remain later slices.
+runs the visible 2D/UI fixture path for 300 frames with five sprites and two retained UI panels.
+**M11-E0–E5** adds the minimal product 3D path: Catalog recipe StaticMesh cube + Unlit solid/textured materials
++ GPU mesh/texture bind via `tina_sample_3d` (not glTF/Prefab/PBR). Scene component command buffers, full
+cgltf Cooker, Prefab hierarchy, TileMap/Box2D polish, Chinese text, and generic PBR remain later slices;
+formal `tina_sample_2d` product-2d is already the 2D product gate.
 The current M8-B Windows MSVC Debug/Release Null gates both pass Core/Runtime 211/211, UI 115/115,
 Runtime-to-UI 60/60, UI-to-Render 12/12, Scene 19/19, RenderScene 11/11, and both 300-frame Null and
 2D-infrastructure samples. The current Windows Debug adapter recheck also passes GLFW 26/26, its 300-frame
@@ -88,7 +90,8 @@ M10-A0 now provides the standalone `Tina::AssetFormat` foundation: distinct 16-b
 borrowed parsers whose successful view publication allocates nothing, with hard-limit, checked-arithmetic, canonical-layout, padding, ordering, and
 dependency validation. `tina_asset_format_tests` passes 14/14 in Windows MSVC Debug and Release. This slice does
 not compute XXH3 or implement full DAG-cycle validation, file IO, the Asset registry/Handle/Lease lifecycle,
-workers/uploads, cgltf, Cooker writes, or the formal 2D/3D asset product path; Cooked glTF remains incomplete.
+workers/uploads, cgltf, Cooker writes, or the formal glTF 3D product path; M11-E0–E5 cube/Unlit
+`tina_sample_3d` is a separate later product slice (done on the runtime branch tip).
 
 M10-A1 now provides the standalone `Tina::Asset` `CatalogSnapshot`: a move-only immutable owning catalog built
 transactionally from a validated `CookedManifestView` on an injected `std::pmr` resource, AssetId binary search,

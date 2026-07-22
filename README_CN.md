@@ -114,7 +114,8 @@ framebuffer 为 `0x0` 时回退到正的 logical extent。新增 `tina_sample_3d
 fixture View 顺序是 0 clear、1 Opaque3D、2 Sprite2D、3 UI；这只是临时固定 View 编号，不是
 Pass Scheduler。`tina_sample_2d_infrastructure_bgfx` 默认/门禁运行300帧，每帧5个 fixture Sprite
 和2个 retained UI panel；它不等于 Asset/Texture/Sprite 产品路径、正式 `tina_sample_2d`、TileMap、
-Box2D、中文文本或 M10 的产品资产路径。
+Box2D、中文文本或 M10 的产品资产路径。**M11-E0–E5 最小产品 3D 已落地**：Catalog recipe
+StaticMesh cube + Unlit solid/textured + `tina_sample_3d`；**仍非** glTF/Prefab/PBR（cgltf Deferred）。
 
 M10-A0 已新增独立 `tina_asset_format`：互不兼容的16字节 `AssetId`/`ContentHash`、固定
 little-endian Cooked Header/Manifest/Entry/Dependency schema、确定性 object path，以及不分配的
