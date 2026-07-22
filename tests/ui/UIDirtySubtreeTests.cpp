@@ -114,8 +114,11 @@ void assertOk(Core::Status status)
     fixture.left = *leftResult;
     fixture.right = *rightResult;
 
-    auto leftLeafResult = updater.createLabel(fixture.left);
-    auto rightLeafResult = updater.createLabel(fixture.right);
+    // Leaves are Panels (not Labels): Labels publish semantics and share
+    // paintSnapshotCapacity; capacity-stress tests (paint cap=1) would fail
+    // makeFixture before exercising paint reuse.
+    auto leftLeafResult = updater.createPanel(fixture.left);
+    auto rightLeafResult = updater.createPanel(fixture.right);
     EXPECT_TRUE(leftLeafResult.has_value());
     EXPECT_TRUE(rightLeafResult.has_value());
     if (!leftLeafResult || !rightLeafResult) {

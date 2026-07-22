@@ -2275,16 +2275,13 @@ struct UIContext::Impl final {
 
     // M11-C4: publish interactive Label/Button/Checkbox/Slider into a stable
     // owner-thread semantics snapshot. Decorative Root/Panel are omitted.
+    // Capacity reuses paintSnapshotCapacity as a fixed entry budget for emitted
+    // semantics rows (not layout node count — Root/Panel do not publish).
     [[nodiscard]] Core::Status buildCommittedSemantics(
         std::pmr::vector<UISemanticsEntry>& output,
         std::span<const UICommittedLayoutEntry> layoutEntries) const
     {
         output.clear();
-        if (layoutEntries.size() > capacityConfig.paintSnapshotCapacity) {
-            return fail(
-                UIErrorCode::CapacityExceeded,
-                "UI committed semantics snapshot capacity has been exhausted");
-        }
         for (const UICommittedLayoutEntry& layoutEntry : layoutEntries) {
             if (layoutEntry.effectiveVisibility != UIVisibility::Visible) {
                 continue;
@@ -2293,6 +2290,11 @@ struct UIContext::Impl final {
             const NodeRecord* record = recordByIndex(nodeIndex);
             if (record == nullptr || !isSemanticsPublishedKind(record->kind)) {
                 continue;
+            }
+            if (output.size() >= capacityConfig.paintSnapshotCapacity) {
+                return fail(
+                    UIErrorCode::CapacityExceeded,
+                    "UI committed semantics snapshot capacity has been exhausted");
             }
             UISemanticsEntry entry{
                 .node = layoutEntry.node,
@@ -5417,9 +5419,11 @@ struct UIContext::Impl final {
                 defaultActionFocusButton,
                 actionRegistrationSerialBoundary);
         if (!actionCandidate.hasValue()) {
-            // Focused control without an action still consumes Accept so
-            // gameplay does not also fire. Checkbox state already toggled above.
-            return UIDefaultActionResult{.consumed = true, .activated = true};
+            // Focused control without a registered action still consumes Accept
+            // so gameplay does not also fire. Checkbox has already toggled above
+            // (counts as activated); bare Button without a callback does not.
+            const bool activated = record->kind == UIWidgetKind::Checkbox;
+            return UIDefaultActionResult{.consumed = true, .activated = activated};
         }
         const u64 currentButtonRouteSerial = ++buttonRouteSerial;
         routeDispatchDepth = 1;
