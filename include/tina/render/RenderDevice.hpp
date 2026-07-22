@@ -165,6 +165,16 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::MeshUploadUnsupported,
                              "This render device does not support Mesh3D mesh binding");
     }
+    // M11-E5: bind baseColor texture for Mesh3D batches with matching materialKey
+    // (0 clears). Unbound materialKey samples the default 1x1 white texture.
+    [[nodiscard]] virtual Core::Status setMesh3DMaterialTextureBinding(u32 materialKey,
+                                                                       GpuTextureId texture) noexcept
+    {
+        static_cast<void>(materialKey);
+        static_cast<void>(texture);
+        return Core::failure(RenderErrorCode::TextureUploadUnsupported,
+                             "This render device does not support Mesh3D material texture binding");
+    }
 };
 
 using RenderDeviceFactory =

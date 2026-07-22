@@ -236,10 +236,10 @@ stale handle、资源归零和 checksum 属确定性硬门禁。
 2. `tina_sample_3d_infrastructure`：procedural indexed Cube、Perspective、depth、真实 instance buffer、
    300帧退出与实际截图；当前 M9-B 最小实现已覆盖 fixture 级路径，但仍不覆盖 Cooked Asset、
    通用 Material/Pipeline、自动 resize/restore 门禁或产品 3D；
-  3. `tina_sample_3d`（M11-E3/E4 最小产品竖切）：Catalog recipe 产出 Cooked StaticMesh（canonical cube）
-    + UnlitBaseColor Material solid factors、`uploadStaticMeshFromCooked` + `setMesh3DBinding`、
-    Perspective + depth + 3 instance Cube（颜色来自 cooked Material）+ UI、300 帧与 GPU mesh 资源归零。
-    **尚未**覆盖 textured Material、glTF、Prefab 层级、resize 门禁。
+  3. `tina_sample_3d`（M11-E3–E5 最小产品竖切）：Catalog recipe 产出 Cooked StaticMesh（canonical cube）
+    + UnlitBaseColor Material（solid + optional Texture2D）、`uploadStaticMeshFromCooked` +
+    `setMesh3DBinding` + `setMesh3DMaterialTextureBinding`、Perspective + depth + 3 instance + UI、
+    300 帧与 GPU 资源归零。**尚未**覆盖 glTF、Prefab 层级、PBR、resize 门禁。
   4. 完整产品 3D（后置）：Cooked textured glTF → Mesh/Material/Prefab、层级 Transform、多个深度遮挡
     对象、frustum culling 与 instance batch；含不支持 glTF 诊断与 shutdown 退役。
 

@@ -788,18 +788,20 @@ cgltf、`tina_sample_3d`、厚 world-pick Game SDK、删 Legacy **不**用 M10-A
   3 个 instance batch Cube + UI overlay，300 帧资源归零）。
 - M11-E4 已完成：`AssetFormat::MaterialPayload` UnlitBaseColor v1（24B solid factor）+
   recipe `material <id> unlit r g b [a]` + `parseMaterialFromCooked` + typed validation；
-  `tina_sample_3d` 从 cooked Material 读 baseColor 填 `RenderMesh3DInput`（**仍非** Texture 绑定 /
-  MaterialKey GPU 表 / glTF）。**仍非** Prefab/textured Mesh；cgltf 后置。
+  `tina_sample_3d` 从 cooked Material 读 baseColor 填 `RenderMesh3DInput`。
+- M11-E5 已完成：Material 可选 Texture2D 依赖（payload flag + cooked dep）+ recipe 尾部 texId；
+  Opaque3D unlit 采样 `s_tex`；`setMesh3DMaterialTextureBinding(materialKey, tex)`；
+  `tina_sample_3d` 2×2 checker + textured unlit（**仍非** glTF/Prefab/PBR）。
 
-### M11 产品 3D StaticMesh + Unlit Material 竖切（E0–E4）
+### M11 产品 3D StaticMesh + Unlit Material 竖切（E0–E5）
 
 | 已完成 | Deferred（不阻塞本收口） |
 | --- | --- |
 | StaticMesh cooked payload v1 + cube recipe | cgltf v1.15 → multi-mesh glTF cook |
-| GPU mesh upload/bind (Null/bgfx) | Material GPU binding / textured Unlit |
-| UnlitBaseColor Material payload + recipe | Prefab / Material slot override |
-| `tina_sample_3d` cube + cooked material colors | PBR / Light / Transparent3D / Pass Scheduler |
-| meshKey binding + fixture fallback | 正式 textured Prefab 场景验收 |
+| GPU mesh upload/bind (Null/bgfx) | Prefab / Material slot override |
+| UnlitBaseColor Material + optional Texture2D | multi-submesh material slots |
+| Opaque3D textured unlit (`s_tex` + materialKey) | PBR / Light / Transparent3D / Pass Scheduler |
+| `tina_sample_3d` cube + textured materials | 正式 textured Prefab 场景验收 |
 
 ### M11 设置 / UI 产品竖切收口（tip `bbbe1b5b`，C0–C5 + D0）
 

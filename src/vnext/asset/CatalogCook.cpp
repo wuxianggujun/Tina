@@ -924,11 +924,13 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         }
         if (tokens[0] == "material")
         {
-            // material <id> unlit <r> <g> <b> [a]  — UnlitBaseColor solid factor (M11-E4).
-            if (tokens.size() != 6 && tokens.size() != 7)
+            // material <id> unlit <r> <g> <b> [a] [tex32hex]
+            // Optional trailing Texture2D id (M11-E5); solid factor always required.
+            if (tokens.size() < 6 || tokens.size() > 8)
             {
-                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                     "material currently supports: material <id> unlit <r> <g> <b> [a]");
+                return Core::failure(
+                    AssetErrorCode::InvalidCatalogConfig,
+                    "material currently supports: material <id> unlit <r> <g> <b> [a] [textureId]");
             }
             if (tokens[2] != "unlit")
             {
@@ -947,9 +949,40 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid material baseColor RGB");
             }
-            if (tokens.size() == 7 && !parseFloatToken(tokens[6], a))
+            Core::AssetId textureId{};
+            if (tokens.size() >= 7)
             {
-                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid material baseColor alpha");
+                // tokens[6] may be alpha float OR texture id (32 hex). Prefer float parse first.
+                float alphaCandidate = 0.0F;
+                if (parseFloatToken(tokens[6], alphaCandidate))
+                {
+                    a = alphaCandidate;
+                    if (tokens.size() == 8)
+                    {
+                        auto tex = Core::AssetId::parseCanonical(tokens[7]);
+                        if (!tex)
+                        {
+                            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                                 "invalid material baseColor texture id");
+                        }
+                        textureId = *tex;
+                    }
+                }
+                else
+                {
+                    auto tex = Core::AssetId::parseCanonical(tokens[6]);
+                    if (!tex)
+                    {
+                        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                             "invalid material alpha or texture id");
+                    }
+                    textureId = *tex;
+                    if (tokens.size() == 8)
+                    {
+                        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                             "material: when token6 is texture id, do not pass 8 tokens");
+                    }
+                }
             }
             AssetFormat::MaterialPayloadDesc desc{
                 .model = AssetFormat::MaterialModel::UnlitBaseColor,
@@ -959,18 +992,28 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
                 .baseColorA = a,
                 .doubleSided = false,
                 .alphaMode = AssetFormat::MaterialAlphaMode::Opaque,
+                .baseColorTextureId = textureId,
             };
             auto payload = AssetFormat::writeMaterialPayloadBytes(desc);
             if (!payload)
             {
                 return Core::failure(std::move(payload.error()));
             }
-            request.assets.push_back(CatalogCookAssetSpec{
+            CatalogCookAssetSpec asset{
                 .assetKind = AssetFormat::AssetKind::Material,
                 .assetId = *materialId,
                 .assetTypeVersion = AssetFormat::MaterialWire::SchemaVersion,
                 .payload = std::move(*payload),
-            });
+            };
+            if (textureId)
+            {
+                asset.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
+                    .assetId = textureId,
+                    .expectedKind = AssetFormat::AssetKind::Texture2D,
+                    .flags = AssetFormat::DependencyFlags::Required,
+                });
+            }
+            request.assets.push_back(std::move(asset));
             continue;
         }
         if (tokens[0] == "tileset")

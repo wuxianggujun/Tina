@@ -578,6 +578,73 @@ TEST(CatalogCookTests, MaterialUnlitRecipe)
     EXPECT_FLOAT_EQ(material->baseColorG, 0.24F);
     EXPECT_FLOAT_EQ(material->baseColorB, 0.30F);
     EXPECT_FLOAT_EQ(material->baseColorA, 1.0F);
+    EXPECT_FALSE(material->hasBaseColorTexture);
+
+    std::filesystem::remove_all(root, ec);
+}
+
+// M11-E5: material with optional Texture2D dependency.
+TEST(CatalogCookTests, MaterialUnlitWithTextureRecipe)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(11U));
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(12U));
+    const auto textureHex = textureId.canonicalText();
+    const auto materialHex = materialId.canonicalText();
+
+    std::string recipe;
+    recipe += "platform WindowsX64\n";
+    recipe += "texture2d ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += " 2 2 FFFFFFFF 000000FF FFFFFFFF 000000FF\n";
+    recipe += "material ";
+    recipe.append(materialHex.data(), materialHex.size());
+    recipe += " unlit 1 1 1 1 ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += "\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    ASSERT_EQ(request->assets.size(), 2U);
+
+    const auto root = std::filesystem::temp_directory_path() / "tina_material_tex";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(root), *request).has_value());
+
+    CatalogPackageOpenConfig openConfig{
+        .manifest =
+            CatalogFileLoadConfig{
+                .catalog =
+                    CatalogConfig{
+                        .maxEntries = 8,
+                        .maxDependencies = 8,
+                        .maxDependenciesPerAsset = 4,
+                        .memoryResource = &memory,
+                    },
+            },
+        .validateOnOpen = true,
+        .validation =
+            CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .verifyContent = true,
+                .verifyTypedPayload = true,
+            },
+    };
+    auto catalog = openCatalogPackage(toUtf8(root), openConfig);
+    ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
+
+    auto asset = loadCookedAssetFromCatalog(toUtf8(root), *catalog, materialId,
+                                            CookedAssetFileLoadConfig{.memoryResource = &memory});
+    ASSERT_TRUE(asset.has_value()) << asset.error().message;
+    EXPECT_EQ(asset->header().dependencyCount, 1U);
+    auto dep = asset->dependency(0);
+    ASSERT_TRUE(dep.has_value());
+    EXPECT_EQ(dep->assetId, textureId);
+
+    auto material = parseMaterialFromCooked(*asset);
+    ASSERT_TRUE(material.has_value()) << material.error().message;
+    EXPECT_TRUE(material->hasBaseColorTexture);
 
     std::filesystem::remove_all(root, ec);
 }

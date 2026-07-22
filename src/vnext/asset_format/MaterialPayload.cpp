@@ -2,9 +2,9 @@
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 
+#include <array>
 #include <cmath>
 #include <cstring>
-#include <limits>
 
 namespace Tina::AssetFormat {
 namespace {
@@ -94,7 +94,8 @@ Core::Result<std::vector<std::byte>> writeMaterialPayloadBytes(const MaterialPay
         writeF32(bytes, 16U, desc.baseColorA);
         writeU8(bytes, 20U, desc.doubleSided ? 1U : 0U);
         writeU8(bytes, 21U, static_cast<u8>(desc.alphaMode));
-        writeU16(bytes, 22U, 0U);
+        const u16 flags = desc.baseColorTextureId ? MaterialWire::FlagHasBaseColorTexture : 0U;
+        writeU16(bytes, 22U, flags);
         return bytes;
     }
     catch (const std::bad_alloc&)
@@ -119,7 +120,7 @@ Core::Result<MaterialPayloadView> parseMaterialPayload(std::span<const std::byte
     view.baseColorA = readF32(payload, 16U);
     const u8 doubleSided = readU8(payload, 20U);
     view.alphaMode = static_cast<MaterialAlphaMode>(readU8(payload, 21U));
-    const u16 reserved = readU16(payload, 22U);
+    const u16 flags = readU16(payload, 22U);
 
     if (view.schemaVersion != MaterialWire::SchemaVersion)
     {
@@ -138,10 +139,11 @@ Core::Result<MaterialPayloadView> parseMaterialPayload(std::span<const std::byte
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported material alphaMode");
     }
-    if (reserved != 0)
+    if ((flags & ~MaterialWire::FlagHasBaseColorTexture) != 0)
     {
-        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material reserved field must be zero");
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material flags has unknown bits");
     }
+    view.hasBaseColorTexture = (flags & MaterialWire::FlagHasBaseColorTexture) != 0;
     if (!finiteColor(view.baseColorR, view.baseColorG, view.baseColorB, view.baseColorA))
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "material baseColor must be finite");
@@ -161,6 +163,24 @@ Core::Result<std::vector<std::byte>> writeCookedMaterialAsset(Core::AssetId asse
     if (!payload)
     {
         return Core::failure(payload.error());
+    }
+    if (desc.baseColorTextureId)
+    {
+        const std::array deps{CookedAssetWriteDependency{
+            .assetId = desc.baseColorTextureId,
+            .expectedKind = AssetKind::Texture2D,
+            .flags = DependencyFlags::Required,
+        }};
+        return writeCookedAssetBytes(CookedAssetWriteDesc{
+            .assetKind = AssetKind::Material,
+            .assetTypeVersion = MaterialWire::SchemaVersion,
+            .targetPlatform = platform,
+            .assetId = assetId,
+            .dependencies = deps,
+            .payload = *payload,
+            .payloadAlignment = 4,
+            .computeContentHash = true,
+        });
     }
     return writeCookedAssetBytes(CookedAssetWriteDesc{
         .assetKind = AssetKind::Material,

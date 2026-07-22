@@ -182,7 +182,8 @@ TEST(BgfxOpaque3DGeometryTest, AcceptsNonFixtureMeshKeyAtGeometryStage)
     EXPECT_EQ(requirements->batchCount, 1U);
 }
 
-TEST(BgfxOpaque3DGeometryTest, RejectsUnsupportedMaterialKeyExplicitly)
+// M11-E5: non-fixture materialKey is valid; texture binds via materialKey at submit.
+TEST(BgfxOpaque3DGeometryTest, AcceptsNonFixtureMaterialKeyAtGeometryStage)
 {
     RenderSceneBuilder builder = makeBuilder();
     auto sceneResult = committedScene(builder, Opaque3DFixtureMeshKey,
@@ -190,8 +191,8 @@ TEST(BgfxOpaque3DGeometryTest, RejectsUnsupportedMaterialKeyExplicitly)
     ASSERT_TRUE(sceneResult.has_value());
 
     auto requirements = checkedOpaque3DFrame(*sceneResult);
-    ASSERT_FALSE(requirements.has_value());
-    EXPECT_EQ(requirements.error().code, Core::CoreErrorCode::Unsupported);
+    ASSERT_TRUE(requirements.has_value()) << (requirements ? "" : requirements.error().message);
+    EXPECT_EQ(requirements->instanceCount, 2U);
 }
 
 TEST(BgfxOpaque3DGeometryTest, RejectsUnsupportedSubmeshIndexExplicitly)

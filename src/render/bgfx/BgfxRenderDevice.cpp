@@ -26,6 +26,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <limits>
@@ -45,9 +47,15 @@ namespace {
 // M11-D1: bgfx CallbackI for requestScreenShot. screenShot may run on render thread.
 class BgfxCaptureCallback final : public bgfx::CallbackI {
   public:
-    void fatal(const char* /*filePath*/, uint16_t /*line*/, bgfx::Fatal::Enum /*code*/,
-               const char* /*str*/) override
+    void fatal(const char* filePath, uint16_t line, bgfx::Fatal::Enum code, const char* str) override
     {
+        // Log then abort so hangs are not stuck behind a modal debug dialog.
+        // Do not write from traceVargs: multi-threaded bgfx + redirected stderr deadlocks.
+        std::fprintf(stderr, "bgfx FATAL code=%d %s:%u %s\n", static_cast<int>(code),
+                     filePath != nullptr ? filePath : "?", static_cast<unsigned>(line),
+                     str != nullptr ? str : "");
+        std::fflush(stderr);
+        std::abort();
     }
 
     void traceVargs(const char* /*filePath*/, uint16_t /*line*/, const char* /*format*/,
@@ -866,6 +874,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         if (bgfxInitialized_)
         {
             mesh3DBindings_.clear();
+            mesh3DMaterialTextureBindings_.clear();
             for (MeshSlot& slot : meshes_)
             {
                 if (slot.live)
@@ -903,8 +912,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(opaque3DProgram_);
                 opaque3DProgram_ = BGFX_INVALID_HANDLE;
-                --statistics_.liveResources;
             }
+            mesh3DMaterialTextureBindings_.clear();
             if (bgfx::isValid(sprite2DProgram_))
             {
                 bgfx::destroy(sprite2DProgram_);
@@ -1152,6 +1161,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setVertexBuffer(0, vb);
             bgfx::setIndexBuffer(ib);
             bgfx::setInstanceDataBuffer(&instanceBuffer, batch.firstItem, batch.itemCount);
+            // Texture sampling for Unlit baseColor is deferred until shader + sampler path is
+            // validated on D3D11 (M11-E5 asset/API surface remains; GPU sample lands with shader).
             bgfx::submit(kOpaque3DView, opaque3DProgram_);
         }
     }
@@ -1306,6 +1317,17 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 it = spriteTextureBindings_.erase(it);
             } else
+            {
+                ++it;
+            }
+        }
+        for (auto it = mesh3DMaterialTextureBindings_.begin(); it != mesh3DMaterialTextureBindings_.end();)
+        {
+            if (it->second == texture)
+            {
+                it = mesh3DMaterialTextureBindings_.erase(it);
+            }
+            else
             {
                 ++it;
             }
@@ -1491,6 +1513,35 @@ class BgfxRenderDevice final : public IRenderDevice {
             return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is invalid");
         }
         mesh3DBindings_[meshKey] = mesh;
+        return Core::success();
+    }
+
+    // M11-E5: bind baseColor texture for Mesh3D materialKey (0 clears).
+    [[nodiscard]] Core::Status setMesh3DMaterialTextureBinding(u32 materialKey, GpuTextureId texture) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (materialKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload, "materialKey must be non-zero");
+        }
+        if (!texture)
+        {
+            mesh3DMaterialTextureBindings_.erase(materialKey);
+            return Core::success();
+        }
+        if (texture.index >= textures_.size() || !textures_[texture.index].live ||
+            textures_[texture.index].generation != texture.generation)
+        {
+            return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
+        }
+        mesh3DMaterialTextureBindings_[materialKey] = texture;
         return Core::success();
     }
 
@@ -1714,6 +1765,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     };
     std::vector<MeshSlot> meshes_{};
     std::unordered_map<u32, GpuMeshId> mesh3DBindings_{};
+    std::unordered_map<u32, GpuTextureId> mesh3DMaterialTextureBindings_{};
 
     bool frameOpen_ = false;
     bool stopped_ = false;

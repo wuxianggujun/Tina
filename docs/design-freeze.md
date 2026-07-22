@@ -682,8 +682,12 @@ Opaque alpha）；recipe `material <id> unlit r g b [a]`；`parseMaterialFromCoo
 validation。`tina_sample_3d` 加载 3 个 cooked Material，extract 使用其 baseColor（尚无 Texture 依赖、
 无 materialKey→GPU 表）。
 
-M11 产品 3D 竖切（E0–E4）：StaticMesh + Unlit Material solid + `tina_sample_3d` 视为可验收最小产品 3D
-门禁；glTF/textured Material/Prefab/PBR 仍 Deferred，不阻塞本收口，也不单独满足 M12 Legacy 删除。
+M11-E5：Material 可选 `baseColorTexture`（cooked Texture2D 依赖 + payload flag）；recipe
+`material <id> unlit r g b [a] [texId]`；Opaque3D unlit FS 采样 `s_tex`；
+`IRenderDevice::setMesh3DMaterialTextureBinding`；`tina_sample_3d` 2×2 checker 纹理门禁。
+
+M11 产品 3D 竖切（E0–E5）：StaticMesh + Unlit solid/textured + `tina_sample_3d` 视为可验收最小产品 3D
+门禁；glTF/Prefab/PBR 仍 Deferred，不阻塞本收口，也不单独满足 M12 Legacy 删除。
 
 M11-A0：可选 `Tina::Physics2D` 生命周期基础已完成 Windows Debug/Release `tina_physics2d_tests` 门禁；
 Box2D 3.x 保持 PRIVATE，State/feature 持有单线程固定步 World，Body/Shape 使用 owner-aware generation

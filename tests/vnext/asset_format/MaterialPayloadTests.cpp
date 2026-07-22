@@ -42,6 +42,7 @@ TEST(MaterialPayloadTests, UnlitBaseColorRoundTrip)
     EXPECT_FLOAT_EQ(view->baseColorB, 0.30F);
     EXPECT_FLOAT_EQ(view->baseColorA, 1.0F);
     EXPECT_TRUE(view->doubleSided);
+    EXPECT_FALSE(view->hasBaseColorTexture);
     EXPECT_EQ(view->alphaMode, MaterialAlphaMode::Opaque);
 }
 
@@ -61,12 +62,41 @@ TEST(MaterialPayloadTests, CookedMaterialRoundTrip)
     ASSERT_TRUE(asset.has_value()) << (asset ? "" : asset.error().message);
     EXPECT_EQ(asset->header().assetKind, AssetKind::Material);
     EXPECT_EQ(asset->header().assetId, materialId);
+    EXPECT_EQ(asset->header().dependencyCount, 0U);
 
     auto view = parseMaterialPayload(asset->payload());
     ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
     EXPECT_FLOAT_EQ(view->baseColorR, 0.1F);
     EXPECT_FLOAT_EQ(view->baseColorA, 0.5F);
+    EXPECT_FALSE(view->hasBaseColorTexture);
     ASSERT_TRUE(verifyCookedAssetContentHash(*asset).has_value());
+}
+
+TEST(MaterialPayloadTests, CookedMaterialWithTextureDependency)
+{
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(0x42));
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(0x43));
+    const MaterialPayloadDesc desc{
+        .baseColorR = 1.0F,
+        .baseColorG = 1.0F,
+        .baseColorB = 1.0F,
+        .baseColorA = 1.0F,
+        .baseColorTextureId = textureId,
+    };
+    auto cooked = writeCookedMaterialAsset(materialId, desc);
+    ASSERT_TRUE(cooked.has_value()) << (cooked ? "" : cooked.error().message);
+
+    auto asset = parseCookedAssetView(*cooked);
+    ASSERT_TRUE(asset.has_value()) << (asset ? "" : asset.error().message);
+    EXPECT_EQ(asset->header().dependencyCount, 1U);
+    auto dep = asset->dependency(0);
+    ASSERT_TRUE(dep.has_value());
+    EXPECT_EQ(dep->assetId, textureId);
+    EXPECT_EQ(dep->expectedKind, AssetKind::Texture2D);
+
+    auto view = parseMaterialPayload(asset->payload());
+    ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+    EXPECT_TRUE(view->hasBaseColorTexture);
 }
 
 TEST(MaterialPayloadTests, RejectsOutOfRangeAndNonFinite)

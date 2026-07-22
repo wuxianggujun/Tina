@@ -119,6 +119,17 @@ class NullRenderDevice final : public IRenderDevice {
                 ++it;
             }
         }
+        for (auto it = materialTextureBindings_.begin(); it != materialTextureBindings_.end();)
+        {
+            if (it->second == texture)
+            {
+                it = materialTextureBindings_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
         return Core::success();
     }
 
@@ -229,6 +240,30 @@ class NullRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status setMesh3DMaterialTextureBinding(u32 materialKey, GpuTextureId texture) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (materialKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload, "materialKey must be non-zero");
+        }
+        if (!texture)
+        {
+            materialTextureBindings_.erase(materialKey);
+            return Core::success();
+        }
+        if (texture.index >= textures_.size() || !textures_[texture.index].live ||
+            textures_[texture.index].generation != texture.generation)
+        {
+            return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
+        }
+        materialTextureBindings_[materialKey] = texture;
+        return Core::success();
+    }
+
     void shutdown() noexcept override
     {
         stopped_ = true;
@@ -236,6 +271,7 @@ class NullRenderDevice final : public IRenderDevice {
         spriteBindings_.clear();
         textures_.clear();
         meshBindings_.clear();
+        materialTextureBindings_.clear();
         meshes_.clear();
         statistics_.liveResources = 0;
     }
@@ -260,6 +296,7 @@ class NullRenderDevice final : public IRenderDevice {
     std::unordered_map<u32, GpuTextureId> spriteBindings_{};
     std::vector<MeshSlot> meshes_{};
     std::unordered_map<u32, GpuMeshId> meshBindings_{};
+    std::unordered_map<u32, GpuTextureId> materialTextureBindings_{};
     u64 nextFrameIndex_ = 0;
     u64 nextSubmissionIndex_ = 0;
     bool frameOpen_ = false;
