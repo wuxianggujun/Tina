@@ -216,15 +216,10 @@ FATAL。产品入口为 `Tina::Desktop` + `tina_sample_*`；UI 仅 vNext `Tina::
  `Tina::PlatformGlfw` 只 PUBLIC 依赖 Tina Platform，GLFW 为 PRIVATE；公共 factory header 不出现 GLFW/native 类型，Null 构建闭包仍不链接 GLFW |
 | 完整 vNext Runtime | 尚未完成 | GameStateStack/commands、worker、Pass Scheduler/RenderFramePacket、Scene component-integrated extraction、AssetSystem/Audio、owning UI packet/pin、Text/Glyph/完整 Widget 与 submission drain 仍按后续切片实施；M8-A World/Transform、M8-B 2D extraction、M9-A 3D CPU/Null extraction、M9-B Opaque3D fixture、M9-C Sprite2D fixture、M10-A0 wire format、M10-A1 CatalogSnapshot、Desktop SolidFill 可见样例、standalone UI/Render/bridge foundation、Runtime-private route/layout/startup/display borrow 接线、Button primary-pointer default action 和私有 bgfx SolidQuad pass 不代表完整产品路径完成 |
 
-因此不能用“删除旧 `src`”作为下一步。正确顺序是：建立新边界和测试 → 迁移调用点 → 确认旧接口零引用 → 通过 2D/UI/3D 验收 → 在独立提交中删除旧实现。
-
-旧模块只有同时满足以下条件才能删除：
-
-1. 已有明确替代模块和所有权关系；
-2. 生产代码与测试不再 include、链接或调用旧接口；
-3. Windows/Linux 构建和直接 GoogleTest 通过；
-4. 2D、UI、3D 冒烟和资源回收门禁通过；
-5. 删除操作不夹带新功能，能够独立回滚。
+Legacy 产品源码删除已完成（见 [m12-legacy-ui-retirement.md](m12-legacy-ui-retirement.md)）。
+实现目录已扁平化：`src/asset`、`src/ui`、`src/scene` 等，**不再使用** `src/vnext/` 前缀；
+公开头仍在 `include/tina/<module>/`。产品资源：`resources/fonts`（FreeType/sample 字体）、
+sample 自带 catalog recipe；**不**再整树复制 `resources/` 进 vNext-only 构建图。
 
 ## 目标契约
 
@@ -237,7 +232,7 @@ FATAL。产品入口为 `Tina::Desktop` + `tina_sample_*`；UI 仅 vNext `Tina::
   `tina_asset_format`、`tina_asset`、`tina_render`、`tina_render_bgfx`、`tina_ui`、
   `tina_ui_freetype`、`tina_audio`、`tina_audio_miniaudio`、`tina_profile_tracy` 与 `tina_assetc`
   形成单向依赖；
-- vNext target 不依赖 EASTL；标准库/`std::pmr` 承担通用容器，Tina 只提供少量经过测试的
+- 产品 target 不依赖 EASTL；标准库/`std::pmr` 承担通用容器，Tina 只提供少量经过测试的
   固定容量和 generation 专用结构；xxHash 只藏在 Hash adapter 后；
 - 2D/3D 共享右手 Y-up 世界，2D 位于 XY 平面；
 - Game SDK 和 Phase Context 不暴露 RenderDevice/native handle；Tina module public header 可以暴露

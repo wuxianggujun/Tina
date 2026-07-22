@@ -27,9 +27,15 @@
 
 ## 保留 / 扫尾
 
-- `thirdparty/bgfx.cmake`（vNext RenderBgfx）— **保留**
+- `thirdparty/bgfx.cmake`（RenderBgfx）— **保留**
 - EASTL/EABase submodule — **已从 `.gitmodules` 与工作树移除**
-- `resources/` — 仍在仓库；vNext 不复制进 Null 图；可按无消费者再删
+- `src/vnext/`、`tests/vnext/` 目录前缀 — **已扁平化**（`02e13d7a`）：实现在 `src/<module>`，
+  测试在 `tests/<module>`（Runtime→UI 专项为 `tests/runtime_ui`）；公开头仍为 `include/tina/`
+- `resources/` — **保留有消费者的资产**：
+  - `resources/fonts/SourceHanSansSC-Regular.otf`：`tina_sample_2d`（FreeType 图）、Desktop UI 字体、
+    FreeType 测试宏路径
+  - 其余 `audio/`、`textures/`、`shaders/` 等：当前 CMake/产品样例**无**硬编码路径；可后续单独审计删除
+  - 产品 **不**再 `file(COPY)` 整棵 `resources/` 进 vNext-only 构建图
 
 ## 验证（禁止 clean-first 全量 wipe）
 

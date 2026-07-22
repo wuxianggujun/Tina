@@ -30,9 +30,11 @@
 - [风险登记](risks.md)
 - [Architecture Decision Records](adr/README.md)
 - [Roadmap](roadmap.md)
+- [M12 门禁清单](m12-gate-checklist.md)
+- [M12 Legacy 退役说明](m12-legacy-ui-retirement.md)
+- [M12 Windows 证据摘录](m12-evidence-windows.md)
 
-主题设计文档会明确区分当前实现、已知问题和目标契约。当前 M9-A 已有 CPU/Null Perspective/Mesh3D
-extraction foundation，M9-B/M9-C 已有私有 bgfx 3D/2D fixture；M10-A0 已完成独立 Cooked Header/Manifest
-wire-format 与只读校验基础。**M11-E0–E5 最小产品 3D 已落地**：Catalog recipe StaticMesh cube +
-Unlit solid/textured + `tina_sample_3d`（非 glTF）。Cooker **cgltf → glTF/Prefab/PBR** 仍 Deferred。
-M12 删除门槛跟踪见 [m12-gate-checklist.md](m12-gate-checklist.md)。测试和实际运行结果优先于文档。
+主题设计文档会明确区分当前实现、已知问题和目标契约。产品路径为 vNext samples（`tina_sample_2d` /
+`tina_sample_3d` 等）；实现目录已扁平为 `src/<module>`、`tests/<module>`，公开头 `include/tina/`。
+**M11-E0–E9 3D 竖切已落地**（含 cgltf 最小 glTF + Prefab + product sample）；multi-mesh/外部纹理/PBR
+仍薄。Legacy `Tina.exe`/`src/ui` 产品图已退役。测试和实际运行结果优先于文档。
