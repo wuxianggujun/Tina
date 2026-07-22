@@ -1,119 +1,123 @@
-# Scene 与 ECS
+# Scene 与 Entity World
 
-## Legacy 当前 Scene 栈
+本文描述当前 `Tina::Scene`。旧 `SceneManager`、Legacy Scene stack 与旧 EnTT World 已随产品图删除；
+当前模块不链接 EnTT，也不承担 `IGameState` 生命周期。
 
-`SceneManager` 持有 Scene 所有权，只有栈顶 Scene 参与 fixed update、variable update 和 render。它同时负责 `onEnter`、`onExit`、`onPause`、`onResume` 生命周期。
+## 模块边界
 
-```mermaid
-stateDiagram-v2
-    [*] --> Active: push / onEnter
-    Active --> Paused: push another / onPause
-    Paused --> Active: pop above / onResume
-    Active --> [*]: pop or replace / onExit
-```
+`tina_scene` 负责：
 
-当前操作规则：
+- 固定容量、PMR-backed `World`；
+- generation/owner-aware `EntityId`；
+- Local/World Transform 层级与显式 publication barrier；
+- Camera2D、SpriteRenderer2D、PerspectiveCamera3D、MeshRenderer3D 组件；
+- World 到 phase-local `RenderSceneWriter` 的 2D/3D extraction；
+- Cooked Prefab node 到 World entity hierarchy 的事务式实例化。
 
-- `push`：暂停旧栈顶、停用旧 UI roots，配置新 Scene 后调用 `onEnter`；
-- `pop`：先停用 UI 和事件，再调用栈顶 `onExit`，最后恢复下一层 Scene；
-- `replace`：退出并销毁旧栈顶，再进入新 Scene；
-- `clear`：从栈顶开始逐个退出；
-- Scene 正在分发 fixed/variable update 时，直接操作会转换为 pending operation；
-- pending operation 统一在 variable update 末尾按入队顺序提交，避免在回调栈中销毁当前 Scene。
+它不负责：
 
-Scene 切换目前缺少完整自动化门禁。下一步应覆盖：回调中 push/pop/replace、同帧多个操作、暂停/恢复顺序、UI roots 激活、空栈和退出时 pending operation 的处理。
+- State push/pop、菜单或暂停流程；
+- Platform/Input、TileMap gameplay、Physics stepping 或 Audio；
+- AssetSystem IO/Lease 生命周期；
+- bgfx handle、shader、native window 或 backend command。
 
-vNext 迁移时旧 Scene 转为 `IGameState`，不照搬二值 `onPause/onResume`。GameStatePolicy 分别决定
-Fixed Update/Frame Update/Gameplay Input/UI Input/Render 是否向下传播；push/replace 使用事务 enter，失败保留旧栈，
-pop/replace 的 exit `noexcept` 且恰好一次。旧 pending operation 只有在这些门禁齐全后才删除。
+依赖方向保持为 Scene → Core/Render/AssetFormat。第三方 ECS 或 renderer 类型不得进入公开头。
 
-## Legacy 当前 World/ECS
+## World 所有权
 
-`World` 使用 EnTT 保存角色组件并持有输入、AI、移动、碰撞和渲染系统。当前实现仍存在明显的边界泄漏：
+`World::Create(WorldConfig, memory_resource)` 在创建时固定 entity/component storage 容量。`World` 不可
+复制，只能 move-construct；所有 mutation 由 owner thread 串行执行。
 
-- `World` 公共接口直接返回 `entt::entity` 和 `entt::registry`；
-- `GameScene` 直接查询和修改 registry；
-- `World` 直接依赖具体 `TileMap`、输入结构、Renderer/ShaderManager 和 bgfx view ID；
-- 玩法 ECS 碰撞与独立 Box2D `Physics2D` 尚未形成清晰职责划分。
+`EntityId` 是 Runtime identity，不是持久化 ID：
 
-因此，“EnTT 仅作为内部存储”和“World 不依赖输入、TileMap、Renderer”目前是目标契约，不是已完成事实。
+- `createEntity()` 发布新 generation；
+- destroy 后旧 ID 必须失败；
+- 跨 World 使用 ID 必须失败；
+- Catalog/Prefab 持久引用使用 `AssetId` 或内容自己的稳定 ID，不能序列化 `EntityId`。
 
-## 推荐收敛方式
+默认 `destroyEntity()` 只销毁目标实体，直接子节点提升到 root 并保持最后发布的 world transform；
+需要整体删除时显式调用 `destroySubtree()`。
 
-不应一次性重写整个 World。按调用面逐步收口：
+## Transform 契约
 
-1. 增加带 generation 的 Tina `EntityId`，先用于新接口；旧 `entt::entity` 接口保留到调用点迁移完成。
-2. 把 `createCharacter`、控制对象切换、Transform/Renderable 修改等高频操作改成明确的 World command/query。
-3. GameScene 不再直接访问 registry 后，才把 registry getter 降为模块内部接口。
-4. 把输入快照转换为玩法 command，World 不读取 GLFW 或全局输入状态。
-5. 把渲染改为 extraction：World 只输出后端无关 RenderScene；Game component 保存 AssetHandle/
-   材质语义，不保存 GPU handle，Render 内部才映射 pass/resource。
-6. TileMap 属于 gameplay feature，通过只读 `IGridCollisionProvider` 传给角色/碰撞系统；Box2D
-   保持独立 2D 模块，不与未来 3D 物理强行统一。
+每个实体拥有 `LocalTransform` 与已发布的 `WorldTransform`。父子修改支持：
 
-目标数据流：
+- `ReparentMode::KeepWorld`：默认，重挂后保持 world pose；
+- `ReparentMode::KeepLocal`：保持 local pose，由新父节点决定 world pose。
+
+循环、stale parent、非法 finite/scale 输入会返回结构化错误，不做静默修复。`setParent()` 与
+`setLocalTransform()` 只修改 owner state；`updateWorldTransforms()` 是显式 publication barrier，按稳定
+顺序非递归传播。Extraction 会先调用该 barrier，确保读取同一批已发布 transform。
+
+## 当前组件
+
+| 组件 | 用途 | 关键约束 |
+| --- | --- | --- |
+| `Camera2D` | FixedWorldHeight/PixelPerfect 投影、viewport、pixel snap | 每帧最多一个 active 2D camera；surface 0x0 时跳过 |
+| `SpriteRenderer2D` | sprite key、尺寸/pivot/UV override、颜色与排序 | key 非0；UV finite 且严格递增 |
+| `PerspectiveCamera3D` | perspective 参数与 active 标志 | 每帧最多一个 active 3D camera |
+| `MeshRenderer3D` | mesh/material key、bounds、base color、可见性 | key 由产品 AssetId resolver 或 fixture 提供 |
+
+组件 storage 与 entity slot 共用固定容量。`set*` 替换当前值，`clear*` 移除组件；访问 stale 或 cross-world
+ID 失败。Camera2D 与 PerspectiveCamera3D 是独立轨道，可以在同一帧同时存在；各自出现多个 active
+camera 时 extraction 失败。
+
+## Render extraction
+
+`extractRenderSceneFromWorld(World&, RenderSceneWriter&, params)` 在调用方提供的 writer 中事务式写入：
 
 ```text
-PlatformFrameView -> UI consumption/claims -> game commands -> fixed-step World systems
-World components -> Render Scene Extraction -> RenderScene --+
-                                                    +-> RenderFrame -> Pass Scheduler
-IGameState UI model -> retained UI tree -> DisplayList+
+updateWorldTransforms
+  -> resolve active Camera2D and/or PerspectiveCamera3D
+  -> emit visible SpriteRenderer2D items
+  -> emit visible MeshRenderer3D items
+  -> caller commits RenderSceneBuilder
 ```
 
-## vNext 内存与并行契约
+2D sprite 使用 world position/scale、Z rotation、pivot/size/UV override，并由 RenderScene 执行排序、
+culling、batch 规划与 pixel snap。3D mesh 使用 world pose/scale、local bounds 和 material color。
+Scene 只写 backend-neutral key 和 POD；真实 Texture2D/StaticMesh 由产品层上传到 RenderDevice 后绑定。
 
-- EnTT 组件池属于 `World` 的 Scene memory domain，组件不得保存 FrameArena 指针；
-- fixed phase 中只读或写入互不相交 chunk 的系统可以提交 CPU Task；结构变化只写每 Worker
-  私有 command buffer；
-- barrier 后按稳定 worker/chunk/index 顺序合并 command，再统一创建、销毁和修改层级；
-- 每个 fixed substep 都执行 previous snapshot → jobs/barrier → command commit → transform
-  propagation；第 N 步提交对第 N+1 步可见；
-- 新 Transform 令 previous=current，销毁后不进入 extraction；Render 只在 previous/current 的
-  position/quaternion/scale 间插值，不逐元素插值矩阵；
-- Render Scene Extraction 把连续 `RenderItem` 写入当前帧 Render Arena，Renderer 不回查 World；
-- `EntityId` 的 generation 在任务开始和提交两端校验，迟到任务不能修改复用后的 slot；
-- 只有 profiling 证明系统工作量覆盖调度成本时才并行，小集合继续直接 for-loop。
+writer、committed view 与其中 span 只在对应 Runtime phase/submit 调用内有效，不能保存到下一帧。
 
-M8-A 已将 identity/transform 基础落为独立 `tina_scene`。当前 standalone `World` 仍在 owner thread
-立即修改层级，使用 `updateWorldTransforms()` 做两阶段 scratch 计算和成功后发布；`setParent()` 默认
-`KeepWorld`，`KeepLocal` 必须显式指定，`destroyEntity()` 默认提升直接子节点，`destroySubtree()` 才递归
-删除。固定容量 dense live index 让子树删除不依赖逐实体线性查找。因为当前 `WorldTransform` 仍是
-position/quaternion/scale 三元组，非均匀父 scale 与旋转子节点造成的 shear 会返回明确诊断，不能静默近似。
+## Prefab 实例化
 
-M8-B 只在 `tina_render`/Runtime integration 层提供已解析的 Camera2D/Sprite2D writer 和
-`RenderFrame::primaryWorldScene` handoff。**M8-C0** 在 `Scene::World` 上增加可选 POD 组件
-`Camera2D` / `SpriteRenderer2D` 与 free function `extractRenderSceneFromWorld(World&,
-RenderSceneWriter&, ExtractRenderSceneParams)`：先 `updateWorldTransforms()`，至多一个
-`active` Camera2D → `makeResolvedCamera2DInput` + `setCamera2D`，可见 Sprite → `addSprite2D`
-（`fixtureSpriteKey`）。**M8-C2** 为 fixture 路径增加可选 UV rect override（与
-`RenderSprite2DInput` 同一校验）。**M8-D0** 对称增加 `PerspectiveCamera3D` / `MeshRenderer3D`：
-至多一个 active Perspective → `setPerspectiveCamera`，可见 mesh → `addMesh3D`（fixture
-meshKey/materialKey）。2D 与 3D 相机轨道独立（可同帧各 0/1 个 active）。无 EnTT、无阶段末
-command buffer、无 Runtime Phase Context World 视图、无 AssetHandle 解析；`tina_sample_2d`
-相机/角色/crate 已走 Scene extract，TileMap/selection 仍可手写 writer。Headless/Null
-infrastructure sample 仍验证 CPU extraction/lifetime，不等同于正式 2D/3D 产品验收。
+`instantiatePrefab()` 读取 `AssetFormat::PrefabPayloadView`，按稳定 node 顺序执行：
 
-内存容量、零稳态分配和基准工作负载见 [性能预算与内存系统](performance-memory.md)；任务
-barrier、取消和确定性合并见 [Task System](task-system.md)。
+```text
+createEntity(local transform)
+  -> setParent(KeepLocal)
+  -> optional setMeshRenderer3D
+```
 
-层级命令必须写明语义：reparent 默认保持 world，也可显式 keep-local；父实体销毁默认把子
-实体 reparent 到 root 并保持 world，递归销毁使用独立命令。批量 commit 在包含本批所有新边
-的临时图上检测循环后才修改 registry。Quaternion 写入时归一化，近零值返回错误；非均匀
-scale 可用于渲染，但物理后端不支持时必须拒绝/显式近似。首期每个启用 World pass 的
-primary RenderView 恰好选择一个 active Camera，零个或多个都产生确定诊断；纯 UI/Present
-帧允许没有 World view/Camera。
+`PrefabMeshBinding` 可以通过回调把每个 mesh/material `AssetId` 解析为 backend-neutral key，并补充 bounds/
+baseColor。任一步失败都会销毁本次已创建的全部 entity，不留下半份 hierarchy。
 
-## 近期验收条件
+multi-mesh Cooker 已能让不同 Prefab node 引用 distinct StaticMesh/Material AssetId；当前产品 sample 仍只
+绑定一个 product mesh。两个 mesh 的 upload/bind/extract/draw 闭环由 `3D-001` 跟踪。
 
-- Scene pending operation 有确定且经过测试的提交点；
-- Scene 暂停后不再接收玩法或 UI 输入，恢复时焦点状态合法；
-- stale `EntityId` 不能解析到复用后的实体；
-- 新增 World API 不暴露 EnTT、bgfx、GLFW 或具体 UI 类型；
-- fixed update 只修改 Simulation 状态，渲染提取不反向修改 World。
-- reparent keep-world/keep-local、父销毁、同批循环、Quaternion 异常、World view 零/多 Camera
-  诊断及纯 UI 零 Camera 合法路径均有测试；
-- 50,000活跃 Transform 与20,000可见 RenderItem 的固定基准记录 p50/p95/p99，稳态
-  command/extraction 的 Tina-owned 动态分配增量为0。
+## 与 Runtime/Game 的关系
 
-游戏入口、2D TileMap/Camera/Sprite 和3D Mesh/Material/Prefab 的完整落点分别见
-[游戏程序入口与状态栈](gameplay.md)、[2D 游戏架构](game-2d.md)和[3D 游戏架构](game-3d.md)。
+当前 Runtime 不把 `World` 放入 Phase Context。产品 State 自己持有 World，并在
+`IGameState::extractRenderScene()` 中调用 Scene extraction：
+
+```text
+Game State fixed/frame update
+  -> mutate gameplay + World
+  -> extractRenderSceneFromWorld
+  -> Runtime commits RenderScene
+  -> Render backend consumes the submitted view
+```
+
+TileMap instance、CharacterController2D、PhysicsWorld2D 与 AssetLease 由产品层持有；Scene core 不反向依赖
+这些系统。
+
+## 验证
+
+- `tina_scene_tests`：entity generation、owner、destroy/reparent、Transform propagation、2D/3D component、
+  extraction 与 Prefab rollback/resolver；
+- `tina_render_scene_tests`：Camera resolve、culling、排序、batch、world picking；
+- `tina_sample_2d` / `tina_sample_3d`：产品 Asset → Scene → Render 路径；
+- header-isolation：公开头不得泄漏 EnTT、GLM、bgfx 或 cgltf。
+
+具体命令见 [测试说明](testing.md)，2D/3D 产品边界见 [2D](game-2d.md)与 [3D](game-3d.md)。

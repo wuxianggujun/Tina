@@ -344,7 +344,7 @@ TEST(UITextTests, SameTextIsNoOpAndClearingTextShrinksAutoSize)
     EXPECT_TRUE(found);
 }
 
-TEST(UITextTests, ImeFocusCompositionAndCommitAppendToLabel)
+TEST(UITextTests, TextEditImeFocusCompositionAndCommitAtCaret)
 {
     auto windowsResult = WindowPool::Create(1);
     ASSERT_TRUE(windowsResult.has_value());
@@ -367,19 +367,19 @@ TEST(UITextTests, ImeFocusCompositionAndCommitAppendToLabel)
     rootStyle.flex.alignItems = UI::UIAlignItems::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
 
-    auto labelResult = updater.createLabel(root.rootNodeId());
-    ASSERT_TRUE(labelResult.has_value());
-    const UI::UINodeId label = *labelResult;
-    UI::UILayoutStyle labelStyle{};
-    labelStyle.size.width = UI::UILayoutLength::Px(100.0F);
-    labelStyle.size.height = UI::UILayoutLength::Px(40.0F);
-    assertOk(updater.setLayoutStyle(label, labelStyle));
-    assertOk(updater.setText(label, "Hi"));
+    auto textEditResult = updater.createTextEdit(root.rootNodeId());
+    ASSERT_TRUE(textEditResult.has_value());
+    const UI::UINodeId textEdit = *textEditResult;
+    UI::UILayoutStyle textEditStyle{};
+    textEditStyle.size.width = UI::UILayoutLength::Px(100.0F);
+    textEditStyle.size.height = UI::UILayoutLength::Px(40.0F);
+    assertOk(updater.setLayoutStyle(textEdit, textEditStyle));
+    assertOk(updater.setText(textEdit, "Hi"));
     assertOk(context->commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
 
     EXPECT_FALSE(context->imeFocus().hasValue());
 
-    // Primary Down on the Label sets IME focus.
+    // Primary Down on the TextEdit sets text/IME focus.
     auto down = context->routePointerInput(UI::UIPointerInputEvent{
         .platformFrame = Platform::PlatformFrameId{1},
         .transitionOrdinal = 0,
@@ -391,7 +391,10 @@ TEST(UITextTests, ImeFocusCompositionAndCommitAppendToLabel)
         .button = Platform::PointerButton::Primary,
     });
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    EXPECT_EQ(context->imeFocus(), label);
+    EXPECT_EQ(context->imeFocus(), textEdit);
+    assertOk(updater.setTextSelection(
+        textEdit,
+        {.anchorCodepoint = 2, .caretCodepoint = 2}));
 
     auto composition = context->routeTextComposition(
         window,
@@ -428,7 +431,7 @@ TEST(UITextTests, ImeFocusCompositionAndCommitAppendToLabel)
     EXPECT_FALSE(context->imeCompositionActive());
     EXPECT_TRUE(context->imePreeditUtf8().empty());
 
-    auto text = updater.text(label);
+    auto text = updater.text(textEdit);
     ASSERT_TRUE(text.has_value());
     EXPECT_EQ(*text, "Hi好");
 }
@@ -455,7 +458,7 @@ TEST(UITextTests, TextInputWithoutImeFocusIsNotConsumed)
     EXPECT_FALSE(idle->applied);
 }
 
-TEST(UITextTests, ImePreeditPaintsAfterCommittedLabelText)
+TEST(UITextTests, TextEditImePreeditPaintsAtCaret)
 {
     auto windowsResult = WindowPool::Create(1);
     ASSERT_TRUE(windowsResult.has_value());
@@ -479,14 +482,14 @@ TEST(UITextTests, ImePreeditPaintsAfterCommittedLabelText)
     rootStyle.flex.alignItems = UI::UIAlignItems::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
 
-    auto labelResult = updater.createLabel(root.rootNodeId());
-    ASSERT_TRUE(labelResult.has_value());
-    const UI::UINodeId label = *labelResult;
-    UI::UILayoutStyle labelStyle{};
-    labelStyle.size.width = UI::UILayoutLength::Px(200.0F);
-    labelStyle.size.height = UI::UILayoutLength::Px(40.0F);
-    assertOk(updater.setLayoutStyle(label, labelStyle));
-    assertOk(updater.setText(label, "A"));
+    auto textEditResult = updater.createTextEdit(root.rootNodeId());
+    ASSERT_TRUE(textEditResult.has_value());
+    const UI::UINodeId textEdit = *textEditResult;
+    UI::UILayoutStyle textEditStyle{};
+    textEditStyle.size.width = UI::UILayoutLength::Px(200.0F);
+    textEditStyle.size.height = UI::UILayoutLength::Px(40.0F);
+    assertOk(updater.setLayoutStyle(textEdit, textEditStyle));
+    assertOk(updater.setText(textEdit, "A"));
     assertOk(context->commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
 
     auto down = context->routePointerInput(UI::UIPointerInputEvent{
@@ -512,8 +515,8 @@ TEST(UITextTests, ImePreeditPaintsAfterCommittedLabelText)
     const UI::UICommittedPaintView paint = context->committedPaint();
     // Committed "A" + preedit "B" => two paint entries.
     ASSERT_GE(paint.size(), 2U);
-    EXPECT_EQ(paint.entries()[0].node, label);
-    EXPECT_EQ(paint.entries()[1].node, label);
+    EXPECT_EQ(paint.entries()[0].node, textEdit);
+    EXPECT_EQ(paint.entries()[1].node, textEdit);
     // Preedit uses cyan-ish tint (0,180,255) premultiplied.
     EXPECT_EQ(paint.entries()[1].solidFill.green, 180);
     EXPECT_EQ(paint.entries()[1].solidFill.blue, 255);
@@ -535,7 +538,7 @@ TEST(UITextTests, ImePreeditPaintsAfterCommittedLabelText)
     EXPECT_FLOAT_EQ(context->committedPaint().entries()[1].worldRect.width, 2.0F);
 }
 
-TEST(UITextTests, ImeFocusLabelPaintsCaretAfterCommittedText)
+TEST(UITextTests, FocusedTextEditPaintsCaretAfterCommittedText)
 {
     auto windowsResult = WindowPool::Create(1);
     ASSERT_TRUE(windowsResult.has_value());
@@ -559,14 +562,14 @@ TEST(UITextTests, ImeFocusLabelPaintsCaretAfterCommittedText)
     rootStyle.flex.alignItems = UI::UIAlignItems::Start;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
 
-    auto labelResult = updater.createLabel(root.rootNodeId());
-    ASSERT_TRUE(labelResult.has_value());
-    const UI::UINodeId label = *labelResult;
-    UI::UILayoutStyle labelStyle{};
-    labelStyle.size.width = UI::UILayoutLength::Px(200.0F);
-    labelStyle.size.height = UI::UILayoutLength::Px(40.0F);
-    assertOk(updater.setLayoutStyle(label, labelStyle));
-    assertOk(updater.setText(label, "A"));
+    auto textEditResult = updater.createTextEdit(root.rootNodeId());
+    ASSERT_TRUE(textEditResult.has_value());
+    const UI::UINodeId textEdit = *textEditResult;
+    UI::UILayoutStyle textEditStyle{};
+    textEditStyle.size.width = UI::UILayoutLength::Px(200.0F);
+    textEditStyle.size.height = UI::UILayoutLength::Px(40.0F);
+    assertOk(updater.setLayoutStyle(textEdit, textEditStyle));
+    assertOk(updater.setText(textEdit, "A"));
     assertOk(context->commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
 
     // Before focus: only committed text glyph(s).
@@ -587,14 +590,81 @@ TEST(UITextTests, ImeFocusLabelPaintsCaretAfterCommittedText)
 
     const UI::UICommittedPaintView paint = context->committedPaint();
     ASSERT_EQ(paint.size(), 2U);
-    EXPECT_EQ(paint.entries()[0].node, label);
-    EXPECT_EQ(paint.entries()[1].node, label);
+    EXPECT_EQ(paint.entries()[0].node, textEdit);
+    EXPECT_EQ(paint.entries()[1].node, textEdit);
     EXPECT_FLOAT_EQ(paint.entries()[1].worldRect.width, 2.0F);
     EXPECT_GT(paint.entries()[1].worldRect.height, 0.0F);
     EXPECT_GT(paint.entries()[1].worldRect.x, paint.entries()[0].worldRect.x);
     EXPECT_EQ(paint.entries()[1].solidFill.red, 255);
     EXPECT_EQ(paint.entries()[1].solidFill.green, 255);
     EXPECT_EQ(paint.entries()[1].solidFill.blue, 255);
+}
+
+TEST(UITextTests, ImeReplacementCapacityCountsOnlyThePaintedSelectionReplacement)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+    const Platform::WindowId window = *windowResult;
+
+    auto context = createContext(
+        window,
+        UI::UIContextCapacityConfig{
+            .nodeCapacity = 8,
+            .rootCapacity = 1,
+            .paintSnapshotCapacity = 2,
+            .textByteCapacity = 64,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), UI::UILayoutStyle{}));
+
+    auto textEditResult = updater.createTextEdit(root.rootNodeId());
+    ASSERT_TRUE(textEditResult.has_value());
+    const UI::UINodeId textEdit = *textEditResult;
+    UI::UILayoutStyle textEditStyle{};
+    textEditStyle.size.width = UI::UILayoutLength::Px(200.0F);
+    textEditStyle.size.height = UI::UILayoutLength::Px(40.0F);
+    assertOk(updater.setLayoutStyle(textEdit, textEditStyle));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+
+    auto down = context->routePointerInput(UI::UIPointerInputEvent{
+        .platformFrame = Platform::PlatformFrameId{1},
+        .transitionOrdinal = 0,
+        .sourceSequence = 1,
+        .window = window,
+        .pointer = Platform::PrimaryPointerId,
+        .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+        .position = {.x = 10.0F, .y = 10.0F},
+        .button = Platform::PointerButton::Primary,
+    });
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+
+    assertOk(updater.setText(textEdit, "ABCDEFGHIJ"));
+    assertOk(updater.setTextSelection(
+        textEdit,
+        {.anchorCodepoint = 0, .caretCodepoint = 10}));
+    auto composition = context->routeTextComposition(
+        window,
+        Platform::PlatformFrameId{2},
+        2,
+        "X",
+        1,
+        Platform::TextCompositionStage::Started);
+    ASSERT_TRUE(composition.has_value())
+        << (composition ? "" : composition.error().message);
+
+    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    ASSERT_EQ(paint.size(), 2U);
+    EXPECT_EQ(paint.entries()[0].node, textEdit);
+    EXPECT_EQ(paint.entries()[0].solidFill.green, 180);
+    EXPECT_EQ(paint.entries()[0].solidFill.blue, 255);
+    EXPECT_EQ(paint.entries()[1].node, textEdit);
+    EXPECT_FLOAT_EQ(paint.entries()[1].worldRect.width, 2.0F);
 }
 
 } // namespace Tina::Tests

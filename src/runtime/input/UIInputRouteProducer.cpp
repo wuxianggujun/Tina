@@ -40,6 +40,31 @@ constexpr usize BitsPerConsumptionWord = sizeof(u64) * 8U;
     return button < Platform::PointerButton::Count;
 }
 
+[[nodiscard]] std::optional<UI::UITextEditCommand> textEditCommandForKey(
+    Platform::Key key,
+    bool controlHeld) noexcept
+{
+    if (controlHeld && key == Platform::Key::A) {
+        return UI::UITextEditCommand::SelectAll;
+    }
+    switch (key) {
+    case Platform::Key::Left:
+        return UI::UITextEditCommand::MoveLeft;
+    case Platform::Key::Right:
+        return UI::UITextEditCommand::MoveRight;
+    case Platform::Key::Home:
+        return UI::UITextEditCommand::MoveHome;
+    case Platform::Key::End:
+        return UI::UITextEditCommand::MoveEnd;
+    case Platform::Key::Backspace:
+        return UI::UITextEditCommand::Backspace;
+    case Platform::Key::Delete:
+        return UI::UITextEditCommand::Delete;
+    default:
+        return std::nullopt;
+    }
+}
+
 [[nodiscard]] bool isRepresentableLogicalValue(double value) noexcept
 {
     constexpr double MaximumLogicalValue = static_cast<double>((std::numeric_limits<float>::max)());
@@ -380,30 +405,76 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             continue;
         }
 
-        // Tab cycles default-action focus among Buttons. Shift is read from the
+        // A focused TextEdit owns keyboard transitions so physical gameplay
+        // bindings cannot fire while text/IME input is active. TextInput still
+        // carries printable UTF-8; key commands only mutate caret/selection.
+        if (const auto* key =
+                std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
+            key != nullptr
+            && key->window == context->ownerWindow()
+            && key->key != Platform::Key::Tab
+            && context->imeFocus().hasValue())
+        {
+            if (key->state == Platform::DigitalTransition::Down)
+            {
+                bool shiftHeld = false;
+                bool controlHeld = false;
+                if (primaryWindow != nullptr)
+                {
+                    shiftHeld = primaryWindow->input.isHeld(Platform::Key::LeftShift)
+                        || primaryWindow->input.isHeld(Platform::Key::RightShift);
+                    controlHeld = primaryWindow->input.isHeld(Platform::Key::LeftControl)
+                        || primaryWindow->input.isHeld(Platform::Key::RightControl);
+                }
+                if (const auto command = textEditCommandForKey(key->key, controlHeld);
+                    command.has_value())
+                {
+                    auto routed = context->routeTextEditCommand(
+                        key->window,
+                        platformFrame.id(),
+                        transitions[ordinal].sequence,
+                        *command,
+                        shiftHeld);
+                    if (!routed)
+                    {
+                        Core::Error error = std::move(routed.error());
+                        error.addContext("UIInputRouteProducer::produce(text-edit-command)");
+                        return Core::failure(std::move(error));
+                    }
+                }
+            }
+            stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                u64{1} << (ordinal % BitsPerConsumptionWord);
+            anyConsumed = true;
+            continue;
+        }
+
+        // Tab cycles keyboard focus. Shift is read from the
         // primary-window held key snapshot (KeyTransition carries no modifiers).
         if (const auto* key =
                 std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
             key != nullptr
             && key->window == context->ownerWindow()
-            && key->state == Platform::DigitalTransition::Down
             && key->key == Platform::Key::Tab)
         {
-            bool reverse = false;
-            if (primaryWindow != nullptr)
-            {
-                reverse = primaryWindow->input.isHeld(Platform::Key::LeftShift)
-                    || primaryWindow->input.isHeld(Platform::Key::RightShift);
+            bool consumed = context->defaultActionFocus().hasValue();
+            if (key->state == Platform::DigitalTransition::Down) {
+                bool reverse = false;
+                if (primaryWindow != nullptr)
+                {
+                    reverse = primaryWindow->input.isHeld(Platform::Key::LeftShift)
+                        || primaryWindow->input.isHeld(Platform::Key::RightShift);
+                }
+                auto step = context->routeDefaultActionFocusStep(reverse);
+                if (!step)
+                {
+                    Core::Error error = std::move(step.error());
+                    error.addContext("UIInputRouteProducer::produce(tab-focus)");
+                    return Core::failure(std::move(error));
+                }
+                consumed = step->consumed;
             }
-            auto step = context->routeDefaultActionFocusStep(reverse);
-            if (!step)
-            {
-                Core::Error error = std::move(step.error());
-                error.addContext("UIInputRouteProducer::produce(tab-focus)");
-                return Core::failure(std::move(error));
-            }
-            if (step->consumed)
-            {
+            if (consumed) {
                 stagingWords_[ordinal / BitsPerConsumptionWord] |=
                     u64{1} << (ordinal % BitsPerConsumptionWord);
                 anyConsumed = true;

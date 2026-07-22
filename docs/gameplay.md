@@ -1,267 +1,134 @@
-# 游戏程序入口与状态栈
+# 游戏入口与 State
 
-> 状态：vNext 候选冻结。M7-C1c-b3d2 已实现 startup primary-window UI capability，D0 已把
-> primary-window UIDisplayList 以 Runtime-private submit-call-local borrow 接入 RenderFrame；本文是游戏开发者理解 Tina 调用面的首要入口。
+本文描述当前游戏侧入口。Tina 目前是单 State Runtime；`GameStateStack`、state commands 和多层 policy
+调度是 `RUNTIME-001` 的目标，不是现有公共能力。
 
-## 一句话结论
+## 当前接口
 
-`IGameApplication` 只负责建立游戏级对象并创建恰好一个初始 `IGameState`；它没有逐帧回调。
-`IGameState` 是 Menu、Settings、Game2D、Game3D、Pause 等状态唯一的帧行为入口。
-
-前缀 `I` 只表示“这是抽象接口”，真正说明职责的是完整名词 `GameApplication` 和 `GameState`；
-实现类必须按产品语义命名为 `TinaGameApplication`、`MainMenuState`、`Game2DState` 等，禁止再用
-`GameImpl`、`Client` 或 `Manager` 让调用者猜用途。
-
-这条边界避免 World、UI 和渲染逻辑既能写进“游戏程序入口”、又能写进状态对象的双重入口。
-Tina 不再保留与 `GameStateStack` 并列的第二套 `SceneManager` 生命周期。
-
-## 最小公共接口
+### `IGameApplication`
 
 ```cpp
-namespace Tina {
-
-class IGameState;
-
 class IGameApplication {
 public:
-    virtual ~IGameApplication() = default;
+    virtual ~IGameApplication() noexcept = default;
 
-    // 只调用一次。State 的 onEnter、initialPolicy 采样和 startup UI snapshot
-    // 全部成功后，游戏启动事务才算 commit。
-    [[nodiscard]] virtual Core::Result<std::unique_ptr<IGameState>>
-    createInitialState(GameStartupContext& context) = 0;
-
-    // 仅在启动事务成功后调用，且恰好一次；不得创建新 Engine 工作。
+    virtual Core::Result<std::unique_ptr<IGameState>> createInitialState(
+        GameStartupContext& context) = 0;
     virtual void onShutdown(GameShutdownContext& context) noexcept = 0;
 };
+```
 
-struct GameStatePolicy {
-    bool blocksGameplayInputBelow = false;
-    bool blocksUIInputBelow = false;
-    bool blocksFixedUpdateBelow = false;
-    bool blocksFrameUpdateBelow = false;
-    bool blocksRenderBelow = false;
-};
+Application 只负责创建初始 State 与最终 shutdown，不接收逐帧回调，也不拥有 backend。
 
+### `IGameState`
+
+```cpp
 class IGameState {
 public:
-    virtual ~IGameState() = default;
+    virtual ~IGameState() noexcept = default;
 
     virtual Core::Status onEnter(GameStateEnterContext& context) = 0;
     virtual void onExit(GameStateExitContext& context) noexcept = 0;
-    [[nodiscard]] virtual GameStatePolicy initialPolicy() const noexcept = 0;
+    virtual GameStatePolicy initialPolicy() const noexcept = 0;
 
-    virtual Core::Status fixedUpdate(FixedUpdateContext&) {
-        return Core::success();
-    }
-
-    virtual Core::Status updateFrame(FrameUpdateContext&) {
-        return Core::success();
-    }
-
-    virtual Core::Status extractRenderScene(RenderSceneExtractionContext&) const {
-        return Core::success();
-    }
-
-    virtual Core::Status updateUI(UIUpdateContext&) {
-        return Core::success();
-    }
+    virtual Core::Status fixedUpdate(FixedUpdateContext& context);
+    virtual Core::Status updateFrame(FrameUpdateContext& context);
+    virtual Core::Status extractRenderScene(RenderSceneExtractionContext& context) const;
+    virtual Core::Status updateUI(UIUpdateContext& context);
 };
-
-} // namespace Tina
 ```
 
-公共 API 不再提供 `IFrameClient`。菜单等不需要 Fixed Update 的状态直接使用默认空实现，
-不必为了接口完整性编写四个无意义函数。
+默认逐帧实现返回 success。当前 Runtime 只保存一个 committed State；`initialPolicy()` 已采样，但
+`blocks*Below` 尚无“下层 State”可调度，不能据此宣称 stack 已完成。
 
-## 两个接口分别负责什么
-
-| 接口 | 应该负责 | 不应该负责 |
-| --- | --- | --- |
-| `IGameApplication` | 拥有纯游戏级 Settings/Save repository、构造初始 State、记录启动期回滚、最终停止 | World、UI root、逐帧输入/更新/渲染、查询 RenderDevice、充当 Service Locator |
-| `IGameState` | 拥有可选 World、UI roots、状态内模型、订阅和 TaskGroup；处理阶段回调 | 拥有 Window/UIContext/AssetSystem/RenderDevice、保存 Phase Context、直接提交 bgfx |
-| `EngineHost` | 模块所有权、Frame Pipeline、GameStateStack、错误收敛和关闭顺序 | 游戏玩法、菜单流程、全局静态访问 |
-
-`IGameApplication` 可以拥有不依赖 Engine 生命周期的产品对象，并通过构造函数把窄接口传给 State，
-例如 `SettingsRepository&`、`SaveRepository&` 和 State factory。它不得保存 `AssetLease`、
-`UINodeId`、`EntityId`、Render handle 或 Phase Context；这些对象必须由已提交 State 的 RAII
-成员持有，并在 State exit transaction/析构中释放。
-
-## 调用时序
+## 生命周期
 
 ```text
-EngineHost::run(gameApplication)
-  -> begin Game Start transaction
-  -> gameApplication.createInitialState(startupContext)
-  -> platform.initialPrimaryWindowMetrics()
-  -> bind primary-window UI context or explicit Headless UI mode
-  -> initialState.onEnter(stateEnterContext)
-  -> sample initialState.initialPolicy()
-  -> startup UI structure/layout/hit/paint snapshot
-  -> commit initial State / UI roots / input context / policy
+EngineHost::run
+  -> IGameApplication::createInitialState
+  -> bind primary UIContext, or Headless unavailable
+  -> IGameState::onEnter
+  -> commit startup UI snapshot and the single State
   -> frame loop
-       UI input scope + one route   top -> bottom eligibility
-       Fixed Update                 top -> bottom
-       Frame Update (variable dt)   top -> bottom
-       State Transition Commit      queued commands only
-       Render Scene Extraction      bottom -> top
-       UI model/layout/display      bottom -> top; Runtime-private DisplayList handoff
-       Deferred Cleanup             resource retirement only
-  -> stop accepting new state commands
-  -> remove state eligibility / close ingress
-  -> requestStop + TaskGroup barrier/join
-  -> state.onExit()                 top -> bottom, workers already joined
-  -> gameApplication.onShutdown()   exactly once
-  -> Engine modules reverse shutdown
+  -> IGameState::onExit
+  -> IGameApplication::onShutdown
+  -> module shutdown
 ```
 
-- `createInitialState`、startup UI bind、初始 `onEnter` 或 startup UI snapshot 失败：启动事务完整回滚，不调用
-  candidate `onExit`，也不调用 Application `onShutdown`；
-- 启动提交后即使帧回调失败，也先按栈顶到栈底执行 `onExit`，再调用一次 `onShutdown`；
-- pop 最后一个 State 表示正常结束游戏；Headless 样例也使用显式 `EmptyState`；
-- State policy 和结构变化只在 Frame Update 后的 State Transition Commit 提交；新状态在当帧
-  Render/UI 阶段完成首份 snapshot，从下一帧开始接收输入。
+创建 initial State、UI bind 或 `onEnter()` 在提交前失败时：candidate 被销毁，不调用 candidate
+`onExit()`，也不调用 Application `onShutdown()`。State 提交后，正常 close、游戏请求退出或 Runtime
+失败都会调用一次 `onExit()` 和一次 `onShutdown()`；上下文提供 `RunStopCause` 与只借用的失败 Error。
 
-## Phase Context 是能力视图
+## 游戏侧所有权
 
-| Context | State 可做的事 | 明确禁止 |
-| --- | --- | --- |
-| `GameStartupContext` | 查询只读启动配置、登记游戏级回滚 | 创建 World/UI root、保存 Context、取得 Engine module |
-| `GameStateEnterContext` | 创建 World、`UIRootBuilder`、输入上下文、订阅和 State TaskGroup | commit 前发布 Task completion、激活半构造 State、修改旧 State、取得 RenderDevice |
-| `FixedUpdateContext` | 读取目标 tick 的 Simulation Action，提交 World command | UI/Window 操作、Frame Action、结构立即提交 |
-| `FrameUpdateContext` | 读取 Frame Action/Asset snapshot，提交 State command | 阻塞 IO、直接 push/pop、读取隐式 Simulation edge |
-| `RenderSceneExtractionContext` | 读取当前 extraction 所需的游戏快照（当前实现仅提供 `FrameTiming`）并向 phase-local `RenderSceneWriter` 写 Tina 描述 | 修改 World、创建 GPU 资源、保存 Context、writer 或 span；World/Asset snapshot 在后续 Scene/Asset integration 切片接入 |
-| `UIUpdateContext` | 通过绑定 root 的 `UITreeUpdater` 更新 retained model/style/action/dirty | 创建新 root、每帧重建 UIContext、直接生成 backend draw、访问 bgfx |
-| `GameStateExitContext` | TaskGroup 已 join 后读取退出原因并释放 State 自己的 RAII owner | 发起新 Task/Asset/State 请求、直接清 Runtime registry |
-| `GameShutdownContext` | 读取退出原因和最终诊断、释放游戏级注册 | 创建新 Window/Asset/Task |
-
-Phase Context 不提供通用 `services()` 或 `get<T>()`。需要新增能力时，必须先确定它属于哪个
-阶段，再增加窄 accessor；不能把 Service Locator 换一个名字重新引入。
-
-M7-C1c-b3d2 的 UI 能力是 phase-scoped facade，不是 `UIContext*`：
-
-- `GameStateEnterContext::hasPrimaryWindowUI()` 只表示当前 startup seed 已绑定 primary-window UI；Headless
-  为 false；
-- `GameStateEnterContext::primaryWindowUIRootBuilder()` 只在 `onEnter` 内创建 `UIRootOwner`，并可取得绑定该
-  root 的 `PrimaryWindowUITreeUpdater`；
-- `UIUpdateContext::primaryWindowUITreeUpdater(root_)` 只允许修改该 root 的 subtree；
-- facade 是 move-only、callback-scoped，回调结束、错误回滚或异常边界 `abortPhase()` 后统一失效；
-- phase 内首个 UI tree 错误 sticky，后续 mutation 不继续扩大半失败状态；
-- 当前可创建 Panel/Label/Button 节点并设置 layout/hit policy、SolidFill box paint 与 primary Pointer
-  Button action，但 Label 文本、Button Keyboard/Gamepad activation、Focus/Capture/Modal 和完整 Widget
-  facade 仍未实现。D0 的 DisplayList handoff 是 Runtime 内部从已提交 paint snapshot 构建的
-  submit-call-local borrow，不是游戏侧完整 Widget 能力。
-
-## State 结构变化
-
-`FrameUpdateContext::gameStateCommands()` 提供唯一的 `requestPush`、`requestPopSelf`、
-`requestReplaceSelf` 和 `requestPolicyChange` 入口。它绑定当前 State，不公开可变状态栈：只有
-当前栈顶能提交 command，首期 structural 与 policy change 合计每帧最多一个；policy change
-只以自己为目标。请求返回
-`GameStateCommandId`，只代表进入固定容量队列，不代表 candidate `onEnter` 已成功。
-
-Runtime 在 Frame Update 返回后按 sequence 提交。push/replace 的 candidate `unique_ptr` 在请求
-被接受时移交 Runtime；enter 期间 Task completion 在 commit 前隔离，失败时 close ingress、取消并
-join TaskGroup、逆序回滚 owner 后直接析构，不调用 `onExit`。旧栈保持不变。请求同时预留有界
-completion slot；结果以 callback-lifetime `GameStateCommandCompletion` span 在来源 State 下一次
-实际执行 `updateFrame()` 时交付。队列/结果槽满、非栈顶、重复请求和 Runtime Stopping 分别返回
-明确错误；pop 最后一个 State 表示正常结束游戏。完整草案见[公共接口](public-api.md)。
-
-UI action 在输入路由期间只更新当前 State 拥有的 intent/model；同帧 `updateFrame()` 再把 intent
-转换为 State command。这样按钮回调不会在 Capture/Target/Bubble 栈中销毁当前 State。
+推荐每个产品 State 按功能组合 owner：
 
 ```text
-Button Click
-  -> MainMenuState::intent = StartGame
-  -> MainMenuState::updateFrame()
-  -> gameStateCommands.requestReplaceSelf(make_unique<Game2DState>(gameServices))
-  -> State Transition Commit
-  -> Game2DState::onEnter()
-  -> current frame Render/UI snapshot
-  -> next frame input becomes active
+Game2DState / Game3DState
+  -> Scene::World
+  -> CatalogSnapshot / AssetSystem / AssetLease
+  -> optional PhysicsWorld2D
+  -> gameplay models and controllers
+  -> UI root + listener tokens
 ```
 
-`push/replace` 先在旧栈仍完整时执行新 State 的 enter transaction；失败时撤销新 State并保留
-旧栈。成功替换/弹出已提交 State 的退出顺序固定为：
+这些 owner 不进入全局变量。State 在 `onExit()` 中先停止 ingress/回调 token，再释放 root、physics、
+asset lease 和 world。Runtime Context、RenderSceneWriter、UI updater 与 Audio pointer都是 phase-local
+borrow，禁止存入成员。
 
-1. 从后续 phase/UI eligibility 移除，关闭 command/task/event ingress，并清理 Focus/Capture/Modal；
-2. signal State TaskGroup cancellation，Runtime barrier/join 并丢弃迟到 completion；
-3. 调用一次 `onExit`，State 可释放自己的 root、lease、订阅和其他 RAII owner；
-4. 析构 State，让残余 owner 幂等释放，再断言 registry/TaskGroup 无残留。
+`Tina::Desktop::CreateEngine` 当前组合：
 
-`onExit` 必须 `noexcept`；Runtime 在它之前停止并 join Worker，但不提前销毁 State owner，也不
-要求它直接操作内部 registry。上一帧已提交的 GPU/Atlas 资源由独立 `RenderFramePacket` 保活，
-不依赖 State 继续存活。
+- GLFW WindowSurface platform；
+- bgfx RenderDevice；
+- BoundedTaskSystem，默认补1个 IO worker和有界 IO/Main queue；
+- backend-neutral `AudioEngine`；
+- 启用 FreeType 且找到字体 fixture 时创建带 rasterizer 的 UIContext。
 
-## 常见 GameStatePolicy
+Desktop 并非 DisabledTaskSystem。其 CPU worker 默认值仍为0，与 ADR 0017 的交互默认约定冲突，见
+`TASK-001`。AssetSystem/Physics2D/miniaudio device 由产品或 feature 图进一步组合。
 
-| State | Gameplay input | UI input | Fixed | Frame update | Render |
-| --- | --- | --- | --- | --- | --- |
-| `MainMenuState` | 阻断下层 | 阻断下层 | 阻断下层 | 阻断下层 | 阻断下层 |
-| `Game2DState` / `Game3DState` | 不阻断 | 不阻断 | 不阻断 | 不阻断 | 不阻断 |
-| `PauseState` | 阻断下层 | 阻断下层 | 阻断下层 | 阻断下层 | 不阻断，继续显示世界 |
-| `SettingsState` overlay | 阻断下层 | 阻断下层 | 通常阻断 | 通常阻断 | 不阻断，保留背景 |
-| `LoadingState` overlay | 阻断下层 | 阻断下层 | 依产品决定 | 通常不阻断下层 | 依产品决定 |
+## Fixed 与 Frame domain
 
-`blocksGameplayInputBelow=true` 但不阻断 Frame Update 时，下层仍收到 Frame Update 回调，但 Action Snapshot
-为空。首期一个 `blocksRenderBelow` 同时决定下层 World 与 UI root 是否可见，避免提前增加两套
-渲染传播标志。
+输入在进入 State 前已经完成 Platform normalize、UI route/consume/claim 与 Action Mapping：
 
-## 最小游戏示例
+- `FixedUpdateContext::simulationActions()` 只读目标 simulation tick 的 action；
+- `FrameUpdateContext::frameActions()` 只读当前 render frame 的 action；
+- 0 fixed-step 帧保留 Simulation edge；追赶多个 fixed step 时只在第一个目标 tick 消费一次；
+- `requestExitAfterFrame()` 完成当帧 render/UI/submit/present 后退出。
 
-```cpp
-class TinaGameApplication final : public Tina::IGameApplication {
-public:
-    TinaGameApplication(SettingsRepository& settings, SaveRepository& saves)
-        : settings_(settings), saves_(saves) {}
+影响玩法正确性的 movement、collision、Physics step、tile command 应放在 `fixedUpdate()`；Camera follow
+presentation、菜单动画等可放在 `updateFrame()`，但不能反向修改已经提交的 simulation 结果。
 
-    Core::Result<std::unique_ptr<Tina::IGameState>>
-    createInitialState(Tina::GameStartupContext&) override {
-        return std::make_unique<MainMenuState>(settings_, saves_);
-    }
+## Scene 与 UI 输出
 
-    void onShutdown(Tina::GameShutdownContext&) noexcept override {}
+`extractRenderScene()` 通过 callback-only `RenderSceneWriter` 写已解析的 Camera/Sprite/Mesh POD；State
+不能发布 view、持有 writer 或把 AssetHandle 留给 backend。产品通常先确保 AssetLease/GPU binding 有效，
+再让 Scene extraction 写对应 key。
 
-private:
-    SettingsRepository& settings_;
-    SaveRepository& saves_;
-};
+`onEnter()` 可通过 `PrimaryWindowUIRootBuilder` 创建 root；`updateUI()` 通过绑定该 root 的 updater 修改树。
+builder/updater 在回调结束时无条件失效。`UIRootOwner` 和 move-only listener token 可以保存在 State；
+listener 不保活 Context/root，退出时应先 reset listener 再释放 root。
 
-int main() {
-    auto host = Tina::Desktop::CreateEngine(Tina::EngineConfig::Defaults());
-    if (!host) {
-        return reportStartupError(host.error());
-    }
+## 当前产品 State
 
-    SettingsRepository settings;
-    SaveRepository saves;
-    TinaGameApplication gameApplication{settings, saves};
-    auto result = host.value()->run(gameApplication);
-    return result ? EXIT_SUCCESS : reportRunError(result.error());
-}
-```
+| 产品 | 当前组合 |
+| --- | --- |
+| `tina_sample_2d` | Catalog recipe、Texture2D/TileMap、CharacterController、Scene 2D、UI、Audio；完整 feature 图含 Box2D、FreeType、miniaudio |
+| `tina_sample_3d` | glTF cook、Catalog/Prefab、StaticMesh/Material upload、Scene 3D、bgfx |
+| `tina_sample_null` | Headless/Null 生命周期与 phase 契约 |
 
-`Tina::Desktop::CreateEngine` 的当前实现组合 GLFW WindowSurface、bgfx、SteadyClock 与
-DisabledTaskSystem，但它的 header 只包含 Tina 类型。FreeType/font、Asset 和 Audio adapter 是后续切片。
-普通游戏入口不 include 或链接具体 backend target；自定义 backend 和失败
-注入测试才使用低一层 `EngineHost::Create(config, factories)`。
+样例内部的参数解析、fixture 和计数器不是通用 Game SDK。正式 SDK package/export、State stack 与通用
+save/load orchestration 尚未完成。
 
-## 2D、3D 与 UI 的落点
+## `RUNTIME-001` 验收边界
 
-- `Game2DState` 持有 2D World、TileMap gameplay object、Camera2D、UI roots 和输入 intent；
-- `Game3DState` 持有 3D World、Camera3D、Prefab instances 和 UI roots；
-- `PauseState`、`SettingsState` 是 overlay，不复制底层 World；
-- UI root 只在 `onEnter/onExit` 创建或销毁，每帧 `updateUI` 只改 retained 数据；
-- World 只在 Fixed/command commit 修改，Render Scene Extraction 只读取并写后端无关描述。
+未来 State stack 至少需要同时关闭：
 
-具体契约见 [2D 游戏架构](game-2d.md)、[3D 游戏架构](game-3d.md)、
-[自研 UI](ui.md)和[渲染架构](rendering.md)。
+- push/pop/replace 只在唯一 commit 点生效；
+- enter/exit 顺序、失败回滚与 Application shutdown 明确；
+- input/fixed/frame/render/UI policy 对上下层的阻断有测试；
+- State UI root、listener、TaskGroup 与 AssetLease 在 transition 后无 stale owner；
+- command 不允许在 callback 中直接修改正在遍历的 stack。
 
-## 验收
-
-- compile-only 示例能只包含 Game SDK headers，不需要 bgfx/GLFW/EnTT include path；
-- `IGameApplication` 类型没有 fixed/update/render/UI 虚函数；
-- `createInitialState`、初始 enter、启动回滚和 `onShutdown` 次数均有失败注入测试；
-- Menu -> Game2D -> Pause -> Settings -> Resume 的回调和 policy 顺序固定；
-- State action 在 routed UI 回调中只能排队，不能立即销毁当前 State；
-- State 退出后 World、UI roots、TaskGroup、Asset lease 和订阅全部归零。
+在这些条件完成前，文档与代码都应继续使用“当前单 State”表述。帧阶段详见 [Runtime](runtime.md)，
+任务状态见 [Backlog](backlog.md)。

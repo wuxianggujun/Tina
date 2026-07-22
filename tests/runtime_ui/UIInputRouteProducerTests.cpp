@@ -17,6 +17,7 @@
 #include <memory_resource>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -216,6 +217,35 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     return tree;
 }
 
+[[nodiscard]] RouteTree createTextEditRouteTree(Platform::WindowId window)
+{
+    RouteTree tree = createRouteTree(window);
+    if (tree.context == nullptr || !tree.target.hasValue())
+    {
+        return tree;
+    }
+
+    const Core::Status destroyButton = tree.updater.destroy(tree.target);
+    EXPECT_TRUE(destroyButton.has_value())
+        << (destroyButton ? "" : destroyButton.error().message);
+    if (!destroyButton)
+    {
+        return tree;
+    }
+
+    auto textEdit = tree.updater.createTextEdit(tree.panel);
+    EXPECT_TRUE(textEdit.has_value()) << (textEdit ? "" : textEdit.error().message);
+    if (!textEdit)
+    {
+        tree.target = {};
+        return tree;
+    }
+    tree.target = *textEdit;
+    expectOk(tree.updater.setLayoutStyle(tree.target, fixedSize(80.0F, 32.0F)));
+    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    return tree;
+}
+
 [[nodiscard]] Core::Result<Platform::PlatformFrameView> buildFrame(Platform::PlatformFrameBuilder& builder,
                                                                    Platform::WindowId window, const FrameSpec& spec)
 {
@@ -366,6 +396,132 @@ TEST_F(UIInputRouteProducerTest, NullContextProducesNoneViews)
     EXPECT_TRUE(output->consumption.consumedOrdinalWords.empty());
     EXPECT_EQ(output->claims.platformFrame, frame->id());
     EXPECT_TRUE(output->claims.controls.empty());
+}
+
+TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesTabCommandsTextAndAcceptKeys)
+{
+    constexpr std::string_view InitialUtf8 = "A" "\xE4\xBD\xA0" "B";
+    auto producer = createProducer();
+    RouteTree tree = createTextEditRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+    ASSERT_TRUE(tree.target.hasValue());
+    expectOk(tree.updater.setText(tree.target, InitialUtf8));
+    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    auto tabFrame = buildFrame(
+        *builder,
+        window,
+        {
+            .frameId = {10},
+            .transitions = {keyDown(window, Platform::Key::Tab)},
+            .heldKeys = {Platform::Key::Tab},
+        });
+    ASSERT_TRUE(tabFrame.has_value()) << (tabFrame ? "" : tabFrame.error().message);
+    auto tabOutput = producer->produce(tree.context.get(), *tabFrame);
+    ASSERT_TRUE(tabOutput.has_value()) << (tabOutput ? "" : tabOutput.error().message);
+    EXPECT_TRUE(tabOutput->consumption.isConsumed(0));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.target);
+    EXPECT_EQ(tree.context->imeFocus(), tree.target);
+
+    auto compositionFrame = buildFrame(
+        *builder,
+        window,
+        {
+            .frameId = {11},
+            .transitions = {Platform::TextCompositionTransition{
+                .window = window,
+                .preeditUtf8 = "ni",
+                .cursorCodepoint = 1,
+                .stage = Platform::TextCompositionStage::Started,
+            }},
+        });
+    ASSERT_TRUE(compositionFrame.has_value())
+        << (compositionFrame ? "" : compositionFrame.error().message);
+    auto compositionOutput = producer->produce(tree.context.get(), *compositionFrame);
+    ASSERT_TRUE(compositionOutput.has_value())
+        << (compositionOutput ? "" : compositionOutput.error().message);
+    EXPECT_TRUE(compositionOutput->consumption.isConsumed(0));
+    EXPECT_TRUE(tree.context->imeCompositionActive());
+    EXPECT_EQ(tree.context->imePreeditUtf8(), "ni");
+
+    auto selectAllFrame = buildFrame(
+        *builder,
+        window,
+        {
+            .frameId = {12},
+            .transitions = {keyDown(window, Platform::Key::A)},
+            .heldKeys = {Platform::Key::A, Platform::Key::LeftControl},
+        });
+    ASSERT_TRUE(selectAllFrame.has_value())
+        << (selectAllFrame ? "" : selectAllFrame.error().message);
+    auto selectAllOutput = producer->produce(tree.context.get(), *selectAllFrame);
+    ASSERT_TRUE(selectAllOutput.has_value())
+        << (selectAllOutput ? "" : selectAllOutput.error().message);
+    EXPECT_TRUE(selectAllOutput->consumption.isConsumed(0));
+    auto selection = tree.updater.textSelection(tree.target);
+    ASSERT_TRUE(selection.has_value()) << (selection ? "" : selection.error().message);
+    EXPECT_EQ(
+        *selection,
+        (UI::UITextSelection{.anchorCodepoint = 0, .caretCodepoint = 3}));
+    EXPECT_FALSE(tree.context->imeCompositionActive());
+
+    auto textFrame = buildFrame(
+        *builder,
+        window,
+        {
+            .frameId = {13},
+            .transitions = {Platform::TextInputTransition{
+                .window = window,
+                .committedUtf8 = "Z",
+            }},
+        });
+    ASSERT_TRUE(textFrame.has_value()) << (textFrame ? "" : textFrame.error().message);
+    auto textOutput = producer->produce(tree.context.get(), *textFrame);
+    ASSERT_TRUE(textOutput.has_value()) << (textOutput ? "" : textOutput.error().message);
+    EXPECT_TRUE(textOutput->consumption.isConsumed(0));
+    auto text = tree.updater.text(tree.target);
+    ASSERT_TRUE(text.has_value()) << (text ? "" : text.error().message);
+    EXPECT_EQ(*text, "Z");
+
+    auto backspaceFrame = buildFrame(
+        *builder,
+        window,
+        {
+            .frameId = {14},
+            .transitions = {keyDown(window, Platform::Key::Backspace)},
+            .heldKeys = {Platform::Key::Backspace},
+        });
+    ASSERT_TRUE(backspaceFrame.has_value())
+        << (backspaceFrame ? "" : backspaceFrame.error().message);
+    auto backspaceOutput = producer->produce(tree.context.get(), *backspaceFrame);
+    ASSERT_TRUE(backspaceOutput.has_value())
+        << (backspaceOutput ? "" : backspaceOutput.error().message);
+    EXPECT_TRUE(backspaceOutput->consumption.isConsumed(0));
+    text = tree.updater.text(tree.target);
+    ASSERT_TRUE(text.has_value());
+    EXPECT_TRUE(text->empty());
+
+    auto acceptFrame = buildFrame(
+        *builder,
+        window,
+        {
+            .frameId = {15},
+            .transitions = {
+                keyDown(window, Platform::Key::Enter),
+                keyDown(window, Platform::Key::Space),
+            },
+            .heldKeys = {Platform::Key::Enter, Platform::Key::Space},
+        });
+    ASSERT_TRUE(acceptFrame.has_value()) << (acceptFrame ? "" : acceptFrame.error().message);
+    auto acceptOutput = producer->produce(tree.context.get(), *acceptFrame);
+    ASSERT_TRUE(acceptOutput.has_value())
+        << (acceptOutput ? "" : acceptOutput.error().message);
+    EXPECT_TRUE(acceptOutput->consumption.isConsumed(0));
+    EXPECT_TRUE(acceptOutput->consumption.isConsumed(1));
+    text = tree.updater.text(tree.target);
+    ASSERT_TRUE(text.has_value());
+    EXPECT_TRUE(text->empty());
 }
 
 TEST_F(UIInputRouteProducerTest, PublishesDeduplicatedHeldPointerClaimsAndDropsNonHeldRequests)

@@ -1,38 +1,44 @@
-# vNext 风险登记
+# Tina 风险登记
 
-> 风险不是“以后再看”的列表。每项都有触发信号、缓解措施和关闭条件；状态由设计冻结清单
-> 与 Roadmap 更新。
+风险描述“可能造成什么失败”，Backlog 描述“接下来做什么”。状态只使用 `Open`、`Mitigated`、
+`Closed`；风险关闭后保留记录。
 
-| 风险 | 等级 | 触发信号 | 缓解 | 关闭条件 |
+## Open
+
+| ID | 等级 | 风险 / 触发信号 | 当前缓解 | 关闭条件 | Backlog |
+| --- | --- | --- | --- | --- | --- |
+| R-TASK-01 | P0 | Accepted ADR 0017 与 Desktop CPU worker 默认0冲突，CPU task 在产品组合中可能 `NotSupported` | IO-only 行为显式，TaskGroup/关闭有测试 | 实现交互默认或用新 ADR supersede，产品 CPU task 门禁通过 | TASK-001 |
+| R-LIFE-01 | P0 | RenderFrame 在途引用因 Asset unload、Atlas eviction 或 Surface close 失效 | Handle/Lease、UploadTicket、retirement ledger | owning packet/FramePin/completion 失败注入后全部归零 | RUNTIME-002 |
+| R-SHUT-01 | P0 | barrier/deadline 后继续析构，Worker 或 callback UAF | 协作取消、join、逆序 shutdown | timeout 注入证明活跃 owner 不被释放，硬 deadline 明确 fast-fail | RUNTIME-002 |
+| R-3D-01 | P0 | Cooker 单测被误当成 multi-mesh 产品 E2E | 文档区分 G4 Cooker 与 G3 product | 两个 mesh AssetId 分别 upload/bind/extract/draw，视觉与账本门禁通过 | 3D-001 |
+| R-GLTF-01 | P0 | 外部 URI 路径穿越、symlink escape、size/count 资源炸弹 | 当前最小内嵌 buffer 路径；解析有结构校验 | root containment、URI policy、overflow/oversize corpus 全通过 | ASSET-001 |
+| R-LINUX-01 | P1 | 旧 Linux 证据掩盖当前 UI/Asset 回归 | 工具链 preset 固定 GCC13/Clang22+libstdc++15 | 当前 tip GCC/Clang/sanitizer/GLFW 复验并记录环境 | TEST-001 |
+| R-UI-01 | P0 | dirty 传播或 paint batching 导致全树工作、每帧分配或透明顺序错误 | committed snapshot、固定 PMR、相邻合批、checksum | 目标规模门禁、零稳态分配和视觉/paint checksum 同时通过 | UI-003, PERF-001 |
+| R-A11Y-01 | P1 | Semantics snapshot 存在但真实辅助技术不可读或读到 stale node | generation ID、committed semantics | UIA/AT-SPI 真机读取与销毁/切场景测试通过 | UI-002 |
+| R-TEXT-01 | P1 | CJK 缺字、IME composition/selection 跨平台差异 | UTF-8 校验、可选 FreeType、Windows TextInput/IME 首切片 | Windows/Linux 支持矩阵与候选窗、shaping 测试明确 | TEXT-001 |
+| R-VIS-01 | P1 | GPU、driver、DPI、字体变化造成截图误报 | 结构化逻辑测试优先；初始化白帧过滤 | 固定 profile、字体 fingerprint、区域/感知阈值噪声校准 | UI-003 |
+| R-PERF-01 | P0 | benchmark 跨 build/host/workload 比较或 MAD 过高 | 仅保留模块 bench，不宣称正式回归协议 | ADR 0018 结论与 `tina_bench` fingerprint/baseline 门禁落地 | PERF-001 |
+| R-LEGACY-01 | P1 | 死 feature/EASTL/compatibility 文案让开发者误判 Legacy 可运行，或误删当前 `src/ui` | `TINA_BUILD_LEGACY=ON` FATAL；文档明确目录边界 | vcpkg/源码/CMake/文档扫描无未解释残留 | CLEAN-001～003 |
+
+## Mitigated
+
+| ID | 等级 | 风险 | 已有门禁 | 残余风险 |
 | --- | --- | --- | --- | --- |
-| 文档/资源残留误导“Legacy 仍可运行” | P1 | 开发者误用已删 Tina.exe/smoke | 主题文档扫尾、m12-* 清单；产品仅 vNext samplesreset 固定 OFF，覆盖门禁后再翻默认值 | vNext-only 全门禁后删除 Legacy |
-| Factory/模块依赖形成环 | P0 | Runtime include 具体 GLFW/bgfx/miniaudio 或 Scene/Render 互相 include | backend factories、依赖图自动检查、public header compile test | 所有目标只按冻结图链接 |
-| `IGameApplication`/`IGameState` 再次形成双帧入口 | P0 | 程序入口出现 fixed/update/render，World/UI 可放两个位置 | `IGameApplication` lifecycle-only、`IGameState` 唯一帧接口、API consumer test | 公共入口无 IFrameClient/双回调且状态顺序测试通过 |
-| State transition/exit 出现双重清理、Worker UAF 或首帧延迟 | P0 | onExit 前 owner 已失效、barrier 前释放 Worker 所读成员、同帧2次布局、新 root 到N+2才交互 | Frame Update 后唯一 transition commit；关闭 ingress→cancel→barrier/join→onExit→RAII | 失败注入、单布局、下一帧输入和残留归零测试通过 |
-| bgfx 通过 header/target/native escape 泄漏 | P0 | Game/UI/Scene 出现 bgfx token、RenderDevice/ViewId 或 backend public link | API 三层、desktop bootstrap、forbidden scan、依赖闭包、外部 SDK consumer | vNext public/install tree与game target零 backend 泄漏 |
-| Legacy D3D11 Debug 关闭警告掩盖真实泄漏 | P1 | bgfx `ID3D11InfoQueue` 关闭报告 `RefCount is 4`，而 Tina handle 未报告 `BGFX LEAK` | 区分上游 debug-interface 引用与 Tina resource ledger；vNext Null/bgfx backend 分别做 typed handle、packet、GPU completion 归零 | Debug/Release 后端门禁无 Tina 资源残留，并对上游警告形成已验证处置结论 |
-| UI dirty/批处理破坏性能或遮挡 | P0 | 单 leaf 触发全树布局、每帧分配、为合批跨透明顺序重排 | 细粒度 dirty、PaintCache、committed paint-hit snapshot、相邻合并与 checksum | 5k节点/100k列表门禁和截图/paint checksum通过 |
-| M7-M9 临时资源路径污染最终边界 | P1 | UI/Sprite/Cube 直接读源文件或创建 backend resource | 版本化 Cooked fixture/procedural geometry、M10替换清单、禁止路径加载 | 正式 Asset样例替换 fixture且接口不变 |
-| FrameArena 容量误判/UAF | P0 | failed count、跨 reset 指针、barrier timeout | 无 heap fallback、owner/barrier、peak×安全系数、ASan | 各 workload 10k 帧0失败且生命周期测试通过 |
-| Tracy TU 配置不一致 | P0 | Debug/Profile 崩溃、Profiler 布局/锁异常 | 唯一 config target/client、Profile build/capture/shutdown test | MSVC/Linux Profile 门禁通过 |
-| Diagnostics 干扰或递归失败 | P1 | 热点格式化日志、Worker sink 锁竞争、sink 失败递归、敏感正文进入 capture | owner channel、静态级别、主线程汇聚、emergency sink、字段策略 | Bench 日志 off/on A/B 与失败/过滤测试通过 |
-| Benchmark 不可重复 | P0 | MAD 高、跨 fingerprint 比较、checksum 漂移 | versioned schema、固定机器、独立进程重复、baseline invalidation | 固定门禁机噪声校准通过 |
-| Asset schema/Manifest 非事务 | P0 | crash 后清单指向半文件、旧 Runtime 误读新产物 | asset_format、staging + reread validate + atomic Manifest、schema reject | 损坏/中断/升级测试通过 |
-| Catalog 依赖环/递归栈溢出 | P0 | 不可信 Manifest 含任意长度 cycle 或深链导致 Runtime 递归栈溢出/半发布 Catalog | M10-A1 owning `CatalogSnapshot` 事务式 Create、迭代着色 `O(V + E)`、显式 stack、禁止递归 DFS、失败回滚 PMR | cycle/深链/容量/分配失败测试通过且不发布部分 Snapshot |
-| ContentHash 算法漂移/公共泄漏 | P1 | seed/endian/版本未锁定导致 Cooker 与 Runtime 不一致，或 xxHash 进入公共头 | M10-A2a 固定 XXH3-128 v1 seed=0 LE 布局、Core PRIVATE adapter、header isolation 禁 `XXH*` | digest 金标测试与公共头扫描通过 |
-| Cooker 路径逃逸/资源炸弹 | P0 | glTF URI 读取根外文件、count/size 乘法溢出或超量分配 | canonical root、URI policy、分配前上限/溢出检查、恶意 corpus | traversal/symlink/data URI/oversize 测试通过 |
-| GPU/Audio 异步物理寿命 | P0 | logical cancel 后 staging/PCM UAF、退出挂起 | Lease、UploadTicket、retirement ledger、callback ACK | 取消竞争与300帧退出资源归零 |
-| RenderFrame 在途引用失效 | P0 | Asset unload/Atlas eviction/Surface close 后 submit 仍引用旧内存 | owning RenderFramePacket、统一 lease/pin/ticket、固定 packet pool | 在途失败注入与 completion 后全计数归零 |
-| Shutdown deadline 后继续析构 | P0 | barrier 超时后 Arena/模块仍释放、后台线程继续访问 | 协作取消、owner 保活、CrashContext、硬 deadline 后 fast-fail | timeout 注入证明不会 reset/free 活跃内存 |
-| 控制事件/完成队列饱和 | P0 | Fatal/Stop/Completion 被普通流量挤掉，退出死锁 | 有界队列、控制预留容量、每类 full 策略、current/peak/rejected 指标；OS Close 独立为 Platform control outcome | 满容量与饥饿测试仍能停止并回收 |
-| UI 输入穿透/首帧布局 | P1 | 点击菜单同时触发玩法、UI-consumed Down 后 held 跨帧穿透、新 root 命中旧 geometry | UIInputScopeSnapshot、transition consumption + continuous claims、suppressed-until-release/neutral、单次 layout | 自动化路由、持续控制和场景切换测试通过 |
-| Fixed 输入边沿丢失/重复 | P1 | 多个0步帧丢 Down→Up、4步触发4次 | 不可变 Snapshot、ordered tick latch、显式 reset、回放 checksum | 0/1/4步与暂停/失焦测试通过 |
-| 同帧输入顺序/批次溢出 | P1 | Down→Up 丢边沿、Wheel/Text 乱序、held/capture 卡住 | PlatformFrameView 有序 transition、Move 安全合并、满容量显式 InputStreamReset | 顺序/溢出/恢复与回放测试通过 |
-| Audio callback 违反实时约束 | P1 | underrun、callback p99 接近 period、callback 中分配/锁等待 | 固定命令、SPSC、预分配、平台 profiler 交叉验证 | 1/32/128 voice 门禁0分配/0阻塞且 period 有余量 |
-| 自研文本/IME 跨平台差异 | P1 | 中文缺字、composition 丢失、Linux preedit 不一致 | 打包字体、UTF-8 边界、IMM32 测试、Linux 明确降级 | Windows 完整门禁，Linux 支持范围文档化 |
-| 跨 GPU 截图抖动 | P1 | driver/font 变化导致像素差 | 固定 reference profile、感知/区域阈值、逻辑测试优先 | 截图门禁误报率达到约定范围 |
-| C++23 Linux 工具链不足 | P1 | GCC 11/Clang 14 缺库能力 | Legacy 兼容门禁与 vNext GCC 13.4、Clang 22.x + libstdc++15.x chainload 基线分离 | 正式 vNext Linux preset 构建运行通过 |
-| 第三方升级破坏 ABI/许可 | P1 | 新类型泄漏、包体/性能/notice 变化 | 固定版本、单依赖提交、license/CVE/bench gate | 升级 checklist 全通过 |
+| R-DEP-01 | P0 | bgfx/GLFW/miniaudio/FreeType/cgltf/xxHash 类型泄漏公共 API | adapter PRIVATE link、header-isolation 与 token scan | 新模块/安装树需持续扫描 |
+| R-INPUT-01 | P1 | UI 点击穿透 Gameplay 或 held input 卡住 | consumption + continuous claims 在 ActionMapper 前；reset/cancel 测试 | 通用 Modal/Capture/Gamepad claim 尚未实现 |
+| R-FIXED-01 | P1 | 0/多 substep 丢失或重复输入边沿 | ordered transition + simulation latch + world pick tests | 完整 replay/State stack 仍需扩展 |
+| R-ASSET-01 | P0 | Catalog cycle、损坏或半发布 | borrowed parser、owning snapshot、迭代 DAG、transaction rollback | 外部 glTF 与多文件 publish 原子性仍需加强 |
+| R-AUDIO-01 | P0 | logical cancel 后 PCM/staging UAF 或 callback 违反实时约束 | command/completion 队列、Lease、null-device tests | 真设备 callback p99 与 shutdown race 证据不足 |
+| R-BACKEND-01 | P1 | D3D11 Debug `RefCount` 提示掩盖 Tina 泄漏 | Tina resource ledger 与 Release 结果单独判断 | backend/driver 升级后需复验 |
 
-每个 P0 风险在首个受影响切片开始前必须有自动化门禁或明确的 fail-safe；只写日志但继续
-使用可能失效内存不算缓解。风险关闭后保留记录和证据链接，不从历史中删除。
+## Closed
+
+| ID | 风险 | 关闭证据 |
+| --- | --- | --- |
+| R-PRODUCT-01 | Legacy `Tina.exe`/旧 UI 产品图继续被构建或运行 | 产品源码/target 已删除，`TINA_BUILD_LEGACY=ON` FATAL |
+| R-EASTL-01 | EASTL 继续作为产品 target 公共依赖 | vNext 产品 target 已使用标准库/PMR；仅余 CLEAN-002 扫尾，不再构成产品依赖 |
+| R-ROOT-01 | `Application` 与 `EngineHost` 双组合根 | Legacy Application 已删除，产品只从 Desktop/EngineHost 进入 |
+
+P0 风险进入受影响切片前必须有自动化门禁或 fail-safe。只记录日志后继续使用可能失效的内存，
+不算风险缓解。
+

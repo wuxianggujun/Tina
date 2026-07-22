@@ -1,7 +1,7 @@
 # 第三方依赖与版本治理
 
-> 状态：vNext 候选设计。`vcpkg-configuration.json` 的 baseline 和 Git submodule commit 是
-> 版本事实；本文定义目标可见性与升级流程。
+`vcpkg-configuration.json` 的 baseline、`vcpkg.json` 的 feature 与 Git submodule commit 是版本事实。
+本文描述当前可见性与升级流程；未消费的 manifest/compatibility 残留单独列入 Backlog。
 
 ## 原则
 
@@ -20,7 +20,7 @@
 | --- | --- | --- | --- | --- |
 | GLFW | Windows/Linux Window、键鼠、标准 Gamepad | vcpkg，`tina_platform_glfw` | 只在 platform backend | 保留；不使用 SDL/SDL3 |
 | bgfx/bx/bimg/shaderc | 唯一真实 Render backend 与离线 shader | 固定 submodule commit | 只在 render_bgfx/tool | 保留 |
-| EnTT | 后续 Scene component storage | vcpkg | 仅允许在未来 `tina_scene` 实现层 PRIVATE 使用 | 保留；M8-A standalone World 当前不接入 |
+| EnTT | 当前无生产消费者 | 仅残留在未使用的 vcpkg `legacy` feature | 若未来采用也只能在 `tina_scene` PRIVATE | 待随 CLEAN-001 删除死声明 |
 | FreeType | 字形 raster；Glyph Atlas 编排仍属于 Tina UI | vcpkg | 只在 `tina_ui_freetype` adapter | 保留 |
 | miniaudio | 唯一真实 Audio backend | vcpkg feature `audio-miniaudio` | 只在 `tina_audio_miniaudio` | 内置 WAV/FLAC/MP3；不使用 SDL_mixer |
 | libvorbis | 可选 Ogg Vorbis 解码 | vcpkg feature `audio-miniaudio-vorbis` | 仅当 `TINA_AUDIO_ENABLE_LIBVORBIS=ON` | 默认 OFF |
@@ -28,13 +28,14 @@
 | xxHash | ContentHash、Cook cache、可选 StringId | vcpkg root dependency + private adapter | `tina_core` PRIVATE 链接；公共头零 token | 保留，不承担安全签名；M10-A2a 契约 |
 | [Tracy 0.13.1](https://github.com/wolfpld/tracy) | 开发 Profile capture | vcpkg optional feature | `tina_profile_tracy` | 可选；发布和正式 bench 禁用 |
 | [cgltf v1.15](https://github.com/jkuhlmann/cgltf) | glTF cook | `thirdparty/cgltf` 单文件 | Asset cook / assetc | **已接入**最小路径 |
+| [stb_image v2.30](https://github.com/nothings/stb) | glTF PNG/JPEG 等 image decode | `thirdparty/stb` 单文件 | Asset cook / assetc | **已接入**；只输出 RGBA8 Cooked Texture2D |
 | [GoogleTest 1.17.0](https://github.com/google/googletest/releases) | 单元/集成契约测试 | vcpkg `tests` feature | tests only | 固定；直接运行，不用 CTest |
 | Box2D 3.x | 唯一 2D Physics backend | vcpkg `physics2d` feature | `tina_physics2d` PRIVATE | M11-A0–A6；sample 可选 |
 | Jolt | 唯一 3D Physics backend | ADR 0010 + 接入时固定版本 | `tina_physics3d` | 未接入 |
-| EASTL/EABase | （已退役） | — | — | **已从仓库移除** |
+| EASTL/EABase | 已退役 | 当前仍有无消费者 compatibility header 引用 | 不得进入任何当前 target/public header | 待 CLEAN-002 证明无消费者后删除/重写 |
 
-`glm/spdlog/utfcpp` 若仍出现在 manifest，不得进入 Game SDK 公共类型；Diagnostics 若用 spdlog
-只能是私有 adapter。
+`glm/spdlog/utfcpp` 当前只出现在未被 preset 使用的 `legacy` feature。它们不是当前 Runtime 依赖，
+也不得进入 Game SDK 公共类型；由 CLEAN-001 删除该死 feature 后，manifest 才能称为零 Legacy 残留。
 
 ## 获取与锁定
 
@@ -63,13 +64,15 @@ TINA_BUILD_BENCHMARKS=ON|OFF
 TINA_BUILD_SHADERS=ON|OFF
 ```
 
-- `TINA_BUILD_LEGACY` 与 vcpkg feature `legacy` 已退役；默认 feature 仅为 `tests`；
+- `TINA_BUILD_LEGACY` 已退役且 ON 必须 FATAL；默认 vcpkg feature 仅为 `tests`；
+- `vcpkg.json` **仍实际包含**未被当前 preset 使用的 `legacy` feature，这是 CLEAN-001 残留，不得写成
+  已删除或可运行的构建模式；
 - `none` 不查找/链接 Tracy；`tracy` 才允许 `find_package(Tracy CONFIG REQUIRED)`；
 - `tina_profile_config` 是唯一传播 Tina backend selection 的 INTERFACE target；Tracy 自身
   definitions 只在 adapter target；
 - `tina_profile_tracy` 唯一包含 Tracy inline header并链接 Client，不能让多个静态库各自带一份
   client；业务 target 只看到 Tina trace token 声明；
-- cgltf implementation 宏只在 `tina_assetc` 的一个 `.cpp` 定义；
+- cgltf/stb_image implementation 宏只在 `src/asset/GltfCook.cpp` 定义；
 - 第三方 include 默认 `PRIVATE/SYSTEM`，Tina public header 的 include-what-you-use 测试不得依赖
   传递 include 偶然成功。
 - vNext target 不再把整个 `${PROJECT_SOURCE_DIR}/src` 作为 PUBLIC include root；公开 header 使用

@@ -195,7 +195,7 @@ endif ()
 # cooked assets themselves; do not scan/copy source resources/ into vNext-only graphs.
 if(TINA_BUILD_LEGACY)
     message(FATAL_ERROR
-        "TINA_BUILD_LEGACY is retired. The Legacy Tina.exe / src/ui / Scene product graph "
+        "TINA_BUILD_LEGACY is retired. The Legacy Tina.exe / old UI / old Scene product graph "
         "was removed; build vNext presets (windows-msvc-vnext*) only.")
 endif()
 

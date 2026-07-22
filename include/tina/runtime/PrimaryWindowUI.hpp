@@ -4,8 +4,11 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIProgressBar.hpp>
+#include <tina/ui/UIRadioButton.hpp>
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIText.hpp>
+#include <tina/ui/UITextEdit.hpp>
 
 #include <string_view>
 
@@ -32,9 +35,12 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<bool> isAlive(UI::UINodeId node) const;
     [[nodiscard]] Core::Result<UI::UINodeId> createPanel(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createLabel(UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createTextEdit(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createButton(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createCheckbox(UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createSlider(UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createProgressBar(UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createRadioButton(UI::UINodeId parent);
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint);
@@ -42,6 +48,8 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setTextStyle(UI::UINodeId node, const UI::UITextStyle& style);
     [[nodiscard]] Core::Result<std::string_view> text(UI::UINodeId node);
     [[nodiscard]] Core::Result<UI::UITextStyle> textStyle(UI::UINodeId node);
+    [[nodiscard]] Core::Status setTextSelection(UI::UINodeId textEdit, UI::UITextSelection selection);
+    [[nodiscard]] Core::Result<UI::UITextSelection> textSelection(UI::UINodeId textEdit) const;
     [[nodiscard]] Core::Status setButtonAction(UI::UINodeId button, UI::UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(UI::UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(UI::UINodeId button) const;
@@ -56,6 +64,18 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setSliderChangeCallback(UI::UINodeId slider, UI::UISliderChangeCallback callback);
     [[nodiscard]] Core::Status clearSliderChangeCallback(UI::UINodeId slider);
     [[nodiscard]] Core::Result<bool> isSliderDragging(UI::UINodeId slider) const;
+    [[nodiscard]] Core::Status setProgressBarRange(UI::UINodeId progressBar, float minValue, float maxValue);
+    [[nodiscard]] Core::Status setProgressBarValue(UI::UINodeId progressBar, float value);
+    [[nodiscard]] Core::Result<float> progressBarValue(UI::UINodeId progressBar) const;
+    [[nodiscard]] Core::Status setProgressBarPaint(UI::UINodeId progressBar, const UI::UIProgressBarPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIProgressBarPaint> progressBarPaint(UI::UINodeId progressBar) const;
+    [[nodiscard]] Core::Status setRadioButtonPaint(UI::UINodeId radioButton, const UI::UIRadioButtonPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIRadioButtonPaint> radioButtonPaint(UI::UINodeId radioButton) const;
+    [[nodiscard]] Core::Status setRadioButtonAction(UI::UINodeId radioButton, UI::UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status clearRadioButtonAction(UI::UINodeId radioButton);
+    [[nodiscard]] Core::Status setRadioButtonSelected(UI::UINodeId radioButton, bool selected);
+    [[nodiscard]] Core::Result<bool> isRadioButtonSelected(UI::UINodeId radioButton) const;
+    [[nodiscard]] Core::Result<bool> isRadioButtonPressed(UI::UINodeId radioButton) const;
     [[nodiscard]] Core::Result<UI::UIRoutedPointerListenerToken>
     addRoutedPointerListener(UI::UIRoutedPointerListenerDesc descriptor, UI::UIRoutedPointerCallback callback);
     [[nodiscard]] Core::Status destroy(UI::UINodeId node);

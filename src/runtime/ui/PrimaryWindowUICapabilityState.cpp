@@ -225,6 +225,23 @@ Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createLabel(u64 epoch
     return *child;
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createTextEdit(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                          UI::UITreeUpdater& updater,
+                                                                          UI::UINodeId parent)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createTextEdit";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto child = updater.createTextEdit(parent);
+    if (!child)
+    {
+        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
+    }
+    return *child;
+}
+
 Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createButton(u64 epoch, PrimaryWindowUIPhase phase,
                                                                         UI::UITreeUpdater& updater, UI::UINodeId parent)
 {
@@ -267,6 +284,38 @@ Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createSlider(u64 epoc
         return Core::failure(std::move(status.error()));
     }
     auto child = updater.createSlider(parent);
+    if (!child)
+    {
+        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
+    }
+    return *child;
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createProgressBar(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createProgressBar";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto child = updater.createProgressBar(parent);
+    if (!child)
+    {
+        return Core::failure(rememberFirstError(std::move(child.error()), Operation));
+    }
+    return *child;
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::createRadioButton(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId parent)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createRadioButton";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto child = updater.createRadioButton(parent);
     if (!child)
     {
         return Core::failure(rememberFirstError(std::move(child.error()), Operation));
@@ -384,6 +433,42 @@ Core::Result<UI::UITextStyle> PrimaryWindowUICapabilityState::textStyle(u64 epoc
         return Core::failure(status.error());
     }
     auto result = updater.textStyle(node);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setTextSelection(u64 epoch, PrimaryWindowUIPhase phase,
+                                                               UI::UITreeUpdater& updater,
+                                                               UI::UINodeId textEdit,
+                                                               UI::UITextSelection selection)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setTextSelection";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTextSelection(textEdit, selection);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UITextSelection>
+PrimaryWindowUICapabilityState::textSelection(u64 epoch, PrimaryWindowUIPhase phase,
+                                               const UI::UITreeUpdater& updater,
+                                               UI::UINodeId textEdit)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::textSelection";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(status.error());
+    }
+    auto result = updater.textSelection(textEdit);
     if (!result)
     {
         return Core::failure(rememberFirstError(std::move(result.error()), Operation));
@@ -621,6 +706,210 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isSliderDragging(u64 epoch, P
         return Core::failure(rememberFirstError(std::move(dragging.error()), Operation));
     }
     return *dragging;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setProgressBarRange(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId progressBar, float minValue, float maxValue)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setProgressBarRange";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setProgressBarRange(progressBar, minValue, maxValue);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::setProgressBarValue(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId progressBar, float value)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setProgressBarValue";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setProgressBarValue(progressBar, value);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<float> PrimaryWindowUICapabilityState::progressBarValue(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId progressBar)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::progressBarValue";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto value = updater.progressBarValue(progressBar);
+    if (!value)
+    {
+        return Core::failure(rememberFirstError(std::move(value.error()), Operation));
+    }
+    return *value;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setProgressBarPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId progressBar, const UI::UIProgressBarPaint& paint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setProgressBarPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setProgressBarPaint(progressBar, paint);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIProgressBarPaint> PrimaryWindowUICapabilityState::progressBarPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId progressBar)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::progressBarPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto paint = updater.progressBarPaint(progressBar);
+    if (!paint)
+    {
+        return Core::failure(rememberFirstError(std::move(paint.error()), Operation));
+    }
+    return *paint;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setRadioButtonPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId radioButton, const UI::UIRadioButtonPaint& paint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setRadioButtonPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setRadioButtonPaint(radioButton, paint);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIRadioButtonPaint> PrimaryWindowUICapabilityState::radioButtonPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId radioButton)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::radioButtonPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto paint = updater.radioButtonPaint(radioButton);
+    if (!paint)
+    {
+        return Core::failure(rememberFirstError(std::move(paint.error()), Operation));
+    }
+    return *paint;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setRadioButtonAction(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId radioButton, UI::UIButtonActionCallback callback)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setRadioButtonAction";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setRadioButtonAction(radioButton, std::move(callback));
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearRadioButtonAction(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId radioButton)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearRadioButtonAction";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearRadioButtonAction(radioButton);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::setRadioButtonSelected(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId radioButton, bool selected)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setRadioButtonSelected";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setRadioButtonSelected(radioButton, selected);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isRadioButtonSelected(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId radioButton)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isRadioButtonSelected";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto selected = updater.isRadioButtonSelected(radioButton);
+    if (!selected)
+    {
+        return Core::failure(rememberFirstError(std::move(selected.error()), Operation));
+    }
+    return *selected;
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isRadioButtonPressed(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId radioButton)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isRadioButtonPressed";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto pressed = updater.isRadioButtonPressed(radioButton);
+    if (!pressed)
+    {
+        return Core::failure(rememberFirstError(std::move(pressed.error()), Operation));
+    }
+    return *pressed;
 }
 
 Core::Result<UI::UIRoutedPointerListenerToken> PrimaryWindowUICapabilityState::addRoutedPointerListener(

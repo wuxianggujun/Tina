@@ -24,5 +24,6 @@ inline constexpr Core::ErrorCode InvalidFont{Core::ErrorDomain::UI, 17};
 // Reserved for atlas miss/stale glyph identity (find failures use InvalidNode
 // when a glyph placement is absent; keep a dedicated code for future eviction).
 inline constexpr Core::ErrorCode InvalidGlyph{Core::ErrorDomain::UI, 18};
+inline constexpr Core::ErrorCode InvalidControlValue{Core::ErrorDomain::UI, 19};
 
 } // namespace Tina::UI::UIErrorCode

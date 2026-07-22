@@ -42,6 +42,13 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
     return result ? *result : UI::UINodeId{};
 }
 
+[[nodiscard]] UI::UINodeId createRadioButton(UI::UIContext& context, UI::UINodeId parent)
+{
+    auto result = context.rootBuilder().createRadioButton(parent);
+    EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    return result ? *result : UI::UINodeId{};
+}
+
 [[nodiscard]] UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
 {
     auto result = context.treeUpdater(root);
@@ -192,6 +199,111 @@ TEST(UISliderTest, RejectsInvalidRange)
     auto updater = createUpdater(*context, root);
     EXPECT_FALSE(updater.setSliderRange(slider, 1.0F, 0.0F, 0.1F).has_value());
     EXPECT_FALSE(updater.setSliderRange(slider, 0.0F, 1.0F, -0.1F).has_value());
+}
+
+TEST(UISliderTest, SetValueDirtyQueueFailurePreservesStateAndSkipsCallback)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(
+        window,
+        {
+            .nodeCapacity = 3,
+            .rootCapacity = 1,
+            .dirtyQueueCapacity = 1,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    const UI::UINodeId slider = createSlider(*context, root.rootNodeId());
+    const UI::UINodeId blocker = createSlider(*context, root.rootNodeId());
+    ASSERT_TRUE(slider.hasValue());
+    ASSERT_TRUE(blocker.hasValue());
+
+    auto updater = createUpdater(*context, root);
+    int changes = 0;
+    assertOk(updater.setSliderChangeCallback(
+        slider,
+        UI::UISliderChangeCallback{[&changes](const UI::UISliderChangeEvent&) noexcept {
+            ++changes;
+        }}));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(updater.setSliderValue(blocker, 0.5F));
+    ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
+
+    const Core::Status rejected = updater.setSliderValue(slider, 0.75F);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
+    auto value = updater.sliderValue(slider);
+    ASSERT_TRUE(value.has_value());
+    EXPECT_FLOAT_EQ(*value, 0.0F);
+    EXPECT_EQ(changes, 0);
+    EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
+}
+
+TEST(UISliderTest, PointerDirtyQueueFailurePreservesStateAndSkipsCallback)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(
+        window,
+        {
+            .nodeCapacity = 4,
+            .rootCapacity = 1,
+            .dirtyQueueCapacity = 1,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    const UI::UINodeId slider = createSlider(*context, root.rootNodeId());
+    const UI::UINodeId intrinsicSpacer = createRadioButton(*context, slider);
+    const UI::UINodeId blocker = createSlider(*context, root.rootNodeId());
+    ASSERT_TRUE(slider.hasValue());
+    ASSERT_TRUE(intrinsicSpacer.hasValue());
+    ASSERT_TRUE(blocker.hasValue());
+
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setPointerHitPolicy(
+        intrinsicSpacer,
+        UI::UIPointerHitPolicy::Ignore));
+    int changes = 0;
+    assertOk(updater.setSliderChangeCallback(
+        slider,
+        UI::UISliderChangeCallback{[&changes](const UI::UISliderChangeEvent&) noexcept {
+            ++changes;
+        }}));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    auto down = context->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::ButtonDown,
+        1,
+        {.x = 0.0F, .y = 4.0F}));
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    auto dragging = updater.isSliderDragging(slider);
+    ASSERT_TRUE(dragging.has_value());
+    ASSERT_TRUE(*dragging);
+    assertOk(updater.setSliderValue(blocker, 0.5F));
+    ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
+    auto move = context->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::Move,
+        2,
+        {.x = 12.0F, .y = 4.0F}));
+    ASSERT_FALSE(move.has_value());
+    EXPECT_EQ(move.error().code, UI::UIErrorCode::CapacityExceeded);
+
+    auto value = updater.sliderValue(slider);
+    ASSERT_TRUE(value.has_value());
+    EXPECT_FLOAT_EQ(*value, 0.0F);
+    EXPECT_EQ(changes, 0);
+    dragging = updater.isSliderDragging(slider);
+    ASSERT_TRUE(dragging.has_value());
+    EXPECT_TRUE(*dragging);
 }
 
 } // namespace

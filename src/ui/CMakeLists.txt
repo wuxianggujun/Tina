@@ -1,6 +1,8 @@
 set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UI.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIButton.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIProgressBar.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIRadioButton.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISlider.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDirty.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedHit.hpp
@@ -16,6 +18,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPaint.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIText.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UITextEdit.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UIGlyphAtlas.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UITextRasterizer.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/InputRouting.hpp

@@ -288,32 +288,37 @@ protected:
 
 TEST_F(UIButtonActionTest, WidgetKindsPublishExpectedDefaultHitPolicies)
 {
-    auto context = createContext(firstWindow, {.nodeCapacity = 4, .rootCapacity = 1});
+    auto context = createContext(firstWindow, {.nodeCapacity = 5, .rootCapacity = 1});
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root);
     const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
     const UI::UINodeId label = createLabel(*context, panel);
     const UI::UINodeId button = createButton(*context, panel);
+    auto textEditResult = context->rootBuilder().createTextEdit(panel);
+    ASSERT_TRUE(textEditResult.has_value());
+    const UI::UINodeId textEdit = *textEditResult;
     auto updater = createUpdater(*context, root);
 
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
     assertOk(updater.setLayoutStyle(panel, fixedSize(80.0F, 80.0F)));
     assertOk(updater.setLayoutStyle(label, fixedSize(20.0F, 10.0F)));
     assertOk(updater.setLayoutStyle(button, fixedSize(30.0F, 10.0F)));
+    assertOk(updater.setLayoutStyle(textEdit, fixedSize(40.0F, 10.0F)));
     assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
 
     const UI::UICommittedHitView hit = context->committedHit();
-    ASSERT_EQ(hit.size(), 4U);
+    ASSERT_EQ(hit.size(), 5U);
     EXPECT_EQ(hit.entries()[0].node, root.rootNodeId());
     EXPECT_EQ(hit.entries()[0].policy, UI::UIPointerHitPolicy::Ignore);
     EXPECT_EQ(hit.entries()[1].node, panel);
     EXPECT_EQ(hit.entries()[1].policy, UI::UIPointerHitPolicy::Ignore);
     EXPECT_EQ(hit.entries()[2].node, label);
-    // Label is Targetable so it can become the IME/text focus target (M7-E6).
-    EXPECT_EQ(hit.entries()[2].policy, UI::UIPointerHitPolicy::Targetable);
+    EXPECT_EQ(hit.entries()[2].policy, UI::UIPointerHitPolicy::Ignore);
     EXPECT_EQ(hit.entries()[3].node, button);
     EXPECT_EQ(hit.entries()[3].policy, UI::UIPointerHitPolicy::Targetable);
+    EXPECT_EQ(hit.entries()[4].node, textEdit);
+    EXPECT_EQ(hit.entries()[4].policy, UI::UIPointerHitPolicy::Targetable);
     EXPECT_EQ(context->statistics().committedHitTargetCount, 2U);
 }
 
@@ -1023,6 +1028,59 @@ TEST_F(UIButtonActionTest, TabCyclesDefaultActionFocusAmongButtons)
     auto reverse = context->routeDefaultActionFocusStep(true);
     ASSERT_TRUE(reverse.has_value());
     EXPECT_EQ(reverse->focus, third);
+}
+
+TEST_F(UIButtonActionTest, FocusStepDirtyQueueFailurePreservesPreviousFocus)
+{
+    auto context = createContext(
+        firstWindow,
+        UI::UIContextCapacityConfig{
+            .nodeCapacity = 4,
+            .rootCapacity = 1,
+            .dirtyQueueCapacity = 2,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    const UI::UINodeId first = createButton(*context, root.rootNodeId());
+    const UI::UINodeId second = createButton(*context, root.rootNodeId());
+    const UI::UINodeId blocker = createPanel(*context, root.rootNodeId());
+
+    assertOk(updater.setLayoutStyle(
+        root.rootNodeId(),
+        fixedSize(200.0F, 80.0F)));
+    assertOk(updater.setLayoutStyle(first, fixedSize(40.0F, 20.0F)));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 80.0F}));
+    assertOk(updater.setLayoutStyle(second, fixedSize(40.0F, 20.0F)));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 80.0F}));
+
+    auto initialFocus = context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(initialFocus.has_value())
+        << (initialFocus ? "" : initialFocus.error().message);
+    ASSERT_EQ(initialFocus->focus, first);
+    EXPECT_EQ(context->defaultActionFocus(), first);
+    EXPECT_FALSE(context->imeFocus().hasValue());
+    assertOk(context->commitLayout({.width = 200.0F, .height = 80.0F}));
+
+    assertOk(updater.setPointerHitPolicy(
+        blocker,
+        UI::UIPointerHitPolicy::Targetable));
+    EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
+
+    auto rejected = context->routeDefaultActionFocusStep(false);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(context->defaultActionFocus(), first);
+    EXPECT_FALSE(context->imeFocus().hasValue());
+    EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
+
+    assertOk(context->commitLayout({.width = 200.0F, .height = 80.0F}));
+    auto retried = context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(retried.has_value()) << (retried ? "" : retried.error().message);
+    EXPECT_TRUE(retried->consumed);
+    EXPECT_TRUE(retried->moved);
+    EXPECT_EQ(retried->focus, second);
+    EXPECT_EQ(context->defaultActionFocus(), second);
 }
 
 } // namespace

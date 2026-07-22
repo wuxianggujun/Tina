@@ -43,12 +43,18 @@ class PrimaryWindowUICapabilityState final {
                                                          UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createLabel(u64 epoch, PrimaryWindowUIPhase phase,
                                                          UI::UITreeUpdater& updater, UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createTextEdit(u64 epoch, PrimaryWindowUIPhase phase,
+                                                            UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createButton(u64 epoch, PrimaryWindowUIPhase phase,
                                                           UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createCheckbox(u64 epoch, PrimaryWindowUIPhase phase,
                                                             UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Result<UI::UINodeId> createSlider(u64 epoch, PrimaryWindowUIPhase phase,
                                                           UI::UITreeUpdater& updater, UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createProgressBar(u64 epoch, PrimaryWindowUIPhase phase,
+                                                               UI::UITreeUpdater& updater, UI::UINodeId parent);
+    [[nodiscard]] Core::Result<UI::UINodeId> createRadioButton(u64 epoch, PrimaryWindowUIPhase phase,
+                                                               UI::UITreeUpdater& updater, UI::UINodeId parent);
     [[nodiscard]] Core::Status setLayoutStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                               UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
@@ -63,6 +69,11 @@ class PrimaryWindowUICapabilityState final {
                                                       UI::UITreeUpdater& updater, UI::UINodeId node);
     [[nodiscard]] Core::Result<UI::UITextStyle> textStyle(u64 epoch, PrimaryWindowUIPhase phase,
                                                           UI::UITreeUpdater& updater, UI::UINodeId node);
+    [[nodiscard]] Core::Status setTextSelection(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                UI::UINodeId textEdit, UI::UITextSelection selection);
+    [[nodiscard]] Core::Result<UI::UITextSelection> textSelection(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                  const UI::UITreeUpdater& updater,
+                                                                  UI::UINodeId textEdit);
     [[nodiscard]] Core::Status setButtonAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                UI::UINodeId button, UI::UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
@@ -92,6 +103,41 @@ class PrimaryWindowUICapabilityState final {
                                                          UI::UITreeUpdater& updater, UI::UINodeId slider);
     [[nodiscard]] Core::Result<bool> isSliderDragging(u64 epoch, PrimaryWindowUIPhase phase,
                                                       const UI::UITreeUpdater& updater, UI::UINodeId slider);
+    [[nodiscard]] Core::Status setProgressBarRange(u64 epoch, PrimaryWindowUIPhase phase,
+                                                   UI::UITreeUpdater& updater, UI::UINodeId progressBar,
+                                                   float minValue, float maxValue);
+    [[nodiscard]] Core::Status setProgressBarValue(u64 epoch, PrimaryWindowUIPhase phase,
+                                                   UI::UITreeUpdater& updater, UI::UINodeId progressBar,
+                                                   float value);
+    [[nodiscard]] Core::Result<float> progressBarValue(u64 epoch, PrimaryWindowUIPhase phase,
+                                                       const UI::UITreeUpdater& updater,
+                                                       UI::UINodeId progressBar);
+    [[nodiscard]] Core::Status setProgressBarPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                   UI::UITreeUpdater& updater, UI::UINodeId progressBar,
+                                                   const UI::UIProgressBarPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIProgressBarPaint> progressBarPaint(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId progressBar);
+    [[nodiscard]] Core::Status setRadioButtonPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                                   UI::UITreeUpdater& updater, UI::UINodeId radioButton,
+                                                   const UI::UIRadioButtonPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIRadioButtonPaint> radioButtonPaint(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId radioButton);
+    [[nodiscard]] Core::Status setRadioButtonAction(u64 epoch, PrimaryWindowUIPhase phase,
+                                                    UI::UITreeUpdater& updater, UI::UINodeId radioButton,
+                                                    UI::UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status clearRadioButtonAction(u64 epoch, PrimaryWindowUIPhase phase,
+                                                      UI::UITreeUpdater& updater, UI::UINodeId radioButton);
+    [[nodiscard]] Core::Status setRadioButtonSelected(u64 epoch, PrimaryWindowUIPhase phase,
+                                                      UI::UITreeUpdater& updater, UI::UINodeId radioButton,
+                                                      bool selected);
+    [[nodiscard]] Core::Result<bool> isRadioButtonSelected(u64 epoch, PrimaryWindowUIPhase phase,
+                                                           const UI::UITreeUpdater& updater,
+                                                           UI::UINodeId radioButton);
+    [[nodiscard]] Core::Result<bool> isRadioButtonPressed(u64 epoch, PrimaryWindowUIPhase phase,
+                                                          const UI::UITreeUpdater& updater,
+                                                          UI::UINodeId radioButton);
     [[nodiscard]] Core::Result<UI::UIRoutedPointerListenerToken>
     addRoutedPointerListener(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                              UI::UIRoutedPointerListenerDesc descriptor, UI::UIRoutedPointerCallback callback);

@@ -3,8 +3,10 @@
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/ui/UI.hpp>
 
+#include <array>
 #include <memory>
 #include <memory_resource>
+#include <thread>
 #include <utility>
 
 namespace Tina::Tests {
@@ -38,6 +40,13 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 [[nodiscard]] UI::UINodeId createCheckbox(UI::UIContext& context, UI::UINodeId parent)
 {
     auto result = context.rootBuilder().createCheckbox(parent);
+    EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    return result ? *result : UI::UINodeId{};
+}
+
+[[nodiscard]] UI::UINodeId createRadioButton(UI::UIContext& context, UI::UINodeId parent)
+{
+    auto result = context.rootBuilder().createRadioButton(parent);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -277,6 +286,189 @@ TEST(UICheckboxTest, KeyboardAcceptTogglesDefaultFocusedCheckbox)
     auto checkedAfterKey = updater.isChecked(checkbox);
     ASSERT_TRUE(checkedAfterKey.has_value());
     EXPECT_FALSE(*checkedAfterKey);
+}
+
+TEST(UICheckboxTest, SetCheckedDirtyQueueFailurePreservesState)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(
+        window,
+        {
+            .nodeCapacity = 3,
+            .rootCapacity = 1,
+            .dirtyQueueCapacity = 1,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    const UI::UINodeId checkbox = createCheckbox(*context, root.rootNodeId());
+    const UI::UINodeId blocker = createCheckbox(*context, root.rootNodeId());
+    ASSERT_TRUE(checkbox.hasValue());
+    ASSERT_TRUE(blocker.hasValue());
+
+    auto updater = createUpdater(*context, root);
+    publishLayout(*context);
+    assertOk(updater.setChecked(blocker, true));
+    ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
+
+    const Core::Status rejected = updater.setChecked(checkbox, true);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
+    auto checked = updater.isChecked(checkbox);
+    ASSERT_TRUE(checked.has_value());
+    EXPECT_FALSE(*checked);
+    EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
+}
+
+TEST(UICheckboxTest, PointerActivationDirtyQueueFailurePreservesStateAndAction)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(
+        window,
+        {
+            .nodeCapacity = 4,
+            .rootCapacity = 1,
+            .dirtyQueueCapacity = 1,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    const UI::UINodeId checkbox = createCheckbox(*context, root.rootNodeId());
+    const UI::UINodeId intrinsicSpacer = createRadioButton(*context, checkbox);
+    const UI::UINodeId blocker = createCheckbox(*context, root.rootNodeId());
+    ASSERT_TRUE(checkbox.hasValue());
+    ASSERT_TRUE(intrinsicSpacer.hasValue());
+    ASSERT_TRUE(blocker.hasValue());
+
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setPointerHitPolicy(
+        intrinsicSpacer,
+        UI::UIPointerHitPolicy::Ignore));
+    int activations = 0;
+    assertOk(updater.setCheckboxAction(
+        checkbox,
+        UI::UIButtonActionCallback{[&activations](const UI::UIButtonActionEvent&) noexcept {
+            ++activations;
+        }}));
+    publishLayout(*context);
+
+    auto down = context->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::ButtonDown,
+        1,
+        {.x = 4.0F, .y = 4.0F}));
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    ASSERT_TRUE(down->consumed);
+    publishLayout(*context);
+
+    assertOk(updater.setChecked(blocker, true));
+    ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
+    auto up = context->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::ButtonUp,
+        2,
+        {.x = 4.0F, .y = 4.0F}));
+    ASSERT_FALSE(up.has_value());
+    EXPECT_EQ(up.error().code, UI::UIErrorCode::CapacityExceeded);
+
+    auto checked = updater.isChecked(checkbox);
+    ASSERT_TRUE(checked.has_value());
+    EXPECT_FALSE(*checked);
+    EXPECT_EQ(activations, 0);
+}
+
+TEST(UICheckboxTest, KeyboardActivationDirtyQueueFailurePreservesStateAndAction)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(
+        window,
+        {
+            .nodeCapacity = 3,
+            .rootCapacity = 1,
+            .dirtyQueueCapacity = 1,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    const UI::UINodeId checkbox = createCheckbox(*context, root.rootNodeId());
+    const UI::UINodeId blocker = createCheckbox(*context, root.rootNodeId());
+    ASSERT_TRUE(checkbox.hasValue());
+    ASSERT_TRUE(blocker.hasValue());
+
+    auto updater = createUpdater(*context, root);
+    int activations = 0;
+    assertOk(updater.setCheckboxAction(
+        checkbox,
+        UI::UIButtonActionCallback{[&activations](const UI::UIButtonActionEvent&) noexcept {
+            ++activations;
+        }}));
+    publishLayout(*context);
+    auto focus = context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
+    ASSERT_TRUE(focus->moved);
+    ASSERT_EQ(focus->focus, checkbox);
+    publishLayout(*context);
+
+    assertOk(updater.setChecked(blocker, true));
+    ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
+    auto activate = context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{1},
+        1,
+        UI::UIButtonActivationSource::Keyboard);
+    ASSERT_FALSE(activate.has_value());
+    EXPECT_EQ(activate.error().code, UI::UIErrorCode::CapacityExceeded);
+
+    auto checked = updater.isChecked(checkbox);
+    ASSERT_TRUE(checked.has_value());
+    EXPECT_FALSE(*checked);
+    EXPECT_EQ(activations, 0);
+}
+
+TEST(UICheckboxTest, TypedWrappersRejectOffThreadBeforeKindResolution)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    auto updater = createUpdater(*context, root);
+    auto buttonResult = updater.createButton(root.rootNodeId());
+    ASSERT_TRUE(buttonResult.has_value())
+        << (buttonResult ? "" : buttonResult.error().message);
+    const UI::UINodeId wrongKind = *buttonResult;
+
+    std::array<bool, 3> succeeded{};
+    std::array<Core::ErrorCode, 3> errors{};
+    std::thread worker([&]() {
+        auto setAction = updater.setCheckboxAction(
+            wrongKind,
+            UI::UIButtonActionCallback{
+                [](const UI::UIButtonActionEvent&) noexcept {}});
+        succeeded[0] = setAction.has_value();
+        errors[0] = setAction ? Core::ErrorCode{} : setAction.error().code;
+
+        auto clearAction = updater.clearCheckboxAction(wrongKind);
+        succeeded[1] = clearAction.has_value();
+        errors[1] = clearAction ? Core::ErrorCode{} : clearAction.error().code;
+
+        auto pressed = updater.isCheckboxPressed(wrongKind);
+        succeeded[2] = pressed.has_value();
+        errors[2] = pressed ? Core::ErrorCode{} : pressed.error().code;
+    });
+    worker.join();
+
+    for (usize index = 0; index < succeeded.size(); ++index) {
+        EXPECT_FALSE(succeeded[index]);
+        EXPECT_EQ(errors[index], UI::UIErrorCode::WrongOwnerThread);
+    }
 }
 
 } // namespace

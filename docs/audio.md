@@ -1,130 +1,113 @@
-# Audio 生命周期与实时线程契约
+# Audio
 
-> 状态：vNext 契约文档。**M11-A7–A20 产品竖切已收口**（Disabled 引擎、命令/完成、bus、
-> miniaudio null 设备、可扩展解码、PCM clip、`mixRealtime`、`playOneShotPcm`、EngineHost/Desktop
-> 注入、sample null-device SFX、cooked AudioClip + recipe/lease、PCM16 WAV cook）。
-> 真实设备固定为 miniaudio（ADR 0012），不引入 SDL_mixer 或第二套音频库。
-> Deferred：OS 真扬声器门禁、MP3/Ogg 源 cook、完整 cooker 音频 CLI。
+Tina 的正式 Audio backend 方向是 miniaudio（ADR 0012）。`tina_audio` 提供 backend-neutral engine，
+`tina_audio_miniaudio` 提供可选 device/decode adapter；不引入 SDL_mixer 或第二套公开音频 API。
 
-## 模块边界
+## 当前实现
 
-`tina_audio` 提供后端无关的 AudioEngine、Bus、Voice、Listener、实时队列与 Disabled backend；
-`tina_audio_miniaudio` 才包含具体设备/callback/stream/decode 实现，miniaudio 类型只存在于该 adapter。
-Scene/World 不直接依赖音频后端；Gameplay 把播放、停止和参数修改提交给 AudioEngine。
+`AudioEngine` 当前具备：
 
-## 解码格式与可扩展性（M11-A10）
+- fixed-capacity generation voice registry；
+- Master/Music/SFX bus volume 与 mute；
+- 有界 Play/Stop command 和 Started/Stopped/Rejected completion；
+- non-owning float32 interleaved PCM view；
+- `playOneShotPcm()`、`mixRealtime()`、natural-stop 与主线程 `pumpCompletions()`；
+- Disabled/Enabled/Stopped 生命周期、stale handle 与重复 shutdown；
+- PMR-backed Tina-owned storage 和统计。
 
-| 格式 | 默认（`audio-miniaudio`） | 可选开启 |
-| --- | --- | --- |
-| WAV / FLAC / MP3 | 始终可用（miniaudio 内置） | — |
-| Ogg Vorbis | 关闭（`MA_NO_LIBVORBIS`） | `TINA_AUDIO_ENABLE_LIBVORBIS=ON` + vcpkg `audio-miniaudio-vorbis` |
-| Opus | 关闭（`MA_NO_LIBOPUS`） | `TINA_AUDIO_ENABLE_LIBOPUS=ON` + vcpkg `audio-miniaudio-opus` |
+`EngineHost` 已支持可选 `AudioEngineFactory`，并在 Fixed/Frame context 暴露 phase-local AudioEngine
+borrow。Desktop 默认创建 backend-neutral AudioEngine；miniaudio device 由完整 feature 产品路径显式创建、
+attach 和 start。
 
-运行时用 `queryAudioDecodeCapabilities()` 查询；`decodeAudioMemory` 在关闭可选编解码时对
-Ogg 魔数返回 `CodecNotEnabled`，其它损坏/未知负载返回 `DecodeFailed`。产品默认图保持小依赖；
-需要更多格式的集成方可按 feature 打开，无需改 Tina 公共 API。
+## miniaudio adapter
 
-首期范围：
+| 能力 | 当前状态 |
+| --- | --- |
+| Device | owner-thread start/stop/shutdown，null backend 或 OS default backend |
+| Callback | 调用 `AudioEngine::mixRealtime()`，无分配、无锁等待、无异常/日志 |
+| Decode | memory payload → float32 PCM；WAV/FLAC/MP3 使用 miniaudio 内置 decoder |
+| Vorbis | feature `audio-miniaudio-vorbis` + `TINA_AUDIO_ENABLE_LIBVORBIS=ON` |
+| Opus | feature `audio-miniaudio-opus` + `TINA_AUDIO_ENABLE_LIBOPUS=ON` |
 
-- Master/Music/SFX Bus 音量与 mute；
-- 短音效播放、停止、音量、pitch、loop 和基础3D位置；
-- 一条可取消的流式 Music 路径；
-- generation `AudioVoiceId`、主线程命令队列和 callback → main completion；
-- 设备不可用时显式 Disabled 状态，使无声运行仍可测试；
-- 内存解码 → float32 PCM（callback 外）；
-- voice 绑定非拥有 PCM + `mixRealtime`（同采样率；Master×SFX gain；播完 natural Stopped）；
-- AssetLease/Cooked clip、重采样、EngineHost 接线后置。
+关闭的 codec 返回 `CodecNotEnabled`，损坏/未知 payload 返回 `DecodeFailed`。miniaudio 类型不进入
+公开 Tina 头。
 
-混响、DSP Graph、空间遮挡、HRTF、编辑器预览和复杂 voice virtualization 后置。
+## PCM 与 Asset 生命周期
 
-## 状态与所有权
+`AudioPcmClipView` 是 non-owning borrow，AudioEngine **不会**自动取得 AssetLease。调用方必须让 PCM
+frames 存活到 voice 停止并完成 completion drain。
 
-```text
-Uninitialized -> Initializing -> Enabled
-                         +-----> Disabled
-Enabled/Disabled -> Stopping -> Stopped
-```
-
-- `EngineHost` 拥有 `AudioEngine`；初始化失败只有在配置声明 Audio 必需时才令 Engine 创建失败；
-- `AudioVoiceId { owner, index, generation }` 只标识 AudioEngine voice slot，不是 AssetId；slot 复用前增加 generation；
-- `AssetHandle<T>` 是可失效查询句柄，不能独自保证 payload 存活；正在播放或排队上传的声音
-  必须持有 `AssetLease<AudioClip>` 强引用；
-- AudioEngine 持有 active lease，直到 callback 确认 voice 停止并由主线程 completion 回收；
-- Listener/Emitter 使用 Tina 右手、Y-up、-Z forward、米为单位；如果 miniaudio adapter 需要
-  转换，只能在 adapter 边界一次完成并测试。
-
-## 实时线程模型
-
-所有公开 Audio API 从主线程提交固定大小命令；音频 callback 是唯一实时 consumer。若将来
-出现多个 producer，它们必须先汇聚到主线程，不能未经证明把 SPSC 偷换成不安全的 MPSC。
+产品 2D 当前路径为：
 
 ```text
-Gameplay / Asset main completion
-  -> main-thread voice registry
-  -> bounded AudioCommand SPSC
-  -> miniaudio callback
-  -> bounded AudioCompletion SPSC
-  -> Runtime Audio Completion phase
+recipe WAV
+  -> Cooked AudioClip (PCM float32 payload)
+  -> Catalog / AssetHandle
+  -> AssetLease keeps Cooked bytes alive
+  -> parseAudioClipFromCooked
+  -> pcmClipViewFromAudioClipPayload
+  -> AudioEngine::playOneShotPcm
+  -> optional miniaudio callback mix
+  -> completion pump
 ```
 
-Audio callback 中禁止：
+这里的强生命周期 owner 是产品 State 保存的 `AssetLease`，不是 AudioEngine 内部 lease。State 关闭时先
+停止/关闭 miniaudio device 和 voice，再释放 lease，不能让 callback 读取已卸载 payload。
+
+## 线程与队列
+
+所有公开 voice/bus/command 操作由 owner thread 提交；miniaudio callback 是实时 mixer consumer。
+
+Callback 中禁止：
 
 - heap allocation/free；
-- 文件 IO、Asset 查询或 Task wait；
-- 可能阻塞的 mutex/condition variable；
-- 格式化日志、异常传播和 UI/EventBus 回调；
-- 销毁 Scene、Asset 或 Engine 对象。
+- 文件 IO、Asset 查询、Task wait；
+- mutex/condition-variable 阻塞；
+- 格式化日志、异常传播、UI/Event callback；
+- 销毁 Engine、Asset、Scene 或 device owner。
 
-命令包含 generation、固定大小参数和已准备好的 backend payload handle。callback 只写入固定
-容量 completion；主线程在唯一阶段重新校验 generation 后执行回调、释放 lease 和更新状态。
+command/completion ring 创建时固定容量。Play/Stop queue 满返回 `CapacityExceeded`，不做无界 fallback；
+主线程按 phase pump completion 并重新校验 generation。当前 EngineHost 在 `updateFrame()` 后 pump。
 
-## 队列满与失败策略
+## 关闭顺序
 
-| 命令 | 队列满行为 |
-| --- | --- |
-| Stop/Shutdown/释放 lease | 不可丢；预留控制容量，失败触发受控 Audio fault |
-| Play | 返回 `QueueFull`，Gameplay 可在下一帧重试或放弃 |
-| 音量/pitch/位置更新 | 同 Voice/参数可合并为最新值；允许丢弃被覆盖的旧值 |
-| Completion | 不可静默丢失；容量按最大 active voice + 控制事件设置 |
+产品 State 先停止产生 Play，并关闭其 miniaudio device；随后 Runtime 调用 State `onExit()`、Application
+`onShutdown()`，最后 `EngineModules` 按 AudioEngine → Render → Task → Platform 顺序关闭。
 
-队列统计 current/peak、rejected、coalesced、callback underrun 和最长 command age。任何可丢弃
-策略都必须在命令类型声明，不能在通用 queue 中猜测。
+`AudioEngine::shutdown()` 幂等并 retire voice。实时 callback 停止前不得释放 PCM/lease；不得强杀 callback
+线程或用提前析构制造 UAF。
 
-## Asset、流式 Music 与延迟销毁
+## 产品证据
 
-短音效由 Asset 的 IO/CPU 阶段解码为拥有生命周期的 AudioClip payload；callback 不读取
-FrameArena 或 Worker scratch。流式 Music 的 IO/Decode 在非实时线程填充有界 ring buffer，
-callback 只消费已准备 PCM；buffer underrun 计数但不阻塞等待磁盘。
+完整 product-2d 报告已证明：
 
-取消 Asset generation 后，已排队但尚未开始的 Play 返回失效；正在播放的 voice 由策略决定
-自然结束或收到 Stop，但 payload 只有在 callback completion 后释放。热重载首期后置，不能
-原地替换 callback 正在读取的内存。
+- AudioEngine 存在并成功 queue one-shot；
+- Started completion 可观察；
+- PCM 来自 Catalog-held AssetLease；
+- Cooked clip frame count/sample rate 有效；
+- miniaudio null device 创建并产生 callback/mixed frames；
+- 300帧 sample exit 0。
 
-## Frame Pipeline 与关闭顺序
+null device 只证明 callback/mix/lifecycle，不证明真实扬声器音质、延迟或 OS backend 兼容性。
 
-Audio command 在 Frame Update/玩法阶段产生，在当帧末主线程批量 flush；Audio completion
-在下一帧固定的 `Audio Completion` 子阶段提交，不直接从 callback 进入 EventBus。
+## 验证
 
-关闭必须遵守：
+```powershell
+cmake --preset windows-msvc-vnext-audio-miniaudio
+cmake --build --preset windows-vnext-audio-miniaudio-debug `
+  --target tina_audio_tests tina_audio_miniaudio_tests -- /m:1 /v:m
+out\build\windows-msvc-vnext-audio-miniaudio\bin\Debug\tina_audio_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext-audio-miniaudio\bin\Debug\tina_audio_miniaudio_tests.exe --gtest_color=yes
+```
 
-1. `IGameApplication`/`IGameState`/Scene 停止产生 Play；
-2. Asset 停止新请求，但保留 active Audio lease；
-3. Audio 发送不可丢的 StopAll/Shutdown，停止 callback 与流式 producer；
-4. 主线程 drain completion，释放全部 Audio lease 和 voice slot；
-5. Asset 释放 Audio payload；
-6. Audio backend、Asset、Task 按依赖顺序退出。
+产品接线还需 product-2d 300帧 smoke。测试数量随工作树变化，不在本文固化；完整命令见
+[测试说明](testing.md)。
 
-超过 shutdown deadline 时输出 active voice、command age、stream task 和 generation，不强杀
-callback 线程，也不提前释放仍被设备读取的内存。
+## 尚未完成
 
-## 性能与验收
+- OS 真实扬声器的质量/延迟/设备切换门禁；
+- streaming Music/ring buffer、重采样、空间音频、HRTF、DSP graph；
+- MP3/Ogg 源文件进入正式 recipe/cooker 的产品策略；
+- Audio callback benchmark 纳入 ADR 0018 的统一协议。
 
-- callback p99 和最大耗时必须显著低于设备 period；结果记录 sample rate、buffer frames 和
-  backend period，不能只写平均耗时；
-- callback 稳态0分配、0阻塞锁、0 Task wait；
-- 1/32/128 active voice、短音效 burst、Music underrun 和队列满分别建立 `tina_bench` workload；
-- generation stale Play/Stop、Stop 与自然结束竞争、completion 满容量、设备 Disabled、重复
-  shutdown 和 active Asset lease 关闭顺序有直接 GoogleTest；
-- 300帧 2D 样例验证 SFX/Music、Master/Music/SFX 音量和退出资源归零；
-- Tracy 可标记主线程 Audio phase，但首期不在实时 callback 发送高频动态字符串或 memory
-  event，避免 profiler 反过来破坏实时性。
+这些后置项不影响当前 Cooked PCM one-shot + miniaudio null-device 产品证据。

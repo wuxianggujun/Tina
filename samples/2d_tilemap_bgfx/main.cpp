@@ -47,7 +47,10 @@
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPaint.hpp>
+#include <tina/ui/UIProgressBar.hpp>
+#include <tina/ui/UIRadioButton.hpp>
 #include <tina/ui/UIText.hpp>
+#include <tina/ui/UITextEdit.hpp>
 #if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/text/FreeTypeTextRasterizerFactory.hpp>
@@ -93,6 +96,8 @@ inline constexpr Tina::InputActionId MoveLeftAction{1};
 inline constexpr Tina::InputActionId MoveRightAction{2};
 inline constexpr Tina::InputActionId SelectTileAction{3};
 inline constexpr float DemoWalkSpeedMetersPerSecond = 4.0f;
+inline constexpr std::string_view InitialProfileNameText = "玩家名：星河";
+inline constexpr u32 InitialProfileNameCodepointCount = 6;
 
 // M11-D0: frame-count-independent product evidence fingerprint (screenshot precursor).
 // Only stable structural counters/flags are hashed —not per-frame animation values.
@@ -165,6 +170,8 @@ struct LifecycleCounters final {
     u64 uiPanelsCreated = 0;
     u64 uiRootsReleased = 0;
     u64 uiTextLabelsCreated = 0;
+    u64 uiTextEditsCreated = 0;
+    bool uiTextEditInitialTextVerified = false;
     u64 uiButtonsCreated = 0;
     u64 uiButtonActionsWired = 0;
     // M11-C1/C2: Master/Music/SFX volume Sliders wired to AudioEngine buses.
@@ -179,6 +186,11 @@ struct LifecycleCounters final {
     // M11-C3/C5: Master/Music/SFX mute Checkboxes -> AudioEngine setBusMuted.
     u64 uiCheckboxesCreated = 0;
     u64 uiCheckboxActions = 0;
+    u64 uiProgressBarsCreated = 0;
+    bool uiProgressBarValueVerified = false;
+    u64 uiRadioButtonsCreated = 0;
+    u64 uiRadioButtonActionsWired = 0;
+    bool uiRadioSelectionVerified = false;
     bool lastMasterMuted = false;
     bool lastMusicMuted = false;
     bool lastSfxMuted = false;
@@ -251,7 +263,10 @@ struct LifecycleCounters final {
 
 inline constexpr u32 ExpectedUIPanelCount = 2;
 inline constexpr u32 ExpectedUITextLabelCount = 2;
+inline constexpr u32 ExpectedUITextEditCount = 1;
 inline constexpr u32 ExpectedUIButtonCount = 1;
+inline constexpr u32 ExpectedUIProgressBarCount = 1;
+inline constexpr u32 ExpectedUIRadioButtonCount = 2;
 // Authored FixedWorldHeight for product sample; world width/ppm come from surface.
 // Keep height small enough that half-width fits the 8m-wide sample map so follow
 // can pan (height 6m →halfW≥.3m > map half →clamp freezes at center).
@@ -1205,6 +1220,197 @@ class TileMapBgfxState final : public Tina::IGameState {
             return status;
         }
 
+        // Single-line profile-name TextEdit. It is separated from the final mute
+        // checkbox by 16 px so the settings column remains readable at 960x540.
+        {
+            auto profileName = tree->createTextEdit(root->rootNodeId());
+            if (!profileName)
+            {
+                return Tina::Core::failure(std::move(profileName.error()));
+            }
+            if (auto status = tree->setLayoutStyle(
+                    *profileName, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
+                                                     Tina::UI::UILayoutLength::Px(252.0F),
+                                                     Tina::UI::UILayoutLength::Px(220.0F),
+                                                     Tina::UI::UILayoutLength::Px(42.0F)));
+                !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setBoxPaint(*profileName, solidFill(18, 44, 58, 245)); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setTextStyle(
+                    *profileName, Tina::UI::UITextStyle{
+                                      .logicalSize = 22.0F,
+                                      .advanceScale = 0.65F,
+                                      .lineHeightScale = 1.15F,
+                                      .color = {.red = 244, .green = 250, .blue = 255, .alpha = 255},
+                                  });
+                !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setText(*profileName, InitialProfileNameText); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setTextSelection(
+                    *profileName, Tina::UI::UITextSelection{
+                                      .anchorCodepoint = InitialProfileNameCodepointCount,
+                                      .caretCodepoint = InitialProfileNameCodepointCount,
+                                  });
+                !status)
+            {
+                return status;
+            }
+            auto initialText = tree->text(*profileName);
+            if (!initialText)
+            {
+                return Tina::Core::failure(std::move(initialText.error()));
+            }
+            if (*initialText != InitialProfileNameText)
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "profile-name TextEdit did not retain its initial UTF-8 text");
+            }
+            ++counters_->uiTextEditsCreated;
+            counters_->uiTextEditInitialTextVerified = true;
+        }
+
+        // Determinate loading/status indicator. UIBoxPaint is the track and the
+        // ProgressBar-specific paint emits the value-derived foreground fill.
+        {
+            auto progress = tree->createProgressBar(root->rootNodeId());
+            if (!progress)
+            {
+                return Tina::Core::failure(std::move(progress.error()));
+            }
+            if (auto status = tree->setLayoutStyle(
+                    *progress, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
+                                                  Tina::UI::UILayoutLength::Px(306.0F),
+                                                  Tina::UI::UILayoutLength::Px(220.0F),
+                                                  Tina::UI::UILayoutLength::Px(20.0F)));
+                !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setBoxPaint(*progress, solidFill(24, 38, 52, 240)); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setProgressBarPaint(
+                    *progress,
+                    Tina::UI::UIProgressBarPaint{
+                        .fillColor = {.red = 44, .green = 210, .blue = 142, .alpha = 255},
+                    });
+                !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setProgressBarRange(*progress, 0.0F, 100.0F); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setProgressBarValue(*progress, 65.0F); !status)
+            {
+                return status;
+            }
+            auto value = tree->progressBarValue(*progress);
+            if (!value)
+            {
+                return Tina::Core::failure(std::move(value.error()));
+            }
+            ++counters_->uiProgressBarsCreated;
+            counters_->uiProgressBarValueVerified = *value == 65.0F;
+        }
+
+        // Same-parent RadioButtons form one exclusive display-mode group. The
+        // label text is also the committed semantics name.
+        {
+            struct RadioSpec final {
+                float y = 0.0F;
+                std::string_view text{};
+            };
+            constexpr std::array radioSpecs{
+                RadioSpec{.y = 338.0F, .text = "Windowed"},
+                RadioSpec{.y = 374.0F, .text = "Fullscreen"},
+            };
+            std::array<Tina::UI::UINodeId, radioSpecs.size()> radioButtons{};
+            for (std::size_t index = 0; index < radioSpecs.size(); ++index)
+            {
+                auto radioButton = tree->createRadioButton(root->rootNodeId());
+                if (!radioButton)
+                {
+                    return Tina::Core::failure(std::move(radioButton.error()));
+                }
+                radioButtons[index] = *radioButton;
+                if (auto status = tree->setLayoutStyle(
+                        *radioButton, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
+                                                        Tina::UI::UILayoutLength::Px(radioSpecs[index].y),
+                                                        Tina::UI::UILayoutLength::Px(220.0F),
+                                                        Tina::UI::UILayoutLength::Px(28.0F)));
+                    !status)
+                {
+                    return status;
+                }
+                if (auto status = tree->setRadioButtonPaint(
+                        *radioButton,
+                        Tina::UI::UIRadioButtonPaint{
+                            .indicatorColor = {.red = 42, .green = 58, .blue = 72, .alpha = 255},
+                            .selectedIndicatorColor = {.red = 255, .green = 196, .blue = 64, .alpha = 255},
+                            .selectedIndicatorInset = 6.0F,
+                            .labelGap = 8.0F,
+                        });
+                    !status)
+                {
+                    return status;
+                }
+                if (auto status = tree->setTextStyle(
+                        *radioButton,
+                        Tina::UI::UITextStyle{
+                            .logicalSize = 18.0F,
+                            .advanceScale = 0.62F,
+                            .lineHeightScale = 1.15F,
+                            .color = {.red = 238, .green = 244, .blue = 248, .alpha = 255},
+                        });
+                    !status)
+                {
+                    return status;
+                }
+                if (auto status = tree->setText(*radioButton, radioSpecs[index].text); !status)
+                {
+                    return status;
+                }
+                if (auto status = tree->setRadioButtonAction(
+                        *radioButton,
+                        Tina::UI::UIButtonActionCallback{
+                            [](const Tina::UI::UIButtonActionEvent&) noexcept {}});
+                    !status)
+                {
+                    return status;
+                }
+                ++counters_->uiRadioButtonsCreated;
+                ++counters_->uiRadioButtonActionsWired;
+            }
+            if (auto status = tree->setRadioButtonSelected(radioButtons[0], true); !status)
+            {
+                return status;
+            }
+            auto firstSelected = tree->isRadioButtonSelected(radioButtons[0]);
+            auto secondSelected = tree->isRadioButtonSelected(radioButtons[1]);
+            if (!firstSelected)
+            {
+                return Tina::Core::failure(std::move(firstSelected.error()));
+            }
+            if (!secondSelected)
+            {
+                return Tina::Core::failure(std::move(secondSelected.error()));
+            }
+            counters_->uiRadioSelectionVerified = *firstSelected && !*secondSelected;
+        }
+
         uiRoot_ = std::move(*root);
         ++counters_->uiRootsCreated;
         counters_->uiPanelsCreated += panels.size();
@@ -2126,8 +2332,15 @@ int main(int argc, char** argv)
               counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
               counters.uiPanelsCreated == ExpectedUIPanelCount &&
               counters.uiTextLabelsCreated == ExpectedUITextLabelCount &&
+              counters.uiTextEditsCreated == ExpectedUITextEditCount &&
+              counters.uiTextEditInitialTextVerified &&
               counters.uiButtonsCreated == ExpectedUIButtonCount && counters.uiButtonActionsWired == 1 &&
               counters.uiSlidersCreated == 3 && counters.uiCheckboxesCreated == 3 &&
+              counters.uiProgressBarsCreated == ExpectedUIProgressBarCount &&
+              counters.uiProgressBarValueVerified &&
+              counters.uiRadioButtonsCreated == ExpectedUIRadioButtonCount &&
+              counters.uiRadioButtonActionsWired == ExpectedUIRadioButtonCount &&
+              counters.uiRadioSelectionVerified &&
               counters.uiRootsReleased == 1 && *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     ok = ok && counters.physicsReady && counters.physicsStaticBodies == ExpectedPhysicsStaticBodies &&
@@ -2145,8 +2358,8 @@ int main(int argc, char** argv)
 
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
-    evidenceBytes.reserve(128);
-    appendLeU32(evidenceBytes, 1U); // schema
+    evidenceBytes.reserve(176);
+    appendLeU32(evidenceBytes, 3U); // schema
     appendLeU32(evidenceBytes, counters.catalogFromRecipeFile ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.catalogRecipeAssets);
     appendLeU64(evidenceBytes, counters.texturesUploaded);
@@ -2154,9 +2367,15 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, expectedTotalSprites);
     appendLeU64(evidenceBytes, ExpectedUIPanelCount);
     appendLeU64(evidenceBytes, ExpectedUITextLabelCount);
+    appendLeU64(evidenceBytes, ExpectedUITextEditCount);
+    appendLeU32(evidenceBytes, counters.uiTextEditInitialTextVerified ? 1U : 0U);
     appendLeU64(evidenceBytes, ExpectedUIButtonCount);
     appendLeU64(evidenceBytes, counters.uiSlidersCreated);
     appendLeU64(evidenceBytes, counters.uiCheckboxesCreated); // expected 3 after M11-C5
+    appendLeU64(evidenceBytes, counters.uiProgressBarsCreated);
+    appendLeU32(evidenceBytes, counters.uiProgressBarValueVerified ? 1U : 0U);
+    appendLeU64(evidenceBytes, counters.uiRadioButtonsCreated);
+    appendLeU32(evidenceBytes, counters.uiRadioSelectionVerified ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.audioClipFrameCount);
     appendLeU32(evidenceBytes, counters.audioClipSampleRate);
     appendLeU32(evidenceBytes, counters.audioEnginePresent ? 1U : 0U);
@@ -2200,7 +2419,12 @@ int main(int argc, char** argv)
                   << ",\"hitRight\":" << counters.controllerHitRightFrames
                   << ",\"maxX\":" << counters.maxControllerX << ",\"uiRoots\":" << counters.uiRootsCreated
                   << ",\"uiPanels\":" << counters.uiPanelsCreated << ",\"uiLabels\":" << counters.uiTextLabelsCreated
+                  << ",\"uiTextEdits\":" << counters.uiTextEditsCreated
+                  << ",\"uiTextEditInitialTextVerified\":"
+                  << (counters.uiTextEditInitialTextVerified ? "true" : "false")
                   << ",\"uiButtons\":" << counters.uiButtonsCreated << ",\"uiSliders\":" << counters.uiSlidersCreated
+                  << ",\"uiProgressBars\":" << counters.uiProgressBarsCreated
+                  << ",\"uiRadioButtons\":" << counters.uiRadioButtonsCreated
                   << ",\"uiReleased\":" << counters.uiRootsReleased
                   << ",\"lastMasterVolume\":" << counters.lastMasterVolume
                   << ",\"worldPointerPresses\":" << counters.tileSelection.pointerPresses
@@ -2274,12 +2498,22 @@ int main(int argc, char** argv)
               << ",\"uiRootsCreated\":" << counters.uiRootsCreated
               << ",\"uiPanelsCreated\":" << counters.uiPanelsCreated
               << ",\"uiTextLabelsCreated\":" << counters.uiTextLabelsCreated
+              << ",\"uiTextEditsCreated\":" << counters.uiTextEditsCreated
+              << ",\"uiTextEditInitialTextVerified\":"
+              << (counters.uiTextEditInitialTextVerified ? "true" : "false")
               << ",\"uiButtonsCreated\":" << counters.uiButtonsCreated
               << ",\"uiButtonActionsWired\":" << counters.uiButtonActionsWired
               << ",\"uiSlidersCreated\":" << counters.uiSlidersCreated
               << ",\"uiSliderChanges\":" << counters.uiSliderChanges
               << ",\"uiCheckboxesCreated\":" << counters.uiCheckboxesCreated
               << ",\"uiCheckboxActions\":" << counters.uiCheckboxActions
+              << ",\"uiProgressBarsCreated\":" << counters.uiProgressBarsCreated
+              << ",\"uiProgressBarValueVerified\":"
+              << (counters.uiProgressBarValueVerified ? "true" : "false")
+              << ",\"uiRadioButtonsCreated\":" << counters.uiRadioButtonsCreated
+              << ",\"uiRadioButtonActionsWired\":" << counters.uiRadioButtonActionsWired
+              << ",\"uiRadioSelectionVerified\":"
+              << (counters.uiRadioSelectionVerified ? "true" : "false")
               << ",\"lastMasterVolume\":" << counters.lastMasterVolume
               << ",\"lastMusicVolume\":" << counters.lastMusicVolume
               << ",\"lastSfxVolume\":" << counters.lastSfxVolume
@@ -2382,7 +2616,7 @@ int main(int argc, char** argv)
 #endif
               << ",\"stateExits\":" << counters.stateExits
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"evidenceSchema\":1"
+              << ",\"evidenceSchema\":3"
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
               << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
               << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")

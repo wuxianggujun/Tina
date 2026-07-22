@@ -93,6 +93,113 @@ TEST_F(PrimaryWindowUICapabilityTest, EnterCapabilityCreatesOneRootScopedTreeAnd
     EXPECT_EQ(expiredBuilder.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, TextEditSelectionFacadeRoundTripsAndExpiresWithPhase)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto textEdit = tree->createTextEdit(root->rootNodeId());
+    ASSERT_TRUE(textEdit.has_value()) << textEdit.error().message;
+    ASSERT_TRUE(tree->setText(*textEdit, "Tina").has_value());
+
+    constexpr UI::UITextSelection Selection{.anchorCodepoint = 1, .caretCodepoint = 3};
+    ASSERT_TRUE(tree->setTextSelection(*textEdit, Selection).has_value());
+    const PrimaryWindowUITreeUpdater& treeView = *tree;
+    auto currentSelection = treeView.textSelection(*textEdit);
+    ASSERT_TRUE(currentSelection.has_value()) << currentSelection.error().message;
+    EXPECT_EQ(*currentSelection, Selection);
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+
+    auto expiredCreate = tree->createTextEdit(root->rootNodeId());
+    ASSERT_FALSE(expiredCreate.has_value());
+    EXPECT_EQ(expiredCreate.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredSet = tree->setTextSelection(*textEdit, {});
+    ASSERT_FALSE(expiredSet.has_value());
+    EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredQuery = treeView.textSelection(*textEdit);
+    ASSERT_FALSE(expiredQuery.has_value());
+    EXPECT_EQ(expiredQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAndExpire)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    auto progressBar = tree->createProgressBar(root->rootNodeId());
+    auto firstRadio = tree->createRadioButton(root->rootNodeId());
+    auto secondRadio = tree->createRadioButton(root->rootNodeId());
+    ASSERT_TRUE(progressBar.has_value()) << progressBar.error().message;
+    ASSERT_TRUE(firstRadio.has_value()) << firstRadio.error().message;
+    ASSERT_TRUE(secondRadio.has_value()) << secondRadio.error().message;
+
+    constexpr UI::UIProgressBarPaint ProgressPaint{
+        .fillColor = {.red = 20, .green = 180, .blue = 120, .alpha = 255},
+    };
+    constexpr UI::UIRadioButtonPaint RadioPaint{
+        .indicatorColor = {.red = 30, .green = 40, .blue = 50, .alpha = 255},
+        .selectedIndicatorColor = {.red = 240, .green = 180, .blue = 40, .alpha = 255},
+        .selectedIndicatorInset = 5.0F,
+        .labelGap = 7.0F,
+    };
+    ASSERT_TRUE(tree->setProgressBarRange(*progressBar, 10.0F, 20.0F).has_value());
+    ASSERT_TRUE(tree->setProgressBarValue(*progressBar, 15.0F).has_value());
+    ASSERT_TRUE(tree->setProgressBarPaint(*progressBar, ProgressPaint).has_value());
+    ASSERT_TRUE(tree->setRadioButtonPaint(*firstRadio, RadioPaint).has_value());
+    ASSERT_TRUE(tree->setRadioButtonPaint(*secondRadio, RadioPaint).has_value());
+    ASSERT_TRUE(tree->setText(*firstRadio, "Windowed").has_value());
+    ASSERT_TRUE(tree->setText(*secondRadio, "Fullscreen").has_value());
+    usize activations = 0;
+    ASSERT_TRUE(tree->setRadioButtonAction(*firstRadio, buttonAction(activations)).has_value());
+    ASSERT_TRUE(tree->setRadioButtonSelected(*firstRadio, true).has_value());
+    ASSERT_TRUE(tree->setRadioButtonSelected(*secondRadio, true).has_value());
+
+    const PrimaryWindowUITreeUpdater& treeView = *tree;
+    auto value = treeView.progressBarValue(*progressBar);
+    auto progressPaint = treeView.progressBarPaint(*progressBar);
+    auto firstSelected = treeView.isRadioButtonSelected(*firstRadio);
+    auto secondSelected = treeView.isRadioButtonSelected(*secondRadio);
+    auto radioPaint = treeView.radioButtonPaint(*secondRadio);
+    auto pressed = treeView.isRadioButtonPressed(*secondRadio);
+    ASSERT_TRUE(value.has_value()) << value.error().message;
+    ASSERT_TRUE(progressPaint.has_value()) << progressPaint.error().message;
+    ASSERT_TRUE(firstSelected.has_value()) << firstSelected.error().message;
+    ASSERT_TRUE(secondSelected.has_value()) << secondSelected.error().message;
+    ASSERT_TRUE(radioPaint.has_value()) << radioPaint.error().message;
+    ASSERT_TRUE(pressed.has_value()) << pressed.error().message;
+    EXPECT_FLOAT_EQ(*value, 15.0F);
+    EXPECT_EQ(*progressPaint, ProgressPaint);
+    EXPECT_FALSE(*firstSelected);
+    EXPECT_TRUE(*secondSelected);
+    EXPECT_EQ(*radioPaint, RadioPaint);
+    EXPECT_FALSE(*pressed);
+    EXPECT_EQ(activations, 0U);
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+
+    auto expiredCreate = tree->createProgressBar(root->rootNodeId());
+    ASSERT_FALSE(expiredCreate.has_value());
+    EXPECT_EQ(expiredCreate.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredValue = treeView.progressBarValue(*progressBar);
+    ASSERT_FALSE(expiredValue.has_value());
+    EXPECT_EQ(expiredValue.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredSelect = tree->setRadioButtonSelected(*firstRadio, true);
+    ASSERT_FALSE(expiredSelect.has_value());
+    EXPECT_EQ(expiredSelect.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, ButtonActionFacadeSetsReplacesClearsAndQueriesInitialPressedState)
 {
     CapabilityState state;

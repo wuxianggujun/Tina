@@ -22,10 +22,12 @@ enum class UISemanticsRole : u8 {
     Dialog,
     List,
     ListItem,
+    ProgressBar,
+    RadioButton,
 };
 
-// Owner-thread snapshot entry. name/description/valueText borrow UIContext
-// storage and are invalidated with the committed semantics view.
+// Owner-thread snapshot entry. Text fields point into the committed snapshot's
+// private, double-buffered text storage and are invalidated with the view.
 struct UISemanticsEntry final {
     UINodeId node{};
     UINodeId parent{};
@@ -45,8 +47,8 @@ struct UISemanticsEntry final {
 };
 
 // Owner-thread borrowed semantics snapshot. Invalidated by the next successful
-// semantics publication (via commitLayout or commitSemantics), or by UIContext
-// destruction. Not a cross-thread snapshot.
+// commitLayout semantics publication, or by UIContext destruction. It is not a
+// cross-thread snapshot.
 class UICommittedSemanticsView final {
   public:
     constexpr UICommittedSemanticsView() noexcept = default;
@@ -129,6 +131,12 @@ class UICommittedSemanticsView final {
         return UISemanticsRole::Checkbox;
     case UIWidgetKind::Slider:
         return UISemanticsRole::Slider;
+    case UIWidgetKind::TextEdit:
+        return UISemanticsRole::TextEdit;
+    case UIWidgetKind::ProgressBar:
+        return UISemanticsRole::ProgressBar;
+    case UIWidgetKind::RadioButton:
+        return UISemanticsRole::RadioButton;
     }
     return UISemanticsRole::Group;
 }
@@ -138,7 +146,8 @@ class UICommittedSemanticsView final {
 [[nodiscard]] constexpr bool isSemanticsPublishedKind(UIWidgetKind kind) noexcept
 {
     return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox ||
-           kind == UIWidgetKind::Slider;
+           kind == UIWidgetKind::Slider || kind == UIWidgetKind::TextEdit ||
+           kind == UIWidgetKind::ProgressBar || kind == UIWidgetKind::RadioButton;
 }
 
 } // namespace Tina::UI

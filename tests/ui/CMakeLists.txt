@@ -3,6 +3,8 @@ add_executable(tina_ui_tests
     UIButtonActionTests.cpp
     UICheckboxTests.cpp
     UISliderTests.cpp
+    UIProgressBarTests.cpp
+    UIRadioButtonTests.cpp
     UISemanticsTests.cpp
     UIInputRouteTests.cpp
 
@@ -10,11 +12,14 @@ add_executable(tina_ui_tests
     UILayoutTests.cpp
     UIPaintSnapshotTests.cpp
     UITextTests.cpp
+    UITextEditTests.cpp
     UITextRasterizerTests.cpp
     UIGlyphAtlasTests.cpp
     UITreeCoreTests.cpp
     header_isolation/InputRoutingHeader.cpp
     header_isolation/UIButtonHeader.cpp
+    header_isolation/UIProgressBarHeader.cpp
+    header_isolation/UIRadioButtonHeader.cpp
     header_isolation/UISliderHeader.cpp
     header_isolation/UISemanticsHeader.cpp
     header_isolation/UIDirtyHeader.cpp
@@ -30,6 +35,7 @@ add_executable(tina_ui_tests
     header_isolation/UILayoutHeader.cpp
     header_isolation/UIPaintHeader.cpp
     header_isolation/UITextHeader.cpp
+    header_isolation/UITextEditHeader.cpp
     header_isolation/UITextRasterizerHeader.cpp
     header_isolation/UIGlyphAtlasHeader.cpp
     header_isolation/UINodeIdHeader.cpp

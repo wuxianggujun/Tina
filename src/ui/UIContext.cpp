@@ -15,9 +15,11 @@
 #include <cstring>
 #include <exception>
 #include <expected>
+#include <initializer_list>
 #include <limits>
 #include <mutex>
 #include <new>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <type_traits>
@@ -92,6 +94,45 @@ struct WidgetTextState final {
     UITextMetrics metrics{};
     bool hasContent = false;
 };
+
+struct TextEditState final {
+    UITextSelection selection{};
+};
+
+struct ProgressBarState final {
+    float minValue = 0.0F;
+    float maxValue = 1.0F;
+    float value = 0.0F;
+    UIProgressBarPaint paint{};
+};
+
+struct RadioButtonState final {
+    UIRadioButtonPaint paint{};
+    bool selected = false;
+};
+
+[[nodiscard]] constexpr bool containsLineBreak(std::string_view text) noexcept
+{
+    return text.find('\r') != std::string_view::npos
+        || text.find('\n') != std::string_view::npos;
+}
+
+[[nodiscard]] constexpr usize utf8ByteOffsetForCodepoint(
+    std::string_view text,
+    u32 codepointOffset) noexcept
+{
+    usize byteOffset = 0;
+    u32 codepoint = 0;
+    while (byteOffset < text.size() && codepoint < codepointOffset) {
+        const auto first = static_cast<unsigned char>(text[byteOffset]);
+        byteOffset += first <= 0x7FU ? 1U
+            : (first & 0xE0U) == 0xC0U ? 2U
+            : (first & 0xF0U) == 0xE0U ? 3U
+            : 4U;
+        ++codepoint;
+    }
+    return (std::min)(byteOffset, text.size());
+}
 
 inline constexpr u32 InvalidRoutedPointerListenerIndex =
     (std::numeric_limits<u32>::max)();
@@ -629,16 +670,17 @@ struct UIContext::Impl final {
     std::pmr::vector<UIPremultipliedRgba8Color> localSolidFillCacheByIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localTextColorCacheByIndex;
     std::pmr::vector<WidgetTextState> textStatesByIndex;
+    std::pmr::vector<TextEditState> textEditStatesByNodeIndex;
+    std::pmr::vector<ProgressBarState> progressBarStatesByNodeIndex;
+    std::pmr::vector<RadioButtonState> radioButtonStatesByNodeIndex;
     std::pmr::vector<char> textBytes;
     std::pmr::vector<TextByteAllocation> freeTextAllocations;
     usize textByteUsed = 0;
     usize textByteHighWater = 0;
+    usize textByteBumpOffset = 0;
     std::unique_ptr<IUITextRasterizer> textRasterizer;
     UIFontFaceId textFace{};
     std::unique_ptr<UIGlyphAtlas> glyphAtlas;
-    // Paint-local scratch: copies glyph advances out of a borrow-local raster
-    // batch so paint can walk UTF-8 (including newlines) without use-after-free.
-    std::pmr::vector<float> textPaintAdvanceScratch;
     std::pmr::vector<UIDirty> dirtyByIndex;
     std::pmr::vector<u8> dirtyQueuedByIndex;
     std::pmr::vector<UINodeId> dirtyQueue;
@@ -671,6 +713,9 @@ struct UIContext::Impl final {
     std::array<std::pmr::vector<UICommittedHitEntry>, 2> committedHitBuffers;
     std::array<std::pmr::vector<UICommittedPaintEntry>, 2> committedPaintBuffers;
     std::array<std::pmr::vector<UISemanticsEntry>, 2> committedSemanticsBuffers;
+    // Semantics entries borrow from the published buffer's private text copy;
+    // mutating the live widget text arena must not rewrite an older snapshot.
+    std::array<std::pmr::vector<char>, 2> committedSemanticsTextBuffers;
     std::vector<UINodeId> deferredRootDestroyBuffer;
     std::vector<Detail::DeferredRoutedPointerListenerRelease>
         deferredRoutedPointerListenerReleaseBuffer;
@@ -733,11 +778,12 @@ struct UIContext::Impl final {
     bool armedPrimaryButtonPressed = false;
     // M11-C1: exclusive Primary drag capture for Slider (clears Button arm).
     UINodeId armedSlider{};
+    UINodeId armedTextEdit{};
     // Last Button that received Primary Pointer arm. Keyboard/Gamepad Accept
     // activates this node without requiring a live pointer press.
     UINodeId defaultActionFocusButton{};
-    // Last Label that received Primary Pointer Down (IME/text target).
-    UINodeId imeFocusLabel{};
+    // Focused single-line editor that receives keyboard and IME input.
+    UINodeId textInputFocus{};
     static constexpr usize MaxImePreeditBytes = 512;
     std::array<char, MaxImePreeditBytes> imePreeditBytes_{};
     usize imePreeditSize_ = 0;
@@ -763,9 +809,11 @@ struct UIContext::Impl final {
           localSolidFillCacheByIndex(&resource),
           localTextColorCacheByIndex(&resource),
           textStatesByIndex(&resource),
+          textEditStatesByNodeIndex(&resource),
+          progressBarStatesByNodeIndex(&resource),
+          radioButtonStatesByNodeIndex(&resource),
           textBytes(&resource),
           freeTextAllocations(&resource),
-          textPaintAdvanceScratch(&resource),
           dirtyByIndex(&resource),
           dirtyQueuedByIndex(&resource),
           dirtyQueue(&resource),
@@ -798,7 +846,10 @@ struct UIContext::Impl final {
               std::pmr::vector<UICommittedPaintEntry>(&resource)},
           committedSemanticsBuffers{
               std::pmr::vector<UISemanticsEntry>(&resource),
-              std::pmr::vector<UISemanticsEntry>(&resource)}
+              std::pmr::vector<UISemanticsEntry>(&resource)},
+          committedSemanticsTextBuffers{
+              std::pmr::vector<char>(&resource),
+              std::pmr::vector<char>(&resource)}
     {
     }
 
@@ -848,6 +899,9 @@ struct UIContext::Impl final {
         impl->localSolidFillCacheByIndex.resize(normalized.nodeCapacity);
         impl->localTextColorCacheByIndex.resize(normalized.nodeCapacity);
         impl->textStatesByIndex.resize(normalized.nodeCapacity);
+        impl->textEditStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->progressBarStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->radioButtonStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->textBytes.resize(normalized.textByteCapacity, '\0');
         impl->freeTextAllocations.reserve(normalized.nodeCapacity);
         impl->dirtyByIndex.resize(normalized.nodeCapacity, UIDirty::None);
@@ -916,6 +970,8 @@ struct UIContext::Impl final {
         // Semantics publishes interactive kinds only; reuse paint snapshot capacity bound.
         impl->committedSemanticsBuffers[0].reserve(normalized.paintSnapshotCapacity);
         impl->committedSemanticsBuffers[1].reserve(normalized.paintSnapshotCapacity);
+        impl->committedSemanticsTextBuffers[0].resize(normalized.textByteCapacity, '\0');
+        impl->committedSemanticsTextBuffers[1].resize(normalized.textByteCapacity, '\0');
         impl->deferredRootDestroyBuffer.reserve(normalized.rootCapacity);
         impl->deferredRoutedPointerListenerReleaseBuffer.reserve(
             normalized.routedPointerListenerCapacity);
@@ -1270,6 +1326,9 @@ struct UIContext::Impl final {
 
             float autoContentWidth = 0.0F;
             float autoContentHeight = 0.0F;
+            float radioLabelWidth = 0.0F;
+            bool hasRadioLabel = false;
+            bool hasRadioIndicator = false;
             usize flowChildCount = 0;
 
             u32 childIndex = record->firstChildIndex;
@@ -1305,25 +1364,36 @@ struct UIContext::Impl final {
             }
 
             if (flowChildCount == 0
-                && (record->kind == UIWidgetKind::Label
-                    || record->kind == UIWidgetKind::Button)
+                && supportsWidgetText(record->kind)
                 && index < textStatesByIndex.size()
                 && textStatesByIndex[index].hasContent) {
                 const UILogicalSize textSize =
                     textStatesByIndex[index].metrics.measuredSize;
                 autoContentWidth = textSize.width;
                 autoContentHeight = textSize.height;
+                if (record->kind == UIWidgetKind::RadioButton
+                    && index < radioButtonStatesByNodeIndex.size()) {
+                    radioLabelWidth = textSize.width;
+                    hasRadioLabel = true;
+                }
             }
 
-            float outerWidth = resolvedWidth(style, scratch, statistics);
-            float outerHeight = resolvedHeight(style, scratch, statistics);
-            if (outerWidth < 0.0F) {
-                outerWidth = record->parentIndex == InvalidNodeIndex
-                    ? (std::max)(
-                        autoContentWidth + horizontalMargin(style.padding),
-                        viewportSize.width)
-                    : autoContentWidth + horizontalMargin(style.padding);
+            if (flowChildCount == 0
+                && record->kind == UIWidgetKind::RadioButton
+                && index < radioButtonStatesByNodeIndex.size()) {
+                hasRadioIndicator = true;
+                if (!hasRadioLabel && index < textStatesByIndex.size()) {
+                    const UITextStyle& textStyle = textStatesByIndex[index].style;
+                    const float defaultIndicatorExtent =
+                        textStyle.logicalSize * textStyle.lineHeightScale;
+                    if (std::isfinite(defaultIndicatorExtent)
+                        && defaultIndicatorExtent > 0.0F) {
+                        autoContentHeight = defaultIndicatorExtent;
+                    }
+                }
             }
+
+            float outerHeight = resolvedHeight(style, scratch, statistics);
             if (outerHeight < 0.0F) {
                 outerHeight = record->parentIndex == InvalidNodeIndex
                     ? (std::max)(
@@ -1331,8 +1401,24 @@ struct UIContext::Impl final {
                         viewportSize.height)
                     : autoContentHeight + verticalMargin(style.padding);
             }
-            outerWidth = clampWidth(outerWidth, style, scratch, statistics);
             outerHeight = clampHeight(outerHeight, style, scratch, statistics);
+            if (hasRadioIndicator) {
+                autoContentWidth = outerHeight;
+                if (hasRadioLabel) {
+                    autoContentWidth += radioLabelWidth
+                        + radioButtonStatesByNodeIndex[index].paint.labelGap;
+                }
+            }
+
+            float outerWidth = resolvedWidth(style, scratch, statistics);
+            if (outerWidth < 0.0F) {
+                outerWidth = record->parentIndex == InvalidNodeIndex
+                    ? (std::max)(
+                        autoContentWidth + horizontalMargin(style.padding),
+                        viewportSize.width)
+                    : autoContentWidth + horizontalMargin(style.padding);
+            }
+            outerWidth = clampWidth(outerWidth, style, scratch, statistics);
 
             scratch.measuredSize = UILogicalSize{
                 .width = normalizeFloat(outerWidth),
@@ -1854,6 +1940,18 @@ struct UIContext::Impl final {
         return count;
     }
 
+    [[nodiscard]] static float normalizedRangeFraction(
+        float value,
+        float minValue,
+        float maxValue) noexcept
+    {
+        if (!(std::isfinite(value) && std::isfinite(minValue)
+              && std::isfinite(maxValue) && maxValue > minValue)) {
+            return 0.0F;
+        }
+        return std::clamp((value - minValue) / (maxValue - minValue), 0.0F, 1.0F);
+    }
+
     [[nodiscard]] Core::Result<usize> validatePaintCandidateCapacity(
         std::span<const UICommittedLayoutEntry> layoutEntries) const
     {
@@ -1873,24 +1971,71 @@ struct UIContext::Impl final {
                 && paint.solidFill->color.alpha != 0) {
                 ++paintEntryCount;
             }
+            const NodeRecord* record = recordByIndex(nodeIndex);
+            if (record != nullptr && record->kind == UIWidgetKind::ProgressBar
+                && nodeIndex < progressBarStatesByNodeIndex.size()) {
+                const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
+                const float fraction = normalizedRangeFraction(
+                    progress.value,
+                    progress.minValue,
+                    progress.maxValue);
+                if (fraction > 0.0F
+                    && progress.paint.fillColor.alpha != 0
+                    && layoutEntry.worldRect.width > 0.0F
+                    && layoutEntry.worldRect.height > 0.0F) {
+                    ++paintEntryCount;
+                }
+            }
+            if (record != nullptr && record->kind == UIWidgetKind::RadioButton
+                && nodeIndex < radioButtonStatesByNodeIndex.size()) {
+                const RadioButtonState& radio = radioButtonStatesByNodeIndex[nodeIndex];
+                const float indicatorExtent = (std::min)(
+                    layoutEntry.worldRect.width,
+                    layoutEntry.worldRect.height);
+                const float inset = radio.paint.selectedIndicatorInset;
+                if (radio.paint.indicatorColor.alpha != 0
+                    && indicatorExtent > 0.0F) {
+                    ++paintEntryCount;
+                }
+                if (radio.selected
+                    && radio.paint.selectedIndicatorColor.alpha != 0
+                    && indicatorExtent > inset * 2.0F) {
+                    ++paintEntryCount;
+                }
+            }
+            const bool focusedTextEdit = record != nullptr
+                && record->kind == UIWidgetKind::TextEdit
+                && textInputFocus == layoutEntry.node
+                && isLiveTextEdit(textInputFocus);
+            const bool activeIme = focusedTextEdit && imeCompositionActive_;
             if (nodeIndex < textStatesByIndex.size()
                 && textStatesByIndex[nodeIndex].hasContent
                 && textStatesByIndex[nodeIndex].style.color.alpha != 0) {
-                paintEntryCount += countDrawableTextCodepoints(
+                const usize committedCodepoints = countDrawableTextCodepoints(
                     textViewFor(nodeIndex));
+                if (activeIme && nodeIndex < textEditStatesByNodeIndex.size()) {
+                    const UITextSelection selection =
+                        textEditStatesByNodeIndex[nodeIndex].selection;
+                    const usize selectedCodepoints = static_cast<usize>(
+                        (std::max)(selection.anchorCodepoint, selection.caretCodepoint)
+                        - (std::min)(selection.anchorCodepoint, selection.caretCodepoint));
+                    paintEntryCount += committedCodepoints
+                        - (std::min)(committedCodepoints, selectedCodepoints);
+                } else {
+                    paintEntryCount += committedCodepoints;
+                }
             }
-            // Active IME preedit is painted after the committed Label text.
-            if (imeCompositionActive_
-                && imeFocusLabel.hasValue()
-                && layoutEntry.node == imeFocusLabel
-                && imePreeditSize_ > 0) {
-                paintEntryCount += countDrawableTextCodepoints(
-                    std::string_view(imePreeditBytes_.data(), imePreeditSize_));
-            }
-            // M7-E8: one caret solid for the IME-focused Label.
-            if (imeFocusLabel.hasValue()
-                && layoutEntry.node == imeFocusLabel
-                && isLiveLabel(imeFocusLabel)) {
+            if (focusedTextEdit) {
+                if (activeIme) {
+                    // Active IME preedit replaces both the selected text and its
+                    // highlight, so count only the replacement glyphs.
+                    paintEntryCount += countDrawableTextCodepoints(
+                        std::string_view(imePreeditBytes_.data(), imePreeditSize_));
+                } else if (nodeIndex < textEditStatesByNodeIndex.size()
+                           && !textEditStatesByNodeIndex[nodeIndex]
+                                   .selection.isCollapsed()) {
+                    ++paintEntryCount;
+                }
                 ++paintEntryCount;
             }
         }
@@ -2141,42 +2286,83 @@ struct UIContext::Impl final {
         u32& nextPaintOrdinal) noexcept
     {
         const u32 nodeIndex = layoutEntry.node.index();
+        const NodeRecord* record = recordByIndex(nodeIndex);
+        const bool focusedTextEdit = record != nullptr
+            && record->kind == UIWidgetKind::TextEdit
+            && textInputFocus == layoutEntry.node
+            && isLiveTextEdit(textInputFocus);
+        const WidgetTextState* textState = nodeIndex < textStatesByIndex.size()
+            ? &textStatesByIndex[nodeIndex]
+            : nullptr;
+        const UITextStyle style = textState != nullptr
+            ? textState->style
+            : UITextStyle{};
+        const UIPremultipliedRgba8Color textColor =
+            nodeIndex < localTextColorCacheByIndex.size()
+            ? localTextColorCacheByIndex[nodeIndex]
+            : UIPremultipliedRgba8Color{};
+        const std::string_view committedText = textState != nullptr
+                && textState->hasContent
+            ? textViewFor(nodeIndex)
+            : std::string_view{};
+        float textStartX = layoutEntry.worldRect.x;
+        if (record != nullptr && record->kind == UIWidgetKind::RadioButton
+            && nodeIndex < radioButtonStatesByNodeIndex.size()) {
+            const float indicatorExtent = (std::min)(
+                layoutEntry.worldRect.width,
+                layoutEntry.worldRect.height);
+            textStartX = normalizeFloat(
+                layoutEntry.worldRect.x + indicatorExtent
+                + radioButtonStatesByNodeIndex[nodeIndex].paint.labelGap);
+        }
         TextPaintCursor cursor{
-            .x = layoutEntry.worldRect.x,
+            .x = textStartX,
             .y = layoutEntry.worldRect.y,
-            .lineHeight = 0.0F,
-            .baseX = layoutEntry.worldRect.x,
+            .lineHeight = style.logicalSize * style.lineHeightScale,
+            .baseX = textStartX,
+        };
+        TextPaintCursor caretCursor = cursor;
+        const auto appendText = [&](std::string_view text,
+                                    UIPremultipliedRgba8Color color) noexcept {
+            appendUtf8TextPaints(
+                output,
+                layoutEntry,
+                nextPaintOrdinal,
+                text,
+                style,
+                color,
+                cursor.x,
+                cursor.y,
+                &cursor);
         };
 
-        if (nodeIndex < textStatesByIndex.size()
-            && textStatesByIndex[nodeIndex].hasContent) {
-            const UIPremultipliedRgba8Color color =
-                localTextColorCacheByIndex[nodeIndex];
-            if (!color.isTransparent()) {
-                const WidgetTextState& state = textStatesByIndex[nodeIndex];
-                appendUtf8TextPaints(
-                    output,
-                    layoutEntry,
-                    nextPaintOrdinal,
-                    textViewFor(nodeIndex),
-                    state.style,
-                    color,
-                    layoutEntry.worldRect.x,
-                    layoutEntry.worldRect.y,
-                    &cursor);
-            }
+        if (!focusedTextEdit) {
+            appendText(committedText, textColor);
+            return;
         }
 
-        // M7-E7: paint active IME preedit after committed text on the focus Label.
-        if (imeCompositionActive_
-            && imeFocusLabel.hasValue()
-            && layoutEntry.node == imeFocusLabel
-            && imePreeditSize_ > 0) {
-            UITextStyle style{};
-            if (nodeIndex < textStatesByIndex.size()) {
-                style = textStatesByIndex[nodeIndex].style;
-            }
-            // Distinct cyan-ish preedit tint (premultiplied).
+        const UITextSelection selection = textEditStatesByNodeIndex[nodeIndex].selection;
+        const u32 selectionBegin = (std::min)(
+            selection.anchorCodepoint,
+            selection.caretCodepoint);
+        const u32 selectionEnd = (std::max)(
+            selection.anchorCodepoint,
+            selection.caretCodepoint);
+        const usize selectionBeginByte = utf8ByteOffsetForCodepoint(
+            committedText,
+            selectionBegin);
+        const usize selectionEndByte = utf8ByteOffsetForCodepoint(
+            committedText,
+            selectionEnd);
+
+        appendText(committedText.substr(0, selectionBeginByte), textColor);
+        const TextPaintCursor selectionStartCursor = cursor;
+
+        if (imeCompositionActive_) {
+            const std::string_view preedit(imePreeditBytes_.data(), imePreeditSize_);
+            const usize preeditCursorByte = utf8ByteOffsetForCodepoint(
+                preedit,
+                imePreeditCursor_);
             const UIPremultipliedRgba8Color preeditColor =
                 premultiply(UIStraightSrgba8Color{
                     .red = 0,
@@ -2184,31 +2370,54 @@ struct UIContext::Impl final {
                     .blue = 255,
                     .alpha = 255,
                 });
-            const float startX = (nodeIndex < textStatesByIndex.size()
-                                  && textStatesByIndex[nodeIndex].hasContent)
-                ? cursor.x
-                : layoutEntry.worldRect.x;
-            const float startY = (nodeIndex < textStatesByIndex.size()
-                                  && textStatesByIndex[nodeIndex].hasContent)
-                ? cursor.y
-                : layoutEntry.worldRect.y;
-            appendUtf8TextPaints(
-                output,
-                layoutEntry,
-                nextPaintOrdinal,
-                std::string_view(imePreeditBytes_.data(), imePreeditSize_),
-                style,
-                preeditColor,
-                startX,
-                startY,
-                &cursor);
+            appendText(preedit.substr(0, preeditCursorByte), preeditColor);
+            caretCursor = cursor;
+            appendText(preedit.substr(preeditCursorByte), preeditColor);
+            appendText(committedText.substr(selectionEndByte), textColor);
+        } else {
+            usize selectionPaintIndex = output.size();
+            if (selectionBegin != selectionEnd) {
+                output.push_back(UICommittedPaintEntry{
+                    .node = layoutEntry.node,
+                    .worldRect = {},
+                    .effectiveClip = layoutEntry.effectiveClip,
+                    .paintOrdinal = nextPaintOrdinal,
+                    .solidFill = premultiply(UIStraightSrgba8Color{
+                        .red = 42,
+                        .green = 112,
+                        .blue = 190,
+                        .alpha = 190,
+                    }),
+                    .isGlyph = false,
+                });
+                ++nextPaintOrdinal;
+            }
+            appendText(
+                committedText.substr(
+                    selectionBeginByte,
+                    selectionEndByte - selectionBeginByte),
+                textColor);
+            const TextPaintCursor selectionEndCursor = cursor;
+            if (selectionBegin != selectionEnd) {
+                output[selectionPaintIndex].worldRect = UILogicalRect{
+                    .x = normalizeFloat(selectionStartCursor.x),
+                    .y = normalizeFloat(selectionStartCursor.y),
+                    .width = normalizeFloat((std::max)(
+                        0.0F,
+                        selectionEndCursor.x - selectionStartCursor.x)),
+                    .height = normalizeFloat((std::max)(
+                        1.0F,
+                        selectionEndCursor.lineHeight)),
+                };
+            }
+            caretCursor = selection.caretCodepoint == selectionBegin
+                ? selectionStartCursor
+                : selectionEndCursor;
+            appendText(committedText.substr(selectionEndByte), textColor);
         }
 
-        // M7-E8: caret after committed text (+ preedit when composing).
-        if (imeFocusLabel.hasValue()
-            && layoutEntry.node == imeFocusLabel
-            && isLiveLabel(imeFocusLabel)) {
-            float lineHeight = cursor.lineHeight;
+        {
+            float lineHeight = caretCursor.lineHeight;
             if (!(std::isfinite(lineHeight) && lineHeight > 0.0F)) {
                 if (nodeIndex < textStatesByIndex.size()) {
                     const UITextStyle& style = textStatesByIndex[nodeIndex].style;
@@ -2232,8 +2441,8 @@ struct UIContext::Impl final {
                 .node = layoutEntry.node,
                 .worldRect =
                     UILogicalRect{
-                        .x = normalizeFloat(cursor.x),
-                        .y = normalizeFloat(cursor.y),
+                        .x = normalizeFloat(caretCursor.x),
+                        .y = normalizeFloat(caretCursor.y),
                         .width = CaretWidth,
                         .height = normalizeFloat(lineHeight),
                     },
@@ -2269,19 +2478,110 @@ struct UIContext::Impl final {
                 });
                 ++nextPaintOrdinal;
             }
+            const NodeRecord* record = recordByIndex(nodeIndex);
+            if (record != nullptr && record->kind == UIWidgetKind::ProgressBar
+                && nodeIndex < progressBarStatesByNodeIndex.size()) {
+                const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
+                const float fraction = normalizedRangeFraction(
+                    progress.value,
+                    progress.minValue,
+                    progress.maxValue);
+                const UIPremultipliedRgba8Color progressFill =
+                    premultiply(progress.paint.fillColor);
+                if (fraction > 0.0F && !progressFill.isTransparent()
+                    && layoutEntry.worldRect.width > 0.0F
+                    && layoutEntry.worldRect.height > 0.0F) {
+                    output.push_back(UICommittedPaintEntry{
+                        .node = layoutEntry.node,
+                        .worldRect = UILogicalRect{
+                            .x = layoutEntry.worldRect.x,
+                            .y = layoutEntry.worldRect.y,
+                            .width = normalizeFloat(layoutEntry.worldRect.width * fraction),
+                            .height = layoutEntry.worldRect.height,
+                        },
+                        .effectiveClip = layoutEntry.effectiveClip,
+                        .paintOrdinal = nextPaintOrdinal,
+                        .solidFill = progressFill,
+                    });
+                    ++nextPaintOrdinal;
+                }
+            }
+            if (record != nullptr && record->kind == UIWidgetKind::RadioButton
+                && nodeIndex < radioButtonStatesByNodeIndex.size()) {
+                const RadioButtonState& radio = radioButtonStatesByNodeIndex[nodeIndex];
+                const float indicatorExtent = (std::min)(
+                    layoutEntry.worldRect.width,
+                    layoutEntry.worldRect.height);
+                const float inset = radio.paint.selectedIndicatorInset;
+                const UIPremultipliedRgba8Color indicatorTrack =
+                    premultiply(radio.paint.indicatorColor);
+                const UIPremultipliedRgba8Color indicator =
+                    premultiply(radio.paint.selectedIndicatorColor);
+                if (!indicatorTrack.isTransparent() && indicatorExtent > 0.0F) {
+                    output.push_back(UICommittedPaintEntry{
+                        .node = layoutEntry.node,
+                        .worldRect = UILogicalRect{
+                            .x = layoutEntry.worldRect.x,
+                            .y = layoutEntry.worldRect.y,
+                            .width = normalizeFloat(indicatorExtent),
+                            .height = normalizeFloat(indicatorExtent),
+                        },
+                        .effectiveClip = layoutEntry.effectiveClip,
+                        .paintOrdinal = nextPaintOrdinal,
+                        .solidFill = indicatorTrack,
+                    });
+                    ++nextPaintOrdinal;
+                }
+                if (radio.selected && !indicator.isTransparent()
+                    && indicatorExtent > inset * 2.0F) {
+                    output.push_back(UICommittedPaintEntry{
+                        .node = layoutEntry.node,
+                        .worldRect = UILogicalRect{
+                            .x = normalizeFloat(layoutEntry.worldRect.x + inset),
+                            .y = normalizeFloat(layoutEntry.worldRect.y + inset),
+                            .width = normalizeFloat(indicatorExtent - inset * 2.0F),
+                            .height = normalizeFloat(indicatorExtent - inset * 2.0F),
+                        },
+                        .effectiveClip = layoutEntry.effectiveClip,
+                        .paintOrdinal = nextPaintOrdinal,
+                        .solidFill = indicator,
+                    });
+                    ++nextPaintOrdinal;
+                }
+            }
             appendTextGlyphPaints(output, layoutEntry, nextPaintOrdinal);
         }
     }
 
-    // M11-C4: publish interactive Label/Button/Checkbox/Slider into a stable
-    // owner-thread semantics snapshot. Decorative Root/Panel are omitted.
+    // Publish semantic controls into a stable owner-thread snapshot.
+    // Decorative Root/Panel are omitted.
     // Capacity reuses paintSnapshotCapacity as a fixed entry budget for emitted
     // semantics rows (not layout node count — Root/Panel do not publish).
     [[nodiscard]] Core::Status buildCommittedSemantics(
         std::pmr::vector<UISemanticsEntry>& output,
+        std::pmr::vector<char>& textOutput,
         std::span<const UICommittedLayoutEntry> layoutEntries) const
     {
         output.clear();
+        usize textOutputSize = 0;
+        const auto copyText = [&](std::string_view source,
+                                  std::string_view& destination) -> Core::Status {
+            destination = {};
+            if (source.empty()) {
+                return Core::success();
+            }
+            if (textOutputSize > textOutput.size()
+                || source.size() > textOutput.size() - textOutputSize) {
+                return fail(
+                    UIErrorCode::CapacityExceeded,
+                    "UI committed semantics text snapshot capacity has been exhausted");
+            }
+            char* const destinationBytes = textOutput.data() + textOutputSize;
+            std::memcpy(destinationBytes, source.data(), source.size());
+            destination = std::string_view(destinationBytes, source.size());
+            textOutputSize += source.size();
+            return Core::success();
+        };
         for (const UICommittedLayoutEntry& layoutEntry : layoutEntries) {
             if (layoutEntry.effectiveVisibility != UIVisibility::Visible) {
                 continue;
@@ -2305,8 +2605,13 @@ struct UIContext::Impl final {
                 .enabled = true,
                 .focused = false,
             };
-            if (record->kind == UIWidgetKind::Label || record->kind == UIWidgetKind::Button) {
-                entry.name = textViewFor(nodeIndex);
+            if (record->kind == UIWidgetKind::Label
+                || record->kind == UIWidgetKind::Button
+                || record->kind == UIWidgetKind::RadioButton) {
+                if (Core::Status status = copyText(textViewFor(nodeIndex), entry.name);
+                    !status) {
+                    return status;
+                }
             }
             if (record->kind == UIWidgetKind::Checkbox
                 && nodeIndex < checkboxCheckedByNodeIndex.size()) {
@@ -2316,6 +2621,15 @@ struct UIContext::Impl final {
             if (record->kind == UIWidgetKind::Button) {
                 entry.focused = defaultActionFocusButton == layoutEntry.node;
             }
+            if (record->kind == UIWidgetKind::TextEdit) {
+                if (Core::Status status = copyText(
+                        textViewFor(nodeIndex),
+                        entry.valueText);
+                    !status) {
+                    return status;
+                }
+                entry.focused = textInputFocus == layoutEntry.node;
+            }
             if (record->kind == UIWidgetKind::Slider && nodeIndex < sliderStatesByNodeIndex.size()) {
                 const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
                 entry.hasRange = true;
@@ -2323,6 +2637,19 @@ struct UIContext::Impl final {
                 entry.maxValue = slider.maxValue;
                 entry.value = slider.value;
                 entry.focused = armedSlider == layoutEntry.node;
+            }
+            if (record->kind == UIWidgetKind::ProgressBar
+                && nodeIndex < progressBarStatesByNodeIndex.size()) {
+                const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
+                entry.hasRange = true;
+                entry.minValue = progress.minValue;
+                entry.maxValue = progress.maxValue;
+                entry.value = progress.value;
+            }
+            if (record->kind == UIWidgetKind::RadioButton
+                && nodeIndex < radioButtonStatesByNodeIndex.size()) {
+                entry.checked = radioButtonStatesByNodeIndex[nodeIndex].selected;
+                entry.focused = defaultActionFocusButton == layoutEntry.node;
             }
             output.push_back(entry);
         }
@@ -2679,17 +3006,24 @@ struct UIContext::Impl final {
             return Core::failure(nodeResult.error());
         }
         if ((*nodeResult)->kind != UIWidgetKind::Button
-            && (*nodeResult)->kind != UIWidgetKind::Checkbox) {
+            && (*nodeResult)->kind != UIWidgetKind::Checkbox
+            && (*nodeResult)->kind != UIWidgetKind::RadioButton) {
             return fail(
                 UIErrorCode::InvalidButtonAction,
-                "UI Button action requires a Button or Checkbox node");
+                "UI Button action requires a Button, Checkbox, or RadioButton node");
         }
         return *nodeResult;
     }
 
     [[nodiscard]] static bool isDefaultActivatableKind(UIWidgetKind kind) noexcept
     {
-        return kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox;
+        return kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox
+            || kind == UIWidgetKind::RadioButton;
+    }
+
+    [[nodiscard]] static bool isKeyboardFocusableKind(UIWidgetKind kind) noexcept
+    {
+        return isDefaultActivatableKind(kind) || kind == UIWidgetKind::TextEdit;
     }
 
     void clearArmedPrimaryButton() noexcept
@@ -2703,36 +3037,110 @@ struct UIContext::Impl final {
         armedSlider = {};
     }
 
+    void clearArmedTextEdit() noexcept
+    {
+        armedTextEdit = {};
+    }
+
     void clearDefaultActionFocus() noexcept
     {
         defaultActionFocusButton = {};
     }
 
-    void clearImeComposition() noexcept
+    void resetImeCompositionState() noexcept
     {
-        const bool wasActive = imeCompositionActive_;
-        const UINodeId focus = imeFocusLabel;
         imeCompositionActive_ = false;
         imePreeditSize_ = 0;
         imePreeditCursor_ = 0;
+    }
+
+    [[nodiscard]] Core::Status clearImeComposition()
+    {
+        const bool wasActive = imeCompositionActive_;
+        const UINodeId focus = textInputFocus;
         if (wasActive && focus.hasValue() && contains(focus)) {
-            static_cast<void>(markPaintDirty(focus));
+            if (Core::Status paintStatus = markPaintDirty(focus); !paintStatus) {
+                return paintStatus;
+            }
         }
+        resetImeCompositionState();
+        return Core::success();
     }
 
     void clearImeFocus() noexcept
     {
-        clearImeComposition();
-        imeFocusLabel = {};
+        const UINodeId previousFocus = textInputFocus;
+        if (Core::Status status = clearImeComposition(); !status) {
+            // Focus cancellation must win even when another dirty node has
+            // exhausted the queue. A pending paint commit will observe this
+            // reset state.
+            resetImeCompositionState();
+        }
+        textInputFocus = {};
+        if (defaultActionFocusButton == previousFocus) {
+            clearDefaultActionFocus();
+        }
+        if (previousFocus.hasValue() && contains(previousFocus)) {
+            static_cast<void>(markPaintDirty(previousFocus));
+        }
     }
 
-    [[nodiscard]] bool isLiveLabel(UINodeId node) const noexcept
+    [[nodiscard]] bool isLiveTextEdit(UINodeId node) const noexcept
     {
         if (!node.hasValue() || !contains(node)) {
             return false;
         }
         const NodeRecord* record = nodes.tryGet(node.storageId());
-        return record != nullptr && record->kind == UIWidgetKind::Label;
+        return record != nullptr && record->kind == UIWidgetKind::TextEdit;
+    }
+
+    [[nodiscard]] bool isKeyboardFocusCandidate(
+        UINodeId node,
+        std::span<const UICommittedLayoutEntry> layoutEntries) const noexcept
+    {
+        if (!node.hasValue() || !contains(node)
+            || node.index() >= pointerHitPoliciesByIndex.size()
+            || pointerHitPoliciesByIndex[node.index()]
+                != UIPointerHitPolicy::Targetable) {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !isKeyboardFocusableKind(record->kind)) {
+            return false;
+        }
+        return std::ranges::any_of(
+            layoutEntries,
+            [node](const UICommittedLayoutEntry& entry) noexcept {
+                return entry.node == node
+                    && entry.effectiveVisibility == UIVisibility::Visible;
+            });
+    }
+
+    [[nodiscard]] bool isCommittedKeyboardFocusCandidate(
+        UINodeId node) const noexcept
+    {
+        if (!node.hasValue() || !contains(node)) {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !isKeyboardFocusableKind(record->kind)) {
+            return false;
+        }
+        const auto& hitEntries = committedHitBuffers[publishedHitBufferIndex];
+        return std::ranges::any_of(
+            hitEntries,
+            [node](const UICommittedHitEntry& entry) noexcept {
+                return entry.node == node
+                    && entry.policy == UIPointerHitPolicy::Targetable;
+            });
+    }
+
+    [[nodiscard]] bool isCommittedTextEditFocusCandidate(
+        UINodeId node) const noexcept
+    {
+        return isLiveTextEdit(node)
+            && isCommittedKeyboardFocusCandidate(node)
+            && defaultActionFocusButton == node;
     }
 
     void recycleButtonAction(u32 actionIndex) noexcept
@@ -2836,10 +3244,13 @@ struct UIContext::Impl final {
         if (armedSlider == node) {
             clearArmedSlider();
         }
+        if (armedTextEdit == node) {
+            clearArmedTextEdit();
+        }
         if (defaultActionFocusButton == node) {
             clearDefaultActionFocus();
         }
-        if (imeFocusLabel == node) {
+        if (textInputFocus == node) {
             clearImeFocus();
         }
         const u32 actionIndex = buttonActionIndexByNodeIndex[nodeIndex];
@@ -2923,12 +3334,41 @@ struct UIContext::Impl final {
         if (allocation.capacity == 0) {
             return;
         }
-        freeTextAllocations.push_back(allocation);
         if (textByteUsed >= allocation.capacity) {
             textByteUsed -= allocation.capacity;
         } else {
             textByteUsed = 0;
         }
+
+        usize mergedBegin = allocation.offset;
+        usize mergedEnd = allocation.offset + allocation.capacity;
+        bool mergedAnotherBlock = true;
+        while (mergedAnotherBlock) {
+            mergedAnotherBlock = false;
+            for (usize index = 0; index < freeTextAllocations.size();) {
+                const TextByteAllocation candidate = freeTextAllocations[index];
+                const usize candidateBegin = candidate.offset;
+                const usize candidateEnd = candidate.offset + candidate.capacity;
+                if (candidateEnd < mergedBegin || candidateBegin > mergedEnd) {
+                    ++index;
+                    continue;
+                }
+                mergedBegin = (std::min)(mergedBegin, candidateBegin);
+                mergedEnd = (std::max)(mergedEnd, candidateEnd);
+                freeTextAllocations[index] = freeTextAllocations.back();
+                freeTextAllocations.pop_back();
+                mergedAnotherBlock = true;
+            }
+        }
+
+        if (mergedEnd == textByteBumpOffset) {
+            textByteBumpOffset = mergedBegin;
+            return;
+        }
+        freeTextAllocations.push_back(TextByteAllocation{
+            .offset = static_cast<u32>(mergedBegin),
+            .capacity = static_cast<u32>(mergedEnd - mergedBegin),
+        });
     }
 
     [[nodiscard]] Core::Result<TextByteAllocation> allocateTextBytes(u32 byteCount)
@@ -2941,24 +3381,32 @@ struct UIContext::Impl final {
             if (candidate.capacity < byteCount) {
                 continue;
             }
-            const TextByteAllocation allocated = candidate;
-            freeTextAllocations[freeIndex] = freeTextAllocations.back();
-            freeTextAllocations.pop_back();
-            textByteUsed += allocated.capacity;
+            const TextByteAllocation allocated{
+                .offset = candidate.offset,
+                .capacity = byteCount,
+            };
+            candidate.offset += byteCount;
+            candidate.capacity -= byteCount;
+            if (candidate.capacity == 0) {
+                freeTextAllocations[freeIndex] = freeTextAllocations.back();
+                freeTextAllocations.pop_back();
+            }
+            textByteUsed += byteCount;
             textByteHighWater = (std::max)(textByteHighWater, textByteUsed);
             return allocated;
         }
-        if (textByteUsed > capacityConfig.textByteCapacity
+        if (textByteBumpOffset > capacityConfig.textByteCapacity
             || static_cast<usize>(byteCount)
-                > capacityConfig.textByteCapacity - textByteUsed) {
+                > capacityConfig.textByteCapacity - textByteBumpOffset) {
             return fail(
                 UIErrorCode::CapacityExceeded,
                 "UI text byte capacity has been exhausted");
         }
         const TextByteAllocation allocated{
-            .offset = static_cast<u32>(textByteUsed),
+            .offset = static_cast<u32>(textByteBumpOffset),
             .capacity = byteCount,
         };
+        textByteBumpOffset += byteCount;
         textByteUsed += byteCount;
         textByteHighWater = (std::max)(textByteHighWater, textByteUsed);
         return allocated;
@@ -3002,7 +3450,8 @@ struct UIContext::Impl final {
 
     [[nodiscard]] static bool supportsWidgetText(UIWidgetKind kind) noexcept
     {
-        return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button;
+        return kind == UIWidgetKind::Label || kind == UIWidgetKind::Button
+            || kind == UIWidgetKind::TextEdit || kind == UIWidgetKind::RadioButton;
     }
 
     void resetNodeSideData(u32 index) noexcept
@@ -3031,6 +3480,15 @@ struct UIContext::Impl final {
         }
         if (index < sliderStatesByNodeIndex.size()) {
             sliderStatesByNodeIndex[index] = {};
+        }
+        if (index < textEditStatesByNodeIndex.size()) {
+            textEditStatesByNodeIndex[index] = {};
+        }
+        if (index < progressBarStatesByNodeIndex.size()) {
+            progressBarStatesByNodeIndex[index] = {};
+        }
+        if (index < radioButtonStatesByNodeIndex.size()) {
+            radioButtonStatesByNodeIndex[index] = {};
         }
     }
 
@@ -3171,30 +3629,101 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status markPaintDirty(UINodeId node)
+    [[nodiscard]] Core::Status markPaintDirtyBatch(
+        std::initializer_list<UINodeId> requestedNodes)
     {
-        if (!contains(node) || node.index() >= dirtyByIndex.size()) {
-            return fail(UIErrorCode::InvalidNode, "UI paint dirty node is invalid");
+        usize uniqueNodeCount = 0;
+        usize requiredQueueEntries = 0;
+        for (auto current = requestedNodes.begin();
+             current != requestedNodes.end();
+             ++current) {
+            if (!current->hasValue()) {
+                continue;
+            }
+            if (!contains(*current) || current->index() >= dirtyByIndex.size()) {
+                return fail(UIErrorCode::InvalidNode, "UI paint dirty node is invalid");
+            }
+            bool duplicate = false;
+            for (auto prior = requestedNodes.begin(); prior != current; ++prior) {
+                if (prior->hasValue() && *prior == *current) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate && dirtyQueuedByIndex[current->index()] == 0) {
+                ++requiredQueueEntries;
+            }
+            if (!duplicate) {
+                ++uniqueNodeCount;
+            }
+        }
+        if (uniqueNodeCount == 0) {
+            return Core::success();
         }
 
-        const u32 index = node.index();
-        if (dirtyQueuedByIndex[index] == 0) {
-            if (dirtyQueue.size() >= capacityConfig.dirtyQueueCapacity) {
-                compactDirtyQueue();
+        if (dirtyQueue.size() > capacityConfig.dirtyQueueCapacity
+            || requiredQueueEntries
+                > capacityConfig.dirtyQueueCapacity - dirtyQueue.size()) {
+            compactDirtyQueue();
+            requiredQueueEntries = 0;
+            for (auto current = requestedNodes.begin();
+                 current != requestedNodes.end();
+                 ++current) {
+                if (!current->hasValue()) {
+                    continue;
+                }
+                bool duplicate = false;
+                for (auto prior = requestedNodes.begin(); prior != current; ++prior) {
+                    if (prior->hasValue() && *prior == *current) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (!duplicate && dirtyQueuedByIndex[current->index()] == 0) {
+                    ++requiredQueueEntries;
+                }
             }
-            if (dirtyQueue.size() >= capacityConfig.dirtyQueueCapacity) {
-                return fail(
-                    UIErrorCode::CapacityExceeded,
-                    "UI dirty queue capacity has been exhausted");
-            }
-            dirtyQueue.push_back(node);
-            dirtyQueuedByIndex[index] = 1;
         }
-        dirtyByIndex[index] |= UIDirty::Paint | UIDirty::Semantics;
+        if (dirtyQueue.size() > capacityConfig.dirtyQueueCapacity
+            || requiredQueueEntries
+                > capacityConfig.dirtyQueueCapacity - dirtyQueue.size()) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI dirty queue capacity has been exhausted");
+        }
+
+        for (auto current = requestedNodes.begin();
+             current != requestedNodes.end();
+             ++current) {
+            if (!current->hasValue()) {
+                continue;
+            }
+            bool duplicate = false;
+            for (auto prior = requestedNodes.begin(); prior != current; ++prior) {
+                if (prior->hasValue() && *prior == *current) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) {
+                continue;
+            }
+            const u32 index = current->index();
+            if (dirtyQueuedByIndex[index] == 0) {
+                dirtyQueue.push_back(*current);
+                dirtyQueuedByIndex[index] = 1;
+            }
+            dirtyByIndex[index] |= UIDirty::Paint | UIDirty::Semantics;
+        }
         dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
         paintDirty = true;
         semanticsDirty = true;
         return Core::success();
+    }
+
+    [[nodiscard]] Core::Status markPaintDirty(UINodeId node)
+    {
+        return markPaintDirtyBatch({node});
     }
 
     void clearDirtyState() noexcept
@@ -3238,11 +3767,12 @@ struct UIContext::Impl final {
         NodeRecord* record = nodes.tryGet(node.storageId());
         record->kind = kind;
         record->rootIndex = node.index();
-        // Button/Checkbox/Slider and Label are Targetable: Label is the IME/text
-        // target surface (M7-E6). Root/Panel remain Ignore.
+        // Interactive controls are targetable. Label remains read-only and
+        // decorative unless the caller explicitly changes its hit policy.
         pointerHitPoliciesByIndex[node.index()] =
             (kind == UIWidgetKind::Button || kind == UIWidgetKind::Checkbox
-             || kind == UIWidgetKind::Slider || kind == UIWidgetKind::Label)
+             || kind == UIWidgetKind::Slider || kind == UIWidgetKind::TextEdit
+             || kind == UIWidgetKind::RadioButton)
             ? UIPointerHitPolicy::Targetable
             : UIPointerHitPolicy::Ignore;
         return node;
@@ -3630,7 +4160,14 @@ struct UIContext::Impl final {
         if (record == nullptr || !supportsWidgetText(record->kind)) {
             return fail(
                 UIErrorCode::InvalidText,
-                "UI text is only supported on Label and Button nodes");
+                "UI text is only supported on Label, Button, RadioButton, and TextEdit nodes");
+        }
+        if ((record->kind == UIWidgetKind::TextEdit
+             || record->kind == UIWidgetKind::RadioButton)
+            && containsLineBreak(utf8)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI TextEdit and RadioButton accept one logical line without CR or LF");
         }
         if (utf8.size() > (std::numeric_limits<u32>::max)()) {
             return fail(UIErrorCode::CapacityExceeded, "UI text payload is too large");
@@ -3681,6 +4218,9 @@ struct UIContext::Impl final {
             state.length = 0;
             state.metrics = {};
             state.hasContent = false;
+            if (record->kind == UIWidgetKind::TextEdit) {
+                textEditStatesByNodeIndex[node.index()].selection = {};
+            }
             return Core::success();
         }
 
@@ -3695,6 +4235,14 @@ struct UIContext::Impl final {
         state.length = static_cast<u32>(utf8.size());
         state.metrics = *metrics;
         state.hasContent = true;
+        if (record->kind == UIWidgetKind::TextEdit) {
+            UITextSelection& selection =
+                textEditStatesByNodeIndex[node.index()].selection;
+            selection.anchorCodepoint =
+                (std::min)(selection.anchorCodepoint, metrics->codepointCount);
+            selection.caretCodepoint =
+                (std::min)(selection.caretCodepoint, metrics->codepointCount);
+        }
         return Core::success();
     }
 
@@ -3724,7 +4272,7 @@ struct UIContext::Impl final {
         if (record == nullptr || !supportsWidgetText(record->kind)) {
             return fail(
                 UIErrorCode::InvalidText,
-                "UI text style is only supported on Label and Button nodes");
+                "UI text style is only supported on Label, Button, RadioButton, and TextEdit nodes");
         }
 
         WidgetTextState& state = textStatesByIndex[node.index()];
@@ -3777,7 +4325,7 @@ struct UIContext::Impl final {
         if (record == nullptr || !supportsWidgetText(record->kind)) {
             return fail(
                 UIErrorCode::InvalidText,
-                "UI text is only supported on Label and Button nodes");
+                "UI text is only supported on Label, Button, RadioButton, and TextEdit nodes");
         }
         return textViewFor(node.index());
     }
@@ -3807,9 +4355,75 @@ struct UIContext::Impl final {
         if (record == nullptr || !supportsWidgetText(record->kind)) {
             return fail(
                 UIErrorCode::InvalidText,
-                "UI text style is only supported on Label and Button nodes");
+                "UI text style is only supported on Label, Button, RadioButton, and TextEdit nodes");
         }
         return textStatesByIndex[node.index()].style;
+    }
+
+    [[nodiscard]] Core::Status setTextSelectionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId textEdit,
+        UITextSelection selection)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = resolveNode(textEdit);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        const NodeRecord* record = nodes.tryGet(textEdit.storageId());
+        if (record == nullptr || record->kind != UIWidgetKind::TextEdit) {
+            return fail(UIErrorCode::InvalidText, "UI selection requires a TextEdit node");
+        }
+        if (!isNodeWithinRoot(updaterRoot, textEdit)) {
+            return fail(UIErrorCode::InvalidNode, "UI TextEdit is not owned by the updater root");
+        }
+        const u32 codepointCount = textStatesByIndex[textEdit.index()].metrics.codepointCount;
+        if (selection.anchorCodepoint > codepointCount
+            || selection.caretCodepoint > codepointCount) {
+            return fail(UIErrorCode::InvalidText, "UI TextEdit selection exceeds the text length");
+        }
+        TextEditState& state = textEditStatesByNodeIndex[textEdit.index()];
+        if (state.selection == selection) {
+            return Core::success();
+        }
+        if (Core::Status dirtyStatus = markPaintDirty(textEdit); !dirtyStatus) {
+            return dirtyStatus;
+        }
+        if (textInputFocus == textEdit) {
+            static_cast<void>(clearImeComposition());
+        }
+        state.selection = selection;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UITextSelection> textSelectionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId textEdit) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = const_cast<Impl*>(this)->resolveNode(textEdit);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        const NodeRecord* record = nodes.tryGet(textEdit.storageId());
+        if (record == nullptr || record->kind != UIWidgetKind::TextEdit) {
+            return fail(UIErrorCode::InvalidText, "UI selection requires a TextEdit node");
+        }
+        if (!isNodeWithinRoot(updaterRoot, textEdit)) {
+            return fail(UIErrorCode::InvalidNode, "UI TextEdit is not owned by the updater root");
+        }
+        return textEditStatesByNodeIndex[textEdit.index()].selection;
     }
 
     [[nodiscard]] Core::Status setButtonActionFromUpdater(
@@ -4019,6 +4633,9 @@ struct UIContext::Impl final {
         UINodeId checkbox,
         UIButtonActionCallback&& callback)
     {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
         auto checkboxResult = resolveCheckbox(checkbox);
         if (!checkboxResult) {
             return Core::failure(checkboxResult.error());
@@ -4030,6 +4647,9 @@ struct UIContext::Impl final {
         UINodeId updaterRoot,
         UINodeId checkbox)
     {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
         auto checkboxResult = resolveCheckbox(checkbox);
         if (!checkboxResult) {
             return Core::failure(checkboxResult.error());
@@ -4065,8 +4685,10 @@ struct UIContext::Impl final {
         }
         const u8 next = checked ? 1 : 0;
         if (checkboxCheckedByNodeIndex[checkbox.index()] != next) {
+            if (Core::Status dirty = markPaintDirty(checkbox); !dirty) {
+                return dirty;
+            }
             checkboxCheckedByNodeIndex[checkbox.index()] = next;
-            static_cast<void>(markPaintDirty(checkbox));
         }
         return Core::success();
     }
@@ -4103,6 +4725,9 @@ struct UIContext::Impl final {
         UINodeId updaterRoot,
         UINodeId checkbox)
     {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
         auto checkboxResult = resolveCheckbox(checkbox);
         if (!checkboxResult) {
             return Core::failure(checkboxResult.error());
@@ -4152,11 +4777,11 @@ struct UIContext::Impl final {
     }
 
     // Map pointer X into [min,max] using last committed hit worldRect for the slider.
-    [[nodiscard]] bool applySliderValueFromPointer(
+    [[nodiscard]] Core::Result<bool> applySliderValueFromPointer(
         UINodeId slider,
         UILogicalPoint position,
         Platform::PlatformFrameId platformFrame,
-        u64 sourceSequence) noexcept
+        u64 sourceSequence)
     {
         if (!slider.hasValue() || slider.index() >= sliderStatesByNodeIndex.size()) {
             return false;
@@ -4197,8 +4822,10 @@ struct UIContext::Impl final {
         if (next == state.value) {
             return false;
         }
+        if (Core::Status dirty = markPaintDirty(slider); !dirty) {
+            return Core::failure(dirty.error());
+        }
         state.value = next;
-        static_cast<void>(markPaintDirty(slider));
         if (state.changeCallback.hasValue()) {
             state.changeCallback(UISliderChangeEvent{
                 .sliderNode = slider,
@@ -4208,6 +4835,99 @@ struct UIContext::Impl final {
             });
         }
         return true;
+    }
+
+    [[nodiscard]] u32 textEditCodepointFromPointer(
+        UINodeId textEdit,
+        UILogicalPoint position) const noexcept
+    {
+        if (!isLiveTextEdit(textEdit)) {
+            return 0;
+        }
+        UILogicalRect worldRect{};
+        bool foundRect = false;
+        for (const UICommittedHitEntry& entry : committedHit().entries()) {
+            if (entry.node == textEdit) {
+                worldRect = entry.worldRect;
+                foundRect = true;
+                break;
+            }
+        }
+        const WidgetTextState& textState = textStatesByIndex[textEdit.index()];
+        const u32 codepointCount = textState.metrics.codepointCount;
+        if (!foundRect || codepointCount == 0) {
+            return 0;
+        }
+        float advance = textState.style.logicalSize * textState.style.advanceScale;
+        if (!(std::isfinite(advance) && advance > 0.0F)) {
+            advance = 1.0F;
+        }
+        const float relativeX = position.x - worldRect.x;
+        if (!(relativeX > 0.0F)) {
+            return 0;
+        }
+
+        if (textRasterizer && textFace.hasValue()) {
+            auto raster = textRasterizer->raster(
+                textFace,
+                textViewFor(textEdit.index()),
+                textState.style);
+            if (raster && raster->glyphs.size() >= codepointCount) {
+                float cursorX = 0.0F;
+                for (u32 codepointIndex = 0;
+                     codepointIndex < codepointCount;
+                     ++codepointIndex) {
+                    float glyphAdvance = raster->glyphs[codepointIndex].advance;
+                    if (!(std::isfinite(glyphAdvance) && glyphAdvance > 0.0F)) {
+                        glyphAdvance = advance;
+                    }
+                    const float midpoint = cursorX + glyphAdvance * 0.5F;
+                    if (!std::isfinite(midpoint) || relativeX < midpoint) {
+                        return codepointIndex;
+                    }
+                    cursorX += glyphAdvance;
+                    if (!std::isfinite(cursorX)) {
+                        return codepointIndex + 1U;
+                    }
+                }
+                return codepointCount;
+            }
+        }
+
+        const float approximate = std::floor(relativeX / advance + 0.5F);
+        if (!(std::isfinite(approximate) && approximate > 0.0F)) {
+            return 0;
+        }
+        return static_cast<u32>((std::min)(
+            approximate,
+            static_cast<float>(codepointCount)));
+    }
+
+    [[nodiscard]] Core::Status updateTextEditSelectionFromPointer(
+        UINodeId textEdit,
+        UILogicalPoint position,
+        bool extendSelection)
+    {
+        if (!isLiveTextEdit(textEdit)) {
+            return Core::success();
+        }
+        TextEditState& state = textEditStatesByNodeIndex[textEdit.index()];
+        UITextSelection next = state.selection;
+        next.caretCodepoint = textEditCodepointFromPointer(textEdit, position);
+        if (!extendSelection) {
+            next.anchorCodepoint = next.caretCodepoint;
+        }
+        if (next == state.selection) {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(textEdit); !dirty) {
+            return dirty;
+        }
+        if (Core::Status composition = clearImeComposition(); !composition) {
+            return composition;
+        }
+        state.selection = next;
+        return Core::success();
     }
 
     [[nodiscard]] Core::Status setSliderRangeFromUpdater(
@@ -4236,14 +4956,18 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidButtonAction, "UI Slider range/step is invalid");
         }
         SliderState& state = sliderStatesByNodeIndex[slider.index()];
+        const float nextValue = quantizeSliderValue(state.value, minValue, maxValue, step);
+        if (state.minValue == minValue && state.maxValue == maxValue
+            && state.step == step && state.value == nextValue) {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(slider); !dirty) {
+            return dirty;
+        }
         state.minValue = minValue;
         state.maxValue = maxValue;
         state.step = step;
-        const float previous = state.value;
-        state.value = quantizeSliderValue(state.value, minValue, maxValue, step);
-        if (state.value != previous) {
-            static_cast<void>(markPaintDirty(slider));
-        }
+        state.value = nextValue;
         return Core::success();
     }
 
@@ -4274,8 +4998,10 @@ struct UIContext::Impl final {
         if (next == state.value) {
             return Core::success();
         }
+        if (Core::Status dirty = markPaintDirty(slider); !dirty) {
+            return dirty;
+        }
         state.value = next;
-        static_cast<void>(markPaintDirty(slider));
         if (state.changeCallback.hasValue()) {
             state.changeCallback(UISliderChangeEvent{
                 .sliderNode = slider,
@@ -4375,6 +5101,433 @@ struct UIContext::Impl final {
         return armedSlider == slider;
     }
 
+    [[nodiscard]] Core::Result<NodeRecord*> resolveProgressBar(
+        UINodeId progressBar)
+    {
+        auto nodeResult = resolveNode(progressBar);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != UIWidgetKind::ProgressBar) {
+            return fail(
+                UIErrorCode::InvalidControlValue,
+                "UI ProgressBar API requires a ProgressBar node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Status setProgressBarRangeFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId progressBar,
+        float minValue,
+        float maxValue)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto progressResult = resolveProgressBar(progressBar);
+        if (!progressResult) {
+            return Core::failure(progressResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, progressBar)) {
+            return fail(UIErrorCode::InvalidNode, "UI ProgressBar is not owned by the updater root");
+        }
+        if (!std::isfinite(minValue) || !std::isfinite(maxValue)
+            || !(maxValue > minValue)) {
+            return fail(
+                UIErrorCode::InvalidControlValue,
+                "UI ProgressBar range must be finite with max greater than min");
+        }
+        ProgressBarState& state = progressBarStatesByNodeIndex[progressBar.index()];
+        const float nextValue = std::clamp(state.value, minValue, maxValue);
+        if (state.minValue == minValue && state.maxValue == maxValue
+            && state.value == nextValue) {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(progressBar); !dirty) {
+            return dirty;
+        }
+        state.minValue = minValue;
+        state.maxValue = maxValue;
+        state.value = nextValue;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setProgressBarValueFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId progressBar,
+        float value)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto progressResult = resolveProgressBar(progressBar);
+        if (!progressResult) {
+            return Core::failure(progressResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, progressBar)) {
+            return fail(UIErrorCode::InvalidNode, "UI ProgressBar is not owned by the updater root");
+        }
+        if (!std::isfinite(value)) {
+            return fail(UIErrorCode::InvalidControlValue, "UI ProgressBar value must be finite");
+        }
+        ProgressBarState& state = progressBarStatesByNodeIndex[progressBar.index()];
+        const float nextValue = std::clamp(value, state.minValue, state.maxValue);
+        if (state.value == nextValue) {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(progressBar); !dirty) {
+            return dirty;
+        }
+        state.value = nextValue;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<float> progressBarValueFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId progressBar) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto progressResult = const_cast<Impl*>(this)->resolveProgressBar(progressBar);
+        if (!progressResult) {
+            return Core::failure(progressResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, progressBar)) {
+            return fail(UIErrorCode::InvalidNode, "UI ProgressBar is not owned by the updater root");
+        }
+        return progressBarStatesByNodeIndex[progressBar.index()].value;
+    }
+
+    [[nodiscard]] Core::Status setProgressBarPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId progressBar,
+        const UIProgressBarPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto progressResult = resolveProgressBar(progressBar);
+        if (!progressResult) {
+            return Core::failure(progressResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, progressBar)) {
+            return fail(UIErrorCode::InvalidNode, "UI ProgressBar is not owned by the updater root");
+        }
+        ProgressBarState& state = progressBarStatesByNodeIndex[progressBar.index()];
+        if (state.paint == paint) {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(progressBar); !dirty) {
+            return dirty;
+        }
+        state.paint = paint;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIProgressBarPaint> progressBarPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId progressBar) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto progressResult = const_cast<Impl*>(this)->resolveProgressBar(progressBar);
+        if (!progressResult) {
+            return Core::failure(progressResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, progressBar)) {
+            return fail(UIErrorCode::InvalidNode, "UI ProgressBar is not owned by the updater root");
+        }
+        return progressBarStatesByNodeIndex[progressBar.index()].paint;
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolveRadioButton(
+        UINodeId radioButton)
+    {
+        auto nodeResult = resolveNode(radioButton);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != UIWidgetKind::RadioButton) {
+            return fail(
+                UIErrorCode::InvalidControlValue,
+                "UI RadioButton API requires a RadioButton node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Status applyRadioButtonSelection(
+        UINodeId radioButton,
+        bool selected)
+    {
+        NodeRecord* radioRecord = nodes.tryGet(radioButton.storageId());
+        if (radioRecord == nullptr || radioRecord->kind != UIWidgetKind::RadioButton
+            || radioButton.index() >= radioButtonStatesByNodeIndex.size()) {
+            return fail(UIErrorCode::InvalidNode, "UI RadioButton is stale");
+        }
+        if (!selected) {
+            RadioButtonState& state = radioButtonStatesByNodeIndex[radioButton.index()];
+            if (!state.selected) {
+                return Core::success();
+            }
+            if (Core::Status dirty = markPaintDirty(radioButton); !dirty) {
+                return dirty;
+            }
+            state.selected = false;
+            return Core::success();
+        }
+
+        const NodeRecord* parent = recordByIndex(radioRecord->parentIndex);
+        if (parent == nullptr) {
+            return fail(UIErrorCode::InvalidParent, "UI RadioButton requires a live parent group");
+        }
+        usize requiredQueueEntries = 0;
+        bool selectionChanged = false;
+        for (u32 childIndex = parent->firstChildIndex;
+             childIndex != InvalidNodeIndex;) {
+            const NodeRecord* child = recordByIndex(childIndex);
+            if (child == nullptr) {
+                return fail(Core::CoreErrorCode::Internal, "UI RadioButton group is invalid");
+            }
+            const u32 nextSiblingIndex = child->nextSiblingIndex;
+            if (child->kind == UIWidgetKind::RadioButton
+                && childIndex < radioButtonStatesByNodeIndex.size()) {
+                const bool nextSelected = childIndex == radioButton.index();
+                if (radioButtonStatesByNodeIndex[childIndex].selected != nextSelected) {
+                    selectionChanged = true;
+                    if (dirtyQueuedByIndex[childIndex] == 0) {
+                        ++requiredQueueEntries;
+                    }
+                }
+            }
+            childIndex = nextSiblingIndex;
+        }
+        if (!selectionChanged) {
+            return Core::success();
+        }
+        if (dirtyQueue.size() > capacityConfig.dirtyQueueCapacity
+            || requiredQueueEntries
+                > capacityConfig.dirtyQueueCapacity - dirtyQueue.size()) {
+            compactDirtyQueue();
+            requiredQueueEntries = 0;
+            for (u32 childIndex = parent->firstChildIndex;
+                 childIndex != InvalidNodeIndex;) {
+                const NodeRecord* child = recordByIndex(childIndex);
+                if (child == nullptr) {
+                    return fail(Core::CoreErrorCode::Internal, "UI RadioButton group is invalid");
+                }
+                const u32 nextSiblingIndex = child->nextSiblingIndex;
+                if (child->kind == UIWidgetKind::RadioButton
+                    && childIndex < radioButtonStatesByNodeIndex.size()
+                    && radioButtonStatesByNodeIndex[childIndex].selected
+                        != (childIndex == radioButton.index())
+                    && dirtyQueuedByIndex[childIndex] == 0) {
+                    ++requiredQueueEntries;
+                }
+                childIndex = nextSiblingIndex;
+            }
+        }
+        if (dirtyQueue.size() > capacityConfig.dirtyQueueCapacity
+            || requiredQueueEntries
+                > capacityConfig.dirtyQueueCapacity - dirtyQueue.size()) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI RadioButton group selection exceeds dirty queue capacity");
+        }
+        for (u32 childIndex = parent->firstChildIndex;
+             childIndex != InvalidNodeIndex;) {
+            const NodeRecord* child = recordByIndex(childIndex);
+            if (child == nullptr) {
+                return fail(Core::CoreErrorCode::Internal, "UI RadioButton group is invalid");
+            }
+            const u32 nextSiblingIndex = child->nextSiblingIndex;
+            if (child->kind == UIWidgetKind::RadioButton
+                && childIndex < radioButtonStatesByNodeIndex.size()) {
+                RadioButtonState& state = radioButtonStatesByNodeIndex[childIndex];
+                const bool nextSelected = childIndex == radioButton.index();
+                if (state.selected != nextSelected) {
+                    if (dirtyQueuedByIndex[childIndex] == 0) {
+                        dirtyQueue.push_back(idForIndex(childIndex));
+                        dirtyQueuedByIndex[childIndex] = 1;
+                    }
+                    dirtyByIndex[childIndex] |= UIDirty::Paint | UIDirty::Semantics;
+                    state.selected = nextSelected;
+                }
+            }
+            childIndex = nextSiblingIndex;
+        }
+        dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
+        paintDirty = true;
+        semanticsDirty = true;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setRadioButtonPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton,
+        const UIRadioButtonPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto radioResult = resolveRadioButton(radioButton);
+        if (!radioResult) {
+            return Core::failure(radioResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, radioButton)) {
+            return fail(UIErrorCode::InvalidNode, "UI RadioButton is not owned by the updater root");
+        }
+        if (!std::isfinite(paint.selectedIndicatorInset)
+            || paint.selectedIndicatorInset < 0.0F
+            || !std::isfinite(paint.labelGap) || paint.labelGap < 0.0F) {
+            return fail(
+                UIErrorCode::InvalidControlValue,
+                "UI RadioButton paint metrics must be finite and non-negative");
+        }
+        RadioButtonState& state = radioButtonStatesByNodeIndex[radioButton.index()];
+        if (state.paint == paint) {
+            return Core::success();
+        }
+        const bool layoutChanged = state.paint.labelGap != paint.labelGap;
+        Core::Status dirty = layoutChanged
+            ? markLayoutStyleDirty(radioButton)
+            : markPaintDirty(radioButton);
+        if (!dirty) {
+            return dirty;
+        }
+        state.paint = paint;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIRadioButtonPaint> radioButtonPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto radioResult = const_cast<Impl*>(this)->resolveRadioButton(radioButton);
+        if (!radioResult) {
+            return Core::failure(radioResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, radioButton)) {
+            return fail(UIErrorCode::InvalidNode, "UI RadioButton is not owned by the updater root");
+        }
+        return radioButtonStatesByNodeIndex[radioButton.index()].paint;
+    }
+
+    [[nodiscard]] Core::Status setRadioButtonActionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton,
+        UIButtonActionCallback&& callback)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        auto radioResult = resolveRadioButton(radioButton);
+        if (!radioResult) {
+            return Core::failure(radioResult.error());
+        }
+        return setButtonActionFromUpdater(updaterRoot, radioButton, std::move(callback));
+    }
+
+    [[nodiscard]] Core::Status clearRadioButtonActionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        auto radioResult = resolveRadioButton(radioButton);
+        if (!radioResult) {
+            return Core::failure(radioResult.error());
+        }
+        return clearButtonActionFromUpdater(updaterRoot, radioButton);
+    }
+
+    [[nodiscard]] Core::Status setRadioButtonSelectedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton,
+        bool selected)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto radioResult = resolveRadioButton(radioButton);
+        if (!radioResult) {
+            return Core::failure(radioResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, radioButton)) {
+            return fail(UIErrorCode::InvalidNode, "UI RadioButton is not owned by the updater root");
+        }
+        return applyRadioButtonSelection(radioButton, selected);
+    }
+
+    [[nodiscard]] Core::Result<bool> isRadioButtonSelectedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto radioResult = const_cast<Impl*>(this)->resolveRadioButton(radioButton);
+        if (!radioResult) {
+            return Core::failure(radioResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, radioButton)) {
+            return fail(UIErrorCode::InvalidNode, "UI RadioButton is not owned by the updater root");
+        }
+        return radioButtonStatesByNodeIndex[radioButton.index()].selected;
+    }
+
+    [[nodiscard]] Core::Result<bool> isRadioButtonPressedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        auto radioResult = resolveRadioButton(radioButton);
+        if (!radioResult) {
+            return Core::failure(radioResult.error());
+        }
+        return isButtonPressedFromUpdater(updaterRoot, radioButton);
+    }
+
     void appendCommittedTree(
         u32 index,
         u32& ordinal,
@@ -4465,9 +5618,9 @@ struct UIContext::Impl final {
             || viewportSize != committedViewportSize;
         const bool layoutNeedsCommit = structureDirty || layoutDirty || viewportChanged;
         const bool hitNeedsCommit = hitDirty || layoutNeedsCommit || committedHitRevision == 0;
-        const bool paintNeedsCommit =
+        bool paintNeedsCommit =
             paintDirty || layoutNeedsCommit || committedPaintRevision == 0;
-        const bool semanticsNeedsCommit =
+        bool semanticsNeedsCommit =
             semanticsDirty || layoutNeedsCommit || committedSemanticsRevision == 0;
 
         if (!layoutNeedsCommit && !hitNeedsCommit && !paintNeedsCommit && !semanticsNeedsCommit) {
@@ -4545,6 +5698,57 @@ struct UIContext::Impl final {
             candidateHitTargetCount = *hitResult;
         }
 
+        const UINodeId previousDefaultActionFocus = defaultActionFocusButton;
+        const UINodeId previousTextInputFocus = textInputFocus;
+        const UINodeId previousArmedTextEdit = armedTextEdit;
+        const auto previousImePreeditBytes = imePreeditBytes_;
+        const usize previousImePreeditSize = imePreeditSize_;
+        const u32 previousImePreeditCursor = imePreeditCursor_;
+        const bool previousImeCompositionActive = imeCompositionActive_;
+        auto focusRollback = Core::makeScopeExit([&]() noexcept {
+            defaultActionFocusButton = previousDefaultActionFocus;
+            textInputFocus = previousTextInputFocus;
+            armedTextEdit = previousArmedTextEdit;
+            imePreeditBytes_ = previousImePreeditBytes;
+            imePreeditSize_ = previousImePreeditSize;
+            imePreeditCursor_ = previousImePreeditCursor;
+            imeCompositionActive_ = previousImeCompositionActive;
+        });
+
+        const NodeRecord* defaultFocusRecord =
+            defaultActionFocusButton.hasValue() && contains(defaultActionFocusButton)
+            ? nodes.tryGet(defaultActionFocusButton.storageId())
+            : nullptr;
+        const bool defaultFocusIsTextEdit = defaultFocusRecord != nullptr
+            && defaultFocusRecord->kind == UIWidgetKind::TextEdit;
+        const bool clearDefaultFocus = defaultActionFocusButton.hasValue()
+            && (!isKeyboardFocusCandidate(
+                    defaultActionFocusButton,
+                    candidateLayoutEntries)
+                || (defaultFocusIsTextEdit
+                    && textInputFocus != defaultActionFocusButton));
+        const bool clearTextFocus = textInputFocus.hasValue()
+            && (!isLiveTextEdit(textInputFocus)
+                || !isKeyboardFocusCandidate(textInputFocus, candidateLayoutEntries)
+                || defaultActionFocusButton != textInputFocus);
+        const bool clearTextEditArm = armedTextEdit.hasValue()
+            && (!isLiveTextEdit(armedTextEdit)
+                || !isKeyboardFocusCandidate(armedTextEdit, candidateLayoutEntries));
+        if (clearDefaultFocus || clearTextFocus || clearTextEditArm) {
+            if (clearDefaultFocus) {
+                defaultActionFocusButton = {};
+            }
+            if (clearTextFocus) {
+                textInputFocus = {};
+                resetImeCompositionState();
+            }
+            if (clearTextEditArm) {
+                armedTextEdit = {};
+            }
+            paintNeedsCommit = true;
+            semanticsNeedsCommit = true;
+        }
+
         usize writePaintBufferIndex = publishedPaintBufferIndex;
         usize candidatePaintCacheRebuildCount = 0;
         if (paintNeedsCommit) {
@@ -4565,6 +5769,7 @@ struct UIContext::Impl final {
             writeSemanticsBufferIndex = 1 - publishedSemanticsBufferIndex;
             if (Core::Status status = buildCommittedSemantics(
                     committedSemanticsBuffers[writeSemanticsBufferIndex],
+                    committedSemanticsTextBuffers[writeSemanticsBufferIndex],
                     candidateLayoutEntries);
                 !status) {
                 return status;
@@ -4614,6 +5819,7 @@ struct UIContext::Impl final {
             layoutReuseCacheValid = true;
         }
         clearDirtyState();
+        focusRollback.release();
         return Core::success();
     }
 
@@ -5121,8 +6327,10 @@ struct UIContext::Impl final {
 
         const UINodeId armedButtonAtRouteStart = armedPrimaryButton;
         const UINodeId armedSliderAtRouteStart = armedSlider;
+        const UINodeId armedTextEditAtRouteStart = armedTextEdit;
         const bool hadArmedInteraction = armedButtonAtRouteStart.hasValue();
         const bool hadArmedSlider = armedSliderAtRouteStart.hasValue();
+        const bool hadArmedTextEdit = armedTextEditAtRouteStart.hasValue();
         const bool primaryButtonDown =
             input.kind == UIRoutedPointerEventKind::ButtonDown
             && input.button == Platform::PointerButton::Primary;
@@ -5224,22 +6432,100 @@ struct UIContext::Impl final {
         if (primaryButtonDown) {
             clearArmedPrimaryButton();
             clearArmedSlider();
-            // Slider drag takes priority over Button/Checkbox when both are under hit.
-            if (!routedEvent.isDefaultActionPrevented()
+            clearArmedTextEdit();
+            const NodeRecord* targetRecord = targetNode.hasValue() && contains(targetNode)
+                ? nodes.tryGet(targetNode.storageId())
+                : nullptr;
+            const bool targetsTextEdit = targetRecord != nullptr
+                && targetRecord->kind == UIWidgetKind::TextEdit;
+            const UINodeId previousKeyboardFocus = defaultActionFocusButton;
+            const UINodeId previousTextFocus = textInputFocus;
+            const bool allowsDefaultAction = !routedEvent.isDefaultActionPrevented();
+            const bool willFocusTextEdit = allowsDefaultAction && targetsTextEdit;
+            const bool willArmSlider = allowsDefaultAction
+                && !willFocusTextEdit
                 && nearestSlider.hasValue()
-                && contains(nearestSlider)) {
+                && contains(nearestSlider);
+            UINodeId nextKeyboardFocus{};
+            UINodeId interactionPaintNode{};
+            if (willFocusTextEdit) {
+                nextKeyboardFocus = targetNode;
+                interactionPaintNode = targetNode;
+            } else if (willArmSlider) {
+                interactionPaintNode = nearestSlider;
+            } else if (allowsDefaultAction
+                       && nearestButton.hasValue()
+                       && contains(nearestButton)) {
+                const NodeRecord* nextButtonRecord =
+                    nodes.tryGet(nearestButton.storageId());
+                if (nextButtonRecord != nullptr
+                    && isDefaultActivatableKind(nextButtonRecord->kind)) {
+                    nextKeyboardFocus = nearestButton;
+                    interactionPaintNode = nearestButton;
+                }
+            }
+            const UINodeId dirtyPreviousKeyboard =
+                previousKeyboardFocus.hasValue()
+                    && previousKeyboardFocus != nextKeyboardFocus
+                    && contains(previousKeyboardFocus)
+                ? previousKeyboardFocus
+                : UINodeId{};
+            const UINodeId dirtyPreviousText =
+                previousTextFocus.hasValue()
+                    && previousTextFocus != nextKeyboardFocus
+                    && contains(previousTextFocus)
+                ? previousTextFocus
+                : UINodeId{};
+            if (Core::Status dirty = markPaintDirtyBatch({
+                    dirtyPreviousKeyboard,
+                    dirtyPreviousText,
+                    interactionPaintNode,
+                });
+                !dirty) {
+                return Core::failure(dirty.error());
+            }
+            clearDefaultActionFocus();
+            if (!willFocusTextEdit && textInputFocus.hasValue()) {
+                clearImeFocus();
+            }
+            // Only one Primary interaction may be armed. An exact TextEdit
+            // target wins over interactive ancestors; otherwise Slider drag
+            // takes priority over Button/Checkbox.
+            if (willFocusTextEdit) {
+                const UINodeId previousFocus = textInputFocus;
+                if (previousFocus != targetNode) {
+                    if (Core::Status composition = clearImeComposition();
+                        !composition) {
+                        return Core::failure(composition.error());
+                    }
+                }
+                textInputFocus = targetNode;
+                defaultActionFocusButton = targetNode;
+                armedTextEdit = targetNode;
+                if (Core::Status selection = updateTextEditSelectionFromPointer(
+                        targetNode,
+                        input.position,
+                        false);
+                    !selection) {
+                    return Core::failure(selection.error());
+                }
+                routedEvent.consumeInputTransition();
+                static_cast<void>(routedEvent.claimPointerButton(
+                    Platform::PointerButton::Primary));
+            } else if (willArmSlider) {
                 armedSlider = nearestSlider;
                 routedEvent.consumeInputTransition();
                 static_cast<void>(routedEvent.claimPointerButton(
                     Platform::PointerButton::Primary));
-                static_cast<void>(applySliderValueFromPointer(
-                    nearestSlider,
-                    input.position,
-                    input.platformFrame,
-                    input.sourceSequence));
-            } else if (!routedEvent.isDefaultActionPrevented()
-                && nearestButton.hasValue()
-                && contains(nearestButton)) {
+                if (auto applied = applySliderValueFromPointer(
+                        nearestSlider,
+                        input.position,
+                        input.platformFrame,
+                        input.sourceSequence);
+                    !applied) {
+                    return Core::failure(applied.error());
+                }
+            } else if (nextKeyboardFocus.hasValue()) {
                 const NodeRecord* buttonRecord =
                     nodes.tryGet(nearestButton.storageId());
                 if (buttonRecord != nullptr
@@ -5247,27 +6533,10 @@ struct UIContext::Impl final {
                     armedPrimaryButton = nearestButton;
                     armedPrimaryButtonPressed = true;
                     defaultActionFocusButton = nearestButton;
+                    clearImeFocus();
                     routedEvent.consumeInputTransition();
                     static_cast<void>(routedEvent.claimPointerButton(
                         Platform::PointerButton::Primary));
-                }
-            }
-            // Label becomes the IME/text target on primary Down.
-            if (result.pointQuery.target.node.hasValue()
-                && contains(result.pointQuery.target.node)) {
-                const NodeRecord* targetRecord =
-                    nodes.tryGet(result.pointQuery.target.node.storageId());
-                if (targetRecord != nullptr
-                    && targetRecord->kind == UIWidgetKind::Label) {
-                    const UINodeId previousFocus = imeFocusLabel;
-                    imeFocusLabel = result.pointQuery.target.node;
-                    clearImeComposition();
-                    if (previousFocus.hasValue()
-                        && previousFocus != imeFocusLabel
-                        && contains(previousFocus)) {
-                        static_cast<void>(markPaintDirty(previousFocus));
-                    }
-                    static_cast<void>(markPaintDirty(imeFocusLabel));
                 }
             }
         } else if (input.kind == UIRoutedPointerEventKind::Move
@@ -5278,11 +6547,30 @@ struct UIContext::Impl final {
             } else {
                 static_cast<void>(routedEvent.claimPointerButton(
                     Platform::PointerButton::Primary));
-                static_cast<void>(applySliderValueFromPointer(
-                    armedSliderAtRouteStart,
-                    input.position,
-                    input.platformFrame,
-                    input.sourceSequence));
+                if (auto applied = applySliderValueFromPointer(
+                        armedSliderAtRouteStart,
+                        input.position,
+                        input.platformFrame,
+                        input.sourceSequence);
+                    !applied) {
+                    return Core::failure(applied.error());
+                }
+            }
+        } else if (input.kind == UIRoutedPointerEventKind::Move
+                   && hadArmedTextEdit
+                   && armedTextEdit == armedTextEditAtRouteStart) {
+            if (!contains(armedTextEditAtRouteStart)) {
+                clearArmedTextEdit();
+            } else {
+                if (Core::Status selection = updateTextEditSelectionFromPointer(
+                        armedTextEditAtRouteStart,
+                        input.position,
+                        true);
+                    !selection) {
+                    return Core::failure(selection.error());
+                }
+                static_cast<void>(routedEvent.claimPointerButton(
+                    Platform::PointerButton::Primary));
             }
         } else if (input.kind == UIRoutedPointerEventKind::Move
                    && hadArmedInteraction
@@ -5300,11 +6588,27 @@ struct UIContext::Impl final {
             routedEvent.consumeInputTransition();
             if (sliderStillArmed && contains(armedSliderAtRouteStart)
                 && !routedEvent.isDefaultActionPrevented()) {
-                static_cast<void>(applySliderValueFromPointer(
-                    armedSliderAtRouteStart,
-                    input.position,
-                    input.platformFrame,
-                    input.sourceSequence));
+                if (auto applied = applySliderValueFromPointer(
+                        armedSliderAtRouteStart,
+                        input.position,
+                        input.platformFrame,
+                        input.sourceSequence);
+                    !applied) {
+                    return Core::failure(applied.error());
+                }
+            }
+        } else if (primaryButtonUp && hadArmedTextEdit) {
+            const bool textEditStillArmed = armedTextEdit == armedTextEditAtRouteStart;
+            clearArmedTextEdit();
+            routedEvent.consumeInputTransition();
+            if (textEditStillArmed && contains(armedTextEditAtRouteStart)) {
+                if (Core::Status selection = updateTextEditSelectionFromPointer(
+                        armedTextEditAtRouteStart,
+                        input.position,
+                        true);
+                    !selection) {
+                    return Core::failure(selection.error());
+                }
             }
         } else if (primaryButtonUp && hadArmedInteraction) {
             const bool interactionStillArmed =
@@ -5321,11 +6625,25 @@ struct UIContext::Impl final {
                     && armedRecord->kind == UIWidgetKind::Checkbox
                     && armedButtonAtRouteStart.index()
                         < checkboxCheckedByNodeIndex.size()) {
+                    if (Core::Status dirty = markPaintDirty(armedButtonAtRouteStart);
+                        !dirty) {
+                        return Core::failure(dirty.error());
+                    }
                     checkboxCheckedByNodeIndex[armedButtonAtRouteStart.index()] =
                         checkboxCheckedByNodeIndex[armedButtonAtRouteStart.index()] == 0
                         ? 1
                         : 0;
-                    static_cast<void>(markPaintDirty(armedButtonAtRouteStart));
+                }
+                if (const NodeRecord* armedRecord =
+                        nodes.tryGet(armedButtonAtRouteStart.storageId());
+                    armedRecord != nullptr
+                    && armedRecord->kind == UIWidgetKind::RadioButton) {
+                    if (Core::Status selected = applyRadioButtonSelection(
+                            armedButtonAtRouteStart,
+                            true);
+                        !selected) {
+                        return Core::failure(selected.error());
+                    }
                 }
                 invokeButtonAction(
                     actionCandidate,
@@ -5366,6 +6684,9 @@ struct UIContext::Impl final {
         }
         clearArmedPrimaryButton();
         clearArmedSlider();
+        clearArmedTextEdit();
+        clearImeFocus();
+        clearDefaultActionFocus();
         return Core::success();
     }
 
@@ -5389,13 +6710,23 @@ struct UIContext::Impl final {
                 UIErrorCode::InvalidButtonAction,
                 "UI default-action activation source must be Keyboard or Gamepad");
         }
-        if (!defaultActionFocusButton.hasValue()
-            || !contains(defaultActionFocusButton)) {
-            clearDefaultActionFocus();
+        if (!isCommittedKeyboardFocusCandidate(defaultActionFocusButton)) {
+            if (textInputFocus == defaultActionFocusButton) {
+                clearImeFocus();
+            } else {
+                clearDefaultActionFocus();
+            }
             return UIDefaultActionResult{};
         }
         const NodeRecord* record =
             nodes.tryGet(defaultActionFocusButton.storageId());
+        if (record != nullptr && record->kind == UIWidgetKind::TextEdit) {
+            if (textInputFocus != defaultActionFocusButton) {
+                clearDefaultActionFocus();
+                return UIDefaultActionResult{};
+            }
+            return UIDefaultActionResult{.consumed = true, .activated = false};
+        }
         if (record == nullptr || !isDefaultActivatableKind(record->kind)) {
             clearDefaultActionFocus();
             return UIDefaultActionResult{};
@@ -5408,9 +6739,20 @@ struct UIContext::Impl final {
         }
         if (record->kind == UIWidgetKind::Checkbox
             && defaultActionFocusButton.index() < checkboxCheckedByNodeIndex.size()) {
+            if (Core::Status dirty = markPaintDirty(defaultActionFocusButton);
+                !dirty) {
+                return Core::failure(dirty.error());
+            }
             checkboxCheckedByNodeIndex[defaultActionFocusButton.index()] =
                 checkboxCheckedByNodeIndex[defaultActionFocusButton.index()] == 0 ? 1 : 0;
-            static_cast<void>(markPaintDirty(defaultActionFocusButton));
+        }
+        if (record->kind == UIWidgetKind::RadioButton) {
+            if (Core::Status selected = applyRadioButtonSelection(
+                    defaultActionFocusButton,
+                    true);
+                !selected) {
+                return Core::failure(selected.error());
+            }
         }
         const u64 actionRegistrationSerialBoundary =
             buttonActionRegistrationSerial;
@@ -5420,9 +6762,10 @@ struct UIContext::Impl final {
                 actionRegistrationSerialBoundary);
         if (!actionCandidate.hasValue()) {
             // Focused control without a registered action still consumes Accept
-            // so gameplay does not also fire. Checkbox has already toggled above
-            // (counts as activated); bare Button without a callback does not.
-            const bool activated = record->kind == UIWidgetKind::Checkbox;
+            // so gameplay does not also fire. Selection controls already
+            // changed state above; a bare Button without a callback did not.
+            const bool activated = record->kind == UIWidgetKind::Checkbox
+                || record->kind == UIWidgetKind::RadioButton;
             return UIDefaultActionResult{.consumed = true, .activated = activated};
         }
         const u64 currentButtonRouteSerial = ++buttonRouteSerial;
@@ -5453,7 +6796,7 @@ struct UIContext::Impl final {
         }
         drainDeferredRootDestroys();
 
-        // Collect visible Targetable Buttons in last committed layout paint order.
+        // Collect visible Targetable keyboard controls in committed paint order.
         // Fixed stack table keeps this path allocation-free (M7-E3 scope).
         constexpr usize MaxTabCandidates = 256;
         std::array<UINodeId, MaxTabCandidates> candidates{};
@@ -5468,14 +6811,10 @@ struct UIContext::Impl final {
                 continue;
             }
             const NodeRecord* record = nodes.tryGet(entry.node.storageId());
-            if (record == nullptr || !isDefaultActivatableKind(record->kind)) {
+            if (record == nullptr || !isKeyboardFocusableKind(record->kind)) {
                 continue;
             }
-            if (entry.node.index() >= pointerHitPoliciesByIndex.size()) {
-                continue;
-            }
-            if (pointerHitPoliciesByIndex[entry.node.index()]
-                != UIPointerHitPolicy::Targetable) {
+            if (!isCommittedKeyboardFocusCandidate(entry.node)) {
                 continue;
             }
             if (candidateCount >= MaxTabCandidates) {
@@ -5488,6 +6827,7 @@ struct UIContext::Impl final {
         }
         if (candidateCount == 0) {
             clearDefaultActionFocus();
+            clearImeFocus();
             return UIDefaultFocusStepResult{};
         }
 
@@ -5511,12 +6851,42 @@ struct UIContext::Impl final {
         }
 
         const UINodeId nextFocus = candidates[nextIndex];
+        const UINodeId previousFocus = defaultActionFocusButton;
         const bool moved =
             !defaultActionFocusButton.hasValue()
             || defaultActionFocusButton != nextFocus;
+        const UINodeId dirtyPreviousFocus =
+            previousFocus.hasValue() && previousFocus != nextFocus
+                && contains(previousFocus)
+            ? previousFocus
+            : UINodeId{};
+        const UINodeId dirtyTextFocus =
+            textInputFocus.hasValue() && textInputFocus != nextFocus
+                && contains(textInputFocus)
+            ? textInputFocus
+            : UINodeId{};
+        if (Core::Status dirty = markPaintDirtyBatch({
+                dirtyPreviousFocus,
+                dirtyTextFocus,
+                nextFocus,
+            });
+            !dirty) {
+            return Core::failure(dirty.error());
+        }
         defaultActionFocusButton = nextFocus;
         // Tab navigation does not keep a live pointer arm.
         clearArmedPrimaryButton();
+        clearArmedSlider();
+        clearArmedTextEdit();
+        const NodeRecord* nextRecord = nodes.tryGet(nextFocus.storageId());
+        if (nextRecord != nullptr && nextRecord->kind == UIWidgetKind::TextEdit) {
+            if (textInputFocus != nextFocus) {
+                clearImeFocus();
+                textInputFocus = nextFocus;
+            }
+        } else {
+            clearImeFocus();
+        }
         return UIDefaultFocusStepResult{
             .consumed = true,
             .moved = moved,
@@ -5526,8 +6896,12 @@ struct UIContext::Impl final {
 
     [[nodiscard]] UINodeId defaultActionFocus() const noexcept
     {
-        if (!defaultActionFocusButton.hasValue()
-            || !contains(defaultActionFocusButton)) {
+        if (!isCommittedKeyboardFocusCandidate(defaultActionFocusButton)) {
+            return {};
+        }
+        const NodeRecord* record = nodes.tryGet(defaultActionFocusButton.storageId());
+        if (record != nullptr && record->kind == UIWidgetKind::TextEdit
+            && textInputFocus != defaultActionFocusButton) {
             return {};
         }
         return defaultActionFocusButton;
@@ -5535,15 +6909,18 @@ struct UIContext::Impl final {
 
     [[nodiscard]] UINodeId imeFocus() const noexcept
     {
-        if (!isLiveLabel(imeFocusLabel)) {
+        if (!isCommittedTextEditFocusCandidate(textInputFocus)
+            || defaultActionFocusButton != textInputFocus) {
             return {};
         }
-        return imeFocusLabel;
+        return textInputFocus;
     }
 
     [[nodiscard]] bool imeCompositionActive() const noexcept
     {
-        return imeCompositionActive_ && isLiveLabel(imeFocusLabel);
+        return imeCompositionActive_
+            && isCommittedTextEditFocusCandidate(textInputFocus)
+            && defaultActionFocusButton == textInputFocus;
     }
 
     [[nodiscard]] std::string_view imePreeditUtf8() const noexcept
@@ -5581,7 +6958,7 @@ struct UIContext::Impl final {
                 UIErrorCode::InvalidPointerInput,
                 "UI text composition requires a platform frame and sequence");
         }
-        if (!isLiveLabel(imeFocusLabel)) {
+        if (!isCommittedTextEditFocusCandidate(textInputFocus)) {
             clearImeFocus();
             return UITextInputRouteResult{};
         }
@@ -5589,13 +6966,20 @@ struct UIContext::Impl final {
         using Stage = Platform::TextCompositionStage;
         if (stage == Stage::Cancelled || stage == Stage::Ended) {
             // clearImeComposition marks paint dirty when preedit was active.
-            clearImeComposition();
+            if (Core::Status status = clearImeComposition(); !status) {
+                return Core::failure(status.error());
+            }
             return UITextInputRouteResult{.consumed = true, .applied = true};
         }
         if (!Core::isStrictUtf8WithoutNul(preeditUtf8)) {
             return fail(
                 UIErrorCode::InvalidText,
                 "UI IME preedit must be strict UTF-8 without embedded NUL");
+        }
+        if (containsLineBreak(preeditUtf8)) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI TextEdit preedit accepts one logical line without CR or LF");
         }
         if (preeditUtf8.size() > MaxImePreeditBytes) {
             return fail(
@@ -5609,15 +6993,15 @@ struct UIContext::Impl final {
                 UIErrorCode::InvalidText,
                 "UI IME preedit must be strict UTF-8 without embedded NUL");
         }
+        if (Core::Status paintStatus = markPaintDirty(textInputFocus); !paintStatus) {
+            return Core::failure(paintStatus.error());
+        }
         if (!preeditUtf8.empty()) {
             std::memcpy(imePreeditBytes_.data(), preeditUtf8.data(), preeditUtf8.size());
         }
         imePreeditSize_ = preeditUtf8.size();
         imePreeditCursor_ = (std::min)(cursorCodepoint, *codepoints);
         imeCompositionActive_ = true;
-        if (Core::Status paintStatus = markPaintDirty(imeFocusLabel); !paintStatus) {
-            return Core::failure(paintStatus.error());
-        }
         return UITextInputRouteResult{.consumed = true, .applied = true};
     }
 
@@ -5641,7 +7025,7 @@ struct UIContext::Impl final {
                 UIErrorCode::InvalidPointerInput,
                 "UI text input requires a platform frame and sequence");
         }
-        if (!isLiveLabel(imeFocusLabel)) {
+        if (!isCommittedTextEditFocusCandidate(textInputFocus)) {
             clearImeFocus();
             return UITextInputRouteResult{};
         }
@@ -5650,13 +7034,18 @@ struct UIContext::Impl final {
                 UIErrorCode::InvalidText,
                 "UI text input must be strict UTF-8 without embedded NUL");
         }
-        // Commit ends any active preedit.
-        clearImeComposition();
+        if (containsLineBreak(committedUtf8)) {
+            return UITextInputRouteResult{.consumed = true, .applied = false};
+        }
         if (committedUtf8.empty()) {
+            if (Core::Status status = clearImeComposition(); !status) {
+                return Core::failure(status.error());
+            }
             return UITextInputRouteResult{.consumed = true, .applied = true};
         }
 
-        const NodeRecord* record = nodes.tryGet(imeFocusLabel.storageId());
+        const UINodeId focusedTextEdit = textInputFocus;
+        const NodeRecord* record = nodes.tryGet(focusedTextEdit.storageId());
         if (record == nullptr) {
             clearImeFocus();
             return UITextInputRouteResult{};
@@ -5667,20 +7056,218 @@ struct UIContext::Impl final {
             return UITextInputRouteResult{};
         }
 
-        const std::string_view current = textViewFor(imeFocusLabel.index());
-        if (current.size() > (std::numeric_limits<usize>::max)() - committedUtf8.size()) {
+        const std::string_view current = textViewFor(focusedTextEdit.index());
+        const UITextSelection selection =
+            textEditStatesByNodeIndex[focusedTextEdit.index()].selection;
+        const u32 selectionBegin = (std::min)(
+            selection.anchorCodepoint,
+            selection.caretCodepoint);
+        const u32 selectionEnd = (std::max)(
+            selection.anchorCodepoint,
+            selection.caretCodepoint);
+        const usize selectionBeginByte = utf8ByteOffsetForCodepoint(current, selectionBegin);
+        const usize selectionEndByte = utf8ByteOffsetForCodepoint(current, selectionEnd);
+        const usize retainedBytes = current.size() - (selectionEndByte - selectionBeginByte);
+        if (retainedBytes > (std::numeric_limits<usize>::max)() - committedUtf8.size()) {
             return fail(
                 UIErrorCode::CapacityExceeded,
                 "UI text input would overflow the text byte capacity");
         }
-        // One-shot commit allocation; not a per-frame hot path.
         std::string combined;
-        combined.reserve(current.size() + committedUtf8.size());
-        combined.append(current);
-        combined.append(committedUtf8);
+        try {
+            // One-shot commit allocation; not a per-frame hot path.
+            combined.reserve(retainedBytes + committedUtf8.size());
+            combined.append(current.substr(0, selectionBeginByte));
+            combined.append(committedUtf8);
+            combined.append(current.substr(selectionEndByte));
+        } catch (const std::bad_alloc&) {
+            return fail(
+                Core::CoreErrorCode::OutOfMemory,
+                "UI text input scratch allocation failed");
+        }
         if (Core::Status status =
-                setTextFromUpdater(rootNode, imeFocusLabel, combined);
+                setTextFromUpdater(rootNode, focusedTextEdit, combined);
             !status) {
+            return Core::failure(status.error());
+        }
+        if (Core::Status dirty = markPaintDirty(focusedTextEdit); !dirty) {
+            return Core::failure(dirty.error());
+        }
+        const auto insertedCodepoints =
+            Core::countStrictUtf8CodepointsWithoutNul(committedUtf8);
+        const u32 nextCaret = selectionBegin + insertedCodepoints.value_or(0U);
+        textEditStatesByNodeIndex[focusedTextEdit.index()].selection = {
+            .anchorCodepoint = nextCaret,
+            .caretCodepoint = nextCaret,
+        };
+        if (Core::Status status = clearImeComposition(); !status) {
+            return Core::failure(status.error());
+        }
+        return UITextInputRouteResult{.consumed = true, .applied = true};
+    }
+
+    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextEditCommand(
+        Platform::WindowId window,
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        UITextEditCommand command,
+        bool extendSelection)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!window.hasValue() || window != ownerWindow) {
+            return fail(
+                UIErrorCode::WrongOwnerWindow,
+                "UI TextEdit command belongs to another owner window");
+        }
+        if (!platformFrame.hasValue() || sourceSequence == 0) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI TextEdit command requires a platform frame and sequence");
+        }
+        if (!isCommittedTextEditFocusCandidate(textInputFocus)) {
+            clearImeFocus();
+            return UITextInputRouteResult{};
+        }
+
+        const UINodeId focusedTextEdit = textInputFocus;
+        const NodeRecord* record = nodes.tryGet(focusedTextEdit.storageId());
+        if (record == nullptr) {
+            clearImeFocus();
+            return UITextInputRouteResult{};
+        }
+        const UINodeId rootNode = idForIndex(record->rootIndex);
+        if (!rootNode.hasValue()) {
+            clearImeFocus();
+            return UITextInputRouteResult{};
+        }
+
+        TextEditState& editState = textEditStatesByNodeIndex[focusedTextEdit.index()];
+        const u32 codepointCount =
+            textStatesByIndex[focusedTextEdit.index()].metrics.codepointCount;
+        const UITextSelection currentSelection = editState.selection;
+        const u32 selectionBegin = (std::min)(
+            currentSelection.anchorCodepoint,
+            currentSelection.caretCodepoint);
+        const u32 selectionEnd = (std::max)(
+            currentSelection.anchorCodepoint,
+            currentSelection.caretCodepoint);
+
+        UITextSelection nextSelection = currentSelection;
+        bool deletesText = false;
+        u32 deleteBegin = selectionBegin;
+        u32 deleteEnd = selectionEnd;
+        switch (command) {
+        case UITextEditCommand::MoveLeft: {
+            const u32 nextCaret = !extendSelection && !currentSelection.isCollapsed()
+                ? selectionBegin
+                : currentSelection.caretCodepoint > 0
+                ? currentSelection.caretCodepoint - 1U
+                : 0U;
+            nextSelection.caretCodepoint = nextCaret;
+            if (!extendSelection) {
+                nextSelection.anchorCodepoint = nextCaret;
+            }
+            break;
+        }
+        case UITextEditCommand::MoveRight: {
+            const u32 nextCaret = !extendSelection && !currentSelection.isCollapsed()
+                ? selectionEnd
+                : (std::min)(currentSelection.caretCodepoint + 1U, codepointCount);
+            nextSelection.caretCodepoint = nextCaret;
+            if (!extendSelection) {
+                nextSelection.anchorCodepoint = nextCaret;
+            }
+            break;
+        }
+        case UITextEditCommand::MoveHome:
+            nextSelection.caretCodepoint = 0;
+            if (!extendSelection) {
+                nextSelection.anchorCodepoint = 0;
+            }
+            break;
+        case UITextEditCommand::MoveEnd:
+            nextSelection.caretCodepoint = codepointCount;
+            if (!extendSelection) {
+                nextSelection.anchorCodepoint = codepointCount;
+            }
+            break;
+        case UITextEditCommand::SelectAll:
+            nextSelection = {
+                .anchorCodepoint = 0,
+                .caretCodepoint = codepointCount,
+            };
+            break;
+        case UITextEditCommand::Backspace:
+            deletesText = true;
+            if (currentSelection.isCollapsed()) {
+                deleteBegin = currentSelection.caretCodepoint > 0
+                    ? currentSelection.caretCodepoint - 1U
+                    : 0U;
+                deleteEnd = currentSelection.caretCodepoint;
+            }
+            break;
+        case UITextEditCommand::Delete:
+            deletesText = true;
+            if (currentSelection.isCollapsed()) {
+                deleteBegin = currentSelection.caretCodepoint;
+                deleteEnd = (std::min)(currentSelection.caretCodepoint + 1U, codepointCount);
+            }
+            break;
+        default:
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI TextEdit command is not recognized");
+        }
+
+        if (!deletesText) {
+            if (nextSelection == currentSelection) {
+                if (Core::Status status = clearImeComposition(); !status) {
+                    return Core::failure(status.error());
+                }
+                return UITextInputRouteResult{.consumed = true, .applied = false};
+            }
+            if (Core::Status paintStatus = markPaintDirty(focusedTextEdit); !paintStatus) {
+                return Core::failure(paintStatus.error());
+            }
+            if (Core::Status status = clearImeComposition(); !status) {
+                return Core::failure(status.error());
+            }
+            editState.selection = nextSelection;
+            return UITextInputRouteResult{.consumed = true, .applied = true};
+        }
+
+        if (deleteBegin == deleteEnd) {
+            if (Core::Status status = clearImeComposition(); !status) {
+                return Core::failure(status.error());
+            }
+            return UITextInputRouteResult{.consumed = true, .applied = false};
+        }
+        const std::string_view current = textViewFor(focusedTextEdit.index());
+        const usize deleteBeginByte = utf8ByteOffsetForCodepoint(current, deleteBegin);
+        const usize deleteEndByte = utf8ByteOffsetForCodepoint(current, deleteEnd);
+        std::string combined;
+        try {
+            combined.reserve(current.size() - (deleteEndByte - deleteBeginByte));
+            combined.append(current.substr(0, deleteBeginByte));
+            combined.append(current.substr(deleteEndByte));
+        } catch (const std::bad_alloc&) {
+            return fail(
+                Core::CoreErrorCode::OutOfMemory,
+                "UI TextEdit command scratch allocation failed");
+        }
+        if (Core::Status status =
+                setTextFromUpdater(rootNode, focusedTextEdit, combined);
+            !status) {
+            return Core::failure(status.error());
+        }
+        editState.selection = {
+            .anchorCodepoint = deleteBegin,
+            .caretCodepoint = deleteBegin,
+        };
+        if (Core::Status status = clearImeComposition(); !status) {
             return Core::failure(status.error());
         }
         return UITextInputRouteResult{.consumed = true, .applied = true};
@@ -5996,6 +7583,30 @@ Core::Result<UINodeId> UIRootBuilder::createSlider(UINodeId parent)
     return m_context->createChild(parent, UIWidgetKind::Slider);
 }
 
+Core::Result<UINodeId> UIRootBuilder::createTextEdit(UINodeId parent)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+    }
+    return m_context->createChild(parent, UIWidgetKind::TextEdit);
+}
+
+Core::Result<UINodeId> UIRootBuilder::createProgressBar(UINodeId parent)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+    }
+    return m_context->createChild(parent, UIWidgetKind::ProgressBar);
+}
+
+Core::Result<UINodeId> UIRootBuilder::createRadioButton(UINodeId parent)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI root builder is not bound to a context");
+    }
+    return m_context->createChild(parent, UIWidgetKind::RadioButton);
+}
+
 UITreeUpdater::UITreeUpdater(UIContext& context, UINodeId root) noexcept
     : m_context(&context), m_root(root)
 {
@@ -6056,6 +7667,30 @@ Core::Result<UINodeId> UITreeUpdater::createSlider(UINodeId parent)
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::Slider);
+}
+
+Core::Result<UINodeId> UITreeUpdater::createTextEdit(UINodeId parent)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::TextEdit);
+}
+
+Core::Result<UINodeId> UITreeUpdater::createProgressBar(UINodeId parent)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::ProgressBar);
+}
+
+Core::Result<UINodeId> UITreeUpdater::createRadioButton(UINodeId parent)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->createChildFromUpdater(m_root, parent, UIWidgetKind::RadioButton);
 }
 
 bool UITreeUpdater::isAlive(UINodeId node) const noexcept
@@ -6120,6 +7755,25 @@ Core::Result<UITextStyle> UITreeUpdater::textStyle(UINodeId node)
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->textStyleFromUpdater(m_root, node);
+}
+
+Core::Status UITreeUpdater::setTextSelection(
+    UINodeId textEdit,
+    UITextSelection selection)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setTextSelectionFromUpdater(m_root, textEdit, selection);
+}
+
+Core::Result<UITextSelection> UITreeUpdater::textSelection(
+    UINodeId textEdit) const
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->textSelectionFromUpdater(m_root, textEdit);
 }
 
 Core::Status UITreeUpdater::setButtonAction(
@@ -6264,6 +7918,129 @@ Core::Result<bool> UITreeUpdater::isSliderDragging(UINodeId slider) const
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->isSliderDraggingFromUpdater(m_root, slider);
+}
+
+Core::Status UITreeUpdater::setProgressBarRange(
+    UINodeId progressBar,
+    float minValue,
+    float maxValue)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setProgressBarRangeFromUpdater(
+        m_root,
+        progressBar,
+        minValue,
+        maxValue);
+}
+
+Core::Status UITreeUpdater::setProgressBarValue(
+    UINodeId progressBar,
+    float value)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setProgressBarValueFromUpdater(m_root, progressBar, value);
+}
+
+Core::Result<float> UITreeUpdater::progressBarValue(UINodeId progressBar) const
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->progressBarValueFromUpdater(m_root, progressBar);
+}
+
+Core::Status UITreeUpdater::setProgressBarPaint(
+    UINodeId progressBar,
+    const UIProgressBarPaint& paint)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setProgressBarPaintFromUpdater(m_root, progressBar, paint);
+}
+
+Core::Result<UIProgressBarPaint> UITreeUpdater::progressBarPaint(
+    UINodeId progressBar) const
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->progressBarPaintFromUpdater(m_root, progressBar);
+}
+
+Core::Status UITreeUpdater::setRadioButtonPaint(
+    UINodeId radioButton,
+    const UIRadioButtonPaint& paint)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setRadioButtonPaintFromUpdater(m_root, radioButton, paint);
+}
+
+Core::Result<UIRadioButtonPaint> UITreeUpdater::radioButtonPaint(
+    UINodeId radioButton) const
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->radioButtonPaintFromUpdater(m_root, radioButton);
+}
+
+Core::Status UITreeUpdater::setRadioButtonAction(
+    UINodeId radioButton,
+    UIButtonActionCallback callback)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setRadioButtonActionFromUpdater(
+        m_root,
+        radioButton,
+        std::move(callback));
+}
+
+Core::Status UITreeUpdater::clearRadioButtonAction(UINodeId radioButton)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->clearRadioButtonActionFromUpdater(m_root, radioButton);
+}
+
+Core::Status UITreeUpdater::setRadioButtonSelected(
+    UINodeId radioButton,
+    bool selected)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setRadioButtonSelectedFromUpdater(
+        m_root,
+        radioButton,
+        selected);
+}
+
+Core::Result<bool> UITreeUpdater::isRadioButtonSelected(
+    UINodeId radioButton) const
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->isRadioButtonSelectedFromUpdater(m_root, radioButton);
+}
+
+Core::Result<bool> UITreeUpdater::isRadioButtonPressed(
+    UINodeId radioButton) const
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->isRadioButtonPressedFromUpdater(m_root, radioButton);
 }
 
 Core::Result<UIRoutedPointerListenerToken> UITreeUpdater::addRoutedPointerListener(
@@ -6608,6 +8385,21 @@ Core::Result<UIContext::UITextInputRouteResult> UIContext::routeTextInput(
         window, platformFrame, sourceSequence, committedUtf8);
 }
 
+Core::Result<UIContext::UITextInputRouteResult> UIContext::routeTextEditCommand(
+    Platform::WindowId window,
+    Platform::PlatformFrameId platformFrame,
+    u64 sourceSequence,
+    UITextEditCommand command,
+    bool extendSelection)
+{
+    return m_impl->routeTextEditCommand(
+        window,
+        platformFrame,
+        sourceSequence,
+        command,
+        extendSelection);
+}
+
 UIContextStatistics UIContext::statistics() const noexcept
 {
     return m_impl->statistics();
@@ -6693,6 +8485,24 @@ Core::Result<UITextStyle> UIContext::textStyleFromUpdater(
     UINodeId node)
 {
     return m_impl->textStyleFromUpdater(updaterRoot, node);
+}
+
+Core::Status UIContext::setTextSelectionFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId textEdit,
+    UITextSelection selection)
+{
+    return m_impl->setTextSelectionFromUpdater(
+        updaterRoot,
+        textEdit,
+        selection);
+}
+
+Core::Result<UITextSelection> UIContext::textSelectionFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId textEdit) const
+{
+    return m_impl->textSelectionFromUpdater(updaterRoot, textEdit);
 }
 
 Core::Status UIContext::setButtonActionFromUpdater(
@@ -6805,6 +8615,81 @@ Core::Result<bool> UIContext::isSliderDraggingFromUpdater(
     UINodeId slider) const
 {
     return m_impl->isSliderDraggingFromUpdater(updaterRoot, slider);
+}
+
+Core::Status UIContext::setProgressBarRangeFromUpdater(
+    UINodeId updaterRoot, UINodeId progressBar, float minValue, float maxValue)
+{
+    return m_impl->setProgressBarRangeFromUpdater(
+        updaterRoot, progressBar, minValue, maxValue);
+}
+
+Core::Status UIContext::setProgressBarValueFromUpdater(
+    UINodeId updaterRoot, UINodeId progressBar, float value)
+{
+    return m_impl->setProgressBarValueFromUpdater(updaterRoot, progressBar, value);
+}
+
+Core::Result<float> UIContext::progressBarValueFromUpdater(
+    UINodeId updaterRoot, UINodeId progressBar) const
+{
+    return m_impl->progressBarValueFromUpdater(updaterRoot, progressBar);
+}
+
+Core::Status UIContext::setProgressBarPaintFromUpdater(
+    UINodeId updaterRoot, UINodeId progressBar, const UIProgressBarPaint& paint)
+{
+    return m_impl->setProgressBarPaintFromUpdater(updaterRoot, progressBar, paint);
+}
+
+Core::Result<UIProgressBarPaint> UIContext::progressBarPaintFromUpdater(
+    UINodeId updaterRoot, UINodeId progressBar) const
+{
+    return m_impl->progressBarPaintFromUpdater(updaterRoot, progressBar);
+}
+
+Core::Status UIContext::setRadioButtonPaintFromUpdater(
+    UINodeId updaterRoot, UINodeId radioButton, const UIRadioButtonPaint& paint)
+{
+    return m_impl->setRadioButtonPaintFromUpdater(updaterRoot, radioButton, paint);
+}
+
+Core::Result<UIRadioButtonPaint> UIContext::radioButtonPaintFromUpdater(
+    UINodeId updaterRoot, UINodeId radioButton) const
+{
+    return m_impl->radioButtonPaintFromUpdater(updaterRoot, radioButton);
+}
+
+Core::Status UIContext::setRadioButtonActionFromUpdater(
+    UINodeId updaterRoot, UINodeId radioButton, UIButtonActionCallback&& callback)
+{
+    return m_impl->setRadioButtonActionFromUpdater(
+        updaterRoot, radioButton, std::move(callback));
+}
+
+Core::Status UIContext::clearRadioButtonActionFromUpdater(
+    UINodeId updaterRoot, UINodeId radioButton)
+{
+    return m_impl->clearRadioButtonActionFromUpdater(updaterRoot, radioButton);
+}
+
+Core::Status UIContext::setRadioButtonSelectedFromUpdater(
+    UINodeId updaterRoot, UINodeId radioButton, bool selected)
+{
+    return m_impl->setRadioButtonSelectedFromUpdater(
+        updaterRoot, radioButton, selected);
+}
+
+Core::Result<bool> UIContext::isRadioButtonSelectedFromUpdater(
+    UINodeId updaterRoot, UINodeId radioButton) const
+{
+    return m_impl->isRadioButtonSelectedFromUpdater(updaterRoot, radioButton);
+}
+
+Core::Result<bool> UIContext::isRadioButtonPressedFromUpdater(
+    UINodeId updaterRoot, UINodeId radioButton) const
+{
+    return m_impl->isRadioButtonPressedFromUpdater(updaterRoot, radioButton);
 }
 
 Core::Result<UIRoutedPointerListenerToken> UIContext::addRoutedPointerListenerFromUpdater(

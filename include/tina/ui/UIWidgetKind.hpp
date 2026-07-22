@@ -13,6 +13,12 @@ enum class UIWidgetKind : u8 {
     Checkbox,
     // M11-C1: horizontal value control; pointer drag maps X to [min,max].
     Slider,
+    // Single-line UTF-8 editor with caret, selection, and IME composition.
+    TextEdit,
+    // Horizontal determinate range indicator; not pointer-interactive.
+    ProgressBar,
+    // Parent-scoped exclusive selection control.
+    RadioButton,
 };
 
 } // namespace Tina::UI

@@ -39,8 +39,10 @@ public static class TinaWinCapture {
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref POINT p);
     [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder s, int n);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+    [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr dpiContext);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int cmd);
+    public const uint PW_CLIENTONLY = 1;
     public const uint PW_RENDERFULLCONTENT = 2;
     public const int SW_RESTORE = 9;
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
@@ -90,8 +92,9 @@ function Capture-Hwnd([IntPtr]$hwnd, [string]$png) {
     try {
         $hdc = $g.GetHdc()
         try {
-            if ([TinaWinCapture]::PrintWindow($hwnd, $hdc, [TinaWinCapture]::PW_RENDERFULLCONTENT) -or
-                [TinaWinCapture]::PrintWindow($hwnd, $hdc, 0)) {
+            $clientFlags = [TinaWinCapture]::PW_CLIENTONLY -bor [TinaWinCapture]::PW_RENDERFULLCONTENT
+            if ([TinaWinCapture]::PrintWindow($hwnd, $hdc, $clientFlags) -or
+                [TinaWinCapture]::PrintWindow($hwnd, $hdc, [TinaWinCapture]::PW_CLIENTONLY)) {
                 $used = "PrintWindow"
             }
         } finally { $g.ReleaseHdc($hdc) }
@@ -141,6 +144,7 @@ function Analyze-Png([string]$png) {
 
 $exePath = Resolve-Exe $Exe
 $runDir = Ensure-Dir (Join-Path (Ensure-Dir $OutDir) (Get-Date -Format "yyyyMMdd-HHmmss"))
+$previousDpiContext = [TinaWinCapture]::SetThreadDpiAwarenessContext([IntPtr]::new(-4))
 $stdoutPath = Join-Path $runDir "stdout.txt"
 $stderrPath = Join-Path $runDir "stderr.txt"
 Write-Host "exe: $exePath"
@@ -157,6 +161,7 @@ $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
 $captures = New-Object System.Collections.Generic.List[object]
 $errors = New-Object System.Collections.Generic.List[string]
 $method = "n/a"
+$forcedTermination = $false
 try {
     Start-Sleep -Milliseconds $WarmupMs
     $hwnd = [IntPtr]::Zero
@@ -189,18 +194,27 @@ try {
         if ($i -lt $CaptureCount) { Start-Sleep -Milliseconds $CaptureIntervalMs }
     }
 } finally {
-    # Start-Process ExitCode is only reliable after WaitForExit.
-    $remain = [int][Math]::Max(1000, ($deadline - (Get-Date)).TotalMilliseconds)
-    if (-not $p.WaitForExit($remain)) {
+    # On Windows PowerShell, WaitForExit(Int32) can leave ExitCode unreadable.
+    # Poll to enforce the deadline, then use only the parameterless overload to
+    # synchronize the process handle and redirected streams.
+    while (-not $p.HasExited -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 50
+        try { $p.Refresh() } catch {}
+    }
+    if (-not $p.HasExited) {
+        $forcedTermination = $true
         Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-        [void]$p.WaitForExit(5000)
+    }
+    $p.WaitForExit()
+    if ($previousDpiContext -ne [IntPtr]::Zero) {
+        [void][TinaWinCapture]::SetThreadDpiAwarenessContext($previousDpiContext)
     }
 }
 
 try { $p.Refresh() } catch {}
-$exitCode = -1
+$exitCode = $null
 try {
-    if ($p.HasExited -and $null -ne $p.ExitCode) { $exitCode = [int]$p.ExitCode }
+    if ($p.HasExited) { $exitCode = [int]$p.ExitCode }
 } catch {}
 
 $stdoutTail = ""
@@ -215,7 +229,7 @@ $blankCount = @($captures | Where-Object { $_.blankLike }).Count
 $usefulCount = @($captures | Where-Object {
         -not $_.blankLike -and ([int]$_.uniqueSampleColors -ge 3) -and ([double]$_.blackRatio -lt 0.95)
     }).Count
-$processOk = ($exitCode -eq 0) -or ($stdoutStatusOk -and $exitCode -le 0)
+$processOk = -not $forcedTermination -and $null -ne $exitCode -and $exitCode -eq 0
 $ok = $processOk -and ($captures.Count -gt 0) -and ($errors.Count -eq 0) -and ($usefulCount -gt 0)
 if ($RequireNonBlank -and ($blankCount -eq $captures.Count)) { $ok = $false }
 
@@ -242,7 +256,10 @@ try {
         exe = [string]$exePath
         args = [string]$ArgString
         processId = [int]$p.Id
-        exitCode = [int]$exitCode
+        exitCode = $exitCode
+        forcedTermination = [bool]$forcedTermination
+        processOk = [bool]$processOk
+        stdoutStatusOk = [bool]$stdoutStatusOk
         outDir = [string]$runDir
         captureCount = [int]$captures.Count
         blankLikeCount = [int]$blankCount
@@ -257,6 +274,6 @@ try {
     Write-Warning $_.Exception.Message
 }
 Write-Host "report: $reportPath"
-Write-Host "ok=$ok exit=$exitCode captures=$($captures.Count) useful=$usefulCount blankLike=$blankCount"
+Write-Host "ok=$ok exit=$exitCode forced=$forcedTermination captures=$($captures.Count) useful=$usefulCount blankLike=$blankCount"
 if (-not $ok) { exit 1 }
 exit 0

@@ -8,6 +8,8 @@
 #include <tina/ui/UICommittedPaint.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
 #include <tina/ui/UIButton.hpp>
+#include <tina/ui/UIProgressBar.hpp>
+#include <tina/ui/UIRadioButton.hpp>
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UIContextConfig.hpp>
@@ -18,6 +20,7 @@
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIText.hpp>
+#include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 #include <tina/ui/UIWidgetKind.hpp>
 
@@ -164,6 +167,9 @@ public:
     [[nodiscard]] Core::Result<UINodeId> createButton(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createCheckbox(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createSlider(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createTextEdit(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createProgressBar(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createRadioButton(UINodeId parent);
 
   private:
     friend class UIContext;
@@ -190,19 +196,27 @@ public:
     [[nodiscard]] Core::Result<UINodeId> createButton(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createCheckbox(UINodeId parent);
     [[nodiscard]] Core::Result<UINodeId> createSlider(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createTextEdit(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createProgressBar(UINodeId parent);
+    [[nodiscard]] Core::Result<UINodeId> createRadioButton(UINodeId parent);
     [[nodiscard]] bool isAlive(UINodeId node) const noexcept;
     [[nodiscard]] Core::Status setLayoutStyle(UINodeId node, const UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(
         UINodeId node,
         UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setBoxPaint(UINodeId node, const UIBoxPaint& paint);
-    // Label/Button only. Stores strict UTF-8 without NUL into the fixed text
+    // Label/Button/RadioButton/TextEdit only. Stores strict UTF-8 without NUL into the fixed text
     // byte budget and dirties Measure for Auto-sized intrinsic placeholders.
     // Glyph raster and FreeType remain out of this API.
     [[nodiscard]] Core::Status setText(UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyle(UINodeId node, const UITextStyle& style);
     [[nodiscard]] Core::Result<std::string_view> text(UINodeId node);
     [[nodiscard]] Core::Result<UITextStyle> textStyle(UINodeId node);
+    [[nodiscard]] Core::Status setTextSelection(
+        UINodeId textEdit,
+        UITextSelection selection);
+    [[nodiscard]] Core::Result<UITextSelection> textSelection(
+        UINodeId textEdit) const;
     [[nodiscard]] Core::Status setButtonAction(
         UINodeId button,
         UIButtonActionCallback callback);
@@ -229,6 +243,36 @@ public:
         UISliderChangeCallback callback);
     [[nodiscard]] Core::Status clearSliderChangeCallback(UINodeId slider);
     [[nodiscard]] Core::Result<bool> isSliderDragging(UINodeId slider) const;
+    [[nodiscard]] Core::Status setProgressBarRange(
+        UINodeId progressBar,
+        float minValue,
+        float maxValue);
+    [[nodiscard]] Core::Status setProgressBarValue(
+        UINodeId progressBar,
+        float value);
+    [[nodiscard]] Core::Result<float> progressBarValue(
+        UINodeId progressBar) const;
+    [[nodiscard]] Core::Status setProgressBarPaint(
+        UINodeId progressBar,
+        const UIProgressBarPaint& paint);
+    [[nodiscard]] Core::Result<UIProgressBarPaint> progressBarPaint(
+        UINodeId progressBar) const;
+    [[nodiscard]] Core::Status setRadioButtonPaint(
+        UINodeId radioButton,
+        const UIRadioButtonPaint& paint);
+    [[nodiscard]] Core::Result<UIRadioButtonPaint> radioButtonPaint(
+        UINodeId radioButton) const;
+    [[nodiscard]] Core::Status setRadioButtonAction(
+        UINodeId radioButton,
+        UIButtonActionCallback callback);
+    [[nodiscard]] Core::Status clearRadioButtonAction(UINodeId radioButton);
+    [[nodiscard]] Core::Status setRadioButtonSelected(
+        UINodeId radioButton,
+        bool selected);
+    [[nodiscard]] Core::Result<bool> isRadioButtonSelected(
+        UINodeId radioButton) const;
+    [[nodiscard]] Core::Result<bool> isRadioButtonPressed(
+        UINodeId radioButton) const;
     [[nodiscard]] Core::Result<UIRoutedPointerListenerToken>
     addRoutedPointerListener(
         UIRoutedPointerListenerDesc descriptor,
@@ -337,7 +381,7 @@ public:
         Platform::PlatformFrameId platformFrame,
         u64 sourceSequence,
         UIButtonActivationSource source);
-    // Cycles default-action focus among visible Targetable Buttons in paint
+    // Cycles keyboard focus among visible Targetable Button/Checkbox/RadioButton/TextEdit nodes in paint
     // order. reverse=true moves backward (Shift+Tab). Consumes when any
     // candidate exists. Not a full Focus Scope / Modal system.
     struct UIDefaultFocusStepResult final {
@@ -349,9 +393,8 @@ public:
         bool reverse);
     [[nodiscard]] UINodeId defaultActionFocus() const noexcept;
 
-    // IME/text target (M7-E6). Pointer-down on a Label sets ime focus. Composition
-    // preedit is retained on the context; commit appends UTF-8 to the Label text.
-    // Not a full TextEdit widget / caret / selection model.
+    // IME/text target. Pointer-down or Tab focus on a TextEdit sets text focus.
+    // Composition preedit is retained separately; commit replaces the selection.
     struct UITextInputRouteResult final {
         bool consumed = false;
         bool applied = false;
@@ -372,6 +415,12 @@ public:
         Platform::PlatformFrameId platformFrame,
         u64 sourceSequence,
         std::string_view committedUtf8);
+    [[nodiscard]] Core::Result<UITextInputRouteResult> routeTextEditCommand(
+        Platform::WindowId window,
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        UITextEditCommand command,
+        bool extendSelection = false);
 
     [[nodiscard]] UIContextStatistics statistics() const noexcept;
     [[nodiscard]] usize liveNodeCount() const noexcept;
@@ -393,6 +442,49 @@ private:
         UINodeId updaterRoot,
         UINodeId parent,
         UIWidgetKind kind);
+    [[nodiscard]] Core::Status setProgressBarRangeFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId progressBar,
+        float minValue,
+        float maxValue);
+    [[nodiscard]] Core::Status setProgressBarValueFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId progressBar,
+        float value);
+    [[nodiscard]] Core::Result<float> progressBarValueFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId progressBar) const;
+    [[nodiscard]] Core::Status setProgressBarPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId progressBar,
+        const UIProgressBarPaint& paint);
+    [[nodiscard]] Core::Result<UIProgressBarPaint> progressBarPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId progressBar) const;
+    [[nodiscard]] Core::Status setRadioButtonPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton,
+        const UIRadioButtonPaint& paint);
+    [[nodiscard]] Core::Result<UIRadioButtonPaint> radioButtonPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton) const;
+    [[nodiscard]] Core::Status setRadioButtonActionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton,
+        UIButtonActionCallback&& callback);
+    [[nodiscard]] Core::Status clearRadioButtonActionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton);
+    [[nodiscard]] Core::Status setRadioButtonSelectedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton,
+        bool selected);
+    [[nodiscard]] Core::Result<bool> isRadioButtonSelectedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton) const;
+    [[nodiscard]] Core::Result<bool> isRadioButtonPressedFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId radioButton) const;
     [[nodiscard]] Core::Status setLayoutStyleFromUpdater(
         UINodeId updaterRoot,
         UINodeId node,
@@ -419,6 +511,13 @@ private:
     [[nodiscard]] Core::Result<UITextStyle> textStyleFromUpdater(
         UINodeId updaterRoot,
         UINodeId node);
+    [[nodiscard]] Core::Status setTextSelectionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId textEdit,
+        UITextSelection selection);
+    [[nodiscard]] Core::Result<UITextSelection> textSelectionFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId textEdit) const;
     [[nodiscard]] Core::Status setButtonActionFromUpdater(
         UINodeId updaterRoot,
         UINodeId button,

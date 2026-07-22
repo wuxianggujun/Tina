@@ -35,7 +35,7 @@ struct UIContextCapacityConfig final {
     // is reserved so an action can be replaced while this published capacity
     // is full without exposing a partial property update.
     usize buttonActionCapacity = 0;
-    // Total retained UTF-8 bytes for Label/Button text across the context.
+    // Total retained UTF-8 bytes for Label/Button/RadioButton/TextEdit text across the context.
     // Zero uses DefaultTextByteCapacity. Storage is pre-reserved at Create.
     usize textByteCapacity = 0;
 };
