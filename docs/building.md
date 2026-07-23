@@ -20,6 +20,14 @@ cmake --version
 cmake --list-presets
 ```
 
+文档本地链接、preset 名与常见 target 名可用：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
+```
+
+（DOC-002；不扫描 `out/`/`build/`/`thirdparty/`。）
+
 ## Preset 选择
 
 | Preset | 图 | Manifest features |

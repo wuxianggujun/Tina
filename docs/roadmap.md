@@ -32,7 +32,7 @@ Linux 当前 tip 有新证据；Legacy 残留有明确删除或保留决定。
 | RUNTIME-001 | GameState stack/commands 与唯一提交点 |
 | RUNTIME-002 | owning RenderFramePacket、FramePin 与 submission completion |
 | PERF-001 | 决定 ADR 0018 并实现正式 `tina_bench` |
-| DOC-002 | 文档链接/preset/target 自动检查 |
+
 
 ## Later：扩展能力
 
