@@ -132,7 +132,8 @@ dispatch/shutdown 不暴露给游戏。
 - primary framebuffer RGBA8 capture。
 
 `GpuTextureId`/`GpuMeshId` 是 RenderDevice generation handle，不是 AssetHandle。当前 `RenderFrame` 的
-Surface/Scene/UI/Glyph view 只在 `submitFrame()` 调用内有效；backend 不能保存。owning packet/FramePin/
+Surface/Scene/UI/Glyph view 只在 `submitFrame()` 调用内有效；backend 不能保存。Runtime 持有
+`RenderFramePacket` 与 Null submission completion ledger（RUNTIME-002 首切片）；owning packet/FramePin/
 completion 尚未实现。
 
 `RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D extraction，

@@ -29,7 +29,6 @@ Linux 当前 tip 有新证据；Legacy 残留有明确删除或保留决定。
 | --- | --- |
 | UI-002 | UIA/AT-SPI accessibility 首切片 |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
-| RUNTIME-002 | owning RenderFramePacket、FramePin 与 submission completion |
 | PERF-001 | 决定 ADR 0018 并实现正式 `tina_bench` |
 
 

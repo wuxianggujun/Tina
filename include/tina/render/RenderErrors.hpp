@@ -32,6 +32,8 @@ inline constexpr Core::ErrorCode RenderSceneCameraConflict{Core::ErrorDomain::Re
 inline constexpr Core::ErrorCode RenderSceneMissingCamera{Core::ErrorDomain::Render, 26};
 inline constexpr Core::ErrorCode UploadTicketInvalid{Core::ErrorDomain::Render, 27};
 inline constexpr Core::ErrorCode UploadTicketNotRetirable{Core::ErrorDomain::Render, 28};
+// Shared capacity / argument errors used by FramePin packet and completion ledger.
+// (CapacityExceeded may already exist elsewhere in this domain; keep stable codes.)
 inline constexpr Core::ErrorCode UploadLedgerFull{Core::ErrorDomain::Render, 29};
 inline constexpr Core::ErrorCode TextureUploadUnsupported{Core::ErrorDomain::Render, 30};
 inline constexpr Core::ErrorCode InvalidTextureUpload{Core::ErrorDomain::Render, 31};
@@ -42,5 +44,9 @@ inline constexpr Core::ErrorCode FrameCaptureBusy{Core::ErrorDomain::Render, 35}
 inline constexpr Core::ErrorCode MeshUploadUnsupported{Core::ErrorDomain::Render, 36};
 inline constexpr Core::ErrorCode InvalidMeshUpload{Core::ErrorDomain::Render, 37};
 inline constexpr Core::ErrorCode MeshNotFound{Core::ErrorDomain::Render, 38};
+inline constexpr Core::ErrorCode FramePinCapacityExceeded{Core::ErrorDomain::Render, 39};
+inline constexpr Core::ErrorCode InvalidFramePin{Core::ErrorDomain::Render, 40};
+inline constexpr Core::ErrorCode SubmissionCompletionLedgerFull{Core::ErrorDomain::Render, 41};
+inline constexpr Core::ErrorCode InvalidSubmissionTicket{Core::ErrorDomain::Render, 42};
 
 } // namespace Tina::Render::RenderErrorCode

@@ -152,7 +152,7 @@ AudioEngine
 | --- | --- |
 | `TASK-001` | 落实或正式替代 ADR 0017 的 Desktop CPU worker 默认值 |
 | `RUNTIME-001` | stack/commands 首切片已落地；多层 policy 向下阻断仍可扩展 |
-| `RUNTIME-002` | owning `RenderFramePacket`、FramePin、submission completion 与资源寿命闭环 |
+| `RUNTIME-002` | packet/FramePin/Null completion 首切片已落地；真实 GPU fence 后置 |
 
 通用 Runtime Event Queue、AssetSystem 组合、State TaskGroup barrier、多 World/editor orchestration 与
 通用 pass scheduler 均不是当前接口。实现前应补 ADR/Backlog 验收，不得从文档中的目标流程推断为已完成。

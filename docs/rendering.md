@@ -29,8 +29,9 @@ PBR 或 owning frame packet。
 返回后不能保存。`submitFrame()` 返回 `Submitted` 或 `SkippedSuspendedSurface`；只有前者允许 Runtime
 调用 `present()`。
 
-owning `RenderFramePacket`、FramePin 与 backend completion 尚未实现，见 `RUNTIME-002`。因此当前
-Asset/UI owner 必须在同步 submit 完成前保持 payload 有效，不能把逻辑 unload 当作物理释放许可。
+`RenderFramePacket` + `FramePin` + Null `SubmissionCompletionLedger` 已作为 RUNTIME-002 首切片接入
+EngineHost：submit 前可登记 Surface/GlyphAtlas pin，present 或 skip 后 complete 并释放 pin，失败路径
+abandon。真实 bgfx fence 驱动的异步 completion 仍未实现；同步 submit 路径下 pin 在 present 后归零。
 
 ## RenderScene
 
@@ -87,9 +88,9 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 `GpuTextureId`/`GpuMeshId` 是 backend owner 的 generation handle，不是 AssetHandle。销毁后 stale handle
 失败；Asset Catalog 使用 `AssetId`，产品 resolver 显式映射 AssetId → key → GPU handle。
 
-`UploadTicketLedger` 当前是 backend-neutral/Null 的逻辑 upload/retirement 首切片。真实 bgfx resource API
-可上传 Cooked Texture2D/StaticMesh 并用于产品 2D/3D；完整 fence/completion 驱动的物理 retirement 仍由
-`RUNTIME-002` 关闭。
+`UploadTicketLedger` 与 `NullSubmissionCompletionLedger` 均为 backend-neutral/Null 逻辑 completion
+首切片。真实 bgfx resource API 可上传 Cooked Texture2D/StaticMesh；GPU fence 驱动的异步 retirement
+仍待后续扩展。
 
 ## bgfx backend
 

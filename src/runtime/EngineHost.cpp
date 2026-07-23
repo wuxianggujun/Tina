@@ -1,7 +1,9 @@
 #include <tina/runtime/EngineHost.hpp>
 
 #include <tina/platform/PlatformBackend.hpp>
+#include <tina/render/FramePin.hpp>
 #include <tina/render/RenderDevice.hpp>
+#include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameStateCommands.hpp>
@@ -999,6 +1001,89 @@ class EngineHostImplementation final {
                 }
             }
 
+            // RUNTIME-002: owning packet + Null completion ledger around submit/present.
+            if (auto packetBegin = m_renderFramePacket.beginFrame(frameIndex); !packetBegin)
+            {
+                return failAfterStartupCommit(gameApplication, std::move(packetBegin.error()), frameIndex,
+                                              simulationTick);
+            }
+            auto packetRollback = Core::makeScopeExit([this]() noexcept {
+                (void)m_renderFramePacket.abandon(&m_submissionCompletionLedger);
+            });
+
+            // Surface pin: keep surface snapshot facts alive for this submission epoch.
+            if (primaryWindowSurface.has_value())
+            {
+                struct SurfacePinCookie final {
+                    u64 surfaceRevision = 0;
+                    bool released = false;
+                };
+                // Cookie is owned by the pin release callback lifetime for this frame only.
+                // Static thread-local last-revision probe for failure-injection tests.
+                static thread_local u64 s_lastReleasedSurfaceRevision = 0;
+                auto* cookie = new SurfacePinCookie{
+                    .surfaceRevision = primaryWindowSurface->surfaceRevision,
+                    .released = false,
+                };
+                Render::FramePin surfacePin{
+                    Render::FramePinKind::Surface,
+                    primaryWindowSurface->surfaceRevision,
+                    cookie,
+                    [](void* userData) noexcept {
+                        auto* pinCookie = static_cast<SurfacePinCookie*>(userData);
+                        if (pinCookie != nullptr && !pinCookie->released)
+                        {
+                            s_lastReleasedSurfaceRevision = pinCookie->surfaceRevision;
+                            pinCookie->released = true;
+                        }
+                        delete pinCookie;
+                    },
+                };
+                if (auto pinStatus =
+                        m_renderFramePacket.add(Render::FramePinKind::Surface, std::move(surfacePin));
+                    !pinStatus)
+                {
+                    return failAfterStartupCommit(gameApplication, std::move(pinStatus.error()), frameIndex,
+                                                  simulationTick);
+                }
+                (void)s_lastReleasedSurfaceRevision;
+            }
+
+            // Glyph atlas pin: UI owner payload must remain valid through sync submit.
+            if (glyphAtlasPage.has_value() && !glyphAtlasPage->pixels.empty())
+            {
+                struct AtlasPinCookie final {
+                    u32 width = 0;
+                    u32 height = 0;
+                    bool released = false;
+                };
+                auto* cookie = new AtlasPinCookie{
+                    .width = glyphAtlasPage->width,
+                    .height = glyphAtlasPage->height,
+                    .released = false,
+                };
+                Render::FramePin atlasPin{
+                    Render::FramePinKind::GlyphAtlas,
+                    (static_cast<u64>(glyphAtlasPage->width) << 32) | glyphAtlasPage->height,
+                    cookie,
+                    [](void* userData) noexcept {
+                        auto* pinCookie = static_cast<AtlasPinCookie*>(userData);
+                        if (pinCookie != nullptr)
+                        {
+                            pinCookie->released = true;
+                        }
+                        delete pinCookie;
+                    },
+                };
+                if (auto pinStatus =
+                        m_renderFramePacket.add(Render::FramePinKind::GlyphAtlas, std::move(atlasPin));
+                    !pinStatus)
+                {
+                    return failAfterStartupCommit(gameApplication, std::move(pinStatus.error()), frameIndex,
+                                                  simulationTick);
+                }
+            }
+
             const Render::RenderFrame renderFrame{
                 .frameIndex = frameIndex,
                 .interpolation = frameTiming.interpolation,
@@ -1029,6 +1114,19 @@ class EngineHostImplementation final {
 
             if (submitResult->requiresPresent())
             {
+                auto ticketResult = m_submissionCompletionLedger.beginSubmitted(submitResult->submissionIndex);
+                if (!ticketResult)
+                {
+                    return failAfterStartupCommit(gameApplication, std::move(ticketResult.error()), frameIndex,
+                                                  simulationTick);
+                }
+                if (auto attachStatus = m_renderFramePacket.attachSubmission(*ticketResult); !attachStatus)
+                {
+                    (void)m_submissionCompletionLedger.abandon(*ticketResult);
+                    return failAfterStartupCommit(gameApplication, std::move(attachStatus.error()), frameIndex,
+                                                  simulationTick);
+                }
+
                 auto presentResult =
                     invokeResultBoundary("IRenderDevice::present", RuntimeErrorCode::LifecycleInvariantViolation,
                                          [&] { return m_modules.renderDevice->present(); });
@@ -1037,11 +1135,27 @@ class EngineHostImplementation final {
                     return failAfterStartupCommit(gameApplication, std::move(presentResult.error()), frameIndex,
                                                   simulationTick);
                 }
+                if (auto completeStatus = m_renderFramePacket.complete(m_submissionCompletionLedger); !completeStatus)
+                {
+                    return failAfterStartupCommit(gameApplication, std::move(completeStatus.error()), frameIndex,
+                                                  simulationTick);
+                }
+                packetRollback.release();
                 // Latch the presented Camera2D for next-frame world pointer picks.
                 // Extraction-only camera moves do not update the latch until present.
                 const u64 surfaceRevision =
                     primaryWindowSurface.has_value() ? primaryWindowSurface->surfaceRevision : 0;
                 m_lastPresentedCamera2D.notePresented(*renderSceneResult, surfaceRevision);
+            }
+            else
+            {
+                // Suspended / skipped: no submission ticket; still release pins.
+                if (auto completeStatus = m_renderFramePacket.completeSkipped(); !completeStatus)
+                {
+                    return failAfterStartupCommit(gameApplication, std::move(completeStatus.error()), frameIndex,
+                                                  simulationTick);
+                }
+                packetRollback.release();
             }
 
             if (frameIndex == (std::numeric_limits<u64>::max)())
@@ -1105,6 +1219,7 @@ class EngineHostImplementation final {
     {
         m_lifecycleState = LifecycleState::Stopping;
         m_pendingCommands.clearAll();
+        (void)m_renderFramePacket.abandon(&m_submissionCompletionLedger);
         while (!m_gameStateStack.empty())
         {
             std::unique_ptr<IGameState> state = m_gameStateStack.popCommitted();
@@ -1249,6 +1364,8 @@ class EngineHostImplementation final {
     GameStateStack m_gameStateStack{};
     GameStatePendingCommands m_pendingCommands{};
     GameStatePolicy m_committedPolicy{};
+    Render::RenderFramePacket m_renderFramePacket{};
+    Render::NullSubmissionCompletionLedger m_submissionCompletionLedger{};
     LifecycleState m_lifecycleState = LifecycleState::Ready;
     std::optional<Integration::WindowSurfaceSnapshot> m_lastWindowSurface;
 };

@@ -51,10 +51,12 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/header_isolation/RenderSurfaceHeader.cpp
     render/header_isolation/UIDisplayListHeader.cpp
     render/header_isolation/UploadTicketHeader.cpp
+    render/header_isolation/FramePinHeader.cpp
     render/header_isolation/WorldPointerSampleHeader.cpp
     render/header_isolation/Camera2DProjectionHeader.cpp
     render/NullRenderDeviceTests.cpp
     render/UploadTicketTests.cpp
+    render/FramePinPacketTests.cpp
     render/GpuTextureUploadTests.cpp
     render/GpuMeshUploadTests.cpp
     render/UIDisplayListTests.cpp
