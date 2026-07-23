@@ -19,6 +19,7 @@
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>
+#include <tina/ui/UIAccessibility.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITheme.hpp>

@@ -27,7 +27,7 @@ Linux 当前 tip 有新证据；Legacy 残留有明确删除或保留决定。
 
 | Backlog | 目标 |
 | --- | --- |
-| UI-002 | UIA/AT-SPI accessibility 首切片 |
+| UI-002 | Windows UIA / Linux AT-SPI 真机桥接（中立 SPI 已落地，见 UI-002-SPI） |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
 
 

@@ -102,8 +102,12 @@ committed text。多行、grapheme、BiDi/shaping、候选窗定位见 `TEXT-001
 - TextEdit valueText；
 - 有限 focused state。
 
-这是后端无关 semantics snapshot，不等同于平台辅助技术。Windows UIA 与 Linux AT-SPI adapter 尚未
-实现，见 `UI-002`；文档不能把 role 单测写成真实 screen reader 通过。
+这是后端无关 semantics snapshot，不等同于平台辅助技术。
+
+`UIAccessibilityTree` / `IUIAccessibilityProvider` / `UIAccessibilityProbeProvider`（UI-002 首切片）
+从 `committedSemantics()` 构建可查询的无障碍节点表（role/name/state/range/value），供后续 Windows
+UIA 与 Linux AT-SPI adapter 消费。Probe 可验证 stale node 拒绝；**真实 screen reader / UIA 进程
+桥接仍未实现**，不得把 probe 单测写成真机 a11y 通过。
 
 ## Render 边界
 

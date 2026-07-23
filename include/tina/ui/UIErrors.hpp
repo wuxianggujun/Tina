@@ -25,5 +25,7 @@ inline constexpr Core::ErrorCode InvalidFont{Core::ErrorDomain::UI, 17};
 // when a glyph placement is absent; keep a dedicated code for future eviction).
 inline constexpr Core::ErrorCode InvalidGlyph{Core::ErrorDomain::UI, 18};
 inline constexpr Core::ErrorCode InvalidControlValue{Core::ErrorDomain::UI, 19};
+inline constexpr Core::ErrorCode AccessibilityTreeMissing{Core::ErrorDomain::UI, 20};
+inline constexpr Core::ErrorCode AccessibilityNodeStale{Core::ErrorDomain::UI, 21};
 
 } // namespace Tina::UI::UIErrorCode

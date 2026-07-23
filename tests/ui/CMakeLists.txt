@@ -8,6 +8,7 @@ add_executable(tina_ui_tests
     UIProgressBarTests.cpp
     UIRadioButtonTests.cpp
     UISemanticsTests.cpp
+    UIAccessibilityTests.cpp
     UIInputRouteTests.cpp
 
     UIDirtySubtreeTests.cpp
@@ -26,6 +27,7 @@ add_executable(tina_ui_tests
     header_isolation/UIRadioButtonHeader.cpp
     header_isolation/UISliderHeader.cpp
     header_isolation/UISemanticsHeader.cpp
+    header_isolation/UIAccessibilityHeader.cpp
     header_isolation/UIDirtyHeader.cpp
     header_isolation/UICommittedHitHeader.cpp
     header_isolation/UICommittedLayoutHeader.cpp

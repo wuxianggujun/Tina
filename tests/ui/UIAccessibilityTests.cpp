@@ -1,0 +1,232 @@
+#include <gtest/gtest.h>
+
+#include <tina/core/id/GenerationPool.hpp>
+#include <tina/ui/UI.hpp>
+#include <tina/ui/UIAccessibility.hpp>
+
+#include <memory>
+#include <memory_resource>
+#include <utility>
+
+namespace Tina::Tests {
+namespace {
+
+using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
+
+[[nodiscard]] std::unique_ptr<UI::UIContext> createContext(
+    Platform::WindowId window,
+    UI::UIContextCapacityConfig capacities = {
+        .nodeCapacity = 32,
+        .rootCapacity = 1,
+        .paintSnapshotCapacity = 32,
+        .routePathCapacity = 8,
+        .routedPointerListenerCapacity = 8,
+        .buttonActionCapacity = 8,
+    },
+    std::pmr::memory_resource& resource = *std::pmr::get_default_resource())
+{
+    auto result = UI::UIContext::Create(window, capacities, resource);
+    EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    return result ? std::move(*result) : nullptr;
+}
+
+[[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
+{
+    auto result = context.rootBuilder().createRoot();
+    EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    return result ? std::move(*result) : UI::UIRootOwner{};
+}
+
+[[nodiscard]] UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
+{
+    auto result = context.treeUpdater(root);
+    EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    return result ? std::move(*result) : UI::UITreeUpdater{};
+}
+
+[[nodiscard]] UI::UILayoutStyle fixedSize(float width, float height) noexcept
+{
+    UI::UILayoutStyle style;
+    style.size.width = UI::UILayoutLength::Px(width);
+    style.size.height = UI::UILayoutLength::Px(height);
+    return style;
+}
+
+void assertOk(Core::Status status)
+{
+    ASSERT_TRUE(status.has_value()) << (status ? "" : status.error().message);
+}
+
+TEST(UIAccessibilityTest, ProbeReadsRolesNamesAndStatesFromCommittedSemantics)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+
+    auto button = context->rootBuilder().createButton(root.rootNodeId());
+    auto checkbox = context->rootBuilder().createCheckbox(root.rootNodeId());
+    auto slider = context->rootBuilder().createSlider(root.rootNodeId());
+    auto progress = context->rootBuilder().createProgressBar(root.rootNodeId());
+    auto radio = context->rootBuilder().createRadioButton(root.rootNodeId());
+    auto textEdit = context->rootBuilder().createTextEdit(root.rootNodeId());
+    ASSERT_TRUE(button.has_value());
+    ASSERT_TRUE(checkbox.has_value());
+    ASSERT_TRUE(slider.has_value());
+    ASSERT_TRUE(progress.has_value());
+    ASSERT_TRUE(radio.has_value());
+    ASSERT_TRUE(textEdit.has_value());
+
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(400.0F, 300.0F)));
+    assertOk(updater.setLayoutStyle(*button, fixedSize(80.0F, 32.0F)));
+    assertOk(updater.setLayoutStyle(*checkbox, fixedSize(24.0F, 24.0F)));
+    assertOk(updater.setLayoutStyle(*slider, fixedSize(120.0F, 20.0F)));
+    assertOk(updater.setLayoutStyle(*progress, fixedSize(120.0F, 12.0F)));
+    assertOk(updater.setLayoutStyle(*radio, fixedSize(100.0F, 24.0F)));
+    assertOk(updater.setLayoutStyle(*textEdit, fixedSize(160.0F, 32.0F)));
+    assertOk(updater.setText(*button, "Apply"));
+    assertOk(updater.setChecked(*checkbox, true));
+    assertOk(updater.setSliderRange(*slider, 0.0F, 1.0F, 0.1F));
+    assertOk(updater.setSliderValue(*slider, 0.4F));
+    assertOk(updater.setProgressBarRange(*progress, 0.0F, 100.0F));
+    assertOk(updater.setProgressBarValue(*progress, 55.0F));
+    assertOk(updater.setText(*radio, "Windowed"));
+    assertOk(updater.setRadioButtonSelected(*radio, true));
+    assertOk(updater.setText(*textEdit, "Player"));
+    assertOk(context->commitLayout({.width = 400.0F, .height = 300.0F}));
+
+    UI::UIAccessibilityTree tree;
+    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    EXPECT_FALSE(tree.empty());
+    EXPECT_EQ(tree.semanticsRevision(), context->committedSemantics().semanticsRevision());
+
+    UI::UIAccessibilityProbeProvider probe;
+    assertOk(probe.publish(tree));
+    EXPECT_TRUE(probe.hasPublishedTree());
+    EXPECT_EQ(probe.publishCount(), 1U);
+
+    auto buttonNode = probe.readNode(*button);
+    ASSERT_TRUE(buttonNode.has_value()) << buttonNode.error().message;
+    EXPECT_EQ(buttonNode->role, UI::UISemanticsRole::Button);
+    EXPECT_EQ(buttonNode->name, "Apply");
+    EXPECT_TRUE(UI::hasState(buttonNode->states, UI::UIAccessibilityState::Enabled));
+
+    auto checkboxNode = probe.readNode(*checkbox);
+    ASSERT_TRUE(checkboxNode.has_value());
+    EXPECT_EQ(checkboxNode->role, UI::UISemanticsRole::Checkbox);
+    EXPECT_TRUE(UI::hasState(checkboxNode->states, UI::UIAccessibilityState::Checked));
+
+    auto sliderNode = probe.readNode(*slider);
+    ASSERT_TRUE(sliderNode.has_value());
+    EXPECT_EQ(sliderNode->role, UI::UISemanticsRole::Slider);
+    EXPECT_TRUE(UI::hasState(sliderNode->states, UI::UIAccessibilityState::HasRange));
+    EXPECT_FLOAT_EQ(sliderNode->value, 0.4F);
+    EXPECT_FLOAT_EQ(sliderNode->minValue, 0.0F);
+    EXPECT_FLOAT_EQ(sliderNode->maxValue, 1.0F);
+
+    auto progressNode = probe.readNode(*progress);
+    ASSERT_TRUE(progressNode.has_value());
+    EXPECT_EQ(progressNode->role, UI::UISemanticsRole::ProgressBar);
+    EXPECT_TRUE(UI::hasState(progressNode->states, UI::UIAccessibilityState::ReadOnly));
+    EXPECT_FLOAT_EQ(progressNode->value, 55.0F);
+
+    auto radioNode = probe.readNode(*radio);
+    ASSERT_TRUE(radioNode.has_value());
+    EXPECT_EQ(radioNode->role, UI::UISemanticsRole::RadioButton);
+    EXPECT_EQ(radioNode->name, "Windowed");
+    EXPECT_TRUE(UI::hasState(radioNode->states, UI::UIAccessibilityState::Checked));
+
+    auto textNode = probe.readNode(*textEdit);
+    ASSERT_TRUE(textNode.has_value());
+    EXPECT_EQ(textNode->role, UI::UISemanticsRole::TextEdit);
+    EXPECT_EQ(textNode->valueText, "Player");
+
+    // Probe lookup by name/role (assistive tech style query).
+    EXPECT_NE(tree.findByName("Apply"), nullptr);
+    EXPECT_NE(tree.findByRole(UI::UISemanticsRole::ProgressBar), nullptr);
+}
+
+TEST(UIAccessibilityTest, StaleNodeAfterDestroyIsRejected)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+
+    auto button = context->rootBuilder().createButton(root.rootNodeId());
+    ASSERT_TRUE(button.has_value());
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 100.0F)));
+    assertOk(updater.setLayoutStyle(*button, fixedSize(80.0F, 32.0F)));
+    assertOk(updater.setText(*button, "Doomed"));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+
+    UI::UIAccessibilityTree tree;
+    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    UI::UIAccessibilityProbeProvider probe;
+    assertOk(probe.publish(tree));
+    const UI::UINodeId staleId = *button;
+    ASSERT_TRUE(probe.readNode(staleId).has_value());
+
+    assertOk(updater.destroy(*button));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+
+    // Stale tree still held by probe must not claim live access without rebuild.
+    UI::UIAccessibilityTree fresh;
+    assertOk(fresh.rebuildFrom(context->committedSemantics()));
+    EXPECT_EQ(fresh.findNode(staleId), nullptr);
+    assertOk(probe.publish(fresh));
+    auto read = probe.readNode(staleId);
+    ASSERT_FALSE(read.has_value());
+    EXPECT_EQ(read.error().code, UI::UIErrorCode::AccessibilityNodeStale);
+}
+
+TEST(UIAccessibilityTest, ClearRemovesPublishedTree)
+{
+    UI::UIAccessibilityProbeProvider probe;
+    UI::UIAccessibilityTree empty;
+    assertOk(probe.publish(empty));
+    EXPECT_TRUE(probe.hasPublishedTree());
+    probe.clear();
+    EXPECT_FALSE(probe.hasPublishedTree());
+    EXPECT_EQ(probe.clearCount(), 1U);
+    auto read = probe.readNode(UI::UINodeId{});
+    ASSERT_FALSE(read.has_value());
+    EXPECT_EQ(read.error().code, UI::UIErrorCode::AccessibilityTreeMissing);
+}
+
+TEST(UIAccessibilityTest, DisabledStateMapsToDisabledFlag)
+{
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    auto button = context->rootBuilder().createButton(root.rootNodeId());
+    ASSERT_TRUE(button.has_value());
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 100.0F)));
+    assertOk(updater.setLayoutStyle(*button, fixedSize(80.0F, 32.0F)));
+    assertOk(updater.setText(*button, "Off"));
+    assertOk(updater.setEnabled(*button, false));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+
+    UI::UIAccessibilityTree tree;
+    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    const UI::UIAccessibilityNode* node = tree.findNode(*button);
+    ASSERT_NE(node, nullptr);
+    EXPECT_TRUE(UI::hasState(node->states, UI::UIAccessibilityState::Disabled));
+    EXPECT_FALSE(UI::hasState(node->states, UI::UIAccessibilityState::Enabled));
+}
+
+} // namespace
+} // namespace Tina::Tests

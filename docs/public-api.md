@@ -147,7 +147,8 @@ commit 后返回 borrowed view。`UIDisplayList` 支持 SolidQuad/Glyph 与 axis
 Label、Button、Checkbox、Slider、ProgressBar、RadioButton、单行 TextEdit。
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8；
-可选 FreeType、R8 Glyph atlas 和 semantics snapshot均为 Tina API。平台 UIA/AT-SPI 尚未实现。
+可选 FreeType、R8 Glyph atlas、semantics snapshot 与 `UIAccessibilityTree`/probe provider 均为 Tina API。
+Windows UIA / Linux AT-SPI 真机桥接尚未实现（UI-002）。
 
 ## Scene
 
