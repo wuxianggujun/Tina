@@ -35,7 +35,7 @@
 
 
 
-| PERF-001 | Planned | P1 | 完成 ADR 0018 决策并实现 `tina_bench` | 固定 workload/fingerprint | 接受或拒绝 ADR 0018；JSON schema、checksum、p50/p95/p99、baseline compatibility 与固定 worker 生效 | Benchmark + Platform |
+
 
 
 ## Later
@@ -72,3 +72,4 @@
 | DOC-002 | `tools/docs/CheckDocs.ps1`：docs 本地链接、cmake configure/build preset、`--target` 名、Legacy 产品文案软警告；不扫 out/build/thirdparty | [building](building.md) · [testing](testing.md) |
 | RUNTIME-001 | `GameStateStack` + commands + 唯一 commit；**policy 向下阻断**（fixed/frame/render/UI 自顶向下 `forEachDispatch`）；enter 失败丢 candidate；`GameStateStackTests` / policy dispatch 单测 | [gameplay](gameplay.md) · ADR 0014 |
 | RUNTIME-002 | `FramePin`/`FramePinSink`、`RenderFramePacket`、`NullSubmissionCompletionLedger`；EngineHost submit/present 挂 pin 并在 present/skip 后 complete；shutdown abandon；`FramePinPacketTests` | [rendering](rendering.md) · ADR 0016 |
+| PERF-001 | ADR 0018 Accepted；`tools/bench` → `tina_bench` schema v1；workload `null_runtime_frames`；JSON fingerprint/checksum/p50/p95/p99；共享机 `conclusion=provisional`；固定 hard-gate 机与多进程 MAD 后置 | [performance-memory](performance-memory.md) · ADR 0018 |

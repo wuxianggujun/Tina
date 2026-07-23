@@ -175,5 +175,5 @@ LSAN_OPTIONS=exitcode=23 ./out/build/linux-clang22-vnext-sanitize/bin/tina_tests
 | `TINA_BUILD_AUDIO_MINIAUDIO` | OFF | 私有 miniaudio adapter |
 | `TINA_BUILD_PHYSICS2D` | OFF | 可选 Box2D 模块 |
 | `TINA_ENABLE_SANITIZERS` | OFF | Unix GCC/Clang ASan/UBSan |
-| `TINA_BUILD_BENCHMARKS` | OFF | 规划中的 benchmark targets |
+| `TINA_BUILD_BENCHMARKS` | OFF | 打开时构建 `tina_bench`；examples 开启时也会构建 |
 | `TINA_UI_FONT_PATH` | 空 | 可选字体文件 |

@@ -76,17 +76,18 @@ protocol。共享 CI 上的墙钟差异默认 informational；确定性失败（
 
 ## ADR 0018 状态
 
-[ADR 0018](adr/0018-benchmark-protocol.md) 当前仍为 `Proposed`。候选方向包括版本化 JSON、machine/
-build fingerprint、run-level median/MAD、baseline compatibility 与固定 worker，但在接受前不能把
-schema、阈值或目录写成永久契约。
+[ADR 0018](adr/0018-benchmark-protocol.md) 已为 `Accepted`（schema v1 首切片）。独立可执行
+`tina_bench`（`tools/bench`，随 `TINA_BUILD_EXAMPLES` 或 `TINA_BUILD_BENCHMARKS` 构建）输出
+版本化 JSON：`schema`、workload id/version/seed/parameters、build/host fingerprint、counters
+checksum、frame-time p50/p95/p99。首个 workload 为 `null_runtime_frames`（Headless+Null+DisabledTask）。
 
-`PERF-001` 的完成条件：
+共享开发机/CI 结论固定为 `conclusion=provisional`，**不是** hard gate。固定门禁机、多进程
+median/MAD 与 baseline 仓库审核仍为后续扩展；在此之前不得把本机毫秒数写成跨机器回归通过。
 
-1. 选择固定 workload 与 gate machine/profile；
-2. 接受 ADR 0018 或明确拒绝/替代；
-3. 实现独立 `tina_bench` 和版本化 JSON/checksum；
-4. 证明 warm-up、repeat、p50/p95/p99、fingerprint mismatch 与 noisy-run rejection；
-5. 建立可重建 baseline，并区分 hard gate 与 informational run。
+```powershell
+cmake --build --preset windows-vnext-bgfx-debug --target tina_bench -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --warmup=60 --samples=600 --seed=1
+```
 
 ## 验证工具
 

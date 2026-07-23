@@ -1,7 +1,9 @@
 # ADR 0018：版本化 benchmark 协议与固定门禁机
 
-- 状态：Proposed
+- 状态：Accepted（schema v1 首切片；共享机仅 provisional）
 - 日期：2026-07-16
+- Accepted：2026-07-24（`tina_bench` schema v1 + `null_runtime_frames` workload；
+  hard-gate 固定机与多进程 MAD 仍后置）
 
 ## 背景
 
