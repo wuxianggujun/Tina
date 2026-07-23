@@ -261,8 +261,8 @@ struct LifecycleCounters final {
 #endif
 };
 
-inline constexpr u32 ExpectedUIPanelCount = 2;
-inline constexpr u32 ExpectedUITextLabelCount = 2;
+inline constexpr u32 ExpectedUIPanelCount = 3;
+inline constexpr u32 ExpectedUITextLabelCount = 8;
 inline constexpr u32 ExpectedUITextEditCount = 1;
 inline constexpr u32 ExpectedUIButtonCount = 1;
 inline constexpr u32 ExpectedUIProgressBarCount = 1;
@@ -968,6 +968,11 @@ class TileMapBgfxState final : public Tina::IGameState {
                 .paint = solidFill(8, 16, 28, 220),
             },
             PanelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(668.0F), Tina::UI::UILayoutLength::Px(8.0F),
+                                             Tina::UI::UILayoutLength::Px(276.0F), Tina::UI::UILayoutLength::Px(448.0F)),
+                .paint = solidFill(8, 16, 24, 228),
+            },
+            PanelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(16.0F), Tina::UI::UILayoutLength::Px(480.0F),
                                              Tina::UI::UILayoutLength::Px(320.0F), Tina::UI::UILayoutLength::Px(10.0F)),
                 .paint = solidFill(255, 196, 64, 230),
@@ -990,9 +995,9 @@ class TileMapBgfxState final : public Tina::IGameState {
             }
         }
 
-        // HUD labels: English + Chinese. Without FreeType these paint as SolidQuad
-        // placeholder bars; with FreeType (TINA_SAMPLE_TILEMAP_FREETYPE) Desktop-style
-        // SourceHan injection yields real CJK glyphs.
+        // HUD and settings labels. Without FreeType these paint as SolidQuad placeholder
+        // bars; with FreeType (TINA_SAMPLE_TILEMAP_FREETYPE) Desktop-style SourceHan
+        // injection yields real CJK glyphs.
         struct LabelSpec final {
             Tina::UI::UILayoutStyle layout{};
             std::string_view text{};
@@ -1023,6 +1028,78 @@ class TileMapBgfxState final : public Tina::IGameState {
                         .color = {.red = 255, .green = 210, .blue = 80, .alpha = 255},
                     },
             },
+            LabelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(684.0F), Tina::UI::UILayoutLength::Px(78.0F),
+                                             Tina::UI::UILayoutLength::Px(72.0F), Tina::UI::UILayoutLength::Px(24.0F)),
+                .text = "Master",
+                .style =
+                    Tina::UI::UITextStyle{
+                        .logicalSize = 18.0F,
+                        .advanceScale = 0.62F,
+                        .lineHeightScale = 1.12F,
+                        .color = {.red = 226, .green = 238, .blue = 246, .alpha = 255},
+                    },
+            },
+            LabelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(684.0F), Tina::UI::UILayoutLength::Px(108.0F),
+                                             Tina::UI::UILayoutLength::Px(72.0F), Tina::UI::UILayoutLength::Px(24.0F)),
+                .text = "Music",
+                .style =
+                    Tina::UI::UITextStyle{
+                        .logicalSize = 18.0F,
+                        .advanceScale = 0.62F,
+                        .lineHeightScale = 1.12F,
+                        .color = {.red = 226, .green = 238, .blue = 246, .alpha = 255},
+                    },
+            },
+            LabelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(684.0F), Tina::UI::UILayoutLength::Px(138.0F),
+                                             Tina::UI::UILayoutLength::Px(72.0F), Tina::UI::UILayoutLength::Px(24.0F)),
+                .text = "SFX",
+                .style =
+                    Tina::UI::UITextStyle{
+                        .logicalSize = 18.0F,
+                        .advanceScale = 0.62F,
+                        .lineHeightScale = 1.12F,
+                        .color = {.red = 226, .green = 238, .blue = 246, .alpha = 255},
+                    },
+            },
+            LabelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(724.0F), Tina::UI::UILayoutLength::Px(174.0F),
+                                             Tina::UI::UILayoutLength::Px(180.0F), Tina::UI::UILayoutLength::Px(24.0F)),
+                .text = "Mute Master",
+                .style =
+                    Tina::UI::UITextStyle{
+                        .logicalSize = 18.0F,
+                        .advanceScale = 0.62F,
+                        .lineHeightScale = 1.12F,
+                        .color = {.red = 244, .green = 246, .blue = 238, .alpha = 255},
+                    },
+            },
+            LabelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(724.0F), Tina::UI::UILayoutLength::Px(210.0F),
+                                             Tina::UI::UILayoutLength::Px(180.0F), Tina::UI::UILayoutLength::Px(24.0F)),
+                .text = "Mute Music",
+                .style =
+                    Tina::UI::UITextStyle{
+                        .logicalSize = 18.0F,
+                        .advanceScale = 0.62F,
+                        .lineHeightScale = 1.12F,
+                        .color = {.red = 244, .green = 246, .blue = 238, .alpha = 255},
+                    },
+            },
+            LabelSpec{
+                .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(724.0F), Tina::UI::UILayoutLength::Px(246.0F),
+                                             Tina::UI::UILayoutLength::Px(180.0F), Tina::UI::UILayoutLength::Px(24.0F)),
+                .text = "Mute SFX",
+                .style =
+                    Tina::UI::UITextStyle{
+                        .logicalSize = 18.0F,
+                        .advanceScale = 0.62F,
+                        .lineHeightScale = 1.12F,
+                        .color = {.red = 244, .green = 246, .blue = 238, .alpha = 255},
+                    },
+            },
         };
         for (const LabelSpec& labelSpec : labels)
         {
@@ -1047,7 +1124,7 @@ class TileMapBgfxState final : public Tina::IGameState {
 
         // HUD Button is product UI surface for pointer/default-action path. Automated
         // smoke does not synthesize clicks; wiring + create counts are gated. Interactive
-        // runs can click "Demo" (no world side-effect required for the JSON gate).
+        // runs can click "Demo Button" (no world side-effect required for the JSON gate).
         {
             auto button = tree->createButton(root->rootNodeId());
             if (!button)
@@ -1056,14 +1133,29 @@ class TileMapBgfxState final : public Tina::IGameState {
             }
             if (auto status = tree->setLayoutStyle(
                     *button, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
-                                                Tina::UI::UILayoutLength::Px(12.0F),
-                                                Tina::UI::UILayoutLength::Px(120.0F),
+                                                Tina::UI::UILayoutLength::Px(24.0F),
+                                                Tina::UI::UILayoutLength::Px(136.0F),
                                                 Tina::UI::UILayoutLength::Px(40.0F)));
                 !status)
             {
                 return status;
             }
             if (auto status = tree->setBoxPaint(*button, solidFill(40, 120, 80, 230)); !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setTextStyle(
+                    *button, Tina::UI::UITextStyle{
+                                 .logicalSize = 18.0F,
+                                 .advanceScale = 0.62F,
+                                 .lineHeightScale = 1.15F,
+                                 .color = {.red = 246, .green = 255, .blue = 246, .alpha = 255},
+                             });
+                !status)
+            {
+                return status;
+            }
+            if (auto status = tree->setText(*button, "Demo Button"); !status)
             {
                 return status;
             }
@@ -1080,7 +1172,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
 
         // M11-C1/C2: Master/Music/SFX volume Sliders -> AudioEngine buses.
-        // Layout stacked under the Demo button (700,12). Smoke only requires create counts;
+        // Layout stacked in the right-side settings surface. Smoke only requires create counts;
         // interactive drag applies via pending flags on next updateFrame.
         const auto wireVolumeSlider =
             [&](float y, std::uint8_t r, std::uint8_t g, std::uint8_t b,
@@ -1092,9 +1184,9 @@ class TileMapBgfxState final : public Tina::IGameState {
                     return Tina::Core::failure(std::move(slider.error()));
                 }
                 if (auto status = tree->setLayoutStyle(
-                        *slider, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
+                        *slider, absolutePanelStyle(Tina::UI::UILayoutLength::Px(764.0F),
                                                     Tina::UI::UILayoutLength::Px(y),
-                                                    Tina::UI::UILayoutLength::Px(200.0F),
+                                                    Tina::UI::UILayoutLength::Px(158.0F),
                                                     Tina::UI::UILayoutLength::Px(20.0F)));
                     !status)
                 {
@@ -1129,19 +1221,19 @@ class TileMapBgfxState final : public Tina::IGameState {
                 return Tina::Core::success();
             };
 
-        if (auto status = wireVolumeSlider(60.0F, 60, 60, 90, pendingMasterVolume_, hasPendingMasterVolume_,
+        if (auto status = wireVolumeSlider(82.0F, 60, 60, 90, pendingMasterVolume_, hasPendingMasterVolume_,
                                            counters_->lastMasterVolume, counters_->masterVolumeFromSlider);
             !status)
         {
             return status;
         }
-        if (auto status = wireVolumeSlider(86.0F, 50, 80, 70, pendingMusicVolume_, hasPendingMusicVolume_,
+        if (auto status = wireVolumeSlider(112.0F, 50, 80, 70, pendingMusicVolume_, hasPendingMusicVolume_,
                                            counters_->lastMusicVolume, counters_->musicVolumeFromSlider);
             !status)
         {
             return status;
         }
-        if (auto status = wireVolumeSlider(112.0F, 90, 70, 50, pendingSfxVolume_, hasPendingSfxVolume_,
+        if (auto status = wireVolumeSlider(142.0F, 90, 70, 50, pendingSfxVolume_, hasPendingSfxVolume_,
                                            counters_->lastSfxVolume, counters_->sfxVolumeFromSlider);
             !status)
         {
@@ -1160,7 +1252,7 @@ class TileMapBgfxState final : public Tina::IGameState {
                     return Tina::Core::failure(std::move(checkbox.error()));
                 }
                 if (auto status = tree->setLayoutStyle(
-                        *checkbox, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
+                        *checkbox, absolutePanelStyle(Tina::UI::UILayoutLength::Px(684.0F),
                                                       Tina::UI::UILayoutLength::Px(y),
                                                       Tina::UI::UILayoutLength::Px(28.0F),
                                                       Tina::UI::UILayoutLength::Px(28.0F)));
@@ -1207,15 +1299,15 @@ class TileMapBgfxState final : public Tina::IGameState {
                 return Tina::Core::success();
             };
 
-        if (auto status = wireMuteCheckbox(140.0F, 120, 50, 50, MuteBus::Master); !status)
+        if (auto status = wireMuteCheckbox(172.0F, 120, 50, 50, MuteBus::Master); !status)
         {
             return status;
         }
-        if (auto status = wireMuteCheckbox(174.0F, 50, 100, 70, MuteBus::Music); !status)
+        if (auto status = wireMuteCheckbox(208.0F, 50, 100, 70, MuteBus::Music); !status)
         {
             return status;
         }
-        if (auto status = wireMuteCheckbox(208.0F, 110, 80, 40, MuteBus::Sfx); !status)
+        if (auto status = wireMuteCheckbox(244.0F, 110, 80, 40, MuteBus::Sfx); !status)
         {
             return status;
         }
@@ -1230,7 +1322,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             }
             if (auto status = tree->setLayoutStyle(
                     *profileName, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
-                                                     Tina::UI::UILayoutLength::Px(252.0F),
+                                                     Tina::UI::UILayoutLength::Px(292.0F),
                                                      Tina::UI::UILayoutLength::Px(220.0F),
                                                      Tina::UI::UILayoutLength::Px(42.0F)));
                 !status)
@@ -1289,7 +1381,7 @@ class TileMapBgfxState final : public Tina::IGameState {
             }
             if (auto status = tree->setLayoutStyle(
                     *progress, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
-                                                  Tina::UI::UILayoutLength::Px(306.0F),
+                                                  Tina::UI::UILayoutLength::Px(350.0F),
                                                   Tina::UI::UILayoutLength::Px(220.0F),
                                                   Tina::UI::UILayoutLength::Px(20.0F)));
                 !status)
@@ -1334,8 +1426,8 @@ class TileMapBgfxState final : public Tina::IGameState {
                 std::string_view text{};
             };
             constexpr std::array radioSpecs{
-                RadioSpec{.y = 338.0F, .text = "Windowed"},
-                RadioSpec{.y = 374.0F, .text = "Fullscreen"},
+                RadioSpec{.y = 386.0F, .text = "Windowed"},
+                RadioSpec{.y = 416.0F, .text = "Fullscreen"},
             };
             std::array<Tina::UI::UINodeId, radioSpecs.size()> radioButtons{};
             for (std::size_t index = 0; index < radioSpecs.size(); ++index)

@@ -204,6 +204,12 @@ public:
     [[nodiscard]] Core::Status setPointerHitPolicy(
         UINodeId node,
         UIPointerHitPolicy policy);
+    // Enables or disables a published widget. Disabled widgets remain in the
+    // semantics snapshot, but cannot receive default focus or widget actions.
+    // The state change is owner-thread only and is committed atomically with
+    // its paint/semantics invalidation.
+    [[nodiscard]] Core::Status setEnabled(UINodeId node, bool enabled);
+    [[nodiscard]] Core::Result<bool> isEnabled(UINodeId node) const;
     [[nodiscard]] Core::Status setBoxPaint(UINodeId node, const UIBoxPaint& paint);
     // Label/Button/RadioButton/TextEdit only. Stores strict UTF-8 without NUL into the fixed text
     // byte budget and dirties Measure for Auto-sized intrinsic placeholders.
@@ -493,6 +499,13 @@ private:
         UINodeId updaterRoot,
         UINodeId node,
         UIPointerHitPolicy policy);
+    [[nodiscard]] Core::Status setEnabledFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        bool enabled);
+    [[nodiscard]] Core::Result<bool> isEnabledFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node) const;
     [[nodiscard]] Core::Status setBoxPaintFromUpdater(
         UINodeId updaterRoot,
         UINodeId node,

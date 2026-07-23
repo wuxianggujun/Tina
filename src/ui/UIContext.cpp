@@ -666,6 +666,10 @@ struct UIContext::Impl final {
     std::pmr::vector<UINodeId> idsByIndex;
     std::pmr::vector<UILayoutStyle> layoutStylesByIndex;
     std::pmr::vector<UIPointerHitPolicy> pointerHitPoliciesByIndex;
+    // Enabled state is index-aligned with the node pool. A byte keeps the
+    // side-array deterministic and avoids introducing a packed-bit mutation
+    // path for a frequently queried interaction property.
+    std::pmr::vector<u8> enabledByNodeIndex;
     std::pmr::vector<UIBoxPaint> boxPaintsByIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localSolidFillCacheByIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localTextColorCacheByIndex;
@@ -805,6 +809,7 @@ struct UIContext::Impl final {
           idsByIndex(&resource),
           layoutStylesByIndex(&resource),
           pointerHitPoliciesByIndex(&resource),
+          enabledByNodeIndex(&resource),
           boxPaintsByIndex(&resource),
           localSolidFillCacheByIndex(&resource),
           localTextColorCacheByIndex(&resource),
@@ -895,6 +900,7 @@ struct UIContext::Impl final {
         impl->pointerHitPoliciesByIndex.resize(
             normalized.nodeCapacity,
             UIPointerHitPolicy::Ignore);
+        impl->enabledByNodeIndex.resize(normalized.nodeCapacity, 1);
         impl->boxPaintsByIndex.resize(normalized.nodeCapacity);
         impl->localSolidFillCacheByIndex.resize(normalized.nodeCapacity);
         impl->localTextColorCacheByIndex.resize(normalized.nodeCapacity);
@@ -1952,6 +1958,33 @@ struct UIContext::Impl final {
         return std::clamp((value - minValue) / (maxValue - minValue), 0.0F, 1.0F);
     }
 
+    [[nodiscard]] static constexpr UIPremultipliedRgba8Color applyOpacity(
+        UIPremultipliedRgba8Color color,
+        u8 opacity) noexcept
+    {
+        const auto scale = [opacity](u8 channel) constexpr noexcept -> u8 {
+            return static_cast<u8>(
+                (static_cast<u16>(channel) * static_cast<u16>(opacity) + u16{127})
+                / u16{255});
+        };
+        return UIPremultipliedRgba8Color{
+            .red = scale(color.red),
+            .green = scale(color.green),
+            .blue = scale(color.blue),
+            .alpha = scale(color.alpha),
+        };
+    }
+
+    [[nodiscard]] UIPremultipliedRgba8Color widgetPaintColor(
+        UINodeId node,
+        UIPremultipliedRgba8Color color) const noexcept
+    {
+        constexpr u8 DisabledOpacity = 140;
+        return isNodeEnabled(node)
+            ? color
+            : applyOpacity(color, DisabledOpacity);
+    }
+
     [[nodiscard]] Core::Result<usize> validatePaintCandidateCapacity(
         std::span<const UICommittedLayoutEntry> layoutEntries) const
     {
@@ -2005,6 +2038,7 @@ struct UIContext::Impl final {
             }
             const bool focusedTextEdit = record != nullptr
                 && record->kind == UIWidgetKind::TextEdit
+                && isNodeEnabled(layoutEntry.node)
                 && textInputFocus == layoutEntry.node
                 && isLiveTextEdit(textInputFocus);
             const bool activeIme = focusedTextEdit && imeCompositionActive_;
@@ -2289,6 +2323,7 @@ struct UIContext::Impl final {
         const NodeRecord* record = recordByIndex(nodeIndex);
         const bool focusedTextEdit = record != nullptr
             && record->kind == UIWidgetKind::TextEdit
+            && isNodeEnabled(layoutEntry.node)
             && textInputFocus == layoutEntry.node
             && isLiveTextEdit(textInputFocus);
         const WidgetTextState* textState = nodeIndex < textStatesByIndex.size()
@@ -2299,7 +2334,9 @@ struct UIContext::Impl final {
             : UITextStyle{};
         const UIPremultipliedRgba8Color textColor =
             nodeIndex < localTextColorCacheByIndex.size()
-            ? localTextColorCacheByIndex[nodeIndex]
+            ? widgetPaintColor(
+                  layoutEntry.node,
+                  localTextColorCacheByIndex[nodeIndex])
             : UIPremultipliedRgba8Color{};
         const std::string_view committedText = textState != nullptr
                 && textState->hasContent
@@ -2467,7 +2504,9 @@ struct UIContext::Impl final {
             }
             const u32 nodeIndex = layoutEntry.node.index();
             const UIPremultipliedRgba8Color fill =
-                localSolidFillCacheByIndex[nodeIndex];
+                widgetPaintColor(
+                    layoutEntry.node,
+                    localSolidFillCacheByIndex[nodeIndex]);
             if (!fill.isTransparent()) {
                 output.push_back(UICommittedPaintEntry{
                     .node = layoutEntry.node,
@@ -2487,7 +2526,9 @@ struct UIContext::Impl final {
                     progress.minValue,
                     progress.maxValue);
                 const UIPremultipliedRgba8Color progressFill =
-                    premultiply(progress.paint.fillColor);
+                    widgetPaintColor(
+                        layoutEntry.node,
+                        premultiply(progress.paint.fillColor));
                 if (fraction > 0.0F && !progressFill.isTransparent()
                     && layoutEntry.worldRect.width > 0.0F
                     && layoutEntry.worldRect.height > 0.0F) {
@@ -2514,9 +2555,13 @@ struct UIContext::Impl final {
                     layoutEntry.worldRect.height);
                 const float inset = radio.paint.selectedIndicatorInset;
                 const UIPremultipliedRgba8Color indicatorTrack =
-                    premultiply(radio.paint.indicatorColor);
+                    widgetPaintColor(
+                        layoutEntry.node,
+                        premultiply(radio.paint.indicatorColor));
                 const UIPremultipliedRgba8Color indicator =
-                    premultiply(radio.paint.selectedIndicatorColor);
+                    widgetPaintColor(
+                        layoutEntry.node,
+                        premultiply(radio.paint.selectedIndicatorColor));
                 if (!indicatorTrack.isTransparent() && indicatorExtent > 0.0F) {
                     output.push_back(UICommittedPaintEntry{
                         .node = layoutEntry.node,
@@ -2596,13 +2641,14 @@ struct UIContext::Impl final {
                     UIErrorCode::CapacityExceeded,
                     "UI committed semantics snapshot capacity has been exhausted");
             }
+            const bool enabled = isNodeEnabled(layoutEntry.node);
             UISemanticsEntry entry{
                 .node = layoutEntry.node,
                 .parent = idForIndex(record->parentIndex),
                 .role = semanticsRoleForWidgetKind(record->kind),
                 .kind = record->kind,
                 .worldRect = layoutEntry.worldRect,
-                .enabled = true,
+                .enabled = enabled,
                 .focused = false,
             };
             if (record->kind == UIWidgetKind::Label
@@ -2616,10 +2662,12 @@ struct UIContext::Impl final {
             if (record->kind == UIWidgetKind::Checkbox
                 && nodeIndex < checkboxCheckedByNodeIndex.size()) {
                 entry.checked = checkboxCheckedByNodeIndex[nodeIndex] != 0;
-                entry.focused = defaultActionFocusButton == layoutEntry.node;
+                entry.focused = enabled
+                    && defaultActionFocusButton == layoutEntry.node;
             }
             if (record->kind == UIWidgetKind::Button) {
-                entry.focused = defaultActionFocusButton == layoutEntry.node;
+                entry.focused = enabled
+                    && defaultActionFocusButton == layoutEntry.node;
             }
             if (record->kind == UIWidgetKind::TextEdit) {
                 if (Core::Status status = copyText(
@@ -2628,7 +2676,7 @@ struct UIContext::Impl final {
                     !status) {
                     return status;
                 }
-                entry.focused = textInputFocus == layoutEntry.node;
+                entry.focused = enabled && textInputFocus == layoutEntry.node;
             }
             if (record->kind == UIWidgetKind::Slider && nodeIndex < sliderStatesByNodeIndex.size()) {
                 const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
@@ -2636,7 +2684,7 @@ struct UIContext::Impl final {
                 entry.minValue = slider.minValue;
                 entry.maxValue = slider.maxValue;
                 entry.value = slider.value;
-                entry.focused = armedSlider == layoutEntry.node;
+                entry.focused = enabled && armedSlider == layoutEntry.node;
             }
             if (record->kind == UIWidgetKind::ProgressBar
                 && nodeIndex < progressBarStatesByNodeIndex.size()) {
@@ -2649,7 +2697,8 @@ struct UIContext::Impl final {
             if (record->kind == UIWidgetKind::RadioButton
                 && nodeIndex < radioButtonStatesByNodeIndex.size()) {
                 entry.checked = radioButtonStatesByNodeIndex[nodeIndex].selected;
-                entry.focused = defaultActionFocusButton == layoutEntry.node;
+                entry.focused = enabled
+                    && defaultActionFocusButton == layoutEntry.node;
             }
             output.push_back(entry);
         }
@@ -2999,6 +3048,13 @@ struct UIContext::Impl final {
             && nodes.contains(node.storageId());
     }
 
+    [[nodiscard]] bool isNodeEnabled(UINodeId node) const noexcept
+    {
+        return contains(node)
+            && node.index() < enabledByNodeIndex.size()
+            && enabledByNodeIndex[node.index()] != 0;
+    }
+
     [[nodiscard]] Core::Result<NodeRecord*> resolveButton(UINodeId button)
     {
         auto nodeResult = resolveNode(button);
@@ -3098,7 +3154,7 @@ struct UIContext::Impl final {
         UINodeId node,
         std::span<const UICommittedLayoutEntry> layoutEntries) const noexcept
     {
-        if (!node.hasValue() || !contains(node)
+        if (!node.hasValue() || !isNodeEnabled(node)
             || node.index() >= pointerHitPoliciesByIndex.size()
             || pointerHitPoliciesByIndex[node.index()]
                 != UIPointerHitPolicy::Targetable) {
@@ -3119,7 +3175,7 @@ struct UIContext::Impl final {
     [[nodiscard]] bool isCommittedKeyboardFocusCandidate(
         UINodeId node) const noexcept
     {
-        if (!node.hasValue() || !contains(node)) {
+        if (!node.hasValue() || !isNodeEnabled(node)) {
             return false;
         }
         const NodeRecord* record = nodes.tryGet(node.storageId());
@@ -3461,6 +3517,9 @@ struct UIContext::Impl final {
         }
         layoutStylesByIndex[index] = {};
         pointerHitPoliciesByIndex[index] = UIPointerHitPolicy::Ignore;
+        if (index < enabledByNodeIndex.size()) {
+            enabledByNodeIndex[index] = 1;
+        }
         boxPaintsByIndex[index] = {};
         localSolidFillCacheByIndex[index] = {};
         localTextColorCacheByIndex[index] = {};
@@ -4097,6 +4156,106 @@ struct UIContext::Impl final {
         }
         currentPolicy = policy;
         return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setEnabledFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node,
+        bool enabled)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(
+                UIErrorCode::RootRequired,
+                "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node)) {
+            return fail(
+                UIErrorCode::InvalidNode,
+                "UI node is not owned by the updater root");
+        }
+        if (!isSemanticsPublishedKind((*nodeResult)->kind)) {
+            return fail(
+                UIErrorCode::InvalidControlValue,
+                "UI enabled state requires a published widget node");
+        }
+        if (node.index() >= enabledByNodeIndex.size()) {
+            return fail(
+                Core::CoreErrorCode::Internal,
+                "UI enabled state index is out of range");
+        }
+
+        const u8 next = enabled ? 1 : 0;
+        if (enabledByNodeIndex[node.index()] == next) {
+            return Core::success();
+        }
+
+        // Dirty capacity is reserved before interaction state changes so a
+        // rejected setter leaves enabled/focus/arm state untouched.
+        if (Core::Status dirty = markPaintDirty(node); !dirty) {
+            return dirty;
+        }
+        enabledByNodeIndex[node.index()] = next;
+        if (!enabled) {
+            if (armedPrimaryButton == node) {
+                clearArmedPrimaryButton();
+            }
+            if (armedSlider == node) {
+                clearArmedSlider();
+            }
+            if (armedTextEdit == node) {
+                clearArmedTextEdit();
+            }
+            if (defaultActionFocusButton == node) {
+                clearDefaultActionFocus();
+            }
+            if (textInputFocus == node) {
+                textInputFocus = {};
+                resetImeCompositionState();
+            }
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<bool> isEnabledFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId node) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(
+                UIErrorCode::RootRequired,
+                "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = const_cast<Impl*>(this)->resolveNode(node);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node)) {
+            return fail(
+                UIErrorCode::InvalidNode,
+                "UI node is not owned by the updater root");
+        }
+        if (!isSemanticsPublishedKind((*nodeResult)->kind)) {
+            return fail(
+                UIErrorCode::InvalidControlValue,
+                "UI enabled state requires a published widget node");
+        }
+        if (node.index() >= enabledByNodeIndex.size()) {
+            return fail(
+                Core::CoreErrorCode::Internal,
+                "UI enabled state index is out of range");
+        }
+        return enabledByNodeIndex[node.index()] != 0;
     }
 
     [[nodiscard]] Core::Status setBoxPaintFromUpdater(
@@ -6307,7 +6466,7 @@ struct UIContext::Impl final {
             if (routeNode == armedSlider) {
                 pointWithinArmedSlider = true;
             }
-            if (!nearestButton.hasValue() && contains(routeNode)) {
+            if (!nearestButton.hasValue() && isNodeEnabled(routeNode)) {
                 const NodeRecord* routeRecord =
                     nodes.tryGet(routeNode.storageId());
                 if (routeRecord != nullptr
@@ -6315,7 +6474,7 @@ struct UIContext::Impl final {
                     nearestButton = routeNode;
                 }
             }
-            if (!nearestSlider.hasValue() && contains(routeNode)) {
+            if (!nearestSlider.hasValue() && isNodeEnabled(routeNode)) {
                 const NodeRecord* routeRecord =
                     nodes.tryGet(routeNode.storageId());
                 if (routeRecord != nullptr
@@ -6325,6 +6484,8 @@ struct UIContext::Impl final {
             }
         }
 
+        const UINodeId targetNode = result.pointQuery.target.node;
+        const bool targetNodeEnabledAtRouteStart = isNodeEnabled(targetNode);
         const UINodeId armedButtonAtRouteStart = armedPrimaryButton;
         const UINodeId armedSliderAtRouteStart = armedSlider;
         const UINodeId armedTextEditAtRouteStart = armedTextEdit;
@@ -6341,6 +6502,7 @@ struct UIContext::Impl final {
             buttonActionRegistrationSerial;
         const ButtonActionInvocationCandidate actionCandidate =
             primaryButtonUp && hadArmedInteraction && pointWithinArmedButton
+                && isNodeEnabled(armedButtonAtRouteStart)
             ? captureButtonAction(
                 armedButtonAtRouteStart,
                 actionRegistrationSerialBoundary)
@@ -6358,7 +6520,6 @@ struct UIContext::Impl final {
             reclaimInactiveButtonActions();
         });
 
-        const UINodeId targetNode = result.pointQuery.target.node;
         if (!routePathScratch.empty() && !result.targetInvalidated) {
             for (usize reversePathIndex = routePathScratch.size();
                  reversePathIndex > 1;
@@ -6437,7 +6598,8 @@ struct UIContext::Impl final {
                 ? nodes.tryGet(targetNode.storageId())
                 : nullptr;
             const bool targetsTextEdit = targetRecord != nullptr
-                && targetRecord->kind == UIWidgetKind::TextEdit;
+                && targetRecord->kind == UIWidgetKind::TextEdit
+                && targetNodeEnabledAtRouteStart;
             const UINodeId previousKeyboardFocus = defaultActionFocusButton;
             const UINodeId previousTextFocus = textInputFocus;
             const bool allowsDefaultAction = !routedEvent.isDefaultActionPrevented();
@@ -6445,7 +6607,7 @@ struct UIContext::Impl final {
             const bool willArmSlider = allowsDefaultAction
                 && !willFocusTextEdit
                 && nearestSlider.hasValue()
-                && contains(nearestSlider);
+                && isNodeEnabled(nearestSlider);
             UINodeId nextKeyboardFocus{};
             UINodeId interactionPaintNode{};
             if (willFocusTextEdit) {
@@ -6455,7 +6617,7 @@ struct UIContext::Impl final {
                 interactionPaintNode = nearestSlider;
             } else if (allowsDefaultAction
                        && nearestButton.hasValue()
-                       && contains(nearestButton)) {
+                       && isNodeEnabled(nearestButton)) {
                 const NodeRecord* nextButtonRecord =
                     nodes.tryGet(nearestButton.storageId());
                 if (nextButtonRecord != nullptr
@@ -6542,7 +6704,7 @@ struct UIContext::Impl final {
         } else if (input.kind == UIRoutedPointerEventKind::Move
                    && hadArmedSlider
                    && armedSlider == armedSliderAtRouteStart) {
-            if (!contains(armedSliderAtRouteStart)) {
+            if (!isNodeEnabled(armedSliderAtRouteStart)) {
                 clearArmedSlider();
             } else {
                 static_cast<void>(routedEvent.claimPointerButton(
@@ -6559,7 +6721,7 @@ struct UIContext::Impl final {
         } else if (input.kind == UIRoutedPointerEventKind::Move
                    && hadArmedTextEdit
                    && armedTextEdit == armedTextEditAtRouteStart) {
-            if (!contains(armedTextEditAtRouteStart)) {
+            if (!isNodeEnabled(armedTextEditAtRouteStart)) {
                 clearArmedTextEdit();
             } else {
                 if (Core::Status selection = updateTextEditSelectionFromPointer(
@@ -6575,7 +6737,7 @@ struct UIContext::Impl final {
         } else if (input.kind == UIRoutedPointerEventKind::Move
                    && hadArmedInteraction
                    && armedPrimaryButton == armedButtonAtRouteStart) {
-            if (!contains(armedButtonAtRouteStart)) {
+            if (!isNodeEnabled(armedButtonAtRouteStart)) {
                 clearArmedPrimaryButton();
             } else {
                 armedPrimaryButtonPressed = pointWithinArmedButton;
@@ -6586,7 +6748,7 @@ struct UIContext::Impl final {
             const bool sliderStillArmed = armedSlider == armedSliderAtRouteStart;
             clearArmedSlider();
             routedEvent.consumeInputTransition();
-            if (sliderStillArmed && contains(armedSliderAtRouteStart)
+            if (sliderStillArmed && isNodeEnabled(armedSliderAtRouteStart)
                 && !routedEvent.isDefaultActionPrevented()) {
                 if (auto applied = applySliderValueFromPointer(
                         armedSliderAtRouteStart,
@@ -6601,7 +6763,8 @@ struct UIContext::Impl final {
             const bool textEditStillArmed = armedTextEdit == armedTextEditAtRouteStart;
             clearArmedTextEdit();
             routedEvent.consumeInputTransition();
-            if (textEditStillArmed && contains(armedTextEditAtRouteStart)) {
+            if (textEditStillArmed
+                && isNodeEnabled(armedTextEditAtRouteStart)) {
                 if (Core::Status selection = updateTextEditSelectionFromPointer(
                         armedTextEditAtRouteStart,
                         input.position,
@@ -6618,7 +6781,7 @@ struct UIContext::Impl final {
             if (!routedEvent.isDefaultActionPrevented()
                 && interactionStillArmed
                 && pointWithinArmedButton
-                && contains(armedButtonAtRouteStart)) {
+                && isNodeEnabled(armedButtonAtRouteStart)) {
                 if (const NodeRecord* armedRecord =
                         nodes.tryGet(armedButtonAtRouteStart.storageId());
                     armedRecord != nullptr
@@ -7717,6 +7880,22 @@ Core::Status UITreeUpdater::setPointerHitPolicy(
     return m_context->setPointerHitPolicyFromUpdater(m_root, node, policy);
 }
 
+Core::Status UITreeUpdater::setEnabled(UINodeId node, bool enabled)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setEnabledFromUpdater(m_root, node, enabled);
+}
+
+Core::Result<bool> UITreeUpdater::isEnabled(UINodeId node) const
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->isEnabledFromUpdater(m_root, node);
+}
+
 Core::Status UITreeUpdater::setBoxPaint(UINodeId node, const UIBoxPaint& paint)
 {
     if (m_context == nullptr) {
@@ -8447,6 +8626,21 @@ Core::Status UIContext::setPointerHitPolicyFromUpdater(
     UIPointerHitPolicy policy)
 {
     return m_impl->setPointerHitPolicyFromUpdater(updaterRoot, node, policy);
+}
+
+Core::Status UIContext::setEnabledFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId node,
+    bool enabled)
+{
+    return m_impl->setEnabledFromUpdater(updaterRoot, node, enabled);
+}
+
+Core::Result<bool> UIContext::isEnabledFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId node) const
+{
+    return m_impl->isEnabledFromUpdater(updaterRoot, node);
 }
 
 Core::Status UIContext::setBoxPaintFromUpdater(

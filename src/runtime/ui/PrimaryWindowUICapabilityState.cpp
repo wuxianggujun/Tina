@@ -357,6 +357,40 @@ Core::Status PrimaryWindowUICapabilityState::setPointerHitPolicy(u64 epoch, Prim
     return Core::success();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setEnabled(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId node, bool enabled)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setEnabled";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setEnabled(node, enabled);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isEnabled(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId node)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isEnabled";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto enabled = updater.isEnabled(node);
+    if (!enabled)
+    {
+        return Core::failure(rememberFirstError(std::move(enabled.error()), Operation));
+    }
+    return *enabled;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setBoxPaint(u64 epoch, PrimaryWindowUIPhase phase,
                                                          UI::UITreeUpdater& updater, UI::UINodeId node,
                                                          const UI::UIBoxPaint& paint)

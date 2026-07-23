@@ -127,6 +127,38 @@ TEST_F(PrimaryWindowUICapabilityTest, TextEditSelectionFacadeRoundTripsAndExpire
     EXPECT_EQ(expiredQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, EnabledFacadeRoundTripsAndExpiresWithPhase)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto button = tree->createButton(root->rootNodeId());
+    ASSERT_TRUE(button.has_value()) << button.error().message;
+
+    const PrimaryWindowUITreeUpdater& treeView = *tree;
+    auto initiallyEnabled = treeView.isEnabled(*button);
+    ASSERT_TRUE(initiallyEnabled.has_value()) << initiallyEnabled.error().message;
+    EXPECT_TRUE(*initiallyEnabled);
+    ASSERT_TRUE(tree->setEnabled(*button, false).has_value());
+    auto disabled = treeView.isEnabled(*button);
+    ASSERT_TRUE(disabled.has_value()) << disabled.error().message;
+    EXPECT_FALSE(*disabled);
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    Core::Status expiredSet = tree->setEnabled(*button, true);
+    ASSERT_FALSE(expiredSet.has_value());
+    EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredQuery = treeView.isEnabled(*button);
+    ASSERT_FALSE(expiredQuery.has_value());
+    EXPECT_EQ(expiredQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAndExpire)
 {
     CapabilityState state;

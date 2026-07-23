@@ -43,6 +43,8 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UINodeId> createRadioButton(UI::UINodeId parent);
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
+    [[nodiscard]] Core::Status setEnabled(UI::UINodeId node, bool enabled);
+    [[nodiscard]] Core::Result<bool> isEnabled(UI::UINodeId node) const;
     [[nodiscard]] Core::Status setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint);
     [[nodiscard]] Core::Status setText(UI::UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyle(UI::UINodeId node, const UI::UITextStyle& style);

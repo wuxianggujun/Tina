@@ -19,6 +19,7 @@ param(
     [int]$CaptureCount = 3,
     [int]$CaptureIntervalMs = 400,
     [int]$TimeoutMs = 45000,
+    [int]$RequiredConsecutiveUsefulCaptures = 2,
     [switch]$RequireNonBlank
 )
 
@@ -142,6 +143,64 @@ function Analyze-Png([string]$png) {
     } finally { $img.Dispose() }
 }
 
+function Test-UsefulCapture($capture) {
+    return (-not [bool]$capture.blankLike) -and ([int]$capture.uniqueSampleColors -ge 3) -and
+        ([double]$capture.blackRatio -lt 0.95)
+}
+
+function Measure-ConsecutiveUsefulSameSize($captures) {
+    $bestRun = 0
+    $currentRun = 0
+    $currentWidth = $null
+    $currentHeight = $null
+    $bestWidth = $null
+    $bestHeight = $null
+    $bestPaths = @()
+    $currentPaths = @()
+
+    foreach ($capture in $captures) {
+        if (Test-UsefulCapture $capture) {
+            $width = [int]$capture.width
+            $height = [int]$capture.height
+            if ($currentRun -gt 0 -and $currentWidth -eq $width -and $currentHeight -eq $height) {
+                $currentRun += 1
+                $currentPaths += [string]$capture.path
+            } else {
+                $currentRun = 1
+                $currentWidth = $width
+                $currentHeight = $height
+                $currentPaths = @([string]$capture.path)
+            }
+
+            if ($currentRun -gt $bestRun) {
+                $bestRun = $currentRun
+                $bestWidth = $currentWidth
+                $bestHeight = $currentHeight
+                $bestPaths = @($currentPaths)
+            }
+        } else {
+            $currentRun = 0
+            $currentWidth = $null
+            $currentHeight = $null
+            $currentPaths = @()
+        }
+    }
+
+    return [ordered]@{
+        longestRun = [int]$bestRun
+        width = $bestWidth
+        height = $bestHeight
+        paths = @($bestPaths)
+    }
+}
+
+if ($RequiredConsecutiveUsefulCaptures -lt 1) {
+    throw "RequiredConsecutiveUsefulCaptures must be >= 1"
+}
+if ($CaptureCount -lt $RequiredConsecutiveUsefulCaptures) {
+    throw "CaptureCount must be >= RequiredConsecutiveUsefulCaptures"
+}
+
 $exePath = Resolve-Exe $Exe
 $runDir = Ensure-Dir (Join-Path (Ensure-Dir $OutDir) (Get-Date -Format "yyyyMMdd-HHmmss"))
 $previousDpiContext = [TinaWinCapture]::SetThreadDpiAwarenessContext([IntPtr]::new(-4))
@@ -227,10 +286,12 @@ if (Test-Path -LiteralPath $stdoutPath) {
 
 $blankCount = @($captures | Where-Object { $_.blankLike }).Count
 $usefulCount = @($captures | Where-Object {
-        -not $_.blankLike -and ([int]$_.uniqueSampleColors -ge 3) -and ([double]$_.blackRatio -lt 0.95)
+        Test-UsefulCapture $_
     }).Count
+$consecutiveUsefulSameSize = Measure-ConsecutiveUsefulSameSize $captures
+$consecutiveUsefulSameSizePassed = [int]$consecutiveUsefulSameSize.longestRun -ge $RequiredConsecutiveUsefulCaptures
 $processOk = -not $forcedTermination -and $null -ne $exitCode -and $exitCode -eq 0
-$ok = $processOk -and ($captures.Count -gt 0) -and ($errors.Count -eq 0) -and ($usefulCount -gt 0)
+$ok = $processOk -and ($captures.Count -gt 0) -and ($errors.Count -eq 0) -and $consecutiveUsefulSameSizePassed
 if ($RequireNonBlank -and ($blankCount -eq $captures.Count)) { $ok = $false }
 
 $reportPath = Join-Path $runDir "report.json"
@@ -248,8 +309,17 @@ try {
             dominantRatio = [double]$c.dominantRatio
             uniqueSampleColors = [int]$c.uniqueSampleColors
             blankLike = [bool]$c.blankLike
+            usefulNonBlank = [bool](Test-UsefulCapture $c)
             method = [string]$c.method
         }
+    }
+    $consecutiveUsefulSameSizeGate = [pscustomobject]@{
+        required = [int]$RequiredConsecutiveUsefulCaptures
+        passed = [bool]$consecutiveUsefulSameSizePassed
+        longestRun = [int]$consecutiveUsefulSameSize.longestRun
+        width = $consecutiveUsefulSameSize.width
+        height = $consecutiveUsefulSameSize.height
+        paths = @($consecutiveUsefulSameSize.paths | ForEach-Object { [string]$_ })
     }
     $reportObj = [pscustomobject]@{
         ok = [bool]$ok
@@ -263,6 +333,9 @@ try {
         outDir = [string]$runDir
         captureCount = [int]$captures.Count
         blankLikeCount = [int]$blankCount
+        usefulNonBlankCount = [int]$usefulCount
+        requiredConsecutiveUsefulCaptures = [int]$RequiredConsecutiveUsefulCaptures
+        consecutiveUsefulSameSizeGate = $consecutiveUsefulSameSizeGate
         captureMethod = [string]$method
         errors = @($errors | ForEach-Object { [string]$_ })
         captures = $captureArr
@@ -274,6 +347,8 @@ try {
     Write-Warning $_.Exception.Message
 }
 Write-Host "report: $reportPath"
-Write-Host "ok=$ok exit=$exitCode forced=$forcedTermination captures=$($captures.Count) useful=$usefulCount blankLike=$blankCount"
+Write-Host ("ok={0} exit={1} forced={2} captures={3} useful={4} consecutiveUsefulSameSize={5}/{6} blankLike={7}" -f `
+        $ok, $exitCode, $forcedTermination, $captures.Count, $usefulCount, `
+        $consecutiveUsefulSameSize.longestRun, $RequiredConsecutiveUsefulCaptures, $blankCount)
 if (-not $ok) { exit 1 }
 exit 0

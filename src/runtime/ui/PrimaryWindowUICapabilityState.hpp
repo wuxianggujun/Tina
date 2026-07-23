@@ -59,6 +59,10 @@ class PrimaryWindowUICapabilityState final {
                                               UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                    UI::UINodeId node, UI::UIPointerHitPolicy policy);
+    [[nodiscard]] Core::Status setEnabled(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                          UI::UINodeId node, bool enabled);
+    [[nodiscard]] Core::Result<bool> isEnabled(u64 epoch, PrimaryWindowUIPhase phase,
+                                               const UI::UITreeUpdater& updater, UI::UINodeId node);
     [[nodiscard]] Core::Status setBoxPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                            UI::UINodeId node, const UI::UIBoxPaint& paint);
     [[nodiscard]] Core::Status setText(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,

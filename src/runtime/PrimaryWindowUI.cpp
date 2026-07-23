@@ -145,6 +145,24 @@ Core::Status PrimaryWindowUITreeUpdater::setPointerHitPolicy(UI::UINodeId node, 
     return m_state->setPointerHitPolicy(m_epoch, m_phase, m_updater, node, policy);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setEnabled(UI::UINodeId node, bool enabled)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setEnabled");
+    }
+    return m_state->setEnabled(m_epoch, m_phase, m_updater, node, enabled);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isEnabled(UI::UINodeId node) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isEnabled");
+    }
+    return m_state->isEnabled(m_epoch, m_phase, m_updater, node);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint)
 {
     if (m_state == nullptr)
