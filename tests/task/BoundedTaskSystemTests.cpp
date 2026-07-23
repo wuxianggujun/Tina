@@ -126,4 +126,67 @@ TEST(BoundedTaskSystemTest, ScheduleCpuWithoutWorkersIsNotSupported)
     (*system)->shutdownAndJoin();
 }
 
+TEST(BoundedTaskSystemTest, InteractiveCpuWorkerCountReservesMainThread)
+{
+    EXPECT_EQ(Task::interactiveCpuWorkerCount(0), 1U);
+    EXPECT_EQ(Task::interactiveCpuWorkerCount(1), 1U);
+    EXPECT_EQ(Task::interactiveCpuWorkerCount(2), 1U);
+    EXPECT_EQ(Task::interactiveCpuWorkerCount(8), 7U);
+}
+
+TEST(BoundedTaskSystemTest, ResolveDesktopParamsAppliesInteractiveCpuDefault)
+{
+    const Task::TaskSystemCreateParams defaults{};
+    const auto resolved = Task::resolveDesktopTaskSystemParams(defaults, 8);
+    EXPECT_EQ(resolved.ioWorkerCount, 1U);
+    EXPECT_EQ(resolved.cpuWorkerCount, 7U);
+    EXPECT_EQ(resolved.ioQueueCapacity, 64U);
+    EXPECT_EQ(resolved.cpuQueueCapacity, 64U);
+    EXPECT_EQ(resolved.mainQueueCapacity, 64U);
+
+    const Task::TaskSystemCreateParams emptyQueues{
+        .ioWorkerCount = 0,
+        .cpuWorkerCount = 0,
+        .ioQueueCapacity = 0,
+        .cpuQueueCapacity = 0,
+        .mainQueueCapacity = 0,
+    };
+    const auto filled = Task::resolveDesktopTaskSystemParams(emptyQueues, 4);
+    EXPECT_EQ(filled.ioWorkerCount, 1U);
+    EXPECT_EQ(filled.cpuWorkerCount, 3U);
+    EXPECT_EQ(filled.ioQueueCapacity, 64U);
+    EXPECT_EQ(filled.cpuQueueCapacity, 64U);
+    EXPECT_EQ(filled.mainQueueCapacity, 64U);
+
+    const Task::TaskSystemCreateParams explicitCpu{
+        .ioWorkerCount = 2,
+        .cpuWorkerCount = 5,
+        .ioQueueCapacity = 16,
+        .cpuQueueCapacity = 32,
+        .mainQueueCapacity = 8,
+    };
+    const auto preserved = Task::resolveDesktopTaskSystemParams(explicitCpu, 16);
+    EXPECT_EQ(preserved.ioWorkerCount, 2U);
+    EXPECT_EQ(preserved.cpuWorkerCount, 5U);
+    EXPECT_EQ(preserved.ioQueueCapacity, 16U);
+    EXPECT_EQ(preserved.cpuQueueCapacity, 32U);
+    EXPECT_EQ(preserved.mainQueueCapacity, 8U);
+}
+
+TEST(BoundedTaskSystemTest, DesktopResolvedParamsEnableScheduleCpu)
+{
+    const auto params = Task::resolveDesktopTaskSystemParams(Task::TaskSystemCreateParams{}, 4);
+    ASSERT_GE(params.cpuWorkerCount, 1U);
+    auto system = Task::createBoundedTaskSystem(params);
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+    std::atomic<int> value{0};
+    ASSERT_TRUE((*system)->scheduleCpu([&] { value.store(1, std::memory_order_release); }).has_value());
+    for (int i = 0; i < 200 && value.load(std::memory_order_acquire) == 0; ++i)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(value.load(std::memory_order_acquire), 1);
+    (*system)->shutdownAndJoin();
+}
+
 } // namespace Tina::Tests

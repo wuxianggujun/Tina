@@ -19,6 +19,7 @@
 #include <fstream>
 #include <memory>
 #include <new>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -73,21 +74,13 @@ Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& confi
             },
             .createTaskSystem =
                 [](const Task::TaskSystemCreateParams& params) {
-                    // Production desktop uses bounded IO + Main completion (ADR 0017 first slice).
-                    // Samples/tests may still inject DisabledTaskSystem explicitly.
-                    Task::TaskSystemCreateParams effective = params;
-                    if (effective.ioWorkerCount == 0)
-                    {
-                        effective.ioWorkerCount = 1;
-                    }
-                    if (effective.ioQueueCapacity == 0)
-                    {
-                        effective.ioQueueCapacity = 64;
-                    }
-                    if (effective.mainQueueCapacity == 0)
-                    {
-                        effective.mainQueueCapacity = 64;
-                    }
+                    // Production Desktop: bounded IO + interactive CPU workers (ADR 0017 / TASK-001).
+                    // Samples/tests may still inject DisabledTaskSystem or call createBoundedTaskSystem
+                    // with cpuWorkerCount=0 for IO-only graphs.
+                    const unsigned hardwareConcurrency = std::thread::hardware_concurrency();
+                    const Task::TaskSystemCreateParams effective = Task::resolveDesktopTaskSystemParams(
+                        params,
+                        hardwareConcurrency == 0U ? 1U : static_cast<Core::u32>(hardwareConcurrency));
                     return Task::createBoundedTaskSystem(effective);
                 },
             .platformRender =

@@ -10,13 +10,51 @@ namespace Tina::Task {
 
 struct TaskSystemCreateParams final {
     Core::u32 ioWorkerCount = 1;
-    // 0 disables the CPU worker pool (scheduleCpu → NotSupported). Interactive hosts may set
-    // max(1, hardware_concurrency-1); leave 0 for IO-only slices.
+    // 0 disables the CPU worker pool (scheduleCpu → NotSupported). Interactive Desktop
+    // (CreateEngine) replaces 0 with interactiveCpuWorkerCount(hardware_concurrency).
+    // IO-only slices keep 0 by calling createBoundedTaskSystem directly.
     Core::u32 cpuWorkerCount = 0;
     Core::usize ioQueueCapacity = 64;
     Core::usize cpuQueueCapacity = 64;
     Core::usize mainQueueCapacity = 64;
 };
+
+// ADR 0017 interactive default: reserve one hardware thread for Main when possible.
+[[nodiscard]] constexpr Core::u32 interactiveCpuWorkerCount(Core::u32 hardwareConcurrency) noexcept
+{
+    return hardwareConcurrency <= 1U ? 1U : hardwareConcurrency - 1U;
+}
+
+// Applies Desktop host defaults to a factory param snapshot (IO/Main queues + interactive CPU).
+// Explicit non-zero cpuWorkerCount is preserved; 0 becomes interactiveCpuWorkerCount(...).
+// Does not force CPU workers when callers bypass Desktop and createBoundedTaskSystem themselves.
+[[nodiscard]] constexpr TaskSystemCreateParams resolveDesktopTaskSystemParams(
+    const TaskSystemCreateParams& params,
+    Core::u32 hardwareConcurrency) noexcept
+{
+    TaskSystemCreateParams effective = params;
+    if (effective.ioWorkerCount == 0)
+    {
+        effective.ioWorkerCount = 1;
+    }
+    if (effective.ioQueueCapacity == 0)
+    {
+        effective.ioQueueCapacity = 64;
+    }
+    if (effective.mainQueueCapacity == 0)
+    {
+        effective.mainQueueCapacity = 64;
+    }
+    if (effective.cpuWorkerCount == 0)
+    {
+        effective.cpuWorkerCount = interactiveCpuWorkerCount(hardwareConcurrency);
+    }
+    if (effective.cpuQueueCapacity == 0)
+    {
+        effective.cpuQueueCapacity = 64;
+    }
+    return effective;
+}
 
 // Owning, type-erased work item. Prefer small captures; no automatic heap fallback contract.
 using TaskCallable = std::move_only_function<void()>;
