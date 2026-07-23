@@ -145,13 +145,13 @@ hard failure policy，但必须保持“join/completion 之前不释放被访问
 
 | Backlog | 目标差距 |
 | --- | --- |
-| `TASK-001` | Desktop CPU worker 默认与 ADR 0017 一致 |
-| `RUNTIME-001` | State stack/commands/policy 与 Task barrier |
-| `RUNTIME-002` | owning packet、FramePin、submission completion |
-| `3D-001` / `ASSET-001` | multi-mesh 产品 E2E、外部 texture 安全路径 |
+| `TASK-001` | **Done**：Desktop 交互 CPU worker 默认 |
+| `RUNTIME-001` | stack/四相位 policy **Done**；gameplay input policy / 交互暂停 / stale-owner 矩阵仍后置 |
+| `RUNTIME-002` | FramePin + Null completion **Done**；真 GPU fence 后置 |
+| `3D-001` / `ASSET-001` | multi-mesh E2E + URI 安全 + texture bind API **Done**；Opaque3D 采样后置 |
 | `UI-002`～`UI-005` / `TEXT-001` | accessibility、视觉矩阵、focus/modal/capture、虚拟化、复杂 text |
-| `PERF-001` | 接受 benchmark protocol 与正式 `tina_bench` |
-| `CLEAN-001`～`CLEAN-003` | manifest/EASTL/compatibility/错误文案扫尾 |
-| `TEST-001` / `TEST-002` | Linux 当前 tip 与完整 product-2d 同轮门禁 |
+| `PERF-001` | schema v1 **Done**；固定机 hard gate / 多进程 MAD 后置 |
+| `CLEAN-001`～`CLEAN-003` | **Done**（扫尾记录） |
+| `TEST-001` / `TEST-002` | Linux 当前 tip 仍缺；product-2d 同轮门禁 **Done** |
 
 实现目标差距时，若反转 Accepted 决策必须新增 ADR 并 supersede 旧 ADR；不能只修改本文。

@@ -1,8 +1,9 @@
 # Rendering
 
 Tina 的公开 Render 边界是 backend-neutral `Tina::Render`；bgfx 只存在于 `tina_render_bgfx` 私有
-实现。当前产品已经有 2D、3D、UI/Glyph 与 Texture2D/StaticMesh upload 路径，但没有通用 pass scheduler、
-PBR 或 owning frame packet。
+实现。当前产品已经有 2D、3D、UI/Glyph 与 Texture2D/StaticMesh upload 路径，以及 EngineHost 侧
+`RenderFramePacket` + FramePin + Null completion 首切片；没有通用 pass scheduler、PBR 或真 GPU fence
+驱动的异步 completion。
 
 ## Target 边界
 
@@ -82,7 +83,7 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 | `setSprite2DTextureBinding` | 校验/记录 binding | sprite key → texture |
 | `create/destroyStaticMeshP3N3UV2` | 逻辑 mesh storage | 私有 VB/IB |
 | `setMesh3DBinding` | 校验/记录 binding | mesh key → GPU mesh |
-| `setMesh3DMaterialTextureBinding` | 校验/记录 binding | material key → base-color texture |
+| `setMesh3DMaterialTextureBinding` | 校验/记录 binding | material key → base-color texture **表**；Opaque3D submit **尚未**采样 |
 | `capturePrimaryFrameRgba8` | Unsupported | present 后异步截图路径 |
 
 `GpuTextureId`/`GpuMeshId` 是 backend owner 的 generation handle，不是 AssetHandle。销毁后 stale handle
@@ -106,7 +107,8 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 - D3D11/OpenGL/Vulkan 对应 embedded shader 选择（按构建与平台可用性）。
 
 `tina_sample_2d` 已使用 Cooked Texture2D 与产品 sprite binding；`tina_sample_3d` 已使用 Cooked
-StaticMesh/Material/Prefab，但当前只绑定一个 product mesh。multi-mesh 产品 E2E 见 `3D-001`。
+StaticMesh/Material/Prefab 的 **双 mesh** product key binding（3D-001 Done），并调用
+`setMesh3DMaterialTextureBinding`（GPU 采样仍后置）。
 
 ## Surface 与线程
 
@@ -129,5 +131,6 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --fr
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
 ```
 
-测试映射与 Visual 证据规则见 [测试说明](testing.md)。当前后置项是 PBR/lighting/pass scheduling
-（`RENDER-001`）、owning packet/completion（`RUNTIME-002`）与跨 DPI/GPU visual gate（`UI-003`）。
+测试映射与 Visual 证据规则见 [测试说明](testing.md)。当前后置项是 PBR/lighting/pass scheduling 与
+Opaque3D baseColor 采样（`RENDER-001`）、真 GPU fence completion（RUNTIME-002 尾巴）与跨 DPI/GPU
+visual gate（`UI-003`）。

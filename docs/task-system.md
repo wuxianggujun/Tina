@@ -119,8 +119,10 @@ out\build\windows-msvc-vnext\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 
 ## 性能与待冻结项
 
-正式 benchmark 仍由 [ADR 0018](adr/0018-benchmark-protocol.md) 提案和 [PERF-001](backlog.md) 跟踪。
-在 `tina_bench` 落地前，只记录模块级 `tina_physics2d_bench` 或局部耗时，不把它们当作跨机器基线。
+正式 benchmark 由 [ADR 0018](adr/0018-benchmark-protocol.md)（Accepted）与 [PERF-001](backlog.md)
+跟踪：`tina_bench` schema v1 + `null_runtime_frames` 已落地，共享机仅 provisional；固定机 hard gate
+与多进程 MAD 后置。模块级 `tina_physics2d_bench` 或局部耗时仍不可当作跨机器基线。
 
-待冻结：CPU worker 默认、各队列容量、Task capture size、phase barrier soft deadline、shutdown hard
-deadline、Background 饥饿策略。work stealing/fiber 只有 profile 证明共享队列是瓶颈后才另建 ADR。
+已落实：Desktop 交互 CPU worker 默认 `max(1, hw-1)`（TASK-001）。仍待冻结：各队列容量、Task capture
+size、phase barrier soft deadline、shutdown hard deadline、Background 饥饿策略。work stealing/fiber
+只有 profile 证明共享队列是瓶颈后才另建 ADR。

@@ -5,8 +5,9 @@ Catalog 发布与校验、两个 StaticMesh GPU upload、Prefab 实例化、Scen
 pass 绘制，并叠加 retained UI。它证明 multi-mesh product 的端到端路径，不等同于完整 3D 渲染器。
 
 Cooker 与产品 sample 均支持一个 glTF 中两个 mesh：distinct Mesh/Material AssetId、独立 meshKey
-binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。Cooked texture GPU 绑定与外部 buffer
-安全策略仍由 `ASSET-001` 跟踪；PBR 见 `RENDER-001`。
+binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。外部 URI 安全与产品侧
+`setMesh3DMaterialTextureBinding` 已完成（ASSET-001 Done）；bgfx Opaque3D **采样** baseColor
+贴图仍后置。PBR 见 `RENDER-001`。
 
 ## 当前模块边界
 
@@ -39,7 +40,7 @@ source glTF/GLB
 | Cooked 数据 | StaticMesh v1 使用 P3N3UV2、UInt16 index、bounds/submesh；Material v1 为 Opaque `UnlitBaseColor`；Prefab v1 保存稳定 node id、父索引、local transform 与 Mesh/Material AssetId |
 | Scene | `PerspectiveCamera3D`、`MeshRenderer3D`、Transform hierarchy、Prefab 实例化与失败回滚 |
 | Extraction | 唯一 active perspective camera、surface aspect resolve、world bounds、frustum culling、稳定排序与相邻实例 batch |
-| bgfx | color/depth clear、Perspective view、depth write/less、back-face culling、instance buffer、内置 Cube fixture或显式 GPU mesh binding、solid Unlit shader |
+| bgfx | color/depth clear、Perspective view、depth write/less、back-face culling、instance buffer、内置 Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、solid Unlit shader；`setMesh3DMaterialTextureBinding` 写入 material→texture 表，Opaque3D submit **尚未** `setTexture` 采样 |
 
 世界坐标为右手、Y-up、局部 `-Z` forward、单位米。Camera 公共字段使用 degree，并要求
 `0 < near < far`、有限数值和有效 normalized viewport；aspect 每帧从 primary surface 解析，不写回
@@ -61,12 +62,14 @@ Mesh/Material AssetId 转成当前 Render key。任一步失败都会逆序销�
 2. cook 并原子发布 Catalog package；
 3. 完整校验 Manifest、ContentHash 与 typed payload；
 4. 加载两个 StaticMesh、两个 Material 和一个 Prefab；
-5. 上传两个 mesh，并分别绑定 product meshKey 1 与 2；
+5. 上传两个 mesh，并分别绑定 product meshKey 1 与 2；upload Texture2D 并
+   `setMesh3DMaterialTextureBinding`；
 6. resolver 按 node AssetId 映射到对应 meshKey/materialKey 与 per-mesh bounds/color；
-7. 实例化、extract、提交，退出时解除两个 binding 并销毁 GPU mesh。
+7. 实例化、extract、提交，退出时解除 binding 并销毁 GPU mesh/texture。
 
-当前产品门禁已证明两个不同 AssetId 的并行 GPU binding；尚未证明 `AssetSystem` Handle/Lease 到
-bgfx submission 的完整 pin（见 `RUNTIME-002`）。
+当前产品门禁已证明两个不同 AssetId 的并行 mesh GPU binding，以及 material texture **绑定 API** 与
+结构化计数；尚未证明 Opaque3D 在 GPU 上 **采样** 该贴图，也尚未证明 `AssetSystem` Handle/Lease 到
+submission 的完整 pin（真 fence 见 RUNTIME-002 尾巴）。
 
 ## 三类 3D 门禁
 
@@ -74,11 +77,12 @@ bgfx submission 的完整 pin（见 `RUNTIME-002`）。
 | --- | --- | --- |
 | `tina_sample_3d_extraction` | Headless/Null Camera、culling、sort、batch、300帧退出 | GPU 画面与 Cooked Asset |
 | `tina_sample_3d_infrastructure` | procedural Cube、真实 bgfx depth/instance/UI frame | 产品 glTF/Catalog mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx 生命周期 | Cooked texture GPU 绑定、PBR、Handle/Lease pin |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；texture upload + material key binding API | Opaque3D 贴图采样画面、PBR、Handle/Lease→fence pin |
 
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
-`cookedPrefab`、`meshUploaded`、`meshBound`、`prefabInstantiated`、`sceneExtract`、退出计数与资源归零
-信息。测试数量不是永久契约；实际命令和门禁矩阵统一见[测试说明](testing.md)。
+`cookedPrefab`、`meshUploaded`、`meshBound`、`materialTextureBound`（或等价字段）、`prefabInstantiated`、
+`sceneExtract`、退出计数与资源归零信息。测试数量不是永久契约；实际命令和门禁矩阵统一见
+[测试说明](testing.md)。
 
 ## 当前限制
 
@@ -87,10 +91,13 @@ bgfx submission 的完整 pin（见 `RUNTIME-002`）。
 - Material 产品路径只有 solid Opaque Unlit；无 PBR、Light、Shadow、transparent pass 或 post-processing；
 - glTF Cooker 把相对文件或 bufferView 的 baseColorTexture 发布为 Texture2D dependency；外部相对 URI
   强制 root containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；`tina_sample_3d` 已 upload 并
-  `setMesh3DMaterialTextureBinding`；
-- `RenderScene` 仍使用 mesh/material key，不是 owning `FrameResourceRef`/`RenderFramePacket`；
-- 无通用 pass scheduler、pipeline cache 产品契约、worker extraction 或正式 `tina_bench`；
+  `setMesh3DMaterialTextureBinding`，但 bgfx Opaque3D submit 注释标明 texture sampling deferred；
+- Scene/Render 仍使用 mesh/material **key**（`fixtureMeshKey` 命名保留），不是 Scene 上直接存
+  `AssetHandle`，也不是 extract 输出 owning `FrameResourceRef`；
+- EngineHost 已有 `RenderFramePacket` + FramePin + Null completion 首切片；真 bgfx fence 后置；
+- 无通用 pass scheduler、pipeline cache 产品契约或 worker extraction；`tina_bench` schema v1 已落地
+  （PERF-001 首切片），但不替代 3D 视觉门禁；
 - Jolt/3D Physics 未接入，静态 3D 产品门禁不以它为前置条件。
 
-下一步只在可执行 Backlog 中维护：外部 buffer/texture 安全策略见 `ASSET-001`，资源 pin/completion
-见 `RUNTIME-002`，PBR/pass scheduling 见 `RENDER-001`。详见 [Backlog](backlog.md)。
+下一步只在可执行 Backlog 中维护：Opaque3D 贴图采样与 PBR/pass 见 `RENDER-001`，真 GPU fence
+completion 见 RUNTIME-002 尾巴。详见 [Backlog](backlog.md)。

@@ -151,8 +151,8 @@ AudioEngine
 
 | Backlog | 范围 |
 | --- | --- |
-| `TASK-001` | 落实或正式替代 ADR 0017 的 Desktop CPU worker 默认值 |
-| `RUNTIME-001` | stack/commands + policy 向下阻断调度已落地 |
+| `TASK-001` | **Done**：Desktop `resolveDesktopTaskSystemParams` 交互默认 `max(1, hw-1)`；工厂 `cpu=0` 仍 IO-only |
+| `RUNTIME-001` | stack/commands + fixed/frame/render/`updateUI` 向下阻断已落地；`blocksGameplayInputBelow` 后置 |
 | `RUNTIME-002` | packet/FramePin/Null completion 首切片已落地；真实 GPU fence 后置 |
 
 通用 Runtime Event Queue、AssetSystem 组合、State TaskGroup barrier、多 World/editor orchestration 与

@@ -13,7 +13,7 @@
 | G0 | 非 clean 构建可复现 | Verified | Windows 现有 build tree 可增量 configure/build；日常门禁禁止 wipe |
 | G1 | 2D 产品 | Strong | base bgfx 与 product-2d 300 帧 + 同轮完整模块测试已固化（TEST-002 / RunProduct2dGate.ps1） |
 | G2 | UI 产品 | Partial | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有产品/结构化/视觉证据；平台 accessibility adapter、跨 DPI/GPU golden 与完整控件矩阵后置 |
-| G3 | 3D 产品 | Partial | 单 product mesh 的 glTF/Prefab/Scene/Render smoke 已通过；multi-mesh 产品 E2E 未关闭 |
+| G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）与 texture bind API 已通过；Opaque3D 贴图采样 / PBR / fence pin 后置 |
 | G4 | Asset/Cooker | Strong | multi-mesh、distinct AssetId/Prefab dependency、baseColorTexture PNG/JPEG cook 与 Material dependency 已完成；PBR/multi-primitive 后置 |
 | G5 | Audio | Evidence | backend-neutral tests、miniaudio null-device 与 product-2d JSON 已有 Windows 证据 |
 | G6 | 平台矩阵 | Open | 当前 tip 的 Linux GCC/Clang/sanitizer 尚未复验 |

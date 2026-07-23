@@ -96,19 +96,18 @@ UI 不调用 bgfx。Render 不读取 UI 节点对象，只同步消费当前 sub
 | 产品面 | 已有 | 仍缺 |
 | --- | --- | --- |
 | 2D | Catalog TileMap、角色/碰撞、UI 设置、文本、Audio；可选 Box2D/FreeType/miniaudio | 更完整关卡/动画/编辑工具、跨平台产品门禁 |
-| 3D | glTF/GLB 最小 cook、baseColorTexture→Texture2D、Prefab、Scene extract、StaticMesh/Unlit、GPU upload | Cooked texture GPU 绑定/安全策略、PBR、multi-primitive merge、完整 multi-mesh 产品 E2E |
+| 3D | multi-mesh cook/upload/bind、Prefab、Scene extract、Unlit、texture bind API、URI 安全 | Opaque3D 贴图采样、PBR、multi-primitive merge、AssetHandle 终态 |
 | UI | Tree/layout/hit/route/paint/semantics、文本/Glyph、7类交互/展示控件 | Focus Scope、Modal/Capture、多行/复杂 shaping、虚拟化、accessibility adapter |
-| Runtime | 单 State 生命周期、固定步长、Platform/Input/UI/Scene/Render/Audio 接线 | 完整 State stack/commands、owning frame packet/pin、统一 shutdown deadline |
-| 性能 | 有界 PMR 路径与模块级测试/bench | ADR 0018 benchmark protocol、固定门禁机与正式 `tina_bench` |
+| Runtime | State stack/commands、四相位 policy 阻断、FramePin/Null completion、固定步长接线 | gameplay input policy、真 GPU fence、统一 shutdown deadline、多 World |
+| 性能 | `tina_bench` schema v1 + provisional 结论 | 固定门禁机 hard gate、多进程 MAD、更多 workload |
 
 ## 如何推进
 
 短期工作只从 [Backlog](backlog.md) 选取验收条件完整的任务。实现顺序遵循：
 
-1. 修复当前契约与实现不一致，包括 ADR 0017 CPU worker 默认值；
-2. 清除 Legacy 依赖和兼容残留，保持产品图不回退；
-3. 补 Linux 与产品级 multi-mesh/视觉证据；
-4. 再扩展 UI、3D/PBR、性能协议和 State/packet 能力。
+1. 补 Linux 当前 tip 证据（TEST-001）与文档/契约自洽；
+2. 关闭 UI accessibility / 跨 DPI 门禁（UI-002/UI-003）与 gameplay input policy 尾巴；
+3. 再扩展 Opaque3D 采样/PBR、真 fence completion 与 bench hard gate。
 
 任何“完成”声明都必须指出证据类型：单元测试、集成测试、sample 生命周期、结构化 JSON 或人工视觉。
 进程 exit 0 不自动证明画面正确；Cooker 单测也不自动证明产品 E2E。

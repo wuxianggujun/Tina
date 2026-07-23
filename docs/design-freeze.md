@@ -26,24 +26,23 @@
 | 测试 | 直接运行 GoogleTest，不用 CTest 调度 | [0006](adr/0006-direct-googletest.md) | Implemented |
 | 容器/Hash | 标准库/PMR，不使用 EASTL；xxHash 私有 | [0007](adr/0007-standard-containers-and-hash.md) | Implemented |
 | Render | bgfx 是首个真实 backend，保持私有 | [0008](adr/0008-bgfx-render-backend.md) | Implemented |
-| Asset | Runtime 只读 Cooked；cgltf 只在 Cooker | [0009](adr/0009-cooked-assets-and-cgltf.md) | Implemented；baseColorTexture cook + 外部 URI 安全与产品 GPU 绑定完成；PBR 后置 |
+| Asset | Runtime 只读 Cooked；cgltf 只在 Cooker | [0009](adr/0009-cooked-assets-and-cgltf.md) | Implemented；baseColorTexture cook + 外部 URI 安全 + 产品 `setMesh3DMaterialTextureBinding`；bgfx Opaque3D **采样**仍后置；PBR 后置 |
 | Physics | Box2D 与 Jolt API 分离 | [0010](adr/0010-separate-physics-backends.md) | Box2D implemented；Jolt deferred |
 | UI | Tina Retained UI 输出后端无关 DisplayList | [0011](adr/0011-retained-ui.md) | Implemented foundation/product slice |
 | Audio | miniaudio 是唯一真实 audio backend | [0012](adr/0012-miniaudio-backend.md) | Implemented optional adapter |
 | ECS | 若使用 EnTT，只能是 Scene 私有存储 | [0013](adr/0013-entt-internal-storage.md) | Not used：当前 Scene 不链接 EnTT |
-| Runtime | `IGameApplication` lifecycle + `IGameState` frame behavior | [0014](adr/0014-runtime-phase-and-state.md) | Single-state implemented；stack/commands pending |
+| Runtime | `IGameApplication` lifecycle + `IGameState` frame behavior | [0014](adr/0014-runtime-phase-and-state.md) | stack/commands + fixed/frame/render/`updateUI` 向下阻断已落地；`blocksGameplayInputBelow` 与 ActionMapper 深度抑制仍后置 |
 | Input | ordered PlatformFrame、Action domain、逐 substep 提交 | [0015](adr/0015-input-and-fixed-step.md) | Implemented foundation |
-| Asset 生命周期 | 弱 Handle、强 Lease、物理 retirement | [0016](adr/0016-asset-ownership-and-retirement.md) | CPU/Null upload/ledger implemented；FramePin/completion partial |
-| Task | 有界 CPU/IO/Main、TaskGroup、禁止 detach/强杀 | [0017](adr/0017-bounded-task-system.md) | Implemented；Desktop 交互默认 `max(1, hw-1)`，工厂 0=IO-only |
+| Asset 生命周期 | 弱 Handle、强 Lease、物理 retirement | [0016](adr/0016-asset-ownership-and-retirement.md) | CPU/Null upload/ledger + FramePin/Null completion 首切片；真 bgfx fence 后置 |
+| Task | 有界 CPU/IO/Main、TaskGroup、禁止 detach/强杀 | [0017](adr/0017-bounded-task-system.md) | Implemented；Desktop 交互默认 `max(1, hw-1)`（TASK-001 Done），工厂 0=IO-only |
+| Benchmark | 版本化 JSON、fingerprint、provisional vs hard gate | [0018](adr/0018-benchmark-protocol.md) | Accepted 首切片：`tina_bench` schema v1；固定机 hard gate / 多进程 MAD 后置 |
 | Handle | 强类型 generation + owner 边界 | [0019](adr/0019-generation-handles.md) | Implemented across current modules |
 | WindowSurface | move-only native lease 与主窗口交接 | [0020](adr/0020-window-surface-handoff.md) | Implemented |
 | Runtime UI | startup transaction + root/phase-scoped capability | [0021](adr/0021-runtime-ui-startup-capability.md) | Implemented |
 
 ## Proposed
 
-| 领域 | 候选决定 | ADR | 进入 Accepted 前必须完成 |
-| --- | --- | --- | --- |
-| Benchmark | 版本化 JSON、fingerprint、provisional vs hard gate | [0018](adr/0018-benchmark-protocol.md) | schema v1 + `tina_bench` 已落地；固定机 hard gate / 多进程 MAD 后置 |
+当前无 Proposed ADR。固定机 hard-gate / 多进程 MAD 等实现尾巴记在 [Backlog](backlog.md)（PERF-001 扩展），不单独占 Proposed 行。
 
 ## Deferred
 
@@ -62,6 +61,8 @@
 | --- | --- | --- |
 | UI 平台证据 | ProgressBar/RadioButton 的 API、单测、product-2d 结构化输出与 Windows client-area 视觉证据已完成 | 后续只扩展 UIA/AT-SPI 与跨 DPI/GPU 门禁；见 UI-002、UI-003 |
 | Linux 状态 | 历史 Linux 门禁早于当前 tip | 复验前不得扩写为当前平台支持证据；见 TEST-001 |
+| ADR 0014 gameplay input | `blocksGameplayInputBelow` 字段可写，EngineHost/ActionMapper **未读** | 接 suppression 或文档/公开契约标明 Deferred；见 gameplay.md RUNTIME-001 |
+| Opaque3D baseColor 采样 | 产品可 `setMesh3DMaterialTextureBinding`，submit 不采样 | RENDER-001 / bgfx Opaque3D sampler 切片 |
 
 ## 不变量
 

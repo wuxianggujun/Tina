@@ -87,7 +87,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 | `tina_sample_2d` | Catalog TileMap、Gameplay、UI、Audio；feature 图含 Physics/FreeType/miniaudio | Linux、跨 GPU golden、完整编辑器/UI 工具包 |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
-| `tina_sample_3d` | 单 product mesh 的 glTF/Prefab/Scene/bgfx 生命周期 | 完整 multi-mesh E2E、Cooked texture GPU 绑定、PBR |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；material texture **bind API** | Opaque3D 贴图采样画面、PBR、Handle/Lease→fence pin |
 
 `tina_sample_2d_tilemap_bgfx` 是 `tina_sample_2d` 的兼容 ALIAS；新脚本使用正式 target 名。
 
@@ -103,8 +103,9 @@ out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalog
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catalog=<catalogRoot>
 ```
 
-multi-mesh glTF Cooker 的库级测试已完成：distinct mesh/material AssetId 与 Prefab dependency 可验证。
-产品 sample 仍是单 product mesh binding，3D-001 完成前不可把上述单测写成产品 multi-mesh 通过。
+multi-mesh glTF Cooker 的库级测试与 `tina_sample_3d` 双 mesh 产品 E2E（3D-001）均已完成：distinct
+mesh/material AssetId、Prefab dependency 与 product meshKey 1/2 binding 可验证。Opaque3D baseColor
+贴图 **采样** 与 PBR 仍后置，不得把 material texture bind API 写成“画面已贴图”。
 
 ## UI 与视觉
 

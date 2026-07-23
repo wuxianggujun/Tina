@@ -39,8 +39,11 @@ public:
 };
 ```
 
-默认逐帧实现返回 success。当前 Runtime 只保存一个 committed State；`initialPolicy()` 已采样，但
-`blocks*Below` 尚无“下层 State”可调度，不能据此宣称 stack 已完成。
+默认逐帧实现返回 success。Runtime 持有私有 `GameStateStack`（定容 8）：enter 成功后采样
+`initialPolicy()`，帧内可 `requestPush` / `requestPop` / `requestReplace` / `requestPolicyChange`。
+四相位 `blocksFixedUpdateBelow` / `blocksFrameUpdateBelow` / `blocksRenderBelow` /
+`blocksUIInputBelow`（控制下层 `updateUI` 是否调用）已调度；`blocksGameplayInputBelow` 字段已存在
+但 **尚未** 接入 ActionMapper（见文末 RUNTIME-001）。
 
 ## 生命周期
 
@@ -49,10 +52,9 @@ EngineHost::run
   -> IGameApplication::createInitialState
   -> bind primary UIContext, or Headless unavailable
   -> IGameState::onEnter
-  -> commit startup UI snapshot and the single State
-  -> frame loop
-  -> IGameState::onExit
-  -> IGameApplication::onShutdown
+  -> sample initialPolicy + commit startup UI snapshot + push stack
+  -> frame loop (top-down phase dispatch; Transition Commit after Frame Update)
+  -> exit each committed State (onExit) then IGameApplication::onShutdown
   -> module shutdown
 ```
 
@@ -85,12 +87,14 @@ borrow，禁止存入成员。
 - backend-neutral `AudioEngine`；
 - 启用 FreeType 且找到字体 fixture 时创建带 rasterizer 的 UIContext。
 
-Desktop 并非 DisabledTaskSystem。其 CPU worker 默认值仍为0，与 ADR 0017 的交互默认约定冲突，见
-`TASK-001`。AssetSystem/Physics2D/miniaudio device 由产品或 feature 图进一步组合。
+Desktop 并非 DisabledTaskSystem。交互路径经 `resolveDesktopTaskSystemParams` 默认
+`max(1, hardwareConcurrency-1)` CPU worker（TASK-001 Done）；直接工厂 `cpuWorkerCount=0` 仍为
+IO-only / NotSupported。AssetSystem/Physics2D/miniaudio device 由产品或 feature 图进一步组合。
 
 ## Fixed 与 Frame domain
 
-输入在进入 State 前已经完成 Platform normalize、UI route/consume/claim 与 Action Mapping：
+输入在 **State 栈调度之前** 已经完成 Platform normalize、UI route/consume/claim 与 Action Mapping
+（因此 `blocksUIInputBelow` 不能回改当帧已产生的 route；它只阻断下层 `updateUI`）：
 
 - `FixedUpdateContext::simulationActions()` 只读目标 simulation tick 的 action；
 - `FrameUpdateContext::frameActions()` 只读当前 render frame 的 action；
@@ -123,18 +127,19 @@ save/load orchestration 尚未完成。
 
 ## `RUNTIME-001` 状态
 
-已落地（见 `GameStateStackTests` / `GameStateStackIntegrationTests`）：
+已落地（见 `GameStateStackTests` / `GameStateStackIntegrationTests`，以及
+`tina_sample_2d` 自动 pause overlay 产品证据）：
 
 - push/pop/replace 只在 `updateFrame` 后、`extractRenderScene` 前唯一 commit；
 - enter 失败丢弃 candidate 且不调用 `onExit`，栈保持；
-- `blocksFixedUpdateBelow` / `blocksFrameUpdateBelow` / `blocksRenderBelow` / `blocksUIInputBelow`
-  自顶向下阻断；
+- `blocksFixedUpdateBelow` / `blocksFrameUpdateBelow` / `blocksRenderBelow` /
+  `blocksUIInputBelow`（下层 `updateUI`）自顶向下阻断；
 - structural command 仅栈顶可排队；pop 空栈 → `GameStateStackBecameEmpty`。
 
 仍后置：
 
-- 交互式菜单/暂停（按键切换）；当前 `tina_sample_2d` 仅自动收尾 push/pop 证据；
+- 交互式菜单/暂停（按键切换）；当前 `tina_sample_2d` 为自动收尾 push/pop 证据（≥60 帧 smoke）；
 - State UI root / listener / TaskGroup / AssetLease 在 transition 后的完整 stale-owner 矩阵；
-- gameplay input policy 与 ActionMapper 的 deeper suppression（字段 `blocksGameplayInputBelow` 已存在）。
+- `blocksGameplayInputBelow` → ActionMapper / fixed 输入深度抑制（字段可写，EngineHost **未读**）。
 
 帧阶段详见 [Runtime](runtime.md)，任务状态见 [Backlog](backlog.md)。
