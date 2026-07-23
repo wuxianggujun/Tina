@@ -1,4 +1,3 @@
-// Single MINIAUDIO_IMPLEMENTATION for the vNext-only audio adapter graph
-// (TINA_BUILD_LEGACY=OFF). When Legacy is ON, link Tina::Miniaudio instead.
+// Single MINIAUDIO_IMPLEMENTATION TU for the private Tina::AudioMiniaudio adapter.
 #define MINIAUDIO_IMPLEMENTATION
 #include <miniaudio.h>

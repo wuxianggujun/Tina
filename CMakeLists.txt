@@ -191,12 +191,13 @@ if (TINA_AUTOUPDATE_SUBMODULE)
     include(UpdateSubmodules)
 endif ()
 
-# Legacy product resource tree copy retired with TINA_BUILD_LEGACY. vNext samples stage
-# cooked assets themselves; do not scan/copy source resources/ into vNext-only graphs.
+# TINA_BUILD_LEGACY is a permanent reject switch; the product graph is gone.
+# vNext samples stage cooked assets themselves; do not scan/copy source resources/.
 if(TINA_BUILD_LEGACY)
     message(FATAL_ERROR
-        "TINA_BUILD_LEGACY is retired. The Legacy Tina.exe / old UI / old Scene product graph "
-        "was removed; build vNext presets (windows-msvc-vnext*) only.")
+        "TINA_BUILD_LEGACY is retired and must stay OFF. "
+        "Build vNext presets only (windows-msvc-vnext* / linux-*). "
+        "There is no Legacy Tina.exe, old UI product graph, or recoverable Legacy dependency set.")
 endif()
 
 if(TINA_ENABLE_SANITIZERS)

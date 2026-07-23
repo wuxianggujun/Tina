@@ -51,23 +51,6 @@
         }
       ]
     },
-    "legacy": {
-      "description": "Dependencies used only by the existing Tina runtime during vNext migration.",
-      "dependencies": [
-        "box2d",
-        "entt",
-        {
-          "name": "freetype",
-          "default-features": false
-        },
-        "glfw3",
-        "glm",
-        "miniaudio",
-        "spdlog",
-        "utfcpp"
-      ]
-    },
-
     "tests": {
       "description": "Build Tina GoogleTest executables without registering CTest.",
       "dependencies": [

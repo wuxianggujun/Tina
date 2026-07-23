@@ -49,10 +49,8 @@ add_library(tina_core STATIC
     base/ScopeExit.hpp
     base/SourceLocation.hpp
     base/Types.hpp
-    time/Clock.cpp
-    time/Clock.hpp
     time/FixedStepAccumulator.cpp
-    time/FrameTimer.hpp
+    time/MonotonicClock.cpp
 )
 add_library(Tina::Core ALIAS tina_core)
 
