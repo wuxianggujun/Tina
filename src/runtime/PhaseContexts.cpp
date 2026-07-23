@@ -218,6 +218,16 @@ Core::Result<PrimaryWindowUITreeUpdater> UIUpdateContext::primaryWindowUITreeUpd
     return m_primaryWindowUI->treeUpdater(m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate, rootOwner);
 }
 
+Core::Result<UI::UICommittedSemanticsView> UIUpdateContext::committedSemantics() const
+{
+    if (m_primaryWindowUI == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::PrimaryWindowUIUnavailable,
+                             "The active Runtime phase has no primary-window UI");
+    }
+    return m_primaryWindowUI->committedSemantics(m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
+}
+
 GameStateExitContext::GameStateExitContext(RunStopCause stopCause, const Core::Error* runtimeFailure) noexcept
     : m_stopCause(stopCause), m_runtimeFailure(runtimeFailure)
 {

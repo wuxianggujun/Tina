@@ -106,8 +106,10 @@ committed text。多行、grapheme、BiDi/shaping、候选窗定位见 `TEXT-001
 
 `UIAccessibilityTree` / `IUIAccessibilityProvider` / `UIAccessibilityProbeProvider`（UI-002 首切片）
 从 `committedSemantics()` 构建可查询的无障碍节点表（role/name/state/range/value），供后续 Windows
-UIA 与 Linux AT-SPI adapter 消费。Probe 可验证 stale node 拒绝；**真实 screen reader / UIA 进程
-桥接仍未实现**，不得把 probe 单测写成真机 a11y 通过。
+UIA 与 Linux AT-SPI adapter 消费。`UIUpdateContext::committedSemantics()` 与
+`PrimaryWindowUICapabilityState::committedSemantics` 暴露同一快照；`tina_sample_2d` 每帧
+`updateUI` 经 probe 发布并输出 `accessibility*` JSON 证据。Probe 可验证 stale node 拒绝；
+**真实 screen reader / UIA 进程桥接仍未实现**，不得把 probe/sample 字段写成真机 a11y 通过。
 
 ## Render 边界
 

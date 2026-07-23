@@ -32,6 +32,10 @@ class PrimaryWindowUICapabilityState final {
     void abortPhase(u64 epoch, PrimaryWindowUIPhase phase) noexcept;
 
     [[nodiscard]] bool hasPrimaryWindowUI(u64 epoch, PrimaryWindowUIPhase phase) const noexcept;
+    // Last committed semantics (after startup/frame commitLayout). Owner-thread, phase-scoped.
+    // For accessibility adapters / product evidence; not a platform UIA bridge.
+    [[nodiscard]] Core::Result<UI::UICommittedSemanticsView> committedSemantics(u64 epoch,
+                                                                                PrimaryWindowUIPhase phase);
     [[nodiscard]] Core::Result<PrimaryWindowUIRootBuilder> rootBuilder(u64 epoch);
     [[nodiscard]] Core::Result<PrimaryWindowUITreeUpdater> treeUpdater(u64 epoch, PrimaryWindowUIPhase phase,
                                                                        UI::UIRootOwner& rootOwner);

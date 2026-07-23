@@ -105,6 +105,17 @@ bool PrimaryWindowUICapabilityState::hasPrimaryWindowUI(u64 epoch, PrimaryWindow
            phase != PrimaryWindowUIPhase::None && phase == phase_ && context_ != nullptr;
 }
 
+Core::Result<UI::UICommittedSemanticsView> PrimaryWindowUICapabilityState::committedSemantics(
+    u64 epoch, PrimaryWindowUIPhase phase)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUICapabilityState::committedSemantics";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return context_->committedSemantics();
+}
+
 Core::Status PrimaryWindowUICapabilityState::validate(u64 epoch, PrimaryWindowUIPhase phase, bool requireContext,
                                                       std::string_view operation)
 {

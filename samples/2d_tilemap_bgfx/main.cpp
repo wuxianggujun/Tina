@@ -44,6 +44,7 @@
 #include <tina/audio/miniaudio/MiniaudioDevice.hpp>
 #endif
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
+#include <tina/ui/UIAccessibility.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPaint.hpp>
@@ -285,6 +286,17 @@ struct LifecycleCounters final {
     u64 pauseOverlayPops = 0;
     u64 pauseOverlayFrames = 0;
     bool pauseOverlayPushQueued = false;
+    // UI-002-SPI product evidence: accessibility tree from committedSemantics.
+    u64 accessibilityPublishCount = 0;
+    u64 accessibilityNodeCount = 0;
+    u64 accessibilitySemanticsRevision = 0;
+    bool accessibilityHasButton = false;
+    bool accessibilityHasCheckbox = false;
+    bool accessibilityHasSlider = false;
+    bool accessibilityHasProgressBar = false;
+    bool accessibilityHasRadio = false;
+    bool accessibilityHasTextEdit = false;
+    bool accessibilityPublished = false;
 };
 
 inline constexpr u32 ExpectedUIPanelCount = 3;
@@ -1651,6 +1663,8 @@ class TileMapBgfxState final : public Tina::IGameState {
             uiRoot_.reset();
             ++counters_->uiRootsReleased;
         }
+        accessibilityProbe_.clear();
+        accessibilityTree_ = Tina::UI::UIAccessibilityTree{};
         if (auto* device = capture_->get(); device != nullptr && resources_->gpuTexture)
         {
             (void)device->setSprite2DTextureBinding(ProductSpriteKey, {});
@@ -2190,12 +2204,54 @@ class TileMapBgfxState final : public Tina::IGameState {
         return Tina::Core::success();
     }
 
+    Tina::Core::Status updateUI(Tina::UIUpdateContext& context) override
+    {
+        if (!context.hasPrimaryWindowUI() || !uiRoot_)
+        {
+            return Tina::Core::success();
+        }
+        // Publish accessibility snapshot from the last committed layout (startup/previous frame).
+        // Real UIA/AT-SPI adapters would poll this same SPI; probe is product smoke only.
+        auto semantics = context.committedSemantics();
+        if (!semantics)
+        {
+            return Tina::Core::failure(std::move(semantics.error()));
+        }
+        if (auto status = accessibilityTree_.rebuildFrom(*semantics); !status)
+        {
+            return status;
+        }
+        if (auto status = accessibilityProbe_.publish(accessibilityTree_); !status)
+        {
+            return status;
+        }
+        ++counters_->accessibilityPublishCount;
+        counters_->accessibilityNodeCount = accessibilityTree_.size();
+        counters_->accessibilitySemanticsRevision = accessibilityTree_.semanticsRevision();
+        counters_->accessibilityPublished = accessibilityProbe_.hasPublishedTree();
+        counters_->accessibilityHasButton =
+            accessibilityTree_.findByRole(Tina::UI::UISemanticsRole::Button) != nullptr;
+        counters_->accessibilityHasCheckbox =
+            accessibilityTree_.findByRole(Tina::UI::UISemanticsRole::Checkbox) != nullptr;
+        counters_->accessibilityHasSlider =
+            accessibilityTree_.findByRole(Tina::UI::UISemanticsRole::Slider) != nullptr;
+        counters_->accessibilityHasProgressBar =
+            accessibilityTree_.findByRole(Tina::UI::UISemanticsRole::ProgressBar) != nullptr;
+        counters_->accessibilityHasRadio =
+            accessibilityTree_.findByRole(Tina::UI::UISemanticsRole::RadioButton) != nullptr;
+        counters_->accessibilityHasTextEdit =
+            accessibilityTree_.findByRole(Tina::UI::UISemanticsRole::TextEdit) != nullptr;
+        return Tina::Core::success();
+    }
+
   private:
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
     TileMapResources* resources_ = nullptr;
     DeviceCapture* capture_ = nullptr;
     Tina::UI::UIRootOwner uiRoot_{};
+    Tina::UI::UIAccessibilityTree accessibilityTree_{};
+    Tina::UI::UIAccessibilityProbeProvider accessibilityProbe_{};
     // Applied on next updateFrame when audioEngine is available (phase-local).
     float pendingMasterVolume_ = 1.0F;
     float pendingMusicVolume_ = 1.0F;
@@ -2590,7 +2646,12 @@ int main(int argc, char** argv)
               counters.uiRadioButtonsCreated == ExpectedUIRadioButtonCount &&
               counters.uiRadioButtonActionsWired == ExpectedUIRadioButtonCount &&
               counters.uiRadioSelectionVerified &&
-              counters.uiRootsReleased == 1 && *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
+              counters.uiRootsReleased == 1 && counters.accessibilityPublished &&
+              counters.accessibilityPublishCount >= 1 && counters.accessibilityNodeCount >= 6 &&
+              counters.accessibilityHasButton && counters.accessibilityHasCheckbox &&
+              counters.accessibilityHasSlider && counters.accessibilityHasProgressBar &&
+              counters.accessibilityHasRadio && counters.accessibilityHasTextEdit &&
+              *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     ok = ok && counters.physicsReady && counters.physicsStaticBodies == ExpectedPhysicsStaticBodies &&
          counters.physicsSteps == counters.frameUpdates && counters.physicsDynamicContacts > 0 &&
@@ -2722,6 +2783,8 @@ int main(int argc, char** argv)
                    << ",\"pauseOverlayPushes\":" << counters.pauseOverlayPushes
                    << ",\"pauseOverlayPops\":" << counters.pauseOverlayPops
                    << ",\"pauseOverlayFrames\":" << counters.pauseOverlayFrames
+                   << ",\"accessibilityPublished\":" << (counters.accessibilityPublished ? "true" : "false")
+                   << ",\"accessibilityNodeCount\":" << counters.accessibilityNodeCount
                    << ",\"audioEnginePresent\":" << (counters.audioEnginePresent ? "true" : "false")
                    << ",\"audioOneShotQueued\":" << (counters.audioOneShotQueued ? "true" : "false")
                    << ",\"audioStartedObserved\":" << (counters.audioStartedObserved ? "true" : "false")
@@ -2902,6 +2965,16 @@ int main(int argc, char** argv)
               << ",\"pauseOverlayPushes\":" << counters.pauseOverlayPushes
               << ",\"pauseOverlayPops\":" << counters.pauseOverlayPops
               << ",\"pauseOverlayFrames\":" << counters.pauseOverlayFrames
+              << ",\"accessibilityPublished\":" << (counters.accessibilityPublished ? "true" : "false")
+              << ",\"accessibilityPublishCount\":" << counters.accessibilityPublishCount
+              << ",\"accessibilityNodeCount\":" << counters.accessibilityNodeCount
+              << ",\"accessibilitySemanticsRevision\":" << counters.accessibilitySemanticsRevision
+              << ",\"accessibilityHasButton\":" << (counters.accessibilityHasButton ? "true" : "false")
+              << ",\"accessibilityHasCheckbox\":" << (counters.accessibilityHasCheckbox ? "true" : "false")
+              << ",\"accessibilityHasSlider\":" << (counters.accessibilityHasSlider ? "true" : "false")
+              << ",\"accessibilityHasProgressBar\":" << (counters.accessibilityHasProgressBar ? "true" : "false")
+              << ",\"accessibilityHasRadio\":" << (counters.accessibilityHasRadio ? "true" : "false")
+              << ",\"accessibilityHasTextEdit\":" << (counters.accessibilityHasTextEdit ? "true" : "false")
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
               << ",\"evidenceSchema\":4"
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""

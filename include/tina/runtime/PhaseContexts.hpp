@@ -162,6 +162,9 @@ class UIUpdateContext final {
     // is bound to rootOwner and expires unconditionally when updateUI returns.
     [[nodiscard]] bool hasPrimaryWindowUI() const noexcept;
     [[nodiscard]] Core::Result<PrimaryWindowUITreeUpdater> primaryWindowUITreeUpdater(UI::UIRootOwner& rootOwner);
+    // Last committed semantics for accessibility rebuild (owner-thread, phase-scoped).
+    // Reflects the most recent commitLayout (startup or previous frame), not in-progress edits.
+    [[nodiscard]] Core::Result<UI::UICommittedSemanticsView> committedSemantics() const;
 
   private:
     UIUpdateContext(const FrameTiming& frameTiming, Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI,

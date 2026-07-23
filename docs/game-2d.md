@@ -117,6 +117,10 @@ Windows 视觉与同轮完整模块测试证据见 [M12 Windows 证据](m12-evid
 仍 extract 下层世界），约 3 帧后 `requestPop`，JSON 输出 `pauseOverlayPushes/Pops/Frames`
 （RUNTIME-001 产品证据）。短 smoke（如 30 帧）不推 overlay。
 
+`updateUI` 每帧从 `UIUpdateContext::committedSemantics()` 重建 `UIAccessibilityTree` 并经
+`UIAccessibilityProbeProvider` 发布；JSON 输出 `accessibilityPublished`、`accessibilityNodeCount`、
+各 role 命中标志（UI-002-SPI 产品证据，**非**真机 UIA/AT-SPI）。
+
 ## 当前限制
 
 - 无无限地图 streaming、通用 Tile 编辑器、Sprite skeletal animation、2D lighting 或网络 rollback；

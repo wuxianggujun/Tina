@@ -31,7 +31,7 @@
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
 
-| UI-002 | Planned | P1 | Windows UIA / Linux AT-SPI 真机 adapter | UI-002-SPI | 真实辅助技术可读 Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit；生命周期无 stale | Integration + Platform |
+
 | UI-003 | Planned | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | 100/150/200% DPI、字体 fingerprint 与区域阈值可复现；初始化白帧不计入 stable capture | Visual + Platform |
 
 
@@ -76,6 +76,6 @@
 | PERF-001 | ADR 0018 Accepted；`tools/bench` → `tina_bench` schema v1；workload `null_runtime_frames`；JSON fingerprint/checksum/p50/p95/p99；共享机 `conclusion=provisional`；固定 hard-gate 机与多进程 MAD 后置 | [performance-memory](performance-memory.md) · ADR 0018 |
 | RUNTIME-001-INT | Null Host 集成：base `requestPush` overlay（block fixed/frame below）→ overlay `requestPop` → base 恢复；enter 失败无 `onExit`；`GameStateStackIntegrationTests` | [gameplay](gameplay.md) · ADR 0014 |
 | RUNTIME-001-SAMPLE | `tina_sample_2d` 收尾自动 pause overlay（≥60 帧）：push/pop + policy block；JSON `pauseOverlay*`；短 smoke 跳过 | [2D](game-2d.md) · ADR 0014 |
-| UI-002-SPI | `UIAccessibilityTree`/`IUIAccessibilityProvider`/`UIAccessibilityProbeProvider`：从 committedSemantics 发布 role/name/state/range；stale node 拒绝；`UIAccessibilityTests` | [UI](ui.md) |
+| UI-002-SPI | `UIAccessibilityTree`/`IUIAccessibilityProvider`/`UIAccessibilityProbeProvider`：从 committedSemantics 发布 role/name/state/range；stale node 拒绝；`UIAccessibilityTests`；`tina_sample_2d` 产品 JSON `accessibility*` | [UI](ui.md) · [2D](game-2d.md) |
 | RUNTIME-001-INPUT | `blocksGameplayInputBelow`：下层 fixed/frame 使用空 action snapshot；`gameplayInputBlockedForDepth` + unit tests | [gameplay](gameplay.md) · ADR 0014 |
 | RENDER-3D-TEX | Opaque3D unlit 采样 materialKey 绑定贴图（shader `s_texColor` + default white）；关闭「bind 不 draw」假完成 | [3D](game-3d.md) |
