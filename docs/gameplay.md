@@ -133,7 +133,7 @@ save/load orchestration 尚未完成。
 
 仍后置：
 
-- 产品 sample 真菜单/暂停层演示；
+- 交互式菜单/暂停（按键切换）；当前 `tina_sample_2d` 仅自动收尾 push/pop 证据；
 - State UI root / listener / TaskGroup / AssetLease 在 transition 后的完整 stale-owner 矩阵；
 - gameplay input policy 与 ActionMapper 的 deeper suppression（字段 `blocksGameplayInputBelow` 已存在）。
 

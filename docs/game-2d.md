@@ -113,6 +113,10 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 Windows 视觉与同轮完整模块测试证据见 [M12 Windows 证据](m12-evidence-windows.md)。可复现脚本：
 `tools/windows/RunProduct2dGate.ps1`（TEST-002）。测试数量不是永久基线。
 
+`--frames>=60` 时产品 State 会在收尾前 `requestPush` 一层暂停 overlay（block fixed/frame/UI below，
+仍 extract 下层世界），约 3 帧后 `requestPop`，JSON 输出 `pauseOverlayPushes/Pops/Frames`
+（RUNTIME-001 产品证据）。短 smoke（如 30 帧）不推 overlay。
+
 ## 当前限制
 
 - 无无限地图 streaming、通用 Tile 编辑器、Sprite skeletal animation、2D lighting 或网络 rollback；

@@ -280,6 +280,11 @@ struct LifecycleCounters final {
     float lastDynamicY = 0.0f;
     bool physicsReady = false;
 #endif
+    // RUNTIME-001 product evidence: pause overlay push/pop + policy blocks below.
+    u64 pauseOverlayPushes = 0;
+    u64 pauseOverlayPops = 0;
+    u64 pauseOverlayFrames = 0;
+    bool pauseOverlayPushQueued = false;
 };
 
 inline constexpr u32 ExpectedUIPanelCount = 3;
@@ -915,6 +920,54 @@ struct TileMapResources final {
     }
     return Tina::Core::success();
 }
+
+// Pause-style overlay: freezes base fixed/frame/render/UI while itself runs a few frames then pops.
+// Product evidence for RUNTIME-001 stack + policy blocksBelow (does not own the product UI root).
+class PauseOverlayState final : public Tina::IGameState {
+  public:
+    explicit PauseOverlayState(LifecycleCounters& counters) noexcept : counters_(&counters) {}
+
+    Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
+    {
+        ++counters_->pauseOverlayPushes;
+        return Tina::Core::success();
+    }
+
+    void onExit(Tina::GameStateExitContext&) noexcept override
+    {
+        ++counters_->pauseOverlayPops;
+    }
+
+    [[nodiscard]] Tina::GameStatePolicy initialPolicy() const noexcept override
+    {
+        // Freeze sim/frame/UI below; keep base extract so the frozen world still draws and
+        // product counters (renderExtractions vs frameUpdates) stay coherent.
+        return Tina::GameStatePolicy{
+            .blocksGameplayInputBelow = true,
+            .blocksUIInputBelow = true,
+            .blocksFixedUpdateBelow = true,
+            .blocksFrameUpdateBelow = true,
+            .blocksRenderBelow = false,
+        };
+    }
+
+    Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
+    {
+        ++counters_->pauseOverlayFrames;
+        // Keep overlay short so product smoke still finishes walk/physics evidence on base.
+        if (counters_->pauseOverlayFrames >= 3U)
+        {
+            if (auto status = context.requestPop(); !status)
+            {
+                return status;
+            }
+        }
+        return Tina::Core::success();
+    }
+
+  private:
+    LifecycleCounters* counters_ = nullptr;
+};
 
 class TileMapBgfxState final : public Tina::IGameState {
   public:
@@ -1928,6 +1981,20 @@ class TileMapBgfxState final : public Tina::IGameState {
                 productUiVisibilityStartedAt_ + std::chrono::milliseconds{targetElapsedMilliseconds});
         }
 #endif
+        // Late-run pause overlay (RUNTIME-001 product evidence). Requires long enough smoke so
+        // walk/physics still complete on base before the push. Short --frames=30 skips this.
+        constexpr u64 kMinFramesForPauseDemo = 60;
+        if (options_.targetFrameCount >= kMinFramesForPauseDemo && !counters_->pauseOverlayPushQueued
+            && counters_->pauseOverlayPushes == 0
+            && counters_->frameUpdates + 12U == options_.targetFrameCount)
+        {
+            if (auto status = context.requestPush(std::make_unique<PauseOverlayState>(*counters_)); !status)
+            {
+                return status;
+            }
+            counters_->pauseOverlayPushQueued = true;
+        }
+
         if (counters_->frameUpdates >= options_.targetFrameCount)
         {
             // Request pixel capture on this frame's upcoming present (M11-D1).
@@ -2506,7 +2573,7 @@ int main(int argc, char** argv)
               counters.lastTileSprites == ExpectedNonEmptyTiles && counters.lastTotalSprites == expectedTotalSprites &&
               counters.controllerGroundedFrames > 0 && counters.controllerWalkFrames > 0 &&
               counters.controllerHitRightFrames > 0 && counters.maxControllerX > 1.5f &&
-              counters.renderExtractions == counters.frameUpdates && counters.stateExits == 1 &&
+              counters.renderExtractions >= counters.frameUpdates &&
               counters.applicationShutdowns == 1 && counters.uiRootsCreated == 1 &&
               counters.uiPanelsCreated == ExpectedUIPanelCount &&
               counters.uiTextLabelsCreated == ExpectedUITextLabelCount &&
@@ -2532,6 +2599,14 @@ int main(int argc, char** argv)
     // M11-D1: require a successful primary-frame RGBA8 capture when the device supports it.
     ok = ok && counters.pixelCaptureAttempted && counters.pixelCaptureOk && !counters.pixelFingerprint.empty() &&
          counters.pixelCaptureWidth > 0 && counters.pixelCaptureHeight > 0 && counters.pixelCaptureBytes > 0;
+    // RUNTIME-001 pause overlay: long smokes (>=60 frames) must push/pop once; short smokes skip.
+    // stateExits counts only TileMapBgfxState exits (still 1); overlay uses pauseOverlayPops.
+    if (options->targetFrameCount >= 60)
+    {
+        ok = ok && counters.pauseOverlayPushes == 1 && counters.pauseOverlayPops == 1
+             && counters.pauseOverlayFrames == 3;
+    }
+    ok = ok && counters.stateExits == 1;
     // M11-D2: optional golden pixel fingerprint comparison (exact match, machine-local).
     const bool pixelGoldenChecked = !options->expectPixelFingerprint.empty();
     const bool pixelGoldenMatched =
@@ -2643,10 +2718,13 @@ int main(int argc, char** argv)
                   << ",\"lastChunkDirtyRebuilds\":" << counters.lastChunkDirtyRebuilds
                   << ",\"lastChunkDirtyHits\":" << counters.lastChunkDirtyCacheHits
                   << ",\"cameraProjectionResolves\":" << counters.cameraProjectionResolves
-                  << ",\"renderExtractions\":" << counters.renderExtractions
-                  << ",\"audioEnginePresent\":" << (counters.audioEnginePresent ? "true" : "false")
-                  << ",\"audioOneShotQueued\":" << (counters.audioOneShotQueued ? "true" : "false")
-                  << ",\"audioStartedObserved\":" << (counters.audioStartedObserved ? "true" : "false")
+                   << ",\"renderExtractions\":" << counters.renderExtractions
+                   << ",\"pauseOverlayPushes\":" << counters.pauseOverlayPushes
+                   << ",\"pauseOverlayPops\":" << counters.pauseOverlayPops
+                   << ",\"pauseOverlayFrames\":" << counters.pauseOverlayFrames
+                   << ",\"audioEnginePresent\":" << (counters.audioEnginePresent ? "true" : "false")
+                   << ",\"audioOneShotQueued\":" << (counters.audioOneShotQueued ? "true" : "false")
+                   << ",\"audioStartedObserved\":" << (counters.audioStartedObserved ? "true" : "false")
                   << ",\"audioStartedCount\":" << counters.audioStartedCount
                   << ",\"audioFromCatalogLease\":" << (counters.audioFromCatalogLease ? "true" : "false")
                   << ",\"audioClipFrameCount\":" << counters.audioClipFrameCount
@@ -2821,6 +2899,9 @@ int main(int argc, char** argv)
               << ",\"productGate\":\"bgfx\""
 #endif
               << ",\"stateExits\":" << counters.stateExits
+              << ",\"pauseOverlayPushes\":" << counters.pauseOverlayPushes
+              << ",\"pauseOverlayPops\":" << counters.pauseOverlayPops
+              << ",\"pauseOverlayFrames\":" << counters.pauseOverlayFrames
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
               << ",\"evidenceSchema\":4"
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
