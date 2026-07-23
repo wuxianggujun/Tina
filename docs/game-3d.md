@@ -6,8 +6,9 @@ pass 绘制，并叠加 retained UI。它证明 multi-mesh product 的端到端�
 
 Cooker 与产品 sample 均支持一个 glTF 中两个 mesh：distinct Mesh/Material AssetId、独立 meshKey
 binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。外部 URI 安全与产品侧
-`setMesh3DMaterialTextureBinding` 已完成（ASSET-001 Done）；bgfx Opaque3D **采样** baseColor
-贴图仍后置。PBR 见 `RENDER-001`。
+`setMesh3DMaterialTextureBinding` 已完成（ASSET-001）；bgfx Opaque3D unlit 在 submit 时按
+materialKey **采样** baseColor（`s_texColor` × instance factor；未 bind 用 1×1 白贴图）。
+PBR 见 `RENDER-001`。
 
 ## 当前模块边界
 
@@ -40,7 +41,7 @@ source glTF/GLB
 | Cooked 数据 | StaticMesh v1 使用 P3N3UV2、UInt16 index、bounds/submesh；Material v1 为 Opaque `UnlitBaseColor`；Prefab v1 保存稳定 node id、父索引、local transform 与 Mesh/Material AssetId |
 | Scene | `PerspectiveCamera3D`、`MeshRenderer3D`、Transform hierarchy、Prefab 实例化与失败回滚 |
 | Extraction | 唯一 active perspective camera、surface aspect resolve、world bounds、frustum culling、稳定排序与相邻实例 batch |
-| bgfx | color/depth clear、Perspective view、depth write/less、back-face culling、instance buffer、内置 Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、solid Unlit shader；`setMesh3DMaterialTextureBinding` 写入 material→texture 表，Opaque3D submit **尚未** `setTexture` 采样 |
+| bgfx | color/depth clear、Perspective view、depth write/less、back-face culling、instance buffer、内置 Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、Unlit shader **采样** materialKey 绑定贴图（`s_texColor`；默认 1×1 白） |
 
 世界坐标为右手、Y-up、局部 `-Z` forward、单位米。Camera 公共字段使用 degree，并要求
 `0 < near < far`、有限数值和有效 normalized viewport；aspect 每帧从 primary surface 解析，不写回
@@ -77,7 +78,7 @@ submission 的完整 pin（真 fence 见 RUNTIME-002 尾巴）。
 | --- | --- | --- |
 | `tina_sample_3d_extraction` | Headless/Null Camera、culling、sort、batch、300帧退出 | GPU 画面与 Cooked Asset |
 | `tina_sample_3d_infrastructure` | procedural Cube、真实 bgfx depth/instance/UI frame | 产品 glTF/Catalog mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；texture upload + material key binding API | Opaque3D 贴图采样画面、PBR、Handle/Lease→fence pin |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；texture upload + material key bind + Opaque3D 采样 | PBR、Handle/Lease→fence pin |
 
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
 `cookedPrefab`、`meshUploaded`、`meshBound`、`materialTextureBound`（或等价字段）、`prefabInstantiated`、
@@ -90,8 +91,8 @@ submission 的完整 pin（真 fence 见 RUNTIME-002 尾巴）。
   skin、animation、sparse accessor 或非三角 primitive；不支持项返回结构化错误；
 - Material 产品路径只有 solid Opaque Unlit；无 PBR、Light、Shadow、transparent pass 或 post-processing；
 - glTF Cooker 把相对文件或 bufferView 的 baseColorTexture 发布为 Texture2D dependency；外部相对 URI
-  强制 root containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；`tina_sample_3d` 已 upload 并
-  `setMesh3DMaterialTextureBinding`，但 bgfx Opaque3D submit 注释标明 texture sampling deferred；
+  强制 root containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；`tina_sample_3d` 已 upload、
+  `setMesh3DMaterialTextureBinding`，且 Opaque3D unlit submit **采样** material 贴图；
 - Scene/Render 仍使用 mesh/material **key**（`fixtureMeshKey` 命名保留），不是 Scene 上直接存
   `AssetHandle`，也不是 extract 输出 owning `FrameResourceRef`；
 - EngineHost 已有 `RenderFramePacket` + FramePin + Null completion 首切片；真 bgfx fence 后置；

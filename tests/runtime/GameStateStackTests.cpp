@@ -2,6 +2,7 @@
 
 #include <tina/runtime/GameState.hpp>
 #include <tina/runtime/GameStateCommands.hpp>
+#include <tina/runtime/InputActions.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 
 #include <memory>
@@ -102,6 +103,34 @@ TEST(GameStatePolicyDispatchTest, BlocksBelowStopsPropagation)
                                   GameStateDispatchPhase::RenderExtract));
     EXPECT_TRUE(policyBlocksBelow(GameStatePolicy{.blocksUIInputBelow = true},
                                   GameStateDispatchPhase::UIUpdate));
+}
+
+TEST(GameStatePolicyDispatchTest, GameplayInputBlockedForDepthUsesOverlayFlag)
+{
+    GameStateStack stack;
+    EventLog log;
+    ASSERT_TRUE(stack.pushCommitted(std::make_unique<RecordingState>(log, "base"), {}));
+    ASSERT_TRUE(stack.pushCommitted(std::make_unique<RecordingState>(log, "overlay"),
+                                    GameStatePolicy{.blocksGameplayInputBelow = true}));
+    EXPECT_FALSE(stack.gameplayInputBlockedForDepth(0));
+    EXPECT_TRUE(stack.gameplayInputBlockedForDepth(1));
+
+    stack.setTopPolicy({});
+    EXPECT_FALSE(stack.gameplayInputBlockedForDepth(1));
+}
+
+TEST(InputActionSnapshotTest, SuppressedSnapshotsReportNoHeldActions)
+{
+    const auto sim = SimulationActionSnapshot::suppressed(7);
+    EXPECT_EQ(sim.targetSimulationTick, 7U);
+    EXPECT_TRUE(sim.states.empty());
+    EXPECT_FALSE(sim.isHeld(InputActionId{1}));
+    EXPECT_FLOAT_EQ(sim.axis(InputActionId{1}), 0.0F);
+
+    const auto frame = FrameActionSnapshot::suppressed(9);
+    EXPECT_EQ(frame.engineFrameIndex, 9U);
+    EXPECT_TRUE(frame.states.empty());
+    EXPECT_FALSE(frame.isHeld(InputActionId{2}));
 }
 
 TEST(GameStatePolicyDispatchTest, CollectDispatchIndicesHonorsOverlayBlock)

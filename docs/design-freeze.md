@@ -61,7 +61,7 @@
 | --- | --- | --- |
 | UI 平台证据 | ProgressBar/RadioButton 的 API、单测、product-2d 结构化输出与 Windows client-area 视觉证据已完成 | 后续只扩展 UIA/AT-SPI 与跨 DPI/GPU 门禁；见 UI-002、UI-003 |
 | Linux 状态 | 历史 Linux 门禁早于当前 tip | 复验前不得扩写为当前平台支持证据；见 TEST-001 |
-| ADR 0014 gameplay input | `blocksGameplayInputBelow` 字段可写，EngineHost/ActionMapper **未读** | 接 suppression 或文档/公开契约标明 Deferred；见 gameplay.md RUNTIME-001 |
+
 | Opaque3D baseColor 采样 | 产品可 `setMesh3DMaterialTextureBinding`，submit 不采样 | RENDER-001 / bgfx Opaque3D sampler 切片 |
 
 ## 不变量

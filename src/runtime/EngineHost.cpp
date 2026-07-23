@@ -831,11 +831,16 @@ class EngineHostImplementation final {
                         Core::Error{RuntimeErrorCode::LifecycleInvariantViolation, "GameStateStack is empty during fixedUpdate"},
                         frameIndex, simulationTick);
                 }
-                FixedUpdateContext fixedContext{frameTiming, fixedTiming, simulationActions,
-                                                m_modules.audioEnginePtr()};
                 auto fixedDispatch = m_gameStateStack.forEachDispatch(
                     GameStateDispatchPhase::FixedUpdate,
-                    [&](IGameState& state, const GameStatePolicy&, usize) -> Core::Status {
+                    [&](IGameState& state, const GameStatePolicy&, usize depthFromTop) -> Core::Status {
+                        // ADR 0014: blocksGameplayInputBelow suppresses action state for layers below.
+                        const SimulationActionSnapshot& actionsForState =
+                            m_gameStateStack.gameplayInputBlockedForDepth(depthFromTop)
+                                ? SimulationActionSnapshot::suppressed(simulationTick)
+                                : simulationActions;
+                        FixedUpdateContext fixedContext{frameTiming, fixedTiming, actionsForState,
+                                                        m_modules.audioEnginePtr()};
                         return invokeResultBoundary("IGameState::fixedUpdate",
                                                     RuntimeErrorCode::GameCallbackThrewException,
                                                     [&] { return state.fixedUpdate(fixedContext); });
@@ -866,14 +871,21 @@ class EngineHostImplementation final {
                     frameIndex, simulationTick);
             }
             // Only the stack top may queue structural commands (ADR 0014).
-            FrameUpdateContext frameContext{frameTiming, frameActions, exitAfterFrame, &m_pendingCommands,
-                                            m_modules.audioEnginePtr()};
-            FrameUpdateContext frameContextBelow{frameTiming, frameActions, exitAfterFrame, nullptr,
-                                                 m_modules.audioEnginePtr()};
+            // blocksGameplayInputBelow: layers below see empty frame actions (no held/edge).
+            // blocksUIInputBelow still only gates updateUI dispatch (not UI route this frame).
+            const FrameActionSnapshot suppressedFrameActions =
+                FrameActionSnapshot::suppressed(frameIndex);
             auto updateResult = m_gameStateStack.forEachDispatch(
                 GameStateDispatchPhase::FrameUpdate,
                 [&](IGameState& state, const GameStatePolicy&, usize depthFromTop) -> Core::Status {
-                    FrameUpdateContext& ctx = depthFromTop == 0 ? frameContext : frameContextBelow;
+                    const bool suppressGameplay =
+                        m_gameStateStack.gameplayInputBlockedForDepth(depthFromTop);
+                    const FrameActionSnapshot& actionsForState =
+                        suppressGameplay ? suppressedFrameActions : frameActions;
+                    // Top alone may queue push/pop/replace; below never gets pendingCommands.
+                    FrameUpdateContext ctx{frameTiming, actionsForState, exitAfterFrame,
+                                           depthFromTop == 0 ? &m_pendingCommands : nullptr,
+                                           m_modules.audioEnginePtr()};
                     return invokeResultBoundary("IGameState::updateFrame",
                                                 RuntimeErrorCode::GameCallbackThrewException,
                                                 [&] { return state.updateFrame(ctx); });

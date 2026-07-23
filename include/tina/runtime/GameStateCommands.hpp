@@ -109,6 +109,25 @@ public:
         return empty() ? GameStatePolicy{} : m_entries[m_size - 1U].policy;
     }
 
+    // True when any state strictly above depthFromTop sets blocksGameplayInputBelow.
+    // depthFromTop==0 (stack top) is never suppressed by this helper.
+    [[nodiscard]] bool gameplayInputBlockedForDepth(usize depthFromTop) const noexcept
+    {
+        if (empty() || depthFromTop == 0)
+        {
+            return false;
+        }
+        const usize limit = (std::min)(depthFromTop, m_size);
+        for (usize d = 0; d < limit; ++d)
+        {
+            if (m_entries[m_size - 1U - d].policy.blocksGameplayInputBelow)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // Top-down visit until a state whose policy blocks this phase below.
     // visitor(state, policy, depthFromTop) where depthFromTop==0 is the stack top.
     // Stops early if visitor returns a failure Status.

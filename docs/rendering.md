@@ -34,6 +34,9 @@ Tina 的公开 Render 边界是 backend-neutral `Tina::Render`；bgfx 只存在�
 EngineHost：submit 前可登记 Surface/GlyphAtlas pin，present 或 skip 后 complete 并释放 pin，失败路径
 abandon。真实 bgfx fence 驱动的异步 completion 仍未实现；同步 submit 路径下 pin 在 present 后归零。
 
+Opaque3D unlit：`setMesh3DMaterialTextureBinding(materialKey)` 在 `submit` 时 `setTexture(0, s_texColor)`；
+shader 输出 `baseColorFactor * texture2D`；未绑定 materialKey 使用 1×1 白贴图（非「只 bind 不采样」）。
+
 ## RenderScene
 
 `RenderSceneBuilder` 在固定容量 storage 中事务式构建 Camera/Sprite/Mesh：

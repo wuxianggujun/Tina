@@ -77,3 +77,5 @@
 | RUNTIME-001-INT | Null Host 集成：base `requestPush` overlay（block fixed/frame below）→ overlay `requestPop` → base 恢复；enter 失败无 `onExit`；`GameStateStackIntegrationTests` | [gameplay](gameplay.md) · ADR 0014 |
 | RUNTIME-001-SAMPLE | `tina_sample_2d` 收尾自动 pause overlay（≥60 帧）：push/pop + policy block；JSON `pauseOverlay*`；短 smoke 跳过 | [2D](game-2d.md) · ADR 0014 |
 | UI-002-SPI | `UIAccessibilityTree`/`IUIAccessibilityProvider`/`UIAccessibilityProbeProvider`：从 committedSemantics 发布 role/name/state/range；stale node 拒绝；`UIAccessibilityTests` | [UI](ui.md) |
+| RUNTIME-001-INPUT | `blocksGameplayInputBelow`：下层 fixed/frame 使用空 action snapshot；`gameplayInputBlockedForDepth` + unit tests | [gameplay](gameplay.md) · ADR 0014 |
+| RENDER-3D-TEX | Opaque3D unlit 采样 materialKey 绑定贴图（shader `s_texColor` + default white）；关闭「bind 不 draw」假完成 | [3D](game-3d.md) |

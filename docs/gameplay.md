@@ -42,8 +42,9 @@ public:
 默认逐帧实现返回 success。Runtime 持有私有 `GameStateStack`（定容 8）：enter 成功后采样
 `initialPolicy()`，帧内可 `requestPush` / `requestPop` / `requestReplace` / `requestPolicyChange`。
 四相位 `blocksFixedUpdateBelow` / `blocksFrameUpdateBelow` / `blocksRenderBelow` /
-`blocksUIInputBelow`（控制下层 `updateUI` 是否调用）已调度；`blocksGameplayInputBelow` 字段已存在
-但 **尚未** 接入 ActionMapper（见文末 RUNTIME-001）。
+`blocksUIInputBelow`（控制下层 `updateUI` 是否调用；**不**回改当帧 UI route）已调度。
+`blocksGameplayInputBelow`：下层 `fixedUpdate`/`updateFrame` 收到空 action snapshot
+（`SimulationActionSnapshot::suppressed` / `FrameActionSnapshot::suppressed`）。
 
 ## 生命周期
 
@@ -140,6 +141,6 @@ save/load orchestration 尚未完成。
 
 - 交互式菜单/暂停（按键切换）；当前 `tina_sample_2d` 为自动收尾 push/pop 证据（≥60 帧 smoke）；
 - State UI root / listener / TaskGroup / AssetLease 在 transition 后的完整 stale-owner 矩阵；
-- `blocksGameplayInputBelow` → ActionMapper / fixed 输入深度抑制（字段可写，EngineHost **未读**）。
+- 交互式菜单/暂停（按键切换）；`tina_sample_2d` 已有自动收尾 pause overlay 证据。
 
 帧阶段详见 [Runtime](runtime.md)，任务状态见 [Backlog](backlog.md)。

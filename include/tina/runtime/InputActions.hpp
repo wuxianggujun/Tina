@@ -135,6 +135,12 @@ struct SimulationActionSnapshot final {
         const InputActionState* state = find(action);
         return state == nullptr ? 0.0F : state->axis;
     }
+
+    // Empty snapshot used when GameStatePolicy suppresses gameplay input below.
+    [[nodiscard]] static SimulationActionSnapshot suppressed(u64 targetSimulationTick) noexcept
+    {
+        return SimulationActionSnapshot{.targetSimulationTick = targetSimulationTick};
+    }
 };
 
 // Borrowed view valid only for the current frame-update callback. Its edges are
@@ -159,6 +165,12 @@ struct FrameActionSnapshot final {
     {
         const InputActionState* state = find(action);
         return state == nullptr ? 0.0F : state->axis;
+    }
+
+    // Empty snapshot used when GameStatePolicy suppresses gameplay input below.
+    [[nodiscard]] static FrameActionSnapshot suppressed(u64 engineFrameIndex) noexcept
+    {
+        return FrameActionSnapshot{.engineFrameIndex = engineFrameIndex};
     }
 };
 

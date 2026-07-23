@@ -729,6 +729,27 @@ class BgfxRenderDevice final : public IRenderDevice {
         opaque3DProgram_ = *opaque3DProgram;
         ++statistics_.liveResources;
 
+        opaque3DSampler_ = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(opaque3DSampler_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D texture sampler uniform");
+        }
+        ++statistics_.liveResources;
+
+        // Default 1x1 white so unlit baseColorFactor remains visible without a material bind.
+        constexpr std::array<u8, 4> OpaqueWhitePixel{255, 255, 255, 255};
+        const bgfx::Memory* opaqueWhiteMemory =
+            bgfx::copy(OpaqueWhitePixel.data(), static_cast<u32>(OpaqueWhitePixel.size()));
+        opaque3DDefaultTexture_ = bgfx::createTexture2D(
+            1, 1, false, 1, bgfx::TextureFormat::RGBA8, BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE, opaqueWhiteMemory);
+        if (!bgfx::isValid(opaque3DDefaultTexture_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D default white texture");
+        }
+        ++statistics_.liveResources;
+
         const std::span<const BgfxOpaque3DVertex> vertices = canonicalCubeVertices();
         opaque3DVertexBuffer_ = bgfx::createVertexBuffer(
             bgfx::copy(vertices.data(), static_cast<u32>(vertices.size_bytes())), opaque3DVertexLayout_);
@@ -932,6 +953,18 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(opaque3DProgram_);
                 opaque3DProgram_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DSampler_))
+            {
+                bgfx::destroy(opaque3DSampler_);
+                opaque3DSampler_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DDefaultTexture_))
+            {
+                bgfx::destroy(opaque3DDefaultTexture_);
+                opaque3DDefaultTexture_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             mesh3DMaterialTextureBindings_.clear();
@@ -1204,11 +1237,25 @@ class BgfxRenderDevice final : public IRenderDevice {
                 continue;
             }
 
+            bgfx::TextureHandle materialTexture = opaque3DDefaultTexture_;
+            if (const auto matBinding = mesh3DMaterialTextureBindings_.find(batch.materialKey);
+                matBinding != mesh3DMaterialTextureBindings_.end())
+            {
+                const GpuTextureId id = matBinding->second;
+                if (id.index < textures_.size())
+                {
+                    const TextureSlot& slot = textures_[id.index];
+                    if (slot.live && slot.generation == id.generation && bgfx::isValid(slot.handle))
+                    {
+                        materialTexture = slot.handle;
+                    }
+                }
+            }
+
             bgfx::setVertexBuffer(0, vb);
             bgfx::setIndexBuffer(ib);
             bgfx::setInstanceDataBuffer(&instanceBuffer, batch.firstItem, batch.itemCount);
-            // Texture sampling for Unlit baseColor is deferred until shader + sampler path is
-            // validated on D3D11 (M11-E5 asset/API surface remains; GPU sample lands with shader).
+            bgfx::setTexture(0, opaque3DSampler_, materialTexture);
             bgfx::submit(kOpaque3DView, opaque3DProgram_);
         }
     }
@@ -1780,6 +1827,8 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::VertexLayout sprite2DVertexLayout_{};
     bgfx::VertexLayout uiVertexLayout_{};
     bgfx::ProgramHandle opaque3DProgram_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DSampler_ = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle opaque3DDefaultTexture_ = BGFX_INVALID_HANDLE;
     bgfx::VertexBufferHandle opaque3DVertexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle opaque3DIndexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle sprite2DProgram_ = BGFX_INVALID_HANDLE;
