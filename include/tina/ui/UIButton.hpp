@@ -3,6 +3,7 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/ui/UINodeId.hpp>
+#include <tina/ui/UIPaint.hpp>
 
 #include <array>
 #include <compare>
@@ -14,10 +15,23 @@
 
 namespace Tina::UI {
 
+// Interaction-state overrides for a Button background. UIBoxPaint remains the
+// normal-state escape hatch. A zero-alpha override falls back to the next
+// state, with disabled > pressed > hovered > focused > normal precedence.
+struct UIButtonPaint final {
+    UIStraightSrgba8Color hoveredBackgroundColor{};
+    UIStraightSrgba8Color pressedBackgroundColor{};
+    UIStraightSrgba8Color focusedBackgroundColor{};
+    UIStraightSrgba8Color disabledBackgroundColor{};
+
+    auto operator<=>(const UIButtonPaint&) const = default;
+};
+
 enum class UIButtonActivationSource : u8 {
     PrimaryPointer,
     // Keyboard Accept (Enter/Space) and Gamepad Accept (South) activate the
-    // Button that currently owns default-action focus (set by pointer arm).
+    // Button that currently owns default-action focus (set by pointer input
+    // or keyboard focus traversal).
     Keyboard,
     Gamepad,
 };

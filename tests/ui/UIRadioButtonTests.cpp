@@ -376,6 +376,66 @@ TEST_F(UIRadioButtonTest, IndicatorPaintPublishesDeterministicGeometry)
         }));
 }
 
+TEST_F(UIRadioButtonTest, PressedFocusedAndDisabledStatesResolveCommittedIndicatorPaint)
+{
+    const UI::UINodeId radioButton = createRadioButton(40.0F, 24.0F);
+    ASSERT_TRUE(radioButton.hasValue());
+    assertOk(updater.setRadioButtonPaint(
+        radioButton,
+        {
+            .indicatorColor = {.red = 10, .green = 20, .blue = 30, .alpha = 255},
+            .selectedIndicatorColor = {},
+            .selectedIndicatorInset = 4.0F,
+            .labelGap = 8.0F,
+            .focusedIndicatorColor = {.red = 40, .green = 50, .blue = 60, .alpha = 255},
+            .pressedIndicatorColor = {.red = 70, .green = 80, .blue = 90, .alpha = 255},
+        }));
+
+    publishLayout();
+    ASSERT_EQ(context->committedPaint().size(), 1U);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
+
+    auto down = context->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::ButtonDown,
+        1,
+        {.x = 10.0F, .y = 10.0F}));
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    EXPECT_TRUE(down->consumed);
+    EXPECT_TRUE(isPressed(updater, radioButton));
+    EXPECT_EQ(context->defaultActionFocus(), radioButton);
+    publishLayout();
+    ASSERT_EQ(context->committedPaint().size(), 1U);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{70, 80, 90, 255}));
+
+    auto up = context->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::ButtonUp,
+        2,
+        {.x = 10.0F, .y = 10.0F}));
+    ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
+    EXPECT_TRUE(up->consumed);
+    EXPECT_FALSE(isPressed(updater, radioButton));
+    EXPECT_EQ(context->defaultActionFocus(), radioButton);
+    publishLayout();
+    ASSERT_EQ(context->committedPaint().size(), 1U);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{40, 50, 60, 255}));
+
+    assertOk(updater.setEnabled(radioButton, false));
+    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    publishLayout();
+    ASSERT_EQ(context->committedPaint().size(), 1U);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{5, 11, 16, 140}));
+}
+
 TEST_F(UIRadioButtonTest, AutoWidthUsesResolvedHeightAndTracksLabelGap)
 {
     UI::UILayoutStyle rootStyle = fixedSize(160.0F, 120.0F);
@@ -524,6 +584,59 @@ TEST_F(UIRadioButtonTest, PaintCapacityCountsSelectedIndicatorAtomically)
     EXPECT_EQ(limitedContext->committedPaint().size(), 1U);
 }
 
+TEST_F(UIRadioButtonTest, FocusedOverrideIsIncludedInPaintCapacityPreflight)
+{
+    auto limitedContext = createContext(
+        window,
+        {
+            .nodeCapacity = 2,
+            .rootCapacity = 1,
+            .paintSnapshotCapacity = 1,
+            .buttonActionCapacity = 1,
+        });
+    ASSERT_NE(limitedContext, nullptr);
+    auto limitedRoot = createRoot(*limitedContext);
+    ASSERT_TRUE(limitedRoot.hasValue());
+    auto limitedUpdater = createUpdater(*limitedContext, limitedRoot);
+    auto radioResult = limitedUpdater.createRadioButton(limitedRoot.rootNodeId());
+    ASSERT_TRUE(radioResult.has_value()) << (radioResult ? "" : radioResult.error().message);
+    const UI::UINodeId radioButton = *radioResult;
+    assertOk(limitedUpdater.setLayoutStyle(
+        limitedRoot.rootNodeId(),
+        fixedSize(40.0F, 24.0F)));
+    assertOk(limitedUpdater.setLayoutStyle(radioButton, fixedSize(40.0F, 24.0F)));
+
+    UI::UIBoxPaint rootPaint{};
+    rootPaint.solidFill = UI::UISolidFill{
+        .color = {.red = 1, .green = 2, .blue = 3, .alpha = 255},
+    };
+    assertOk(limitedUpdater.setBoxPaint(limitedRoot.rootNodeId(), rootPaint));
+    UI::UIRadioButtonPaint radioPaint{};
+    radioPaint.focusedIndicatorColor = {
+        .red = 40,
+        .green = 50,
+        .blue = 60,
+        .alpha = 255,
+    };
+    assertOk(limitedUpdater.setRadioButtonPaint(radioButton, radioPaint));
+    assertOk(limitedContext->commitLayout({.width = 40.0F, .height = 24.0F}));
+    ASSERT_EQ(limitedContext->committedPaint().size(), 1U);
+    const u64 publishedRevision = limitedContext->committedPaint().paintRevision();
+
+    auto focus = limitedContext->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
+    EXPECT_TRUE(focus->consumed);
+    EXPECT_EQ(focus->focus, radioButton);
+    const Core::Status overflow =
+        limitedContext->commitLayout({.width = 40.0F, .height = 24.0F});
+    ASSERT_FALSE(overflow.has_value());
+    EXPECT_EQ(overflow.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(limitedContext->committedPaint().paintRevision(), publishedRevision);
+    ASSERT_EQ(limitedContext->committedPaint().size(), 1U);
+    EXPECT_EQ(limitedContext->committedPaint().entries()[0].node, limitedRoot.rootNodeId());
+    EXPECT_TRUE(limitedContext->statistics().paintDirty);
+}
+
 TEST_F(UIRadioButtonTest, PointerAndKeyboardActivationSelectWithoutTogglingOff)
 {
     assertOk(updater.setLayoutStyle(
@@ -606,6 +719,191 @@ TEST_F(UIRadioButtonTest, PointerAndKeyboardActivationSelectWithoutTogglingOff)
     EXPECT_TRUE(repeat->activated);
     EXPECT_TRUE(isSelected(updater, second));
     EXPECT_EQ(secondLog.count, 2);
+
+    auto gamepad = context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{5},
+        5,
+        UI::UIButtonActivationSource::Gamepad);
+    ASSERT_TRUE(gamepad.has_value()) << (gamepad ? "" : gamepad.error().message);
+    EXPECT_TRUE(gamepad->consumed);
+    EXPECT_TRUE(gamepad->activated);
+    EXPECT_TRUE(isSelected(updater, second));
+    EXPECT_EQ(secondLog.count, 3);
+    EXPECT_EQ(secondLog.source, UI::UIButtonActivationSource::Gamepad);
+    EXPECT_EQ(secondLog.platformFrame, Platform::PlatformFrameId{5});
+    EXPECT_EQ(secondLog.sourceSequence, 5U);
+}
+
+TEST_F(UIRadioButtonTest, PointerRouteReservationSurvivesListenerSiblingMutation)
+{
+    auto limitedContext = createContext(
+        window,
+        {
+            .nodeCapacity = 6,
+            .rootCapacity = 1,
+            .dirtyQueueCapacity = 4,
+            .paintSnapshotCapacity = 6,
+            .routePathCapacity = 6,
+            .routedPointerListenerCapacity = 1,
+            .buttonActionCapacity = 3,
+            .textByteCapacity = 64,
+        });
+    ASSERT_NE(limitedContext, nullptr);
+    auto limitedRoot = createRoot(*limitedContext);
+    ASSERT_TRUE(limitedRoot.hasValue());
+    auto limitedUpdater = createUpdater(*limitedContext, limitedRoot);
+
+    auto firstResult = limitedUpdater.createRadioButton(limitedRoot.rootNodeId());
+    auto secondResult = limitedUpdater.createRadioButton(limitedRoot.rootNodeId());
+    auto thirdResult = limitedUpdater.createRadioButton(limitedRoot.rootNodeId());
+    auto firstBlockerResult = limitedUpdater.createPanel(limitedRoot.rootNodeId());
+    auto secondBlockerResult = limitedUpdater.createPanel(limitedRoot.rootNodeId());
+    ASSERT_TRUE(firstResult.has_value());
+    ASSERT_TRUE(secondResult.has_value());
+    ASSERT_TRUE(thirdResult.has_value());
+    ASSERT_TRUE(firstBlockerResult.has_value());
+    ASSERT_TRUE(secondBlockerResult.has_value());
+    const UI::UINodeId first = *firstResult;
+    const UI::UINodeId second = *secondResult;
+    const UI::UINodeId third = *thirdResult;
+    const UI::UINodeId firstBlocker = *firstBlockerResult;
+    const UI::UINodeId secondBlocker = *secondBlockerResult;
+
+    assertOk(limitedUpdater.setLayoutStyle(
+        limitedRoot.rootNodeId(),
+        fixedSize(100.0F, 80.0F)));
+    assertOk(limitedUpdater.setLayoutStyle(first, fixedSize(40.0F, 30.0F)));
+    assertOk(limitedUpdater.setLayoutStyle(second, fixedSize(40.0F, 30.0F)));
+    assertOk(limitedUpdater.setLayoutStyle(third, fixedSize(40.0F, 30.0F)));
+    assertOk(limitedUpdater.setRadioButtonSelected(second, true));
+    ActivationLog firstLog{};
+    ActivationLog thirdLog{};
+    assertOk(limitedUpdater.setRadioButtonAction(first, actionFor(firstLog)));
+    assertOk(limitedUpdater.setRadioButtonAction(third, actionFor(thirdLog)));
+    assertOk(limitedContext->commitLayout({.width = 100.0F, .height = 80.0F}));
+
+    struct ListenerState final {
+        UI::UIContext* context = nullptr;
+        UI::UITreeUpdater* updater = nullptr;
+        UI::UINodeId sibling{};
+        UI::UINodeId firstBlocker{};
+        UI::UINodeId secondBlocker{};
+        bool invoked = false;
+        bool siblingMutationSucceeded = false;
+        bool commitRejected = false;
+        bool firstBlockerSucceeded = false;
+        bool secondBlockerRejected = false;
+    } listenerState{
+        .context = limitedContext.get(),
+        .updater = &limitedUpdater,
+        .sibling = third,
+        .firstBlocker = firstBlocker,
+        .secondBlocker = secondBlocker,
+    };
+    auto listenerResult = limitedContext->addRoutedPointerListener(
+        {
+            .node = first,
+            .kind = UI::UIRoutedPointerEventKind::ButtonUp,
+            .phases = UI::UIEventPhaseMask::Target,
+        },
+        UI::UIRoutedPointerCallback{
+            [&listenerState](UI::UIRoutedPointerEvent&) noexcept {
+                listenerState.invoked = true;
+                const Core::Status siblingMutation =
+                    listenerState.updater->setRadioButtonSelected(
+                        listenerState.sibling,
+                        true);
+                listenerState.siblingMutationSucceeded =
+                    siblingMutation.has_value();
+                if (!listenerState.siblingMutationSucceeded) {
+                    return;
+                }
+                const Core::Status listenerCommit =
+                    listenerState.context->commitLayout(
+                    {.width = 100.0F, .height = 80.0F});
+                listenerState.commitRejected = !listenerCommit
+                    && listenerCommit.error().code
+                        == UI::UIErrorCode::PointerRouteAlreadyInProgress;
+
+                const UI::UIBoxPaint blockerPaint{
+                    .solidFill = UI::UISolidFill{
+                        .color = {.red = 9, .green = 8, .blue = 7, .alpha = 255},
+                    },
+                };
+                listenerState.firstBlockerSucceeded =
+                    listenerState.updater->setBoxPaint(
+                        listenerState.firstBlocker,
+                        blockerPaint).has_value();
+                const Core::Status secondMutation =
+                    listenerState.updater->setBoxPaint(
+                        listenerState.secondBlocker,
+                        blockerPaint);
+                listenerState.secondBlockerRejected = !secondMutation
+                    && secondMutation.error().code
+                        == UI::UIErrorCode::CapacityExceeded;
+            }});
+    ASSERT_TRUE(listenerResult.has_value())
+        << (listenerResult ? "" : listenerResult.error().message);
+    auto listenerToken = std::move(*listenerResult);
+
+    auto down = limitedContext->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::ButtonDown,
+        1,
+        {.x = 10.0F, .y = 10.0F}));
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    EXPECT_TRUE(down->consumed);
+    EXPECT_TRUE(isPressed(limitedUpdater, first));
+    assertOk(limitedContext->commitLayout({.width = 100.0F, .height = 80.0F}));
+
+    auto up = limitedContext->routePointerInput(makePointerInput(
+        window,
+        UI::UIRoutedPointerEventKind::ButtonUp,
+        2,
+        {.x = 10.0F, .y = 10.0F}));
+    ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
+    EXPECT_TRUE(listenerState.invoked);
+    EXPECT_TRUE(listenerState.siblingMutationSucceeded);
+    EXPECT_TRUE(listenerState.commitRejected);
+    EXPECT_TRUE(listenerState.firstBlockerSucceeded);
+    EXPECT_TRUE(listenerState.secondBlockerRejected);
+    EXPECT_TRUE(up->consumed);
+    EXPECT_FALSE(isPressed(limitedUpdater, first));
+    EXPECT_TRUE(isSelected(limitedUpdater, first));
+    EXPECT_FALSE(isSelected(limitedUpdater, second));
+    EXPECT_FALSE(isSelected(limitedUpdater, third));
+    EXPECT_EQ(firstLog.count, 1);
+    EXPECT_EQ(thirdLog.count, 0);
+    EXPECT_EQ(limitedContext->statistics().dirtyQueuePendingCount, 4U);
+
+    // The listener's re-entrant commit is rejected; the initial committed
+    // selection remains published until the route's pending action commits.
+    const UI::UISemanticsEntry* committedFirst = findSemanticsEntry(
+        limitedContext->committedSemantics(),
+        first);
+    const UI::UISemanticsEntry* committedSecond = findSemanticsEntry(
+        limitedContext->committedSemantics(),
+        second);
+    const UI::UISemanticsEntry* committedThird = findSemanticsEntry(
+        limitedContext->committedSemantics(),
+        third);
+    ASSERT_NE(committedFirst, nullptr);
+    ASSERT_NE(committedSecond, nullptr);
+    ASSERT_NE(committedThird, nullptr);
+    EXPECT_FALSE(committedFirst->checked);
+    EXPECT_TRUE(committedSecond->checked);
+    EXPECT_FALSE(committedThird->checked);
+
+    assertOk(limitedContext->commitLayout({.width = 100.0F, .height = 80.0F}));
+    committedFirst = findSemanticsEntry(limitedContext->committedSemantics(), first);
+    committedSecond = findSemanticsEntry(limitedContext->committedSemantics(), second);
+    committedThird = findSemanticsEntry(limitedContext->committedSemantics(), third);
+    ASSERT_NE(committedFirst, nullptr);
+    ASSERT_NE(committedSecond, nullptr);
+    ASSERT_NE(committedThird, nullptr);
+    EXPECT_TRUE(committedFirst->checked);
+    EXPECT_FALSE(committedSecond->checked);
+    EXPECT_FALSE(committedThird->checked);
 }
 
 TEST_F(UIRadioButtonTest, RejectsInvalidPaintMultilineTextAndWrongKinds)

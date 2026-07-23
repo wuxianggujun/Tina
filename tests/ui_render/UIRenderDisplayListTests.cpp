@@ -77,6 +77,28 @@ template <usize Count>
     };
 }
 
+[[nodiscard]] UI::UICommittedPaintEntry glyphEntry(
+    u32 ordinal,
+    UI::UILogicalRect bounds,
+    UI::UILogicalRect clip,
+    Render::UIPixelRect atlasUv,
+    u32 atlasPage,
+    UI::UIPremultipliedRgba8Color color = {80, 60, 40, 128}) noexcept
+{
+    return UI::UICommittedPaintEntry{
+        .worldRect = bounds,
+        .effectiveClip = clip,
+        .paintOrdinal = ordinal,
+        .solidFill = color,
+        .isGlyph = true,
+        .atlasX = static_cast<u32>(atlasUv.x),
+        .atlasY = static_cast<u32>(atlasUv.y),
+        .atlasWidth = atlasUv.width,
+        .atlasHeight = atlasUv.height,
+        .atlasPage = atlasPage,
+    };
+}
+
 [[nodiscard]] std::unique_ptr<UI::UIContext> createContext(
     Platform::WindowId window)
 {
@@ -147,6 +169,87 @@ TEST_F(UIRenderDisplayListTest, ConvertsCommittedUISolidFillAndIntegerPremultipl
     EXPECT_FALSE(command.clip.hasClip());
     EXPECT_EQ(result->statistics.sourcePaintEntryCount, 1U);
     EXPECT_EQ(result->statistics.submittedSolidQuadCount, 1U);
+}
+
+TEST_F(UIRenderDisplayListTest, PreservesMixedSolidAndGlyphPaintOrderClipAndBatchBoundaries)
+{
+    constexpr UI::UILogicalRect sharedClip{
+        .x = 10.0F,
+        .y = 10.0F,
+        .width = 40.0F,
+        .height = 40.0F,
+    };
+    const std::array entries{
+        solidEntry(3, {0.0F, 15.0F, 20.0F, 10.0F}, sharedClip),
+        glyphEntry(
+            7,
+            {5.0F, 20.0F, 15.0F, 12.0F},
+            sharedClip,
+            {11, 13, 7, 9},
+            2),
+        glyphEntry(
+            11,
+            {45.0F, 22.0F, 10.0F, 14.0F},
+            sharedClip,
+            {23, 29, 8, 10},
+            2),
+        solidEntry(20, {40.0F, 30.0F, 20.0F, 10.0F}, sharedClip),
+    };
+    auto builder = createBuilder({.commandCount = 4, .clipCount = 1, .batchCount = 3});
+
+    auto result = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {100.0F, 100.0F}),
+        {.framebufferViewport = {0, 0, 200, 100}});
+
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    const auto commands = result->displayList.commands();
+    ASSERT_EQ(commands.size(), 4U);
+    EXPECT_EQ(commands[0].paintOrdinal, 3U);
+    EXPECT_EQ(commands[1].paintOrdinal, 7U);
+    EXPECT_EQ(commands[2].paintOrdinal, 11U);
+    EXPECT_EQ(commands[3].paintOrdinal, 20U);
+    EXPECT_EQ(commands[0].kind, Render::UIDrawCommandKind::SolidQuad);
+    EXPECT_EQ(commands[1].kind, Render::UIDrawCommandKind::Glyph);
+    EXPECT_EQ(commands[2].kind, Render::UIDrawCommandKind::Glyph);
+    EXPECT_EQ(commands[3].kind, Render::UIDrawCommandKind::SolidQuad);
+
+    EXPECT_EQ(commands[1].atlasPage, 2U);
+    EXPECT_EQ(commands[1].atlasUv, (Render::UIPixelRect{11, 13, 7, 9}));
+    EXPECT_EQ(commands[2].atlasPage, 2U);
+    EXPECT_EQ(commands[2].atlasUv, (Render::UIPixelRect{23, 29, 8, 10}));
+
+    ASSERT_EQ(result->displayList.clips().size(), 1U);
+    ASSERT_TRUE(commands[0].clip.hasClip());
+    EXPECT_EQ(commands[1].clip, commands[0].clip);
+    EXPECT_EQ(commands[2].clip, commands[0].clip);
+    EXPECT_EQ(commands[3].clip, commands[0].clip);
+    const Render::UIPixelRect* resolvedClip =
+        result->displayList.resolveClip(commands[0].clip);
+    ASSERT_NE(resolvedClip, nullptr);
+    EXPECT_EQ(*resolvedClip, (Render::UIPixelRect{20, 10, 80, 40}));
+
+    const auto batches = result->displayList.batches();
+    ASSERT_EQ(batches.size(), 3U);
+    EXPECT_EQ(batches[0].kind, Render::UIDrawCommandKind::SolidQuad);
+    EXPECT_EQ(batches[0].clip, commands[0].clip);
+    EXPECT_EQ(batches[0].firstCommand, 0U);
+    EXPECT_EQ(batches[0].commandCount, 1U);
+    EXPECT_EQ(batches[1].kind, Render::UIDrawCommandKind::Glyph);
+    EXPECT_EQ(batches[1].clip, commands[0].clip);
+    EXPECT_EQ(batches[1].atlasPage, 2U);
+    EXPECT_EQ(batches[1].firstCommand, 1U);
+    EXPECT_EQ(batches[1].commandCount, 2U);
+    EXPECT_EQ(batches[2].kind, Render::UIDrawCommandKind::SolidQuad);
+    EXPECT_EQ(batches[2].clip, commands[0].clip);
+    EXPECT_EQ(batches[2].firstCommand, 3U);
+    EXPECT_EQ(batches[2].commandCount, 1U);
+
+    EXPECT_EQ(result->statistics.sourcePaintEntryCount, 4U);
+    EXPECT_EQ(result->statistics.submittedSolidQuadCount, 2U);
+    EXPECT_EQ(result->statistics.submittedGlyphCount, 2U);
+    EXPECT_EQ(result->displayList.statistics().solidQuadCommandCount, 2U);
+    EXPECT_EQ(result->displayList.statistics().glyphCommandCount, 2U);
 }
 
 TEST_F(UIRenderDisplayListTest, UsesOutwardFractionalRoundingAndClampsToFramebufferViewport)

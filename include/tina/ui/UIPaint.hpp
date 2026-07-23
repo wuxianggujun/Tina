@@ -18,6 +18,30 @@ struct UIStraightSrgba8Color final {
     auto operator<=>(const UIStraightSrgba8Color&) const = default;
 };
 
+// Authoring helpers: storage remains channel sRGBA8; hex is only an input sugar.
+[[nodiscard]] constexpr UIStraightSrgba8Color rgba8(u8 red, u8 green, u8 blue, u8 alpha = 255) noexcept
+{
+    return UIStraightSrgba8Color{.red = red, .green = green, .blue = blue, .alpha = alpha};
+}
+
+// 0xRRGGBB with optional alpha (default opaque).
+[[nodiscard]] constexpr UIStraightSrgba8Color rgb(u32 hexRgb, u8 alpha = 255) noexcept
+{
+    return rgba8(static_cast<u8>((hexRgb >> 16) & 0xFFU),
+                 static_cast<u8>((hexRgb >> 8) & 0xFFU),
+                 static_cast<u8>(hexRgb & 0xFFU),
+                 alpha);
+}
+
+// 0xAARRGGBB
+[[nodiscard]] constexpr UIStraightSrgba8Color argb(u32 hexArgb) noexcept
+{
+    return rgba8(static_cast<u8>((hexArgb >> 16) & 0xFFU),
+                 static_cast<u8>((hexArgb >> 8) & 0xFFU),
+                 static_cast<u8>(hexArgb & 0xFFU),
+                 static_cast<u8>((hexArgb >> 24) & 0xFFU));
+}
+
 // Cached/snapshot color ready for conventional premultiplied-alpha blending.
 struct UIPremultipliedRgba8Color final {
     u8 red = 0;
@@ -55,10 +79,19 @@ struct UISolidFill final {
     auto operator<=>(const UISolidFill&) const = default;
 };
 
-// First paint schema: a box may optionally emit one solid fill. Default and
-// explicitly cleared paint emit nothing.
+// Box paint: optional fill, dual-tone border (Phase A), optional shadow (Phase B).
+// Default and explicitly cleared paint emit nothing. Border/shadow use SolidQuad only.
 struct UIBoxPaint final {
     std::optional<UISolidFill> solidFill{};
+    // Top/left edge color when borderWidth > 0 and alpha != 0.
+    UIStraightSrgba8Color borderLight{};
+    // Bottom/right edge color when borderWidth > 0 and alpha != 0.
+    UIStraightSrgba8Color borderDark{};
+    float borderWidth = 0.0F;
+    // Fake drop shadow drawn before fill (does not receive hit).
+    UIStraightSrgba8Color shadow{};
+    float shadowOffsetX = 0.0F;
+    float shadowOffsetY = 0.0F;
 
     auto operator<=>(const UIBoxPaint&) const = default;
 };

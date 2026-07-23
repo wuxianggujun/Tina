@@ -12,6 +12,7 @@ namespace Tina::Tests {
 namespace {
 
 using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
+using GamepadPool = Core::GenerationPool<int, Platform::GamepadRegistryTag>;
 
 class ObservingMemoryResource final : public std::pmr::memory_resource {
 public:
@@ -844,6 +845,74 @@ TEST_F(UIButtonActionTest, ActionCallbackMayDestroyButtonOrRoot)
     }
 }
 
+TEST_F(UIButtonActionTest, ReentrantDefaultActionActivationIsRejectedAndGuardSurvives)
+{
+    ButtonTree tree = createButtonTree(firstWindow);
+    ASSERT_NE(tree.context, nullptr);
+
+    struct State final {
+        UI::UIContext* context = nullptr;
+        Core::ErrorCode nestedError{};
+        Core::ErrorCode commitError{};
+        usize callbackCount = 0;
+        bool nestedRejected = false;
+    } state{
+        .context = tree.context.get(),
+    };
+
+    assertOk(tree.updater.setButtonAction(
+        tree.button,
+        UI::UIButtonActionCallback{[&state](const UI::UIButtonActionEvent&) noexcept {
+            ++state.callbackCount;
+            if (state.callbackCount != 1U) {
+                return;
+            }
+            auto nested = state.context->routeDefaultActionActivate(
+                Platform::PlatformFrameId{2},
+                20,
+                UI::UIButtonActivationSource::Keyboard);
+            state.nestedRejected = !nested.has_value();
+            if (!nested) {
+                state.nestedError = nested.error().code;
+            }
+            const Core::Status commit = state.context->commitLayout(
+                {.width = 100.0F, .height = 100.0F});
+            if (!commit) {
+                state.commitError = commit.error().code;
+            }
+        }}));
+
+    auto focus = tree.context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
+    ASSERT_EQ(focus->focus, tree.button);
+    ASSERT_EQ(tree.context->defaultActionFocus(), tree.button);
+    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    assertOk(tree.updater.setBoxPaint(
+        tree.button,
+        UI::UIBoxPaint{
+            .solidFill = UI::UISolidFill{
+                .color = {.red = 68, .green = 85, .blue = 102, .alpha = 255},
+            },
+        }));
+    const u64 paintRevisionBefore = tree.context->statistics().paintRevision;
+
+    auto outer = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{1},
+        10,
+        UI::UIButtonActivationSource::Keyboard);
+    ASSERT_TRUE(outer.has_value()) << (outer ? "" : outer.error().message);
+    EXPECT_TRUE(outer->consumed);
+    EXPECT_TRUE(outer->activated);
+    EXPECT_TRUE(state.nestedRejected);
+    EXPECT_EQ(state.nestedError, UI::UIErrorCode::PointerRouteAlreadyInProgress);
+    EXPECT_EQ(state.commitError, UI::UIErrorCode::PointerRouteAlreadyInProgress);
+    EXPECT_EQ(state.callbackCount, 1U);
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.button);
+    EXPECT_FALSE(buttonPressed(tree.updater, tree.button));
+    EXPECT_EQ(tree.context->statistics().paintRevision, paintRevisionBefore);
+}
+
 TEST_F(UIButtonActionTest, CancelOrResetClearsPressedWithoutActivation)
 {
     ButtonTree tree = createButtonTree(firstWindow);
@@ -966,6 +1035,301 @@ TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptActivateDefaultFocusedButton)
     ASSERT_EQ(recorder.size, 2U);
     EXPECT_EQ(recorder.entries[1].source, UI::UIButtonActivationSource::Gamepad);
     EXPECT_EQ(recorder.entries[1].sourceSequence, 30U);
+}
+
+TEST_F(UIButtonActionTest, DisablingUnrelatedButtonPreservesDefaultActionPress)
+{
+    auto context = createContext(
+        firstWindow,
+        UI::UIContextCapacityConfig{.nodeCapacity = 8, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    const UI::UINodeId firstPanel = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId firstButton = createButton(*context, firstPanel);
+    const UI::UINodeId unrelatedButton = createButton(*context, root.rootNodeId());
+
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 40.0F)));
+    assertOk(updater.setLayoutStyle(firstPanel, fixedSize(50.0F, 40.0F)));
+    assertOk(updater.setLayoutStyle(firstButton, fixedSize(40.0F, 40.0F)));
+    assertOk(updater.setLayoutStyle(unrelatedButton, fixedSize(50.0F, 40.0F)));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+
+    auto focus = context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
+    ASSERT_EQ(focus->focus, firstButton);
+
+    const Platform::DigitalControlIdentity enter =
+        Platform::KeyControlIdentity{firstWindow, Platform::Key::Enter};
+    auto down = context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{1},
+        10,
+        UI::UIButtonActivationSource::Keyboard,
+        enter);
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    EXPECT_TRUE(down->consumed);
+    expectButtonPressed(updater, firstButton, true);
+
+    assertOk(updater.setEnabled(unrelatedButton, false));
+    EXPECT_EQ(context->defaultActionFocus(), firstButton);
+    expectButtonPressed(updater, firstButton, true);
+
+    auto up = context->routeDefaultActionRelease(
+        Platform::PlatformFrameId{2},
+        20,
+        UI::UIButtonActivationSource::Keyboard,
+        enter);
+    ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
+    EXPECT_TRUE(up->consumed);
+    expectButtonPressed(updater, firstButton, false);
+}
+
+TEST_F(UIButtonActionTest, DisablingPressedButtonClearsPressAndQueuesDirtyState)
+{
+    ButtonTree tree = createButtonTree(firstWindow);
+    ASSERT_NE(tree.context, nullptr);
+
+    auto focus = tree.context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
+    ASSERT_EQ(focus->focus, tree.button);
+    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    const Platform::DigitalControlIdentity enter =
+        Platform::KeyControlIdentity{firstWindow, Platform::Key::Enter};
+    auto down = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{1},
+        10,
+        UI::UIButtonActivationSource::Keyboard,
+        enter);
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    EXPECT_TRUE(down->consumed);
+    expectButtonPressed(tree.updater, tree.button, true);
+    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    EXPECT_EQ(tree.context->statistics().dirtyQueuePendingCount, 0U);
+
+    assertOk(tree.updater.setEnabled(tree.button, false));
+    EXPECT_FALSE(tree.context->defaultActionFocus().hasValue());
+    expectButtonPressed(tree.updater, tree.button, false);
+    EXPECT_EQ(tree.context->statistics().dirtyQueuePendingCount, 1U);
+}
+
+TEST_F(UIButtonActionTest, KeyboardAcceptPressTracksEachKeyUntilItsMatchingUp)
+{
+    ButtonTree tree = createButtonTree(firstWindow);
+    ASSERT_NE(tree.context, nullptr);
+    ActionRecorder recorder;
+    assertOk(tree.updater.setButtonAction(tree.button, makeAction(recorder, 1)));
+
+    auto focus = tree.context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
+    ASSERT_EQ(focus->focus, tree.button);
+
+    const Platform::DigitalControlIdentity enter =
+        Platform::KeyControlIdentity{firstWindow, Platform::Key::Enter};
+    const Platform::DigitalControlIdentity space =
+        Platform::KeyControlIdentity{firstWindow, Platform::Key::Space};
+    auto enterDown = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{3}, 30, UI::UIButtonActivationSource::Keyboard, enter);
+    ASSERT_TRUE(enterDown.has_value()) << (enterDown ? "" : enterDown.error().message);
+    EXPECT_TRUE(enterDown->consumed);
+    EXPECT_TRUE(enterDown->activated);
+    expectButtonPressed(tree.updater, tree.button, true);
+
+    auto spaceDown = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{4}, 40, UI::UIButtonActivationSource::Keyboard, space);
+    ASSERT_TRUE(spaceDown.has_value()) << (spaceDown ? "" : spaceDown.error().message);
+    EXPECT_TRUE(spaceDown->consumed);
+    expectButtonPressed(tree.updater, tree.button, true);
+
+    auto enterUp = tree.context->routeDefaultActionRelease(
+        Platform::PlatformFrameId{5}, 50, UI::UIButtonActivationSource::Keyboard, enter);
+    ASSERT_TRUE(enterUp.has_value()) << (enterUp ? "" : enterUp.error().message);
+    EXPECT_TRUE(enterUp->consumed);
+    expectButtonPressed(tree.updater, tree.button, true);
+
+    auto spaceUp = tree.context->routeDefaultActionRelease(
+        Platform::PlatformFrameId{6}, 60, UI::UIButtonActivationSource::Keyboard, space);
+    ASSERT_TRUE(spaceUp.has_value()) << (spaceUp ? "" : spaceUp.error().message);
+    EXPECT_TRUE(spaceUp->consumed);
+    expectButtonPressed(tree.updater, tree.button, false);
+    EXPECT_EQ(recorder.size, 2U);
+}
+
+TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptUpAreReleaseBarriersWhenDirtyQueueIsFull)
+{
+    ButtonTree tree = createButtonTree(
+        firstWindow,
+        {
+            .nodeCapacity = 8,
+            .rootCapacity = 1,
+            .dirtyQueueCapacity = 3,
+            .routePathCapacity = 8,
+            .routedPointerListenerCapacity = 8,
+            .buttonActionCapacity = 1,
+        });
+    ASSERT_NE(tree.context, nullptr);
+    const UI::UINodeId blocker =
+        createPanel(*tree.context, tree.root.rootNodeId());
+    ASSERT_TRUE(blocker.hasValue());
+    ActionRecorder recorder;
+    assertOk(tree.updater.setButtonAction(tree.button, makeAction(recorder, 9)));
+
+    auto focus = tree.context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
+    ASSERT_EQ(focus->focus, tree.button);
+    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    const Platform::DigitalControlIdentity enter =
+        Platform::KeyControlIdentity{firstWindow, Platform::Key::Enter};
+    auto down = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{1},
+        10,
+        UI::UIButtonActivationSource::Keyboard,
+        enter);
+    ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+    EXPECT_TRUE(down->consumed);
+    EXPECT_TRUE(down->activated);
+    expectButtonPressed(tree.updater, tree.button, true);
+    EXPECT_EQ(recorder.size, 1U);
+
+    // Publish the pressed state before filling every remaining dirty slot.
+    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    const UI::UIBoxPaint blockerPaint{
+        .solidFill = UI::UISolidFill{
+            .color = {.red = 1, .green = 2, .blue = 3, .alpha = 255},
+        },
+    };
+    assertOk(tree.updater.setBoxPaint(tree.root.rootNodeId(), blockerPaint));
+    assertOk(tree.updater.setBoxPaint(tree.panel, blockerPaint));
+    assertOk(tree.updater.setBoxPaint(blocker, blockerPaint));
+    ASSERT_EQ(tree.context->statistics().dirtyQueuePendingCount, 3U);
+
+    auto up = tree.context->routeDefaultActionRelease(
+        Platform::PlatformFrameId{2},
+        20,
+        UI::UIButtonActivationSource::Keyboard,
+        enter);
+    ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
+    EXPECT_TRUE(up->consumed);
+    EXPECT_FALSE(up->activated);
+    // Up is a release barrier: failure to repaint cannot resurrect the
+    // logical pressed state or trigger another action.
+    expectButtonPressed(tree.updater, tree.button, false);
+    EXPECT_EQ(recorder.size, 1U);
+
+    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.button);
+    auto idleUp = tree.context->routeDefaultActionRelease(
+        Platform::PlatformFrameId{3},
+        30,
+        UI::UIButtonActivationSource::Keyboard,
+        enter);
+    ASSERT_TRUE(idleUp.has_value()) << (idleUp ? "" : idleUp.error().message);
+    EXPECT_FALSE(idleUp->consumed);
+    EXPECT_EQ(recorder.size, 1U);
+
+    auto gamepadsResult = GamepadPool::Create(1);
+    ASSERT_TRUE(gamepadsResult.has_value());
+    auto gamepads = std::make_unique<GamepadPool>(std::move(*gamepadsResult));
+    auto gamepadResult = gamepads->tryEmplace(1);
+    ASSERT_TRUE(gamepadResult.has_value());
+    const Platform::DigitalControlIdentity south =
+        Platform::GamepadButtonControlIdentity{
+            .routedWindow = firstWindow,
+            .gamepad = *gamepadResult,
+            .button = Platform::GamepadButton::South,
+        };
+    auto gamepadDown = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{4},
+        40,
+        UI::UIButtonActivationSource::Gamepad,
+        south);
+    ASSERT_TRUE(gamepadDown.has_value())
+        << (gamepadDown ? "" : gamepadDown.error().message);
+    EXPECT_TRUE(gamepadDown->consumed);
+    EXPECT_TRUE(gamepadDown->activated);
+    expectButtonPressed(tree.updater, tree.button, true);
+    EXPECT_EQ(recorder.size, 2U);
+    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    const UI::UIBoxPaint secondBlockerPaint{
+        .solidFill = UI::UISolidFill{
+            .color = {.red = 4, .green = 5, .blue = 6, .alpha = 255},
+        },
+    };
+    assertOk(tree.updater.setBoxPaint(
+        tree.root.rootNodeId(),
+        secondBlockerPaint));
+    assertOk(tree.updater.setBoxPaint(tree.panel, secondBlockerPaint));
+    assertOk(tree.updater.setBoxPaint(blocker, secondBlockerPaint));
+    ASSERT_EQ(tree.context->statistics().dirtyQueuePendingCount, 3U);
+
+    auto gamepadUp = tree.context->routeDefaultActionRelease(
+        Platform::PlatformFrameId{5},
+        50,
+        UI::UIButtonActivationSource::Gamepad,
+        south);
+    ASSERT_TRUE(gamepadUp.has_value())
+        << (gamepadUp ? "" : gamepadUp.error().message);
+    EXPECT_TRUE(gamepadUp->consumed);
+    EXPECT_FALSE(gamepadUp->activated);
+    expectButtonPressed(tree.updater, tree.button, false);
+    EXPECT_EQ(recorder.size, 2U);
+
+    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    auto idleGamepadUp = tree.context->routeDefaultActionRelease(
+        Platform::PlatformFrameId{6},
+        60,
+        UI::UIButtonActivationSource::Gamepad,
+        south);
+    ASSERT_TRUE(idleGamepadUp.has_value())
+        << (idleGamepadUp ? "" : idleGamepadUp.error().message);
+    EXPECT_FALSE(idleGamepadUp->consumed);
+    EXPECT_EQ(recorder.size, 2U);
+}
+
+TEST_F(UIButtonActionTest, KeyboardAcceptDownDirtyFailurePrecedesCallbackAndPress)
+{
+    ButtonTree tree = createButtonTree(
+        firstWindow,
+        {
+            .nodeCapacity = 8,
+            .rootCapacity = 1,
+            .dirtyQueueCapacity = 3,
+            .routePathCapacity = 8,
+            .routedPointerListenerCapacity = 8,
+            .buttonActionCapacity = 1,
+        });
+    ASSERT_NE(tree.context, nullptr);
+    ActionRecorder recorder;
+    assertOk(tree.updater.setButtonAction(tree.button, makeAction(recorder, 1)));
+    const UI::UINodeId blocker =
+        createPanel(*tree.context, tree.root.rootNodeId());
+    ASSERT_TRUE(blocker.hasValue());
+    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    auto focus = tree.context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
+    ASSERT_EQ(focus->focus, tree.button);
+    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    const UI::UIBoxPaint blockerPaint{
+        .solidFill = UI::UISolidFill{
+            .color = {.red = 1, .green = 2, .blue = 3, .alpha = 255},
+        },
+    };
+    assertOk(tree.updater.setBoxPaint(tree.root.rootNodeId(), blockerPaint));
+    assertOk(tree.updater.setBoxPaint(tree.panel, blockerPaint));
+    assertOk(tree.updater.setBoxPaint(blocker, blockerPaint));
+    ASSERT_EQ(tree.context->statistics().dirtyQueuePendingCount, 3U);
+
+    const Platform::DigitalControlIdentity enter =
+        Platform::KeyControlIdentity{firstWindow, Platform::Key::Enter};
+    auto rejected = tree.context->routeDefaultActionActivate(
+        Platform::PlatformFrameId{3}, 30, UI::UIButtonActivationSource::Keyboard, enter);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
+    expectButtonPressed(tree.updater, tree.button, false);
+    EXPECT_EQ(recorder.size, 0U);
 }
 
 TEST_F(UIButtonActionTest, DefaultActionWithoutRegisteredCallbackConsumesButDoesNotActivate)

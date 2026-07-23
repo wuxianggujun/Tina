@@ -3,6 +3,7 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/ui/UIButton.hpp>
+#include <tina/ui/UICheckbox.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIRadioButton.hpp>
@@ -46,6 +47,8 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setEnabled(UI::UINodeId node, bool enabled);
     [[nodiscard]] Core::Result<bool> isEnabled(UI::UINodeId node) const;
     [[nodiscard]] Core::Status setBoxPaint(UI::UINodeId node, const UI::UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setButtonPaint(UI::UINodeId button, const UI::UIButtonPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIButtonPaint> buttonPaint(UI::UINodeId button) const;
     [[nodiscard]] Core::Status setText(UI::UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyle(UI::UINodeId node, const UI::UITextStyle& style);
     [[nodiscard]] Core::Result<std::string_view> text(UI::UINodeId node);
@@ -57,12 +60,16 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<bool> isButtonPressed(UI::UINodeId button) const;
     [[nodiscard]] Core::Status setCheckboxAction(UI::UINodeId checkbox, UI::UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearCheckboxAction(UI::UINodeId checkbox);
+    [[nodiscard]] Core::Status setCheckboxPaint(UI::UINodeId checkbox, const UI::UICheckboxPaint& paint);
+    [[nodiscard]] Core::Result<UI::UICheckboxPaint> checkboxPaint(UI::UINodeId checkbox) const;
     [[nodiscard]] Core::Status setChecked(UI::UINodeId checkbox, bool checked);
     [[nodiscard]] Core::Result<bool> isChecked(UI::UINodeId checkbox) const;
     [[nodiscard]] Core::Result<bool> isCheckboxPressed(UI::UINodeId checkbox) const;
     [[nodiscard]] Core::Status setSliderRange(UI::UINodeId slider, float minValue, float maxValue, float step = 0.0F);
     [[nodiscard]] Core::Status setSliderValue(UI::UINodeId slider, float value);
     [[nodiscard]] Core::Result<float> sliderValue(UI::UINodeId slider) const;
+    [[nodiscard]] Core::Status setSliderPaint(UI::UINodeId slider, const UI::UISliderPaint& paint);
+    [[nodiscard]] Core::Result<UI::UISliderPaint> sliderPaint(UI::UINodeId slider) const;
     [[nodiscard]] Core::Status setSliderChangeCallback(UI::UINodeId slider, UI::UISliderChangeCallback callback);
     [[nodiscard]] Core::Status clearSliderChangeCallback(UI::UINodeId slider);
     [[nodiscard]] Core::Result<bool> isSliderDragging(UI::UINodeId slider) const;

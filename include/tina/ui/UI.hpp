@@ -2,6 +2,7 @@
 
 #include <tina/ui/InputRouting.hpp>
 #include <tina/ui/UIButton.hpp>
+#include <tina/ui/UICheckbox.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIRadioButton.hpp>
 #include <tina/ui/UISlider.hpp>
@@ -20,6 +21,7 @@
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIText.hpp>
+#include <tina/ui/UITheme.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/text/UIGlyphAtlas.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>

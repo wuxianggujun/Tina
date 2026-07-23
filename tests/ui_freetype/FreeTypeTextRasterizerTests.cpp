@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
 
+#include <tina/core/id/GenerationPool.hpp>
+#include <tina/ui/UI.hpp>
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/text/FreeTypeTextRasterizerFactory.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <span>
@@ -11,6 +14,8 @@
 
 namespace Tina::Tests {
 namespace {
+
+using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
 [[nodiscard]] const char* resolveOptionalFontPath()
 {
@@ -138,6 +143,105 @@ TEST(FreeTypeTextRasterizerTests, SourceHanSansFixtureMeasuresAndRastersChinese)
     EXPECT_TRUE(hasInk);
 
     ASSERT_TRUE(rasterizer->closeFace(face));
+}
+
+TEST(FreeTypeTextRasterizerTests, ContextSkipsZeroCoverageSpacePaintAndKeepsAtlasGlyphOrder)
+{
+    const char* fontPath = resolveOptionalFontPath();
+    if (fontPath == nullptr) {
+        GTEST_SKIP() << "No FreeType fixture font: set TINA_UI_FONT_PATH or CMake -DTINA_UI_FONT_PATH=";
+    }
+    const auto fontBytes = loadFontBytes(fontPath);
+    if (fontBytes.empty()) {
+        GTEST_SKIP() << "Cannot read FreeType fixture font at " << fontPath;
+    }
+
+    auto rasterizerResult = UI::createFreeTypeTextRasterizer(
+        UI::UITextRasterizerCapacity{
+            .faceCapacity = 1,
+            .maxGlyphsPerRaster = 8,
+            .coverageByteCapacity = 64U * 1024U,
+        });
+    ASSERT_TRUE(rasterizerResult.has_value())
+        << (rasterizerResult ? "" : rasterizerResult.error().message);
+
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+
+    auto contextResult = UI::UIContext::Create(
+        *windowResult,
+        UI::UIContextCapacityConfig{
+            .nodeCapacity = 8,
+            .rootCapacity = 1,
+            .paintSnapshotCapacity = 8,
+        },
+        std::move(*rasterizerResult));
+    ASSERT_TRUE(contextResult.has_value())
+        << (contextResult ? "" : contextResult.error().message);
+    std::unique_ptr<UI::UIContext> context = std::move(*contextResult);
+    ASSERT_TRUE(context->openTextFont(
+        std::span<const std::byte>(fontBytes.data(), fontBytes.size())));
+
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value())
+        << (rootResult ? "" : rootResult.error().message);
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value())
+        << (updaterResult ? "" : updaterResult.error().message);
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    UI::UILayoutStyle rootStyle{};
+    rootStyle.flex.alignItems = UI::UIAlignItems::Start;
+    ASSERT_TRUE(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
+    auto labelResult = updater.createLabel(root.rootNodeId());
+    ASSERT_TRUE(labelResult.has_value())
+        << (labelResult ? "" : labelResult.error().message);
+    const UI::UINodeId label = *labelResult;
+    UI::UITextStyle textStyle{};
+    textStyle.logicalSize = 24.0F;
+    ASSERT_TRUE(updater.setTextStyle(label, textStyle));
+    ASSERT_TRUE(updater.setText(label, "A A"));
+    ASSERT_TRUE(context->commitLayout({.width = 200.0F, .height = 80.0F}));
+
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    ASSERT_EQ(paint.size(), 2U);
+    for (const UI::UICommittedPaintEntry& entry : paint.entries()) {
+        EXPECT_EQ(entry.node, label);
+        EXPECT_TRUE(entry.isGlyph);
+        EXPECT_GT(entry.atlasWidth, 0U);
+        EXPECT_GT(entry.atlasHeight, 0U);
+    }
+    EXPECT_LT(paint.entries()[0].paintOrdinal, paint.entries()[1].paintOrdinal);
+    EXPECT_LT(paint.entries()[0].worldRect.x, paint.entries()[1].worldRect.x);
+    EXPECT_GT(
+        paint.entries()[1].worldRect.x,
+        paint.entries()[0].worldRect.x + paint.entries()[0].worldRect.width);
+
+    // Repeated visible glyphs reuse one atlas placement; the zero-coverage
+    // space consumes no slot and never becomes a SolidQuad paint entry.
+    EXPECT_EQ(paint.entries()[0].atlasX, paint.entries()[1].atlasX);
+    EXPECT_EQ(paint.entries()[0].atlasY, paint.entries()[1].atlasY);
+    EXPECT_EQ(paint.entries()[0].atlasWidth, paint.entries()[1].atlasWidth);
+    EXPECT_EQ(paint.entries()[0].atlasHeight, paint.entries()[1].atlasHeight);
+
+    const std::span<const u8> atlas = context->glyphAtlasPixels();
+    ASSERT_FALSE(atlas.empty());
+    const u32 atlasWidth = context->glyphAtlasWidth();
+    ASSERT_GT(atlasWidth, 0U);
+    bool hasInk = false;
+    for (u32 row = 0; row < paint.entries()[0].atlasHeight && !hasInk; ++row) {
+        const usize rowOffset =
+            static_cast<usize>(paint.entries()[0].atlasY + row) * atlasWidth
+            + paint.entries()[0].atlasX;
+        const auto rowPixels = atlas.subspan(rowOffset, paint.entries()[0].atlasWidth);
+        hasInk = std::any_of(
+            rowPixels.begin(), rowPixels.end(), [](u8 coverage) { return coverage != 0; });
+    }
+    EXPECT_TRUE(hasInk);
 }
 
 } // namespace Tina::Tests

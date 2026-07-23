@@ -7,6 +7,7 @@
 #include <initializer_list>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -349,6 +350,144 @@ TEST_F(UITextEditTest, EnforcesSingleLineUtf8AndCodepointSelectionBounds)
     EXPECT_EQ(
         *selection,
         (UI::UITextSelection{.anchorCodepoint = 1, .caretCodepoint = 1}));
+}
+
+TEST_F(UITextEditTest, InvalidTextInputAndCompositionLeaveActivePreeditUnchanged)
+{
+    const UI::UINodeId textEdit = createTextEdit();
+    ASSERT_TRUE(textEdit.hasValue());
+    assertOk(updater.setText(textEdit, "AB"));
+    focusWithTab(textEdit);
+
+    auto started = context->routeTextComposition(
+        window,
+        Platform::PlatformFrameId{1},
+        1,
+        "old",
+        2,
+        Platform::TextCompositionStage::Started);
+    ASSERT_TRUE(started.has_value())
+        << (started ? "" : started.error().message);
+
+    const auto expectCompositionStateUnchanged = [&] {
+        EXPECT_TRUE(context->imeCompositionActive());
+        EXPECT_EQ(context->imePreeditUtf8(), "old");
+        EXPECT_EQ(context->imePreeditCursorCodepoint(), 2U);
+    };
+    const auto expectInvalidComposition = [&](u64 sequence,
+                                              std::string_view preedit,
+                                              Platform::TextCompositionStage stage,
+                                              Core::ErrorCode expectedError) {
+        auto result = context->routeTextComposition(
+            window,
+            Platform::PlatformFrameId{sequence},
+            sequence,
+            preedit,
+            0,
+            stage);
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, expectedError);
+        expectCompositionStateUnchanged();
+    };
+
+    expectInvalidComposition(
+        2,
+        "new",
+        static_cast<Platform::TextCompositionStage>(255),
+        UI::UIErrorCode::InvalidText);
+    expectInvalidComposition(
+        3,
+        std::string_view{"\xC3\x28", 2},
+        Platform::TextCompositionStage::Updated,
+        UI::UIErrorCode::InvalidText);
+    expectInvalidComposition(
+        4,
+        std::string_view{"A\0B", 3},
+        Platform::TextCompositionStage::Updated,
+        UI::UIErrorCode::InvalidText);
+
+    const std::string oversizedPreedit(513, 'x');
+    expectInvalidComposition(
+        5,
+        oversizedPreedit,
+        Platform::TextCompositionStage::Updated,
+        UI::UIErrorCode::CapacityExceeded);
+
+    for (const auto [sequence, invalidInput] : {
+             std::pair{6ULL, std::string_view{"\xE2\x82", 2}},
+             std::pair{7ULL, std::string_view{"A\0B", 3}},
+         }) {
+        auto input = context->routeTextInput(
+            window,
+            Platform::PlatformFrameId{sequence},
+            sequence,
+            invalidInput);
+        ASSERT_FALSE(input.has_value());
+        EXPECT_EQ(input.error().code, UI::UIErrorCode::InvalidText);
+        expectCompositionStateUnchanged();
+    }
+}
+
+TEST_F(UITextEditTest, CompositionByteLimitAndProgrammaticTextClampState)
+{
+    constexpr std::string_view InitialUtf8 = "A" "\xE4\xBD\xA0" "BC";
+    const UI::UINodeId textEdit = createTextEdit();
+    ASSERT_TRUE(textEdit.hasValue());
+    assertOk(updater.setText(textEdit, InitialUtf8));
+    assertOk(updater.setTextSelection(
+        textEdit,
+        {.anchorCodepoint = 1, .caretCodepoint = 4}));
+    focusWithTab(textEdit);
+
+    const std::string maximumPreedit(512, 'x');
+    auto composition = context->routeTextComposition(
+        window,
+        Platform::PlatformFrameId{1},
+        1,
+        maximumPreedit,
+        999,
+        Platform::TextCompositionStage::Started);
+    ASSERT_TRUE(composition.has_value())
+        << (composition ? "" : composition.error().message);
+    EXPECT_TRUE(composition->consumed);
+    EXPECT_TRUE(composition->applied);
+    EXPECT_EQ(context->imePreeditUtf8(), maximumPreedit);
+    EXPECT_EQ(context->imePreeditCursorCodepoint(), 512U);
+
+    const Core::Status invalidReplacement = updater.setText(
+        textEdit,
+        std::string_view{"\xED\xA0\x80", 3});
+    ASSERT_FALSE(invalidReplacement.has_value());
+    EXPECT_EQ(invalidReplacement.error().code, UI::UIErrorCode::InvalidText);
+    EXPECT_TRUE(context->imeCompositionActive());
+    EXPECT_EQ(context->imePreeditUtf8(), maximumPreedit);
+
+    assertOk(updater.setText(textEdit, "X"));
+    EXPECT_FALSE(context->imeCompositionActive());
+    EXPECT_TRUE(context->imePreeditUtf8().empty());
+    EXPECT_EQ(context->imePreeditCursorCodepoint(), 0U);
+    auto selection = updater.textSelection(textEdit);
+    ASSERT_TRUE(selection.has_value())
+        << (selection ? "" : selection.error().message);
+    EXPECT_EQ(
+        *selection,
+        (UI::UITextSelection{.anchorCodepoint = 1, .caretCodepoint = 1}));
+
+    composition = context->routeTextComposition(
+        window,
+        Platform::PlatformFrameId{2},
+        2,
+        "again",
+        5,
+        Platform::TextCompositionStage::Started);
+    ASSERT_TRUE(composition.has_value())
+        << (composition ? "" : composition.error().message);
+    ASSERT_TRUE(context->imeCompositionActive());
+
+    assertOk(updater.setText(textEdit, "X"));
+    EXPECT_FALSE(context->imeCompositionActive());
+    EXPECT_TRUE(context->imePreeditUtf8().empty());
+    EXPECT_EQ(context->imePreeditCursorCodepoint(), 0U);
 }
 
 TEST_F(UITextEditTest, TextInputAndImeCommitReplaceUnicodeSelection)

@@ -69,7 +69,9 @@ set(TINA_RUNTIME_TEST_SOURCES
     runtime/header_isolation/PrimaryWindowUIHeader.cpp
     runtime/header_isolation/WindowSurfaceIntegrationHeader.cpp
     runtime/InputActionTests.cpp
+    runtime/Sample2DAudioControlStateTests.cpp
     runtime/Sample2DTileSelectionTests.cpp
+    runtime/Sample2DWindowVisibilityPacingTests.cpp
     runtime/PlatformEventDispatcherTests.cpp
     runtime/RuntimeLifecycleTests.cpp
     runtime/WindowSurfaceLeaseTests.cpp

@@ -17,6 +17,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIHitTest.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPaint.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UITheme.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIText.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITextEdit.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UIGlyphAtlas.hpp

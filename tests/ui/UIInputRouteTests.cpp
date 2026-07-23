@@ -954,6 +954,140 @@ TEST_F(UIInputRouteTest, RouteDepthCapacityFailureInvokesNoPartialCallbacks)
     EXPECT_EQ(query.target.node, tree.target);
 }
 
+TEST_F(UIInputRouteTest, DirtyQueueCapacityFailureInvokesNoCallbacks)
+{
+    RouteTree tree = createRouteTree(
+        window,
+        {.nodeCapacity = 8,
+         .rootCapacity = 1,
+         .dirtyQueueCapacity = 3,
+         .routePathCapacity = 8,
+         .routedPointerListenerCapacity = 1});
+    ASSERT_NE(tree.context, nullptr);
+    const UI::UINodeId blocker =
+        createPanel(*tree.context, tree.root.rootNodeId());
+    ASSERT_TRUE(blocker.hasValue());
+    usize callbackCount = 0;
+    auto token = addListener(
+        *tree.context,
+        {.node = tree.target,
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[&callbackCount](
+                                        UI::UIRoutedPointerEvent&) noexcept {
+            ++callbackCount;
+        }});
+    ASSERT_TRUE(token);
+
+    const auto fillDirtySlot = [&tree](
+                                   UI::UINodeId node,
+                                   UI::UIStraightSrgba8Color color) {
+        expectOk(tree.updater.setBoxPaint(
+            node,
+            UI::UIBoxPaint{
+                .solidFill = UI::UISolidFill{.color = color},
+            }));
+    };
+    fillDirtySlot(
+        tree.root.rootNodeId(),
+        {.red = 1, .green = 2, .blue = 3, .alpha = 255});
+    fillDirtySlot(
+        tree.panel,
+        {.red = 4, .green = 5, .blue = 6, .alpha = 255});
+    fillDirtySlot(
+        blocker,
+        {.red = 7, .green = 8, .blue = 9, .alpha = 255});
+    ASSERT_EQ(tree.context->statistics().dirtyQueuePendingCount, 3U);
+
+    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    ASSERT_FALSE(routed.has_value());
+    EXPECT_EQ(routed.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(callbackCount, 0U);
+    EXPECT_EQ(tree.context->statistics().dirtyQueuePendingCount, 3U);
+}
+
+TEST_F(UIInputRouteTest, ListenerCannotStealReservedPointerRouteDirtySlot)
+{
+    RouteTree tree = createRouteTree(
+        window,
+        {.nodeCapacity = 8,
+         .rootCapacity = 1,
+         .dirtyQueueCapacity = 4,
+         .routePathCapacity = 8,
+         .routedPointerListenerCapacity = 1});
+    ASSERT_NE(tree.context, nullptr);
+    const UI::UINodeId blocker =
+        createPanel(*tree.context, tree.root.rootNodeId());
+    const UI::UINodeId existingDirty =
+        createPanel(*tree.context, tree.root.rootNodeId());
+    const UI::UINodeId existingDirty2 =
+        createPanel(*tree.context, tree.root.rootNodeId());
+    const UI::UINodeId existingDirty3 =
+        createPanel(*tree.context, tree.root.rootNodeId());
+    ASSERT_TRUE(blocker.hasValue());
+    ASSERT_TRUE(existingDirty.hasValue());
+    ASSERT_TRUE(existingDirty2.hasValue());
+    ASSERT_TRUE(existingDirty3.hasValue());
+    expectOk(tree.updater.setBoxPaint(
+        existingDirty,
+        UI::UIBoxPaint{
+            .solidFill = UI::UISolidFill{
+                .color = {.red = 1, .green = 2, .blue = 3, .alpha = 255},
+            },
+        }));
+    ASSERT_EQ(tree.context->statistics().dirtyQueuePendingCount, 1U);
+    expectOk(tree.updater.setBoxPaint(
+        existingDirty2,
+        UI::UIBoxPaint{
+            .solidFill = UI::UISolidFill{
+                .color = {.red = 4, .green = 5, .blue = 6, .alpha = 255},
+            },
+        }));
+    expectOk(tree.updater.setBoxPaint(
+        existingDirty3,
+        UI::UIBoxPaint{
+            .solidFill = UI::UISolidFill{
+                .color = {.red = 7, .green = 8, .blue = 9, .alpha = 255},
+            },
+        }));
+    ASSERT_EQ(tree.context->statistics().dirtyQueuePendingCount, 3U);
+
+    bool listenerInvoked = false;
+    bool unrelatedMutationRejected = false;
+    auto token = addListener(
+        *tree.context,
+        {.node = tree.target,
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{
+            [&tree, blocker, &listenerInvoked, &unrelatedMutationRejected](
+                UI::UIRoutedPointerEvent&) noexcept {
+                listenerInvoked = true;
+                const Core::Status mutation = tree.updater.setBoxPaint(
+                    blocker,
+                    UI::UIBoxPaint{
+                        .solidFill = UI::UISolidFill{
+                            .color = {.red = 12, .green = 34, .blue = 56, .alpha = 255},
+                        },
+                    });
+                unrelatedMutationRejected = !mutation
+                    && mutation.error().code == UI::UIErrorCode::CapacityExceeded;
+            }});
+    ASSERT_TRUE(token);
+
+    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
+    EXPECT_TRUE(listenerInvoked);
+    EXPECT_TRUE(unrelatedMutationRejected);
+    EXPECT_TRUE(routed->consumed);
+    EXPECT_TRUE(routed->claimedPointerButtons.test(
+        static_cast<usize>(Platform::PointerButton::Primary)));
+    EXPECT_EQ(tree.context->statistics().dirtyQueuePendingCount, 4U);
+    auto pressed = tree.updater.isButtonPressed(tree.target);
+    ASSERT_TRUE(pressed.has_value());
+    EXPECT_TRUE(*pressed);
+}
+
 TEST_F(UIInputRouteTest, ListenerTokenMovesAndSurvivesContextDestroyedFirst)
 {
     RouteTree tree = createRouteTree(window);
@@ -1078,6 +1212,75 @@ TEST_F(UIInputRouteTest, CommitAttemptsDuringRouteAreRejectedAndOuterRouteComple
     EXPECT_EQ(state.layoutError, UI::UIErrorCode::PointerRouteAlreadyInProgress);
     EXPECT_EQ(state.laterListenerCount, 1U);
     EXPECT_EQ(routed->listenerInvocationCount, 2U);
+}
+
+TEST_F(UIInputRouteTest, DefaultActionActivationFromListenerRetainsRouteGuard)
+{
+    RouteTree tree = createRouteTree(window);
+    ASSERT_NE(tree.context, nullptr);
+
+    struct State final {
+        UI::UIContext* context = nullptr;
+        Core::ErrorCode nestedError{};
+        Core::ErrorCode commitError{};
+        usize callbackCount = 0;
+        bool nestedRejected = false;
+    } state{.context = tree.context.get()};
+
+    auto action = tree.updater.setButtonAction(
+        tree.target,
+        UI::UIButtonActionCallback{[&state](const UI::UIButtonActionEvent&) noexcept {
+            ++state.callbackCount;
+        }});
+    ASSERT_TRUE(action.has_value()) << (action ? "" : action.error().message);
+
+    auto focus = tree.context->routeDefaultActionFocusStep(false);
+    ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
+    ASSERT_EQ(focus->focus, tree.target);
+    ASSERT_EQ(tree.context->defaultActionFocus(), tree.target);
+    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    expectOk(tree.updater.setBoxPaint(
+        tree.panel,
+        UI::UIBoxPaint{
+            .solidFill = UI::UISolidFill{
+                .color = {.red = 17, .green = 34, .blue = 51, .alpha = 255},
+            },
+        }));
+    const u64 paintRevisionBefore = tree.context->statistics().paintRevision;
+
+    auto token = addListener(
+        *tree.context,
+        {.node = tree.target,
+         .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+         .phases = UI::UIEventPhaseMask::Target},
+        UI::UIRoutedPointerCallback{[&state](UI::UIRoutedPointerEvent&) noexcept {
+            auto nested = state.context->routeDefaultActionActivate(
+                Platform::PlatformFrameId{2},
+                20,
+                UI::UIButtonActivationSource::Keyboard);
+            state.nestedRejected = !nested.has_value();
+            if (!nested) {
+                state.nestedError = nested.error().code;
+            }
+            const Core::Status commit = state.context->commitLayout(
+                {.width = 100.0F, .height = 100.0F});
+            if (!commit) {
+                state.commitError = commit.error().code;
+            }
+        }});
+    ASSERT_TRUE(token);
+
+    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
+    EXPECT_TRUE(state.nestedRejected);
+    EXPECT_EQ(state.nestedError, UI::UIErrorCode::PointerRouteAlreadyInProgress);
+    EXPECT_EQ(state.commitError, UI::UIErrorCode::PointerRouteAlreadyInProgress);
+    EXPECT_EQ(state.callbackCount, 0U);
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.target);
+    EXPECT_EQ(tree.context->statistics().paintRevision, paintRevisionBefore);
+    EXPECT_EQ(routed->listenerInvocationCount, 1U);
+    EXPECT_FALSE(routed->targetInvalidated);
 }
 
 TEST_F(UIInputRouteTest, DestroyingContextFromItsCallbackTerminates)

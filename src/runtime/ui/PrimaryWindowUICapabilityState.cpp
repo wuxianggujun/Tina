@@ -408,6 +408,40 @@ Core::Status PrimaryWindowUICapabilityState::setBoxPaint(u64 epoch, PrimaryWindo
     return Core::success();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setButtonPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId button, const UI::UIButtonPaint& paint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setButtonPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setButtonPaint(button, paint);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UIButtonPaint> PrimaryWindowUICapabilityState::buttonPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId button)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::buttonPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto paint = updater.buttonPaint(button);
+    if (!paint)
+    {
+        return Core::failure(rememberFirstError(std::move(paint.error()), Operation));
+    }
+    return *paint;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setText(u64 epoch, PrimaryWindowUIPhase phase,
                                                      UI::UITreeUpdater& updater, UI::UINodeId node,
                                                      std::string_view utf8)
@@ -593,6 +627,40 @@ Core::Status PrimaryWindowUICapabilityState::clearCheckboxAction(u64 epoch, Prim
     return Core::success();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setCheckboxPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId checkbox, const UI::UICheckboxPaint& paint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setCheckboxPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setCheckboxPaint(checkbox, paint);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UICheckboxPaint> PrimaryWindowUICapabilityState::checkboxPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId checkbox)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::checkboxPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto paint = updater.checkboxPaint(checkbox);
+    if (!paint)
+    {
+        return Core::failure(rememberFirstError(std::move(paint.error()), Operation));
+    }
+    return *paint;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setChecked(u64 epoch, PrimaryWindowUIPhase phase,
                                                         UI::UITreeUpdater& updater, UI::UINodeId checkbox, bool checked)
 {
@@ -690,6 +758,40 @@ Core::Result<float> PrimaryWindowUICapabilityState::sliderValue(u64 epoch, Prima
         return Core::failure(rememberFirstError(std::move(value.error()), Operation));
     }
     return *value;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setSliderPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId slider, const UI::UISliderPaint& paint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setSliderPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setSliderPaint(slider, paint);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UISliderPaint> PrimaryWindowUICapabilityState::sliderPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId slider)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::sliderPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto paint = updater.sliderPaint(slider);
+    if (!paint)
+    {
+        return Core::failure(rememberFirstError(std::move(paint.error()), Operation));
+    }
+    return *paint;
 }
 
 Core::Status PrimaryWindowUICapabilityState::setSliderChangeCallback(u64 epoch, PrimaryWindowUIPhase phase,

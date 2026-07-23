@@ -3,6 +3,7 @@
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/ui/UI.hpp>
 
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <utility>
@@ -224,6 +225,50 @@ TEST_F(UIProgressBarTest, RangeAndValueClampAndPublishSemantics)
     EXPECT_FALSE(semantics->focused);
 }
 
+TEST_F(UIProgressBarTest, RangeAndValueChangesPublishUpdatedSemanticsRevision)
+{
+    const UI::UINodeId progressBar = createProgressBar();
+    ASSERT_TRUE(progressBar.hasValue());
+    publishLayout();
+
+    const UI::UICommittedSemanticsView initialView = context->committedSemantics();
+    const u64 initialRevision = initialView.semanticsRevision();
+    const u64 initialLayoutRevision = initialView.layoutRevision();
+    const UI::UISemanticsEntry* initial = findSemanticsEntry(initialView, progressBar);
+    ASSERT_NE(initial, nullptr);
+    EXPECT_FLOAT_EQ(initial->minValue, 0.0F);
+    EXPECT_FLOAT_EQ(initial->maxValue, 1.0F);
+    EXPECT_FLOAT_EQ(initial->value, 0.0F);
+
+    assertOk(updater.setProgressBarRange(progressBar, 10.0F, 30.0F));
+    publishLayout();
+    const UI::UICommittedSemanticsView rangedView = context->committedSemantics();
+    EXPECT_EQ(rangedView.semanticsRevision(), initialRevision + 1U);
+    EXPECT_EQ(rangedView.layoutRevision(), initialLayoutRevision);
+    const UI::UISemanticsEntry* ranged = findSemanticsEntry(rangedView, progressBar);
+    ASSERT_NE(ranged, nullptr);
+    EXPECT_FLOAT_EQ(ranged->minValue, 10.0F);
+    EXPECT_FLOAT_EQ(ranged->maxValue, 30.0F);
+    EXPECT_FLOAT_EQ(ranged->value, 10.0F);
+
+    assertOk(updater.setProgressBarValue(progressBar, 20.0F));
+    publishLayout();
+    const UI::UICommittedSemanticsView valuedView = context->committedSemantics();
+    EXPECT_EQ(valuedView.semanticsRevision(), initialRevision + 2U);
+    EXPECT_EQ(valuedView.layoutRevision(), initialLayoutRevision);
+    const UI::UISemanticsEntry* valued = findSemanticsEntry(valuedView, progressBar);
+    ASSERT_NE(valued, nullptr);
+    EXPECT_FLOAT_EQ(valued->minValue, 10.0F);
+    EXPECT_FLOAT_EQ(valued->maxValue, 30.0F);
+    EXPECT_FLOAT_EQ(valued->value, 20.0F);
+
+    assertOk(updater.setProgressBarValue(progressBar, 20.0F));
+    publishLayout();
+    EXPECT_EQ(
+        context->committedSemantics().semanticsRevision(),
+        valuedView.semanticsRevision());
+}
+
 TEST_F(UIProgressBarTest, TrackAndFillPublishDeterministicGeometry)
 {
     const UI::UINodeId progressBar = createProgressBar(120.0F, 20.0F);
@@ -267,6 +312,74 @@ TEST_F(UIProgressBarTest, TrackAndFillPublishDeterministicGeometry)
             .blue = 25,
             .alpha = 128,
         }));
+}
+
+TEST_F(UIProgressBarTest, ClampedEndpointsPublishNoZeroWidthFillAndExactFullWidth)
+{
+    const UI::UINodeId progressBar = createProgressBar(120.0F, 20.0F);
+    ASSERT_TRUE(progressBar.hasValue());
+    assertOk(updater.setBoxPaint(progressBar, solidFill(20, 40, 60)));
+    assertOk(updater.setProgressBarRange(progressBar, 10.0F, 30.0F));
+    assertOk(updater.setProgressBarPaint(
+        progressBar,
+        {.fillColor = {.red = 200, .green = 100, .blue = 50, .alpha = 255}}));
+
+    assertOk(updater.setProgressBarValue(progressBar, -100.0F));
+    auto value = updater.progressBarValue(progressBar);
+    ASSERT_TRUE(value.has_value());
+    EXPECT_FLOAT_EQ(*value, 10.0F);
+    publishLayout();
+
+    const UI::UICommittedPaintView emptyFillPaint = context->committedPaint();
+    ASSERT_EQ(emptyFillPaint.size(), 1U);
+    EXPECT_EQ(emptyFillPaint.entries().front().node, progressBar);
+    EXPECT_EQ(
+        emptyFillPaint.entries().front().worldRect,
+        (UI::UILogicalRect{.x = 0.0F, .y = 0.0F, .width = 120.0F, .height = 20.0F}));
+
+    assertOk(updater.setProgressBarValue(progressBar, 100.0F));
+    value = updater.progressBarValue(progressBar);
+    ASSERT_TRUE(value.has_value());
+    EXPECT_FLOAT_EQ(*value, 30.0F);
+    publishLayout();
+
+    const UI::UICommittedPaintView fullFillPaint = context->committedPaint();
+    ASSERT_EQ(fullFillPaint.size(), 2U);
+    const UI::UICommittedPaintEntry& fill = fullFillPaint.entries()[1];
+    EXPECT_EQ(fill.node, progressBar);
+    EXPECT_EQ(
+        fill.worldRect,
+        (UI::UILogicalRect{.x = 0.0F, .y = 0.0F, .width = 120.0F, .height = 20.0F}));
+}
+
+TEST_F(UIProgressBarTest, ExtremeFiniteRangePublishesFiniteHalfWidthFill)
+{
+    const UI::UINodeId progressBar = createProgressBar(120.0F, 20.0F);
+    ASSERT_TRUE(progressBar.hasValue());
+    const float maximum = (std::numeric_limits<float>::max)();
+    assertOk(updater.setProgressBarRange(progressBar, -maximum, maximum));
+    assertOk(updater.setProgressBarValue(progressBar, 0.0F));
+    assertOk(updater.setProgressBarPaint(
+        progressBar,
+        {.fillColor = {.red = 40, .green = 80, .blue = 120, .alpha = 255}}));
+
+    publishLayout();
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    ASSERT_EQ(paint.size(), 1U);
+    const UI::UICommittedPaintEntry& fill = paint.entries().front();
+    EXPECT_EQ(fill.node, progressBar);
+    EXPECT_TRUE(std::isfinite(fill.worldRect.width));
+    EXPECT_FLOAT_EQ(fill.worldRect.width, 60.0F);
+
+    const UI::UISemanticsEntry* semantics =
+        findSemanticsEntry(context->committedSemantics(), progressBar);
+    ASSERT_NE(semantics, nullptr);
+    EXPECT_TRUE(std::isfinite(semantics->minValue));
+    EXPECT_TRUE(std::isfinite(semantics->maxValue));
+    EXPECT_TRUE(std::isfinite(semantics->value));
+    EXPECT_FLOAT_EQ(semantics->minValue, -maximum);
+    EXPECT_FLOAT_EQ(semantics->maxValue, maximum);
+    EXPECT_FLOAT_EQ(semantics->value, 0.0F);
 }
 
 TEST_F(UIProgressBarTest, PaintCapacityCountsValueDerivedFillAtomically)

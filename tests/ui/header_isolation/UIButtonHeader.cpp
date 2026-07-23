@@ -52,6 +52,8 @@ static_assert(std::is_enum_v<Tina::UI::UIButtonActivationSource>);
 static_assert(std::is_same_v<
               std::underlying_type_t<Tina::UI::UIButtonActivationSource>,
               Tina::u8>);
+static_assert(std::is_trivially_copyable_v<Tina::UI::UIButtonPaint>);
+static_assert(std::is_nothrow_destructible_v<Tina::UI::UIButtonPaint>);
 static_assert(std::is_trivially_copyable_v<Tina::UI::UIButtonActionEvent>);
 static_assert(std::is_nothrow_destructible_v<Tina::UI::UIButtonActionEvent>);
 

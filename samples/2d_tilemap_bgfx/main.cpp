@@ -51,13 +51,16 @@
 #include <tina/ui/UIRadioButton.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
+#include <tina/ui/UITheme.hpp>
 #if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/text/FreeTypeTextRasterizerFactory.hpp>
 #endif
 
 #include "render/bgfx/BgfxRenderDevice.hpp"
+#include "AudioControlState.hpp"
 #include "TileSelection.hpp"
+#include "WindowVisibilityPacing.hpp"
 
 #include <algorithm>
 #include <array>
@@ -143,6 +146,8 @@ void appendF32Bits(std::vector<std::byte>& out, float value)
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
+    // Optional visual gate: publish the Demo Button in its real disabled state.
+    bool uiDisabledDemoButton = false;
     // Optional controlled product gate: seed one map cell selection after enter
     // without synthesizing OS pointer events (GLFW smoke stays hermetic).
     bool seedTileSelection = false;
@@ -152,6 +157,18 @@ struct SampleOptions final {
     // Empty = capture-only (must succeed); non-empty = must match exactly.
     std::string expectPixelFingerprint{};
 };
+
+[[nodiscard]] constexpr u32 minimumWindowVisibilityMilliseconds(const SampleOptions& options) noexcept
+{
+#if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
+    return Tina::Sample2D::useProductUiVisibilityPacing(options.frameDelayMilliseconds)
+               ? Tina::Sample2D::MinimumProductUiVisibilityMilliseconds
+               : 0;
+#else
+    static_cast<void>(options);
+    return 0;
+#endif
+}
 
 struct LifecycleCounters final {
     u64 frameUpdates = 0;
@@ -174,6 +191,10 @@ struct LifecycleCounters final {
     bool uiTextEditInitialTextVerified = false;
     u64 uiButtonsCreated = 0;
     u64 uiButtonActionsWired = 0;
+    bool uiButtonPaintVerified = false;
+    bool uiDisabledDemoButtonRequested = false;
+    bool uiDemoButtonEnabled = true;
+    bool uiDisabledDemoButtonVerified = false;
     // M11-C1/C2: Master/Music/SFX volume Sliders wired to AudioEngine buses.
     u64 uiSlidersCreated = 0;
     u64 uiSliderChanges = 0;
@@ -330,16 +351,14 @@ inline constexpr u32 ExpectedSpritesWithPhysics = ExpectedNonEmptyTiles + 1;
 [[nodiscard]] Tina::UI::UIBoxPaint solidFill(u8 red, u8 green, u8 blue, u8 alpha = 255) noexcept
 {
     return Tina::UI::UIBoxPaint{
-        .solidFill =
-            Tina::UI::UISolidFill{
-                .color =
-                    {
-                        .red = red,
-                        .green = green,
-                        .blue = blue,
-                        .alpha = alpha,
-                    },
-            },
+        .solidFill = Tina::UI::UISolidFill{.color = Tina::UI::rgba8(red, green, blue, alpha)},
+    };
+}
+
+[[nodiscard]] Tina::UI::UIBoxPaint solidFill(u32 hexRgb, u8 alpha = 255) noexcept
+{
+    return Tina::UI::UIBoxPaint{
+        .solidFill = Tina::UI::UISolidFill{.color = Tina::UI::rgb(hexRgb, alpha)},
     };
 }
 
@@ -403,6 +422,11 @@ void writeError(const Tina::Core::Error& error)
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "invalid --frame-delay-ms");
             }
             options.frameDelayMilliseconds = value;
+            continue;
+        }
+        if (argument == "--ui-disabled-demo-button")
+        {
+            options.uiDisabledDemoButton = true;
             continue;
         }
         if (argument.starts_with("--seed-tile-selection="))
@@ -956,26 +980,30 @@ class TileMapBgfxState final : public Tina::IGameState {
             return status;
         }
 
+        // Phase A/B product chrome tokens (not CSS Theme). Escape hatch remains UIBoxPaint.
+        const Tina::UI::UITheme theme = Tina::UI::makeDefaultProductTheme();
         struct PanelSpec final {
             Tina::UI::UILayoutStyle layout{};
             Tina::UI::UIBoxPaint paint{};
         };
-        // HUD-style overlays: top-left status bar + bottom accent strip (SolidQuad only, no FreeType).
+        // Top-left title plate (wide enough for CJK), right settings card with elevation, accent strip.
         const std::array panels{
             PanelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(16.0F), Tina::UI::UILayoutLength::Px(12.0F),
-                                             Tina::UI::UILayoutLength::Px(280.0F), Tina::UI::UILayoutLength::Px(48.0F)),
-                .paint = solidFill(8, 16, 28, 220),
+                                             Tina::UI::UILayoutLength::Px(320.0F), Tina::UI::UILayoutLength::Px(56.0F)),
+                .paint = Tina::UI::makePanelBoxPaint(
+                    theme, Tina::UI::scaleColorAlpha(theme.surface1, 230), Tina::UI::UIElevation::None),
             },
             PanelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(668.0F), Tina::UI::UILayoutLength::Px(8.0F),
                                              Tina::UI::UILayoutLength::Px(276.0F), Tina::UI::UILayoutLength::Px(448.0F)),
-                .paint = solidFill(8, 16, 24, 228),
+                .paint = Tina::UI::makePanelBoxPaint(
+                    theme, Tina::UI::scaleColorAlpha(theme.surface0, 236), Tina::UI::UIElevation::Low),
             },
             PanelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(16.0F), Tina::UI::UILayoutLength::Px(480.0F),
                                              Tina::UI::UILayoutLength::Px(320.0F), Tina::UI::UILayoutLength::Px(10.0F)),
-                .paint = solidFill(255, 196, 64, 230),
+                .paint = Tina::UI::makeSolidBox(Tina::UI::scaleColorAlpha(theme.textAccent, 230)),
             },
         };
         for (const PanelSpec& panelSpec : panels)
@@ -1006,99 +1034,51 @@ class TileMapBgfxState final : public Tina::IGameState {
         const std::array labels{
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(28.0F), Tina::UI::UILayoutLength::Px(20.0F),
-                                             Tina::UI::UILayoutLength::Px(240.0F), Tina::UI::UILayoutLength::Px(28.0F)),
+                                             Tina::UI::UILayoutLength::Px(300.0F), Tina::UI::UILayoutLength::Px(28.0F)),
                 .text = "TileMap 2D",
-                .style =
-                    Tina::UI::UITextStyle{
-                        .logicalSize = 22.0F,
-                        .advanceScale = 0.65F,
-                        .lineHeightScale = 1.15F,
-                        .color = {.red = 120, .green = 240, .blue = 255, .alpha = 255},
-                    },
+                .style = Tina::UI::makeTitleTextStyle(theme),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(28.0F), Tina::UI::UILayoutLength::Px(44.0F),
-                                             Tina::UI::UILayoutLength::Px(240.0F), Tina::UI::UILayoutLength::Px(28.0F)),
+                                             Tina::UI::UILayoutLength::Px(300.0F), Tina::UI::UILayoutLength::Px(28.0F)),
                 .text = "中文地图",
-                .style =
-                    Tina::UI::UITextStyle{
-                        .logicalSize = 22.0F,
-                        .advanceScale = 0.65F,
-                        .lineHeightScale = 1.15F,
-                        .color = {.red = 255, .green = 210, .blue = 80, .alpha = 255},
-                    },
+                .style = Tina::UI::makeAccentTextStyle(theme, 22.0F),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(684.0F), Tina::UI::UILayoutLength::Px(78.0F),
                                              Tina::UI::UILayoutLength::Px(72.0F), Tina::UI::UILayoutLength::Px(24.0F)),
                 .text = "Master",
-                .style =
-                    Tina::UI::UITextStyle{
-                        .logicalSize = 18.0F,
-                        .advanceScale = 0.62F,
-                        .lineHeightScale = 1.12F,
-                        .color = {.red = 226, .green = 238, .blue = 246, .alpha = 255},
-                    },
+                .style = Tina::UI::makeBodyTextStyle(theme),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(684.0F), Tina::UI::UILayoutLength::Px(108.0F),
                                              Tina::UI::UILayoutLength::Px(72.0F), Tina::UI::UILayoutLength::Px(24.0F)),
                 .text = "Music",
-                .style =
-                    Tina::UI::UITextStyle{
-                        .logicalSize = 18.0F,
-                        .advanceScale = 0.62F,
-                        .lineHeightScale = 1.12F,
-                        .color = {.red = 226, .green = 238, .blue = 246, .alpha = 255},
-                    },
+                .style = Tina::UI::makeBodyTextStyle(theme),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(684.0F), Tina::UI::UILayoutLength::Px(138.0F),
                                              Tina::UI::UILayoutLength::Px(72.0F), Tina::UI::UILayoutLength::Px(24.0F)),
                 .text = "SFX",
-                .style =
-                    Tina::UI::UITextStyle{
-                        .logicalSize = 18.0F,
-                        .advanceScale = 0.62F,
-                        .lineHeightScale = 1.12F,
-                        .color = {.red = 226, .green = 238, .blue = 246, .alpha = 255},
-                    },
+                .style = Tina::UI::makeBodyTextStyle(theme),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(724.0F), Tina::UI::UILayoutLength::Px(174.0F),
                                              Tina::UI::UILayoutLength::Px(180.0F), Tina::UI::UILayoutLength::Px(24.0F)),
                 .text = "Mute Master",
-                .style =
-                    Tina::UI::UITextStyle{
-                        .logicalSize = 18.0F,
-                        .advanceScale = 0.62F,
-                        .lineHeightScale = 1.12F,
-                        .color = {.red = 244, .green = 246, .blue = 238, .alpha = 255},
-                    },
+                .style = Tina::UI::makeSecondaryTextStyle(theme),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(724.0F), Tina::UI::UILayoutLength::Px(210.0F),
                                              Tina::UI::UILayoutLength::Px(180.0F), Tina::UI::UILayoutLength::Px(24.0F)),
                 .text = "Mute Music",
-                .style =
-                    Tina::UI::UITextStyle{
-                        .logicalSize = 18.0F,
-                        .advanceScale = 0.62F,
-                        .lineHeightScale = 1.12F,
-                        .color = {.red = 244, .green = 246, .blue = 238, .alpha = 255},
-                    },
+                .style = Tina::UI::makeSecondaryTextStyle(theme),
             },
             LabelSpec{
                 .layout = absolutePanelStyle(Tina::UI::UILayoutLength::Px(724.0F), Tina::UI::UILayoutLength::Px(246.0F),
                                              Tina::UI::UILayoutLength::Px(180.0F), Tina::UI::UILayoutLength::Px(24.0F)),
                 .text = "Mute SFX",
-                .style =
-                    Tina::UI::UITextStyle{
-                        .logicalSize = 18.0F,
-                        .advanceScale = 0.62F,
-                        .lineHeightScale = 1.12F,
-                        .color = {.red = 244, .green = 246, .blue = 238, .alpha = 255},
-                    },
+                .style = Tina::UI::makeSecondaryTextStyle(theme),
             },
         };
         for (const LabelSpec& labelSpec : labels)
@@ -1140,16 +1120,36 @@ class TileMapBgfxState final : public Tina::IGameState {
             {
                 return status;
             }
-            if (auto status = tree->setBoxPaint(*button, solidFill(40, 120, 80, 230)); !status)
+            const Tina::UI::UIStraightSrgba8Color buttonNormal =
+                Tina::UI::scaleColorAlpha(Tina::UI::rgb(0x287850), 230);
+            if (auto status = tree->setBoxPaint(*button, Tina::UI::makeSolidBox(buttonNormal)); !status)
             {
                 return status;
             }
+            const Tina::UI::UIButtonPaint buttonPaint{
+                .hoveredBackgroundColor = Tina::UI::scaleColorAlpha(Tina::UI::lightenChannel(buttonNormal, 28), 240),
+                .pressedBackgroundColor = Tina::UI::darkenChannel(buttonNormal, 36),
+                .focusedBackgroundColor = Tina::UI::rgb(0x529AD0, 245),
+                .disabledBackgroundColor = Tina::UI::rgb(0x4C5258, 230),
+            };
+            if (auto status = tree->setButtonPaint(*button, buttonPaint); !status)
+            {
+                return status;
+            }
+            auto configuredButtonPaint = tree->buttonPaint(*button);
+            if (!configuredButtonPaint || *configuredButtonPaint != buttonPaint)
+            {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::Internal,
+                    "Button visual paint round-trip failed");
+            }
+            counters_->uiButtonPaintVerified = true;
             if (auto status = tree->setTextStyle(
                     *button, Tina::UI::UITextStyle{
                                  .logicalSize = 18.0F,
                                  .advanceScale = 0.62F,
                                  .lineHeightScale = 1.15F,
-                                 .color = {.red = 246, .green = 255, .blue = 246, .alpha = 255},
+                                  .color = theme.textPrimary,
                              });
                 !status)
             {
@@ -1169,6 +1169,31 @@ class TileMapBgfxState final : public Tina::IGameState {
             }
             ++counters_->uiButtonsCreated;
             ++counters_->uiButtonActionsWired;
+
+            // Keep the visual gate tied to the real retained enabled state. The
+            // default path still queries the state so both modes verify the same
+            // owner-thread contract without synthesizing paint or input state.
+            if (options_.uiDisabledDemoButton)
+            {
+                if (auto status = tree->setEnabled(*button, false); !status)
+                {
+                    return status;
+                }
+            }
+            auto enabled = tree->isEnabled(*button);
+            if (!enabled)
+            {
+                return Tina::Core::failure(std::move(enabled.error()));
+            }
+            counters_->uiDemoButtonEnabled = *enabled;
+            counters_->uiDisabledDemoButtonVerified =
+                *enabled == !options_.uiDisabledDemoButton;
+            if (!counters_->uiDisabledDemoButtonVerified)
+            {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::Internal,
+                    "Demo Button enabled state verification failed");
+            }
         }
 
         // M11-C1/C2: Master/Music/SFX volume Sliders -> AudioEngine buses.
@@ -1176,6 +1201,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         // interactive drag applies via pending flags on next updateFrame.
         const auto wireVolumeSlider =
             [&](float y, std::uint8_t r, std::uint8_t g, std::uint8_t b,
+                float initialValue,
                 float& pendingVolume, bool& hasPending, float& lastVolume, bool& fromSlider)
             -> Tina::Core::Status {
                 auto slider = tree->createSlider(root->rootNodeId());
@@ -1192,7 +1218,23 @@ class TileMapBgfxState final : public Tina::IGameState {
                 {
                     return status;
                 }
-                if (auto status = tree->setBoxPaint(*slider, solidFill(r, g, b, 220)); !status)
+                if (auto status = tree->setBoxPaint(
+                        *slider,
+                        Tina::UI::makeSolidBox(Tina::UI::scaleColorAlpha(theme.surface2, 230)));
+                    !status)
+                {
+                    return status;
+                }
+                if (auto status = tree->setSliderPaint(
+                        *slider,
+                        Tina::UI::UISliderPaint{
+                            .filledTrackColor = Tina::UI::rgba8(r, g, b),
+                            .thumbColor = theme.textPrimary,
+                            .draggingThumbColor = theme.textAccent,
+                            .contentInset = 4.0F,
+                            .thumbWidth = 8.0F,
+                        });
+                    !status)
                 {
                     return status;
                 }
@@ -1200,10 +1242,12 @@ class TileMapBgfxState final : public Tina::IGameState {
                 {
                     return status;
                 }
-                if (auto status = tree->setSliderValue(*slider, 1.0F); !status)
+                if (auto status = tree->setSliderValue(*slider, initialValue); !status)
                 {
                     return status;
                 }
+                pendingVolume = initialValue;
+                hasPending = true;
                 if (auto status = tree->setSliderChangeCallback(
                         *slider,
                         Tina::UI::UISliderChangeCallback{[&, this](const Tina::UI::UISliderChangeEvent& event) noexcept {
@@ -1221,19 +1265,22 @@ class TileMapBgfxState final : public Tina::IGameState {
                 return Tina::Core::success();
             };
 
-        if (auto status = wireVolumeSlider(82.0F, 60, 60, 90, pendingMasterVolume_, hasPendingMasterVolume_,
+        if (auto status = wireVolumeSlider(82.0F, 110, 130, 230, 0.75F,
+                                           pendingMasterVolume_, hasPendingMasterVolume_,
                                            counters_->lastMasterVolume, counters_->masterVolumeFromSlider);
             !status)
         {
             return status;
         }
-        if (auto status = wireVolumeSlider(112.0F, 50, 80, 70, pendingMusicVolume_, hasPendingMusicVolume_,
+        if (auto status = wireVolumeSlider(112.0F, 70, 185, 125, 0.55F,
+                                           pendingMusicVolume_, hasPendingMusicVolume_,
                                            counters_->lastMusicVolume, counters_->musicVolumeFromSlider);
             !status)
         {
             return status;
         }
-        if (auto status = wireVolumeSlider(142.0F, 90, 70, 50, pendingSfxVolume_, hasPendingSfxVolume_,
+        if (auto status = wireVolumeSlider(142.0F, 225, 155, 70, 0.35F,
+                                           pendingSfxVolume_, hasPendingSfxVolume_,
                                            counters_->lastSfxVolume, counters_->sfxVolumeFromSlider);
             !status)
         {
@@ -1241,11 +1288,12 @@ class TileMapBgfxState final : public Tina::IGameState {
         }
 
         // M11-C3/C5: Master/Music/SFX mute Checkboxes (product settings surface).
-        // UI toggles checked before the action; sample flips pending from last known bus state.
+        // UI toggles checked before the action; sample queues the matching mute transition.
         // Capture bus id by value so the action callback does not dangle on stack refs.
         enum class MuteBus : u8 { Master = 0, Music = 1, Sfx = 2 };
         const auto wireMuteCheckbox =
-            [&](float y, std::uint8_t r, std::uint8_t g, std::uint8_t b, MuteBus bus) -> Tina::Core::Status {
+            [&](float y, std::uint8_t r, std::uint8_t g, std::uint8_t b, MuteBus bus,
+                bool initiallyChecked) -> Tina::Core::Status {
                 auto checkbox = tree->createCheckbox(root->rootNodeId());
                 if (!checkbox)
                 {
@@ -1264,9 +1312,34 @@ class TileMapBgfxState final : public Tina::IGameState {
                 {
                     return status;
                 }
-                if (auto status = tree->setChecked(*checkbox, false); !status)
+                if (auto status = tree->setCheckboxPaint(
+                        *checkbox,
+                        Tina::UI::UICheckboxPaint{
+                            .checkedIndicatorColor = theme.textPrimary,
+                            .checkedIndicatorInset = 6.0F,
+                        });
+                    !status)
                 {
                     return status;
+                }
+                if (auto status = tree->setChecked(*checkbox, initiallyChecked); !status)
+                {
+                    return status;
+                }
+                if (initiallyChecked)
+                {
+                    switch (bus)
+                    {
+                    case MuteBus::Master:
+                        masterMuteState_.pending = true;
+                        break;
+                    case MuteBus::Music:
+                        musicMuteState_.pending = true;
+                        break;
+                    case MuteBus::Sfx:
+                        sfxMuteState_.pending = true;
+                        break;
+                    }
                 }
                 if (auto status = tree->setCheckboxAction(
                         *checkbox,
@@ -1275,18 +1348,15 @@ class TileMapBgfxState final : public Tina::IGameState {
                             switch (bus)
                             {
                             case MuteBus::Master:
-                                pendingMasterMuted_ = !counters_->lastMasterMuted;
-                                hasPendingMasterMuted_ = true;
+                                static_cast<void>(Tina::Sample2D::togglePendingAudioMute(masterMuteState_));
                                 counters_->masterMutedFromCheckbox = true;
                                 break;
                             case MuteBus::Music:
-                                pendingMusicMuted_ = !counters_->lastMusicMuted;
-                                hasPendingMusicMuted_ = true;
+                                static_cast<void>(Tina::Sample2D::togglePendingAudioMute(musicMuteState_));
                                 counters_->musicMutedFromCheckbox = true;
                                 break;
                             case MuteBus::Sfx:
-                                pendingSfxMuted_ = !counters_->lastSfxMuted;
-                                hasPendingSfxMuted_ = true;
+                                static_cast<void>(Tina::Sample2D::togglePendingAudioMute(sfxMuteState_));
                                 counters_->sfxMutedFromCheckbox = true;
                                 break;
                             }
@@ -1299,15 +1369,15 @@ class TileMapBgfxState final : public Tina::IGameState {
                 return Tina::Core::success();
             };
 
-        if (auto status = wireMuteCheckbox(172.0F, 120, 50, 50, MuteBus::Master); !status)
+        if (auto status = wireMuteCheckbox(172.0F, 120, 50, 50, MuteBus::Master, false); !status)
         {
             return status;
         }
-        if (auto status = wireMuteCheckbox(208.0F, 50, 100, 70, MuteBus::Music); !status)
+        if (auto status = wireMuteCheckbox(208.0F, 50, 100, 70, MuteBus::Music, true); !status)
         {
             return status;
         }
-        if (auto status = wireMuteCheckbox(244.0F, 110, 80, 40, MuteBus::Sfx); !status)
+        if (auto status = wireMuteCheckbox(244.0F, 110, 80, 40, MuteBus::Sfx, false); !status)
         {
             return status;
         }
@@ -1329,17 +1399,15 @@ class TileMapBgfxState final : public Tina::IGameState {
             {
                 return status;
             }
-            if (auto status = tree->setBoxPaint(*profileName, solidFill(18, 44, 58, 245)); !status)
+            if (auto status = tree->setBoxPaint(
+                    *profileName,
+                    Tina::UI::makeSolidBox(Tina::UI::scaleColorAlpha(theme.surface2, 245)));
+                !status)
             {
                 return status;
             }
             if (auto status = tree->setTextStyle(
-                    *profileName, Tina::UI::UITextStyle{
-                                      .logicalSize = 22.0F,
-                                      .advanceScale = 0.65F,
-                                      .lineHeightScale = 1.15F,
-                                      .color = {.red = 244, .green = 250, .blue = 255, .alpha = 255},
-                                  });
+                    *profileName, Tina::UI::makeBodyTextStyle(theme, 22.0F));
                 !status)
             {
                 return status;
@@ -1388,14 +1456,17 @@ class TileMapBgfxState final : public Tina::IGameState {
             {
                 return status;
             }
-            if (auto status = tree->setBoxPaint(*progress, solidFill(24, 38, 52, 240)); !status)
+            if (auto status = tree->setBoxPaint(
+                    *progress,
+                    Tina::UI::makeSolidBox(Tina::UI::scaleColorAlpha(theme.surface2, 240)));
+                !status)
             {
                 return status;
             }
             if (auto status = tree->setProgressBarPaint(
                     *progress,
                     Tina::UI::UIProgressBarPaint{
-                        .fillColor = {.red = 44, .green = 210, .blue = 142, .alpha = 255},
+                        .fillColor = theme.accent,
                     });
                 !status)
             {
@@ -1450,10 +1521,12 @@ class TileMapBgfxState final : public Tina::IGameState {
                 if (auto status = tree->setRadioButtonPaint(
                         *radioButton,
                         Tina::UI::UIRadioButtonPaint{
-                            .indicatorColor = {.red = 42, .green = 58, .blue = 72, .alpha = 255},
-                            .selectedIndicatorColor = {.red = 255, .green = 196, .blue = 64, .alpha = 255},
+                            .indicatorColor = theme.surface2,
+                            .selectedIndicatorColor = theme.textAccent,
                             .selectedIndicatorInset = 6.0F,
                             .labelGap = 8.0F,
+                            .focusedIndicatorColor = Tina::UI::rgb(0x529AD0, 245),
+                            .pressedIndicatorColor = Tina::UI::darkenChannel(theme.accent, 40),
                         });
                     !status)
                 {
@@ -1461,12 +1534,7 @@ class TileMapBgfxState final : public Tina::IGameState {
                 }
                 if (auto status = tree->setTextStyle(
                         *radioButton,
-                        Tina::UI::UITextStyle{
-                            .logicalSize = 18.0F,
-                            .advanceScale = 0.62F,
-                            .lineHeightScale = 1.15F,
-                            .color = {.red = 238, .green = 244, .blue = 248, .alpha = 255},
-                        });
+                        Tina::UI::makeBodyTextStyle(theme));
                     !status)
                 {
                     return status;
@@ -1507,6 +1575,9 @@ class TileMapBgfxState final : public Tina::IGameState {
         ++counters_->uiRootsCreated;
         counters_->uiPanelsCreated += panels.size();
         counters_->uiTextLabelsCreated += labels.size();
+#if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
+        productUiVisibilityStartedAt_ = std::chrono::steady_clock::now();
+#endif
         return Tina::Core::success();
     }
 
@@ -1622,44 +1693,49 @@ class TileMapBgfxState final : public Tina::IGameState {
                 }
                 hasPendingSfxVolume_ = false;
             }
-            if (hasPendingMasterMuted_)
+            if (masterMuteState_.pending.has_value())
             {
-                if (auto status = audio->setBusMuted(Tina::Audio::AudioBusId::Master, pendingMasterMuted_); !status)
+                if (auto status = audio->setBusMuted(Tina::Audio::AudioBusId::Master, *masterMuteState_.pending);
+                    !status)
                 {
                     return Tina::Core::failure(std::move(status.error()));
                 }
-                hasPendingMasterMuted_ = false;
+                Tina::Sample2D::commitPendingAudioMute(masterMuteState_);
             }
-            if (hasPendingMusicMuted_)
+            if (musicMuteState_.pending.has_value())
             {
-                if (auto status = audio->setBusMuted(Tina::Audio::AudioBusId::Music, pendingMusicMuted_); !status)
+                if (auto status = audio->setBusMuted(Tina::Audio::AudioBusId::Music, *musicMuteState_.pending);
+                    !status)
                 {
                     return Tina::Core::failure(std::move(status.error()));
                 }
-                hasPendingMusicMuted_ = false;
+                Tina::Sample2D::commitPendingAudioMute(musicMuteState_);
             }
-            if (hasPendingSfxMuted_)
+            if (sfxMuteState_.pending.has_value())
             {
-                if (auto status = audio->setBusMuted(Tina::Audio::AudioBusId::Sfx, pendingSfxMuted_); !status)
+                if (auto status = audio->setBusMuted(Tina::Audio::AudioBusId::Sfx, *sfxMuteState_.pending); !status)
                 {
                     return Tina::Core::failure(std::move(status.error()));
                 }
-                hasPendingSfxMuted_ = false;
+                Tina::Sample2D::commitPendingAudioMute(sfxMuteState_);
             }
             if (auto bus = audio->busState(Tina::Audio::AudioBusId::Master); bus.has_value())
             {
                 counters_->lastMasterVolume = bus->volume;
                 counters_->lastMasterMuted = bus->muted;
+                masterMuteState_.committed = bus->muted;
             }
             if (auto bus = audio->busState(Tina::Audio::AudioBusId::Music); bus.has_value())
             {
                 counters_->lastMusicVolume = bus->volume;
                 counters_->lastMusicMuted = bus->muted;
+                musicMuteState_.committed = bus->muted;
             }
             if (auto bus = audio->busState(Tina::Audio::AudioBusId::Sfx); bus.has_value())
             {
                 counters_->lastSfxVolume = bus->volume;
                 counters_->lastSfxMuted = bus->muted;
+                sfxMuteState_.committed = bus->muted;
             }
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
             // First frame with Audio: create null device, attach mixer, start.
@@ -1843,6 +1919,15 @@ class TileMapBgfxState final : public Tina::IGameState {
         {
             std::this_thread::sleep_for(std::chrono::milliseconds{options_.frameDelayMilliseconds});
         }
+#if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
+        else
+        {
+            const u32 targetElapsedMilliseconds = Tina::Sample2D::productUiTargetElapsedMilliseconds(
+                counters_->frameUpdates, options_.targetFrameCount);
+            std::this_thread::sleep_until(
+                productUiVisibilityStartedAt_ + std::chrono::milliseconds{targetElapsedMilliseconds});
+        }
+#endif
         if (counters_->frameUpdates >= options_.targetFrameCount)
         {
             // Request pixel capture on this frame's upcoming present (M11-D1).
@@ -2048,15 +2133,15 @@ class TileMapBgfxState final : public Tina::IGameState {
     float pendingMasterVolume_ = 1.0F;
     float pendingMusicVolume_ = 1.0F;
     float pendingSfxVolume_ = 1.0F;
-    bool pendingMasterMuted_ = false;
-    bool pendingMusicMuted_ = false;
-    bool pendingSfxMuted_ = false;
+    Tina::Sample2D::AudioMuteControlState masterMuteState_{};
+    Tina::Sample2D::AudioMuteControlState musicMuteState_{};
+    Tina::Sample2D::AudioMuteControlState sfxMuteState_{};
     bool hasPendingMasterVolume_ = false;
     bool hasPendingMusicVolume_ = false;
     bool hasPendingSfxVolume_ = false;
-    bool hasPendingMasterMuted_ = false;
-    bool hasPendingMusicMuted_ = false;
-    bool hasPendingSfxMuted_ = false;
+#if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
+    std::chrono::steady_clock::time_point productUiVisibilityStartedAt_{};
+#endif
 };
 
 class TileMapBgfxApplication final : public Tina::IGameApplication {
@@ -2287,6 +2372,7 @@ int main(int argc, char** argv)
     }
 
     LifecycleCounters counters{};
+    counters.uiDisabledDemoButtonRequested = options->uiDisabledDemoButton;
     TileMapResources resources{};
     if (const auto status = prepareCatalog(resources, counters); !status)
     {
@@ -2427,6 +2513,10 @@ int main(int argc, char** argv)
               counters.uiTextEditsCreated == ExpectedUITextEditCount &&
               counters.uiTextEditInitialTextVerified &&
               counters.uiButtonsCreated == ExpectedUIButtonCount && counters.uiButtonActionsWired == 1 &&
+              counters.uiButtonPaintVerified &&
+              counters.uiDisabledDemoButtonRequested == options->uiDisabledDemoButton &&
+              counters.uiDisabledDemoButtonVerified &&
+              counters.uiDemoButtonEnabled == !counters.uiDisabledDemoButtonRequested &&
               counters.uiSlidersCreated == 3 && counters.uiCheckboxesCreated == 3 &&
               counters.uiProgressBarsCreated == ExpectedUIProgressBarCount &&
               counters.uiProgressBarValueVerified &&
@@ -2450,8 +2540,8 @@ int main(int argc, char** argv)
 
     // M11-D0 product evidence fingerprint: structural gates only (not frame count / animation).
     std::vector<std::byte> evidenceBytes;
-    evidenceBytes.reserve(176);
-    appendLeU32(evidenceBytes, 3U); // schema
+    evidenceBytes.reserve(188);
+    appendLeU32(evidenceBytes, 4U); // schema
     appendLeU32(evidenceBytes, counters.catalogFromRecipeFile ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.catalogRecipeAssets);
     appendLeU64(evidenceBytes, counters.texturesUploaded);
@@ -2462,6 +2552,9 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, ExpectedUITextEditCount);
     appendLeU32(evidenceBytes, counters.uiTextEditInitialTextVerified ? 1U : 0U);
     appendLeU64(evidenceBytes, ExpectedUIButtonCount);
+    appendLeU32(evidenceBytes, counters.uiDisabledDemoButtonRequested ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.uiDemoButtonEnabled ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.uiDisabledDemoButtonVerified ? 1U : 0U);
     appendLeU64(evidenceBytes, counters.uiSlidersCreated);
     appendLeU64(evidenceBytes, counters.uiCheckboxesCreated); // expected 3 after M11-C5
     appendLeU64(evidenceBytes, counters.uiProgressBarsCreated);
@@ -2505,6 +2598,8 @@ int main(int argc, char** argv)
                      "\"message\":\"verification failed\","
                      "\"frames\":"
                   << counters.frameUpdates << ",\"tileSprites\":" << counters.lastTileSprites
+                  << ",\"requestedFrameDelayMs\":" << options->frameDelayMilliseconds
+                  << ",\"minimumWindowVisibilityMs\":" << minimumWindowVisibilityMilliseconds(*options)
                   << ",\"totalSprites\":" << counters.lastTotalSprites
                   << ",\"grounded\":" << counters.controllerGroundedFrames
                   << ",\"walkFrames\":" << counters.controllerWalkFrames
@@ -2514,7 +2609,16 @@ int main(int argc, char** argv)
                   << ",\"uiTextEdits\":" << counters.uiTextEditsCreated
                   << ",\"uiTextEditInitialTextVerified\":"
                   << (counters.uiTextEditInitialTextVerified ? "true" : "false")
-                  << ",\"uiButtons\":" << counters.uiButtonsCreated << ",\"uiSliders\":" << counters.uiSlidersCreated
+                  << ",\"uiButtons\":" << counters.uiButtonsCreated
+                  << ",\"uiButtonPaintVerified\":"
+                  << (counters.uiButtonPaintVerified ? "true" : "false")
+                  << ",\"uiDisabledDemoButtonRequested\":"
+                  << (counters.uiDisabledDemoButtonRequested ? "true" : "false")
+                  << ",\"uiDemoButtonEnabled\":"
+                  << (counters.uiDemoButtonEnabled ? "true" : "false")
+                  << ",\"uiDisabledDemoButtonVerified\":"
+                  << (counters.uiDisabledDemoButtonVerified ? "true" : "false")
+                  << ",\"uiSliders\":" << counters.uiSlidersCreated
                   << ",\"uiProgressBars\":" << counters.uiProgressBarsCreated
                   << ",\"uiRadioButtons\":" << counters.uiRadioButtonsCreated
                   << ",\"uiReleased\":" << counters.uiRootsReleased
@@ -2578,6 +2682,8 @@ int main(int argc, char** argv)
     // via --seed-tile-selection=cellX,cellY for automated product evidence.
     std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_2d\""
               << ",\"frames\":" << counters.frameUpdates << ",\"renderExtractions\":" << counters.renderExtractions
+              << ",\"requestedFrameDelayMs\":" << options->frameDelayMilliseconds
+              << ",\"minimumWindowVisibilityMs\":" << minimumWindowVisibilityMilliseconds(*options)
               << ",\"catalogFromRecipeFile\":" << (counters.catalogFromRecipeFile ? "true" : "false")
               << ",\"catalogRecipeAssets\":" << counters.catalogRecipeAssets
               << ",\"texturesUploaded\":" << counters.texturesUploaded
@@ -2595,6 +2701,14 @@ int main(int argc, char** argv)
               << (counters.uiTextEditInitialTextVerified ? "true" : "false")
               << ",\"uiButtonsCreated\":" << counters.uiButtonsCreated
               << ",\"uiButtonActionsWired\":" << counters.uiButtonActionsWired
+              << ",\"uiButtonPaintVerified\":"
+              << (counters.uiButtonPaintVerified ? "true" : "false")
+              << ",\"uiDisabledDemoButtonRequested\":"
+              << (counters.uiDisabledDemoButtonRequested ? "true" : "false")
+              << ",\"uiDemoButtonEnabled\":"
+              << (counters.uiDemoButtonEnabled ? "true" : "false")
+              << ",\"uiDisabledDemoButtonVerified\":"
+              << (counters.uiDisabledDemoButtonVerified ? "true" : "false")
               << ",\"uiSlidersCreated\":" << counters.uiSlidersCreated
               << ",\"uiSliderChanges\":" << counters.uiSliderChanges
               << ",\"uiCheckboxesCreated\":" << counters.uiCheckboxesCreated
@@ -2708,7 +2822,7 @@ int main(int argc, char** argv)
 #endif
               << ",\"stateExits\":" << counters.stateExits
               << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"evidenceSchema\":3"
+              << ",\"evidenceSchema\":4"
               << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
               << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
               << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")

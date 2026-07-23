@@ -65,6 +65,12 @@ class PrimaryWindowUICapabilityState final {
                                                const UI::UITreeUpdater& updater, UI::UINodeId node);
     [[nodiscard]] Core::Status setBoxPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                            UI::UINodeId node, const UI::UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setButtonPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                                               UI::UITreeUpdater& updater, UI::UINodeId button,
+                                               const UI::UIButtonPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIButtonPaint> buttonPaint(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId button);
     [[nodiscard]] Core::Status setText(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                        UI::UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
@@ -88,6 +94,10 @@ class PrimaryWindowUICapabilityState final {
                                                  UI::UINodeId checkbox, UI::UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearCheckboxAction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                    UI::UINodeId checkbox);
+    [[nodiscard]] Core::Status setCheckboxPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                                UI::UINodeId checkbox, const UI::UICheckboxPaint& paint);
+    [[nodiscard]] Core::Result<UI::UICheckboxPaint> checkboxPaint(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId checkbox);
     [[nodiscard]] Core::Status setChecked(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                           UI::UINodeId checkbox, bool checked);
     [[nodiscard]] Core::Result<bool> isChecked(u64 epoch, PrimaryWindowUIPhase phase,
@@ -100,6 +110,10 @@ class PrimaryWindowUICapabilityState final {
                                               UI::UINodeId slider, float value);
     [[nodiscard]] Core::Result<float> sliderValue(u64 epoch, PrimaryWindowUIPhase phase,
                                                   const UI::UITreeUpdater& updater, UI::UINodeId slider);
+    [[nodiscard]] Core::Status setSliderPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                                              UI::UINodeId slider, const UI::UISliderPaint& paint);
+    [[nodiscard]] Core::Result<UI::UISliderPaint> sliderPaint(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId slider);
     [[nodiscard]] Core::Status setSliderChangeCallback(u64 epoch, PrimaryWindowUIPhase phase,
                                                        UI::UITreeUpdater& updater, UI::UINodeId slider,
                                                        UI::UISliderChangeCallback callback);

@@ -67,6 +67,20 @@ namespace Tina::UI {
 namespace {
 
 using NodeStorageId = Core::GenerationId<Detail::UINodeRegistryTag>;
+
+[[nodiscard]] std::optional<usize> defaultAcceptKeySlot(Platform::Key key) noexcept
+{
+    switch (key) {
+    case Platform::Key::Enter:
+        return 0;
+    case Platform::Key::Space:
+        return 1;
+    case Platform::Key::KeypadEnter:
+        return 2;
+    default:
+        return std::nullopt;
+    }
+}
 inline constexpr u32 InvalidNodeIndex = NodeStorageId::InvalidIndex;
 
 struct NormalizedCapacityConfig final {
@@ -176,6 +190,34 @@ struct ButtonActionInvocationCandidate final {
     [[nodiscard]] bool hasValue() const noexcept
     {
         return button.hasValue() && actionIndex != InvalidButtonActionIndex
+            && generation != 0;
+    }
+};
+
+inline constexpr u32 InvalidSliderChangeCallbackIndex =
+    (std::numeric_limits<u32>::max)();
+
+struct SliderChangeCallbackRecord final {
+    UINodeId node{};
+    UISliderChangeCallback callback{};
+    u32 generation = 0;
+    u32 nextFreeIndex = InvalidSliderChangeCallbackIndex;
+    bool active = false;
+    bool queuedForReclaim = false;
+    bool invoking = false;
+};
+
+static_assert(std::is_nothrow_destructible_v<SliderChangeCallbackRecord>);
+
+struct SliderChangeCallbackInvocationCandidate final {
+    UINodeId slider{};
+    u32 callbackIndex = InvalidSliderChangeCallbackIndex;
+    u32 generation = 0;
+
+    [[nodiscard]] bool hasValue() const noexcept
+    {
+        return slider.hasValue()
+            && callbackIndex != InvalidSliderChangeCallbackIndex
             && generation != 0;
     }
 };
@@ -292,7 +334,161 @@ struct ResolvedLength final {
         && paint.solidFill->color.alpha == 0) {
         paint.solidFill.reset();
     }
+    if (!(std::isfinite(paint.borderWidth) && paint.borderWidth > 0.0F)) {
+        paint.borderWidth = 0.0F;
+        paint.borderLight = {};
+        paint.borderDark = {};
+    }
+    if (paint.borderLight.alpha == 0 && paint.borderDark.alpha == 0) {
+        paint.borderWidth = 0.0F;
+    }
+    if (!(std::isfinite(paint.shadowOffsetX) && std::isfinite(paint.shadowOffsetY))
+        || paint.shadow.alpha == 0) {
+        paint.shadow = {};
+        paint.shadowOffsetX = 0.0F;
+        paint.shadowOffsetY = 0.0F;
+    }
     return paint;
+}
+
+[[nodiscard]] usize countBoxChromePaintEntries(
+    const UIBoxPaint& paint,
+    const UILogicalRect& worldRect,
+    bool hasResolvedFill) noexcept
+{
+    usize count = 0;
+    if (hasResolvedFill) {
+        ++count;
+    }
+    if (paint.shadow.alpha != 0
+        && (paint.shadowOffsetX != 0.0F || paint.shadowOffsetY != 0.0F)
+        && worldRect.width > 0.0F
+        && worldRect.height > 0.0F) {
+        ++count;
+    }
+    if (paint.borderWidth > 0.0F
+        && worldRect.width > paint.borderWidth * 2.0F
+        && worldRect.height > paint.borderWidth * 2.0F) {
+        if (paint.borderLight.alpha != 0) {
+            count += 2; // top + left
+        }
+        if (paint.borderDark.alpha != 0) {
+            count += 2; // bottom + right
+        }
+    }
+    return count;
+}
+
+void appendBoxChromePaints(
+    std::pmr::vector<UICommittedPaintEntry>& output,
+    UINodeId node,
+    const UILogicalRect& worldRect,
+    const UILogicalRect& effectiveClip,
+    u32& nextPaintOrdinal,
+    const UIBoxPaint& paint,
+    UIPremultipliedRgba8Color resolvedFill) noexcept
+{
+    if (paint.shadow.alpha != 0
+        && (paint.shadowOffsetX != 0.0F || paint.shadowOffsetY != 0.0F)
+        && worldRect.width > 0.0F
+        && worldRect.height > 0.0F) {
+        output.push_back(UICommittedPaintEntry{
+            .node = node,
+            .worldRect =
+                UILogicalRect{
+                    .x = normalizeFloat(worldRect.x + paint.shadowOffsetX),
+                    .y = normalizeFloat(worldRect.y + paint.shadowOffsetY),
+                    .width = worldRect.width,
+                    .height = worldRect.height,
+                },
+            .effectiveClip = effectiveClip,
+            .paintOrdinal = nextPaintOrdinal,
+            .solidFill = premultiply(paint.shadow),
+        });
+        ++nextPaintOrdinal;
+    }
+    if (!resolvedFill.isTransparent()) {
+        output.push_back(UICommittedPaintEntry{
+            .node = node,
+            .worldRect = worldRect,
+            .effectiveClip = effectiveClip,
+            .paintOrdinal = nextPaintOrdinal,
+            .solidFill = resolvedFill,
+        });
+        ++nextPaintOrdinal;
+    }
+    if (!(paint.borderWidth > 0.0F)
+        || worldRect.width <= paint.borderWidth * 2.0F
+        || worldRect.height <= paint.borderWidth * 2.0F) {
+        return;
+    }
+    const float bw = paint.borderWidth;
+    if (paint.borderLight.alpha != 0) {
+        const UIPremultipliedRgba8Color light = premultiply(paint.borderLight);
+        // Top
+        output.push_back(UICommittedPaintEntry{
+            .node = node,
+            .worldRect =
+                UILogicalRect{
+                    .x = worldRect.x,
+                    .y = worldRect.y,
+                    .width = worldRect.width,
+                    .height = normalizeFloat(bw),
+                },
+            .effectiveClip = effectiveClip,
+            .paintOrdinal = nextPaintOrdinal,
+            .solidFill = light,
+        });
+        ++nextPaintOrdinal;
+        // Left
+        output.push_back(UICommittedPaintEntry{
+            .node = node,
+            .worldRect =
+                UILogicalRect{
+                    .x = worldRect.x,
+                    .y = normalizeFloat(worldRect.y + bw),
+                    .width = normalizeFloat(bw),
+                    .height = normalizeFloat(worldRect.height - bw),
+                },
+            .effectiveClip = effectiveClip,
+            .paintOrdinal = nextPaintOrdinal,
+            .solidFill = light,
+        });
+        ++nextPaintOrdinal;
+    }
+    if (paint.borderDark.alpha != 0) {
+        const UIPremultipliedRgba8Color dark = premultiply(paint.borderDark);
+        // Bottom
+        output.push_back(UICommittedPaintEntry{
+            .node = node,
+            .worldRect =
+                UILogicalRect{
+                    .x = worldRect.x,
+                    .y = normalizeFloat(worldRect.y + worldRect.height - bw),
+                    .width = worldRect.width,
+                    .height = normalizeFloat(bw),
+                },
+            .effectiveClip = effectiveClip,
+            .paintOrdinal = nextPaintOrdinal,
+            .solidFill = dark,
+        });
+        ++nextPaintOrdinal;
+        // Right
+        output.push_back(UICommittedPaintEntry{
+            .node = node,
+            .worldRect =
+                UILogicalRect{
+                    .x = normalizeFloat(worldRect.x + worldRect.width - bw),
+                    .y = worldRect.y,
+                    .width = normalizeFloat(bw),
+                    .height = normalizeFloat(worldRect.height - bw),
+                },
+            .effectiveClip = effectiveClip,
+            .paintOrdinal = nextPaintOrdinal,
+            .solidFill = dark,
+        });
+        ++nextPaintOrdinal;
+    }
 }
 
 [[nodiscard]] bool isFiniteNonNegative(float value) noexcept
@@ -671,6 +867,7 @@ struct UIContext::Impl final {
     // path for a frequently queried interaction property.
     std::pmr::vector<u8> enabledByNodeIndex;
     std::pmr::vector<UIBoxPaint> boxPaintsByIndex;
+    std::pmr::vector<UIButtonPaint> buttonPaintsByNodeIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localSolidFillCacheByIndex;
     std::pmr::vector<UIPremultipliedRgba8Color> localTextColorCacheByIndex;
     std::pmr::vector<WidgetTextState> textStatesByIndex;
@@ -687,7 +884,14 @@ struct UIContext::Impl final {
     std::unique_ptr<UIGlyphAtlas> glyphAtlas;
     std::pmr::vector<UIDirty> dirtyByIndex;
     std::pmr::vector<u8> dirtyQueuedByIndex;
+    // Pointer routes reserve the queue entries needed by their post-dispatch
+    // state transition before invoking user listeners. A listener may still
+    // dirty one of the reserved nodes, but unrelated mutations cannot steal
+    // the reserved capacity and make the route fail half-way through.
+    std::pmr::vector<u8> dirtyReservedByIndex;
     std::pmr::vector<UINodeId> dirtyQueue;
+    std::pmr::vector<UINodeId> routeDirtyReservationScratch;
+    std::pmr::vector<u8> routeDirtyReservationCandidateByIndex;
     std::pmr::vector<LayoutScratchState> layoutScratchByIndex;
     std::pmr::vector<u8> layoutWorkByIndex;
     std::pmr::vector<u32> layoutOrderScratch;
@@ -701,15 +905,19 @@ struct UIContext::Impl final {
     std::pmr::vector<u64> buttonActionClearRouteSerialByNodeIndex;
     // M11-C0: Checkbox checked bit (index-aligned with nodes; false for non-Checkbox).
     std::pmr::vector<u8> checkboxCheckedByNodeIndex;
+    std::pmr::vector<UICheckboxPaint> checkboxPaintsByNodeIndex;
     // M11-C1: Slider range/value/callback (index-aligned; default 0..1).
     struct SliderState final {
         float minValue = 0.0F;
         float maxValue = 1.0F;
         float step = 0.0F;
         float value = 0.0F;
-        UISliderChangeCallback changeCallback{};
+        UISliderPaint paint{};
     };
     std::pmr::vector<SliderState> sliderStatesByNodeIndex;
+    std::pmr::vector<u32> sliderChangeCallbackIndexByNodeIndex;
+    std::pmr::vector<SliderChangeCallbackRecord> sliderChangeCallbacks;
+    std::pmr::vector<u32> inactiveSliderChangeCallbackIndices;
     std::pmr::vector<ButtonActionRecord> buttonActions;
     std::pmr::vector<u32> inactiveButtonActionIndices;
     std::array<std::pmr::vector<UICommittedNodeEntry>, 2> committedBuffers;
@@ -760,6 +968,7 @@ struct UIContext::Impl final {
     bool layoutReuseInProgress = false;
     LayoutPassStatistics lastLayoutPass{};
     usize dirtyQueueHighWater = 0;
+    usize dirtyQueueReservationCount = 0;
     usize committedHitTargetCount = 0;
     usize lastHitRebuildCount = 0;
     usize lastPaintCacheRebuildCount = 0;
@@ -778,8 +987,23 @@ struct UIContext::Impl final {
     u64 buttonRouteSerial = 0;
     usize buttonActionCallbackOperationDepth = 0;
     bool reclaimingInactiveButtonActions = false;
+    u32 freeSliderChangeCallbackHead = InvalidSliderChangeCallbackIndex;
+    usize activeSliderChangeCallbackCount = 0;
+    usize sliderChangeCallbackOperationDepth = 0;
+    bool reclaimingInactiveSliderChangeCallbacks = false;
     UINodeId armedPrimaryButton{};
     bool armedPrimaryButtonPressed = false;
+    UINodeId hoveredPrimaryButton{};
+    // Keyboard Accept keys and gamepad South buttons each own an independent
+    // pressed target. Generation-aware gamepad identity prevents a reused
+    // slot's Up from clearing a newer device's state.
+    std::array<UINodeId, 3> defaultActionKeyPressedTargets{};
+    struct DefaultActionGamepadPress final {
+        Platform::GamepadId gamepad{};
+        UINodeId target{};
+    };
+    std::array<DefaultActionGamepadPress, Platform::PlatformFrameBuilder::MaximumGamepadSlots>
+        defaultActionGamepadPressed{};
     // M11-C1: exclusive Primary drag capture for Slider (clears Button arm).
     UINodeId armedSlider{};
     UINodeId armedTextEdit{};
@@ -811,6 +1035,7 @@ struct UIContext::Impl final {
           pointerHitPoliciesByIndex(&resource),
           enabledByNodeIndex(&resource),
           boxPaintsByIndex(&resource),
+          buttonPaintsByNodeIndex(&resource),
           localSolidFillCacheByIndex(&resource),
           localTextColorCacheByIndex(&resource),
           textStatesByIndex(&resource),
@@ -821,7 +1046,10 @@ struct UIContext::Impl final {
           freeTextAllocations(&resource),
           dirtyByIndex(&resource),
           dirtyQueuedByIndex(&resource),
+          dirtyReservedByIndex(&resource),
           dirtyQueue(&resource),
+          routeDirtyReservationScratch(&resource),
+          routeDirtyReservationCandidateByIndex(&resource),
           layoutScratchByIndex(&resource),
           layoutWorkByIndex(&resource),
           layoutOrderScratch(&resource),
@@ -833,7 +1061,11 @@ struct UIContext::Impl final {
           inactiveRoutedPointerListenerIndices(&resource),
           buttonActionIndexByNodeIndex(&resource),
           checkboxCheckedByNodeIndex(&resource),
+          checkboxPaintsByNodeIndex(&resource),
           sliderStatesByNodeIndex(&resource),
+          sliderChangeCallbackIndexByNodeIndex(&resource),
+          sliderChangeCallbacks(&resource),
+          inactiveSliderChangeCallbackIndices(&resource),
           buttonActionClearRouteSerialByNodeIndex(&resource),
           buttonActions(&resource),
           inactiveButtonActionIndices(&resource),
@@ -902,6 +1134,7 @@ struct UIContext::Impl final {
             UIPointerHitPolicy::Ignore);
         impl->enabledByNodeIndex.resize(normalized.nodeCapacity, 1);
         impl->boxPaintsByIndex.resize(normalized.nodeCapacity);
+        impl->buttonPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->localSolidFillCacheByIndex.resize(normalized.nodeCapacity);
         impl->localTextColorCacheByIndex.resize(normalized.nodeCapacity);
         impl->textStatesByIndex.resize(normalized.nodeCapacity);
@@ -912,7 +1145,12 @@ struct UIContext::Impl final {
         impl->freeTextAllocations.reserve(normalized.nodeCapacity);
         impl->dirtyByIndex.resize(normalized.nodeCapacity, UIDirty::None);
         impl->dirtyQueuedByIndex.resize(normalized.nodeCapacity, 0);
+        impl->dirtyReservedByIndex.resize(normalized.nodeCapacity, 0);
         impl->dirtyQueue.reserve(normalized.dirtyQueueCapacity);
+        impl->routeDirtyReservationScratch.reserve(normalized.nodeCapacity);
+        impl->routeDirtyReservationCandidateByIndex.resize(
+            normalized.nodeCapacity,
+            0);
         impl->layoutScratchByIndex.resize(normalized.nodeCapacity);
         impl->layoutWorkByIndex.resize(normalized.nodeCapacity, 0);
         impl->layoutOrderScratch.reserve(normalized.nodeCapacity);
@@ -950,7 +1188,27 @@ struct UIContext::Impl final {
             normalized.nodeCapacity,
             0);
         impl->checkboxCheckedByNodeIndex.resize(normalized.nodeCapacity, 0);
+        impl->checkboxPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->sliderStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->sliderChangeCallbackIndexByNodeIndex.resize(
+            normalized.nodeCapacity,
+            InvalidSliderChangeCallbackIndex);
+        const usize sliderChangeCallbackStorageCapacity =
+            normalized.nodeCapacity + 1;
+        impl->sliderChangeCallbacks.resize(sliderChangeCallbackStorageCapacity);
+        for (usize callbackIndex = 0;
+             callbackIndex < sliderChangeCallbackStorageCapacity;
+             ++callbackIndex) {
+            SliderChangeCallbackRecord& callback =
+                impl->sliderChangeCallbacks[callbackIndex];
+            callback.nextFreeIndex =
+                callbackIndex + 1 < sliderChangeCallbackStorageCapacity
+                ? static_cast<u32>(callbackIndex + 1)
+                : InvalidSliderChangeCallbackIndex;
+        }
+        impl->freeSliderChangeCallbackHead = 0;
+        impl->inactiveSliderChangeCallbackIndices.reserve(
+            sliderChangeCallbackStorageCapacity);
         const usize buttonActionStorageCapacity = normalized.buttonActionCapacity + 1;
         impl->buttonActions.resize(buttonActionStorageCapacity);
         for (usize actionIndex = 0;
@@ -1955,7 +2213,91 @@ struct UIContext::Impl final {
               && std::isfinite(maxValue) && maxValue > minValue)) {
             return 0.0F;
         }
-        return std::clamp((value - minValue) / (maxValue - minValue), 0.0F, 1.0F);
+        const double numerator = static_cast<double>(value)
+            - static_cast<double>(minValue);
+        const double denominator = static_cast<double>(maxValue)
+            - static_cast<double>(minValue);
+        return static_cast<float>(std::clamp(numerator / denominator, 0.0, 1.0));
+    }
+
+    struct SliderTrackGeometry final {
+        float verticalInset = 0.0F;
+        float thumbWidth = 0.0F;
+        float startCenterX = 0.0F;
+        float endCenterX = 0.0F;
+    };
+
+    [[nodiscard]] static SliderTrackGeometry sliderTrackGeometry(
+        UILogicalRect worldRect,
+        const SliderState& slider) noexcept
+    {
+        const float width = (std::max)(0.0F, worldRect.width);
+        const float height = (std::max)(0.0F, worldRect.height);
+        const float horizontalInset = (std::min)(
+            slider.paint.contentInset,
+            width * 0.5F);
+        const float verticalInset = (std::min)(
+            slider.paint.contentInset,
+            height * 0.5F);
+        const float thumbWidth = (std::min)(
+            slider.paint.thumbWidth,
+            width);
+        const float minimumCenterX = worldRect.x + thumbWidth * 0.5F;
+        const float maximumCenterX = worldRect.x + width - thumbWidth * 0.5F;
+        const float rawStartCenterX = worldRect.x + horizontalInset;
+        const float rawEndCenterX = worldRect.x + width - horizontalInset;
+        return SliderTrackGeometry{
+            .verticalInset = verticalInset,
+            .thumbWidth = thumbWidth,
+            .startCenterX = std::clamp(
+                rawStartCenterX,
+                minimumCenterX,
+                maximumCenterX),
+            .endCenterX = std::clamp(
+                rawEndCenterX,
+                minimumCenterX,
+                maximumCenterX),
+        };
+    }
+
+    struct SliderPaintGeometry final {
+        UILogicalRect filledTrack{};
+        UILogicalRect thumb{};
+        float fraction = 0.0F;
+    };
+
+    [[nodiscard]] static SliderPaintGeometry sliderPaintGeometry(
+        UILogicalRect worldRect,
+        const SliderState& slider) noexcept
+    {
+        const float fraction = normalizedRangeFraction(
+            slider.value,
+            slider.minValue,
+            slider.maxValue);
+        const SliderTrackGeometry track = sliderTrackGeometry(worldRect, slider);
+        const float centerSpan = (std::max)(
+            0.0F,
+            track.endCenterX - track.startCenterX);
+        const float thumbCenterX = track.startCenterX + centerSpan * fraction;
+        const float thumbX = thumbCenterX - track.thumbWidth * 0.5F;
+        const float trackHeight = (std::max)(
+            0.0F,
+            worldRect.height - track.verticalInset * 2.0F);
+        return SliderPaintGeometry{
+            .filledTrack = UILogicalRect{
+                .x = normalizeFloat(track.startCenterX),
+                .y = normalizeFloat(worldRect.y + track.verticalInset),
+                .width = normalizeFloat(centerSpan * fraction),
+                .height = normalizeFloat(trackHeight),
+            },
+            .thumb = UILogicalRect{
+                .x = normalizeFloat(thumbX),
+                .y = worldRect.y,
+                .width = normalizeFloat(track.thumbWidth),
+                .height = worldRect.height,
+            },
+            .fraction = fraction,
+        };
     }
 
     [[nodiscard]] static constexpr UIPremultipliedRgba8Color applyOpacity(
@@ -1985,6 +2327,64 @@ struct UIContext::Impl final {
             : applyOpacity(color, DisabledOpacity);
     }
 
+    [[nodiscard]] UIPremultipliedRgba8Color resolvedBoxFillColor(
+        UINodeId node,
+        u32 nodeIndex,
+        UIPremultipliedRgba8Color normalColor) const noexcept
+    {
+        UIPremultipliedRgba8Color color = normalColor;
+        const NodeRecord* record = recordByIndex(nodeIndex);
+        if (record == nullptr || record->kind != UIWidgetKind::Button
+            || nodeIndex >= buttonPaintsByNodeIndex.size()) {
+            return widgetPaintColor(node, color);
+        }
+
+        const UIButtonPaint& paint = buttonPaintsByNodeIndex[nodeIndex];
+        const auto applyOverride = [&color](UIStraightSrgba8Color overrideColor) noexcept {
+            if (overrideColor.alpha != 0) {
+                color = premultiply(overrideColor);
+            }
+        };
+        if (defaultActionFocusButton == node) {
+            applyOverride(paint.focusedBackgroundColor);
+        }
+        if (hoveredPrimaryButton == node) {
+            applyOverride(paint.hoveredBackgroundColor);
+        }
+        if (isButtonPressed(node)) {
+            applyOverride(paint.pressedBackgroundColor);
+        }
+        if (!isNodeEnabled(node)) {
+            applyOverride(paint.disabledBackgroundColor);
+        }
+        return widgetPaintColor(node, color);
+    }
+
+    [[nodiscard]] UIPremultipliedRgba8Color resolvedRadioIndicatorColor(
+        UINodeId node,
+        u32 nodeIndex) const noexcept
+    {
+        if (nodeIndex >= radioButtonStatesByNodeIndex.size()) {
+            return {};
+        }
+
+        const UIRadioButtonPaint& paint =
+            radioButtonStatesByNodeIndex[nodeIndex].paint;
+        UIPremultipliedRgba8Color color = premultiply(paint.indicatorColor);
+        const auto applyOverride = [&color](UIStraightSrgba8Color overrideColor) noexcept {
+            if (overrideColor.alpha != 0) {
+                color = premultiply(overrideColor);
+            }
+        };
+        if (defaultActionFocusButton == node) {
+            applyOverride(paint.focusedIndicatorColor);
+        }
+        if (isButtonPressed(node)) {
+            applyOverride(paint.pressedIndicatorColor);
+        }
+        return widgetPaintColor(node, color);
+    }
+
     [[nodiscard]] Core::Result<usize> validatePaintCandidateCapacity(
         std::span<const UICommittedLayoutEntry> layoutEntries) const
     {
@@ -1999,12 +2399,57 @@ struct UIContext::Impl final {
                     "UI paint snapshot layout references a stale node");
             }
             const u32 nodeIndex = layoutEntry.node.index();
-            const UIBoxPaint& paint = boxPaintsByIndex[nodeIndex];
-            if (paint.solidFill.has_value()
-                && paint.solidFill->color.alpha != 0) {
-                ++paintEntryCount;
-            }
+            const UIBoxPaint& boxPaint = boxPaintsByIndex[nodeIndex];
+            const UIPremultipliedRgba8Color normalColor =
+                boxPaint.solidFill.has_value()
+                ? premultiply(boxPaint.solidFill->color)
+                : UIPremultipliedRgba8Color{};
+            const UIPremultipliedRgba8Color resolvedFill = resolvedBoxFillColor(
+                layoutEntry.node,
+                nodeIndex,
+                normalColor);
+            paintEntryCount += countBoxChromePaintEntries(
+                boxPaint,
+                layoutEntry.worldRect,
+                !resolvedFill.isTransparent());
             const NodeRecord* record = recordByIndex(nodeIndex);
+            if (record != nullptr && record->kind == UIWidgetKind::Checkbox
+                && nodeIndex < checkboxCheckedByNodeIndex.size()
+                && nodeIndex < checkboxPaintsByNodeIndex.size()
+                && checkboxCheckedByNodeIndex[nodeIndex] != 0) {
+                const UICheckboxPaint& checkboxPaint =
+                    checkboxPaintsByNodeIndex[nodeIndex];
+                const float indicatorExtent = (std::min)(
+                    layoutEntry.worldRect.width,
+                    layoutEntry.worldRect.height);
+                if (checkboxPaint.checkedIndicatorColor.alpha != 0
+                    && indicatorExtent > checkboxPaint.checkedIndicatorInset * 2.0F) {
+                    ++paintEntryCount;
+                }
+            }
+            if (record != nullptr && record->kind == UIWidgetKind::Slider
+                && nodeIndex < sliderStatesByNodeIndex.size()) {
+                const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
+                const SliderPaintGeometry geometry = sliderPaintGeometry(
+                    layoutEntry.worldRect,
+                    slider);
+                if (geometry.filledTrack.width > 0.0F
+                    && geometry.filledTrack.height > 0.0F
+                    && geometry.fraction > 0.0F
+                    && slider.paint.filledTrackColor.alpha != 0) {
+                    ++paintEntryCount;
+                }
+                const UIStraightSrgba8Color thumbColor =
+                    armedSlider == layoutEntry.node
+                        && slider.paint.draggingThumbColor.alpha != 0
+                    ? slider.paint.draggingThumbColor
+                    : slider.paint.thumbColor;
+                if (geometry.thumb.width > 0.0F
+                    && geometry.thumb.height > 0.0F
+                    && thumbColor.alpha != 0) {
+                    ++paintEntryCount;
+                }
+            }
             if (record != nullptr && record->kind == UIWidgetKind::ProgressBar
                 && nodeIndex < progressBarStatesByNodeIndex.size()) {
                 const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
@@ -2026,7 +2471,9 @@ struct UIContext::Impl final {
                     layoutEntry.worldRect.width,
                     layoutEntry.worldRect.height);
                 const float inset = radio.paint.selectedIndicatorInset;
-                if (radio.paint.indicatorColor.alpha != 0
+                if (!resolvedRadioIndicatorColor(
+                        layoutEntry.node,
+                        nodeIndex).isTransparent()
                     && indicatorExtent > 0.0F) {
                     ++paintEntryCount;
                 }
@@ -2189,19 +2636,23 @@ struct UIContext::Impl final {
                         advance = fallbackAdvance;
                     }
 
-                    std::span<const u8> coverage{};
-                    if (glyph.width > 0 && glyph.height > 0) {
-                        const usize coverageBytes =
-                            static_cast<usize>(glyph.width) * glyph.height;
-                        if (glyph.coverageOffset + coverageBytes
-                            > batch->coverage.size()) {
-                            usedAtlasPath = false;
-                            break;
-                        }
-                        coverage = std::span<const u8>(
-                            batch->coverage.data() + glyph.coverageOffset,
-                            coverageBytes);
+                    if (glyph.width == 0 || glyph.height == 0) {
+                        cursorX = normalizeFloat(cursorX + advance);
+                        index += unitLength;
+                        continue;
                     }
+
+                    std::span<const u8> coverage{};
+                    const usize coverageBytes =
+                        static_cast<usize>(glyph.width) * glyph.height;
+                    if (glyph.coverageOffset + coverageBytes
+                        > batch->coverage.size()) {
+                        usedAtlasPath = false;
+                        break;
+                    }
+                    coverage = std::span<const u8>(
+                        batch->coverage.data() + glyph.coverageOffset,
+                        coverageBytes);
                     auto placed = glyphAtlas->insert(
                         UIGlyphKey{
                             .face = textFace,
@@ -2218,12 +2669,8 @@ struct UIContext::Impl final {
                     const float drawX = normalizeFloat(cursorX + glyph.bearingX);
                     const float drawY = normalizeFloat(
                         cursorY + (lineHeight - glyph.bearingY));
-                    const float drawW = placed->width > 0
-                        ? static_cast<float>(placed->width)
-                        : advance;
-                    const float drawH = placed->height > 0
-                        ? static_cast<float>(placed->height)
-                        : lineHeight;
+                    const float drawW = static_cast<float>(placed->width);
+                    const float drawH = static_cast<float>(placed->height);
 
                     output.push_back(UICommittedPaintEntry{
                         .node = layoutEntry.node,
@@ -2237,7 +2684,7 @@ struct UIContext::Impl final {
                         .effectiveClip = layoutEntry.effectiveClip,
                         .paintOrdinal = nextPaintOrdinal,
                         .solidFill = color,
-                        .isGlyph = placed->width > 0 && placed->height > 0,
+                        .isGlyph = true,
                         .atlasX = placed->atlasX,
                         .atlasY = placed->atlasY,
                         .atlasWidth = placed->width,
@@ -2503,21 +2950,96 @@ struct UIContext::Impl final {
                 continue;
             }
             const u32 nodeIndex = layoutEntry.node.index();
+            const UIBoxPaint& boxPaint = boxPaintsByIndex[nodeIndex];
             const UIPremultipliedRgba8Color fill =
-                widgetPaintColor(
+                resolvedBoxFillColor(
                     layoutEntry.node,
+                    nodeIndex,
                     localSolidFillCacheByIndex[nodeIndex]);
-            if (!fill.isTransparent()) {
-                output.push_back(UICommittedPaintEntry{
-                    .node = layoutEntry.node,
-                    .worldRect = layoutEntry.worldRect,
-                    .effectiveClip = layoutEntry.effectiveClip,
-                    .paintOrdinal = nextPaintOrdinal,
-                    .solidFill = fill,
-                });
-                ++nextPaintOrdinal;
-            }
+            appendBoxChromePaints(
+                output,
+                layoutEntry.node,
+                layoutEntry.worldRect,
+                layoutEntry.effectiveClip,
+                nextPaintOrdinal,
+                boxPaint,
+                fill);
             const NodeRecord* record = recordByIndex(nodeIndex);
+            if (record != nullptr && record->kind == UIWidgetKind::Checkbox
+                && nodeIndex < checkboxCheckedByNodeIndex.size()
+                && nodeIndex < checkboxPaintsByNodeIndex.size()
+                && checkboxCheckedByNodeIndex[nodeIndex] != 0) {
+                const UICheckboxPaint& checkboxPaint =
+                    checkboxPaintsByNodeIndex[nodeIndex];
+                const float indicatorExtent = (std::min)(
+                    layoutEntry.worldRect.width,
+                    layoutEntry.worldRect.height);
+                const float inset = checkboxPaint.checkedIndicatorInset;
+                const UIPremultipliedRgba8Color indicator =
+                    widgetPaintColor(
+                        layoutEntry.node,
+                        premultiply(checkboxPaint.checkedIndicatorColor));
+                if (!indicator.isTransparent() && indicatorExtent > inset * 2.0F) {
+                    output.push_back(UICommittedPaintEntry{
+                        .node = layoutEntry.node,
+                        .worldRect = UILogicalRect{
+                            .x = normalizeFloat(layoutEntry.worldRect.x + inset),
+                            .y = normalizeFloat(layoutEntry.worldRect.y + inset),
+                            .width = normalizeFloat(indicatorExtent - inset * 2.0F),
+                            .height = normalizeFloat(indicatorExtent - inset * 2.0F),
+                        },
+                        .effectiveClip = layoutEntry.effectiveClip,
+                        .paintOrdinal = nextPaintOrdinal,
+                        .solidFill = indicator,
+                    });
+                    ++nextPaintOrdinal;
+                }
+            }
+            if (record != nullptr && record->kind == UIWidgetKind::Slider
+                && nodeIndex < sliderStatesByNodeIndex.size()) {
+                const SliderState& slider = sliderStatesByNodeIndex[nodeIndex];
+                const SliderPaintGeometry geometry = sliderPaintGeometry(
+                    layoutEntry.worldRect,
+                    slider);
+                const UIPremultipliedRgba8Color filledTrack =
+                    widgetPaintColor(
+                        layoutEntry.node,
+                        premultiply(slider.paint.filledTrackColor));
+                if (geometry.filledTrack.width > 0.0F
+                    && geometry.filledTrack.height > 0.0F
+                    && geometry.fraction > 0.0F
+                    && !filledTrack.isTransparent()) {
+                    output.push_back(UICommittedPaintEntry{
+                        .node = layoutEntry.node,
+                        .worldRect = geometry.filledTrack,
+                        .effectiveClip = layoutEntry.effectiveClip,
+                        .paintOrdinal = nextPaintOrdinal,
+                        .solidFill = filledTrack,
+                    });
+                    ++nextPaintOrdinal;
+                }
+                const UIStraightSrgba8Color thumbSource =
+                    armedSlider == layoutEntry.node
+                        && slider.paint.draggingThumbColor.alpha != 0
+                    ? slider.paint.draggingThumbColor
+                    : slider.paint.thumbColor;
+                const UIPremultipliedRgba8Color thumb =
+                    widgetPaintColor(
+                        layoutEntry.node,
+                        premultiply(thumbSource));
+                if (geometry.thumb.width > 0.0F
+                    && geometry.thumb.height > 0.0F
+                    && !thumb.isTransparent()) {
+                    output.push_back(UICommittedPaintEntry{
+                        .node = layoutEntry.node,
+                        .worldRect = geometry.thumb,
+                        .effectiveClip = layoutEntry.effectiveClip,
+                        .paintOrdinal = nextPaintOrdinal,
+                        .solidFill = thumb,
+                    });
+                    ++nextPaintOrdinal;
+                }
+            }
             if (record != nullptr && record->kind == UIWidgetKind::ProgressBar
                 && nodeIndex < progressBarStatesByNodeIndex.size()) {
                 const ProgressBarState& progress = progressBarStatesByNodeIndex[nodeIndex];
@@ -2555,9 +3077,7 @@ struct UIContext::Impl final {
                     layoutEntry.worldRect.height);
                 const float inset = radio.paint.selectedIndicatorInset;
                 const UIPremultipliedRgba8Color indicatorTrack =
-                    widgetPaintColor(
-                        layoutEntry.node,
-                        premultiply(radio.paint.indicatorColor));
+                    resolvedRadioIndicatorColor(layoutEntry.node, nodeIndex);
                 const UIPremultipliedRgba8Color indicator =
                     widgetPaintColor(
                         layoutEntry.node,
@@ -3082,10 +3602,214 @@ struct UIContext::Impl final {
         return isDefaultActivatableKind(kind) || kind == UIWidgetKind::TextEdit;
     }
 
+    [[nodiscard]] Core::Status validateDefaultActionControl(
+        UIButtonActivationSource source,
+        const Platform::DigitalControlIdentity& control) const
+    {
+        if (source == UIButtonActivationSource::Keyboard) {
+            const auto* key = std::get_if<Platform::KeyControlIdentity>(&control);
+            if (key != nullptr && key->window == ownerWindow
+                && defaultAcceptKeySlot(key->key).has_value()) {
+                return Core::success();
+            }
+        } else if (source == UIButtonActivationSource::Gamepad) {
+            const auto* gamepad =
+                std::get_if<Platform::GamepadButtonControlIdentity>(&control);
+            if (gamepad != nullptr && gamepad->routedWindow == ownerWindow
+                && gamepad->gamepad.hasValue()
+                && gamepad->gamepad.index()
+                    < Platform::PlatformFrameBuilder::MaximumGamepadSlots
+                && gamepad->button == Platform::GamepadButton::South) {
+                return Core::success();
+            }
+        }
+        return fail(
+            UIErrorCode::InvalidButtonAction,
+            "UI default-action control does not match its activation source");
+    }
+
+    [[nodiscard]] UINodeId defaultActionPressedTarget(
+        const Platform::DigitalControlIdentity& control) const noexcept
+    {
+        if (const auto* key = std::get_if<Platform::KeyControlIdentity>(&control);
+            key != nullptr) {
+            const auto slot = defaultAcceptKeySlot(key->key);
+            return key->window == ownerWindow && slot.has_value()
+                ? defaultActionKeyPressedTargets[*slot]
+                : UINodeId{};
+        }
+        if (const auto* gamepad =
+                std::get_if<Platform::GamepadButtonControlIdentity>(&control);
+            gamepad != nullptr && gamepad->routedWindow == ownerWindow
+            && gamepad->gamepad.hasValue()
+            && gamepad->gamepad.index()
+                < defaultActionGamepadPressed.size()) {
+            const DefaultActionGamepadPress& pressed =
+                defaultActionGamepadPressed[gamepad->gamepad.index()];
+            return pressed.gamepad == gamepad->gamepad ? pressed.target : UINodeId{};
+        }
+        return {};
+    }
+
+    void setDefaultActionPressedTarget(
+        const Platform::DigitalControlIdentity& control,
+        UINodeId target) noexcept
+    {
+        if (const auto* key = std::get_if<Platform::KeyControlIdentity>(&control);
+            key != nullptr) {
+            if (const auto slot = defaultAcceptKeySlot(key->key); slot.has_value()) {
+                defaultActionKeyPressedTargets[*slot] = target;
+            }
+            return;
+        }
+        const auto* gamepad =
+            std::get_if<Platform::GamepadButtonControlIdentity>(&control);
+        if (gamepad == nullptr || !gamepad->gamepad.hasValue()
+            || gamepad->gamepad.index() >= defaultActionGamepadPressed.size()) {
+            return;
+        }
+        defaultActionGamepadPressed[gamepad->gamepad.index()] = {
+            .gamepad = gamepad->gamepad,
+            .target = target,
+        };
+    }
+
+    void clearDefaultActionPressedTarget(
+        const Platform::DigitalControlIdentity& control) noexcept
+    {
+        if (const auto* key = std::get_if<Platform::KeyControlIdentity>(&control);
+            key != nullptr) {
+            if (const auto slot = defaultAcceptKeySlot(key->key); slot.has_value()) {
+                defaultActionKeyPressedTargets[*slot] = {};
+            }
+            return;
+        }
+        const auto* gamepad =
+            std::get_if<Platform::GamepadButtonControlIdentity>(&control);
+        if (gamepad == nullptr || !gamepad->gamepad.hasValue()
+            || gamepad->gamepad.index() >= defaultActionGamepadPressed.size()) {
+            return;
+        }
+        DefaultActionGamepadPress& pressed =
+            defaultActionGamepadPressed[gamepad->gamepad.index()];
+        if (pressed.gamepad == gamepad->gamepad) {
+            pressed = {};
+        }
+    }
+
+    void clearDefaultActionPresses() noexcept
+    {
+        defaultActionKeyPressedTargets.fill({});
+        defaultActionGamepadPressed.fill({});
+    }
+
+    void clearDefaultActionPressesForNode(UINodeId node) noexcept
+    {
+        if (!node.hasValue()) {
+            return;
+        }
+        for (UINodeId& target : defaultActionKeyPressedTargets) {
+            if (target == node) {
+                target = {};
+            }
+        }
+        for (DefaultActionGamepadPress& pressed : defaultActionGamepadPressed) {
+            if (pressed.target == node) {
+                pressed = {};
+            }
+        }
+    }
+
+    void clearDefaultActionPressesForGamepad(Platform::GamepadId gamepad) noexcept
+    {
+        if (!gamepad.hasValue()
+            || gamepad.index() >= defaultActionGamepadPressed.size()) {
+            return;
+        }
+        DefaultActionGamepadPress& pressed =
+            defaultActionGamepadPressed[gamepad.index()];
+        if (pressed.gamepad == gamepad) {
+            pressed = {};
+        }
+    }
+
+    [[nodiscard]] bool isDefaultActionPressed(UINodeId node) const noexcept
+    {
+        if (!node.hasValue()) {
+            return false;
+        }
+        if (std::ranges::any_of(
+                defaultActionKeyPressedTargets,
+                [node](UINodeId target) noexcept { return target == node; })) {
+            return true;
+        }
+        return std::ranges::any_of(
+            defaultActionGamepadPressed,
+            [node](const DefaultActionGamepadPress& pressed) noexcept {
+                return pressed.target == node;
+            });
+    }
+
+    [[nodiscard]] bool isButtonPressed(UINodeId node) const noexcept
+    {
+        return (armedPrimaryButton == node && armedPrimaryButtonPressed)
+            || isDefaultActionPressed(node);
+    }
+
     void clearArmedPrimaryButton() noexcept
     {
         armedPrimaryButton = {};
         armedPrimaryButtonPressed = false;
+    }
+
+    void clearHoveredPrimaryButton() noexcept
+    {
+        hoveredPrimaryButton = {};
+    }
+
+    [[nodiscard]] UINodeId resolvedHoveredPrimaryButton(
+        UINodeId candidate) const noexcept
+    {
+        if (candidate.hasValue() && isNodeEnabled(candidate)) {
+            const NodeRecord* record = nodes.tryGet(candidate.storageId());
+            if (record != nullptr && record->kind == UIWidgetKind::Button) {
+                return candidate;
+            }
+        }
+        return {};
+    }
+
+    [[nodiscard]] Core::Status preflightHoveredPrimaryButton(
+        UINodeId candidate) const
+    {
+        const UINodeId nextHover = resolvedHoveredPrimaryButton(candidate);
+        if (nextHover == hoveredPrimaryButton) {
+            return Core::success();
+        }
+        const UINodeId previousHover =
+            hoveredPrimaryButton.hasValue() && contains(hoveredPrimaryButton)
+            ? hoveredPrimaryButton
+            : UINodeId{};
+        return preflightPaintDirtyBatch({previousHover, nextHover});
+    }
+
+    [[nodiscard]] Core::Status updateHoveredPrimaryButton(
+        UINodeId candidate)
+    {
+        const UINodeId nextHover = resolvedHoveredPrimaryButton(candidate);
+        if (nextHover == hoveredPrimaryButton) {
+            return Core::success();
+        }
+        const UINodeId previousHover =
+            hoveredPrimaryButton.hasValue() && contains(hoveredPrimaryButton)
+            ? hoveredPrimaryButton
+            : UINodeId{};
+        if (Core::Status dirty = markPaintDirtyBatch({previousHover, nextHover});
+            !dirty) {
+            return dirty;
+        }
+        hoveredPrimaryButton = nextHover;
+        return Core::success();
     }
 
     void clearArmedSlider() noexcept
@@ -3101,6 +3825,7 @@ struct UIContext::Impl final {
     void clearDefaultActionFocus() noexcept
     {
         defaultActionFocusButton = {};
+        clearDefaultActionPresses();
     }
 
     void resetImeCompositionState() noexcept
@@ -3150,7 +3875,7 @@ struct UIContext::Impl final {
         return record != nullptr && record->kind == UIWidgetKind::TextEdit;
     }
 
-    [[nodiscard]] bool isKeyboardFocusCandidate(
+    [[nodiscard]] bool isPointerInteractionCandidate(
         UINodeId node,
         std::span<const UICommittedLayoutEntry> layoutEntries) const noexcept
     {
@@ -3160,16 +3885,23 @@ struct UIContext::Impl final {
                 != UIPointerHitPolicy::Targetable) {
             return false;
         }
-        const NodeRecord* record = nodes.tryGet(node.storageId());
-        if (record == nullptr || !isKeyboardFocusableKind(record->kind)) {
-            return false;
-        }
         return std::ranges::any_of(
             layoutEntries,
             [node](const UICommittedLayoutEntry& entry) noexcept {
                 return entry.node == node
                     && entry.effectiveVisibility == UIVisibility::Visible;
             });
+    }
+
+    [[nodiscard]] bool isKeyboardFocusCandidate(
+        UINodeId node,
+        std::span<const UICommittedLayoutEntry> layoutEntries) const noexcept
+    {
+        if (!isPointerInteractionCandidate(node, layoutEntries)) {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        return record != nullptr && isKeyboardFocusableKind(record->kind);
     }
 
     [[nodiscard]] bool isCommittedKeyboardFocusCandidate(
@@ -3294,6 +4026,23 @@ struct UIContext::Impl final {
             return;
         }
         const UINodeId node = idForIndex(nodeIndex);
+        if (isDefaultActionPressed(node)) {
+            // Node destruction makes every matching control identity stale;
+            // no synthetic Up is emitted for the destroyed target.
+            for (UINodeId& target : defaultActionKeyPressedTargets) {
+                if (target == node) {
+                    target = {};
+                }
+            }
+            for (DefaultActionGamepadPress& pressed : defaultActionGamepadPressed) {
+                if (pressed.target == node) {
+                    pressed = {};
+                }
+            }
+        }
+        if (hoveredPrimaryButton == node) {
+            hoveredPrimaryButton = {};
+        }
         if (armedPrimaryButton == node) {
             clearArmedPrimaryButton();
         }
@@ -3383,6 +4132,191 @@ struct UIContext::Impl final {
                 current.invoking = false;
             }
         }
+    }
+
+    void recycleSliderChangeCallback(u32 callbackIndex) noexcept
+    {
+        if (callbackIndex >= sliderChangeCallbacks.size()) {
+            return;
+        }
+        SliderChangeCallbackRecord& callback =
+            sliderChangeCallbacks[callbackIndex];
+        if (callback.node.hasValue()
+            && callback.node.index()
+                < sliderChangeCallbackIndexByNodeIndex.size()
+            && sliderChangeCallbackIndexByNodeIndex[callback.node.index()]
+                == callbackIndex) {
+            sliderChangeCallbackIndexByNodeIndex[callback.node.index()] =
+                InvalidSliderChangeCallbackIndex;
+        }
+
+        callback.node = {};
+        callback.active = false;
+        callback.queuedForReclaim = false;
+        callback.invoking = false;
+        callback.nextFreeIndex = InvalidSliderChangeCallbackIndex;
+
+        ++sliderChangeCallbackOperationDepth;
+        auto callbackOperation = Core::makeScopeExit([this]() noexcept {
+            --sliderChangeCallbackOperationDepth;
+        });
+        UISliderChangeCallback detachedCallback(std::move(callback.callback));
+
+        callback.nextFreeIndex = freeSliderChangeCallbackHead;
+        freeSliderChangeCallbackHead = callbackIndex;
+        detachedCallback.reset();
+    }
+
+    void reclaimInactiveSliderChangeCallbacks() noexcept
+    {
+        if (routeDispatchDepth != 0
+            || sliderChangeCallbackOperationDepth != 0
+            || reclaimingInactiveSliderChangeCallbacks) {
+            return;
+        }
+
+        reclaimingInactiveSliderChangeCallbacks = true;
+        auto reclaimGuard = Core::makeScopeExit([this]() noexcept {
+            reclaimingInactiveSliderChangeCallbacks = false;
+        });
+        while (!inactiveSliderChangeCallbackIndices.empty()) {
+            const u32 callbackIndex =
+                inactiveSliderChangeCallbackIndices.back();
+            inactiveSliderChangeCallbackIndices.pop_back();
+            if (callbackIndex >= sliderChangeCallbacks.size()) {
+                continue;
+            }
+            SliderChangeCallbackRecord& callback =
+                sliderChangeCallbacks[callbackIndex];
+            callback.queuedForReclaim = false;
+            if (!callback.active
+                && !callback.invoking
+                && callback.node.hasValue()) {
+                recycleSliderChangeCallback(callbackIndex);
+            }
+        }
+    }
+
+    void deactivateSliderChangeCallback(u32 callbackIndex) noexcept
+    {
+        if (callbackIndex >= sliderChangeCallbacks.size()) {
+            return;
+        }
+        SliderChangeCallbackRecord& callback =
+            sliderChangeCallbacks[callbackIndex];
+        if (!callback.node.hasValue()) {
+            return;
+        }
+        if (callback.node.index()
+                < sliderChangeCallbackIndexByNodeIndex.size()
+            && sliderChangeCallbackIndexByNodeIndex[callback.node.index()]
+                == callbackIndex) {
+            sliderChangeCallbackIndexByNodeIndex[callback.node.index()] =
+                InvalidSliderChangeCallbackIndex;
+        }
+        if (callback.active) {
+            callback.active = false;
+            if (activeSliderChangeCallbackCount > 0) {
+                --activeSliderChangeCallbackCount;
+            }
+        }
+        if (routeDispatchDepth != 0
+            || sliderChangeCallbackOperationDepth != 0
+            || callback.invoking
+            || reclaimingInactiveSliderChangeCallbacks) {
+            if (!callback.queuedForReclaim) {
+                callback.queuedForReclaim = true;
+                inactiveSliderChangeCallbackIndices.push_back(callbackIndex);
+            }
+            return;
+        }
+        recycleSliderChangeCallback(callbackIndex);
+        reclaimInactiveSliderChangeCallbacks();
+    }
+
+    void deactivateSliderChangeCallbackForNode(u32 nodeIndex) noexcept
+    {
+        if (nodeIndex >= sliderChangeCallbackIndexByNodeIndex.size()) {
+            return;
+        }
+        const u32 callbackIndex =
+            sliderChangeCallbackIndexByNodeIndex[nodeIndex];
+        sliderChangeCallbackIndexByNodeIndex[nodeIndex] =
+            InvalidSliderChangeCallbackIndex;
+        if (callbackIndex != InvalidSliderChangeCallbackIndex) {
+            deactivateSliderChangeCallback(callbackIndex);
+        }
+    }
+
+    [[nodiscard]] Core::Status rollbackSliderChangeCallbackRegistration(
+        u32 callbackIndex,
+        Core::Error error)
+    {
+        deactivateSliderChangeCallback(callbackIndex);
+        reclaimInactiveSliderChangeCallbacks();
+        return Core::failure(std::move(error));
+    }
+
+    [[nodiscard]] SliderChangeCallbackInvocationCandidate
+    captureSliderChangeCallback(UINodeId slider) const noexcept
+    {
+        if (!contains(slider)
+            || slider.index() >= sliderChangeCallbackIndexByNodeIndex.size()) {
+            return {};
+        }
+        const u32 callbackIndex =
+            sliderChangeCallbackIndexByNodeIndex[slider.index()];
+        if (callbackIndex >= sliderChangeCallbacks.size()) {
+            return {};
+        }
+        const SliderChangeCallbackRecord& callback =
+            sliderChangeCallbacks[callbackIndex];
+        if (!callback.active
+            || callback.node != slider
+            || !callback.callback.hasValue()) {
+            return {};
+        }
+        return SliderChangeCallbackInvocationCandidate{
+            .slider = slider,
+            .callbackIndex = callbackIndex,
+            .generation = callback.generation,
+        };
+    }
+
+    void invokeSliderChangeCallback(
+        SliderChangeCallbackInvocationCandidate candidate,
+        const UISliderChangeEvent& event) noexcept
+    {
+        if (!candidate.hasValue()
+            || !contains(candidate.slider)
+            || candidate.callbackIndex >= sliderChangeCallbacks.size()) {
+            return;
+        }
+        const NodeRecord* sliderRecord =
+            nodes.tryGet(candidate.slider.storageId());
+        SliderChangeCallbackRecord& callback =
+            sliderChangeCallbacks[candidate.callbackIndex];
+        if (sliderRecord == nullptr
+            || sliderRecord->kind != UIWidgetKind::Slider
+            || !callback.active
+            || callback.generation != candidate.generation
+            || callback.node != candidate.slider
+            || !callback.callback.hasValue()) {
+            return;
+        }
+
+        callback.invoking = true;
+        ++sliderChangeCallbackOperationDepth;
+        callback.callback(event);
+        --sliderChangeCallbackOperationDepth;
+        if (candidate.callbackIndex < sliderChangeCallbacks.size()) {
+            SliderChangeCallbackRecord& current =
+                sliderChangeCallbacks[candidate.callbackIndex];
+            if (current.generation == candidate.generation) {
+                current.invoking = false;
+            }
+        }
+        reclaimInactiveSliderChangeCallbacks();
     }
 
     void releaseTextAllocation(TextByteAllocation allocation) noexcept
@@ -3521,11 +4455,22 @@ struct UIContext::Impl final {
             enabledByNodeIndex[index] = 1;
         }
         boxPaintsByIndex[index] = {};
+        buttonPaintsByNodeIndex[index] = {};
         localSolidFillCacheByIndex[index] = {};
         localTextColorCacheByIndex[index] = {};
         clearTextState(index);
         dirtyByIndex[index] = UIDirty::None;
         dirtyQueuedByIndex[index] = 0;
+        if (index < dirtyReservedByIndex.size()
+            && dirtyReservedByIndex[index] != 0) {
+            dirtyReservedByIndex[index] = 0;
+            if (dirtyQueueReservationCount != 0) {
+                --dirtyQueueReservationCount;
+            }
+        }
+        if (index < routeDirtyReservationCandidateByIndex.size()) {
+            routeDirtyReservationCandidateByIndex[index] = 0;
+        }
         layoutScratchByIndex[index] = {};
         layoutWorkByIndex[index] = 0;
         routedPointerListenerHeadByNodeIndex[index] =
@@ -3537,8 +4482,15 @@ struct UIContext::Impl final {
         if (index < checkboxCheckedByNodeIndex.size()) {
             checkboxCheckedByNodeIndex[index] = 0;
         }
+        if (index < checkboxPaintsByNodeIndex.size()) {
+            checkboxPaintsByNodeIndex[index] = {};
+        }
         if (index < sliderStatesByNodeIndex.size()) {
             sliderStatesByNodeIndex[index] = {};
+        }
+        if (index < sliderChangeCallbackIndexByNodeIndex.size()) {
+            sliderChangeCallbackIndexByNodeIndex[index] =
+                InvalidSliderChangeCallbackIndex;
         }
         if (index < textEditStatesByNodeIndex.size()) {
             textEditStatesByNodeIndex[index] = {};
@@ -3601,6 +4553,88 @@ struct UIContext::Impl final {
         return count;
     }
 
+    [[nodiscard]] usize occupiedDirtyQueueSlotCount() const noexcept
+    {
+        return dirtyQueue.size() + dirtyQueueReservationCount;
+    }
+
+    void consumeDirtyQueueReservation(u32 index) noexcept
+    {
+        if (index >= dirtyReservedByIndex.size()
+            || dirtyReservedByIndex[index] == 0) {
+            return;
+        }
+        dirtyReservedByIndex[index] = 0;
+        if (dirtyQueueReservationCount != 0) {
+            --dirtyQueueReservationCount;
+        }
+    }
+
+    void addRouteDirtyReservationCandidate(UINodeId node)
+    {
+        if (!node.hasValue() || !contains(node)) {
+            return;
+        }
+        const u32 index = node.index();
+        if (index >= routeDirtyReservationCandidateByIndex.size()
+            || routeDirtyReservationCandidateByIndex[index] != 0) {
+            return;
+        }
+        routeDirtyReservationCandidateByIndex[index] = 1;
+        routeDirtyReservationScratch.push_back(node);
+    }
+
+    [[nodiscard]] Core::Status reserveRouteDirtyQueueSlots()
+    {
+        compactDirtyQueue();
+        usize requiredQueueEntries = 0;
+        for (const UINodeId node : routeDirtyReservationScratch) {
+            if (!contains(node) || node.index() >= dirtyByIndex.size()) {
+                return fail(
+                    UIErrorCode::InvalidNode,
+                    "UI pointer route dirty reservation node is invalid");
+            }
+            const u32 index = node.index();
+            if (dirtyQueuedByIndex[index] == 0
+                && dirtyReservedByIndex[index] == 0) {
+                ++requiredQueueEntries;
+            }
+        }
+
+        const usize occupiedQueueEntries = occupiedDirtyQueueSlotCount();
+        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity
+            || requiredQueueEntries
+                > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI dirty queue capacity has been exhausted");
+        }
+
+        for (const UINodeId node : routeDirtyReservationScratch) {
+            const u32 index = node.index();
+            if (dirtyQueuedByIndex[index] == 0
+                && dirtyReservedByIndex[index] == 0) {
+                dirtyReservedByIndex[index] = 1;
+                ++dirtyQueueReservationCount;
+            }
+        }
+        return Core::success();
+    }
+
+    void releaseRouteDirtyQueueReservations() noexcept
+    {
+        for (const UINodeId node : routeDirtyReservationScratch) {
+            if (node.hasValue() && node.index() < dirtyReservedByIndex.size()) {
+                consumeDirtyQueueReservation(node.index());
+            }
+            if (node.hasValue()
+                && node.index() < routeDirtyReservationCandidateByIndex.size()) {
+                routeDirtyReservationCandidateByIndex[node.index()] = 0;
+            }
+        }
+        routeDirtyReservationScratch.clear();
+    }
+
     [[nodiscard]] Core::Status markLayoutStyleDirty(UINodeId node)
     {
         if (!contains(node) || node.index() >= dirtyByIndex.size()) {
@@ -3620,23 +4654,32 @@ struct UIContext::Impl final {
 
         usize requiredQueueEntries = 0;
         for (const u32 dirtyIndex : layoutOrderScratch) {
-            if (dirtyQueuedByIndex[dirtyIndex] == 0) {
+            if (dirtyQueuedByIndex[dirtyIndex] == 0
+                && dirtyReservedByIndex[dirtyIndex] == 0) {
                 ++requiredQueueEntries;
             }
         }
-        if (dirtyQueue.size() > capacityConfig.dirtyQueueCapacity
+        usize occupiedQueueEntries = occupiedDirtyQueueSlotCount();
+        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity
             || requiredQueueEntries
-                > capacityConfig.dirtyQueueCapacity - dirtyQueue.size()) {
+                > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries) {
             compactDirtyQueue();
+            requiredQueueEntries = 0;
+            for (const u32 dirtyIndex : layoutOrderScratch) {
+                if (dirtyQueuedByIndex[dirtyIndex] == 0
+                    && dirtyReservedByIndex[dirtyIndex] == 0) {
+                    ++requiredQueueEntries;
+                }
+            }
+            occupiedQueueEntries = occupiedDirtyQueueSlotCount();
         }
-        if (dirtyQueue.size() > capacityConfig.dirtyQueueCapacity
+        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity
             || requiredQueueEntries
-                > capacityConfig.dirtyQueueCapacity - dirtyQueue.size()) {
+                > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries) {
             return fail(
                 UIErrorCode::CapacityExceeded,
                 "UI dirty queue capacity has been exhausted");
         }
-
         constexpr UIDirty ChangedNodeDirty =
             UIDirty::Style
             | UIDirty::Measure
@@ -3652,6 +4695,7 @@ struct UIContext::Impl final {
         for (usize pathIndex = 0; pathIndex < layoutOrderScratch.size(); ++pathIndex) {
             const u32 dirtyIndex = layoutOrderScratch[pathIndex];
             if (dirtyQueuedByIndex[dirtyIndex] == 0) {
+                consumeDirtyQueueReservation(dirtyIndex);
                 dirtyQueue.push_back(idForIndex(dirtyIndex));
                 dirtyQueuedByIndex[dirtyIndex] = 1;
             }
@@ -3671,20 +4715,60 @@ struct UIContext::Impl final {
 
         const u32 index = node.index();
         if (dirtyQueuedByIndex[index] == 0) {
-            if (dirtyQueue.size() >= capacityConfig.dirtyQueueCapacity) {
+            if (occupiedDirtyQueueSlotCount() >= capacityConfig.dirtyQueueCapacity) {
                 compactDirtyQueue();
             }
-            if (dirtyQueue.size() >= capacityConfig.dirtyQueueCapacity) {
+            if (occupiedDirtyQueueSlotCount() >= capacityConfig.dirtyQueueCapacity
+                && dirtyReservedByIndex[index] == 0) {
                 return fail(
                     UIErrorCode::CapacityExceeded,
                     "UI dirty queue capacity has been exhausted");
             }
+            consumeDirtyQueueReservation(index);
             dirtyQueue.push_back(node);
             dirtyQueuedByIndex[index] = 1;
         }
         dirtyByIndex[index] |= UIDirty::HitTest;
         dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
         hitDirty = true;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status preflightPaintDirtyBatch(
+        std::initializer_list<UINodeId> requestedNodes) const
+    {
+        usize requiredQueueEntries = 0;
+        for (auto current = requestedNodes.begin();
+             current != requestedNodes.end();
+             ++current) {
+            if (!current->hasValue()) {
+                continue;
+            }
+            if (!contains(*current) || current->index() >= dirtyByIndex.size()) {
+                return fail(UIErrorCode::InvalidNode, "UI paint dirty node is invalid");
+            }
+            bool duplicate = false;
+            for (auto prior = requestedNodes.begin(); prior != current; ++prior) {
+                if (prior->hasValue() && *prior == *current) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate && dirtyQueuedByIndex[current->index()] == 0
+                && dirtyReservedByIndex[current->index()] == 0) {
+                ++requiredQueueEntries;
+            }
+        }
+
+        const usize occupiedQueueEntries =
+            validDirtyQueueCount() + dirtyQueueReservationCount;
+        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity
+            || requiredQueueEntries
+                > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI dirty queue capacity has been exhausted");
+        }
         return Core::success();
     }
 
@@ -3709,7 +4793,8 @@ struct UIContext::Impl final {
                     break;
                 }
             }
-            if (!duplicate && dirtyQueuedByIndex[current->index()] == 0) {
+            if (!duplicate && dirtyQueuedByIndex[current->index()] == 0
+                && dirtyReservedByIndex[current->index()] == 0) {
                 ++requiredQueueEntries;
             }
             if (!duplicate) {
@@ -3720,9 +4805,10 @@ struct UIContext::Impl final {
             return Core::success();
         }
 
-        if (dirtyQueue.size() > capacityConfig.dirtyQueueCapacity
+        usize occupiedQueueEntries = occupiedDirtyQueueSlotCount();
+        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity
             || requiredQueueEntries
-                > capacityConfig.dirtyQueueCapacity - dirtyQueue.size()) {
+                > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries) {
             compactDirtyQueue();
             requiredQueueEntries = 0;
             for (auto current = requestedNodes.begin();
@@ -3738,14 +4824,16 @@ struct UIContext::Impl final {
                         break;
                     }
                 }
-                if (!duplicate && dirtyQueuedByIndex[current->index()] == 0) {
+                if (!duplicate && dirtyQueuedByIndex[current->index()] == 0
+                    && dirtyReservedByIndex[current->index()] == 0) {
                     ++requiredQueueEntries;
                 }
             }
+            occupiedQueueEntries = occupiedDirtyQueueSlotCount();
         }
-        if (dirtyQueue.size() > capacityConfig.dirtyQueueCapacity
+        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity
             || requiredQueueEntries
-                > capacityConfig.dirtyQueueCapacity - dirtyQueue.size()) {
+                > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries) {
             return fail(
                 UIErrorCode::CapacityExceeded,
                 "UI dirty queue capacity has been exhausted");
@@ -3769,6 +4857,7 @@ struct UIContext::Impl final {
             }
             const u32 index = current->index();
             if (dirtyQueuedByIndex[index] == 0) {
+                consumeDirtyQueueReservation(index);
                 dirtyQueue.push_back(*current);
                 dirtyQueuedByIndex[index] = 1;
             }
@@ -3998,6 +5087,7 @@ struct UIContext::Impl final {
             const UINodeId node = idForIndex(currentIndex);
             deactivateAllRoutedPointerListenersForNode(currentIndex);
             deactivateButtonActionForNode(currentIndex);
+            deactivateSliderChangeCallbackForNode(currentIndex);
             idsByIndex[currentIndex] = {};
             resetNodeSideData(currentIndex);
             static_cast<void>(nodes.erase(node.storageId()));
@@ -4151,10 +5241,20 @@ struct UIContext::Impl final {
         if (currentPolicy == policy) {
             return Core::success();
         }
+        const bool clearHover = hoveredPrimaryButton == node
+            && policy != UIPointerHitPolicy::Targetable;
+        if (clearHover) {
+            if (Core::Status dirtyStatus = markPaintDirty(node); !dirtyStatus) {
+                return dirtyStatus;
+            }
+        }
         if (Core::Status dirtyStatus = markHitTestDirty(node); !dirtyStatus) {
             return dirtyStatus;
         }
         currentPolicy = policy;
+        if (clearHover) {
+            clearHoveredPrimaryButton();
+        }
         return Core::success();
     }
 
@@ -4204,6 +5304,10 @@ struct UIContext::Impl final {
         }
         enabledByNodeIndex[node.index()] = next;
         if (!enabled) {
+            clearDefaultActionPressesForNode(node);
+            if (hoveredPrimaryButton == node) {
+                hoveredPrimaryButton = {};
+            }
             if (armedPrimaryButton == node) {
                 clearArmedPrimaryButton();
             }
@@ -4214,7 +5318,7 @@ struct UIContext::Impl final {
                 clearArmedTextEdit();
             }
             if (defaultActionFocusButton == node) {
-                clearDefaultActionFocus();
+                defaultActionFocusButton = {};
             }
             if (textInputFocus == node) {
                 textInputFocus = {};
@@ -4293,6 +5397,74 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status setButtonPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId button,
+        const UIButtonPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(
+                UIErrorCode::RootRequired,
+                "UI tree updater requires a live root owner");
+        }
+        auto buttonResult = resolvePlainButton(button);
+        if (!buttonResult) {
+            return Core::failure(buttonResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, button)) {
+            return fail(
+                UIErrorCode::InvalidNode,
+                "UI Button is not owned by the updater root");
+        }
+        if (button.index() >= buttonPaintsByNodeIndex.size()) {
+            return fail(
+                Core::CoreErrorCode::Internal,
+                "UI Button paint index is out of range");
+        }
+        UIButtonPaint& currentPaint = buttonPaintsByNodeIndex[button.index()];
+        if (currentPaint == paint) {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(button); !dirty) {
+            return dirty;
+        }
+        currentPaint = paint;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIButtonPaint> buttonPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId button) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(
+                UIErrorCode::RootRequired,
+                "UI tree updater requires a live root owner");
+        }
+        auto buttonResult = const_cast<Impl*>(this)->resolvePlainButton(button);
+        if (!buttonResult) {
+            return Core::failure(buttonResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, button)) {
+            return fail(
+                UIErrorCode::InvalidNode,
+                "UI Button is not owned by the updater root");
+        }
+        if (button.index() >= buttonPaintsByNodeIndex.size()) {
+            return fail(
+                Core::CoreErrorCode::Internal,
+                "UI Button paint index is out of range");
+        }
+        return buttonPaintsByNodeIndex[button.index()];
+    }
+
     [[nodiscard]] Core::Status setTextFromUpdater(
         UINodeId updaterRoot,
         UINodeId node,
@@ -4341,9 +5513,15 @@ struct UIContext::Impl final {
 
         WidgetTextState& state = textStatesByIndex[node.index()];
         const std::string_view current = textViewFor(node.index());
+        const bool clearActiveIme = record->kind == UIWidgetKind::TextEdit
+            && textInputFocus == node
+            && imeCompositionActive_;
         if (state.hasContent == !utf8.empty()
             && current == utf8
             && state.metrics == *metrics) {
+            if (clearActiveIme) {
+                return clearImeComposition();
+            }
             return Core::success();
         }
 
@@ -4379,6 +5557,9 @@ struct UIContext::Impl final {
             state.hasContent = false;
             if (record->kind == UIWidgetKind::TextEdit) {
                 textEditStatesByNodeIndex[node.index()].selection = {};
+                if (clearActiveIme) {
+                    resetImeCompositionState();
+                }
             }
             return Core::success();
         }
@@ -4401,6 +5582,9 @@ struct UIContext::Impl final {
                 (std::min)(selection.anchorCodepoint, metrics->codepointCount);
             selection.caretCodepoint =
                 (std::min)(selection.caretCodepoint, metrics->codepointCount);
+            if (clearActiveIme) {
+                resetImeCompositionState();
+            }
         }
         return Core::success();
     }
@@ -4770,7 +5954,7 @@ struct UIContext::Impl final {
                 UIErrorCode::InvalidNode,
                 "UI Button is not owned by the updater root");
         }
-        return armedPrimaryButton == button && armedPrimaryButtonPressed;
+        return isButtonPressed(button);
     }
 
     [[nodiscard]] Core::Result<NodeRecord*> resolveCheckbox(UINodeId checkbox)
@@ -4814,6 +5998,76 @@ struct UIContext::Impl final {
             return Core::failure(checkboxResult.error());
         }
         return clearButtonActionFromUpdater(updaterRoot, checkbox);
+    }
+
+    [[nodiscard]] Core::Status setCheckboxPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox,
+        const UICheckboxPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(
+                UIErrorCode::RootRequired,
+                "UI tree updater requires a live root owner");
+        }
+        auto checkboxResult = resolveCheckbox(checkbox);
+        if (!checkboxResult) {
+            return Core::failure(checkboxResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, checkbox)) {
+            return fail(
+                UIErrorCode::InvalidNode,
+                "UI Checkbox is not owned by the updater root");
+        }
+        if (checkbox.index() >= checkboxPaintsByNodeIndex.size()) {
+            return fail(Core::CoreErrorCode::Internal, "UI Checkbox paint index out of range");
+        }
+        if (!std::isfinite(paint.checkedIndicatorInset)
+            || paint.checkedIndicatorInset < 0.0F) {
+            return fail(
+                UIErrorCode::InvalidControlValue,
+                "UI Checkbox paint inset must be finite and non-negative");
+        }
+        UICheckboxPaint& currentPaint = checkboxPaintsByNodeIndex[checkbox.index()];
+        if (currentPaint == paint) {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(checkbox); !dirty) {
+            return dirty;
+        }
+        currentPaint = paint;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UICheckboxPaint> checkboxPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(
+                UIErrorCode::RootRequired,
+                "UI tree updater requires a live root owner");
+        }
+        auto checkboxResult = const_cast<Impl*>(this)->resolveCheckbox(checkbox);
+        if (!checkboxResult) {
+            return Core::failure(checkboxResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, checkbox)) {
+            return fail(
+                UIErrorCode::InvalidNode,
+                "UI Checkbox is not owned by the updater root");
+        }
+        if (checkbox.index() >= checkboxPaintsByNodeIndex.size()) {
+            return fail(Core::CoreErrorCode::Internal, "UI Checkbox paint index out of range");
+        }
+        return checkboxPaintsByNodeIndex[checkbox.index()];
     }
 
     [[nodiscard]] Core::Status setCheckedFromUpdater(
@@ -4908,31 +6162,32 @@ struct UIContext::Impl final {
         return *nodeResult;
     }
 
-    [[nodiscard]] static float quantizeSliderValue(float value, float minValue, float maxValue, float step) noexcept
+    [[nodiscard]] static float quantizeSliderValue(
+        double value,
+        float minValue,
+        float maxValue,
+        float step) noexcept
     {
-        float clamped = value;
-        if (clamped < minValue) {
-            clamped = minValue;
-        }
-        if (clamped > maxValue) {
-            clamped = maxValue;
-        }
+        const double minimum = static_cast<double>(minValue);
+        const double maximum = static_cast<double>(maxValue);
+        const double clamped = std::clamp(
+            value,
+            minimum,
+            maximum);
         if (!(step > 0.0F) || !std::isfinite(step)) {
-            return clamped;
+            return static_cast<float>(clamped);
         }
-        const float span = maxValue - minValue;
-        if (!(span > 0.0F)) {
+        const double span = maximum - minimum;
+        if (!(span > 0.0)) {
             return minValue;
         }
-        const float steps = std::round((clamped - minValue) / step);
-        float quantized = minValue + steps * step;
-        if (quantized < minValue) {
-            quantized = minValue;
-        }
-        if (quantized > maxValue) {
-            quantized = maxValue;
-        }
-        return quantized;
+        const double steps = std::round(
+            (clamped - minimum) / static_cast<double>(step));
+        const double quantized = std::clamp(
+            minimum + steps * static_cast<double>(step),
+            minimum,
+            maximum);
+        return static_cast<float>(quantized);
     }
 
     // Map pointer X into [min,max] using last committed hit worldRect for the slider.
@@ -4969,14 +6224,20 @@ struct UIContext::Impl final {
             return false;
         }
 
-        float t = (position.x - worldRect.x) / worldRect.width;
-        if (t < 0.0F) {
-            t = 0.0F;
+        const SliderTrackGeometry track = sliderTrackGeometry(worldRect, state);
+        const float centerSpan = track.endCenterX - track.startCenterX;
+        if (!(centerSpan > 0.0F)) {
+            return false;
         }
-        if (t > 1.0F) {
-            t = 1.0F;
-        }
-        const float raw = state.minValue + t * (state.maxValue - state.minValue);
+        const double t = std::clamp(
+            (static_cast<double>(position.x)
+                - static_cast<double>(track.startCenterX))
+                / static_cast<double>(centerSpan),
+            0.0,
+            1.0);
+        const double raw = static_cast<double>(state.minValue)
+            + t * (static_cast<double>(state.maxValue)
+                - static_cast<double>(state.minValue));
         const float next = quantizeSliderValue(raw, state.minValue, state.maxValue, state.step);
         if (next == state.value) {
             return false;
@@ -4985,14 +6246,14 @@ struct UIContext::Impl final {
             return Core::failure(dirty.error());
         }
         state.value = next;
-        if (state.changeCallback.hasValue()) {
-            state.changeCallback(UISliderChangeEvent{
+        invokeSliderChangeCallback(
+            captureSliderChangeCallback(slider),
+            UISliderChangeEvent{
                 .sliderNode = slider,
                 .value = state.value,
                 .platformFrame = platformFrame,
                 .sourceSequence = sourceSequence,
             });
-        }
         return true;
     }
 
@@ -5123,10 +6384,21 @@ struct UIContext::Impl final {
         if (Core::Status dirty = markPaintDirty(slider); !dirty) {
             return dirty;
         }
+        const float previousValue = state.value;
         state.minValue = minValue;
         state.maxValue = maxValue;
         state.step = step;
         state.value = nextValue;
+        if (state.value != previousValue) {
+            invokeSliderChangeCallback(
+                captureSliderChangeCallback(slider),
+                UISliderChangeEvent{
+                    .sliderNode = slider,
+                    .value = state.value,
+                    .platformFrame = {},
+                    .sourceSequence = 0,
+                });
+        }
         return Core::success();
     }
 
@@ -5161,14 +6433,14 @@ struct UIContext::Impl final {
             return dirty;
         }
         state.value = next;
-        if (state.changeCallback.hasValue()) {
-            state.changeCallback(UISliderChangeEvent{
+        invokeSliderChangeCallback(
+            captureSliderChangeCallback(slider),
+            UISliderChangeEvent{
                 .sliderNode = slider,
                 .value = state.value,
                 .platformFrame = {},
                 .sourceSequence = 0,
             });
-        }
         return Core::success();
     }
 
@@ -5190,6 +6462,62 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
         }
         return sliderStatesByNodeIndex[slider.index()].value;
+    }
+
+    [[nodiscard]] Core::Status setSliderPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider,
+        const UISliderPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto sliderResult = resolveSlider(slider);
+        if (!sliderResult) {
+            return Core::failure(sliderResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, slider)) {
+            return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
+        }
+        if (!std::isfinite(paint.contentInset) || paint.contentInset < 0.0F
+            || !std::isfinite(paint.thumbWidth) || paint.thumbWidth < 0.0F) {
+            return fail(
+                UIErrorCode::InvalidControlValue,
+                "UI Slider paint metrics must be finite and non-negative");
+        }
+        SliderState& state = sliderStatesByNodeIndex[slider.index()];
+        if (state.paint == paint) {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(slider); !dirty) {
+            return dirty;
+        }
+        state.paint = paint;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UISliderPaint> sliderPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot)) {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto sliderResult = const_cast<Impl*>(this)->resolveSlider(slider);
+        if (!sliderResult) {
+            return Core::failure(sliderResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, slider)) {
+            return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
+        }
+        return sliderStatesByNodeIndex[slider.index()].paint;
     }
 
     [[nodiscard]] Core::Status setSliderChangeCallbackFromUpdater(
@@ -5214,7 +6542,90 @@ struct UIContext::Impl final {
         if (!callback.hasValue()) {
             return fail(UIErrorCode::InvalidButtonAction, "UI Slider change callback is empty");
         }
-        sliderStatesByNodeIndex[slider.index()].changeCallback = std::move(callback);
+
+        const u32 previousCallbackIndex =
+            sliderChangeCallbackIndexByNodeIndex[slider.index()];
+        const bool replacing = previousCallbackIndex
+                < sliderChangeCallbacks.size()
+            && sliderChangeCallbacks[previousCallbackIndex].active
+            && sliderChangeCallbacks[previousCallbackIndex].node == slider;
+        if (previousCallbackIndex != InvalidSliderChangeCallbackIndex
+            && !replacing) {
+            return fail(
+                Core::CoreErrorCode::Internal,
+                "UI Slider change callback mapping is inconsistent");
+        }
+        if (!replacing
+            && activeSliderChangeCallbackCount
+                >= capacityConfig.nodeCapacity) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI Slider change callback capacity has been exhausted");
+        }
+        if (freeSliderChangeCallbackHead
+            == InvalidSliderChangeCallbackIndex) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI Slider change callback transaction storage has been exhausted");
+        }
+
+        const u32 callbackIndex = freeSliderChangeCallbackHead;
+        SliderChangeCallbackRecord& callbackRecord =
+            sliderChangeCallbacks[callbackIndex];
+        freeSliderChangeCallbackHead = callbackRecord.nextFreeIndex;
+        ++callbackRecord.generation;
+        if (callbackRecord.generation == 0) {
+            ++callbackRecord.generation;
+        }
+        callbackRecord.node = slider;
+        callbackRecord.nextFreeIndex = InvalidSliderChangeCallbackIndex;
+        callbackRecord.active = false;
+        callbackRecord.queuedForReclaim = false;
+        callbackRecord.invoking = false;
+        {
+            ++sliderChangeCallbackOperationDepth;
+            auto callbackOperation = Core::makeScopeExit([this]() noexcept {
+                --sliderChangeCallbackOperationDepth;
+            });
+            callbackRecord.callback = std::move(callback);
+        }
+        reclaimInactiveSliderChangeCallbacks();
+
+        if (!contains(updaterRoot)) {
+            return rollbackSliderChangeCallbackRegistration(
+                callbackIndex,
+                makeError(
+                    UIErrorCode::RootRequired,
+                    "UI tree updater root was released while setting a Slider callback"));
+        }
+        auto liveSliderResult = resolveSlider(slider);
+        if (!liveSliderResult) {
+            return rollbackSliderChangeCallbackRegistration(
+                callbackIndex,
+                liveSliderResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, slider)) {
+            return rollbackSliderChangeCallbackRegistration(
+                callbackIndex,
+                makeError(
+                    UIErrorCode::InvalidNode,
+                    "UI Slider left the updater root while setting its callback"));
+        }
+        if (sliderChangeCallbackIndexByNodeIndex[slider.index()]
+            != previousCallbackIndex) {
+            return rollbackSliderChangeCallbackRegistration(
+                callbackIndex,
+                makeError(
+                    UIErrorCode::InvalidButtonAction,
+                    "UI Slider change callback changed during callback transfer"));
+        }
+
+        callbackRecord.active = true;
+        sliderChangeCallbackIndexByNodeIndex[slider.index()] = callbackIndex;
+        ++activeSliderChangeCallbackCount;
+        if (replacing) {
+            deactivateSliderChangeCallback(previousCallbackIndex);
+        }
         return Core::success();
     }
 
@@ -5236,7 +6647,13 @@ struct UIContext::Impl final {
         if (!isNodeWithinRoot(updaterRoot, slider)) {
             return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
         }
-        sliderStatesByNodeIndex[slider.index()].changeCallback.reset();
+        const u32 callbackIndex =
+            sliderChangeCallbackIndexByNodeIndex[slider.index()];
+        sliderChangeCallbackIndexByNodeIndex[slider.index()] =
+            InvalidSliderChangeCallbackIndex;
+        if (callbackIndex != InvalidSliderChangeCallbackIndex) {
+            deactivateSliderChangeCallback(callbackIndex);
+        }
         return Core::success();
     }
 
@@ -5271,6 +6688,20 @@ struct UIContext::Impl final {
             return fail(
                 UIErrorCode::InvalidControlValue,
                 "UI ProgressBar API requires a ProgressBar node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolvePlainButton(UINodeId button)
+    {
+        auto nodeResult = resolveNode(button);
+        if (!nodeResult) {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != UIWidgetKind::Button) {
+            return fail(
+                UIErrorCode::InvalidButtonAction,
+                "UI Button paint API requires a Button node");
         }
         return *nodeResult;
     }
@@ -5435,6 +6866,70 @@ struct UIContext::Impl final {
         return *nodeResult;
     }
 
+    [[nodiscard]] Core::Status preflightDefaultActionActivationDirty(
+        UINodeId target,
+        bool pressedStateChanges) const
+    {
+        const NodeRecord* targetRecord = nodes.tryGet(target.storageId());
+        if (targetRecord == nullptr || !isDefaultActivatableKind(targetRecord->kind)) {
+            return fail(UIErrorCode::InvalidNode, "UI default-action target is stale");
+        }
+
+        usize requiredQueueEntries = 0;
+        const auto countNode = [this, &requiredQueueEntries](UINodeId node) {
+            if (node.hasValue() && contains(node)
+                && dirtyQueuedByIndex[node.index()] == 0
+                && dirtyReservedByIndex[node.index()] == 0) {
+                ++requiredQueueEntries;
+            }
+        };
+        const bool targetStateChanges = pressedStateChanges
+            || targetRecord->kind == UIWidgetKind::Checkbox;
+        if (targetStateChanges) {
+            countNode(target);
+        }
+
+        if (targetRecord->kind == UIWidgetKind::RadioButton) {
+            const NodeRecord* parent = recordByIndex(targetRecord->parentIndex);
+            if (parent == nullptr) {
+                return fail(
+                    UIErrorCode::InvalidParent,
+                    "UI RadioButton requires a live parent group");
+            }
+            for (u32 childIndex = parent->firstChildIndex;
+                 childIndex != InvalidNodeIndex;) {
+                const NodeRecord* child = recordByIndex(childIndex);
+                if (child == nullptr) {
+                    return fail(
+                        Core::CoreErrorCode::Internal,
+                        "UI RadioButton group is invalid");
+                }
+                const u32 nextSiblingIndex = child->nextSiblingIndex;
+                if (child->kind == UIWidgetKind::RadioButton
+                    && childIndex < radioButtonStatesByNodeIndex.size()
+                    && radioButtonStatesByNodeIndex[childIndex].selected
+                        != (childIndex == target.index())
+                    && !(targetStateChanges && childIndex == target.index())
+                    && dirtyQueuedByIndex[childIndex] == 0
+                    && dirtyReservedByIndex[childIndex] == 0) {
+                    ++requiredQueueEntries;
+                }
+                childIndex = nextSiblingIndex;
+            }
+        }
+
+        const usize occupiedQueueEntries =
+            validDirtyQueueCount() + dirtyQueueReservationCount;
+        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity
+            || requiredQueueEntries
+                > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries) {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI dirty queue capacity has been exhausted");
+        }
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Status applyRadioButtonSelection(
         UINodeId radioButton,
         bool selected)
@@ -5474,7 +6969,8 @@ struct UIContext::Impl final {
                 const bool nextSelected = childIndex == radioButton.index();
                 if (radioButtonStatesByNodeIndex[childIndex].selected != nextSelected) {
                     selectionChanged = true;
-                    if (dirtyQueuedByIndex[childIndex] == 0) {
+                    if (dirtyQueuedByIndex[childIndex] == 0
+                        && dirtyReservedByIndex[childIndex] == 0) {
                         ++requiredQueueEntries;
                     }
                 }
@@ -5484,9 +6980,10 @@ struct UIContext::Impl final {
         if (!selectionChanged) {
             return Core::success();
         }
-        if (dirtyQueue.size() > capacityConfig.dirtyQueueCapacity
+        usize occupiedQueueEntries = occupiedDirtyQueueSlotCount();
+        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity
             || requiredQueueEntries
-                > capacityConfig.dirtyQueueCapacity - dirtyQueue.size()) {
+                > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries) {
             compactDirtyQueue();
             requiredQueueEntries = 0;
             for (u32 childIndex = parent->firstChildIndex;
@@ -5500,15 +6997,17 @@ struct UIContext::Impl final {
                     && childIndex < radioButtonStatesByNodeIndex.size()
                     && radioButtonStatesByNodeIndex[childIndex].selected
                         != (childIndex == radioButton.index())
-                    && dirtyQueuedByIndex[childIndex] == 0) {
+                    && dirtyQueuedByIndex[childIndex] == 0
+                    && dirtyReservedByIndex[childIndex] == 0) {
                     ++requiredQueueEntries;
                 }
                 childIndex = nextSiblingIndex;
             }
+            occupiedQueueEntries = occupiedDirtyQueueSlotCount();
         }
-        if (dirtyQueue.size() > capacityConfig.dirtyQueueCapacity
+        if (occupiedQueueEntries > capacityConfig.dirtyQueueCapacity
             || requiredQueueEntries
-                > capacityConfig.dirtyQueueCapacity - dirtyQueue.size()) {
+                > capacityConfig.dirtyQueueCapacity - occupiedQueueEntries) {
             return fail(
                 UIErrorCode::CapacityExceeded,
                 "UI RadioButton group selection exceeds dirty queue capacity");
@@ -5526,6 +7025,7 @@ struct UIContext::Impl final {
                 const bool nextSelected = childIndex == radioButton.index();
                 if (state.selected != nextSelected) {
                     if (dirtyQueuedByIndex[childIndex] == 0) {
+                        consumeDirtyQueueReservation(childIndex);
                         dirtyQueue.push_back(idForIndex(childIndex));
                         dirtyQueuedByIndex[childIndex] = 1;
                     }
@@ -5859,6 +7359,14 @@ struct UIContext::Impl final {
 
         const UINodeId previousDefaultActionFocus = defaultActionFocusButton;
         const UINodeId previousTextInputFocus = textInputFocus;
+        const UINodeId previousArmedPrimaryButton = armedPrimaryButton;
+        const bool previousArmedPrimaryButtonPressed = armedPrimaryButtonPressed;
+        const UINodeId previousHoveredPrimaryButton = hoveredPrimaryButton;
+        const auto previousDefaultActionKeyPressedTargets =
+            defaultActionKeyPressedTargets;
+        const auto previousDefaultActionGamepadPressed =
+            defaultActionGamepadPressed;
+        const UINodeId previousArmedSlider = armedSlider;
         const UINodeId previousArmedTextEdit = armedTextEdit;
         const auto previousImePreeditBytes = imePreeditBytes_;
         const usize previousImePreeditSize = imePreeditSize_;
@@ -5867,6 +7375,12 @@ struct UIContext::Impl final {
         auto focusRollback = Core::makeScopeExit([&]() noexcept {
             defaultActionFocusButton = previousDefaultActionFocus;
             textInputFocus = previousTextInputFocus;
+            armedPrimaryButton = previousArmedPrimaryButton;
+            armedPrimaryButtonPressed = previousArmedPrimaryButtonPressed;
+            hoveredPrimaryButton = previousHoveredPrimaryButton;
+            defaultActionKeyPressedTargets = previousDefaultActionKeyPressedTargets;
+            defaultActionGamepadPressed = previousDefaultActionGamepadPressed;
+            armedSlider = previousArmedSlider;
             armedTextEdit = previousArmedTextEdit;
             imePreeditBytes_ = previousImePreeditBytes;
             imePreeditSize_ = previousImePreeditSize;
@@ -5893,9 +7407,20 @@ struct UIContext::Impl final {
         const bool clearTextEditArm = armedTextEdit.hasValue()
             && (!isLiveTextEdit(armedTextEdit)
                 || !isKeyboardFocusCandidate(armedTextEdit, candidateLayoutEntries));
+        const bool clearPrimaryButtonArm = armedPrimaryButton.hasValue()
+            && !isPointerInteractionCandidate(
+                armedPrimaryButton,
+                candidateLayoutEntries);
+        const bool clearSliderArm = armedSlider.hasValue()
+            && !isPointerInteractionCandidate(armedSlider, candidateLayoutEntries);
+        const bool clearButtonHover = hoveredPrimaryButton.hasValue()
+            && !isPointerInteractionCandidate(
+                hoveredPrimaryButton,
+                candidateLayoutEntries);
         if (clearDefaultFocus || clearTextFocus || clearTextEditArm) {
             if (clearDefaultFocus) {
                 defaultActionFocusButton = {};
+                clearDefaultActionPresses();
             }
             if (clearTextFocus) {
                 textInputFocus = {};
@@ -5906,6 +7431,18 @@ struct UIContext::Impl final {
             }
             paintNeedsCommit = true;
             semanticsNeedsCommit = true;
+        }
+        if (clearPrimaryButtonArm || clearSliderArm || clearButtonHover) {
+            if (clearPrimaryButtonArm) {
+                clearArmedPrimaryButton();
+            }
+            if (clearSliderArm) {
+                clearArmedSlider();
+            }
+            if (clearButtonHover) {
+                clearHoveredPrimaryButton();
+            }
+            paintNeedsCommit = true;
         }
 
         usize writePaintBufferIndex = publishedPaintBufferIndex;
@@ -6498,6 +8035,112 @@ struct UIContext::Impl final {
         const bool primaryButtonUp =
             input.kind == UIRoutedPointerEventKind::ButtonUp
             && input.button == Platform::PointerButton::Primary;
+        releaseRouteDirtyQueueReservations();
+        const UINodeId nextHoveredButton =
+            resolvedHoveredPrimaryButton(nearestButton);
+        if (nextHoveredButton != hoveredPrimaryButton) {
+            const UINodeId previousHover =
+                hoveredPrimaryButton.hasValue() && contains(hoveredPrimaryButton)
+                ? hoveredPrimaryButton
+                : UINodeId{};
+            addRouteDirtyReservationCandidate(previousHover);
+            addRouteDirtyReservationCandidate(nextHoveredButton);
+        }
+
+        if (primaryButtonDown) {
+            addRouteDirtyReservationCandidate(defaultActionFocusButton);
+            addRouteDirtyReservationCandidate(textInputFocus);
+            addRouteDirtyReservationCandidate(armedSliderAtRouteStart);
+            const NodeRecord* targetRecord =
+                targetNode.hasValue() && contains(targetNode)
+                ? nodes.tryGet(targetNode.storageId())
+                : nullptr;
+            if (targetRecord != nullptr
+                && targetRecord->kind == UIWidgetKind::TextEdit
+                && targetNodeEnabledAtRouteStart) {
+                addRouteDirtyReservationCandidate(targetNode);
+            } else if (nearestSlider.hasValue()
+                       && isNodeEnabled(nearestSlider)) {
+                addRouteDirtyReservationCandidate(nearestSlider);
+            } else if (nearestButton.hasValue()
+                       && isNodeEnabled(nearestButton)) {
+                addRouteDirtyReservationCandidate(nearestButton);
+            }
+        } else if (input.kind == UIRoutedPointerEventKind::Move) {
+            if (hadArmedSlider) {
+                addRouteDirtyReservationCandidate(armedSliderAtRouteStart);
+            }
+            if (hadArmedTextEdit) {
+                addRouteDirtyReservationCandidate(armedTextEditAtRouteStart);
+            }
+            if (hadArmedInteraction
+                && armedPrimaryButtonPressed != pointWithinArmedButton) {
+                addRouteDirtyReservationCandidate(armedButtonAtRouteStart);
+            }
+        } else if (primaryButtonUp) {
+            if (hadArmedSlider) {
+                addRouteDirtyReservationCandidate(armedSliderAtRouteStart);
+            }
+            if (hadArmedTextEdit) {
+                addRouteDirtyReservationCandidate(armedTextEditAtRouteStart);
+            }
+            if (hadArmedInteraction) {
+                addRouteDirtyReservationCandidate(armedButtonAtRouteStart);
+                const NodeRecord* armedRecord =
+                    contains(armedButtonAtRouteStart)
+                    ? nodes.tryGet(armedButtonAtRouteStart.storageId())
+                    : nullptr;
+                if (pointWithinArmedButton
+                    && isNodeEnabled(armedButtonAtRouteStart)
+                    && armedRecord != nullptr
+                    && armedRecord->kind == UIWidgetKind::RadioButton) {
+                    const NodeRecord* parent =
+                        recordByIndex(armedRecord->parentIndex);
+                    if (parent != nullptr) {
+                        for (u32 childIndex = parent->firstChildIndex;
+                             childIndex != InvalidNodeIndex;) {
+                            const NodeRecord* child = recordByIndex(childIndex);
+                            if (child == nullptr) {
+                                break;
+                            }
+                            const u32 nextSiblingIndex = child->nextSiblingIndex;
+                            if (child->kind == UIWidgetKind::RadioButton
+                                && childIndex < radioButtonStatesByNodeIndex.size()
+                                && radioButtonStatesByNodeIndex[childIndex].selected
+                                    != (childIndex == armedButtonAtRouteStart.index())) {
+                                addRouteDirtyReservationCandidate(idForIndex(childIndex));
+                            }
+                            childIndex = nextSiblingIndex;
+                        }
+                    }
+                }
+            }
+        }
+        if (Core::Status reservation = reserveRouteDirtyQueueSlots();
+            !reservation) {
+            if (primaryButtonUp
+                && reservation.error().code == UIErrorCode::CapacityExceeded) {
+                const UINodeId releasedButton = armedPrimaryButton;
+                const UINodeId releasedSlider = armedSlider;
+                const UINodeId releasedTextEdit = armedTextEdit;
+                clearArmedPrimaryButton();
+                clearArmedSlider();
+                clearArmedTextEdit();
+                // Primary Up is a release barrier even when queue capacity is
+                // exhausted. Existing dirty work will rebuild paint globally;
+                // otherwise this best-effort mark publishes the released state.
+                static_cast<void>(markPaintDirtyBatch({
+                    releasedButton,
+                    releasedSlider,
+                    releasedTextEdit,
+                }));
+            }
+            releaseRouteDirtyQueueReservations();
+            return Core::failure(reservation.error());
+        }
+        auto reservationCleanup = Core::makeScopeExit([this]() noexcept {
+            releaseRouteDirtyQueueReservations();
+        });
         const u64 actionRegistrationSerialBoundary =
             buttonActionRegistrationSerial;
         const ButtonActionInvocationCandidate actionCandidate =
@@ -6590,6 +8233,13 @@ struct UIContext::Impl final {
             result.targetInvalidated = true;
         }
 
+        Core::Status hoverPaintStatus = updateHoveredPrimaryButton(nearestButton);
+        const bool deferHoverFailureForRelease = primaryButtonUp
+            && (hadArmedInteraction || hadArmedSlider || hadArmedTextEdit);
+        if (!hoverPaintStatus && !deferHoverFailureForRelease) {
+            return Core::failure(hoverPaintStatus.error());
+        }
+
         if (primaryButtonDown) {
             clearArmedPrimaryButton();
             clearArmedSlider();
@@ -6638,9 +8288,16 @@ struct UIContext::Impl final {
                     && contains(previousTextFocus)
                 ? previousTextFocus
                 : UINodeId{};
+            const UINodeId dirtyPreviousSlider =
+                armedSliderAtRouteStart.hasValue()
+                    && armedSliderAtRouteStart != interactionPaintNode
+                    && contains(armedSliderAtRouteStart)
+                ? armedSliderAtRouteStart
+                : UINodeId{};
             if (Core::Status dirty = markPaintDirtyBatch({
                     dirtyPreviousKeyboard,
                     dirtyPreviousText,
+                    dirtyPreviousSlider,
                     interactionPaintNode,
                 });
                 !dirty) {
@@ -6740,13 +8397,29 @@ struct UIContext::Impl final {
             if (!isNodeEnabled(armedButtonAtRouteStart)) {
                 clearArmedPrimaryButton();
             } else {
-                armedPrimaryButtonPressed = pointWithinArmedButton;
+                if (armedPrimaryButtonPressed != pointWithinArmedButton) {
+                    if (Core::Status dirty = markPaintDirty(armedButtonAtRouteStart);
+                        !dirty) {
+                        return Core::failure(dirty.error());
+                    }
+                    armedPrimaryButtonPressed = pointWithinArmedButton;
+                }
                 static_cast<void>(routedEvent.claimPointerButton(
                     Platform::PointerButton::Primary));
             }
         } else if (primaryButtonUp && hadArmedSlider) {
             const bool sliderStillArmed = armedSlider == armedSliderAtRouteStart;
+            Core::Status releasePaint = Core::success();
+            if (sliderStillArmed && contains(armedSliderAtRouteStart)) {
+                releasePaint = markPaintDirty(armedSliderAtRouteStart);
+            }
             clearArmedSlider();
+            if (!hoverPaintStatus) {
+                return Core::failure(hoverPaintStatus.error());
+            }
+            if (!releasePaint) {
+                return Core::failure(releasePaint.error());
+            }
             routedEvent.consumeInputTransition();
             if (sliderStillArmed && isNodeEnabled(armedSliderAtRouteStart)
                 && !routedEvent.isDefaultActionPrevented()) {
@@ -6762,6 +8435,9 @@ struct UIContext::Impl final {
         } else if (primaryButtonUp && hadArmedTextEdit) {
             const bool textEditStillArmed = armedTextEdit == armedTextEditAtRouteStart;
             clearArmedTextEdit();
+            if (!hoverPaintStatus) {
+                return Core::failure(hoverPaintStatus.error());
+            }
             routedEvent.consumeInputTransition();
             if (textEditStillArmed
                 && isNodeEnabled(armedTextEditAtRouteStart)) {
@@ -6776,7 +8452,17 @@ struct UIContext::Impl final {
         } else if (primaryButtonUp && hadArmedInteraction) {
             const bool interactionStillArmed =
                 armedPrimaryButton == armedButtonAtRouteStart;
+            Core::Status releasePaint = Core::success();
+            if (interactionStillArmed && contains(armedButtonAtRouteStart)) {
+                releasePaint = markPaintDirty(armedButtonAtRouteStart);
+            }
             clearArmedPrimaryButton();
+            if (!hoverPaintStatus) {
+                return Core::failure(hoverPaintStatus.error());
+            }
+            if (!releasePaint) {
+                return Core::failure(releasePaint.error());
+            }
             routedEvent.consumeInputTransition();
             if (!routedEvent.isDefaultActionPrevented()
                 && interactionStillArmed
@@ -6845,21 +8531,88 @@ struct UIContext::Impl final {
                 UIErrorCode::WrongOwnerWindow,
                 "UI Pointer interaction cancellation belongs to another Window");
         }
+        const UINodeId cancelledButton = armedPrimaryButton;
+        const UINodeId cancelledSlider = armedSlider;
+        const UINodeId cancelledFocus = defaultActionFocusButton;
+        const UINodeId cancelledHover = hoveredPrimaryButton;
         clearArmedPrimaryButton();
         clearArmedSlider();
         clearArmedTextEdit();
+        clearDefaultActionPresses();
         clearImeFocus();
         clearDefaultActionFocus();
+        clearHoveredPrimaryButton();
+        // Cancellation is a state barrier: a full dirty queue must not leave
+        // any pointer interaction armed. Existing dirty work will rebuild the
+        // paint/semantics snapshot; otherwise this best-effort mark schedules
+        // the cleared control state for the next commit.
+        static_cast<void>(markPaintDirtyBatch({
+            cancelledButton,
+            cancelledSlider,
+            cancelledFocus,
+            cancelledHover,
+        }));
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status cancelDefaultActionInteraction(
+        Platform::WindowId routedWindow,
+        std::optional<Platform::GamepadId> gamepad)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!routedWindow.hasValue()) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI default-action cancellation requires a Window");
+        }
+        if (routedWindow != ownerWindow) {
+            return fail(
+                UIErrorCode::WrongOwnerWindow,
+                "UI default-action cancellation belongs to another Window");
+        }
+
+        if (gamepad.has_value()) {
+            UINodeId cancelledTarget{};
+            if (gamepad->hasValue()
+                && gamepad->index() < defaultActionGamepadPressed.size()) {
+                const DefaultActionGamepadPress& pressed =
+                    defaultActionGamepadPressed[gamepad->index()];
+                if (pressed.gamepad == *gamepad) {
+                    cancelledTarget = pressed.target;
+                }
+            }
+            clearDefaultActionPressesForGamepad(*gamepad);
+            if (cancelledTarget.hasValue() && contains(cancelledTarget)
+                && !isButtonPressed(cancelledTarget)) {
+                static_cast<void>(markPaintDirty(cancelledTarget));
+            }
+            return Core::success();
+        }
+
+        const UINodeId cancelledTarget = defaultActionFocusButton;
+        clearDefaultActionPresses();
+        if (cancelledTarget.hasValue() && contains(cancelledTarget)) {
+            static_cast<void>(markPaintDirty(cancelledTarget));
+        }
         return Core::success();
     }
 
     [[nodiscard]] Core::Result<UIDefaultActionResult> routeDefaultActionActivate(
         Platform::PlatformFrameId platformFrame,
         u64 sourceSequence,
-        UIButtonActivationSource source)
+        UIButtonActivationSource source,
+        std::optional<Platform::DigitalControlIdentity> control)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
             return Core::failure(ownerThread.error());
+        }
+        if (routeDispatchDepth != 0) {
+            return fail(
+                UIErrorCode::PointerRouteAlreadyInProgress,
+                "UI default-action activation cannot nest during routing");
         }
         drainDeferredRootDestroys();
         if (!platformFrame.hasValue() || sourceSequence == 0) {
@@ -6872,6 +8625,26 @@ struct UIContext::Impl final {
             return fail(
                 UIErrorCode::InvalidButtonAction,
                 "UI default-action activation source must be Keyboard or Gamepad");
+        }
+        if (control.has_value()) {
+            if (Core::Status validControl =
+                    validateDefaultActionControl(source, *control);
+                !validControl) {
+                return Core::failure(validControl.error());
+            }
+            const UINodeId existingTarget = defaultActionPressedTarget(*control);
+            if (existingTarget.hasValue()) {
+                if (existingTarget == defaultActionFocusButton
+                    && isCommittedKeyboardFocusCandidate(existingTarget)) {
+                    // Native key repeat and duplicate gamepad Down remain owned
+                    // by UI without re-running toggle/callback side effects.
+                    return UIDefaultActionResult{
+                        .consumed = true,
+                        .activated = false,
+                    };
+                }
+                clearDefaultActionPressedTarget(*control);
+            }
         }
         if (!isCommittedKeyboardFocusCandidate(defaultActionFocusButton)) {
             if (textInputFocus == defaultActionFocusButton) {
@@ -6900,28 +8673,45 @@ struct UIContext::Impl final {
                 UIErrorCode::CapacityExceeded,
                 "UI Button route serial is exhausted");
         }
+        const UINodeId activationTarget = defaultActionFocusButton;
+        const bool pressedStateChanges = control.has_value()
+            && !isButtonPressed(activationTarget);
+        if (Core::Status dirty = preflightDefaultActionActivationDirty(
+                activationTarget,
+                pressedStateChanges);
+            !dirty) {
+            return Core::failure(dirty.error());
+        }
+        if (pressedStateChanges) {
+            if (Core::Status dirty = markPaintDirty(activationTarget); !dirty) {
+                return Core::failure(dirty.error());
+            }
+        }
         if (record->kind == UIWidgetKind::Checkbox
-            && defaultActionFocusButton.index() < checkboxCheckedByNodeIndex.size()) {
-            if (Core::Status dirty = markPaintDirty(defaultActionFocusButton);
+            && activationTarget.index() < checkboxCheckedByNodeIndex.size()) {
+            if (Core::Status dirty = markPaintDirty(activationTarget);
                 !dirty) {
                 return Core::failure(dirty.error());
             }
-            checkboxCheckedByNodeIndex[defaultActionFocusButton.index()] =
-                checkboxCheckedByNodeIndex[defaultActionFocusButton.index()] == 0 ? 1 : 0;
+            checkboxCheckedByNodeIndex[activationTarget.index()] =
+                checkboxCheckedByNodeIndex[activationTarget.index()] == 0 ? 1 : 0;
         }
         if (record->kind == UIWidgetKind::RadioButton) {
             if (Core::Status selected = applyRadioButtonSelection(
-                    defaultActionFocusButton,
+                    activationTarget,
                     true);
                 !selected) {
                 return Core::failure(selected.error());
             }
         }
+        if (control.has_value()) {
+            setDefaultActionPressedTarget(*control, activationTarget);
+        }
         const u64 actionRegistrationSerialBoundary =
             buttonActionRegistrationSerial;
         const ButtonActionInvocationCandidate actionCandidate =
             captureButtonAction(
-                defaultActionFocusButton,
+                activationTarget,
                 actionRegistrationSerialBoundary);
         if (!actionCandidate.hasValue()) {
             // Focused control without a registered action still consumes Accept
@@ -6942,13 +8732,50 @@ struct UIContext::Impl final {
         invokeButtonAction(
             actionCandidate,
             UIButtonActionEvent{
-                .buttonNode = defaultActionFocusButton,
+                .buttonNode = activationTarget,
                 .source = source,
                 .platformFrame = platformFrame,
                 .sourceSequence = sourceSequence,
             },
             currentButtonRouteSerial);
         return UIDefaultActionResult{.consumed = true, .activated = true};
+    }
+
+    [[nodiscard]] Core::Result<UIDefaultActionResult> routeDefaultActionRelease(
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        UIButtonActivationSource source,
+        const Platform::DigitalControlIdentity& control)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread) {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!platformFrame.hasValue() || sourceSequence == 0) {
+            return fail(
+                UIErrorCode::InvalidPointerInput,
+                "UI default-action release requires a platform frame and sequence");
+        }
+        if (Core::Status validControl = validateDefaultActionControl(source, control);
+            !validControl) {
+            return Core::failure(validControl.error());
+        }
+
+        const UINodeId releasedTarget = defaultActionPressedTarget(control);
+        if (!releasedTarget.hasValue()) {
+            return UIDefaultActionResult{};
+        }
+
+        clearDefaultActionPressedTarget(control);
+        if (contains(releasedTarget) && !isButtonPressed(releasedTarget)) {
+            // Physical Up cannot be replayed. Keep release as a successful
+            // input barrier even when repaint capacity is temporarily full.
+            static_cast<void>(markPaintDirty(releasedTarget));
+        }
+        return UIDefaultActionResult{
+            .consumed = true,
+            .activated = false,
+        };
     }
 
     [[nodiscard]] Core::Result<UIDefaultFocusStepResult> routeDefaultActionFocusStep(
@@ -7028,14 +8855,21 @@ struct UIContext::Impl final {
                 && contains(textInputFocus)
             ? textInputFocus
             : UINodeId{};
+        const UINodeId dirtyArmedSlider =
+            armedSlider.hasValue() && armedSlider != nextFocus
+                && contains(armedSlider)
+            ? armedSlider
+            : UINodeId{};
         if (Core::Status dirty = markPaintDirtyBatch({
                 dirtyPreviousFocus,
                 dirtyTextFocus,
+                dirtyArmedSlider,
                 nextFocus,
             });
             !dirty) {
             return Core::failure(dirty.error());
         }
+        clearDefaultActionPresses();
         defaultActionFocusButton = nextFocus;
         // Tab navigation does not keep a live pointer arm.
         clearArmedPrimaryButton();
@@ -7121,12 +8955,22 @@ struct UIContext::Impl final {
                 UIErrorCode::InvalidPointerInput,
                 "UI text composition requires a platform frame and sequence");
         }
+
+        using Stage = Platform::TextCompositionStage;
+        const bool knownStage = stage == Stage::Started
+            || stage == Stage::Updated
+            || stage == Stage::Ended
+            || stage == Stage::Cancelled;
+        if (!knownStage) {
+            return fail(
+                UIErrorCode::InvalidText,
+                "UI text composition stage is not recognized");
+        }
         if (!isCommittedTextEditFocusCandidate(textInputFocus)) {
             clearImeFocus();
             return UITextInputRouteResult{};
         }
 
-        using Stage = Platform::TextCompositionStage;
         if (stage == Stage::Cancelled || stage == Stage::Ended) {
             // clearImeComposition marks paint dirty when preedit was active.
             if (Core::Status status = clearImeComposition(); !status) {
@@ -7904,6 +9748,28 @@ Core::Status UITreeUpdater::setBoxPaint(UINodeId node, const UIBoxPaint& paint)
     return m_context->setBoxPaintFromUpdater(m_root, node, paint);
 }
 
+Core::Status UITreeUpdater::setButtonPaint(
+    UINodeId button,
+    const UIButtonPaint& paint)
+{
+    if (m_context == nullptr) {
+        return fail(
+            UIErrorCode::WrongContext,
+            "UI tree updater is not bound to a context");
+    }
+    return m_context->setButtonPaintFromUpdater(m_root, button, paint);
+}
+
+Core::Result<UIButtonPaint> UITreeUpdater::buttonPaint(UINodeId button) const
+{
+    if (m_context == nullptr) {
+        return fail(
+            UIErrorCode::WrongContext,
+            "UI tree updater is not bound to a context");
+    }
+    return m_context->buttonPaintFromUpdater(m_root, button);
+}
+
 Core::Status UITreeUpdater::setText(UINodeId node, std::string_view utf8)
 {
     if (m_context == nullptr) {
@@ -8015,6 +9881,29 @@ Core::Status UITreeUpdater::clearCheckboxAction(UINodeId checkbox)
     return m_context->clearCheckboxActionFromUpdater(m_root, checkbox);
 }
 
+Core::Status UITreeUpdater::setCheckboxPaint(
+    UINodeId checkbox,
+    const UICheckboxPaint& paint)
+{
+    if (m_context == nullptr) {
+        return fail(
+            UIErrorCode::WrongContext,
+            "UI tree updater is not bound to a context");
+    }
+    return m_context->setCheckboxPaintFromUpdater(m_root, checkbox, paint);
+}
+
+Core::Result<UICheckboxPaint> UITreeUpdater::checkboxPaint(
+    UINodeId checkbox) const
+{
+    if (m_context == nullptr) {
+        return fail(
+            UIErrorCode::WrongContext,
+            "UI tree updater is not bound to a context");
+    }
+    return m_context->checkboxPaintFromUpdater(m_root, checkbox);
+}
+
 Core::Status UITreeUpdater::setChecked(UINodeId checkbox, bool checked)
 {
     if (m_context == nullptr) {
@@ -8071,6 +9960,24 @@ Core::Result<float> UITreeUpdater::sliderValue(UINodeId slider) const
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->sliderValueFromUpdater(m_root, slider);
+}
+
+Core::Status UITreeUpdater::setSliderPaint(
+    UINodeId slider,
+    const UISliderPaint& paint)
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setSliderPaintFromUpdater(m_root, slider, paint);
+}
+
+Core::Result<UISliderPaint> UITreeUpdater::sliderPaint(UINodeId slider) const
+{
+    if (m_context == nullptr) {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->sliderPaintFromUpdater(m_root, slider);
 }
 
 Core::Status UITreeUpdater::setSliderChangeCallback(
@@ -8347,7 +10254,8 @@ UIContext::~UIContext() noexcept
         if (!m_impl->isOwnerThread()
             || m_impl->routeDispatchDepth != 0
             || m_impl->listenerCallbackOperationDepth != 0
-            || m_impl->buttonActionCallbackOperationDepth != 0) {
+            || m_impl->buttonActionCallbackOperationDepth != 0
+            || m_impl->sliderChangeCallbackOperationDepth != 0) {
             std::terminate();
         }
         m_impl->detachLifetime(this);
@@ -8489,14 +10397,33 @@ Core::Status UIContext::cancelPointerInteraction(
     return m_impl->cancelPointerInteraction(routedWindow);
 }
 
+Core::Status UIContext::cancelDefaultActionInteraction(
+    Platform::WindowId routedWindow,
+    std::optional<Platform::GamepadId> gamepad)
+{
+    return m_impl->cancelDefaultActionInteraction(routedWindow, gamepad);
+}
+
 Core::Result<UIContext::UIDefaultActionResult>
 UIContext::routeDefaultActionActivate(
     Platform::PlatformFrameId platformFrame,
     u64 sourceSequence,
-    UIButtonActivationSource source)
+    UIButtonActivationSource source,
+    std::optional<Platform::DigitalControlIdentity> control)
 {
     return m_impl->routeDefaultActionActivate(
-        platformFrame, sourceSequence, source);
+        platformFrame, sourceSequence, source, std::move(control));
+}
+
+Core::Result<UIContext::UIDefaultActionResult>
+UIContext::routeDefaultActionRelease(
+    Platform::PlatformFrameId platformFrame,
+    u64 sourceSequence,
+    UIButtonActivationSource source,
+    const Platform::DigitalControlIdentity& control)
+{
+    return m_impl->routeDefaultActionRelease(
+        platformFrame, sourceSequence, source, control);
 }
 
 Core::Result<UIContext::UIDefaultFocusStepResult>
@@ -8651,6 +10578,21 @@ Core::Status UIContext::setBoxPaintFromUpdater(
     return m_impl->setBoxPaintFromUpdater(updaterRoot, node, paint);
 }
 
+Core::Status UIContext::setButtonPaintFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId button,
+    const UIButtonPaint& paint)
+{
+    return m_impl->setButtonPaintFromUpdater(updaterRoot, button, paint);
+}
+
+Core::Result<UIButtonPaint> UIContext::buttonPaintFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId button) const
+{
+    return m_impl->buttonPaintFromUpdater(updaterRoot, button);
+}
+
 Core::Status UIContext::setTextFromUpdater(
     UINodeId updaterRoot,
     UINodeId node,
@@ -8742,6 +10684,21 @@ Core::Status UIContext::clearCheckboxActionFromUpdater(
     return m_impl->clearCheckboxActionFromUpdater(updaterRoot, checkbox);
 }
 
+Core::Status UIContext::setCheckboxPaintFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId checkbox,
+    const UICheckboxPaint& paint)
+{
+    return m_impl->setCheckboxPaintFromUpdater(updaterRoot, checkbox, paint);
+}
+
+Core::Result<UICheckboxPaint> UIContext::checkboxPaintFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId checkbox) const
+{
+    return m_impl->checkboxPaintFromUpdater(updaterRoot, checkbox);
+}
+
 Core::Status UIContext::setCheckedFromUpdater(
     UINodeId updaterRoot,
     UINodeId checkbox,
@@ -8787,6 +10744,21 @@ Core::Result<float> UIContext::sliderValueFromUpdater(
     UINodeId slider) const
 {
     return m_impl->sliderValueFromUpdater(updaterRoot, slider);
+}
+
+Core::Status UIContext::setSliderPaintFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId slider,
+    const UISliderPaint& paint)
+{
+    return m_impl->setSliderPaintFromUpdater(updaterRoot, slider, paint);
+}
+
+Core::Result<UISliderPaint> UIContext::sliderPaintFromUpdater(
+    UINodeId updaterRoot,
+    UINodeId slider) const
+{
+    return m_impl->sliderPaintFromUpdater(updaterRoot, slider);
 }
 
 Core::Status UIContext::setSliderChangeCallbackFromUpdater(

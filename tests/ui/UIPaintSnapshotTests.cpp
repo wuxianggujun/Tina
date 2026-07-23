@@ -94,16 +94,23 @@ private:
     u8 blue,
     u8 alpha = 255) noexcept
 {
-    UI::UIBoxPaint paint;
-    paint.solidFill = UI::UISolidFill{
-        .color = {
-            .red = red,
-            .green = green,
-            .blue = blue,
-            .alpha = alpha,
-        },
+    return UI::UIBoxPaint{
+        .solidFill = UI::UISolidFill{.color = UI::rgba8(red, green, blue, alpha)},
     };
-    return paint;
+}
+
+TEST(UIPaintColorHelpers, HexAndChannelHelpersMatchExplicitChannels)
+{
+    constexpr UI::UIStraightSrgba8Color fromChannels = UI::rgba8(110, 130, 230, 200);
+    constexpr UI::UIStraightSrgba8Color fromRgb = UI::rgb(0x6E82E6, 200);
+    constexpr UI::UIStraightSrgba8Color fromArgb = UI::argb(0xC86E82E6);
+    EXPECT_EQ(fromChannels, fromRgb);
+    EXPECT_EQ(fromChannels, fromArgb);
+    EXPECT_EQ(UI::rgb(0xFF0000).red, 255);
+    EXPECT_EQ(UI::rgb(0x00FF00).green, 255);
+    EXPECT_EQ(UI::rgb(0x0000FF).blue, 255);
+    EXPECT_EQ(UI::rgb(0x112233).alpha, 255);
+    EXPECT_EQ(UI::argb(0x80112233).alpha, 0x80);
 }
 
 void expectOk(Core::Status status)

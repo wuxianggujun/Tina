@@ -172,6 +172,27 @@ Core::Status PrimaryWindowUITreeUpdater::setBoxPaint(UI::UINodeId node, const UI
     return m_state->setBoxPaint(m_epoch, m_phase, m_updater, node, paint);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setButtonPaint(
+    UI::UINodeId button,
+    const UI::UIButtonPaint& paint)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setButtonPaint");
+    }
+    return m_state->setButtonPaint(m_epoch, m_phase, m_updater, button, paint);
+}
+
+Core::Result<UI::UIButtonPaint> PrimaryWindowUITreeUpdater::buttonPaint(
+    UI::UINodeId button) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIButtonPaint>("PrimaryWindowUITreeUpdater::buttonPaint");
+    }
+    return m_state->buttonPaint(m_epoch, m_phase, m_updater, button);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setText(UI::UINodeId node, std::string_view utf8)
 {
     if (m_state == nullptr)
@@ -271,6 +292,25 @@ Core::Status PrimaryWindowUITreeUpdater::clearCheckboxAction(UI::UINodeId checkb
     return m_state->clearCheckboxAction(m_epoch, m_phase, m_updater, checkbox);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setCheckboxPaint(UI::UINodeId checkbox,
+                                                           const UI::UICheckboxPaint& paint)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setCheckboxPaint");
+    }
+    return m_state->setCheckboxPaint(m_epoch, m_phase, m_updater, checkbox, paint);
+}
+
+Core::Result<UI::UICheckboxPaint> PrimaryWindowUITreeUpdater::checkboxPaint(UI::UINodeId checkbox) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UICheckboxPaint>("PrimaryWindowUITreeUpdater::checkboxPaint");
+    }
+    return m_state->checkboxPaint(m_epoch, m_phase, m_updater, checkbox);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setChecked(UI::UINodeId checkbox, bool checked)
 {
     if (m_state == nullptr)
@@ -324,6 +364,27 @@ Core::Result<float> PrimaryWindowUITreeUpdater::sliderValue(UI::UINodeId slider)
         return expiredFacade<float>("PrimaryWindowUITreeUpdater::sliderValue");
     }
     return m_state->sliderValue(m_epoch, m_phase, m_updater, slider);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setSliderPaint(
+    UI::UINodeId slider,
+    const UI::UISliderPaint& paint)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setSliderPaint");
+    }
+    return m_state->setSliderPaint(m_epoch, m_phase, m_updater, slider, paint);
+}
+
+Core::Result<UI::UISliderPaint> PrimaryWindowUITreeUpdater::sliderPaint(
+    UI::UINodeId slider) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UISliderPaint>("PrimaryWindowUITreeUpdater::sliderPaint");
+    }
+    return m_state->sliderPaint(m_epoch, m_phase, m_updater, slider);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setSliderChangeCallback(UI::UINodeId slider,

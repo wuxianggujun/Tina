@@ -331,6 +331,17 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     error.addContext("UIInputRouteProducer::produce(cancel)");
                     return Core::failure(std::move(error));
                 }
+            } else if (cancel->gamepad.has_value()
+                       && cancel->routedWindow == context->ownerWindow()) {
+                Core::Status cancelStatus =
+                    context->cancelDefaultActionInteraction(
+                        cancel->routedWindow,
+                        cancel->gamepad);
+                if (!cancelStatus) {
+                    Core::Error error = std::move(cancelStatus.error());
+                    error.addContext("UIInputRouteProducer::produce(cancel-default-action)");
+                    return Core::failure(std::move(error));
+                }
             }
             continue;
         }
@@ -482,28 +493,40 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             continue;
         }
 
-        // Keyboard Accept (Enter/Space) and Gamepad South Accept activate the
-        // Button that owns default-action focus (pointer-arm or Tab sets it).
+        // Keyboard Accept (Enter/Space) and Gamepad South Accept activate on
+        // Down, remain visibly pressed while their exact control is held, and
+        // release only on the matching Up.
         if (const auto* key =
                 std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
             key != nullptr
             && key->window == context->ownerWindow()
-            && key->state == Platform::DigitalTransition::Down
             && (key->key == Platform::Key::Enter
                 || key->key == Platform::Key::Space
                 || key->key == Platform::Key::KeypadEnter))
         {
-            auto activate = context->routeDefaultActionActivate(
-                platformFrame.id(),
-                transitions[ordinal].sequence,
-                UI::UIButtonActivationSource::Keyboard);
-            if (!activate)
+            const Platform::DigitalControlIdentity control =
+                Platform::KeyControlIdentity{
+                    .window = key->window,
+                    .key = key->key,
+                };
+            auto routed = key->state == Platform::DigitalTransition::Down
+                ? context->routeDefaultActionActivate(
+                    platformFrame.id(),
+                    transitions[ordinal].sequence,
+                    UI::UIButtonActivationSource::Keyboard,
+                    control)
+                : context->routeDefaultActionRelease(
+                    platformFrame.id(),
+                    transitions[ordinal].sequence,
+                    UI::UIButtonActivationSource::Keyboard,
+                    control);
+            if (!routed)
             {
-                Core::Error error = std::move(activate.error());
+                Core::Error error = std::move(routed.error());
                 error.addContext("UIInputRouteProducer::produce(keyboard-accept)");
                 return Core::failure(std::move(error));
             }
-            if (activate->consumed)
+            if (routed->consumed)
             {
                 stagingWords_[ordinal / BitsPerConsumptionWord] |=
                     u64{1} << (ordinal % BitsPerConsumptionWord);
@@ -515,20 +538,32 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 std::get_if<Platform::GamepadButtonTransition>(&transitions[ordinal].payload);
             gamepad != nullptr
             && gamepad->routedWindow == context->ownerWindow()
-            && gamepad->state == Platform::DigitalTransition::Down
             && gamepad->button == Platform::GamepadButton::South)
         {
-            auto activate = context->routeDefaultActionActivate(
-                platformFrame.id(),
-                transitions[ordinal].sequence,
-                UI::UIButtonActivationSource::Gamepad);
-            if (!activate)
+            const Platform::DigitalControlIdentity control =
+                Platform::GamepadButtonControlIdentity{
+                    .routedWindow = gamepad->routedWindow,
+                    .gamepad = gamepad->gamepad,
+                    .button = gamepad->button,
+                };
+            auto routed = gamepad->state == Platform::DigitalTransition::Down
+                ? context->routeDefaultActionActivate(
+                    platformFrame.id(),
+                    transitions[ordinal].sequence,
+                    UI::UIButtonActivationSource::Gamepad,
+                    control)
+                : context->routeDefaultActionRelease(
+                    platformFrame.id(),
+                    transitions[ordinal].sequence,
+                    UI::UIButtonActivationSource::Gamepad,
+                    control);
+            if (!routed)
             {
-                Core::Error error = std::move(activate.error());
+                Core::Error error = std::move(routed.error());
                 error.addContext("UIInputRouteProducer::produce(gamepad-accept)");
                 return Core::failure(std::move(error));
             }
-            if (activate->consumed)
+            if (routed->consumed)
             {
                 stagingWords_[ordinal / BitsPerConsumptionWord] |=
                     u64{1} << (ordinal % BitsPerConsumptionWord);

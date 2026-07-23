@@ -3,8 +3,10 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/ui/UINodeId.hpp>
+#include <tina/ui/UIPaint.hpp>
 
 #include <array>
+#include <compare>
 #include <cstddef>
 #include <new>
 #include <type_traits>
@@ -12,7 +14,21 @@
 
 namespace Tina::UI {
 
-// Fired when Slider value actually changes (setValue, drag, or step).
+// Slider-specific derived paint. UIBoxPaint remains the full track/background;
+// this schema adds the value-derived fill and the thumb without coupling the
+// retained UI to a render backend.
+struct UISliderPaint final {
+    UIStraightSrgba8Color filledTrackColor{};
+    UIStraightSrgba8Color thumbColor{};
+    UIStraightSrgba8Color draggingThumbColor{};
+    float contentInset = 3.0F;
+    float thumbWidth = 8.0F;
+
+    auto operator<=>(const UISliderPaint&) const = default;
+};
+
+// Fired when Slider value actually changes through setValue, drag, or a
+// range/step re-clamp.
 struct UISliderChangeEvent final {
     UINodeId sliderNode{};
     float value = 0.0F;

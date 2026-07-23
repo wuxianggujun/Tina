@@ -8,6 +8,7 @@
 #include <tina/ui/UICommittedPaint.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
 #include <tina/ui/UIButton.hpp>
+#include <tina/ui/UICheckbox.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIRadioButton.hpp>
 #include <tina/ui/UISlider.hpp>
@@ -26,6 +27,7 @@
 
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -211,6 +213,11 @@ public:
     [[nodiscard]] Core::Status setEnabled(UINodeId node, bool enabled);
     [[nodiscard]] Core::Result<bool> isEnabled(UINodeId node) const;
     [[nodiscard]] Core::Status setBoxPaint(UINodeId node, const UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setButtonPaint(
+        UINodeId button,
+        const UIButtonPaint& paint);
+    [[nodiscard]] Core::Result<UIButtonPaint> buttonPaint(
+        UINodeId button) const;
     // Label/Button/RadioButton/TextEdit only. Stores strict UTF-8 without NUL into the fixed text
     // byte budget and dirties Measure for Auto-sized intrinsic placeholders.
     // Glyph raster and FreeType remain out of this API.
@@ -233,6 +240,11 @@ public:
         UINodeId checkbox,
         UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearCheckboxAction(UINodeId checkbox);
+    [[nodiscard]] Core::Status setCheckboxPaint(
+        UINodeId checkbox,
+        const UICheckboxPaint& paint);
+    [[nodiscard]] Core::Result<UICheckboxPaint> checkboxPaint(
+        UINodeId checkbox) const;
     [[nodiscard]] Core::Status setChecked(UINodeId checkbox, bool checked);
     [[nodiscard]] Core::Result<bool> isChecked(UINodeId checkbox) const;
     [[nodiscard]] Core::Result<bool> isCheckboxPressed(UINodeId checkbox) const;
@@ -244,6 +256,11 @@ public:
         float step = 0.0F);
     [[nodiscard]] Core::Status setSliderValue(UINodeId slider, float value);
     [[nodiscard]] Core::Result<float> sliderValue(UINodeId slider) const;
+    [[nodiscard]] Core::Status setSliderPaint(
+        UINodeId slider,
+        const UISliderPaint& paint);
+    [[nodiscard]] Core::Result<UISliderPaint> sliderPaint(
+        UINodeId slider) const;
     [[nodiscard]] Core::Status setSliderChangeCallback(
         UINodeId slider,
         UISliderChangeCallback callback);
@@ -376,6 +393,12 @@ public:
     // Window without synthesizing an Up event or invoking a Button action.
     [[nodiscard]] Core::Status cancelPointerInteraction(
         Platform::WindowId routedWindow);
+    // Clears a disconnected gamepad's default-action press without releasing
+    // another keyboard/gamepad control. A missing gamepad clears all default
+    // action controls for the window.
+    [[nodiscard]] Core::Status cancelDefaultActionInteraction(
+        Platform::WindowId routedWindow,
+        std::optional<Platform::GamepadId> gamepad = std::nullopt);
     // Activates the default-focused Button (set when Primary Pointer arms a
     // Button). Used for keyboard Enter/Space and Gamepad South Accept.
     // Returns consumed=true when an action was invoked or the key was claimed.
@@ -386,7 +409,16 @@ public:
     [[nodiscard]] Core::Result<UIDefaultActionResult> routeDefaultActionActivate(
         Platform::PlatformFrameId platformFrame,
         u64 sourceSequence,
-        UIButtonActivationSource source);
+        UIButtonActivationSource source,
+        std::optional<Platform::DigitalControlIdentity> control = std::nullopt);
+    // Releases one keyboard/gamepad default-action control. The control
+    // identity is required so overlapping Accept keys or gamepads cannot
+    // release one another's pressed state.
+    [[nodiscard]] Core::Result<UIDefaultActionResult> routeDefaultActionRelease(
+        Platform::PlatformFrameId platformFrame,
+        u64 sourceSequence,
+        UIButtonActivationSource source,
+        const Platform::DigitalControlIdentity& control);
     // Cycles keyboard focus among visible Targetable Button/Checkbox/RadioButton/TextEdit nodes in paint
     // order. reverse=true moves backward (Shift+Tab). Consumes when any
     // candidate exists. Not a full Focus Scope / Modal system.
@@ -510,6 +542,13 @@ private:
         UINodeId updaterRoot,
         UINodeId node,
         const UIBoxPaint& paint);
+    [[nodiscard]] Core::Status setButtonPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId button,
+        const UIButtonPaint& paint);
+    [[nodiscard]] Core::Result<UIButtonPaint> buttonPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId button) const;
     [[nodiscard]] Core::Status setTextFromUpdater(
         UINodeId updaterRoot,
         UINodeId node,
@@ -548,6 +587,13 @@ private:
     [[nodiscard]] Core::Status clearCheckboxActionFromUpdater(
         UINodeId updaterRoot,
         UINodeId checkbox);
+    [[nodiscard]] Core::Status setCheckboxPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox,
+        const UICheckboxPaint& paint);
+    [[nodiscard]] Core::Result<UICheckboxPaint> checkboxPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId checkbox) const;
     [[nodiscard]] Core::Status setCheckedFromUpdater(
         UINodeId updaterRoot,
         UINodeId checkbox,
@@ -569,6 +615,13 @@ private:
         UINodeId slider,
         float value);
     [[nodiscard]] Core::Result<float> sliderValueFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider) const;
+    [[nodiscard]] Core::Status setSliderPaintFromUpdater(
+        UINodeId updaterRoot,
+        UINodeId slider,
+        const UISliderPaint& paint);
+    [[nodiscard]] Core::Result<UISliderPaint> sliderPaintFromUpdater(
         UINodeId updaterRoot,
         UINodeId slider) const;
     [[nodiscard]] Core::Status setSliderChangeCallbackFromUpdater(

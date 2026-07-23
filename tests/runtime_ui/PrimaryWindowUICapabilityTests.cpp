@@ -172,9 +172,13 @@ TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAn
     ASSERT_TRUE(tree.has_value()) << tree.error().message;
 
     auto progressBar = tree->createProgressBar(root->rootNodeId());
+    auto slider = tree->createSlider(root->rootNodeId());
+    auto checkbox = tree->createCheckbox(root->rootNodeId());
     auto firstRadio = tree->createRadioButton(root->rootNodeId());
     auto secondRadio = tree->createRadioButton(root->rootNodeId());
     ASSERT_TRUE(progressBar.has_value()) << progressBar.error().message;
+    ASSERT_TRUE(slider.has_value()) << slider.error().message;
+    ASSERT_TRUE(checkbox.has_value()) << checkbox.error().message;
     ASSERT_TRUE(firstRadio.has_value()) << firstRadio.error().message;
     ASSERT_TRUE(secondRadio.has_value()) << secondRadio.error().message;
 
@@ -187,9 +191,25 @@ TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAn
         .selectedIndicatorInset = 5.0F,
         .labelGap = 7.0F,
     };
+    constexpr UI::UICheckboxPaint CheckboxPaint{
+        .checkedIndicatorColor = {.red = 240, .green = 240, .blue = 240, .alpha = 255},
+        .checkedIndicatorInset = 4.0F,
+    };
+    constexpr UI::UISliderPaint SliderPaint{
+        .filledTrackColor = {.red = 40, .green = 160, .blue = 220, .alpha = 255},
+        .thumbColor = {.red = 235, .green = 240, .blue = 245, .alpha = 255},
+        .draggingThumbColor = {.red = 255, .green = 200, .blue = 40, .alpha = 255},
+        .contentInset = 4.0F,
+        .thumbWidth = 8.0F,
+    };
     ASSERT_TRUE(tree->setProgressBarRange(*progressBar, 10.0F, 20.0F).has_value());
     ASSERT_TRUE(tree->setProgressBarValue(*progressBar, 15.0F).has_value());
     ASSERT_TRUE(tree->setProgressBarPaint(*progressBar, ProgressPaint).has_value());
+    ASSERT_TRUE(tree->setSliderPaint(*slider, SliderPaint).has_value());
+    ASSERT_TRUE(tree->setSliderRange(*slider, 0.0F, 1.0F, 0.05F).has_value());
+    ASSERT_TRUE(tree->setSliderValue(*slider, 0.55F).has_value());
+    ASSERT_TRUE(tree->setCheckboxPaint(*checkbox, CheckboxPaint).has_value());
+    ASSERT_TRUE(tree->setChecked(*checkbox, true).has_value());
     ASSERT_TRUE(tree->setRadioButtonPaint(*firstRadio, RadioPaint).has_value());
     ASSERT_TRUE(tree->setRadioButtonPaint(*secondRadio, RadioPaint).has_value());
     ASSERT_TRUE(tree->setText(*firstRadio, "Windowed").has_value());
@@ -202,18 +222,30 @@ TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAn
     const PrimaryWindowUITreeUpdater& treeView = *tree;
     auto value = treeView.progressBarValue(*progressBar);
     auto progressPaint = treeView.progressBarPaint(*progressBar);
+    auto sliderValue = treeView.sliderValue(*slider);
+    auto sliderPaint = treeView.sliderPaint(*slider);
+    auto checkboxPaint = treeView.checkboxPaint(*checkbox);
+    auto checkboxChecked = treeView.isChecked(*checkbox);
     auto firstSelected = treeView.isRadioButtonSelected(*firstRadio);
     auto secondSelected = treeView.isRadioButtonSelected(*secondRadio);
     auto radioPaint = treeView.radioButtonPaint(*secondRadio);
     auto pressed = treeView.isRadioButtonPressed(*secondRadio);
     ASSERT_TRUE(value.has_value()) << value.error().message;
     ASSERT_TRUE(progressPaint.has_value()) << progressPaint.error().message;
+    ASSERT_TRUE(sliderValue.has_value()) << sliderValue.error().message;
+    ASSERT_TRUE(sliderPaint.has_value()) << sliderPaint.error().message;
+    ASSERT_TRUE(checkboxPaint.has_value()) << checkboxPaint.error().message;
+    ASSERT_TRUE(checkboxChecked.has_value()) << checkboxChecked.error().message;
     ASSERT_TRUE(firstSelected.has_value()) << firstSelected.error().message;
     ASSERT_TRUE(secondSelected.has_value()) << secondSelected.error().message;
     ASSERT_TRUE(radioPaint.has_value()) << radioPaint.error().message;
     ASSERT_TRUE(pressed.has_value()) << pressed.error().message;
     EXPECT_FLOAT_EQ(*value, 15.0F);
     EXPECT_EQ(*progressPaint, ProgressPaint);
+    EXPECT_FLOAT_EQ(*sliderValue, 0.55F);
+    EXPECT_EQ(*sliderPaint, SliderPaint);
+    EXPECT_EQ(*checkboxPaint, CheckboxPaint);
+    EXPECT_TRUE(*checkboxChecked);
     EXPECT_FALSE(*firstSelected);
     EXPECT_TRUE(*secondSelected);
     EXPECT_EQ(*radioPaint, RadioPaint);
@@ -227,9 +259,102 @@ TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAn
     auto expiredValue = treeView.progressBarValue(*progressBar);
     ASSERT_FALSE(expiredValue.has_value());
     EXPECT_EQ(expiredValue.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredCheckboxPaint = treeView.checkboxPaint(*checkbox);
+    ASSERT_FALSE(expiredCheckboxPaint.has_value());
+    EXPECT_EQ(expiredCheckboxPaint.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredSliderPaint = treeView.sliderPaint(*slider);
+    ASSERT_FALSE(expiredSliderPaint.has_value());
+    EXPECT_EQ(expiredSliderPaint.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredSetSliderPaint = tree->setSliderPaint(*slider, SliderPaint);
+    ASSERT_FALSE(expiredSetSliderPaint.has_value());
+    EXPECT_EQ(expiredSetSliderPaint.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     Core::Status expiredSelect = tree->setRadioButtonSelected(*firstRadio, true);
     ASSERT_FALSE(expiredSelect.has_value());
     EXPECT_EQ(expiredSelect.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, ButtonPaintFacadeRoundTripsAndExpiresWithPhase)
+{
+    constexpr UI::UIButtonPaint ButtonPaint{
+        .hoveredBackgroundColor = {.red = 30, .green = 80, .blue = 140, .alpha = 255},
+        .pressedBackgroundColor = {.red = 20, .green = 60, .blue = 110, .alpha = 255},
+        .focusedBackgroundColor = {.red = 220, .green = 170, .blue = 40, .alpha = 255},
+        .disabledBackgroundColor = {.red = 70, .green = 75, .blue = 80, .alpha = 210},
+    };
+
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto button = tree->createButton(root->rootNodeId());
+    ASSERT_TRUE(button.has_value()) << button.error().message;
+
+    const PrimaryWindowUITreeUpdater& treeView = *tree;
+    auto initialPaint = treeView.buttonPaint(*button);
+    ASSERT_TRUE(initialPaint.has_value()) << initialPaint.error().message;
+    EXPECT_EQ(*initialPaint, UI::UIButtonPaint{});
+
+    ASSERT_TRUE(tree->setButtonPaint(*button, ButtonPaint).has_value());
+    auto configuredPaint = treeView.buttonPaint(*button);
+    ASSERT_TRUE(configuredPaint.has_value()) << configuredPaint.error().message;
+    EXPECT_EQ(*configuredPaint, ButtonPaint);
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    Core::Status expiredSet = tree->setButtonPaint(*button, {});
+    ASSERT_FALSE(expiredSet.has_value());
+    EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredQuery = treeView.buttonPaint(*button);
+    ASSERT_FALSE(expiredQuery.has_value());
+    EXPECT_EQ(expiredQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, ButtonPaintWrongKindFailureIsStickyAndPreventsLaterMutation)
+{
+    constexpr UI::UIButtonPaint ButtonPaint{
+        .hoveredBackgroundColor = {.red = 40, .green = 100, .blue = 180, .alpha = 255},
+        .pressedBackgroundColor = {.red = 20, .green = 60, .blue = 120, .alpha = 255},
+        .focusedBackgroundColor = {.red = 245, .green = 190, .blue = 45, .alpha = 255},
+        .disabledBackgroundColor = {.red = 80, .green = 85, .blue = 90, .alpha = 220},
+    };
+
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto panel = tree->createPanel(root->rootNodeId());
+    auto button = tree->createButton(root->rootNodeId());
+    ASSERT_TRUE(panel.has_value()) << panel.error().message;
+    ASSERT_TRUE(button.has_value()) << button.error().message;
+
+    Core::Status wrongKind = tree->setButtonPaint(*panel, ButtonPaint);
+    ASSERT_FALSE(wrongKind.has_value());
+    EXPECT_EQ(wrongKind.error().code.domain, Core::ErrorDomain::UI);
+
+    const PrimaryWindowUITreeUpdater& treeView = *tree;
+    auto otherwiseValid = treeView.buttonPaint(*button);
+    ASSERT_FALSE(otherwiseValid.has_value());
+    EXPECT_EQ(otherwiseValid.error().code, wrongKind.error().code);
+    EXPECT_EQ(otherwiseValid.error().message, wrongKind.error().message);
+
+    auto finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish.has_value());
+    EXPECT_EQ(finish.error().code, wrongKind.error().code);
+
+    auto directUpdater = context->treeUpdater(*root);
+    ASSERT_TRUE(directUpdater.has_value()) << directUpdater.error().message;
+    auto unmodifiedPaint = directUpdater->buttonPaint(*button);
+    ASSERT_TRUE(unmodifiedPaint.has_value()) << unmodifiedPaint.error().message;
+    EXPECT_EQ(*unmodifiedPaint, UI::UIButtonPaint{});
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, ButtonActionFacadeSetsReplacesClearsAndQueriesInitialPressedState)
