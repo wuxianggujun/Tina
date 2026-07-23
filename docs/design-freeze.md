@@ -31,7 +31,7 @@
 | UI | Tina Retained UI 输出后端无关 DisplayList | [0011](adr/0011-retained-ui.md) | Implemented foundation/product slice |
 | Audio | miniaudio 是唯一真实 audio backend | [0012](adr/0012-miniaudio-backend.md) | Implemented optional adapter |
 | ECS | 若使用 EnTT，只能是 Scene 私有存储 | [0013](adr/0013-entt-internal-storage.md) | Not used：当前 Scene 不链接 EnTT |
-| Runtime | `IGameApplication` lifecycle + `IGameState` frame behavior | [0014](adr/0014-runtime-phase-and-state.md) | stack/commands + fixed/frame/render/`updateUI` 向下阻断已落地；`blocksGameplayInputBelow` 与 ActionMapper 深度抑制仍后置 |
+| Runtime | `IGameApplication` lifecycle + `IGameState` frame behavior | [0014](adr/0014-runtime-phase-and-state.md) | stack/commands + 四相位阻断 + `blocksGameplayInputBelow` 空 snapshot 已落地；`blocksUIInputBelow` 仅拦 `updateUI`（不回改当帧 UI route） |
 | Input | ordered PlatformFrame、Action domain、逐 substep 提交 | [0015](adr/0015-input-and-fixed-step.md) | Implemented foundation |
 | Asset 生命周期 | 弱 Handle、强 Lease、物理 retirement | [0016](adr/0016-asset-ownership-and-retirement.md) | CPU/Null upload/ledger + FramePin/Null completion 首切片；真 bgfx fence 后置 |
 | Task | 有界 CPU/IO/Main、TaskGroup、禁止 detach/强杀 | [0017](adr/0017-bounded-task-system.md) | Implemented；Desktop 交互默认 `max(1, hw-1)`（TASK-001 Done），工厂 0=IO-only |
@@ -59,10 +59,10 @@
 
 | 偏差 | 事实 | 处理方式 |
 | --- | --- | --- |
-| UI 平台证据 | ProgressBar/RadioButton 的 API、单测、product-2d 结构化输出与 Windows client-area 视觉证据已完成 | 后续只扩展 UIA/AT-SPI 与跨 DPI/GPU 门禁；见 UI-002、UI-003 |
+| UI 平台证据 | Semantics + 中立 a11y probe（UI-002-SPI）已有；真机 UIA/AT-SPI 未接 | 见 UI-002；勿把 probe 单测写成真机 a11y |
 | Linux 状态 | 历史 Linux 门禁早于当前 tip | 复验前不得扩写为当前平台支持证据；见 TEST-001 |
-
-| Opaque3D baseColor 采样 | 产品可 `setMesh3DMaterialTextureBinding`，submit 不采样 | RENDER-001 / bgfx Opaque3D sampler 切片 |
+| UI route vs policy | `blocksUIInputBelow` 不回改当帧 UI route（route 在 stack 前） | 文档已标明；若需真挡 UI 输入另开切片 |
+| AssetHandle 终态 | Scene 仍用 fixture mesh/material key | 产品 key binding 可用；Handle 终态后置 |
 
 ## 不变量
 

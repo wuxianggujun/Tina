@@ -137,10 +137,14 @@ save/load orchestration 尚未完成。
   `blocksUIInputBelow`（下层 `updateUI`）自顶向下阻断；
 - structural command 仅栈顶可排队；pop 空栈 → `GameStateStackBecameEmpty`。
 
+另已落地（RUNTIME-001-INPUT）：`blocksGameplayInputBelow` 使下层 fixed/frame 使用
+`SimulationActionSnapshot::suppressed` / `FrameActionSnapshot::suppressed`（
+`gameplayInputBlockedForDepth` + unit tests）。
+
 仍后置：
 
-- 交互式菜单/暂停（按键切换）；当前 `tina_sample_2d` 为自动收尾 push/pop 证据（≥60 帧 smoke）；
+- 交互式菜单/暂停（按键切换）；`tina_sample_2d` 仅自动收尾 pause overlay（≥60 帧 smoke）；
 - State UI root / listener / TaskGroup / AssetLease 在 transition 后的完整 stale-owner 矩阵；
-- 交互式菜单/暂停（按键切换）；`tina_sample_2d` 已有自动收尾 pause overlay 证据。
+- `blocksUIInputBelow` 回改当帧 UI route（当前故意不接；route 在 stack 前）。
 
 帧阶段详见 [Runtime](runtime.md)，任务状态见 [Backlog](backlog.md)。
