@@ -137,10 +137,20 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 
 成功为 exit 0；验证失败为 exit 1；参数错误为 exit 2。Catalog manifest 相对路径和派生 object path 已校验
 UTF-8，并拒绝绝对路径与 `..` 逃逸。glTF Cooker 已能读取 relative-file/bufferView baseColorTexture，
-但 relative URI 的 root containment、规范化与 symlink 逃逸策略尚未闭合；当前只应处理可信源资产，完整
-安全策略由 [ASSET-001](backlog.md) 跟踪。
+relative URI 的 root containment 与 size 上限已由 ASSET-001 落地；仍应只处理可信源资产（symlink
+逃逸等更严策略可后置）。
 
 ## Linux Null 与 sanitizer
+
+Windows 宿主可用 Docker Desktop 复现 GCC13 Null（TEST-001 子图）：
+
+```powershell
+docker build -f docker/linux-gcc13/Dockerfile -t tina-linux-gcc13:test-001 .
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxGcc13NullGate.ps1 `
+  -SkipImageBuild -OutJson artifacts\gates\test-001-linux-gcc13-null.json
+```
+
+容器内等价命令（`tools/linux/run-gcc13-null-gate.sh`）：
 
 ```bash
 cmake --preset linux-gcc13-vnext
@@ -151,7 +161,11 @@ cmake --build --preset linux-gcc13-vnext-debug \
 ./out/build/linux-gcc13-vnext/bin/tina_runtime_ui_tests --gtest_color=no
 ./out/build/linux-gcc13-vnext/bin/tina_ui_render_integration_tests --gtest_color=no
 ./out/build/linux-gcc13-vnext/bin/tina_sample_null --frames=300
+```
 
+Clang sanitizer（本机 Linux）：
+
+```bash
 cmake --preset linux-clang22-vnext-sanitize
 cmake --build --preset linux-clang22-vnext-sanitize-debug \
   --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests tina_sample_null

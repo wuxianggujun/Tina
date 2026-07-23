@@ -156,6 +156,20 @@ powershell -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 Linux 门禁必须记录 compiler、stdlib、CMake、vcpkg baseline、display backend 和 sanitizer 环境。
 Clang preset 通过 chainload 固定 libstdc++15；Ubuntu 默认旧工具链不能冒充正式结果。
 
+### Docker Desktop（Windows 宿主）— GCC13 Null 子图
+
+见 [m12-evidence-linux.md](m12-evidence-linux.md)。快捷：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxGcc13NullGate.ps1 `
+  -OutJson artifacts\gates\test-001-linux-gcc13-null.json
+```
+
+2026-07-23 tip `e0d94faa`：GCC13 Null 全 executable exit 0（`tina_ui_tests` 255/255 等）。
+**不等于** TEST-001 全关闭（缺 GLFW 与 Clang sanitizer）。
+
+### 本机 Linux / Clang sanitizer
+
 ```bash
 cmake --preset linux-clang22-vnext-sanitize
 cmake --build --preset linux-clang22-vnext-sanitize-debug \

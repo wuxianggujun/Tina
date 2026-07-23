@@ -22,7 +22,7 @@
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
 
-| TEST-001 | Planned | P0 | 复验 Linux vNext 当前 tip | 可用 GCC 13、Clang 22 + libstdc++15 | GCC Null/GLFW 及 Clang sanitizer 直接测试通过；记录工具链、返回码、sanitizer 与 X11/Wayland 条件 | Platform |
+| TEST-001 | Partial | P0 | 复验 Linux vNext 当前 tip | 可用 GCC 13、Clang 22 + libstdc++15 | **已完成** GCC13 Null（Docker）；**待** GCC GLFW、Clang Null、Clang sanitizer；记录工具链/返回码/X11/Wayland | [Linux 证据](m12-evidence-linux.md) |
 
 
 
@@ -79,3 +79,4 @@
 | UI-002-SPI | `UIAccessibilityTree`/`IUIAccessibilityProvider`/`UIAccessibilityProbeProvider`：从 committedSemantics 发布 role/name/state/range；stale node 拒绝；`UIAccessibilityTests`；`tina_sample_2d` 产品 JSON `accessibility*` | [UI](ui.md) · [2D](game-2d.md) |
 | RUNTIME-001-INPUT | `blocksGameplayInputBelow`：下层 fixed/frame 使用空 action snapshot；`gameplayInputBlockedForDepth` + unit tests | [gameplay](gameplay.md) · ADR 0014 |
 | RENDER-3D-TEX | Opaque3D unlit 采样 materialKey 绑定贴图（shader `s_texColor` + default white）；关闭「bind 不 draw」假完成 | [3D](game-3d.md) |
+| TEST-001-GCC13-NULL | Docker Desktop + `linux-gcc13-vnext`：`tina_tests`/`tina_ui_tests`(255)/`tina_runtime_ui_tests`(83)/bridge(13)/`tina_sample_null` 300 帧；vcpkg baseline 与仓库一致；`artifacts/gates/test-001-linux-gcc13-null.json` | [Linux 证据](m12-evidence-linux.md) |

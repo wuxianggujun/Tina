@@ -104,5 +104,5 @@ miniaudio null-device callback 与 Catalog AudioClip lease。真实扬声器质�
 
 ## 未关闭
 
-- 当前 tip Linux GCC/Clang/sanitizer（TEST-001）；
-- Cooked texture 产品绑定与安全 URI/size policy（ASSET-001）、PBR、跨 GPU/DPI golden、UIA/AT-SPI。
+- Linux tip：**GCC13 Null 已有证据**（见 [m12-evidence-linux.md](m12-evidence-linux.md)）；GLFW 与 Clang sanitizer 仍未复验（TEST-001 尾巴）；
+- PBR、跨 GPU/DPI golden、UIA/AT-SPI 真机（UI-002/UI-003/RENDER-001）。
