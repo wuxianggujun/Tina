@@ -824,8 +824,7 @@ class EngineHostImplementation final {
                     return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
                 }
                 const SimulationActionSnapshot& simulationActions = *simulationActionsResult;
-                IGameState* const activeState = m_gameStateStack.top();
-                if (activeState == nullptr)
+                if (m_gameStateStack.empty())
                 {
                     return failAfterStartupCommit(
                         gameApplication,
@@ -834,12 +833,16 @@ class EngineHostImplementation final {
                 }
                 FixedUpdateContext fixedContext{frameTiming, fixedTiming, simulationActions,
                                                 m_modules.audioEnginePtr()};
-                auto fixedResult =
-                    invokeResultBoundary("IGameState::fixedUpdate", RuntimeErrorCode::GameCallbackThrewException,
-                                         [&] { return activeState->fixedUpdate(fixedContext); });
-                if (!fixedResult)
+                auto fixedDispatch = m_gameStateStack.forEachDispatch(
+                    GameStateDispatchPhase::FixedUpdate,
+                    [&](IGameState& state, const GameStatePolicy&, usize) -> Core::Status {
+                        return invokeResultBoundary("IGameState::fixedUpdate",
+                                                    RuntimeErrorCode::GameCallbackThrewException,
+                                                    [&] { return state.fixedUpdate(fixedContext); });
+                    });
+                if (!fixedDispatch)
                 {
-                    return failAfterStartupCommit(gameApplication, std::move(fixedResult.error()), frameIndex,
+                    return failAfterStartupCommit(gameApplication, std::move(fixedDispatch.error()), frameIndex,
                                                   simulationTick);
                 }
                 if (auto completeStatus = m_actionMapper->completeSimulationTick(simulationTick); !completeStatus)
@@ -855,19 +858,26 @@ class EngineHostImplementation final {
             bool exitAfterFrame = false;
             m_pendingCommands.clearAll();
             const FrameActionSnapshot frameActions = m_actionMapper->frameActions();
-            IGameState* const frameState = m_gameStateStack.top();
-            if (frameState == nullptr)
+            if (m_gameStateStack.empty())
             {
                 return failAfterStartupCommit(
                     gameApplication,
                     Core::Error{RuntimeErrorCode::LifecycleInvariantViolation, "GameStateStack is empty during updateFrame"},
                     frameIndex, simulationTick);
             }
+            // Only the stack top may queue structural commands (ADR 0014).
             FrameUpdateContext frameContext{frameTiming, frameActions, exitAfterFrame, &m_pendingCommands,
                                             m_modules.audioEnginePtr()};
-            auto updateResult =
-                invokeResultBoundary("IGameState::updateFrame", RuntimeErrorCode::GameCallbackThrewException,
-                                     [&] { return frameState->updateFrame(frameContext); });
+            FrameUpdateContext frameContextBelow{frameTiming, frameActions, exitAfterFrame, nullptr,
+                                                 m_modules.audioEnginePtr()};
+            auto updateResult = m_gameStateStack.forEachDispatch(
+                GameStateDispatchPhase::FrameUpdate,
+                [&](IGameState& state, const GameStatePolicy&, usize depthFromTop) -> Core::Status {
+                    FrameUpdateContext& ctx = depthFromTop == 0 ? frameContext : frameContextBelow;
+                    return invokeResultBoundary("IGameState::updateFrame",
+                                                RuntimeErrorCode::GameCallbackThrewException,
+                                                [&] { return state.updateFrame(ctx); });
+                });
             if (!updateResult)
             {
                 m_pendingCommands.clearAll();
@@ -896,8 +906,7 @@ class EngineHostImplementation final {
             }
             m_pendingCommands.clearAll();
 
-            IGameState* const committedState = m_gameStateStack.top();
-            if (committedState == nullptr)
+            if (m_gameStateStack.empty())
             {
                 return failAfterStartupCommit(
                     gameApplication,
@@ -928,9 +937,13 @@ class EngineHostImplementation final {
             auto renderSceneRollback = Core::makeScopeExit([this]() noexcept { m_renderSceneBuilder.rollback(); });
             Render::RenderSceneWriter renderSceneWriter = m_renderSceneBuilder.writer();
             RenderSceneExtractionContext extractionContext{frameTiming, renderSceneWriter};
-            auto extractionResult =
-                invokeResultBoundary("IGameState::extractRenderScene", RuntimeErrorCode::GameCallbackThrewException,
-                                     [&] { return committedState->extractRenderScene(extractionContext); });
+            auto extractionResult = m_gameStateStack.forEachDispatch(
+                GameStateDispatchPhase::RenderExtract,
+                [&](IGameState& state, const GameStatePolicy&, usize) -> Core::Status {
+                    return invokeResultBoundary("IGameState::extractRenderScene",
+                                                RuntimeErrorCode::GameCallbackThrewException,
+                                                [&] { return state.extractRenderScene(extractionContext); });
+                });
             if (!extractionResult)
             {
                 return failAfterStartupCommit(gameApplication, std::move(extractionResult.error()), frameIndex,
@@ -954,8 +967,12 @@ class EngineHostImplementation final {
                 m_primaryWindowUICapability.abortPhase(epoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
             });
             UIUpdateContext uiContext{frameTiming, m_primaryWindowUICapability, *updateUIPhase};
-            auto uiResult = invokeResultBoundary("IGameState::updateUI", RuntimeErrorCode::GameCallbackThrewException,
-                                                 [&] { return committedState->updateUI(uiContext); });
+            auto uiResult = m_gameStateStack.forEachDispatch(
+                GameStateDispatchPhase::UIUpdate,
+                [&](IGameState& state, const GameStatePolicy&, usize) -> Core::Status {
+                    return invokeResultBoundary("IGameState::updateUI", RuntimeErrorCode::GameCallbackThrewException,
+                                                [&] { return state.updateUI(uiContext); });
+                });
             Core::Status updateUIPhaseStatus = m_primaryWindowUICapability.finishPhase(
                 *updateUIPhase, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
             if (!updateUIPhaseStatus)

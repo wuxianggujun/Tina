@@ -90,5 +90,81 @@ TEST(GameStatePendingCommandsTest, TracksSingleStructuralAndPolicySlots)
     EXPECT_EQ(pending.candidate, nullptr);
 }
 
+TEST(GameStatePolicyDispatchTest, BlocksBelowStopsPropagation)
+{
+    EXPECT_TRUE(policyBlocksBelow(GameStatePolicy{.blocksFixedUpdateBelow = true},
+                                  GameStateDispatchPhase::FixedUpdate));
+    EXPECT_FALSE(policyBlocksBelow(GameStatePolicy{.blocksFixedUpdateBelow = true},
+                                   GameStateDispatchPhase::FrameUpdate));
+    EXPECT_TRUE(policyBlocksBelow(GameStatePolicy{.blocksFrameUpdateBelow = true},
+                                  GameStateDispatchPhase::FrameUpdate));
+    EXPECT_TRUE(policyBlocksBelow(GameStatePolicy{.blocksRenderBelow = true},
+                                  GameStateDispatchPhase::RenderExtract));
+    EXPECT_TRUE(policyBlocksBelow(GameStatePolicy{.blocksUIInputBelow = true},
+                                  GameStateDispatchPhase::UIUpdate));
+}
+
+TEST(GameStatePolicyDispatchTest, CollectDispatchIndicesHonorsOverlayBlock)
+{
+    GameStateStack stack;
+    EventLog log;
+    // index 0 = base (bottom), index 1 = overlay (top)
+    ASSERT_TRUE(stack.pushCommitted(std::make_unique<RecordingState>(log, "base"), {}));
+    ASSERT_TRUE(stack.pushCommitted(std::make_unique<RecordingState>(log, "overlay"),
+                                    GameStatePolicy{.blocksUIInputBelow = true,
+                                                    .blocksFixedUpdateBelow = true,
+                                                    .blocksFrameUpdateBelow = true,
+                                                    .blocksRenderBelow = true}));
+
+    std::array<usize, 4> indices{};
+    // FixedUpdate: only top (stack index 1)
+    usize n = stack.collectDispatchIndices(GameStateDispatchPhase::FixedUpdate, indices);
+    ASSERT_EQ(n, 1U);
+    EXPECT_EQ(indices[0], 1U);
+
+    // Without block on top, both would run if policy is empty on top
+    stack.setTopPolicy({});
+    n = stack.collectDispatchIndices(GameStateDispatchPhase::FixedUpdate, indices);
+    ASSERT_EQ(n, 2U);
+    EXPECT_EQ(indices[0], 1U); // top first
+    EXPECT_EQ(indices[1], 0U); // then base
+}
+
+TEST(GameStatePolicyDispatchTest, ForEachDispatchOrderIsTopDownAndStops)
+{
+    GameStateStack stack;
+    EventLog log;
+    ASSERT_TRUE(stack.pushCommitted(std::make_unique<RecordingState>(log, "base"), {}));
+    ASSERT_TRUE(stack.pushCommitted(std::make_unique<RecordingState>(log, "mid"), {}));
+    ASSERT_TRUE(stack.pushCommitted(std::make_unique<RecordingState>(log, "top"),
+                                    GameStatePolicy{.blocksFrameUpdateBelow = true}));
+
+    std::vector<usize> visitedDepths;
+    ASSERT_TRUE(stack
+                    .forEachDispatch(GameStateDispatchPhase::FrameUpdate,
+                                     [&](IGameState&, const GameStatePolicy&, usize depth) -> Core::Status {
+                                         visitedDepths.push_back(depth);
+                                         return Core::success();
+                                     })
+                    .has_value());
+    // Only top (depth 0) — mid/base blocked by blocksFrameUpdateBelow
+    ASSERT_EQ(visitedDepths.size(), 1U);
+    EXPECT_EQ(visitedDepths[0], 0U);
+
+    visitedDepths.clear();
+    stack.setTopPolicy({});
+    ASSERT_TRUE(stack
+                    .forEachDispatch(GameStateDispatchPhase::FrameUpdate,
+                                     [&](IGameState&, const GameStatePolicy&, usize depth) -> Core::Status {
+                                         visitedDepths.push_back(depth);
+                                         return Core::success();
+                                     })
+                    .has_value());
+    ASSERT_EQ(visitedDepths.size(), 3U);
+    EXPECT_EQ(visitedDepths[0], 0U);
+    EXPECT_EQ(visitedDepths[1], 1U);
+    EXPECT_EQ(visitedDepths[2], 2U);
+}
+
 } // namespace
 } // namespace Tina::Tests

@@ -13,7 +13,8 @@
   每帧最多一个 structural command，在 Frame Update 与 extract 之间唯一 commit；enter 失败只丢
   candidate（不 onExit），栈保持。pop 空栈产生 `RunExitReason::GameStateStackBecameEmpty`。
 - `GameStatePolicy` 在 enter 成功后采样；`requestPolicyChange` 更新栈顶 committed policy。
-  多层 policy 向下阻断（input/fixed/render 对 below 的屏蔽）尚未调度。
+  帧阶段按栈 **自顶向下** 调度：`blocksFixedUpdateBelow` / `blocksFrameUpdateBelow` /
+  `blocksRenderBelow` / `blocksUIInputBelow` 为真时停止向更下层传播。structural command 仍仅栈顶可排队。
 - `IGameState` 承担 `fixedUpdate()`、`updateFrame()`、`extractRenderScene()` 与 `updateUI()`。
 - Runtime 已组合 Clock、Platform、Task、Render 和可选 Audio；AssetSystem/World/Physics2D 仍由
   产品 State 或样例显式持有，不是 `EngineHost` 模块。
@@ -151,7 +152,7 @@ AudioEngine
 | Backlog | 范围 |
 | --- | --- |
 | `TASK-001` | 落实或正式替代 ADR 0017 的 Desktop CPU worker 默认值 |
-| `RUNTIME-001` | stack/commands 首切片已落地；多层 policy 向下阻断仍可扩展 |
+| `RUNTIME-001` | stack/commands + policy 向下阻断调度已落地 |
 | `RUNTIME-002` | packet/FramePin/Null completion 首切片已落地；真实 GPU fence 后置 |
 
 通用 Runtime Event Queue、AssetSystem 组合、State TaskGroup barrier、多 World/editor orchestration 与

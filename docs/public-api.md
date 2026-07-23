@@ -88,7 +88,9 @@ updateUI(UIUpdateContext&)
 
 Runtime 私有持有 `GameStateStack`（定容 8）。`FrameUpdateContext` 提供 `requestPush` /
 `requestPop` / `requestReplace` / `requestPolicyChange`：每帧最多一个 structural command，在
-`updateFrame` 之后、`extractRenderScene` 之前唯一 commit。Game SDK 不获得可变 stack 引用。
+`updateFrame` 之后、`extractRenderScene` 之前唯一 commit。各相位自顶向下调用栈上 State，直到
+某层 policy 的 `blocks*Below` 阻止继续向下。structural command 仅栈顶 context 可排队。Game SDK
+不获得可变 stack 引用。
 
 ## Phase Context
 

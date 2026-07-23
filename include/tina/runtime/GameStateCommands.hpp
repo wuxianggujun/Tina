@@ -7,6 +7,7 @@
 
 #include <array>
 #include <memory>
+#include <span>
 #include <utility>
 
 namespace Tina {
@@ -62,6 +63,31 @@ struct GameStateStackEntry final {
     GameStatePolicy policy{};
 };
 
+// Which frame phase is being dispatched top-down (ADR 0014 policy propagation).
+enum class GameStateDispatchPhase : u8 {
+    FixedUpdate = 0,
+    FrameUpdate = 1,
+    RenderExtract = 2,
+    UIUpdate = 3,
+};
+
+[[nodiscard]] constexpr bool policyBlocksBelow(const GameStatePolicy& policy,
+                                               GameStateDispatchPhase phase) noexcept
+{
+    switch (phase)
+    {
+    case GameStateDispatchPhase::FixedUpdate:
+        return policy.blocksFixedUpdateBelow;
+    case GameStateDispatchPhase::FrameUpdate:
+        return policy.blocksFrameUpdateBelow;
+    case GameStateDispatchPhase::RenderExtract:
+        return policy.blocksRenderBelow;
+    case GameStateDispatchPhase::UIUpdate:
+        return policy.blocksUIInputBelow;
+    }
+    return false;
+}
+
 class GameStateStack final {
 public:
     [[nodiscard]] usize size() const noexcept { return m_size; }
@@ -81,6 +107,62 @@ public:
     [[nodiscard]] GameStatePolicy topPolicy() const noexcept
     {
         return empty() ? GameStatePolicy{} : m_entries[m_size - 1U].policy;
+    }
+
+    // Top-down visit until a state whose policy blocks this phase below.
+    // visitor(state, policy, depthFromTop) where depthFromTop==0 is the stack top.
+    // Stops early if visitor returns a failure Status.
+    template <typename Visitor>
+    [[nodiscard]] Core::Status forEachDispatch(GameStateDispatchPhase phase, Visitor&& visitor)
+    {
+        if (empty())
+        {
+            return Core::success();
+        }
+        for (usize depthFromTop = 0; depthFromTop < m_size; ++depthFromTop)
+        {
+            const usize index = m_size - 1U - depthFromTop;
+            GameStateStackEntry& entry = m_entries[index];
+            if (entry.state == nullptr)
+            {
+                return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                                     "GameStateStack entry is null during dispatch");
+            }
+            if (Core::Status status = visitor(*entry.state, entry.policy, depthFromTop); !status)
+            {
+                return status;
+            }
+            if (policyBlocksBelow(entry.policy, phase))
+            {
+                break;
+            }
+        }
+        return Core::success();
+    }
+
+    // Collect which stack indices (0=bottom) participate in a phase (for tests).
+    [[nodiscard]] usize collectDispatchIndices(GameStateDispatchPhase phase,
+                                               std::span<usize> outIndices) const noexcept
+    {
+        usize written = 0;
+        if (empty() || outIndices.empty())
+        {
+            return 0;
+        }
+        for (usize depthFromTop = 0; depthFromTop < m_size; ++depthFromTop)
+        {
+            const usize index = m_size - 1U - depthFromTop;
+            if (written < outIndices.size())
+            {
+                outIndices[written] = index;
+                ++written;
+            }
+            if (policyBlocksBelow(m_entries[index].policy, phase))
+            {
+                break;
+            }
+        }
+        return written;
     }
 
     [[nodiscard]] Core::Status pushCommitted(std::unique_ptr<IGameState> state, GameStatePolicy policy) noexcept
