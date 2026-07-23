@@ -117,7 +117,8 @@ Texture2D dependency；Prefab 保存 node hierarchy 与 Mesh/Material AssetId。
 
 ## 当前限制与下一步
 
-- owning `RenderFramePacket`、FramePin、真实 backend completion/fence 和 submission 生命周期尚未实现，
+- owning `RenderFramePacket`、FramePin、Null completion 首切片已落地；真实 backend fence 驱动的
+  asynchronous completion 仍后置；
   由 `RUNTIME-002` 跟踪；
 - glTF 外部 buffer/texture 的 root containment、URI/type/size 上限与产品接入由 `ASSET-001` 跟踪；
 - hot reload、增量 Cooker、自动 LRU、Bundle/Patch 与 network Asset 尚未实现，见 `ASSET-002`；

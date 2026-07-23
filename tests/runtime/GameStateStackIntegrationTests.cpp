@@ -33,6 +33,9 @@ struct StackProbe final {
     u64 overlayEnter = 0;
     u64 overlayExit = 0;
     u64 baseExit = 0;
+    // Non-empty state span is never present under blocksGameplayInputBelow (Host supplies suppressed).
+    u64 baseFrameActionStateSpansWhileOverlay = 0;
+    u64 baseFrameActionStateSpansWhileTop = 0;
 };
 
 class OverlayState final : public IGameState {
@@ -131,6 +134,20 @@ public:
     {
         ++probe_->frameCallsBase;
         probe_->events.emplace_back("base.frame");
+        // Host must suppress gameplay actions for layers below an overlay that sets
+        // blocksGameplayInputBelow (empty states span even if platform had input).
+        if (probe_->overlayEnter > probe_->overlayExit)
+        {
+            if (!context.frameActions().states.empty())
+            {
+                ++probe_->baseFrameActionStateSpansWhileOverlay;
+            }
+        }
+        else
+        {
+            // Record that we observed the snapshot object while top (may still be empty on Null).
+            ++probe_->baseFrameActionStateSpansWhileTop;
+        }
         // Frame 0: push overlay. After overlay pops, continue until exitAfterFrames base frames total.
         if (probe_->frameCallsBase == 1U && probe_->overlayEnter == 0U)
         {
@@ -222,6 +239,10 @@ TEST(GameStateStackIntegrationTest, PushOverlayBlocksBaseFixedAndFrameThenPopRes
     // UI likewise not blocked below.
     EXPECT_GE(probe.uiCallsBase, 1U);
     EXPECT_GE(probe.uiCallsOverlay, 1U);
+
+    // While overlay is active, base must never see a non-empty action state span.
+    EXPECT_EQ(probe.baseFrameActionStateSpansWhileOverlay, 0U);
+    EXPECT_GT(probe.baseFrameActionStateSpansWhileTop, 0U);
 
     // Event order fragments.
     auto find = [&](std::string_view token) {

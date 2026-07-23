@@ -68,9 +68,9 @@ Mesh/Material AssetId 转成当前 Render key。任一步失败都会逆序销�
 6. resolver 按 node AssetId 映射到对应 meshKey/materialKey 与 per-mesh bounds/color；
 7. 实例化、extract、提交，退出时解除 binding 并销毁 GPU mesh/texture。
 
-当前产品门禁已证明两个不同 AssetId 的并行 mesh GPU binding，以及 material texture **绑定 API** 与
-结构化计数；尚未证明 Opaque3D 在 GPU 上 **采样** 该贴图，也尚未证明 `AssetSystem` Handle/Lease 到
-submission 的完整 pin（真 fence 见 RUNTIME-002 尾巴）。
+当前产品门禁已证明两个不同 AssetId 的并行 mesh GPU binding、material texture 绑定，以及 Opaque3D
+unlit submit 时按 materialKey **采样**（`s_texColor` × instance baseColorFactor；未 bind 用 1×1 白）。
+尚未证明 `AssetSystem` Handle/Lease 到 submission 的完整 fence pin（真 fence 见 RUNTIME-002 尾巴）。
 
 ## 三类 3D 门禁
 
@@ -100,5 +100,5 @@ submission 的完整 pin（真 fence 见 RUNTIME-002 尾巴）。
   （PERF-001 首切片），但不替代 3D 视觉门禁；
 - Jolt/3D Physics 未接入，静态 3D 产品门禁不以它为前置条件。
 
-下一步只在可执行 Backlog 中维护：Opaque3D 贴图采样与 PBR/pass 见 `RENDER-001`，真 GPU fence
-completion 见 RUNTIME-002 尾巴。详见 [Backlog](backlog.md)。
+下一步只在可执行 Backlog 中维护：PBR/pass 见 `RENDER-001`，真 GPU fence completion 见 RUNTIME-002
+尾巴。详见 [Backlog](backlog.md)。

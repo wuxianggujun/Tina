@@ -130,7 +130,7 @@ multi-mesh glTF Cooker 已生成 distinct AssetId/Prefab dependency；产品 sam
 | AssetHandle | Asset registry | 弱 lookup，可失效 |
 | AssetLease | Asset payload | 强保活 CPU payload |
 | GPU handle | RenderDevice | generation backend owner |
-| FramePin/packet | 尚未实现 | 目标为 submission completion 后释放 |
+| FramePin/packet | Null 同步 complete 首切片已落地 | 真 bgfx fence 异步 completion 后置 |
 
 任何 borrowed view 都必须注明精确失效点。不能用“一律不能跨帧”代替 committed UI view、Platform
 view、phase writer 和 Lease 各自不同的规则。

@@ -86,7 +86,7 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 | `setSprite2DTextureBinding` | 校验/记录 binding | sprite key → texture |
 | `create/destroyStaticMeshP3N3UV2` | 逻辑 mesh storage | 私有 VB/IB |
 | `setMesh3DBinding` | 校验/记录 binding | mesh key → GPU mesh |
-| `setMesh3DMaterialTextureBinding` | 校验/记录 binding | material key → base-color texture **表**；Opaque3D submit **尚未**采样 |
+| `setMesh3DMaterialTextureBinding` | 校验/记录 binding | material key → base-color texture；Opaque3D unlit submit **采样** `s_texColor`（默认 1×1 白） |
 | `capturePrimaryFrameRgba8` | Unsupported | present 后异步截图路径 |
 
 `GpuTextureId`/`GpuMeshId` 是 backend owner 的 generation handle，不是 AssetHandle。销毁后 stale handle
