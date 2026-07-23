@@ -62,6 +62,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     runtime/header_isolation/EngineConfigHeader.cpp
     runtime/header_isolation/EngineHostHeader.cpp
     runtime/header_isolation/GameApplicationHeader.cpp
+    runtime/header_isolation/GameStateCommandsHeader.cpp
     runtime/header_isolation/InputActionsHeader.cpp
     runtime/header_isolation/InputActionMapHeader.cpp
     runtime/header_isolation/PlatformEventDispatcherHeader.cpp
@@ -73,6 +74,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     runtime/Sample2DTileSelectionTests.cpp
     runtime/Sample2DWindowVisibilityPacingTests.cpp
     runtime/PlatformEventDispatcherTests.cpp
+    runtime/GameStateStackTests.cpp
     runtime/RuntimeLifecycleTests.cpp
     runtime/WindowSurfaceLeaseTests.cpp
     runtime/WindowSurfaceRuntimeTests.cpp

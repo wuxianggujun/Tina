@@ -2,6 +2,7 @@
 
 #include <tina/core/error/Result.hpp>
 #include <tina/runtime/GameState.hpp>
+#include <tina/runtime/PhaseContexts.hpp>
 
 #include <memory>
 

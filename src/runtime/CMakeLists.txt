@@ -4,6 +4,7 @@ add_library(tina_runtime STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/FrameTiming.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/GameApplication.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/GameState.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/runtime/GameStateCommands.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/InputActions.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/InputActionMap.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/PhaseContexts.hpp

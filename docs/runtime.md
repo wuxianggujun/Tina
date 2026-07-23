@@ -8,13 +8,16 @@
 - `EngineHost` 是唯一非全局组合根；`run()` 只能在创建线程调用一次。
 - `IGameApplication` 只通过 `createInitialState()` 创建首个 State，并在已提交游戏结束时接收
   `onShutdown()`。
-- 当前 Runtime 只持有一个已提交的 `IGameState`。`GameStatePolicy` 会在启动时采样，但尚无
-  State stack、push/pop/replace command 或多 State policy 调度。
+- Runtime 持有私有 `GameStateStack`（定容 8）；初始 State 经 onEnter 成功后 push。
+- `FrameUpdateContext` 提供 `requestPush` / `requestPop` / `requestReplace` / `requestPolicyChange`：
+  每帧最多一个 structural command，在 Frame Update 与 extract 之间唯一 commit；enter 失败只丢
+  candidate（不 onExit），栈保持。pop 空栈产生 `RunExitReason::GameStateStackBecameEmpty`。
+- `GameStatePolicy` 在 enter 成功后采样；`requestPolicyChange` 更新栈顶 committed policy。
+  多层 policy 向下阻断（input/fixed/render 对 below 的屏蔽）尚未调度。
 - `IGameState` 承担 `fixedUpdate()`、`updateFrame()`、`extractRenderScene()` 与 `updateUI()`。
 - Runtime 已组合 Clock、Platform、Task、Render 和可选 Audio；AssetSystem/World/Physics2D 仍由
   产品 State 或样例显式持有，不是 `EngineHost` 模块。
-- Desktop 使用 GLFW、bgfx、有界 TaskSystem 和 backend-neutral `AudioEngine`。它会补一个 IO worker
-  及 IO/Main 队列容量，但当前没有落实 ADR 0017 的交互 CPU worker 默认值，见 `TASK-001`。
+- Desktop 使用 GLFW、bgfx、有界 TaskSystem（含 ADR 0017 交互 CPU 默认）和 backend-neutral `AudioEngine`。
 - Null/测试图可以显式注入 Headless、DisabledTaskSystem、NullRender 和无 Audio 组合。
 
 Legacy `Application`、`SceneManager` 与 `Tina.exe` 已删除；禁止恢复 Singleton、Service Locator 或
@@ -148,7 +151,7 @@ AudioEngine
 | Backlog | 范围 |
 | --- | --- |
 | `TASK-001` | 落实或正式替代 ADR 0017 的 Desktop CPU worker 默认值 |
-| `RUNTIME-001` | State stack、push/pop/replace command、唯一提交点与 policy 调度 |
+| `RUNTIME-001` | stack/commands 首切片已落地；多层 policy 向下阻断仍可扩展 |
 | `RUNTIME-002` | owning `RenderFramePacket`、FramePin、submission completion 与资源寿命闭环 |
 
 通用 Runtime Event Queue、AssetSystem 组合、State TaskGroup barrier、多 World/editor orchestration 与

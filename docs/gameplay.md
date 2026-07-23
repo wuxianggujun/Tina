@@ -1,7 +1,7 @@
 # 游戏入口与 State
 
-本文描述当前游戏侧入口。Tina 目前是单 State Runtime；`GameStateStack`、state commands 和多层 policy
-调度是 `RUNTIME-001` 的目标，不是现有公共能力。
+本文描述当前游戏侧入口。Runtime 已支持私有 `GameStateStack` 与通过 `FrameUpdateContext` 排队的
+push/pop/replace/policy 命令（`RUNTIME-001` 首切片）；Game SDK 仍不能直接持有可变 stack。
 
 ## 当前接口
 

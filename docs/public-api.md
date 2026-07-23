@@ -86,8 +86,9 @@ extractRenderScene(RenderSceneExtractionContext&) const
 updateUI(UIUpdateContext&)
 ```
 
-Runtime 目前只持有一个 committed State。不存在公开 `GameStateStack`、`GameStateCommands` 或
-push/pop/replace API；`GameStatePolicy` 已采样但尚无下层 State 调度。对应扩展见 `RUNTIME-001`。
+Runtime 私有持有 `GameStateStack`（定容 8）。`FrameUpdateContext` 提供 `requestPush` /
+`requestPop` / `requestReplace` / `requestPolicyChange`：每帧最多一个 structural command，在
+`updateFrame` 之后、`extractRenderScene` 之前唯一 commit。Game SDK 不获得可变 stack 引用。
 
 ## Phase Context
 

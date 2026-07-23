@@ -27,6 +27,10 @@ inline constexpr Core::ErrorCode PlatformEventCallbackThrewException{Core::Error
 inline constexpr Core::ErrorCode WrongOwnerThread{Core::ErrorDomain::Runtime, 12};
 inline constexpr Core::ErrorCode PrimaryWindowUIUnavailable{Core::ErrorDomain::Runtime, 13};
 inline constexpr Core::ErrorCode UIPhaseCapabilityExpired{Core::ErrorDomain::Runtime, 14};
+inline constexpr Core::ErrorCode GameStateCommandAlreadyQueued{Core::ErrorDomain::Runtime, 15};
+inline constexpr Core::ErrorCode GameStateStackCapacityExceeded{Core::ErrorDomain::Runtime, 16};
+inline constexpr Core::ErrorCode GameStateTransitionFailed{Core::ErrorDomain::Runtime, 17};
+inline constexpr Core::ErrorCode GameStateCommandRejected{Core::ErrorDomain::Runtime, 18};
 
 } // namespace RuntimeErrorCode
 

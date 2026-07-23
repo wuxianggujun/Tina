@@ -1,9 +1,15 @@
 #pragma once
 
 #include <tina/core/error/Result.hpp>
-#include <tina/runtime/PhaseContexts.hpp>
 
 namespace Tina {
+
+class GameStateEnterContext;
+class GameStateExitContext;
+class FixedUpdateContext;
+class FrameUpdateContext;
+class RenderSceneExtractionContext;
+class UIUpdateContext;
 
 struct GameStatePolicy final {
     bool blocksGameplayInputBelow = false;

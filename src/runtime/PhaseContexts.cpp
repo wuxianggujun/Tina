@@ -79,10 +79,12 @@ Audio::AudioEngine* FixedUpdateContext::audioEngine() const noexcept
 }
 
 FrameUpdateContext::FrameUpdateContext(const FrameTiming& frameTiming, const FrameActionSnapshot& frameActions,
-                                       bool& exitRequested, Audio::AudioEngine* audioEngine) noexcept
+                                       bool& exitRequested, GameStatePendingCommands* pendingCommands,
+                                       Audio::AudioEngine* audioEngine) noexcept
     : m_frameTiming(&frameTiming),
       m_frameActions(&frameActions),
       m_exitRequested(&exitRequested),
+      m_pendingCommands(pendingCommands),
       m_audioEngine(audioEngine)
 {
 }
@@ -105,6 +107,77 @@ Audio::AudioEngine* FrameUpdateContext::audioEngine() const noexcept
 void FrameUpdateContext::requestExitAfterFrame() noexcept
 {
     *m_exitRequested = true;
+}
+
+Core::Status FrameUpdateContext::requestPush(std::unique_ptr<IGameState> state)
+{
+    if (m_pendingCommands == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::GameStateCommandRejected, "GameState commands unavailable");
+    }
+    if (state == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::InitialGameStateWasNull, "requestPush requires non-null IGameState");
+    }
+    if (m_pendingCommands->hasStructural())
+    {
+        return Core::failure(RuntimeErrorCode::GameStateCommandAlreadyQueued,
+                             "only one structural GameState command is allowed per frame");
+    }
+    m_pendingCommands->structural = GameStateStructuralCommandKind::Push;
+    m_pendingCommands->candidate = std::move(state);
+    ++m_pendingCommands->structuralSequence;
+    return Core::success();
+}
+
+Core::Status FrameUpdateContext::requestPop()
+{
+    if (m_pendingCommands == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::GameStateCommandRejected, "GameState commands unavailable");
+    }
+    if (m_pendingCommands->hasStructural())
+    {
+        return Core::failure(RuntimeErrorCode::GameStateCommandAlreadyQueued,
+                             "only one structural GameState command is allowed per frame");
+    }
+    m_pendingCommands->structural = GameStateStructuralCommandKind::Pop;
+    m_pendingCommands->candidate.reset();
+    ++m_pendingCommands->structuralSequence;
+    return Core::success();
+}
+
+Core::Status FrameUpdateContext::requestReplace(std::unique_ptr<IGameState> state)
+{
+    if (m_pendingCommands == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::GameStateCommandRejected, "GameState commands unavailable");
+    }
+    if (state == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::InitialGameStateWasNull, "requestReplace requires non-null IGameState");
+    }
+    if (m_pendingCommands->hasStructural())
+    {
+        return Core::failure(RuntimeErrorCode::GameStateCommandAlreadyQueued,
+                             "only one structural GameState command is allowed per frame");
+    }
+    m_pendingCommands->structural = GameStateStructuralCommandKind::Replace;
+    m_pendingCommands->candidate = std::move(state);
+    ++m_pendingCommands->structuralSequence;
+    return Core::success();
+}
+
+Core::Status FrameUpdateContext::requestPolicyChange(GameStatePolicy policy)
+{
+    if (m_pendingCommands == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::GameStateCommandRejected, "GameState commands unavailable");
+    }
+    m_pendingCommands->policyChangeRequested = true;
+    m_pendingCommands->requestedPolicy = policy;
+    ++m_pendingCommands->policySequence;
+    return Core::success();
 }
 
 RenderSceneExtractionContext::RenderSceneExtractionContext(

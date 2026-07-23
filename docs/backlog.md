@@ -33,7 +33,7 @@
 | UI-002 | Planned | P1 | 建立 Windows UIA / Linux AT-SPI adapter 首切片 | Semantics snapshot | Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit role、name、state 可由真实辅助技术读取，生命周期无 stale node | Integration + Platform |
 | UI-003 | Planned | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | 100/150/200% DPI、字体 fingerprint 与区域阈值可复现；初始化白帧不计入 stable capture | Visual + Platform |
 
-| RUNTIME-001 | Planned | P1 | GameState stack/commands | 当前单 State 生命周期 | push/pop/replace 仅在唯一 commit 点生效；onEnter/onExit 顺序、UI root、Task barrier 与失败回滚有测试 | Unit + Integration |
+
 | RUNTIME-002 | Planned | P0 | owning RenderFramePacket、FramePin 与 submission completion | ADR 0016 | 在途 Asset/UI atlas/Surface 不因 logical unload 失效；完成后所有 pin/ticket/ledger 归零 | Unit + failure injection |
 | PERF-001 | Planned | P1 | 完成 ADR 0018 决策并实现 `tina_bench` | 固定 workload/fingerprint | 接受或拒绝 ADR 0018；JSON schema、checksum、p50/p95/p99、baseline compatibility 与固定 worker 生效 | Benchmark + Platform |
 
@@ -70,3 +70,4 @@
 | DOC-001 | 文档职责与任务体系重组完成；本地链接、configure/build preset、CMake target、Markdown fence 与格式扫描通过；UI 绘制链路和控件矩阵已归档 | [文档索引](README.md) · [Roadmap](roadmap.md) · [UI](ui.md) |
 | UI-THEME-AB | 薄 `UITheme` token；`UIBoxPaint` 亮/暗边 + 可选 shadow；sample_2d 设置面板 elevation；hex `rgb`/`argb`；`UIThemeTests` | [UI](ui.md) |
 | DOC-002 | `tools/docs/CheckDocs.ps1`：docs 本地链接、cmake configure/build preset、`--target` 名、Legacy 产品文案软警告；不扫 out/build/thirdparty | [building](building.md) · [testing](testing.md) |
+| RUNTIME-001 | `GameStateStack` + `FrameUpdateContext` push/pop/replace/policy；updateFrame 后、extract 前唯一 commit；enter 失败丢 candidate 不 onExit；pop 空栈 → `GameStateStackBecameEmpty`；`GameStateStackTests` | [gameplay](gameplay.md) · ADR 0014 |

@@ -5,10 +5,15 @@
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/EngineConfig.hpp>
 #include <tina/runtime/FrameTiming.hpp>
+#include <tina/runtime/GameStateCommands.hpp>
 #include <tina/runtime/InputActions.hpp>
 #include <tina/runtime/PlatformEvents.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
+
+#include <memory>
+
+// GameState.hpp is included via GameStateCommands.hpp (IGameState + GameStatePolicy).
 
 namespace Tina::Detail {
 class EngineHostImplementation;
@@ -103,13 +108,21 @@ class FrameUpdateContext final {
     [[nodiscard]] Audio::AudioEngine* audioEngine() const noexcept;
     void requestExitAfterFrame() noexcept;
 
+    // Deferred stack commands (ADR 0014). Commit is EngineHost-only after updateFrame.
+    [[nodiscard]] Core::Status requestPush(std::unique_ptr<IGameState> state);
+    [[nodiscard]] Core::Status requestPop();
+    [[nodiscard]] Core::Status requestReplace(std::unique_ptr<IGameState> state);
+    [[nodiscard]] Core::Status requestPolicyChange(GameStatePolicy policy);
+
   private:
     FrameUpdateContext(const FrameTiming& frameTiming, const FrameActionSnapshot& frameActions,
-                       bool& exitRequested, Audio::AudioEngine* audioEngine) noexcept;
+                       bool& exitRequested, GameStatePendingCommands* pendingCommands,
+                       Audio::AudioEngine* audioEngine) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
     const FrameActionSnapshot* m_frameActions = nullptr;
     bool* m_exitRequested = nullptr;
+    GameStatePendingCommands* m_pendingCommands = nullptr;
     Audio::AudioEngine* m_audioEngine = nullptr;
 
     friend class Detail::EngineHostImplementation;

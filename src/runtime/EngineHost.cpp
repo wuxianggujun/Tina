@@ -4,6 +4,8 @@
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/GameApplication.hpp>
+#include <tina/runtime/GameStateCommands.hpp>
+#include <tina/runtime/PhaseContexts.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
@@ -636,14 +638,19 @@ class EngineHostImplementation final {
             return failBeforeStartupCommit(std::move(enterResult.error()));
         }
 
-        m_committedPolicy = candidate->initialPolicy();
+        const GameStatePolicy initialPolicy = candidate->initialPolicy();
         if (Core::Status layoutStatus = m_primaryWindowUILayout.commitForStartup(*uiContextResult, initialMetrics);
             !layoutStatus)
         {
             candidate.reset();
             return failBeforeStartupCommit(std::move(layoutStatus.error()));
         }
-        m_gameState = std::move(candidate);
+        if (Core::Status pushStatus = m_gameStateStack.pushCommitted(std::move(candidate), initialPolicy); !pushStatus)
+        {
+            return failBeforeStartupCommit(std::move(pushStatus.error()));
+        }
+        m_committedPolicy = initialPolicy;
+        m_pendingCommands.clearAll();
         m_lifecycleState = LifecycleState::Running;
 
         Core::MonotonicTimePoint previousFrameTime = m_modules.monotonicClock->now();
@@ -815,11 +822,19 @@ class EngineHostImplementation final {
                     return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
                 }
                 const SimulationActionSnapshot& simulationActions = *simulationActionsResult;
+                IGameState* const activeState = m_gameStateStack.top();
+                if (activeState == nullptr)
+                {
+                    return failAfterStartupCommit(
+                        gameApplication,
+                        Core::Error{RuntimeErrorCode::LifecycleInvariantViolation, "GameStateStack is empty during fixedUpdate"},
+                        frameIndex, simulationTick);
+                }
                 FixedUpdateContext fixedContext{frameTiming, fixedTiming, simulationActions,
                                                 m_modules.audioEnginePtr()};
                 auto fixedResult =
                     invokeResultBoundary("IGameState::fixedUpdate", RuntimeErrorCode::GameCallbackThrewException,
-                                         [&] { return m_gameState->fixedUpdate(fixedContext); });
+                                         [&] { return activeState->fixedUpdate(fixedContext); });
                 if (!fixedResult)
                 {
                     return failAfterStartupCommit(gameApplication, std::move(fixedResult.error()), frameIndex,
@@ -836,15 +851,56 @@ class EngineHostImplementation final {
             frameTiming.completedSimulationTicks = simulationTick;
 
             bool exitAfterFrame = false;
+            m_pendingCommands.clearAll();
             const FrameActionSnapshot frameActions = m_actionMapper->frameActions();
-            FrameUpdateContext frameContext{frameTiming, frameActions, exitAfterFrame, m_modules.audioEnginePtr()};
+            IGameState* const frameState = m_gameStateStack.top();
+            if (frameState == nullptr)
+            {
+                return failAfterStartupCommit(
+                    gameApplication,
+                    Core::Error{RuntimeErrorCode::LifecycleInvariantViolation, "GameStateStack is empty during updateFrame"},
+                    frameIndex, simulationTick);
+            }
+            FrameUpdateContext frameContext{frameTiming, frameActions, exitAfterFrame, &m_pendingCommands,
+                                            m_modules.audioEnginePtr()};
             auto updateResult =
                 invokeResultBoundary("IGameState::updateFrame", RuntimeErrorCode::GameCallbackThrewException,
-                                     [&] { return m_gameState->updateFrame(frameContext); });
+                                     [&] { return frameState->updateFrame(frameContext); });
             if (!updateResult)
             {
+                m_pendingCommands.clearAll();
                 return failAfterStartupCommit(gameApplication, std::move(updateResult.error()), frameIndex,
                                               simulationTick);
+            }
+
+            // State Transition Commit (ADR 0014): after Frame Update, before extractRenderScene.
+            auto transitionResult = commitPendingGameStateCommands(gameApplication, *uiContextResult);
+            if (!transitionResult)
+            {
+                m_pendingCommands.clearAll();
+                return failAfterStartupCommit(gameApplication, std::move(transitionResult.error()), frameIndex,
+                                              simulationTick);
+            }
+            if (*transitionResult)
+            {
+                // Pop emptied the stack: finish the current frame phases only if a state remains.
+                // Empty stack means normal exit after this frame's render is skipped.
+                if (m_gameStateStack.empty())
+                {
+                    m_pendingCommands.clearAll();
+                    return stopNormally(gameApplication, RunExitReason::GameStateStackBecameEmpty,
+                                        RunStopCause::GameRequestedExitAfterCurrentFrame);
+                }
+            }
+            m_pendingCommands.clearAll();
+
+            IGameState* const committedState = m_gameStateStack.top();
+            if (committedState == nullptr)
+            {
+                return failAfterStartupCommit(
+                    gameApplication,
+                    Core::Error{RuntimeErrorCode::LifecycleInvariantViolation, "GameStateStack empty after transition commit"},
+                    frameIndex, simulationTick);
             }
 
             // Drain audio completions after gameplay may have enqueued Play/Stop.
@@ -872,7 +928,7 @@ class EngineHostImplementation final {
             RenderSceneExtractionContext extractionContext{frameTiming, renderSceneWriter};
             auto extractionResult =
                 invokeResultBoundary("IGameState::extractRenderScene", RuntimeErrorCode::GameCallbackThrewException,
-                                     [&] { return m_gameState->extractRenderScene(extractionContext); });
+                                     [&] { return committedState->extractRenderScene(extractionContext); });
             if (!extractionResult)
             {
                 return failAfterStartupCommit(gameApplication, std::move(extractionResult.error()), frameIndex,
@@ -897,7 +953,7 @@ class EngineHostImplementation final {
             });
             UIUpdateContext uiContext{frameTiming, m_primaryWindowUICapability, *updateUIPhase};
             auto uiResult = invokeResultBoundary("IGameState::updateUI", RuntimeErrorCode::GameCallbackThrewException,
-                                                 [&] { return m_gameState->updateUI(uiContext); });
+                                                 [&] { return committedState->updateUI(uiContext); });
             Core::Status updateUIPhaseStatus = m_primaryWindowUICapability.finishPhase(
                 *updateUIPhase, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
             if (!updateUIPhaseStatus)
@@ -1007,7 +1063,7 @@ class EngineHostImplementation final {
     [[nodiscard]] Core::Result<RunExitReason> failUnexpectedRunException(IGameApplication& gameApplication,
                                                                          Core::Error error)
     {
-        if (m_gameState != nullptr)
+        if (!m_gameStateStack.empty())
         {
             stopCommittedGame(gameApplication, RunStopCause::RuntimeFailure, &error);
             m_lifecycleState = LifecycleState::Failed;
@@ -1048,11 +1104,15 @@ class EngineHostImplementation final {
                            const Core::Error* runtimeFailure) noexcept
     {
         m_lifecycleState = LifecycleState::Stopping;
-        if (m_gameState != nullptr)
+        m_pendingCommands.clearAll();
+        while (!m_gameStateStack.empty())
         {
-            GameStateExitContext exitContext{stopCause, runtimeFailure};
-            m_gameState->onExit(exitContext);
-            m_gameState.reset();
+            std::unique_ptr<IGameState> state = m_gameStateStack.popCommitted();
+            if (state != nullptr)
+            {
+                GameStateExitContext exitContext{stopCause, runtimeFailure};
+                state->onExit(exitContext);
+            }
         }
 
         GameShutdownContext shutdownContext{stopCause, runtimeFailure};
@@ -1060,6 +1120,117 @@ class EngineHostImplementation final {
         m_primaryWindowUi.shutdown();
         m_platformEventDispatcher.shutdown();
         m_modules.shutdown();
+    }
+
+    // Returns true when a structural transition changed the stack (including emptying it).
+    [[nodiscard]] Core::Result<bool> commitPendingGameStateCommands(
+        IGameApplication& gameApplication,
+        UI::UIContext* uiContext)
+    {
+        bool structuralChanged = false;
+        if (m_pendingCommands.policyChangeRequested)
+        {
+            m_committedPolicy = m_pendingCommands.requestedPolicy;
+            m_gameStateStack.setTopPolicy(m_committedPolicy);
+            m_pendingCommands.clearPolicy();
+        }
+
+        if (!m_pendingCommands.hasStructural())
+        {
+            return false;
+        }
+
+        const GameStateStructuralCommandKind kind = m_pendingCommands.structural;
+        std::unique_ptr<IGameState> candidate = std::move(m_pendingCommands.candidate);
+        m_pendingCommands.clearStructural();
+
+        if (kind == GameStateStructuralCommandKind::Pop)
+        {
+            if (m_gameStateStack.empty())
+            {
+                return Core::failure(RuntimeErrorCode::GameStateCommandRejected, "GameStateStack is already empty");
+            }
+            std::unique_ptr<IGameState> leaving = m_gameStateStack.popCommitted();
+            if (leaving != nullptr)
+            {
+                GameStateExitContext exitContext{RunStopCause::GameRequestedExitAfterCurrentFrame, nullptr};
+                leaving->onExit(exitContext);
+            }
+            structuralChanged = true;
+            if (!m_gameStateStack.empty())
+            {
+                m_committedPolicy = m_gameStateStack.topPolicy();
+            }
+            return structuralChanged;
+        }
+
+        if (kind == GameStateStructuralCommandKind::Push || kind == GameStateStructuralCommandKind::Replace)
+        {
+            if (candidate == nullptr)
+            {
+                return Core::failure(RuntimeErrorCode::InitialGameStateWasNull, "transition candidate is null");
+            }
+            if (kind == GameStateStructuralCommandKind::Push && m_gameStateStack.full())
+            {
+                return Core::failure(RuntimeErrorCode::GameStateStackCapacityExceeded,
+                                     "GameStateStack cannot push beyond MaxStackDepth");
+            }
+
+            auto enterUIPhase = m_primaryWindowUICapability.beginGameStateEnterPhase(uiContext);
+            if (!enterUIPhase)
+            {
+                return Core::failure(std::move(enterUIPhase.error()));
+            }
+            auto enterUIPhaseGuard = Core::makeScopeExit([this, epoch = *enterUIPhase]() noexcept {
+                m_primaryWindowUICapability.abortPhase(epoch, Runtime::Detail::PrimaryWindowUIPhase::GameStateEnter);
+            });
+            GameStateEnterContext enterContext{m_config, m_platformEventDispatcher, m_primaryWindowUICapability,
+                                               *enterUIPhase};
+            auto enterResult = invokeResultBoundary("IGameState::onEnter", RuntimeErrorCode::GameCallbackThrewException,
+                                                    [&] { return candidate->onEnter(enterContext); });
+            Core::Status enterUIPhaseStatus = m_primaryWindowUICapability.finishPhase(
+                *enterUIPhase, Runtime::Detail::PrimaryWindowUIPhase::GameStateEnter);
+            if (!enterUIPhaseStatus)
+            {
+                // Capability failure is a runtime fault; discard candidate without onExit.
+                candidate.reset();
+                auto error = std::move(enterUIPhaseStatus.error());
+                error.addContext("IGameState::onEnter", "primary-window UI capability");
+                return Core::failure(std::move(error));
+            }
+            enterUIPhaseGuard.release();
+            if (!enterResult)
+            {
+                // ADR 0014: enter failure rolls back candidate only (no onExit), keep stack.
+                candidate.reset();
+                return false;
+            }
+
+            const GameStatePolicy policy = candidate->initialPolicy();
+            if (kind == GameStateStructuralCommandKind::Replace)
+            {
+                if (m_gameStateStack.empty())
+                {
+                    candidate.reset();
+                    return Core::failure(RuntimeErrorCode::GameStateCommandRejected,
+                                         "GameStateStack replace requires a current state");
+                }
+                std::unique_ptr<IGameState> leaving = m_gameStateStack.popCommitted();
+                if (leaving != nullptr)
+                {
+                    GameStateExitContext exitContext{RunStopCause::GameRequestedExitAfterCurrentFrame, nullptr};
+                    leaving->onExit(exitContext);
+                }
+            }
+            if (Core::Status pushStatus = m_gameStateStack.pushCommitted(std::move(candidate), policy); !pushStatus)
+            {
+                return Core::failure(std::move(pushStatus.error()));
+            }
+            m_committedPolicy = policy;
+            structuralChanged = true;
+        }
+
+        return structuralChanged;
     }
 
     EngineConfig m_config;
@@ -1075,8 +1246,9 @@ class EngineHostImplementation final {
     Runtime::Input::LastPresentedCamera2DLatch m_lastPresentedCamera2D{};
     Render::RenderSceneBuilder m_renderSceneBuilder;
     std::thread::id m_ownerThread;
-    std::unique_ptr<IGameState> m_gameState;
-    [[maybe_unused]] GameStatePolicy m_committedPolicy{};
+    GameStateStack m_gameStateStack{};
+    GameStatePendingCommands m_pendingCommands{};
+    GameStatePolicy m_committedPolicy{};
     LifecycleState m_lifecycleState = LifecycleState::Ready;
     std::optional<Integration::WindowSurfaceSnapshot> m_lastWindowSurface;
 };
