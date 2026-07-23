@@ -66,7 +66,8 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | --- | --- | --- |
 | 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002） | TEST-001 |
 | UI product | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有结构化与 Windows 产品视觉证据 | UI-002、UI-003 |
-| 3D product | 双 mesh + baseColorTexture GPU 绑定 smoke 已有证据（3D-001/ASSET-001） | RENDER-001、RUNTIME-002 |
+| 3D product | 双 mesh + baseColorTexture GPU 绑定 smoke 已有证据（3D-001/ASSET-001） | RENDER-001 |
+| Runtime stack/packet | stack/commands/policy 与 FramePin Null completion 首切片已落地 | 产品 sample 暂停演示；GPU fence 异步 completion |
 | Asset/Cooker | multi-mesh 产品 E2E、baseColorTexture cook、外部 URI 安全与产品纹理绑定已完成 | PBR 与更完整资源炸弹矩阵 |
 | Audio | backend-neutral 与 miniaudio null-device 路径已有 Windows 证据 | Linux/product gate 复验 |
 | Legacy retirement | 产品源码/target 删除完成；vcpkg legacy feature 与 EASTL/compatibility 扫尾完成 | 仅保留 `TINA_BUILD_LEGACY=ON` FATAL 拒绝开关 |

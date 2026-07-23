@@ -77,6 +77,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     runtime/Sample2DWindowVisibilityPacingTests.cpp
     runtime/PlatformEventDispatcherTests.cpp
     runtime/GameStateStackTests.cpp
+    runtime/GameStateStackIntegrationTests.cpp
     runtime/RuntimeLifecycleTests.cpp
     runtime/WindowSurfaceLeaseTests.cpp
     runtime/WindowSurfaceRuntimeTests.cpp

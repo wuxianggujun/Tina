@@ -118,18 +118,23 @@ listener 不保活 Context/root，退出时应先 reset listener 再释放 root�
 | `tina_sample_3d` | glTF cook、Catalog/Prefab、StaticMesh/Material upload、Scene 3D、bgfx |
 | `tina_sample_null` | Headless/Null 生命周期与 phase 契约 |
 
-样例内部的参数解析、fixture 和计数器不是通用 Game SDK。正式 SDK package/export、State stack 与通用
+样例内部的参数解析、fixture 和计数器不是通用 Game SDK。正式 SDK package/export 与通用
 save/load orchestration 尚未完成。
 
-## `RUNTIME-001` 验收边界
+## `RUNTIME-001` 状态
 
-未来 State stack 至少需要同时关闭：
+已落地（见 `GameStateStackTests` / `GameStateStackIntegrationTests`）：
 
-- push/pop/replace 只在唯一 commit 点生效；
-- enter/exit 顺序、失败回滚与 Application shutdown 明确；
-- input/fixed/frame/render/UI policy 对上下层的阻断有测试；
-- State UI root、listener、TaskGroup 与 AssetLease 在 transition 后无 stale owner；
-- command 不允许在 callback 中直接修改正在遍历的 stack。
+- push/pop/replace 只在 `updateFrame` 后、`extractRenderScene` 前唯一 commit；
+- enter 失败丢弃 candidate 且不调用 `onExit`，栈保持；
+- `blocksFixedUpdateBelow` / `blocksFrameUpdateBelow` / `blocksRenderBelow` / `blocksUIInputBelow`
+  自顶向下阻断；
+- structural command 仅栈顶可排队；pop 空栈 → `GameStateStackBecameEmpty`。
 
-在这些条件完成前，文档与代码都应继续使用“当前单 State”表述。帧阶段详见 [Runtime](runtime.md)，
-任务状态见 [Backlog](backlog.md)。
+仍后置：
+
+- 产品 sample 真菜单/暂停层演示；
+- State UI root / listener / TaskGroup / AssetLease 在 transition 后的完整 stale-owner 矩阵；
+- gameplay input policy 与 ActionMapper 的 deeper suppression（字段 `blocksGameplayInputBelow` 已存在）。
+
+帧阶段详见 [Runtime](runtime.md)，任务状态见 [Backlog](backlog.md)。

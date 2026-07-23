@@ -73,3 +73,4 @@
 | RUNTIME-001 | `GameStateStack` + commands + 唯一 commit；**policy 向下阻断**（fixed/frame/render/UI 自顶向下 `forEachDispatch`）；enter 失败丢 candidate；`GameStateStackTests` / policy dispatch 单测 | [gameplay](gameplay.md) · ADR 0014 |
 | RUNTIME-002 | `FramePin`/`FramePinSink`、`RenderFramePacket`、`NullSubmissionCompletionLedger`；EngineHost submit/present 挂 pin 并在 present/skip 后 complete；shutdown abandon；`FramePinPacketTests` | [rendering](rendering.md) · ADR 0016 |
 | PERF-001 | ADR 0018 Accepted；`tools/bench` → `tina_bench` schema v1；workload `null_runtime_frames`；JSON fingerprint/checksum/p50/p95/p99；共享机 `conclusion=provisional`；固定 hard-gate 机与多进程 MAD 后置 | [performance-memory](performance-memory.md) · ADR 0018 |
+| RUNTIME-001-INT | Null Host 集成：base `requestPush` overlay（block fixed/frame below）→ overlay `requestPop` → base 恢复；enter 失败无 `onExit`；`GameStateStackIntegrationTests` | [gameplay](gameplay.md) · ADR 0014 |

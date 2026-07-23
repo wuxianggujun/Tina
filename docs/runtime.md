@@ -1,7 +1,7 @@
 # Runtime 与 Frame Pipeline
 
-本文描述当前 `tina_runtime` 与 `Tina::Desktop::CreateEngine`。未来 State stack、owning frame packet
-等工作统一在 [Backlog](backlog.md) 跟踪，不在本文写成已存在接口。
+本文描述当前 `tina_runtime` 与 `Tina::Desktop::CreateEngine`。未完成扩展（如真实 GPU fence、产品
+暂停 sample）见 [Backlog](backlog.md)；已落地 stack/packet 能力见下文「当前结论」。
 
 ## 当前结论
 
