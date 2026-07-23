@@ -327,5 +327,84 @@ TEST(GltfCookTests, CooksBaseColorTextureToTexture2DDependency)
     ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
 }
 
+TEST(GltfCookTests, RejectsExternalImagePathTraversal)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_path_escape";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "escape.gltf";
+    {
+        std::ofstream out(gltfPath, std::ios::binary);
+        ASSERT_TRUE(out.good());
+        out << R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1, "mode": 4, "material": 0}]}],
+  "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
+  "textures": [{"source": 0}],
+  "images": [{"uri": "../secret.png"}],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+     "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]},
+    {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 6}
+  ],
+  "buffers": [{
+    "byteLength": 44,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAEAAAACAAAA"
+  }]
+})json";
+    }
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("traversal"), std::string::npos)
+        << request.error().message;
+}
+
+TEST(GltfCookTests, RejectsAbsoluteExternalImageUri)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_abs_uri";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "abs.gltf";
+    {
+        std::ofstream out(gltfPath, std::ios::binary);
+        ASSERT_TRUE(out.good());
+        out << R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1, "mode": 4, "material": 0}]}],
+  "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
+  "textures": [{"source": 0}],
+  "images": [{"uri": "file:///C:/Windows/System32/drivers/etc/hosts"}],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+     "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]},
+    {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 6}
+  ],
+  "buffers": [{
+    "byteLength": 44,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAEAAAACAAAA"
+  }]
+})json";
+    }
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_FALSE(request.error().message.empty());
+}
+
 } // namespace
 } // namespace Tina::Asset

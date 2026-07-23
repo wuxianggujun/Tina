@@ -577,6 +577,20 @@ parseAudioClipInline(const std::vector<std::string>& tokens, std::string_view ba
             return Core::failure(AssetErrorCode::InvalidCatalogConfig, "duplicate AssetId in cook request");
         }
     }
+    // Dependency streams must be strictly increasing AssetId (manifest + cooked validation).
+    // Prefab streams are still (StaticMesh, Material)×N in node order — callers must assign
+    // ids so that natural pair order also sorts by AssetId.
+    for (const CatalogCookAssetSpec& asset : sorted)
+    {
+        for (std::size_t depIndex = 1; depIndex < asset.dependencies.size(); ++depIndex)
+        {
+            if (!(asset.dependencies[depIndex - 1U].assetId < asset.dependencies[depIndex].assetId))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "cook dependency AssetIds must be strictly increasing");
+            }
+        }
+    }
 
     CookedPackage package{};
     package.objectStorage.reserve(sorted.size());

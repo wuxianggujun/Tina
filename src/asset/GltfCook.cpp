@@ -38,13 +38,16 @@ namespace {
     return *Core::AssetId::fromBytes(bytes);
 }
 
+// Sequential suffix keeps multi-mesh Prefab deps strictly AssetId-sorted while
+// remaining path-stable: bytes[12..15] = big-endian index after a seed hash prefix.
 [[nodiscard]] Core::AssetId deriveIndexedId(std::string_view seed, Core::u8 tag, Core::u32 index)
 {
-    Core::AssetId id = deriveId(seed, tag);
+    Core::AssetId id = deriveId(seed, tag == 0 ? 0x71 : tag);
     Core::AssetId::Bytes bytes = id.bytes();
-    bytes[1] = static_cast<std::byte>(static_cast<Core::u8>(bytes[1]) ^ static_cast<Core::u8>(index & 0xFFU));
-    bytes[2] = static_cast<std::byte>(static_cast<Core::u8>(bytes[2]) ^ static_cast<Core::u8>((index >> 8) & 0xFFU));
-    bytes[3] = static_cast<std::byte>(static_cast<Core::u8>(bytes[3]) ^ static_cast<Core::u8>((index >> 16) & 0xFFU));
+    bytes[12] = static_cast<std::byte>(static_cast<Core::u8>((index >> 24) & 0xFFU));
+    bytes[13] = static_cast<std::byte>(static_cast<Core::u8>((index >> 16) & 0xFFU));
+    bytes[14] = static_cast<std::byte>(static_cast<Core::u8>((index >> 8) & 0xFFU));
+    bytes[15] = static_cast<std::byte>(static_cast<Core::u8>(index & 0xFFU));
     return *Core::AssetId::fromBytes(bytes);
 }
 
@@ -216,6 +219,95 @@ struct CookedMeshPieces final {
     return out;
 }
 
+// ASSET-001: external glTF file URIs must stay under the glTF parent directory.
+// Reject absolute paths, URI schemes, and ".." escape. Max encoded file size 64 MiB.
+inline constexpr std::uint64_t kMaxGltfExternalFileBytes = 64ULL * 1024ULL * 1024ULL;
+
+[[nodiscard]] Core::Result<std::filesystem::path> resolveContainedGltfExternalPath(
+    const std::filesystem::path& gltfFilePath,
+    std::string_view uri) noexcept
+{
+    if (uri.empty())
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF external URI is empty");
+    }
+    if (uri.find(':') != std::string_view::npos)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF external URI schemes are not supported (use relative paths under glTF root)");
+    }
+    if (uri.find("..") != std::string_view::npos)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF external URI must not contain path traversal");
+    }
+    const std::filesystem::path relative{std::string{uri}};
+    if (relative.is_absolute())
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF external URI must be relative to the glTF file");
+    }
+    std::error_code ec;
+    const auto root = std::filesystem::weakly_canonical(gltfFilePath.parent_path(), ec);
+    if (ec)
+    {
+        return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "failed to resolve glTF parent directory");
+    }
+    const auto joined = std::filesystem::weakly_canonical(root / relative, ec);
+    if (ec)
+    {
+        return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "failed to resolve glTF external path");
+    }
+    const auto rootText = root.generic_string();
+    const auto joinedText = joined.generic_string();
+    if (joinedText.size() < rootText.size() ||
+        joinedText.compare(0, rootText.size(), rootText) != 0 ||
+        (joinedText.size() > rootText.size() && joinedText[rootText.size()] != '/'))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF external path escapes catalog root containment");
+    }
+    return joined;
+}
+
+[[nodiscard]] Core::Status validateGltfExternalBuffersContained(
+    const cgltf_data* data,
+    const std::filesystem::path& gltfFilePath) noexcept
+{
+    if (data == nullptr)
+    {
+        return Core::success();
+    }
+    for (cgltf_size i = 0; i < data->buffers_count; ++i)
+    {
+        const cgltf_buffer& buffer = data->buffers[i];
+        if (buffer.uri == nullptr || buffer.uri[0] == '\0')
+        {
+            continue;
+        }
+        if (std::strncmp(buffer.uri, "data:", 5) == 0)
+        {
+            continue;
+        }
+        auto path = resolveContainedGltfExternalPath(gltfFilePath, buffer.uri);
+        if (!path)
+        {
+            return Core::failure(std::move(path.error()));
+        }
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(*path, ec))
+        {
+            return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "glTF external buffer file not found");
+        }
+        const auto fileSize = std::filesystem::file_size(*path, ec);
+        if (ec || fileSize == 0 || fileSize > kMaxGltfExternalFileBytes)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF external buffer size invalid");
+        }
+    }
+    return Core::success();
+}
+
 // Decode PNG/JPEG (or other stb_image formats) to RGBA8 for Texture2D cook.
 // Supports buffer-view embedded images and relative file URIs next to the glTF.
 [[nodiscard]] Core::Result<std::pair<int, int>> decodeImageRgba8(
@@ -239,6 +331,10 @@ struct CookedMeshPieces final {
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF image buffer_view has no data");
         }
+        if (view->size == 0 || view->size > kMaxGltfExternalFileBytes)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF image buffer_view size invalid");
+        }
         encoded = static_cast<const stbi_uc*>(view->buffer->data) + view->offset;
         encodedSize = static_cast<int>(view->size);
     }
@@ -251,19 +347,23 @@ struct CookedMeshPieces final {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "glTF data-URI images must be bufferView-backed for cook (use GLB or buffer views)");
         }
-        const auto imagePath = gltfFilePath.parent_path() / image->uri;
+        auto imagePath = resolveContainedGltfExternalPath(gltfFilePath, image->uri);
+        if (!imagePath)
+        {
+            return Core::failure(std::move(imagePath.error()));
+        }
         std::error_code ec;
-        if (!std::filesystem::is_regular_file(imagePath, ec))
+        if (!std::filesystem::is_regular_file(*imagePath, ec))
         {
             return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "glTF image file not found");
         }
-        const auto fileSize = std::filesystem::file_size(imagePath, ec);
-        if (ec || fileSize == 0 || fileSize > 64ULL * 1024ULL * 1024ULL)
+        const auto fileSize = std::filesystem::file_size(*imagePath, ec);
+        if (ec || fileSize == 0 || fileSize > kMaxGltfExternalFileBytes)
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF image file size invalid");
         }
         fileBytes.resize(static_cast<std::size_t>(fileSize));
-        std::FILE* file = std::fopen(imagePath.string().c_str(), "rb");
+        std::FILE* file = std::fopen(imagePath->string().c_str(), "rb");
         if (file == nullptr)
         {
             return Core::failure(AssetErrorCode::CatalogFileLoadFailed, "failed to open glTF image file");
@@ -334,6 +434,12 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
     {
         return Core::failure(status.error());
     }
+    // Reject path traversal / absolute external buffer URIs before cgltf loads them.
+    if (const auto status = validateGltfExternalBuffersContained(data, std::filesystem::path{path}); !status)
+    {
+        cgltf_free(data);
+        return Core::failure(status.error());
+    }
     if (const auto status = mapCgltfResult(cgltf_load_buffers(&options, data, path.c_str())); !status)
     {
         cgltf_free(data);
@@ -397,23 +503,27 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             return Core::failure(std::move(pieces.error()));
         }
 
+        // Interleaved path-derived ids: mesh i at 2*i, material i at 2*i+1 (same tag) so
+        // Prefab (StaticMesh, Material)×N deps are strictly AssetId-sorted.
+        // Optional fixed ids.meshId/materialId only apply to mesh index 0; when both are
+        // provided they must already satisfy meshId < materialId.
         Core::AssetId meshId{};
         Core::AssetId materialId{};
-        if (meshIndex == 0 && static_cast<bool>(ids.meshId))
+        if (meshIndex == 0 && static_cast<bool>(ids.meshId) && static_cast<bool>(ids.materialId))
         {
+            if (!(ids.meshId < ids.materialId))
+            {
+                cgltf_free(data);
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "fixed mesh AssetId must be strictly less than material AssetId");
+            }
             meshId = ids.meshId;
-        }
-        else
-        {
-            meshId = deriveIndexedId(gltfUtf8Path, 0x71, static_cast<Core::u32>(meshIndex));
-        }
-        if (meshIndex == 0 && static_cast<bool>(ids.materialId))
-        {
             materialId = ids.materialId;
         }
         else
         {
-            materialId = deriveIndexedId(gltfUtf8Path, 0x72, static_cast<Core::u32>(meshIndex));
+            meshId = deriveIndexedId(gltfUtf8Path, 0x71, static_cast<Core::u32>(meshIndex) * 2U);
+            materialId = deriveIndexedId(gltfUtf8Path, 0x71, static_cast<Core::u32>(meshIndex) * 2U + 1U);
         }
 
         AssetFormat::StaticMeshPayloadDesc meshDesc{
