@@ -85,17 +85,11 @@ shutdown 后 channel 写入为 no-op。
 当前没有 file sink、异步日志队列、MetricsRegistry、TraceZone/Tracy adapter 或 CrashContext。日志不得
 包含 token、密钥、用户正文和不必要的绝对路径；Audio callback/异常信号路径不调用普通日志。
 
-## Legacy compatibility 残留
+## 时间与文本
 
-Legacy 产品 target 已删除，但 Core 文件层还不是零残留：
-
-- `src/core/CMakeLists.txt` 仍编译私有 `time/Clock.cpp`、`Clock.hpp` 与 `FrameTimer.hpp`；
-- `src/core/utils/StringUtils.hpp` 仍 include EASTL，当前不在 `tina_core` source list，需先证明无消费者；
-- 当前产品公共 API 使用 `MonotonicClock.hpp`/`FixedStepAccumulator.hpp`，不能把上述 compatibility 文件
-  写成正式 Game SDK。
-
-这些项由 `CLEAN-002` 处理。删除前必须全仓库扫描 include/target/source consumer；不能仅凭“私有”或
-“未列入 source list”直接删除用户未提交代码。
+产品公共 API 使用 `MonotonicClock.hpp` 与 `FixedStepAccumulator.hpp`。Legacy `Clock`/`FrameTimer`/
+`StringUtils` compatibility 已删除（CLEAN-002）；`SteadyMonotonicClock` 实现位于
+`src/core/time/MonotonicClock.cpp`。
 
 ## 验证
 

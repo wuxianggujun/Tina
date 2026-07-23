@@ -21,14 +21,10 @@
 
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
-| TASK-001 | Planned | P0 | 解决 ADR 0017 与 Desktop CPU worker 默认值冲突 | ADR 0017 | 交互 Desktop 默认 `max(1, hardware_threads-1)`，或新 ADR 明确 supersede；0-worker IO-only 图继续可配置；关闭/TaskGroup 测试通过 | Unit + Integration |
-| CLEAN-001 | Planned | P1 | 删除未消费的 vcpkg `legacy` feature | 当前 presets/依赖闭包 | 所有 preset 不引用该 feature；移除 EnTT/GLM/spdlog/utfcpp 等死依赖声明；Windows 基础与产品 configure 通过 | Platform |
-| CLEAN-002 | Planned | P1 | 清理 EASTL 与 Legacy compatibility 残留 | CLEAN-001 | 证明 `src/core/utils/StringUtils.hpp` 无消费者后删除/重写；决定并清理 Clock/FrameTimer/FixedStepTicker compatibility；源码和 CMake 无 EASTL token | Unit + forbidden scan |
-| CLEAN-003 | Planned | P2 | 清理 miniaudio Legacy 条件说明与余下错误文案 | CLEAN-001 | `MiniaudioImplementation.cpp`、CMake FATAL 和文档不再暗示当前 `src/ui` 已退役或 Legacy ON 可运行 | Scan |
+
 | TEST-001 | Planned | P0 | 复验 Linux vNext 当前 tip | 可用 GCC 13、Clang 22 + libstdc++15 | GCC Null/GLFW 及 Clang sanitizer 直接测试通过；记录工具链、返回码、sanitizer 与 X11/Wayland 条件 | Platform |
-| TEST-002 | Planned | P0 | 固化 product-2d 完整门禁 | product-2d preset | 构建并直接运行 Physics2D、UI、UI FreeType、Audio、miniaudio 测试与 300 帧 sample；标签严格为 `bgfx-physics-freetype-audio` | Integration + Smoke |
-| 3D-001 | Planned | P0 | 完成 multi-mesh 产品 E2E | 已完成 multi-mesh Cooker/AssetId resolver | 产品 fixture 含至少两个 glTF mesh/Prefab node；两个 AssetId 分别 upload/bind/extract/draw；账本归零 | Unit + Integration + Smoke + Visual |
-| DOC-001 | InProgress | P1 | 建立文档职责与一致性检查 | 本次文档重组 | README/架构/设计/构建/测试/任务/M12 无已知状态冲突；本地链接和命令 target 扫描通过 | Scan |
+
+
 
 ## Next
 
@@ -36,7 +32,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | UI-002 | Planned | P1 | 建立 Windows UIA / Linux AT-SPI adapter 首切片 | Semantics snapshot | Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit role、name、state 可由真实辅助技术读取，生命周期无 stale node | Integration + Platform |
 | UI-003 | Planned | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | 100/150/200% DPI、字体 fingerprint 与区域阈值可复现；初始化白帧不计入 stable capture | Visual + Platform |
-| ASSET-001 | Planned | P1 | glTF 外部 buffer/baseColorTexture 安全策略与产品绑定 | 3D-001 | root containment、URI/type/size 上限、路径穿越与资源炸弹用例通过；已 Cooked 的 Texture2D 进入 Render 产品路径 | Unit + Integration |
+
 | RUNTIME-001 | Planned | P1 | GameState stack/commands | 当前单 State 生命周期 | push/pop/replace 仅在唯一 commit 点生效；onEnter/onExit 顺序、UI root、Task barrier 与失败回滚有测试 | Unit + Integration |
 | RUNTIME-002 | Planned | P0 | owning RenderFramePacket、FramePin 与 submission completion | ADR 0016 | 在途 Asset/UI atlas/Surface 不因 logical unload 失效；完成后所有 pin/ticket/ledger 归零 | Unit + failure injection |
 | PERF-001 | Planned | P1 | 完成 ADR 0018 决策并实现 `tina_bench` | 固定 workload/fingerprint | 接受或拒绝 ADR 0018；JSON schema、checksum、p50/p95/p99、baseline compatibility 与固定 worker 生效 | Benchmark + Platform |
@@ -63,4 +59,13 @@
 | DONE-004 | 2D product sample 与 glTF/Prefab 3D product sample | [2D](game-2d.md) · [3D](game-3d.md) |
 | DONE-005 | Retained UI 文本/Glyph、Checkbox/Slider/TextEdit、ProgressBar/RadioButton 库级实现 | [UI](ui.md) |
 | DONE-006 | glTF multi-mesh Cooker 与 distinct AssetId/Prefab dependency 测试 | [3D](game-3d.md) |
+| 3D-001 | multi-mesh 产品 E2E：双 mesh glTF fixture → cook → 两 StaticMesh upload/bind（meshKey 1/2）→ Prefab 每节点 resolve → extract/draw → ledger 归零；`tina_sample_3d` 300 帧 `multiMesh=true` | [3D](game-3d.md) |
+| TASK-001 | Desktop `resolveDesktopTaskSystemParams`：交互默认 `max(1, hw-1)` CPU worker；`createBoundedTaskSystem(cpu=0)` IO-only 仍 NotSupported；BoundedTaskSystem 单测覆盖 | [Task](task-system.md) · ADR 0017 |
+| CLEAN-001 | 删除 vcpkg `legacy` feature 及 EnTT/GLM/spdlog/utfcpp 死依赖声明；preset 无引用 | [dependencies](dependencies.md) |
+| CLEAN-002 | 删除无消费者 `StringUtils.hpp`（EASTL/utfcpp）与 Clock/FrameTimer/FixedStepTicker compatibility；`SteadyMonotonicClock` 实现迁到 `MonotonicClock.cpp` | [core](core.md) |
+| CLEAN-003 | miniaudio 实现 TU 与 CMake FATAL 文案不再暗示 Legacy ON 可运行 | [dependencies](dependencies.md) |
+| TEST-002 | product-2d 同轮：UI/RuntimeUI/bridge/FreeType/Physics2D/Audio/miniaudio/Asset 测试 + sample 300 帧；`productGate=bgfx-physics-freetype-audio`；脚本 `tools/windows/RunProduct2dGate.ps1` | [building](building.md) · [Windows 证据](m12-evidence-windows.md) |
+| ASSET-001 | glTF 外部 URI root containment/`..`/scheme 拒绝 + 64MiB 上限；`tina_sample_3d` 上传/绑定 Cooked Texture2D 到 materialKey；路径逃逸单测 | [3D](game-3d.md) · GltfCookTests |
 | UI-001 | ProgressBar/RadioButton 已接入 product-2d；190/190 UI、77/77 Runtime UI、12/12 Render bridge 通过，结构化输出与 Windows client-area 视觉证据成立 | [UI](ui.md) · [Windows 证据](m12-evidence-windows.md) |
+| DOC-001 | 文档职责与任务体系重组完成；本地链接、configure/build preset、CMake target、Markdown fence 与格式扫描通过；UI 绘制链路和控件矩阵已归档 | [文档索引](README.md) · [Roadmap](roadmap.md) · [UI](ui.md) |
+| UI-THEME-AB | 薄 `UITheme` token；`UIBoxPaint` 亮/暗边 + 可选 shadow；sample_2d 设置面板 elevation；hex `rgb`/`argb`；`UIThemeTests` | [UI](ui.md) |

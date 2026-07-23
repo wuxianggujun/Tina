@@ -24,9 +24,10 @@ class ITaskSystem {
 };
 ```
 
-`cpuWorkerCount=0` 明确表示 CPU pool disabled，`scheduleCpu()` 返回 `NotSupported`。这是当前实现事实，
-但与 Accepted [ADR 0017](adr/0017-bounded-task-system.md) 的“交互默认保留一个硬件线程”不一致；
-该决策由 [TASK-001](backlog.md) 解决，不能靠文档把默认0写成已符合 ADR。
+`cpuWorkerCount=0` 在 `createBoundedTaskSystem` / 直接工厂参数中仍表示 CPU pool disabled，
+`scheduleCpu()` 返回 `NotSupported`（IO-only 图与单测继续可用）。产品 `Desktop::CreateEngine` 通过
+`resolveDesktopTaskSystemParams` 把 0 解析为 `max(1, hardware_concurrency-1)`，符合
+Accepted [ADR 0017](adr/0017-bounded-task-system.md)。
 
 `TaskGroup` 当前是 CPU domain 的最小结构化封装：`add()`、`pending()`、`isIdle()`、`waitIdle()`、
 `waitIdleFor()`；析构等待 pending work，不 detach。
@@ -37,11 +38,11 @@ class ITaskSystem {
 | --- | --- | --- | --- |
 | Main | 1 | Frame、World/UI commit、GPU submit、completion pump | 无界阻塞 IO、跨 phase 裸等待 |
 | IO | 1 | 有界阻塞文件读 | UI/World/Render mutation、长 CPU decode |
-| CPU | 0（可配置） | 纯 CPU decode/culling/simulation chunk | 阻塞 IO、窗口、UI、bgfx |
+| CPU | Desktop 交互：`max(1, hw-1)`；工厂默认 0 可配置 | 纯 CPU decode/culling/simulation chunk | 阻塞 IO、窗口、UI、bgfx |
 | Audio callback | backend-owned | 固定命令消费与 mix | 分配、锁等待、Task wait、格式化日志 |
 
-IO 与 CPU 队列分离，避免慢磁盘占满 CPU worker。普通 preset 的 IO-only 图保持 `cpuWorkerCount=0`；
-Desktop 交互默认的 CPU worker 行为待 TASK-001 落定。
+IO 与 CPU 队列分离，避免慢磁盘占满 CPU worker。普通 preset 的 IO-only 图可直接
+`createBoundedTaskSystem({.cpuWorkerCount=0})`；产品 Desktop 走交互默认。
 
 ## 不变量
 
@@ -114,7 +115,7 @@ out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 ```
 
-TASK-001 完成前不要把 `cpuWorkerCount=0` 的 `NotSupported` 测试删除；它是当前配置语义，不是错误测试。
+`cpuWorkerCount=0` 的 `NotSupported` 测试保留：它描述直接工厂的 IO-only 语义，不是错误测试。
 
 ## 性能与待冻结项
 

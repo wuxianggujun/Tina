@@ -13,6 +13,7 @@
 | Layout | Flex-lite measure/arrange、logical pixel、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、listener token、consume/prevent/claim |
 | Paint | box/text/control paint、clip、PaintCache、committed paint snapshot |
+| Theme（A/B） | `UITheme` token + `makePanelBoxPaint`：surface 色阶、1px 亮/暗边、可选 Low elevation 假影；hex helper `rgb`/`argb`；**无**圆角/毛玻璃/CSS Theme（C） |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
 | Input | Pointer default action、Tab focus、Keyboard/Gamepad activation、TextEdit edit/selection/IME |
 | Semantics | role/name/checked/selected/range/value/valueText/focused snapshot |
@@ -113,6 +114,56 @@ UI 不调用 bgfx。`tina_ui_render_integration` 把 committed paint 转为固�
 当前支持 solid/glyph quad 与 axis-aligned scissor。rounded/stencil clip、Image widget、owning frame
 packet/FramePin 与跨 GPU golden 尚未完成。
 
+## 实际绘制链路
+
+UI 是 Retained UI：游戏代码先创建节点并修改属性，Runtime 在一帧内提交一次布局；绘制和命中都读取
+同一份已提交快照，不在 `updateUI()` 回调里直接调用 bgfx。当前主窗口的顺序是：
+
+```text
+IGameState::onEnter / updateUI
+  -> UIRootOwner + UITreeUpdater 修改节点树
+  -> UIContext::commitLayout(logical extent)
+  -> Measure / Arrange
+  -> committed layout + hit + paint + semantics snapshots
+  -> UICommittedPaintView
+  -> tina_ui_render_integration::buildUIDisplayList
+  -> logical pixels 映射到 framebuffer pixels、裁剪、相邻 batch 合并
+  -> UIDisplayList SolidQuad / Glyph commands
+  -> bgfx transient vertex/index buffer
+  -> UI textured shader + scissor + premultiplied alpha
+  -> RenderDevice::submitFrame 后显示
+```
+
+`UIContext::buildCommittedPaint()` 按 paint order 遍历可见节点。普通 `UIBoxPaint` 生成一个矩形 entry；
+文字生成 Glyph entry；ProgressBar 追加按 value 缩短的 foreground，RadioButton 追加 indicator 和
+选中内块，TextEdit 在焦点状态下追加 selection highlight、IME preedit 和 caret。Integration 再把
+逻辑坐标投影为像素矩形，并丢弃空/透明/完全在 clip 外的 entry。
+
+Solid 和 Glyph 共用一套带 UV 的 UI shader：SolidQuad 绑定 1×1 白色 R8 纹理，采样值恒为 1；Glyph
+绑定 UIContext 持有的 R8 atlas，采样灰度作为 coverage。片元颜色是顶点 premultiplied 颜色乘 coverage，
+backend 对每个 clip batch 设置 bgfx scissor，并使用 `ONE, INV_SRC_ALPHA` 混合。UI 模块本身不依赖
+bgfx；这条依赖只存在于 `tina_ui_render_integration` 和私有 bgfx backend。
+
+## 控件绘制矩阵
+
+| 控件 | 语义/交互 | 当前实际绘制 |
+| --- | --- | --- |
+| `Root` | 树和所有权边界 | 默认不绘制；设置 `UIBoxPaint` 后也可作为背景 SolidQuad |
+| `Panel` | 容器和布局 | `UIBoxPaint` 的 SolidQuad；当前 effective clip 是 viewport 与自身矩形的交集 |
+| `Label` | 只读 UTF-8 文本 | Glyph quads；没有可用字体时为确定性的 placeholder SolidQuad |
+| `Button` | Pointer、Tab、Enter/Space/KeypadEnter、Gamepad South | 调用方设置的背景 SolidQuad + 文本；当前没有独立 Theme 绘制器 |
+| `Checkbox` | checked 切换，复用 Button action/焦点路径 | 背景 SolidQuad + 文本；checked 主要发布到 semantics/状态，当前没有自动勾选图元 |
+| `Slider` | Pointer 横向拖动，min/max/value/step | 当前核心只绘制调用方的 box paint；thumb/track 专用主题图元尚未抽象 |
+| `TextEdit` | 单行编辑、选择、光标、IME | 文本 Glyph/placeholder + selection highlight + caret SolidQuad |
+| `ProgressBar` | 非交互 determinate range/value | track SolidQuad + 按比例缩短的 foreground SolidQuad |
+| `RadioButton` | 同直接父节点互斥选择 | indicator SolidQuad + 选中内块 + 文本 Glyph |
+
+控件创建入口集中在 `UIRootBuilder`/`UITreeUpdater`；属性 setter 只修改 retained 状态并标记必要的
+dirty 类别。`UITheme` 提供薄 token 与 panel chrome helper；`UIBoxPaint` 仍是 escape hatch，并可携带
+borderLight/borderDark/borderWidth 与 shadow（假 elevation）。rounded rectangle、Image widget、
+毛玻璃与完整 CSS 式 Theme 仍未实现（Phase C）。Button/Checkbox/Slider 的控件几何仍由专用 paint
+与调用方参数决定，可用 theme token 填色。
+
 ## 产品接入与证据
 
 `tina_sample_2d` 当前 UI 包含：
@@ -156,5 +207,8 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [测�
 | `UI-004` | 通用 Focus Scope、Modal、持久 Pointer Capture |
 | `UI-005` | ScrollView、虚拟 ListView、Dropdown、TreeView |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |
+| （可选） | Phase C：圆角 clip、backdrop blur、完整 style resolver |
 
 ProgressBar/RadioButton 的产品接入 `UI-001` 已完成，不应重新列为 Planned。
+Theme A/B（token、panel 边、Low 假影、sample 改 token）已在产品 sample 路径落地；不要把 UI-002/003
+标成 Done。

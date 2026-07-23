@@ -175,15 +175,14 @@ Modal、持久 Pointer Capture、多行编辑、复杂 shaping、虚拟列表和
 
 ## Legacy 与剩余扫尾
 
-产品级 Legacy 删除已经完成，但“整库零残留”尚未成立：
+产品级 Legacy 删除与 CLEAN-001～003 扫尾已完成：
 
-- `vcpkg.json` 仍有未被当前 preset 使用的 `legacy` feature；
-- `src/core/utils/StringUtils.hpp` 仍含无引用 EASTL include；
-- 部分 compatibility 计时实现仍被 `tina_core` 编译；
-- `src/audio/miniaudio/MiniaudioImplementation.cpp` 仍有过时 Legacy 条件说明；
-- Linux 全门禁与部分历史文档仍需复验/扫尾。
+- vcpkg `legacy` feature 已移除；
+- 无消费者 EASTL `StringUtils` 与 Clock/FrameTimer compatibility 已删除；
+- miniaudio 实现注释与 FATAL 文案不再暗示 Legacy ON 可运行；
+- `TINA_BUILD_LEGACY=ON` 仍为永久 FATAL 拒绝开关。
 
-这些项在 [Backlog](backlog.md) 中独立跟踪。删除历史残留时必须先证明无消费者，不能误删当前
+剩余跨平台证据与扩展能力见 [Backlog](backlog.md)（如 TEST-001 Linux 复验）。不得误删当前
 `src/ui` 或其他 vNext 模块。
 
 ## 架构不变量

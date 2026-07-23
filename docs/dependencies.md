@@ -1,106 +1,112 @@
 # 第三方依赖与版本治理
 
-`vcpkg-configuration.json` 的 baseline、`vcpkg.json` 的 feature 与 Git submodule commit 是版本事实。
-本文描述当前可见性与升级流程；未消费的 manifest/compatibility 残留单独列入 Backlog。
+依赖版本事实来自 `vcpkg-configuration.json` 的 builtin baseline、`vcpkg.json` feature、
+`.gitmodules` 与 vendored `NOTICE`。本文件只描述当前实际接入；ADR 中接受但尚未实现的依赖不会写成
+可用 CMake option 或 target。
 
 ## 原则
 
-- 依赖必须解决 Tina 当前不应自研的问题，并隐藏在最窄 adapter 后；
-- 所有已安装/Game SDK/Tina module public header 都不暴露第三方类型、宏或传递 include；第三方
-  即使作为模块内部存储也不是公开类型例外；
+- 第三方依赖解决 Tina 当前不应自研的问题，并隐藏在最窄 adapter/Cooker TU；
+- Game API、Module API/SPI 和安装候选公开头不暴露第三方类型、宏或传递 include；
 - Configure/Build 不自动更新 submodule，`TINA_AUTOUPDATE_SUBMODULE` 日常保持 OFF；
-- Runtime 不下载源码、编译 shader 或解析源资产；所有发布资产来自可重复 Cooker；
-- 每次升级单独提交，包含版本/许可证变化、Windows/Linux 构建、直接 GoogleTest、对应 smoke
-  和性能 A/B；
-- 不保留“也许以后会切换”的第二后端，新增或替换依赖必须写 ADR。
+- Runtime 不下载源码、编译 shader 或解析源资产；源格式只在 Cooker/tool；
+- 一次升级只改一个依赖，记录版本/许可证变化，并运行受影响的 Windows/Linux build、直接
+  GoogleTest、sample smoke 和必要的性能 A/B；
+- 未接入的第二 backend 或工具不能只靠文档占位，正式接入前先落实 ADR、target 与测试。
 
-## vNext 依赖矩阵
+## 当前依赖矩阵
 
-| 依赖 | 目标用途 | 接入方式 | 可见范围 | 状态 |
-| --- | --- | --- | --- | --- |
-| GLFW | Windows/Linux Window、键鼠、标准 Gamepad | vcpkg，`tina_platform_glfw` | 只在 platform backend | 保留；不使用 SDL/SDL3 |
-| bgfx/bx/bimg/shaderc | 唯一真实 Render backend 与离线 shader | 固定 submodule commit | 只在 render_bgfx/tool | 保留 |
-| EnTT | 当前无生产消费者 | 仅残留在未使用的 vcpkg `legacy` feature | 若未来采用也只能在 `tina_scene` PRIVATE | 待随 CLEAN-001 删除死声明 |
-| FreeType | 字形 raster；Glyph Atlas 编排仍属于 Tina UI | vcpkg | 只在 `tina_ui_freetype` adapter | 保留 |
-| miniaudio | 唯一真实 Audio backend | vcpkg feature `audio-miniaudio` | 只在 `tina_audio_miniaudio` | 内置 WAV/FLAC/MP3；不使用 SDL_mixer |
-| libvorbis | 可选 Ogg Vorbis 解码 | vcpkg feature `audio-miniaudio-vorbis` | 仅当 `TINA_AUDIO_ENABLE_LIBVORBIS=ON` | 默认 OFF |
-| libopus / opusfile | 可选 Opus 解码 | vcpkg feature `audio-miniaudio-opus` | 仅当 `TINA_AUDIO_ENABLE_LIBOPUS=ON` | 默认 OFF |
-| xxHash | ContentHash、Cook cache、可选 StringId | vcpkg root dependency + private adapter | `tina_core` PRIVATE 链接；公共头零 token | 保留，不承担安全签名；M10-A2a 契约 |
-| [Tracy 0.13.1](https://github.com/wolfpld/tracy) | 开发 Profile capture | vcpkg optional feature | `tina_profile_tracy` | 可选；发布和正式 bench 禁用 |
-| [cgltf v1.15](https://github.com/jkuhlmann/cgltf) | glTF cook | `thirdparty/cgltf` 单文件 | Asset cook / assetc | **已接入**最小路径 |
-| [stb_image v2.30](https://github.com/nothings/stb) | glTF PNG/JPEG 等 image decode | `thirdparty/stb` 单文件 | Asset cook / assetc | **已接入**；只输出 RGBA8 Cooked Texture2D |
-| [GoogleTest 1.17.0](https://github.com/google/googletest/releases) | 单元/集成契约测试 | vcpkg `tests` feature | tests only | 固定；直接运行，不用 CTest |
-| Box2D 3.x | 唯一 2D Physics backend | vcpkg `physics2d` feature | `tina_physics2d` PRIVATE | M11-A0–A6；sample 可选 |
-| Jolt | 唯一 3D Physics backend | ADR 0010 + 接入时固定版本 | `tina_physics3d` | 未接入 |
-| EASTL/EABase | 已退役 | 当前仍有无消费者 compatibility header 引用 | 不得进入任何当前 target/public header | 待 CLEAN-002 证明无消费者后删除/重写 |
+| 依赖 | 用途 | 接入方式 | 可见范围 |
+| --- | --- | --- | --- |
+| GLFW | Windows/Linux Window、键鼠、标准 Gamepad | vcpkg feature `platform-glfw` | `tina_platform_glfw` PRIVATE |
+| bgfx/bx/bimg/shaderc | 唯一真实 Render backend 与离线 shader | `thirdparty/bgfx.cmake` submodule | `tina_render_bgfx`/shader tool PRIVATE |
+| FreeType | 字形 raster；Atlas/布局仍由 Tina UI 拥有 | vcpkg feature `ui-freetype` | `tina_ui_freetype` PRIVATE |
+| miniaudio | 唯一真实 Audio backend | vcpkg feature `audio-miniaudio` | `tina_audio_miniaudio` PRIVATE |
+| libvorbis | 可选 Ogg Vorbis decode | feature `audio-miniaudio-vorbis` | miniaudio adapter PRIVATE；默认 OFF |
+| libopus/opusfile | 可选 Opus decode | feature `audio-miniaudio-opus` | miniaudio adapter PRIVATE；默认 OFF |
+| Box2D 3.x | 2D Physics backend | vcpkg feature `physics2d` | `tina_physics2d` PRIVATE |
+| xxHash | ContentHash/确定性校验 | vcpkg root dependency | `tina_core` PRIVATE adapter；非安全签名 |
+| GoogleTest | 单元/集成契约测试 | 默认 vcpkg feature `tests` | tests only；直接运行，不注册 CTest |
+| cgltf v1.15 | glTF/GLB parse/validate | vendored `thirdparty/cgltf` | `src/asset/GltfCook.cpp` PRIVATE |
+| stb_image v2.30 | glTF image decode 为 RGBA8 Texture2D | vendored `thirdparty/stb` | 同一 Cooker TU PRIVATE |
 
-`glm/spdlog/utfcpp` 当前只出现在未被 preset 使用的 `legacy` feature。它们不是当前 Runtime 依赖，
-也不得进入 Game SDK 公共类型；由 CLEAN-001 删除该死 feature 后，manifest 才能称为零 Legacy 残留。
+`CGLTF_IMPLEMENTATION` 与 `STB_IMAGE_IMPLEMENTATION` 只在 `src/asset/GltfCook.cpp` 定义。公开
+`GltfCook.hpp` 只出现 Tina-owned 类型；cgltf/stb_image token 不能进入 `include/tina`。
 
-## 获取与锁定
+bgfx.cmake、bx、bimg 的源码 revision 由 submodule commit 锁定。cgltf/stb_image 不是 submodule，版本、
+来源和许可证分别由 `thirdparty/cgltf/NOTICE.json`、`LICENSE` 与 `thirdparty/stb/NOTICE.txt` 记录。
 
-- vcpkg 依赖由仓库中的 builtin baseline 解析，结果的 baseline 和包版本写入 bench/build
-  fingerprint；
-- bgfx.cmake/bx/bimg 等源码依赖锁定 Git commit，构建期间不 fetch/pull；
-- cgltf 作为单文件 Cooker 依赖时同时保存上游 URL、tag/commit、SHA-256 和 LICENSE，不复制
-  Carbon 的副本；
-- Tracy 通过目标 vcpkg manifest feature `profile-tracy` 按需解析，由 Profile preset 启用；普通
-  Debug/Release 和发行包不能因为未安装 Tracy 而 configure 失败；
-- Box2D 通过独立 `physics2d` feature 进入 vNext Physics 图；基础 `tests` Null 图不解析 Box2D；
-- 生成包记录 Tina commit、vcpkg baseline、submodule commit、Cooked schema 和 shader ABI。
+## Manifest 与 CMake
 
-## CMake 可见性
-
-目标选项为：
+`vcpkg.json` 当前默认只启用 `tests`，root dependency 为 `xxhash`。可选 feature：
 
 ```text
-TINA_PROFILE_BACKEND=none|tracy
-TINA_PROFILE_TRACY_LOCKS=OFF|ON
-TINA_PROFILE_TRACY_MEMORY=OFF|ON
-TINA_BUILD_LEGACY=OFF only  # 已退役；ON → FATAL_ERROR
-TINA_BUILD_TESTING=ON|OFF
-TINA_BUILD_PHYSICS2D=ON|OFF
-TINA_BUILD_BENCHMARKS=ON|OFF
-TINA_BUILD_SHADERS=ON|OFF
+platform-glfw
+ui-freetype
+physics2d
+audio-miniaudio
+audio-miniaudio-vorbis
+audio-miniaudio-opus
+wayland
 ```
 
-- `TINA_BUILD_LEGACY` 已退役且 ON 必须 FATAL；默认 vcpkg feature 仅为 `tests`；
-- `vcpkg.json` **仍实际包含**未被当前 preset 使用的 `legacy` feature，这是 CLEAN-001 残留，不得写成
-  已删除或可运行的构建模式；
-- `none` 不查找/链接 Tracy；`tracy` 才允许 `find_package(Tracy CONFIG REQUIRED)`；
-- `tina_profile_config` 是唯一传播 Tina backend selection 的 INTERFACE target；Tracy 自身
-  definitions 只在 adapter target；
-- `tina_profile_tracy` 唯一包含 Tracy inline header并链接 Client，不能让多个静态库各自带一份
-  client；业务 target 只看到 Tina trace token 声明；
-- cgltf/stb_image implementation 宏只在 `src/asset/GltfCook.cpp` 定义；
-- 第三方 include 默认 `PRIVATE/SYSTEM`，Tina public header 的 include-what-you-use 测试不得依赖
-  传递 include 偶然成功。
-- vNext target 不再把整个 `${PROJECT_SOURCE_DIR}/src` 作为 PUBLIC include root；公开 header 使用
-  target-scoped `include/tina/...`，实现目录 PRIVATE；
-- `tina_render_bgfx` 对 bgfx/bx/bimg 的依赖只能是 PRIVATE/SYSTEM；Scene/UI/Asset/Runtime 的
-  direct link/public interface/include/definition 出现它们时 configure 直接失败。Game/Sample 只
-  直接链接 `Tina::GameSDK`、`Tina::DesktopBootstrap` 和按需的公开扩展模块（首个为
-  `Tina::Physics2D`）；最终生产链接经 bootstrap 带入 backend object/library 是实现闭包，不向
-  游戏源码传播 header、宏或 target 选择；
-- 源码 policy gate 除 render_bgfx、离线 shader tool 和 adapter test 外禁止 `<bgfx/...>`、
-  `bgfx::`、`BGFX_`、`bx::`、`bimg::`；
-- vNext Null preset 完全不 add_subdirectory/link/load bgfx；安装到 staging 后由无第三方 include
-  path 的外部 Game SDK consumer 再编译一次；`Tina::Physics2D` 的安装 consumer 必须在没有
-  Box2D include path、宏或 direct link 的环境独立编译，证明 Box2D 始终为 PRIVATE 实现依赖。
+vcpkg `legacy` feature 已删除（CLEAN-001）。EnTT、GLM、spdlog、utfcpp 不得再作为当前 Runtime 依赖声明；
+若未来 Scene 使用 EnTT，只能经 ADR 0013 作为 Scene 私有存储并单独 feature 接入。
 
-## 许可证与发布
+与第三方接入直接相关的现有 CMake option：
 
-依赖接入提交必须确认 license 与商用分发兼容，并更新发布包的 Third-Party Notices。单文件
-依赖也必须保留原始版权/许可证，不因为只复制一个 header 就省略。开发工具依赖（Tracy
-viewer、GoogleTest、shaderc）默认不进入游戏发布包；Runtime 依赖只打包目标平台真正需要的
-动态库、资源和 notice。
+```text
+TINA_BUILD_PLATFORM_GLFW=OFF|ON
+TINA_BUILD_RENDER_BGFX=OFF|ON
+TINA_BUILD_UI_FREETYPE=OFF|ON
+TINA_BUILD_PHYSICS2D=OFF|ON
+TINA_BUILD_AUDIO_MINIAUDIO=OFF|ON
+TINA_AUDIO_ENABLE_LIBVORBIS=OFF|ON
+TINA_AUDIO_ENABLE_LIBOPUS=OFF|ON
+TINA_BUILD_SHADERS=OFF|ON
+TINA_BUILD_WAYLAND=OFF|ON
+TINA_BUILD_TESTING=OFF|ON
+TINA_BUILD_LEGACY=OFF only
+```
 
-## 升级门禁
+`TINA_BUILD_LEGACY=ON` 必须在 configure 阶段 FATAL。全部 preset 与输出路径见[构建说明](building.md)，
+这里不复制 preset 清单。
 
-1. 在独立分支/worktree 更新一个依赖及锁定信息；
-2. 检查 public header 和生成包没有新增第三方类型泄漏；
-3. Visual Studio 2026 / MSVC 19.50 Debug/Release、Linux GCC/Clang 构建并直接运行 GoogleTest；
-4. 运行受影响的2D/UI/3D/Audio/Cooker smoke；
-5. 同 fingerprint 运行 `tina_bench` A/B，记录性能、内存和生成产物大小；
-6. 检查许可证、CVE/安全公告、Cooked schema/shader ABI 是否需要迁移；
-7. 单独提交，失败可回滚，不与功能重构混合。
+不存在 `TINA_PROFILE_BACKEND`、`TINA_PROFILE_TRACY_*`、`profile-tracy` feature、
+`tina_profile_config` 或 `tina_profile_tracy` target。ADR 0002 保留 Tracy 作为未来定位工具方向，但当前
+只有基础 Trace/Metrics 设计和 `PERF-001`；`tina_bench` 也尚未成为正式 target。
+
+Jolt/`tina_physics3d` 同样尚未接入。它们分别由 `PHYSICS-001` 与后续设计负责，不能出现在当前 build
+命令或发布依赖中。
+
+## 可见性门禁
+
+- GLFW/native window 类型只在 Platform adapter；WindowSurface SPI 只传播 Tina-owned opaque binding；
+- bgfx/bx/bimg/shaderc 只在 Render backend/tool；Scene、Asset、UI、Runtime 不直接 include/link；
+- FreeType 与 miniaudio 只在各自 adapter；Box2D 只在 Physics2D 实现；
+- cgltf/stb_image 只处理离线/启动前 Cooker 输入；Runtime frame path 不解析 source glTF/image；
+- xxHash header/type 不进入 Core public header，公共 API 只暴露版本化 `ContentHash`；
+- Null preset 不解析 GLFW、FreeType、miniaudio、Box2D feature，也不 add bgfx backend；
+- optional adapter 的 public factory/header isolation 必须在第三方 include path 不可见时独立编译；
+- `rg` forbidden-token 命中后人工判断，不能用“第三方 target 是 PRIVATE”替代公开头隔离测试。
+
+## 当前残留
+
+CLEAN-001～003 已关闭：vcpkg `legacy` feature、无消费者 EASTL `StringUtils`、Clock/FrameTimer
+compatibility 与 miniaudio/Legacy 误导文案已删除或改写。`TINA_BUILD_LEGACY=ON` 仍 FATAL。
+
+后续若出现新的死依赖/兼容层，按「先证明消费者 → 替代接口 → 独立可回滚删除」处理，不恢复
+EnTT/GLM/spdlog/utfcpp/EASTL 产品依赖。
+
+## 许可证与升级
+
+1. 确认 upstream version/commit、license、CVE 与商用分发约束；
+2. 更新 manifest baseline、submodule commit 或 vendored NOTICE，不在 configure 时在线漂移；
+3. 检查 public header、generated package 和 compile definitions 无第三方泄漏；
+4. 运行受影响的 Windows MSVC 与 Linux GCC/Clang 直接测试；
+5. 运行对应 2D/UI/3D/Audio/Cooker smoke，并记录退出、资源归零与视觉/音频边界；
+6. 若 Cooked schema、shader ABI 或 deterministic output 变化，提供迁移/失效策略；
+7. 更新 Third-Party Notices，工具依赖不进入游戏发布包；
+8. 单独提交，保证可回滚，不夹带功能重构。
+
+Backlog 与当前验收见[可执行 Backlog](backlog.md)和[测试说明](testing.md)。

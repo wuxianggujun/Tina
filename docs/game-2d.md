@@ -110,8 +110,8 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - `stateExits=1`、`applicationShutdowns=1`、`uiRootsReleased=1`；
 - `pixelCaptureOk=true`。
 
-Windows 视觉证据见 [M12 Windows 证据](m12-evidence-windows.md)。测试数量不是永久基线；同轮完整
-模块测试集合仍由 `TEST-002` 跟踪。
+Windows 视觉与同轮完整模块测试证据见 [M12 Windows 证据](m12-evidence-windows.md)。可复现脚本：
+`tools/windows/RunProduct2dGate.ps1`（TEST-002）。测试数量不是永久基线。
 
 ## 当前限制
 

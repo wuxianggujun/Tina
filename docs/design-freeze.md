@@ -19,14 +19,14 @@
 | 领域 | 决定 | ADR | 实现状态 |
 | --- | --- | --- | --- |
 | 迁移 | 完整目标、小步垂直切片、持续可运行 | [0001](adr/0001-vnext-vertical-slices.md) | Implemented |
-| Profiling | Tina Trace/Metrics；Tracy 用于定位，bench 用于回归 | [0002](adr/0002-tracy-and-benchmark.md) | Partial：正式 `tina_bench` 未实现 |
+| Profiling | Tina Trace/Metrics；Tracy 用于定位，bench 用于回归 | [0002](adr/0002-tracy-and-benchmark.md) | Not implemented：仅有模块计数/局部 bench；见 PERF-001 |
 | 组合 | backend factory + 非全局 `EngineHost` | [0003](adr/0003-backend-factories.md) | Implemented |
 | 错误 | 内部可用 exception，模块边界转 `Result`/`Status` | [0004](adr/0004-exceptions-and-errors.md) | Implemented |
 | Platform | GLFW + 窄原生适配，不引入 SDL/SDL3 | [0005](adr/0005-glfw-without-sdl.md) | Implemented |
 | 测试 | 直接运行 GoogleTest，不用 CTest 调度 | [0006](adr/0006-direct-googletest.md) | Implemented |
-| 容器/Hash | 标准库/PMR，不使用 EASTL；xxHash 私有 | [0007](adr/0007-standard-containers-and-hash.md) | Product implemented；残留扫尾见 CLEAN-002 |
+| 容器/Hash | 标准库/PMR，不使用 EASTL；xxHash 私有 | [0007](adr/0007-standard-containers-and-hash.md) | Implemented |
 | Render | bgfx 是首个真实 backend，保持私有 | [0008](adr/0008-bgfx-render-backend.md) | Implemented |
-| Asset | Runtime 只读 Cooked；cgltf 只在 Cooker | [0009](adr/0009-cooked-assets-and-cgltf.md) | Implemented；baseColorTexture cook 已完成，安全策略/产品绑定/PBR 后置 |
+| Asset | Runtime 只读 Cooked；cgltf 只在 Cooker | [0009](adr/0009-cooked-assets-and-cgltf.md) | Implemented；baseColorTexture cook + 外部 URI 安全与产品 GPU 绑定完成；PBR 后置 |
 | Physics | Box2D 与 Jolt API 分离 | [0010](adr/0010-separate-physics-backends.md) | Box2D implemented；Jolt deferred |
 | UI | Tina Retained UI 输出后端无关 DisplayList | [0011](adr/0011-retained-ui.md) | Implemented foundation/product slice |
 | Audio | miniaudio 是唯一真实 audio backend | [0012](adr/0012-miniaudio-backend.md) | Implemented optional adapter |
@@ -34,7 +34,7 @@
 | Runtime | `IGameApplication` lifecycle + `IGameState` frame behavior | [0014](adr/0014-runtime-phase-and-state.md) | Single-state implemented；stack/commands pending |
 | Input | ordered PlatformFrame、Action domain、逐 substep 提交 | [0015](adr/0015-input-and-fixed-step.md) | Implemented foundation |
 | Asset 生命周期 | 弱 Handle、强 Lease、物理 retirement | [0016](adr/0016-asset-ownership-and-retirement.md) | CPU/Null upload/ledger implemented；FramePin/completion partial |
-| Task | 有界 CPU/IO/Main、TaskGroup、禁止 detach/强杀 | [0017](adr/0017-bounded-task-system.md) | Partial；Desktop CPU default 冲突见 TASK-001 |
+| Task | 有界 CPU/IO/Main、TaskGroup、禁止 detach/强杀 | [0017](adr/0017-bounded-task-system.md) | Implemented；Desktop 交互默认 `max(1, hw-1)`，工厂 0=IO-only |
 | Handle | 强类型 generation + owner 边界 | [0019](adr/0019-generation-handles.md) | Implemented across current modules |
 | WindowSurface | move-only native lease 与主窗口交接 | [0020](adr/0020-window-surface-handoff.md) | Implemented |
 | Runtime UI | startup transaction + root/phase-scoped capability | [0021](adr/0021-runtime-ui-startup-capability.md) | Implemented |
@@ -60,9 +60,6 @@
 
 | 偏差 | 事实 | 处理方式 |
 | --- | --- | --- |
-| ADR 0017 CPU 默认值 | `TaskSystemCreateParams::cpuWorkerCount` 默认0，Desktop 只修正 IO/Main，不设置交互 CPU worker | 实现 Accepted 决定，或新 ADR supersede；见 TASK-001 |
-| Legacy 依赖声明 | 产品图已删，但 vcpkg `legacy` feature 与少量 compatibility 文件仍存在 | 按 CLEAN-001～003 删除或给出保留理由 |
-| 3D 状态表述 | multi-mesh Cooker 已完成，产品 sample 仍绑定单 mesh | 分别记录 G4 Done 与 G3 Partial；见 3D-001 |
 | UI 平台证据 | ProgressBar/RadioButton 的 API、单测、product-2d 结构化输出与 Windows client-area 视觉证据已完成 | 后续只扩展 UIA/AT-SPI 与跨 DPI/GPU 门禁；见 UI-002、UI-003 |
 | Linux 状态 | 历史 Linux 门禁早于当前 tip | 复验前不得扩写为当前平台支持证据；见 TEST-001 |
 

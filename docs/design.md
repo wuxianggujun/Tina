@@ -27,7 +27,7 @@ Tina 的设计目标不是“功能最多”，而是让游戏 Runtime 的模块
 | ECS | 如采用 EnTT，只能是 Scene 私有实现 | 当前 `tina_scene` 不链接 EnTT |
 | 容器 | 标准库/`std::pmr` + 少量专用有界结构 | 不恢复 EASTL 产品依赖 |
 | 测试 | GoogleTest executable 直接运行 | 不使用 CTest 调度 |
-| Profiling | Tina Trace/Metrics + 可选 Tracy | 完整 `tina_bench` 仍未实现 |
+| Profiling | Tina Trace/Metrics + 可选 Tracy | 当前只有模块计数/局部 bench；Trace/Metrics、Tracy adapter 与正式 `tina_bench` 均未实现 |
 
 决策理由见 [ADR 索引](adr/README.md)，状态汇总见[设计冻结清单](design-freeze.md)。
 

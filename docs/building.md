@@ -110,6 +110,12 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 
 完整图的结构化标签应为 `productGate=bgfx-physics-freetype-audio`。
 
+一键复现（configure 可跳过）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1
+```
+
 ## Asset CLI
 
 先构建工具，再运行工具；工具不读取未构建的旧 binary：
@@ -121,8 +127,10 @@ out\build\windows-msvc-vnext\bin\Debug\tina_catalog_validate.exe --root <catalog
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catalog=<catalogRoot>
 ```
 
-成功为 exit 0；验证失败为 exit 1；参数错误为 exit 2。Catalog root 必须是 UTF-8、规范化且位于
-用户明确选择的输出目录，不能让源路径或任意 glTF URI 穿越到 root 外。
+成功为 exit 0；验证失败为 exit 1；参数错误为 exit 2。Catalog manifest 相对路径和派生 object path 已校验
+UTF-8，并拒绝绝对路径与 `..` 逃逸。glTF Cooker 已能读取 relative-file/bufferView baseColorTexture，
+但 relative URI 的 root containment、规范化与 symlink 逃逸策略尚未闭合；当前只应处理可信源资产，完整
+安全策略由 [ASSET-001](backlog.md) 跟踪。
 
 ## Linux Null 与 sanitizer
 

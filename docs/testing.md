@@ -141,6 +141,9 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 miniaudio null-device 证明 adapter callback/mix/lifecycle，不证明真实扬声器质量。Physics2D Release bench
 是模块基线，不是 ADR 0018 的完整 `tina_bench` 协议。
 
+Windows 同轮 product-2d 拓扑由 `tools/windows/RunProduct2dGate.ps1` 固化（TEST-002）：上表测试 executable
+全部 exit 0 后，再跑 sample 300 帧并校验 `productGate=bgfx-physics-freetype-audio`。
+
 ## Linux 与 sanitizer
 
 Linux 门禁必须记录 compiler、stdlib、CMake、vcpkg baseline、display backend 和 sanitizer 环境。

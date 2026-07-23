@@ -28,17 +28,40 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --fr
 
 基础 bgfx 图的标签为 `productGate=bgfx`。30 帧不足以满足行走/撞墙阈值，正式 2D 门禁使用300帧。
 
-## 完整 2D feature 图
+## 完整 2D feature 图（TEST-002）
+
+同轮门禁脚本：`tools/windows/RunProduct2dGate.ps1`（configure + 全模块 target 构建 + 直接 GoogleTest
++ sample 300 帧；标签必须为 `productGate=bgfx-physics-freetype-audio`）。
 
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx-product-2d
-cmake --build --preset windows-vnext-bgfx-product-2d-debug --target tina_sample_2d -- /m:2 /v:m
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_sample_2d tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests `
+           tina_ui_freetype_tests tina_physics2d_tests tina_audio_tests tina_audio_miniaudio_tests `
+           tina_asset_tests -- /m:2 /v:m
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1 -SkipConfigure -SkipBuild
 ```
 
-记录结果：exit 0，`productGate=bgfx-physics-freetype-audio`，`physicsEnabled=true`、
+2026-07-23 tip `eea065ad`（工作树含 3D-001/TASK-001/CLEAN 未提交改动时同轮复验）Windows product-2d：
+
+| 步骤 | 结果 |
+| --- | --- |
+| configure `windows-msvc-vnext-bgfx-product-2d` | OK |
+| 上表全部 target 构建 | OK |
+| `tina_ui_tests` | exit 0（listed 202） |
+| `tina_runtime_ui_tests` | exit 0（listed 78） |
+| `tina_ui_render_integration_tests` | exit 0（listed 12） |
+| `tina_ui_freetype_tests` | exit 0（listed 2） |
+| `tina_physics2d_tests` | exit 0（listed 26） |
+| `tina_audio_tests` | exit 0（listed 15） |
+| `tina_audio_miniaudio_tests` | exit 0（listed 9） |
+| `tina_asset_tests` | exit 0（listed 110） |
+| `tina_sample_2d --frames=300` | exit 0 |
+
+sample 关键字段：`productGate=bgfx-physics-freetype-audio`、`physicsEnabled=true`、
 `freetypeEnabled=true`、`audioMiniaudioEnabled=true`、`audioDeviceNullBackend=true`、
-`pixelCaptureOk=true`。
+`physicsSteps=300`、`uiProgressBarValueVerified=true`、`uiRadioSelectionVerified=true`、
+`pixelCaptureOk=true`、`evidenceSchema=3`。listed 数量随工作树变化，不是永久基线。
 
 ## UI
 
@@ -70,20 +93,16 @@ Windowed/Fullscreen RadioButton 可见，中文无乱码，控件无裁剪或重
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
 ```
 
-记录结果：exit 0，JSON 含 `gltfCooked`、`prefabInstantiated`、`sceneExtract` 和
-`renderResourceLedgerBalanced`。该 sample 当前是单 product mesh 映射。
-
-独立 Asset/Cooker 测试已经覆盖 multi-mesh glTF：每个 mesh 生成 distinct StaticMesh/Material AssetId，
-Prefab dependency 可解析。尚未关闭两个 mesh 在产品 sample 中分别 upload/bind/draw 的 E2E。
+记录结果：exit 0，JSON 含 `gltfCooked`、`multiMesh=true`、`meshesUploaded=2`、
+`prefabInstantiated`、`sceneExtract` 和 `renderResourceLedgerBalanced`（3D-001 双 mesh 产品路径）。
 
 ## Audio
 
-`tina_audio_tests` 前序记录为 15/15；product-2d 完整 feature 图还证明 miniaudio null-device callback
-与 Catalog AudioClip lease 路径。真实扬声器质量、Linux 当前 tip 与 callback 性能不由这份证据证明。
+product-2d 同轮图证明 `tina_audio_tests` / `tina_audio_miniaudio_tests` exit 0，以及 sample 内
+miniaudio null-device callback 与 Catalog AudioClip lease。真实扬声器质量、Linux tip 与 callback
+性能不由这份证据证明。
 
 ## 未关闭
 
-- 当前 tip Linux GCC/Clang/sanitizer；
-- product-2d 完整模块测试集合的同轮复验；
-- multi-mesh 3D 产品 E2E；
-- Cooked texture 产品绑定与安全 URI/size policy、PBR、跨 GPU/DPI golden、UIA/AT-SPI。
+- 当前 tip Linux GCC/Clang/sanitizer（TEST-001）；
+- Cooked texture 产品绑定与安全 URI/size policy（ASSET-001）、PBR、跨 GPU/DPI golden、UIA/AT-SPI。

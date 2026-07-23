@@ -16,12 +16,9 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
-| TASK-001 | 落实或正式替代 ADR 0017 的交互 CPU worker 默认值 | Accepted 决策与 Desktop 当前行为冲突 |
-| CLEAN-001～003 | 清除 vcpkg `legacy` feature、EASTL/compatibility 与错误文案 | 产品已退役，但整库零残留尚未成立 |
 | TEST-001 | 复验当前 tip 的 Linux GCC/Clang/sanitizer 图 | 现有 Linux 结果早于当前 UI/Asset 产品切片 |
-| TEST-002 | 把 product-2d 的完整 feature 测试拓扑固化 | 当前文档曾只运行 sample，遗漏模块测试 |
-| 3D-001 | 从 multi-mesh Cooker 走到两个 mesh 的产品 E2E | G4 Cooker 已完成，G3 产品证据尚未完成 |
-| DOC-001 | 完成本轮文档重组与一致性扫描 | 移除状态漂移，恢复单一任务来源 |
+
+
 
 Now 的退出条件：没有未解释的 Accepted ADR/实现冲突；Windows product-2d 与 3D 产品门禁可复现；
 Linux 当前 tip 有新证据；Legacy 残留有明确删除或保留决定。
@@ -32,7 +29,6 @@ Linux 当前 tip 有新证据；Legacy 残留有明确删除或保留决定。
 | --- | --- |
 | UI-002 | UIA/AT-SPI accessibility 首切片 |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
-| ASSET-001 | 安全外部 texture/buffer glTF 产品路径 |
 | RUNTIME-001 | GameState stack/commands 与唯一提交点 |
 | RUNTIME-002 | owning RenderFramePacket、FramePin 与 submission completion |
 | PERF-001 | 决定 ADR 0018 并实现正式 `tina_bench` |
@@ -49,9 +45,9 @@ Linux 当前 tip 有新证据；Legacy 残留有明确删除或保留决定。
 
 Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语义和验收命令，不能只按功能名称开工。
 
-## Done：产品迁移主线
+## Done：已关闭工作
 
-| 阶段 | 完成结果 |
+| 阶段/任务 | 完成结果 |
 | --- | --- |
 | M0～M5 | C++23 构建基线、设计审计、ADR 与依赖方向建立 |
 | M6 | Headless Runtime、`EngineHost`、`IGameApplication`/`IGameState` 生命周期 |
@@ -61,6 +57,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | M10 | Catalog/Cooked、AssetSystem、Handle/Lease、Task、GPU upload、TileMap 与正式 2D sample |
 | M11 | Physics2D、Audio/miniaudio、UI 设置/文本、StaticMesh/Material/Prefab/glTF 3D 产品路径 |
 | M12 | Legacy `Tina.exe`、旧横版 2D、旧 UI 产品图与 `src/vnext` 前缀删除 |
+| DOC-001 | README/架构/设计/构建/测试/任务职责重组完成，Backlog 成为未完成工作的唯一明细，一致性扫描通过 |
 
 “M12 Done”只表示产品删除完成，不表示 Linux、PBR、accessibility、benchmark 或整库 Legacy 字符串全部
 完成。剩余工作已经拆入 Backlog，不再继续扩写 M12 历史清单。
@@ -69,9 +66,9 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 
 | 门禁 | 当前结论 | 下一关闭点 |
 | --- | --- | --- |
-| 2D product | Windows bgfx 与 product-2d 300 帧已有证据 | TEST-002、TEST-001 |
+| 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002） | TEST-001 |
 | UI product | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有结构化与 Windows 产品视觉证据 | UI-002、UI-003 |
-| 3D product | 单 product mesh 的 glTF/Prefab/Scene/Render smoke 已有证据 | 3D-001、ASSET-001、RENDER-001 |
-| Asset/Cooker | multi-mesh、distinct AssetId 与 baseColorTexture→Texture2D cook 测试已完成 | 产品 multi-mesh、纹理 GPU 绑定与安全策略 |
+| 3D product | 双 mesh + baseColorTexture GPU 绑定 smoke 已有证据（3D-001/ASSET-001） | RENDER-001、RUNTIME-002 |
+| Asset/Cooker | multi-mesh 产品 E2E、baseColorTexture cook、外部 URI 安全与产品纹理绑定已完成 | PBR 与更完整资源炸弹矩阵 |
 | Audio | backend-neutral 与 miniaudio null-device 路径已有 Windows 证据 | Linux/product gate 复验 |
-| Legacy retirement | 产品源码、target 与入口删除完成 | CLEAN-001～003 |
+| Legacy retirement | 产品源码/target 删除完成；vcpkg legacy feature 与 EASTL/compatibility 扫尾完成 | 仅保留 `TINA_BUILD_LEGACY=ON` FATAL 拒绝开关 |

@@ -106,7 +106,7 @@ Texture2D dependency；Prefab 保存 node hierarchy 与 Mesh/Material AssetId。
 
 ## 文件与安全边界
 
-- Catalog root、manifest relative path 和派生 object path必须是有效 UTF-8，拒绝 NUL、绝对 manifest
+- Catalog root、manifest relative path 和派生 object path 必须是有效 UTF-8，拒绝 NUL、绝对 manifest
   path 与 `..` 逃逸；
 - 所有 size/count/offset multiplication 在分配和访问前检查 hard limit 与溢出；
 - Manifest entry 按 AssetId 严格升序，依赖范围必须完整、无 gap/overlap，依赖 kind 必须匹配；

@@ -1,12 +1,12 @@
 # 3D 产品架构
 
-`tina_sample_3d` 是当前最小 3D 产品门禁：运行时生成一个单 mesh glTF fixture，经 cgltf Cook、
-Catalog 发布与校验、StaticMesh GPU upload、Prefab 实例化、Scene extraction 后由 bgfx Opaque3D pass
-绘制，并叠加 retained UI。它证明单 product mesh 的端到端路径，不等同于完整 3D 渲染器。
+`tina_sample_3d` 是当前最小 3D 产品门禁：运行时生成双 mesh glTF fixture，经 cgltf Cook、
+Catalog 发布与校验、两个 StaticMesh GPU upload、Prefab 实例化、Scene extraction 后由 bgfx Opaque3D
+pass 绘制，并叠加 retained UI。它证明 multi-mesh product 的端到端路径，不等同于完整 3D 渲染器。
 
-Cooker 已支持一个 glTF 文件中的多个 mesh，并为每个 mesh/material 生成 distinct AssetId；产品 sample
-仍只绑定一个 mesh/material key。两个 mesh 的独立 upload、binding、extract、draw 与视觉证据由
-`3D-001` 跟踪。
+Cooker 与产品 sample 均支持一个 glTF 中两个 mesh：distinct Mesh/Material AssetId、独立 meshKey
+binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。Cooked texture GPU 绑定与外部 buffer
+安全策略仍由 `ASSET-001` 跟踪；PBR 见 `RENDER-001`。
 
 ## 当前模块边界
 
@@ -57,16 +57,16 @@ Mesh/Material AssetId 转成当前 Render key。任一步失败都会逆序销�
 
 `tina_sample_3d` 当前使用同步 Catalog package API：
 
-1. 生成单三角形 glTF fixture；
+1. 生成双三角形 multi-mesh glTF fixture（两 scene node，第二节点 translation x=2）；
 2. cook 并原子发布 Catalog package；
 3. 完整校验 Manifest、ContentHash 与 typed payload；
-4. 加载一个 StaticMesh、一个 Material 和一个 Prefab；
-5. 上传 mesh，并把固定 product key 绑定到 GPU mesh；
-6. resolver 只接受该 mesh/material 的 AssetId；
-7. 实例化、extract、提交，退出时解除 binding 并销毁 GPU mesh。
+4. 加载两个 StaticMesh、两个 Material 和一个 Prefab；
+5. 上传两个 mesh，并分别绑定 product meshKey 1 与 2；
+6. resolver 按 node AssetId 映射到对应 meshKey/materialKey 与 per-mesh bounds/color；
+7. 实例化、extract、提交，退出时解除两个 binding 并销毁 GPU mesh。
 
-因此当前产品门禁没有证明 `AssetSystem` Handle/Lease 到 bgfx submission 的完整 pin，也没有证明两个
-不同 AssetId 的并行 GPU binding。后者属于 `3D-001`，前者属于 `RUNTIME-002`。
+当前产品门禁已证明两个不同 AssetId 的并行 GPU binding；尚未证明 `AssetSystem` Handle/Lease 到
+bgfx submission 的完整 pin（见 `RUNTIME-002`）。
 
 ## 三类 3D 门禁
 
@@ -74,7 +74,7 @@ Mesh/Material AssetId 转成当前 Render key。任一步失败都会逆序销�
 | --- | --- | --- |
 | `tina_sample_3d_extraction` | Headless/Null Camera、culling、sort、batch、300帧退出 | GPU 画面与 Cooked Asset |
 | `tina_sample_3d_infrastructure` | procedural Cube、真实 bgfx depth/instance/UI frame | 产品 glTF/Catalog mesh |
-| `tina_sample_3d` | 单 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx 生命周期 | multi-mesh E2E、Cooked texture GPU 绑定、PBR |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx 生命周期 | Cooked texture GPU 绑定、PBR、Handle/Lease pin |
 
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
 `cookedPrefab`、`meshUploaded`、`meshBound`、`prefabInstantiated`、`sceneExtract`、退出计数与资源归零
@@ -85,12 +85,12 @@ Mesh/Material AssetId 转成当前 Render key。任一步失败都会逆序销�
 - glTF importer 不支持单 mesh 多 primitive merge、无 bufferView 的 data-URI image、Draco、morph、
   skin、animation、sparse accessor 或非三角 primitive；不支持项返回结构化错误；
 - Material 产品路径只有 solid Opaque Unlit；无 PBR、Light、Shadow、transparent pass 或 post-processing；
-- glTF Cooker 已把相对文件或 bufferView 的 baseColorTexture 发布为 Texture2D dependency，但当前
-  产品 sample 尚未把该 Cooked texture 绑定到 GPU material；
+- glTF Cooker 把相对文件或 bufferView 的 baseColorTexture 发布为 Texture2D dependency；外部相对 URI
+  强制 root containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；`tina_sample_3d` 已 upload 并
+  `setMesh3DMaterialTextureBinding`；
 - `RenderScene` 仍使用 mesh/material key，不是 owning `FrameResourceRef`/`RenderFramePacket`；
 - 无通用 pass scheduler、pipeline cache 产品契约、worker extraction 或正式 `tina_bench`；
 - Jolt/3D Physics 未接入，静态 3D 产品门禁不以它为前置条件。
 
-下一步只在可执行 Backlog 中维护：multi-mesh 产品闭环见 `3D-001`，外部 buffer/texture 安全策略见
-`ASSET-001`，资源 pin/completion 见 `RUNTIME-002`，PBR/pass scheduling 见 `RENDER-001`。详见
-[Backlog](backlog.md)。
+下一步只在可执行 Backlog 中维护：外部 buffer/texture 安全策略见 `ASSET-001`，资源 pin/completion
+见 `RUNTIME-002`，PBR/pass scheduling 见 `RENDER-001`。详见 [Backlog](backlog.md)。

@@ -117,8 +117,9 @@ dispatch/shutdown 不暴露给游戏。
 ## Task
 
 `ITaskSystem` 提供 `scheduleIo`、`scheduleCpu`、`postMain`、`pumpMain`、`requestStop`、
-`shutdownAndJoin`。`TaskSystemCreateParams::cpuWorkerCount=0` 表示 CPU domain disabled；Desktop 的交互
-默认值仍待 `TASK-001` 校准。`TaskGroup` 提供结构化 pending/wait，不允许 detach/强杀。
+`shutdownAndJoin`。`TaskSystemCreateParams::cpuWorkerCount=0` 在直接工厂中表示 CPU domain disabled；
+`Desktop::CreateEngine` 经 `resolveDesktopTaskSystemParams` 将 0 解析为 `max(1, hardware_concurrency-1)`。
+`TaskGroup` 提供结构化 pending/wait，不允许 detach/强杀。
 
 ## Render
 
