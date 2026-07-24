@@ -25,6 +25,7 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
         .textByteCapacity = 1024,
     })
 {
+    capacities.applyDefaultProductChrome = false;
     auto result = UI::UIContext::Create(window, capacities);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : nullptr;

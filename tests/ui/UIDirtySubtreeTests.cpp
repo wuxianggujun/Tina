@@ -76,6 +76,7 @@ void assertOk(Core::Status status)
     UI::UIContextCapacityConfig capacity{
         .nodeCapacity = 16,
         .rootCapacity = 1,
+        .applyDefaultProductChrome = false,
     };
     if (paintSnapshotCapacity != 0) {
         capacity.paintSnapshotCapacity = paintSnapshotCapacity;

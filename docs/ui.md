@@ -176,10 +176,21 @@ bgfx；这条依赖只存在于 `tina_ui_render_integration` 和私有 bgfx back
 | `RadioButton` | 同直接父节点互斥选择 | indicator SolidQuad + 选中内块 + 文本 Glyph |
 
 控件创建入口集中在 `UIRootBuilder`/`UITreeUpdater`；属性 setter 只修改 retained 状态并标记必要的
-dirty 类别。`UITheme` 提供薄 token 与 panel chrome helper；`UIBoxPaint` 仍是 escape hatch，并可携带
-borderLight/borderDark/borderWidth 与 shadow（假 elevation）。rounded rectangle、Image widget、
-毛玻璃与完整 CSS 式 Theme 仍未实现（Phase C）。Button/Checkbox/Slider 的控件几何仍由专用 paint
-与调用方参数决定，可用 theme token 填色。
+dirty 类别。
+
+**产品 Theme（默认皮肤 + 全局换肤 + 局部覆盖）：**
+
+- `UIContext` 持有 `productTheme()`，默认 `makeDefaultProductTheme()`；
+- `create*`（Button/Checkbox/Slider/TextEdit/ProgressBar/RadioButton）与 Label 文本样式在创建时
+  **自动 apply** 对应 `make*Chrome` / text style；Root/Panel 默认无底色（容器），需背景时用
+  `makePanelBoxPaint` / `makeSettingsPanelChrome`；
+- `setProductTheme(theme)` 只影响**之后**新建的节点；已有节点保留当前 paint，直到调用方
+  `setBoxPaint` / `set*Paint` / `setTextStyle` 覆盖；
+- 局部覆盖优先级：单节点 setter > 创建时的全局 Theme；
+- 另提供 `makeLightProductTheme()` 与完整 chrome 工厂（`makeButtonChrome` 等）。
+
+`UIBoxPaint` 仍是 escape hatch，并可携带 borderLight/borderDark/borderWidth 与 shadow（假 elevation）。
+rounded rectangle、Image widget、毛玻璃与 CSS 式 stylesheet 仍未实现（Phase C）。
 
 ## 产品接入与证据
 

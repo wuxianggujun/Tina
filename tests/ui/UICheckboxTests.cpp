@@ -27,6 +27,7 @@ using GamepadPool = Core::GenerationPool<int, Platform::GamepadRegistryTag>;
     },
     std::pmr::memory_resource& resource = *std::pmr::get_default_resource())
 {
+    capacities.applyDefaultProductChrome = false;
     auto result = UI::UIContext::Create(window, capacities, resource);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : nullptr;

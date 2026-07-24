@@ -52,6 +52,7 @@
 | UI-005 | Deferred | P2 | ScrollView、虚拟 ListView、Dropdown、TreeView | 100k item 虚拟化与零稳态分配门禁通过 |
 | TEXT-001 | Deferred | P2 | 多行 TextEdit、grapheme/shaping、候选窗定位 | 中英混排、组合输入、selection 与平台 IME 矩阵通过 |
 | ASSET-002 | Deferred | P2 | 热重载与增量 Cooker | 不破坏 AssetId/Lease/retirement 契约，失败不发布半包 |
+| UI-THEME-C | Deferred | P2 | 圆角/Image/stylesheet 级 Theme | 不破坏 create 默认 chrome 与局部覆盖契约 |
 
 ## Done
 
@@ -73,6 +74,7 @@
 | UI-001 | ProgressBar/RadioButton 已接入 product-2d；190/190 UI、77/77 Runtime UI、12/12 Render bridge 通过，结构化输出与 Windows client-area 视觉证据成立 | [UI](ui.md) · [Windows 证据](m12-evidence-windows.md) |
 | DOC-001 | 文档职责与任务体系重组完成；本地链接、configure/build preset、CMake target、Markdown fence 与格式扫描通过；UI 绘制链路和控件矩阵已归档 | [文档索引](README.md) · [Roadmap](roadmap.md) · [UI](ui.md) |
 | UI-THEME-AB | 薄 `UITheme` token；`UIBoxPaint` 亮/暗边 + 可选 shadow；sample_2d 设置面板 elevation；hex `rgb`/`argb`；`UIThemeTests` | [UI](ui.md) |
+| UI-THEME-DEFAULT | Context `productTheme`/`setProductTheme`；`create*` 自动 apply `make*Chrome`；`makeLightProductTheme`；局部 `set*Paint` 覆盖；`UIThemeTests` | [UI](ui.md) |
 | DOC-002 | `tools/docs/CheckDocs.ps1`：docs 本地链接、cmake configure/build preset、`--target` 名、Legacy 产品文案软警告；不扫 out/build/thirdparty | [building](building.md) · [testing](testing.md) |
 | RUNTIME-001 | `GameStateStack` + commands + 唯一 commit；**policy 向下阻断**（fixed/frame/render/UI 自顶向下 `forEachDispatch`）；enter 失败丢 candidate；`GameStateStackTests` / policy dispatch 单测 | [gameplay](gameplay.md) · ADR 0014 |
 | RUNTIME-002 | `FramePin`/`FramePinSink`、`RenderFramePacket`、`NullSubmissionCompletionLedger`；EngineHost submit/present 挂 pin 并在 present/skip 后 complete；shutdown abandon；`FramePinPacketTests` | [rendering](rendering.md) · ADR 0016 |

@@ -54,6 +54,7 @@ private:
     UI::UIContextCapacityConfig capacities = {},
     std::pmr::memory_resource& resource = *std::pmr::get_default_resource())
 {
+    capacities.applyDefaultProductChrome = false;
     auto contextResult = UI::UIContext::Create(ownerWindow, capacities, resource);
     EXPECT_TRUE(contextResult.has_value())
         << (contextResult ? "" : contextResult.error().message);
