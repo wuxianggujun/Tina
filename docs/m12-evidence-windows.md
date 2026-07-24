@@ -143,9 +143,10 @@ blankLike 仍由 `CaptureSampleWindow` 排除。摘要：`artifacts/gates/ui-003
 | `ContentScale*` 映射单测（logical→fb 100/150/200%） | OS 显示缩放 100/150/200% 真机多 DPI 金标 |
 | 单机 ROI + design-1x baseline（960×540 absolute） | 多显示器混 DPI golden 矩阵 |
 | content-scale-like 逻辑窗口矩阵 + 分尺寸 baseline | 跨 GPU 像素 golden |
-| sample JSON contentScale/logical/fb 一致性 | 字体 identity fingerprint 金标 |
+| sample JSON contentScale/logical/fb 一致性 | |
+| 字体 identity fingerprint（path/sha256/env/FreeType-on；baseline schema 3；mismatch fail） | |
 
 ## 未关闭
 
-- OS 级多 DPI 截图矩阵与字体 fingerprint（UI-003 尾巴）、UIA/AT-SPI 真机（UI-002）、PBR（RENDER-001）；
+- OS 级多 DPI 截图矩阵与跨 GPU 像素金标（UI-003 尾巴；字体 identity fingerprint 已进 gate/baseline）、UIA/AT-SPI 真机（UI-002）、PBR（RENDER-001）；
 - Linux 可选 Wayland / 真显示器（TEST-001 主验收已关，见 [Linux 证据](m12-evidence-linux.md)）。

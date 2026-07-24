@@ -1,5 +1,4 @@
 ﻿{
-    "schema":  2,
     "gate":  "UI-003-visual-roi-baseline",
     "designLogicalSize":  [
                               960,
@@ -100,9 +99,27 @@
                      "uniqueSampleColors":  21
                  }
              ],
+    "schema":  3,
+    "fontFingerprint":  {
+                            "source":  "repo-fixture",
+                            "fileName":  "SourceHanSansSC-Regular.otf",
+                            "envTinaUiFontPath":  null,
+                            "exists":  true,
+                            "freeTypeLikelyOn":  true,
+                            "notes":  [
+                                          "Resolution order matches cmake/TinaUiFont.cmake: env TINA_UI_FONT_PATH then repo fixture",
+                                          "identity prefers sha256 of font file bytes; baseline compare fails on mismatch when baseline has fingerprint"
+                                      ],
+                            "sha256":  "f1d8611151880c6c336aabeac4640ef434fa13cbfbf1ffe82d0a71b2a5637256",
+                            "identity":  "sha256:f1d8611151880c6c336aabeac4640ef434fa13cbfbf1ffe82d0a71b2a5637256",
+                            "resolvedPath":  "resources/fonts/SourceHanSansSC-Regular.otf",
+                            "schema":  1,
+                            "sizeBytes":  16529832
+                        },
     "notes":  [
                   "Host-recorded ROI fingerprints for regression on same machine/class of GPU",
                   "avgRgb compared with absolute channel tolerance; uniqueSampleColors is a soft floor",
-                  "Absolute UI layout is design-locked; per-size baselines are not OS DPI goldens"
+                  "Absolute UI layout is design-locked; per-size baselines are not OS DPI goldens",
+                  "fontFingerprint.identity/sha256 must match when baseline includes fingerprint (gate fails on mismatch)"
               ]
 }
