@@ -1,0 +1,91 @@
+﻿{
+    "schema":  1,
+    "gate":  "UI-003-visual-roi-baseline",
+    "designLogicalSize":  [
+                              960,
+                              540
+                          ],
+    "clientSize":  [
+                       960,
+                       540
+                   ],
+    "aspect":  1.7778,
+    "rois":  [
+                 {
+                     "name":  "title_plate",
+                     "rectPx":  [
+                                    9,
+                                    5,
+                                    327,
+                                    71
+                                ],
+                     "samples":  936,
+                     "avgRgb":  [
+                                    43.76,
+                                    70.91,
+                                    80.24
+                                ],
+                     "dominantColor":  "121D2B",
+                     "dominantRatio":  0.5331,
+                     "uniqueSampleColors":  5
+                 },
+                 {
+                     "name":  "settings_panel",
+                     "rectPx":  [
+                                    652,
+                                    5,
+                                    299,
+                                    454
+                                ],
+                     "samples":  650,
+                     "avgRgb":  [
+                                    49.48,
+                                    66.29,
+                                    74.71
+                                ],
+                     "dominantColor":  "0A131D",
+                     "dominantRatio":  0.2908,
+                     "uniqueSampleColors":  43
+                 },
+                 {
+                     "name":  "progress_bar",
+                     "rectPx":  [
+                                    672,
+                                    297,
+                                    260,
+                                    38
+                                ],
+                     "samples":  988,
+                     "avgRgb":  [
+                                    55.42,
+                                    67.34,
+                                    80.31
+                                ],
+                     "dominantColor":  "192737",
+                     "dominantRatio":  0.5972,
+                     "uniqueSampleColors":  11
+                 },
+                 {
+                     "name":  "playfield_lower",
+                     "rectPx":  [
+                                    48,
+                                    297,
+                                    480,
+                                    200
+                                ],
+                     "samples":  600,
+                     "avgRgb":  [
+                                    106.35,
+                                    90.92,
+                                    64.92
+                                ],
+                     "dominantColor":  "102A43",
+                     "dominantRatio":  0.56,
+                     "uniqueSampleColors":  22
+                 }
+             ],
+    "notes":  [
+                  "Host-recorded ROI fingerprints for regression on same machine/class of GPU",
+                  "avgRgb compared with absolute channel tolerance; uniqueSampleColors is a soft floor"
+              ]
+}

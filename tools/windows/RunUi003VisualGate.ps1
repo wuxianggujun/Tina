@@ -19,7 +19,13 @@ param(
     [int]$CaptureCount = 3,
     [int]$CaptureIntervalMs = 350,
     [int]$RequiredConsecutiveUsefulCaptures = 2,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    # Compare ROI avgRgb / dominantColor / unique colors against a checked-in baseline.
+    [string]$BaselinePath = 'tools/windows/baselines/ui-003-sample2d-960x540.json',
+    # Max absolute avg channel delta allowed when a baseline is present.
+    [double]$AvgRgbTolerance = 28.0,
+    [switch]$WriteBaseline,
+    [switch]$NoBaselineCompare
 )
 
 $ErrorActionPreference = 'Stop'
@@ -241,10 +247,6 @@ if (-not $productOk) {
     [void]$gateErrors.Add('sample stdout missing status=ok JSON')
 }
 
-$captureOk = $false
-if ($null -ne $captureReport.ok) { $captureOk = [bool]$captureReport.ok }
-$ok = ($captureExit -eq 0) -and $captureOk -and ($gateErrors.Count -eq 0)
-
 $roiJson = @()
 foreach ($r in $roiList) {
     $roiJson += [pscustomobject]@{
@@ -257,6 +259,80 @@ foreach ($r in $roiList) {
         uniqueSampleColors = [int]$r.uniqueSampleColors
     }
 }
+
+$baselineCompare = [pscustomobject]@{
+    enabled = $false
+    path = $null
+    matched = $null
+    avgRgbTolerance = [double]$AvgRgbTolerance
+    diffs = @()
+}
+
+$resolvedBaseline = $BaselinePath
+if (-not [string]::IsNullOrWhiteSpace($BaselinePath) -and -not [IO.Path]::IsPathRooted($BaselinePath)) {
+    $resolvedBaseline = Join-Path $SourceRoot $BaselinePath
+}
+
+if ($WriteBaseline) {
+    $baselineDir = Split-Path -Parent $resolvedBaseline
+    if ($baselineDir -and -not (Test-Path -LiteralPath $baselineDir)) {
+        New-Item -ItemType Directory -Path $baselineDir -Force | Out-Null
+    }
+    $baselineObj = [pscustomobject]@{
+        schema = 1
+        gate = 'UI-003-visual-roi-baseline'
+        designLogicalSize = @(960, 540)
+        clientSize = @([int]$clientW, [int]$clientH)
+        aspect = [math]::Round($aspect, 4)
+        rois = $roiJson
+        notes = @(
+            'Host-recorded ROI fingerprints for regression on same machine/class of GPU',
+            'avgRgb compared with absolute channel tolerance; uniqueSampleColors is a soft floor'
+        )
+    }
+    $baselineObj | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $resolvedBaseline -Encoding utf8
+    Write-Host "wrote baseline: $resolvedBaseline"
+}
+
+if (-not $NoBaselineCompare -and -not [string]::IsNullOrWhiteSpace($resolvedBaseline) -and (Test-Path -LiteralPath $resolvedBaseline)) {
+    $baselineCompare.enabled = $true
+    $baselineCompare.path = $resolvedBaseline
+    $baseline = Get-Content -LiteralPath $resolvedBaseline -Raw -Encoding UTF8 | ConvertFrom-Json
+    $diffs = New-Object System.Collections.Generic.List[string]
+    foreach ($roi in $roiJson) {
+        $baseRoi = $null
+        foreach ($b in @($baseline.rois)) {
+            if ([string]$b.name -eq [string]$roi.name) { $baseRoi = $b; break }
+        }
+        if ($null -eq $baseRoi) {
+            [void]$diffs.Add("baseline missing ROI $($roi.name)")
+            continue
+        }
+        $baseAvg = @($baseRoi.avgRgb)
+        $curAvg = @($roi.avgRgb)
+        for ($i = 0; $i -lt 3; $i++) {
+            $delta = [Math]::Abs([double]$curAvg[$i] - [double]$baseAvg[$i])
+            if ($delta -gt $AvgRgbTolerance) {
+                [void]$diffs.Add(("{0} avgRgb[{1}] delta={2:N2} (tol={3})" -f $roi.name, $i, $delta, $AvgRgbTolerance))
+            }
+        }
+        # Soft floor: current uniqueness should not collapse vs baseline.
+        $baseUnique = [int]$baseRoi.uniqueSampleColors
+        $curUnique = [int]$roi.uniqueSampleColors
+        if ($baseUnique -ge 4 -and $curUnique -lt [Math]::Max(2, [int][Math]::Floor($baseUnique * 0.35))) {
+            [void]$diffs.Add(("{0} uniqueSampleColors collapsed {1} -> {2}" -f $roi.name, $baseUnique, $curUnique))
+        }
+    }
+    $baselineCompare.diffs = @($diffs | ForEach-Object { [string]$_ })
+    $baselineCompare.matched = ($diffs.Count -eq 0)
+    if (-not $baselineCompare.matched) {
+        foreach ($d in $diffs) { [void]$gateErrors.Add("baseline: $d") }
+    }
+}
+
+$captureOk = $false
+if ($null -ne $captureReport.ok) { $captureOk = [bool]$captureReport.ok }
+$ok = ($captureExit -eq 0) -and $captureOk -and ($gateErrors.Count -eq 0)
 
 $gateReport = [pscustomobject]@{
     schema = 1
@@ -271,11 +347,13 @@ $gateReport = [pscustomobject]@{
     productStdoutOk = [bool]$productOk
     accessibilityPublished = [bool]$accessibilityPublished
     rois = $roiJson
+    baselineCompare = $baselineCompare
     errors = @($gateErrors | ForEach-Object { [string]$_ })
     notes = @(
         'ROI fractions relative to client capture (design baseline 960x540)',
         'Single-host visual gate; multi-monitor multi-DPI golden matrix still open',
-        'blankLike frames excluded via CaptureSampleWindow usefulNonBlank gate'
+        'blankLike frames excluded via CaptureSampleWindow usefulNonBlank gate',
+        'Optional checked-in baseline under tools/windows/baselines for avgRgb regression'
     )
 }
 

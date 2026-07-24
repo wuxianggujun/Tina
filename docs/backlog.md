@@ -85,4 +85,4 @@
 | TEST-001-CLANG22-NULL | `linux-clang22-vnext`：tests/ui/runtime_ui/bridge + sample_null 300；`test-001-linux-clang22-null.json` | [Linux 证据](m12-evidence-linux.md) |
 | TEST-001-CLANG22-SAN | `linux-clang22-vnext-sanitize`：同上 + ASan/UBSan/LSan；`test-001-linux-clang22-sanitize.json` | [Linux 证据](m12-evidence-linux.md) |
 | UI-003-MAP | `buildUIDisplayList` content-scale 映射：logical 100×100 → fb 100/150/200 时 rect 与 clip 像素确定性；`UIRenderDisplayListTest.ContentScale*` | [UI](ui.md) · bridge tests |
-| UI-003-VIS | `tools/windows/RunUi003VisualGate.ps1`：CaptureSampleWindow + ROI 指纹（title/settings/progress/playfield）；排除 blankLike；`artifacts/gates/ui-003-visual-*.json` | [UI](ui.md) · CaptureSampleWindow |
+| UI-003-VIS | `RunUi003VisualGate.ps1`：ROI 指纹 + 可选 baseline 比对（`tools/windows/baselines/ui-003-sample2d-960x540.json`）；blankLike 排除；`artifacts/gates/ui-003-visual-*.json` | [UI](ui.md) · CaptureSampleWindow |

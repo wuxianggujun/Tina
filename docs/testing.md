@@ -151,11 +151,14 @@ Windows 同轮 product-2d 拓扑由 `tools/windows/RunProduct2dGate.ps1` 固化�
 powershell -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
-UI-003 单机视觉 ROI 门禁（映射单测之外的截图证据；排除 PrintWindow 白帧）：
+UI-003 单机视觉 ROI 门禁（映射单测之外的截图证据；排除 PrintWindow 白帧；可选 baseline 比对）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003VisualGate.ps1 `
   -SkipBuild -OutDir artifacts\screenshots\ui-003-visual
+# 写入/更新本机金标（同机回归）：
+#   ... -WriteBaseline
+# 默认读取 tools/windows/baselines/ui-003-sample2d-960x540.json
 ```
 
 ## Linux 与 sanitizer

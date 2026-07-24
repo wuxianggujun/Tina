@@ -109,9 +109,10 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003VisualGate.ps1 
   -SkipBuild -OutDir artifacts\screenshots\ui-003-visual
 ```
 
-结果：`ok=true`，client **960×540**，aspect 1.7778；CaptureSampleWindow 3 帧中 1 帧 `blankLike`
-（PrintWindow 白帧）排除，2 帧连续 useful；ROI 指纹覆盖 title/settings/progress/playfield；
-`accessibilityPublished=true`。摘要：`artifacts/gates/ui-003-visual-20260724-112721.json`。
+结果：`ok=true`，client **960×540**，aspect 1.7778；CaptureSampleWindow 排除 `blankLike` 白帧；
+ROI 指纹覆盖 title/settings/progress/playfield；`accessibilityPublished=true`。
+仓库内 baseline：`tools/windows/baselines/ui-003-sample2d-960x540.json`（avgRgb 容差默认 28）。
+二次运行 `baselineCompare.matched=true`。摘要示例：`artifacts/gates/ui-003-visual-*.json`。
 
 **不证明** 多显示器 100/150/200% DPI 金标矩阵或跨 GPU 像素 golden。
 
