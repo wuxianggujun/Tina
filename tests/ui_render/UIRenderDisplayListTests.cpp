@@ -544,5 +544,68 @@ TEST_F(UIRenderDisplayListTest, ReusesFixedBuilderStorageForThreeHundredBuilds)
     EXPECT_EQ(builder.statistics().rolledBackBuildCount, 0U);
 }
 
+// UI-003 first slice: content scale is carried only by the logical/framebuffer extent pair
+// (see UIRenderViewportMapping). 100%/150%/200% DPI-like mappings must be deterministic.
+TEST_F(UIRenderDisplayListTest, ContentScale100_150_200PercentMapsLogicalRectDeterministically)
+{
+    // Logical design rect: x=10,y=20,w=40,h=30 in a 100x100 logical viewport.
+    const std::array entries{
+        solidEntry(
+            1,
+            {.x = 10.0F, .y = 20.0F, .width = 40.0F, .height = 30.0F},
+            {.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 100.0F}),
+    };
+    auto builder = createBuilder({.commandCount = 4, .clipCount = 4, .batchCount = 4});
+
+    struct Case final {
+        const char* label = nullptr;
+        u32 framebufferW = 0;
+        u32 framebufferH = 0;
+        Render::UIPixelRect expected{};
+    };
+    // scale = framebuffer / logical. Clip covers full viewport so elides.
+    const std::array cases{
+        Case{"100%", 100, 100, {10, 20, 40, 30}},
+        Case{"150%", 150, 150, {15, 30, 60, 45}},
+        Case{"200%", 200, 200, {20, 40, 80, 60}},
+    };
+
+    for (const Case& c : cases)
+    {
+        auto result = Integration::buildUIDisplayList(
+            builder,
+            paintView(entries, {100.0F, 100.0F}),
+            {.framebufferViewport = {0, 0, c.framebufferW, c.framebufferH}});
+        ASSERT_TRUE(result.has_value()) << c.label << " " << (result ? "" : result.error().message);
+        ASSERT_EQ(result->displayList.commands().size(), 1U) << c.label;
+        EXPECT_EQ(result->displayList.commands().front().bounds, c.expected) << c.label;
+        EXPECT_EQ(result->statistics.submittedSolidQuadCount, 1U) << c.label;
+    }
+}
+
+TEST_F(UIRenderDisplayListTest, ContentScale150PercentProjectsPartialClip)
+{
+    // Logical: command 0..100, clip 20..40 (10x10). At 150%: command 0..150, clip 30..60 (15x15).
+    const std::array entries{
+        solidEntry(
+            1,
+            {.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 100.0F},
+            {.x = 20.0F, .y = 20.0F, .width = 10.0F, .height = 10.0F}),
+    };
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 1, .batchCount = 1});
+    auto result = Integration::buildUIDisplayList(
+        builder,
+        paintView(entries, {100.0F, 100.0F}),
+        {.framebufferViewport = {0, 0, 150, 150}});
+    ASSERT_TRUE(result.has_value()) << result.error().message;
+    ASSERT_EQ(result->displayList.commands().size(), 1U);
+    const Render::UIDrawCommand& command = result->displayList.commands().front();
+    EXPECT_EQ(command.bounds, (Render::UIPixelRect{0, 0, 150, 150}));
+    ASSERT_TRUE(command.clip.hasClip());
+    const Render::UIPixelRect* clip = result->displayList.resolveClip(command.clip);
+    ASSERT_NE(clip, nullptr);
+    EXPECT_EQ(*clip, (Render::UIPixelRect{30, 30, 15, 15}));
+}
+
 } // namespace
 } // namespace Tina::Tests
