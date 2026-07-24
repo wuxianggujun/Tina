@@ -95,13 +95,20 @@ public:
 };
 
 // Tracks Submitted frame indices until complete/abandon (ADR 0016 / RUNTIME-002).
-// Host holds an ISubmissionCompletionLedger; Null completes at present-return.
-// Future Bgfx* ledger will complete from GPU fence without changing packet/Host shape.
+// Host owns ISubmissionCompletionLedger (unique_ptr); default product/Null path uses
+// NullSubmissionCompletionLedger (present-return == complete). Desktop bgfx path may inject
+// BgfxSubmissionCompletionLedger (still present-sync until true GPU fence lands).
 struct SubmissionTicket final {
     Core::u64 submissionIndex = 0;
     bool open = false;
 
     [[nodiscard]] bool hasValue() const noexcept { return open; }
+};
+
+// How complete() is driven. Fence is reserved for a future bgfx-backed implementation.
+enum class SubmissionCompletionMode : Core::u8 {
+    PresentSync = 0,
+    // GpuFence = 1, // not implemented; do not claim Done for RENDER-FENCE
 };
 
 class ISubmissionCompletionLedger {
@@ -113,9 +120,10 @@ public:
     [[nodiscard]] virtual Core::Status abandon(SubmissionTicket& ticket) noexcept = 0;
     [[nodiscard]] virtual Core::u32 inflightCount() const noexcept = 0;
     [[nodiscard]] virtual bool allClear() const noexcept = 0;
+    [[nodiscard]] virtual SubmissionCompletionMode completionMode() const noexcept = 0;
 };
 
-// Sync Null ledger: present-return == complete. Not a GPU fence.
+// Sync Null ledger: present-return == complete. Not a GPU fence. Default for Headless/Null graphs.
 class NullSubmissionCompletionLedger final : public ISubmissionCompletionLedger {
 public:
     static constexpr Core::usize DefaultCapacity = 64;
@@ -129,6 +137,10 @@ public:
     [[nodiscard]] Core::u32 inflightCount() const noexcept override { return m_inflight; }
     [[nodiscard]] Core::u64 lastCompletedSubmission() const noexcept { return m_lastCompleted; }
     [[nodiscard]] bool allClear() const noexcept override { return m_inflight == 0; }
+    [[nodiscard]] SubmissionCompletionMode completionMode() const noexcept override
+    {
+        return SubmissionCompletionMode::PresentSync;
+    }
 
     [[nodiscard]] Core::Result<SubmissionTicket> beginSubmitted(Core::u64 submissionIndex) override
     {
@@ -200,6 +212,73 @@ private:
     Core::u64 m_completed = 0;
     Core::u64 m_abandoned = 0;
     Core::u64 m_lastCompleted = 0;
+};
+
+// Product-path ledger type for Desktop/bgfx composition. Still PresentSync today: Host completes
+// on present-return so FramePin release cannot outlive the CPU frame (no UAF).
+//
+// Fence injection points (not wired; no bgfx types in this public header):
+// - notePresentReturned(submissionIndex): today identical to complete() path via Host
+// - future registerGpuFence(submissionIndex, fenceToken): store token, keep ticket open
+// - future pollGpuFences(): complete tickets whose fences signalled, then release pins
+// Do not treat this type as RENDER-FENCE Done.
+class BgfxSubmissionCompletionLedger final : public ISubmissionCompletionLedger {
+public:
+    static constexpr Core::usize DefaultCapacity = NullSubmissionCompletionLedger::DefaultCapacity;
+
+    explicit BgfxSubmissionCompletionLedger(Core::usize capacity = DefaultCapacity) noexcept
+        : m_inner(capacity)
+    {
+    }
+
+    [[nodiscard]] Core::usize capacity() const noexcept { return m_inner.capacity(); }
+    [[nodiscard]] Core::u32 inflightCount() const noexcept override { return m_inner.inflightCount(); }
+    [[nodiscard]] Core::u64 lastCompletedSubmission() const noexcept
+    {
+        return m_inner.lastCompletedSubmission();
+    }
+    [[nodiscard]] bool allClear() const noexcept override { return m_inner.allClear(); }
+    [[nodiscard]] SubmissionCompletionMode completionMode() const noexcept override
+    {
+        // Present-sync until GPU fence is implemented; keep mode honest.
+        return SubmissionCompletionMode::PresentSync;
+    }
+
+    [[nodiscard]] Core::Result<SubmissionTicket> beginSubmitted(Core::u64 submissionIndex) override
+    {
+        return m_inner.beginSubmitted(submissionIndex);
+    }
+
+    [[nodiscard]] Core::Status complete(SubmissionTicket& ticket) noexcept override
+    {
+        // Present-sync: Host calls this after IRenderDevice::present returns.
+        // Future fence path: only complete after pollGpuFences() observes signal.
+        return m_inner.complete(ticket);
+    }
+
+    [[nodiscard]] Core::Status abandon(SubmissionTicket& ticket) noexcept override
+    {
+        return m_inner.abandon(ticket);
+    }
+
+    [[nodiscard]] Core::u64 openedCount() const noexcept { return m_inner.openedCount(); }
+    [[nodiscard]] Core::u64 completedCount() const noexcept { return m_inner.completedCount(); }
+    [[nodiscard]] Core::u64 abandonedCount() const noexcept { return m_inner.abandonedCount(); }
+
+    // Fence hook stubs (no-ops). Keep API stable for the next RENDER-FENCE slice.
+    void notePresentReturned(Core::u64 /*submissionIndex*/) noexcept
+    {
+        // No separate bookkeeping while completionMode is PresentSync.
+    }
+
+    [[nodiscard]] Core::u32 pollGpuFences() noexcept
+    {
+        // Returns number of tickets completed by fence. Always 0 until fence wiring exists.
+        return 0;
+    }
+
+private:
+    NullSubmissionCompletionLedger m_inner;
 };
 
 } // namespace Tina::Render

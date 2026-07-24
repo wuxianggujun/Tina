@@ -6,6 +6,7 @@
 #include <tina/integration/WindowSurface.hpp>
 #include <tina/platform/PlatformBackend.hpp>
 #include <tina/platform/Window.hpp>
+#include <tina/render/FramePin.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/task/TaskSystem.hpp>
 #include <tina/ui/UIContext.hpp>
@@ -54,6 +55,12 @@ using PrimaryWindowUIContextFactory = std::move_only_function<Core::Result<std::
 // sample/adapter private and is not required by Runtime.
 using AudioEngineFactory = std::move_only_function<Core::Result<Audio::AudioEngine>()>;
 
+// Optional submission completion ledger (RENDER-FENCE / RUNTIME-002). Empty → Host owns
+// NullSubmissionCompletionLedger (present-sync). Desktop may inject BgfxSubmissionCompletionLedger
+// (still present-sync until true GPU fence). Must not leak bgfx types through this factory.
+using SubmissionCompletionLedgerFactory =
+    std::move_only_function<Core::Result<std::unique_ptr<Render::ISubmissionCompletionLedger>>()>;
+
 // One-shot composition input. The tagged Platform/Render branch prevents an
 // invalid mixture of independent and native-window-aware factories.
 struct EngineCompositionFactories final {
@@ -62,6 +69,7 @@ struct EngineCompositionFactories final {
     PlatformRenderComposition platformRender;
     PrimaryWindowUIContextFactory createPrimaryWindowUIContext{};
     AudioEngineFactory createAudioEngine{};
+    SubmissionCompletionLedgerFactory createSubmissionCompletionLedger{};
 };
 
 } // namespace Tina
