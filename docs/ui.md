@@ -104,12 +104,19 @@ committed text。多行、grapheme、BiDi/shaping、候选窗定位见 `TEXT-001
 
 这是后端无关 semantics snapshot，不等同于平台辅助技术。
 
-`UIAccessibilityTree` / `IUIAccessibilityProvider` / `UIAccessibilityProbeProvider`（UI-002 首切片）
-从 `committedSemantics()` 构建可查询的无障碍节点表（role/name/state/range/value），供后续 Windows
-UIA 与 Linux AT-SPI adapter 消费。`UIUpdateContext::committedSemantics()` 与
-`PrimaryWindowUICapabilityState::committedSemantics` 暴露同一快照；`tina_sample_2d` 每帧
-`updateUI` 经 probe 发布并输出 `accessibility*` JSON 证据。Probe 可验证 stale node 拒绝；
-**真实 screen reader / UIA 进程桥接仍未实现**，不得把 probe/sample 字段写成真机 a11y 通过。
+`UIAccessibilityTree` / `IUIAccessibilityProvider` / `UIAccessibilityProbeProvider`（UI-002-SPI）
+从 `committedSemantics()` 构建可查询的无障碍节点表（role/name/state/range/value）。
+`UIUpdateContext::committedSemantics()` 与 `PrimaryWindowUICapabilityState::committedSemantics`
+暴露同一快照；`tina_sample_2d` 每帧 `updateUI` 经 probe 发布并输出 `accessibility*` JSON 证据。
+Probe 可验证 stale node 拒绝。
+
+**Windows UIA 私有 adapter（UI-002 首切片，可选）：** `TINA_BUILD_UI_UIA=ON`（Windows-only）时
+构建 `tina_ui_uia`。公开工厂头 `WindowsUiaAccessibilityProviderFactory.hpp` 零 COM；实现将
+`UIAccessibilityTree` 映射为 UIA 形属性（ControlType、Name、IsEnabled、IsKeyboardFocusable /
+HasKeyboardFocus、RangeValue、ToggleState、Value），并在 `publish`/`clear` 生命周期下拒绝 stale
+节点。`tina_ui_uia_tests` 覆盖映射与 provider 行为。**外部 Narrator/Inspect 的 HWND /
+IRawElementProviderSimple 进程桥接仍为可选后续**；不得把 probe/sample JSON 或 in-process 映射
+单测写成「真机 screen reader 已通过」。Linux AT-SPI 仍未实现。
 
 ## Render 边界
 
@@ -208,7 +215,7 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [测�
 
 | ID | 范围 |
 | --- | --- |
-| `UI-002` | Windows UIA / Linux AT-SPI 真机 adapter（中立 SPI + sample JSON 已有） |
+| `UI-002` | Windows UIA 进程桥接（HWND/IRawElementProvider）与 Linux AT-SPI；私有 UIA 映射 adapter + SPI 已有 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + 逻辑窗口尺寸矩阵已有；OS 级 100/150/200% DPI 后置） |
 | `UI-004` | 通用 Focus Scope、Modal、持久 Pointer Capture |
 | `UI-005` | ScrollView、虚拟 ListView、Dropdown、TreeView |
@@ -216,5 +223,5 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [测�
 | （可选） | Phase C：圆角 clip、backdrop blur、完整 style resolver |
 
 ProgressBar/RadioButton 的产品接入 `UI-001` 已完成，不应重新列为 Planned。
-Theme A/B（token、panel 边、Low 假影、sample 改 token）已在产品 sample 路径落地；不要把 UI-002/003
-标成 Done。
+Theme A/B（token、panel 边、Low 假影、sample 改 token）已在产品 sample 路径落地；UI-002-SPI 与
+可选 `tina_ui_uia` 映射切片已落地，但不要把外部 Narrator 真机门禁或 UI-003 标成 Done。

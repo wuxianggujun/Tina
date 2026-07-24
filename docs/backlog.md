@@ -32,6 +32,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 
 
+| UI-002 | Partial | P1 | Windows UIA 真机 adapter 首切片 | UI-002-SPI | **已完成** 可选 `tina_ui_uia`：`UIAccessibilityTree`→UIA 形属性（ControlType/Name/Enabled/Focus/Range/Toggle/Value）、stale/clear 生命周期、`tina_ui_uia_tests`、公开工厂头零 COM；**待** HWND/`IRawElementProviderSimple` 外部 Narrator/Inspect 进程桥接与 Linux AT-SPI | Unit |
 | UI-003 | Partial | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** ContentScale* 单测 + 单机 ROI/baseline + **逻辑窗口尺寸矩阵**（960×540 / 1280×720 / 1440×810，`RunUi003SizeMatrix.ps1`）；**待** OS 级 100/150/200% DPI 真机矩阵与字体 fingerprint 金标 | Unit + Visual |
 
 

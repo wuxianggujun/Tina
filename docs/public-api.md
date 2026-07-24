@@ -148,7 +148,8 @@ Label、Button、Checkbox、Slider、ProgressBar、RadioButton、单行 TextEdit
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8；
 可选 FreeType、R8 Glyph atlas、semantics snapshot 与 `UIAccessibilityTree`/probe provider 均为 Tina API。
-Windows UIA / Linux AT-SPI 真机桥接尚未实现（UI-002）。
+可选 Windows UIA 私有 adapter（`TINA_BUILD_UI_UIA`、`createWindowsUiaAccessibilityProvider`）映射
+UIA 形属性；公开头无 COM。外部 Narrator/Inspect 进程桥接与 Linux AT-SPI 仍未完成（UI-002）。
 
 ## Scene
 

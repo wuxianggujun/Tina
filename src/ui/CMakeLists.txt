@@ -69,3 +69,34 @@ if(TINA_BUILD_UI_FREETYPE)
         EXPORT_NAME UIFreetype
     )
 endif()
+
+# Optional Windows UIA private adapter (COM / UIAutomation stay out of Game SDK headers).
+if(TINA_BUILD_UI_UIA)
+    if(NOT WIN32)
+        message(FATAL_ERROR "TINA_BUILD_UI_UIA is Windows-only.")
+    endif()
+    add_library(tina_ui_uia STATIC
+        ${PROJECT_SOURCE_DIR}/include/tina/ui/WindowsUiaAccessibilityProviderFactory.hpp
+        uia/UIUiaMapping.hpp
+        uia/WindowsUiaAccessibilityProvider.hpp
+        uia/WindowsUiaAccessibilityProvider.cpp
+    )
+    add_library(Tina::UIUia ALIAS tina_ui_uia)
+    target_compile_features(tina_ui_uia PUBLIC cxx_std_23)
+    target_include_directories(tina_ui_uia
+        PUBLIC
+            ${PROJECT_SOURCE_DIR}/include
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/uia
+    )
+    target_link_libraries(tina_ui_uia
+        PUBLIC
+            Tina::UI
+        PRIVATE
+            Tina::ProjectOptions
+    )
+    set_target_properties(tina_ui_uia PROPERTIES
+        CXX_EXTENSIONS OFF
+        EXPORT_NAME UIUia
+    )
+endif()

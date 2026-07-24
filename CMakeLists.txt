@@ -59,6 +59,7 @@ option(TINA_BUILD_LEGACY "Build Legacy product (retired; must stay OFF)" OFF)
 option(TINA_BUILD_PLATFORM_GLFW "Build the private vNext GLFW platform backend" OFF)
 option(TINA_BUILD_RENDER_BGFX "Build the private vNext bgfx render backend" OFF)
 option(TINA_BUILD_UI_FREETYPE "Build the private vNext FreeType UI text adapter" OFF)
+option(TINA_BUILD_UI_UIA "Build the private Windows UIA accessibility adapter" OFF)
 option(TINA_BUILD_PHYSICS2D "Build the optional vNext Box2D physics module" OFF)
 option(TINA_BUILD_AUDIO_MINIAUDIO "Build the private vNext miniaudio audio adapter" OFF)
 option(TINA_AUDIO_ENABLE_LIBVORBIS "Enable Ogg Vorbis decoding via libvorbis (optional)" OFF)
@@ -82,6 +83,10 @@ if (TINA_BUILD_UI_FREETYPE)
         message(FATAL_ERROR
             "TINA_BUILD_UI_FREETYPE requires the vcpkg manifest feature 'ui-freetype'.")
     endif ()
+endif ()
+
+if (TINA_BUILD_UI_UIA AND NOT WIN32)
+    message(FATAL_ERROR "TINA_BUILD_UI_UIA is Windows-only.")
 endif ()
 
 if (TINA_BUILD_PHYSICS2D)

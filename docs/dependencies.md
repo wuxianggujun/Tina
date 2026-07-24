@@ -21,6 +21,7 @@
 | GLFW | Windows/Linux Window、键鼠、标准 Gamepad | vcpkg feature `platform-glfw` | `tina_platform_glfw` PRIVATE |
 | bgfx/bx/bimg/shaderc | 唯一真实 Render backend 与离线 shader | `thirdparty/bgfx.cmake` submodule | `tina_render_bgfx`/shader tool PRIVATE |
 | FreeType | 字形 raster；Atlas/布局仍由 Tina UI 拥有 | vcpkg feature `ui-freetype` | `tina_ui_freetype` PRIVATE |
+| UI Automation (system) | Windows UIA 无障碍属性映射 | OS SDK headers（无 vcpkg feature） | `tina_ui_uia` PRIVATE；`TINA_BUILD_UI_UIA` |
 | miniaudio | 唯一真实 Audio backend | vcpkg feature `audio-miniaudio` | `tina_audio_miniaudio` PRIVATE |
 | libvorbis | 可选 Ogg Vorbis decode | feature `audio-miniaudio-vorbis` | miniaudio adapter PRIVATE；默认 OFF |
 | libopus/opusfile | 可选 Opus decode | feature `audio-miniaudio-opus` | miniaudio adapter PRIVATE；默认 OFF |
@@ -59,6 +60,7 @@ vcpkg `legacy` feature 已删除（CLEAN-001）。EnTT、GLM、spdlog、utfcpp �
 TINA_BUILD_PLATFORM_GLFW=OFF|ON
 TINA_BUILD_RENDER_BGFX=OFF|ON
 TINA_BUILD_UI_FREETYPE=OFF|ON
+TINA_BUILD_UI_UIA=OFF|ON
 TINA_BUILD_PHYSICS2D=OFF|ON
 TINA_BUILD_AUDIO_MINIAUDIO=OFF|ON
 TINA_AUDIO_ENABLE_LIBVORBIS=OFF|ON
