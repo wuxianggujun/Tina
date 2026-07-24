@@ -27,7 +27,7 @@ Tina 的设计目标不是“功能最多”，而是让游戏 Runtime 的模块
 | ECS | 如采用 EnTT，只能是 Scene 私有实现 | 当前 `tina_scene` 不链接 EnTT |
 | 容器 | 标准库/`std::pmr` + 少量专用有界结构 | 不恢复 EASTL 产品依赖 |
 | 测试 | GoogleTest executable 直接运行 | 不使用 CTest 调度 |
-| Profiling | Tina Trace/Metrics + 可选 Tracy | 当前只有模块计数/局部 bench；Trace/Metrics、Tracy adapter 与正式 `tina_bench` 均未实现 |
+| Profiling | Tina Trace/Metrics + 可选 Tracy | `tina_bench` schema v1 已有；Trace/Metrics 与 Tracy adapter 仍后置 |
 
 决策理由见 [ADR 索引](adr/README.md)，状态汇总见[设计冻结清单](design-freeze.md)。
 
@@ -95,18 +95,29 @@ UI 不调用 bgfx。Render 不读取 UI 节点对象，只同步消费当前 sub
 
 | 产品面 | 已有 | 仍缺 |
 | --- | --- | --- |
-| 2D | Catalog TileMap、角色/碰撞、UI 设置、文本、Audio；可选 Box2D/FreeType/miniaudio | 更完整关卡/动画/编辑工具、跨平台产品门禁 |
+| 2D | Catalog TileMap、角色/碰撞、UI 设置、文本、Audio；可选 Box2D/FreeType/miniaudio | 更完整关卡/动画/编辑工具 |
 | 3D | multi-mesh cook/upload/bind、Prefab、Scene extract、Unlit、texture bind API、URI 安全 | Opaque3D 贴图采样、PBR、multi-primitive merge、AssetHandle 终态 |
-| UI | Tree/layout/hit/route/paint/semantics、文本/Glyph、7类交互/展示控件 | Focus Scope、Modal/Capture、多行/复杂 shaping、虚拟化、accessibility adapter |
-| Runtime | State stack/commands、四相位 policy 阻断、FramePin/Null completion、固定步长接线 | gameplay input policy、真 GPU fence、统一 shutdown deadline、多 World |
+| UI | Tree/layout/hit/route/paint/semantics、文本/Glyph、控件集；Windows UIA + HWND 桥接首切片 | Focus Scope、Modal/Capture、多行/复杂 shaping、虚拟化、Narrator 金标/AT-SPI |
+| Runtime | State 栈/commands、四相位阻断、`blocksGameplayInputBelow` 空 snapshot、FramePin/ledger、固定步长 | 真 GPU fence、多 World、Runtime 内置 Asset/World |
 | 性能 | `tina_bench` schema v1 + provisional 结论 | 固定门禁机 hard gate、多进程 MAD、更多 workload |
+
+## 游戏侧正确姿势（摘要）
+
+1. `IGameApplication` 只造初始 `IGameState` 并处理 `onShutdown`。
+2. 帧逻辑只在 State：`fixedUpdate` → `updateFrame`（可排队栈命令）→ `extractRenderScene` → `updateUI`。
+3. 产品入口用 `Tina::Desktop::CreateEngine` + `EngineHost::run`；测试才手写 factories。
+4. 输入只消费 Action snapshot；UI 先 route，再 ActionMapper，再（按 policy）suppressed 下层输入。
+5. 资源只走 Cooked Catalog + Handle/Lease；不在 Runtime 解析源 glTF/工程场景格式。
+
+更细的帧序与 policy 见 [Runtime](runtime.md)；公共面见 [Public API](public-api.md)。上手阅读顺序见
+[文档索引](README.md)。
 
 ## 如何推进
 
 短期工作只从 [Backlog](backlog.md) 选取验收条件完整的任务。实现顺序遵循：
 
-1. 补 Linux 当前 tip 证据（TEST-001）与文档/契约自洽；
-2. 关闭 UI accessibility / 跨 DPI 门禁（UI-002/UI-003）与 gameplay input policy 尾巴；
+1. 保持文档/契约与 tip 源码一致（本索引与 runtime/public-api 为优先同步面）；
+2. 收口 UI-002（Narrator 金标等）与 UI-003（跨 DPI 视觉门禁）；
 3. 再扩展 Opaque3D 采样/PBR、真 fence completion 与 bench hard gate。
 
 任何“完成”声明都必须指出证据类型：单元测试、集成测试、sample 生命周期、结构化 JSON 或人工视觉。

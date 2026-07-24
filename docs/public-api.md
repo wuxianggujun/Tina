@@ -1,7 +1,7 @@
 # Public API
 
-本文描述当前 `include/tina` 公共面和 CMake target。它不是未来 SDK 愿望清单；不存在的 State stack、
-event queue、packet/pin 或 PBR API 会明确列在末尾。
+本文描述当前 `include/tina` 公共面和 CMake target。它不是未来 SDK 愿望清单；尚未存在的能力（通用
+event queue、真 GPU fence、PBR 等）列在末尾。State 栈、FramePin 与 Null completion 首切片**已经存在**。
 
 ## 分层
 
@@ -46,6 +46,22 @@ Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`�
 
 ## Engine 与游戏入口
 
+### 正确姿势（普通桌面游戏）
+
+```cpp
+// 1) 实现 IGameApplication：createInitialState + onShutdown
+// 2) 实现 IGameState：onEnter/onExit/initialPolicy + 需要的相位
+// 3) 组合并运行（不要自建主循环）
+auto host = Tina::Desktop::CreateEngine(config);
+if (!host) { /* handle error */ }
+return host.value()->run(application);
+```
+
+- 帧逻辑只写在 `IGameState` 相位里；Application 不做逐帧工作。
+- 优先 `Desktop::CreateEngine`；手写 `EngineCompositionFactories` 是测试/Headless/特殊集成的接线税。
+- 不取得 `IRenderDevice*`、不缓存 phase Context/writer/span 跨回调。
+- AssetSystem / Scene::World / Physics2D 由游戏 State（或样例）显式持有，不是 Host 内置模块。
+
 普通桌面游戏调用：
 
 ```cpp
@@ -89,8 +105,18 @@ updateUI(UIUpdateContext&)
 Runtime 私有持有 `GameStateStack`（定容 8）。`FrameUpdateContext` 提供 `requestPush` /
 `requestPop` / `requestReplace` / `requestPolicyChange`：每帧最多一个 structural command，在
 `updateFrame` 之后、`extractRenderScene` 之前唯一 commit。各相位自顶向下调用栈上 State，直到
-某层 policy 的 `blocks*Below` 阻止继续向下。structural command 仅栈顶 context 可排队。Game SDK
+某层 policy 的相位阻断字段阻止继续向下。structural command 仅栈顶 context 可排队。Game SDK
 不获得可变 stack 引用。
+
+`GameStatePolicy`（`include/tina/runtime/GameState.hpp`）：
+
+| 字段 | 行为 |
+| --- | --- |
+| `blocksFixedUpdateBelow` / `blocksFrameUpdateBelow` / `blocksRenderBelow` / `blocksUIUpdateBelow` | 截断该相位向下分发 |
+| `blocksUIUpdateBelow` | 只挡下层 `updateUI`；**不**挡当帧 UI route |
+| `blocksGameplayInputBelow` | 下层 fixed/frame 收到空 suppressed Action snapshot；不截断回调本身 |
+
+完整帧序与输入四段式见 [Runtime](runtime.md)。
 
 ## Phase Context
 
@@ -134,9 +160,9 @@ dispatch/shutdown 不暴露给游戏。
 - primary framebuffer RGBA8 capture。
 
 `GpuTextureId`/`GpuMeshId` 是 RenderDevice generation handle，不是 AssetHandle。当前 `RenderFrame` 的
-Surface/Scene/UI/Glyph view 只在 `submitFrame()` 调用内有效；backend 不能保存。Runtime 持有
-`RenderFramePacket` 与 Null submission completion ledger（RUNTIME-002 首切片）；owning packet/FramePin/
-completion 尚未实现。
+Surface/Scene/UI/Glyph view 只在 `submitFrame()` 调用内有效；backend 不能保存。Runtime 使用
+`RenderFramePacket`、`FramePin` 与 submission completion ledger（Null/present-sync 首切片，见
+`include/tina/render/FramePin.hpp`）；真实 GPU fence 驱动的 completion 尚未实现。
 
 `RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D extraction，
 commit 后返回 borrowed view。`UIDisplayList` 支持 SolidQuad/Glyph 与 axis-aligned clip。
@@ -148,8 +174,9 @@ Label、Button、Checkbox、Slider、ProgressBar、RadioButton、单行 TextEdit
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8；
 可选 FreeType、R8 Glyph atlas、semantics snapshot 与 `UIAccessibilityTree`/probe provider 均为 Tina API。
-可选 Windows UIA 私有 adapter（`TINA_BUILD_UI_UIA`、`createWindowsUiaAccessibilityProvider`）映射
-UIA 形属性；公开头无 COM。外部 Narrator/Inspect 进程桥接与 Linux AT-SPI 仍未完成（UI-002）。
+可选 Windows UIA 私有 adapter（`TINA_BUILD_UI_UIA`）映射 UIA 形属性，公开头无 COM；产品路径可经
+EngineHost 自动附着 HWND HostBridge（`IRawElementProviderSimple` 首切片）。Narrator 人工金标与
+Linux AT-SPI 仍未完成（UI-002）。
 
 ## Scene
 
@@ -201,13 +228,20 @@ command 与 Tile grid static body helper。Box2D 类型不出现在 public heade
 不要手工构造 generation ID、跨 owner 混用、持久化 Runtime handle，或把 non-owning view包装成“看似
 拥有”的裸 pointer成员。
 
-## 尚不存在的公共能力
+## 尚不存在或仅部分落地的公共能力
 
-- State stack/commands、多 World/editor orchestration；
+**已存在（勿再文档成“没有”）：** `GameStateStack` 与 structural commands；相位 `blocks*Below` 与
+`blocksGameplayInputBelow` 空 snapshot；`RenderFramePacket` / `FramePin` / Null 或 present-sync
+completion ledger；Windows UIA provider + HWND HostBridge 首切片。
+
+**仍不存在或未完成：**
+
+- 多 World / editor orchestration；
 - 通用 Runtime owning event queue；
-- owning RenderFramePacket、FramePin、submission completion；
-- PBR Material/lighting/pass scheduler；
-- UIA/AT-SPI、完整 Focus Scope/Modal/Capture、复杂 text/虚拟列表；
+- 真实 GPU fence 驱动的 submission completion；
+- PBR Material / lighting / 通用 pass scheduler；
+- 完整 Focus Scope / Modal / 持久 Capture、复杂 text / 虚拟列表；
+- Narrator 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
 - 正式 `Tina::GameSDK` install/export/package ABI。
 

@@ -13,8 +13,7 @@
   每帧最多一个 structural command，在 Frame Update 与 extract 之间唯一 commit；enter 失败只丢
   candidate（不 onExit），栈保持。pop 空栈产生 `RunExitReason::GameStateStackBecameEmpty`。
 - `GameStatePolicy` 在 enter 成功后采样；`requestPolicyChange` 更新栈顶 committed policy。
-  帧阶段按栈 **自顶向下** 调度：`blocksFixedUpdateBelow` / `blocksFrameUpdateBelow` /
-  `blocksRenderBelow` / `blocksUIUpdateBelow` 为真时停止向更下层传播。structural command 仍仅栈顶可排队。
+  帧阶段按栈 **自顶向下** 调度（见下节 policy 语义）。structural command 仍仅栈顶可排队。
 - `IGameState` 承担 `fixedUpdate()`、`updateFrame()`、`extractRenderScene()` 与 `updateUI()`。
 - Runtime 已组合 Clock、Platform、Task、Render 和可选 Audio；AssetSystem/World/Physics2D 仍由
   产品 State 或样例显式持有，不是 `EngineHost` 模块。
@@ -60,6 +59,8 @@ IGameApplication::createInitialState
 
 ## 当前帧顺序
 
+与 `src/runtime/EngineHost.cpp` 一致：
+
 ```text
 Platform poll
   -> validate frame id/capacity/source sequence and WindowSurface revision
@@ -68,24 +69,46 @@ Platform poll
   -> select primary UIContext
   -> UI input routing/default action against previous committed hit snapshot
   -> ActionMapper with UI consumption/claims
-  -> 0..4 fixedUpdate callbacks
-  -> updateFrame
+  -> 0..4 fixedUpdate (stack top-down; suppressed Action if blocked by above)
+  -> updateFrame (stack top-down; only top may queue stack commands)
+  -> commitPendingGameStateCommands  // after frame, before extract
   -> Audio completion pump
-  -> RenderScene begin/extract/commit
-  -> updateUI through root-scoped capability
-  -> UI layout/hit/paint/semantics commit
+  -> RenderScene begin/extract/commit (stack top-down)
+  -> updateUI through root-scoped capability (stack top-down)
+  -> UI layout/hit/paint/semantics commit (+ optional UIA publish)
   -> UI DisplayList + optional R8 Glyph atlas view
-  -> RenderDevice::submitFrame
-  -> present when the surface is active
+  -> RenderFramePacket pins + RenderDevice::submitFrame
+  -> present when the surface is active (else completeSkipped)
   -> latch presented Camera2D for next-frame world picking
 ```
 
-Fixed simulation 默认 60 Hz，单帧最多追赶4步。真实 delta、接受/拒绝的真实时间、variable
+Fixed simulation 默认 60 Hz，单帧最多追赶 4 步。真实 delta、接受/拒绝的真实时间、variable
 `updateDelta`、丢弃的 simulation delta 与 interpolation 分开记录。Simulation Action 只在目标 fixed
-tick 消费一次；0步帧不丢 edge，多步追赶不重复消费。Frame Action 只进入 `updateFrame()`。
+tick 消费一次；0 步帧不丢 edge，多步追赶不重复消费。Frame Action 只进入 `updateFrame()`。
 
 `requestExitAfterFrame()` 会完成当帧 extraction、UI、submit 和 present 后退出。主窗口 close 是
 Platform poll 的不可取消退出分支，在任何新游戏回调前停止。
+
+## State 栈与 `GameStatePolicy`
+
+Runtime 私有 `GameStateStack`（定容 8）。相位 `forEachDispatch` **自顶向下**访问；某层
+`policyBlocksBelow(phase)` 为真则不再调用更下层。
+
+| Policy 字段 | 作用 | 注意 |
+| --- | --- | --- |
+| `blocksFixedUpdateBelow` | 截断下层 `fixedUpdate` | — |
+| `blocksFrameUpdateBelow` | 截断下层 `updateFrame` | 下层即使不跑，栈命令仍只有顶层可排队 |
+| `blocksRenderBelow` | 截断下层 `extractRenderScene` | 暂停层可设 `false` 以继续画底层世界 |
+| `blocksUIUpdateBelow` | 截断下层 `updateUI` | **不**挡当帧 UI 指针/IME route（route 在栈 dispatch 前） |
+| `blocksGameplayInputBelow` | 不截断 fixed/frame 回调 | 下层收到 `SimulationActionSnapshot::suppressed` / `FrameActionSnapshot::suppressed`（空 held/edge）；栈顶永不被此 helper 压制 |
+
+`blocksGameplayInputBelow` 与 `blocksFrameUpdateBelow` **正交**：可只冻输入仍跑下层动画，也可停回调仍保留真实 Action 形状（由 Host 在 dispatch 时选择 real vs suppressed snapshot）。
+
+产品证据：`samples/2d_tilemap_bgfx` 的 `PauseOverlayState` 使用
+`blocksGameplayInputBelow` + 多数相位阻断 + `blocksRenderBelow = false`。
+
+栈命令提交点：`updateFrame` 之后、`extractRenderScene` 之前唯一 commit。enter 失败只丢 candidate、
+不调用其 `onExit`，原栈保持。pop 至空栈 → `RunExitReason::GameStateStackBecameEmpty`。
 
 ## 输入、UI 与世界点击
 
@@ -93,14 +116,15 @@ Platform transition、UI route result 与 Gameplay Action 是三层独立数据�
 
 1. `UIInputRouteProducer` 按原始 ordinal 路由 Pointer/Keyboard/Gamepad/Text/IME；
 2. UI 发布 transition consumption 与 continuous-control claim；
-3. `ActionMapper` 只处理未被 UI 接管的输入。
+3. `ActionMapper` 只处理未被 UI 接管的输入（产出完整 snapshot）；
+4. Host 在 stack dispatch 时按 `gameplayInputBlockedForDepth` 决定是否换成 suppressed snapshot。
 
 Button、Checkbox、Slider、RadioButton、TextEdit 的当前默认行为在 UI route 阶段完成，早于 Action
 Mapping。Tab/Shift+Tab、Enter/Space/KeypadEnter 和 Gamepad South 已有窄 focus/default-action 路径；
 通用 Focus Scope、Modal 和持久 Pointer Capture 尚未实现。
 
 未被 UI 消费或 claim 的 primary Pointer transition 可以形成带 `WorldPointerSample` 的 Simulation
-edge。坐标使用 last-presented Camera2D 与对应 surface revision 锁存；跨0步帧延迟消费时不会用新
+edge。坐标使用 last-presented Camera2D 与对应 surface revision 锁存；跨 0 步帧延迟消费时不会用新
 Camera 或 resize 重算。
 
 ## Phase Context 与借用寿命
@@ -147,15 +171,16 @@ AudioEngine
 主窗口 UIContext 在 Render、Task、Platform 与 Clock 之前于 owner thread 销毁。Task 未 join 前不得
 释放其可能访问的 owner；错误线程销毁带 native 资源的 Host 会终止进程，而不是冒险制造 UAF。
 
-## 尚未完成
+## 已落地 vs 后置
 
-| Backlog | 范围 |
+| 项 | 状态 |
 | --- | --- |
-| `TASK-001` | **Done**：Desktop `resolveDesktopTaskSystemParams` 交互默认 `max(1, hw-1)`；工厂 `cpu=0` 仍 IO-only |
-| `RUNTIME-001` | stack/commands + phase 阻断 + **gameplay input 空 snapshot 抑制** 已落地；`blocksUIUpdateBelow` 仅挡 `updateUI` 不挡当帧 UI route |
-| `RUNTIME-002` | packet/FramePin/Null completion 首切片已落地；真实 GPU fence 后置 |
-
-通用 Runtime Event Queue、AssetSystem 组合、State TaskGroup barrier、多 World/editor orchestration 与
-通用 pass scheduler 均不是当前接口。实现前应补 ADR/Backlog 验收，不得从文档中的目标流程推断为已完成。
+| `TASK-001` Desktop 交互 CPU 默认 `max(1, hw-1)` | Done；工厂 `cpuWorkerCount=0` 仍为 IO-only |
+| State 栈 / structural commands / 四相位 `blocks*Below` | Done |
+| `blocksGameplayInputBelow` → 下层空 Action snapshot | Done（Host dispatch，非 ActionMapper 内） |
+| `blocksUIUpdateBelow` 仅挡 `updateUI` | Done；不回改当帧 UI route |
+| `RenderFramePacket` + `FramePin` + Null/present-sync ledger | 首切片 Done；真实 GPU fence 后置 |
+| Runtime 拥有 AssetSystem/World | 否；仍由产品 State/样例持有 |
+| 通用 Event Queue、多 World/editor orchestration、pass scheduler | 未做；需 ADR/Backlog 后开 |
 
 验证命令与 sample 证据边界见 [测试说明](testing.md)，公开契约见 [Public API](public-api.md)。

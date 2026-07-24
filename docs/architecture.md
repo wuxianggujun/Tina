@@ -105,15 +105,17 @@ flowchart TD
 
 ## 启动事务
 
+`EngineHost::Create` 先校验配置并创建模块（Clock / Platform / Task / Render / 可选 Audio 等），失败逆序
+回滚。`run()` 内提交游戏的顺序与 `src/runtime/EngineHost.cpp` 一致：
+
 ```text
-validate EngineConfig
-  -> create Clock / Platform / Task / Render / Audio
-  -> query initial primary-window metrics
+IGameApplication::createInitialState
+  -> initialPrimaryWindowMetrics
   -> bind primary UIContext (or explicit Headless)
-  -> IGameApplication::createInitialState
   -> IGameState::onEnter through scoped UI capability
-  -> commit startup UI snapshots
-  -> publish Running state
+  -> sample initialPolicy + pushCommitted onto GameStateStack
+  -> commit startup UI layout/hit (and optional a11y publish)
+  -> publish Running → frame loop
 ```
 
 任何步骤失败都不能发布半初始化 Host、State 或 UI snapshot。模块关闭顺序为 UI/Runtime 私有状态先退场，
@@ -127,14 +129,15 @@ Platform::pollFrame
   -> dispatch Platform lifecycle events
   -> route UI input against previous committed hit snapshot
   -> ActionMapper consumes UI consumption/claims
-  -> 0..N fixedUpdate ticks
-  -> updateFrame
+  -> 0..N fixedUpdate ticks (stack top-down; policy may cut below)
+  -> updateFrame (stack top-down; only top queues stack commands)
+  -> commitPendingGameStateCommands (push/pop/replace/policy)
   -> Audio completion pump
-  -> extractRenderScene + commit RenderScene
-  -> updateUI through phase-scoped facade
+  -> extractRenderScene + commit RenderScene (stack top-down)
+  -> updateUI through phase-scoped facade (stack top-down)
   -> commit UI structure/layout/hit/paint/semantics
   -> build UI DisplayList + expose Glyph atlas page
-  -> RenderDevice::submitFrame
+  -> RenderDevice::submitFrame (+ FramePin / completion ledger)
   -> present when surface is active
   -> latch presented Camera2D for next-frame world picking
 ```
@@ -142,6 +145,13 @@ Platform::pollFrame
 输入 transition、UI route 和 Gameplay Action 是三层数据。UI consumption/claim 必须在
 `ActionMapper` 前发布，避免一次点击同时激活 UI 和世界操作。UI route 读取上一份 committed hit snapshot；
 本帧 `updateUI` 的布局在 Render 前提交，下一帧才参与输入命中。
+
+`GameStatePolicy` 两套语义（详见 [Runtime](runtime.md)）：
+
+- `blocksFixedUpdateBelow` / `blocksFrameUpdateBelow` / `blocksRenderBelow` / `blocksUIUpdateBelow`：
+  截断该相位向更下层的回调（`blocksUIUpdateBelow` **不**挡当帧 UI route）。
+- `blocksGameplayInputBelow`：不截断 `fixedUpdate`/`updateFrame` 回调，但下层收到空 suppressed
+  Action snapshot。
 
 ## Asset 与 Render 数据流
 
@@ -172,7 +182,9 @@ Material dependency；纹理产品绑定、安全 URI/size policy、PBR 和 mult
 
 ProgressBar 是非交互的 determinate range/value 控件；RadioButton 按直接父节点形成互斥组；TextEdit
 按 Unicode scalar 保存 selection/caret，并支持 committed text 与 IME preedit 首切片。通用 Focus Scope、
-Modal、持久 Pointer Capture、多行编辑、复杂 shaping、虚拟列表和平台 accessibility adapter 尚未完成。
+Modal、持久 Pointer Capture、多行编辑、复杂 shaping、虚拟列表尚未完成。Windows UIA 私有 adapter 与
+Host HWND 桥接已有首切片（`tina_ui_uia`）；Narrator 人工金标与 AT-SPI 仍后置，见 [Backlog](backlog.md)
+UI-002。
 
 ## Legacy 与剩余扫尾
 
