@@ -86,7 +86,7 @@
 | API-CLEAN-POLICY | `blocksUIUpdateBelow` 替换误导名 `blocksUIInputBelow`；文档/sample/tests 同步 | [gameplay](gameplay.md) |
 | API-CLEAN-ASSET-READY | 删除 `AssetLogicalState Ready` 别名（仅 ReadyCpu/ReadyGpu） | [resources](resources.md) |
 | API-CLEAN-SCENE-KEYS | Scene `fixture*Key` → `meshKey`/`materialKey`/`spriteKey`；注释改为 bind-table 语义 | [Scene](scene-ecs.md) · [3D](game-3d.md) |
-| API-CLEAN-UI-STATS | `UIContextStats.dirty` → `structureDirty`（与内部 structure dirty 对齐） | [UI](ui.md) |
+| API-CLEAN-UI-STATS | `UIContextStatistics` phase dirty 单源：`structureDirty`/`layoutDirty`/`hitDirty`/`paintDirty`/`semanticsDirty` 由内部 `phaseDirty` mask 派生；去掉 public `dirty` 与并行 bool 双轨 | [UI](ui.md) |
 | RENDER-LEDGER-SPI | `ISubmissionCompletionLedger` + `NullSubmissionCompletionLedger` 实现；`RenderFramePacket` 走接口 | [rendering](rendering.md) · ADR 0016 |
 | RUNTIME-001-INPUT | `blocksGameplayInputBelow`：下层 fixed/frame 使用空 action snapshot；`gameplayInputBlockedForDepth` + unit tests | [gameplay](gameplay.md) · ADR 0014 |
 | RENDER-3D-TEX | Opaque3D unlit 采样 materialKey 绑定贴图（shader `s_texColor` + default white）；关闭「bind 不 draw」假完成 | [3D](game-3d.md) |

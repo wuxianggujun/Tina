@@ -397,5 +397,68 @@ TEST(UIDirtySubtreeTest, FailedPaintCandidateDisablesReuseForNextLayout)
     EXPECT_EQ(statistics.lastLayoutArrangedNodeCount, 5U);
 }
 
+TEST(UIDirtySubtreeTest, PhaseDirtyStatsTrackStructureLayoutHitPaintAndSemantics)
+{
+    LayoutFixture fixture = makeFixture();
+    ASSERT_NE(fixture.context, nullptr);
+    ASSERT_TRUE(fixture.root);
+
+    UI::UIContextStatistics clean = fixture.context->statistics();
+    EXPECT_FALSE(clean.structureDirty);
+    EXPECT_FALSE(clean.layoutDirty);
+    EXPECT_FALSE(clean.hitDirty);
+    EXPECT_FALSE(clean.paintDirty);
+    EXPECT_FALSE(clean.semanticsDirty);
+    EXPECT_EQ(clean.dirtyQueuePendingCount, 0U);
+
+    auto updaterResult = fixture.context->treeUpdater(fixture.root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    assertOk(updater.setLayoutStyle(fixture.leftLeaf, fixedSize(36.0F, 10.0F)));
+    UI::UIContextStatistics afterLayout = fixture.context->statistics();
+    EXPECT_FALSE(afterLayout.structureDirty);
+    EXPECT_TRUE(afterLayout.layoutDirty);
+    EXPECT_TRUE(afterLayout.hitDirty);
+    EXPECT_FALSE(afterLayout.paintDirty);
+    EXPECT_FALSE(afterLayout.semanticsDirty);
+    EXPECT_GT(afterLayout.dirtyQueuePendingCount, 0U);
+
+    assertOk(updater.setBoxPaint(fixture.leftLeaf, solidFill(1, 2, 3)));
+    UI::UIContextStatistics afterPaint = fixture.context->statistics();
+    EXPECT_FALSE(afterPaint.structureDirty);
+    EXPECT_TRUE(afterPaint.layoutDirty);
+    EXPECT_TRUE(afterPaint.hitDirty);
+    EXPECT_TRUE(afterPaint.paintDirty);
+    EXPECT_TRUE(afterPaint.semanticsDirty);
+
+    auto panelResult = updater.createPanel(fixture.root.rootNodeId());
+    ASSERT_TRUE(panelResult.has_value());
+    UI::UIContextStatistics afterStructure = fixture.context->statistics();
+    EXPECT_TRUE(afterStructure.structureDirty);
+    EXPECT_TRUE(afterStructure.layoutDirty);
+    EXPECT_TRUE(afterStructure.hitDirty);
+    EXPECT_TRUE(afterStructure.paintDirty);
+    EXPECT_TRUE(afterStructure.semanticsDirty);
+    static_cast<void>(*panelResult);
+
+    assertOk(fixture.context->commitStructure());
+    UI::UIContextStatistics afterStructureCommit = fixture.context->statistics();
+    EXPECT_FALSE(afterStructureCommit.structureDirty);
+    EXPECT_TRUE(afterStructureCommit.layoutDirty);
+    EXPECT_TRUE(afterStructureCommit.hitDirty);
+    EXPECT_TRUE(afterStructureCommit.paintDirty);
+    EXPECT_TRUE(afterStructureCommit.semanticsDirty);
+
+    assertOk(fixture.context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    UI::UIContextStatistics afterLayoutCommit = fixture.context->statistics();
+    EXPECT_FALSE(afterLayoutCommit.structureDirty);
+    EXPECT_FALSE(afterLayoutCommit.layoutDirty);
+    EXPECT_FALSE(afterLayoutCommit.hitDirty);
+    EXPECT_FALSE(afterLayoutCommit.paintDirty);
+    EXPECT_FALSE(afterLayoutCommit.semanticsDirty);
+    EXPECT_EQ(afterLayoutCommit.dirtyQueuePendingCount, 0U);
+}
+
 } // namespace
 } // namespace Tina::Tests
