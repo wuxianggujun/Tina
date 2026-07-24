@@ -92,7 +92,7 @@ namespace {
                         },
                     .createWindowSurfaceRenderDevice =
                         [wrap = std::move(wrap)](const Render::RenderDeviceCreateParams& params,
-                                                 Integration::NativeWindowSurfaceLease lease)
+                                                 Integration::NativeWindowSurfaceLease lease) mutable
                             -> Core::Result<std::unique_ptr<Render::IRenderDevice>> {
                             auto device = Render::Bgfx::createBgfxRenderDevice(params, std::move(lease));
                             if (!device)
@@ -103,6 +103,7 @@ namespace {
                             {
                                 return device;
                             }
+                            // move_only_function::operator() is non-const; lambda must be mutable.
                             return wrap(std::move(*device));
                         },
                 },
