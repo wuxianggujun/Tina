@@ -99,6 +99,7 @@ struct ProductMeshSlot final {
     Tina::Asset::CookedAssetFile materialFile{};
     Tina::Asset::CookedAssetFile textureFile{};
     Tina::Asset::CookedAssetFile metallicRoughnessTextureFile{};
+    Tina::Asset::CookedAssetFile normalTextureFile{};
     Tina::Render::RenderLinearColor materialColor{.red = 0.2F, .green = 0.6F, .blue = 0.9F, .alpha = 1.0F};
     float metallicFactor = 0.0F;
     float roughnessFactor = 1.0F;
@@ -106,13 +107,16 @@ struct ProductMeshSlot final {
     Tina::Render::GpuMeshId gpuMesh{};
     Tina::Render::GpuTextureId gpuTexture{};
     Tina::Render::GpuTextureId gpuMetallicRoughnessTexture{};
+    Tina::Render::GpuTextureId gpuNormalTexture{};
     bool meshUploaded = false;
     bool textureUploaded = false;
     bool metallicRoughnessTextureUploaded = false;
+    bool normalTextureUploaded = false;
     Tina::Core::AssetId meshId{};
     Tina::Core::AssetId materialId{};
     Tina::Core::AssetId textureId{};
     Tina::Core::AssetId metallicRoughnessTextureId{};
+    Tina::Core::AssetId normalTextureId{};
     u32 meshKey = 0;
     u32 materialKey = 0;
 };
@@ -703,10 +707,11 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         {
             return status;
         }
-        // normalTexture cooked but not bound in this sample slice (experimental MR uses MR map only).
-        if (material->hasNormalTexture)
+        if (auto status = loadTextureDep(material->hasNormalTexture, productMesh.normalTextureId,
+                                         productMesh.normalTextureFile, "missing normal texture dep");
+            !status)
         {
-            ++depIndex;
+            return status;
         }
         ++counters.materialsLoaded;
     }
@@ -815,6 +820,23 @@ class Product3DState final : public Tina::IGameState {
                 }
                 productMesh.gpuMetallicRoughnessTexture = *texture;
                 productMesh.metallicRoughnessTextureUploaded = true;
+                ++counters_->texturesUploaded;
+            }
+            if (productMesh.normalTextureFile)
+            {
+                auto texture = Tina::Asset::uploadTexture2DFromCooked(*device, productMesh.normalTextureFile);
+                if (!texture)
+                {
+                    return Tina::Core::failure(std::move(texture.error()));
+                }
+                if (auto status = device->setMesh3DMaterialNormalTextureBinding(productMesh.materialKey, *texture);
+                    !status)
+                {
+                    (void)device->destroyTexture2D(*texture);
+                    return status;
+                }
+                productMesh.gpuNormalTexture = *texture;
+                productMesh.normalTextureUploaded = true;
                 ++counters_->texturesUploaded;
             }
         }
@@ -1012,6 +1034,13 @@ class Product3DState final : public Tina::IGameState {
             for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
             {
                 ProductMeshSlot& productMesh = resources_->meshes[slot];
+                if (productMesh.normalTextureUploaded)
+                {
+                    (void)device->setMesh3DMaterialNormalTextureBinding(productMesh.materialKey, {});
+                    (void)device->destroyTexture2D(productMesh.gpuNormalTexture);
+                    productMesh.normalTextureUploaded = false;
+                    productMesh.gpuNormalTexture = {};
+                }
                 if (productMesh.metallicRoughnessTextureUploaded)
                 {
                     (void)device->setMesh3DMaterialMetallicRoughnessTextureBinding(productMesh.materialKey, {});

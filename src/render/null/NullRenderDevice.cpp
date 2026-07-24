@@ -298,6 +298,31 @@ class NullRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status setMesh3DMaterialNormalTextureBinding(u32 materialKey,
+                                                                     GpuTextureId texture) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (materialKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload, "materialKey must be non-zero");
+        }
+        if (!texture)
+        {
+            materialNormalTextureBindings_.erase(materialKey);
+            return Core::success();
+        }
+        if (texture.index >= textures_.size() || !textures_[texture.index].live ||
+            textures_[texture.index].generation != texture.generation)
+        {
+            return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
+        }
+        materialNormalTextureBindings_[materialKey] = texture;
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Status setMesh3DMaterialMetallicRoughnessTextureBinding(
         u32 materialKey, GpuTextureId texture) noexcept override
     {
@@ -332,6 +357,7 @@ class NullRenderDevice final : public IRenderDevice {
         meshBindings_.clear();
         materialTextureBindings_.clear();
         materialMetallicRoughnessTextureBindings_.clear();
+        materialNormalTextureBindings_.clear();
         materialFactors_.clear();
         meshes_.clear();
         statistics_.liveResources = 0;
@@ -359,6 +385,7 @@ class NullRenderDevice final : public IRenderDevice {
     std::unordered_map<u32, GpuMeshId> meshBindings_{};
     std::unordered_map<u32, GpuTextureId> materialTextureBindings_{};
     std::unordered_map<u32, GpuTextureId> materialMetallicRoughnessTextureBindings_{};
+    std::unordered_map<u32, GpuTextureId> materialNormalTextureBindings_{};
     struct MaterialFactors final {
         float metallic = 0.0F;
         float roughness = 1.0F;

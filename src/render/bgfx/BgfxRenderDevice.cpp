@@ -770,6 +770,22 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
+        opaque3DNormalSampler_ = bgfx::createUniform("s_texNormal", bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(opaque3DNormalSampler_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D normal sampler uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DNormalParamsUniform_ = bgfx::createUniform("u_normalParams", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(opaque3DNormalParamsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D normal params uniform");
+        }
+        ++statistics_.liveResources;
+
         // Default 1x1 white so baseColorFactor remains visible without a material bind.
         constexpr std::array<u8, 4> OpaqueWhitePixel{255, 255, 255, 255};
         const bgfx::Memory* opaqueWhiteMemory =
@@ -793,6 +809,19 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
                                  "bgfx rejected the Opaque3D default metallic-roughness texture");
+        }
+        ++statistics_.liveResources;
+
+        // Default normal map: flat +Z in tangent space (128,128,255).
+        constexpr std::array<u8, 4> OpaqueDefaultNormalPixel{128, 128, 255, 255};
+        const bgfx::Memory* opaqueNormalMemory =
+            bgfx::copy(OpaqueDefaultNormalPixel.data(), static_cast<u32>(OpaqueDefaultNormalPixel.size()));
+        opaque3DDefaultNormalTexture_ = bgfx::createTexture2D(
+            1, 1, false, 1, bgfx::TextureFormat::RGBA8, BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE, opaqueNormalMemory);
+        if (!bgfx::isValid(opaque3DDefaultNormalTexture_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D default normal texture");
         }
         ++statistics_.liveResources;
 
@@ -974,6 +1003,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             mesh3DBindings_.clear();
             mesh3DMaterialTextureBindings_.clear();
             mesh3DMaterialMetallicRoughnessTextureBindings_.clear();
+            mesh3DMaterialNormalTextureBindings_.clear();
+            mesh3DMaterialFactors_.clear();
             for (MeshSlot& slot : meshes_)
             {
                 if (slot.live)
@@ -1043,6 +1074,18 @@ class BgfxRenderDevice final : public IRenderDevice {
                 opaque3DMrParamsUniform_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
+            if (bgfx::isValid(opaque3DNormalSampler_))
+            {
+                bgfx::destroy(opaque3DNormalSampler_);
+                opaque3DNormalSampler_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DNormalParamsUniform_))
+            {
+                bgfx::destroy(opaque3DNormalParamsUniform_);
+                opaque3DNormalParamsUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             if (bgfx::isValid(opaque3DDefaultTexture_))
             {
                 bgfx::destroy(opaque3DDefaultTexture_);
@@ -1055,8 +1098,16 @@ class BgfxRenderDevice final : public IRenderDevice {
                 opaque3DDefaultMrTexture_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
+            if (bgfx::isValid(opaque3DDefaultNormalTexture_))
+            {
+                bgfx::destroy(opaque3DDefaultNormalTexture_);
+                opaque3DDefaultNormalTexture_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             mesh3DMaterialTextureBindings_.clear();
             mesh3DMaterialMetallicRoughnessTextureBindings_.clear();
+            mesh3DMaterialNormalTextureBindings_.clear();
+            mesh3DMaterialFactors_.clear();
             if (bgfx::isValid(sprite2DProgram_))
             {
                 bgfx::destroy(sprite2DProgram_);
@@ -1362,6 +1413,23 @@ class BgfxRenderDevice final : public IRenderDevice {
                 }
             }
 
+            bgfx::TextureHandle normalTexture = opaque3DDefaultNormalTexture_;
+            float normalMapBound = 0.0F;
+            if (const auto normalBinding = mesh3DMaterialNormalTextureBindings_.find(batch.materialKey);
+                normalBinding != mesh3DMaterialNormalTextureBindings_.end())
+            {
+                const GpuTextureId id = normalBinding->second;
+                if (id.index < textures_.size())
+                {
+                    const TextureSlot& slot = textures_[id.index];
+                    if (slot.live && slot.generation == id.generation && bgfx::isValid(slot.handle))
+                    {
+                        normalTexture = slot.handle;
+                        normalMapBound = 1.0F;
+                    }
+                }
+            }
+
             // Fixed product light: no light system yet. Direction toward light in world space.
             constexpr std::array<float, 4> kDefaultLightDir{0.4F, 0.85F, 0.35F, 0.0F};
             constexpr std::array<float, 4> kDefaultLightColor{1.0F, 0.98F, 0.92F, 1.0F};
@@ -1376,15 +1444,18 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             // ambient=0.18; w = MR map bound flag.
             const std::array<float, 4> mrParams{metallic, roughness, 0.18F, mrMapBound};
+            const std::array<float, 4> normalParams{normalMapBound, 0.0F, 0.0F, 0.0F};
 
             bgfx::setVertexBuffer(0, vb);
             bgfx::setIndexBuffer(ib);
             bgfx::setInstanceDataBuffer(&instanceBuffer, batch.firstItem, batch.itemCount);
             bgfx::setTexture(0, opaque3DSampler_, materialTexture);
             bgfx::setTexture(1, opaque3DMrSampler_, mrTexture);
+            bgfx::setTexture(2, opaque3DNormalSampler_, normalTexture);
             bgfx::setUniform(opaque3DLightDirUniform_, kDefaultLightDir.data());
             bgfx::setUniform(opaque3DLightColorUniform_, kDefaultLightColor.data());
             bgfx::setUniform(opaque3DMrParamsUniform_, mrParams.data());
+            bgfx::setUniform(opaque3DNormalParamsUniform_, normalParams.data());
             bgfx::submit(kOpaque3DView, opaque3DProgram_);
         }
     }
@@ -1560,6 +1631,18 @@ class BgfxRenderDevice final : public IRenderDevice {
             if (it->second == texture)
             {
                 it = mesh3DMaterialMetallicRoughnessTextureBindings_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        for (auto it = mesh3DMaterialNormalTextureBindings_.begin();
+             it != mesh3DMaterialNormalTextureBindings_.end();)
+        {
+            if (it->second == texture)
+            {
+                it = mesh3DMaterialNormalTextureBindings_.erase(it);
             }
             else
             {
@@ -1834,6 +1917,35 @@ class BgfxRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status setMesh3DMaterialNormalTextureBinding(u32 materialKey,
+                                                                     GpuTextureId texture) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (materialKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload, "materialKey must be non-zero");
+        }
+        if (!texture)
+        {
+            mesh3DMaterialNormalTextureBindings_.erase(materialKey);
+            return Core::success();
+        }
+        if (texture.index >= textures_.size() || !textures_[texture.index].live ||
+            textures_[texture.index].generation != texture.generation)
+        {
+            return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
+        }
+        mesh3DMaterialNormalTextureBindings_[materialKey] = texture;
+        return Core::success();
+    }
+
     // M11-D1: capture primary backbuffer after present (frame must not be open).
     [[nodiscard]] Core::Result<Rgba8FrameCapture> capturePrimaryFrameRgba8() override
     {
@@ -2026,11 +2138,14 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::ProgramHandle opaque3DProgram_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DMrSampler_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DNormalSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DLightDirUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DLightColorUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DMrParamsUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DNormalParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle opaque3DDefaultTexture_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle opaque3DDefaultMrTexture_ = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle opaque3DDefaultNormalTexture_ = BGFX_INVALID_HANDLE;
     bgfx::VertexBufferHandle opaque3DVertexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle opaque3DIndexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle sprite2DProgram_ = BGFX_INVALID_HANDLE;
@@ -2064,6 +2179,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     std::unordered_map<u32, GpuMeshId> mesh3DBindings_{};
     std::unordered_map<u32, GpuTextureId> mesh3DMaterialTextureBindings_{};
     std::unordered_map<u32, GpuTextureId> mesh3DMaterialMetallicRoughnessTextureBindings_{};
+    std::unordered_map<u32, GpuTextureId> mesh3DMaterialNormalTextureBindings_{};
     struct MaterialFactors final {
         float metallic = 0.0F;
         float roughness = 1.0F;

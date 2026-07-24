@@ -201,6 +201,16 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Mesh3D material factors");
     }
+    // RENDER-001: optional tangent-space normal map for Mesh3D materialKey (invalid clears).
+    // Unbound uses geometric normals only (no map sample).
+    [[nodiscard]] virtual Core::Status setMesh3DMaterialNormalTextureBinding(u32 materialKey,
+                                                                             GpuTextureId texture) noexcept
+    {
+        static_cast<void>(materialKey);
+        static_cast<void>(texture);
+        return Core::failure(RenderErrorCode::TextureUploadUnsupported,
+                             "This render device does not support Mesh3D normal texture binding");
+    }
 };
 
 using RenderDeviceFactory =

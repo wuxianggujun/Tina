@@ -2,14 +2,15 @@ $input v_color0, v_texcoord0, v_normal, v_worldPos
 
 #include <bgfx_shader.sh>
 
-// Experimental Opaque3D metallic-roughness hybrid (RENDER-001 first slice).
+// Experimental Opaque3D metallic-roughness hybrid (RENDER-001).
 // Honesty: single fixed directional light + constant ambient; no IBL, shadows,
-// multi-light, or cooked MR factors yet. Defaults when maps unbound:
-//   baseColor = white * instance factor; metallic=0; roughness=1.
+// multi-light. Cooked factors via u_mrParams; optional MR + normal maps.
 // glTF packing for s_texMR: G = roughness, B = metallic (R unused).
+// s_texNormal: tangent-space RGB normal (no mesh tangents; TBN from derivatives).
 
 SAMPLER2D(s_texColor, 0);
 SAMPLER2D(s_texMR, 1);
+SAMPLER2D(s_texNormal, 2);
 
 // xyz = world-space direction toward the light (normalized preferred), w unused.
 uniform vec4 u_lightDir;
@@ -17,6 +18,8 @@ uniform vec4 u_lightDir;
 uniform vec4 u_lightColor;
 // x = metallic factor, y = roughness factor, z = ambient scale, w = 1 if MR map bound.
 uniform vec4 u_mrParams;
+// x = 1 if normal map bound, yzw unused.
+uniform vec4 u_normalParams;
 
 void main()
 {
@@ -34,6 +37,25 @@ void main()
 	}
 
 	vec3 N = normalize(v_normal);
+	if (u_normalParams.x > 0.5)
+	{
+		// Cotangent frame from screen-space derivatives (no vertex tangents).
+		vec3 dp1 = dFdx(v_worldPos);
+		vec3 dp2 = dFdy(v_worldPos);
+		vec2 duv1 = dFdx(v_texcoord0);
+		vec2 duv2 = dFdy(v_texcoord0);
+		vec3 dp2perp = cross(dp2, N);
+		vec3 dp1perp = cross(N, dp1);
+		vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
+		vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
+		float invMax = inversesqrt(max(dot(T, T), dot(B, B)));
+		T *= invMax;
+		B *= invMax;
+		vec3 mapN = texture2D(s_texNormal, v_texcoord0).xyz * 2.0 - 1.0;
+		// glTF: green channel often OpenGL-style; keep as authored.
+		N = normalize(T * mapN.x + B * mapN.y + N * mapN.z);
+	}
+
 	vec3 L = normalize(u_lightDir.xyz);
 	// Camera world position from inverse view (bgfx built-in).
 	vec3 eyePos = mul(u_invView, vec4(0.0, 0.0, 0.0, 1.0)).xyz;
