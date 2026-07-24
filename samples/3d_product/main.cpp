@@ -30,6 +30,7 @@
 
 #include "DeviceCapture.hpp"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <chrono>
@@ -59,7 +60,8 @@ inline constexpr u64 DefaultFrameCount = 300;
 inline constexpr u32 DefaultFrameDelayMilliseconds = 0;
 // Product meshKeys start at 1; key 1 is no longer "only cube fixture".
 // Cap matches sample renderSceneCapacities.mesh3DBatchCapacity.
-inline constexpr u32 MaxProductMeshSlots = 8;
+// Khronos MetalRoughSpheres* is a mesh-per-sphere MR grid (often 50–100+ meshes).
+inline constexpr u32 MaxProductMeshSlots = 128;
 inline constexpr u32 FirstProductMeshKey = 1;
 inline constexpr u32 FirstProductMaterialKey = 1;
 
@@ -138,12 +140,14 @@ struct Product3DResources final {
     std::string gltfSourcePath{};
 };
 
+// High marker so prefab id stays above mesh/material product indices for small slot counts
+// and remains unique for MaxProductMeshSlots (uses 0xFFFE).
 [[nodiscard]] Tina::Core::AssetId::Bytes prefabIdBytes() noexcept
 {
     Tina::Core::AssetId::Bytes bytes{};
     bytes[0] = static_cast<std::byte>(0x3DU);
-    bytes[14] = static_cast<std::byte>(0x00U);
-    bytes[15] = static_cast<std::byte>(0xF0U);
+    bytes[14] = static_cast<std::byte>(0xFFU);
+    bytes[15] = static_cast<std::byte>(0xFEU);
     return bytes;
 }
 
@@ -407,25 +411,26 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     return path.string();
 }
 
-// Stable product AssetIds for slot i: mesh at 0x10+2i, material at 0x11+2i (mesh < mat).
-// Prefab at 0xF0. Order keeps Prefab (mesh,mat)×N deps strictly AssetId-sorted.
-// Built-in fixture slots 0/1 match historical 0x10/0x11 and 0x12/0x13 (not the old 0x10/0x20/0x30/0x40
-// layout); only ordering constraints matter for catalog validation.
+// Stable product AssetIds (16-bit slot index in bytes[14..15], no 8-bit wrap).
+// mesh: 0x10 + 2*slot, material: 0x11 + 2*slot so mesh < mat and unique for slot < 32760.
+// Prefab: 0xF000. Texture ids from GltfCook are left unchanged by rewrite (only mesh/mat/prefab).
 [[nodiscard]] Tina::Core::AssetId productMeshIdForSlot(u32 slot) noexcept
 {
+    const u32 index = 0x10U + slot * 2U;
     Tina::Core::AssetId::Bytes bytes{};
     bytes[0] = static_cast<std::byte>(0x3DU);
-    bytes[14] = static_cast<std::byte>(0x00U);
-    bytes[15] = static_cast<std::byte>(0x10U + slot * 2U);
+    bytes[14] = static_cast<std::byte>(static_cast<unsigned char>((index >> 8) & 0xFFU));
+    bytes[15] = static_cast<std::byte>(static_cast<unsigned char>(index & 0xFFU));
     return *Tina::Core::AssetId::fromBytes(bytes);
 }
 
 [[nodiscard]] Tina::Core::AssetId productMaterialIdForSlot(u32 slot) noexcept
 {
+    const u32 index = 0x11U + slot * 2U;
     Tina::Core::AssetId::Bytes bytes{};
     bytes[0] = static_cast<std::byte>(0x3DU);
-    bytes[14] = static_cast<std::byte>(0x00U);
-    bytes[15] = static_cast<std::byte>(0x11U + slot * 2U);
+    bytes[14] = static_cast<std::byte>(static_cast<unsigned char>((index >> 8) & 0xFFU));
+    bytes[15] = static_cast<std::byte>(static_cast<unsigned char>(index & 0xFFU));
     return *Tina::Core::AssetId::fromBytes(bytes);
 }
 
@@ -607,6 +612,18 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         {
             dep.assetId = rewriteId(dep.assetId);
         }
+        // Rewrite can disorder dependency streams; CatalogCook requires strictly increasing ids.
+        std::sort(asset.dependencies.begin(), asset.dependencies.end(),
+                  [](const Tina::AssetFormat::CookedAssetWriteDependency& a,
+                     const Tina::AssetFormat::CookedAssetWriteDependency& b) {
+                      return a.assetId < b.assetId;
+                  });
+        asset.dependencies.erase(std::unique(asset.dependencies.begin(), asset.dependencies.end(),
+                                             [](const Tina::AssetFormat::CookedAssetWriteDependency& a,
+                                                const Tina::AssetFormat::CookedAssetWriteDependency& b) {
+                                                 return a.assetId == b.assetId;
+                                             }),
+                                 asset.dependencies.end());
     }
 
     if (auto status = Tina::Asset::cookAndPublishCatalogPackage(toUtf8(resources.catalogRoot), *request); !status)
@@ -617,15 +634,19 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     }
     ++counters.catalogCooked;
 
-    const u32 maxCatalogEntries = 8U + slotCount * 4U;
+    // Prefab may list mesh+material for every node; spheres grids need hundreds of deps.
+    const u32 maxCatalogEntries = 16U + slotCount * 8U;
+    const u32 maxDepsPerAsset =
+        (std::max)(16U, slotCount * 2U + 8U); // mesh+mat pairs + headroom for material tex deps
+    const u32 maxDepsTotal = (std::max)(maxCatalogEntries, maxDepsPerAsset * 4U);
     Tina::Asset::CatalogPackageOpenConfig openConfig{
         .manifest =
             Tina::Asset::CatalogFileLoadConfig{
                 .catalog =
                     Tina::Asset::CatalogConfig{
                         .maxEntries = maxCatalogEntries,
-                        .maxDependencies = maxCatalogEntries,
-                        .maxDependenciesPerAsset = 4,
+                        .maxDependencies = maxDepsTotal,
+                        .maxDependenciesPerAsset = maxDepsPerAsset,
                         .memoryResource = &resources.memory,
                     },
             },
@@ -894,7 +915,10 @@ class Product3DState final : public Tina::IGameState {
             counters_->materialTextureBound = (counters_->texturesUploaded >= resources_->meshSlotCount);
         }
 
-        auto worldResult = Tina::Scene::World::Create(Tina::Scene::WorldConfig{32});
+        // Prefab may expand multi-prim parents + draw children; scale with cooked mesh slots.
+        const Tina::Core::usize worldCapacity =
+            static_cast<Tina::Core::usize>((std::max)(32U, resources_->meshSlotCount * 4U + 16U));
+        auto worldResult = Tina::Scene::World::Create(Tina::Scene::WorldConfig{worldCapacity});
         if (!worldResult)
         {
             return Tina::Core::failure(std::move(worldResult.error()));
@@ -1223,8 +1247,9 @@ class Product3DApplication final : public Tina::IGameApplication {
     config.primaryWindow.title = "Tina vNext - glTF Prefab Product 3D";
     config.primaryWindow.initialLogicalExtent = {1280, 720};
     config.primaryWindow.initiallyVisible = true;
-    config.renderSceneCapacities.mesh3DItemCapacity = 16;
-    config.renderSceneCapacities.mesh3DBatchCapacity = 8;
+    // MetalRoughSpheres-scale external models: one item/batch per mesh instance.
+    config.renderSceneCapacities.mesh3DItemCapacity = MaxProductMeshSlots;
+    config.renderSceneCapacities.mesh3DBatchCapacity = MaxProductMeshSlots;
     return config;
 }
 

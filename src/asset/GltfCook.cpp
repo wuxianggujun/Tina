@@ -52,6 +52,23 @@ namespace {
     return *Core::AssetId::fromBytes(bytes);
 }
 
+// Texture channels force Material dep AssetIds into baseColor < MR < normal order
+// (CatalogCook requires strictly increasing deps; flag order must stay base/MR/normal).
+enum class GltfTextureChannel : Core::u8 {
+    BaseColor = 0,
+    MetallicRoughness = 1,
+    Normal = 2,
+};
+
+[[nodiscard]] Core::AssetId deriveTextureChannelId(std::string_view seed, GltfTextureChannel channel,
+                                                   Core::u32 sequence)
+{
+    // bytes[12]=channel, bytes[13..15]=sequence under shared path hash (tag 0x74).
+    const Core::u32 packed =
+        (static_cast<Core::u32>(channel) << 24) | (sequence & 0x00FFFFFFU);
+    return deriveIndexedId(seed, 0x74, packed);
+}
+
 [[nodiscard]] Core::Status mapCgltfResult(cgltf_result result) noexcept
 {
     switch (result)
@@ -512,19 +529,42 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
     std::vector<TextureEntry> textures;
     // pointer equality for cgltf_mesh* → contiguous MeshEntry range
     std::unordered_map<const cgltf_mesh*, MeshPrimRange> meshRangeByPtr;
-    std::unordered_map<const cgltf_image*, Core::AssetId> imageToTextureId;
     const std::filesystem::path gltfFilePath{path};
-    Core::u32 nextTextureIndex = 0;
+    // Per-channel sequence so first baseColor is always < first MR < first normal (CatalogCook).
+    Core::u32 nextTextureSeqBase = 0;
+    Core::u32 nextTextureSeqMr = 0;
+    Core::u32 nextTextureSeqNormal = 0;
     // Sequential slot across all prims: mesh at 2*slot, material at 2*slot+1 (AssetId-sorted deps).
     Core::u32 nextPrimSlot = 0;
 
-    auto ensureTextureId = [&](const cgltf_image* image) -> Core::Result<Core::AssetId> {
+    // Key: image pointer + channel (same image reused as base and MR gets two ids if needed... 
+    // actually same image for different channels is rare; still key by image only and first channel wins?
+    // Prefer key (image, channel) so shared image across materials reuses id per channel role.
+    struct ImageChannelKey final {
+        const cgltf_image* image = nullptr;
+        GltfTextureChannel channel = GltfTextureChannel::BaseColor;
+        bool operator==(const ImageChannelKey& o) const noexcept
+        {
+            return image == o.image && channel == o.channel;
+        }
+    };
+    struct ImageChannelKeyHash final {
+        std::size_t operator()(const ImageChannelKey& k) const noexcept
+        {
+            return std::hash<const void*>{}(k.image) ^ (static_cast<std::size_t>(k.channel) << 1);
+        }
+    };
+    std::unordered_map<ImageChannelKey, Core::AssetId, ImageChannelKeyHash> imageChannelToTextureId;
+
+    auto ensureTextureId = [&](const cgltf_image* image,
+                               GltfTextureChannel channel) -> Core::Result<Core::AssetId> {
         if (image == nullptr)
         {
             return Core::AssetId{};
         }
-        const auto existing = imageToTextureId.find(image);
-        if (existing != imageToTextureId.end())
+        const ImageChannelKey key{.image = image, .channel = channel};
+        const auto existing = imageChannelToTextureId.find(key);
+        if (existing != imageChannelToTextureId.end())
         {
             return existing->second;
         }
@@ -534,7 +574,20 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
         {
             return Core::failure(std::move(dims.error()));
         }
-        const Core::AssetId textureId = deriveIndexedId(gltfUtf8Path, 0x74, nextTextureIndex++);
+        Core::u32 sequence = 0;
+        switch (channel)
+        {
+        case GltfTextureChannel::BaseColor:
+            sequence = nextTextureSeqBase++;
+            break;
+        case GltfTextureChannel::MetallicRoughness:
+            sequence = nextTextureSeqMr++;
+            break;
+        case GltfTextureChannel::Normal:
+            sequence = nextTextureSeqNormal++;
+            break;
+        }
+        const Core::AssetId textureId = deriveTextureChannelId(gltfUtf8Path, channel, sequence);
         auto texPayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
             .width = static_cast<Core::u16>(dims->first),
             .height = static_cast<Core::u16>(dims->second),
@@ -545,7 +598,7 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
         {
             return Core::failure(std::move(texPayload.error()));
         }
-        imageToTextureId.emplace(image, textureId);
+        imageChannelToTextureId.emplace(key, textureId);
         textures.push_back(TextureEntry{
             .textureId = textureId,
             .payload = std::move(*texPayload),
@@ -597,8 +650,9 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             }
             else
             {
-                meshId = deriveIndexedId(gltfUtf8Path, 0x71, nextPrimSlot * 2U);
-                materialId = deriveIndexedId(gltfUtf8Path, 0x71, nextPrimSlot * 2U + 1U);
+                // Distinct tags so mesh/material never collide under dense sequential indexes.
+                meshId = deriveIndexedId(gltfUtf8Path, 0x71, nextPrimSlot);
+                materialId = deriveIndexedId(gltfUtf8Path, 0x72, nextPrimSlot);
             }
             ++nextPrimSlot;
 
@@ -614,19 +668,22 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
                 .indices = pieces->indices,
             };
             const cgltf_material* material = prim.material;
-            auto baseColorTextureId = ensureTextureId(baseColorImage(material));
+            auto baseColorTextureId =
+                ensureTextureId(baseColorImage(material), GltfTextureChannel::BaseColor);
             if (!baseColorTextureId)
             {
                 cgltf_free(data);
                 return Core::failure(std::move(baseColorTextureId.error()));
             }
-            auto metallicRoughnessTextureId = ensureTextureId(metallicRoughnessImage(material));
+            auto metallicRoughnessTextureId =
+                ensureTextureId(metallicRoughnessImage(material), GltfTextureChannel::MetallicRoughness);
             if (!metallicRoughnessTextureId)
             {
                 cgltf_free(data);
                 return Core::failure(std::move(metallicRoughnessTextureId.error()));
             }
-            auto normalTextureId = ensureTextureId(normalImage(material));
+            auto normalTextureId =
+                ensureTextureId(normalImage(material), GltfTextureChannel::Normal);
             if (!normalTextureId)
             {
                 cgltf_free(data);
@@ -814,6 +871,7 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             .payload = std::move(entry.materialPayload),
         };
         // Flag order: baseColor, metallicRoughness, normal (matches MaterialPayload flags).
+        // Channel-tagged texture ids guarantee base < MR < normal when all three present.
         const std::array textureDeps{entry.baseColorTextureId, entry.metallicRoughnessTextureId,
                                      entry.normalTextureId};
         for (const Core::AssetId textureId : textureDeps)
@@ -851,6 +909,18 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             });
         }
     }
+    // Prefab node-order deps may not be AssetId-sorted when many meshes; CatalogCook requires
+    // strictly increasing dependency streams — sort + unique here (kinds stay mesh/material pairs
+    // only as ids; validation cares about id order, not pair adjacency).
+    std::sort(prefabSpec.dependencies.begin(), prefabSpec.dependencies.end(),
+              [](const AssetFormat::CookedAssetWriteDependency& a,
+                 const AssetFormat::CookedAssetWriteDependency& b) { return a.assetId < b.assetId; });
+    prefabSpec.dependencies.erase(std::unique(prefabSpec.dependencies.begin(), prefabSpec.dependencies.end(),
+                                              [](const AssetFormat::CookedAssetWriteDependency& a,
+                                                 const AssetFormat::CookedAssetWriteDependency& b) {
+                                                  return a.assetId == b.assetId;
+                                              }),
+                                  prefabSpec.dependencies.end());
     request.assets.push_back(std::move(prefabSpec));
     return request;
 }

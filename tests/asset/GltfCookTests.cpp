@@ -736,5 +736,51 @@ TEST(GltfCookTests, CooksRepoCompletePbrFixture)
 }
 #endif
 
+TEST(GltfCookTests, CooksKhronosMetalRoughSpheresNoTexturesWhenPresent)
+{
+    // Optional large multi-mesh MR grid from Khronos Sample Models (vendored under tests/fixtures).
+#if !defined(TINA_COMPLETE_PBR_GLTF_FIXTURE)
+    GTEST_SKIP() << "TINA_COMPLETE_PBR_GLTF_FIXTURE not defined; cannot locate fixtures tree";
+#else
+    const auto path = std::filesystem::path{TINA_COMPLETE_PBR_GLTF_FIXTURE}.parent_path().parent_path() /
+                      "metal_rough_spheres" / "MetalRoughSpheresNoTextures.glb";
+    if (!std::filesystem::exists(path))
+    {
+        GTEST_SKIP() << "MetalRoughSpheresNoTextures.glb not vendored";
+    }
+
+    auto request = cookGltfFileToCatalogRequest(path.string());
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+
+    std::size_t meshCount = 0;
+    std::size_t materialCount = 0;
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind == AssetFormat::AssetKind::StaticMesh)
+        {
+            ++meshCount;
+        }
+        else if (asset.assetKind == AssetFormat::AssetKind::Material)
+        {
+            ++materialCount;
+            auto mat = AssetFormat::parseMaterialPayload(asset.payload);
+            ASSERT_TRUE(mat.has_value());
+            EXPECT_GE(mat->metallicFactor, 0.0F);
+            EXPECT_LE(mat->metallicFactor, 1.0F);
+            EXPECT_GE(mat->roughnessFactor, 0.0F);
+            EXPECT_LE(mat->roughnessFactor, 1.0F);
+        }
+    }
+    EXPECT_GT(meshCount, 8U);
+    EXPECT_EQ(meshCount, materialCount);
+
+    const auto catalogRoot =
+        std::filesystem::temp_directory_path() / "tina_gltf_metal_rough_spheres_catalog";
+    std::error_code ec;
+    std::filesystem::remove_all(catalogRoot, ec);
+    ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
+#endif
+}
+
 } // namespace
 } // namespace Tina::Asset

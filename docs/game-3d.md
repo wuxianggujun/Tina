@@ -35,13 +35,19 @@ tina_sample_3d [--frames=N] [--frame-delay-ms=N] [--gltf=<path>|--gltf <path>] [
 `status=error`、`code`、`message`、可选 `context[]`。成功 stdout JSON 含 `gltfCooked`、
 `externalGltf`、`meshSlotCount`、`multiMesh` 等。
 
-外部路径 smoke 为 opt-in：仓库不强制附带用户模型；有模型时例如：
+仓库附带的外部样本（Khronos Sample Models，CC 许可见各目录 README）：
 
 ```powershell
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0 --gltf=path\to\model.glb
+# PBR 球体网格（~123 mesh，无贴图，测 metallic/roughness factors）
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0 `
+  --gltf=tests\fixtures\gltf\metal_rough_spheres\MetalRoughSpheresNoTextures.glb
+
+# 单盒简单模型
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0 `
+  --gltf=tests\fixtures\gltf\box\Box.glb
 ```
 
-默认 fixture 门禁：
+默认产品门禁（complete_pbr）：
 
 ```powershell
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
