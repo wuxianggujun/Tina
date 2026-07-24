@@ -14,7 +14,7 @@
 | G1 | 2D 产品 | Strong | base bgfx 与 product-2d 300 帧 + 同轮完整模块测试已固化（TEST-002 / RunProduct2dGate.ps1） |
 | G2 | UI 产品 | Partial | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有产品/结构化/视觉证据；平台 accessibility adapter、跨 DPI/GPU golden 与完整控件矩阵后置 |
 | G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）与 texture bind API 已通过；Opaque3D 贴图采样 / PBR / fence pin 后置 |
-| G4 | Asset/Cooker | Strong | multi-mesh、distinct AssetId/Prefab dependency、baseColorTexture PNG/JPEG cook 与 Material dependency 已完成；PBR/multi-primitive 后置 |
+| G4 | Asset/Cooker | Strong | multi-mesh、multi-primitive SPLIT、distinct AssetId/Prefab dependency、baseColorTexture PNG/JPEG cook 与 Material dependency 已完成；PBR 后置 |
 | G5 | Audio | Evidence | backend-neutral tests、miniaudio null-device 与 product-2d JSON 已有 Windows 证据 |
 | G6 | 平台矩阵 | Strong | tip Docker：GCC13 Null + Platform/GLFW(Xvfb) + Clang22 Null + Clang22 sanitizer 均 exit 0（见 [Linux 证据](m12-evidence-linux.md)） |
 | G7 | Legacy smoke | N/A | 产品已删除，不再运行 Legacy smoke |
@@ -54,7 +54,7 @@ accessibility adapter、跨 DPI/GPU golden 和完整控件/输入矩阵保持 Pa
 | 最小 glTF/GLB parse + Prefab | Done | `tina_sample_3d` 单 mesh 产品路径 |
 | 多 glTF mesh cook | Done | 每个 mesh 生成 distinct StaticMesh/Material AssetId，Prefab 依赖可解析 |
 | baseColorTexture cook | Done | 相对文件或 bufferView 的 PNG/JPEG 解码为 RGBA8 Texture2D，Material 发布 required dependency，相同 image 去重 |
-| multi-primitive mesh merge | Deferred | 当前明确拒绝单 mesh 多 primitive |
+| multi-primitive mesh (SPLIT) | Done | 每 TRIANGLES prim → StaticMesh+Material；Prefab 展开父+子节点；非三角 prim 结构化失败 |
 | multi-mesh product bind/draw | Open | sample 当前仍映射单个 product mesh key；见 3D-001 |
 | PBR/其他纹理通道 | Deferred | metallic-roughness/normal/emissive 与 Material/Render 产品门禁仍后置 |
 

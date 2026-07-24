@@ -469,6 +469,11 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
         std::vector<std::byte> meshPayload{};
         std::vector<std::byte> materialPayload{};
     };
+    // One glTF mesh may expand to N StaticMesh/Material pairs (one per TRIANGLES prim).
+    struct MeshPrimRange final {
+        std::size_t firstEntry = 0;
+        std::size_t entryCount = 0;
+    };
     struct TextureEntry final {
         Core::AssetId textureId{};
         std::vector<std::byte> payload{};
@@ -476,11 +481,13 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
     std::vector<MeshEntry> meshes;
     meshes.reserve(data->meshes_count);
     std::vector<TextureEntry> textures;
-    // pointer equality for cgltf_mesh* → entry index
-    std::unordered_map<const cgltf_mesh*, std::size_t> meshIndexByPtr;
+    // pointer equality for cgltf_mesh* → contiguous MeshEntry range
+    std::unordered_map<const cgltf_mesh*, MeshPrimRange> meshRangeByPtr;
     std::unordered_map<const cgltf_image*, Core::AssetId> imageToTextureId;
     const std::filesystem::path gltfFilePath{path};
     Core::u32 nextTextureIndex = 0;
+    // Sequential slot across all prims: mesh at 2*slot, material at 2*slot+1 (AssetId-sorted deps).
+    Core::u32 nextPrimSlot = 0;
 
     for (cgltf_size meshIndex = 0; meshIndex < data->meshes_count; ++meshIndex)
     {
@@ -490,123 +497,130 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             cgltf_free(data);
             return Core::failure(AssetErrorCode::InvalidCatalogConfig, "glTF mesh has no primitives");
         }
-        if (mesh.primitives_count > 1)
+        if (mesh.primitives_count > AssetFormat::StaticMeshWire::MaxSubmeshes)
         {
             cgltf_free(data);
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                 "multi-primitive meshes are not supported (use one TRIANGLES prim per mesh)");
-        }
-        auto pieces = extractTriangleMesh(mesh.primitives[0]);
-        if (!pieces)
-        {
-            cgltf_free(data);
-            return Core::failure(std::move(pieces.error()));
+                                 "glTF mesh primitive count exceeds product limit");
         }
 
-        // Interleaved path-derived ids: mesh i at 2*i, material i at 2*i+1 (same tag) so
-        // Prefab (StaticMesh, Material)×N deps are strictly AssetId-sorted.
-        // Optional fixed ids.meshId/materialId only apply to mesh index 0; when both are
-        // provided they must already satisfy meshId < materialId.
-        Core::AssetId meshId{};
-        Core::AssetId materialId{};
-        if (meshIndex == 0 && static_cast<bool>(ids.meshId) && static_cast<bool>(ids.materialId))
+        const std::size_t rangeFirst = meshes.size();
+        for (cgltf_size primIndex = 0; primIndex < mesh.primitives_count; ++primIndex)
         {
-            if (!(ids.meshId < ids.materialId))
+            const cgltf_primitive& prim = mesh.primitives[primIndex];
+            auto pieces = extractTriangleMesh(prim);
+            if (!pieces)
             {
                 cgltf_free(data);
-                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                     "fixed mesh AssetId must be strictly less than material AssetId");
+                return Core::failure(std::move(pieces.error()));
             }
-            meshId = ids.meshId;
-            materialId = ids.materialId;
-        }
-        else
-        {
-            meshId = deriveIndexedId(gltfUtf8Path, 0x71, static_cast<Core::u32>(meshIndex) * 2U);
-            materialId = deriveIndexedId(gltfUtf8Path, 0x71, static_cast<Core::u32>(meshIndex) * 2U + 1U);
-        }
 
-        AssetFormat::StaticMeshPayloadDesc meshDesc{
-            .vertexLayout = AssetFormat::StaticMeshVertexLayout::P3N3UV2,
-            .indexType = AssetFormat::StaticMeshIndexType::U16,
-            .boundsCenterX = pieces->boundsCenterX,
-            .boundsCenterY = pieces->boundsCenterY,
-            .boundsCenterZ = pieces->boundsCenterZ,
-            .boundsRadius = pieces->boundsRadius,
-            .submeshes = std::span<const AssetFormat::StaticMeshSubmeshDesc>(&pieces->submesh, 1),
-            .vertices = pieces->vertices,
-            .indices = pieces->indices,
-        };
-        Core::AssetId baseColorTextureId{};
-        if (const cgltf_image* image = baseColorImage(mesh.primitives[0].material); image != nullptr)
-        {
-            const auto existing = imageToTextureId.find(image);
-            if (existing != imageToTextureId.end())
+            // Optional fixed ids.meshId/materialId only apply to mesh 0 / prim 0; when both are
+            // provided they must already satisfy meshId < materialId.
+            Core::AssetId meshId{};
+            Core::AssetId materialId{};
+            if (meshIndex == 0 && primIndex == 0 && static_cast<bool>(ids.meshId) &&
+                static_cast<bool>(ids.materialId))
             {
-                baseColorTextureId = existing->second;
+                if (!(ids.meshId < ids.materialId))
+                {
+                    cgltf_free(data);
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "fixed mesh AssetId must be strictly less than material AssetId");
+                }
+                meshId = ids.meshId;
+                materialId = ids.materialId;
             }
             else
             {
-                std::vector<std::byte> rgba;
-                auto dims = decodeImageRgba8(data, image, gltfFilePath, rgba);
-                if (!dims)
-                {
-                    cgltf_free(data);
-                    return Core::failure(std::move(dims.error()));
-                }
-                baseColorTextureId =
-                    deriveIndexedId(gltfUtf8Path, 0x74, nextTextureIndex++);
-                auto texPayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
-                    .width = static_cast<Core::u16>(dims->first),
-                    .height = static_cast<Core::u16>(dims->second),
-                    .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
-                    .pixels = rgba,
-                });
-                if (!texPayload)
-                {
-                    cgltf_free(data);
-                    return Core::failure(std::move(texPayload.error()));
-                }
-                imageToTextureId.emplace(image, baseColorTextureId);
-                textures.push_back(TextureEntry{
-                    .textureId = baseColorTextureId,
-                    .payload = std::move(*texPayload),
-                });
+                meshId = deriveIndexedId(gltfUtf8Path, 0x71, nextPrimSlot * 2U);
+                materialId = deriveIndexedId(gltfUtf8Path, 0x71, nextPrimSlot * 2U + 1U);
             }
+            ++nextPrimSlot;
+
+            AssetFormat::StaticMeshPayloadDesc meshDesc{
+                .vertexLayout = AssetFormat::StaticMeshVertexLayout::P3N3UV2,
+                .indexType = AssetFormat::StaticMeshIndexType::U16,
+                .boundsCenterX = pieces->boundsCenterX,
+                .boundsCenterY = pieces->boundsCenterY,
+                .boundsCenterZ = pieces->boundsCenterZ,
+                .boundsRadius = pieces->boundsRadius,
+                .submeshes = std::span<const AssetFormat::StaticMeshSubmeshDesc>(&pieces->submesh, 1),
+                .vertices = pieces->vertices,
+                .indices = pieces->indices,
+            };
+            Core::AssetId baseColorTextureId{};
+            if (const cgltf_image* image = baseColorImage(prim.material); image != nullptr)
+            {
+                const auto existing = imageToTextureId.find(image);
+                if (existing != imageToTextureId.end())
+                {
+                    baseColorTextureId = existing->second;
+                }
+                else
+                {
+                    std::vector<std::byte> rgba;
+                    auto dims = decodeImageRgba8(data, image, gltfFilePath, rgba);
+                    if (!dims)
+                    {
+                        cgltf_free(data);
+                        return Core::failure(std::move(dims.error()));
+                    }
+                    baseColorTextureId = deriveIndexedId(gltfUtf8Path, 0x74, nextTextureIndex++);
+                    auto texPayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
+                        .width = static_cast<Core::u16>(dims->first),
+                        .height = static_cast<Core::u16>(dims->second),
+                        .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
+                        .pixels = rgba,
+                    });
+                    if (!texPayload)
+                    {
+                        cgltf_free(data);
+                        return Core::failure(std::move(texPayload.error()));
+                    }
+                    imageToTextureId.emplace(image, baseColorTextureId);
+                    textures.push_back(TextureEntry{
+                        .textureId = baseColorTextureId,
+                        .payload = std::move(*texPayload),
+                    });
+                }
+            }
+
+            AssetFormat::MaterialPayloadDesc materialDesc{
+                .model = AssetFormat::MaterialModel::UnlitBaseColor,
+                .baseColorR = pieces->baseR,
+                .baseColorG = pieces->baseG,
+                .baseColorB = pieces->baseB,
+                .baseColorA = pieces->baseA,
+                .doubleSided = pieces->doubleSided,
+                .alphaMode = AssetFormat::MaterialAlphaMode::Opaque,
+                .baseColorTextureId = baseColorTextureId,
+            };
+
+            auto meshPayload = AssetFormat::writeStaticMeshPayloadBytes(meshDesc);
+            if (!meshPayload)
+            {
+                cgltf_free(data);
+                return Core::failure(std::move(meshPayload.error()));
+            }
+            auto materialPayload = AssetFormat::writeMaterialPayloadBytes(materialDesc);
+            if (!materialPayload)
+            {
+                cgltf_free(data);
+                return Core::failure(std::move(materialPayload.error()));
+            }
+
+            meshes.push_back(MeshEntry{
+                .meshId = meshId,
+                .materialId = materialId,
+                .baseColorTextureId = baseColorTextureId,
+                .meshPayload = std::move(*meshPayload),
+                .materialPayload = std::move(*materialPayload),
+            });
         }
 
-        AssetFormat::MaterialPayloadDesc materialDesc{
-            .model = AssetFormat::MaterialModel::UnlitBaseColor,
-            .baseColorR = pieces->baseR,
-            .baseColorG = pieces->baseG,
-            .baseColorB = pieces->baseB,
-            .baseColorA = pieces->baseA,
-            .doubleSided = pieces->doubleSided,
-            .alphaMode = AssetFormat::MaterialAlphaMode::Opaque,
-            .baseColorTextureId = baseColorTextureId,
-        };
-
-        auto meshPayload = AssetFormat::writeStaticMeshPayloadBytes(meshDesc);
-        if (!meshPayload)
-        {
-            cgltf_free(data);
-            return Core::failure(std::move(meshPayload.error()));
-        }
-        auto materialPayload = AssetFormat::writeMaterialPayloadBytes(materialDesc);
-        if (!materialPayload)
-        {
-            cgltf_free(data);
-            return Core::failure(std::move(materialPayload.error()));
-        }
-
-        meshIndexByPtr.emplace(&mesh, meshes.size());
-        meshes.push_back(MeshEntry{
-            .meshId = meshId,
-            .materialId = materialId,
-            .baseColorTextureId = baseColorTextureId,
-            .meshPayload = std::move(*meshPayload),
-            .materialPayload = std::move(*materialPayload),
-        });
+        meshRangeByPtr.emplace(&mesh,
+                               MeshPrimRange{.firstEntry = rangeFirst, .entryCount = meshes.size() - rangeFirst});
     }
 
     std::vector<AssetFormat::PrefabNodeDesc> prefabNodes;
@@ -638,17 +652,48 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             desc.scaleY = node->scale[1];
             desc.scaleZ = node->scale[2];
         }
+
+        MeshPrimRange range{};
+        bool hasMeshRange = false;
         if (node->mesh != nullptr)
         {
-            const auto found = meshIndexByPtr.find(node->mesh);
-            if (found != meshIndexByPtr.end())
+            const auto found = meshRangeByPtr.find(node->mesh);
+            if (found != meshRangeByPtr.end())
             {
-                const MeshEntry& entry = meshes[found->second];
-                desc.meshId = entry.meshId;
-                desc.materialId = entry.materialId;
+                range = found->second;
+                hasMeshRange = range.entryCount > 0;
             }
         }
-        prefabNodes.push_back(desc);
+
+        if (hasMeshRange && range.entryCount == 1U)
+        {
+            // Single-prim path: mesh/material stay on the transform node (unchanged).
+            const MeshEntry& entry = meshes[range.firstEntry];
+            desc.meshId = entry.meshId;
+            desc.materialId = entry.materialId;
+            prefabNodes.push_back(desc);
+        }
+        else if (hasMeshRange && range.entryCount > 1U)
+        {
+            // Multi-prim SPLIT: transform parent (no draw) + identity children (one draw each).
+            // Preserves per-prim materials and Prefab's 1 mesh / 1 material per node contract.
+            prefabNodes.push_back(desc);
+            for (std::size_t i = 0; i < range.entryCount; ++i)
+            {
+                const MeshEntry& entry = meshes[range.firstEntry + i];
+                prefabNodes.push_back(AssetFormat::PrefabNodeDesc{
+                    .stableNodeId = static_cast<Core::u32>(prefabNodes.size() + 1U),
+                    .parentIndex = selfIndex,
+                    .meshId = entry.meshId,
+                    .materialId = entry.materialId,
+                });
+            }
+        }
+        else
+        {
+            prefabNodes.push_back(desc);
+        }
+
         for (cgltf_size c = 0; c < node->children_count; ++c)
         {
             self(self, node->children[c], selfIndex);

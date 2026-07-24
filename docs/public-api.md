@@ -206,9 +206,9 @@ Cooker/tool。
 `AssetLease` 强保活 CPU payload。逻辑 invalidation 不等于物理释放。产品 helper 可把 Cooked Texture2D/
 StaticMesh 上传到 RenderDevice，并建立 backend key binding。
 
-multi-mesh glTF Cooker 当前为每个 mesh 生成 distinct StaticMesh/Material AssetId，并让 Prefab node 引用；
-baseColorTexture 可 cook 为 Texture2D required dependency。单 mesh 多 primitive、纹理产品绑定/安全策略与
-PBR 其他通道尚未完成。
+multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct StaticMesh/Material AssetId；
+单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。baseColorTexture 可
+cook 为 Texture2D required dependency。纹理产品绑定/安全策略与 PBR 其他通道尚未完成。
 
 ## Audio 与 Physics
 
