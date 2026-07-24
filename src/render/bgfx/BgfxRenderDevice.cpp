@@ -1185,13 +1185,13 @@ class BgfxRenderDevice final : public IRenderDevice {
                 std::snprintf(path, sizeof(path), "%s\\tina_bgfx_ledger_imbalance.txt", temp);
                 if (std::FILE* file = std::fopen(path, "wb"))
                 {
-                    std::fprintf(file, "BgfxRenderDevice liveResources imbalance at shutdown: %u\n",
-                                 statistics_.liveResources);
+                    std::fprintf(file, "BgfxRenderDevice liveResources imbalance at shutdown: %llu\n",
+                                 static_cast<unsigned long long>(statistics_.liveResources));
                     std::fflush(file);
                     std::fclose(file);
                 }
-                std::fprintf(stderr, "BgfxRenderDevice liveResources imbalance at shutdown: %u\n",
-                             statistics_.liveResources);
+                std::fprintf(stderr, "BgfxRenderDevice liveResources imbalance at shutdown: %llu\n",
+                             static_cast<unsigned long long>(statistics_.liveResources));
                 std::fflush(stderr);
                 std::_Exit(3);
             }

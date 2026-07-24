@@ -61,10 +61,11 @@ TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)
     ASSERT_TRUE((*device)->setMesh3DMaterialNormalTextureBinding(7U, *baseColor).has_value());
     ASSERT_FALSE((*device)->setMesh3DMaterialNormalTextureBinding(0U, *baseColor).has_value());
     ASSERT_FALSE((*device)->setMesh3DMaterialMetallicRoughnessTextureBinding(0U, *metallicRoughness).has_value());
+    // Destroy while still bound: stale normal/MR/baseColor bindings must be scrubbed.
+    ASSERT_TRUE((*device)->destroyTexture2D(*baseColor).has_value());
     ASSERT_TRUE((*device)->setMesh3DMaterialNormalTextureBinding(7U, {}).has_value());
     ASSERT_TRUE((*device)->setMesh3DMaterialMetallicRoughnessTextureBinding(7U, {}).has_value());
     ASSERT_TRUE((*device)->setMesh3DMaterialTextureBinding(7U, {}).has_value());
-    ASSERT_TRUE((*device)->destroyTexture2D(*baseColor).has_value());
     ASSERT_TRUE((*device)->destroyTexture2D(*metallicRoughness).has_value());
     EXPECT_EQ((*device)->statistics().liveResources, 0U);
 }

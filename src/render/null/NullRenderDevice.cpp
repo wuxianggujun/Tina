@@ -143,6 +143,17 @@ class NullRenderDevice final : public IRenderDevice {
                 ++it;
             }
         }
+        for (auto it = materialNormalTextureBindings_.begin(); it != materialNormalTextureBindings_.end();)
+        {
+            if (it->second == texture)
+            {
+                it = materialNormalTextureBindings_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
         return Core::success();
     }
 

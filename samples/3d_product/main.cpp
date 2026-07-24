@@ -169,8 +169,18 @@ struct Product3DResources final {
     {"primitives": [{"attributes": {"POSITION": 1}, "indices": 3, "mode": 4, "material": 1}]}
   ],
   "materials": [
-    {"pbrMetallicRoughness": {"baseColorFactor": [1.0, 1.0, 1.0, 1.0], "baseColorTexture": {"index": 0}}},
-    {"pbrMetallicRoughness": {"baseColorFactor": [1.0, 1.0, 1.0, 1.0], "baseColorTexture": {"index": 0}}}
+    {"pbrMetallicRoughness": {
+      "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+      "metallicFactor": 0.15,
+      "roughnessFactor": 0.65,
+      "baseColorTexture": {"index": 0}
+    }},
+    {"pbrMetallicRoughness": {
+      "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+      "metallicFactor": 0.85,
+      "roughnessFactor": 0.25,
+      "baseColorTexture": {"index": 0}
+    }}
   ],
   "textures": [{"source": 0}],
   "images": [{"uri": "tex.png"}],
