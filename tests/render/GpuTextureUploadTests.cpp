@@ -33,6 +33,36 @@ TEST(NullRenderDeviceTextureTest, CreateBindDestroyLifecycle)
     EXPECT_EQ(stale.error().code, Render::RenderErrorCode::TextureNotFound);
 }
 
+TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+
+    std::array<std::byte, 4> pixel{std::byte{10}, std::byte{20}, std::byte{30}, std::byte{255}};
+    auto baseColor = (*device)->createTexture2DRgba8(Render::Texture2DUploadDesc{
+        .width = 1,
+        .height = 1,
+        .rgba8Pixels = pixel,
+    });
+    ASSERT_TRUE(baseColor.has_value()) << baseColor.error().message;
+    auto metallicRoughness = (*device)->createTexture2DRgba8(Render::Texture2DUploadDesc{
+        .width = 1,
+        .height = 1,
+        .rgba8Pixels = pixel,
+    });
+    ASSERT_TRUE(metallicRoughness.has_value()) << metallicRoughness.error().message;
+
+    ASSERT_TRUE((*device)->setMesh3DMaterialTextureBinding(7U, *baseColor).has_value());
+    ASSERT_TRUE(
+        (*device)->setMesh3DMaterialMetallicRoughnessTextureBinding(7U, *metallicRoughness).has_value());
+    ASSERT_FALSE((*device)->setMesh3DMaterialMetallicRoughnessTextureBinding(0U, *metallicRoughness).has_value());
+    ASSERT_TRUE((*device)->setMesh3DMaterialMetallicRoughnessTextureBinding(7U, {}).has_value());
+    ASSERT_TRUE((*device)->setMesh3DMaterialTextureBinding(7U, {}).has_value());
+    ASSERT_TRUE((*device)->destroyTexture2D(*baseColor).has_value());
+    ASSERT_TRUE((*device)->destroyTexture2D(*metallicRoughness).has_value());
+    EXPECT_EQ((*device)->statistics().liveResources, 0U);
+}
+
 TEST(NullRenderDeviceTextureTest, RejectsBadUploadSize)
 {
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});

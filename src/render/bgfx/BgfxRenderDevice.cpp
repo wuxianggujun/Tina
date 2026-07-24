@@ -721,7 +721,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
-        auto opaque3DProgram = ShaderDetail::createOpaque3DUnlitProgram();
+        // RENDER-001: product Opaque3D uses experimental metallic-roughness hybrid.
+        auto opaque3DProgram = ShaderDetail::createOpaque3DMrProgram();
         if (!opaque3DProgram)
         {
             return Core::failure(std::move(opaque3DProgram.error()));
@@ -737,7 +738,39 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
-        // Default 1x1 white so unlit baseColorFactor remains visible without a material bind.
+        opaque3DMrSampler_ = bgfx::createUniform("s_texMR", bgfx::UniformType::Sampler);
+        if (!bgfx::isValid(opaque3DMrSampler_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D metallic-roughness sampler uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DLightDirUniform_ = bgfx::createUniform("u_lightDir", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(opaque3DLightDirUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D light direction uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DLightColorUniform_ = bgfx::createUniform("u_lightColor", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(opaque3DLightColorUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D light color uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DMrParamsUniform_ = bgfx::createUniform("u_mrParams", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(opaque3DMrParamsUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D metallic-roughness params uniform");
+        }
+        ++statistics_.liveResources;
+
+        // Default 1x1 white so baseColorFactor remains visible without a material bind.
         constexpr std::array<u8, 4> OpaqueWhitePixel{255, 255, 255, 255};
         const bgfx::Memory* opaqueWhiteMemory =
             bgfx::copy(OpaqueWhitePixel.data(), static_cast<u32>(OpaqueWhitePixel.size()));
@@ -747,6 +780,19 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
                                  "bgfx rejected the Opaque3D default white texture");
+        }
+        ++statistics_.liveResources;
+
+        // Default MR map: R=0, G=1 (roughness), B=0 (metallic), A=1 — dielectric matte.
+        constexpr std::array<u8, 4> OpaqueDefaultMrPixel{0, 255, 0, 255};
+        const bgfx::Memory* opaqueMrMemory =
+            bgfx::copy(OpaqueDefaultMrPixel.data(), static_cast<u32>(OpaqueDefaultMrPixel.size()));
+        opaque3DDefaultMrTexture_ = bgfx::createTexture2D(
+            1, 1, false, 1, bgfx::TextureFormat::RGBA8, BGFX_TEXTURE_NONE | BGFX_SAMPLER_NONE, opaqueMrMemory);
+        if (!bgfx::isValid(opaque3DDefaultMrTexture_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D default metallic-roughness texture");
         }
         ++statistics_.liveResources;
 
@@ -927,6 +973,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             mesh3DBindings_.clear();
             mesh3DMaterialTextureBindings_.clear();
+            mesh3DMaterialMetallicRoughnessTextureBindings_.clear();
             for (MeshSlot& slot : meshes_)
             {
                 if (slot.live)
@@ -972,13 +1019,44 @@ class BgfxRenderDevice final : public IRenderDevice {
                 opaque3DSampler_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
+            if (bgfx::isValid(opaque3DMrSampler_))
+            {
+                bgfx::destroy(opaque3DMrSampler_);
+                opaque3DMrSampler_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DLightDirUniform_))
+            {
+                bgfx::destroy(opaque3DLightDirUniform_);
+                opaque3DLightDirUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DLightColorUniform_))
+            {
+                bgfx::destroy(opaque3DLightColorUniform_);
+                opaque3DLightColorUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DMrParamsUniform_))
+            {
+                bgfx::destroy(opaque3DMrParamsUniform_);
+                opaque3DMrParamsUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             if (bgfx::isValid(opaque3DDefaultTexture_))
             {
                 bgfx::destroy(opaque3DDefaultTexture_);
                 opaque3DDefaultTexture_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
+            if (bgfx::isValid(opaque3DDefaultMrTexture_))
+            {
+                bgfx::destroy(opaque3DDefaultMrTexture_);
+                opaque3DDefaultMrTexture_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             mesh3DMaterialTextureBindings_.clear();
+            mesh3DMaterialMetallicRoughnessTextureBindings_.clear();
             if (bgfx::isValid(sprite2DProgram_))
             {
                 bgfx::destroy(sprite2DProgram_);
@@ -1037,7 +1115,10 @@ class BgfxRenderDevice final : public IRenderDevice {
             // Device-owned init resources (must match ++ in initialize):
             // uiSolidQuadProgram, uiSolidWhiteTexture, uiTexColorUniform,
             // sprite2DProgram, sprite2DSampler, sprite2DDefaultTexture,
-            // opaque3DProgram, opaque3DVertexBuffer, opaque3DIndexBuffer (+ dynamic mesh/texture slots).
+            // opaque3DProgram, opaque3DSampler, opaque3DMrSampler,
+            // opaque3DLightDir/Color/MrParams uniforms, opaque3DDefaultTexture,
+            // opaque3DDefaultMrTexture, opaque3DVertexBuffer, opaque3DIndexBuffer
+            // (+ dynamic mesh/texture slots).
             if (statistics_.liveResources != 0)
             {
                 char path[512]{};
@@ -1263,10 +1344,39 @@ class BgfxRenderDevice final : public IRenderDevice {
                 }
             }
 
+            bgfx::TextureHandle mrTexture = opaque3DDefaultMrTexture_;
+            float mrMapBound = 0.0F;
+            if (const auto mrBinding =
+                    mesh3DMaterialMetallicRoughnessTextureBindings_.find(batch.materialKey);
+                mrBinding != mesh3DMaterialMetallicRoughnessTextureBindings_.end())
+            {
+                const GpuTextureId id = mrBinding->second;
+                if (id.index < textures_.size())
+                {
+                    const TextureSlot& slot = textures_[id.index];
+                    if (slot.live && slot.generation == id.generation && bgfx::isValid(slot.handle))
+                    {
+                        mrTexture = slot.handle;
+                        mrMapBound = 1.0F;
+                    }
+                }
+            }
+
+            // Fixed product light: no light system yet. Direction toward light in world space.
+            constexpr std::array<float, 4> kDefaultLightDir{0.4F, 0.85F, 0.35F, 0.0F};
+            constexpr std::array<float, 4> kDefaultLightColor{1.0F, 0.98F, 0.92F, 1.0F};
+            // metallic=0, roughness=1, ambient=0.18; w = MR map bound flag.
+            // TODO(RENDER-001): wire cooked metallic/roughness factors when Material payload lands.
+            const std::array<float, 4> mrParams{0.0F, 1.0F, 0.18F, mrMapBound};
+
             bgfx::setVertexBuffer(0, vb);
             bgfx::setIndexBuffer(ib);
             bgfx::setInstanceDataBuffer(&instanceBuffer, batch.firstItem, batch.itemCount);
             bgfx::setTexture(0, opaque3DSampler_, materialTexture);
+            bgfx::setTexture(1, opaque3DMrSampler_, mrTexture);
+            bgfx::setUniform(opaque3DLightDirUniform_, kDefaultLightDir.data());
+            bgfx::setUniform(opaque3DLightColorUniform_, kDefaultLightColor.data());
+            bgfx::setUniform(opaque3DMrParamsUniform_, mrParams.data());
             bgfx::submit(kOpaque3DView, opaque3DProgram_);
         }
     }
@@ -1430,6 +1540,18 @@ class BgfxRenderDevice final : public IRenderDevice {
             if (it->second == texture)
             {
                 it = mesh3DMaterialTextureBindings_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        for (auto it = mesh3DMaterialMetallicRoughnessTextureBindings_.begin();
+             it != mesh3DMaterialMetallicRoughnessTextureBindings_.end();)
+        {
+            if (it->second == texture)
+            {
+                it = mesh3DMaterialMetallicRoughnessTextureBindings_.erase(it);
             }
             else
             {
@@ -1649,6 +1771,36 @@ class BgfxRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    // RENDER-001: bind optional metallic-roughness texture (G=roughness, B=metallic).
+    [[nodiscard]] Core::Status setMesh3DMaterialMetallicRoughnessTextureBinding(
+        u32 materialKey, GpuTextureId texture) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (materialKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload, "materialKey must be non-zero");
+        }
+        if (!texture)
+        {
+            mesh3DMaterialMetallicRoughnessTextureBindings_.erase(materialKey);
+            return Core::success();
+        }
+        if (texture.index >= textures_.size() || !textures_[texture.index].live ||
+            textures_[texture.index].generation != texture.generation)
+        {
+            return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
+        }
+        mesh3DMaterialMetallicRoughnessTextureBindings_[materialKey] = texture;
+        return Core::success();
+    }
+
     // M11-D1: capture primary backbuffer after present (frame must not be open).
     [[nodiscard]] Core::Result<Rgba8FrameCapture> capturePrimaryFrameRgba8() override
     {
@@ -1840,7 +1992,12 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::VertexLayout uiVertexLayout_{};
     bgfx::ProgramHandle opaque3DProgram_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DSampler_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DMrSampler_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DLightDirUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DLightColorUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DMrParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle opaque3DDefaultTexture_ = BGFX_INVALID_HANDLE;
+    bgfx::TextureHandle opaque3DDefaultMrTexture_ = BGFX_INVALID_HANDLE;
     bgfx::VertexBufferHandle opaque3DVertexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle opaque3DIndexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle sprite2DProgram_ = BGFX_INVALID_HANDLE;
@@ -1873,6 +2030,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     std::vector<MeshSlot> meshes_{};
     std::unordered_map<u32, GpuMeshId> mesh3DBindings_{};
     std::unordered_map<u32, GpuTextureId> mesh3DMaterialTextureBindings_{};
+    std::unordered_map<u32, GpuTextureId> mesh3DMaterialMetallicRoughnessTextureBindings_{};
 
     bool frameOpen_ = false;
     bool stopped_ = false;

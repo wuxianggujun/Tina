@@ -207,8 +207,10 @@ Cooker/tool。
 StaticMesh 上传到 RenderDevice，并建立 backend key binding。
 
 multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct StaticMesh/Material AssetId；
-单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。baseColorTexture 可
-cook 为 Texture2D required dependency。纹理产品绑定/安全策略与 PBR 其他通道尚未完成。
+单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含
+metallic/roughness factors 与可选 baseColor/MR/normal Texture2D deps。Runtime Opaque3D 为 experimental
+MR hybrid（`setMesh3DMaterialTextureBinding` + 可选 `setMesh3DMaterialMetallicRoughnessTextureBinding`；
+固定方向光）。完整 light system/IBL/shadow 尚未完成。
 
 ## Audio 与 Physics
 
