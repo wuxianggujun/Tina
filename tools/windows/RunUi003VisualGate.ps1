@@ -4,10 +4,11 @@
   UI-003 visual gate (product slice): capture tina_sample_2d and verify ROI fingerprints.
 
 .DESCRIPTION
-  Wraps CaptureSampleWindow.ps1, then samples relative ROIs on a useful non-blank
-  client capture. Design baseline is 960x540; ROIs are fractions of client size so
-  host DPI still hits the same logical HUD regions. Multi-monitor multi-DPI golden
-  matrix remains open.
+  Wraps CaptureSampleWindow.ps1, then samples absolute-design ROIs mapped into the
+  client capture (product-2d HUD is design-locked at 960x540). blankLike frames are
+  excluded via CaptureSampleWindow. Parses sample JSON for GLFW logical/framebuffer
+  /contentScale and asserts consistency. Does NOT change OS display scale; true
+  OS 100/150/200% multi-DPI golden matrix remains open.
 #>
 [CmdletBinding()]
 param(
@@ -28,7 +29,14 @@ param(
     [switch]$NoBaselineCompare,
     # Design-space absolute ROI (sample absolute layout is fixed to this design).
     [int]$DesignWidth = 960,
-    [int]$DesignHeight = 540
+    [int]$DesignHeight = 540,
+    # Expected --width/--height logical size (0 = do not assert against args).
+    [int]$ExpectedLogicalWidth = 0,
+    [int]$ExpectedLogicalHeight = 0,
+    # Content-scale consistency: |fb - logical * scale| max pixel error per axis.
+    [double]$ContentScalePixelTolerance = 2.0,
+    [double]$ContentScaleMin = 0.5,
+    [double]$ContentScaleMax = 4.0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -271,13 +279,105 @@ if ($aspect -lt 1.4 -or $aspect -gt 2.0) {
 $stdoutPath = Join-Path $runDir.FullName 'stdout.txt'
 $productOk = $false
 $accessibilityPublished = $false
+$sampleMetrics = [pscustomobject]@{
+    parsed = $false
+    status = $null
+    windowLogicalWidth = $null
+    windowLogicalHeight = $null
+    logicalPixelWidth = $null
+    logicalPixelHeight = $null
+    framebufferPixelWidth = $null
+    framebufferPixelHeight = $null
+    contentScaleX = $null
+    contentScaleY = $null
+    surfacePixelWidth = $null
+    surfacePixelHeight = $null
+    contentScaleConsistent = $null
+    contentScaleMode = $null
+}
 if (Test-Path -LiteralPath $stdoutPath) {
     $tail = Get-Content -LiteralPath $stdoutPath -Raw -Encoding UTF8
     if ($tail -match '"status"\s*:\s*"ok"') { $productOk = $true }
     if ($tail -match '"accessibilityPublished"\s*:\s*true') { $accessibilityPublished = $true }
+
+    $jsonLine = $null
+    foreach ($line in ($tail -split "`r?`n")) {
+        if ($line -match '^\s*\{' -and $line -match '"status"\s*:') {
+            $jsonLine = $line.Trim()
+        }
+    }
+    if ($null -ne $jsonLine) {
+        try {
+            $sampleJson = $jsonLine | ConvertFrom-Json
+            $sampleMetrics.parsed = $true
+            $sampleMetrics.status = [string]$sampleJson.status
+            if ($null -ne $sampleJson.windowLogicalWidth) { $sampleMetrics.windowLogicalWidth = [int]$sampleJson.windowLogicalWidth }
+            if ($null -ne $sampleJson.windowLogicalHeight) { $sampleMetrics.windowLogicalHeight = [int]$sampleJson.windowLogicalHeight }
+            if ($null -ne $sampleJson.logicalPixelWidth) { $sampleMetrics.logicalPixelWidth = [int]$sampleJson.logicalPixelWidth }
+            if ($null -ne $sampleJson.logicalPixelHeight) { $sampleMetrics.logicalPixelHeight = [int]$sampleJson.logicalPixelHeight }
+            if ($null -ne $sampleJson.framebufferPixelWidth) { $sampleMetrics.framebufferPixelWidth = [int]$sampleJson.framebufferPixelWidth }
+            if ($null -ne $sampleJson.framebufferPixelHeight) { $sampleMetrics.framebufferPixelHeight = [int]$sampleJson.framebufferPixelHeight }
+            if ($null -ne $sampleJson.contentScaleX) { $sampleMetrics.contentScaleX = [double]$sampleJson.contentScaleX }
+            if ($null -ne $sampleJson.contentScaleY) { $sampleMetrics.contentScaleY = [double]$sampleJson.contentScaleY }
+            if ($null -ne $sampleJson.surfacePixelWidth) { $sampleMetrics.surfacePixelWidth = [int]$sampleJson.surfacePixelWidth }
+            if ($null -ne $sampleJson.surfacePixelHeight) { $sampleMetrics.surfacePixelHeight = [int]$sampleJson.surfacePixelHeight }
+        } catch {
+            [void]$gateErrors.Add("sample JSON parse failed: $($_.Exception.Message)")
+        }
+    }
 }
 if (-not $productOk) {
     [void]$gateErrors.Add('sample stdout missing status=ok JSON')
+}
+
+if ($sampleMetrics.parsed) {
+    if ($null -eq $sampleMetrics.contentScaleX -or $null -eq $sampleMetrics.contentScaleY -or
+        $null -eq $sampleMetrics.logicalPixelWidth -or $null -eq $sampleMetrics.framebufferPixelWidth) {
+        [void]$gateErrors.Add('sample JSON missing logical/framebuffer/contentScale fields (rebuild tina_sample_2d)')
+    } else {
+        $sx = [double]$sampleMetrics.contentScaleX
+        $sy = [double]$sampleMetrics.contentScaleY
+        if ($sx -lt $ContentScaleMin -or $sx -gt $ContentScaleMax -or $sy -lt $ContentScaleMin -or $sy -gt $ContentScaleMax) {
+            [void]$gateErrors.Add(("contentScale out of range: x={0} y={1} (expected {2}..{3})" -f $sx, $sy, $ContentScaleMin, $ContentScaleMax))
+        }
+        $lw = [double]$sampleMetrics.logicalPixelWidth
+        $lh = [double]$sampleMetrics.logicalPixelHeight
+        $fw = [double]$sampleMetrics.framebufferPixelWidth
+        $fh = [double]$sampleMetrics.framebufferPixelHeight
+        # Windows GLFW may report either:
+        #   (A) classic DPI: framebuffer ≈ logical * contentScale
+        #   (B) already-pixel extents: framebuffer ≈ logical (contentScale is OS hint only)
+        $errScaledX = [Math]::Abs($fw - ($lw * $sx))
+        $errScaledY = [Math]::Abs($fh - ($lh * $sy))
+        $errEqualX = [Math]::Abs($fw - $lw)
+        $errEqualY = [Math]::Abs($fh - $lh)
+        $modeA = ($errScaledX -le $ContentScalePixelTolerance) -and ($errScaledY -le $ContentScalePixelTolerance)
+        $modeB = ($errEqualX -le $ContentScalePixelTolerance) -and ($errEqualY -le $ContentScalePixelTolerance)
+        $scaleOk = $modeA -or $modeB
+        $sampleMetrics.contentScaleConsistent = [bool]$scaleOk
+        $sampleMetrics.contentScaleMode = if ($modeA) { 'logical_times_scale' } elseif ($modeB) { 'logical_equals_framebuffer' } else { 'inconsistent' }
+        if (-not $scaleOk) {
+            [void]$gateErrors.Add(("contentScale metrics inconsistent: fb={0}x{1} logical={2}x{3} scale={4}x{5} (need fb≈logical*scale or fb≈logical)" -f `
+                [int]$fw, [int]$fh, [int]$lw, [int]$lh, $sx, $sy))
+        }
+        if ($ExpectedLogicalWidth -gt 0 -and [int]$sampleMetrics.windowLogicalWidth -ne $ExpectedLogicalWidth) {
+            [void]$gateErrors.Add(("windowLogicalWidth {0} != expected {1}" -f $sampleMetrics.windowLogicalWidth, $ExpectedLogicalWidth))
+        }
+        if ($ExpectedLogicalHeight -gt 0 -and [int]$sampleMetrics.windowLogicalHeight -ne $ExpectedLogicalHeight) {
+            [void]$gateErrors.Add(("windowLogicalHeight {0} != expected {1}" -f $sampleMetrics.windowLogicalHeight, $ExpectedLogicalHeight))
+        }
+        # Capture client size is typically logical (PrintWindow client); allow fb when scale≈1.
+        if ($null -ne $sampleMetrics.logicalPixelWidth) {
+            $matchLogical = ($clientW -eq [int]$sampleMetrics.logicalPixelWidth -and $clientH -eq [int]$sampleMetrics.logicalPixelHeight)
+            $matchFb = ($clientW -eq [int]$sampleMetrics.framebufferPixelWidth -and $clientH -eq [int]$sampleMetrics.framebufferPixelHeight)
+            if (-not $matchLogical -and -not $matchFb) {
+                [void]$gateErrors.Add(("capture client {0}x{1} matches neither logical {2}x{3} nor framebuffer {4}x{5}" -f `
+                    $clientW, $clientH,
+                    [int]$sampleMetrics.logicalPixelWidth, [int]$sampleMetrics.logicalPixelHeight,
+                    [int]$sampleMetrics.framebufferPixelWidth, [int]$sampleMetrics.framebufferPixelHeight))
+            }
+        }
+    }
 }
 
 $roiJson = @()
@@ -312,15 +412,17 @@ if ($WriteBaseline) {
         New-Item -ItemType Directory -Path $baselineDir -Force | Out-Null
     }
     $baselineObj = [pscustomobject]@{
-        schema = 1
+        schema = 2
         gate = 'UI-003-visual-roi-baseline'
-        designLogicalSize = @(960, 540)
+        designLogicalSize = @([int]$DesignWidth, [int]$DesignHeight)
         clientSize = @([int]$clientW, [int]$clientH)
         aspect = [math]::Round($aspect, 4)
+        sampleMetrics = $sampleMetrics
         rois = $roiJson
         notes = @(
             'Host-recorded ROI fingerprints for regression on same machine/class of GPU',
-            'avgRgb compared with absolute channel tolerance; uniqueSampleColors is a soft floor'
+            'avgRgb compared with absolute channel tolerance; uniqueSampleColors is a soft floor',
+            'Absolute UI layout is design-locked; per-size baselines are not OS DPI goldens'
         )
     }
     $baselineObj | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $resolvedBaseline -Encoding utf8
@@ -368,7 +470,7 @@ if ($null -ne $captureReport.ok) { $captureOk = [bool]$captureReport.ok }
 $ok = ($captureExit -eq 0) -and $captureOk -and ($gateErrors.Count -eq 0)
 
 $gateReport = [pscustomobject]@{
-    schema = 1
+    schema = 2
     gate = 'UI-003-visual-roi'
     ok = [bool]$ok
     tip = [string](git rev-parse HEAD 2>$null)
@@ -379,14 +481,17 @@ $gateReport = [pscustomobject]@{
     aspect = [math]::Round($aspect, 4)
     productStdoutOk = [bool]$productOk
     accessibilityPublished = [bool]$accessibilityPublished
+    sampleMetrics = $sampleMetrics
+    designLogicalSize = @([int]$DesignWidth, [int]$DesignHeight)
     rois = $roiJson
     baselineCompare = $baselineCompare
     errors = @($gateErrors | ForEach-Object { [string]$_ })
     notes = @(
-        'ROI fractions relative to client capture (design baseline 960x540)',
-        'Single-host visual gate; multi-monitor multi-DPI golden matrix still open',
-        'blankLike frames excluded via CaptureSampleWindow usefulNonBlank gate',
-        'Optional checked-in baseline under tools/windows/baselines for avgRgb regression'
+        'Absolute design ROIs mapped into client capture (product-2d HUD design-locked 960x540)',
+        'Proven: single-host ROI + optional baseline + GLFW contentScale consistency when fields present',
+        'Open: OS Settings display scale 100/150/200% multi-DPI golden matrix (requires host scale change)',
+        'blankLike frames excluded via CaptureSampleWindow usefulNonBlank / RequireNonBlank',
+        'Logical --width/--height matrix is not OS DPI; larger windows leave absolute-UI margin'
     )
 }
 

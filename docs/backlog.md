@@ -32,7 +32,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 
 
-| UI-003 | Partial | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** ContentScale* 单测 + 单机 ROI/baseline + **逻辑窗口尺寸矩阵**（960×540 / 1280×720 / 1440×810，`RunUi003SizeMatrix.ps1`）；**待** OS 级 100/150/200% DPI 真机矩阵与字体 fingerprint 金标 | Unit + Visual |
+| UI-003 | Partial | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** ContentScale* 单测 + 单机 ROI/baseline + **content-scale-like 逻辑尺寸矩阵**（960/1200/1440/1280/1920，`RunUi003SizeMatrix.ps1` + 分尺寸 baseline）+ sample JSON `contentScale`/`logical`/`framebuffer` 一致性；**待** OS 级 100/150/200% DPI 真机矩阵与字体 fingerprint 金标 | Unit + Visual |
 
 
 
@@ -86,4 +86,5 @@
 | TEST-001-CLANG22-SAN | `linux-clang22-vnext-sanitize`：同上 + ASan/UBSan/LSan；`test-001-linux-clang22-sanitize.json` | [Linux 证据](m12-evidence-linux.md) |
 | UI-003-MAP | `buildUIDisplayList` content-scale 映射：logical 100×100 → fb 100/150/200 时 rect 与 clip 像素确定性；`UIRenderDisplayListTest.ContentScale*` | [UI](ui.md) · bridge tests |
 | UI-003-VIS | `RunUi003VisualGate.ps1`：ROI 指纹 + 可选 baseline 比对（`tools/windows/baselines/ui-003-sample2d-960x540.json`）；blankLike 排除；`artifacts/gates/ui-003-visual-*.json` | [UI](ui.md) · CaptureSampleWindow |
-| UI-003-SIZE | `tina_sample_2d --width/--height` + `RunUi003SizeMatrix.ps1`：设计绝对布局 ROI 映射到 960/1280/1440 逻辑窗口；`artifacts/gates/ui-003-size-matrix-*.json` | [UI](ui.md) · sample_2d |
+| UI-003-SIZE | `tina_sample_2d --width/--height` + `RunUi003SizeMatrix.ps1`：content-scale-like 逻辑窗口 960/1200/1440/1280/1920；分尺寸 ROI baseline；`artifacts/gates/ui-003-size-matrix-*.json` | [UI](ui.md) · sample_2d |
+| UI-003-METRICS | sample JSON：`logicalPixel*` / `framebufferPixel*` / `contentScale*`；gate 断言 `fb ≈ logical * scale` 与 capture client 一致 | [UI](ui.md) · sample_2d |

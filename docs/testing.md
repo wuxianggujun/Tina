@@ -160,9 +160,18 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003VisualGate.ps1 
 #   ... -WriteBaseline
 # 默认读取 tools/windows/baselines/ui-003-sample2d-960x540.json
 
-# 逻辑窗口尺寸矩阵（非 OS DPI；sample --width/--height）
+# 逻辑 / content-scale-like 尺寸矩阵（非 OS Settings DPI；sample --width/--height）
+# 含 960×540 / 1200×675 / 1440×810 / 1280×720 / 1920×1080；按尺寸 ROI baseline
 powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003SizeMatrix.ps1 -SkipBuild
+# 首次/刷新各尺寸 baseline：
+#   ... -WriteBaselines
 ```
+
+**已证明：** ContentScale* 映射单测；单机 ROI + blankLike 排除；设计 960×540 absolute 布局 baseline；
+逻辑窗口 content-scale-like 矩阵；sample JSON `logicalPixel*` / `framebufferPixel*` / `contentScale*`
+一致性（GLFW metrics，非 COM DPI API）。
+
+**未证明：** OS 显示缩放 100/150/200% 真机多 DPI 金标；多显示器混 DPI；跨 GPU/字体 fingerprint 金标。
 
 ## Linux 与 sanitizer
 

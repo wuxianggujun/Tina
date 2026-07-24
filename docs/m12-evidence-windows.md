@@ -114,18 +114,38 @@ ROI 指纹覆盖 title/settings/progress/playfield；`accessibilityPublished=tru
 仓库内 baseline：`tools/windows/baselines/ui-003-sample2d-960x540.json`（avgRgb 容差默认 28）。
 二次运行 `baselineCompare.matched=true`。摘要示例：`artifacts/gates/ui-003-visual-*.json`。
 
-逻辑窗口尺寸矩阵（`--width/--height`，非 OS DPI）：
+逻辑 / content-scale-like 尺寸矩阵（`--width/--height`，**非** OS Settings DPI）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003SizeMatrix.ps1 -SkipBuild
+# 写入分尺寸 baseline：
+# powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003SizeMatrix.ps1 -SkipBuild -WriteBaselines
 ```
 
-结果：`ok=true`，cases 960×540 / 1280×720 / 1440×810 均 `ok=true`（client 与请求逻辑尺寸一致；
-绝对 UI 布局按设计坐标映射 ROI）。摘要：`artifacts/gates/ui-003-size-matrix-*.json`。
+cases（16:9，模拟 content-scale 客户端足迹，产品 absolute UI 仍锁 960×540 设计坐标）：
 
-**不证明** OS 显示缩放 100/150/200% 金标矩阵或跨 GPU 像素 golden。
+| label | logical | baseline |
+| --- | --- | --- |
+| design-1x | 960×540 | `tools/windows/baselines/ui-003-sample2d-960x540.json` |
+| scale-like-1.25x | 1200×675 | `...-1200x675.json` |
+| scale-like-1.5x | 1440×810 | `...-1440x810.json` |
+| desktop-720p | 1280×720 | `...-1280x720.json` |
+| scale-like-2x | 1920×1080 | `...-1920x1080.json` |
+
+gate 另解析 sample JSON：`logicalPixel*` / `framebufferPixel*` / `contentScale*`，断言
+`framebuffer ≈ logical * contentScale`（GLFW metrics，无需 COM/DPI API）。
+blankLike 仍由 `CaptureSampleWindow` 排除。摘要：`artifacts/gates/ui-003-size-matrix-*.json`。
+
+### UI-003 已证明 vs 仍开放
+
+| 已证明（可自动化） | 仍开放 |
+| --- | --- |
+| `ContentScale*` 映射单测（logical→fb 100/150/200%） | OS 显示缩放 100/150/200% 真机多 DPI 金标 |
+| 单机 ROI + design-1x baseline（960×540 absolute） | 多显示器混 DPI golden 矩阵 |
+| content-scale-like 逻辑窗口矩阵 + 分尺寸 baseline | 跨 GPU 像素 golden |
+| sample JSON contentScale/logical/fb 一致性 | 字体 identity fingerprint 金标 |
 
 ## 未关闭
 
-- 多 DPI 截图矩阵（UI-003 尾巴）、UIA/AT-SPI 真机（UI-002）、PBR（RENDER-001）；
+- OS 级多 DPI 截图矩阵与字体 fingerprint（UI-003 尾巴）、UIA/AT-SPI 真机（UI-002）、PBR（RENDER-001）；
 - Linux 可选 Wayland / 真显示器（TEST-001 主验收已关，见 [Linux 证据](m12-evidence-linux.md)）。

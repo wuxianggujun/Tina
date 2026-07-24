@@ -239,6 +239,13 @@ struct LifecycleCounters final {
     // M11-B0: surface-driven Camera2D projection (FixedWorldHeight).
     u32 surfacePixelWidth = 960;
     u32 surfacePixelHeight = 540;
+    // UI-003: last GLFW window metrics (logical vs framebuffer vs contentScale).
+    u32 logicalPixelWidth = 960;
+    u32 logicalPixelHeight = 540;
+    u32 framebufferPixelWidth = 960;
+    u32 framebufferPixelHeight = 540;
+    float contentScaleX = 1.0F;
+    float contentScaleY = 1.0F;
     u64 windowMetricsEvents = 0;
     u64 cameraProjectionResolves = 0;
     float lastCameraWorldWidth = 0.0f;
@@ -2307,10 +2314,16 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
     Tina::Core::Result<std::unique_ptr<Tina::IGameState>> createInitialState(Tina::GameStartupContext& context) override
     {
         // Seed surface from engine primary-window config; metrics events refine
-        // framebuffer size after DPI/resize (M11-B0).
+        // framebuffer size after DPI/resize (M11-B0). UI-003 records logical/fb/scale.
         const auto& window = context.engineConfig().primaryWindow;
         counters_->surfacePixelWidth = window.initialLogicalExtent.width;
         counters_->surfacePixelHeight = window.initialLogicalExtent.height;
+        counters_->logicalPixelWidth = window.initialLogicalExtent.width;
+        counters_->logicalPixelHeight = window.initialLogicalExtent.height;
+        counters_->framebufferPixelWidth = window.initialLogicalExtent.width;
+        counters_->framebufferPixelHeight = window.initialLogicalExtent.height;
+        counters_->contentScaleX = 1.0F;
+        counters_->contentScaleY = 1.0F;
         auto subscription = context.platformEventSubscriptions().subscribe(
             [this](const Tina::PlatformEventNotification& notification) {
                 if (!std::holds_alternative<Tina::Platform::WindowMetricsChangedEvent>(
@@ -2323,6 +2336,12 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
                 {
                     const bool hasFb =
                         metrics->framebufferExtent.width != 0 && metrics->framebufferExtent.height != 0;
+                    counters_->logicalPixelWidth = metrics->logicalExtent.width;
+                    counters_->logicalPixelHeight = metrics->logicalExtent.height;
+                    counters_->framebufferPixelWidth = metrics->framebufferExtent.width;
+                    counters_->framebufferPixelHeight = metrics->framebufferExtent.height;
+                    counters_->contentScaleX = metrics->contentScale.x;
+                    counters_->contentScaleY = metrics->contentScale.y;
                     counters_->surfacePixelWidth =
                         hasFb ? metrics->framebufferExtent.width : metrics->logicalExtent.width;
                     counters_->surfacePixelHeight =
@@ -2928,6 +2947,12 @@ int main(int argc, char** argv)
               << ",\"seedTileSelectionApplied\":" << (counters.seedTileSelectionApplied ? "true" : "false")
               << ",\"windowLogicalWidth\":" << options->windowLogicalWidth
               << ",\"windowLogicalHeight\":" << options->windowLogicalHeight
+              << ",\"logicalPixelWidth\":" << counters.logicalPixelWidth
+              << ",\"logicalPixelHeight\":" << counters.logicalPixelHeight
+              << ",\"framebufferPixelWidth\":" << counters.framebufferPixelWidth
+              << ",\"framebufferPixelHeight\":" << counters.framebufferPixelHeight
+              << ",\"contentScaleX\":" << counters.contentScaleX
+              << ",\"contentScaleY\":" << counters.contentScaleY
               << ",\"surfacePixelWidth\":" << counters.surfacePixelWidth
               << ",\"surfacePixelHeight\":" << counters.surfacePixelHeight
               << ",\"windowMetricsEvents\":" << counters.windowMetricsEvents

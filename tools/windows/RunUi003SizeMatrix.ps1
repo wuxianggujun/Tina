@@ -1,20 +1,34 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  UI-003 multi-size logical window matrix for tina_sample_2d.
+  UI-003 multi-size logical / content-scale-like visual matrix for tina_sample_2d.
 
 .DESCRIPTION
-  Runs RunUi003VisualGate.ps1 for several logical window sizes. Absolute UI
-  layout is designed at 960x540; larger windows keep HUD at design coords and
-  ROI mapping uses client/design fractions. Baseline compare only applies to the
-  default 960x540 entry.
+  Runs RunUi003VisualGate.ps1 for several logical window sizes that approximate
+  content-scale client footprints without changing OS display scale:
+
+    design-1x        960x540   (product absolute layout gold)
+    scale-like-1.25x 1200x675
+    scale-like-1.5x  1440x810
+    desktop-720p     1280x720
+    scale-like-2x    1920x1080
+
+  Absolute UI layout is design-locked at 960x540; larger windows keep HUD at
+  design coords and ROI mapping uses design/client fractions. Per-size ROI
+  baselines live under tools/windows/baselines/ when CompareBaseline is set.
+
+  NOT proven: OS Settings DPI 100/150/200% multi-monitor multi-DPI goldens.
 #>
 [CmdletBinding()]
 param(
     [string]$SourceRoot = '',
     [string]$Exe = '',
     [switch]$SkipBuild,
-    [string]$OutDir = 'artifacts/screenshots/ui-003-size-matrix'
+    [string]$OutDir = 'artifacts/screenshots/ui-003-size-matrix',
+    # When set, regenerate checked-in per-size baselines (commit only after local review).
+    [switch]$WriteBaselines,
+    # Skip baseline compare even when a baseline file exists for the case.
+    [switch]$NoBaselineCompare
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,11 +56,38 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) { throw "build failed exit=$LASTEXITCODE" }
 }
 
-# Logical sizes: design baseline + larger "scaled desktop" windows (absolute UI stays put).
+# Content-scale-like logical sizes (16:9). Product absolute UI stays at design coords.
 $sizes = @(
-    @{ W = 960; H = 540; Label = 'design-1x'; CompareBaseline = $true },
-    @{ W = 1280; H = 720; Label = 'desktop-720p'; CompareBaseline = $false },
-    @{ W = 1440; H = 810; Label = 'design-1.5x-window'; CompareBaseline = $false }
+    @{
+        W = 960; H = 540; Label = 'design-1x'
+        ScaleLike = 1.0
+        BaselineRel = 'tools/windows/baselines/ui-003-sample2d-960x540.json'
+        CompareBaseline = $true
+    },
+    @{
+        W = 1200; H = 675; Label = 'scale-like-1.25x'
+        ScaleLike = 1.25
+        BaselineRel = 'tools/windows/baselines/ui-003-sample2d-1200x675.json'
+        CompareBaseline = $true
+    },
+    @{
+        W = 1440; H = 810; Label = 'scale-like-1.5x'
+        ScaleLike = 1.5
+        BaselineRel = 'tools/windows/baselines/ui-003-sample2d-1440x810.json'
+        CompareBaseline = $true
+    },
+    @{
+        W = 1280; H = 720; Label = 'desktop-720p'
+        ScaleLike = 1.3333
+        BaselineRel = 'tools/windows/baselines/ui-003-sample2d-1280x720.json'
+        CompareBaseline = $true
+    },
+    @{
+        W = 1920; H = 1080; Label = 'scale-like-2x'
+        ScaleLike = 2.0
+        BaselineRel = 'tools/windows/baselines/ui-003-sample2d-1920x1080.json'
+        CompareBaseline = $true
+    }
 )
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -63,14 +104,25 @@ foreach ($s in $sizes) {
     $label = [string]$s.Label
     $w = [int]$s.W
     $h = [int]$s.H
-    # Relative OutDir under matrix stamp for nested CaptureSampleWindow paths.
     $caseRel = Join-Path (Join-Path $OutDir $stamp) $label
     $args = "--frames=90 --frame-delay-ms=0 --width=$w --height=$h"
-    Write-Host "=== UI-003 size case $label (${w}x${h}) ==="
+    Write-Host "=== UI-003 size case $label (${w}x${h}) scaleLike=$($s.ScaleLike) ==="
 
-    $noBaseline = (-not [bool]$s.CompareBaseline)
+    $baselineRel = [string]$s.BaselineRel
+    $baselineAbs = Join-Path $SourceRoot $baselineRel
+    $hasBaseline = Test-Path -LiteralPath $baselineAbs
+    $wantCompare = [bool]$s.CompareBaseline -and -not $NoBaselineCompare -and ($hasBaseline -or $WriteBaselines)
+
     $extra = @()
-    if ($noBaseline) { $extra += '-NoBaselineCompare' }
+    if ($WriteBaselines) {
+        $extra += '-WriteBaseline'
+    }
+    if (-not $wantCompare -or $NoBaselineCompare) {
+        if (-not $WriteBaselines) {
+            $extra += '-NoBaselineCompare'
+        }
+    }
+
     & powershell -NoProfile -ExecutionPolicy Bypass -File $gateScript `
         -SourceRoot $SourceRoot `
         -Exe $Exe `
@@ -79,6 +131,9 @@ foreach ($s in $sizes) {
         -SkipBuild `
         -DesignWidth 960 `
         -DesignHeight 540 `
+        -ExpectedLogicalWidth $w `
+        -ExpectedLogicalHeight $h `
+        -BaselinePath $baselineRel `
         -WarmupMs 900 `
         -CaptureCount 3 `
         -RequiredConsecutiveUsefulCaptures 2 `
@@ -92,16 +147,26 @@ foreach ($s in $sizes) {
     $summary = Get-ChildItem -Path $caseAbs -Recurse -Filter 'ui-003-gate.json' -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
     $client = $null
+    $sampleMetrics = $null
+    $baselineCompare = $null
     if ($summary) {
         $j = Get-Content -LiteralPath $summary.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
         $client = $j.clientSize
+        $sampleMetrics = $j.sampleMetrics
+        $baselineCompare = $j.baselineCompare
         $ok = [bool]$j.ok
+        if (-not $ok -and $code -eq 0) { $fail++ }
     }
 
     $results += [pscustomobject]@{
         label = $label
+        scaleLike = [double]$s.ScaleLike
         requestedLogical = @($w, $h)
         clientSize = $client
+        sampleMetrics = $sampleMetrics
+        baselinePath = $baselineRel
+        baselinePresent = [bool]$hasBaseline
+        baselineCompare = $baselineCompare
         ok = [bool]$ok
         exitCode = $code
         report = if ($summary) { [string]$summary.FullName } else { $null }
@@ -110,21 +175,32 @@ foreach ($s in $sizes) {
 
 $matrixOk = ($fail -eq 0)
 $matrixReport = [pscustomobject]@{
-    schema = 1
+    schema = 2
     gate = 'UI-003-size-matrix'
     ok = [bool]$matrixOk
     tip = [string](git rev-parse HEAD 2>$null)
     cases = $results
+    proven = @(
+        'Logical window size matrix via --width/--height (content-scale-like client footprints)',
+        'Absolute UI design-locked ROI mapping + soft/hard ROI signal gates',
+        'Per-size ROI baselines under tools/windows/baselines when present',
+        'Sample JSON contentScale/logical/framebuffer consistency (when fields present)',
+        'blankLike exclusion via CaptureSampleWindow'
+    )
+    open = @(
+        'OS Settings display scale 100/150/200% true multi-DPI golden matrix',
+        'Multi-monitor mixed-DPI capture matrix',
+        'Font identity fingerprint goldens across machines'
+    )
     notes = @(
-        'Logical window size matrix via --width/--height',
-        'Absolute UI layout is design-locked; larger windows leave empty margin',
-        'Baseline compare only on design-1x (960x540)',
-        'Not a system DPI 100/150/200% matrix (requires OS scale change)'
+        'Larger logical windows leave empty margin; HUD stays at 960x540 design coords',
+        'scale-like-* sizes approximate content-scale client sizes without OS DPI change',
+        'design-1x (960x540) remains product absolute-layout verification gold'
     )
 }
 
 $matrixPath = Join-Path $matrixRoot 'matrix-report.json'
-$matrixReport | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $matrixPath -Encoding utf8
+$matrixReport | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $matrixPath -Encoding utf8
 $summaryDir = Join-Path $SourceRoot 'artifacts\gates'
 if (-not (Test-Path -LiteralPath $summaryDir)) {
     New-Item -ItemType Directory -Path $summaryDir -Force | Out-Null
