@@ -13,7 +13,9 @@ namespace Tina::Asset {
 // - glTF 2.0 JSON or GLB via cgltf_parse_file
 // - every mesh: single TRIANGLES primitive with POSITION(float3) + optional NORMAL/TEXCOORD_0
 // - multi-mesh files produce one StaticMesh + one Material per mesh index
-// - baseColorTexture (PNG/JPEG via stb_image) → Texture2D cook + Material dep (M11-E11)
+// - pbrMetallicRoughness: baseColorFactor, metallicFactor, roughnessFactor,
+//   baseColorTexture / metallicRoughnessTexture (PNG/JPEG → Texture2D deps)
+// - optional normalTexture → Texture2D dependency (cooked data only; GPU PBR separate)
 // - scene nodes → Prefab deps bind each node's mesh/material AssetIds
 // Output is a CatalogCookRequest ready for cookCatalogPackage / publish.
 //

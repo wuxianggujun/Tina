@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 namespace Tina::AssetFormat {
 namespace {
@@ -53,6 +54,11 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     return std::isfinite(r) && std::isfinite(g) && std::isfinite(b) && std::isfinite(a);
 }
 
+[[nodiscard]] bool unitInterval(float value) noexcept
+{
+    return std::isfinite(value) && value >= 0.0F && value <= 1.0F;
+}
+
 [[nodiscard]] Core::Status validateMaterialDesc(const MaterialPayloadDesc& desc) noexcept
 {
     if (desc.model != MaterialModel::UnlitBaseColor)
@@ -68,11 +74,50 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "material baseColor components must be in [0,1]");
     }
+    if (!unitInterval(desc.metallicFactor))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material metallicFactor must be in [0,1]");
+    }
+    if (!unitInterval(desc.roughnessFactor))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material roughnessFactor must be in [0,1]");
+    }
     if (desc.alphaMode != MaterialAlphaMode::Opaque)
     {
-        return Core::failure(AssetFormatErrorCode::UnsupportedValue, "material alphaMode must be Opaque in v1");
+        return Core::failure(AssetFormatErrorCode::UnsupportedValue, "material alphaMode must be Opaque in v2");
     }
     return Core::success();
+}
+
+[[nodiscard]] u16 materialFlags(const MaterialPayloadDesc& desc) noexcept
+{
+    u16 flags = 0U;
+    if (desc.baseColorTextureId)
+    {
+        flags = static_cast<u16>(flags | MaterialWire::FlagHasBaseColorTexture);
+    }
+    if (desc.metallicRoughnessTextureId)
+    {
+        flags = static_cast<u16>(flags | MaterialWire::FlagHasMetallicRoughnessTexture);
+    }
+    if (desc.normalTextureId)
+    {
+        flags = static_cast<u16>(flags | MaterialWire::FlagHasNormalTexture);
+    }
+    return flags;
+}
+
+void appendTextureDependency(std::vector<CookedAssetWriteDependency>& deps, Core::AssetId textureId)
+{
+    if (!textureId)
+    {
+        return;
+    }
+    deps.push_back(CookedAssetWriteDependency{
+        .assetId = textureId,
+        .expectedKind = AssetKind::Texture2D,
+        .flags = DependencyFlags::Required,
+    });
 }
 
 } // namespace
@@ -92,10 +137,12 @@ Core::Result<std::vector<std::byte>> writeMaterialPayloadBytes(const MaterialPay
         writeF32(bytes, 8U, desc.baseColorG);
         writeF32(bytes, 12U, desc.baseColorB);
         writeF32(bytes, 16U, desc.baseColorA);
-        writeU8(bytes, 20U, desc.doubleSided ? 1U : 0U);
-        writeU8(bytes, 21U, static_cast<u8>(desc.alphaMode));
-        const u16 flags = desc.baseColorTextureId ? MaterialWire::FlagHasBaseColorTexture : 0U;
-        writeU16(bytes, 22U, flags);
+        writeF32(bytes, 20U, desc.metallicFactor);
+        writeF32(bytes, 24U, desc.roughnessFactor);
+        writeU8(bytes, 28U, desc.doubleSided ? 1U : 0U);
+        writeU8(bytes, 29U, static_cast<u8>(desc.alphaMode));
+        writeU16(bytes, 30U, materialFlags(desc));
+        // bytes 32..39 reserved zero padding for 8-byte alignment / future factors
         return bytes;
     }
     catch (const std::bad_alloc&)
@@ -108,7 +155,7 @@ Core::Result<MaterialPayloadView> parseMaterialPayload(std::span<const std::byte
 {
     if (payload.size() != MaterialWire::HeaderBytes)
     {
-        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material payload size must be 24 bytes");
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material payload size must be 40 bytes");
     }
 
     MaterialPayloadView view{};
@@ -118,9 +165,11 @@ Core::Result<MaterialPayloadView> parseMaterialPayload(std::span<const std::byte
     view.baseColorG = readF32(payload, 8U);
     view.baseColorB = readF32(payload, 12U);
     view.baseColorA = readF32(payload, 16U);
-    const u8 doubleSided = readU8(payload, 20U);
-    view.alphaMode = static_cast<MaterialAlphaMode>(readU8(payload, 21U));
-    const u16 flags = readU16(payload, 22U);
+    view.metallicFactor = readF32(payload, 20U);
+    view.roughnessFactor = readF32(payload, 24U);
+    const u8 doubleSided = readU8(payload, 28U);
+    view.alphaMode = static_cast<MaterialAlphaMode>(readU8(payload, 29U));
+    const u16 flags = readU16(payload, 30U);
 
     if (view.schemaVersion != MaterialWire::SchemaVersion)
     {
@@ -139,11 +188,21 @@ Core::Result<MaterialPayloadView> parseMaterialPayload(std::span<const std::byte
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported material alphaMode");
     }
-    if ((flags & ~MaterialWire::FlagHasBaseColorTexture) != 0)
+    if ((flags & ~MaterialWire::KnownFlags) != 0)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "material flags has unknown bits");
     }
+    // Reserved tail must stay zero so future fields can be introduced carefully.
+    for (usize offset = 32U; offset < MaterialWire::HeaderBytes; ++offset)
+    {
+        if (readU8(payload, offset) != 0U)
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout, "material reserved bytes must be zero");
+        }
+    }
     view.hasBaseColorTexture = (flags & MaterialWire::FlagHasBaseColorTexture) != 0;
+    view.hasMetallicRoughnessTexture = (flags & MaterialWire::FlagHasMetallicRoughnessTexture) != 0;
+    view.hasNormalTexture = (flags & MaterialWire::FlagHasNormalTexture) != 0;
     if (!finiteColor(view.baseColorR, view.baseColorG, view.baseColorB, view.baseColorA))
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "material baseColor must be finite");
@@ -152,6 +211,14 @@ Core::Result<MaterialPayloadView> parseMaterialPayload(std::span<const std::byte
         view.baseColorR > 1.0F || view.baseColorG > 1.0F || view.baseColorB > 1.0F || view.baseColorA > 1.0F)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "material baseColor components must be in [0,1]");
+    }
+    if (!unitInterval(view.metallicFactor))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material metallicFactor must be in [0,1]");
+    }
+    if (!unitInterval(view.roughnessFactor))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "material roughnessFactor must be in [0,1]");
     }
     return view;
 }
@@ -164,29 +231,17 @@ Core::Result<std::vector<std::byte>> writeCookedMaterialAsset(Core::AssetId asse
     {
         return Core::failure(payload.error());
     }
-    if (desc.baseColorTextureId)
-    {
-        const std::array deps{CookedAssetWriteDependency{
-            .assetId = desc.baseColorTextureId,
-            .expectedKind = AssetKind::Texture2D,
-            .flags = DependencyFlags::Required,
-        }};
-        return writeCookedAssetBytes(CookedAssetWriteDesc{
-            .assetKind = AssetKind::Material,
-            .assetTypeVersion = MaterialWire::SchemaVersion,
-            .targetPlatform = platform,
-            .assetId = assetId,
-            .dependencies = deps,
-            .payload = *payload,
-            .payloadAlignment = 4,
-            .computeContentHash = true,
-        });
-    }
+    std::vector<CookedAssetWriteDependency> deps;
+    deps.reserve(3U);
+    appendTextureDependency(deps, desc.baseColorTextureId);
+    appendTextureDependency(deps, desc.metallicRoughnessTextureId);
+    appendTextureDependency(deps, desc.normalTextureId);
     return writeCookedAssetBytes(CookedAssetWriteDesc{
         .assetKind = AssetKind::Material,
         .assetTypeVersion = MaterialWire::SchemaVersion,
         .targetPlatform = platform,
         .assetId = assetId,
+        .dependencies = deps,
         .payload = *payload,
         .payloadAlignment = 4,
         .computeContentHash = true,

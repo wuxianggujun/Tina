@@ -8,7 +8,8 @@ Cooker 与产品 sample 均支持一个 glTF 中两个 mesh：distinct Mesh/Mate
 binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。外部 URI 安全与产品侧
 `setMesh3DMaterialTextureBinding` 已完成（ASSET-001）；bgfx Opaque3D unlit 在 submit 时按
 materialKey **采样** baseColor（`s_texColor` × instance factor；未 bind 用 1×1 白贴图）。
-PBR 见 `RENDER-001`。
+Cooked Material v2 已携带 metallic/roughness factor 与可选 MR/normal Texture2D dependency
+（cooker 数据路径）；GPU PBR 采样/lighting 仍见 `RENDER-001`。
 
 ## 当前模块边界
 
@@ -45,7 +46,7 @@ EngineHost 仍是唯一组合根。
 | 层 | 当前实现 |
 | --- | --- |
 | Cooker | glTF 2.0 JSON/GLB；每个 mesh 一个 TRIANGLES primitive；POSITION float3，NORMAL/TEXCOORD_0 可选；multi-mesh 输出 distinct Mesh/Material AssetId；scene node 转 Prefab hierarchy/dependency |
-| Cooked 数据 | StaticMesh v1 使用 P3N3UV2、UInt16 index、bounds/submesh；Material v1 为 Opaque `UnlitBaseColor`；Prefab v1 保存稳定 node id、父索引、local transform 与 Mesh/Material AssetId |
+| Cooked 数据 | StaticMesh v1 使用 P3N3UV2、UInt16 index、bounds/submesh；Material v2 为 Opaque `UnlitBaseColor` + cooked PBR factors（metallic/roughness）与可选 baseColor/MR/normal Texture2D deps；Prefab v1 保存稳定 node id、父索引、local transform 与 Mesh/Material AssetId |
 | Scene | `PerspectiveCamera3D`、`MeshRenderer3D`、Transform hierarchy、Prefab 实例化与失败回滚 |
 | Extraction | 唯一 active perspective camera、surface aspect resolve、world bounds、frustum culling、稳定排序与相邻实例 batch |
 | bgfx | color/depth clear、Perspective view、depth write/less、back-face culling、instance buffer、内置 Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、Unlit shader **采样** materialKey 绑定贴图（`s_texColor`；默认 1×1 白） |
@@ -96,10 +97,14 @@ unlit submit 时按 materialKey **采样**（`s_texColor` × instance baseColorF
 
 - glTF importer 不支持单 mesh 多 primitive merge、无 bufferView 的 data-URI image、Draco、morph、
   skin、animation、sparse accessor 或非三角 primitive；不支持项返回结构化错误；
-- Material 产品路径只有 solid Opaque Unlit；无 PBR、Light、Shadow、transparent pass 或 post-processing；
-- glTF Cooker 把相对文件或 bufferView 的 baseColorTexture 发布为 Texture2D dependency；外部相对 URI
-  强制 root containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；`tina_sample_3d` 已 upload、
-  `setMesh3DMaterialTextureBinding`，且 Opaque3D unlit submit **采样** material 贴图；
+- Material 运行时产品路径仍是 Opaque Unlit（只消费 baseColor factor + baseColor 贴图 bind）；Cooked
+  Material v2 已写入 metallicFactor/roughnessFactor 与可选 metallicRoughness/normal Texture2D
+  dependency，但 GPU 不采样 MR/normal，无 lighting/Shadow/transparent/post；
+- glTF Cooker 读取完整 `pbrMetallicRoughness`（baseColor/metallic/roughness factors + baseColor 与
+  metallicRoughness 贴图）以及可选 `normalTexture`，将相对文件或 bufferView 图像发布为 Texture2D
+  dependency；外部相对 URI 强制 root containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；
+  `tina_sample_3d` 已 upload、`setMesh3DMaterialTextureBinding`，且 Opaque3D unlit submit **采样**
+  baseColor 贴图；
 - Scene/Render 仍使用 mesh/material **key**（bind-table 语义，非 AssetHandle 组件字段），不是 Scene 上直接存
   `AssetHandle`，也不是 extract 输出 owning `FrameResourceRef`；
 - EngineHost 已有 `RenderFramePacket` + FramePin + Null completion 首切片；真 bgfx fence 后置；

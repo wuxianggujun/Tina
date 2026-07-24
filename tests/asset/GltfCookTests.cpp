@@ -246,6 +246,8 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
   "materials": [{
     "pbrMetallicRoughness": {
       "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+      "metallicFactor": 0.2,
+      "roughnessFactor": 0.8,
       "baseColorTexture": {"index": 0}
     }
   }],
@@ -315,6 +317,10 @@ TEST(GltfCookTests, CooksBaseColorTextureToTexture2DDependency)
             auto mat = AssetFormat::parseMaterialPayload(asset.payload);
             ASSERT_TRUE(mat.has_value()) << (mat ? "" : mat.error().message);
             EXPECT_TRUE(mat->hasBaseColorTexture);
+            EXPECT_FALSE(mat->hasMetallicRoughnessTexture);
+            EXPECT_FALSE(mat->hasNormalTexture);
+            EXPECT_FLOAT_EQ(mat->metallicFactor, 0.2F);
+            EXPECT_FLOAT_EQ(mat->roughnessFactor, 0.8F);
             ASSERT_EQ(asset.dependencies.size(), 1U);
             EXPECT_EQ(asset.dependencies[0].expectedKind, AssetFormat::AssetKind::Texture2D);
             materialHasTexDep = true;
@@ -322,6 +328,110 @@ TEST(GltfCookTests, CooksBaseColorTextureToTexture2DDependency)
     }
     EXPECT_TRUE(sawTexture);
     EXPECT_TRUE(materialHasTexDep);
+
+    const auto catalogRoot = dir / "catalog";
+    ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
+}
+
+TEST(GltfCookTests, CooksMetallicRoughnessAndNormalTextureDeps)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_pbr_mr_normal";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    {
+        const auto png = tinyRedPngBytes();
+        for (const char* name : {"base.png", "mr.png", "n.png"})
+        {
+            std::ofstream out(dir / name, std::ios::binary);
+            ASSERT_TRUE(out.good());
+            out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+        }
+    }
+    const auto gltfPath = dir / "pbr.gltf";
+    {
+        std::ofstream out(gltfPath, std::ios::binary);
+        ASSERT_TRUE(out.good());
+        out << R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{
+    "primitives": [{
+      "attributes": {"POSITION": 0, "TEXCOORD_0": 1},
+      "indices": 2,
+      "mode": 4,
+      "material": 0
+    }]
+  }],
+  "materials": [{
+    "pbrMetallicRoughness": {
+      "baseColorFactor": [0.9, 0.1, 0.2, 1.0],
+      "metallicFactor": 0.3,
+      "roughnessFactor": 0.6,
+      "baseColorTexture": {"index": 0},
+      "metallicRoughnessTexture": {"index": 1}
+    },
+    "normalTexture": {"index": 2}
+  }],
+  "textures": [{"source": 0}, {"source": 1}, {"source": 2}],
+  "images": [{"uri": "base.png"}, {"uri": "mr.png"}, {"uri": "n.png"}],
+  "accessors": [
+    {
+      "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+      "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]
+    },
+    {
+      "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC2"
+    },
+    {
+      "bufferView": 2, "componentType": 5123, "count": 3, "type": "SCALAR"
+    }
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 60, "byteLength": 6}
+  ],
+  "buffers": [{
+    "byteLength": 68,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAAAgD8AAIA/AACAPwAAgD8AAAAAAAAAAAAAgD8BAAAAAgAAAA=="
+  }]
+})json";
+    }
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+
+    std::size_t textureCount = 0;
+    bool sawMaterial = false;
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind == AssetFormat::AssetKind::Texture2D)
+        {
+            ++textureCount;
+        }
+        else if (asset.assetKind == AssetFormat::AssetKind::Material)
+        {
+            sawMaterial = true;
+            auto mat = AssetFormat::parseMaterialPayload(asset.payload);
+            ASSERT_TRUE(mat.has_value()) << (mat ? "" : mat.error().message);
+            EXPECT_FLOAT_EQ(mat->baseColorR, 0.9F);
+            EXPECT_FLOAT_EQ(mat->metallicFactor, 0.3F);
+            EXPECT_FLOAT_EQ(mat->roughnessFactor, 0.6F);
+            EXPECT_TRUE(mat->hasBaseColorTexture);
+            EXPECT_TRUE(mat->hasMetallicRoughnessTexture);
+            EXPECT_TRUE(mat->hasNormalTexture);
+            ASSERT_EQ(asset.dependencies.size(), 3U);
+            EXPECT_EQ(asset.dependencies[0].expectedKind, AssetFormat::AssetKind::Texture2D);
+            EXPECT_EQ(asset.dependencies[1].expectedKind, AssetFormat::AssetKind::Texture2D);
+            EXPECT_EQ(asset.dependencies[2].expectedKind, AssetFormat::AssetKind::Texture2D);
+            EXPECT_NE(asset.dependencies[0].assetId, asset.dependencies[1].assetId);
+            EXPECT_NE(asset.dependencies[1].assetId, asset.dependencies[2].assetId);
+        }
+    }
+    EXPECT_EQ(textureCount, 3U);
+    EXPECT_TRUE(sawMaterial);
 
     const auto catalogRoot = dir / "catalog";
     ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
