@@ -6,23 +6,23 @@
                               540
                           ],
     "clientSize":  [
-                       960,
-                       540
+                       1280,
+                       720
                    ],
     "aspect":  1.7778,
     "sampleMetrics":  {
                           "parsed":  true,
                           "status":  "ok",
-                          "windowLogicalWidth":  960,
-                          "windowLogicalHeight":  540,
-                          "logicalPixelWidth":  960,
-                          "logicalPixelHeight":  540,
-                          "framebufferPixelWidth":  960,
-                          "framebufferPixelHeight":  540,
+                          "windowLogicalWidth":  1280,
+                          "windowLogicalHeight":  720,
+                          "logicalPixelWidth":  1280,
+                          "logicalPixelHeight":  720,
+                          "framebufferPixelWidth":  1280,
+                          "framebufferPixelHeight":  720,
                           "contentScaleX":  2,
                           "contentScaleY":  2,
-                          "surfacePixelWidth":  960,
-                          "surfacePixelHeight":  540,
+                          "surfacePixelWidth":  1280,
+                          "surfacePixelHeight":  720,
                           "contentScaleConsistent":  true,
                           "contentScaleMode":  "logical_equals_framebuffer"
                       },
@@ -55,13 +55,13 @@
                                 ],
                      "samples":  650,
                      "avgRgb":  [
-                                    54.2,
-                                    74.09,
-                                    78.08
+                                    53.88,
+                                    73.2,
+                                    77.34
                                 ],
                      "dominantColor":  "0A131D",
-                     "dominantRatio":  0.26,
-                     "uniqueSampleColors":  40
+                     "dominantRatio":  0.3831,
+                     "uniqueSampleColors":  23
                  },
                  {
                      "name":  "progress_bar",
@@ -73,13 +73,13 @@
                                 ],
                      "samples":  720,
                      "avgRgb":  [
-                                    66.43,
-                                    78.33,
-                                    91.43
+                                    66.77,
+                                    78.83,
+                                    91.68
                                 ],
                      "dominantColor":  "192737",
-                     "dominantRatio":  0.6389,
-                     "uniqueSampleColors":  4
+                     "dominantRatio":  0.7167,
+                     "uniqueSampleColors":  3
                  },
                  {
                      "name":  "playfield_lower",
@@ -91,13 +91,13 @@
                                 ],
                      "samples":  600,
                      "avgRgb":  [
-                                    106.12,
-                                    89.32,
-                                    63.94
+                                    21.4,
+                                    45.78,
+                                    67.3
                                 ],
                      "dominantColor":  "102A43",
-                     "dominantRatio":  0.56,
-                     "uniqueSampleColors":  21
+                     "dominantRatio":  0.975,
+                     "uniqueSampleColors":  2
                  }
              ],
     "notes":  [
