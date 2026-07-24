@@ -32,7 +32,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 
 
-| UI-003 | Partial | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** logical→framebuffer 100/150/200% 确定性映射单测（`UIRenderDisplayListTest.ContentScale*`）；**待** 真机 100/150/200% 截图、字体 fingerprint 与区域阈值、白帧排除 | Unit + Visual |
+| UI-003 | Partial | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** ContentScale* 映射单测 + 单机 ROI 视觉门禁（`RunUi003VisualGate.ps1`，白帧排除、settings/progress/playfield ROI）；**待** 真机 100/150/200% 多 DPI 截图矩阵与字体 fingerprint 金标 | Unit + Visual |
 
 
 
@@ -82,3 +82,4 @@
 | TEST-001-GCC13-NULL | Docker Desktop + `linux-gcc13-vnext`：`tina_tests`/`tina_ui_tests`(255)/`tina_runtime_ui_tests`(83)/bridge(13)/`tina_sample_null` 300 帧；vcpkg baseline 与仓库一致；`artifacts/gates/test-001-linux-gcc13-null.json` | [Linux 证据](m12-evidence-linux.md) |
 | TEST-001-GCC13-PLATFORM | Docker + Xvfb + `linux-gcc13-vnext-platform`：`tina_tests` + `tina_platform_glfw_tests`(34/34) + `tina_sample_platform --frames=60`；`artifacts/gates/test-001-linux-gcc13-platform.json` | [Linux 证据](m12-evidence-linux.md) |
 | UI-003-MAP | `buildUIDisplayList` content-scale 映射：logical 100×100 → fb 100/150/200 时 rect 与 clip 像素确定性；`UIRenderDisplayListTest.ContentScale*` | [UI](ui.md) · bridge tests |
+| UI-003-VIS | `tools/windows/RunUi003VisualGate.ps1`：CaptureSampleWindow + ROI 指纹（title/settings/progress/playfield）；排除 blankLike；`artifacts/gates/ui-003-visual-*.json` | [UI](ui.md) · CaptureSampleWindow |

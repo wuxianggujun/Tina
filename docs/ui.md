@@ -209,7 +209,7 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [测�
 | ID | 范围 |
 | --- | --- |
 | `UI-002` | Windows UIA / Linux AT-SPI 真机 adapter（中立 SPI + sample JSON 已有） |
-| `UI-003` | 跨 DPI/GPU 容差视觉门禁（logical→framebuffer 100/150/200% 映射单测已有；真机截图/golden 后置） |
+| `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI 视觉门禁已有；多 DPI 截图矩阵/字体 fingerprint 后置） |
 | `UI-004` | 通用 Focus Scope、Modal、持久 Pointer Capture |
 | `UI-005` | ScrollView、虚拟 ListView、Dropdown、TreeView |
 | `TEXT-001` | 多行 TextEdit、grapheme/shaping、候选窗定位 |

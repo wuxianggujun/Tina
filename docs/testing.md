@@ -151,6 +151,13 @@ Windows 同轮 product-2d 拓扑由 `tools/windows/RunProduct2dGate.ps1` 固化�
 powershell -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 ```
 
+UI-003 单机视觉 ROI 门禁（映射单测之外的截图证据；排除 PrintWindow 白帧）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003VisualGate.ps1 `
+  -SkipBuild -OutDir artifacts\screenshots\ui-003-visual
+```
+
 ## Linux 与 sanitizer
 
 Linux 门禁必须记录 compiler、stdlib、CMake、vcpkg baseline、display backend 和 sanitizer 环境。
