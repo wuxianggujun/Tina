@@ -5,7 +5,9 @@ Catalog 发布与校验、StaticMesh GPU upload、Prefab 实例化、Scene extra
 pass 绘制，并叠加 retained UI。它证明 multi-mesh product 的端到端路径，不等同于完整 3D 渲染器。
 
 也可通过 CLI 加载**磁盘上的外部** `.gltf`/`.glb`（用户模型）：同样只走 cooker，Runtime 不解析源
-glTF。默认门禁仍用内建 fixture；外部路径为 opt-in。
+glTF。默认产品门禁使用仓库 **complete PBR fixture**
+（`tests/fixtures/gltf/complete_pbr/complete_pbr.gltf`：双 mesh、NORMAL/UV、baseColor+MR+normal 贴图、
+不同 metallic/roughness）；未编译进 fixture 路径时回退到最小内建 glTF。外部 `--gltf=` 仍为 opt-in。
 
 Cooker 与产品 sample 支持一个 glTF 中多个 mesh（sample 槽位上限 8）：distinct Mesh/Material
 AssetId、独立 meshKey binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。外部 URI 安全与

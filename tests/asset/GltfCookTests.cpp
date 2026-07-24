@@ -660,5 +660,81 @@ TEST(GltfCookTests, RejectsNonTrianglePrimitiveInMultiPrimMesh)
         << request.error().message;
 }
 
+#if defined(TINA_COMPLETE_PBR_GLTF_FIXTURE)
+TEST(GltfCookTests, CooksRepoCompletePbrFixture)
+{
+    // Product gate fixture: multi-mesh + NORMAL/UV + baseColor/MR/normal textures + distinct MR factors.
+    const std::filesystem::path gltfPath{TINA_COMPLETE_PBR_GLTF_FIXTURE};
+    ASSERT_TRUE(std::filesystem::exists(gltfPath)) << TINA_COMPLETE_PBR_GLTF_FIXTURE;
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+
+    std::size_t meshCount = 0;
+    std::size_t materialCount = 0;
+    std::size_t textureCount = 0;
+    std::size_t prefabCount = 0;
+    bool sawDielectric = false;
+    bool sawMetal = false;
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind == AssetFormat::AssetKind::StaticMesh)
+        {
+            ++meshCount;
+            auto mesh = AssetFormat::parseStaticMeshPayload(asset.payload);
+            ASSERT_TRUE(mesh.has_value()) << (mesh ? "" : mesh.error().message);
+            EXPECT_GT(mesh->vertexCount, 0U);
+            EXPECT_GT(mesh->indexCount, 0U);
+        }
+        else if (asset.assetKind == AssetFormat::AssetKind::Material)
+        {
+            ++materialCount;
+            auto mat = AssetFormat::parseMaterialPayload(asset.payload);
+            ASSERT_TRUE(mat.has_value()) << (mat ? "" : mat.error().message);
+            EXPECT_TRUE(mat->hasBaseColorTexture);
+            EXPECT_TRUE(mat->hasMetallicRoughnessTexture);
+            EXPECT_TRUE(mat->hasNormalTexture);
+            ASSERT_EQ(asset.dependencies.size(), 3U);
+            if (mat->metallicFactor < 0.5F)
+            {
+                sawDielectric = true;
+                EXPECT_NEAR(mat->metallicFactor, 0.1F, 1.0e-4F);
+                EXPECT_NEAR(mat->roughnessFactor, 0.7F, 1.0e-4F);
+            }
+            else
+            {
+                sawMetal = true;
+                EXPECT_NEAR(mat->metallicFactor, 0.9F, 1.0e-4F);
+                EXPECT_NEAR(mat->roughnessFactor, 0.2F, 1.0e-4F);
+            }
+        }
+        else if (asset.assetKind == AssetFormat::AssetKind::Texture2D)
+        {
+            ++textureCount;
+        }
+        else if (asset.assetKind == AssetFormat::AssetKind::Prefab)
+        {
+            ++prefabCount;
+            std::vector<AssetFormat::PrefabNodeView> nodes;
+            auto prefab = AssetFormat::parsePrefabPayload(asset.payload, nodes);
+            ASSERT_TRUE(prefab.has_value()) << (prefab ? "" : prefab.error().message);
+            EXPECT_GE(prefab->nodes.size(), 2U);
+        }
+    }
+    EXPECT_EQ(meshCount, 2U);
+    EXPECT_EQ(materialCount, 2U);
+    EXPECT_EQ(textureCount, 3U);
+    EXPECT_EQ(prefabCount, 1U);
+    EXPECT_TRUE(sawDielectric);
+    EXPECT_TRUE(sawMetal);
+
+    const auto catalogRoot =
+        std::filesystem::temp_directory_path() / "tina_gltf_complete_pbr_catalog";
+    std::error_code ec;
+    std::filesystem::remove_all(catalogRoot, ec);
+    ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
+}
+#endif
+
 } // namespace
 } // namespace Tina::Asset

@@ -17,6 +17,14 @@ target_link_libraries(tina_sample_3d PRIVATE
 )
 set_target_properties(tina_sample_3d PROPERTIES CXX_EXTENSIONS OFF)
 
+set(_tina_complete_pbr_gltf
+    "${PROJECT_SOURCE_DIR}/tests/fixtures/gltf/complete_pbr/complete_pbr.gltf")
+if(EXISTS "${_tina_complete_pbr_gltf}")
+    # Default product gate uses the complete PBR repo fixture (multi-mesh + MR/normal maps).
+    target_compile_definitions(tina_sample_3d PRIVATE
+        "TINA_COMPLETE_PBR_GLTF_FIXTURE=\"${_tina_complete_pbr_gltf}\"")
+endif()
+
 if(WIN32)
     add_custom_command(TARGET tina_sample_3d POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

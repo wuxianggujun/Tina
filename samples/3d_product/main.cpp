@@ -88,8 +88,12 @@ struct LifecycleCounters final {
     u64 prefabInstances = 0;
     bool meshBound = false;
     bool materialTextureBound = false;
+    bool materialFactorsBound = false;
+    bool materialMrTextureBound = false;
+    bool materialNormalTextureBound = false;
     bool gltfCooked = false;
     bool prefabInstantiated = false;
+    bool completePbrFixture = false;
 };
 
 using DeviceCapture = Tina::Sample3D::DeviceCapture;
@@ -130,6 +134,7 @@ struct Product3DResources final {
     std::array<ProductMeshSlot, MaxProductMeshSlots> meshes{};
     u32 meshSlotCount = 0;
     bool externalGltf = false;
+    bool completePbrFixture = false;
     std::string gltfSourcePath{};
 };
 
@@ -154,8 +159,8 @@ struct Product3DResources final {
     return std::span<const unsigned char>{kPng, sizeof(kPng)};
 }
 
-// Two meshes + shared relative-file baseColorTexture (ASSET-001). TEXCOORD optional.
-[[nodiscard]] std::string_view productTwoMeshGltfJson() noexcept
+// Fallback only when TINA_COMPLETE_PBR_GLTF_FIXTURE is not compiled in (minimal two-mesh + baseColor).
+[[nodiscard]] std::string_view productTwoMeshGltfJsonFallback() noexcept
 {
     return R"json({
   "asset": {"version": "2.0"},
@@ -206,6 +211,15 @@ struct Product3DResources final {
   }]
 })json";
 }
+
+#if defined(TINA_COMPLETE_PBR_GLTF_FIXTURE)
+[[nodiscard]] bool tryResolveCompletePbrFixture(std::filesystem::path& outPath) noexcept
+{
+    std::error_code ec;
+    outPath = std::filesystem::path{TINA_COMPLETE_PBR_GLTF_FIXTURE};
+    return std::filesystem::exists(outPath, ec) && !ec;
+}
+#endif
 
 [[nodiscard]] Tina::UI::UILayoutStyle absolutePanelStyle(Tina::UI::UILayoutLength left, Tina::UI::UILayoutLength top,
                                                          Tina::UI::UILayoutLength width,
@@ -415,8 +429,8 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     return *Tina::Core::AssetId::fromBytes(bytes);
 }
 
-[[nodiscard]] Tina::Core::Status writeBuiltInGltfFixture(const std::filesystem::path& workRoot,
-                                                        std::filesystem::path& outGltfPath)
+[[nodiscard]] Tina::Core::Status writeFallbackGltfFixture(const std::filesystem::path& workRoot,
+                                                          std::filesystem::path& outGltfPath)
 {
     {
         const auto png = productTinyRedPng();
@@ -434,7 +448,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Io, "failed to write temporary glTF fixture");
         }
-        out << productTwoMeshGltfJson();
+        out << productTwoMeshGltfJsonFallback();
     }
     return Tina::Core::success();
 }
@@ -446,6 +460,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     resources.workRoot = std::filesystem::temp_directory_path() / "tina_sample_3d_gltf";
     resources.catalogRoot = resources.workRoot / "catalog";
     resources.externalGltf = !options.gltfPath.empty();
+    resources.completePbrFixture = false;
     resources.gltfSourcePath = options.gltfPath;
     std::error_code ec;
     std::filesystem::remove_all(resources.workRoot, ec);
@@ -472,13 +487,21 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             return Tina::Core::failure(std::move(error));
         }
     }
+#if defined(TINA_COMPLETE_PBR_GLTF_FIXTURE)
+    else if (tryResolveCompletePbrFixture(gltfPath))
+    {
+        resources.completePbrFixture = true;
+        resources.gltfSourcePath = toUtf8(gltfPath);
+    }
+#endif
     else
     {
-        if (auto status = writeBuiltInGltfFixture(resources.workRoot, gltfPath); !status)
+        if (auto status = writeFallbackGltfFixture(resources.workRoot, gltfPath); !status)
         {
             return status;
         }
     }
+    counters.completePbrFixture = resources.completePbrFixture;
 
     // Cook via GltfCook (cgltf PRIVATE). Unsupported features fail with structured Asset errors.
     auto request = Tina::Asset::cookGltfFileToCatalogRequest(toUtf8(gltfPath), Tina::Asset::GltfCookIds{});
@@ -797,6 +820,7 @@ class Product3DState final : public Tina::IGameState {
             {
                 return status;
             }
+            counters_->materialFactorsBound = true;
             if (productMesh.textureFile)
             {
                 auto texture = Tina::Asset::uploadTexture2DFromCooked(*device, productMesh.textureFile);
@@ -830,6 +854,7 @@ class Product3DState final : public Tina::IGameState {
                 }
                 productMesh.gpuMetallicRoughnessTexture = *texture;
                 productMesh.metallicRoughnessTextureUploaded = true;
+                counters_->materialMrTextureBound = true;
                 ++counters_->texturesUploaded;
             }
             if (productMesh.normalTextureFile)
@@ -847,13 +872,27 @@ class Product3DState final : public Tina::IGameState {
                 }
                 productMesh.gpuNormalTexture = *texture;
                 productMesh.normalTextureUploaded = true;
+                counters_->materialNormalTextureBound = true;
                 ++counters_->texturesUploaded;
             }
         }
         counters_->meshBound = true;
-        // Built-in fixture binds one texture per mesh; external may omit textures.
-        counters_->materialTextureBound =
-            resources_->externalGltf ? true : (counters_->texturesUploaded == resources_->meshSlotCount);
+        // Complete PBR fixture: base+MR+normal per mesh (texturesUploaded >= 3*slots).
+        // Minimal fallback: one baseColor per mesh. External may omit textures.
+        if (resources_->externalGltf)
+        {
+            counters_->materialTextureBound = true;
+        }
+        else if (resources_->completePbrFixture)
+        {
+            counters_->materialTextureBound =
+                counters_->texturesUploaded >= (resources_->meshSlotCount * 3U) && counters_->materialMrTextureBound &&
+                counters_->materialNormalTextureBound && counters_->materialFactorsBound;
+        }
+        else
+        {
+            counters_->materialTextureBound = (counters_->texturesUploaded >= resources_->meshSlotCount);
+        }
 
         auto worldResult = Tina::Scene::World::Create(Tina::Scene::WorldConfig{32});
         if (!worldResult)
@@ -1243,8 +1282,13 @@ class Product3DApplication final : public Tina::IGameApplication {
     }
     const u32 expectedMeshes = resources.meshSlotCount;
     const bool multiMesh = expectedMeshes >= 2U;
-    const bool texturesOk =
-        resources.externalGltf ? true : (counters.texturesUploaded == expectedMeshes);
+    const bool texturesOk = resources.externalGltf
+                                ? true
+                                : (resources.completePbrFixture
+                                       ? (counters.texturesUploaded >= expectedMeshes * 3U &&
+                                          counters.materialMrTextureBound && counters.materialNormalTextureBound &&
+                                          counters.materialFactorsBound)
+                                       : (counters.texturesUploaded >= expectedMeshes));
     if (*runResult != Tina::RunExitReason::GameRequestedExitAfterCurrentFrame ||
         counters.frameUpdates != options.targetFrameCount ||
         counters.renderExtractions != options.targetFrameCount || counters.stateEnters != 1 ||
@@ -1281,8 +1325,12 @@ class Product3DApplication final : public Tina::IGameApplication {
               << counters.texturesUploaded << ",\"meshesUploaded\":" << counters.meshesUploaded
               << ",\"materialsLoaded\":" << counters.materialsLoaded << ",\"prefabNodes\":" << counters.prefabNodes
               << ",\"prefabInstances\":" << counters.prefabInstances << ",\"meshSlotCount\":" << expectedMeshes
-              << ",\"externalGltf\":" << (resources.externalGltf ? "true" : "false");
-    if (resources.externalGltf)
+              << ",\"externalGltf\":" << (resources.externalGltf ? "true" : "false")
+              << ",\"completePbrFixture\":" << (resources.completePbrFixture ? "true" : "false")
+              << ",\"materialFactorsBound\":" << (counters.materialFactorsBound ? "true" : "false")
+              << ",\"materialMrTextureBound\":" << (counters.materialMrTextureBound ? "true" : "false")
+              << ",\"materialNormalTextureBound\":" << (counters.materialNormalTextureBound ? "true" : "false");
+    if (resources.externalGltf || resources.completePbrFixture)
     {
         std::cout << ",\"gltfPath\":";
         writeJsonString(std::cout, resources.gltfSourcePath);

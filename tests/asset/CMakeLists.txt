@@ -72,3 +72,10 @@ target_link_libraries(tina_asset_tests PRIVATE
     GTest::gtest_main
 )
 set_target_properties(tina_asset_tests PROPERTIES CXX_EXTENSIONS OFF)
+
+set(_tina_complete_pbr_gltf
+    "${PROJECT_SOURCE_DIR}/tests/fixtures/gltf/complete_pbr/complete_pbr.gltf")
+if(EXISTS "${_tina_complete_pbr_gltf}")
+    target_compile_definitions(tina_asset_tests PRIVATE
+        "TINA_COMPLETE_PBR_GLTF_FIXTURE=\"${_tina_complete_pbr_gltf}\"")
+endif()
