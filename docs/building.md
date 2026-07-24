@@ -142,10 +142,21 @@ relative URI 的 root containment 与 size 上限已由 ASSET-001 落地；仍�
 
 ## Linux Null 与 sanitizer
 
-Windows 宿主可用 Docker Desktop 复现 GCC13 Null（TEST-001 子图）：
+Windows 宿主可用 Docker Desktop 复现 GCC13 Null / Platform（TEST-001 子图）：
 
 ```powershell
-docker build -f docker/linux-gcc13/Dockerfile -t tina-linux-gcc13:test-001 .
+# Null
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxDockerGate.ps1 `
+  -Gate gcc13-null -OutJson artifacts\gates\test-001-linux-gcc13-null.json
+
+# Platform GLFW/X11 (Xvfb)
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxDockerGate.ps1 `
+  -Gate gcc13-platform -OutJson artifacts\gates\test-001-linux-gcc13-platform.json
+```
+
+兼容旧入口：
+
+```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxGcc13NullGate.ps1 `
   -SkipImageBuild -OutJson artifacts\gates\test-001-linux-gcc13-null.json
 ```

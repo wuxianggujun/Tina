@@ -22,7 +22,7 @@
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
 
-| TEST-001 | Partial | P0 | 复验 Linux vNext 当前 tip | 可用 GCC 13、Clang 22 + libstdc++15 | **已完成** GCC13 Null（Docker）；**待** GCC GLFW、Clang Null、Clang sanitizer；记录工具链/返回码/X11/Wayland | [Linux 证据](m12-evidence-linux.md) |
+| TEST-001 | Partial | P0 | 复验 Linux vNext 当前 tip | 可用 GCC 13、Clang 22 + libstdc++15 | **已完成** GCC13 Null + GCC13 Platform/GLFW（Xvfb Docker）；**待** Clang Null / sanitizer（镜像构建受网络/代理阻塞）；记录工具链/返回码 | [Linux 证据](m12-evidence-linux.md) |
 
 
 
@@ -80,3 +80,4 @@
 | RUNTIME-001-INPUT | `blocksGameplayInputBelow`：下层 fixed/frame 使用空 action snapshot；`gameplayInputBlockedForDepth` + unit tests | [gameplay](gameplay.md) · ADR 0014 |
 | RENDER-3D-TEX | Opaque3D unlit 采样 materialKey 绑定贴图（shader `s_texColor` + default white）；关闭「bind 不 draw」假完成 | [3D](game-3d.md) |
 | TEST-001-GCC13-NULL | Docker Desktop + `linux-gcc13-vnext`：`tina_tests`/`tina_ui_tests`(255)/`tina_runtime_ui_tests`(83)/bridge(13)/`tina_sample_null` 300 帧；vcpkg baseline 与仓库一致；`artifacts/gates/test-001-linux-gcc13-null.json` | [Linux 证据](m12-evidence-linux.md) |
+| TEST-001-GCC13-PLATFORM | Docker + Xvfb + `linux-gcc13-vnext-platform`：`tina_tests` + `tina_platform_glfw_tests`(34/34) + `tina_sample_platform --frames=60`；`artifacts/gates/test-001-linux-gcc13-platform.json` | [Linux 证据](m12-evidence-linux.md) |

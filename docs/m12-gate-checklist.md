@@ -16,7 +16,7 @@
 | G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）与 texture bind API 已通过；Opaque3D 贴图采样 / PBR / fence pin 后置 |
 | G4 | Asset/Cooker | Strong | multi-mesh、distinct AssetId/Prefab dependency、baseColorTexture PNG/JPEG cook 与 Material dependency 已完成；PBR/multi-primitive 后置 |
 | G5 | Audio | Evidence | backend-neutral tests、miniaudio null-device 与 product-2d JSON 已有 Windows 证据 |
-| G6 | 平台矩阵 | Partial | tip GCC13 Null Docker 证据有（见 [Linux 证据](m12-evidence-linux.md)）；GLFW/Clang sanitizer 仍 Open |
+| G6 | 平台矩阵 | Partial | tip GCC13 Null + GCC13 Platform/GLFW（Xvfb）Docker 证据有；Clang Null/sanitizer 仍 Open |
 | G7 | Legacy smoke | N/A | 产品已删除，不再运行 Legacy smoke |
 | G8 | 产品旧接口零引用 | Done | Legacy product target/source 已删除；整库残留见 CLEAN-001～003 |
 | G9 | 独立产品删除 | Done | `e2ef3d5e` 起的删除及后续迁移提交 |
