@@ -215,7 +215,7 @@ FreeType、bgfx 和 product-2d 需要对应 feature 图；完整命令见 [测�
 
 | ID | 范围 |
 | --- | --- |
-| `UI-002` | Windows UIA 进程桥接（HWND/IRawElementProvider）与 Linux AT-SPI；私有 UIA 映射 adapter（`tina_ui_uia`）+ SPI 已有 |
+| `UI-002` | 产品 HWND 自动接线 + Narrator/Inspect 金标 + Linux AT-SPI（映射 + HostBridge 已有） |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON 已有；OS 级 100/150/200% DPI 真机矩阵后置） |
 | `UI-004` | 通用 Focus Scope、Modal、持久 Pointer Capture |
 | `UI-005` | ScrollView、虚拟 ListView、Dropdown、TreeView |

@@ -80,6 +80,10 @@ if(TINA_BUILD_UI_UIA)
         uia/UIUiaMapping.hpp
         uia/WindowsUiaAccessibilityProvider.hpp
         uia/WindowsUiaAccessibilityProvider.cpp
+        uia/WindowsUiaComProviders.hpp
+        uia/WindowsUiaComProviders.cpp
+        uia/WindowsUiaHostBridge.hpp
+        uia/WindowsUiaHostBridge.cpp
     )
     add_library(Tina::UIUia ALIAS tina_ui_uia)
     target_compile_features(tina_ui_uia PUBLIC cxx_std_23)
@@ -94,6 +98,11 @@ if(TINA_BUILD_UI_UIA)
             Tina::UI
         PRIVATE
             Tina::ProjectOptions
+            ole32
+            oleaut32
+            oleacc
+            UIAutomationCore
+            comctl32
     )
     set_target_properties(tina_ui_uia PROPERTIES
         CXX_EXTENSIONS OFF

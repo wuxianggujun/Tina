@@ -5,7 +5,11 @@
 #include <tina/ui/WindowsUiaAccessibilityProviderFactory.hpp>
 
 #include "WindowsUiaAccessibilityProvider.hpp"
+#include "WindowsUiaHostBridge.hpp"
 #include "UIUiaMapping.hpp"
+
+#include <UIAutomation.h>
+#include <Windows.h>
 
 #include <memory>
 #include <memory_resource>
@@ -322,6 +326,89 @@ TEST(WindowsUiaProviderTest, PublicHeadersStayComFree)
     // Compile-time / link-time smoke: factory header and UIAccessibility are used
     // without requiring COM types in the test translation unit public include set.
     EXPECT_TRUE(UI::windowsUiaAccessibilityProviderAvailable());
+}
+
+TEST(WindowsUiaHostBridgeTest, AttachPublishExposesRootProviderAndChildren)
+{
+    auto bridgeResult = UI::createWindowsUiaHostBridge();
+    ASSERT_TRUE(bridgeResult.has_value());
+    auto bridge = std::move(*bridgeResult);
+
+    const HWND hwnd = ::CreateWindowExW(
+        0, L"STATIC", L"TinaUiaBridgeTest", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 320, 200, nullptr,
+        nullptr, ::GetModuleHandleW(nullptr), nullptr);
+    ASSERT_NE(hwnd, nullptr);
+
+    assertOk(bridge->attach(hwnd));
+    EXPECT_TRUE(bridge->isAttached());
+    EXPECT_EQ(bridge->hwnd(), hwnd);
+
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    auto button = context->rootBuilder().createButton(root.rootNodeId());
+    ASSERT_TRUE(button.has_value());
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 100.0F)));
+    assertOk(updater.setLayoutStyle(*button, fixedSize(80.0F, 32.0F)));
+    assertOk(updater.setText(*button, "Bridge"));
+    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+
+    UI::UIAccessibilityTree tree;
+    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(bridge->publish(tree));
+    EXPECT_TRUE(bridge->hasPublishedTree());
+    EXPECT_GE(bridge->publishCount(), 1U);
+
+    IRawElementProviderSimple* provider = bridge->acquireRootProvider();
+    ASSERT_NE(provider, nullptr);
+
+    IRawElementProviderFragmentRoot* fragmentRoot = nullptr;
+    ASSERT_HRESULT_SUCCEEDED(provider->QueryInterface(IID_PPV_ARGS(&fragmentRoot)));
+    ASSERT_NE(fragmentRoot, nullptr);
+
+    IRawElementProviderFragment* rootFragment = nullptr;
+    ASSERT_HRESULT_SUCCEEDED(provider->QueryInterface(IID_PPV_ARGS(&rootFragment)));
+    ASSERT_NE(rootFragment, nullptr);
+
+    IRawElementProviderFragment* firstChild = nullptr;
+    ASSERT_HRESULT_SUCCEEDED(rootFragment->Navigate(NavigateDirection_FirstChild, &firstChild));
+    EXPECT_NE(firstChild, nullptr);
+    if (firstChild != nullptr) {
+        IRawElementProviderSimple* childSimple = nullptr;
+        ASSERT_HRESULT_SUCCEEDED(firstChild->QueryInterface(IID_PPV_ARGS(&childSimple)));
+        ASSERT_NE(childSimple, nullptr);
+        VARIANT controlType{};
+        ::VariantInit(&controlType);
+        ASSERT_HRESULT_SUCCEEDED(childSimple->GetPropertyValue(UIA_ControlTypePropertyId, &controlType));
+        EXPECT_EQ(controlType.vt, VT_I4);
+        ::VariantClear(&controlType);
+        childSimple->Release();
+        firstChild->Release();
+    }
+    rootFragment->Release();
+    fragmentRoot->Release();
+    provider->Release();
+
+    bridge->clear();
+    EXPECT_GE(bridge->clearCount(), 1U);
+    bridge->detach();
+    EXPECT_FALSE(bridge->isAttached());
+    (void)::DestroyWindow(hwnd);
+}
+
+TEST(WindowsUiaHostBridgeTest, DetachWithoutAttachIsSafe)
+{
+    auto bridgeResult = UI::createWindowsUiaHostBridge();
+    ASSERT_TRUE(bridgeResult.has_value());
+    auto bridge = std::move(*bridgeResult);
+    bridge->detach();
+    EXPECT_FALSE(bridge->isAttached());
+    EXPECT_EQ(bridge->acquireRootProvider(), nullptr);
 }
 
 } // namespace

@@ -32,7 +32,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 
 
-| UI-002 | Partial | P1 | Windows UIA 真机 adapter 首切片 | UI-002-SPI | **已完成** 可选 `tina_ui_uia`：`UIAccessibilityTree`→UIA 形属性（ControlType/Name/Enabled/Focus/Range/Toggle/Value）、stale/clear 生命周期、`tina_ui_uia_tests`、公开工厂头零 COM；**待** HWND/`IRawElementProviderSimple` 外部 Narrator/Inspect 进程桥接与 Linux AT-SPI | Unit |
+| UI-002 | Partial | P1 | Windows UIA 真机 adapter | UI-002-SPI | **已完成** 属性映射 + **HWND subclass / `IRawElementProviderSimple` 根与子 fragment**（`WindowsUiaHostBridge`，`WM_GETOBJECT`）；`tina_ui_uia_tests` 含 HostBridge；**待** 产品 HWND 自动接线、Narrator/Inspect 人工金标、Linux AT-SPI | Unit |
 | UI-003 | Partial | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** ContentScale* 单测 + 单机 ROI/baseline + **content-scale-like 逻辑尺寸矩阵**（960/1200/1440/1280/1920，`RunUi003SizeMatrix.ps1` + 分尺寸 baseline）+ sample JSON `contentScale`/`logical`/`framebuffer` 一致性；**待** OS 级 100/150/200% DPI 真机矩阵与字体 fingerprint 金标 | Unit + Visual |
 
 
@@ -78,6 +78,8 @@
 | RUNTIME-001-INT | Null Host 集成：base `requestPush` overlay（block fixed/frame below）→ overlay `requestPop` → base 恢复；enter 失败无 `onExit`；`GameStateStackIntegrationTests` | [gameplay](gameplay.md) · ADR 0014 |
 | RUNTIME-001-SAMPLE | `tina_sample_2d` 收尾自动 pause overlay（≥60 帧）：push/pop + policy block；JSON `pauseOverlay*`；短 smoke 跳过 | [2D](game-2d.md) · ADR 0014 |
 | UI-002-SPI | `UIAccessibilityTree`/`IUIAccessibilityProvider`/`UIAccessibilityProbeProvider`：从 committedSemantics 发布 role/name/state/range；stale node 拒绝；`UIAccessibilityTests`；`tina_sample_2d` 产品 JSON `accessibility*` | [UI](ui.md) · [2D](game-2d.md) |
+| UI-002-UIA-MAP | 可选 `tina_ui_uia`：UIA 形属性映射 + factory 零 COM；`tina_ui_uia_tests` | [UI](ui.md) |
+| UI-002-HWND | `WindowsUiaHostBridge`：SetWindowSubclass + WM_GETOBJECT + fragment root/children `IRawElementProviderSimple`；HostBridge 单测 | [UI](ui.md) |
 | RUNTIME-001-INPUT | `blocksGameplayInputBelow`：下层 fixed/frame 使用空 action snapshot；`gameplayInputBlockedForDepth` + unit tests | [gameplay](gameplay.md) · ADR 0014 |
 | RENDER-3D-TEX | Opaque3D unlit 采样 materialKey 绑定贴图（shader `s_texColor` + default white）；关闭「bind 不 draw」假完成 | [3D](game-3d.md) |
 | TEST-001-GCC13-NULL | Docker Desktop + `linux-gcc13-vnext`：`tina_tests`/`tina_ui_tests`(255)/`tina_runtime_ui_tests`(83)/bridge(13)/`tina_sample_null` 300 帧；vcpkg baseline 与仓库一致；`artifacts/gates/test-001-linux-gcc13-null.json` | [Linux 证据](m12-evidence-linux.md) |

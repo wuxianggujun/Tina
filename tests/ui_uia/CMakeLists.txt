@@ -13,5 +13,9 @@ target_link_libraries(tina_ui_uia_tests
         Tina::UI
         Tina::UIUia
         GTest::gtest_main
+        ole32
+        oleaut32
+        UIAutomationCore
+        user32
 )
 set_target_properties(tina_ui_uia_tests PROPERTIES CXX_EXTENSIONS OFF)

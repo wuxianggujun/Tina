@@ -14,9 +14,9 @@ namespace Tina::UI {
 
 // Creates an IUIAccessibilityProvider that maps UIAccessibilityTree onto
 // UIA-shaped properties (ControlType, Name, IsEnabled, focus, RangeValue,
-// ToggleState, Value). Full HWND / IRawElementProviderSimple registration for
-// external Narrator/Inspect is optional product follow-up; this factory delivers
-// the private in-process adapter and property mirror used by unit tests.
+// ToggleState, Value). HWND registration uses private WindowsUiaHostBridge
+// (SetWindowSubclass + IRawElementProviderSimple); product auto-attach remains
+// a follow-up. This factory stays COM-free for Game SDK headers.
 [[nodiscard]] Core::Result<std::unique_ptr<IUIAccessibilityProvider>> createWindowsUiaAccessibilityProvider(
     std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
 
