@@ -957,11 +957,15 @@ struct UIContext::Impl final {
     usize liveRootCount = 0;
     u32 firstRootIndex = InvalidNodeIndex;
     u32 lastRootIndex = InvalidNodeIndex;
-    bool structureDirty = false;
-    bool layoutDirty = false;
-    bool hitDirty = false;
-    bool paintDirty = false;
-    bool semanticsDirty = false;
+    // Single phase-level dirty truth. Node-level dirtyByIndex remains the
+    // incremental work queue; these bits only say which published snapshots
+    // still need a successful commit.
+    static constexpr UIDirty PhaseStructure = UIDirty::Structure;
+    static constexpr UIDirty PhaseLayout = UIDirty::Measure;
+    static constexpr UIDirty PhaseHit = UIDirty::HitTest;
+    static constexpr UIDirty PhasePaint = UIDirty::Paint;
+    static constexpr UIDirty PhaseSemantics = UIDirty::Semantics;
+    UIDirty phaseDirty = UIDirty::None;
     // A failed candidate may have partially mutated layout scratch. The next
     // layout attempt must rebuild from scratch before reuse is enabled again.
     bool layoutReuseCacheValid = false;
@@ -3253,9 +3257,14 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] bool isPhaseDirty(UIDirty flags) const noexcept
+    {
+        return hasDirty(phaseDirty, flags);
+    }
+
     [[nodiscard]] Core::Status publishStructureIfDirty()
     {
-        if (!structureDirty) {
+        if (!isPhaseDirty(PhaseStructure)) {
             return Core::success();
         }
 
@@ -3263,7 +3272,7 @@ struct UIContext::Impl final {
         buildCommittedStructure(committedBuffers[writeBufferIndex]);
         publishedBufferIndex = writeBufferIndex;
         ++committedRevision;
-        structureDirty = false;
+        phaseDirty = clearDirty(phaseDirty, PhaseStructure);
         return Core::success();
     }
 
@@ -4505,9 +4514,7 @@ struct UIContext::Impl final {
 
     void markStructureChanged() noexcept
     {
-        structureDirty = true;
-        layoutDirty = true;
-        hitDirty = true;
+        phaseDirty |= PhaseStructure | PhaseLayout | PhaseHit;
         layoutReuseCacheValid = false;
     }
 
@@ -4702,8 +4709,7 @@ struct UIContext::Impl final {
             dirtyByIndex[dirtyIndex] |= pathIndex == 0 ? ChangedNodeDirty : AncestorDirty;
         }
         dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
-        layoutDirty = true;
-        hitDirty = true;
+        phaseDirty |= PhaseLayout | PhaseHit;
         return Core::success();
     }
 
@@ -4730,7 +4736,7 @@ struct UIContext::Impl final {
         }
         dirtyByIndex[index] |= UIDirty::HitTest;
         dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
-        hitDirty = true;
+        phaseDirty |= PhaseHit;
         return Core::success();
     }
 
@@ -4864,8 +4870,7 @@ struct UIContext::Impl final {
             dirtyByIndex[index] |= UIDirty::Paint | UIDirty::Semantics;
         }
         dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
-        paintDirty = true;
-        semanticsDirty = true;
+        phaseDirty |= PhasePaint | PhaseSemantics;
         return Core::success();
     }
 
@@ -4879,10 +4884,7 @@ struct UIContext::Impl final {
         std::fill(dirtyByIndex.begin(), dirtyByIndex.end(), UIDirty::None);
         std::fill(dirtyQueuedByIndex.begin(), dirtyQueuedByIndex.end(), 0);
         dirtyQueue.clear();
-        layoutDirty = false;
-        hitDirty = false;
-        paintDirty = false;
-        semanticsDirty = false;
+        phaseDirty = UIDirty::None;
     }
 
     [[nodiscard]] bool isNodeWithinRoot(UINodeId root, UINodeId node) const noexcept
@@ -7036,8 +7038,7 @@ struct UIContext::Impl final {
             childIndex = nextSiblingIndex;
         }
         dirtyQueueHighWater = (std::max)(dirtyQueueHighWater, dirtyQueue.size());
-        paintDirty = true;
-        semanticsDirty = true;
+        phaseDirty |= PhasePaint | PhaseSemantics;
         return Core::success();
     }
 
@@ -7275,12 +7276,15 @@ struct UIContext::Impl final {
         viewportSize.height = normalizeFloat(viewportSize.height);
         const bool viewportChanged = !hasCommittedViewport
             || viewportSize != committedViewportSize;
-        const bool layoutNeedsCommit = structureDirty || layoutDirty || viewportChanged;
-        const bool hitNeedsCommit = hitDirty || layoutNeedsCommit || committedHitRevision == 0;
+        const bool structureNeedsCommit = isPhaseDirty(PhaseStructure);
+        const bool layoutNeedsCommit =
+            structureNeedsCommit || isPhaseDirty(PhaseLayout) || viewportChanged;
+        const bool hitNeedsCommit =
+            isPhaseDirty(PhaseHit) || layoutNeedsCommit || committedHitRevision == 0;
         bool paintNeedsCommit =
-            paintDirty || layoutNeedsCommit || committedPaintRevision == 0;
-        bool semanticsNeedsCommit =
-            semanticsDirty || layoutNeedsCommit || committedSemanticsRevision == 0;
+            isPhaseDirty(PhasePaint) || layoutNeedsCommit || committedPaintRevision == 0;
+        bool semanticsNeedsCommit = isPhaseDirty(PhaseSemantics) || layoutNeedsCommit
+            || committedSemanticsRevision == 0;
 
         if (!layoutNeedsCommit && !hitNeedsCommit && !paintNeedsCommit && !semanticsNeedsCommit) {
             lastLayoutPass = {};
@@ -7297,7 +7301,7 @@ struct UIContext::Impl final {
         }
 
         const usize writeStructureBufferIndex = 1 - publishedBufferIndex;
-        if (structureDirty) {
+        if (structureNeedsCommit) {
             buildCommittedStructure(committedBuffers[writeStructureBufferIndex]);
         }
 
@@ -7306,7 +7310,7 @@ struct UIContext::Impl final {
         std::span<const UICommittedLayoutEntry> candidateLayoutEntries{};
         if (layoutNeedsCommit) {
             const bool allowLayoutReuse =
-                !structureDirty && !viewportChanged && layoutReuseCacheValid;
+                !structureNeedsCommit && !viewportChanged && layoutReuseCacheValid;
             layoutReuseCacheValid = false;
             layoutReuseInProgress = allowLayoutReuse;
             auto layoutReuseGuard = Core::makeScopeExit([this]() noexcept {
@@ -7338,7 +7342,8 @@ struct UIContext::Impl final {
                 currentLayout.size());
         }
 
-        const u64 candidateStructureRevision = committedRevision + (structureDirty ? 1u : 0u);
+        const u64 candidateStructureRevision =
+            committedRevision + (structureNeedsCommit ? 1u : 0u);
         const u64 candidateLayoutRevision = committedLayoutRevision + (layoutNeedsCommit ? 1u : 0u);
         // C1c-a derives paint order solely from committed tree preorder. A
         // future independent Order mutation must advance this stamp without
@@ -7472,10 +7477,9 @@ struct UIContext::Impl final {
             }
         }
 
-        if (structureDirty) {
+        if (structureNeedsCommit) {
             publishedBufferIndex = writeStructureBufferIndex;
             ++committedRevision;
-            structureDirty = false;
         }
         if (layoutNeedsCommit) {
             publishedLayoutBufferIndex = writeLayoutBufferIndex;
@@ -9318,11 +9322,11 @@ struct UIContext::Impl final {
             .committedSemanticsNodeCount =
                 committedSemanticsBuffers[publishedSemanticsBufferIndex].size(),
             .semanticsRevision = committedSemanticsRevision,
-            .structureDirty = structureDirty,
-            .layoutDirty = layoutDirty,
-            .hitDirty = hitDirty,
-            .paintDirty = paintDirty,
-            .semanticsDirty = semanticsDirty,
+            .structureDirty = isPhaseDirty(PhaseStructure),
+            .layoutDirty = isPhaseDirty(PhaseLayout),
+            .hitDirty = isPhaseDirty(PhaseHit),
+            .paintDirty = isPhaseDirty(PhasePaint),
+            .semanticsDirty = isPhaseDirty(PhaseSemantics),
             .lastLayoutPassCount = lastLayoutPass.passCount,
             .lastLayoutMeasuredNodeCount = lastLayoutPass.measuredNodeCount,
             .lastLayoutArrangedNodeCount = lastLayoutPass.arrangedNodeCount,

@@ -73,9 +73,11 @@ struct UIContextStatistics final {
     u64 paintRevision = 0;
     usize committedSemanticsNodeCount = 0;
     u64 semanticsRevision = 0;
-    // structureDirty: public name for structure-only dirty (legacy field was "dirty").
+    // Phase dirty mirrors internal UIDirty phase mask (Structure / layout /
+    // HitTest / Paint / Semantics). True means that snapshot still needs a
+    // successful commit before it matches live tree state.
     bool structureDirty = false;
-    bool layoutDirty = false; // Style/structure changes still requiring layout.
+    bool layoutDirty = false;
     bool hitDirty = false;
     bool paintDirty = false;
     bool semanticsDirty = false;
