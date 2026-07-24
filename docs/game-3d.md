@@ -1,14 +1,46 @@
 # 3D 产品架构
 
-`tina_sample_3d` 是当前最小 3D 产品门禁：运行时生成双 mesh glTF fixture，经 cgltf Cook、
-Catalog 发布与校验、两个 StaticMesh GPU upload、Prefab 实例化、Scene extraction 后由 bgfx Opaque3D
+`tina_sample_3d` 是当前最小 3D 产品门禁：默认在运行时生成双 mesh glTF fixture，经 cgltf Cook、
+Catalog 发布与校验、StaticMesh GPU upload、Prefab 实例化、Scene extraction 后由 bgfx Opaque3D
 pass 绘制，并叠加 retained UI。它证明 multi-mesh product 的端到端路径，不等同于完整 3D 渲染器。
 
-Cooker 与产品 sample 均支持一个 glTF 中两个 mesh：distinct Mesh/Material AssetId、独立 meshKey
-binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。外部 URI 安全与产品侧
-`setMesh3DMaterialTextureBinding` 已完成（ASSET-001）；bgfx Opaque3D unlit 在 submit 时按
+也可通过 CLI 加载**磁盘上的外部** `.gltf`/`.glb`（用户模型）：同样只走 cooker，Runtime 不解析源
+glTF。默认门禁仍用内建 fixture；外部路径为 opt-in。
+
+Cooker 与产品 sample 支持一个 glTF 中多个 mesh（sample 槽位上限 8）：distinct Mesh/Material
+AssetId、独立 meshKey binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。外部 URI 安全与
+产品侧 `setMesh3DMaterialTextureBinding` 已完成（ASSET-001）；bgfx Opaque3D unlit 在 submit 时按
 materialKey **采样** baseColor（`s_texColor` × instance factor；未 bind 用 1×1 白贴图）。
 PBR 见 `RENDER-001`。
+
+## CLI（`tina_sample_3d`）
+
+```text
+tina_sample_3d [--frames=N] [--frame-delay-ms=N] [--gltf=<path>|--gltf <path>] [--help]
+```
+
+| 标志 | 含义 |
+| --- | --- |
+| `--frames=N` | N 帧后退出（默认 300） |
+| `--frame-delay-ms=N` | 每帧 sleep（默认 0） |
+| `--gltf=<path>` / `--gltf <path>` | 从磁盘 cook 外部 `.gltf`/`.glb`；省略则用内建双 mesh fixture |
+| `--help` / `-h` | 打印用法 |
+
+失败（文件不存在、扩展名非法、cooker 不支持的 multi-primitive / Draco / skin 等）在 stderr 输出
+结构化 JSON：`status=error`、`code`、`message`、可选 `context[]`。成功 stdout JSON 含
+`gltfCooked`、`externalGltf`、`meshSlotCount`、`multiMesh` 等。
+
+外部路径 smoke 为 opt-in：仓库不强制附带用户模型；有模型时例如：
+
+```powershell
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0 --gltf=path\to\model.glb
+```
+
+默认 fixture 门禁：
+
+```powershell
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
+```
 
 ## 当前模块边界
 
@@ -66,12 +98,13 @@ Mesh/Material AssetId 转成当前 Render key。任一步失败都会逆序销�
 
 `tina_sample_3d` 当前使用同步 Catalog package API：
 
-1. 生成双三角形 multi-mesh glTF fixture（两 scene node，第二节点 translation x=2）；
-2. cook 并原子发布 Catalog package；
+1. 默认生成双三角形 multi-mesh glTF fixture（两 scene node，第二节点 translation x=2）；或
+   用 `--gltf` 指向磁盘上的 `.gltf`/`.glb`；
+2. `cookGltfFileToCatalogRequest` + `cookAndPublishCatalogPackage` 原子发布 Catalog package；
 3. 完整校验 Manifest、ContentHash 与 typed payload；
-4. 加载两个 StaticMesh、两个 Material 和一个 Prefab；
-5. 上传两个 mesh，并分别绑定 product meshKey 1 与 2；upload Texture2D 并
-   `setMesh3DMaterialTextureBinding`；
+4. 加载 N 个 StaticMesh、N 个 Material 和一个 Prefab（N≤8）；
+5. 上传 mesh，绑定 product meshKey `1..N`；有 baseColorTexture 时 upload Texture2D 并
+   `setMesh3DMaterialTextureBinding`（外部无贴图模型可跳过，Opaque3D 用 1×1 白）；
 6. resolver 按 node AssetId 映射到对应 meshKey/materialKey 与 per-mesh bounds/color；
 7. 实例化、extract、提交，退出时解除 binding 并销毁 GPU mesh/texture。
 
