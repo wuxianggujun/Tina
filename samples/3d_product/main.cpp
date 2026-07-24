@@ -98,15 +98,21 @@ struct ProductMeshSlot final {
     Tina::Asset::CookedAssetFile meshFile{};
     Tina::Asset::CookedAssetFile materialFile{};
     Tina::Asset::CookedAssetFile textureFile{};
+    Tina::Asset::CookedAssetFile metallicRoughnessTextureFile{};
     Tina::Render::RenderLinearColor materialColor{.red = 0.2F, .green = 0.6F, .blue = 0.9F, .alpha = 1.0F};
+    float metallicFactor = 0.0F;
+    float roughnessFactor = 1.0F;
     float meshBoundsRadius = 1.75F;
     Tina::Render::GpuMeshId gpuMesh{};
     Tina::Render::GpuTextureId gpuTexture{};
+    Tina::Render::GpuTextureId gpuMetallicRoughnessTexture{};
     bool meshUploaded = false;
     bool textureUploaded = false;
+    bool metallicRoughnessTextureUploaded = false;
     Tina::Core::AssetId meshId{};
     Tina::Core::AssetId materialId{};
     Tina::Core::AssetId textureId{};
+    Tina::Core::AssetId metallicRoughnessTextureId{};
     u32 meshKey = 0;
     u32 materialKey = 0;
 };
@@ -646,30 +652,61 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             .blue = material->baseColorB,
             .alpha = material->baseColorA,
         };
-        // Built-in fixture requires baseColorTexture. External models may be untextured
-        // (Opaque3D falls back to 1×1 white when materialKey has no texture binding).
-        if (material->hasBaseColorTexture && productMesh.materialFile.header().dependencyCount > 0)
-        {
-            auto textureDep = productMesh.materialFile.dependency(0);
+        productMesh.metallicFactor = material->metallicFactor;
+        productMesh.roughnessFactor = material->roughnessFactor;
+        // Cooked Material v2 deps are ordered: baseColor, metallicRoughness, normal (flag order).
+        u32 depIndex = 0;
+        const auto loadTextureDep = [&](bool present, Tina::Core::AssetId& outId,
+                                        Tina::Asset::CookedAssetFile& outFile,
+                                        const char* missingLabel) -> Tina::Core::Status {
+            if (!present)
+            {
+                return Tina::Core::success();
+            }
+            if (depIndex >= productMesh.materialFile.header().dependencyCount)
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, missingLabel);
+            }
+            auto textureDep = productMesh.materialFile.dependency(depIndex++);
             if (!textureDep || textureDep->expectedKind != Tina::AssetFormat::AssetKind::Texture2D)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                            "product material texture dependency is not Texture2D");
             }
-            productMesh.textureId = textureDep->assetId;
+            outId = textureDep->assetId;
             auto textureAsset = Tina::Asset::loadCookedAssetFromCatalog(
-                toUtf8(resources.catalogRoot), *catalog, productMesh.textureId,
+                toUtf8(resources.catalogRoot), *catalog, outId,
                 Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
             if (!textureAsset)
             {
                 return Tina::Core::failure(std::move(textureAsset.error()));
             }
-            productMesh.textureFile = std::move(*textureAsset);
+            outFile = std::move(*textureAsset);
+            return Tina::Core::success();
+        };
+        if (auto status = loadTextureDep(material->hasBaseColorTexture, productMesh.textureId,
+                                         productMesh.textureFile, "missing baseColor texture dep");
+            !status)
+        {
+            return status;
         }
-        else if (!resources.externalGltf)
+        if (!resources.externalGltf && !material->hasBaseColorTexture)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "product material missing baseColorTexture dependency");
+        }
+        if (auto status = loadTextureDep(material->hasMetallicRoughnessTexture,
+                                         productMesh.metallicRoughnessTextureId,
+                                         productMesh.metallicRoughnessTextureFile,
+                                         "missing metallicRoughness texture dep");
+            !status)
+        {
+            return status;
+        }
+        // normalTexture cooked but not bound in this sample slice (experimental MR uses MR map only).
+        if (material->hasNormalTexture)
+        {
+            ++depIndex;
         }
         ++counters.materialsLoaded;
     }
@@ -739,6 +776,12 @@ class Product3DState final : public Tina::IGameState {
             productMesh.meshUploaded = true;
             ++counters_->meshesUploaded;
 
+            if (auto status = device->setMesh3DMaterialFactors(productMesh.materialKey, productMesh.metallicFactor,
+                                                               productMesh.roughnessFactor);
+                !status)
+            {
+                return status;
+            }
             if (productMesh.textureFile)
             {
                 auto texture = Tina::Asset::uploadTexture2DFromCooked(*device, productMesh.textureFile);
@@ -753,6 +796,25 @@ class Product3DState final : public Tina::IGameState {
                 }
                 productMesh.gpuTexture = *texture;
                 productMesh.textureUploaded = true;
+                ++counters_->texturesUploaded;
+            }
+            if (productMesh.metallicRoughnessTextureFile)
+            {
+                auto texture =
+                    Tina::Asset::uploadTexture2DFromCooked(*device, productMesh.metallicRoughnessTextureFile);
+                if (!texture)
+                {
+                    return Tina::Core::failure(std::move(texture.error()));
+                }
+                if (auto status = device->setMesh3DMaterialMetallicRoughnessTextureBinding(productMesh.materialKey,
+                                                                                           *texture);
+                    !status)
+                {
+                    (void)device->destroyTexture2D(*texture);
+                    return status;
+                }
+                productMesh.gpuMetallicRoughnessTexture = *texture;
+                productMesh.metallicRoughnessTextureUploaded = true;
                 ++counters_->texturesUploaded;
             }
         }
@@ -950,6 +1012,13 @@ class Product3DState final : public Tina::IGameState {
             for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
             {
                 ProductMeshSlot& productMesh = resources_->meshes[slot];
+                if (productMesh.metallicRoughnessTextureUploaded)
+                {
+                    (void)device->setMesh3DMaterialMetallicRoughnessTextureBinding(productMesh.materialKey, {});
+                    (void)device->destroyTexture2D(productMesh.gpuMetallicRoughnessTexture);
+                    productMesh.metallicRoughnessTextureUploaded = false;
+                    productMesh.gpuMetallicRoughnessTexture = {};
+                }
                 if (productMesh.textureUploaded)
                 {
                     (void)device->setMesh3DMaterialTextureBinding(productMesh.materialKey, {});

@@ -55,6 +55,9 @@ TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)
     ASSERT_TRUE((*device)->setMesh3DMaterialTextureBinding(7U, *baseColor).has_value());
     ASSERT_TRUE(
         (*device)->setMesh3DMaterialMetallicRoughnessTextureBinding(7U, *metallicRoughness).has_value());
+    ASSERT_TRUE((*device)->setMesh3DMaterialFactors(7U, 0.25F, 0.75F).has_value());
+    ASSERT_FALSE((*device)->setMesh3DMaterialFactors(0U, 0.0F, 1.0F).has_value());
+    ASSERT_FALSE((*device)->setMesh3DMaterialFactors(7U, 1.5F, 0.5F).has_value());
     ASSERT_FALSE((*device)->setMesh3DMaterialMetallicRoughnessTextureBinding(0U, *metallicRoughness).has_value());
     ASSERT_TRUE((*device)->setMesh3DMaterialMetallicRoughnessTextureBinding(7U, {}).has_value());
     ASSERT_TRUE((*device)->setMesh3DMaterialTextureBinding(7U, {}).has_value());

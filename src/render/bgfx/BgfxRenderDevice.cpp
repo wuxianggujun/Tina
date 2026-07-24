@@ -1365,9 +1365,17 @@ class BgfxRenderDevice final : public IRenderDevice {
             // Fixed product light: no light system yet. Direction toward light in world space.
             constexpr std::array<float, 4> kDefaultLightDir{0.4F, 0.85F, 0.35F, 0.0F};
             constexpr std::array<float, 4> kDefaultLightColor{1.0F, 0.98F, 0.92F, 1.0F};
-            // metallic=0, roughness=1, ambient=0.18; w = MR map bound flag.
-            // TODO(RENDER-001): wire cooked metallic/roughness factors when Material payload lands.
-            const std::array<float, 4> mrParams{0.0F, 1.0F, 0.18F, mrMapBound};
+            // Factors from setMesh3DMaterialFactors (Cooked Material v2); defaults metallic=0, roughness=1.
+            float metallic = 0.0F;
+            float roughness = 1.0F;
+            if (const auto factors = mesh3DMaterialFactors_.find(batch.materialKey);
+                factors != mesh3DMaterialFactors_.end())
+            {
+                metallic = factors->second.metallic;
+                roughness = factors->second.roughness;
+            }
+            // ambient=0.18; w = MR map bound flag.
+            const std::array<float, 4> mrParams{metallic, roughness, 0.18F, mrMapBound};
 
             bgfx::setVertexBuffer(0, vb);
             bgfx::setIndexBuffer(ib);
@@ -1801,6 +1809,31 @@ class BgfxRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status setMesh3DMaterialFactors(u32 materialKey, float metallic,
+                                                        float roughness) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (materialKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload, "materialKey must be non-zero");
+        }
+        if (!(metallic >= 0.0F && metallic <= 1.0F) || !(roughness >= 0.0F && roughness <= 1.0F) ||
+            !std::isfinite(metallic) || !std::isfinite(roughness))
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "metallic and roughness must be finite values in [0,1]");
+        }
+        mesh3DMaterialFactors_[materialKey] = MaterialFactors{.metallic = metallic, .roughness = roughness};
+        return Core::success();
+    }
+
     // M11-D1: capture primary backbuffer after present (frame must not be open).
     [[nodiscard]] Core::Result<Rgba8FrameCapture> capturePrimaryFrameRgba8() override
     {
@@ -2031,6 +2064,11 @@ class BgfxRenderDevice final : public IRenderDevice {
     std::unordered_map<u32, GpuMeshId> mesh3DBindings_{};
     std::unordered_map<u32, GpuTextureId> mesh3DMaterialTextureBindings_{};
     std::unordered_map<u32, GpuTextureId> mesh3DMaterialMetallicRoughnessTextureBindings_{};
+    struct MaterialFactors final {
+        float metallic = 0.0F;
+        float roughness = 1.0F;
+    };
+    std::unordered_map<u32, MaterialFactors> mesh3DMaterialFactors_{};
 
     bool frameOpen_ = false;
     bool stopped_ = false;

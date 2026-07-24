@@ -86,6 +86,16 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     {
         return inner_->setMesh3DMaterialTextureBinding(materialKey, texture);
     }
+    [[nodiscard]] Core::Status setMesh3DMaterialMetallicRoughnessTextureBinding(
+        Core::u32 materialKey, Render::GpuTextureId texture) noexcept override
+    {
+        return inner_->setMesh3DMaterialMetallicRoughnessTextureBinding(materialKey, texture);
+    }
+    [[nodiscard]] Core::Status setMesh3DMaterialFactors(Core::u32 materialKey, float metallic,
+                                                        float roughness) noexcept override
+    {
+        return inner_->setMesh3DMaterialFactors(materialKey, metallic, roughness);
+    }
 
   private:
     std::unique_ptr<Render::IRenderDevice> inner_;

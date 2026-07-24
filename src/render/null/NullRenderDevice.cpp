@@ -3,6 +3,7 @@
 
 #include "../RenderSurfaceStateTracker.hpp"
 
+#include <cmath>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -276,6 +277,27 @@ class NullRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status setMesh3DMaterialFactors(u32 materialKey, float metallic,
+                                                        float roughness) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (materialKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload, "materialKey must be non-zero");
+        }
+        if (!(metallic >= 0.0F && metallic <= 1.0F) || !(roughness >= 0.0F && roughness <= 1.0F) ||
+            !std::isfinite(metallic) || !std::isfinite(roughness))
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "metallic and roughness must be finite values in [0,1]");
+        }
+        materialFactors_[materialKey] = MaterialFactors{.metallic = metallic, .roughness = roughness};
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Status setMesh3DMaterialMetallicRoughnessTextureBinding(
         u32 materialKey, GpuTextureId texture) noexcept override
     {
@@ -310,6 +332,7 @@ class NullRenderDevice final : public IRenderDevice {
         meshBindings_.clear();
         materialTextureBindings_.clear();
         materialMetallicRoughnessTextureBindings_.clear();
+        materialFactors_.clear();
         meshes_.clear();
         statistics_.liveResources = 0;
     }
@@ -336,6 +359,11 @@ class NullRenderDevice final : public IRenderDevice {
     std::unordered_map<u32, GpuMeshId> meshBindings_{};
     std::unordered_map<u32, GpuTextureId> materialTextureBindings_{};
     std::unordered_map<u32, GpuTextureId> materialMetallicRoughnessTextureBindings_{};
+    struct MaterialFactors final {
+        float metallic = 0.0F;
+        float roughness = 1.0F;
+    };
+    std::unordered_map<u32, MaterialFactors> materialFactors_{};
     u64 nextFrameIndex_ = 0;
     u64 nextSubmissionIndex_ = 0;
     bool frameOpen_ = false;

@@ -11,7 +11,8 @@ Cooker 与产品 sample 支持一个 glTF 中多个 mesh（sample 槽位上限 8
 AssetId、独立 meshKey binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。外部 URI 安全与
 产品侧 `setMesh3DMaterialTextureBinding` 已完成（ASSET-001）。Cooked Material v2 携带 metallic/
 roughness factor 与可选 MR/normal Texture2D dependency。bgfx Opaque3D 在 submit 时采样 baseColor，
-并以 **experimental metallic-roughness hybrid** 着色（固定 1 盏方向光 + ambient；可选
+并以 **experimental metallic-roughness hybrid** 着色（固定 1 盏方向光 + ambient；
+`setMesh3DMaterialFactors` 接 Cooked metallic/roughness；可选
 `setMesh3DMaterialMetallicRoughnessTextureBinding`）。完整 light system / IBL / shadow 仍属
 `RENDER-001` 后续。
 

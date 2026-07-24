@@ -180,7 +180,7 @@ class IRenderDevice {
     }
     // RENDER-001: bind optional glTF metallic-roughness texture (G=roughness, B=metallic)
     // for Mesh3D batches with matching materialKey (invalid texture clears). Unbound uses
-    // device defaults (metallic=0, roughness=1) without sampling a map.
+    // device defaults (or setMesh3DMaterialFactors) without sampling a map.
     [[nodiscard]] virtual Core::Status setMesh3DMaterialMetallicRoughnessTextureBinding(
         u32 materialKey, GpuTextureId texture) noexcept
     {
@@ -189,6 +189,17 @@ class IRenderDevice {
         return Core::failure(
             RenderErrorCode::TextureUploadUnsupported,
             "This render device does not support Mesh3D metallic-roughness texture binding");
+    }
+    // RENDER-001: per-materialKey metallic/roughness factors from Cooked Material v2.
+    // Values must be in [0,1]. materialKey 0 is invalid. Unset keys use defaults (0, 1).
+    [[nodiscard]] virtual Core::Status setMesh3DMaterialFactors(u32 materialKey, float metallic,
+                                                                float roughness) noexcept
+    {
+        static_cast<void>(materialKey);
+        static_cast<void>(metallic);
+        static_cast<void>(roughness);
+        return Core::failure(RenderErrorCode::TextureUploadUnsupported,
+                             "This render device does not support Mesh3D material factors");
     }
 };
 
