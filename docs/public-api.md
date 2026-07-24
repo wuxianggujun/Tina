@@ -67,7 +67,14 @@ return host.value()->run(application);
 ```cpp
 Core::Result<std::unique_ptr<EngineHost>>
 Tina::Desktop::CreateEngine(const EngineConfig& config) noexcept;
+
+Core::Result<std::unique_ptr<EngineHost>>
+Tina::Desktop::CreateEngine(const EngineConfig& config,
+                            Desktop::CreateEngineOptions options) noexcept;
 ```
+
+`CreateEngineOptions::wrapWindowSurfaceRenderDevice` 可在产品/门禁路径包装已创建的
+`IRenderDevice`（例如帧捕获装饰器），不暴露 bgfx/GLFW，也不替代 EngineHost 组合根。
 
 高级测试/集成可使用：
 
@@ -76,7 +83,8 @@ EngineHost::Create(const EngineConfig&, EngineCompositionFactories) noexcept;
 ```
 
 `EngineCompositionFactories` 提供 Clock、Task、Platform/Render tagged composition、可选 Audio 与可选
-primary UIContext factory。普通游戏不应动态拼装 native surface backend，也不取得 `IRenderDevice*`。
+primary UIContext factory。普通游戏应优先 `Desktop::CreateEngine`，不应动态拼装 native surface
+backend，也不取得 `IRenderDevice*`。
 
 `EngineHost` 在创建线程拥有全部 Runtime module，`run()` 只允许一次。跨线程 run 返回错误；错误线程
 析构带 native owner 的 Host 会终止，避免在错误线程调用平台 API。

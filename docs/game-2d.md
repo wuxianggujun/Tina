@@ -121,6 +121,13 @@ Windows 视觉与同轮完整模块测试证据见 [M12 Windows 证据](m12-evid
 `UIAccessibilityProbeProvider` 发布；JSON 输出 `accessibilityPublished`、`accessibilityNodeCount`、
 各 role 命中标志（UI-002-SPI 产品证据，**非**真机 UIA/AT-SPI）。
 
+## 组合入口（接线税）
+
+产品 sample 不再手写 `EngineCompositionFactories`（GLFW/bgfx/Task/Audio/FreeType）。`tina_sample_2d`
+经 `Tina::Desktop::CreateEngine(config, options)` 启动；仅在需要帧捕获证据时通过
+`CreateEngineOptions::wrapWindowSurfaceRenderDevice` 包装 `IRenderDevice`（见
+`samples/2d_tilemap_bgfx/DeviceCapture.hpp`）。业务仍在 `TileMapBgfxState`；EngineHost 仍是唯一组合根。
+
 ## 当前限制
 
 - 无无限地图 streaming、通用 Tile 编辑器、Sprite skeletal animation、2D lighting 或网络 rollback；
