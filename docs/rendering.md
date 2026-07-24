@@ -2,8 +2,9 @@
 
 Tina 的公开 Render 边界是 backend-neutral `Tina::Render`；bgfx 只存在于 `tina_render_bgfx` 私有
 实现。当前产品已经有 2D、3D、UI/Glyph 与 Texture2D/StaticMesh upload 路径，以及 EngineHost 侧
-`RenderFramePacket` + FramePin + Null completion 首切片；没有通用 pass scheduler、PBR 或真 GPU fence
-驱动的异步 completion。
+`RenderFramePacket` + FramePin + Null completion 首切片。Opaque3D 产品着色为 **experimental
+metallic-roughness hybrid**（`RENDER-001` 首切片：固定 1 盏方向光 + 常量 ambient，无 IBL/阴影/
+多光源）；没有通用 pass scheduler 或真 GPU fence 驱动的异步 completion。
 
 ## Target 边界
 
@@ -44,8 +45,12 @@ Host 持有 **`unique_ptr<ISubmissionCompletionLedger>`**（经可选
 FrameDeferred 是双缓冲 lag，**不是**真 GPU fence 对象轮询；勿写成「GPU 已退役」。真 fence 见 backlog
 `RENDER-FENCE` 剩余项。
 
-Opaque3D unlit：`setMesh3DMaterialTextureBinding(materialKey)` 在 `submit` 时 `setTexture(0, s_texColor)`；
-shader 输出 `baseColorFactor * texture2D`；未绑定 materialKey 使用 1×1 白贴图（非「只 bind 不采样」）。
+Opaque3D（experimental MR hybrid）：`setMesh3DMaterialTextureBinding(materialKey)` 在 `submit` 时
+`setTexture(0, s_texColor)`；可选 `setMesh3DMaterialMetallicRoughnessTextureBinding` →
+`setTexture(1, s_texMR)`（glTF 打包：G=roughness、B=metallic）。着色 = baseColor × 贴图 ×
+（固定方向光 Lambert + Blinn-Phong 近似 specular + ambient）；未绑定 baseColor 用 1×1 白；未绑定
+MR 图时 metallic=0、roughness=1（shader/default 纹理兜底）。Cooked metallic/roughness **因子**尚未
+进 Material payload（TODO）。诚实限制：无 light system、无 IBL、无 shadow。
 
 ## RenderScene
 
@@ -96,7 +101,8 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 | `setSprite2DTextureBinding` | 校验/记录 binding | sprite key → texture |
 | `create/destroyStaticMeshP3N3UV2` | 逻辑 mesh storage | 私有 VB/IB |
 | `setMesh3DBinding` | 校验/记录 binding | mesh key → GPU mesh |
-| `setMesh3DMaterialTextureBinding` | 校验/记录 binding | material key → base-color texture；Opaque3D unlit submit **采样** `s_texColor`（默认 1×1 白） |
+| `setMesh3DMaterialTextureBinding` | 校验/记录 binding | material key → base-color texture；Opaque3D MR submit **采样** `s_texColor`（默认 1×1 白） |
+| `setMesh3DMaterialMetallicRoughnessTextureBinding` | 校验/记录 binding | material key → optional MR texture；未 bind 用默认 metallic=0/roughness=1 |
 | `capturePrimaryFrameRgba8` | Unsupported | present 后异步截图路径 |
 
 `GpuTextureId`/`GpuMeshId` 是 backend owner 的 generation handle，不是 AssetHandle。销毁后 stale handle
@@ -113,7 +119,7 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 - native WindowSurface 初始化、resize/suspend、submit/present/shutdown；
 - transient frame budget 与容量失败；
 - Sprite2D textured quad pass；
-- Opaque3D unlit mesh/depth pass；
+- Opaque3D experimental metallic-roughness hybrid mesh/depth pass（固定方向光）；
 - UI solid/glyph pass；
 - Texture2D/StaticMesh generation storage 与 key binding；
 - present 后 primary framebuffer capture；
@@ -121,7 +127,7 @@ rounded/stencil clip、Image widget、复杂 material 与跨 GPU golden 仍未�
 
 `tina_sample_2d` 已使用 Cooked Texture2D 与产品 sprite binding；`tina_sample_3d` 已使用 Cooked
 StaticMesh/Material/Prefab 的 **双 mesh** product key binding（3D-001 Done），并调用
-`setMesh3DMaterialTextureBinding`（GPU 采样仍后置）。
+`setMesh3DMaterialTextureBinding`；bgfx Opaque3D 以 experimental MR hybrid 着色（固定光，可选 MR 贴图 API）。
 
 ## Surface 与线程
 
@@ -144,6 +150,6 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --fr
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0
 ```
 
-测试映射与 Visual 证据规则见 [测试说明](testing.md)。当前后置项是 PBR/lighting/pass scheduling 与
-Opaque3D baseColor 采样（`RENDER-001`）、真 GPU fence completion（RUNTIME-002 尾巴）与跨 DPI/GPU
-visual gate（`UI-003`）。
+测试映射与 Visual 证据规则见 [测试说明](testing.md)。`RENDER-001` 首切片（experimental MR + 固定光）
+已落地；完整 light system / IBL / shadow / cooked MR factors / pass scheduling 仍后置。真 GPU fence
+completion（RUNTIME-002 尾巴）与跨 DPI/GPU visual gate（`UI-003`）亦后置。

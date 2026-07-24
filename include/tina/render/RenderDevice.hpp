@@ -178,6 +178,18 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Mesh3D material texture binding");
     }
+    // RENDER-001: bind optional glTF metallic-roughness texture (G=roughness, B=metallic)
+    // for Mesh3D batches with matching materialKey (invalid texture clears). Unbound uses
+    // device defaults (metallic=0, roughness=1) without sampling a map.
+    [[nodiscard]] virtual Core::Status setMesh3DMaterialMetallicRoughnessTextureBinding(
+        u32 materialKey, GpuTextureId texture) noexcept
+    {
+        static_cast<void>(materialKey);
+        static_cast<void>(texture);
+        return Core::failure(
+            RenderErrorCode::TextureUploadUnsupported,
+            "This render device does not support Mesh3D metallic-roughness texture binding");
+    }
 };
 
 using RenderDeviceFactory =

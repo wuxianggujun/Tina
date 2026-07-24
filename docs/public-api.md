@@ -207,8 +207,9 @@ Cooker/tool。
 StaticMesh 上传到 RenderDevice，并建立 backend key binding。
 
 multi-mesh glTF Cooker 当前为每个 mesh 生成 distinct StaticMesh/Material AssetId，并让 Prefab node 引用；
-baseColorTexture 可 cook 为 Texture2D required dependency。单 mesh 多 primitive、纹理产品绑定/安全策略与
-PBR 其他通道尚未完成。
+baseColorTexture 可 cook 为 Texture2D required dependency。Runtime Opaque3D 为 experimental MR hybrid
+（`setMesh3DMaterialTextureBinding` + 可选 `setMesh3DMaterialMetallicRoughnessTextureBinding`；固定方向光）。
+Cooked Material 仍无 metallic/roughness 因子字段；完整 light system/IBL/shadow 尚未完成。
 
 ## Audio 与 Physics
 

@@ -6,9 +6,10 @@ pass 绘制，并叠加 retained UI。它证明 multi-mesh product 的端到端�
 
 Cooker 与产品 sample 均支持一个 glTF 中两个 mesh：distinct Mesh/Material AssetId、独立 meshKey
 binding、Prefab 每节点 resolver、extract/draw 与 ledger 归零。外部 URI 安全与产品侧
-`setMesh3DMaterialTextureBinding` 已完成（ASSET-001）；bgfx Opaque3D unlit 在 submit 时按
-materialKey **采样** baseColor（`s_texColor` × instance factor；未 bind 用 1×1 白贴图）。
-PBR 见 `RENDER-001`。
+`setMesh3DMaterialTextureBinding` 已完成（ASSET-001）；bgfx Opaque3D 在 submit 时按 materialKey
+**采样** baseColor，并以 **experimental metallic-roughness hybrid** 着色（固定 1 盏方向光 + ambient；
+可选 `setMesh3DMaterialMetallicRoughnessTextureBinding`）。完整 light system / IBL / shadow /
+cooked MR factors 仍属 `RENDER-001` 后续。
 
 ## 当前模块边界
 
@@ -48,7 +49,7 @@ EngineHost 仍是唯一组合根。
 | Cooked 数据 | StaticMesh v1 使用 P3N3UV2、UInt16 index、bounds/submesh；Material v1 为 Opaque `UnlitBaseColor`；Prefab v1 保存稳定 node id、父索引、local transform 与 Mesh/Material AssetId |
 | Scene | `PerspectiveCamera3D`、`MeshRenderer3D`、Transform hierarchy、Prefab 实例化与失败回滚 |
 | Extraction | 唯一 active perspective camera、surface aspect resolve、world bounds、frustum culling、稳定排序与相邻实例 batch |
-| bgfx | color/depth clear、Perspective view、depth write/less、back-face culling、instance buffer、内置 Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、Unlit shader **采样** materialKey 绑定贴图（`s_texColor`；默认 1×1 白） |
+| bgfx | color/depth clear、Perspective view、depth write/less、back-face culling、instance buffer、内置 Cube fixture（`meshKey=1` 未 bind 时）或显式 GPU mesh binding、experimental MR hybrid **采样** baseColor（`s_texColor`）与可选 MR 贴图（`s_texMR`）；固定方向光 |
 
 世界坐标为右手、Y-up、局部 `-Z` forward、单位米。Camera 公共字段使用 degree，并要求
 `0 < near < far`、有限数值和有效 normalized viewport；aspect 每帧从 primary surface 解析，不写回
@@ -76,8 +77,9 @@ Mesh/Material AssetId 转成当前 Render key。任一步失败都会逆序销�
 7. 实例化、extract、提交，退出时解除 binding 并销毁 GPU mesh/texture。
 
 当前产品门禁已证明两个不同 AssetId 的并行 mesh GPU binding、material texture 绑定，以及 Opaque3D
-unlit submit 时按 materialKey **采样**（`s_texColor` × instance baseColorFactor；未 bind 用 1×1 白）。
-尚未证明 `AssetSystem` Handle/Lease 到 submission 的完整 fence pin（真 fence 见 RUNTIME-002 尾巴）。
+experimental MR submit 时按 materialKey **采样** baseColor 并做固定光照（未 bind 用 1×1 白；
+默认 metallic=0/roughness=1）。尚未证明 `AssetSystem` Handle/Lease 到 submission 的完整 fence pin
+（真 fence 见 RUNTIME-002 尾巴）。
 
 ## 三类 3D 门禁
 
@@ -85,7 +87,7 @@ unlit submit 时按 materialKey **采样**（`s_texColor` × instance baseColorF
 | --- | --- | --- |
 | `tina_sample_3d_extraction` | Headless/Null Camera、culling、sort、batch、300帧退出 | GPU 画面与 Cooked Asset |
 | `tina_sample_3d_infrastructure` | procedural Cube、真实 bgfx depth/instance/UI frame | 产品 glTF/Catalog mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；texture upload + material key bind + Opaque3D 采样 | PBR、Handle/Lease→fence pin |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；texture upload + material key bind + Opaque3D experimental MR | 完整 light system/IBL/shadow、Handle/Lease→fence pin |
 
 产品 smoke 的结构化输出至少应包含 `gltfCooked`、`cookedStaticMesh`、`cookedMaterial`、
 `cookedPrefab`、`meshUploaded`、`meshBound`、`materialTextureBound`（或等价字段）、`prefabInstantiated`、
@@ -96,10 +98,12 @@ unlit submit 时按 materialKey **采样**（`s_texColor` × instance baseColorF
 
 - glTF importer 不支持单 mesh 多 primitive merge、无 bufferView 的 data-URI image、Draco、morph、
   skin、animation、sparse accessor 或非三角 primitive；不支持项返回结构化错误；
-- Material 产品路径只有 solid Opaque Unlit；无 PBR、Light、Shadow、transparent pass 或 post-processing；
+- Material **Cooked** 路径仍是 Opaque `UnlitBaseColor`（无 metallic/roughness 因子字段）；Runtime/
+  bgfx 产品着色已是 experimental MR hybrid（固定光 + 可选 MR 贴图 API），不是完整 PBR；
+- 无 multi-light system、Shadow、transparent pass、IBL 或 post-processing；
 - glTF Cooker 把相对文件或 bufferView 的 baseColorTexture 发布为 Texture2D dependency；外部相对 URI
   强制 root containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；`tina_sample_3d` 已 upload、
-  `setMesh3DMaterialTextureBinding`，且 Opaque3D unlit submit **采样** material 贴图；
+  `setMesh3DMaterialTextureBinding`，且 Opaque3D MR submit **采样** material 贴图；
 - Scene/Render 仍使用 mesh/material **key**（bind-table 语义，非 AssetHandle 组件字段），不是 Scene 上直接存
   `AssetHandle`，也不是 extract 输出 owning `FrameResourceRef`；
 - EngineHost 已有 `RenderFramePacket` + FramePin + Null completion 首切片；真 bgfx fence 后置；
@@ -107,5 +111,5 @@ unlit submit 时按 materialKey **采样**（`s_texColor` × instance baseColorF
   （PERF-001 首切片），但不替代 3D 视觉门禁；
 - Jolt/3D Physics 未接入，静态 3D 产品门禁不以它为前置条件。
 
-下一步只在可执行 Backlog 中维护：PBR/pass 见 `RENDER-001`，真 GPU fence completion 见 RUNTIME-002
-尾巴。详见 [Backlog](backlog.md)。
+下一步只在可执行 Backlog 中维护：`RENDER-001` 剩余（light system / IBL / cooked MR factors /
+pass scheduling），真 GPU fence completion 见 RUNTIME-002 尾巴。详见 [Backlog](backlog.md)。

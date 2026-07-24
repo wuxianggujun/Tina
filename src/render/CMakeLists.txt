@@ -100,6 +100,13 @@ if(TINA_BUILD_RENDER_BGFX)
     )
     tina_add_bgfx_embedded_shader(
         tina_render_bgfx
+        tina_opaque3d_mr
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_opaque3d_mr.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_opaque3d_mr.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_mr.def.sc"
+    )
+    tina_add_bgfx_embedded_shader(
+        tina_render_bgfx
         tina_sprite2d_fixture
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_sprite2d_fixture.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_sprite2d_fixture.sc"
