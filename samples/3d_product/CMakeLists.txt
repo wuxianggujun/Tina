@@ -1,5 +1,6 @@
 add_executable(tina_sample_3d
     main.cpp
+    DeviceCapture.hpp
 )
 
 target_compile_features(tina_sample_3d PRIVATE cxx_std_23)

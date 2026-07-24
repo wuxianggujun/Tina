@@ -96,6 +96,7 @@
 | TEST-001-GCC13-NULL | Docker Desktop + `linux-gcc13-vnext`：`tina_tests`/`tina_ui_tests`(255)/`tina_runtime_ui_tests`(83)/bridge(13)/`tina_sample_null` 300 帧；vcpkg baseline 与仓库一致；`artifacts/gates/test-001-linux-gcc13-null.json` | [Linux 证据](m12-evidence-linux.md) |
 | TEST-001-GCC13-PLATFORM | Docker + Xvfb + `linux-gcc13-vnext-platform`：`tina_tests` + `tina_platform_glfw_tests`(34/34) + `tina_sample_platform --frames=60`；`artifacts/gates/test-001-linux-gcc13-platform.json` | [Linux 证据](m12-evidence-linux.md) |
 | SAMPLE-FACADE-001 | `tina_sample_2d` 去手写 factories：`Desktop::CreateEngine(options)` + `wrapWindowSurfaceRenderDevice`；`DeviceCapture` 抽出 sample helper | [2D](game-2d.md) · [public-api](public-api.md) |
+| SAMPLE-FACADE-3D | `tina_sample_3d` 同样走 `Desktop::CreateEngine` + wrap；`DeviceCapture.hpp` 抽出；去掉 Glfw/bgfx 直链 factories | [3D](game-3d.md) |
 | TEST-001 | Docker Desktop 复验 tip：GCC13 Null + Platform/GLFW(Xvfb) + Clang22 Null + Clang22 ASan/UBSan/LSan；`libclang-rt-22-dev` 修 sanitizer 链接；证据 JSON 见 `artifacts/gates/test-001-linux-*.json` | [Linux 证据](m12-evidence-linux.md) |
 | TEST-001-CLANG22-NULL | `linux-clang22-vnext`：tests/ui/runtime_ui/bridge + sample_null 300；`test-001-linux-clang22-null.json` | [Linux 证据](m12-evidence-linux.md) |
 | TEST-001-CLANG22-SAN | `linux-clang22-vnext-sanitize`：同上 + ASan/UBSan/LSan；`test-001-linux-clang22-sanitize.json` | [Linux 证据](m12-evidence-linux.md) |

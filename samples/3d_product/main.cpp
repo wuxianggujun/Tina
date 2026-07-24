@@ -11,8 +11,7 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/core/id/AssetId.hpp>
-#include <tina/core/time/MonotonicClock.hpp>
-#include <tina/platform/glfw/GlfwPlatformFactory.hpp>
+#include <tina/desktop/DesktopEngine.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/EngineConfig.hpp>
@@ -21,17 +20,15 @@
 #include <tina/runtime/GameState.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
-#include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/PrefabInstantiate.hpp>
 #include <tina/scene/World.hpp>
-#include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPaint.hpp>
 
-#include "render/bgfx/BgfxRenderDevice.hpp"
+#include "DeviceCapture.hpp"
 
 #include <array>
 #include <charconv>
@@ -91,83 +88,7 @@ struct LifecycleCounters final {
     bool prefabInstantiated = false;
 };
 
-class DeviceCapture final {
-  public:
-    void set(Tina::Render::IRenderDevice* device) noexcept { device_ = device; }
-    [[nodiscard]] Tina::Render::IRenderDevice* get() const noexcept { return device_; }
-
-  private:
-    Tina::Render::IRenderDevice* device_ = nullptr;
-};
-
-class CapturingRenderDevice final : public Tina::Render::IRenderDevice {
-  public:
-    CapturingRenderDevice(std::unique_ptr<Tina::Render::IRenderDevice> inner, DeviceCapture& capture) noexcept
-        : inner_(std::move(inner)), capture_(&capture)
-    {
-        capture_->set(this);
-    }
-
-    ~CapturingRenderDevice() override
-    {
-        if (capture_ != nullptr && capture_->get() == this)
-        {
-            capture_->set(nullptr);
-        }
-    }
-
-    [[nodiscard]] Tina::Core::Result<Tina::Render::RenderFrameSubmission>
-    submitFrame(const Tina::Render::RenderFrame& frame) override
-    {
-        return inner_->submitFrame(frame);
-    }
-    [[nodiscard]] Tina::Core::Status present() override { return inner_->present(); }
-    [[nodiscard]] Tina::Render::RenderStatistics statistics() const noexcept override
-    {
-        return inner_->statistics();
-    }
-    void shutdown() noexcept override { inner_->shutdown(); }
-    [[nodiscard]] Tina::Core::Result<Tina::Render::GpuTextureId>
-    createTexture2DRgba8(const Tina::Render::Texture2DUploadDesc& desc) override
-    {
-        return inner_->createTexture2DRgba8(desc);
-    }
-    [[nodiscard]] Tina::Core::Status destroyTexture2D(Tina::Render::GpuTextureId texture) noexcept override
-    {
-        return inner_->destroyTexture2D(texture);
-    }
-    [[nodiscard]] Tina::Core::Status setSprite2DTextureBinding(u32 spriteKey,
-                                                               Tina::Render::GpuTextureId texture) noexcept override
-    {
-        return inner_->setSprite2DTextureBinding(spriteKey, texture);
-    }
-    [[nodiscard]] Tina::Core::Result<Tina::Render::GpuMeshId>
-    createStaticMeshP3N3UV2(const Tina::Render::StaticMeshUploadDesc& desc) override
-    {
-        return inner_->createStaticMeshP3N3UV2(desc);
-    }
-    [[nodiscard]] Tina::Core::Status destroyStaticMesh(Tina::Render::GpuMeshId mesh) noexcept override
-    {
-        return inner_->destroyStaticMesh(mesh);
-    }
-    [[nodiscard]] Tina::Core::Status setMesh3DBinding(u32 meshKey, Tina::Render::GpuMeshId mesh) noexcept override
-    {
-        return inner_->setMesh3DBinding(meshKey, mesh);
-    }
-    [[nodiscard]] Tina::Core::Status
-    setMesh3DMaterialTextureBinding(u32 materialKey, Tina::Render::GpuTextureId texture) noexcept override
-    {
-        return inner_->setMesh3DMaterialTextureBinding(materialKey, texture);
-    }
-    [[nodiscard]] Tina::Core::Result<Tina::Render::Rgba8FrameCapture> capturePrimaryFrameRgba8() override
-    {
-        return inner_->capturePrimaryFrameRgba8();
-    }
-
-  private:
-    std::unique_ptr<Tina::Render::IRenderDevice> inner_;
-    DeviceCapture* capture_ = nullptr;
-};
+using DeviceCapture = Tina::Sample3D::DeviceCapture;
 
 struct ProductMeshSlot final {
     Tina::Asset::CookedAssetFile meshFile{};
@@ -1018,50 +939,6 @@ class Product3DApplication final : public Tina::IGameApplication {
     return config;
 }
 
-[[nodiscard]] Tina::EngineCompositionFactories createFactories(DeviceCapture& capture)
-{
-    return Tina::EngineCompositionFactories{
-        .createMonotonicClock =
-            []() -> Tina::Core::Result<std::unique_ptr<Tina::Core::IMonotonicClock>> {
-            return std::unique_ptr<Tina::Core::IMonotonicClock>{std::make_unique<Tina::Core::SteadyMonotonicClock>()};
-        },
-        .createTaskSystem =
-            [](const Tina::Task::TaskSystemCreateParams& params) {
-                Tina::Task::TaskSystemCreateParams effective = params;
-                if (effective.ioWorkerCount == 0)
-                {
-                    effective.ioWorkerCount = 1;
-                }
-                if (effective.ioQueueCapacity == 0)
-                {
-                    effective.ioQueueCapacity = 64;
-                }
-                if (effective.mainQueueCapacity == 0)
-                {
-                    effective.mainQueueCapacity = 64;
-                }
-                return Tina::Task::createBoundedTaskSystem(effective);
-            },
-        .platformRender =
-            Tina::WindowSurfacePlatformRenderFactories{
-                .createWindowSurfacePlatformBackend = Tina::Platform::createGlfwWindowSurfacePlatformBackend,
-                .createWindowSurfaceRenderDevice =
-                    [&capture](const Tina::Render::RenderDeviceCreateParams& params,
-                               Tina::Integration::NativeWindowSurfaceLease lease)
-                        -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
-                        auto device = Tina::Render::Bgfx::createBgfxRenderDevice(params, std::move(lease));
-                        if (!device)
-                        {
-                            return device;
-                        }
-                        std::unique_ptr<Tina::Render::IRenderDevice> capturing =
-                            std::make_unique<CapturingRenderDevice>(std::move(*device), capture);
-                        return capturing;
-                    },
-            },
-    };
-}
-
 [[nodiscard]] int runSample(int argumentCount, char** arguments)
 {
     auto optionsResult = parseOptions(argumentCount, arguments);
@@ -1081,8 +958,13 @@ class Product3DApplication final : public Tina::IGameApplication {
     }
 
     DeviceCapture capture;
-    auto factories = createFactories(capture);
-    auto hostResult = Tina::EngineHost::Create(createEngineConfig(), std::move(factories));
+    Tina::Desktop::CreateEngineOptions desktopOptions{};
+    desktopOptions.wrapWindowSurfaceRenderDevice =
+        [&capture](std::unique_ptr<Tina::Render::IRenderDevice> device)
+            -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
+            return Tina::Sample3D::wrapCapturingRenderDevice(std::move(device), capture);
+        };
+    auto hostResult = Tina::Desktop::CreateEngine(createEngineConfig(), std::move(desktopOptions));
     if (!hostResult)
     {
         writeError(hostResult.error());

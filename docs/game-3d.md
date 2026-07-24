@@ -33,6 +33,13 @@ source glTF/GLB
 - `tina_render_bgfx` 私有拥有 shader、vertex/index buffer、view id、uniform 与 texture binding；
 - 普通 Game API 不暴露 cgltf、bgfx 或 native surface 类型。
 
+## 组合入口
+
+产品 3D sample 经 `Tina::Desktop::CreateEngine(config, options)` 启动（与 2D 一致），不再手写
+`EngineCompositionFactories`。mesh/texture bind 证据通过
+`CreateEngineOptions::wrapWindowSurfaceRenderDevice` + `samples/3d_product/DeviceCapture.hpp`。
+EngineHost 仍是唯一组合根。
+
 ## 已实现能力
 
 | 层 | 当前实现 |
