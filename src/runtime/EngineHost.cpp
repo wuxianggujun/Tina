@@ -507,16 +507,17 @@ namespace Detail {
 
 class EngineHostImplementation final {
   public:
-    EngineHostImplementation(EngineConfig config, Core::FixedStepAccumulator fixedStepAccumulator,
-                             PlatformEventDispatcher platformEventDispatcher,
-                             std::unique_ptr<Runtime::Input::ActionMapper> actionMapper,
-                             std::unique_ptr<Runtime::Input::UIInputRouteProducer> uiInputRouteProducer,
-                             Runtime::Detail::PrimaryWindowUIDisplayCoordinator primaryWindowUIDisplay,
-                             Render::RenderSceneBuilder renderSceneBuilder,
-                             EngineModules modules,
-                             std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface,
-                             PrimaryWindowUIContextFactory createPrimaryWindowUIContext = {},
-                             std::optional<std::uintptr_t> primaryWin32Hwnd = {}) noexcept
+    EngineHostImplementation(
+        EngineConfig config, Core::FixedStepAccumulator fixedStepAccumulator,
+        PlatformEventDispatcher platformEventDispatcher,
+        std::unique_ptr<Runtime::Input::ActionMapper> actionMapper,
+        std::unique_ptr<Runtime::Input::UIInputRouteProducer> uiInputRouteProducer,
+        Runtime::Detail::PrimaryWindowUIDisplayCoordinator primaryWindowUIDisplay,
+        Render::RenderSceneBuilder renderSceneBuilder, EngineModules modules,
+        std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface,
+        PrimaryWindowUIContextFactory createPrimaryWindowUIContext = {},
+        std::optional<std::uintptr_t> primaryWin32Hwnd = {},
+        std::unique_ptr<Render::ISubmissionCompletionLedger> submissionCompletionLedger = {}) noexcept
         : m_config(std::move(config)), m_fixedStepAccumulator(std::move(fixedStepAccumulator)),
           m_platformEventDispatcher(std::move(platformEventDispatcher)), m_actionMapper(std::move(actionMapper)),
           m_uiInputRouteProducer(std::move(uiInputRouteProducer)), m_modules(std::move(modules)),
@@ -524,9 +525,14 @@ class EngineHostImplementation final {
                             std::move(createPrimaryWindowUIContext)),
           m_primaryWindowUIDisplay(std::move(primaryWindowUIDisplay)),
           m_renderSceneBuilder(std::move(renderSceneBuilder)), m_ownerThread(std::this_thread::get_id()),
+          m_submissionCompletionLedger(submissionCompletionLedger != nullptr
+                                           ? std::move(submissionCompletionLedger)
+                                           : std::unique_ptr<Render::ISubmissionCompletionLedger>(
+                                                 std::make_unique<Render::NullSubmissionCompletionLedger>())),
           m_lastWindowSurface(std::move(initialWindowSurface))
 #if defined(TINA_HAS_UI_UIA)
-          , m_primaryWin32Hwnd(primaryWin32Hwnd)
+          ,
+          m_primaryWin32Hwnd(primaryWin32Hwnd)
 #endif
     {
 #if !defined(TINA_HAS_UI_UIA)
@@ -1057,14 +1063,15 @@ class EngineHostImplementation final {
                 }
             }
 
-            // RUNTIME-002: owning packet + Null completion ledger around submit/present.
+            // RUNTIME-002: owning packet + injectable completion ledger around submit/present.
+            // Default Null / Desktop Bgfx ledger are still present-sync (not GPU fence).
             if (auto packetBegin = m_renderFramePacket.beginFrame(frameIndex); !packetBegin)
             {
                 return failAfterStartupCommit(gameApplication, std::move(packetBegin.error()), frameIndex,
                                               simulationTick);
             }
             auto packetRollback = Core::makeScopeExit([this]() noexcept {
-                (void)m_renderFramePacket.abandon(&m_submissionCompletionLedger);
+                (void)m_renderFramePacket.abandon(m_submissionCompletionLedger.get());
             });
 
             // Surface pin: keep surface snapshot facts alive for this submission epoch.
@@ -1170,7 +1177,8 @@ class EngineHostImplementation final {
 
             if (submitResult->requiresPresent())
             {
-                auto ticketResult = m_submissionCompletionLedger.beginSubmitted(submitResult->submissionIndex);
+                auto& ledger = *m_submissionCompletionLedger;
+                auto ticketResult = ledger.beginSubmitted(submitResult->submissionIndex);
                 if (!ticketResult)
                 {
                     return failAfterStartupCommit(gameApplication, std::move(ticketResult.error()), frameIndex,
@@ -1178,7 +1186,7 @@ class EngineHostImplementation final {
                 }
                 if (auto attachStatus = m_renderFramePacket.attachSubmission(*ticketResult); !attachStatus)
                 {
-                    (void)m_submissionCompletionLedger.abandon(*ticketResult);
+                    (void)ledger.abandon(*ticketResult);
                     return failAfterStartupCommit(gameApplication, std::move(attachStatus.error()), frameIndex,
                                                   simulationTick);
                 }
@@ -1191,7 +1199,9 @@ class EngineHostImplementation final {
                     return failAfterStartupCommit(gameApplication, std::move(presentResult.error()), frameIndex,
                                                   simulationTick);
                 }
-                if (auto completeStatus = m_renderFramePacket.complete(m_submissionCompletionLedger); !completeStatus)
+                // Present-sync completion: pins release after present returns. Fence-driven
+                // ledgers must keep tickets open until GPU signals (not implemented).
+                if (auto completeStatus = m_renderFramePacket.complete(ledger); !completeStatus)
                 {
                     return failAfterStartupCommit(gameApplication, std::move(completeStatus.error()), frameIndex,
                                                   simulationTick);
@@ -1276,7 +1286,7 @@ class EngineHostImplementation final {
     {
         m_lifecycleState = LifecycleState::Stopping;
         m_pendingCommands.clearAll();
-        (void)m_renderFramePacket.abandon(&m_submissionCompletionLedger);
+        (void)m_renderFramePacket.abandon(m_submissionCompletionLedger.get());
         while (!m_gameStateStack.empty())
         {
             std::unique_ptr<IGameState> state = m_gameStateStack.popCommitted();
@@ -1423,7 +1433,8 @@ class EngineHostImplementation final {
     GameStatePendingCommands m_pendingCommands{};
     GameStatePolicy m_committedPolicy{};
     Render::RenderFramePacket m_renderFramePacket{};
-    Render::NullSubmissionCompletionLedger m_submissionCompletionLedger{};
+    // Owned SPI: Null default or injected Bgfx/mock ledger (still present-sync until fence).
+    std::unique_ptr<Render::ISubmissionCompletionLedger> m_submissionCompletionLedger{};
     LifecycleState m_lifecycleState = LifecycleState::Ready;
     std::optional<Integration::WindowSurfaceSnapshot> m_lastWindowSurface;
 
@@ -1818,12 +1829,35 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
             initialWindowSurface = *snapshotResult;
         }
 
+        std::unique_ptr<Render::ISubmissionCompletionLedger> submissionCompletionLedger{};
+        if (factories.createSubmissionCompletionLedger)
+        {
+            auto ledgerResult =
+                invokeResultBoundary("EngineCompositionFactories::createSubmissionCompletionLedger",
+                                     RuntimeErrorCode::EngineFactoryThrewException,
+                                     [&] { return factories.createSubmissionCompletionLedger(); });
+            if (!ledgerResult)
+            {
+                return Core::failure(std::move(ledgerResult.error()));
+            }
+            submissionCompletionLedger = std::move(*ledgerResult);
+            if (submissionCompletionLedger == nullptr)
+            {
+                return Core::failure(factoryReturnedNull("createSubmissionCompletionLedger"));
+            }
+        }
+        else
+        {
+            // Headless/Null and any composition without an override: present-sync Null ledger.
+            submissionCompletionLedger = std::make_unique<Render::NullSubmissionCompletionLedger>();
+        }
+
         auto implementation = std::make_unique<Detail::EngineHostImplementation>(
             std::move(ownedConfig), std::move(*accumulatorResult), std::move(*platformEventDispatcherResult),
             std::move(*actionMapperResult), std::move(*uiInputRouteProducerResult),
             std::move(*primaryWindowUIDisplayResult), std::move(*renderSceneBuilderResult), std::move(modules),
-            std::move(initialWindowSurface), std::move(factories.createPrimaryWindowUIContext),
-            primaryWin32Hwnd);
+            std::move(initialWindowSurface), std::move(factories.createPrimaryWindowUIContext), primaryWin32Hwnd,
+            std::move(submissionCompletionLedger));
         return std::unique_ptr<EngineHost>(new EngineHost(std::move(implementation)));
     } catch (const std::bad_alloc&)
     {

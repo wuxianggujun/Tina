@@ -106,6 +106,14 @@ Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& confi
                         .completionCapacity = 64,
                     });
                 },
+            // RENDER-FENCE prep: typed Bgfx ledger injection point. Still present-sync
+            // (complete on present-return); not a true GPU fence completion path.
+            .createSubmissionCompletionLedger =
+                []() -> Core::Result<std::unique_ptr<Render::ISubmissionCompletionLedger>> {
+                    std::unique_ptr<Render::ISubmissionCompletionLedger> ledger =
+                        std::make_unique<Render::BgfxSubmissionCompletionLedger>();
+                    return ledger;
+                },
         };
 
 #if defined(TINA_HAS_UI_FREETYPE)

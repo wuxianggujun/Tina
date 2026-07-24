@@ -32,8 +32,18 @@ Tina 的公开 Render 边界是 backend-neutral `Tina::Render`；bgfx 只存在�
 
 `RenderFramePacket` + `FramePin` + `ISubmissionCompletionLedger` 已作为 RUNTIME-002 首切片接入
 EngineHost：submit 前可登记 Surface/GlyphAtlas pin，present 或 skip 后 complete 并释放 pin，失败路径
-abandon。Host 当前注入 **`NullSubmissionCompletionLedger`**（present-return 即 complete，**不是** GPU
-fence）。接口形状已可替换为未来 fence-driven ledger；勿把 present 同步完成写成「GPU 已退役」。
+abandon。
+
+Host 持有 **`unique_ptr<ISubmissionCompletionLedger>`**（经可选
+`EngineCompositionFactories::createSubmissionCompletionLedger` 注入）：
+
+| 路径 | 类型 | 完成语义 |
+| --- | --- | --- |
+| 默认 / Null / Headless | `NullSubmissionCompletionLedger` | present-return 即 complete |
+| Desktop `CreateEngine` | `BgfxSubmissionCompletionLedger` | **仍是** present-sync；类型与 fence 钩子（`notePresentReturned` / `pollGpuFences` no-op）已就位 |
+
+**两者都不是 GPU fence。** `completionMode()` 当前恒为 `PresentSync`。真 fence 驱动 pin retirement
+见 backlog `RENDER-FENCE`；勿把 present 同步完成写成「GPU 已退役」。
 
 Opaque3D unlit：`setMesh3DMaterialTextureBinding(materialKey)` 在 `submit` 时 `setTexture(0, s_texColor)`；
 shader 输出 `baseColorFactor * texture2D`；未绑定 materialKey 使用 1×1 白贴图（非「只 bind 不采样」）。
