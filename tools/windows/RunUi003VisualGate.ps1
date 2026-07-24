@@ -25,7 +25,10 @@ param(
     # Max absolute avg channel delta allowed when a baseline is present.
     [double]$AvgRgbTolerance = 28.0,
     [switch]$WriteBaseline,
-    [switch]$NoBaselineCompare
+    [switch]$NoBaselineCompare,
+    # Design-space absolute ROI (sample absolute layout is fixed to this design).
+    [int]$DesignWidth = 960,
+    [int]$DesignHeight = 540
 )
 
 $ErrorActionPreference = 'Stop'
@@ -65,7 +68,11 @@ if (-not (Test-Path -LiteralPath $Exe)) {
 
 $captureScript = Join-Path $SourceRoot 'tools\windows\CaptureSampleWindow.ps1'
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$runRoot = Join-Path $SourceRoot (Join-Path $OutDir $stamp)
+if ([IO.Path]::IsPathRooted($OutDir)) {
+    $runRoot = Join-Path $OutDir $stamp
+} else {
+    $runRoot = Join-Path $SourceRoot (Join-Path $OutDir $stamp)
+}
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 
 Write-Host '=== CaptureSampleWindow ==='
@@ -203,15 +210,41 @@ if (-not (Test-Path -LiteralPath $pngPath)) {
     throw "capture png not found: $pngPath"
 }
 
-$roiList = @(
-    (Get-RoiFingerprint -PngPath $pngPath -X0 0.01 -Y0 0.01 -X1 0.35 -Y1 0.14 -Name 'title_plate'),
-    (Get-RoiFingerprint -PngPath $pngPath -X0 0.68 -Y0 0.01 -X1 0.99 -Y1 0.85 -Name 'settings_panel'),
-    (Get-RoiFingerprint -PngPath $pngPath -X0 0.70 -Y0 0.55 -X1 0.97 -Y1 0.62 -Name 'progress_bar'),
-    # Lower playfield (ground tiles / props); mid-sky is often a single clear color.
-    (Get-RoiFingerprint -PngPath $pngPath -X0 0.05 -Y0 0.55 -X1 0.55 -Y1 0.92 -Name 'playfield_lower')
-)
+# Absolute design ROIs (logical px in 960x540 sample layout). Map through client/design
+# so --width/--height windows still hit the same HUD chrome (absolute, not percent layout).
+function Get-DesignRoiFraction {
+    param([int]$DesignCoord, [int]$DesignExtent, [int]$ClientExtent)
+    if ($ClientExtent -le 0) { return 0.0 }
+    # When client == design (1x content scale), fraction = coord/design.
+    # When client is larger but UI stays absolute, fraction = coord/client.
+    return [double]$DesignCoord / [double]$ClientExtent
+}
 
 $gateErrors = New-Object System.Collections.Generic.List[string]
+
+$designRois = @(
+    @{ Name = 'title_plate'; L = 16; T = 12; R = 336; B = 68 },
+    @{ Name = 'settings_panel'; L = 668; T = 8; R = 944; B = 456 },
+    @{ Name = 'progress_bar'; L = 700; T = 300; R = 940; B = 330 },
+    @{ Name = 'playfield_lower'; L = 40; T = 300; R = 520; B = 500 }
+)
+
+$roiList = @()
+foreach ($d in $designRois) {
+    $x0 = Get-DesignRoiFraction -DesignCoord ([int]$d.L) -DesignExtent $DesignWidth -ClientExtent $clientW
+    $y0 = Get-DesignRoiFraction -DesignCoord ([int]$d.T) -DesignExtent $DesignHeight -ClientExtent $clientH
+    $x1 = Get-DesignRoiFraction -DesignCoord ([int]$d.R) -DesignExtent $DesignWidth -ClientExtent $clientW
+    $y1 = Get-DesignRoiFraction -DesignCoord ([int]$d.B) -DesignExtent $DesignHeight -ClientExtent $clientH
+    if ($x1 -le $x0 -or $y1 -le $y0 -or $x0 -ge 1.0 -or $y0 -ge 1.0) {
+        [void]$gateErrors.Add(("ROI {0} outside client {1}x{2} (design {3}x{4})" -f $d.Name, $clientW, $clientH, $DesignWidth, $DesignHeight))
+        continue
+    }
+    $x0 = [Math]::Max(0.0, [Math]::Min(0.999, $x0))
+    $y0 = [Math]::Max(0.0, [Math]::Min(0.999, $y0))
+    $x1 = [Math]::Max($x0 + 0.001, [Math]::Min(1.0, $x1))
+    $y1 = [Math]::Max($y0 + 0.001, [Math]::Min(1.0, $y1))
+    $roiList += ,(Get-RoiFingerprint -PngPath $pngPath -X0 $x0 -Y0 $y0 -X1 $x1 -Y1 $y1 -Name ([string]$d.Name))
+}
 $progress = $roiList | Where-Object { $_.name -eq 'progress_bar' } | Select-Object -First 1
 $settings = $roiList | Where-Object { $_.name -eq 'settings_panel' } | Select-Object -First 1
 $playfield = $roiList | Where-Object { $_.name -eq 'playfield_lower' } | Select-Object -First 1

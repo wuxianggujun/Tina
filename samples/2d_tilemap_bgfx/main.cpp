@@ -147,6 +147,9 @@ void appendF32Bits(std::vector<std::byte>& out, float value)
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
+    // Primary window logical size (UI-003 multi-size matrix). Design baseline 960x540.
+    u32 windowLogicalWidth = 960;
+    u32 windowLogicalHeight = 540;
     // Optional visual gate: publish the Demo Button in its real disabled state.
     bool uiDisabledDemoButton = false;
     // Optional controlled product gate: seed one map cell selection after enter
@@ -439,6 +442,32 @@ void writeError(const Tina::Core::Error& error)
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "invalid --frame-delay-ms");
             }
             options.frameDelayMilliseconds = value;
+            continue;
+        }
+        if (argument.starts_with("--width="))
+        {
+            const auto text = argument.substr(std::string_view{"--width="}.size());
+            u32 value = 0;
+            const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), value);
+            if (err != std::errc{} || end != text.data() + text.size() || value < 320U || value > 3840U)
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "invalid --width (expected 320..3840)");
+            }
+            options.windowLogicalWidth = value;
+            continue;
+        }
+        if (argument.starts_with("--height="))
+        {
+            const auto text = argument.substr(std::string_view{"--height="}.size());
+            u32 value = 0;
+            const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), value);
+            if (err != std::errc{} || end != text.data() + text.size() || value < 180U || value > 2160U)
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "invalid --height (expected 180..2160)");
+            }
+            options.windowLogicalHeight = value;
             continue;
         }
         if (argument == "--ui-disabled-demo-button")
@@ -2443,12 +2472,12 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
     return factories;
 }
 
-[[nodiscard]] Tina::EngineConfig createEngineConfig()
+[[nodiscard]] Tina::EngineConfig createEngineConfig(const SampleOptions& options)
 {
     Tina::EngineConfig config = Tina::EngineConfig::Defaults();
     config.applicationName = "Tina Sample 2D";
     config.primaryWindow.title = "Tina Sample 2D — TileMap + Character + UI";
-    config.primaryWindow.initialLogicalExtent = {960, 540};
+    config.primaryWindow.initialLogicalExtent = {options.windowLogicalWidth, options.windowLogicalHeight};
     config.primaryWindow.initiallyVisible = true;
     config.renderSceneCapacities.spriteCapacity = 64;
     // A/D + arrows for interactive walk; automated smoke uses scripted walk after land.
@@ -2504,7 +2533,7 @@ int main(int argc, char** argv)
     }
 
     DeviceCapture capture{};
-    auto host = Tina::EngineHost::Create(createEngineConfig(), createFactories(capture));
+    auto host = Tina::EngineHost::Create(createEngineConfig(*options), createFactories(capture));
     if (!host)
     {
         writeError(host.error());
@@ -2897,6 +2926,8 @@ int main(int argc, char** argv)
               << ",\"lastHighlightSprites\":" << counters.lastHighlightSprites
               << ",\"seedTileSelection\":" << (options->seedTileSelection ? "true" : "false")
               << ",\"seedTileSelectionApplied\":" << (counters.seedTileSelectionApplied ? "true" : "false")
+              << ",\"windowLogicalWidth\":" << options->windowLogicalWidth
+              << ",\"windowLogicalHeight\":" << options->windowLogicalHeight
               << ",\"surfacePixelWidth\":" << counters.surfacePixelWidth
               << ",\"surfacePixelHeight\":" << counters.surfacePixelHeight
               << ",\"windowMetricsEvents\":" << counters.windowMetricsEvents

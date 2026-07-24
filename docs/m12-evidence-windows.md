@@ -114,7 +114,16 @@ ROI 指纹覆盖 title/settings/progress/playfield；`accessibilityPublished=tru
 仓库内 baseline：`tools/windows/baselines/ui-003-sample2d-960x540.json`（avgRgb 容差默认 28）。
 二次运行 `baselineCompare.matched=true`。摘要示例：`artifacts/gates/ui-003-visual-*.json`。
 
-**不证明** 多显示器 100/150/200% DPI 金标矩阵或跨 GPU 像素 golden。
+逻辑窗口尺寸矩阵（`--width/--height`，非 OS DPI）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003SizeMatrix.ps1 -SkipBuild
+```
+
+结果：`ok=true`，cases 960×540 / 1280×720 / 1440×810 均 `ok=true`（client 与请求逻辑尺寸一致；
+绝对 UI 布局按设计坐标映射 ROI）。摘要：`artifacts/gates/ui-003-size-matrix-*.json`。
+
+**不证明** OS 显示缩放 100/150/200% 金标矩阵或跨 GPU 像素 golden。
 
 ## 未关闭
 

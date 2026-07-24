@@ -159,6 +159,9 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003VisualGate.ps1 
 # 写入/更新本机金标（同机回归）：
 #   ... -WriteBaseline
 # 默认读取 tools/windows/baselines/ui-003-sample2d-960x540.json
+
+# 逻辑窗口尺寸矩阵（非 OS DPI；sample --width/--height）
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003SizeMatrix.ps1 -SkipBuild
 ```
 
 ## Linux 与 sanitizer
