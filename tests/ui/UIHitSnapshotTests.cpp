@@ -378,7 +378,7 @@ TEST_F(UIHitSnapshotTest, DiagnosticStructureCommitKeepsOldHitUntilLayoutBarrier
     EXPECT_EQ(context->committedHit().hitRevision(), oldHitRevision);
     EXPECT_EQ(context->committedHit().structureRevision(), oldHitStructureRevision);
     EXPECT_EQ(findHitEntry(context->committedHit(), panel), nullptr);
-    EXPECT_FALSE(context->statistics().dirty);
+    EXPECT_FALSE(context->statistics().structureDirty);
     EXPECT_TRUE(context->statistics().layoutDirty);
     EXPECT_TRUE(context->statistics().hitDirty);
 
@@ -422,7 +422,7 @@ TEST_F(UIHitSnapshotTest, HitCapacityFailureKeepsAllPublishedSnapshotsAndPending
     EXPECT_EQ(context->committedHit().size(), oldHit.size());
     EXPECT_EQ(oldHit.entries().front().node, oldHitNode);
     EXPECT_EQ(context->committedHit().entries().front().node, oldHitNode);
-    EXPECT_TRUE(context->statistics().dirty);
+    EXPECT_TRUE(context->statistics().structureDirty);
     EXPECT_TRUE(context->statistics().layoutDirty);
     EXPECT_TRUE(context->statistics().hitDirty);
 
@@ -736,7 +736,7 @@ TEST_F(UIHitSnapshotTest, ThreeHundredPointerQueriesDoNotAllocateOrMutateUiState
     EXPECT_EQ(after.layoutRevision, before.layoutRevision);
     EXPECT_EQ(after.hitRevision, before.hitRevision);
     EXPECT_EQ(after.paintOrderRevision, before.paintOrderRevision);
-    EXPECT_EQ(after.dirty, before.dirty);
+    EXPECT_EQ(after.structureDirty, before.structureDirty);
     EXPECT_EQ(after.layoutDirty, before.layoutDirty);
     EXPECT_EQ(after.hitDirty, before.hitDirty);
     EXPECT_EQ(after.lastLayoutPassCount, before.lastLayoutPassCount);

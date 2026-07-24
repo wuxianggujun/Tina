@@ -44,6 +44,8 @@
 
 | ID | 状态 | 优先级 | 工作 | 验收条件 |
 | --- | --- | --- | --- | --- |
+| RENDER-FENCE | Deferred | P1 | bgfx fence-driven `ISubmissionCompletionLedger` 替换 Host 默认 Null 同步 complete | pin/retirement 在 fence 后；Null 图仍用 Null ledger |
+| ASSET-HANDLE-SCENE | Deferred | P1 | Scene 组件存 AssetHandle；extract 解析 bind key / 未来 FrameResourceRef | 去掉游戏侧手写 key 表为唯一产品路径 |
 | RENDER-001 | Deferred | P2 | PBR Material、lighting 与 pass scheduling | 产品 3D 使用 Cooked texture/material，排序与资源退役有门禁 |
 | PHYSICS-001 | Deferred | P2 | Jolt 3D adapter | 独立 Tina::Physics3D API、Jolt PRIVATE、生命周期/查询/性能门禁 |
 | UI-004 | Deferred | P2 | 通用 Focus Scope、Modal、持久 Pointer Capture | 多 root/state transition 与输入恢复测试通过 |
@@ -81,6 +83,11 @@
 | UI-002-UIA-MAP | 可选 `tina_ui_uia`：UIA 形属性映射 + factory 零 COM；`tina_ui_uia_tests` | [UI](ui.md) |
 | UI-002-HWND | `WindowsUiaHostBridge`：SetWindowSubclass + WM_GETOBJECT + fragment root/children `IRawElementProviderSimple`；HostBridge 单测 | [UI](ui.md) |
 | UI-002-HOST | `TINA_HAS_UI_UIA`：`EngineHost` 从 surface lease 取 Win32 HWND，startup/每帧 layout 后 publish `committedSemantics`；shutdown detach | [UI](ui.md) · Runtime |
+| API-CLEAN-POLICY | `blocksUIUpdateBelow` 替换误导名 `blocksUIInputBelow`；文档/sample/tests 同步 | [gameplay](gameplay.md) |
+| API-CLEAN-ASSET-READY | 删除 `AssetLogicalState Ready` 别名（仅 ReadyCpu/ReadyGpu） | [resources](resources.md) |
+| API-CLEAN-SCENE-KEYS | Scene `fixture*Key` → `meshKey`/`materialKey`/`spriteKey`；注释改为 bind-table 语义 | [Scene](scene-ecs.md) · [3D](game-3d.md) |
+| API-CLEAN-UI-STATS | `UIContextStats.dirty` → `structureDirty`（与内部 structure dirty 对齐） | [UI](ui.md) |
+| RENDER-LEDGER-SPI | `ISubmissionCompletionLedger` + `NullSubmissionCompletionLedger` 实现；`RenderFramePacket` 走接口 | [rendering](rendering.md) · ADR 0016 |
 | RUNTIME-001-INPUT | `blocksGameplayInputBelow`：下层 fixed/frame 使用空 action snapshot；`gameplayInputBlockedForDepth` + unit tests | [gameplay](gameplay.md) · ADR 0014 |
 | RENDER-3D-TEX | Opaque3D unlit 采样 materialKey 绑定贴图（shader `s_texColor` + default white）；关闭「bind 不 draw」假完成 | [3D](game-3d.md) |
 | TEST-001-GCC13-NULL | Docker Desktop + `linux-gcc13-vnext`：`tina_tests`/`tina_ui_tests`(255)/`tina_runtime_ui_tests`(83)/bridge(13)/`tina_sample_null` 300 帧；vcpkg baseline 与仓库一致；`artifacts/gates/test-001-linux-gcc13-null.json` | [Linux 证据](m12-evidence-linux.md) |

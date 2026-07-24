@@ -1,4 +1,4 @@
-﻿#include <gtest/gtest.h>
+#include <gtest/gtest.h>
 
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformFrame.hpp>
@@ -697,7 +697,7 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorCapacityFailureIsAtomic
     EXPECT_EQ(hitAfterFailure.paintOrderRevision(), oldHitPaintOrderRevision);
     EXPECT_EQ(hitAfterFailure.size(), oldHitSize);
     EXPECT_EQ(context->statistics().committedHitTargetCount, oldHitTargetCount);
-    EXPECT_TRUE(context->statistics().dirty);
+    EXPECT_TRUE(context->statistics().structureDirty);
     EXPECT_TRUE(context->statistics().layoutDirty);
 
     const Core::Status retry = coordinator.commitForFrame(context.get(), *frame);

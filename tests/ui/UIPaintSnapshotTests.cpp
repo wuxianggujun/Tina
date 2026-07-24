@@ -460,7 +460,7 @@ TEST_F(UIPaintSnapshotTest, CapacityFailurePreservesAllFourPublishedSnapshotsAnd
     EXPECT_EQ(context->committedPaint().viewportSize(), oldPaint.viewportSize());
     EXPECT_EQ(oldPaint.entries().front().node, first);
     EXPECT_EQ(context->committedPaint().entries().front().node, first);
-    EXPECT_TRUE(context->statistics().dirty);
+    EXPECT_TRUE(context->statistics().structureDirty);
     EXPECT_TRUE(context->statistics().layoutDirty);
     EXPECT_TRUE(context->statistics().hitDirty);
     EXPECT_TRUE(context->statistics().paintDirty);

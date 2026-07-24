@@ -100,7 +100,7 @@ Core::Status extractRenderSceneFromWorld(
         if (params.surfaceViewport.pixelWidth == 0
             || params.surfaceViewport.pixelHeight == 0) {
             // Continue to sprites only when a camera was authored but surface is
-            // suspended â€” still skip setCamera2D so pure-UI / suspended frames
+            // suspended â€?still skip setCamera2D so pure-UI / suspended frames
             // remain valid.
         } else {
             const Render::Camera2DProjectionQuery query{
@@ -135,7 +135,7 @@ Core::Status extractRenderSceneFromWorld(
         if (!isValid(*sprite)) {
             return Core::failure(
                 SceneErrorCode::UnresolvedSprite,
-                "Scene SpriteRenderer2D is missing fixtureSpriteKey or has invalid size");
+                "Scene SpriteRenderer2D is missing spriteKey or has invalid size");
         }
         const WorldTransform* transform = world.worldTransform(entity);
         if (transform == nullptr || !isValid(*transform)) {
@@ -183,7 +183,7 @@ Core::Status extractRenderSceneFromWorld(
         }
 
         const Render::RenderSprite2DInput input{
-            .spriteKey = sprite->fixtureSpriteKey,
+            .spriteKey = sprite->spriteKey,
             .stableEntityKey = stableEntityKey(entity),
             .centerX = centerX,
             .centerY = centerY,
@@ -291,8 +291,8 @@ Core::Status extractRenderSceneFromWorld(
         }
 
         const Render::RenderMesh3DInput input{
-            .meshKey = mesh->fixtureMeshKey,
-            .materialKey = mesh->fixtureMaterialKey,
+            .meshKey = mesh->meshKey,
+            .materialKey = mesh->materialKey,
             .submeshIndex = mesh->submeshIndex,
             .stableEntityKey = stableEntityKey(entity),
             .worldTransform =

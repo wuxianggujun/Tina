@@ -92,7 +92,8 @@ public:
     }
 
     // Complete after present (or Null sync completion). Releases all pins and closes ticket via ledger.
-    [[nodiscard]] Core::Status complete(NullSubmissionCompletionLedger& ledger) noexcept
+    // Ledger may be Null (present-sync) or a future fence-driven implementation.
+    [[nodiscard]] Core::Status complete(ISubmissionCompletionLedger& ledger) noexcept
     {
         if (m_state == State::Idle || m_state == State::Completed || m_state == State::Abandoned)
         {
@@ -128,7 +129,7 @@ public:
     }
 
     // Failure path: abandon in-flight ticket (if any) and release pins.
-    [[nodiscard]] Core::Status abandon(NullSubmissionCompletionLedger* ledger = nullptr) noexcept
+    [[nodiscard]] Core::Status abandon(ISubmissionCompletionLedger* ledger = nullptr) noexcept
     {
         if (m_state == State::Idle || m_state == State::Completed || m_state == State::Abandoned)
         {

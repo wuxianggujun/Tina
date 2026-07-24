@@ -45,7 +45,7 @@ namespace {
                                          i32 orderInLayer = 0) noexcept
 {
     return RenderSprite2DInput{
-        .spriteKey = Sprite2DFixtureSpriteKey,
+        .spriteKey = Sprite2DspriteKey,
         .stableEntityKey = stableEntityKey,
         .centerX = centerX,
         .centerY = 0.0F,
@@ -214,7 +214,7 @@ TEST(BgfxSprite2DGeometryTest, RejectsUnsupportedFixtureKeyExplicitly)
 {
     RenderSceneBuilder builder = makeBuilder();
     auto unsupported = sprite(1, 0.0F);
-    unsupported.spriteKey = Sprite2DFixtureSpriteKey + 1U;
+    unsupported.spriteKey = Sprite2DspriteKey + 1U;
     const std::array inputs{unsupported};
     auto scene = commitScene(builder, inputs);
     ASSERT_TRUE(scene.has_value());

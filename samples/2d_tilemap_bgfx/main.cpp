@@ -719,7 +719,7 @@ struct TileMapResources final {
         return Tina::Core::failure(std::move(characterEntity.error()));
     }
     const Tina::Scene::SpriteRenderer2D characterSprite{
-        .fixtureSpriteKey = ProductSpriteKey,
+        .spriteKey = ProductSpriteKey,
         .overrides = Tina::Scene::SpriteOverrideFlags::Size | Tina::Scene::SpriteOverrideFlags::UvRect,
         .sizeOverrideMeters = {controllerConfig.halfWidth * 2.0f, controllerConfig.halfHeight * 2.0f},
         // Left half of the product atlas (pre-M8-C1 direct emit fidelity).
@@ -742,7 +742,7 @@ struct TileMapResources final {
     }
     const float crateSize = resources.dynamicHalfExtent * 2.0f;
     const Tina::Scene::SpriteRenderer2D crateSprite{
-        .fixtureSpriteKey = ProductSpriteKey,
+        .spriteKey = ProductSpriteKey,
         .overrides = Tina::Scene::SpriteOverrideFlags::Size | Tina::Scene::SpriteOverrideFlags::UvRect,
         .sizeOverrideMeters = {crateSize, crateSize},
         // Right half of the product atlas (pre-M8-C1 direct emit fidelity).
@@ -992,7 +992,7 @@ class PauseOverlayState final : public Tina::IGameState {
         // product counters (renderExtractions vs frameUpdates) stay coherent.
         return Tina::GameStatePolicy{
             .blocksGameplayInputBelow = true,
-            .blocksUIInputBelow = true,
+            .blocksUIUpdateBelow = true,
             .blocksFixedUpdateBelow = true,
             .blocksFrameUpdateBelow = true,
             .blocksRenderBelow = false,

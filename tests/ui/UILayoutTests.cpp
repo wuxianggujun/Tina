@@ -269,7 +269,7 @@ TEST_F(UILayoutTest, InvalidPercentEnumAndViewportPreserveCommittedStateAndPendi
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidLayout);
     expectCommittedSnapshotUnchanged();
-    EXPECT_FALSE(context->statistics().dirty);
+    EXPECT_FALSE(context->statistics().structureDirty);
     EXPECT_FALSE(context->statistics().layoutDirty);
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 0U);
 
@@ -279,13 +279,13 @@ TEST_F(UILayoutTest, InvalidPercentEnumAndViewportPreserveCommittedStateAndPendi
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidLayout);
     expectCommittedSnapshotUnchanged();
-    EXPECT_FALSE(context->statistics().dirty);
+    EXPECT_FALSE(context->statistics().structureDirty);
     EXPECT_FALSE(context->statistics().layoutDirty);
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 0U);
 
     assertOk(updater.setLayoutStyle(panel, fixedSize(30.0F, 15.0F)));
     const UI::UIContextStatistics pending = context->statistics();
-    ASSERT_FALSE(pending.dirty);
+    ASSERT_FALSE(pending.structureDirty);
     ASSERT_TRUE(pending.layoutDirty);
     ASSERT_EQ(pending.dirtyQueuePendingCount, 2U);
 
@@ -295,7 +295,7 @@ TEST_F(UILayoutTest, InvalidPercentEnumAndViewportPreserveCommittedStateAndPendi
         EXPECT_EQ(status.error().code, UI::UIErrorCode::InvalidLayout);
         expectCommittedSnapshotUnchanged();
         const UI::UIContextStatistics after = context->statistics();
-        EXPECT_EQ(after.dirty, pending.dirty);
+        EXPECT_EQ(after.structureDirty, pending.structureDirty);
         EXPECT_EQ(after.layoutDirty, pending.layoutDirty);
         EXPECT_EQ(after.dirtyQueuePendingCount, pending.dirtyQueuePendingCount);
     };
@@ -937,7 +937,7 @@ TEST_F(UILayoutTest, LayoutSnapshotCapacityFailurePreservesOldCommittedLayoutAnd
         structureAfterFailure.begin(),
         structureAfterFailure.end(),
         [&](const UI::UICommittedNodeEntry& entry) { return entry.node == second; }));
-    EXPECT_TRUE(context->statistics().dirty);
+    EXPECT_TRUE(context->statistics().structureDirty);
     EXPECT_TRUE(context->statistics().layoutDirty);
 }
 

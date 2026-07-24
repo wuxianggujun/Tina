@@ -226,8 +226,8 @@ class Visible3DState final : public Tina::IGameState {
             if (auto status = world_->setMeshRenderer3D(
                     cubeEntities_[index],
                     Tina::Scene::MeshRenderer3D{
-                        .fixtureMeshKey = 1,
-                        .fixtureMaterialKey = 1,
+                        .meshKey = 1,
+                        .materialKey = 1,
                         .submeshIndex = 0,
                         .localBounds = {.radius = 1.75F},
                         .baseColorFactor = Colors[index],

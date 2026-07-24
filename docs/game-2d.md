@@ -41,7 +41,7 @@ consume/claim 的 primary pointer transition 才生成 `WorldPointerSample`；0 
 
 `SpriteRenderer2D` 保存：
 
-- 非0 `fixtureSpriteKey`/产品 resource key；
+- 非0 `spriteKey`/产品 resource key；
 - size、pivot、UV override；
 - color、sorting layer、order、flip 与 visible。
 

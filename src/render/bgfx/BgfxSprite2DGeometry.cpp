@@ -190,7 +190,7 @@ Core::Result<BgfxSprite2DFrameRequirements> checkedSprite2DFrame(RenderSceneView
     for (usize index = 0; index < sprites.size(); ++index)
     {
         const RenderSprite2DItem& sprite = sprites[index];
-        if (sprite.spriteKey != Sprite2DFixtureSpriteKey)
+        if (sprite.spriteKey != Sprite2DspriteKey)
         {
             return unsupportedFixtureKey();
         }

@@ -47,7 +47,7 @@ source glTF/GLB
 `0 < near < far`、有限数值和有效 normalized viewport；aspect 每帧从 primary surface 解析，不写回
 Camera component。
 
-当前 `MeshRenderer3D` 的真实字段仍是 `fixtureMeshKey`、`fixtureMaterialKey`、`submeshIndex`、bounds、
+当前 `MeshRenderer3D` 的真实字段仍是 `meshKey`、`materialKey`、`submeshIndex`、bounds、
 base color 与可见性。名称保留了基础设施阶段痕迹，但非零 key 也可绑定产品 GPU mesh。它尚未直接保存
 `AssetHandle<StaticMesh>` 或 `AssetHandle<Material>`，不要把未来资源解析边界写成现有 API。
 
@@ -93,7 +93,7 @@ unlit submit 时按 materialKey **采样**（`s_texColor` × instance baseColorF
 - glTF Cooker 把相对文件或 bufferView 的 baseColorTexture 发布为 Texture2D dependency；外部相对 URI
   强制 root containment，拒绝 `..`/scheme/绝对路径与 >64MiB 文件；`tina_sample_3d` 已 upload、
   `setMesh3DMaterialTextureBinding`，且 Opaque3D unlit submit **采样** material 贴图；
-- Scene/Render 仍使用 mesh/material **key**（`fixtureMeshKey` 命名保留），不是 Scene 上直接存
+- Scene/Render 仍使用 mesh/material **key**（bind-table 语义，非 AssetHandle 组件字段），不是 Scene 上直接存
   `AssetHandle`，也不是 extract 输出 owning `FrameResourceRef`；
 - EngineHost 已有 `RenderFramePacket` + FramePin + Null completion 首切片；真 bgfx fence 后置；
 - 无通用 pass scheduler、pipeline cache 产品契约或 worker extraction；`tina_bench` schema v1 已落地

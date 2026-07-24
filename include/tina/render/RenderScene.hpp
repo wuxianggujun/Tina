@@ -60,7 +60,7 @@ struct RenderCamera2DInput final {
     RenderPixelSnapPolicy pixelSnap = RenderPixelSnapPolicy::Disabled;
 };
 
-// spriteKey is an M8 fixture resource key / product resource id seed for now.
+// spriteKey is a backend-neutral bind table id (setSprite2DTextureBinding).
 // UV rect defaults to full texture [0,1]; typed Sprite payload extraction may
 // override it. The position is the resolved geometric center; Scene/Asset
 // extraction applies any authored pivot before writing this render-facing value.
@@ -131,8 +131,8 @@ struct RenderPerspectiveCameraInput final {
     RenderNormalizedViewport normalizedViewport{};
 };
 
-// meshKey/materialKey are deterministic M9 fixture resource keys. M10 replaces
-// them with resolved FrameResourceRef values without exposing backend handles.
+// meshKey/materialKey are backend-neutral bind table ids (setMesh3DBinding /
+// setMesh3DMaterialTextureBinding). AssetHandle-on-component resolve remains Deferred.
 struct RenderMesh3DInput final {
     u32 meshKey = 0;
     u32 materialKey = 0;

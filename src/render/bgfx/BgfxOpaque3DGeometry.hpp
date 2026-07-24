@@ -8,8 +8,8 @@
 
 namespace Tina::Render::Bgfx {
 
-inline constexpr u32 Opaque3DFixtureMeshKey = 1;
-inline constexpr u32 Opaque3DFixtureMaterialKey = 1;
+inline constexpr u32 Opaque3DmeshKey = 1;
+inline constexpr u32 Opaque3DmaterialKey = 1;
 inline constexpr u32 Opaque3DFixtureSubmeshIndex = 0;
 
 struct BgfxOpaque3DVertex final {

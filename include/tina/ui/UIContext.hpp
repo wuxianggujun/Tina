@@ -73,7 +73,8 @@ struct UIContextStatistics final {
     u64 paintRevision = 0;
     usize committedSemanticsNodeCount = 0;
     u64 semanticsRevision = 0;
-    bool dirty = false;       // Structure dirty kept for M7-C1a compatibility.
+    // structureDirty: public name for structure-only dirty (legacy field was "dirty").
+    bool structureDirty = false;
     bool layoutDirty = false; // Style/structure changes still requiring layout.
     bool hitDirty = false;
     bool paintDirty = false;

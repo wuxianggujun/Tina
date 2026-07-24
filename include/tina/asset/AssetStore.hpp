@@ -32,7 +32,8 @@ struct AssetHandle final {
     [[nodiscard]] friend constexpr bool operator==(const AssetHandle&, const AssetHandle&) = default;
 };
 
-// Ready is kept as an alias name for CPU-ready in docs/tests; enum value is ReadyCpu.
+// Logical asset residency. ReadyCpu = cooked CPU payload; ReadyGpu = GPU-resident.
+// Do not introduce a bare "Ready" alias — it collides with upload ticket Ready and hides CPU/GPU.
 enum class AssetLogicalState : Core::u8 {
     Queued = 1,
     Loading = 2,
@@ -43,9 +44,6 @@ enum class AssetLogicalState : Core::u8 {
     UnloadPending = 7,
     Unloaded = 8,
 };
-
-// Backward-compatible alias used by existing call sites that mean "CPU payload is available".
-inline constexpr AssetLogicalState Ready = AssetLogicalState::ReadyCpu;
 
 struct AssetStoreConfig final {
     Core::usize capacity = 0;

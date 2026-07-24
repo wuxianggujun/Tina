@@ -9318,7 +9318,7 @@ struct UIContext::Impl final {
             .committedSemanticsNodeCount =
                 committedSemanticsBuffers[publishedSemanticsBufferIndex].size(),
             .semanticsRevision = committedSemanticsRevision,
-            .dirty = structureDirty,
+            .structureDirty = structureDirty,
             .layoutDirty = layoutDirty,
             .hitDirty = hitDirty,
             .paintDirty = paintDirty,

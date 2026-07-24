@@ -1447,7 +1447,7 @@ TEST_F(UIInputRouteTest, ThreeHundredRoutesDoNotAllocateOrMutateCommittedState)
     EXPECT_EQ(after.paintOrderRevision, before.paintOrderRevision);
     EXPECT_EQ(after.activeRoutedPointerListenerCount,
               before.activeRoutedPointerListenerCount);
-    EXPECT_EQ(after.dirty, before.dirty);
+    EXPECT_EQ(after.structureDirty, before.structureDirty);
     EXPECT_EQ(after.layoutDirty, before.layoutDirty);
     EXPECT_EQ(after.hitDirty, before.hitDirty);
 }

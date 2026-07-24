@@ -38,7 +38,7 @@ namespace {
 
 [[nodiscard]] RenderMesh3DInput mesh(u32 meshKey, u64 stableEntityKey, float x,
                                      RenderLinearColor color = {},
-                                     u32 materialKey = Opaque3DFixtureMaterialKey,
+                                     u32 materialKey = Opaque3DmaterialKey,
                                      u32 submeshIndex = Opaque3DFixtureSubmeshIndex) noexcept
 {
     return RenderMesh3DInput{
@@ -55,8 +55,8 @@ namespace {
 }
 
 [[nodiscard]] Core::Result<RenderSceneView>
-committedScene(RenderSceneBuilder& builder, u32 meshKey = Opaque3DFixtureMeshKey,
-               u32 materialKey = Opaque3DFixtureMaterialKey,
+committedScene(RenderSceneBuilder& builder, u32 meshKey = Opaque3DmeshKey,
+               u32 materialKey = Opaque3DmaterialKey,
                u32 submeshIndex = Opaque3DFixtureSubmeshIndex)
 {
     if (auto status = builder.beginFrame({.primarySurfaceAspectRatio = 16.0F / 9.0F}); !status)
@@ -170,10 +170,10 @@ TEST(BgfxOpaque3DGeometryTest, ValidFixtureWritesWorldTransformsAndColors)
 
 // Product path: non-fixture meshKey is valid at geometry validation; submit binds GPU mesh.
 // (meshKey=0 is rejected earlier by RenderSceneBuilder, not only here.)
-TEST(BgfxOpaque3DGeometryTest, AcceptsNonFixtureMeshKeyAtGeometryStage)
+TEST(BgfxOpaque3DGeometryTest, AcceptsNonmeshKeyAtGeometryStage)
 {
     RenderSceneBuilder builder = makeBuilder();
-    auto sceneResult = committedScene(builder, Opaque3DFixtureMeshKey + 1U);
+    auto sceneResult = committedScene(builder, Opaque3DmeshKey + 1U);
     ASSERT_TRUE(sceneResult.has_value());
     const RenderSceneView scene = *sceneResult;
     auto requirements = checkedOpaque3DFrame(scene);
@@ -183,11 +183,11 @@ TEST(BgfxOpaque3DGeometryTest, AcceptsNonFixtureMeshKeyAtGeometryStage)
 }
 
 // M11-E5: non-fixture materialKey is valid; texture binds via materialKey at submit.
-TEST(BgfxOpaque3DGeometryTest, AcceptsNonFixtureMaterialKeyAtGeometryStage)
+TEST(BgfxOpaque3DGeometryTest, AcceptsNonmaterialKeyAtGeometryStage)
 {
     RenderSceneBuilder builder = makeBuilder();
-    auto sceneResult = committedScene(builder, Opaque3DFixtureMeshKey,
-                                      Opaque3DFixtureMaterialKey + 1U);
+    auto sceneResult = committedScene(builder, Opaque3DmeshKey,
+                                      Opaque3DmaterialKey + 1U);
     ASSERT_TRUE(sceneResult.has_value());
 
     auto requirements = checkedOpaque3DFrame(*sceneResult);
@@ -198,8 +198,8 @@ TEST(BgfxOpaque3DGeometryTest, AcceptsNonFixtureMaterialKeyAtGeometryStage)
 TEST(BgfxOpaque3DGeometryTest, RejectsUnsupportedSubmeshIndexExplicitly)
 {
     RenderSceneBuilder builder = makeBuilder();
-    auto sceneResult = committedScene(builder, Opaque3DFixtureMeshKey,
-                                      Opaque3DFixtureMaterialKey,
+    auto sceneResult = committedScene(builder, Opaque3DmeshKey,
+                                      Opaque3DmaterialKey,
                                       Opaque3DFixtureSubmeshIndex + 1U);
     ASSERT_TRUE(sceneResult.has_value());
 

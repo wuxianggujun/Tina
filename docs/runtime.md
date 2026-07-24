@@ -14,7 +14,7 @@
   candidate（不 onExit），栈保持。pop 空栈产生 `RunExitReason::GameStateStackBecameEmpty`。
 - `GameStatePolicy` 在 enter 成功后采样；`requestPolicyChange` 更新栈顶 committed policy。
   帧阶段按栈 **自顶向下** 调度：`blocksFixedUpdateBelow` / `blocksFrameUpdateBelow` /
-  `blocksRenderBelow` / `blocksUIInputBelow` 为真时停止向更下层传播。structural command 仍仅栈顶可排队。
+  `blocksRenderBelow` / `blocksUIUpdateBelow` 为真时停止向更下层传播。structural command 仍仅栈顶可排队。
 - `IGameState` 承担 `fixedUpdate()`、`updateFrame()`、`extractRenderScene()` 与 `updateUI()`。
 - Runtime 已组合 Clock、Platform、Task、Render 和可选 Audio；AssetSystem/World/Physics2D 仍由
   产品 State 或样例显式持有，不是 `EngineHost` 模块。
@@ -152,7 +152,7 @@ AudioEngine
 | Backlog | 范围 |
 | --- | --- |
 | `TASK-001` | **Done**：Desktop `resolveDesktopTaskSystemParams` 交互默认 `max(1, hw-1)`；工厂 `cpu=0` 仍 IO-only |
-| `RUNTIME-001` | stack/commands + phase 阻断 + **gameplay input 空 snapshot 抑制** 已落地；`blocksUIInputBelow` 仅挡 `updateUI` 不挡当帧 UI route |
+| `RUNTIME-001` | stack/commands + phase 阻断 + **gameplay input 空 snapshot 抑制** 已落地；`blocksUIUpdateBelow` 仅挡 `updateUI` 不挡当帧 UI route |
 | `RUNTIME-002` | packet/FramePin/Null completion 首切片已落地；真实 GPU fence 后置 |
 
 通用 Runtime Event Queue、AssetSystem 组合、State TaskGroup barrier、多 World/editor orchestration 与

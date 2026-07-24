@@ -991,7 +991,7 @@ Core::Status World::setSpriteRenderer2D(
     if (!isValid(sprite)) {
         return Core::failure(
             SceneErrorCode::InvalidComponent,
-            "Scene SpriteRenderer2D is missing fixtureSpriteKey or has invalid size");
+            "Scene SpriteRenderer2D is missing spriteKey or has invalid size");
     }
     EntityRecord* entityRecord = record(entity);
     if (entityRecord == nullptr) {

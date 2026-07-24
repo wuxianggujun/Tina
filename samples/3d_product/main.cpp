@@ -749,8 +749,8 @@ class Product3DState final : public Tina::IGameState {
             *world_,
             prefab->view,
             Tina::Scene::PrefabMeshBinding{
-                .fixtureMeshKey = FirstProductMeshKey,
-                .fixtureMaterialKey = FirstProductMaterialKey,
+                .meshKey = FirstProductMeshKey,
+                .materialKey = FirstProductMaterialKey,
                 .localBounds = {.radius = resources_->meshes[0].meshBoundsRadius},
                 .baseColorFactor = resources_->meshes[0].materialColor,
                 .resolveMeshKey =

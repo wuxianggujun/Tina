@@ -1231,7 +1231,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                     }
                 }
             }
-            else if (batch.meshKey != Opaque3DFixtureMeshKey)
+            else if (batch.meshKey != Opaque3DmeshKey)
             {
                 // Unbound non-fixture meshKey: skip submit rather than draw wrong geometry.
                 continue;

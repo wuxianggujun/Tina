@@ -14,12 +14,11 @@
 namespace Tina::Scene {
 
 // Maps cooked Prefab node AssetIds to backend meshKey/materialKey tables.
-// When resolve* is empty, fixtureMeshKey/fixtureMaterialKey apply to every
-// meshed node (E8 fixture path). Games typically bind GPU meshes once then
-// resolve AssetId → key (E10).
+// When resolve* is empty, meshKey/materialKey apply to every meshed node.
+// Games typically bind GPU meshes once then resolve AssetId -> key.
 struct PrefabMeshBinding final {
-    u32 fixtureMeshKey = 1;
-    u32 fixtureMaterialKey = 1;
+    u32 meshKey = 1;
+    u32 materialKey = 1;
     Render::RenderBoundingSphereInput localBounds{.radius = 0.5F};
     Render::RenderLinearColor baseColorFactor{};
     // Optional: return 0 to fail instantiate for that node.
@@ -31,7 +30,7 @@ struct PrefabMeshBinding final {
 };
 
 // Instantiates Prefab nodes into World in stable order:
-// createEntity(local) → setParent(keep-local) → optional setMeshRenderer3D.
+// createEntity(local) -> setParent(keep-local) -> optional setMeshRenderer3D.
 // On any failure, destroys all entities created by this call (no partial hierarchy).
 // Caller must still call updateWorldTransforms() before extract.
 [[nodiscard]] Core::Result<std::vector<EntityId>> instantiatePrefab(

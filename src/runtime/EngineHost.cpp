@@ -894,7 +894,7 @@ class EngineHostImplementation final {
             }
             // Only the stack top may queue structural commands (ADR 0014).
             // blocksGameplayInputBelow: layers below see empty frame actions (no held/edge).
-            // blocksUIInputBelow still only gates updateUI dispatch (not UI route this frame).
+            // blocksUIUpdateBelow still only gates updateUI dispatch (not UI route this frame).
             const FrameActionSnapshot suppressedFrameActions =
                 FrameActionSnapshot::suppressed(frameIndex);
             auto updateResult = m_gameStateStack.forEachDispatch(
@@ -1442,6 +1442,14 @@ class EngineHostImplementation final {
         m_uiaTree = UI::UIAccessibilityTree{};
     }
 
+    // UIA is optional product wiring: fake/test HWNDs and attach failures must not
+    // fail EngineHost::run. Disable the optional path and continue.
+    void disablePrimaryWindowUia() noexcept
+    {
+        detachPrimaryWindowUia();
+        m_primaryWin32Hwnd.reset();
+    }
+
     [[nodiscard]] Core::Status ensurePrimaryWindowUiaAttached()
     {
         if (!m_primaryWin32Hwnd.has_value() || *m_primaryWin32Hwnd == 0)
@@ -1452,15 +1460,22 @@ class EngineHostImplementation final {
         {
             return Core::success();
         }
+        HWND hwnd = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(*m_primaryWin32Hwnd));
+        if (!::IsWindow(hwnd))
+        {
+            disablePrimaryWindowUia();
+            return Core::success();
+        }
         auto bridgeResult = UI::createWindowsUiaHostBridge();
         if (!bridgeResult)
         {
-            return Core::failure(std::move(bridgeResult.error()));
+            disablePrimaryWindowUia();
+            return Core::success();
         }
-        HWND hwnd = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(*m_primaryWin32Hwnd));
         if (auto status = (*bridgeResult)->attach(hwnd); !status)
         {
-            return status;
+            disablePrimaryWindowUia();
+            return Core::success();
         }
         m_uiaHostBridge = std::move(*bridgeResult);
         return Core::success();
@@ -1490,9 +1505,15 @@ class EngineHostImplementation final {
         }
         if (auto status = m_uiaTree.rebuildFrom(context->committedSemantics()); !status)
         {
+            // Semantics rebuild failure is a real UI invariant; keep hard.
             return status;
         }
-        return m_uiaHostBridge->publish(m_uiaTree);
+        if (auto status = m_uiaHostBridge->publish(m_uiaTree); !status)
+        {
+            disablePrimaryWindowUia();
+            return Core::success();
+        }
+        return Core::success();
     }
 #else
     void detachPrimaryWindowUia() noexcept {}

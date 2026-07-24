@@ -7,12 +7,13 @@
 
 namespace Tina::Scene {
 
-// Scene-owned opaque mesh draw component. Stores semantic fields only — no GPU
-// handles. This slice extracts via fixture meshKey/materialKey (M9 product seed /
-// fixture resource id). Full AssetHandle + Cooked Mesh resolve is Deferred.
+// Scene-owned opaque mesh draw component. Stores semantic fields only (no GPU
+// handles). meshKey/materialKey are backend-neutral bind table ids (set via
+// setMesh3DBinding / setMesh3DMaterialTextureBinding). Full AssetHandle on the
+// component + extract-time resolve remains Deferred.
 struct MeshRenderer3D final {
-    u32 fixtureMeshKey = 0;
-    u32 fixtureMaterialKey = 0;
+    u32 meshKey = 0;
+    u32 materialKey = 0;
     u32 submeshIndex = 0;
     Render::RenderBoundingSphereInput localBounds{.radius = 0.5F};
     Render::RenderLinearColor baseColorFactor{};
@@ -24,7 +25,7 @@ struct MeshRenderer3D final {
 
 [[nodiscard]] inline bool isValid(const MeshRenderer3D& mesh) noexcept
 {
-    if (mesh.fixtureMeshKey == 0 || mesh.fixtureMaterialKey == 0)
+    if (mesh.meshKey == 0 || mesh.materialKey == 0)
     {
         return false;
     }

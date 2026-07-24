@@ -25,7 +25,7 @@ struct ExtractRenderSceneParams final {
 // - Active PerspectiveCamera3D count >1: structured MultipleActiveCameras failure.
 // - Camera2D and PerspectiveCamera3D are independent tracks (2D ortho vs 3D
 //   perspective); both may be active in the same frame when the writer allows.
-// - Each visible SpriteRenderer2D with valid fixtureSpriteKey becomes addSprite2D
+// - Each visible SpriteRenderer2D with valid spriteKey becomes addSprite2D
 //   using published world position/scale and Z-axis rotation.
 // - Each visible MeshRenderer3D with valid fixture mesh/material keys becomes
 //   addMesh3D from WorldTransform pose/scale.

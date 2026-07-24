@@ -64,8 +64,8 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
             continue;
         }
 
-        u32 meshKey = meshBinding.fixtureMeshKey;
-        u32 materialKey = meshBinding.fixtureMaterialKey;
+        u32 meshKey = meshBinding.meshKey;
+        u32 materialKey = meshBinding.materialKey;
         if (meshBinding.resolveMeshKey)
         {
             if (!static_cast<bool>(node.meshId))
@@ -105,8 +105,8 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
         }
 
         MeshRenderer3D mesh{
-            .fixtureMeshKey = meshKey,
-            .fixtureMaterialKey = materialKey,
+            .meshKey = meshKey,
+            .materialKey = materialKey,
             .localBounds = bounds,
             .baseColorFactor = color,
             .visible = node.visible,

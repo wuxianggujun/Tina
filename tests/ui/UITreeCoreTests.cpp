@@ -498,7 +498,7 @@ TEST_F(UITreeCoreTest, CommitPublishesStablePreorderParentDepthKindAndPaintOrdin
     EXPECT_TRUE(beforeCreate.empty());
     EXPECT_EQ(beforeCreate.revision(), 0U);
     EXPECT_TRUE(context->committedStructure().empty());
-    EXPECT_TRUE(context->statistics().dirty);
+    EXPECT_TRUE(context->statistics().structureDirty);
 
     ASSERT_TRUE(context->commitStructure().has_value());
     const UI::UICommittedStructureView committed = context->committedStructure();
@@ -553,7 +553,7 @@ TEST_F(UITreeCoreTest, UnchangedCommitPreservesRevisionAndDoesNotAllocateUiPersi
     }
 
     EXPECT_EQ(resource.allocationCount(), allocationCount);
-    EXPECT_FALSE(context->statistics().dirty);
+    EXPECT_FALSE(context->statistics().structureDirty);
 }
 
 TEST_F(UITreeCoreTest, DestroyInvalidatesImmediatelyButKeepsCommittedSnapshotUntilNextCommit)

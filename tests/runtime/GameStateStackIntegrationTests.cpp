@@ -60,7 +60,7 @@ public:
         // Pause-style overlay: freeze simulation + frame of layers below; still extract/UI self.
         return GameStatePolicy{
             .blocksGameplayInputBelow = true,
-            .blocksUIInputBelow = false,
+            .blocksUIUpdateBelow = false,
             .blocksFixedUpdateBelow = true,
             .blocksFrameUpdateBelow = true,
             .blocksRenderBelow = false,

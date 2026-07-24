@@ -94,8 +94,9 @@ public:
     [[nodiscard]] virtual Core::u32 pinCount() const noexcept = 0;
 };
 
-// Null-path submission completion ledger: tracks Submitted indices until complete().
-// Real backends will complete from GPU fence; Null completes when Runtime finishes present.
+// Tracks Submitted frame indices until complete/abandon (ADR 0016 / RUNTIME-002).
+// Host holds an ISubmissionCompletionLedger; Null completes at present-return.
+// Future Bgfx* ledger will complete from GPU fence without changing packet/Host shape.
 struct SubmissionTicket final {
     Core::u64 submissionIndex = 0;
     bool open = false;
@@ -103,7 +104,19 @@ struct SubmissionTicket final {
     [[nodiscard]] bool hasValue() const noexcept { return open; }
 };
 
-class NullSubmissionCompletionLedger final {
+class ISubmissionCompletionLedger {
+public:
+    virtual ~ISubmissionCompletionLedger() noexcept = default;
+
+    [[nodiscard]] virtual Core::Result<SubmissionTicket> beginSubmitted(Core::u64 submissionIndex) = 0;
+    [[nodiscard]] virtual Core::Status complete(SubmissionTicket& ticket) noexcept = 0;
+    [[nodiscard]] virtual Core::Status abandon(SubmissionTicket& ticket) noexcept = 0;
+    [[nodiscard]] virtual Core::u32 inflightCount() const noexcept = 0;
+    [[nodiscard]] virtual bool allClear() const noexcept = 0;
+};
+
+// Sync Null ledger: present-return == complete. Not a GPU fence.
+class NullSubmissionCompletionLedger final : public ISubmissionCompletionLedger {
 public:
     static constexpr Core::usize DefaultCapacity = 64;
 
@@ -113,12 +126,11 @@ public:
     }
 
     [[nodiscard]] Core::usize capacity() const noexcept { return m_capacity; }
-    [[nodiscard]] Core::u32 inflightCount() const noexcept { return m_inflight; }
+    [[nodiscard]] Core::u32 inflightCount() const noexcept override { return m_inflight; }
     [[nodiscard]] Core::u64 lastCompletedSubmission() const noexcept { return m_lastCompleted; }
-    [[nodiscard]] bool allClear() const noexcept { return m_inflight == 0; }
+    [[nodiscard]] bool allClear() const noexcept override { return m_inflight == 0; }
 
-    // Opens an in-flight ticket for a Submitted frame. Fails if capacity exhausted.
-    [[nodiscard]] Core::Result<SubmissionTicket> beginSubmitted(Core::u64 submissionIndex)
+    [[nodiscard]] Core::Result<SubmissionTicket> beginSubmitted(Core::u64 submissionIndex) override
     {
         if (m_inflight >= static_cast<Core::u32>(m_capacity))
         {
@@ -131,8 +143,7 @@ public:
         return SubmissionTicket{.submissionIndex = submissionIndex, .open = true};
     }
 
-    // Marks a ticket complete and releases one in-flight slot. Idempotent on closed tickets.
-    [[nodiscard]] Core::Status complete(SubmissionTicket& ticket) noexcept
+    [[nodiscard]] Core::Status complete(SubmissionTicket& ticket) noexcept override
     {
         if (!ticket.open)
         {
@@ -151,8 +162,7 @@ public:
         return Core::success();
     }
 
-    // Abandon without counting as completed GPU work (failed submit path).
-    [[nodiscard]] Core::Status abandon(SubmissionTicket& ticket) noexcept
+    [[nodiscard]] Core::Status abandon(SubmissionTicket& ticket) noexcept override
     {
         if (!ticket.open)
         {

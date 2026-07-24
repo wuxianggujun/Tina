@@ -65,12 +65,12 @@ struct SpriteUvRect final {
     friend constexpr bool operator==(const SpriteUvRect&, const SpriteUvRect&) noexcept = default;
 };
 
-// Scene-owned 2D sprite draw component. Stores semantic fields only — no GPU
-// handles. This slice extracts via fixtureSpriteKey (M8/M9 product seed /
-// fixture resource id). Full AssetHandle + Cooked Sprite resolve is Deferred.
+// Scene-owned 2D sprite draw component. Stores semantic fields only (no GPU
+// handles). spriteKey is a backend-neutral bind table id (set via
+// setSprite2DTextureBinding). Full AssetHandle on the component remains Deferred.
 struct SpriteRenderer2D final {
     // Non-zero resolved render resource key written to RenderSprite2DInput.
-    u32 fixtureSpriteKey = 0;
+    u32 spriteKey = 0;
     SpriteOverrideFlags overrides = SpriteOverrideFlags::None;
     Vec2 sizeOverrideMeters{1.0F, 1.0F};
     // Pivot in [0,1] relative to sprite extents; geometric center is adjusted
@@ -101,7 +101,7 @@ struct SpriteRenderer2D final {
 
 [[nodiscard]] inline bool isValid(const SpriteRenderer2D& sprite) noexcept
 {
-    if (sprite.fixtureSpriteKey == 0) {
+    if (sprite.spriteKey == 0) {
         return false;
     }
     if (!std::isfinite(sprite.sizeOverrideMeters.x)

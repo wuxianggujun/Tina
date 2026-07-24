@@ -46,7 +46,7 @@ namespace {
     float height = 1.0F)
 {
     return SpriteRenderer2D{
-        .fixtureSpriteKey = key,
+        .spriteKey = key,
         .overrides = SpriteOverrideFlags::Size,
         .sizeOverrideMeters = {width, height},
         .visible = true,
@@ -65,7 +65,7 @@ TEST(SceneComponentStorageTest, SetsClearsAndQueriesCameraAndSprite)
 
     ASSERT_TRUE(world.setSpriteRenderer2D(entity, fixtureSprite(1)));
     ASSERT_NE(world.spriteRenderer2D(entity), nullptr);
-    EXPECT_EQ(world.spriteRenderer2D(entity)->fixtureSpriteKey, 1U);
+    EXPECT_EQ(world.spriteRenderer2D(entity)->spriteKey, 1U);
 
     ASSERT_TRUE(world.clearCamera2D(entity));
     EXPECT_EQ(world.camera2D(entity), nullptr);
@@ -360,8 +360,8 @@ TEST(SceneExtractTest, InactiveCameraIsIgnored)
 [[nodiscard]] MeshRenderer3D fixtureMesh(u32 meshKey = 1, u32 materialKey = 1)
 {
     return MeshRenderer3D{
-        .fixtureMeshKey = meshKey,
-        .fixtureMaterialKey = materialKey,
+        .meshKey = meshKey,
+        .materialKey = materialKey,
         .localBounds = Render::RenderBoundingSphereInput{.radius = 0.5F},
         .visible = true,
     };
@@ -378,8 +378,8 @@ TEST(SceneComponentStorageTest, SetsClearsAndQueriesPerspectiveCameraAndMesh)
 
     ASSERT_TRUE(world.setMeshRenderer3D(entity, fixtureMesh(2, 3)));
     ASSERT_NE(world.meshRenderer3D(entity), nullptr);
-    EXPECT_EQ(world.meshRenderer3D(entity)->fixtureMeshKey, 2U);
-    EXPECT_EQ(world.meshRenderer3D(entity)->fixtureMaterialKey, 3U);
+    EXPECT_EQ(world.meshRenderer3D(entity)->meshKey, 2U);
+    EXPECT_EQ(world.meshRenderer3D(entity)->materialKey, 3U);
 
     ASSERT_TRUE(world.clearPerspectiveCamera3D(entity));
     EXPECT_EQ(world.perspectiveCamera3D(entity), nullptr);
@@ -517,7 +517,7 @@ TEST(ScenePrefabInstantiateTest, InstantiatesHierarchyAndMeshes)
         },
     };
     AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
-    auto created = instantiatePrefab(world, prefab, PrefabMeshBinding{.fixtureMeshKey = 1, .fixtureMaterialKey = 1});
+    auto created = instantiatePrefab(world, prefab, PrefabMeshBinding{.meshKey = 1, .materialKey = 1});
     ASSERT_TRUE(created.has_value()) << (created ? "" : created.error().message);
     ASSERT_EQ(created->size(), 2U);
     EXPECT_EQ(world.entityCount(), 2U);
@@ -599,8 +599,8 @@ TEST(ScenePrefabInstantiateTest, ResolvesPerNodeMeshKeysFromAssetIds)
     };
     AssetFormat::PrefabPayloadView prefab{.schemaVersion = 1, .nodes = nodes};
     PrefabMeshBinding binding{
-        .fixtureMeshKey = 1,
-        .fixtureMaterialKey = 1,
+        .meshKey = 1,
+        .materialKey = 1,
         .resolveMeshKey =
             [meshA, meshB](Core::AssetId id) -> u32 {
                 if (id == meshA)
@@ -633,10 +633,10 @@ TEST(ScenePrefabInstantiateTest, ResolvesPerNodeMeshKeysFromAssetIds)
     const MeshRenderer3D* b = world.meshRenderer3D((*created)[1]);
     ASSERT_NE(a, nullptr);
     ASSERT_NE(b, nullptr);
-    EXPECT_EQ(a->fixtureMeshKey, 10U);
-    EXPECT_EQ(a->fixtureMaterialKey, 11U);
-    EXPECT_EQ(b->fixtureMeshKey, 20U);
-    EXPECT_EQ(b->fixtureMaterialKey, 21U);
+    EXPECT_EQ(a->meshKey, 10U);
+    EXPECT_EQ(a->materialKey, 11U);
+    EXPECT_EQ(b->meshKey, 20U);
+    EXPECT_EQ(b->materialKey, 21U);
 }
 
 } // namespace

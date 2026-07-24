@@ -83,7 +83,7 @@ enum class GameStateDispatchPhase : u8 {
     case GameStateDispatchPhase::RenderExtract:
         return policy.blocksRenderBelow;
     case GameStateDispatchPhase::UIUpdate:
-        return policy.blocksUIInputBelow;
+        return policy.blocksUIUpdateBelow;
     }
     return false;
 }

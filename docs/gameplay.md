@@ -42,7 +42,7 @@ public:
 默认逐帧实现返回 success。Runtime 持有私有 `GameStateStack`（定容 8）：enter 成功后采样
 `initialPolicy()`，帧内可 `requestPush` / `requestPop` / `requestReplace` / `requestPolicyChange`。
 四相位 `blocksFixedUpdateBelow` / `blocksFrameUpdateBelow` / `blocksRenderBelow` /
-`blocksUIInputBelow`（控制下层 `updateUI` 是否调用；**不**回改当帧 UI route）已调度。
+`blocksUIUpdateBelow`（控制下层 `updateUI` 是否调用；**不**回改当帧 UI route）已调度。
 `blocksGameplayInputBelow`：下层 `fixedUpdate`/`updateFrame` 收到空 action snapshot
 （`SimulationActionSnapshot::suppressed` / `FrameActionSnapshot::suppressed`）。
 
@@ -95,7 +95,7 @@ IO-only / NotSupported。AssetSystem/Physics2D/miniaudio device 由产品或 fea
 ## Fixed 与 Frame domain
 
 输入在 **State 栈调度之前** 已经完成 Platform normalize、UI route/consume/claim 与 Action Mapping
-（因此 `blocksUIInputBelow` 不能回改当帧已产生的 route；它只阻断下层 `updateUI`）：
+（因此 `blocksUIUpdateBelow` 不能回改当帧已产生的 route；它只阻断下层 `updateUI`）：
 
 - `FixedUpdateContext::simulationActions()` 只读目标 simulation tick 的 action；
 - `FrameUpdateContext::frameActions()` 只读当前 render frame 的 action；
@@ -134,7 +134,7 @@ save/load orchestration 尚未完成。
 - push/pop/replace 只在 `updateFrame` 后、`extractRenderScene` 前唯一 commit；
 - enter 失败丢弃 candidate 且不调用 `onExit`，栈保持；
 - `blocksFixedUpdateBelow` / `blocksFrameUpdateBelow` / `blocksRenderBelow` /
-  `blocksUIInputBelow`（下层 `updateUI`）自顶向下阻断；
+  `blocksUIUpdateBelow`（下层 `updateUI`）自顶向下阻断；
 - structural command 仅栈顶可排队；pop 空栈 → `GameStateStackBecameEmpty`。
 
 另已落地（RUNTIME-001-INPUT）：`blocksGameplayInputBelow` 使下层 fixed/frame 使用
@@ -145,6 +145,6 @@ save/load orchestration 尚未完成。
 
 - 交互式菜单/暂停（按键切换）；`tina_sample_2d` 仅自动收尾 pause overlay（≥60 帧 smoke）；
 - State UI root / listener / TaskGroup / AssetLease 在 transition 后的完整 stale-owner 矩阵；
-- `blocksUIInputBelow` 回改当帧 UI route（当前故意不接；route 在 stack 前）。
+- `blocksUIUpdateBelow` 回改当帧 UI route（当前故意不接；route 在 stack 前）。
 
 帧阶段详见 [Runtime](runtime.md)，任务状态见 [Backlog](backlog.md)。

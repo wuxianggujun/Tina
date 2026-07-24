@@ -13,7 +13,10 @@ class UIUpdateContext;
 
 struct GameStatePolicy final {
     bool blocksGameplayInputBelow = false;
-    bool blocksUIInputBelow = false;
+    // Gates lower-layer IGameState::updateUI only (not the current-frame UI route,
+    // which runs before stack dispatch). Name matches behavior; do not read as
+    // "blocks UI pointer/IME routing".
+    bool blocksUIUpdateBelow = false;
     bool blocksFixedUpdateBelow = false;
     bool blocksFrameUpdateBelow = false;
     bool blocksRenderBelow = false;

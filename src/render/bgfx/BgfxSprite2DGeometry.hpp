@@ -7,7 +7,7 @@
 
 namespace Tina::Render::Bgfx {
 
-inline constexpr u32 Sprite2DFixtureSpriteKey = 1;
+inline constexpr u32 Sprite2DspriteKey = 1;
 
 struct BgfxSprite2DVertex final {
     float positionX = 0.0F;

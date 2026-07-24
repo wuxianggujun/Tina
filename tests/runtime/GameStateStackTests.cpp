@@ -101,7 +101,7 @@ TEST(GameStatePolicyDispatchTest, BlocksBelowStopsPropagation)
                                   GameStateDispatchPhase::FrameUpdate));
     EXPECT_TRUE(policyBlocksBelow(GameStatePolicy{.blocksRenderBelow = true},
                                   GameStateDispatchPhase::RenderExtract));
-    EXPECT_TRUE(policyBlocksBelow(GameStatePolicy{.blocksUIInputBelow = true},
+    EXPECT_TRUE(policyBlocksBelow(GameStatePolicy{.blocksUIUpdateBelow = true},
                                   GameStateDispatchPhase::UIUpdate));
 }
 
@@ -140,7 +140,7 @@ TEST(GameStatePolicyDispatchTest, CollectDispatchIndicesHonorsOverlayBlock)
     // index 0 = base (bottom), index 1 = overlay (top)
     ASSERT_TRUE(stack.pushCommitted(std::make_unique<RecordingState>(log, "base"), {}));
     ASSERT_TRUE(stack.pushCommitted(std::make_unique<RecordingState>(log, "overlay"),
-                                    GameStatePolicy{.blocksUIInputBelow = true,
+                                    GameStatePolicy{.blocksUIUpdateBelow = true,
                                                     .blocksFixedUpdateBelow = true,
                                                     .blocksFrameUpdateBelow = true,
                                                     .blocksRenderBelow = true}));
