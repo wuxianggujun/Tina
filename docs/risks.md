@@ -14,7 +14,7 @@
 | R-GLTF-01 | P0 | 外部 URI 路径穿越、symlink escape、size/count 资源炸弹 | Runtime 不直接打开 URI；Cooker 有结构/size 校验，relative-file 仍只按可信输入处理 | root containment、URI policy、overflow/oversize corpus 全通过 | ASSET-001 |
 | R-LINUX-01 | closed | tip Docker GCC13 + Clang22（含 sanitizer）已复验 | [m12-evidence-linux.md](m12-evidence-linux.md) | 可选 Wayland/真显示器 | TEST-001 Done |
 | R-UI-01 | P0 | dirty 传播或 paint batching 导致全树工作、每帧分配或透明顺序错误 | committed snapshot、固定 PMR、相邻合批、checksum | 目标规模门禁、零稳态分配和视觉/paint checksum 同时通过 | UI-003, PERF-001 |
-| R-A11Y-01 | P1 | Semantics/probe/UIA 属性映射可读，外部 screen reader 仍不可读 | generation ID、`UIAccessibilityTree`、stale 拒绝、`tina_ui_uia` 映射 | HWND/UIA 进程桥接与 AT-SPI 真机读取通过 | UI-002 |
+| R-A11Y-01 | P1 | UIA HWND 桥已接线，Narrator/Inspect 金标与 AT-SPI 未关 | generation ID、HostBridge、EngineHost 自动 publish | 人工读屏金标 + AT-SPI | UI-002 |
 | R-TEXT-01 | P1 | CJK 缺字、IME composition/selection 跨平台差异 | UTF-8 校验、可选 FreeType、Windows TextInput/IME 首切片 | Windows/Linux 支持矩阵与候选窗、shaping 测试明确 | TEXT-001 |
 | R-VIS-01 | P1 | GPU、driver、DPI、字体变化造成截图误报 | 结构化逻辑测试优先；初始化白帧过滤 | 固定 profile、字体 fingerprint、区域/感知阈值噪声校准 | UI-003 |
 | R-PERF-01 | P0 | benchmark 跨 build/host/workload 比较或 MAD 过高 | 仅保留模块 bench，不宣称正式回归协议 | ADR 0018 结论与 `tina_bench` fingerprint/baseline 门禁落地 | PERF-001 |

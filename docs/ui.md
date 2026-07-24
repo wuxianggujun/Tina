@@ -110,13 +110,17 @@ committed text。多行、grapheme、BiDi/shaping、候选窗定位见 `TEXT-001
 暴露同一快照；`tina_sample_2d` 每帧 `updateUI` 经 probe 发布并输出 `accessibility*` JSON 证据。
 Probe 可验证 stale node 拒绝。
 
-**Windows UIA 私有 adapter（UI-002 首切片，可选）：** `TINA_BUILD_UI_UIA=ON`（Windows-only）时
-构建 `tina_ui_uia`。公开工厂头 `WindowsUiaAccessibilityProviderFactory.hpp` 零 COM；实现将
-`UIAccessibilityTree` 映射为 UIA 形属性（ControlType、Name、IsEnabled、IsKeyboardFocusable /
-HasKeyboardFocus、RangeValue、ToggleState、Value），并在 `publish`/`clear` 生命周期下拒绝 stale
-节点。`tina_ui_uia_tests` 覆盖映射与 provider 行为。**外部 Narrator/Inspect 的 HWND /
-IRawElementProviderSimple 进程桥接仍为可选后续**；不得把 probe/sample JSON 或 in-process 映射
-单测写成「真机 screen reader 已通过」。Linux AT-SPI 仍未实现。
+**Windows UIA 私有 adapter（UI-002，可选）：** `TINA_BUILD_UI_UIA=ON`（Windows-only）时构建
+`tina_ui_uia` 并让 `tina_runtime` 在 WindowSurface 产品路径上自动接线：
+
+1. 属性映射：`UIAccessibilityTree` → UIA 形 ControlType/Name/Enabled/Focus/Range/Toggle/Value；
+2. **HWND 桥**：`WindowsUiaHostBridge`（`SetWindowSubclass` + `WM_GETOBJECT` +
+   `IRawElementProviderSimple` 根/子 fragment）；公开工厂头仍零 COM；
+3. **产品自动 attach**：`EngineHost` 从主窗口 lease 解码 Win32 HWND，startup layout 与每帧
+   `commitForFrame` 后 `rebuildFrom(committedSemantics)` 并 `publish`；shutdown 时 detach。
+
+`tina_ui_uia_tests` 覆盖映射、provider 与 HostBridge attach/navigate。**Narrator/Inspect 人工金标与
+Linux AT-SPI 仍后置**；不得把单测写成「真机 screen reader 合规已过」。
 
 ## Render 边界
 

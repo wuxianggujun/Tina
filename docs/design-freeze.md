@@ -59,7 +59,7 @@
 
 | 偏差 | 事实 | 处理方式 |
 | --- | --- | --- |
-| UI 平台证据 | Semantics + probe（UI-002-SPI）与可选 `tina_ui_uia` 属性映射已有；外部 Narrator/AT-SPI 进程桥接未接 | 见 UI-002；勿把 probe/映射单测写成真机 a11y |
+| UI 平台证据 | Semantics + probe + `tina_ui_uia` 映射/HostBridge + EngineHost 自动 HWND 接线已有；Narrator 人工金标与 AT-SPI 后置 | 见 UI-002；勿把单测写成合规读屏门禁 |
 | Linux 状态 | tip Docker：GCC13 Null/Platform + Clang22 Null/sanitizer 已有证据 | 见 [m12-evidence-linux.md](m12-evidence-linux.md)；TEST-001 Done |
 | UI route vs policy | `blocksUIInputBelow` 不回改当帧 UI route（route 在 stack 前） | 文档已标明；若需真挡 UI 输入另开切片 |
 | AssetHandle 终态 | Scene 仍用 fixture mesh/material key | 产品 key binding 可用；Handle 终态后置 |

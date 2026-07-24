@@ -59,6 +59,11 @@ target_link_libraries(tina_runtime
         Tina::ProjectOptions
         Tina::UIRenderIntegration
 )
+if(TINA_BUILD_UI_UIA)
+    target_compile_definitions(tina_runtime PRIVATE TINA_HAS_UI_UIA=1)
+    target_include_directories(tina_runtime PRIVATE "${PROJECT_SOURCE_DIR}/src/ui/uia")
+    target_link_libraries(tina_runtime PRIVATE Tina::UIUia)
+endif()
 set_target_properties(tina_runtime PROPERTIES
     CXX_EXTENSIONS OFF
     EXPORT_NAME Runtime

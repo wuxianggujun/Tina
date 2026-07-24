@@ -32,7 +32,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 
 
-| UI-002 | Partial | P1 | Windows UIA 真机 adapter | UI-002-SPI | **已完成** 属性映射 + **HWND subclass / `IRawElementProviderSimple` 根与子 fragment**（`WindowsUiaHostBridge`，`WM_GETOBJECT`）；`tina_ui_uia_tests` 含 HostBridge；**待** 产品 HWND 自动接线、Narrator/Inspect 人工金标、Linux AT-SPI | Unit |
+| UI-002 | Partial | P1 | Windows UIA 真机 adapter | UI-002-SPI | **已完成** 属性映射 + HostBridge + **EngineHost 产品 HWND 自动 attach/publish**（lease 解码 Win32）；**待** Narrator/Inspect 人工金标、Linux AT-SPI | Unit + Integration |
 | UI-003 | Partial | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** ContentScale* 单测 + 单机 ROI/baseline + **content-scale-like 逻辑尺寸矩阵**（960/1200/1440/1280/1920，`RunUi003SizeMatrix.ps1` + 分尺寸 baseline）+ sample JSON `contentScale`/`logical`/`framebuffer` 一致性；**待** OS 级 100/150/200% DPI 真机矩阵与字体 fingerprint 金标 | Unit + Visual |
 
 
@@ -80,6 +80,7 @@
 | UI-002-SPI | `UIAccessibilityTree`/`IUIAccessibilityProvider`/`UIAccessibilityProbeProvider`：从 committedSemantics 发布 role/name/state/range；stale node 拒绝；`UIAccessibilityTests`；`tina_sample_2d` 产品 JSON `accessibility*` | [UI](ui.md) · [2D](game-2d.md) |
 | UI-002-UIA-MAP | 可选 `tina_ui_uia`：UIA 形属性映射 + factory 零 COM；`tina_ui_uia_tests` | [UI](ui.md) |
 | UI-002-HWND | `WindowsUiaHostBridge`：SetWindowSubclass + WM_GETOBJECT + fragment root/children `IRawElementProviderSimple`；HostBridge 单测 | [UI](ui.md) |
+| UI-002-HOST | `TINA_HAS_UI_UIA`：`EngineHost` 从 surface lease 取 Win32 HWND，startup/每帧 layout 后 publish `committedSemantics`；shutdown detach | [UI](ui.md) · Runtime |
 | RUNTIME-001-INPUT | `blocksGameplayInputBelow`：下层 fixed/frame 使用空 action snapshot；`gameplayInputBlockedForDepth` + unit tests | [gameplay](gameplay.md) · ADR 0014 |
 | RENDER-3D-TEX | Opaque3D unlit 采样 materialKey 绑定贴图（shader `s_texColor` + default white）；关闭「bind 不 draw」假完成 | [3D](game-3d.md) |
 | TEST-001-GCC13-NULL | Docker Desktop + `linux-gcc13-vnext`：`tina_tests`/`tina_ui_tests`(255)/`tina_runtime_ui_tests`(83)/bridge(13)/`tina_sample_null` 300 帧；vcpkg baseline 与仓库一致；`artifacts/gates/test-001-linux-gcc13-null.json` | [Linux 证据](m12-evidence-linux.md) |

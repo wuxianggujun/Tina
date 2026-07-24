@@ -25,6 +25,14 @@
 #include "ui/PrimaryWindowUIDisplayCoordinator.hpp"
 #include "ui/PrimaryWindowUILayoutCoordinator.hpp"
 
+#include "integration/WindowSurfaceLeaseAccess.hpp"
+
+#if defined(TINA_HAS_UI_UIA)
+#include "WindowsUiaHostBridge.hpp"
+#include <tina/ui/UIAccessibility.hpp>
+#include <Windows.h>
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <concepts>
@@ -507,7 +515,8 @@ class EngineHostImplementation final {
                              Render::RenderSceneBuilder renderSceneBuilder,
                              EngineModules modules,
                              std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface,
-                             PrimaryWindowUIContextFactory createPrimaryWindowUIContext = {}) noexcept
+                             PrimaryWindowUIContextFactory createPrimaryWindowUIContext = {},
+                             std::optional<std::uintptr_t> primaryWin32Hwnd = {}) noexcept
         : m_config(std::move(config)), m_fixedStepAccumulator(std::move(fixedStepAccumulator)),
           m_platformEventDispatcher(std::move(platformEventDispatcher)), m_actionMapper(std::move(actionMapper)),
           m_uiInputRouteProducer(std::move(uiInputRouteProducer)), m_modules(std::move(modules)),
@@ -516,7 +525,13 @@ class EngineHostImplementation final {
           m_primaryWindowUIDisplay(std::move(primaryWindowUIDisplay)),
           m_renderSceneBuilder(std::move(renderSceneBuilder)), m_ownerThread(std::this_thread::get_id()),
           m_lastWindowSurface(std::move(initialWindowSurface))
+#if defined(TINA_HAS_UI_UIA)
+          , m_primaryWin32Hwnd(primaryWin32Hwnd)
+#endif
     {
+#if !defined(TINA_HAS_UI_UIA)
+        static_cast<void>(primaryWin32Hwnd);
+#endif
     }
 
     ~EngineHostImplementation() noexcept
@@ -528,12 +543,14 @@ class EngineHostImplementation final {
         if (m_lifecycleState == LifecycleState::Ready)
         {
             m_lifecycleState = LifecycleState::Stopping;
+            detachPrimaryWindowUia();
             m_primaryWindowUi.shutdown();
             m_platformEventDispatcher.shutdown();
             m_modules.shutdown();
             m_lifecycleState = LifecycleState::Stopped;
         } else
         {
+            detachPrimaryWindowUia();
             m_primaryWindowUi.shutdown();
             m_modules.shutdown();
         }
@@ -646,6 +663,11 @@ class EngineHostImplementation final {
         {
             candidate.reset();
             return failBeforeStartupCommit(std::move(layoutStatus.error()));
+        }
+        if (auto uiaStatus = publishPrimaryWindowUia(*uiContextResult); !uiaStatus)
+        {
+            candidate.reset();
+            return failBeforeStartupCommit(std::move(uiaStatus.error()));
         }
         if (Core::Status pushStatus = m_gameStateStack.pushCommitted(std::move(candidate), initialPolicy); !pushStatus)
         {
@@ -1005,6 +1027,11 @@ class EngineHostImplementation final {
                 return failAfterStartupCommit(gameApplication, std::move(layoutStatus.error()), frameIndex,
                                               simulationTick);
             }
+            if (auto uiaStatus = publishPrimaryWindowUia(*uiContextResult); !uiaStatus)
+            {
+                return failAfterStartupCommit(gameApplication, std::move(uiaStatus.error()), frameIndex,
+                                              simulationTick);
+            }
 
             auto uiDisplayResult =
                 m_primaryWindowUIDisplay.buildForFrame(*uiContextResult, *platformFrame, primaryWindowSurface);
@@ -1219,6 +1246,7 @@ class EngineHostImplementation final {
     {
         error.addContext("EngineHost::run", "startup transaction was rolled back");
         m_lifecycleState = LifecycleState::Stopping;
+        detachPrimaryWindowUia();
         m_primaryWindowUi.shutdown();
         m_platformEventDispatcher.shutdown();
         m_modules.shutdown();
@@ -1261,6 +1289,7 @@ class EngineHostImplementation final {
 
         GameShutdownContext shutdownContext{stopCause, runtimeFailure};
         gameApplication.onShutdown(shutdownContext);
+        detachPrimaryWindowUia();
         m_primaryWindowUi.shutdown();
         m_platformEventDispatcher.shutdown();
         m_modules.shutdown();
@@ -1397,6 +1426,78 @@ class EngineHostImplementation final {
     Render::NullSubmissionCompletionLedger m_submissionCompletionLedger{};
     LifecycleState m_lifecycleState = LifecycleState::Ready;
     std::optional<Integration::WindowSurfaceSnapshot> m_lastWindowSurface;
+
+#if defined(TINA_HAS_UI_UIA)
+    std::optional<std::uintptr_t> m_primaryWin32Hwnd{};
+    std::unique_ptr<UI::WindowsUiaHostBridge> m_uiaHostBridge{};
+    UI::UIAccessibilityTree m_uiaTree{};
+
+    void detachPrimaryWindowUia() noexcept
+    {
+        if (m_uiaHostBridge)
+        {
+            m_uiaHostBridge->detach();
+            m_uiaHostBridge.reset();
+        }
+        m_uiaTree = UI::UIAccessibilityTree{};
+    }
+
+    [[nodiscard]] Core::Status ensurePrimaryWindowUiaAttached()
+    {
+        if (!m_primaryWin32Hwnd.has_value() || *m_primaryWin32Hwnd == 0)
+        {
+            return Core::success();
+        }
+        if (m_uiaHostBridge && m_uiaHostBridge->isAttached())
+        {
+            return Core::success();
+        }
+        auto bridgeResult = UI::createWindowsUiaHostBridge();
+        if (!bridgeResult)
+        {
+            return Core::failure(std::move(bridgeResult.error()));
+        }
+        HWND hwnd = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(*m_primaryWin32Hwnd));
+        if (auto status = (*bridgeResult)->attach(hwnd); !status)
+        {
+            return status;
+        }
+        m_uiaHostBridge = std::move(*bridgeResult);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status publishPrimaryWindowUia(UI::UIContext* context)
+    {
+        if (!m_primaryWin32Hwnd.has_value() || *m_primaryWin32Hwnd == 0)
+        {
+            return Core::success();
+        }
+        if (context == nullptr)
+        {
+            if (m_uiaHostBridge)
+            {
+                m_uiaHostBridge->clear();
+            }
+            return Core::success();
+        }
+        if (auto status = ensurePrimaryWindowUiaAttached(); !status)
+        {
+            return status;
+        }
+        if (m_uiaHostBridge == nullptr)
+        {
+            return Core::success();
+        }
+        if (auto status = m_uiaTree.rebuildFrom(context->committedSemantics()); !status)
+        {
+            return status;
+        }
+        return m_uiaHostBridge->publish(m_uiaTree);
+    }
+#else
+    void detachPrimaryWindowUia() noexcept {}
+    [[nodiscard]] Core::Status publishPrimaryWindowUia(UI::UIContext*) { return Core::success(); }
+#endif
 };
 
 } // namespace Detail
@@ -1605,6 +1706,7 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         }
 
         std::optional<Integration::WindowSurfaceSnapshot> initialWindowSurface;
+        std::optional<std::uintptr_t> primaryWin32Hwnd;
         if (auto* independent = std::get_if<IndependentPlatformRenderFactories>(&factories.platformRender);
             independent != nullptr)
         {
@@ -1657,6 +1759,17 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
                                      "The WindowSurface lease and initial snapshot identify different surfaces");
             }
 
+            // Decode Win32 HWND before the lease is moved into the render device (UI-002 product attach).
+            if (auto bindingResult = Integration::Detail::NativeWindowSurfaceLeaseAccess::decode(*leaseResult);
+                bindingResult)
+            {
+                if (bindingResult->kind == Integration::Detail::NativeWindowBindingKind::Win32
+                    && bindingResult->nativeWindow != 0)
+                {
+                    primaryWin32Hwnd = bindingResult->nativeWindow;
+                }
+            }
+
             const Render::RenderDeviceCreateParams renderParams{
                 .initialPrimaryWindowSurface = toRenderSurfaceState(*snapshotResult),
             };
@@ -1688,7 +1801,8 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
             std::move(ownedConfig), std::move(*accumulatorResult), std::move(*platformEventDispatcherResult),
             std::move(*actionMapperResult), std::move(*uiInputRouteProducerResult),
             std::move(*primaryWindowUIDisplayResult), std::move(*renderSceneBuilderResult), std::move(modules),
-            std::move(initialWindowSurface), std::move(factories.createPrimaryWindowUIContext));
+            std::move(initialWindowSurface), std::move(factories.createPrimaryWindowUIContext),
+            primaryWin32Hwnd);
         return std::unique_ptr<EngineHost>(new EngineHost(std::move(implementation)));
     } catch (const std::bad_alloc&)
     {
