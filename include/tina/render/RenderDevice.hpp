@@ -214,6 +214,24 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Mesh3D normal texture binding");
     }
+    // RENDER-001: single directional light for experimental Opaque3D MR (product path).
+    // directionTowardLight = world-space vector toward the light (normalized by backend).
+    // colorRgb = RGB intensity (linear). ambientScale multiplies albedo ambient term.
+    // Not a multi-light / IBL system.
+    [[nodiscard]] virtual Core::Status setMesh3DDirectionalLight(float dirX, float dirY, float dirZ,
+                                                                 float colorR, float colorG, float colorB,
+                                                                 float ambientScale = 0.18F) noexcept
+    {
+        static_cast<void>(dirX);
+        static_cast<void>(dirY);
+        static_cast<void>(dirZ);
+        static_cast<void>(colorR);
+        static_cast<void>(colorG);
+        static_cast<void>(colorB);
+        static_cast<void>(ambientScale);
+        return Core::failure(RenderErrorCode::TextureUploadUnsupported,
+                             "This render device does not support Mesh3D directional light");
+    }
 };
 
 using RenderDeviceFactory =

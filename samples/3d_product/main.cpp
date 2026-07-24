@@ -925,32 +925,14 @@ class Product3DState final : public Tina::IGameState {
         }
         world_.emplace(std::move(*worldResult));
 
-        Tina::Scene::LocalTransform cameraLocal{};
-        // Pull back for built-in dual nodes (origin + x=2); scale slightly for larger external bounds.
-        float maxRadius = 1.75F;
-        for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
+        // Directional light for experimental MR (override defaults for product framing).
+        if (auto* device = capture_->get(); device != nullptr)
         {
-            maxRadius = (std::max)(maxRadius, resources_->meshes[slot].meshBoundsRadius);
-        }
-        const float cameraZ = (std::max)(5.5F, maxRadius * 3.5F);
-        cameraLocal.position = {1.0F, 0.45F, cameraZ};
-        auto cameraEntity = world_->createEntity(cameraLocal);
-        if (!cameraEntity)
-        {
-            return Tina::Core::failure(std::move(cameraEntity.error()));
-        }
-        cameraEntity_ = *cameraEntity;
-        if (auto status = world_->setPerspectiveCamera3D(
-                cameraEntity_,
-                Tina::Scene::PerspectiveCamera3D{
-                    .verticalFovDegrees = 55.0F,
-                    .nearPlaneMeters = 0.1F,
-                    .farPlaneMeters = 100.0F,
-                    .active = true,
-                });
-            !status)
-        {
-            return status;
+            if (auto status = device->setMesh3DDirectionalLight(0.35F, 0.9F, 0.4F, 1.0F, 0.98F, 0.92F, 0.22F);
+                !status)
+            {
+                return status;
+            }
         }
 
         auto prefab = Tina::Asset::parsePrefabFromCooked(resources_->prefabFile);
@@ -1029,6 +1011,86 @@ class Product3DState final : public Tina::IGameState {
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "prefab instantiate produced fewer than two product instances");
+        }
+        if (auto status = world_->updateWorldTransforms(); !status)
+        {
+            return status;
+        }
+
+        // Frame camera to prefab mesh AABB after transforms (works for spheres grid / external models).
+        float minX = 0.0F;
+        float minY = 0.0F;
+        float minZ = 0.0F;
+        float maxX = 0.0F;
+        float maxY = 0.0F;
+        float maxZ = 0.0F;
+        bool haveBounds = false;
+        for (const auto entity : prefabEntities_)
+        {
+            const auto* mesh = world_->meshRenderer3D(entity);
+            const auto* worldXf = world_->worldTransform(entity);
+            if (mesh == nullptr || worldXf == nullptr)
+            {
+                continue;
+            }
+            const float r = mesh->localBounds.radius > 0.0F ? mesh->localBounds.radius : 1.0F;
+            const float sx = (std::max)(std::abs(worldXf->scale.x), 1.0e-3F);
+            const float sy = (std::max)(std::abs(worldXf->scale.y), 1.0e-3F);
+            const float sz = (std::max)(std::abs(worldXf->scale.z), 1.0e-3F);
+            const float wr = r * (std::max)(sx, (std::max)(sy, sz));
+            const float x = worldXf->position.x;
+            const float y = worldXf->position.y;
+            const float z = worldXf->position.z;
+            if (!haveBounds)
+            {
+                minX = x - wr;
+                maxX = x + wr;
+                minY = y - wr;
+                maxY = y + wr;
+                minZ = z - wr;
+                maxZ = z + wr;
+                haveBounds = true;
+            }
+            else
+            {
+                minX = (std::min)(minX, x - wr);
+                maxX = (std::max)(maxX, x + wr);
+                minY = (std::min)(minY, y - wr);
+                maxY = (std::max)(maxY, y + wr);
+                minZ = (std::min)(minZ, z - wr);
+                maxZ = (std::max)(maxZ, z + wr);
+            }
+        }
+        const float centerX = haveBounds ? 0.5F * (minX + maxX) : 1.0F;
+        const float centerY = haveBounds ? 0.5F * (minY + maxY) : 0.0F;
+        const float centerZ = haveBounds ? 0.5F * (minZ + maxZ) : 0.0F;
+        const float extentX = haveBounds ? (maxX - minX) : 3.0F;
+        const float extentY = haveBounds ? (maxY - minY) : 2.0F;
+        const float extentZ = haveBounds ? (maxZ - minZ) : 2.0F;
+        const float radius =
+            0.5F * std::sqrt(extentX * extentX + extentY * extentY + extentZ * extentZ);
+        constexpr float kFovDegrees = 55.0F;
+        const float fovRad = kFovDegrees * 0.01745329252F;
+        const float distance = (std::max)(radius / std::tan(0.5F * fovRad) * 1.35F, 3.0F);
+        Tina::Scene::LocalTransform cameraLocal{};
+        cameraLocal.position = {centerX, centerY + radius * 0.15F, centerZ + distance};
+        auto cameraEntity = world_->createEntity(cameraLocal);
+        if (!cameraEntity)
+        {
+            return Tina::Core::failure(std::move(cameraEntity.error()));
+        }
+        cameraEntity_ = *cameraEntity;
+        if (auto status = world_->setPerspectiveCamera3D(
+                cameraEntity_,
+                Tina::Scene::PerspectiveCamera3D{
+                    .verticalFovDegrees = kFovDegrees,
+                    .nearPlaneMeters = (std::max)(0.05F, distance * 0.02F),
+                    .farPlaneMeters = (std::max)(100.0F, distance + radius * 8.0F),
+                    .active = true,
+                });
+            !status)
+        {
+            return status;
         }
         if (auto status = world_->updateWorldTransforms(); !status)
         {

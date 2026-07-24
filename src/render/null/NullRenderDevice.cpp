@@ -334,6 +334,37 @@ class NullRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status setMesh3DDirectionalLight(float dirX, float dirY, float dirZ, float colorR,
+                                                         float colorG, float colorB,
+                                                         float ambientScale) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (!std::isfinite(dirX) || !std::isfinite(dirY) || !std::isfinite(dirZ) || !std::isfinite(colorR) ||
+            !std::isfinite(colorG) || !std::isfinite(colorB) || !std::isfinite(ambientScale) ||
+            ambientScale < 0.0F)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "Mesh3D directional light parameters must be finite (ambient >= 0)");
+        }
+        const float lenSq = dirX * dirX + dirY * dirY + dirZ * dirZ;
+        if (lenSq <= 1.0e-12F)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "Mesh3D light direction must be non-zero");
+        }
+        lightDirX_ = dirX;
+        lightDirY_ = dirY;
+        lightDirZ_ = dirZ;
+        lightColorR_ = colorR;
+        lightColorG_ = colorG;
+        lightColorB_ = colorB;
+        lightAmbient_ = ambientScale;
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Status setMesh3DMaterialMetallicRoughnessTextureBinding(
         u32 materialKey, GpuTextureId texture) noexcept override
     {
@@ -402,6 +433,13 @@ class NullRenderDevice final : public IRenderDevice {
         float roughness = 1.0F;
     };
     std::unordered_map<u32, MaterialFactors> materialFactors_{};
+    float lightDirX_ = 0.4F;
+    float lightDirY_ = 0.85F;
+    float lightDirZ_ = 0.35F;
+    float lightColorR_ = 1.0F;
+    float lightColorG_ = 0.98F;
+    float lightColorB_ = 0.92F;
+    float lightAmbient_ = 0.18F;
     u64 nextFrameIndex_ = 0;
     u64 nextSubmissionIndex_ = 0;
     bool frameOpen_ = false;

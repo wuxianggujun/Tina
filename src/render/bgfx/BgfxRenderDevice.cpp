@@ -1430,9 +1430,6 @@ class BgfxRenderDevice final : public IRenderDevice {
                 }
             }
 
-            // Fixed product light: no light system yet. Direction toward light in world space.
-            constexpr std::array<float, 4> kDefaultLightDir{0.4F, 0.85F, 0.35F, 0.0F};
-            constexpr std::array<float, 4> kDefaultLightColor{1.0F, 0.98F, 0.92F, 1.0F};
             // Factors from setMesh3DMaterialFactors (Cooked Material v2); defaults metallic=0, roughness=1.
             float metallic = 0.0F;
             float roughness = 1.0F;
@@ -1442,8 +1439,8 @@ class BgfxRenderDevice final : public IRenderDevice {
                 metallic = factors->second.metallic;
                 roughness = factors->second.roughness;
             }
-            // ambient=0.18; w = MR map bound flag.
-            const std::array<float, 4> mrParams{metallic, roughness, 0.18F, mrMapBound};
+            // ambient from setMesh3DDirectionalLight; w = MR map bound flag.
+            const std::array<float, 4> mrParams{metallic, roughness, mesh3DAmbientScale_, mrMapBound};
             const std::array<float, 4> normalParams{normalMapBound, 0.0F, 0.0F, 0.0F};
 
             bgfx::setVertexBuffer(0, vb);
@@ -1452,8 +1449,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setTexture(0, opaque3DSampler_, materialTexture);
             bgfx::setTexture(1, opaque3DMrSampler_, mrTexture);
             bgfx::setTexture(2, opaque3DNormalSampler_, normalTexture);
-            bgfx::setUniform(opaque3DLightDirUniform_, kDefaultLightDir.data());
-            bgfx::setUniform(opaque3DLightColorUniform_, kDefaultLightColor.data());
+            bgfx::setUniform(opaque3DLightDirUniform_, mesh3DLightDir_.data());
+            bgfx::setUniform(opaque3DLightColorUniform_, mesh3DLightColor_.data());
             bgfx::setUniform(opaque3DMrParamsUniform_, mrParams.data());
             bgfx::setUniform(opaque3DNormalParamsUniform_, normalParams.data());
             bgfx::submit(kOpaque3DView, opaque3DProgram_);
@@ -1946,6 +1943,38 @@ class BgfxRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status setMesh3DDirectionalLight(float dirX, float dirY, float dirZ, float colorR,
+                                                         float colorG, float colorB,
+                                                         float ambientScale) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (!std::isfinite(dirX) || !std::isfinite(dirY) || !std::isfinite(dirZ) || !std::isfinite(colorR) ||
+            !std::isfinite(colorG) || !std::isfinite(colorB) || !std::isfinite(ambientScale) ||
+            ambientScale < 0.0F)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "Mesh3D directional light parameters must be finite (ambient >= 0)");
+        }
+        const float lenSq = dirX * dirX + dirY * dirY + dirZ * dirZ;
+        if (lenSq <= 1.0e-12F)
+        {
+            return Core::failure(RenderErrorCode::InvalidTextureUpload,
+                                 "Mesh3D light direction must be non-zero");
+        }
+        const float invLen = 1.0F / std::sqrt(lenSq);
+        mesh3DLightDir_ = {dirX * invLen, dirY * invLen, dirZ * invLen, 0.0F};
+        mesh3DLightColor_ = {colorR, colorG, colorB, 1.0F};
+        mesh3DAmbientScale_ = ambientScale;
+        return Core::success();
+    }
+
     // M11-D1: capture primary backbuffer after present (frame must not be open).
     [[nodiscard]] Core::Result<Rgba8FrameCapture> capturePrimaryFrameRgba8() override
     {
@@ -2185,6 +2214,9 @@ class BgfxRenderDevice final : public IRenderDevice {
         float roughness = 1.0F;
     };
     std::unordered_map<u32, MaterialFactors> mesh3DMaterialFactors_{};
+    std::array<float, 4> mesh3DLightDir_{0.4F, 0.85F, 0.35F, 0.0F};
+    std::array<float, 4> mesh3DLightColor_{1.0F, 0.98F, 0.92F, 1.0F};
+    float mesh3DAmbientScale_ = 0.18F;
 
     bool frameOpen_ = false;
     bool stopped_ = false;

@@ -101,6 +101,12 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     {
         return inner_->setMesh3DMaterialNormalTextureBinding(materialKey, texture);
     }
+    [[nodiscard]] Core::Status setMesh3DDirectionalLight(float dirX, float dirY, float dirZ, float colorR,
+                                                         float colorG, float colorB,
+                                                         float ambientScale = 0.18F) noexcept override
+    {
+        return inner_->setMesh3DDirectionalLight(dirX, dirY, dirZ, colorR, colorG, colorB, ambientScale);
+    }
 
   private:
     std::unique_ptr<Render::IRenderDevice> inner_;
