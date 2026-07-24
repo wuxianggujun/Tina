@@ -887,10 +887,21 @@ class BgfxRenderDevice final : public IRenderDevice {
                                  "A bgfx frame must be submitted before it can be presented");
         }
 
-        bgfx::frame();
+        // bgfx::frame() advances the multi-buffered GPU timeline; token is the
+        // frame number for FrameDeferred pin lag (not a true fence object).
+        lastPresentFrameToken_ = bgfx::frame();
         frameOpen_ = false;
         ++statistics_.presented;
         return Core::success();
+    }
+
+    [[nodiscard]] std::optional<u64> lastPresentFrameToken() const noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        return lastPresentFrameToken_;
     }
 
     [[nodiscard]] RenderStatistics statistics() const noexcept override
@@ -1820,6 +1831,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     RenderSurfaceState committedSurfaceState_{};
     RenderSurfaceExtent appliedBackbuffer_ = BgfxSurfaceFramePlanner::BootstrapBackbufferExtent;
     RenderStatistics statistics_{};
+    std::optional<u64> lastPresentFrameToken_{};
     u64 nextFrameIndex_ = 0;
     u64 nextSubmissionIndex_ = 0;
     bgfx::VertexLayout transientByteLayout_{};

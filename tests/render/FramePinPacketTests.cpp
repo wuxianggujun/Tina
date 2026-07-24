@@ -203,18 +203,19 @@ TEST(ISubmissionCompletionLedgerPolymorphismTest, PacketAbandonUsesInjectedMock)
     EXPECT_EQ(g_releaseCount.load(), 1);
 }
 
-TEST(BgfxSubmissionCompletionLedgerTest, PresentSyncBalancesLikeNullAndExposesFenceHooks)
+TEST(BgfxSubmissionCompletionLedgerTest, FrameDeferredModeAndPresentNotes)
 {
     Render::BgfxSubmissionCompletionLedger ledger{4};
-    EXPECT_EQ(ledger.completionMode(), Render::SubmissionCompletionMode::PresentSync);
+    EXPECT_EQ(ledger.completionMode(), Render::SubmissionCompletionMode::FrameDeferred);
 
     auto t1 = ledger.beginSubmitted(100);
     ASSERT_TRUE(t1.has_value());
     EXPECT_EQ(ledger.inflightCount(), 1U);
 
-    // Fence hooks are no-ops while still present-sync.
-    ledger.notePresentReturned(100);
-    EXPECT_EQ(ledger.pollGpuFences(), 0U);
+    ledger.notePresentReturned(100, 7);
+    EXPECT_EQ(ledger.lastPresentSubmission(), 100U);
+    EXPECT_EQ(ledger.lastPresentFrameToken(), 7U);
+    EXPECT_EQ(ledger.presentNoteCount(), 1U);
     EXPECT_EQ(ledger.inflightCount(), 1U);
 
     ASSERT_TRUE(ledger.complete(*t1).has_value());
@@ -223,7 +224,7 @@ TEST(BgfxSubmissionCompletionLedgerTest, PresentSyncBalancesLikeNullAndExposesFe
     EXPECT_EQ(ledger.completedCount(), 1U);
 }
 
-TEST(BgfxSubmissionCompletionLedgerTest, PacketCompleteThroughInterface)
+TEST(BgfxSubmissionCompletionLedgerTest, PacketHandOffDeferredReleasesOnCompleteDeferred)
 {
     g_releaseCount.store(0);
     Render::BgfxSubmissionCompletionLedger concrete{};
@@ -238,7 +239,15 @@ TEST(BgfxSubmissionCompletionLedgerTest, PacketCompleteThroughInterface)
     auto ticket = ledger.beginSubmitted(3);
     ASSERT_TRUE(ticket.has_value());
     ASSERT_TRUE(packet.attachSubmission(*ticket).has_value());
-    ASSERT_TRUE(packet.complete(ledger).has_value());
+
+    auto handoff = packet.handOffDeferred(42);
+    ASSERT_TRUE(handoff.has_value());
+    EXPECT_EQ(packet.state(), Render::RenderFramePacket::State::Completed);
+    EXPECT_EQ(packet.pinCount(), 0U);
+    EXPECT_EQ(g_releaseCount.load(), 0);
+    EXPECT_EQ(ledger.inflightCount(), 1U);
+
+    ASSERT_TRUE(Render::RenderFramePacket::completeDeferred(ledger, *handoff).has_value());
     EXPECT_EQ(g_releaseCount.load(), 1);
     EXPECT_TRUE(ledger.allClear());
 }

@@ -44,7 +44,7 @@
 
 | ID | 状态 | 优先级 | 工作 | 验收条件 |
 | --- | --- | --- | --- | --- |
-| RENDER-FENCE | Partial | P1 | 真 GPU fence 驱动 complete（替换 present-sync） | **已完成** Host `unique_ptr<ISubmissionCompletionLedger>` + 可选 factory；Desktop 注入 `BgfxSubmissionCompletionLedger`（仍 present-sync + fence 钩子 stub）；mock 多态单测；Null 默认不变。**待** bgfx fence token 登记 / `pollGpuFences` 异步 complete / pin 在 fence 后释放 |
+| RENDER-FENCE | Partial | P1 | 真 GPU fence 驱动 complete | **已完成** Host 可注入 ledger；Desktop `BgfxSubmissionCompletionLedger` = **FrameDeferred**（present 后 pin 延迟到下一 present 释放；`bgfx::frame()` token 经 `lastPresentFrameToken`）；Null 仍 PresentSync；`handOffDeferred`/`completeDeferred` 单测。**待** 真 fence object poll（非仅双缓冲 lag） |
 | ASSET-HANDLE-SCENE | Deferred | P1 | Scene 组件存 AssetHandle；extract 解析 bind key / 未来 FrameResourceRef | 去掉游戏侧手写 key 表为唯一产品路径 |
 | RENDER-001 | Deferred | P2 | PBR Material、lighting 与 pass scheduling | 产品 3D 使用 Cooked texture/material，排序与资源退役有门禁 |
 | PHYSICS-001 | Deferred | P2 | Jolt 3D adapter | 独立 Tina::Physics3D API、Jolt PRIVATE、生命周期/查询/性能门禁 |

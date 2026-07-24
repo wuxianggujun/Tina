@@ -107,6 +107,9 @@ class IRenderDevice {
     // or element pointer after returning.
     [[nodiscard]] virtual Core::Result<RenderFrameSubmission> submitFrame(const RenderFrame& frame) = 0;
     [[nodiscard]] virtual Core::Status present() = 0;
+    // Optional: backend frame token after the last successful present (e.g. bgfx::frame()).
+    // Empty until present has succeeded; used by FrameDeferred completion lag.
+    [[nodiscard]] virtual std::optional<u64> lastPresentFrameToken() const noexcept { return std::nullopt; }
     [[nodiscard]] virtual RenderStatistics statistics() const noexcept = 0;
     virtual void shutdown() noexcept = 0;
 

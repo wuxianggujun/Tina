@@ -1064,7 +1064,7 @@ class EngineHostImplementation final {
             }
 
             // RUNTIME-002: owning packet + injectable completion ledger around submit/present.
-            // Default Null / Desktop Bgfx ledger are still present-sync (not GPU fence).
+            // Null = PresentSync; Desktop Bgfx = FrameDeferred (one present lag).
             if (auto packetBegin = m_renderFramePacket.beginFrame(frameIndex); !packetBegin)
             {
                 return failAfterStartupCommit(gameApplication, std::move(packetBegin.error()), frameIndex,
@@ -1199,12 +1199,46 @@ class EngineHostImplementation final {
                     return failAfterStartupCommit(gameApplication, std::move(presentResult.error()), frameIndex,
                                                   simulationTick);
                 }
-                // Present-sync completion: pins release after present returns. Fence-driven
-                // ledgers must keep tickets open until GPU signals (not implemented).
-                if (auto completeStatus = m_renderFramePacket.complete(ledger); !completeStatus)
+
+                const Core::u64 presentToken =
+                    m_modules.renderDevice->lastPresentFrameToken().value_or(submitResult->submissionIndex);
+                if (auto* bgfxLedger =
+                        dynamic_cast<Render::BgfxSubmissionCompletionLedger*>(&ledger);
+                    bgfxLedger != nullptr)
                 {
-                    return failAfterStartupCommit(gameApplication, std::move(completeStatus.error()), frameIndex,
-                                                  simulationTick);
+                    bgfxLedger->notePresentReturned(submitResult->submissionIndex, presentToken);
+                }
+
+                if (ledger.completionMode() == Render::SubmissionCompletionMode::FrameDeferred)
+                {
+                    // Complete previous deferred handoff (one present lag), then park this frame.
+                    if (m_deferredSubmission.has_value())
+                    {
+                        if (auto status = Render::RenderFramePacket::completeDeferred(
+                                ledger, *m_deferredSubmission);
+                            !status)
+                        {
+                            return failAfterStartupCommit(gameApplication, std::move(status.error()),
+                                                          frameIndex, simulationTick);
+                        }
+                        m_deferredSubmission.reset();
+                    }
+                    auto handoff = m_renderFramePacket.handOffDeferred(presentToken);
+                    if (!handoff)
+                    {
+                        return failAfterStartupCommit(gameApplication, std::move(handoff.error()), frameIndex,
+                                                      simulationTick);
+                    }
+                    m_deferredSubmission = std::move(*handoff);
+                }
+                else
+                {
+                    // PresentSync: pins release after present returns.
+                    if (auto completeStatus = m_renderFramePacket.complete(ledger); !completeStatus)
+                    {
+                        return failAfterStartupCommit(gameApplication, std::move(completeStatus.error()),
+                                                      frameIndex, simulationTick);
+                    }
                 }
                 packetRollback.release();
                 // Latch the presented Camera2D for next-frame world pointer picks.
@@ -1281,11 +1315,23 @@ class EngineHostImplementation final {
         return exitReason;
     }
 
+    void flushDeferredSubmission() noexcept
+    {
+        if (!m_deferredSubmission.has_value() || m_submissionCompletionLedger == nullptr)
+        {
+            m_deferredSubmission.reset();
+            return;
+        }
+        (void)Render::RenderFramePacket::completeDeferred(*m_submissionCompletionLedger, *m_deferredSubmission);
+        m_deferredSubmission.reset();
+    }
+
     void stopCommittedGame(IGameApplication& gameApplication, RunStopCause stopCause,
                            const Core::Error* runtimeFailure) noexcept
     {
         m_lifecycleState = LifecycleState::Stopping;
         m_pendingCommands.clearAll();
+        flushDeferredSubmission();
         (void)m_renderFramePacket.abandon(m_submissionCompletionLedger.get());
         while (!m_gameStateStack.empty())
         {
@@ -1433,8 +1479,9 @@ class EngineHostImplementation final {
     GameStatePendingCommands m_pendingCommands{};
     GameStatePolicy m_committedPolicy{};
     Render::RenderFramePacket m_renderFramePacket{};
-    // Owned SPI: Null default or injected Bgfx/mock ledger (still present-sync until fence).
+    // Owned SPI: Null = PresentSync; Desktop Bgfx = FrameDeferred (one present lag).
     std::unique_ptr<Render::ISubmissionCompletionLedger> m_submissionCompletionLedger{};
+    std::optional<Render::RenderFramePacket::DeferredHandoff> m_deferredSubmission{};
     LifecycleState m_lifecycleState = LifecycleState::Ready;
     std::optional<Integration::WindowSurfaceSnapshot> m_lastWindowSurface;
 

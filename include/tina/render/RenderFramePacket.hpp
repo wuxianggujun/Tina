@@ -92,7 +92,7 @@ public:
     }
 
     // Complete after present (or Null sync completion). Releases all pins and closes ticket via ledger.
-    // Ledger may be Null (present-sync) or a future fence-driven implementation.
+    // Ledger may be Null (present-sync) or FrameDeferred (Host completes after lag).
     [[nodiscard]] Core::Status complete(ISubmissionCompletionLedger& ledger) noexcept
     {
         if (m_state == State::Idle || m_state == State::Completed || m_state == State::Abandoned)
@@ -108,6 +108,77 @@ public:
         }
         releasePins();
         m_state = State::Completed;
+        return Core::success();
+    }
+
+    // FrameDeferred handoff: move pins + open ticket out; packet becomes Completed without
+    // releasing pins or closing the ledger ticket. Caller must later complete the ticket
+    // and release pins (next present lag or shutdown).
+    struct DeferredHandoff final {
+        SubmissionTicket ticket{};
+        std::array<FramePin, MaxPins> pins{};
+        Core::u32 pinCount = 0;
+        Core::u64 frameIndex = 0;
+        Core::u64 presentFrameToken = 0;
+    };
+
+    [[nodiscard]] Core::Result<DeferredHandoff> handOffDeferred(Core::u64 presentFrameToken) noexcept
+    {
+        if (m_state != State::Submitted)
+        {
+            return Core::failure(RenderErrorCode::InvalidSubmissionTicket,
+                                 "handOffDeferred requires Submitted packet");
+        }
+        DeferredHandoff handoff{};
+        handoff.ticket = m_ticket;
+        handoff.pinCount = m_pinCount;
+        handoff.frameIndex = m_frameIndex;
+        handoff.presentFrameToken = presentFrameToken;
+        for (Core::u32 i = 0; i < m_pinCount; ++i)
+        {
+            handoff.pins[i] = std::move(m_pins[i]);
+        }
+        m_pinCount = 0;
+        m_ticket = {};
+        m_state = State::Completed;
+        return handoff;
+    }
+
+    // Release pins from a previous handOffDeferred and close the ledger ticket.
+    [[nodiscard]] static Core::Status completeDeferred(ISubmissionCompletionLedger& ledger,
+                                                       DeferredHandoff& handoff) noexcept
+    {
+        if (handoff.ticket.hasValue())
+        {
+            if (auto status = ledger.complete(handoff.ticket); !status)
+            {
+                return status;
+            }
+        }
+        for (Core::u32 i = 0; i < handoff.pinCount; ++i)
+        {
+            handoff.pins[i].release();
+        }
+        handoff.pinCount = 0;
+        handoff.ticket = {};
+        handoff.presentFrameToken = 0;
+        return Core::success();
+    }
+
+    [[nodiscard]] static Core::Status abandonDeferred(ISubmissionCompletionLedger* ledger,
+                                                      DeferredHandoff& handoff) noexcept
+    {
+        if (handoff.ticket.hasValue() && ledger != nullptr)
+        {
+            (void)ledger->abandon(handoff.ticket);
+        }
+        for (Core::u32 i = 0; i < handoff.pinCount; ++i)
+        {
+            handoff.pins[i].release();
+        }
+        handoff.pinCount = 0;
+        handoff.ticket = {};
+        handoff.presentFrameToken = 0;
         return Core::success();
     }
 

@@ -30,20 +30,19 @@ Tina 的公开 Render 边界是 backend-neutral `Tina::Render`；bgfx 只存在�
 返回后不能保存。`submitFrame()` 返回 `Submitted` 或 `SkippedSuspendedSurface`；只有前者允许 Runtime
 调用 `present()`。
 
-`RenderFramePacket` + `FramePin` + `ISubmissionCompletionLedger` 已作为 RUNTIME-002 首切片接入
-EngineHost：submit 前可登记 Surface/GlyphAtlas pin，present 或 skip 后 complete 并释放 pin，失败路径
-abandon。
+`RenderFramePacket` + `FramePin` + `ISubmissionCompletionLedger` 已接入 EngineHost：submit 前可登记
+Surface/GlyphAtlas pin；失败路径 abandon；shutdown 冲刷 deferred handoff。
 
 Host 持有 **`unique_ptr<ISubmissionCompletionLedger>`**（经可选
 `EngineCompositionFactories::createSubmissionCompletionLedger` 注入）：
 
-| 路径 | 类型 | 完成语义 |
-| --- | --- | --- |
-| 默认 / Null / Headless | `NullSubmissionCompletionLedger` | present-return 即 complete |
-| Desktop `CreateEngine` | `BgfxSubmissionCompletionLedger` | **仍是** present-sync；类型与 fence 钩子（`notePresentReturned` / `pollGpuFences` no-op）已就位 |
+| 路径 | 类型 | `completionMode` | 完成语义 |
+| --- | --- | --- | --- |
+| 默认 / Null / Headless | `NullSubmissionCompletionLedger` | `PresentSync` | present-return 即 complete 并释放 pin |
+| Desktop `CreateEngine` | `BgfxSubmissionCompletionLedger` | **`FrameDeferred`** | present 后 `handOffDeferred` 保留 pin，**下一 present**（或 shutdown）再 complete；`lastPresentFrameToken()` = `bgfx::frame()` |
 
-**两者都不是 GPU fence。** `completionMode()` 当前恒为 `PresentSync`。真 fence 驱动 pin retirement
-见 backlog `RENDER-FENCE`；勿把 present 同步完成写成「GPU 已退役」。
+FrameDeferred 是双缓冲 lag，**不是**真 GPU fence 对象轮询；勿写成「GPU 已退役」。真 fence 见 backlog
+`RENDER-FENCE` 剩余项。
 
 Opaque3D unlit：`setMesh3DMaterialTextureBinding(materialKey)` 在 `submit` 时 `setTexture(0, s_texColor)`；
 shader 输出 `baseColorFactor * texture2D`；未绑定 materialKey 使用 1×1 白贴图（非「只 bind 不采样」）。

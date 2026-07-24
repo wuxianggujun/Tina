@@ -4,6 +4,7 @@
 #include <tina/render/RenderDevice.hpp>
 
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace Tina::Sample3D {
@@ -43,6 +44,10 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     [[nodiscard]] Render::RenderStatistics statistics() const noexcept override
     {
         return inner_->statistics();
+    }
+    [[nodiscard]] std::optional<Core::u64> lastPresentFrameToken() const noexcept override
+    {
+        return inner_->lastPresentFrameToken();
     }
     void shutdown() noexcept override { inner_->shutdown(); }
     [[nodiscard]] Core::Result<Render::GpuTextureId>

@@ -105,10 +105,13 @@ struct SubmissionTicket final {
     [[nodiscard]] bool hasValue() const noexcept { return open; }
 };
 
-// How complete() is driven. Fence is reserved for a future bgfx-backed implementation.
+// How Host drives complete() / pin release after present.
 enum class SubmissionCompletionMode : Core::u8 {
+    // complete() immediately after present returns (Null / tests).
     PresentSync = 0,
-    // GpuFence = 1, // not implemented; do not claim Done for RENDER-FENCE
+    // Keep pins until the next present (bgfx double-buffer lag). Not a true GPU
+    // fence token poll, but pins outlive the submitting CPU frame safely.
+    FrameDeferred = 1,
 };
 
 class ISubmissionCompletionLedger {
@@ -214,14 +217,9 @@ private:
     Core::u64 m_lastCompleted = 0;
 };
 
-// Product-path ledger type for Desktop/bgfx composition. Still PresentSync today: Host completes
-// on present-return so FramePin release cannot outlive the CPU frame (no UAF).
-//
-// Fence injection points (not wired; no bgfx types in this public header):
-// - notePresentReturned(submissionIndex): today identical to complete() path via Host
-// - future registerGpuFence(submissionIndex, fenceToken): store token, keep ticket open
-// - future pollGpuFences(): complete tickets whose fences signalled, then release pins
-// Do not treat this type as RENDER-FENCE Done.
+// Product-path ledger for Desktop/bgfx. Host uses FrameDeferred: after present, pins stay
+// owned until the next present (double-buffer lag via bgfx::frame sequencing). True GPU
+// fence object polling remains a follow-up (RENDER-FENCE remaining).
 class BgfxSubmissionCompletionLedger final : public ISubmissionCompletionLedger {
 public:
     static constexpr Core::usize DefaultCapacity = NullSubmissionCompletionLedger::DefaultCapacity;
@@ -240,8 +238,7 @@ public:
     [[nodiscard]] bool allClear() const noexcept override { return m_inner.allClear(); }
     [[nodiscard]] SubmissionCompletionMode completionMode() const noexcept override
     {
-        // Present-sync until GPU fence is implemented; keep mode honest.
-        return SubmissionCompletionMode::PresentSync;
+        return SubmissionCompletionMode::FrameDeferred;
     }
 
     [[nodiscard]] Core::Result<SubmissionTicket> beginSubmitted(Core::u64 submissionIndex) override
@@ -251,8 +248,7 @@ public:
 
     [[nodiscard]] Core::Status complete(SubmissionTicket& ticket) noexcept override
     {
-        // Present-sync: Host calls this after IRenderDevice::present returns.
-        // Future fence path: only complete after pollGpuFences() observes signal.
+        // Host calls complete when deferred lag elapses (next present or shutdown).
         return m_inner.complete(ticket);
     }
 
@@ -265,20 +261,23 @@ public:
     [[nodiscard]] Core::u64 completedCount() const noexcept { return m_inner.completedCount(); }
     [[nodiscard]] Core::u64 abandonedCount() const noexcept { return m_inner.abandonedCount(); }
 
-    // Fence hook stubs (no-ops). Keep API stable for the next RENDER-FENCE slice.
-    void notePresentReturned(Core::u64 /*submissionIndex*/) noexcept
+    // Records present return for diagnostics; Host owns deferred pin storage.
+    void notePresentReturned(Core::u64 submissionIndex, Core::u64 presentFrameToken = 0) noexcept
     {
-        // No separate bookkeeping while completionMode is PresentSync.
+        m_lastPresentSubmission = submissionIndex;
+        m_lastPresentFrameToken = presentFrameToken;
+        ++m_presentNotes;
     }
 
-    [[nodiscard]] Core::u32 pollGpuFences() noexcept
-    {
-        // Returns number of tickets completed by fence. Always 0 until fence wiring exists.
-        return 0;
-    }
+    [[nodiscard]] Core::u64 lastPresentSubmission() const noexcept { return m_lastPresentSubmission; }
+    [[nodiscard]] Core::u64 lastPresentFrameToken() const noexcept { return m_lastPresentFrameToken; }
+    [[nodiscard]] Core::u64 presentNoteCount() const noexcept { return m_presentNotes; }
 
 private:
     NullSubmissionCompletionLedger m_inner;
+    Core::u64 m_lastPresentSubmission = 0;
+    Core::u64 m_lastPresentFrameToken = 0;
+    Core::u64 m_presentNotes = 0;
 };
 
 } // namespace Tina::Render
