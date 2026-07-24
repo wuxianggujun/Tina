@@ -111,7 +111,7 @@ TEST(UITextRasterizerTests, ContextCreateWiresPlaceholderRasterizerForTextMeasur
     auto windowResult = windows.tryEmplace(1);
     ASSERT_TRUE(windowResult.has_value());
 
-    auto contextResult = UI::UIContext::Create(*windowResult);
+    auto contextResult = UI::UIContext::Create(*windowResult, UI::UIContextCapacityConfig{.applyDefaultProductChrome = false});
     ASSERT_TRUE(contextResult.has_value())
         << (contextResult ? "" : contextResult.error().message);
     auto& context = **contextResult;
@@ -137,7 +137,7 @@ TEST(UITextRasterizerTests, ContextCreateRejectsNullRasterizer)
 
     auto result = UI::UIContext::Create(
         *windowResult,
-        {},
+        UI::UIContextCapacityConfig{.applyDefaultProductChrome = false},
         std::unique_ptr<UI::IUITextRasterizer>{});
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, UI::UIErrorCode::InvalidFont);

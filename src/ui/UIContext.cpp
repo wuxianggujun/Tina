@@ -5,6 +5,7 @@
 #include <tina/core/text/Utf8.hpp>
 #include <tina/ui/UIDirty.hpp>
 #include <tina/ui/UIText.hpp>
+#include <tina/ui/UITheme.hpp>
 #include <tina/ui/text/UIGlyphAtlas.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 
@@ -94,6 +95,7 @@ struct NormalizedCapacityConfig final {
     usize routedPointerListenerCapacity = 0;
     usize buttonActionCapacity = 0;
     usize textByteCapacity = 0;
+    bool applyDefaultProductChrome = true;
 };
 
 struct TextByteAllocation final {
@@ -788,6 +790,7 @@ void appendBoxChromePaints(
         .routedPointerListenerCapacity = routedPointerListenerCapacity,
         .buttonActionCapacity = buttonActionCapacity,
         .textByteCapacity = textByteCapacity,
+        .applyDefaultProductChrome = config.applyDefaultProductChrome,
     };
 }
 
@@ -857,6 +860,10 @@ struct UIContext::Impl final {
     Platform::WindowId ownerWindow{};
     UIContextCapacityConfig capacityConfig{};
     std::thread::id ownerThreadId{};
+    // Active product theme used when create* installs default control chrome.
+    // Not a global singleton; one copy per UIContext. Local set*Paint overrides
+    // remain on the node after create.
+    UITheme productTheme = makeDefaultProductTheme();
     std::shared_ptr<Detail::UIContextLifetimeControl> lifetime;
     NodePool nodes;
     std::pmr::vector<UINodeId> idsByIndex;
@@ -1118,6 +1125,7 @@ struct UIContext::Impl final {
             .routedPointerListenerCapacity = normalized.routedPointerListenerCapacity,
             .buttonActionCapacity = normalized.buttonActionCapacity,
             .textByteCapacity = normalized.textByteCapacity,
+            .applyDefaultProductChrome = normalized.applyDefaultProductChrome,
         };
 
         auto impl = std::unique_ptr<Impl>(new Impl(
@@ -4898,6 +4906,80 @@ struct UIContext::Impl final {
         return nodeRecord->rootIndex == root.index();
     }
 
+    void applyDefaultProductChrome(u32 index, UIWidgetKind kind) noexcept
+    {
+        if (index >= boxPaintsByIndex.size()) {
+            return;
+        }
+
+        switch (kind) {
+        case UIWidgetKind::Root:
+        case UIWidgetKind::Panel:
+            // Containers stay paint-free unless the caller sets a background.
+            // Use makePanelBoxPaint / makeSettingsPanelChrome for chrome.
+            break;
+        case UIWidgetKind::Label: {
+            if (index < textStatesByIndex.size()) {
+                textStatesByIndex[index].style = makeBodyTextStyle(productTheme);
+            }
+            break;
+        }
+        case UIWidgetKind::Button: {
+            const UIButtonChrome chrome = makeButtonChrome(productTheme);
+            boxPaintsByIndex[index] = chrome.box;
+            if (index < buttonPaintsByNodeIndex.size()) {
+                buttonPaintsByNodeIndex[index] = chrome.states;
+            }
+            if (index < textStatesByIndex.size()) {
+                textStatesByIndex[index].style = chrome.label;
+            }
+            break;
+        }
+        case UIWidgetKind::Checkbox: {
+            const UICheckboxChrome chrome = makeCheckboxChrome(productTheme);
+            boxPaintsByIndex[index] = chrome.box;
+            if (index < checkboxPaintsByNodeIndex.size()) {
+                checkboxPaintsByNodeIndex[index] = chrome.indicator;
+            }
+            break;
+        }
+        case UIWidgetKind::Slider: {
+            const UISliderChrome chrome = makeSliderChrome(productTheme);
+            boxPaintsByIndex[index] = chrome.track;
+            if (index < sliderStatesByNodeIndex.size()) {
+                sliderStatesByNodeIndex[index].paint = chrome.slider;
+            }
+            break;
+        }
+        case UIWidgetKind::TextEdit: {
+            const UITextEditChrome chrome = makeTextEditChrome(productTheme);
+            boxPaintsByIndex[index] = chrome.box;
+            if (index < textStatesByIndex.size()) {
+                textStatesByIndex[index].style = chrome.text;
+            }
+            break;
+        }
+        case UIWidgetKind::ProgressBar: {
+            const UIProgressBarChrome chrome = makeProgressBarChrome(productTheme);
+            boxPaintsByIndex[index] = chrome.track;
+            if (index < progressBarStatesByNodeIndex.size()) {
+                progressBarStatesByNodeIndex[index].paint = chrome.bar;
+            }
+            break;
+        }
+        case UIWidgetKind::RadioButton: {
+            const UIRadioButtonChrome chrome = makeRadioButtonChrome(productTheme);
+            if (index < radioButtonStatesByNodeIndex.size()) {
+                radioButtonStatesByNodeIndex[index].paint = chrome.radio;
+            }
+            if (index < textStatesByIndex.size()) {
+                textStatesByIndex[index].style = chrome.label;
+            }
+            break;
+        }
+        }
+    }
+
     [[nodiscard]] Core::Result<UINodeId> createNode(UIWidgetKind kind)
     {
         auto idResult = nodes.tryEmplace();
@@ -4923,6 +5005,9 @@ struct UIContext::Impl final {
              || kind == UIWidgetKind::RadioButton)
             ? UIPointerHitPolicy::Targetable
             : UIPointerHitPolicy::Ignore;
+        if (capacityConfig.applyDefaultProductChrome) {
+            applyDefaultProductChrome(node.index(), kind);
+        }
         return node;
     }
 
@@ -10270,6 +10355,16 @@ Platform::WindowId UIContext::ownerWindow() const noexcept
 bool UIContext::contains(UINodeId node) const noexcept
 {
     return m_impl->isOwnerThread() && m_impl->contains(node);
+}
+
+const UITheme& UIContext::productTheme() const noexcept
+{
+    return m_impl->productTheme;
+}
+
+void UIContext::setProductTheme(const UITheme& theme) noexcept
+{
+    m_impl->productTheme = theme;
 }
 
 Core::Status UIContext::openTextFont(

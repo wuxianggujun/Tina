@@ -22,6 +22,7 @@
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
+#include <tina/ui/UITheme.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 #include <tina/ui/UIWidgetKind.hpp>
 
@@ -349,6 +350,13 @@ public:
 
     [[nodiscard]] Platform::WindowId ownerWindow() const noexcept;
     [[nodiscard]] bool contains(UINodeId node) const noexcept;
+
+    // Active product theme for create* default chrome. Defaults to
+    // makeDefaultProductTheme(). setProductTheme updates the active theme for
+    // subsequent create* only; existing nodes keep their paints until callers
+    // re-apply via setBoxPaint / set*Paint / setTextStyle (local override).
+    [[nodiscard]] const UITheme& productTheme() const noexcept;
+    void setProductTheme(const UITheme& theme) noexcept;
 
     // Opens (or replaces) the text face used by measure/paint. Closes the previous
     // face, clears the glyph atlas, and dirties layout/paint for nodes with text.

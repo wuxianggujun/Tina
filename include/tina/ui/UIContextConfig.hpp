@@ -38,6 +38,11 @@ struct UIContextCapacityConfig final {
     // Total retained UTF-8 bytes for Label/Button/RadioButton/TextEdit text across the context.
     // Zero uses DefaultTextByteCapacity. Storage is pre-reserved at Create.
     usize textByteCapacity = 0;
+    // When true (product default), create* installs productTheme chrome
+    // (make*Chrome / body text style). Local setBoxPaint / set*Paint still
+    // override. Unit tests that assert empty paint or exact paint-entry
+    // capacity may set this false.
+    bool applyDefaultProductChrome = true;
 };
 
 [[nodiscard]] Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& config);

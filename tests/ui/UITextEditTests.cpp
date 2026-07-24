@@ -131,6 +131,7 @@ class VariableAdvanceTextRasterizer final : public UI::IUITextRasterizer {
     Platform::WindowId window,
     UI::UIContextCapacityConfig capacityConfig)
 {
+    capacityConfig.applyDefaultProductChrome = false;
     auto result = UI::UIContext::Create(
         window,
         capacityConfig);
