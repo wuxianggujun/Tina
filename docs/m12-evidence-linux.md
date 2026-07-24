@@ -20,9 +20,10 @@ Backlog `TEST-001` 验收为：
 
 | 路径 | 作用 |
 | --- | --- |
-| `docker/linux-gcc13/Dockerfile` | GCC13 Null 工具链 + 仓库 vcpkg baseline |
-| `docker/linux-gcc13-platform/Dockerfile` | GCC13 + X11/GLFW 系统依赖 + Xvfb |
-| `docker/linux-clang22/Dockerfile` | Clang22 + g++-15（libstdc++15）+ vcpkg baseline（构建需可用外网） |
+| `docker/linux-gcc13/Dockerfile` | GCC13 Null；默认阿里云 apt + 清华 vcpkg + DaoCloud Ubuntu |
+| `docker/linux-gcc13-platform/Dockerfile` | GCC13 + X11/GLFW + Xvfb；同上国内镜像默认 |
+| `docker/linux-clang22/Dockerfile` | Clang22 + g++-15；清华 llvm-apt / toolchain 镜像 + 国内 apt |
+| `docker/README.md` | 镜像源说明与 `--build-arg` 覆盖 |
 | `tools/linux/run-gcc13-null-gate.sh` | Null 门禁 |
 | `tools/linux/run-gcc13-platform-gate.sh` | Platform/GLFW 门禁（优先 `xvfb-run`） |
 | `tools/linux/run-clang22-null-gate.sh` | Clang22 Null 门禁 |

@@ -117,8 +117,8 @@ UI 不调用 bgfx。`tina_ui_render_integration` 把 committed paint 转为固�
 在 `RenderFrame` 中只借用 DisplayList 和可选 R8 atlas page。backend 必须在 `submitFrame()` 内同步
 消费。
 
-当前支持 solid/glyph quad 与 axis-aligned scissor。rounded/stencil clip、Image widget、owning frame
-packet/FramePin 与跨 GPU golden 尚未完成。
+当前支持 solid/glyph quad 与 axis-aligned scissor。Runtime `RenderFramePacket`/FramePin 首切片已落地
+（Null 同步 complete）。rounded/stencil clip、Image widget 与跨 GPU/DPI golden（UI-003）尚未完成。
 
 ## 实际绘制链路
 
@@ -157,9 +157,9 @@ bgfx；这条依赖只存在于 `tina_ui_render_integration` 和私有 bgfx back
 | `Root` | 树和所有权边界 | 默认不绘制；设置 `UIBoxPaint` 后也可作为背景 SolidQuad |
 | `Panel` | 容器和布局 | `UIBoxPaint` 的 SolidQuad；当前 effective clip 是 viewport 与自身矩形的交集 |
 | `Label` | 只读 UTF-8 文本 | Glyph quads；没有可用字体时为确定性的 placeholder SolidQuad |
-| `Button` | Pointer、Tab、Enter/Space/KeypadEnter、Gamepad South | 调用方设置的背景 SolidQuad + 文本；当前没有独立 Theme 绘制器 |
-| `Checkbox` | checked 切换，复用 Button action/焦点路径 | 背景 SolidQuad + 文本；checked 主要发布到 semantics/状态，当前没有自动勾选图元 |
-| `Slider` | Pointer 横向拖动，min/max/value/step | 当前核心只绘制调用方的 box paint；thumb/track 专用主题图元尚未抽象 |
+| `Button` | Pointer、Tab、Enter/Space/KeypadEnter、Gamepad South | `UIBoxPaint` 背景 + 可选 `UIButtonPaint` 状态色 + 文本 |
+| `Checkbox` | checked 切换，复用 Button action/焦点路径 | 背景 SolidQuad + `UICheckboxPaint` 勾选指示块 + 可选文本 |
+| `Slider` | Pointer 横向拖动，min/max/value/step | 背景 track + `UISliderPaint` filled track/thumb（拖动 thumb 色） |
 | `TextEdit` | 单行编辑、选择、光标、IME | 文本 Glyph/placeholder + selection highlight + caret SolidQuad |
 | `ProgressBar` | 非交互 determinate range/value | track SolidQuad + 按比例缩短的 foreground SolidQuad |
 | `RadioButton` | 同直接父节点互斥选择 | indicator SolidQuad + 选中内块 + 文本 Glyph |
@@ -186,7 +186,7 @@ borderLight/borderDark/borderWidth 与 shadow（假 elevation）。rounded recta
 人工复核 `frame-02.png` / `frame-03.png` 中上述控件可见、中文正常且无裁剪或重叠；两帧 65% fill
 均为 x=700..842（143 px），选中色只出现在 Windowed RadioButton，client capture 未混入标题栏。
 
-当前增量验证为：`tina_ui_tests` 190/190、`tina_runtime_ui_tests` 77/77、
+当前 tip 增量验证为：`tina_ui_tests` 255/255（含 Accessibility）、`tina_runtime_ui_tests` 83/83、
 `tina_ui_render_integration_tests` 12/12、product-2d 图的 `tina_ui_freetype_tests` 2/2。UI 容量回归
 覆盖 Checkbox/Slider mutation、TextEdit pointer selection 和需要同时重绘旧/新节点的 focus step；
 dirty queue 容量不足时状态与 callback 原子不变，同文本替换 selection 仍发布新 paint。数字是当前
