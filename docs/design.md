@@ -96,7 +96,7 @@ UI 不调用 bgfx。Render 不读取 UI 节点对象，只同步消费当前 sub
 | 产品面 | 已有 | 仍缺 |
 | --- | --- | --- |
 | 2D | Catalog TileMap、角色/碰撞、UI 设置、文本、Audio；可选 Box2D/FreeType/miniaudio | 更完整关卡/动画/编辑工具 |
-| 3D | multi-mesh cook/upload/bind、Prefab、Scene extract、Unlit、texture bind API、URI 安全 | Opaque3D 贴图采样、PBR、multi-primitive merge、AssetHandle 终态 |
+| 3D | multi-mesh/multi-prim SPLIT cook、upload/bind、Prefab、Scene extract、Unlit、texture bind API、URI 安全 | Opaque3D 贴图采样、PBR、AssetHandle 终态 |
 | UI | Tree/layout/hit/route/paint/semantics、文本/Glyph、控件集；Windows UIA + HWND 桥接首切片 | Focus Scope、Modal/Capture、多行/复杂 shaping、虚拟化、Narrator 金标/AT-SPI |
 | Runtime | State 栈/commands、四相位阻断、`blocksGameplayInputBelow` 空 snapshot、FramePin/ledger、固定步长 | 真 GPU fence、多 World、Runtime 内置 Asset/World |
 | 性能 | `tina_bench` schema v1 + provisional 结论 | 固定门禁机 hard gate、多进程 MAD、更多 workload |

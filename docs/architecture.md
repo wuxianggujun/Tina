@@ -169,10 +169,11 @@ source asset
   -> completion / retirement ledger
 ```
 
-multi-mesh glTF cooking 已能为每个 mesh 生成独立 StaticMesh/Material，并由 Prefab 依赖 AssetId；当前
-`tina_sample_3d` 仍只把单个 product mesh 映射到 backend key，因此不能把 Cooker 单测扩写成完整
-multi-mesh 产品 E2E。相对文件或 bufferView 的 baseColorTexture 已可 cook 为 RGBA8 Texture2D 并成为
-Material dependency；纹理产品绑定、安全 URI/size policy、PBR 和 multi-primitive merge 仍未完成。
+multi-mesh / multi-primitive glTF cooking 已能为每个 TRIANGLES prim 生成独立 StaticMesh/Material，并由
+Prefab 依赖 AssetId（多 prim 展开父+子节点）；当前 `tina_sample_3d` 仍只把单个 product mesh 映射到
+backend key，因此不能把 Cooker 单测扩写成完整 multi-mesh 产品 E2E。相对文件或 bufferView 的
+baseColorTexture 已可 cook 为 RGBA8 Texture2D 并成为 Material dependency；纹理产品绑定、安全
+URI/size policy 与 PBR 仍未完成。
 
 ## 当前 UI 边界
 

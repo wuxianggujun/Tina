@@ -406,5 +406,149 @@ TEST(GltfCookTests, RejectsAbsoluteExternalImageUri)
     EXPECT_FALSE(request.error().message.empty());
 }
 
+// One mesh, two TRIANGLES prims with distinct materials (external multi-prim models).
+// Cooker SPLITs into two StaticMesh + two Material; Prefab expands to transform parent + 2 children.
+[[nodiscard]] std::string multiPrimitiveMeshGltfJson()
+{
+    // Shared buffer: 6*float3 positions + 6*u16 indices (two independent triangles).
+    return R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0, "translation": [1.0, 0.0, 0.0]}],
+  "meshes": [{
+    "primitives": [
+      {"attributes": {"POSITION": 0}, "indices": 2, "mode": 4, "material": 0},
+      {"attributes": {"POSITION": 1}, "indices": 3, "mode": 4, "material": 1}
+    ]
+  }],
+  "materials": [
+    {"pbrMetallicRoughness": {"baseColorFactor": [1.0, 0.0, 0.0, 1.0]}},
+    {"pbrMetallicRoughness": {"baseColorFactor": [0.0, 1.0, 0.0, 1.0]}}
+  ],
+  "accessors": [
+    {
+      "bufferView": 0, "byteOffset": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+      "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]
+    },
+    {
+      "bufferView": 0, "byteOffset": 36, "componentType": 5126, "count": 3, "type": "VEC3",
+      "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]
+    },
+    {"bufferView": 1, "byteOffset": 0, "componentType": 5123, "count": 3, "type": "SCALAR"},
+    {"bufferView": 1, "byteOffset": 6, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 72},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 12}
+  ],
+  "buffers": [{
+    "byteLength": 84,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAEAAAACAAAAAAAAAAEAAAACAAAA"
+  }]
+})json";
+}
+
+TEST(GltfCookTests, SplitsMultiPrimitiveMeshIntoDistinctAssetsAndPrefabChildren)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_multi_prim";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "multi_prim.gltf";
+    {
+        std::ofstream out(gltfPath, std::ios::binary);
+        ASSERT_TRUE(out.good());
+        out << multiPrimitiveMeshGltfJson();
+    }
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+    // 2 mesh + 2 material + 1 prefab
+    ASSERT_EQ(request->assets.size(), 5U);
+
+    std::size_t meshCount = 0;
+    std::size_t materialCount = 0;
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind == AssetFormat::AssetKind::StaticMesh)
+        {
+            ++meshCount;
+            auto view = AssetFormat::parseStaticMeshPayload(asset.payload);
+            ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+            EXPECT_EQ(view->vertexCount, 3U);
+            EXPECT_EQ(view->indexCount, 3U);
+            EXPECT_EQ(view->submeshCount, 1U);
+        }
+        else if (asset.assetKind == AssetFormat::AssetKind::Material)
+        {
+            ++materialCount;
+        }
+        else if (asset.assetKind == AssetFormat::AssetKind::Prefab)
+        {
+            // Parent transform + 2 prim children → 4 deps (mesh+mat × 2)
+            EXPECT_EQ(asset.dependencies.size(), 4U);
+            std::vector<AssetFormat::PrefabNodeView> nodes;
+            auto prefab = AssetFormat::parsePrefabPayload(asset.payload, nodes);
+            ASSERT_TRUE(prefab.has_value()) << (prefab ? "" : prefab.error().message);
+            ASSERT_EQ(prefab->nodes.size(), 3U);
+            EXPECT_FALSE(prefab->nodes[0].hasMesh);
+            EXPECT_FLOAT_EQ(prefab->nodes[0].positionX, 1.0F);
+            EXPECT_TRUE(prefab->nodes[1].hasMesh);
+            EXPECT_TRUE(prefab->nodes[2].hasMesh);
+            EXPECT_EQ(prefab->nodes[1].parentIndex, 0);
+            EXPECT_EQ(prefab->nodes[2].parentIndex, 0);
+        }
+    }
+    EXPECT_EQ(meshCount, 2U);
+    EXPECT_EQ(materialCount, 2U);
+
+    const auto catalogRoot = dir / "catalog";
+    ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
+}
+
+TEST(GltfCookTests, RejectsNonTrianglePrimitiveInMultiPrimMesh)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_multi_prim_bad";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "bad_mode.gltf";
+    {
+        std::ofstream out(gltfPath, std::ios::binary);
+        ASSERT_TRUE(out.good());
+        // mode 1 = LINES (unsupported); second prim TRIANGLES.
+        out << R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{
+    "primitives": [
+      {"attributes": {"POSITION": 0}, "indices": 1, "mode": 1, "material": 0},
+      {"attributes": {"POSITION": 0}, "indices": 1, "mode": 4, "material": 0}
+    ]
+  }],
+  "materials": [{"pbrMetallicRoughness": {"baseColorFactor": [1.0, 1.0, 1.0, 1.0]}}],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+     "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]},
+    {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 6}
+  ],
+  "buffers": [{
+    "byteLength": 44,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAEAAAACAAAA"
+  }]
+})json";
+    }
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string());
+    ASSERT_FALSE(request.has_value());
+    EXPECT_NE(request.error().message.find("TRIANGLES"), std::string::npos)
+        << request.error().message;
+}
+
 } // namespace
 } // namespace Tina::Asset
