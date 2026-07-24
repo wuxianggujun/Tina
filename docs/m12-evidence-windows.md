@@ -102,7 +102,20 @@ product-2d 同轮图证明 `tina_audio_tests` / `tina_audio_miniaudio_tests` exi
 miniaudio null-device callback 与 Catalog AudioClip lease。真实扬声器质量、Linux tip 与 callback
 性能不由这份证据证明。
 
+## UI-003 单机视觉 ROI（2026-07-24 tip `66374135`）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003VisualGate.ps1 `
+  -SkipBuild -OutDir artifacts\screenshots\ui-003-visual
+```
+
+结果：`ok=true`，client **960×540**，aspect 1.7778；CaptureSampleWindow 3 帧中 1 帧 `blankLike`
+（PrintWindow 白帧）排除，2 帧连续 useful；ROI 指纹覆盖 title/settings/progress/playfield；
+`accessibilityPublished=true`。摘要：`artifacts/gates/ui-003-visual-20260724-112721.json`。
+
+**不证明** 多显示器 100/150/200% DPI 金标矩阵或跨 GPU 像素 golden。
+
 ## 未关闭
 
-- Linux tip：**GCC13 Null 已有证据**（见 [m12-evidence-linux.md](m12-evidence-linux.md)）；GLFW 与 Clang sanitizer 仍未复验（TEST-001 尾巴）；
-- PBR、跨 GPU/DPI golden、UIA/AT-SPI 真机（UI-002/UI-003/RENDER-001）。
+- 多 DPI 截图矩阵（UI-003 尾巴）、UIA/AT-SPI 真机（UI-002）、PBR（RENDER-001）；
+- Linux 可选 Wayland / 真显示器（TEST-001 主验收已关，见 [Linux 证据](m12-evidence-linux.md)）。

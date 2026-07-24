@@ -12,7 +12,7 @@
 | R-SHUT-01 | P0 | barrier/deadline 后继续析构，Worker 或 callback UAF | 协作取消、join、逆序 shutdown | timeout 注入证明活跃 owner 不被释放，硬 deadline 明确 fast-fail | RUNTIME-002 |
 | R-3D-01 | P0 | Cooker 单测被误当成 multi-mesh 产品 E2E | 文档区分 G4 Cooker 与 G3 product | 两个 mesh AssetId 分别 upload/bind/extract/draw，视觉与账本门禁通过 | 3D-001 |
 | R-GLTF-01 | P0 | 外部 URI 路径穿越、symlink escape、size/count 资源炸弹 | Runtime 不直接打开 URI；Cooker 有结构/size 校验，relative-file 仍只按可信输入处理 | root containment、URI policy、overflow/oversize corpus 全通过 | ASSET-001 |
-| R-LINUX-01 | P1 | Linux 证据不完整 | Docker GCC13 Null + Platform/GLFW 已复验 | 补 Clang Null/sanitizer（修 Docker 外网/代理）后关 TEST-001 | TEST-001 尾巴 |
+| R-LINUX-01 | closed | tip Docker GCC13 + Clang22（含 sanitizer）已复验 | [m12-evidence-linux.md](m12-evidence-linux.md) | 可选 Wayland/真显示器 | TEST-001 Done |
 | R-UI-01 | P0 | dirty 传播或 paint batching 导致全树工作、每帧分配或透明顺序错误 | committed snapshot、固定 PMR、相邻合批、checksum | 目标规模门禁、零稳态分配和视觉/paint checksum 同时通过 | UI-003, PERF-001 |
 | R-A11Y-01 | P1 | Semantics 与中立 probe 可读，但真实辅助技术仍不可读 | generation ID、`UIAccessibilityTree`、stale 拒绝 | UIA/AT-SPI 真机读取与销毁/切场景测试通过 | UI-002 |
 | R-TEXT-01 | P1 | CJK 缺字、IME composition/selection 跨平台差异 | UTF-8 校验、可选 FreeType、Windows TextInput/IME 首切片 | Windows/Linux 支持矩阵与候选窗、shaping 测试明确 | TEXT-001 |

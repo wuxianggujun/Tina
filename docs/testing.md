@@ -172,9 +172,10 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxGcc13NullGate.p
   -OutJson artifacts\gates\test-001-linux-gcc13-null.json
 ```
 
-2026-07-23 tip `e0d94faa`：GCC13 Null exit 0（`tina_ui_tests` 255/255 等）。  
-2026-07-24 tip `d883d787`：GCC13 Platform/GLFW + Xvfb exit 0（`tina_platform_glfw_tests` 34/34）。  
-**不等于** TEST-001 全关闭（缺 Clang Null/sanitizer）。
+2026-07-23 tip `e0d94faa`：GCC13 Null exit 0。  
+2026-07-24 tip `d883d787`：GCC13 Platform/GLFW + Xvfb exit 0（34/34）。  
+2026-07-24 tip `66374135`：Clang22 Null + Clang22 sanitizer Null 全 executable exit 0。  
+详见 [m12-evidence-linux.md](m12-evidence-linux.md)；TEST-001 主验收已关。
 
 ### 本机 Linux / Clang sanitizer
 

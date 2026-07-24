@@ -16,7 +16,7 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
-| TEST-001 | 复验当前 tip 的 Linux GCC/Clang/sanitizer 图 | 现有 Linux 结果早于当前 UI/Asset 产品切片 |
+
 
 
 
@@ -64,7 +64,8 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 
 | 门禁 | 当前结论 | 下一关闭点 |
 | --- | --- | --- |
-| 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002） | TEST-001 |
+| 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002） | UI-003 多 DPI 矩阵 |
+| Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
 | UI product | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有结构化与 Windows 产品视觉证据 | UI-002、UI-003 |
 | 3D product | 双 mesh + baseColorTexture GPU 绑定 smoke 已有证据（3D-001/ASSET-001） | RENDER-001 |
 | Runtime stack/packet | stack/commands/policy 与 FramePin Null completion 首切片已落地 | 产品 sample 暂停演示；GPU fence 异步 completion |

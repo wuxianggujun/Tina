@@ -57,6 +57,7 @@ RUN set -eux; \
         clang-22 \
         clang++-22 \
         lld-22 \
+        libclang-rt-22-dev \
         git \
         ninja-build \
         pkg-config \
