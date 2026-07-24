@@ -87,6 +87,7 @@ flowchart TD
 | `tina_platform_glfw` | GLFW `NO_API` 窗口、输入、WindowSurface lease；GLFW PRIVATE |
 | `tina_render_bgfx` | bgfx surface、2D/3D/UI pass 与 GPU resource；bgfx/bx PRIVATE |
 | `tina_ui_freetype` | FreeType 文本 rasterizer；FreeType PRIVATE |
+| `tina_ui_uia` | Windows UIA 无障碍私有 adapter（可选，`TINA_BUILD_UI_UIA`）；COM PRIVATE |
 | `tina_audio_miniaudio` | miniaudio device/mix adapter；可选 Vorbis/Opus |
 | `tina_window_surface_integration` | Platform 与 Render 之间的 native surface handoff |
 | `tina_ui_render_integration` | committed UI paint 到 Render DisplayList 的窄桥 |
