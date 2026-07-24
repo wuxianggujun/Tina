@@ -170,9 +170,11 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunUi003SizeMatrix.ps1 
 
 **已证明：** ContentScale* 映射单测；单机 ROI + blankLike 排除；设计 960×540 absolute 布局 baseline；
 逻辑窗口 content-scale-like 矩阵；sample JSON `logicalPixel*` / `framebufferPixel*` / `contentScale*`
-一致性（GLFW metrics，非 COM DPI API）。
+一致性（GLFW metrics，非 COM DPI API）；**字体 identity fingerprint**（`fontFingerprint`：env
+`TINA_UI_FONT_PATH` / repo fixture path、`sha256`、`freeTypeLikelyOn`、`identity`；baseline schema 3；
+与 baseline 不一致时默认 fail，`-AllowFontFingerprintMismatch` 可 provisional 跳过 ROI 比对）。
 
-**未证明：** OS 显示缩放 100/150/200% 真机多 DPI 金标；多显示器混 DPI；跨 GPU/字体 fingerprint 金标。
+**未证明：** OS 显示缩放 100/150/200% 真机多 DPI 金标；多显示器混 DPI；跨 GPU 像素金标。
 
 ## Linux 与 sanitizer
 

@@ -7,8 +7,11 @@
   Wraps CaptureSampleWindow.ps1, then samples absolute-design ROIs mapped into the
   client capture (product-2d HUD is design-locked at 960x540). blankLike frames are
   excluded via CaptureSampleWindow. Parses sample JSON for GLFW logical/framebuffer
-  /contentScale and asserts consistency. Does NOT change OS display scale; true
-  OS 100/150/200% multi-DPI golden matrix remains open.
+  /contentScale and asserts consistency. Records font identity fingerprint
+  (path/hash/env TINA_UI_FONT_PATH/FreeType-on) in gate report and baseline compare.
+  Font fingerprint mismatch vs baseline metadata fails the gate when the baseline
+  expects a fingerprint (prefer fail over provisional skip). Does NOT change OS
+  display scale; true OS 100/150/200% multi-DPI golden matrix remains open.
 #>
 [CmdletBinding()]
 param(
@@ -36,7 +39,10 @@ param(
     # Content-scale consistency: |fb - logical * scale| max pixel error per axis.
     [double]$ContentScalePixelTolerance = 2.0,
     [double]$ContentScaleMin = 0.5,
-    [double]$ContentScaleMax = 4.0
+    [double]$ContentScaleMax = 4.0,
+    # When baseline has fontFingerprint and current differs: fail (default). Switch to
+    # provisional skip of ROI baseline only when AllowFontFingerprintMismatch is set.
+    [switch]$AllowFontFingerprintMismatch
 )
 
 $ErrorActionPreference = 'Stop'
@@ -63,6 +69,155 @@ function Invoke-Checked {
         throw "step failed: $Name exit=$LASTEXITCODE"
     }
 }
+
+function Get-Ui003FontFingerprint {
+    param(
+        [Parameter(Mandatory = $true)][string]$Root,
+        [string]$ExePath = ''
+    )
+
+    $envPath = $null
+    if (-not [string]::IsNullOrWhiteSpace($env:TINA_UI_FONT_PATH)) {
+        $envPath = [string]$env:TINA_UI_FONT_PATH
+    }
+
+    $resolved = $null
+    $source = 'none'
+    $candidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($envPath)) {
+        $candidates += [pscustomobject]@{ Path = $envPath; Source = 'env:TINA_UI_FONT_PATH' }
+    }
+    $fixtureRel = 'resources/fonts/SourceHanSansSC-Regular.otf'
+    $fixtureAbs = Join-Path $Root ($fixtureRel -replace '/', [IO.Path]::DirectorySeparatorChar)
+    $candidates += [pscustomobject]@{ Path = $fixtureAbs; Source = 'repo-fixture' }
+
+    foreach ($c in $candidates) {
+        $p = [string]$c.Path
+        if ([string]::IsNullOrWhiteSpace($p)) { continue }
+        if (Test-Path -LiteralPath $p) {
+            $resolved = (Resolve-Path -LiteralPath $p).Path
+            $source = [string]$c.Source
+            break
+        }
+    }
+
+    $sha256 = $null
+    $sizeBytes = $null
+    $fileName = $null
+    $exists = $false
+    $pathForReport = $resolved
+    if (-not [string]::IsNullOrWhiteSpace($resolved) -and (Test-Path -LiteralPath $resolved)) {
+        $exists = $true
+        $item = Get-Item -LiteralPath $resolved
+        $sizeBytes = [int64]$item.Length
+        $fileName = [string]$item.Name
+        $sha256 = (Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash.ToLowerInvariant()
+        # Prefer repo-relative path in reports/baselines (portable across machines).
+        $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\', '/')
+        $resFull = [IO.Path]::GetFullPath($resolved)
+        if ($resFull.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) {
+            $rel = $resFull.Substring($rootFull.Length).TrimStart('\', '/')
+            $pathForReport = ($rel -replace '\\', '/')
+        }
+    }
+
+    # FreeType product path: sample is built with optional font macros when path exists at configure.
+    # Gate cannot read compile defs; treat present resolved font file as FreeType-on identity for visual goldens.
+    $freeTypeLikelyOn = [bool]$exists
+
+    $identity = 'none'
+    if ($exists -and -not [string]::IsNullOrWhiteSpace($sha256)) {
+        $identity = ('sha256:{0}' -f $sha256)
+    } elseif ($exists -and -not [string]::IsNullOrWhiteSpace($fileName)) {
+        $identity = ('name:{0}' -f $fileName)
+    }
+
+    return [pscustomobject]@{
+        schema              = 1
+        envTinaUiFontPath   = $envPath
+        resolvedPath        = $pathForReport
+        source              = $source
+        fileName            = $fileName
+        exists              = [bool]$exists
+        sizeBytes           = $sizeBytes
+        sha256              = $sha256
+        freeTypeLikelyOn    = [bool]$freeTypeLikelyOn
+        identity            = $identity
+        notes               = @(
+            'Resolution order matches cmake/TinaUiFont.cmake: env TINA_UI_FONT_PATH then repo fixture',
+            'identity prefers sha256 of font file bytes; baseline compare fails on mismatch when baseline has fingerprint'
+        )
+    }
+}
+
+function Test-Ui003FontFingerprintMatch {
+    param(
+        $Current,
+        $BaselineFp
+    )
+    if ($null -eq $BaselineFp) {
+        return [pscustomobject]@{
+            compared = $false
+            matched  = $null
+            reason   = 'baseline has no fontFingerprint'
+            diffs    = @()
+        }
+    }
+
+    $diffs = New-Object System.Collections.Generic.List[string]
+    $baseId = $null
+    if ($null -ne $BaselineFp.identity) { $baseId = [string]$BaselineFp.identity }
+    $curId = $null
+    if ($null -ne $Current.identity) { $curId = [string]$Current.identity }
+
+    if (-not [string]::IsNullOrWhiteSpace($baseId) -and $baseId -ne 'none') {
+        if ([string]::IsNullOrWhiteSpace($curId) -or $curId -ne $baseId) {
+            [void]$diffs.Add(("identity baseline={0} current={1}" -f $baseId, $curId))
+        }
+    }
+
+    $baseSha = $null
+    if ($null -ne $BaselineFp.sha256) { $baseSha = [string]$BaselineFp.sha256 }
+    $curSha = $null
+    if ($null -ne $Current.sha256) { $curSha = [string]$Current.sha256 }
+    if (-not [string]::IsNullOrWhiteSpace($baseSha)) {
+        if ([string]::IsNullOrWhiteSpace($curSha) -or $curSha.ToLowerInvariant() -ne $baseSha.ToLowerInvariant()) {
+            [void]$diffs.Add(("sha256 baseline={0} current={1}" -f $baseSha, $curSha))
+        }
+    }
+
+    $baseName = $null
+    if ($null -ne $BaselineFp.fileName) { $baseName = [string]$BaselineFp.fileName }
+    $curName = $null
+    if ($null -ne $Current.fileName) { $curName = [string]$Current.fileName }
+    if (-not [string]::IsNullOrWhiteSpace($baseName) -and -not [string]::IsNullOrWhiteSpace($curName) -and $baseName -ne $curName) {
+        [void]$diffs.Add(("fileName baseline={0} current={1}" -f $baseName, $curName))
+    }
+
+    if ($null -ne $BaselineFp.freeTypeLikelyOn -and $null -ne $Current.freeTypeLikelyOn) {
+        if ([bool]$BaselineFp.freeTypeLikelyOn -ne [bool]$Current.freeTypeLikelyOn) {
+            [void]$diffs.Add(("freeTypeLikelyOn baseline={0} current={1}" -f $BaselineFp.freeTypeLikelyOn, $Current.freeTypeLikelyOn))
+        }
+    }
+
+    if ($null -ne $BaselineFp.exists -and $null -ne $Current.exists) {
+        if ([bool]$BaselineFp.exists -ne [bool]$Current.exists) {
+            [void]$diffs.Add(("exists baseline={0} current={1}" -f $BaselineFp.exists, $Current.exists))
+        }
+    }
+
+    $matched = ($diffs.Count -eq 0)
+    return [pscustomobject]@{
+        compared = $true
+        matched  = [bool]$matched
+        reason   = if ($matched) { 'ok' } else { 'font fingerprint mismatch' }
+        diffs    = @($diffs | ForEach-Object { [string]$_ })
+    }
+}
+
+$fontFingerprint = Get-Ui003FontFingerprint -Root $SourceRoot -ExePath $Exe
+Write-Host ("fontFingerprint identity={0} source={1} freeTypeLikelyOn={2}" -f `
+    $fontFingerprint.identity, $fontFingerprint.source, $fontFingerprint.freeTypeLikelyOn)
 
 if (-not $SkipBuild) {
     Invoke-Checked 'build tina_sample_2d' {
@@ -398,6 +553,14 @@ $baselineCompare = [pscustomobject]@{
     path = $null
     matched = $null
     avgRgbTolerance = [double]$AvgRgbTolerance
+    roiCompared = $null
+    fontFingerprint = [pscustomobject]@{
+        compared = $false
+        matched  = $null
+        reason   = $null
+        diffs    = @()
+        policy   = 'fail-when-baseline-expects-fingerprint'
+    }
     diffs = @()
 }
 
@@ -412,17 +575,19 @@ if ($WriteBaseline) {
         New-Item -ItemType Directory -Path $baselineDir -Force | Out-Null
     }
     $baselineObj = [pscustomobject]@{
-        schema = 2
+        schema = 3
         gate = 'UI-003-visual-roi-baseline'
         designLogicalSize = @([int]$DesignWidth, [int]$DesignHeight)
         clientSize = @([int]$clientW, [int]$clientH)
         aspect = [math]::Round($aspect, 4)
+        fontFingerprint = $fontFingerprint
         sampleMetrics = $sampleMetrics
         rois = $roiJson
         notes = @(
             'Host-recorded ROI fingerprints for regression on same machine/class of GPU',
             'avgRgb compared with absolute channel tolerance; uniqueSampleColors is a soft floor',
-            'Absolute UI layout is design-locked; per-size baselines are not OS DPI goldens'
+            'Absolute UI layout is design-locked; per-size baselines are not OS DPI goldens',
+            'fontFingerprint.identity/sha256 must match when baseline includes fingerprint (gate fails on mismatch)'
         )
     }
     $baselineObj | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $resolvedBaseline -Encoding utf8
@@ -434,34 +599,73 @@ if (-not $NoBaselineCompare -and -not [string]::IsNullOrWhiteSpace($resolvedBase
     $baselineCompare.path = $resolvedBaseline
     $baseline = Get-Content -LiteralPath $resolvedBaseline -Raw -Encoding UTF8 | ConvertFrom-Json
     $diffs = New-Object System.Collections.Generic.List[string]
-    foreach ($roi in $roiJson) {
-        $baseRoi = $null
-        foreach ($b in @($baseline.rois)) {
-            if ([string]$b.name -eq [string]$roi.name) { $baseRoi = $b; break }
-        }
-        if ($null -eq $baseRoi) {
-            [void]$diffs.Add("baseline missing ROI $($roi.name)")
-            continue
-        }
-        $baseAvg = @($baseRoi.avgRgb)
-        $curAvg = @($roi.avgRgb)
-        for ($i = 0; $i -lt 3; $i++) {
-            $delta = [Math]::Abs([double]$curAvg[$i] - [double]$baseAvg[$i])
-            if ($delta -gt $AvgRgbTolerance) {
-                [void]$diffs.Add(("{0} avgRgb[{1}] delta={2:N2} (tol={3})" -f $roi.name, $i, $delta, $AvgRgbTolerance))
+
+    $fpCheck = Test-Ui003FontFingerprintMatch -Current $fontFingerprint -BaselineFp $baseline.fontFingerprint
+    $baselineCompare.fontFingerprint = [pscustomobject]@{
+        compared = [bool]$fpCheck.compared
+        matched  = $fpCheck.matched
+        reason   = [string]$fpCheck.reason
+        diffs    = @($fpCheck.diffs)
+        policy   = if ($AllowFontFingerprintMismatch) { 'allow-mismatch-skip-roi' } else { 'fail-when-baseline-expects-fingerprint' }
+    }
+
+    $skipRoiCompare = $false
+    if ($fpCheck.compared -and -not [bool]$fpCheck.matched) {
+        if ($AllowFontFingerprintMismatch) {
+            $skipRoiCompare = $true
+            [void]$diffs.Add('font fingerprint mismatch (provisional: ROI compare skipped via -AllowFontFingerprintMismatch)')
+            foreach ($d in @($fpCheck.diffs)) {
+                [void]$diffs.Add("fontFingerprint: $d")
+            }
+            Write-Host 'WARNING: font fingerprint mismatch; ROI baseline compare skipped (provisional)'
+        } else {
+            foreach ($d in @($fpCheck.diffs)) {
+                [void]$diffs.Add("fontFingerprint: $d")
+            }
+            foreach ($d in @($fpCheck.diffs)) {
+                [void]$gateErrors.Add("fontFingerprint: $d")
             }
         }
-        # Soft floor: current uniqueness should not collapse vs baseline.
-        $baseUnique = [int]$baseRoi.uniqueSampleColors
-        $curUnique = [int]$roi.uniqueSampleColors
-        if ($baseUnique -ge 4 -and $curUnique -lt [Math]::Max(2, [int][Math]::Floor($baseUnique * 0.35))) {
-            [void]$diffs.Add(("{0} uniqueSampleColors collapsed {1} -> {2}" -f $roi.name, $baseUnique, $curUnique))
-        }
     }
+
+    if (-not $skipRoiCompare) {
+        $baselineCompare.roiCompared = $true
+        foreach ($roi in $roiJson) {
+            $baseRoi = $null
+            foreach ($b in @($baseline.rois)) {
+                if ([string]$b.name -eq [string]$roi.name) { $baseRoi = $b; break }
+            }
+            if ($null -eq $baseRoi) {
+                [void]$diffs.Add("baseline missing ROI $($roi.name)")
+                continue
+            }
+            $baseAvg = @($baseRoi.avgRgb)
+            $curAvg = @($roi.avgRgb)
+            for ($i = 0; $i -lt 3; $i++) {
+                $delta = [Math]::Abs([double]$curAvg[$i] - [double]$baseAvg[$i])
+                if ($delta -gt $AvgRgbTolerance) {
+                    [void]$diffs.Add(("{0} avgRgb[{1}] delta={2:N2} (tol={3})" -f $roi.name, $i, $delta, $AvgRgbTolerance))
+                }
+            }
+            # Soft floor: current uniqueness should not collapse vs baseline.
+            $baseUnique = [int]$baseRoi.uniqueSampleColors
+            $curUnique = [int]$roi.uniqueSampleColors
+            if ($baseUnique -ge 4 -and $curUnique -lt [Math]::Max(2, [int][Math]::Floor($baseUnique * 0.35))) {
+                [void]$diffs.Add(("{0} uniqueSampleColors collapsed {1} -> {2}" -f $roi.name, $baseUnique, $curUnique))
+            }
+        }
+    } else {
+        $baselineCompare.roiCompared = $false
+    }
+
     $baselineCompare.diffs = @($diffs | ForEach-Object { [string]$_ })
     $baselineCompare.matched = ($diffs.Count -eq 0)
     if (-not $baselineCompare.matched) {
-        foreach ($d in $diffs) { [void]$gateErrors.Add("baseline: $d") }
+        foreach ($d in $diffs) {
+            if ($d -like 'fontFingerprint:*') { continue }
+            if ($d -like 'font fingerprint mismatch*') { continue }
+            [void]$gateErrors.Add("baseline: $d")
+        }
     }
 }
 
@@ -470,7 +674,7 @@ if ($null -ne $captureReport.ok) { $captureOk = [bool]$captureReport.ok }
 $ok = ($captureExit -eq 0) -and $captureOk -and ($gateErrors.Count -eq 0)
 
 $gateReport = [pscustomobject]@{
-    schema = 2
+    schema = 3
     gate = 'UI-003-visual-roi'
     ok = [bool]$ok
     tip = [string](git rev-parse HEAD 2>$null)
@@ -481,6 +685,7 @@ $gateReport = [pscustomobject]@{
     aspect = [math]::Round($aspect, 4)
     productStdoutOk = [bool]$productOk
     accessibilityPublished = [bool]$accessibilityPublished
+    fontFingerprint = $fontFingerprint
     sampleMetrics = $sampleMetrics
     designLogicalSize = @([int]$DesignWidth, [int]$DesignHeight)
     rois = $roiJson
@@ -488,7 +693,8 @@ $gateReport = [pscustomobject]@{
     errors = @($gateErrors | ForEach-Object { [string]$_ })
     notes = @(
         'Absolute design ROIs mapped into client capture (product-2d HUD design-locked 960x540)',
-        'Proven: single-host ROI + optional baseline + GLFW contentScale consistency when fields present',
+        'Proven: single-host ROI + optional baseline + GLFW contentScale consistency + font fingerprint metadata',
+        'Font fingerprint mismatch vs baseline fails gate when baseline expects identity/sha256 (prefer fail)',
         'Open: OS Settings display scale 100/150/200% multi-DPI golden matrix (requires host scale change)',
         'blankLike frames excluded via CaptureSampleWindow usefulNonBlank / RequireNonBlank',
         'Logical --width/--height matrix is not OS DPI; larger windows leave absolute-UI margin'

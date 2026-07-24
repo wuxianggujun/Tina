@@ -175,7 +175,7 @@ foreach ($s in $sizes) {
 
 $matrixOk = ($fail -eq 0)
 $matrixReport = [pscustomobject]@{
-    schema = 2
+    schema = 3
     gate = 'UI-003-size-matrix'
     ok = [bool]$matrixOk
     tip = [string](git rev-parse HEAD 2>$null)
@@ -183,19 +183,21 @@ $matrixReport = [pscustomobject]@{
     proven = @(
         'Logical window size matrix via --width/--height (content-scale-like client footprints)',
         'Absolute UI design-locked ROI mapping + soft/hard ROI signal gates',
-        'Per-size ROI baselines under tools/windows/baselines when present',
+        'Per-size ROI baselines under tools/windows/baselines when present (schema 3 + fontFingerprint)',
         'Sample JSON contentScale/logical/framebuffer consistency (when fields present)',
+        'Font identity fingerprint (path/sha256/env TINA_UI_FONT_PATH/FreeType-on) in gate + baseline; mismatch fails when baseline expects it',
         'blankLike exclusion via CaptureSampleWindow'
     )
     open = @(
         'OS Settings display scale 100/150/200% true multi-DPI golden matrix',
         'Multi-monitor mixed-DPI capture matrix',
-        'Font identity fingerprint goldens across machines'
+        'Cross-GPU pixel golden (font fingerprint is identity metadata, not pixel golden)'
     )
     notes = @(
         'Larger logical windows leave empty margin; HUD stays at 960x540 design coords',
         'scale-like-* sizes approximate content-scale client sizes without OS DPI change',
-        'design-1x (960x540) remains product absolute-layout verification gold'
+        'design-1x (960x540) remains product absolute-layout verification gold',
+        'fontFingerprint is shared identity across sizes; per-size baselines still store full fingerprint for self-contained compare'
     )
 }
 

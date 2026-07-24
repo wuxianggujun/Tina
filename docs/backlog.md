@@ -33,7 +33,7 @@
 
 
 | UI-002 | Partial | P1 | Windows UIA 真机 adapter | UI-002-SPI | **已完成** 属性映射 + HostBridge + **EngineHost 产品 HWND 自动 attach/publish**（lease 解码 Win32）；**待** Narrator/Inspect 人工金标、Linux AT-SPI | Unit + Integration |
-| UI-003 | Partial | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** ContentScale* 单测 + 单机 ROI/baseline + **content-scale-like 逻辑尺寸矩阵**（960/1200/1440/1280/1920，`RunUi003SizeMatrix.ps1` + 分尺寸 baseline）+ sample JSON `contentScale`/`logical`/`framebuffer` 一致性；**待** OS 级 100/150/200% DPI 真机矩阵与字体 fingerprint 金标 | Unit + Visual |
+| UI-003 | Partial | P1 | 建立跨 DPI/GPU 容差视觉门禁 | 稳定门禁机 | **已完成** ContentScale* 单测 + 单机 ROI/baseline + **content-scale-like 逻辑尺寸矩阵**（960/1200/1440/1280/1920，`RunUi003SizeMatrix.ps1` + 分尺寸 baseline）+ sample JSON `contentScale`/`logical`/`framebuffer` 一致性 + **字体 identity fingerprint**（`fontFingerprint`：path/sha256/env `TINA_UI_FONT_PATH`/FreeType-on；baseline schema 3；mismatch 默认 fail）；**待** OS 级 100/150/200% DPI 真机矩阵、跨 GPU 像素金标 | Unit + Visual |
 
 
 
@@ -99,3 +99,4 @@
 | UI-003-VIS | `RunUi003VisualGate.ps1`：ROI 指纹 + 可选 baseline 比对（`tools/windows/baselines/ui-003-sample2d-960x540.json`）；blankLike 排除；`artifacts/gates/ui-003-visual-*.json` | [UI](ui.md) · CaptureSampleWindow |
 | UI-003-SIZE | `tina_sample_2d --width/--height` + `RunUi003SizeMatrix.ps1`：content-scale-like 逻辑窗口 960/1200/1440/1280/1920；分尺寸 ROI baseline；`artifacts/gates/ui-003-size-matrix-*.json` | [UI](ui.md) · sample_2d |
 | UI-003-METRICS | sample JSON：`logicalPixel*` / `framebufferPixel*` / `contentScale*`；gate 断言 `fb ≈ logical * scale` 与 capture client 一致 | [UI](ui.md) · sample_2d |
+| UI-003-FONT-FP | `RunUi003VisualGate.ps1`：`fontFingerprint`（resolvedPath/source/fileName/sizeBytes/sha256/envTinaUiFontPath/freeTypeLikelyOn/identity）写入 gate JSON 与 baseline；baseline 含 fingerprint 时 mismatch **fail**（可选 `-AllowFontFingerprintMismatch` 仅跳过 ROI）；分尺寸 baseline schema 3 | [UI](ui.md) · baselines |
