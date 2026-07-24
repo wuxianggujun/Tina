@@ -61,12 +61,13 @@ namespace {
 }
 #endif
 
-} // namespace
-
-Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& config) noexcept
+[[nodiscard]] Core::Result<std::unique_ptr<EngineHost>> createEngineImpl(const EngineConfig& config,
+                                                                         CreateEngineOptions options) noexcept
 {
     try
     {
+        WindowSurfaceRenderDeviceWrap wrap = std::move(options.wrapWindowSurfaceRenderDevice);
+
         EngineCompositionFactories factories{
             .createMonotonicClock = []() -> Core::Result<std::unique_ptr<Core::IMonotonicClock>> {
                 std::unique_ptr<Core::IMonotonicClock> clock = std::make_unique<Core::SteadyMonotonicClock>();
@@ -90,9 +91,19 @@ Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& confi
                             return Platform::createGlfwWindowSurfacePlatformBackend(params);
                         },
                     .createWindowSurfaceRenderDevice =
-                        [](const Render::RenderDeviceCreateParams& params,
-                           Integration::NativeWindowSurfaceLease lease) {
-                            return Render::Bgfx::createBgfxRenderDevice(params, std::move(lease));
+                        [wrap = std::move(wrap)](const Render::RenderDeviceCreateParams& params,
+                                                 Integration::NativeWindowSurfaceLease lease)
+                            -> Core::Result<std::unique_ptr<Render::IRenderDevice>> {
+                            auto device = Render::Bgfx::createBgfxRenderDevice(params, std::move(lease));
+                            if (!device)
+                            {
+                                return device;
+                            }
+                            if (!wrap)
+                            {
+                                return device;
+                            }
+                            return wrap(std::move(*device));
                         },
                 },
             // M11-A15: production Desktop always owns a Disabled AudioEngine so
@@ -162,6 +173,19 @@ Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& confi
     {
         return Core::failure(createBootstrapBoundaryError(RuntimeErrorCode::EngineFactoryThrewException));
     }
+}
+
+} // namespace
+
+Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& config) noexcept
+{
+    return createEngineImpl(config, CreateEngineOptions{});
+}
+
+Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& config,
+                                                      CreateEngineOptions options) noexcept
+{
+    return createEngineImpl(config, std::move(options));
 }
 
 } // namespace Tina::Desktop

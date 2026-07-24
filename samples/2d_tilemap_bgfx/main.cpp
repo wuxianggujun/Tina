@@ -19,12 +19,11 @@
 #include <tina/core/hash/ContentHash.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
-#include <tina/core/time/MonotonicClock.hpp>
-#include <tina/platform/glfw/GlfwPlatformFactory.hpp>
 #include <tina/render/Camera2DProjection.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/platform/Input.hpp>
+#include <tina/desktop/DesktopEngine.hpp>
 #include <tina/runtime/EngineHost.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
@@ -35,7 +34,6 @@
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/audio/AudioClipView.hpp>
 #include <tina/audio/AudioEngine.hpp>
-#include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/scene/Camera2D.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
@@ -43,7 +41,6 @@
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
 #include <tina/audio/miniaudio/MiniaudioDevice.hpp>
 #endif
-#include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 #include <tina/ui/UIAccessibility.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UILayout.hpp>
@@ -53,13 +50,9 @@
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITheme.hpp>
-#if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
-#include <tina/ui/UIContext.hpp>
-#include <tina/ui/text/FreeTypeTextRasterizerFactory.hpp>
-#endif
 
-#include "render/bgfx/BgfxRenderDevice.hpp"
 #include "AudioControlState.hpp"
+#include "DeviceCapture.hpp"
 #include "TileSelection.hpp"
 #include "WindowVisibilityPacing.hpp"
 
@@ -535,101 +528,6 @@ void writeError(const Tina::Core::Error& error)
     return options;
 }
 
-class DeviceCapture final {
-  public:
-    void set(Tina::Render::IRenderDevice* device) noexcept { device_ = device; }
-    [[nodiscard]] Tina::Render::IRenderDevice* get() const noexcept { return device_; }
-    // M11-D1: capture on next successful present (after the frame is closed).
-    void requestCaptureNextPresent() noexcept { captureNextPresent_ = true; }
-    [[nodiscard]] bool consumeCaptureNextPresent() noexcept
-    {
-        const bool requested = captureNextPresent_;
-        captureNextPresent_ = false;
-        return requested;
-    }
-    void setLastCapture(Tina::Render::Rgba8FrameCapture capture) noexcept
-    {
-        lastCapture_ = std::move(capture);
-        hasLastCapture_ = true;
-    }
-    [[nodiscard]] bool hasLastCapture() const noexcept { return hasLastCapture_; }
-    [[nodiscard]] const Tina::Render::Rgba8FrameCapture* lastCapture() const noexcept
-    {
-        return hasLastCapture_ ? &lastCapture_ : nullptr;
-    }
-
-  private:
-    Tina::Render::IRenderDevice* device_ = nullptr;
-    bool captureNextPresent_ = false;
-    bool hasLastCapture_ = false;
-    Tina::Render::Rgba8FrameCapture lastCapture_{};
-};
-
-class CapturingRenderDevice final : public Tina::Render::IRenderDevice {
-  public:
-    CapturingRenderDevice(std::unique_ptr<Tina::Render::IRenderDevice> inner, DeviceCapture& capture) noexcept
-        : inner_(std::move(inner)), capture_(&capture)
-    {
-        capture_->set(this);
-    }
-
-    ~CapturingRenderDevice() override
-    {
-        if (capture_ != nullptr && capture_->get() == this)
-        {
-            capture_->set(nullptr);
-        }
-    }
-
-    [[nodiscard]] Tina::Core::Result<Tina::Render::RenderFrameSubmission>
-    submitFrame(const Tina::Render::RenderFrame& frame) override
-    {
-        return inner_->submitFrame(frame);
-    }
-    [[nodiscard]] Tina::Core::Status present() override
-    {
-        auto status = inner_->present();
-        if (status && capture_ != nullptr && capture_->consumeCaptureNextPresent())
-        {
-            // Capture immediately after present while the backbuffer still holds
-            // the last submitted frame content.
-            auto captured = inner_->capturePrimaryFrameRgba8();
-            if (captured.has_value() && !captured->empty())
-            {
-                capture_->setLastCapture(std::move(*captured));
-            }
-        }
-        return status;
-    }
-    [[nodiscard]] Tina::Render::RenderStatistics statistics() const noexcept override
-    {
-        return inner_->statistics();
-    }
-    void shutdown() noexcept override { inner_->shutdown(); }
-    [[nodiscard]] Tina::Core::Result<Tina::Render::GpuTextureId>
-    createTexture2DRgba8(const Tina::Render::Texture2DUploadDesc& desc) override
-    {
-        return inner_->createTexture2DRgba8(desc);
-    }
-    [[nodiscard]] Tina::Core::Status destroyTexture2D(Tina::Render::GpuTextureId texture) noexcept override
-    {
-        return inner_->destroyTexture2D(texture);
-    }
-    [[nodiscard]] Tina::Core::Status setSprite2DTextureBinding(u32 spriteKey,
-                                                               Tina::Render::GpuTextureId texture) noexcept override
-    {
-        return inner_->setSprite2DTextureBinding(spriteKey, texture);
-    }
-    [[nodiscard]] Tina::Core::Result<Tina::Render::Rgba8FrameCapture> capturePrimaryFrameRgba8() override
-    {
-        return inner_->capturePrimaryFrameRgba8();
-    }
-
-  private:
-    std::unique_ptr<Tina::Render::IRenderDevice> inner_;
-    DeviceCapture* capture_ = nullptr;
-};
-
 struct TileMapResources final {
     std::pmr::unsynchronized_pool_resource memory{};
     std::unique_ptr<Tina::Asset::AssetSystem> system{};
@@ -1020,7 +918,7 @@ class PauseOverlayState final : public Tina::IGameState {
 class TileMapBgfxState final : public Tina::IGameState {
   public:
     TileMapBgfxState(SampleOptions options, LifecycleCounters& counters, TileMapResources& resources,
-                     DeviceCapture& capture) noexcept
+                     Tina::Sample2D::DeviceCapture& capture) noexcept
         : options_(options), counters_(&counters), resources_(&resources), capture_(&capture)
     {
     }
@@ -2284,7 +2182,7 @@ class TileMapBgfxState final : public Tina::IGameState {
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
     TileMapResources* resources_ = nullptr;
-    DeviceCapture* capture_ = nullptr;
+    Tina::Sample2D::DeviceCapture* capture_ = nullptr;
     Tina::UI::UIRootOwner uiRoot_{};
     Tina::UI::UIAccessibilityTree accessibilityTree_{};
     Tina::UI::UIAccessibilityProbeProvider accessibilityProbe_{};
@@ -2306,7 +2204,7 @@ class TileMapBgfxState final : public Tina::IGameState {
 class TileMapBgfxApplication final : public Tina::IGameApplication {
   public:
     TileMapBgfxApplication(SampleOptions options, LifecycleCounters& counters, TileMapResources& resources,
-                           DeviceCapture& capture) noexcept
+                           Tina::Sample2D::DeviceCapture& capture) noexcept
         : options_(options), counters_(&counters), resources_(&resources), capture_(&capture)
     {
     }
@@ -2367,129 +2265,9 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
     TileMapResources* resources_ = nullptr;
-    DeviceCapture* capture_ = nullptr;
+    Tina::Sample2D::DeviceCapture* capture_ = nullptr;
     std::optional<Tina::PlatformEventSubscription> platformEvents_{};
 };
-
-#if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
-[[nodiscard]] std::shared_ptr<std::vector<std::byte>> loadFontFixtureBytes(const char* path)
-{
-    if (path == nullptr || path[0] == '\0')
-    {
-        return {};
-    }
-    std::ifstream input(path, std::ios::binary);
-    if (!input)
-    {
-        return {};
-    }
-    input.seekg(0, std::ios::end);
-    const auto size = static_cast<std::size_t>(input.tellg());
-    input.seekg(0, std::ios::beg);
-    auto bytes = std::make_shared<std::vector<std::byte>>(size);
-    if (size > 0)
-    {
-        input.read(reinterpret_cast<char*>(bytes->data()), static_cast<std::streamsize>(size));
-    }
-    if (!input)
-    {
-        return {};
-    }
-    return bytes;
-}
-#endif
-
-[[nodiscard]] Tina::EngineCompositionFactories createFactories(DeviceCapture& capture)
-{
-    Tina::EngineCompositionFactories factories{
-        .createMonotonicClock = []() -> Tina::Core::Result<std::unique_ptr<Tina::Core::IMonotonicClock>> {
-            return std::unique_ptr<Tina::Core::IMonotonicClock>{std::make_unique<Tina::Core::SteadyMonotonicClock>()};
-        },
-        .createTaskSystem =
-            [](const Tina::Task::TaskSystemCreateParams& params) {
-                Tina::Task::TaskSystemCreateParams effective = params;
-                if (effective.ioWorkerCount == 0)
-                {
-                    effective.ioWorkerCount = 1;
-                }
-                if (effective.ioQueueCapacity == 0)
-                {
-                    effective.ioQueueCapacity = 64;
-                }
-                if (effective.mainQueueCapacity == 0)
-                {
-                    effective.mainQueueCapacity = 64;
-                }
-                return Tina::Task::createBoundedTaskSystem(effective);
-            },
-        .platformRender =
-            Tina::WindowSurfacePlatformRenderFactories{
-                .createWindowSurfacePlatformBackend = Tina::Platform::createGlfwWindowSurfacePlatformBackend,
-                .createWindowSurfaceRenderDevice =
-                    [&capture](const Tina::Render::RenderDeviceCreateParams& params,
-                               Tina::Integration::NativeWindowSurfaceLease lease)
-                        -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
-                        auto device = Tina::Render::Bgfx::createBgfxRenderDevice(params, std::move(lease));
-                        if (!device)
-                        {
-                            return device;
-                        }
-                        std::unique_ptr<Tina::Render::IRenderDevice> capturing =
-                            std::make_unique<CapturingRenderDevice>(std::move(*device), capture);
-                        return capturing;
-                    },
-            },
-        .createAudioEngine =
-            []() -> Tina::Core::Result<Tina::Audio::AudioEngine> {
-                return Tina::Audio::AudioEngine::Create(Tina::Audio::AudioEngineConfig{
-                    .voiceCapacity = 16,
-                    .commandCapacity = 32,
-                    .completionCapacity = 32,
-                });
-            },
-    };
-
-#if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
-    std::shared_ptr<std::vector<std::byte>> fontBytes{};
-#if defined(TINA_SAMPLE_TILEMAP_FONT_PATH)
-    fontBytes = loadFontFixtureBytes(TINA_SAMPLE_TILEMAP_FONT_PATH);
-#elif defined(TINA_UI_FONT_PATH)
-    fontBytes = loadFontFixtureBytes(TINA_UI_FONT_PATH);
-#else
-    if (const char* envPath = std::getenv("TINA_UI_FONT_PATH"); envPath != nullptr && envPath[0] != '\0')
-    {
-        fontBytes = loadFontFixtureBytes(envPath);
-    }
-#endif
-    if (fontBytes && !fontBytes->empty())
-    {
-        factories.createPrimaryWindowUIContext =
-            [fontBytes](Tina::Platform::WindowId ownerWindow, const Tina::UI::UIContextCapacityConfig& capacities,
-                        std::pmr::memory_resource& resource) -> Tina::Core::Result<std::unique_ptr<Tina::UI::UIContext>> {
-                auto rasterizer = Tina::UI::createFreeTypeTextRasterizer({}, resource);
-                if (!rasterizer)
-                {
-                    return Tina::Core::failure(std::move(rasterizer.error()));
-                }
-                auto context =
-                    Tina::UI::UIContext::Create(ownerWindow, capacities, std::move(*rasterizer), resource);
-                if (!context)
-                {
-                    return Tina::Core::failure(std::move(context.error()));
-                }
-                const auto open =
-                    (*context)->openTextFont(std::span<const std::byte>(fontBytes->data(), fontBytes->size()));
-                if (!open)
-                {
-                    return Tina::Core::failure(std::move(open.error()));
-                }
-                return std::move(*context);
-            };
-    }
-#endif
-
-    return factories;
-}
 
 [[nodiscard]] Tina::EngineConfig createEngineConfig(const SampleOptions& options)
 {
@@ -2551,8 +2329,14 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    DeviceCapture capture{};
-    auto host = Tina::EngineHost::Create(createEngineConfig(*options), createFactories(capture));
+    Tina::Sample2D::DeviceCapture capture{};
+    Tina::Desktop::CreateEngineOptions desktopOptions{};
+    desktopOptions.wrapWindowSurfaceRenderDevice =
+        [&capture](std::unique_ptr<Tina::Render::IRenderDevice> device)
+            -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
+            return Tina::Sample2D::wrapCapturingRenderDevice(std::move(device), capture);
+        };
+    auto host = Tina::Desktop::CreateEngine(createEngineConfig(*options), std::move(desktopOptions));
     if (!host)
     {
         writeError(host.error());
