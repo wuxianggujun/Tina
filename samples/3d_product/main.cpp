@@ -57,14 +57,18 @@ using Tina::Core::u64;
 
 inline constexpr u64 DefaultFrameCount = 300;
 inline constexpr u32 DefaultFrameDelayMilliseconds = 0;
-// 3D-001: two product meshKeys (1 and 2); key 1 no longer means "only cube fixture".
-inline constexpr u32 ProductMeshSlotCount = 2;
+// Product meshKeys start at 1; key 1 is no longer "only cube fixture".
+// Cap matches sample renderSceneCapacities.mesh3DBatchCapacity.
+inline constexpr u32 MaxProductMeshSlots = 8;
 inline constexpr u32 FirstProductMeshKey = 1;
 inline constexpr u32 FirstProductMaterialKey = 1;
 
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
+    // Empty → in-memory two-mesh fixture. Non-empty → cook external .gltf/.glb path.
+    std::string gltfPath{};
+    bool help = false;
 };
 
 struct LifecycleCounters final {
@@ -113,47 +117,11 @@ struct Product3DResources final {
     std::filesystem::path catalogRoot{};
     Tina::Asset::CookedAssetFile prefabFile{};
     Tina::Core::AssetId prefabId{};
-    std::array<ProductMeshSlot, ProductMeshSlotCount> meshes{};
+    std::array<ProductMeshSlot, MaxProductMeshSlots> meshes{};
     u32 meshSlotCount = 0;
+    bool externalGltf = false;
+    std::string gltfSourcePath{};
 };
-
-// Fixed product AssetIds: mesh0 < mat0 < mesh1 < mat1 so Prefab (mesh,mat)×N dep stream
-// is also strictly AssetId-sorted (required by cooked/manifest validation).
-[[nodiscard]] Tina::Core::AssetId::Bytes mesh0IdBytes() noexcept
-{
-    Tina::Core::AssetId::Bytes bytes{};
-    bytes[0] = static_cast<std::byte>(0x3DU);
-    bytes[14] = static_cast<std::byte>(0x00U);
-    bytes[15] = static_cast<std::byte>(0x10U);
-    return bytes;
-}
-
-[[nodiscard]] Tina::Core::AssetId::Bytes material0IdBytes() noexcept
-{
-    Tina::Core::AssetId::Bytes bytes{};
-    bytes[0] = static_cast<std::byte>(0x3DU);
-    bytes[14] = static_cast<std::byte>(0x00U);
-    bytes[15] = static_cast<std::byte>(0x20U);
-    return bytes;
-}
-
-[[nodiscard]] Tina::Core::AssetId::Bytes mesh1IdBytes() noexcept
-{
-    Tina::Core::AssetId::Bytes bytes{};
-    bytes[0] = static_cast<std::byte>(0x3DU);
-    bytes[14] = static_cast<std::byte>(0x00U);
-    bytes[15] = static_cast<std::byte>(0x30U);
-    return bytes;
-}
-
-[[nodiscard]] Tina::Core::AssetId::Bytes material1IdBytes() noexcept
-{
-    Tina::Core::AssetId::Bytes bytes{};
-    bytes[0] = static_cast<std::byte>(0x3DU);
-    bytes[14] = static_cast<std::byte>(0x00U);
-    bytes[15] = static_cast<std::byte>(0x40U);
-    return bytes;
-}
 
 [[nodiscard]] Tina::Core::AssetId::Bytes prefabIdBytes() noexcept
 {
@@ -282,7 +250,41 @@ void writeError(const Tina::Core::Error& error)
     writeJsonString(std::cerr, errorCodeName(error.code));
     std::cerr << ",\"message\":";
     writeJsonString(std::cerr, error.message);
+    if (!error.context.empty())
+    {
+        std::cerr << ",\"context\":[";
+        for (std::size_t index = 0; index < error.context.size(); ++index)
+        {
+            if (index != 0)
+            {
+                std::cerr << ',';
+            }
+            std::cerr << "{\"operation\":";
+            writeJsonString(std::cerr, error.context[index].operation);
+            std::cerr << ",\"detail\":";
+            writeJsonString(std::cerr, error.context[index].detail);
+            std::cerr << '}';
+        }
+        std::cerr << ']';
+    }
     std::cerr << "}\n";
+}
+
+void printUsage()
+{
+    std::cerr
+        << "tina_sample_3d [options]\n"
+        << "  Product 3D gate: glTF/GLB cook -> Catalog -> GPU mesh/material bind -> Prefab/Scene/bgfx.\n"
+        << "\n"
+        << "  --frames=N              exit after N frames (default " << DefaultFrameCount << ")\n"
+        << "  --frame-delay-ms=N      sleep N ms per frame (default 0)\n"
+        << "  --gltf=<path>           cook external .gltf/.glb from disk (omit = built-in two-mesh fixture)\n"
+        << "  --gltf <path>           same as --gltf=<path>\n"
+        << "  --help, -h              print this help\n"
+        << "\n"
+        << "External path is opt-in. Runtime never parses glTF; only the cooker (cgltf) does.\n"
+        << "Unsupported glTF features (multi-primitive mesh, Draco, skin, morph, ...) fail with\n"
+        << "structured JSON on stderr (status=error, code, message, optional context).\n";
 }
 
 template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text, Value& value) noexcept
@@ -295,13 +297,20 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
 {
     constexpr std::string_view FramesPrefix = "--frames=";
     constexpr std::string_view DelayPrefix = "--frame-delay-ms=";
+    constexpr std::string_view GltfPrefix = "--gltf=";
     SampleOptions options;
     bool hasFrames = false;
     bool hasDelay = false;
+    bool hasGltf = false;
 
     for (int index = 1; index < argumentCount; ++index)
     {
         const std::string_view argument{arguments[index]};
+        if (argument == "--help" || argument == "-h")
+        {
+            options.help = true;
+            return options;
+        }
         if (argument.starts_with(FramesPrefix))
         {
             if (hasFrames || !parseUnsigned(argument.substr(FramesPrefix.size()), options.targetFrameCount) ||
@@ -321,6 +330,34 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             }
             hasDelay = true;
         }
+        else if (argument.starts_with(GltfPrefix))
+        {
+            const std::string_view path = argument.substr(GltfPrefix.size());
+            if (hasGltf || path.empty())
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--gltf must appear once with a non-empty path");
+            }
+            options.gltfPath.assign(path);
+            hasGltf = true;
+        }
+        else if (argument == "--gltf")
+        {
+            if (hasGltf || index + 1 >= argumentCount)
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--gltf must appear once with a non-empty path");
+            }
+            ++index;
+            const std::string_view path{arguments[index]};
+            if (path.empty())
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--gltf must appear once with a non-empty path");
+            }
+            options.gltfPath.assign(path);
+            hasGltf = true;
+        }
         else
         {
             Tina::Core::Error error{Tina::Core::CoreErrorCode::InvalidArgument, "Unsupported command-line argument"};
@@ -336,45 +373,109 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     return path.string();
 }
 
-[[nodiscard]] Tina::Core::Status prepareCookedProductAssets(Product3DResources& resources,
-                                                            LifecycleCounters& counters)
+// Stable product AssetIds for slot i: mesh at 0x10+2i, material at 0x11+2i (mesh < mat).
+// Prefab at 0xF0. Order keeps Prefab (mesh,mat)×N deps strictly AssetId-sorted.
+// Built-in fixture slots 0/1 match historical 0x10/0x11 and 0x12/0x13 (not the old 0x10/0x20/0x30/0x40
+// layout); only ordering constraints matter for catalog validation.
+[[nodiscard]] Tina::Core::AssetId productMeshIdForSlot(u32 slot) noexcept
 {
-    resources.workRoot = std::filesystem::temp_directory_path() / "tina_sample_3d_gltf";
-    resources.catalogRoot = resources.workRoot / "catalog";
-    std::error_code ec;
-    std::filesystem::remove_all(resources.workRoot, ec);
-    std::filesystem::create_directories(resources.workRoot, ec);
+    Tina::Core::AssetId::Bytes bytes{};
+    bytes[0] = static_cast<std::byte>(0x3DU);
+    bytes[14] = static_cast<std::byte>(0x00U);
+    bytes[15] = static_cast<std::byte>(0x10U + slot * 2U);
+    return *Tina::Core::AssetId::fromBytes(bytes);
+}
 
+[[nodiscard]] Tina::Core::AssetId productMaterialIdForSlot(u32 slot) noexcept
+{
+    Tina::Core::AssetId::Bytes bytes{};
+    bytes[0] = static_cast<std::byte>(0x3DU);
+    bytes[14] = static_cast<std::byte>(0x00U);
+    bytes[15] = static_cast<std::byte>(0x11U + slot * 2U);
+    return *Tina::Core::AssetId::fromBytes(bytes);
+}
+
+[[nodiscard]] Tina::Core::Status writeBuiltInGltfFixture(const std::filesystem::path& workRoot,
+                                                        std::filesystem::path& outGltfPath)
+{
     {
         const auto png = productTinyRedPng();
-        std::ofstream out(resources.workRoot / "tex.png", std::ios::binary);
+        std::ofstream out(workRoot / "tex.png", std::ios::binary);
         if (!out.good())
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Io, "failed to write temporary texture fixture");
         }
         out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
     }
-    const auto gltfPath = resources.workRoot / "product_two_mesh.gltf";
+    outGltfPath = workRoot / "product_two_mesh.gltf";
     {
-        std::ofstream out(gltfPath, std::ios::binary);
+        std::ofstream out(outGltfPath, std::ios::binary);
         if (!out.good())
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Io, "failed to write temporary glTF fixture");
         }
         out << productTwoMeshGltfJson();
     }
+    return Tina::Core::success();
+}
 
-    // GltfCookIds only pins mesh0/mat0/prefab; mesh1/mat1 are path-derived. After cook,
-    // remap AssetIds on the request so Prefab deps sort as mesh0 < mat0 < mesh1 < mat1.
+[[nodiscard]] Tina::Core::Status prepareCookedProductAssets(Product3DResources& resources,
+                                                            LifecycleCounters& counters,
+                                                            const SampleOptions& options)
+{
+    resources.workRoot = std::filesystem::temp_directory_path() / "tina_sample_3d_gltf";
+    resources.catalogRoot = resources.workRoot / "catalog";
+    resources.externalGltf = !options.gltfPath.empty();
+    resources.gltfSourcePath = options.gltfPath;
+    std::error_code ec;
+    std::filesystem::remove_all(resources.workRoot, ec);
+    std::filesystem::create_directories(resources.workRoot, ec);
+
+    std::filesystem::path gltfPath;
+    if (resources.externalGltf)
+    {
+        gltfPath = std::filesystem::path{options.gltfPath};
+        if (!std::filesystem::exists(gltfPath, ec) || ec)
+        {
+            Tina::Core::Error error{Tina::Core::CoreErrorCode::NotFound, "external glTF/GLB file not found"};
+            error.addContext("prepareCookedProductAssets", options.gltfPath);
+            return Tina::Core::failure(std::move(error));
+        }
+        const auto extension = gltfPath.extension().string();
+        const bool gltfExt = extension == ".gltf" || extension == ".GLTF";
+        const bool glbExt = extension == ".glb" || extension == ".GLB";
+        if (!gltfExt && !glbExt)
+        {
+            Tina::Core::Error error{Tina::Core::CoreErrorCode::InvalidArgument,
+                                    "external model path must end with .gltf or .glb"};
+            error.addContext("prepareCookedProductAssets", options.gltfPath);
+            return Tina::Core::failure(std::move(error));
+        }
+    }
+    else
+    {
+        if (auto status = writeBuiltInGltfFixture(resources.workRoot, gltfPath); !status)
+        {
+            return status;
+        }
+    }
+
+    // Cook via GltfCook (cgltf PRIVATE). Unsupported features fail with structured Asset errors.
     auto request = Tina::Asset::cookGltfFileToCatalogRequest(toUtf8(gltfPath), Tina::Asset::GltfCookIds{});
     if (!request)
     {
-        return Tina::Core::failure(std::move(request.error()));
+        Tina::Core::Error error = std::move(request.error());
+        error.addContext("cookGltfFileToCatalogRequest", toUtf8(gltfPath));
+        if (resources.externalGltf)
+        {
+            error.addContext("externalGltf", options.gltfPath);
+        }
+        return Tina::Core::failure(std::move(error));
     }
     counters.gltfCooked = true;
 
-    std::array<Tina::Core::AssetId, ProductMeshSlotCount> cookedMeshIds{};
-    std::array<Tina::Core::AssetId, ProductMeshSlotCount> cookedMaterialIds{};
+    std::array<Tina::Core::AssetId, MaxProductMeshSlots> cookedMeshIds{};
+    std::array<Tina::Core::AssetId, MaxProductMeshSlots> cookedMaterialIds{};
     u32 meshIdCount = 0;
     u32 materialIdCount = 0;
     Tina::Core::AssetId cookedPrefabId{};
@@ -382,19 +483,23 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     {
         if (asset.assetKind == Tina::AssetFormat::AssetKind::StaticMesh)
         {
-            if (meshIdCount >= ProductMeshSlotCount)
+            if (meshIdCount >= MaxProductMeshSlots)
             {
-                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                           "glTF cook produced more StaticMesh assets than product slots");
+                Tina::Core::Error error{Tina::Core::CoreErrorCode::CapacityExceeded,
+                                        "glTF cook produced more StaticMesh assets than product slot cap"};
+                error.addContext("maxProductMeshSlots", std::to_string(MaxProductMeshSlots));
+                return Tina::Core::failure(std::move(error));
             }
             cookedMeshIds[meshIdCount++] = asset.assetId;
         }
         else if (asset.assetKind == Tina::AssetFormat::AssetKind::Material)
         {
-            if (materialIdCount >= ProductMeshSlotCount)
+            if (materialIdCount >= MaxProductMeshSlots)
             {
-                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                           "glTF cook produced more Material assets than product slots");
+                Tina::Core::Error error{Tina::Core::CoreErrorCode::CapacityExceeded,
+                                        "glTF cook produced more Material assets than product slot cap"};
+                error.addContext("maxProductMeshSlots", std::to_string(MaxProductMeshSlots));
+                return Tina::Core::failure(std::move(error));
             }
             cookedMaterialIds[materialIdCount++] = asset.assetId;
         }
@@ -403,24 +508,38 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             cookedPrefabId = asset.assetId;
         }
     }
-    if (meshIdCount != ProductMeshSlotCount || materialIdCount != ProductMeshSlotCount || !cookedPrefabId)
+    if (meshIdCount == 0 || materialIdCount == 0 || !cookedPrefabId)
     {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                   "glTF multi-mesh cook did not yield two meshes, two materials, and one prefab");
+                                   "glTF cook did not yield at least one mesh, one material, and one prefab");
+    }
+    if (meshIdCount != materialIdCount)
+    {
+        Tina::Core::Error error{Tina::Core::CoreErrorCode::Internal,
+                                "glTF cook mesh/material count mismatch"};
+        error.addContext("meshCount", std::to_string(meshIdCount));
+        error.addContext("materialCount", std::to_string(materialIdCount));
+        return Tina::Core::failure(std::move(error));
+    }
+    // Built-in fixture is the multi-mesh product gate (exactly two meshes).
+    if (!resources.externalGltf && meshIdCount != 2U)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "built-in fixture must cook exactly two meshes");
     }
 
-    const std::array productMeshIds{
-        *Tina::Core::AssetId::fromBytes(mesh0IdBytes()),
-        *Tina::Core::AssetId::fromBytes(mesh1IdBytes()),
-    };
-    const std::array productMaterialIds{
-        *Tina::Core::AssetId::fromBytes(material0IdBytes()),
-        *Tina::Core::AssetId::fromBytes(material1IdBytes()),
-    };
+    const u32 slotCount = meshIdCount;
+    std::array<Tina::Core::AssetId, MaxProductMeshSlots> productMeshIds{};
+    std::array<Tina::Core::AssetId, MaxProductMeshSlots> productMaterialIds{};
+    for (u32 slot = 0; slot < slotCount; ++slot)
+    {
+        productMeshIds[slot] = productMeshIdForSlot(slot);
+        productMaterialIds[slot] = productMaterialIdForSlot(slot);
+    }
     resources.prefabId = *Tina::Core::AssetId::fromBytes(prefabIdBytes());
 
     const auto rewriteId = [&](Tina::Core::AssetId id) -> Tina::Core::AssetId {
-        for (u32 slot = 0; slot < ProductMeshSlotCount; ++slot)
+        for (u32 slot = 0; slot < slotCount; ++slot)
         {
             if (id == cookedMeshIds[slot])
             {
@@ -449,17 +568,20 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
 
     if (auto status = Tina::Asset::cookAndPublishCatalogPackage(toUtf8(resources.catalogRoot), *request); !status)
     {
-        return status;
+        Tina::Core::Error error = std::move(status.error());
+        error.addContext("cookAndPublishCatalogPackage", toUtf8(resources.catalogRoot));
+        return Tina::Core::failure(std::move(error));
     }
     ++counters.catalogCooked;
 
+    const u32 maxCatalogEntries = 8U + slotCount * 4U;
     Tina::Asset::CatalogPackageOpenConfig openConfig{
         .manifest =
             Tina::Asset::CatalogFileLoadConfig{
                 .catalog =
                     Tina::Asset::CatalogConfig{
-                        .maxEntries = 16,
-                        .maxDependencies = 16,
+                        .maxEntries = maxCatalogEntries,
+                        .maxDependencies = maxCatalogEntries,
                         .maxDependenciesPerAsset = 4,
                         .memoryResource = &resources.memory,
                     },
@@ -478,7 +600,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         return Tina::Core::failure(std::move(catalog.error()));
     }
 
-    for (u32 slot = 0; slot < ProductMeshSlotCount; ++slot)
+    for (u32 slot = 0; slot < slotCount; ++slot)
     {
         ProductMeshSlot& productMesh = resources.meshes[slot];
         productMesh.meshId = productMeshIds[slot];
@@ -524,29 +646,34 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             .blue = material->baseColorB,
             .alpha = material->baseColorA,
         };
-        if (!material->hasBaseColorTexture || productMesh.materialFile.header().dependencyCount == 0)
+        // Built-in fixture requires baseColorTexture. External models may be untextured
+        // (Opaque3D falls back to 1×1 white when materialKey has no texture binding).
+        if (material->hasBaseColorTexture && productMesh.materialFile.header().dependencyCount > 0)
+        {
+            auto textureDep = productMesh.materialFile.dependency(0);
+            if (!textureDep || textureDep->expectedKind != Tina::AssetFormat::AssetKind::Texture2D)
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "product material texture dependency is not Texture2D");
+            }
+            productMesh.textureId = textureDep->assetId;
+            auto textureAsset = Tina::Asset::loadCookedAssetFromCatalog(
+                toUtf8(resources.catalogRoot), *catalog, productMesh.textureId,
+                Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
+            if (!textureAsset)
+            {
+                return Tina::Core::failure(std::move(textureAsset.error()));
+            }
+            productMesh.textureFile = std::move(*textureAsset);
+        }
+        else if (!resources.externalGltf)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "product material missing baseColorTexture dependency");
         }
-        auto textureDep = productMesh.materialFile.dependency(0);
-        if (!textureDep || textureDep->expectedKind != Tina::AssetFormat::AssetKind::Texture2D)
-        {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "product material texture dependency is not Texture2D");
-        }
-        productMesh.textureId = textureDep->assetId;
-        auto textureAsset = Tina::Asset::loadCookedAssetFromCatalog(
-            toUtf8(resources.catalogRoot), *catalog, productMesh.textureId,
-            Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
-        if (!textureAsset)
-        {
-            return Tina::Core::failure(std::move(textureAsset.error()));
-        }
-        productMesh.textureFile = std::move(*textureAsset);
         ++counters.materialsLoaded;
     }
-    resources.meshSlotCount = ProductMeshSlotCount;
+    resources.meshSlotCount = slotCount;
 
     auto prefabAsset = Tina::Asset::loadCookedAssetFromCatalog(
         toUtf8(resources.catalogRoot), *catalog, resources.prefabId,
@@ -562,7 +689,11 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         return Tina::Core::failure(std::move(prefab.error()));
     }
     counters.prefabNodes = prefab->nodes.size();
-    if (counters.prefabNodes < ProductMeshSlotCount)
+    if (counters.prefabNodes == 0)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "cooked Prefab has no nodes");
+    }
+    if (!resources.externalGltf && counters.prefabNodes < 2U)
     {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "cooked Prefab must contain at least two meshed nodes");
@@ -582,9 +713,9 @@ class Product3DState final : public Tina::IGameState {
     {
         ++counters_->stateEnters;
         auto* device = capture_->get();
-        if (device == nullptr || resources_->meshSlotCount != ProductMeshSlotCount)
+        if (device == nullptr || resources_->meshSlotCount == 0)
         {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "render device or multi-mesh slots missing");
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "render device or product mesh slots missing");
         }
 
         for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
@@ -608,27 +739,27 @@ class Product3DState final : public Tina::IGameState {
             productMesh.meshUploaded = true;
             ++counters_->meshesUploaded;
 
-            if (!productMesh.textureFile)
+            if (productMesh.textureFile)
             {
-                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                           "cooked Texture2D missing for product material slot");
+                auto texture = Tina::Asset::uploadTexture2DFromCooked(*device, productMesh.textureFile);
+                if (!texture)
+                {
+                    return Tina::Core::failure(std::move(texture.error()));
+                }
+                if (auto status = device->setMesh3DMaterialTextureBinding(productMesh.materialKey, *texture); !status)
+                {
+                    (void)device->destroyTexture2D(*texture);
+                    return status;
+                }
+                productMesh.gpuTexture = *texture;
+                productMesh.textureUploaded = true;
+                ++counters_->texturesUploaded;
             }
-            auto texture = Tina::Asset::uploadTexture2DFromCooked(*device, productMesh.textureFile);
-            if (!texture)
-            {
-                return Tina::Core::failure(std::move(texture.error()));
-            }
-            if (auto status = device->setMesh3DMaterialTextureBinding(productMesh.materialKey, *texture); !status)
-            {
-                (void)device->destroyTexture2D(*texture);
-                return status;
-            }
-            productMesh.gpuTexture = *texture;
-            productMesh.textureUploaded = true;
-            ++counters_->texturesUploaded;
         }
         counters_->meshBound = true;
-        counters_->materialTextureBound = counters_->texturesUploaded == resources_->meshSlotCount;
+        // Built-in fixture binds one texture per mesh; external may omit textures.
+        counters_->materialTextureBound =
+            resources_->externalGltf ? true : (counters_->texturesUploaded == resources_->meshSlotCount);
 
         auto worldResult = Tina::Scene::World::Create(Tina::Scene::WorldConfig{32});
         if (!worldResult)
@@ -638,8 +769,14 @@ class Product3DState final : public Tina::IGameState {
         world_.emplace(std::move(*worldResult));
 
         Tina::Scene::LocalTransform cameraLocal{};
-        // Pull back so both nodes (origin and x=2) stay in frame.
-        cameraLocal.position = {1.0F, 0.45F, 5.5F};
+        // Pull back for built-in dual nodes (origin + x=2); scale slightly for larger external bounds.
+        float maxRadius = 1.75F;
+        for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
+        {
+            maxRadius = (std::max)(maxRadius, resources_->meshes[slot].meshBoundsRadius);
+        }
+        const float cameraZ = (std::max)(5.5F, maxRadius * 3.5F);
+        cameraLocal.position = {1.0F, 0.45F, cameraZ};
         auto cameraEntity = world_->createEntity(cameraLocal);
         if (!cameraEntity)
         {
@@ -726,7 +863,12 @@ class Product3DState final : public Tina::IGameState {
         prefabEntities_ = std::move(*instances);
         counters_->prefabInstances = prefabEntities_.size();
         counters_->prefabInstantiated = true;
-        if (counters_->prefabInstances < ProductMeshSlotCount)
+        if (counters_->prefabInstances == 0)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "prefab instantiate produced no product instances");
+        }
+        if (!resources_->externalGltf && counters_->prefabInstances < 2U)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "prefab instantiate produced fewer than two product instances");
@@ -948,10 +1090,15 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 2;
     }
     const SampleOptions options = *optionsResult;
+    if (options.help)
+    {
+        printUsage();
+        return 0;
+    }
 
     LifecycleCounters counters;
     Product3DResources resources;
-    if (auto status = prepareCookedProductAssets(resources, counters); !status)
+    if (auto status = prepareCookedProductAssets(resources, counters, options); !status)
     {
         writeError(status.error());
         return 1;
@@ -986,16 +1133,18 @@ class Product3DApplication final : public Tina::IGameApplication {
         writeError(runResult.error());
         return 1;
     }
+    const u32 expectedMeshes = resources.meshSlotCount;
+    const bool multiMesh = expectedMeshes >= 2U;
+    const bool texturesOk =
+        resources.externalGltf ? true : (counters.texturesUploaded == expectedMeshes);
     if (*runResult != Tina::RunExitReason::GameRequestedExitAfterCurrentFrame ||
         counters.frameUpdates != options.targetFrameCount ||
         counters.renderExtractions != options.targetFrameCount || counters.stateEnters != 1 ||
         counters.stateExits != 1 || counters.applicationShutdowns != 1 || counters.uiRootsCreated != 1 ||
         counters.uiPanelsCreated != 2 || counters.uiRootsReleased != 1 ||
-        counters.meshesUploaded != ProductMeshSlotCount || counters.materialsLoaded != ProductMeshSlotCount ||
-        counters.texturesUploaded != ProductMeshSlotCount || !counters.meshBound || !counters.materialTextureBound ||
-        counters.catalogCooked != 1 || !counters.gltfCooked || !counters.prefabInstantiated ||
-        counters.prefabNodes < ProductMeshSlotCount || counters.prefabInstances < ProductMeshSlotCount ||
-        !ledgerBalanced)
+        counters.meshesUploaded != expectedMeshes || counters.materialsLoaded != expectedMeshes || !texturesOk ||
+        !counters.meshBound || !counters.materialTextureBound || counters.catalogCooked != 1 || !counters.gltfCooked ||
+        !counters.prefabInstantiated || counters.prefabNodes == 0 || counters.prefabInstances == 0 || !ledgerBalanced)
     {
         std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_3d\","
                      "\"message\":\"lifecycle counters did not match\","
@@ -1010,21 +1159,45 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"prefabNodes\":" << counters.prefabNodes
                   << ",\"prefabInstances\":" << counters.prefabInstances
                   << ",\"catalogCooked\":" << counters.catalogCooked
+                  << ",\"meshSlotCount\":" << expectedMeshes
+                  << ",\"externalGltf\":" << (resources.externalGltf ? "true" : "false")
                   << ",\"ledgerBalanced\":" << (ledgerBalanced ? "true" : "false") << "}\n";
         return 1;
     }
 
     std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"frames\":" << counters.frameUpdates
               << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
-                 "\"prefabInstantiated\":true,\"sceneExtract\":true,\"multiMesh\":true,\"materialTextureBound\":true,"
-                 "\"texturesUploaded\":"
+                 "\"prefabInstantiated\":true,\"sceneExtract\":true,\"multiMesh\":"
+              << (multiMesh ? "true" : "false") << ",\"materialTextureBound\":"
+              << (counters.materialTextureBound ? "true" : "false") << ",\"texturesUploaded\":"
               << counters.texturesUploaded << ",\"meshesUploaded\":" << counters.meshesUploaded
               << ",\"materialsLoaded\":" << counters.materialsLoaded << ",\"prefabNodes\":" << counters.prefabNodes
-              << ",\"prefabInstances\":" << counters.prefabInstances
-              << ",\"meshKeys\":[" << FirstProductMeshKey << "," << (FirstProductMeshKey + 1U) << "]"
-              << ",\"materialKeys\":[" << FirstProductMaterialKey << "," << (FirstProductMaterialKey + 1U) << "]"
-              << ",\"instanceBatchesPerFrame\":" << ProductMeshSlotCount
-              << ",\"catalogCooked\":" << counters.catalogCooked
+              << ",\"prefabInstances\":" << counters.prefabInstances << ",\"meshSlotCount\":" << expectedMeshes
+              << ",\"externalGltf\":" << (resources.externalGltf ? "true" : "false");
+    if (resources.externalGltf)
+    {
+        std::cout << ",\"gltfPath\":";
+        writeJsonString(std::cout, resources.gltfSourcePath);
+    }
+    std::cout << ",\"meshKeys\":[";
+    for (u32 slot = 0; slot < expectedMeshes; ++slot)
+    {
+        if (slot != 0)
+        {
+            std::cout << ',';
+        }
+        std::cout << (FirstProductMeshKey + slot);
+    }
+    std::cout << "],\"materialKeys\":[";
+    for (u32 slot = 0; slot < expectedMeshes; ++slot)
+    {
+        if (slot != 0)
+        {
+            std::cout << ',';
+        }
+        std::cout << (FirstProductMaterialKey + slot);
+    }
+    std::cout << "],\"instanceBatchesPerFrame\":" << expectedMeshes << ",\"catalogCooked\":" << counters.catalogCooked
               << ",\"stateExits\":" << counters.stateExits << ",\"uiPanelsPerFrame\":2,\"uiRootsReleased\":"
               << counters.uiRootsReleased << ",\"applicationShutdowns\":" << counters.applicationShutdowns
               << ",\"engineHostDestroyed\":true,\"renderResourceLedgerBalanced\":true}\n";
