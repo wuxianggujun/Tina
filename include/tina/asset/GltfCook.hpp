@@ -12,11 +12,13 @@ namespace Tina::Asset {
 // Supported:
 // - glTF 2.0 JSON or GLB via cgltf_parse_file
 // - every primitive: TRIANGLES with POSITION(float3) + optional NORMAL/TEXCOORD_0
-// - multi-mesh files produce one StaticMesh + one Material per mesh index
+// - multi-mesh files produce StaticMesh + Material assets (multi-prim SPLIT below)
 // - multi-primitive meshes: SPLIT (not merge) — one StaticMesh + Material per prim;
 //   Prefab expands the referencing node into a transform parent + identity child nodes
 //   (fits Prefab 1 mesh/1 material per node and preserves per-prim materials)
-// - baseColorTexture (PNG/JPEG via stb_image) → Texture2D cook + Material dep (M11-E11)
+// - pbrMetallicRoughness: baseColorFactor, metallicFactor, roughnessFactor,
+//   baseColorTexture / metallicRoughnessTexture (PNG/JPEG → Texture2D deps)
+// - optional normalTexture → Texture2D dependency (cooked data; GPU PBR separate)
 // - scene nodes → Prefab deps bind each node's mesh/material AssetIds
 // Output is a CatalogCookRequest ready for cookCatalogPackage / publish.
 //

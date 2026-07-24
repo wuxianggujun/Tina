@@ -14,6 +14,7 @@
 #include <tina/asset_format/Texture2DPayload.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -94,6 +95,8 @@ struct CookedMeshPieces final {
     float baseG = 1.0F;
     float baseB = 1.0F;
     float baseA = 1.0F;
+    float metallicFactor = 1.0F;
+    float roughnessFactor = 1.0F;
     bool doubleSided = false;
 };
 
@@ -208,13 +211,19 @@ struct CookedMeshPieces final {
         .materialSlot = 0,
     };
 
-    if (prim.material != nullptr && prim.material->has_pbr_metallic_roughness)
+    if (prim.material != nullptr)
     {
-        out.baseR = prim.material->pbr_metallic_roughness.base_color_factor[0];
-        out.baseG = prim.material->pbr_metallic_roughness.base_color_factor[1];
-        out.baseB = prim.material->pbr_metallic_roughness.base_color_factor[2];
-        out.baseA = prim.material->pbr_metallic_roughness.base_color_factor[3];
         out.doubleSided = prim.material->double_sided != 0;
+        if (prim.material->has_pbr_metallic_roughness)
+        {
+            const cgltf_pbr_metallic_roughness& pbr = prim.material->pbr_metallic_roughness;
+            out.baseR = pbr.base_color_factor[0];
+            out.baseG = pbr.base_color_factor[1];
+            out.baseB = pbr.base_color_factor[2];
+            out.baseA = pbr.base_color_factor[3];
+            out.metallicFactor = pbr.metallic_factor;
+            out.roughnessFactor = pbr.roughness_factor;
+        }
     }
     return out;
 }
@@ -403,18 +412,36 @@ inline constexpr std::uint64_t kMaxGltfExternalFileBytes = 64ULL * 1024ULL * 102
     return std::pair<int, int>{width, height};
 }
 
+[[nodiscard]] const cgltf_image* textureImage(const cgltf_texture* texture) noexcept
+{
+    return texture != nullptr ? texture->image : nullptr;
+}
+
 [[nodiscard]] const cgltf_image* baseColorImage(const cgltf_material* material) noexcept
 {
     if (material == nullptr || !material->has_pbr_metallic_roughness)
     {
         return nullptr;
     }
-    const cgltf_texture* texture = material->pbr_metallic_roughness.base_color_texture.texture;
-    if (texture == nullptr)
+    return textureImage(material->pbr_metallic_roughness.base_color_texture.texture);
+}
+
+[[nodiscard]] const cgltf_image* metallicRoughnessImage(const cgltf_material* material) noexcept
+{
+    if (material == nullptr || !material->has_pbr_metallic_roughness)
     {
         return nullptr;
     }
-    return texture->image;
+    return textureImage(material->pbr_metallic_roughness.metallic_roughness_texture.texture);
+}
+
+[[nodiscard]] const cgltf_image* normalImage(const cgltf_material* material) noexcept
+{
+    if (material == nullptr)
+    {
+        return nullptr;
+    }
+    return textureImage(material->normal_texture.texture);
 }
 
 } // namespace
@@ -466,6 +493,8 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
         Core::AssetId meshId{};
         Core::AssetId materialId{};
         Core::AssetId baseColorTextureId{};
+        Core::AssetId metallicRoughnessTextureId{};
+        Core::AssetId normalTextureId{};
         std::vector<std::byte> meshPayload{};
         std::vector<std::byte> materialPayload{};
     };
@@ -488,6 +517,41 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
     Core::u32 nextTextureIndex = 0;
     // Sequential slot across all prims: mesh at 2*slot, material at 2*slot+1 (AssetId-sorted deps).
     Core::u32 nextPrimSlot = 0;
+
+    auto ensureTextureId = [&](const cgltf_image* image) -> Core::Result<Core::AssetId> {
+        if (image == nullptr)
+        {
+            return Core::AssetId{};
+        }
+        const auto existing = imageToTextureId.find(image);
+        if (existing != imageToTextureId.end())
+        {
+            return existing->second;
+        }
+        std::vector<std::byte> rgba;
+        auto dims = decodeImageRgba8(data, image, gltfFilePath, rgba);
+        if (!dims)
+        {
+            return Core::failure(std::move(dims.error()));
+        }
+        const Core::AssetId textureId = deriveIndexedId(gltfUtf8Path, 0x74, nextTextureIndex++);
+        auto texPayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
+            .width = static_cast<Core::u16>(dims->first),
+            .height = static_cast<Core::u16>(dims->second),
+            .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
+            .pixels = rgba,
+        });
+        if (!texPayload)
+        {
+            return Core::failure(std::move(texPayload.error()));
+        }
+        imageToTextureId.emplace(image, textureId);
+        textures.push_back(TextureEntry{
+            .textureId = textureId,
+            .payload = std::move(*texPayload),
+        });
+        return textureId;
+    };
 
     for (cgltf_size meshIndex = 0; meshIndex < data->meshes_count; ++meshIndex)
     {
@@ -549,41 +613,24 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
                 .vertices = pieces->vertices,
                 .indices = pieces->indices,
             };
-            Core::AssetId baseColorTextureId{};
-            if (const cgltf_image* image = baseColorImage(prim.material); image != nullptr)
+            const cgltf_material* material = prim.material;
+            auto baseColorTextureId = ensureTextureId(baseColorImage(material));
+            if (!baseColorTextureId)
             {
-                const auto existing = imageToTextureId.find(image);
-                if (existing != imageToTextureId.end())
-                {
-                    baseColorTextureId = existing->second;
-                }
-                else
-                {
-                    std::vector<std::byte> rgba;
-                    auto dims = decodeImageRgba8(data, image, gltfFilePath, rgba);
-                    if (!dims)
-                    {
-                        cgltf_free(data);
-                        return Core::failure(std::move(dims.error()));
-                    }
-                    baseColorTextureId = deriveIndexedId(gltfUtf8Path, 0x74, nextTextureIndex++);
-                    auto texPayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
-                        .width = static_cast<Core::u16>(dims->first),
-                        .height = static_cast<Core::u16>(dims->second),
-                        .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
-                        .pixels = rgba,
-                    });
-                    if (!texPayload)
-                    {
-                        cgltf_free(data);
-                        return Core::failure(std::move(texPayload.error()));
-                    }
-                    imageToTextureId.emplace(image, baseColorTextureId);
-                    textures.push_back(TextureEntry{
-                        .textureId = baseColorTextureId,
-                        .payload = std::move(*texPayload),
-                    });
-                }
+                cgltf_free(data);
+                return Core::failure(std::move(baseColorTextureId.error()));
+            }
+            auto metallicRoughnessTextureId = ensureTextureId(metallicRoughnessImage(material));
+            if (!metallicRoughnessTextureId)
+            {
+                cgltf_free(data);
+                return Core::failure(std::move(metallicRoughnessTextureId.error()));
+            }
+            auto normalTextureId = ensureTextureId(normalImage(material));
+            if (!normalTextureId)
+            {
+                cgltf_free(data);
+                return Core::failure(std::move(normalTextureId.error()));
             }
 
             AssetFormat::MaterialPayloadDesc materialDesc{
@@ -592,9 +639,13 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
                 .baseColorG = pieces->baseG,
                 .baseColorB = pieces->baseB,
                 .baseColorA = pieces->baseA,
+                .metallicFactor = pieces->metallicFactor,
+                .roughnessFactor = pieces->roughnessFactor,
                 .doubleSided = pieces->doubleSided,
                 .alphaMode = AssetFormat::MaterialAlphaMode::Opaque,
-                .baseColorTextureId = baseColorTextureId,
+                .baseColorTextureId = *baseColorTextureId,
+                .metallicRoughnessTextureId = *metallicRoughnessTextureId,
+                .normalTextureId = *normalTextureId,
             };
 
             auto meshPayload = AssetFormat::writeStaticMeshPayloadBytes(meshDesc);
@@ -613,7 +664,9 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             meshes.push_back(MeshEntry{
                 .meshId = meshId,
                 .materialId = materialId,
-                .baseColorTextureId = baseColorTextureId,
+                .baseColorTextureId = *baseColorTextureId,
+                .metallicRoughnessTextureId = *metallicRoughnessTextureId,
+                .normalTextureId = *normalTextureId,
                 .meshPayload = std::move(*meshPayload),
                 .materialPayload = std::move(*materialPayload),
             });
@@ -760,13 +813,19 @@ Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(std::string_view g
             .assetTypeVersion = AssetFormat::MaterialWire::SchemaVersion,
             .payload = std::move(entry.materialPayload),
         };
-        if (static_cast<bool>(entry.baseColorTextureId))
+        // Flag order: baseColor, metallicRoughness, normal (matches MaterialPayload flags).
+        const std::array textureDeps{entry.baseColorTextureId, entry.metallicRoughnessTextureId,
+                                     entry.normalTextureId};
+        for (const Core::AssetId textureId : textureDeps)
         {
-            materialSpec.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
-                .assetId = entry.baseColorTextureId,
-                .expectedKind = AssetFormat::AssetKind::Texture2D,
-                .flags = AssetFormat::DependencyFlags::Required,
-            });
+            if (static_cast<bool>(textureId))
+            {
+                materialSpec.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
+                    .assetId = textureId,
+                    .expectedKind = AssetFormat::AssetKind::Texture2D,
+                    .flags = AssetFormat::DependencyFlags::Required,
+                });
+            }
         }
         request.assets.push_back(std::move(materialSpec));
     }

@@ -36,7 +36,7 @@ Catalog package
 | 身份与摘要 | 128-bit `AssetId` 与 `ContentHash` 强类型分离；XXH3-128 v1 校验 payload；非密码学签名 |
 | Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验 |
 | Package | 确定性 object path、metadata/full 校验、load plan、依赖序批量加载、失败不发布部分批 |
-| Cooker | recipe、writer、staging 后原子发布；glTF Cooker 支持 multi-mesh 和 relative-file/bufferView baseColorTexture cook |
+| Cooker | recipe、writer、staging 后原子发布；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook，以及 Material v2 PBR factors |
 | Registry | generation `AssetHandle`、move-only `AssetLease`、显式容量与注入 PMR |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 逻辑状态 | Null `UploadTicket`、ReadyCpu→UploadQueued→ReadyGpu、取消与 retirement ledger |
@@ -100,9 +100,11 @@ mesh 产品上传使用 `RenderDevice` typed upload 和 key binding，尚未与�
 产品消费闭环，不能把它们列为已完成资源类型。FreeType 字体仍通过显式 `TINA_UI_FONT_PATH`/fixture
 接入，详见 [UI](ui.md)。
 
-StaticMesh v1 为 P3N3UV2 + UInt16 index；Material v1 为 Opaque `UnlitBaseColor`，可表达可选
-Texture2D dependency；Prefab 保存 node hierarchy 与 Mesh/Material AssetId。glTF importer 的实际限制见
-[3D 产品架构](game-3d.md)。
+StaticMesh v1 为 P3N3UV2 + UInt16 index；Material v2（40B）为 Opaque `UnlitBaseColor`，携带
+`baseColor` RGBA、`metallicFactor`/`roughnessFactor`，以及可选 Texture2D dependency 标志
+（baseColor / metallicRoughness / normal，AssetId 在 Cooked deps 中按 flag 顺序）；Prefab 保存 node
+hierarchy 与 Mesh/Material AssetId。运行时产品仍只 bind/sample baseColor（Unlit）；GPU PBR 采样属
+`RENDER-001`。glTF importer 的实际限制见 [3D 产品架构](game-3d.md)。
 
 ## 文件与安全边界
 

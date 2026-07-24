@@ -10,20 +10,32 @@
 
 namespace Tina::AssetFormat {
 
-// Material cooked payload schema v1 (little-endian, after CookedAsset header/deps).
-// M11-E4/E5: UnlitBaseColor solid factor; optional Texture2D is a cooked dependency
-// (not embedded in payload), same pattern as Sprite→Texture2D.
-// Layout (24B):
-//   u16 schemaVersion (=1)
+// Material cooked payload schema v2 (little-endian, after CookedAsset header/deps).
+// Opaque UnlitBaseColor product path (runtime still samples baseColor only).
+// PBR metallic/roughness factors + optional MR/normal Texture2D deps are cooked
+// data for RENDER-001; GPU PBR sampling is a separate branch.
+// Layout (40B):
+//   u16 schemaVersion (=2)
 //   u16 materialModel  (1 = UnlitBaseColor)
 //   f32 baseColorR, G, B, A   // linear RGBA
+//   f32 metallicFactor        // glTF pbrMetallicRoughness; default 1
+//   f32 roughnessFactor       // glTF pbrMetallicRoughness; default 1
 //   u8  doubleSided           (0/1)
 //   u8  alphaMode             (1 = Opaque)
-//   u16 flags                 (bit0 = hasBaseColorTexture dependency)
+//   u16 flags
+//     bit0 = hasBaseColorTexture dependency
+//     bit1 = hasMetallicRoughnessTexture dependency
+//     bit2 = hasNormalTexture dependency
+// Texture AssetIds live in CookedAsset dependencies (required Texture2D), in flag
+// order: baseColor, metallicRoughness, normal.
 namespace MaterialWire {
-inline constexpr Core::u16 SchemaVersion = 1;
-inline constexpr Core::u32 HeaderBytes = 24;
+inline constexpr Core::u16 SchemaVersion = 2;
+inline constexpr Core::u32 HeaderBytes = 40;
 inline constexpr Core::u16 FlagHasBaseColorTexture = 1U << 0U;
+inline constexpr Core::u16 FlagHasMetallicRoughnessTexture = 1U << 1U;
+inline constexpr Core::u16 FlagHasNormalTexture = 1U << 2U;
+inline constexpr Core::u16 KnownFlags = FlagHasBaseColorTexture | FlagHasMetallicRoughnessTexture |
+                                        FlagHasNormalTexture;
 } // namespace MaterialWire
 
 enum class MaterialModel : Core::u16 {
@@ -42,10 +54,14 @@ struct MaterialPayloadDesc final {
     float baseColorG = 1.0F;
     float baseColorB = 1.0F;
     float baseColorA = 1.0F;
+    float metallicFactor = 1.0F;
+    float roughnessFactor = 1.0F;
     bool doubleSided = false;
     MaterialAlphaMode alphaMode = MaterialAlphaMode::Opaque;
-    // Optional; when set, written as required Texture2D dependency (M11-E5).
+    // Optional; when set, written as required Texture2D dependency (flag order).
     Core::AssetId baseColorTextureId{};
+    Core::AssetId metallicRoughnessTextureId{};
+    Core::AssetId normalTextureId{};
 };
 
 struct MaterialPayloadView final {
@@ -55,9 +71,13 @@ struct MaterialPayloadView final {
     float baseColorG = 0.0F;
     float baseColorB = 0.0F;
     float baseColorA = 0.0F;
+    float metallicFactor = 0.0F;
+    float roughnessFactor = 0.0F;
     bool doubleSided = false;
     MaterialAlphaMode alphaMode = MaterialAlphaMode::Invalid;
-    bool hasBaseColorTexture = false; // payload flag; resolve texture via CookedAsset deps
+    bool hasBaseColorTexture = false;          // resolve via CookedAsset deps
+    bool hasMetallicRoughnessTexture = false;  // resolve via CookedAsset deps
+    bool hasNormalTexture = false;             // resolve via CookedAsset deps
 
     [[nodiscard]] bool empty() const noexcept
     {
@@ -69,8 +89,8 @@ struct MaterialPayloadView final {
 
 [[nodiscard]] Core::Result<MaterialPayloadView> parseMaterialPayload(std::span<const std::byte> payload);
 
-// Convenience: full cooked Material asset. Optional Texture2D dependency when
-// baseColorTextureId is set.
+// Convenience: full cooked Material asset. Optional Texture2D dependencies when
+// texture AssetIds are set (baseColor, metallicRoughness, normal).
 [[nodiscard]] Core::Result<std::vector<std::byte>>
 writeCookedMaterialAsset(Core::AssetId assetId, const MaterialPayloadDesc& desc,
                          TargetPlatform platform = TargetPlatform::WindowsX64);

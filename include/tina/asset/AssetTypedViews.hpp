@@ -40,7 +40,7 @@ parseAudioClipFromCooked(const CookedAssetFile& file);
 [[nodiscard]] Core::Result<AssetFormat::StaticMeshPayloadView>
 parseStaticMeshFromCooked(const CookedAssetFile& file);
 
-// M11-E4: Material cooked payload accessor (UnlitBaseColor factor).
+// Material cooked payload accessor (UnlitBaseColor + cooked PBR factors/texture flags).
 [[nodiscard]] Core::Result<AssetFormat::MaterialPayloadView>
 parseMaterialFromCooked(const CookedAssetFile& file);
 

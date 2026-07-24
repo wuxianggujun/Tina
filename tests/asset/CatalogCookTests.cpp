@@ -574,11 +574,16 @@ TEST(CatalogCookTests, MaterialUnlitRecipe)
     auto material = parseMaterialFromCooked(*asset);
     ASSERT_TRUE(material.has_value()) << material.error().message;
     EXPECT_EQ(material->model, AssetFormat::MaterialModel::UnlitBaseColor);
+    EXPECT_EQ(material->schemaVersion, AssetFormat::MaterialWire::SchemaVersion);
     EXPECT_FLOAT_EQ(material->baseColorR, 0.95F);
     EXPECT_FLOAT_EQ(material->baseColorG, 0.24F);
     EXPECT_FLOAT_EQ(material->baseColorB, 0.30F);
     EXPECT_FLOAT_EQ(material->baseColorA, 1.0F);
+    EXPECT_FLOAT_EQ(material->metallicFactor, 1.0F);
+    EXPECT_FLOAT_EQ(material->roughnessFactor, 1.0F);
     EXPECT_FALSE(material->hasBaseColorTexture);
+    EXPECT_FALSE(material->hasMetallicRoughnessTexture);
+    EXPECT_FALSE(material->hasNormalTexture);
 
     std::filesystem::remove_all(root, ec);
 }
