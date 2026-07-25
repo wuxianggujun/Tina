@@ -365,7 +365,7 @@ createProducer(usize rawTransitionCapacity = 128,
 [[nodiscard]] std::unique_ptr<ActionMapper> createPointerMapper()
 {
     const std::array bindings{
-        DigitalActionBinding{
+        InputActionBinding{
             .input =
                 PrimaryPointerButtonBinding{
                     .pointer = Platform::PrimaryPointerId,
@@ -375,14 +375,16 @@ createProducer(usize rawTransitionCapacity = 128,
             .domain = InputActionDomain::Simulation,
         },
     };
-    auto mapper = ActionMapper::Create(bindings);
+    auto mapper = ActionMapper::Create(InputActionMapConfig{
+        .bindings = std::vector<InputActionBinding>(bindings.begin(), bindings.end()),
+    });
     EXPECT_TRUE(mapper.has_value()) << (mapper ? "" : mapper.error().message);
     return mapper ? std::move(*mapper) : nullptr;
 }
 
-[[nodiscard]] const DigitalActionTransition* digital(const SimulationActionTransition& transition)
+[[nodiscard]] const InputActionTransition* digital(const SimulationActionTransition& transition)
 {
-    return std::get_if<DigitalActionTransition>(&transition);
+    return std::get_if<InputActionTransition>(&transition);
 }
 
 class UIInputRouteProducerTest : public testing::Test {
@@ -1454,7 +1456,7 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
     auto suppressed = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(suppressed.has_value()) << (suppressed ? "" : suppressed.error().message);
     EXPECT_TRUE(suppressed->transitions.empty());
-    EXPECT_FALSE(suppressed->isHeld(PointerAction));
+    EXPECT_FALSE(suppressed->isActive(PointerAction));
 
     auto stillHeld = buildFrame(*builder, window,
                                 {
@@ -1511,8 +1513,8 @@ TEST_F(UIInputRouteProducerTest, ButtonDefaultDownSuppressesGameplayUntilTrueUpT
     ASSERT_TRUE(restored.has_value()) << (restored ? "" : restored.error().message);
     ASSERT_EQ(restored->transitions.size(), 1U);
     ASSERT_NE(digital(restored->transitions[0]), nullptr);
-    EXPECT_EQ(digital(restored->transitions[0])->kind, DigitalActionTransitionKind::Pressed);
-    EXPECT_TRUE(restored->isHeld(PointerAction));
+    EXPECT_EQ(digital(restored->transitions[0])->kind, InputActionTransitionKind::Started);
+    EXPECT_TRUE(restored->isActive(PointerAction));
 }
 
 TEST_F(UIInputRouteProducerTest, HeldPointerClaimCancelsObservedGameplayUntilTrueUp)
@@ -1550,7 +1552,7 @@ TEST_F(UIInputRouteProducerTest, HeldPointerClaimCancelsObservedGameplayUntilTru
     ASSERT_TRUE(pressed.has_value()) << (pressed ? "" : pressed.error().message);
     ASSERT_EQ(pressed->transitions.size(), 1U);
     ASSERT_NE(digital(pressed->transitions[0]), nullptr);
-    EXPECT_EQ(digital(pressed->transitions[0])->kind, DigitalActionTransitionKind::Pressed);
+    EXPECT_EQ(digital(pressed->transitions[0])->kind, InputActionTransitionKind::Started);
     ASSERT_TRUE(mapper->completeSimulationTick(0).has_value());
 
     auto claimed = buildFrame(*builder, window,
@@ -1573,9 +1575,9 @@ TEST_F(UIInputRouteProducerTest, HeldPointerClaimCancelsObservedGameplayUntilTru
     ASSERT_TRUE(cancelled.has_value()) << (cancelled ? "" : cancelled.error().message);
     ASSERT_EQ(cancelled->transitions.size(), 1U);
     ASSERT_NE(digital(cancelled->transitions[0]), nullptr);
-    EXPECT_EQ(digital(cancelled->transitions[0])->kind, DigitalActionTransitionKind::Cancelled);
+    EXPECT_EQ(digital(cancelled->transitions[0])->kind, InputActionTransitionKind::Cancelled);
     EXPECT_FALSE(digital(cancelled->transitions[0])->worldPointerSample.has_value());
-    EXPECT_FALSE(cancelled->isHeld(PointerAction));
+    EXPECT_FALSE(cancelled->isActive(PointerAction));
     ASSERT_TRUE(mapper->completeSimulationTick(1).has_value());
 
     auto up = buildFrame(*builder, window,
@@ -1596,7 +1598,7 @@ TEST_F(UIInputRouteProducerTest, HeldPointerClaimCancelsObservedGameplayUntilTru
     ASSERT_TRUE(releasedSuppression.has_value())
         << (releasedSuppression ? "" : releasedSuppression.error().message);
     EXPECT_TRUE(releasedSuppression->transitions.empty());
-    EXPECT_FALSE(releasedSuppression->isHeld(PointerAction));
+    EXPECT_FALSE(releasedSuppression->isActive(PointerAction));
 }
 
 TEST_F(UIInputRouteProducerTest, PointerClaimInterceptsInitialDownWithoutTransitionConsumption)
@@ -1639,7 +1641,7 @@ TEST_F(UIInputRouteProducerTest, PointerClaimInterceptsInitialDownWithoutTransit
     auto suppressed = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(suppressed.has_value()) << (suppressed ? "" : suppressed.error().message);
     EXPECT_TRUE(suppressed->transitions.empty());
-    EXPECT_FALSE(suppressed->isHeld(PointerAction));
+    EXPECT_FALSE(suppressed->isActive(PointerAction));
 }
 
 // Product-level M10-A39 gate: HUD Button default action (same surface as
@@ -1692,7 +1694,7 @@ TEST_F(UIInputRouteProducerTest, ProductButtonClickDoesNotPenetrateWorldPointerA
     auto suppressedDown = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(suppressedDown.has_value()) << (suppressedDown ? "" : suppressedDown.error().message);
     EXPECT_TRUE(suppressedDown->transitions.empty());
-    EXPECT_FALSE(suppressedDown->isHeld(PointerAction));
+    EXPECT_FALSE(suppressedDown->isActive(PointerAction));
     ASSERT_TRUE(mapper->completeSimulationTick(0).has_value());
 
     auto hitUp =
@@ -1714,7 +1716,7 @@ TEST_F(UIInputRouteProducerTest, ProductButtonClickDoesNotPenetrateWorldPointerA
     auto afterUp = mapper->simulationActionsForTick(1);
     ASSERT_TRUE(afterUp.has_value()) << (afterUp ? "" : afterUp.error().message);
     EXPECT_TRUE(afterUp->transitions.empty());
-    EXPECT_FALSE(afterUp->isHeld(PointerAction));
+    EXPECT_FALSE(afterUp->isActive(PointerAction));
     ASSERT_TRUE(mapper->completeSimulationTick(1).has_value());
 
     EXPECT_EQ(activationCount, 1U);
@@ -1747,8 +1749,8 @@ TEST_F(UIInputRouteProducerTest, ProductButtonClickDoesNotPenetrateWorldPointerA
     ASSERT_TRUE(worldPressed.has_value()) << (worldPressed ? "" : worldPressed.error().message);
     ASSERT_EQ(worldPressed->transitions.size(), 1U);
     ASSERT_NE(digital(worldPressed->transitions[0]), nullptr);
-    EXPECT_EQ(digital(worldPressed->transitions[0])->kind, DigitalActionTransitionKind::Pressed);
-    EXPECT_TRUE(worldPressed->isHeld(PointerAction));
+    EXPECT_EQ(digital(worldPressed->transitions[0])->kind, InputActionTransitionKind::Started);
+    EXPECT_TRUE(worldPressed->isActive(PointerAction));
     EXPECT_EQ(activationCount, 1U);
 }
 

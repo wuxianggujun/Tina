@@ -318,8 +318,17 @@ TEST(CatalogCookTests, InlineTilesetAndTileMapRecipe)
     recipe += " ";
     recipe.append(tilesetHex.data(), tilesetHex.size());
     recipe += " 2 2 1.0\n";
+    recipe += "tilelayer 10 1 visual\n";
+    recipe += "property role render\n";
     recipe += "row 1 2\n";
     recipe += "row 2 0\n";
+    recipe += "endlayer\n";
+    recipe += "objectlayer 20 1 gameplay\n";
+    recipe += "property domain gameplay\n";
+    recipe += "point 101 1 spawn 1 1\n";
+    recipe += "objectproperty 101 role player\n";
+    recipe += "endlayer\n";
+    recipe += "endtilemap\n";
 
     auto request = parseCatalogCookRecipe(recipe, ".");
     ASSERT_TRUE(request.has_value()) << request.error().message;
@@ -376,9 +385,91 @@ TEST(CatalogCookTests, InlineTilesetAndTileMapRecipe)
     ASSERT_TRUE(mapView.has_value()) << mapView.error().message;
     EXPECT_EQ(mapView->widthCells, 2U);
     EXPECT_EQ(mapView->heightCells, 2U);
-    EXPECT_EQ(*mapView->tileAt(0, 0), 1U);
-    EXPECT_EQ(*mapView->tileAt(1, 1), 0U);
+    ASSERT_TRUE(mapView->layerAt(0).has_value());
+    ASSERT_TRUE(mapView->layerAt(1).has_value());
+    EXPECT_EQ(mapView->layerAt(0)->stableLayerId, 10U);
+    EXPECT_EQ(mapView->layerAt(1)->stableLayerId, 20U);
+    const auto visual = mapView->findLayer(10);
+    ASSERT_TRUE(visual.has_value());
+    EXPECT_TRUE(visual->visible);
+    ASSERT_TRUE(visual->findProperty("role").has_value());
+    EXPECT_EQ(visual->findProperty("role")->value, "render");
+    EXPECT_EQ(*visual->tileAt(0, 0), 1U);
+    EXPECT_EQ(*visual->tileAt(1, 1), 0U);
+    const auto gameplay = mapView->findLayer(20);
+    ASSERT_TRUE(gameplay.has_value());
+    EXPECT_EQ(gameplay->objectCount, 1U);
+    const auto spawn = gameplay->findObject(101);
+    ASSERT_TRUE(spawn.has_value());
+    EXPECT_TRUE(spawn->visible);
+    ASSERT_TRUE(spawn->findProperty("role").has_value());
+    EXPECT_EQ(spawn->findProperty("role")->value, "player");
 
+    std::filesystem::remove_all(root, ec);
+}
+
+TEST(CatalogCookTests, TileMapRecipeRejectsLegacyRowsInvalidReferencesAndUnclosedBlocks)
+{
+    const auto tilesetId = *Core::AssetId::fromBytes(idBytes(5U));
+    const auto mapId = *Core::AssetId::fromBytes(idBytes(6U));
+    const auto tilesetHex = tilesetId.canonicalText();
+    const auto mapHex = mapId.canonicalText();
+
+    std::string header = "tilemap ";
+    header.append(mapHex.data(), mapHex.size());
+    header += " ";
+    header.append(tilesetHex.data(), tilesetHex.size());
+    header += " 1 1 1.0\n";
+
+    EXPECT_FALSE(parseCatalogCookRecipe(header + "row 1\nendtilemap\n", ".").has_value());
+    EXPECT_FALSE(parseCatalogCookRecipe(header + "tilelayer 10 1 visual\nrow 1\nendtilemap\n", ".")
+                     .has_value());
+    EXPECT_FALSE(parseCatalogCookRecipe(header + "tilelayer 10 1 visual\nrow 1\nendlayer\n", ".")
+                     .has_value());
+    EXPECT_FALSE(parseCatalogCookRecipe(
+                     header + "objectlayer 20 1 gameplay\nobjectproperty 999 role spawn\nendlayer\nendtilemap\n",
+                     ".")
+                     .has_value());
+    EXPECT_FALSE(parseCatalogCookRecipe(
+                     header + "objectlayer 20 1 gameplay\npoint 101 2 spawn 0 0\nendlayer\nendtilemap\n", ".")
+                     .has_value());
+    EXPECT_FALSE(parseCatalogCookRecipe(
+                     header +
+                         "tilelayer 10 1 visual\nrow 1\nendlayer\ntilelayer 10 1 collision\nrow 1\nendlayer\n"
+                         "endtilemap\n",
+                     ".")
+                     .has_value());
+}
+
+TEST(CatalogCookTests, InvalidTileReferenceDoesNotPublishPartialCatalog)
+{
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto tilesetId = *Core::AssetId::fromBytes(idBytes(5U));
+    const auto mapId = *Core::AssetId::fromBytes(idBytes(6U));
+    const auto textureHex = textureId.canonicalText();
+    const auto tilesetHex = tilesetId.canonicalText();
+    const auto mapHex = mapId.canonicalText();
+
+    std::string recipe = "texture2d ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += " 1 1 FFFFFFFF\ntileset ";
+    recipe.append(tilesetHex.data(), tilesetHex.size());
+    recipe += " ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += " 16 16\ntile 1 1 0 0 1 1\ntilemap ";
+    recipe.append(mapHex.data(), mapHex.size());
+    recipe += " ";
+    recipe.append(tilesetHex.data(), tilesetHex.size());
+    recipe += " 1 1 1.0\ntilelayer 10 1 visual\nrow 99\nendlayer\nendtilemap\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    const auto root = std::filesystem::temp_directory_path() / "tina_invalid_tilemap_no_partial_publish";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    auto published = cookAndPublishCatalogPackage(toUtf8(root), *request);
+    ASSERT_FALSE(published.has_value());
+    EXPECT_FALSE(std::filesystem::exists(root / "manifest.tmnft"));
     std::filesystem::remove_all(root, ec);
 }
 

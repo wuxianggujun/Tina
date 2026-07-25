@@ -16,9 +16,6 @@ Roadmap 只表达优先级窗口，不保存逐提交流水。可执行任务、
 
 | Backlog | 目标 | 为什么现在做 |
 | --- | --- | --- |
-| 2D-TILEMAP-LAYERS | TileMap 多层与对象层 | 让当前 TileMap/Catalog 路径承载真实关卡数据，而不破坏有序渲染、碰撞与资源契约 |
-| 2D-PHYSICS-EXPAND | shapes、sensors 与 joints | 在现有 backend-neutral Physics2D 边界上补齐可验证的交互能力 |
-| 2D-INPUT-ADV | analog action 与运行时 rebind | 使 ActionMapper 覆盖手柄/重绑定，同时保持 UI consume 不穿透 |
 
 
 
@@ -32,6 +29,7 @@ Now 的退出条件：当前 P1 条目均满足各自验收条件；受影响的
 | --- | --- |
 | UI-002 | 产品 HWND 自动接线 / Narrator 金标 / AT-SPI（映射 + HostBridge 已落地） |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
+| 2D-TILEMAP-STREAM | 基于已完成 schema v2/layer ID 契约做有界 chunk 加载、取消和卸载 |
 
 
 
@@ -42,7 +40,8 @@ Now 的退出条件：当前 P1 条目均满足各自验收条件；受影响的
 - 通用 Focus Scope、Modal、Pointer Capture；
 - ScrollView、虚拟 ListView、Dropdown、TreeView；
 - 多行 TextEdit、grapheme/shaping 与完整 IME 候选窗；
-- Asset 热重载与增量 Cooker。
+- Asset 热重载与增量 Cooker；
+- TileMap/Scene/动画 editor tooling、undo/redo 与 cook preview；
 
 Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语义和验收命令，不能只按功能名称开工。
 
@@ -59,6 +58,10 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | M11 | Physics2D、Audio/miniaudio、UI 设置/文本、StaticMesh/Material/Prefab/glTF 3D 产品路径 |
 | M12 | Legacy `Tina.exe`、旧横版 2D、旧 UI 产品图与 `src/vnext` 前缀删除 |
 | DOC-001 | README/架构/设计/构建/测试/任务职责重组完成，Backlog 成为未完成工作的唯一明细，一致性扫描通过 |
+| 2D-TILEMAP-LAYERS / N1 | TileMap schema v2 有序 tile/object layers、非零唯一稳定 ID、visibility/UTF-8 properties、point/rectangle；recipe 单一显式 block 语法；runtime render/chunk/collision 显式 layer ID；sample 消费 layer 30 的 object 101/102；发布前验证 Tileset dependency/localId |
+| 2D-PHYSICS-EXPAND / N2 | Body/Shape/Joint 独立 generation；Box/Circle/Capsule 与多 shape/body；sensor enter/exit；Distance joint；body 级联 retirement；TileMap bridge 与产品 sample 迁移；29/29 模块测试及 300 帧 sensor/joint 证据 |
+| RENDER-001-NLIGHT / N4 | Opaque3D lighting 收敛为唯一 `Mesh3DLightingDesc`，有界0..4 directional lights；Null/bgfx/shader/sample/test 同步；产品一次提交3灯 |
+| 2D-INPUT-ADV / N3 | Runtime 单一 unified binding 覆盖 digital/analog value、deadzone/scale、两种合成、多手柄、UI suppression 与 next-frame transactional rebind；本轮测试执行结果以最终验证记录为准 |
 
 “M12 Done”只表示产品删除完成，不表示 Linux、PBR、accessibility、benchmark 或整库 Legacy 字符串全部
 完成。剩余工作已经拆入 Backlog，不再继续扩写 M12 历史清单。
@@ -67,11 +70,11 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 
 | 门禁 | 当前结论 | 下一关闭点 |
 | --- | --- | --- |
-| 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002） | UI-003 多 DPI 矩阵 |
+| 2D product | Windows product-2d 同轮模块测试 + 300 帧已有证据（TEST-002）；TileMap v2 sample 使用 visual=10、hidden collision=20、gameplay objects=30；Physics 输出 sensor enter/exit 与 Distance joint ready；Advanced input 实现已完成，当前轮测试结果单独记录 | TileMap streaming/editor 与 UI-003 多 DPI 矩阵均为独立后续项 |
 | Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
 | UI product | Text/Glyph、设置控件、TextEdit、ProgressBar、RadioButton 均有结构化与 Windows 产品视觉证据 | UI-002、UI-003 |
-| 3D product | 双 mesh + baseColor/MR/normal 贴图采样、material factors、key/fill light 已有证据（3D-001/ASSET-001） | RENDER-001 的完整 PBR/IBL/shadow/pass scheduling |
-| Runtime stack/packet | stack/commands/policy 与 FramePin Null completion 首切片已落地 | 产品 sample 暂停演示；GPU fence 异步 completion |
-| Asset/Cooker | multi-mesh 产品 E2E、baseColor/MR/normal Texture2D cook、外部 URI 安全与产品纹理采样已完成 | 更完整资源炸弹矩阵、热重载与增量 Cooker |
+| 3D product | 双 mesh + baseColor/MR/normal 贴图采样、material factors、有界0..4 directional lights 已有证据（产品提交3灯） | RENDER-001 的完整 PBR/IBL/shadow/light component/pass scheduling |
+| Runtime stack/packet | stack/commands/policy 与 FramePin present-return CPU completion 已落地 | 产品 sample 暂停演示；Asset→GPU fence 异步 retirement |
+| Asset/Cooker | multi-mesh 产品 E2E、baseColor/MR/normal Texture2D cook、外部 URI 安全；TileMap v2 + required Tileset dependency/localId 发布前验证已完成 | 更完整资源炸弹矩阵、TileMap streaming/editor、热重载与增量 Cooker |
 | Audio | backend-neutral 与 miniaudio null-device 路径已有 Windows 证据 | Linux/product gate 复验 |
 | Legacy retirement | 产品源码/target 删除完成；vcpkg legacy feature 与 EASTL/compatibility 扫尾完成 | 仅保留 `TINA_BUILD_LEGACY=ON` FATAL 拒绝开关 |

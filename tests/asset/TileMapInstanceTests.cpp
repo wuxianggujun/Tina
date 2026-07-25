@@ -1,3 +1,4 @@
+#include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/TileMapInstance.hpp>
 #include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
@@ -11,6 +12,9 @@
 
 namespace Tina::Asset {
 namespace {
+
+inline constexpr AssetFormat::TileMapLayerId TileLayerId = 10;
+inline constexpr AssetFormat::TileMapLayerId ObjectLayerId = 20;
 
 [[nodiscard]] Core::AssetId::Bytes idBytes(Core::u8 seed)
 {
@@ -51,11 +55,36 @@ TEST(TileMapInstanceTests, CreateEditChunkRevisionAndSolidQuery)
 
     // 4x2 map: solid floor on y=0
     const std::array<Core::u16, 8> cells{1, 1, 1, 1, 0, 2, 0, 0};
+    const std::array objects{
+        AssetFormat::TileMapObjectDesc{
+            .stableObjectId = 100,
+            .kind = AssetFormat::TileMapObjectKind::Point,
+            .name = "spawn",
+            .x = 1.0f,
+            .y = 1.0f,
+        },
+    };
+    const std::array layers{
+        AssetFormat::TileMapLayerDesc{
+            .stableLayerId = TileLayerId,
+            .kind = AssetFormat::TileMapLayerKind::Tile,
+            .visible = true,
+            .name = "visual",
+            .tiles = cells,
+        },
+        AssetFormat::TileMapLayerDesc{
+            .stableLayerId = ObjectLayerId,
+            .kind = AssetFormat::TileMapLayerKind::Object,
+            .visible = true,
+            .name = "objects",
+            .objects = objects,
+        },
+    };
     auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
         .widthCells = 4,
         .heightCells = 2,
         .cellSizeMeters = 1.0f,
-        .tiles = cells,
+        .layers = layers,
         .tilesetId = tilesetId,
     });
     ASSERT_TRUE(mapBytes.has_value());
@@ -69,27 +98,55 @@ TEST(TileMapInstanceTests, CreateEditChunkRevisionAndSolidQuery)
     EXPECT_EQ(instance->heightCells(), 2U);
     EXPECT_EQ(instance->chunkCountX(), 2U);
     EXPECT_EQ(instance->chunkCountY(), 1U);
-    EXPECT_EQ(instance->tileIdAt(0, 0), 1U);
-    EXPECT_EQ(instance->tileIdAt(1, 1), 2U);
+    auto tile00 = instance->tileIdAt(TileLayerId, 0, 0);
+    auto tile11 = instance->tileIdAt(TileLayerId, 1, 1);
+    ASSERT_TRUE(tile00.has_value());
+    ASSERT_TRUE(tile11.has_value());
+    EXPECT_EQ(*tile00, 1U);
+    EXPECT_EQ(*tile11, 2U);
+    auto objectLayer = instance->layer(ObjectLayerId);
+    ASSERT_TRUE(objectLayer.has_value());
+    EXPECT_EQ(objectLayer->objectCount, 1U);
+    const auto spawn = objectLayer->objectAt(0);
+    ASSERT_TRUE(spawn.has_value());
+    EXPECT_EQ(spawn->name, "spawn");
 
-    const auto revBefore = instance->chunkRevision(0, 0);
-    ASSERT_TRUE(instance->setTile(0, 0, 2).has_value());
-    EXPECT_EQ(instance->tileIdAt(0, 0), 2U);
-    EXPECT_GT(instance->chunkRevision(0, 0), revBefore);
+    const auto revBefore = instance->chunkRevision(TileLayerId, 0, 0);
+    ASSERT_TRUE(revBefore.has_value());
+    ASSERT_TRUE(instance->setTile(TileLayerId, 0, 0, 2).has_value());
+    auto editedTile = instance->tileIdAt(TileLayerId, 0, 0);
+    auto editedRevision = instance->chunkRevision(TileLayerId, 0, 0);
+    ASSERT_TRUE(editedTile.has_value());
+    ASSERT_TRUE(editedRevision.has_value());
+    EXPECT_EQ(*editedTile, 2U);
+    EXPECT_GT(*editedRevision, *revBefore);
+    const auto editedLayerView = instance->layer(TileLayerId);
+    ASSERT_TRUE(editedLayerView.has_value());
+    ASSERT_TRUE(editedLayerView->tileAt(0, 0).has_value());
+    EXPECT_EQ(*editedLayerView->tileAt(0, 0), 2U);
     // Other chunk unchanged.
-    EXPECT_EQ(instance->chunkRevision(1, 0), 1U);
+    auto otherRevision = instance->chunkRevision(TileLayerId, 1, 0);
+    ASSERT_TRUE(otherRevision.has_value());
+    EXPECT_EQ(*otherRevision, 1U);
 
     std::pmr::vector<TileMapSolidHit> hits{&memory};
     // Query entire map: remaining solids at (1,0)(2,0)(3,0) — (0,0) no longer solid
-    auto count = instance->querySolidAabb(TileMapSolidQuery{.minX = 0.0f, .minY = 0.0f, .maxX = 4.0f, .maxY = 2.0f},
-                                          hits);
+    auto count = instance->querySolidAabb(
+        TileLayerId, TileMapSolidQuery{.minX = 0.0f, .minY = 0.0f, .maxX = 4.0f, .maxY = 2.0f}, hits);
     ASSERT_TRUE(count.has_value());
     EXPECT_EQ(*count, 3U);
     EXPECT_EQ(hits.size(), 3U);
 
     // Unknown tile id rejected.
-    auto bad = instance->setTile(0, 0, 99);
+    auto bad = instance->setTile(TileLayerId, 0, 0, 99);
     ASSERT_FALSE(bad.has_value());
+
+    auto objectAsTile = instance->tileIdAt(ObjectLayerId, 0, 0);
+    ASSERT_FALSE(objectAsTile.has_value());
+    EXPECT_EQ(objectAsTile.error().code, AssetErrorCode::TileMapLayerTypeMismatch);
+    auto missingLayer = instance->chunkRevision(999, 0, 0);
+    ASSERT_FALSE(missingLayer.has_value());
+    EXPECT_EQ(missingLayer.error().code, AssetErrorCode::TileMapLayerNotFound);
 }
 
 TEST(TileMapInstanceTests, RejectsUnknownCellInSourceMap)
@@ -103,8 +160,17 @@ TEST(TileMapInstanceTests, RejectsUnknownCellInSourceMap)
     ASSERT_TRUE(tileset.has_value());
 
     const std::array<Core::u16, 1> cells{9};
+    const std::array layers{
+        AssetFormat::TileMapLayerDesc{
+            .stableLayerId = TileLayerId,
+            .kind = AssetFormat::TileMapLayerKind::Tile,
+            .visible = true,
+            .name = "visual",
+            .tiles = cells,
+        },
+    };
     auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
-        .widthCells = 1, .heightCells = 1, .cellSizeMeters = 1.0f, .tiles = cells});
+        .widthCells = 1, .heightCells = 1, .cellSizeMeters = 1.0f, .layers = layers});
     auto map = AssetFormat::parseTileMapPayload(*mapBytes);
     ASSERT_TRUE(map.has_value());
 

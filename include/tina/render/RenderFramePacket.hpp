@@ -7,7 +7,8 @@
 #include <tina/render/RenderFrame.hpp>
 
 #include <array>
-#include <limits>
+#include <optional>
+#include <utility>
 
 namespace Tina::Render {
 
@@ -34,7 +35,10 @@ public:
 
     [[nodiscard]] State state() const noexcept { return m_state; }
     [[nodiscard]] Core::u64 frameIndex() const noexcept { return m_frameIndex; }
-    [[nodiscard]] SubmissionTicket ticket() const noexcept { return m_ticket; }
+    [[nodiscard]] Core::u64 submissionIndex() const noexcept
+    {
+        return m_ticket.has_value() ? m_ticket->submissionIndex() : 0;
+    }
     [[nodiscard]] Core::u32 pinCount() const noexcept override { return m_pinCount; }
 
     // Begin a new frame. Abandons any previous incomplete packet.
@@ -42,11 +46,15 @@ public:
     {
         if (m_state == State::Building || m_state == State::Submitted)
         {
-            (void)abandon();
+            if (auto status = abandon(); !status)
+            {
+                return status;
+            }
         }
         m_frameIndex = frameIndex;
         m_pinCount = 0;
-        m_ticket = {};
+        m_ticket.reset();
+        m_ledger = nullptr;
         m_state = State::Building;
         return Core::success();
     }
@@ -74,8 +82,9 @@ public:
         return Core::success();
     }
 
-    // Attach a Submitted submission ticket (Null ledger open). Packet must be Building.
-    [[nodiscard]] Core::Status attachSubmission(SubmissionTicket ticket) noexcept
+    // The ledger must outlive this packet while the ticket remains open.
+    [[nodiscard]] Core::Status attachSubmission(ISubmissionCompletionLedger& ledger,
+                                                SubmissionTicket&& ticket) noexcept
     {
         if (m_state != State::Building)
         {
@@ -86,14 +95,20 @@ public:
         {
             return Core::failure(RenderErrorCode::InvalidSubmissionTicket, "SubmissionTicket is not open");
         }
-        m_ticket = ticket;
+        if (!ticket.belongsTo(ledger))
+        {
+            return Core::failure(RenderErrorCode::InvalidSubmissionTicket,
+                                 "SubmissionTicket belongs to a different completion ledger");
+        }
+        m_ticket.emplace(std::move(ticket));
+        m_ledger = &ledger;
         m_state = State::Submitted;
         return Core::success();
     }
 
-    // Complete after present (or Null sync completion). Releases all pins and closes ticket via ledger.
-    // Ledger may be Null (present-sync) or FrameDeferred (Host completes after lag).
-    [[nodiscard]] Core::Status complete(ISubmissionCompletionLedger& ledger) noexcept
+    // Complete after present returns. Releases all CPU lifetime pins and closes the
+    // submission ticket. This is not a GPU-resource retirement signal.
+    [[nodiscard]] Core::Status complete() noexcept
     {
         if (m_state == State::Idle || m_state == State::Completed || m_state == State::Abandoned)
         {
@@ -101,84 +116,18 @@ public:
         }
         if (m_state == State::Submitted)
         {
-            if (auto status = ledger.complete(m_ticket); !status)
+            if (m_ledger == nullptr || !m_ticket.has_value())
+            {
+                return Core::failure(RenderErrorCode::InvalidSubmissionTicket,
+                                     "Submitted packet has no completion ledger or ticket");
+            }
+            if (auto status = m_ledger->complete(*m_ticket); !status)
             {
                 return status;
             }
         }
         releasePins();
         m_state = State::Completed;
-        return Core::success();
-    }
-
-    // FrameDeferred handoff: move pins + open ticket out; packet becomes Completed without
-    // releasing pins or closing the ledger ticket. Caller must later complete the ticket
-    // and release pins (next present lag or shutdown).
-    struct DeferredHandoff final {
-        SubmissionTicket ticket{};
-        std::array<FramePin, MaxPins> pins{};
-        Core::u32 pinCount = 0;
-        Core::u64 frameIndex = 0;
-        Core::u64 presentFrameToken = 0;
-    };
-
-    [[nodiscard]] Core::Result<DeferredHandoff> handOffDeferred(Core::u64 presentFrameToken) noexcept
-    {
-        if (m_state != State::Submitted)
-        {
-            return Core::failure(RenderErrorCode::InvalidSubmissionTicket,
-                                 "handOffDeferred requires Submitted packet");
-        }
-        DeferredHandoff handoff{};
-        handoff.ticket = m_ticket;
-        handoff.pinCount = m_pinCount;
-        handoff.frameIndex = m_frameIndex;
-        handoff.presentFrameToken = presentFrameToken;
-        for (Core::u32 i = 0; i < m_pinCount; ++i)
-        {
-            handoff.pins[i] = std::move(m_pins[i]);
-        }
-        m_pinCount = 0;
-        m_ticket = {};
-        m_state = State::Completed;
-        return handoff;
-    }
-
-    // Release pins from a previous handOffDeferred and close the ledger ticket.
-    [[nodiscard]] static Core::Status completeDeferred(ISubmissionCompletionLedger& ledger,
-                                                       DeferredHandoff& handoff) noexcept
-    {
-        if (handoff.ticket.hasValue())
-        {
-            if (auto status = ledger.complete(handoff.ticket); !status)
-            {
-                return status;
-            }
-        }
-        for (Core::u32 i = 0; i < handoff.pinCount; ++i)
-        {
-            handoff.pins[i].release();
-        }
-        handoff.pinCount = 0;
-        handoff.ticket = {};
-        handoff.presentFrameToken = 0;
-        return Core::success();
-    }
-
-    [[nodiscard]] static Core::Status abandonDeferred(ISubmissionCompletionLedger* ledger,
-                                                      DeferredHandoff& handoff) noexcept
-    {
-        if (handoff.ticket.hasValue() && ledger != nullptr)
-        {
-            (void)ledger->abandon(handoff.ticket);
-        }
-        for (Core::u32 i = 0; i < handoff.pinCount; ++i)
-        {
-            handoff.pins[i].release();
-        }
-        handoff.pinCount = 0;
-        handoff.ticket = {};
-        handoff.presentFrameToken = 0;
         return Core::success();
     }
 
@@ -200,15 +149,23 @@ public:
     }
 
     // Failure path: abandon in-flight ticket (if any) and release pins.
-    [[nodiscard]] Core::Status abandon(ISubmissionCompletionLedger* ledger = nullptr) noexcept
+    [[nodiscard]] Core::Status abandon() noexcept
     {
         if (m_state == State::Idle || m_state == State::Completed || m_state == State::Abandoned)
         {
             return Core::success();
         }
-        if (m_state == State::Submitted && ledger != nullptr)
+        if (m_state == State::Submitted)
         {
-            (void)ledger->abandon(m_ticket);
+            if (m_ledger == nullptr || !m_ticket.has_value())
+            {
+                return Core::failure(RenderErrorCode::InvalidSubmissionTicket,
+                                     "Submitted packet has no completion ledger or ticket");
+            }
+            if (auto status = m_ledger->abandon(*m_ticket); !status)
+            {
+                return status;
+            }
         }
         releasePins();
         m_state = State::Abandoned;
@@ -223,12 +180,14 @@ private:
             m_pins[i].release();
         }
         m_pinCount = 0;
-        m_ticket = {};
+        m_ticket.reset();
+        m_ledger = nullptr;
     }
 
     State m_state = State::Idle;
     Core::u64 m_frameIndex = 0;
-    SubmissionTicket m_ticket{};
+    std::optional<SubmissionTicket> m_ticket{};
+    ISubmissionCompletionLedger* m_ledger = nullptr;
     std::array<FramePin, MaxPins> m_pins{};
     Core::u32 m_pinCount = 0;
 };

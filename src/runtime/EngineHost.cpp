@@ -528,7 +528,7 @@ class EngineHostImplementation final {
           m_submissionCompletionLedger(submissionCompletionLedger != nullptr
                                            ? std::move(submissionCompletionLedger)
                                            : std::unique_ptr<Render::ISubmissionCompletionLedger>(
-                                                 std::make_unique<Render::NullSubmissionCompletionLedger>())),
+                                                  std::make_unique<Render::CpuSubmissionCompletionLedger>())),
           m_lastWindowSurface(std::move(initialWindowSurface))
 #if defined(TINA_HAS_UI_UIA)
           ,
@@ -913,7 +913,8 @@ class EngineHostImplementation final {
                     // Top alone may queue push/pop/replace; below never gets pendingCommands.
                     FrameUpdateContext ctx{frameTiming, actionsForState, exitAfterFrame,
                                            depthFromTop == 0 ? &m_pendingCommands : nullptr,
-                                           m_modules.audioEnginePtr()};
+                                           m_modules.audioEnginePtr(),
+                                           depthFromTop == 0 ? m_actionMapper.get() : nullptr};
                     return invokeResultBoundary("IGameState::updateFrame",
                                                 RuntimeErrorCode::GameCallbackThrewException,
                                                 [&] { return state.updateFrame(ctx); });
@@ -1063,15 +1064,15 @@ class EngineHostImplementation final {
                 }
             }
 
-            // RUNTIME-002: owning packet + injectable completion ledger around submit/present.
-            // Null = PresentSync; Desktop Bgfx = FrameDeferred (one present lag).
+            // RUNTIME-002: owning packet + injectable accounting ledger around submit/present.
+            // Pins cover CPU submission ownership only and release after present returns.
             if (auto packetBegin = m_renderFramePacket.beginFrame(frameIndex); !packetBegin)
             {
                 return failAfterStartupCommit(gameApplication, std::move(packetBegin.error()), frameIndex,
                                               simulationTick);
             }
             auto packetRollback = Core::makeScopeExit([this]() noexcept {
-                (void)m_renderFramePacket.abandon(m_submissionCompletionLedger.get());
+                (void)m_renderFramePacket.abandon();
             });
 
             // Surface pin: keep surface snapshot facts alive for this submission epoch.
@@ -1184,7 +1185,9 @@ class EngineHostImplementation final {
                     return failAfterStartupCommit(gameApplication, std::move(ticketResult.error()), frameIndex,
                                                   simulationTick);
                 }
-                if (auto attachStatus = m_renderFramePacket.attachSubmission(*ticketResult); !attachStatus)
+                if (auto attachStatus =
+                        m_renderFramePacket.attachSubmission(ledger, std::move(*ticketResult));
+                    !attachStatus)
                 {
                     (void)ledger.abandon(*ticketResult);
                     return failAfterStartupCommit(gameApplication, std::move(attachStatus.error()), frameIndex,
@@ -1200,45 +1203,13 @@ class EngineHostImplementation final {
                                                   simulationTick);
                 }
 
-                const Core::u64 presentToken =
-                    m_modules.renderDevice->lastPresentFrameToken().value_or(submitResult->submissionIndex);
-                if (auto* bgfxLedger =
-                        dynamic_cast<Render::BgfxSubmissionCompletionLedger*>(&ledger);
-                    bgfxLedger != nullptr)
+                // submitFrame() synchronously consumes every borrowed view. Once present()
+                // returns, Host can close the CPU submission ticket and release frame pins.
+                // GPU resource retirement remains backend-owned and is not represented here.
+                if (auto completeStatus = m_renderFramePacket.complete(); !completeStatus)
                 {
-                    bgfxLedger->notePresentReturned(submitResult->submissionIndex, presentToken);
-                }
-
-                if (ledger.completionMode() == Render::SubmissionCompletionMode::FrameDeferred)
-                {
-                    // Complete previous deferred handoff (one present lag), then park this frame.
-                    if (m_deferredSubmission.has_value())
-                    {
-                        if (auto status = Render::RenderFramePacket::completeDeferred(
-                                ledger, *m_deferredSubmission);
-                            !status)
-                        {
-                            return failAfterStartupCommit(gameApplication, std::move(status.error()),
-                                                          frameIndex, simulationTick);
-                        }
-                        m_deferredSubmission.reset();
-                    }
-                    auto handoff = m_renderFramePacket.handOffDeferred(presentToken);
-                    if (!handoff)
-                    {
-                        return failAfterStartupCommit(gameApplication, std::move(handoff.error()), frameIndex,
-                                                      simulationTick);
-                    }
-                    m_deferredSubmission = std::move(*handoff);
-                }
-                else
-                {
-                    // PresentSync: pins release after present returns.
-                    if (auto completeStatus = m_renderFramePacket.complete(ledger); !completeStatus)
-                    {
-                        return failAfterStartupCommit(gameApplication, std::move(completeStatus.error()),
-                                                      frameIndex, simulationTick);
-                    }
+                    return failAfterStartupCommit(gameApplication, std::move(completeStatus.error()),
+                                                  frameIndex, simulationTick);
                 }
                 packetRollback.release();
                 // Latch the presented Camera2D for next-frame world pointer picks.
@@ -1315,24 +1286,12 @@ class EngineHostImplementation final {
         return exitReason;
     }
 
-    void flushDeferredSubmission() noexcept
-    {
-        if (!m_deferredSubmission.has_value() || m_submissionCompletionLedger == nullptr)
-        {
-            m_deferredSubmission.reset();
-            return;
-        }
-        (void)Render::RenderFramePacket::completeDeferred(*m_submissionCompletionLedger, *m_deferredSubmission);
-        m_deferredSubmission.reset();
-    }
-
     void stopCommittedGame(IGameApplication& gameApplication, RunStopCause stopCause,
                            const Core::Error* runtimeFailure) noexcept
     {
         m_lifecycleState = LifecycleState::Stopping;
         m_pendingCommands.clearAll();
-        flushDeferredSubmission();
-        (void)m_renderFramePacket.abandon(m_submissionCompletionLedger.get());
+        (void)m_renderFramePacket.abandon();
         while (!m_gameStateStack.empty())
         {
             std::unique_ptr<IGameState> state = m_gameStateStack.popCommitted();
@@ -1478,10 +1437,9 @@ class EngineHostImplementation final {
     GameStateStack m_gameStateStack{};
     GameStatePendingCommands m_pendingCommands{};
     GameStatePolicy m_committedPolicy{};
-    Render::RenderFramePacket m_renderFramePacket{};
-    // Owned SPI: Null = PresentSync; Desktop Bgfx = FrameDeferred (one present lag).
+    // Owned CPU submission accounting SPI; completion is always present-return.
     std::unique_ptr<Render::ISubmissionCompletionLedger> m_submissionCompletionLedger{};
-    std::optional<Render::RenderFramePacket::DeferredHandoff> m_deferredSubmission{};
+    Render::RenderFramePacket m_renderFramePacket{};
     LifecycleState m_lifecycleState = LifecycleState::Ready;
     std::optional<Integration::WindowSurfaceSnapshot> m_lastWindowSurface;
 
@@ -1643,13 +1601,9 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         const InputActionMapperCapacityConfig mapperCapacities{
             .rawInputTransitionCapacity = ownedConfig.platformFrameCapacities.inputTransitionCapacity,
             .continuousControlClaimCapacity = InputActionMapperCapacityConfig::DefaultContinuousControlClaimCapacity,
-            .simulationActionTransitionCapacity =
-                ownedConfig.inputActions.capacities.simulationActionTransitionCapacity,
-            .frameActionTransitionCapacity = ownedConfig.inputActions.capacities.frameActionTransitionCapacity,
-            .digitalActionBindingCapacity = ownedConfig.inputActions.capacities.digitalActionBindingCapacity,
         };
-        auto actionMapperResult =
-            Runtime::Input::ActionMapper::Create(ownedConfig.inputActions.digitalBindings, mapperCapacities);
+        auto actionMapperResult = Runtime::Input::ActionMapper::Create(ownedConfig.inputActions,
+                                                                       mapperCapacities);
         if (!actionMapperResult)
         {
             auto error = std::move(actionMapperResult.error());
@@ -1895,8 +1849,8 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         }
         else
         {
-            // Headless/Null and any composition without an override: present-sync Null ledger.
-            submissionCompletionLedger = std::make_unique<Render::NullSubmissionCompletionLedger>();
+            // Every composition uses present-return CPU submission completion by contract.
+            submissionCompletionLedger = std::make_unique<Render::CpuSubmissionCompletionLedger>();
         }
 
         auto implementation = std::make_unique<Detail::EngineHostImplementation>(

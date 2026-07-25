@@ -3,6 +3,7 @@
 #include <tina/asset/AssetErrors.hpp>
 
 #include <new>
+#include <utility>
 
 namespace Tina::Asset {
 namespace {
@@ -28,7 +29,20 @@ Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const T
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "spriteKey must be non-zero");
     }
-    if (chunk.empty || chunk.widthCells == 0 || chunk.heightCells == 0)
+    if (chunk.layerId == 0)
+    {
+        return Core::failure(AssetErrorCode::TileMapLayerNotFound, "tile chunk has no selected layer");
+    }
+    auto layer = map.layer(chunk.layerId);
+    if (!layer)
+    {
+        return Core::failure(std::move(layer.error()));
+    }
+    if (layer->kind != AssetFormat::TileMapLayerKind::Tile)
+    {
+        return Core::failure(AssetErrorCode::TileMapLayerTypeMismatch, "tile chunk render requires tile layer");
+    }
+    if (!layer->visible || chunk.empty || chunk.widthCells == 0 || chunk.heightCells == 0)
     {
         out.clear();
         return Core::u32{0};
@@ -46,8 +60,12 @@ Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const T
             {
                 const Core::u32 cellX = chunk.originCellX + x;
                 const Core::u32 cellY = chunk.originCellY + y;
-                auto info = map.tileInfoAt(cellX, cellY);
-                if (!info || info->empty)
+                auto info = map.tileInfoAt(chunk.layerId, cellX, cellY);
+                if (!info)
+                {
+                    return Core::failure(std::move(info.error()));
+                }
+                if (!*info || (*info)->empty)
                 {
                     continue;
                 }
@@ -63,10 +81,10 @@ Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const T
                     .heightMeters = cell,
                     .scaleX = 1.0f,
                     .scaleY = 1.0f,
-                    .u0 = info->u0,
-                    .v0 = info->v0,
-                    .u1 = info->u1,
-                    .v1 = info->v1,
+                    .u0 = (*info)->u0,
+                    .v0 = (*info)->v0,
+                    .u1 = (*info)->u1,
+                    .v1 = (*info)->v1,
                     .sortingLayer = params.sortingLayer,
                     .orderInLayer = order++,
                     .red = params.red,
@@ -86,13 +104,13 @@ Core::Result<Core::u32> emitTileChunkSprites(const TileMapInstance& map, const T
     return static_cast<Core::u32>(out.size());
 }
 
-Core::Result<Core::u32> emitVisibleTileMapSprites(const TileMapInstance& map, const TileChunkCameraQuery& camera,
-                                                  const TileChunkSpriteEmitParams& params,
+Core::Result<Core::u32> emitVisibleTileMapSprites(const TileMapInstance& map, AssetFormat::TileMapLayerId layerId,
+                                                  const TileChunkCameraQuery& camera, const TileChunkSpriteEmitParams& params,
                                                   std::pmr::vector<Render::RenderSprite2DInput>& out)
 {
     out.clear();
     std::pmr::vector<TileChunkView> chunks{out.get_allocator()};
-    auto extracted = extractVisibleTileChunks(map, camera, chunks);
+    auto extracted = extractVisibleTileChunks(map, layerId, camera, chunks);
     if (!extracted)
     {
         return Core::failure(std::move(extracted.error()));

@@ -32,11 +32,12 @@ Core::Result<TileChunkDirtyCache> TileChunkDirtyCache::Create(TileChunkDirtyCach
     }
 }
 
-TileChunkDirtyCache::Entry* TileChunkDirtyCache::findEntry(Core::u32 chunkX, Core::u32 chunkY) noexcept
+TileChunkDirtyCache::Entry* TileChunkDirtyCache::findEntry(AssetFormat::TileMapLayerId layerId, Core::u32 chunkX,
+                                                           Core::u32 chunkY) noexcept
 {
     for (Entry& entry : m_entries)
     {
-        if (entry.occupied && entry.chunkX == chunkX && entry.chunkY == chunkY)
+        if (entry.occupied && entry.layerId == layerId && entry.chunkX == chunkX && entry.chunkY == chunkY)
         {
             return &entry;
         }
@@ -91,8 +92,12 @@ Core::Result<Core::u32> TileChunkDirtyCache::classifyVisible(std::span<const Til
         Core::u32 rebuildCount = 0;
         for (const TileChunkView& view : visible)
         {
+            if (view.layerId == 0)
+            {
+                return Core::failure(AssetErrorCode::TileMapLayerNotFound, "tile chunk view has no selected layer");
+            }
             ++m_visibleChunkObservations;
-            Entry* entry = findEntry(view.coord.chunkX, view.coord.chunkY);
+            Entry* entry = findEntry(view.layerId, view.coord.chunkX, view.coord.chunkY);
             if (entry != nullptr && entry->revision == view.revision)
             {
                 ++m_cacheHits;
@@ -111,6 +116,7 @@ Core::Result<Core::u32> TileChunkDirtyCache::classifyVisible(std::span<const Til
                 entry->chunkY = view.coord.chunkY;
             }
             entry->revision = view.revision;
+            entry->layerId = view.layerId;
             entry->lastFrame = m_framesSynced;
             ++m_rebuilds;
             ++rebuildCount;
@@ -124,6 +130,7 @@ Core::Result<Core::u32> TileChunkDirtyCache::classifyVisible(std::span<const Til
 }
 
 Core::Result<Core::u32> TileChunkDirtyCache::syncVisible(const TileMapInstance& map,
+                                                         AssetFormat::TileMapLayerId layerId,
                                                          const TileChunkCameraQuery& camera,
                                                          std::pmr::vector<TileChunkView>& rebuiltOut)
 {
@@ -138,7 +145,7 @@ Core::Result<Core::u32> TileChunkDirtyCache::syncVisible(const TileMapInstance& 
     try
     {
         std::pmr::vector<TileChunkView> visible{rebuiltOut.get_allocator()};
-        auto extracted = extractVisibleTileChunks(map, camera, visible);
+        auto extracted = extractVisibleTileChunks(map, layerId, camera, visible);
         if (!extracted)
         {
             return Core::failure(std::move(extracted.error()));

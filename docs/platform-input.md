@@ -10,7 +10,7 @@ GLFW、Win32、X11 或 Wayland 类型。
 | `tina_platform` | Window/Input POD、`PlatformFrameBuilder/View`、Headless backend、错误契约 |
 | `tina_platform_glfw` | GLFW NO_API 窗口、Keyboard/Pointer/Gamepad、UTF-8 text、WindowSurface lease |
 | `tina_window_surface_integration` | move-only native surface handoff，真实 native 类型仍在 PRIVATE adapter |
-| `tina_runtime` | lifecycle dispatch、UI route、ActionMapper、Simulation/Frame domain |
+| `tina_runtime` | lifecycle dispatch、UI route、唯一 ActionMapper、unified binding、Simulation/Frame domain 与运行时 rebind |
 
 ## PlatformFrame 契约
 
@@ -87,11 +87,36 @@ Gameplay Action，不能隐式替代 UI default-action policy。
 
 ## Action domain
 
-- Simulation binding 只在 fixed tick读取；0步帧保留 edge，多步追赶不重复消费；
-- Frame binding 只在 `updateFrame()` 读取；
-- 同一隐式 edge 不同时广播到两个 domain；
-- world pointer action 使用 last-presented Camera2D 锁存结果；viewport miss 为 `hit=false`，缺 Camera 为
-  结构化失败。
+- Runtime 只维护 `InputActionMapConfig::bindings` 一套模型。`InputActionBinding` 用稳定
+  `InputBindingId` 把 Key、Pointer Button、Gamepad Button 或 Gamepad Axis 映射到一个
+  `InputActionId`；Platform 不拥有第二套 Action mapper 或 snapshot。
+- Digital 与 analog 都产出浮点 `InputActionState::value` 及 Started/ValueChanged/Completed/Cancelled
+  transition。Digital source 的 active 值由 `scale` 决定；axis 先按 Signed/PositiveHalf/NegativeHalf/Trigger
+  归一化，再应用 gameplay `deadzone`、deadzone 外重映射和 `scale`。
+- 同一 Action/domain 的多个 source 使用 `SumClamped` 或 `StrongestMagnitude`。前者求和后 clamp 到
+  [-1, 1]，后者选择绝对值最大的 source，并以稳定 binding/source 顺序解决等幅值；所有已连接
+  Gamepad generation 都参与组合，不固定到 native slot。
+- UI consume 会压制对应 transition；digital/axis continuous claim 会取消既有 Gameplay source，并分别
+  保持 suppression 到真实 release 或 neutral/deadzone。UI route result 仍由 `Tina::UI` 拥有，Runtime
+  只消费其 borrowed view。
+- Simulation binding 只在 fixed tick 读取；0步帧保留 value transition，多步追赶不重复消费；Frame
+  binding 只在 `updateFrame()` 读取。同一隐式 transition 不同时广播到两个 domain。
+- world pointer action 在映射时使用 last-presented Camera2D 和 surface revision 固化
+  `WorldPointerSample`；viewport miss 为 `hit=false`，缺 Camera 为结构化失败。样本跨0步帧锁存，不会按
+  后续 Camera 或 resize 重算。
+
+## 运行时 rebind
+
+只有栈顶 State 的 `FrameUpdateContext::inputActionRebinding()` 可取得 phase-local 窄 facade；下层 State
+得到 null，游戏不能持有或替换 Runtime mapper owner。`begin()` 进入 `Capturing`，`commit()` 只把替换
+排入 `Queued`，并在下一次 Action mapping frame 开始时原子应用，因此当前 callback 的 snapshot 不会被
+中途改写。
+
+冲突策略是显式 `Reject` 或 `Swap`：Reject 返回冲突 binding 且保留 capture，Swap 在提交点交换 physical
+pattern。`cancel()` 同时允许取消 `Capturing` 和 `Queued` transaction。绑定到特定
+`GamepadId` generation 的 capture/queue 在设备断连，或 raw reset 后无法继续证明该 generation 存活时
+转为 `DeviceDisconnected`，不会迁移到重连后的新 generation。当前切片不包含完整输入设置 UI、binding
+持久化/云同步或第三方 input SDK。
 
 ## 验证
 

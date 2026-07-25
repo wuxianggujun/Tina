@@ -119,18 +119,18 @@ TEST(GameStatePolicyDispatchTest, GameplayInputBlockedForDepthUsesOverlayFlag)
     EXPECT_FALSE(stack.gameplayInputBlockedForDepth(1));
 }
 
-TEST(InputActionSnapshotTest, SuppressedSnapshotsReportNoHeldActions)
+TEST(InputActionSnapshotTest, SuppressedSnapshotsReportNoActiveActions)
 {
     const auto sim = SimulationActionSnapshot::suppressed(7);
     EXPECT_EQ(sim.targetSimulationTick, 7U);
     EXPECT_TRUE(sim.states.empty());
-    EXPECT_FALSE(sim.isHeld(InputActionId{1}));
-    EXPECT_FLOAT_EQ(sim.axis(InputActionId{1}), 0.0F);
+    EXPECT_FALSE(sim.isActive(InputActionId{1}));
+    EXPECT_FLOAT_EQ(sim.value(InputActionId{1}), 0.0F);
 
     const auto frame = FrameActionSnapshot::suppressed(9);
     EXPECT_EQ(frame.engineFrameIndex, 9U);
     EXPECT_TRUE(frame.states.empty());
-    EXPECT_FALSE(frame.isHeld(InputActionId{2}));
+    EXPECT_FALSE(frame.isActive(InputActionId{2}));
 }
 
 TEST(GameStatePolicyDispatchTest, CollectDispatchIndicesHonorsOverlayBlock)

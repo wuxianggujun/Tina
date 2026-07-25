@@ -21,6 +21,9 @@ inline constexpr Core::ErrorCode BackendFailure{Core::ErrorDomain::Physics2D, 12
 inline constexpr Core::ErrorCode ReentrantMutation{Core::ErrorDomain::Physics2D, 13};
 inline constexpr Core::ErrorCode ConstructionFailed{Core::ErrorDomain::Physics2D, 14};
 inline constexpr Core::ErrorCode InvalidQuery{Core::ErrorDomain::Physics2D, 15};
+inline constexpr Core::ErrorCode InvalidJoint{Core::ErrorDomain::Physics2D, 16};
+inline constexpr Core::ErrorCode StaleJoint{Core::ErrorDomain::Physics2D, 17};
+inline constexpr Core::ErrorCode InvalidJointDescription{Core::ErrorDomain::Physics2D, 18};
 
 } // namespace Physics2DErrorCode
 

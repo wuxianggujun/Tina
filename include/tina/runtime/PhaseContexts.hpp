@@ -106,6 +106,9 @@ class FrameUpdateContext final {
     [[nodiscard]] const FrameActionSnapshot& frameActions() const noexcept;
     // Phase-local borrow; null when Audio factory was omitted.
     [[nodiscard]] Audio::AudioEngine* audioEngine() const noexcept;
+    // Phase-local top-state authority for transactional Action rebinding. Lower
+    // GameStates receive null and cannot mutate the global binding map.
+    [[nodiscard]] InputActionRebinding* inputActionRebinding() noexcept;
     void requestExitAfterFrame() noexcept;
 
     // Deferred stack commands (ADR 0014). Commit is EngineHost-only after updateFrame.
@@ -117,13 +120,15 @@ class FrameUpdateContext final {
   private:
     FrameUpdateContext(const FrameTiming& frameTiming, const FrameActionSnapshot& frameActions,
                        bool& exitRequested, GameStatePendingCommands* pendingCommands,
-                       Audio::AudioEngine* audioEngine) noexcept;
+                       Audio::AudioEngine* audioEngine, Runtime::Input::ActionMapper* actionMapper) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
     const FrameActionSnapshot* m_frameActions = nullptr;
     bool* m_exitRequested = nullptr;
     GameStatePendingCommands* m_pendingCommands = nullptr;
     Audio::AudioEngine* m_audioEngine = nullptr;
+    InputActionRebinding m_inputActionRebinding;
+    bool m_rebindingAvailable = false;
 
     friend class Detail::EngineHostImplementation;
 };

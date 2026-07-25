@@ -4,91 +4,177 @@
 #include <tina/runtime/RuntimeErrors.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <exception>
 #include <limits>
 #include <new>
 #include <ranges>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace Tina::Runtime::Input {
 namespace {
 
+inline constexpr float ActionEpsilon = 1.0e-6F;
 inline constexpr usize InvalidIndex = (std::numeric_limits<usize>::max)();
+inline constexpr usize MaximumAxisPatternMatches = 4;
 
 template <typename... Callables> struct Overloaded : Callables... {
     using Callables::operator()...;
 };
-
 template <typename... Callables> Overloaded(Callables...) -> Overloaded<Callables...>;
 
-[[nodiscard]] Core::Status invariantFailure(std::string_view message)
+[[nodiscard]] bool active(float value) noexcept
 {
-    return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation, message);
+    return std::abs(value) > ActionEpsilon;
 }
 
-[[nodiscard]] bool capacitiesAreValid(const InputActionMapperCapacityConfig& capacities) noexcept
+[[nodiscard]] bool sameValue(float left, float right) noexcept
+{
+    return std::abs(left - right) <= ActionEpsilon;
+}
+
+[[nodiscard]] bool validDomain(InputActionDomain domain) noexcept
+{
+    return domain == InputActionDomain::Simulation || domain == InputActionDomain::Frame;
+}
+
+[[nodiscard]] bool validComposition(ActionCompositionMode composition) noexcept
+{
+    return composition == ActionCompositionMode::SumClamped ||
+           composition == ActionCompositionMode::StrongestMagnitude;
+}
+
+[[nodiscard]] bool validPattern(const ActionBindingPattern& pattern) noexcept
+{
+    return std::visit(
+        Overloaded{
+            [](const PrimaryWindowKeyBinding& binding) {
+                return binding.key != Platform::Key::Unknown &&
+                       static_cast<usize>(binding.key) < Platform::KeyCount;
+            },
+            [](const PrimaryPointerButtonBinding& binding) {
+                return binding.pointer == Platform::PrimaryPointerId &&
+                       static_cast<usize>(binding.button) < Platform::PointerButtonCount;
+            },
+            [](const StandardGamepadButtonBinding& binding) {
+                return static_cast<usize>(binding.button) < Platform::GamepadButtonCount;
+            },
+            [](const StandardGamepadAxisBinding& binding) {
+                return static_cast<usize>(binding.axis) < Platform::GamepadAxisCount &&
+                       binding.valueMode >= GamepadAxisValueMode::Signed &&
+                       binding.valueMode <= GamepadAxisValueMode::Trigger;
+            },
+        },
+        pattern);
+}
+
+[[nodiscard]] bool validTransformForPattern(const ActionBindingPattern& pattern, float deadzone,
+                                            float scale) noexcept
+{
+    const bool analog = std::holds_alternative<StandardGamepadAxisBinding>(pattern);
+    return std::isfinite(deadzone) && std::isfinite(scale) && deadzone >= 0.0F && deadzone < 1.0F &&
+           active(scale) && std::abs(scale) <= 16.0F && (analog || deadzone == 0.0F);
+}
+
+[[nodiscard]] bool validMapCapacities(const InputActionMapCapacityConfig& capacities) noexcept
+{
+    return capacities.simulationActionTransitionCapacity != 0 &&
+           capacities.simulationActionTransitionCapacity <=
+               InputActionMapCapacityConfig::MaximumSimulationActionTransitionCapacity &&
+           capacities.frameActionTransitionCapacity != 0 &&
+           capacities.frameActionTransitionCapacity <=
+               InputActionMapCapacityConfig::MaximumFrameActionTransitionCapacity &&
+           capacities.actionBindingCapacity != 0 &&
+           capacities.actionBindingCapacity <= InputActionMapCapacityConfig::MaximumActionBindingCapacity;
+}
+
+[[nodiscard]] bool validMapperCapacities(const InputActionMapperCapacityConfig& capacities) noexcept
 {
     return capacities.rawInputTransitionCapacity != 0 &&
            capacities.rawInputTransitionCapacity <=
                Platform::PlatformFrameCapacityConfig::MaximumInputTransitionCapacity &&
            capacities.continuousControlClaimCapacity != 0 &&
            capacities.continuousControlClaimCapacity <=
-               InputActionMapperCapacityConfig::MaximumContinuousControlClaimCapacity &&
-           capacities.simulationActionTransitionCapacity != 0 &&
-           capacities.simulationActionTransitionCapacity <=
-               InputActionMapCapacityConfig::MaximumSimulationActionTransitionCapacity &&
-           capacities.frameActionTransitionCapacity != 0 &&
-           capacities.frameActionTransitionCapacity <=
-               InputActionMapCapacityConfig::MaximumFrameActionTransitionCapacity &&
-           capacities.digitalActionBindingCapacity != 0 &&
-           capacities.digitalActionBindingCapacity <= InputActionMapCapacityConfig::MaximumDigitalActionBindingCapacity;
+               InputActionMapperCapacityConfig::MaximumContinuousControlClaimCapacity;
 }
 
-[[nodiscard]] bool bindingPatternIsValid(const DigitalActionBindingPattern& input) noexcept
+[[nodiscard]] bool gamepadPattern(const ActionBindingPattern& pattern) noexcept
 {
-    return std::visit(Overloaded{
-                          [](const PrimaryWindowKeyBinding& binding) {
-                              return binding.key != Platform::Key::Unknown &&
-                                     static_cast<usize>(binding.key) < Platform::KeyCount;
-                          },
-                          [](const PrimaryPointerButtonBinding& binding) {
-                              return binding.pointer == Platform::PrimaryPointerId &&
-                                     static_cast<usize>(binding.button) < Platform::PointerButtonCount;
-                          },
-                          [](const StandardGamepadButtonBinding& binding) {
-                              return static_cast<usize>(binding.button) < Platform::GamepadButtonCount;
-                          },
-                      },
-                      input);
+    return std::holds_alternative<StandardGamepadButtonBinding>(pattern) ||
+           std::holds_alternative<StandardGamepadAxisBinding>(pattern);
 }
 
-[[nodiscard]] usize sourceCountForBinding(const DigitalActionBindingPattern& input) noexcept
+[[nodiscard]] usize sourceCount(const ActionBindingPattern& pattern) noexcept
 {
-    return std::holds_alternative<StandardGamepadButtonBinding>(input) ? Platform::PlatformFrameBuilder::MaximumGamepads
-                                                                       : 1U;
+    return gamepadPattern(pattern) ? Platform::PlatformFrameBuilder::MaximumGamepads : 1U;
 }
 
-template <typename Record>
-[[nodiscard]] usize findActionRecordIndex(const std::vector<Record>& records, InputActionId action) noexcept
+[[nodiscard]] float normalizeAxis(float raw, GamepadAxisValueMode mode, float deadzone, float scale) noexcept
 {
-    const auto iterator = std::ranges::lower_bound(records, action, {}, &Record::action);
-    return iterator != records.end() && iterator->action == action
-               ? static_cast<usize>(std::distance(records.begin(), iterator))
-               : InvalidIndex;
+    float normalized = 0.0F;
+    switch (mode)
+    {
+    case GamepadAxisValueMode::Signed:
+        normalized = std::clamp(raw, -1.0F, 1.0F);
+        break;
+    case GamepadAxisValueMode::PositiveHalf:
+        normalized = std::clamp(raw, 0.0F, 1.0F);
+        break;
+    case GamepadAxisValueMode::NegativeHalf:
+        normalized = std::clamp(-raw, 0.0F, 1.0F);
+        break;
+    case GamepadAxisValueMode::Trigger:
+        normalized = std::clamp((raw + 1.0F) * 0.5F, 0.0F, 1.0F);
+        break;
+    }
+
+    const float magnitude = std::abs(normalized);
+    if (magnitude <= deadzone)
+    {
+        return 0.0F;
+    }
+    const float outsideDeadzone = (magnitude - deadzone) / (1.0F - deadzone);
+    return std::copysign(outsideDeadzone, normalized) * scale;
 }
 
-[[nodiscard]] const Platform::WindowFrameSnapshot* primaryWindow(const Platform::PlatformFrameView& frame) noexcept
+[[nodiscard]] InputActionTransitionKind transitionKind(float previous, float current, bool cancelled) noexcept
+{
+    if (!active(previous) && active(current))
+    {
+        return InputActionTransitionKind::Started;
+    }
+    if (active(previous) && !active(current))
+    {
+        return cancelled ? InputActionTransitionKind::Cancelled : InputActionTransitionKind::Completed;
+    }
+    return InputActionTransitionKind::ValueChanged;
+}
+
+[[nodiscard]] Core::Status invariantFailure(std::string_view message)
+{
+    return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation, message);
+}
+
+[[nodiscard]] Core::Status invalidTransaction(std::string_view message)
+{
+    return Core::failure(RuntimeErrorCode::InvalidRebindTransaction, message);
+}
+
+[[nodiscard]] const Platform::WindowFrameSnapshot*
+primaryWindow(const Platform::PlatformFrameView& frame) noexcept
 {
     return frame.primaryWindow();
 }
 
 [[nodiscard]] Core::Result<std::optional<Render::WorldPointerSample>>
-pickWorldPointerSample(const Platform::PlatformFrameView& platformFrame, InputActionDomain domain, bool emitsEdge,
-                       const Platform::PointerButtonTransition* pointerTransition,
+pickWorldPointerSample(const Platform::PlatformFrameView& platformFrame, InputActionDomain domain,
+                       bool emitsChange, const Platform::PointerButtonTransition* pointerTransition,
                        const LastPresentedCamera2DLatch* lastPresentedCamera2D, u64 sequence)
 {
-    if (!emitsEdge || domain != InputActionDomain::Simulation || pointerTransition == nullptr)
+    if (!emitsChange || domain != InputActionDomain::Simulation || pointerTransition == nullptr)
     {
         return std::optional<Render::WorldPointerSample>{};
     }
@@ -97,7 +183,6 @@ pickWorldPointerSample(const Platform::PlatformFrameView& platformFrame, InputAc
         return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
                              "World pointer Simulation Action requires the last-presented Camera2D latch");
     }
-
     const Platform::WindowFrameSnapshot* primary = primaryWindow(platformFrame);
     if (primary == nullptr)
     {
@@ -106,8 +191,8 @@ pickWorldPointerSample(const Platform::PlatformFrameView& platformFrame, InputAc
     }
 
     auto pick = lastPresentedCamera2D->pickLogical(
-        pointerTransition->logicalX, pointerTransition->logicalY, primary->metrics.logicalExtent.width,
-        primary->metrics.logicalExtent.height, sequence);
+        pointerTransition->logicalX, pointerTransition->logicalY,
+        primary->metrics.logicalExtent.width, primary->metrics.logicalExtent.height, sequence);
     if (!pick)
     {
         return Core::failure(std::move(pick.error()));
@@ -117,138 +202,163 @@ pickWorldPointerSample(const Platform::PlatformFrameView& platformFrame, InputAc
 
 } // namespace
 
-Core::Result<std::unique_ptr<ActionMapper>> ActionMapper::Create(std::span<const DigitalActionBinding> bindings,
-                                                                 InputActionMapperCapacityConfig capacities)
+Core::Result<std::unique_ptr<ActionMapper>>
+ActionMapper::Create(InputActionMapConfig config, InputActionMapperCapacityConfig capacities)
 {
-    if (!capacitiesAreValid(capacities))
+    if (!validMapCapacities(config.capacities) || !validMapperCapacities(capacities))
     {
         return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
-                             "Input Action routing capacity is outside the supported range");
+                             "Input Action capacity is outside the supported range");
     }
-    if (bindings.size() > capacities.digitalActionBindingCapacity)
+    if (config.bindings.size() > config.capacities.actionBindingCapacity)
     {
         return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
-                             "Digital Action binding count exceeds its configured capacity");
+                             "Action binding count exceeds configured capacity");
     }
 
     try
     {
-        std::vector<BindingRecord> records;
-        records.reserve(bindings.size());
-        for (const DigitalActionBinding& binding : bindings)
+        u32 nextAutomaticBindingId = 1;
+        for (InputActionBinding& binding : config.bindings)
         {
-            const bool validDomain =
-                binding.domain == InputActionDomain::Simulation || binding.domain == InputActionDomain::Frame;
-            if (!binding.action.hasValue() || !bindingPatternIsValid(binding.input) || !validDomain)
+            if (!binding.binding.hasValue())
+            {
+                while (std::ranges::any_of(config.bindings, [nextAutomaticBindingId](const InputActionBinding& other) {
+                    return other.binding == InputBindingId{nextAutomaticBindingId};
+                }))
+                {
+                    if (nextAutomaticBindingId == (std::numeric_limits<u32>::max)())
+                    {
+                        return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
+                                             "Automatic Action binding id space is exhausted");
+                    }
+                    ++nextAutomaticBindingId;
+                }
+                binding.binding = InputBindingId{nextAutomaticBindingId};
+                if (nextAutomaticBindingId != (std::numeric_limits<u32>::max)())
+                {
+                    ++nextAutomaticBindingId;
+                }
+            }
+
+            if (!binding.action.hasValue() || !validPattern(binding.input) || !validDomain(binding.domain) ||
+                !validComposition(binding.composition) ||
+                !validTransformForPattern(binding.input, binding.deadzone, binding.scale))
             {
                 return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
-                                     "Digital Action bindings require a valid pattern, "
-                                     "action id, and domain");
+                                     "Action binding contains an invalid id, pattern, transform, domain, or composition");
             }
-            const bool actionAlreadyUsesAnotherDomain =
-                std::ranges::any_of(records, [&binding](const BindingRecord& existing) {
-                    return existing.action == binding.action && existing.domain != binding.domain;
+        }
+
+        for (usize left = 0; left < config.bindings.size(); ++left)
+        {
+            for (usize right = left + 1; right < config.bindings.size(); ++right)
+            {
+                const InputActionBinding& lhs = config.bindings[left];
+                const InputActionBinding& rhs = config.bindings[right];
+                if (lhs.binding == rhs.binding)
+                {
+                    return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
+                                         "Action binding ids must be unique");
+                }
+                if (lhs.input == rhs.input)
+                {
+                    return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
+                                         "One physical input pattern cannot have multiple bindings");
+                }
+                if (lhs.action == rhs.action &&
+                    (lhs.domain != rhs.domain || lhs.composition != rhs.composition))
+                {
+                    return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
+                                         "One Action id must use one domain and composition mode");
+                }
+            }
+        }
+
+        std::vector<ActionRecord> actions;
+        actions.reserve(config.bindings.size());
+        for (const InputActionBinding& binding : config.bindings)
+        {
+            if (std::ranges::none_of(actions, [&binding](const ActionRecord& action) {
+                    return action.action == binding.action;
+                }))
+            {
+                actions.push_back(ActionRecord{
+                    .action = binding.action,
+                    .domain = binding.domain,
+                    .composition = binding.composition,
                 });
-            if (actionAlreadyUsesAnotherDomain)
-            {
-                return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
-                                     "one Input Action id cannot belong to both "
-                                     "Simulation and Frame domains");
             }
-            records.push_back(BindingRecord{
-                .input = binding.input,
-                .action = binding.action,
-                .domain = binding.domain,
-            });
         }
-        std::ranges::sort(records, {}, &BindingRecord::input);
-        if (std::ranges::adjacent_find(records, [](const BindingRecord& left, const BindingRecord& right) {
-                return left.input == right.input;
-            }) != records.end())
-        {
-            return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
-                                 "one physical input pattern cannot have multiple "
-                                 "default-context bindings");
-        }
+        std::ranges::sort(actions, [](const ActionRecord& left, const ActionRecord& right) {
+            if (left.domain != right.domain)
+            {
+                return left.domain < right.domain;
+            }
+            return left.action < right.action;
+        });
 
         std::vector<InputActionId> simulationActionIds;
-        std::vector<InputActionId> frameActionIds;
-        simulationActionIds.reserve(records.size());
-        frameActionIds.reserve(records.size());
-        for (const BindingRecord& record : records)
+        std::vector<InputActionState> frameStates;
+        simulationActionIds.reserve(actions.size());
+        frameStates.reserve(actions.size());
+        for (ActionRecord& action : actions)
         {
-            auto& destination = record.domain == InputActionDomain::Simulation ? simulationActionIds : frameActionIds;
-            destination.push_back(record.action);
+            if (action.domain == InputActionDomain::Simulation)
+            {
+                action.stateIndex = simulationActionIds.size();
+                simulationActionIds.push_back(action.action);
+            } else
+            {
+                action.stateIndex = frameStates.size();
+                frameStates.push_back(InputActionState{.action = action.action});
+            }
         }
-        const auto sortAndUnique = [](std::vector<InputActionId>& actions) {
-            std::ranges::sort(actions);
-            actions.erase(std::unique(actions.begin(), actions.end()), actions.end());
-        };
-        sortAndUnique(simulationActionIds);
-        sortAndUnique(frameActionIds);
 
-        auto latchResult =
-            SimulationActionLatch::Create(simulationActionIds, capacities.simulationActionTransitionCapacity);
+        auto latchResult = SimulationActionLatch::Create(
+            simulationActionIds, config.capacities.simulationActionTransitionCapacity);
         if (!latchResult)
         {
             return Core::failure(std::move(latchResult.error()));
         }
 
-        std::vector<ActionRecord> simulationActions;
-        simulationActions.reserve(simulationActionIds.size());
-        for (InputActionId action : simulationActionIds)
+        std::vector<BindingRecord> records;
+        records.reserve(config.bindings.size());
+        for (usize index = 0; index < config.bindings.size(); ++index)
         {
-            simulationActions.push_back(ActionRecord{.action = action});
-        }
-        std::vector<ActionRecord> frameActionRecords;
-        std::vector<InputActionState> frameActionStates;
-        frameActionRecords.reserve(frameActionIds.size());
-        frameActionStates.reserve(frameActionIds.size());
-        for (InputActionId action : frameActionIds)
-        {
-            frameActionRecords.push_back(ActionRecord{.action = action});
-            frameActionStates.push_back(InputActionState{.action = action});
-        }
-        std::vector<bool> frameStartHeld(frameActionIds.size(), false);
-
-        usize totalSourceCount = 0;
-        for (const BindingRecord& record : records)
-        {
-            const usize count = sourceCountForBinding(record.input);
-            if (totalSourceCount > (std::numeric_limits<usize>::max)() - count)
-            {
-                return Core::failure(Core::CoreErrorCode::CapacityExceeded,
-                                     "Digital Action source storage size overflowed");
-            }
-            totalSourceCount += count;
-        }
-        std::vector<SourceState> sources(totalSourceCount);
-
-        usize nextSource = 0;
-        for (BindingRecord& record : records)
-        {
-            record.sourceOffset = nextSource;
-            record.sourceCount = sourceCountForBinding(record.input);
-            nextSource += record.sourceCount;
-            record.actionIndex = record.domain == InputActionDomain::Simulation
-                                     ? findActionRecordIndex(simulationActions, record.action)
-                                     : findActionRecordIndex(frameActionRecords, record.action);
-            if (record.actionIndex == InvalidIndex)
+            const InputActionBinding& binding = config.bindings[index];
+            const auto action = std::ranges::find_if(actions, [&binding](const ActionRecord& candidate) {
+                return candidate.action == binding.action;
+            });
+            if (action == actions.end())
             {
                 return Core::failure(Core::CoreErrorCode::Internal,
-                                     "Digital Action binding could not resolve its normalized action");
+                                     "Action binding could not resolve its normalized Action record");
             }
+            records.push_back(BindingRecord{
+                .actionIndex = static_cast<usize>(std::distance(actions.begin(), action)),
+                .sourceOffset = index * Platform::PlatformFrameBuilder::MaximumGamepads,
+            });
         }
 
+        const usize sourceStorageSize =
+            config.bindings.size() * Platform::PlatformFrameBuilder::MaximumGamepads;
+        std::vector<SourceState> sources(sourceStorageSize);
         std::vector<FrameActionTransition> frameTransitions;
-        frameTransitions.reserve(static_cast<usize>(capacities.frameActionTransitionCapacity) + 1U);
+        frameTransitions.reserve(static_cast<usize>(config.capacities.frameActionTransitionCapacity) + 1U);
         std::vector<ActionSourceToken> frameTransitionSources;
-        frameTransitionSources.reserve(static_cast<usize>(capacities.frameActionTransitionCapacity) + 1U);
+        frameTransitionSources.reserve(static_cast<usize>(config.capacities.frameActionTransitionCapacity) + 1U);
+        std::vector<u8> affectedActionsScratch(actions.size(), u8{0});
+        std::vector<u8> cancelledSourcesScratch(sourceStorageSize, u8{0});
+        std::vector<ActionSourceToken> cancellationTokensScratch(sourceStorageSize,
+                                                                 InvalidActionSourceToken);
 
         auto mapper = std::unique_ptr<ActionMapper>(new (std::nothrow) ActionMapper(
-            capacities, std::move(records), std::move(sources), std::move(simulationActions),
-            std::move(frameActionRecords), std::move(frameActionStates), std::move(frameStartHeld),
-            std::move(frameTransitions), std::move(frameTransitionSources), std::move(*latchResult)));
+            capacities, config.capacities, std::move(config.bindings), std::move(records),
+            std::move(sources), std::move(actions), std::move(frameStates),
+            std::move(frameTransitions), std::move(frameTransitionSources),
+            std::move(affectedActionsScratch), std::move(cancelledSourcesScratch),
+            std::move(cancellationTokensScratch), std::move(*latchResult)));
         if (mapper == nullptr)
         {
             return Core::failure(Core::CoreErrorCode::OutOfMemory, "Action Mapper allocation failed");
@@ -262,21 +372,30 @@ Core::Result<std::unique_ptr<ActionMapper>> ActionMapper::Create(std::span<const
         return Core::failure(Core::CoreErrorCode::Internal, exception.what());
     } catch (...)
     {
-        return Core::failure(Core::CoreErrorCode::Internal, "Action Mapper creation failed with an unknown exception");
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "Action Mapper creation failed with an unknown exception");
     }
 }
 
-ActionMapper::ActionMapper(InputActionMapperCapacityConfig capacities, std::vector<BindingRecord> bindings,
-                           std::vector<SourceState> sources, std::vector<ActionRecord> simulationActions,
-                           std::vector<ActionRecord> frameActionRecords,
-                           std::vector<InputActionState> frameActionStates, std::vector<bool> frameStartHeld,
+ActionMapper::ActionMapper(InputActionMapperCapacityConfig capacities,
+                           InputActionMapCapacityConfig mapCapacities,
+                           std::vector<InputActionBinding> bindings,
+                           std::vector<BindingRecord> records, std::vector<SourceState> sources,
+                           std::vector<ActionRecord> actions,
+                           std::vector<InputActionState> frameStates,
                            std::vector<FrameActionTransition> frameTransitions,
                            std::vector<ActionSourceToken> frameTransitionSources,
+                           std::vector<u8> affectedActionsScratch,
+                           std::vector<u8> cancelledSourcesScratch,
+                           std::vector<ActionSourceToken> cancellationTokensScratch,
                            SimulationActionLatch simulationLatch) noexcept
-    : capacities_(capacities), bindings_(std::move(bindings)), sources_(std::move(sources)),
-      simulationActions_(std::move(simulationActions)), frameActionRecords_(std::move(frameActionRecords)),
-      frameActionStates_(std::move(frameActionStates)), frameStartHeld_(std::move(frameStartHeld)),
-      frameTransitions_(std::move(frameTransitions)), frameTransitionSources_(std::move(frameTransitionSources)),
+    : capacities_(capacities), mapCapacities_(mapCapacities), bindings_(std::move(bindings)),
+      records_(std::move(records)), sources_(std::move(sources)), actions_(std::move(actions)),
+      frameActionStates_(std::move(frameStates)), frameTransitions_(std::move(frameTransitions)),
+      frameTransitionSources_(std::move(frameTransitionSources)),
+      affectedActionsScratch_(std::move(affectedActionsScratch)),
+      cancelledSourcesScratch_(std::move(cancelledSourcesScratch)),
+      cancellationTokensScratch_(std::move(cancellationTokensScratch)),
       simulationLatch_(std::move(simulationLatch))
 {
 }
@@ -287,8 +406,8 @@ Core::Status ActionMapper::mapFrame(const Platform::PlatformFrameView& platformF
                                     u64 nextUncompletedSimulationTick,
                                     const LastPresentedCamera2DLatch* lastPresentedCamera2D)
 {
-    if (auto validation =
-            validateFrameInputs(platformFrame, consumption, claims, engineFrameIndex, nextUncompletedSimulationTick);
+    if (auto validation = validateFrameInputs(platformFrame, consumption, claims, engineFrameIndex,
+                                              nextUncompletedSimulationTick);
         !validation)
     {
         return validation;
@@ -298,23 +417,34 @@ Core::Status ActionMapper::mapFrame(const Platform::PlatformFrameView& platformF
         return windowStatus;
     }
 
+    const auto transitions = platformFrame.inputTransitions();
+    const u64 frameAnchor =
+        transitions.empty() ? lastAcceptedRawInputSequence_.value_or(0) : transitions.front().sequence;
+
+    currentEngineFrameIndex_ = engineFrameIndex;
+    frameTransitions_.clear();
+    frameTransitionSources_.clear();
+    frameNormalTransitionCount_ = 0;
+    frameResetWritten_ = false;
+    for (ActionRecord& action : actions_)
+    {
+        action.frameStartValue = action.value;
+    }
     for (SourceState& source : sources_)
     {
         source.claimedThisFrame = false;
     }
-    frameTransitions_.clear();
-    frameTransitionSources_.clear();
-    frameNormalTransitionCount_ = 0;
-    for (usize index = 0; index < frameActionStates_.size(); ++index)
-    {
-        frameStartHeld_[index] = frameActionStates_[index].held;
-    }
-    currentEngineFrameIndex_ = engineFrameIndex;
 
-    const auto transitions = platformFrame.inputTransitions();
-    const u64 claimSequence =
-        transitions.empty() ? lastAcceptedRawInputSequence_.value_or(0) : transitions.front().sequence;
-    if (auto claimStatus = applyClaims(platformFrame, claims, claimSequence, nextUncompletedSimulationTick);
+    observeRebindDeviceChanges(platformFrame);
+    if (pendingRebind_.has_value())
+    {
+        if (auto status = applyPendingRebind(platformFrame, frameAnchor, nextUncompletedSimulationTick); !status)
+        {
+            return status;
+        }
+    }
+    if (auto claimStatus = applyClaims(platformFrame, claims, frameAnchor,
+                                       nextUncompletedSimulationTick);
         !claimStatus)
     {
         return claimStatus;
@@ -322,24 +452,22 @@ Core::Status ActionMapper::mapFrame(const Platform::PlatformFrameView& platformF
 
     for (usize ordinal = 0; ordinal < transitions.size(); ++ordinal)
     {
-        if (auto transitionStatus = mapTransition(platformFrame, transitions[ordinal], consumption.isConsumed(ordinal),
-                                                  nextUncompletedSimulationTick, lastPresentedCamera2D);
+        if (auto transitionStatus =
+                mapTransition(platformFrame, transitions[ordinal], consumption.isConsumed(ordinal),
+                              nextUncompletedSimulationTick, lastPresentedCamera2D);
             !transitionStatus)
         {
             return transitionStatus;
         }
+        lastAcceptedRawInputSequence_ = transitions[ordinal].sequence;
     }
-    if (auto snapshotStatus = validateRetainedSourceSnapshots(platformFrame); !snapshotStatus)
+    if (auto snapshotStatus = validateRetainedSources(platformFrame); !snapshotStatus)
     {
         return snapshotStatus;
     }
 
     lastMappedEngineFrame_ = engineFrameIndex;
     lastMappedPlatformFrame_ = platformFrame.id();
-    if (!transitions.empty())
-    {
-        lastAcceptedRawInputSequence_ = transitions.back().sequence;
-    }
     return Core::success();
 }
 
@@ -362,16 +490,135 @@ Core::Status ActionMapper::completeSimulationTick(u64 simulationTick)
     return simulationLatch_.completeTick(simulationTick);
 }
 
+Core::Result<RebindTransaction>
+ActionMapper::beginRebind(InputBindingId binding, std::optional<Platform::GamepadId> capturedGamepad)
+{
+    if (findBindingIndex(binding) == InvalidIndex)
+    {
+        return Core::failure(RuntimeErrorCode::InvalidRebindTransaction,
+                             "Rebind target does not identify an existing binding");
+    }
+    if (capturedGamepad.has_value() && !capturedGamepad->hasValue())
+    {
+        return Core::failure(RuntimeErrorCode::InvalidRebindTransaction,
+                             "Rebind capture requires a valid gamepad generation");
+    }
+    if (activeRebind_.has_value() || pendingRebind_.has_value())
+    {
+        return Core::failure(RuntimeErrorCode::InvalidRebindTransaction,
+                             "Only one rebind transaction may be active or queued");
+    }
+    if (nextRebindTransaction_ == (std::numeric_limits<u64>::max)())
+    {
+        return Core::failure(RuntimeErrorCode::InvalidRebindTransaction,
+                             "Rebind transaction id space is exhausted");
+    }
+
+    const RebindTransaction transaction{
+        .transaction = RebindTransactionId{nextRebindTransaction_++},
+        .binding = binding,
+    };
+    activeRebind_ = PendingRebind{
+        .transaction = transaction,
+        .capturedGamepad = capturedGamepad,
+    };
+    rebindState_ = RebindState::Capturing;
+    lastRebindTransaction_ = transaction;
+    return transaction;
+}
+
+Core::Result<RebindCommitResult>
+ActionMapper::commitRebind(RebindTransaction transaction, ActionBindingPattern replacement,
+                           RebindConflictPolicy conflictPolicy)
+{
+    if (!activeRebind_.has_value() || activeRebind_->transaction != transaction)
+    {
+        return Core::failure(RuntimeErrorCode::InvalidRebindTransaction,
+                             "Rebind commit does not match the active transaction");
+    }
+    if (!validPattern(replacement))
+    {
+        return Core::failure(RuntimeErrorCode::InvalidRebindTransaction,
+                             "Rebind replacement pattern is invalid");
+    }
+    if (conflictPolicy != RebindConflictPolicy::Reject && conflictPolicy != RebindConflictPolicy::Swap)
+    {
+        return Core::failure(RuntimeErrorCode::InvalidRebindTransaction,
+                             "Rebind conflict policy is invalid");
+    }
+
+    const usize target = findBindingIndex(transaction.binding);
+    if (target == InvalidIndex ||
+        !validTransformForPattern(replacement, bindings_[target].deadzone, bindings_[target].scale))
+    {
+        return Core::failure(RuntimeErrorCode::InvalidRebindTransaction,
+                             "Rebind replacement is incompatible with the target binding transform");
+    }
+    const usize conflict = findPatternIndex(replacement, target);
+    if (conflict != InvalidIndex && conflictPolicy == RebindConflictPolicy::Swap &&
+        !validTransformForPattern(bindings_[target].input, bindings_[conflict].deadzone,
+                                  bindings_[conflict].scale))
+    {
+        return Core::failure(RuntimeErrorCode::InvalidRebindTransaction,
+                             "Rebind swap is incompatible with the conflicting binding transform");
+    }
+    if (conflict != InvalidIndex && conflictPolicy == RebindConflictPolicy::Reject)
+    {
+        ++statistics_.rebindConflictCount;
+        return RebindCommitResult{
+            .outcome = RebindCommitOutcome::Conflict,
+            .conflictingBinding = bindings_[conflict].binding,
+        };
+    }
+
+    activeRebind_->replacement = std::move(replacement);
+    activeRebind_->conflictingBindingIndex =
+        conflict == InvalidIndex ? std::nullopt : std::optional<usize>{conflict};
+    pendingRebind_ = std::move(activeRebind_);
+    activeRebind_.reset();
+    rebindState_ = RebindState::Queued;
+    return RebindCommitResult{.outcome = RebindCommitOutcome::Queued};
+}
+
+Core::Status ActionMapper::cancelRebind(RebindTransaction transaction) noexcept
+{
+    if (activeRebind_.has_value() && activeRebind_->transaction == transaction)
+    {
+        activeRebind_.reset();
+    } else if (pendingRebind_.has_value() && pendingRebind_->transaction == transaction)
+    {
+        pendingRebind_.reset();
+    } else
+    {
+        return invalidTransaction("Rebind cancellation does not match the active or queued transaction");
+    }
+    rebindState_ = RebindState::Cancelled;
+    lastRebindTransaction_ = transaction;
+    return Core::success();
+}
+
+RebindStateView ActionMapper::rebindState() const noexcept
+{
+    return RebindStateView{.state = rebindState_, .transaction = lastRebindTransaction_};
+}
+
+std::span<const InputActionBinding> ActionMapper::bindings() const noexcept
+{
+    return bindings_;
+}
+
 Core::Status ActionMapper::validateFrameInputs(const Platform::PlatformFrameView& platformFrame,
                                                const UI::InputTransitionConsumptionView& consumption,
-                                               const UI::ContinuousControlClaimsView& claims, u64 engineFrameIndex,
+                                               const UI::ContinuousControlClaimsView& claims,
+                                               u64 engineFrameIndex,
                                                u64 nextUncompletedSimulationTick) const
 {
     if (!platformFrame.id().hasValue())
     {
         return invariantFailure("Action Mapping requires a valid Platform frame id");
     }
-    if (lastMappedPlatformFrame_.has_value() && platformFrame.id().value <= lastMappedPlatformFrame_->value)
+    if (lastMappedPlatformFrame_.has_value() &&
+        platformFrame.id().value <= lastMappedPlatformFrame_->value)
     {
         return invariantFailure("Platform frame ids must be strictly monotonic");
     }
@@ -406,7 +653,7 @@ Core::Status ActionMapper::validateFrameInputs(const Platform::PlatformFrameView
         return invariantFailure("raw Input transition batch exceeds configured capacity");
     }
     if (transitions.size() > capacities_.rawInputTransitionCapacity &&
-        (transitions.empty() || !std::holds_alternative<Platform::InputStreamReset>(transitions.back().payload)))
+        !std::holds_alternative<Platform::InputStreamReset>(transitions.back().payload))
     {
         return invariantFailure("raw Input reserved slot is not an InputStreamReset");
     }
@@ -440,18 +687,20 @@ Core::Status ActionMapper::synchronizePrimaryWindow(const Platform::PlatformFram
     if (primary == nullptr)
     {
         const bool retainedWindowState = std::ranges::any_of(sources_, [](const SourceState& source) {
-            return source.routedWindow.hasValue() && (source.active || source.suppressedUntilRelease);
+            return source.routedWindow.hasValue() &&
+                   (active(source.outputValue) || source.suppressedUntilNeutral);
         });
-        return retainedWindowState ? invariantFailure("a Platform frame lost its primary window "
-                                                      "without cancelling input")
-                                   : Core::success();
+        return retainedWindowState
+                   ? invariantFailure("a Platform frame lost its primary window without cancelling input")
+                   : Core::success();
     }
 
-    for (BindingRecord& binding : bindings_)
+    for (usize bindingIndex = 0; bindingIndex < bindings_.size(); ++bindingIndex)
     {
-        for (usize sourceIndex = 0; sourceIndex < binding.sourceCount; ++sourceIndex)
+        const usize count = sourceCount(bindings_[bindingIndex].input);
+        for (usize sourceIndex = 0; sourceIndex < count; ++sourceIndex)
         {
-            SourceState& source = sources_[binding.sourceOffset + sourceIndex];
+            SourceState& source = sources_[records_[bindingIndex].sourceOffset + sourceIndex];
             if (!source.routedWindow.hasValue())
             {
                 source.routedWindow = primary->metrics.window;
@@ -461,10 +710,9 @@ Core::Status ActionMapper::synchronizePrimaryWindow(const Platform::PlatformFram
             {
                 continue;
             }
-            if (source.active || source.suppressedUntilRelease)
+            if (active(source.outputValue) || source.suppressedUntilNeutral)
             {
-                return invariantFailure("primary Window generation changed without "
-                                        "cancelling retained input");
+                return invariantFailure("primary Window generation changed without cancelling retained input");
             }
             source.routedWindow = primary->metrics.window;
         }
@@ -472,56 +720,169 @@ Core::Status ActionMapper::synchronizePrimaryWindow(const Platform::PlatformFram
     return Core::success();
 }
 
-Core::Status ActionMapper::validateRetainedSourceSnapshots(const Platform::PlatformFrameView& platformFrame) const
+void ActionMapper::observeRebindDeviceChanges(const Platform::PlatformFrameView& platformFrame) noexcept
 {
-    for (const BindingRecord& binding : bindings_)
-    {
-        for (usize sourceIndex = 0; sourceIndex < binding.sourceCount; ++sourceIndex)
+    const auto disconnectedByFrame = [&platformFrame](const PendingRebind& rebind) {
+        if (!rebind.capturedGamepad.has_value())
         {
-            const SourceState& source = sources_[binding.sourceOffset + sourceIndex];
-            if (!source.active && !source.suppressedUntilRelease)
-            {
-                continue;
-            }
-            if (!physicalHeld(platformFrame, binding, source))
-            {
-                return invariantFailure("retained Input Action source contradicts the "
-                                        "final Platform snapshot");
-            }
+            return false;
         }
+        const auto transitions = platformFrame.inputTransitions();
+        const bool explicitDisconnect = std::ranges::any_of(transitions, [&rebind](const Platform::InputTransition& item) {
+            const auto* cancel = std::get_if<Platform::InputCancelTransition>(&item.payload);
+            return cancel != nullptr && cancel->reason == Platform::InputCancelReason::DeviceDisconnected &&
+                   cancel->gamepad == rebind.capturedGamepad;
+        });
+        if (explicitDisconnect)
+        {
+            return true;
+        }
+        const bool rawReset = std::ranges::any_of(transitions, [](const Platform::InputTransition& item) {
+            return std::holds_alternative<Platform::InputStreamReset>(item.payload);
+        });
+        return rawReset &&
+               std::ranges::none_of(platformFrame.gamepads(), [&rebind](const Platform::GamepadSnapshot& snapshot) {
+                   return snapshot.gamepad == *rebind.capturedGamepad;
+               });
+    };
+
+    const auto cancelDisconnected = [this, &disconnectedByFrame](std::optional<PendingRebind>& rebind) {
+        if (!rebind.has_value() || !disconnectedByFrame(*rebind))
+        {
+            return;
+        }
+        lastRebindTransaction_ = rebind->transaction;
+        rebind.reset();
+        rebindState_ = RebindState::DeviceDisconnected;
+        ++statistics_.rebindDeviceCancellationCount;
+    };
+    cancelDisconnected(activeRebind_);
+    cancelDisconnected(pendingRebind_);
+}
+
+Core::Status ActionMapper::applyPendingRebind(const Platform::PlatformFrameView& platformFrame,
+                                              u64 sequence, u64 nextSimulationTick)
+{
+    PendingRebind rebind = *pendingRebind_;
+    pendingRebind_.reset();
+    const usize target = findBindingIndex(rebind.transaction.binding);
+    if (target == InvalidIndex)
+    {
+        return invalidTransaction("Queued rebind target no longer exists");
     }
+
+    std::ranges::fill(affectedActionsScratch_, u8{0});
+    std::ranges::fill(cancelledSourcesScratch_, u8{0});
+    std::array<usize, 2> changed{target, InvalidIndex};
+    usize changedCount = 1;
+    if (rebind.conflictingBindingIndex.has_value())
+    {
+        changed[changedCount++] = *rebind.conflictingBindingIndex;
+    }
+    for (usize index = 0; index < changedCount; ++index)
+    {
+        const usize bindingIndex = changed[index];
+        affectedActionsScratch_[records_[bindingIndex].actionIndex] = 1;
+        clearBindingSources(bindingIndex, true);
+    }
+
+    if (rebind.conflictingBindingIndex.has_value())
+    {
+        const usize conflict = *rebind.conflictingBindingIndex;
+        std::swap(bindings_[target].input, bindings_[conflict].input);
+    } else
+    {
+        bindings_[target].input = std::move(rebind.replacement);
+    }
+    for (usize index = 0; index < changedCount; ++index)
+    {
+        seedSuppressionFromSnapshots(platformFrame, changed[index]);
+    }
+    recomputeAllActionValues();
+    if (auto status = reconcileMarkedCancellations(sequence, nextSimulationTick); !status)
+    {
+        return status;
+    }
+
+    rebindState_ = RebindState::Applied;
+    lastRebindTransaction_ = rebind.transaction;
+    ++statistics_.rebindApplyCount;
     return Core::success();
 }
 
 Core::Status ActionMapper::applyClaims(const Platform::PlatformFrameView& platformFrame,
-                                       const UI::ContinuousControlClaimsView& claims, u64 claimSequence, u64 nextSimulationTick)
+                                       const UI::ContinuousControlClaimsView& claims, u64 sequence,
+                                       u64 nextSimulationTick)
 {
+    const auto claimBinding = [this, &platformFrame, sequence,
+                               nextSimulationTick](usize bindingIndex, Platform::WindowId window,
+                                                   Platform::GamepadId gamepad) -> Core::Status {
+        SourceState* source = resolveSource(bindingIndex, window, gamepad);
+        if (source == nullptr)
+        {
+            return invariantFailure("a claimed control references an invalid device generation");
+        }
+        source->physicalValue = physicalValue(platformFrame, bindingIndex, *source);
+        source->claimedThisFrame = true;
+        source->suppressedUntilNeutral = active(source->physicalValue);
+        source->outputValue = 0.0F;
+        const ActionSourceToken token =
+            static_cast<ActionSourceToken>(source - sources_.data());
+        return reconcileCancelledAction(records_[bindingIndex].actionIndex,
+                                        std::span<const ActionSourceToken>(&token, 1), sequence,
+                                        nextSimulationTick, true);
+    };
+
     for (const UI::ContinuousControlClaim& claim : claims.controls)
     {
-        LocatedSource located =
-            std::visit(Overloaded{
-                           [this, &platformFrame](const Platform::KeyControlIdentity& control) {
-                               return locate(platformFrame, control);
-                           },
-                           [this, &platformFrame](const Platform::PointerButtonControlIdentity& control) {
-                               return locate(platformFrame, control);
-                           },
-                           [this, &platformFrame](const Platform::GamepadButtonControlIdentity& control) {
-                               return locate(platformFrame, control);
-                           },
-                           [](const Platform::GamepadAxisControlIdentity&) { return LocatedSource{}; },
-                           [](const Platform::PointerContinuousControlIdentity&) { return LocatedSource{}; },
-                       },
-                       claim.control);
-        if (located.binding == nullptr || located.source == nullptr)
-        {
-            continue;
-        }
-
-        located.source->claimedThisFrame = true;
-        if (auto status =
-                cancelSource(platformFrame, *located.binding, *located.source, claimSequence, nextSimulationTick, true);
-            !status)
+        Core::Status status = std::visit(
+            Overloaded{
+                [&](const Platform::KeyControlIdentity& control) {
+                    const usize binding = findPatternIndex(PrimaryWindowKeyBinding{control.key});
+                    return binding == InvalidIndex ? Core::success()
+                                                   : claimBinding(binding, control.window, {});
+                },
+                [&](const Platform::PointerButtonControlIdentity& control) {
+                    const usize binding = findPatternIndex(
+                        PrimaryPointerButtonBinding{control.pointer, control.button});
+                    return binding == InvalidIndex ? Core::success()
+                                                   : claimBinding(binding, control.window, {});
+                },
+                [&](const Platform::GamepadButtonControlIdentity& control) {
+                    const usize binding = findPatternIndex(StandardGamepadButtonBinding{control.button});
+                    return binding == InvalidIndex
+                               ? Core::success()
+                               : claimBinding(binding, control.routedWindow, control.gamepad);
+                },
+                [&](const Platform::GamepadAxisControlIdentity& control) {
+                    usize matchCount = 0;
+                    for (usize bindingIndex = 0; bindingIndex < bindings_.size(); ++bindingIndex)
+                    {
+                        const auto* axis =
+                            std::get_if<StandardGamepadAxisBinding>(&bindings_[bindingIndex].input);
+                        if (axis == nullptr || axis->axis != control.axis)
+                        {
+                            continue;
+                        }
+                        if (++matchCount > MaximumAxisPatternMatches)
+                        {
+                            return invariantFailure("gamepad axis matched more binding modes than supported");
+                        }
+                        if (auto claimStatus = claimBinding(bindingIndex, control.routedWindow,
+                                                            control.gamepad);
+                            !claimStatus)
+                        {
+                            return claimStatus;
+                        }
+                    }
+                    return Core::success();
+                },
+                [](const Platform::PointerContinuousControlIdentity&) {
+                    return Core::success();
+                },
+            },
+            claim.control);
+        if (!status)
         {
             return status;
         }
@@ -534,405 +895,209 @@ Core::Status ActionMapper::mapTransition(const Platform::PlatformFrameView& plat
                                          u64 nextSimulationTick,
                                          const LastPresentedCamera2DLatch* lastPresentedCamera2D)
 {
-    const auto applyDigital = [this, &platformFrame, sequence = transition.sequence, consumed,
-                               nextSimulationTick, lastPresentedCamera2D](
-                                  LocatedSource located, Platform::DigitalTransition state, bool repeat,
-                                  const Platform::PointerButtonTransition* pointerTransition) -> Core::Status {
-        if (located.binding == nullptr || located.source == nullptr || repeat)
-        {
-            return Core::success();
-        }
-        SourceState& source = *located.source;
-        BindingRecord& binding = *located.binding;
-        const bool intercepted = consumed || source.claimedThisFrame;
-
-        if (state == Platform::DigitalTransition::Down)
-        {
-            if (intercepted)
-            {
-                if (auto status = cancelSource(platformFrame, binding, source, sequence, nextSimulationTick, false);
-                    !status)
-                {
-                    return status;
-                }
-                source.suppressedUntilRelease = true;
-                return Core::success();
-            }
-            if (source.suppressedUntilRelease)
-            {
-                return Core::success();
-            }
-            return activateSource(platformFrame, binding, source, sequence, nextSimulationTick, pointerTransition,
-                                  lastPresentedCamera2D);
-        }
-
-        if (source.suppressedUntilRelease)
-        {
-            source.active = false;
-            source.suppressedUntilRelease = false;
-            return Core::success();
-        }
-        if (intercepted)
-        {
-            return cancelSource(platformFrame, binding, source, sequence, nextSimulationTick, false);
-        }
-        return releaseSource(platformFrame, binding, source, sequence, nextSimulationTick, pointerTransition,
-                             lastPresentedCamera2D);
-    };
-
     return std::visit(
         Overloaded{
-            [this, &platformFrame, &applyDigital](const Platform::KeyTransition& key) {
-                return applyDigital(locate(platformFrame, Platform::KeyControlIdentity{key.window, key.key}), key.state,
-                                    key.repeat, nullptr);
+            [&](const Platform::KeyTransition& input) {
+                return mapDigital(platformFrame, PrimaryWindowKeyBinding{input.key}, input.window, {},
+                                  input.state, input.repeat, transition.sequence, consumed,
+                                  nextSimulationTick, nullptr, lastPresentedCamera2D);
             },
-            [this, &platformFrame, &applyDigital](const Platform::PointerButtonTransition& pointer) {
-                return applyDigital(locate(platformFrame,
-                                           Platform::PointerButtonControlIdentity{
-                                               pointer.window,
-                                               pointer.pointer,
-                                               pointer.button,
-                                           }),
-                                    pointer.state, false, &pointer);
+            [&](const Platform::PointerButtonTransition& input) {
+                return mapDigital(platformFrame,
+                                  PrimaryPointerButtonBinding{input.pointer, input.button}, input.window,
+                                  {}, input.state, false, transition.sequence, consumed,
+                                  nextSimulationTick, &input, lastPresentedCamera2D);
             },
-            [this, &platformFrame, &applyDigital](const Platform::GamepadButtonTransition& gamepad) {
-                return applyDigital(locate(platformFrame,
-                                           Platform::GamepadButtonControlIdentity{
-                                               gamepad.routedWindow,
-                                               gamepad.gamepad,
-                                               gamepad.button,
-                                           }),
-                                    gamepad.state, false, nullptr);
+            [&](const Platform::GamepadButtonTransition& input) {
+                return mapDigital(platformFrame, StandardGamepadButtonBinding{input.button},
+                                  input.routedWindow, input.gamepad, input.state, false,
+                                  transition.sequence, consumed, nextSimulationTick, nullptr,
+                                  lastPresentedCamera2D);
             },
-            [this, &platformFrame, &transition, nextSimulationTick](const Platform::InputCancelTransition& cancel) {
-                return applyCancelTransition(platformFrame, cancel, transition.sequence, nextSimulationTick);
+            [&](const Platform::GamepadAxisTransition& input) {
+                return mapAxis(platformFrame, input, transition.sequence, consumed,
+                               nextSimulationTick);
             },
-            [this, &platformFrame, &transition, nextSimulationTick](const Platform::InputStreamReset& reset) {
-                return applyRawReset(platformFrame, reset, transition.sequence, nextSimulationTick);
+            [&](const Platform::InputCancelTransition& cancel) {
+                return applyCancel(platformFrame, cancel, transition.sequence, nextSimulationTick);
+            },
+            [&](const Platform::InputStreamReset& reset) {
+                return applyRawReset(platformFrame, reset, transition.sequence,
+                                     nextSimulationTick);
             },
             [](const auto&) { return Core::success(); },
         },
         transition.payload);
 }
 
-ActionMapper::LocatedSource ActionMapper::locate(const Platform::PlatformFrameView& platformFrame,
-                                                 const Platform::KeyControlIdentity& control)
+Core::Status ActionMapper::mapDigital(const Platform::PlatformFrameView& platformFrame,
+                                      const ActionBindingPattern& pattern, Platform::WindowId window,
+                                      Platform::GamepadId gamepad, Platform::DigitalTransition state,
+                                      bool repeat, u64 sequence, bool consumed,
+                                      u64 nextSimulationTick,
+                                      const Platform::PointerButtonTransition* pointerTransition,
+                                      const LastPresentedCamera2DLatch* lastPresentedCamera2D)
 {
-    const Platform::WindowFrameSnapshot* primary = primaryWindow(platformFrame);
-    if (primary == nullptr || control.window != primary->metrics.window)
-    {
-        return {};
-    }
-    BindingRecord* binding = findBinding(PrimaryWindowKeyBinding{control.key});
-    return binding == nullptr ? LocatedSource{} : LocatedSource{binding, &sources_[binding->sourceOffset]};
-}
-
-ActionMapper::LocatedSource ActionMapper::locate(const Platform::PlatformFrameView& platformFrame,
-                                                 const Platform::PointerButtonControlIdentity& control)
-{
-    const Platform::WindowFrameSnapshot* primary = primaryWindow(platformFrame);
-    if (primary == nullptr || control.window != primary->metrics.window)
-    {
-        return {};
-    }
-    BindingRecord* binding = findBinding(PrimaryPointerButtonBinding{
-        control.pointer,
-        control.button,
-    });
-    return binding == nullptr ? LocatedSource{} : LocatedSource{binding, &sources_[binding->sourceOffset]};
-}
-
-ActionMapper::LocatedSource ActionMapper::locate(const Platform::PlatformFrameView& platformFrame,
-                                                 const Platform::GamepadButtonControlIdentity& control)
-{
-    const Platform::WindowFrameSnapshot* primary = primaryWindow(platformFrame);
-    if (primary == nullptr || control.routedWindow != primary->metrics.window || !control.gamepad.hasValue() ||
-        control.gamepad.index() >= Platform::PlatformFrameBuilder::MaximumGamepads)
-    {
-        return {};
-    }
-    BindingRecord* binding = findBinding(StandardGamepadButtonBinding{control.button});
-    if (binding == nullptr)
-    {
-        return {};
-    }
-
-    SourceState& source = sources_[binding->sourceOffset + control.gamepad.index()];
-    if (!source.gamepad.hasValue())
-    {
-        source.gamepad = control.gamepad;
-        source.routedWindow = control.routedWindow;
-    } else if (source.gamepad != control.gamepad)
-    {
-        if (source.active || source.suppressedUntilRelease)
-        {
-            return {};
-        }
-        source.gamepad = control.gamepad;
-        source.routedWindow = control.routedWindow;
-    }
-    return LocatedSource{binding, &source};
-}
-
-ActionMapper::BindingRecord* ActionMapper::findBinding(const DigitalActionBindingPattern& input) noexcept
-{
-    const auto iterator = std::ranges::lower_bound(bindings_, input, {}, &BindingRecord::input);
-    return iterator != bindings_.end() && iterator->input == input ? std::addressof(*iterator) : nullptr;
-}
-
-bool ActionMapper::physicalHeld(const Platform::PlatformFrameView& platformFrame, const BindingRecord& binding,
-                                const SourceState& source) const noexcept
-{
-    return std::visit(Overloaded{
-                          [&platformFrame](const PrimaryWindowKeyBinding& key) {
-                              const auto* primary = primaryWindow(platformFrame);
-                              return primary != nullptr && primary->input.isHeld(key.key);
-                          },
-                          [&platformFrame](const PrimaryPointerButtonBinding& pointer) {
-                              const auto* primary = primaryWindow(platformFrame);
-                              return primary != nullptr && primary->input.pointer.pointer == pointer.pointer &&
-                                     primary->input.pointer.isHeld(pointer.button);
-                          },
-                          [&platformFrame, &source](const StandardGamepadButtonBinding& gamepad) {
-                              if (!source.gamepad.hasValue())
-                              {
-                                  return false;
-                              }
-                              const auto snapshots = platformFrame.gamepads();
-                              const auto iterator =
-                                  std::ranges::find(snapshots, source.gamepad, &Platform::GamepadSnapshot::gamepad);
-                              return iterator != snapshots.end() && iterator->isHeld(gamepad.button);
-                          },
-                      },
-                      binding.input);
-}
-
-Core::Status ActionMapper::activateSource(const Platform::PlatformFrameView& platformFrame, BindingRecord& binding,
-                                          SourceState& source, u64 sequence, u64 nextSimulationTick,
-                                          const Platform::PointerButtonTransition* pointerTransition,
-                                          const LastPresentedCamera2DLatch* lastPresentedCamera2D)
-{
-    if (source.active)
+    const usize bindingIndex = findPatternIndex(pattern);
+    if (bindingIndex == InvalidIndex || repeat)
     {
         return Core::success();
     }
-    ActionRecord& action = binding.domain == InputActionDomain::Simulation ? simulationActions_[binding.actionIndex]
-                                                                           : frameActionRecords_[binding.actionIndex];
-    const bool firstSource = action.activeSourceCount == 0;
-    auto worldPointerSample = pickWorldPointerSample(platformFrame, binding.domain, firstSource, pointerTransition,
-                                                     lastPresentedCamera2D, sequence);
-    if (!worldPointerSample)
+    SourceState* source = resolveSource(bindingIndex, window, gamepad);
+    if (source == nullptr)
     {
-        return Core::failure(std::move(worldPointerSample.error()));
+        return invariantFailure("a digital transition references an invalid device generation");
     }
+    const SourceState previousSource = *source;
+    const InputActionBinding& binding = bindings_[bindingIndex];
+    source->physicalValue =
+        state == Platform::DigitalTransition::Down ? binding.scale : 0.0F;
+    const ActionSourceToken token = static_cast<ActionSourceToken>(source - sources_.data());
 
-    source.active = true;
-    ++action.activeSourceCount;
-    if (!firstSource)
+    if (consumed || source->claimedThisFrame)
     {
+        source->outputValue = 0.0F;
+        source->suppressedUntilNeutral = active(source->physicalValue);
+        return reconcileCancelledAction(records_[bindingIndex].actionIndex,
+                                        std::span<const ActionSourceToken>(&token, 1), sequence,
+                                        nextSimulationTick, true);
+    }
+    if (source->suppressedUntilNeutral)
+    {
+        if (!active(source->physicalValue))
+        {
+            source->suppressedUntilNeutral = false;
+        }
+        source->outputValue = 0.0F;
         return Core::success();
     }
 
-    if (binding.domain == InputActionDomain::Simulation)
+    source->outputValue = source->physicalValue;
+    auto status = appendActionChange(platformFrame, records_[bindingIndex].actionIndex, token,
+                                     sequence, nextSimulationTick, false, pointerTransition,
+                                     lastPresentedCamera2D);
+    if (!status)
     {
-        if (auto status = simulationLatch_.setHeld(binding.action, true); !status)
-        {
-            return status;
-        }
-    } else
-    {
-        frameActionStates_[binding.actionIndex].held = true;
-        frameActionStates_[binding.actionIndex].axis = 1.0F;
+        *source = previousSource;
     }
-    return appendNormalTransition(platformFrame, binding,
-                                  static_cast<ActionSourceToken>(std::addressof(source) - sources_.data()),
-                                  DigitalActionTransitionKind::Pressed, sequence, nextSimulationTick,
-                                  std::move(*worldPointerSample));
+    return status;
 }
 
-Core::Status ActionMapper::releaseSource(const Platform::PlatformFrameView& platformFrame, BindingRecord& binding,
-                                         SourceState& source, u64 sequence, u64 nextSimulationTick,
-                                         const Platform::PointerButtonTransition* pointerTransition,
-                                         const LastPresentedCamera2DLatch* lastPresentedCamera2D)
+Core::Status ActionMapper::mapAxis(const Platform::PlatformFrameView& platformFrame,
+                                   const Platform::GamepadAxisTransition& input, u64 sequence,
+                                   bool consumed, u64 nextSimulationTick)
 {
-    if (!source.active)
+    usize matchCount = 0;
+    for (usize bindingIndex = 0; bindingIndex < bindings_.size(); ++bindingIndex)
     {
-        return Core::success();
-    }
-    ActionRecord& action = binding.domain == InputActionDomain::Simulation ? simulationActions_[binding.actionIndex]
-                                                                           : frameActionRecords_[binding.actionIndex];
-    if (action.activeSourceCount == 0)
-    {
-        return invariantFailure("Digital Action active source count underflowed");
-    }
-
-    const bool lastSource = action.activeSourceCount == 1;
-    auto worldPointerSample = pickWorldPointerSample(platformFrame, binding.domain, lastSource, pointerTransition,
-                                                     lastPresentedCamera2D, sequence);
-    if (!worldPointerSample)
-    {
-        return Core::failure(std::move(worldPointerSample.error()));
-    }
-
-    source.active = false;
-    --action.activeSourceCount;
-    if (action.activeSourceCount != 0)
-    {
-        return Core::success();
-    }
-
-    if (binding.domain == InputActionDomain::Simulation)
-    {
-        if (auto status = simulationLatch_.setHeld(binding.action, false); !status)
+        const auto* axis = std::get_if<StandardGamepadAxisBinding>(&bindings_[bindingIndex].input);
+        if (axis == nullptr || axis->axis != input.axis)
         {
-            return status;
+            continue;
         }
-    } else
-    {
-        frameActionStates_[binding.actionIndex].held = false;
-        frameActionStates_[binding.actionIndex].axis = 0.0F;
-    }
-    return appendNormalTransition(platformFrame, binding,
-                                  static_cast<ActionSourceToken>(std::addressof(source) - sources_.data()),
-                                  DigitalActionTransitionKind::Released, sequence, nextSimulationTick,
-                                  std::move(*worldPointerSample));
-}
-
-Core::Status ActionMapper::cancelSource(const Platform::PlatformFrameView& platformFrame, BindingRecord& binding,
-                                        SourceState& source, u64 sequence, u64 nextSimulationTick,
-                                        bool suppressWhilePhysicallyHeld)
-{
-    const bool wasActive = source.active;
-    if (wasActive)
-    {
-        source.active = false;
-        ActionRecord& action = binding.domain == InputActionDomain::Simulation
-                                   ? simulationActions_[binding.actionIndex]
-                                   : frameActionRecords_[binding.actionIndex];
-        if (action.activeSourceCount == 0)
+        if (++matchCount > MaximumAxisPatternMatches)
         {
-            return invariantFailure("Digital Action active source count underflowed");
+            return invariantFailure("gamepad axis matched more binding modes than supported");
         }
-        --action.activeSourceCount;
-        const bool held = action.activeSourceCount != 0;
-        if (binding.domain == InputActionDomain::Simulation)
+        SourceState* source = resolveSource(bindingIndex, input.routedWindow, input.gamepad);
+        if (source == nullptr)
         {
-            if (auto status = simulationLatch_.setHeld(binding.action, held); !status)
+            return invariantFailure("an axis transition references an invalid gamepad generation");
+        }
+        const InputActionBinding& binding = bindings_[bindingIndex];
+        source->physicalValue = normalizeAxis(input.value, axis->valueMode, binding.deadzone,
+                                              binding.scale);
+        const ActionSourceToken token = static_cast<ActionSourceToken>(source - sources_.data());
+
+        if (consumed || source->claimedThisFrame)
+        {
+            source->outputValue = 0.0F;
+            source->suppressedUntilNeutral = active(source->physicalValue);
+            if (auto status = reconcileCancelledAction(
+                    records_[bindingIndex].actionIndex,
+                    std::span<const ActionSourceToken>(&token, 1), sequence,
+                    nextSimulationTick, true);
+                !status)
             {
                 return status;
             }
-        } else
-        {
-            frameActionStates_[binding.actionIndex].held = held;
-            frameActionStates_[binding.actionIndex].axis = held ? 1.0F : 0.0F;
+            continue;
         }
-        if (auto status = reconcileCancelledAction(
-                platformFrame, binding, static_cast<ActionSourceToken>(std::addressof(source) - sources_.data()),
-                sequence, nextSimulationTick, true);
+        if (source->suppressedUntilNeutral)
+        {
+            if (!active(source->physicalValue))
+            {
+                source->suppressedUntilNeutral = false;
+            }
+            source->outputValue = 0.0F;
+            continue;
+        }
+
+        source->outputValue = source->physicalValue;
+        if (auto status = appendActionChange(platformFrame, records_[bindingIndex].actionIndex,
+                                             token, sequence, nextSimulationTick, false, nullptr,
+                                             nullptr);
             !status)
         {
             return status;
         }
     }
-    source.suppressedUntilRelease = suppressWhilePhysicallyHeld && physicalHeld(platformFrame, binding, source);
     return Core::success();
 }
 
-Core::Status ActionMapper::appendNormalTransition(const Platform::PlatformFrameView& platformFrame,
-                                                  BindingRecord& binding, ActionSourceToken source,
-                                                  DigitalActionTransitionKind kind, u64 sequence,
-                                                  u64 nextSimulationTick,
-                                                  std::optional<Render::WorldPointerSample> worldPointerSample)
+Core::Status ActionMapper::applyCancel(const Platform::PlatformFrameView& platformFrame,
+                                       const Platform::InputCancelTransition& cancel, u64 sequence,
+                                       u64 nextSimulationTick)
 {
-    const DigitalActionTransition transition{
-        .action = binding.action,
-        .kind = kind,
-        .sourceSequence = sequence,
-        .worldPointerSample = std::move(worldPointerSample),
-    };
-    if (binding.domain == InputActionDomain::Simulation)
+    std::ranges::fill(affectedActionsScratch_, u8{0});
+    std::ranges::fill(cancelledSourcesScratch_, u8{0});
+    for (usize bindingIndex = 0; bindingIndex < bindings_.size(); ++bindingIndex)
     {
-        auto result = simulationLatch_.append(nextSimulationTick, transition, source);
-        if (!result)
+        const usize count = sourceCount(bindings_[bindingIndex].input);
+        for (usize sourceIndex = 0; sourceIndex < count; ++sourceIndex)
         {
-            return Core::failure(std::move(result.error()));
-        }
-        if (*result == SimulationLatchAppendResult::CapacityResetInserted)
-        {
-            suppressDomainAfterCapacityReset(binding.domain);
-        }
-        return Core::success();
-    }
-    return appendFrameTransition(platformFrame, FrameActionTransition{transition}, source, nextSimulationTick);
-}
-
-Core::Status ActionMapper::reconcileCancelledAction(const Platform::PlatformFrameView& platformFrame,
-                                                    BindingRecord& binding, ActionSourceToken source, u64 sequence,
-                                                    u64 nextSimulationTick, bool forceStateReconciliation)
-{
-    if (binding.domain == InputActionDomain::Simulation)
-    {
-        auto result = simulationLatch_.reconcileCancellation(nextSimulationTick, binding.action, source, sequence,
-                                                             forceStateReconciliation);
-        if (!result)
-        {
-            return Core::failure(std::move(result.error()));
-        }
-        if (*result == SimulationLatchAppendResult::CapacityResetInserted)
-        {
-            suppressDomainAfterCapacityReset(binding.domain);
-        }
-        return Core::success();
-    }
-    return reconcileFrameCancellation(platformFrame, binding.actionIndex, source, sequence, nextSimulationTick,
-                                      forceStateReconciliation);
-}
-
-Core::Status ActionMapper::applyCancelTransition(const Platform::PlatformFrameView& platformFrame,
-                                                 const Platform::InputCancelTransition& cancel, u64 sequence,
-                                                 u64 nextSimulationTick)
-{
-    for (BindingRecord& binding : bindings_)
-    {
-        for (usize sourceIndex = 0; sourceIndex < binding.sourceCount; ++sourceIndex)
-        {
-            SourceState& source = sources_[binding.sourceOffset + sourceIndex];
-            const bool windowMatches = !cancel.routedWindow.hasValue() || source.routedWindow == cancel.routedWindow;
-            const bool deviceMatches = !cancel.gamepad.has_value() || source.gamepad == *cancel.gamepad;
-            if (!windowMatches || !deviceMatches)
+            const ActionSourceToken token = sourceToken(bindingIndex, sourceIndex);
+            SourceState& source = sources_[token];
+            const bool matchesGamepad = cancel.gamepad.has_value() && source.gamepad == *cancel.gamepad;
+            const bool matchesWindow = !cancel.gamepad.has_value() &&
+                                       (!cancel.routedWindow.hasValue() ||
+                                        source.routedWindow == cancel.routedWindow);
+            if (!matchesGamepad && !matchesWindow)
             {
                 continue;
             }
+            source = {};
+            cancelledSourcesScratch_[token] = 1;
+            affectedActionsScratch_[records_[bindingIndex].actionIndex] = 1;
+        }
+    }
 
-            const bool wasActive = source.active;
-            if (auto status = cancelSource(platformFrame, binding, source, sequence, nextSimulationTick, true); !status)
+    if (!cancel.gamepad.has_value())
+    {
+        const Platform::WindowFrameSnapshot* primary = primaryWindow(platformFrame);
+        if (primary != nullptr &&
+            (!cancel.routedWindow.hasValue() || cancel.routedWindow == primary->metrics.window))
+        {
+            for (usize bindingIndex = 0; bindingIndex < bindings_.size(); ++bindingIndex)
             {
-                return status;
-            }
-            if (!wasActive)
-            {
-                if (auto status = reconcileCancelledAction(
-                        platformFrame, binding,
-                        static_cast<ActionSourceToken>(std::addressof(source) - sources_.data()), sequence,
-                        nextSimulationTick, false);
-                    !status)
-                {
-                    return status;
-                }
+                seedSuppressionFromSnapshots(platformFrame, bindingIndex);
             }
         }
     }
-    return Core::success();
+    recomputeAllActionValues();
+    return reconcileMarkedCancellations(sequence, nextSimulationTick);
 }
 
 Core::Status ActionMapper::applyRawReset(const Platform::PlatformFrameView& platformFrame,
-                                         const Platform::InputStreamReset& reset, u64 sequence, u64 nextSimulationTick)
+                                         const Platform::InputStreamReset& reset, u64 sequence,
+                                         u64 nextSimulationTick)
 {
-    if (auto status = simulationLatch_.resetStream(nextSimulationTick,
-                                                   SimulationInputStreamReset{
-                                                       .reason = ActionInputStreamResetReason::RawInputStreamReset,
-                                                       .sourceSequence = sequence,
-                                                   });
+    if (auto status = simulationLatch_.resetStream(
+            nextSimulationTick,
+            SimulationInputStreamReset{
+                .reason = ActionInputStreamResetReason::RawInputStreamReset,
+                .sourceSequence = sequence,
+            });
         !status)
     {
         return status;
@@ -942,108 +1107,164 @@ Core::Status ActionMapper::applyRawReset(const Platform::PlatformFrameView& plat
         .sourceSequence = sequence,
     });
 
-    for (BindingRecord& binding : bindings_)
+    const Platform::WindowFrameSnapshot* primary = primaryWindow(platformFrame);
+    const bool affectsPrimary = !reset.routedWindow.has_value() ||
+                                (primary != nullptr && reset.routedWindow == primary->metrics.window);
+    if (affectsPrimary)
     {
-        for (usize sourceIndex = 0; sourceIndex < binding.sourceCount; ++sourceIndex)
+        for (usize bindingIndex = 0; bindingIndex < bindings_.size(); ++bindingIndex)
         {
-            SourceState& source = sources_[binding.sourceOffset + sourceIndex];
-            if (reset.routedWindow.has_value() && source.routedWindow != *reset.routedWindow)
-            {
-                continue;
-            }
-            source.active = false;
-            source.suppressedUntilRelease = physicalHeld(platformFrame, binding, source);
+            clearBindingSources(bindingIndex, false);
+            seedSuppressionFromSnapshots(platformFrame, bindingIndex);
         }
+        recomputeAllActionValues();
     }
-    recomputeActionStates();
     ++statistics_.rawInputResetCount;
     return Core::success();
 }
 
-void ActionMapper::suppressDomainAfterCapacityReset(InputActionDomain domain) noexcept
+Core::Status ActionMapper::validateRetainedSources(const Platform::PlatformFrameView& platformFrame)
 {
-    for (BindingRecord& binding : bindings_)
+    for (usize bindingIndex = 0; bindingIndex < bindings_.size(); ++bindingIndex)
     {
-        if (binding.domain != domain)
+        const usize count = sourceCount(bindings_[bindingIndex].input);
+        for (usize sourceIndex = 0; sourceIndex < count; ++sourceIndex)
         {
-            continue;
-        }
-        for (usize sourceIndex = 0; sourceIndex < binding.sourceCount; ++sourceIndex)
-        {
-            SourceState& source = sources_[binding.sourceOffset + sourceIndex];
-            // Capacity reset can occur in the middle of the ordered raw batch.
-            // Freeze only state already observed at this sequence; consulting the
-            // frame-end physical snapshot would suppress later Down transitions.
-            source.suppressedUntilRelease = source.suppressedUntilRelease || source.active;
-            source.active = false;
-        }
-    }
-
-    auto& actions = domain == InputActionDomain::Simulation ? simulationActions_ : frameActionRecords_;
-    for (usize index = 0; index < actions.size(); ++index)
-    {
-        actions[index].activeSourceCount = 0;
-        if (domain == InputActionDomain::Simulation)
-        {
-            static_cast<void>(simulationLatch_.setHeld(actions[index].action, false));
-        } else
-        {
-            frameActionStates_[index].held = false;
-            frameActionStates_[index].axis = 0.0F;
-        }
-    }
-}
-
-void ActionMapper::recomputeActionStates() noexcept
-{
-    for (ActionRecord& action : simulationActions_)
-    {
-        action.activeSourceCount = 0;
-    }
-    for (ActionRecord& action : frameActionRecords_)
-    {
-        action.activeSourceCount = 0;
-    }
-    for (const BindingRecord& binding : bindings_)
-    {
-        usize activeCount = 0;
-        for (usize sourceIndex = 0; sourceIndex < binding.sourceCount; ++sourceIndex)
-        {
-            if (sources_[binding.sourceOffset + sourceIndex].active)
+            SourceState& source = sources_[records_[bindingIndex].sourceOffset + sourceIndex];
+            if (!active(source.outputValue) && !source.suppressedUntilNeutral)
             {
-                ++activeCount;
+                continue;
+            }
+            const float finalPhysical = physicalValue(platformFrame, bindingIndex, source);
+            if (source.suppressedUntilNeutral)
+            {
+                source.physicalValue = finalPhysical;
+                if (!active(finalPhysical))
+                {
+                    source.suppressedUntilNeutral = false;
+                }
+                continue;
+            }
+            if (!sameValue(source.physicalValue, finalPhysical))
+            {
+                return invariantFailure("a retained Action source disagrees with the final Platform snapshot");
             }
         }
-        auto& actions = binding.domain == InputActionDomain::Simulation ? simulationActions_ : frameActionRecords_;
-        actions[binding.actionIndex].activeSourceCount += activeCount;
     }
-    for (usize index = 0; index < simulationActions_.size(); ++index)
-    {
-        const bool held = simulationActions_[index].activeSourceCount != 0;
-        static_cast<void>(simulationLatch_.setHeld(simulationActions_[index].action, held));
-    }
-    for (usize index = 0; index < frameActionRecords_.size(); ++index)
-    {
-        const bool held = frameActionRecords_[index].activeSourceCount != 0;
-        frameActionStates_[index].held = held;
-        frameActionStates_[index].axis = held ? 1.0F : 0.0F;
-    }
+    return Core::success();
 }
 
-Core::Status ActionMapper::appendFrameTransition(const Platform::PlatformFrameView& /*platformFrame*/,
-                                                 FrameActionTransition transition, ActionSourceToken source,
-                                                 u64 /*nextSimulationTick*/)
+Core::Status ActionMapper::appendActionChange(
+    const Platform::PlatformFrameView& platformFrame, usize actionIndex, ActionSourceToken source,
+    u64 sequence, u64 nextSimulationTick, bool cancelled,
+    const Platform::PointerButtonTransition* pointerTransition,
+    const LastPresentedCamera2DLatch* lastPresentedCamera2D)
 {
-    if (frameNormalTransitionCount_ >= capacities_.frameActionTransitionCapacity)
+    ActionRecord& action = actions_[actionIndex];
+    const float previous = action.value;
+    const float current = composeActionValue(actionIndex);
+    if (sameValue(previous, current))
     {
-        const auto* digital = std::get_if<DigitalActionTransition>(&transition);
-        const u64 sequence = digital == nullptr ? 0 : digital->sourceSequence;
+        return setActionValue(actionIndex, current);
+    }
+
+    auto worldPointerSample = pickWorldPointerSample(platformFrame, action.domain, true,
+                                                     pointerTransition, lastPresentedCamera2D,
+                                                     sequence);
+    if (!worldPointerSample)
+    {
+        return Core::failure(std::move(worldPointerSample.error()));
+    }
+    if (auto stateStatus = setActionValue(actionIndex, current); !stateStatus)
+    {
+        return stateStatus;
+    }
+    return appendTransition(
+        actionIndex,
+        InputActionTransition{
+            .action = action.action,
+            .kind = transitionKind(previous, current, cancelled),
+            .value = current,
+            .sourceSequence = sequence,
+            .worldPointerSample = std::move(*worldPointerSample),
+        },
+        source, nextSimulationTick);
+}
+
+Core::Status ActionMapper::reconcileCancelledAction(usize actionIndex,
+                                                    std::span<const ActionSourceToken> sources,
+                                                    u64 sourceSequence, u64 nextSimulationTick,
+                                                    bool forceStateReconciliation)
+{
+    const float current = composeActionValue(actionIndex);
+    if (auto stateStatus = setActionValue(actionIndex, current); !stateStatus)
+    {
+        return stateStatus;
+    }
+    ActionRecord& action = actions_[actionIndex];
+    if (action.domain == InputActionDomain::Simulation)
+    {
+        const u64 resetCountBefore = simulationLatch_.statistics().capacityResetCount;
+        auto result = simulationLatch_.reconcileCancellation(
+            nextSimulationTick, action.action, sources, sourceSequence, forceStateReconciliation);
+        if (!result)
+        {
+            return Core::failure(std::move(result.error()));
+        }
+        if (*result == SimulationLatchAppendResult::CapacityResetInserted)
+        {
+            if (simulationLatch_.statistics().capacityResetCount != resetCountBefore)
+            {
+                ++statistics_.simulationActionCapacityResetCount;
+            }
+            suppressDomain(InputActionDomain::Simulation);
+        }
+        return Core::success();
+    }
+    return reconcileFrameCancellation(actionIndex, sources, sourceSequence,
+                                      forceStateReconciliation);
+}
+
+Core::Status ActionMapper::appendTransition(usize actionIndex, InputActionTransition transition,
+                                            ActionSourceToken source, u64 nextSimulationTick)
+{
+    if (actions_[actionIndex].domain == InputActionDomain::Simulation)
+    {
+        const u64 resetCountBefore = simulationLatch_.statistics().capacityResetCount;
+        auto result = simulationLatch_.append(nextSimulationTick, std::move(transition), source);
+        if (!result)
+        {
+            return Core::failure(std::move(result.error()));
+        }
+        if (*result == SimulationLatchAppendResult::CapacityResetInserted)
+        {
+            if (simulationLatch_.statistics().capacityResetCount != resetCountBefore)
+            {
+                ++statistics_.simulationActionCapacityResetCount;
+            }
+            suppressDomain(InputActionDomain::Simulation);
+        }
+        return Core::success();
+    }
+    return appendFrameTransition(std::move(transition), source);
+}
+
+Core::Status ActionMapper::appendFrameTransition(InputActionTransition transition,
+                                                 ActionSourceToken source)
+{
+    if (frameResetWritten_)
+    {
+        suppressDomain(InputActionDomain::Frame);
+        return Core::success();
+    }
+    if (frameNormalTransitionCount_ >= mapCapacities_.frameActionTransitionCapacity)
+    {
         resetFrameActionStream(FrameInputStreamReset{
             .reason = ActionInputStreamResetReason::ActionTransitionCapacityExceeded,
-            .sourceSequence = sequence,
+            .sourceSequence = transition.sourceSequence,
         });
         ++statistics_.frameActionCapacityResetCount;
-        suppressDomainAfterCapacityReset(InputActionDomain::Frame);
+        suppressDomain(InputActionDomain::Frame);
         return Core::success();
     }
     frameTransitions_.emplace_back(std::move(transition));
@@ -1052,24 +1273,39 @@ Core::Status ActionMapper::appendFrameTransition(const Platform::PlatformFrameVi
     return Core::success();
 }
 
-Core::Status ActionMapper::reconcileFrameCancellation(const Platform::PlatformFrameView& platformFrame,
-                                                      usize actionIndex, ActionSourceToken source, u64 sourceSequence,
-                                                      u64 nextSimulationTick, bool forceStateReconciliation)
+Core::Status ActionMapper::reconcileFrameCancellation(usize actionIndex,
+                                                      std::span<const ActionSourceToken> sources,
+                                                      u64 sourceSequence,
+                                                      bool forceStateReconciliation)
 {
-    if (actionIndex >= frameActionStates_.size())
+    if (frameResetWritten_)
     {
-        return invariantFailure("Frame Action cancellation references an unknown action");
+        suppressDomain(InputActionDomain::Frame);
+        return Core::success();
     }
-    const InputActionId action = frameActionStates_[actionIndex].action;
-    usize destination = 0;
-    bool removedPendingSource = false;
+    const InputActionId action = actions_[actionIndex].action;
+    bool affectedPendingSource = false;
     for (usize index = 0; index < frameTransitions_.size(); ++index)
     {
-        const auto* digital = std::get_if<DigitalActionTransition>(&frameTransitions_[index]);
-        const bool remove = digital != nullptr && digital->action == action && frameTransitionSources_[index] == source;
-        if (remove)
+        const auto* pending = std::get_if<InputActionTransition>(&frameTransitions_[index]);
+        if (pending != nullptr && pending->action == action &&
+            std::ranges::find(sources, frameTransitionSources_[index]) != sources.end())
         {
-            removedPendingSource = true;
+            affectedPendingSource = true;
+            break;
+        }
+    }
+    if (!forceStateReconciliation && !affectedPendingSource)
+    {
+        return Core::success();
+    }
+
+    usize destination = 0;
+    for (usize index = 0; index < frameTransitions_.size(); ++index)
+    {
+        const auto* actionTransition = std::get_if<InputActionTransition>(&frameTransitions_[index]);
+        if (actionTransition != nullptr && actionTransition->action == action)
+        {
             continue;
         }
         if (destination != index)
@@ -1081,39 +1317,25 @@ Core::Status ActionMapper::reconcileFrameCancellation(const Platform::PlatformFr
     }
     frameTransitions_.resize(destination);
     frameTransitionSources_.resize(destination);
-    frameNormalTransitionCount_ =
-        static_cast<usize>(std::ranges::count_if(frameTransitions_, [](const FrameActionTransition& transition) {
-            return std::holds_alternative<DigitalActionTransition>(transition);
+    frameNormalTransitionCount_ = static_cast<usize>(std::ranges::count_if(
+        frameTransitions_, [](const FrameActionTransition& transition) {
+            return std::holds_alternative<InputActionTransition>(transition);
         }));
 
-    if (!forceStateReconciliation && !removedPendingSource)
-    {
-        return Core::success();
-    }
-    const bool startedHeld = frameStartHeld_[actionIndex];
-    const bool currentHeld = frameActionStates_[actionIndex].held;
-    bool pendingResult = startedHeld;
-    for (const FrameActionTransition& pending : frameTransitions_)
-    {
-        const auto* digital = std::get_if<DigitalActionTransition>(&pending);
-        if (digital == nullptr || digital->action != action)
-        {
-            continue;
-        }
-        pendingResult = digital->kind == DigitalActionTransitionKind::Pressed;
-    }
-    if (pendingResult == currentHeld)
+    const float baseline = actions_[actionIndex].frameStartValue;
+    const float current = actions_[actionIndex].value;
+    if (sameValue(baseline, current))
     {
         return Core::success();
     }
     return appendFrameTransition(
-        platformFrame,
-        FrameActionTransition{DigitalActionTransition{
+        InputActionTransition{
             .action = action,
-            .kind = currentHeld ? DigitalActionTransitionKind::Pressed : DigitalActionTransitionKind::Cancelled,
+            .kind = transitionKind(baseline, current, true),
+            .value = current,
             .sourceSequence = sourceSequence,
-        }},
-        source, nextSimulationTick);
+        },
+        InvalidActionSourceToken);
 }
 
 void ActionMapper::resetFrameActionStream(FrameInputStreamReset reset) noexcept
@@ -1121,8 +1343,301 @@ void ActionMapper::resetFrameActionStream(FrameInputStreamReset reset) noexcept
     frameTransitions_.clear();
     frameTransitionSources_.clear();
     frameNormalTransitionCount_ = 0;
+    frameResetWritten_ = true;
     frameTransitions_.emplace_back(reset);
     frameTransitionSources_.push_back(InvalidActionSourceToken);
+}
+
+void ActionMapper::suppressDomain(InputActionDomain domain) noexcept
+{
+    for (usize bindingIndex = 0; bindingIndex < bindings_.size(); ++bindingIndex)
+    {
+        if (actions_[records_[bindingIndex].actionIndex].domain != domain)
+        {
+            continue;
+        }
+        const usize count = sourceCount(bindings_[bindingIndex].input);
+        for (usize sourceIndex = 0; sourceIndex < count; ++sourceIndex)
+        {
+            SourceState& source = sources_[records_[bindingIndex].sourceOffset + sourceIndex];
+            source.suppressedUntilNeutral = source.suppressedUntilNeutral ||
+                                            active(source.physicalValue);
+            source.outputValue = 0.0F;
+        }
+    }
+    for (usize actionIndex = 0; actionIndex < actions_.size(); ++actionIndex)
+    {
+        if (actions_[actionIndex].domain == domain)
+        {
+            static_cast<void>(setActionValue(actionIndex, 0.0F));
+        }
+    }
+}
+
+float ActionMapper::composeActionValue(usize actionIndex) const noexcept
+{
+    const ActionRecord& action = actions_[actionIndex];
+    float value = 0.0F;
+    float strongestMagnitude = -1.0F;
+    for (usize bindingIndex = 0; bindingIndex < bindings_.size(); ++bindingIndex)
+    {
+        if (records_[bindingIndex].actionIndex != actionIndex)
+        {
+            continue;
+        }
+        const usize count = sourceCount(bindings_[bindingIndex].input);
+        for (usize sourceIndex = 0; sourceIndex < count; ++sourceIndex)
+        {
+            const float contribution =
+                sources_[records_[bindingIndex].sourceOffset + sourceIndex].outputValue;
+            if (action.composition == ActionCompositionMode::SumClamped)
+            {
+                value += contribution;
+            } else if (std::abs(contribution) > strongestMagnitude)
+            {
+                value = contribution;
+                strongestMagnitude = std::abs(contribution);
+            }
+        }
+    }
+    return action.composition == ActionCompositionMode::SumClamped
+               ? std::clamp(value, -1.0F, 1.0F)
+               : value;
+}
+
+Core::Status ActionMapper::setActionValue(usize actionIndex, float value) noexcept
+{
+    if (actionIndex >= actions_.size() || !std::isfinite(value))
+    {
+        return invariantFailure("Action state update references an invalid action or value");
+    }
+    ActionRecord& action = actions_[actionIndex];
+    action.value = active(value) ? value : 0.0F;
+    if (action.domain == InputActionDomain::Simulation)
+    {
+        return simulationLatch_.setValue(action.action, action.value);
+    }
+    frameActionStates_[action.stateIndex].value = action.value;
+    return Core::success();
+}
+
+void ActionMapper::recomputeAllActionValues() noexcept
+{
+    for (usize actionIndex = 0; actionIndex < actions_.size(); ++actionIndex)
+    {
+        static_cast<void>(setActionValue(actionIndex, composeActionValue(actionIndex)));
+    }
+}
+
+void ActionMapper::clearBindingSources(usize bindingIndex, bool markCancelled) noexcept
+{
+    const usize offset = records_[bindingIndex].sourceOffset;
+    const usize oldCount = sourceCount(bindings_[bindingIndex].input);
+    if (markCancelled)
+    {
+        affectedActionsScratch_[records_[bindingIndex].actionIndex] = 1;
+        for (usize sourceIndex = 0; sourceIndex < oldCount; ++sourceIndex)
+        {
+            cancelledSourcesScratch_[offset + sourceIndex] = 1;
+        }
+    }
+    for (usize sourceIndex = 0; sourceIndex < Platform::PlatformFrameBuilder::MaximumGamepads;
+         ++sourceIndex)
+    {
+        sources_[offset + sourceIndex] = {};
+    }
+}
+
+void ActionMapper::seedSuppressionFromSnapshots(const Platform::PlatformFrameView& platformFrame,
+                                                usize bindingIndex) noexcept
+{
+    const InputActionBinding& binding = bindings_[bindingIndex];
+    const usize offset = records_[bindingIndex].sourceOffset;
+    if (const auto* key = std::get_if<PrimaryWindowKeyBinding>(&binding.input); key != nullptr)
+    {
+        if (const Platform::WindowFrameSnapshot* window = primaryWindow(platformFrame); window != nullptr)
+        {
+            SourceState& source = sources_[offset];
+            source.routedWindow = window->input.window;
+            source.physicalValue = window->input.isHeld(key->key) ? binding.scale : 0.0F;
+            source.suppressedUntilNeutral = active(source.physicalValue);
+        }
+        return;
+    }
+    if (const auto* pointer = std::get_if<PrimaryPointerButtonBinding>(&binding.input);
+        pointer != nullptr)
+    {
+        if (const Platform::WindowFrameSnapshot* window = primaryWindow(platformFrame); window != nullptr)
+        {
+            SourceState& source = sources_[offset];
+            source.routedWindow = window->input.window;
+            source.physicalValue = window->input.pointer.isHeld(pointer->button)
+                                       ? binding.scale
+                                       : 0.0F;
+            source.suppressedUntilNeutral = active(source.physicalValue);
+        }
+        return;
+    }
+
+    const Platform::WindowFrameSnapshot* window = primaryWindow(platformFrame);
+    for (const Platform::GamepadSnapshot& gamepad : platformFrame.gamepads())
+    {
+        if (gamepad.gamepad.index() >= Platform::PlatformFrameBuilder::MaximumGamepads)
+        {
+            continue;
+        }
+        SourceState& source = sources_[offset + gamepad.gamepad.index()];
+        source.gamepad = gamepad.gamepad;
+        source.routedWindow = window == nullptr ? Platform::WindowId{} : window->input.window;
+        if (const auto* button = std::get_if<StandardGamepadButtonBinding>(&binding.input);
+            button != nullptr)
+        {
+            source.physicalValue = gamepad.isHeld(button->button) ? binding.scale : 0.0F;
+        } else if (const auto* axis = std::get_if<StandardGamepadAxisBinding>(&binding.input);
+                   axis != nullptr)
+        {
+            source.physicalValue = normalizeAxis(gamepad.axis(axis->axis), axis->valueMode,
+                                                 binding.deadzone, binding.scale);
+        }
+        source.suppressedUntilNeutral = active(source.physicalValue);
+    }
+}
+
+ActionMapper::SourceState* ActionMapper::resolveSource(usize bindingIndex,
+                                                       Platform::WindowId window,
+                                                       Platform::GamepadId gamepad) noexcept
+{
+    const InputActionBinding& binding = bindings_[bindingIndex];
+    const usize offset = records_[bindingIndex].sourceOffset;
+    if (!gamepadPattern(binding.input))
+    {
+        SourceState& source = sources_[offset];
+        if (source.routedWindow.hasValue() && source.routedWindow != window &&
+            (active(source.outputValue) || source.suppressedUntilNeutral))
+        {
+            return nullptr;
+        }
+        source.routedWindow = window;
+        return &source;
+    }
+    if (!gamepad.hasValue() || gamepad.index() >= Platform::PlatformFrameBuilder::MaximumGamepads)
+    {
+        return nullptr;
+    }
+    SourceState& source = sources_[offset + gamepad.index()];
+    if (source.gamepad.hasValue() && source.gamepad != gamepad &&
+        (active(source.outputValue) || source.suppressedUntilNeutral))
+    {
+        return nullptr;
+    }
+    if (source.gamepad != gamepad)
+    {
+        source = {};
+        source.gamepad = gamepad;
+    }
+    source.routedWindow = window;
+    return &source;
+}
+
+float ActionMapper::physicalValue(const Platform::PlatformFrameView& platformFrame,
+                                  usize bindingIndex, const SourceState& source) const noexcept
+{
+    const InputActionBinding& binding = bindings_[bindingIndex];
+    if (const auto* key = std::get_if<PrimaryWindowKeyBinding>(&binding.input); key != nullptr)
+    {
+        const Platform::WindowFrameSnapshot* window = primaryWindow(platformFrame);
+        return window != nullptr && window->input.window == source.routedWindow &&
+                       window->input.isHeld(key->key)
+                   ? binding.scale
+                   : 0.0F;
+    }
+    if (const auto* pointer = std::get_if<PrimaryPointerButtonBinding>(&binding.input);
+        pointer != nullptr)
+    {
+        const Platform::WindowFrameSnapshot* window = primaryWindow(platformFrame);
+        return window != nullptr && window->input.window == source.routedWindow &&
+                       window->input.pointer.isHeld(pointer->button)
+                   ? binding.scale
+                   : 0.0F;
+    }
+    const auto gamepad = std::ranges::find(platformFrame.gamepads(), source.gamepad,
+                                           &Platform::GamepadSnapshot::gamepad);
+    if (gamepad == platformFrame.gamepads().end())
+    {
+        return 0.0F;
+    }
+    if (const auto* button = std::get_if<StandardGamepadButtonBinding>(&binding.input);
+        button != nullptr)
+    {
+        return gamepad->isHeld(button->button) ? binding.scale : 0.0F;
+    }
+    const auto* axis = std::get_if<StandardGamepadAxisBinding>(&binding.input);
+    return axis == nullptr
+               ? 0.0F
+               : normalizeAxis(gamepad->axis(axis->axis), axis->valueMode, binding.deadzone,
+                               binding.scale);
+}
+
+usize ActionMapper::findBindingIndex(InputBindingId binding) const noexcept
+{
+    const auto iterator = std::ranges::find(bindings_, binding, &InputActionBinding::binding);
+    return iterator == bindings_.end()
+               ? InvalidIndex
+               : static_cast<usize>(std::distance(bindings_.begin(), iterator));
+}
+
+usize ActionMapper::findPatternIndex(const ActionBindingPattern& pattern, usize excluded) const noexcept
+{
+    for (usize index = 0; index < bindings_.size(); ++index)
+    {
+        if (index != excluded && bindings_[index].input == pattern)
+        {
+            return index;
+        }
+    }
+    return InvalidIndex;
+}
+
+ActionSourceToken ActionMapper::sourceToken(usize bindingIndex, usize sourceIndex) const noexcept
+{
+    return records_[bindingIndex].sourceOffset + sourceIndex;
+}
+
+Core::Status ActionMapper::reconcileMarkedCancellations(u64 sequence, u64 nextSimulationTick)
+{
+    for (usize actionIndex = 0; actionIndex < actions_.size(); ++actionIndex)
+    {
+        if (affectedActionsScratch_[actionIndex] == 0)
+        {
+            continue;
+        }
+        usize tokenCount = 0;
+        for (usize bindingIndex = 0; bindingIndex < bindings_.size(); ++bindingIndex)
+        {
+            if (records_[bindingIndex].actionIndex != actionIndex)
+            {
+                continue;
+            }
+            const usize offset = records_[bindingIndex].sourceOffset;
+            for (usize sourceIndex = 0;
+                 sourceIndex < Platform::PlatformFrameBuilder::MaximumGamepads; ++sourceIndex)
+            {
+                if (cancelledSourcesScratch_[offset + sourceIndex] != 0)
+                {
+                    cancellationTokensScratch_[tokenCount++] = offset + sourceIndex;
+                }
+            }
+        }
+        if (auto status = reconcileCancelledAction(
+                actionIndex,
+                std::span<const ActionSourceToken>(cancellationTokensScratch_.data(), tokenCount),
+                sequence, nextSimulationTick, true);
+            !status)
+        {
+            return status;
+        }
+    }
+    return Core::success();
 }
 
 } // namespace Tina::Runtime::Input

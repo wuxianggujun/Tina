@@ -13,17 +13,18 @@ namespace Tina::Physics2D {
     const PhysicsWorld2DConfig& config) noexcept;
 [[nodiscard]] Core::Status validatePhysicsBody2DDesc(
     const PhysicsBody2DDesc& desc) noexcept;
-[[nodiscard]] Core::Status validatePhysicsBoxShape2DDesc(
-    const PhysicsBoxShape2DDesc& desc) noexcept;
+[[nodiscard]] Core::Status validatePhysicsShape2DDesc(
+    const PhysicsShape2DDesc& desc) noexcept;
+[[nodiscard]] Core::Status validatePhysicsJoint2DDesc(
+    const PhysicsJoint2DDesc& desc) noexcept;
 [[nodiscard]] Core::Status validatePhysicsQueryFilter2D(
     const PhysicsQueryFilter2D& filter) noexcept;
 [[nodiscard]] Core::Status validatePhysicsAabb2D(const PhysicsAabb2D& aabb) noexcept;
 [[nodiscard]] Core::Status validatePhysicsRayCast2D(const PhysicsRayCast2D& ray) noexcept;
 
-// Single-owner, fixed-step 2D physics world. M11-A0 owns one Box shape per body
-// and fixed-step lifecycle; M11-A1 copies contact begin/end/hit into fixed
-// Tina storage before step() returns; M11-A2 adds caller-buffer spatial queries;
-// M11-A3 applies a fixed-capacity deferred command queue immediately before step.
+// Single-owner, fixed-step 2D physics world. Bodies, shapes, and joints have
+// independent generation handles. Shapes are backend-neutral Box/Circle/Capsule
+// descriptors and may be sensors; every body may own multiple shapes.
 class PhysicsWorld2D final {
 public:
     [[nodiscard]] static Core::Result<PhysicsWorld2D> Create(
@@ -37,10 +38,14 @@ public:
     PhysicsWorld2D(PhysicsWorld2D&& other) noexcept;
     PhysicsWorld2D& operator=(PhysicsWorld2D&&) = delete;
 
-    [[nodiscard]] Core::Result<PhysicsBodyShape2D> createBoxBody(
-        const PhysicsBody2DDesc& body,
-        const PhysicsBoxShape2DDesc& shape);
+    [[nodiscard]] Core::Result<PhysicsBodyId> createBody(const PhysicsBody2DDesc& body);
+    [[nodiscard]] Core::Result<PhysicsShapeId> createShape(
+        PhysicsBodyId body,
+        const PhysicsShape2DDesc& shape);
+    [[nodiscard]] Core::Status destroyShape(PhysicsShapeId shape) noexcept;
     [[nodiscard]] Core::Status destroyBody(PhysicsBodyId body) noexcept;
+    [[nodiscard]] Core::Result<PhysicsJointId> createJoint(const PhysicsJoint2DDesc& joint);
+    [[nodiscard]] Core::Status destroyJoint(PhysicsJointId joint) noexcept;
 
     // FIFO deferred mutations. Capacity is fixed at Create; full queue returns
     // CapacityExceeded without dropping earlier commands. Stale body targets are
@@ -98,9 +103,14 @@ public:
         PhysicsBodyId body) const noexcept;
     [[nodiscard]] Core::Result<PhysicsBodyId> shapeBody(
         PhysicsShapeId shape) const noexcept;
+    [[nodiscard]] Core::Result<PhysicsShapeState2D> shapeState(
+        PhysicsShapeId shape) const noexcept;
+    [[nodiscard]] Core::Result<PhysicsJointState2D> jointState(
+        PhysicsJointId joint) const noexcept;
 
     [[nodiscard]] bool contains(PhysicsBodyId body) const noexcept;
     [[nodiscard]] bool contains(PhysicsShapeId shape) const noexcept;
+    [[nodiscard]] bool contains(PhysicsJointId joint) const noexcept;
     [[nodiscard]] PhysicsWorld2DStats stats() const noexcept;
     [[nodiscard]] bool isOpen() const noexcept;
 
@@ -116,6 +126,7 @@ private:
     [[nodiscard]] Core::Status ensureUsable() const noexcept;
     [[nodiscard]] Core::Status validateBody(PhysicsBodyId body) const noexcept;
     [[nodiscard]] Core::Status validateShape(PhysicsShapeId shape) const noexcept;
+    [[nodiscard]] Core::Status validateJoint(PhysicsJointId joint) const noexcept;
 
     Impl* m_impl = nullptr;
 };

@@ -92,6 +92,11 @@ inline constexpr u64 DefaultFrameCount = 300;
 inline constexpr u32 DefaultFrameDelayMilliseconds = 0;
 inline constexpr u32 ProductTileSpriteKey = 1;
 inline constexpr u32 ProductCharacterSpriteKey = 2;
+inline constexpr Tina::AssetFormat::TileMapLayerId VisualTileLayerId = 10;
+inline constexpr Tina::AssetFormat::TileMapLayerId CollisionTileLayerId = 20;
+inline constexpr Tina::AssetFormat::TileMapLayerId GameplayObjectLayerId = 30;
+inline constexpr Tina::AssetFormat::TileMapObjectId PlayerSpawnObjectId = 101;
+inline constexpr Tina::AssetFormat::TileMapObjectId CrateSpawnObjectId = 102;
 inline constexpr u32 ExpectedCharacterAnimationClips = 3;
 inline constexpr u32 ExpectedCharacterAnimationSprites = 3;
 inline constexpr u32 ExpectedCharacterAnimationResolvedFrames = 5;
@@ -247,6 +252,8 @@ struct LifecycleCounters final {
     u64 lastHighlightSprites = 0;
     u64 catalogRecipeAssets = 0;
     bool catalogFromRecipeFile = false;
+    u64 objectLayerObjectCount = 0;
+    bool objectLayerConsumed = false;
     bool seedTileSelectionApplied = false;
     // M11-B0: surface-driven Camera2D projection (FixedWorldHeight).
     u32 surfacePixelWidth = 960;
@@ -300,8 +307,11 @@ struct LifecycleCounters final {
     u64 physicsSteps = 0;
     u64 physicsStaticBodies = 0;
     u64 physicsDynamicContacts = 0;
+    u64 physicsSensorEnters = 0;
+    u64 physicsSensorExits = 0;
     float lastDynamicY = 0.0f;
     bool physicsReady = false;
+    bool physicsJointReady = false;
 #endif
     // RUNTIME-001 product evidence: pause overlay push/pop + policy blocks below.
     u64 pauseOverlayPushes = 0;
@@ -589,6 +599,8 @@ struct TileMapResources final {
     std::optional<Tina::Asset::TileChunkDirtyCache> chunkDirtyCache{};
     std::pmr::vector<Tina::Asset::TileChunkView> chunkDirtyRebuilt{&memory};
     std::pmr::vector<Tina::Asset::TileMapSolidHit> solidScratch{&memory};
+    float characterSpawnX = 1.0f;
+    float characterSpawnY = 3.0f;
     // Presentation camera: previous/current sim targets; extract lerps with FrameTiming.interpolation.
     float cameraPreviousX = 4.0f;
     float cameraPreviousY = 2.0f;
@@ -611,6 +623,13 @@ struct TileMapResources final {
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     std::optional<Tina::Physics2D::PhysicsWorld2D> physicsWorld{};
     Tina::Physics2D::PhysicsBodyId dynamicBody{};
+    Tina::Physics2D::PhysicsShapeId dynamicShape{};
+    Tina::Physics2D::PhysicsBodyId sensorBody{};
+    Tina::Physics2D::PhysicsShapeId sensorShape{};
+    Tina::Physics2D::PhysicsBodyId jointAnchorBody{};
+    Tina::Physics2D::PhysicsBodyId jointFollowerBody{};
+    Tina::Physics2D::PhysicsShapeId jointFollowerShape{};
+    Tina::Physics2D::PhysicsJointId demoJoint{};
     Tina::Physics2D::PhysicsBodyId staticBodies[32]{};
     Tina::Physics2D::PhysicsGridSolidCell2D solidCellScratch[32]{};
     float dynamicHalfExtent = 0.25f;
@@ -621,6 +640,69 @@ struct TileMapResources final {
     std::optional<Tina::Audio::MiniaudioDevice> audioDevice{};
 #endif
 };
+
+[[nodiscard]] Tina::Core::Status consumeGameplayObjectLayer(TileMapResources& resources, LifecycleCounters& counters)
+{
+    if (!resources.map)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "tilemap is required for object layer setup");
+    }
+    auto layer = resources.map->layer(GameplayObjectLayerId);
+    if (!layer)
+    {
+        return Tina::Core::failure(std::move(layer.error()));
+    }
+    if (layer->kind != Tina::AssetFormat::TileMapLayerKind::Object || !layer->visible ||
+        layer->name != "gameplay")
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                                   "gameplay object layer metadata is invalid");
+    }
+    const auto layerProperty = layer->findProperty("domain");
+    if (layer->propertyCount != 1U || !layerProperty || layerProperty->value != "gameplay")
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                                   "gameplay object layer property is invalid");
+    }
+
+    if (layer->objectCount != 2U)
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                                   "gameplay object layer must contain exactly two objects");
+    }
+    const auto playerSpawn = layer->findObject(PlayerSpawnObjectId);
+    const auto crateSpawn = layer->findObject(CrateSpawnObjectId);
+    if (!playerSpawn || !crateSpawn)
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                                   "gameplay object layer is missing required stable object ids");
+    }
+    const auto playerRole = playerSpawn->findProperty("role");
+    if (playerSpawn->kind != Tina::AssetFormat::TileMapObjectKind::Point || !playerSpawn->visible ||
+        playerSpawn->name != "player_spawn" || playerSpawn->propertyCount != 1U || !playerRole ||
+        playerRole->value != "player")
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                                   "player spawn object is invalid");
+    }
+    const auto crateRole = crateSpawn->findProperty("role");
+    if (crateSpawn->kind != Tina::AssetFormat::TileMapObjectKind::Rectangle || !crateSpawn->visible ||
+        crateSpawn->name != "crate_spawn" || crateSpawn->propertyCount != 1U || !crateRole ||
+        crateRole->value != "crate")
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidCatalogConfig,
+                                   "crate spawn object is invalid");
+    }
+    resources.characterSpawnX = playerSpawn->x;
+    resources.characterSpawnY = playerSpawn->y;
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+    resources.lastDynamicX = crateSpawn->x + crateSpawn->width * 0.5f;
+    resources.lastDynamicY = crateSpawn->y + crateSpawn->height * 0.5f;
+#endif
+    counters.objectLayerObjectCount = layer->objectCount;
+    counters.objectLayerConsumed = true;
+    return Tina::Core::success();
+}
 
 [[nodiscard]] Tina::Scene::LocalTransform sceneTranslation(float x, float y) noexcept
 {
@@ -1077,7 +1159,11 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
         return Tina::Core::failure(std::move(map.error()));
     }
     resources.map.emplace(std::move(*map));
-    resources.grid.emplace(*resources.map);
+    if (const auto status = consumeGameplayObjectLayer(resources, counters); !status)
+    {
+        return status;
+    }
+    resources.grid.emplace(*resources.map, CollisionTileLayerId);
     {
         // M11-B1 product path: fixed-capacity revision cache for visible chunks.
         auto dirty = Tina::Asset::TileChunkDirtyCache::Create(
@@ -1095,7 +1181,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
         .maxFallSpeed = 50.0f,
         .skin = 0.01f,
     });
-    resources.controller->teleport(1.0f, 3.0f, true);
+    resources.controller->teleport(resources.characterSpawnX, resources.characterSpawnY, true);
 
     if (const auto status = prepareCharacterAnimations(resources, counters, *system, characterTextureId,
                                                        idleClipId, walkClipId, hitWallClipId);
@@ -1108,6 +1194,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     Tina::Physics2D::PhysicsWorld2DConfig worldConfig;
     worldConfig.bodyCapacity = 64;
     worldConfig.shapeCapacity = 64;
+    worldConfig.jointCapacity = 8;
     worldConfig.contactBeginCapacity = 32;
     worldConfig.contactEndCapacity = 32;
     worldConfig.contactHitCapacity = 8;
@@ -1137,19 +1224,92 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
 
     Tina::Physics2D::PhysicsBody2DDesc dynamicDesc;
     dynamicDesc.type = Tina::Physics2D::PhysicsBodyType2D::Dynamic;
-    dynamicDesc.positionMeters = {3.0F, 3.5F};
-    Tina::Physics2D::PhysicsBoxShape2DDesc box;
+    dynamicDesc.positionMeters = {resources.lastDynamicX, resources.lastDynamicY};
+    Tina::Physics2D::PhysicsShape2DDesc box;
+    box.kind = Tina::Physics2D::PhysicsShapeKind2D::Box;
     box.halfExtentsMeters = {resources.dynamicHalfExtent, resources.dynamicHalfExtent};
     box.density = 1.0F;
     box.enableContactEvents = true;
-    auto dynamic = resources.physicsWorld->createBoxBody(dynamicDesc, box);
+    box.enableSensorEvents = true;
+    auto dynamic = resources.physicsWorld->createBody(dynamicDesc);
     if (!dynamic)
     {
         return Tina::Core::failure(std::move(dynamic.error()));
     }
-    resources.dynamicBody = dynamic->body;
+    auto dynamicShape = resources.physicsWorld->createShape(*dynamic, box);
+    if (!dynamicShape)
+    {
+        return Tina::Core::failure(std::move(dynamicShape.error()));
+    }
+    resources.dynamicBody = *dynamic;
+    resources.dynamicShape = *dynamicShape;
     resources.lastDynamicX = dynamicDesc.positionMeters.x;
     resources.lastDynamicY = dynamicDesc.positionMeters.y;
+
+    Tina::Physics2D::PhysicsBody2DDesc sensorBodyDesc;
+    sensorBodyDesc.type = Tina::Physics2D::PhysicsBodyType2D::Static;
+    sensorBodyDesc.positionMeters = dynamicDesc.positionMeters;
+    auto sensorBody = resources.physicsWorld->createBody(sensorBodyDesc);
+    if (!sensorBody)
+    {
+        return Tina::Core::failure(std::move(sensorBody.error()));
+    }
+    Tina::Physics2D::PhysicsShape2DDesc sensorDesc;
+    sensorDesc.kind = Tina::Physics2D::PhysicsShapeKind2D::Circle;
+    sensorDesc.radiusMeters = 0.75F;
+    sensorDesc.density = 0.0F;
+    sensorDesc.isSensor = true;
+    sensorDesc.enableSensorEvents = true;
+    auto sensorShape = resources.physicsWorld->createShape(*sensorBody, sensorDesc);
+    if (!sensorShape)
+    {
+        return Tina::Core::failure(std::move(sensorShape.error()));
+    }
+    resources.sensorBody = *sensorBody;
+    resources.sensorShape = *sensorShape;
+
+    Tina::Physics2D::PhysicsBody2DDesc anchorDesc;
+    anchorDesc.type = Tina::Physics2D::PhysicsBodyType2D::Static;
+    anchorDesc.positionMeters = {-20.0F, 10.0F};
+    auto anchorBody = resources.physicsWorld->createBody(anchorDesc);
+    if (!anchorBody)
+    {
+        return Tina::Core::failure(std::move(anchorBody.error()));
+    }
+    Tina::Physics2D::PhysicsBody2DDesc followerDesc;
+    followerDesc.type = Tina::Physics2D::PhysicsBodyType2D::Dynamic;
+    followerDesc.positionMeters = {-19.0F, 10.0F};
+    auto followerBody = resources.physicsWorld->createBody(followerDesc);
+    if (!followerBody)
+    {
+        return Tina::Core::failure(std::move(followerBody.error()));
+    }
+    Tina::Physics2D::PhysicsShape2DDesc followerShapeDesc;
+    followerShapeDesc.kind = Tina::Physics2D::PhysicsShapeKind2D::Circle;
+    followerShapeDesc.radiusMeters = 0.2F;
+    followerShapeDesc.density = 1.0F;
+    auto followerShape = resources.physicsWorld->createShape(*followerBody, followerShapeDesc);
+    if (!followerShape)
+    {
+        return Tina::Core::failure(std::move(followerShape.error()));
+    }
+    Tina::Physics2D::PhysicsJoint2DDesc jointDesc;
+    jointDesc.bodyA = *anchorBody;
+    jointDesc.bodyB = *followerBody;
+    jointDesc.lengthMeters = 1.0F;
+    jointDesc.enableSpring = true;
+    jointDesc.hertz = 3.0F;
+    jointDesc.dampingRatio = 0.5F;
+    auto joint = resources.physicsWorld->createJoint(jointDesc);
+    if (!joint)
+    {
+        return Tina::Core::failure(std::move(joint.error()));
+    }
+    resources.jointAnchorBody = *anchorBody;
+    resources.jointFollowerBody = *followerBody;
+    resources.jointFollowerShape = *followerShape;
+    resources.demoJoint = *joint;
+    counters.physicsJointReady = resources.physicsWorld->jointState(*joint).has_value();
 #endif
 
     // AssetLease holds AssetStore*; acquire only after the system owns its final address.
@@ -1969,7 +2129,7 @@ class TileMapBgfxState final : public Tina::IGameState {
         };
 
         // Controlled product gate (M10-A44): once per run, inject a locked
-        // Pressed+hit WorldPointerSample edge into the same consumer as A42
+        // Started transition with a hit WorldPointerSample into the same consumer as A42
         // edges. This is sample-private (not OS/GLFW injection) and does not
         // re-project with live Camera/Platform.
         if (options_.seedTileSelection && !counters_->seedTileSelectionApplied)
@@ -1991,7 +2151,12 @@ class TileMapBgfxState final : public Tina::IGameState {
                                            "seed tile selection did not lock the requested cell");
             }
             counters_->seedTileSelectionApplied = true;
-            counters_->lastSelectedTileId = map.tileIdAt(options_.seedTileCellX, options_.seedTileCellY);
+            auto tileId = map.tileIdAt(VisualTileLayerId, options_.seedTileCellX, options_.seedTileCellY);
+            if (!tileId)
+            {
+                return Tina::Core::failure(std::move(tileId.error()));
+            }
+            counters_->lastSelectedTileId = *tileId;
         }
 
         const u64 previousSelectionHits = counters_->tileSelection.selectionHits;
@@ -2002,7 +2167,12 @@ class TileMapBgfxState final : public Tina::IGameState {
             counters_->tileSelection.lastSelection.has_value())
         {
             const Tina::Sample2D::SelectedTile& selection = *counters_->tileSelection.lastSelection;
-            counters_->lastSelectedTileId = map.tileIdAt(selection.cellX, selection.cellY);
+            auto tileId = map.tileIdAt(VisualTileLayerId, selection.cellX, selection.cellY);
+            if (!tileId)
+            {
+                return Tina::Core::failure(std::move(tileId.error()));
+            }
+            counters_->lastSelectedTileId = *tileId;
         }
         return Tina::Core::success();
     }
@@ -2161,17 +2331,10 @@ class TileMapBgfxState final : public Tina::IGameState {
         if (resources_->controller && resources_->grid)
         {
             // Hermetic product demo: after first ground contact, walk right until wall.
-            // Keyboard MoveLeft/MoveRight bindings remain available for interactive runs
-            // and override the scripted walk when held.
-            float wishX = 0.0f;
-            if (context.frameActions().isHeld(MoveLeftAction))
-            {
-                wishX -= DemoWalkSpeedMetersPerSecond;
-            }
-            if (context.frameActions().isHeld(MoveRightAction))
-            {
-                wishX += DemoWalkSpeedMetersPerSecond;
-            }
+            // Keyboard and LeftX contributions share scalar Move Actions.
+            const float moveLeft = context.frameActions().value(MoveLeftAction);
+            const float moveRight = context.frameActions().value(MoveRightAction);
+            float wishX = (moveRight - moveLeft) * DemoWalkSpeedMetersPerSecond;
             if (wishX == 0.0f && counters_->controllerGroundedFrames > 0)
             {
                 wishX = DemoWalkSpeedMetersPerSecond;
@@ -2269,9 +2432,20 @@ class TileMapBgfxState final : public Tina::IGameState {
             }
             for (const auto& begin : contacts->beginEvents)
             {
-                if (begin.bodyA == resources_->dynamicBody || begin.bodyB == resources_->dynamicBody)
+                if (begin.isSensor && begin.shapeA == resources_->sensorShape)
+                {
+                    ++counters_->physicsSensorEnters;
+                }
+                else if (begin.bodyA == resources_->dynamicBody || begin.bodyB == resources_->dynamicBody)
                 {
                     ++counters_->physicsDynamicContacts;
+                }
+            }
+            for (const auto& end : contacts->endEvents)
+            {
+                if (end.isSensor && end.shapeA == resources_->sensorShape)
+                {
+                    ++counters_->physicsSensorExits;
                 }
             }
             if (auto state = resources_->physicsWorld->bodyState(resources_->dynamicBody); state)
@@ -2428,8 +2602,8 @@ class TileMapBgfxState final : public Tina::IGameState {
         // Still emit all visible sprites for the visual product path. Dirty cache
         // runs in parallel as the CPU revision gate (M11-B1 evidence).
         auto emitted = Tina::Asset::emitVisibleTileMapSprites(
-            *resources_->map, query, Tina::Asset::TileChunkSpriteEmitParams{.spriteKey = ProductTileSpriteKey},
-            tileSprites);
+            *resources_->map, VisualTileLayerId, query,
+            Tina::Asset::TileChunkSpriteEmitParams{.spriteKey = ProductTileSpriteKey}, tileSprites);
         if (!emitted)
         {
             return Tina::Core::failure(std::move(emitted.error()));
@@ -2446,8 +2620,8 @@ class TileMapBgfxState final : public Tina::IGameState {
         {
             const auto statsBefore = resources_->chunkDirtyCache->stats();
             resources_->chunkDirtyRebuilt.clear();
-            auto rebuilds =
-                resources_->chunkDirtyCache->syncVisible(*resources_->map, query, resources_->chunkDirtyRebuilt);
+            auto rebuilds = resources_->chunkDirtyCache->syncVisible(
+                *resources_->map, VisualTileLayerId, query, resources_->chunkDirtyRebuilt);
             if (!rebuilds)
             {
                 return Tina::Core::failure(std::move(rebuilds.error()));
@@ -2644,27 +2818,45 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
     config.primaryWindow.initiallyVisible = true;
     config.renderSceneCapacities.spriteCapacity = 64;
     // A/D + arrows for interactive walk; automated smoke uses scripted walk after land.
-    config.inputActions.digitalBindings.push_back(Tina::DigitalActionBinding{
+    config.inputActions.bindings.push_back(Tina::InputActionBinding{
         .input = Tina::PrimaryWindowKeyBinding{.key = Tina::Platform::Key::A},
         .action = MoveLeftAction,
         .domain = Tina::InputActionDomain::Frame,
     });
-    config.inputActions.digitalBindings.push_back(Tina::DigitalActionBinding{
+    config.inputActions.bindings.push_back(Tina::InputActionBinding{
         .input = Tina::PrimaryWindowKeyBinding{.key = Tina::Platform::Key::Left},
         .action = MoveLeftAction,
         .domain = Tina::InputActionDomain::Frame,
     });
-    config.inputActions.digitalBindings.push_back(Tina::DigitalActionBinding{
+    config.inputActions.bindings.push_back(Tina::InputActionBinding{
+        .input = Tina::StandardGamepadAxisBinding{
+            .axis = Tina::Platform::GamepadAxis::LeftX,
+            .valueMode = Tina::GamepadAxisValueMode::NegativeHalf,
+        },
+        .action = MoveLeftAction,
+        .domain = Tina::InputActionDomain::Frame,
+        .deadzone = 0.2F,
+    });
+    config.inputActions.bindings.push_back(Tina::InputActionBinding{
         .input = Tina::PrimaryWindowKeyBinding{.key = Tina::Platform::Key::D},
         .action = MoveRightAction,
         .domain = Tina::InputActionDomain::Frame,
     });
-    config.inputActions.digitalBindings.push_back(Tina::DigitalActionBinding{
+    config.inputActions.bindings.push_back(Tina::InputActionBinding{
         .input = Tina::PrimaryWindowKeyBinding{.key = Tina::Platform::Key::Right},
         .action = MoveRightAction,
         .domain = Tina::InputActionDomain::Frame,
     });
-    config.inputActions.digitalBindings.push_back(Tina::DigitalActionBinding{
+    config.inputActions.bindings.push_back(Tina::InputActionBinding{
+        .input = Tina::StandardGamepadAxisBinding{
+            .axis = Tina::Platform::GamepadAxis::LeftX,
+            .valueMode = Tina::GamepadAxisValueMode::PositiveHalf,
+        },
+        .action = MoveRightAction,
+        .domain = Tina::InputActionDomain::Frame,
+        .deadzone = 0.2F,
+    });
+    config.inputActions.bindings.push_back(Tina::InputActionBinding{
         .input = Tina::PrimaryPointerButtonBinding{
             .pointer = Tina::Platform::PrimaryPointerId,
             .button = Tina::Platform::PointerButton::Primary,
@@ -2834,6 +3026,7 @@ int main(int argc, char** argv)
               cameraFollowValid && chunkDirtyValid && audioValid && audioDeviceValid && characterAnimationValid &&
               counters.catalogFromRecipeFile &&
               counters.catalogRecipeAssets == ExpectedCatalogRecipeAssets &&
+              counters.objectLayerConsumed && counters.objectLayerObjectCount == 2U &&
               counters.texturesUploaded == ExpectedUploadedTextures &&
               counters.lastTileSprites == ExpectedNonEmptyTiles && counters.lastTotalSprites == expectedTotalSprites &&
               counters.controllerGroundedFrames > 0 && counters.controllerWalkFrames > 0 &&
@@ -2864,6 +3057,8 @@ int main(int argc, char** argv)
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     ok = ok && counters.physicsReady && counters.physicsStaticBodies == ExpectedPhysicsStaticBodies &&
          counters.physicsSteps == counters.frameUpdates && counters.physicsDynamicContacts > 0 &&
+         counters.physicsSensorEnters > 0 && counters.physicsSensorExits > 0 &&
+         counters.physicsJointReady &&
          counters.lastDynamicY < 3.5f && counters.lastDynamicY > 0.5f;
 #endif
     // M11-D1: require a successful primary-frame RGBA8 capture when the device supports it.
@@ -2920,9 +3115,15 @@ int main(int argc, char** argv)
     appendF32Bits(evidenceBytes, counters.lastCameraWorldHeight);
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     appendLeU64(evidenceBytes, counters.physicsStaticBodies);
+    appendLeU64(evidenceBytes, counters.physicsSensorEnters);
+    appendLeU64(evidenceBytes, counters.physicsSensorExits);
+    appendLeU32(evidenceBytes, counters.physicsJointReady ? 1U : 0U);
     appendLeU32(evidenceBytes, 1U);
 #else
     appendLeU64(evidenceBytes, 0U);
+    appendLeU64(evidenceBytes, 0U);
+    appendLeU64(evidenceBytes, 0U);
+    appendLeU32(evidenceBytes, 0U);
     appendLeU32(evidenceBytes, 0U);
 #endif
 #if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
@@ -3025,6 +3226,9 @@ int main(int argc, char** argv)
                   << ",\"physicsSteps\":" << counters.physicsSteps
                   << ",\"physicsStatics\":" << counters.physicsStaticBodies
                   << ",\"physicsDynamicContacts\":" << counters.physicsDynamicContacts
+                  << ",\"physicsSensorEnters\":" << counters.physicsSensorEnters
+                  << ",\"physicsSensorExits\":" << counters.physicsSensorExits
+                  << ",\"physicsJointReady\":" << (counters.physicsJointReady ? "true" : "false")
                   << ",\"dynamicY\":" << counters.lastDynamicY
 #endif
                   << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
@@ -3050,6 +3254,8 @@ int main(int argc, char** argv)
               << ",\"minimumWindowVisibilityMs\":" << minimumWindowVisibilityMilliseconds(*options)
               << ",\"catalogFromRecipeFile\":" << (counters.catalogFromRecipeFile ? "true" : "false")
               << ",\"catalogRecipeAssets\":" << counters.catalogRecipeAssets
+              << ",\"objectLayerConsumed\":" << (counters.objectLayerConsumed ? "true" : "false")
+              << ",\"objectLayerObjects\":" << counters.objectLayerObjectCount
               << ",\"texturesUploaded\":" << counters.texturesUploaded
               << ",\"tileSpritesPerFrame\":" << ExpectedNonEmptyTiles
               << ",\"spritesPerFrame\":" << expectedTotalSprites
@@ -3182,6 +3388,9 @@ int main(int argc, char** argv)
               << ",\"physicsSteps\":" << counters.physicsSteps
               << ",\"physicsStaticBodies\":" << counters.physicsStaticBodies
               << ",\"physicsDynamicContacts\":" << counters.physicsDynamicContacts
+              << ",\"physicsSensorEnters\":" << counters.physicsSensorEnters
+              << ",\"physicsSensorExits\":" << counters.physicsSensorExits
+              << ",\"physicsJointReady\":" << (counters.physicsJointReady ? "true" : "false")
               << ",\"lastDynamicY\":" << counters.lastDynamicY
 #else
               << ",\"physicsEnabled\":false"

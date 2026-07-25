@@ -10,8 +10,8 @@
 
 namespace {
 
-using Tina::DigitalActionTransition;
-using Tina::DigitalActionTransitionKind;
+using Tina::InputActionTransition;
+using Tina::InputActionTransitionKind;
 using Tina::InputActionId;
 using Tina::SimulationActionTransition;
 using Tina::Render::WorldPointerSample;
@@ -22,13 +22,14 @@ using Tina::Sample2D::consumeTileSelectionTransitions;
 inline constexpr InputActionId SelectTileAction{3};
 inline constexpr TileSelectionGrid SampleGrid{8, 4, 1.0F};
 
-[[nodiscard]] SimulationActionTransition pointerTransition(DigitalActionTransitionKind kind, InputActionId action,
+[[nodiscard]] SimulationActionTransition pointerTransition(InputActionTransitionKind kind, InputActionId action,
                                                             std::optional<WorldPointerSample> sample,
                                                             Tina::Core::u64 sequence = 1)
 {
-    return DigitalActionTransition{
+    return InputActionTransition{
         .action = action,
         .kind = kind,
+        .value = kind == InputActionTransitionKind::Started ? 1.0F : 0.0F,
         .sourceSequence = sequence,
         .worldPointerSample = std::move(sample),
     };
@@ -49,11 +50,11 @@ inline constexpr TileSelectionGrid SampleGrid{8, 4, 1.0F};
 
 } // namespace
 
-TEST(Sample2DTileSelectionTest, PressedHitSelectsHalfOpenMapCellAndRetainsPayload)
+TEST(Sample2DTileSelectionTest, StartedHitSelectsHalfOpenMapCellAndRetainsPayload)
 {
     TileSelectionCounters counters{};
     const auto transitions = std::array{
-        pointerTransition(DigitalActionTransitionKind::Pressed, SelectTileAction, hit(0.99F, 1.01F, 42), 42),
+        pointerTransition(InputActionTransitionKind::Started, SelectTileAction, hit(0.99F, 1.01F, 42), 42),
     };
 
     consumeTileSelectionTransitions(transitions, SelectTileAction, TileSelectionGrid{8, 4, 0.5F}, counters);
@@ -81,11 +82,11 @@ TEST(Sample2DTileSelectionTest, ViewportAndMapMissesDoNotSelect)
     TileSelectionCounters counters{};
     const auto noHit = WorldPointerSample{.inputSequence = 2, .hit = false};
     const auto transitions = std::array{
-        pointerTransition(DigitalActionTransitionKind::Pressed, SelectTileAction, noHit, 2),
-        pointerTransition(DigitalActionTransitionKind::Pressed, SelectTileAction, hit(-0.01F, 1.0F, 3), 3),
-        pointerTransition(DigitalActionTransitionKind::Pressed, SelectTileAction, hit(8.0F, 1.0F, 4), 4),
-        pointerTransition(DigitalActionTransitionKind::Pressed, SelectTileAction, hit(1.0F, 4.0F, 5), 5),
-        pointerTransition(DigitalActionTransitionKind::Pressed, SelectTileAction,
+        pointerTransition(InputActionTransitionKind::Started, SelectTileAction, noHit, 2),
+        pointerTransition(InputActionTransitionKind::Started, SelectTileAction, hit(-0.01F, 1.0F, 3), 3),
+        pointerTransition(InputActionTransitionKind::Started, SelectTileAction, hit(8.0F, 1.0F, 4), 4),
+        pointerTransition(InputActionTransitionKind::Started, SelectTileAction, hit(1.0F, 4.0F, 5), 5),
+        pointerTransition(InputActionTransitionKind::Started, SelectTileAction,
                          hit(std::numeric_limits<float>::quiet_NaN(), 1.0F, 6), 6),
     };
 
@@ -98,14 +99,14 @@ TEST(Sample2DTileSelectionTest, ViewportAndMapMissesDoNotSelect)
     EXPECT_FALSE(counters.lastSelection.has_value());
 }
 
-TEST(Sample2DTileSelectionTest, IgnoresNonPressedOtherActionsMissingPayloadAndCatchUpBatch)
+TEST(Sample2DTileSelectionTest, IgnoresNonStartedOtherActionsMissingPayloadAndCatchUpBatch)
 {
     TileSelectionCounters counters{};
     const auto transitions = std::array{
-        pointerTransition(DigitalActionTransitionKind::Released, SelectTileAction, hit(1.0F, 1.0F), 1),
-        pointerTransition(DigitalActionTransitionKind::Cancelled, SelectTileAction, hit(1.0F, 1.0F), 2),
-        pointerTransition(DigitalActionTransitionKind::Pressed, InputActionId{99}, hit(1.0F, 1.0F), 3),
-        pointerTransition(DigitalActionTransitionKind::Pressed, SelectTileAction, std::nullopt, 4),
+        pointerTransition(InputActionTransitionKind::Completed, SelectTileAction, hit(1.0F, 1.0F), 1),
+        pointerTransition(InputActionTransitionKind::Cancelled, SelectTileAction, hit(1.0F, 1.0F), 2),
+        pointerTransition(InputActionTransitionKind::Started, InputActionId{99}, hit(1.0F, 1.0F), 3),
+        pointerTransition(InputActionTransitionKind::Started, SelectTileAction, std::nullopt, 4),
     };
 
     consumeTileSelectionTransitions(transitions, SelectTileAction, SampleGrid, counters);

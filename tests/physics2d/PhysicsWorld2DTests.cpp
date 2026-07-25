@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -87,6 +88,7 @@ void expectFailureCode(const Result& result, Core::ErrorCode expectedCode)
     PhysicsWorld2DConfig config;
     config.bodyCapacity = bodyCapacity;
     config.shapeCapacity = shapeCapacity;
+    config.jointCapacity = 4;
     config.contactBeginCapacity = contactBeginCapacity;
     config.contactEndCapacity = contactEndCapacity;
     config.contactHitCapacity = contactHitCapacity;
@@ -117,12 +119,35 @@ template <typename Id>
     return desc;
 }
 
-[[nodiscard]] PhysicsBoxShape2DDesc unitBox() noexcept
+[[nodiscard]] PhysicsShape2DDesc unitBox() noexcept
 {
-    PhysicsBoxShape2DDesc desc;
+    PhysicsShape2DDesc desc;
+    desc.kind = PhysicsShapeKind2D::Box;
     desc.halfExtentsMeters = {0.5F, 0.5F};
     desc.density = 1.0F;
     return desc;
+}
+
+struct CreatedBodyShape final {
+    PhysicsBodyId body{};
+    PhysicsShapeId shape{};
+};
+
+[[nodiscard]] Core::Result<CreatedBodyShape> createBodyWithShape(
+    PhysicsWorld2D& world,
+    const PhysicsBody2DDesc& bodyDescription,
+    const PhysicsShape2DDesc& shapeDescription)
+{
+    auto body = world.createBody(bodyDescription);
+    if (!body) {
+        return Core::failure(std::move(body.error()));
+    }
+    auto shape = world.createShape(*body, shapeDescription);
+    if (!shape) {
+        (void)world.destroyBody(*body);
+        return Core::failure(std::move(shape.error()));
+    }
+    return CreatedBodyShape{.body = *body, .shape = *shape};
 }
 
 TEST(PhysicsWorld2DTest, ValidatesWorldConfigBeforeCreatingBackendState)
@@ -136,6 +161,10 @@ TEST(PhysicsWorld2DTest, ValidatesWorldConfigBeforeCreatingBackendState)
 
     config = smallConfig();
     config.shapeCapacity = 0;
+    expectFailureCode(validatePhysicsWorld2DConfig(config), Physics2DErrorCode::InvalidConfiguration);
+
+    config = smallConfig();
+    config.jointCapacity = 0;
     expectFailureCode(validatePhysicsWorld2DConfig(config), Physics2DErrorCode::InvalidConfiguration);
 
     config = smallConfig();
@@ -162,7 +191,7 @@ TEST(PhysicsWorld2DTest, ValidatesWorldConfigBeforeCreatingBackendState)
 TEST(PhysicsWorld2DTest, ValidatesBodyAndShapeDescriptions)
 {
     EXPECT_TRUE(validatePhysicsBody2DDesc(dynamicBody()));
-    EXPECT_TRUE(validatePhysicsBoxShape2DDesc(unitBox()));
+    EXPECT_TRUE(validatePhysicsShape2DDesc(unitBox()));
 
     PhysicsBody2DDesc body = dynamicBody();
     body.type = static_cast<PhysicsBodyType2D>(255);
@@ -180,25 +209,25 @@ TEST(PhysicsWorld2DTest, ValidatesBodyAndShapeDescriptions)
     body.linearDamping = -0.01F;
     expectFailureCode(validatePhysicsBody2DDesc(body), Physics2DErrorCode::InvalidBodyDescription);
 
-    PhysicsBoxShape2DDesc shape = unitBox();
+    PhysicsShape2DDesc shape = unitBox();
     shape.halfExtentsMeters.y = 0.0F;
-    expectFailureCode(validatePhysicsBoxShape2DDesc(shape), Physics2DErrorCode::InvalidShapeDescription);
+    expectFailureCode(validatePhysicsShape2DDesc(shape), Physics2DErrorCode::InvalidShapeDescription);
 
     shape = unitBox();
     shape.density = -1.0F;
-    expectFailureCode(validatePhysicsBoxShape2DDesc(shape), Physics2DErrorCode::InvalidShapeDescription);
+    expectFailureCode(validatePhysicsShape2DDesc(shape), Physics2DErrorCode::InvalidShapeDescription);
 
     shape = unitBox();
     shape.friction = 1.01F;
-    expectFailureCode(validatePhysicsBoxShape2DDesc(shape), Physics2DErrorCode::InvalidShapeDescription);
+    expectFailureCode(validatePhysicsShape2DDesc(shape), Physics2DErrorCode::InvalidShapeDescription);
 
     shape = unitBox();
     shape.restitution = -0.01F;
-    expectFailureCode(validatePhysicsBoxShape2DDesc(shape), Physics2DErrorCode::InvalidShapeDescription);
+    expectFailureCode(validatePhysicsShape2DDesc(shape), Physics2DErrorCode::InvalidShapeDescription);
 
     shape = unitBox();
     shape.filter.categoryBits = 0;
-    expectFailureCode(validatePhysicsBoxShape2DDesc(shape), Physics2DErrorCode::InvalidShapeDescription);
+    expectFailureCode(validatePhysicsShape2DDesc(shape), Physics2DErrorCode::InvalidShapeDescription);
 }
 
 TEST(PhysicsWorld2DTest, InvalidDescriptionsDoNotConsumeCapacity)
@@ -209,20 +238,20 @@ TEST(PhysicsWorld2DTest, InvalidDescriptionsDoNotConsumeCapacity)
 
     PhysicsBody2DDesc invalidBody = dynamicBody();
     invalidBody.angularDamping = -1.0F;
-    const auto bodyFailure = world.createBoxBody(invalidBody, unitBox());
+    const auto bodyFailure = createBodyWithShape(world, invalidBody, unitBox());
     expectFailureCode(bodyFailure, Physics2DErrorCode::InvalidBodyDescription);
     EXPECT_EQ(world.stats().bodyCount, 0U);
     EXPECT_EQ(world.stats().shapeCount, 0U);
 
-    PhysicsBoxShape2DDesc invalidShape = unitBox();
+    PhysicsShape2DDesc invalidShape = unitBox();
     invalidShape.filter.categoryBits = 0;
-    const auto shapeFailure = world.createBoxBody(dynamicBody(), invalidShape);
+    const auto shapeFailure = createBodyWithShape(world, dynamicBody(), invalidShape);
     expectFailureCode(shapeFailure, Physics2DErrorCode::InvalidShapeDescription);
     EXPECT_EQ(world.stats().bodyCount, 0U);
     EXPECT_EQ(world.stats().shapeCount, 0U);
 
-    ASSERT_TRUE(world.createBoxBody(dynamicBody(), unitBox()));
-    const auto capacityFailure = world.createBoxBody(dynamicBody(), unitBox());
+    ASSERT_TRUE(createBodyWithShape(world, dynamicBody(), unitBox()));
+    const auto capacityFailure = createBodyWithShape(world, dynamicBody(), unitBox());
     expectFailureCode(capacityFailure, Physics2DErrorCode::CapacityExceeded);
     EXPECT_EQ(world.stats().bodyCount, 1U);
     EXPECT_EQ(world.stats().shapeCount, 1U);
@@ -230,7 +259,7 @@ TEST(PhysicsWorld2DTest, InvalidDescriptionsDoNotConsumeCapacity)
 
 TEST(PhysicsWorld2DTest, RollsBackPmrStorageWhenWorldConstructionFails)
 {
-    // Create allocates: body pool, shape pool, begin/end/hit contact buffers,
+    // Create allocates: body/shape/joint pools, begin/end/hit contact buffers,
     // shape tombstones, deferred command buffer, then Impl storage.
     const PhysicsWorld2DConfig config = smallConfig(2, 2);
 
@@ -246,20 +275,26 @@ TEST(PhysicsWorld2DTest, RollsBackPmrStorageWhenWorldConstructionFails)
     EXPECT_EQ(shapePoolFailure.outstandingAllocations(), 0U);
     EXPECT_EQ(shapePoolFailure.outstandingBytes(), 0U);
 
-    FailAfterSuccessfulAllocationsResource contactBufferFailure(2);
+    FailAfterSuccessfulAllocationsResource jointPoolFailure(2);
+    const auto jointPoolResult = PhysicsWorld2D::Create(config, jointPoolFailure);
+    EXPECT_FALSE(jointPoolResult);
+    EXPECT_EQ(jointPoolFailure.outstandingAllocations(), 0U);
+    EXPECT_EQ(jointPoolFailure.outstandingBytes(), 0U);
+
+    FailAfterSuccessfulAllocationsResource contactBufferFailure(3);
     const auto contactBufferResult = PhysicsWorld2D::Create(config, contactBufferFailure);
     EXPECT_FALSE(contactBufferResult);
     EXPECT_EQ(contactBufferFailure.outstandingAllocations(), 0U);
     EXPECT_EQ(contactBufferFailure.outstandingBytes(), 0U);
 
-    FailAfterSuccessfulAllocationsResource implFailure(7);
+    FailAfterSuccessfulAllocationsResource implFailure(8);
     const auto implResult = PhysicsWorld2D::Create(config, implFailure);
     expectFailureCode(implResult, Physics2DErrorCode::CapacityExceeded);
     EXPECT_EQ(implFailure.outstandingAllocations(), 0U);
     EXPECT_EQ(implFailure.outstandingBytes(), 0U);
 }
 
-TEST(PhysicsWorld2DTest, AtomicallyCreatesBodyAndBoxShapeWithOwningGenerationIds)
+TEST(PhysicsWorld2DTest, CreatesBodyAndBoxShapeWithIndependentOwningGenerationIds)
 {
     auto worldResult = PhysicsWorld2D::Create(smallConfig(2, 3));
     ASSERT_TRUE(worldResult) << worldResult.error().message;
@@ -269,9 +304,9 @@ TEST(PhysicsWorld2DTest, AtomicallyCreatesBodyAndBoxShapeWithOwningGenerationIds
     body.angleRadians = 0.25F;
     body.angularVelocityRadiansPerSecond = 0.5F;
 
-    auto createdResult = world.createBoxBody(body, unitBox());
+    auto createdResult = createBodyWithShape(world, body, unitBox());
     ASSERT_TRUE(createdResult) << createdResult.error().message;
-    const PhysicsBodyShape2D created = *createdResult;
+    const CreatedBodyShape created = *createdResult;
 
     EXPECT_TRUE(world.contains(created.body));
     EXPECT_TRUE(world.contains(created.shape));
@@ -299,6 +334,172 @@ TEST(PhysicsWorld2DTest, AtomicallyCreatesBodyAndBoxShapeWithOwningGenerationIds
     EXPECT_TRUE(state.enabled);
 }
 
+TEST(PhysicsWorld2DTest, SupportsMultipleBoxCircleAndCapsuleShapesPerBody)
+{
+    PhysicsWorld2DConfig config = smallConfig(1, 3);
+    auto worldResult = PhysicsWorld2D::Create(config);
+    ASSERT_TRUE(worldResult) << worldResult.error().message;
+    PhysicsWorld2D world = std::move(*worldResult);
+
+    auto body = world.createBody(dynamicBody());
+    ASSERT_TRUE(body) << body.error().message;
+
+    PhysicsShape2DDesc box = unitBox();
+    box.filter.categoryBits = 0x2U;
+    auto boxShape = world.createShape(*body, box);
+    ASSERT_TRUE(boxShape) << boxShape.error().message;
+
+    PhysicsShape2DDesc circle;
+    circle.kind = PhysicsShapeKind2D::Circle;
+    circle.radiusMeters = 0.25F;
+    circle.localCenterMeters = {0.75F, 0.0F};
+    auto circleShape = world.createShape(*body, circle);
+    ASSERT_TRUE(circleShape) << circleShape.error().message;
+
+    PhysicsShape2DDesc capsule;
+    capsule.kind = PhysicsShapeKind2D::Capsule;
+    capsule.radiusMeters = 0.2F;
+    capsule.localPointAMeters = {-0.5F, 0.5F};
+    capsule.localPointBMeters = {0.5F, 0.5F};
+    auto capsuleShape = world.createShape(*body, capsule);
+    ASSERT_TRUE(capsuleShape) << capsuleShape.error().message;
+
+    EXPECT_EQ(world.stats().bodyCount, 1U);
+    EXPECT_EQ(world.stats().shapeCount, 3U);
+    for (const PhysicsShapeId shape : {*boxShape, *circleShape, *capsuleShape}) {
+        auto owner = world.shapeBody(shape);
+        ASSERT_TRUE(owner) << owner.error().message;
+        EXPECT_EQ(*owner, *body);
+    }
+
+    auto boxState = world.shapeState(*boxShape);
+    auto circleState = world.shapeState(*circleShape);
+    auto capsuleState = world.shapeState(*capsuleShape);
+    ASSERT_TRUE(boxState);
+    ASSERT_TRUE(circleState);
+    ASSERT_TRUE(capsuleState);
+    EXPECT_EQ(boxState->kind, PhysicsShapeKind2D::Box);
+    EXPECT_EQ(boxState->filter.categoryBits, 0x2U);
+    EXPECT_EQ(circleState->kind, PhysicsShapeKind2D::Circle);
+    EXPECT_EQ(capsuleState->kind, PhysicsShapeKind2D::Capsule);
+
+    ASSERT_TRUE(world.destroyShape(*circleShape));
+    EXPECT_FALSE(world.contains(*circleShape));
+    EXPECT_TRUE(world.contains(*boxShape));
+    EXPECT_TRUE(world.contains(*capsuleShape));
+    expectFailureCode(world.shapeState(*circleShape), Physics2DErrorCode::StaleShape);
+
+    ASSERT_TRUE(world.destroyBody(*body));
+    EXPECT_FALSE(world.contains(*boxShape));
+    EXPECT_FALSE(world.contains(*capsuleShape));
+    EXPECT_EQ(world.stats().shapeCount, 0U);
+}
+
+TEST(PhysicsWorld2DTest, PublishesSensorEnterAndExitWithoutContactResponse)
+{
+    PhysicsWorld2DConfig config = smallConfig(2, 2);
+    config.gravityMetersPerSecondSquared = {0.0F, 0.0F};
+    auto worldResult = PhysicsWorld2D::Create(config);
+    ASSERT_TRUE(worldResult) << worldResult.error().message;
+    PhysicsWorld2D world = std::move(*worldResult);
+
+    PhysicsBody2DDesc sensorBodyDescription;
+    sensorBodyDescription.type = PhysicsBodyType2D::Static;
+    auto sensorBody = world.createBody(sensorBodyDescription);
+    ASSERT_TRUE(sensorBody) << sensorBody.error().message;
+    PhysicsShape2DDesc sensorShapeDescription;
+    sensorShapeDescription.kind = PhysicsShapeKind2D::Circle;
+    sensorShapeDescription.radiusMeters = 2.0F;
+    sensorShapeDescription.density = 0.0F;
+    sensorShapeDescription.isSensor = true;
+    sensorShapeDescription.enableSensorEvents = true;
+    auto sensorShape = world.createShape(*sensorBody, sensorShapeDescription);
+    ASSERT_TRUE(sensorShape) << sensorShape.error().message;
+
+    auto visitorBody = world.createBody(dynamicBody());
+    ASSERT_TRUE(visitorBody) << visitorBody.error().message;
+    PhysicsShape2DDesc visitorShapeDescription;
+    visitorShapeDescription.kind = PhysicsShapeKind2D::Circle;
+    visitorShapeDescription.radiusMeters = 0.25F;
+    visitorShapeDescription.enableSensorEvents = true;
+    auto visitorShape = world.createShape(*visitorBody, visitorShapeDescription);
+    ASSERT_TRUE(visitorShape) << visitorShape.error().message;
+
+    ASSERT_TRUE(world.step());
+    auto entered = world.contactEvents();
+    ASSERT_TRUE(entered) << entered.error().message;
+    const auto begin = std::find_if(
+        entered->beginEvents.begin(), entered->beginEvents.end(),
+        [&](const PhysicsContactBeginEvent2D& event) {
+            return event.isSensor && event.bodyA == *sensorBody && event.shapeA == *sensorShape
+                && event.bodyB == *visitorBody && event.shapeB == *visitorShape;
+        });
+    ASSERT_NE(begin, entered->beginEvents.end());
+
+    ASSERT_TRUE(world.enqueueSetTransform(*visitorBody, {10.0F, 0.0F}, 0.0F));
+    bool sawExit = false;
+    for (int stepIndex = 0; stepIndex < 3 && !sawExit; ++stepIndex) {
+        ASSERT_TRUE(world.step());
+        auto exited = world.contactEvents();
+        ASSERT_TRUE(exited) << exited.error().message;
+        sawExit = std::any_of(
+            exited->endEvents.begin(), exited->endEvents.end(),
+            [&](const PhysicsContactEndEvent2D& event) {
+                return event.isSensor && event.bodyA == *sensorBody && event.shapeA == *sensorShape
+                    && event.bodyB == *visitorBody && event.shapeB == *visitorShape;
+            });
+    }
+    EXPECT_TRUE(sawExit);
+}
+
+TEST(PhysicsWorld2DTest, DistanceJointLifecycleUsesGenerationHandles)
+{
+    PhysicsWorld2DConfig config = smallConfig(3, 3);
+    config.jointCapacity = 1;
+    config.gravityMetersPerSecondSquared = {0.0F, 0.0F};
+    auto worldResult = PhysicsWorld2D::Create(config);
+    ASSERT_TRUE(worldResult) << worldResult.error().message;
+    PhysicsWorld2D world = std::move(*worldResult);
+
+    auto bodyA = world.createBody(dynamicBody({0.0F, 0.0F}));
+    auto bodyB = world.createBody(dynamicBody({2.0F, 0.0F}));
+    ASSERT_TRUE(bodyA);
+    ASSERT_TRUE(bodyB);
+
+    PhysicsJoint2DDesc jointDescription;
+    jointDescription.bodyA = *bodyA;
+    jointDescription.bodyB = *bodyB;
+    jointDescription.lengthMeters = 2.0F;
+    jointDescription.enableSpring = true;
+    jointDescription.hertz = 4.0F;
+    jointDescription.dampingRatio = 0.5F;
+    auto firstJoint = world.createJoint(jointDescription);
+    ASSERT_TRUE(firstJoint) << firstJoint.error().message;
+    EXPECT_TRUE(world.contains(*firstJoint));
+    EXPECT_EQ(world.stats().jointCount, 1U);
+
+    auto state = world.jointState(*firstJoint);
+    ASSERT_TRUE(state) << state.error().message;
+    EXPECT_EQ(state->bodyA, *bodyA);
+    EXPECT_EQ(state->bodyB, *bodyB);
+    EXPECT_NEAR(state->lengthMeters, 2.0F, 1.0e-4F);
+    EXPECT_TRUE(state->springEnabled);
+
+    expectFailureCode(world.createJoint(jointDescription), Physics2DErrorCode::CapacityExceeded);
+    ASSERT_TRUE(world.destroyJoint(*firstJoint));
+    expectFailureCode(world.jointState(*firstJoint), Physics2DErrorCode::StaleJoint);
+
+    auto reusedJoint = world.createJoint(jointDescription);
+    ASSERT_TRUE(reusedJoint) << reusedJoint.error().message;
+    EXPECT_EQ(reusedJoint->index(), firstJoint->index());
+    EXPECT_NE(reusedJoint->generation(), firstJoint->generation());
+
+    ASSERT_TRUE(world.destroyBody(*bodyA));
+    EXPECT_FALSE(world.contains(*reusedJoint));
+    expectFailureCode(world.destroyJoint(*reusedJoint), Physics2DErrorCode::StaleJoint);
+    EXPECT_TRUE(world.contains(*bodyB));
+}
+
 TEST(PhysicsWorld2DTest, AdvancesByTheConfiguredFixedStepOnly)
 {
     PhysicsWorld2DConfig config = smallConfig(1, 1);
@@ -309,7 +510,7 @@ TEST(PhysicsWorld2DTest, AdvancesByTheConfiguredFixedStepOnly)
     ASSERT_TRUE(worldResult) << worldResult.error().message;
     PhysicsWorld2D world = std::move(*worldResult);
 
-    auto created = world.createBoxBody(dynamicBody({2.0F, 3.0F}, {4.0F, -2.0F}), unitBox());
+    auto created = createBodyWithShape(world, dynamicBody({2.0F, 3.0F}, {4.0F, -2.0F}), unitBox());
     ASSERT_TRUE(created) << created.error().message;
 
     EXPECT_EQ(world.stats().completedStepCount, 0U);
@@ -331,8 +532,8 @@ TEST(PhysicsWorld2DTest, RejectsStaleAndCrossWorldBodyAndShapeHandles)
     PhysicsWorld2D first = std::move(*firstResult);
     PhysicsWorld2D second = std::move(*secondResult);
 
-    auto firstPair = first.createBoxBody(dynamicBody(), unitBox());
-    auto secondPair = second.createBoxBody(dynamicBody(), unitBox());
+    auto firstPair = createBodyWithShape(first, dynamicBody(), unitBox());
+    auto secondPair = createBodyWithShape(second, dynamicBody(), unitBox());
     ASSERT_TRUE(firstPair) << firstPair.error().message;
     ASSERT_TRUE(secondPair) << secondPair.error().message;
 
@@ -350,7 +551,7 @@ TEST(PhysicsWorld2DTest, RejectsStaleAndCrossWorldBodyAndShapeHandles)
     expectFailureCode(first.bodyState(firstPair->body), Physics2DErrorCode::StaleBody);
     expectFailureCode(first.shapeBody(firstPair->shape), Physics2DErrorCode::StaleShape);
 
-    auto reused = first.createBoxBody(dynamicBody(), unitBox());
+    auto reused = createBodyWithShape(first, dynamicBody(), unitBox());
     ASSERT_TRUE(reused) << reused.error().message;
     EXPECT_EQ(reused->body.owner(), firstPair->body.owner());
     EXPECT_EQ(reused->body.index(), firstPair->body.index());
@@ -366,10 +567,10 @@ TEST(PhysicsWorld2DTest, RollsBackBodyReservationWhenShapeCapacityIsFull)
     ASSERT_TRUE(worldResult) << worldResult.error().message;
     PhysicsWorld2D world = std::move(*worldResult);
 
-    auto first = world.createBoxBody(dynamicBody(), unitBox());
+    auto first = createBodyWithShape(world, dynamicBody(), unitBox());
     ASSERT_TRUE(first) << first.error().message;
 
-    const auto second = world.createBoxBody(dynamicBody(), unitBox());
+    const auto second = createBodyWithShape(world, dynamicBody(), unitBox());
     expectFailureCode(second, Physics2DErrorCode::CapacityExceeded);
     EXPECT_EQ(world.stats().bodyCount, 1U);
     EXPECT_EQ(world.stats().shapeCount, 1U);
@@ -380,7 +581,7 @@ TEST(PhysicsWorld2DTest, RollsBackBodyReservationWhenShapeCapacityIsFull)
     EXPECT_EQ(world.stats().bodyCount, 0U);
     EXPECT_EQ(world.stats().shapeCount, 0U);
 
-    auto retry = world.createBoxBody(dynamicBody(), unitBox());
+    auto retry = createBodyWithShape(world, dynamicBody(), unitBox());
     ASSERT_TRUE(retry) << retry.error().message;
     EXPECT_EQ(world.stats().bodyCount, 1U);
     EXPECT_EQ(world.stats().shapeCount, 1U);
@@ -392,7 +593,7 @@ TEST(PhysicsWorld2DTest, DestroyBodyRetiresItsShapeAndRepeatedDestroyIsStale)
     ASSERT_TRUE(worldResult) << worldResult.error().message;
     PhysicsWorld2D world = std::move(*worldResult);
 
-    auto created = world.createBoxBody(dynamicBody(), unitBox());
+    auto created = createBodyWithShape(world, dynamicBody(), unitBox());
     ASSERT_TRUE(created) << created.error().message;
 
     ASSERT_TRUE(world.destroyBody(created->body));
@@ -410,7 +611,7 @@ TEST(PhysicsWorld2DTest, ShutdownIsIdempotentAndClosesAllOperations)
     ASSERT_TRUE(worldResult) << worldResult.error().message;
     PhysicsWorld2D world = std::move(*worldResult);
 
-    auto created = world.createBoxBody(dynamicBody(), unitBox());
+    auto created = createBodyWithShape(world, dynamicBody(), unitBox());
     ASSERT_TRUE(created) << created.error().message;
 
     ASSERT_TRUE(world.shutdown());
@@ -426,7 +627,7 @@ TEST(PhysicsWorld2DTest, ShutdownIsIdempotentAndClosesAllOperations)
     expectFailureCode(stepStatus, Physics2DErrorCode::WorldClosed);
     expectFailureCode(world.bodyState(created->body), Physics2DErrorCode::WorldClosed);
     expectFailureCode(world.shapeBody(created->shape), Physics2DErrorCode::WorldClosed);
-    expectFailureCode(world.createBoxBody(dynamicBody(), unitBox()), Physics2DErrorCode::WorldClosed);
+    expectFailureCode(createBodyWithShape(world, dynamicBody(), unitBox()), Physics2DErrorCode::WorldClosed);
 }
 
 TEST(PhysicsWorld2DTest, MoveTransfersOwnershipAndLeavesSourceClosed)
@@ -435,7 +636,7 @@ TEST(PhysicsWorld2DTest, MoveTransfersOwnershipAndLeavesSourceClosed)
     ASSERT_TRUE(sourceResult) << sourceResult.error().message;
     PhysicsWorld2D source = std::move(*sourceResult);
 
-    auto created = source.createBoxBody(dynamicBody(), unitBox());
+    auto created = createBodyWithShape(source, dynamicBody(), unitBox());
     ASSERT_TRUE(created) << created.error().message;
 
     PhysicsWorld2D destination(std::move(source));
@@ -454,7 +655,7 @@ TEST(PhysicsWorld2DTest, RejectsOwnerThreadViolationsWithoutMutatingWorld)
     ASSERT_TRUE(worldResult) << worldResult.error().message;
     PhysicsWorld2D world = std::move(*worldResult);
 
-    auto created = world.createBoxBody(dynamicBody(), unitBox());
+    auto created = createBodyWithShape(world, dynamicBody(), unitBox());
     ASSERT_TRUE(created) << created.error().message;
 
     struct ObservedErrors final {
@@ -470,7 +671,7 @@ TEST(PhysicsWorld2DTest, RejectsOwnerThreadViolationsWithoutMutatingWorld)
     std::thread worker([&] {
         ObservedErrors local;
 
-        const auto createResult = world.createBoxBody(dynamicBody(), unitBox());
+        const auto createResult = createBodyWithShape(world, dynamicBody(), unitBox());
         if (!createResult) {
             local.create = createResult.error().code;
         }
@@ -531,7 +732,7 @@ TEST(PhysicsWorld2DTest, ReleasesAllTinaOwnedMemoryToThePhysicsTag)
         ASSERT_TRUE(worldResult) << worldResult.error().message;
         PhysicsWorld2D world = std::move(*worldResult);
 
-        auto created = world.createBoxBody(dynamicBody(), unitBox());
+        auto created = createBodyWithShape(world, dynamicBody(), unitBox());
         ASSERT_TRUE(created) << created.error().message;
         EXPECT_GT(tracker.snapshot(Core::MemoryTag::Physics2D).currentBytes, 0U);
 
@@ -558,16 +759,16 @@ TEST(PhysicsWorld2DTest, PublishesBeginAndEndContactEventsAfterStep)
     PhysicsBody2DDesc groundBody;
     groundBody.type = PhysicsBodyType2D::Static;
     groundBody.positionMeters = {0.0F, -1.0F};
-    PhysicsBoxShape2DDesc groundShape = unitBox();
+    PhysicsShape2DDesc groundShape = unitBox();
     groundShape.halfExtentsMeters = {5.0F, 0.5F};
     groundShape.enableContactEvents = true;
 
     PhysicsBody2DDesc fallingBody = dynamicBody({0.0F, 2.0F}, {0.0F, -20.0F});
-    PhysicsBoxShape2DDesc fallingShape = unitBox();
+    PhysicsShape2DDesc fallingShape = unitBox();
     fallingShape.enableContactEvents = true;
 
-    auto ground = world.createBoxBody(groundBody, groundShape);
-    auto falling = world.createBoxBody(fallingBody, fallingShape);
+    auto ground = createBodyWithShape(world, groundBody, groundShape);
+    auto falling = createBodyWithShape(world, fallingBody, fallingShape);
     ASSERT_TRUE(ground) << ground.error().message;
     ASSERT_TRUE(falling) << falling.error().message;
 
@@ -630,21 +831,21 @@ TEST(PhysicsWorld2DTest, ContactBeginOverflowSetsFlagAndDropsTailEvents)
     PhysicsBody2DDesc staticBody;
     staticBody.type = PhysicsBodyType2D::Static;
     staticBody.positionMeters = {0.0F, 0.0F};
-    PhysicsBoxShape2DDesc staticShape = unitBox();
+    PhysicsShape2DDesc staticShape = unitBox();
     staticShape.halfExtentsMeters = {3.0F, 0.5F};
     staticShape.enableContactEvents = true;
 
-    auto platform = world.createBoxBody(staticBody, staticShape);
+    auto platform = createBodyWithShape(world, staticBody, staticShape);
     ASSERT_TRUE(platform) << platform.error().message;
 
     PhysicsBody2DDesc left = dynamicBody({-0.75F, 1.5F}, {0.0F, -30.0F});
     PhysicsBody2DDesc right = dynamicBody({0.75F, 1.5F}, {0.0F, -30.0F});
-    PhysicsBoxShape2DDesc box = unitBox();
+    PhysicsShape2DDesc box = unitBox();
     box.halfExtentsMeters = {0.4F, 0.4F};
     box.enableContactEvents = true;
 
-    auto leftBody = world.createBoxBody(left, box);
-    auto rightBody = world.createBoxBody(right, box);
+    auto leftBody = createBodyWithShape(world, left, box);
+    auto rightBody = createBodyWithShape(world, right, box);
     ASSERT_TRUE(leftBody) << leftBody.error().message;
     ASSERT_TRUE(rightBody) << rightBody.error().message;
 
@@ -680,7 +881,7 @@ TEST(PhysicsWorld2DTest, ContactEventsViewClearsOnNextStepWithoutNewContacts)
     ASSERT_TRUE(worldResult) << worldResult.error().message;
     PhysicsWorld2D world = std::move(*worldResult);
 
-    auto created = world.createBoxBody(dynamicBody({0.0F, 0.0F}), unitBox());
+    auto created = createBodyWithShape(world, dynamicBody({0.0F, 0.0F}), unitBox());
     ASSERT_TRUE(created) << created.error().message;
     ASSERT_TRUE(world.step());
 
@@ -712,11 +913,11 @@ TEST(PhysicsWorld2DTest, OverlapAabbReturnsSortedHitsAndReportsOverflow)
     staticBody.type = PhysicsBodyType2D::Static;
 
     staticBody.positionMeters = {-1.0F, 0.0F};
-    auto left = world.createBoxBody(staticBody, unitBox());
+    auto left = createBodyWithShape(world, staticBody, unitBox());
     staticBody.positionMeters = {1.0F, 0.0F};
-    auto right = world.createBoxBody(staticBody, unitBox());
+    auto right = createBodyWithShape(world, staticBody, unitBox());
     staticBody.positionMeters = {10.0F, 10.0F};
-    auto farAway = world.createBoxBody(staticBody, unitBox());
+    auto farAway = createBodyWithShape(world, staticBody, unitBox());
     ASSERT_TRUE(left) << left.error().message;
     ASSERT_TRUE(right) << right.error().message;
     ASSERT_TRUE(farAway) << farAway.error().message;
@@ -765,9 +966,9 @@ TEST(PhysicsWorld2DTest, CastRayFindsHitsAndClosestIsStable)
     PhysicsBody2DDesc staticBody;
     staticBody.type = PhysicsBodyType2D::Static;
     staticBody.positionMeters = {2.0F, 0.0F};
-    auto nearBody = world.createBoxBody(staticBody, unitBox());
+    auto nearBody = createBodyWithShape(world, staticBody, unitBox());
     staticBody.positionMeters = {5.0F, 0.0F};
-    auto farBody = world.createBoxBody(staticBody, unitBox());
+    auto farBody = createBodyWithShape(world, staticBody, unitBox());
     ASSERT_TRUE(nearBody) << nearBody.error().message;
     ASSERT_TRUE(farBody) << farBody.error().message;
 
@@ -813,7 +1014,7 @@ TEST(PhysicsWorld2DTest, DeferredCommandsApplyBeforeStepInFifoOrder)
     ASSERT_TRUE(worldResult) << worldResult.error().message;
     PhysicsWorld2D world = std::move(*worldResult);
 
-    auto created = world.createBoxBody(dynamicBody({0.0F, 0.0F}), unitBox());
+    auto created = createBodyWithShape(world, dynamicBody({0.0F, 0.0F}), unitBox());
     ASSERT_TRUE(created) << created.error().message;
 
     ASSERT_TRUE(world.enqueueSetLinearVelocity(created->body, {6.0F, 0.0F}));
@@ -840,7 +1041,7 @@ TEST(PhysicsWorld2DTest, DeferredDestroyAndCapacityAndStaleSkip)
     ASSERT_TRUE(worldResult) << worldResult.error().message;
     PhysicsWorld2D world = std::move(*worldResult);
 
-    auto first = world.createBoxBody(dynamicBody({0.0F, 0.0F}), unitBox());
+    auto first = createBodyWithShape(world, dynamicBody({0.0F, 0.0F}), unitBox());
     ASSERT_TRUE(first) << first.error().message;
 
     ASSERT_TRUE(world.enqueueDestroyBody(first->body));
@@ -853,7 +1054,7 @@ TEST(PhysicsWorld2DTest, DeferredDestroyAndCapacityAndStaleSkip)
     EXPECT_FALSE(world.contains(first->body));
     EXPECT_EQ(world.pendingCommandCount(), 0U);
 
-    auto second = world.createBoxBody(dynamicBody({3.0F, 0.0F}), unitBox());
+    auto second = createBodyWithShape(world, dynamicBody({3.0F, 0.0F}), unitBox());
     ASSERT_TRUE(second) << second.error().message;
     ASSERT_TRUE(world.enqueueSetLinearVelocity(second->body, {2.0F, 0.0F}));
     ASSERT_TRUE(world.destroyBody(second->body));

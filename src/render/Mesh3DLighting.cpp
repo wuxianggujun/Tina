@@ -1,0 +1,46 @@
+#include <tina/render/RenderDevice.hpp>
+
+#include <cmath>
+
+namespace Tina::Render {
+
+Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noexcept
+{
+    if (lighting.directionalLights.size() > Mesh3DLightingDesc::MaximumDirectionalLightCount)
+    {
+        return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
+                             "Mesh3D directional light count exceeds the fixed device limit");
+    }
+    if (!std::isfinite(lighting.ambientScale) || lighting.ambientScale < 0.0F)
+    {
+        return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
+                             "Mesh3D ambient scale must be finite and non-negative");
+    }
+
+    for (const Mesh3DDirectionalLight& light : lighting.directionalLights)
+    {
+        if (!std::isfinite(light.directionTowardLightX) ||
+            !std::isfinite(light.directionTowardLightY) ||
+            !std::isfinite(light.directionTowardLightZ) || !std::isfinite(light.colorR) ||
+            !std::isfinite(light.colorG) || !std::isfinite(light.colorB) || light.colorR < 0.0F ||
+            light.colorG < 0.0F || light.colorB < 0.0F)
+        {
+            return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
+                                 "Mesh3D directional light values must be finite and RGB non-negative");
+        }
+
+        const float directionLengthSquared =
+            light.directionTowardLightX * light.directionTowardLightX +
+            light.directionTowardLightY * light.directionTowardLightY +
+            light.directionTowardLightZ * light.directionTowardLightZ;
+        if (directionLengthSquared <= 1.0e-12F)
+        {
+            return Core::failure(RenderErrorCode::InvalidMesh3DLighting,
+                                 "Mesh3D directional light direction must be non-zero");
+        }
+    }
+
+    return Core::success();
+}
+
+} // namespace Tina::Render

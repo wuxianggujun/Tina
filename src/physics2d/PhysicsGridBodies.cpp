@@ -60,7 +60,8 @@ Core::Result<PhysicsQueryWriteResult2D> createStaticBodiesForSolidCells(
     bodyDesc.initiallyAwake = false;
     bodyDesc.enableSleep = true;
 
-    PhysicsBoxShape2DDesc shapeDesc;
+    PhysicsShape2DDesc shapeDesc;
+    shapeDesc.kind = PhysicsShapeKind2D::Box;
     shapeDesc.halfExtentsMeters = {half, half};
     shapeDesc.density = config.density;
     shapeDesc.friction = config.friction;
@@ -73,14 +74,22 @@ Core::Result<PhysicsQueryWriteResult2D> createStaticBodiesForSolidCells(
         bodyDesc.positionMeters = {
             (static_cast<float>(cell.cellX) + 0.5F) * config.cellSizeMeters,
             (static_cast<float>(cell.cellY) + 0.5F) * config.cellSizeMeters};
-        auto createdBody = world.createBoxBody(bodyDesc, shapeDesc);
+        auto createdBody = world.createBody(bodyDesc);
         if (!createdBody) {
             for (const PhysicsBodyId id : created) {
                 (void)world.destroyBody(id);
             }
             return Core::failure(createdBody.error());
         }
-        created.push_back(createdBody->body);
+        auto createdShape = world.createShape(*createdBody, shapeDesc);
+        if (!createdShape) {
+            (void)world.destroyBody(*createdBody);
+            for (const PhysicsBodyId id : created) {
+                (void)world.destroyBody(id);
+            }
+            return Core::failure(createdShape.error());
+        }
+        created.push_back(*createdBody);
     }
 
     const Core::usize writeCount =

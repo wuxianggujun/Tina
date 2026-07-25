@@ -22,13 +22,31 @@ struct PhysicsWorld2D::Impl final {
     struct BodyRecord final {
         b2BodyId backend = b2_nullBodyId;
         PhysicsBodyId id{};
-        PhysicsShapeId shape{};
+        PhysicsShapeId firstShape{};
     };
 
     struct ShapeRecord final {
         b2ShapeId backend = b2_nullShapeId;
         PhysicsShapeId id{};
         PhysicsBodyId body{};
+        PhysicsShapeKind2D kind = PhysicsShapeKind2D::Box;
+        bool isSensor = false;
+        PhysicsCollisionFilter2D filter{};
+        PhysicsShapeId previousOnBody{};
+        PhysicsShapeId nextOnBody{};
+    };
+
+    struct JointRecord final {
+        b2JointId backend = b2_nullJointId;
+        PhysicsJointId id{};
+        PhysicsBodyId bodyA{};
+        PhysicsBodyId bodyB{};
+        PhysicsJointKind2D kind = PhysicsJointKind2D::Distance;
+        float lengthMeters = 0.0F;
+        bool springEnabled = false;
+        bool collideConnected = false;
+        PhysicsJointId previous{};
+        PhysicsJointId next{};
     };
 
     struct ShapeTombstone final {
@@ -40,11 +58,13 @@ struct PhysicsWorld2D::Impl final {
 
     using BodyPool = Core::GenerationPool<BodyRecord, Detail::PhysicsBodyRegistryTag>;
     using ShapePool = Core::GenerationPool<ShapeRecord, Detail::PhysicsShapeRegistryTag>;
+    using JointPool = Core::GenerationPool<JointRecord, Detail::PhysicsJointRegistryTag>;
 
     Impl(
         PhysicsWorld2DConfig worldConfig,
         BodyPool bodyPool,
         ShapePool shapePool,
+        JointPool jointPool,
         PhysicsContactBeginEvent2D* beginStorage,
         PhysicsContactEndEvent2D* endStorage,
         PhysicsContactHitEvent2D* hitStorage,
@@ -56,6 +76,7 @@ struct PhysicsWorld2D::Impl final {
           resource(&memoryResource),
           bodies(std::move(bodyPool)),
           shapes(std::move(shapePool)),
+          joints(std::move(jointPool)),
           beginContacts(beginStorage),
           endContacts(endStorage),
           hitContacts(hitStorage),
@@ -159,6 +180,88 @@ struct PhysicsWorld2D::Impl final {
         ++tombstoneWriteIndex;
     }
 
+    [[nodiscard]] bool linkShapeToBody(BodyRecord& bodyRecord, ShapeRecord& shapeRecord) noexcept
+    {
+        shapeRecord.previousOnBody = {};
+        shapeRecord.nextOnBody = bodyRecord.firstShape;
+        if (bodyRecord.firstShape.hasValue()) {
+            ShapeRecord* previousFirst = shapes.tryGet(bodyRecord.firstShape);
+            if (previousFirst == nullptr) {
+                shapeRecord.nextOnBody = {};
+                return false;
+            }
+            previousFirst->previousOnBody = shapeRecord.id;
+        }
+        bodyRecord.firstShape = shapeRecord.id;
+        return true;
+    }
+
+    [[nodiscard]] bool unlinkShapeFromBody(ShapeRecord& shapeRecord) noexcept
+    {
+        BodyRecord* bodyRecord = bodies.tryGet(shapeRecord.body);
+        if (bodyRecord == nullptr) {
+            return false;
+        }
+        if (shapeRecord.previousOnBody.hasValue()) {
+            ShapeRecord* previous = shapes.tryGet(shapeRecord.previousOnBody);
+            if (previous == nullptr) {
+                return false;
+            }
+            previous->nextOnBody = shapeRecord.nextOnBody;
+        } else {
+            bodyRecord->firstShape = shapeRecord.nextOnBody;
+        }
+        if (shapeRecord.nextOnBody.hasValue()) {
+            ShapeRecord* next = shapes.tryGet(shapeRecord.nextOnBody);
+            if (next == nullptr) {
+                return false;
+            }
+            next->previousOnBody = shapeRecord.previousOnBody;
+        }
+        shapeRecord.previousOnBody = {};
+        shapeRecord.nextOnBody = {};
+        return true;
+    }
+
+    [[nodiscard]] bool linkJoint(JointRecord& jointRecord) noexcept
+    {
+        jointRecord.previous = {};
+        jointRecord.next = firstJoint;
+        if (firstJoint.hasValue()) {
+            JointRecord* previousFirst = joints.tryGet(firstJoint);
+            if (previousFirst == nullptr) {
+                jointRecord.next = {};
+                return false;
+            }
+            previousFirst->previous = jointRecord.id;
+        }
+        firstJoint = jointRecord.id;
+        return true;
+    }
+
+    [[nodiscard]] bool unlinkJoint(JointRecord& jointRecord) noexcept
+    {
+        if (jointRecord.previous.hasValue()) {
+            JointRecord* previous = joints.tryGet(jointRecord.previous);
+            if (previous == nullptr) {
+                return false;
+            }
+            previous->next = jointRecord.next;
+        } else {
+            firstJoint = jointRecord.next;
+        }
+        if (jointRecord.next.hasValue()) {
+            JointRecord* next = joints.tryGet(jointRecord.next);
+            if (next == nullptr) {
+                return false;
+            }
+            next->previous = jointRecord.previous;
+        }
+        jointRecord.previous = {};
+        jointRecord.next = {};
+        return true;
+    }
+
     struct ShapeEndpoints final {
         PhysicsShapeId shape{};
         PhysicsBodyId body{};
@@ -212,86 +315,92 @@ struct PhysicsWorld2D::Impl final {
             return;
         }
 
-        const b2ContactEvents events = b2World_GetContactEvents(world);
-
-        const int beginTotal = (std::max)(0, events.beginCount);
-        const Core::usize beginCapacity = config.contactBeginCapacity;
-        const Core::usize beginPublish =
-            (std::min)(static_cast<Core::usize>(beginTotal), beginCapacity);
-        for (Core::usize index = 0; index < beginPublish; ++index) {
-            const b2ContactBeginTouchEvent& source = events.beginEvents[index];
-            const ShapeEndpoints shapeA = resolveShapeEndpoints(source.shapeIdA);
-            const ShapeEndpoints shapeB = resolveShapeEndpoints(source.shapeIdB);
+        const auto publishBegin = [this](const ShapeEndpoints& shapeA,
+                                         const ShapeEndpoints& shapeB,
+                                         bool isSensor) noexcept {
             if (!shapeA.resolved || !shapeB.resolved || shapeA.destroyed || shapeB.destroyed) {
-                continue;
+                return;
             }
-            if (beginContacts == nullptr) {
-                break;
+            if (beginContacts == nullptr || beginCount >= config.contactBeginCapacity) {
+                beginOverflow = true;
+                ++droppedBeginContactCount;
+                return;
             }
             beginContacts[beginCount++] = PhysicsContactBeginEvent2D{
-                shapeA.body,
-                shapeB.body,
-                shapeA.shape,
-                shapeB.shape};
-        }
-        if (static_cast<Core::usize>(beginTotal) > beginCapacity) {
-            beginOverflow = true;
-            droppedBeginContactCount += static_cast<Core::u64>(beginTotal) - beginCapacity;
-        }
-
-        const int endTotal = (std::max)(0, events.endCount);
-        const Core::usize endCapacity = config.contactEndCapacity;
-        const Core::usize endPublish =
-            (std::min)(static_cast<Core::usize>(endTotal), endCapacity);
-        for (Core::usize index = 0; index < endPublish; ++index) {
-            const b2ContactEndTouchEvent& source = events.endEvents[index];
-            const ShapeEndpoints shapeA = resolveShapeEndpoints(source.shapeIdA);
-            const ShapeEndpoints shapeB = resolveShapeEndpoints(source.shapeIdB);
+                .bodyA = shapeA.body,
+                .bodyB = shapeB.body,
+                .shapeA = shapeA.shape,
+                .shapeB = shapeB.shape,
+                .isSensor = isSensor,
+            };
+        };
+        const auto publishEnd = [this](const ShapeEndpoints& shapeA,
+                                       const ShapeEndpoints& shapeB,
+                                       bool isSensor) noexcept {
             if (!shapeA.resolved && !shapeB.resolved) {
-                continue;
+                return;
             }
-            if (endContacts == nullptr) {
-                break;
+            if (endContacts == nullptr || endCount >= config.contactEndCapacity) {
+                endOverflow = true;
+                ++droppedEndContactCount;
+                return;
             }
             endContacts[endCount++] = PhysicsContactEndEvent2D{
-                shapeA.body,
-                shapeB.body,
-                shapeA.shape,
-                shapeB.shape,
-                shapeA.destroyed || !shapeA.resolved,
-                shapeB.destroyed || !shapeB.resolved};
+                .bodyA = shapeA.body,
+                .bodyB = shapeB.body,
+                .shapeA = shapeA.shape,
+                .shapeB = shapeB.shape,
+                .shapeADestroyed = shapeA.destroyed || !shapeA.resolved,
+                .shapeBDestroyed = shapeB.destroyed || !shapeB.resolved,
+                .isSensor = isSensor,
+            };
+        };
+
+        const b2ContactEvents contactEvents = b2World_GetContactEvents(world);
+        for (int index = 0; index < (std::max)(0, contactEvents.beginCount); ++index) {
+            const b2ContactBeginTouchEvent& source = contactEvents.beginEvents[index];
+            publishBegin(resolveShapeEndpoints(source.shapeIdA), resolveShapeEndpoints(source.shapeIdB), false);
         }
-        if (static_cast<Core::usize>(endTotal) > endCapacity) {
-            endOverflow = true;
-            droppedEndContactCount += static_cast<Core::u64>(endTotal) - endCapacity;
+        for (int index = 0; index < (std::max)(0, contactEvents.endCount); ++index) {
+            const b2ContactEndTouchEvent& source = contactEvents.endEvents[index];
+            publishEnd(resolveShapeEndpoints(source.shapeIdA), resolveShapeEndpoints(source.shapeIdB), false);
         }
 
-        const int hitTotal = (std::max)(0, events.hitCount);
-        const Core::usize hitCapacity = config.contactHitCapacity;
-        const Core::usize hitPublish =
-            (std::min)(static_cast<Core::usize>(hitTotal), hitCapacity);
-        for (Core::usize index = 0; index < hitPublish; ++index) {
-            const b2ContactHitEvent& source = events.hitEvents[index];
+        const b2SensorEvents sensorEvents = b2World_GetSensorEvents(world);
+        for (int index = 0; index < (std::max)(0, sensorEvents.beginCount); ++index) {
+            const b2SensorBeginTouchEvent& source = sensorEvents.beginEvents[index];
+            publishBegin(resolveShapeEndpoints(source.sensorShapeId),
+                         resolveShapeEndpoints(source.visitorShapeId),
+                         true);
+        }
+        for (int index = 0; index < (std::max)(0, sensorEvents.endCount); ++index) {
+            const b2SensorEndTouchEvent& source = sensorEvents.endEvents[index];
+            publishEnd(resolveShapeEndpoints(source.sensorShapeId),
+                       resolveShapeEndpoints(source.visitorShapeId),
+                       true);
+        }
+
+        for (int index = 0; index < (std::max)(0, contactEvents.hitCount); ++index) {
+            const b2ContactHitEvent& source = contactEvents.hitEvents[index];
             const ShapeEndpoints shapeA = resolveShapeEndpoints(source.shapeIdA);
             const ShapeEndpoints shapeB = resolveShapeEndpoints(source.shapeIdB);
             if (!shapeA.resolved || !shapeB.resolved || shapeA.destroyed || shapeB.destroyed) {
                 continue;
             }
-            if (hitContacts == nullptr) {
-                break;
+            if (hitContacts == nullptr || hitCount >= config.contactHitCapacity) {
+                hitOverflow = true;
+                ++droppedHitContactCount;
+                continue;
             }
             hitContacts[hitCount++] = PhysicsContactHitEvent2D{
-                shapeA.body,
-                shapeB.body,
-                shapeA.shape,
-                shapeB.shape,
-                {source.point.x, source.point.y},
-                {source.normal.x, source.normal.y},
-                source.approachSpeed};
-        }
-        if (static_cast<Core::usize>(hitTotal) > hitCapacity) {
-            hitOverflow = true;
-            droppedHitContactCount += static_cast<Core::u64>(hitTotal) - hitCapacity;
+                .bodyA = shapeA.body,
+                .bodyB = shapeB.body,
+                .shapeA = shapeA.shape,
+                .shapeB = shapeB.shape,
+                .pointMeters = {source.point.x, source.point.y},
+                .normalFromAToB = {source.normal.x, source.normal.y},
+                .approachSpeedMetersPerSecond = source.approachSpeed,
+            };
         }
     }
 
@@ -495,6 +604,7 @@ struct PhysicsWorld2D::Impl final {
     std::pmr::memory_resource* resource = nullptr;
     BodyPool bodies;
     ShapePool shapes;
+    JointPool joints;
     PhysicsContactBeginEvent2D* beginContacts = nullptr;
     PhysicsContactEndEvent2D* endContacts = nullptr;
     PhysicsContactHitEvent2D* hitContacts = nullptr;
@@ -514,6 +624,7 @@ struct PhysicsWorld2D::Impl final {
     Core::u64 appliedCommandCount = 0;
     Core::u64 skippedStaleCommandCount = 0;
     b2WorldId world = b2_nullWorldId;
+    PhysicsJointId firstJoint{};
     Core::u64 completedStepCount = 0;
     bool open = true;
     bool inStep = false;
@@ -535,6 +646,22 @@ namespace {
         return true;
     }
     return false;
+}
+
+[[nodiscard]] bool isKnownShapeKind(PhysicsShapeKind2D kind) noexcept
+{
+    switch (kind) {
+    case PhysicsShapeKind2D::Box:
+    case PhysicsShapeKind2D::Circle:
+    case PhysicsShapeKind2D::Capsule:
+        return true;
+    }
+    return false;
+}
+
+[[nodiscard]] bool isKnownJointKind(PhysicsJointKind2D kind) noexcept
+{
+    return kind == PhysicsJointKind2D::Distance;
 }
 
 [[nodiscard]] b2BodyType toBackendBodyType(PhysicsBodyType2D type) noexcept
@@ -609,18 +736,20 @@ template <typename Value>
 
 Core::Status validatePhysicsWorld2DConfig(const PhysicsWorld2DConfig& config) noexcept
 {
-    if (config.bodyCapacity == 0 || config.shapeCapacity == 0) {
+    if (config.bodyCapacity == 0 || config.shapeCapacity == 0 || config.jointCapacity == 0) {
         return Core::failure(
             Physics2DErrorCode::InvalidConfiguration,
-            "Physics2D body and shape capacities must be greater than zero");
+            "Physics2D body, shape, and joint capacities must be greater than zero");
     }
     if (config.bodyCapacity > PhysicsWorld2DConfig::MaxBodyCapacity
         || config.bodyCapacity > PhysicsBodyId::InvalidIndex
         || config.shapeCapacity > PhysicsWorld2DConfig::MaxShapeCapacity
-        || config.shapeCapacity > PhysicsShapeId::InvalidIndex) {
+        || config.shapeCapacity > PhysicsShapeId::InvalidIndex
+        || config.jointCapacity > PhysicsWorld2DConfig::MaxJointCapacity
+        || config.jointCapacity > PhysicsJointId::InvalidIndex) {
         return Core::failure(
             Physics2DErrorCode::InvalidConfiguration,
-            "Physics2D body or shape capacity exceeds the supported generation range");
+            "Physics2D body, shape, or joint capacity exceeds the supported generation range");
     }
     if (config.contactBeginCapacity > PhysicsWorld2DConfig::MaxContactEventCapacity
         || config.contactEndCapacity > PhysicsWorld2DConfig::MaxContactEventCapacity
@@ -669,13 +798,15 @@ Core::Status validatePhysicsBody2DDesc(const PhysicsBody2DDesc& desc) noexcept
     return Core::success();
 }
 
-Core::Status validatePhysicsBoxShape2DDesc(const PhysicsBoxShape2DDesc& desc) noexcept
+Core::Status validatePhysicsShape2DDesc(const PhysicsShape2DDesc& desc) noexcept
 {
-    if (!isFinite(desc.halfExtentsMeters)
-        || desc.halfExtentsMeters.x <= 0.0F
-        || desc.halfExtentsMeters.y <= 0.0F
-        || !isFinite(desc.centerMeters)
-        || !std::isfinite(desc.angleRadians)
+    if (!isKnownShapeKind(desc.kind)
+        || !isFinite(desc.halfExtentsMeters)
+        || !std::isfinite(desc.radiusMeters)
+        || !isFinite(desc.localCenterMeters)
+        || !std::isfinite(desc.localAngleRadians)
+        || !isFinite(desc.localPointAMeters)
+        || !isFinite(desc.localPointBMeters)
         || !std::isfinite(desc.density)
         || !std::isfinite(desc.friction)
         || !std::isfinite(desc.restitution)
@@ -687,7 +818,46 @@ Core::Status validatePhysicsBoxShape2DDesc(const PhysicsBoxShape2DDesc& desc) no
         || desc.filter.categoryBits == 0) {
         return Core::failure(
             Physics2DErrorCode::InvalidShapeDescription,
-            "Physics2D box shape contains invalid geometry, material, or collision filter values");
+            "Physics2D shape contains invalid material or collision filter values");
+    }
+    switch (desc.kind) {
+    case PhysicsShapeKind2D::Box:
+        if (desc.halfExtentsMeters.x <= 0.0F || desc.halfExtentsMeters.y <= 0.0F) {
+            return Core::failure(
+                Physics2DErrorCode::InvalidShapeDescription,
+                "Physics2D box shape requires positive half extents");
+        }
+        break;
+    case PhysicsShapeKind2D::Circle:
+        if (!(desc.radiusMeters > 0.0F)) {
+            return Core::failure(
+                Physics2DErrorCode::InvalidShapeDescription,
+                "Physics2D circle shape requires a positive radius");
+        }
+        break;
+    case PhysicsShapeKind2D::Capsule:
+        if (!(desc.radiusMeters > 0.0F)
+            || (desc.localPointAMeters.x == desc.localPointBMeters.x
+                && desc.localPointAMeters.y == desc.localPointBMeters.y)) {
+            return Core::failure(
+                Physics2DErrorCode::InvalidShapeDescription,
+                "Physics2D capsule shape requires a positive radius and distinct endpoints");
+        }
+        break;
+    }
+    return Core::success();
+}
+
+Core::Status validatePhysicsJoint2DDesc(const PhysicsJoint2DDesc& desc) noexcept
+{
+    if (!isKnownJointKind(desc.kind) || !desc.bodyA.hasValue() || !desc.bodyB.hasValue()
+        || desc.bodyA == desc.bodyB || !isFinite(desc.localAnchorAMeters) || !isFinite(desc.localAnchorBMeters)
+        || !std::isfinite(desc.lengthMeters) || !(desc.lengthMeters > 0.0F) || !std::isfinite(desc.hertz)
+        || !std::isfinite(desc.dampingRatio) || desc.hertz < 0.0F || desc.dampingRatio < 0.0F
+        || desc.dampingRatio > 1.0F) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidJointDescription,
+            "Physics2D distance joint description is invalid");
     }
     return Core::success();
 }
@@ -796,6 +966,13 @@ Core::Result<PhysicsWorld2D> PhysicsWorld2D::Create(
             std::move(shapePoolResult.error()),
             "PhysicsWorld2D::Create",
             "shape registry allocation"));
+    }
+    auto jointPoolResult = Impl::JointPool::Create(config.jointCapacity, resource);
+    if (!jointPoolResult) {
+        return Core::failure(mapPoolError(
+            std::move(jointPoolResult.error()),
+            "PhysicsWorld2D::Create",
+            "joint registry allocation"));
     }
 
     auto beginStorageResult = allocateContactBuffer<PhysicsContactBeginEvent2D>(
@@ -962,6 +1139,7 @@ Core::Result<PhysicsWorld2D> PhysicsWorld2D::Create(
             config,
             std::move(*bodyPoolResult),
             std::move(*shapePoolResult),
+            std::move(*jointPoolResult),
             *beginStorageResult,
             *endStorageResult,
             *hitStorageResult,
@@ -1191,9 +1369,27 @@ Core::Status PhysicsWorld2D::validateShape(PhysicsShapeId shape) const noexcept
     return Core::success();
 }
 
-Core::Result<PhysicsBodyShape2D> PhysicsWorld2D::createBoxBody(
-    const PhysicsBody2DDesc& bodyDescription,
-    const PhysicsBoxShape2DDesc& shapeDescription)
+Core::Status PhysicsWorld2D::validateJoint(PhysicsJointId joint) const noexcept
+{
+    if (!joint.hasValue()) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidJoint,
+            "Physics2D joint handle is invalid");
+    }
+    if (joint.owner() != m_impl->joints.owner()) {
+        return Core::failure(
+            Physics2DErrorCode::WrongWorld,
+            "Physics2D joint belongs to another world");
+    }
+    if (!m_impl->joints.contains(joint)) {
+        return Core::failure(
+            Physics2DErrorCode::StaleJoint,
+            "Physics2D joint handle is stale");
+    }
+    return Core::success();
+}
+
+Core::Result<PhysicsBodyId> PhysicsWorld2D::createBody(const PhysicsBody2DDesc& bodyDescription)
 {
     if (const Core::Status status = ensureUsable(); !status) {
         return Core::failure(status.error());
@@ -1201,42 +1397,23 @@ Core::Result<PhysicsBodyShape2D> PhysicsWorld2D::createBoxBody(
     if (const Core::Status status = validatePhysicsBody2DDesc(bodyDescription); !status) {
         return Core::failure(status.error());
     }
-    if (const Core::Status status = validatePhysicsBoxShape2DDesc(shapeDescription); !status) {
-        return Core::failure(status.error());
-    }
-
     auto bodyIdResult = m_impl->bodies.tryEmplace();
     if (!bodyIdResult) {
         return Core::failure(mapPoolError(
             std::move(bodyIdResult.error()),
-            "PhysicsWorld2D::createBoxBody",
+            "PhysicsWorld2D::createBody",
             "body registry capacity"));
     }
     const PhysicsBodyId bodyId = *bodyIdResult;
 
-    auto shapeIdResult = m_impl->shapes.tryEmplace();
-    if (!shapeIdResult) {
-        (void)m_impl->bodies.erase(bodyId);
-        return Core::failure(mapPoolError(
-            std::move(shapeIdResult.error()),
-            "PhysicsWorld2D::createBoxBody",
-            "shape registry capacity"));
-    }
-    const PhysicsShapeId shapeId = *shapeIdResult;
-
     Impl::BodyRecord* bodyRecord = m_impl->bodies.tryGet(bodyId);
-    Impl::ShapeRecord* shapeRecord = m_impl->shapes.tryGet(shapeId);
-    if (bodyRecord == nullptr || shapeRecord == nullptr) {
-        (void)m_impl->shapes.erase(shapeId);
+    if (bodyRecord == nullptr) {
         (void)m_impl->bodies.erase(bodyId);
         return Core::failure(
             Physics2DErrorCode::BackendFailure,
-            "Physics2D could not resolve newly reserved registry slots");
+            "Physics2D could not resolve a newly reserved body slot");
     }
     bodyRecord->id = bodyId;
-    bodyRecord->shape = shapeId;
-    shapeRecord->id = shapeId;
-    shapeRecord->body = bodyId;
 
     b2BodyDef bodyDefinition = b2DefaultBodyDef();
     bodyDefinition.type = toBackendBodyType(bodyDescription.type);
@@ -1260,12 +1437,56 @@ Core::Result<PhysicsBodyShape2D> PhysicsWorld2D::createBoxBody(
     bodyRecord->backend = b2CreateBody(m_impl->world, &bodyDefinition);
     if (B2_IS_NULL(bodyRecord->backend) || !b2Body_IsValid(bodyRecord->backend)) {
         bodyRecord->backend = b2_nullBodyId;
-        (void)m_impl->shapes.erase(shapeId);
         (void)m_impl->bodies.erase(bodyId);
         return Core::failure(
             Physics2DErrorCode::BackendFailure,
             "Box2D failed to create a body");
     }
+
+    return bodyId;
+}
+
+Core::Result<PhysicsShapeId> PhysicsWorld2D::createShape(
+    PhysicsBodyId body,
+    const PhysicsShape2DDesc& shapeDescription)
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = validateBody(body); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = validatePhysicsShape2DDesc(shapeDescription); !status) {
+        return Core::failure(status.error());
+    }
+
+    Impl::BodyRecord* bodyRecord = m_impl->bodies.tryGet(body);
+    if (bodyRecord == nullptr || !b2Body_IsValid(bodyRecord->backend)) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D body registry lost its Box2D body");
+    }
+
+    auto shapeIdResult = m_impl->shapes.tryEmplace();
+    if (!shapeIdResult) {
+        return Core::failure(mapPoolError(
+            std::move(shapeIdResult.error()),
+            "PhysicsWorld2D::createShape",
+            "shape registry capacity"));
+    }
+    const PhysicsShapeId shapeId = *shapeIdResult;
+    Impl::ShapeRecord* shapeRecord = m_impl->shapes.tryGet(shapeId);
+    if (shapeRecord == nullptr) {
+        (void)m_impl->shapes.erase(shapeId);
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D could not resolve a newly reserved shape slot");
+    }
+    shapeRecord->id = shapeId;
+    shapeRecord->body = body;
+    shapeRecord->kind = shapeDescription.kind;
+    shapeRecord->isSensor = shapeDescription.isSensor;
+    shapeRecord->filter = shapeDescription.filter;
 
     b2ShapeDef shapeDefinition = b2DefaultShapeDef();
     shapeDefinition.userData = shapeRecord;
@@ -1275,29 +1496,194 @@ Core::Result<PhysicsBodyShape2D> PhysicsWorld2D::createBoxBody(
     shapeDefinition.filter.categoryBits = shapeDescription.filter.categoryBits;
     shapeDefinition.filter.maskBits = shapeDescription.filter.maskBits;
     shapeDefinition.filter.groupIndex = shapeDescription.filter.groupIndex;
+    shapeDefinition.isSensor = shapeDescription.isSensor;
+    shapeDefinition.enableSensorEvents = shapeDescription.enableSensorEvents;
     shapeDefinition.enableContactEvents = shapeDescription.enableContactEvents;
     shapeDefinition.enableHitEvents = shapeDescription.enableHitEvents;
-    const b2Polygon polygon = b2MakeOffsetBox(
-        shapeDescription.halfExtentsMeters.x,
-        shapeDescription.halfExtentsMeters.y,
-        {shapeDescription.centerMeters.x, shapeDescription.centerMeters.y},
-        b2MakeRot(shapeDescription.angleRadians));
-    shapeRecord->backend = b2CreatePolygonShape(
-        bodyRecord->backend,
-        &shapeDefinition,
-        &polygon);
-    if (B2_IS_NULL(shapeRecord->backend) || !b2Shape_IsValid(shapeRecord->backend)) {
-        shapeRecord->backend = b2_nullShapeId;
-        b2DestroyBody(bodyRecord->backend);
-        bodyRecord->backend = b2_nullBodyId;
-        (void)m_impl->shapes.erase(shapeId);
-        (void)m_impl->bodies.erase(bodyId);
-        return Core::failure(
-            Physics2DErrorCode::BackendFailure,
-            "Box2D failed to create a box shape");
+
+    switch (shapeDescription.kind) {
+    case PhysicsShapeKind2D::Box: {
+        const b2Polygon polygon = b2MakeOffsetBox(
+            shapeDescription.halfExtentsMeters.x,
+            shapeDescription.halfExtentsMeters.y,
+            {shapeDescription.localCenterMeters.x, shapeDescription.localCenterMeters.y},
+            b2MakeRot(shapeDescription.localAngleRadians));
+        shapeRecord->backend = b2CreatePolygonShape(bodyRecord->backend, &shapeDefinition, &polygon);
+        break;
+    }
+    case PhysicsShapeKind2D::Circle: {
+        const b2Circle circle{
+            {shapeDescription.localCenterMeters.x, shapeDescription.localCenterMeters.y},
+            shapeDescription.radiusMeters,
+        };
+        shapeRecord->backend = b2CreateCircleShape(bodyRecord->backend, &shapeDefinition, &circle);
+        break;
+    }
+    case PhysicsShapeKind2D::Capsule: {
+        const b2Capsule capsule{
+            {shapeDescription.localPointAMeters.x, shapeDescription.localPointAMeters.y},
+            {shapeDescription.localPointBMeters.x, shapeDescription.localPointBMeters.y},
+            shapeDescription.radiusMeters,
+        };
+        shapeRecord->backend = b2CreateCapsuleShape(bodyRecord->backend, &shapeDefinition, &capsule);
+        break;
+    }
     }
 
-    return PhysicsBodyShape2D{bodyId, shapeId};
+    if (B2_IS_NULL(shapeRecord->backend) || !b2Shape_IsValid(shapeRecord->backend)) {
+        shapeRecord->backend = b2_nullShapeId;
+        (void)m_impl->shapes.erase(shapeId);
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Box2D failed to create a shape");
+    }
+    if (!m_impl->linkShapeToBody(*bodyRecord, *shapeRecord)) {
+        b2DestroyShape(shapeRecord->backend, true);
+        shapeRecord->backend = b2_nullShapeId;
+        (void)m_impl->shapes.erase(shapeId);
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D body shape list is inconsistent");
+    }
+    return shapeId;
+}
+
+Core::Status PhysicsWorld2D::destroyShape(PhysicsShapeId shape) noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return status;
+    }
+    if (const Core::Status status = validateShape(shape); !status) {
+        return status;
+    }
+
+    Impl::ShapeRecord* shapeRecord = m_impl->shapes.tryGet(shape);
+    if (shapeRecord == nullptr || !b2Shape_IsValid(shapeRecord->backend)) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D shape registry lost its Box2D shape");
+    }
+    if (!m_impl->unlinkShapeFromBody(*shapeRecord)) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D body shape list is inconsistent");
+    }
+
+    m_impl->rememberDestroyedShape(*shapeRecord);
+    b2DestroyShape(shapeRecord->backend, true);
+    shapeRecord->backend = b2_nullShapeId;
+    const Core::GenerationEraseResult shapeEraseResult = m_impl->shapes.erase(shape);
+    if (shapeEraseResult != Core::GenerationEraseResult::Erased) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D failed to retire a destroyed shape slot");
+    }
+    return Core::success();
+}
+
+Core::Result<PhysicsJointId> PhysicsWorld2D::createJoint(const PhysicsJoint2DDesc& jointDescription)
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = validatePhysicsJoint2DDesc(jointDescription); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = validateBody(jointDescription.bodyA); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = validateBody(jointDescription.bodyB); !status) {
+        return Core::failure(status.error());
+    }
+
+    Impl::BodyRecord* bodyA = m_impl->bodies.tryGet(jointDescription.bodyA);
+    Impl::BodyRecord* bodyB = m_impl->bodies.tryGet(jointDescription.bodyB);
+    if (bodyA == nullptr || bodyB == nullptr || !b2Body_IsValid(bodyA->backend) || !b2Body_IsValid(bodyB->backend)) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D joint body registry lost a Box2D body");
+    }
+
+    auto jointIdResult = m_impl->joints.tryEmplace();
+    if (!jointIdResult) {
+        return Core::failure(mapPoolError(
+            std::move(jointIdResult.error()),
+            "PhysicsWorld2D::createJoint",
+            "joint registry capacity"));
+    }
+    const PhysicsJointId jointId = *jointIdResult;
+    Impl::JointRecord* jointRecord = m_impl->joints.tryGet(jointId);
+    if (jointRecord == nullptr) {
+        (void)m_impl->joints.erase(jointId);
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D could not resolve a newly reserved joint slot");
+    }
+    jointRecord->id = jointId;
+    jointRecord->bodyA = jointDescription.bodyA;
+    jointRecord->bodyB = jointDescription.bodyB;
+    jointRecord->kind = jointDescription.kind;
+    jointRecord->lengthMeters = jointDescription.lengthMeters;
+    jointRecord->springEnabled = jointDescription.enableSpring;
+    jointRecord->collideConnected = jointDescription.collideConnected;
+
+    b2DistanceJointDef definition = b2DefaultDistanceJointDef();
+    definition.bodyIdA = bodyA->backend;
+    definition.bodyIdB = bodyB->backend;
+    definition.localAnchorA = {jointDescription.localAnchorAMeters.x, jointDescription.localAnchorAMeters.y};
+    definition.localAnchorB = {jointDescription.localAnchorBMeters.x, jointDescription.localAnchorBMeters.y};
+    definition.length = jointDescription.lengthMeters;
+    definition.enableSpring = jointDescription.enableSpring;
+    definition.hertz = jointDescription.hertz;
+    definition.dampingRatio = jointDescription.dampingRatio;
+    definition.collideConnected = jointDescription.collideConnected;
+    definition.userData = jointRecord;
+    jointRecord->backend = b2CreateDistanceJoint(m_impl->world, &definition);
+    if (B2_IS_NULL(jointRecord->backend) || !b2Joint_IsValid(jointRecord->backend)) {
+        jointRecord->backend = b2_nullJointId;
+        (void)m_impl->joints.erase(jointId);
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Box2D failed to create a distance joint");
+    }
+    if (!m_impl->linkJoint(*jointRecord)) {
+        b2DestroyJoint(jointRecord->backend);
+        jointRecord->backend = b2_nullJointId;
+        (void)m_impl->joints.erase(jointId);
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D joint list is inconsistent");
+    }
+    return jointId;
+}
+
+Core::Status PhysicsWorld2D::destroyJoint(PhysicsJointId joint) noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return status;
+    }
+    if (const Core::Status status = validateJoint(joint); !status) {
+        return status;
+    }
+    Impl::JointRecord* jointRecord = m_impl->joints.tryGet(joint);
+    if (jointRecord == nullptr || !b2Joint_IsValid(jointRecord->backend)) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D joint registry lost its Box2D joint");
+    }
+    if (!m_impl->unlinkJoint(*jointRecord)) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D joint list is inconsistent");
+    }
+    b2DestroyJoint(jointRecord->backend);
+    jointRecord->backend = b2_nullJointId;
+    if (m_impl->joints.erase(joint) != Core::GenerationEraseResult::Erased) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D failed to retire a destroyed joint slot");
+    }
+    return Core::success();
 }
 
 Core::Status PhysicsWorld2D::destroyBody(PhysicsBodyId body) noexcept
@@ -1315,25 +1701,37 @@ Core::Status PhysicsWorld2D::destroyBody(PhysicsBodyId body) noexcept
             Physics2DErrorCode::BackendFailure,
             "Physics2D body registry lost its Box2D body");
     }
-    const PhysicsShapeId shape = bodyRecord->shape;
-    Impl::ShapeRecord* shapeRecord = m_impl->shapes.tryGet(shape);
-    if (shapeRecord == nullptr || !b2Shape_IsValid(shapeRecord->backend)) {
-        return Core::failure(
-            Physics2DErrorCode::BackendFailure,
-            "Physics2D body registry lost its Box2D shape");
+
+    PhysicsJointId jointId = m_impl->firstJoint;
+    while (jointId.hasValue()) {
+        Impl::JointRecord* jointRecord = m_impl->joints.tryGet(jointId);
+        if (jointRecord == nullptr) {
+            return Core::failure(
+                Physics2DErrorCode::BackendFailure,
+                "Physics2D joint list is inconsistent");
+        }
+        const PhysicsJointId next = jointRecord->next;
+        if (jointRecord->bodyA == body || jointRecord->bodyB == body) {
+            if (const Core::Status status = destroyJoint(jointId); !status) {
+                return status;
+            }
+        }
+        jointId = next;
     }
 
-    m_impl->rememberDestroyedShape(*shapeRecord);
+    while (bodyRecord->firstShape.hasValue()) {
+        const PhysicsShapeId shape = bodyRecord->firstShape;
+        if (const Core::Status status = destroyShape(shape); !status) {
+            return status;
+        }
+    }
+
     b2DestroyBody(bodyRecord->backend);
     bodyRecord->backend = b2_nullBodyId;
-    shapeRecord->backend = b2_nullShapeId;
-    const Core::GenerationEraseResult shapeEraseResult = m_impl->shapes.erase(shape);
-    const Core::GenerationEraseResult bodyEraseResult = m_impl->bodies.erase(body);
-    if (shapeEraseResult != Core::GenerationEraseResult::Erased
-        || bodyEraseResult != Core::GenerationEraseResult::Erased) {
+    if (m_impl->bodies.erase(body) != Core::GenerationEraseResult::Erased) {
         return Core::failure(
             Physics2DErrorCode::BackendFailure,
-            "Physics2D failed to retire destroyed registry slots");
+            "Physics2D failed to retire a destroyed body slot");
     }
     return Core::success();
 }
@@ -1754,6 +2152,54 @@ Core::Result<PhysicsBodyId> PhysicsWorld2D::shapeBody(
     return shapeRecord->body;
 }
 
+Core::Result<PhysicsShapeState2D> PhysicsWorld2D::shapeState(
+    PhysicsShapeId shape) const noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = validateShape(shape); !status) {
+        return Core::failure(status.error());
+    }
+    const Impl::ShapeRecord* shapeRecord = m_impl->shapes.tryGet(shape);
+    if (shapeRecord == nullptr || !b2Shape_IsValid(shapeRecord->backend)) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D shape registry lost its Box2D shape");
+    }
+    return PhysicsShapeState2D{
+        .body = shapeRecord->body,
+        .kind = shapeRecord->kind,
+        .isSensor = shapeRecord->isSensor,
+        .filter = shapeRecord->filter,
+    };
+}
+
+Core::Result<PhysicsJointState2D> PhysicsWorld2D::jointState(
+    PhysicsJointId joint) const noexcept
+{
+    if (const Core::Status status = ensureUsable(); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = validateJoint(joint); !status) {
+        return Core::failure(status.error());
+    }
+    const Impl::JointRecord* jointRecord = m_impl->joints.tryGet(joint);
+    if (jointRecord == nullptr || !b2Joint_IsValid(jointRecord->backend)) {
+        return Core::failure(
+            Physics2DErrorCode::BackendFailure,
+            "Physics2D joint registry lost its Box2D joint");
+    }
+    return PhysicsJointState2D{
+        .kind = jointRecord->kind,
+        .bodyA = jointRecord->bodyA,
+        .bodyB = jointRecord->bodyB,
+        .lengthMeters = b2DistanceJoint_GetLength(jointRecord->backend),
+        .springEnabled = b2DistanceJoint_IsSpringEnabled(jointRecord->backend),
+        .collideConnected = jointRecord->collideConnected,
+    };
+}
+
 bool PhysicsWorld2D::contains(PhysicsBodyId body) const noexcept
 {
     return m_impl != nullptr && m_impl->open && m_impl->bodies.contains(body);
@@ -1764,28 +2210,36 @@ bool PhysicsWorld2D::contains(PhysicsShapeId shape) const noexcept
     return m_impl != nullptr && m_impl->open && m_impl->shapes.contains(shape);
 }
 
+bool PhysicsWorld2D::contains(PhysicsJointId joint) const noexcept
+{
+    return m_impl != nullptr && m_impl->open && m_impl->joints.contains(joint);
+}
+
 PhysicsWorld2DStats PhysicsWorld2D::stats() const noexcept
 {
     if (m_impl == nullptr) {
         return {};
     }
     return PhysicsWorld2DStats{
-        m_impl->bodies.activeCount(),
-        m_impl->shapes.activeCount(),
-        m_impl->bodies.capacity(),
-        m_impl->shapes.capacity(),
-        m_impl->config.contactBeginCapacity,
-        m_impl->config.contactEndCapacity,
-        m_impl->config.contactHitCapacity,
-        m_impl->config.commandCapacity,
-        m_impl->commandCount,
-        m_impl->completedStepCount,
-        m_impl->appliedCommandCount,
-        m_impl->skippedStaleCommandCount,
-        m_impl->droppedBeginContactCount,
-        m_impl->droppedEndContactCount,
-        m_impl->droppedHitContactCount,
-        m_impl->open};
+        .bodyCount = m_impl->bodies.activeCount(),
+        .shapeCount = m_impl->shapes.activeCount(),
+        .jointCount = m_impl->joints.activeCount(),
+        .bodyCapacity = m_impl->bodies.capacity(),
+        .shapeCapacity = m_impl->shapes.capacity(),
+        .jointCapacity = m_impl->joints.capacity(),
+        .contactBeginCapacity = m_impl->config.contactBeginCapacity,
+        .contactEndCapacity = m_impl->config.contactEndCapacity,
+        .contactHitCapacity = m_impl->config.contactHitCapacity,
+        .commandCapacity = m_impl->config.commandCapacity,
+        .pendingCommandCount = m_impl->commandCount,
+        .completedStepCount = m_impl->completedStepCount,
+        .appliedCommandCount = m_impl->appliedCommandCount,
+        .skippedStaleCommandCount = m_impl->skippedStaleCommandCount,
+        .droppedBeginContactCount = m_impl->droppedBeginContactCount,
+        .droppedEndContactCount = m_impl->droppedEndContactCount,
+        .droppedHitContactCount = m_impl->droppedHitContactCount,
+        .open = m_impl->open,
+    };
 }
 
 bool PhysicsWorld2D::isOpen() const noexcept
@@ -1817,8 +2271,10 @@ Core::Status PhysicsWorld2D::shutdown() noexcept
         b2DestroyWorld(m_impl->world);
     }
     m_impl->world = b2_nullWorldId;
+    m_impl->joints.clear();
     m_impl->shapes.clear();
     m_impl->bodies.clear();
+    m_impl->firstJoint = {};
     m_impl->clearPublishedContacts();
     m_impl->clearCommands();
     if (m_impl->shapeTombstones != nullptr) {

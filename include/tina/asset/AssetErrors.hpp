@@ -20,5 +20,7 @@ inline constexpr Core::ErrorCode LeaseCountOverflow{Core::ErrorDomain::Asset, 23
 inline constexpr Core::ErrorCode AssetFailed{Core::ErrorDomain::Asset, 24};
 inline constexpr Core::ErrorCode AssetQueueFull{Core::ErrorDomain::Asset, 25};
 inline constexpr Core::ErrorCode AssetUploadFailed{Core::ErrorDomain::Asset, 26};
+inline constexpr Core::ErrorCode TileMapLayerNotFound{Core::ErrorDomain::Asset, 27};
+inline constexpr Core::ErrorCode TileMapLayerTypeMismatch{Core::ErrorDomain::Asset, 28};
 
 } // namespace Tina::Asset::AssetErrorCode

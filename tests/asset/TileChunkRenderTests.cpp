@@ -14,6 +14,9 @@
 namespace Tina::Asset {
 namespace {
 
+inline constexpr AssetFormat::TileMapLayerId VisualLayerId = 10;
+inline constexpr AssetFormat::TileMapLayerId HiddenLayerId = 20;
+
 [[nodiscard]] Core::AssetId::Bytes idBytes(Core::u8 seed)
 {
     Core::AssetId::Bytes bytes{};
@@ -45,11 +48,27 @@ namespace {
     auto tileset = AssetFormat::parseTilesetPayload(*tilesetBytes);
     // 2x2 all filled
     const std::array<Core::u16, 4> cells{1, 2, 2, 1};
+    const std::array layers{
+        AssetFormat::TileMapLayerDesc{
+            .stableLayerId = VisualLayerId,
+            .kind = AssetFormat::TileMapLayerKind::Tile,
+            .visible = true,
+            .name = "visual",
+            .tiles = cells,
+        },
+        AssetFormat::TileMapLayerDesc{
+            .stableLayerId = HiddenLayerId,
+            .kind = AssetFormat::TileMapLayerKind::Tile,
+            .visible = false,
+            .name = "collision",
+            .tiles = cells,
+        },
+    };
     auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
         .widthCells = 2,
         .heightCells = 2,
         .cellSizeMeters = 1.0f,
-        .tiles = cells,
+        .layers = layers,
         .tilesetId = tilesetId,
     });
     auto map = AssetFormat::parseTileMapPayload(*mapBytes);
@@ -65,8 +84,8 @@ TEST(TileChunkRenderTests, EmitSpritesWithUvAndCenter)
     auto map = makeMap(memory);
     std::pmr::vector<TileChunkView> chunks{&memory};
     ASSERT_TRUE(extractVisibleTileChunks(
-                    map, TileChunkCameraQuery{.centerX = 1.0f, .centerY = 1.0f, .halfWidth = 2.0f, .halfHeight = 2.0f},
-                    chunks)
+                    map, VisualLayerId,
+                    TileChunkCameraQuery{.centerX = 1.0f, .centerY = 1.0f, .halfWidth = 2.0f, .halfHeight = 2.0f}, chunks)
                     .has_value());
     ASSERT_EQ(chunks.size(), 1U);
 
@@ -115,7 +134,22 @@ TEST(TileChunkRenderTests, EmitVisibleSkipsOffCamera)
     std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory};
     // Camera far away → 0 sprites
     auto n = emitVisibleTileMapSprites(
-        map, TileChunkCameraQuery{.centerX = 100.0f, .centerY = 100.0f, .halfWidth = 0.5f, .halfHeight = 0.5f},
+        map, VisualLayerId,
+        TileChunkCameraQuery{.centerX = 100.0f, .centerY = 100.0f, .halfWidth = 0.5f, .halfHeight = 0.5f},
+        TileChunkSpriteEmitParams{.spriteKey = 7}, sprites);
+    ASSERT_TRUE(n.has_value());
+    EXPECT_EQ(*n, 0U);
+    EXPECT_TRUE(sprites.empty());
+}
+
+TEST(TileChunkRenderTests, HiddenLayerIsNotEmitted)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    auto map = makeMap(memory);
+    std::pmr::vector<Render::RenderSprite2DInput> sprites{&memory};
+    auto n = emitVisibleTileMapSprites(
+        map, HiddenLayerId,
+        TileChunkCameraQuery{.centerX = 1.0f, .centerY = 1.0f, .halfWidth = 2.0f, .halfHeight = 2.0f},
         TileChunkSpriteEmitParams{.spriteKey = 7}, sprites);
     ASSERT_TRUE(n.has_value());
     EXPECT_EQ(*n, 0U);

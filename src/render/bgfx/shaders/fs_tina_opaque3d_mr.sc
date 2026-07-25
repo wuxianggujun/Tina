@@ -3,7 +3,7 @@ $input v_color0, v_texcoord0, v_normal, v_worldPos
 #include <bgfx_shader.sh>
 
 // Experimental Opaque3D metallic-roughness hybrid (RENDER-001).
-// Honesty: key + optional fill directional lights + constant ambient; no IBL/shadows.
+// Honesty: up to four directional lights + constant ambient; no IBL/shadows.
 // Cooked factors via u_mrParams; optional MR + normal maps.
 // glTF packing for s_texMR: G = roughness, B = metallic (R unused).
 // s_texNormal: tangent-space RGB normal (no mesh tangents; TBN from derivatives).
@@ -12,14 +12,10 @@ SAMPLER2D(s_texColor, 0);
 SAMPLER2D(s_texMR, 1);
 SAMPLER2D(s_texNormal, 2);
 
-// xyz = world-space direction toward the key light (normalized preferred), w unused.
-uniform vec4 u_lightDir;
-// rgb = key light color * intensity, w unused.
-uniform vec4 u_lightColor;
-// xyz = direction toward fill light; w = 1 if fill enabled (color length > 0).
-uniform vec4 u_fillLightDir;
-// rgb = fill light color * intensity, w unused.
-uniform vec4 u_fillLightColor;
+// xyz = world-space direction toward light; w = 1 when the slot is active.
+uniform vec4 u_lightDirs[4];
+// rgb = light color * intensity; w unused.
+uniform vec4 u_lightColors[4];
 // x = metallic factor, y = roughness factor, z = ambient scale, w = 1 if MR map bound.
 uniform vec4 u_mrParams;
 // x = 1 if normal map bound, yzw unused.
@@ -85,12 +81,14 @@ void main()
 	vec3 albedo = baseColor.rgb;
 	vec3 F0 = mix(vec3_splat(0.04), albedo, metallic);
 
-	vec3 lit = shadeDirectional(N, V, safeNormalize(u_lightDir.xyz), u_lightColor.rgb, albedo, F0, metallic,
-		roughness);
-	if (u_fillLightDir.w > 0.5)
+	vec3 lit = vec3_splat(0.0);
+	for (int lightIndex = 0; lightIndex < 4; ++lightIndex)
 	{
-		lit += shadeDirectional(N, V, safeNormalize(u_fillLightDir.xyz), u_fillLightColor.rgb, albedo, F0,
-			metallic, roughness);
+		if (u_lightDirs[lightIndex].w > 0.5)
+		{
+			lit += shadeDirectional(N, V, safeNormalize(u_lightDirs[lightIndex].xyz),
+				u_lightColors[lightIndex].rgb, albedo, F0, metallic, roughness);
+		}
 	}
 
 	float ambientScale = max(u_mrParams.z, 0.0);

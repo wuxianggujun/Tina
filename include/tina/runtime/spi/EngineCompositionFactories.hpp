@@ -55,9 +55,9 @@ using PrimaryWindowUIContextFactory = std::move_only_function<Core::Result<std::
 // sample/adapter private and is not required by Runtime.
 using AudioEngineFactory = std::move_only_function<Core::Result<Audio::AudioEngine>()>;
 
-// Optional submission completion ledger (RENDER-FENCE / RUNTIME-002). Empty → Host owns
-// NullSubmissionCompletionLedger (present-sync). Desktop may inject BgfxSubmissionCompletionLedger
-// (still present-sync until true GPU fence). Must not leak bgfx types through this factory.
+// Optional CPU submission accounting ledger (RUNTIME-002). Empty means Host owns a
+// CpuSubmissionCompletionLedger. Custom ledgers observe the same present-return
+// completion point; this factory is not a GPU-fence extension point.
 using SubmissionCompletionLedgerFactory =
     std::move_only_function<Core::Result<std::unique_ptr<Render::ISubmissionCompletionLedger>>()>;
 

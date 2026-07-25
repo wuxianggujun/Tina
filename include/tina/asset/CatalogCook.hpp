@@ -56,9 +56,18 @@ struct CatalogCookResult final {
 //   tileset <32hexId> <texture32hexId> <tilePxW> <tilePxH>
 //   tile <localId> <materialFlags> <u0> <v0> <u1> <v1>   // after tileset; ends at next non-tile
 //   tilemap <32hexId> <tileset32hexId> <widthCells> <heightCells> <cellSizeMeters>
-//   row <localId>...                                      // after tilemap; heightCells rows
+//   tilelayer <stableLayerId> <0|1 visible> <name>
+//   property <key> <value>                                 // layer property (no whitespace in either token)
+//   row <localId>...                                       // inside a tilelayer; heightCells rows
+//   endlayer
+//   objectlayer <stableLayerId> <0|1 visible> <name>
+//   point <stableObjectId> <0|1 visible> <name> <x> <y>
+//   rectangle <stableObjectId> <0|1 visible> <name> <x> <y> <width> <height>
+//   objectproperty <stableObjectId> <key> <value>
+//   endlayer
+//   endtilemap                                            // required; no single-layer fallback
 // Paths are relative to the recipe file directory unless absolute.
-// Inline typed lines build payload v1 without pre-encoded files.
+// Inline typed lines build the current versioned payload without pre-encoded files.
 [[nodiscard]] Core::Result<CatalogCookRequest> loadCatalogCookRecipeFile(std::string_view recipeUtf8Path);
 
 // Parse recipe text with an explicit base directory for relative payload paths.

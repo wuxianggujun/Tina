@@ -15,7 +15,8 @@ namespace {
 
 using Tina::Physics2D::PhysicsBody2DDesc;
 using Tina::Physics2D::PhysicsBodyType2D;
-using Tina::Physics2D::PhysicsBoxShape2DDesc;
+using Tina::Physics2D::PhysicsShape2DDesc;
+using Tina::Physics2D::PhysicsShapeKind2D;
 using Tina::Physics2D::PhysicsWorld2D;
 using Tina::Physics2D::PhysicsWorld2DConfig;
 
@@ -120,18 +121,34 @@ struct Options final {
 
 [[nodiscard]] bool buildStackScene(PhysicsWorld2D& world, std::uint32_t dynamicBodies)
 {
+    const auto createBodyWithShape = [&world](const PhysicsBody2DDesc& body,
+                                               const PhysicsShape2DDesc& shape) {
+        auto bodyId = world.createBody(body);
+        if (!bodyId) {
+            return false;
+        }
+        auto shapeId = world.createShape(*bodyId, shape);
+        if (!shapeId) {
+            (void)world.destroyBody(*bodyId);
+            return false;
+        }
+        return true;
+    };
+
     PhysicsBody2DDesc groundBody;
     groundBody.type = PhysicsBodyType2D::Static;
     groundBody.positionMeters = {0.0F, -1.0F};
-    PhysicsBoxShape2DDesc groundShape;
+    PhysicsShape2DDesc groundShape;
+    groundShape.kind = PhysicsShapeKind2D::Box;
     groundShape.halfExtentsMeters = {20.0F, 0.5F};
     groundShape.density = 0.0F;
     groundShape.enableContactEvents = false;
-    if (!world.createBoxBody(groundBody, groundShape)) {
+    if (!createBodyWithShape(groundBody, groundShape)) {
         return false;
     }
 
-    PhysicsBoxShape2DDesc boxShape;
+    PhysicsShape2DDesc boxShape;
+    boxShape.kind = PhysicsShapeKind2D::Box;
     boxShape.halfExtentsMeters = {0.4F, 0.4F};
     boxShape.density = 1.0F;
     boxShape.friction = 0.4F;
@@ -146,7 +163,7 @@ struct Options final {
             -3.5F + column * 1.0F,
             1.0F + row * 1.0F};
         body.initiallyAwake = true;
-        if (!world.createBoxBody(body, boxShape)) {
+        if (!createBodyWithShape(body, boxShape)) {
             return false;
         }
     }

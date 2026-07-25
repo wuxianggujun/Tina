@@ -21,9 +21,6 @@
 
 | ID | 状态 | 优先级 | 工作 | 依赖 | 验收条件 | 证据 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2D-TILEMAP-LAYERS | Planned | P1 | TileMap 多层与对象层 | 当前 TileMap typed payload / chunk cache | versioned payload、Cooker 与 runtime 保留有序 tile/object layer、稳定 ID、visibility 和 properties；渲染/碰撞显式选择 layer；非法引用不发布半包 | Unit + Integration + Smoke |
-| 2D-PHYSICS-EXPAND | Planned | P1 | Physics2D shapes、sensors 与 joints | 当前 Box2D adapter / Tile solid sync | backend-neutral shape/sensor/joint 描述覆盖创建、查询、enter/exit、销毁顺序和 stale handle；Box2D 类型保持 PRIVATE；sample 至少验证一个 sensor 与一个 joint | Unit + Integration + Smoke |
-| 2D-INPUT-ADV | Planned | P1 | analog action 与运行时 rebind | ActionMapper / UI consumption | axis deadzone、缩放与合成行为确定；rebind 支持冲突、取消和设备变化；UI consume/claim 后 analog/digital action 均不得穿透 | Unit + Integration + Smoke |
 
 ## Next
 
@@ -46,9 +43,9 @@
 
 | ID | 状态 | 优先级 | 工作 | 验收条件 |
 | --- | --- | --- | --- | --- |
-| RENDER-FENCE | Partial | P1 | 真 GPU fence 驱动 complete | **已完成** Host 可注入 ledger；Desktop `BgfxSubmissionCompletionLedger` = **FrameDeferred**（present 后 pin 延迟到下一 present 释放；`bgfx::frame()` token 经 `lastPresentFrameToken`）；Null 仍 PresentSync；`handOffDeferred`/`completeDeferred` 单测。**待** 真 fence object poll（非仅双缓冲 lag） |
+| RENDER-FENCE | Partial | P1 | 真 GPU fence 驱动 Asset retirement | **已完成** Host/FramePin 收敛为唯一 present-return CPU completion，并删除 `PresentSync`/`FrameDeferred`、bgfx wrapper、固定下一帧 handoff 与 `bgfx::frame()` 假 token。**待** backend 真 fence/equivalent poll、AssetLease→GPU resource retirement 合并与 shutdown drain；当前 CPU ticket 不得描述为 GPU 退役 |
 | ASSET-HANDLE-SCENE | Deferred | P1 | Scene 组件存 AssetHandle；extract 解析 bind key / 未来 FrameResourceRef | 去掉游戏侧手写 key 表为唯一产品路径 |
-| RENDER-001 | Partial | P2 | PBR Material、lighting 与 pass scheduling | **已完成** experimental MR + factors + baseColor/MR/normal + **key `setMesh3DDirectionalLight` + fill `setMesh3DFillDirectionalLight`**；sample_3d 自动相机 + Khronos 球体/盒。**待** N-light/IBL/shadow、pass scheduling、vertex tangents |
+| RENDER-001 | Partial | P2 | PBR Material、lighting 与 pass scheduling | **已完成** experimental MR + factors + baseColor/MR/normal；唯一 `setMesh3DLighting` 有界 0..4 directional lights；sample_3d 一次提交3灯 + 自动相机 + Khronos 球体/盒。**待** IBL/shadow、light component/culling、pass scheduling、vertex tangents |
 | PHYSICS-001 | Deferred | P2 | Jolt 3D adapter | 独立 Tina::Physics3D API、Jolt PRIVATE、生命周期/查询/性能门禁 |
 | UI-004 | Deferred | P2 | 通用 Focus Scope、Modal、持久 Pointer Capture | 多 root/state transition 与输入恢复测试通过 |
 | UI-005 | Deferred | P2 | ScrollView、虚拟 ListView、Dropdown、TreeView | 100k item 虚拟化与零稳态分配门禁通过 |
@@ -70,6 +67,10 @@
 | DONE-004 | 2D product sample 与 glTF/Prefab 3D product sample | [2D](game-2d.md) · [3D](game-3d.md) |
 | DONE-005 | Retained UI 文本/Glyph、Checkbox/Slider/TextEdit、ProgressBar/RadioButton 库级实现 | [UI](ui.md) |
 | DONE-006 | glTF multi-mesh Cooker 与 distinct AssetId/Prefab dependency 测试 | [3D](game-3d.md) |
+| 2D-INPUT-ADV | Runtime 唯一 unified binding 覆盖 digital/analog value、deadzone/scale、SumClamped/StrongestMagnitude、多 Gamepad、UI consume/claim suppression 与顶层 State transactional rebind（next-frame apply、Reject/Swap、cancel、generation disconnect/reset） | [Platform/Input](platform-input.md) · [Runtime](runtime.md) · ActionMapper/InputAction/Rebind unit + Runtime/UI integration + `tina_sample_2d` 300-frame smoke 是本轮最终验证目标，执行结果以最终验证记录为准 |
+| 2D-TILEMAP-LAYERS | TileMap 唯一 payload schema v2：有序 tile/object layer、map-wide 非零唯一稳定 layer/object ID、visibility、UTF-8 name/properties、point/rectangle；runtime chunk/render/collision 显式选择 layer；sample 使用 visual=10、collision=20、gameplay objects=30 并消费 object 101/102；Cooker 在发布前校验 v2、required Tileset dependency 与 tile localId | [2D](game-2d.md) · [资源](resources.md) · [物理](physics.md) · TileMap/CatalogCook/TileChunk/TileMapPhysics tests |
+| 2D-PHYSICS-EXPAND | Body/Shape/Joint 独立 generation handle；Box/Circle/Capsule、多 shape/body、sensor enter/exit、Distance joint 与级联 retirement；TileMap bridge/sample 全部迁移，Box2D 保持 PRIVATE；29/29 模块测试与产品 300 帧 sensor/joint 证据通过 | [物理](physics.md) · [2D](game-2d.md) · PhysicsWorld2D/TileMapPhysics/CharacterControllerPhysics tests |
+| RENDER-001-NLIGHT | 删除 Opaque3D key/fill 双 setter；`Mesh3DLightingDesc` 单次提交0..4 directional lights + ambient；Null/bgfx/shader 同一上限与验证；sample_3d 提交3灯并输出 count | [Rendering](rendering.md) · [3D](game-3d.md) · GpuTextureUploadTests |
 | 2D-SPRITE-BATCH | 任意非0 `spriteKey`；bgfx 按最终渲染顺序建立连续 key batch 并逐 batch 绑定纹理；双纹理 sample 保持透明排序 | [2D](game-2d.md) · BgfxSprite2DGeometryTests |
 | 2D-SPRITE-ANIM | SpriteAnimationClip cooked payload/typed validation/recipe；SpriteAnimator2D Once/Loop/PingPong、暂停、倍速与大 delta；sample 双纹理 `Idle -> Walk -> HitWall` | [2D](game-2d.md) · [资源](resources.md) · SpriteAnimationClipPayloadTests · SpriteAnimator2DTests |
 | 3D-001 | multi-mesh 产品 E2E：双 mesh glTF fixture → cook → 两 StaticMesh upload/bind（meshKey 1/2）→ Prefab 每节点 resolve → extract/draw → ledger 归零；`tina_sample_3d` 300 帧 `multiMesh=true` | [3D](game-3d.md) |
@@ -85,7 +86,7 @@
 | UI-THEME-DEFAULT | Context `productTheme`/`setProductTheme`；`create*` 自动 apply `make*Chrome`；`makeLightProductTheme`；局部 `set*Paint` 覆盖；`UIThemeTests` | [UI](ui.md) |
 | DOC-002 | `tools/docs/CheckDocs.ps1`：docs 本地链接、cmake configure/build preset、`--target` 名、Legacy 产品文案软警告；不扫 out/build/thirdparty | [building](building.md) · [testing](testing.md) |
 | RUNTIME-001 | `GameStateStack` + commands + 唯一 commit；**policy 向下阻断**（fixed/frame/render/UI 自顶向下 `forEachDispatch`）；enter 失败丢 candidate；`GameStateStackTests` / policy dispatch 单测 | [gameplay](gameplay.md) · ADR 0014 |
-| RUNTIME-002 | `FramePin`/`FramePinSink`、`RenderFramePacket`、`NullSubmissionCompletionLedger`；EngineHost submit/present 挂 pin 并在 present/skip 后 complete；shutdown abandon；`FramePinPacketTests` | [rendering](rendering.md) · ADR 0016 |
+| RUNTIME-002 | `FramePin`/`FramePinSink`、`RenderFramePacket`、`CpuSubmissionCompletionLedger`；EngineHost submit/present 挂 pin 并在 present/skip 后 complete；shutdown abandon；`FramePinPacketTests` | [rendering](rendering.md) · ADR 0016 |
 | PERF-001 | ADR 0018 Accepted；`tools/bench` → `tina_bench` schema v1；workload `null_runtime_frames`；JSON fingerprint/checksum/p50/p95/p99；共享机 `conclusion=provisional`；固定 hard-gate 机与多进程 MAD 后置 | [performance-memory](performance-memory.md) · ADR 0018 |
 | RUNTIME-001-INT | Null Host 集成：base `requestPush` overlay（block fixed/frame below）→ overlay `requestPop` → base 恢复；enter 失败无 `onExit`；`GameStateStackIntegrationTests` | [gameplay](gameplay.md) · ADR 0014 |
 | RUNTIME-001-SAMPLE | `tina_sample_2d` 收尾自动 pause overlay（≥60 帧）：push/pop + policy block；JSON `pauseOverlay*`；短 smoke 跳过 | [2D](game-2d.md) · ADR 0014 |
@@ -97,8 +98,8 @@
 | API-CLEAN-ASSET-READY | 删除 `AssetLogicalState Ready` 别名（仅 ReadyCpu/ReadyGpu） | [resources](resources.md) |
 | API-CLEAN-SCENE-KEYS | Scene `fixture*Key` → `meshKey`/`materialKey`/`spriteKey`；注释改为 bind-table 语义 | [Scene](scene-ecs.md) · [3D](game-3d.md) |
 | API-CLEAN-UI-STATS | `UIContextStatistics` phase dirty 单源：`structureDirty`/`layoutDirty`/`hitDirty`/`paintDirty`/`semanticsDirty` 由内部 `phaseDirty` mask 派生；去掉 public `dirty` 与并行 bool 双轨 | [UI](ui.md) |
-| RENDER-LEDGER-SPI | `ISubmissionCompletionLedger` + `NullSubmissionCompletionLedger` 实现；`RenderFramePacket` 走接口 | [rendering](rendering.md) · ADR 0016 |
-| RENDER-LEDGER-INJECT | Host 持 `unique_ptr<ISubmissionCompletionLedger>`；可选 `createSubmissionCompletionLedger`；Desktop 注入 `BgfxSubmissionCompletionLedger`（present-sync）；mock/Bgfx 多态单测 | [rendering](rendering.md) · ADR 0016 |
+| RENDER-LEDGER-SPI | `ISubmissionCompletionLedger` + `CpuSubmissionCompletionLedger` 实现；`RenderFramePacket` 走接口 | [rendering](rendering.md) · ADR 0016 |
+| RENDER-LEDGER-INJECT | Host 持 `unique_ptr<ISubmissionCompletionLedger>`；可选 `createSubmissionCompletionLedger` 仅替换 CPU 记账实现；所有 composition 都在 present-return complete；mock 多态单测 | [rendering](rendering.md) · ADR 0016 |
 | RUNTIME-001-INPUT | `blocksGameplayInputBelow`：下层 fixed/frame 使用空 action snapshot；`gameplayInputBlockedForDepth` + unit tests | [gameplay](gameplay.md) · ADR 0014 |
 | RENDER-3D-TEX | Opaque3D unlit 采样 materialKey 绑定贴图（shader `s_texColor` + default white）；关闭「bind 不 draw」假完成 | [3D](game-3d.md) |
 | TEST-001-GCC13-NULL | Docker Desktop + `linux-gcc13-vnext`：`tina_tests`/`tina_ui_tests`(255)/`tina_runtime_ui_tests`(83)/bridge(13)/`tina_sample_null` 300 帧；vcpkg baseline 与仓库一致；`artifacts/gates/test-001-linux-gcc13-null.json` | [Linux 证据](m12-evidence-linux.md) |

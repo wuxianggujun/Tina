@@ -3,6 +3,7 @@
 
 #include "../RenderSurfaceStateTracker.hpp"
 
+#include <array>
 #include <cmath>
 #include <memory>
 #include <unordered_map>
@@ -11,12 +12,6 @@
 
 namespace Tina::Render {
 namespace {
-
-[[nodiscard]] bool isFiniteNonNegativeRgb(float red, float green, float blue) noexcept
-{
-    return std::isfinite(red) && std::isfinite(green) && std::isfinite(blue) &&
-           red >= 0.0F && green >= 0.0F && blue >= 0.0F;
-}
 
 class NullRenderDevice final : public IRenderDevice {
   public:
@@ -340,75 +335,42 @@ class NullRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status setMesh3DDirectionalLight(float dirX, float dirY, float dirZ, float colorR,
-                                                         float colorG, float colorB,
-                                                         float ambientScale) noexcept override
+    [[nodiscard]] Core::Status setMesh3DLighting(const Mesh3DLightingDesc& lighting) noexcept override
     {
         if (stopped_)
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
         }
-        if (!std::isfinite(dirX) || !std::isfinite(dirY) || !std::isfinite(dirZ) ||
-            !isFiniteNonNegativeRgb(colorR, colorG, colorB) || !std::isfinite(ambientScale) ||
-            ambientScale < 0.0F)
+        if (auto status = validateMesh3DLightingDesc(lighting); !status)
         {
-            return Core::failure(RenderErrorCode::InvalidTextureUpload,
-                                 "Mesh3D directional light parameters must be finite (color and ambient >= 0)");
+            return status;
         }
-        const float lenSq = dirX * dirX + dirY * dirY + dirZ * dirZ;
-        if (lenSq <= 1.0e-12F)
-        {
-            return Core::failure(RenderErrorCode::InvalidTextureUpload,
-                                 "Mesh3D light direction must be non-zero");
-        }
-        lightDirX_ = dirX;
-        lightDirY_ = dirY;
-        lightDirZ_ = dirZ;
-        lightColorR_ = colorR;
-        lightColorG_ = colorG;
-        lightColorB_ = colorB;
-        lightAmbient_ = ambientScale;
-        return Core::success();
-    }
 
-    [[nodiscard]] Core::Status setMesh3DFillDirectionalLight(float dirX, float dirY, float dirZ, float colorR,
-                                                             float colorG, float colorB) noexcept override
-    {
-        if (stopped_)
+        directionalLightCount_ = lighting.directionalLights.size();
+        for (std::size_t lightIndex = 0; lightIndex < directionalLights_.size(); ++lightIndex)
         {
-            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+            if (lightIndex >= directionalLightCount_)
+            {
+                directionalLights_[lightIndex] = {};
+                continue;
+            }
+
+            const Mesh3DDirectionalLight& source = lighting.directionalLights[lightIndex];
+            const float lengthSquared =
+                source.directionTowardLightX * source.directionTowardLightX +
+                source.directionTowardLightY * source.directionTowardLightY +
+                source.directionTowardLightZ * source.directionTowardLightZ;
+            const float inverseLength = 1.0F / std::sqrt(lengthSquared);
+            directionalLights_[lightIndex] = Mesh3DDirectionalLight{
+                .directionTowardLightX = source.directionTowardLightX * inverseLength,
+                .directionTowardLightY = source.directionTowardLightY * inverseLength,
+                .directionTowardLightZ = source.directionTowardLightZ * inverseLength,
+                .colorR = source.colorR,
+                .colorG = source.colorG,
+                .colorB = source.colorB,
+            };
         }
-        if (!std::isfinite(dirX) || !std::isfinite(dirY) || !std::isfinite(dirZ) ||
-            !isFiniteNonNegativeRgb(colorR, colorG, colorB))
-        {
-            return Core::failure(RenderErrorCode::InvalidTextureUpload,
-                                 "Mesh3D fill light parameters must be finite and color must be non-negative");
-        }
-        const float colorMag = std::abs(colorR) + std::abs(colorG) + std::abs(colorB);
-        if (colorMag <= 1.0e-6F)
-        {
-            fillEnabled_ = false;
-            fillDirX_ = 0.0F;
-            fillDirY_ = 1.0F;
-            fillDirZ_ = 0.0F;
-            fillColorR_ = 0.0F;
-            fillColorG_ = 0.0F;
-            fillColorB_ = 0.0F;
-            return Core::success();
-        }
-        const float lenSq = dirX * dirX + dirY * dirY + dirZ * dirZ;
-        if (lenSq <= 1.0e-12F)
-        {
-            return Core::failure(RenderErrorCode::InvalidTextureUpload,
-                                 "Mesh3D fill light direction must be non-zero when color is non-zero");
-        }
-        fillEnabled_ = true;
-        fillDirX_ = dirX;
-        fillDirY_ = dirY;
-        fillDirZ_ = dirZ;
-        fillColorR_ = colorR;
-        fillColorG_ = colorG;
-        fillColorB_ = colorB;
+        ambientScale_ = lighting.ambientScale;
         return Core::success();
     }
 
@@ -480,20 +442,17 @@ class NullRenderDevice final : public IRenderDevice {
         float roughness = 1.0F;
     };
     std::unordered_map<u32, MaterialFactors> materialFactors_{};
-    float lightDirX_ = 0.4F;
-    float lightDirY_ = 0.85F;
-    float lightDirZ_ = 0.35F;
-    float lightColorR_ = 1.0F;
-    float lightColorG_ = 0.98F;
-    float lightColorB_ = 0.92F;
-    float lightAmbient_ = 0.18F;
-    bool fillEnabled_ = false;
-    float fillDirX_ = 0.0F;
-    float fillDirY_ = 1.0F;
-    float fillDirZ_ = 0.0F;
-    float fillColorR_ = 0.0F;
-    float fillColorG_ = 0.0F;
-    float fillColorB_ = 0.0F;
+    std::array<Mesh3DDirectionalLight, Mesh3DLightingDesc::MaximumDirectionalLightCount> directionalLights_{
+        Mesh3DDirectionalLight{
+            .directionTowardLightX = 0.4F,
+            .directionTowardLightY = 0.85F,
+            .directionTowardLightZ = 0.35F,
+            .colorR = 1.0F,
+            .colorG = 0.98F,
+            .colorB = 0.92F,
+        }};
+    std::size_t directionalLightCount_ = 1;
+    float ambientScale_ = 0.18F;
     u64 nextFrameIndex_ = 0;
     u64 nextSubmissionIndex_ = 0;
     bool frameOpen_ = false;

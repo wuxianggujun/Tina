@@ -48,5 +48,6 @@ inline constexpr Core::ErrorCode FramePinCapacityExceeded{Core::ErrorDomain::Ren
 inline constexpr Core::ErrorCode InvalidFramePin{Core::ErrorDomain::Render, 40};
 inline constexpr Core::ErrorCode SubmissionCompletionLedgerFull{Core::ErrorDomain::Render, 41};
 inline constexpr Core::ErrorCode InvalidSubmissionTicket{Core::ErrorDomain::Render, 42};
+inline constexpr Core::ErrorCode InvalidMesh3DLighting{Core::ErrorDomain::Render, 43};
 
 } // namespace Tina::Render::RenderErrorCode

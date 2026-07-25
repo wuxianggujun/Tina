@@ -94,24 +94,41 @@ public:
     [[nodiscard]] virtual Core::u32 pinCount() const noexcept = 0;
 };
 
-// Tracks Submitted frame indices until complete/abandon (ADR 0016 / RUNTIME-002).
-// Host owns ISubmissionCompletionLedger (unique_ptr); default product/Null path uses
-// NullSubmissionCompletionLedger (present-return == complete). Desktop bgfx path may inject
-// BgfxSubmissionCompletionLedger (still present-sync until true GPU fence lands).
-struct SubmissionTicket final {
-    Core::u64 submissionIndex = 0;
-    bool open = false;
+class ISubmissionCompletionLedger;
 
-    [[nodiscard]] bool hasValue() const noexcept { return open; }
-};
+// Unique ownership token for one submitted frame. The issuing ledger must outlive
+// the open ticket; destroying an open ticket abandons it through that ledger.
+class SubmissionTicket final {
+public:
+    SubmissionTicket(const SubmissionTicket&) = delete;
+    SubmissionTicket& operator=(const SubmissionTicket&) = delete;
+    SubmissionTicket(SubmissionTicket&& other) noexcept;
+    SubmissionTicket& operator=(SubmissionTicket&&) = delete;
+    ~SubmissionTicket() noexcept;
 
-// How Host drives complete() / pin release after present.
-enum class SubmissionCompletionMode : Core::u8 {
-    // complete() immediately after present returns (Null / tests).
-    PresentSync = 0,
-    // Keep pins until the next present (bgfx double-buffer lag). Not a true GPU
-    // fence token poll, but pins outlive the submitting CPU frame safely.
-    FrameDeferred = 1,
+    [[nodiscard]] Core::u64 submissionIndex() const noexcept { return m_submissionIndex; }
+    [[nodiscard]] bool hasValue() const noexcept { return m_owner != nullptr; }
+    [[nodiscard]] bool belongsTo(const ISubmissionCompletionLedger& ledger) const noexcept
+    {
+        return m_owner == &ledger;
+    }
+
+private:
+    friend class ISubmissionCompletionLedger;
+
+    SubmissionTicket(ISubmissionCompletionLedger& owner, Core::u64 submissionIndex) noexcept
+        : m_owner(&owner), m_submissionIndex(submissionIndex)
+    {
+    }
+
+    void closeWithoutCallback() noexcept
+    {
+        m_owner = nullptr;
+        m_submissionIndex = 0;
+    }
+
+    ISubmissionCompletionLedger* m_owner = nullptr;
+    Core::u64 m_submissionIndex = 0;
 };
 
 class ISubmissionCompletionLedger {
@@ -119,19 +136,71 @@ public:
     virtual ~ISubmissionCompletionLedger() noexcept = default;
 
     [[nodiscard]] virtual Core::Result<SubmissionTicket> beginSubmitted(Core::u64 submissionIndex) = 0;
-    [[nodiscard]] virtual Core::Status complete(SubmissionTicket& ticket) noexcept = 0;
-    [[nodiscard]] virtual Core::Status abandon(SubmissionTicket& ticket) noexcept = 0;
+    [[nodiscard]] Core::Status complete(SubmissionTicket& ticket) noexcept
+    {
+        return close(ticket, true);
+    }
+    [[nodiscard]] Core::Status abandon(SubmissionTicket& ticket) noexcept
+    {
+        return close(ticket, false);
+    }
     [[nodiscard]] virtual Core::u32 inflightCount() const noexcept = 0;
     [[nodiscard]] virtual bool allClear() const noexcept = 0;
-    [[nodiscard]] virtual SubmissionCompletionMode completionMode() const noexcept = 0;
+
+protected:
+    [[nodiscard]] SubmissionTicket makeSubmissionTicket(Core::u64 submissionIndex) noexcept
+    {
+        return SubmissionTicket{*this, submissionIndex};
+    }
+
+    // Implementations must mutate accounting only when returning success.
+    [[nodiscard]] virtual Core::Status completeOwned(Core::u64 submissionIndex) noexcept = 0;
+    [[nodiscard]] virtual Core::Status abandonOwned(Core::u64 submissionIndex) noexcept = 0;
+
+private:
+    [[nodiscard]] Core::Status close(SubmissionTicket& ticket, bool completed) noexcept
+    {
+        if (!ticket.hasValue())
+        {
+            return Core::success();
+        }
+        if (!ticket.belongsTo(*this))
+        {
+            return Core::failure(RenderErrorCode::InvalidSubmissionTicket,
+                                 "SubmissionTicket belongs to a different completion ledger");
+        }
+
+        Core::Status status = completed ? completeOwned(ticket.submissionIndex())
+                                        : abandonOwned(ticket.submissionIndex());
+        if (status)
+        {
+            ticket.closeWithoutCallback();
+        }
+        return status;
+    }
 };
 
-// Sync Null ledger: present-return == complete. Not a GPU fence. Default for Headless/Null graphs.
-class NullSubmissionCompletionLedger final : public ISubmissionCompletionLedger {
+inline SubmissionTicket::SubmissionTicket(SubmissionTicket&& other) noexcept
+    : m_owner(other.m_owner), m_submissionIndex(other.m_submissionIndex)
+{
+    other.closeWithoutCallback();
+}
+
+inline SubmissionTicket::~SubmissionTicket() noexcept
+{
+    if (m_owner != nullptr)
+    {
+        (void)m_owner->abandon(*this);
+    }
+}
+
+// Backend-neutral CPU submission ledger. Host completes tickets after present returns.
+// It is intentionally not a GPU fence and is the default for every composition graph.
+class CpuSubmissionCompletionLedger final : public ISubmissionCompletionLedger {
 public:
     static constexpr Core::usize DefaultCapacity = 64;
 
-    explicit NullSubmissionCompletionLedger(Core::usize capacity = DefaultCapacity) noexcept
+    explicit CpuSubmissionCompletionLedger(Core::usize capacity = DefaultCapacity) noexcept
         : m_capacity(capacity == 0 ? DefaultCapacity : capacity)
     {
     }
@@ -140,73 +209,51 @@ public:
     [[nodiscard]] Core::u32 inflightCount() const noexcept override { return m_inflight; }
     [[nodiscard]] Core::u64 lastCompletedSubmission() const noexcept { return m_lastCompleted; }
     [[nodiscard]] bool allClear() const noexcept override { return m_inflight == 0; }
-    [[nodiscard]] SubmissionCompletionMode completionMode() const noexcept override
-    {
-        return SubmissionCompletionMode::PresentSync;
-    }
 
     [[nodiscard]] Core::Result<SubmissionTicket> beginSubmitted(Core::u64 submissionIndex) override
     {
         if (m_inflight >= static_cast<Core::u32>(m_capacity))
         {
             return Core::failure(RenderErrorCode::SubmissionCompletionLedgerFull,
-                                 "NullSubmissionCompletionLedger in-flight capacity exhausted");
+                                 "CpuSubmissionCompletionLedger in-flight capacity exhausted");
         }
         // submissionIndex may be 0 on the first engine frame (Null/bgfx paths).
         ++m_inflight;
         ++m_opened;
-        return SubmissionTicket{.submissionIndex = submissionIndex, .open = true};
+        return makeSubmissionTicket(submissionIndex);
     }
 
-    [[nodiscard]] Core::Status complete(SubmissionTicket& ticket) noexcept override
+protected:
+    [[nodiscard]] Core::Status completeOwned(Core::u64 submissionIndex) noexcept override
     {
-        if (!ticket.open)
-        {
-            return Core::success();
-        }
         if (m_inflight == 0)
         {
-            ticket.open = false;
             return Core::failure(RenderErrorCode::InvalidSubmissionTicket,
-                                 "NullSubmissionCompletionLedger has no in-flight submissions");
+                                 "CpuSubmissionCompletionLedger has no in-flight submissions");
         }
         --m_inflight;
-        m_lastCompleted = ticket.submissionIndex;
+        m_lastCompleted = submissionIndex;
         ++m_completed;
-        ticket.open = false;
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status abandon(SubmissionTicket& ticket) noexcept override
+    [[nodiscard]] Core::Status abandonOwned(Core::u64) noexcept override
     {
-        if (!ticket.open)
-        {
-            return Core::success();
-        }
         if (m_inflight == 0)
         {
-            ticket.open = false;
             return Core::failure(RenderErrorCode::InvalidSubmissionTicket,
-                                 "NullSubmissionCompletionLedger has no in-flight submissions");
+                                 "CpuSubmissionCompletionLedger has no in-flight submissions");
         }
         --m_inflight;
         ++m_abandoned;
-        ticket.open = false;
         return Core::success();
     }
+
+public:
 
     [[nodiscard]] Core::u64 openedCount() const noexcept { return m_opened; }
     [[nodiscard]] Core::u64 completedCount() const noexcept { return m_completed; }
     [[nodiscard]] Core::u64 abandonedCount() const noexcept { return m_abandoned; }
-
-    void resetCountersForTest() noexcept
-    {
-        m_inflight = 0;
-        m_opened = 0;
-        m_completed = 0;
-        m_abandoned = 0;
-        m_lastCompleted = 0;
-    }
 
 private:
     Core::usize m_capacity = DefaultCapacity;
@@ -215,69 +262,6 @@ private:
     Core::u64 m_completed = 0;
     Core::u64 m_abandoned = 0;
     Core::u64 m_lastCompleted = 0;
-};
-
-// Product-path ledger for Desktop/bgfx. Host uses FrameDeferred: after present, pins stay
-// owned until the next present (double-buffer lag via bgfx::frame sequencing). True GPU
-// fence object polling remains a follow-up (RENDER-FENCE remaining).
-class BgfxSubmissionCompletionLedger final : public ISubmissionCompletionLedger {
-public:
-    static constexpr Core::usize DefaultCapacity = NullSubmissionCompletionLedger::DefaultCapacity;
-
-    explicit BgfxSubmissionCompletionLedger(Core::usize capacity = DefaultCapacity) noexcept
-        : m_inner(capacity)
-    {
-    }
-
-    [[nodiscard]] Core::usize capacity() const noexcept { return m_inner.capacity(); }
-    [[nodiscard]] Core::u32 inflightCount() const noexcept override { return m_inner.inflightCount(); }
-    [[nodiscard]] Core::u64 lastCompletedSubmission() const noexcept
-    {
-        return m_inner.lastCompletedSubmission();
-    }
-    [[nodiscard]] bool allClear() const noexcept override { return m_inner.allClear(); }
-    [[nodiscard]] SubmissionCompletionMode completionMode() const noexcept override
-    {
-        return SubmissionCompletionMode::FrameDeferred;
-    }
-
-    [[nodiscard]] Core::Result<SubmissionTicket> beginSubmitted(Core::u64 submissionIndex) override
-    {
-        return m_inner.beginSubmitted(submissionIndex);
-    }
-
-    [[nodiscard]] Core::Status complete(SubmissionTicket& ticket) noexcept override
-    {
-        // Host calls complete when deferred lag elapses (next present or shutdown).
-        return m_inner.complete(ticket);
-    }
-
-    [[nodiscard]] Core::Status abandon(SubmissionTicket& ticket) noexcept override
-    {
-        return m_inner.abandon(ticket);
-    }
-
-    [[nodiscard]] Core::u64 openedCount() const noexcept { return m_inner.openedCount(); }
-    [[nodiscard]] Core::u64 completedCount() const noexcept { return m_inner.completedCount(); }
-    [[nodiscard]] Core::u64 abandonedCount() const noexcept { return m_inner.abandonedCount(); }
-
-    // Records present return for diagnostics; Host owns deferred pin storage.
-    void notePresentReturned(Core::u64 submissionIndex, Core::u64 presentFrameToken = 0) noexcept
-    {
-        m_lastPresentSubmission = submissionIndex;
-        m_lastPresentFrameToken = presentFrameToken;
-        ++m_presentNotes;
-    }
-
-    [[nodiscard]] Core::u64 lastPresentSubmission() const noexcept { return m_lastPresentSubmission; }
-    [[nodiscard]] Core::u64 lastPresentFrameToken() const noexcept { return m_lastPresentFrameToken; }
-    [[nodiscard]] Core::u64 presentNoteCount() const noexcept { return m_presentNotes; }
-
-private:
-    NullSubmissionCompletionLedger m_inner;
-    Core::u64 m_lastPresentSubmission = 0;
-    Core::u64 m_lastPresentFrameToken = 0;
-    Core::u64 m_presentNotes = 0;
 };
 
 } // namespace Tina::Render

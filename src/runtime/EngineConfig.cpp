@@ -16,7 +16,7 @@ namespace {
     return Core::failure(ConfigurationErrorCode::InvalidEngineConfig, message);
 }
 
-[[nodiscard]] bool isValidDigitalBindingPattern(const DigitalActionBindingPattern& pattern) noexcept
+[[nodiscard]] bool isValidActionBindingPattern(const ActionBindingPattern& pattern) noexcept
 {
     return std::visit(
         []<typename Pattern>(const Pattern& value) noexcept {
@@ -27,12 +27,26 @@ namespace {
             } else if constexpr (std::is_same_v<PatternType, PrimaryPointerButtonBinding>)
             {
                 return value.pointer == Platform::PrimaryPointerId && value.button < Platform::PointerButton::Count;
-            } else
+            } else if constexpr (std::is_same_v<PatternType, StandardGamepadButtonBinding>)
             {
                 return value.button < Platform::GamepadButton::Count;
+            } else
+            {
+                return value.axis < Platform::GamepadAxis::Count &&
+                       value.valueMode >= GamepadAxisValueMode::Signed &&
+                       value.valueMode <= GamepadAxisValueMode::Trigger;
             }
         },
         pattern);
+}
+
+[[nodiscard]] bool isValidActionTransform(const InputActionBinding& binding) noexcept
+{
+    const bool analog = std::holds_alternative<StandardGamepadAxisBinding>(binding.input);
+    return std::isfinite(binding.deadzone) && std::isfinite(binding.scale) &&
+           binding.deadzone >= 0.0F && binding.deadzone < 1.0F &&
+           std::abs(binding.scale) > 1.0e-6F && std::abs(binding.scale) <= 16.0F &&
+           (analog || binding.deadzone == 0.0F);
 }
 
 [[nodiscard]] Core::Status validatePlatformFrameCapacities(const Platform::PlatformFrameCapacityConfig& capacities)
@@ -69,46 +83,66 @@ namespace {
     {
         return invalidConfig("frame action transition capacity is outside the supported range");
     }
-    if (capacities.digitalActionBindingCapacity == 0 ||
-        capacities.digitalActionBindingCapacity > InputActionMapCapacityConfig::MaximumDigitalActionBindingCapacity)
+    if (capacities.actionBindingCapacity == 0 ||
+        capacities.actionBindingCapacity > InputActionMapCapacityConfig::MaximumActionBindingCapacity)
     {
-        return invalidConfig("digital action binding capacity is outside the supported range");
+        return invalidConfig("action binding capacity is outside the supported range");
     }
-    if (input.digitalBindings.size() > capacities.digitalActionBindingCapacity)
+    if (input.bindings.size() > capacities.actionBindingCapacity)
     {
-        return invalidConfig("digital action bindings exceed the configured capacity");
+        return invalidConfig("action bindings exceed the configured capacity");
     }
 
-    for (usize index = 0; index < input.digitalBindings.size(); ++index)
+    for (usize index = 0; index < input.bindings.size(); ++index)
     {
-        const DigitalActionBinding& binding = input.digitalBindings[index];
+        const InputActionBinding& binding = input.bindings[index];
         if (!binding.action.hasValue())
         {
-            return invalidConfig("digital action binding uses an invalid action id");
+            return invalidConfig("action binding uses an invalid action id");
         }
-        if (!isValidDigitalBindingPattern(binding.input))
+        if (!isValidActionBindingPattern(binding.input))
         {
-            return invalidConfig("digital action binding uses an invalid physical control");
+            return invalidConfig("action binding uses an invalid physical control");
         }
         if (binding.domain != InputActionDomain::Simulation && binding.domain != InputActionDomain::Frame)
         {
-            return invalidConfig("digital action binding uses an invalid action domain");
+            return invalidConfig("action binding uses an invalid action domain");
         }
-        const auto duplicate = std::ranges::find(input.digitalBindings.begin(),
-                                                 input.digitalBindings.begin() + static_cast<std::ptrdiff_t>(index),
-                                                 binding.input, &DigitalActionBinding::input);
-        if (duplicate != input.digitalBindings.begin() + static_cast<std::ptrdiff_t>(index))
+        if (binding.composition != ActionCompositionMode::SumClamped &&
+            binding.composition != ActionCompositionMode::StrongestMagnitude)
+        {
+            return invalidConfig("action binding uses an invalid composition mode");
+        }
+        if (!isValidActionTransform(binding))
+        {
+            return invalidConfig("action binding uses an invalid deadzone or scale");
+        }
+
+        const auto previousEnd = input.bindings.begin() + static_cast<std::ptrdiff_t>(index);
+        const auto duplicate = std::ranges::find(input.bindings.begin(), previousEnd,
+                                                 binding.input, &InputActionBinding::input);
+        if (duplicate != previousEnd)
         {
             return invalidConfig("one physical control may have only one binding in the default input context");
         }
-        const auto conflictingDomain = std::ranges::find_if(
-            input.digitalBindings.begin(), input.digitalBindings.begin() + static_cast<std::ptrdiff_t>(index),
-            [&binding](const DigitalActionBinding& previous) {
-                return previous.action == binding.action && previous.domain != binding.domain;
-            });
-        if (conflictingDomain != input.digitalBindings.begin() + static_cast<std::ptrdiff_t>(index))
+        if (binding.binding.hasValue())
         {
-            return invalidConfig("one action id may belong to only one input domain");
+            const auto duplicateId = std::ranges::find(input.bindings.begin(), previousEnd,
+                                                       binding.binding, &InputActionBinding::binding);
+            if (duplicateId != previousEnd)
+            {
+                return invalidConfig("explicit action binding ids must be unique");
+            }
+        }
+        const auto conflictingDomain = std::ranges::find_if(
+            input.bindings.begin(), previousEnd, [&binding](const InputActionBinding& previous) {
+                return previous.action == binding.action &&
+                       (previous.domain != binding.domain ||
+                        previous.composition != binding.composition);
+            });
+        if (conflictingDomain != previousEnd)
+        {
+            return invalidConfig("one action id must use one input domain and composition mode");
         }
     }
     return Core::success();

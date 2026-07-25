@@ -63,12 +63,15 @@ TEST(PhysicsGridBodiesTest, CreatesStaticBodiesAtCellCenters)
     dynamicBody.type = PhysicsBodyType2D::Dynamic;
     dynamicBody.positionMeters = {1.5F, 3.0F};
     dynamicBody.linearVelocityMetersPerSecond = {0.0F, -20.0F};
-    PhysicsBoxShape2DDesc box;
+    PhysicsShape2DDesc box;
+    box.kind = PhysicsShapeKind2D::Box;
     box.halfExtentsMeters = {0.4F, 0.4F};
     box.density = 1.0F;
     box.enableContactEvents = true;
-    auto dynamic = world.createBoxBody(dynamicBody, box);
+    auto dynamic = world.createBody(dynamicBody);
     ASSERT_TRUE(dynamic) << dynamic.error().message;
+    auto dynamicShape = world.createShape(*dynamic, box);
+    ASSERT_TRUE(dynamicShape) << dynamicShape.error().message;
 
     bool sawBegin = false;
     for (int step = 0; step < 120; ++step) {

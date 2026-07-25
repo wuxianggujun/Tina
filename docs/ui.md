@@ -128,7 +128,8 @@ UI 不调用 bgfx。`tina_ui_render_integration` 把 committed paint 转为固�
 在 `RenderFrame` 中只借用 DisplayList 和可选 R8 atlas page。backend 必须在 `submitFrame()` 内同步
 消费。
 
-当前支持 solid/glyph quad 与 axis-aligned scissor。Runtime `RenderFramePacket`/FramePin 首切片已落地
+当前支持 solid/glyph quad 与 axis-aligned scissor。Runtime `RenderFramePacket`/FramePin 的
+present-return CPU completion 已落地
 （Null 同步 complete）。rounded/stencil clip、Image widget 与跨 GPU/DPI golden（UI-003）尚未完成。
 
 ## 实际绘制链路

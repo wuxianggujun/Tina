@@ -21,6 +21,16 @@ GPU upload 用拥有 staging 的 UploadTicket，GPU/Audio 销毁进入 DestroyQu
 账本。逻辑 cancel/unload 先使新查询失效，物理内存/资源计数只有 backend fence/completion 或
 audio ACK 后释放。Ready 只在下一帧 snapshot 发布，首期不做自动 LRU。
 
+## 当前实现边界（2026-07-25）
+
+- `RenderFrame` 的 view 必须由 backend 在 `submitFrame()` 内同步消费；成功 `present()` 返回后，Host
+  complete CPU submission ticket 并释放 FramePin。suspended skip 与失败路径也会确定性释放/abandon。
+- 该完成点只关闭本帧 CPU 借用，不是 GPU fence，也不能驱动 Asset 物理退役。
+- 已删除固定延迟到下一 present 的 `FrameDeferred` 路径与 `bgfx::frame()` 假 token；这与本 ADR 拒绝
+  “固定延迟 N 帧释放”的决定一致。
+- bgfx Texture/Mesh 的内部资源所有权继续由 backend 管理；通用 AssetLease/retirement 必须等真实
+  GPU fence 或等价、可证明安全的 completion 后再合并。
+
 ## 代价
 
 - 需要区分 logical state 与 physical retirement，诊断面更大；

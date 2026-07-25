@@ -31,6 +31,7 @@ inline constexpr Core::ErrorCode GameStateCommandAlreadyQueued{Core::ErrorDomain
 inline constexpr Core::ErrorCode GameStateStackCapacityExceeded{Core::ErrorDomain::Runtime, 16};
 inline constexpr Core::ErrorCode GameStateTransitionFailed{Core::ErrorDomain::Runtime, 17};
 inline constexpr Core::ErrorCode GameStateCommandRejected{Core::ErrorDomain::Runtime, 18};
+inline constexpr Core::ErrorCode InvalidRebindTransaction{Core::ErrorDomain::Runtime, 19};
 
 } // namespace RuntimeErrorCode
 

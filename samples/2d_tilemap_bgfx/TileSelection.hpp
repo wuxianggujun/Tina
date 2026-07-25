@@ -61,21 +61,21 @@ inline void consumeTileSelectionTransitions(std::span<const SimulationActionTran
 {
     for (const SimulationActionTransition& transition : transitions)
     {
-        const auto* digital = std::get_if<DigitalActionTransition>(&transition);
-        if (digital == nullptr || digital->action != selectionAction ||
-            digital->kind != DigitalActionTransitionKind::Pressed)
+        const auto* actionTransition = std::get_if<InputActionTransition>(&transition);
+        if (actionTransition == nullptr || actionTransition->action != selectionAction ||
+            actionTransition->kind != InputActionTransitionKind::Started)
         {
             continue;
         }
 
         ++counters.pointerPresses;
-        if (!digital->worldPointerSample.has_value())
+        if (!actionTransition->worldPointerSample.has_value())
         {
             ++counters.missingWorldPointerSamples;
             continue;
         }
 
-        const Render::WorldPointerSample& sample = *digital->worldPointerSample;
+        const Render::WorldPointerSample& sample = *actionTransition->worldPointerSample;
         if (!sample.hit)
         {
             ++counters.viewportMisses;
@@ -160,7 +160,7 @@ makeSelectionHighlightSprite(const SelectedTile& selection, TileSelectionGrid gr
 }
 
 // Hermetic product-gate helper: seed lastSelection from a map cell center as if
-// an unconsumed A42 Pressed+hit worldPointerSample had been consumed. Does not
+// an unconsumed A42 Started+hit worldPointerSample had been consumed. Does not
 // re-read Camera/Platform. Returns false on invalid grid/cell (no half-state).
 [[nodiscard]] inline bool seedTileSelection(Core::u32 cellX, Core::u32 cellY, TileSelectionGrid grid,
                                             TileSelectionCounters& counters, Core::u64 inputSequence = 1) noexcept
@@ -195,11 +195,11 @@ makeSelectionHighlightSprite(const SelectedTile& selection, TileSelectionGrid gr
     return true;
 }
 
-// Optional path that builds a Pressed Simulation edge with a locked sample so
+// Optional path that builds a Started Simulation edge with a locked sample so
 // consumeTileSelectionTransitions exercises the same consumer as real A42
 // edges. Prefer seedTileSelection for the product CLI gate; this helper is for
 // unit tests that assert consumer-path equivalence.
-[[nodiscard]] inline Core::Result<DigitalActionTransition>
+[[nodiscard]] inline Core::Result<InputActionTransition>
 makeScriptedWorldCellPress(InputActionId selectionAction, TileSelectionGrid grid, Core::u32 cellX, Core::u32 cellY,
                            Core::u64 sourceSequence = 1) noexcept
 {
@@ -223,9 +223,10 @@ makeScriptedWorldCellPress(InputActionId selectionAction, TileSelectionGrid grid
         .stableCameraKey = 1,
         .hit = true,
     };
-    return DigitalActionTransition{
+    return InputActionTransition{
         .action = selectionAction,
-        .kind = DigitalActionTransitionKind::Pressed,
+        .kind = InputActionTransitionKind::Started,
+        .value = 1.0F,
         .sourceSequence = sourceSequence,
         .worldPointerSample = sample,
     };

@@ -73,6 +73,25 @@ struct StaticMeshUploadDesc final {
     std::span<const u16> indices{};    // size == indexCount, multiple of 3
 };
 
+struct Mesh3DDirectionalLight final {
+    float directionTowardLightX = 0.0F;
+    float directionTowardLightY = 1.0F;
+    float directionTowardLightZ = 0.0F;
+    float colorR = 1.0F;
+    float colorG = 1.0F;
+    float colorB = 1.0F;
+};
+
+struct Mesh3DLightingDesc final {
+    static constexpr std::size_t MaximumDirectionalLightCount = 4;
+
+    // Consumed synchronously by setMesh3DLighting(); the backend retains no span.
+    std::span<const Mesh3DDirectionalLight> directionalLights{};
+    float ambientScale = 0.18F;
+};
+
+[[nodiscard]] Core::Status validateMesh3DLightingDesc(const Mesh3DLightingDesc& lighting) noexcept;
+
 enum class RenderFrameSubmissionKind : u8 {
     Submitted,
     SkippedSuspendedSurface,
@@ -107,9 +126,6 @@ class IRenderDevice {
     // or element pointer after returning.
     [[nodiscard]] virtual Core::Result<RenderFrameSubmission> submitFrame(const RenderFrame& frame) = 0;
     [[nodiscard]] virtual Core::Status present() = 0;
-    // Optional: backend frame token after the last successful present (e.g. bgfx::frame()).
-    // Empty until present has succeeded; used by FrameDeferred completion lag.
-    [[nodiscard]] virtual std::optional<u64> lastPresentFrameToken() const noexcept { return std::nullopt; }
     [[nodiscard]] virtual RenderStatistics statistics() const noexcept = 0;
     virtual void shutdown() noexcept = 0;
 
@@ -214,39 +230,14 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Mesh3D normal texture binding");
     }
-    // RENDER-001: key directional light for experimental Opaque3D MR (product path).
-    // directionTowardLight = world-space vector toward the light (normalized by backend).
-    // colorRgb = non-negative RGB intensity (linear). ambientScale multiplies albedo ambient term.
-    // Pair with setMesh3DFillDirectionalLight for a second (fill) dir light. Not IBL/shadows.
-    [[nodiscard]] virtual Core::Status setMesh3DDirectionalLight(float dirX, float dirY, float dirZ,
-                                                                 float colorR, float colorG, float colorB,
-                                                                 float ambientScale = 0.18F) noexcept
+    // RENDER-001: one bounded lighting submission model for experimental Opaque3D MR.
+    // Supports 0..MaximumDirectionalLightCount world-space directional lights plus
+    // non-negative ambient. Directions are normalized by the backend. Not IBL/shadows.
+    [[nodiscard]] virtual Core::Status setMesh3DLighting(const Mesh3DLightingDesc& lighting) noexcept
     {
-        static_cast<void>(dirX);
-        static_cast<void>(dirY);
-        static_cast<void>(dirZ);
-        static_cast<void>(colorR);
-        static_cast<void>(colorG);
-        static_cast<void>(colorB);
-        static_cast<void>(ambientScale);
+        static_cast<void>(lighting);
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
-                             "This render device does not support Mesh3D directional light");
-    }
-    // RENDER-001: optional fill directional light (second dir light). Zero color disables fill.
-    // colorRgb must be non-negative linear RGB.
-    // directionTowardLight must be non-zero when color is non-zero.
-    [[nodiscard]] virtual Core::Status setMesh3DFillDirectionalLight(float dirX, float dirY, float dirZ,
-                                                                     float colorR, float colorG,
-                                                                     float colorB) noexcept
-    {
-        static_cast<void>(dirX);
-        static_cast<void>(dirY);
-        static_cast<void>(dirZ);
-        static_cast<void>(colorR);
-        static_cast<void>(colorG);
-        static_cast<void>(colorB);
-        return Core::failure(RenderErrorCode::TextureUploadUnsupported,
-                             "This render device does not support Mesh3D fill directional light");
+                             "This render device does not support Mesh3D lighting");
     }
 };
 

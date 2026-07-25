@@ -40,6 +40,8 @@ using Tina::Core::u8;
 
 inline constexpr u32 ProductSpriteKey = 1;
 inline constexpr u32 CharacterSpriteKey = 2;
+inline constexpr Tina::AssetFormat::TileMapLayerId VisualLayerId = 1;
+inline constexpr Tina::AssetFormat::TileMapLayerId CollisionLayerId = 2;
 inline constexpr u64 ExpectedNonEmptyTiles = 11; // 8 floor + 3 wall
 
 struct SampleCapture final {
@@ -214,11 +216,27 @@ makePlatformMap(std::pmr::memory_resource& memory)
         cells[y * 8 + 6] = 2;
     }
 
+    const std::array layers{
+        Tina::AssetFormat::TileMapLayerDesc{
+            .stableLayerId = VisualLayerId,
+            .kind = Tina::AssetFormat::TileMapLayerKind::Tile,
+            .visible = true,
+            .name = "visual",
+            .tiles = cells,
+        },
+        Tina::AssetFormat::TileMapLayerDesc{
+            .stableLayerId = CollisionLayerId,
+            .kind = Tina::AssetFormat::TileMapLayerKind::Tile,
+            .visible = false,
+            .name = "collision",
+            .tiles = cells,
+        },
+    };
     auto mapBytes = Tina::AssetFormat::writeTileMapPayloadBytes(Tina::AssetFormat::TileMapPayloadDesc{
         .widthCells = 8,
         .heightCells = 4,
         .cellSizeMeters = 1.0f,
-        .tiles = cells,
+        .layers = layers,
         .tilesetId = tilesetId,
     });
     if (!mapBytes)
@@ -251,7 +269,7 @@ class TileMap2DState final : public Tina::IGameState {
             return Tina::Core::failure(std::move(map.error()));
         }
         map_.emplace(std::move(*map));
-        grid_.emplace(*map_);
+        grid_.emplace(*map_, CollisionLayerId);
         controller_.emplace(Tina::Asset::CharacterController2DConfig{
             .halfWidth = 0.3f,
             .halfHeight = 0.5f,
@@ -335,7 +353,8 @@ class TileMap2DState final : public Tina::IGameState {
             .halfHeight = camera.worldHeight * 0.5f,
         };
         auto emitted = Tina::Asset::emitVisibleTileMapSprites(
-            *map_, query, Tina::Asset::TileChunkSpriteEmitParams{.spriteKey = ProductSpriteKey}, tileSprites);
+            *map_, VisualLayerId, query, Tina::Asset::TileChunkSpriteEmitParams{.spriteKey = ProductSpriteKey},
+            tileSprites);
         if (!emitted)
         {
             return Tina::Core::failure(std::move(emitted.error()));

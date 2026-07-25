@@ -54,6 +54,7 @@ class TileChunkDirtyCache final {
     // rebuiltOut receives only chunks whose revision is new or changed.
     // Returns rebuild count this call.
     [[nodiscard]] Core::Result<Core::u32> syncVisible(const TileMapInstance& map,
+                                                      AssetFormat::TileMapLayerId layerId,
                                                       const TileChunkCameraQuery& camera,
                                                       std::pmr::vector<TileChunkView>& rebuiltOut);
 
@@ -68,6 +69,7 @@ class TileChunkDirtyCache final {
 
   private:
     struct Entry final {
+        AssetFormat::TileMapLayerId layerId = 0;
         Core::u32 chunkX = 0;
         Core::u32 chunkY = 0;
         Core::u32 revision = 0;
@@ -77,7 +79,7 @@ class TileChunkDirtyCache final {
 
     explicit TileChunkDirtyCache(std::pmr::vector<Entry> entries, Core::usize capacity) noexcept;
 
-    [[nodiscard]] Entry* findEntry(Core::u32 chunkX, Core::u32 chunkY) noexcept;
+    [[nodiscard]] Entry* findEntry(AssetFormat::TileMapLayerId layerId, Core::u32 chunkX, Core::u32 chunkY) noexcept;
     [[nodiscard]] Entry* allocateEntry() noexcept;
 
     std::pmr::vector<Entry> m_entries{};

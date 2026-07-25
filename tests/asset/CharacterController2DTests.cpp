@@ -14,6 +14,8 @@
 namespace Tina::Asset {
 namespace {
 
+inline constexpr AssetFormat::TileMapLayerId CollisionLayerId = 20;
+
 [[nodiscard]] Core::AssetId::Bytes idBytes(Core::u8 seed)
 {
     Core::AssetId::Bytes bytes{};
@@ -51,11 +53,21 @@ namespace {
         cells[y * 8 + 6] = 1;
     }
 
+    const std::array layers{
+        AssetFormat::TileMapLayerDesc{
+            .stableLayerId = CollisionLayerId,
+            .kind = AssetFormat::TileMapLayerKind::Tile,
+            .visible = false,
+            .name = "collision",
+            .tiles = cells,
+        },
+    };
+
     auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
         .widthCells = 8,
         .heightCells = 4,
         .cellSizeMeters = 1.0f,
-        .tiles = cells,
+        .layers = layers,
         .tilesetId = tilesetId,
     });
     auto map = AssetFormat::parseTileMapPayload(*mapBytes);
@@ -69,7 +81,7 @@ TEST(CharacterController2DTests, FallsAndLandsOnFloor)
 {
     std::pmr::unsynchronized_pool_resource memory;
     auto map = makePlatformMap(memory);
-    TileMapGridCollision grid{map};
+    TileMapGridCollision grid{map, CollisionLayerId};
     CharacterController2D controller(CharacterController2DConfig{
         .halfWidth = 0.3f,
         .halfHeight = 0.5f,
@@ -101,7 +113,7 @@ TEST(CharacterController2DTests, HorizontalHitsWallAndStops)
 {
     std::pmr::unsynchronized_pool_resource memory;
     auto map = makePlatformMap(memory);
-    TileMapGridCollision grid{map};
+    TileMapGridCollision grid{map, CollisionLayerId};
     CharacterController2D controller(CharacterController2DConfig{
         .halfWidth = 0.3f,
         .halfHeight = 0.5f,
@@ -134,7 +146,7 @@ TEST(CharacterController2DTests, JumpLeavesGround)
 {
     std::pmr::unsynchronized_pool_resource memory;
     auto map = makePlatformMap(memory);
-    TileMapGridCollision grid{map};
+    TileMapGridCollision grid{map, CollisionLayerId};
     CharacterController2D controller(CharacterController2DConfig{
         .halfWidth = 0.3f,
         .halfHeight = 0.5f,

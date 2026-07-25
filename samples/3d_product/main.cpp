@@ -95,8 +95,8 @@ struct LifecycleCounters final {
     bool materialFactorsBound = false;
     bool materialMrTextureBound = false;
     bool materialNormalTextureBound = false;
-    bool keyLightConfigured = false;
-    bool fillLightConfigured = false;
+    u32 directionalLightCount = 0;
+    bool lightingConfigured = false;
     bool gltfCooked = false;
     bool prefabInstantiated = false;
     bool completePbrFixture = false;
@@ -940,22 +940,45 @@ class Product3DState final : public Tina::IGameState {
         }
         world_.emplace(std::move(*worldResult));
 
-        // Key + fill directional lights for experimental MR (sphere grid readability).
+        // Bounded N-light submission for experimental MR (sphere grid readability).
         if (auto* device = capture_->get(); device != nullptr)
         {
-            if (auto status = device->setMesh3DDirectionalLight(0.35F, 0.9F, 0.4F, 1.0F, 0.98F, 0.92F, 0.16F);
+            constexpr std::array<Tina::Render::Mesh3DDirectionalLight, 3> ProductLights{
+                Tina::Render::Mesh3DDirectionalLight{
+                    .directionTowardLightX = 0.35F,
+                    .directionTowardLightY = 0.9F,
+                    .directionTowardLightZ = 0.4F,
+                    .colorR = 1.0F,
+                    .colorG = 0.98F,
+                    .colorB = 0.92F,
+                },
+                Tina::Render::Mesh3DDirectionalLight{
+                    .directionTowardLightX = -0.55F,
+                    .directionTowardLightY = 0.25F,
+                    .directionTowardLightZ = -0.35F,
+                    .colorR = 0.28F,
+                    .colorG = 0.34F,
+                    .colorB = 0.45F,
+                },
+                Tina::Render::Mesh3DDirectionalLight{
+                    .directionTowardLightX = 0.15F,
+                    .directionTowardLightY = 0.45F,
+                    .directionTowardLightZ = -0.9F,
+                    .colorR = 0.14F,
+                    .colorG = 0.18F,
+                    .colorB = 0.30F,
+                },
+            };
+            if (auto status = device->setMesh3DLighting(Tina::Render::Mesh3DLightingDesc{
+                    .directionalLights = ProductLights,
+                    .ambientScale = 0.16F,
+                });
                 !status)
             {
                 return status;
             }
-            counters_->keyLightConfigured = true;
-            // Cool fill from opposite side so metallic spheres show rim response without IBL.
-            if (auto status = device->setMesh3DFillDirectionalLight(-0.55F, 0.25F, -0.35F, 0.28F, 0.34F, 0.45F);
-                !status)
-            {
-                return status;
-            }
-            counters_->fillLightConfigured = true;
+            counters_->directionalLightCount = static_cast<u32>(ProductLights.size());
+            counters_->lightingConfigured = true;
         }
 
         auto prefab = Tina::Asset::parsePrefabFromCooked(resources_->prefabFile);
@@ -1414,7 +1437,7 @@ class Product3DApplication final : public Tina::IGameApplication {
         counters.meshesUploaded != expectedMeshes || counters.materialsLoaded != expectedMeshes || !texturesOk ||
         !counters.meshBound || !counters.materialTextureBound || counters.catalogCooked != 1 || !counters.gltfCooked ||
         !counters.prefabInstantiated || counters.prefabNodes == 0 || counters.prefabInstances == 0 ||
-        !counters.keyLightConfigured || !counters.fillLightConfigured || !ledgerBalanced)
+        !counters.lightingConfigured || counters.directionalLightCount != 3U || !ledgerBalanced)
     {
         std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_3d\","
                      "\"message\":\"lifecycle counters did not match\","
@@ -1424,8 +1447,8 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"texturesUploaded\":" << counters.texturesUploaded
                   << ",\"meshBound\":" << (counters.meshBound ? "true" : "false")
                   << ",\"materialTextureBound\":" << (counters.materialTextureBound ? "true" : "false")
-                  << ",\"keyLightConfigured\":" << (counters.keyLightConfigured ? "true" : "false")
-                  << ",\"fillLightConfigured\":" << (counters.fillLightConfigured ? "true" : "false")
+                  << ",\"lightingConfigured\":" << (counters.lightingConfigured ? "true" : "false")
+                  << ",\"directionalLightCount\":" << counters.directionalLightCount
                   << ",\"gltfCooked\":" << (counters.gltfCooked ? "true" : "false")
                   << ",\"prefabInstantiated\":" << (counters.prefabInstantiated ? "true" : "false")
                   << ",\"prefabNodes\":" << counters.prefabNodes
@@ -1450,8 +1473,8 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"materialFactorsBound\":" << (counters.materialFactorsBound ? "true" : "false")
               << ",\"materialMrTextureBound\":" << (counters.materialMrTextureBound ? "true" : "false")
               << ",\"materialNormalTextureBound\":" << (counters.materialNormalTextureBound ? "true" : "false")
-              << ",\"keyLightConfigured\":" << (counters.keyLightConfigured ? "true" : "false")
-              << ",\"fillLightConfigured\":" << (counters.fillLightConfigured ? "true" : "false");
+              << ",\"lightingConfigured\":" << (counters.lightingConfigured ? "true" : "false")
+              << ",\"directionalLightCount\":" << counters.directionalLightCount;
     if (resources.externalGltf || resources.completePbrFixture)
     {
         std::cout << ",\"gltfPath\":";

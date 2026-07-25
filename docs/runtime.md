@@ -15,6 +15,8 @@
 - `GameStatePolicy` 在 enter 成功后采样；`requestPolicyChange` 更新栈顶 committed policy。
   帧阶段按栈 **自顶向下** 调度（见下节 policy 语义）。structural command 仍仅栈顶可排队。
 - `IGameState` 承担 `fixedUpdate()`、`updateFrame()`、`extractRenderScene()` 与 `updateUI()`。
+- Runtime 唯一 `ActionMapper` 使用 unified digital/analog binding；只有栈顶 State 可在
+  `FrameUpdateContext` 中排队下一 mapping frame 生效的 rebind transaction。
 - Runtime 已组合 Clock、Platform、Task、Render 和可选 Audio；AssetSystem/World/Physics2D 仍由
   产品 State 或样例显式持有，不是 `EngineHost` 模块。
 - Desktop 使用 GLFW、bgfx、有界 TaskSystem（含 ADR 0017 交互 CPU 默认）和 backend-neutral `AudioEngine`。
@@ -68,7 +70,7 @@ Platform poll
   -> Platform lifecycle dispatch
   -> select primary UIContext
   -> UI input routing/default action against previous committed hit snapshot
-  -> ActionMapper with UI consumption/claims
+  -> ActionMapper applies queued rebind, then maps with UI consumption/claims
   -> 0..4 fixedUpdate (stack top-down; suppressed Action if blocked by above)
   -> updateFrame (stack top-down; only top may queue stack commands)
   -> commitPendingGameStateCommands  // after frame, before extract
@@ -78,7 +80,7 @@ Platform poll
   -> UI layout/hit/paint/semantics commit (+ optional UIA publish)
   -> UI DisplayList + optional R8 Glyph atlas view
   -> RenderFramePacket pins + RenderDevice::submitFrame
-  -> present when the surface is active (else completeSkipped)
+  -> present when the surface is active, then complete CPU frame pins (else completeSkipped)
   -> latch presented Camera2D for next-frame world picking
 ```
 
@@ -119,6 +121,12 @@ Platform transition、UI route result 与 Gameplay Action 是三层独立数据�
 3. `ActionMapper` 只处理未被 UI 接管的输入（产出完整 snapshot）；
 4. Host 在 stack dispatch 时按 `gameplayInputBlockedForDepth` 决定是否换成 suppressed snapshot。
 
+`InputActionMapConfig::bindings` 是唯一 Action 配置。Digital 和 Gamepad Axis 都映射为浮点 value；axis
+依次经过 value-mode 归一化、gameplay deadzone 外重映射与 scale。多个物理 source（包括多个已连接
+Gamepad generation）按 `SumClamped` 或 `StrongestMagnitude` 合成，snapshot 通过 `value()` /
+`isActive()` 暴露结果。UI consume/claim 会取消对应 gameplay source，并使 digital 抑制到真实 release、
+axis 抑制到 neutral/deadzone。
+
 Button、Checkbox、Slider、RadioButton、TextEdit 的当前默认行为在 UI route 阶段完成，早于 Action
 Mapping。Tab/Shift+Tab、Enter/Space/KeypadEnter 和 Gamepad South 已有窄 focus/default-action 路径；
 通用 Focus Scope、Modal 和持久 Pointer Capture 尚未实现。
@@ -126,6 +134,12 @@ Mapping。Tab/Shift+Tab、Enter/Space/KeypadEnter 和 Gamepad South 已有窄 fo
 未被 UI 消费或 claim 的 primary Pointer transition 可以形成带 `WorldPointerSample` 的 Simulation
 edge。坐标使用 last-presented Camera2D 与对应 surface revision 锁存；跨 0 步帧延迟消费时不会用新
 Camera 或 resize 重算。
+
+运行时 rebind 不暴露 mapper owner。只有栈顶 `FrameUpdateContext` 返回 phase-local
+`InputActionRebinding`；`begin()` 进入 `Capturing`，`commit()` 以 `Reject`/`Swap` 处理冲突并排入
+`Queued`，下一次 Action mapping frame 才原子应用。`cancel()` 可取消 Capturing 或 Queued transaction；
+capture 绑定的 `GamepadId` generation 在 disconnect，或 raw reset 后不再存在时，以
+`DeviceDisconnected` 结束，不迁移到新 generation。
 
 ## Phase Context 与借用寿命
 
@@ -136,7 +150,7 @@ Camera 或 resize 重算。
 | `GameStartupContext` | EngineConfig、Platform event subscription facade | `createInitialState()` 返回 |
 | `GameStateEnterContext` | Platform subscription、primary UI root builder | `onEnter()` 返回 |
 | `FixedUpdateContext` | timing、Simulation Action、可选 Audio borrow | `fixedUpdate()` 返回 |
-| `FrameUpdateContext` | timing、Frame Action、可选 Audio、退出请求 | `updateFrame()` 返回 |
+| `FrameUpdateContext` | timing、Frame Action、可选 Audio、退出请求；仅栈顶可借用 rebind facade | `updateFrame()` 返回 |
 | `RenderSceneExtractionContext` | phase-local `RenderSceneWriter` | `extractRenderScene()` 返回 |
 | `UIUpdateContext` | root-scoped UI updater | `updateUI()` 返回 |
 
@@ -152,6 +166,8 @@ Platform subscription token、UI listener token、`UIRootOwner`、AssetLease 等
 - `RenderFrame` 当前携带 submit-call-local 的 World Scene、UI DisplayList 与 Glyph atlas borrow；
   backend 必须在 `submitFrame()` 返回前同步消费，不能保存指针。
 - suspended surface 返回 `SkippedSuspendedSurface`，Runtime 不调用 `present()`。
+- active surface 在 `present()` 成功返回后关闭 submission ticket 并释放 FramePin；该时点只结束 CPU
+  借用，不声明 GPU 已执行完成或 Asset 已物理退役。
 - 游戏回调和 factory 抛出的普通异常在边界转换为结构化 Error；owner-thread 违规和序列回退有明确错误。
 
 ## 关闭顺序
@@ -179,7 +195,8 @@ AudioEngine
 | State 栈 / structural commands / 四相位 `blocks*Below` | Done |
 | `blocksGameplayInputBelow` → 下层空 Action snapshot | Done（Host dispatch，非 ActionMapper 内） |
 | `blocksUIUpdateBelow` 仅挡 `updateUI` | Done；不回改当帧 UI route |
-| `RenderFramePacket` + `FramePin` + Null/present-sync ledger | 首切片 Done；真实 GPU fence 后置 |
+| `2D-INPUT-ADV` unified digital/analog Action + transactional rebind | Done；本轮测试结果以最终验证记录为准 |
+| `RenderFramePacket` + `FramePin` + present-return CPU ledger | Done；固定帧延迟假 fence 已删除，真实 GPU fence 后置 |
 | Runtime 拥有 AssetSystem/World | 否；仍由产品 State/样例持有 |
 | 通用 Event Queue、多 World/editor orchestration、pass scheduler | 未做；需 ADR/Backlog 后开 |
 

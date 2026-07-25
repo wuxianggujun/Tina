@@ -24,9 +24,9 @@ struct SimulationActionLatchStatistics final {
     u64 rawInputResetCount = 0;
 };
 
-// Runtime-private fixed-capacity bridge between render-frame input routing and
-// fixed simulation ticks. Create performs every allocation; mapping and tick
-// consumption never grow storage.
+// Fixed-capacity bridge between render-frame routing and fixed Simulation
+// ticks. Create performs every allocation; mapping and tick consumption never
+// grow storage.
 class SimulationActionLatch final {
   public:
     [[nodiscard]] static Core::Result<SimulationActionLatch> Create(std::span<const InputActionId> sortedActions,
@@ -38,24 +38,22 @@ class SimulationActionLatch final {
     SimulationActionLatch& operator=(SimulationActionLatch&&) noexcept = default;
 
     [[nodiscard]] Core::Status validateNextUncompletedTick(u64 tick) const;
+    [[nodiscard]] Core::Status setValue(InputActionId action, float value) noexcept;
+    [[nodiscard]] float value(InputActionId action) const noexcept;
 
-    [[nodiscard]] Core::Status setHeld(InputActionId action, bool held) noexcept;
-    [[nodiscard]] bool isHeld(InputActionId action) const noexcept;
+    [[nodiscard]] Core::Result<SimulationLatchAppendResult>
+    append(u64 targetTick, InputActionTransition transition,
+           ActionSourceToken source = InvalidActionSourceToken);
 
-    [[nodiscard]] Core::Result<SimulationLatchAppendResult> append(u64 targetTick, DigitalActionTransition transition,
-                                                                   ActionSourceToken source = InvalidActionSourceToken);
-
-    // Removes still-unconsumed edges produced by this physical source. If the
-    // remaining batch no longer reaches the current aggregate Action state, one
-    // replacement edge (Pressed or Cancelled) is emitted; otherwise cancellation
-    // stays silent.
-    [[nodiscard]] Core::Result<SimulationLatchAppendResult> reconcileCancellation(u64 targetTick, InputActionId action,
-                                                                                  ActionSourceToken source,
-                                                                                  u64 sourceSequence,
-                                                                                  bool forceStateReconciliation);
+    // When cancellation affects this Action, discard all still-unconsumed
+    // aggregate changes for it and rebuild at most one transition from the last
+    // delivered value to the current aggregate value.
+    [[nodiscard]] Core::Result<SimulationLatchAppendResult>
+    reconcileCancellation(u64 targetTick, InputActionId action,
+                          std::span<const ActionSourceToken> sources, u64 sourceSequence,
+                          bool forceStateReconciliation);
 
     [[nodiscard]] Core::Status resetStream(u64 targetTick, SimulationInputStreamReset reset);
-
     [[nodiscard]] Core::Result<SimulationActionSnapshot> snapshotForTick(u64 tick) const;
     [[nodiscard]] Core::Status completeTick(u64 tick);
 
@@ -64,27 +62,24 @@ class SimulationActionLatch final {
         return statistics_;
     }
 
-    [[nodiscard]] usize transitionCapacity() const noexcept
-    {
-        return transitionCapacity_;
-    }
-
   private:
-    SimulationActionLatch(std::vector<InputActionState> states, std::vector<bool> deliveredHeld,
+    SimulationActionLatch(std::vector<InputActionState> states, std::vector<float> deliveredValues,
                           std::vector<SimulationActionTransition> transitionStorage,
-                          std::vector<ActionSourceToken> transitionSourceStorage, usize transitionCapacity) noexcept;
+                          std::vector<ActionSourceToken> transitionSourceStorage,
+                          usize transitionCapacity) noexcept;
 
     [[nodiscard]] usize findActionIndex(InputActionId action) const noexcept;
     [[nodiscard]] Core::Status ensureTarget(u64 targetTick);
-    [[nodiscard]] bool removePendingTransitions(InputActionId action, ActionSourceToken source) noexcept;
+    void removePendingTransitions(InputActionId action) noexcept;
     void clearPending() noexcept;
 
     std::vector<InputActionState> states_;
-    std::vector<bool> deliveredHeld_;
+    std::vector<float> deliveredValues_;
     std::vector<SimulationActionTransition> transitions_;
     std::vector<ActionSourceToken> transitionSources_;
     usize transitionCapacity_ = 0;
     usize normalTransitionCount_ = 0;
+    bool resetWritten_ = false;
     std::optional<u64> targetTick_;
     std::optional<u64> lastCompletedTick_;
     SimulationActionLatchStatistics statistics_{};

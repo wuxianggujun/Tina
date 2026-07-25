@@ -39,9 +39,9 @@ struct PointerFrameSpec final {
     std::vector<UI::ContinuousControlClaim> claims{};
 };
 
-[[nodiscard]] DigitalActionBinding primaryPointerBinding() noexcept
+[[nodiscard]] InputActionBinding primaryPointerBinding() noexcept
 {
-    return DigitalActionBinding{
+    return InputActionBinding{
         .input =
             PrimaryPointerButtonBinding{
                 .pointer = Platform::PrimaryPointerId,
@@ -88,9 +88,9 @@ struct PointerFrameSpec final {
     };
 }
 
-[[nodiscard]] const DigitalActionTransition* digital(const SimulationActionTransition& transition) noexcept
+[[nodiscard]] const InputActionTransition* digital(const SimulationActionTransition& transition) noexcept
 {
-    return std::get_if<DigitalActionTransition>(&transition);
+    return std::get_if<InputActionTransition>(&transition);
 }
 
 [[nodiscard]] Core::Status mapPointerFrame(ActionMapper& mapper, Platform::PlatformFrameBuilder& builder,
@@ -223,7 +223,9 @@ class WorldPointerActionMappingTest : public testing::Test {
     [[nodiscard]] std::unique_ptr<ActionMapper> createMapper()
     {
         const std::array bindings{primaryPointerBinding()};
-        auto mapper = ActionMapper::Create(bindings);
+        auto mapper = ActionMapper::Create(InputActionMapConfig{
+            .bindings = std::vector<InputActionBinding>(bindings.begin(), bindings.end()),
+        });
         EXPECT_TRUE(mapper.has_value()) << (mapper ? "" : mapper.error().message);
         return mapper ? std::move(*mapper) : nullptr;
     }
@@ -250,7 +252,7 @@ TEST_F(WorldPointerActionMappingTest, ConsumedPointerTransitionDoesNotRequirePre
     auto snapshot = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(snapshot.has_value()) << (snapshot ? "" : snapshot.error().message);
     EXPECT_TRUE(snapshot->transitions.empty());
-    EXPECT_FALSE(snapshot->isHeld(SelectAction));
+    EXPECT_FALSE(snapshot->isActive(SelectAction));
 }
 
 TEST_F(WorldPointerActionMappingTest, ClaimedPointerTransitionDoesNotRequirePresentedCamera)
@@ -277,7 +279,7 @@ TEST_F(WorldPointerActionMappingTest, ClaimedPointerTransitionDoesNotRequirePres
     auto snapshot = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(snapshot.has_value()) << (snapshot ? "" : snapshot.error().message);
     EXPECT_TRUE(snapshot->transitions.empty());
-    EXPECT_FALSE(snapshot->isHeld(SelectAction));
+    EXPECT_FALSE(snapshot->isActive(SelectAction));
 }
 
 TEST_F(WorldPointerActionMappingTest, UnconsumedPointerTransitionFailsWithoutPresentedCamera)
@@ -315,7 +317,7 @@ TEST_F(WorldPointerActionMappingTest, FailedWorldPickLeavesPressSourceRetryable)
     auto unchanged = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(unchanged.has_value()) << (unchanged ? "" : unchanged.error().message);
     EXPECT_TRUE(unchanged->transitions.empty());
-    EXPECT_FALSE(unchanged->isHeld(SelectAction));
+    EXPECT_FALSE(unchanged->isActive(SelectAction));
 
     ASSERT_TRUE(notePresentedCamera(latch, camera(), 9).has_value());
     const PointerFrameSpec retryFrame{
@@ -328,11 +330,11 @@ TEST_F(WorldPointerActionMappingTest, FailedWorldPickLeavesPressSourceRetryable)
     auto retried = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(retried.has_value()) << (retried ? "" : retried.error().message);
     ASSERT_EQ(retried->transitions.size(), 1U);
-    const DigitalActionTransition* transition = digital(retried->transitions.front());
+    const InputActionTransition* transition = digital(retried->transitions.front());
     ASSERT_NE(transition, nullptr);
-    EXPECT_EQ(transition->kind, DigitalActionTransitionKind::Pressed);
+    EXPECT_EQ(transition->kind, InputActionTransitionKind::Started);
     EXPECT_TRUE(transition->worldPointerSample.has_value());
-    EXPECT_TRUE(retried->isHeld(SelectAction));
+    EXPECT_TRUE(retried->isActive(SelectAction));
 }
 
 TEST_F(WorldPointerActionMappingTest, UnconsumedPointerTransitionLocksWorldSampleFromEventCoordinates)
@@ -355,7 +357,7 @@ TEST_F(WorldPointerActionMappingTest, UnconsumedPointerTransitionLocksWorldSampl
     auto snapshot = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(snapshot.has_value()) << (snapshot ? "" : snapshot.error().message);
     ASSERT_EQ(snapshot->transitions.size(), 1U);
-    const DigitalActionTransition* transition = digital(snapshot->transitions[0]);
+    const InputActionTransition* transition = digital(snapshot->transitions[0]);
     ASSERT_NE(transition, nullptr);
     ASSERT_TRUE(transition->worldPointerSample.has_value());
 
@@ -390,7 +392,7 @@ TEST_F(WorldPointerActionMappingTest, ViewportMissProducesLockedNoHitSample)
     auto snapshot = mapper->simulationActionsForTick(0);
     ASSERT_TRUE(snapshot.has_value()) << (snapshot ? "" : snapshot.error().message);
     ASSERT_EQ(snapshot->transitions.size(), 1U);
-    const DigitalActionTransition* transition = digital(snapshot->transitions[0]);
+    const InputActionTransition* transition = digital(snapshot->transitions[0]);
     ASSERT_NE(transition, nullptr);
     ASSERT_TRUE(transition->worldPointerSample.has_value());
 
@@ -425,16 +427,16 @@ TEST_F(WorldPointerActionMappingTest, UnconsumedReleaseLocksWorldSample)
     auto snapshot = mapper->simulationActionsForTick(1);
     ASSERT_TRUE(snapshot.has_value()) << (snapshot ? "" : snapshot.error().message);
     ASSERT_EQ(snapshot->transitions.size(), 1U);
-    const DigitalActionTransition* transition = digital(snapshot->transitions.front());
+    const InputActionTransition* transition = digital(snapshot->transitions.front());
     ASSERT_NE(transition, nullptr);
-    EXPECT_EQ(transition->kind, DigitalActionTransitionKind::Released);
+    EXPECT_EQ(transition->kind, InputActionTransitionKind::Completed);
     ASSERT_TRUE(transition->worldPointerSample.has_value());
     EXPECT_TRUE(transition->worldPointerSample->hit);
     EXPECT_FLOAT_EQ(transition->worldPointerSample->worldX, 2.5F);
     EXPECT_FLOAT_EQ(transition->worldPointerSample->worldY, 2.5F);
     EXPECT_EQ(transition->worldPointerSample->surfaceRevision, 12U);
     EXPECT_EQ(transition->worldPointerSample->inputSequence, transition->sourceSequence);
-    EXPECT_FALSE(snapshot->isHeld(SelectAction));
+    EXPECT_FALSE(snapshot->isActive(SelectAction));
 }
 
 TEST_F(WorldPointerActionMappingTest, FailedWorldPickLeavesReleaseSourceRetryable)
@@ -464,7 +466,7 @@ TEST_F(WorldPointerActionMappingTest, FailedWorldPickLeavesReleaseSourceRetryabl
     auto unchanged = mapper->simulationActionsForTick(1);
     ASSERT_TRUE(unchanged.has_value()) << (unchanged ? "" : unchanged.error().message);
     EXPECT_TRUE(unchanged->transitions.empty());
-    EXPECT_TRUE(unchanged->isHeld(SelectAction));
+    EXPECT_TRUE(unchanged->isActive(SelectAction));
 
     ASSERT_TRUE(notePresentedCamera(latch, camera(), 21).has_value());
     const PointerFrameSpec retryUpFrame{
@@ -476,11 +478,11 @@ TEST_F(WorldPointerActionMappingTest, FailedWorldPickLeavesReleaseSourceRetryabl
     auto retried = mapper->simulationActionsForTick(1);
     ASSERT_TRUE(retried.has_value()) << (retried ? "" : retried.error().message);
     ASSERT_EQ(retried->transitions.size(), 1U);
-    const DigitalActionTransition* transition = digital(retried->transitions.front());
+    const InputActionTransition* transition = digital(retried->transitions.front());
     ASSERT_NE(transition, nullptr);
-    EXPECT_EQ(transition->kind, DigitalActionTransitionKind::Released);
+    EXPECT_EQ(transition->kind, InputActionTransitionKind::Completed);
     EXPECT_TRUE(transition->worldPointerSample.has_value());
-    EXPECT_FALSE(retried->isHeld(SelectAction));
+    EXPECT_FALSE(retried->isActive(SelectAction));
 }
 
 TEST_F(WorldPointerActionMappingTest, ZeroStepFrameKeepsLockedSampleAcrossLaterCameraAndResize)
@@ -505,7 +507,7 @@ TEST_F(WorldPointerActionMappingTest, ZeroStepFrameKeepsLockedSampleAcrossLaterC
     auto pendingBefore = mapper->simulationActionsForTick(7);
     ASSERT_TRUE(pendingBefore.has_value()) << (pendingBefore ? "" : pendingBefore.error().message);
     ASSERT_EQ(pendingBefore->transitions.size(), 1U);
-    const DigitalActionTransition* firstTransition = digital(pendingBefore->transitions[0]);
+    const InputActionTransition* firstTransition = digital(pendingBefore->transitions[0]);
     ASSERT_NE(firstTransition, nullptr);
     ASSERT_TRUE(firstTransition->worldPointerSample.has_value());
     const Render::WorldPointerSample lockedSample = *firstTransition->worldPointerSample;
@@ -527,7 +529,7 @@ TEST_F(WorldPointerActionMappingTest, ZeroStepFrameKeepsLockedSampleAcrossLaterC
     auto pendingAfter = mapper->simulationActionsForTick(7);
     ASSERT_TRUE(pendingAfter.has_value()) << (pendingAfter ? "" : pendingAfter.error().message);
     ASSERT_EQ(pendingAfter->transitions.size(), 1U);
-    const DigitalActionTransition* retainedTransition = digital(pendingAfter->transitions[0]);
+    const InputActionTransition* retainedTransition = digital(pendingAfter->transitions[0]);
     ASSERT_NE(retainedTransition, nullptr);
     ASSERT_TRUE(retainedTransition->worldPointerSample.has_value());
 

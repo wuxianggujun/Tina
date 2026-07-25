@@ -61,14 +61,66 @@ TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)
     ASSERT_TRUE((*device)->setMesh3DMaterialNormalTextureBinding(7U, *baseColor).has_value());
     ASSERT_FALSE((*device)->setMesh3DMaterialNormalTextureBinding(0U, *baseColor).has_value());
     ASSERT_FALSE((*device)->setMesh3DMaterialMetallicRoughnessTextureBinding(0U, *metallicRoughness).has_value());
-    ASSERT_TRUE((*device)->setMesh3DDirectionalLight(0.2F, 0.8F, 0.3F, 1.0F, 1.0F, 1.0F, 0.2F).has_value());
-    ASSERT_FALSE((*device)->setMesh3DDirectionalLight(0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.2F).has_value());
-    ASSERT_FALSE((*device)->setMesh3DDirectionalLight(0.0F, 1.0F, 0.0F, 1.0F, 1.0F, 1.0F, -0.1F).has_value());
-    ASSERT_FALSE((*device)->setMesh3DDirectionalLight(0.0F, 1.0F, 0.0F, -0.1F, 1.0F, 1.0F, 0.2F).has_value());
-    ASSERT_TRUE((*device)->setMesh3DFillDirectionalLight(-0.4F, 0.2F, -0.3F, 0.3F, 0.3F, 0.4F).has_value());
-    ASSERT_TRUE((*device)->setMesh3DFillDirectionalLight(0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F).has_value());
-    ASSERT_FALSE((*device)->setMesh3DFillDirectionalLight(0.0F, 1.0F, 0.0F, 0.2F, -0.2F, 0.2F).has_value());
-    ASSERT_FALSE((*device)->setMesh3DFillDirectionalLight(0.0F, 0.0F, 0.0F, 0.2F, 0.2F, 0.2F).has_value());
+    std::array<Render::Mesh3DDirectionalLight, 3> lights{
+        Render::Mesh3DDirectionalLight{
+            .directionTowardLightX = 0.2F,
+            .directionTowardLightY = 0.8F,
+            .directionTowardLightZ = 0.3F,
+        },
+        Render::Mesh3DDirectionalLight{
+            .directionTowardLightX = -0.4F,
+            .directionTowardLightY = 0.2F,
+            .directionTowardLightZ = -0.3F,
+            .colorR = 0.3F,
+            .colorG = 0.3F,
+            .colorB = 0.4F,
+        },
+        Render::Mesh3DDirectionalLight{
+            .directionTowardLightX = 0.0F,
+            .directionTowardLightY = 1.0F,
+            .directionTowardLightZ = -1.0F,
+            .colorR = 0.1F,
+            .colorG = 0.15F,
+            .colorB = 0.2F,
+        },
+    };
+    ASSERT_TRUE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .directionalLights = lights,
+        .ambientScale = 0.2F,
+    }));
+    ASSERT_TRUE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .directionalLights = {},
+        .ambientScale = 0.1F,
+    }));
+
+    auto invalidDirection = lights;
+    invalidDirection[1].directionTowardLightX = 0.0F;
+    invalidDirection[1].directionTowardLightY = 0.0F;
+    invalidDirection[1].directionTowardLightZ = 0.0F;
+    auto directionFailure = (*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .directionalLights = invalidDirection,
+        .ambientScale = 0.2F,
+    });
+    ASSERT_FALSE(directionFailure);
+    EXPECT_EQ(directionFailure.error().code, Render::RenderErrorCode::InvalidMesh3DLighting);
+
+    auto negativeColor = lights;
+    negativeColor[0].colorR = -0.1F;
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .directionalLights = negativeColor,
+        .ambientScale = 0.2F,
+    }));
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .directionalLights = lights,
+        .ambientScale = -0.1F,
+    }));
+
+    std::array<Render::Mesh3DDirectionalLight, Render::Mesh3DLightingDesc::MaximumDirectionalLightCount + 1U>
+        tooManyLights{};
+    ASSERT_FALSE((*device)->setMesh3DLighting(Render::Mesh3DLightingDesc{
+        .directionalLights = tooManyLights,
+        .ambientScale = 0.2F,
+    }));
     // Destroy while still bound: stale normal/MR/baseColor bindings must be scrubbed.
     ASSERT_TRUE((*device)->destroyTexture2D(*baseColor).has_value());
     ASSERT_TRUE((*device)->setMesh3DMaterialNormalTextureBinding(7U, {}).has_value());

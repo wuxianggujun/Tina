@@ -5,9 +5,16 @@
 #include <tina/render/RenderErrors.hpp>
 
 #include <atomic>
+#include <type_traits>
+#include <utility>
 
 namespace Tina::Tests {
 namespace {
+
+static_assert(!std::is_copy_constructible_v<Render::SubmissionTicket>);
+static_assert(!std::is_copy_assignable_v<Render::SubmissionTicket>);
+static_assert(std::is_move_constructible_v<Render::SubmissionTicket>);
+static_assert(!std::is_move_assignable_v<Render::SubmissionTicket>);
 
 std::atomic<int> g_releaseCount{0};
 
@@ -53,9 +60,9 @@ TEST(FramePinTest, MoveTransfersOwnershipWithoutDoubleRelease)
     EXPECT_EQ(g_releaseCount.load(), 1);
 }
 
-TEST(NullSubmissionCompletionLedgerTest, BeginCompleteBalancesInflight)
+TEST(CpuSubmissionCompletionLedgerTest, BeginCompleteBalancesInflight)
 {
-    Render::NullSubmissionCompletionLedger ledger{4};
+    Render::CpuSubmissionCompletionLedger ledger{4};
     auto t1 = ledger.beginSubmitted(1);
     ASSERT_TRUE(t1.has_value());
     auto t2 = ledger.beginSubmitted(2);
@@ -71,9 +78,9 @@ TEST(NullSubmissionCompletionLedgerTest, BeginCompleteBalancesInflight)
     EXPECT_EQ(ledger.completedCount(), 2U);
 }
 
-TEST(NullSubmissionCompletionLedgerTest, CapacityFailureDoesNotLeakInflight)
+TEST(CpuSubmissionCompletionLedgerTest, CapacityFailureDoesNotLeakInflight)
 {
-    Render::NullSubmissionCompletionLedger ledger{1};
+    Render::CpuSubmissionCompletionLedger ledger{1};
     auto t1 = ledger.beginSubmitted(10);
     ASSERT_TRUE(t1.has_value());
     auto t2 = ledger.beginSubmitted(11);
@@ -84,10 +91,53 @@ TEST(NullSubmissionCompletionLedgerTest, CapacityFailureDoesNotLeakInflight)
     EXPECT_TRUE(ledger.allClear());
 }
 
-TEST(NullSubmissionCompletionLedgerTest, CompletionModeIsPresentSync)
+TEST(CpuSubmissionCompletionLedgerTest, RepeatedCompleteCannotConsumeAnotherOpenTicket)
 {
-    Render::NullSubmissionCompletionLedger ledger{};
-    EXPECT_EQ(ledger.completionMode(), Render::SubmissionCompletionMode::PresentSync);
+    Render::CpuSubmissionCompletionLedger ledger{2};
+    auto first = ledger.beginSubmitted(1);
+    auto second = ledger.beginSubmitted(2);
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(second.has_value());
+
+    ASSERT_TRUE(ledger.complete(*first).has_value());
+    EXPECT_FALSE(first->hasValue());
+    ASSERT_TRUE(ledger.complete(*first).has_value());
+    EXPECT_EQ(ledger.inflightCount(), 1U);
+    EXPECT_FALSE(ledger.allClear());
+
+    ASSERT_TRUE(ledger.complete(*second).has_value());
+    EXPECT_TRUE(ledger.allClear());
+}
+
+TEST(CpuSubmissionCompletionLedgerTest, WrongLedgerCannotConsumeTicket)
+{
+    Render::CpuSubmissionCompletionLedger issuingLedger{1};
+    Render::CpuSubmissionCompletionLedger otherLedger{1};
+    auto ticket = issuingLedger.beginSubmitted(7);
+    ASSERT_TRUE(ticket.has_value());
+
+    auto wrongLedgerStatus = otherLedger.complete(*ticket);
+    ASSERT_FALSE(wrongLedgerStatus.has_value());
+    EXPECT_EQ(wrongLedgerStatus.error().code, Render::RenderErrorCode::InvalidSubmissionTicket);
+    EXPECT_TRUE(ticket->hasValue());
+    EXPECT_EQ(issuingLedger.inflightCount(), 1U);
+    EXPECT_TRUE(otherLedger.allClear());
+
+    ASSERT_TRUE(issuingLedger.complete(*ticket).has_value());
+    EXPECT_TRUE(issuingLedger.allClear());
+}
+
+TEST(CpuSubmissionCompletionLedgerTest, DroppedTicketAbandonsIssuingLedger)
+{
+    Render::CpuSubmissionCompletionLedger ledger{1};
+    {
+        auto ticket = ledger.beginSubmitted(9);
+        ASSERT_TRUE(ticket.has_value());
+        EXPECT_EQ(ledger.inflightCount(), 1U);
+    }
+
+    EXPECT_TRUE(ledger.allClear());
+    EXPECT_EQ(ledger.abandonedCount(), 1U);
 }
 
 // Counting mock proves Host/packet call sites use the SPI, not a concrete Null type only.
@@ -101,50 +151,36 @@ public:
             return Core::failure(Render::RenderErrorCode::SubmissionCompletionLedgerFull, "mock full");
         }
         ++inflight;
-        return Render::SubmissionTicket{.submissionIndex = submissionIndex, .open = true};
+        return makeSubmissionTicket(submissionIndex);
     }
 
-    [[nodiscard]] Core::Status complete(Render::SubmissionTicket& ticket) noexcept override
+protected:
+    [[nodiscard]] Core::Status completeOwned(Core::u64 submissionIndex) noexcept override
     {
         ++completeCalls;
-        if (!ticket.open)
-        {
-            return Core::success();
-        }
         if (inflight == 0)
         {
-            ticket.open = false;
             return Core::failure(Render::RenderErrorCode::InvalidSubmissionTicket, "mock empty");
         }
         --inflight;
-        lastCompleted = ticket.submissionIndex;
-        ticket.open = false;
+        lastCompleted = submissionIndex;
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status abandon(Render::SubmissionTicket& ticket) noexcept override
+    [[nodiscard]] Core::Status abandonOwned(Core::u64) noexcept override
     {
         ++abandonCalls;
-        if (!ticket.open)
-        {
-            return Core::success();
-        }
         if (inflight == 0)
         {
-            ticket.open = false;
             return Core::failure(Render::RenderErrorCode::InvalidSubmissionTicket, "mock empty");
         }
         --inflight;
-        ticket.open = false;
         return Core::success();
     }
 
+public:
     [[nodiscard]] Core::u32 inflightCount() const noexcept override { return inflight; }
     [[nodiscard]] bool allClear() const noexcept override { return inflight == 0; }
-    [[nodiscard]] Render::SubmissionCompletionMode completionMode() const noexcept override
-    {
-        return Render::SubmissionCompletionMode::PresentSync;
-    }
 
     Core::u32 beginCalls = 0;
     Core::u32 completeCalls = 0;
@@ -168,8 +204,8 @@ TEST(ISubmissionCompletionLedgerPolymorphismTest, PacketCompleteUsesInjectedMock
                     .has_value());
     auto ticket = ledger.beginSubmitted(42);
     ASSERT_TRUE(ticket.has_value());
-    ASSERT_TRUE(packet.attachSubmission(*ticket).has_value());
-    ASSERT_TRUE(packet.complete(ledger).has_value());
+    ASSERT_TRUE(packet.attachSubmission(ledger, std::move(*ticket)).has_value());
+    ASSERT_TRUE(packet.complete().has_value());
 
     EXPECT_EQ(mock.beginCalls, 1U);
     EXPECT_EQ(mock.completeCalls, 1U);
@@ -193,8 +229,8 @@ TEST(ISubmissionCompletionLedgerPolymorphismTest, PacketAbandonUsesInjectedMock)
                     .has_value());
     auto ticket = ledger.beginSubmitted(7);
     ASSERT_TRUE(ticket.has_value());
-    ASSERT_TRUE(packet.attachSubmission(*ticket).has_value());
-    ASSERT_TRUE(packet.abandon(&ledger).has_value());
+    ASSERT_TRUE(packet.attachSubmission(ledger, std::move(*ticket)).has_value());
+    ASSERT_TRUE(packet.abandon().has_value());
 
     EXPECT_EQ(mock.beginCalls, 1U);
     EXPECT_EQ(mock.completeCalls, 0U);
@@ -203,59 +239,10 @@ TEST(ISubmissionCompletionLedgerPolymorphismTest, PacketAbandonUsesInjectedMock)
     EXPECT_EQ(g_releaseCount.load(), 1);
 }
 
-TEST(BgfxSubmissionCompletionLedgerTest, FrameDeferredModeAndPresentNotes)
-{
-    Render::BgfxSubmissionCompletionLedger ledger{4};
-    EXPECT_EQ(ledger.completionMode(), Render::SubmissionCompletionMode::FrameDeferred);
-
-    auto t1 = ledger.beginSubmitted(100);
-    ASSERT_TRUE(t1.has_value());
-    EXPECT_EQ(ledger.inflightCount(), 1U);
-
-    ledger.notePresentReturned(100, 7);
-    EXPECT_EQ(ledger.lastPresentSubmission(), 100U);
-    EXPECT_EQ(ledger.lastPresentFrameToken(), 7U);
-    EXPECT_EQ(ledger.presentNoteCount(), 1U);
-    EXPECT_EQ(ledger.inflightCount(), 1U);
-
-    ASSERT_TRUE(ledger.complete(*t1).has_value());
-    EXPECT_TRUE(ledger.allClear());
-    EXPECT_EQ(ledger.lastCompletedSubmission(), 100U);
-    EXPECT_EQ(ledger.completedCount(), 1U);
-}
-
-TEST(BgfxSubmissionCompletionLedgerTest, PacketHandOffDeferredReleasesOnCompleteDeferred)
+TEST(RenderFramePacketTest, PinsReleaseWhenCpuSubmissionCompletes)
 {
     g_releaseCount.store(0);
-    Render::BgfxSubmissionCompletionLedger concrete{};
-    Render::ISubmissionCompletionLedger& ledger = concrete;
-    Render::RenderFramePacket packet;
-
-    ASSERT_TRUE(packet.beginFrame(9).has_value());
-    ASSERT_TRUE(packet
-                    .add(Render::FramePinKind::Surface,
-                         Render::FramePin{Render::FramePinKind::Surface, 1, new int{3}, &countingRelease})
-                    .has_value());
-    auto ticket = ledger.beginSubmitted(3);
-    ASSERT_TRUE(ticket.has_value());
-    ASSERT_TRUE(packet.attachSubmission(*ticket).has_value());
-
-    auto handoff = packet.handOffDeferred(42);
-    ASSERT_TRUE(handoff.has_value());
-    EXPECT_EQ(packet.state(), Render::RenderFramePacket::State::Completed);
-    EXPECT_EQ(packet.pinCount(), 0U);
-    EXPECT_EQ(g_releaseCount.load(), 0);
-    EXPECT_EQ(ledger.inflightCount(), 1U);
-
-    ASSERT_TRUE(Render::RenderFramePacket::completeDeferred(ledger, *handoff).has_value());
-    EXPECT_EQ(g_releaseCount.load(), 1);
-    EXPECT_TRUE(ledger.allClear());
-}
-
-TEST(RenderFramePacketTest, PinsReleaseOnComplete)
-{
-    g_releaseCount.store(0);
-    Render::NullSubmissionCompletionLedger ledger{};
+    Render::CpuSubmissionCompletionLedger ledger{};
     Render::ISubmissionCompletionLedger& ledgerSpi = ledger;
     Render::RenderFramePacket packet;
 
@@ -272,10 +259,10 @@ TEST(RenderFramePacketTest, PinsReleaseOnComplete)
 
     auto ticket = ledgerSpi.beginSubmitted(5);
     ASSERT_TRUE(ticket.has_value());
-    ASSERT_TRUE(packet.attachSubmission(*ticket).has_value());
+    ASSERT_TRUE(packet.attachSubmission(ledgerSpi, std::move(*ticket)).has_value());
     EXPECT_EQ(packet.state(), Render::RenderFramePacket::State::Submitted);
 
-    ASSERT_TRUE(packet.complete(ledgerSpi).has_value());
+    ASSERT_TRUE(packet.complete().has_value());
     EXPECT_EQ(packet.state(), Render::RenderFramePacket::State::Completed);
     EXPECT_EQ(packet.pinCount(), 0U);
     EXPECT_EQ(g_releaseCount.load(), 2);
@@ -285,7 +272,7 @@ TEST(RenderFramePacketTest, PinsReleaseOnComplete)
 TEST(RenderFramePacketTest, AbandonReleasesPinsAndTicket)
 {
     g_releaseCount.store(0);
-    Render::NullSubmissionCompletionLedger ledger{};
+    Render::CpuSubmissionCompletionLedger ledger{};
     Render::RenderFramePacket packet;
     ASSERT_TRUE(packet.beginFrame(1).has_value());
     ASSERT_TRUE(packet
@@ -294,12 +281,52 @@ TEST(RenderFramePacketTest, AbandonReleasesPinsAndTicket)
                     .has_value());
     auto ticket = ledger.beginSubmitted(8);
     ASSERT_TRUE(ticket.has_value());
-    ASSERT_TRUE(packet.attachSubmission(*ticket).has_value());
-    ASSERT_TRUE(packet.abandon(&ledger).has_value());
+    ASSERT_TRUE(packet.attachSubmission(ledger, std::move(*ticket)).has_value());
+    EXPECT_FALSE(ticket->hasValue());
+    ASSERT_TRUE(packet.abandon().has_value());
     EXPECT_EQ(packet.state(), Render::RenderFramePacket::State::Abandoned);
     EXPECT_EQ(g_releaseCount.load(), 1);
     EXPECT_TRUE(ledger.allClear());
     EXPECT_EQ(ledger.abandonedCount(), 1U);
+}
+
+TEST(RenderFramePacketTest, DestructorAbandonsSubmittedTicket)
+{
+    g_releaseCount.store(0);
+    Render::CpuSubmissionCompletionLedger ledger{};
+    {
+        Render::RenderFramePacket packet;
+        ASSERT_TRUE(packet.beginFrame(1).has_value());
+        ASSERT_TRUE(packet
+                        .add(Render::FramePinKind::Custom,
+                             Render::FramePin{Render::FramePinKind::Custom, 0, new int{5}, &countingRelease})
+                        .has_value());
+        auto ticket = ledger.beginSubmitted(10);
+        ASSERT_TRUE(ticket.has_value());
+        ASSERT_TRUE(packet.attachSubmission(ledger, std::move(*ticket)).has_value());
+        EXPECT_EQ(packet.submissionIndex(), 10U);
+    }
+
+    EXPECT_TRUE(ledger.allClear());
+    EXPECT_EQ(ledger.abandonedCount(), 1U);
+    EXPECT_EQ(g_releaseCount.load(), 1);
+}
+
+TEST(RenderFramePacketTest, BeginFrameAbandonsPreviousSubmittedTicket)
+{
+    Render::CpuSubmissionCompletionLedger ledger{};
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1).has_value());
+    auto ticket = ledger.beginSubmitted(11);
+    ASSERT_TRUE(ticket.has_value());
+    ASSERT_TRUE(packet.attachSubmission(ledger, std::move(*ticket)).has_value());
+
+    ASSERT_TRUE(packet.beginFrame(2).has_value());
+    EXPECT_EQ(packet.state(), Render::RenderFramePacket::State::Building);
+    EXPECT_EQ(packet.frameIndex(), 2U);
+    EXPECT_TRUE(ledger.allClear());
+    EXPECT_EQ(ledger.abandonedCount(), 1U);
+    ASSERT_TRUE(packet.completeSkipped().has_value());
 }
 
 TEST(RenderFramePacketTest, CompleteSkippedReleasesWithoutTicket)

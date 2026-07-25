@@ -1486,18 +1486,18 @@ class ScriptedGameState final : public IGameState {
         {
             const SimulationActionSnapshot& actions = context.simulationActions();
             EXPECT_EQ(actions.targetSimulationTick, fixedTiming.simulationTickIndex);
-            EXPECT_TRUE(actions.isHeld(probe_->actionWiring.simulationAction));
+            EXPECT_TRUE(actions.isActive(probe_->actionWiring.simulationAction));
             EXPECT_EQ(actions.find(probe_->actionWiring.frameAction), nullptr);
             const usize expectedTransitionCount = fixedTiming.fixedStepIndexInFrame == 0U ? 1U : 0U;
             EXPECT_EQ(actions.transitions.size(), expectedTransitionCount);
             if (fixedTiming.fixedStepIndexInFrame == 0U && actions.transitions.size() == 1U)
             {
-                const auto* digital = std::get_if<DigitalActionTransition>(&actions.transitions.front());
+                const auto* digital = std::get_if<InputActionTransition>(&actions.transitions.front());
                 EXPECT_NE(digital, nullptr);
                 if (digital != nullptr)
                 {
                     EXPECT_EQ(digital->action, probe_->actionWiring.simulationAction);
-                    EXPECT_EQ(digital->kind, DigitalActionTransitionKind::Pressed);
+                    EXPECT_EQ(digital->kind, InputActionTransitionKind::Started);
                     EXPECT_EQ(digital->sourceSequence, 1U);
                     if (digital->worldPointerSample.has_value())
                     {
@@ -1551,17 +1551,17 @@ class ScriptedGameState final : public IGameState {
             EXPECT_EQ(actions.engineFrameIndex, frameIndex);
             if (probe_->actionWiring.frameAction.hasValue())
             {
-                EXPECT_TRUE(actions.isHeld(probe_->actionWiring.frameAction));
+                EXPECT_TRUE(actions.isActive(probe_->actionWiring.frameAction));
                 EXPECT_EQ(actions.find(probe_->actionWiring.simulationAction), nullptr);
                 EXPECT_EQ(actions.transitions.size(), 1U);
                 if (actions.transitions.size() == 1U)
                 {
-                    const auto* digital = std::get_if<DigitalActionTransition>(&actions.transitions.front());
+                    const auto* digital = std::get_if<InputActionTransition>(&actions.transitions.front());
                     EXPECT_NE(digital, nullptr);
                     if (digital != nullptr)
                     {
                         EXPECT_EQ(digital->action, probe_->actionWiring.frameAction);
-                        EXPECT_EQ(digital->kind, DigitalActionTransitionKind::Pressed);
+                        EXPECT_EQ(digital->kind, InputActionTransitionKind::Started);
                         EXPECT_EQ(digital->sourceSequence, 2U);
                     }
                 }
@@ -1574,7 +1574,7 @@ class ScriptedGameState final : public IGameState {
             const FrameActionSnapshot& actions = context.frameActions();
             const InputActionState* action = actions.find(probe_->uiPointerGameplayAction);
             probe_->uiPointerGameplayActionPresent = action != nullptr;
-            probe_->uiPointerGameplayActionHeld = action != nullptr && action->held;
+            probe_->uiPointerGameplayActionHeld = action != nullptr && action->isActive();
             probe_->uiPointerGameplayTransitionCount = actions.transitions.size();
         }
         if (frameIndex == probe_->exitOnFrame)
@@ -1738,6 +1738,167 @@ class ScriptedGameApplication final : public IGameApplication {
 
   private:
     GameProbe* probe_;
+};
+
+struct RebindFacadeProbe final {
+    InputActionId action{};
+    InputBindingId targetBinding{};
+    bool lowerSawFacadeWhileTop = false;
+    u32 lowerNullFacadeCount = 0;
+    bool topSawFacade = false;
+    bool startupBindingIdsWereAssigned = false;
+    bool sawCapturing = false;
+    bool sawQueued = false;
+    bool currentFrameKeptOriginalBinding = false;
+    bool sawApplied = false;
+    bool nextFrameDroppedOriginalBinding = false;
+    bool replacementMapped = false;
+};
+
+[[nodiscard]] bool bindingUsesKey(const InputActionBinding& binding, Platform::Key key) noexcept
+{
+    const auto* keyBinding = std::get_if<PrimaryWindowKeyBinding>(&binding.input);
+    return keyBinding != nullptr && keyBinding->key == key;
+}
+
+class RebindFacadeTopState final : public IGameState {
+  public:
+    explicit RebindFacadeTopState(RebindFacadeProbe& probe) noexcept : probe_(&probe)
+    {
+    }
+
+    Core::Status onEnter(GameStateEnterContext&) override
+    {
+        return Core::success();
+    }
+
+    void onExit(GameStateExitContext&) noexcept override
+    {
+    }
+
+    [[nodiscard]] GameStatePolicy initialPolicy() const noexcept override
+    {
+        return {};
+    }
+
+    Core::Status updateFrame(FrameUpdateContext& context) override
+    {
+        InputActionRebinding* rebinding = context.inputActionRebinding();
+        probe_->topSawFacade = rebinding != nullptr;
+        if (rebinding == nullptr)
+        {
+            return Core::failure(Core::CoreErrorCode::Internal, "top GameState did not receive rebinding facade");
+        }
+
+        const u64 frameIndex = context.frameTiming().frameIndex;
+        if (frameIndex == 1U)
+        {
+            const auto startupBindings = rebinding->bindings();
+            if (startupBindings.size() != 2U)
+            {
+                return Core::failure(Core::CoreErrorCode::Internal,
+                                     "rebinding facade did not expose both startup bindings");
+            }
+            probe_->targetBinding = startupBindings[0].binding;
+            probe_->startupBindingIdsWereAssigned = startupBindings[0].binding.hasValue() &&
+                                                    startupBindings[1].binding.hasValue() &&
+                                                    startupBindings[0].binding != startupBindings[1].binding;
+
+            auto transaction = rebinding->begin(probe_->targetBinding);
+            if (!transaction)
+            {
+                return Core::failure(std::move(transaction.error()));
+            }
+            probe_->sawCapturing = rebinding->state().state == RebindState::Capturing;
+
+            auto commit = rebinding->commit(*transaction, PrimaryWindowKeyBinding{.key = Platform::Key::B},
+                                            RebindConflictPolicy::Reject);
+            if (!commit)
+            {
+                return Core::failure(std::move(commit.error()));
+            }
+            if (commit->outcome != RebindCommitOutcome::Queued)
+            {
+                return Core::failure(Core::CoreErrorCode::Internal, "rebinding facade did not queue replacement");
+            }
+            probe_->sawQueued = rebinding->state().state == RebindState::Queued;
+            probe_->currentFrameKeptOriginalBinding = context.frameActions().isActive(probe_->action) &&
+                                                      bindingUsesKey(rebinding->bindings()[0], Platform::Key::A);
+        } else if (frameIndex == 2U)
+        {
+            probe_->sawApplied = rebinding->state().state == RebindState::Applied &&
+                                 rebinding->state().transaction.binding == probe_->targetBinding &&
+                                 bindingUsesKey(rebinding->bindings()[0], Platform::Key::B);
+            probe_->nextFrameDroppedOriginalBinding = !context.frameActions().isActive(probe_->action);
+        } else if (frameIndex == 3U)
+        {
+            probe_->replacementMapped = context.frameActions().isActive(probe_->action) &&
+                                        bindingUsesKey(rebinding->bindings()[0], Platform::Key::B);
+            context.requestExitAfterFrame();
+        }
+        return Core::success();
+    }
+
+  private:
+    RebindFacadeProbe* probe_;
+};
+
+class RebindFacadeLowerState final : public IGameState {
+  public:
+    explicit RebindFacadeLowerState(RebindFacadeProbe& probe) noexcept : probe_(&probe)
+    {
+    }
+
+    Core::Status onEnter(GameStateEnterContext&) override
+    {
+        return Core::success();
+    }
+
+    void onExit(GameStateExitContext&) noexcept override
+    {
+    }
+
+    [[nodiscard]] GameStatePolicy initialPolicy() const noexcept override
+    {
+        return {};
+    }
+
+    Core::Status updateFrame(FrameUpdateContext& context) override
+    {
+        if (context.frameTiming().frameIndex == 0U)
+        {
+            probe_->lowerSawFacadeWhileTop = context.inputActionRebinding() != nullptr;
+            return context.requestPush(std::make_unique<RebindFacadeTopState>(*probe_));
+        }
+        if (context.inputActionRebinding() == nullptr)
+        {
+            ++probe_->lowerNullFacadeCount;
+        }
+        return Core::success();
+    }
+
+  private:
+    RebindFacadeProbe* probe_;
+};
+
+class RebindFacadeGameApplication final : public IGameApplication {
+  public:
+    explicit RebindFacadeGameApplication(RebindFacadeProbe& probe) noexcept : probe_(&probe)
+    {
+    }
+
+    Core::Result<std::unique_ptr<IGameState>> createInitialState(GameStartupContext&) override
+    {
+        std::unique_ptr<IGameState> state = std::make_unique<RebindFacadeLowerState>(*probe_);
+        return state;
+    }
+
+    void onShutdown(GameShutdownContext&) noexcept override
+    {
+    }
+
+  private:
+    RebindFacadeProbe* probe_;
 };
 
 Core::Result<std::unique_ptr<EngineHost>> createRuntimeHost(RuntimeProbe& probe,
@@ -1908,7 +2069,7 @@ TEST(EngineConfigTest, RejectsInvalidWindowInputAndPlatformEventConfiguration)
     invalidConfigs.push_back(std::move(noFrameEdges));
 
     auto noBindings = EngineConfig::Defaults();
-    noBindings.inputActions.capacities.digitalActionBindingCapacity = 0;
+    noBindings.inputActions.capacities.actionBindingCapacity = 0;
     invalidConfigs.push_back(std::move(noBindings));
 
     for (const EngineConfig& config : invalidConfigs)
@@ -1919,25 +2080,25 @@ TEST(EngineConfigTest, RejectsInvalidWindowInputAndPlatformEventConfiguration)
     }
 }
 
-TEST(EngineConfigTest, RejectsInvalidDuplicateAndExcessDigitalBindings)
+TEST(EngineConfigTest, RejectsInvalidDuplicateAndExcessBindings)
 {
     constexpr InputActionId JumpAction{1};
 
     auto invalidAction = EngineConfig::Defaults();
-    invalidAction.inputActions.digitalBindings.push_back(DigitalActionBinding{
+    invalidAction.inputActions.bindings.push_back(InputActionBinding{
         .input = PrimaryWindowKeyBinding{.key = Platform::Key::Space},
     });
     EXPECT_FALSE(invalidAction.validate().has_value());
 
     auto invalidKey = EngineConfig::Defaults();
-    invalidKey.inputActions.digitalBindings.push_back(DigitalActionBinding{
+    invalidKey.inputActions.bindings.push_back(InputActionBinding{
         .input = PrimaryWindowKeyBinding{.key = Platform::Key::Unknown},
         .action = JumpAction,
     });
     EXPECT_FALSE(invalidKey.validate().has_value());
 
     auto unsupportedPointer = EngineConfig::Defaults();
-    unsupportedPointer.inputActions.digitalBindings.push_back(DigitalActionBinding{
+    unsupportedPointer.inputActions.bindings.push_back(InputActionBinding{
         .input =
             PrimaryPointerButtonBinding{
                 .pointer = Platform::PrimaryPointerId + 1,
@@ -1948,7 +2109,7 @@ TEST(EngineConfigTest, RejectsInvalidDuplicateAndExcessDigitalBindings)
     EXPECT_FALSE(unsupportedPointer.validate().has_value());
 
     auto invalidDomain = EngineConfig::Defaults();
-    invalidDomain.inputActions.digitalBindings.push_back(DigitalActionBinding{
+    invalidDomain.inputActions.bindings.push_back(InputActionBinding{
         .input = PrimaryWindowKeyBinding{.key = Platform::Key::Space},
         .action = JumpAction,
         .domain = static_cast<InputActionDomain>(255),
@@ -1956,13 +2117,13 @@ TEST(EngineConfigTest, RejectsInvalidDuplicateAndExcessDigitalBindings)
     EXPECT_FALSE(invalidDomain.validate().has_value());
 
     auto duplicateControl = EngineConfig::Defaults();
-    duplicateControl.inputActions.digitalBindings = {
-        DigitalActionBinding{
+    duplicateControl.inputActions.bindings = {
+        InputActionBinding{
             .input = PrimaryWindowKeyBinding{.key = Platform::Key::Space},
             .action = JumpAction,
             .domain = InputActionDomain::Simulation,
         },
-        DigitalActionBinding{
+        InputActionBinding{
             .input = PrimaryWindowKeyBinding{.key = Platform::Key::Space},
             .action = InputActionId{2},
             .domain = InputActionDomain::Frame,
@@ -1971,13 +2132,13 @@ TEST(EngineConfigTest, RejectsInvalidDuplicateAndExcessDigitalBindings)
     EXPECT_FALSE(duplicateControl.validate().has_value());
 
     auto actionInTwoDomains = EngineConfig::Defaults();
-    actionInTwoDomains.inputActions.digitalBindings = {
-        DigitalActionBinding{
+    actionInTwoDomains.inputActions.bindings = {
+        InputActionBinding{
             .input = PrimaryWindowKeyBinding{.key = Platform::Key::Space},
             .action = JumpAction,
             .domain = InputActionDomain::Simulation,
         },
-        DigitalActionBinding{
+        InputActionBinding{
             .input = PrimaryWindowKeyBinding{.key = Platform::Key::Enter},
             .action = JumpAction,
             .domain = InputActionDomain::Frame,
@@ -1986,13 +2147,13 @@ TEST(EngineConfigTest, RejectsInvalidDuplicateAndExcessDigitalBindings)
     EXPECT_FALSE(actionInTwoDomains.validate().has_value());
 
     auto beyondConfiguredCapacity = EngineConfig::Defaults();
-    beyondConfiguredCapacity.inputActions.capacities.digitalActionBindingCapacity = 1;
-    beyondConfiguredCapacity.inputActions.digitalBindings = {
-        DigitalActionBinding{
+    beyondConfiguredCapacity.inputActions.capacities.actionBindingCapacity = 1;
+    beyondConfiguredCapacity.inputActions.bindings = {
+        InputActionBinding{
             .input = PrimaryWindowKeyBinding{.key = Platform::Key::Space},
             .action = JumpAction,
         },
-        DigitalActionBinding{
+        InputActionBinding{
             .input = PrimaryWindowKeyBinding{.key = Platform::Key::Enter},
             .action = InputActionId{2},
         },
@@ -2435,8 +2596,8 @@ TEST(EngineHostRunTest, GameSdkPointerListenerPublishesClaimBeforeActionsAndRele
     ScriptedGameApplication application(game);
 
     auto config = EngineConfig::Defaults();
-    config.inputActions.digitalBindings = {
-        DigitalActionBinding{
+    config.inputActions.bindings = {
+        InputActionBinding{
             .input =
                 PrimaryPointerButtonBinding{
                     .pointer = Platform::PrimaryPointerId,
@@ -3102,13 +3263,13 @@ TEST(EngineHostRunTest, RoutesConfiguredInputActionsIntoTheirRuntimePhaseContext
         .maximumAcceptedRealDelta = Core::Duration{0.20},
         .maximumStepsPerFrame = 4,
     };
-    config.inputActions.digitalBindings = {
-        DigitalActionBinding{
+    config.inputActions.bindings = {
+        InputActionBinding{
             .input = PrimaryWindowKeyBinding{.key = Platform::Key::A},
             .action = JumpAction,
             .domain = InputActionDomain::Simulation,
         },
-        DigitalActionBinding{
+        InputActionBinding{
             .input = PrimaryWindowKeyBinding{.key = Platform::Key::B},
             .action = PauseAction,
             .domain = InputActionDomain::Frame,
@@ -3126,6 +3287,79 @@ TEST(EngineHostRunTest, RoutesConfiguredInputActionsIntoTheirRuntimePhaseContext
     ASSERT_GE(game.fixedObservations.size(), 1U);
     EXPECT_EQ(game.fixedObservations.front().frameIndex, 0U);
     EXPECT_EQ(game.fixedObservations.front().simulationTickIndex, 0U);
+}
+
+TEST(EngineHostRunTest, TopStateRebindingFacadeAppliesQueuedReplacementOnNextMappingFrame)
+{
+    constexpr InputActionId MoveAction{301};
+    constexpr InputActionId MenuAction{302};
+
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {
+        Core::Duration::zero(),
+        Core::Duration::zero(),
+        Core::Duration::zero(),
+        Core::Duration::zero(),
+    };
+    runtime.heldKeysByFrame = {
+        {},
+        {Platform::Key::A},
+        {Platform::Key::A},
+        {Platform::Key::B},
+    };
+    runtime.keyTransitionsByFrame = {
+        {},
+        {ScriptedKeyTransition{
+            .key = Platform::Key::A,
+            .state = Platform::DigitalTransition::Down,
+        }},
+        {},
+        {
+            ScriptedKeyTransition{
+                .key = Platform::Key::A,
+                .state = Platform::DigitalTransition::Up,
+            },
+            ScriptedKeyTransition{
+                .key = Platform::Key::B,
+                .state = Platform::DigitalTransition::Down,
+            },
+        },
+    };
+
+    RebindFacadeProbe probe{.action = MoveAction};
+    RebindFacadeGameApplication application(probe);
+
+    auto config = EngineConfig::Defaults();
+    config.inputActions.bindings = {
+        InputActionBinding{
+            .input = PrimaryWindowKeyBinding{.key = Platform::Key::A},
+            .action = MoveAction,
+            .domain = InputActionDomain::Frame,
+        },
+        InputActionBinding{
+            .input = PrimaryWindowKeyBinding{.key = Platform::Key::C},
+            .action = MenuAction,
+            .domain = InputActionDomain::Frame,
+        },
+    };
+    auto hostResult = createRuntimeHost(runtime, std::move(config));
+    ASSERT_TRUE(hostResult.has_value());
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
+    EXPECT_EQ(*runResult, RunExitReason::GameRequestedExitAfterCurrentFrame);
+    EXPECT_TRUE(probe.lowerSawFacadeWhileTop);
+    EXPECT_EQ(probe.lowerNullFacadeCount, 3U);
+    EXPECT_TRUE(probe.topSawFacade);
+    EXPECT_TRUE(probe.startupBindingIdsWereAssigned);
+    EXPECT_TRUE(probe.targetBinding.hasValue());
+    EXPECT_TRUE(probe.sawCapturing);
+    EXPECT_TRUE(probe.sawQueued);
+    EXPECT_TRUE(probe.currentFrameKeptOriginalBinding);
+    EXPECT_TRUE(probe.sawApplied);
+    EXPECT_TRUE(probe.nextFrameDroppedOriginalBinding);
+    EXPECT_TRUE(probe.replacementMapped);
 }
 
 TEST(EngineHostRunTest, WorldPointerActionPayloadUsesLastPresentedCamera2D)
@@ -3172,8 +3406,8 @@ TEST(EngineHostRunTest, WorldPointerActionPayloadUsesLastPresentedCamera2D)
         .maximumAcceptedRealDelta = Core::Duration{0.20},
         .maximumStepsPerFrame = 4,
     };
-    config.inputActions.digitalBindings = {
-        DigitalActionBinding{
+    config.inputActions.bindings = {
+        InputActionBinding{
             .input =
                 PrimaryPointerButtonBinding{
                     .pointer = Platform::PrimaryPointerId,

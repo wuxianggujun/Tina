@@ -14,6 +14,9 @@
 namespace Tina::Asset {
 namespace {
 
+inline constexpr AssetFormat::TileMapLayerId VisualLayerId = 10;
+inline constexpr AssetFormat::TileMapLayerId AlternateLayerId = 20;
+
 [[nodiscard]] Core::AssetId::Bytes idBytes(Core::u8 seed)
 {
     Core::AssetId::Bytes bytes{};
@@ -49,11 +52,27 @@ namespace {
             cells[y * 8 + x] = ((x + y) % 3 == 0) ? 1 : 0;
         }
     }
+    const std::array layers{
+        AssetFormat::TileMapLayerDesc{
+            .stableLayerId = VisualLayerId,
+            .kind = AssetFormat::TileMapLayerKind::Tile,
+            .visible = true,
+            .name = "visual",
+            .tiles = cells,
+        },
+        AssetFormat::TileMapLayerDesc{
+            .stableLayerId = AlternateLayerId,
+            .kind = AssetFormat::TileMapLayerKind::Tile,
+            .visible = true,
+            .name = "alternate",
+            .tiles = cells,
+        },
+    };
     auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
         .widthCells = 8,
         .heightCells = 8,
         .cellSizeMeters = 1.0f,
-        .tiles = cells,
+        .layers = layers,
         .tilesetId = tilesetId,
     });
     auto map = AssetFormat::parseTileMapPayload(*mapBytes);
@@ -76,14 +95,14 @@ TEST(TileChunkDirtyCacheTests, FirstSyncRebuildsThenHitsWithoutEdits)
     ASSERT_TRUE(cache.has_value()) << cache.error().message;
 
     std::pmr::vector<TileChunkView> rebuilt{&memory};
-    auto first = cache->syncVisible(map, fullMapCamera(), rebuilt);
+    auto first = cache->syncVisible(map, VisualLayerId, fullMapCamera(), rebuilt);
     ASSERT_TRUE(first.has_value()) << first.error().message;
     EXPECT_GT(*first, 0U);
     EXPECT_EQ(rebuilt.size(), *first);
     const auto firstRebuilds = *first;
 
     rebuilt.clear();
-    auto second = cache->syncVisible(map, fullMapCamera(), rebuilt);
+    auto second = cache->syncVisible(map, VisualLayerId, fullMapCamera(), rebuilt);
     ASSERT_TRUE(second.has_value()) << second.error().message;
     EXPECT_EQ(*second, 0U);
     EXPECT_TRUE(rebuilt.empty());
@@ -103,24 +122,47 @@ TEST(TileChunkDirtyCacheTests, SetTileRebuildsOnlyAffectedChunk)
     ASSERT_TRUE(cache.has_value());
 
     std::pmr::vector<TileChunkView> rebuilt{&memory};
-    ASSERT_TRUE(cache->syncVisible(map, fullMapCamera(), rebuilt).has_value());
+    ASSERT_TRUE(cache->syncVisible(map, VisualLayerId, fullMapCamera(), rebuilt).has_value());
     rebuilt.clear();
-    ASSERT_TRUE(cache->syncVisible(map, fullMapCamera(), rebuilt).has_value());
+    ASSERT_TRUE(cache->syncVisible(map, VisualLayerId, fullMapCamera(), rebuilt).has_value());
     EXPECT_TRUE(rebuilt.empty());
 
     // Cell (0,0) is in chunk (0,0). Change tile id → only that chunk dirty.
-    const auto revBefore = map.chunkRevision(0, 0);
-    ASSERT_TRUE(map.setTile(0, 0, 2).has_value());
-    EXPECT_GT(map.chunkRevision(0, 0), revBefore);
+    const auto revBefore = map.chunkRevision(VisualLayerId, 0, 0);
+    ASSERT_TRUE(revBefore.has_value());
+    ASSERT_TRUE(map.setTile(VisualLayerId, 0, 0, 2).has_value());
+    const auto revisionAfterEdit = map.chunkRevision(VisualLayerId, 0, 0);
+    ASSERT_TRUE(revisionAfterEdit.has_value());
+    EXPECT_GT(*revisionAfterEdit, *revBefore);
 
     rebuilt.clear();
-    auto afterEdit = cache->syncVisible(map, fullMapCamera(), rebuilt);
+    auto afterEdit = cache->syncVisible(map, VisualLayerId, fullMapCamera(), rebuilt);
     ASSERT_TRUE(afterEdit.has_value()) << afterEdit.error().message;
     EXPECT_EQ(*afterEdit, 1U);
     ASSERT_EQ(rebuilt.size(), 1U);
     EXPECT_EQ(rebuilt[0].coord.chunkX, 0U);
     EXPECT_EQ(rebuilt[0].coord.chunkY, 0U);
-    EXPECT_EQ(rebuilt[0].revision, map.chunkRevision(0, 0));
+    EXPECT_EQ(rebuilt[0].revision, *revisionAfterEdit);
+}
+
+TEST(TileChunkDirtyCacheTests, TracksSameChunkCoordinatesPerLayer)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    auto map = makeLargeMap(memory);
+    auto cache = TileChunkDirtyCache::Create({.capacity = 64, .memoryResource = &memory});
+    ASSERT_TRUE(cache.has_value());
+
+    std::pmr::vector<TileChunkView> rebuilt{&memory};
+    auto visual = cache->syncVisible(map, VisualLayerId, fullMapCamera(), rebuilt);
+    ASSERT_TRUE(visual.has_value());
+    ASSERT_GT(*visual, 0U);
+
+    rebuilt.clear();
+    auto alternate = cache->syncVisible(map, AlternateLayerId, fullMapCamera(), rebuilt);
+    ASSERT_TRUE(alternate.has_value());
+    EXPECT_EQ(*alternate, *visual);
+    ASSERT_FALSE(rebuilt.empty());
+    EXPECT_EQ(rebuilt.front().layerId, AlternateLayerId);
 }
 
 TEST(TileChunkDirtyCacheTests, IdenticalSetTileIsNoOpForRevisionAndCache)
@@ -130,16 +172,20 @@ TEST(TileChunkDirtyCacheTests, IdenticalSetTileIsNoOpForRevisionAndCache)
     auto cache = TileChunkDirtyCache::Create({.capacity = 32, .memoryResource = &memory});
     ASSERT_TRUE(cache.has_value());
     std::pmr::vector<TileChunkView> rebuilt{&memory};
-    ASSERT_TRUE(cache->syncVisible(map, fullMapCamera(), rebuilt).has_value());
+    ASSERT_TRUE(cache->syncVisible(map, VisualLayerId, fullMapCamera(), rebuilt).has_value());
 
-    const auto rev = map.chunkRevision(1, 1);
+    const auto rev = map.chunkRevision(VisualLayerId, 1, 1);
+    ASSERT_TRUE(rev.has_value());
     // set same value: TileMapInstance does not bump revision
-    const auto id = map.tileIdAt(2, 2);
-    ASSERT_TRUE(map.setTile(2, 2, id).has_value());
-    EXPECT_EQ(map.chunkRevision(1, 1), rev);
+    const auto id = map.tileIdAt(VisualLayerId, 2, 2);
+    ASSERT_TRUE(id.has_value());
+    ASSERT_TRUE(map.setTile(VisualLayerId, 2, 2, *id).has_value());
+    const auto revisionAfterNoOp = map.chunkRevision(VisualLayerId, 1, 1);
+    ASSERT_TRUE(revisionAfterNoOp.has_value());
+    EXPECT_EQ(*revisionAfterNoOp, *rev);
 
     rebuilt.clear();
-    auto n = cache->syncVisible(map, fullMapCamera(), rebuilt);
+    auto n = cache->syncVisible(map, VisualLayerId, fullMapCamera(), rebuilt);
     ASSERT_TRUE(n.has_value());
     EXPECT_EQ(*n, 0U);
 }
@@ -173,12 +219,14 @@ TEST(TileChunkDirtyCacheTests, StressThreeHundredFramesRebuildsStaySparse)
         {
             const Core::u32 x = (frame / 17U) % 8U;
             const Core::u32 y = (frame * 3U) % 8U;
-            const Core::u16 next = (map.tileIdAt(x, y) == 1) ? 2 : 1;
-            ASSERT_TRUE(map.setTile(x, y, next).has_value());
+            const auto current = map.tileIdAt(VisualLayerId, x, y);
+            ASSERT_TRUE(current.has_value());
+            const Core::u16 next = (*current == 1) ? 2 : 1;
+            ASSERT_TRUE(map.setTile(VisualLayerId, x, y, next).has_value());
         }
 
         rebuilt.clear();
-        auto n = cache->syncVisible(map, camera, rebuilt);
+        auto n = cache->syncVisible(map, VisualLayerId, camera, rebuilt);
         ASSERT_TRUE(n.has_value()) << n.error().message;
         totalRebuilds += *n;
 
@@ -193,7 +241,7 @@ TEST(TileChunkDirtyCacheTests, StressThreeHundredFramesRebuildsStaySparse)
         }
 
         std::pmr::vector<TileChunkView> visible{&memory};
-        auto vis = extractVisibleTileChunks(map, camera, visible);
+        auto vis = extractVisibleTileChunks(map, VisualLayerId, camera, visible);
         ASSERT_TRUE(vis.has_value());
         totalVisible += *vis;
     }
@@ -217,11 +265,11 @@ TEST(TileChunkDirtyCacheTests, ClearForcesFullRebuild)
     auto cache = TileChunkDirtyCache::Create({.capacity = 64, .memoryResource = &memory});
     ASSERT_TRUE(cache.has_value());
     std::pmr::vector<TileChunkView> rebuilt{&memory};
-    auto first = cache->syncVisible(map, fullMapCamera(), rebuilt);
+    auto first = cache->syncVisible(map, VisualLayerId, fullMapCamera(), rebuilt);
     ASSERT_TRUE(first.has_value());
     cache->clear();
     rebuilt.clear();
-    auto again = cache->syncVisible(map, fullMapCamera(), rebuilt);
+    auto again = cache->syncVisible(map, VisualLayerId, fullMapCamera(), rebuilt);
     ASSERT_TRUE(again.has_value());
     EXPECT_EQ(*again, *first);
 }

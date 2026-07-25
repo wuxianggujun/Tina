@@ -1,7 +1,8 @@
 # Public API
 
 本文描述当前 `include/tina` 公共面和 CMake target。它不是未来 SDK 愿望清单；尚未存在的能力（通用
-event queue、真 GPU fence、PBR 等）列在末尾。State 栈、FramePin 与 Null completion 首切片**已经存在**。
+event queue、真 GPU fence、PBR 等）列在末尾。State 栈、FramePin 与 present-return CPU completion
+首切片**已经存在**。
 
 ## 分层
 
@@ -133,7 +134,7 @@ Runtime 私有持有 `GameStateStack`（定容 8）。`FrameUpdateContext` 提�
 | `GameStartupContext` | EngineConfig、Platform event subscription | `createInitialState()` 回调 |
 | `GameStateEnterContext` | subscription、primary UI root builder | `onEnter()` 回调 |
 | `FixedUpdateContext` | frame/fixed timing、Simulation Action、可选 Audio | `fixedUpdate()` 回调 |
-| `FrameUpdateContext` | timing、Frame Action、可选 Audio、exit-after-frame | `updateFrame()` 回调 |
+| `FrameUpdateContext` | timing、Frame Action、可选 Audio、exit-after-frame；仅栈顶可借用 `InputActionRebinding` | `updateFrame()` 回调 |
 | `RenderSceneExtractionContext` | phase-local `RenderSceneWriter` | extraction 回调 |
 | `UIUpdateContext` | root-scoped UI updater | `updateUI()` 回调 |
 | Exit/Shutdown Context | stop cause、只借用 failure Error | 对应 callback |
@@ -151,6 +152,20 @@ Gamepad snapshot、ordered lifecycle/input transition、strict UTF-8 text/compos
 枚举不会越过 adapter。`PlatformEventSubscription` 是 generation-safe RAII token；dispatcher owner 和
 dispatch/shutdown 不暴露给游戏。
 
+Gameplay Action 只有 Runtime 一套公开模型：`InputActionMapConfig::bindings` 保存带稳定
+`InputBindingId` 的 `InputActionBinding`，同一 binding variant 表达 digital control 与
+`StandardGamepadAxisBinding`。axis 支持 Signed/PositiveHalf/NegativeHalf/Trigger、gameplay deadzone 与
+scale；多个 keyboard/pointer/所有已连接 Gamepad generation 的贡献按每个 Action 固定的
+`SumClamped` 或 `StrongestMagnitude` 合成。Simulation/Frame snapshot 公开排序后的
+`InputActionState{action, value}` 和 Started/ValueChanged/Completed/Cancelled transition；调用方通过
+`value()` / `isActive()` 查询，不读取 physical held state。
+
+UI transition consumption 与 continuous-control claim 先于 Action mapping：digital source 抑制到真实
+release，axis 抑制到 neutral/deadzone，均不会穿透 gameplay。只有栈顶 State 可从
+`FrameUpdateContext::inputActionRebinding()` 借用窄 facade；`begin`/`commit` 把修改排到下一 mapping
+frame 原子应用，冲突显式选择 `Reject` 或 `Swap`，`Capturing`/`Queued` 均可取消。绑定的 Gamepad
+generation 断连或 raw reset 失去该 generation 时 transaction 取消，不自动迁移到重连设备。
+
 ## Task
 
 `ITaskSystem` 提供 `scheduleIo`、`scheduleCpu`、`postMain`、`pumpMain`、`requestStop`、
@@ -166,13 +181,14 @@ dispatch/shutdown 不暴露给游戏。
 - P3N3UV2/U16 StaticMesh create/destroy、Mesh3D key binding；
 - material key → base-color / metallic-roughness / normal texture binding；
 - material key → metallic/roughness factors；
-- experimental Opaque3D key/fill directional lights（非负 RGB + 非负 ambient）；
+- experimental Opaque3D `Mesh3DLightingDesc`（同步提交0..4 directional lights + 非负 ambient）；
 - primary framebuffer RGBA8 capture。
 
 `GpuTextureId`/`GpuMeshId` 是 RenderDevice generation handle，不是 AssetHandle。当前 `RenderFrame` 的
 Surface/Scene/UI/Glyph view 只在 `submitFrame()` 调用内有效；backend 不能保存。Runtime 使用
-`RenderFramePacket`、`FramePin` 与 submission completion ledger（Null/present-sync 首切片，见
-`include/tina/render/FramePin.hpp`）；真实 GPU fence 驱动的 completion 尚未实现。
+`RenderFramePacket`、`FramePin` 与 submission completion ledger（成功 present 返回后关闭 CPU 借用，见
+`include/tina/render/FramePin.hpp`）。`SubmissionTicket` 不可复制且绑定签发 ledger，packet 取得唯一所有权
+后负责 complete/abandon。它不代表 GPU execution/retirement；真实 GPU fence completion 尚未实现。
 
 `RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D extraction，
 commit 后返回 borrowed view。`UIDisplayList` 支持 SolidQuad/Glyph 与 axis-aligned clip。
@@ -204,6 +220,19 @@ Scene target 使用。
 AudioClip 等 typed payload。Runtime 不解析源 glTF/WAV/image；cgltf/stb_image 与源文件解析只在
 Cooker/tool。
 
+TileMap 的唯一当前 wire contract 是 schema v2。`TileMapPayloadView` 按 authoring 顺序通过
+`layerAt()/findLayer(TileMapLayerId)` 暴露 tile/object layer；稳定 layer/object ID 都是 map-wide 非零唯一
+`u32`。layer 与 object 都有独立 visibility；name 与 properties 是 strict UTF-8 borrowed views；object kind
+当前只有 Point 和 axis-aligned Rectangle。旧 schema v1 不兼容，也没有“默认单层”公共 API。
+
+`TileMapInstance` 拷贝验证后的 payload，并为每个 tile layer 持有独立可变 cell/chunk revision。
+`layer(id)` 返回借用到 instance-owned payload 的 metadata/object view；`tileIdAt()`、`tileInfoAt()`、
+`setTile()`、`chunkRevision()`、`querySolidAabb()`、chunk extraction/dirty cache/sprite emit 与
+`TileMapGridCollision` 都要求显式 `TileMapLayerId`。result-returning 的 tile/chunk/query API 对误选 object
+layer 与不存在 layer 分别返回 `TileMapLayerTypeMismatch`/`TileMapLayerNotFound`；grid SPI 的
+`materialFlagsAt()` 仍按约定把无效/空 cell 表现为0。visibility=false 会跳过可见 chunk/sprite emit，但
+不禁止调用方显式把该 tile layer 用作 collision。
+
 `AssetSystem` 提供 request/load/pump、generation slot 与 typed state。`AssetHandle` 是弱 lookup；
 `AssetLease` 强保活 CPU payload。逻辑 invalidation 不等于物理释放。产品 helper 可把 Cooked Texture2D/
 StaticMesh 上传到 RenderDevice，并建立 backend key binding。
@@ -212,7 +241,7 @@ multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct
 单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含
 metallic/roughness factors 与可选 baseColor/MR/normal Texture2D deps。Runtime Opaque3D 为 experimental
 MR hybrid（`setMesh3DMaterialTextureBinding` + 可选 `setMesh3DMaterialMetallicRoughnessTextureBinding`；
-`setMesh3DMaterialFactors` + 可选 normal 贴图 + key/fill directional lights）。完整 light system/IBL/shadow
+`setMesh3DMaterialFactors` + 可选 normal 贴图 + 有界0..4 directional lights）。完整 light component/IBL/shadow
 尚未完成。
 
 ## Audio 与 Physics
@@ -221,14 +250,18 @@ MR hybrid（`setMesh3DMaterialTextureBinding` + 可选 `setMesh3DMaterialMetalli
 PCM 调用方必须保活到底层 voice stop/completion；产品 2D 用 AssetLease持有 Cooked AudioClip。miniaudio
 device/decode 留在 adapter。
 
-`PhysicsWorld2D` 提供 Box2D-backed fixed-step world、body/shape generation ID、contact/query/deferred
-command 与 Tile grid static body helper。Box2D 类型不出现在 public header。Jolt/Physics3D 尚未接入。
+`PhysicsWorld2D` 提供 Box2D-backed fixed-step world，以及相互独立的 body/shape/joint generation ID。
+唯一创建模型是 `createBody()` + `createShape()`；backend-neutral `PhysicsShape2DDesc` 支持
+Box/Circle/Capsule 与 sensor，一个 body 可拥有多个 shape。sensor enter/exit 通过 contact view 的
+`isSensor` 表达；joint 当前为 Distance，并有 create/query/destroy 与关联 body 级联 retirement。公共面还
+包含 query、deferred command 与 Tile grid static body helper。Box2D 类型不出现在 public header；
+Jolt/Physics3D 尚未接入。
 
 ## Handle 与借用速查
 
 | 类型 | 所有权 | 典型失效点 |
 | --- | --- | --- |
-| `EntityId/UINodeId/PhysicsBodyId/...` | registry owner | erase/owner destroy/generation reuse |
+| `EntityId/UINodeId/PhysicsBodyId/PhysicsShapeId/PhysicsJointId/...` | registry owner | erase/owner destroy/generation reuse |
 | `AssetHandle` | 弱 | slot invalidation/reuse |
 | `AssetLease` | 强 CPU payload owner | lease reset/destroy |
 | `GpuTextureId/GpuMeshId` | RenderDevice | destroy/device shutdown |
@@ -237,6 +270,7 @@ command 与 Tile grid static body helper。Box2D 类型不出现在 public heade
 | committed UI view | UIContext | 下一次对应 commit/context destroy |
 | RenderFrame view | Runtime builder | `submitFrame()` 返回 |
 | `AudioPcmClipView` | non-owning | 调用方 payload 释放；必须晚于 voice completion |
+| `TileMapLayerPayloadView` / object/property view | `TileMapPayloadView` 或 `TileMapInstance` 借用 | backing payload 释放；instance view 还会在 instance move/destroy 时失效 |
 
 不要手工构造 generation ID、跨 owner 混用、持久化 Runtime handle，或把 non-owning view包装成“看似
 拥有”的裸 pointer成员。
@@ -244,15 +278,16 @@ command 与 Tile grid static body helper。Box2D 类型不出现在 public heade
 ## 尚不存在或仅部分落地的公共能力
 
 **已存在（勿再文档成“没有”）：** `GameStateStack` 与 structural commands；相位 `blocks*Below` 与
-`blocksGameplayInputBelow` 空 snapshot；`RenderFramePacket` / `FramePin` / Null 或 present-sync
-completion ledger；Windows UIA provider + HWND HostBridge 首切片。
+`blocksGameplayInputBelow` 空 snapshot；`RenderFramePacket` / `FramePin` / present-return CPU
+submission ledger；Windows UIA provider + HWND HostBridge 首切片。
 
 **仍不存在或未完成：**
 
 - 多 World / editor orchestration；
 - 通用 Runtime owning event queue；
 - 真实 GPU fence 驱动的 submission completion；
-- PBR Material / lighting / 通用 pass scheduler；
+- 完整 PBR/IBL/shadow、light component/culling 与通用 pass scheduler；
+- TileMap chunk streaming、editor orchestration、旧 schema migration 与自动 gameplay 生成；
 - 完整 Focus Scope / Modal / 持久 Capture、复杂 text / 虚拟列表；
 - Narrator 合规金标、Linux AT-SPI；
 - Jolt Physics3D；

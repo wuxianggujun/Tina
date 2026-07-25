@@ -14,6 +14,7 @@ namespace Tina::Asset {
 // Does not own tile storage; nonEmptyTileCount is computed at extraction time.
 // Render packet conversion (FrameResourceRef geometry) remains a later slice.
 struct TileChunkView final {
+    AssetFormat::TileMapLayerId layerId = 0;
     TileMapChunkCoord coord{};
     Core::u32 revision = 0;
     Core::u32 originCellX = 0;
@@ -41,6 +42,7 @@ struct TileChunkCameraQuery final {
 // Appends visible non-empty chunks intersecting the camera AABB. Clears `out` first.
 // Empty chunks are skipped. Returns number of views written.
 [[nodiscard]] Core::Result<Core::u32> extractVisibleTileChunks(const TileMapInstance& map,
+                                                               AssetFormat::TileMapLayerId layerId,
                                                                const TileChunkCameraQuery& camera,
                                                                std::pmr::vector<TileChunkView>& out);
 
@@ -51,7 +53,8 @@ struct TileChunkCell final {
     TileMapTileInfo info{};
 };
 
-[[nodiscard]] Core::Result<Core::u32> collectChunkNonEmptyCells(const TileMapInstance& map, TileMapChunkCoord coord,
-                                                               std::pmr::vector<TileChunkCell>& out);
+[[nodiscard]] Core::Result<Core::u32>
+collectChunkNonEmptyCells(const TileMapInstance& map, AssetFormat::TileMapLayerId layerId, TileMapChunkCoord coord,
+                          std::pmr::vector<TileChunkCell>& out);
 
 } // namespace Tina::Asset

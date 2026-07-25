@@ -4,16 +4,42 @@
 #include <tina/runtime/RuntimeErrors.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 #include <limits>
 #include <new>
+#include <ranges>
 #include <string_view>
 #include <utility>
 
 namespace Tina::Runtime::Input {
 namespace {
 
+inline constexpr float ActionEpsilon = 1.0e-6F;
 inline constexpr usize InvalidActionIndex = (std::numeric_limits<usize>::max)();
+
+[[nodiscard]] bool active(float value) noexcept
+{
+    return std::abs(value) > ActionEpsilon;
+}
+
+[[nodiscard]] bool sameValue(float left, float right) noexcept
+{
+    return std::abs(left - right) <= ActionEpsilon;
+}
+
+[[nodiscard]] InputActionTransitionKind cancellationKind(float previous, float current) noexcept
+{
+    if (!active(previous) && active(current))
+    {
+        return InputActionTransitionKind::Started;
+    }
+    if (active(previous) && !active(current))
+    {
+        return InputActionTransitionKind::Cancelled;
+    }
+    return InputActionTransitionKind::ValueChanged;
+}
 
 [[nodiscard]] Core::Status invariantFailure(std::string_view message)
 {
@@ -47,12 +73,12 @@ Core::Result<SimulationActionLatch> SimulationActionLatch::Create(std::span<cons
             states.push_back(InputActionState{.action = action});
         }
 
-        std::vector<bool> deliveredHeld(sortedActions.size(), false);
+        std::vector<float> deliveredValues(sortedActions.size(), 0.0F);
         std::vector<SimulationActionTransition> transitions;
         transitions.reserve(static_cast<usize>(transitionCapacity) + 1U);
         std::vector<ActionSourceToken> transitionSources;
         transitionSources.reserve(static_cast<usize>(transitionCapacity) + 1U);
-        return SimulationActionLatch(std::move(states), std::move(deliveredHeld), std::move(transitions),
+        return SimulationActionLatch(std::move(states), std::move(deliveredValues), std::move(transitions),
                                      std::move(transitionSources), transitionCapacity);
     } catch (const std::bad_alloc&)
     {
@@ -67,12 +93,14 @@ Core::Result<SimulationActionLatch> SimulationActionLatch::Create(std::span<cons
     }
 }
 
-SimulationActionLatch::SimulationActionLatch(std::vector<InputActionState> states, std::vector<bool> deliveredHeld,
+SimulationActionLatch::SimulationActionLatch(std::vector<InputActionState> states,
+                                             std::vector<float> deliveredValues,
                                              std::vector<SimulationActionTransition> transitionStorage,
                                              std::vector<ActionSourceToken> transitionSourceStorage,
                                              usize transitionCapacity) noexcept
-    : states_(std::move(states)), deliveredHeld_(std::move(deliveredHeld)), transitions_(std::move(transitionStorage)),
-      transitionSources_(std::move(transitionSourceStorage)), transitionCapacity_(transitionCapacity)
+    : states_(std::move(states)), deliveredValues_(std::move(deliveredValues)),
+      transitions_(std::move(transitionStorage)), transitionSources_(std::move(transitionSourceStorage)),
+      transitionCapacity_(transitionCapacity)
 {
 }
 
@@ -89,42 +117,46 @@ Core::Status SimulationActionLatch::validateNextUncompletedTick(u64 tick) const
     return Core::success();
 }
 
-Core::Status SimulationActionLatch::setHeld(InputActionId action, bool held) noexcept
+Core::Status SimulationActionLatch::setValue(InputActionId action, float value) noexcept
 {
     const usize index = findActionIndex(action);
-    if (index == InvalidActionIndex)
+    if (index == InvalidActionIndex || !std::isfinite(value))
     {
-        return invariantFailure("Simulation Action state references an unknown action id");
+        return invariantFailure("Simulation Action state references an unknown action or non-finite value");
     }
-    states_[index].held = held;
-    states_[index].axis = held ? 1.0F : 0.0F;
+    states_[index].value = active(value) ? value : 0.0F;
     return Core::success();
 }
 
-bool SimulationActionLatch::isHeld(InputActionId action) const noexcept
+float SimulationActionLatch::value(InputActionId action) const noexcept
 {
     const usize index = findActionIndex(action);
-    return index != InvalidActionIndex && states_[index].held;
+    return index == InvalidActionIndex ? 0.0F : states_[index].value;
 }
 
 Core::Result<SimulationLatchAppendResult>
-SimulationActionLatch::append(u64 targetTick, DigitalActionTransition transition, ActionSourceToken source)
+SimulationActionLatch::append(u64 targetTick, InputActionTransition transition, ActionSourceToken source)
 {
-    if (!transition.action.hasValue() || findActionIndex(transition.action) == InvalidActionIndex)
+    if (!transition.action.hasValue() || findActionIndex(transition.action) == InvalidActionIndex ||
+        !std::isfinite(transition.value))
     {
         return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
-                             "Simulation Action transition references an unknown action id");
+                             "Simulation Action transition references an invalid action or value");
     }
     if (auto targetStatus = ensureTarget(targetTick); !targetStatus)
     {
         return Core::failure(std::move(targetStatus.error()));
     }
-
+    if (resetWritten_)
+    {
+        return SimulationLatchAppendResult::CapacityResetInserted;
+    }
     if (normalTransitionCount_ >= transitionCapacity_)
     {
         transitions_.clear();
         transitionSources_.clear();
         normalTransitionCount_ = 0;
+        resetWritten_ = true;
         transitions_.emplace_back(SimulationInputStreamReset{
             .reason = ActionInputStreamResetReason::ActionTransitionCapacityExceeded,
             .sourceSequence = transition.sourceSequence,
@@ -141,8 +173,9 @@ SimulationActionLatch::append(u64 targetTick, DigitalActionTransition transition
 }
 
 Core::Result<SimulationLatchAppendResult>
-SimulationActionLatch::reconcileCancellation(u64 targetTick, InputActionId action, ActionSourceToken source,
-                                             u64 sourceSequence, bool forceStateReconciliation)
+SimulationActionLatch::reconcileCancellation(u64 targetTick, InputActionId action,
+                                             std::span<const ActionSourceToken> sources, u64 sourceSequence,
+                                             bool forceStateReconciliation)
 {
     const usize index = findActionIndex(action);
     if (index == InvalidActionIndex)
@@ -154,36 +187,44 @@ SimulationActionLatch::reconcileCancellation(u64 targetTick, InputActionId actio
     {
         return Core::failure(std::move(targetStatus.error()));
     }
+    if (resetWritten_)
+    {
+        return SimulationLatchAppendResult::CapacityResetInserted;
+    }
 
-    const bool removedPendingSource = removePendingTransitions(action, source);
-    if (!forceStateReconciliation && !removedPendingSource)
+    const bool affectedPendingSource = [&] {
+        for (usize pendingIndex = 0; pendingIndex < transitions_.size(); ++pendingIndex)
+        {
+            const auto* pending = std::get_if<InputActionTransition>(&transitions_[pendingIndex]);
+            if (pending != nullptr && pending->action == action &&
+                std::ranges::find(sources, transitionSources_[pendingIndex]) != sources.end())
+            {
+                return true;
+            }
+        }
+        return false;
+    }();
+    if (!forceStateReconciliation && !affectedPendingSource)
     {
         return SimulationLatchAppendResult::NoTransitionNeeded;
     }
-    const bool delivered = deliveredHeld_[index];
-    const bool current = states_[index].held;
-    bool pendingResult = delivered;
-    for (const SimulationActionTransition& pending : transitions_)
-    {
-        const auto* digital = std::get_if<DigitalActionTransition>(&pending);
-        if (digital == nullptr || digital->action != action)
-        {
-            continue;
-        }
-        pendingResult = digital->kind == DigitalActionTransitionKind::Pressed;
-    }
-    if (pendingResult == current)
+
+    removePendingTransitions(action);
+    const float delivered = deliveredValues_[index];
+    const float current = states_[index].value;
+    if (sameValue(delivered, current))
     {
         return SimulationLatchAppendResult::NoTransitionNeeded;
     }
 
     return append(targetTick,
-                  DigitalActionTransition{
+                  InputActionTransition{
                       .action = action,
-                      .kind = current ? DigitalActionTransitionKind::Pressed : DigitalActionTransitionKind::Cancelled,
+                      .kind = cancellationKind(delivered, current),
+                      .value = current,
                       .sourceSequence = sourceSequence,
                   },
-                  source);
+                  InvalidActionSourceToken);
 }
 
 Core::Status SimulationActionLatch::resetStream(u64 targetTick, SimulationInputStreamReset reset)
@@ -195,6 +236,7 @@ Core::Status SimulationActionLatch::resetStream(u64 targetTick, SimulationInputS
     transitions_.clear();
     transitionSources_.clear();
     normalTransitionCount_ = 0;
+    resetWritten_ = true;
     targetTick_ = targetTick;
     transitions_.emplace_back(reset);
     transitionSources_.push_back(InvalidActionSourceToken);
@@ -242,7 +284,7 @@ Core::Status SimulationActionLatch::completeTick(u64 tick)
 
     for (usize index = 0; index < states_.size(); ++index)
     {
-        deliveredHeld_[index] = states_[index].held;
+        deliveredValues_[index] = states_[index].value;
     }
     clearPending();
     lastCompletedTick_ = tick;
@@ -270,17 +312,14 @@ Core::Status SimulationActionLatch::ensureTarget(u64 targetTick)
     return Core::success();
 }
 
-bool SimulationActionLatch::removePendingTransitions(InputActionId action, ActionSourceToken source) noexcept
+void SimulationActionLatch::removePendingTransitions(InputActionId action) noexcept
 {
     usize destination = 0;
-    bool removed = false;
     for (usize index = 0; index < transitions_.size(); ++index)
     {
-        const auto* digital = std::get_if<DigitalActionTransition>(&transitions_[index]);
-        const bool remove = digital != nullptr && digital->action == action && transitionSources_[index] == source;
-        if (remove)
+        const auto* actionTransition = std::get_if<InputActionTransition>(&transitions_[index]);
+        if (actionTransition != nullptr && actionTransition->action == action)
         {
-            removed = true;
             continue;
         }
         if (destination != index)
@@ -294,13 +333,12 @@ bool SimulationActionLatch::removePendingTransitions(InputActionId action, Actio
     transitionSources_.resize(destination);
     normalTransitionCount_ =
         static_cast<usize>(std::ranges::count_if(transitions_, [](const SimulationActionTransition& transition) {
-            return std::holds_alternative<DigitalActionTransition>(transition);
+            return std::holds_alternative<InputActionTransition>(transition);
         }));
     if (transitions_.empty())
     {
         targetTick_.reset();
     }
-    return removed;
 }
 
 void SimulationActionLatch::clearPending() noexcept
@@ -308,6 +346,7 @@ void SimulationActionLatch::clearPending() noexcept
     transitions_.clear();
     transitionSources_.clear();
     normalTransitionCount_ = 0;
+    resetWritten_ = false;
     targetTick_.reset();
 }
 

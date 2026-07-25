@@ -31,7 +31,10 @@ class IGridCollisionProvider {
 // Non-owning adapter over TileMapInstance.
 class TileMapGridCollision final : public IGridCollisionProvider {
   public:
-    explicit TileMapGridCollision(const TileMapInstance& map) noexcept : m_map(&map) {}
+    TileMapGridCollision(const TileMapInstance& map, AssetFormat::TileMapLayerId layerId) noexcept
+        : m_map(&map), m_layerId(layerId)
+    {
+    }
 
     [[nodiscard]] Core::u32 widthCells() const noexcept override
     {
@@ -51,6 +54,7 @@ class TileMapGridCollision final : public IGridCollisionProvider {
 
   private:
     const TileMapInstance* m_map = nullptr;
+    AssetFormat::TileMapLayerId m_layerId = 0;
 };
 
 } // namespace Tina::Asset

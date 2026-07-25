@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <new>
+#include <utility>
 
 namespace Tina::Asset {
 namespace {
@@ -17,17 +18,31 @@ namespace {
 
 } // namespace
 
-Core::Result<Core::u32> extractVisibleTileChunks(const TileMapInstance& map, const TileChunkCameraQuery& camera,
-                                                 std::pmr::vector<TileChunkView>& out)
+Core::Result<Core::u32> extractVisibleTileChunks(const TileMapInstance& map, AssetFormat::TileMapLayerId layerId,
+                                                 const TileChunkCameraQuery& camera, std::pmr::vector<TileChunkView>& out)
 {
     if (!map)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tile map instance is empty");
     }
-    if (!(camera.halfWidth > 0.0f) || !(camera.halfHeight > 0.0f) || camera.halfWidth != camera.halfWidth ||
-        camera.halfHeight != camera.halfHeight || camera.centerX != camera.centerX || camera.centerY != camera.centerY)
+    auto layer = map.layer(layerId);
+    if (!layer)
+    {
+        return Core::failure(std::move(layer.error()));
+    }
+    if (layer->kind != AssetFormat::TileMapLayerKind::Tile)
+    {
+        return Core::failure(AssetErrorCode::TileMapLayerTypeMismatch, "visible chunk extraction requires tile layer");
+    }
+    if (!(camera.halfWidth > 0.0f) || !(camera.halfHeight > 0.0f) || !std::isfinite(camera.halfWidth) ||
+        !std::isfinite(camera.halfHeight) || !std::isfinite(camera.centerX) || !std::isfinite(camera.centerY))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "camera query invalid");
+    }
+    if (!layer->visible)
+    {
+        out.clear();
+        return Core::u32{0};
     }
 
     out.clear();
@@ -68,7 +83,12 @@ Core::Result<Core::u32> extractVisibleTileChunks(const TileMapInstance& map, con
                 {
                     for (Core::u32 x = 0; x < width; ++x)
                     {
-                        if (map.tileIdAt(originX + x, originY + y) != 0)
+                        auto tileId = map.tileIdAt(layerId, originX + x, originY + y);
+                        if (!tileId)
+                        {
+                            return Core::failure(std::move(tileId.error()));
+                        }
+                        if (*tileId != AssetFormat::TileMapWire::EmptyTileId)
                         {
                             ++nonEmpty;
                         }
@@ -79,9 +99,15 @@ Core::Result<Core::u32> extractVisibleTileChunks(const TileMapInstance& map, con
                     continue;
                 }
 
+                auto revision = map.chunkRevision(layerId, cx, cy);
+                if (!revision)
+                {
+                    return Core::failure(std::move(revision.error()));
+                }
                 out.push_back(TileChunkView{
+                    .layerId = layerId,
                     .coord = TileMapChunkCoord{.chunkX = cx, .chunkY = cy},
-                    .revision = map.chunkRevision(cx, cy),
+                    .revision = *revision,
                     .originCellX = originX,
                     .originCellY = originY,
                     .widthCells = width,
@@ -104,12 +130,21 @@ Core::Result<Core::u32> extractVisibleTileChunks(const TileMapInstance& map, con
     return static_cast<Core::u32>(out.size());
 }
 
-Core::Result<Core::u32> collectChunkNonEmptyCells(const TileMapInstance& map, TileMapChunkCoord coord,
-                                                  std::pmr::vector<TileChunkCell>& out)
+Core::Result<Core::u32> collectChunkNonEmptyCells(const TileMapInstance& map, AssetFormat::TileMapLayerId layerId,
+                                                  TileMapChunkCoord coord, std::pmr::vector<TileChunkCell>& out)
 {
     if (!map)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tile map instance is empty");
+    }
+    auto layer = map.layer(layerId);
+    if (!layer)
+    {
+        return Core::failure(std::move(layer.error()));
+    }
+    if (layer->kind != AssetFormat::TileMapLayerKind::Tile)
+    {
+        return Core::failure(AssetErrorCode::TileMapLayerTypeMismatch, "chunk cell collection requires tile layer");
     }
     if (coord.chunkX >= map.chunkCountX() || coord.chunkY >= map.chunkCountY())
     {
@@ -131,12 +166,16 @@ Core::Result<Core::u32> collectChunkNonEmptyCells(const TileMapInstance& map, Ti
             {
                 const Core::u32 cellX = originX + x;
                 const Core::u32 cellY = originY + y;
-                auto info = map.tileInfoAt(cellX, cellY);
-                if (!info || info->empty)
+                auto info = map.tileInfoAt(layerId, cellX, cellY);
+                if (!info)
+                {
+                    return Core::failure(std::move(info.error()));
+                }
+                if (!*info || (*info)->empty)
                 {
                     continue;
                 }
-                out.push_back(TileChunkCell{.cellX = cellX, .cellY = cellY, .info = *info});
+                out.push_back(TileChunkCell{.cellX = cellX, .cellY = cellY, .info = **info});
             }
         }
     } catch (const std::bad_alloc&)

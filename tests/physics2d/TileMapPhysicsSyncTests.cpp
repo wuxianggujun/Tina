@@ -15,6 +15,8 @@
 namespace Tina {
 namespace {
 
+inline constexpr AssetFormat::TileMapLayerId CollisionLayerId = 20;
+
 [[nodiscard]] Core::AssetId::Bytes idBytes(Core::u8 seed)
 {
     Core::AssetId::Bytes bytes{};
@@ -56,11 +58,20 @@ TEST(TileMapPhysicsSyncTest, SyncsSolidFloorToStaticBodiesAndContactsDynamic)
 
     // 4x2: solid floor on y=0, non-solid/empty above
     const std::array<Core::u16, 8> cells{1, 1, 1, 1, 0, 2, 0, 0};
+    const std::array layers{
+        AssetFormat::TileMapLayerDesc{
+            .stableLayerId = CollisionLayerId,
+            .kind = AssetFormat::TileMapLayerKind::Tile,
+            .visible = false,
+            .name = "collision",
+            .tiles = cells,
+        },
+    };
     auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
         .widthCells = 4,
         .heightCells = 2,
         .cellSizeMeters = 1.0f,
-        .tiles = cells,
+        .layers = layers,
         .tilesetId = tilesetId,
     });
     ASSERT_TRUE(mapBytes.has_value());
@@ -75,7 +86,7 @@ TEST(TileMapPhysicsSyncTest, SyncsSolidFloorToStaticBodiesAndContactsDynamic)
         Asset::TileMapInstanceConfig{.chunkSizeCells = 2, .memoryResource = &memory});
     ASSERT_TRUE(instance.has_value()) << instance.error().message;
 
-    Asset::TileMapGridCollision grid{*instance};
+    Asset::TileMapGridCollision grid{*instance, CollisionLayerId};
     Physics2D::PhysicsGridSolidCell2D solidScratch[16]{};
     auto collected = Asset::collectAllSolidCellsForPhysics(grid, solidScratch);
     ASSERT_TRUE(collected) << collected.error().message;
@@ -119,12 +130,15 @@ TEST(TileMapPhysicsSyncTest, SyncsSolidFloorToStaticBodiesAndContactsDynamic)
     dynamicBody.type = Physics2D::PhysicsBodyType2D::Dynamic;
     dynamicBody.positionMeters = {1.5F, 4.0F};
     dynamicBody.linearVelocityMetersPerSecond = {0.0F, -15.0F};
-    Physics2D::PhysicsBoxShape2DDesc box;
+    Physics2D::PhysicsShape2DDesc box;
+    box.kind = Physics2D::PhysicsShapeKind2D::Box;
     box.halfExtentsMeters = {0.4F, 0.4F};
     box.density = 1.0F;
     box.enableContactEvents = true;
-    auto dynamic = world.createBoxBody(dynamicBody, box);
+    auto dynamic = world.createBody(dynamicBody);
     ASSERT_TRUE(dynamic) << dynamic.error().message;
+    auto dynamicShape = world.createShape(*dynamic, box);
+    ASSERT_TRUE(dynamicShape) << dynamicShape.error().message;
 
     bool sawBegin = false;
     for (int step = 0; step < 180; ++step) {
@@ -138,7 +152,7 @@ TEST(TileMapPhysicsSyncTest, SyncsSolidFloorToStaticBodiesAndContactsDynamic)
     }
     EXPECT_TRUE(sawBegin);
 
-    auto after = world.bodyState(dynamic->body);
+    auto after = world.bodyState(*dynamic);
     ASSERT_TRUE(after) << after.error().message;
     EXPECT_LT(after->positionMeters.y, 4.0F);
     EXPECT_GT(after->positionMeters.y, 0.5F);
@@ -160,11 +174,20 @@ TEST(TileMapPhysicsSyncTest, ScratchOverflowIsReportedAndSyncFails)
     ASSERT_TRUE(tileset.has_value());
 
     const std::array<Core::u16, 4> cells{1, 1, 1, 1};
+    const std::array layers{
+        AssetFormat::TileMapLayerDesc{
+            .stableLayerId = CollisionLayerId,
+            .kind = AssetFormat::TileMapLayerKind::Tile,
+            .visible = false,
+            .name = "collision",
+            .tiles = cells,
+        },
+    };
     auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
         .widthCells = 2,
         .heightCells = 2,
         .cellSizeMeters = 1.0f,
-        .tiles = cells});
+        .layers = layers});
     auto map = AssetFormat::parseTileMapPayload(*mapBytes);
     ASSERT_TRUE(map.has_value());
 
@@ -176,7 +199,7 @@ TEST(TileMapPhysicsSyncTest, ScratchOverflowIsReportedAndSyncFails)
         Asset::TileMapInstanceConfig{.chunkSizeCells = 2, .memoryResource = &memory});
     ASSERT_TRUE(instance.has_value());
 
-    Asset::TileMapGridCollision grid{*instance};
+    Asset::TileMapGridCollision grid{*instance, CollisionLayerId};
     Physics2D::PhysicsGridSolidCell2D tiny[1]{};
     auto collected = Asset::collectAllSolidCellsForPhysics(grid, tiny);
     ASSERT_TRUE(collected);

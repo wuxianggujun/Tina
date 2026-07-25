@@ -3,6 +3,7 @@
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UITheme.hpp>
 
 #include "../../src/runtime/ui/PrimaryWindowUICapabilityState.hpp"
 
@@ -297,7 +298,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ButtonPaintFacadeRoundTripsAndExpiresWithP
     const PrimaryWindowUITreeUpdater& treeView = *tree;
     auto initialPaint = treeView.buttonPaint(*button);
     ASSERT_TRUE(initialPaint.has_value()) << initialPaint.error().message;
-    EXPECT_EQ(*initialPaint, UI::UIButtonPaint{});
+    EXPECT_EQ(*initialPaint, UI::makeButtonChrome(context->productTheme()).states);
 
     ASSERT_TRUE(tree->setButtonPaint(*button, ButtonPaint).has_value());
     auto configuredPaint = treeView.buttonPaint(*button);
@@ -354,7 +355,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ButtonPaintWrongKindFailureIsStickyAndPrev
     ASSERT_TRUE(directUpdater.has_value()) << directUpdater.error().message;
     auto unmodifiedPaint = directUpdater->buttonPaint(*button);
     ASSERT_TRUE(unmodifiedPaint.has_value()) << unmodifiedPaint.error().message;
-    EXPECT_EQ(*unmodifiedPaint, UI::UIButtonPaint{});
+    EXPECT_EQ(*unmodifiedPaint, UI::makeButtonChrome(context->productTheme()).states);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, ButtonActionFacadeSetsReplacesClearsAndQueriesInitialPressedState)

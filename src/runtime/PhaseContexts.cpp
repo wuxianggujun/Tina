@@ -1,8 +1,53 @@
 #include <tina/runtime/PhaseContexts.hpp>
 
+#include "input/ActionMapper.hpp"
 #include "ui/PrimaryWindowUICapabilityState.hpp"
 
+#include <utility>
+
 namespace Tina {
+
+Core::Result<RebindTransaction>
+InputActionRebinding::begin(InputBindingId binding,
+                            std::optional<Platform::GamepadId> capturedGamepad)
+{
+    if (mapper_ == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::InvalidRebindTransaction,
+                             "Input Action rebinding is unavailable in this Runtime phase");
+    }
+    return mapper_->beginRebind(binding, capturedGamepad);
+}
+
+Core::Result<RebindCommitResult>
+InputActionRebinding::commit(RebindTransaction transaction, ActionBindingPattern replacement,
+                             RebindConflictPolicy conflictPolicy)
+{
+    if (mapper_ == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::InvalidRebindTransaction,
+                             "Input Action rebinding is unavailable in this Runtime phase");
+    }
+    return mapper_->commitRebind(transaction, std::move(replacement), conflictPolicy);
+}
+
+Core::Status InputActionRebinding::cancel(RebindTransaction transaction) noexcept
+{
+    return mapper_ == nullptr
+               ? Core::failure(RuntimeErrorCode::InvalidRebindTransaction,
+                               "Input Action rebinding is unavailable in this Runtime phase")
+               : mapper_->cancelRebind(transaction);
+}
+
+RebindStateView InputActionRebinding::state() const noexcept
+{
+    return mapper_ == nullptr ? RebindStateView{} : mapper_->rebindState();
+}
+
+std::span<const InputActionBinding> InputActionRebinding::bindings() const noexcept
+{
+    return mapper_ == nullptr ? std::span<const InputActionBinding>{} : mapper_->bindings();
+}
 
 GameStartupContext::GameStartupContext(const EngineConfig& config, PlatformEventDispatcher& platformEvents) noexcept
     : m_config(&config), m_platformEventSubscriptions(platformEvents)
@@ -80,12 +125,15 @@ Audio::AudioEngine* FixedUpdateContext::audioEngine() const noexcept
 
 FrameUpdateContext::FrameUpdateContext(const FrameTiming& frameTiming, const FrameActionSnapshot& frameActions,
                                        bool& exitRequested, GameStatePendingCommands* pendingCommands,
-                                       Audio::AudioEngine* audioEngine) noexcept
+                                       Audio::AudioEngine* audioEngine,
+                                       Runtime::Input::ActionMapper* actionMapper) noexcept
     : m_frameTiming(&frameTiming),
       m_frameActions(&frameActions),
       m_exitRequested(&exitRequested),
       m_pendingCommands(pendingCommands),
-      m_audioEngine(audioEngine)
+      m_audioEngine(audioEngine),
+      m_inputActionRebinding(actionMapper),
+      m_rebindingAvailable(actionMapper != nullptr)
 {
 }
 
@@ -102,6 +150,11 @@ const FrameTiming& FrameUpdateContext::frameTiming() const noexcept
 Audio::AudioEngine* FrameUpdateContext::audioEngine() const noexcept
 {
     return m_audioEngine;
+}
+
+InputActionRebinding* FrameUpdateContext::inputActionRebinding() noexcept
+{
+    return m_rebindingAvailable ? &m_inputActionRebinding : nullptr;
 }
 
 void FrameUpdateContext::requestExitAfterFrame() noexcept

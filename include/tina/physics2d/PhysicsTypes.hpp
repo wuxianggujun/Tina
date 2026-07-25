@@ -33,12 +33,14 @@ struct PhysicsCollisionFilter2D final {
 struct PhysicsWorld2DConfig final {
     static constexpr Core::usize DefaultBodyCapacity = 1024;
     static constexpr Core::usize DefaultShapeCapacity = 2048;
+    static constexpr Core::usize DefaultJointCapacity = 256;
     static constexpr Core::usize DefaultContactBeginCapacity = 256;
     static constexpr Core::usize DefaultContactEndCapacity = 256;
     static constexpr Core::usize DefaultContactHitCapacity = 64;
     static constexpr Core::usize DefaultCommandCapacity = 256;
     static constexpr Core::usize MaxBodyCapacity = 1'048'576;
     static constexpr Core::usize MaxShapeCapacity = 2'097'152;
+    static constexpr Core::usize MaxJointCapacity = 1'048'576;
     static constexpr Core::usize MaxContactEventCapacity = 1'048'576;
     static constexpr Core::usize MaxCommandCapacity = 1'048'576;
     static constexpr Core::u32 DefaultSolverSubStepCount = 4;
@@ -46,6 +48,7 @@ struct PhysicsWorld2DConfig final {
 
     Core::usize bodyCapacity = DefaultBodyCapacity;
     Core::usize shapeCapacity = DefaultShapeCapacity;
+    Core::usize jointCapacity = DefaultJointCapacity;
     Core::usize contactBeginCapacity = DefaultContactBeginCapacity;
     Core::usize contactEndCapacity = DefaultContactEndCapacity;
     Core::usize contactHitCapacity = DefaultContactHitCapacity;
@@ -71,23 +74,64 @@ struct PhysicsBody2DDesc final {
     bool enabled = true;
 };
 
-struct PhysicsBoxShape2DDesc final {
+enum class PhysicsShapeKind2D : Core::u8 {
+    Box,
+    Circle,
+    Capsule,
+};
+
+struct PhysicsShape2DDesc final {
+    PhysicsShapeKind2D kind = PhysicsShapeKind2D::Box;
+    // Box: positive halfExtentsMeters, localCenterMeters, localAngleRadians.
+    // Circle: positive radiusMeters, localCenterMeters.
+    // Capsule: positive radiusMeters, distinct localPointA/BMeters.
     PhysicsVec2 halfExtentsMeters{0.5F, 0.5F};
-    PhysicsVec2 centerMeters{};
-    float angleRadians = 0.0F;
+    float radiusMeters = 0.5F;
+    PhysicsVec2 localCenterMeters{};
+    float localAngleRadians = 0.0F;
+    PhysicsVec2 localPointAMeters{-0.5F, 0.0F};
+    PhysicsVec2 localPointBMeters{0.5F, 0.0F};
     float density = 1.0F;
     float friction = 0.6F;
     float restitution = 0.0F;
+    bool isSensor = false;
+    bool enableSensorEvents = false;
     bool enableContactEvents = true;
     bool enableHitEvents = false;
     PhysicsCollisionFilter2D filter{};
 };
 
-struct PhysicsBodyShape2D final {
+struct PhysicsShapeState2D final {
     PhysicsBodyId body{};
-    PhysicsShapeId shape{};
+    PhysicsShapeKind2D kind = PhysicsShapeKind2D::Box;
+    bool isSensor = false;
+    PhysicsCollisionFilter2D filter{};
+};
 
-    friend constexpr bool operator==(const PhysicsBodyShape2D&, const PhysicsBodyShape2D&) noexcept = default;
+enum class PhysicsJointKind2D : Core::u8 {
+    Distance,
+};
+
+struct PhysicsJoint2DDesc final {
+    PhysicsJointKind2D kind = PhysicsJointKind2D::Distance;
+    PhysicsBodyId bodyA{};
+    PhysicsBodyId bodyB{};
+    PhysicsVec2 localAnchorAMeters{};
+    PhysicsVec2 localAnchorBMeters{};
+    float lengthMeters = 1.0F;
+    bool enableSpring = false;
+    float hertz = 0.0F;
+    float dampingRatio = 0.0F;
+    bool collideConnected = false;
+};
+
+struct PhysicsJointState2D final {
+    PhysicsJointKind2D kind = PhysicsJointKind2D::Distance;
+    PhysicsBodyId bodyA{};
+    PhysicsBodyId bodyB{};
+    float lengthMeters = 0.0F;
+    bool springEnabled = false;
+    bool collideConnected = false;
 };
 
 struct PhysicsBodyState2D final {
@@ -107,6 +151,8 @@ struct PhysicsContactBeginEvent2D final {
     PhysicsBodyId bodyB{};
     PhysicsShapeId shapeA{};
     PhysicsShapeId shapeB{};
+    // true means an explicit sensor enter. shapeA/bodyA identify the sensor.
+    bool isSensor = false;
 };
 
 struct PhysicsContactEndEvent2D final {
@@ -116,6 +162,8 @@ struct PhysicsContactEndEvent2D final {
     PhysicsShapeId shapeB{};
     bool shapeADestroyed = false;
     bool shapeBDestroyed = false;
+    // true means an explicit sensor exit. shapeA/bodyA identify the sensor.
+    bool isSensor = false;
 };
 
 struct PhysicsContactHitEvent2D final {
@@ -189,7 +237,7 @@ struct PhysicsQueryWriteResult2D final {
 
 // Deferred gameplay mutations. Enqueue on the owner thread before step(); the
 // world applies them in FIFO order immediately before the fixed Box2D step.
-// CreateBody is not deferred (atomic createBoxBody remains immediate).
+// Body, shape, and joint creation are immediate. Commands never create handles.
 enum class PhysicsCommandKind2D : Core::u8 {
     DestroyBody,
     SetTransform,
@@ -212,8 +260,10 @@ struct PhysicsCommand2D final {
 struct PhysicsWorld2DStats final {
     Core::usize bodyCount = 0;
     Core::usize shapeCount = 0;
+    Core::usize jointCount = 0;
     Core::usize bodyCapacity = 0;
     Core::usize shapeCapacity = 0;
+    Core::usize jointCapacity = 0;
     Core::usize contactBeginCapacity = 0;
     Core::usize contactEndCapacity = 0;
     Core::usize contactHitCapacity = 0;

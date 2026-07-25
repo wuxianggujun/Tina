@@ -4,7 +4,6 @@
 #include <tina/render/RenderDevice.hpp>
 
 #include <memory>
-#include <optional>
 #include <utility>
 
 namespace Tina::Sample3D {
@@ -44,10 +43,6 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     [[nodiscard]] Render::RenderStatistics statistics() const noexcept override
     {
         return inner_->statistics();
-    }
-    [[nodiscard]] std::optional<Core::u64> lastPresentFrameToken() const noexcept override
-    {
-        return inner_->lastPresentFrameToken();
     }
     void shutdown() noexcept override { inner_->shutdown(); }
     [[nodiscard]] Core::Result<Render::GpuTextureId>
@@ -101,16 +96,9 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     {
         return inner_->setMesh3DMaterialNormalTextureBinding(materialKey, texture);
     }
-    [[nodiscard]] Core::Status setMesh3DDirectionalLight(float dirX, float dirY, float dirZ, float colorR,
-                                                         float colorG, float colorB,
-                                                         float ambientScale = 0.18F) noexcept override
+    [[nodiscard]] Core::Status setMesh3DLighting(const Render::Mesh3DLightingDesc& lighting) noexcept override
     {
-        return inner_->setMesh3DDirectionalLight(dirX, dirY, dirZ, colorR, colorG, colorB, ambientScale);
-    }
-    [[nodiscard]] Core::Status setMesh3DFillDirectionalLight(float dirX, float dirY, float dirZ, float colorR,
-                                                             float colorG, float colorB) noexcept override
-    {
-        return inner_->setMesh3DFillDirectionalLight(dirX, dirY, dirZ, colorR, colorG, colorB);
+        return inner_->setMesh3DLighting(lighting);
     }
 
   private:

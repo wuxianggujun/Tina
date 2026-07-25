@@ -37,7 +37,8 @@ emitTileChunkSprites(const TileMapInstance& map, const TileChunkView& chunk, con
 // Convenience: extract visible chunks then emit sprites for each (order: chunk row-major, then cells).
 // Clears `out` first. Returns total sprites written.
 [[nodiscard]] Core::Result<Core::u32>
-emitVisibleTileMapSprites(const TileMapInstance& map, const TileChunkCameraQuery& camera,
+emitVisibleTileMapSprites(const TileMapInstance& map, AssetFormat::TileMapLayerId layerId,
+                          const TileChunkCameraQuery& camera,
                           const TileChunkSpriteEmitParams& params, std::pmr::vector<Render::RenderSprite2DInput>& out);
 
 } // namespace Tina::Asset

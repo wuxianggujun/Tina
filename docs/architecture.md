@@ -137,8 +137,8 @@ Platform::pollFrame
   -> updateUI through phase-scoped facade (stack top-down)
   -> commit UI structure/layout/hit/paint/semantics
   -> build UI DisplayList + expose Glyph atlas page
-  -> RenderDevice::submitFrame (+ FramePin / completion ledger)
-  -> present when surface is active
+  -> RenderDevice::submitFrame (+ FramePin / CPU submission ledger)
+  -> present when surface is active, then close CPU submission ownership
   -> latch presented Camera2D for next-frame world picking
 ```
 
@@ -165,17 +165,18 @@ source asset
   -> typed payload parse
   -> GPU upload and backend-neutral binding key
   -> Scene extraction
-  -> RenderFrame submit
-  -> completion / retirement ledger
+  -> RenderFrame submit + present-return CPU frame completion
+  -> backend-specific GPU resource retirement
 ```
 
 multi-mesh / multi-primitive glTF cooking 为每个 TRIANGLES prim 生成独立 StaticMesh/Material，并由
 Prefab 依赖 AssetId（多 prim 展开父+子节点）。`tina_sample_3d` 已按每个 product mesh/material 映射
 backend key，覆盖 multi-mesh cook -> upload/bind -> Prefab resolve -> extract/draw 的产品 E2E。相对文件或
 bufferView 的 baseColor/MR/normal 贴图可 cook 为 RGBA8 Texture2D 并成为 Material dependency；产品路径
-完成外部 URI/size policy、GPU binding 与 experimental metallic-roughness 采样（material factors、key/fill
-directional light）。完整 PBR、IBL/shadow、通用 light/pass system，以及 Handle/Lease 到真 GPU fence 的
-pinning 仍未完成。
+完成外部 URI/size policy、GPU binding 与 experimental metallic-roughness 采样（material factors、
+`Mesh3DLightingDesc` 单次提交0..4 directional lights）。完整 PBR、IBL/shadow、light component/culling、
+通用 pass system，以及 Asset Handle/Lease 到真 GPU fence retirement 的合并仍未完成。FramePin 当前只覆盖
+同步 submit/present 的 CPU 借用期，不能作为 GPU 退役证据。
 
 ## 当前 UI 边界
 

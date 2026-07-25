@@ -195,9 +195,9 @@ class PlatformSampleState final : public Tina::IGameState {
         ++counters_.frameUpdates;
         for (const Tina::FrameActionTransition& transition : context.frameActions().transitions)
         {
-            const auto* digital = std::get_if<Tina::DigitalActionTransition>(&transition);
-            if (digital != nullptr && digital->action == ExitAction &&
-                digital->kind == Tina::DigitalActionTransitionKind::Pressed)
+            const auto* actionTransition = std::get_if<Tina::InputActionTransition>(&transition);
+            if (actionTransition != nullptr && actionTransition->action == ExitAction &&
+                actionTransition->kind == Tina::InputActionTransitionKind::Started)
             {
                 counters_.escapeRequested = true;
                 context.requestExitAfterFrame();
@@ -329,7 +329,7 @@ createSurfacePinnedNullRenderDevice(const Tina::Render::RenderDeviceCreateParams
     config.primaryWindow.title = "Tina C++23 平台样例";
     config.primaryWindow.initialLogicalExtent = {960, 540};
     config.primaryWindow.initiallyVisible = true;
-    config.inputActions.digitalBindings.push_back(Tina::DigitalActionBinding{
+    config.inputActions.bindings.push_back(Tina::InputActionBinding{
         .input = Tina::PrimaryWindowKeyBinding{.key = Tina::Platform::Key::Escape},
         .action = ExitAction,
         .domain = Tina::InputActionDomain::Frame,

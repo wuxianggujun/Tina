@@ -16,6 +16,8 @@
 namespace Tina {
 namespace {
 
+inline constexpr AssetFormat::TileMapLayerId CollisionLayerId = 20;
+
 [[nodiscard]] Core::AssetId::Bytes idBytes(Core::u8 seed)
 {
     Core::AssetId::Bytes bytes{};
@@ -52,11 +54,21 @@ namespace {
         cells[y * 8 + 6] = 1;
     }
 
+    const std::array layers{
+        AssetFormat::TileMapLayerDesc{
+            .stableLayerId = CollisionLayerId,
+            .kind = AssetFormat::TileMapLayerKind::Tile,
+            .visible = false,
+            .name = "collision",
+            .tiles = cells,
+        },
+    };
+
     auto mapBytes = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
         .widthCells = 8,
         .heightCells = 4,
         .cellSizeMeters = 1.0f,
-        .tiles = cells,
+        .layers = layers,
         .tilesetId = tilesetId,
     });
     auto map = AssetFormat::parseTileMapPayload(*mapBytes);
@@ -72,7 +84,7 @@ TEST(CharacterControllerPhysicsCoexistenceTest, GridControllerAndDynamicBodyShar
 {
     std::pmr::unsynchronized_pool_resource memory;
     auto map = makePlatformMap(memory);
-    Asset::TileMapGridCollision grid{map};
+    Asset::TileMapGridCollision grid{map, CollisionLayerId};
 
     Physics2D::PhysicsWorld2DConfig worldConfig;
     worldConfig.bodyCapacity = 64;
@@ -112,12 +124,15 @@ TEST(CharacterControllerPhysicsCoexistenceTest, GridControllerAndDynamicBodyShar
     dynamicDesc.type = Physics2D::PhysicsBodyType2D::Dynamic;
     dynamicDesc.positionMeters = {3.0F, 3.5F};
     dynamicDesc.linearVelocityMetersPerSecond = {0.0F, 0.0F};
-    Physics2D::PhysicsBoxShape2DDesc box;
+    Physics2D::PhysicsShape2DDesc box;
+    box.kind = Physics2D::PhysicsShapeKind2D::Box;
     box.halfExtentsMeters = {0.25F, 0.25F};
     box.density = 1.0F;
     box.enableContactEvents = true;
-    auto dynamic = world.createBoxBody(dynamicDesc, box);
+    auto dynamic = world.createBody(dynamicDesc);
     ASSERT_TRUE(dynamic) << dynamic.error().message;
+    auto dynamicShape = world.createShape(*dynamic, box);
+    ASSERT_TRUE(dynamicShape) << dynamicShape.error().message;
 
     std::pmr::vector<Asset::TileMapSolidHit> controllerScratch{&memory};
     bool controllerGrounded = false;
@@ -138,7 +153,7 @@ TEST(CharacterControllerPhysicsCoexistenceTest, GridControllerAndDynamicBodyShar
         ASSERT_TRUE(contacts);
         for (const auto& begin : contacts->beginEvents)
         {
-            if (begin.bodyA == dynamic->body || begin.bodyB == dynamic->body)
+            if (begin.bodyA == *dynamic || begin.bodyB == *dynamic)
             {
                 dynamicContacted = true;
             }
@@ -155,7 +170,7 @@ TEST(CharacterControllerPhysicsCoexistenceTest, GridControllerAndDynamicBodyShar
     EXPECT_FLOAT_EQ(controller.state().velocityY, 0.0f);
 
     EXPECT_TRUE(dynamicContacted);
-    auto after = world.bodyState(dynamic->body);
+    auto after = world.bodyState(*dynamic);
     ASSERT_TRUE(after) << after.error().message;
     EXPECT_LT(after->positionMeters.y, 3.5F);
     EXPECT_GT(after->positionMeters.y, 0.5F);

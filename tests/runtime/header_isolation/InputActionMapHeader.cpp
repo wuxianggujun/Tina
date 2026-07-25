@@ -2,6 +2,6 @@
 
 #include <type_traits>
 
-static_assert(std::is_copy_constructible_v<Tina::DigitalActionBinding>);
-static_assert(Tina::InputActionMapCapacityConfig::DefaultDigitalActionBindingCapacity == 64);
+static_assert(std::is_copy_constructible_v<Tina::InputActionBinding>);
+static_assert(Tina::InputActionMapCapacityConfig::DefaultActionBindingCapacity == 64);
 static_assert(Tina::InputActionMapCapacityConfig::DefaultSimulationActionTransitionCapacity == 128);

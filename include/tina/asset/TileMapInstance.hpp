@@ -14,8 +14,8 @@
 namespace Tina::Asset {
 
 // Runtime mutable TileMap instance (gameplay feature; not Scene).
-// First slice: single layer, fixed grid, power-of-two chunk size, solid AABB query.
-// Built by copying tile ids from a parsed TileMap payload and material/UV tables from Tileset.
+// Tile data is owned per explicit TileMapLayerId. Object layers and metadata are
+// retained in the instance-owned validated payload and exposed through layer().
 
 struct TileMapInstanceConfig final {
     // Chunk size in cells along each axis. Must be power-of-two in [1, 64]. Default 16.
@@ -32,6 +32,7 @@ struct TileMapSolidQuery final {
 };
 
 struct TileMapSolidHit final {
+    AssetFormat::TileMapLayerId layerId = 0;
     Core::u32 cellX = 0;
     Core::u32 cellY = 0;
     Core::u16 localTileId = 0;
@@ -65,8 +66,8 @@ class TileMapInstance final {
     TileMapInstance(TileMapInstance&&) noexcept = default;
     TileMapInstance& operator=(TileMapInstance&&) noexcept = default;
 
-    // Copies cells from tileMap and material/UV table from tileset (by localId index).
-    // tileset.localId values should be dense or sparse-safe via max localId table.
+    // Copies tile cells, metadata, and object layers from tileMap. Tile values
+    // are validated against the tileset's local-id table before the instance is published.
     [[nodiscard]] static Core::Result<TileMapInstance>
     Create(const AssetFormat::TileMapPayloadView& tileMap, const AssetFormat::TilesetPayloadView& tileset,
            Core::AssetId tileMapAssetId, Core::AssetId tilesetAssetId, TileMapInstanceConfig config = {});
@@ -109,19 +110,30 @@ class TileMapInstance final {
         return m_tilesetAssetId;
     }
 
-    [[nodiscard]] Core::u16 tileIdAt(Core::u32 x, Core::u32 y) const noexcept;
-    [[nodiscard]] std::optional<TileMapTileInfo> tileInfoAt(Core::u32 x, Core::u32 y) const noexcept;
+    // Returns a borrowed layer view. It remains valid until this instance is moved
+    // or destroyed. Tile bytes stay synchronized with setTile(), while names,
+    // properties, ordering, visibility, and object data remain immutable.
+    [[nodiscard]] Core::Result<AssetFormat::TileMapLayerPayloadView>
+    layer(AssetFormat::TileMapLayerId layerId) const;
 
-    // Sets cell; bumps affected chunk revision. localTileId 0 = empty.
-    // Unknown non-zero local ids fail (must exist in tileset table used at Create).
-    [[nodiscard]] Core::Status setTile(Core::u32 x, Core::u32 y, Core::u16 localTileId) noexcept;
+    [[nodiscard]] Core::Result<Core::u16> tileIdAt(AssetFormat::TileMapLayerId layerId, Core::u32 x,
+                                                   Core::u32 y) const;
+    [[nodiscard]] Core::Result<std::optional<TileMapTileInfo>>
+    tileInfoAt(AssetFormat::TileMapLayerId layerId, Core::u32 x, Core::u32 y) const;
 
-    [[nodiscard]] Core::u32 chunkRevision(Core::u32 chunkX, Core::u32 chunkY) const noexcept;
+    // Sets a cell in the selected tile layer; bumps that layer's affected chunk revision.
+    // localTileId 0 = empty. Unknown non-zero local ids fail.
+    [[nodiscard]] Core::Status setTile(AssetFormat::TileMapLayerId layerId, Core::u32 x, Core::u32 y,
+                                       Core::u16 localTileId);
+
+    [[nodiscard]] Core::Result<Core::u32> chunkRevision(AssetFormat::TileMapLayerId layerId, Core::u32 chunkX,
+                                                         Core::u32 chunkY) const;
     [[nodiscard]] TileMapChunkCoord chunkCoordForCell(Core::u32 x, Core::u32 y) const noexcept;
 
-    // Collects solid (MaterialSolid) cells overlapping the AABB. Clears `out` first.
-    // Capacity limited by out.capacity() growth via PMR vector; returns count written.
-    [[nodiscard]] Core::Result<Core::u32> querySolidAabb(const TileMapSolidQuery& query,
+    // Collects solid (MaterialSolid) cells from the selected tile layer that overlap the AABB.
+    // Clears `out` first; returns count written.
+    [[nodiscard]] Core::Result<Core::u32> querySolidAabb(AssetFormat::TileMapLayerId layerId,
+                                                         const TileMapSolidQuery& query,
                                                          std::pmr::vector<TileMapSolidHit>& out) const;
 
   private:
@@ -134,15 +146,24 @@ class TileMapInstance final {
         bool valid = false;
     };
 
+    struct TileLayerState final {
+        AssetFormat::TileMapLayerId layerId = 0;
+        Core::usize payloadTileByteOffset = 0;
+        std::pmr::vector<Core::u16> cells{};
+        std::pmr::vector<Core::u32> chunkRevisions{};
+    };
+
     TileMapInstance(Core::u32 width, Core::u32 height, float cellSize, Core::u16 chunkSize, Core::u32 chunkCountX,
                     Core::u32 chunkCountY, Core::AssetId tileMapAssetId, Core::AssetId tilesetAssetId,
-                    std::pmr::vector<Core::u16> cells, std::pmr::vector<Core::u32> chunkRevisions,
+                    std::pmr::vector<std::byte> payloadBytes, std::pmr::vector<TileLayerState> tileLayers,
                     std::pmr::vector<TileDef> tileDefs) noexcept;
 
     [[nodiscard]] bool inBounds(Core::u32 x, Core::u32 y) const noexcept;
     [[nodiscard]] Core::u32 cellIndex(Core::u32 x, Core::u32 y) const noexcept;
     [[nodiscard]] Core::u32 chunkIndex(Core::u32 chunkX, Core::u32 chunkY) const noexcept;
-    void bumpChunkForCell(Core::u32 x, Core::u32 y) noexcept;
+    [[nodiscard]] Core::Result<TileLayerState*> tileLayer(AssetFormat::TileMapLayerId layerId);
+    [[nodiscard]] Core::Result<const TileLayerState*> tileLayer(AssetFormat::TileMapLayerId layerId) const;
+    void bumpChunkForCell(TileLayerState& layer, Core::u32 x, Core::u32 y) noexcept;
 
     Core::u32 m_width = 0;
     Core::u32 m_height = 0;
@@ -152,8 +173,8 @@ class TileMapInstance final {
     Core::u32 m_chunkCountY = 0;
     Core::AssetId m_tileMapAssetId{};
     Core::AssetId m_tilesetAssetId{};
-    std::pmr::vector<Core::u16> m_cells{};
-    std::pmr::vector<Core::u32> m_chunkRevisions{};
+    std::pmr::vector<std::byte> m_payloadBytes{};
+    std::pmr::vector<TileLayerState> m_tileLayers{};
     // Indexed by localTileId; entry.valid when present in tileset.
     std::pmr::vector<TileDef> m_tileDefs{};
 };

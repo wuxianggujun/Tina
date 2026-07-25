@@ -96,6 +96,33 @@ struct CookedPackage final {
     return false;
 }
 
+[[nodiscard]] Core::u16 currentAssetTypeVersion(AssetFormat::AssetKind kind) noexcept
+{
+    switch (kind)
+    {
+    case AssetFormat::AssetKind::Texture2D:
+        return AssetFormat::Texture2DWire::SchemaVersion;
+    case AssetFormat::AssetKind::Sprite:
+        return AssetFormat::SpriteWire::SchemaVersion;
+    case AssetFormat::AssetKind::SpriteAnimationClip:
+        return AssetFormat::SpriteAnimationClipWire::SchemaVersion;
+    case AssetFormat::AssetKind::Tileset:
+        return AssetFormat::TilesetWire::SchemaVersion;
+    case AssetFormat::AssetKind::TileMap:
+        return AssetFormat::TileMapWire::SchemaVersion;
+    case AssetFormat::AssetKind::StaticMesh:
+        return AssetFormat::StaticMeshWire::SchemaVersion;
+    case AssetFormat::AssetKind::Material:
+        return AssetFormat::MaterialWire::SchemaVersion;
+    case AssetFormat::AssetKind::Prefab:
+        return AssetFormat::PrefabWire::SchemaVersion;
+    case AssetFormat::AssetKind::AudioClip:
+        return AssetFormat::AudioClipWire::SchemaVersion;
+    default:
+        return 1U;
+    }
+}
+
 [[nodiscard]] bool isKnownPlatformName(std::string_view name, AssetFormat::TargetPlatform& out) noexcept
 {
     if (name == "WindowsX64")
@@ -646,6 +673,89 @@ parseSpriteAnimationInline(const std::vector<std::string>& tokens)
     };
 }
 
+[[nodiscard]] const CatalogCookAssetSpec*
+findCookAsset(std::span<const CatalogCookAssetSpec> assets, Core::AssetId assetId) noexcept
+{
+    const auto found = std::lower_bound(
+        assets.begin(), assets.end(), assetId,
+        [](const CatalogCookAssetSpec& candidate, Core::AssetId id) { return candidate.assetId < id; });
+    return found != assets.end() && found->assetId == assetId ? &*found : nullptr;
+}
+
+[[nodiscard]] Core::Status validateTileMapCookAsset(const CatalogCookAssetSpec& tileMapAsset,
+                                                     std::span<const CatalogCookAssetSpec> assets)
+{
+    if (tileMapAsset.assetTypeVersion != AssetFormat::TileMapWire::SchemaVersion)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "tilemap cook asset type version must match the current payload schema");
+    }
+    auto tileMap = AssetFormat::parseTileMapPayload(tileMapAsset.payload);
+    if (!tileMap)
+    {
+        return Core::failure(std::move(tileMap.error()));
+    }
+    if (tileMapAsset.dependencies.size() != 1U ||
+        tileMapAsset.dependencies[0].expectedKind != AssetFormat::AssetKind::Tileset ||
+        tileMapAsset.dependencies[0].flags != AssetFormat::DependencyFlags::Required)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "tilemap cook asset requires exactly one required Tileset dependency");
+    }
+
+    const CatalogCookAssetSpec* tilesetAsset = findCookAsset(assets, tileMapAsset.dependencies[0].assetId);
+    if (tilesetAsset == nullptr || tilesetAsset->assetKind != AssetFormat::AssetKind::Tileset ||
+        tilesetAsset->assetTypeVersion != AssetFormat::TilesetWire::SchemaVersion)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "tilemap Tileset dependency is missing or has the wrong kind/version");
+    }
+    auto tileset = AssetFormat::parseTilesetPayload(tilesetAsset->payload);
+    if (!tileset)
+    {
+        return Core::failure(std::move(tileset.error()));
+    }
+
+    std::array<bool, 65536> knownLocalIds{};
+    for (Core::u32 index = 0; index < tileset->tileCount; ++index)
+    {
+        const auto tile = tileset->tile(index);
+        if (!tile || tile->localId == AssetFormat::TileMapWire::EmptyTileId || knownLocalIds[tile->localId])
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "tilemap Tileset dependency has an invalid or duplicate local tile id");
+        }
+        knownLocalIds[tile->localId] = true;
+    }
+
+    for (Core::u16 layerIndex = 0; layerIndex < tileMap->layerCount; ++layerIndex)
+    {
+        const auto layer = tileMap->layerAt(layerIndex);
+        if (!layer)
+        {
+            return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                 "tilemap layer disappeared after payload validation");
+        }
+        if (layer->kind != AssetFormat::TileMapLayerKind::Tile)
+        {
+            continue;
+        }
+        for (Core::u32 y = 0; y < tileMap->heightCells; ++y)
+        {
+            for (Core::u32 x = 0; x < tileMap->widthCells; ++x)
+            {
+                const auto localId = layer->tileAt(x, y);
+                if (!localId || (*localId != AssetFormat::TileMapWire::EmptyTileId && !knownLocalIds[*localId]))
+                {
+                    return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                                         "tilemap tile layer references an unknown Tileset local id");
+                }
+            }
+        }
+    }
+    return Core::success();
+}
+
 [[nodiscard]] Core::Result<CookedPackage> cookPackageInternal(const CatalogCookRequest& request)
 {
     if (request.assets.empty())
@@ -679,6 +789,16 @@ parseSpriteAnimationInline(const std::vector<std::string>& tokens)
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                      "cook dependency AssetIds must be strictly increasing");
+            }
+        }
+    }
+    for (const CatalogCookAssetSpec& asset : sorted)
+    {
+        if (asset.assetKind == AssetFormat::AssetKind::TileMap)
+        {
+            if (auto status = validateTileMapCookAsset(asset, sorted); !status)
+            {
+                return Core::failure(std::move(status.error()).withContext("cookCatalogPackage", "validateTileMap"));
             }
         }
     }
@@ -781,7 +901,34 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
 
     // Multi-line builders for tileset/tilemap.
     enum class MultiState : Core::u8 { None, Tileset, TileMap };
+    enum class TileMapBlockState : Core::u8 { None, TileLayer, ObjectLayer };
+    struct PendingTileMapProperty final {
+        std::string key{};
+        std::string value{};
+    };
+    struct PendingTileMapObject final {
+        Core::u32 stableObjectId = 0;
+        AssetFormat::TileMapObjectKind kind = AssetFormat::TileMapObjectKind::Point;
+        bool visible = true;
+        std::string name{};
+        float x = 0.0f;
+        float y = 0.0f;
+        float width = 0.0f;
+        float height = 0.0f;
+        std::vector<PendingTileMapProperty> properties{};
+    };
+    struct PendingTileMapLayer final {
+        Core::u32 stableLayerId = 0;
+        AssetFormat::TileMapLayerKind kind = AssetFormat::TileMapLayerKind::Tile;
+        bool visible = true;
+        std::string name{};
+        std::vector<PendingTileMapProperty> properties{};
+        std::vector<Core::u16> tiles{};
+        std::vector<PendingTileMapObject> objects{};
+        Core::u32 rowCount = 0;
+    };
     MultiState multi = MultiState::None;
+    TileMapBlockState tileMapBlock = TileMapBlockState::None;
     Core::AssetId pendingTilesetId{};
     Core::AssetId pendingTilesetTextureId{};
     Core::u16 pendingTilePxW = 0;
@@ -792,8 +939,7 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
     Core::u32 pendingMapW = 0;
     Core::u32 pendingMapH = 0;
     float pendingCellSize = 1.0f;
-    std::vector<Core::u16> pendingMapTiles{};
-    Core::u32 pendingMapRows = 0;
+    std::vector<PendingTileMapLayer> pendingMapLayers{};
 
     auto flushTileset = [&]() -> Core::Status {
         if (multi != MultiState::Tileset)
@@ -836,15 +982,88 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         {
             return Core::success();
         }
-        if (pendingMapRows != pendingMapH)
+        if (tileMapBlock != TileMapBlockState::None)
         {
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tilemap row count does not match height");
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tilemap layer must end before endtilemap");
         }
+        if (pendingMapLayers.empty())
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tilemap requires at least one layer");
+        }
+
+        std::vector<std::vector<AssetFormat::TileMapPropertyDesc>> layerProperties;
+        std::vector<std::vector<std::vector<AssetFormat::TileMapPropertyDesc>>> objectProperties;
+        std::vector<std::vector<AssetFormat::TileMapObjectDesc>> layerObjects;
+        std::vector<AssetFormat::TileMapLayerDesc> layers;
+        layerProperties.reserve(pendingMapLayers.size());
+        objectProperties.reserve(pendingMapLayers.size());
+        layerObjects.reserve(pendingMapLayers.size());
+        layers.reserve(pendingMapLayers.size());
+        for (const PendingTileMapLayer& pendingLayer : pendingMapLayers)
+        {
+            if (pendingLayer.kind == AssetFormat::TileMapLayerKind::Tile && pendingLayer.rowCount != pendingMapH)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "tile layer row count does not match tilemap height");
+            }
+
+            layerProperties.emplace_back();
+            auto& properties = layerProperties.back();
+            properties.reserve(pendingLayer.properties.size());
+            for (const PendingTileMapProperty& property : pendingLayer.properties)
+            {
+                properties.push_back(AssetFormat::TileMapPropertyDesc{
+                    .key = property.key,
+                    .value = property.value,
+                });
+            }
+
+            objectProperties.emplace_back();
+            layerObjects.emplace_back();
+            auto& ownedObjectProperties = objectProperties.back();
+            auto& objects = layerObjects.back();
+            ownedObjectProperties.reserve(pendingLayer.objects.size());
+            objects.reserve(pendingLayer.objects.size());
+            for (const PendingTileMapObject& pendingObject : pendingLayer.objects)
+            {
+                ownedObjectProperties.emplace_back();
+                auto& objectPropertyViews = ownedObjectProperties.back();
+                objectPropertyViews.reserve(pendingObject.properties.size());
+                for (const PendingTileMapProperty& property : pendingObject.properties)
+                {
+                    objectPropertyViews.push_back(AssetFormat::TileMapPropertyDesc{
+                        .key = property.key,
+                        .value = property.value,
+                    });
+                }
+                objects.push_back(AssetFormat::TileMapObjectDesc{
+                    .stableObjectId = pendingObject.stableObjectId,
+                    .kind = pendingObject.kind,
+                    .visible = pendingObject.visible,
+                    .name = pendingObject.name,
+                    .x = pendingObject.x,
+                    .y = pendingObject.y,
+                    .width = pendingObject.width,
+                    .height = pendingObject.height,
+                    .properties = objectPropertyViews,
+                });
+            }
+            layers.push_back(AssetFormat::TileMapLayerDesc{
+                .stableLayerId = pendingLayer.stableLayerId,
+                .kind = pendingLayer.kind,
+                .visible = pendingLayer.visible,
+                .name = pendingLayer.name,
+                .properties = properties,
+                .tiles = pendingLayer.tiles,
+                .objects = objects,
+            });
+        }
+
         auto payload = AssetFormat::writeTileMapPayloadBytes(AssetFormat::TileMapPayloadDesc{
             .widthCells = pendingMapW,
             .heightCells = pendingMapH,
             .cellSizeMeters = pendingCellSize,
-            .tiles = pendingMapTiles,
+            .layers = layers,
             .tilesetId = pendingMapTilesetId,
         });
         if (!payload)
@@ -864,8 +1083,8 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         });
         request.assets.push_back(std::move(asset));
         multi = MultiState::None;
-        pendingMapTiles.clear();
-        pendingMapRows = 0;
+        tileMapBlock = TileMapBlockState::None;
+        pendingMapLayers.clear();
         return Core::success();
     };
 
@@ -876,7 +1095,7 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         }
         if (multi == MultiState::TileMap)
         {
-            return flushTileMap();
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "tilemap requires explicit endtilemap");
         }
         return Core::success();
     };
@@ -926,27 +1145,177 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
             pendingTiles.push_back(tile);
             continue;
         }
-        if (multi == MultiState::TileMap && tokens[0] == "row")
+        if (multi == MultiState::TileMap)
         {
-            if (tokens.size() != 1U + pendingMapW)
+            if (tokens[0] == "endtilemap")
             {
-                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "row width does not match tilemap width");
-            }
-            if (pendingMapRows >= pendingMapH)
-            {
-                return Core::failure(AssetErrorCode::InvalidCatalogConfig, "too many tilemap rows");
-            }
-            for (Core::u32 index = 0; index < pendingMapW; ++index)
-            {
-                Core::u32 cell = 0;
-                if (!parseU32Token(tokens[1U + index], cell) || cell > 0xFFFFU)
+                if (tokens.size() != 1 || tileMapBlock != TileMapBlockState::None)
                 {
-                    return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid tilemap cell id");
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "endtilemap requires all layers to be closed");
                 }
-                pendingMapTiles.push_back(static_cast<Core::u16>(cell));
+                if (const auto status = flushTileMap(); !status)
+                {
+                    return Core::failure(std::move(status.error()));
+                }
+                continue;
             }
-            ++pendingMapRows;
-            continue;
+
+            if (tokens[0] == "tilelayer" || tokens[0] == "objectlayer")
+            {
+                if (tileMapBlock != TileMapBlockState::None || tokens.size() != 4)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "tilemap layer needs id visible name and no open layer");
+                }
+                Core::u32 layerId = 0;
+                Core::u32 visible = 0;
+                if (!parseU32Token(tokens[1], layerId) || !parseU32Token(tokens[2], visible) || layerId == 0 ||
+                    visible > 1)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid tilemap layer fields");
+                }
+                PendingTileMapLayer layer{};
+                layer.stableLayerId = layerId;
+                layer.kind = tokens[0] == "tilelayer" ? AssetFormat::TileMapLayerKind::Tile
+                                                        : AssetFormat::TileMapLayerKind::Object;
+                layer.visible = visible != 0;
+                layer.name = tokens[3];
+                if (layer.kind == AssetFormat::TileMapLayerKind::Tile)
+                {
+                    layer.tiles.reserve(static_cast<std::size_t>(pendingMapW) * pendingMapH);
+                    tileMapBlock = TileMapBlockState::TileLayer;
+                }
+                else
+                {
+                    tileMapBlock = TileMapBlockState::ObjectLayer;
+                }
+                pendingMapLayers.push_back(std::move(layer));
+                continue;
+            }
+
+            if (tokens[0] == "endlayer")
+            {
+                if (tokens.size() != 1 || tileMapBlock == TileMapBlockState::None || pendingMapLayers.empty())
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig, "endlayer has no open tilemap layer");
+                }
+                const PendingTileMapLayer& layer = pendingMapLayers.back();
+                if (layer.kind == AssetFormat::TileMapLayerKind::Tile && layer.rowCount != pendingMapH)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "tile layer row count does not match tilemap height");
+                }
+                tileMapBlock = TileMapBlockState::None;
+                continue;
+            }
+
+            if (tileMapBlock == TileMapBlockState::None || pendingMapLayers.empty())
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "tilemap content must be inside tilelayer or objectlayer");
+            }
+            PendingTileMapLayer& layer = pendingMapLayers.back();
+            if (tokens[0] == "property")
+            {
+                if (tokens.size() != 3)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig, "property needs key value");
+                }
+                layer.properties.push_back(PendingTileMapProperty{.key = tokens[1], .value = tokens[2]});
+                continue;
+            }
+            if (tileMapBlock == TileMapBlockState::TileLayer && tokens[0] == "row")
+            {
+                if (tokens.size() != 1U + pendingMapW)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "row width does not match tilemap width");
+                }
+                if (layer.rowCount >= pendingMapH)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig, "too many tilemap rows");
+                }
+                for (Core::u32 index = 0; index < pendingMapW; ++index)
+                {
+                    Core::u32 cell = 0;
+                    if (!parseU32Token(tokens[1U + index], cell) || cell > 0xFFFFU)
+                    {
+                        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid tilemap cell id");
+                    }
+                    layer.tiles.push_back(static_cast<Core::u16>(cell));
+                }
+                ++layer.rowCount;
+                continue;
+            }
+            if (tileMapBlock == TileMapBlockState::ObjectLayer && tokens[0] == "point")
+            {
+                if (tokens.size() != 6)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "point needs id visible name x y");
+                }
+                PendingTileMapObject object{};
+                object.kind = AssetFormat::TileMapObjectKind::Point;
+                Core::u32 visible = 0;
+                object.name = tokens[3];
+                if (!parseU32Token(tokens[1], object.stableObjectId) || object.stableObjectId == 0 ||
+                    !parseU32Token(tokens[2], visible) || visible > 1 || !parseFloatToken(tokens[4], object.x) ||
+                    !parseFloatToken(tokens[5], object.y))
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid point fields");
+                }
+                object.visible = visible != 0;
+                layer.objects.push_back(std::move(object));
+                continue;
+            }
+            if (tileMapBlock == TileMapBlockState::ObjectLayer && tokens[0] == "rectangle")
+            {
+                if (tokens.size() != 8)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "rectangle needs id visible name x y width height");
+                }
+                PendingTileMapObject object{};
+                object.kind = AssetFormat::TileMapObjectKind::Rectangle;
+                Core::u32 visible = 0;
+                object.name = tokens[3];
+                if (!parseU32Token(tokens[1], object.stableObjectId) || object.stableObjectId == 0 ||
+                    !parseU32Token(tokens[2], visible) || visible > 1 || !parseFloatToken(tokens[4], object.x) ||
+                    !parseFloatToken(tokens[5], object.y) || !parseFloatToken(tokens[6], object.width) ||
+                    !parseFloatToken(tokens[7], object.height))
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid rectangle fields");
+                }
+                object.visible = visible != 0;
+                layer.objects.push_back(std::move(object));
+                continue;
+            }
+            if (tileMapBlock == TileMapBlockState::ObjectLayer && tokens[0] == "objectproperty")
+            {
+                if (tokens.size() != 4)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "objectproperty needs objectId key value");
+                }
+                Core::u32 objectId = 0;
+                if (!parseU32Token(tokens[1], objectId) || objectId == 0)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid objectproperty id");
+                }
+                auto object = std::find_if(layer.objects.begin(), layer.objects.end(),
+                                           [objectId](const PendingTileMapObject& candidate) {
+                                               return candidate.stableObjectId == objectId;
+                                           });
+                if (object == layer.objects.end())
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "objectproperty references unknown object id");
+                }
+                object->properties.push_back(PendingTileMapProperty{.key = tokens[2], .value = tokens[3]});
+                continue;
+            }
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid directive inside tilemap");
         }
 
         // Starting a new top-level directive flushes any open multi-line block.
@@ -1223,6 +1592,16 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         if (tokens[0] == "tilemap")
         {
             // tilemap <id> <tilesetId> <w> <h> <cellSize>
+            //   tilelayer <stableLayerId> <0|1 visible> <name>
+            //   property <key> <value>
+            //   row <localId>...
+            //   endlayer
+            //   objectlayer <stableLayerId> <0|1 visible> <name>
+            //   point <stableObjectId> <0|1 visible> <name> <x> <y>
+            //   rectangle <stableObjectId> <0|1 visible> <name> <x> <y> <width> <height>
+            //   objectproperty <stableObjectId> <key> <value>
+            //   endlayer
+            // endtilemap
             if (tokens.size() != 6)
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig,
@@ -1234,7 +1613,9 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
             Core::u32 height = 0;
             float cellSize = 0.0f;
             if (!mapId || !tilesetId || !parseU32Token(tokens[3], width) || !parseU32Token(tokens[4], height) ||
-                !parseFloatToken(tokens[5], cellSize) || width == 0 || height == 0)
+                !parseFloatToken(tokens[5], cellSize) || width == 0 || height == 0 ||
+                width > AssetFormat::TileMapWire::MaxDimension || height > AssetFormat::TileMapWire::MaxDimension ||
+                !std::isfinite(cellSize) || !(cellSize > 0.0f))
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid tilemap header fields");
             }
@@ -1244,9 +1625,8 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
             pendingMapW = width;
             pendingMapH = height;
             pendingCellSize = cellSize;
-            pendingMapTiles.clear();
-            pendingMapTiles.reserve(static_cast<std::size_t>(width) * height);
-            pendingMapRows = 0;
+            pendingMapLayers.clear();
+            tileMapBlock = TileMapBlockState::None;
             continue;
         }
         if (tokens[0] != "asset" || tokens.size() < 4)
@@ -1277,6 +1657,7 @@ Core::Result<CatalogCookRequest> parseCatalogCookRecipe(std::string_view recipeT
         CatalogCookAssetSpec asset{
             .assetKind = kind,
             .assetId = *assetId,
+            .assetTypeVersion = currentAssetTypeVersion(kind),
             .payload = std::vector<std::byte>(payload->begin(), payload->end()),
         };
         for (std::size_t index = 4; index < tokens.size(); ++index)

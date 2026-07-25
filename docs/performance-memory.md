@@ -27,7 +27,8 @@ Scene、UI、RenderScene、Asset、Task、Audio、Physics2D 等模块也使用�
 - RenderScene/UI committed view 当前由固定 builder storage 借出，到下一次对应 commit/builder 析构失效；
 - `RenderFrame` 的 Scene/UI/Glyph view 只在 `submitFrame()` 调用内有效；
 - AssetLease、UploadTicket、GpuTextureId/GpuMeshId、Audio voice 是不同账本，不能互相替代；
-- owning RenderFramePacket、FramePin 与 backend completion 未完成前，不得让异步 backend 保存 frame borrow。
+- backend 必须在 `submitFrame()` 内同步消费 frame borrow；RenderFramePacket/FramePin 在 present-return
+  关闭 CPU 所有权。真实 GPU retirement 未接入前，不得用该完成点释放仍被 GPU 资源路径引用的 Asset。
 
 容量不足必须返回 `CapacityExceeded`/模块错误，不越界、不覆盖 in-flight 数据、不静默切换系统 heap。
 

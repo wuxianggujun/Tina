@@ -69,8 +69,9 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 | RenderScene/Scene | `tina_render_scene_tests`、`tina_scene_tests` | extraction samples、2D/3D products |
 | bgfx backend | `tina_render_bgfx_tests` | Desktop/2D/3D GPU samples + Visual |
 | Asset format/Cooker | `tina_asset_format_tests`、`tina_asset_tests` | `assetc`→validate→sample、3D product |
+| TileMap payload/runtime | `tina_asset_format_tests`、`tina_asset_tests`、`tina_physics2d_tests` | `tina_sample_2d`；验证显式 visual/collision/object layer |
 | Audio | `tina_audio_tests` | miniaudio tests、product-2d |
-| Physics2D | `tina_physics2d_tests` | Release bench、product-2d |
+| Physics2D | `tina_physics2d_tests`（body/shape/joint、sensor、query、grid bridge） | Release bench、product-2d |
 | CMake/preset/dependency | 所有受影响 configure 图 | 最小 executable + product smoke |
 
 公共 API 变化还必须编译 header-isolation/consumer 测试，并扫描公开头是否出现第三方 token。
@@ -85,10 +86,10 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
-| `tina_sample_2d` | Catalog TileMap、SpriteAnimationClip/Animator、Gameplay、UI、Audio；feature 图含 Physics/FreeType/miniaudio | Linux、跨 GPU golden、完整编辑器/UI 工具包 |
+| `tina_sample_2d` | Catalog TileMap schema v2；visual=10、hidden collision=20、gameplay objects=30；消费 point 101/rectangle 102；SpriteAnimationClip/Animator、Gameplay、UI、Audio；Physics 含 multi-shape API、sensor enter/exit 与 Distance joint；feature 图含 Physics/FreeType/miniaudio | TileMap streaming/editor/自动 gameplay 生成、更多 shape/joint、Linux、跨 GPU golden、完整 UI 工具包 |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
-| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；baseColor/MR/normal 贴图采样、material factors、key/fill light | 完整 PBR/IBL/shadow、Handle/Lease→真 GPU fence pin |
+| `tina_sample_3d` | 双 mesh glTF→Cooked→GPU→Prefab→Scene→bgfx；baseColor/MR/normal 贴图采样、material factors、唯一0..4 directional-light 提交（产品3灯） | 完整 PBR/IBL/shadow/light component、Handle/Lease→真 GPU fence pin |
 
 `tina_sample_2d_tilemap_bgfx` 是 `tina_sample_2d` 的兼容 ALIAS；新脚本使用正式 target 名。
 
@@ -107,12 +108,25 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_asset.exe --frames=60 --catal
 
 multi-mesh glTF Cooker 的库级测试与 `tina_sample_3d` 双 mesh 产品 E2E（3D-001）均已完成：distinct
 mesh/material AssetId、Prefab dependency 与 product meshKey 1/2 binding 可验证。Opaque3D 已做
-baseColor/MR/normal 贴图 **采样**、material factors 与 key/fill directional light；完整 PBR/IBL/shadow
+baseColor/MR/normal 贴图 **采样**、material factors 与有界0..4 directional lights；完整 PBR/IBL/shadow
 仍后置。
 
 `SpriteAnimationClip` 覆盖 payload/schema、Catalog typed view、dependency contract 与
 `SpriteAnimator2D` 的 Once/Loop/PingPong、暂停、倍速和大 delta；`tina_sample_2d` 再提供
 `Idle -> Walk -> HitWall` 的产品状态证据。
+
+TileMap N1 的最小回归覆盖：payload schema v2 round-trip（含 layer/object visibility）、旧 schema/重复或零稳定 ID/非法几何与 UTF-8
+拒绝；recipe 显式 layer block 与旧裸 `row` 拒绝；Cooker 在 Manifest 发布前验证 required Tileset
+dependency 和所有非零 tile localId；runtime/chunk/dirty/render/collision 全部显式传 layer ID；hidden tile
+layer 不渲染但可作为 collision。对应产品 smoke 还必须看到 `objectLayerConsumed=true` 与
+`objectLayerObjects=2`。
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-debug --target tina_tests tina_sample_2d -- /m:2 /v:m
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe `
+  --gtest_filter="TileMap*:CatalogCook*:TileChunk*:CharacterController*:TileMapPhysics*"
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
+```
 
 ## UI 与视觉
 
@@ -148,6 +162,12 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 
 miniaudio null-device 证明 adapter callback/mix/lifecycle，不证明真实扬声器质量。Physics2D Release bench
 是模块基线。统一 schema 使用 `tina_bench`（ADR 0018 schema v1；共享机仅 provisional）。
+
+Physics2D N2 的模块门禁覆盖：`createBody/createShape` 独立 generation、多 Box/Circle/Capsule shape/body、
+shape 单独销毁、sensor enter/exit、Distance joint create/query/destroy、body 级联退休 shape/joint、
+wrong-world/stale/capacity/PMR rollback，以及 TileMap bridge/CharacterController coexistence。当前直接运行
+`tina_physics2d_tests` 为 29/29；产品 300 帧还要求 `physicsSensorEnters>0`、
+`physicsSensorExits>0`、`physicsJointReady=true`。
 
 Windows 同轮 product-2d 拓扑由 `tools/windows/RunProduct2dGate.ps1` 固化（TEST-002）：上表测试 executable
 全部 exit 0 后，再跑 sample 300 帧并校验 `productGate=bgfx-physics-freetype-audio`。

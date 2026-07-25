@@ -4,6 +4,7 @@
 #include <tina/render/WorldPointerSample.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <compare>
 #include <memory>
 #include <optional>
@@ -12,8 +13,8 @@
 
 namespace Tina {
 
-// Stable semantic identity chosen by the game. Physical keys and buttons never
-// cross the Game SDK action boundary.
+// Stable semantic identity chosen by the game. Physical controls never cross
+// the Game SDK Action boundary.
 class InputActionId final {
   public:
     constexpr InputActionId() noexcept = default;
@@ -45,9 +46,10 @@ enum class InputActionDomain : u8 {
     Frame,
 };
 
-enum class DigitalActionTransitionKind : u8 {
-    Pressed,
-    Released,
+enum class InputActionTransitionKind : u8 {
+    Started,
+    ValueChanged,
+    Completed,
     Cancelled,
 };
 
@@ -58,28 +60,33 @@ enum class ActionInputStreamResetReason : u8 {
 
 struct InputActionState final {
     InputActionId action{};
-    float axis = 0.0F;
-    bool held = false;
+    float value = 0.0F;
+
+    [[nodiscard]] bool isActive() const noexcept
+    {
+        return std::abs(value) > 1.0e-6F;
+    }
 
     auto operator<=>(const InputActionState&) const = default;
 };
 
-struct DigitalActionTransition final {
+struct InputActionTransition final {
     InputActionId action{};
-    DigitalActionTransitionKind kind = DigitalActionTransitionKind::Pressed;
+    InputActionTransitionKind kind = InputActionTransitionKind::Started;
+    float value = 0.0F;
     // Ordered anchor from Platform input. Synthetic UI cancellation may share
     // the first raw sequence of its frame (or the last accepted sequence when
     // the frame has no raw transition), so a batch is non-decreasing rather
     // than guaranteed unique or strictly increasing.
     u64 sourceSequence = 0;
-    // Present only when an unconsumed primary-pointer transition produces a
-    // Simulation edge. The value is projected once during Action Mapping with
-    // the last-presented Camera2D and remains unchanged while a zero-step frame
-    // delays consumption. hit=false is an explicit viewport miss; nullopt means
-    // this edge has no world-pointer payload.
+    // Present only when an unconsumed primary-pointer transition changes a
+    // Simulation Action. The value is projected once during Action Mapping
+    // with the last-presented Camera2D and remains frozen across zero-step
+    // frames. hit=false is an explicit viewport miss; nullopt means the Action
+    // change has no world-pointer payload.
     std::optional<Render::WorldPointerSample> worldPointerSample{};
 
-    auto operator<=>(const DigitalActionTransition&) const = default;
+    auto operator<=>(const InputActionTransition&) const = default;
 };
 
 struct SimulationInputStreamReset final {
@@ -96,9 +103,8 @@ struct FrameInputStreamReset final {
     auto operator<=>(const FrameInputStreamReset&) const = default;
 };
 
-using SimulationActionTransition = std::variant<DigitalActionTransition, SimulationInputStreamReset>;
-
-using FrameActionTransition = std::variant<DigitalActionTransition, FrameInputStreamReset>;
+using SimulationActionTransition = std::variant<InputActionTransition, SimulationInputStreamReset>;
+using FrameActionTransition = std::variant<InputActionTransition, FrameInputStreamReset>;
 
 namespace Detail {
 
@@ -124,27 +130,26 @@ struct SimulationActionSnapshot final {
         return Detail::findActionState(states, action);
     }
 
-    [[nodiscard]] bool isHeld(InputActionId action) const noexcept
+    [[nodiscard]] bool isActive(InputActionId action) const noexcept
     {
         const InputActionState* state = find(action);
-        return state != nullptr && state->held;
+        return state != nullptr && state->isActive();
     }
 
-    [[nodiscard]] float axis(InputActionId action) const noexcept
+    [[nodiscard]] float value(InputActionId action) const noexcept
     {
         const InputActionState* state = find(action);
-        return state == nullptr ? 0.0F : state->axis;
+        return state == nullptr ? 0.0F : state->value;
     }
 
-    // Empty snapshot used when GameStatePolicy suppresses gameplay input below.
     [[nodiscard]] static SimulationActionSnapshot suppressed(u64 targetSimulationTick) noexcept
     {
         return SimulationActionSnapshot{.targetSimulationTick = targetSimulationTick};
     }
 };
 
-// Borrowed view valid only for the current frame-update callback. Its edges are
-// never carried into a later render frame.
+// Borrowed view valid only for the current frame-update callback. Its changes
+// are never carried into a later render frame.
 struct FrameActionSnapshot final {
     u64 engineFrameIndex = 0;
     std::span<const InputActionState> states{};
@@ -155,19 +160,18 @@ struct FrameActionSnapshot final {
         return Detail::findActionState(states, action);
     }
 
-    [[nodiscard]] bool isHeld(InputActionId action) const noexcept
+    [[nodiscard]] bool isActive(InputActionId action) const noexcept
     {
         const InputActionState* state = find(action);
-        return state != nullptr && state->held;
+        return state != nullptr && state->isActive();
     }
 
-    [[nodiscard]] float axis(InputActionId action) const noexcept
+    [[nodiscard]] float value(InputActionId action) const noexcept
     {
         const InputActionState* state = find(action);
-        return state == nullptr ? 0.0F : state->axis;
+        return state == nullptr ? 0.0F : state->value;
     }
 
-    // Empty snapshot used when GameStatePolicy suppresses gameplay input below.
     [[nodiscard]] static FrameActionSnapshot suppressed(u64 engineFrameIndex) noexcept
     {
         return FrameActionSnapshot{.engineFrameIndex = engineFrameIndex};

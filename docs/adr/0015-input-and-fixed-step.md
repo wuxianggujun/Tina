@@ -3,14 +3,11 @@
 - 状态：Accepted
 - 日期：2026-07-16
 - 接受日期：2026-07-17
-- 实施状态：M7-A Headless Platform/Input、Action Mapper、fixed-step latch、
-  `PlatformEventDispatcher` 与私有 GLFW Window/Keyboard/Pointer/committed text producer 已落地；
-  M7-C1a 已落地 UI-owned route-result view ABI，M7-C1c-b3a 已让 Pointer Button/Wheel 固化事件时
-  logical position，M7-C1c-b3b 已实现 Runtime-private `UIInputRouteProducer`，M7-C1c-b3c 已让
-  `EngineHost` 私有延迟绑定 primary-window `UIContext`，并按 Platform lifecycle dispatch → UI route
-  → ActionMapper 接入正式帧；M7-C1c-b3d2 已加入 startup/root capability，M7-C1c-b3e 已加入 held primary
-  Pointer Button claim bridge。Key/Gamepad/axis claim 与 production
-  Gamepad、完整 DPI、Windows IMM32 与可见 Runtime UI 仍是目标
+- 实施状态：M7 Headless/GLFW Platform/Input、fixed-step latch、Runtime-private UI route 和正式
+  EngineHost 帧链路已落地；2D-INPUT-ADV/N3 已收敛为 Runtime 唯一 unified digital/analog mapper，覆盖
+  value/deadzone/scale、SumClamped/StrongestMagnitude、多 Gamepad source、UI digital/axis suppression 与
+  顶层 State transactional rebind。Windows IMM32 与可见 Runtime UI 已落地；真实设备/DPI 平台矩阵仍按
+  独立测试门禁记录。本轮 N3 命令执行结果以最终验证记录为准
 
 ## 背景
 
@@ -46,6 +43,16 @@ UI 使用上一帧稳定布局逐 transition 路由；UI 输出与当前 `Platfo
   `Tina::UI::ContinuousControlClaimsView` 是当前路由结果，
   `suppressedUntilReleaseOrNeutral` 由 Action Mapper 跨帧持有。三者职责不能合并成修改全局 held
   状态的一个 bitset。
+
+Runtime 是 Action mapping 的唯一 owner；Platform 只发布 raw frame，不提供第二套 Action ID、binding、
+snapshot 或 mapper。`InputActionMapConfig::bindings` 统一表达 Key、Pointer Button、Gamepad Button 与
+Gamepad Axis。每个 binding 有稳定 `InputBindingId`、Action/domain、composition、deadzone 和 scale；
+Digital source 用 scale 表达 active value，axis 先按 value mode 归一化，再做 gameplay deadzone 外重映射
+与 scale。Action snapshot/transition 使用浮点 value，不再把 Gameplay 语义压成 held bool。
+
+同一 Action/domain 的多 source 使用一致的 `SumClamped` 或 `StrongestMagnitude`：前者求和后 clamp 到
+[-1, 1]，后者取绝对值最大的 source，等幅值以稳定 binding/source 顺序决胜。所有当前连接的标准
+Gamepad generation 都可贡献；native slot 不进入 Game API，重连后的 generation 不继承旧 source 状态。
 
 Action 明确属于 Simulation 或 Frame domain。同一 active Input Context 中，同一 transition 默认
 只能映射到一个 domain；确需两个行为必须配置两条显式 binding。Frame Action transition 只在
@@ -101,19 +108,29 @@ Render → Task → Platform → Clock modules 前 shutdown。owner 不调用 `c
 b3d2 后续加入 startup bind 与 root-scoped phase capability；到该切片为止 claims 仍为 canonical `None`，
 也没有可见 Widget、Focus/Capture/Modal 或 DisplayList。b3e 随后加入 held primary Pointer Button claim：
 UI request 只在最终 snapshot 仍 held 时发布，ActionMapper 在 transition mapping 前应用 claim，取消 active
-Gameplay source或拦截同帧 Down，并抑制到真实 Up；Key/Gamepad/axis claim 仍后置。
+Gameplay source或拦截同帧 Down，并抑制到真实 Up。N3 随后把相同规则扩展到 Key/Gamepad Button，
+并让 Gamepad Axis claim 抑制到 neutral/deadzone；这些 claim 仍由 UI-owned route-result ABI 表达。
 
-M7-A Action Mapper 由 Runtime 唯一拥有，只实现 EngineConfig 注册的单一 immutable default Input
-Context（priority=0）。UI consumption/claim 优先；未来多 Context 以显式 priority 决胜，同 priority
-竞争同一 physical control 时拒绝激活，同一 Context 内禁止一个 control 重复绑定不同 action/domain。
+Action Mapper 由 Runtime 唯一拥有，当前仍只有 EngineConfig 注册的单一 default Input Context
+（priority=0），但 binding 可通过受控事务更新。UI consumption/claim 优先；未来多 Context 以显式
+priority 决胜，同 priority 竞争同一 physical control 时拒绝激活，同一 Context 内禁止一个 control
+重复绑定不同 action/domain。
+
+运行时 rebind 只通过栈顶 State 的 `FrameUpdateContext::inputActionRebinding()` 暴露 phase-local facade，
+下层 State 无修改全局 map 的权限。`begin()` 进入 Capturing；`commit()` 用 Reject 或 Swap 处理冲突，只
+排入 Queued，并在下一次 mapping frame 开始时原子应用。Reject 返回冲突 binding 且保留 capture；
+`cancel()` 可取消 Capturing 或 Queued transaction。若 capture 绑定了 `GamepadId` generation，设备
+disconnect，或 raw reset 后无法继续证明该 generation 存活，则 transaction 以 DeviceDisconnected
+取消，不能迁移到重连后的新 generation。
+
 每帧 transition 映射后，Mapper 会用最终 Platform snapshot 验证跨帧 retained source：仍为 `active`
-或 suppressed 的 Key、Primary Pointer Button、Gamepad Button 必须仍为 held；Primary Window/Gamepad
-generation 若在 retained state 未先 cancel/reset/release 时消失或替换，返回
+或 suppressed 的 Key、Primary Pointer Button、Gamepad Button/Axis 必须仍与 final value 一致；Primary
+Window/Gamepad generation 若在 retained state 未先 cancel/reset/release/neutral 时消失或替换，返回
 `LifecycleInvariantViolation`，不能静默清零或迁移到新 generation。
 默认/硬容量冻结为：raw transition 256/4096、UTF-8 text bytes 16 KiB/1 MiB、Platform event
 64/1024、continuous claim 64/1024（M7-A 仅为 Runtime ActionMapper consumer 内部固定上限，不属于 game-facing
 `InputActionMapConfig`）、
-pending Simulation transition 128/4096、Frame Action transition 128/4096、digital binding 64/4096；
+pending Simulation transition 128/4096、Frame Action transition 128/4096、unified Action binding 64/4096；
 raw/event/simulation/frame batch 各有不计入有效项的一个 reset slot。所有容量 Create 时一次性分配，
 运行期不扩容。完整 reset 后续规则见[平台与输入](../platform-input.md)。
 
@@ -132,10 +149,10 @@ command merge/commit 与 Transform propagation，Render 使用 previous/current 
 - UI 命中使用上一份 committed geometry；State Transition Commit 位于 Frame Update 后，使动态
   root 能在同帧唯一 UI layout 中进入 snapshot、下一帧才交互；
 - 每 substep barrier/commit 有固定成本，需要 benchmark 后再并行。
-- GLFW standard gamepad 只能轮询最终 sampled state，因此只能为相邻 Poll 之间观察到的状态差
+- GLFW standard Gamepad producer 已落地，但只能轮询最终 sampled state，因此只能为相邻 Poll 之间观察到的状态差
   生成 transition；无法承诺捕获两次 Poll 之间已经完成的物理 Down→Up。该限制必须进入能力说明
-  和 replay 语义，不能为补齐它引入 SDL/SDL3；当前 GLFW窗口/键鼠 producer 不得改变已落地的
-  Headless 契约，production Gamepad、完整 DPI与 IMM32仍属于完整 M7目标。
+  和 replay 语义，不能为补齐它引入 SDL/SDL3；当前 GLFW producer 不得改变已落地的 Headless
+  契约，真实设备与完整 DPI 矩阵仍需独立平台门禁。
 
 ## 被拒绝方案
 
